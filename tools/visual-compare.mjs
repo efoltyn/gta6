@@ -959,9 +959,12 @@ function reportHtml(before, after) {
     .frameShots figure { border-radius:2mm; border-top-width:1.2mm; }
     .stageError { padding:4mm; color:#ffb3b3; font:11px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap:anywhere; }
     footer { position:absolute; left:14mm; right:14mm; bottom:6mm; display:flex; justify-content:space-between; color:#6f8496; font:10px ui-monospace, SFMono-Regular, Menlo, monospace; }
-    .metrics table { width:100%; border-collapse:collapse; margin-top:4mm; font-size:11.5px; }
-    .metrics th { text-align:left; color:#80c9ff; letter-spacing:.08em; font-size:10px; text-transform:uppercase; padding:1.6mm 3mm; border-bottom:1px solid #35485a; }
-    .metrics td { padding:1.5mm 3mm; border-bottom:1px solid #22303f; font-variant-numeric:tabular-nums; }
+    /* Evidence must fit the delivered page, not merely the browser DOM.  A4
+       landscape has room for the declared compact audit, but the old 3 mm
+       row padding clipped the final rows even after raw metrics were filtered. */
+    .metrics table { width:100%; border-collapse:collapse; margin-top:3mm; font-size:10.2px; line-height:1.12; }
+    .metrics th { text-align:left; color:#80c9ff; letter-spacing:.08em; font-size:9px; text-transform:uppercase; padding:.9mm 2mm; border-bottom:1px solid #35485a; }
+    .metrics td { padding:.85mm 2mm; border-bottom:1px solid #22303f; font-variant-numeric:tabular-nums; }
     .metrics td small { color:#8fa2b2; }
     .metrics td.good { color:#59d59a; font-weight:800; }
     .metrics td.bad { color:#f06464; font-weight:800; }

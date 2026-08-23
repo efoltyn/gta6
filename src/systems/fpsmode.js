@@ -3464,7 +3464,13 @@
       // first person keeps looking where you were looking — the orbit used to
       // inherit whatever stale cam.pitch was left over (often the steep spawn
       // value), which armed-3PS turned into a sky/ceiling stare.
-      if (CBZ.cam && typeof fps.fp === "number") CBZ.cam.pitch = Math.max(-0.6, Math.min(0.9, fps.fp));
+      // SIGN: fps.fp is UP-positive, cam.pitch is DOWN-positive (this file
+      // already says so twice — at aimForward and at applyAimLock). Copying
+      // fps.fp straight across FLIPPED your view vertically on every [V]: leave
+      // first person looking up at a roof and the orbit swung above you and
+      // stared at the pavement. Negate, and clamp in the orbit's own sense
+      // (-0.9 = look up, 0.6 = look down) rather than fps.fp's.
+      if (CBZ.cam && typeof fps.fp === "number") CBZ.cam.pitch = Math.max(-0.9, Math.min(0.6, -fps.fp));
     }
     // toggling FPS on hides the body; clear the 3PS present-weapon/carry poses
     // so the rig's arms are not stuck raised when the body re-appears

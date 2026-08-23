@@ -392,6 +392,15 @@
       jawUpperX: authoredMouth ? authoredMouth.upper.position.x : 0,
       jawUpperY: authoredMouth ? authoredMouth.upper.position.y : 0,
       jawCavityScaleY: authoredMouth ? authoredMouth.cavity.scale.y : 1,
+      // A builder may own more of the animal than the two generic jaw groups:
+      // a shark's rostrum, an orca's white chin, a crocodile's cheek fold.  The
+      // shared rig still owns WHEN the mouth opens; this callback lets the
+      // builder describe WHAT body envelope follows that one openness value.
+      // Keeping the callback on the authored-mouth contract means every
+      // consumer (city, battle, mounts, predators and visual staging) drives
+      // the same geometry instead of growing species-specific animation loops.
+      jawApplyGape: authoredMouth && typeof authoredMouth.applyGape === "function"
+        ? authoredMouth.applyGape : null,
       jawK: -1,
       px: null, pz: null, py: null, ph0: a.heading,
       roll: 0, pitch: 0,
@@ -428,6 +437,7 @@
         // narrow mouth line instead of a coloured box stuck under the snout.
         rig.jawCavity.scale.y = rig.jawCavityScaleY * (1 + o * 9);
       }
+      if (rig.jawApplyGape) rig.jawApplyGape(o);
       return;
     }
     const th = -o * 0.62;                       // drop the lower jaw about the hinge

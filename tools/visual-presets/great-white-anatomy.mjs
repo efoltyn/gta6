@@ -383,7 +383,7 @@ function stageGreatWhiteAnatomy(input) {
   }
 
   // Face and mouth parts are not fins; naming them out keeps the count honest.
-  const NOT_A_FIN = /gill|eye|nostril|gum|lip|mandible|tooth|cavity|pore|skin/i;
+  const NOT_A_FIN = /gill|eye|nostril|gum|lip|mandible|chin|tooth|cavity|pore|skin/i;
   const allMeshes = meshList(animal);
   let triangles = 0, boxFins = 0;
   allMeshes.forEach(function (mesh) {

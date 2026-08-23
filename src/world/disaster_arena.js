@@ -293,6 +293,21 @@
     return def;
   }
 
+  /* THE BUILD IS ONE SYNCHRONOUS BLOCK, SO IT REPORTS ON ITSELF.
+
+     systems/bootprogress.js draws the loading percentage on a WORKER thread
+     precisely so it keeps counting while the main thread is stuck inside a
+     build like this one — but every CBZ.bootStep() checkpoint in the repo was
+     written for the CITY (city/world.js, city/worldmap.js, city/mode.js). The
+     island had none, so pressing PLAY on the disaster game froze behind a bar
+     with one segment and no idea how far along it was. On a desktop that is
+     three seconds of vagueness. On the phone this build is FOR, it is the
+     first thing the player ever sees.
+
+     Six checkpoints at the boundaries that actually cost time. The meter
+     weights each one by how long it took last time ON THIS DEVICE, so the
+     second launch on the player's phone is accurate about the player's phone
+     rather than about the machine this was written on. */
   CBZ.buildDisasterArena = function () {
     if (arena) return arena;
     const S = CBZ.SURV.arena;
@@ -396,6 +411,7 @@
       return seabedAt(x, z);
     }
 
+    if (CBZ.bootStep) CBZ.bootStep("island:ground");
     // ---- island ground + ocean ----
     // big ocean plane. Exposed on the descriptor (arena.ocean / arena.oceanY)
     // so the tsunami can pull the whole sea OUT during its warning and surge
@@ -579,6 +595,7 @@
     island.rotation.x = -Math.PI / 2; island.position.set(cx, 0, cz);
     island.receiveShadow = true; root.add(island);
 
+    if (CBZ.bootStep) CBZ.bootStep("island:mountains");
     // ---- mountains as cones sitting on the floor ----
     /* EVERY ONE OF THESE IS TERRAIN, SO EVERY ONE OF THEM TAKES SNOW.
        systems/weather.js's coat scan qualifies a surface by BOUNDING RADIUS
@@ -841,6 +858,7 @@
       return b;
     }
 
+    if (CBZ.bootStep) CBZ.bootStep("island:towers");
     // ---- SKYSCRAPERS: enterable hollow towers with floor landings and a
     // working ELEVATOR up the central shaft. Walk in the ground-floor door,
     // ride the lift up (it auto-cycles), step off at any floor or the roof
@@ -959,6 +977,7 @@
       return b;
     }
 
+    if (CBZ.bootStep) CBZ.bootStep("island:streets");
     // ---- STREETS: dark asphalt running in flat, contiguous runs along grid
     // lines, with a dashed centre line. Hills/mountain break the runs so roads
     // never float. roadSegs feeds the car scatter below. ----
@@ -1296,6 +1315,7 @@
       }
     });
 
+    if (CBZ.bootStep) CBZ.bootStep("island:trees");
     // ---- scattered trees: passable canopy, thin solid trunk (run-around) ----
     const flammable = [];
     for (let i = 0; i < 70; i++) {
@@ -1328,6 +1348,7 @@
       flammable.push({ x, z, trunk, foliage, trunkCol: trunk.userData.collider, burning: 0, burnt: false });
     }
 
+    if (CBZ.bootStep) CBZ.bootStep("island:rocks");
     // ---- rocks / cover ----
     // Boulders, not silver dice: earthy grey-brown, randomly rotated and
     // squashed so they read as rough rock — and kept OFF the hill/mountain

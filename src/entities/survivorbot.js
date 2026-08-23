@@ -72,9 +72,31 @@
     return b;
   }
 
+  /* THE CROWD'S OWN STREAM. Every draw a bot makes after it exists — where it
+     wanders, how long it stands still — comes from here, reseeded once per
+     match so two clients on one seed watch the same hundred people. The bots
+     are ticked in array order every tick, so the sequence is the same on both
+     ends. (Their APPEARANCE still comes from the spawn LCG below, which was
+     already deterministic.) */
+  let botRng = null;
+  function brnd() { return botRng ? botRng() : Math.random(); }
+  let matchNo = 0;
+
   CBZ.spawnSurvivorBots = function (n) {
     CBZ.clearSurvivorBots();
     const arena = CBZ.buildDisasterArena();
+    botRng = CBZ.seedStream ? CBZ.seedStream("surv-crowd-" + (++matchNo)) : null;
+    /* THE THINK SCHEDULE STARTS AT THE MATCH, NOT AT THE PAGE.
+
+       `frame` is what decides which bots think on which tick
+       ((frame + b.slice) % stride), and it counted every update since the page
+       loaded — so which bots thought on tick 1 of a match depended on how many
+       frames the TITLE SCREEN had rendered first. Two clients that took
+       different times to boot ran different crowds from the first tick, which
+       is what tools/determinism-check.mjs kept catching and why the answer
+       moved between runs. Zeroed with the crowd it schedules. */
+    frame = 0;
+    if (CBZ.fixedStep) CBZ.fixedStep.tick = 0;
     let s = 7 + n;
     const rr = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
     for (let i = 0; i < n; i++) {
@@ -83,6 +105,30 @@
       arena.root.add(b.group);
       CBZ.bots.push(b);
     }
+  };
+
+  /* WHAT THE CROWD'S SCHEDULE IS DOING. Both numbers are match state that no
+     one outside this file could see, and both have already been a divergence:
+     `frame` decides which bots think on which tick, and `matchNo` names the
+     seeded stream they wander on. tools/determinism-check.mjs reads them, so a
+     drift between two clients names itself instead of showing up as ninety-nine
+     bodies in the wrong places. */
+  CBZ.survBotAudit = function () {
+    return { frame: frame, matchNo: matchNo, bots: CBZ.bots.length, seeded: !!botRng };
+  };
+
+  /* THE SHARK SIM'S LARDER: one bot, at a stated point, mid-match. It joins
+     the same array, the same wander stream and the same think schedule as
+     the drop's own crowd — makeBot IS the spawner, this is just a door to
+     it for a mode that restocks what gets eaten. stats.total keeps the
+     spectate line honest about how many people this match has seen. */
+  CBZ.spawnSurvivorBotAt = function (x, z) {
+    const arena = CBZ.buildDisasterArena();
+    const b = makeBot(x, z, brnd);
+    arena.root.add(b.group);
+    CBZ.bots.push(b);
+    if (CBZ.surv && CBZ.surv.stats) CBZ.surv.stats.total++;
+    return b;
   };
 
   CBZ.clearSurvivorBots = function () {
@@ -127,9 +173,22 @@
       b.urg = 0;
       if (b.pause <= 0) {
         const arena = CBZ.surv.arena;
-        const a = Math.random() * 6.28, d = Math.random() * arena.radius * 0.6;
-        b.target.set(arena.center.x + Math.cos(a) * d, 0, arena.center.z + Math.sin(a) * d);
-        b.pause = 0.6 + Math.random() * 2.2;
+        /* SEEDED, because where ninety-nine people wander is match state, not
+           decoration: on Math.random two clients on the same seed had a
+           different crowd within one second of the drop. brnd() is the match's
+           own stream, reseeded in spawnSurvivorBots. The shark-sim ring below
+           draws the same two numbers from the same stream, so flipping the
+           mode never desyncs a seed. */
+        const ring = CBZ.sharkSimShoreRing;   // shark sim: the crowd lives on the sand
+        const a = brnd() * 6.28;
+        if (ring) {
+          const d = ring.r0 + brnd() * (ring.r1 - ring.r0);
+          b.target.set(ring.cx + Math.cos(a) * d, 0, ring.cz + Math.sin(a) * d);
+        } else {
+          const d = brnd() * arena.radius * 0.6;
+          b.target.set(arena.center.x + Math.cos(a) * d, 0, arena.center.z + Math.sin(a) * d);
+        }
+        b.pause = 0.6 + brnd() * 2.2;
       }
     }
   }
@@ -201,7 +260,8 @@
   CBZ.onUpdate(23, function (dt) {
     if (CBZ.game.mode !== "survival") return;
     frame++;
-    const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
+    const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;   // VIEW: animation + corpse LOD
+    const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;                 // SIM: think cadence (see below)
     const bots = CBZ.bots;
     lingering = 0;                                   // recounted in the pass below
     for (let i = 0; i < bots.length; i++) {
@@ -244,8 +304,21 @@
       if (b.tag) b.tag.visible = false;                  // identity stays in interaction UI, not over the head
       if (CBZ.body && CBZ.body.busy(b)) continue;       // thrown / knocked down / held → body owns it
       const near = dist2 < ANIM_DIST2;
-      // think: near bots every 3rd frame, far every 7th (round-robin by index)
-      const stride = near ? 3 : 7;
+      /* HOW OFTEN A BOT THINKS IS A SIM DECISION. HOW OFTEN IT ANIMATES IS NOT.
+
+         Both used to be `near`, measured from the CAMERA — so a bot's decision
+         cadence depended on where the local player happened to be looking. On
+         one machine that is invisible. On two it is fatal: tools/determinism-
+         check.mjs found exactly this, three bots out of eight drifting apart
+         within four seconds of an identical seed, because two cameras put the
+         same bot on opposite sides of the LOD boundary and it thought every
+         3rd frame on one client and every 7th on the other.
+
+         The stride is measured from the PLAYER now — a body in the world, at
+         the same place on every client. `near` (the camera) still decides
+         animation, which is a view decision and is allowed to differ. */
+      const sdx = b.pos.x - px, sdz = b.pos.z - pz;
+      const stride = (sdx * sdx + sdz * sdz) < ANIM_DIST2 ? 3 : 7;
       if ((frame + b.slice) % stride === 0) think(b);
       move(b, dt, near);
     }

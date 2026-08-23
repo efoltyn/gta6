@@ -1,0 +1,18 @@
+{
+  "appId": "com.efoltyn.naturaldisastersurvival",
+  "appName": "Natural Disaster Survival",
+  "webDir": "dist-ios/www",
+  "bundledWebRuntime": false,
+  "loggingBehavior": "none",
+  "ios": {
+    "contentInset": "never",
+    "scrollEnabled": false,
+    "limitsNavigationsToAppBoundDomains": true,
+    "backgroundColor": "#070d18",
+    "preferredContentMode": "mobile"
+  },
+  "server": {
+    "iosScheme": "capacitor",
+    "androidScheme": "https"
+  }
+}

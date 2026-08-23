@@ -1,0 +1,1586 @@
+<!DOCTYPE html>
+<!-- ============================================================
+     disaster.html — GENERATED. Do not edit; edit index.html or the manifest.
+
+       node tools/build-disaster-page.mjs
+
+     Natural Disaster Survival, standing alone: index.html minus the 473
+     script tags this game never runs, opening straight onto the island. This
+     is the page the iOS build ships (tools/build-ios.mjs bundles it).
+============================================================ -->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Natural Disaster Survival</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23111923'/%3E%3Cpath d='M12 48V28h12v20zm16 0V12h24v36z' fill='%23ffd451'/%3E%3C/svg%3E">
+<!-- The UI typeface is BUNDLED (css/fonts.css) — no CDN on the critical path,
+     and the game looks the same with no network at all. -->
+<link rel="stylesheet" href="css/fonts.css">
+
+<!-- styles, split by concern -->
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/hud.css?v=survrail1">
+<link rel="stylesheet" href="css/screens.css?v=bagless1">
+<link rel="stylesheet" href="css/mobile.css?v=onecall1">
+<link rel="stylesheet" href="css/dashboard.css?v=standing1">
+<link rel="stylesheet" href="css/inventory.css?v=bagless1">
+<link rel="stylesheet" href="css/city.css?v=onecall1">
+<link rel="stylesheet" href="css/campaign.css?v=onecall1">
+<link rel="stylesheet" href="css/interact_touch.css?v=hudtidy1">
+</head>
+<body class="campaign-build">
+<div id="game"></div>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="objective" class="panel"><span class="tag">Objective</span><div id="objText">Escape your cell and find the keycard.</div></div>
+  <div id="topright">
+    <!-- SURVIVAL alive counter. It rides the top-right rail WITH the clock (it
+         used to be a wider, taller pill of its own floating top-centre) so the
+         two numbers that describe the match read as one instrument, and the
+         word "ALIVE" is a people glyph — the number is doing the talking. -->
+    <div id="survTop" class="pill panel"><b id="aliveCount">100</b><svg class="aliveIc" viewBox="0 0 24 24" role="img" aria-label="survivors alive"><circle cx="9" cy="7.1" r="3.4"/><path d="M2.5 20.5c0-3.7 2.9-6.3 6.5-6.3s6.5 2.6 6.5 6.3z"/><circle cx="17.6" cy="8.6" r="2.5" opacity=".7"/><path d="M16.1 13.3c3.2-.6 6 1.8 6 5.2h-4.4c0-1.9-.6-3.7-1.6-5.2z" opacity=".7"/></svg></div>
+    <div id="timer" class="pill panel">00:00</div>
+    <div id="cigs" class="pill panel"><span class="ic"></span><span id="cigText">0</span></div>
+  </div>
+  <div id="keycard" class="panel"><span class="card"></span><span>Keycard</span></div>
+  <div id="inventory" class="panel"><span class="tag">Stash</span><span id="invList">—</span></div>
+
+  <div id="hint" class="panel"></div>
+
+  <!-- contextual interaction menu (shown when near an actor) -->
+  <div id="interact" class="panel">
+    <div id="interactName">INMATE</div>
+    <div id="interactNote">Rep ♥ 0</div>
+    <div id="interactOpts"></div>
+  </div>
+
+  <div id="detectWrap" class="panel">
+    <div class="lab"><span>Wanted</span><span id="detectState">Clear</span></div>
+    <div id="detectBarBg"><div id="detectBar"></div></div>
+  </div>
+
+  <div id="gangHud" class="panel"></div>
+  <div id="compass" class="panel"><div id="compassArrow">▲</div><span id="compassDist">--</span></div>
+
+  <canvas id="minimap" class="panel" width="112" height="168"></canvas>
+  <div id="simHud" class="panel"></div>
+
+  <div id="dashBtn" class="panel"><span>Ranks</span></div>
+
+  <!-- SURVIVAL mode HUD (shown only in disaster mode). #survTop moved up into
+       #topright beside the clock — see the comment there. -->
+  <div id="survStatus" class="panel"><span id="survStatusText"></span></div>
+  <div id="survBars">
+    <div class="sbar"><span class="slab">HEALTH</span><div class="sbarbg"><div id="hpBar"></div></div></div>
+    <div class="sbar"><span class="slab">STAMINA</span><div class="sbarbg"><div id="stamBar"></div></div></div>
+  </div>
+  <div id="disasterBanner"></div>
+
+  <div id="toast"></div>
+  <div id="hitfx"></div>
+  <div id="crosshair"></div>
+  <div id="ammo"></div>
+  <div id="weaponStrip" class="panel"></div>
+</div>
+<div id="vignette"></div>
+<div id="flash"></div>
+<div id="survFlash"></div>
+<div id="spray"></div>
+<div id="fade"></div>
+
+<!-- live yard rankings overlay (systems/dashboard.js) -->
+<div id="dashboard"></div>
+
+<!-- shared full-screen navigation map (systems/fullmap.js) -->
+<div id="fullMap" aria-hidden="true">
+  <div class="fullmap-shell panel">
+    <div class="fullmap-head">
+      <div><b id="fullMapTitle">AREA MAP</b><span id="fullMapPlaceHint">Click or right-click to place a waypoint</span></div>
+      <button id="fullMapClose" type="button" aria-label="Close map">Close [M]</button>
+    </div>
+    <canvas id="fullMapCanvas" width="960" height="620"></canvas>
+    <!-- touch-only zoom chips (fullmap.js): iPad has no wheel/F key -->
+    <div id="fullMapZoom">
+      <button id="fullMapZoomIn" type="button" aria-label="Zoom in">+</button>
+      <button id="fullMapZoomOut" type="button" aria-label="Zoom out">−</button>
+    </div>
+    <div id="fullMapLegend" class="fullmap-legend"></div>
+    <!-- The clear-waypoint affordance is a BUTTON, not a key legend: an iPad has
+         no Space bar, so the only documented way to drop a waypoint did not
+         exist there at all. fullmap.js relabels it "Clear waypoint" on touch. -->
+    <div class="fullmap-foot"><span id="fullMapReadout">No waypoint set</span><button id="fullMapClear" type="button" class="fullmap-clear">[Space] clear waypoint</button></div>
+  </div>
+</div>
+<div id="waypointGuide" class="panel">
+  <span id="waypointArrow">▲</span><span id="waypointDist">--</span><span id="waypointLabel">Waypoint</span><span class="waypoint-mapkey">[M] map</span>
+</div>
+
+<!-- Title -->
+<div id="title" class="screen">
+  <div class="card-box">
+    <!-- ESCAPE mode -->
+    <div class="mode-escape-only">
+      <div class="logo">CELL BLOCK <span class="z">Z</span></div>
+      <div class="sub">Prison Escape</div>
+      <div id="roleSelect" class="role-select" aria-label="Choose role">
+        <button class="role-btn active" type="button" data-role="inmate">
+          <span>Inmate</span><small>Escape the block</small>
+        </button>
+        <button class="role-btn" type="button" data-role="cop">
+          <span>Cop</span><small>Patrol with gear</small>
+        </button>
+      </div>
+      <!-- NO KEYBOARD ⇒ NO KEY LEGEND (owner, 2026-08-09, iPad). This card is
+           the prison's ONLY how-to-play surface — systems/controls.js's card,
+           the one that already knows how to render touchRows, never fires here
+           (its context() bails outside the city) — so on a tablet the entire
+           tutorial was nine key caps for keys that do not exist. The touch grid
+           names the on-screen control instead. css/mobile.css swaps the two off
+           body.touch; the other three mode cards still carry key caps only. -->
+      <details class="controls">
+        <summary>Controls</summary>
+        <div class="keys keys-touch">
+          <div class="row"><span class="keycol"><span class="tcap">Left stick</span></span><span class="lab">Move · rim to sprint · press to sneak</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Fire</span></span><span class="lab">Punch · fire</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Jump</span></span><span class="lab">Jump · vault</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Reload</span></span><span class="lab">Reload</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Eye</span></span><span class="lab">First-person</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Word pills</span></span><span class="lab">Interact · the pill names the action</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Minimap</span></span><span class="lab">Tap it for the map</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Ranks</span></span><span class="lab">Yard rankings</span></div>
+        </div>
+        <div class="keys keys-kbd">
+          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Ctrl / C</span></span><span class="lab">Sneak</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Interact</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">F</span> / <span class="kbd">R</span></span><span class="lab">Fire · reload</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">Rankings</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">First-person</span></div>
+        </div>
+      </details>
+    </div>
+
+    <!-- SURVIVAL mode -->
+    <div class="mode-survival-only">
+      <div class="logo">DISASTER <span class="z">SURVIVAL</span></div>
+      <div class="sub">Natural Disaster Survival</div>
+      <details class="controls">
+        <summary>Controls</summary>
+        <div class="keys">
+          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch · throw</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Grab / set down</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">Climb high</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map</span></div>
+        </div>
+      </details>
+    </div>
+
+    <!-- GUN GAME mode (map buttons are built by src/modes/gungame.js from its
+         own MAPS registry — the registry is the truth, the markup is a slot) -->
+    <div class="mode-gungame-only">
+      <div class="logo">GUN <span class="z">GAME</span></div>
+      <div class="sub">Weapon-Ladder Deathmatch</div>
+      <div class="gg-map-label">CHOOSE YOUR MAP</div>
+      <div id="gungameMapSelect" class="gg-map-select" aria-label="Choose map"></div>
+      <details class="controls">
+        <summary>Controls</summary>
+        <div class="keys">
+          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Fire · punch</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">R-Click</span></span><span class="lab">Aim</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">R</span></span><span class="lab">Reload</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">First-person</span></div>
+        </div>
+      </details>
+      <div class="smallnote" id="gungameMapNote">Every kill climbs the ladder. The final rung is bare fists.</div>
+    </div>
+
+    <!-- CITY mode -->
+    <div class="mode-city-only">
+      <div class="logo">GANG <span class="z">LIFE</span></div>
+      <div class="sub">Open-world turf war</div>
+      <!-- character-origin picker (systems/state.js wires it; city/origins.js
+           applies the pick at run-start — see that file's header). -->
+      <div class="origin-label">CHOOSE YOUR STORY</div>
+      <div id="originSelect" class="origin-select" aria-label="Choose your story">
+        <button class="origin-btn origin-btn-contract" type="button" data-origin="contract"><b>The Hitman</b></button>
+        <button class="origin-btn active" type="button" data-origin="exec"><b>The Executive</b></button>
+        <button class="origin-btn" type="button" data-origin="pilot"><b>The Pilot</b></button>
+        <button class="origin-btn" type="button" data-origin="racer"><b>The Racer</b></button>
+        <button class="origin-btn" type="button" data-origin="captain"><b>The Captain</b></button>
+        <button class="origin-btn" type="button" data-origin="president"><b>The President</b></button>
+        <button class="origin-btn" type="button" data-origin="hustler"><b>The Hustler</b></button>
+        <button class="origin-btn" type="button" data-origin="debtor"><b>The Debtor</b></button>
+        <button class="origin-btn" type="button" data-origin="wick"><b>The Marked</b></button>
+        <button class="origin-btn" type="button" data-origin="barfly"><b>The Barfly</b></button>
+        <button class="origin-btn" type="button" data-origin="tenant"><b>The Tenant</b></button>
+        <button class="origin-btn origin-btn-roll" type="button" data-origin="random"><b>Roll The Dice</b><span id="originRollLine"></span></button>
+      </div>
+      <!-- PILOT sub-select. Hidden unless the PILOT story is chosen; systems/
+           state.js fills it from CBZ.cityOriginPlanes(), which reads the LIVE
+           aircraft registry — every airframe in the game shows up here with no
+           edit, and a new one appears the moment it registers. -->
+      <div id="originPlaneWrap" class="origin-plane-wrap" style="display:none">
+        <div class="origin-label origin-sublabel">CHOOSE YOUR AIRCRAFT</div>
+        <div id="originPlaneSelect" class="origin-plane-select" aria-label="Choose your aircraft"></div>
+      </div>
+      <!-- CAPTAIN sub-select. The same strip, drawn by the same renderSub() in
+           systems/state.js, filled from CBZ.cityOriginBoats() — world/
+           water_hulls.js's live hull registry. That one is populated at PARSE
+           time, so unlike the aircraft list above this is the REAL fleet with
+           real lengths before a world exists, and a hull registered tomorrow
+           appears here with no edit. -->
+      <div id="originBoatWrap" class="origin-plane-wrap" style="display:none">
+        <div class="origin-label origin-sublabel">CHOOSE YOUR BOAT</div>
+        <div id="originBoatSelect" class="origin-plane-select" aria-label="Choose your boat"></div>
+      </div>
+      <details class="controls">
+        <summary>Controls</summary>
+        <div class="keys">
+          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move · drive</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch · fire</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">YES · take the offer</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">I</span></span><span class="lab">NO · refuse</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">J</span></span><span class="lab">PUNCH · start a fight</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map · waypoint</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">City Power</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Z</span></span><span class="lab">Zillow</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">U</span></span><span class="lab">Switch character</span></div>
+        </div>
+        <div class="controls-note">Everything else is on the card in front of you. Walk up and it shows the buttons.</div>
+      </details>
+    </div>
+
+    <!-- THE THINGS YOU PRESS, IN ONE BOX. Graphics, PLAY and New Life used to
+         be three loose children of the card, each picking its own width: the
+         roles above them ran the full 1100px, these shrank to a 460px strip
+         down the middle, and PLAY sat off-centre because New Life stood beside
+         it. Boxed together they become a rail — beside the roster on a wide
+         screen, under it on a phone — and PLAY is centred in it either way.
+         Nothing here is addressed by position: state.js, newlife.js, quality.js
+         and gamepad.js all reach these by id. -->
+    <div class="title-actions">
+    <div id="qualityPreset" class="quality-preset" aria-label="Choose graphics quality">
+      <div class="quality-preset-label">Graphics</div>
+      <div class="quality-select">
+        <button class="quality-btn" type="button" data-quality-preset="fast" aria-pressed="false"><span>Fast</span><small>HD · short horizon</small></button>
+        <button class="quality-btn active" type="button" data-quality-preset="medium" aria-pressed="true"><span>Medium</span><small>Balanced world</small></button>
+        <button class="quality-btn" type="button" data-quality-preset="best" aria-pressed="false"><span>Best</span><small>Full distance</small></button>
+      </div>
+    </div>
+
+    <button class="btn" id="playBtn">Play</button>
+    <button class="new-life-btn mode-city-only" id="newLifeBtn" type="button">
+      <span>New Life</span><small>Clear every saved city character</small>
+    </button>
+    </div><!-- /.title-actions -->
+    <!-- THE OTHER GAMES, BELOW THE GAME. This strip used to be the first
+         thing on the title card, which made the screen a menu of six
+         products instead of one game you are about to play. It keeps every
+         button and every behaviour — setMode for the four modes, data-href
+         for the two that leave the page — it just stopped going first.
+         (Kept as-is otherwise, by owner direction.) -->
+    <!-- MORE GAMES is cut from this build: disaster.html ships ONE game.
+     (tools/build-disaster-page.mjs removes the strip; index.html keeps it.) -->
+    <div id="modeSelect" class="mode-select" hidden>
+      <button class="mode-btn active" type="button" data-mode="survival"><span>Disaster Survival</span><small>100 players · last alive</small></button>
+    </div>
+  
+
+    <div class="smallnote mode-escape-only">Lay low and guards ignore you. Cause trouble and they hunt.</div>
+    <div class="smallnote mode-city-only">Make money any way you can. Cops escalate to 5 stars. Get cuffed and it's the jail game.</div>
+    <div class="smallnote mode-escape-only" id="bestStat"></div>
+    <div class="smallnote mode-survival-only">Reach high ground before the water does.</div>
+  </div>
+</div>
+
+<!-- Pause -->
+<div id="pause" class="screen hidden">
+  <div class="card-box">
+    <div class="logo" style="font-size:clamp(32px,6vw,46px)">PAUSED</div>
+    <!-- Performance/quality controls live in ONE place: the Settings panel
+         (systems/settings.js injects its button below; [Esc] from here opens it). -->
+    <button class="btn" id="resumeBtn">Resume</button>
+  </div>
+</div>
+
+<!-- Win -->
+<div id="win" class="screen hidden">
+  <div class="card-box">
+    <div class="logo" style="color:var(--green);text-shadow:0 4px 0 var(--green-d),0 6px 0 var(--green-d)">YOU'RE OUT!</div>
+    <div class="sub" id="wReason" style="color:#3c7a52">Freedom</div>
+    <div class="stats">
+      <div class="stat"><div class="v" id="wTime">--</div><div class="l">Escape Time</div></div>
+      <div class="stat"><div class="v" id="wCigs">0</div><div class="l">Cigarettes</div></div>
+      <div class="stat"><div class="v" id="wKos">0</div><div class="l">Knockouts</div></div>
+      <div class="stat"><div class="v" id="wCaught">0</div><div class="l">Times Caught</div></div>
+    </div>
+    <button class="btn" id="againBtn">Escape Again</button>
+  </div>
+</div>
+
+<!-- Survival: Victory -->
+<div id="survwin" class="screen hidden">
+  <div class="card-box">
+    <div class="logo" style="color:var(--green);text-shadow:0 4px 0 var(--green-d),0 6px 0 var(--green-d)">VICTORY ROYALE</div>
+    <div class="sub" style="color:#3c7a52">Last one standing</div>
+    <div class="stats">
+      <div class="stat"><div class="v" id="swPlace">#1</div><div class="l" id="swTotal">of 100</div></div>
+      <div class="stat"><div class="v" id="swTime">--</div><div class="l">Survived</div></div>
+      <div class="stat"><div class="v" id="swDis">0</div><div class="l">Disasters</div></div>
+    </div>
+    <button class="btn" id="survAgainBtn">Play Again</button>
+    <button class="btn" id="survMenuBtn" style="background:#6b7686;box-shadow:0 6px 0 #4a5562,0 10px 18px rgba(0,0,0,.25)">Main Menu</button>
+  </div>
+</div>
+
+<!-- Survival: Eliminated -->
+<div id="survlose" class="screen hidden">
+  <div class="card-box">
+    <div class="logo" style="color:#ff5b5b;text-shadow:0 4px 0 #b11226,0 6px 0 #7c0c1a">ELIMINATED</div>
+    <div class="sub" style="color:#b06868">The disasters claimed you</div>
+    <div class="stats">
+      <div class="stat"><div class="v" id="slPlace">#--</div><div class="l" id="slTotal">of 100</div></div>
+      <div class="stat"><div class="v" id="slTime">--</div><div class="l">Survived</div></div>
+      <div class="stat"><div class="v" id="slDis">0</div><div class="l">Disasters</div></div>
+    </div>
+    <button class="btn" id="loseAgainBtn">Try Again</button>
+    <button class="btn" id="loseMenuBtn" style="background:#6b7686;box-shadow:0 6px 0 #4a5562,0 10px 18px rgba(0,0,0,.25)">Main Menu</button>
+  </div>
+</div>
+
+<!-- Three.js (vendored locally — same r128 build the CDN served; local files load
+     offline, deterministically, and inside the headless screenshot harness).
+     NOTE: an r164 IIFE bundle + legacy compat shim exist on disk
+     (src/vendor/three-r164/ + src/compat/three-legacy.js) from the O3
+     migration spike — verified pixel-identical on its branch but NOT yet
+     re-verified against this tree's newest THREE usage, so r128 stays the
+     loaded build for now. -->
+<script src="src/vendor/three.r128.min.js"></script>
+<!-- Slayvin flat-mirror reflective water (ported to r128 as THREE.WaterReflect;
+     wired onto the ocean by src/world/waterfx.js). Must follow the THREE tag. -->
+<!-- Official Three.js sample loaders used by the farm truck / BIM campus.
+     fflate must precede ThreeMFLoader because .3mf is a ZIP container. -->
+<!-- procedural backdrop terrain: noise (public-domain simplex/perlin) then
+     the terrain builder. BOTH must load before city/world.js runs, since
+     buildCity() calls CBZ.buildTerrain() and routes groundHeightAt →
+     CBZ.terrainHeight. terrain.js depends on BufferGeometryUtils (above). -->
+<!-- world layout dial: per-biome anchor offsets (map-enlargement stage 1;
+     all-zero today). Must load before terrain + every biome/island file. -->
+<!-- terrain overhaul: overrides terrainHeight/buildTerrain with a SOLID
+     mountain heightfield (no hollow ridge sheets) + per-material fog scale.
+     Must load right after terrain.js and before city/world.js.
+     Revert: CBZ.CONFIG.TERRAIN_SOLID = false. -->
+<!-- Geology kit: shared Quilez erosion / ridged multifractal / drainage / strata /
+     snow-cover / adaptive-mesh helpers, used by city/biome_snow (the real walkable
+     mountains), world/terrain_overhaul (the backdrop range) and city/continent
+     (backcountry). Also a landmass builder (order 98.4) that finally puts
+     rockscliffs.js's fractured boulders on the mountains you can actually walk on.
+     MUST load AFTER terrain_overhaul.js (reads CBZ.terrainFogScale) and BEFORE
+     city/biome_snow.js, which reads CBZ.mtn* at PARSE time. -->
+
+<!-- ============================================================
+     Game modules — loaded in dependency order. Each is a tiny
+     IIFE that wires itself onto window.CBZ. Keep this order:
+     config → core → world → entities → systems → loop → main.
+============================================================ -->
+
+<!-- pre-config: a saved Settings-panel "Total Population" choice (localStorage,
+     see src/systems/settings.js) must land on window.CBZ BEFORE config.js
+     reads CBZ.MASS_CROWD/CROWD_RIG_CAP so it actually takes effect next load. -->
+<script>
+  /* THIS PAGE IS ONE GAME. src/config.js reads START_MODE and opens there, so
+     the island is the only world this build ever stands up — no city, no
+     prison, nothing behind the title card that the player did not ask for. */
+  window.CBZ = Object.assign(window.CBZ || {}, { START_MODE: "survival" });
+  try {
+    var _popOverride = parseInt(localStorage.getItem("CBZ_POP_OVERRIDE_V1"), 10);
+    if (_popOverride > 0) window.CBZ = Object.assign(window.CBZ || {}, { MASS_CROWD: _popOverride });
+  } catch (e) {}
+</script>
+<!-- 0. namespace + constants -->
+<script src="src/config.js?v=nodash1"></script>
+<!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
+     Turns "is this the city?" into "may I vault / may I blow up here?", so the
+     prison, gun game and the disaster island reuse Gang City's engine instead
+     of being refused by a mode enum. Loads before every consumer; flag
+     MODE_CAPS_V1=false restores the old city-only answers everywhere at once. -->
+<script src="src/systems/modecaps.js?v=caps1"></script>
+<!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
+     5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
+     once so the prison door, the bank vault and every wall price themselves in
+     the same unit. Must precede any file registering a breach target. -->
+<!-- THE AIRPORT REGISTRY (CBZ.registerAirport / CBZ.airports / the local
+     airfield frame). An airport stops being a rectangle of the map and becomes
+     a RECORD with an origin, a bearing and a runway, so a second field is a
+     spec rather than a second copy of island_airport.js's 4,000 lines. Must
+     precede every field builder and the airline that flies between them. -->
+<!-- tree connection-law registry + CBZ.treeAudit() — must precede every
+     vegetation builder (they register planted parts into it) -->
+<!-- Shared scenery-scale vegetation archetypes. Biomes own ecology/placement;
+     this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
+<script src="src/core/prio.js?v=arch2"></script>
+<script src="src/core/matrixskip.js?v=mskip1"></script>
+<!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
+     which ~290 are the contracts index's prose and the rest is a single
+     CBZ.INTERFACES list of 16 strings that, measured across src/, index.html,
+     tools/ and docs/, has ZERO readers anywhere — the file implements nothing
+     and executes nothing, so parsing it every boot bought exactly nothing.
+     THE FILE STAYS WHERE IT IS ON PURPOSE: eight comments across the repo
+     cite "core/interfaces.js #4", "#6", "#12" as documentation, and moving it
+     would make all eight stale to save nothing. It is a reference document
+     that is deliberately not a script. (CLAUDE.md names it as the canonical
+     failed block: shipped July 1-2, zero adopters ever.) -->
+
+
+<!-- 1. core engine -->
+<script src="src/core/scene.js?v=neutralhaze1"></script>
+<script src="src/core/renderer.js?v=scale3"></script>
+<!-- THE GROUND STOPS BEING DRAWN OVER A HOLE. Must load AFTER core/renderer.js:
+     its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
+     installed before it is erased in silence. groundmask.js asserts CBZ.renderer
+     exists and appends rather than rewriting. -->
+<!-- THE GROUND IS A SOLID: base field minus carvings. Owns CBZ.floorAt, so it
+     must load before any mode registers its base (city/mode.js, modes/*). -->
+<script src="src/systems/solidground.js?v=solid1"></script>
+<!-- ORDNANCE LEAVES THE GROUND CHANGED: a bomb digs a carving. -->
+<!-- A ROOM UNDER AN INTACT STREET: a hole with a lid on it. -->
+<!-- A TUNNEL IS A HOLE LYING DOWN: a swept carving with its lid intact. -->
+<!-- GROUND YOU CAN TAKE AWAY A BUCKET AT A TIME (bare ground only). -->
+<script src="src/core/lights.js"></script>
+<script src="src/core/sky.js?v=neutralhaze2"></script>
+<script src="src/core/daynight.js?v=neutralhaze1"></script>
+
+<!-- 2. world geometry -->
+<!-- Procedural surface library: tiling colour + normal + roughness CanvasTextures
+     (asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass grime).
+     Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
+     has to precede its first consumer — world/materials.js. -->
+<script src="src/world/materials.js?v=pbr1"></script>
+<!-- Masonry textures: procedural brick (stretcher bond + header courses) and
+     ashlar (drafted-margin blocks) CanvasTextures + the fixed 6-colourway
+     palette. After materials.js — it consumes CBZ.cmat. -->
+<!-- THE ONE MISSION PRIMITIVE. CBZ.mission.start({id,title,goal,at,reward}) buys
+     completion detection + the g.cityJob HUD line + map waypoint + world beacon +
+     phone card + payout. MUST precede every consumer: careers.js, activities.js,
+     gigs.js, heists.js and core/packages.js (which reads CBZ.mission.NULL at parse). -->
+<!-- Furniture kit: CBZ.furnish draws a piece AND registers its use-anchor in one
+     call. After materials.js (resolves addBox at call time); before its consumers
+     lounge.js / cafeteria.js / clutter.js. -->
+<!-- FURNITURE MOVES WHEN YOU WALK INTO IT (owner: "physics, not another
+     f***ing button"). CBZ.pushables.add(spec) — still exported as CBZ.pushProp —
+     makes a drawn prop a mass on a floor:
+     contact from a moving body slides it, its collider is translated with it
+     and the broadphase dirtied, so the moved prop is instantly real to the
+     player's depenetration, every guard's steering and the vault probe. The
+     tag MUST precede every world file that registers at parse time
+     (cellblock/clutter/cafeteria/yardfurniture below, each declaring
+     mode:"escape" so its furniture is inert in the city that shares those
+     coordinates) — a prop registered
+     after core/batch.js has run would already be welded into a static buffer.
+     Runtime deps (markCollidersDirty, queryCollidersNear, propNearestSeat) are
+     all resolved inside the per-frame driver, never at parse. -->
+<script src="src/world/cellblock.js"></script>
+<!-- crates.js/props.js moved below systems/pieces.js (F7): both now call
+     CBZ.spawnPiece at parse time, so they must load after chunks.js/
+     pieces.js define it. Nothing else in this file's original 283-284 slot
+     depended on their (synchronous, load-time) execution happening this
+     early — every cross-file reader (e.g. CBZ.breaker) only touches them
+     from inside a runtime callback, long after all scripts have loaded. -->
+<script src="src/world/door.js?v=scale2"></script>
+
+<!-- 2b. rooms (need world helpers; loaded after coins for stash drops) -->
+
+<!-- 2c. the prop-type registry (generic object lifecycle) — must load
+     before any entity that registers a prop type, e.g. coins.js below -->
+
+<!-- 3. entities -->
+  <script src="src/entities/character.js?v=holster1"></script>
+  <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
+       melee site in the game handed the ATTACKER's own number straight to the
+       target, so a fist did the same to a 190 kg silverback as to a 62 kg
+       woman, and the silverback's blow landed on a man with no more authority
+       than a man's landed on it. Derived entirely from the anthropometric
+       profile character.js already builds and the species row's own scale —
+       nothing new is authored. MUST follow entities/character.js: it reads
+       CBZ.charProfile. -->
+<script src="src/entities/player.js?v=radio1"></script>
+<!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
+     is gone as of 2026-07-26; this comment used to describe it in the present
+     tense and offer "re-add the tag" as a revert, which no longer works).
+     They inferred blood from `ko`/pooled-rig sentinel state, so clean tackles,
+     sprints, tasers and even crowd LOD demotion manufactured pools.
+     systems/gore.js + wounds.js own blood from explicit damage events. -->
+
+<!-- 4. systems — economy/quests load before actors that reference them -->
+<script src="src/systems/audio.js?v=nukefield1"></script>
+<script src="src/systems/hud.js?v=allmain3"></script>
+
+<!-- weapon tuning/appearances are data-only and also feed the armory room -->
+<!-- ONE prison flashlight model: held guard tool, physical death drop and
+     inventory thumbnail all consume this factory. -->
+<!-- THE OFF HAND ACTUALLY HOLDS THE GUN, AND RELOADS IT. Solves the
+     support arm onto the drawn weapon's own authored handguard every
+     frame (instead of the old hand-tuned Euler guess, which could not
+     know which gun was out) and choreographs the reload the same way.
+     After holsterprops — it reads the gun that module just placed. -->
+
+<!-- 2c. rooms (use addBox + addPack) -->
+<script src="src/world/roombuild.js"></script>
+<!-- THE PRISON GETS A LID. Every interior above was open-topped (roomShell
+     builds four walls and no ceiling), so you could stand in the mess hall and
+     watch the crows. roofs.js lays a real ceiling over each of them and hangs
+     the fittings that keep a roofed room from being a cave — and it is also
+     what flushes CBZ.prisonDress's fixture queue into CBZ.prisonLights, so
+     every caged lamp in the compound joins the schedule. AFTER every file that
+     draws a room; BEFORE world/adminwing.js, which asks it for its own roof. -->
+
+<!-- 3b. actors that depend on economy -->
+<script src="src/entities/vision.js"></script>
+<!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
+     aircraft passengers request real actors through one reusable contract. -->
+<!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
+     of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
+     now opens, and puts the Warden on a day: rounds, his desk, his quarters.
+     AFTER guards.js (it borrows CBZ.jailBoost's run watcher at parse, and the
+     warden it schedules is spawned there) and after roofs.js (it asks
+     CBZ.prisonRoof for its own ceiling); BEFORE prisonschedule.js, whose
+     block ids it reads at runtime. -->
+
+<!-- THE COMPOUND'S REAL SIZE (owner 2026-08-11: "the prison should be bigger…
+     think of scale of human vs prison size"). 92x195 m of authored prison was
+     1.79 ha — fifty body-lengths across a yard, against 300-400 m a side for a
+     real perimeter. world/prisonwings.js throws the outer wire at x +-124,
+     z -116..128 (6.05 ha) WITHOUT moving one authored coordinate, and fills it
+     with six rooms whose locks hang off the three keys the game already has:
+     the Keycard (four sally gates + segregation), the Lockpick (tool crib,
+     knife cage, property cage) and the Warden's Gun-Room Key (central control,
+     which throws every lock in the house at once).
+     AFTER roofs.js (asks CBZ.prisonRoof for its lids), roombuild.js (roomShell)
+     and cafeteria.js (CBZ.prisonDress fittings); AFTER guards.js + adminwing.js
+     so it borrows the same CBZ.jailBoost run watcher; and it must follow
+     world/yard.js, which cuts the four gate gaps this file stands gates in. -->
+
+<!-- ============ THE ENGINE LAYER THE PRISON WAVE PROVED WAS MISSING ==========
+     Four services promoted OUT of the prison files below, because a hospital,
+     a school, a heist and an asylum need every one of them and none of them is
+     about a prison. Each is mode-agnostic, feature-detects everything, and
+     works on a games/*.html page that loads no city file at all.
+
+       dayplan.js   CBZ.dayPlan.define(id, blocks) — named blocks over a day,
+                    block()/until()/progress()/on(transition). Owns the wrap
+                    through midnight, the silent arm on a run that starts
+                    mid-block, and the day length (the world's own sun).
+       fixtures.js  CBZ.fixtures.rig(id, spec) — a light-fixture registry with
+                    a per-kind schedule, driven materials, region-aware
+                    level(x,z) (a lamp does not shine through a wall) and the
+                    sensor curve scale(sensor,x,z).
+       rest.js      CBZ.rest — assign a body a place, walk it there, hand it to
+                    the pose, get it up and step it CLEAR; plus the three
+                    load-order repairs that make furniture anchors exist at all.
+
+     TAGGED BEFORE THEIR CALLERS, which is the whole reason the order of this
+     file matters: prisonschedule.js/prisonnight.js/prisonrest.js each hard-
+     require its service and return early without it. (pushables.js, the fourth,
+     is up at the top of the world block — it has to precede the parse-time
+     world files that register props.) -->
+
+<!-- TIME OF DAY IS THE PILLAR (escape mode). prisonschedule.js carves the day
+     into the blocks a real prison runs — unlock/count, yard, chow, evening
+     return, secure, lights out — and enforces them physically: a PA klaxon off
+     a real horn, cell doors racking on world/cellblock.js's own leaves, guards
+     changing post, inmates walked in for count. prisonnight.js is the other
+     half: the lights that are ON that schedule, an actually dark prison night,
+     and CBZ.sightScale — the one hook guards.js's vision cone and
+     interactions.js's cameras multiply by, so darkness is priced once.
+     After cellblock/guards/searchlight/npc (all read at parse), before the
+     detection sweep that consumes the result. -->
+<!-- BODIES USE THE FURNITURE. The bunks in this wing had never once become
+     propuse anchors (city/propuse.js loads 337 tags after world/cellblock.js,
+     so every useBed() call silently degraded — measured: 21 props, 0 beds),
+     and nothing outside src/city/ had ever called CBZ.propSleep. This drives
+     the wing off CBZ.prisonSchedule: lights-out puts every inmate horizontal
+     in a bunk or on an issue mat, wake gets them up, mess and yard get sat at,
+     and the warden sleeps in his own bed until somebody walks into the room.
+     AFTER prisonschedule.js (it reads that clock and never its own) and after
+     cellblock/guards/npc; propuse.js is in the CITY block far below, so every
+     call into it happens inside the per-frame sweep, never at parse. -->
+
+<!-- FOUR SECURITY LEVELS OVER ONE COMPOUND. Getting caught escaping used to
+     end the run on a card that said TRANSFERRED and then handed you the same
+     prison back; now it transfers you — LOW -> MEDIUM -> HIGH -> ULTRA-MAX,
+     and at the top the regime itself is the punishment. World geometry is
+     parse-time, so a level is a REGIME turned over the same jail: guard posts
+     and quality, which of the nine lenses are wired, the block timetable, the
+     lights that stay on, searchlight reach, lock discipline, loadouts, steal
+     odds and how fast anybody trusts you. Every one of those lands on a
+     surface somebody else published. Tagged after prisonschedule/prisonnight
+     (it turns their tables), after entities/guards.js, entities/security.js
+     and systems/economy.js (it turns their records), and BEFORE capture.js
+     and state.js, which call CBZ.prisonTier at runtime. -->
+
+<!-- 4b. remaining systems -->
+<script src="src/systems/input.js"></script>
+<script src="src/systems/spatialgrid.js?v=scale3"></script>
+<script src="src/systems/camera.js?v=survdeathcam1"></script>
+<script src="src/systems/physics.js?v=trauma2"></script>
+<!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
+     standing actor on a surface that moves — 30+ CBZ.platforms sites, none
+     re-centring on a moving parent. CBZ.movingPlatform(parent, spec) carries
+     riders by delta transform rather than scene-graph parenting, and ticks at
+     9.5 — BEFORE updatePlayer at 10. That ordering IS the feature: a platform
+     driven after the player resolves against it is the one-frame sink/pop.
+     Costs physics.js 11 lines behind two feature-detected seams; collide()'s
+     signature and math are untouched. Consumers today: the arena tower lift,
+     a floating dock + hinged gangway, marina pontoons, and yacht decks.
+     Next adopters are one line each — elevators.js (the teleporting cab is
+     the reason this exists) and the airliner cabin deck. -->
+<script src="src/systems/actorcollide.js?v=contact1"></script>
+<!-- A DEAD MAN LIES ON THE FLOOR, IN THE ROOM. Owns every prison corpse's
+     transform: clear lie direction, wall depenetration at both ends of the
+     body, limb sprawl. entities/npc.js + entities/guards.js call its tick
+     from their dead branches; ai.js kill() places. PRISON_CORPSE_V1=false
+     restores the legacy feet-pivot flop. -->
+<!-- HOW WELL A PERSON FIGHTS (NPC_COMBAT_IQ). The ONE competence model —
+     role x weapon -> reaction, settle, burst, accuracy, cover quality — plus
+     real collider-derived cover, the shooter token that stops a crew firing
+     all at once, and the punch exchange. Loads right after aitactics.js
+     (whose LOS/search/flank primitives it composes and never re-implements)
+     and BEFORE every consumer: gangs.js, peds.js, police.js, city/combat.js.
+     Revert with ?cfg_NPC_COMBAT_IQ=0. -->
+<!-- ONE TASER VISUAL OWNER. Player fire and the prison capture escalation both
+     launch its pooled twin probes/wires and electrical body arc; it also draws
+     the shared taser appearance in a guard's real weapon socket for that beat. -->
+<!-- The blades half the wing was already carrying. Owns only WHEN an inmate's
+     shank comes out of the waistband and how the one arm holding it is posed;
+     what a stab DOES lives in systems/combat.js. Loads beside taserfx for the
+     same reason: both re-assert a carried weapon every frame because
+     actorweapons' self-heal pass is city-only. -->
+<script src="src/systems/weather.js?v=snowbury1"></script>
+<script src="src/systems/compass.js"></script>
+<script src="src/systems/minimap.js?v=route1"></script>
+<!-- WHAT A THING IN YOUR BAG LOOKS LIKE: one real 3D object per item KIND,
+     which city/itemicons.js photographs for the slot and city/inventory.js
+     drops on the pavement. Needs THREE + actorweapons + materials, all
+     above; resolves itemicons' seams lazily so order between the two does
+     not matter. -->
+<!-- WHAT A THING IN YOUR BAG IS: one drawn pictogram per item KIND (so
+     runtime registrations — species pelts/meat, the fishing catch, produce,
+     C4 — are covered structurally), plus its verb and its worth. Loads
+     before every consumer: systems/inventory.js, city/hud.js, charpanel.js,
+     city/inventory.js. Only needs CBZ + CBZ.CONFIG. -->
+<!-- LOADING METER: the boot card's percentage, drawn on a worker thread so it
+     keeps counting through the 20-30 s synchronous world build (the main
+     thread cannot repaint during that). Must load BEFORE state.js, which
+     shows it, and before the city modules that call CBZ.bootStep(). -->
+<script src="src/systems/bootprogress.js?v=meter1"></script>
+<script src="src/systems/state.js?v=nodash1"></script>
+<!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
+     context under memory pressure and hands it back later; three.js rebuilds
+     its own GL resources, but nothing told the GAME, so a hundred survivors
+     and eleven disasters kept running behind a black screen and the player came
+     back to a death they never saw. Pauses the match on context loss and on
+     losing the foreground, resumes the audio graph on the way back in, and asks
+     for the context back if it has not returned. AFTER state.js (it pauses
+     through CBZ.setState, so there is exactly one kind of paused).
+     ?cfg_GL_CONTEXT_GUARD=0 reverts. -->
+<script src="src/systems/glcontext.js?v=glguard1"></script>
+<!-- THE SIM ADVANCES IN WHOLE TICKS (survival only, by default). core/loop.js
+     measures TIME, which is right for one player and is the reason two machines
+     can never run the same match — a phone at 47 fps and a laptop at 60 take
+     different steps through the same second and drift apart from an identical
+     seed. This turns the frame delta into whole 1/60 ticks. MUST load before
+     core/loop.js, which reads CBZ.fixedStep every frame. ?cfg_FIXED_STEP_V1=0
+     puts survival back on the variable step, live. -->
+<script src="src/systems/fixedstep.js?v=fixed1"></script>
+<script src="src/systems/touch.js?v=onecall1"></script>
+<!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
+     per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
+     the keyboard + touch layers use. -->
+<script src="src/systems/gamepad.js?v=nodash1"></script>
+
+<!-- 4c. SURVIVAL — natural-disaster battle royale (a second game mode).
+     Additive: registers its own updaters (gated by game.mode) and builds
+     its world lazily, so the prison game above is untouched. Must load
+     BEFORE loop.js so its frame-work is included in the sort. -->
+<script src="src/systems/fx.js?v=glass1"></script>
+<!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
+     bus, so a cloud-to-ground strike draws a forked channel with return
+     strokes, ground flashover, steam and a burn scar instead of falling
+     through to COMPOSERS.heavy — which is cityAirstrikeExplosion, i.e. an
+     orange fireball with a debris cone. WITHOUT THIS TAG systems/disasters.js
+     detects the missing CBZ.lightningStrike and keeps the old blast, so the
+     page still runs; it just looks like an RPG again. Needs only config.js +
+     scene; it wires itself to the bus lazily, in any script order. -->
+<script src="src/systems/lightningfx.js?v=bolt1"></script>
+<script src="src/world/disaster_arena.js?v=snowbury1"></script>
+<script src="src/systems/grapple.js?v=nohint1"></script>
+<script src="src/entities/survivorbot.js?v=trauma2"></script>
+<script src="src/modes/survival.js?v=nodash1"></script>
+<!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
+     island (survival). Loads AFTER both so their builders exist. -->
+<!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
+     (survival sinkholes today, CITY_SINKHOLES tomorrow). Must precede
+     systems/disasters.js so the roster finds CBZ.groundShaft at load. -->
+<script src="src/world/groundshaft.js?v=shaft1"></script>
+<!-- THE VOLCANO IS SHARED: world/volcanofx.js owns the opaque crusted lava,
+     the pyroclastic density current, the lahar and the ash LOAD, all keyed on
+     a position + a height field so a city-side eruption calls the same four
+     builders. Must precede systems/disasters.js so the roster finds
+     CBZ.volcanoFx (and its VOLCANO_* flag defaults) at load. -->
+<script src="src/world/volcanofx.js?v=strato1"></script>
+<!-- THE QUAKE IS SHARED: systems/quake.js owns facade shedding, drop-cover,
+     gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
+     Must precede systems/disasters.js so the roster finds CBZ.quake. -->
+<script src="src/systems/quake.js?v=quake1"></script>
+<script src="src/systems/disasters.js?v=nodash1"></script>
+<script src="src/systems/survival_interact.js?v=climbdock1"></script>
+<script src="src/systems/survivalhud.js?v=nozone1"></script>
+<!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
+     have to be true before a transport is worth writing: every actor carries a
+     stable id, the whole match serialises to one ArrayBuffer and back
+     (2.5 KB at 100 bots), and there is one fingerprint two clients can compare.
+     tools/determinism-check.mjs is what compares it. AFTER survival.js and
+     systems/disasters.js — it reads their public surfaces and publishes
+     nothing they need. ?cfg_SURVNET_V1=0 makes it inert. -->
+<script src="src/net/survnet.js?v=survnet1"></script>
+<!-- GUN GAME ladder HUD (mode-gated; shares #survBars with survival) -->
+
+<!-- 4d. CITY — open-world GTA-style mode (a third game mode). Additive:
+     registers its own updaters (gated by game.mode==="city") and builds its
+     world lazily far from the other two. Must load BEFORE loop.js so its
+     frame-work is included in the sort. mode.js defines CBZ.city first; the
+     rest augment it. -->
+<!-- THE ONE WATER SPEC (WATER V2): the swell table, the GLSL generated from that
+     table (so the shader and the CPU wave query provably cannot drift), the
+     camera-centred radial sea geometry, the shared ripple normal map and the
+     shared water shading chunks. MUST load before city/world.js (its buildSea
+     reads this) and before city/waterfield.js (its surfaceY delegates here). -->
+<script src="src/world/water_spec.js?v=shallow1"></script>
+<!-- Masonry + civic building grammar: the BLD_* flags, the civic trade table and
+     the shared masonry / portico / roof-clutter geometry. MUST load BEFORE
+     city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
+     parse time and the bld* helpers at build time. -->
+<!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
+     the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
+     register ONE style and must load after it. The generalisation of what
+     govcomplex.js does to this same office shell: a spec at the call site.
+     Inert until a caller passes {dress:{style}} (or ?cfg_FACADE_KIT_CITY=1). -->
+<script src="src/city/facade_kit.js?v=fk1"></script>
+<script src="src/city/facades/brick.js?v=fk1"></script>
+<script src="src/city/facades/stone.js?v=fk1"></script>
+<script src="src/city/facades/mosque.js?v=fk1"></script>
+<script src="src/city/facades/artdeco.js?v=fk1"></script>
+<script src="src/city/facades/brutalist.js?v=fk1"></script>
+<script src="src/city/facades/hightech.js?v=fk1"></script>
+<script src="src/city/facades/pagoda.js?v=fk1"></script>
+<script src="src/city/facades/gothic.js?v=fk1"></script>
+<script src="src/city/facades/adobe.js?v=fk1"></script>
+<!-- TOWER GRAMMARS. Same contract, written for the 40-storey end of the range
+     (buildings.js's own makeMegaTower is 52 storeys / ~166m). These declare
+     minStoreys so FACADE_KIT_CITY only ever hands them to real towers. -->
+<!-- HOUSE GRAMMARS. The same contract written for the DOMESTIC end of the range:
+     every one of these owns a real roof (gable, hip, tile, turret, floating
+     plane) where the shell had a parapet, and every one dresses AROUND the base
+     building's own window band instead of over it — shutters, surrounds, posts
+     and courses that FRAME the host glass, which is the thing the owner asked
+     for. They declare maxStoreys so FACADE_KIT_CITY never hands a mansion
+     grammar to a tower. -->
+<!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
+     MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
+<script src="src/city/worldmap.js?v=nodash1"></script>
+<!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
+     the landmass registry so rendering, swimmers, boats and aquatic wildlife
+     all consult the same coast instead of inventing separate radius tests. -->
+<!-- Reflective-ocean FX: swaps CBZ.citySea for a THREE.WaterReflect plane when
+     CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
+     so load order past config.js + WaterReflect.js is all it needs. -->
+<!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
+     builder. Loads right after the ribbon builder it drives; registers its
+     own landmass pass (order 91 — after every causeway, before the
+     continent plate reads its relief-corridor gate). -->
+<!-- 4d-3. SIMS-STYLE WORLD FOUNDATION: asset catalog + occupancy/anti-overlap
+     placement + per-biome town generator (loaded before biome/island builders). -->
+<!-- 4d-3b. F4 — the player-building ENABLING ENGINE (additive, zero call
+     sites change yet): a 16m chunk registry, then spawnPiece/despawnPiece/
+     findSupport built on top of it + the CBZ.assets/physics.js contracts
+     above. chunks.js first (pieces.js registers pieces into it), though
+     either load order works. -->
+<!-- B1 — the wood-tier build catalog + CBZ.building.place() (no UI yet;
+     B2 lands the ghost preview/hotbar). Loads right after pieces.js
+     (needs spawnPiece/despawnPiece/findSupport) and after placement.js
+     above (needs CBZ.placement.isFree/reserve for the world-collision gate). -->
+<!-- B5 — the raid-tool damage matrix: CBZ.structDamage.hit/repair on top
+     of B1's CATALOG hp + B4's cascade/stability (CBZ.building.remove).
+     Loads right after building.js (needs CBZ.building.remove + CBZ.pieces,
+     both already defined by this point); explosives.js/fpsmode.js's bullet
+     hook call CBZ.structDamage.hit at runtime, so load order relative to
+     THEM doesn't matter — only relative to building.js/pieces.js does. -->
+<!-- B6 — OWNERSHIP: the tool cupboard + BaseRecord + placement-rejection
+     radius + door locks/lockable containers, on top of B1's CATALOG and
+     B5's damage matrix (structdamage.js's destroy path stamps the
+     BaseRecord breach window this file reads). Loads right after
+     structdamage.js per the family's own load-order convention; the
+     city-mode interaction verbs it registers (city/interactions.js,
+     which loads much later in this file) are wired LAZILY on first
+     sight of CBZ.interactions, so relative order to THAT file doesn't
+     matter — only relative to building.js/structdamage.js does. -->
+<!-- B2 — the walking skeleton: CBZ.buildMode ghost preview + hotbar strip
+     + confirm/rotate/level/demolish/undo, all calling B1's place()/remove().
+     Loads right after building.js (needs CBZ.building.CATALOG/validate/
+     place/remove) and after CBZ.camera/CBZ.pieces already exist (systems/
+     camera.js, systems/pieces.js — both load earlier in this file). -->
+<!-- F7 — world/crates.js + world/props.js migrated onto CBZ.spawnPiece
+     (moved from the "2. world geometry" wave above, right after
+     towers.js): they now need spawnPiece to exist at parse time. -->
+<script src="src/world/crates.js?v=nodash1"></script>
+<!-- THE YARD IS A PRISON YARD. crates.js already killed the loot verb on its
+     five packing cases; this stands the cases DOWN and puts what a real
+     exercise yard contains on the same five spots — handball wall, weight
+     pile, shade pavilion, phone bank, notice board — keeping every metre of
+     the line-of-sight cover the stealth layer is built on. It also re-homes
+     the Hacksaw Blade and the Lockpick into the workshop and the laundry,
+     which is where a saw and a pick would actually be. AFTER crates.js
+     (whose PRISON_YARD_FURNITURE flag it shares) and props.js. -->
+<!-- SETTLEMENT COMPOSITION — flavored anchor plan + registry + cityWorldGeo
+     wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
+     and after worldmap.js (whose cityWorldGeo it wraps). -->
+<!-- DIAMOND SPEEDWAY, part 1 — the circuit's architecture: grandstands with real
+     raked seating, pit garages, scoring pylon, jumbotron, floodlight masts,
+     hoardings, marshal posts, tyre walls, paddock. Authored against the track
+     frame island_speedway.js publishes; both run at world-build time so either
+     order works — kept adjacent for readability. -->
+<!-- THE AIRFIELD KIT + THE SECOND AIRPORT. buildAirfield() lays a complete
+     field (runway, markings, edge lights, taxiway, apron, stands, terminal,
+     tower, fence, kerb, access causeway) from one spec at any origin and any
+     bearing, reusing island_airport.js's OWN airframe factories — which is
+     why airport_capeharbor.js is a spec and a single call. Both load after
+     island_airport.js: it is what publishes CBZ.airportKit. -->
+<!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
+     w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
+     the military island (22) and both biome height fields (30/31). -->
+<!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
+     far backdrop relief (world/terrain.js). Self-registers as a high-order
+     landmass; runs via cityWorldGeo after terrain + biomes exist. -->
+<!-- 4d-4. WILDLIFE + HUNTING + DOGS. The bestiary (defineSpecies) loads FIRST,
+     then every biome batch of species, then the hunting engine and the dog
+     companion system (both self-register as high-order landmasses). -->
+<script src="src/city/wildlife_rig.js?v=beasts1"></script>
+<script src="src/city/wildlife_species.js?v=attach1"></script>
+<!-- EVERY ANIMAL IS AN INDIVIDUAL: the per-individual size draw and the
+     hunger scalar wildlife.js spends. Must load BEFORE the engine (it
+     binds CBZ.wildlifeTraits once, at load); absent, the engine falls
+     straight back to the species constant. -->
+<script src="src/city/wildlife.js?v=indiv1"></script>
+<!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
+     companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
+<!-- IRONJAW ARENA. arena_venue.js is the BUILDING (raked bowl, concourse,
+     vomitories, roof truss, light rig, jumbotron, instanced crowd);
+     arena_fights.js is the FIGHT SURFACES + sim. Both only run at world build,
+     so either order works — keep them adjacent, still landmass order 40. -->
+<!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
+     wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
+<!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
+     = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
+     playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
+<!-- Occupied structures: floors, a role per floor, access control, boss/VIP
+     placement. After peds.js (uses the ped factory + the guard primitive) and
+     after interior_programs.js. This is what puts a boss on the top floor. -->
+<!-- CHILDHOOD: age bands, the growth curve, child proportions and gait. After
+     peds.js (the ped factory) and after the character rig it extends. Without
+     this tag children get correct proportions but never grow. -->
+<!-- WHO YOU ARE TO THEM, IN WORDS. The street's port of the prison's
+     socialRead: the five relationship axes + the cover-aware level + the role
+     become a standing, a mood and a LEVEL GAP, and the gap picks the line.
+     After level.js (cityLevel/cityRole/cityPlayerTitle) and social.js
+     (cityRel/cityBond/citySay); every consumer resolves it lazily at call
+     time, so nothing below needs reordering. Consumers: humancontact.js (the
+     bump), peds.js (trade + greet), interactions_rich.js (insult scaling). -->
+<!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
+     spec generator derives ~40 numbers from what already exists, taking the
+     eye point from geometry the artists already placed (the modelled captain's
+     seat, else the cosmetic pilot silhouette's head that has sat unused in
+     buildHeli/buildJet for months). Instruments read the craft's real world
+     matrix, not its intent variables, so the glass cannot disagree with the
+     window. Renders in a second pass because the design-eye distance (0.71m)
+     is INSIDE the world near plane. cockpit_panel (2D glass) and
+     cockpit_shapes (geometry — needs CBZ.taperBox from world/carfx.js:353)
+     must precede cockpit.js; cockpit_view.js must be last of the four. -->
+<!-- BAILOUT: stepping out of a FLYING aircraft. exitAircraft() was written for
+     a parked machine — it zeroes attitude and velocity and forces onGround, so
+     bailing at 500m teleported the plane flat and landed it. This file owns
+     both halves instead: the falling body (freefall → canopy → landing, with
+     hard landings handed to the EXISTING fall-damage ladder rather than a
+     second damage path) and the pilotless machine, which enters a real
+     graveyard spiral — bank tilts lift, the nose drops, speed builds, the bank
+     deepens — unless somebody else is aboard to take the controls. The wreck
+     is priced through CBZ.detonate so it damages buildings like any other
+     impact of that mass and speed. After playeraircraft.js (uses the exported
+     setCraftRotation) and after cockpit_view.js. Revert: ?cfg_BAILOUT=0. -->
+<!-- elevator-grammar boarding doors for every flyable aircraft: the door
+     visibly opens, you walk in through the opening, it closes, THEN flight
+     control hands over (and the reverse on exit). Wired behind the existing
+     board/enter APIs — militaryvehicles.js + playeraircraft.js call into it,
+     island_airport.js panel/airstair easing honours its open flag. -->
+<!-- THE WALK-IN HOLD: CBZ.vehicleHold(vehicle, spec) — a real ROOM inside a
+     moving vehicle (cargo plane today, semi trailer / van next), built on
+     systems/platforms_moving.js for the floor+ramp+walls and npclife for the
+     bodies. Owns the rear-ramp arc and the LATCH that carries vehicles and
+     cargo. After platforms_moving.js, interactions.js and aircraft_doors.js
+     (which grew a "ramp" door kind for it); before militaryvehicles.js and
+     the island builders that declare holds. Revert: ?cfg_VEHICLE_HOLD_V1=0. -->
+<!-- BOARDING + FOLLOWER ORDERS: CBZ.boarding / CBZ.followerOrder /
+     CBZ.boardingHolds. The aircraft_doors grammar (walk → open → step →
+     handover → close) generalised to CARS and to N ACTORS AT ONCE, so your
+     crew, your hired security, your partner, a hostage and a cuffed captive
+     all WALK to a real door, open it, and are seated by npclife where you can
+     see them through the glass — instead of the old hidden-rig snap to the
+     car's origin. Also owns the per-follower verbs (get in / get out / wait /
+     carry the bags / run this to my warehouse).
+     Must load AFTER vehicles.js (CBZ.carCabinInfo, the enter/exit wrap
+     targets), aircraft_doors.js (whose beats it mirrors) and vehicle_hold.js
+     (a walk-in hold is a boardable room); BEFORE careers.js, interact.js,
+     restrain.js, playergang.js and protection.js, all of which consume it.
+     Reverts: ?cfg_COMPANION_BOARDING_V1=0 (the arcs) ·
+     ?cfg_FOLLOWER_ORDERS_V1=0 (the verbs) · ?cfg_CAR_DOOR_ARC=0 (just the
+     player's own car door beat, leaving companions boarding). -->
+<!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
+     city, banking into their turns) — pure atmosphere, deterministic, gated by
+     CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
+<!-- ORDNANCE + STRUCTURE. impactbus.js: CBZ.detonate(x,y,z,kind,opts) — new
+     ordnance is a TABLE ROW, not a file. structural.js: CBZ.structure, the ONE
+     building damage ledger (INTACT→SCARRED→WOUNDED→BURNING→CRITICAL→COLLAPSING→
+     RUBBLE). nukefx + aircraftimpact register FX/consumers by name.
+     MUST precede strategic.js, which now routes its B-2/nuke through the bus. -->
+<script src="src/systems/impactbus.js?v=nukefield2"></script>
+<script src="src/city/structural.js?v=nukefield1"></script>
+<!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
+     thrown vehicles priced through the impact bus's kinetic row. Spawns from
+     severe weather, deterministic per in-game day. The survival-mode duplicate
+     was deleted and migrated onto this file — WITHOUT THIS TAG the survival
+     tornado is a silent no-op. Only needs config.js; no other ordering. -->
+<script src="src/systems/tornado.js?v=tornado1"></script>
+<!-- weapon attachments: scopes / bigger mags / suppressor / grips — sold at the
+     gunsmith bench in the gun store; scopeview does the zoom + scope overlay -->
+<!-- missile lock-on squares + homing hand-off + the factory sniper's REAL
+     scope. After fpsmode/weapons (whose fire paths it feeds) and after
+     scopeview.js (whose gamepad fine-aim hook it wraps; a bought optic
+     always wins over the factory scope). Revert: CBZ.CONFIG.WEAPON_LOCKON /
+     CBZ.CONFIG.SNIPER_REAL_SCOPE = false. -->
+<script src="src/city/interactions.js?v=nodash1"></script>
+<!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
+     before this file — they just had nothing to sell, because no vehicle had
+     a tank. Player vehicle only (a hundred NPC cars silently running dry is a
+     traffic bug wearing a feature's clothes). CBZ.vehicleFuel(car) is the ONE
+     read for any instrument cluster. After interactions.js — it registers the
+     forecourt zone at parse time; after vehicles.js, whose throttle gate calls
+     CBZ.fuelStarved(). Revert with ?cfg_VEH_FUEL=0. -->
+<!-- ROAD RULES. Answers "what road am I on" off city.roads — the record every
+     road builder in the game already pushes — and turns it into a real posted
+     speed limit, plus the enforcement that makes the limit mean something
+     (wanted.js has carried a "speed"/Reckless Driving crime with no caller for
+     its whole life). MUST load BEFORE carcluster.js: the cluster defines its
+     own limit query only if nobody else has, so loading first is the entire
+     handover. Revert with ?cfg_ROAD_RULES=0 (?cfg_ROAD_SPEED_ENFORCE=0 keeps
+     the roundel and drops only the ticket). -->
+<!-- THE CONTROLS CARD. The owner reported "planes are not moving", then
+     corrected it: "planes do move, they just changed the control and I did not
+     know the control." FLIGHT_CONTROLS_V2 moved throttle from W/S to Space/Ctrl
+     and this game has never had a controls screen anywhere, so a better scheme
+     read as a broken aircraft. One registry, declared next to the key tests that
+     consume them; pops once per context and stays until dismissed; [?] reopens.
+     Revert with ?cfg_CONTROLS_CARD=0. -->
+<!-- AIRSIDE GROUND TRAFFIC (owner: "cars spawning randomly inside airport near
+     runway — it's dumb"). Two halves of one fix. roadrules.js now CLOSES the
+     airfield to ambient city traffic; this file gives the airfield the traffic
+     it should have had instead — pushback tugs, baggage trains, catering
+     lifts, fuel bowsers and a follow-me car working the apron and taxiways on
+     their own service loop, plus the airport's landside kerb (departures /
+     arrivals) which IS ordinary traffic and should be busy. Registers every
+     vehicle through vehicles.js's CBZ.cityRegisterVehicle, so they are
+     enterable, drivable and damageable like anything else — never scenery.
+     After roadrules.js (the access law) and island_airport.js (the apron
+     geometry it works). Revert with ?cfg_AIRSIDE_TRAFFIC=0. -->
+<!-- THE AIRLINE. Claims a parked airliner off a stand and flies it, for real:
+     doors, taxi to the holding point via a connector, backtrack, line up,
+     rotate, climb, cruise, descend on the far field's extended centreline,
+     touch down in the touchdown zone, brake, taxi in, park, turn round, fly
+     back. No new aeroplane and no new pilots — the airframe it moves is the
+     one island_airport.js parks, so its cockpit seats, its cabin, its
+     passengers, its doors and its damage model all come with it. Hijack one
+     and the flight is cancelled. Then ticketing.js sells you a seat on it:
+     [E] at any check-in counter, the flight holds its doors for you, and you
+     ride the cabin the whole way. After the fields that register themselves. -->
+<!-- HIGHWAY CHECKPOINTS. Permanent policed shoulders, as opposed to the
+     dynamic roadblock police.js already stages across your lane at 3 stars.
+     The officers run police.js's OWN posted-officer brain (c._post) and the
+     cruiser is painted by its exported CBZ.cityMarkCruiser — this file
+     authors placement, cones and a barrier, and nothing else. Its radar is
+     what roadrules.js asks when deciding whether your speeding was witnessed.
+     After police.js and vehicles.js. Revert with ?cfg_HWY_CHECKPOINTS=0. -->
+<!-- THE INSTRUMENT CLUSTER: speed, the posted limit for the area, and the fuel
+     gauge that city/fuel.js finally gave something real to read. Cars only —
+     aircraft have diegetic glass in city/cockpit*.js and a second readout
+     fighting it would be worse than none. Speed uses the repo's own documented
+     scale (vehicles.js:68 — 1 unit ~ 2.4 mph), not a guess. It defines
+     CBZ.roadSpeedLimit ONLY IF nobody else has, so when the roads domain lands
+     with real per-segment limits it wins automatically with no edit here.
+     After fuel.js (reads CBZ.vehicleFuel). Revert with ?cfg_CAR_CLUSTER=0. -->
+<!-- A ROLE IS A VERB: one data table of job-string -> verb (doctor patches you
+     up, cook feeds you, dock hand puts you on the clock, courier hands you a
+     run) plus one of streetProp-type -> verb (hydrant, meter, route board,
+     cart). Registers into interact.js's registry, so it must load AFTER it;
+     reads CBZ.cityPedJob (level.js), the cab fare (shops.js) and the bounded
+     prop rummage (interact.js), all of which are already loaded here.
+     CBZ.cityJobs (aigoals.js, below) is only ever read at RUN time.
+     Revert with ?cfg_ROLE_VERBS=0 / ?cfg_OBJECT_VERBS=0. -->
+<!-- B7 — RESOURCES: harvest nodes (needs CBZ.assets/placement/CBZ.CITY
+     already loaded, and CBZ.cityEcon's Wood/Stone/Scrap/Hatchet/Pickaxe
+     entries above). Loads right after city/combat.js, whose lightAttack/
+     heavyAttack call CBZ.resourceHarvestSwing when a swing finds no ped in
+     the cone. (systems/craft.js is DELETED — owner mandate "kill crafting";
+     its one live organ, the mode-aware item store, moved to
+     CBZ.econ.itemStore in systems/economy.js.) -->
+<!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
+<script src="src/city/swim.js?v=nodash1"></script>
+<!-- TSUNAMI. The whole event is one number — the sea-level surge in
+     world/water_spec.js — because everything that cares about water in this
+     game already reads sea level. It authors no water mesh, no flood damage
+     model and no panic AI; the shader's shoreline cut, waterfield's water
+     mask, crowd.js's flee and the predator dread bus do all of it. Fires only
+     on CBZ.cityTsunami() unless ?cfg_TSUNAMI_AUTO=1. After swim.js and
+     waterfield.js. Revert with ?cfg_TSUNAMI=0. -->
+<!-- sims-overhaul wave 1: drivable military hardware + smart team combat (self-contained, self-registering via CBZ.interactions) -->
+<!-- STRATEGIC LAYER part 2 — the B-2 (registers into the militaryvehicles
+     seam above), the bunker-buster and the nuke. Conventional blasts use the
+     wrapped explosion chain; the nuke uses impactbus's analytic field. -->
+<!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->
+<!-- THE RACING GAME: real driving opponents (one brain for oval + street) + race scorer + racing HUD -->
+<!-- custom dialogue + street talk (one contextual YES/NO decision) — after the registry -->
+<!-- 4d-3. this wave's feature modules (load after all deps they read) -->
+<!-- DIALOGUE IS TWO CHOICES — every talkable person answers with a line and
+     exactly two shown answers (BOARD/HIJACK card grammar); punch and walking
+     away are the two unshown exits. Loads after interactions/interact/
+     street_talk/interactions_rich; contracts.js + phone.js read lazily. -->
+<script src="src/city/stuntjumps.js?v=ballistic2z"></script>
+<!-- MARINA + BOATYARD: finger berths, Med-moor quay, fuel dock, travel-lift
+     well, IALA Region B buoyage, and a dealer with three demo hulls floating
+     at its own dock. Buying reuses zillow.js's cash AND financed paths (no 7th
+     buy transaction) and a bought boat is an ordinary garage record, so
+     persistence and net worth work with zero new save code. After storage.js
+     — CBZ.cityBerth wraps citySpawnOwnedCar so every existing retrieval path
+     became water-aware without a caller changing. -->
+<!-- THE APPROACH: how you get IN and OUT of a property. Every block in the
+     city was ringed by an UNBROKEN kerb and every home's retrieved car was
+     delivered at the pedestrian door on a hard-coded heading of 0 — sideways
+     across the street. This solves ONE crossing per parcel, splits world.js's
+     kerb ring around it (one author, two consumers: the gap and the driveway
+     laid through it), fills in the `lot.building.garage` field realestate.js
+     ALREADY reads, and wraps citySpawnOwnedCar so a delivered car faces down
+     the near lane. After marina.js/boatyard.js — marina wraps the same spawn
+     for boats first, and this wrapper passes every marine hull straight
+     through to it. Revert with ?cfg_LOT_APPROACH=0. -->
+<!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
+     a mackerel was harvested by SHOOTING it through the hunting pipeline).
+     Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a
+     station that lies about standing on water is refused and counted — gives
+     NPC anglers a real cast/settle/haul loop, and puts the player on the same
+     one through a single interaction option. It owns NO fish table: catches
+     are drawn from CBZ.WILDLIFE_SPECIES and paid in the SAME "Fresh Fish" /
+     "Fish Fillet" items wildlife.js's skin() already grants, so adding a
+     species to aquatic.js makes it catchable with no edit here. After
+     marina/boatyard (it registers spots on their quays) and after wildlife.
+     Revert with ?cfg_FISHING=0. -->
+<!-- YACHTS + SEA CREW. yachts.js owns the superyacht class (helideck, tender
+     garage, car deck) and the small-craft fleet; every hull goes through
+     CBZ.cityRegisterVehicle and CBZ.marineHulls so it is drivable, damageable
+     and stealable like anything else — never scenery. seacrew.js declares the
+     crew as REAL posted jobs through citystaff.js (Captain / Mate / Bosun /
+     Steward / Deckhand / Engineer), so a vessel with a bridge has somebody on
+     it. After marina/boatyard (berths), aircraft (the helideck), vehicles
+     (registration), citystaff (posts) and wildlife (the sea it sails on). -->
+<!-- Direct Prison Escape cast through Gang City's canonical painted wardrobe.
+     Loaded after clothes/outfits/armor so the adapter only assigns roles; the
+     shared garment and fit owners do every actual visual operation. -->
+<!-- WORN PELTS (PELT_WEAR): skin an animal and WEAR it — the species' own
+     harvested head as a hood + a fur mantle over the shoulders. Reuses
+     armor.js's measured fit (loads after it) and wildlife's species builds;
+     hooks skin() + the pocket Wear verb, all degrade-safe. -->
+<!-- 4d-4. GIG + CRIMINAL ECONOMY: player gig loops + own-a-company + NPC drivers -->
+<!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
+     loads after shops.js/hud so it can hook the same HUD/economy surface) -->
+<!-- THE PHOTO BOOTH: one offscreen rig that photographs any body in the
+     outfit it is ACTUALLY wearing (CBZ.cityMugshot). The hitman contract
+     card on the phone shows the mark instead of describing him. -->
+<!-- INVENTORY V2 (CBZ.CONFIG.INVENTORY_V2): the Minecraft-like city inventory —
+     renders the interactive [I] slot grid into charpanel's overlay, owns world
+     item-drop pickups + placeable storage chests, and wraps cityKillPlayer so
+     the player's guns drop on death. Needs economy/worldstate/combat/fpsmode/
+     death.js/charpanel.js, all loaded above. -->
+<script src="src/city/killfeed.js?v=survfeedtop1"></script>
+<!-- THE MORGUE (DEATH_DROPS_V2 / CORPSE_PERSIST / EMS_RESPONSE): what a death
+     leaves behind and who comes for it. Wraps cityKillPed + cityHurtCop the
+     same way killfeed.js does — so it loads AFTER killfeed, leaving the feed
+     line to be filed first — and sweeps the ten death sites that set
+     `.dead = true` directly and route through no wrap at all. It owns the ONE
+     death-drop routine (gun + armour, deferred for a body still falling), the
+     corpse-persistence law both peds.js and police.js now cull through, and
+     the EMS dispatcher that puts traffic.js's ambulance and medics.js's
+     paramedic on the same scene. Needs peds.js, police.js, traffic.js,
+     armor.js and interact.js — all above. -->
+<!-- character-origin scenes (title-screen picker payoff): needs mode.js,
+     worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
+     bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
+     already loaded above — so it goes last in the city block. -->
+<!-- The one hitman pipe + the motel room HQ (wall of marks, gear case, the
+     tiered ladder of marks) — activities' Crime doors and the campaign's
+     merged opening both route through it. -->
+<!-- Canonical story layer: the diegetic phone mounts first, then the campaign
+     director drives the rooftop arrest, prison choice and contract chain. -->
+<!-- THE PRISON WALKS TO DOORS. Owner: "Instead of flickering when walking into
+     a wall falling real physics and then finding door etc". The mover is a
+     straight line and actorcollide.js always said so ("an NPC may bump a wall
+     its target is behind"); measured, a QUARTER of every metre this cast tried
+     to walk at curfew was a body pressed into geometry. This sits between the
+     brain and the mover and answers HOW to get there — and it owns the one
+     walkability grid + A* that navigation.js's escapeRoute now delegates to. -->
+<!-- THE CITY'S SIDE OF THE SAME GRID. Measured on a calm street: 56% of every
+     metre 683 pedestrians tried to walk went into geometry, 37 of them grinding
+     for over 1.5 s at a time. The window is 320 m around the player (peds stop
+     drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
+<script src="src/systems/fullmap.js?v=nodash1"></script>
+
+<!-- cinematic death gore — shared by both games; loads before loop.js so its
+     always-updater is in the sort -->
+<script src="src/systems/gore.js?v=snowbury1"></script>
+<!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
+     Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
+     sprayed arterial red) and never for the violent, physical, player-caused
+     things — beatings, long falls, being driven into a wall. This decides WHEN
+     blood is warranted and WHICH gore the death's physics calls for; it draws
+     nothing itself. After gore.js + wounds.js (routes through CBZ.goreImpact,
+     CBZ.gore and CBZ.bodyWound), before core/loop.js so its clock makes the
+     boot sort. Consumers: grapple.js, physics.js, modes/survival.js. -->
+<script src="src/systems/trauma.js?v=trauma2"></script>
+<!-- PREDATOR GRAMMAR — the shared answer to "a thing hunts you and takes you":
+     predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
+     predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the
+     same brain. After wounds.js (routes through CBZ.bodyBite). -->
+<!-- The LAND sibling of the swim rig. Land animals had no jaw articulation and
+     no spine bend at all — a bear grabbing you moved nothing. Discovery is
+     geometric (no species table), so all 45 species animate from one change.
+     MUST follow predator.js; without this tag the whole animation lane is dead. -->
+<!-- THE APE MOVE SET. A silverback shared the wolf's `maul` row, so its entire
+     animated repertoire was a jaw opening on the strike envelope. This adds the
+     six things a knuckle-walker actually does — charge, overhead smash,
+     backhand, canine bite, chest-beat display — and the one no other file could
+     own: it PICKS A MAN UP, spins, and uses him as a club on everyone else.
+     MUST follow predator_anim.js (it drives its new hand layers) and
+     creature_combat.js (which calls into it through three guarded seams). -->
+<!-- VERLET CORPSE PHYSICS FOR ANIMALS — the sibling of city/ragdoll.js, which
+     is hard-wired to the humanoid skeleton, so every one of the 45 species used
+     to die by easing group.rotation.z to a constant ("head pointed to sky").
+     The point graph is DISCOVERED geometrically (legs/head/tail off the same
+     evidence buildGaitRig reads), so there is no species table and the 46th
+     animal ragdolls for free. Declines cleanly (snakes, fish, far kills, budget
+     full) and the caller falls back to CBZ.wildlifeDeathTumble. -->
+<!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
+     predator.js AND wildlife.js so both seams exist. -->
+<!-- THE ORCA. Re-registers id:"orca" over city/wildlife/aquatic.js's build
+     (defineSpecies is last-write-wins) so the markings that actually identify
+     the animal exist: the white post-ocular eye patch, the grey saddle, the
+     flank flare, the white chin and fluke undersides, a blowhole that VENTS,
+     and a dorsal fin that is a bull's tower or a cow's falcate blade depending
+     on the individual. Adds pod TRAVEL (formation, matriarch, calf in the
+     slipstream), the surface acts no shark can do (blow, spy-hop, breach,
+     tail-lob, porpoising), the grab-and-drag, and a black-and-white surface
+     proxy. AFTER wildlife_shark.js: it borrows that file's ONE water mover and
+     capture-and-wraps CBZ.sharkBrain, and marine_predation.js wraps it in turn
+     one tag later — so the chain is marine -> orca -> shark. The megalodon
+     takedown is CONSUMED from marine_predation, not re-implemented.
+     Reverts whole with CBZ.CONFIG.ORCA_V1 / ORCA_POD / ORCA_SURFACE /
+     ORCA_ACTS / ORCA_DRAG / ORCA_HUNT. -->
+<!-- THE SEA EATS ITSELF: the marine predation graph (who preys on whom, who
+     MOBS whom), the orca pod's bearings/ram/roll-over finisher, a big shark
+     taking a small boat, and the chum producers that had never existed — a
+     wounded or dead thing in the water finally bleeds and finally draws
+     something. AFTER wildlife_shark.js because it capture-and-wraps
+     CBZ.sharkBrain (a marine hunt gets first refusal on an actor and anything
+     it declines falls through to the shark's own player hunt), and after
+     predator.js + creature_combat.js whose drivers it ticks rather than
+     duplicating. Reverts whole with CBZ.CONFIG.MARINE_PREDATION = false. -->
+<!-- WHAT A KILL LOOKS LIKE FROM A MILE AWAY: the bait ball that tightens, is
+     driven up against the surface and collapses as it is eaten; the gulls
+     working it (the only part of a marine kill visible ABOVE the water, and
+     therefore the long-range read that makes you turn the boat); the surface
+     boil; and a carcass drawing a crowd of scavengers — ticked by the same
+     CBZ.predatorHunt as every other hunter, never a private loop. AFTER
+     marine_predation.js, whose chum producer and damage bus it spends.
+     Reverts whole with CBZ.CONFIG.MARINE_FRENZY = false. -->
+<!-- CHILDREN ARE NOT TARGETS. Wraps the shared damage/kill/KO/crowd-kill/gore/
+     lock-on/predator buses and seals child hp against the ~32 raw `.hp -=`
+     sites that bypass every bus. Hooks are lazily retried for 10s, so exact
+     position is forgiving — but it is placed AFTER predator.js and wounds.js
+     so every hook lands on the first attempt. WITHOUT THIS TAG CHILDREN ARE
+     NOT PROTECTED: every gun, blast, car, dog and shark treats them as adults. -->
+
+<!-- multiplayer (host-your-own RP servers) — inert when offline/solo; loads
+     after the whole city block so every CBZ hook it wraps already exists -->
+
+<!-- W-wave: women & families -->
+<!-- kinship.js — the BODY for the family/friends arithmetic: bonded walkers,
+     greetings, grief, homecoming. Loads after familypanel (reads the whole
+     family cluster lazily; only hard dep is entities/poses.js far above). -->
+<!-- tells.js — body-language tells: maps already-tracked ped scalars (fear,
+     grudge, bond, wealth, aggr) onto CBZ.charPoses rows so internal state is
+     legible as posture. Loads after kinship (reuses kinWave; yields to kin
+     beats); only hard dep is entities/poses.js far above. -->
+
+<!-- B8: single-player persistence bridge for player building's piece
+     geometry (localStorage ledger, arena-gated deferred apply) — see that
+     file's header for why this rides as its own bridge instead of another
+     _xWrap inside systems/building.js itself. Loads after net/netpersist.js
+     (needs CBZ.cityWorldCommit/Collect, already wrapped by then) and after
+     city/familytree.js/systems/baseclaim.js (same save-wrap install-tick
+     family, slotted right beside their 45.92/45.93 ticks). -->
+
+<!-- E-wave: living economy -->
+<!-- M1: multi-currency wallet + registry — loads FIRST in the sim wave, on
+     purpose: market.js/econstate.js consume nothing from it yet (day one is
+     unchanged), but M2's forex.js/M3's centralbank.js wire into the registry
+     this ships, so it needs to exist before every other sim/* money module. -->
+<!-- M2: forex.js — rates over the 5 currencies M1 registered (PPP+carry+
+     confidence+momentum) + airport FX counter/exchange desk. Loads
+     immediately after currency.js (needs CBZ.currency.walletGet/Add/Take),
+     BEFORE city/countries.js/polity.js/polwar.js/civilwar.js/migration.js —
+     fine, every cross-module read it does is guarded and resolved at CALL
+     time (its own onNewDay tick), not at parse time. See that file's header. -->
+<!-- M3: centralbank.js — governor NPCs, the policy rate feeding bank.js's
+     RATES (a compatibility-accessor design so day one is byte-identical —
+     see that file's own header) + the reserve-requirement credit cap.
+     Loads immediately after forex.js (same v=cur1 bucket, per BUILD-PLAN's
+     own instruction) — forex.js's own carryTerm seam
+     (CBZ.centralbank && CBZ.centralbank.rate(id)) picks this up with ZERO
+     forex.js edits the moment this file exists. -->
+<!-- M4: inflation.js — the π equation (monetary/demand/war-deficit/import
+     pass-through/credibility terms) + the compounding price LEVEL every
+     price reads (sim/econstate.js's priceIndex, sim/market.js's itemPrice,
+     systems/hunger.js's mealCost) + the sim/centralbank.js `_inflationTerm`
+     seam (assigned at this file's own parse time — centralbank.js is
+     already loaded, immediately above). Loads immediately after
+     centralbank.js (same v=cur1 bucket, per BUILD-PLAN's own instruction),
+     BEFORE sim/market.js/sim/econstate.js/sim/npcecon.js and every P-wave
+     file — fine, every cross-module read here is guarded and resolved at
+     CALL time (its own onNewDay tick), not at parse time. See that file's
+     header. -->
+<!-- M5: bonds.js — deficit -> bond auctions (billionaires/companies/player)
+     -> unsold remainder printed, feeding sim/inflation.js's own new
+     printing term. Loads immediately after inflation.js (same v=cur1
+     bucket, per BUILD-PLAN's own instruction) — BEFORE sim/corporations.js/
+     sim/stocks.js/sim/billionaires.js; fine, every cross-module read here
+     (CBZ.billionaires.founders, CBZ.corps.list/debitCash/creditRevenue,
+     CBZ.centralbank, CBZ.inflation, CBZ.forex.shock, CBZ.approvalShock,
+     CBZ.city.spend/addCash) is guarded and resolved at CALL time (its own
+     onNewDay tick / the player's buy()), long after every script on the
+     page has loaded. See that file's own header. -->
+<!-- M6: hyperinflation.js — stages (CREEPING/WARNING/GALLOPING/HYPER, off
+     M4's own pi + M5's own distress) + redenomination/dollarization endings
+     + Soros runs + counterfeiting. Loads immediately after bonds.js (same
+     v=cur1 bucket, per BUILD-PLAN's own instruction) — BEFORE sim/market.js/
+     sim/econstate.js/sim/npcecon.js/sim/corporations.js/sim/billionaires.js
+     and every P/X-wave file (city/polity.js included); fine, every
+     cross-module read here is guarded and resolved at CALL time (its own
+     onNewDay tick / a directly-invoked public function). See that file's
+     own header. -->
+<!-- TAKE. OWNER (2026-07-29): "i hate ransoms and robberies with dumb
+     hardcoded limit — imagine what a dumb thing that is to reality." A take is
+     a TRANSFER: what you get is what the target actually HAS, it comes OUT of
+     a balance the simulation already keeps, and that balance is poorer
+     afterwards. Loads AFTER npcecon/billionaires (the cohort wallets and the
+     real net worth it reads) and after economy/companies/wealth. Every
+     consumer calls it degrade-safely, so load order can only ever cost the
+     old inline number, never a throw. -->
+<!-- INSURANCE. OWNER: "if you made businesses real, in real life businesses
+     don't go away" — a building the player blows up is a CLAIM, not a hole. A
+     real trade with a real ladder, a real office whose desks are occupied by
+     people who commute to them, and a payer of last resort behind the take
+     ledger. Loads after take.js (it is the counterparty to a loss), after
+     citystaff/roleverbs (its desks are posts and its rungs are verbs) and
+     after structural/demolition (the losses it underwrites). -->
+
+<!-- P-wave: politics -->
+<!-- P5: the ONE protector system (secret service / hired security / gangs'
+     read-only adapter) — loaded before officials.js, which consumes it for
+     every office's guard lifecycle (officials.js's calls are runtime-lazy so
+     load order is soft either way, but this keeps "the record before its
+     first consumer" honest). -->
+
+<!-- X-wave: the world -->
+<!-- X5: the village hut/shack/well/market-stall kit (CBZ.assets.define +
+     CBZ.CITY_TEMPLATES.village). Must load before countries.js CONSUMES it
+     via buildTown/CBZ.cityTemplate — countries.js builds lazily through
+     CBZ.addLandmass so load order isn't strictly load-bearing today, but
+     this keeps the "assets define before buildTown reads them" contract
+     honest for any future eager caller. -->
+<!-- REAL CASINOS — order-90 dress pass over every casino lot (mainland Golden
+     Ace + composed town casinos): marquee/mast exterior, felt tables with
+     seats + an "[E] Sit at the table" that opens the casino floor. Loads after
+     countries.js and its deps (interactions.js, activities.js, worldmap). -->
+<!-- THE RIVER: the marina's way to the sea. The harbour pass in continent.js
+     opens a 67 m bay ring around the city rect and closes it on all four
+     sides, so every boat in the game floated in a moat — a flood fill from a
+     berth reached 314 m and stopped, with the nearest real coast 7 km away.
+     This routes ONE channel from the ring to open water, avoiding POIs and
+     bridging the roads it must cross, and registers it as a single polyline
+     water body so continent.js's own shore field carves it — same water as
+     the ocean, no second oracle. MUST load and run (order 96.5) BEFORE
+     continent.js at 97, which snapshots city.waterBodies once.
+     Revert with ?cfg_CITY_RIVER=0. -->
+<!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
+     ocean between POIs with walkable backcountry — one world, not circles. -->
+<!-- X6: the affinity matrix (country/state/city relations) — after
+     countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already
+     loaded in the earlier P-wave) since it reads/subscribes to both. -->
+<!-- P6: the regime state machine (govType transitions + first effects —
+     fascist curfew, communist price controls, anarchist collapse). Loads
+     LAST in the P/X-wave block: it reads CBZ.relations.warPressure +
+     CBZ.hunger.miseryIndex (both above) on top of polity/approval/elections
+     (also above), so every dependency is already live by the time it parses. -->
+<!-- P6b: the crown as a bloodline (monarchy succession/legitimacy/royal
+     marriages) — regimes.js's own tickCountry() deliberately never enters
+     monarchy; this file owns that regime entirely. Loads LAST in the P/X-
+     wave block, right after regimes.js, since it reuses CBZ.regimes.transition
+     for its two cross-regime triggers (dictator self-coronation, anarchist
+     restoration) and needs CBZ.officials/CBZ.relations/CBZ.demographics/
+     CBZ.cityFamilyTree, all already live above. -->
+<!-- P7: militia — protection details past a headcount threshold escalate
+     into real CBZ.cityGangs factions (gang machinery reused, not forked),
+     with regime reactions (democracy watches, fascism/dictatorship cracks
+     down or absorbs a loyalist, communism nationalizes, anarchism lets them
+     thrive). Loads LAST in the P/X-wave block: it reads CBZ.protection's own
+     details(), CBZ.cityGangs/cityGangById, CBZ.polity/regimes' govType, and
+     CBZ.cityLedgerEntry/cityPoliceForceAdd — every one of those already live
+     above. -->
+<!-- JOB GIVERS. The rule is binding: the generator picks the VERB, the WORLD
+     supplies the specifics — never spawn a target for a contract, bind to the
+     officeholder/lot/vehicle the simulation was already running. Loads last of
+     this family: needs factions, mission, polity, officials, militaryvehicles,
+     interactions and militia all present. -->
+<!-- P8: state/country wars — generalizes the gang-war machinery (declare/
+     upkeep/decay, treasury-funded raids) to whole polities: counted
+     matériel (soldiers/planes/missiles) per country, fronts at causeway
+     chokepoints (falling back to the capital midpoint where no causeway
+     connects the two sides — see that file's own header), procurement
+     contracts routing real treasury dollars into KAI/VLT/Granite revenue
+     (defense stocks inflate honestly through earnings, not a fake pump),
+     conscription (cohort employment down), and the losing-authoritarian
+     desperate-measures ladder (nationalization, child-soldier war crimes).
+     Loads LAST in the P/X-wave block, right after militia.js: it reads
+     CBZ.polity/CBZ.relations/CBZ.regimes(govType only)/CBZ.hunger/
+     CBZ.econState/CBZ.npcEcon/CBZ.corps/CBZ.COUNTRIES, every one of those
+     already live above. declareWar()/endWar()/warsOf()/frontsOf() are a
+     kind-agnostic public API — X6b's civil war (a country splitting into
+     two warring polity records) builds directly on this machinery. -->
+<!-- P9: migration — policy per country (president legislates over
+     LEGISLATE_DAYS days + an approval cost if unpopular; every other govType
+     decrees instantly), daily individual-migration-evaluation propensity
+     (misery gap, wage gap, war, relations affinity, demographic kinship)
+     gated by emigration/immigration policy, brain drain (skilled flight
+     hits the origin's economy ×1.5 vs unskilled — the doom loop), refugee
+     waves (war/famine routed to the friendliest open neighbor, straining
+     relations on arrival), the border-escape gig, and the X4 demographics
+     mix seam (sustained immigration nudges a country's population mix
+     toward polyglot, gradually, capped/day). Loads LAST in the P-wave
+     block, right after polwar.js: it reads CBZ.polity/CBZ.relations/
+     CBZ.hunger/CBZ.econState/CBZ.npcEcon/CBZ.demographics/CBZ.polwar
+     (activeWarFor)/CBZ.COUNTRIES/CBZ.cityPopulation*/CBZ.cityMakePed,
+     every one of those already live above. -->
+<!-- X6b: civil war — a cohort misery index (hunger + real wages + approval)
+     past threshold in 2+ districts, sustained days, with low approval ->
+     armed uprising; a seeded coup roll for authoritarian countries in
+     crisis (full success/full failure/partial); the partial-coup and
+     misery roads both fracture the polity into two warring polity records
+     via THIS SAME fracture() — a rebel country record, a real transitioned
+     leader, counted matériel defecting proportional to collapse — then
+     fight it out through P8's own war machinery (declareWar/fronts/
+     casualties/conscription/procurement, all already generic). Endings:
+     reconquest (fragment dissolves, districts return), partition (the map
+     PERMANENTLY gains a country), or warlordism (parent -> anarchism,
+     regimes.js's own strongman race takes it from there; strongest gangs
+     absorb the fragment's people/treasury). Loads LAST in the P/X-wave
+     block, right after migration.js: it reads CBZ.polity/CBZ.relations/
+     CBZ.regimes/CBZ.polwar/CBZ.hunger/CBZ.npcEcon/CBZ.migration/
+     CBZ.cityGangs/CBZ.cityEcon/CBZ.officials-family mint hooks/
+     CBZ.onOfficialDeath, every one already live above. -->
+<!-- GOVERNMENT YOU CAN PLAY. Placed here because this is the latest anchor any
+     of the four names: officialdom reads officials.js's ledger (:970),
+     candidacy requires elections.js (:972), civic hooks shops.js's keydown
+     (:730), and statecraft reads militia.js (:1019), polwar.js (:1041) and
+     civilwar.js (above). Order within the group is dependency order:
+     officialdom (the office/seat queries) → candidacy (running for it) →
+     civic (what the buildings DO) → statecraft (what you do once you hold it,
+     including a curfew that enforces your own law on your own body). -->
+
+<!-- THE PROTECTION LAYER (owner: "a mob boss and soldiers protecting, or gov
+     and police protecting — see how NPCs interact based on roles and levels
+     and hierarchy"). ONE declaration turns any actor into a PRINCIPAL: a
+     ring of guards whose loyalty, weapons and tolerance come from WHO he is,
+     a floor-by-floor escort ladder inside his own tower, and a reaction rule
+     that reads the gap between YOUR standing and his — walk up to a nobody
+     and he talks to you; walk up to a cartel head and his detail steps in
+     first. Reads factions.js for allegiance and aim_dossier/actorDossier for
+     the level+role the pill already shows. After officials.js/officialdom.js
+     (it binds real officeholders) and police.js (state principals inherit the
+     posted-officer brain). Revert with ?cfg_POWER_PROTECTION=0. -->
+<!-- GARRISON. A stationed job is a job that requires you to BE SOMEWHERE.
+     Fourth consumer of police.js's `_post` standing brain (roadblock,
+     checkpoints, power details were the first three) — soldiers, sentries and
+     every other posted trade hold a slot instead of wandering off it, and can
+     still bolt or put hands up through cityScare. After police, militia,
+     checkpoints, citystaff and power: it posts bodies those files already
+     cast. -->
+<!-- FORT RESPONSE. A base that answers for itself: one alert bus rung from the
+     two names every loud thing in the game already goes through (cityAlarm,
+     cityCrime — installed as wraps, so no call site is edited), a section that
+     CONVERGES on the noise through peds.js's own steering fields and fights
+     through squadai/combat_iq, and the STAND-TO posture that replaced the
+     1.3 km beeline island_military.js used to order at 5 stars. Loads after
+     island_military (the base publishes its own bounds), garrison (posts own
+     their bodies and this file yields to them), squadai and peds. -->
+<!-- PIRACY. Armed skiffs take a vessel, and the crew aboard it are the same
+     posted people seacrew.js declared — a hostage is a real actor with a
+     family, a ransom is real money, and the buyer of that money is a gang, a
+     cartel, an insurer or the victim's own relatives. Loads LAST of the sea
+     family: it needs marine hulls, berths, yachts, sea crew, factions, gangs,
+     captives, mission, power details and garrison all present above. -->
+
+<!-- THE CAPTAIN — the boat-captain career spine: the spawn-at-the-helm origin
+     (origins.js's `voyage` verb defers into it), crew orders on real bodies
+     (cast lines / take the helm / arm up, on seacrew's shipco ladder), the
+     chart-table voyage board (charters, cargo through a vehicle_hold room,
+     fishing trips, salvage, the black book), and the locked prize hull on the
+     marina hard stand. Loads after piracy.js (marineAutopilot, pirateProvoke)
+     and before water_helm; every cross-read is feature-detected.
+     Revert with ?cfg_CAPTAIN_V1=0. -->
+
+<!-- SEATS OF POWER — the standalone complexes that do NOT fit inside a city
+     block: the capitol, the executive mansion, the agency headquarters, the
+     five-sided defence HQ, and the private estates (the mob compound, the
+     cartel finca, the tech billionaire's cliff house). Each owns its OWN land
+     plot outside the urban grid, registers its own region + keep-out, and
+     staffs itself through power.js's protection layer rather than authoring
+     guards. After power.js and the biome/continent builders whose empty land
+     it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
+
+<!-- THE PRESIDENCY — one spine over organs built above: the President origin
+     (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's
+     Executive Mansion (a locked door + a console of real orders), the
+     Saltlands terror cell (factions/occupy/aigoals), Bureau raids (real
+     agents at real cell members), the border wall order (construction.js's
+     CBZ.stateWall) and the falls (regimes' dictatorship, crown's coronation,
+     jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
+     other read is feature-detected and lazily retried.
+     Revert with ?cfg_PRESIDENCY_V1=0. -->
+
+<!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
+     your own place can store the cash, not just rob"). Turns govcomplex's
+     `freeport` plot into a property you buy (in DUFFELS, at the gate) and
+     whose racks physically hold the money you carried in: one visible bag per
+     deposit, persisted, declared as a real till balance, and the place the
+     crew finally take their cut from a physical bank job. AFTER govcomplex.js
+     (it reads that file's published site record), storage.js (the property
+     ledger it writes through) and inventory.js (CBZ.cashBags). Revert with
+     ?cfg_CASH_STORE_V1=0. -->
+
+<!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
+     feature-detected/lazy — this tag itself is tiny (no wasm, no Worker
+     spin-up at parse time); CBZ.sqlitedb.js kicks off its OWN async init
+     on parse and only THEN, if a backend is available, dynamically loads
+     src/vendor/sqlite-wasm/ (via `new Worker(...)` or an injected
+     <script> tag — never a blocking tag here) and src/workers/
+     sqlitedb-worker.js. Loads after city/worldstate.js (city/*.js's own
+     wave, well above) since that file's save()/load() check
+     CBZ.sqlitedb at CALL time, not parse time — load order doesn't
+     matter, but this is the natural home: same "net wave, after
+     everything it might touch already exists" placement as net/
+     netpersist.js above. Absent/failed sqlite-wasm changes nothing —
+     day one (localStorage-only) behavior is untouched. -->
+
+<!-- 4b. game packages: engine registry first, then each packaged venue game
+     (after every city system they facade: interactions, worldmap, economy) -->
+<script src="src/core/packages.js?v=pkg8"></script>
+<!-- games/warband.js DELETED 2026-07-29. OWNER: "the whole war band code — it
+     was a dumb idea, but it's really what this whole game's point is: get
+     enough people recruited, or get enough money, or enough guns, or somehow
+     get key cards and access and everything, to get to the nuke." So its two
+     good rules were promoted OUT of the minigame and into the world, where you
+     already have people and enemies: the outnumbered-remnant SURRENDER and the
+     recruit-or-ransom PRISONER are now CBZ.citySurrenderSweep and
+     CBZ.cityTakePrisoner in city/loyalty.js, usable in any fight anywhere. The
+     desert camp, the two standards, the prisoner rail and the three-banner
+     scoreboard existed only to host those two rules and are gone with it. -->
+
+<!-- 5. quality + loop + boot -->
+<script src="src/core/quality.js?v=scale8"></script>
+
+<!-- REAL BOATS. Four hulls with real numbers replace one mesh wearing three
+     name aliases: a 4.5m RIB, the 6.2m runabout (mesh untouched — zero art
+     regression), a 14m sport cruiser, and a 34m superyacht at 16kn that
+     physically cannot reach its own drag hump. Displacement → hump → planing
+     is a felt transition; outboards will not steer without way on; yaw torque
+     is applied at the STERN so the bow sweeps wide; inertia scales L²·mass
+     with a yaw-ACCELERATION cap, which is what makes the yacht take seconds
+     to answer the helm rather than merely being slow. Both before core/loop.js
+     — it sorts CBZ.updaters once at parse time. -->
+
+<!-- WATER V2 runtime: submerged-camera state, boat buoyancy off the live wave
+     field, splash/wake FX. After core/quality.js so CBZ.onQualityChange exists
+     at parse time; before core/loop.js so their updaters make the boot sort.
+     No dependency on each other — any order among these three works. -->
+<script src="src/world/water_buoyancy.js?v=waterv2"></script>
+<!-- The float block (CBZ.waterFloat / waterSubmergenceAt / waterRideAt — cars
+     sink and wallow, corpses float face-down) and the impact bus
+     (CBZ.waterHit — one call made ~58 existing bullet/explosion sites
+     water-aware by wrapping, with zero edits to their files). -->
+<!-- ONE WATER ORACLE, BOTH WORLDS. Wraps CBZ.cityWaterAt / citySeaHeightAt /
+     citySeaBedDepthAt / citySeaBedYAt so they answer with the survival island's
+     numbers in survival mode, and publishes CBZ.waterModeOn() — the predicate
+     the four modules above now gate on instead of `g.mode === "city"`. Must
+     load AFTER city/waterfield.js (publishes the first two) and city/swim.js
+     (publishes the bathymetry pair); it retries on the update bus if either is
+     still missing, so a future reorder degrades to a late install rather than a
+     silent no-op. Revert with ?cfg_SURV_SHARED_WATER_FX=0. -->
+
+<!-- WORLD DRESSING (5 layers) — the "lived-in" pass: street furniture, power
+     poles + catenary-sagging wires, road wear/paint/puddles, and rooftop and
+     facade clutter glued onto the buildings that already exist.
+     ORDER IS LOAD-BEARING:
+       - AFTER core/quality.js: detail_kit registers CBZ.onQualityChange at
+         parse time to drive its density tiers.
+       - AFTER city/props.js: detail_kit WRAPS CBZ.cityProps so it runs at the
+         end of buildCity and can avoid every prop props.js already placed.
+       - detail_kit.js FIRST; the other four only register passes into it.
+       - street_furniture.js before building_dress.js — it owns the shared sign
+         atlas texture the house-number plates reuse. -->
+<script src="src/core/farcull.js?v=fc2z"></script>
+<script src="src/core/staticfreeze.js?v=sf1"></script>
+<script src="src/systems/settings.js?v=nodash1"></script>
+<script src="src/core/batch.js"></script>
+<!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
+     exposure, contact AO. MUST load after core/quality.js (reads
+     CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder
+     and registers its own window-load handler SECOND, so the static merge has
+     finished before it promotes materials. -->
+<script src="src/core/gfx.js?v=gfx1"></script>
+<script src="src/core/loop.js?v=scale1"></script>
+<script src="src/main.js"></script>
+</body>
+</html>

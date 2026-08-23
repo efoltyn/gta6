@@ -57,3 +57,12 @@ mild envelope flattening), encoded to mono AAC 96 kbps.
 | `car/screech.m4a` | "Screeching Tires #1" (#2368, `2368.mp3`) | 1.1s sustained tire-squeal loop from the skid body, envelope-flattened, 0.28s crossfade | CC0 1.0 |
 | `car/skid_stop.m4a` | "Screeching Tires #3" (#2370, `2370.mp3`) | full 2.1s skid-to-stop one-shot (natural decay) | CC0 1.0 |
 | `car/horn.m4a` | "Recent car horn #1" (#0257, `0257.mp3`) | single 0.55s honk | CC0 1.0 |
+
+## UI typeface (`assets/fonts/`) — 2026-08-21, bundled for offline / App Store
+
+| File | Source | Notes | License |
+|------|--------|-------|---------|
+| `fonts/fredoka-latin-var.woff2` | Google Fonts, Fredoka v17 latin subset (variable, wght 300–700) | replaces the render-blocking `fonts.googleapis.com` stylesheet index.html used to load; see `css/fonts.css` | SIL Open Font License 1.1 |
+
+Fredoka is by Milena Brandão and Hafontia. The OFL permits bundling the font
+inside an application and redistributing it with the software.
