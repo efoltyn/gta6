@@ -1451,67 +1451,11 @@
     },
 
     // ---- METEOR SHOWER: telegraphed impacts, big blast ----
-    meteor: {
-      name: "METEOR SHOWER", emoji: "", warnSecs: 5, activeSecs: 17, gap: 6, cause: "flattened by a meteor", tint: 0x4a3a3a,
-      // STREAKS CROSS THE SKY FIRST. Bolides burn up high and harmlessly for a
-      // few seconds before anything reaches the ground — which is exactly the
-      // real sequence, and it makes the player look UP, which is where the
-      // warning for the rest of the event will be.
-      warn(ctx) {
-        narrate("hint", "METEORS, watch the shadows!", 2.6); sound("rumble");
-        ctx.st.streaks = []; ctx.st.streakCd = 0.15;
-      },
-      warnTick(dt, ctx) {
-        ctx.st.streakCd -= dt;
-        if (ctx.st.streakCd <= 0) {
-          ctx.st.streakCd = 0.18 + rnd() * 0.4;
-          skyStreak(ctx);
-          if (rnd() < 0.35) soundAt("rumble", camPos().x, camPos().z, { volume: 0.4 });
-        }
-        tickStreaks(dt, ctx);
-      },
-      warnThreat() { return 0.12; },   // nowhere is safe; keep the crowd moving
-      start(ctx) { ctx.st.pending = []; ctx.st.cd = 0.5; ctx.env.sunInt = 0.7; ctx.st.timers = []; },
-      active(dt, ctx) {
-        ctx.env.fog = 0x4a3a3a; ctx.env.fogNear = 40; ctx.env.fogFar = 240; ctx.env.hemiColor = 0xffb0a0;
-        tickStreaks(dt, ctx);
-        ctx.st.cd -= dt;
-        if (ctx.st.cd <= 0) {
-          ctx.st.cd = (0.8 - 0.4 * ctx.prog) * (0.6 + rnd());
-          const p = ctx.arena.randomPoint(0, ctx.R);
-          const r = 5 + scale(2, ctx);
-          // the incoming rock is VISIBLE all the way down, not a shadow that
-          // appears on the floor — the marker is the shadow it casts
-          skyStreak(ctx, p.x, p.z);
-          ctx.st.pending.push({ x: p.x, z: p.z, r, t: 1.2, m: CBZ.fx.groundMarker(p.x, p.z, r, 0xff5030) });
-        }
-        for (let i = ctx.st.pending.length - 1; i >= 0; i--) {
-          const p = ctx.st.pending[i]; p.t -= dt; p.m.set(1 - p.t / 1.2);
-          if (p.t <= 0) {
-            p.m.dispose();
-            CBZ.fx.dropDebris({ x: p.x, z: p.z, fromY: 40, vy: -22, size: 2.4, color: 0x3a2018, dmg: 0, linger: 4, keep: true, onLand: (x, z) => {
-              // THE BLAST BUS OWNS THE IMPACT. `meteor` is a real ordnance row
-              // (systems/impactbus.js) and it is PURE KINETICS — refE 1.2e8 J,
-              // a 6 t stone at 200 m/s — so passing this rock's mass and speed
-              // makes a late-round meteor genuinely bigger instead of the same
-              // constant fireball with a different number typed beside it.
-              survBlast("meteor", x, z, {
-                r: p.r, cause: "flattened by a meteor", ctx: ctx,
-                mass: 4000 + 4000 * ctx.intensity, speed: 190 + 60 * ctx.intensity,
-                struct: 0.55 + 0.35 * ctx.intensity, structR: p.r * 2.4,
-                fling: 7, knockback: 14, color: 0xffcaa0,
-              });
-              const cr = disc(x, z, 0x201810, 0.9, 0.05); cr.userData.transient = true;
-            } });
-            ctx.st.pending.splice(i, 1);
-          }
-        }
-        tick0(ctx, dt);
-      },
-      end(ctx) { (ctx.st.pending || []).forEach((p) => p.m.dispose()); clearStreaks(ctx); },
-      threat(x, z, ctx) { let t = 0; (ctx.st.pending || []).forEach((p) => { const d = Math.hypot(x - p.x, z - p.z); if (d < p.r + 3) t = Math.max(t, 1 - d / (p.r + 3)); }); return t; },
-      safeDir(x, z, ctx) { let bx = 0, bz = 0; (ctx.st.pending || []).forEach((p) => { const dx = x - p.x, dz = z - p.z, d = Math.hypot(dx, dz); if (d < p.r + 4 && d > 0.1) { bx += dx / d; bz += dz / d; } }); return (bx || bz) ? { x: bx, z: bz } : null; },
-    },
+    // ---- METEOR SHOWER: rebuilt around systems/meteor.js (CBZ.meteor).
+    //      The def is METEOR_DEF(), in its own block further down ("THE
+    //      METEOR SHOWER") beside the sky-streak helpers it owns. METEOR_V2
+    //      off — or meteor.js absent — plays the legacy shower verbatim. ----
+    meteor: METEOR_DEF(),
 
     /* ---- SINKHOLES: THE GROUND OPENS AND YOU GO DOWN IT ---------------------
        It began as a flat BLACK DISC painted on the grass that instakilled
@@ -4471,6 +4415,210 @@
     (ctx.st.holes || []).length = 0;
   }
 
+  /* ============================================================
+     THE METEOR SHOWER (METEOR_V2 wave). OWNER'S BRIEF: judge it against
+     what a meteor event really is.
+
+     The legacy shower (kept verbatim below as the flag-off path) was streaks
+     on random headings, a brown box teleport-dropping from y=40, an instant
+     bang and a painted decal. The rebuilt event delegates the SKY to
+     systems/meteor.js — one RADIANT all rocks share, visible bolides with
+     smoke trains, AIRBURSTS carrying most of the energy, the flash arriving
+     seconds before the bang (the pressure front expands at the same dramatic
+     sound speed the audio is scheduled at, so the ring you watch sweep the
+     island IS the noise), real craters through CBZ.groundCrater and
+     incandescent ejecta on ballistic arcs.
+
+     THIS FILE STILL OWNS THE GAME: which points get hit comes from the
+     seeded stream, an impact is priced by survBlast's kinetic `meteor` row
+     exactly as before, and the airburst's annulus damage runs on the mode's
+     own actor roster via the damage callbacks handed to CBZ.meteor.begin().
+     Ground strikes keep their marker telegraph (the bolide's shadow) so
+     threat()/safeDir() still answer honestly; an airburst is not dodgeable,
+     which is the point of an airburst — it wounds and knocks down rather
+     than instakills.
+
+     Degrade-safe: CBZ.meteor absent or METEOR_V2=false → the legacy shower,
+     line for line. Ratchet: CBZ.meteorAudit() (+ the meteor fields in
+     CBZ.disasterAudit()).
+     ============================================================ */
+  function METEOR_DEF() {
+    const v2 = () => CBZ.meteor && CBZ.CONFIG.METEOR_V2 !== false;
+    let mCtx = null;   // the live ctx, refreshed every tick, for the callbacks
+
+    function beginV2(ctx) {
+      mCtx = ctx;
+      CBZ.meteor.begin({
+        root: root(), floor, rnd,
+        cx: ctx.cx, cz: ctx.cz, R: ctx.R, intensity: ctx.intensity,
+        damage: {
+          // A GROUND STRIKE: the same kinetic pricing the old shower had —
+          // the bus draws the fireball (quiet: the bang is scheduled late by
+          // meteor.js), the mode prices its own roster and ledger.
+          impact(x, z, spec) {
+            const c = mCtx; if (!c) return;
+            survBlast("meteor", x, z, {
+              r: spec.r || 6, cause: "flattened by a meteor", ctx: c, quiet: true,
+              mass: 4000 + 4000 * c.intensity, speed: 190 + 60 * c.intensity,
+              struct: 0.55 + 0.35 * c.intensity, structR: (spec.r || 6) * 2.4,
+              fling: 7, knockback: 14, color: 0xffcaa0,
+            });
+          },
+          // THE PRESSURE FRONT: an annulus sweeping outward at the speed of
+          // sound. Chelyabinsk's model — it knocks you down and cuts you
+          // with the glass, it does not vaporise you.
+          front(x, z, r0, r1, k) {
+            const c = mCtx; if (!c || !surv().forEachActor) return;
+            surv().forEachActor((a) => {
+              const dx = a.pos.x - x, dz = a.pos.z - z, d = Math.hypot(dx, dz);
+              if (d < r0 || d >= r1) return;
+              if (CBZ.body) CBZ.body.hit(a, { fromX: x, fromZ: z, force: 5 + 13 * k, fling: k > 0.45 ? 2.5 + 4 * k : 0 });
+              if (k > 0.18) surv().hurt(a, 6 + 30 * k, { fromX: x, fromZ: z, cause: "caught in the meteor airburst" });
+            });
+            if (k > 0.25) structureSweepRing(c, x, z, r0, r1, 0.06 * k);
+          },
+        },
+      });
+    }
+    // a low bolide is BRIGHTER THAN THE SUN: feed meteor.js's light into the
+    // scene so the flash visibly lights the island before it makes a sound
+    function lightV2(ctx) {
+      const b = CBZ.meteor.lightBoost();
+      if (b > 0.01) {
+        ctx.env.sunInt = Math.min(1.7, ctx.env.sunInt + b * 1.3);
+        ctx.env.hemiInt = Math.min(1.6, ctx.env.hemiInt + b * 0.9);
+      }
+    }
+    function activeV2(dt, ctx) {
+      mCtx = ctx;
+      // a thin haze, not the legacy 240 m soup: the flashes need a sky to light
+      ctx.env.fog = 0x4a3a3a; ctx.env.fogNear = 70; ctx.env.fogFar = 480; ctx.env.hemiColor = 0xffb0a0;
+      CBZ.meteor.tick(dt);
+      lightV2(ctx);
+      ctx.st.clock = (ctx.st.clock || 0) + dt;
+      /* THE CHELYABINSK MOMENT, once per event on a fixed beat (so every
+         seed and both storyboard sides stage the same second): one huge
+         bolide crossing low, terminating in a high airburst whose flash
+         whites the island — and then NOTHING, for the seconds the bang
+         takes to crawl down, before the front knocks the crowd flat. */
+      if (!ctx.st.big && ctx.st.clock >= 5) {
+        ctx.st.big = true;
+        const a = rnd() * 6.28, d0 = ctx.R * (0.2 + 0.35 * rnd());
+        CBZ.meteor.strike({
+          x: ctx.cx + Math.cos(a) * d0, z: ctx.cz + Math.sin(a) * d0,
+          air: true, alt: 95 + 40 * rnd(), size: 2.6, eta: 3.2, big: true,
+        });
+      }
+      ctx.st.cd -= dt;
+      if (ctx.st.cd <= 0) {
+        ctx.st.cd = (1.25 - 0.5 * ctx.prog) * (0.6 + rnd());
+        const r = 5 + scale(2, ctx);
+        // MOST OF A METEOR EVENT NEVER TOUCHES THE GROUND. The first strike
+        // is guaranteed a ground hit (the event must leave a hole); after
+        // that the majority burst in the air, which is the real energy split.
+        const ground = !ctx.st.first || rnd() < 0.4;
+        ctx.st.first = true;
+        let p = ctx.arena.randomPoint(0, ctx.R * 0.9);
+        if (ground && CBZ.groundShaftCanOpen) {
+          // prefer ground a crater can actually be dug in (flat, dry, clear)
+          for (let k2 = 0; k2 < 5; k2++) {
+            const q = ctx.arena.randomPoint(0, ctx.R * 0.8);
+            if (CBZ.groundShaftCanOpen(q.x, q.z, 6).ok) { p = q; break; }
+          }
+        }
+        const eta = 1.5 + rnd() * 0.6;
+        CBZ.meteor.strike({ x: p.x, z: p.z, air: !ground, alt: 30 + 45 * rnd(), size: 0.9 + 0.9 * ctx.intensity, eta, r });
+        // the marker is the bolide's shadow — ground strikes only; you
+        // cannot stand clear of an airburst and the map should not pretend
+        if (ground) ctx.st.pending.push({ x: p.x, z: p.z, r, t: eta, t0: eta, m: CBZ.fx.groundMarker(p.x, p.z, r, 0xff5030) });
+      }
+      for (let i = ctx.st.pending.length - 1; i >= 0; i--) {
+        const p = ctx.st.pending[i]; p.t -= dt; p.m.set(1 - p.t / (p.t0 || 1.2));
+        if (p.t <= 0) { p.m.dispose(); ctx.st.pending.splice(i, 1); }
+      }
+      tick0(ctx, dt);
+    }
+
+    return {
+      name: "METEOR SHOWER", emoji: "", warnSecs: 5, activeSecs: 17, gap: 6, cause: "flattened by a meteor", tint: 0x4a3a3a,
+      _meteorDelegated: true,
+      // STREAKS CROSS THE SKY FIRST. Bolides burn up high and harmlessly for a
+      // few seconds before anything reaches the ground — which is exactly the
+      // real sequence, and it makes the player look UP, which is where the
+      // warning for the rest of the event will be. V2: they all come from ONE
+      // RADIANT, because a shower is one debris stream, not fireworks.
+      warn(ctx) {
+        narrate("hint", "METEORS, watch the shadows!", 2.6); sound("rumble");
+        if (v2()) { ctx.st.pending = []; ctx.st.timers = []; beginV2(ctx); return; }
+        ctx.st.streaks = []; ctx.st.streakCd = 0.15;
+      },
+      warnTick(dt, ctx) {
+        if (v2()) { mCtx = ctx; CBZ.meteor.tick(dt); lightV2(ctx); return; }
+        ctx.st.streakCd -= dt;
+        if (ctx.st.streakCd <= 0) {
+          ctx.st.streakCd = 0.18 + rnd() * 0.4;
+          skyStreak(ctx);
+          if (rnd() < 0.35) soundAt("rumble", camPos().x, camPos().z, { volume: 0.4 });
+        }
+        tickStreaks(dt, ctx);
+      },
+      warnThreat() { return 0.12; },   // nowhere is safe; keep the crowd moving
+      start(ctx) {
+        if (v2()) {
+          if (!CBZ.meteor.live()) beginV2(ctx);   // force() can skip warn
+          ctx.st.pending = ctx.st.pending || []; ctx.st.cd = 1.0; ctx.st.clock = 0;
+          ctx.env.sunInt = 0.85; ctx.st.timers = ctx.st.timers || [];
+          return;
+        }
+        ctx.st.pending = []; ctx.st.cd = 0.5; ctx.env.sunInt = 0.7; ctx.st.timers = [];
+      },
+      active(dt, ctx) {
+        if (v2()) { activeV2(dt, ctx); return; }
+        ctx.env.fog = 0x4a3a3a; ctx.env.fogNear = 40; ctx.env.fogFar = 240; ctx.env.hemiColor = 0xffb0a0;
+        tickStreaks(dt, ctx);
+        ctx.st.cd -= dt;
+        if (ctx.st.cd <= 0) {
+          ctx.st.cd = (0.8 - 0.4 * ctx.prog) * (0.6 + rnd());
+          const p = ctx.arena.randomPoint(0, ctx.R);
+          const r = 5 + scale(2, ctx);
+          // the incoming rock is VISIBLE all the way down, not a shadow that
+          // appears on the floor — the marker is the shadow it casts
+          skyStreak(ctx, p.x, p.z);
+          ctx.st.pending.push({ x: p.x, z: p.z, r, t: 1.2, m: CBZ.fx.groundMarker(p.x, p.z, r, 0xff5030) });
+        }
+        for (let i = ctx.st.pending.length - 1; i >= 0; i--) {
+          const p = ctx.st.pending[i]; p.t -= dt; p.m.set(1 - p.t / 1.2);
+          if (p.t <= 0) {
+            p.m.dispose();
+            CBZ.fx.dropDebris({ x: p.x, z: p.z, fromY: 40, vy: -22, size: 2.4, color: 0x3a2018, dmg: 0, linger: 4, keep: true, onLand: (x, z) => {
+              // THE BLAST BUS OWNS THE IMPACT. `meteor` is a real ordnance row
+              // (systems/impactbus.js) and it is PURE KINETICS — refE 1.2e8 J,
+              // a 6 t stone at 200 m/s — so passing this rock's mass and speed
+              // makes a late-round meteor genuinely bigger instead of the same
+              // constant fireball with a different number typed beside it.
+              survBlast("meteor", x, z, {
+                r: p.r, cause: "flattened by a meteor", ctx: ctx,
+                mass: 4000 + 4000 * ctx.intensity, speed: 190 + 60 * ctx.intensity,
+                struct: 0.55 + 0.35 * ctx.intensity, structR: p.r * 2.4,
+                fling: 7, knockback: 14, color: 0xffcaa0,
+              });
+              const cr = disc(x, z, 0x201810, 0.9, 0.05); cr.userData.transient = true;
+            } });
+            ctx.st.pending.splice(i, 1);
+          }
+        }
+        tick0(ctx, dt);
+      },
+      end(ctx) {
+        (ctx.st.pending || []).forEach((p) => p.m.dispose()); clearStreaks(ctx);
+        if (CBZ.meteor && CBZ.meteor.live()) CBZ.meteor.stop();
+        mCtx = null;
+      },
+      threat(x, z, ctx) { let t = 0; (ctx.st.pending || []).forEach((p) => { const d = Math.hypot(x - p.x, z - p.z); if (d < p.r + 3) t = Math.max(t, 1 - d / (p.r + 3)); }); return t; },
+      safeDir(x, z, ctx) { let bx = 0, bz = 0; (ctx.st.pending || []).forEach((p) => { const dx = x - p.x, dz = z - p.z, d = Math.hypot(dx, dz); if (d < p.r + 4 && d > 0.1) { bx += dx / d; bz += dz / d; } }); return (bx || bz) ? { x: bx, z: bz } : null; },
+    };
+  }
+
   /* ---- SKY STREAKS: the meteor shower's real warning -----------------------
      A bolide is visible for seconds before anything lands. Each streak is one
      stretched additive box travelling on a straight line — pooled per event,
@@ -4948,6 +5096,18 @@
       boltStrokes: boltA ? boltA.strokes : 0,
       boltScars: boltA ? boltA.scarsCut : 0,
       boltLive: boltA ? boltA.live : 0,
+      /* ---- THE METEOR'S RADIANT AND ITS LATE SOUND (systems/meteor.js).
+         `meteor` is that file's whole ratchet (airbursts, craters dug,
+         ejecta, flash-to-bang seconds, the live bolide/burst positions the
+         storyboard cameras solve off). `meteorLegacyStreakDirs` publishes
+         the LEGACY streaks' headings while the old shower is live, so a
+         before-side run can measure that its streaks came from everywhere —
+         the exact number the radiant deletes. ---- */
+      meteorV2: !!(CBZ.meteor && CBZ.CONFIG.METEOR_V2 !== false),
+      meteor: CBZ.meteorAudit ? CBZ.meteorAudit() : null,
+      meteorLegacyStreakDirs: dir.curId === "meteor" && st.streaks
+        ? st.streaks.map(function (s) { return { x: +s.vx.toFixed(2), z: +s.vz.toFixed(2) }; })
+        : null,
       /* ---- THE TSUNAMI'S FOUR: what the water was carrying, what it hit
          with, how dirty it was and how hard it pulled on the way out. Zero
          unless a tsunami is actually running, which is the point.
