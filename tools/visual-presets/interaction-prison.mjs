@@ -188,6 +188,13 @@ export default {
     ).filter(vis);
     const rows = touchRows.length ? touchRows : desktopRows;
     const panel = touchRows.length ? document.getElementById("pinteract") : document.getElementById("interact");
+    /* A CARD FULL OF VISIBLE BUTTONS IS A VISIBLE CARD. #pinteract's verb
+       containers are display:contents on phones, and a phone-frame run showed
+       what that does to the old root-rect test: panelVisible printed 0 on
+       BOTH sides of a pair whose pixels plainly showed the full card. If we
+       measured rows, the surface is up — the root's own rect is a layout
+       detail, not the answer. */
+    const panelVisible = rows.length ? 1 : (vis(panel) ? 1 : 0);
     const minTapPx = rows.length
       ? Math.min.apply(null, rows.map((r) => r.getBoundingClientRect().height)) : 0;
     const minTapArea = rows.length
@@ -205,7 +212,7 @@ export default {
       surface: touchRows.length ? "#pinteract" : "#interact",
       rowsText: rows.map((r) => (r.innerText || "").trim()),
       metrics: {
-        panelVisible: vis(panel) ? 1 : 0,
+        panelVisible,
         verbCount: rows.length,
         minTapPx,
         minTapArea,
