@@ -828,25 +828,57 @@
       },
     },
 
-    // ---- HURRICANE: shrieking wind drags everyone downwind, blinding rain,
-    //      swirling debris, and violent gusts that knock you flat. The wind
-    //      direction slowly veers, so high ground alone won't save you. ----
+    // ---- HURRICANE: a cyclone with STRUCTURE. systems/hurricane.js owns the
+    //      field — a storm CENTER tracks across the island, so the arc is
+    //      geometry, not a script: outer bands as the wall approaches, the
+    //      front eyewall at full scream, then the EYE (sudden calm, the sky
+    //      opens, the crowd walks back into the open — the trap), then the
+    //      back wall from the OPPOSITE direction, then the tail. The surge is
+    //      the killer and it goes through the ONE water lever (surgeSet), so
+    //      the drowning, the floating cars and the corpses all come free.
+    //      HURRICANE_V2=false (or hurricane.js missing) plays the legacy
+    //      windstorm below, verbatim. ----
     hurricane: {
-      name: "HURRICANE", emoji: "", warnSecs: 5, activeSecs: 20, gap: 7, cause: "killed by hurricane debris", tint: 0x46505a,
-      // THE WIND RAMPS FROM ZERO. You feel yourself start to lean before the
-      // storm is anywhere near full strength, and the debris streaming past at
-      // ground level tells you which way it is going — which is the ONE piece
-      // of information the old banner was trying to convey. The wind vector is
-      // now THE weather's wind (systems/weather.js), not a third private one.
+      name: "HURRICANE", emoji: "", warnSecs: 5, gap: 7, cause: "killed by hurricane debris", tint: 0x46505a,
+      // an eye + two eyewalls need room to be three different experiences;
+      // the legacy windstorm keeps its old 20 s
+      get activeSecs() { return this._v2() ? 26 : 20; },
+      _v2() { return CBZ.CONFIG.HURRICANE_V2 !== false && !!CBZ.hurricane; },
       warn(ctx) {
         narrate("hint", "HURRICANE inbound, brace and hold on!", 3); sound("wind");
         const a = rnd() * 6.28; ctx.st.wx = Math.cos(a); ctx.st.wz = Math.sin(a);
         ctx.st.gustCd = 2; ctx.st.turn = (rnd() - 0.5) * 0.2;
+        if (this._v2()) {
+          // the TRACK is a rule (it decides who floods and who stands in the
+          // wall), so its bearing and offset come from the seeded stream
+          ctx.st.h2 = 1;
+          CBZ.hurricane.begin({
+            cx: ctx.cx, cz: ctx.cz, R: ctx.R, intensity: ctx.intensity,
+            duration: this.warnSecs + this.activeSecs,
+            bearing: a, offset: (rnd() - 0.5) * ctx.R * 0.35,
+          });
+          return;
+        }
         ctx.st.debris = CBZ.fx.particleCloud({ mode: "swirl", color: 0x7a6f5a, count: 200, radius: ctx.R * 0.7, top: 10, size: 0.3, opacity: 0.6, vMin: 8, vMax: 16 });
         ctx.st.debris.setActive(0.15);
       },
       warnTick(dt, ctx) {
         const k = 1 - dir.t / (this.warnSecs || 1);
+        if (ctx.st.h2) {
+          // the OUTER BANDS: the field's own far edge is already over the
+          // island, so the first squalls and the first lean are the real
+          // storm arriving, not a scripted ramp
+          const H = CBZ.hurricane;
+          H.tick(dt, camPos().x, camPos().z);
+          weather(H.localWeather(camPos().x, camPos().z));
+          const w = H.windAt(CBZ.player.pos.x, CBZ.player.pos.z);
+          const p = CBZ.player._phys || (CBZ.player._phys = { kx: 0, kz: 0 });
+          p.kx = (p.kx || 0) + w.x * w.speed * 0.09 * k * dt;
+          p.kz = (p.kz || 0) + w.z * w.speed * 0.09 * k * dt;
+          if (CBZ.shake) CBZ.shake(Math.min(0.12, 0.02 + w.speed * 0.004));
+          if (rnd() < dt * 2 * k) sound("wind");
+          return;
+        }
         weather({ rain: k * 0.5, wind: k * 14, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: k * 0.35, fogColor: 0x46505a });
         ctx.st.debris.setActive(0.15 + k * 0.5);
         ctx.st.debris.update(dt, camPos().x, 3, camPos().z);
@@ -859,11 +891,18 @@
         if (rnd() < dt * 2 * k) sound("wind");
       },
       warnThreat() { return 0.35; },
-      warnSafeDir(x, z, ctx) { return { x: -(ctx.st.wx || 0), z: -(ctx.st.wz || 0) }; },
+      warnSafeDir(x, z, ctx) {
+        if (ctx.st.h2) return CBZ.hurricane.safeDir(x, z);
+        return { x: -(ctx.st.wx || 0), z: -(ctx.st.wz || 0) };
+      },
       start(ctx) {
+        if (ctx.st.h2) return;                       // the field is already live
         ctx.st.debris.setActive(0.8);
       },
       active(dt, ctx) {
+        // h2 set means V2 ran this storm — never fall into the legacy body
+        // (its state was never built) even if the module's storm is gone
+        if (ctx.st.h2) { if (CBZ.hurricane && CBZ.hurricane.active()) this._v2Active(dt, ctx); return; }
         ctx.env.fog = 0x46505a; ctx.env.fogNear = 16; ctx.env.fogFar = 120; ctx.env.sunInt = 0.5; ctx.env.hemiColor = 0x8a98a6;
         ctx.st.debris.update(dt, camPos().x, 4, camPos().z);
         // the wind slowly veers so its direction can't be simply outrun
@@ -900,9 +939,151 @@
           structureSweep(ctx.cx, ctx.cz, ctx.R, 0.02 + 0.02 * ctx.intensity, ctx, { kind: "tornado", dirx: wx, dirz: wz });
         }
       },
-      end(ctx) { weatherOff(); if (ctx.st.debris) ctx.st.debris.dispose(); },
-      threat(x, z, ctx) { return 0.4; },
-      safeDir(x, z, ctx) { return { x: -(ctx.st.wx || 0), z: -(ctx.st.wz || 0) }; },
+      /* THE V2 STORM. Everything below reads the FIELD at each body's own
+         position — there is no "the wind" any more, only the wind where you
+         are standing, which is what makes the eye a real place. */
+      _v2Active(dt, ctx) {
+        const H = CBZ.hurricane;
+        H.tick(dt, camPos().x, camPos().z);
+        const S = H.state();
+        ctx.st.x = S.eyeX; ctx.st.z = S.eyeZ;        // the minimap tracks the EYE
+        // the drift bearing shared helpers read (floodActors, car floats):
+        // the storm's forward motion — what actually carries floodwater inland
+        ctx.st.wx = S.fwdX; ctx.st.wz = S.fwdZ;
+        // sky + weather are LOCAL to the camera: eyewall = whiteout,
+        // eye = the rain stops and the sun comes out. The clearing is the trap.
+        const lw = H.localWeather(camPos().x, camPos().z);
+        weather(lw);
+        const rCam = Math.hypot(camPos().x - S.eyeX, camPos().z - S.eyeZ);
+        if (rCam < S.eyeR) {
+          const u = 1 - rCam / S.eyeR;
+          ctx.env.fog = 0x93a7b8; ctx.env.fogNear = 40; ctx.env.fogFar = 220 + 800 * u;
+          ctx.env.sunInt = 0.55 + 0.65 * u; ctx.env.hemiColor = 0xc2d3e0; ctx.env.hemiInt = 0.75;
+        } else {
+          ctx.env.fog = 0x46505a; ctx.env.fogNear = 14;
+          ctx.env.fogFar = Math.max(55, 200 - lw.wind * 3.2);
+          ctx.env.sunInt = 0.45; ctx.env.hemiColor = 0x8a98a6;
+        }
+        if (CBZ.shake) CBZ.shake(Math.min(0.42, lw.wind * 0.009));
+        if (rnd() < dt * (0.4 + lw.wind * 0.05)) sound("wind");
+        // ---- THE SURGE: the sea is one number and this drives it ----
+        surgeSet(S.surge);
+        if (S.surge > 0.5) {
+          publishSheetFlood(ctx, "flooded", S.surge, 1.1);
+          let dead0 = 0;
+          for (let i = 0; i < CBZ.bots.length; i++) if (CBZ.bots[i].dead) dead0++;
+          floodActors(dt, ctx, 1.15, "drowned in the storm surge", S.fwdX, S.fwdZ);
+          /* THE WATER IS THE KILLER — the real event's own arithmetic. The
+             flash flood's 7/s bleed never crosses 100 hp in the surge's ~10 s
+             of deep water, which makes the surge a light show. A second bleed
+             on whoever is still swimming when the water is over 2 m deep
+             makes deep water lethal on the surge's own timescale while the
+             shallows stay survivable — run UP, not just out. */
+          for (let i = 0; i < CBZ.bots.length; i++) {
+            const b = CBZ.bots[i];
+            if (b.dead || !b._survSwim) continue;
+            if (floodDepth(b.pos.x, b.pos.z) > 2) surv().hurt(b, scale(6, ctx) * dt, { cause: "drowned in the storm surge" });
+          }
+          let dead1 = 0;
+          for (let i = 0; i < CBZ.bots.length; i++) if (CBZ.bots[i].dead) dead1++;
+          H.count("drownings", Math.max(0, dead1 - dead0));
+          // TWO FEET FLOATS A CAR — same threshold as the flash flood
+          if (ctx.arena.cars) for (let i = 0; i < ctx.arena.cars.length; i++) {
+            const car = ctx.arena.cars[i];
+            if (car.flung) continue;
+            if (floodDepth(car.x, car.z) > 0.6) flingCar(car, S.fwdX, S.fwdZ, 3.2 + scale(2.2, ctx), 1.1);
+          }
+          if (rnd() < dt * 3) sound("water");
+        }
+        // ---- wind loads on every body, from the field at THEIR feet ----
+        surv().forEachActor(function (a) {
+          if (CBZ.body && CBZ.body.busy(a)) return;
+          if (sheltered(a)) return;                  // a roof still breaks the wind
+          const w = H.windAt(a.pos.x, a.pos.z);
+          const drag = w.speed * (0.14 + 0.06 * ctx.intensity);
+          if (a.isPlayer) {
+            const p = CBZ.player._phys || (CBZ.player._phys = { kx: 0, kz: 0 });
+            p.kx = (p.kx || 0) + w.x * drag * dt; p.kz = (p.kz || 0) + w.z * drag * dt;
+          } else {
+            a.pos.x += w.x * drag * dt; a.pos.z += w.z * drag * dt;
+            if (CBZ.collide) CBZ.collide(a.pos, 0.5);
+            a.pos.y = floor(a.pos.x, a.pos.z);
+          }
+          // FLYING DEBRIS IS THE WOUND: at eyewall speeds loose material is
+          // airborne and a strike is a real hit, not ambient chip damage
+          if (w.speed > 24 && rnd() < dt * (w.speed - 24) * 0.022) {
+            H.count("debrisStrikes", 1);
+            if (CBZ.body) CBZ.body.hit(a, { dir: { x: w.x, z: w.z }, force: 6 + w.speed * 0.22, knockdown: rnd() < 0.4 ? 1.0 : 0 });
+            const wasDead = !!a.dead;
+            // a 2x4 at eyewall speed is a wound, not chip damage — ~14-20 by
+            // intensity, so repeated strikes on someone who stays in the open
+            // genuinely finish them
+            surv().hurt(a, scale(14, ctx), { cause: "killed by hurricane debris", dir: { x: w.x, z: w.z } });
+            if (!wasDead && a.dead) H.count("debrisKills", 1);
+          }
+        });
+        // ---- gust turbulence on top of the mean field ----
+        ctx.st.gustCd -= dt;
+        if (ctx.st.gustCd <= 0) {
+          ctx.st.gustCd = 1.4 + rnd() * 1.7;
+          H.count("gusts", 1);
+          sound("wind");
+          const camW = H.windAt(camPos().x, camPos().z);
+          if (CBZ.shake && camW.speed > 14) CBZ.shake(Math.min(0.5, camW.speed * 0.012));
+          surv().forEachActor(function (a) {
+            if (sheltered(a)) return;
+            const w = H.windAt(a.pos.x, a.pos.z);
+            if (w.speed < 16) return;                // the eye's calm is REAL
+            const down = rnd() < Math.min(0.55, (w.speed - 16) * 0.02);
+            if (down) H.count("knockdowns", 1);
+            if (CBZ.body) CBZ.body.hit(a, { dir: { x: w.x, z: w.z }, force: 4 + w.speed * 0.24, knockdown: down ? 1.0 : 0 });
+          });
+        }
+        // ---- the EYEWALL scours the roofs it is standing over — an annulus
+        //      that walks across the town with the storm, so damage maps the
+        //      track. Budget: wall-dwell ≈ glass-out + some spall, never a
+        //      levelled town (the ledger is shared with the quake and the
+        //      wave). Batched to 4 Hz — per-frame ring walks were the single
+        //      biggest V2 sim cost and the ledger integrates the same total.
+        ctx.st.scourCd = (ctx.st.scourCd || 0) - dt;
+        if (ctx.st.scourCd <= 0) {
+          ctx.st.scourCd += 0.25;
+          structureSweepRing(ctx, S.eyeX, S.eyeZ, S.eyeR, S.rmw * 2.3,
+            (0.032 + 0.022 * ctx.intensity) * 0.25);
+        }
+      },
+      end(ctx) {
+        weatherOff();
+        if (ctx.st.h2) {
+          CBZ.hurricane.end();
+          surgeSet(0);
+          if (CBZ.waterEventClear) CBZ.waterEventClear("survival-flood");
+          const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
+          if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; }
+          return;
+        }
+        if (ctx.st.debris) ctx.st.debris.dispose();
+      },
+      threat(x, z, ctx) {
+        if (ctx.st.h2 && CBZ.hurricane.active()) {
+          if (floodDepth(x, z) > 0.4) return 0.85;    // the water outranks the wind
+          return CBZ.hurricane.threat(x, z);
+        }
+        return 0.4;
+      },
+      safeDir(x, z, ctx) {
+        if (ctx.st.h2 && CBZ.hurricane.active()) {
+          const S = CBZ.hurricane.state();
+          // flooded or about to be: the answer is UP, measured in world Y
+          // (same lesson the flash flood's safeDir learned)
+          if (S.surge > 0.5 && floodDepth(x, z) > -1.0) {
+            const rest = ctx.arena.oceanY != null ? ctx.arena.oceanY : -0.8;
+            return uphill(ctx, x, z, rest + S.surgeMax + 1.2);
+          }
+          return CBZ.hurricane.safeDir(x, z);
+        }
+        return { x: -(ctx.st.wx || 0), z: -(ctx.st.wz || 0) };
+      },
     },
 
     // ---- WILDFIRE: fire spreads tree to tree, burns on contact ----
@@ -4660,7 +4841,9 @@
     const privateRain = (st.rain ? 1 : 0) + (st.snow ? 1 : 0);
     // ONE read of the debris field, so every number below is from the same
     // instant rather than from two calls that could straddle a strike
-    const dbgT = st.debris ? st.debris.stats() : null;
+    // (guarded: the legacy hurricane parks a particleCloud in st.debris,
+    // which has no stats() — auditing mid-hurricane used to throw)
+    const dbgT = st.debris && typeof st.debris.stats === "function" ? st.debris.stats() : null;
     // PRIVATE SWIM: the deleted player solve set these two on CBZ.player.
     const privateSwim = (CBZ.player && CBZ.player._tsuSwim ? 1 : 0);
     // the sinkhole's own ratchet, exported by world/groundshaft.js
@@ -4727,6 +4910,13 @@
          so the tsunami's number was silently replaced by the earthquake's and
          the audit reported 0 debris kills on a run that had just made one.
          One shared audit means one shared namespace. */
+      /* ---- THE HURRICANE'S STRUCTURE (systems/hurricane.js). Nested under
+         one `hur` key — the tsunami's namespace lesson above, applied in
+         advance. Live-state answers: eyePassedCam only fires if the camera
+         saw real wind BEFORE the calm, windReversed is two sampled bearings
+         at the island center dotted across the eye's passage, surgePeak is
+         the biggest number this def actually fed the sea. ---- */
+      hur: CBZ.hurricaneAudit ? CBZ.hurricaneAudit() : null,
       tsuDebrisEntrained: dbgT ? dbgT.entrained : 0,
       tsuDebrisStrikes: dbgT ? dbgT.strikes : 0,
       tsuDebrisKills: dbgT ? dbgT.kills : 0,

@@ -884,6 +884,11 @@
      gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
      Must precede systems/disasters.js so the roster finds CBZ.quake. -->
 <script src="src/systems/quake.js?v=quake1"></script>
+<!-- THE HURRICANE IS A CYCLONE, NOT A WIND NUMBER: systems/hurricane.js owns
+     the tracking eye, the eyewall field, the surge curve and the advected
+     debris. Must precede systems/disasters.js so the roster finds
+     CBZ.hurricane (and its HURRICANE_V2 flag default) at load. -->
+<script src="src/systems/hurricane.js?v=hur1"></script>
 <script src="src/systems/disasters.js?v=nodash1"></script>
 <script src="src/systems/survival_interact.js?v=climbdock1"></script>
 <script src="src/systems/survivalhud.js?v=nozone1"></script>
