@@ -24,6 +24,11 @@ aircraft-current-orbit.png
 
 # Generated before/after screenshots, HTML contact sheets, and PDFs.
 artifacts/visual-comparisons/
+# Same thing, one level up: a hand-picked SELECTION of those reports gathered
+# for review (the disaster-roster pass copied one final PDF per disaster here
+# to hand over). Still generated output, still tens of megabytes, still not
+# something git should carry — the run that produced it is the source of truth.
+artifacts/disaster-roster-pdfs/
 
 # Local third-party/reference inputs. These are inspected as design sources,
 # never loaded by the game and should not be published by GitHub Pages.
