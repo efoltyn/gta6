@@ -1324,8 +1324,14 @@
     if (W.v > 0.001) {
       const wf = CBZ.waterField;
       if (wf && wf.moveInWater) {
+        // A RIDDEN body may hunt the shallows: cap the nav clearance by body
+        // size (scale × 12 ⇒ a bull shark blocks at ~0.45 m of water; a
+        // megalodon still stands ~15 m off the island's sand — its meal is
+        // the orca, not the waders). Wild swimmers keep their species' full
+        // clearance: this call only ever runs for the mount.
+        const rideClear = Math.min(a.waterClearance || 8, ((a.species && a.species.scale) || 1) * 12);
         const nav = wf.moveInWater(P.pos.x, P.pos.z, ride.head, W.v * fdt,
-          a.waterClearance || 8, time, W.nav);
+          rideClear, time, W.nav);
         P.pos.x = nav.x; P.pos.z = nav.z;
         if (nav.blocked) W.v *= 0.35;
         ride.head = nav.heading;

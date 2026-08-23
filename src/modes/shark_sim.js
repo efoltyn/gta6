@@ -299,20 +299,25 @@
     if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = true;
   }
 
-  /* A receding tsunami can leave the mount in ankle-deep water the nav
-     field now calls land. Rather than freezing there, thrash back to sea:
-     slide the shared root seaward (deeper is always radially outward on
-     this island) until there is water under the body again. */
+  /* Beached for REAL — sand under the belly. Swimming cannot get you here
+     (the nav field blocks shallower than the body's clearance); a BREACH
+     can, when the leap lands past the block line in the swash. Thrash back
+     to sea — deeper is always radially outward on this island — and STOP
+     the moment there is swimmable water under the body again. The old
+     tuning (trigger at 0.30 m of depth, push seaward 4.5 m/s forever) was
+     a conveyor ring 9 feet off the beach that walled the entire shore —
+     and the crowd standing on it — away from the shark. */
   function strandedFix(dt) {
     const A = arena(), P = CBZ.player;
     if (!A) return;
-    if (depthMean(P.pos.x, P.pos.z) < 0.3) sim.strandT += dt;
-    else sim.strandT = 0;
-    if (sim.strandT > 1.2) {
+    const d = depthMean(P.pos.x, P.pos.z);
+    if (d < 0.10) sim.strandT += dt;            // the swash zone: genuinely aground
+    else if (d >= 0.50) sim.strandT = 0;        // released: legal water for every ridden tier
+    if (sim.strandT > 0.6 && d < 0.50) {
       const dx = P.pos.x - A.center.x, dz = P.pos.z - A.center.z;
       const rr = Math.hypot(dx, dz) || 1;
-      P.pos.x += (dx / rr) * 4.5 * dt;
-      P.pos.z += (dz / rr) * 4.5 * dt;
+      P.pos.x += (dx / rr) * 3.2 * dt;
+      P.pos.z += (dz / rr) * 3.2 * dt;
     }
   }
 
