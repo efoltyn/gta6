@@ -15,6 +15,14 @@
   from one shared definition in css/interact_touch.css. What is left to watch
   here is the TABLET rail, which is still its own animal.
 
+  2026-08-23: the menus themselves shrank. Every context is curated to THREE
+  verbs by construction (owner: "3 interaction buttons max"), the old
+  ever-present BEFRIEND is renamed TALK, and BEFRIEND only appears when an
+  NPC has earned-and-offered it (systems/prisonfriends.js). The desktop card
+  also lost its fourth key (`;`). So against any before older than this, this
+  preset SHOULD show fewer rows on both subjects — verbCount's direction
+  below flipped to match.
+
   HUD stays visible — the HUD is the subject. Camera is the player's own.
 
   Staging facts (static read 2026-08-20):
@@ -66,7 +74,15 @@ export default {
   ],
   metrics: {
     panelVisible: { label: "Options surface actually visible", unit: "1=yes", better: "higher" },
-    verbCount: { label: "Options on screen", unit: "rows", better: "higher" },
+    /* FLIPPED 2026-08-23. This used to say better:"higher", from the era whose
+       goal was "nothing the context offers is thrown away" — the touch rail
+       rendered the capped four AND the overflow, and this metric was the proof
+       it did. The owner has since laid down the opposite law ("I like 3
+       interaction buttons max at a time... more than 3 looks bad"), the menus
+       are curated to three by construction, and tools/interact-verbs-check.mjs
+       enforces it statically. So fewer rows is now the DESIGN, and a metric
+       still declaring more-is-better would print the fix as a regression. */
+    verbCount: { label: "Options on screen (owner's law: 3 max)", unit: "rows", better: "lower" },
     minTapPx: { label: "Smallest option target height", unit: "px", better: "higher" },
     // HEIGHT ALONE LIES ABOUT A PILL. A 58x58 square scores better than a
     // 48x127 capsule on that row and is a third of the thumb target. Report

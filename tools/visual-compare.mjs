@@ -657,31 +657,54 @@ async function captureSide(side, sourceUrl, referenceResult = null) {
       process.stdout.write(`[${side}] ${subject.id} FAILED (kept going): ${err.message}\n`);
       stageResult = { ok: false, error: String(err.message || err) };
     }
-    await evaluate(`(async () => {
-      // A deterministic preset may freeze window.requestAnimationFrame after
-      // staging its simulation. Await a preset's explicit compositor render
-      // here: otherwise metadata can describe the new camera while Chrome's
-      // canvas layer still contains the previous player view.
-      if (window.__cbzVisualCompare && window.__cbzVisualCompare.render) await window.__cbzVisualCompare.render();
-      // Force style/layout now; the two-frame barrier below then guarantees
-      // both DOM labels and the WebGL surface reached Chrome's compositor.
-      void document.documentElement.offsetHeight;
-      return true;
-    })()`);
-    await evaluate(`new Promise((resolve) => {
-      let done = false;
-      const finish = () => { if (!done) { done = true; resolve(true); } };
-      requestAnimationFrame(() => requestAnimationFrame(finish));
-      setTimeout(finish, 180);
-    })`);
-    const screenshot = await send("Page.captureScreenshot", {
-      format: "png",
-      captureBeyondViewport: false,
-      fromSurface: true,
-    });
+    /* THE SHOT ITSELF CAN FAIL, AND IT MUST NOT SINK THE RUN. Learned the
+       expensive way (2026-08-23): a 5-frame x 2-subject matrix staged all ten
+       BEFORE captures on a loaded box, then ONE Page.captureScreenshot — a
+       1440x900@2x software raster under SwiftShader — outran the generic CDP
+       timeout, the exception flew past --keep-going (which only guarded
+       staging), and twenty-plus minutes of completed captures died with the
+       process. Two changes: the screenshot gets a rasterisation-sized timeout
+       of its own, and the settle + shot are inside the same keep-going
+       contract as staging — a capture whose pixels never arrived is recorded
+       as a FAILED capture (stage.ok=false, filename=null; the report prints
+       NOT CAPTURED, the summary counts it) while its already-measured metrics
+       are kept, and the run carries on. */
     const filename = shotName(frameIndex, frame, index, subject);
-    const absolute = path.join(shotDir, side, filename);
-    await writeFile(absolute, Buffer.from(screenshot.data, "base64"));
+    let shotFile = null;
+    try {
+      await evaluate(`(async () => {
+        // A deterministic preset may freeze window.requestAnimationFrame after
+        // staging its simulation. Await a preset's explicit compositor render
+        // here: otherwise metadata can describe the new camera while Chrome's
+        // canvas layer still contains the previous player view.
+        if (window.__cbzVisualCompare && window.__cbzVisualCompare.render) await window.__cbzVisualCompare.render();
+        // Force style/layout now; the two-frame barrier below then guarantees
+        // both DOM labels and the WebGL surface reached Chrome's compositor.
+        void document.documentElement.offsetHeight;
+        return true;
+      })()`);
+      await evaluate(`new Promise((resolve) => {
+        let done = false;
+        const finish = () => { if (!done) { done = true; resolve(true); } };
+        requestAnimationFrame(() => requestAnimationFrame(finish));
+        setTimeout(finish, 180);
+      })`);
+      const screenshot = await send("Page.captureScreenshot", {
+        format: "png",
+        captureBeyondViewport: false,
+        fromSurface: true,
+      }, Math.max(CDP_TIMEOUT, 180000));
+      await writeFile(path.join(shotDir, side, filename), Buffer.from(screenshot.data, "base64"));
+      shotFile = filename;
+    } catch (err) {
+      if (!args["keep-going"]) throw err;
+      process.stdout.write(`[${side}] ${subject.id} SCREENSHOT FAILED (kept going): ${err.message}\n`);
+      stageResult = {
+        ok: false,
+        error: `screenshot failed: ${err.message}`,
+        metrics: stageResult && stageResult.metrics ? stageResult.metrics : undefined,
+      };
+    }
     /* FILM STRIP — motion photographed as stills. A still cannot show "he
        stopped to shoot" or "he pressed his face into the wall"; a row of
        frames can. A subject declares `strip: {frames, stepSec}` and the
@@ -692,8 +715,8 @@ async function captureSide(side, sourceUrl, referenceResult = null) {
        the metric and the pictures describe the same moment, by construction. */
     let stripFiles = null;
     const stripSpec = subject.strip;
-    if (stripSpec && Number(stripSpec.frames) > 1 && stageResult && stageResult.ok === true) {
-      stripFiles = [filename];
+    if (stripSpec && Number(stripSpec.frames) > 1 && stageResult && stageResult.ok === true && shotFile) {
+      stripFiles = [shotFile];
       const stepSec = Number(stripSpec.stepSec) || 0.5;
       for (let stepIndex = 1; stepIndex < Number(stripSpec.frames); stepIndex++) {
         await evaluate(`(async () => {
@@ -713,8 +736,8 @@ async function captureSide(side, sourceUrl, referenceResult = null) {
           format: "png",
           captureBeyondViewport: false,
           fromSurface: true,
-        });
-        const stripName = filename.replace(/\.png$/, `-t${stepIndex}.png`);
+        }, Math.max(CDP_TIMEOUT, 180000));
+        const stripName = shotFile.replace(/\.png$/, `-t${stepIndex}.png`);
         await writeFile(path.join(shotDir, side, stripName), Buffer.from(stripShot.data, "base64"));
         stripFiles.push(stripName);
       }
@@ -726,7 +749,7 @@ async function captureSide(side, sourceUrl, referenceResult = null) {
         }
       } catch (_) {}
     }
-    captures.push({ frame, frameIndex, subject, subjectIndex: index, filename, stage: stageResult, stripFiles });
+    captures.push({ frame, frameIndex, subject, subjectIndex: index, filename: shotFile, stage: stageResult, stripFiles });
   }
   }
   return { navigation: nav, captures };

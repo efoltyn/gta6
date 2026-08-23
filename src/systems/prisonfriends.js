@@ -29,10 +29,12 @@
              the ORIGINAL alternate victory and it is untouched: taking his
              offer at that rung still walks you out the side gate.
 
-   Any of those, plus no bad blood, and he offers. The offer is a state he
-   carries (a.pfOffer), so it shows as ONE extra button on his card and as one
-   spoken line the first time you're near him after he decides — and it is
-   gated hard enough that most inmates in most runs will never make it.
+   Any of those, plus no bad blood, and he offers. The offer is RECOMPUTED
+   (offered(a)) rather than latched, so a count or a swing at you silently
+   withdraws it instead of leaving a stale button up. It shows as ONE extra
+   button on his card and as one spoken line the first time you're near him
+   after he decides — and it is gated hard enough that most inmates in most
+   runs will never make it.
 
    WHAT TAKING IT BUYS. Not a counter. He becomes CREW: entities/ai.js already
    has the behaviour — the `shadowPlayer` state, where an NPC walks at your
@@ -63,6 +65,7 @@
   const RESCUE_HP_FRAC  = 0.72; // he has to have been LOSING for it to be a rescue
   const SHADOW_TOP_UP   = 30;   // seconds of shadowPlayer we keep re-arming
   const FRIEND_RANGE    = 26;   // beyond this he goes about his day
+  const CALL_RANGE      = 46;   // ...unless you are being jumped: then he RUNS
   const OFFER_LINE_GAP  = 25;   // don't re-pitch the same offer inside this many seconds
 
   function friendRep() { return CBZ.quests && CBZ.quests.FRIEND != null ? CBZ.quests.FRIEND : 100; }
@@ -180,7 +183,7 @@
     if (downed.foe && downed.foe !== P) saved.push(downed.foe);
     for (const n of actors()) {
       if (n === downed || saved.indexOf(n) >= 0) continue;
-      if (n.foe === downed || (n.huntedBy === downed)) saved.push(n);
+      if (n.foe === downed) saved.push(n);
     }
     for (const n of saved) {
       if (!alive(n) || n === P) continue;
@@ -221,7 +224,6 @@
       return { ok: false, msg: `${nameOf(a)} isn't in the mood.` };
     }
     a.pfFriend = true;
-    a.pfSince = CBZ.game ? (CBZ.game.t || 0) : 0;
     a.pfPitchT = 0;
     if (CBZ.econ && CBZ.econ.addRespect) CBZ.econ.addRespect(a, 20);
     if (CBZ.econ && CBZ.econ.addLoyalty) CBZ.econ.addLoyalty(a, 8);
@@ -269,6 +271,23 @@
     if (acc < 0.4) return;
     const step = acc; acc = 0;
 
+    /* "BACKS YOU UP AND RUNS TO YOU" — the owner's exact words, and the half
+       of it shadowPlayer's 8-unit brawl reflex doesn't cover on its own: a
+       friend across the yard when you get jumped. So the tick asks the world
+       one question first — is anyone actively ON the player right now? — and
+       while the answer is yes, every friend inside CALL_RANGE is forced into
+       shadowPlayer even out of a passive state (force=true; only a KO, his own
+       live fight, or death still excuse him). shadowPlayer runs at 1.25x base
+       speed toward your shoulder and starts a fight with any hunter it closes
+       with, so "run to you and pile in" is the state machine ai.js already
+       has, pointed at the moment it was built for. */
+    const P = CBZ.player;
+    let threat = false;
+    for (const a of actors()) {
+      if (!alive(a) || a.ko > 0) continue;
+      if ((a.huntPlayer || 0) > 0 || (a.aiState === "fight" && a.foe === P)) { threat = true; break; }
+    }
+
     for (const a of actors()) {
       if (a.pfPitchT > 0) a.pfPitchT -= step;
 
@@ -284,8 +303,11 @@
           if (CBZ.prisonSay) CBZ.prisonSay(a, "We're done. Don't come near me.");
           continue;
         }
-        // Close enough to be with you → be with you. Far away → he has a day.
-        if (dist2ToPlayer(a) < FRIEND_RANGE * FRIEND_RANGE) shadow(a, false);
+        // Close enough to be with you → be with you. Far away → he has a day —
+        // unless you are being jumped, in which case CALL_RANGE is the yard
+        // and "passive states only" stops applying (see the threat sweep).
+        if (threat && a.aiState !== "fight" && dist2ToPlayer(a) < CALL_RANGE * CALL_RANGE) shadow(a, true);
+        else if (dist2ToPlayer(a) < FRIEND_RANGE * FRIEND_RANGE) shadow(a, false);
         continue;
       }
 
@@ -322,7 +344,7 @@
   function reset() {
     for (const a of actors()) {
       if (!a) continue;
-      a.pfFriend = false; a.pfSaved = false; a.pfTrades = 0; a.pfPitchT = 0; a.pfSince = 0;
+      a.pfFriend = false; a.pfSaved = false; a.pfTrades = 0; a.pfPitchT = 0;
     }
   }
 

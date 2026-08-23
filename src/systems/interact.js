@@ -3,7 +3,9 @@
    anyone and the options fade in beside them. THREE social verbs, never
    more, on the home-row cluster (numbers belong to the inventory hotbar):
 
-       [J] Talk   [K] Insult   [L] Steal
+       [J] the headline — what this man IS (Trade / Join / Befriend,
+           or Insult when he is nobody in particular)
+       [K] Talk   [L] Steal
        (fight is left-click / the touch trigger, never a menu row)
        (Romance was a fourth and is DELETED — see economy.js)
 

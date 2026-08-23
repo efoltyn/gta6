@@ -158,21 +158,39 @@ async function printSummary(dir) {
   const specs = (preset && preset.metrics) || {};
   const keys = Object.keys(specs);
   if (!keys.length || !meta.captures) return null;
+  // A frame matrix repeats every subject id once per device; without the
+  // frame in the row label a 5-frame run prints "inmate-walkup" five times
+  // and the regression you are hunting could be on any of them.
+  const manyFrames = Array.isArray(meta.frames) && meta.frames.length > 1;
+  /* FAILURES ARE PART OF THE ANSWER. --keep-going (this wrapper's default)
+     turns a broken subject into an error page and the run carries on — right
+     for capture, and a trap for this summary as it used to be: a capture
+     whose stage failed has no metrics, so it fell out of the table entirely,
+     and a run where the AFTER side crashed on half its subjects ended in a
+     cheerful "0 worse" verdict that --gate waved through. A subject that
+     could not be measured is not "unchanged"; it is the loudest row there
+     is, so it is printed, tallied, and (under --gate) fails the run. */
   const rows = [];
+  const failures = [];
   for (const cap of meta.captures) {
+    const label = manyFrames && cap.frame ? `${cap.id} @ ${cap.frame}` : cap.id;
+    for (const [sideName, stage] of [["before", cap.before], ["after", cap.after]]) {
+      if (stage && stage.ok !== true) {
+        failures.push({ label, side: sideName, error: String(stage.error || stage.err || "stage failed") });
+      }
+    }
     const b = cap.before && cap.before.metrics, a = cap.after && cap.after.metrics;
     if (!b && !a) continue;
     for (const k of keys) {
       if ((!b || b[k] == null) && (!a || a[k] == null)) continue;
-      rows.push({ subject: cap.id, key: k, before: b ? b[k] : null, after: a ? a[k] : null });
+      rows.push({ subject: label, key: k, before: b ? b[k] : null, after: a ? a[k] : null });
     }
   }
-  if (!rows.length) return null;
-  const w = (sel, min) => Math.max(min, ...rows.map((r) => String(sel(r)).length));
-  const wS = w((r) => r.subject, 7), wM = Math.max(7, ...keys.map((k) => (specs[k].label || k).length));
+  if (!rows.length && !failures.length) return null;
+  const wM = Math.max(7, ...keys.map((k) => (specs[k].label || k).length));
   process.stdout.write(`\nMEASUREMENTS — ${meta.preset && meta.preset.title ? meta.preset.title : presetName}\n`);
   let lastSubject = null;
-  const tally = { better: 0, worse: 0, flat: 0 };
+  const tally = { better: 0, worse: 0, flat: 0, failed: failures.length };
   for (const r of rows) {
     if (r.subject !== lastSubject) {
       process.stdout.write(`\n  ${r.subject}\n`);
@@ -192,6 +210,12 @@ async function printSummary(dir) {
       `${fmt(r.before).padStart(8)} → ${fmt(r.after).padStart(8)}` +
       `${spec.unit ? "  " + spec.unit : ""}\n`);
   }
+  if (failures.length) {
+    process.stdout.write("\n  NOT MEASURED — the stage failed on these; fix or rerun before trusting the table:\n");
+    for (const f of failures) {
+      process.stdout.write(`    ✗ ${f.label} [${f.side}]  ${f.error.split("\n")[0].slice(0, 140)}\n`);
+    }
+  }
   if (preset && preset.metricsNote) process.stdout.write(`\n  ${preset.metricsNote}\n`);
   /* ONE LINE THAT SAYS WHETHER IT WORKED.
 
@@ -201,8 +225,10 @@ async function printSummary(dir) {
      the whole tool from a thing you read into a check you can run. */
   process.stdout.write(
     `\nVERDICT  ${tally.better} better \u00b7 ${tally.worse} worse \u00b7 ${tally.flat} unchanged` +
-    (tally.worse ? "  \u2190 REGRESSIONS" : "") + "\n");
-  void wS;
+    (tally.failed ? ` \u00b7 ${tally.failed} FAILED` : "") +
+    (tally.worse || tally.failed
+      ? "  \u2190 " + [tally.worse ? "REGRESSIONS" : "", tally.failed ? "UNMEASURED" : ""].filter(Boolean).join(" + ")
+      : "") + "\n");
   return tally;
 }
 
