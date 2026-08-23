@@ -158,3 +158,33 @@ pass clean. False positives are poison; none were observed.
 - **Known blind spots (all loops):** whole-biome removal, terrainHeight NaN, and
   silent world-shrink — none are catchable by configuration; they need the three
   golden-baseline asserts noted above.
+
+## The city host (2026-08-23) — Gang City at prison-game loop speed
+
+Everything above prices a loop in BUILDS, and a Gang City build is the 40-50s
+floor. `tools/cityhost.mjs` removes the multiplier: one long-lived headless
+browser holds one built city behind a tiny HTTP API, and the build is paid
+once, when the host starts.
+
+```
+node tools/cityhost.mjs --origin racer &   # ~55s, once
+node tools/city.mjs eval "<expr>"          # ~1s     — any world-state question
+node tools/city.mjs step 30                # 30 sim-seconds under your control
+node tools/city.mjs shot f.png --t 0 --s -60 --u 9 --h 6   # ~1-2s, real pixels
+node tools/city.mjs rerun --origin racer   # ~1s     — a genuinely fresh LIFE
+node tools/city.mjs reload --origin racer  # ~60s    — a fresh PAGE (code edits)
+node tools/city-story.mjs race             # tsunami-style timestamped strip
+```
+
+The discipline is knowing which loop you are in: `rerun` re-runs the WORLD
+with the scripts already parsed (measured 0.8s — this is the probe loop);
+`reload` re-parses the code (this is the edit loop). A "new life" must clear
+THREE save layers (in-memory ledger, localStorage, sqlitedb's OPFS mirror —
+the list systems/newlife.js documents); the host does, and forgetting the
+third layer was measured to resurrect the old character's career records.
+
+Storyboards (`tools/city-story.mjs`) are the tsunami timeline generalized:
+hold the loop (CBZ.loopHold), advance exact sim-seconds with CBZ.stepSim,
+shoot one frame per beat (CBZ.renderFrame — works with drawing off), stitch
+the strip. Beats can compute their camera in-page (`camExpr`) so a moving
+subject — a race pack — stays in frame.

@@ -276,7 +276,11 @@ async function boot(query) {
     await sleep(400);
   }
   log("  storage before clear: " + await ev("(function(){try{return location.origin+' keys='+localStorage.length}catch(e){return 'ERR '+e}})()", 10000));
-  await ev("try { localStorage.clear(); sessionStorage.clear(); } catch (e) {} true", 10000);
+  /* All THREE save layers (systems/newlife.js's list), not just localStorage:
+     sqlitedb's OPFS mirror is worldstate load()'s FIRST stop and survives
+     both localStorage.clear() and navigation, so without this a later leg in
+     the same profile resumes the earlier leg's character. */
+  await ev("(async function(){ try { localStorage.clear(); sessionStorage.clear(); } catch (e) {} try { if (window.CBZ && CBZ.sqlitedb && CBZ.sqlitedb.clearWorld) await CBZ.sqlitedb.clearWorld(); } catch (e) {} return true; })()", 30000);
   log("  storage after clear:  " + await ev("(function(){try{return 'keys='+localStorage.length}catch(e){return 'ERR '+e}})()", 10000));
   await send("Page.navigate", { url: url });
   // CBZ.bootComplete is main.js's LAST line, so it means "the script chain

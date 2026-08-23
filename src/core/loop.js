@@ -61,6 +61,17 @@
                           // honour an owner-set value (don't clobber a toggle)
 
   function loop(t) {
+    /* LOOP HOLD (tools only — inert in play, undefined by default). While
+       CBZ.loopHold is true the loop keeps scheduling itself but runs NOTHING:
+       no updaters, no always-chain, no render. It exists for the storyboard
+       problem: a tool that wants "the world at t+0s, t+5s, t+30s" needs to be
+       the ONLY thing advancing time, driving it with CBZ.stepSim(dt) between
+       shots — exactly how the tsunami timeline pages work. Stubbing
+       requestAnimationFrame used to be the way to get this, but with
+       ?cfg_RENDER_FRAMES=0 the pump is a timer (see schedule()), so a stub of
+       rAF no longer stops anything. This flag stops the loop whatever pumps
+       it. Flip it back off and live time resumes mid-run. */
+    if (CBZ.loopHold) { last = t; schedule(); return; }
     /* WHO OWNS THE CLOCK. Under the variable step, CBZ.now IS the rAF
        timestamp — unchanged, and right for a single player. Under the fixed
        step it is advanced one whole tick at a time down in the update block,

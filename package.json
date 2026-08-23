@@ -2,7 +2,7 @@
   "name": "cell-block-z",
   "private": true,
   "version": "0.1.0",
-  "description": "Vite dev/build harness for the legacy IIFE game (O1 \u2014 MASTER-PLAN Part II OSS/Vite bridge). Legacy game files are untouched and keep working with a dumb static server; `npm run dev`/`npm run build` add a parallel module world via src/bootstrap.js.",
+  "description": "Vite dev/build harness for the legacy IIFE game (O1 — MASTER-PLAN Part II OSS/Vite bridge). Legacy game files are untouched and keep working with a dumb static server; `npm run dev`/`npm run build` add a parallel module world via src/bootstrap.js.",
   "engines": {
     "node": ">=22"
   },
@@ -103,7 +103,10 @@
     "test:tactics": "node tools/tactics-check.mjs",
     "test:camera-look": "node tools/camera-look-check.mjs",
     "visual:camera-look": "node tools/camera-look-shots.mjs && python3 tools/camera-look-report.py",
-    "visual:npc-tactics": "node tools/visual-compare.mjs --preset npc-tactics --subjects cops-standoff,firefight,stop-profile,hide-break --no-open"
+    "visual:npc-tactics": "node tools/visual-compare.mjs --preset npc-tactics --subjects cops-standoff,firefight,stop-profile,hide-break --no-open",
+    "city:host": "node tools/cityhost.mjs",
+    "city": "node tools/city.mjs",
+    "city:story": "node tools/city-story.mjs"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.0",

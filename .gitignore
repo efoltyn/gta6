@@ -21,6 +21,10 @@ aircraft-current-orbit.png
 
 # Generated before/after screenshots, HTML contact sheets, and PDFs.
 artifacts/visual-comparisons/
+# City-host storyboards (tools/city-story.mjs) — generated frames + strips.
+artifacts/storyboards/
+# The running city host's portfile (tools/cityhost.mjs).
+tools/.cityhost.json
 
 # Local third-party/reference inputs. These are inspected as design sources,
 # never loaded by the game and should not be published by GitHub Pages.

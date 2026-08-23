@@ -226,6 +226,41 @@ function drawText(img, text, x0, y0, scale, rgb) {
   }
 }
 
+/** Stitch N PNG buffers into ONE labelled horizontal strip — the storyboard
+    shape (the tsunami pages' "t+0s · t+40s · t+90s" row). frames is
+    [{ buf, label }] in display order; labels draw in the bar above each cell.
+    Same cell law as joinPNGs below: different sizes top-left align in a
+    common cell, never rescale — a viewport drift IS a finding. */
+export function stripPNGs(frames, opts = {}) {
+  const BAR = 26, GAP = 8, PAD = 6;
+  const INK = [235, 238, 242], BG = [16, 19, 24], RULE = [70, 78, 90];
+  const imgs = frames.map((f) => ({ img: decodePNG(f.buf), label: f.label || "" }));
+  if (!imgs.length) throw new Error("stripPNGs: no frames");
+  const cellW = Math.max(...imgs.map((f) => f.img.width));
+  const cellH = Math.max(...imgs.map((f) => f.img.height));
+  const W = PAD * 2 + cellW * imgs.length + GAP * (imgs.length - 1);
+  const H = PAD * 2 + BAR + cellH;
+  const out = blank(W, H, BG);
+  for (let i = 0; i < imgs.length; i++) {
+    const x0 = PAD + i * (cellW + GAP);
+    blit(out, imgs[i].img, x0, PAD + BAR);
+    drawText(out, imgs[i].label.slice(0, Math.floor(cellW / 12)), x0 + 2, PAD + 6, 2, INK);
+    if (i) {
+      for (let y = PAD + BAR; y < H - PAD; y++) {
+        for (let x = x0 - GAP + 1; x < x0 - 1; x++) {
+          const d = (y * W + x) * 4;
+          out.data[d] = RULE[0]; out.data[d + 1] = RULE[1]; out.data[d + 2] = RULE[2];
+        }
+      }
+    }
+  }
+  if (opts.title) {
+    const tw = String(opts.title).length * 12;
+    drawText(out, opts.title, Math.max(PAD, W - PAD - tw), PAD + 6, 2, INK);
+  }
+  return encodePNG(out);
+}
+
 /** Stitch two PNG buffers into one labelled side-by-side PNG buffer.
     Different-sized sides are allowed and are top-left aligned in a common
     cell — a viewport change between the two builds is itself a finding, and

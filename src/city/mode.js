@@ -609,6 +609,19 @@
       if (CBZ.cityRoofLootReset) CBZ.cityRoofLootReset();  // roofs restock with the fresh run
       if (CBZ.cityVehiclesReset) CBZ.cityVehiclesReset();
       if (CBZ.cityGlassReset) CBZ.cityGlassReset();   // re-glaze every shattered window
+      /* A LIVE RACE DOES NOT SURVIVE A NEW LIFE — abort it, don't let it die
+         confused. Found by the city-host storyboard: nothing here ever told
+         the speedway a reset happened, so a race that was running kept its
+         RACE.active latch while this teardown deleted its cars, and one frame
+         into the NEW run its tick found the player "out of the car" and ended
+         the OLD race as a DNF — popping a results board over the newcomer's
+         opening AND writing a phantom race-finish (a DNF still counts a
+         START) into the fresh character's ledger, which is career arithmetic
+         the new life never earned. Abort first (no result, no round burned,
+         field despawned), then close any results board an already-finished
+         race left standing — the board is a modal that only Esc dismissed. */
+      if (CBZ.cityRaceAbort) { try { CBZ.cityRaceAbort("New life — the weekend is scratched."); } catch (e) {} }
+      if (CBZ.raceHud && CBZ.raceHud.closeResults) { try { CBZ.raceHud.closeResults(); } catch (e) {} }
 
       // spawn population (spawnCityPeds also spawns gangs + seeds families).
       // Multiplayer GUEST: the sim host owns peds/cops/traffic — we render its
