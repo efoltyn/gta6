@@ -336,7 +336,7 @@
      ============================================================ */
   if (CFG.SURV_SHARED_SWIM == null) CFG.SURV_SHARED_SWIM = true;
   function survOn() {
-    return CFG.SURV_SHARED_SWIM !== false && g.mode === "survival" &&
+    return CFG.SURV_SHARED_SWIM !== false && CBZ.islandModeOn(g.mode) &&
       !!(CBZ.surv && CBZ.surv.arena && CBZ.survSeaHeightAt);
   }
   // A descriptor with the shape the rest of this file expects. `minX` must be

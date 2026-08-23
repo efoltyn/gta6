@@ -343,7 +343,7 @@
   // so the mode that is ENTIRELY about people dying gets the one sanctioned
   // popup instead of its own.
   CBZ.onAlways(47.5, function () {
-    if (!g || (g.mode !== "city" && g.mode !== "survival") || CBZ.CONFIG.CITY_KILLFEED_HUD === false) {
+    if (!g || (g.mode !== "city" && !CBZ.islandModeOn(g.mode)) || CBZ.CONFIG.CITY_KILLFEED_HUD === false) {
       if (feedEl && feedEl.childElementCount) { feedEl.innerHTML = ""; feedFP = ""; }
       return;
     }

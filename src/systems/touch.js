@@ -522,7 +522,7 @@
     if (CBZ.cityMountedAnimalAttack && CBZ.cityMountedAnimalAttack(down)) return;
     if (((CBZ.fps && CBZ.fps.active) || (CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive())) && CBZ.fpsFire) CBZ.fpsFire(down);
     else if (down) {
-      if (CBZ.game.mode === "survival") { if (CBZ.grapple) CBZ.grapple.punch(); }
+      if (CBZ.islandModeOn(CBZ.game.mode)) { if (CBZ.grapple) CBZ.grapple.punch(); }
       else if (CBZ.punch) CBZ.punch();
     }
   }

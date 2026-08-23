@@ -314,7 +314,7 @@
      out breath, so on a phone the dial is the ONLY way to know how much air is
      left, and deleting it outright would take that away from a mode the owner
      was not talking about. */
-  const survSwim = () => !!(CBZ.game && CBZ.game.mode === "survival");
+  const survSwim = () => !!(CBZ.game && CBZ.islandModeOn(CBZ.game.mode));
   function dialOff(next) { return next === "mount" || (next === "swim" && survSwim()); }
   function setDialOff(off) {
     if (!dial) return;

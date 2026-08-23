@@ -136,7 +136,7 @@
   let _wetT = 0;
   if (CBZ.onUpdate) CBZ.onUpdate(47.95, function (dt) {
     const S = shoreRig;
-    if (!S || !arena || !CBZ.game || CBZ.game.mode !== "survival") return;
+    if (!S || !arena || !CBZ.game || !CBZ.islandModeOn(CBZ.game.mode)) return;
     _wetT += dt || 0;
     const t = CBZ.waterClock ? CBZ.waterClock() : _wetT;
     const sea = arena_meanY();
@@ -456,7 +456,7 @@
     // rendered the sea one frame behind the level everything else used — and
     // would have left the mesh a frame high on the tick a tsunami ends.
     if (CBZ.onUpdate) CBZ.onUpdate(47.9, function () {
-      if (!arena || !CBZ.game || CBZ.game.mode !== "survival") return;
+      if (!arena || !CBZ.game || !CBZ.islandModeOn(CBZ.game.mode)) return;
       ocean.position.y = arena_meanY();
       if (sharedWater) CBZ.waterDriveDisasterSurface(ocean, arenaWave);
     });
@@ -1442,7 +1442,7 @@
     // frame's height — the one-frame sink/pop. Nothing else reads these meshes,
     // so moving the drive earlier in the frame is inert for every other system.
     CBZ.onUpdate(9.4, function (dt) {
-      if (CBZ.game.mode !== "survival") return;
+      if (!CBZ.islandModeOn(CBZ.game.mode)) return;
       for (let i = 0; i < elevators.length; i++) {
         const e = elevators[i];
         // a collapsed tower parks its lift: the rig stands down with the mesh

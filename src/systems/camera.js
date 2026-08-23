@@ -1556,7 +1556,7 @@
     // smoothed rig height (crouch dips the whole rig). Survival frames the
     // player higher — disasters need you to read the ground around you — and
     // sprinting lifts it a touch more instead of letting it sag low.
-    const surv = CBZ.game.mode === "survival";
+    const surv = CBZ.islandModeOn(CBZ.game.mode);
     const sprinting = surv && !!player.sprint;
     const baseHeight = chuteState ? (chuteCanopy ? 4.15 : 1.55)
       : player.prone ? 0.74 : (player.crouch ? 1.16 : (driving ? 2.35 : (TP ? (shoulder ? (TP.HEIGHT_AIM != null ? TP.HEIGHT_AIM : TP.HEIGHT + 0.1) : TP.HEIGHT) : (shoulder ? 1.64 : (meleeFocus ? 1.44 : (surv ? (sprinting ? 2.28 : 2.08) : 1.82))))));

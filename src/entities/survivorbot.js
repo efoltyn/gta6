@@ -258,7 +258,7 @@
 
   // ---- per-frame update (order 23: after player @10, prison npc @22 is gated off) ----
   CBZ.onUpdate(23, function (dt) {
-    if (CBZ.game.mode !== "survival") return;
+    if (!CBZ.islandModeOn(CBZ.game.mode)) return;
     frame++;
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;   // VIEW: animation + corpse LOD
     const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;                 // SIM: think cadence (see below)
@@ -333,7 +333,7 @@
   const playerEntry = { pos: null, _p: true, isPlayer: true, r: 0.55 };
   function botPos(b) { return b.pos; }
   CBZ.onUpdate(26, function (dt) {
-    if (CBZ.game.mode !== "survival") return;
+    if (!CBZ.islandModeOn(CBZ.game.mode)) return;
     if (!sepGrid) sepGrid = CBZ.makeGrid(CELL);
     sepList.length = 0;
     for (let i = 0; i < CBZ.bots.length; i++) {

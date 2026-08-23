@@ -127,7 +127,7 @@
   // radius; these turn a 7-puff burst into a knee-high haze at the wound rather
   // than a four-metre pink cloud over the yard.
   const MIST_K = 2.4, MIST_A = 0.24;
-  function survMode() { return !!(CBZ.game && CBZ.game.mode === "survival"); }
+  function survMode() { return !!(CBZ.game && CBZ.islandModeOn(CBZ.game.mode)); }
   const GRAV = 24;
   // DECALS ARE UNLIT, AND THE PRISON FLOOR IS WHITE. A pool/wall/streak decal
   // is MeshBasicMaterial: no light touches it, and the renderer's sRGB output
@@ -1420,7 +1420,7 @@
     // so a survival corpse could lie face-down in its own kill pool for the
     // whole round and stay factory-clean. Same test, same throttle, same
     // camera gate — the survival roster was simply never asked.
-    if (CBZ.game && CBZ.game.mode === "survival") stainRoster(CBZ.bots);
+    if (CBZ.game && CBZ.islandModeOn(CBZ.game.mode)) stainRoster(CBZ.bots);
   }
 
   /* ============================================================
@@ -1533,7 +1533,7 @@
   if (CBZ.CONFIG.GORE_WASH == null) CBZ.CONFIG.GORE_WASH = true;
   function washOn() { return CBZ.CONFIG.GORE_WASH !== false; }
   function washDepthAt(x, z) {
-    if (CBZ.game && CBZ.game.mode === "survival") {
+    if (CBZ.game && CBZ.islandModeOn(CBZ.game.mode)) {
       if (!CBZ.survFloodDepthMeanAt) return 0;
       try { const d = CBZ.survFloodDepthMeanAt(x, z); return isFinite(d) ? d : 0; } catch (e) { return 0; }
     }

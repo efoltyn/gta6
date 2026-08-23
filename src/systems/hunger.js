@@ -158,11 +158,11 @@
       // g.hunger — just mirror it so CBZ.player.hunger reads correctly
       // in every mode without touching that file's own state machine.
       CBZ.player.hunger = g.hunger == null ? 100 : g.hunger;
-    } else if (g.mode === "survival" && (!CBZ.CONFIG || CBZ.CONFIG.SURV_NO_HUNGER !== false)) {
+    } else if (CBZ.islandModeOn(g.mode) && (!CBZ.CONFIG || CBZ.CONFIG.SURV_NO_HUNGER !== false)) {
       // disaster mode: hunger does not exist (SURV_NO_HUNGER). Read full so
       // the cross-mode effects below (sprint gate / regen block) never fire.
       CBZ.player.hunger = 100;
-    } else if (g.mode === "survival" || g.mode === "escape") {
+    } else if (CBZ.islandModeOn(g.mode) || g.mode === "escape") {
       if (g._oocHunger == null) g._oocHunger = PLAYER_START;
       const drain = (DRAIN_PER_HR / HOUR) * (P.sprint ? SPRINT_MULT : 1);
       g._oocHunger = clampNum(0, 100, g._oocHunger - drain * dt);
@@ -170,7 +170,7 @@
       if (g._oocHunger <= 0 && !((g.invuln || 0) > 0)) {
         const dmg = STARVE_DMG_PER_SEC * dt;
         // FULL LETHAL outside the city, per the plan — no mercy floor here.
-        if (g.mode === "survival" && CBZ.surv && CBZ.surv.hurt) {
+        if (CBZ.islandModeOn(g.mode) && CBZ.surv && CBZ.surv.hurt) {
           CBZ.surv.hurt({ isPlayer: true }, dmg, { cause: "starved" });
         } else if (g.mode === "escape") {
           P.hp = (P.hp == null ? 100 : P.hp) - dmg;

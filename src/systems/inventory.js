@@ -734,7 +734,7 @@
      uses J/K/L/; (systems/interact.js), so that invariant is untouched. */
   function stashMode() {
     const m = CBZ.game && CBZ.game.mode;
-    return m !== "city" && m !== "survival";
+    return m !== "city" && !CBZ.islandModeOn(m);
   }
 
   // ---------- open / close ----------

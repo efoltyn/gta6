@@ -78,7 +78,7 @@
   // and it was not what was reported. One test, in one place, rather than a
   // mode check copied to each hook.
   function on() {
-    return CBZ.CONFIG.SURV_TRAUMA !== false && !!(CBZ.game && CBZ.game.mode === "survival");
+    return CBZ.CONFIG.SURV_TRAUMA !== false && !!(CBZ.game && CBZ.islandModeOn(CBZ.game.mode));
   }
 
   // ---- the ledger's units ---------------------------------------------------

@@ -216,7 +216,7 @@
 
   // ---- main per-frame driver (playing only) ----
   CBZ.onUpdate(62, function (dt) {
-    if (g.mode === "survival") return;   // the prison difficulty curve has no guards to sharpen in disaster mode
+    if (CBZ.islandModeOn(g.mode)) return;   // the prison difficulty curve has no guards to sharpen on the island
     maybeReset();
 
     ramp = computeRamp(g.elapsed || 0);

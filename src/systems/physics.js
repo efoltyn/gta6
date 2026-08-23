@@ -886,7 +886,7 @@
     // same coordinate space the city calls ocean. Asking it there would refuse
     // every vault in the block once the campaign has built the city. Ask only
     // where the answer is about this world.
-    const wetMode = !CBZ.game || CBZ.game.mode === "city" || CBZ.game.mode === "survival";
+    const wetMode = !CBZ.game || CBZ.game.mode === "city" || CBZ.islandModeOn(CBZ.game.mode);
     if (wetMode && CBZ.cityWaterAt) {
       try { if (CBZ.cityWaterAt(x, z)) return false; } catch (e) {}
     }
@@ -1784,7 +1784,7 @@
     // systems/trauma.js decide whether that landing opened you up. It is the
     // same call grapple.js makes for a bot's landing, so player and bot bleed
     // off one rule. Everything below stays city-only, byte for byte.
-    if (CBZ.game.mode === "survival") {
+    if (CBZ.islandModeOn(CBZ.game.mode)) {
       if (CBZ.trauma && CBZ.surv && !player.dead) CBZ.trauma.slam(CBZ.surv.playerActor, v, { dir: { x: 0, y: 1, z: 0 } });
       return;
     }

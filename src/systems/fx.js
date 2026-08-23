@@ -260,7 +260,7 @@
 
   // ---- one mode-gated updater drives all fire-and-forget effects ----
   CBZ.onUpdate(27, function (dt) {
-    if (CBZ.game.mode !== "survival") return;
+    if (!CBZ.islandModeOn(CBZ.game.mode)) return;
     const g = CBZ.TUNE.gravity;
 
     // flash decays toward 0

@@ -228,7 +228,7 @@
   CBZ.killstreakBreak = breakStreak;
 
   CBZ.onAlways(94, function () {
-    if (CBZ.game.mode === "survival" || CBZ.game.mode === "city") {
+    if (CBZ.islandModeOn(CBZ.game.mode) || CBZ.game.mode === "city") {
       meter.style.display = "none";
       box.classList.remove("pop", "nuke", "ended");
       return;   // killstreaks / tactical-nuke are a prison thing

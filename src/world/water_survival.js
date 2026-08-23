@@ -63,7 +63,7 @@
   // arena must answer "no water" rather than throw inside a render pass.
   function survOn() {
     const g = CBZ.game;
-    return CFG.SURV_SHARED_WATER_FX !== false && !!g && g.mode === "survival" &&
+    return CFG.SURV_SHARED_WATER_FX !== false && !!g && CBZ.islandModeOn(g.mode) &&
       !!(CBZ.surv && CBZ.surv.arena && CBZ.survSeaHeightAt && CBZ.survWaterAt);
   }
 

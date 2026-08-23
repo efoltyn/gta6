@@ -270,7 +270,7 @@
        already asks this one function where the ground is. You fall in because
        there is nothing to stand on, and the landing is what kills you. */
     floorAt(x, z) {
-      if (g.mode !== "survival" || !surv.arena) return 0;
+      if (!CBZ.islandModeOn(g.mode) || !surv.arena) return 0;
       const holes = CBZ.survHoles;
       if (holes && holes.length) {
         for (let i = 0; i < holes.length; i++) {
@@ -388,7 +388,7 @@
   }
 
   CBZ.onAlways(93, function () {
-    const isSurv = g.mode === "survival";
+    const isSurv = CBZ.islandModeOn(g.mode);   // sharksim shares the island's sky
     setShadow(isSurv ? "survival" : "escape");
     if (!isSurv) { if (CBZ.sunTarget) CBZ.sunTarget.position.set(0, 0, 18); return; }
     const A = surv.arena; if (!A) return;
@@ -405,13 +405,16 @@
   // ---- stamina + spectate watcher + last-one-standing check ----
   let specHudT = 0;
   CBZ.onUpdate(30, function (dt) {
-    if (g.mode !== "survival") return;
+    if (!CBZ.islandModeOn(g.mode)) return;
     const P = CBZ.player, S = CBZ.SURV;
     if (P.stamina === undefined) P.stamina = S.staminaMax;
     if (P.sprint) P.stamina = Math.max(0, P.stamina - S.staminaDrain * dt);
     else P.stamina = Math.min(S.staminaMax, P.stamina + S.staminaRegen * dt);
 
-    if (g.state === "playing" && !P.dead && liveBots() === 0) {
+    // LAST ONE STANDING is the DISASTER game's win alone. The shark sim keeps
+    // its crowd restocked, but a restock can lag a frame — an empty beach must
+    // never hand the shark an unearned victory card.
+    if (g.mode === "survival" && g.state === "playing" && !P.dead && liveBots() === 0) {
       surv.stats.placement = 1;
       if (CBZ.winGame) CBZ.winGame("survival");   // fills #survwin + CBZ.recordSurvWin
       const sub = document.querySelector("#survwin .sub");

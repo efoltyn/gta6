@@ -27,7 +27,7 @@
   function isPlayer(a) { return !!(a && (a._p || a.isPlayer)); }
   function realPlayerActor(mode) {
     if (mode === "city" && CBZ.city) return CBZ.city.playerActor;
-    if (mode === "survival" && CBZ.surv) return CBZ.surv.playerActor;
+    if (CBZ.islandModeOn(mode) && CBZ.surv) return CBZ.surv.playerActor;
     return {
       isPlayer: true,
       pos: CBZ.player.pos,
@@ -140,7 +140,7 @@
     const mode = event.mode || CBZ.game.mode;
     if (mode === "city") reactCity(a, event.source, level, severity);
     else if (mode === "escape") reactEscape(a, event.source, level, severity);
-    else if (mode === "survival") reactSurvival(a, event.source, level, severity);
+    else if (CBZ.islandModeOn(mode)) reactSurvival(a, event.source, level, severity);
     // CONTACT HAS A VOICE. This file has classified every body-to-body contact
     // since it shipped and never made a sound — the kind and the severity were
     // computed, remembered, and spent entirely on flee/rage flags. city/read.js

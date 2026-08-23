@@ -3570,7 +3570,7 @@
     // Auto-drop into FIRST-PERSON the moment you actually pick up a gun in
     // third person — FPS-with-a-gun is the intended way to shoot. Only on a
     // brand-new acquisition (first), only mid-play, never in survival.
-    if (first && !fps.active && CBZ.game.state === "playing" && CBZ.game.mode !== "survival" && CBZ.game.mode !== "city") {
+    if (first && !fps.active && CBZ.game.state === "playing" && !CBZ.islandModeOn(CBZ.game.mode) && CBZ.game.mode !== "city") {
       setActive(true);
       fps.fp = Math.max(fps.fp, 0.06);
       // (no announcement — the camera dropping into first person IS the message)
@@ -3585,7 +3585,7 @@
     fps.fp = Math.max(-1.3, Math.min(1.3, fps.fp - e.movementY * SENS * sensMul));
   });
   document.addEventListener("mousedown", (e) => {
-    if (CBZ.game.mode === "survival") return;   // disaster mode: grapple.js owns push/grab/punch
+    if (CBZ.islandModeOn(CBZ.game.mode)) return;   // island games: grapple / the mount own the pointer, not gunplay
     if ((fps.active || shoulderActive()) && CBZ.game.state === "playing" && document.pointerLockElement) {
       e.preventDefault();
       if (e.button === 0) fireControl(true);
@@ -3645,7 +3645,7 @@
     // frames, which produced "leftover" weapon switches after you stopped
     // mashing. Instead we read the live key state once per frame below
     // (rising-edge + cooldown), so buffered duplicates collapse to nothing.
-    else if (k === "f" && (fps.active || shoulderActive()) && CBZ.game.mode !== "survival") fireControl(true);
+    else if (k === "f" && (fps.active || shoulderActive()) && !CBZ.islandModeOn(CBZ.game.mode)) fireControl(true);
     // H: homing on/off (owner toggle). Missile-class contexts only; state
     // cue is the rack sfx pitch + the lock squares standing down — no HUD.
     else if (k === "h" && CBZ.lockonHomingSet &&

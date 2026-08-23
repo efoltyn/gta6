@@ -616,7 +616,7 @@
   // Requires pointer-lock so the click that re-grabs the cursor doesn't swing.
   addEventListener("mousedown", (e) => {
     if (e.button !== 0) return;
-    if (CBZ.game.mode === "survival") return;
+    if (CBZ.islandModeOn(CBZ.game.mode)) return;
     if (CBZ.game.state !== "playing" || !document.pointerLockElement) return;
     if (CBZ.fps && CBZ.fps.active) return;
     if (CBZ.playerArmed && CBZ.playerArmed()) return;

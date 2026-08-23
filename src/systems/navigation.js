@@ -314,7 +314,7 @@
     plan(which, from, to) {
       if (!from || !to) return null;
       if (which === "city") return cityRoute(from, to);
-      if (which === "survival") return survivalRoute(from, to);
+      if (CBZ.islandModeOn(which)) return survivalRoute(from, to);
       return escapeRoute(from, to);
     },
     next(route, pos) { return progress(route, pos); },

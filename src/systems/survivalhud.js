@@ -127,7 +127,7 @@
   }
 
   CBZ.onUpdate(49, function () {
-    if (CBZ.game.mode !== "survival") return;
+    if (!CBZ.islandModeOn(CBZ.game.mode)) return;
     const surv = CBZ.surv;
     if (el.alive) el.alive.textContent = surv.aliveCount();
     if (el.hp) { const h = Math.max(0, CBZ.player.hp); el.hp.style.width = h + "%"; el.hp.style.background = h > 50 ? "#3ad17a" : (h > 22 ? "#ffd451" : "#ff4d4d"); }

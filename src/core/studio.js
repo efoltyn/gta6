@@ -116,6 +116,15 @@
     }
   } catch (e) {}
 
+  /* Same door-holding for CBZ.islandModeOn (owned by config.js): the island
+     predicate is asked inside shared engine files (physics, fx, gore, …) that
+     a slice page loads without config.js. Identical definition, whichever
+     runs first wins the same answer. */
+  if (!CBZ.islandModeOn) {
+    CBZ.ISLAND_MODES = CBZ.ISLAND_MODES || { survival: 1, sharksim: 1 };
+    CBZ.islandModeOn = function (m) { return !!CBZ.ISLAND_MODES[m || (CBZ.game && CBZ.game.mode)]; };
+  }
+
   if (CBZ.CONFIG.STUDIO_V1 == null) CBZ.CONFIG.STUDIO_V1 = true;
   // one-line reverts for the takeoff repair, so before/after can photograph it
   if (CBZ.CONFIG.PLANE_SEATING_V1 == null) CBZ.CONFIG.PLANE_SEATING_V1 = true;

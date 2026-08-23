@@ -46,7 +46,8 @@
   };
   CBZ.fullMap = map;
 
-  function mode() { return CBZ.game.mode || "escape"; }
+  // sharksim reads as "survival" here on purpose: the island map IS its map.
+  function mode() { const m = CBZ.game.mode || "escape"; return m === "sharksim" ? "survival" : m; }
 
   // ---- MAP_V2 (owner's overhaul flag) + the wanted-star read -----------------
   // MAP_V2 on ⇒ icons/marks/labels draw LIVE at the current zoom (never baked

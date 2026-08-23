@@ -1112,7 +1112,7 @@
     // SURVIVAL: the island's crowd rides its own bus (CBZ.bots, not
     // cityPeds), so a mounted shark's mouth has to be told it exists —
     // this is what makes the shark sim's beach a buffet.
-    if (g.mode === "survival" && CBZ.bots) {
+    if (CBZ.islandModeOn(g.mode) && CBZ.bots) {
       const bots = CBZ.bots;
       for (let i = 0; i < bots.length; i++) considerBiteTarget(bots[i], "survivor", mouth, best.d, best);
     }

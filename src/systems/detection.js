@@ -688,7 +688,7 @@
   };
 
   function updateDetection(dt) {
-    if (g.mode === "survival") return;   // no wanted/heat system in disaster mode
+    if (CBZ.islandModeOn(g.mode)) return;   // no wanted/heat system in the island games
     decayCase(dt);
     if (g.invuln > 0) g.invuln -= dt;
     if ((g.racketProtectionT || 0) > 0) {
