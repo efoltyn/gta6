@@ -461,22 +461,35 @@
       // In a vehicle, only the person you are sharing it with gets to talk.
       if (P.driving && ped._vehicle !== P._vehicle) return false;
     }
+    /* ONE LINE, ONE SURFACE (systems/subtitlebus.js). #citySpeech is one of
+       four DOM layers that render speech into the same bottom band, and when
+       two of them carry the SAME sentence the hud.css ladder renders the
+       duplicate a slot higher instead of not at all — which on iPad, where
+       #hint wears this very skin, is the owner's "2 layers of text, slightly
+       offset". A ped bark loses that race to an authored line or to the answer
+       to the player's own verb, and simply doesn't show. */
+    const dur = secs || 2.4;
+    if (CBZ.subtitles && !CBZ.subtitles.claim("citySpeech", "speech", text, dur, speakerName(ped), silenceSpeech)) return false;
     ensureSpeech();
     speechPed = ped;
-    speechT = secs || 2.4;
+    speechT = dur;
     speechNameEl.textContent = speakerName(ped);
     speechTextEl.textContent = String(text).replace(/^[“\"]|[”\"]$/g, "");
     speechEl.style.setProperty("--speaker-color", color || "#dfe7ff");
     speechEl.classList.add("show");
     return true;
   }
+  // Drop the line NOW. Called both by the tick (the line aged out) and by the
+  // subtitle desk when a higher-ranked surface takes this sentence off us.
+  function silenceSpeech() {
+    speechT = 0; speechPed = null;
+    if (speechEl) speechEl.classList.remove("show");
+    if (CBZ.subtitles) CBZ.subtitles.release("citySpeech");
+  }
   function tickBubbles(dt) {
     if (speechT <= 0) return;
     speechT -= dt;
-    if (speechT <= 0 || !speechPed || speechPed.dead) {
-      speechT = 0; speechPed = null;
-      if (speechEl) speechEl.classList.remove("show");
-    }
+    if (speechT <= 0 || !speechPed || speechPed.dead) silenceSpeech();
   }
   // peds.js leans on the same pooled bubbles for its relationship barks (the
   // cross-street mutter, the by-name greeting, the snitch point-out) — same
@@ -612,7 +625,7 @@
   CBZ.citySocialInit = function () {
     g.cityPartner = null; g.citySpouse = false; g.cityHostage = null;
     clearBeacon(); kidnapCD = 12;
-    speechT = 0; speechPed = null; if (speechEl) speechEl.classList.remove("show");
+    silenceSpeech();
     clubT = 0; queueT = 0; gossipT = 2; eventT = 6; routineT = 1.5;
     // fresh run: the prior spawn's family bodies were already disposed by
     // clearCityPeds (they live in CBZ.cityPeds); just drop our stale refs.
@@ -955,7 +968,7 @@
     if (CBZ.cityKinshipReset) { try { CBZ.cityKinshipReset(); } catch (e) {} }
     clearBeacon(); kidnapCD = 12;
     // retire any live subtitle + pending rumors
-    speechT = 0; speechPed = null; if (speechEl) speechEl.classList.remove("show");
+    silenceSpeech();
     RUMORS.length = 0;
     // drop refs to spawned family bodies — they're disposed with the rest of the
     // population by the clearCityPeds that follows on a fresh spawn.

@@ -1,4 +1,7 @@
 node_modules/
+# the worktree setup symlinks node_modules from the main checkout; the
+# trailing-slash rule above does not match a symlink, so cover it bare
+node_modules
 *.log
 .DS_Store
 server/worlds/
@@ -25,6 +28,11 @@ artifacts/visual-comparisons/
 artifacts/storyboards/
 # The running city host's portfile (tools/cityhost.mjs).
 tools/.cityhost.json
+# Same thing, one level up: a hand-picked SELECTION of those reports gathered
+# for review (the disaster-roster pass copied one final PDF per disaster here
+# to hand over). Still generated output, still tens of megabytes, still not
+# something git should carry — the run that produced it is the source of truth.
+artifacts/disaster-roster-pdfs/
 
 # Local third-party/reference inputs. These are inspected as design sources,
 # never loaded by the game and should not be published by GitHub Pages.
@@ -45,3 +53,8 @@ disaster.candidate-*.html
 # regenerates it in a second, and Capacitor copies it into the app at sync
 # time; nothing needs the committed copy.
 dist-ios/
+
+# Natural Disaster Survival's Xcode project — GENERATED on the Mac
+# (cd apps/disaster-ios && npx cap add ios), then patched by tools/setup-ios.mjs.
+# Gang Life's project at ios/App is the opposite: committed, hand-tuned, tracked.
+apps/disaster-ios/ios/

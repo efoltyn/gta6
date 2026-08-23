@@ -849,6 +849,24 @@
   const cabinMat = () => sharedMat("interior-v2", 0x333a44, { emissive: 0x1a202a, ei: 0.85 });
   const cabinLiteMat = () => sharedMat("interior-lite", 0x545b66, { emissive: 0x343b46, ei: 0.85 });
   const clusterMat = () => sharedMat("interior-screen", 0x0e141b, { emissive: 0x1d4560, ei: 0.9 });
+  /* CAR_CABIN_V3 — the cabin reads as a ROOM, not a filled block.
+     MEASURED (before/after, backseat + cutaway plates): with every soft
+     surface in the one pale "interior-lite" tone, the parcel shelf, bench,
+     seats and headliner fused into a single flat mass pressed against the
+     glass — through the backlight the car read as a body-coloured SOLID, and
+     an occupant blob (its lift sits at the same value) merged straight into
+     it. A real interior is read by VALUE STEPS: near-black shelf and
+     structure, dark seats, pale headliner, and a body that is BRIGHTER than
+     the seat behind it. So seats get their own upholstery tone — one extra
+     shared material, i.e. one extra merged bucket per enclosed car — and the
+     shelf joins the dark structure. The headliner stays pale: it is the one
+     surface a high camera reads, and darkening it is the "black void" fault
+     this file already documented. */
+  if (CFG.CAR_CABIN_V3 == null) CFG.CAR_CABIN_V3 = true;
+  const cabinV3 = () => CFG.CAR_CABIN_V3 !== false;
+  const cabinSeatMat = () => cabinV3()
+    ? sharedMat("interior-seat", 0x40454e, { emissive: 0x20242c, ei: 0.85 })
+    : cabinLiteMat();
 
   /* dressCabin(root, o) -> cabinInfo (also written to root.userData.cabinInfo)
        o.cabW    cabin base width (the glass tub's base width)
@@ -940,37 +958,44 @@
     // ---- SEATS. Base, back, headrest — the three shapes that read as a car
     //      seat from outside, and the crown of the headrest stops just under
     //      the eye so a driver's head sits ABOVE it (the reference photo).
+    // Upholstery tone (V3): darker than the headliner, lighter than the
+    // structure — the value step that separates a seat from the roof above it
+    // and lets a seated body read BRIGHTER than the cushion behind it.
+    const S = cabinSeatMat();
     function seat(x, z, bh, hr) {
-      addBox(root, 0.46, 0.13, 0.48, x, cushionY - 0.065, z, L);
-      const back = addBox(root, 0.46, bh, 0.12, x, cushionY + bh * 0.5, z - 0.24, L);
+      addBox(root, 0.46, 0.13, 0.48, x, cushionY - 0.065, z, S);
+      const back = addBox(root, 0.46, bh, 0.12, x, cushionY + bh * 0.5, z - 0.24, S);
       back.rotation.x = -0.12;                                                 // recline
-      // bolsters: two dark uprights framing the pale back. Cheap, and the
+      // bolsters: two dark uprights framing the back. Cheap, and the
       // difference between "a slab" and "a seat" at any distance.
       [0.20, -0.20].forEach(function (bx) {
         const bo = addBox(root, 0.07, bh * 0.86, 0.16, x + bx, cushionY + bh * 0.5, z - 0.22, M);
         bo.rotation.x = -0.12;
       });
-      // HEADREST, in the PALE upholstery tone. A real one is ~0.25 m tall and
-      // it is the ONLY part of a seat that clears the window sill — so it is
-      // the entire outside read, the one shape a passing camera can use to
-      // tell a furnished cabin from an empty one. Its base sits on the sill
-      // and its crown stands a hand above, which puts it either side of the
-      // driver's head rather than under it.
-      if (hr) addBox(root, 0.25, 0.22, 0.13, x, cushionY + bh + 0.10, z - 0.27, L);
+      // HEADREST. A real one is ~0.25 m tall and it is the ONLY part of a
+      // seat that clears the window sill — so it is the entire outside read,
+      // the one shape a passing camera can use to tell a furnished cabin from
+      // an empty one. Its base sits on the sill and its crown stands a hand
+      // above, which puts it either side of the driver's head rather than
+      // under it.
+      if (hr) addBox(root, 0.25, 0.22, 0.13, x, cushionY + bh + 0.10, z - 0.27, S);
     }
     seat(seatX, seatZ, backH, true);
     seat(-seatX, seatZ, backH, true);
     if (rows > 1) {
       const rbh = Math.max(0.24, backH * 0.80);
-      addBox(root, cabW * 0.80, 0.13, 0.44, 0, cushionY - 0.065, rearZ, L);
-      const rb = addBox(root, cabW * 0.80, rbh, 0.12, 0, cushionY + rbh * 0.5, rearZ - 0.22, L);
+      addBox(root, cabW * 0.80, 0.13, 0.44, 0, cushionY - 0.065, rearZ, S);
+      const rb = addBox(root, cabW * 0.80, rbh, 0.12, 0, cushionY + rbh * 0.5, rearZ - 0.22, S);
       rb.rotation.x = -0.16;
       [seatX, -seatX].forEach(function (x) {
-        addBox(root, 0.22, 0.14, 0.11, x, cushionY + rbh + 0.07, rearZ - 0.25, L);
+        addBox(root, 0.22, 0.14, 0.11, x, cushionY + rbh + 0.07, rearZ - 0.25, S);
       });
-      // parcel shelf behind the bench, so the backlight has something under it
+      // parcel shelf behind the bench, so the backlight has something under
+      // it. DARK (V3): a real shelf is near-black, and the pale version was
+      // the single surface that made the whole tail read as a filled solid —
+      // it is the thing a chase camera looks at all game.
       addBox(root, cabW * 0.86, 0.05, Math.max(0.12, (rearZ - 0.30) - (zR + 0.09)), 0,
-        beltY - 0.05, (rearZ - 0.30 + zR + 0.09) * 0.5, L);
+        beltY - 0.05, (rearZ - 0.30 + zR + 0.09) * 0.5, cabinV3() ? M : L);
     }
     // centre console + transmission tunnel between the front seats
     addBox(root, Math.max(0.16, cabW * 0.14), Math.max(0.14, cushionY + 0.10 - floorY),
@@ -1033,6 +1058,12 @@
       // the V2 frame
       floorY: floorY, roofY: roofY, beltY: beltY,
       zRear: zR, zFront: zF, rows: rows,
+      // where the ROOF starts at the tail — the backlight rakes from the
+      // beltline at zRear up to full height here. vehicles.js clamps a rear
+      // occupant under that plane (V3): a body scaled for the front eye put
+      // its crown through the raked glass, which is the filmed "passenger
+      // merged with the car".
+      zRoofRear: zTR,
       cushionY: cushionY, seatX: seatX, seatZ: seatZ, rearSeatZ: rows > 1 ? rearZ : null,
       wheel: { x: seatX, y: wheelY, z: wheelZ, r: wheelR },
       // THE FIRST-PERSON EYE. Offset forward of the seat frame by the depth
@@ -1188,9 +1219,17 @@
     // lie in the rake plane (one rotation.x each); B-pillars are vertical.
     const bpZ = (fT[0] + rT[0]) * 0.5;
     const pillarX = (cabW * 0.5 + roofW * 0.5) * 0.5 - 0.005;
+    /* PILLARS FOLLOW THE TUMBLEHOME (V3). The glass leans inboard toward the
+       roof (roofTuck), but the pillar bars used to stand in a vertical plane
+       at the AVERAGE x — touching the glass edge at exactly one height and
+       floating off it everywhere else, which is most of why the greenhouse
+       photographed as scaffolding around a tub instead of a glasshouse.
+       One z-lean per pillar lays the bar along the real edge line. */
+    const tumble = cabinV3() ? Math.atan2((cabW - roofW) * 0.5, Math.max(0.12, peakY)) : 0;
     [1, -1].forEach(function (side) {
       const bp = addBox(root, 0.035, peakY * 0.94, 0.05, side * pillarX, cabBaseY + peakY * 0.48, bpZ, paint);
       bp.castShadow = false;
+      bp.rotation.z = side * tumble;
       // A-pillar (front rake edge) and C-pillar (rear rake edge)
       [[fB, fT, 1], [rB, rT, -1]].forEach(function (edge) {
         const bot = edge[0], top = edge[1];
@@ -1198,9 +1237,20 @@
         const el = Math.hypot(dz, dy);
         const pm = addBox(root, 0.05, el * 1.02, 0.055, side * pillarX, cabBaseY + (bot[1] + top[1]) * 0.5, (bot[0] + top[0]) * 0.5, paint);
         pm.rotation.x = Math.atan2(dz, dy);
+        pm.rotation.z = side * tumble;
         pm.castShadow = false;
       });
     });
+    // DLO TRIM (V3): a slim near-black band where the glass meets the body —
+    // the shadow line every real car carries at its beltline. It is the
+    // single cheapest cue that the greenhouse is an OPENING cut into the
+    // body rather than a patch painted on it. Reuses the sill bucket.
+    if (cabinV3()) {
+      const dlo = addBox(root, cabW + 0.022, 0.05, cabLen * 0.985, 0, cabBaseY + 0.012, cabCx, sharedMat("sill-" + style, 0x14171c));
+      // noSeal: sealSeams' wide-flat-panel rule would skirt this 0.45 m down
+      // the body — a black band over both doors instead of a trim line.
+      dlo.userData.noSeal = true;
+    }
     // paint cowl at the windshield base so the glass meets bodywork, not air.
     addBox(root, cabW * 0.94, 0.10, 0.12, 0, cabBaseY + fB[1] + 0.05, fB[0] - 0.02, paint);
 
@@ -1451,18 +1501,30 @@
       addBox(root, w * 0.72 + 0.14, 0.045, 0.07, 0, cabBaseY + peakY + 0.13, sideMidZ + sideLen * fz, rail);
     });
     const pillarXs = (cabWs * 0.5 + roofWs * 0.5) * 0.5 - 0.005;
+    // pillars lean with the tumblehome so they lie ON the glass edge instead
+    // of touching it at one height and floating everywhere else (V3 — same
+    // fix as makeRoadCar, and this greenhouse is the tallest in the fleet, so
+    // the float was worst here: A-pillars visibly ended in mid-air).
+    const tumbleS = cabinV3() ? Math.atan2((cabWs - roofWs) * 0.5, Math.max(0.12, peakY)) : 0;
     [1, -1].forEach(function (side) {
       const bp = addBox(root, 0.04, peakY * 0.94, 0.06, side * pillarXs, cabBaseY + peakY * 0.48, sideMidZ, paint);
       bp.castShadow = false;
+      bp.rotation.z = side * tumbleS;
       [[fB, fT], [rB, rT]].forEach(function (edge) {
         const bot = edge[0], top = edge[1];
         const dz = top[0] - bot[0], dy = top[1] - bot[1];
         const el = Math.hypot(dz, dy);
         const pm = addBox(root, 0.055, el * 1.02, 0.06, side * pillarXs, cabBaseY + (bot[1] + top[1]) * 0.5, (bot[0] + top[0]) * 0.5, paint);
         pm.rotation.x = Math.atan2(dz, dy);
+        pm.rotation.z = side * tumbleS;
         pm.castShadow = false;
       });
     });
+    // DLO trim at the glass base (V3) — see makeRoadCar.
+    if (cabinV3()) {
+      const dloS = addBox(root, cabWs + 0.022, 0.05, cb * 2 * 0.985, 0, cabBaseY + 0.012, cabCx, trim);
+      dloS.userData.noSeal = true;
+    }
     [1, -1].forEach(function (side) {
       addBox(root, 0.16, 0.12, 0.24, side * (w * 0.55), bodyTop + 0.10, fB[0] - 0.05, trim);  // door mirrors at the A-pillar base
       // door seam insets + chrome handles at the beltline (front/rear door split)

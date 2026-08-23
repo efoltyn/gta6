@@ -727,9 +727,18 @@
           if (h < lo) { lo = h; la = a; }
         }
         ctx.st.wx = Math.cos(la); ctx.st.wz = Math.sin(la);
-        // deliberately UNDER the smallest hill's peak (7) and every building
-        // floor slab: the flood takes the streets, never the refuges
-        ctx.st.peak = Math.min(5.6, 3.5 + scale(2.2, ctx));
+        /* V2 (systems/flashflood.js): the sea stays a COASTAL detail. The old
+           3.5-5.6 m surge put the whole island under the ocean plane — a
+           regional sea flood wearing the flash flood's name, and it visually
+           erased the channel front this def computes (measured 2026-08-23:
+           the "lake" frame was open sea with a cone poking out). The flash
+           flood is the RAIN's water — the groundwater field, which runs the
+           channel, carries the front and takes the mud — so V2 gives the sea
+           only the modest rise a coast really sees in a cloudburst. */
+        const v2 = CBZ.CONFIG.FLASHFLOOD_V2 !== false && CBZ.flashflood;
+        // (legacy: deliberately UNDER the smallest hill's peak (7) and every
+        // building floor slab — the flood takes the streets, never the refuges)
+        ctx.st.peak = v2 ? Math.min(1.6, 0.7 + scale(0.45, ctx)) : Math.min(5.6, 3.5 + scale(2.2, ctx));
         // metres of standing water in the channel at the height of it: well
         // over two feet, so cars float and the low streets genuinely swim
         ctx.st.pool = Math.min(2.4, 1.15 + scale(0.62, ctx));
@@ -748,6 +757,10 @@
         // looking DOWN — which is exactly where the danger is about to be.
         weather({ rain: 0.25 + k * 0.72, wind: 4 + k * 5, windDir: { x: ctx.st.wx, z: ctx.st.wz },
           fog: k * 0.5, fogColor: 0x59636b, pool: 0.02 + k * 0.16 });
+        // the gutters BROWN as they fill — runoff carries sediment before it
+        // carries anything else, and it is the honest half of the telegraph
+        if (CBZ.CONFIG.FLASHFLOOD_V2 !== false && CBZ.weatherFloodLook)
+          CBZ.weatherFloodLook({ mud: 0.35 * k, crest: 0, band: 0, flow: 0 });
         if (rnd() < dt * 3 * k) sound("water");
       },
       start(ctx) {
@@ -782,11 +795,38 @@
           ctx.st.frontS += ctx.st.frontV * dt;
           // past the halfway mark the wall has done its work and the event is
           // a lake: dropping the front lets the level stand everywhere
-          if (u > 0.55 || ctx.st.frontS > ctx.R + 60) CBZ.groundWaterFrontSet(null);
-          else CBZ.groundWaterFrontSet({
+          const v2 = CBZ.CONFIG.FLASHFLOOD_V2 !== false && CBZ.flashflood;
+          const frontLive = !(u > 0.55 || ctx.st.frontS > ctx.R + 60);
+          const front = frontLive ? {
             x: ctx.cx, z: ctx.cz, dx: ctx.st.wx, dz: ctx.st.wz,
-            s: ctx.st.frontS, width: 15, crest: 0.6, speed: ctx.st.frontV,
-          });
+            // V2 stands the crest visibly proud of the water behind it — the
+            // "wall" is a real term in the shared depth field, never a mesh
+            s: ctx.st.frontS, width: 15, crest: v2 ? 0.95 : 0.6, speed: ctx.st.frontV,
+          } : null;
+          CBZ.groundWaterFrontSet(front);
+          /* THE FRONT'S FACE — systems/flashflood.js: the churn spray thrown
+             off the crest, the entrained debris tumbling behind it, the mud
+             that makes the water opaque and the roar that places the wall by
+             ear. All read the SAME front descriptor and the SAME depth field;
+             none of it is a water plane. Degrade-safe: without the file (or
+             with FLASHFLOOD_V2=0) this def plays the flood it always played. */
+          if (v2) CBZ.flashflood.drive(front, { dt: dt, pool: pk, u: u });
+          /* THE SEA TAKES THE SAME MUD. The runoff that browned the streets
+             discharges at the coast, and the ocean shader already owns a
+             sediment palette (world/water_spec.js's turbid block, the
+             tsunami's landfall soup) driven off the arena's own wave record —
+             so the flooded shoreline cannot render clean holiday blue beside
+             a chocolate street. Same lever the tsunami uses, nothing new. */
+          if (v2) {
+            const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
+            if (W) {
+              W.sediment = Math.min(1, 0.55 + pk * 0.3);
+              W.frontC = [ctx.cx, ctx.cz];
+              W.frontDir = [ctx.st.wx, ctx.st.wz];
+              W.frontS = frontLive ? ctx.st.frontS : ctx.R * 2;
+              W.frontRun = 130;
+            }
+          }
         }
         // a real downhill current in the inundation, published on the ONE
         // water-event descriptor so the swimmer and the debris both feel it
@@ -807,8 +847,11 @@
       end(ctx) {
         weatherOff(); surgeSet(0);
         if (CBZ.groundWaterFrontSet) CBZ.groundWaterFrontSet(null);
+        if (CBZ.flashflood) CBZ.flashflood.clear();
         const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
-        if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; }   // the sea settles back down
+        // the sea settles back down — and the sediment goes with it (one
+        // match's soup must never tint the next event's clean water)
+        if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; W.sediment = 0; }
         if (CBZ.waterEventClear) CBZ.waterEventClear("survival-flood");
       },
       threat(x, z, ctx) {
@@ -828,25 +871,57 @@
       },
     },
 
-    // ---- HURRICANE: shrieking wind drags everyone downwind, blinding rain,
-    //      swirling debris, and violent gusts that knock you flat. The wind
-    //      direction slowly veers, so high ground alone won't save you. ----
+    // ---- HURRICANE: a cyclone with STRUCTURE. systems/hurricane.js owns the
+    //      field — a storm CENTER tracks across the island, so the arc is
+    //      geometry, not a script: outer bands as the wall approaches, the
+    //      front eyewall at full scream, then the EYE (sudden calm, the sky
+    //      opens, the crowd walks back into the open — the trap), then the
+    //      back wall from the OPPOSITE direction, then the tail. The surge is
+    //      the killer and it goes through the ONE water lever (surgeSet), so
+    //      the drowning, the floating cars and the corpses all come free.
+    //      HURRICANE_V2=false (or hurricane.js missing) plays the legacy
+    //      windstorm below, verbatim. ----
     hurricane: {
-      name: "HURRICANE", emoji: "", warnSecs: 5, activeSecs: 20, gap: 7, cause: "killed by hurricane debris", tint: 0x46505a,
-      // THE WIND RAMPS FROM ZERO. You feel yourself start to lean before the
-      // storm is anywhere near full strength, and the debris streaming past at
-      // ground level tells you which way it is going — which is the ONE piece
-      // of information the old banner was trying to convey. The wind vector is
-      // now THE weather's wind (systems/weather.js), not a third private one.
+      name: "HURRICANE", emoji: "", warnSecs: 5, gap: 7, cause: "killed by hurricane debris", tint: 0x46505a,
+      // an eye + two eyewalls need room to be three different experiences;
+      // the legacy windstorm keeps its old 20 s
+      get activeSecs() { return this._v2() ? 26 : 20; },
+      _v2() { return CBZ.CONFIG.HURRICANE_V2 !== false && !!CBZ.hurricane; },
       warn(ctx) {
         narrate("hint", "HURRICANE inbound, brace and hold on!", 3); sound("wind");
         const a = rnd() * 6.28; ctx.st.wx = Math.cos(a); ctx.st.wz = Math.sin(a);
         ctx.st.gustCd = 2; ctx.st.turn = (rnd() - 0.5) * 0.2;
+        if (this._v2()) {
+          // the TRACK is a rule (it decides who floods and who stands in the
+          // wall), so its bearing and offset come from the seeded stream
+          ctx.st.h2 = 1;
+          CBZ.hurricane.begin({
+            cx: ctx.cx, cz: ctx.cz, R: ctx.R, intensity: ctx.intensity,
+            duration: this.warnSecs + this.activeSecs,
+            bearing: a, offset: (rnd() - 0.5) * ctx.R * 0.35,
+          });
+          return;
+        }
         ctx.st.debris = CBZ.fx.particleCloud({ mode: "swirl", color: 0x7a6f5a, count: 200, radius: ctx.R * 0.7, top: 10, size: 0.3, opacity: 0.6, vMin: 8, vMax: 16 });
         ctx.st.debris.setActive(0.15);
       },
       warnTick(dt, ctx) {
         const k = 1 - dir.t / (this.warnSecs || 1);
+        if (ctx.st.h2) {
+          // the OUTER BANDS: the field's own far edge is already over the
+          // island, so the first squalls and the first lean are the real
+          // storm arriving, not a scripted ramp
+          const H = CBZ.hurricane;
+          H.tick(dt, camPos().x, camPos().z);
+          weather(H.localWeather(camPos().x, camPos().z));
+          const w = H.windAt(CBZ.player.pos.x, CBZ.player.pos.z);
+          const p = CBZ.player._phys || (CBZ.player._phys = { kx: 0, kz: 0 });
+          p.kx = (p.kx || 0) + w.x * w.speed * 0.09 * k * dt;
+          p.kz = (p.kz || 0) + w.z * w.speed * 0.09 * k * dt;
+          if (CBZ.shake) CBZ.shake(Math.min(0.12, 0.02 + w.speed * 0.004));
+          if (rnd() < dt * 2 * k) sound("wind");
+          return;
+        }
         weather({ rain: k * 0.5, wind: k * 14, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: k * 0.35, fogColor: 0x46505a });
         ctx.st.debris.setActive(0.15 + k * 0.5);
         ctx.st.debris.update(dt, camPos().x, 3, camPos().z);
@@ -859,11 +934,18 @@
         if (rnd() < dt * 2 * k) sound("wind");
       },
       warnThreat() { return 0.35; },
-      warnSafeDir(x, z, ctx) { return { x: -(ctx.st.wx || 0), z: -(ctx.st.wz || 0) }; },
+      warnSafeDir(x, z, ctx) {
+        if (ctx.st.h2) return CBZ.hurricane.safeDir(x, z);
+        return { x: -(ctx.st.wx || 0), z: -(ctx.st.wz || 0) };
+      },
       start(ctx) {
+        if (ctx.st.h2) return;                       // the field is already live
         ctx.st.debris.setActive(0.8);
       },
       active(dt, ctx) {
+        // h2 set means V2 ran this storm — never fall into the legacy body
+        // (its state was never built) even if the module's storm is gone
+        if (ctx.st.h2) { if (CBZ.hurricane && CBZ.hurricane.active()) this._v2Active(dt, ctx); return; }
         ctx.env.fog = 0x46505a; ctx.env.fogNear = 16; ctx.env.fogFar = 120; ctx.env.sunInt = 0.5; ctx.env.hemiColor = 0x8a98a6;
         ctx.st.debris.update(dt, camPos().x, 4, camPos().z);
         // the wind slowly veers so its direction can't be simply outrun
@@ -900,19 +982,178 @@
           structureSweep(ctx.cx, ctx.cz, ctx.R, 0.02 + 0.02 * ctx.intensity, ctx, { kind: "tornado", dirx: wx, dirz: wz });
         }
       },
-      end(ctx) { weatherOff(); if (ctx.st.debris) ctx.st.debris.dispose(); },
-      threat(x, z, ctx) { return 0.4; },
-      safeDir(x, z, ctx) { return { x: -(ctx.st.wx || 0), z: -(ctx.st.wz || 0) }; },
+      /* THE V2 STORM. Everything below reads the FIELD at each body's own
+         position — there is no "the wind" any more, only the wind where you
+         are standing, which is what makes the eye a real place. */
+      _v2Active(dt, ctx) {
+        const H = CBZ.hurricane;
+        H.tick(dt, camPos().x, camPos().z);
+        const S = H.state();
+        ctx.st.x = S.eyeX; ctx.st.z = S.eyeZ;        // the minimap tracks the EYE
+        // the drift bearing shared helpers read (floodActors, car floats):
+        // the storm's forward motion — what actually carries floodwater inland
+        ctx.st.wx = S.fwdX; ctx.st.wz = S.fwdZ;
+        // sky + weather are LOCAL to the camera: eyewall = whiteout,
+        // eye = the rain stops and the sun comes out. The clearing is the trap.
+        const lw = H.localWeather(camPos().x, camPos().z);
+        weather(lw);
+        const rCam = Math.hypot(camPos().x - S.eyeX, camPos().z - S.eyeZ);
+        if (rCam < S.eyeR) {
+          const u = 1 - rCam / S.eyeR;
+          ctx.env.fog = 0x93a7b8; ctx.env.fogNear = 40; ctx.env.fogFar = 220 + 800 * u;
+          ctx.env.sunInt = 0.55 + 0.65 * u; ctx.env.hemiColor = 0xc2d3e0; ctx.env.hemiInt = 0.75;
+        } else {
+          ctx.env.fog = 0x46505a; ctx.env.fogNear = 14;
+          ctx.env.fogFar = Math.max(55, 200 - lw.wind * 3.2);
+          ctx.env.sunInt = 0.45; ctx.env.hemiColor = 0x8a98a6;
+        }
+        if (CBZ.shake) CBZ.shake(Math.min(0.42, lw.wind * 0.009));
+        if (rnd() < dt * (0.4 + lw.wind * 0.05)) sound("wind");
+        // ---- THE SURGE: the sea is one number and this drives it ----
+        surgeSet(S.surge);
+        if (S.surge > 0.5) {
+          publishSheetFlood(ctx, "flooded", S.surge, 1.1);
+          let dead0 = 0;
+          for (let i = 0; i < CBZ.bots.length; i++) if (CBZ.bots[i].dead) dead0++;
+          floodActors(dt, ctx, 1.15, "drowned in the storm surge", S.fwdX, S.fwdZ);
+          /* THE WATER IS THE KILLER — the real event's own arithmetic. The
+             flash flood's 7/s bleed never crosses 100 hp in the surge's ~10 s
+             of deep water, which makes the surge a light show. A second bleed
+             on whoever is still swimming when the water is over 2 m deep
+             makes deep water lethal on the surge's own timescale while the
+             shallows stay survivable — run UP, not just out. */
+          for (let i = 0; i < CBZ.bots.length; i++) {
+            const b = CBZ.bots[i];
+            if (b.dead || !b._survSwim) continue;
+            if (floodDepth(b.pos.x, b.pos.z) > 2) surv().hurt(b, scale(6, ctx) * dt, { cause: "drowned in the storm surge" });
+          }
+          let dead1 = 0;
+          for (let i = 0; i < CBZ.bots.length; i++) if (CBZ.bots[i].dead) dead1++;
+          H.count("drownings", Math.max(0, dead1 - dead0));
+          // TWO FEET FLOATS A CAR — same threshold as the flash flood
+          if (ctx.arena.cars) for (let i = 0; i < ctx.arena.cars.length; i++) {
+            const car = ctx.arena.cars[i];
+            if (car.flung) continue;
+            if (floodDepth(car.x, car.z) > 0.6) flingCar(car, S.fwdX, S.fwdZ, 3.2 + scale(2.2, ctx), 1.1);
+          }
+          if (rnd() < dt * 3) sound("water");
+        }
+        // ---- wind loads on every body, from the field at THEIR feet ----
+        surv().forEachActor(function (a) {
+          if (CBZ.body && CBZ.body.busy(a)) return;
+          if (sheltered(a)) return;                  // a roof still breaks the wind
+          const w = H.windAt(a.pos.x, a.pos.z);
+          const drag = w.speed * (0.14 + 0.06 * ctx.intensity);
+          if (a.isPlayer) {
+            const p = CBZ.player._phys || (CBZ.player._phys = { kx: 0, kz: 0 });
+            p.kx = (p.kx || 0) + w.x * drag * dt; p.kz = (p.kz || 0) + w.z * drag * dt;
+          } else {
+            a.pos.x += w.x * drag * dt; a.pos.z += w.z * drag * dt;
+            if (CBZ.collide) CBZ.collide(a.pos, 0.5);
+            a.pos.y = floor(a.pos.x, a.pos.z);
+          }
+          // FLYING DEBRIS IS THE WOUND: at eyewall speeds loose material is
+          // airborne and a strike is a real hit, not ambient chip damage
+          if (w.speed > 24 && rnd() < dt * (w.speed - 24) * 0.022) {
+            H.count("debrisStrikes", 1);
+            if (CBZ.body) CBZ.body.hit(a, { dir: { x: w.x, z: w.z }, force: 6 + w.speed * 0.22, knockdown: rnd() < 0.4 ? 1.0 : 0 });
+            const wasDead = !!a.dead;
+            // a 2x4 at eyewall speed is a wound, not chip damage — ~14-20 by
+            // intensity, so repeated strikes on someone who stays in the open
+            // genuinely finish them
+            surv().hurt(a, scale(14, ctx), { cause: "killed by hurricane debris", dir: { x: w.x, z: w.z } });
+            if (!wasDead && a.dead) H.count("debrisKills", 1);
+          }
+        });
+        // ---- gust turbulence on top of the mean field ----
+        ctx.st.gustCd -= dt;
+        if (ctx.st.gustCd <= 0) {
+          ctx.st.gustCd = 1.4 + rnd() * 1.7;
+          H.count("gusts", 1);
+          sound("wind");
+          const camW = H.windAt(camPos().x, camPos().z);
+          if (CBZ.shake && camW.speed > 14) CBZ.shake(Math.min(0.5, camW.speed * 0.012));
+          surv().forEachActor(function (a) {
+            if (sheltered(a)) return;
+            const w = H.windAt(a.pos.x, a.pos.z);
+            if (w.speed < 16) return;                // the eye's calm is REAL
+            const down = rnd() < Math.min(0.55, (w.speed - 16) * 0.02);
+            if (down) H.count("knockdowns", 1);
+            if (CBZ.body) CBZ.body.hit(a, { dir: { x: w.x, z: w.z }, force: 4 + w.speed * 0.24, knockdown: down ? 1.0 : 0 });
+          });
+        }
+        // ---- the EYEWALL scours the roofs it is standing over — an annulus
+        //      that walks across the town with the storm, so damage maps the
+        //      track. Budget: wall-dwell ≈ glass-out + some spall, never a
+        //      levelled town (the ledger is shared with the quake and the
+        //      wave). Batched to 4 Hz — per-frame ring walks were the single
+        //      biggest V2 sim cost and the ledger integrates the same total.
+        ctx.st.scourCd = (ctx.st.scourCd || 0) - dt;
+        if (ctx.st.scourCd <= 0) {
+          ctx.st.scourCd += 0.25;
+          structureSweepRing(ctx, S.eyeX, S.eyeZ, S.eyeR, S.rmw * 2.3,
+            (0.032 + 0.022 * ctx.intensity) * 0.25);
+        }
+      },
+      end(ctx) {
+        weatherOff();
+        if (ctx.st.h2) {
+          CBZ.hurricane.end();
+          surgeSet(0);
+          if (CBZ.waterEventClear) CBZ.waterEventClear("survival-flood");
+          const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
+          if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; }
+          return;
+        }
+        if (ctx.st.debris) ctx.st.debris.dispose();
+      },
+      threat(x, z, ctx) {
+        if (ctx.st.h2 && CBZ.hurricane.active()) {
+          if (floodDepth(x, z) > 0.4) return 0.85;    // the water outranks the wind
+          return CBZ.hurricane.threat(x, z);
+        }
+        return 0.4;
+      },
+      safeDir(x, z, ctx) {
+        if (ctx.st.h2 && CBZ.hurricane.active()) {
+          const S = CBZ.hurricane.state();
+          // flooded or about to be: the answer is UP, measured in world Y
+          // (same lesson the flash flood's safeDir learned)
+          if (S.surge > 0.5 && floodDepth(x, z) > -1.0) {
+            const rest = ctx.arena.oceanY != null ? ctx.arena.oceanY : -0.8;
+            return uphill(ctx, x, z, rest + S.surgeMax + 1.2);
+          }
+          return CBZ.hurricane.safeDir(x, z);
+        }
+        return { x: -(ctx.st.wx || 0), z: -(ctx.st.wz || 0) };
+      },
     },
 
-    // ---- WILDFIRE: fire spreads tree to tree, burns on contact ----
+    // ---- WILDFIRE: DELEGATED to systems/wildfire.js (CBZ.wildfire) --------
+    //      The fire itself — the wind/slope spread wave, ember spotting ahead
+    //      of the front, the choking plume that kills more than the flame
+    //      does, the persistent burn scar, and the crosswind escape advice —
+    //      lives in that file behind WILDFIRE_V2 (declared there, default
+    //      on). This def keeps what is genuinely director-specific: pacing,
+    //      env tint, the weatherDrive call (the fire's bearing IS the
+    //      weather's bearing), and the complete legacy fire as the
+    //      WILDFIRE_V2=false / missing-module revert path. The legacy path's
+    //      camera-centred ember/smoke clouds, 13 m coin-flip spread and
+    //      flame-only casualties are exactly what the module exists to
+    //      replace — see its header for the argument.
     wildfire: {
       name: "WILDFIRE", emoji: "", warnSecs: 5, activeSecs: 18, gap: 6, cause: "burned alive in the wildfire", tint: 0x4a2814,
+      v2() { return !!(CBZ.wildfire && CBZ.CONFIG.WILDFIRE_V2 !== false); },
       // ONE TREE LIGHTS AND ITS SMOKE STANDS UP. That is how you actually learn
       // a wildfire is coming, and it also gives the fire a real ORIGIN you can
       // put your back to instead of a hazard that materialises everywhere.
       warn(ctx) {
         narrate("hint", "Wildfire spreading, don't get cornered!", 2.6); sound("fire");
+        if (this.v2()) {
+          CBZ.wildfire.beginWarn(ctx);
+          const w = CBZ.wildfire.wind(); ctx.st.wx = w.x; ctx.st.wz = w.z;
+          return;
+        }
         const tr = ctx.arena.flammable;
         const seedTree = tr[(rnd() * tr.length) | 0];
         if (seedTree && !seedTree.burnt) { ignite(seedTree); ctx.st.seed = seedTree; }
@@ -921,22 +1162,33 @@
       },
       warnTick(dt, ctx) {
         const k = 1 - dir.t / (this.warnSecs || 1);
+        if (this.v2()) {
+          const w = CBZ.wildfire.wind(); ctx.st.wx = w.x; ctx.st.wz = w.z;
+          weather({ rain: 0, wind: 3 + k * 7, windDir: { x: w.x, z: w.z }, fog: k * 0.3, fogColor: 0x6a4a30 });
+          CBZ.wildfire.tick(dt, ctx, true); // the seed torches; its smoke column stands up
+          ctx.env.sunColor = lerpHex(ctx.env.sunColor, 0xff9a50, 0.4 * k);
+          if (rnd() < dt * 1.2) sound("fire");
+          return;
+        }
         weather({ rain: 0, wind: 3 + k * 7, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: k * 0.3, fogColor: 0x6a4a30 });
         if (ctx.st.seed) { ctx.st.seed.burning = Math.max(ctx.st.seed.burning, 1); flickerTreeFire(ctx.st.seed); }
         ctx.env.sunColor = lerpHex(ctx.env.sunColor, 0xff9a50, 0.4 * k);
         if (rnd() < dt * 1.2) sound("fire");
       },
       warnThreat(x, z, ctx) {
+        if (this.v2()) return CBZ.wildfire.threat(x, z);
         const s = ctx.st.seed; if (!s) return 0;
         const d = Math.hypot(x - s.x, z - s.z);
         return d < 16 ? 0.7 * (1 - d / 16) : 0;
       },
       warnSafeDir(x, z, ctx) {
+        if (this.v2()) return CBZ.wildfire.safeDir(x, z);
         const s = ctx.st.seed; if (!s) return null;
         const dx = x - s.x, dz = z - s.z, d = Math.hypot(dx, dz) || 1;
         return { x: dx / d, z: dz / d };
       },
       start(ctx) {
+        if (this.v2()) { CBZ.wildfire.begin(ctx); return; }
         ctx.st.embers = CBZ.fx.particleCloud({ mode: "rise", color: 0xff7a1a, count: 320, radius: 28, top: 16, size: 0.26, opacity: 0.7, vMin: 5, vMax: 12, drift: 6 });
         ctx.st.embers.setActive(0.9);
         // a heavy rolling smoke pall above the flames
@@ -955,6 +1207,19 @@
       active(dt, ctx) {
         // smoke-choked, fire-lit sky: dim orange sun, low red-brown haze
         ctx.env.fog = 0x4a2814; ctx.env.fogNear = 16; ctx.env.fogFar = 145; ctx.env.sunInt = 0.5; ctx.env.sunColor = 0xff7320; ctx.env.hemiColor = 0xff8a3a; ctx.env.hemiInt = 0.62;
+        if (this.v2()) {
+          const w = CBZ.wildfire.wind(); ctx.st.wx = w.x; ctx.st.wz = w.z;
+          // fire runs DOWNWIND — the same wind everything else in the game reads
+          weather({ rain: 0, wind: 9 + 4 * ctx.intensity, windDir: { x: w.x, z: w.z }, fog: 0.45, fogColor: 0x4a2814 });
+          CBZ.wildfire.tick(dt, ctx);
+          // the sky YOU are under: standing in the plume closes the world in —
+          // the smoke is a place, not a colour grade
+          const p = CBZ.player && CBZ.player.group ? CBZ.player.group.position : camPos();
+          const s = Math.min(1, CBZ.wildfire.smokeAt(p.x, p.z));
+          if (s > 0.15) { ctx.env.fogNear = 16 - 11 * s; ctx.env.fogFar = 145 - 100 * s; ctx.env.sunInt = 0.5 - 0.25 * s; }
+          if (rnd() < dt * 3) sound("fire");
+          return;
+        }
         // fire runs DOWNWIND — the same wind everything else in the game reads
         weather({ rain: 0, wind: 9 + 4 * ctx.intensity, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: 0.45, fogColor: 0x4a2814 });
         ctx.st.embers.update(dt, camPos().x, 2, camPos().z);
@@ -988,9 +1253,19 @@
         }
         if (rnd() < dt * 3) sound("fire");
       },
-      end(ctx) { weatherOff(); if (ctx.st.embers) ctx.st.embers.dispose(); if (ctx.st.smoke) ctx.st.smoke.dispose(); ctx.arena.flammable.forEach((t) => { if (t.fire) removeTreeFire(t); }); },
-      threat(x, z, ctx) { let t = 0; const tr = ctx.arena.flammable; for (let i = 0; i < tr.length; i++) if (tr[i].burning) { const d = Math.hypot(x - tr[i].x, z - tr[i].z); if (d < 7) t = Math.max(t, 1 - d / 7); } return t; },
-      safeDir(x, z, ctx) { let bx = 0, bz = 0; const tr = ctx.arena.flammable; for (let i = 0; i < tr.length; i++) if (tr[i].burning) { const dx = x - tr[i].x, dz = z - tr[i].z, d = Math.hypot(dx, dz); if (d < 9 && d > 0.1) { bx += dx / d / d; bz += dz / d / d; } } return (bx || bz) ? { x: bx, z: bz } : null; },
+      end(ctx) {
+        weatherOff();
+        if (this.v2()) { CBZ.wildfire.stop(); return; }   // the burnt trees and the scar STAY
+        if (ctx.st.embers) ctx.st.embers.dispose(); if (ctx.st.smoke) ctx.st.smoke.dispose(); ctx.arena.flammable.forEach((t) => { if (t.fire) removeTreeFire(t); });
+      },
+      threat(x, z, ctx) {
+        if (this.v2()) return CBZ.wildfire.threat(x, z);
+        let t = 0; const tr = ctx.arena.flammable; for (let i = 0; i < tr.length; i++) if (tr[i].burning) { const d = Math.hypot(x - tr[i].x, z - tr[i].z); if (d < 7) t = Math.max(t, 1 - d / 7); } return t;
+      },
+      safeDir(x, z, ctx) {
+        if (this.v2()) return CBZ.wildfire.safeDir(x, z);
+        let bx = 0, bz = 0; const tr = ctx.arena.flammable; for (let i = 0; i < tr.length; i++) if (tr[i].burning) { const dx = x - tr[i].x, dz = z - tr[i].z, d = Math.hypot(dx, dz); if (d < 9 && d > 0.1) { bx += dx / d / d; bz += dz / d / d; } } return (bx || bz) ? { x: bx, z: bz } : null;
+      },
     },
 
     // ---- TORNADO: DELEGATED to systems/tornado.js (CBZ.tornado) ----------
@@ -1037,6 +1312,22 @@
           // no `by`: nobody is credited for the weather (see tornado.js's
           // note — a non-null `by` makes structural.js blame the player)
           bounds: { x: ctx.cx, z: ctx.cz, r: ctx.R - 6 },   // bounce off the island edge
+          /* THE ARENA BRIDGE (TORNADO_V2, declared in tornado.js). The vortex
+             file owns the wind field and the timing; what it cannot own is the
+             island's machinery, so this def LENDS it: bites land in THE
+             structural ledger above (glass → lean → collapse, shared with the
+             quake and the wave), thrown cars ride the one flingCar ticker the
+             flood uses, and shelter is surv's own physical underRoof test.
+             The vortex keeps no structural state; the island keeps one ledger. */
+          arena: (CBZ.CONFIG.TORNADO_V2 !== false) ? {
+            fragile: function () { return ctx.arena.fragile || []; },
+            cars: function () { return ctx.arena.cars || []; },
+            hitBuilding: function (b, amount, dirx, dirz) {
+              return structureHit(b, amount, ctx, { kind: "tornado", dirx: dirx, dirz: dirz });
+            },
+            flingCar: function (car, dx, dz, force, up) { flingCar(car, dx, dz, force, up); },
+            sheltered: function (a) { return sheltered(a); },
+          } : null,
         }) : null;
       },
       active(dt, ctx) {
@@ -1044,7 +1335,11 @@
         // All this def does is mirror the live position for the minimap and
         // keep the parent storm blowing (the funnel already biases off
         // CBZ.weather's wind, so this is the only wind either of us sets).
-        weather({ rain: 0.55, wind: 12, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: 0.45, fogColor: 0x6a6f7a });
+        // V2 thins the active-phase fog: at 0.45 the whole column washed to
+        // the fog colour and the funnel read as weather haze, not a tornado.
+        // The dark condensation funnel + wall cloud need the contrast.
+        weather({ rain: 0.55, wind: 12, windDir: { x: ctx.st.wx, z: ctx.st.wz },
+          fog: CBZ.CONFIG.TORNADO_V2 !== false ? 0.28 : 0.45, fogColor: 0x6a6f7a });
         const a = CBZ.tornado && CBZ.tornado.active()[0];
         if (a) { ctx.st.x = a.x; ctx.st.z = a.z; }
       },
@@ -1179,6 +1474,10 @@
       warn(ctx) {
         narrate("hint", "Blizzard incoming, get INDOORS or keep moving!", 2.8); sound("wind");
         const a = rnd() * 6.28; ctx.st.wx = Math.cos(a); ctx.st.wz = Math.sin(a);
+        // V2 (systems/blizzard.js): seed the drift field on this wind bearing
+        // and reset the windchill clock. Absent or flagged off, the legacy
+        // storm below plays untouched.
+        if (CBZ.blizzard && CBZ.CONFIG.BLIZZARD_V2 !== false) CBZ.blizzard.begin(ctx.st.wx, ctx.st.wz, ctx);
       },
       warnTick(dt, ctx) {
         const k = 1 - dir.t / (this.warnSecs || 1);
@@ -1191,11 +1490,24 @@
         ctx.env.fog = lerpHex(ctx.env.fog, 0xdbe6f0, 0.7 * k);
         if (rnd() < dt * 1.5) sound("wind");
       },
-      // shelter is the answer, so the crowd converges on the town roofs
+      // shelter is the answer, so the crowd converges on the lee faces while
+      // the sky is still darkening (V2), or just keeps moving (legacy)
       warnThreat(x, z, ctx) { return 0.3; },
-      warnSafeDir(x, z, ctx) { return null; },
+      warnSafeDir(x, z, ctx) {
+        return (CBZ.blizzard && CBZ.CONFIG.BLIZZARD_V2 !== false) ? CBZ.blizzard.safeDir(x, z) : null;
+      },
       start(ctx) { ctx.st.t = 0; },
       active(dt, ctx) {
+        /* V2: systems/blizzard.js owns the event — the gusting whiteout, the
+           windchill clock on every unsheltered actor, the windbreak query,
+           the lee-side drifts and the burial. This def hands it dt+ctx and
+           keeps the wind sound. Flag off / file missing = the storm below,
+           exactly as it always played. */
+        if (CBZ.blizzard && CBZ.CONFIG.BLIZZARD_V2 !== false) {
+          CBZ.blizzard.storm(dt, ctx);
+          if (rnd() < dt * 2) sound("wind");
+          return;
+        }
         ctx.env.fog = 0xdbe6f0; ctx.env.fogNear = 8; ctx.env.fogFar = 60; ctx.env.sunInt = 0.6; ctx.env.sunColor = 0xcfe0ff; ctx.env.hemiInt = 1.1; ctx.env.hemiColor = 0xeaf2ff;
         // THE GROUND GOES WHITE AS THE EVENT RUNS. `cover` ramps with the
         // progress of the storm rather than snapping to 1, so the arc reads
@@ -1215,73 +1527,29 @@
       // weatherOff() drops the driven coverage back to the ambient integrator,
       // which MELTS it over minutes instead of deleting it — the island stays
       // white for a while after, which is the whole point of state on the ground.
-      end(ctx) { weatherOff(); },
-      threat() { return 0.25; },
-      safeDir() { return null; }, // no safe direction — just don't stand still
+      end(ctx) {
+        weatherOff();
+        // V2: the drifts and the buried stay; blizzard.js melts them over
+        // minutes, the same clock weather.js melts the ground cover on.
+        if (CBZ.blizzard && CBZ.CONFIG.BLIZZARD_V2 !== false) CBZ.blizzard.end();
+      },
+      threat(x, z) {
+        // V2: the open is a countdown (0.5), a lee face is holding on (0.1),
+        // a roof is warmth (0.05) — which is what steers the crowd into the
+        // huddle behind the wall. Legacy: a flat 0.25 with nowhere to go.
+        return (CBZ.blizzard && CBZ.CONFIG.BLIZZARD_V2 !== false) ? CBZ.blizzard.threat(x, z) : 0.25;
+      },
+      safeDir(x, z) {
+        return (CBZ.blizzard && CBZ.CONFIG.BLIZZARD_V2 !== false) ? CBZ.blizzard.safeDir(x, z) : null;
+      },
     },
 
     // ---- METEOR SHOWER: telegraphed impacts, big blast ----
-    meteor: {
-      name: "METEOR SHOWER", emoji: "", warnSecs: 5, activeSecs: 17, gap: 6, cause: "flattened by a meteor", tint: 0x4a3a3a,
-      // STREAKS CROSS THE SKY FIRST. Bolides burn up high and harmlessly for a
-      // few seconds before anything reaches the ground — which is exactly the
-      // real sequence, and it makes the player look UP, which is where the
-      // warning for the rest of the event will be.
-      warn(ctx) {
-        narrate("hint", "METEORS, watch the shadows!", 2.6); sound("rumble");
-        ctx.st.streaks = []; ctx.st.streakCd = 0.15;
-      },
-      warnTick(dt, ctx) {
-        ctx.st.streakCd -= dt;
-        if (ctx.st.streakCd <= 0) {
-          ctx.st.streakCd = 0.18 + rnd() * 0.4;
-          skyStreak(ctx);
-          if (rnd() < 0.35) soundAt("rumble", camPos().x, camPos().z, { volume: 0.4 });
-        }
-        tickStreaks(dt, ctx);
-      },
-      warnThreat() { return 0.12; },   // nowhere is safe; keep the crowd moving
-      start(ctx) { ctx.st.pending = []; ctx.st.cd = 0.5; ctx.env.sunInt = 0.7; ctx.st.timers = []; },
-      active(dt, ctx) {
-        ctx.env.fog = 0x4a3a3a; ctx.env.fogNear = 40; ctx.env.fogFar = 240; ctx.env.hemiColor = 0xffb0a0;
-        tickStreaks(dt, ctx);
-        ctx.st.cd -= dt;
-        if (ctx.st.cd <= 0) {
-          ctx.st.cd = (0.8 - 0.4 * ctx.prog) * (0.6 + rnd());
-          const p = ctx.arena.randomPoint(0, ctx.R);
-          const r = 5 + scale(2, ctx);
-          // the incoming rock is VISIBLE all the way down, not a shadow that
-          // appears on the floor — the marker is the shadow it casts
-          skyStreak(ctx, p.x, p.z);
-          ctx.st.pending.push({ x: p.x, z: p.z, r, t: 1.2, m: CBZ.fx.groundMarker(p.x, p.z, r, 0xff5030) });
-        }
-        for (let i = ctx.st.pending.length - 1; i >= 0; i--) {
-          const p = ctx.st.pending[i]; p.t -= dt; p.m.set(1 - p.t / 1.2);
-          if (p.t <= 0) {
-            p.m.dispose();
-            CBZ.fx.dropDebris({ x: p.x, z: p.z, fromY: 40, vy: -22, size: 2.4, color: 0x3a2018, dmg: 0, linger: 4, keep: true, onLand: (x, z) => {
-              // THE BLAST BUS OWNS THE IMPACT. `meteor` is a real ordnance row
-              // (systems/impactbus.js) and it is PURE KINETICS — refE 1.2e8 J,
-              // a 6 t stone at 200 m/s — so passing this rock's mass and speed
-              // makes a late-round meteor genuinely bigger instead of the same
-              // constant fireball with a different number typed beside it.
-              survBlast("meteor", x, z, {
-                r: p.r, cause: "flattened by a meteor", ctx: ctx,
-                mass: 4000 + 4000 * ctx.intensity, speed: 190 + 60 * ctx.intensity,
-                struct: 0.55 + 0.35 * ctx.intensity, structR: p.r * 2.4,
-                fling: 7, knockback: 14, color: 0xffcaa0,
-              });
-              const cr = disc(x, z, 0x201810, 0.9, 0.05); cr.userData.transient = true;
-            } });
-            ctx.st.pending.splice(i, 1);
-          }
-        }
-        tick0(ctx, dt);
-      },
-      end(ctx) { (ctx.st.pending || []).forEach((p) => p.m.dispose()); clearStreaks(ctx); },
-      threat(x, z, ctx) { let t = 0; (ctx.st.pending || []).forEach((p) => { const d = Math.hypot(x - p.x, z - p.z); if (d < p.r + 3) t = Math.max(t, 1 - d / (p.r + 3)); }); return t; },
-      safeDir(x, z, ctx) { let bx = 0, bz = 0; (ctx.st.pending || []).forEach((p) => { const dx = x - p.x, dz = z - p.z, d = Math.hypot(dx, dz); if (d < p.r + 4 && d > 0.1) { bx += dx / d; bz += dz / d; } }); return (bx || bz) ? { x: bx, z: bz } : null; },
-    },
+    // ---- METEOR SHOWER: rebuilt around systems/meteor.js (CBZ.meteor).
+    //      The def is METEOR_DEF(), in its own block further down ("THE
+    //      METEOR SHOWER") beside the sky-streak helpers it owns. METEOR_V2
+    //      off — or meteor.js absent — plays the legacy shower verbatim. ----
+    meteor: METEOR_DEF(),
 
     /* ---- SINKHOLES: THE GROUND OPENS AND YOU GO DOWN IT ---------------------
        It began as a flat BLACK DISC painted on the grass that instakilled
@@ -2720,9 +2988,18 @@
        the pyroclastic current's mass); the flag revert keeps the old dotted
        Points cloud verbatim. */
     if (V && V.ashColumn) {
+      /* V3: THE COLUMN IS THE SILHOUETTE. At 52-68 m the pillar was barely
+         twice the 26 m mountain — a smudge that scene fog then ate. A real
+         eruption column is the most dramatic shape in nature, and on a 240 m
+         island a ~180 m fog-exempt pillar is what reads as that from every
+         beach. Same sprite count as before — the emitter's puffs scale with
+         `height`/`r`, so the drama costs zero extra draw calls. */
+      const V3 = CBZ.CONFIG.VOLCANO_V3 !== false;
       ctx.st.erColumn = V.ashColumn({
         x: h.x, z: h.z, y: h.peak + 3,
-        height: 52 + 16 * ctx.intensity, r: 6.5 + 2.5 * ctx.intensity,
+        height: V3 ? 150 + 55 * ctx.intensity : 52 + 16 * ctx.intensity,
+        r: V3 ? 11 + 4 * ctx.intensity : 6.5 + 2.5 * ctx.intensity,
+        fogless: V3,
         parent: root(),
       });
       ctx.st.erSmoke = null;
@@ -2886,15 +3163,25 @@
        under which the lava's own light is supposed to be the thing you see.
        dayK() is the sun's own elevation off core/daynight.js. */
     const dk = dayK();
-    ctx.env.fog = lerpHex(0x120b08, 0x2e211c, dk); ctx.env.fogNear = 55; ctx.env.fogFar = 380;
+    /* V3: ASH BLOTS THE SUN. The one thing every eyewitness account of a real
+       ashfall agrees on is darkness at noon — and the fixed 0.5 sun above
+       could never say it. ashK follows the DEPOSIT (the field's own peak
+       depth), so the sky darkens exactly as fast as the ground greys and a
+       revert of the ash flag reverts the darkness with it. The fog wall
+       tightens with it — 380 → ~290 at full load, still twice the 2026-08-16
+       "island-wide grey-out" distance, and now it has a visible cause. */
+    const ashK = (CBZ.CONFIG.VOLCANO_V3 !== false && ctx.st.erAshLoad)
+      ? Math.min(1, ctx.st.erAshLoad.peakDepth / 0.3) : 0;
+    ctx.env.fog = lerpHex(0x120b08, lerpHex(0x2e211c, 0x181310, ashK), dk);
+    ctx.env.fogNear = 55; ctx.env.fogFar = 380 - 90 * ashK;
     /* AND IT MUST NOT PAINT THE ISLAND PEACH. 0xff6a3a is a fully saturated
        orange; run through every diffuse surface on the map it turned grey ash,
        grey concrete and green grass into one warm pastel, which is the
        opposite of the reference photograph the owner sent — that mountain is
        DARK. An ash-shrouded eruption sky is a dirty brown, not a sodium lamp,
        so the sun keeps its warmth and loses most of its saturation. */
-    ctx.env.sunInt = 0.5 * dk; ctx.env.sunColor = 0xd9714a;
-    ctx.env.hemiInt = 0.14 + 0.42 * dk; ctx.env.hemiColor = 0x9c7461;
+    ctx.env.sunInt = 0.5 * dk * (1 - 0.78 * ashK); ctx.env.sunColor = 0xd9714a;
+    ctx.env.hemiInt = (0.14 + 0.42 * dk) * (1 - 0.55 * ashK); ctx.env.hemiColor = 0x9c7461;
     ctx.st.erFountain.update(dt, h.x, h.peak, h.z);
     if (ctx.st.erSmoke) ctx.st.erSmoke.update(dt, h.x + (ctx.st.erWindX || 0) * 14, h.peak + 6, h.z + (ctx.st.erWindZ || 0) * 14);
     // the sprite pillar leans with the same wind the ash falls on
@@ -2905,7 +3192,9 @@
     if (ctx.st.erCrater) ctx.st.erCrater.material.opacity = 0.7 + 0.25 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.012));
     // the eruption is still weather — a dimmed sun and a downwind haze — but
     // a light one now the ash is gone: 0.55 fog was the island-wide grey-out
-    weather({ rain: 0, wind: 7, windDir: { x: ctx.st.erWindX || 1, z: ctx.st.erWindZ || 0 }, fog: 0.3, fogColor: 0x2e211c });
+    // the ash thickens the air it is falling through (V3: ashK rides the
+    // deposit; pre-V3 ashK is 0 and this is the old constant 0.3)
+    weather({ rain: 0, wind: 7, windDir: { x: ctx.st.erWindX || 1, z: ctx.st.erWindZ || 0 }, fog: 0.3 + 0.2 * ashK, fogColor: 0x2e211c });
     if (rnd() < dt * 1.6) sound("rumble");
 
     // ---------------- LAVA ----------------
@@ -3038,7 +3327,16 @@
            makes the wedge readable at all. */
         rate: 0.014 + 0.024 * ctx.intensity,
         windX: ctx.st.erWindX, windZ: ctx.st.erWindZ,
-        srcX: h.x, srcZ: h.z, spread: 0.16,
+        /* V3: A WEDGE, NOT A BLANKET. spread 0.16 put a sixth of the axis
+           rate on every cell — the whole island greyed at once, which is
+           precisely the "covers everything in a dumb way" that got the
+           entire ash ledger switched off on 2026-08-16. At 0.05/lobe 3.2
+           the fall is a sector: the downwind town greys, chokes and loses
+           roofs while the upwind beach stays green — a hazard with an
+           outside, which is what makes it a hazard at all. */
+        srcX: h.x, srcZ: h.z,
+        spread: CBZ.CONFIG.VOLCANO_V3 !== false ? 0.05 : 0.16,
+        lobe: CBZ.CONFIG.VOLCANO_V3 !== false ? 3.2 : 2.2,
       });
       // ROOFS FAIL UNDER THE LOAD, through the ONE ledger. Wet ash is ~1000
       // kg/m3: a quarter-metre on a flat roof is a quarter of a tonne per
@@ -3132,13 +3430,13 @@
         }
       }
       /* 5) ASHFALL — glass in the lungs, and a roof is a real answer to it.
-         THE ASH FIELD IS THE ONLY AUTHORITY ON WHERE THERE IS ASH — and
-         with VOLCANO_ASH_LOAD now defaulting OFF (owner, 2026-08-16) there
-         is usually no ash at all, so there is usually no choke. The old
-         geometric downwind wedge that stood in when the field was absent is
-         deleted rather than resurrected: it choked people with nothing on
-         screen to explain it, which is exactly the death-by-arithmetic the
-         owner reported. No picture, no damage. */
+         THE ASH FIELD IS THE ONLY AUTHORITY ON WHERE THERE IS ASH. V3
+         (2026-08-23) turned the field back on as a downwind WEDGE — the
+         2026-08-16 default-off was aimed at the island-wide blanket, and
+         world/volcanofx.js's flag note carries that investigation. The rule
+         survives unchanged either way: the choke reads depthAt() off the
+         drawn field, so no picture, no damage — the geometric stand-in
+         wedge that once choked people over clean ground stays deleted. */
       if (!sheltered(a)) {
         let choke = 0;
         /* AND IT IS A GRADIENT, NOT A SWITCH. The measurement that found this:
@@ -3277,8 +3575,11 @@
     /* A SCAR IS A MEMORY, NOT A LEAK. Two eruptions can legitimately happen
        in one match (the volcano, plus the earthquake's surprise one), and a
        third would only be stacking a second full ash field on top of an
-       identical one. Oldest out at four. */
-    while (volScars.length > 4) { const old = volScars.shift(); try { old.dispose(); } catch (e) {} }
+       identical one. With the ash ledger back on (V3) one eruption leaves
+       THREE scars — lava composite, set lahar, ash field — so the old cap
+       of four evicted the first eruption's lava the moment the second one
+       ended. Six holds exactly the two legitimate eruptions' full memory. */
+    while (volScars.length > 6) { const old = volScars.shift(); try { old.dispose(); } catch (e) {} }
     ctx.st.erRoofs = null;
     ctx.st.erWindX = ctx.st.erWindZ = null;
     ctx.st.erupting = false;
@@ -3362,9 +3663,17 @@
       if (P.r > 0.7) { const d = Math.hypot(x - P.m.position.x, z - P.m.position.z); if (d < P.r + 3) t = Math.max(t, Math.min(0.95, 1 - (d - P.r * 0.85) / 3)); }
     });
     if (ctx.st.lahar && ctx.st.lahar.hitTest(x, z)) t = Math.max(t, 0.8);
-    // no downwind-wedge term any more: with the ash gone (2026-08-16) there
-    // is nothing there to flee, and bots emptying a visibly clean half of the
-    // island read as broken pathing
+    /* THE ASH IS BACK, SO THE FLEEING READS AGAIN. The 2026-08-16 build cut
+       this term because bots emptying a visibly clean half of the island
+       looked like broken pathing — correct, WITH the field deleted. V3's
+       field is a visible grey wedge, so the term returns as a gradient read
+       off the same depthAt() the choke uses: bots drift out of exactly the
+       ground the player can see greying over. Capped at 0.5 — leaving the
+       wedge must never outrank fleeing the flow, the melt or the mud. */
+    if (CBZ.CONFIG.VOLCANO_V3 !== false && ctx.st.erAshLoad) {
+      const ad = ctx.st.erAshLoad.depthAt(x, z);
+      if (ad > ASH_DOT_DEPTH) t = Math.max(t, Math.min(0.5, (ad - ASH_DOT_DEPTH) / 0.35));
+    }
     return t;
   }
 
@@ -4241,6 +4550,210 @@
     (ctx.st.holes || []).length = 0;
   }
 
+  /* ============================================================
+     THE METEOR SHOWER (METEOR_V2 wave). OWNER'S BRIEF: judge it against
+     what a meteor event really is.
+
+     The legacy shower (kept verbatim below as the flag-off path) was streaks
+     on random headings, a brown box teleport-dropping from y=40, an instant
+     bang and a painted decal. The rebuilt event delegates the SKY to
+     systems/meteor.js — one RADIANT all rocks share, visible bolides with
+     smoke trains, AIRBURSTS carrying most of the energy, the flash arriving
+     seconds before the bang (the pressure front expands at the same dramatic
+     sound speed the audio is scheduled at, so the ring you watch sweep the
+     island IS the noise), real craters through CBZ.groundCrater and
+     incandescent ejecta on ballistic arcs.
+
+     THIS FILE STILL OWNS THE GAME: which points get hit comes from the
+     seeded stream, an impact is priced by survBlast's kinetic `meteor` row
+     exactly as before, and the airburst's annulus damage runs on the mode's
+     own actor roster via the damage callbacks handed to CBZ.meteor.begin().
+     Ground strikes keep their marker telegraph (the bolide's shadow) so
+     threat()/safeDir() still answer honestly; an airburst is not dodgeable,
+     which is the point of an airburst — it wounds and knocks down rather
+     than instakills.
+
+     Degrade-safe: CBZ.meteor absent or METEOR_V2=false → the legacy shower,
+     line for line. Ratchet: CBZ.meteorAudit() (+ the meteor fields in
+     CBZ.disasterAudit()).
+     ============================================================ */
+  function METEOR_DEF() {
+    const v2 = () => CBZ.meteor && CBZ.CONFIG.METEOR_V2 !== false;
+    let mCtx = null;   // the live ctx, refreshed every tick, for the callbacks
+
+    function beginV2(ctx) {
+      mCtx = ctx;
+      CBZ.meteor.begin({
+        root: root(), floor, rnd,
+        cx: ctx.cx, cz: ctx.cz, R: ctx.R, intensity: ctx.intensity,
+        damage: {
+          // A GROUND STRIKE: the same kinetic pricing the old shower had —
+          // the bus draws the fireball (quiet: the bang is scheduled late by
+          // meteor.js), the mode prices its own roster and ledger.
+          impact(x, z, spec) {
+            const c = mCtx; if (!c) return;
+            survBlast("meteor", x, z, {
+              r: spec.r || 6, cause: "flattened by a meteor", ctx: c, quiet: true,
+              mass: 4000 + 4000 * c.intensity, speed: 190 + 60 * c.intensity,
+              struct: 0.55 + 0.35 * c.intensity, structR: (spec.r || 6) * 2.4,
+              fling: 7, knockback: 14, color: 0xffcaa0,
+            });
+          },
+          // THE PRESSURE FRONT: an annulus sweeping outward at the speed of
+          // sound. Chelyabinsk's model — it knocks you down and cuts you
+          // with the glass, it does not vaporise you.
+          front(x, z, r0, r1, k) {
+            const c = mCtx; if (!c || !surv().forEachActor) return;
+            surv().forEachActor((a) => {
+              const dx = a.pos.x - x, dz = a.pos.z - z, d = Math.hypot(dx, dz);
+              if (d < r0 || d >= r1) return;
+              if (CBZ.body) CBZ.body.hit(a, { fromX: x, fromZ: z, force: 5 + 13 * k, fling: k > 0.45 ? 2.5 + 4 * k : 0 });
+              if (k > 0.18) surv().hurt(a, 6 + 30 * k, { fromX: x, fromZ: z, cause: "caught in the meteor airburst" });
+            });
+            if (k > 0.25) structureSweepRing(c, x, z, r0, r1, 0.06 * k);
+          },
+        },
+      });
+    }
+    // a low bolide is BRIGHTER THAN THE SUN: feed meteor.js's light into the
+    // scene so the flash visibly lights the island before it makes a sound
+    function lightV2(ctx) {
+      const b = CBZ.meteor.lightBoost();
+      if (b > 0.01) {
+        ctx.env.sunInt = Math.min(1.7, ctx.env.sunInt + b * 1.3);
+        ctx.env.hemiInt = Math.min(1.6, ctx.env.hemiInt + b * 0.9);
+      }
+    }
+    function activeV2(dt, ctx) {
+      mCtx = ctx;
+      // a thin haze, not the legacy 240 m soup: the flashes need a sky to light
+      ctx.env.fog = 0x4a3a3a; ctx.env.fogNear = 70; ctx.env.fogFar = 480; ctx.env.hemiColor = 0xffb0a0;
+      CBZ.meteor.tick(dt);
+      lightV2(ctx);
+      ctx.st.clock = (ctx.st.clock || 0) + dt;
+      /* THE CHELYABINSK MOMENT, once per event on a fixed beat (so every
+         seed and both storyboard sides stage the same second): one huge
+         bolide crossing low, terminating in a high airburst whose flash
+         whites the island — and then NOTHING, for the seconds the bang
+         takes to crawl down, before the front knocks the crowd flat. */
+      if (!ctx.st.big && ctx.st.clock >= 5) {
+        ctx.st.big = true;
+        const a = rnd() * 6.28, d0 = ctx.R * (0.2 + 0.35 * rnd());
+        CBZ.meteor.strike({
+          x: ctx.cx + Math.cos(a) * d0, z: ctx.cz + Math.sin(a) * d0,
+          air: true, alt: 95 + 40 * rnd(), size: 2.6, eta: 3.2, big: true,
+        });
+      }
+      ctx.st.cd -= dt;
+      if (ctx.st.cd <= 0) {
+        ctx.st.cd = (1.25 - 0.5 * ctx.prog) * (0.6 + rnd());
+        const r = 5 + scale(2, ctx);
+        // MOST OF A METEOR EVENT NEVER TOUCHES THE GROUND. The first strike
+        // is guaranteed a ground hit (the event must leave a hole); after
+        // that the majority burst in the air, which is the real energy split.
+        const ground = !ctx.st.first || rnd() < 0.4;
+        ctx.st.first = true;
+        let p = ctx.arena.randomPoint(0, ctx.R * 0.9);
+        if (ground && CBZ.groundShaftCanOpen) {
+          // prefer ground a crater can actually be dug in (flat, dry, clear)
+          for (let k2 = 0; k2 < 5; k2++) {
+            const q = ctx.arena.randomPoint(0, ctx.R * 0.8);
+            if (CBZ.groundShaftCanOpen(q.x, q.z, 6).ok) { p = q; break; }
+          }
+        }
+        const eta = 1.5 + rnd() * 0.6;
+        CBZ.meteor.strike({ x: p.x, z: p.z, air: !ground, alt: 30 + 45 * rnd(), size: 0.9 + 0.9 * ctx.intensity, eta, r });
+        // the marker is the bolide's shadow — ground strikes only; you
+        // cannot stand clear of an airburst and the map should not pretend
+        if (ground) ctx.st.pending.push({ x: p.x, z: p.z, r, t: eta, t0: eta, m: CBZ.fx.groundMarker(p.x, p.z, r, 0xff5030) });
+      }
+      for (let i = ctx.st.pending.length - 1; i >= 0; i--) {
+        const p = ctx.st.pending[i]; p.t -= dt; p.m.set(1 - p.t / (p.t0 || 1.2));
+        if (p.t <= 0) { p.m.dispose(); ctx.st.pending.splice(i, 1); }
+      }
+      tick0(ctx, dt);
+    }
+
+    return {
+      name: "METEOR SHOWER", emoji: "", warnSecs: 5, activeSecs: 17, gap: 6, cause: "flattened by a meteor", tint: 0x4a3a3a,
+      _meteorDelegated: true,
+      // STREAKS CROSS THE SKY FIRST. Bolides burn up high and harmlessly for a
+      // few seconds before anything reaches the ground — which is exactly the
+      // real sequence, and it makes the player look UP, which is where the
+      // warning for the rest of the event will be. V2: they all come from ONE
+      // RADIANT, because a shower is one debris stream, not fireworks.
+      warn(ctx) {
+        narrate("hint", "METEORS, watch the shadows!", 2.6); sound("rumble");
+        if (v2()) { ctx.st.pending = []; ctx.st.timers = []; beginV2(ctx); return; }
+        ctx.st.streaks = []; ctx.st.streakCd = 0.15;
+      },
+      warnTick(dt, ctx) {
+        if (v2()) { mCtx = ctx; CBZ.meteor.tick(dt); lightV2(ctx); return; }
+        ctx.st.streakCd -= dt;
+        if (ctx.st.streakCd <= 0) {
+          ctx.st.streakCd = 0.18 + rnd() * 0.4;
+          skyStreak(ctx);
+          if (rnd() < 0.35) soundAt("rumble", camPos().x, camPos().z, { volume: 0.4 });
+        }
+        tickStreaks(dt, ctx);
+      },
+      warnThreat() { return 0.12; },   // nowhere is safe; keep the crowd moving
+      start(ctx) {
+        if (v2()) {
+          if (!CBZ.meteor.live()) beginV2(ctx);   // force() can skip warn
+          ctx.st.pending = ctx.st.pending || []; ctx.st.cd = 1.0; ctx.st.clock = 0;
+          ctx.env.sunInt = 0.85; ctx.st.timers = ctx.st.timers || [];
+          return;
+        }
+        ctx.st.pending = []; ctx.st.cd = 0.5; ctx.env.sunInt = 0.7; ctx.st.timers = [];
+      },
+      active(dt, ctx) {
+        if (v2()) { activeV2(dt, ctx); return; }
+        ctx.env.fog = 0x4a3a3a; ctx.env.fogNear = 40; ctx.env.fogFar = 240; ctx.env.hemiColor = 0xffb0a0;
+        tickStreaks(dt, ctx);
+        ctx.st.cd -= dt;
+        if (ctx.st.cd <= 0) {
+          ctx.st.cd = (0.8 - 0.4 * ctx.prog) * (0.6 + rnd());
+          const p = ctx.arena.randomPoint(0, ctx.R);
+          const r = 5 + scale(2, ctx);
+          // the incoming rock is VISIBLE all the way down, not a shadow that
+          // appears on the floor — the marker is the shadow it casts
+          skyStreak(ctx, p.x, p.z);
+          ctx.st.pending.push({ x: p.x, z: p.z, r, t: 1.2, m: CBZ.fx.groundMarker(p.x, p.z, r, 0xff5030) });
+        }
+        for (let i = ctx.st.pending.length - 1; i >= 0; i--) {
+          const p = ctx.st.pending[i]; p.t -= dt; p.m.set(1 - p.t / 1.2);
+          if (p.t <= 0) {
+            p.m.dispose();
+            CBZ.fx.dropDebris({ x: p.x, z: p.z, fromY: 40, vy: -22, size: 2.4, color: 0x3a2018, dmg: 0, linger: 4, keep: true, onLand: (x, z) => {
+              // THE BLAST BUS OWNS THE IMPACT. `meteor` is a real ordnance row
+              // (systems/impactbus.js) and it is PURE KINETICS — refE 1.2e8 J,
+              // a 6 t stone at 200 m/s — so passing this rock's mass and speed
+              // makes a late-round meteor genuinely bigger instead of the same
+              // constant fireball with a different number typed beside it.
+              survBlast("meteor", x, z, {
+                r: p.r, cause: "flattened by a meteor", ctx: ctx,
+                mass: 4000 + 4000 * ctx.intensity, speed: 190 + 60 * ctx.intensity,
+                struct: 0.55 + 0.35 * ctx.intensity, structR: p.r * 2.4,
+                fling: 7, knockback: 14, color: 0xffcaa0,
+              });
+              const cr = disc(x, z, 0x201810, 0.9, 0.05); cr.userData.transient = true;
+            } });
+            ctx.st.pending.splice(i, 1);
+          }
+        }
+        tick0(ctx, dt);
+      },
+      end(ctx) {
+        (ctx.st.pending || []).forEach((p) => p.m.dispose()); clearStreaks(ctx);
+        if (CBZ.meteor && CBZ.meteor.live()) CBZ.meteor.stop();
+        mCtx = null;
+      },
+      threat(x, z, ctx) { let t = 0; (ctx.st.pending || []).forEach((p) => { const d = Math.hypot(x - p.x, z - p.z); if (d < p.r + 3) t = Math.max(t, 1 - d / (p.r + 3)); }); return t; },
+      safeDir(x, z, ctx) { let bx = 0, bz = 0; (ctx.st.pending || []).forEach((p) => { const dx = x - p.x, dz = z - p.z, d = Math.hypot(dx, dz); if (d < p.r + 4 && d > 0.1) { bx += dx / d; bz += dz / d; } }); return (bx || bz) ? { x: bx, z: bz } : null; },
+    };
+  }
+
   /* ---- SKY STREAKS: the meteor shower's real warning -----------------------
      A bolide is visible for seconds before anything lands. Each streak is one
      stretched additive box travelling on a straight line — pooled per event,
@@ -4597,9 +5110,15 @@
       } else if (id === "nuke") {
         if (st.gx != null) out.push(!st.r ? { x: st.gx, z: st.gz, r: 9 } : { x: st.gx, z: st.gz, r: st.r, fill: false });
       } else if (id === "flashflood") {
-        // no front any more — the flood is a LEVEL, so the map marks the low
-        // ground that is already under. One ring per drowned hollow beats a
-        // line pretending there is a wall.
+        // the def RUNS a front down the channel (CBZ.groundWaterFrontSet) —
+        // while that wall is live the map marks it as the travelling line it
+        // is, exactly like the tsunami's. The old comment here claimed "no
+        // front any more"; it was describing a build two rewrites ago.
+        if (!warn && CBZ.CONFIG.FLASHFLOOD_V2 !== false && CBZ.groundWaterFront) {
+          const F = CBZ.groundWaterFront();
+          if (F) out.push({ line: true, x: F.x + F.dx * F.s, z: F.z + F.dz * F.s, dx: F.dx, dz: F.dz });
+        }
+        // ...and the low ground that is already under stays ringed
         if (!warn) for (let i = 0; i < A.hills.length; i++) {
           const h = A.hills[i];
           if (h.peak < (st.peak || 0) + 1) out.push({ x: h.x, z: h.z, r: h.r, fill: false });
@@ -4660,7 +5179,9 @@
     const privateRain = (st.rain ? 1 : 0) + (st.snow ? 1 : 0);
     // ONE read of the debris field, so every number below is from the same
     // instant rather than from two calls that could straddle a strike
-    const dbgT = st.debris ? st.debris.stats() : null;
+    // (guarded: the legacy hurricane parks a particleCloud in st.debris,
+    // which has no stats() — auditing mid-hurricane used to throw)
+    const dbgT = st.debris && typeof st.debris.stats === "function" ? st.debris.stats() : null;
     // PRIVATE SWIM: the deleted player solve set these two on CBZ.player.
     const privateSwim = (CBZ.player && CBZ.player._tsuSwim ? 1 : 0);
     // the sinkhole's own ratchet, exported by world/groundshaft.js
@@ -4684,6 +5205,11 @@
       surgeDriven: surgeWrites > 0,
       surgeWrites: surgeWrites,
       surge: CBZ.waterSurge ? +CBZ.waterSurge().toFixed(3) : 0,
+      // ---- THE FLASH FLOOD'S FRONT (systems/flashflood.js) ----
+      // live evidence the wall has a face: churn spray in the air, entrained
+      // debris riding the depth field, mud opacity on the coat — and still
+      // zero private water planes, which groundWaterAudit checks separately.
+      flashflood: CBZ.flashflood ? CBZ.flashflood.audit() : null,
       // ---- ONE SWIM ----
       privateSwim: privateSwim,
       /* ---- THE STORM'S BOLTS. `boltStrokes / boltStrikes` is the whole
@@ -4716,6 +5242,24 @@
       boltStrokes: boltA ? boltA.strokes : 0,
       boltScars: boltA ? boltA.scarsCut : 0,
       boltLive: boltA ? boltA.live : 0,
+      /* ---- THE METEOR'S RADIANT AND ITS LATE SOUND (systems/meteor.js).
+         `meteor` is that file's whole ratchet (airbursts, craters dug,
+         ejecta, flash-to-bang seconds, the live bolide/burst positions the
+         storyboard cameras solve off). `meteorLegacyStreakDirs` publishes
+         the LEGACY streaks' headings while the old shower is live, so a
+         before-side run can measure that its streaks came from everywhere —
+         the exact number the radiant deletes. ---- */
+      meteorV2: !!(CBZ.meteor && CBZ.CONFIG.METEOR_V2 !== false),
+      meteor: CBZ.meteorAudit ? CBZ.meteorAudit() : null,
+      meteorLegacyStreakDirs: dir.curId === "meteor" && st.streaks
+        ? st.streaks.map(function (s) { return { x: +s.vx.toFixed(2), z: +s.vz.toFixed(2) }; })
+        : null,
+      /* ---- THE WILDFIRE — delegated to systems/wildfire.js, whose audit is
+         live-measured off the same tree records the legacy path mutates, so
+         `wildfire.v2:false` (the revert) still reports honest burn counts and
+         zeros for the mechanisms only the module has (spotting, smoke
+         deaths, the persistent scar). */
+      wildfire: CBZ.wildfireAudit ? CBZ.wildfireAudit() : null,
       /* ---- THE TSUNAMI'S FOUR: what the water was carrying, what it hit
          with, how dirty it was and how hard it pulled on the way out. Zero
          unless a tsunami is actually running, which is the point.
@@ -4727,6 +5271,13 @@
          so the tsunami's number was silently replaced by the earthquake's and
          the audit reported 0 debris kills on a run that had just made one.
          One shared audit means one shared namespace. */
+      /* ---- THE HURRICANE'S STRUCTURE (systems/hurricane.js). Nested under
+         one `hur` key — the tsunami's namespace lesson above, applied in
+         advance. Live-state answers: eyePassedCam only fires if the camera
+         saw real wind BEFORE the calm, windReversed is two sampled bearings
+         at the island center dotted across the eye's passage, surgePeak is
+         the biggest number this def actually fed the sea. ---- */
+      hur: CBZ.hurricaneAudit ? CBZ.hurricaneAudit() : null,
       tsuDebrisEntrained: dbgT ? dbgT.entrained : 0,
       tsuDebrisStrikes: dbgT ? dbgT.strikes : 0,
       tsuDebrisKills: dbgT ? dbgT.kills : 0,
@@ -4736,6 +5287,12 @@
       swimShared: !!(CBZ.CONFIG.SURV_SHARED_SWIM !== false && CBZ.citySwimState && CBZ.survSeaHeightAt),
       swimming: !!(sw && sw.swimming),
       breath: sw && sw.breath != null ? sw.breath : null,
+      /* ---- THE BLIZZARD (systems/blizzard.js's own ratchet, re-exported
+         whole so one audit call answers for the roster: the windchill clock,
+         who is holding on in a lee vs freezing in the open, the drift field's
+         live height and the bodies the storm has buried). null on a build
+         without the module — "not measured", never "no storm". */
+      blizzard: CBZ.blizzardAudit ? CBZ.blizzardAudit() : null,
       // ---- ONE STRUCTURE + ONE BLAST BUS ----
       privateCollapse: structPrivate,
       structureHits: structHits,

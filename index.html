@@ -6,7 +6,10 @@
 <title>Gang Life</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23111923'/%3E%3Cpath d='M12 48V28h12v20zm16 0V12h24v36z' fill='%23ffd451'/%3E%3C/svg%3E">
 <!-- The UI typeface is BUNDLED (css/fonts.css) — no CDN on the critical path,
-     and the game looks the same with no network at all. -->
+     and the game looks the same with no network at all. Both App Store shells
+     (Gang Life at the repo root, the disaster app in apps/disaster-ios/) run
+     from local files where a webfont fetch would fail, and the HUD is laid
+     out against Fredoka's metrics — a missing face reflows every pill. -->
 <link rel="stylesheet" href="css/fonts.css">
 
 <!-- styles, split by concern -->
@@ -442,6 +445,14 @@
      of being refused by a mode enum. Loads before every consumer; flag
      MODE_CAPS_V1=false restores the old city-only answers everywhere at once. -->
 <script src="src/systems/modecaps.js?v=caps1"></script>
+<!-- ONE LINE, ONE SURFACE. Four DOM layers render speech into the same
+     bottom-centre band (#campaignDialogue / #pinteractSay / #citySpeech /
+     #hint), and hud.css's ladder OFFSETS a collision rather than suppressing
+     it — which on touch, where #hint wears the subtitle skin and every floor
+     collapses to the same 120px, is the "two layers of text slightly offset"
+     bug. This is the claim desk that decides which surface owns a sentence.
+     Must precede all four of them. ?cfg_SUBTITLE_DEDUPE=0 reverts. -->
+<script src="src/systems/subtitlebus.js?v=onemouth1"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
@@ -797,7 +808,17 @@
 <script src="src/systems/dashboard.js?v=nodash1"></script>
 <script src="src/systems/combat.js?v=phys1"></script>
 <script src="src/systems/killstreaks.js"></script>
-<script src="src/systems/interact.js?v=nodash1"></script>
+<script src="src/systems/interact.js?v=threeverb1"></script>
+<!-- FRIENDSHIP IS OFFERED, NOT BROWSED. BEFRIEND used to sit on every inmate's
+     card as a permanent button that actually opened the FAVOUR loop (it is
+     called TALK now, which is what it does). This owns the real thing: an NPC
+     decides he owes you — you pulled someone off him, you've been buying from
+     him for weeks, or his favour ladder ran out — and OFFERS. Take it and he
+     walks at your shoulder and swings at whoever is hunting you (ai.js's
+     shadowPlayer, off its rental timer). Loads after interact.js (which reads
+     CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
+     ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
+<script src="src/systems/prisonfriends.js?v=crew1"></script>
 <script src="src/systems/interactions.js?v=onebar1"></script>
 <!-- WHAT A THING IN YOUR BAG LOOKS LIKE: one real 3D object per item KIND,
      which city/itemicons.js photographs for the slot and city/inventory.js
@@ -884,6 +905,41 @@
      gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
      Must precede systems/disasters.js so the roster finds CBZ.quake. -->
 <script src="src/systems/quake.js?v=quake1"></script>
+<!-- ==== PER-DISASTER MODULE SEAM ==========================================
+     One line per disaster in the survival roster, each owned by exactly that
+     disaster and nobody else. A disaster whose behaviour outgrows its entry in
+     systems/disasters.js moves that behaviour into its OWN file and claims its
+     line here; the ones still living entirely inside the roster leave theirs a
+     comment. Everything in this block loads BEFORE systems/disasters.js so the
+     roster finds the module's public surface (CBZ.<thing>) at definition time.
+
+     Why a block of one-line slots instead of "add a script tag wherever":
+     twelve disasters get worked on in parallel, and a shared insertion point
+     is a merge conflict every single time. A slot per disaster is not. -->
+<!-- seam:earthquake     — systems/quake.js, tagged above (predates this block) -->
+<!-- seam:lightning      — systems/lightningfx.js, tagged above -->
+<!-- seam:tsunami        — city/tsunami.js, tagged with the city systems -->
+<!-- seam:flashflood — systems/flashflood.js owns the churn spray, the entrained
+     debris and the roar. Two draw calls and no water planes: the flood itself
+     is still a term in the ONE shared depth field, never a mesh. -->
+<script src="src/systems/flashflood.js?v=flood1"></script>
+<!-- seam:hurricane — a cyclone, not a wind number: systems/hurricane.js owns the
+     tracking eye, the eyewall field, the surge curve and the advected debris. -->
+<script src="src/systems/hurricane.js?v=hur1"></script>
+<!-- seam:wildfire — systems/wildfire.js owns the wind/slope-driven front, the
+     killing smoke plume, the ember spotting and the persistent burn scar. -->
+<script src="src/systems/wildfire.js?v=fire1"></script>
+<!-- seam:tornado        — systems/tornado.js, tagged with the city systems -->
+<!-- seam:volcano        — world/volcanofx.js, tagged above -->
+<!-- seam:blizzard — systems/blizzard.js owns the windchill clock, the windbreak
+     query, the gusting whiteout, the lee-side drifts and the burial. -->
+<script src="src/systems/blizzard.js?v=snow1"></script>
+<!-- seam:meteor — systems/meteor.js owns the radiant, the bolides and their smoke
+     trains, the airbursts, the delayed-sound queue and the crater digs. -->
+<script src="src/systems/meteor.js?v=meteor1"></script>
+<!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
+<!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
+<!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
 <script src="src/systems/disasters.js?v=nodash1"></script>
 <script src="src/systems/survival_interact.js?v=climbdock1"></script>
 <script src="src/systems/survivalhud.js?v=nozone1"></script>

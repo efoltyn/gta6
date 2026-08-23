@@ -205,9 +205,17 @@
   max-height: var(--pi-stack-max);
   max-width: 100%;
 }
-/* the core-four / overflow split is a KEYBOARD fact (I J K L). A thumb
-   has no keys, so it must not see the seam. */
+/* the core/overflow split is a KEYBOARD fact (J K L). A thumb has no
+   keys, so it must not see the seam. */
 #pverbs, #poptions{ display: contents; }
+/* The prison stack is THREE one-word verbs now (2026-08-23), and one of
+   them is TALK — four letters, which on .svbtn's generic 104px floor
+   rendered a visibly stubbier capsule than its neighbours (the
+   before/after harness flagged it: smallest tap area 5755 → 4992 px²).
+   A slightly higher floor, scoped to this card only so the survival
+   dock keeps its own tuning, puts the short words back at the width the
+   old four-verb card's narrowest button had. */
+#pinteract .svbtn{ min-width: 122px; }
 
 /* ---- the quiet identity line (gang-city dialogue treatment, no box) ---- */
 #pinteractWho{

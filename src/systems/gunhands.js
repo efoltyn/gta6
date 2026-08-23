@@ -486,6 +486,30 @@
        No reach model can be wrong because there isn't one. */
     const reloadOwnsTheHand = !!reloadSeg;
     const LANDED = 0.03;                     // 3 cm — a fist's worth of slop
+    /* ---- ONE-HAND PORT CARRY (CHAR_PORT_ARMS_CARRY) ----------------------
+       At the port-arms carry the handguard rides up the diagonal, and for the
+       longer guns it is genuinely outside the off arm's ellipsoid. Both ways
+       of forcing two hands onto it were measured and both are worse than not:
+         · the shouldered placement re-aims the gun down its own (now diagonal)
+           axis and yanks the wrist toward the neck — off hand 50 cm off the
+           bore (gunhands-check);
+         · the inboard tuck brings the gun to the centreline, where the torso
+           eats it from the chase camera — 92% of the barrel visible fell to
+           23% (tp-gun-view-check, carry).
+       A rifle ported in one hand is a real carry and reads clean, so when the
+       handguard is out of reach the off arm is RELEASED to animChar's own
+       carry swing rather than left stretching at it. Presenting or reloading
+       brings the gun to the hands again and the IK below resumes. span() is
+       the conservative reach; the margin is the protraction it excludes. */
+    if (!ch.aimingPose && !reloadOwnsTheHand && buttLen(prop) > 0.18 &&
+        CBZ.CONFIG.CHAR_PORT_ARMS_CARRY !== false && CBZ.charArmTo.span) {
+      shoulderWorld(ch, "l", _sh);
+      if (_sh.distanceTo(target) > CBZ.charArmTo.span(ch, "l") + 0.10) {
+        blend = 0;
+        seen.why = "port carry: handguard out of reach — off hand at rest";
+        return;
+      }
+    }
     CBZ.charArmTo.rest(ch, "l", 0);
     let resid = CBZ.charArmTo(ch, target, "l", blend);
     seen.resid0 = resid;
@@ -510,6 +534,19 @@
       prop.getWorldQuaternion(_bodyQ);
       _fwd.set(0, 0, -1).applyQuaternion(_bodyQ);          // the barrel's own axis
       shoulderWorld(ch, "r", _rt);                          // the firing shoulder
+      // WHICH placement depends on what the body is DOING, not just on the
+      // weapon. The stock-in-the-pocket geometry below is the truth of a rifle
+      // being AIMED — wrist one stock-length down the barrel's own axis. Run
+      // it at the port-arms CARRY (CHAR_PORT_ARMS_CARRY, entities/character.js)
+      // and "down the barrel's own axis" is the up-across diagonal, so it
+      // computed wrist = shoulder + stock-length toward the NECK and fought
+      // the carry pose every frame: measured, the off hand went from 2 cm off
+      // the bore to 50 (gunhands-check, carry column). A ported long gun the
+      // off hand cannot reach RELEASES the arm instead (the block above) —
+      // relocating the gun was measured and it hides the weapon behind the
+      // torso. The pistol inboard tuck below is different and stays: it was
+      // load-bearing at carry for sidearms all along (gating it away pushed
+      // their carry gap from 10 cm to 49).
       if (stock <= 0.18) {
         /* NO STOCK TO SHOULDER — a pistol. It was being held at full arm's
            length out to the firing side, which put its grip 81 cm from the

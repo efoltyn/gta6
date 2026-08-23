@@ -1,5 +1,11 @@
 # NATURAL DISASTER SURVIVAL — the App Store runbook
 
+> **Two apps live in this repo.** Gang Life (the full game) owns the repo-root
+> `capacitor.config.json` and the COMMITTED Xcode project at `ios/App` — its
+> runbook is `docs/APP-STORE.md`. THIS app owns `apps/disaster-ios/`, and its
+> Xcode project is generated there on the Mac (gitignored). Neither pipeline
+> may write into the other's shell.
+
 Everything between this repo and a build sitting in App Store Connect. You have
 the developer account and other apps on the store, so this skips what you
 already know and states only what is specific to THIS app.
@@ -11,13 +17,14 @@ npm run build:disaster     # regenerate disaster.html from index.html
 npm run build:ios          # dist-ios/www — the bundle the app ships
 npm run check:ios          # boot that bundle and run all eleven disasters
 
-# on the Mac, once:
-npx cap add ios
+# on the Mac, once (this app's Capacitor root is apps/disaster-ios — the
+# repo-root config and ios/ belong to the OTHER app, Gang Life):
+(cd apps/disaster-ios && npx cap add ios)
 node tools/setup-ios.mjs   # plist keys, privacy manifest, icon, splash
 
 # every time after that:
-npm run build:ios && npx cap sync ios
-open ios/App/App.xcworkspace
+npm run build:ios && (cd apps/disaster-ios && npx cap sync ios)
+open apps/disaster-ios/ios/App/App.xcworkspace
 ```
 
 ---

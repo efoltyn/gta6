@@ -123,11 +123,36 @@
   if (CBZ.CONFIG.VOLCANO_V2 == null) CBZ.CONFIG.VOLCANO_V2 = true;
   if (CBZ.CONFIG.VOLCANO_PYRO == null) CBZ.CONFIG.VOLCANO_PYRO = true;
   if (CBZ.CONFIG.VOLCANO_LAHAR == null) CBZ.CONFIG.VOLCANO_LAHAR = true;
-  /* OFF as of 2026-08-16. OWNER: "the ash covering the map is not needed...
-     idc if it's realistic". The blanket, the roof quads and the choke it fed
-     all hang off this one flag; ?cfg_VOLCANO_ASH_LOAD=1 brings the whole
-     ledger back intact. */
-  if (CBZ.CONFIG.VOLCANO_ASH_LOAD == null) CBZ.CONFIG.VOLCANO_ASH_LOAD = false;
+  /* VOLCANO_V3 (2026-08-23): the eruption gets its SKY back. One flag, three
+     repairs, all in the caller (systems/disasters.js) plus the two builder
+     options below (`fogless` on the column, `lobe` on the ash fall):
+       COLUMN   the eruption column is the most dramatic silhouette in nature
+                and ours was 60 m — barely twice the mountain, and the murk's
+                linear fog ate its head. V3 stands it ~180 m over a 26 m peak
+                and exempts its soot from scene fog (the nukefx precedent:
+                the landmark must not dissolve in its own weather).
+       ASH      the wedge, not the blanket — see the note below.
+       DARK     ash blots the sun: as the deposit builds, the eruption's env
+                walks toward darkness-at-noon instead of holding a fixed tint.
+     False is the one-line revert to the 2026-08-16 build. */
+  if (CBZ.CONFIG.VOLCANO_V3 == null) CBZ.CONFIG.VOLCANO_V3 = true;
+  /* ASH IS BACK ON, because what was OFF was never the ledger — it was the
+     BLANKET. The 2026-08-16 owner note ("the ash covering the map is not
+     needed... the ash covers everything in a dumb way, idc if it's
+     realistic") describes exactly what the caller was asking this field to
+     do: `spread: 0.16` put a sixth of the axis rate on EVERY cell of the
+     island, so the whole map greyed over at once and the deposit read as a
+     screen filter, not a place. That is a parameter bug, not a reason to
+     delete the one hazard that reaches everyone — and deleting it also
+     deleted the roof-load collapses and the whole indoors-saves-you-until-
+     the-roof-goes tension, which nobody complained about.
+     V3 fixes the parameter: the fall is a DOWNWIND WEDGE (spread ~0.05,
+     lobe exponent up), so the upwind half of the island keeps its own
+     colour for the whole event and the grey is somewhere you can point at,
+     walk out of, and watch roofs fail under. ?cfg_VOLCANO_ASH_LOAD=0 still
+     kills the whole ledger on its own; with V3 off the old default-off
+     stands, so the 2026-08-16 build is fully recoverable. */
+  if (CBZ.CONFIG.VOLCANO_ASH_LOAD == null) CBZ.CONFIG.VOLCANO_ASH_LOAD = CBZ.CONFIG.VOLCANO_V3 !== false;
 
   const V = {};
   // live census for CBZ.volcanoAudit() — measured, never counted in source
@@ -1078,10 +1103,17 @@
     // output encoding both lift these on the way to the screen (same lesson
     // as the melt ramp and the ash palette)
     const COL_TIERS = [0x1a1713, 0x211d17, 0x28231c, 0x2f2921];
+    /* `fogless`: the V3 column is the eruption's LANDMARK, and a 180 m pillar
+       whose head sits 250+ m from any camera on a 240 m island was being
+       dissolved by the eruption's own 380 m fog wall — the most dramatic
+       silhouette in nature, fading out precisely because it was tall enough
+       to matter. Soot against sky owes the air nothing (city/nukefx.js's
+       lobes made the same call), so the caller may exempt it. */
+    const useFog = o.fogless ? false : true;
     for (let i = 0; i < COL_TIERS.length; i++) {
       mats.push(new THREE.SpriteMaterial({
         map: puffTex(i % 3), color: COL_TIERS[i],
-        transparent: true, opacity: 1, depthWrite: false, fog: true,
+        transparent: true, opacity: 1, depthWrite: false, fog: useFog,
         blending: THREE.NormalBlending, rotation: i * 1.7,
       }));
     }
@@ -1826,35 +1858,12 @@
         // print no matter how organic each individual outline is
         const jit = 0.58 + 0.92 * h01(x, z, salt + 89);
         const C = {
-          x: x, z: z, y: groundAt(x, z), w: cell, d: cell, depth: 0, roof: false,
-          ang: ang, jit: jit,
+          x: x, z: z, y: 0, w: cell, d: cell, depth: 0, roof: false,
+          ang: ang, jit: jit, probed: false, cy: null,
           // per-cell coverage gain: the drift does not arrive as a straight
           // edge, it mottles, and one hashed multiplier is the whole effect
           gain: 0.55 + 0.95 * h01(x, z, salt + 103),
         };
-        /* ---- THE DEPOSIT LIES ON THE GROUND. ------------------------------
-           OWNER, 2026-08-13: "ash is the worst, theres random cubes and
-           floating flat gray squares all around". Exactly right, and it was
-           one line: every quad took ONE height — the ground under its centre —
-           for all four of its corners. A horizontal three-metre plate on the
-           side of a cone buries one edge and hangs the other a metre in the
-           air, and there are five thousand of them. On the flat it still
-           floated, because the surface was also being lifted by 0.6 x the
-           depth: half a metre of ash put the sheet a third of a metre above
-           the grass it was supposed to be sitting on.
-
-           Each corner now stands on the ground under ITSELF. The four ground
-           probes are taken once, here, at the quad's full extent — the cell
-           never moves, and the only thing that changes with coverage is how
-           far out along that fixed diagonal the corner currently sits, which
-           is a lerp. So the blanket drapes the mountain for no per-frame cost
-           at all. ------------------------------------------------------- */
-        const hw0 = cell * 0.78 * jit, ca = Math.cos(ang), sa = Math.sin(ang);
-        const ox = [-hw0, hw0, hw0, -hw0], oz = [-hw0, -hw0, hw0, hw0];
-        C.cy = new Float32Array(4);
-        for (let k = 0; k < 4; k++) {
-          C.cy[k] = groundAt(x + ox[k] * ca - oz[k] * sa, z + ox[k] * sa + oz[k] * ca);
-        }
         cells.push(C);
       }
     }
@@ -1927,9 +1936,45 @@
     parent.add(mesh);
 
     let dirty = true, wT = 0, peak = 0, dead = false;
+    /* ---- THE DEPOSIT LIES ON THE GROUND — AND THE PROBES ARE AMORTISED. --
+       OWNER, 2026-08-13: "ash is the worst, theres random cubes and floating
+       flat gray squares all around". The cure was corner-accurate draping:
+       each quad corner stands on the ground under ITSELF, probed once, and
+       coverage only lerps along that fixed diagonal — no per-frame cost.
+
+       What moved (2026-08-23): WHEN the probing happens. Five probes for
+       each of ~5800 cells inside the constructor was ~29k height-field
+       calls in the same tick that also builds the column, five lava flows
+       and the vent apron — the measured eruption-start spike. The probes
+       now run in budgeted batches inside the first few update ticks; an
+       unprobed cell draws nothing (its quad collapses to a point), which
+       costs no look because ash takes seconds to land anywhere anyway. The
+       depth ledger never waits: accumulation and depthAt() work on unprobed
+       cells from tick one. ------------------------------------------------ */
+    let probeCursor = 0;
+    function probeCell(n) {
+      const C = cells[n];
+      if (C.roof || C.probed) return;
+      C.probed = true;
+      C.y = groundAt(C.x, C.z);
+      const hw0 = C.w * 0.78 * C.jit, ca = Math.cos(C.ang), sa = Math.sin(C.ang);
+      const ox = [-hw0, hw0, hw0, -hw0], oz = [-hw0, -hw0, hw0, hw0];
+      C.cy = new Float32Array(4);
+      for (let k = 0; k < 4; k++) {
+        C.cy[k] = groundAt(C.x + ox[k] * ca - oz[k] * sa, C.z + ox[k] * sa + oz[k] * ca);
+      }
+    }
 
     function writeCell(n) {
       const C = cells[n];
+      if (!C.roof && !C.probed) {
+        // not yet seated on the ground: draw nothing (zero-area quad)
+        const v0 = n * 4 * 3;
+        for (let k = 0; k < 4; k++) {
+          pos[v0 + k * 3] = C.x; pos[v0 + k * 3 + 1] = C.y; pos[v0 + k * 3 + 2] = C.z;
+        }
+        return;
+      }
       const cov = clamp((C.depth / FULL) * (C.roof ? 1 : (C.gain || 1)), 0, 1);
       // quads grow from a point at their cell centre; neighbours overlap at
       // full coverage, which is what welds them into one blanket
@@ -1991,7 +2036,10 @@
       get peakDepth() { return peak; },
       get cellCount() { return cells.length; },
       /* spec: { rate (m/s at the plume axis), windX, windZ, srcX, srcZ,
-                 spread (0..1 how much falls off-axis) } */
+                 spread (0..1 how much falls off-axis),
+                 lobe (downwind cosine exponent, default 2.2 — higher = a
+                 tighter wedge; the V3 caller raises it so the fall is a
+                 sector you can stand outside of, not a map filter) } */
       update(dt, spec) {
         if (dead) return handle;
         spec = spec || {};
@@ -2003,6 +2051,12 @@
         const rate = +spec.rate || 0;
         if (wT < 0.125 && !(rate > 0 && peak === 0)) return handle;
         const step = wT; wT = 0;
+        // seat a batch of cells on the ground (see the amortisation note)
+        if (probeCursor < groundCells) {
+          const lim = Math.min(groundCells, probeCursor + 700);
+          for (; probeCursor < lim; probeCursor++) probeCell(probeCursor);
+          dirty = true;
+        }
         if (rate > 0) {
           const wx = spec.windX != null ? +spec.windX : 1;
           const wz = spec.windZ != null ? +spec.windZ : 0;
@@ -2011,14 +2065,15 @@
           const sx = spec.srcX != null ? +spec.srcX : cx;
           const sz = spec.srcZ != null ? +spec.srcZ : cz;
           const spread = spec.spread != null ? clamp(+spec.spread, 0, 1) : 0.18;
+          const lobeP = spec.lobe > 0 ? +spec.lobe : 2.2;
           for (let n = 0; n < cells.length; n++) {
             const C = cells[n];
             const dx = C.x - sx, dz = C.z - sz;
             const d = Math.hypot(dx, dz) || 0.001;
             // the DOWNWIND WEDGE: a hard cosine lobe on the wind bearing,
-            // plus a small isotropic term so the whole island greys over
+            // plus a small isotropic term for the dusting near the vent
             const dot = (dx * ux + dz * uz) / d;
-            const lobe = dot > 0 ? Math.pow(dot, 2.2) : 0;
+            const lobe = dot > 0 ? Math.pow(dot, lobeP) : 0;
             const fall = 1 / (1 + (d / (R * 0.55)) * (d / (R * 0.55)));
             const k = (spread + (1 - spread) * lobe) * fall;
             if (k > 0.001) {
@@ -2037,13 +2092,17 @@
         }
         return handle;
       },
-      // metres of ash standing on the ground at (x,z)
+      // metres of ash standing on the ground at (x,z). An unprobed cell
+      // reports 0 even if the ledger has started filling it: it is not
+      // drawn yet, and no picture means no damage (the choke reads this).
       depthAt(x, z) {
         const i = Math.floor((x - (cx - R)) / cell);
         const j = Math.floor((z - (cz - R)) / cell);
         if (i < 0 || j < 0 || i >= NC || j >= NC) return 0;
         const n = grid[i * NC + j];
-        return n < 0 || n >= groundCells ? 0 : cells[n].depth;
+        if (n < 0 || n >= groundCells) return 0;
+        const C = cells[n];
+        return C.probed ? C.depth : 0;
       },
       /* A ROOF IS A CELL WITH A CALLER-SUPPLIED CEILING. The disaster hands
          its building rects in once, then reads roofDepth(id) back and prices

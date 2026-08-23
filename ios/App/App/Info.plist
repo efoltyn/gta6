@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CAPACITOR_DEBUG</key>
+	<string>$(CAPACITOR_DEBUG)</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Gang Life</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+	</array>
+
+	<!-- EXPORT COMPLIANCE. The game ships no cryptography of its own; the only
+	     crypto it can touch is the OS's own TLS. Declaring this here answers
+	     the export-compliance question ONCE instead of on every single upload
+	     to App Store Connect (and a wrong/absent answer holds the build in
+	     "Missing Compliance" until someone clicks through it by hand). -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
+					<key>UISceneStoryboardFile</key>
+					<string>Main</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
+
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIMainStoryboardFile</key>
+	<string>Main</string>
+
+	<!-- arm64, NOT the armv7 the Capacitor template ships. armv7 is 32-bit and
+	     no 32-bit device can run a modern deployment target, so the template
+	     value describes hardware this build could never install on. -->
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+
+	<!-- ORIENTATION: everything except upside-down on the phone.
+	     The HUD is genuinely built for both — css/mobile.css carries a whole
+	     max-height:560px regime for the landscape phone (the FIRE/JUMP column
+	     wrapping into a second column) and portrait rules alongside it — so
+	     there is no reason to lock an axis, and leaving both free is also what
+	     keeps the iPad well-behaved in Split View / Stage Manager. Upside-down
+	     is dropped on iPhone only because iOS itself never rotates there. -->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+
+	<!-- FULL-SCREEN GAME. The status bar would otherwise print the clock and
+	     the battery straight through the top of the HUD rail. Hiding it in the
+	     plist (rather than per-view-controller) means it is gone from the very
+	     first frame of the launch screen, so there is no bar that appears for
+	     one frame and then leaves. -->
+	<key>UIStatusBarHidden</key>
+	<true/>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
+
+	<!-- The game paints its own world; there is no light/dark UI to invert,
+	     and letting iOS hand the WKWebView a light appearance is what puts a
+	     white flash between the launch image and the first rendered frame. -->
+	<key>UIUserInterfaceStyle</key>
+	<string>Dark</string>
+
+	<!-- Trackpad/mouse on iPad: deliver real indirect pointer events instead of
+	     synthesising taps at the cursor. Without this a Magic Keyboard iPad
+	     gets touch-shaped events at trackpad positions, which is exactly the
+	     kind of half-working input a reviewer notices. -->
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+
+	<!-- MFi / Xbox / DualSense controllers. src/systems/gamepad.js already
+	     drives the whole game off the web Gamepad API, and WKWebView surfaces
+	     a paired controller through it — this key is what lets the system hand
+	     the controller to the app at all, and it is what makes the App Store
+	     listing show the "Controller Support" badge. -->
+	<key>GCSupportsControllerUserInteraction</key>
+	<true/>
+	<key>GCSupportedGameControllers</key>
+	<array>
+		<dict>
+			<key>ProfileName</key>
+			<string>ExtendedGamepad</string>
+		</dict>
+	</array>
+</dict>
+</plist>
