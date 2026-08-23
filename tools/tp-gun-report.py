@@ -204,7 +204,7 @@ st += [
         'Measured before anything was touched: while firing, <b>0% of the drawn weapon’s barrel reached the '
         'lens</b>. Not “a bit small” — none of it. The gun spent every gunfight behind the shoulder of the '
         'person holding it. Three passes later — a framing table, a plain aim bug, and a new carry pose — '
-        '<b>firing shows 77% of the barrel and carrying shows 92%</b>, measured, not eyeballed.', BODY),
+        '<b>firing shows 77% of the barrel and carrying shows 100%</b>, measured, not eyeballed.', BODY),
     Spacer(1, 4),
     gate_pair(),
     Paragraph(
@@ -245,7 +245,7 @@ st += [
         ["firing, before", "0%", "—", "the gun is behind its owner"],
         ["<b>firing, after</b>", "<b>77%</b>", "<b>10% of frame height</b>", "framing table + the aim-bug fix"],
         ["carrying, before", "54% on a knife edge", "0–5%", "a thigh-hung rifle inside the leg’s silhouette"],
-        ["<b>carrying, after</b>", "<b>92%</b>", "<b>15% of frame height</b>", "port arms — a pose fix, not a camera fix"],
+        ["<b>carrying, after</b>", "<b>100%</b>", "<b>16% of frame height</b>", "port arms — a pose fix, not a camera fix"],
         ["scoping (for scale)", "77%", "8%", "unchanged; it always worked"],
     ], [1.35 * inch, 1.5 * inch, 1.45 * inch, W - 4.3 * inch]),
     Paragraph('Measured on the airport apron, carbine, same spot, same moment of the trigger pull, by '
