@@ -1179,6 +1179,10 @@
       warn(ctx) {
         narrate("hint", "Blizzard incoming, get INDOORS or keep moving!", 2.8); sound("wind");
         const a = rnd() * 6.28; ctx.st.wx = Math.cos(a); ctx.st.wz = Math.sin(a);
+        // V2 (systems/blizzard.js): seed the drift field on this wind bearing
+        // and reset the windchill clock. Absent or flagged off, the legacy
+        // storm below plays untouched.
+        if (CBZ.blizzard && CBZ.CONFIG.BLIZZARD_V2 !== false) CBZ.blizzard.begin(ctx.st.wx, ctx.st.wz, ctx);
       },
       warnTick(dt, ctx) {
         const k = 1 - dir.t / (this.warnSecs || 1);
@@ -1191,11 +1195,24 @@
         ctx.env.fog = lerpHex(ctx.env.fog, 0xdbe6f0, 0.7 * k);
         if (rnd() < dt * 1.5) sound("wind");
       },
-      // shelter is the answer, so the crowd converges on the town roofs
+      // shelter is the answer, so the crowd converges on the lee faces while
+      // the sky is still darkening (V2), or just keeps moving (legacy)
       warnThreat(x, z, ctx) { return 0.3; },
-      warnSafeDir(x, z, ctx) { return null; },
+      warnSafeDir(x, z, ctx) {
+        return (CBZ.blizzard && CBZ.CONFIG.BLIZZARD_V2 !== false) ? CBZ.blizzard.safeDir(x, z) : null;
+      },
       start(ctx) { ctx.st.t = 0; },
       active(dt, ctx) {
+        /* V2: systems/blizzard.js owns the event — the gusting whiteout, the
+           windchill clock on every unsheltered actor, the windbreak query,
+           the lee-side drifts and the burial. This def hands it dt+ctx and
+           keeps the wind sound. Flag off / file missing = the storm below,
+           exactly as it always played. */
+        if (CBZ.blizzard && CBZ.CONFIG.BLIZZARD_V2 !== false) {
+          CBZ.blizzard.storm(dt, ctx);
+          if (rnd() < dt * 2) sound("wind");
+          return;
+        }
         ctx.env.fog = 0xdbe6f0; ctx.env.fogNear = 8; ctx.env.fogFar = 60; ctx.env.sunInt = 0.6; ctx.env.sunColor = 0xcfe0ff; ctx.env.hemiInt = 1.1; ctx.env.hemiColor = 0xeaf2ff;
         // THE GROUND GOES WHITE AS THE EVENT RUNS. `cover` ramps with the
         // progress of the storm rather than snapping to 1, so the arc reads
@@ -1215,9 +1232,21 @@
       // weatherOff() drops the driven coverage back to the ambient integrator,
       // which MELTS it over minutes instead of deleting it — the island stays
       // white for a while after, which is the whole point of state on the ground.
-      end(ctx) { weatherOff(); },
-      threat() { return 0.25; },
-      safeDir() { return null; }, // no safe direction — just don't stand still
+      end(ctx) {
+        weatherOff();
+        // V2: the drifts and the buried stay; blizzard.js melts them over
+        // minutes, the same clock weather.js melts the ground cover on.
+        if (CBZ.blizzard && CBZ.CONFIG.BLIZZARD_V2 !== false) CBZ.blizzard.end();
+      },
+      threat(x, z) {
+        // V2: the open is a countdown (0.5), a lee face is holding on (0.1),
+        // a roof is warmth (0.05) — which is what steers the crowd into the
+        // huddle behind the wall. Legacy: a flat 0.25 with nowhere to go.
+        return (CBZ.blizzard && CBZ.CONFIG.BLIZZARD_V2 !== false) ? CBZ.blizzard.threat(x, z) : 0.25;
+      },
+      safeDir(x, z) {
+        return (CBZ.blizzard && CBZ.CONFIG.BLIZZARD_V2 !== false) ? CBZ.blizzard.safeDir(x, z) : null;
+      },
     },
 
     // ---- METEOR SHOWER: telegraphed impacts, big blast ----
@@ -4736,6 +4765,12 @@
       swimShared: !!(CBZ.CONFIG.SURV_SHARED_SWIM !== false && CBZ.citySwimState && CBZ.survSeaHeightAt),
       swimming: !!(sw && sw.swimming),
       breath: sw && sw.breath != null ? sw.breath : null,
+      /* ---- THE BLIZZARD (systems/blizzard.js's own ratchet, re-exported
+         whole so one audit call answers for the roster: the windchill clock,
+         who is holding on in a lee vs freezing in the open, the drift field's
+         live height and the bodies the storm has buried). null on a build
+         without the module — "not measured", never "no storm". */
+      blizzard: CBZ.blizzardAudit ? CBZ.blizzardAudit() : null,
       // ---- ONE STRUCTURE + ONE BLAST BUS ----
       privateCollapse: structPrivate,
       structureHits: structHits,
