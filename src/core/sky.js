@@ -88,6 +88,22 @@
      by the same owner order as the skyline rings.
   --------------------------------------------------------------------- */
   if (CBZ.CONFIG.SKY_ALTITUDE == null) CBZ.CONFIG.SKY_ALTITUDE = true;
+  /* SKY_STORM_EDGE — a storm has a FRONT, not a dimmer switch.
+     OWNER (photographing the real thing through a windscreen, twice): the
+     edge of a storm — a dense dark shelf owning one side of the sky, hard
+     against blazing clear air on the other, the horizon under the deck's lip
+     glowing white with the daylight leaking in from outside the system.
+     The painted deck could not draw that day: coverage was a single alpha
+     applied to ALL 360° of azimuth, so a storm arrived as a uniform grey
+     film fading in everywhere at once and left the same way — a projector
+     dimming, not weather moving. With this flag the deck owns an azimuthal
+     SECTOR anchored where the wind is coming from: it is DENSE from the
+     first minute, its edges sweep across the sky as coverage grows and
+     shrinks, daylight burns along the boundary, and the sun disc dies only
+     when the deck actually reaches it. Coverage still comes off the one
+     number systems/weather.js publishes (overcast), so every existing storm
+     drives it with no edit. */
+  if (CBZ.CONFIG.SKY_STORM_EDGE == null) CBZ.CONFIG.SKY_STORM_EDGE = true;
 
   // Barometric scale height of Earth's atmosphere. Pressure — and with it
   // the Rayleigh column that IS the blue of the sky — falls as exp(-h/H).
@@ -348,9 +364,48 @@
     return r / (r + DECK_R0);
   }
 
-  function deckLayer(pat, reps, driftU, driftV, alpha, bot) {
+  /* THE FRONT'S OWN CANVASES (SKY_STORM_EDGE). The deck is painted at full
+     density into its own layer, the clear sector is erased out of it with a
+     wrap-aware horizontal ramp, and the result is blitted onto the sky — so
+     every line of the existing band painter runs unchanged, just against a
+     different context. The 1-px strip is the azimuth mask, stretched to the
+     deck's full height on the way in (drawImage with a skew, so the deck
+     OVERHANGS its own edge at altitude the way a real shelf leans out ahead
+     of the rain under it). */
+  let deckCv = null, deckCx2 = null, maskCv = null, maskCx = null;
+  function deckCanvases() {
+    if (!deckCv) {
+      deckCv = document.createElement("canvas");
+      deckCv.width = SKY_W; deckCv.height = Math.ceil(HORIZON_Y);
+      deckCx2 = deckCv.getContext("2d");
+      maskCv = document.createElement("canvas");
+      maskCv.width = SKY_W; maskCv.height = 1;
+      maskCx = maskCv.getContext("2d");
+    }
+    return deckCx2;
+  }
+  // Where the deck is, per azimuth: 1 fully under the deck, 0 clear air, a
+  // soft ramp at the two edges. Everything that must die under cloud — the
+  // sun disc, its halo, the veiling glare — asks THIS instead of the raw
+  // coverage, which is what lets the sun blaze beside an advancing shelf.
+  const EDGE_SOFT = 0.045;             // edge ramp width, in canvas u
+  function stormSectorAt(u) {
+    const k = frame.stormK;
+    if (k < 0.01) return 0;
+    if (CBZ.CONFIG.SKY_STORM_EDGE === false || k >= 0.985 || !DECK_XFORM ||
+        (deckBuilt && !(deckPatD && deckPatD.setTransform))) return k;   // painter fell back → answer like it
+    let d = Math.abs((u - frame.stormEdgeU) % 1);
+    if (d > 0.5) d = 1 - d;                       // wrap distance, 0..0.5
+    const hw = k * 0.5;                            // covered half-width in u
+    const a = d <= hw ? 1 : Math.max(0, 1 - (d - hw) / EDGE_SOFT);
+    return a * Math.min(1, k * 1.8);               // a front is DENSE from minute one
+  }
+  CBZ.stormSectorAt = stormSectorAt;               // read by the gate/preset
+
+  function deckLayer(ctx2, pat, reps, driftU, driftV, alpha, bot) {
     if (!pat || alpha < 0.004) return;
     const sx = SKY_W / (DECK_N * 3);   // three tile widths around the horizon
+    const skyCtx = ctx2;               // the band loop below is unchanged
     skyCtx.fillStyle = pat;
     const span = DECK_N * reps;
     for (let i = 0; i < DECK_BANDS; i++) {
@@ -397,22 +452,89 @@
        the last 50 px to the ramp, which melts the cloud into exactly the fog
        colour, and the seam law at step 4 is untouched. */
     const bot = HORIZON_Y;
+    /* THE FRONT (SKY_STORM_EDGE). Below ~full coverage the deck is painted at
+       front density into its own layer and the CLEAR SECTOR is erased out of
+       it, so a growing storm arrives as a dense shelf taking the sky one
+       azimuth at a time and a dying one is swept off it — the owner's two
+       photographs, instead of a grey film fading in everywhere at once. At
+       k≥0.985 the sector is the whole sky and the classic full-dome path
+       runs unchanged (also the no-DOMMatrix fallback). */
+    // (the edge also needs the tile: if buildDeck failed there is nothing to
+    // mask and the flat fallback must keep painting straight onto the sky)
+    const edgeOn = CBZ.CONFIG.SKY_STORM_EDGE !== false && DECK_XFORM && k < 0.985 &&
+      !!(deckPatD && deckPatD.setTransform);
+    const den = edgeOn ? Math.min(1, k * 1.8) : k;
+    const ctx2 = edgeOn ? deckCanvases() : skyCtx;
+    if (edgeOn) ctx2.clearRect(0, 0, SKY_W, Math.ceil(bot));
     // 1) the base ceiling: opaque at full overcast, so the blue underneath is
     //    GONE rather than tinted. This is the half that fixes the complaint;
     //    the structure below is the half that makes it worth looking at.
-    const g = skyCtx.createLinearGradient(0, 0, 0, bot);
-    g.addColorStop(0, cssA(_stTop, k));
-    g.addColorStop(0.55, cssA(_stMid, k));
-    g.addColorStop(1, cssA(_stLow, k));
-    skyCtx.fillStyle = g;
-    skyCtx.fillRect(0, 0, SKY_W, Math.ceil(bot));
+    const g = ctx2.createLinearGradient(0, 0, 0, bot);
+    g.addColorStop(0, cssA(_stTop, den));
+    g.addColorStop(0.55, cssA(_stMid, den));
+    g.addColorStop(1, cssA(_stLow, den));
+    ctx2.fillStyle = g;
+    ctx2.fillRect(0, 0, SKY_W, Math.ceil(bot));
     if (!DECK_XFORM || !deckPatD || !deckPatD.setTransform) return; // flat deck, still a deck
     // 2) structure. The two layers run at different tile counts and different
     //    drift rates because a storm sky is not one sheet — it is a ragged
     //    lower layer sliding under a slower mass above it, and that parallax
     //    is most of what sells depth in a still frame.
-    deckLayer(deckPatD, 1.15, frame.stormU, frame.stormV, k * 0.92, bot);
-    deckLayer(deckPatL, 0.8, frame.stormU * 0.5 + 90, frame.stormV * 0.5, k * frame.stormLit * 0.3, bot);
+    deckLayer(ctx2, deckPatD, 1.15, frame.stormU, frame.stormV, den * 0.92, bot);
+    deckLayer(ctx2, deckPatL, 0.8, frame.stormU * 0.5 + 90, frame.stormV * 0.5, den * frame.stormLit * 0.3, bot);
+    if (!edgeOn) return;
+    // 3) erase the clear sector. The mask is a 1-px strip: keep-alpha 1 under
+    //    the deck, 0 in clear air, EDGE_SOFT ramps between, drawn at x and
+    //    x±SKY_W so the wrap can never show a hard cut.
+    const cx = frame.stormEdgeU * SKY_W;
+    const hw = k * 0.5 * SKY_W, soft = EDGE_SOFT * SKY_W;
+    maskCx.clearRect(0, 0, SKY_W, 1);
+    for (let o = -1; o <= 1; o++) {
+      const c = cx + o * SKY_W;
+      const gm = maskCx.createLinearGradient(c - hw - soft, 0, c + hw + soft, 0);
+      gm.addColorStop(0, "rgba(0,0,0,0)");
+      gm.addColorStop(soft / (2 * (hw + soft)), "rgba(0,0,0,1)");
+      gm.addColorStop(1 - soft / (2 * (hw + soft)), "rgba(0,0,0,1)");
+      gm.addColorStop(1, "rgba(0,0,0,0)");
+      maskCx.fillStyle = gm;
+      const x0 = Math.max(0, c - hw - soft), x1 = Math.min(SKY_W, c + hw + soft);
+      if (x1 > x0) maskCx.fillRect(x0, 0, x1 - x0, 1);
+    }
+    ctx2.save();
+    ctx2.globalCompositeOperation = "destination-in";
+    /* the skew: the shelf leans FORWARD aloft — a real gust front's anvil
+       runs out ahead of the rain under it — so the mask is sheared to give
+       the deck ~4° more reach at the zenith than at the waterline. */
+    const lean = 0.04 * SKY_W;
+    ctx2.transform(1, 0, -lean / bot, 1, lean * 0.5, 0);
+    ctx2.drawImage(maskCv, 0, 0, SKY_W, 1, -lean, 0, SKY_W + lean * 2, Math.ceil(bot));
+    ctx2.restore();
+    // 4) blit the front onto the sky.
+    skyCtx.drawImage(deckCv, 0, 0);
+    // 5) DAYLIGHT UNDER THE LIP. The owner's photograph: the horizon just
+    //    beyond the shelf burns near-white with the clear air's light coming
+    //    in under the deck. One squashed radial glow per edge, on the clear
+    //    side, dying as the sky closes and with the daylight itself.
+    const glow = den * frame.stormLit * (1 - k * k);
+    if (glow > 0.03) {
+      for (let e = -1; e <= 1; e += 2) {
+        const ex = cx + e * (hw + soft * 0.4);
+        for (let o = -1; o <= 1; o++) {
+          const gx = ex + o * SKY_W;
+          if (gx < -SKY_W * 0.2 || gx > SKY_W * 1.2) continue;
+          skyCtx.save();
+          skyCtx.translate(gx, HORIZON_Y - 2);
+          skyCtx.scale(2.6, 1);
+          const g2 = skyCtx.createRadialGradient(0, 0, 0, 0, 0, SKY_H * 0.16);
+          g2.addColorStop(0, "rgba(246,248,250," + (0.62 * glow).toFixed(3) + ")");
+          g2.addColorStop(0.5, "rgba(236,240,244," + (0.26 * glow).toFixed(3) + ")");
+          g2.addColorStop(1, "rgba(230,236,242,0)");
+          skyCtx.fillStyle = g2;
+          skyCtx.fillRect(-SKY_H * 0.16, -SKY_H * 0.16, SKY_H * 0.32, SKY_H * 0.16);
+          skyCtx.restore();
+        }
+      }
+    }
   }
 
   // horizon colour = fog ÷ tint (clamped) so (texel × tint) == fog exactly
@@ -429,7 +551,12 @@
     // the storm deck: coverage 0..1, its drift in canvas px, and how much
     // daylight is left to light the thin gaps (a night deck has none).
     stormK: 0, stormU: 0, stormV: 0, stormLit: 1,
+    // where the front is centred, in canvas u — LATCHED off the wind when the
+    // storm first appears, because a front that re-anchored every frame would
+    // slew across the sky whenever a gust turned.
+    stormEdgeU: 0.25,
   };
+  let stormEdgeLatched = false;
   const _zen = new THREE.Color(), _mid = new THREE.Color(), _top = new THREE.Color();
   const _hot = new THREE.Color(), _gmid = new THREE.Color();
   const _stTop = new THREE.Color(), _stMid = new THREE.Color(), _stLow = new THREE.Color();
@@ -883,6 +1010,11 @@
     frame.duskW = duskness;
     frame.glowK = duskness;
     frame.photoK = clamp01((up - 0.3) * 4); // photo fades out entering golden hour
+    // sun azimuth → canvas u (r128 SphereGeometry: x=-cos(2πu)·s, z=sin(2πu)·s)
+    // — computed BEFORE the storm block so the deck can ask whether the sun's
+    // side of the sky is actually covered.
+    let gu = Math.atan2(-10, -Math.cos(a) * 80) / (Math.PI * 2);
+    frame.glowU = gu - Math.floor(gu);
 
     /* ---- THE STORM (see section 1b) --------------------------------
        systems/weather.js owns "how much cloud is overhead" because it is the
@@ -890,6 +1022,21 @@
        a dry scripted strobe. This file owns what that LOOKS like. */
     const W = CBZ.weather;
     frame.stormK = clamp01(W && typeof W.overcast === "number" ? W.overcast : 0);
+    // LATCH THE FRONT where the wind was coming from when the storm first
+    // showed. The covered sector is centred on the UPWIND azimuth — the deck
+    // advances downwind across the sky as coverage grows — and it stays
+    // latched for the storm's whole life so the sky cannot slew.
+    if (frame.stormK > 0.02 && !stormEdgeLatched) {
+      stormEdgeLatched = true;
+      const wx = W && typeof W.windX === "number" ? W.windX : 0.62;
+      const wz = W && typeof W.windZ === "number" ? W.windZ : 0.42;
+      // world dir (x,z) → canvas u (same mapping the sun uses below):
+      // u = atan2(z, -x)/2π, here for the direction the wind comes FROM.
+      let eu = Math.atan2(-wz, wx) / (Math.PI * 2);
+      frame.stormEdgeU = eu - Math.floor(eu);
+    } else if (frame.stormK <= 0.01) {
+      stormEdgeLatched = false;
+    }
     if (frame.stormK > 0.002) {
       // drift: the deck moves downwind, and the wind is the ONE wind vector
       // systems/weather.js publishes — never a private bearing. Azimuthal
@@ -915,8 +1062,12 @@
       // things you cannot see through cloud, and leaving any of them running
       // under an overcast sky is the tell that the grey is a filter rather
       // than a ceiling.
+      // Occlusion is asked PER AZIMUTH now: the photo spans the whole sky so
+      // it fades on raw coverage, but the sunset burn lives at the sun's own
+      // azimuth — beside an advancing front it keeps burning until the deck
+      // actually reaches it, which is the owner's photograph exactly.
       frame.photoK *= 1 - frame.stormK;
-      frame.glowK *= 1 - frame.stormK * 0.88;
+      frame.glowK *= 1 - stormSectorAt(frame.glowU) * 0.88;
       /* AND THE DOME TINT HAS TO LET GO. modes/survival.js multiplies the
          whole dome by the disaster's fog colour (0x3a4150 for the storm) so
          the sky reads the mood — which was the only storm-sky mechanism
@@ -960,9 +1111,7 @@
     // stops being the only thing it is darkening.
     frame.spaceK = Math.min(0.30, 1 - Math.exp(-altY / AIR_SCALE_H)) * kDay * (1 - duskness * 0.6);
     frame.hazeK = Math.exp(-altY / HAZE_SCALE_H);
-    // sun azimuth → canvas u (r128 SphereGeometry: x=-cos(2πu)·s, z=sin(2πu)·s)
-    let gu = Math.atan2(-10, -Math.cos(a) * 80) / (Math.PI * 2);
-    frame.glowU = gu - Math.floor(gu);
+    // (frame.glowU is computed above the storm block, where the deck needs it)
 
     _tintWrote.copy(tint);
 
@@ -998,9 +1147,12 @@
     _p.set(Math.cos(a) * 80, Math.sin(a) * 95, -10).normalize();
     const sunY = _p.y;
     sunSpr.position.copy(_p).multiplyScalar(795);
-    // NOTHING IN THE SKY SURVIVES THE DECK. A visible sun disc under full
-    // overcast is the single most obvious "the grey is a filter" tell.
-    const clear = 1 - frame.stormK;
+    // NOTHING IN THE SKY SURVIVES THE DECK — but the deck is a SECTOR now,
+    // so the question is whether the deck has reached the SUN's azimuth. A
+    // sun blazing hard against the flank of an advancing shelf is the whole
+    // drama of a storm edge; a sun bleeding through the deck itself is still
+    // the "grey is a filter" tell, and still banned.
+    const clear = 1 - stormSectorAt(frame.glowU);
     let sop = Math.min(1, dayness * 1.6 + duskness * 0.5) * (clear * clear);
     if (sunY < -0.02) sop = 0;
     sunSpr.visible = sop > 0.01;
@@ -1104,6 +1256,11 @@
       stormK: +frame.stormK.toFixed(3),
       deck: deckDark ? 1 : 0,
       deckPerspective: (DECK_XFORM && deckPatD && deckPatD.setTransform) ? 1 : 0,
+      // the front: on/off, where it is anchored, and how covered the SUN's
+      // own azimuth is (0 = blazing clear beside the shelf, 1 = under it).
+      stormEdge: CBZ.CONFIG.SKY_STORM_EDGE !== false ? 1 : 0,
+      stormEdgeU: +frame.stormEdgeU.toFixed(3),
+      sunCovered: +stormSectorAt(frame.glowU).toFixed(3),
       photoK: +frame.photoK.toFixed(3),
       sunOpacity: +(sunSpr.visible ? sunSpr.material.opacity : 0).toFixed(3),
       tintR: +dome.material.color.r.toFixed(3),

@@ -330,6 +330,15 @@
      prevent. */
   let overcast = 0;
   const OC_EASE = 0.55;    // ~1.8 s time constant: the deck rolls in, never cuts
+  /* THE END OF A STORM IS SLOWER THAN ITS START. Clouds are not rain: when a
+     drive lapses the rain stops in seconds, but the deck it fell out of hangs
+     over the street and BREAKS UP — and with core/sky.js's storm front, a
+     slow fall is what lets the back edge visibly sweep the sky instead of
+     the whole ceiling evaporating in two seconds. τ≈17 s on the way down, so
+     a finished storm's sky clears over half a minute while the wet ground
+     and fog release on their own faster curves. WEATHER_SLOW_CLEAR=false
+     restores the symmetric ease. */
+  const OC_EASE_DOWN = 0.06;
 
   /* PUBLISHED so a real drawn bolt can light the real scene. See the block in
      tryLightning that consumes it. Deliberately a REQUEST rather than a direct
@@ -1166,7 +1175,8 @@
       intensity * 1.25 - 0.05,
       drv.lightning * 0.95,
       drv.fog * 0.9));
-    overcast += (ocTarget - overcast) * Math.min(1, dt * OC_EASE);
+    const ocEase = (ocTarget < overcast && CFG.WEATHER_SLOW_CLEAR !== false) ? OC_EASE_DOWN : OC_EASE;
+    overcast += (ocTarget - overcast) * Math.min(1, dt * ocEase);
     if (overcast < 0.0004) overcast = 0;
 
     // ---- fog darkening while raining ----

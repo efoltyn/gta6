@@ -1133,12 +1133,31 @@
         : Math.max((ci.zRear != null ? ci.zRear + 0.30 : occZ - 0.95), occZ - 0.74),
       halfW: Math.max(0.7, (ci.w || 1.8) * 0.5),
     };
+    /* THE REAR ROOF IS LOWER THAN THE FRONT EYE (CAR_CABIN_V3). The one fit
+       scale `s` solves the FRONT seat against the front eye height — but the
+       bench sits under the raked backlight, and a body at the front scale put
+       its crown through that glass plane: photographed as a skin cube poking
+       out of the body-coloured tail, i.e. "the passenger is merged with the
+       car". The rake line is published by dressCabin (zRoofRear); clamp the
+       rear body under it with a hand of clearance. Derived cabins keep the
+       old single scale — they have no rake line to clamp against. */
+    let sRear = s;
+    if ((!CBZ.CONFIG || CBZ.CONFIG.CAR_CABIN_V3 !== false) && fit &&
+        ci.zRoofRear != null && ci.zRear != null && c._occFrame.rearZ < ci.zRoofRear) {
+      const t = (c._occFrame.rearZ - ci.zRear) / Math.max(0.05, ci.zRoofRear - ci.zRear);
+      const roofAtBench = ci.beltY + (ci.roofY - ci.beltY) * Math.max(0, Math.min(1, t));
+      // occGeo's crown sits 0.95 over the cushion at scale 1
+      sRear = Math.max(0.5, Math.min(s, (roofAtBench - 0.06 - seatY) / 0.95));
+    }
     const occ = occDecide(c);
     for (let i = 0; i < occ.seats.length; i++) {
       const st = occ.seats[i];
       const p = occSeatPose(c, st);
       st.blob = seatBody(p.x, p.z, st.variant);
-      if (st.row) st.blob.position.y = p.y;
+      if (st.row) {
+        st.blob.position.y = p.y;
+        if (sRear < s) st.blob.scale.setScalar(sRear);
+      }
     }
     // the two legacy handles stay pointed at the real meshes: airside.js reads
     // `_occDriver` directly and gangs.js clears both. A field other files use

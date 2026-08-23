@@ -276,16 +276,21 @@
       if (!ctx.noBumpers) addBumpers(root, ctx, false);
       // closed body-colour nose panel + slim LED brow + low aero slot
       if (ctx.paint) add(root, w * 0.6, 0.13, 0.05, 0, ctx.headY - 0.05, ctx.frontZ + 0.02, ctx.paint);
-      add(root, w * 0.74, 0.055, 0.055, 0, ctx.headY + 0.055, ctx.frontZ + 0.03, head());
+      // The brow is a SLIM strip and stays one: sealSeams inflates any box
+      // axis ≤0.09 by +0.04, which swelled this 0.055 lamp 73% into the fat
+      // white tube filmed across every oncoming Voltra nose. Author the depth
+      // past the inflation threshold (buried into the panel, so the seam stays
+      // sealed) and pin the height with noSeal.
+      add(root, w * 0.72, 0.05, 0.10, 0, ctx.headY + 0.055, ctx.frontZ - 0.01, head()).userData.noSeal = true;
       add(root, w * 0.5, 0.08, 0.05, 0, ctx.baseY + 0.05, ctx.frontZ + 0.03, grille());
       // chevron badge (two chrome dashes forming a V)
       [1, -1].forEach(function (side) {
         const b = add(root, 0.10, 0.03, 0.035, side * 0.043, ctx.headY - 0.045, ctx.frontZ + 0.045, chrome());
         b.rotation.z = side * -0.65;
       });
-      // full-width red tail blade + dark valance
+      // full-width red tail blade + dark valance (same slim-lamp rule as the brow)
       add(root, w * 0.9, 0.05, 0.04, 0, ctx.tailY - 0.075, ctx.rearZ - 0.015, darkTrim());
-      add(root, w * 0.88, 0.085, 0.06, 0, ctx.tailY, ctx.rearZ - 0.012, tail());
+      add(root, w * 0.88, 0.075, 0.10, 0, ctx.tailY, ctx.rearZ + 0.02, tail()).userData.noSeal = true;
       add(root, w * 0.6, 0.1, 0.1, 0, ctx.baseY - 0.02, ctx.rearZ - 0.03, grille());   // diffuser, no pipes
     },
 
