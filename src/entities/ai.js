@@ -1387,7 +1387,7 @@
         clearApproach(n);
         n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 1);
         if (a.racketGuard) {
-          CBZ.game.racketDebt = Math.min(50, (CBZ.game.racketDebt || 0) + Math.max(2, Math.ceil((a.cost || 3) * 0.55)));
+          CBZ.econ.addRacketDebt(Math.max(2, Math.ceil((a.cost || 3) * 0.55)));
           if (CBZ.addCasePressure) CBZ.addCasePressure(7 + (a.cost || 3), { type: "racket runner" }, n, { corruptHold: true });
           addBuzz("badge", 6, "ignored-racket-runner");
         }
@@ -5903,7 +5903,7 @@
           for (const m of CBZ.npcs) if (m.gang === n.gang) m.huntPlayer = 0;
         }
         if (racketGuard) {
-          CBZ.game.racketDebt = Math.max(0, (CBZ.game.racketDebt || 0) - Math.max(4, Math.ceil(a.cost * 1.8)));
+          CBZ.econ.addRacketDebt(-Math.max(4, Math.ceil(a.cost * 1.8)));
           CBZ.game.racketProtectionT = Math.max(CBZ.game.racketProtectionT || 0, 10 + a.cost * 1.1);
           addBuzz("badge", -6, "racket-runner-paid");
         }
@@ -5935,7 +5935,7 @@
       }
       if (a.kind === "racketCover") {
         const cut = Math.max(5, a.cost * 2 + Math.ceil((a.racketDebt || 0) * 0.35));
-        CBZ.game.racketDebt = Math.max(0, (CBZ.game.racketDebt || 0) - cut);
+        CBZ.econ.addRacketDebt(-cut);
         CBZ.game.racketProtectionT = Math.max(CBZ.game.racketProtectionT || 0, 18 + a.cost * 2);
         CBZ.game.racketGuard = a.source || CBZ.game.racketGuard || who;
         if (CBZ.addRacketStanding) CBZ.addRacketStanding(1);
@@ -6251,7 +6251,7 @@
           n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 2);
           addGangStanding(n.gang, n.gang >= 0 ? -3 : 0);
           if (racketGuard) {
-            CBZ.game.racketDebt = Math.min(50, (CBZ.game.racketDebt || 0) + Math.max(2, Math.ceil((a.cost || 3) * 0.5)));
+            CBZ.econ.addRacketDebt(Math.max(2, Math.ceil((a.cost || 3) * 0.5)));
             addBuzz("badge", 5, "threatened-racket-runner");
           }
           clearApproach(n);
@@ -6278,7 +6278,7 @@
         }
         if (a.kind === "racketCover") {
           CBZ.game.racketProtectionT = Math.max(CBZ.game.racketProtectionT || 0, 6 + (a.cost || 3));
-          CBZ.game.racketDebt = Math.max(0, (CBZ.game.racketDebt || 0) - Math.max(2, Math.ceil((a.cost || 3) * 0.7)));
+          CBZ.econ.addRacketDebt(-Math.max(2, Math.ceil((a.cost || 3) * 0.7)));
           addBuzz("badge", -5, "threat-racket-cover");
           addGangStanding(n.gang, n.gang >= 0 ? -2 : 0);
           clearApproach(n);
@@ -6417,7 +6417,7 @@
         clearApproach(n);
         n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 4);
         if (racketGuard) {
-          CBZ.game.racketDebt = Math.min(50, (CBZ.game.racketDebt || 0) + Math.max(3, Math.ceil((a.cost || 3) * 0.85)));
+          CBZ.econ.addRacketDebt(Math.max(3, Math.ceil((a.cost || 3) * 0.85)));
           if (CBZ.addCasePressure) CBZ.addCasePressure(10 + (a.cost || 3), { type: "racket threat" }, n, { corruptHold: true });
         }
         if (gang >= 0) {
@@ -6474,7 +6474,7 @@
       if (a.kind === "racketCover") {
         clearApproach(n);
         n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 3);
-        CBZ.game.racketDebt = Math.min(60, (CBZ.game.racketDebt || 0) + Math.max(3, Math.ceil((a.cost || 3) * 0.75)));
+        CBZ.econ.addRacketDebt(Math.max(3, Math.ceil((a.cost || 3) * 0.75)));
         if (CBZ.addCasePressure) CBZ.addCasePressure(8 + (a.cost || 3), { type: "racket cover threat", heardOnly: true }, n, { corruptHold: true });
         addBuzz("badge", 8, "failed-racket-cover-threat");
         return { ok: false, msg: `${who} sells the threat straight back to the racket, and you are the one who pays for it.` };
@@ -6671,7 +6671,7 @@
         clearApproach(n);
         n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 3);
         if (racketGuard) {
-          CBZ.game.racketDebt = Math.min(50, (CBZ.game.racketDebt || 0) + Math.max(3, Math.ceil((a.cost || 3) * 0.75)));
+          CBZ.econ.addRacketDebt(Math.max(3, Math.ceil((a.cost || 3) * 0.75)));
           if (CBZ.addCasePressure) CBZ.addCasePressure(9 + (a.cost || 3), { type: "racket refusal" }, n, { corruptHold: true });
         }
         if (gang >= 0) {
@@ -6704,7 +6704,7 @@
         clearApproach(n);
         n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 1);
-        CBZ.game.racketDebt = Math.min(60, (CBZ.game.racketDebt || 0) + 2);
+        CBZ.econ.addRacketDebt(2);
         addBuzz("badge", 5, "refused-racket-cover");
         return { ok: false, msg: `${who} leaves the bent-cop tab alone. It sits at ${Math.ceil(CBZ.game.racketDebt || 0)}.` };
       }

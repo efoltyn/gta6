@@ -229,7 +229,7 @@
     settle:   "Hand over what you took · keep your cut",
     work:     "Can't pay the tab · collect theirs instead",
     trade:    "Buy contraband with cigarettes",
-    bribe:    "Spend cigs to make authority look away",
+    bribe:    "A moment of blindness · a name or standing buys it",
     snitch:   "Trade a rival's name for the heat on you",
     steal:    "Lift a key, a chain, or cigs · risky if seen",
     payoff:   "Corrupt cop cleans up heat for a price",
@@ -630,9 +630,14 @@
   // A payoff cleans HEAT; a bribe buys this moment. Offering the first when
   // there is nothing on your file is a button that spends cigs on nothing.
   function guardPayoffWorthIt(a) {
+    /* This read city fields (g.heat / g.detect / a.racketDebt / g.wanted) —
+       none of which exist in the prison, where heat is g.detection and the
+       racket tab lives on the game. So the PAYOFF verb never rendered on a
+       bent officer in escape mode: the slot silently fell through to BRIBE
+       every time. Found by the phone-bridge audit. */
     const g = CBZ.game || {};
-    const heat = g.heat != null ? g.heat : (g.detect != null ? g.detect : 0);
-    return heat > 0 || (a.racketDebt || 0) > 0 || (g.wanted || 0) > 0;
+    const heat = g.detection != null ? g.detection : (g.heat || 0);
+    return heat > 0 || (g.complaints || 0) > 0 || (g.racketDebt || 0) > 0 || (g.wanted || 0) > 0;
   }
   function subFor(a, v) {
     if (CBZ.cityCampaignPrisonSub) {
@@ -728,7 +733,12 @@
     // LIES. economy.js's bribeCost is loyalty- and schedule-aware now (a man
     // you have already paid is cheaper; a man standing a count is dearer), so
     // the chip and the label both ask IT rather than re-deriving 25/5/10.
-    if (v === "bribe") return (CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : (a.corrupt ? 5 : 10)) + "";
+    if (v === "bribe") {
+      const c = CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : (a.corrupt ? 5 : 10);
+      // no cig price under the bridge doctrine: the chip names the real
+      // currency instead of quoting 0
+      return c > 0 ? c + "" : (a.corrupt ? "a name" : "");
+    }
     // snitch trades a name for heat — the chip is the warden's mood, straight
     // off economy.js's own gate so the chip and the refusal can never disagree
     if (v === "snitch") {
@@ -738,7 +748,9 @@
       if (w === "clean") return "no heat";
       return "-heat";
     }
-    if (v === "payoff") return (CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : Math.max(6, Math.ceil((CBZ.game.detection || 0) / 8) + Math.ceil((CBZ.game.complaints || 0) / 12) + (CBZ.game.gangJob ? 4 : 0) + (a.kind === "warden" ? 14 : 5))) + "";
+    // the till (economy.js payoffCost) is the ONE price source — the old
+    // fallback here was the last copy of the deleted warden +14 premium
+    if (v === "payoff") return (CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : 6) + "";
     if (v === "pay") return a.approach && a.approach.cost ? a.approach.cost + "" : "";
     if (v === "squash") return CBZ.squashGrudgeCost ? CBZ.squashGrudgeCost(a) + "" : "";
     if (v === "paySilence") return CBZ.knownSnitchCost ? CBZ.knownSnitchCost(a) + "" : "";
@@ -829,7 +841,7 @@
       case "work":     return `Work the tab off instead`;
       case "fight":    return `Throw hands with ${nm}`;
       case "trade":    { const o = a.data && a.data.offer; return o ? `Buy ${shortText(o.item, 16)}. ${o.price}` : "Browse their goods"; }
-      case "bribe":    { const c = CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : (a.corrupt ? 5 : 10); return `Slip ${c} to look away`; }
+      case "bribe":    { const c = CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : (a.corrupt ? 5 : 10); return c > 0 ? `Slip ${c} to look away` : "Ask him to look away"; }
       case "snitch":   return "Give the warden a name";
       case "payoff":   { const c = CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : 6; return `Pay ${c} to clear your heat`; }
       case "steal":    return (a.kind === "guard" || a.kind === "warden") ? `Lift ${nm}'s keys` : `Pick ${nm}'s pocket`;

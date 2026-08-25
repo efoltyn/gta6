@@ -113,7 +113,7 @@
     g.gangProtection = [0, 0];
     g.gangJob = null;
     g.lowProfileT = 0;
-    g.racketProtectionT = 0; g.racketGuard = null; g.racketDebt = 0; g.racketStanding = 0; g.racketPressureT = 0; g.racketHintT = 0;
+    g.racketProtectionT = 0; g.racketGuard = null; g.racketDebt = 0; g.racketStanding = 0; g.racketPressureT = 0; g.racketHintT = 0; g.phoneTimeT = 0;
     g.blockRumor = null; g.socialDirectorT = 0; g.socialDirectorLast = null; g.watcherDirectorT = 0; g.watcherLast = null; g.gossipHuddleT = 0; g.gangTierT = [0, 0]; g.turfCheckpointT = [0, 0];
     g.socialProfile = { paid: 0, threatened: 0, refused: 0, helped: 0, listened: 0, bargained: 0, exploited: 0, last: "" };
     g.witnessReportT = 0; g.snitchReports = 0; g.lastKnown = null; g.caseSearchCD = 0;

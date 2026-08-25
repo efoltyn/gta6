@@ -498,7 +498,11 @@ function cacheBusted(url, side) {
   // from the same checkout; afterParams exists for symmetry. The CLI
   // (--before-params/--after-params, "k=v&k2=v2") composes on top for
   // one-off experiments without editing the preset.
-  const sidePreset = side === "before" ? preset.beforeParams : preset.afterParams;
+  const sidePresetRaw = side === "before" ? preset.beforeParams : preset.afterParams;
+  // a preset may hand this over as an object OR a "k=v&k2=v2" string — the
+  // string shape used to spread character-by-character through
+  // Object.entries into 20+ junk params with no error (found by dogfooding).
+  const sidePreset = typeof sidePresetRaw === "string" ? parseParamString(sidePresetRaw) : sidePresetRaw;
   for (const [key, value] of Object.entries(sidePreset || {})) {
     parsed.searchParams.set(key, String(value));
   }
