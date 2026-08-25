@@ -1285,7 +1285,7 @@
       if (near) {
         const line = closerLine(n, "tax", [
           `Then ${gangName(gang)} carry you at ${cost}. It follows you.`,
-          `${cost} on the book, then. ${gangName(gang)} always collect.`,
+          `That's ${cost} on the book, then. ${gangName(gang)} always collect.`,
           "Walking is just paying later, with interest.",
         ]);
         if (line) nar(`${gangName(gang)} mark you as unpaid.`, 1.8, n, line);
@@ -1303,7 +1303,7 @@
       if (near) {
         const line = closerLine(n, "debtCollect", [
           `That's ${debt} now. It goes up every time I walk away.`,
-          `${debt}. Count it yourself next time, save us both the walk.`,
+          `It's ${debt} now. Count it yourself next time, save us both the walk.`,
         ]);
         if (line) nar(`${gangName(gang)} add interest. Debt ${debt}.`, 1.8, n, line);
         else if (CBZ.npcStare) CBZ.npcStare(n, 1.6);
