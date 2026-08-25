@@ -404,7 +404,14 @@
   const SHAFT_R = 34;        // torus-wrap radius around the swimmer
   const SHAFT_H = 22;
 
+  // The backdrop shell (see THE EMPTY PIXEL, below). Radius only has to clear
+  // the longest fog range this file ever writes (FOG_FAR_SHALLOW * the 1.9x
+  // look-up bonus = 76 m) by a wide margin at the frustum corners, and stay
+  // well inside every camera's far plane.
+  const BACKDROP_R = 260;
+
   let fxRoot = null, ceiling = null, ceilU = null, shafts = null, shaftMat = null;
+  let backdrop = null;
 
   function buildFx() {
     if (fxRoot || typeof document === "undefined") return;
@@ -414,6 +421,66 @@
     fxRoot.userData.uwFx = true;
     fxRoot.visible = false;
     fxRoot.matrixAutoUpdate = true;
+
+    /* ============================================================
+       THE EMPTY PIXEL WAS THE ONE THING NOT GRADED (2026-08-25)
+
+       Owner, from his phone: "the dark blue band, it looks dumb". Across the
+       middle of every underwater frame sat a hard-edged, NEAR-BLACK horizontal
+       stripe with his graded blue above it and lighter blue below. MEASURED
+       off his screenshot: the water either side of it is (39,71,87) and the
+       stripe is (10,19,24) — the same hue at a quarter of the value.
+
+       That ratio is the whole diagnosis. Both are the SAME linear fog colour;
+       one has been through the output transform and the other has not.
+
+         * A fogged fragment gets core/renderer.js's patched fog_fragment
+           (renderer.js:356-366), which deliberately runs fogColor through
+           toneMapping() and linearToOutputTexel() before mixing, so the sky/
+           fog seam law stays exact under ACES.
+         * scene.background = a THREE.Color goes to gl.clearColor RAW. r128's
+           WebGLBackground does not tone map it and outputEncoding does not
+           touch it. So the takeover below was clearing the buffer to the
+           LINEAR value while every fogged pixel around it showed the graded
+           one. Reconstructed for the deep medium: raw (10,19,24) against a
+           graded (42,76,90). That is the band, to within 3/255.
+
+       And the band is a BAND because of where the empty pixels are: looking
+       level, the sea surface sheet covers the frame above the horizon and the
+       bed covers it below, and neither reaches the horizon row itself. The
+       stripe is exactly the wedge where nothing is drawn.
+
+       THE FIX IS NOT TO RE-DERIVE THE GRADE ON THE CPU. Duplicating ACES plus
+       core/renderer.js's film grade in JS would be a second copy of a look
+       that is allowed to change. Instead the empty pixel stops being empty:
+       one black shell around the eye, `fog: true`, sitting 260 m out — far
+       past any fog range this file writes, so its fog factor saturates at 1
+       and the fragment IS cbzFogCol, produced by the identical shader code
+       that produced the water beside it. Exact by construction, and it stays
+       exact if anyone re-tunes the grade.
+
+       Black + saturated fog also means the shell contributes nothing of its
+       own: `mix(black, cbzFogCol, 1.0)`. depthTest off and renderOrder -9000
+       make it a background rather than an occluder, and layer 2 keeps it out
+       of the planar mirror and every CCTV feed like the rest of this file's
+       meshes. Cost: one untextured fullscreen fill, only while submerged —
+       the same fill the buffer clear was already doing. */
+    if (CFG.WATER_UW_SKY_SEAM !== false) {
+      const bgMat = new THREE.MeshBasicMaterial({
+        color: 0x000000, fog: true, side: THREE.BackSide,
+        depthWrite: false, depthTest: false,
+      });
+      bgMat.name = "cbz-uw-backdrop";   // never water/ocean/sea — gate matches names
+      backdrop = new THREE.Mesh(new THREE.SphereGeometry(BACKDROP_R, 16, 12), bgMat);
+      backdrop.name = "cbz-uw-backdrop";
+      backdrop.frustumCulled = false;
+      backdrop.renderOrder = -9000;     // after the dome (-10000), before everything real
+      backdrop.userData.uwFx = true;
+      backdrop.userData.underlay = true;
+      backdrop.layers.set(FX_LAYER);
+      backdrop.visible = false;
+      fxRoot.add(backdrop);
+    }
 
     if (CFG.WATER_CAUSTICS !== false) {
       // The caustic ceiling: one additive plane 6cm under the waterline,
@@ -542,6 +609,13 @@
   function driveFx(camX, camZ, surfY, depth, day, tint) {
     if (!fxRoot) return;
     const t = CBZ.waterClock ? CBZ.waterClock() : (performance.now() * 0.001);
+    if (backdrop) {
+      // Same 0.9 m gate as the sky takeover: straddling the waterline the top
+      // of the frame is genuinely air, and painting it water is the bug the
+      // meniscus exists to avoid.
+      backdrop.visible = depth >= 0.9;
+      if (backdrop.visible) backdrop.position.copy(_eye);
+    }
     if (ceiling && ceilU) {
       ceiling.position.set(camX, surfY - 0.06, camZ);
       ceilU.uTime.value = t;
@@ -560,6 +634,13 @@
       // grey-teal wash exactly like the one the owner rejected. Halved, and
       // the colour pulled off white toward the medium's own blue, so what is
       // left is a rippling pattern rather than a sheet of daylight.
+      // TRIED AND REVERTED (2026-08-25): 0.60, to lift the ceiling above the
+      // horizon in the owner's chase framing. It bought 5 luminance points at
+      // the top of that frame and lifted the two DEEP frames by 6 and 11 FLAT,
+      // top to bottom — this plane is additive and fog:false, so what it adds
+      // is a sheet, not a shape, which is the exact pale wash the note above
+      // is about. The angle-shaped half of that experiment (the Snell window
+      // in water_spec.js) kept the gain and cost nothing; this half did not.
       ceilU.uStrength.value = 0.45 * dfade * dfade * day;
       ceilU.uColor.value.setRGB(
         Math.min(1, 0.32 + tint.r * 1.0),
@@ -598,6 +679,10 @@
 
   function hideFx() {
     if (fxRoot) fxRoot.visible = false;
+    // Belt and braces: the group flag already stops it drawing, but leaving
+    // the backdrop's own flag true makes every probe that asks "is the water
+    // background up?" answer yes on a dry beach.
+    if (backdrop) backdrop.visible = false;
   }
 
   /* ============================================================
@@ -832,9 +917,42 @@
      nobody rewrote it (a mode with no light writer), we still hold the base we
      adopted and the multiply stays idempotent. Surfacing writes the base back.
      ============================================================ */
-  const LIGHT_FLOOR = 0.13;     // fraction of the KEY light left in the deep
-  const AMB_FLOOR = 0.22;       // ...and of the scattered ambient
-  const LIGHT_SCALE = 4.6;      // e-folding depth, metres
+  /* THE DIVER DIMMED THE WRONG HALF (2026-08-25). The first cut of this took
+     the KEY down hardest (floor 0.13, e-fold 4.6 m) and let the scattered
+     ambient outlive it (floor 0.22, e-fold 7.4 m). At twelve metres that left
+     sun 0.19 against ambient 0.37 — nearly two parts flat fill to one part
+     directional — and a Lambert body under two parts fill has no form at all.
+     That is the second half of the owner's "the shark is BLUE": even once the
+     veil bug above stopped painting it flat, the light had nothing left to
+     model it with.
+
+     It is also backwards. Direct sunlight takes the SHORT path — straight
+     down, roughly depth/cos — while skylight arrives over every longer slant
+     there is, so what actually survives a dive is the directional half. Every
+     one of the owner's reference photographs shows it: a shark at depth is
+     top-lit, bright along the back with the underside in shadow, against a
+     medium that has gone dark. So the key now outlives the ambient, not the
+     other way round.
+
+     THE TOTAL MUST GO DOWN, NOT UP — this may not lighten the deep he
+     approved, and the first pass of this rebalance did: floors of 0.30/0.10
+     over a 6 m key e-fold doubled the sun at twelve metres (0.19 -> 0.43) and
+     the captured frame went from a saturated blue to a grey-blue, because a
+     harder key on the sea's own underside and on the shelf puts luminance back
+     into the two surfaces that fill most of a deep frame. The reference
+     photographs are the check: their RED channel sits between 0 and 13 at
+     every depth, and lifting the key is the fastest way to break that.
+     So the key is nudged and the fill is halved:
+       at  3.4 m  key 0.545 -> 0.586,  fill 0.638 -> 0.500  (total  -8%)
+       at  6.0 m  key 0.395 -> 0.413,  fill 0.541 -> 0.316  (total -22%)
+       at 12.0 m  key 0.194 -> 0.236,  fill 0.372 -> 0.161  (total -30%)
+     Darker at every depth than what shipped, and the key:fill ratio at twelve
+     metres goes from 0.52:1 to 1.47:1 — which is the part that decides whether
+     a body has a lit side. */
+  const LIGHT_FLOOR = 0.16;     // fraction of the KEY light left in the deep
+  const AMB_FLOOR = 0.10;       // ...and of the scattered ambient
+  const LIGHT_SCALE = 5.0;      // e-folding depth of the KEY, metres
+  const AMB_SCALE = 4.2;        // the fill dies FASTER than the key (short path)
   let litSun = -1, litHemi = -1, litBounce = -1;
   let baseSun = 0, baseHemi = 0, baseBounce = 0;
   function driveLight(depth, amount) {
@@ -854,10 +972,10 @@
     }
     const d = Math.max(0, depth);
     const lit = LIGHT_FLOOR + (1 - LIGHT_FLOOR) * Math.exp(-d / LIGHT_SCALE);
-    // The ambient half keeps more than the key does, and keeps it longer:
-    // light underwater is SCATTERED, so a diver's shadow side is never black
-    // the way a direct-only falloff would make it.
-    const litA = AMB_FLOOR + (1 - AMB_FLOOR) * Math.exp(-d / (LIGHT_SCALE * 1.6));
+    // The scattered half arrives over every longer slant there is, so it is
+    // the one the water eats first. Its floor is what keeps a shadow side
+    // dark-blue rather than black.
+    const litA = AMB_FLOOR + (1 - AMB_FLOOR) * Math.exp(-d / AMB_SCALE);
     const f = 1 - amount * (1 - lit);
     sun.intensity = baseSun * f; litSun = sun.intensity;
     if (hemi) { hemi.intensity = baseHemi * (1 - amount * (1 - litA)); litHemi = hemi.intensity; }
@@ -1174,7 +1292,6 @@
     // ...and an empty pixel falls back to the water rather than to daylight.
     if (CFG.WATER_UW_SKY_SEAM === false || depth < 0.9) releaseSky(scene);
     else { _bgC.copy(_fogC); holdSky(scene); }
-    myFog.near = 0.4;
     // Visibility by `k`, not by eye depth: a metre under the surface in a 60 m
     // trench is already dark blue with the far wall gone, and ten metres down
     // over a sandbar still reads the bottom (ref 3).
@@ -1187,6 +1304,33 @@
     // dive is correct and boring — the surface sits past the fog limit and
     // ref 5's whole subject, the bright rippling ceiling, is never drawn.
     myFog.far = farK * (1 + glow * 0.9) * q / density;
+    /* THE FIRST FEW METRES OF WATER ARE GLASS (2026-08-25). `near` was a flat
+       0.4 m, which means smoothstep started eating a body the moment it left
+       the lens: at the phone's own tier (far ~17 m) the ridden shark four to
+       eight metres ahead was already 12-45% dissolved into the medium, and
+       that is the rest of the owner's "the shark is BLUE". None of the
+       reference photographs behave that way — clear water is glass at close
+       range and only the DISTANCE hazes; the great white at six metres in the
+       master reference is at full contrast against a dark column.
+
+       So `near` becomes a fraction of the range instead of a constant. It is
+       tied to `far` and not fixed in metres because "how far can you see"
+       already varies 40 m to 16 m across this file's own ramp, and a constant
+       near that reads as clear in the shallows would be most of the deep's
+       entire visible range. At 0.22:
+         shallow (far 40)  clear to  8.8 m, closed by 40 m
+         mid     (far 24)  clear to  5.3 m, closed by 24 m
+         deep    (far 16)  clear to  3.5 m, closed by 16 m
+       FAR IS UNTOUCHED, so nothing about the far field moves: everything at
+       25 m and beyond still closes into exactly the dark blue he approved.
+       This only reshapes the curve between the lens and the haze.
+
+       0.15 AND NOT 0.22, on the second pass: 0.22 also unfogged the SHELF at
+       twelve metres, and a bed that reads lighter than the water above it is
+       the exact "light blue under" the owner rejected. 0.15 keeps the first
+       few metres glass (a body at 6 m is 7% fogged where it used to be 19%)
+       and hands the mid-field back to the medium. */
+    myFog.near = myFog.far * 0.15;
     lastNear = myFog.near; lastFar = myFog.far;
   });
 
@@ -1275,14 +1419,36 @@
     _c3.r = _tint.r * (0.78 - 0.54 * dkf);
     _c3.g = _tint.g * (0.80 - 0.52 * dkf);
     _c3.b = _tint.b * (0.92 - 0.46 * dkf);
-    // The veil is LIGHT over sand and heavy in the deep, on every stop.
+    /* THE VEIL IS LIGHT OVER SAND AND HEAVY IN THE DEEP, on every stop — and
+       since 2026-08-25 it also LEANS. Owner, on the master reference: "color
+       bands should be gradient darker as it gets deeper — not light blue, dark
+       blue, and light blue under." Once the band above stopped painting a
+       stripe through the middle, the remaining fault was that this gradient
+       was too flat to read as a gradient at all: at the deep k its top stop
+       sat at 0.37 and its bottom at 0.80.
+
+       ONLY THE BOTTOM MOVES, and the first cut of this got that wrong. Taking
+       the TOP stop down as well (to unveil a near body up there) lightened
+       every frame by a lot more than it looked like it would, and it lightened
+       it in the one direction the reference photographs will not tolerate: the
+       rendered water under this overlay is a pale cyan, because the fog colour
+       is a dark navy in LINEAR space and the ACES pass plus the sRGB encode
+       lift it a very long way. The overlay is authored in sRGB bytes straight
+       off the linear tint, so it is the ONLY layer in the stack whose colour
+       is already reference-shaped (red near zero) — thinning it is thinning
+       the thing that makes the frame look like the photograph. The near-body
+       problem it was aimed at was never this layer's fault anyway; it was the
+       veil bug in water_spec.js, and a properly shaded shark carries its own
+       contrast straight through a 0.27 veil.
+       So the top stop is exactly what shipped and only the bottom leans:
+       deep-k spread 0.37->0.80 becomes 0.37->0.88. */
     const bright = rgb(_c1, (0.26 + k * 0.14 + gl * 0.14).toFixed(3));
     const mid = rgb(_c2, (0.36 + k * 0.24).toFixed(3));
     // ...and its WEIGHT. 0.54 at k = 0.1 is a heavy navy sheet laid over a
     // sunlit sandbar; ref 3's downward view is barely veiled at all near the
     // lens and only the DISTANCE goes teal, which is the fog's job. Solved to
     // hit the shipped 0.796 at the deep k (~0.8) exactly.
-    const deep = rgb(_c3, (0.30 + k * 0.62).toFixed(3));
+    const deep = rgb(_c3, (0.36 + k * 0.65).toFixed(3));
     const top = row.toFixed(1);
     const mid1 = (row + (hz - row) * 0.55).toFixed(1);
     const bg = "linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0) " + top + "%, " +

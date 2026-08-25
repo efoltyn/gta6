@@ -1280,11 +1280,42 @@
     shader.fragmentShader = shader.fragmentShader
       .replace("#include <common>",
         "#include <common>\nvarying vec3 vCbzVeilW;\nuniform float uVeilSeaY;\nuniform float uVeilK;\nuniform vec3 uVeilColor;")
+      /* THE EYE IS NOT `cameraPosition` ON A LAMBERT MATERIAL (2026-08-25).
+
+         Every animal this veil is applied to is a MeshLambertMaterial, and
+         r128's setProgram only UPLOADS the `cameraPosition` uniform for
+           isShaderMaterial | isMeshPhongMaterial | isMeshToonMaterial |
+           isMeshStandardMaterial | envMap
+         (three.r128.min.js, the `y.map.cameraPosition` guard — the same fact
+         core/renderer.js's fog patch is built around). It is DECLARED in every
+         fragment prefix, so this compiled, linked and read (0,0,0).
+
+         What that did, every frame, to every shark and orca in the game:
+           cbzAC = 0 - seaY  ->  +0.8, i.e. "the camera is always above water";
+           cbzL  = |worldPos - origin| * ...  ->  hundreds of metres, because
+                  the island is hundreds of metres from the world origin;
+           exp(-cbzL * 0.115)  ->  0.
+         So gl_FragColor.rgb WAS uVeilColor, exactly, on every fragment: a flat
+         single-colour water-blue cutout with no shading and no belly. That is
+         the owner's "the shark is BLUE underwater" — it was never the fog and
+         never the lights, it was this line reading a uniform that was never
+         sent. It also fired while the camera was UNDER the water, where the
+         veil is supposed to stand down entirely.
+
+         viewMatrix IS uploaded for every material type, and it is the inverse
+         of the camera's world matrix: for orthonormal R and camera c,
+         viewMatrix = [ Rt | -Rt c ], so c = -(Rt)t * viewMatrix[3].xyz, and
+         component i of that is -dot( viewMatrix[i].xyz, viewMatrix[3].xyz ).
+         Written out per-component because WebGL1 GLSL ES 1.00 has no
+         transpose(). Three dot products, no uniform added, exact. */
       .replace("#include <tonemapping_fragment>",
-        "float cbzAC = cameraPosition.y - uVeilSeaY;\n" +
+        "vec3 cbzVeilEye = -vec3( dot( viewMatrix[0].xyz, viewMatrix[3].xyz ),\n" +
+        "                         dot( viewMatrix[1].xyz, viewMatrix[3].xyz ),\n" +
+        "                         dot( viewMatrix[2].xyz, viewMatrix[3].xyz ) );\n" +
+        "float cbzAC = cbzVeilEye.y - uVeilSeaY;\n" +
         "float cbzBP = vCbzVeilW.y - uVeilSeaY;\n" +
         "if ( uVeilK > 0.0 && cbzAC > 0.0 && cbzBP < 0.0 ) {\n" +
-        "  float cbzL = length( vCbzVeilW - cameraPosition ) * ( -cbzBP ) / max( 0.05, cbzAC - cbzBP );\n" +
+        "  float cbzL = length( vCbzVeilW - cbzVeilEye ) * ( -cbzBP ) / max( 0.05, cbzAC - cbzBP );\n" +
         "  gl_FragColor.rgb = mix( uVeilColor, gl_FragColor.rgb, exp( -cbzL * uVeilK ) );\n" +
         "}\n#include <tonemapping_fragment>");
   }
@@ -2151,9 +2182,50 @@
          brief asks for AND the dark ceiling at grazing angles the reference
          photographs have, from one physical fact rather than two dials.
          Above water nothing changes: dwUnder is 0 and the mix never runs. */
+      /* ...AND INSIDE THE WINDOW THERE HAS TO BE A SKY (2026-08-25).
+
+         The note above says the flat pale ceiling came from `sky`. Measured,
+         it did not: from BELOW, N is flipped downward and V points down at the
+         eye, so dot(N,V) is LARGE, and `fres` — which is
+         0.025 + 0.975 * pow(1 - dot(N,V), 4.8) — collapses to about 0.028.
+         `mix(body, sky, fres * 0.72)` therefore takes TWO PER CENT of the sky.
+         What the ceiling actually was, at every angle, is `body` with ndl = 0:
+         uDisasterTint * 0.62 * 0.58, a dark blue-green. Which is why the
+         window branch could not brighten anything and why, once the black band
+         stopped hiding it, the frame came out DARKEST at the top and brightest
+         at the horizon — the exact inversion of the owner's master reference,
+         where a shimmering ceiling sits over a column that only gets darker.
+
+         Fresnel is the wrong law to be reading here anyway. It describes what
+         a surface REFLECTS; a diver looking up is seeing what it TRANSMITS,
+         and inside the critical cone the whole sky hemisphere is refracted
+         into that cone at near-total transmittance. So inside the window the
+         ceiling is the sky (keeping 28% of the surface's own body and its sun
+         glitter, so it still ripples and still catches the sun); outside it,
+         total internal reflection shows the water column below you, which is
+         the live medium at its dim end — fogColor, the value
+         world/water_underwater.js is already writing per frame off the depth
+         ramp, rather than a fixed tint that stays shallow-blue twenty metres
+         down. 0.55 and a wide, soft window edge because a real surface is
+         ROUGH: every wave facet tilts the cone, which smears the boundary over
+         tens of degrees instead of ruling a ring at 48.6.
+
+         No seam to engineer at the horizon: fogColor is linear here and so is
+         outColor, so the fog mix carries this fragment to exactly the byte the
+         open water beside it lands on. Above water dwUnder is 0 and not one
+         line of this runs. */
       "  if (dwUnder > 0.5) {",
-      "    float dwWin = smoothstep(0.52, 0.82, clamp(dot(N, V), 0.0, 1.0));",
-      "    outColor = mix(uDisasterTint * 0.34, outColor, dwWin);",
+      "    float dwWin = smoothstep(0.36, 0.80, clamp(dot(N, V), 0.0, 1.0));",
+      "    #ifdef USE_FOG",
+      "      vec3 dwMirror = fogColor * 0.55;",
+      "    #else",
+      "      vec3 dwMirror = uDisasterTint * 0.34;",
+      "    #endif",
+      // 0.86 and not 0.72: measured, 0.72 left the ceiling at luminance 132
+      // against a horizon at 148, i.e. still the wrong way round by a nose.
+      // The remaining 14% is the surface's own body colour and its sun
+      // glitter, which is what stops the window being a plain card.
+      "    outColor = mix(dwMirror, mix(outColor, sky, 0.86), dwWin);",
       "  }",
       "  float dwSolid = clamp(max(max(foam, boil), clamp(sed, 0.0, 1.0)), 0.0, 1.0);",
       "  gl_FragColor = vec4(outColor, uDisasterOpacity * cbzSeaAlpha(V, vDwDist, dwUnder, dwSolid));",

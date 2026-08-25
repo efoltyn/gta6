@@ -58,6 +58,34 @@ const subjects = [
     ring: 167, eye: 4.6, look: -0.28, toward: "shore", shark: true, sharkDy: -1.4, sharkAt: 13,
     state: "4.6 m EYE · ACROSS THE SHELF",
   },
+  /* ---- the 2026-08-25 wave: the owner's own phone framing ----------------
+     He plays in the chase cam, a few metres behind and just under the ridden
+     shark with the lens tipped up, and that is the frame both of his
+     complaints are in: a hard near-black stripe across the middle of it, and
+     his own animal four metres away reading as a flat blue cutout. These
+     three subjects photograph exactly that eye. */
+  {
+    id: "chase-cam-band",
+    label: "The Chase Cam · Where The Band Was",
+    focus: "THE OWNER'S OWN FRAMING: three metres under, the lens two and a half metres behind the ridden shark and a metre below it, tipped ~13 degrees up. BEFORE: a hard near-black horizontal stripe across the middle of the frame with graded blue above it and LIGHTER blue below — scene.background cleared raw while every fogged pixel around it went through ACES and the sRGB encode. AFTER: one monotonic gradient, bright ceiling to dark floor, no line anywhere.",
+    ring: 178, eye: 3.0, look: 0.24, shark: true, sharkDy: 1.0, sharkAt: 3.4,
+    state: "3.0 m EYE · CHASE CAM · +13 deg",
+  },
+  {
+    id: "shark-read-close",
+    label: "Six Metres Off · Is It A Shark",
+    focus: "The reference photographs are unambiguous: a shark at this range is GREY with a white belly, top-lit, with real form. BEFORE it is a single flat colour with no shading and no belly line at all — the SEA_TRANSLUCENT veil was reading a `cameraPosition` uniform r128 never uploads to a Lambert material, so every fragment came out as the veil colour exactly.",
+    ring: 186, eye: 6.0, look: 0.20, shark: true, sharkDy: 1.6, sharkAt: 6.0,
+    state: "6.0 m EYE · BODY AT 6 m",
+  },
+  {
+    id: "fish-at-distance",
+    label: "Bait At Ten Metres · Can You See Them",
+    focus: "A shoal parked eight to sixteen metres out, which is where the fog curve is decided. BEFORE the medium started closing 0.4 m from the lens, so a fish at ten metres was already half dissolved. AFTER the first few metres are glass and the shoal reads as crisp dark silhouettes, while everything past twenty-five metres still shuts into the same dark blue.",
+    ring: 190, eye: 5.0, look: 0.06, shark: true, sharkDy: 0.9, sharkAt: 5.5,
+    fish: 26,
+    state: "5.0 m EYE · SHOAL AT 8-16 m",
+  },
   {
     id: "surface-toward-shore",
     label: "From The Surface · Toward The Shore",
@@ -166,6 +194,41 @@ async function stageIslandUnderwater(input) {
         ov.innerHTML = "<div data-side></div><div data-name></div><div data-focus></div><div data-state></div><div data-metric></div><div data-source></div>";
         document.body.appendChild(ov);
         D.overlay = ov;
+      },
+      /* THE SHOAL, PARKED. The island is stocked with mackerel and sardine,
+         but where they happen to be at capture time is a lottery — and a
+         subject about how far you can SEE has to have something at a known
+         distance to see. So the nearest N small fish are teleported onto a
+         deterministic fan in front of the pinned lens, between 8 and 16 m out.
+         Both sides get the same fan from the same seeded stream, so the only
+         difference left in the frame is the medium between them and the eye. */
+      stockFish(px, pz, eyeY, aim, n) {
+        const pool = [];
+        for (const a of CBZ.cityWildlife || []) {
+          if (!a || a.dead || !a.species || !a.species.aquatic) continue;
+          if (a.species.id !== "fish" && a.species.id !== "sardine") continue;
+          if (CBZ.sharkSim && a === CBZ.sharkSim.shark) continue;
+          pool.push(a);
+        }
+        const N = Math.min(n, pool.length);
+        for (let i = 0; i < N; i++) {
+          const a = pool[i];
+          const u = i / Math.max(1, N - 1);
+          const dist = 8 + u * 8;                       // 8 m -> 16 m
+          const lat = Math.sin(i * 2.39996) * (1.6 + u * 4.2);
+          const up = Math.cos(i * 2.39996 * 1.7) * (0.9 + u * 1.8);
+          const x = px + Math.cos(aim) * dist - Math.sin(aim) * lat;
+          const z = pz + Math.sin(aim) * dist + Math.cos(aim) * lat;
+          if (a.pos) { a.pos.x = x; a.pos.y = eyeY + up; a.pos.z = z; }
+          if (a.group) {
+            a.group.position.set(x, eyeY + up, z);
+            a.group.rotation.y = aim + Math.PI / 2;
+            a.group.visible = true;
+            a.group.updateMatrixWorld(true);
+          }
+          a.hunger = 0;
+        }
+        return N;
       },
       peace() {
         for (const a of CBZ.cityWildlife || []) {
@@ -282,6 +345,14 @@ async function stageIslandUnderwater(input) {
   // need a few real ticks at the final position.
   D.sec(1.6);
 
+  // The shoal is parked AFTER the settle, so the fish brains get one tick to
+  // orient them but not enough sim time to swim back out of frame.
+  let fishPlaced = 0;
+  if (sub.fish) {
+    fishPlaced = D.stockFish(px, pz, eyeY, aimAng, Number(sub.fish));
+    D.step(2);
+  }
+
   const cam = CBZ.camera;
   const camSurf = CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(cam.position.x, cam.position.z) : surf;
   const eyeDepth = camSurf - cam.position.y;
@@ -320,6 +391,13 @@ async function stageIslandUnderwater(input) {
       mode: CBZ.game.mode, state: CBZ.game.state,
       ring: rr, camPos: cam.position.toArray().map((v) => +v.toFixed(2)),
       sharkDepthM: sharkDepth == null ? null : +sharkDepth.toFixed(2),
+      sharkRangeM: shark && shark.group ? +shark.group.position.distanceTo(cam.position).toFixed(2) : null,
+      fishPlaced: fishPlaced,
+      fogNearM: fog && fog.near != null ? +fog.near.toFixed(2) : null,
+      backdropOn: (function () {
+        const b = CBZ.scene.getObjectByName("cbz-uw-backdrop");
+        return b ? (b.visible ? 1 : 0) : -1;
+      })(),
       skyBg: CBZ.scene.background && CBZ.scene.background.getHexString
         ? "#" + CBZ.scene.background.getHexString() : String(CBZ.scene.background),
       domeVisible: CBZ.skyDome ? (CBZ.skyDome.visible ? 1 : 0) : -1,
@@ -334,6 +412,7 @@ async function stageIslandUnderwater(input) {
       waterColumnM: +column.toFixed(2),
       seabedY: +bedY.toFixed(2),
       fogFarM: fog && fog.far != null ? +fog.far.toFixed(2) : null,
+      fogNearM: fog && fog.near != null ? +fog.near.toFixed(2) : null,
       fogColor: fog && fog.color ? "#" + fog.color.getHexString() : null,
       sunIntensity: CBZ.sun ? +CBZ.sun.intensity.toFixed(3) : null,
       hemiIntensity: CBZ.hemi ? +CBZ.hemi.intensity.toFixed(3) : null,
@@ -345,9 +424,9 @@ async function stageIslandUnderwater(input) {
 export default {
   id: "island-underwater",
   title: "Shark Sim — Being Under The Water",
-  description: "Five matched frames of the live ?mode=sharksim island: a metre under the surface, twelve metres down looking level and then up, four metres down looking at the floor, and the same shelf seen from the surface. The eye is pinned to the same world coordinate and the same depth on both sides, so the only variables are the colour of the medium, the light falling on the bottom, and whether there is a bottom.",
+  description: "Eight matched frames of the live ?mode=sharksim island. Five are the depth grade itself — a metre under, twelve metres down looking level and then up, the shelf, and the surface. Three are the owner's own phone framing: the chase cam where the near-black band sat, a shark at six metres that has to read as a shark, and a shoal parked at eight to sixteen metres. The eye is pinned to the same world coordinate and the same depth on both sides, so the only variables are the colour of the medium, the light in it, and what the water does to a body seen through it.",
   beforeLabel: "BEFORE · DEPLOYED",
-  afterLabel: "AFTER · GRADED COLUMN + REAL SHELF",
+  afterLabel: "AFTER · NO BAND · SHARK READS",
   pairNote: "Same seed · same island · same ring radius · same eye depth · same pinned camera · noon · quality tier 3",
   method: "Both pages boot index.html?mode=sharksim, click the tile and PLAY like a player, then kill the frame loop and advance the match only through CBZ.stepSim. A per-page onAlways(51.2) pass parks the camera at the subject's ring radius and eye depth every tick — after systems/camera.js (50) and after water_underwater.js's own lens pass (50.5), and before its grading pass (99.6) — so the water is graded FOR the photographed eye rather than around it. Every number is read off the engine's own seams at the instant of the capture.",
   defaultBefore: "local",
@@ -360,6 +439,7 @@ export default {
     waterColumnM: { label: "Water column at the photographed ring", unit: "m", better: "higher" },
     seabedY: { label: "World Y of the sea bed there", unit: "m", better: "lower" },
     fogFarM: { label: "How far you can see through the medium", unit: "m" },
+    fogNearM: { label: "How far the water stays glass-clear", unit: "m", better: "higher" },
     fogColor: { label: "The colour of the water column" },
     sunIntensity: { label: "Sun intensity while submerged", unit: "x", better: "lower" },
     hemiIntensity: { label: "Ambient intensity while submerged", unit: "x", better: "lower" },
