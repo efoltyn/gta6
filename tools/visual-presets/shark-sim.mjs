@@ -47,7 +47,7 @@ const subjects = [
   {
     id: "pod-hunt", ch: 5,
     label: "The Threat Curve — The Pod Has Your Scent",
-    focus: "BEFORE: the orca pod minds its own blue water; the player means nothing to it. AFTER: the pod converges on YOU — marine predation's one `huntable` exception — and the HUD's single status line switches to the warning.",
+    focus: "BEFORE: the orca pod minds its own blue water; the player means nothing to it. AFTER: the pod converges on YOU — marine predation's one `huntable` exception — and it says so by turning and coming, not in words (the status line that used to print \"the pod has your scent\" is gone; see the shark-show-dont-tell preset).",
   },
   {
     id: "megalodon", ch: 6,

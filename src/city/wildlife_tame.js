@@ -50,6 +50,55 @@
   if (CBZ.CONFIG && CBZ.CONFIG.ANIMALS_ALL_CONTROLLABLE == null) CBZ.CONFIG.ANIMALS_ALL_CONTROLLABLE = true;
   function ALLCTL() { return !(CBZ.CONFIG && CBZ.CONFIG.ANIMALS_ALL_CONTROLLABLE === false); }
 
+  /* ============================================================
+     THE WATER COLUMN IS A PLACE, NOT A CEILING (owner, 2026-08-25):
+       "in nat disaster world on touch when in the water you get rise and dive
+        and there's real underwater; in shark sim game there's just water
+        surface and you can't really dive and jumps are fake."
+
+     Three separate faults sat behind that one sentence, and each gets its own
+     flag so the before/after is one build and a query string.
+
+     SHARK_RIDE_DIVE — the ride could descend (the body genuinely went to 7 m,
+       measured) but the CAMERA could not follow: systems/camera.js frames an
+       island player from a 2.08 m pivot on a ~7 m boom, so diving seven metres
+       put the lens 0.69 m under the surface and left it there. Every underwater
+       treatment in the game (world/water_underwater.js — fog, caustics, god
+       rays, the muffle) is a read-only observer of the CAMERA, so from the
+       saddle the whole system was unreachable and the sea read as a lid. This
+       flag adds the dive rig: a late camera pass (order 50.4, i.e. after
+       camera.js's one writer at 50 and BEFORE water_underwater.js's observer at
+       50.5) that eases the lens onto the body's own line as the body goes down,
+       plus honest dive/rise authority and body pitch. It builds NO second
+       underwater system — it just puts the eye where the existing one can see.
+     SHARK_RIDE_TOUCH_VERT — the vertical axis on a thumb. The survival swimmer
+       has had DIVE/RISE pills since SURV_SHARED_SWIM (systems/touch_vehicle.js
+       "swim" context); the aquatic MOUNT had a DISMOUNT pill and nothing else,
+       so on iPad the shark could not be told to go down at all. This publishes
+       the same hold seam city/swim.js publishes (CBZ.citySwimVertical) so the
+       touch layer drives the mount through one named API instead of poking keys.
+     SHARK_BREACH — `breach: id === "dolphin"` was the whole reason a shark's
+       jump was fake: only a dolphin was ever allowed to leave the water, so a
+       great white "jumping" was the surface clamp letting go for a moment.
+       Every strong swimmer now gets a REAL ballistic arc, sized to its own
+       body (see aquaticRideDef), with a re-entry splash and shake to match.
+     MARINE_SIT_DEEPER — "orcas and sharks are just slightly too high up in the
+       water … this out-of-water bit should go under water". A resting-depth
+       trim on the ridden body's surface clamp; the wild bodies' own trim lives
+       with their locomotion (city/wildlife_shark.js, city/wildlife_orca.js).
+  ============================================================ */
+  const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
+  if (CFG.SHARK_RIDE_DIVE == null) CFG.SHARK_RIDE_DIVE = true;
+  if (CFG.SHARK_RIDE_TOUCH_VERT == null) CFG.SHARK_RIDE_TOUCH_VERT = true;
+  if (CFG.SHARK_BREACH == null) CFG.SHARK_BREACH = true;
+  if (CFG.MARINE_SIT_DEEPER == null) CFG.MARINE_SIT_DEEPER = true;
+  const DIVE_ON = () => CFG.SHARK_RIDE_DIVE !== false;
+  const BREACH_ON = () => CFG.SHARK_BREACH !== false;
+  const DEEPER_ON = () => CFG.MARINE_SIT_DEEPER !== false;
+  // The one gravity the airborne mount integrates under, shared with the launch
+  // solve so "how much air" and "how fast do I leave" can never disagree.
+  const BREACH_G = 17.5;
+
   function groundY(x, z) { return (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) || 0; }
   function animals() { return CBZ.cityWildlife || []; }
   function note(msg, sec, o) { if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, sec, o); }
@@ -114,6 +163,24 @@
     const scale = Math.max(0.25, sp.scale || 1);
     const cruise = Math.max(5.5, Math.min(16, (sp.spd || 1.5) * 4));
     const hunter = !!(sp.bite > 0) || /shark|megalodon|orca|barracuda/.test(id);
+    // ---- THE BALLISTIC ARC IS SIZED TO THE BODY, NOT TYPED PER SPECIES ----
+    // `breach: id === "dolphin"` was the fake jump. Give every strong swimmer
+    // the real transition and the launch speed falls straight out of school
+    // physics: to clear `apex` metres of air against the same BREACH_G the
+    // airborne integrator below uses, you leave the water at sqrt(2·g·apex).
+    // So the number authored here is the one a person can actually picture —
+    // HOW MUCH AIR THIS ANIMAL GETS — and the arc, the hang time and the
+    // re-entry speed are all consequences of it.
+    //
+    // A dolphin keeps its measured 6.9 m (sqrt(2·17.5·6.9) = 15.53 ≈ the 15.5
+    // this file shipped), because that leap is the one the owner approved.
+    // Everything else scales with the hull: a bull shark clears about its own
+    // depth, a great white clears a body length, and a megalodon throws 5.8 m
+    // of air and stays up for 1.6 SECONDS — enormous and heavy, which is what
+    // makes it read as mass rather than as a bigger dolphin.
+    const apex = id === "dolphin" ? 6.9 : (0.9 + scale * 1.9);
+    const canBreach = BREACH_ON() ? (hunter || id === "dolphin" || /whale|ray|tuna|marlin|sailfish/.test(id))
+                                  : id === "dolphin";
     return (AQUATIC_RIDES[sp.id] = {
       y: Math.max(0.45, 0.92 * scale),
       mult: cruise / (((CBZ.TUNE && CBZ.TUNE.walkSpeed) || 6.4)),
@@ -121,10 +188,19 @@
       cruise: cruise,
       sprint: cruise * (id === "dolphin" ? 1.78 : 1.56),
       turn: Math.max(0.75, 3.8 / (0.65 + scale * 0.55)),
-      rise: Math.max(3.1, Math.min(6.5, cruise * 0.38)),
-      dive: Math.max(3.5, Math.min(7.2, cruise * 0.42)),
-      breach: id === "dolphin",
-      breachVel: id === "dolphin" ? 15.5 : 0,
+      // Vertical authority under SHARK_RIDE_DIVE. The old numbers topped a bull
+      // shark out at 4.5 m/s down, which is a lift, not a dive — and a body the
+      // size of a megalodon moving 4.5 m/s down looks becalmed. Sounding is
+      // faster than surfacing for every real fish (gravity is not the only
+      // thing helping, but buoyancy is the thing fighting the climb), so dive
+      // keeps the bigger of the two coefficients.
+      rise: DIVE_ON() ? Math.max(3.6, Math.min(9.5, cruise * 0.48))
+                      : Math.max(3.1, Math.min(6.5, cruise * 0.38)),
+      dive: DIVE_ON() ? Math.max(4.4, Math.min(11.5, cruise * 0.62))
+                      : Math.max(3.5, Math.min(7.2, cruise * 0.42)),
+      breach: canBreach,
+      breachVel: canBreach ? Math.sqrt(2 * BREACH_G * apex) : 0,
+      breachApex: canBreach ? apex : 0,
       attack: hunter,
       shipBite: id === "megalodon",
     });
@@ -222,6 +298,11 @@
     const R = rideDef(sp); return R ? {
       y: R.y, mult: R.mult, jump: rideJump(sp), aquatic: !!R.aquatic,
       cruise: R.cruise || 0, sprint: R.sprint || 0, breach: !!R.breach,
+      // The vertical half of the profile was never published, so nothing could
+      // check the one claim the dive/breach work makes: how fast this body
+      // leaves the water and how much air that buys it.
+      rise: R.rise || 0, dive: R.dive || 0,
+      breachVel: R.breachVel || 0, breachApex: R.breachApex || 0,
       attack: !!R.attack, shipBite: !!R.shipBite,
     } : null;
   };
@@ -1025,6 +1106,8 @@
     mount: null, head: 0, phase: 0, lx: 0, lz: 0, visual: null, water: null,
     attackT: 0, attackDur: 0, attackCd: 0, attackHit: false, attackHitP: -1,
     target: null, targetKind: null, attackPitch: 0, attackRoll: 0,
+    // the above-weight-kill ceremony (see THE CLAMP below)
+    clampT: 0, clampDur: 0, clampVictim: null, clampChum: null, clampBeat: -1, clampOrder: "",
   };
   const seatV = new THREE.Vector3();
   const riderHipV = new THREE.Vector3();
@@ -1034,6 +1117,7 @@
   const biteNormal = new THREE.Vector3();
   const AQUATIC_AUDIT = {
     mounts: 0, breaches: 0, reentries: 0, attacks: 0, hits: 0, shipBites: 0,
+    clamps: 0,
     lastSpecies: null, lastTarget: null,
   };
 
@@ -1138,6 +1222,13 @@
       CBZ.cityWildlifeHit(target,
         { head: false, point: biteV, dir: { x: Math.cos(ride.head), y: 0.12, z: Math.sin(ride.head) }, from: a.pos },
         { damage: damage, by: a, cause: "eaten by a " + String(sp.name || sp.id).toLowerCase() });
+      // A KILL BIGGER THAN YOU IS NOT A CHOMP. See THE CLAMP above; a snack
+      // is unaffected because aboveWeight() measures both bodies.
+      if (target.dead || target.hp <= 0) beginClamp(a, target);
+      else if (CBZ.creatureBiteChunk && aboveWeight(a, target)) {
+        // it survived the bite: it still leaves with less of itself
+        try { CBZ.creatureBiteChunk(target, biteV, { jaw: biteReach(a) * 0.32, sev: 0.7, bleedS: 12 }); } catch (e) {}
+      }
     } else if (kind === "cop") {
       if (!CBZ.cityHurtCop) return false;
       if (CBZ.creatureBiteWound) CBZ.creatureBiteWound(a, target, "lunge");
@@ -1191,9 +1282,201 @@
     return true;
   }
 
+  /* ============================================================
+     THE CLAMP — what a kill BIGGER THAN YOU is supposed to look like.
+
+     Owner, 2026-08-25: "Biting is too fast and doesn't look cool enough —
+     especially when a shark kills an orca bigger than it. It's pretty cool
+     the engine makes that possible-but-challenging, but it doesn't LOOK cool."
+
+     He is describing a real hole. The aquatic bite is ONE clock for every
+     meal: a mackerel and a nine-tonne orca both got the same ~0.9 s open-hold-
+     shut and then the corpse simply stopped existing as a problem. The fight
+     that got you there could take a minute of circling and bleeding, and its
+     payoff was the same chomp as a sardine.
+
+     So the SNACK KEEPS ITS TEMPO — eating forty mackerel must not become
+     forty ceremonies, and creature_combat's shared bite clock is untouched
+     for them — and an ABOVE-WEIGHT KILL earns a finish:
+
+       CLAMP   (0 → 18%)   the jaws shut, the body stops dead in the water,
+                           white water, a shake, and time drops for a beat
+       ROLL    (18 → 76%)  the death roll: the whole animal spins about its
+                           long axis at ~1.1 Hz with the carcass locked in its
+                           teeth, tearing material off it on every half turn
+                           and putting blood in the water each time
+       RELEASE (76 → 100%) the roll decays out, the jaws part, and the carcass
+                           is let go limp to drift and sink
+
+     REUSED, NOT REBUILT. The roll rides ride.attackRoll/attackPitch — the
+     ride's own pose channels, already composed into the animal transform and
+     already carried by the rider at 0.42/0.58 weight — so no new transform
+     owner exists and nothing here can fight the mount's physics. The tearing
+     is systems/wounds.js's creatureBiteChunk (the same call an orca's bite
+     makes on YOU). The blood is gore.js's chum and blooms. The time drop is
+     loop.js's doSlowmo.
+
+     THE EULER ORDER, and it is the whole difference between a roll and a
+     tilt. The default 'XYZ' composes R = Rx·Ry·Rz, so rotation.z is a LOCAL
+     pitch (this model is nose-toward +X) but rotation.x is applied after the
+     yaw and is therefore a WORLD tilt whose meaning changes with heading —
+     which is why the existing ±0.09 attackRoll never read as a roll and could
+     not be turned up. 'YXZ' puts the yaw outermost, making rotation.x a true
+     roll about the body's long axis. predator.js takes exactly this trade for
+     exactly this reason during a seize. We hold it for the ceremony and put
+     the original order back at the end, by every exit.
+
+     ?cfg_BITE_CINEMATIC=0 restores the old instant end-of-bite. */
+  const CLAMP_A = 0.18, CLAMP_B = 0.76;   // phase boundaries, as fractions
+  const CLAMP_HZ = 1.15;                  // rolls per second
+  function cinematicOn() { return CBZ.CONFIG.BITE_CINEMATIC !== false; }
+  /* IS THIS MEAL BIGGER THAN ME. Measured, never a species list: the two
+     bodies' own lengths through marine_predation's one measurer, with a raw
+     scale fallback so this still answers on a build without it. 0.85 rather
+     than 1.0 because a shark taking something nearly its own size is the same
+     event — and because the megalodon-vs-orca matchup the owner is talking
+     about sits right on that line. */
+  function aboveWeight(a, t) {
+    const L = CBZ.marineBodyLen;
+    const la = L ? L(a) : ((a.species && a.species.scale) || 1) * 6;
+    const lt = L ? L(t) : ((t.species && t.species.scale) || 1) * 6;
+    return la > 0 && lt >= la * 0.85;
+  }
+  function clampJawWorld(a) {
+    const p = (CBZ.creatureJawPoint && CBZ.creatureJawPoint(a)) || { x: 1, y: 0.8, z: 0 };
+    a.group.updateMatrixWorld(true);
+    return jawV.set(p.x, p.y, p.z).applyMatrix4(a.group.matrixWorld);
+  }
+  function beginClamp(a, victim) {
+    if (!cinematicOn() || ride.clampT > 0 || !victim) return false;
+    if (!aboveWeight(a, victim)) return false;
+    const dur = 2.15 + Math.min(0.9, (CBZ.marineBodyLen ? CBZ.marineBodyLen(victim) : 8) * 0.05);
+    ride.clampDur = dur; ride.clampT = dur;
+    ride.clampVictim = victim; ride.clampBeat = -1;
+    victim._jawHeld = a;                     // "somebody else owns this corpse"
+    // a true long-axis roll needs the yaw outermost (see the block comment)
+    if (a.group.rotation) {
+      ride.clampOrder = a.group.rotation.order || "XYZ";
+      try { a.group.rotation.order = "YXZ"; } catch (e) { ride.clampOrder = ""; }
+    }
+    const j = clampJawWorld(a);
+    if (CBZ.goreChum) {
+      const at = { x: j.x, y: j.y, z: j.z };
+      ride._clampAt = at;
+      try {
+        /* 1.3, not 2.6. Twice this rate on top of the per-beat blooms put so
+           much chum in front of a chase camera that the roll photographed as a
+           red screen (caught in the preset's own captures, both columns). The
+           water still clouds; you can still see what is doing it. */
+        ride.clampChum = CBZ.goreChum(function () { return at.x; }, function () { return at.y; },
+          function () { return at.z; }, 1.3, dur + 2);
+      } catch (e) { ride.clampChum = null; }
+    }
+    if (CBZ.goreBloom) { try { CBZ.goreBloom(j.x, j.y, j.z, { amount: 0.8 }); } catch (e) {} }
+    if (CBZ.waterSplashAt) { try { CBZ.waterSplashAt(j.x, seaY(j.x, j.z), j.z, 4.2); } catch (e) {} }
+    if (CBZ.shake) CBZ.shake(1.1);
+    if (CBZ.doSlowmo) CBZ.doSlowmo(0.5);
+    if (CBZ.sfx) { try { CBZ.sfx("hit", { volume: 1 }); } catch (e) {} }
+    AQUATIC_AUDIT.clamps = (AQUATIC_AUDIT.clamps || 0) + 1;
+    return true;
+  }
+  function endClamp(a) {
+    const v = ride.clampVictim;
+    if (v) { v._jawHeld = null; }
+    if (ride.clampChum && CBZ.goreChumStop) { try { CBZ.goreChumStop(ride.clampChum); } catch (e) {} }
+    if (a && a.group && a.group.rotation && ride.clampOrder) {
+      try { a.group.rotation.order = ride.clampOrder; } catch (e) {}
+    }
+    ride.clampOrder = ""; ride.clampChum = null; ride.clampVictim = null;
+    ride.clampT = 0; ride.clampDur = 0; ride.clampBeat = -1;
+    ride.attackRoll = 0; ride.attackPitch = 0;
+    if (CBZ.swimJaw && a) { try { CBZ.swimJaw(a, 0); } catch (e) {} }
+    if (a) a._atkAnim = -1;
+  }
+  function tickClamp(a, dt) {
+    if (!(ride.clampT > 0)) return false;
+    const v = ride.clampVictim;
+    if (!v || !v.group || !v.group.parent || v.culled) { endClamp(a); return false; }
+    ride.clampT -= dt;
+    const e = Math.max(0, Math.min(1, 1 - ride.clampT / ride.clampDur));
+    a._atkAnim = 0.5;                       // animateSwim yields the transform
+    const j = clampJawWorld(a);
+    if (ride._clampAt) { ride._clampAt.x = j.x; ride._clampAt.y = j.y; ride._clampAt.z = j.z; }
+
+    // THE BODY STOPS. A shark that has just clamped nine tonnes does not keep
+    // cruising; the whole point of the beat is the sudden loss of way.
+    if (ride.water) ride.water.v *= Math.max(0, 1 - dt * (e < CLAMP_B ? 4.2 : 1.4));
+
+    let roll = 0, pitch = 0, gape = 0;
+    if (e < CLAMP_A) {
+      const q = e / CLAMP_A;
+      gape = 0.5 * (1 - q);                 // the mouth closing onto the body
+      pitch = 0.18 * Math.sin(q * Math.PI);
+    } else if (e < CLAMP_B) {
+      const q = (e - CLAMP_A) / (CLAMP_B - CLAMP_A);
+      // ease in and out so the spin has weight at both ends instead of popping
+      const env = Math.sin(Math.min(1, q * 1.35) * Math.PI * 0.5) * (1 - Math.pow(q, 4) * 0.35);
+      const ph = q * (CLAMP_B - CLAMP_A) * ride.clampDur * CLAMP_HZ * 6.283185307;
+      roll = Math.sin(ph) * 1.15 * env;
+      pitch = Math.sin(ph * 0.5) * 0.26 * env;
+      // ONE BEAT PER HALF TURN: a piece comes away, blood goes in the water,
+      // the surface breaks and the screen kicks. This is the violence.
+      const beat = Math.floor(ph / Math.PI);
+      if (beat !== ride.clampBeat) {
+        ride.clampBeat = beat;
+        if (CBZ.creatureBiteChunk) {
+          try { CBZ.creatureBiteChunk(v, j, { jaw: biteReach(a) * 0.38, sev: 0.85, bleedS: 12 }); } catch (er) {}
+        }
+        /* EVERY OTHER HALF TURN, and measured before it was tuned: a bloom on
+           every beat put six overlapping clouds inside a chase camera that is
+           ten metres behind the jaw, and the capture came back as a red lens
+           rather than blood in water. The chum trail (opened at the clamp)
+           carries the continuity between them. */
+        if ((beat & 1) === 0 && CBZ.goreBloom) {
+          try { CBZ.goreBloom(j.x, j.y, j.z, { amount: 0.5 }); } catch (er) {}
+        }
+        if (CBZ.marineSurfaceHit) { try { CBZ.marineSurfaceHit(j.x, j.z, 2.4); } catch (er) {} }
+        if (CBZ.shake) CBZ.shake(0.5);
+        if (CBZ.sfx) { try { CBZ.sfx("hit", { volume: 0.7 }); } catch (er) {} }
+      }
+    } else {
+      const q = (e - CLAMP_B) / (1 - CLAMP_B);
+      gape = 0.42 * Math.sin(q * Math.PI);  // the jaws part and let it go
+      roll = 0; pitch = -0.12 * (1 - q);
+    }
+    ride.attackRoll = roll; ride.attackPitch = pitch;
+    if (CBZ.swimJaw) { try { CBZ.swimJaw(a, gape); } catch (er) {} }
+
+    // THE CARCASS IS IN THE TEETH. Held at the jaw and rolled with the body
+    // until the release, then dropped limp. This write lands in the onAlways
+    // 49.8 pass, i.e. AFTER wildlife.js's own animal tick, so it is the last
+    // word on where the corpse is for the frame.
+    if (e < CLAMP_B) {
+      const vg = v.group;
+      const back = (CBZ.marineBodyLen ? CBZ.marineBodyLen(v) : 8) * 0.22;
+      const hd = ride.head;
+      const px = j.x + Math.cos(hd) * back, pz = j.z + Math.sin(hd) * back;
+      vg.position.set(px, j.y, pz);
+      if (v.pos) { v.pos.x = px; v.pos.y = j.y; v.pos.z = pz; }
+      if (vg.rotation) {
+        vg.rotation.order = "YXZ";
+        vg.rotation.y = -(hd + Math.PI * 0.42);      // held across the mouth
+        vg.rotation.x = roll * 0.9;
+        vg.rotation.z = pitch * 0.5;
+      }
+      if (v._waterMove) { v._waterMove.x = px; v._waterMove.z = pz; }
+    }
+    if (ride.clampT <= 0) { endClamp(a); return false; }
+    return true;
+  }
+  // Read by modes/shark_sim.js: the win card must not cut the finish off.
+  CBZ.cityAquaticClampT = function () { return ride.clampT > 0 ? ride.clampT : 0; };
+  CBZ.cityAquaticClampVictim = function () { return ride.clampT > 0 ? ride.clampVictim : null; };
+
   function startAquaticAttack() {
     const a = ride.mount, R = a && rideDef(a.species);
     if (!a || !R || !R.aquatic || !R.attack || ride.attackCd > 0 || ride.attackT > 0) return false;
+    if (ride.clampT > 0) return false;                  // the finish is not interruptible
     const pick = selectBiteTarget(a, R);
     ride.target = pick.target; ride.targetKind = pick.kind;
     // The mounted animal and the wild predator now use creature_combat's one
@@ -1203,8 +1486,10 @@
     // Preserve target-sensitive mass — an actual hull takes longer — then
     // leave a visible recovery beat after the mouth has returned to rest.
     ride.attackT = 0.0001;
+    // the third argument is the TARGET, and it only ever lengthens the swing
+    // when that target is the size of the animal biting it (creature_combat)
     ride.attackDur = CBZ.aquaticBiteDuration
-      ? CBZ.aquaticBiteDuration(a, pick.kind)
+      ? CBZ.aquaticBiteDuration(a, pick.kind, pick.kind === "animal" ? pick.target : null)
       : (R.shipBite ? 0.72 : 0.56);
     ride.attackHit = false; ride.attackHitP = -1;
     ride.attackCd = ride.attackDur + (pick.kind === "ship" ? 0.55 : 0.42);
@@ -1236,11 +1521,19 @@
   CBZ.cityAquaticBiteProbe = function () {
     const a = ride.mount, R = a && rideDef(a.species);
     if (!a || !R || !R.aquatic || !R.attack || ride.attackCd > 0 || ride.attackT > 0) return null;
+    if (ride.clampT > 0) return null;
     const pick = selectBiteTarget(a, R);
     return pick.target ? pick : null;
   };
 
   function tickAquaticAttack(a, dt) {
+    // THE CEREMONY OWNS THE FRAME. While a clamp is running it writes both
+    // pose channels itself and no new bite may start — otherwise the auto-fire
+    // in shark_sim would chomp straight through the finish.
+    if (ride.clampT > 0) {
+      if (ride.attackCd > 0) ride.attackCd = Math.max(0, ride.attackCd - dt);
+      if (tickClamp(a, dt)) return;
+    }
     if (ride.attackCd > 0) ride.attackCd = Math.max(0, ride.attackCd - dt);
     ride.attackPitch = 0; ride.attackRoll = 0;
     if (!(ride.attackT > 0)) return;
@@ -1285,6 +1578,39 @@
   // travel is momentum with a seabed floor. A dolphin breach is the one state
   // transition: sprint + rise near the surface launches a ballistic body, then
   // gravity returns that SAME root to the sea and the water takes it back.
+  /* ---- THE VERTICAL AXIS, ON EVERY DEVICE (SHARK_RIDE_TOUCH_VERT) --------
+     Desktop already had it: Space rises, Ctrl/C dives — the SAME grammar
+     city/swim.js's verticalInput() uses, which is why they read as one game.
+     A thumb had nothing. city/swim.js solved that for the human swimmer by
+     publishing a hold seam (CBZ.citySwimVertical) that systems/touch_vehicle.js
+     drives from two pills; this is that seam for the saddle, byte-for-byte the
+     same contract — call it every frame with -1/0/+1 and it EXPIRES after
+     0.25 s without a refresh, so a swallowed touchend (routine on iPad) can
+     never pin a shark at the bottom of the sea. */
+  let mountVert = 0, mountVertT = -9;
+  CBZ.cityAquaticMountVertical = function (v) {
+    if (CFG.SHARK_RIDE_TOUCH_VERT === false) return;
+    mountVert = v > 0 ? 1 : (v < 0 ? -1 : 0);
+    mountVertT = CBZ.now != null ? CBZ.now : (typeof performance !== "undefined" ? performance.now() : 0);
+  };
+  function touchVertical() {
+    if (!mountVert) return 0;
+    const now = CBZ.now != null ? CBZ.now : (typeof performance !== "undefined" ? performance.now() : 0);
+    if (now - mountVertT > 250) { mountVert = 0; return 0; }
+    return mountVert;
+  }
+  function verticalRideInput(keys) {
+    let v = touchVertical();
+    if (keys[" "]) v = 1;
+    if (keys.control || keys.c) v = -1;
+    return v;
+  }
+  // "Am I piloting a body in the water right now?" — the one question the touch
+  // layer and any HUD needs, so neither has to reach into `ride`.
+  CBZ.cityAquaticMountRiding = function () {
+    return !!(ride.mount && ride.water && aquaticMounted(ride.mount) && !ride.mount.dead);
+  };
+
   CBZ.cityAquaticMountStep = function (dt) {
     const a = ride.mount, P = CBZ.player;
     if (!a || !P || !aquaticMounted(a) || P.dead || P.driving || a.dead) return false;
@@ -1343,20 +1669,35 @@
 
     const surf = seaY(P.pos.x, P.pos.z);
     const depth = waterDepth(P.pos.x, P.pos.z);
-    const vin = blockedInput ? 0 : (keys[" "] ? 1 : ((keys.control || keys.c) ? -1 : 0));
+    const bodyScale = Math.max(0.35, (a.species && a.species.scale) || 1);
+    const vin = blockedInput ? 0 : verticalRideInput(keys);
     if (W.breachCd > 0) W.breachCd = Math.max(0, W.breachCd - dt);
     if (W.airborne) {
-      W.vy -= 17.5 * fdt;
+      W.vy -= BREACH_G * fdt;
       W.y += W.vy * fdt;
+      W.airT = (W.airT || 0) + fdt;
+      if (W.y - surf > (W.airPeak || 0)) W.airPeak = W.y - surf;
       W.pitch = Math.max(-0.72, Math.min(1.18, Math.atan2(W.vy, Math.max(4, W.v))));
       if (W.vy < 0 && W.y <= surf - Math.max(0.18, (a.swimDepth || 1) * 0.12)) {
         W.airborne = false; W.y = surf - Math.max(0.22, (a.swimDepth || 1) * 0.18);
-        W.vy = -Math.min(3.8, Math.max(1.8, Math.abs(W.vy) * 0.22));
+        // Re-entry keeps a real fraction of the fall as plunge momentum: a
+        // megalodon coming down off six metres should CARRY, not stop dead on
+        // the waterline the way the old flat 22% bleed made it.
+        const fall = Math.abs(W.vy);
+        W.vy = -Math.min(3.8 + bodyScale * 2.4, Math.max(1.8, fall * 0.34));
         W.v *= 0.78; W.breachCd = 1.15;
         AQUATIC_AUDIT.reentries++;
-        if (CBZ.waterSplashAt) CBZ.waterSplashAt(P.pos.x, surf, P.pos.z, 2.8);
-        if (CBZ.sfx) { try { CBZ.sfx("water", { volume: 1.1, force: true }); } catch (e) {} }
-        if (CBZ.shake) CBZ.shake(0.62);
+        AQUATIC_AUDIT.lastApex = +(W.airPeak || 0).toFixed(2);
+        AQUATIC_AUDIT.lastAirT = +(W.airT || 0).toFixed(2);
+        // A SPLASH IS THE SIZE OF THE BODY THAT MADE IT. One constant 2.8 read
+        // as the same dimple for a bull shark and for a sixteen-metre animal.
+        if (CBZ.waterSplashAt) {
+          CBZ.waterSplashAt(P.pos.x, surf, P.pos.z,
+            Math.min(9, 1.5 + bodyScale * 1.9 + fall * 0.10));
+        }
+        if (CBZ.sfx) { try { CBZ.sfx("water", { volume: Math.min(1.6, 0.9 + bodyScale * 0.25), force: true }); } catch (e) {} }
+        if (CBZ.shake) CBZ.shake(Math.min(1.6, 0.45 + bodyScale * 0.22 + fall * 0.012));
+        W.airT = 0; W.airPeak = 0;
       }
     } else {
       const wantVy = vin > 0 ? (R.rise || 4) : (vin < 0 ? -(R.dive || 4) : 0);
@@ -1365,7 +1706,13 @@
       if (!vin) W.vy *= Math.exp(-2.8 * fdt);
       W.y += W.vy * fdt;
       const bedY = surf - depth + Math.max(0.35, (a.species.scale || 1) * 0.32);
-      const topY = surf - Math.max(0.28, (a.swimDepth || 1) * (R.breach ? 0.36 : 0.72));
+      // HOW HIGH THE BODY MAY RIDE. `0.36 × swimDepth` for a breacher is what
+      // lets the dorsal cut the surface before a leap; MARINE_SIT_DEEPER trims
+      // that by a fifth so a shark at full rise sits IN the water rather than
+      // half out of it (the owner's "slightly too high up in the water" — the
+      // ridden half of it; the wild half is in wildlife_shark/orca's depth()).
+      const topK = (R.breach ? 0.36 : 0.72) * (DEEPER_ON() ? 1.2 : 1);
+      const topY = surf - Math.max(0.28, (a.swimDepth || 1) * topK);
       // Water shallower than the body's cruise depth crosses the clamps —
       // a megalodon (swimDepth ~8) in 3 m of surf had topY UNDER the seabed
       // and got wedged into the ground. The honest posture is riding the
@@ -1374,13 +1721,19 @@
       if (W.y < bedY) { W.y = bedY; if (W.vy < 0) W.vy = 0; }
       if (W.y > effTop) { W.y = effTop; if (W.vy > 0) W.vy *= 0.42; }
       W.pitch += (Math.max(-0.62, Math.min(0.72, W.vy * 0.115)) - W.pitch) * Math.min(1, fdt * 4.2);
+      // THE LAUNCH. Sprint + rise, held until the body is actually at the top
+      // of its column and still climbing — you cannot breach from twenty metres
+      // down, and you cannot breach standing still. The gate stays exactly what
+      // the dolphin's always was; what changed is WHO passes it (SHARK_BREACH)
+      // and how much air the pass is worth (R.breachVel, solved from the body).
       if (R.breach && sprint && vin > 0 && W.breachCd <= 0 && W.vy > 1.2 && W.y >= topY - 0.08) {
         W.airborne = true; W.vy = R.breachVel || 15.5;
+        W.airT = 0; W.airPeak = 0;
         W.v = Math.max(W.v, R.sprint * 1.04); W.pitch = 0.78;
         AQUATIC_AUDIT.breaches++;
-        if (CBZ.waterSplashAt) CBZ.waterSplashAt(P.pos.x, surf, P.pos.z, 2.2);
+        if (CBZ.waterSplashAt) CBZ.waterSplashAt(P.pos.x, surf, P.pos.z, 1.3 + bodyScale * 1.2);
         if (CBZ.sfx) { try { CBZ.sfx("water", { volume: 1, force: true }); } catch (e) {} }
-        if (CBZ.shake) CBZ.shake(0.42);
+        if (CBZ.shake) CBZ.shake(0.42 + bodyScale * 0.12);
       }
     }
     W.roll += ((shortestAngle(ride.head - W.lastHead) / fdt) * -0.065 - W.roll) * Math.min(1, fdt * 4);
@@ -1389,6 +1742,95 @@
     P.vy = W.vy; P.grounded = false; P._fallPeak = 0;
     P._swim = false; P._aquaticMount = a;
     return true;
+  };
+
+  /* ============================================================
+     THE DIVE CAMERA (SHARK_RIDE_DIVE) — why the sea had a lid.
+
+     MEASURED on the live page (mode=sharksim, seed 90210, bull shark): hold
+     Ctrl for four seconds and the BODY goes from 1.43 m under the surface to
+     7.13 m under — the ride's vertical controller was never the problem. The
+     CAMERA went from above the water to 0.69 m under it and stopped, because
+     systems/camera.js frames an island player from a 2.08 m pivot on a ~7 m
+     boom: the lens lives five and a half metres over the body no matter where
+     the body goes, and over open sea five and a half metres is the sky.
+
+     Everything the owner means by "real underwater" — world/water_underwater.js's
+     fog ramp, the caustic ceiling, the god rays, the waterline band, the 820 Hz
+     muffle — is a READ-ONLY OBSERVER OF THE CAMERA (it asks CBZ.cityWaterAt /
+     CBZ.citySeaHeightAt where the eye is, nothing more). So there was never a
+     missing underwater system to build for the shark. There was an eye in the
+     wrong place. This pass moves the eye; the existing system does the rest.
+
+     HOW IT COMPOSES INSTEAD OF COMPETING. Order 50.4 is deliberate and sits in
+     a two-sided gap: AFTER systems/camera.js's one and only writer (onAlways 50)
+     so nothing can clobber us mid-frame, and BEFORE water_underwater.js's
+     observer (onAlways 50.5) so the depth it grades is the depth we just moved
+     to. camera.js is not edited, is not flagged off, and keeps owning yaw,
+     pitch, collision, shake and FOV.
+
+     THE MOVE ITSELF is one lerp and NO rotation write, which is the whole
+     trick. The target is `body − viewDirection × distance`: the point from
+     which the camera's CURRENT aim already looks straight down the barrel at
+     the animal. So at k=0 nothing happens at all, at k=1 the body is dead
+     centre, and in between it eases toward centre while the player's own yaw
+     and pitch keep orbiting — because the target is defined FROM the live view
+     direction, steering still steers. Rotation is never touched, so there is
+     no fight with camera.lookAt and nothing to unwind when we stand down.
+  ============================================================ */
+  const _diveWant = new THREE.Vector3(), _diveDir = new THREE.Vector3();
+  function aquaticDiveCamera() {
+    if (!DIVE_ON()) return;
+    const a = ride.mount, W = ride.water, P = CBZ.player, cam = CBZ.camera;
+    if (!cam || !a || !W || !P || a.dead || P.dead || !aquaticMounted(a)) return;
+    if (!CBZ.game || CBZ.game.state !== "playing") return;
+    // Never wrestle an owner with a stronger claim on the lens.
+    if (CBZ.cineCam && CBZ.cineCam.active) return;
+    if (CBZ.simView && CBZ.simView.active) return;
+    if (CBZ.cityCam && CBZ.cityCam.death) return;
+    if (CBZ.fps && CBZ.fps.active) return;      // first person already rides the body
+    const surf = seaY(P.pos.x, P.pos.z);
+    const sub = surf - W.y;                     // the BODY's submergence, not the rider's seat
+    // Dead band at the surface so a swell can never make the frame breathe, and
+    // full authority by ~2.6 m down — the depth at which the old rig had the
+    // lens still in the air and the whole treatment still switched off.
+    const k = Math.min(1, (sub - 0.45) / 2.2);
+    if (!(k > 0)) return;
+    cam.getWorldDirection(_diveDir);
+    const scale = Math.max(0.35, (a.species && a.species.scale) || 1);
+    // A CONSTANT distance, not the measured one: measuring our own previous
+    // frame's result and feeding it back in is how a camera starts creeping.
+    // Sized to the hull so a megalodon is framed like a megalodon.
+    const dist = Math.max(4.5, Math.min(26, 4.2 + scale * 3.2));
+    _diveWant.set(
+      P.pos.x - _diveDir.x * dist,
+      W.y - _diveDir.y * dist,
+      P.pos.z - _diveDir.z * dist);
+    // ...but never inside the bottom. Same 0.4 m stand-off camera.js's own
+    // water floor uses, off the same bathymetry oracle.
+    if (CBZ.citySeaBedYAt) {
+      const bed = +CBZ.citySeaBedYAt(_diveWant.x, _diveWant.z);
+      if (Number.isFinite(bed) && _diveWant.y < bed + 0.4) _diveWant.y = bed + 0.4;
+    }
+    cam.position.lerp(_diveWant, k);
+  }
+  if (CBZ.onAlways) CBZ.onAlways(50.4, aquaticDiveCamera);
+  // Tooling seam: the one number the before/after is actually about.
+  CBZ.cityAquaticRideDepths = function () {
+    const a = ride.mount, W = ride.water, P = CBZ.player, cam = CBZ.camera;
+    if (!a || !W || !P) return null;
+    const surf = seaY(P.pos.x, P.pos.z);
+    const v = new THREE.Vector3();
+    if (cam) cam.getWorldPosition(v);
+    return {
+      species: a.species ? a.species.id : null,
+      bodyDepth: +(surf - W.y).toFixed(2),
+      camDepth: cam ? +(surf - v.y).toFixed(2) : null,
+      submerged: CBZ.cityCameraSubmerged ? !!CBZ.cityCameraSubmerged() : null,
+      airborne: !!W.airborne, vy: +(W.vy || 0).toFixed(2),
+      apex: +(W.airPeak || 0).toFixed(2),
+      surf: +surf.toFixed(2),
+    };
   };
 
   function canRide(a) {
@@ -1488,6 +1930,9 @@
     const a = ride.mount; if (!a) return;
     const P = CBZ.player;
     const wasAquatic = aquaticMounted(a), W = ride.water;
+    // BEFORE the mount reference goes: endClamp puts the Euler order back on
+    // THIS body and unpins whatever it was holding.
+    if (ride.clampT > 0) endClamp(a);
     ride.mount = null; a.ridden = false;
     ride.visual = null; ride.water = null;
     ride.attackT = ride.attackCd = 0; ride.attackHitP = -1; ride.target = null; ride.targetKind = null;
@@ -1649,9 +2094,14 @@
       attackTarget: ride.targetKind,
       attackTargetDistance: a && ride.target && ride.target.group
         ? +biteDistance(ride.target, jawWorld(a)).toFixed(2) : null,
+      // the breach, as numbers: how much air the last one got and for how long
+      breachApex: AQUATIC_AUDIT.lastApex || 0, breachAirT: AQUATIC_AUDIT.lastAirT || 0,
+      breachVel: a && rideDef(a.species) ? +(rideDef(a.species).breachVel || 0).toFixed(2) : 0,
+      canBreach: !!(a && rideDef(a.species) && rideDef(a.species).breach),
       mounts: AQUATIC_AUDIT.mounts, breaches: AQUATIC_AUDIT.breaches,
       reentries: AQUATIC_AUDIT.reentries, attacks: AQUATIC_AUDIT.attacks,
       hits: AQUATIC_AUDIT.hits, shipBites: AQUATIC_AUDIT.shipBites,
+      clamps: AQUATIC_AUDIT.clamps, clampT: ride.clampT > 0 ? +ride.clampT.toFixed(2) : 0,
       lastSpecies: AQUATIC_AUDIT.lastSpecies, lastTarget: AQUATIC_AUDIT.lastTarget,
     };
   };

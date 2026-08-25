@@ -47,6 +47,36 @@
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;
   const g = CBZ.game;
+  const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
+
+  /* ---- SHOW, DON'T TELL ---------------------------------------------------
+     Owner, 2026-08-25: "I HATE WORDS POPPING UP ON THE SCREEN. Like 'the pod
+     has your scent' — it's dumb slop. SHOW don't tell."
+
+     He is right, and the rule is categorical: a sentence that appears over
+     the water mid-play is this file admitting it could not stage the thing it
+     is describing. So every mid-play sentence is GONE and each one was
+     replaced by the physical event it was narrating:
+
+       "the pod has your scent"      -> podShow(): the orcas come UP, their
+                                        dorsals cut, they leave wake, and the
+                                        moment they commit is a hit of white
+                                        water and a shake. No words.
+       "YOU ARE THE <SPECIES>"       -> evolveBeat(): the body visibly SWELLS
+       (the evolution banner)           out of the old one with a splash ring,
+                                        a shake and a beat of slow motion.
+       "point your mouth at food"    -> deleted. The bite is automatic; the
+                                        first thing you eat teaches it.
+       "Riding You · Fire bites..."  -> suppressed (the mount toast, which
+                                        fired again on every evolution).
+
+     What survives is a HUD, not a popup: one pill that holds the species name
+     and the progress bar, and the title/end cards that own the screen when
+     play is not happening.
+
+     ?cfg_SHARK_SHOW_DONT_TELL=0 restores every line of the old text and
+     silences the physical beats — that is the before/after preset's BEFORE. */
+  function SDT() { return CFG.SHARK_SHOW_DONT_TELL !== false; }
 
   /* ---- THE LADDER. `need` is total mass eaten; mass comes off the meal's
      own hit points (massOf), so a mackerel is a snack and a human is a
@@ -67,7 +97,7 @@
     match: 0,
     shark: null,
     tier: 0, mass: 0, eaten: 0,
-    biteT: 0, hudT: 0, podT: 0, stockT: 0, strandT: 0, hintT: 0,
+    biteT: 0, hudT: 0, podT: 0, stockT: 0, strandT: 0, hintT: 0, winT: 0,
     waterline: 0,       // mean radius where the sea meets this island's sand
   };
   CBZ.sharkSim = sim;
@@ -188,7 +218,16 @@
     const cur = CBZ.cityMountedAnimal && CBZ.cityMountedAnimal();
     if (cur === S) return;                 // cityMountAnimal TOGGLES — never call it on the current mount
     if (cur && CBZ.cityDismount) CBZ.cityDismount();
-    CBZ.cityMountAnimal(S);
+    /* SILENTLY. The mount system announces itself with a toast ("Riding You ·
+       Fire bites; E dismounts.") which is correct for a city pet and wrong
+       here twice over: there is no dismount key in this game and the mount
+       re-binds on EVERY evolution, so the toast fired four times a match to
+       tell you about a control you do not have. Gag it for exactly this call
+       and put it straight back — the city's own toast is untouched. */
+    const city = CBZ.city;
+    const note0 = SDT() && city && city.note;
+    if (note0) city.note = function () {};
+    try { CBZ.cityMountAnimal(S); } finally { if (note0) city.note = note0; }
   }
 
   function orcas(fn) {
@@ -204,6 +243,101 @@
      sea); this keeps it real: a match that starts with the orcas hunted out
      gets a fresh pod in deep water, and orcas that catch the scent stay
      motivated (hunger is what marine_predation hunts on). */
+  /* ---- THE POD, SHOWN --------------------------------------------------
+     This is what "the pod has your scent" became. The words said a thing was
+     true; this makes it VISIBLE from a shark's eye-level camera, using only
+     what the sea already owns:
+
+       • THEY TURN AND COME AT YOU. Three fins milling on their own errands
+         and three fins all pointed at you are completely different pictures,
+         and only the second one is a threat you can read. A clamped nudge of
+         each locked orca's heading toward you — the same blend wildlife_orca
+         uses to make a spy-hop actually LOOK at the boat, never a snap — is
+         what turns the pod into a convergence.
+       • THEY LEAVE WAKE. One marineSurfaceHit behind each locked orca, a few
+         times a second, scaled by how close it is: white water converging on
+         you from three directions is the read, and it gets faster as they do.
+       • THEY MEAN IT. hunger is what marine_predation hunts on; locked orcas
+         are pinned at the top of it, every frame, not once every eight seconds.
+       • AND THERE IS A MOMENT. The frame the lock trips — the exact frame that
+         used to print the sentence — the nearest one hits the surface hard and
+         the camera takes it. That is the sentence, in water.
+
+     WHAT THIS DELIBERATELY DOES NOT DO, and it was measured before it was
+     cut: an earlier version also halved each locked orca's draft (swimDepth)
+     to bring the dorsals up. The preset's own numbers killed it — a closing
+     pod already rides 0.37 m under the surface, so the write bought nothing
+     visible, and raising them off the shark's depth band cost them contact on
+     the flank pass. The fin was never the missing thing; the CONVERGENCE was.
+
+     Same 55/75 m hysteresis the text used: the threshold keeps its meaning,
+     only its expression changed. */
+  const podLocked = [];              // the orcas currently in the read
+  const POD_TURN = 0.11;             // rad per scan of steering authority we borrow
+  function podRestore() {
+    podLocked.length = 0;
+    sim._podClose = false;
+  }
+  function shortest(a) {
+    while (a > Math.PI) a -= 6.283185307;
+    while (a < -Math.PI) a += 6.283185307;
+    return a;
+  }
+  function podShow(dt) {
+    if (!SDT() || sim.tier >= 3) { if (podLocked.length) podRestore(); return; }
+    const P = CBZ.player;
+    sim.podScanT = (sim.podScanT || 0) - dt;
+    sim.podWakeT = (sim.podWakeT || 0) - dt;
+    if (sim.podScanT > 0 && sim.podWakeT > 0) return;
+    const scan = sim.podScanT <= 0;
+    if (scan) sim.podScanT = 0.2;
+    let near = 1e9, nearest = null;
+    podLocked.length = 0;
+    orcas(function (a) {
+      const d = Math.hypot(a.pos.x - P.pos.x, a.pos.z - P.pos.z);
+      if (d < near) { near = d; nearest = a; }
+      if (d > 110) return;
+      podLocked.push(a);
+    });
+    // enter at 55 m, let go at 75 — a read that flickers is a read ignored
+    const was = !!sim._podClose;
+    sim._podClose = near < (was ? 75 : 55);
+    for (let i = 0; i < podLocked.length; i++) {
+      const a = podLocked[i];
+      const d = Math.hypot(a.pos.x - P.pos.x, a.pos.z - P.pos.z);
+      a.hunger = Math.max(a.hunger || 0, sim._podClose ? 1 : 0.9);
+      const k = Math.max(0, Math.min(1, (d - 18) / 92));
+      // CONVERGE. Borrowed authority, not seized: a clamped step toward the
+      // bearing to you, so the mover keeps owning the turn and the fins come
+      // round rather than snapping. Only while the lock holds.
+      if (scan && sim._podClose && a.heading != null) {
+        const want = Math.atan2(P.pos.z - a.pos.z, P.pos.x - a.pos.x);
+        const dh = shortest(want - a.heading);
+        a.heading += Math.max(-POD_TURN, Math.min(POD_TURN, dh));
+        if (a._waterMove) a._waterMove.heading = a.heading;
+      }
+      // THE WAKE, behind the fin, faster the nearer it is.
+      if (sim.podWakeT <= 0 && CBZ.marineSurfaceHit && d < 95) {
+        const L = CBZ.marineBodyLen ? CBZ.marineBodyLen(a) : 7;
+        const h = a.heading || 0;
+        try {
+          CBZ.marineSurfaceHit(a.pos.x - Math.cos(h) * L * 0.35, a.pos.z - Math.sin(h) * L * 0.35,
+            0.6 + (1 - k) * 1.3);
+        } catch (e) {}
+      }
+    }
+    if (sim.podWakeT <= 0) sim.podWakeT = sim._podClose ? 0.28 : 0.55;
+    // THE COMMIT. The frame the old text appeared, staged instead.
+    if (sim._podClose && !was && nearest) {
+      sim.podShows = (sim.podShows || 0) + 1;
+      const x = nearest.pos.x, z = nearest.pos.z;
+      if (CBZ.waterSplashAt) { try { CBZ.waterSplashAt(x, seaYAt(x, z), z, 3.2); } catch (e) {} }
+      if (CBZ.marineSurfaceHit) { try { CBZ.marineSurfaceHit(x, z, 3.4); } catch (e) {} }
+      if (CBZ.shake) CBZ.shake(0.32);
+      if (CBZ.sfx) { try { CBZ.sfx("hit", { volume: 0.35 }); } catch (e) {} }
+    }
+  }
+
   function podPressure(dt) {
     sim.podT -= dt;
     if (sim.podT > 0) return;
@@ -258,16 +392,105 @@
     despawn(S0);
     sim.shark = S1;
     mountShark();
-    if (CBZ.waterSplashAt) CBZ.waterSplashAt(x, seaYAt(x, z), z, 3.6);
-    if (CBZ.shake) CBZ.shake(0.55);
-    if (CBZ.sfx) { try { CBZ.sfx("win", { volume: 0.5 }); } catch (e) {} }
-    flash("YOU ARE THE " + next.name,
-      sim.tier >= 3 ? "Now eat an orca." : "Next: " + LADDER[sim.tier + 1].name);
+    if (SDT()) evolveBeat(S1, x, z);
+    else {
+      if (CBZ.waterSplashAt) CBZ.waterSplashAt(x, seaYAt(x, z), z, 3.6);
+      if (CBZ.shake) CBZ.shake(0.55);
+      if (CBZ.sfx) { try { CBZ.sfx("win", { volume: 0.5 }); } catch (e) {} }
+      flash("YOU ARE THE " + next.name,
+        sim.tier >= 3 ? "Now eat an orca." : "Next: " + LADDER[sim.tier + 1].name);
+    }
     hudNow();
   }
 
+  /* ---- WHAT EVOLVING LOOKS LIKE ----------------------------------------
+     The banner said "YOU ARE THE GREAT WHITE" over a body that had already
+     silently been swapped for a bigger one between two frames. Nobody ever
+     SAW the growth — which is the one thing this whole ladder is about.
+
+     So the new body starts at the OLD body's size and swells into its own
+     over three quarters of a second, with an overshoot at the top so it lands
+     with weight; the sea breaks in a ring around it; the screen shakes and
+     time drops to a third for a beat so you cannot miss it. No words.
+
+     growTick() owns group.scale for the duration and hands it back exactly
+     (growTo is captured from the authored scale, never recomputed), so a
+     ceremony interrupted by a death or a mode change cannot leave a shark
+     stuck half-size — teardown/setup clear it too. */
+  function evolveBeat(S1, x, z) {
+    const gsc = S1.group && S1.group.scale;
+    if (gsc) {
+      const prev = LADDER[sim.tier - 1];
+      const from = (prev && CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES[prev.id] &&
+        CBZ.WILDLIFE_SPECIES[prev.id].scale) || 0;
+      const to = gsc.x || 1;
+      const own = (S1.species && S1.species.scale) || to;
+      /* THE FLOOR AND THE CEILING ARE BOTH DELIBERATE. Starting the swell at
+         the previous species' true size ratio is the honest number and it is
+         a bad beat: a hammerhead and a great white are authored close enough
+         that the ratio is 0.9, so the "growth" was a 10% twitch nobody would
+         see (measured on the preset, which is what caught it). Cap the start
+         at 0.7 so every rung arrives with real mass, and floor it at 0.32 so
+         the megalodon does not erupt out of a marble. */
+      sim.grow = {
+        a: S1, t: 0, dur: 0.75, to: to,
+        from: to * Math.max(0.32, Math.min(0.70, from > 0 && own > 0 ? from / own : 0.55)),
+      };
+      gsc.setScalar(sim.grow.from);
+    }
+    const y = seaYAt(x, z);
+    if (CBZ.waterSplashAt) {
+      try {
+        CBZ.waterSplashAt(x, y, z, 4.6);
+        for (let i = 0; i < 5; i++) {
+          const ang = (i / 5) * 6.283 + 0.4, r = 3.4;
+          CBZ.waterSplashAt(x + Math.cos(ang) * r, y, z + Math.sin(ang) * r, 2.4);
+        }
+      } catch (e) {}
+    }
+    if (CBZ.marineSurfaceHit) { try { CBZ.marineSurfaceHit(x, z, 4); } catch (e) {} }
+    if (CBZ.shake) CBZ.shake(1.0);
+    if (CBZ.doSlowmo) CBZ.doSlowmo(0.42);
+    if (CBZ.sfx) { try { CBZ.sfx("win", { volume: 0.5 }); } catch (e) {} }
+    sim.evolveBeats = (sim.evolveBeats || 0) + 1;
+  }
+  function growTick(dt) {
+    const G = sim.grow; if (!G) return;
+    const gsc = G.a && G.a.group && G.a.group.scale;
+    if (!gsc || G.a.dead || G.a !== sim.shark) { sim.grow = null; if (gsc) gsc.setScalar(G.to); return; }
+    G.t += dt;
+    const e = Math.min(1, G.t / G.dur);
+    // ease-out with a 6% overshoot that settles: mass arriving, not a lerp
+    const k = 1 - Math.pow(1 - e, 3);
+    const over = Math.sin(e * Math.PI) * 0.06;
+    gsc.setScalar(G.from + (G.to - G.from) * k + G.to * over);
+    if (e >= 1) { gsc.setScalar(G.to); sim.grow = null; }
+  }
+  function growClear() {
+    const G = sim.grow; if (!G) return;
+    const gsc = G.a && G.a.group && G.a.group.scale;
+    if (gsc) gsc.setScalar(G.to);
+    sim.grow = null;
+  }
+
+  /* THE WIN CARD DOES NOT CUT THE FINISH OFF. Killing an orca as the
+     megalodon starts wildlife_tame's clamp/death-roll ceremony, and the old
+     code put the victory screen up on the same frame — so the one shot this
+     whole game builds toward was covered by a card before it happened. Hold
+     the win until the jaws let go (plus a beat), then resolve exactly as
+     before. sim.ended is still set immediately, so nothing else can start. */
   function apexWin() {
     if (sim.ended) return;
+    const hold = CBZ.cityAquaticClampT ? CBZ.cityAquaticClampT() : 0;
+    if (hold > 0 && SDT()) {
+      sim.ended = true; sim.apex = true;
+      sim.winT = hold + 0.7;
+      return;
+    }
+    apexResolve();
+  }
+  function apexResolve() {
+    sim.winT = 0;
     sim.ended = true; sim.apex = true;
     restoreRider();
     hideHud();                           // the win card owns the screen now
@@ -363,12 +586,13 @@
     flashTimer = 2.8;
   }
   function hudNow() { sim.hudT = 0; }
-  /* ONE pill, one voice. The species name, the progress to the next form,
-     and one status line that only ever says something worth reading: the
-     opening hint for a few seconds, or the pod when it is genuinely close
-     (with hysteresis so it cannot flicker at the threshold). The shark's
-     health is NOT repeated here — the bottom health bar already mirrors it,
-     and a HUD that says the same number twice is a HUD shouting. */
+  /* ONE pill, and under SHOW-DON'T-TELL it holds no sentences at all: the
+     species you are, a bar for how far the next form is, and the NAME of that
+     next form as a label — the kind of thing a HUD is for. Everything this
+     line used to narrate (the pod, the opening hint) now happens in the water
+     instead; see podShow() and evolveBeat(). The shark's health is NOT
+     repeated here — the bottom health bar already mirrors it, and a HUD that
+     says the same number twice is a HUD shouting. */
   function hudTick(dt) {
     if (!hud) return;
     if (flashTimer > 0) { flashTimer -= dt; if (flashTimer <= 0) flashEl.style.opacity = "0"; }
@@ -376,17 +600,23 @@
     if (sim.hudT > 0) return;
     sim.hudT = 0.25;
     const S = sim.shark; if (!S) return;
+    const show = SDT();
     hudLine1.textContent = LADDER[sim.tier].name;
     const next = LADDER[sim.tier + 1];
     if (next) {
       const prev = LADDER[sim.tier].need;
       hudBar.style.width = Math.min(100, Math.round(100 * (sim.mass - prev) / (next.need - prev))) + "%";
-      hudLine2.textContent = "eat " + Math.max(0, next.need - sim.mass) + " more → " + next.name;
+      hudLine2.textContent = show
+        ? "→ " + next.name
+        : "eat " + Math.max(0, next.need - sim.mass) + " more → " + next.name;
     } else {
       hudBar.style.width = "100%";
-      hudLine2.textContent = "eat an orca";
+      hudLine2.textContent = show ? "→ ORCA" : "eat an orca";
     }
     hudLine2.style.color = "#bcd0e2";
+    // Everything past this point is the OLD TEXT and only runs with the flag
+    // off. podShow() owns the pod read now, and it owns it in the water.
+    if (show) return;
     if (sim.tier < 3) {
       const P = CBZ.player;
       let near = 1e9;
@@ -415,7 +645,9 @@
     sim.tier = 0; sim.mass = 0; sim.eaten = 0;
     sim.ended = false; sim.apex = false;
     sim.biteT = 0; sim.podT = 2; sim.stockT = 3; sim.strandT = 0; sim.hudT = 0; sim.hintT = 5;
-    sim._podClose = false;
+    sim._podClose = false; sim.winT = 0;
+    podRestore(); growClear();
+    sim.podScanT = 0; sim.podWakeT = 0; sim.grow = null;
     sim.waterline = measureWaterline();
     relocateBots();
     // heal a boot race: PLAY clicked before wildlife.js parsed leaves the
@@ -432,6 +664,9 @@
     claim(S);
     sim.shark = S;
     mountShark();
+    hideRider();          // the frame you BECOME the shark, not the one after:
+                          // step() used to own this and the oracle caught the
+                          // one-frame window where a man sits on the shark
     buildHud();
     hudNow();
     flash("YOU ARE THE SHARK", "eat fish and swimmers · avoid the pod · become the MEGALODON");
@@ -450,6 +685,8 @@
     hideHud();
     g.invuln = 0;                        // never leak the rider shield into another mode
     CBZ.sharkSimShoreRing = null;
+    podRestore();                        // every orca we raised goes back to its own draft
+    growClear();                         // and no shark is left frozen mid-swell
     if (sim.shark) { sim.shark.huntable = false; }   // whatever survives goes back to being a pet
     sim.on = false;
     sim.needsTeardown = false;
@@ -459,7 +696,11 @@
     const P = CBZ.player, S = sim.shark;
     sim.stepN = (sim.stepN || 0) + 1;          // heartbeat for tools/shark-sim-check.mjs
     if (!S) return;
-    if (sim.ended) { hudTick(dt); return; }
+    if (sim.ended) {
+      if (sim.winT > 0) { sim.winT -= dt; growTick(dt); if (sim.winT <= 0) apexResolve(); }
+      hudTick(dt);
+      return;
+    }
     if (S.dead) { onSharkDead(); return; }
     if (sim.hintT > 0) sim.hintT -= dt;
     // the HUD health bar IS the shark — the rider has no separate body here.
@@ -486,6 +727,8 @@
       }
     }
     podPressure(dt);
+    podShow(dt);
+    growTick(dt);
     restock(dt);
     hudTick(dt);
   }

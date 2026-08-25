@@ -1092,8 +1092,277 @@
     return { decals: decals, oversized: oversized, cameraFacing: cameraFacing };
   };
 
+  // ============================================================
+  //  A BITE THAT TAKES SOMETHING WITH IT — persistent, on ANY rig.
+  //
+  //  Owner, 2026-08-25: "I want to get part of my tail ripped off by an orca
+  //  bite, etc." Everything above this line assumes a HUMANOID: bodyBite and
+  //  bodyWound both require actor.char.skinSlots and give up on anything else.
+  //  So when a pod bit the player's shark the ONLY feedback was a health bar
+  //  going down and a puff of blood that lasted a second — which is why being
+  //  eaten alive by three orcas read as nothing at all.
+  //
+  //  This is the missing half, and it is deliberately NOT shark-specific
+  //  (BLOCK LAW, same as bodyBite): any actor whose group is a pile of box
+  //  meshes — every wildlife body in this game — can have a piece taken out
+  //  of it. The caller passes the world point the jaw closed on and how big
+  //  the jaw was; this finds the mesh that was in it and removes material.
+  //
+  //  WHAT IT DOES TO THE MESH, and why it survives the animators. The swim rig
+  //  (city/wildlife_rig.js animateSwim) owns exactly two channels on a tail
+  //  part: position.z + rotation.y for a fish, position.y + rotation.z for a
+  //  cetacean. It never touches SCALE and never touches position.x. So the
+  //  chunk is taken by shrinking the part's scale — the piece is gone — and
+  //  the raw edge is capped with a dark torn face parented to the same mesh,
+  //  which therefore swims, banks and dies with the body for free. Nothing
+  //  here can fight the tail animation because it does not write to it.
+  //
+  //  It is PERSISTENT: nothing removes it but a restore. A shark that lost a
+  //  third of its caudal fin in the first minute is still missing it when the
+  //  pod comes back, which is the entire point.
+  //
+  //    CBZ.creatureBiteChunk(actor, worldPoint, opts)
+  //      jaw   jaw RADIUS in metres — how much of the part is taken
+  //      sev   0..1 severity (default 0.6)
+  //      bleed true (default) = a lasting chum trail off the wound
+  //    CBZ.creatureBiteChunkRestore(actor)   put every piece back
+  //    CBZ.creatureBiteChunkAudit()          {actors, chunks} for the tools
+  // ============================================================
+  if (CBZ.CONFIG.CREATURE_BITE_CHUNK == null) CBZ.CONFIG.CREATURE_BITE_CHUNK = true;
+  function chunkOn() { return CBZ.CONFIG.CREATURE_BITE_CHUNK !== false; }
+
+  const CHUNKS = [];                    // {actor, mesh, sx,sy,sz, cap, chum, deep}
+  const MAX_CHUNKS_PER_ACTOR = 4;
+  const MAX_CHUNKS = 24;
+  // NOT the MAT_TORN decal above: that one is a flat polygon-offset DECAL with
+  // vertexColors on, and a box with no colour attribute renders black under it.
+  // A cut face is solid geometry and needs a solid material of its own.
+  let MAT_CUT = null, GEO_TORN = null;
+  function tornMat() {
+    if (MAT_CUT) return MAT_CUT;
+    // unlit on purpose: a torn face has to read as a DARK HOLE in the
+    // silhouette, and a lit one disappears against a sunlit sea edge-on.
+    MAT_CUT = new THREE.MeshBasicMaterial({ color: 0x3d0608 });
+    MAT_CUT._shared = true;
+    return MAT_CUT;
+  }
+  function tornGeo() {
+    if (!GEO_TORN) { GEO_TORN = new THREE.BoxGeometry(1, 1, 1); GEO_TORN._shared = true; }
+    return GEO_TORN;
+  }
+  const _cbv = new THREE.Vector3();
+  const _half = new THREE.Vector3();     // half-extents in PARENT units (geometry x scale)
+  const _geoH = new THREE.Vector3();     // ..and in the mesh's own local units
+  const _geoC = new THREE.Vector3();     // the geometry's centre, local units
+  /* THE BOUNDING BOX IS NOT NECESSARILY CENTRED ON THE MESH ORIGIN, and the
+     first version of this assumed it was. A fin whose geometry is authored
+     offset from its joint then got its cut face seated at the joint instead of
+     at the fin's edge — which photographs as a red slab floating in the water
+     beside the shark, exactly what the preset's first capture showed. Carry
+     the centre and everything seats on the actual surface. */
+  function meshHalf(m, out) {
+    const gm = m.geometry;
+    if (!gm) return false;
+    if (!gm.boundingBox) gm.computeBoundingBox();
+    const bb = gm.boundingBox;
+    if (!bb) return false;
+    _geoH.set((bb.max.x - bb.min.x) * 0.5, (bb.max.y - bb.min.y) * 0.5, (bb.max.z - bb.min.z) * 0.5);
+    _geoC.set((bb.max.x + bb.min.x) * 0.5, (bb.max.y + bb.min.y) * 0.5, (bb.max.z + bb.min.z) * 0.5);
+    out.set(_geoH.x * Math.abs(m.scale.x), _geoH.y * Math.abs(m.scale.y), _geoH.z * Math.abs(m.scale.z));
+    return out.x > 0 || out.y > 0 || out.z > 0;
+  }
+  // WHICH PART WAS IN THE MOUTH. The group's own children, scored by distance
+  // from the bite point in the group's local frame; ties broken toward the
+  // SMALLER part, because a jaw that closes across a tail and a flank at the
+  // same range took the tail.
+  function partAt(actor, wp, jawR) {
+    const grp = actor.group; if (!grp) return null;
+    grp.updateMatrixWorld(true);
+    const local = _cbv.set(wp.x, wp.y, wp.z);
+    grp.worldToLocal(local);
+    const lx = local.x, ly = local.y, lz = local.z;
+    const kids = grp.children;
+    let best = null, bestScore = 1e9;
+    const reach = Math.max(0.6, jawR * 2.4) / Math.max(0.05, grp.scale.x || 1);
+    for (let i = 0; i < kids.length; i++) {
+      const m = kids[i];
+      if (!m || !m.isMesh || m.visible === false || m._tornCap) continue;
+      if (!meshHalf(m, _half)) continue;
+      // distance from the bite point to this box, in group-local metres
+      const cx = m.position.x + _geoC.x * m.scale.x;
+      const cy = m.position.y + _geoC.y * m.scale.y;
+      const cz = m.position.z + _geoC.z * m.scale.z;
+      const dx = Math.max(0, Math.abs(lx - cx) - _half.x);
+      const dy = Math.max(0, Math.abs(ly - cy) - _half.y);
+      const dz = Math.max(0, Math.abs(lz - cz) - _half.z);
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (d > reach) continue;
+      const vol = _half.x * _half.y * _half.z;
+      const score = d + Math.min(0.4, vol * 0.9);   // prefer the small part
+      if (score < bestScore) { bestScore = score; best = m; }
+    }
+    return best;
+  }
+
+  function recordFor(actor, mesh) {
+    for (let i = 0; i < CHUNKS.length; i++) if (CHUNKS[i].mesh === mesh) return CHUNKS[i];
+    return null;
+  }
+  function chunkCount(actor) {
+    let n = 0;
+    for (let i = 0; i < CHUNKS.length; i++) if (CHUNKS[i].actor === actor) n++;
+    return n;
+  }
+
+  CBZ.creatureBiteChunk = function (actor, wp, opts) {
+    opts = opts || {};
+    if (!chunkOn() || !actor || !wp || !actor.group || !CBZ.scene) return false;
+    if (actor.culled || actor.group.visible === false) return false;
+    if (wp.x == null || wp.y == null || wp.z == null) return false;
+    if (!isFinite(wp.x) || !isFinite(wp.y) || !isFinite(wp.z)) return false;
+    // ONLY WHERE IT CAN BE SEEN — same band bodyBite and gore.js use. A food
+    // chain runs across this whole map; a wound nobody can look at is a cap
+    // mesh and a chum source bought for nothing.
+    if (dist2Cam(wp.x, wp.z) > SPAWN_D2) return false;
+    // a child is never dismembered (systems/childsafe.js owns that rule; this
+    // is the same test bodyBite's callers honour, asked directly)
+    if (actor.child || actor._childSafe) return false;
+    const sev = Math.max(0.15, Math.min(1, opts.sev != null ? opts.sev : 0.6));
+    const jawR = Math.max(0.1, Math.min(3.5, opts.jaw != null ? opts.jaw : 0.4));
+    const mesh = partAt(actor, wp, jawR);
+    if (!mesh) return false;
+    if (!meshHalf(mesh, _half)) return false;
+
+    let r = recordFor(actor, mesh);
+    if (!r) {
+      if (CHUNKS.length >= MAX_CHUNKS || chunkCount(actor) >= MAX_CHUNKS_PER_ACTOR) return false;
+      r = {
+        actor: actor, mesh: mesh, deep: 0, chum: null,
+        sx: mesh.scale.x, sy: mesh.scale.y, sz: mesh.scale.z, cap: null,
+        px: null, py: null, pz: null,
+      };
+      CHUNKS.push(r);
+    }
+    // HOW MUCH CAME AWAY. The jaw against the part's own size, capped so a
+    // body part never vanishes entirely — a stump has to stay readable — and
+    // ACCUMULATING, so a second bite in the same place takes more.
+    const partR = Math.max(0.05, Math.max(_half.x, Math.max(_half.y, _half.z)));
+    const took = Math.max(0.20, Math.min(0.45, (jawR / (partR * 2.6)) * (0.5 + sev * 0.6)));
+    r.deep = Math.min(0.70, r.deep + took);
+    const k = 1 - r.deep;
+    // Shrink OFF THE LONG AXIS and pinch the cross-section: a caudal fin at a
+    // third of its height with a raw edge is unmistakably a fin that lost its
+    // top lobe, and it costs nothing per frame.
+    const longY = _half.y >= _half.z;
+    mesh.scale.set(r.sx * (0.72 + 0.28 * k),
+                   r.sy * (longY ? k : (0.7 + 0.3 * k)),
+                   r.sz * (longY ? (0.7 + 0.3 * k) : k));
+    /* AND THE ROOT STAYS ATTACHED. Scale alone shrinks a part about its own
+       origin, i.e. from BOTH ends — which reads as "that fin is smaller",
+       not "that fin lost its tip". Slide the part back along the shrink axis
+       by exactly what the inner end moved, and the piece that is missing is
+       the OUTER one, which is the only version of this anybody can read.
+
+       WHICH AXIS IS SAFE TO WRITE. wildlife_rig.js's animateSwim owns exactly
+       one position channel per body plan — position.z for a fish, position.y
+       for a cetacean — and rewrites it every frame. Writing that one would be
+       a fight nobody wins, so the slide is simply skipped when the shrink axis
+       IS the animated one; the cap still seats correctly either way. */
+    if (r.px == null) { r.px = mesh.position.x; r.py = mesh.position.y; r.pz = mesh.position.z; }
+    const animY = !!(actor.swim && actor.swim.vert);
+    if (longY ? !animY : animY) {
+      const inner = longY ? (_geoC.y - _geoH.y) : (_geoC.z - _geoH.z);
+      const base = longY ? r.sy : r.sz;
+      const shift = inner * base * (1 - k);
+      if (longY) mesh.position.y = r.py + shift; else mesh.position.z = r.pz + shift;
+    }
+
+    /* THE RAW EDGE. A slab of dark torn tissue capping the cut, parented to
+       the part so it swims, banks and dies with it. Re-seated (never
+       duplicated) on a re-bite.
+
+       It lives in the PART's own local frame, where geometry is unscaled, so
+       every figure below is a GEOMETRY half-extent (_geoH) about the
+       GEOMETRY centre (_geoC) — not the parent-space _half the rest of this
+       function reasons in. Slightly INSIDE the part's cross-section (0.9), so
+       it reads as flesh inside the silhouette rather than a plate bolted to
+       the outside of it. */
+    meshHalf(mesh, _half);
+    if (!r.cap) {
+      r.cap = new THREE.Mesh(tornGeo(), tornMat());
+      r.cap._tornCap = true;
+      r.cap.castShadow = false; r.cap.receiveShadow = false;
+      mesh.add(r.cap);
+    }
+    const gx = Math.max(0.01, _geoH.x), gy = Math.max(0.01, _geoH.y), gz = Math.max(0.01, _geoH.z);
+    if (longY) {
+      const th = Math.max(0.02, gy * 0.22);
+      r.cap.scale.set(gx * 1.8, th * 2, gz * 1.8);
+      r.cap.position.set(_geoC.x, _geoC.y + gy - th, _geoC.z);
+    } else {
+      const th = Math.max(0.02, gz * 0.22);
+      r.cap.scale.set(gx * 1.8, gy * 1.8, th * 2);
+      r.cap.position.set(_geoC.x, _geoC.y, _geoC.z - gz + th);
+    }
+    // a torn edge is never square to the body
+    r.cap.rotation.set((Math.random() - 0.5) * 0.22, (Math.random() - 0.5) * 0.24, (Math.random() - 0.5) * 0.22);
+
+    // BLOOD IN THE WATER, and it does not stop when the animation does: one
+    // chum source (gore.js §7, the same one a wounded whale trails) bound to
+    // the wound's own moving world position for as long as the fight lasts.
+    if (opts.bleed !== false && CBZ.goreChum && !r.chum) {
+      const cap = r.cap;
+      const at = new THREE.Vector3();
+      const px = function () { cap.getWorldPosition(at); return at.x; };
+      const py = function () { return at.y; };
+      const pz = function () { return at.z; };
+      try { r.chum = CBZ.goreChum(px, py, pz, 0.9 + sev * 1.1, opts.bleedS || 14); } catch (e) { r.chum = null; }
+    }
+    // and one immediate cloud where the teeth were
+    if (CBZ.goreBloom) {
+      try { CBZ.goreBloom(wp.x, wp.y, wp.z, { amount: 0.6 + sev * 0.7 }); } catch (e) {}
+    }
+    return true;
+  };
+
+  function restoreChunk(r) {
+    if (!r) return;
+    if (r.mesh) {
+      r.mesh.scale.set(r.sx, r.sy, r.sz);
+      if (r.px != null) r.mesh.position.set(r.px, r.py, r.pz);
+      if (r.cap && r.cap.parent) r.cap.parent.remove(r.cap);
+    }
+    if (r.chum && CBZ.goreChumStop) { try { CBZ.goreChumStop(r.chum); } catch (e) {} }
+    r.cap = null; r.chum = null;
+  }
+  CBZ.creatureBiteChunkRestore = function (actor) {
+    for (let i = CHUNKS.length - 1; i >= 0; i--) {
+      if (!actor || CHUNKS[i].actor === actor) { restoreChunk(CHUNKS[i]); CHUNKS.splice(i, 1); }
+    }
+  };
+  CBZ.creatureBiteChunkAudit = function () {
+    const seen = [];
+    let deepest = 0;
+    for (let i = 0; i < CHUNKS.length; i++) {
+      if (seen.indexOf(CHUNKS[i].actor) < 0) seen.push(CHUNKS[i].actor);
+      if (CHUNKS[i].deep > deepest) deepest = CHUNKS[i].deep;
+    }
+    return { actors: seen.length, chunks: CHUNKS.length, deepest: Math.round(deepest * 100) / 100 };
+  };
+  // LEAK-PROOF: a rig that left the scene (culled corpse, recycled body, mode
+  // change) drops its record. Same law severAudit runs on for limbs.
+  function chunkAudit() {
+    for (let i = CHUNKS.length - 1; i >= 0; i--) {
+      const r = CHUNKS[i], a = r.actor;
+      if (!a || a.culled || !a.group || !a.group.parent || r.mesh.parent !== a.group) {
+        restoreChunk(r); CHUNKS.splice(i, 1);
+      }
+    }
+  }
+
   // ---- reset: detach everything ---------------------------------------------
   CBZ.clearWounds = function () {
+    CBZ.creatureBiteChunkRestore(null);
     for (let i = 0; i < wounds.length; i++) {
       const r = wounds[i];
       r.gone = true;
@@ -1116,9 +1385,10 @@
   // ---- one updater: ZERO cost while nobody is being shot ---------------------
   // soak spread runs per-frame (only while a stain is actively growing);
   // record lifecycle stays on the cheap 0.8s throttle.
-  let tick = 0;
+  let tick = 0, chunkT = 0;
   CBZ.onAlways(9, function (dt) {
     if (CBZ.clearGore && !CBZ.clearGore._wounds) wrapClearGore();
+    if (CHUNKS.length) { chunkT += dt; if (chunkT > 1.1) { chunkT = 0; chunkAudit(); } }
     if (!wounds.length) return;   // the whole system sleeps
     for (let i = growing.length - 1; i >= 0; i--) {
       const r = growing[i];

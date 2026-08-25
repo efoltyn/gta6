@@ -14,6 +14,7 @@
 */
 
 import { execFile, spawn } from "node:child_process";
+import { createServer } from "node:net";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -239,8 +240,32 @@ if (reuseBeforeDir && path.resolve(reuseBeforeDir) === path.resolve(outputDir)) 
 await mkdir(path.join(shotDir, "before"), { recursive: true });
 await mkdir(path.join(shotDir, "after"), { recursive: true });
 
-const webPort = 8700 + Math.floor(Math.random() * 500);
-const debugPort = 10400 + Math.floor(Math.random() * 500);
+/* PORTS ARE RESERVED, NOT GUESSED. This tool is run by several agents AT ONCE
+   on the same checkout (that is the point of the --before local flag A/B: each
+   agent's change rides its own cfg_* flag, so one working tree carries N
+   parallel before/afters). A random port with no free-check made collisions a
+   1-in-a-few-hundred silent disaster in exactly that setting: a colliding
+   debugPort attaches this run to a SIBLING AGENT'S Chrome and navigates their
+   capture out from under them; a colliding webPort rides a sibling's devserver
+   that dies when they finish. So: bind-test each candidate and keep rolling
+   until the OS actually grants it. The bind is released just before the real
+   process spawns — a race window of milliseconds against another picker that
+   also just verified a DIFFERENT random candidate, versus the old scheme's
+   permanent blind spot. */
+async function pickFreePort(base, span) {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const candidate = base + Math.floor(Math.random() * span);
+    const free = await new Promise((resolve) => {
+      const probe = createServer();
+      probe.once("error", () => resolve(false));
+      probe.listen(candidate, "127.0.0.1", () => probe.close(() => resolve(true)));
+    });
+    if (free) return candidate;
+  }
+  throw new Error(`no free port found in ${base}..${base + span}`);
+}
+const webPort = await pickFreePort(8700, 500);
+const debugPort = await pickFreePort(10400, 500);
 const localUrl = `http://127.0.0.1:${webPort}/`;
 const afterUrl = String(args.after || process.env.CBZ_VISUAL_AFTER || localUrl);
 /* "--before local" (or preset.defaultBefore = "local"): the SAME checkout

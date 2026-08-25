@@ -301,6 +301,71 @@
     const d = m ? meshDims(m) : null;
     return !!(d && d.w > d.h * 1.6);
   }
+
+  // ============================================================
+  //  MARINE_TAIL_V2 — THE WELD (CBZ.CONFIG.MARINE_TAIL_V2, default ON)
+  //
+  //  OWNER (2026-08-25): "the tail visibly DISCONNECTS from the body. For orca
+  //  the vertical disconnect, for sharks the horizontal disconnect."
+  //
+  //  IT WAS NOT A LAG BUG, A STAGGER BUG OR A MATRIX-OWNERSHIP BUG. It was the
+  //  animator's whole model. Every marine body in this game is a BIG RIGID HULL
+  //  (`sharkHull` spans local x -1.62..1.68; `cetaceanHull` -2.35..3.25) plus a
+  //  handful of separate fin/peduncle meshes bolted onto it. The v1 loop moved
+  //  ONLY the bolted-on meshes, and it moved each one by TRANSLATING its whole
+  //  body sideways by `sin(phase) * t * amp` — with `t` read off the mesh's
+  //  CENTRE — and then spinning it about that same centre by up to 0.42 rad of
+  //  "angle of attack" that had nothing to do with the shape of the wave. The
+  //  hull never moved at all. Measured on the shipped great white, the caudal
+  //  peduncle's FRONT EDGE (the edge that has to stay inside the hull) left the
+  //  hull by up to 0.48 m sideways — on a tail stock 0.34 m wide. On the orca
+  //  the same arithmetic in the vertical plane walked the peduncle 0.59 m off
+  //  the hull. That is the owner's disconnect, in each species' own plane,
+  //  exactly as reported, and it got worse with size because `amp` scales with
+  //  body length while the joint does not.
+  //
+  //  V2 IS A HINGE, NOT A SLIDE. Each part now knows two things it never knew:
+  //  where the RIGID TRUNK ENDS (`anchorX` — the rear-most point of every mesh
+  //  that is NOT part of the tail), and where its OWN ROOT EDGE is (the front
+  //  face of its transformed bounding box). It is then placed by fitting its
+  //  rigid body as a CHORD of one continuous wave w(u) that is exactly ZERO at
+  //  the trunk weld: the root lands on w(u_root), the rear lands on w(u_rear),
+  //  and the rotation is whatever angle connects them. A part whose root is at
+  //  or in front of the anchor therefore CANNOT MOVE ITS ROOT — the weld is
+  //  arithmetic, not a tuning value — while its rear end whips as hard as the
+  //  wave says. The angle-of-attack term is deleted: the fin's angle IS the
+  //  slope of the wave it sits on, which is also what a real caudal fin does.
+  //
+  //  AND IT WHIPS HARDER WHEN IT SWIMS HARDER. v1's amplitude was a constant;
+  //  only the beat frequency rode speed. Amplitude now rides body-lengths per
+  //  second (AMP_SLOW..AMP_FAST), and the trunk itself counter-yaws a little at
+  //  speed so the body reads as one animal instead of a plank towing a fin.
+  //
+  //  ?cfg_MARINE_TAIL_V2=0 restores the v1 slide verbatim for A/B captures.
+  // ============================================================
+  if (!CBZ.CONFIG) CBZ.CONFIG = {};
+  if (CBZ.CONFIG.MARINE_TAIL_V2 == null) CBZ.CONFIG.MARINE_TAIL_V2 = true;
+  function TAILV2() { return CBZ.CONFIG.MARINE_TAIL_V2 !== false; }
+
+  const TAIL_LAG = 1.45;      // rad of phase between the trunk weld and the tip
+  const TAIL_ENV = 1.55;      // amplitude envelope exponent along the tail
+  const AMP_SLOW = 0.55;      // × rig.amp when it is drifting
+  const AMP_FAST = 1.45;      // × rig.amp at a full rush
+  const SPD_LO = 0.30;        // body-lengths/s that counts as "drifting"
+  const SPD_HI = 2.60;        // ..and as a full rush
+  const BODY_SWING = 0.055;   // rad the TRUNK counter-swings at a full rush
+
+  const _bb3 = (window.THREE && window.THREE.Box3) ? new window.THREE.Box3() : null;
+  // a child mesh's bounding box expressed in its PARENT's (the actor group's)
+  // space — which is the space every number in the rig lives in.
+  function boxInGroup(m) {
+    if (!_bb3 || !m.geometry) return null;
+    if (!m.geometry.boundingBox) { try { m.geometry.computeBoundingBox(); } catch (e) { return null; } }
+    if (!m.geometry.boundingBox) return null;
+    m.updateMatrix();
+    return _bb3.copy(m.geometry.boundingBox).applyMatrix4(m.matrix);
+  }
+
   function buildSwimRig(a) {
     const sp = a.species, grp = a.group;
     if (!sp.aquatic || sp.snake) return;
@@ -316,18 +381,78 @@
     const span = minX - cut;
     const parts = [];
     let tip = null, tipX = 1e9;
+    // THE TRUNK: how far back the rigid, never-animated geometry actually
+    // reaches, and where its long axis sits. Everything the tail does is
+    // measured from here, so the weld is a fact about the model rather than a
+    // constant somebody has to keep in sync with the bestiary.
+    let anchorX = Infinity, spineY = 0, spineZ = 0;
     for (let i = 0; i < kids.length; i++) {
       const m = kids[i]; if (!m || !m.isMesh) continue;
-      if (m.position.x > cut) continue;
+      if (m.position.x > cut) {
+        const bb = boxInGroup(m);
+        if (bb && bb.min.x < anchorX) {
+          anchorX = bb.min.x;
+          spineY = (bb.min.y + bb.max.y) * 0.5;
+          spineZ = (bb.min.z + bb.max.z) * 0.5;
+        }
+        continue;
+      }
+      const pb = boxInGroup(m);
       parts.push({
         m: m, bx: m.position.x, by: m.position.y, bz: m.position.z,
         ry: m.rotation.y, rz: m.rotation.z,
         t: Math.max(0, Math.min(1, (m.position.x - cut) / (span || -1))),
+        x0: pb ? pb.min.x : m.position.x, x1: pb ? pb.max.x : m.position.x,
       });
       if (m.position.x < tipX) { tipX = m.position.x; tip = m; }
     }
     if (!parts.length) return;
     parts.sort(function (p, q) { return p.t - q.t; });   // base -> tip, so the wave travels
+
+    // ---- v2 stations: hinge, root/rear wave coordinates, lever arm ---------
+    let tipRear = Infinity;
+    for (let i = 0; i < parts.length; i++) if (parts[i].x0 < tipRear) tipRear = parts[i].x0;
+    let anchor = (anchorX < Infinity) ? anchorX : cut;
+    if (!(anchor > tipRear)) { anchor = cut; spineY = 0; spineZ = 0; }   // no rigid trunk: fall back
+    const tspan = Math.max(0.05, anchor - tipRear);
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      // THE HINGE. A part that starts in front of the anchor is buried in the
+      // hull; it pivots where it LEAVES the hull, never at its own front face,
+      // so nothing bolted to the trunk can ever slide out of it.
+      p.hx = Math.min(p.x1, anchor);
+      p.u0 = Math.max(0, Math.min(1, (anchor - p.hx) / tspan));
+      p.u1 = Math.max(0, Math.min(1, (anchor - p.x0) / tspan));
+      p.d = Math.max(tspan * 0.08, p.hx - p.x0);    // hinge -> rear lever arm
+      p.dx = p.bx - p.hx;                            // origin, offset from the hinge
+      p.dy = p.by - spineY;
+      p.dz = p.bz - spineZ;
+      p.e0 = p.u0 > 0 ? Math.pow(p.u0, TAIL_ENV) : 0;
+      p.e1 = p.u1 > 0 ? Math.pow(p.u1, TAIL_ENV) : 0;
+      p.l0 = p.u0 * TAIL_LAG;
+      p.l1 = p.u1 * TAIL_LAG;
+      p.w0 = 0; p.w1 = 0;
+      // THE CHAIN. A caudal fin is not bolted to the hull, it is sleeved onto
+      // the PEDUNCLE — and a peduncle is a rigid stick, so its surface is a
+      // straight CHORD, not the smooth wave. Rooting the fin on the curve
+      // instead leaves the two shearing past each other by the difference.
+      // Every part therefore looks for the part in front of it that physically
+      // contains its hinge and, when it finds one, takes its root offset off
+      // THAT part's chord. `parts` is sorted base -> tip, so a host is always
+      // already solved by the time we need it.
+      p.host = -1;
+      if (p.hx < anchor - 1e-6) {
+        let bestW = 0;
+        for (let j = 0; j < i; j++) {
+          const q = parts[j];
+          if (q.x0 <= p.hx && q.x1 > p.hx + 1e-6) {
+            const w = q.x1 - q.x0;
+            if (w > bestW) { bestW = w; p.host = j; }
+          }
+        }
+      }
+      p.hf = p.host >= 0 ? Math.max(0, Math.min(1, (parts[p.host].hx - p.hx) / parts[p.host].d)) : 0;
+    }
     // JAW: newly authored sharks expose one lower-jaw Group whose origin is the
     // physical hinge. Older aquatics keep the geometric fallback below, so the
     // shared animator remains backward-compatible and species-agnostic.
@@ -381,6 +506,9 @@
       // world build. Position-hash instead (no stream state at all).
       ph: (CBZ.hash01 ? CBZ.hash01(grp.position.x, grp.position.z, 71) : 0) * 6.283,
       k: 0,
+      // v2 spine facts (see MARINE_TAIL_V2 above)
+      len: len, anchorX: anchor, tspan: tspan, spineY: spineY, spineZ: spineZ,
+      spd01: 0, swingAdd: 0, swingLeft: null,
       jaw: jaw.length ? jaw : null,
       jawX: jawBase ? jawBase.x : maxX * 0.62,
       jawY: jawBase ? jawBase.y : 0,
@@ -468,18 +596,59 @@
     if (rig.ph > 1e6) rig.ph -= 1e6;
     const swing = moved > 0.002 ? 1 : 0.4;
     rig.k += (swing - rig.k) * Math.min(1, dt * 4);
-    const amp = rig.amp * rig.k, yaw = rig.yaw * rig.k;
     const parts = rig.parts;
-    for (let i = 0; i < parts.length; i++) {
-      const p = parts[i];
-      const ang = rig.ph - p.t * 1.55;            // lag down the body = a travelling wave
-      const sw = Math.sin(ang) * p.t, lead = Math.cos(ang) * p.t;
-      if (rig.vert) {                             // cetacean: up/down flukes
-        p.m.position.y = p.by + sw * amp;
-        p.m.rotation.z = p.rz + lead * yaw;
-      } else {                                    // fish/shark: side to side
-        p.m.position.z = p.bz + sw * amp;
-        p.m.rotation.y = p.ry + lead * yaw;
+    let bodySwing = 0;
+    if (TAILV2() && rig.tspan > 0) {
+      // ---- V2: chord-fit every rigid part onto ONE wave that is zero at the
+      //      trunk weld. See the MARINE_TAIL_V2 block above for why.
+      const wlen = Math.max(0.5, rig.len * (grp.scale && grp.scale.x ? grp.scale.x : 1));
+      const blps = dt > 0 ? (moved / dt) / wlen : 0;    // body lengths per second
+      const wantS = Math.max(0, Math.min(1, (blps - SPD_LO) / (SPD_HI - SPD_LO)));
+      rig.spd01 += (wantS - rig.spd01) * Math.min(1, dt * 4);
+      const amp = rig.amp * (AMP_SLOW + (AMP_FAST - AMP_SLOW) * rig.spd01) * rig.k;
+      const ph = rig.ph;
+      for (let i = 0; i < parts.length; i++) {
+        const p = parts[i];
+        // where the ROOT sits: on its host part's own chord if it is sleeved
+        // onto one, otherwise on the wave (which is exactly 0 at the trunk).
+        const h = p.host >= 0 ? parts[p.host] : null;
+        const w0 = h ? (h.w0 + (h.w1 - h.w0) * p.hf)
+                     : (p.e0 > 0 ? amp * p.e0 * Math.sin(ph - p.l0) : 0);
+        const w1 = p.e1 > 0 ? amp * p.e1 * Math.sin(ph - p.l1) : 0;   // ..and the REAR END
+        p.w0 = w0; p.w1 = w1;
+        const th = Math.atan2(w1 - w0, p.d);       // the chord that joins them
+        if (rig.vert) {                            // cetacean: the fluke plane is horizontal
+          const c = Math.cos(-th), s = Math.sin(-th);
+          p.m.position.x = p.hx + p.dx * c - p.dy * s;
+          p.m.position.y = rig.spineY + p.dx * s + p.dy * c + w0;
+          p.m.rotation.z = p.rz - th;
+        } else {                                   // fish/shark: the caudal plane is vertical
+          const c = Math.cos(th), s = Math.sin(th);
+          p.m.position.x = p.hx + p.dx * c + p.dz * s;
+          p.m.position.z = rig.spineZ - p.dx * s + p.dz * c + w0;
+          p.m.rotation.y = p.ry + th;
+        }
+      }
+      // THE TRUNK IS NOT A PLANK. A swimming body yaws (or pitches) against its
+      // own tail beat; without this the fin whips off a dead hull and the eye
+      // reads two objects. Deliberately small, speed-scaled, and skipped on a
+      // RIDDEN animal because wildlife_tame.js transforms the rider's saddle
+      // socket by this exact euler and a wobbling seat is worse than a stiff
+      // trunk.
+      if (!a.ridden) bodySwing = -BODY_SWING * rig.spd01 * rig.k * Math.sin(rig.ph);
+    } else {
+      const amp = rig.amp * rig.k, yaw = rig.yaw * rig.k;
+      for (let i = 0; i < parts.length; i++) {
+        const p = parts[i];
+        const ang = rig.ph - p.t * 1.55;            // lag down the body = a travelling wave
+        const sw = Math.sin(ang) * p.t, lead = Math.cos(ang) * p.t;
+        if (rig.vert) {                             // cetacean: up/down flukes
+          p.m.position.y = p.by + sw * amp;
+          p.m.rotation.z = p.rz + lead * yaw;
+        } else {                                    // fish/shark: side to side
+          p.m.position.z = p.bz + sw * amp;
+          p.m.rotation.y = p.ry + lead * yaw;
+        }
       }
     }
     // BODY: bank into the turn (rotation.x rolls a +X-forward body) and pitch
@@ -495,7 +664,16 @@
       rig.roll += (wantRoll - rig.roll) * e;
       rig.pitch += (wantPitch - rig.pitch) * e;
       grp.rotation.x = rig.roll;
-      grp.rotation.z = rig.pitch;
+      grp.rotation.z = rig.pitch + (rig.vert ? bodySwing : 0);
+      // The lateral swimmers' trunk swing lands on the YAW, which the mover
+      // rewrites from `heading` every frame — so remember exactly what we left
+      // behind: unchanged means nobody else wrote and our old offset has to
+      // come off first; changed means that new value is the authoritative base.
+      if (!rig.vert) {
+        if (rig.swingLeft != null && grp.rotation.y === rig.swingLeft) grp.rotation.y -= rig.swingAdd;
+        grp.rotation.y += bodySwing;
+        rig.swingAdd = bodySwing; rig.swingLeft = grp.rotation.y;
+      }
     }
     rig.ph0 = a.heading;
   }

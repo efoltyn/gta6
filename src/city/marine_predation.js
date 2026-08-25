@@ -167,7 +167,7 @@
   const _v = THREE ? new THREE.Vector3() : null;
   const AUDIT = {
     hunts: 0, rams: 0, rolls: 0, kills: 0, casualties: 0, brokeOff: 0,
-    shipBites: 0, shipsSunk: 0, chumOpened: 0, chumLive: 0, hudWrites: 0,
+    shipBites: 0, shipsSunk: 0, chumOpened: 0, chumLive: 0, hudWrites: 0, chunks: 0,
   };
 
   function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
@@ -562,6 +562,61 @@
   function bitePassOn() {
     return typeof CBZ.creatureBitePass === "function" ? !!CBZ.creatureBitePass() : true;
   }
+
+  /* THE FIGHT LEAVES SOMETHING BEHIND (owner, 2026-08-25: "I want to get part
+     of my tail ripped off by an orca bite").
+
+     Before this, a pod could eat a shark alive and the only evidence was a
+     health bar: the blows did damage, made white water, put one puff of blood
+     in the sea, and the BODY was untouched. Ride that shark and you could not
+     tell a landed bite from a near miss.
+
+     So a landed blow takes MATERIAL now, through systems/wounds.js's
+     creatureBiteChunk — persistent, deepening with every further bite in the
+     same place, and restored only when the rig leaves the scene. Nothing here
+     is orca- or shark-specific: it hangs off §7's damage bus, so anything the
+     graph lets bite anything gets it.
+
+     WHERE THE TEETH LAND. Not the target's origin — that is the middle of the
+     body and a mouth cannot reach it. The attacker's own bearing is projected
+     onto the quarry's long axis and clamped to its measured length, then
+     pushed out to the measured flank: an orca coming in from behind takes the
+     TAIL, one crossing the beam takes the flank, which is both correct and
+     the shot the owner asked for.
+
+     ?cfg_CREATURE_BITE_CHUNK=0 (systems/wounds.js) turns it back off. */
+  const CHUNK_EVERY = 1.1;             // s per victim — a wound, not a grinder
+  function biteChunkOn(a, t, tp, frac) {
+    if (typeof CBZ.creatureBiteChunk !== "function") return;
+    if (!a || !t || !tp || !a.species || !t.species) return;
+    if (a.species === t.species) return;              // a pod squabble is not a meal
+    const now = (typeof performance !== "undefined" ? performance.now() : Date.now()) * 0.001;
+    if (now - (t._mpChunkT || -1e9) < CHUNK_EVERY) return;
+    t._mpChunkT = now;
+    const hp = actorPos(a);
+    if (!hp) return;
+    const face = (t.heading != null) ? t.heading : (t.group ? -t.group.rotation.y : 0);
+    const fx = Math.cos(face), fz = Math.sin(face);
+    const L = bodyLen(t) * 0.5, B = bodyBeam(t) * 0.5;
+    // along the body: how far back the attacker is, clamped to the real length
+    let along = (hp.x - tp.x) * fx + (hp.z - tp.z) * fz;
+    along = clamp(along, -L * 0.92, L * 0.6);
+    // and out to the flank on the side it came from
+    let side = (hp.x - tp.x) * -fz + (hp.z - tp.z) * fx;
+    side = side >= 0 ? B : -B;
+    _ck.x = tp.x + fx * along - fz * side;
+    _ck.z = tp.z + fz * along + fx * side;
+    _ck.y = (tp.y || 0) + (Math.random() - 0.5) * B * 0.5;
+    try {
+      CBZ.creatureBiteChunk(t, _ck, {
+        jaw: gapeOf(a) * 0.45,
+        sev: clamp((frac || 0.1) * 6 + sizeOf(a) / Math.max(0.2, sizeOf(t)) * 0.4, 0.3, 1),
+        bleedS: 16,
+      });
+      AUDIT.chunks = (AUDIT.chunks || 0) + 1;
+    } catch (e) {}
+  }
+  const _ck = { x: 0, y: 0, z: 0 };
   function ramOpts(a) {
     const m = mp(a);
     if (m.ram) return m.ram;
@@ -962,7 +1017,16 @@
       if (victim._mpRoll) { victim._mpRoll = null; clearTonic(victim); }
     }
     // WHOEVER JUST BLED IS CHUM. One call into §7 — never a second blood system.
-    bleedInWater(victim, clamp(dmg / Math.max(1, maxHpOf(victim)) * 3.2, 0.25, 1));
+    const frac = dmg / Math.max(1, maxHpOf(victim));
+    bleedInWater(victim, clamp(frac * 3.2, 0.25, 1));
+    // AND WHOEVER JUST GOT BITTEN IS SMALLER. Same placement, same reasoning:
+    // this is the one bus every marine blow arrives on, so the body-damage
+    // call belongs here and not at any one attack's call site. Measured the
+    // hard way — hung off the flank pass's own onHit first, and a pod that
+    // took 23% of a great white's health in a staged fight landed exactly
+    // zero flank passes doing it: the roll-over row and predatorHunt's own
+    // strikes are the paths that actually connect, and they all end here.
+    if (frac > 0.03) biteChunkOn(by, victim, actorPos(victim), frac);
   }
 
   function surfaceHit(x, z, power) {
@@ -1654,6 +1718,7 @@
       chumOpened: AUDIT.chumOpened, chumLive: liveSlots(),
       chumSources: (typeof CBZ.goreChumList === "function" && CBZ.goreChumList()) ? CBZ.goreChumList().length : 0,
       hudWrites: AUDIT.hudWrites,
+      chunks: AUDIT.chunks,          // flank bites that took material off the quarry
       wrapped: inChain(),
       // THE RATCHET (see the wrap note above): how many links deep the shark
       // brain chain is. Two files wrap it, so this is 3 with wildlife_shark.js

@@ -671,9 +671,48 @@
     return d - Math.PI;
   }
 
+  /* ============================================================
+     MARINE_STEER_V2 (default ON, ?cfg_MARINE_STEER_V2=0 reverts)
+
+     OWNER (2026-08-25): "when the shark or orca move fast, first sometimes
+     their bodies move glitchy — fast left-right movement."
+
+     THIS FUNCTION WAS THE STROBE, and the bug is one missing `dt`. Every
+     correction below was applied PER CALL, not per second and not per metre:
+     a flat +/-0.34 rad clamp (20 rad/s at 60fps — 1170 deg/s), and a 0.18
+     inward blend re-applied every frame. On top of that the left/right feeler
+     branch was BANG-BANG: with the two feelers near a tie it picked `leftA`
+     one frame and `rightA` the next, and the front-blocked branch could flip
+     its tangent by 180 degrees on a dot-product tie. So a body moving fast
+     near ANY shore — which for a ridden shark is nearly always, its nav
+     clearance is capped by body size — was handed +/-0.34 rad of alternating
+     yaw at frame rate. That is the glitch, and it got worse the faster the
+     animal moved because the feeler probe reaches further with distance.
+
+     THE FIX IS THE REPO'S OWN LAW: steering rides DISTANCE ACTUALLY MOVED.
+     The clamp is now a turn RADIUS (rad per unit travelled), so the same
+     path is steered identically at 30fps, 60fps and 144fps; and both
+     branch choices carry hysteresis in the caller's own persistent `out`
+     object, so a near-tie holds its last decision instead of chattering.
+     ============================================================ */
+  if (CFG.MARINE_STEER_V2 == null) CFG.MARINE_STEER_V2 = true;
+  // 0.38 rad per unit travelled = a ~2.6u turn radius, and it is a CAP on an
+  // emergency dodge, not a cruising rate. Measured over 18 coast-hugging runs
+  // at 22 u/s it peaks at 8.4 rad/s at 60fps AND at 120fps (v1: 20.4 and 40.8),
+  // never produces a single >0.15 rad frame-to-frame snap (v1: 3.8/s), and
+  // still beaches nothing (0% blocked). Tying it to the ANIMAL's own turn law
+  // instead was tried and measured worse: at the great white's 1.15 rad/s a
+  // committed rush could no longer clear a bar and 5% of steps came back
+  // blocked, which is a stuck shark grinding a sandbar.
+  const TURN_PER_UNIT = 0.38;
+  const TURN_FLOOR = 0.012;     // ..but a drifting body may still steer, slowly
+  const FEELER_TIE = 0.06;      // |feeler error| under which last frame's side is held
+  const TANGENT_HYST = 0.25;    // dot-product margin before the tangent may flip
+
   function moveInWater(x, z, heading, distance, clearance, t, out) {
     distance = Math.max(0, +distance || 0);
     clearance = Math.max(2, +clearance || 8);
+    const v2 = CFG.MARINE_STEER_V2 !== false;
     const probe = Math.max(10, Math.min(44, distance * 6 + clearance * 1.4));
     const hx = Math.cos(heading), hz = Math.sin(heading);
     const frontS = coastAt(x + hx * probe, z + hz * probe);
@@ -687,24 +726,66 @@
       // Blend inward with the tangent closest to the current direction. This
       // makes animals follow a bay instead of repeatedly headbutting its edge.
       const tx1 = -n.z, tz1 = n.x, tx2 = n.z, tz2 = -n.x;
-      const useFirst = tx1 * hx + tz1 * hz >= tx2 * hx + tz2 * hz;
+      const d1 = tx1 * hx + tz1 * hz, d2 = tx2 * hx + tz2 * hz;
+      let useFirst = d1 >= d2;
+      if (v2) {
+        const prev = out && out._tan ? out._tan : 0;
+        if (prev && Math.abs(d1 - d2) < TANGENT_HYST) useFirst = prev > 0;
+        if (out) out._tan = useFirst ? 1 : -1;
+      }
       const tx = useFirst ? tx1 : tx2, tz = useFirst ? tz1 : tz2;
       desired = Math.atan2(-n.z * 0.82 + tz * 0.58, -n.x * 0.82 + tx * 0.58);
-    } else if (leftS >= -clearance && rightS < leftS) {
+    } else if (v2 && (leftS >= -clearance || rightS >= -clearance)) {
+      // PROPORTIONAL, NOT BANG-BANG. v1 slammed `desired` a fixed 0.72 rad to
+      // one side the instant either feeler touched, so a body running down a
+      // channel crossed the centre line and slammed back the other way — every
+      // frame, for as long as it was between two banks. The error signal is the
+      // DIFFERENCE between the two feelers, which is exactly zero where the
+      // animal is centred, so the correction fades out instead of ringing.
+      let err = (leftS - rightS) / (clearance * 2);             // + = right is wetter
+      if (err > 1) err = 1; else if (err < -1) err = -1;
+      // ..and on a dead tie (both banks equally close) keep last frame's side
+      // rather than letting a rounding difference pick a new one each frame.
+      if (Math.abs(err) < FEELER_TIE) {
+        const prev = out && out._side ? out._side : 0;
+        err = prev * FEELER_TIE;
+      }
+      if (out && err !== 0) out._side = err > 0 ? 1 : -1;
+      desired = heading + err * 0.72;
+    } else if (!v2 && leftS >= -clearance && rightS < leftS) {
       desired = rightA;
-    } else if (rightS >= -clearance && leftS < rightS) {
+    } else if (!v2 && rightS >= -clearance && leftS < rightS) {
       desired = leftA;
     } else {
       const here = coastAt(x, z);
       if (here > -clearance * 3.4) {
         const n = shoreGradient(x, z, 7, _grad);
         const inward = Math.atan2(-n.z, -n.x);
-        desired = heading + angleDelta(heading, inward) * 0.18;
-      }
+        // v1 pulled 18% of the way inward EVERY FRAME (a ~0.09 s time constant
+        // at 60fps) and fought whatever the caller was steering toward, which
+        // is the other half of the left-right limit cycle.
+        const pull = v2 ? Math.min(0.18, distance * 0.22) : 0.18;
+        desired = heading + angleDelta(heading, inward) * pull;
+      } else if (v2 && out) { out._side = 0; out._tan = 0; }   // open water: forget
     }
 
+    // THE STEERING TARGET HAS INERTIA TOO. Capping the turn alone still lets a
+    // feeler reading that flips between two frames drive the body to the cap in
+    // one direction and then the other — the square wave you can see on the
+    // marine-tail steering page. `desired` is therefore low-passed in the
+    // caller's own persistent nav object, and the filter constant rides
+    // DISTANCE TRAVELLED like everything else here, so it is the same filter at
+    // any frame rate. A genuine shore does not disappear in three frames; a
+    // sampling flip does.
+    if (v2 && out) {
+      if (out._des != null && isFinite(out._des)) {
+        desired = out._des + angleDelta(out._des, desired) * Math.min(1, distance * 0.9 + 0.02);
+      }
+      out._des = desired;
+    }
     // Turn rate is capped, preventing instant 180-degree pops at shorelines.
-    heading += Math.max(-0.34, Math.min(0.34, angleDelta(heading, desired)));
+    const cap = v2 ? Math.min(0.34, Math.max(TURN_FLOOR, distance * TURN_PER_UNIT)) : 0.34;
+    heading += Math.max(-cap, Math.min(cap, angleDelta(heading, desired)));
     let nx = x + Math.cos(heading) * distance;
     let nz = z + Math.sin(heading) * distance;
     const cur = currentAt(x, z, t, _cur);

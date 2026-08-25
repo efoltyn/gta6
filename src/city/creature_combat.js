@@ -186,11 +186,27 @@
      last duplicate was duration. Scale adds only a restrained amount of mass
      to the beat, while an actual ship bite gets another tenth of a second.
      This is not a species table: any authored aquatic biter inherits it. */
-  function aquaticBiteDuration(actor, targetKind) {
+  function aquaticBiteDuration(actor, targetKind, target) {
     var sc = actorScale(actor);
     var d = AQUATIC_BITE_BASE_S + Math.max(-0.04, Math.min(0.14, (sc - 1) * 0.08));
     if (targetKind === 'ship') d += 0.10;
-    return Math.max(0.82, Math.min(1.10, d));
+    d = Math.max(0.82, Math.min(1.10, d));
+    /* A MEAL THE SIZE OF YOU TAKES A BIGGER SWING (owner, 2026-08-25: the
+       bite "is too fast … especially when a shark kills an orca bigger than
+       it"). This is the ONLY thing size changes, and it is deliberately the
+       third argument: every existing caller passes two and gets the byte-
+       identical old number, so the snack tempo — and the elapsed-second
+       acceptance frames in tools/visual-presets/shark-bite-cadence.mjs, which
+       are all timed against a lone shark or a tuna — cannot move. Measured on
+       both bodies through the one measurer; there is no species name here.
+       The FINISH itself is wildlife_tame.js's clamp; this is just the wind-up
+       being honest about what is in front of it. */
+    if (target && CBZ.CONFIG && CBZ.CONFIG.BITE_CINEMATIC !== false) {
+      var la = CBZ.marineBodyLen ? CBZ.marineBodyLen(actor) : 0;
+      var lt = CBZ.marineBodyLen ? CBZ.marineBodyLen(target) : 0;
+      if (la > 0 && lt >= la * 0.85) d += 0.34;
+    }
+    return d;
   }
   CBZ.aquaticBiteDuration = aquaticBiteDuration;
   // Tooling and tests read the same declared beats the runtime uses; no copied

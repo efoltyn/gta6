@@ -1315,6 +1315,13 @@
     // a latch left over from jail must not follow into a stance-machine mode:
     // its held "c" would read as a phantom keydown edge to physics' detector.
     if (crouchLatch && stanceRoute()) crouchLatch = false;
+    // ...NOR INTO THE WATER ON A SHARK. city/wildlife_tame.js's aquatic mount
+    // reads the shared vertical grammar (Space rises, Ctrl/C dives) exactly as
+    // city/swim.js does, so a crouch latch you left on before you mounted is a
+    // held DIVE key: the animal sinks to the seabed and stays there, and the
+    // stick that caused it is nowhere near the water. The latch is a foot verb;
+    // a body in the water has no stance to hold.
+    if (crouchLatch && P && (P._aquaticMount || P._swim)) crouchLatch = false;
     const wantC = onFoot && crouchLatch;
     if (wantC !== crouchOwned) {
       crouchOwned = wantC; k["c"] = wantC;

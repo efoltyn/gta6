@@ -1302,14 +1302,29 @@
     _goreOpts.sfx = true;
     _goreOpts.melee = "blade";     // teeth open you like a blade, not a club
     try { CBZ.gore(_jaw.x, _jaw.y, _jaw.z, _goreOpts); } catch (e) {}
-    if (CBZ.bodyWound) {
-      const target = h.isPlayer ? playerRagdollTarget() : h.victim;
-      if (target) {
-        _woundP.x = _jaw.x; _woundP.y = _jaw.y; _woundP.z = _jaw.z;
-        _woundOpts.cal = 1.2 + amount * 0.4;
-        _woundOpts.fromX = ap ? ap.x : 0; _woundOpts.fromZ = ap ? ap.z : 0;
-        try { CBZ.bodyWound(target, _woundP, _woundOpts); } catch (e) {}
-      }
+    const target = h.isPlayer ? playerRagdollTarget() : h.victim;
+    if (CBZ.bodyWound && target) {
+      _woundP.x = _jaw.x; _woundP.y = _jaw.y; _woundP.z = _jaw.z;
+      _woundOpts.cal = 1.2 + amount * 0.4;
+      _woundOpts.fromX = ap ? ap.x : 0; _woundOpts.fromZ = ap ? ap.z : 0;
+      try { CBZ.bodyWound(target, _woundP, _woundOpts); } catch (e) {}
+    }
+    /* AND IF THE THING IN THE JAWS IS NOT A PERSON.
+       bodyWound (and bodyBite under it) require actor.char.skinSlots — a
+       HUMANOID rig — and return silently on anything else. So every seize on
+       an animal, in a file whose entire job is animals, drew its blood into
+       the water and left the body itself untouched: a shark held and worried
+       by an orca for four seconds came out of it geometrically identical.
+       systems/wounds.js's creatureBiteChunk is the non-humanoid half of the
+       same idea, so ask it for exactly the cases bodyWound could not take.
+       Guarded by its own flag; a humanoid never reaches this line. */
+    if (target && CBZ.creatureBiteChunk && !(target.char && target.char.skinSlots)) {
+      _woundP.x = _jaw.x; _woundP.y = _jaw.y; _woundP.z = _jaw.z;
+      try {
+        CBZ.creatureBiteChunk(target, _woundP, {
+          jaw: 0.28 + amount * 0.5, sev: Math.min(1, 0.4 + amount * 0.5), bleedS: 14,
+        });
+      } catch (e) {}
     }
   }
 

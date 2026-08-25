@@ -453,7 +453,17 @@
     // branch in the watcher. It gets ONE pill, in the aux rail, well clear of
     // the on-foot cluster, because everything else about riding (move, look,
     // jump, aim, FIRE) is still the on-foot layer's job and stays on screen.
-    if (next === "mount") h += pill("tvDismount", "DISMOUNT", "tv-sm");
+    if (next === "mount") {
+      // Order matters in a column-reverse rail: DIVE sits nearest the thumb,
+      // RISE directly above it (the swim context's own pairing), DISMOUNT last
+      // and small, because the one button you must not fat-finger while three
+      // metres under is the one that gives the shark back.
+      if (mountDive()) {
+        h += pill("tvMDive", "DIVE", "tv-big");
+        h += pill("tvMRise", "RISE", "tv-big tv-go");
+      }
+      h += pill("tvDismount", "DISMOUNT", "tv-sm");
+    }
     if (air) {
       // Bottom-up (column-reverse): the release sits nearest the thumb, its own
       // readout directly above it, and the occasional taps PAIR OFF into rows.
@@ -488,6 +498,20 @@
     // BOMB — hold, not tap: strategicBombHold IS the [B] state machine (tap
     // releases one, past 0.4 s it becomes a carpet run), so the thumb inherits
     // the whole arc instead of re-implementing half of it.
+    // The mount's vertical axis. Two paths on purpose and BOTH are honest: the
+    // key hold is the same one every other pill in this file uses (the mount
+    // reads Space/Ctrl off CBZ.keys exactly as the swimmer does), and the named
+    // seam is city/wildlife_tame.js's own expiring hold — so if a touchend is
+    // ever swallowed, the 0.25 s expiry stands the axis down even though the
+    // key would still be pumped. Belt and braces, no second implementation.
+    if (q("tvMDive")) holdFn(q("tvMDive"), (down) => {
+      held["control"] = down; if (!down) { const k = CBZ.keys; if (k) k["control"] = false; }
+      if (CBZ.cityAquaticMountVertical) CBZ.cityAquaticMountVertical(down ? -1 : 0);
+    });
+    if (q("tvMRise")) holdFn(q("tvMRise"), (down) => {
+      held[" "] = down; if (!down) { const k = CBZ.keys; if (k) k[" "] = false; }
+      if (CBZ.cityAquaticMountVertical) CBZ.cityAquaticMountVertical(down ? 1 : 0);
+    });
     if (q("tvBomb")) holdFn(q("tvBomb"), (down) => { if (CBZ.strategicBombHold) CBZ.strategicBombHold(down); });
     if (q("tvBombCam")) holdFn(q("tvBombCam"), (down) => { if (CBZ.strategicBombCameraHold) CBZ.strategicBombCameraHold(down); });
     if (q("tvPay")) tapBtn(q("tvPay"), () => {
@@ -570,6 +594,19 @@
   // build without the seam simply never offers the fire button and never grows
   // an armor context, and the pre-seam behaviour returns exactly.
   const armorOn = () => !!(airV2() && CBZ.cityArmorActive && CBZ.cityArmorActive());
+  /* AN AQUATIC MOUNT IS A THIRD KIND OF SWIMMER. The "swim" context above gives
+     the human swimmer DIVE/RISE (city/swim.js's Space/Ctrl grammar on two
+     pills); the "mount" context gives a saddle a DISMOUNT pill. Ride a SHARK
+     and you are in the water with a vertical axis and neither of those covered
+     it — owner, 2026-08-25: "in nat disaster world on touch when in the water
+     you get rise and dive … in shark sim there's just water surface and you
+     can't really dive". Same two verbs, same keys, same hold plumbing; they
+     land in the AUX RAIL rather than the thumb column because a mount keeps the
+     on-foot cluster (FIRE is the mounted bite — systems/touch.js routes it to
+     CBZ.cityMountedAnimalAttack) and must not have it covered up.
+     TOUCH_MOUNT_DIVE=0 → the saddle gets DISMOUNT and nothing else, as before. */
+  const mountDive = () => !!(airV2() && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_MOUNT_DIVE !== false) &&
+    CBZ.cityAquaticMountRiding && CBZ.cityAquaticMountRiding());
   function armorRec() { return CBZ.cityArmorRec ? CBZ.cityArmorRec() : null; }
   function isTank() { const r = armorRec(); return !!(r && r.kind === "tank" && CBZ.cityArmorFire); }
 
