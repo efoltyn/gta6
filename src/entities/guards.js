@@ -212,6 +212,9 @@
   }
 
   function clearGuardApproach(g) {
+    // answering the deal he was actually pitching settles his standing copy
+    // of it too (entities/ai.js has the same contract for inmates)
+    if (g.standingOffer && (!g.approach || g.approach.kind === g.standingOffer.kind)) g.standingOffer = null;
     g.approach = null;
     g.approachCD = 12 + CBZ.econ.rng() * 12;
   }
@@ -260,6 +263,30 @@
     if (!g.approach) return;
     const a = g.approach;
     const near = Math.hypot(player.pos.x - g.group.position.x, player.pos.z - g.group.position.z) < 20;
+    /* A bent screw's SALES PITCH keeps, the way an inmate's offer keeps
+       (entities/ai.js OFFER_STANDS): walking off to think about buying a name
+       or a clean sheet is not an answer, and punishing it made the offer read
+       as a glitch. Only refusing him to his face — or true extortion
+       (racketOffer, witnessBlackmail) — has walk-away teeth. */
+    if ((a.kind === "payoffOffer" || a.kind === "snitchIntel") && reason !== "refuse") {
+      const prev = g.standingOffer;
+      const sameDeal = prev && prev.kind === a.kind;
+      g.standingOffer = {
+        kind: a.kind,
+        saved: Object.assign({}, a),
+        t: sameDeal ? prev.t : 90,
+        walks: (sameDeal ? prev.walks : 0) + 1,
+        needsLeave: reason === "timeout",
+      };
+      g.approach = null;
+      g.approachCD = 3 + CBZ.econ.rng() * 3;
+      if (near && CBZ.prisonSay && g.standingOffer.walks === 1) {
+        CBZ.prisonSay(g, a.kind === "snitchIntel"
+          ? "The name keeps. You know my post."
+          : "The paperwork can wait on you. Not forever.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+      }
+      return;
+    }
     clearGuardApproach(g);
     if (CBZ.game.role === "cop") {
       CBZ.addComplaint && CBZ.addComplaint(reason === "refuse" ? 12 : 7);
@@ -275,18 +302,50 @@
       CBZ.addHeat && CBZ.addHeat(a.kind === "racketOffer" ? (reason === "refuse" ? 18 : 11) : (reason === "refuse" ? 14 : 8));
       nudgeCleanGuard(g);
     }
-    // He is a man ending a conversation, so he ends it out loud. prisonSay is
-    // the prison's ONE mouth (systems/interact.js) and it puts the name in the
-    // speaker slot instead of stapling it to the front of the sentence.
-    if (near && CBZ.prisonSay) CBZ.prisonSay(g, "We're done talking.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+    // He is a man ending a conversation, so he ends it out loud — ONCE per
+    // kind of business. A man does not deliver the same exit line every
+    // shakedown; the second time he just goes back to his round.
+    const seen = g._saidClosers || (g._saidClosers = {});
+    if (near && CBZ.prisonSay && !seen[a.kind]) {
+      seen[a.kind] = 1;
+      CBZ.prisonSay(g, a.kind === "racketOffer" ? "The tab doesn't close because you walked." : "We're done talking.",
+        { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+    }
   }
 
   function considerPayoffApproach(g, dt) {
     if (!g.corrupt || g.approach || g.bribed > 0 || g.ko > 0 || g.dead || g.hunt > 0) return;
+    // his standing offer only ages while he is NOT pitching it
+    if (g.standingOffer) {
+      g.standingOffer.t -= dt;
+      if (g.standingOffer.t <= 0) g.standingOffer = null;   // he quietly stops holding the door
+    }
     if (CBZ.playerApproachBusy && CBZ.playerApproachBusy(g)) return;
     g.approachCD = (g.approachCD || 0) - dt;
     if (g.approachCD > 0 || !CBZ.game || CBZ.game.state !== "playing") return;
     g.approachCD = 1.4 + CBZ.econ.rng() * 2.6;
+    if (g.standingOffer) {
+      /* While his offer stands he pitches nothing new — he re-opens THE SAME
+         deal, in words that show he remembers making it, or he waits. */
+      const s = g.standingOffer;
+      const sdx = player.pos.x - g.group.position.x, sdz = player.pos.z - g.group.position.z;
+      const sd = Math.hypot(sdx, sdz);
+      if (s.needsLeave) {
+        if (sd > 17 || sd < 3.4) s.needsLeave = false;
+        else return;
+      }
+      if (sd >= 3.4 && sd <= 15) {
+        const a = Object.assign({}, s.saved);
+        a.t = 12;
+        a.greeted = false;
+        a.msg = a.kind === "snitchIntel"
+          ? `${nameOf(g)} still has that name. ${a.cost} cigs, like before.`
+          : `${nameOf(g)}: the offer to bury your sheet still stands. ${a.cost} cigs.`;
+        g.approach = a;
+        g.approachCD = 0;
+      }
+      return;
+    }
     const heat = CBZ.game.role === "cop" ? (CBZ.game.complaints || 0) : (CBZ.game.detection || 0);
     const cigs = CBZ.game.cigs || 0;
     const dx = player.pos.x - g.group.position.x, dz = player.pos.z - g.group.position.z;

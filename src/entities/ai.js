@@ -387,12 +387,32 @@
     addBuzz(helpful ? "debt" : "fear", helpful ? -Math.min(8, severity * 0.9) : Math.min(16, severity * 1.2), source);
 
     let witnesses = 0, responders = 0;
+    let beefCheer = null, beefCheerW = 0;
     const rivalTouched = [false, false];
     for (const m of CBZ.npcs || []) {
       if (!alive(m) || m === actor || !m.group || m.role === "merchant") continue;
       const nearActor = Math.hypot(m.group.position.x - actor.group.position.x, m.group.position.z - actor.group.position.z);
       const nearPlayer = CBZ.player ? playerDist(m) : 99;
       if (nearActor > 18 && nearPlayer > 18) continue;
+
+      /* THE ENEMY OF MY ENEMY. The yard already keeps per-pair grudges
+         (_beef, below) — this is where they become visible. A man watching
+         you put hands on somebody HE has real beef with does not close ranks;
+         he approves, crew or not. This is the other half of "they always hate
+         you for a punch": WHO you punch matters, because they remember him. */
+      if (!helpful) {
+        const bw = beefWith(m, actor);
+        if (bw >= BEEF_SWING) {
+          witnesses++;
+          bumpSocial(m, "playerTrust", 0.5 + severity * 0.05, -8, 14);
+          bumpSocial(m, "playerGrudge", -(0.6 + severity * 0.05), 0, 14);
+          if (nearPlayer < 15 && severity >= 3) {
+            emote(m, "+");
+            if (bw > beefCheerW) { beefCheer = m; beefCheerW = bw; }
+          }
+          continue;
+        }
+      }
 
       if (m.gang === gang) {
         witnesses++;
@@ -405,6 +425,7 @@
         } else {
           const p = m.personality || {};
           bumpSocial(m, "playerGrudge", 0.55 + severity * 0.06, 0, 14);
+          if (severity >= 3) m.grudgeWhy = `what you did to ${actorName(actor)}`;
           bumpSocial(m, "playerFear", Math.min(0.8, severity * 0.04), 0, 14);
           const responseChance = Math.min(0.82, 0.12 + severity * 0.035 + (p.loyalty || 0.5) * 0.22 + (p.nerve || 0.5) * 0.18 - (sameCrew ? 0.14 : 0));
           if (severity >= 5 && !m.approach && m.aiState !== "snitch" && m.aiState !== "fight" && rng() < responseChance) {
@@ -421,6 +442,13 @@
           addGangStanding(m.gang, Math.min(3, Math.ceil(severity * 0.18)));
         }
       }
+    }
+    // one voice, the man with the deepest grudge — he NAMES who you hit,
+    // which is his memory talking, not a bark
+    if (beefCheer && rng() < 0.6) {
+      say(beefCheer, rng() < 0.5
+        ? `${actorName(actor)} had that coming.`
+        : `Been waiting on somebody to get to ${actorName(actor)}.`, null, 2.2);
     }
 
     const g = CBZ.game || {};
@@ -992,9 +1020,202 @@
 
   function clearApproach(n) {
     clearGangPressure(n);
+    // Answering THIS deal settles THIS deal. A standing offer from earlier
+    // (his job pitch) survives an unrelated shakedown getting resolved.
+    if (n.standingOffer && (!n.approach || n.approach.kind === n.standingOffer.kind)) n.standingOffer = null;
     n.approach = null;
     n.approachCD = 6 + rng() * 10;
     if (n.aiState === "approachPlayer") { n.aiState = "wander"; n.aiTimer = 0.2; }
+  }
+
+  /* ============================================================
+     AN OFFER IS A THING HE SAID, NOT A TIMER.
+
+     What shipped before: every approach lived 9 seconds, and walking out of
+     range voided it — with a penalty and one fixed closing line per kind
+     ("Nobody eats free in here. Remember that."), repeated verbatim forever.
+     So the worst possible sequence was also the most natural one: a man
+     offers you work, you walk off to think about it — or to go GET the thing
+     he asked for — and nine seconds later the deal never existed, your trust
+     is docked, and when he finds you again he's pitching something else.
+     An offer that evaporates the moment you turn around is not an offer;
+     it reads as a glitch.
+
+     The rule now: a DEMAND (he wants something FROM you, under threat) still
+     has teeth when you walk — that pressure IS the mechanic, extortion that
+     shrugs when you leave isn't extortion. But an OFFER (he wants to give,
+     sell, hire, warn, or recruit you) STANDS. He remembers making it. Walk
+     away and he says so once — a short line about THAT deal — or just watches
+     you go the second time. Come back and he re-opens the SAME deal at the
+     SAME price, in words that show he remembers asking. While it stands he
+     invents no new business with you. Only after minutes of genuinely being
+     ignored does it quietly lapse — and only then do the world-consequences
+     that used to fire at the 9-second mark (an alibi shopped to a guard, a
+     report left warm) actually land.
+
+     The map below is each offer-kind's standing life in seconds. Evergreen
+     deals keep as long as a man plausibly remembers; case-tied ones stand
+     only while the situation they answer is still live. */
+  const OFFER_STANDS = {
+    gangJob: 150, gangInvite: 150, gangParley: 150, buyItem: 150, deal: 150,
+    favor: 150, rumor: 150, lookout: 150, crewBackup: 120, diversion: 120,
+    reputation: 120, infoSell: 90,
+    heatWarning: 45, coverStory: 45, alibiDeal: 45, witnessFix: 45,
+    recantOffer: 45, stashCover: 45, racketCover: 45,
+  };
+
+  /* The one line he gets to say as you walk — about THIS deal, once. A man
+     repeats himself to nobody: the second walk-away gets a stare. */
+  function standLine(n, a) {
+    const k = a.kind;
+    if (k === "gangJob") return "Think on it. The work keeps.";
+    if (k === "gangInvite") return `Door's open at ${gangName(n.gang)}. It doesn't stay open forever.`;
+    if (k === "buyItem") return `I still want that ${a.item}. Find me.`;
+    if (k === "favor") return "It'll keep. Come see me.";
+    if (k === "crewBackup") return "Offer holds. Whistle when it gets loud.";
+    if (k === "infoSell") return "What I know stays true a while. You know where I am.";
+    if (k === "heatWarning") return "Suit yourself. The sweep won't wait on you.";
+    if (k === "alibiDeal") return "The story's still for sale. Not for long.";
+    if (k === "witnessFix") return "Every hour that report sits, it gets harder to reach.";
+    if (k === "recantOffer") return "My statement can still change. Today.";
+    if (k === "gangParley") return a.parleyMode === "truce"
+      ? "The truce is on the table till somebody bleeds."
+      : "We'll talk when you're ready to talk.";
+    return "Offer stands.";
+  }
+
+  /* Walking away from an OFFER: no penalty, no re-roll — he files it. */
+  function standDown(n, reason) {
+    const a = n.approach;
+    const saved = Object.assign({}, a);
+    const prev = n.standingOffer;
+    // an interruption is not a walk-away: it neither burns his one spoken
+    // walk-line nor counts against him giving up
+    const walks = (prev && prev.kind === a.kind ? prev.walks : 0) + (reason === "interrupted" ? 0 : 1);
+    n.standingOffer = {
+      kind: a.kind,
+      saved,
+      // one standing window per deal — re-walking doesn't refresh it
+      t: prev && prev.kind === a.kind ? prev.t : OFFER_STANDS[a.kind],
+      walks,
+      // timed out with you stood right there = you heard him. He won't
+      // re-pitch until you leave and come back, or walk up to him yourself.
+      needsLeave: reason === "timeout",
+    };
+    clearGangPressure(n);
+    n.approach = null;
+    n.approachCD = 2.5 + rng() * 2;
+    if (n.aiState === "approachPlayer") { n.aiState = "wander"; n.aiTimer = 0.2; }
+    if (reason !== "interrupted" && playerDist(n) < 22) {
+      if (walks === 1) say(n, standLine(n, saved), null, 2.2);
+      else if (CBZ.npcStare) CBZ.npcStare(n, 1.8);   // he just watches you go
+    }
+  }
+
+  /* He gave up waiting. Quietly, mostly — but the world-consequences that
+     used to fire nine seconds after the pitch belong HERE, after he has
+     honestly stopped holding the door. */
+  function lapseStandingOffer(n) {
+    const s = n.standingOffer;
+    n.standingOffer = null;
+    const a = s.saved || {};
+    const near = playerDist(n) < 22;
+    if (a.kind === "alibiDeal" && a.memoryType && n.memory && (CBZ.game.cigs || 0) > 0 && rng() < 0.42) {
+      sendNpcToSnitch(n, a.heat || 12, { copCrime: a.memoryType === "copCrime", lastKnown: n.memory.lastKnown, type: "ignored alibi" });
+      if (near) say(n, "You wouldn't buy it. The screws will.", null, 2.0);
+      return;
+    }
+    if (a.kind === "witnessFix") {
+      const reporter = (a.reporter && alive(a.reporter)) ? a.reporter : findKnownReporter(n);
+      if (reporter && rng() < 0.35) reporter.reportedPlayerT = Math.max(reporter.reportedPlayerT || 0, 16);
+      addBuzz("snitch", 3, "ignored-fixer");
+      return;
+    }
+    if (a.kind === "recantOffer") {
+      const amount = n.reportedPlayerAmount || a.amount || 12;
+      n.reportedPlayerT = Math.max(n.reportedPlayerT || 0, 18);
+      n.reportedPlayerCred = Math.min(1, (n.reportedPlayerCred || a.credibility || 0.65) + 0.07);
+      n.reportedPlayerDoubt = Math.max(0, 1 - n.reportedPlayerCred);
+      if (CBZ.addCasePressure) CBZ.addCasePressure(amount * 0.18, { type: "ignored recant", lastKnown: n.reportedPlayerLastKnown, credibility: n.reportedPlayerCred }, n);
+      addBuzz("snitch", 4, "ignored-recant");
+    }
+  }
+
+  /* Coming back to a standing offer: the SAME deal at the SAME price, in
+     words that show he remembers asking — never a fresh roll of the dice. */
+  function reopenText(n, a) {
+    const name = n.data.name.replace(/^the |^a |^an /, "");
+    const k = a.kind;
+    if (k === "gangJob") return `${name} again: that ${a.job ? jobNoun(a.job) : "work"} is still on the table.`;
+    if (k === "gangInvite") return `${name} is still holding a spot with ${gangName(n.gang)}.`;
+    if (k === "buyItem") return `${name}, like before: your ${a.item} for ${a.price || a.cost} cigs.`;
+    if (k === "favor") return `${name} hasn't forgotten ${gangName(n.gang)} owe you one.`;
+    if (k === "crewBackup") return `${name}, same as before: ${gangName(n.gang)} can watch your back.`;
+    if (k === "infoSell") return `${name} still knows where guards are looking. Same price.`;
+    if (k === "alibiDeal") return `${name}: the alibi's still yours for ${a.cost} cigs. Clock's running.`;
+    if (k === "witnessFix") return `${name} can still reach ${a.targetName || "the witness"}. ${a.cost} cigs, like I said.`;
+    if (k === "recantOffer") return `${name} can still walk that report back. ${a.cost} cigs.`;
+    if (k === "heatWarning") return `${name}, one more time: guards are on your last spot.`;
+    if (k === "gangParley") return a.parleyMode === "truce"
+      ? `${name}: the ${gangName(n.gang)} truce still costs ${a.cost} cigs.`
+      : `${name} still wants that sit-down for ${gangName(n.gang)}.`;
+    return a.msg;   // the original pitch is still the truth
+  }
+
+  function reopenOffer(n) {
+    const s = n.standingOffer;
+    const a = Object.assign({}, s.saved);
+    a.t = 14;
+    a.greeted = false;
+    a.reopened = true;
+    a.msg = reopenText(n, a);
+    a.motive = "still waiting on your answer";
+    n.approach = a;
+    n.aiState = "approachPlayer";
+    n.foe = null;
+    n.pause = 0;
+    emote(n, approachGlyph(a.kind));
+  }
+
+  /* A demand's closing line, said ONCE per man per kind. He already told you
+     what walking away costs; saying it again every time is a broken record,
+     and the stare is the honest repeat. Returns null when he's done talking. */
+  function closerLine(n, kind, lines) {
+    const seen = n._saidClosers || (n._saidClosers = {});
+    if (seen[kind]) return null;
+    seen[kind] = 1;
+    return lines[(rng() * lines.length) | 0];
+  }
+
+  /* ============================================================
+     SQUASHING A GRUDGE. The prison already remembers every wrong
+     (playerGrudge, and now grudgeWhy — the specific thing he's sore about);
+     what it lacked was any way to BUY peace. You could out-wait a grudge or
+     out-punch it, but "give him something and make it right" — the most
+     ordinary social move in any yard — did not exist. The verb appears on
+     his card only while he is actually carrying something (interact.js gates
+     it), the price scales with how much, and his answer names the wrong he's
+     letting go — which is his memory talking. */
+  function squashGrudgeCost(n) {
+    return Math.max(2, Math.ceil(((n && n.playerGrudge) || 0) * 0.8));
+  }
+  function squashGrudge(n) {
+    if (!n || !n.data) return { ok: false, msg: "" };
+    const who = n.data.name.replace(/^the |^a |^an /, "");
+    if ((n.playerGrudge || 0) < 3) return { ok: false, msg: `${who} isn't holding anything against you.` };
+    if (n.aiState === "fight" && n.foe === CBZ.player) return { ok: false, msg: `${who} isn't hearing offers mid-swing.` };
+    const cost = squashGrudgeCost(n);
+    if ((CBZ.game.cigs || 0) < cost) return { ok: false, msg: `${who} wants ${cost} cigs to bury it. You're short.` };
+    CBZ.econ.addCigs(-cost);
+    const why = n.grudgeWhy;
+    n.playerGrudge = 0;
+    n.grudgeWhy = null;
+    n.huntPlayer = 0;
+    n.playerTrust = Math.min(14, (n.playerTrust || 0) + 1);
+    if (n.gang >= 0) addGangStanding(n.gang, 2);
+    CBZ.sfx && CBZ.sfx("coin");
+    say(n, why ? `For ${why}? ...Alright. We're square.` : "Alright. We're square. Don't make a habit of needing to be.", null, 2.8);
+    return { ok: true, msg: "" };   // he said it himself; the card adds nothing
   }
 
   function playerApproachBusy(except) {
@@ -1010,6 +1231,10 @@
   function expireApproach(n, reason) {
     const a = n && n.approach;
     if (!a) return;
+
+    // An OFFER doesn't die because you turned around — see OFFER_STANDS.
+    if (OFFER_STANDS[a.kind] != null) { standDown(n, reason); return; }
+
     const near = playerDist(n) < 22;
     const who = n.data.name.replace(/^the |^a |^an /, "");
 
@@ -1027,11 +1252,19 @@
 
     if (a.kind === "tax") {
       const gang = n.gang;
+      const cost = Math.max(2, a.cost || 3);
       clearApproach(n);
-      addGangDebt(gang, Math.max(2, a.cost || 3));
+      addGangDebt(gang, cost);
       addGangStanding(gang, -8);
-      if (near && nar) nar(`${gangName(gang)} mark you as unpaid.`, 1.8, n,
-        `Then you owe. ${gangName(gang)} don't forget.`);
+      if (near) {
+        const line = closerLine(n, "tax", [
+          `Then ${gangName(gang)} carry you at ${cost}. It follows you.`,
+          `${cost} on the book, then. ${gangName(gang)} always collect.`,
+          "Walking is just paying later, with interest.",
+        ]);
+        if (line) nar(`${gangName(gang)} mark you as unpaid.`, 1.8, n, line);
+        else if (CBZ.npcStare) CBZ.npcStare(n, 1.6);
+      }
       if (gang >= 0 && gangStanding(gang) < -12) provokeGang(n, 7);
       return;
     }
@@ -1041,8 +1274,14 @@
       clearApproach(n);
       const debt = addGangDebt(gang, Math.max(2, Math.ceil((a.cost || 3) * 0.5)));
       addGangStanding(gang, -6);
-      if (near && nar) nar(`${gangName(gang)} add interest. Debt ${debt}.`, 1.8, n,
-        `That's ${debt} now. It goes up every time I walk away.`);
+      if (near) {
+        const line = closerLine(n, "debtCollect", [
+          `That's ${debt} now. It goes up every time I walk away.`,
+          `${debt}. Count it yourself next time, save us both the walk.`,
+        ]);
+        if (line) nar(`${gangName(gang)} add interest. Debt ${debt}.`, 1.8, n, line);
+        else if (CBZ.npcStare) CBZ.npcStare(n, 1.6);
+      }
       if (gang >= 0 && debt > 10) provokeGang(n, 6);
       return;
     }
@@ -1052,19 +1291,15 @@
       clearApproach(n);
       addGangDebt(gang, 2);
       addGangStanding(gang, reason === "walkedAway" ? -3 : -5);
-      if (near && nar) nar(`${gangName(gang)} take the disrespect personally.`, 1.8, n,
-        "Walk off again and it stops being talk.");
+      if (near) {
+        const line = closerLine(n, "turfWarning", [
+          "Walk off again and it stops being talk.",
+          `You heard me. ${gangName(gang)} grass has a price on it.`,
+        ]);
+        if (line) nar(`${gangName(gang)} take the disrespect personally.`, 1.8, n, line);
+        else if (CBZ.npcStare) CBZ.npcStare(n, 1.6);
+      }
       if (gang >= 0 && gangStanding(gang) < -10) provokeGang(n, 5);
-      return;
-    }
-
-    if (a.kind === "gangJob") {
-      const gang = n.gang;
-      clearApproach(n);
-      n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
-      addGangStanding(gang, -3);
-      if (near && nar) nar(`${gangName(gang)} see you ducking work.`, 1.7, n,
-        "Nobody eats free in here. Remember that.");
       return;
     }
 
@@ -1074,17 +1309,14 @@
       clearApproach(n);
       addGangStanding(gang, -3);
       provokeGang(n, 4.5);
-      if (near && nar) nar(`${gangName(gang)} move to spoil the job.`, 1.7, n,
-        "You're not finishing that. Not today.");
-      return;
-    }
-
-    if (a.kind === "coverStory") {
-      clearApproach(n);
-      n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
-      if (n.gang >= 0) addGangStanding(n.gang, -1);
-      if (near && nar) nar(`${who} stops covering for you.`, 1.5, n,
-        "I'm done lying for you. Tell your own story.");
+      if (near) {
+        const line = closerLine(n, "jobThreat", [
+          "You're not finishing that. Not today.",
+          `${gangName(gang)} just made your job their business.`,
+        ]);
+        if (line) nar(`${gangName(gang)} move to spoil the job.`, 1.7, n, line);
+        else if (CBZ.npcStare) CBZ.npcStare(n, 1.6);
+      }
       return;
     }
 
@@ -1096,17 +1328,14 @@
       if (n.gang >= 0) addGangStanding(n.gang, -1);
       if (CBZ.addCasePressure) CBZ.addCasePressure(5 + (a.cost || 2), { type: "ignored cover debt", heardOnly: true, source: who }, n);
       addBuzz("heat", 4, "ignored-cover-debt");
-      if (near && nar) nar(`${who} decides that cover should cost you later.`, 1.5, n,
-        "I covered for you. That's going on your tab.");
-      return;
-    }
-
-    if (a.kind === "crewBackup") {
-      clearApproach(n);
-      n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
-      if (n.gang >= 0) addGangStanding(n.gang, -1);
-      if (near && nar) nar(`${who} stops waiting to back you up.`, 1.5, n,
-        "Stood here like a fool waiting on you. Find your own backup.");
+      if (near) {
+        const line = closerLine(n, "coverDebt", [
+          "I covered for you. That's going on your tab.",
+          `I lied to ${a.guard || "a guard"} for you. You'll pay for that one way or another.`,
+        ]);
+        if (line) nar(`${who} decides that cover should cost you later.`, 1.5, n, line);
+        else if (CBZ.npcStare) CBZ.npcStare(n, 1.6);
+      }
       return;
     }
 
@@ -1116,8 +1345,14 @@
       n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
       const debt = addGangDebt(gang, Math.max(2, Math.ceil((a.cost || 3) * 0.65)));
       addGangStanding(gang, -4);
-      if (near && nar) nar(`${gangName(gang)} mark dues unpaid. Debt ${debt}.`, 1.7, n,
-        `Dues are dues. You're down ${debt} with us.`);
+      if (near) {
+        const line = closerLine(n, "crewDues", [
+          `Dues are dues. You're down ${debt} with us.`,
+          `${gangName(gang)} keep their own books. Yours says ${debt}.`,
+        ]);
+        if (line) nar(`${gangName(gang)} mark dues unpaid. Debt ${debt}.`, 1.7, n, line);
+        else if (CBZ.npcStare) CBZ.npcStare(n, 1.6);
+      }
       if (gang >= 0 && debt > 12 && gangStanding(gang) < -8) provokeGang(n, 5);
       return;
     }
@@ -1133,65 +1368,13 @@
         if (n.gang >= 0) addGangStanding(n.gang, -3);
         if (n.role === "thief") n.huntPlayer = Math.max(n.huntPlayer || 0, 3.5);
         else if (n.gang >= 0 && (a.rivalGang || gangStanding(n.gang) < -10)) provokeGang(n, 4.5);
-      if (near && nar) nar(a.racketGuard ? `${who} leaves the racket tab open.` : `${who} stops asking and starts watching your pockets.`, 1.6, n,
-        a.racketGuard ? "The boss hears you stiffed his runner." : "Fine. I'll just take it off you later.");
-      return;
-    }
-
-    if (a.kind === "infoSell") {
-      clearApproach(n);
-      n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
-      if (near && nar) nar(`${who} sells the guard rumor to somebody else.`, 1.6, n,
-        "Someone else will pay for what I know.");
-      return;
-    }
-
-    if (a.kind === "recantOffer") {
-      clearApproach(n);
-      const amount = n.reportedPlayerAmount || a.amount || 12;
-      n.reportedPlayerT = Math.max(n.reportedPlayerT || 0, 18);
-      n.reportedPlayerCred = Math.min(1, (n.reportedPlayerCred || a.credibility || 0.65) + 0.07);
-      n.reportedPlayerDoubt = Math.max(0, 1 - n.reportedPlayerCred);
-      if (CBZ.addCasePressure) CBZ.addCasePressure(amount * 0.18, { type: "ignored recant", lastKnown: n.reportedPlayerLastKnown, credibility: n.reportedPlayerCred }, n);
-      addBuzz("snitch", 4, "ignored-recant");
-      if (near && nar) nar(`${who} keeps the report alive.`, 1.5, n,
-        "Then my statement stands. Every word of it.");
-      return;
-    }
-
-    if (a.kind === "witnessFix") {
-      const reporter = (a.reporter && alive(a.reporter)) ? a.reporter : findKnownReporter(n);
-      clearApproach(n);
-      n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
-      n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 1);
-      if (n.gang >= 0) addGangStanding(n.gang, -1);
-      if (reporter && rng() < 0.35) reporter.reportedPlayerT = Math.max(reporter.reportedPlayerT || 0, 16);
-      addBuzz("snitch", 3, "ignored-fixer");
-      if (near && nar) nar(`${who} leaves ${reporterName(reporter)} talking.`, 1.5, n,
-        `Your problem. ${reporterName(reporter)} is still talking.`);
-      return;
-    }
-
-    if (a.kind === "alibiDeal") {
-      clearApproach(n);
-      n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 1);
-      addBuzz("snitch", 4, "ignored-alibi");
-      if (a.memoryType && n.memory && (CBZ.game.cigs || 0) > 0 && rng() < 0.42) {
-        sendNpcToSnitch(n, a.heat || 12, { copCrime: a.memoryType === "copCrime", lastKnown: n.memory.lastKnown, type: "ignored alibi" });
-        if (near && nar) nar(`${who} sells the story to a guard instead.`, 1.6, n,
-          "You wouldn't buy it. The screws will.");
-        return;
+      if (near) {
+        const line = closerLine(n, "stickUp", a.racketGuard
+          ? ["The boss hears you stiffed his runner."]
+          : ["Fine. I'll just take it off you later.", "Keep walking. Pockets empty themselves in here."]);
+        if (line) nar(a.racketGuard ? `${who} leaves the racket tab open.` : `${who} stops asking and starts watching your pockets.`, 1.6, n, line);
+        else if (CBZ.npcStare) CBZ.npcStare(n, 1.6);
       }
-      if (near && nar) nar(`${who} stops offering the alibi.`, 1.4, n,
-        "Offer's off. Good luck explaining yourself.");
-      return;
-    }
-
-    if (a.kind === "heatWarning") {
-      clearApproach(n);
-      n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
-      if (near && nar) nar(`${who} stops warning you.`, 1.4, n,
-        "I tried to tell you. Not my problem now.");
       return;
     }
 
@@ -1329,7 +1512,9 @@
     n.approach = {
       kind,
       cost: cost || 0,
-      t: 9,
+      // an offer gets a little longer on its feet than a demand, and either
+      // way the clock nearly stops while he has your ear (see approachPlayer)
+      t: OFFER_STANDS[kind] != null ? 14 : 12,
       greeted: false,
       msg: (extra && extra.msg) || approachText(n, kind, cost || 0, extra),
       motive: approachMotive(kind, extra),
@@ -1337,12 +1522,14 @@
     if (extra) Object.assign(n.approach, extra);
     n.foe = null;
     n.pause = 0;
-    emote(n,
-      kind === "tax" || kind === "snitchThreat" || kind === "buyItem" || kind === "copBribe" || kind === "jobThreat" || kind === "infoSell" || kind === "stashCover" || kind === "witnessFix" || kind === "recantOffer" || kind === "crewDues" || kind === "stickUp" || kind === "alibiDeal" || kind === "racketCover" || kind === "coverDebt" ? "$" :
-        kind === "turfWarning" || kind === "heatWarning" || kind === "copTaunt" || kind === "copTip" ? "!" :
-          kind === "favor" || kind === "copPlea" || kind === "crewBackup" || kind === "gangJob" || kind === "gangParley" || kind === "coverStory" || kind === "reputation" ? "+" : "?"
-    );
+    emote(n, approachGlyph(kind));
     callGangPressure(n, kind, extra || {});
+  }
+
+  function approachGlyph(kind) {
+    return kind === "tax" || kind === "snitchThreat" || kind === "buyItem" || kind === "copBribe" || kind === "jobThreat" || kind === "infoSell" || kind === "stashCover" || kind === "witnessFix" || kind === "recantOffer" || kind === "crewDues" || kind === "stickUp" || kind === "alibiDeal" || kind === "racketCover" || kind === "coverDebt" ? "$" :
+      kind === "turfWarning" || kind === "heatWarning" || kind === "copTaunt" || kind === "copTip" ? "!" :
+        kind === "favor" || kind === "copPlea" || kind === "crewBackup" || kind === "gangJob" || kind === "gangParley" || kind === "coverStory" || kind === "reputation" ? "+" : "?";
   }
 
   function startRacketRunner(guard) {
@@ -2049,10 +2236,32 @@
 
   function considerPlayerApproach(n, dt) {
     if (n.approachCD > 0) n.approachCD -= dt;
-    if (n.approachCD > 0 || n.approach || n.role === "merchant") return;
+    if (n.approach) return;
+    // The standing-offer clock only runs while he is NOT engaging you: time
+    // spent re-pitched in your face doesn't burn the window.
+    const so = n.standingOffer;
+    if (so) {
+      so.t -= dt;
+      if (so.t <= 0) { lapseStandingOffer(n); }
+    }
+    if (n.approachCD > 0 || n.role === "merchant") return;
     if (playerApproachBusy(n)) return;
     if ((CBZ.player.stun || 0) > 0) return;
     const d = playerDist(n);
+    if (n.standingOffer) {
+      /* While his offer stands he invents NO new business with you — the
+         whole bug was "walk off for nine seconds and the same man wants
+         something different". He re-opens THIS deal or he waits. */
+      const s = n.standingOffer;
+      if (s.needsLeave) {
+        // You stood there and let it time out. He won't chase — but leaving
+        // and coming back, or walking right up to him, reads as an answer.
+        if (d > APPROACH_FAR + 2 || d < 4.6) s.needsLeave = false;
+        else return;
+      }
+      if (d < APPROACH_FAR && n.aiState !== "fight" && n.aiState !== "snitch" && !(n.huntPlayer > 0)) reopenOffer(n);
+      return;
+    }
     if (d < 4.5 || d > APPROACH_FAR) return;
 
     const p = n.personality || {};
@@ -4029,11 +4238,17 @@
       case "approachPlayer": {
         const a = n.approach;
         if (!a) { n.aiState = "wander"; break; }
-        a.t -= dt;
         const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
         const d = Math.hypot(px - n.group.position.x, pz - n.group.position.z);
+        /* A man talking TO YOUR FACE does not void his own offer mid-sentence.
+           The clock is for being ignored, so it barely runs while you stand
+           with him — an offer waits almost indefinitely, a demand leans on
+           you a little harder. */
+        a.t -= dt * (d <= APPROACH_NEAR + 1.2 ? (OFFER_STANDS[a.kind] != null ? 0.15 : 0.5) : 1);
         if (CBZ.game.state !== "playing") {
-          clearApproach(n);
+          // a cutscene/menu interrupting an OFFER doesn't void it — he files it
+          if (OFFER_STANDS[a.kind] != null) standDown(n, "interrupted");
+          else clearApproach(n);
           break;
         }
         if (d > APPROACH_FAR + 5 || a.t <= 0) {
@@ -5415,6 +5630,7 @@
         const gang = n.gang;
         clearApproach(n);
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 2);
+        n.grudgeWhy = "you shorting the crew";
         addGangDebt(gang, Math.max(2, a.cost || 3));
         addGangStanding(gang, -12);
         provokeGang(n, 8);
@@ -5424,6 +5640,7 @@
         const gang = n.gang;
         clearApproach(n);
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 2);
+        n.grudgeWhy = "you shorting the crew";
         addGangDebt(gang, Math.max(3, a.cost || 4));
         addGangStanding(gang, -8);
         provokeGang(n, 7);
@@ -5452,6 +5669,7 @@
       if (a.kind === "buyItem") {
         clearApproach(n);
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 1);
+        n.grudgeWhy = "you holding out on me";
         return { ok: true, msg: `${who} remembers you holding out on ${a.item}.` };
       }
       if (a.kind === "copBribe") {
@@ -5771,6 +5989,8 @@
   CBZ.npcEmote = emote;
   CBZ.clearNpcApproach = clearApproach;
   CBZ.resolveNpcApproach = resolveNpcApproach;
+  CBZ.squashGrudge = squashGrudge;
+  CBZ.squashGrudgeCost = squashGrudgeCost;
   CBZ.resolveKnownSnitch = resolveKnownSnitch;
   CBZ.knownSnitchCost = knownSnitchCost;
   CBZ.startRacketRunner = startRacketRunner;

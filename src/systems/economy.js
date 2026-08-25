@@ -990,6 +990,7 @@
         nudgeGang(actor, -8, Math.max(1, Math.floor(loot / 4)));
         if (CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "steal", 6 + Math.min(5, Math.ceil(loot / 3)), { source: "theft" });
         actor.playerGrudge = (actor.playerGrudge || 0) + 1.5;
+        actor.grudgeWhy = "you going through my pockets";
       }
       if (guardish && actor.corrupt) {
         g.racketDebt = Math.max(0, Math.min(70, (g.racketDebt || 0) + Math.max(2, Math.ceil(loot * 0.35))));
@@ -1050,6 +1051,7 @@
     }
     CBZ.reportCrime(16, { type: "steal", actorRole: g.role });
     actor.playerGrudge = (actor.playerGrudge || 0) + 2;
+    actor.grudgeWhy = "you going through my pockets";
     addRespect(actor, -6);
     if (actor.gang >= 0) nudgeGang(actor, -5, 1);
     if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "steal", 5, { source: "failed theft" });
@@ -1108,6 +1110,7 @@
     actor.rep = Math.max(-50, (actor.rep || 0) - 15);
     actor.love = Math.max(0, (actor.love || 0) - 12);
     actor.playerGrudge = (actor.playerGrudge || 0) + 1.2;
+    actor.grudgeWhy = "the trash you talked";
     addLoyalty(actor, -12);          // you do not insult a man you are paying
     if (actor.gang >= 0) nudgeGang(actor, -4, 1);
     if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "insult", 4, { source: "insult" });
@@ -1159,6 +1162,12 @@
       }
       // the yard saw it. Standing goes up with everyone but his crew.
       addLoyalty(actor, -25);
+      if (!guardish) {
+        // the man you dropped wakes up REMEMBERING it — personally, not just
+        // through his crew's ledger
+        actor.playerGrudge = Math.min(14, (actor.playerGrudge || 0) + 2);
+        actor.grudgeWhy = "the beating";
+      }
       witnessRespect(actor, guardish ? 3 : 2, 14);
       if (CBZ.knockback) CBZ.knockback(actor, CBZ.player.pos.x, CBZ.player.pos.z, 0.9);
       return { ok: true, msg: "", beat: actor.data.name };

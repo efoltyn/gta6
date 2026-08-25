@@ -113,6 +113,13 @@
        runs off snitches and swings at whoever is hunting you. */
     befriend: { label: "Befriend",        fn: (a) => (CBZ.prisonFriendAccept ? CBZ.prisonFriendAccept(a)
                                                 : (CBZ.quests ? CBZ.quests.onTalk(a) : CBZ.econ.talk(a))) },
+    /* SQUASH IS THE OTHER HALF OF A GRUDGE. The prison remembers every wrong
+       you do a man (playerGrudge, and grudgeWhy — the specific thing), and
+       until now the only ways out were waiting or violence. This buys peace:
+       cigs scaled to how sore he is, and his answer NAMES what he's letting
+       go. Appears only while he is actually carrying something — same
+       contextual law as Befriend. entities/ai.js owns the transaction. */
+    squash:   { label: "Squash",          fn: (a) => (CBZ.squashGrudge ? CBZ.squashGrudge(a) : { ok: false, msg: "" }) },
     trade:    { label: "Trade",           fn: (a) => {
       const res = CBZ.econ.trade(a);
       if (res && res.ok && a.approach && a.approach.kind === "deal") {
@@ -192,6 +199,7 @@
     fight:    "Throw hands · chain hits for a K.O. combo",
     talk:     "Ask what they need · running favors builds rep",
     befriend: "They're offering · take it and they run with you",
+    squash:   "He's holding a grudge · cigs can bury it",
     trade:    "Buy contraband with cigarettes",
     bribe:    "Spend cigs to make authority look away",
     snitch:   "Trade a rival's name for the heat on you",
@@ -370,10 +378,12 @@
     const priority = a.quest
       ? "waiting on you: " + a.quest.text
       : (a.approach && a.approach.msg ? a.approach.msg
+        : (a.standingOffer && a.standingOffer.saved ? "his offer stands: " + shortText(a.standingOffer.saved.msg, 46)
         : ((a.reportedPlayerT || 0) > 0 ? reportDetail(a)
         : (CBZ.game.role === "cop" && a.copMarked > 0 ? "somebody put his name in"
+        : ((a.playerGrudge || 0) >= 4 && a.grudgeWhy ? "still sore about " + a.grudgeWhy
         : (a.rep >= (CBZ.quests ? CBZ.quests.FRIEND : 100) ? "owes you, and knows it"
-        : ""))));
+        : ""))))));
     const read = actorRead(a);
     const motive = a.approach && a.approach.motive ? `motive: ${shortText(a.approach.motive, 24)}` : "";
     if (!priority) return read;
@@ -500,8 +510,12 @@
 
        Fighting is left-click and never a row. */
     const offering = !!(CBZ.prisonFriendOffered && CBZ.prisonFriendOffered(a));
+    // a man carrying real bad blood leads with the way OUT of it — the most
+    // fleeting thing about him, and the one the other verbs are useless under
+    const sore = !!CBZ.squashGrudge && (a.playerGrudge || 0) >= 4;
     const recruiting = a.gang >= 0 && CBZ.player.gang == null && (a.rep || 0) >= 40;
     const head = offering ? "befriend"
+      : sore ? "squash"
       : recruiting ? "join"
       : (a.data && a.data.offer) ? "trade"
       : "insult";
@@ -603,6 +617,7 @@
     }
     if (v === "payoff") return (CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : Math.max(6, Math.ceil((CBZ.game.detection || 0) / 8) + Math.ceil((CBZ.game.complaints || 0) / 12) + (CBZ.game.gangJob ? 4 : 0) + (a.kind === "warden" ? 14 : 5))) + "";
     if (v === "pay") return a.approach && a.approach.cost ? a.approach.cost + "" : "";
+    if (v === "squash") return CBZ.squashGrudgeCost ? CBZ.squashGrudgeCost(a) + "" : "";
     if (v === "paySilence") return CBZ.knownSnitchCost ? CBZ.knownSnitchCost(a) + "" : "";
     if (v === "haggle") return a.approach && a.approach.haggled ? "done" : ((a.playerTrust || 0) >= 6 ? "trust helps" : "");
     if (v === "threaten" || v === "threatenSnitch") return CBZ.playerArmed && CBZ.playerArmed() ? "armed" : "";
