@@ -1530,6 +1530,15 @@
   }
 
   function startApproach(n, kind, cost, extra) {
+    /* TWO MEN AT YOUR SHOULDER CHANGE THE MATH. A tax or a stick-up is a
+       bet about being the stronger party; a flanked player visibly isn't
+       the weaker one, so the man rolls his approach and thinks better of
+       it — he keeps the WANT (the cooldown re-arms, he'll try you alone)
+       but not the walk. systems/prisonfriends.js owns the crew read. */
+    if ((kind === "tax" || kind === "stickUp") && CBZ.posseFlanked && CBZ.posseFlanked()) {
+      n.approachCD = 6 + rng() * 6;
+      return;
+    }
     if (cost > 0) {
       const sp = socialProfile();
       const payerRead = Math.max(0, (sp.paid || 0) + (sp.exploited || 0) - (sp.threatened || 0) - (sp.refused || 0));

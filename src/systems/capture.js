@@ -304,7 +304,12 @@
     // in-tier strike below, never to the card.
     const restrained = !!(CBZ.playerChar && CBZ.playerChar.cuffed) || player.captureState === "cuffed";
     const transferring = tiered && !T.top() && !campaign && restrained;
-    const taken = transferring ? 0 : Math.floor((g.cigs || 0) / 2);
+    let taken = transferring ? 0 : Math.floor((g.cigs || 0) / 2);
+    // CREW PALM A CUT. systems/prisonfriends.js: each of your men within
+    // arm's reach of the shakedown quietly holds a slice (0.25/man, cap
+    // 0.75) — and the nearest one tells you what he palmed a beat later.
+    // Banking through people you earned is what a posse is FOR.
+    if (taken > 0 && CBZ.posseShelterCut) taken = CBZ.posseShelterCut(taken);
     if (taken > 0 && CBZ.econ && CBZ.econ.addCigs) CBZ.econ.addCigs(-taken);
 
     if (transferring || (!tiered && strike >= 3 && !campaign && restrained)) {
