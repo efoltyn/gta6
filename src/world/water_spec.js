@@ -2133,6 +2133,28 @@
       // opacity a disaster has already dialled in (a receding tsunami fades
       // this plane out) still wins: the two multiply.
       "  float dwUnder = gl_FrontFacing ? 0.0 : 1.0;",
+      /* ---- SNELL'S WINDOW (2026-08-25) ---------------------------------
+         Seen from BELOW, this shader was handing every angle the same thing
+         it hands the sky: `sky = mix(vec3(0.48,0.65,0.72), ...)`, an unlit
+         pale grey-blue that owes nothing to the water it is the roof of. So
+         the ceiling of the sea was a flat #7aa6b8 sheet from one metre down
+         to twenty, and it is most of what made the owner's underwater frames
+         read as washed out — measured at 3.4 m under the shark island, a
+         #327ea5 medium under a (152,203,215) ceiling.
+
+         What actually happens is Snell's window: water/air total-internal-
+         reflects past a critical angle of 48.6 degrees, so a diver sees the
+         whole sky squeezed into a bright disc directly overhead and a MIRROR
+         of the dark water everywhere outside it. cos(48.6 deg) = 0.661, so
+         the window is the smoothstep across it; outside, the surface takes
+         the sea's own body tint. That is the "lighter showing surface" the
+         brief asks for AND the dark ceiling at grazing angles the reference
+         photographs have, from one physical fact rather than two dials.
+         Above water nothing changes: dwUnder is 0 and the mix never runs. */
+      "  if (dwUnder > 0.5) {",
+      "    float dwWin = smoothstep(0.52, 0.82, clamp(dot(N, V), 0.0, 1.0));",
+      "    outColor = mix(uDisasterTint * 0.34, outColor, dwWin);",
+      "  }",
       "  float dwSolid = clamp(max(max(foam, boil), clamp(sed, 0.0, 1.0)), 0.0, 1.0);",
       "  gl_FragColor = vec4(outColor, uDisasterOpacity * cbzSeaAlpha(V, vDwDist, dwUnder, dwSolid));",
       "  #include <tonemapping_fragment>",

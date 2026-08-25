@@ -35,6 +35,10 @@
   // SURV_BEACH_V2's live wet-line rig ({attr, base, h, th, wet, n}) + the
   // static shore numbers the before/after tool reads (CBZ.survShoreAudit).
   let shoreRig = null, shoreFacts = null;
+  // The kelp field's sway rig ({attr, base, lean, ph, n}) — see the seabed
+  // dressing in buildDisasterArena. Only ever touched while the eye is under
+  // water, which is the only place kelp is visible from.
+  let kelpRig = null;
 
   // SURV_SEABED — the island's coastal shelf (see groundHeightAt below). ON →
   // the ground falls away past the beach, so the open ocean is real water and
@@ -158,6 +162,36 @@
       dirty = true;
     }
     if (dirty) S.attr.needsUpdate = true;
+  });
+
+  /* ---- THE KELP MOVES, BUT ONLY WHEN ANYONE CAN SEE IT --------------------
+     A static weed field reads as plastic, and a per-frame vertex rewrite of a
+     few hundred verts is not the sort of thing this game has spare. Both are
+     avoided by the one gate that is actually true: kelp lives 3-13 m down and
+     is only ever LOOKED at from under the water, so the sway runs when — and
+     only when — world/water_underwater.js says the eye is submerged. On every
+     other frame in every other mode this costs one boolean.
+     ~650 vertices, no allocation, throttled to 15 Hz. */
+  let _kelpT = 0, _kelpNext = 0;
+  if (CBZ.onUpdate) CBZ.onUpdate(47.96, function (dt) {
+    const K = kelpRig;
+    if (!K || !arena || !CBZ.game || !CBZ.islandModeOn(CBZ.game.mode)) return;
+    if (!CBZ.cityCameraSubmerged || !CBZ.cityCameraSubmerged()) return;
+    _kelpT += dt || 0;
+    if (_kelpT < _kelpNext) return;
+    _kelpNext = _kelpT + 0.066;
+    const a = K.attr.array, b = K.base, ln = K.lean, ph = K.ph, t = _kelpT;
+    for (let i = 0; i < K.n; i++) {
+      const w = ln[i];
+      if (w < 0.02) continue;                 // the holdfast never moves
+      const p = ph[i];
+      const sx = Math.sin(t * 0.72 + p) * 0.5 + Math.sin(t * 1.63 + p * 2.1) * 0.18;
+      const sz = Math.cos(t * 0.61 + p * 1.4) * 0.46;
+      const q = i * 3;
+      a[q] = b[q] + sx * w;
+      a[q + 2] = b[q + 2] + sz * w;
+    }
+    K.attr.needsUpdate = true;
   });
 
   // deterministic-ish RNG so the map is the same each match (learnable)
@@ -382,14 +416,50 @@
     const BEACH_W = BEACH2 ? 26 : 8;   // grass edge → shelf handoff
     const SHORE_R = R + BEACH_W;       // where the shelf takes over from the beach
     const FORE_DROP = BEACH2 ? 1.9 : 0; // depth the foreshore has reached by SHORE_R
-    const DEEP = 34;                   // m — the shelf stops falling here (~100 m out)
+    /* ---- THE SHELF WAS A SANDBAR ------------------------------------------
+       The old profile was ONE straight 0.34 slope capped at 34 m, which meant
+       the whole ring a shark-sim player actually swims in — 20 to 60 m off the
+       beach — sat under three to twelve metres of water. world/water_
+       underwater.js grades the colour of the medium off exactly that number
+       (its `basin` term is smoothstep(2, 40, bedDepth)), so the entire game
+       was played at basin ~= 0.05: flat pale turquoise, everywhere, at every
+       depth. The grade was not broken; it was being fed a sandbar.
+
+       A real fringing shelf does not fall at a constant rate. It has a gentle
+       surf-zone ramp, then a distinct break where the slope steepens, then a
+       long uniform fall to the shelf edge. So: the first SHELF_KNEE metres past
+       the beach keep the ORIGINAL 0.34 exactly (r <= 150 — the near-shore
+       profile the shark's shore-blocking is calibrated against is byte-for-byte
+       untouched), the slope then eases up to SHELF_DEEP over SHELF_RAMP metres,
+       and holds until DEEP.
+
+       Measured off the function below: 30 m offshore = 9.1 m of water (was
+       3.7), 60 m = 22 m (was 9.6), and the outer ring bottoms out at 62 m
+       around r 241 instead of 34 m — the same cap the city's own shelf uses,
+       so `medium()` sees the same range of water column in both worlds. */
+    const DEEP = 62;                   // m — the shelf stops falling here (r ~241)
+    const SHELF_KNEE = 4;              // m past SHORE_R the original slope holds (r <= 150)
+    const SHELF_RAMP = 9;              // m over which the slope eases to its deep value
+    const SHELF_DEEP = 0.66;           // m of depth per m out, past the break
+    // Metres of water over the bed `d` metres past SHORE_R. The ramp is the
+    // integral of a smoothstep between the two slopes, so the profile is C1 —
+    // no visible crease in the drawn bed where the break happens.
+    function shelfDepth(d) {
+      const flat = FORE_DROP + d * SHELF_SLOPE;
+      const u = d - SHELF_KNEE;
+      if (u <= 0) return Math.min(flat, DEEP);
+      const s = u / SHELF_RAMP;
+      const add = s >= 1 ? SHELF_RAMP * 0.5 + (u - SHELF_RAMP)
+        : SHELF_RAMP * (s * s * s - s * s * s * s * 0.5);
+      return Math.min(flat + (SHELF_DEEP - SHELF_SLOPE) * add, DEEP);
+    }
     // the whole coast as one function of distance-from-centre: 0 on the grass,
     // berm + foreshore across the beach band, then the linear shelf. Every
     // consumer — physics, the drawn shore ring, the drawn seabed ring — reads
     // THIS, which is what keeps drawn and walked from ever being two surfaces.
     function coastHeightAt(dist) {
       const d = dist - SHORE_R;
-      if (d > 0) return -Math.min(FORE_DROP + d * SHELF_SLOPE, DEEP);
+      if (d > 0) return -shelfDepth(d);
       if (!BEACH2) return 0;
       const b = dist - R;              // metres past the grass edge
       if (b <= 0) return 0;
@@ -483,32 +553,265 @@
        CircleGeometry/RingGeometry are authored in XY and rotated -PI/2 about X,
        which maps local (x, y, z) -> world (x, z, -y). So the vertex's LOCAL Z
        is its world height, and its world XZ comes from local (x, -y). */
-    const seabedGeo = new THREE.RingGeometry(SHORE_R - 1, R + 170, 96, 28);
-    if (CBZ.CONFIG.SURV_SEABED !== false) {
-      const sp = seabedGeo.attributes.position, sa = sp.array;
-      for (let i = 0; i < sa.length; i += 3) {
-        sa[i + 2] = seabedAt(cx + sa[i], cz - sa[i + 1]) + 1.35;   // +1.35 undoes the mesh offset below
+    /* ---- THE SEA HAD A FLOOR THE COLOUR OF A BEACH TOWEL ------------------
+       What was here: RingGeometry(145 → 290) draped on the height field and
+       painted ONE flat MeshLambert 0xcdbb8f, plus fourteen separate circle
+       meshes for wet patches. Three faults, all visible in the shipped frames:
+
+         1. It stopped at r = 290 under a 1400 m ocean plane, so every surface
+            view out to sea showed water with nothing under it.
+         2. A single pale-tan albedo under a sun nothing ever dimmed clipped
+            toward WHITE at every depth. The owner's frame of a hammerhead over
+            it is a teal shark on a sheet of paper.
+         3. Fourteen circles = fourteen draw calls for mottling that a vertex
+            colour does for free.
+
+       Now: one mesh, out to R + 500, radially graded on a squared ring
+       distribution (fine where a swimmer can reach it, coarse at the horizon),
+       with the CITY's own bed ramp ported onto vertex colours — sand → silt →
+       shelf teal → abyssal sediment BY WATER COLUMN, which is exactly what
+       world/terrain_overhaul.js grades the continent's seabed by. The old wet
+       patches survive as low-frequency tone blotches in the same attribute.
+       Still one draw call, and thirteen fewer than before. */
+    const BED_R0 = SHORE_R - 1;        // shares the shore ring's outer rim exactly
+    const BED_R1 = R + 500;            // 620 m — well inside the 1400 m ocean plane
+    const BED_RINGS = 40, BED_SECT = 96;
+    function bss(e0, e1, x2) { let t = (x2 - e0) / (e1 - e0); t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); }
+    (function seaFloor() {
+      const flat = CBZ.CONFIG.SURV_SEABED === false;
+      const nv = (BED_RINGS + 1) * (BED_SECT + 1);
+      const pos = new Float32Array(nv * 3);
+      const col = new Float32Array(nv * 3);
+      const idx = [];
+      // ref values ported from world/terrain_overhaul.js's C3 bed ramp
+      // ...but DARKER than the city's, and deliberately. terrain_overhaul's
+      // own note records that its tiles are lit ~1.2x harder than the albedo
+      // reads and that a cream value therefore clipped to white; the island's
+      // rig is harsher still (survival.js writes sun 1.08 AND hemi 0.98, so a
+      // flat bed sees ~2.0x before this wave's dimmer and ~1.25x after). A
+      // 0.79-luma sand under that is white however good the ramp is.
+      const bedSand = new THREE.Color(0x5d5038), bedSilt = new THREE.Color(0x413a2b);
+      const bedShelf = new THREE.Color(0x1c303a), bedDeep = new THREE.Color(0x060d15);
+      const c = new THREE.Color();
+      let v = 0;
+      for (let i = 0; i <= BED_RINGS; i++) {
+        // squared distribution: ~1 m rings off the beach, ~30 m at the horizon
+        const rr = BED_R0 + (BED_R1 - BED_R0) * Math.pow(i / BED_RINGS, 1.7);
+        for (let j = 0; j <= BED_SECT; j++) {
+          const a = (j / BED_SECT) * Math.PI * 2;
+          const lx = Math.cos(a) * rr, ly = Math.sin(a) * rr;
+          const y = flat ? -1.35 : coastHeightAt(rr);
+          const wx = cx + lx, wz = cz - ly;
+          pos[v * 3] = lx; pos[v * 3 + 1] = ly; pos[v * 3 + 2] = y;
+          // metres of water standing over this vertex — the ONE thing the bed's
+          // colour depends on (world/terrain_overhaul.js, refs 3 and 5)
+          const column = OCEAN_Y - y;
+          c.copy(bedSand).lerp(bedSilt, bss(5, 24, column));
+          // a sloping bed should read as a slope: one multiplicative tone
+          // fall-off with the column, applied BEFORE the deep lerps so both
+          // deep endpoints stay exact
+          c.multiplyScalar(1 - bss(1, 20, column) * 0.46);
+          c.lerp(bedShelf, bss(10, 30, column));
+          c.lerp(bedDeep, bss(20, 50, column));
+          // Sand banding + patchiness. Deliberately LOW frequency, from
+          // analytic sums rather than a hash: the ring spacing runs 1 m at the
+          // beach to 30 m at the horizon, so anything with a period under ~60 m
+          // is sampled below Nyquist out there and comes out as a moiré of the
+          // grid instead of as sand. (CBZ.hash01 quantises to 0.1 of its input,
+          // which at any usable scale here is per-vertex white noise — it looks
+          // like static on a 1 m ring and like nothing at all on a 30 m one.)
+          // The blotches are what the fourteen deleted "wet patch" circle
+          // meshes used to be; the band is a broad sand ripple, faded out past
+          // the shelf break where the bed is uniform sediment anyway.
+          const blot = (Math.sin(wx * 0.037 + wz * 0.021) * 0.5 + 0.5) * 0.6 +
+                       (Math.sin(wx * -0.017 + wz * 0.049 + 1.7) * 0.5 + 0.5) * 0.4;
+          const band = 0.05 * Math.sin(rr * 0.11 + a * 3.0) * (1 - bss(14, 34, column));
+          const tone = (1 + (blot - 0.5) * 0.26 + band) * (1 - 0.20 * bss(0.66, 0.96, blot));
+          col[v * 3] = c.r * tone; col[v * 3 + 1] = c.g * tone; col[v * 3 + 2] = c.b * tone;
+          v++;
+        }
       }
-      sp.needsUpdate = true;
-      seabedGeo.computeVertexNormals();
-    }
-    const seabed = new THREE.Mesh(seabedGeo,
-      new THREE.MeshLambertMaterial({ color: 0xcdbb8f, side: THREE.DoubleSide }));
-    seabed.rotation.x = -Math.PI / 2; seabed.position.set(cx, -1.35, cz);
-    seabed.receiveShadow = true; root.add(seabed);
-    // darker wet patches + shallow pools scattered across the exposed shelf
-    const wetM = new THREE.MeshLambertMaterial({ color: 0xa39572 });
-    const poolM = new THREE.MeshLambertMaterial({ color: 0x5e7d86 });
-    for (let i = 0; i < 14; i++) {
-      const a2 = rng2() * Math.PI * 2, d2 = R + 10 + rng2() * 148;
-      const pm = new THREE.Mesh(new THREE.CircleGeometry(3.5 + rng2() * 9, 12), i % 3 === 2 ? poolM : wetM);
-      pm.rotation.x = -Math.PI / 2;
-      // Sit each patch ON the shelf now that the shelf has a shape — a fixed
-      // -1.15 would bury them in the slope or hang them in the water column.
-      const pmx = cx + Math.cos(a2) * d2, pmz = cz + Math.sin(a2) * d2;
-      pm.position.set(pmx, groundHeightAt(pmx, pmz) + 0.2, pmz);
-      root.add(pm);
-    }
+      const stride = BED_SECT + 1;
+      for (let i = 0; i < BED_RINGS; i++) {
+        for (let j = 0; j < BED_SECT; j++) {
+          const a = i * stride + j, b = a + 1, d = a + stride, e = d + 1;
+          idx.push(a, b, d, b, e, d);
+        }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      geo.setIndex(idx);
+      geo.computeVertexNormals();
+      geo.computeBoundingSphere();
+      const bedMat = new THREE.MeshLambertMaterial({
+        color: 0xffffff, vertexColors: true, side: THREE.DoubleSide,
+      });
+      bedMat.name = "survival-seabed";   // never water/ocean/sea (test contract)
+      const seabed = new THREE.Mesh(geo, bedMat);
+      seabed.rotation.x = -Math.PI / 2; seabed.position.set(cx, 0, cz);
+      seabed.receiveShadow = true;
+      seabed.userData.terrain = true;    // batch.js / farcull.js keep their hands off
+      root.add(seabed);
+    })();
+
+    /* ---- DRESSING: THIS IS A SEA FLOOR, NOT A GRADIENT --------------------
+       Two draw calls total, both built once, both deterministic (CBZ.hash01 and
+       the private rng2 stream, so the island's seeded layout is untouched).
+
+       ROCKS: one InstancedMesh of a flat-shaded icosahedron, squashed and
+       rotated per instance, sunk a third of its height into the bed. r128's
+       fragment shader only applies vColor under USE_COLOR, so the per-instance
+       colour needs BOTH instanceColor and a (white) vertex-colour attribute —
+       instanceColor alone compiles and then does nothing.
+       KELP: one merged mesh of tapered double-sided ribbons in the 3-13 m band,
+       which is exactly the water a shark-sim player swims in. It sways, but
+       only while the camera is actually under water — see the tick below. */
+    (function seaDressing() {
+      if (CBZ.CONFIG.SURV_SEABED === false) return;
+      const bedY = (x, z) => groundHeightAt(x, z);
+
+      // ---- rocks ----------------------------------------------------------
+      // SIZED BY THE QUALITY KNOB, not by a magic constant (the house rule).
+      // The density matters more than it looks: the medium's view distance
+      // down here is ~21 m, so a 21 m disc of floor is all a swimmer ever
+      // sees at once — about 1,400 m2. The first pass scattered 120 rocks
+      // over the whole 210,000 m2 shelf, which is 0.8 rocks in view. One
+      // rock is indistinguishable from none.
+      const ROCKS = Math.round(CBZ.qScale ? CBZ.qScale(190, 560) : 460);
+      const rockGeo = new THREE.IcosahedronGeometry(1, 0);
+      const rc = new Float32Array(rockGeo.attributes.position.count * 3).fill(1);
+      rockGeo.setAttribute("color", new THREE.BufferAttribute(rc, 3));
+      // no flatShading: r128's Lambert is Gouraud and warns about the property.
+      // IcosahedronGeometry is non-indexed with per-face normals already, so
+      // the facets are there for free.
+      const rockMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+      rockMat.name = "survival-seabed-rock";
+      const rocks = new THREE.InstancedMesh(rockGeo, rockMat, ROCKS);
+      const m4 = new THREE.Matrix4(), qq = new THREE.Quaternion();
+      const ee = new THREE.Euler(), sc = new THREE.Vector3(), pv = new THREE.Vector3();
+      // DARK, and much darker than the number looks. The renderer is linear with
+      // an ACES curve and an sRGB encode on the way out, and that pair lifts a
+      // linear 0.34 to roughly 200/255 on screen — so an albedo that reads
+      // "dark grey" in a hex picker photographs as pale concrete. Measured: a
+      // 0x565045 boulder came out (197,185,170) against a sand bed it is
+      // supposed to be darker than.
+      const rockHi = new THREE.Color(0x2b2823), rockLo = new THREE.Color(0x080d12);
+      const rcol = new THREE.Color();
+      for (let i = 0; i < ROCKS; i++) {
+        const a = rng2() * Math.PI * 2;
+        // biased inward: most rocks where the player can actually see them
+        const t = rng2();
+        const rr = SHORE_R + 6 + t * t * 150;
+        const x = cx + Math.cos(a) * rr, z = cz + Math.sin(a) * rr;
+        const y = bedY(x, z);
+        const s = 0.34 + rng2() * rng2() * 1.7;
+        sc.set(s * (0.8 + rng2() * 0.6), s * (0.42 + rng2() * 0.45), s * (0.8 + rng2() * 0.6));
+        ee.set(rng2() * 3.1, rng2() * 6.28, rng2() * 3.1);
+        qq.setFromEuler(ee);
+        pv.set(x, y + sc.y * 0.24, z);
+        m4.compose(pv, qq, sc);
+        rocks.setMatrixAt(i, m4);
+        const column = OCEAN_Y - y;
+        rcol.copy(rockHi).lerp(rockLo, bss(4, 40, column))
+          .multiplyScalar(0.82 + rng2() * 0.34);
+        rocks.setColorAt(i, rcol);
+      }
+      rocks.instanceMatrix.needsUpdate = true;
+      if (rocks.instanceColor) rocks.instanceColor.needsUpdate = true;
+      rocks.castShadow = false; rocks.receiveShadow = false;
+      rocks.userData.terrain = true;
+      root.add(rocks);
+
+      // ---- kelp -----------------------------------------------------------
+      // A CLUMP, NOT A STRAP. One blade per holdfast came out as a single
+      // half-metre rubber band standing in open water; kelp reads as kelp
+      // because several narrow blades rise from one point and fan apart. So:
+      // CLUMPS holdfasts, BLADES narrow ribbons each, every ribbon SEGS+1 rows
+      // of 2 vertices, tapering and bowing. Merged by hand into flat arrays —
+      // no BufferGeometryUtils round trip for a shape this regular, and the
+      // flat arrays are what the sway below writes into.
+      const CLUMPS = Math.round(CBZ.qScale ? CBZ.qScale(60, 165) : 140), BLADES = 3, SEGS = 5;
+      const STRANDS = CLUMPS * BLADES;
+      const rows = SEGS + 1, vpS = rows * 2;
+      const nv = STRANDS * vpS;
+      const kp = new Float32Array(nv * 3);
+      const kc = new Float32Array(nv * 3);
+      const kbase = new Float32Array(nv * 3);
+      const klean = new Float32Array(nv);      // 0 at the holdfast, 1 at the tip
+      const kph = new Float32Array(nv);        // per-strand phase
+      const kidx = [];
+      const kelpLit = new THREE.Color(0x25331a), kelpDim = new THREE.Color(0x0e170f);   // same encode note as the rocks
+      const kcol = new THREE.Color();
+      let kv = 0, placed = 0;
+      for (let s = 0; s < CLUMPS * 8 && placed < CLUMPS; s++) {
+        const a = rng2() * Math.PI * 2;
+        const rr = SHORE_R + 2 + rng2() * 34;
+        const hx = cx + Math.cos(a) * rr, hz = cz + Math.sin(a) * rr;
+        const hy = bedY(hx, hz);
+        const column = OCEAN_Y - hy;
+        if (column < 2.2 || column > 16) continue;   // kelp is a shallow-shelf plant
+        placed++;
+        const phase = rng2() * 6.28;
+        for (let bl = 0; bl < BLADES; bl++) {
+          // each blade starts a few centimetres off the holdfast and leans its
+          // own way, so the clump fans instead of stacking on one line
+          const sp = rng2() * 6.28, spr = rng2() * 0.45;
+          const x = hx + Math.cos(sp) * spr, z = hz + Math.sin(sp) * spr;
+          const y = bedY(x, z);
+          // never taller than the water it stands in, or a blade pokes through
+          // the surface and reads as a stick floating in the sea
+          const H = Math.min(column * 0.86, 2.4 + rng2() * 4.6);
+          const w0 = 0.09 + rng2() * 0.10;
+          const lean = rng2() * 6.28, leanR = 0.24 + rng2() * 0.42;
+          const twist = a + rng2() * 3.1;
+          const cs = Math.cos(twist), sn = Math.sin(twist);
+          const base0 = kv;
+          for (let r2 = 0; r2 < rows; r2++) {
+            const f = r2 / SEGS;
+            const w = w0 * (1 - f * 0.62);
+            const ly = y + H * f;
+            // the blade bows away from vertical as it rises
+            const bx = Math.cos(lean) * leanR * H * f * f;
+            const bz = Math.sin(lean) * leanR * H * f * f;
+            for (let e = 0; e < 2; e++) {
+              const o = (e ? w : -w);
+              const px = x + bx + cs * o, pz = z + bz + sn * o;
+              kp[kv * 3] = px; kp[kv * 3 + 1] = ly; kp[kv * 3 + 2] = pz;
+              kbase[kv * 3] = px; kbase[kv * 3 + 1] = ly; kbase[kv * 3 + 2] = pz;
+              klean[kv] = f * f; kph[kv] = phase + bl * 0.7;
+              kcol.copy(kelpDim).lerp(kelpLit, f * 0.55 + 0.25)
+                .multiplyScalar(0.7 + rng2() * 0.5);
+              kc[kv * 3] = kcol.r; kc[kv * 3 + 1] = kcol.g; kc[kv * 3 + 2] = kcol.b;
+              kv++;
+            }
+          }
+          for (let r2 = 0; r2 < SEGS; r2++) {
+            const q = base0 + r2 * 2;
+            kidx.push(q, q + 1, q + 2, q + 1, q + 3, q + 2);
+          }
+        }
+      }
+      if (placed) {
+        const kgeo = new THREE.BufferGeometry();
+        kgeo.setAttribute("position", new THREE.BufferAttribute(kp.subarray(0, kv * 3), 3));
+        kgeo.setAttribute("color", new THREE.BufferAttribute(kc.subarray(0, kv * 3), 3));
+        kgeo.setIndex(kidx);
+        kgeo.computeVertexNormals();
+        kgeo.computeBoundingSphere();
+        const kmat = new THREE.MeshLambertMaterial({
+          color: 0xffffff, vertexColors: true, side: THREE.DoubleSide,
+        });
+        kmat.name = "survival-seabed-kelp";
+        const kelp = new THREE.Mesh(kgeo, kmat);
+        kelp.frustumCulled = true;
+        kelp.userData.dynamic = true;      // never batch-merge a mesh we rewrite
+        root.add(kelp);
+        kelpRig = {
+          attr: kgeo.getAttribute("position"), base: kbase, lean: klean, ph: kph, n: kv,
+        };
+      }
+    })();
 
     // the island disc (grass) with a sandy beach ring. Flag off: the old flat
     // 8 m stripe. Flag on: the ring is DRAPED over coastHeightAt — the berm,

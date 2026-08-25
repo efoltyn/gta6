@@ -198,11 +198,29 @@
   const MURK_LAKE = 2.15;      // an inland body is this much murkier than open sea
 
   // Depth (metres below the surface) at which the eye's own descent has taken
-  // the colour as far as it goes.
+  // the colour as far as it goes. BLACKOUT normalises the EYE for the glow and
+  // ray fades; DIVE_DARK is the shorter scale the COLOUR ramp uses — see the
+  // note on medium() for why they are two numbers and not one.
   const BLACKOUT = 26;
+  const DIVE_DARK = 16;
   // Where the SEABED-depth half of `k` runs from and to. 2 m of water is a
-  // sandbar; 40 m is offshore blue. Beyond that the ramp is already at its end.
-  const BASIN_LIGHT = 2, BASIN_DARK = 40;
+  // sandbar; 18 m is already open blue.
+  //
+  // BASIN_DARK WAS 40, and that is not what the reference photographs say.
+  // The shark refs are shot over 15-25 m of water and that water is ALREADY a
+  // saturated blue, while smoothstep(2, 40) called 17 m "a third of the way to
+  // open ocean" and handed it a Bahamas turquoise. Measured on the island at
+  // 3.4 m over a 17.5 m column, the old window produced a #327ea5 medium that
+  // renders (through ACES and the sRGB encode, which lift a linear fog colour
+  // a very long way) as a (148,205,215) pale sheet — the exact frame the owner
+  // rejected.
+  //
+  // NEITHER APPROVED ANCHOR MOVES. Both worlds' deep frames are shot over a
+  // 62 m column and the city's own shallow preset is 95 m offshore over its
+  // 62 m cap, so every frame this ramp was tuned on sits at basin = 1 under
+  // both windows. What changes is genuinely near-shore water — under 18 m —
+  // which gets bluer sooner, which is what the photographs show.
+  const BASIN_LIGHT = 2, BASIN_DARK = 18;
   // How far you can see, by `k`. Linear THREE.Fog, so this is literally "how
   // far can you see" — long over sand (ref 3), short in the deep (ref 5).
   const FOG_FAR_SHALLOW = 40, FOG_FAR_MID = 24, FOG_FAR_DEEP = 16;
@@ -440,9 +458,19 @@
           "  vec2 q = rot * (vUv * 21.0) + vec2(uTime * -0.013, uTime * 0.019);",
           "  float b = texture2D(uTex, q).r;",
           "  float c = pow(a * b, 0.85);",
-          // radial falloff so the plane's rim is never a visible edge
+          // THE CEILING IS A DISC, NOT A SHEET. The plane follows the camera,
+          // so `r` is horizontal distance from the swimmer: 0.35..0.98 meant
+          // full strength out to 33 m and something out to 93 m, i.e. an
+          // ADDITIVE, FOG-FREE layer over the entire upper half of every
+          // underwater frame. Measured at 3.4 m under the shark island, that
+          // lifted a #327fa5 medium to a (100,182,201) wash — the pale sheet
+          // the whole brief is about, and it was coming from the one effect
+          // nothing could fog. Tightened to a bright patch overhead falling
+          // off by ~28 m, which is both what a diver sees (the light that
+          // dances on the ceiling is the light near you) and inside the
+          // medium's own view distance, so the far water is the water again.
           "  float r = length(vUv - 0.5) * 2.0;",
-          "  float edge = 1.0 - smoothstep(0.35, 0.98, r);",
+          "  float edge = 1.0 - smoothstep(0.055, 0.30, r);",
           "  float v = c * edge * uStrength;",
           // The plane is 190m across but `edge` has already killed everything
           // past ~35% of the half-width, so most of that area blends pure
@@ -519,15 +547,27 @@
       ceilU.uTime.value = t;
       // Caustics come from sunlight refracting THROUGH the surface, so they
       // die with depth and with the day. Strongest in the first few metres.
-      const dfade = Math.max(0, 1 - depth / 16);
-      ceilU.uStrength.value = 0.85 * dfade * dfade * day;
+      // 16 m was too short a reach, and for the wrong reason: what depth does
+      // to a caustic pattern is BLUR it, not delete it — and the one view that
+      // wants the ceiling most is looking UP from the deep, where ref 5's whole
+      // subject is a bright rippling surface over a dark column. At 12 m the
+      // old constant left 5% of it, i.e. nothing.
+      const dfade = Math.max(0, 1 - depth / 26);
+      // 0.85 OF A NEAR-WHITE was too much light to hang over the whole upper
+      // hemisphere. This plane is 190 m across and ADDITIVE, so its average
+      // contribution — not its peak — is what the eye reads, and measured at
+      // 2.6 m under it was lifting a #3383a8 medium to (90,155,178): a pale
+      // grey-teal wash exactly like the one the owner rejected. Halved, and
+      // the colour pulled off white toward the medium's own blue, so what is
+      // left is a rippling pattern rather than a sheet of daylight.
+      ceilU.uStrength.value = 0.45 * dfade * dfade * day;
       ceilU.uColor.value.setRGB(
-        Math.min(1, 0.55 + tint.r * 0.9),
-        Math.min(1, 0.80 + tint.g * 0.5),
-        Math.min(1, 0.92 + tint.b * 0.3));
+        Math.min(1, 0.32 + tint.r * 1.0),
+        Math.min(1, 0.54 + tint.g * 0.7),
+        Math.min(1, 0.76 + tint.b * 0.45));
     }
     if (shafts && shaftMat) {
-      const gfade = Math.max(0, 1 - depth / 22);
+      const gfade = Math.max(0, 1 - depth / 30);
       shaftMat.opacity = 0.30 * gfade * gfade * day;
       const vis = shaftMat.opacity > 0.004;
       for (let i = 0; i < shafts.length; i++) {
@@ -715,10 +755,113 @@
     savedFog.far = savedFar;
     myFog = null; savedFog = null;
     lastNear = lastFar = -1;
+    driveLight(0, 0);              // give the world its daylight back at once
+    releaseSky(scene);
     // Stop re-asserting a water colour onto a Fog we no longer own. sky.js
     // repaints itself from here: daynight writes the day colour to the
     // restored Fog and its moved-test sees the jump.
     fogCReady = false;
+  }
+
+  /* ============================================================
+     HALF THE FRAME WAS STILL SKY (2026-08-25)
+
+     The seam note below fixed the colour core/sky.js paints BELOW its horizon
+     row. It could not fix the half above it, because that half is a sky
+     gradient by construction: core/sky.js:653 fills SKY_H/2 downward with
+     scene.fog.color and everything above stays daylight blue. Above water that
+     is exactly right — the dome IS the sky. Eleven metres under it means that
+     any pixel with no geometry in it, looking level or up, is painted a bright
+     daylight blue on top of a dark navy medium. Measured on the shark island
+     at 1.6 m: a #2a8ba5 fog, and a frame reading about (128,180,186).
+
+     There is no repaint to win here — the dome is a BACKGROUND (fog:false,
+     depthTest:false, renderOrder -10000) and its job is to be what an empty
+     pixel falls back to. So while the eye is properly under, the empty pixel
+     falls back to the WATER instead: the dome is hidden and scene.background
+     is taken over by the live medium colour, which is what r128's
+     WebGLBackground clears the buffer to. Both are restored on surfacing.
+
+     THE 0.9 m THRESHOLD IS NOT A FUDGE. Straddling the waterline, the top of
+     the frame is genuinely above the surface and genuinely sky — that is the
+     whole point of the meniscus band and the clipped tint gradient. So the
+     takeover waits until the eye is a clear metre under, where there is no
+     above-water half left to protect. */
+  let savedBg, bgHave = false, domeWas = -1;
+  const _bgC = new THREE.Color();
+  function holdSky(scene) {
+    if (bgHave || !scene) return;
+    savedBg = scene.background;
+    scene.background = _bgC;
+    bgHave = true;
+    const dome = CBZ.skyDome;
+    if (dome) { domeWas = dome.visible ? 1 : 0; dome.visible = false; }
+  }
+  function releaseSky(scene) {
+    if (!bgHave) return;
+    if (scene && scene.background === _bgC) scene.background = savedBg;
+    savedBg = undefined; bgHave = false;
+    const dome = CBZ.skyDome;
+    if (dome && domeWas >= 0) dome.visible = !!domeWas;
+    domeWas = -1;
+  }
+
+  /* ============================================================
+     THE SUN DOES NOT GO UNDERWATER WITH YOU (2026-08-25)
+
+     Nothing in this engine has ever read CBZ.cityCameraSubmerged, which meant
+     the LIGHTS never changed when your eyes went under. modes/survival.js
+     (onAlways 93) writes sun 1.08 / hemi 0.98 every single frame, and
+     core/gfx.js re-applies the tone-map gain on top at 94.5 — so a seabed nine
+     metres down was being lit exactly as hard as the beach, and a pale sand
+     albedo under that much light CLIPS. That is most of what made the owner's
+     underwater frames read as a shark floating on a sheet of paper: the fog
+     was already grading, and the floor underneath it was still at full noon.
+
+     Sunlight does not survive water. Ten metres of clear sea takes roughly
+     two thirds of it, and by twenty-five there is barely a tenth left; what
+     remains is what makes a deep shark a SILHOUETTE rather than a lit object.
+     So: one exponential, applied to the sun, the hemisphere and the bounce
+     fill, eased on the same 0.22 s ramp as the tint.
+
+     WHY THIS CANNOT COMPOUND. Every mode rewrites these intensities from
+     scratch before we run (survival.js @93, city/mode.js @94, core/gfx.js
+     @94.5), so we are always scaling a FRESH number. The `lit*` fields are the
+     same foreign-write probe the fog uses above: if what we find is not what
+     we last wrote, someone else authored it and that is the new base. If
+     nobody rewrote it (a mode with no light writer), we still hold the base we
+     adopted and the multiply stays idempotent. Surfacing writes the base back.
+     ============================================================ */
+  const LIGHT_FLOOR = 0.13;     // fraction of the KEY light left in the deep
+  const AMB_FLOOR = 0.22;       // ...and of the scattered ambient
+  const LIGHT_SCALE = 4.6;      // e-folding depth, metres
+  let litSun = -1, litHemi = -1, litBounce = -1;
+  let baseSun = 0, baseHemi = 0, baseBounce = 0;
+  function driveLight(depth, amount) {
+    const sun = CBZ.sun, hemi = CBZ.hemi, bounce = CBZ.bounce;
+    if (!sun) return;
+    if (sun.intensity !== litSun) baseSun = sun.intensity;
+    if (hemi && hemi.intensity !== litHemi) baseHemi = hemi.intensity;
+    if (bounce && bounce.intensity !== litBounce) baseBounce = bounce.intensity;
+    if (!(amount > 0.002)) {
+      if (litSun >= 0) {
+        sun.intensity = baseSun;
+        if (hemi) hemi.intensity = baseHemi;
+        if (bounce) bounce.intensity = baseBounce;
+        litSun = litHemi = litBounce = -1;
+      }
+      return;
+    }
+    const d = Math.max(0, depth);
+    const lit = LIGHT_FLOOR + (1 - LIGHT_FLOOR) * Math.exp(-d / LIGHT_SCALE);
+    // The ambient half keeps more than the key does, and keeps it longer:
+    // light underwater is SCATTERED, so a diver's shadow side is never black
+    // the way a direct-only falloff would make it.
+    const litA = AMB_FLOOR + (1 - AMB_FLOOR) * Math.exp(-d / (LIGHT_SCALE * 1.6));
+    const f = 1 - amount * (1 - lit);
+    sun.intensity = baseSun * f; litSun = sun.intensity;
+    if (hemi) { hemi.intensity = baseHemi * (1 - amount * (1 - litA)); litHemi = hemi.intensity; }
+    if (bounce) { bounce.intensity = baseBounce * f; litBounce = bounce.intensity; }
   }
 
   /* ---- THE SEAM LAW IS ALSO A SUBMERGED LAW -------------------------------
@@ -809,15 +952,37 @@
     return out;
   }
 
-  /* THE MEDIUM. `k` is the one number the whole look hangs off:
+  /* THE MEDIUM. `k` is the one number the whole look hangs off, and it was
+     WEIGHTED THE WRONG WAY ROUND (2026-08-25).
 
-       k = 0.66 * (seabed depth here, 2m..40m) + 0.34 * (eye depth, 0..26m)
+     It used to be `0.66 * basin + 0.34 * dive` over a 26 m eye scale, i.e. the
+     colour was almost entirely a function of how deep the SEABED is and barely
+     a function of how deep YOU are. The reasoning was sound for the two city
+     reference photographs it was tuned on (both taken a few metres down, one
+     over sand and one over the abyss). It is wrong the moment anyone actually
+     descends: the owner's shark refs are the same water at two eye depths —
+     bright sunlit blue near the surface, dark desaturated blue-green twelve
+     metres down — and the old weights moved `k` by 0.16 across that whole dive.
+     Diving did essentially nothing to the picture.
 
-     Weighted toward the SEABED because that is what the owner's photographs
-     actually differ by — ref 3 and ref 5 are both taken a few metres under the
-     surface, and the only reason one is turquoise and the other is navy is how
-     much water is underneath the photographer. The eye's own depth is the
-     second term so that descending in one place still darkens.
+     THE REBALANCE, and why it is not just "swap the numbers". What the eye
+     reads horizontally underwater is two separate things:
+       * how much sunlight has survived the water ABOVE you — that is `dive`,
+         and it is the term that must dominate, because it is the only one that
+         changes when you swim down;
+       * whether there is a bright bottom close enough to bounce light back —
+         that is `1 - basin`, and it is what keeps a sandbar turquoise no matter
+         what. Its influence has to FADE as you leave it behind, which is what
+         the negative cross term does.
+
+           k = 0.40 * basin + 0.72 * dive - 0.14 * basin * dive
+
+     Solved so the approved CITY deep frame is arithmetically unchanged: at the
+     open-ocean anchor (62 m bed, 11 m eye) this is 0.799 against the old 0.800.
+     The city's shallows come out LIGHTER (a 30 m bed at 4 m eye: 0.49 against
+     0.62 — which is the direction ref 3 wanted anyway), and a dive over the
+     island's shelf finally goes dark: 12 m down over 25 m of water is 0.75,
+     where the old weights gave 0.35.
 
      Then: the day factor (a night dive really is black), the inland-lake green
      shift, and a gentle Beer-Lambert trim on the eye depth alone. Writes into
@@ -825,8 +990,8 @@
   const _tint = { r: 0, g: 0, b: 0 };
   function medium(eyeDepth, bedDepth, murk, inland, day, out) {
     const basin = smoothstep(BASIN_LIGHT, BASIN_DARK, bedDepth);
-    const dive = clamp01(eyeDepth / BLACKOUT);
-    const k = clamp01(basin * 0.66 + dive * 0.34);
+    const dive = clamp01(eyeDepth / DIVE_DARK);
+    const k = clamp01(basin * 0.40 + dive * 0.72 - basin * dive * 0.14);
     rampAt(k, out);
     // spectral trim — red first, over the metres the eye itself has descended
     const e = Math.max(0, eyeDepth) * murk;
@@ -921,6 +1086,11 @@
     // consumer's authored dial.
     if (CBZ.terrainFogScaleSubmerged) CBZ.terrainFogScaleSubmerged(shown);
 
+    // THE LIGHT GOES DOWN WITH THE EYE. Order 99.6 is after every mode's own
+    // light writer (survival.js @93, city/mode.js @94, core/gfx.js @94.5), so
+    // this always scales a fresh authored value — see driveLight's note.
+    driveLight(depth, shown);
+
     breathVignette(dt);
     // Nothing below costs anything unless the treatment is on screen. `_eye`
     // is only current when eyeDepth() ran this frame, so never read it here
@@ -1001,6 +1171,9 @@
       _tint.b + (SURFACE_GLOW.b * day - _tint.b) * gm);
     myFog.color.copy(_fogC);
     fogCReady = true;              // _fogC is now a real colour for the 98.9 pass
+    // ...and an empty pixel falls back to the water rather than to daylight.
+    if (CFG.WATER_UW_SKY_SEAM === false || depth < 0.9) releaseSky(scene);
+    else { _bgC.copy(_fogC); holdSky(scene); }
     myFog.near = 0.4;
     // Visibility by `k`, not by eye depth: a metre under the surface in a 60 m
     // trench is already dark blue with the far wall gone, and ten metres down
