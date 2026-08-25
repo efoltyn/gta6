@@ -189,6 +189,204 @@
   }
 
   // ============================================================
+  //  GROWTH — THE BODY IS THE PROGRESS BAR
+  // ============================================================
+  /* OWNER, verbatim: "each time the shark eats something it should get
+     bigger ... getting bigger is a huge thing, like some megalodons should be
+     bigger than others, ALL animals in the game, and it's based on how much
+     they eat — eat a big shark you grow more vs eating a little fish."
+
+     Agario logic, and the reason it belongs in THIS file rather than in a new
+     one: the section above already answers "how big is this individual" for
+     every animal in the game, and every consumer in the repo already reads
+     that answer through SZ()/CBZ.wildlifeScale. Growth is therefore not a new
+     system — it is a SECOND TERM in the multiplier this file already owns.
+
+       _sizeMul   the spawn draw. IMMUTABLE. What this animal was born as.
+       eatenMass  the ledger. How much meat it has eaten in its current form.
+       _growMul   the ledger, curved. 1 .. growCap(sp).
+       _sizeEff   species.scale x _sizeMul x _growMul x (baby grow)
+
+     Splitting the draw from the ledger is load-bearing: the curve is defined
+     relative to the body the animal was BORN with, so folding growth back into
+     _sizeMul would make appetite compound on itself and the caps meaningless.
+
+     ---- THE CURVE ----------------------------------------------------------
+     g = 1 + (cap - 1) * (1 - exp(-m / M0))
+
+     Monotonic, continuous, and saturating — the three properties the design
+     needs. Saturating is the one that matters: it is what makes a big meal
+     worth more than the same mass in small ones (25 mass of orca buys 0.71 of
+     the range; twenty-five mackerel eaten one at a time buy the same 0.71
+     only because the ledger is a SUM — but the first orca buys 0.26 where the
+     first mackerel buys 0.06, so the animal that hunts well is visibly ahead
+     of the one that grazes, which is the whole design).
+
+     M0 — the e-folding mass — goes as the body^MASS_P, so a megalodon needs
+     roughly five times a bull shark's tonnage to move the same fraction. A
+     mackerel barely swells you; a shark is a visible jump.
+
+     ---- THE CAP IS NOT DECORATION -----------------------------------------
+     Two separate rails, and both are real:
+       1. growCap(sp) — per species, 1.0..1.4. A bull shark is a growth animal
+          and a bait fish is not, and the ceiling is what keeps a fed animal
+          reading as a big ONE OF ITS KIND rather than as a balloon.
+       2. K_MAX — the rail the size section already published: nothing may
+          become another species. A monster great white (1.86) that eats all
+          match still stops short of a megalodon (2.6). Growth is clamped into
+          the SAME rail rather than being allowed to sail past it, because the
+          silhouette ladder is the game's other progression and a shark that
+          can eat its way into looking like the next rung erases it.
+     The second rail also protects the LOD/draw radii, which are derived from
+     scale and were tuned against K_MAX.
+
+     ---- FLAGS -------------------------------------------------------------
+     CBZ.CONFIG.MASS_ECONOMY — off: no ledger, no growth, anywhere.
+     CBZ.CONFIG.WILD_GROWTH  — off: the player still grows, wild animals do
+                               not (the ledger keeps accruing, it just stops
+                               being spent on the body).  */
+  if (C.MASS_ECONOMY == null) C.MASS_ECONOMY = true;
+  if (C.WILD_GROWTH == null) C.WILD_GROWTH = true;
+  function MASS_ON() { return C.MASS_ECONOMY !== false; }
+  function WILD_ON() { return C.WILD_GROWTH !== false; }
+
+  const MASS_E = 18;      // e-folding mass for a reference (scale 1) body
+  const MASS_P = 1.6;     // ..and how that appetite grows with the body
+
+  /* PER-SPECIES CEILINGS. A row may author its own `growCap` and win outright;
+     these are the ones the marine ladder needed to differ by hand (the owner
+     asked for exactly this: "a bull shark's ceiling differs from an orca's").
+     Everything else derives from facts the bestiary already carries, so a new
+     species still costs no row. */
+  const GROW_CAP = {
+    bull_shark: 1.40, hammerhead_shark: 1.36, great_white_shark: 1.34,
+    megalodon: 1.30, orca: 1.26, tiger_shark: 1.38, mako_shark: 1.38,
+    barracuda: 1.30, marlin: 1.22, tuna: 1.20, dolphin: 1.16,
+    humpback_whale: 1.10, blue_whale: 1.08, fish: 1.10, sardine: 1.08,
+  };
+  function growCap(sp) {
+    if (!sp) return 1;
+    if (Number.isFinite(sp.growCap)) return clamp(+sp.growCap, 1, 1.4);
+    const named = GROW_CAP[sp.id];
+    if (named) return named;
+    /* DERIVED. A PREDATOR grows on what it kills, which is the whole premise,
+       so `danger` is the dial. A SCHOOLING animal is uniform by definition
+       (the size section already spends `herd` on exactly that argument) and
+       gets the narrowest ceiling of all — forty near-identical mackerel must
+       not become forty differently-sized mackerel just because some of them
+       found more plankton. */
+    const grp = (sp.herd && sp.herd[1]) || 1;
+    const school = grp >= 12 ? 0.35 : (grp >= 5 ? 0.7 : 1);
+    return clamp(1 + (0.13 + 0.27 * clamp(sp.danger || 0, 0, 1)) * school, 1, 1.4);
+  }
+
+  // The ledger, curved. Pure: same mass in, same multiplier out, forever.
+  function growthOf(a) {
+    if (!a || !MASS_ON()) return 1;
+    const m = +a.eatenMass;
+    if (!(m > 0)) return 1;
+    const sp = a.species;
+    const cap = growCap(sp);
+    if (!(cap > 1)) return 1;
+    // the body this animal was BORN with — the curve's own reference
+    const born = ((sp && sp.scale) || 1) * (a._sizeMul > 0 ? a._sizeMul : 1);
+    const m0 = MASS_E * Math.pow(Math.max(0.2, born), MASS_P);
+    return 1 + (cap - 1) * (1 - Math.exp(-m / m0));
+  }
+
+  /* THE INDIVIDUAL FACTOR, as a multiplier on the SPECIES constant — i.e.
+     exactly what sizeKit() below wants and what predatorKit()'s sp.scale-derived
+     numbers are missing. Derived from _sizeEff rather than re-multiplied, so it
+     picks up the baby grow-up for free (a calf used to be handed a full-grown
+     adult's reach and bite, which nothing had noticed). */
+  function indivK(a) {
+    if (!a) return 1;
+    const sp = a.species;
+    const base = (sp && sp.scale) || 1;
+    const eff = +a._sizeEff;
+    if (eff > 0 && base > 0) return eff / base;
+    return a._sizeMul > 0 ? a._sizeMul : 1;
+  }
+
+  /* HOW MUCH MEAT IS THIS. ONE currency for the whole game: modes/shark_sim.js
+     used to own a private copy of this and city/marine_predation.js had none at
+     all, which is precisely how a player-facing ladder and a wild food chain
+     drift into two different economies. hp is the only honest proxy the
+     bestiary carries for tonnage, and people are worth a mouthful flat. */
+  function massOf(target, kind) {
+    if (kind === "survivor" || kind === "ped" || kind === "cop") return 5;
+    if (!target) return 1;
+    if (target === CBZ.player || target.isPlayer) return 5;
+    const hp = (+target.maxHp) || (target.species && +target.species.hp) || 20;
+    return Math.max(1, Math.round(hp / 25));
+  }
+
+  /* ---- THE SWELL. ONE animator, and it is deliberately not a second one ----
+     modes/shark_sim.js already owns a grow animator for the EVOLVE ceremony
+     (0.75 s, overshoot, slow-mo, a ring of white water). That beat is a
+     cinematic and stays exactly as it is. This is the other thing entirely: a
+     quarter-second meal-sized swell that happens dozens of times a match, on
+     any animal in the world, with no camera work at all.
+
+     It is a TRANSIENT on top of _sizeEff, never a second owner of it. The
+     resting scale is written once by the engine's applyScale(); this only ever
+     multiplies the group by a factor that eases from `from` to exactly 1, so
+     an animator that is interrupted, cleared, or never ticked again cannot
+     leave a body stuck at the wrong size — the next applyScale() rewrites it.
+
+     _growLock is the handshake with shark_sim's ceremony: while the evolve
+     beat owns group.scale, this yields completely rather than fighting it. */
+  const PULSE_DUR = 0.28;
+  function growPulse(a, fromRatio) {
+    if (!a || !(fromRatio > 0) || fromRatio >= 0.999) return;
+    const p = a._growP || (a._growP = { t: 0, dur: PULSE_DUR, from: 1 });
+    // an interrupted pulse restarts from WHERE IT IS, so a fast eater's body
+    // swells continuously instead of snapping back on every mouthful
+    const cur = p.t < p.dur ? (p.from + (1 - p.from) * ease(p.t / p.dur)) : 1;
+    p.from = Math.min(0.999, fromRatio * cur);
+    p.t = 0; p.dur = PULSE_DUR;
+  }
+  function ease(e) { const k = e < 0 ? 0 : (e > 1 ? 1 : e); return 1 - Math.pow(1 - k, 3); }
+  function tickGrow(a, dt) {
+    const p = a && a._growP;
+    if (!p) return;
+    const g = a.group;
+    if (!g || !g.scale || a.dead || a._growLock) { a._growP = null; return; }
+    p.t += dt;
+    const eff = +a._sizeEff > 0 ? a._sizeEff : ((a.species && a.species.scale) || 1);
+    if (p.t >= p.dur) { g.scale.setScalar(eff); a._growP = null; return; }
+    const e = p.t / p.dur;
+    // ease-out with a small settling overshoot — mass arriving, not a lerp.
+    // Half the evolve beat's 6%, because this fires on every single meal.
+    const k = p.from + (1 - p.from) * ease(e);
+    g.scale.setScalar(eff * (k + Math.sin(e * Math.PI) * 0.03));
+  }
+
+  /* ---- THE LEDGER SINK. Every mouthful in the game arrives here ----------
+     Returns the multiplier the body should now be at, or 0 if nothing changed.
+     Spending it on the body is the ENGINE's job (wildlife.js owns the one
+     place an animal's scale is written, and hp/kits/colliders have to move
+     with it) — this file owns the number, never the write. */
+  function feedMass(eater, gain, opts) {
+    if (!eater || !MASS_ON()) return 0;
+    const g = +gain;
+    if (!(g > 0) || !isFinite(g)) return 0;
+    eater.eatenMass = (+eater.eatenMass || 0) + g;
+    eater.eatenCount = (+eater.eatenCount || 0) + 1;
+    // The player's own shark is grown by modes/shark_sim.js even with wild
+    // growth switched off, so the flag reads as "wild animals" and not "the
+    // ledger". `player` marks that caller.
+    if (!WILD_ON() && !(opts && opts.player)) return 0;
+    const was = +eater._growMul > 0 ? eater._growMul : 1;
+    const now = growthOf(eater);
+    eater._growMul = now;
+    // Below a fifth of a per cent nothing is visible and nothing downstream
+    // moved enough to be worth invalidating a cache over.
+    if (Math.abs(now - was) < 0.002) return 0;
+    return now / was;      // the RATIO — what the caller pulses from
+  }
+
+  // ============================================================
   //  HUNGER
   // ============================================================
   // Seconds from stuffed to starving at scale 1. A big animal eats big and
@@ -388,38 +586,76 @@
   //  after it is built — using predator.js's own published exponents so a big
   //  individual and a big species scale by the same laws.
   //
-  //  Idempotent by the `_szK` receipt: calling it twice on one bundle is a
-  //  no-op, which matters because two files build kits for the same actor.
+  //  CONVERGENT ON k, NOT APPLY-ONCE. The `_szK` receipt used to mean "this
+  //  bundle has been sized, never touch it again", which was right while size
+  //  was fixed at spawn and became THE staleness bug the moment animals could
+  //  grow: every consumer of a cached kit (reach, bite, sense radius, seize
+  //  hold — and through senseR the LOD/draw radii too) would have kept the
+  //  numbers of the body the animal had when it was first built.
+  //
+  //  So the receipt now records WHICH k the bundle is currently at, and a call
+  //  with a different k applies the RATIO. Calling it twice with the same k is
+  //  still a no-op (which is what the two-files-build-kits-for-one-actor case
+  //  needed), calling it every frame with a live k is free, and the numbers
+  //  land on exactly the same values as a fresh build at that k, because every
+  //  law here is a power of k and powers compose.
   // ============================================================
-  function sizeKit(kit, k) {
-    if (!kit || !(k > 0) || kit._szK) return kit;
-    kit._szK = k;
-    if (k === 1) return kit;
-    const rs = Math.sqrt(k);                 // radii
-    const ct = Math.pow(k, 0.7);             // patience
-    const hs = Math.pow(k, 0.9);             // hold
-    const nimble = Math.pow(k, -0.13);       // acceleration
-    if (kit.senseR) kit.senseR *= rs;
-    if (kit.chumR) kit.chumR *= rs;
-    if (kit.circleR) kit.circleR *= rs;
-    if (kit.orbitR) kit.orbitR *= rs;
-    if (kit.circleT) kit.circleT *= ct;
-    if (kit.cruiseSpeed) kit.cruiseSpeed *= nimble;
-    if (kit.rushSpeed) kit.rushSpeed *= nimble;
-    if (kit.reach) kit.reach *= Math.pow(k, 0.85);
-    if (kit.rate) kit.rate *= rs;
-    if (kit.dmg) kit.dmg *= Math.pow(k, 1.35);
-    if (kit.bumpDmg) kit.bumpDmg *= Math.pow(k, 1.35);
-    // The seize carries its OWN receipt, and that is not belt-and-braces: two
-    // bundles on one hunter (hunting YOU and hunting a deer) come out of the
-    // same predatorKit and can share this exact object, so a receipt only on
-    // the outer kit would scale the grab twice for anything that does both.
+  function sizeKit(kit, want) {
+    if (!kit || !(want > 0) || !isFinite(want)) return kit;
+    const had = +kit._szK > 0 ? kit._szK : 1;
+    if (Math.abs(want - had) > 1e-6) {
+      kit._szK = want;
+      const k = want / had;                    // the RATIO, so this re-converges
+      const rs = Math.sqrt(k);                 // radii
+      const ct = Math.pow(k, 0.7);             // patience
+      const nimble = Math.pow(k, -0.13);       // acceleration
+      if (kit.senseR) kit.senseR *= rs;
+      if (kit.chumR) kit.chumR *= rs;
+      if (kit.circleR) kit.circleR *= rs;
+      if (kit.orbitR) kit.orbitR *= rs;
+      if (kit.circleT) kit.circleT *= ct;
+      if (kit.cruiseSpeed) kit.cruiseSpeed *= nimble;
+      if (kit.rushSpeed) kit.rushSpeed *= nimble;
+      if (kit.reach) kit.reach *= Math.pow(k, 0.85);
+      if (kit.rate) kit.rate *= rs;
+      if (kit.dmg) kit.dmg *= Math.pow(k, 1.35);
+      if (kit.bumpDmg) kit.bumpDmg *= Math.pow(k, 1.35);
+      /* ..AND THE HUNGER LAYER'S SNAPSHOT UNDER IT. hungerKit below caches the
+         kit's UNMODULATED radii once and then rewrites the live fields from
+         that cache on every hunger step. Left alone, the first hunger step
+         after an animal grew would reset its sense radius to the body it used
+         to have — the growth silently undone by the other layer, which is
+         exactly the composition bug the two-layer design exists to avoid. The
+         snapshot is a size-free base, so it rides the same ratio. */
+      const hb = kit._hgBase;
+      if (hb) {
+        if (hb.senseR) hb.senseR *= rs;
+        if (hb.chumR) hb.chumR *= rs;
+        if (hb.circleT) hb.circleT *= ct;
+        if (hb.cruiseSpeed) hb.cruiseSpeed *= nimble;
+      }
+    }
+    /* THE SEIZE CARRIES ITS OWN RECEIPT, and that is not belt-and-braces: two
+       bundles on one hunter (hunting YOU and hunting a deer) come out of the
+       same predatorKit and can share this exact object, so a receipt only on
+       the outer kit would scale the grab twice for anything that does both.
+
+       It converges on the ABSOLUTE k rather than composing the ratio, which is
+       what keeps that shared case correct now that the outer receipt is no
+       longer a one-shot latch: the second bundle arrives with its own ratio,
+       finds the seize already at this k, and does nothing. It also lives
+       OUTSIDE the block above so a bundle that was already at `want` can still
+       bring a freshly-merged seize up to date. */
     const s = kit.seize;
-    if (s && typeof s === "object" && !s._szK) {
-      s._szK = k;
-      if (s.dps) s.dps *= Math.pow(k, 1.35);
-      if (s.hold) s.hold *= hs;
-      if (s.escape) s.escape = clamp(s.escape * Math.pow(k, -0.9), 0.03, 0.95);
+    if (s && typeof s === "object") {
+      const sHad = +s._szK > 0 ? s._szK : 1;
+      if (Math.abs(want - sHad) > 1e-6) {
+        const sk = want / sHad;
+        s._szK = want;
+        if (s.dps) s.dps *= Math.pow(sk, 1.35);
+        if (s.hold) s.hold *= Math.pow(sk, 0.9);
+        if (s.escape) s.escape = clamp(s.escape * Math.pow(sk, -0.9), 0.03, 0.95);
+      }
     }
     return kit;
   }
@@ -473,6 +709,33 @@
     return (sp && sp.scale) || 1;
   };
   CBZ.wildlifeHunger = function (a) { return hungerOf(a); };
+  /* ---- GROWTH, PUBLIC ----------------------------------------------------
+     wildlifeScale() above already answers "how big is this animal" and now
+     carries the ledger, so nothing that reads it needs to learn a new call.
+     These are for the things that must credit a meal or report the economy. */
+  // How much meat is this? ONE currency for the ladder and the food chain.
+  CBZ.wildlifeMassOf = function (target, kind) { return massOf(target, kind); };
+  // Lifetime mass eaten IN THIS FORM (shark_sim rebases it on every evolution).
+  CBZ.wildlifeEatenMass = function (a) { return (a && +a.eatenMass) || 0; };
+  // The ledger curved into a body multiplier, and this species' ceiling.
+  CBZ.wildlifeGrowth = function (a) { return (a && +a._growMul > 0) ? a._growMul : 1; };
+  CBZ.wildlifeGrowCap = function (sp) { return growCap(sp && sp.species ? sp.species : sp); };
+  /* CREDIT A MEAL. The ONE sink; city/marine_predation.js calls it for every
+     wild kill and modes/shark_sim.js for every one of the player's. Returns
+     the ratio the body must swell by (1 = nothing to do), and does NOT write
+     the body: city/wildlife.js owns the single place a scale is written
+     because hp, the hunt kits, the colliders and the saddle all move with it.
+     `opts.player` exempts the player's own shark from the WILD_GROWTH flag. */
+  CBZ.wildlifeFeedMass = function (eater, gain, opts) { return feedMass(eater, gain, opts); };
+  // Staging / probes / a future save hydration. Never called in play.
+  CBZ.wildlifeSetEatenMass = function (a, m) {
+    if (!a) return 0;
+    a.eatenMass = Math.max(0, +m || 0);
+    a._growMul = growthOf(a);
+    if (typeof CBZ.wildlifeApplyScale === "function") { try { CBZ.wildlifeApplyScale(a); } catch (e) {} }
+    return a._growMul;
+  };
+
   // Staging / tests / any future save hydration. Never called in play.
   CBZ.wildlifeSetHunger = function (a, v) {
     if (!a) return;
@@ -489,5 +752,9 @@
     hunger: hungerOf, drive: drive, tick: tickHunger, feed: feed,
     metabolism: metabolism, bodyCue: bodyCue, findBody: findBody,
     sizeKit: sizeKit, hungerKit: hungerKit,
+    // growth
+    MASS_ON: MASS_ON, WILD_ON: WILD_ON, growCap: growCap, growth: growthOf,
+    indivK: indivK, massOf: massOf, feedMass: feedMass,
+    growPulse: growPulse, tickGrow: tickGrow, MASS_E: MASS_E, MASS_P: MASS_P,
   };
 })();

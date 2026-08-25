@@ -664,15 +664,141 @@
      and forces the group back to it forever after, so a calf attacked while
      small stayed calf-sized for the rest of its life. */
   function applyScale(a, grow) {
-    const k = a._sizeMul > 0 ? a._sizeMul : 1;
+    const sp = a.species;
+    const born = a._sizeMul > 0 ? a._sizeMul : 1;
+    /* ---- ..AND WHAT IT HAS EATEN SINCE. The second term (city/wildlife_traits.js
+       owns the curve and the caps) is what makes the body the progress bar.
+
+       CLAMPED INTO THE SAME K_MAX RAIL THE SPAWN DRAW USES, not past it. The
+       rail's whole job is "nothing may become another species", and a shark
+       that could eat its way up to a megalodon's silhouette would erase the
+       evolution ladder that is the game's other progression. It also keeps the
+       LOD/draw radii — which are derived from this number — inside the band
+       they were tuned against. */
+    const gm = (TRAITS && a._growMul > 0) ? a._growMul : 1;
+    const k = TRAITS ? Math.min(TRAITS.K_MAX, born * gm) : born;
     const g = grow == null ? 1 : (0.4 + 0.6 * grow);
-    const s = ((a.species && a.species.scale) || 1) * k * g;
+    const s = ((sp && sp.scale) || 1) * k * g;
+    const was = a._sizeEff > 0 ? a._sizeEff : s;
     a._sizeEff = s;
     a._baseScale = s;
     a._hgInv = null;                     // metabolism follows the body it feeds
     if (a.group) a.group.scale.setScalar(s);
+    if (Math.abs(s - was) > 1e-6) sizeChanged(a, was, s);
     return s;
   }
+
+  /* ---- EVERYTHING THAT CACHED A SIZE, INVALIDATED IN ONE PLACE -------------
+     This is the real engineering of growth, and it is the half that does not
+     show up in a screenshot. A world where size was fixed at spawn could cache
+     anything derived from it forever, and it did — a hunt bundle, a measured
+     body length, a rider's saddle socket. Every one of those is a lie the
+     moment an animal can grow, and a lie that fails QUIETLY: the shark simply
+     keeps biting at its old reach and drawing at its old LOD radius.
+
+     applyScale() is already documented as THE ONE PLACE an animal's scale is
+     written, which makes it the only honest place to hang this. Each line
+     below is a cache somewhere else in the repo; none of them is rebuilt here,
+     they are only marked stale so their owner rebuilds on its next read.  */
+  function sizeChanged(a, was, now) {
+    const r = now / was;
+    // 1. THE HUNT BUNDLES. sizeKit is convergent on the individual factor, so
+    //    handing it the new one re-derives reach/bite/rate/sense/hold exactly
+    //    as a fresh build at this size would. a._shark.opts is already fed it
+    //    every frame by the shark tick; these two are cached lazily.
+    if (TRAITS) {
+      const ik = TRAITS.indivK(a);
+      /* _predKit FIRST, and it is not optional: it is the BASE that every
+         merged bundle below was copied out of, and systems/predator.js
+         refreshes those copies from it. Re-converging a copy while leaving the
+         base at the old size just means the next predatorKit() call quietly
+         puts the old numbers back. */
+      if (a._predKit) TRAITS.sizeKit(a._predKit, ik);
+      if (a._predOpts) TRAITS.sizeKit(a._predOpts, ik);
+      if (a._landHunt) TRAITS.sizeKit(a._landHunt, ik);
+      if (a._preyHunt) TRAITS.sizeKit(a._preyHunt, ik);
+      if (a._shark && a._shark.opts) TRAITS.sizeKit(a._shark.opts, ik);
+      if (a._orca && a._orca.opts) TRAITS.sizeKit(a._orca.opts, ik);
+    }
+    // 2. HEALTH IS SIZE. The spawn draw already spends k^2.1 on hp; growth
+    //    spends the same exponent so a fed animal is genuinely harder to kill
+    //    (agario: the bigger animal of the same form wins the stat contest).
+    //    The CURRENT hp rides the same ratio so a wounded animal keeps its
+    //    fraction and a healthy one does not suddenly read as hurt.
+    const hk = Math.pow(r, 2.1);
+    if (a.maxHp > 0) {
+      const frac = a.hp > 0 ? a.hp / a.maxHp : 0;
+      a.maxHp = a.maxHp * hk;
+      a.hp = a.maxHp * frac;
+    }
+    // 3. THE WATER THIS BODY NEEDS. Same exponents the spawn path uses.
+    if (a.species && a.species.aquatic) {
+      if (a._baseClear > 0) { a._baseClear *= Math.pow(r, 0.7); a.waterClearance = a._baseClear; }
+      if (a._swimDepth0 > 0) { a._swimDepth0 *= Math.pow(r, 0.9); a.swimDepth = a._swimDepth0; }
+    }
+    // 4. MEASURED-OFF-THE-MODEL CACHES in city/marine_predation.js (body length
+    //    and beam, both taken from a bounding box that already carried the old
+    //    group scale). Cleared by stamp rather than by reaching into that
+    //    file's private state — it re-measures on its next read.
+    const m = a._mp;
+    if (m) { m.len = 0; m.beam = 0; }
+    // 5. THE RIDER'S SEAT AND CAMERA (city/wildlife_tame.js caches the socket
+    //    it measured off the body at mount time). A shark that doubles under
+    //    its rider must not swallow the camera or float the saddle.
+    if (a.ridden && typeof CBZ.wildlifeRideResize === "function") {
+      try { CBZ.wildlifeRideResize(a); } catch (e) {}
+    }
+    // 6. creature_combat.js's rest scale — already rewritten above, but its own
+    //    per-swing cache keys off this field and must not hold the old number.
+    a._baseScale = now;
+  }
+  /* PUBLIC. The seam every meal-crediting caller uses: it never writes a scale
+     itself, it asks the one writer to. */
+  CBZ.wildlifeApplyScale = function (a) {
+    if (!a || !a.species) return 0;
+    return applyScale(a, a.grow == null ? null : a.grow);
+  };
+
+  /* ---- CREDIT A KILL TO THE THING THAT ATE IT --------------------------
+     THE one entry point for the whole mass economy, so a wild orca that hunts
+     well all match and the player's shark in modes/shark_sim.js are running
+     the same ledger rather than two that drift. Callers:
+        city/marine_predation.js  every kill in the wild food chain
+        modes/shark_sim.js        every meal the player takes
+
+     Returns the mass credited (0 = nothing happened), which is what shark_sim
+     wants for its ladder — the ledger and the ladder read the same number.
+
+     The SWELL is measured off the real before/after scale rather than off the
+     ledger's ratio, because the K_MAX rail can eat some or all of the growth
+     and a pulse that animates growth the body did not get is a lie. */
+  function creditMeal(eater, victim, kind, opts) {
+    if (!eater || !TRAITS || !TRAITS.MASS_ON()) return 0;
+    /* ONE MOUTHFUL, ONE CREDIT — receipted on the (eater, victim) PAIR, which
+       is the same shape mealFrom's `_ateFrom` uses and for the same reason.
+       Not on the victim alone: a carcass legitimately feeds several animals
+       and each of them has genuinely eaten. Not on the eater alone: it eats
+       all match. The pair is the thing that happens exactly once.
+
+       It has to exist because a single mouthful is reported by more than one
+       path — mealFrom fires from killAnimal for EVERY killer in the game, and
+       modes/shark_sim.js separately reports the player's own landed bites —
+       and a ledger that double-counts grows the winner twice for one meal. */
+    if (victim && typeof victim === "object") {
+      if (eater._massAte === victim) return 0;
+      eater._massAte = victim;
+    }
+    const share = (opts && opts.share > 0) ? opts.share : 1;
+    const gain = TRAITS.massOf(victim, kind) * share;
+    if (!(gain > 0)) return 0;
+    const grew = TRAITS.feedMass(eater, gain, opts);
+    if (!(grew > 1)) return gain;               // ledger moved, body did not
+    const was = eater._sizeEff > 0 ? eater._sizeEff : 1;
+    const now = applyScale(eater, eater.grow == null ? null : eater.grow);
+    if (now > was) TRAITS.growPulse(eater, was / now);
+    return gain;
+  }
+  CBZ.wildlifeCreditMeal = creditMeal;
 
   function fallbackMesh(sp) {
     // never let a broken build() crash the world — a plain quadruped box.
@@ -2084,11 +2210,13 @@
     /* THE INDIVIDUAL, INTO THE SHARED BUNDLE. predatorKit derives the whole
        hunt from a.species.scale — a SPECIES constant — so without this the
        runt wolf and the monster wolf reach the same distance, bite for the
-       same damage and hold you for the same seconds. Applied once, here,
-       using predator.js's own published exponents, and idempotent by receipt.
+       same damage and hold you for the same seconds. Applied here using
+       predator.js's own published exponents; the receipt makes a repeat call
+       free and (since growth) makes a call at a NEW size re-converge, which is
+       how a bundle cached at spawn follows a body that has since eaten.
        (The proper fix is two lines inside predator.js; see this file's report.
         This is the version that does not edit a file another change owns.) */
-    if (TRAITS && a._landHunt) TRAITS.sizeKit(a._landHunt, a._sizeMul || 1);
+    if (TRAITS && a._landHunt) TRAITS.sizeKit(a._landHunt, TRAITS.indivK(a));
     return a._landHunt;
   }
 
@@ -2324,7 +2452,7 @@
     for (const k in over) out[k] = over[k];
     // the merge copies the kit's numbers into a FRESH object, so the size fold
     // has to happen again on this one (its own receipt keeps it to once).
-    if (TRAITS) TRAITS.sizeKit(out, a._sizeMul || 1);
+    if (TRAITS) TRAITS.sizeKit(out, TRAITS.indivK(a));
     a._preyHunt = out;
     return out;
   }
@@ -2433,9 +2561,23 @@
     const eaten = kill._eaten || 0;
     kill._eaten = eaten + 1;
     const bulk = SZ(kill) / Math.max(0.2, SZ(eater));
-    const meal = Math.min(1.15, 0.42 + 0.75 * bulk) *
-                 (share == null ? 1 : share) / (1 + eaten * 0.7);
+    const split = (share == null ? 1 : share) / (1 + eaten * 0.7);
+    const meal = Math.min(1.15, 0.42 + 0.75 * bulk) * split;
     TRAITS.feed(eater, meal);
+    /* ---- AND THE SAME MOUTHFUL ON THE MASS LEDGER ----------------------
+       OWNER: "ALL animals in the game". This is the one line that makes that
+       true, and it is one line because this function was ALREADY the universal
+       receipted answer to "which animal just ate which body" — killAnimal
+       routes every killer in the game through it (including the sharks, orcas
+       and seizes that resolve in files this change does not own), and
+       scavenging and the food chain's own feed both arrive here too.
+
+       It is paid the SAME `split` hunger is paid, so a carcass is one finite
+       body on both ledgers: the third wolf onto a deer grows about as much as
+       it fills, and the biggest animal in a pack — which takes the largest
+       share — stays the biggest. That is the food chain telling its own story
+       through the bodies, which is the whole design. */
+    creditMeal(eater, kill, "animal", { share: split });
   }
 
   /* THE MEAL IS PAID ON ARRIVAL, NOT ON THE DECISION — feedTick calls
@@ -3398,6 +3540,13 @@
         applyScale(a, a.grow);
         if (a.grow >= 1) { a.grow = null; applyScale(a, null); }
       }
+      /* ---- THE MEAL SWELL. Deliberately ABOVE the `ridden` early-out below:
+         the player's own shark in modes/shark_sim.js is an ordinary actor in
+         this list that happens to be ridden, and it is the one body in the
+         game the growth is most for. The animator is a transient on top of the
+         resting scale applyScale() just wrote (wildlife_traits.js owns it), so
+         a frame that skips it cannot leave a body at the wrong size. */
+      if (TRAITS && a._growP) TRAITS.tickGrow(a, dt);
       // ---- TAMED / RIDDEN animals are driven by wildlife_tame.js ----------
       // (their position is set elsewhere; the gait layer keys off distance
       //  actually moved, so their legs animate for free.)
@@ -3453,7 +3602,7 @@
              sizeKit is idempotent by its own receipt; hungerKit snapshots its
              base once so it can never compound. */
           if (TRAITS && a._shark && a._shark.opts) {
-            TRAITS.sizeKit(a._shark.opts, a._sizeMul || 1);
+            TRAITS.sizeKit(a._shark.opts, TRAITS.indivK(a));
             TRAITS.hungerKit(a._shark.opts, a);
           }
           if (CBZ.sharkBrain(a, dt, P)) {

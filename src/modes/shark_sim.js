@@ -70,9 +70,13 @@
        "Riding You · Fire bites..."  -> suppressed (the mount toast, which
                                         fired again on every evolution).
 
-     What survives is a HUD, not a popup: one pill that holds the species name
-     and the progress bar, and the title/end cards that own the screen when
-     play is not happening.
+     And in the wave after that the pill itself went (2026-08-25): the species
+     name, the "→ NEXT" label and the box around them are deleted, because a
+     ladder whose whole point is a body that visibly grows does not need to
+     print what that body already is. What survives mid-play is one 3 px
+     WORDLESS sliver seated with the health/stamina bars — how close the next
+     form is, and nothing else — plus the title/end cards that own the screen
+     when play is not happening, and the killfeed. See the HUD section.
 
      ?cfg_SHARK_SHOW_DONT_TELL=0 restores every line of the old text and
      silences the physical beats — that is the before/after preset's BEFORE. */
@@ -525,7 +529,15 @@
   }
 
   // ---- meals -------------------------------------------------------------
+  /* ONE CURRENCY. This formula used to live only here, which is exactly how a
+     player-facing ladder and a wild food chain end up as two economies that
+     disagree about what a tuna is worth. city/wildlife_traits.js publishes it
+     now and every eater in the game — the player, a wild orca, a pod — is paid
+     in the same units. The old body is kept verbatim as the degrade path. */
   function massOf(kind, target) {
+    if (CBZ.wildlifeMassOf) {
+      try { const m = +CBZ.wildlifeMassOf(target, kind); if (m > 0 && isFinite(m)) return m; } catch (e) {}
+    }
     if (kind === "survivor" || kind === "ped" || kind === "cop") return 5;
     const hp = (target && (target.maxHp || (target.species && target.species.hp))) || 20;
     return Math.max(1, Math.round(hp / 25));
@@ -535,6 +547,22 @@
     if (!target || !(target.dead || target.hp <= 0)) return;   // a chomp is not a meal until it kills
     const gain = massOf(kind, target);
     sim.mass += gain; sim.eaten++;
+    /* ---- THE BODY IS THE PROGRESS BAR ----------------------------------
+       OWNER: "each time the shark eats something it should get bigger".
+       The LADDER is untouched — `need`, the tiers and the evolve cinematic
+       are exactly as they were, and they still swap the FORM. This is the
+       other axis: within a form, the body grows continuously with what it has
+       eaten, so the bar on screen and the animal under the camera are telling
+       the same story and a player who has eaten well LOOKS like it.
+
+       city/wildlife.js owns the write (scale, hp, reach, the hunt kit, the
+       saddle and the camera boom all move together) and city/wildlife_traits.js
+       owns the curve and the per-species ceiling. `player: true` exempts the
+       player's own shark from the WILD_GROWTH flag, so turning wild growth off
+       to compare a pod still leaves the player growing. */
+    if (CBZ.wildlifeCreditMeal) {
+      try { CBZ.wildlifeCreditMeal(eater, target, kind, { player: true }); } catch (e) {}
+    }
     const S = sim.shark;
     if (S && S.maxHp) S.hp = Math.min(S.maxHp, S.hp + S.maxHp * (0.05 + Math.min(0.25, gain * 0.012)));
     if (kind === "animal" && target.species && target.species.id === "orca" && sim.tier >= 3) { apexWin(); return; }
@@ -556,6 +584,19 @@
     if (CBZ.cityDismount) CBZ.cityDismount();
     despawn(S0);
     sim.shark = S1;
+    /* ---- THE LEDGER FOLLOWS YOU UP THE LADDER, REBASED -------------------
+       Evolution swaps the FORM; growth is size WITHIN a form. So the new body
+       does not inherit the whole lifetime ledger — that would hand a fresh
+       megalodon a maxed-out ceiling on its first frame and there would be
+       nothing left to earn — it inherits the SURPLUS: the mass eaten beyond
+       the rung it just cleared. A player who over-ate before evolving arrives
+       already a little bigger than one who evolved on the exact threshold,
+       which is the honest reading of the same ledger, and the loop stays whole:
+       grow, evolve into a bigger form at ITS base size, grow again. */
+    if (CBZ.wildlifeSetEatenMass) {
+      const rung = (LADDER[sim.tier] && LADDER[sim.tier].need) || 0;
+      try { CBZ.wildlifeSetEatenMass(S1, Math.max(0, sim.mass - rung)); } catch (e) {}
+    }
     mountShark();
     if (SDT()) evolveBeat(S1, x, z);
     else {
@@ -601,6 +642,14 @@
         a: S1, t: 0, dur: 0.75, to: to,
         from: to * Math.max(0.32, Math.min(0.70, from > 0 && own > 0 ? from / own : 0.55)),
       };
+      /* HANDS OFF, MEAL SWELL. city/wildlife_traits.js runs a quarter-second
+         pulse on every mouthful and this ceremony owns group.scale outright for
+         its three quarters of a second; two writers on one Vector3 is the
+         stuck-half-size bug this block's header already warns about. The lock
+         is released in growTick/growClear, i.e. on exactly the paths that hand
+         the scale back. */
+      S1._growLock = 1;
+      S1._growP = null;
       gsc.setScalar(sim.grow.from);
     }
     const y = seaYAt(x, z);
@@ -619,22 +668,40 @@
     if (CBZ.sfx) { try { CBZ.sfx("win", { volume: 0.5 }); } catch (e) {} }
     sim.evolveBeats = (sim.evolveBeats || 0) + 1;
   }
+  /* `to` IS RE-READ LIVE, NEVER TRUSTED FROM CAPTURE TIME. It used to be
+     snapshotted off the authored species scale, which was the only truth there
+     was while a body's size was fixed for its whole life. Now a meal landing
+     during the ceremony moves the resting scale under us, and a ceremony that
+     handed back its stale snapshot would silently undo that growth. The engine
+     publishes the resting scale on _sizeEff; that is the number this beat is
+     easing toward and the number it must land on. */
+  function growRest(G) {
+    const eff = G.a && +G.a._sizeEff;
+    return (eff > 0 && isFinite(eff)) ? eff : G.to;
+  }
   function growTick(dt) {
     const G = sim.grow; if (!G) return;
     const gsc = G.a && G.a.group && G.a.group.scale;
-    if (!gsc || G.a.dead || G.a !== sim.shark) { sim.grow = null; if (gsc) gsc.setScalar(G.to); return; }
+    if (!gsc || G.a.dead || G.a !== sim.shark) {
+      sim.grow = null;
+      if (G.a) G.a._growLock = 0;
+      if (gsc) gsc.setScalar(growRest(G));
+      return;
+    }
     G.t += dt;
+    const to = growRest(G);
     const e = Math.min(1, G.t / G.dur);
     // ease-out with a 6% overshoot that settles: mass arriving, not a lerp
     const k = 1 - Math.pow(1 - e, 3);
     const over = Math.sin(e * Math.PI) * 0.06;
-    gsc.setScalar(G.from + (G.to - G.from) * k + G.to * over);
-    if (e >= 1) { gsc.setScalar(G.to); sim.grow = null; }
+    gsc.setScalar(G.from + (to - G.from) * k + to * over);
+    if (e >= 1) { gsc.setScalar(to); sim.grow = null; G.a._growLock = 0; }
   }
   function growClear() {
     const G = sim.grow; if (!G) return;
     const gsc = G.a && G.a.group && G.a.group.scale;
-    if (gsc) gsc.setScalar(G.to);
+    if (gsc) gsc.setScalar(growRest(G));
+    if (G.a) G.a._growLock = 0;
     sim.grow = null;
   }
 
@@ -735,9 +802,110 @@
   }
 
   // ---- HUD ---------------------------------------------------------------
+  /* THE BODY IS THE READOUT. The owner, on the last thing this mode still put
+     over the water mid-play:
+
+       "the popup on the screen saying shark name arrow next shark should be
+        GONE ... instead each time the shark eats something it gets bigger,
+        and a level-up meter moves up until the shark cinematically evolves."
+
+     He does not hate meters, he hates WORDS. So the pill is deleted outright —
+     the species name (you can SEE what you are; that is the entire point of a
+     ladder that grows the body), the "→ GREAT WHITE" label, and the boxed
+     chrome that made a HUD read as a popup. Every meal now grows the shark
+     physically, which is the honest readout of "how big am I", and the only
+     thing a bar can add is the one fact the body cannot show: HOW CLOSE the
+     next form is.
+
+     What is left is that one fact and nothing else — a 3 px wordless sliver
+     seated with the health/stamina bars at the bottom, at the width they are
+     already at, so it belongs to the same instrument cluster instead of
+     floating alone at the top of the screen. It fills as you eat, flares white
+     for the beat the ladder climbs (evolveBeat's swell owns the screen at that
+     moment), empties into the new rung, and after the MEGALODON — which has
+     nothing left to become — it fades out for good. Nothing to eat "next" is a
+     thing the HUD should stop having an opinion about.
+
+     It hangs off #survBars deliberately, and OUT OF ITS FLOW. That element
+     already carries the island's bottom-centre width, its centring, and the
+     `.sbar`/`.slab`/`.sbarbg` row grammar the health and stamina bars are
+     built from — so the sliver borrows all of it (including an EMPTY label
+     cell, which holds the column so the bar lines up under the other two
+     without a single hard-coded offset) and prints nothing.
+
+     Out of the flow because css/interact_touch.css measured this cluster:
+     #survBars is 66 px tall (bottom:24 + 42) and the portrait touch dock was
+     given 78 px of clearance against exactly that number. #survBars is pinned
+     by its BOTTOM, so an extra row in the flow grows the box UPWARD and eats
+     that clearance. `position:absolute;bottom:-9px` instead: the sliver hangs
+     into the 24 px gap under the stamina bar, the measured height of the
+     cluster does not change, and no touch rail moves on any device.
+
+     ?cfg_SHARK_HUD_WORDLESS=0 restores the old pill verbatim — species name,
+     bar, "→ NEXT" — which is the before/after preset's BEFORE.
+
+     The id stays "sharkhud": it is still THE shark HUD, and shark-sim-check's
+     "the HUD stood up" assertion means the same thing about the sliver as it
+     did about the pill. */
+  function WORDLESS() { return CFG.SHARK_HUD_WORDLESS !== false; }
+
   let hud = null, hudLine1 = null, hudBar = null, hudLine2 = null, flashEl = null, flashSub = null;
+  let hudTier = -1, hudFlare = 0, hudSpent = false;
+
   function buildHud() {
-    if (hud) { hud.style.display = "block"; return; }
+    // a fresh match starts the ladder over, so the meter does too
+    hudTier = -1; hudFlare = 0; hudSpent = false;
+    if (hud) {
+      // "" and not "block": the meter row is a flex row, and block would
+      // collapse the label column that keeps it aligned with the other bars
+      hud.style.display = "";
+      hud.style.opacity = "1";
+      if (hudBar) hudBar.style.width = "0%";
+      return;
+    }
+    if (WORDLESS()) buildMeter(); else buildPill();
+    buildFlash();
+  }
+
+  /* THE METER. No label, no number, no name, no box — a line that is either
+     further along than it was or it is not. */
+  function buildMeter() {
+    hudBar = document.createElement("div");
+    hudBar.id = "sharkhudfill";
+    hudBar.style.cssText = "height:100%;width:0%;border-radius:2px;" +
+      "background:linear-gradient(90deg,#39c06a,#9fe870);" +
+      "box-shadow:0 0 6px rgba(159,232,112,.45);transition:width .25s ease,background .2s";
+    hud = document.createElement("div");
+    hud.id = "sharkhud";
+    const host = document.getElementById("survBars");
+    if (host) {
+      // the island cluster's own row, out of its flow (see the note above)
+      hud.className = "sbar";
+      hud.style.cssText = "position:absolute;left:0;right:0;bottom:-9px;margin:0;" +
+        "pointer-events:none;opacity:1;transition:opacity .7s ease";
+      const slab = document.createElement("span");
+      slab.className = "slab";                 // holds the column, prints nothing
+      slab.style.cssText = "font-size:0;line-height:0";
+      const track = document.createElement("div");
+      track.className = "sbarbg";
+      track.style.cssText = "height:3px;border-radius:2px;background:rgba(0,0,0,.42);" +
+        "box-shadow:inset 0 1px 2px rgba(0,0,0,.5)";
+      track.appendChild(hudBar);
+      hud.appendChild(slab); hud.appendChild(track);
+      host.appendChild(hud);
+    } else {
+      // no island cluster (a bare mount test page): stand where it would have
+      hud.style.cssText = "position:fixed;left:50%;bottom:12px;transform:translateX(-50%);" +
+        "width:min(360px,72vw);height:3px;border-radius:2px;z-index:45;pointer-events:none;" +
+        "background:rgba(0,0,0,.42);overflow:hidden;opacity:1;transition:opacity .7s ease";
+      hud.appendChild(hudBar);
+      document.body.appendChild(hud);
+    }
+  }
+
+  /* THE OLD PILL, kept whole behind ?cfg_SHARK_HUD_WORDLESS=0 so the A/B has
+     a real BEFORE to photograph. Nothing new should be added to it. */
+  function buildPill() {
     hud = document.createElement("div");
     hud.id = "sharkhud";
     hud.style.cssText = "position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:45;" +
@@ -749,12 +917,20 @@
     const barWrap = document.createElement("div");
     barWrap.style.cssText = "height:6px;border-radius:3px;background:rgba(255,255,255,.14);margin:5px 0 4px;overflow:hidden";
     hudBar = document.createElement("div");
+    hudBar.id = "sharkhudfill";
     hudBar.style.cssText = "height:100%;width:0%;border-radius:3px;background:linear-gradient(90deg,#39c06a,#9fe870);transition:width .25s ease";
     barWrap.appendChild(hudBar);
     hudLine2 = document.createElement("div");
     hudLine2.style.cssText = "color:#bcd0e2;font-size:12.5px";
     hud.appendChild(hudLine1); hud.appendChild(barWrap); hud.appendChild(hudLine2);
     document.body.appendChild(hud);
+  }
+
+  /* The title card / end card / sim.banner surface. It is NOT the pill and it
+     never was: it owns the screen when play is not happening, and the storyboard
+     preset re-shows a beat through it at capture time. Built in both modes. */
+  function buildFlash() {
+    if (flashEl) return;
     flashEl = document.createElement("div");
     flashEl.id = "sharkflash";
     flashEl.style.cssText = "position:fixed;left:0;right:0;top:26vh;z-index:46;pointer-events:none;text-align:center;" +
@@ -775,20 +951,64 @@
     flashTimer = 2.8;
   }
   function hudNow() { sim.hudT = 0; }
-  /* ONE pill, and under SHOW-DON'T-TELL it holds no sentences at all: the
-     species you are, a bar for how far the next form is, and the NAME of that
-     next form as a label — the kind of thing a HUD is for. Everything this
-     line used to narrate (the pod, the opening hint) now happens in the water
-     instead; see podShow() and evolveBeat(). The shark's health is NOT
-     repeated here — the bottom health bar already mirrors it, and a HUD that
-     says the same number twice is a HUD shouting. */
+
   function hudTick(dt) {
     if (!hud) return;
     if (flashTimer > 0) { flashTimer -= dt; if (flashTimer <= 0) flashEl.style.opacity = "0"; }
+    // the flare runs on real time, not on the quarter-second refresh clock
+    if (hudFlare > 0) { hudFlare -= dt; if (hudFlare <= 0) sim.hudT = 0; }
     sim.hudT -= dt;
     if (sim.hudT > 0) return;
     sim.hudT = 0.25;
     const S = sim.shark; if (!S) return;
+    if (WORDLESS()) { meterTick(); return; }
+    pillTick();
+  }
+
+  /* PROGRESS BETWEEN TWO RUNGS AND NOTHING ELSE. The LADDER's `need` values
+     are the thresholds — this only reads them. sim.mass is the same number the
+     growth wiring turns into body scale, so the bar and the body are two
+     renderings of one fact and cannot disagree. */
+  function meterTick() {
+    if (hudSpent) return;
+    if (sim.tier !== hudTier) {
+      // a rung climbed while the HUD was watching: hold the bar full and go
+      // white for the length of the evolve beat, then let it fall to the new
+      // rung's zero. On the first tick of a match there is nothing to flare.
+      if (hudTier >= 0) hudFlare = 0.75;
+      hudTier = sim.tier;
+    }
+    /* THE FLARE IS TIED TO THE BODY, NOT TO A STOPWATCH. sim.grow is live for
+       exactly as long as growTick is swelling the new body out of the old one
+       — the cinematic beat this meter is the level-up bar for — so the bar
+       holds full and white for exactly that, and the 0.75 s timer is only the
+       fallback for the flag-off path where there is no swell to ride. Tying it
+       to the timer alone was fragile in the A/B: how much HUD time one
+       stepSim burns is not something this file gets to assume. */
+    if (hudFlare > 0 || sim.grow) {
+      hudBar.style.width = "100%";
+      hudBar.style.background = "linear-gradient(90deg,#9fe870,#fff)";
+      return;
+    }
+    hudBar.style.background = "linear-gradient(90deg,#39c06a,#9fe870)";
+    const next = LADDER[sim.tier + 1];
+    if (!next) {
+      // MEGALODON. There is no next form, so there is no meter — it fades out
+      // and stays out. What is left to do (find an orca) is a thing to find,
+      // not a thing to fill.
+      hud.style.opacity = "0";
+      hudSpent = true;
+      return;
+    }
+    const prev = LADDER[sim.tier].need;
+    const p = (sim.mass - prev) / Math.max(1e-6, next.need - prev);
+    hudBar.style.width = (Math.max(0, Math.min(1, p)) * 100).toFixed(1) + "%";
+  }
+
+  /* ?cfg_SHARK_HUD_WORDLESS=0 ONLY. Everything below is the deleted design,
+     kept runnable so the A/B can photograph it. ?cfg_SHARK_SHOW_DONT_TELL=0
+     additionally restores the scent line and the opening hint inside it. */
+  function pillTick() {
     const show = SDT();
     hudLine1.textContent = LADDER[sim.tier].name;
     const next = LADDER[sim.tier + 1];
@@ -803,8 +1023,6 @@
       hudLine2.textContent = show ? "→ ORCA" : "eat an orca";
     }
     hudLine2.style.color = "#bcd0e2";
-    // Everything past this point is the OLD TEXT and only runs with the flag
-    // off. podShow() owns the pod read now, and it owns it in the water.
     if (show) return;
     if (sim.tier < 3) {
       const P = CBZ.player;

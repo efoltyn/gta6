@@ -420,9 +420,24 @@
     const d = shortAngle(want - cur);
     return cur + (d > maxStep ? maxStep : (d < -maxStep ? -maxStep : d));
   }
+  /* HOW BIG IS THIS ONE, LIVE. `a.species.scale` is a SPECIES CONSTANT and was
+     the wrong answer twice over: it never knew the individual (the runt and the
+     monster great white measured the same), and since animals grow by eating it
+     does not even know the body that is in front of you this second.
+     CBZ.wildlifeScale is city/wildlife_traits.js's published answer to exactly
+     this question and already carries the spawn draw, the baby grow-up and the
+     mass ledger. Consumed defensively — another block's API, may load either
+     side of this one — and the group's own live scale is the next-best truth
+     before the species constant is finally fallen back on. */
   function actorScale(a) {
-    if (a && a.species && typeof a.species.scale === "number") return a.species.scale;
-    if (a && typeof a.scale === "number") return a.scale;
+    if (!a) return 1;
+    if (typeof CBZ.wildlifeScale === "function" && a.species) {
+      try { const s = +CBZ.wildlifeScale(a); if (s > 0 && isFinite(s)) return s; } catch (e) {}
+    }
+    const g = a.group;
+    if (g && g.scale && g.scale.x > 0) return g.scale.x;
+    if (a.species && typeof a.species.scale === "number") return a.species.scale;
+    if (typeof a.scale === "number") return a.scale;
     return 1;
   }
   function actorPos(a) {
@@ -3252,6 +3267,27 @@
     if (!actor || CFG.PREDATOR_KIT === false) return null;   // one-line revert
     let base = actor._predKit;
     if (!base) { try { base = actor._predKit = buildKit(actor); } catch (e) { return null; } }
+    /* ---- THE INDIVIDUAL, FOLDED IN CENTRALLY -----------------------------
+       buildKit derives everything from `sp.scale`, a SPECIES CONSTANT, so a
+       kit built for "a great white" gives the runt and the monster identical
+       reach, bite, patience and hold. city/wildlife.js has been folding the
+       individual back in from outside since the size wave, with a comment
+       saying the proper fix was two lines in here. This is those lines.
+
+       It had to move because "outside" only ever covered the callers that knew
+       to do it: a WILD shark's bundle (city/wildlife_shark.js builds it) was
+       measured carrying the raw species numbers — `_szK` undefined — so the
+       biggest shark in the sea reached exactly as far as the smallest. Doing it
+       here covers every builder in the game, including the ones that have not
+       been written yet.
+
+       sizeKit converges on the k it is handed rather than latching, so this is
+       also the growth path: an animal that has eaten arrives with a larger
+       indivK and the cached bundle re-derives to it. Consumed defensively —
+       city/wildlife_traits.js is another block and may load either side. */
+    if (CBZ.wildlifeTraits && CBZ.wildlifeTraits.sizeKit) {
+      try { CBZ.wildlifeTraits.sizeKit(base, CBZ.wildlifeTraits.indivK(actor)); } catch (e) {}
+    }
     if (!overrides) return base;
     let out = actor._predOpts;
     if (!out) out = actor._predOpts = {};
