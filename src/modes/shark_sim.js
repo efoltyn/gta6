@@ -168,21 +168,177 @@
     for (let i = 0; i < b.length; i++) if (!b[i].dead) n++;
     return n;
   }
+  /* ---- THE SEA IS THE GAME ------------------------------------------------
+     OWNER: "check why there's so few others — it's just orca, no other sharks
+     or small fish."
+
+     Two things were wrong and only one of them lives here. The other — every
+     fish this island was stocked with landing on ONE hardcoded point 187 m
+     outside the fence its own navigator walls the sea with, frozen on its
+     first step and LOD-hidden all match — is fixed in city/wildlife.js and
+     world/water_survival.js, and it is why only the orcas were ever met (the
+     shark brain steers those without asking the navigator).
+
+     This is the other half: A SHARK SIM EATS ITS SEA. The island seeds around
+     thirty animals for the whole ring, spread over fourteen species, and the
+     player's whole job is to remove them. Ten minutes in, an empty sea looks
+     exactly like the bug that was just fixed. So the sea is kept stocked the
+     way the beach crowd already is — a census against a want, small batches on
+     the same one-second clock.
+
+     THREE THINGS THIS IS CAREFUL ABOUT:
+       • ARRIVALS ARE UNSEEN. 45-85 m out, which is past the wildlife LOD
+         radius at the lowest quality tier (90 m) and well past it at any
+         other, so nothing is ever watched to pop into existence.
+       • FISH ARRIVE AS SHOALS, on one anchor, and that is load-bearing rather
+         than decorative: city/marine_frenzy.js opens a BAIT BALL when a bait
+         species (mackerel, sardine — the two rows whose herd maximum clears
+         its school threshold) is on screen with something toothed inside
+         130 m, which the player's own shark is. A shoal is what makes that
+         fire. Loose singletons scattered round the ring never would.
+       • NO ORCAS. podPressure owns the threat curve, and a second spawner for
+         the same species is exactly the parallel system that ends with two
+         pieces of code arguing about how frightened you should be. -- */
+  const SEA_WANT = [
+    { id: "fish",       n: 30, g: [8, 14] },   // mackerel — the snack AND the bait ball
+    { id: "sardine",    n: 36, g: [10, 16] },
+    { id: "barracuda",  n: 8,  g: [1, 3] },
+    { id: "dolphin",    n: 6,  g: [2, 3] },
+    { id: "sea_turtle", n: 5,  g: [1, 2] },
+  ];
+  /* THE RIVALS — other sharks, and how many of them depends on what you are.
+     A bull shark's sea has bigger things in it than a great white's does; the
+     ladder is what changes, not the ocean. */
+  function rivalWant() {
+    const t = sim.tier;
+    if (t <= 0) return { bull_shark: 3, hammerhead_shark: 1, great_white_shark: 0 };
+    if (t === 1) return { bull_shark: 2, hammerhead_shark: 2, great_white_shark: 1 };
+    if (t === 2) return { bull_shark: 1, hammerhead_shark: 2, great_white_shark: 2 };
+    return { bull_shark: 1, hammerhead_shark: 1, great_white_shark: 2 };
+  }
+  /* THE CEILING. Wildlife's own tick measures ~985 animals in 1.4 ms, so this
+     is not a frame budget — it is a "how full should this ocean feel" knob,
+     and the answer for a sea that is the entire playfield is FULL. */
+  const SEA_CAP = 150;                 // total live sea bodies before we stop adding
+  const seaTally = {};
+  function seaCensus() {
+    for (const k in seaTally) delete seaTally[k];
+    let total = 0;
+    const list = CBZ.cityWildlife || [];
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      if (!a || a.dead || a.external || a === sim.shark) continue;
+      if (!a.species || !a.species.aquatic) continue;
+      seaTally[a.species.id] = (seaTally[a.species.id] || 0) + 1;
+      total++;
+    }
+    seaTally.$total = total;
+    return seaTally;
+  }
+  function clearanceOf(id) {
+    const sp = (CBZ.WILDLIFE_SPECIES || {})[id];
+    return CBZ.cityAquaticClearance ? CBZ.cityAquaticClearance(sp) : 18;
+  }
+  /* A POINT THIS BODY CAN SWIM AT, near the player. CBZ.survNavRing is the
+     island's own answer to "where does a body of this clearance fit" — the
+     same fence the mover enforces — so a point taken from it can never be one
+     of the frozen animals this whole change is about. Null when the species
+     does not fit this sea at all, and null is a refusal to spawn. */
+  function seaPointNear(clearance, minD, maxD) {
+    const P = CBZ.player;
+    const ring = CBZ.survNavRing && CBZ.survNavRing(clearance);
+    if (!ring || !P) return null;
+    for (let i = 0; i < 14; i++) {
+      const ang = Math.random() * 6.283;
+      const d = minD + Math.random() * (maxD - minD);
+      const x = P.pos.x + Math.cos(ang) * d, z = P.pos.z + Math.sin(ang) * d;
+      const rr = Math.hypot(x - ring.cx, z - ring.cz);
+      if (rr < ring.r0 + 2 || rr > ring.r1 - 2) continue;
+      return { x: x, z: z, ring: ring };
+    }
+    return null;
+  }
+  /* A GROUP IS A HERD, not n bodies that happen to share a coordinate. A herd
+     is the object wildlife.js's boids steer on — the shared heading and the
+     shared centre — and without one, sixteen mackerel dropped on one point
+     are sixteen independent random walks that have scattered inside a couple
+     of seconds at a mackerel's cruise. A scattered school is invisible (the
+     sea's sight lines are shorter than the spacing) and it never balls. */
+  function spawnGroup(id, n, minD, maxD) {
+    const at = seaPointNear(clearanceOf(id), minD, maxD);
+    if (!at) return 0;
+    const ring = at.ring;
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      let x = at.x + (Math.random() - 0.5) * 18;
+      let z = at.z + (Math.random() - 0.5) * 18;
+      // Keep the whole shoal inside the swimmable band: one straggler jittered
+      // over the fence is one fish that never moves again.
+      const dx = x - ring.cx, dz = z - ring.cz;
+      const rr = Math.hypot(dx, dz) || 1;
+      const want = Math.max(ring.r0 + 2, Math.min(ring.r1 - 2, rr));
+      if (want !== rr) { x = ring.cx + dx / rr * want; z = ring.cz + dz / rr * want; }
+      pts.push({ x: x, z: z });
+    }
+    if (CBZ.cityWildlifeSpawnHerd) return CBZ.cityWildlifeSpawnHerd(id, pts).length;
+    let made = 0;
+    for (const p of pts) if (CBZ.cityWildlifeSpawnAt(id, p.x, p.z)) made++;
+    return made;
+  }
+  function stockSea() {
+    if (!CBZ.cityWildlifeSpawnAt || !CBZ.survNavRing || !CBZ.player) return;
+    const t = seaCensus();
+    if (t.$total >= SEA_CAP) return;
+    /* A THIN SEA FILLS FAST, A FULL ONE TRICKLES. Three groups a second while
+       the water is genuinely empty (the first seconds of a match, or after a
+       feeding run) and one a second after that — so the ocean is populated
+       before the player has finished turning round, and the steady-state cost
+       is one census and one small batch per second. */
+    let budget = t.$total < 60 ? 3 : 1;
+    /* ..and a BODY ceiling under the group ceiling, because a body is a
+       build(): three groups of sixteen is forty-eight meshes constructed in
+       one frame, which is a visible hitch to buy a thing whose whole point is
+       that you never notice it arriving. */
+    let bodies = 18;
+    for (let k = 0; k < SEA_WANT.length && budget > 0 && bodies > 0; k++) {
+      sim.seaIx = ((sim.seaIx || 0) + 1) % SEA_WANT.length;
+      const row = SEA_WANT[sim.seaIx];
+      const have = t[row.id] || 0;
+      if (have >= row.n) continue;
+      const n = Math.min(row.n - have, bodies,
+        row.g[0] + ((Math.random() * (row.g[1] - row.g[0] + 1)) | 0));
+      const made = spawnGroup(row.id, n, 45, 85);
+      if (made) { sim.seaAdds = (sim.seaAdds || 0) + made; budget--; bodies -= made; }
+    }
+    // ..and the rivals on their own slower clock: one shark every four passes,
+    // because meeting another shark should be an event and not traffic.
+    sim.rivalT = (sim.rivalT || 0) - 1;
+    if (sim.rivalT > 0) return;
+    sim.rivalT = 4;
+    const want = rivalWant();
+    for (const id in want) {
+      if ((t[id] || 0) >= want[id]) continue;
+      sim.seaAdds = (sim.seaAdds || 0) + spawnGroup(id, 1, 55, 95);
+      return;
+    }
+  }
   function restock(dt) {
     sim.stockT -= dt;
     if (sim.stockT > 0) return;
     sim.stockT = 1.0;
-    if (!CBZ.spawnSurvivorBotAt) return;
     const A = arena(); if (!A) return;
     // keep the buffet stocked — this is also what keeps survival's
     // last-one-standing win check permanently dormant while the sim runs
-    let want = 40 - liveBots();
-    want = Math.min(3, want);
-    for (let i = 0; i < want; i++) {
-      const a = Math.random() * 6.283;
-      const r = A.radius * 1.03 + Math.random() * Math.max(4, sim.waterline - 2 - A.radius * 1.03);
-      CBZ.spawnSurvivorBotAt(A.center.x + Math.cos(a) * r, A.center.z + Math.sin(a) * r);
+    if (CBZ.spawnSurvivorBotAt) {
+      let want = 40 - liveBots();
+      want = Math.min(3, want);
+      for (let i = 0; i < want; i++) {
+        const a = Math.random() * 6.283;
+        const r = A.radius * 1.03 + Math.random() * Math.max(4, sim.waterline - 2 - A.radius * 1.03);
+        CBZ.spawnSurvivorBotAt(A.center.x + Math.cos(a) * r, A.center.z + Math.sin(a) * r);
+      }
     }
+    stockSea();
   }
 
   // ---- the shark ---------------------------------------------------------
@@ -677,7 +833,10 @@
     sim.shark = null;
     sim.tier = 0; sim.mass = 0; sim.eaten = 0;
     sim.ended = false; sim.apex = false;
-    sim.biteT = 0; sim.podT = 2; sim.stockT = 3; sim.strandT = 0; sim.hudT = 0; sim.hintT = 5;
+    // stockT 0.4, not 3: the sea top-up rides this same clock now and a match
+    // that opens on empty water is the bug this file was opened to fix.
+    sim.biteT = 0; sim.podT = 2; sim.stockT = 0.4; sim.strandT = 0; sim.hudT = 0; sim.hintT = 5;
+    sim.seaIx = 0; sim.rivalT = 0; sim.seaAdds = 0;
     sim._podClose = false; sim.winT = 0;
     podRestore(); growClear();
     sim.podScanT = 0; sim.podWakeT = 0; sim.grow = null;

@@ -268,7 +268,119 @@
           : cityNav(x, z, clearance);
       };
     }
+    /* ---- THE OTHER TWO. These were the FORGOTTEN half of this wrap, and the
+       cost was the whole island sea.
+
+       `randomWaterPoint` is how city/wildlife.js picks every spawn point in
+       the ocean and `nearestWater` is the recovery it runs on any body that
+       finds itself somewhere it cannot swim. Both run on coastAt — the same
+       "+24, dry land" answer for the island that made a ridden shark
+       immovable — so both returned null out here, every time. wildlife.js's
+       own fallback then dropped EVERY fish, every rival shark and the
+       megalodon on ONE hardcoded point 187 m outside the fence islandMove
+       walls the sea with, where they reported `blocked` on their first step
+       and stayed frozen and LOD-hidden for the whole match. The sea looked
+       empty because it was: only the orcas moved, and only because the shark
+       brain steers them without ever asking this navigator.
+
+       They are the same two answers as the city's, on a circle. -- */
+    if (typeof wf.nearestWater === "function") {
+      const cityNear = wf.nearestWater;
+      wf.nearestWater = function (x, z, clearance, maxRadius) {
+        if (!survOn()) return cityNear(x, z, clearance, maxRadius);
+        const ring = CBZ.survNavRing(clearance);
+        if (!ring) return null;                       // this body does not fit this sea
+        let dx = x - ring.cx, dz = z - ring.cz;
+        let rr = Math.hypot(dx, dz);
+        if (!(rr > 0.001)) { dx = 1; dz = 0; rr = 1; }
+        if (rr >= ring.r0 && rr <= ring.r1) return { x: x, z: z, moved: false };
+        // The island's water is an ANNULUS, so the nearest point of it to
+        // anywhere is straight along your own radius — no ring search needed.
+        // Land inside the band rather than on its lip, so the mover does not
+        // immediately report blocked at the place we just rescued it to.
+        const inset = Math.min(6, (ring.r1 - ring.r0) * 0.25);
+        const want = Math.max(ring.r0 + inset, Math.min(ring.r1 - inset, rr));
+        const max = +maxRadius > 0 ? +maxRadius : 1e9;
+        if (Math.abs(want - rr) > max) return null;
+        return { x: ring.cx + dx / rr * want, z: ring.cz + dz / rr * want, moved: true };
+      };
+    }
+    if (typeof wf.randomWaterPoint === "function") {
+      const cityRand = wf.randomWaterPoint;
+      wf.randomWaterPoint = function (rnd, opts) {
+        if (!survOn()) return cityRand(rnd, opts);
+        const o = opts || {};
+        const ring = CBZ.survNavRing(o.clearance);
+        if (!ring) return null;
+        const rf = typeof rnd === "function" ? rnd : Math.random;
+        let r0 = ring.r0, r1 = ring.r1;
+        /* A caller's own band narrows the ring where the two OVERLAP, and is
+           ignored where they do not. city/wildlife.js asks for 1.12R..6.5R —
+           780 m on this island — and a band that asks for water the mover
+           refuses is asking for a frozen animal, so the navigable ring wins
+           that argument rather than the sampler failing. */
+        if (+o.r1 > 0) {
+          const lo = Math.max(r0, +o.r0 || 0), hi = Math.min(r1, +o.r1);
+          if (hi - lo > 4) { r0 = lo; r1 = hi; }
+        }
+        /* WEIGHTED TOWARD THE SHORE, triangular. Area-uniform sampling would
+           put most of the sea life in the outer third of the ring, which on a
+           120 m island is 200 m+ from anything a player does — past the
+           wildlife LOD radius, so it may as well not exist. The play ring is
+           the first hundred metres of water off the beach and that is where
+           the fish go. */
+        const rr = r0 + Math.min(rf(), rf()) * (r1 - r0);
+        const a = rf() * Math.PI * 2;
+        return { x: ring.cx + Math.cos(a) * rr, z: ring.cz + Math.sin(a) * rr };
+      };
+    }
   }
+
+  /* ---- WHERE A BODY OF THIS SIZE CAN ACTUALLY SWIM ------------------------
+     The radial band [r0, r1] a body needing `clearance` metres of shore
+     clearance can be dropped into and still move under islandMove. Published
+     because the island's fence is this file's fact and nothing else should be
+     re-deriving it: city/wildlife.js was carrying `r1 = 6.5 * radius` as its
+     idea of the sea, which is 780 m around a 120 m island and 510 m past the
+     fence.
+
+     MEASURED, NOT CONSTANT. It reads islandShore rather than the numbers
+     inside it, so the beach profile and the fence radius above are free to
+     move and this tracks them.
+
+     THE 0.6 IS islandMove'S OWN THRESHOLD (it blocks at clearance * 0.55)
+     with a hair of margin — and that, not isNavigableWater's full-clearance
+     answer, is the question a spawner is asking: "can what I put here swim
+     away from here". Keep the two in step if that threshold ever changes.
+
+     NULL MEANS THE BODY DOES NOT FIT, and callers must honour it instead of
+     placing something anyway. An orca wants ~8 m of water (so: at least 156 m
+     out) and 66 m of room inside a 270 m fence (so: at most 209 m out); a
+     blue marlin's 150 leaves no overlap at all, and a marlin spawned anyway
+     is a marlin frozen on the spot where it spawned.
+
+     Sampled along +X only: the shelf under this sea is a function of radius
+     alone (world/disaster_arena.js's coastHeightAt), and the four hills that
+     break that symmetry are all inland. */
+  CBZ.survNavRing = function (clearance) {
+    if (!survOn()) return null;
+    const A = CBZ.surv.arena;
+    const cx = A.center.x, cz = A.center.z;
+    const need = -Math.max(0, +clearance || 0) * 0.6;
+    const far = A.radius * 3 + 400;
+    const STEP = 6;
+    let inR = -1, outR = -1;
+    for (let rr = A.radius * 0.85; rr <= far; rr += STEP) {
+      if (islandShore(cx + rr, cz) < need) { if (inR < 0) inR = rr; outR = rr; }
+      else if (inR >= 0) break;
+    }
+    if (inR < 0) return null;
+    let a = Math.max(0, inR - STEP), b = inR;
+    for (let i = 0; i < 12; i++) { const m = (a + b) * 0.5; if (islandShore(cx + m, cz) < need) b = m; else a = m; }
+    let c = outR, d = outR + STEP;
+    for (let i = 0; i < 12; i++) { const m = (c + d) * 0.5; if (islandShore(cx + m, cz) < need) c = m; else d = m; }
+    return (c - b > 6) ? { cx: cx, cz: cz, r0: b, r1: c } : null;
+  };
 
   // Try at load; if the publishers are not up yet, retry on the update bus
   // until they are. Costs one boolean per frame until it lands, then nothing.

@@ -165,6 +165,17 @@
     if (c && Number.isFinite(+c.x) && R > 0) {
       FIELD.cx = +c.x; FIELD.cz = +c.z;
       FIELD.r0 = R * ISLE_R0; FIELD.r1 = R * ISLE_R1;
+      /* ..UNLESS THE WORLD ITSELF ANSWERS, in which case the multiples above
+         are a guess and this is a fact. 6.5R is 780 m of "sea" around a 120 m
+         island, and the disaster island's navigator walls the swimmable water
+         at radius+150 — so five hundred metres of that band was water no
+         animal placed in it could move a metre in, and most of the sea life
+         landed there. CBZ.survNavRing (world/water_survival.js) is the same
+         fence measured rather than repeated here; asked for a mid-size body
+         (a dolphin's 23 m of clearance) it describes the sea generally
+         instead of one species' corner of it. */
+      const ring = CBZ.survNavRing && CBZ.survNavRing(23);
+      if (ring && ring.r1 > ring.r0) { FIELD.r0 = ring.r0; FIELD.r1 = ring.r1; }
       return FIELD;
     }
     return FIELD;                                  // keep whatever we had
@@ -401,7 +412,16 @@
     // frame and the caller already has the surface, so going through
     // citySeaBedY would evaluate the whole swell table a second time.
     let bed;
-    if (CBZ.citySeaBedDepth) {
+    /* THE ISLAND'S BOTTOM FIRST when the island is the world we are stocked
+       for. CBZ.citySeaBedDepth is waterfield's RAW city answer and is defined
+       even where the city was never built, so out here it reported 0 and this
+       function returned -Infinity — i.e. NO BED CLAMP AT ALL — for every body
+       in the disaster island's sea. Two property reads on the city path. */
+    if (CBZ.surv && CBZ.surv.arena === ARENA() && CBZ.survFloodDepthMeanAt) {
+      const col = +CBZ.survFloodDepthMeanAt(x, z);
+      if (!(col > 0)) return -Infinity;
+      bed = s - col;
+    } else if (CBZ.citySeaBedDepth) {
       const col = +CBZ.citySeaBedDepth(x, z);
       if (!(col > 0)) return -Infinity;           // no water column here at all
       bed = s - col;
@@ -435,6 +455,11 @@
   CBZ.cityAquaticBedRestY = aquaticBedRestY;
   CBZ.cityAquaticBodyY = aquaticBodyY;
   CBZ.cityAquaticBedLift = aquaticBedLift;
+  // ..and the shore clearance a species declares, for the same reason: a mode
+  // that places one body of its own (modes/shark_sim.js keeps the sim's sea
+  // stocked as the player eats it) must ask the SAME question this file's
+  // spawner asks, not carry a second copy of the ladder that drifts from it.
+  CBZ.cityAquaticClearance = aquaticClearance;
 
   function oceanPoint(r, sp) {
     // Spawn from the same signed coast the visible sea uses. This is the
@@ -455,35 +480,64 @@
     }
     /* THE RING SAMPLER. Used for isolated unit loads and for any arena the
        city water field does not cover. A candidate is rejected if it is on a
-       registered land region, and — where the mode publishes one — validated
-       against that mode's OWN water test, so an island's beaches and its
-       interior are excluded without this file knowing anything about them. */
-    const wet = CBZ.survWaterAt || null;
-    const ground = (ARENA() && ARENA().groundHeightAt) || null;
+       registered land region and validated against the WATER COLUMN the live
+       world reports, so an island's beaches and its interior are excluded
+       without this file knowing anything about them. */
     const clear = aquaticClearance(sp);
+    // ..and where the live world publishes the band a body of this size can
+    // actually swim in, sample THAT rather than the derived ring: it is the
+    // same fence the mover enforces, so a point from it can never be a frozen
+    // animal. Null means the body does not fit this sea at all (a blue marlin
+    // wants 150 m of clearance in a 270 m bowl) — and the honest answer to
+    // that is no spawn, not a spawn nobody will ever see move.
+    const ring = CBZ.survNavRing && CBZ.survNavRing(clear);
     for (let tries = 0; tries < 40; tries++) {
       const a = r() * Math.PI * 2;
-      const rad = FIELD.r0 + r() * (FIELD.r1 - FIELD.r0);
-      const x = FIELD.cx + Math.cos(a) * rad, z = FIELD.cz + Math.sin(a) * rad;
+      let x, z;
+      if (ring) {
+        const rad = ring.r0 + Math.min(r(), r()) * (ring.r1 - ring.r0);
+        x = ring.cx + Math.cos(a) * rad; z = ring.cz + Math.sin(a) * rad;
+      } else {
+        const rad = FIELD.r0 + r() * (FIELD.r1 - FIELD.r0);
+        x = FIELD.cx + Math.cos(a) * rad; z = FIELD.cz + Math.sin(a) * rad;
+      }
       if (CBZ.cityAnyRegion && CBZ.cityAnyRegion(ARENA(), x, z, 30)) continue;
       /* DEEP ENOUGH FOR THIS ANIMAL. A whale does not belong in the shallows a
          mackerel is happy in, and `clearance` is already that per-species
-         number. Three tiers, most authoritative first, because falling through
-         from waterfield must not become a way to spawn a body somewhere
-         waterfield would have refused — that would be a Gang City regression
-         paid for with a Natural Disaster feature. */
-      const need = Math.max(1.2, clear * 0.12);
-      if (CBZ.citySeaBedDepth) {
-        const col = +CBZ.citySeaBedDepth(x, z);        // the city's own column
-        if (!(col > need)) continue;
-      } else if (ground) {
-        if (!(aquaticSurfY(x, z, 0) - ground(x, z) > need)) continue;
-      } else if (wet) {
-        try { if (!wet(x, z)) continue; } catch (e) {}
-      }
+         number. */
+      if (!(seaColumnAt(x, z) > Math.max(1.2, clear * 0.12))) continue;
       return { x, z };
     }
-    return { x: FIELD.cx + (FIELD.r0 + FIELD.r1) * 0.5, z: FIELD.cz };
+    /* NO POINT IS THE ANSWER WHEN THERE IS NO POINT. This used to return a
+       CONSTANT — the mid-radius of the band, due east of its centre — which
+       is how a disaster island ended up with its entire sea life stacked on
+       one dead coordinate 187 m outside the navigable fence: frozen on their
+       first step, LOD-hidden for being 300 m from anybody, all match, every
+       match. seedIndividuals knows how to skip. */
+    return null;
+  }
+
+  /* METRES OF WATER OVER THE BOTTOM, from the oracle that answers for the
+     world we are STOCKED FOR.
+
+     This used to be a three-tier else-if ladder whose first rung was
+     `CBZ.citySeaBedDepth` — waterfield's RAW city bathymetry, which is
+     published unconditionally at load and answers 0 for every coordinate of
+     a world where the city terrain was never built. So on the disaster
+     island the first rung was always taken, always said "no water", and the
+     two rungs under it that would have answered correctly were unreachable
+     code. The wrapped names (world/water_survival.js) are the ones that know
+     which world is live; the island's own is asked directly because the
+     arena we hold IS the answer to "which world". */
+  function seaColumnAt(x, z) {
+    if (CBZ.surv && CBZ.surv.arena === ARENA() && CBZ.survFloodDepthMeanAt) {
+      return Math.max(0, +CBZ.survFloodDepthMeanAt(x, z) || 0);
+    }
+    if (CBZ.citySeaBedDepthAt) return Math.max(0, +CBZ.citySeaBedDepthAt(x, z) || 0);
+    if (CBZ.citySeaBedDepth) return Math.max(0, +CBZ.citySeaBedDepth(x, z) || 0);
+    const gh = (ARENA() && ARENA().groundHeightAt) || null;
+    if (gh) return Math.max(0, aquaticSurfY(x, z, 0) - gh(x, z));
+    return CBZ.survWaterAt && CBZ.survWaterAt(x, z) ? 99 : 0;
   }
 
   function wetPointNear(x, z, sp, radius) {
@@ -763,12 +817,17 @@
     // species' NATURAL size. Herd size is a per-species TRAIT (how they group);
     // `count` is set by the ratio system (how many exist). The two are
     // decoupled — that's what makes the mix scalable.
-    let placed = 0, guard = 0;
+    let placed = 0, guard = 0, dry = 0;
     while (placed < count && guard++ < 400) {
       const regs = sp.aquatic ? null : biomeRegions(sp.biome);
       if (!sp.aquatic && (!regs || !regs.length)) return placed;
       const anchor = sp.aquatic ? oceanPoint(rng, sp) : regionPoint(regs[(rng() * regs.length) | 0], rng);
-      if (!anchor) return placed;          // no validated water means no aquatic spawn
+      /* NO VALIDATED WATER MEANS NO AQUATIC SPAWN — but a single miss is a
+         miss, not a verdict. oceanPoint can decline one candidate ring in a
+         sea it can still place the species in; three in a row is the sea
+         telling you this body does not fit (a marlin in a 270 m bowl), and
+         THAT is the species to leave out rather than freeze in place. */
+      if (!anchor) { if (!sp.aquatic || ++dry >= 3) return placed; continue; }
       let herd = sp.herd ? (sp.herd[0] + ((rng() * (sp.herd[1] - sp.herd[0] + 1)) | 0)) : 1;
       herd = Math.min(herd, count - placed);
       const hr = newHerd(sp);            // this cluster moves & panics as ONE unit
@@ -3420,6 +3479,47 @@
           a.heading += (Math.random() - 0.5) * 0.8 * hdA.restless;
           a.turnT = (3 + Math.random() * 4) / hdA.restless;
         }
+        /* ---- A SCHOOL IS A SCHOOL. -------------------------------------
+           This block existed twice in this file — once in landWalk and once
+           in the legacy land branch — and NOT ONCE in the water, which is the
+           one place the concept has a name. A sardine row declares a herd of
+           26 to 60; seeding built the herd, updateHerds kept its centre and
+           its shared heading up to date every frame, and then the aquatic
+           mover ignored all of it and gave each fish an independent random
+           walk. At a mackerel's cruise that is a shoal for about two seconds
+           and a scatter of loners for the rest of the match — which is why
+           the sea reads empty even when it is full: forty fish spread evenly
+           over a ring is one fish every forty metres, and underwater sight
+           lines here are shorter than that.
+
+           Same three boids terms and the same constants as the land block,
+           the same `bunch` scalar (a bait ball IS a school that has knotted
+           because something hungry is under it), applied to the heading
+           BEFORE the water navigator so shoreline clearance still owns the
+           final step. Behind the LOD gate, so an off-screen school costs
+           nothing. */
+        const hrA = a.herd;
+        if (hrA && hrA.n > 1 && !a.tamed) {
+          let dx = Math.cos(a.heading), dz = Math.sin(a.heading);
+          dx += Math.cos(hrA.heading) * 0.5; dz += Math.sin(hrA.heading) * 0.5;
+          const toCx = hrA.cx - grp.position.x, toCz = hrA.cz - grp.position.z;
+          const cd = Math.hypot(toCx, toCz) || 1;
+          const bn = hrA.bunch || 0;
+          const coh = Math.min(1.1 + bn * 0.9, Math.max(0, cd - 5 * (1 - bn * 0.8)) / (14 - bn * 7));
+          dx += (toCx / cd) * coh; dz += (toCz / cd) * coh;
+          const sepR = (2.2 + SZ(a) * 1.0) * (1 - bn * 0.45);
+          let sx = 0, sz = 0;
+          for (let m = 0; m < hrA.members.length; m++) {
+            const o2 = hrA.members[m]; if (o2 === a || o2.dead) continue;
+            const ox = grp.position.x - o2.pos.x, oz = grp.position.z - o2.pos.z;
+            const od = Math.hypot(ox, oz);
+            if (od > 0.001 && od < sepR) { sx += (ox / od) * (sepR - od); sz += (oz / od) * (sepR - od); }
+          }
+          dx += sx * 0.9; dz += sz * 0.9;
+          let dh = Math.atan2(dz, dx) - a.heading;
+          while (dh > Math.PI) dh -= 2 * Math.PI; while (dh < -Math.PI) dh += 2 * Math.PI;
+          a.heading += dh * Math.min(1, dt * 2.2);
+        }
         // TAMED sea life (ANIMALS_ALL_CONTROLLABLE): your dolphin swims WITH
         // you — heading steers toward wherever you are (the water nav below
         // still owns shoreline clearance, so it holds just offshore when you
@@ -3741,6 +3841,34 @@
     const sp = (CBZ.WILDLIFE_SPECIES || {})[id];
     if (!sp || !root) return null;
     return makeActor(sp, x, z);
+  };
+  /* ..AND A SCHOOL, which is a different thing and not n calls to the line
+     above. A herd is the object that owns the shared heading and centre the
+     boids blocks steer on; without one, sixteen mackerel dropped on the same
+     point are sixteen independent random walks that have scattered before you
+     get there. `newHerd`/`joinHerd` are module-private on purpose — this is
+     the door, so a mode restocking its own sea (modes/shark_sim.js) gets a
+     real shoal instead of standing up a second cohesion system beside this
+     one.
+
+     It takes the POINTS rather than a centre and a radius: the caller is the
+     one that knows which water its world will let a body swim in, and a
+     jitter applied in here could put half a school over the fence. Returns
+     the actors placed. */
+  CBZ.cityWildlifeSpawnHerd = function (id, points) {
+    const sp = (CBZ.WILDLIFE_SPECIES || {})[id];
+    const made = [];
+    if (!sp || !root || !points || !points.length) return made;
+    const hr = points.length > 1 ? newHerd(sp) : null;
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.z)) continue;
+      const a = makeActor(sp, p.x, p.z);
+      if (!a) continue;
+      if (hr) joinHerd(a, hr);
+      made.push(a);
+    }
+    return made;
   };
 
   // ============================================================
