@@ -669,8 +669,18 @@
     const priced = offerPrice(actor);
     const price = priced.price;
     if (g.cigs < price) {
-      const why = whyLine(priced.reasons);
-      return { ok: false, msg: `${price}. ${why || pick(VOICE.guardShort)}` };
+      /* HE NAMES WHAT HE IS SELLING. This used to be `${price}. ${whyLine}` —
+         a bare numeral followed by a DISCOUNT brag, used as a rejection:
+         "4. Crew price. Don't go telling people." The player, holding zero
+         cigs, was told the price was friendly and never told what was on
+         offer. On iPad it is the only string in the whole transaction: the
+         button is one word (TRADE) and the chip is the bare price, so the
+         item name lived nowhere a sighted player could read it.
+         A man refusing a sale says the thing, the number, and the no. */
+      // "That's N for the X" rather than a possessive: the item pool has
+      // plurals in it (Pills, Smokes) and "Pills's 4" is not a sentence.
+      const short = Math.max(1, price - (g.cigs || 0));
+      return { ok: false, msg: `That's ${price} for the ${offer.item}. You're ${short} short.` };
     }
     addCigs(-price);
     addItem(offer.item, 1);
@@ -694,8 +704,11 @@
     // The thing you bought lands where every other thing you pick up lands.
     // The seller SPEAKS; the transaction is shown, not narrated.
     if (CBZ.pickupNote) CBZ.pickupNote(offer.item, { rare: isRare(offer.item) });
+    // ...and he names it on the way out too, so the sale reads as a sale and
+    // not as a number leaving your pocket. The discount/markup reason, when
+    // he has one, is the second half — his voice, not a spreadsheet row.
     const why = whyLine(priced.reasons);
-    return { ok: true, msg: why || (yardTime() ? "Yard's open. Come back if you need more." : "That's the last one I've got on me.") };
+    return { ok: true, msg: why ? `${offer.item}, ${price}. ${why}` : `${offer.item}, ${price}. ${yardTime() ? "Come back if you need more." : "That's the last one I've got on me."}` };
   }
 
   /* A MAN YOU HAVE ALREADY PAID IS CHEAPER, AND HE STAYS CHEAPER.
@@ -732,7 +745,7 @@
       // and a supervisor; there is no price at which he turns round right now.
       if (counting() && !bought(actor)) return { ok: false, msg: pick(VOICE.guardBusy) };
       const cost = bribeCost(actor);
-      if (g.cigs < cost) return { ok: false, msg: `${cost}. ${pick(VOICE.guardShort)}` };
+      if (g.cigs < cost) return { ok: false, msg: `It's ${cost} to look the other way. ${pick(VOICE.guardShort)}` };
       addCigs(-cost);
       // A BOUGHT MAN LOOKS AWAY LONGER. `bribed` stays what it always was —
       // seconds of blindness — and `loyalty` is the thing that persists, so a
@@ -756,7 +769,7 @@
     }
     // inmates: a small gift earns goodwill + sometimes a free item/tip
     const cost = 3;
-    if (g.cigs < cost) return { ok: false, msg: `Three smokes. ${pick(VOICE.guardShort)}` };
+    if (g.cigs < cost) return { ok: false, msg: `Three smokes buys goodwill in here. ${pick(VOICE.guardShort)}` };
     addCigs(-cost);
     actor.playerTrust = (actor.playerTrust || 0) + 1.2;
     addRespect(actor, 2);            // standing, capped — a gift is not a favor
@@ -789,7 +802,7 @@
     const heat = g.detection || 0;
     const complaints = g.complaints || 0;
     const cost = payoffCost(actor);
-    if (g.cigs < cost) return { ok: false, msg: `${cost}. ${pick(VOICE.guardShort)}` };
+    if (g.cigs < cost) return { ok: false, msg: `Making paper disappear runs ${cost}. ${pick(VOICE.guardShort)}` };
 
     addCigs(-cost);
     actor.bribed = Math.max(actor.bribed || 0, 20);

@@ -386,9 +386,30 @@
         : ""))))));
     const read = actorRead(a);
     const motive = a.approach && a.approach.motive ? `motive: ${shortText(a.approach.motive, 24)}` : "";
-    if (!priority) return read;
+    if (!priority) return stall(a) ? (read ? `${stall(a)} | ${read}` : stall(a)) : read;
     if (motive) return `${shortText(priority, 62)} | ${motive}`;
     return priority.length < 58 && read ? `${priority} | ${read}` : priority;
+  }
+
+  /* TRADE FOR WHAT? (owner, with the screenshot: a man called PIKE, a button
+     reading TRADE with a chip reading "4", and a spoken line reading "4. Crew
+     price. Don't go telling people." — the name of the thing on sale appearing
+     NOWHERE on screen.)
+
+     The item was never lost in the data: labelFor() has always said "Buy
+     Burner Phone. 14". But that string is the DESKTOP row and the touch
+     aria-label — on iPad the visible button is one word by house law and the
+     chip is the bare price, so a sighted player got a number and a verb and
+     no noun. A stall is the most ordinary thing in this prison to want to
+     read at a glance, so it goes in the card's own note line, where it sits
+     while you decide instead of only after you press. The price comes from
+     economy.js's live pricer, the same one the chip and the till ask, so the
+     note can never quote a number the sale won't honour. */
+  function stall(a) {
+    const o = a && a.data && a.data.offer;
+    if (!o || !o.item) return "";
+    const p = CBZ.econ && CBZ.econ.offerPrice ? CBZ.econ.offerPrice(a) : null;
+    return `selling ${shortText(o.item, 18)} · ${p ? p.price : o.price}`;
   }
 
   function verbsFor(a) {
