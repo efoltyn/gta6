@@ -182,7 +182,19 @@
         const ring = CBZ.sharkSimShoreRing;   // shark sim: the crowd lives on the sand
         const a = brnd() * 6.28;
         if (ring) {
-          const d = ring.r0 + brnd() * (ring.r1 - ring.r0);
+          /* ONE DRAW, SHAPED. Uniform across the whole band put as many people
+             out at the deep edge as on the dry sand, which reads as a crowd
+             that has waded into the sea for no reason. Two thirds pick the
+             beach, the rest wade — and the waders spread out to thigh-deep,
+             which is the water the ridden shark can now reach. Still exactly
+             ONE brnd(): the draw COUNT is match state (see above), so the
+             shape may change and the count may not. */
+          const u = brnd();
+          const wl = ring.wl != null ? ring.wl : ring.r1;
+          const dry = Math.max(0.5, wl - 0.5 - ring.r0);
+          const wet = Math.max(0.5, ring.r1 - wl + 0.5);
+          const d = u < 0.66 ? ring.r0 + (u / 0.66) * dry
+                             : (wl - 0.5) + ((u - 0.66) / 0.34) * wet;
           b.target.set(ring.cx + Math.cos(a) * d, 0, ring.cz + Math.sin(a) * d);
         } else {
           const d = brnd() * arena.radius * 0.6;

@@ -159,7 +159,7 @@
     const A = CBZ.surv.arena;
     const rr = Math.hypot(x - A.center.x, z - A.center.z);
     const depth = CBZ.survFloodDepthMeanAt ? Math.max(0, CBZ.survFloodDepthMeanAt(x, z)) : 0;
-    return Math.max(-depth / 0.073, rr - (A.radius + 150));
+    return Math.max(-depth / SHORE_SLOPE, rr - (A.radius + 150));
   }
   function angleDelta(a, b) {
     let d = b - a;
@@ -171,7 +171,27 @@
      ahead, prefer the clearer flank, blend along the shore tangent, capped
      turn rate, {x,z,heading,blocked,shore} out) — on the island's ring,
      where the safe direction is always radial: seaward off the beach,
-     inward off the outer fence. */
+     inward off the outer fence.
+
+     "SAME STEERING SHAPE" WAS A LIE UNTIL NOW. This was written against
+     waterfield's v1 body and never picked up MARINE_STEER_V2 (waterfield.js
+     :712-799), so every wild swimmer on the island still ran the bang-bang
+     version: the side feelers slammed `desired` a fixed 0.72 rad the instant
+     either one touched, there was no hysteresis on the tie or on the tangent
+     choice, and the turn cap was a flat ±0.34 PER FRAME with no dt in it — so
+     the island's sharks strobed along the shore and turned twice as fast at
+     120 fps as at 60. The three fixes below are ports, constant for constant,
+     of the measured city version; the only island-specific part is that the
+     "inward" normal is a radius rather than a sampled shore gradient. */
+  const TURN_PER_UNIT = 0.38;   // rad of turn per unit travelled (waterfield's measured law)
+  const TURN_FLOOR = 0.012;     // ..but a drifting body may still steer, slowly
+  const FEELER_TIE = 0.06;      // |feeler error| under which last frame's side is held
+  const TANGENT_HYST = 0.25;    // dot-product margin before the tangent may flip
+  // Metres of depth per metre of shore distance: the exchange rate islandShore
+  // trades in, so a clearance quoted in metres-from-the-waterline lands on the
+  // depth the species clearances were tuned against.
+  const SHORE_SLOPE = 0.073;
+
   function islandMove(x, z, heading, distance, clearance, t, out) {
     distance = Math.max(0, +distance || 0);
     clearance = Math.max(2, +clearance || 8);
@@ -180,25 +200,50 @@
     const hx = Math.cos(heading), hz = Math.sin(heading);
     let desired = heading;
     const frontS = islandShore(x + hx * probe, z + hz * probe);
+    const leftA = heading - 0.72, rightA = heading + 0.72;
+    const leftS = islandShore(x + Math.cos(leftA) * probe * 0.82, z + Math.sin(leftA) * probe * 0.82);
+    const rightS = islandShore(x + Math.cos(rightA) * probe * 0.82, z + Math.sin(rightA) * probe * 0.82);
     if (frontS >= -clearance) {
       const dx = x - A.center.x, dz = z - A.center.z;
       const rr = Math.hypot(dx, dz) || 1;
       const rx = dx / rr, rz = dz / rr;
       const depth = CBZ.survFloodDepthMeanAt ? Math.max(0, CBZ.survFloodDepthMeanAt(x, z)) : 0;
-      const atFence = (rr - (A.radius + 150)) > -depth / 0.073;
+      const atFence = (rr - (A.radius + 150)) > -depth / SHORE_SLOPE;
       const ax = atFence ? -rx : rx, az = atFence ? -rz : rz;   // the safe radial
       const tx1 = -az, tz1 = ax, tx2 = az, tz2 = -ax;
-      const useFirst = tx1 * hx + tz1 * hz >= tx2 * hx + tz2 * hz;
+      const d1 = tx1 * hx + tz1 * hz, d2 = tx2 * hx + tz2 * hz;
+      // Hold last frame's tangent through a near-tie, or a body running
+      // parallel to the beach picks a new way round the island every frame.
+      let useFirst = d1 >= d2;
+      const prevT = out && out._tan ? out._tan : 0;
+      if (prevT && Math.abs(d1 - d2) < TANGENT_HYST) useFirst = prevT > 0;
+      if (out) out._tan = useFirst ? 1 : -1;
       const tx = useFirst ? tx1 : tx2, tz = useFirst ? tz1 : tz2;
       desired = Math.atan2(az * 0.82 + tz * 0.58, ax * 0.82 + tx * 0.58);
-    } else {
-      const leftA = heading - 0.72, rightA = heading + 0.72;
-      const leftS = islandShore(x + Math.cos(leftA) * probe * 0.82, z + Math.sin(leftA) * probe * 0.82);
-      const rightS = islandShore(x + Math.cos(rightA) * probe * 0.82, z + Math.sin(rightA) * probe * 0.82);
-      if (leftS >= -clearance && rightS < leftS) desired = rightA;
-      else if (rightS >= -clearance && leftS < rightS) desired = leftA;
+    } else if (leftS >= -clearance || rightS >= -clearance) {
+      // PROPORTIONAL, NOT BANG-BANG. The error is the DIFFERENCE between the
+      // feelers, which is exactly zero where the body is centred, so the
+      // correction fades out instead of ringing between the two banks.
+      let err = (leftS - rightS) / (clearance * 2);             // + = right is wetter
+      if (err > 1) err = 1; else if (err < -1) err = -1;
+      if (Math.abs(err) < FEELER_TIE) {
+        const prevS = out && out._side ? out._side : 0;
+        err = prevS * FEELER_TIE;
+      }
+      if (out && err !== 0) out._side = err > 0 ? 1 : -1;
+      desired = heading + err * 0.72;
+    } else if (out) { out._side = 0; out._tan = 0; }            // open water: forget
+    // The steering TARGET has inertia too, filtered on distance travelled so
+    // it is the same filter at any frame rate. A real shore does not vanish in
+    // three frames; a sampling flip does.
+    if (out) {
+      if (out._des != null && isFinite(out._des)) {
+        desired = out._des + angleDelta(out._des, desired) * Math.min(1, distance * 0.9 + 0.02);
+      }
+      out._des = desired;
     }
-    heading += Math.max(-0.34, Math.min(0.34, angleDelta(heading, desired)));
+    const cap = Math.min(0.34, Math.max(TURN_FLOOR, distance * TURN_PER_UNIT));
+    heading += Math.max(-cap, Math.min(cap, angleDelta(heading, desired)));
     let nx = x + Math.cos(heading) * distance;
     let nz = z + Math.sin(heading) * distance;
     const blocked = islandShore(nx, nz) >= -clearance * 0.55;

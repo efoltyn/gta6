@@ -136,15 +136,24 @@
   function relocateBots() {
     const A = arena(); if (!A || !CBZ.bots) return;
     const WL = sim.waterline;
-    CBZ.sharkSimShoreRing = { cx: A.center.x, cz: A.center.z, r0: A.radius * 1.02, r1: WL + 4 };
+    /* THE WADE BAND HAS TO BE WORTH SWIMMING TO. It used to end at WL+4,
+       which on this foreshore (measured: 0.24 m at WL+2, 0.45 at WL+4, 0.83
+       at WL+8, 0.97 at WL+10) is 0.43 m — the DEEPEST any bot ever stood,
+       with a 0.15 m mean across the whole crowd. That was
+       fine when the shark stopped half a metre out and pointless now that it
+       grounds at a hand's depth: the crowd was a line of ankles. WL+9 puts
+       the far edge just under a metre, so a real slice of the beach is people
+       standing thigh-deep with something under them. `wl` is published for
+       entities/survivorbot.js's wander, which shapes the same band. */
+    CBZ.sharkSimShoreRing = { cx: A.center.x, cz: A.center.z, r0: A.radius * 1.02, r1: WL + 9, wl: WL };
     for (let i = 0; i < CBZ.bots.length; i++) {
       const b = CBZ.bots[i];
       if (!b || b.dead) continue;
       const roll = h01(i * 1.71 + 3, sim.match);
       if (roll > 0.86) continue;                       // a few stay inland
       const a = h01(i * 2.13 + 9, sim.match) * 6.283;
-      const wade = roll > 0.62;                        // ~a quarter of the crowd is IN the water
-      const r = wade ? (WL - 1 + h01(i, sim.match + 7) * 5)
+      const wade = roll > 0.55;                        // ~a third of the crowd is IN the water
+      const r = wade ? (WL - 1 + h01(i, sim.match + 7) * 10)
                      : (A.radius * 1.03 + h01(i, sim.match + 11) * Math.max(4, WL - 3 - A.radius * 1.03));
       b.pos.x = A.center.x + Math.cos(a) * r;
       b.pos.z = A.center.z + Math.sin(a) * r;
@@ -523,26 +532,50 @@
     if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = true;
   }
 
-  /* Beached for REAL — sand under the belly. Swimming cannot get you here
-     (the nav field blocks shallower than the body's clearance); a BREACH
-     can, when the leap lands past the block line in the swash. Thrash back
-     to sea — deeper is always radially outward on this island — and STOP
-     the moment there is swimmable water under the body again. The old
-     tuning (trigger at 0.30 m of depth, push seaward 4.5 m/s forever) was
-     a conveyor ring 9 feet off the beach that walled the entire shore —
-     and the crowd standing on it — away from the shark. */
+  /* BEACHING IS A MOVE, AND THIS IS ONLY THE SAFETY NET.
+     A sprint up the swash or a breach that lands past the waterline leaves
+     the body genuinely aground — belly on sand, jaws still working, movement
+     reduced to a thrash. That is the whole point, so nothing here interrupts
+     it. Your own thrashing gets BEACH_PATIENCE seconds to work the animal
+     back to the sea; only after that does the island quietly help, ramping a
+     seaward slide so a player who has run out of ideas cannot be softlocked
+     on the sand. No damage — orcas do this deliberately.
+
+     WHAT WAS WRONG. Three things. (1) The thresholds were a second, private
+     copy of the ride's shore law, and they disagreed with it: it triggered at
+     0.30 m and only released at 0.50 m — deeper than the water a great white,
+     a hammerhead or a megalodon was allowed to swim in — so the "rescue" was
+     a conveyor ring nine feet off the beach that shoved the shark away from
+     the entire crowd standing on it. It now ASKS the ride
+     (CBZ.cityAquaticShoreLaw) instead of guessing. (2) Between 0.10 m and
+     0.50 m the timer was neither advanced nor cleared, so a body that crawled
+     into that band froze whatever count it arrived with. The timer now has
+     honest hysteresis: it runs from aground until genuinely swimmable.
+     (3) It fired after 0.6 s at a flat 3.2 m/s, which is faster than the
+     beaching itself — you could not stay beached long enough to eat. */
+  const BEACH_PATIENCE = 3.4;          // seconds of your own thrashing before the island helps
   function strandedFix(dt) {
     const A = arena(), P = CBZ.player;
     if (!A) return;
+    const law = CBZ.cityAquaticShoreLaw && CBZ.cityAquaticShoreLaw();
+    const ground = law ? law.ground : 0.22;
+    const release = law ? law.release : 0.38;
     const d = depthMean(P.pos.x, P.pos.z);
-    if (d < 0.10) sim.strandT += dt;            // the swash zone: genuinely aground
-    else if (d >= 0.50) sim.strandT = 0;        // released: legal water for every ridden tier
-    if (sim.strandT > 0.6 && d < 0.50) {
-      const dx = P.pos.x - A.center.x, dz = P.pos.z - A.center.z;
-      const rr = Math.hypot(dx, dz) || 1;
-      P.pos.x += (dx / rr) * 3.2 * dt;
-      P.pos.z += (dz / rr) * 3.2 * dt;
-    }
+    if (d >= release) { sim.strandT = 0; return; }      // swimming again: hands off
+    if (d >= ground && sim.strandT <= 0) return;        // shallow, but not aground
+    // A PLAYER STILL THRASHING IS NOT STUCK. Working the body over the sand is
+    // the escape; the clock runs at half rate against it, so a deliberate
+    // beaching lasts about seven seconds of effort and an ABANDONED one about
+    // three and a half. (Without this, holding W up the beach was fought by
+    // the rescue at 2.6 m/s and you could not stay beached long enough to eat.)
+    sim.strandT += dt * (law && law.moving ? 0.5 : 1);
+    if (sim.strandT < BEACH_PATIENCE) return;
+    // ..and then a ramp, not a shove: deeper is always radially outward here.
+    const dx = P.pos.x - A.center.x, dz = P.pos.z - A.center.z;
+    const rr = Math.hypot(dx, dz) || 1;
+    const slide = Math.min(2.6, 0.7 + (sim.strandT - BEACH_PATIENCE) * 1.6);
+    P.pos.x += (dx / rr) * slide * dt;
+    P.pos.z += (dz / rr) * slide * dt;
   }
 
   // ---- HUD ---------------------------------------------------------------

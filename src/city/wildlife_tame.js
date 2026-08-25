@@ -1129,12 +1129,76 @@
     }
     return CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48;
   }
+  /* THE WATER COLUMN, HONESTLY. This used to answer `Math.max(1.2, d)` — a
+     floor that meant a ridden body NEVER saw shallow water, so the posture
+     solver below always had a metre and a bit of column to sink the animal
+     into and a shark in a foot of swash was drawn buried in the sand with a
+     metre of imaginary sea over its back. The shallows are the whole point of
+     the shark sim; the ride gets the real number. */
   function waterDepth(x, z) {
     if (CBZ.cityWaterDepthAt) {
       const d = CBZ.cityWaterDepthAt(x, z);
-      if (Number.isFinite(d)) return Math.max(1.2, d);
+      if (Number.isFinite(d)) return Math.max(0, d);
     }
     return 18;
+  }
+  // World Y of the ground under the body — sand or seabed, the same surface a
+  // camera boom and the swimmer clamp to. On dry beach it is ABOVE the sea,
+  // which is exactly what a beached animal needs to rest on.
+  function bedYAt(x, z) {
+    if (CBZ.citySeaBedYAt) {
+      const y = +CBZ.citySeaBedYAt(x, z);
+      if (Number.isFinite(y)) return y;
+    }
+    return seaY(x, z) - waterDepth(x, z);
+  }
+
+  /* ---- THE SHORE LAW FOR A RIDDEN BODY -----------------------------------
+     A wild fish is kept off the rocks by its species clearance because nobody
+     is steering it. A MOUNT has a driver, and the owner's note is exactly
+     about this: "sharks get blocked like 5 feet from shore when really they
+     should be blocked like a couple feet IN the shore; beaching is possible,
+     orcas do it really well."
+
+     So the ridden body has one number — the DEPTH of water it grounds in —
+     and everything else is derived from it. Roughly a hand's depth for a bull
+     shark, a foot for a megalodon: big enough that the animal is visibly
+     bottoming out, small enough that every wader on this beach is inside the
+     jaws. Deliberately NOT the species spawn clearance (bull 12 ⇒ it used to
+     stop in 0.46 m; megalodon ⇒ 1.25 m, fifteen metres off the sand, which
+     killed the shark sim's own "megalodon in the surf" promise). */
+  function rideGroundDepth(scale) {
+    return Math.min(0.45, 0.14 + Math.max(0.35, scale || 1) * 0.075);
+  }
+  // Is there swimmable water here for a body that grounds at `groundD`? The
+  // DEPTH oracle is the shore law; the nav field is kept only as the fence
+  // that stops a mount leaving the world or grinding a quay wall.
+  function rideCanSwim(x, z, groundD, scale) {
+    if (waterDepth(x, z) < groundD) return false;
+    const wf = CBZ.waterField;
+    if (wf && wf.isNavigableWater &&
+        !wf.isNavigableWater(x, z, Math.max(1.2, Math.max(0.35, scale || 1) * 0.9))) return false;
+    return true;
+  }
+  /* Blocked head-on: slide ALONG the shore instead of dead-stopping into it.
+     The old step handed the whole heading to the navigator, so hitting the
+     shallows spun the animal; a wall slide keeps the player's aim and just
+     stops the component that cannot happen. Shallowest deviation that works
+     wins, and ties break toward the deeper water. */
+  function rideShoreSlide(x, z, heading, dist, groundD, scale) {
+    for (let i = 0; i < 3; i++) {
+      const off = 0.45 + i * 0.45;
+      let best = null, bestD = groundD;
+      for (let s = -1; s <= 1; s += 2) {
+        const h = heading + off * s;
+        const nx = x + Math.cos(h) * dist, nz = z + Math.sin(h) * dist;
+        if (!rideCanSwim(nx, nz, groundD, scale)) continue;
+        const d = waterDepth(nx, nz);
+        if (d > bestD) { bestD = d; best = { x: nx, z: nz, heading: h }; }
+      }
+      if (best) return best;
+    }
+    return null;
   }
   function shortestAngle(d) {
     while (d > Math.PI) d -= Math.PI * 2;
@@ -1646,30 +1710,45 @@
     W.v = Math.max(0, W.v + dv);
     P.sprint = sprint; P.speed = W.v;
 
-    const time = ((typeof performance !== "undefined" ? performance.now() : Date.now()) * 0.001) % 3600;
+    const bodyScale = Math.max(0.35, (a.species && a.species.scale) || 1);
+    const groundD = rideGroundDepth(bodyScale);
+    /* AGROUND IS A STATE, NOT A FAILURE. Orcas beach on purpose; so may you.
+       The belly is on sand, the body can still bite, and the only thing that
+       changes is that the cruise becomes a thrash. */
+    const aground = !W.airborne && waterDepth(P.pos.x, P.pos.z) < groundD;
+    W.aground = aground;
+    W.groundT = aground ? (W.groundT || 0) + fdt : 0;
+    if (aground) W.v = Math.min(W.v, 1.15 + bodyScale * 0.45);
+
     if (W.v > 0.001) {
-      const wf = CBZ.waterField;
-      if (wf && wf.moveInWater) {
-        // A RIDDEN body may hunt the shallows: cap the nav clearance by body
-        // size (scale × 12 ⇒ a bull shark blocks at ~0.45 m of water; a
-        // megalodon still stands ~15 m off the island's sand — its meal is
-        // the orca, not the waders). Wild swimmers keep their species' full
-        // clearance: this call only ever runs for the mount.
-        const rideClear = Math.min(a.waterClearance || 8, ((a.species && a.species.scale) || 1) * 12);
-        const nav = wf.moveInWater(P.pos.x, P.pos.z, ride.head, W.v * fdt,
-          rideClear, time, W.nav);
-        P.pos.x = nav.x; P.pos.z = nav.z;
-        if (nav.blocked) W.v *= 0.35;
-        ride.head = nav.heading;
-      } else {
-        P.pos.x += Math.cos(ride.head) * W.v * fdt;
-        P.pos.z += Math.sin(ride.head) * W.v * fdt;
+      /* THE PLAYER OWNS THE WHEEL. This used to be one line —
+       `ride.head = nav.heading` — which handed the animal's entire heading to
+       the shore-following navigator, so the closer you steered to the beach
+       the harder something else steered you off it. That is the "blocked five
+       feet from shore" feel, and no clearance number could have fixed it.
+       The navigator is demoted to a FENCE: it answers where the body may be,
+       never where it is pointing. */
+      const stepLen = W.v * fdt;
+      let nx = P.pos.x + Math.cos(ride.head) * stepLen;
+      let nz = P.pos.z + Math.sin(ride.head) * stepLen;
+      // An airborne body lands where physics puts it (a breach that cannot
+      // cross the block line is not a breach), and a beached one must be free
+      // to work itself back out over ground it is already lying on.
+      if (!W.airborne && !aground && !rideCanSwim(nx, nz, groundD, bodyScale)) {
+        // A COMMITTED SPRINT BEACHES. Cruising into the sand does not: that is
+        // the difference between an accident and an orca.
+        if (!(sprint && W.v > (R.cruise || 6) * 0.85)) {
+          const slid = rideShoreSlide(P.pos.x, P.pos.z, ride.head, stepLen, groundD, bodyScale);
+          if (slid) {
+            nx = slid.x; nz = slid.z;
+            ride.head += shortestAngle(slid.heading - ride.head) * 0.35;
+          } else { nx = P.pos.x; nz = P.pos.z; W.v *= 0.35; }
+        }
       }
+      P.pos.x = nx; P.pos.z = nz;
     }
 
     const surf = seaY(P.pos.x, P.pos.z);
-    const depth = waterDepth(P.pos.x, P.pos.z);
-    const bodyScale = Math.max(0.35, (a.species && a.species.scale) || 1);
     const vin = blockedInput ? 0 : verticalRideInput(keys);
     if (W.breachCd > 0) W.breachCd = Math.max(0, W.breachCd - dt);
     if (W.airborne) {
@@ -1678,8 +1757,15 @@
       W.airT = (W.airT || 0) + fdt;
       if (W.y - surf > (W.airPeak || 0)) W.airPeak = W.y - surf;
       W.pitch = Math.max(-0.72, Math.min(1.18, Math.atan2(W.vy, Math.max(4, W.v))));
-      if (W.vy < 0 && W.y <= surf - Math.max(0.18, (a.swimDepth || 1) * 0.12)) {
-        W.airborne = false; W.y = surf - Math.max(0.22, (a.swimDepth || 1) * 0.18);
+      // A LEAP CAN LAND ON SAND. The old test only ever asked about the
+      // waterline, so a breach that cleared the swash kept "falling" to a sea
+      // floor that was not under it and popped up a frame later. The ground is
+      // a landing surface too — that is what makes an intentional beaching a
+      // move rather than a glitch.
+      const landBed = bedYAt(P.pos.x, P.pos.z) + Math.max(0.35, bodyScale * 0.32);
+      if (W.vy < 0 && (W.y <= surf - Math.max(0.18, (a.swimDepth || 1) * 0.12) || W.y <= landBed)) {
+        W.airborne = false;
+        W.y = Math.max(landBed, surf - Math.max(0.22, (a.swimDepth || 1) * 0.18));
         // Re-entry keeps a real fraction of the fall as plunge momentum: a
         // megalodon coming down off six metres should CARRY, not stop dead on
         // the waterline the way the old flat 22% bleed made it.
@@ -1705,7 +1791,13 @@
       W.vy += Math.max(-va * fdt, Math.min(va * fdt, wantVy - W.vy));
       if (!vin) W.vy *= Math.exp(-2.8 * fdt);
       W.y += W.vy * fdt;
-      const bedY = surf - depth + Math.max(0.35, (a.species.scale || 1) * 0.32);
+      // THE BED IS THE GROUND, asked of the bathymetry oracle — not "the
+      // surface minus a column we made up". In a foot of swash that puts the
+      // origin ABOVE the waterline with the belly on wet sand, which is what a
+      // shark in the shallows actually looks like; on dry beach the ground is
+      // above the sea and the body rests on the beach instead of sinking to a
+      // sea floor that isn't under it.
+      const bedY = bedYAt(P.pos.x, P.pos.z) + Math.max(0.35, (a.species.scale || 1) * 0.32);
       // HOW HIGH THE BODY MAY RIDE. `0.36 × swimDepth` for a breacher is what
       // lets the dorsal cut the surface before a leap; MARINE_SIT_DEEPER trims
       // that by a fifth so a shark at full rise sits IN the water rather than
@@ -1736,8 +1828,25 @@
         if (CBZ.shake) CBZ.shake(0.42 + bodyScale * 0.12);
       }
     }
-    W.roll += ((shortestAngle(ride.head - W.lastHead) / fdt) * -0.065 - W.roll) * Math.min(1, fdt * 4);
-    W.roll = Math.max(-0.42, Math.min(0.42, W.roll)); W.lastHead = ride.head;
+    /* THRASHING READS AS EFFORT. A beached body shoving itself over wet sand
+       throws spray every time it flexes; without it the animal just slides
+       and the whole beat looks like a physics bug. Rolls harder than a
+       swimming body too — that side-to-side working is the escape. */
+    if (aground) {
+      W.thrashT = (W.thrashT || 0) + fdt;
+      if (W.thrashT > 0.34 && W.v > 0.12) {
+        W.thrashT = 0;
+        if (CBZ.marineSurfaceHit) { try { CBZ.marineSurfaceHit(P.pos.x, P.pos.z, 1.1 + bodyScale * 0.5); } catch (e) {} }
+        else if (CBZ.waterSplashAt) CBZ.waterSplashAt(P.pos.x, surf, P.pos.z, 1.0 + bodyScale * 0.6);
+      }
+      W.roll = Math.max(-0.5, Math.min(0.5,
+        Math.sin((W.groundT || 0) * 6.4) * 0.34 * Math.min(1, 0.25 + W.v)));
+      W.lastHead = ride.head;
+    } else {
+      W.thrashT = 0;
+      W.roll += ((shortestAngle(ride.head - W.lastHead) / fdt) * -0.065 - W.roll) * Math.min(1, fdt * 4);
+      W.roll = Math.max(-0.42, Math.min(0.42, W.roll)); W.lastHead = ride.head;
+    }
     P.pos.y = W.y + aquaticSeatY(V, W.pitch + ride.attackPitch);
     P.vy = W.vy; P.grounded = false; P._fallPeak = 0;
     P._swim = false; P._aquaticMount = a;
@@ -1815,6 +1924,30 @@
     cam.position.lerp(_diveWant, k);
   }
   if (CBZ.onAlways) CBZ.onAlways(50.4, aquaticDiveCamera);
+  /* THE SHORE LAW, PUBLISHED. modes/shark_sim.js owns the anti-softlock slide
+     off a beach and needs to know when the body is genuinely aground and when
+     it can swim again. Those are the ride's numbers, so it asks the ride —
+     a second copy of the thresholds in the mode file is how the old 0.30/0.50
+     conveyor ring came to wall the entire shore. `release` sits above `ground`
+     so the two do not chatter across one threshold. */
+  CBZ.cityAquaticShoreLaw = function () {
+    const a = ride.mount, W = ride.water;
+    if (!a || !W || !aquaticMounted(a)) return null;
+    const scale = Math.max(0.35, (a.species && a.species.scale) || 1);
+    const ground = rideGroundDepth(scale);
+    return {
+      species: a.species ? a.species.id : null, scale: scale,
+      ground: +ground.toFixed(3),
+      release: +(ground * 1.45 + 0.06).toFixed(3),
+      aground: !!W.aground, groundT: +(W.groundT || 0).toFixed(2),
+      airborne: !!W.airborne,
+      // Somebody is working the body: a thrashing player is not softlocked,
+      // so the mode's rescue timer gets to run at half rate against them.
+      moving: (W.v || 0) > 0.12,
+      depth: +waterDepth(CBZ.player ? CBZ.player.pos.x : 0, CBZ.player ? CBZ.player.pos.z : 0).toFixed(3),
+    };
+  };
+
   // Tooling seam: the one number the before/after is actually about.
   CBZ.cityAquaticRideDepths = function () {
     const a = ride.mount, W = ride.water, P = CBZ.player, cam = CBZ.camera;
