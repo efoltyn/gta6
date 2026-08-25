@@ -208,6 +208,34 @@
     if (holstered()) return false;   // holstered = read as unarmed (fists show; city also de-escalates)
     return availableIndices().length > 0 && !(CBZ.game.mode === "city" && CBZ.game.cityMeleeWeapon);
   }
+  // ---- YOU ARE THE ANIMAL: NO HANDS ------------------------------------
+  // Owner, on shark sim: "our first person is still a person mounted on shark,
+  // which is a cool angle but human ARMS occasionally show lol." They did:
+  // first person with nothing equipped draws the FIST viewmodel (see
+  // `fists.visible = !armed()` in the per-frame pass), and nothing in this file
+  // knew the player was a passenger on a bull shark rather than a man standing
+  // on a street — so a pair of swaying human forearms drifted into the eye of
+  // the shark, worst on the auto-bite punch-in and for a frame after every
+  // evolution re-mounts the ride.
+  //
+  // AQUATIC mounts only, and deliberately so. Riding a shark/dolphin, the ride
+  // owns the trigger outright (city/wildlife_tame.js cityMountedAnimalAttack
+  // returns true and fireControl hands the whole input over), the mouth is the
+  // weapon, and the camera sits on the animal's back looking down its nose:
+  // there is nothing a hand could be doing. A LAND pet is the opposite case —
+  // that trigger call returns false, you really can fire a gun from the saddle,
+  // and hiding the gun you are shooting would be a new bug. So: on a fish, no
+  // viewmodel; on a horse, unchanged.
+  //
+  // WHY THE FLAG IS SAFE TO READ HERE: the ride republishes `_aquaticMount`
+  // every frame from its own tick at onAlways 49.8 — i.e. immediately BEFORE
+  // this file's onAlways 52 — and shark_sim's evolution dismounts and re-mounts
+  // inside a single synchronous call, so there is no frame in which this reads
+  // stale-false and lets the hands through.
+  function aquaticRide() {
+    const p = CBZ.player;
+    return !!(p && p._aquaticMount);
+  }
   function shoulderActive() {
     const p = CBZ.player;
     // The shoulder owner is strictly an alive, on-foot third-person state.
@@ -3445,7 +3473,10 @@
   function setActive(on) {
     fps.active = on;
     if (CBZ.playerChar) CBZ.playerChar.group.visible = !on;
-    vm.visible = on;
+    // Same owner as the per-frame pass below (aquaticRide): the eye toggle can
+    // land AFTER this frame's onAlways(52), so without it a [V] pressed mid-ride
+    // flashed one frame of fists before the next frame took them away.
+    vm.visible = on && !aquaticRide();
     if (cross) {
       // Leaving FP used to write display:none even though shoulderActive()
       // became true in the same call. The per-frame change-only cache still
@@ -3770,7 +3801,7 @@
       (CBZ.playerChar && CBZ.playerChar.skydiving));
     // bailout.js owns a dedicated two-hand/riser viewmodel. Hide the generic
     // fist/gun while it is active, then restore it automatically on landing.
-    if (ddT < 0) vm.visible = !!(fps.active && !chutePresentation);
+    if (ddT < 0) vm.visible = !!(fps.active && !chutePresentation && !aquaticRide());
     const aiming = fps.active || shoulderActive();
     const crossShow = aiming && !chutePresentation && CBZ.game.state === "playing";
     if (cross && crossShow !== _crossShown) { cross.style.display = crossShow ? "block" : "none"; _crossShown = crossShow; }
