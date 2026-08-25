@@ -203,6 +203,57 @@
   // sea exactly as it shipped (`?cfg_WATER_SURFACE_LOOK=0`).
   if (CFG.WATER_SURFACE_LOOK == null) CFG.WATER_SURFACE_LOOK = true;
 
+  /* ---- SEA_TRANSLUCENT — THE SEA YOU CAN SEE INTO -----------------------
+     OWNER (2026-08-25): "the shadow left by the orca is dumb and fake, like a
+     fake horizon — rather than water being slightly opaque and the shadow
+     being real then."
+
+     He is right, and the files that draw those shadows say so themselves:
+     wildlife_shark.js's own header admits "the sea is OPAQUE ... so from above
+     the water the body is never actually visible" and calls the silhouette a
+     stand-in for that fact. The silhouette is a painted proxy for a missing
+     rendering feature. This is the feature.
+
+     TWO HALVES, and only both together make it work:
+
+       1. THE SURFACE BLENDS. Both sea materials now write a real alpha instead
+          of 1.0, and the alpha is the physics: you can see INTO water you are
+          looking down at, and you cannot see into water you are looking ACROSS
+          (cbzSeaAlpha below). Straight down ~0.58 opacity; twenty degrees off
+          the horizontal is already 0.9; the horizon is 1.0. So this cannot
+          "open a hole" in the far ocean and cannot fight the horizon fuse.
+
+       2. THE BODY DIMS. A constant blend alone would show a shark at 30 m
+          exactly as brightly as a shark at 1 m, which is the sticker problem
+          again wearing a different hat. CBZ.waterVeilApply() patches a
+          submerged animal's OWN materials so every fragment fades toward the
+          water colour by the length of the water column between it and the eye
+          (Beer-Lambert, one exp()). That is why depth still swallows: at a
+          grazing angle the column is long and the animal is gone, which is
+          also exactly when the surface has gone opaque. The two halves agree
+          because they are the same geometry.
+
+     PERF: the alpha ramp is bounded to CLARITY_FAR metres, so the transparent
+     region is a puddle around the camera and the other 15.8 km of the disc
+     blends at alpha 1.0 (the same pixel cost it always had, one extra blend
+     op). depthWrite STAYS ON, so the sea still owns its depth the way it did
+     and nothing downstream loses an occluder.
+
+     OFF (?cfg_SEA_TRANSLUCENT=0) -> gl_FragColor.a is 1.0 on both sea
+     materials, the materials go back to transparent:false, no material is ever
+     veiled, and wildlife_shark.js / wildlife_orca.js draw their painted
+     silhouettes again. A true one-flag revert to the sticker. */
+  if (CFG.SEA_TRANSLUCENT == null) CFG.SEA_TRANSLUCENT = true;
+  function translucentOn() { return CFG.SEA_TRANSLUCENT !== false && CFG.WATER_V2 !== false; }
+  CBZ.seaTranslucentOn = translucentOn;
+
+  // How clear, and how far the clarity reaches.
+  const CLARITY = 0.46;      // max transparency looking STRAIGHT DOWN (1-alpha)
+  const CLARITY_POW = 5.0;   // Schlick exponent — the REAL Fresnel curve (see cbzSeaAlpha)
+  const CLARITY_NEAR = 55;   // m — full clarity inside this
+  const CLARITY_FAR = 240;   // m — fully opaque beyond this
+  const VEIL_K = 0.115;      // Beer-Lambert extinction, per metre of water (~8.7 m e-fold)
+
   // ============================================================
   //  1. THE SWELL TABLE — the single source of truth
   // ============================================================
@@ -890,6 +941,12 @@
     // w = distance-roughness master. All four go to 0 with the flag, which is
     // what makes the revert exact on BOTH sea materials at once.
     u.uLook = { value: new THREE.Vector4(1.0, 1.0, 1.0, 1.0) };
+    // SEA_TRANSLUCENT. x = how transparent the sea gets looking straight down
+    // (0 = the old opaque sheet), y = the view-angle exponent, z/w = the
+    // distance window the clarity is allowed to live in. Shared by both sea
+    // materials so they cannot disagree about how clear the water is.
+    u.uClarity = { value: new THREE.Vector4(
+      translucentOn() ? CLARITY : 0.0, CLARITY_POW, CLARITY_NEAR, CLARITY_FAR) };
     return u;
   };
 
@@ -984,6 +1041,16 @@
       _skyHigh.copy(SKY_HIGH_NIGHT).lerp(SKY_HIGH_DAY, Math.max(0, Math.min(1, +CBZ.dayness || 0)));
       u.uSkyHigh.value.copy(u.uSkyLow ? u.uSkyLow.value : SKY_HIGH_DAY).lerp(_skyHigh, 0.86);
     }
+    veilDrive(u);
+    if (u.uClarity) {
+      // Clarity is a live read, not a boot-time one, so ?cfg_SEA_TRANSLUCENT=0
+      // and a runtime toggle land on the same frame. Rain silts the water:
+      // heavy chop closes the window rather than opening a murky hole.
+      u.uClarity.value.x = translucentOn() ? CLARITY * (1 - wet * 0.55) : 0.0;
+      u.uClarity.value.y = CLARITY_POW;
+      u.uClarity.value.z = CLARITY_NEAR;
+      u.uClarity.value.w = CLARITY_FAR;
+    }
     if (u.uLook) {
       const v = u.uLook.value;
       // A storm is rougher water, not calmer: chop widens the lanes and pushes
@@ -1003,7 +1070,31 @@
     "  float f = 0.0;",
     "  for (int i = 0; i < " + MAX_INLAND + "; i++) {",
     "    vec4 b = uInlandBodies[i];",
-    "    float d = distance(p, b.xy);",
+    /* length(), NOT distance(), AND THAT IS NOT A STYLE CHOICE.
+
+       This function is grafted into the vendor mirror shader by
+       world/waterfx.js, and that shader's own main() contains the line
+
+           float distance = length(worldToEye);
+
+       ESSL 1.00 forbids a declaration that shadows a built-in the translation
+       unit actually USES, so the moment anything in this shared GLSL called
+       distance(), the WHOLE MIRROR FRAGMENT SHADER stopped compiling:
+
+           ERROR: 0:1059: 'distance' : function name expected
+
+       three logs that to the console and then draws the mesh with a dead
+       program — silently. The result was that at quality tier >= 2, where
+       waterfx.js swaps CBZ.citySea for the reflector, THE OCEAN RENDERED
+       NOTHING AT ALL. What everyone (including several visual-compare
+       presets) has been photographing as "the sea" is world/
+       terrain_overhaul.js's teal visual seabed showing through the hole. It
+       has no swell, no glitter and no foam, which is exactly why it never
+       looked quite right.
+
+       length(p - b.xy) is the same number and references no built-in name, so
+       the vendor's local is legal again. Do not put distance() back. */
+    "    float d = length(p - b.xy);",
     "    float s = smoothstep(b.z * 0.55, b.z * 1.15, d);",
     "    f = max(f, b.w * (1.0 - s));",
     "  }",
@@ -1083,8 +1174,194 @@
     ].join("\n");
   };
 
+  /* SEA_TRANSLUCENT, half one: the surface's own alpha.
+
+     WHY VIEW ANGLE AND NOT A CONSTANT. A flat opacity would be the sticker
+     problem inverted — the far ocean would go glassy, the horizon fuse would
+     have nothing solid to converge on, and every sea in the game would read
+     like cellophane. Real water is a Fresnel switch, and the alpha here is
+     literally its transmittance: at the vertical 98% of the light gets in, at
+     forty-five degrees still ~99%, and only inside the last few degrees of
+     grazing does the surface snap to the mirror everyone pictures. Computed
+     over the FLAT surface normal, deliberately not the rippled shading normal,
+     because an alpha that sparkled with the wave normals would boil.
+
+     The distance window is the perf half of the same idea and costs nothing
+     visually: past CLARITY_FAR you are looking across the water anyway, so
+     forcing alpha to 1 there removes a blend from 99% of a 16 km disc and
+     removes any chance of the transparent sea revealing the void beyond the
+     seabed ring. Foam is opaque because foam is air, not water. */
+  CBZ.waterClarityGLSL = function () {
+    return [
+      "uniform vec4 uClarity;",
+      "float cbzSeaAlpha(vec3 V, float dist, float under, float foam) {",
+      "  if (uClarity.x <= 0.0) return 1.0;",
+      // TRANSMITTANCE, not a taste curve: Schlick over the FLAT surface normal
+      // (deliberately not the rippled shading normal — an alpha that sparkled
+      // with the wave normals would boil). Water's F0 is 0.02, so at forty-five
+      // degrees ~99% of the light still gets in and only inside the last few
+      // degrees of grazing does the surface become the mirror everyone pictures.
+      // The first cut of this used pow(V.y, 1.15), which said a boat deck at
+      // seventeen degrees could see almost nothing in — three times more opaque
+      // than real water, and it made the whole feature invisible in the exact
+      // frame the owner asked about.
+      "  float c = clamp(V.y, 0.0, 1.0);",
+      "  float clarity = 1.0 - (0.02 + 0.98 * pow(1.0 - c, uClarity.y));",
+      "  clarity *= 1.0 - smoothstep(uClarity.z, uClarity.w, dist);",
+      "  clarity *= 1.0 - clamp(foam, 0.0, 1.0);",
+      "  clarity *= 1.0 - clamp(under, 0.0, 1.0);",
+      "  return clamp(1.0 - uClarity.x * clarity, 0.0, 1.0);",
+      "}",
+    ].join("\n");
+  };
+
+  /* SEA_TRANSLUCENT, half two: THE VEIL — what the water does to a body seen
+     through it.
+
+     A blended surface alone is not enough and never was. Blend the sea at a
+     flat 0.7 and a shark thirty metres down is exactly as legible as one a
+     metre down, which is the painted-sticker failure with extra steps. What
+     actually hides a submerged animal is the WATER COLUMN between it and your
+     eye: two metres of it and you can count the pectorals, fifteen and there
+     is nothing there.
+
+     So this patches the animal's own materials with one Beer-Lambert term over
+     the length of that column. The column is not the animal's depth — it is
+     the part of the eye->fragment segment that lies below the surface, which
+     for a camera at height a looking at a fragment at depth -b is
+     |CP| * b / (a + b). Straight down that is the depth; from a deck at a low
+     angle it is many times the depth, so the same animal at the same depth
+     fades as you flatten your view — which is the real behaviour, and it is
+     the same geometric fact cbzSeaAlpha uses to close the surface at the same
+     moment. The two halves are one model seen from two sides.
+
+     THE CAMERA UNDER THE SURFACE IS NOT THIS FILE'S PROBLEM: world/
+     water_underwater.js already owns the water column's fog when you are in
+     it, so the veil returns 1.0 there rather than attenuating twice.
+
+     Applied before <tonemapping_fragment>, i.e. in the same linear space the
+     sea's own body colour is mixed in, so a fully-veiled animal converges on
+     exactly the water around it instead of leaving a differently-graded ghost.
+
+     COST: one exp, one length, one mix, on submerged animal fragments only.
+     The patched material is a CLONE cached per source material, so N sharks
+     sharing a hide material still compile one program (r128 keys the program
+     on onBeforeCompile.toString(), which is one constant string here). */
+  const VEIL_U = {
+    uVeilSeaY: { value: 0 },
+    uVeilK: { value: VEIL_K },
+    uVeilColor: { value: new THREE.Color(0x11384f) },
+  };
+  CBZ.waterVeilUniforms = VEIL_U;
+  const _veilCache = new WeakMap();
+  const _veilTint = new THREE.Color();
+
+  function veilBefore(shader) {
+    /* EVERY ANCHOR IS CHECKED BEFORE ANYTHING IS EMITTED. A fragment shader
+       that READS a varying its vertex partner never WROTE is the one failure
+       here that is not visibly obvious — it does not fail to compile, it just
+       renders garbage on one material. If any chunk name ever moves, ship the
+       plain material instead of a subtly wrong one. (core/gfx.js's patch makes
+       the same promise for the same reason.) */
+    if (shader.vertexShader.indexOf("#include <project_vertex>") < 0) return;
+    if (shader.vertexShader.indexOf("#include <common>") < 0) return;
+    if (shader.fragmentShader.indexOf("#include <tonemapping_fragment>") < 0) return;
+    if (shader.fragmentShader.indexOf("#include <common>") < 0) return;
+    shader.uniforms.uVeilSeaY = VEIL_U.uVeilSeaY;
+    shader.uniforms.uVeilK = VEIL_U.uVeilK;
+    shader.uniforms.uVeilColor = VEIL_U.uVeilColor;
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying vec3 vCbzVeilW;")
+      .replace("#include <project_vertex>",
+        "#include <project_vertex>\n" +
+        "vec4 cbzVeilP = vec4( transformed, 1.0 );\n" +
+        "#ifdef USE_INSTANCING\n  cbzVeilP = instanceMatrix * cbzVeilP;\n#endif\n" +
+        "vCbzVeilW = ( modelMatrix * cbzVeilP ).xyz;");
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>",
+        "#include <common>\nvarying vec3 vCbzVeilW;\nuniform float uVeilSeaY;\nuniform float uVeilK;\nuniform vec3 uVeilColor;")
+      .replace("#include <tonemapping_fragment>",
+        "float cbzAC = cameraPosition.y - uVeilSeaY;\n" +
+        "float cbzBP = vCbzVeilW.y - uVeilSeaY;\n" +
+        "if ( uVeilK > 0.0 && cbzAC > 0.0 && cbzBP < 0.0 ) {\n" +
+        "  float cbzL = length( vCbzVeilW - cameraPosition ) * ( -cbzBP ) / max( 0.05, cbzAC - cbzBP );\n" +
+        "  gl_FragColor.rgb = mix( uVeilColor, gl_FragColor.rgb, exp( -cbzL * uVeilK ) );\n" +
+        "}\n#include <tonemapping_fragment>");
+  }
+
+  // The patched twin of one material. Cached, so a whole pod shares it.
+  CBZ.waterVeilMaterial = function (mat) {
+    if (!mat || !translucentOn()) return mat;
+    if (mat.userData && mat.userData.cbzVeiled) return mat;
+    const hit = _veilCache.get(mat);
+    if (hit) return hit;
+    if (mat.isShaderMaterial || mat.isRawShaderMaterial) return mat;   // no chunks to patch
+    let clone;
+    try { clone = mat.clone(); } catch (e) { return mat; }
+    /* CHAIN, NEVER CLOBBER. systems/weather.js (wetness, snow, flood) and
+       core/gfx.js (detail normals, contact AO) both install onBeforeCompile
+       hooks on ordinary materials — and Material.copy() does NOT carry an own
+       onBeforeCompile onto a clone, so cloning silently drops them. Capture
+       the SOURCE's hook and call it first, and give the clone a cache key that
+       names the hook we chained onto: r128 keys the program cache on
+       onBeforeCompile.toString(), our source is one constant string, and
+       without this a wet-coated hide would reuse a dry one's program. */
+    const prev = mat.onBeforeCompile;
+    const prevSrc = (prev && prev !== THREE.Material.prototype.onBeforeCompile) ? String(prev) : "";
+    clone.onBeforeCompile = prev
+      ? function (sh) { prev.call(this, sh); veilBefore(sh); }
+      : veilBefore;
+    clone.customProgramCacheKey = function () { return "cbzVeil|" + prevSrc; };
+    clone.userData = Object.assign({}, clone.userData, { cbzVeiled: true });
+    clone.needsUpdate = true;
+    _veilCache.set(mat, clone);
+    _veilCache.set(clone, clone);
+    return clone;
+  };
+
+  // Swap every material under an object for its veiled twin. Idempotent, and a
+  // no-op with the flag off, so callers can run it unconditionally on spawn.
+  CBZ.waterVeilApply = function (obj) {
+    if (!obj || !translucentOn()) return false;
+    let n = 0;
+    obj.traverse(function (o) {
+      if (!o.isMesh && !o.isSkinnedMesh) return;
+      const m = o.material;
+      if (!m) return;
+      if (Array.isArray(m)) {
+        let changed = false;
+        const out = m.map(function (x) { const y = CBZ.waterVeilMaterial(x); if (y !== x) changed = true; return y; });
+        if (changed) { o.material = out; n++; }
+      } else {
+        const y = CBZ.waterVeilMaterial(m);
+        if (y !== m) { o.material = y; n++; }
+      }
+    });
+    return n > 0;
+  };
+
+  // Sea level and water tint the veil fades toward, refreshed once a frame off
+  // whichever water world is live. Called from waterDriveCommonUniforms.
+  function veilDrive(u) {
+    VEIL_U.uVeilK.value = translucentOn() ? VEIL_K : 0;
+    let y = seaY();
+    if (CBZ.game && CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game.mode) && CBZ.survSeaMeanY) {
+      const iy = CBZ.survSeaMeanY();
+      if (Number.isFinite(iy)) y = iy;
+    }
+    VEIL_U.uVeilSeaY.value = y;
+    // The colour a fully-swallowed body converges on IS the water's own body
+    // colour at its dimmest lit value (see the `base *= 0.63 + ndl * 0.37`
+    // line in city/world.js), so the animal dissolves into the sea rather than
+    // into a second, differently-tinted blue.
+    const src = (u && u.uDisasterTint) ? u.uDisasterTint.value
+      : (u && u.uSeaColor) ? u.uSeaColor.value : null;
+    if (src) VEIL_U.uVeilColor.value.copy(_veilTint.copy(src).multiplyScalar(0.66));
+  }
+
   CBZ.waterFragmentDecl = function () {
     return [
+      CBZ.waterClarityGLSL(),
       "uniform float uSeaTime;",
       "uniform vec3 uSeaColor;",
       "uniform sampler2D uSeaNormal;",
@@ -1766,6 +2043,7 @@
     ].join("\n");
 
     const fs = [
+      CBZ.waterClarityGLSL(),
       "uniform float uSeaTime;",
       "uniform sampler2D uSeaNormal;",
       "uniform vec3 uSunDir;",
@@ -1850,20 +2128,41 @@
       "  float tip = pow(clamp(vDwNormal.y, 0.0, 1.0), 18.0);",
       "  float foam = smoothstep(0.48, 0.90, vDwHeight + (n - 0.5) * 0.38) * tip * uDisasterFoam;",
       "  outColor = mix(outColor, uFoamColor, clamp(foam, 0.0, 0.88));",
-      "  gl_FragColor = vec4(outColor, uDisasterOpacity);",
+      // SEA_TRANSLUCENT. The island's sea is the one you actually swim a shark
+      // under, so it gets the same view-angle clarity the city ocean does. Any
+      // opacity a disaster has already dialled in (a receding tsunami fades
+      // this plane out) still wins: the two multiply.
+      "  float dwUnder = gl_FrontFacing ? 0.0 : 1.0;",
+      "  float dwSolid = clamp(max(max(foam, boil), clamp(sed, 0.0, 1.0)), 0.0, 1.0);",
+      "  gl_FragColor = vec4(outColor, uDisasterOpacity * cbzSeaAlpha(V, vDwDist, dwUnder, dwSolid));",
       "  #include <tonemapping_fragment>",
       "  #include <encodings_fragment>",
       "  #include <fog_fragment>",
       "}",
     ].join("\n");
 
-    const transparent = opts.transparent === true || U.uDisasterOpacity.value < 0.999;
+    const transparent = opts.transparent === true || U.uDisasterOpacity.value < 0.999 ||
+      translucentOn();
+    /* DEPTH STAYS OURS. A transparent material normally drops depthWrite, and
+       for a sprite that is right — but this is a 1.4 km sheet that half the
+       world sits behind, and a sea that stopped writing depth would stop
+       occluding every particle, decal and foam layer under it. The sea keeps
+       writing depth and simply blends on the way in; the only thing that
+       changes is that it is now drawn in the transparent pass, AFTER the
+       opaque animals it has to show through. Callers that ask for a specific
+       depthWrite (the receding tsunami) still get exactly what they asked. */
     const mat = new THREE.ShaderMaterial({
       name: opts.name || "CBZ Disaster Water",
       uniforms: U, vertexShader: vs, fragmentShader: fs,
       fog: true, transparent: transparent,
       opacity: U.uDisasterOpacity.value,
-      depthWrite: opts.depthWrite == null ? !transparent : !!opts.depthWrite,
+      // ...but only for a sea at FULL body opacity. A caller that deliberately
+      // fades this sheet out (the receding tsunami) still gets the old
+      // depthWrite:false, because a half-faded sheet that writes depth punches
+      // a hole in everything behind it.
+      depthWrite: opts.depthWrite == null
+        ? ((translucentOn() && U.uDisasterOpacity.value >= 0.999) ? true : !transparent)
+        : !!opts.depthWrite,
       depthTest: true, side: THREE.DoubleSide,
     });
     mat.userData.waterMode = "shared-disaster-fresnel";
@@ -1891,6 +2190,15 @@
     if (Number.isFinite(state.opacity)) {
       u.uDisasterOpacity.value = +state.opacity;
       mat.opacity = +state.opacity;
+      /* SEA_TRANSLUCENT made this number mean something. Before it, the sea was
+         built transparent:false and a runtime opacity was simply ignored by the
+         renderer; now the sheet really does fade — so the moment it stops being
+         a full-bodied sea it must also stop writing depth, or a half-faded
+         tsunami punches a hole in everything behind it. */
+      if (translucentOn() && mat.userData && mat.userData.waterUniforms === u) {
+        const solid = +state.opacity >= 0.999;
+        if (mat.depthWrite !== solid) mat.depthWrite = solid;
+      }
     }
     // ---- the turbid-front block. Absent from `state` = untouched, so an
     //      existing caller keeps its clean water without knowing this exists.

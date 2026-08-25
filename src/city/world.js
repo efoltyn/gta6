@@ -1447,20 +1447,32 @@
         (CFGW.SEA_HORIZON_FUSE !== false
           ? "  #ifdef USE_FOG\n  outColor = mix(outColor, fogColor, smoothstep(3600.0, 6400.0, vSeaDist));\n  #endif"
           : ""),
-        "  gl_FragColor = vec4(outColor, 1.0);",
+        /* SEA_TRANSLUCENT (world/water_spec.js). The sea stops being a painted
+           lid. cbzSeaAlpha is a view-angle switch, not a constant: looking
+           down into water you see through it, looking ACROSS it you do not,
+           and past ~240 m it is 1.0 again — so the horizon fuse two lines up
+           still converges on a fully opaque pixel and the far ocean costs
+           exactly what it always did. Foam is air and stays opaque; the
+           underside (a swimmer looking up) stays a solid silvery ceiling. */
+        "  gl_FragColor = vec4(outColor, cbzSeaAlpha(V, vSeaDist, under, foam));",
         "  #include <tonemapping_fragment>",
         "  #include <encodings_fragment>",
         "  #include <fog_fragment>",
         "}",
       ].join("\n");
 
+      const seaClear = CBZ.seaTranslucentOn ? CBZ.seaTranslucentOn() : false;
       seaMat2 = new THREE.ShaderMaterial({
         name: "CBZ Ocean Water",
         uniforms: U,
         fog: true,
+        // depthWrite STAYS ON while transparent — see the note in
+        // makeDisasterWaterMaterial. The sea must keep owning its depth; all
+        // that changes is that it is now drawn after the opaque bodies it has
+        // to show through, and blends instead of overwriting.
         depthWrite: true,
         depthTest: true,
-        transparent: false,
+        transparent: seaClear,
         side: THREE.DoubleSide,          // you can swim UNDER the sea now
         vertexShader: vs,
         fragmentShader: fs,
@@ -1472,6 +1484,14 @@
 
       const sea = new THREE.Mesh(CBZ.waterBuildSeaGeometry(), seaMat2);
       sea.name = "world-sea";
+      /* THE SEA IS THE FIRST TRANSPARENT THING, ALWAYS. Once it blends, three
+         sorts it into the transparent list by the distance to its ORIGIN — and
+         because this disc is re-centred on the camera in the vertex shader,
+         that distance is meaningless: near the city centre the sea would sort
+         LAST and wash over every spray sprite and foam layer already drawn.
+         renderOrder -1 pins it ahead of all of them, which is also exactly
+         where it sat when it was opaque. */
+      sea.renderOrder = -1;
       sea.receiveShadow = false; sea.castShadow = false;
       sea.frustumCulled = false;                   // the horizon is everywhere
       sea.position.set(0, SEA_Y, 0);               // mean level; XZ comes from the shader

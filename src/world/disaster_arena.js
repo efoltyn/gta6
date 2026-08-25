@@ -428,6 +428,10 @@
     ocean.position.set(cx, OCEAN_Y, cz);
     ocean.receiveShadow = false; root.add(ocean);
     ocean.name = "survival-ocean";
+    // SEA_TRANSLUCENT: the sea blends now, so it joins the transparent list —
+    // pinned first (city/world.js has the same line and the same reason) so it
+    // can never be sorted on top of the spray and foam that ride on it.
+    ocean.renderOrder = -1;
     ocean.frustumCulled = false;
     ocean.userData.waterSurface = true;
     ocean.userData.surfaceOwner = "survival-water";

@@ -296,7 +296,13 @@
         "vec3 cbzUnderCol = mix( cbzBody * 0.72, cbzBody * 1.30 + uFoamColor * 0.22, clamp( reflectance * 1.45, 0.0, 1.0 ) );",
         "cbzOut = mix( cbzOut, cbzUnderCol, cbzUnder );",
         "cbzOut = mix( cbzOut, uFoamColor, cbzFoam );",
-        "gl_FragColor = vec4( cbzOut, alpha );",
+        // SEA_TRANSLUCENT (world/water_spec.js). The MIRROR sea is the one
+        // actually on screen at quality tier >= 2, so it needs the identical
+        // alpha the shader sea got or "you can see into the water" would be
+        // true only on low quality. eyeDirection is the vendor's own
+        // normalize(eye - worldPosition), i.e. exactly the V cbzSeaAlpha
+        // wants. uClarity.x is 0 with the flag off and this is a no-op.
+        "gl_FragColor = vec4( cbzOut, alpha * cbzSeaAlpha( eyeDirection, vDist, cbzUnder, cbzFoam ) );",
       ].join("\n"),
       "fragment composite");
 
@@ -390,6 +396,18 @@
         mat.fragmentShader = pf.src;
         for (const k in U) if (mat.uniforms[k] === undefined) mat.uniforms[k] = U[k];
         mat.userData.waterMode = "reflect-mirror+swell-shore";
+        /* SEA_TRANSLUCENT. The mirror now writes an alpha < 1 near the camera,
+           so it has to be allowed to blend — but it KEEPS depthWrite, exactly
+           as the shader sea does (city/world.js has the note): a 16 km sheet
+           that stopped owning its depth would stop occluding everything under
+           it. All that changes is which pass it draws in, and renderOrder -1
+           pins it first inside that pass so it can never be sorted on top of
+           the spray and foam riding on it. */
+        if (CBZ.seaTranslucentOn && CBZ.seaTranslucentOn()) {
+          mat.transparent = true;
+          mat.depthWrite = true;
+          water.renderOrder = -1;
+        }
         mat.needsUpdate = true;
       }
     }

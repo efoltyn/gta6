@@ -131,6 +131,16 @@
   function ACTS() { return CFG.ORCA_ACTS !== false; }
   function DRAG() { return CFG.ORCA_DRAG !== false; }
   function HUNT() { return CFG.ORCA_HUNT !== false; }
+  /* MARINE_SIT_DEEPER — owner, 2026-08-25: "orcas and sharks are just slightly
+     too high up in the water, it's not bad but this out-of-water bit should go
+     under water and dive more naturally." Declared in city/wildlife_tame.js
+     (the aquatic-ride owner) and read here so the ridden body and the wild pod
+     answer to ONE switch: ?cfg_MARINE_SIT_DEEPER=0 restores every number this
+     file used to ride at. Deliberately does NOT touch the breach, the spy-hop
+     or the tail lob — those are the acts that are SUPPOSED to leave the water,
+     and their heights were staged against the owner's reference photographs. */
+  if (CFG.MARINE_SIT_DEEPER == null) CFG.MARINE_SIT_DEEPER = true;
+  function SITLOW() { return CFG.MARINE_SIT_DEEPER !== false; }
 
   let FRAME = 0;              // the late pass's own clock; nothing else reads it
   const AUDIT = {
@@ -1109,6 +1119,10 @@
   // ============================================================
   let proxAssets = null;
   const SHADOW_DEPTH = 11, SHADOW_ALPHA = 0.36;
+  // Can the sea be seen into? world/water_spec.js's SEA_TRANSLUCENT. When it
+  // can, items 3 and 4 above (the painted body and its painted shadow) stand
+  // down in favour of the real animal — see the note in makeProxy().
+  function seaClear() { return !!(CBZ.seaTranslucentOn && CBZ.seaTranslucentOn()); }
 
   function tintBlade(geo, spanH) {
     // a dorsal goes thin and translucent along its trailing margin and picks
@@ -1321,26 +1335,43 @@
     wake.rotation.x = -Math.PI / 2; wake.renderOrder = 4; wake.castShadow = false;
     root.add(wake);
 
-    s.shadowMat = new T.MeshBasicMaterial({
-      color: 0x04101a, map: A.maskTex, transparent: true,
-      opacity: SHADOW_ALPHA, depthWrite: false,
-    });
-    const shadow = new T.Mesh(A.quad, s.shadowMat);
-    shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.015;
-    shadow.renderOrder = 2; shadow.castShadow = false;
-    root.add(shadow);
+    /* THE PAINTED PAIR — AND WHY THEY ARE GONE (2026-08-25).
+       OWNER: "the shadow left by the orca is dumb and fake, like a fake horizon
+       — rather than water being slightly opaque and the shadow being real
+       then." These two quads were a top-down PAINTING of an orca and a
+       top-down PAINTING of its shadow, laid flat on the waterline because the
+       sea was an opaque lid and the real animal could not be seen through it.
+       world/water_spec.js's SEA_TRANSLUCENT lifts the lid: the sea now blends
+       by view angle and the real body is veiled by the real water column. With
+       the actual orca visible underneath, a painted orca lying on the surface
+       is a second orca, and a painted shadow riding the waterline is precisely
+       the flat sticker the owner was pointing at. So neither is built.
+       The DORSAL, the SPOUT and the WAKE stay: those are above the water and
+       are not standing in for anything. ?cfg_SEA_TRANSLUCENT=0 brings the pair
+       straight back. */
+    let shadow = null, body = null;
+    if (!seaClear()) {
+      s.shadowMat = new T.MeshBasicMaterial({
+        color: 0x04101a, map: A.maskTex, transparent: true,
+        opacity: SHADOW_ALPHA, depthWrite: false,
+      });
+      shadow = new T.Mesh(A.quad, s.shadowMat);
+      shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.015;
+      shadow.renderOrder = 2; shadow.castShadow = false;
+      root.add(shadow);
 
-    // THE BLACK-AND-WHITE BODY. Lifted toward the water the way a mass under a
-    // metre of sea actually looks — but only a little, because the whole point
-    // of an orca is that its patches survive the wash-out.
-    s.bodyMat = new T.MeshBasicMaterial({
-      color: 0xc8d8d6, map: A.planTex, transparent: true,
-      opacity: SHADOW_ALPHA, depthWrite: false,
-    });
-    const body = new T.Mesh(A.quad, s.bodyMat);
-    body.rotation.x = -Math.PI / 2; body.position.y = 0.024;
-    body.renderOrder = 3; body.castShadow = false;
-    root.add(body);
+      // THE BLACK-AND-WHITE BODY. Lifted toward the water the way a mass under
+      // a metre of sea actually looks — but only a little, because the whole
+      // point of an orca is that its patches survive the wash-out.
+      s.bodyMat = new T.MeshBasicMaterial({
+        color: 0xc8d8d6, map: A.planTex, transparent: true,
+        opacity: SHADOW_ALPHA, depthWrite: false,
+      });
+      body = new T.Mesh(A.quad, s.bodyMat);
+      body.rotation.x = -Math.PI / 2; body.position.y = 0.024;
+      body.renderOrder = 3; body.castShadow = false;
+      root.add(body);
+    }
 
     parent.add(root);
     s.root = root; s.blade = blade; s.wake = wake; s.shadow = shadow; s.body = body;
@@ -1453,7 +1484,7 @@
       const cd = Math.hypot(cam.position.x - grp.position.x, cam.position.z - grp.position.z);
       reach *= 0.95 + 1.15 * clamp(cy / Math.max(0.5, Math.hypot(cy, cd)), 0, 1);
     }
-    const shWant = (!a.dead && dist < PROXY_R * 1.15 && dep > 0.25)
+    const shWant = (!seaClear() && !a.dead && dist < PROXY_R * 1.15 && dep > 0.25)
       ? clamp(1 - dep / reach, 0, 1) : 0;
 
     if (!finWant && (s.finK || 0) <= 0.02 && !shWant && (s.shK || 0) <= 0.02 && !(s.spoutT > 0)) {
@@ -1481,8 +1512,8 @@
     s.root.rotation.y = -a.heading;
 
     const wid = PLAN_BEAM * sz;
-    s.shadow.visible = s.shK > 0.02;
-    if (s.shadow.visible) {
+    if (s.shadow) s.shadow.visible = s.shK > 0.02;
+    if (s.shadow && s.shadow.visible) {
       sunGround(t);
       const spread = 1 + dep * 0.08;
       s.shadow.scale.set(len * 1.06 * spread, wid * 1.06 * spread, 1);
@@ -1679,13 +1710,22 @@
       // the mob (§7b) — only ever used when marine_predation.js is absent
       quarry: null, mobT: 0, rolling: null, retreat: 0, ramOpts: null,
       bodyLen: 0, mobNeed: 0, mobHave: 0,
-      dive: a.swimDepth || 2.6, diveWant: (a.swimDepth || 2.6) * 1.4, dragT: 0, dragPh: 0,
+      dive: a.swimDepth || 2.6, diveWant: (a.swimDepth || 2.6) * (SITLOW() ? 1.61 : 1.4), dragT: 0, dragPh: 0,
       mover: null,
     };
     identify(a, s);
     applyIdentity(a, s);
     s.formation = (h01(homeOf(a).x, homeOf(a).z, 0x0C72) * 3) | 0;
     if (!a._waterMove) a._waterMove = { x: 0, z: 0, heading: 0, blocked: false, shore: -999 };
+    /* THE REAL ANIMAL IS THE READ NOW (SEA_TRANSLUCENT). Swap the group's
+       materials for their veiled twins so the black and the white fade toward
+       the water colour by the real water column between the fragment and the
+       eye. Cached per source material, idempotent, no-op with the flag off.
+       (wildlife_shark.js's ensure() does the same thing and runs first for an
+       orca, because wildlife.js routes every danger>=0.5 aquatic through
+       sharkBrain — this line is what makes the veil true of an orca even if
+       that routing ever changes.) */
+    if (a.group && CBZ.waterVeilApply) { try { CBZ.waterVeilApply(a.group); } catch (e) {} }
     /* CAPTURE THE SHARK'S MOVER NOW, BEFORE optsFor() EVER RUNS, and this is
        not a micro-optimisation — it is a recursion guard. predatorKit caches
        ONE merged opts object per actor (`actor._predOpts`), so if this file
@@ -1799,7 +1839,11 @@
     if (!s.act && s.spd > 5.2 && dep < draft * 2.6) {
       s.porpPh = (s.porpPh || 0) + dt * 1.35;
       if (s.porpPh > 6.283185307) { s.porpPh -= 6.283185307; AUDIT.porpoises++; }
-      s.lift = Math.max(0, Math.sin(s.porpPh)) * draft * 1.5;
+      // MARINE_SIT_DEEPER: 1.5 drafts of air put the ORIGIN 4.3 m over the
+      // surface, i.e. the whole nine metres of animal clear of the water on an
+      // ordinary fast transit. A porpoise is a low arc that skims — the back
+      // and the flank break out, the body does not fly.
+      s.lift = Math.max(0, Math.sin(s.porpPh)) * draft * (SITLOW() ? 0.75 : 1.5);
       s.pitch = -Math.cos(s.porpPh) * 0.38;
       s.airborne = s.lift > draft * 0.5;
       s.porp = true;
@@ -1842,7 +1886,25 @@
     if (s.act === "blow") {
       // rise until the blowhole clears, vent, sink back
       const k = 1 - clamp(s.actT / 4.2, 0, 1);
-      s.lift = Math.sin(clamp(k, 0, 1) * Math.PI) * (draft * 0.85);
+      /* BREATHING IS NOT LEVITATION (MARINE_SIT_DEEPER). MEASURED on the live
+         island, 60 samples over a pod: during a blow the orca's own
+         CBZ.orcaSurfaceRead reported the body **2.10 m ABOVE the surface** at
+         its worst and a mean of 4.07 m of dorsal in the air, peaking at 7.15 m.
+         That is the owner's "orcas are just slightly too high up in the water …
+         this out-of-water bit should go under water", and it is not a tuning
+         drift: `lift = 0.85 × draft` is a target ABOVE the waterline, applied
+         to the one act every orca in the pod performs on a 26-60 s clock. So a
+         breath — the most frequent thing an orca does — was the biggest jump in
+         the game.
+         The honest shape is a rise to the SURFACE, not through it: aim the same
+         eased curve at a shallow DEPTH instead of a height, and let depth()'s
+         own submersion clamp (0.92 × draft, which puts the back and the whole
+         dorsal in the air and nothing else) be what stops it. `s.airborne`
+         stays false for a blow now, which is what re-arms that clamp — the act
+         no longer asks for the exemption a breach legitimately needs. */
+      const rise = Math.sin(clamp(k, 0, 1) * Math.PI);
+      if (SITLOW()) s.lift = -draft * (1.25 - 1.05 * rise);   // ⇒ diveWant = a depth
+      else s.lift = rise * (draft * 0.85);
       s.pitch = -Math.sin(k * Math.PI * 2) * 0.10;
       if (!s.blown && k > 0.42) { s.blown = true; fireSpout(a, s); }
       if (s.actT <= 0) endAct(s);
@@ -1971,7 +2033,11 @@
       onState: function (ns) {
         s.state = ns || "cruise";
         const d = a.swimDepth || 2.6;
-        s.diveWant = d * (ns === "rush" ? 1.7 : ns === "seize" ? 0.6 : ns === "circle" ? 0.85 : 1.4);
+        // MARINE_SIT_DEEPER trims the RESTING lane only (the trailing 1.4 —
+        // "nobody is being hunted right now"). rush/seize/circle are the
+        // shallow, deliberate, visible states and keep their own numbers.
+        s.diveWant = d * (ns === "rush" ? 1.7 : ns === "seize" ? 0.6 : ns === "circle" ? 0.85
+          : (SITLOW() ? 1.61 : 1.4));
         if (CBZ.swimJaw && ns !== "rush" && ns !== "seize") { try { CBZ.swimJaw(a, 0); } catch (e) {} }
         if (ns === "seize") { s.dragT = 0; s.dragPh = 0; AUDIT.grabs++; }
       },
@@ -2763,7 +2829,8 @@
           swim(a, lh, cruise * 0.9, dt);
           owned = true;
         }
-        s.diveWant = (a.swimDepth || 2.6) * (s.calf ? 1.05 : 1.35);
+        // MARINE_SIT_DEEPER: the pod's station-keeping depth, one notch lower.
+        s.diveWant = (a.swimDepth || 2.6) * (s.calf ? 1.05 : 1.35) * (SITLOW() ? 1.15 : 1);
       }
     }
 

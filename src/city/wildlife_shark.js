@@ -59,7 +59,21 @@
   // shadow every top-down water game uses, faded out by real depth so a deep
   // cruiser vanishes and a shallow stalker reads as a looming shape.
   if (CBZ.CONFIG && CBZ.CONFIG.SHARK_SHADOW == null) CBZ.CONFIG.SHARK_SHADOW = true;
-  function shadowOn() { return !(CBZ.CONFIG && CBZ.CONFIG.SHARK_SHADOW === false); }
+  /* ...AND THAT PARAGRAPH IS NOW THE ARGUMENT AGAINST ITSELF (2026-08-25).
+     "The sea is OPAQUE, so from above the water the body is never actually
+     visible" was a statement about the RENDERER, and the owner's answer was to
+     go fix the renderer: "rather than water being slightly opaque and the
+     shadow being real then." world/water_spec.js's SEA_TRANSLUCENT does that —
+     the sea blends by view angle and a submerged body is veiled by the real
+     water column between it and your eye. The moment the actual animal shows
+     through, a painted torpedo lying on the waterline is a SECOND shark on top
+     of the first one, and the flat-sticker read the owner objected to.
+     So the whole silhouette family stands down when the sea can be seen into,
+     and comes straight back with ?cfg_SEA_TRANSLUCENT=0. The fin, the tail
+     tip, the wake and the spray are untouched: those are real surface reads of
+     things genuinely above the water, not stand-ins for a missing feature. */
+  function seaClear() { return !!(CBZ.seaTranslucentOn && CBZ.seaTranslucentOn()); }
+  function shadowOn() { return !(CBZ.CONFIG && CBZ.CONFIG.SHARK_SHADOW === false) && !seaClear(); }
   const SHADOW_DEPTH = 9;       // m of water that fully swallows the shadow
   const SHADOW_ALPHA = 0.34;    // its darkest (near-surface) opacity
   // ---- the four surface-read switches (see THE SURFACE PROXY below) -------
@@ -111,10 +125,28 @@
   const TURN_RATE = 1.15;       // rad/s — a shark turns with its whole body
   const STUCK_BAIL = 0.9;       // s of blocked movement before it gives up the hunt
   // depth targets, as a MULTIPLE of the species' authored swim depth
+  /* HOW DEEP THIS SHARK WANTS TO BE, per hunt state, as a multiple of its own
+     authored draft. The HUNTING numbers are under 1 on purpose — a shark that
+     has your scent rides high enough for the dorsal to cut the surface, which
+     is the whole read — and none of them is touched below.
+
+     MARINE_SIT_DEEPER (owner, 2026-08-25: "orcas and sharks are just slightly
+     too high up in the water … this out-of-water bit should go under water and
+     dive more naturally") trims only the two RESTING states — the cruise
+     nobody is being hunted in, and the post-bail disengage — so an idle sea
+     sits its animals lower without ever taking the fin away from the moment it
+     is supposed to be there. Declared in city/wildlife_tame.js; one switch
+     covers the ridden body, the pod and this. ?cfg_MARINE_SIT_DEEPER=0 reverts. */
+  const SITLOW = () => !(CBZ.CONFIG && CBZ.CONFIG.MARINE_SIT_DEEPER === false);
   const DIVE = {
     cruise: 1.55, scent: 0.95, circle: 0.9, bump: 0.85,
     vanish: 9, rush: 1.9, seize: 0.8, disengage: 2.4,
   };
+  const DIVE_LOW = { cruise: 1.85, disengage: 2.6 };
+  function diveMul(state) {
+    if (SITLOW() && DIVE_LOW[state] != null) return DIVE_LOW[state];
+    return DIVE[state] != null ? DIVE[state] : (SITLOW() ? DIVE_LOW.cruise : DIVE.cruise);
+  }
   // shoreline clearance by hunt state, as a fraction of the spawn clearance.
   // This is the estuary law above, in one table.
   const CLEAR = {
@@ -1050,7 +1082,7 @@
     const s = a._shark = {
       meg: meg,
       baseClear: a.waterClearance || 12,
-      dive: a.swimDepth || 2.5, diveWant: (a.swimDepth || 2.5) * DIVE.cruise,
+      dive: a.swimDepth || 2.5, diveWant: (a.swimDepth || 2.5) * diveMul("cruise"),
       state: "cruise", owned: false, stuck: 0, bail: 0,
       finK: 0, shK: 0, spd: 0, px: null, pz: null, wedged: 0,
       yaw: 0, ph: null, bank: 0, tailExposed: 0,
@@ -1066,6 +1098,13 @@
     // allocates a fresh result EVERY frame. wildlife.js gives aquatic actors
     // theirs at spawn — this is the belt-and-braces for anything hand-made.
     if (!a._waterMove) a._waterMove = { x: 0, z: 0, heading: 0, blocked: false, shore: -999 };
+    /* THE BODY IS THE READ NOW. With SEA_TRANSLUCENT the sea shows the actual
+       animal, so the actual animal has to know it is underwater: this swaps
+       the group's materials for their veiled twins, which fade every fragment
+       toward the water colour by the length of water between it and the eye.
+       Cached and shared across the whole ocean (one clone per source
+       material), idempotent, and a no-op with the flag off. */
+    if (a.group && CBZ.waterVeilApply) { try { CBZ.waterVeilApply(a.group); } catch (e) {} }
     const label = String(sp.name || sp.id || "shark").toLowerCase();
 
     // ---- THE SEAMS. These are the four things predatorKit CANNOT derive, and
@@ -1151,7 +1190,7 @@
     const s = a._shark; if (!s) return;
     s.state = ns || "cruise";
     const d = a.swimDepth || 2.5;
-    s.diveWant = d * (DIVE[s.state] != null ? DIVE[s.state] : DIVE.cruise);
+    s.diveWant = d * diveMul(s.state);
     if (s.state === "vanish") s.diveWant = d * (s.meg ? 22 : 9);
     // the gape shuts whenever it is not committed
     if (CBZ.swimJaw && s.state !== "rush" && s.state !== "seize") {
