@@ -1,0 +1,1097 @@
+{
+  "preset": {
+    "id": "prison-posse",
+    "title": "Prison Escape: The Posse — a name that caps it, a bill that keeps it",
+    "path": "artifacts/prison-econ-wave/posse/prison-posse.mjs"
+  },
+  "generatedAt": "2026-08-25T18:05:09.405Z",
+  "only": null,
+  "reusedBeforeFrom": null,
+  "viewport": {
+    "width": 1100,
+    "height": 680
+  },
+  "frameSignature": "custom@1100x680",
+  "frames": [
+    {
+      "id": "custom",
+      "device": "custom",
+      "label": "1100x680",
+      "orientation": "fixed",
+      "width": 1100,
+      "height": 680,
+      "dsf": 1,
+      "mobile": false,
+      "ua": null,
+      "landscape": true
+    }
+  ],
+  "before": {
+    "requested": "http://127.0.0.1:8859/?seed=64321&cfg_PRISON_POSSE=0&visualCompare=before-1787681093730",
+    "final": "http://127.0.0.1:8859/?seed=64321&cfg_PRISON_POSSE=0&visualCompare=before-1787681093730"
+  },
+  "after": {
+    "requested": "http://127.0.0.1:8859/?seed=64321&visualCompare=after-1787681101847",
+    "final": "http://127.0.0.1:8859/?seed=64321&visualCompare=after-1787681101847"
+  },
+  "subjects": [
+    {
+      "id": "the-army-you-earned",
+      "label": "Three men owe you · how many can walk with you",
+      "focus": "Three inmates you pulled off the floor, all three offering, and you press BEFRIEND on all three. BEFORE: three men, free, forever — the crew had no ceiling, so the only limit on an NPC army was how many fights you happened to turn up for. AFTER: your name is worth ONE man (nobody in this yard rates you above 'stranger' and no gang has your number), so the second and third count the shoulder in front of them and decline. Same deed, same three men, same button.",
+      "standing": 0,
+      "phase": "yard",
+      "cigs": 20,
+      "cam": {
+        "x": 0.7,
+        "y": 4.6,
+        "z": 40.2,
+        "ax": 0,
+        "ay": 1,
+        "az": 32.6,
+        "fov": 46
+      }
+    },
+    {
+      "id": "flanked",
+      "label": "The same three men, with a name behind you",
+      "focus": "Identical staging, one number moved: the Reds' books say 70. That is 'solid' in economy.js's own words, which is three slots — so all three stand with you and the yard has to look at four men instead of one. The pictures match, because the pictures are not the claim here: the rows under them are. Flanked and shelter are what the rest of the prison can now ASK about this group (ai.js before it opens a shakedown, capture.js when the wing takes you), and on the BEFORE side there is nothing to ask.",
+      "standing": 70,
+      "phase": "yard",
+      "cigs": 20,
+      "cam": {
+        "x": 0.7,
+        "y": 4.6,
+        "z": 40.2,
+        "ax": 0,
+        "ay": 1,
+        "az": 32.6,
+        "fov": 46
+      }
+    },
+    {
+      "id": "not-standing-fourth",
+      "label": "The fourth man · the offer you have no room for",
+      "focus": "A fourth inmate you also saved walks up on a full crew. BEFORE his card carries BEFRIEND and he says the line every offering man says. AFTER there is no button — because there is no slot — and he says why, naming the three men already on you and the place in the line he is being offered. His offer is not thrown away: it arms itself the moment one of them dies, quits or is thrown over.",
+      "standing": 70,
+      "phase": "yard",
+      "cigs": 20,
+      "hold": true,
+      "cam": {
+        "x": 5,
+        "y": 2.95,
+        "z": 39.1,
+        "ax": -1.3,
+        "ay": 1.25,
+        "az": 32.6,
+        "fov": 46
+      }
+    },
+    {
+      "id": "three-chows",
+      "label": "Three chows and nothing",
+      "focus": "The same three-man crew, and your pocket is empty. The world's clock is walked through three real sittings — Chow, Evening Chow, Chow again — with nothing to put on anybody's tray. BEFORE: three men still glued to your shoulder, because the old crew ate nothing and noticed nothing. AFTER: they count the trays out loud and go and eat with somebody else, and the ledgers that earned them (a rescue each) are wiped, so they are re-earned or they are gone.",
+      "standing": 70,
+      "phase": "yard",
+      "cigs": 0,
+      "starve": true,
+      "cam": {
+        "x": 0.7,
+        "y": 4.6,
+        "z": 40.2,
+        "ax": 0,
+        "ay": 1,
+        "az": 32.6,
+        "fov": 46
+      }
+    }
+  ],
+  "captures": [
+    {
+      "id": "the-army-you-earned",
+      "frame": "custom",
+      "beforeFile": "01-the-army-you-earned.png",
+      "afterFile": "01-the-army-you-earned.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "camera": {
+          "x": 0.7,
+          "y": 4.6,
+          "z": 40.2,
+          "ax": 0,
+          "ay": 1,
+          "az": 32.6,
+          "fov": 46
+        },
+        "men": [
+          "Ash",
+          "Bishop",
+          "Blue Ace",
+          "Bolt"
+        ],
+        "trace": [],
+        "band": {
+          "carriedIn": "",
+          "spokenHere": 0
+        },
+        "fourthMan": null,
+        "where": [
+          {
+            "who": "Ash",
+            "d": 2.4,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Bishop",
+            "d": 2.4,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Blue Ace",
+            "d": 2.9,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Bolt",
+            "d": 6.2,
+            "friend": false,
+            "state": "wander"
+          }
+        ],
+        "blocks": [
+          "wake@5",
+          "yard@6.5",
+          "mess@12",
+          "work@13",
+          "supper@17.5",
+          "count@19.5",
+          "secure@22",
+          "night@23"
+        ],
+        "presses": [
+          {
+            "who": "Ash",
+            "ok": true,
+            "msg": "From here I'm with you. Anyone comes at you, they come at me."
+          },
+          {
+            "who": "Bishop",
+            "ok": true,
+            "msg": "From here I'm with you. Anyone comes at you, they come at me."
+          },
+          {
+            "who": "Blue Ace",
+            "ok": true,
+            "msg": "From here I'm with you. That's 3 of us now."
+          }
+        ],
+        "cardRows": [
+          "J Trade 12",
+          "K Talk known",
+          "L Steal"
+        ],
+        "said": "",
+        "audit": {
+          "crew": 3,
+          "cap": null,
+          "renown": 0,
+          "standing": "nobody",
+          "chow": {
+            "block": "",
+            "sitting": 0,
+            "day": 0
+          }
+        },
+        "metrics": {
+          "crew": 3,
+          "cap": -1,
+          "offersTaken": 3,
+          "offersRefused": 0,
+          "flanked": 0,
+          "shelterPct": 0,
+          "befriendOffered": 0,
+          "cigs": 20,
+          "missedMeals": 0,
+          "stillWithYou": 3
+        }
+      },
+      "after": {
+        "ok": true,
+        "camera": {
+          "x": 0.7,
+          "y": 4.6,
+          "z": 40.2,
+          "ax": 0,
+          "ay": 1,
+          "az": 32.6,
+          "fov": 46
+        },
+        "men": [
+          "Ash",
+          "Bishop",
+          "Blue Ace",
+          "Bolt"
+        ],
+        "trace": [],
+        "band": {
+          "carriedIn": "",
+          "spokenHere": 1
+        },
+        "fourthMan": null,
+        "where": [
+          {
+            "who": "Ash",
+            "d": 2.4,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Bishop",
+            "d": 2.5,
+            "friend": false,
+            "state": "wander"
+          },
+          {
+            "who": "Blue Ace",
+            "d": 3.1,
+            "friend": false,
+            "state": "idle"
+          },
+          {
+            "who": "Bolt",
+            "d": 2,
+            "friend": false,
+            "state": "socialize"
+          }
+        ],
+        "blocks": [
+          "wake@5",
+          "yard@6.5",
+          "mess@12",
+          "work@13",
+          "supper@17.5",
+          "count@19.5",
+          "secure@22",
+          "night@23"
+        ],
+        "presses": [
+          {
+            "who": "Ash",
+            "ok": true,
+            "msg": "From here I'm with you. Anyone comes at you, they come at me."
+          },
+          {
+            "who": "Bishop",
+            "ok": false,
+            "msg": "You've got Ash. Come back one short."
+          },
+          {
+            "who": "Blue Ace",
+            "ok": false,
+            "msg": "You've got Ash. Come back one short."
+          }
+        ],
+        "cardRows": [
+          "J Trade 8",
+          "K Talk",
+          "L Steal"
+        ],
+        "said": "You already run with Ash. I'm not standing second in nobody's line.",
+        "audit": {
+          "crew": 1,
+          "cap": 1,
+          "renown": 0,
+          "standing": "nobody",
+          "chow": {
+            "block": "yard",
+            "sitting": 0,
+            "day": 0
+          }
+        },
+        "metrics": {
+          "crew": 1,
+          "cap": 1,
+          "offersTaken": 1,
+          "offersRefused": 2,
+          "flanked": 0,
+          "shelterPct": 25,
+          "befriendOffered": 0,
+          "cigs": 20,
+          "missedMeals": 0,
+          "stillWithYou": 1
+        }
+      }
+    },
+    {
+      "id": "flanked",
+      "frame": "custom",
+      "beforeFile": "02-flanked.png",
+      "afterFile": "02-flanked.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "camera": {
+          "x": 0.7,
+          "y": 4.6,
+          "z": 40.2,
+          "ax": 0,
+          "ay": 1,
+          "az": 32.6,
+          "fov": 46
+        },
+        "men": [
+          "Ash",
+          "Bishop",
+          "Blue Ace",
+          "Bolt"
+        ],
+        "trace": [],
+        "band": {
+          "carriedIn": "",
+          "spokenHere": 0
+        },
+        "fourthMan": null,
+        "where": [
+          {
+            "who": "Ash",
+            "d": 2.4,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Bishop",
+            "d": 2.4,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Blue Ace",
+            "d": 2.9,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Bolt",
+            "d": 5,
+            "friend": false,
+            "state": "wander"
+          }
+        ],
+        "blocks": [
+          "wake@5",
+          "yard@6.5",
+          "mess@12",
+          "work@13",
+          "supper@17.5",
+          "count@19.5",
+          "secure@22",
+          "night@23"
+        ],
+        "presses": [
+          {
+            "who": "Ash",
+            "ok": true,
+            "msg": "From here I'm with you. Anyone comes at you, they come at me."
+          },
+          {
+            "who": "Bishop",
+            "ok": true,
+            "msg": "From here I'm with you. Anyone comes at you, they come at me."
+          },
+          {
+            "who": "Blue Ace",
+            "ok": true,
+            "msg": "From here I'm with you. That's 3 of us now."
+          }
+        ],
+        "cardRows": [
+          "J Trade 10",
+          "K Talk known",
+          "L Steal"
+        ],
+        "said": "",
+        "audit": {
+          "crew": 3,
+          "cap": null,
+          "renown": 70,
+          "standing": "solid",
+          "chow": {
+            "block": "",
+            "sitting": 0,
+            "day": 0
+          }
+        },
+        "metrics": {
+          "crew": 3,
+          "cap": -1,
+          "offersTaken": 3,
+          "offersRefused": 0,
+          "flanked": 0,
+          "shelterPct": 0,
+          "befriendOffered": 0,
+          "cigs": 20,
+          "missedMeals": 0,
+          "stillWithYou": 3
+        }
+      },
+      "after": {
+        "ok": true,
+        "camera": {
+          "x": 0.7,
+          "y": 4.6,
+          "z": 40.2,
+          "ax": 0,
+          "ay": 1,
+          "az": 32.6,
+          "fov": 46
+        },
+        "men": [
+          "Ash",
+          "Bishop",
+          "Blue Ace",
+          "Bolt"
+        ],
+        "trace": [],
+        "band": {
+          "carriedIn": "You already run with Ash. I'm not standing second in nobody's line.",
+          "spokenHere": 0
+        },
+        "fourthMan": null,
+        "where": [
+          {
+            "who": "Ash",
+            "d": 2.4,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Bishop",
+            "d": 2.4,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Blue Ace",
+            "d": 2.9,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Bolt",
+            "d": 2.3,
+            "friend": false,
+            "state": "socialize"
+          }
+        ],
+        "blocks": [
+          "wake@5",
+          "yard@6.5",
+          "mess@12",
+          "work@13",
+          "supper@17.5",
+          "count@19.5",
+          "secure@22",
+          "night@23"
+        ],
+        "presses": [
+          {
+            "who": "Ash",
+            "ok": true,
+            "msg": "From here I'm with you. Anyone comes at you, they come at me."
+          },
+          {
+            "who": "Bishop",
+            "ok": true,
+            "msg": "From here I'm with you. Anyone comes at you, they come at me."
+          },
+          {
+            "who": "Blue Ace",
+            "ok": true,
+            "msg": "From here I'm with you. That's 3 of us now."
+          }
+        ],
+        "cardRows": [
+          "J Trade 8",
+          "K Talk",
+          "L Steal hot"
+        ],
+        "said": "",
+        "audit": {
+          "crew": 3,
+          "cap": 3,
+          "renown": 70,
+          "standing": "solid",
+          "chow": {
+            "block": "yard",
+            "sitting": 0,
+            "day": 0
+          }
+        },
+        "metrics": {
+          "crew": 3,
+          "cap": 3,
+          "offersTaken": 3,
+          "offersRefused": 0,
+          "flanked": 1,
+          "shelterPct": 75,
+          "befriendOffered": 0,
+          "cigs": 20,
+          "missedMeals": 0,
+          "stillWithYou": 3
+        }
+      }
+    },
+    {
+      "id": "not-standing-fourth",
+      "frame": "custom",
+      "beforeFile": "03-not-standing-fourth.png",
+      "afterFile": "03-not-standing-fourth.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "camera": {
+          "x": 5,
+          "y": 2.95,
+          "z": 39.1,
+          "ax": -1.3,
+          "ay": 1.25,
+          "az": 32.6,
+          "fov": 46
+        },
+        "men": [
+          "Ash",
+          "Bishop",
+          "Blue Ace",
+          "Bolt"
+        ],
+        "trace": [],
+        "band": {
+          "carriedIn": "",
+          "spokenHere": 1
+        },
+        "fourthMan": {
+          "who": "Bolt",
+          "offered": true,
+          "pitchT": 22.92,
+          "heldSaid": false,
+          "saved": true,
+          "state": "idle",
+          "approach": false,
+          "d": 2
+        },
+        "where": [
+          {
+            "who": "Ash",
+            "d": 4,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Bishop",
+            "d": 4.8,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Blue Ace",
+            "d": 3.5,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Bolt",
+            "d": 2,
+            "friend": false,
+            "state": "idle"
+          }
+        ],
+        "blocks": [
+          "wake@5",
+          "yard@6.5",
+          "mess@12",
+          "work@13",
+          "supper@17.5",
+          "count@19.5",
+          "secure@22",
+          "night@23"
+        ],
+        "presses": [
+          {
+            "who": "Ash",
+            "ok": true,
+            "msg": "From here I'm with you. Anyone comes at you, they come at me."
+          },
+          {
+            "who": "Bishop",
+            "ok": true,
+            "msg": "From here I'm with you. Anyone comes at you, they come at me."
+          },
+          {
+            "who": "Blue Ace",
+            "ok": true,
+            "msg": "From here I'm with you. That's 3 of us now."
+          }
+        ],
+        "cardRows": [
+          "J Befriend you saved him",
+          "K Talk",
+          "L Steal"
+        ],
+        "said": "You didn't have to step in back there. I don't forget that.",
+        "audit": {
+          "crew": 3,
+          "cap": null,
+          "renown": 70,
+          "standing": "solid",
+          "chow": {
+            "block": "",
+            "sitting": 0,
+            "day": 0
+          }
+        },
+        "metrics": {
+          "crew": 3,
+          "cap": -1,
+          "offersTaken": 3,
+          "offersRefused": 0,
+          "flanked": 0,
+          "shelterPct": 0,
+          "befriendOffered": 1,
+          "cigs": 20,
+          "missedMeals": 0,
+          "stillWithYou": 3
+        }
+      },
+      "after": {
+        "ok": true,
+        "camera": {
+          "x": 5,
+          "y": 2.95,
+          "z": 39.1,
+          "ax": -1.3,
+          "ay": 1.25,
+          "az": 32.6,
+          "fov": 46
+        },
+        "men": [
+          "Ash",
+          "Bishop",
+          "Blue Ace",
+          "Bolt"
+        ],
+        "trace": [],
+        "band": {
+          "carriedIn": "",
+          "spokenHere": 1
+        },
+        "fourthMan": {
+          "who": "Bolt",
+          "offered": false,
+          "pitchT": 25,
+          "heldSaid": true,
+          "saved": true,
+          "state": "socialize",
+          "approach": false,
+          "d": 2
+        },
+        "where": [
+          {
+            "who": "Ash",
+            "d": 4,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Bishop",
+            "d": 4.8,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Blue Ace",
+            "d": 3.5,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Bolt",
+            "d": 2,
+            "friend": false,
+            "state": "socialize"
+          }
+        ],
+        "blocks": [
+          "wake@5",
+          "yard@6.5",
+          "mess@12",
+          "work@13",
+          "supper@17.5",
+          "count@19.5",
+          "secure@22",
+          "night@23"
+        ],
+        "presses": [
+          {
+            "who": "Ash",
+            "ok": true,
+            "msg": "From here I'm with you. Anyone comes at you, they come at me."
+          },
+          {
+            "who": "Bishop",
+            "ok": true,
+            "msg": "From here I'm with you. Anyone comes at you, they come at me."
+          },
+          {
+            "who": "Blue Ace",
+            "ok": true,
+            "msg": "From here I'm with you. That's 3 of us now."
+          }
+        ],
+        "cardRows": [
+          "J Trade 8",
+          "K Talk",
+          "L Steal hot"
+        ],
+        "said": "You already run with Blue Ace, Ash and Bishop. I'm not standing fourth in nobody's line.",
+        "audit": {
+          "crew": 3,
+          "cap": 3,
+          "renown": 70,
+          "standing": "solid",
+          "chow": {
+            "block": "yard",
+            "sitting": 0,
+            "day": 0
+          }
+        },
+        "metrics": {
+          "crew": 3,
+          "cap": 3,
+          "offersTaken": 3,
+          "offersRefused": 0,
+          "flanked": 1,
+          "shelterPct": 75,
+          "befriendOffered": 0,
+          "cigs": 20,
+          "missedMeals": 0,
+          "stillWithYou": 3
+        }
+      }
+    },
+    {
+      "id": "three-chows",
+      "frame": "custom",
+      "beforeFile": "04-three-chows.png",
+      "afterFile": "04-three-chows.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "camera": {
+          "x": 0.7,
+          "y": 4.6,
+          "z": 40.2,
+          "ax": 0,
+          "ay": 1,
+          "az": 32.6,
+          "fov": 46
+        },
+        "men": [
+          "Ash",
+          "Bishop",
+          "Blue Ace",
+          "Bolt"
+        ],
+        "trace": [
+          {
+            "phase": 0.2666666666666666,
+            "block": "",
+            "sitting": 0,
+            "crew": 3
+          },
+          {
+            "phase": 0.30833333333333335,
+            "block": "",
+            "sitting": 0,
+            "crew": 3
+          },
+          {
+            "phase": 0.49583333333333335,
+            "block": "",
+            "sitting": 0,
+            "crew": 3
+          },
+          {
+            "phase": 0.5791666666666666,
+            "block": "",
+            "sitting": 0,
+            "crew": 3
+          },
+          {
+            "phase": 0.2666666666666666,
+            "block": "",
+            "sitting": 0,
+            "crew": 3
+          },
+          {
+            "phase": 0.30833333333333335,
+            "block": "",
+            "sitting": 0,
+            "crew": 3
+          }
+        ],
+        "band": {
+          "carriedIn": "You didn't have to step in back there. I don't forget that.",
+          "spokenHere": 0
+        },
+        "fourthMan": null,
+        "where": [
+          {
+            "who": "Ash",
+            "d": 2.4,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Bishop",
+            "d": 2.4,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Blue Ace",
+            "d": 2.9,
+            "friend": true,
+            "state": "shadowPlayer"
+          },
+          {
+            "who": "Bolt",
+            "d": 7,
+            "friend": false,
+            "state": "socialize"
+          }
+        ],
+        "blocks": [
+          "wake@5",
+          "yard@6.5",
+          "mess@12",
+          "work@13",
+          "supper@17.5",
+          "count@19.5",
+          "secure@22",
+          "night@23"
+        ],
+        "presses": [
+          {
+            "who": "Ash",
+            "ok": true,
+            "msg": "From here I'm with you. Anyone comes at you, they come at me."
+          },
+          {
+            "who": "Bishop",
+            "ok": true,
+            "msg": "From here I'm with you. Anyone comes at you, they come at me."
+          },
+          {
+            "who": "Blue Ace",
+            "ok": true,
+            "msg": "From here I'm with you. That's 3 of us now."
+          }
+        ],
+        "cardRows": [
+          "J Trade 10",
+          "K Talk known",
+          "L Steal"
+        ],
+        "said": "",
+        "audit": {
+          "crew": 3,
+          "cap": null,
+          "renown": 70,
+          "standing": "solid",
+          "chow": {
+            "block": "",
+            "sitting": 0,
+            "day": 0
+          }
+        },
+        "metrics": {
+          "crew": 3,
+          "cap": -1,
+          "offersTaken": 3,
+          "offersRefused": 0,
+          "flanked": 0,
+          "shelterPct": 0,
+          "befriendOffered": 0,
+          "cigs": 0,
+          "missedMeals": 0,
+          "stillWithYou": 3
+        }
+      },
+      "after": {
+        "ok": true,
+        "camera": {
+          "x": 0.7,
+          "y": 4.6,
+          "z": 40.2,
+          "ax": 0,
+          "ay": 1,
+          "az": 32.6,
+          "fov": 46
+        },
+        "men": [
+          "Ash",
+          "Bishop",
+          "Blue Ace",
+          "Bolt"
+        ],
+        "trace": [
+          {
+            "phase": 0.2666666666666666,
+            "block": "mess",
+            "sitting": 1,
+            "crew": 3
+          },
+          {
+            "phase": 0.30833333333333335,
+            "block": "work",
+            "sitting": 1,
+            "crew": 3
+          },
+          {
+            "phase": 0.49583333333333335,
+            "block": "supper",
+            "sitting": 2,
+            "crew": 3
+          },
+          {
+            "phase": 0.5791666666666666,
+            "block": "count",
+            "sitting": 2,
+            "crew": 3
+          },
+          {
+            "phase": 0.2666666666666666,
+            "block": "mess",
+            "sitting": 3,
+            "crew": 3
+          },
+          {
+            "phase": 0.30833333333333335,
+            "block": "work",
+            "sitting": 3,
+            "crew": 0
+          }
+        ],
+        "band": {
+          "carriedIn": "You already run with Blue Ace, Ash and Bishop. I'm not standing fourth in nobody's line.",
+          "spokenHere": 1
+        },
+        "fourthMan": null,
+        "where": [
+          {
+            "who": "Ash",
+            "d": 3.8,
+            "friend": false,
+            "state": "wander"
+          },
+          {
+            "who": "Bishop",
+            "d": 3.8,
+            "friend": false,
+            "state": "wander"
+          },
+          {
+            "who": "Blue Ace",
+            "d": 4.5,
+            "friend": false,
+            "state": "wander"
+          },
+          {
+            "who": "Bolt",
+            "d": 10.1,
+            "friend": false,
+            "state": "idle"
+          }
+        ],
+        "blocks": [
+          "wake@5",
+          "yard@6.5",
+          "mess@12",
+          "work@13",
+          "supper@17.5",
+          "count@19.5",
+          "secure@22",
+          "night@23"
+        ],
+        "presses": [
+          {
+            "who": "Ash",
+            "ok": true,
+            "msg": "From here I'm with you. Anyone comes at you, they come at me."
+          },
+          {
+            "who": "Bishop",
+            "ok": true,
+            "msg": "From here I'm with you. Anyone comes at you, they come at me."
+          },
+          {
+            "who": "Blue Ace",
+            "ok": true,
+            "msg": "From here I'm with you. That's 3 of us now."
+          }
+        ],
+        "cardRows": [
+          "J Trade 23",
+          "K Talk known",
+          "L Steal hot"
+        ],
+        "said": "Three chows and nothing. I eat with the Blues now.",
+        "audit": {
+          "crew": 0,
+          "cap": 3,
+          "renown": 70,
+          "standing": "solid",
+          "chow": {
+            "block": "work",
+            "sitting": 3,
+            "day": 0
+          }
+        },
+        "metrics": {
+          "crew": 0,
+          "cap": 3,
+          "offersTaken": 3,
+          "offersRefused": 0,
+          "flanked": 0,
+          "shelterPct": 0,
+          "befriendOffered": 0,
+          "cigs": 0,
+          "missedMeals": 6,
+          "stillWithYou": 0
+        }
+      }
+    }
+  ],
+  "browserMessages": [
+    {
+      "side": "before",
+      "type": "warning",
+      "text": "THREE.MeshLambertMaterial: 'flatShading' is not a property of this material.",
+      "count": 4
+    },
+    {
+      "side": "after",
+      "type": "warning",
+      "text": "THREE.MeshLambertMaterial: 'flatShading' is not a property of this material.",
+      "count": 4
+    }
+  ]
+}
