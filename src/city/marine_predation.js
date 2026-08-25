@@ -149,6 +149,7 @@
   const SEE_R = 420;           // inside this the combatants are forced visible
   const RESCAN = 1.7;          // s between target re-scans (jittered per actor)
   const POD_R = 90;            // u — inside this you are in the same pod fight
+  const SHADOW_K = 0.85;       // × the FSM's wake radius: how close a shadowing pod closes to
   const PREY_MAX = 1.05;       // a loner's quarry may be at most this × its size
   const MOB_MAX = 2.4;         // a POD's quarry may be at most this × its size
   const POD_HERD_MIN = 3;      // herd[1] this big or more = a pod animal
@@ -166,6 +167,7 @@
   const _box = THREE ? new THREE.Box3() : null;
   const _v = THREE ? new THREE.Vector3() : null;
   const AUDIT = {
+    shadowed: 0,        // frames a committed pod spent crossing water to its quarry
     hunts: 0, rams: 0, rolls: 0, kills: 0, casualties: 0, brokeOff: 0,
     shipBites: 0, shipsSunk: 0, chumOpened: 0, chumLive: 0, hudWrites: 0, chunks: 0,
   };
@@ -633,10 +635,20 @@
       rate: RAM_EVERY * Math.sqrt(sizeOf(a)),
       reach: 0,                                  // set live: it scales with the quarry
       dmg: 0,                                    // set live: sizes on both sides
-      onHit: function () {
+      onHit: function (d) {
         const t = mp(a).target;
         if (!t || t.dead) return;
-        hurt(t, dpsAgainst(a, t) * 1.6, a,
+        /* BILL THE NUMBER THE DRIVER HANDED US. This used to recompute
+           dpsAgainst() and throw the argument away, which was harmless while
+           `o.dmg` was the same expression — and became a silent hole the
+           moment anything upstream started SHAPING that number. The angle
+           contest (systems/bite_angles.js) is exactly that: creature_combat
+           scales `dmg` by the geometry at contact before it calls this, so a
+           pod bite taken on the quarry's nose is supposed to cost less than
+           one taken on its tail. Ignoring `d` would have made the pod the one
+           attacker in the game exempt from the law it is meant to teach.
+           The recompute stays as the fallback for a caller with no number. */
+        hurt(t, (d > 0 ? d : dpsAgainst(a, t) * 1.6), a,
           (bite ? "bitten by a " : "rammed by a ") + label(a));
         if (typeof CBZ.predatorStagger === "function") {
           try { CBZ.predatorStagger(t, STAGGER_S * clamp(sizeOf(a), 0.5, 2)); } catch (e) {}
@@ -1605,6 +1617,60 @@
     if (typeof CBZ.predatorHunt === "function") {
       try { st = CBZ.predatorHunt(a, target, dt, opts) || "cruise"; } catch (e) { st = "cruise"; }
     }
+
+    /* ============================================================
+       A POD DOES NOT LOSE ITS QUARRY BY DRIFTING AWAY FROM IT.
+
+       MEASURED, and it is why the pod's flank pass had fired zero times since
+       it was written. Staged as an arena — four orcas, one shark, nothing
+       else in that sea — and run for 150 game seconds, the orcas finished the
+       fight 190, 304 and 322 metres from a quarry they were all still
+       correctly targeting. Two bites landed in two and a half minutes.
+
+       The mechanism is a seam, not a bug in either half. predatorHunt's
+       `disengage` and `vanish` states deliberately DRIVE THE HUNTER AWAY —
+       that gap is the whole horror grammar and it must not be shortened — and
+       its `cruise` state says in as many words that "the caller owns
+       idle/wander: we only decide when to wake up". For a land predator the
+       caller IS a wander that keeps the animal in its own territory. Here the
+       caller is this file, which hands a cruising body back to wildlife.js's
+       open-sea wander — and an orca that vanishes at 12 m/s for six seconds,
+       twice, is 200 m out and past predatorHunt's wake radius, at which point
+       nothing in the game is pointing it at the shark any more. §3 keeps the
+       target out to FIGHT_R (1400 m). The FSM wakes at senseR (~110 m). The
+       band between those two numbers is where the pod quietly dissolved.
+
+       So a pod that has committed to an apex SHADOWS it: while the FSM is
+       cruising, a MOB hunter closes to just inside the wake radius and no
+       further. It never shortens the gap between passes — the FSM still owns
+       every decision to commit, and inside the wake radius this branch does
+       nothing at all — it only refuses to let the quarry be forgotten. That
+       is exactly what §4's own header already claims a pod is ("an apex is
+       the thing a pod crosses water for"); the crossing was simply never
+       implemented.
+
+       ONE MOVER, as everywhere else in this file: the shark's own water mover
+       out of opts.move, at the FSM's own cruise speed. PREY hunts are
+       untouched — a loner that loses interest in a snack SHOULD lose it.
+
+       ?cfg_MARINE_POD_SHADOW=0 restores the drift.
+       ============================================================ */
+    if (st === "cruise" && m.kind === 2 && CFG.MARINE_POD_SHADOW !== false &&
+        typeof opts.move === "function") {
+      const tp2 = actorPos(target), hp2 = actorPos(a);
+      if (tp2 && hp2) {
+        _t0 = tp2.x - hp2.x; _t1 = tp2.z - hp2.z;
+        const wake = ((opts.senseR > 0 ? opts.senseR : 110) * SHADOW_K);
+        if (_t0 * _t0 + _t1 * _t1 > wake * wake) {
+          const spd = (opts.cruiseSpeed > 0 ? opts.cruiseSpeed : 4) * 1.3;
+          try { opts.move(a, Math.atan2(_t1, _t0), spd, dt); } catch (e) {}
+          AUDIT.shadowed++;
+          a.state = "wander";        // never the player's threat chevron
+          show(a, pd2);
+          return true;
+        }
+      }
+    }
     // markers.js keys the HUD off a.state === stalk/charge and that is for the
     // PLAYER's hunters only. A fight between two animals must never light the
     // player's threat chevron, so this hunt reports itself as wandering.
@@ -1769,7 +1835,7 @@
   // ============================================================
   CBZ.marineAudit = function () {
     return {
-      hunts: AUDIT.hunts, rams: AUDIT.rams, rolls: AUDIT.rolls,
+        hunts: AUDIT.hunts, rams: AUDIT.rams, rolls: AUDIT.rolls, shadowed: AUDIT.shadowed,
       kills: AUDIT.kills, casualties: AUDIT.casualties, brokeOff: AUDIT.brokeOff,
       shipBites: AUDIT.shipBites, shipsSunk: AUDIT.shipsSunk,
       chumOpened: AUDIT.chumOpened, chumLive: liveSlots(),
@@ -1786,6 +1852,7 @@
   };
   CBZ.marineAuditReset = function () {
     AUDIT.hunts = AUDIT.rams = AUDIT.rolls = AUDIT.kills = AUDIT.casualties = AUDIT.brokeOff = 0;
+    AUDIT.shadowed = 0;
     AUDIT.shipBites = AUDIT.shipsSunk = AUDIT.chumOpened = 0;
   };
 

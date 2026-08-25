@@ -220,6 +220,41 @@
     aquaticBaseS: AQUATIC_BITE_BASE_S,
   };
 
+  /* ============================================================
+     THE ANGLE CONTEST — one seam, and it is the strike frame.
+
+     systems/bite_angles.js owns the law (rear half = the ambush, flank = par,
+     in its face = weakened and answered, nose to nose = the bigger gape
+     wins). This file owns the ONE place every creature-on-creature blow in
+     the game actually lands, so this is where the law is asked — not in each
+     caller, and never in a species file.
+
+     Consulted AFTER jawReaches: a bite that never arrived has no geometry to
+     contest and must not cost the victim its once-per-1.1s answer. The
+     answer itself is applied here too, BEFORE the attacker's damage is
+     billed, because the owner's word is "counter-bite during the attacker's
+     windup" — so an answer that kills the attacker cancels the bite that
+     provoked it (`denied`).
+
+     Returns null on ?cfg_BITE_ANGLES=0, on a build without the law loaded,
+     and on any victim whose facing nobody publishes (people; the law refuses
+     to invent a heading). Null is the old flat bite, byte for byte.
+     ============================================================ */
+  var _angOpt = { point: null, style: '' };
+  function angleContest(attacker, target, style) {
+    if (typeof CBZ.biteAngle !== 'function') return null;
+    var c = null;
+    try {
+      _angOpt.point = null; _angOpt.style = style || '';
+      c = CBZ.biteAngle(attacker, target, _angOpt);
+    } catch (e) { c = null; }
+    if (!c) return null;
+    if (c.counter > 0 && typeof CBZ.biteAnswer === 'function') {
+      try { CBZ.biteAnswer(c); } catch (e) {}
+    }
+    return c;
+  }
+
   function shortestAngle(a) {
     while (a > Math.PI) a -= Math.PI * 2;
     while (a < -Math.PI) a += Math.PI * 2;
@@ -876,7 +911,62 @@
     if (!J) return true;
     var tol = bodyRadius(target) + Math.max(0.4, (reach || 2) * 0.42);
     var jx = tp.x - J.x, jz = tp.z - J.z;
-    return (jx * jx + jz * jz) <= tol * tol;
+    if ((jx * jx + jz * jz) <= tol * tol) return true;
+    return longBodyReach(attacker, target, J, tp, reach);
+  }
+
+  /* ==========================================================================
+     A LONG BODY IS NOT A CIRCLE AT ITS NAVEL, and until this existed you could
+     not bite an orca's tail.
+
+     MEASURED, and it is the defect the whole angle wave sat on top of. The
+     test above asks whether the attacker's teeth are within one body radius
+     of the target's ORIGIN, and bodyRadius() is 0.42 + scale·0.45 — about a
+     metre for an orca. A staged rear-half ambush on a 12.7 m orca puts the
+     shark's jaw at the tail, which is six metres from that origin, so the
+     contact test called it a MISS: sixty engagements, zero landed, the same
+     three misses every time. The bearing the owner's design pays the most for
+     was the one bearing the game physically could not resolve, and every
+     flank pass a pod ever threw at a long animal had the same hole under it.
+
+     So: project the jaw onto the target's OWN long axis, clamp it to the
+     measured half-length, push it out to the measured half-beam on the side
+     it came from, and ask how far the teeth are from THAT — the nearest point
+     on the body, which is what "did the jaws reach it" always meant. The
+     lengths come from marine_predation's measurers (taken off the built model
+     once, cached), and degrade to the old circle when that file is absent.
+
+     STRICTLY ADDITIVE. It runs only after the circle test has already said
+     no, and it can only ever turn a miss into a hit — so nothing that landed
+     before can stop landing, and a compact animal (whose length IS about its
+     radius) is unaffected by construction.
+
+     ?cfg_BITE_LONG_BODY=0 restores the origin-circle test.
+     ========================================================================== */
+  function longBodyReach(attacker, target, J, tp, reach) {
+    if (CBZ.CONFIG && CBZ.CONFIG.BITE_LONG_BODY === false) return false;
+    if (typeof CBZ.marineBodyLen !== 'function') return false;
+    var L = 0, B = 0;
+    try {
+      L = CBZ.marineBodyLen(target) * 0.5;
+      B = (typeof CBZ.marineBodyBeam === 'function' ? CBZ.marineBodyBeam(target) : 0) * 0.5;
+    } catch (e) { return false; }
+    if (!(L > 0)) return false;
+    if (!(B > 0)) B = bodyRadius(target);
+    var face = (typeof target.heading === 'number') ? target.heading
+      : (target.group && target.group.rotation ? -target.group.rotation.y : 0);
+    var fx = Math.cos(face), fz = Math.sin(face);
+    var dx = J.x - tp.x, dz = J.z - tp.z;
+    var along = dx * fx + dz * fz;
+    if (along > L) along = L; else if (along < -L) along = -L;
+    var side = dx * -fz + dz * fx;
+    if (side > B) side = B; else if (side < -B) side = -B;
+    // the nearest point ON the body, and the teeth's distance to it
+    var nx = tp.x + fx * along - fz * side;
+    var nz = tp.z + fz * along + fx * side;
+    var ex = J.x - nx, ez = J.z - nz;
+    var tol = Math.max(0.4, (reach || 2) * 0.42);
+    return (ex * ex + ez * ez) <= tol * tol;
   }
 
   /* ==========================================================================
@@ -1162,6 +1252,11 @@
              animalStrikePlayer), so an ape style that swallowed the strike
              would have made a gorilla completely harmless to the player. */
           var apeDealt = null;
+          // LOCAL, not one of this file's module scratch vars: the contest is
+          // read again several branches below (after trySeize), and a shared
+          // slot would be one re-entrant strike away from billing another
+          // animal's geometry to this bite.
+          var _ang = null;
           if (CBZ.apeStrike) {
             try { apeDealt = CBZ.apeStrike(attacker, target, style, opts, dmg); } catch (e) { apeDealt = null; }
           }
@@ -1181,6 +1276,17 @@
           } else if (!jawReaches(attacker, target, style, tp, reach)) {
             RES.missed = true;
             attacker._atkT = rate * 0.3;
+          } else if ((_ang = angleContest(attacker, target, style)) && _ang.denied) {
+            /* THE COUNTER-BITE BEAT THE WIND-UP. systems/bite_angles.js
+               resolved the geometry, the victim answered while this animal
+               was still opening its mouth, and the answer put the attacker
+               down. The swing plays out on a dying body and bills nothing —
+               which is the single frame that makes facing a charge worth
+               doing. Reported as a MISS so every caller's own "did that
+               connect" branch (predator.js's commit spend, the pod's pass
+               ration) reads it the way it looks. */
+            RES.missed = true;
+            RES.dealt = 0;
           } else if (!trySeize(attacker, target, opts, style)) {
             // THE SEIZE takes precedence over the hit: if the block accepts, it
             // owns the damage, the camera and the death from here. Anything else
@@ -1194,6 +1300,12 @@
             // ...and it BLEEDS. The decal above marks the skin; this is the
             // spray, and it leaves the teeth rather than the victim's centre.
             biteBlood(attacker, target, style);
+            /* AND THE ANGLE DECIDES WHAT IT WAS WORTH. Rear half = the ambush
+               premium, flank = par, in its face = weakened, nose to nose = the
+               gape decides. `_ang` is null whenever ?cfg_BITE_ANGLES=0 or the
+               geometry could not be taken, and a null multiplies by nothing:
+               the flag-off path is the old number, byte for byte. */
+            if (_ang) dmg *= _ang.mult;
             if (typeof opts.onHit === 'function') {
               opts.onHit(dmg);
             } else {

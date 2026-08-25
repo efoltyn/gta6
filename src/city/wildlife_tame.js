@@ -99,6 +99,27 @@
   // solve so "how much air" and "how fast do I leave" can never disagree.
   const BREACH_G = 17.5;
 
+  /* ---- HOW BIG IS THE BODY UNDER THE RIDER, RIGHT NOW --------------------
+     Every `a.species.scale` in this file meant "how big is this animal" and
+     answered with "how big is this SPECIES", which was already wrong for the
+     individual (a runt and a monster great white rode identically) and became
+     wrong every second once animals grow by eating: a shark that doubles
+     mid-match would keep a saddle socket, a camera boom, a shore threshold and
+     a turn rate solved for the body it had when the player climbed on.
+
+     One reader, consumed defensively (city/wildlife_traits.js is another block
+     and may load either side of this one), falling back to the group's own
+     live scale before the species constant. */
+  function liveScale(a) {
+    if (!a) return 1;
+    if (typeof CBZ.wildlifeScale === "function" && a.species) {
+      try { const s = +CBZ.wildlifeScale(a); if (s > 0 && isFinite(s)) return s; } catch (e) {}
+    }
+    const g = a.group;
+    if (g && g.scale && g.scale.x > 0) return g.scale.x;
+    return (a.species && a.species.scale) || 1;
+  }
+
   function groundY(x, z) { return (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) || 0; }
   function animals() { return CBZ.cityWildlife || []; }
   function note(msg, sec, o) { if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, sec, o); }
@@ -494,7 +515,7 @@
   // so two terriers stand shoulder to shoulder and two elephants do not try to
   // occupy the same three metres of ground.
   const SEPV = { x: 0, z: 0 };
-  function girth(p) { return Math.max(0, ((p.species && p.species.scale) || 1) - 0.8) * 1.2; }
+  function girth(p) { return Math.max(0, liveScale(p) - 0.8) * 1.2; }
   function separate(pet, tx, tz) {
     SEPV.x = tx; SEPV.z = tz;
     const mine = girth(pet);
@@ -1246,7 +1267,7 @@
     return best;
   }
   function biteReach(a) {
-    return Math.max(3.0, Math.max(0.35, (a && a.species && a.species.scale) || 1) * 2.5);
+    return Math.max(3.0, Math.max(0.35, liveScale(a)) * 2.5);
   }
   function selectBiteTarget(a, R) {
     const mouth = jawWorld(a);
@@ -1280,7 +1301,37 @@
     // megalodon's jaw below a surface hull: accepting a target at 6.5 m and
     // then shrinking the strike to 5.1 m made the visible bite a fake miss.
     if (dist > biteReach(a) || !inBiteFront(mouth, biteV)) return false;
-    const damage = Math.max(8, Math.round(sp.bite || 12));
+    /* ============================================================
+       AND NOW THE GEOMETRY DECIDES WHAT IT WAS WORTH.
+
+       Owner, 2026-08-25: "like agario over and over again for each bite —
+       angles of collision decide kills — so a shark at the right angle can
+       kill a bigger shark."
+
+       THE TRIGGER IS UNTOUCHED, and that is the whole contract: Shark Sim
+       still fires this the instant something is in front of the mouth, move
+       is still the only control, and nothing above this line changed. What
+       the angle decides is what the bite COSTS and what it DOES — a rear-half
+       ambush is worth half again as much and cannot be answered, a bite taken
+       in something's face is weakened and gets counter-bitten while you are
+       still opening, and swimming nose-first into a bigger mouth is how you
+       die. The contest point is biteV, the real clamped contact on the
+       target's own surface, so the zone is where the teeth ARE and not where
+       your body happens to be.
+
+       IT COSTS THE SNACK NOTHING. systems/bite_angles.js refuses to invent a
+       heading, and survivors, peds, cops and boats do not publish one — so
+       eating the beach is exactly the flat, fast meal it has always been and
+       only an animal-on-animal fight is contested.
+
+       ?cfg_BITE_ANGLES=0 puts the flat bite back. */
+    const contest = (typeof CBZ.biteContest === "function")
+      ? CBZ.biteContest(a, target, { point: biteV, style: "lunge" }) : null;
+    // THE ANSWER WON. Something turned into your charge, bit first, and the
+    // thing it bit was you: the swing plays out and bills nothing.
+    if (contest && contest.denied) return false;
+    const damage = Math.max(1, Math.round(
+      Math.max(8, sp.bite || 12) * (contest ? contest.mult : 1)));
     if (kind === "animal") {
       if (!CBZ.cityWildlifeHit) return false;
       CBZ.cityWildlifeHit(target,
@@ -1290,8 +1341,14 @@
       // is unaffected because aboveWeight() measures both bodies.
       if (target.dead || target.hp <= 0) beginClamp(a, target);
       else if (CBZ.creatureBiteChunk && aboveWeight(a, target)) {
-        // it survived the bite: it still leaves with less of itself
-        try { CBZ.creatureBiteChunk(target, biteV, { jaw: biteReach(a) * 0.32, sev: 0.7, bleedS: 12 }); } catch (e) {}
+        // IT SURVIVED THE BITE: IT STILL LEAVES WITH LESS OF ITSELF — and how
+        // much less is the angle, same as the damage was. A rear-half ambush
+        // takes a real piece of the tail; a bite taken in something's face,
+        // while it is biting back at you, barely gets purchase. biteV is the
+        // clamped contact on the target's own surface, so the material comes
+        // off the part the teeth actually closed on and not off its middle.
+        const sev = Math.max(0.25, Math.min(1, 0.7 * (contest ? contest.mult : 1)));
+        try { CBZ.creatureBiteChunk(target, biteV, { jaw: biteReach(a) * 0.32, sev: sev, bleedS: 12 }); } catch (e) {}
       }
     } else if (kind === "cop") {
       if (!CBZ.cityHurtCop) return false;
@@ -1402,8 +1459,8 @@
      about sits right on that line. */
   function aboveWeight(a, t) {
     const L = CBZ.marineBodyLen;
-    const la = L ? L(a) : ((a.species && a.species.scale) || 1) * 6;
-    const lt = L ? L(t) : ((t.species && t.species.scale) || 1) * 6;
+    const la = L ? L(a) : liveScale(a) * 6;
+    const lt = L ? L(t) : liveScale(t) * 6;
     return la > 0 && lt >= la * 0.85;
   }
   function clampJawWorld(a) {
@@ -1710,7 +1767,7 @@
     W.v = Math.max(0, W.v + dv);
     P.sprint = sprint; P.speed = W.v;
 
-    const bodyScale = Math.max(0.35, (a.species && a.species.scale) || 1);
+    const bodyScale = Math.max(0.35, liveScale(a));
     const groundD = rideGroundDepth(bodyScale);
     /* AGROUND IS A STATE, NOT A FAILURE. Orcas beach on purpose; so may you.
        The belly is on sand, the body can still bite, and the only thing that
@@ -1797,7 +1854,7 @@
       // shark in the shallows actually looks like; on dry beach the ground is
       // above the sea and the body rests on the beach instead of sinking to a
       // sea floor that isn't under it.
-      const bedY = bedYAt(P.pos.x, P.pos.z) + Math.max(0.35, (a.species.scale || 1) * 0.32);
+      const bedY = bedYAt(P.pos.x, P.pos.z) + Math.max(0.35, liveScale(a) * 0.32);
       // HOW HIGH THE BODY MAY RIDE. `0.36 × swimDepth` for a breacher is what
       // lets the dorsal cut the surface before a leap; MARINE_SIT_DEEPER trims
       // that by a fifth so a shark at full rise sits IN the water rather than
@@ -1906,7 +1963,7 @@
     const k = Math.min(1, (sub - 0.45) / 2.2);
     if (!(k > 0)) return;
     cam.getWorldDirection(_diveDir);
-    const scale = Math.max(0.35, (a.species && a.species.scale) || 1);
+    const scale = Math.max(0.35, liveScale(a));
     // A CONSTANT distance, not the measured one: measuring our own previous
     // frame's result and feeding it back in is how a camera starts creeping.
     // Sized to the hull so a megalodon is framed like a megalodon.
@@ -1930,10 +1987,38 @@
      a second copy of the thresholds in the mode file is how the old 0.30/0.50
      conveyor ring came to wall the entire shore. `release` sits above `ground`
      so the two do not chatter across one threshold. */
+  /* ---- THE MOUNT GREW UNDER ITS RIDER -----------------------------------
+     city/wildlife.js calls this from applyScale() whenever a RIDDEN animal
+     changes size, which since the mass economy is every few seconds of a good
+     match. `ride.visual` is the saddle socket measured off the body's bounding
+     boxes at mount time (animalSaddle multiplies by group.scale, so it is a
+     snapshot of the old body), and everything the rider's position, seat
+     height, jump and camera boom read comes out of it.
+
+     The fix is to DROP the snapshot, not to patch it: the next tick rebuilds
+     it from the live group in exactly the same way the mount did, so there is
+     no second derivation to drift. The seat is then re-solved immediately so
+     the rider does not spend a frame inside the animal that just doubled.
+
+     Without this a shark that grows mid-match slowly swallows its own camera
+     (the boom is sized off the hull) and floats its rider off the back. */
+  CBZ.wildlifeRideResize = function (a) {
+    if (!a || a !== ride.mount) return false;
+    ride.visual = null;
+    const V = ride.visual = rideVisualSpec(a.species, a.group);
+    if (!V) return false;
+    const P = CBZ.player;
+    if (P && ride.water && V.aquatic) {
+      P.pos.y = ride.water.y + aquaticSeatY(V, ride.water.pitch + (ride.attackPitch || 0));
+    }
+    if (P) P._rideJump = V.jump;
+    return true;
+  };
+
   CBZ.cityAquaticShoreLaw = function () {
     const a = ride.mount, W = ride.water;
     if (!a || !W || !aquaticMounted(a)) return null;
-    const scale = Math.max(0.35, (a.species && a.species.scale) || 1);
+    const scale = Math.max(0.35, liveScale(a));
     const ground = rideGroundDepth(scale);
     return {
       species: a.species ? a.species.id : null, scale: scale,
@@ -2028,7 +2113,7 @@
 
     const level = Math.max(1, (g.level || g.cityLevel || 1) | 0);
     const danger = Math.max(0, Math.min(1, a.species.danger || 0));
-    const size = Math.max(0.7, a.species.scale || 1);
+    const size = Math.max(0.7, liveScale(a));
     const chance = Math.max(0.035, Math.min(0.42, 0.13 + level * 0.004 - danger * 0.16 - Math.max(0, size - 1.3) * 0.055));
     if (Math.random() <= chance) {
       a.tamed = true;
@@ -2084,7 +2169,7 @@
     // cannot deposit its rider six inches across the shoreline mask.
     if (ALLCTL()) {
       const side = ride.head + Math.PI / 2;
-      const off = 1.1 + (a.species.scale || 1) * 0.55;
+      const off = 1.1 + liveScale(a) * 0.55;
       if (wasAquatic) {
         const wf = CBZ.waterField, x0 = P.pos.x, z0 = P.pos.z;
         const lx = x0 + Math.cos(side) * off, lz = z0 + Math.sin(side) * off;
@@ -2113,6 +2198,24 @@
   CBZ.cityCanRideAnimal = function (a) { return !!(a && !a.dead && !a.external && rideDef(a.species) && a.grow == null); };
   CBZ.cityMountAnimal = attemptMount;
   CBZ.cityMountedAnimal = function () { return ride.mount; };
+  /* WHERE THE MOUNT IS POINTING — the one number that is the aim.
+
+     `ride.head` is not a pose, it is the aim: the bite probe's forward cone
+     (inBiteFront), the damage direction, the animal's own heading and the
+     rider's yaw are all read off it. Everything OUTSIDE this file that needs
+     to know or set where the mount is looking — the angle-contest tooling
+     that stages an approach bearing, most obviously — was reaching for a
+     closure it cannot see, so it is published here as a getter/setter pair in
+     one function rather than as a raw handle to the ride object. Passing a
+     number turns the mount; passing nothing just asks. */
+  CBZ.cityMountedHeading = function (h) {
+    if (typeof h === "number" && isFinite(h)) {
+      ride.head = h;
+      if (ride.mount) faceAnimal(ride.mount, h);
+      if (ride.water) ride.water.lastHead = h;
+    }
+    return ride.head;
+  };
 
   // FINAL PRESENTATION OWNER. wildlife.js registers its numbered updater from
   // inside the landmass build, after loop.js's one-time updater sort, so its
@@ -2146,7 +2249,7 @@
         const want = Math.atan2(mdz, mdx);
         let hd = want - ride.head;
         while (hd > Math.PI) hd -= 2 * Math.PI; while (hd < -Math.PI) hd += 2 * Math.PI;
-        const trMax = (7.5 / (1 + (a.species.scale || 1) * 0.35)) * dt;
+        const trMax = (7.5 / (1 + liveScale(a) * 0.35)) * dt;
         if (hd > trMax) hd = trMax; else if (hd < -trMax) hd = -trMax;
         ride.head += hd;
       } else ride.head = Math.atan2(mdz, mdx);        // legacy snap (flag off)
@@ -2157,7 +2260,7 @@
     // ballistic root itself; adding a second sine there would make the animal
     // detach visually from its collision trajectory.
     ride.phase += dt * (moving ? 9 : 0.6);
-    const bob = !W && moving && !airborne ? Math.abs(Math.sin(ride.phase)) * 0.09 * (a.species.scale || 1) : 0;
+    const bob = !W && moving && !airborne ? Math.abs(Math.sin(ride.phase)) * 0.09 * liveScale(a) : 0;
     const rootY = W ? W.y : P.pos.y;
     a.group.position.set(gx, rootY + bob, gz);
     faceAnimal(a, ride.head);

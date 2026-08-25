@@ -1174,6 +1174,13 @@
 <script src="src/city/dogs.js?v=nodash1"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
+<!-- THE ANGLE LAW loads first because it is the one thing all three biters
+     ask (the shared strike frame, the mounted bite, the pod's flank pass) and
+     it must exist before any of them can consult it. It is pure geometry with
+     no build step and no dependency of its own — every neighbour it consumes
+     (predatorKit, marineGape, marineHurt) is asked for at CALL time, so its
+     position here is about readability, not load order. -->
+<script src="src/systems/bite_angles.js?v=biteangles1"></script>
 <script src="src/city/creature_combat.js?v=sharkmouth2"></script>
 <script src="src/city/companions.js?v=allmain1"></script>
 <!-- IRONJAW ARENA. arena_venue.js is the BUILDING (raked bowl, concourse,
