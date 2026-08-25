@@ -462,7 +462,10 @@
         h += pill("tvMDive", "DIVE", "tv-big");
         h += pill("tvMRise", "RISE", "tv-big tv-go");
       }
-      h += pill("tvDismount", "DISMOUNT", "tv-sm");
+      // In Shark Sim there is no rider to dismount — you ARE the shark, the
+      // human is hidden, and shark_sim.js force-remounts every frame, so the
+      // pill was a button that did nothing but flicker. No pill, no lie.
+      if (CBZ.game.mode !== "sharksim") h += pill("tvDismount", "DISMOUNT", "tv-sm");
     }
     if (air) {
       // Bottom-up (column-reverse): the release sits nearest the thumb, its own
