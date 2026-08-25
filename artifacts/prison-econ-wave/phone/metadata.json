@@ -1,0 +1,400 @@
+{
+  "preset": {
+    "id": "prison-phone-bridge",
+    "title": "Prison — staff corruption priced honestly",
+    "path": "tools/visual-presets/prison-phone-bridge.mjs"
+  },
+  "generatedAt": "2026-08-25T17:34:18.519Z",
+  "only": null,
+  "reusedBeforeFrom": null,
+  "viewport": {
+    "width": 960,
+    "height": 600
+  },
+  "frameSignature": "custom@960x600",
+  "frames": [
+    {
+      "id": "custom",
+      "device": "custom",
+      "label": "960x600",
+      "orientation": "fixed",
+      "width": 960,
+      "height": 600,
+      "dsf": 1,
+      "mobile": false,
+      "ua": null,
+      "landscape": true
+    }
+  ],
+  "before": {
+    "requested": "http://127.0.0.1:8966/index.html?seed=90210&cfg_PRISON_PHONE_BRIDGE=0&visualCompare=before-1787679251898",
+    "final": "http://127.0.0.1:8966/index.html?seed=90210&cfg_PRISON_PHONE_BRIDGE=0&visualCompare=before-1787679251898"
+  },
+  "after": {
+    "requested": "http://127.0.0.1:8966/index.html?seed=90210&visualCompare=after-1787679255342",
+    "final": "http://127.0.0.1:8966/index.html?seed=90210&visualCompare=after-1787679255342"
+  },
+  "subjects": [
+    {
+      "id": "payoff-no-phone",
+      "label": "The clean sheet, holding only smokes",
+      "focus": "Before: a career-ending favour bought with tobacco. After: the once-per-officer explanation of why it is not."
+    },
+    {
+      "id": "phone-rental",
+      "label": "Renting ten minutes on a handset",
+      "focus": "Is PHONE TIME actually reachable through the real stock pool, and does the seller state his terms?"
+    },
+    {
+      "id": "racket-cut-phone",
+      "label": "The racket cut, with the window open",
+      "focus": "The rented line lets the deep service through — and the officer says once where the money really landed."
+    }
+  ],
+  "captures": [
+    {
+      "id": "payoff-no-phone",
+      "frame": "custom",
+      "beforeFile": "01-payoff-no-phone.png",
+      "afterFile": "01-payoff-no-phone.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "side": "before",
+        "subject": "payoff-no-phone",
+        "bridge": false,
+        "officer": "Officer #4 (bent)",
+        "seller": "Officer #4 (bent)",
+        "offer": {
+          "item": "Razor Blade",
+          "price": 9,
+          "basePrice": 9
+        },
+        "verbs": [
+          "pay",
+          "haggle",
+          "refuse"
+        ],
+        "verbOk": true,
+        "pressFallback": 0,
+        "quoted": 13,
+        "line": "Your name comes off the sheet. It goes back on if you make me look stupid.",
+        "audit": {
+          "bodies": 72,
+          "unminted": 0,
+          "minted": 72,
+          "cigsHeld": 701,
+          "keysHeld": 16,
+          "torches": 12,
+          "loyal": 1,
+          "bought": 1,
+          "respectCeil": 45,
+          "block": "yard",
+          "counting": false,
+          "night": false,
+          "groundCigs": 0,
+          "phoneBridge": false,
+          "phoneAccess": false,
+          "phoneOwned": false,
+          "phoneTimeT": 0,
+          "racketDebt": 0,
+          "racketDebtCeil": 60
+        },
+        "metrics": {
+          "phoneAccess": 0,
+          "deepSale": 1,
+          "cigsSpent": 13,
+          "serviceInPool": 0,
+          "lineChars": 74,
+          "quoteGap": 0
+        }
+      },
+      "after": {
+        "ok": true,
+        "side": "after",
+        "subject": "payoff-no-phone",
+        "bridge": true,
+        "officer": "Officer #4 (bent)",
+        "seller": "Officer #4 (bent)",
+        "offer": {
+          "item": "Cigarette Carton",
+          "price": 24,
+          "basePrice": 24
+        },
+        "verbs": [
+          "pay",
+          "haggle",
+          "refuse"
+        ],
+        "verbOk": true,
+        "pressFallback": 0,
+        "quoted": 13,
+        "line": "What am I doing with cigarettes? You can't reach the street, we got nothing to talk about.",
+        "audit": {
+          "bodies": 72,
+          "unminted": 0,
+          "minted": 72,
+          "cigsHeld": 717,
+          "keysHeld": 14,
+          "torches": 12,
+          "loyal": 1,
+          "bought": 1,
+          "respectCeil": 45,
+          "block": "yard",
+          "counting": false,
+          "night": false,
+          "groundCigs": 0,
+          "phoneBridge": true,
+          "phoneAccess": false,
+          "phoneOwned": false,
+          "phoneTimeT": 0,
+          "racketDebt": 0,
+          "racketDebtCeil": 60
+        },
+        "metrics": {
+          "phoneAccess": 0,
+          "deepSale": 0,
+          "cigsSpent": 0,
+          "serviceInPool": 0,
+          "lineChars": 90,
+          "quoteGap": 0
+        }
+      }
+    },
+    {
+      "id": "phone-rental",
+      "frame": "custom",
+      "beforeFile": "02-phone-rental.png",
+      "afterFile": "02-phone-rental.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "side": "before",
+        "subject": "phone-rental",
+        "bridge": false,
+        "officer": "Officer #4 (bent)",
+        "seller": "the Dealer",
+        "offer": {
+          "item": "Pills",
+          "price": 15,
+          "basePrice": 15
+        },
+        "verbs": [
+          "trade",
+          "talk",
+          "steal"
+        ],
+        "verbOk": true,
+        "pressFallback": 0,
+        "quoted": 27,
+        "line": "Powder, 27. You're rattling when you walk. Costs extra.",
+        "audit": {
+          "bodies": 72,
+          "unminted": 0,
+          "minted": 72,
+          "cigsHeld": 705,
+          "keysHeld": 16,
+          "torches": 12,
+          "loyal": 1,
+          "bought": 1,
+          "respectCeil": 45,
+          "block": "yard",
+          "counting": false,
+          "night": false,
+          "groundCigs": 0,
+          "phoneBridge": false,
+          "phoneAccess": false,
+          "phoneOwned": false,
+          "phoneTimeT": 0,
+          "racketDebt": 0,
+          "racketDebtCeil": 60
+        },
+        "metrics": {
+          "phoneAccess": 0,
+          "deepSale": 1,
+          "cigsSpent": 27,
+          "serviceInPool": 0,
+          "lineChars": 55,
+          "quoteGap": 0
+        }
+      },
+      "after": {
+        "ok": true,
+        "side": "after",
+        "subject": "phone-rental",
+        "bridge": true,
+        "officer": "Officer #4 (bent)",
+        "seller": "the Dealer",
+        "offer": {
+          "item": "Painkillers",
+          "price": 13,
+          "basePrice": 13
+        },
+        "verbs": [
+          "trade",
+          "talk",
+          "steal"
+        ],
+        "verbOk": true,
+        "pressFallback": 0,
+        "quoted": 15,
+        "line": "Ten minutes, and it stays where I can see it.",
+        "audit": {
+          "bodies": 72,
+          "unminted": 0,
+          "minted": 72,
+          "cigsHeld": 717,
+          "keysHeld": 14,
+          "torches": 12,
+          "loyal": 1,
+          "bought": 1,
+          "respectCeil": 45,
+          "block": "yard",
+          "counting": false,
+          "night": false,
+          "groundCigs": 0,
+          "phoneBridge": true,
+          "phoneAccess": true,
+          "phoneOwned": false,
+          "phoneTimeT": 89.9,
+          "racketDebt": 0,
+          "racketDebtCeil": 60
+        },
+        "metrics": {
+          "phoneAccess": 0,
+          "deepSale": 1,
+          "cigsSpent": 15,
+          "serviceInPool": 1,
+          "lineChars": 45,
+          "quoteGap": 0
+        }
+      }
+    },
+    {
+      "id": "racket-cut-phone",
+      "frame": "custom",
+      "beforeFile": "03-racket-cut-phone.png",
+      "afterFile": "03-racket-cut-phone.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "side": "before",
+        "subject": "racket-cut-phone",
+        "bridge": false,
+        "officer": "Officer #4 (bent)",
+        "seller": "Officer #4 (bent)",
+        "offer": {
+          "item": "Razor Blade",
+          "price": 9,
+          "basePrice": 9
+        },
+        "verbs": [
+          "pay",
+          "haggle",
+          "refuse"
+        ],
+        "verbOk": true,
+        "pressFallback": 0,
+        "quoted": 25,
+        "line": "You're under my wing for a while. Don't make me regret the arithmetic.",
+        "audit": {
+          "bodies": 72,
+          "unminted": 0,
+          "minted": 72,
+          "cigsHeld": 705,
+          "keysHeld": 16,
+          "torches": 12,
+          "loyal": 1,
+          "bought": 1,
+          "respectCeil": 45,
+          "block": "yard",
+          "counting": false,
+          "night": false,
+          "groundCigs": 0,
+          "phoneBridge": false,
+          "phoneAccess": false,
+          "phoneOwned": false,
+          "phoneTimeT": 0,
+          "racketDebt": 0,
+          "racketDebtCeil": 60
+        },
+        "metrics": {
+          "phoneAccess": 1,
+          "deepSale": 1,
+          "cigsSpent": 25,
+          "serviceInPool": 0,
+          "lineChars": 70,
+          "quoteGap": 0
+        }
+      },
+      "after": {
+        "ok": true,
+        "side": "after",
+        "subject": "racket-cut-phone",
+        "bridge": true,
+        "officer": "Officer #4 (bent)",
+        "seller": "Officer #4 (bent)",
+        "offer": {
+          "item": "Cigarette Carton",
+          "price": 24,
+          "basePrice": 24
+        },
+        "verbs": [
+          "pay",
+          "haggle",
+          "refuse"
+        ],
+        "verbOk": true,
+        "pressFallback": 0,
+        "quoted": 23,
+        "line": "Money landed on my sister's app. You're under my wing for a while. Don't make me regret the arithmetic.",
+        "audit": {
+          "bodies": 72,
+          "unminted": 0,
+          "minted": 72,
+          "cigsHeld": 717,
+          "keysHeld": 14,
+          "torches": 12,
+          "loyal": 1,
+          "bought": 1,
+          "respectCeil": 45,
+          "block": "yard",
+          "counting": false,
+          "night": false,
+          "groundCigs": 0,
+          "phoneBridge": true,
+          "phoneAccess": false,
+          "phoneOwned": false,
+          "phoneTimeT": 0,
+          "racketDebt": 0,
+          "racketDebtCeil": 60
+        },
+        "metrics": {
+          "phoneAccess": 1,
+          "deepSale": 1,
+          "cigsSpent": 23,
+          "serviceInPool": 0,
+          "lineChars": 103,
+          "quoteGap": 0
+        }
+      }
+    }
+  ],
+  "browserMessages": [
+    {
+      "side": "before",
+      "type": "warning",
+      "text": "THREE.MeshLambertMaterial: 'flatShading' is not a property of this material.",
+      "count": 4
+    },
+    {
+      "side": "after",
+      "type": "warning",
+      "text": "THREE.MeshLambertMaterial: 'flatShading' is not a property of this material.",
+      "count": 4
+    }
+  ]
+}

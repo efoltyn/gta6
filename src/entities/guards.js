@@ -136,12 +136,18 @@
     return s < 0 ? Math.ceil(Math.abs(s) / (12 / scale)) : -Math.floor(s / (16 / scale));
   }
 
-  function payoffCost(g) {
-    const heat = (CBZ.game && CBZ.game.detection) || 0;
-    const complaints = (CBZ.game && CBZ.game.complaints) || 0;
-    const jobCut = CBZ.game && CBZ.game.gangJob ? 4 : 0;
-    return Math.max(5, Math.ceil(heat / 8) + Math.ceil(complaints / 12) + jobCut + (g.kind === "warden" ? 14 : 5) + racketPriceMod(0.75));
-  }
+  /* THE LOCAL payoffCost() IS GONE (defect fix, 2026-08-25).
+     It was a SECOND sum for the SAME purchase. This file quoted you its own
+     number on the approach card — startPayoffApproach() below writes it into
+     `g.approach.msg` and systems/interact.js prints it on the button — and
+     then `action:"pay"` handed the transaction to CBZ.econ.payoff(), whose
+     payoffCost() charged a DIFFERENT number. The two disagreed on both terms
+     that matter: this one priced the racket ledger with racketPriceMod(0.75)
+     while economy.js prices it off racketStanding/racketDebt/protection, and
+     this one still carried a +14 WARDEN premium for a transaction the warden
+     refuses outright (economy.js's payoff() turns him down before any price
+     is read, owner 2026-08-19). A man who quotes nine and takes fourteen is
+     a bug, not a character. The till sets the price; ask the till. */
 
   function contrabandCount() {
     const inv = (CBZ.game && CBZ.game.inventory) || {};
@@ -224,7 +230,7 @@
     extra = extra || {};
     const cost = kind === "racketOffer" ? racketCost(g, extra)
       : kind === "snitchIntel" ? snitchIntelCost(g, extra.snitch)
-      : payoffCost(g);
+      : CBZ.econ.payoffCost(g);          // the till's price, never a second sum
     const finalCost = extra.cost || (kind === "witnessBlackmail" ? Math.max(4, Math.ceil((extra.amount || 14) / 6) + Math.ceil(((CBZ.game && CBZ.game.detection) || 0) / 14) + 3 + racketPriceMod(0.7)) : cost);
     const msg = kind === "witnessBlackmail"
       ? `${nameOf(g)} heard ${extra.source || "a snitch"} talking and wants ${finalCost} cigs to bury it.`
@@ -292,7 +298,7 @@
       CBZ.addComplaint && CBZ.addComplaint(reason === "refuse" ? 12 : 7);
     } else {
       if (a.kind === "racketOffer") {
-        CBZ.game.racketDebt = Math.min(40, (CBZ.game.racketDebt || 0) + Math.ceil((a.cost || 5) * (reason === "refuse" ? 0.8 : 0.45)));
+        CBZ.econ.addRacketDebt(Math.ceil((a.cost || 5) * (reason === "refuse" ? 0.8 : 0.45)));
         addRacketStanding(reason === "refuse" ? -8 : -4);
         startCleanSweep(g, 12 + Math.ceil((a.cost || 5) * 0.7));
         if (CBZ.player && CBZ.player.gang != null && CBZ.addGangStanding) CBZ.addGangStanding(CBZ.player.gang, -2);
@@ -508,6 +514,19 @@
     }
   }
 
+  /* The three approaches that are career-ending favours rather than a moment
+     of blindness — the ones the phone bridge gates. `payoffOffer` is a deep
+     service too, but it is transacted by CBZ.econ.payoff(), which gates
+     itself, so listing it here would run the gate twice and burn two lines
+     out of the once-per-officer refusal. */
+  function deepKind(a) {
+    return !!a && (a.kind === "racketOffer" || a.kind === "witnessBlackmail" || a.kind === "snitchIntel");
+  }
+  /* The once-a-run honest clause, worn in front of whichever deep purchase
+     happens first. It LATCHES when it returns non-empty, so it may only be
+     called on a path that has already taken the money — never speculatively. */
+  function paidPrefix() { return CBZ.econ.outsidePaidPrefix ? CBZ.econ.outsidePaidPrefix() : ""; }
+
   function resolveGuardApproach(g, action) {
     const a = g && g.approach;
     if (!a) return { ok: false, msg: "Nothing doing. Not right now." };
@@ -516,18 +535,43 @@
       // in the prison: .pi-subtitle (systems/interact.js) carries the speaker
       // in its own element and shows only the words, so a name stapled to the
       // front is the same man introduced twice.
+      /* AND HE STATES THE INSTRUMENT. Asking a bent officer what the deal is
+         is the one moment the outside-money fiction belongs in a mouth: he
+         says where the money actually goes, and asks the only question that
+         decides whether you are in the conversation at all. Empty string when
+         PRISON_PHONE_BRIDGE is off, so these four lines revert exactly. */
+      const terms = deepKind(a) && CBZ.econ.phoneTerms ? CBZ.econ.phoneTerms() : "";
+      const tail = terms ? " " + terms : "";
       return { ok: true, msg: a.kind === "witnessBlackmail"
-        ? `${a.source || "Somebody"} gave me a trail. Pay and it never reaches the log.`
+        ? `${a.source || "Somebody"} gave me a trail. Pay and it never reaches the log.${tail}`
         : a.kind === "racketOffer"
-        ? "Pay the cut and your contraband stays invisible."
+        ? `Pay the cut and your contraband stays invisible.${tail}`
         : a.kind === "snitchIntel"
-        ? "Pay, and I point you at the mouth feeding the log. What you do about it is yours."
+        ? `Pay, and I point you at the mouth feeding the log. What you do about it is yours.${tail}`
         : `${a.cost}, and the paperwork gets lost.` };
     }
     if (action === "pay") {
+      /* NOBODY SELLS A CAREER FOR TOBACCO (PRISON_PHONE_BRIDGE).
+         A racket's protection, a buried statement and a name off the log are
+         the three deep services on this file's side of the counter, and all
+         three are paid the way staff corruption is really paid: your people
+         to his people. The cigarettes still leave your pocket at the same
+         magnitude — they stand for what your people sent — but you cannot
+         reach your people without a line out, so this is the precondition for
+         the conversation and it is checked before the money is counted.
+         `payoffOffer` is deliberately absent: it falls through to
+         CBZ.econ.payoff() below, which runs the same gate at the till. */
+      if (deepKind(a)) {
+        const gate = CBZ.econ.phoneGate ? CBZ.econ.phoneGate(g) : null;
+        if (gate) return gate;
+      }
       if (a.kind === "snitchIntel") {
-        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `${a.cost}. Come back with it or don't come back.` };
+        // A REFUSAL NAMES THE THING AND THE NUMBER, and never opens on a bare
+        // numeral — these three said "12. Come back with it or don't come
+        // back", which is a price tag with a full stop after it.
+        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `That name costs ${a.cost}. Come back with it or don't come back.` };
         CBZ.econ.addCigs(-a.cost);
+        CBZ.econ.consumePhoneTime && CBZ.econ.consumePhoneTime();
         const snitch = (a.snitch && !a.snitch.dead && !a.snitch.escaped) ? a.snitch : findSnitchLead();
         g.bribed = Math.max(g.bribed || 0, 14);
         if (snitch && snitch.data) {
@@ -554,17 +598,18 @@
           addRacketStanding(1);
           CBZ.sfx && CBZ.sfx("coin");
           clearGuardApproach(g);
-          return { ok: true, msg: `It was ${nameOf(snitch)}. Do what you like with that. I never said it.` };
+          return { ok: true, msg: paidPrefix() + `It was ${nameOf(snitch)}. Do what you like with that. I never said it.` };
         }
         if (CBZ.addHeat) CBZ.addHeat(-3);
         addRacketStanding(1);
         CBZ.sfx && CBZ.sfx("coin");
         clearGuardApproach(g);
-        return { ok: true, msg: "Trail's cold. I'll keep the smokes for the trouble." };
+        return { ok: true, msg: paidPrefix() + "Trail's cold. I'll keep the fee for the trouble." };
       }
       if (a.kind === "witnessBlackmail") {
-        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `${a.cost}. Come back with it or don't come back.` };
+        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `Burying a statement costs ${a.cost}. Come back with it or don't come back.` };
         CBZ.econ.addCigs(-a.cost);
+        CBZ.econ.consumePhoneTime && CBZ.econ.consumePhoneTime();
         g.bribed = Math.max(g.bribed || 0, 22);
         g.alert = 0; g.hunt = 0; g.investigate = null;
         if (CBZ.addHeat) CBZ.addHeat(-(12 + (a.amount || 12) * 0.65));
@@ -584,16 +629,17 @@
         addRacketStanding(3);
         CBZ.sfx && CBZ.sfx("coin");
         clearGuardApproach(g);
-        return { ok: true, msg: "That statement never got typed up. Nobody remembers taking it." };
+        return { ok: true, msg: paidPrefix() + "That statement never got typed up. Nobody remembers taking it." };
       }
       if (a.kind === "racketOffer") {
-        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `${a.cost}. Come back with it or don't come back.` };
+        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `The cut is ${a.cost}. Come back with it or don't come back.` };
         CBZ.econ.addCigs(-a.cost);
+        CBZ.econ.consumePhoneTime && CBZ.econ.consumePhoneTime();
         g.bribed = Math.max(g.bribed || 0, 24);
         g.alert = 0; g.hunt = 0;
         CBZ.game.racketProtectionT = Math.max(CBZ.game.racketProtectionT || 0, 32 + Math.min(28, a.cost * 2));
         CBZ.game.racketGuard = nameOf(g);
-        CBZ.game.racketDebt = Math.max(0, (CBZ.game.racketDebt || 0) - a.cost * 2 - 5);
+        CBZ.econ.addRacketDebt(-(a.cost * 2 + 5));
         for (const gd of CBZ.guards || []) if (gd.corrupt) {
           gd.bribed = Math.max(gd.bribed || 0, 10);
           gd.alert = 0;
@@ -607,9 +653,12 @@
         addRacketStanding(6);
         CBZ.sfx && CBZ.sfx("coin");
         clearGuardApproach(g);
-        return { ok: true, msg: "You're under my wing for a while. Don't make me regret the arithmetic." };
+        return { ok: true, msg: paidPrefix() + "You're under my wing for a while. Don't make me regret the arithmetic." };
       }
-      const res = CBZ.econ.payoff(g);
+      // the price on the card, not a second one computed at the till — see the
+      // note on econ.payoff()'s opts.cost. HAGGLE writes a.cost; this is what
+      // makes that discount reach the money instead of only the chip.
+      const res = CBZ.econ.payoff(g, { cost: a.cost });
       if (res && res.ok) { addRacketStanding(3); clearGuardApproach(g); }
       return res;
     }
@@ -625,7 +674,7 @@
         return { ok: true, msg: `Fine. ${a.cost}, and we never had this conversation.` };
       }
       a.cost += 2;
-      if (a.kind === "racketOffer") CBZ.game.racketDebt = Math.min(40, (CBZ.game.racketDebt || 0) + 1);
+      if (a.kind === "racketOffer") CBZ.econ.addRacketDebt(1);
       addRacketStanding(-2);
       if (CBZ.addHeat) CBZ.addHeat(4);
       return { ok: false, msg: `Now it's ${a.cost}. Haggle again and see what happens.` };
@@ -651,12 +700,12 @@
       addRacketStanding(-10);
       if (!g.corrupt) g.hunt = Math.max(g.hunt || 0, 2.6);
       if (a.kind === "racketOffer") {
-        CBZ.game.racketDebt = Math.min(40, (CBZ.game.racketDebt || 0) + Math.ceil((a.cost || 5) * 0.7));
+        CBZ.econ.addRacketDebt(Math.ceil((a.cost || 5) * 0.7));
         startCleanSweep(g, 18 + Math.ceil((a.cost || 5) * 0.6));
       }
       if (a.kind === "snitchIntel" && CBZ.game) {
         CBZ.game.witnessReportT = Math.max(CBZ.game.witnessReportT || 0, 8);
-        CBZ.game.racketDebt = Math.min(40, (CBZ.game.racketDebt || 0) + 2);
+        CBZ.econ.addRacketDebt(2);
       }
       if (CBZ.addHeat) CBZ.addHeat(g.corrupt ? 12 : 28);
       nudgeCleanGuard(g);
