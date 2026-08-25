@@ -171,6 +171,41 @@
       return { ok: true, msg: actor.quest.text };
     }
 
+    /* WHAT'S ACTUALLY ON HIS MIND (PRISON_CONTRACTS, entities/ai.js).
+
+       This file's favours are INVENTED — "rough up somebody, pull two heists,
+       bring me eight cigs" — assembled from a die and a name plucked out of
+       the roster, and the man asking has no relationship with the victim at
+       all. A tab is the opposite: it already exists, it has an amount, a
+       reason and a date, and the person it is against is somebody he has
+       actually been standing next to in this yard.
+
+       So when a man holding a sour claim gets asked what he needs, that is
+       what he says — ahead of the generated favour, because it is the truer
+       answer to the same question. He pitches it through the same approach
+       machinery every other offer in this prison uses (so it STANDS if you
+       walk off, and so the words come out of his mouth rather than the HUD),
+       and the card re-renders into TAKE IT / HAGGLE / WALK next frame.
+
+       Flag off, or an ai.js without the layer: this block does not exist and
+       the favour roll below is the whole of onTalk exactly as it shipped. */
+    const CT = CBZ.prisonContract;
+    if (CT && CT.canOffer(actor)) {
+      // ai.js's offer() speaks the pitch itself and marks the approach greeted
+      // (autoListen cannot: the card is already open on this man, so `current`
+      // never changes). Returning the words here would print a second copy.
+      const c = CT.offer(actor);
+      if (c) return { ok: true, msg: "" };
+    }
+    // He sent you, you went, you came back holding it. Talk is the ordinary
+    // way to close a job with a man, and it should not need its own button on
+    // a card that already has one — the button exists for the touch rail's
+    // sake, and this is the same transaction reachable the same way as always.
+    if (CT && CT.forCreditor(actor) && CT.satisfied(CT.live())) {
+      const res = CT.settle(actor);
+      if (res && res.ok) return { ok: true, msg: "" };     // he counts it out loud
+    }
+
     /* RESPECT DECIDES WHETHER YOU ARE EVEN ASKED. A man does not hand his dirty
        work to somebody he met a minute ago, and he does not hand it to somebody
        who has picked his pocket. econ's respect ledger (a.rep, the same number

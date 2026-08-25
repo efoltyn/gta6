@@ -120,6 +120,31 @@
        go. Appears only while he is actually carrying something — same
        contextual law as Befriend. entities/ai.js owns the transaction. */
     squash:   { label: "Squash",          fn: (a) => (CBZ.squashGrudge ? CBZ.squashGrudge(a) : { ok: false, msg: "" }) },
+    /* COLLECT AND SETTLE — the two ends of somebody else's debt
+       (PRISON_CONTRACTS, entities/ai.js owns every transaction below).
+
+       The owner's law for this whole layer: BUTTONS ARE FOR DEALS, THE BODY IS
+       FOR PRESSURE. So there are exactly two buttons in it, both on the man who
+       is TALKING to you — the one who hands you his claim, and the same one
+       when you come back holding it. The debtor never grows a "collect from
+       him" button, because finding him, cornering him, picking his pocket or
+       putting him down are things you do with the verbs this game already has.
+
+       COLLECT asks him for the work (ai.js starts the same standing offer any
+       other pitch uses, so it keeps if you walk). SETTLE is the proof: it only
+       renders on the man who sent you, only once what he asked for is actually
+       in your hands, and pressing it is him counting it in front of you. */
+    collect:  { label: "Collect",         fn: (a) => {
+      if (!CBZ.prisonContract || !CBZ.prisonContract.offer) return { ok: false, msg: "" };
+      // ai.js raises the standing offer AND speaks the pitch (autoListen can't:
+      // the card is already open on him, so `current` never changes). The menu
+      // becomes TAKE IT / HAGGLE / WALK on the next render.
+      return { ok: !!CBZ.prisonContract.offer(a), msg: "" };
+    } },
+    settle:   { label: "Settle",          fn: (a) => (CBZ.prisonContract ? CBZ.prisonContract.settle(a) : { ok: false, msg: "" }) },
+    // The symmetry, on the collector who is leaning on YOU: turn the tab into
+    // labour. Same approach dispatch as pay/refuse — ai.js's "work" action.
+    work:     { label: "Work",            fn: (a) => approachAction(a, "work") },
     trade:    { label: "Trade",           fn: (a) => {
       const res = CBZ.econ.trade(a);
       if (res && res.ok && a.approach && a.approach.kind === "deal") {
@@ -200,6 +225,9 @@
     talk:     "Ask what they need · running favors builds rep",
     befriend: "They're offering · take it and they run with you",
     squash:   "He's holding a grudge · cigs can bury it",
+    collect:  "Somebody owes him · hear the job",
+    settle:   "Hand over what you took · keep your cut",
+    work:     "Can't pay the tab · collect theirs instead",
     trade:    "Buy contraband with cigarettes",
     bribe:    "Spend cigs to make authority look away",
     snitch:   "Trade a rival's name for the heat on you",
@@ -375,15 +403,20 @@
      still shows — as the thing about that person that a man standing in front
      of them would actually notice. */
   function panelNote(a) {
+    // WHAT YOU ARE IN THE MIDDLE OF WITH THIS MAN. Ranked under live speech
+    // (he is talking, that wins) and over the ledger reads, because a job you
+    // are actually carrying is the most current fact about the two of you.
+    const contractNote = CBZ.prisonContract ? CBZ.prisonContract.note(a) : "";
     const priority = a.quest
       ? "waiting on you: " + a.quest.text
       : (a.approach && a.approach.msg ? a.approach.msg
         : (a.standingOffer && a.standingOffer.saved ? "his offer stands: " + shortText(a.standingOffer.saved.msg, 46)
+        : (contractNote ? contractNote
         : ((a.reportedPlayerT || 0) > 0 ? reportDetail(a)
         : (CBZ.game.role === "cop" && a.copMarked > 0 ? "somebody put his name in"
         : ((a.playerGrudge || 0) >= 4 && a.grudgeWhy ? "still sore about " + a.grudgeWhy
         : (a.rep >= (CBZ.quests ? CBZ.quests.FRIEND : 100) ? "owes you, and knows it"
-        : ""))))));
+        : "")))))));
     const read = actorRead(a);
     const motive = a.approach && a.approach.motive ? `motive: ${shortText(a.approach.motive, 24)}` : "";
     if (!priority) return stall(a) ? (read ? `${stall(a)} | ${read}` : stall(a)) : read;
@@ -450,6 +483,28 @@
          verb below is still reachable, on the read where it makes sense. */
       const k = a.approach.kind;
       const press = pressureVerb(a);                      // "haggle" or "threaten"
+      /* THE CONTRACT PAIR (PRISON_CONTRACTS). Both are the same triad every
+         other menu here is — TAKE IT · PUSH BACK · WALK AWAY — pointed at
+         somebody else's debt.
+
+         On the CREDITOR the middle rung is HAGGLE, because the only thing on
+         the table between you and him is your cut. On the cornered DEBTOR it
+         is always THREATEN and never haggle: he is not negotiating a price, he
+         is deciding whether to hand over what is in his pocket, and leaning on
+         him is the physical half of a collection. When his pockets are empty
+         there is nothing to accept, so the menu honestly drops to two. */
+      if (k === "contract") return ["accept", "haggle", "refuse"];
+      if (k === "debtorDodge") return (a.approach.partial > 0)
+        ? ["accept", "threaten", "refuse"]
+        : ["threaten", "refuse"];
+      /* CAN'T PAY, SO WORK IT. The one place the middle rung is neither a
+         price nor a threat: the collector holding your tab has a claim of his
+         own to send you after, and WORK is the way out that costs a walk
+         instead of cigarettes you don't have. ai.js decides when it's live —
+         debt bigger than your pocket, crew actually holding a ripe claim. */
+      if (k === "debtCollect" && CBZ.prisonContract && CBZ.prisonContract.canWorkOff(a)) {
+        return ["pay", "work", "refuse"];
+      }
       if (k === "gangInvite" || k === "gangJob" || k === "favor") return ["accept", "refuse"];
       if (k === "copTip" || k === "copPlea") return ["accept", "refuse"];
       if (k === "gangParley") return [a.approach.cost > 0 ? "pay" : "accept", "respect", "refuse"];
@@ -535,8 +590,29 @@
     // fleeting thing about him, and the one the other verbs are useless under
     const sore = !!CBZ.squashGrudge && (a.playerGrudge || 0) >= 4;
     const recruiting = a.gang >= 0 && CBZ.player.gang == null && (a.rep || 0) >= 40;
-    const head = offering ? "befriend"
+    /* TWO NEW RUNGS, ON THE SAME LADDER AND FOR THE SAME REASON — how fleeting
+       the thing is (PRISON_CONTRACTS).
+
+       SETTLE goes to the TOP, above even an offered hand: you are standing in
+       front of the man who sent you, holding his money or his radio or the
+       news that the other guy is on the floor. There is nothing else you would
+       be doing with him in that second, and it stops being true the moment you
+       press it.
+       COLLECT sits below the one-time offers and above the repeatable ones. A
+       claim is not permanent — it ages out (ai.js's TAB_DEAD) — but it will
+       still be there after you buy his soap.
+
+       The two spare slots below are untouched: ask him something, take
+       something. The rest of the layer is not a button anywhere — cornering
+       the debtor, picking his pocket, putting him down are the verbs the game
+       already had, and that is the whole design. */
+    const C = CBZ.prisonContract;
+    const settling = !!(C && C.forCreditor(a) && (C.satisfied(C.live()) || (C.live() && C.live().dead)));
+    const claiming = !!(C && C.canOffer(a));
+    const head = settling ? "settle"
+      : offering ? "befriend"
       : sore ? "squash"
+      : claiming ? "collect"
       : recruiting ? "join"
       : (a.data && a.data.offer) ? "trade"
       : "insult";
@@ -592,6 +668,32 @@
     // ever renders on a man who has already decided, so a standing word here
     // would be telling the player something the button itself just said.
     if (v === "befriend") return CBZ.prisonFriendReason ? CBZ.prisonFriendReason(a) : "";
+    /* THE CONTRACT CHIPS ARE THE NUMBER AND THE NOUN, like every other priced
+       verb's. COLLECT shows what the claim is worth before you agree to walk
+       across a prison for it; SETTLE shows what you are actually holding, so
+       the button can never promise a payout your pockets can't honour. */
+    if (v === "collect") {
+      const t = CBZ.prisonContract && CBZ.prisonContract.ripeTab(a);
+      return t ? `${Math.round(t.amt)} owed` : "";
+    }
+    if (v === "settle") {
+      const c = CBZ.prisonContract && CBZ.prisonContract.live();
+      if (!c) return "";
+      if (c.dead) return "gone";
+      if (c.kind === "repo") return c.item ? shortText(c.item, 12) : "";
+      if (c.kind === "roughUp") return "he's down";
+      return `${c.got || 0} of ${c.amt}`;
+    }
+    if (v === "work") {
+      const c = CBZ.prisonContract && CBZ.prisonContract.ripeTab(a);
+      return c ? `${Math.round(c.amt)} off` : "off the tab";
+    }
+    // The steal verb is the repo when a repo is live on this man — same hand,
+    // named object (ai.js wraps econ.steal). The chip is what you are after.
+    if (v === "steal" && CBZ.prisonContract) {
+      const want = CBZ.prisonContract.wantedItem(a);
+      if (want) return shortText(want, 12);
+    }
     if (v === "insult") {
       if ((a.playerGrudge || 0) >= 6) return "bad blood";
       if ((a.playerFear || 0) >= 6) return "fear";
@@ -703,6 +805,12 @@
       case "heatWarning":return "Duck the heat";
       case "alibiDeal":  return "Take the alibi";
       case "gangInvite": return `Join the ${(CBZ.GANG_NAMES && CBZ.GANG_NAMES[a.gang]) || "crew"}`;
+      case "contract":   return ap.contract
+        ? (ap.contract.kind === "repo" ? `Go take the ${ap.contract.item}`
+          : ap.contract.kind === "roughUp" ? `Go put ${ap.contract.name} down`
+          : `Go collect the ${ap.contract.amt}`)
+        : "Take the work";
+      case "debtorDodge":return `Take the ${ap.partial || 0} he's got`;
       default:           return "Take the offer";
     }
   }
@@ -716,6 +824,9 @@
       case "insult":   return `Talk trash to ${nm}`;
       case "talk":     return (a.playerGrudge || 0) >= 6 ? `Square things with ${nm}` : ((a.rep || 0) >= 45 ? `Catch up with ${nm}` : `Chat up ${nm}`);
       case "befriend": return `Take ${nm} up on it — he runs with you`;
+      case "collect":  { const t = CBZ.prisonContract && CBZ.prisonContract.ripeTab(a); return t ? `Hear what ${nm} wants collected` : `Ask ${nm} about the money`; }
+      case "settle":   { const c = CBZ.prisonContract && CBZ.prisonContract.live(); return c && c.kind === "repo" ? `Hand ${nm} the ${c.item}` : `Settle up with ${nm}`; }
+      case "work":     return `Work the tab off instead`;
       case "fight":    return `Throw hands with ${nm}`;
       case "trade":    { const o = a.data && a.data.offer; return o ? `Buy ${shortText(o.item, 16)}. ${o.price}` : "Browse their goods"; }
       case "bribe":    { const c = CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : (a.corrupt ? 5 : 10); return `Slip ${c} to look away`; }
@@ -1256,6 +1367,10 @@
   const MAX_VERBS = 3;
   const VERB_PRIORITY = {
     refuse: 100, talk: 90, steal: 87, befriend: 86, join: 85, accept: 92, trade: 88,
+    // both are curated into the head slot by construction, so the cap should
+    // never see them — but if arithmetic ever does beat the curation, the one
+    // that is about to disappear (settle) survives ahead of the one that keeps
+    settle: 93, collect: 86, work: 74,
     confrontReport: 84, paySilence: 80, snitch: 80, bribe: 78, threatenSnitch: 78,
     payoff: 76, pay: 74, detain: 72, search: 70, warn: 66, threaten: 64,
     respect: 60, question: 60, haggle: 50, insult: 40,

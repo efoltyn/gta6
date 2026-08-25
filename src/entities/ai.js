@@ -105,6 +105,14 @@
      ------------------------------------------------------------------------ */
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.JAIL_SHOW_DONT_TELL == null) CBZ.CONFIG.JAIL_SHOW_DONT_TELL = true;
+  /* PRISON_CONTRACTS — the tab ledger between inmates and the work it buys.
+     Everything in the "TABS AND CONTRACTS" section below, every approach kind
+     it mints, every verb interact.js hangs off it and every line quests.js
+     speaks for it is gated on this one flag. ?cfg_PRISON_CONTRACTS=0 is the
+     exact pre-wave prison: no tabs are minted, no claim ever ripens, the two
+     new approach kinds are never started, and the card falls back to the
+     befriend/squash/join/trade head slot it had before. */
+  if (CBZ.CONFIG.PRISON_CONTRACTS == null) CBZ.CONFIG.PRISON_CONTRACTS = true;
   let narDropped = 0, narSpoken = 0, narMute = 0;
   function nar(text, secs, actor, spoken) {
     if (CBZ.CONFIG.JAIL_SHOW_DONT_TELL === false) {
@@ -499,7 +507,7 @@
     const kind = a && a.kind;
     if (action === "threaten") return "fear";
     if (kind === "snitchThreat" || kind === "witnessFix" || kind === "recantOffer" || kind === "alibiDeal") return "snitch";
-    if (kind === "stickUp" || kind === "crewDues" || kind === "tax" || kind === "debtCollect" || kind === "gangParley" || kind === "turfWarning") return "debt";
+    if (kind === "stickUp" || kind === "crewDues" || kind === "tax" || kind === "debtCollect" || kind === "gangParley" || kind === "turfWarning" || kind === "contract" || kind === "debtorDodge") return "debt";
     if (kind === "copBribe" || kind === "copTip" || kind === "copPlea" || kind === "copTaunt" || kind === "racketCover" || kind === "reputation" && a.repKind === "badge") return "badge";
     if (kind === "buyItem" || kind === "deal" || kind === "stashCover") return "wealth";
     if (kind === "heatWarning" || kind === "infoSell" || kind === "coverStory" || kind === "coverDebt") return "heat";
@@ -1062,6 +1070,14 @@
     reputation: 120, infoSell: 90,
     heatWarning: 45, coverStory: 45, alibiDeal: 45, witnessFix: 45,
     recantOffer: 45, stashCover: 45, racketCover: 45,
+    /* A DEBT IS THE MOST STANDING THING IN A PRISON. `contract` is a man
+       handing you his claim on somebody — he is not going to forget he asked
+       because you walked twenty feet, and the tab it comes off keeps ageing
+       whether you take it or not. `debtorDodge` is the other end: the debtor
+       cornered, pitching six-of-nine and Thursday. Walk off and that excuse
+       is still his excuse when you come back — which is the whole reason it
+       has to STAND rather than re-roll into a fresh lie. */
+    contract: 180, debtorDodge: 120,
   };
 
   /* The one line he gets to say as you walk — about THIS deal, once. A man
@@ -1081,6 +1097,12 @@
     if (k === "gangParley") return a.parleyMode === "truce"
       ? "The truce is on the table till somebody bleeds."
       : "We'll talk when you're ready to talk.";
+    if (k === "contract") return a.contract
+      ? `He still owes it. Ask me when you want the work.`
+      : "Offer stands.";
+    if (k === "debtorDodge") return a.contract && a.contract.kind === "repo"
+      ? "It's not on me anyway."
+      : "Tell him Thursday.";
     return "Offer stands.";
   }
 
@@ -1159,6 +1181,10 @@
     if (k === "gangParley") return a.parleyMode === "truce"
       ? `${name}: the ${gangName(n.gang)} truce still costs ${a.cost} cigs.`
       : `${name} still wants that sit-down for ${gangName(n.gang)}.`;
+    if (k === "contract" && a.contract) return `${name}, same as before: ${a.contract.name} still owes him ${a.contract.amt}.`;
+    if (k === "debtorDodge" && a.contract) return a.partial > 0
+      ? `${name} still says ${a.partial} now, the rest later.`
+      : `${name} still says his pockets are empty.`;
     return a.msg;   // the original pitch is still the truth
   }
 
@@ -1424,7 +1450,18 @@
     if (kind === "coverDebt") return `${name} lied to ${extra.guard || "a guard"} for you and wants ${cost} cigs.`;
     if (kind === "witnessFix") return `${name} can pressure ${extra.targetName || "the witness"}${extra.caseSourceCount > 1 ? " before the reports stack" : ""} for ${cost} cigs.`;
     if (kind === "recantOffer") return `${name} can walk back their report for ${cost} cigs.`;
-    if (kind === "debtCollect") return `${name} says ${gangName(n.gang)} want ${cost} cigs on your debt.`;
+    /* THE WORK IS IN HIS OPENER, not only in the long version.
+
+       ai.js speaks `msg` the moment a collector reaches you (the greet block in
+       approachPlayer sets `greeted` and says this line), and interact.js's
+       autoListen — which is where the LONG "you can't pay it, so work it. Dice
+       owes us too" answer lives — is skipped once greeted is true. So the only
+       way to hear the offer was to walk up to him mid-jog or come back to a
+       standing offer. A way out that most players would never be told about is
+       not a way out, so the opener names it too. */
+    if (kind === "debtCollect") return extra.workOff
+      ? `${name} says ${gangName(n.gang)} want ${cost} cigs — or a collection run.`
+      : `${name} says ${gangName(n.gang)} want ${cost} cigs on your debt.`;
     if (kind === "buyItem") return `${name} wants to buy your ${extra.item || cost}.`;
     if (kind === "gangJob") return `${name} has ${extra.job ? `a ${jobNoun(extra.job)}` : "work"} for ${gangName(n.gang)}.`;
     if (kind === "gangParley") {
@@ -1454,6 +1491,8 @@
       if (extra.repKind === "debt") return `${name} heard gangs are keeping a tab on you.`;
       return `${name} has heard your name around the block.`;
     }
+    if (kind === "contract" && extra.contract) return contractText(n, extra.contract);
+    if (kind === "debtorDodge" && extra.contract) return `${name} says he's short.`;
     if (kind === "copBribe") return `${name} offers ${extra.price || 3} cigs to look away.`;
     if (kind === "copTip") return `${name} has a tip about trouble in the block.`;
     if (kind === "copPlea") return `${name} asks for protection from gang pressure.`;
@@ -1527,7 +1566,7 @@
   }
 
   function approachGlyph(kind) {
-    return kind === "tax" || kind === "snitchThreat" || kind === "buyItem" || kind === "copBribe" || kind === "jobThreat" || kind === "infoSell" || kind === "stashCover" || kind === "witnessFix" || kind === "recantOffer" || kind === "crewDues" || kind === "stickUp" || kind === "alibiDeal" || kind === "racketCover" || kind === "coverDebt" ? "$" :
+    return kind === "tax" || kind === "snitchThreat" || kind === "buyItem" || kind === "copBribe" || kind === "jobThreat" || kind === "infoSell" || kind === "stashCover" || kind === "witnessFix" || kind === "recantOffer" || kind === "crewDues" || kind === "stickUp" || kind === "alibiDeal" || kind === "racketCover" || kind === "coverDebt" || kind === "contract" || kind === "debtorDodge" ? "$" :
       kind === "turfWarning" || kind === "heatWarning" || kind === "copTaunt" || kind === "copTip" ? "!" :
         kind === "favor" || kind === "copPlea" || kind === "crewBackup" || kind === "gangJob" || kind === "gangParley" || kind === "coverStory" || kind === "reputation" ? "+" : "?";
   }
@@ -2262,6 +2301,14 @@
       if (d < APPROACH_FAR && n.aiState !== "fight" && n.aiState !== "snitch" && !(n.huntPlayer > 0)) reopenOffer(n);
       return;
     }
+    /* CORNERING HIM IS THE VERB. Deliberately ABOVE the 4.5 m floor every
+       other approach sits behind: the rest of this ladder is people crossing
+       the yard to bother YOU, and that floor exists so they don't spawn a
+       conversation in your face. This is the opposite — you walked up to a man
+       you were sent after, and getting inside arm's reach is the entire
+       mechanic. So it fires close, and only on the one man the live contract
+       names (PRISON_CONTRACTS). */
+    if (considerCornered(n, d)) return;
     if (d < 4.5 || d > APPROACH_FAR) return;
 
     const p = n.personality || {};
@@ -2302,6 +2349,16 @@
       }
     }
 
+    /* HE COMES LOOKING FOR YOU ABOUT IT. A man sitting on a claim old enough
+       to have gone sour starts asking around for somebody to go get it, and
+       the player is somebody. Greed decides how fast he stops waiting; the
+       card gate (canOfferContract) decides whether he'd trust you with it at
+       all. Ranked here, above the block-rumour reads, because a debt with a
+       name and a date on it beats whatever he half-heard about you. */
+    if (canOfferContract(n) && d < 12.5 && rng() < 0.034 + (p.greed || 0.5) * 0.045) {
+      if (offerContract(n)) return;
+    }
+
     if (read && d < 12.8) {
       const readChance = Math.min(0.072, 0.014 + (read.score || 0) * 0.00072 + (read.source === "gossip" ? 0.006 : 0));
       if (rng() < readChance) {
@@ -2321,7 +2378,7 @@
         }
         if (read.kind === "debt" && n.gang >= 0) {
           if (debt > 0 && !sameGang && !protectedHere && cigs > 0) {
-            startApproach(n, "debtCollect", Math.min(cigs, Math.max(2, Math.ceil(debt * 0.55) + Math.floor(p.greed * 4))), { debt: true, rumorSource: read.source });
+            startApproach(n, "debtCollect", Math.min(cigs, Math.max(2, Math.ceil(debt * 0.55) + Math.floor(p.greed * 4))), { debt: true, rumorSource: read.source, workOff: workOffAvailable(n) && debt > cigs && debt >= WORKOFF_DEBT });
             return;
           }
           if ((sameGang || protectedHere || standing > 22) && cigs >= 6 && p.loyalty > 0.22) {
@@ -2512,7 +2569,7 @@
     }
     if (debt > 0 && !sameGang && !protectedHere && p.nerve > 0.25) {
       if (cigs > 0 && rng() < Math.min(0.075, 0.024 + debt * 0.003)) {
-        startApproach(n, "debtCollect", Math.min(cigs, Math.max(2, Math.ceil(debt * 0.55) + Math.floor(p.greed * 4))), { debt: true });
+        startApproach(n, "debtCollect", Math.min(cigs, Math.max(2, Math.ceil(debt * 0.55) + Math.floor(p.greed * 4))), { debt: true, workOff: workOffAvailable(n) && debt > cigs && debt >= WORKOFF_DEBT });
         return;
       }
       if (debt >= 14 && rng() < 0.018) {
@@ -3021,7 +3078,7 @@
     if (kind === "debt" && n.gang >= 0) {
       const debt = gangDebt(n.gang);
       if (!helpful && cigs > 0 && (debt > 0 || standing < -8 || (p.greed || 0.5) > 0.45)) {
-        startApproach(n, debt > 4 ? "debtCollect" : "tax", Math.min(cigs, Math.max(2, Math.ceil(Math.max(debt, 4) * 0.55) + Math.floor((p.greed || 0.5) * 4))), { debt: true, motive: "huddle debt talk" });
+        startApproach(n, debt > 4 ? "debtCollect" : "tax", Math.min(cigs, Math.max(2, Math.ceil(Math.max(debt, 4) * 0.55) + Math.floor((p.greed || 0.5) * 4))), { debt: true, motive: "huddle debt talk", workOff: workOffAvailable(n) && debt > cigs && debt >= WORKOFF_DEBT });
         return true;
       }
       if (helpful && cigs >= 4) {
@@ -3228,6 +3285,684 @@
       b.w -= drop;
       if (b.w <= 0 || !alive(b.who)) list.splice(i, 1);
     }
+  }
+
+  /* ============================================================
+     TABS AND CONTRACTS — what the yard owes itself, and the work that
+     collecting it becomes (PRISON_CONTRACTS)
+
+     BEEF is the yard's memory of who swung at who. This is the other ledger a
+     prison actually runs on and the one that was missing entirely: WHO OWES
+     WHO, for WHAT, and since WHEN. Two men played dominoes, one lost, and now
+     there is a number between them with a date on it. Nothing in this sim
+     tracked that. Every debt in the game ran between the PLAYER and a gang —
+     an abstraction with no face and no reason — so the block's economy had no
+     interior. Men traded, argued and fought, and none of it left a claim.
+
+     A TAB is `{ who, amt, why, t }` on the CREDITOR: `who` owes `n` `amt` cigs
+     for `why`, and `t` is how long it has sat. `why` is load-bearing — it is
+     the thing the creditor says out loud when he asks you to go get it, and a
+     debt with no story behind it is a number on a HUD, not a grievance.
+
+     A CONTRACT is what a ripe tab becomes when the claim-holder decides he is
+     done waiting and hands it to YOU. Three of them, and every one is settled
+     with the body rather than a button: COLLECT (go take it off him), REPO
+     (lift the named thing he bought with the money), ROUGH UP (put him down).
+     The creditor's card grows a row; the debtor's card never grows a "do
+     violence" button, because finding him and cornering him IS the mechanic.
+
+     And it runs both ways. When the player is the one who can't pay, the same
+     gang collector who has been leaning on him offers him a contract instead
+     of a beating — go collect ours, and yours gets lighter. Same three verbs,
+     same physical work, the debt moving the other direction.
+     ============================================================ */
+  function contractsOn() { return CBZ.CONFIG.PRISON_CONTRACTS !== false; }
+
+  /* Small numbers on purpose. A tab is two soups and a phone card, not a
+     mortgage: 2-12 cigs is a week of commissary, which is the scale at which
+     a man in here will actually send somebody after you. TAB_FADE is a tenth
+     of BEEF_FADE — a punch is forgotten in minutes, a debt is not. */
+  const TAB_MIN = 2, TAB_MAX = 12;
+  const TAB_FADE = 0.0022;      // cigs per second — ~7 minutes to forgive one cig
+  const TAB_RIPE = 95;          // seconds a claim sits before he starts asking around
+  const TAB_DEAD = 900;         // he eventually writes it off
+  /* WHAT THE MONEY WAS FOR. Every one of these is a thing you can point at:
+     an item, a game, a service, a day of the week. None of them is a mood. */
+  const TAB_WHY = [
+    "store day", "the domino game", "phone time", "a pack of ramen",
+    "a card game", "two soups", "the TV bet", "a phone card",
+    "commissary", "a pair of shoes", "the fight last month", "a carton",
+  ];
+  /* A CONTRACT MAY ONLY NAME A MAN YOU CAN FIND. Half this yard answers to
+     "an inmate" (entities/npc.js's crowd bodies literally share the string),
+     and "go collect nine off an inmate" is not an errand, it is a riddle. So
+     the moment an anonymous body becomes a target he gets a name — off this
+     pool, minimal and one-way. Full naming of the crowd is a later wave; this
+     is only the part the contract cannot work without. */
+  const STREET_NAMES = [
+    "Half-Ear Danny", "Two-Cent", "Preacher's Kid", "Bobo", "Gator",
+    "New York", "Rayray", "Slim Pauly", "Cornbread", "Sugar Ray Willis",
+  ];
+  function isAnonymous(n) {
+    const nm = n && n.data && n.data.name;
+    return !nm || /^(an inmate|a thief|someone)$/i.test(nm);
+  }
+  function nameHim(n) {
+    if (!n || !n.data || !isAnonymous(n)) return;
+    const taken = {};
+    for (const m of CBZ.npcs || []) if (m.data && m.data.name) taken[m.data.name] = 1;
+    const free = STREET_NAMES.filter((s) => !taken[s]);
+    const pool = free.length ? free : STREET_NAMES;
+    n.data.name = pool[(rng() * pool.length) | 0];
+    n.data.tag = n.data.tag || "Inmate";
+    n._namedByContract = true;
+  }
+
+  function tabList(n) { return n._tabs || (n._tabs = []); }
+  function tabWith(n, other) {
+    if (!n || !other || !n._tabs) return 0;
+    for (const t of n._tabs) if (t.who === other) return t.amt;
+    return 0;
+  }
+  /* `other` owes `n`. Booking more onto a live tab keeps the ORIGINAL reason
+     and the ORIGINAL date, because that is how a man tells it: "he's been into
+     me since store day", not "he owes me for four separate things". */
+  function addTab(n, other, amt, why) {
+    if (!contractsOn()) return null;
+    if (!n || !other || n === other || !alive(n) || !alive(other) || !(amt > 0)) return null;
+    if (n.role === "merchant" || other.role === "merchant") return null;
+    const list = tabList(n);
+    for (const t of list) {
+      if (t.who === other) { t.amt = Math.min(TAB_MAX, t.amt + amt); return t; }
+    }
+    const t = { who: other, amt: Math.min(TAB_MAX, Math.max(TAB_MIN, amt)), why: why || TAB_WHY[(rng() * TAB_WHY.length) | 0], t: 0 };
+    list.push(t);
+    return t;
+  }
+  function clearTab(n, other) {
+    if (!n || !n._tabs) return;
+    for (let i = 0; i < n._tabs.length; i++) {
+      if (n._tabs[i].who === other) { n._tabs.splice(i, 1); return; }
+    }
+  }
+  function payTab(n, other, amt) {
+    if (!n || !n._tabs || !(amt > 0)) return;
+    for (let i = 0; i < n._tabs.length; i++) {
+      const t = n._tabs[i];
+      if (t.who !== other) continue;
+      t.amt -= amt;
+      if (t.amt <= 0.5) n._tabs.splice(i, 1);
+      return;
+    }
+  }
+  /* A MAN WHO IS UNCONSCIOUS STILL OWES YOU MONEY. Deliberately NOT `alive()`:
+     that helper reads a knocked-out body as not-alive, which is right for
+     "can he swing at me" and catastrophic for a ledger — every brawl in the
+     yard would quietly erase the debts of everyone who lost one. Only death
+     and escape close a tab. */
+  function ledgerGone(a) { return !a || a.dead || a.escaped; }
+  // Debts age instead of evaporating: `t` is what makes a claim RIPE, and the
+  // slow amt decay is the man quietly deciding it isn't worth the trouble.
+  function fadeTabs(n, dt) {
+    const list = n._tabs;
+    if (!list || !list.length) return;
+    const drop = TAB_FADE * dt;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const t = list[i];
+      t.t += dt;
+      t.amt -= drop;
+      if (t.amt <= 0.5 || t.t > TAB_DEAD || ledgerGone(t.who)) list.splice(i, 1);
+    }
+  }
+
+  /* WHERE THE MONEY GOES. Two men stopped to talk; sometimes one of them
+     leaves owing the other. Hung off the SAME socialize exchange that already
+     books gossip and arguments, so a tab is minted where a debt is actually
+     made — in front of anyone standing near enough to watch — instead of on a
+     background timer. Chow and yard are when commissary and games happen, so
+     that is when this fires; a greedy man is the one who lends and the one who
+     keeps count. */
+  function mintTab(n, p) {
+    if (!contractsOn() || !n || !p) return false;
+    const S = CBZ.prisonSchedule;
+    const block = S && S.enabled() ? S.id() : "yard";
+    const trading = block === "mess" || block === "supper" || block === "yard" || block === "work";
+    if (!trading) return false;
+    const greed = (n.personality && n.personality.greed) || 0.5;
+    const loose = (p.personality && p.personality.greed) || 0.5;
+    // the lender is the one who counts; the borrower is the one who doesn't
+    if (rng() > (greed * 0.5 + (1 - loose) * 0.12) * 0.10) return false;
+    if (tabWith(n, p) > 0) return false;         // one live claim per pair
+    const amt = TAB_MIN + Math.floor(rng() * (TAB_MAX - TAB_MIN));
+    const why = block === "mess" || block === "supper"
+      ? ["two soups", "a pack of ramen", "commissary", "a carton"][(rng() * 4) | 0]
+      : TAB_WHY[(rng() * TAB_WHY.length) | 0];
+    return !!addTab(n, p, amt, why);
+  }
+
+  /* WHERE HE IS, SAID THE WAY A MAN WOULD SAY IT. The place has to be TRUE or
+     the contract is a lie the game told you: it comes off his own wander box
+     (entities/npc.js's `region`, or `_dayRegion` when a count has temporarily
+     shrunk it to a muster spot) through the prison's own landmark list, then
+     gets the verb the current block makes true — at chow everybody is at the
+     tables, at night everybody is on their tier. */
+  function homeSpot(n) {
+    const r = (n && (n._dayRegion || n.region)) || null;
+    if (r && r.length === 4) return { x: (r[0] + r[1]) / 2, z: (r[2] + r[3]) / 2 };
+    if (n && n.group) return { x: n.group.position.x, z: n.group.position.z };
+    return null;
+  }
+  function placeFor(n) {
+    const S = CBZ.prisonSchedule;
+    const block = S && S.enabled() ? S.id() : "";
+    if (block === "mess" || block === "supper") return "He eats at the far tables.";
+    if (block === "secure" || block === "night") return "He's locked on his tier.";
+    const spot = homeSpot(n);
+    const where = spot ? nearestLandmark(spot.x, spot.z) : "yard";
+    if (where === "cell block") return "He's on the tier most days.";
+    if (where === "staff lounge") return "He works up by the staff lounge.";
+    if (where === "exit corridor") return "He hangs down the exit corridor.";
+    if (where === "armory door") return "He's always near the armory door.";
+    if (where === "yard gate") return "He stands at the yard gate.";
+    if (where === "Reds' corner") return "He posts up at the Reds' corner.";
+    if (where === "Blues' corner") return "He posts up at the Blues' corner.";
+    return "He's out on the yard.";
+  }
+
+  // ---- the live contract ---------------------------------------------------
+  // One at a time, the same way CBZ.game.gangJob is one at a time: a man who
+  // is running three collections for three different people is a quest log.
+  function contract() { return (CBZ.game && CBZ.game.contract) || null; }
+  function contractFor(n) {
+    const c = contract();
+    return c && c.creditor === n ? c : null;
+  }
+  function contractAgainst(n) {
+    const c = contract();
+    return c && c.debtor === n ? c : null;
+  }
+  function contractSatisfied(c) {
+    if (!c) return false;
+    if (c.kind === "roughUp") return !!c.done;
+    if (c.kind === "repo") return !!c.done && CBZ.econ.hasItem(c.item);
+    return (c.got || 0) > 0;                     // collect: anything you pulled off him
+  }
+  function contractPaidInFull(c) {
+    if (!c) return false;
+    if (c.kind === "collect") return (c.got || 0) >= c.amt;
+    return contractSatisfied(c);
+  }
+  function contractCut(amt) { return Math.max(2, Math.min(5, Math.ceil(amt * 0.34))); }
+
+  /* WHICH JOB THE CLAIM BECOMES. Not a die: it is read off the two men. A man
+     who bought something with money he owed gets REPO'd for that thing, and
+     the item has to actually be in his pockets right now (economy.js's loadout
+     is the one truth about what a body is carrying). A shotcaller or an
+     enforcer with a live grievance wants him PUT DOWN. Everyone else wants
+     their cigarettes, which is the ordinary case. */
+  function pickContractKind(creditor, debtor, forceKind) {
+    const load = (CBZ.econ && CBZ.econ.rollLoadout) ? CBZ.econ.rollLoadout(debtor) : null;
+    const items = (load && load.items) || [];
+    const wanted = items.filter((it) => !/key|card/i.test(it) && it !== "Gun");
+    const p = creditor.personality || {};
+    // A staging/probe caller may name the job (see the `offer` export). A repo
+    // still cannot be conjured out of empty pockets — the item has to be real.
+    if (forceKind === "repo" && wanted.length) return { kind: "repo", item: wanted[0] };
+    if (forceKind === "roughUp" || forceKind === "collect") return { kind: forceKind, item: "" };
+    if (wanted.length && rng() < 0.34) {
+      return { kind: "repo", item: wanted[(rng() * wanted.length) | 0] };
+    }
+    const violent = (p.nerve || 0.5) > 0.6 && ((p.greed || 0.5) < 0.55 || beefWith(creditor, debtor) > 4);
+    if (violent && rng() < 0.4) return { kind: "roughUp", item: "" };
+    return { kind: "collect", item: "" };
+  }
+
+  function makeContract(creditor, tab, workOff, holder, forceKind) {
+    const debtor = tab.who;
+    nameHim(debtor);
+    const pick = pickContractKind(creditor, debtor, forceKind);
+    const amt = Math.max(TAB_MIN, Math.round(tab.amt));
+    return {
+      creditor, debtor,
+      // usually the same man; on a work-it-off the claim belongs to his crew
+      // and he is only the one you hand it back to
+      holder: holder || creditor,
+      kind: pick.kind,
+      item: pick.item,
+      amt,
+      cut: workOff ? 0 : contractCut(amt),
+      why: tab.why,
+      place: placeFor(debtor),
+      name: debtor.data.name.replace(/^the |^a |^an /, ""),
+      // the symmetry: the payout is gang debt coming OFF you, not cigs going on
+      workOff: workOff || null,
+      got: 0, done: false, told: false,
+    };
+  }
+
+  /* THE PITCH. Names the man, the amount or the item, the reason, the place,
+     and your cut — in that order, in four clipped sentences, the way somebody
+     hands off a collection. No sentence explains a system. */
+  function contractPitch(c) {
+    const who = c.name;
+    const owed = `${c.amt}`;
+    const since = c.why ? ` since ${c.why}` : "";
+    const cut = c.workOff
+      ? `Bring it and ${gangName(c.workOff.gang)} take it off your tab.`
+      : `Bring it, keep ${c.cut}.`;
+    if (c.kind === "repo") {
+      return `${who} bought a ${c.item} with my ${owed}${since}. ${c.place} Bring me the ${c.item}` +
+        (c.workOff ? ` and we're square.` : `, keep ${c.cut}.`);
+    }
+    if (c.kind === "roughUp") {
+      return `${who} is into me for ${owed}${since} and he's laughing. ${c.place} Put him on the floor` +
+        (c.workOff ? `. That squares us.` : `. ${c.cut} for you.`);
+    }
+    return `${who} is into me for ${owed}${since}. ${c.place} ${cut}`;
+  }
+  // the card's one line — the pitch is SPOKEN, this is what you glance at
+  function contractText(n, c) {
+    const who = n.data.name.replace(/^the |^a |^an /, "");
+    if (c.kind === "repo") return `${who} wants ${c.name}'s ${c.item} back.`;
+    if (c.kind === "roughUp") return `${who} wants ${c.name} put down over ${c.amt}.`;
+    return `${who} wants ${c.amt} collected off ${c.name}.`;
+  }
+
+  /* THE SETTLE ROW, in plain words, for the card. It is the one place the
+     player is allowed to read the state of the job, because he is standing in
+     front of the man who gave it to him and looking at his face. */
+  function contractSummary() {
+    const c = contract();
+    if (!c) return "";
+    if (c.kind === "repo") {
+      return c.done ? `holding ${c.name}'s ${c.item}` : `${c.name}'s ${c.item} · ${c.place.replace(/^He /, "he ").replace(/\.$/, "")}`;
+    }
+    if (c.kind === "roughUp") return c.done ? `${c.name} is down` : `${c.name} still standing`;
+    return `${c.got || 0} of ${c.amt} off ${c.name}`;
+  }
+  function contractNoteFor(n) {
+    const c = contract();
+    if (!c) return "";
+    if (c.creditor === n) return (contractSatisfied(c) ? "settle up: " : "waiting on you: ") + contractSummary();
+    if (c.debtor === n) {
+      if (c.kind === "repo") return `he's holding the ${c.item}`;
+      if (c.kind === "roughUp") return `this is the man`;
+      return `owes ${c.creditor.data.name.replace(/^the |^a |^an /, "")} ${c.amt}`;
+    }
+    return "";
+  }
+
+  // ---- offering it ---------------------------------------------------------
+  // The claim he is most likely to send somebody after: oldest first, because
+  // patience is the thing that ran out.
+  function ripeTab(n) {
+    if (!contractsOn() || !n || !n._tabs || !n._tabs.length) return null;
+    let best = null;
+    for (const t of n._tabs) {
+      if (t.t < TAB_RIPE || ledgerGone(t.who) || t.who === CBZ.player) continue;
+      if (t.who.role === "merchant") continue;
+      if (!best || t.t > best.t) best = t;
+    }
+    return best;
+  }
+  /* "DICE OWES US TOO." A collector leaning on the player for a gang debt is
+     speaking for a CREW, so the claim he sends you after may sit on any of his
+     people's ledgers — which is both truer and the only thing that makes the
+     work-it-off leg fire often enough to exist. He is still the man you hand
+     it back to; the tab's real owner rides along as `holder`. */
+  function ripeCrewTab(n) {
+    const own = ripeTab(n);
+    if (own) return { holder: n, tab: own };
+    if (!(n.gang >= 0)) return null;
+    let best = null;
+    for (const m of CBZ.npcs || []) {
+      if (m === n || m.gang !== n.gang || !alive(m)) continue;
+      const t = ripeTab(m);
+      if (t && t.who !== n && (!best || t.t > best.tab.t)) best = { holder: m, tab: t };
+    }
+    return best;
+  }
+  function canOfferContract(n) {
+    if (!contractsOn() || contract() || !n || !alive(n)) return false;
+    if (CBZ.game.role === "cop" || CBZ.game.mode !== "escape") return false;
+    if (n.role === "merchant" || n.kind === "guard" || n.kind === "warden") return false;
+    if ((n.playerGrudge || 0) >= 6) return false;      // he isn't handing his money to you
+    return !!ripeTab(n);
+  }
+  // The symmetric leg's gate: can this collector turn your debt into work?
+  function workOffAvailable(n) {
+    if (!contractsOn() || contract() || !n || !alive(n)) return false;
+    return !!ripeCrewTab(n);
+  }
+  /* THE ONE QUESTION THE CARD ASKS. Work-it-off is only on the table while you
+     genuinely CANNOT clear the tab — the debt is bigger than your pocket — and
+     while the crew actually holds a claim to send you after. Both halves are
+     live, not latched at pitch time: pay some of it down and the offer goes
+     away, which is correct, because it was never charity.
+
+     WORKOFF_DEBT is the floor. Below it a man does not organise labour over
+     four cigarettes; he just asks again. */
+  const WORKOFF_DEBT = 9;
+  function canWorkOff(n) {
+    if (!contractsOn() || !n || !n.approach || n.approach.kind !== "debtCollect") return false;
+    const a = n.approach;
+    if (!a.workOff || contract()) return false;
+    if (!(n.gang >= 0)) return false;
+    const debt = gangDebt(n.gang);
+    if (debt < WORKOFF_DEBT || debt <= ((CBZ.game && CBZ.game.cigs) || 0)) return false;
+    // interact.js asks this every render while the card is up, and the answer
+    // costs a walk of the whole roster. It cannot change inside a second.
+    const now = CBZ.now || 0;
+    if (a._workAskT && now - a._workAskT < 900) return !!a._workAsk;
+    a._workAskT = now;
+    a._workAsk = !!ripeCrewTab(n);
+    return a._workAsk;
+  }
+  /* HE SAYS IT HERE, ONCE, AND NOWHERE ELSE.
+
+     interact.js speaks an approach's pitch through autoListen — but ONLY when
+     the focused actor CHANGES, because that is the moment a card opens. Every
+     way this offer actually gets raised happens while the player is already
+     standing in front of the man with his card up: he decides mid-conversation
+     (considerPlayerApproach), or you pressed COLLECT, or you pressed TALK. In
+     all three, `current` never changes, autoListen never runs, and a pitch
+     that lives only in the approach would be silent.
+
+     So the offer speaks itself and marks itself greeted. Callers return an
+     empty msg — one man, one mouth, one copy of the line. */
+  function offerContract(n, workOff, forceKind) {
+    const src = workOff ? ripeCrewTab(n) : (ripeTab(n) ? { holder: n, tab: ripeTab(n) } : null);
+    if (!src) return null;
+    const c = makeContract(n, src.tab, workOff, src.holder, forceKind);
+    startApproach(n, "contract", 0, {
+      contract: c,
+      msg: contractText(n, c),
+      motive: `owed ${c.amt} since ${c.why}`,
+    });
+    if (say(n, contractPitch(c), null, 3.6) && n.approach) n.approach.greeted = true;
+    return c;
+  }
+  function takeContract(n, c) {
+    CBZ.game.contract = c;
+    c.t = 0;
+    ensureContractWraps();
+    return c;
+  }
+
+  // ---- the debtor, cornered ------------------------------------------------
+  /* HE TALKS BECAUSE YOU WALKED UP, NOT BECAUSE YOU PRESSED SOMETHING. Getting
+     inside three metres of the man you were sent after is the whole verb; what
+     it triggers is the same approach machinery every other pitch in this file
+     uses, pointed the other way. He offers what is actually in his pocket
+     (economy.js's loadout, not a number invented here) and a day for the rest.
+     Because it is a standing offer, walking off and coming back gets you the
+     SAME six-and-Thursday instead of a fresh excuse — which is the difference
+     between a person and a slot machine. */
+  const DODGE_DAYS = ["Thursday", "store day", "Friday", "after count", "next week"];
+  function dodgeLine(c, onHand) {
+    if (c.kind === "repo") {
+      return onHand > 0
+        ? `That ${c.item}? It's spoken for. Take ${onHand} instead.`
+        : `I don't have the ${c.item} on me. Ask somebody else.`;
+    }
+    if (c.kind === "roughUp") {
+      return onHand > 0
+        ? `Don't. I got ${onHand} right here. Take it to him.`
+        : `He sent you? I got nothing. Do what you're gonna do.`;
+    }
+    if (onHand <= 0) return `This about the ${c.amt}? I'm empty. ${DODGE_DAYS[(rng() * DODGE_DAYS.length) | 0]}.`;
+    if (onHand >= c.amt) return `Alright. Here's the ${c.amt}. Tell him we're done.`;
+    return `This about the ${c.amt}? I got ${onHand} on me. ${DODGE_DAYS[(rng() * DODGE_DAYS.length) | 0]} for the rest.`;
+  }
+  function debtorOnHand(n) {
+    const load = (CBZ.econ && CBZ.econ.rollLoadout) ? CBZ.econ.rollLoadout(n) : null;
+    return load ? Math.max(0, Math.floor(load.cigs || 0)) : 0;
+  }
+  function startDodge(n, c) {
+    const owe = Math.max(0, c.amt - (c.got || 0));
+    const onHand = Math.min(debtorOnHand(n), owe);
+    const line = dodgeLine(c, onHand);
+    startApproach(n, "debtorDodge", 0, {
+      contract: c,
+      partial: onHand,
+      msg: `${c.name}: ${onHand > 0 ? `${onHand} on him, the rest later` : "says he's empty"}.`,
+      motive: `owes ${c.creditor.data.name.replace(/^the |^a |^an /, "")} ${c.amt}`,
+      dodgeLine: line,
+    });
+    n.approachCD = 0;
+    // Cornering him IS the moment he talks — see the note on offerContract
+    // about why autoListen cannot be the mouth for an offer raised in place.
+    if (say(n, line, null, 3.0) && n.approach) n.approach.greeted = true;
+    return true;
+  }
+  // Called from considerPlayerApproach: standing close to your mark IS the
+  // trigger, and it fires once per approach rather than every frame.
+  function considerCornered(n, d) {
+    if (!contractsOn()) return false;
+    const c = contractAgainst(n);
+    if (!c || contractSatisfied(c) || d > 3.2) return false;
+    if (n.intimidMode === "scared") return false;    // a drawn gun owns him already
+    if (n.aiState === "fight" || (n.ko || 0) > 0) return false;
+    return startDodge(n, c);
+  }
+
+  // ---- the physical execution ---------------------------------------------
+  /* A REPO IS A NAMED LIFT, and economy.js's steal() cannot do one: liftBest
+     takes the most VALUABLE thing in his pockets, which on a repo would hand
+     you his shiv and leave the radio you were sent for. `econ.steal(actor)`
+     also takes no want-parameter and economy.js is another agent's file this
+     wave, so the targeted lift lives here — on the same accessors steal uses
+     (rollLoadout's live items array, stealOdds, addItem, announceLoot), so a
+     repo and a pickpocket are the same hand in the same pocket at the same
+     odds. SEAM FOR THE ORCHESTRATOR: this wants to be `steal(actor, {want})`
+     in economy.js eventually, with liftBest taking the wanted name. */
+  function contractLift(n) {
+    const c = contractAgainst(n);
+    if (!c || c.kind !== "repo") return { ok: false, msg: "" };
+    const who = n.data.name.replace(/^the |^a |^an /, "");
+    const load = CBZ.econ.rollLoadout(n);
+    const idx = load.items.indexOf(c.item);
+    if (idx < 0) {
+      // He sold it, spent it or lost it. The job dies where the object died.
+      c.dead = true;
+      say(n, `The ${c.item}? Gone. Ask around.`, null, 2.2);
+      return { ok: false, msg: "" };
+    }
+    const odds = CBZ.econ.stealOdds ? CBZ.econ.stealOdds(n) : 0.5;
+    if (rng() < odds) {
+      load.items.splice(idx, 1);
+      CBZ.econ.addItem(c.item, 1);
+      c.done = true;
+      c.got = 1;
+      if (CBZ.econ.announceLoot) CBZ.econ.announceLoot(0, [c.item]);
+      CBZ.sfx && CBZ.sfx("loot");
+      bookDebtorGrudge(n, `you lifting my ${c.item}`, 2.5);
+      return { ok: true, msg: "" };
+    }
+    CBZ.sfx && CBZ.sfx("whoosh");
+    bookDebtorGrudge(n, "you going through my pockets", 3);
+    say(n, "Hand. Now.", null, 1.8);
+    return { ok: false, msg: "" };
+  }
+  // Does the steal verb on this man mean the repo? interact.js asks.
+  function contractWantedItem(n) {
+    const c = contractAgainst(n);
+    return c && c.kind === "repo" && !c.done && !c.dead ? c.item : "";
+  }
+
+  /* THE DEBTOR REMEMBERS WHO CAME. Every completion path routes through here
+     so the grudge always has a CAUSE the card can print ("still sore about the
+     collection") and his crew always hears about it through the net that
+     already exists. Men already carrying beef against him are not touched —
+     noteGangIncident and the beef ledger handle that side, and they were built
+     for it. */
+  function bookDebtorGrudge(n, why, weight) {
+    if (!n) return;
+    n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + (weight || 2));
+    n.grudgeWhy = why;
+    if (n.gang >= 0 && CBZ.noteGangIncident) {
+      noteGangIncident(n, "disrespect", 4 + Math.min(5, weight || 2), { source: "contract" });
+    }
+  }
+
+  /* WRAPPING THE WORLD'S OWN VERBS instead of adding new ones. A rough-up
+     completes on ANY knockdown of the target, from any weapon, any system —
+     because CBZ.killstreakOnDown is the one call every path that drops a body
+     already makes (systems/prisonfriends.js wraps it for the same reason). A
+     collection banks what you actually pulled OFF HIM: the pickpocket, the
+     gunpoint rob, the partial he handed over. It deliberately does NOT bank
+     cigarettes you already had — the point of the whole layer is that the
+     payment has to come out of THAT man's pocket, which is why the card can
+     never be satisfied by walking to a shop.
+
+     Armed lazily: killstreaks.js, intimidate.js and economy.js all load after
+     this file. */
+  function creditCollected(target, cigs) {
+    const c = contractAgainst(target);
+    if (!c || !(cigs > 0) || c.kind === "repo") return;
+    c.got = Math.min(c.amt, (c.got || 0) + cigs);
+  }
+  function ensureContractWraps() {
+    if (CBZ.killstreakOnDown && !CBZ.killstreakOnDown._contractWrapped) {
+      const inner = CBZ.killstreakOnDown;
+      const onDown = function (actor, how) {
+        try {
+          const c = contractAgainst(actor);
+          if (c && c.kind === "roughUp" && !c.done) {
+            c.done = true;
+            bookDebtorGrudge(actor, "the beating you took for somebody else", 4);
+          }
+        } catch (e) { /* never let bookkeeping eat a takedown */ }
+        return inner.apply(this, arguments);
+      };
+      onDown._contractWrapped = true;
+      CBZ.killstreakOnDown = onDown;
+    }
+    if (CBZ.econ && CBZ.econ.steal && !CBZ.econ.steal._contractWrapped) {
+      const innerSteal = CBZ.econ.steal;
+      const stealWrapped = function (actor) {
+        // a repo IS the steal on that man — same hand, named object
+        if (contractWantedItem(actor)) return contractLift(actor);
+        const before = (CBZ.game && CBZ.game.cigs) || 0;
+        const res = innerSteal.apply(this, arguments);
+        try { creditCollected(actor, ((CBZ.game && CBZ.game.cigs) || 0) - before); } catch (e) {}
+        return res;
+      };
+      stealWrapped._contractWrapped = true;
+      CBZ.econ.steal = stealWrapped;
+    }
+    if (CBZ.prisonRobTarget && !CBZ.prisonRobTarget._contractWrapped) {
+      const innerRob = CBZ.prisonRobTarget;
+      const robWrapped = function (who) {
+        const target = who || (CBZ.intimidate && CBZ.intimidate.target && CBZ.intimidate.target());
+        const before = (CBZ.game && CBZ.game.cigs) || 0;
+        const wanted = target ? contractWantedItem(target) : "";
+        const out = innerRob.apply(this, arguments);
+        try {
+          if (target) {
+            creditCollected(target, ((CBZ.game && CBZ.game.cigs) || 0) - before);
+            const c = contractAgainst(target);
+            if (c && wanted && CBZ.econ.hasItem(wanted)) { c.done = true; c.got = 1; }
+          }
+        } catch (e) {}
+        return out;
+      };
+      robWrapped._contractWrapped = true;
+      CBZ.prisonRobTarget = robWrapped;
+    }
+  }
+
+  // ---- proof and payout ----------------------------------------------------
+  /* SETTLING. You are standing in front of the man who sent you, holding what
+     you took off the other one. What he pays is your cut and his respect; what
+     it costs you is handing over the rest, out of the pocket you put it in.
+     A short collection is not a failure — he takes what came back, says so,
+     and the remainder stays on his ledger, because a tab that survives a bad
+     collection is exactly what a tab is. */
+  function settleContract(n) {
+    const c = contractFor(n);
+    const who = n.data.name.replace(/^the |^a |^an /, "");
+    if (!c) return { ok: false, msg: "" };
+    if (c.dead) {
+      CBZ.game.contract = null;
+      say(n, `Gone? Then it's gone. Forget it.`, null, 2.4);
+      return { ok: true, msg: "" };
+    }
+    if (!contractSatisfied(c)) {
+      say(n, c.kind === "roughUp" ? `He's still walking. Go.` : `Empty hands. Go see him.`, null, 2.2);
+      return { ok: false, msg: "" };
+    }
+
+    const holder = c.holder || n;
+    let line = "";
+    if (c.kind === "repo") {
+      CBZ.econ.takeItem(c.item);
+      clearTab(holder, c.debtor);
+      line = `The ${c.item}. Knew he had it.`;
+    } else if (c.kind === "roughUp") {
+      clearTab(holder, c.debtor);
+      line = `Heard him hit the floor from here.`;
+    } else {
+      const brought = Math.min(c.got || 0, c.amt);
+      const keep = Math.min(c.cut, brought);
+      const handOver = Math.max(0, brought - keep);
+      if (handOver > 0) CBZ.econ.addCigs(-handOver);
+      payTab(holder, c.debtor, brought);
+      line = brought >= c.amt
+        ? `All of it. He say anything?`
+        : `${brought}. He's still into me for ${Math.max(1, c.amt - brought)}.`;
+    }
+
+    // the cut, and what it buys you with him
+    if (c.workOff) {
+      const off = Math.max(3, c.amt + 2);
+      addGangDebt(c.workOff.gang, -off);
+      addGangStanding(c.workOff.gang, 6);
+      addGangProtection(c.workOff.gang, 14 + c.amt);
+      for (const m of CBZ.npcs) if (m.gang === c.workOff.gang) m.huntPlayer = 0;
+      line += ` Your tab's lighter.`;
+    } else if (c.kind !== "collect" && c.cut > 0) {
+      CBZ.econ.addCigs(c.cut);
+      if (CBZ.pickupNote) CBZ.pickupNote("Cigarettes", { count: c.cut });
+    }
+    if (CBZ.econ.addRespect) CBZ.econ.addRespect(n, contractPaidInFull(c) ? 8 : 4);
+    n.playerTrust = Math.min(14, (n.playerTrust || 0) + 2);
+    n.playerGrudge = Math.max(0, (n.playerGrudge || 0) - 1);
+    if (n.gang >= 0) addGangStanding(n.gang, contractPaidInFull(c) ? 5 : 2);
+    addBuzz("debt", 3, "collection");
+    rippleApproach(n, "paid", { kind: "contract", cost: c.amt }, { range: 11 });
+    CBZ.sfx && CBZ.sfx("coin");
+    CBZ.game.contract = null;
+    say(n, line, null, 2.8);
+    return { ok: true, msg: "" };
+  }
+
+  /* THE ONE SLOW TICK. Ages the live contract, arms the wraps once the systems
+     that own the verbs have loaded, and quietly drops a job whose debtor died
+     or walked out — a contract on a corpse is a card the player can never
+     clear. Registered at 44.5, beside the other prison social directors. */
+  function updateContracts(dt) {
+    if (!contractsOn()) return;
+    ensureContractWraps();
+    const c = contract();
+    if (!c) return;
+    c.t = (c.t || 0) + dt;
+    if (ledgerGone(c.creditor)) { CBZ.game.contract = null; return; }
+    if (ledgerGone(c.debtor)) c.dead = true;
+    /* HE GIVES UP ON YOU. Without this a player who takes a job and never does
+       it is holding the only contract slot forever, and nobody in the prison
+       can ever offer him another — the exact bug shape a one-at-a-time design
+       invites. Ten minutes of nothing and the man goes and finds somebody
+       else, which is also the truth about him. He says so if you are stood
+       near enough to hear it. */
+    if (!contractSatisfied(c) && c.t > 600) {
+      const near = playerDist(c.creditor) < 20;
+      CBZ.game.contract = null;
+      if (near) say(c.creditor, `Forget it. I sent somebody else.`, null, 2.4);
+      return;
+    }
+    // he keeps the place honest — a man who moved is a man you get re-directed to
+    if (!c.done && (c.t % 30) < dt) c.place = placeFor(c.debtor);
   }
   // Somebody in uniform is looking at this patch of ground. `guts` is how
   // little that stops you: a Predator (0.96) barely slows down, an Opportunist
@@ -3564,7 +4299,7 @@
       if (score > bs) { bs = score; best = n; }
     }
     if (!best || bs < 2.2) return false;
-    startApproach(best, debt >= 10 ? "debtCollect" : "tax", Math.min(cigs, Math.max(2, Math.ceil(debt * 0.45) + Math.floor(((best.personality && best.personality.greed) || 0.5) * 4))), { debt: true, socialRead: "debt-pressure" });
+    startApproach(best, debt >= 10 ? "debtCollect" : "tax", Math.min(cigs, Math.max(2, Math.ceil(debt * 0.45) + Math.floor(((best.personality && best.personality.greed) || 0.5) * 4))), { debt: true, socialRead: "debt-pressure", workOff: workOffAvailable(best) && debt > cigs && debt >= WORKOFF_DEBT });
     return true;
   }
 
@@ -4016,6 +4751,8 @@
     // not an event: it is what makes the fight that eventually happens land
     // as the consequence of something the player could have watched building.
     fadeBeef(n, dt);
+    // and so does what he is owed — slower, because a debt outlives a punch
+    if (contractsOn()) fadeTabs(n, dt);
     if (n.aiState !== "fight") turfFriction(n, dt);
     if (n.blockRead && n.blockRead.t > 0) {
       n.blockRead.t -= dt;
@@ -4405,7 +5142,7 @@
           }
           if (kind === "debt" && n.gang >= 0) {
             const debt = gangDebt(n.gang);
-            startApproach(n, debt > 4 ? "debtCollect" : "tax", Math.min(cigs, Math.max(2, Math.ceil(debt * 0.55) + Math.floor((p.greed || 0.5) * 4))), { debt: true, watched: true });
+            startApproach(n, debt > 4 ? "debtCollect" : "tax", Math.min(cigs, Math.max(2, Math.ceil(debt * 0.55) + Math.floor((p.greed || 0.5) * 4))), { debt: true, watched: true, workOff: workOffAvailable(n) && debt > cigs && debt >= WORKOFF_DEBT });
             return n.baseSpeed * 1.2;
           }
           if (kind === "copTip") {
@@ -4598,6 +5335,12 @@
           if (n.aiTimer <= 0) {
             n.aiTimer = 1.4 + rng() * 2;
             emote(n, rng() < 0.4 ? "" : rng() < 0.5 ? "" : "♥");
+            // MONEY CHANGES HANDS WHERE MEN STOP TO TALK. The same exchange
+            // that already books gossip and arguments is where a tab gets
+            // opened — so the yard's debts are made in front of you, on the
+            // days commissary and the card games happen, instead of on a
+            // background timer nobody can see.
+            mintTab(n, p);
             gossip(n, p);
             if (n.aiState === "snitch") return n.baseSpeed * 1.85;
             // IT TURNED. A fight that starts out of a conversation is the one
@@ -4685,8 +5428,13 @@
       clearKnownReport(n);
       n.memory = null;
       n.copMarked = 0;
+      // A FRESH RUN IS A FRESH LEDGER. Tabs (and the job one of them became)
+      // are per-run memory exactly like beef is; carrying them across a death
+      // would have men collecting on debts from a life the player didn't live.
+      n._tabs = null;
       n.isLeader = false; initActor(n);
     }
+    CBZ.game.contract = null;
     for (const g of CBZ.guards) { g.hp = null; g.dead = false; if (CBZ.prisonCorpseClear) CBZ.prisonCorpseClear(g); }
     for (const gang of [0, 1]) {
       const m = CBZ.npcs.find((n) => n.gang === gang && crewRole(n) === "shotcaller") || CBZ.npcs.find((n) => n.gang === gang);
@@ -4735,7 +5483,22 @@
 
     if (action === "listen") {
       if (a.kind === "tax") return { ok: true, msg: `${who}: ${a.cost} cigs keeps ${gangName(n.gang)} off your back.` };
-      if (a.kind === "debtCollect") return { ok: true, msg: `${who}: your tab with ${gangName(n.gang)} is ${gangDebt(n.gang)} cigs. Pay or they keep leaning on you.` };
+      /* THE PITCH IS THE MAN TALKING. interact.js speaks this the moment the
+         card opens (autoListen), so it is the four-clause hand-off — name,
+         amount, reason, place, cut — and not a description of a feature. */
+      if (a.kind === "contract" && a.contract) return { ok: true, msg: contractPitch(a.contract) };
+      if (a.kind === "debtorDodge" && a.contract) return { ok: true, msg: a.dodgeLine || dodgeLine(a.contract, a.partial || 0) };
+      if (a.kind === "debtCollect") {
+        // "You can't pay it, so work it." Same collector, same tab, but the
+        // way out is labour instead of cigarettes he can see you don't have.
+        if (canWorkOff(n)) {
+          const src = ripeCrewTab(n);
+          if (src) nameHim(src.tab.who);        // he is about to be named out loud
+          const nm2 = src ? src.tab.who.data.name.replace(/^the |^a |^an /, "") : "somebody";
+          return { ok: true, msg: `${who}: you can't pay it, so work it. ${nm2} owes us too. Go get ours and yours gets lighter.` };
+        }
+        return { ok: true, msg: `${who}: your tab with ${gangName(n.gang)} is ${gangDebt(n.gang)} cigs. Pay or they keep leaning on you.` };
+      }
       if (a.kind === "snitchThreat") return { ok: true, msg: `${who}: pay ${a.cost} cigs or I tell a guard.` };
       if (a.kind === "turfWarning") return { ok: true, msg: `${who}: this is ${gangName(n.gang)} turf. Respect it or pay.` };
       if (a.kind === "gangInvite") return { ok: true, msg: `${who}: roll with ${gangName(n.gang)} and rivals think twice.` };
@@ -4818,7 +5581,59 @@
       return { ok: true, msg: n.data.tip || n.data.talk[(rng() * n.data.talk.length) | 0] || "Keep your eyes open." };
     }
 
+    /* THE SYMMETRY, TAKEN. The player's own gang debt turning into the exact
+       same errand, with the payout pointed at the tab instead of his pocket.
+       There is no second approach for this — the collector is standing in
+       front of you, so he hands it over where he stood. */
+    if (action === "work") {
+      if (a.kind !== "debtCollect" || !canWorkOff(n)) return { ok: false, msg: "" };
+      const src = ripeCrewTab(n);
+      if (!src) return { ok: false, msg: "" };
+      const c = makeContract(n, src.tab, { gang: n.gang }, src.holder);
+      clearApproach(n);
+      takeContract(n, c);
+      addGangStanding(n.gang, 3);
+      n.playerTrust = Math.min(14, (n.playerTrust || 0) + 1);
+      for (const m of CBZ.npcs) if (m.gang === n.gang) m.huntPlayer = 0;
+      say(n, contractPitch(c), null, 3.4);
+      return { ok: true, msg: "" };
+    }
+
     if (action === "accept") {
+      /* TAKING THE WORK. Nothing is deducted, nothing is promised — you have
+         agreed to go and find a man. What he says back names where to start,
+         because a job whose first instruction is "open a menu" is not a job. */
+      if (a.kind === "contract") {
+        const c = a.contract;
+        clearApproach(n);
+        if (!c || !alive(c.debtor)) return { ok: false, msg: "" };
+        takeContract(n, c);
+        say(n, c.place, null, 2.4);
+        return { ok: true, msg: "" };
+      }
+      /* HIS PARTIAL, TAKEN. This is the cornered debtor handing over what is
+         actually in his pocket — economy.js's loadout, drained for real, so a
+         man you have already squeezed has less next time. */
+      if (a.kind === "debtorDodge") {
+        const c = a.contract;
+        const take = Math.max(0, Math.min(a.partial || 0, debtorOnHand(n)));
+        clearApproach(n);
+        if (!c) return { ok: false, msg: "" };
+        if (take <= 0) {
+          say(n, "Told you. Empty.", null, 2.0);
+          return { ok: false, msg: "" };
+        }
+        const load = CBZ.econ.rollLoadout(n);
+        load.cigs = Math.max(0, load.cigs - take);
+        CBZ.econ.addCigs(take);
+        if (CBZ.pickupNote) CBZ.pickupNote("Cigarettes", { count: take });
+        creditCollected(n, take);
+        CBZ.sfx && CBZ.sfx("coin");
+        n.playerTrust = Math.min(10, (n.playerTrust || 0) + 1);
+        bookDebtorGrudge(n, "the collection", 1.5);
+        say(n, contractPaidInFull(c) ? "That's all of it. We're done." : `That's what I got. Tell him.`, null, 2.6);
+        return { ok: true, msg: "" };
+      }
       if (a.kind === "gangInvite") {
         clearApproach(n);
         const res = joinGang(n);
@@ -5266,6 +6081,30 @@
     }
 
     if (action === "haggle") {
+      /* THE ONLY NUMBER ON THE TABLE IS YOUR CUT. A contract costs nothing, so
+         the generic price-haggle below (which bails on cost <= 1) can never
+         reach it. What you are actually arguing about is what you keep — and
+         he will go up if he trusts you, because a man who has had work done
+         well pays more for the next one. Once per offer, same as any haggle. */
+      if (a.kind === "contract" && a.contract) {
+        const c = a.contract;
+        if (a.haggled) return { ok: false, msg: "" };
+        a.haggled = true;
+        if (c.workOff) { say(n, "It's your tab. There's no cut.", null, 2.2); return { ok: false, msg: "" }; }
+        const p = n.personality || {};
+        const chance = Math.max(0.1, Math.min(0.75, 0.3 + (n.playerTrust || 0) * 0.05 - (p.greed || 0.5) * 0.28));
+        if (rng() < chance) {
+          c.cut = Math.min(c.amt - 1, c.cut + 1 + Math.floor(rng() * 2));
+          a.msg = contractText(n, c);
+          a.t = Math.max(a.t || 0, 8);
+          n.playerTrust = Math.min(12, (n.playerTrust || 0) + 1);
+          say(n, `Keep ${c.cut}. Don't ask again.`, null, 2.2);
+          return { ok: true, msg: "" };
+        }
+        n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 1);
+        say(n, `${c.cut}. You want it or not?`, null, 2.2);
+        return { ok: false, msg: "" };
+      }
       if (a.cost <= 1 || a.haggled) return { ok: false, msg: `${who} won't move on the price.` };
       const standing = n.gang >= 0 ? gangStanding(n.gang) : 0;
       const p = n.personality || {};
@@ -5308,6 +6147,28 @@
         rippleApproach(n, "threatWon", a, { range: 13 });
         n.playerFear = Math.min(14, (n.playerFear || 0) + 3);
         n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 2);
+        /* PRESSING THE DEBTOR. He was holding back — everybody holds back —
+           and leaning on him gets the rest of what is actually in his pocket,
+           which is usually still short of the number. He remembers who did
+           this and why, by name. */
+        if (a.kind === "debtorDodge" && a.contract) {
+          const c = a.contract;
+          const load = CBZ.econ.rollLoadout(n);
+          const owe = Math.max(0, c.amt - (c.got || 0));
+          const take = Math.max(0, Math.min(Math.floor(load.cigs || 0), owe));
+          clearApproach(n);
+          if (take > 0) {
+            load.cigs -= take;
+            CBZ.econ.addCigs(take);
+            if (CBZ.pickupNote) CBZ.pickupNote("Cigarettes", { count: take });
+            creditCollected(n, take);
+            CBZ.sfx && CBZ.sfx("coin");
+          }
+          bookDebtorGrudge(n, "you shaking me down over somebody else's money", 4);
+          n.aiState = "flee"; n.fleeT = 1.8 + rng() * 1.2;
+          say(n, take > 0 ? `Take it. Take all of it.` : `I got NOTHING. Look at me.`, null, 2.4);
+          return { ok: true, msg: "" };
+        }
         if (a.kind === "snitchThreat") {
           n.memory = null; n.snitchHeat = 0; n.snitchT = 0;
           addGangStanding(n.gang, n.gang >= 0 ? -2 : 0);
@@ -5463,6 +6324,19 @@
       }
       n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 3);
       rippleApproach(n, "threatFailed", a, { range: 13.5 });
+      /* HE CALLED IT. A man being squeezed over a debt he did not run up with
+         YOU has the shortest fuse in this yard, and leaning on him and losing
+         is the one place a collection turns into the fight the player was
+         trying to avoid. The offer does NOT stand after this — he is swinging. */
+      if (a.kind === "debtorDodge") {
+        clearApproach(n);
+        bookDebtorGrudge(n, "you shaking me down over somebody else's money", 4);
+        say(n, "Go collect from him then.", null, 2.0);
+        n.huntPlayer = Math.max(n.huntPlayer || 0, 6);
+        n.aiState = "wander";
+        if (n.gang >= 0) provokeGang(n, 4);
+        return { ok: false, msg: "" };
+      }
       if (a.kind === "snitchThreat") {
         const heat = a.heat || Math.max(14, a.cost * 9);
         const lastKnown = n.memory && n.memory.lastKnown;
@@ -5625,6 +6499,25 @@
     }
 
     if (action === "refuse") {
+      /* WALKING AWAY FROM WORK COSTS NOTHING — it is an OFFER, and OFFER_STANDS
+         already keeps it warm for three minutes. He does not take it
+         personally, because you never owed him this. Handled ahead of the
+         ripple so a declined job is not read by the whole block as a public
+         refusal of a demand, which it is not. */
+      if (a.kind === "contract") {
+        clearApproach(n);
+        return { ok: true, msg: "" };
+      }
+      /* PRESSING HIM IS THE OTHER ROAD, and this is not it. Waving off a
+         cornered debtor's excuse leaves him standing there with it — his
+         reverse-offer stands, and coming back gets the same six and the same
+         Thursday. What it also does is make him certain you are the one
+         collecting, which is a grudge with a cause. */
+      if (a.kind === "debtorDodge") {
+        clearApproach(n);
+        bookDebtorGrudge(n, "the collection", 1.5);
+        return { ok: true, msg: "" };
+      }
       rippleApproach(n, "refused", a, { range: 12 });
       if (a.kind === "tax") {
         const gang = n.gang;
@@ -5991,6 +6884,66 @@
   CBZ.resolveNpcApproach = resolveNpcApproach;
   CBZ.squashGrudge = squashGrudge;
   CBZ.squashGrudgeCost = squashGrudgeCost;
+  /* THE CONTRACT SURFACE. systems/interact.js hangs two card verbs off this
+     (COLLECT on a claim-holder, SETTLE on the man you owe an answer) and
+     systems/quests.js offers the same work through Talk. Everything a caller
+     needs to ask is a question about a PERSON standing in front of the player,
+     never a query into a ledger — that is deliberate, and it is why there is no
+     "list contracts" here. */
+  CBZ.prisonContract = {
+    on: contractsOn,
+    live: contract,                  // the one live job, or null
+    forCreditor: contractFor,        // is this the man who sent you?
+    againstDebtor: contractAgainst,  // is this the man you were sent after?
+    canOffer: canOfferContract,      // does he hold a claim worth handing you?
+    // offer(creditor) is the live path. The two extra args exist for the
+    // symmetric leg (workOff) and for a preset or probe that needs a NAMED job
+    // instead of a rolled one — tools/visual-presets/prison-contracts.mjs
+    // stages all three kinds through it.
+    offer: offerContract,
+    /* SEED ONE CLAIM, AGED. A tab needs ~95 s of yard time before its holder
+       starts asking around, which no capture and no probe can wait for. This
+       books the same row mintTab books and hands it the age it would have had,
+       so what gets photographed is the real system and not a mock of it. */
+    seed: function (creditor, debtor, opts) {
+      opts = opts || {};
+      const t = addTab(creditor, debtor, opts.amt || 9, opts.why || "store day");
+      if (t) t.t = opts.age != null ? opts.age : TAB_RIPE + 20;
+      return t;
+    },
+    take: takeContract,              // accept it without going through the card
+    settle: settleContract,
+    satisfied: contractSatisfied,
+    paidInFull: contractPaidInFull,
+    summary: contractSummary,
+    note: contractNoteFor,
+    pitch: contractPitch,
+    wantedItem: contractWantedItem,  // "" unless a repo is live on this man
+    lift: contractLift,
+    canWorkOff: canWorkOff,          // the symmetry: debt turning into labour
+    ripeTab: ripeTab,
+    tabWith: tabWith,
+    addTab: addTab,                  // for a preset or a probe to seed the yard
+    place: placeFor,
+    /* One line for a console. Counts the ledger the way the beef audit counts
+       its own: how many claims exist, how many have gone sour, and what the
+       live job is — so "the yard has an economy" is measurable and not a
+       claim in a comment. */
+    audit: function () {
+      let tabs = 0, ripe = 0, total = 0, holders = 0;
+      for (const n of CBZ.npcs || []) {
+        if (!n._tabs || !n._tabs.length) continue;
+        holders++;
+        for (const t of n._tabs) { tabs++; total += t.amt; if (t.t >= TAB_RIPE) ripe++; }
+      }
+      const c = contract();
+      return {
+        on: contractsOn(), tabs, ripe, holders,
+        avgTab: tabs ? Math.round((total / tabs) * 10) / 10 : 0,
+        live: c ? { kind: c.kind, name: c.name, amt: c.amt, item: c.item, got: c.got, done: !!c.done, workOff: !!c.workOff } : null,
+      };
+    },
+  };
   CBZ.resolveKnownSnitch = resolveKnownSnitch;
   CBZ.knownSnitchCost = knownSnitchCost;
   CBZ.startRacketRunner = startRacketRunner;
@@ -6036,4 +6989,5 @@
   CBZ.onUpdate(43, esc(updateSocialDirector));
   CBZ.onUpdate(43.5, esc(updateWatcherDirector));
   CBZ.onUpdate(44, esc(updateBlockRumors));
+  CBZ.onUpdate(44.5, esc(updateContracts));
 })();

@@ -1,0 +1,924 @@
+{
+  "preset": {
+    "id": "prison-contracts",
+    "title": "Prison — a man hands you his collection",
+    "path": "tools/visual-presets/prison-contracts.mjs"
+  },
+  "generatedAt": "2026-08-25T17:50:28.242Z",
+  "only": null,
+  "reusedBeforeFrom": null,
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frameSignature": "laptop@1440x900,ipad-mini-landscape@1133x744",
+  "frames": [
+    {
+      "id": "laptop",
+      "device": "laptop",
+      "label": "Laptop",
+      "orientation": "fixed",
+      "width": 1440,
+      "height": 900,
+      "dsf": 2,
+      "mobile": false,
+      "ua": null,
+      "landscape": false
+    },
+    {
+      "id": "ipad-mini-landscape",
+      "device": "ipad-mini",
+      "label": "iPad mini",
+      "orientation": "landscape",
+      "width": 1133,
+      "height": 744,
+      "dsf": 2,
+      "mobile": true,
+      "ua": "Mozilla/5.0 (iPad; CPU OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1",
+      "landscape": true
+    }
+  ],
+  "before": {
+    "requested": "http://127.0.0.1:9039/?seed=41773&cfg_PRISON_CONTRACTS=0&visualCompare=before-1787680206388",
+    "final": "http://127.0.0.1:9039/?seed=41773&cfg_PRISON_CONTRACTS=0&visualCompare=before-1787680206388"
+  },
+  "after": {
+    "requested": "http://127.0.0.1:9039/?seed=41773&visualCompare=after-1787680223587",
+    "final": "http://127.0.0.1:9039/?seed=41773&visualCompare=after-1787680223587"
+  },
+  "subjects": [
+    {
+      "id": "creditor-pitch",
+      "label": "Mack hands over the claim",
+      "focus": "AFTER: a COLLECT row on his card and his own voice naming Dice, the nine, store day, the place and your cut. BEFORE: insult / talk / steal, and silence."
+    },
+    {
+      "id": "debtor-cornered",
+      "label": "Dice, cornered",
+      "focus": "AFTER: walking inside three metres of the man you were sent after IS the trigger — he counters with what is actually in his pocket. BEFORE: he has no idea who you are."
+    },
+    {
+      "id": "settle-row",
+      "label": "Back to Mack, holding it",
+      "focus": "AFTER: the head slot becomes SETTLE, the chip counts what you actually pulled off Dice, the note says so. BEFORE: there is no such row anywhere in the game."
+    },
+    {
+      "id": "settle-paid",
+      "label": "He counts it",
+      "focus": "The payout, one press later: he says what came back, the cut stays in your pocket, his respect moves. The contract row is correctly GONE here — it was spent — so read the spoken line, not the row count."
+    },
+    {
+      "id": "workoff",
+      "label": "The symmetry — you owe, so you work",
+      "focus": "You are broke and the Reds' book has you down for 22. AFTER: the collector's middle button is WORK, and he names a man who owes the crew. BEFORE: pay what you don't have, haggle, or refuse."
+    }
+  ],
+  "captures": [
+    {
+      "id": "creditor-pitch",
+      "frame": "laptop",
+      "beforeFile": "f01-laptop__01-creditor-pitch.png",
+      "afterFile": "f01-laptop__01-creditor-pitch.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "frame": "laptop",
+        "touch": false,
+        "flagOn": false,
+        "card": "MACK",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "",
+        "pitch": "",
+        "workLeg": false,
+        "gangDebt": 0,
+        "cigs": 20,
+        "audit": {
+          "on": false,
+          "tabs": 0,
+          "ripe": 0,
+          "holders": 0,
+          "avgTab": 0,
+          "live": null
+        },
+        "rowsText": [
+          "J\nTrade\n33",
+          "K\nTalk",
+          "L\nSteal"
+        ],
+        "spoken": "",
+        "note": "selling Ramen · 33 | watching pockets",
+        "metrics": {
+          "contractRow": 0,
+          "spokenChars": 0,
+          "namesTarget": 0,
+          "verbCount": 3,
+          "noteChars": 37
+        }
+      },
+      "after": {
+        "ok": true,
+        "frame": "laptop",
+        "touch": false,
+        "flagOn": true,
+        "card": "MACK",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "collect 9 (store day)",
+        "pitch": "contract",
+        "workLeg": false,
+        "gangDebt": 0,
+        "cigs": 20,
+        "audit": {
+          "on": true,
+          "tabs": 1,
+          "ripe": 1,
+          "holders": 1,
+          "avgTab": 9,
+          "live": null
+        },
+        "rowsText": [
+          "J\nAccept",
+          "K\nHaggle",
+          "L\nRefuse"
+        ],
+        "spoken": "Dice is into me for 9 since store day. He posts up at the Blues' corner. Bring it, keep 4.",
+        "note": "Mack wants 9 collected off Dice. | motive: owed 9 since store day",
+        "metrics": {
+          "contractRow": 1,
+          "spokenChars": 90,
+          "namesTarget": 1,
+          "verbCount": 3,
+          "noteChars": 65
+        }
+      }
+    },
+    {
+      "id": "debtor-cornered",
+      "frame": "laptop",
+      "beforeFile": "f01-laptop__02-debtor-cornered.png",
+      "afterFile": "f01-laptop__02-debtor-cornered.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "frame": "laptop",
+        "touch": false,
+        "flagOn": false,
+        "card": "DICE",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "",
+        "pitch": "",
+        "workLeg": false,
+        "gangDebt": 0,
+        "cigs": 12,
+        "audit": {
+          "on": false,
+          "tabs": 0,
+          "ripe": 0,
+          "holders": 0,
+          "avgTab": 0,
+          "live": null
+        },
+        "rowsText": [
+          "J\nTrade\n17",
+          "K\nTalk",
+          "L\nSteal\nhot"
+        ],
+        "spoken": "Eyes open. Something moved.",
+        "note": "selling Burner Phone · 17 | heard cigs from Dice",
+        "metrics": {
+          "contractRow": 0,
+          "spokenChars": 27,
+          "namesTarget": 1,
+          "verbCount": 3,
+          "noteChars": 48
+        }
+      },
+      "after": {
+        "ok": true,
+        "frame": "laptop",
+        "touch": false,
+        "flagOn": true,
+        "card": "DICE",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "collect 9 (store day)",
+        "pitch": "",
+        "workLeg": false,
+        "gangDebt": 0,
+        "cigs": 16,
+        "audit": {
+          "on": true,
+          "tabs": 1,
+          "ripe": 1,
+          "holders": 1,
+          "avgTab": 9,
+          "live": {
+            "kind": "collect",
+            "name": "Dice",
+            "amt": 9,
+            "item": "",
+            "got": 0,
+            "done": false,
+            "workOff": false
+          }
+        },
+        "rowsText": [
+          "J\nAccept",
+          "K\nThreaten",
+          "L\nRefuse"
+        ],
+        "spoken": "Alright. Here's the 9. Tell him we're done.",
+        "note": "Dice: 9 on him, the rest later. | motive: owes Mack 9",
+        "metrics": {
+          "contractRow": 1,
+          "spokenChars": 43,
+          "namesTarget": 1,
+          "verbCount": 3,
+          "noteChars": 53
+        }
+      }
+    },
+    {
+      "id": "settle-row",
+      "frame": "laptop",
+      "beforeFile": "f01-laptop__03-settle-row.png",
+      "afterFile": "f01-laptop__03-settle-row.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "frame": "laptop",
+        "touch": false,
+        "flagOn": false,
+        "card": "MACK",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "",
+        "pitch": "stashCover",
+        "workLeg": false,
+        "gangDebt": 0,
+        "cigs": 20,
+        "audit": {
+          "on": false,
+          "tabs": 0,
+          "ripe": 0,
+          "holders": 0,
+          "avgTab": 0,
+          "live": null
+        },
+        "rowsText": [
+          "J\nPay\n6",
+          "K\nHaggle",
+          "L\nRefuse"
+        ],
+        "spoken": "Mack can hide your money trail for 6 cigs.",
+        "note": "Mack can hide your money trail for 6 cigs. | watching pockets",
+        "metrics": {
+          "contractRow": 0,
+          "spokenChars": 42,
+          "namesTarget": 0,
+          "verbCount": 3,
+          "noteChars": 61
+        }
+      },
+      "after": {
+        "ok": true,
+        "frame": "laptop",
+        "touch": false,
+        "flagOn": true,
+        "card": "MACK",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "collect 9 (store day)",
+        "pitch": "",
+        "workLeg": false,
+        "gangDebt": 2,
+        "cigs": 29,
+        "audit": {
+          "on": true,
+          "tabs": 1,
+          "ripe": 1,
+          "holders": 1,
+          "avgTab": 9,
+          "live": {
+            "kind": "collect",
+            "name": "Dice",
+            "amt": 9,
+            "item": "",
+            "got": 9,
+            "done": false,
+            "workOff": false
+          }
+        },
+        "rowsText": [
+          "J\nSettle\n9 of 9",
+          "K\nTalk",
+          "L\nSteal"
+        ],
+        "spoken": "He posts up at the Blues' corner.",
+        "note": "settle up: 9 of 9 off Dice | watching pockets",
+        "metrics": {
+          "contractRow": 1,
+          "spokenChars": 33,
+          "namesTarget": 1,
+          "verbCount": 3,
+          "noteChars": 45
+        }
+      }
+    },
+    {
+      "id": "settle-paid",
+      "frame": "laptop",
+      "beforeFile": "f01-laptop__04-settle-paid.png",
+      "afterFile": "f01-laptop__04-settle-paid.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "frame": "laptop",
+        "touch": false,
+        "flagOn": false,
+        "card": "MACK",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "",
+        "pitch": "",
+        "workLeg": false,
+        "gangDebt": 0,
+        "cigs": 20,
+        "audit": {
+          "on": false,
+          "tabs": 0,
+          "ripe": 0,
+          "holders": 0,
+          "avgTab": 0,
+          "live": null
+        },
+        "rowsText": [
+          "J\nTrade\n34",
+          "K\nTalk",
+          "L\nSteal"
+        ],
+        "spoken": "Mack can hide your money trail for 6 cigs.",
+        "note": "selling Ramen · 34 | heard debt from Red Hook",
+        "metrics": {
+          "contractRow": 0,
+          "spokenChars": 42,
+          "namesTarget": 0,
+          "verbCount": 3,
+          "noteChars": 45
+        }
+      },
+      "after": {
+        "ok": true,
+        "frame": "laptop",
+        "touch": false,
+        "flagOn": true,
+        "card": "MACK",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "collect 9 (store day)",
+        "pitch": "",
+        "workLeg": false,
+        "gangDebt": 2,
+        "cigs": 24,
+        "audit": {
+          "on": true,
+          "tabs": 0,
+          "ripe": 0,
+          "holders": 0,
+          "avgTab": 0,
+          "live": null
+        },
+        "rowsText": [
+          "J\nTrade\n14",
+          "K\nTalk",
+          "L\nSteal"
+        ],
+        "spoken": "All of it. He say anything?",
+        "note": "selling Shiv · 14 | watching pockets",
+        "metrics": {
+          "contractRow": 0,
+          "spokenChars": 27,
+          "namesTarget": 0,
+          "verbCount": 3,
+          "noteChars": 36
+        }
+      }
+    },
+    {
+      "id": "workoff",
+      "frame": "laptop",
+      "beforeFile": "f01-laptop__05-workoff.png",
+      "afterFile": "f01-laptop__05-workoff.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "frame": "laptop",
+        "touch": false,
+        "flagOn": false,
+        "card": "MACK",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "",
+        "pitch": "debtCollect",
+        "workLeg": false,
+        "gangDebt": 22,
+        "cigs": 3,
+        "audit": {
+          "on": false,
+          "tabs": 0,
+          "ripe": 0,
+          "holders": 0,
+          "avgTab": 0,
+          "live": null
+        },
+        "rowsText": [
+          "J\nPay\n3",
+          "K\nHaggle",
+          "L\nRefuse"
+        ],
+        "spoken": "Mack says the Reds want 3 cigs on your debt.",
+        "note": "Mack says the Reds want 3 cigs on your debt. | motive: debt pressure",
+        "metrics": {
+          "contractRow": 0,
+          "spokenChars": 44,
+          "namesTarget": 0,
+          "verbCount": 3,
+          "noteChars": 68
+        }
+      },
+      "after": {
+        "ok": true,
+        "frame": "laptop",
+        "touch": false,
+        "flagOn": true,
+        "card": "MACK",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "",
+        "pitch": "debtCollect",
+        "workLeg": true,
+        "gangDebt": 35,
+        "cigs": 3,
+        "audit": {
+          "on": true,
+          "tabs": 5,
+          "ripe": 1,
+          "holders": 5,
+          "avgTab": 6.7,
+          "live": null
+        },
+        "rowsText": [
+          "J\nPay\n3",
+          "K\nWork\noff the tab",
+          "L\nRefuse"
+        ],
+        "spoken": "Mack says the Reds want 3 cigs — or a collection run.",
+        "note": "Mack says the Reds want 3 cigs — or a collection run. | motive: gang debt",
+        "metrics": {
+          "contractRow": 1,
+          "spokenChars": 53,
+          "namesTarget": 0,
+          "verbCount": 3,
+          "noteChars": 73
+        }
+      }
+    },
+    {
+      "id": "creditor-pitch",
+      "frame": "ipad-mini-landscape",
+      "beforeFile": "f02-ipad-mini-landscape__01-creditor-pitch.png",
+      "afterFile": "f02-ipad-mini-landscape__01-creditor-pitch.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "frame": "ipad-mini-landscape",
+        "touch": true,
+        "flagOn": false,
+        "card": "MACK",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "",
+        "pitch": "",
+        "workLeg": false,
+        "gangDebt": 0,
+        "cigs": 20,
+        "audit": {
+          "on": false,
+          "tabs": 0,
+          "ripe": 0,
+          "holders": 0,
+          "avgTab": 0,
+          "live": null
+        },
+        "rowsText": [
+          "TRADE6",
+          "TALK",
+          "STEAL"
+        ],
+        "spoken": "",
+        "note": "selling Phone Charger · 6 | watching pockets",
+        "metrics": {
+          "contractRow": 0,
+          "spokenChars": 0,
+          "namesTarget": 0,
+          "verbCount": 3,
+          "noteChars": 44
+        }
+      },
+      "after": {
+        "ok": true,
+        "frame": "ipad-mini-landscape",
+        "touch": true,
+        "flagOn": true,
+        "card": "MACK",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "collect 9 (store day)",
+        "pitch": "contract",
+        "workLeg": false,
+        "gangDebt": 0,
+        "cigs": 20,
+        "audit": {
+          "on": true,
+          "tabs": 1,
+          "ripe": 1,
+          "holders": 1,
+          "avgTab": 9,
+          "live": null
+        },
+        "rowsText": [
+          "ACCEPT",
+          "HAGGLE",
+          "REFUSE"
+        ],
+        "spoken": "Dice is into me for 9 since store day. He posts up at the Blues' corner. Bring it, keep 4.",
+        "note": "Mack wants 9 collected off Dice. | motive: owed 9 since store day",
+        "metrics": {
+          "contractRow": 1,
+          "spokenChars": 90,
+          "namesTarget": 1,
+          "verbCount": 3,
+          "noteChars": 65
+        }
+      }
+    },
+    {
+      "id": "debtor-cornered",
+      "frame": "ipad-mini-landscape",
+      "beforeFile": "f02-ipad-mini-landscape__02-debtor-cornered.png",
+      "afterFile": "f02-ipad-mini-landscape__02-debtor-cornered.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "frame": "ipad-mini-landscape",
+        "touch": true,
+        "flagOn": false,
+        "card": "DICE",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "",
+        "pitch": "",
+        "workLeg": false,
+        "gangDebt": 0,
+        "cigs": 17,
+        "audit": {
+          "on": false,
+          "tabs": 0,
+          "ripe": 0,
+          "holders": 0,
+          "avgTab": 0,
+          "live": null
+        },
+        "rowsText": [
+          "TRADE14",
+          "TALK",
+          "STEALhot"
+        ],
+        "spoken": "",
+        "note": "selling Brass Knuckles · 14 | heard cigs from Dice",
+        "metrics": {
+          "contractRow": 0,
+          "spokenChars": 0,
+          "namesTarget": 1,
+          "verbCount": 3,
+          "noteChars": 50
+        }
+      },
+      "after": {
+        "ok": true,
+        "frame": "ipad-mini-landscape",
+        "touch": true,
+        "flagOn": true,
+        "card": "DICE",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "collect 9 (store day)",
+        "pitch": "",
+        "workLeg": false,
+        "gangDebt": 0,
+        "cigs": 12,
+        "audit": {
+          "on": true,
+          "tabs": 1,
+          "ripe": 1,
+          "holders": 1,
+          "avgTab": 9,
+          "live": {
+            "kind": "collect",
+            "name": "Dice",
+            "amt": 9,
+            "item": "",
+            "got": 0,
+            "done": false,
+            "workOff": false
+          }
+        },
+        "rowsText": [
+          "ACCEPT",
+          "THREATEN",
+          "REFUSE"
+        ],
+        "spoken": "Alright. Here's the 9. Tell him we're done.",
+        "note": "Dice: 9 on him, the rest later. | motive: owes Mack 9",
+        "metrics": {
+          "contractRow": 1,
+          "spokenChars": 43,
+          "namesTarget": 1,
+          "verbCount": 3,
+          "noteChars": 53
+        }
+      }
+    },
+    {
+      "id": "settle-row",
+      "frame": "ipad-mini-landscape",
+      "beforeFile": "f02-ipad-mini-landscape__03-settle-row.png",
+      "afterFile": "f02-ipad-mini-landscape__03-settle-row.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "frame": "ipad-mini-landscape",
+        "touch": true,
+        "flagOn": false,
+        "card": "MACK",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "",
+        "pitch": "",
+        "workLeg": false,
+        "gangDebt": 0,
+        "cigs": 20,
+        "audit": {
+          "on": false,
+          "tabs": 0,
+          "ripe": 0,
+          "holders": 0,
+          "avgTab": 0,
+          "live": null
+        },
+        "rowsText": [
+          "TRADE6",
+          "TALK",
+          "STEALhot"
+        ],
+        "spoken": "",
+        "note": "selling Phone Charger · 6 | watching pockets",
+        "metrics": {
+          "contractRow": 0,
+          "spokenChars": 0,
+          "namesTarget": 0,
+          "verbCount": 3,
+          "noteChars": 44
+        }
+      },
+      "after": {
+        "ok": true,
+        "frame": "ipad-mini-landscape",
+        "touch": true,
+        "flagOn": true,
+        "card": "MACK",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "collect 9 (store day)",
+        "pitch": "",
+        "workLeg": false,
+        "gangDebt": 0,
+        "cigs": 29,
+        "audit": {
+          "on": true,
+          "tabs": 2,
+          "ripe": 1,
+          "holders": 2,
+          "avgTab": 8.5,
+          "live": {
+            "kind": "collect",
+            "name": "Dice",
+            "amt": 9,
+            "item": "",
+            "got": 9,
+            "done": false,
+            "workOff": false
+          }
+        },
+        "rowsText": [
+          "SETTLE9 of 9",
+          "TALK",
+          "STEALhot"
+        ],
+        "spoken": "He posts up at the Blues' corner.",
+        "note": "settle up: 9 of 9 off Dice | watching pockets",
+        "metrics": {
+          "contractRow": 1,
+          "spokenChars": 33,
+          "namesTarget": 1,
+          "verbCount": 3,
+          "noteChars": 45
+        }
+      }
+    },
+    {
+      "id": "settle-paid",
+      "frame": "ipad-mini-landscape",
+      "beforeFile": "f02-ipad-mini-landscape__04-settle-paid.png",
+      "afterFile": "f02-ipad-mini-landscape__04-settle-paid.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "frame": "ipad-mini-landscape",
+        "touch": true,
+        "flagOn": false,
+        "card": "MACK",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "",
+        "pitch": "",
+        "workLeg": false,
+        "gangDebt": 0,
+        "cigs": 17,
+        "audit": {
+          "on": false,
+          "tabs": 0,
+          "ripe": 0,
+          "holders": 0,
+          "avgTab": 0,
+          "live": null
+        },
+        "rowsText": [
+          "TRADE4",
+          "TALK",
+          "STEALhot"
+        ],
+        "spoken": "Dice wants 9 cigs to leave your pockets alone.",
+        "note": "selling Phone Charger · 4 | heard cigs from Dice",
+        "metrics": {
+          "contractRow": 0,
+          "spokenChars": 46,
+          "namesTarget": 1,
+          "verbCount": 3,
+          "noteChars": 48
+        }
+      },
+      "after": {
+        "ok": true,
+        "frame": "ipad-mini-landscape",
+        "touch": true,
+        "flagOn": true,
+        "card": "MACK",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "collect 9 (store day)",
+        "pitch": "",
+        "workLeg": false,
+        "gangDebt": 0,
+        "cigs": 24,
+        "audit": {
+          "on": true,
+          "tabs": 0,
+          "ripe": 0,
+          "holders": 0,
+          "avgTab": 0,
+          "live": null
+        },
+        "rowsText": [
+          "TRADE32",
+          "TALK",
+          "STEALhot"
+        ],
+        "spoken": "All of it. He say anything?",
+        "note": "selling Ramen · 32 | watching pockets",
+        "metrics": {
+          "contractRow": 0,
+          "spokenChars": 27,
+          "namesTarget": 0,
+          "verbCount": 3,
+          "noteChars": 37
+        }
+      }
+    },
+    {
+      "id": "workoff",
+      "frame": "ipad-mini-landscape",
+      "beforeFile": "f02-ipad-mini-landscape__05-workoff.png",
+      "afterFile": "f02-ipad-mini-landscape__05-workoff.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "frame": "ipad-mini-landscape",
+        "touch": true,
+        "flagOn": false,
+        "card": "MACK",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "",
+        "pitch": "debtCollect",
+        "workLeg": false,
+        "gangDebt": 22,
+        "cigs": 3,
+        "audit": {
+          "on": false,
+          "tabs": 0,
+          "ripe": 0,
+          "holders": 0,
+          "avgTab": 0,
+          "live": null
+        },
+        "rowsText": [
+          "PAY3",
+          "HAGGLE",
+          "REFUSE"
+        ],
+        "spoken": "Mack says the Reds want 3 cigs on your debt.",
+        "note": "Mack says the Reds want 3 cigs on your debt. | motive: debt pressure",
+        "metrics": {
+          "contractRow": 0,
+          "spokenChars": 44,
+          "namesTarget": 0,
+          "verbCount": 3,
+          "noteChars": 68
+        }
+      },
+      "after": {
+        "ok": true,
+        "frame": "ipad-mini-landscape",
+        "touch": true,
+        "flagOn": true,
+        "card": "MACK",
+        "creditor": "Mack",
+        "debtor": "Dice",
+        "job": "",
+        "pitch": "debtCollect",
+        "workLeg": true,
+        "gangDebt": 22,
+        "cigs": 3,
+        "audit": {
+          "on": true,
+          "tabs": 1,
+          "ripe": 1,
+          "holders": 1,
+          "avgTab": 7,
+          "live": null
+        },
+        "rowsText": [
+          "PAY3",
+          "WORKoff the tab",
+          "REFUSE"
+        ],
+        "spoken": "Mack says the Reds want 3 cigs — or a collection run.",
+        "note": "Mack says the Reds want 3 cigs — or a collection run. | motive: debt pressure",
+        "metrics": {
+          "contractRow": 1,
+          "spokenChars": 53,
+          "namesTarget": 0,
+          "verbCount": 3,
+          "noteChars": 77
+        }
+      }
+    }
+  ],
+  "browserMessages": [
+    {
+      "side": "before",
+      "type": "warning",
+      "text": "THREE.MeshLambertMaterial: 'flatShading' is not a property of this material.",
+      "count": 8
+    },
+    {
+      "side": "after",
+      "type": "warning",
+      "text": "THREE.MeshLambertMaterial: 'flatShading' is not a property of this material.",
+      "count": 8
+    }
+  ]
+}
