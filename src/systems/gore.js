@@ -669,6 +669,64 @@
     });
   };
 
+  /* THE KILL CLOUD — the payoff, and it is a different event from a bite.
+     ------------------------------------------------------------------
+     A landed bite is a BURST: fast, tight, at the wound, gone in two seconds
+     (goreBloom above). A DEATH is not that. When a body stops swimming the
+     blood stops being pumped out of it in pulses and starts simply LEAVING
+     it, and what you see is a slow, enormous, low-contrast cloud that hangs
+     where the animal is and is still there when you swim back. Before this,
+     dying underwater in this game produced exactly the same puff as being
+     nicked — which is why an orca kill read as nothing at all.
+
+     Three layers, all through machinery that already exists so nothing here
+     is a second blood system and every cap still holds:
+       1. the burst goreBloom already knows how to make, at full amount
+       2. a HAZE SHELL the burst cannot make: a dozen big, slow, long-lived
+          puffs seeded on a sphere around the corpse rather than at a point,
+          which is what turns "a puff" into "a cloud you are inside"
+       3. a short, heavy chum handle, so the cloud keeps being fed for a few
+          seconds as the body sinks, and every shark in smell range comes.
+     Plus the slick overhead: blood from a kill reaches the surface, and from
+     a boat that red patch IS the kill.
+
+     Costs nothing when it is not called, and when it is: pooled puffs under
+     the existing puffCap, one pooled slick under slickCap, one chum handle
+     out of twelve. On land it is a no-op — a land death already has the
+     whole air-medium gore path and does not want a plume. */
+  CBZ.goreKillCloud = function (x, y, z, opts) {
+    if (!waterOn() || !CBZ.scene) return false;
+    if (typeof x !== "number" || typeof y !== "number" || typeof z !== "number") return false;
+    if (!isFinite(x) || !isFinite(y) || !isFinite(z)) return false;
+    if (!woundInWater(x, y, z)) return false;         // a land death is not this
+    opts = opts || {};
+    const size = Math.max(0.4, Math.min(3, opts.size == null ? 1 : opts.size));
+    const d2 = dist2Cam(x, z);
+    if (CBZ.camera && CBZ.camera.position && d2 > 110 * 110) return false;
+    const lod = d2 > 55 * 55 ? 0.5 : 1;
+    const sy = seaY(x, z);
+    // 1 — the burst, borrowed whole
+    CBZ.goreBloom(x, y, z, { amount: 1.6 * size, arterial: true });
+    // 2 — the shell. Seeded on a sphere of the BODY's own scale, drifting
+    //     outward slowly: a cloud has an inside, a puff does not.
+    const n = Math.max(3, Math.round(9 * size * lod));
+    const rad = 0.5 + size * 0.9;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * 6.28, c = Math.random() * 2 - 1;
+      const s = Math.sqrt(Math.max(0, 1 - c * c)), r = rad * (0.35 + Math.random() * 0.65);
+      puff(x + Math.cos(a) * s * r, y + c * r * 0.7, z + Math.sin(a) * s * r,
+        Math.cos(a) * s * 0.28, 0.02, Math.sin(a) * s * 0.28,
+        0.9 + Math.random() * 1.1 * size, 7 + Math.random() * 6, true, sy);
+    }
+    // 3 — the body keeps leaking while it sinks
+    if (opts.trail !== false) {
+      try { CBZ.goreChum(x, y, z, 1, 4 + size * 2); } catch (e) {}
+    }
+    // and it reaches the surface: from above, that patch IS the kill
+    CBZ.goreSlick(x, z, 1.1 * size);
+    return true;
+  };
+
   // where a gib comes to rest it bleeds. On the seabed that must NOT be a
   // ground pool — a decal lying in the dark under 30m of water is the exact
   // "invisible gore at the bottom of the ocean" bug this whole block exists to
@@ -726,8 +784,16 @@
       c.acc += dt;
       if (c.acc >= 0.35) {
         c.acc = 0;
-        CBZ.goreBloom(x, y, z, { amount: 0.3 + c.rate * 0.7 });
-        if (Math.random() < 0.3) CBZ.goreSlick(x, z, 0.3 + c.rate * 0.5);
+        /* THE TRAIL SCALES WITH THE WOUND. It used to top out at 1.0 amount
+           however badly the thing was bleeding, which was survivable only
+           because a mauled animal used to hold three or four handles at once
+           and got its density from the duplication. systems/wounds.js now
+           opens exactly ONE per animal (a body bleeds; its individual holes do
+           not bleed separately), which frees slots for other bleeders but
+           made a single hard-bitten orca trail a third of what it did. A full
+           rate is a torn artery now, not a nick. */
+        CBZ.goreBloom(x, y, z, { amount: 0.35 + c.rate * 1.25, arterial: c.rate > 0.75 });
+        if (Math.random() < 0.25 + c.rate * 0.3) CBZ.goreSlick(x, z, 0.3 + c.rate * 0.7);
       }
     }
   }

@@ -586,15 +586,17 @@
 
      ?cfg_CREATURE_BITE_CHUNK=0 (systems/wounds.js) turns it back off. */
   const CHUNK_EVERY = 1.1;             // s per victim — a wound, not a grinder
+  // returns TRUE when a wound actually landed — the caller uses that to decide
+  // whether it still owes the hit a blood burst of its own.
   function biteChunkOn(a, t, tp, frac) {
-    if (typeof CBZ.creatureBiteChunk !== "function") return;
-    if (!a || !t || !tp || !a.species || !t.species) return;
-    if (a.species === t.species) return;              // a pod squabble is not a meal
+    if (typeof CBZ.creatureBiteChunk !== "function") return false;
+    if (!a || !t || !tp || !a.species || !t.species) return false;
+    if (a.species === t.species) return false;        // a pod squabble is not a meal
     const now = (typeof performance !== "undefined" ? performance.now() : Date.now()) * 0.001;
-    if (now - (t._mpChunkT || -1e9) < CHUNK_EVERY) return;
+    if (now - (t._mpChunkT || -1e9) < CHUNK_EVERY) return false;
     t._mpChunkT = now;
     const hp = actorPos(a);
-    if (!hp) return;
+    if (!hp) return false;
     const face = (t.heading != null) ? t.heading : (t.group ? -t.group.rotation.y : 0);
     const fx = Math.cos(face), fz = Math.sin(face);
     const L = bodyLen(t) * 0.5, B = bodyBeam(t) * 0.5;
@@ -607,14 +609,16 @@
     _ck.x = tp.x + fx * along - fz * side;
     _ck.z = tp.z + fz * along + fx * side;
     _ck.y = (tp.y || 0) + (Math.random() - 0.5) * B * 0.5;
+    let took = false;
     try {
-      CBZ.creatureBiteChunk(t, _ck, {
+      took = CBZ.creatureBiteChunk(t, _ck, {
         jaw: gapeOf(a) * 0.45,
         sev: clamp((frac || 0.1) * 6 + sizeOf(a) / Math.max(0.2, sizeOf(t)) * 0.4, 0.3, 1),
         bleedS: 16,
       });
-      AUDIT.chunks = (AUDIT.chunks || 0) + 1;
-    } catch (e) {}
+      if (took) AUDIT.chunks = (AUDIT.chunks || 0) + 1;
+    } catch (e) { took = false; }
+    return !!took;
   }
   const _ck = { x: 0, y: 0, z: 0 };
   function ramOpts(a) {
@@ -639,12 +643,19 @@
         }
         const tp = actorPos(t);
         if (tp) {
-          // THE READ AT DISTANCE, and it is the whole read: white water where
-          // a three-tonne animal just hit another one, and blood in the sea.
+          // THE READ AT DISTANCE: white water where a three-tonne animal just
+          // hit another one.
+          //
+          // THE BLOOD USED TO BE HERE TOO, AND IT NEVER RAN. This onHit is
+          // creature_combat's flank-pass callback, and the note at hurt()'s
+          // biteChunkOn call already records the measurement: a pod that took
+          // 23% of a great white's health landed exactly ZERO flank passes
+          // doing it. So the one bloom that was supposed to be a pod bite's
+          // blood in the water was dead code, and every landed blow in this
+          // file went through hurt() with no burst at all. The burst now lives
+          // there, on the bus every attack actually arrives on. (surfaceHit
+          // stays: white water IS ram-specific and would double if it moved.)
           surfaceHit(tp.x, tp.z, 1.6 + sizeOf(a) * 0.9);
-          if (CBZ.goreBloom) {
-            try { CBZ.goreBloom(tp.x, (tp.y || 0) + 0.4, tp.z, { amount: 0.7 }); } catch (e) {}
-          }
         }
         if (CBZ.creatureFlinch) { try { CBZ.creatureFlinch(t); } catch (e) {} }
         AUDIT.rams++;
@@ -1015,6 +1026,25 @@
       const m = victim._mp;
       if (m) { m.target = null; m.rolling = null; }
       if (victim._mpRoll) { victim._mpRoll = null; clearTonic(victim); }
+      /* THE KILL PAYOFF. A death is the moment the whole hunt was for, and
+         until now it looked identical to a nick: the same 0.3s puff, then
+         nothing. gore.js's kill cloud is the other shape — a full burst, a
+         slow haze shell around the corpse that is still there when you swim
+         back, and a slick on the surface directly above it, which from a boat
+         IS the kill. Sized by the body: a tuna is a puff, an orca is weather.
+         Once per animal (systems/wounds.js sets the same flag for kills that
+         arrive by any other path), and a no-op out of the water. */
+      if (typeof CBZ.goreKillCloud === "function" && !victim._cbzKillCloud) {
+        victim._cbzKillCloud = 1;
+        const vp = actorPos(victim);
+        if (vp) {
+          const L = bodyLen(victim);
+          try {
+            CBZ.goreKillCloud(vp.x, (vp.y || 0) + 0.2, vp.z,
+              { size: clamp((L > 0 ? L : 4) * 0.22, 0.5, 2.6) });
+          } catch (e) {}
+        }
+      }
     }
     // WHOEVER JUST BLED IS CHUM. One call into §7 — never a second blood system.
     const frac = dmg / Math.max(1, maxHpOf(victim));
@@ -1026,7 +1056,34 @@
     // took 23% of a great white's health in a staged fight landed exactly
     // zero flank passes doing it: the roll-over row and predatorHunt's own
     // strikes are the paths that actually connect, and they all end here.
-    if (frac > 0.03) biteChunkOn(by, victim, actorPos(victim), frac);
+    /* AND THE BURST. The chum trail above is the SLOW half — a puff every
+       0.35s wherever the body is — so on its own a landed bite from a
+       three-tonne animal read as a leak rather than as a blow.
+
+       creatureBiteChunk already fires the better version of this burst: it
+       knows the wound's real position on the flank and the outward normal of
+       the surface it opened, so its plume erupts OUT of the body instead of
+       ballooning around the body's centre. So this is the FALLBACK, fired
+       only when the chunk did not land (out of the camera's band, the rig has
+       its four wounds already, no part under the teeth) — never both, because
+       two blooms on one bite is the red-lens failure wildlife_tame.js already
+       measured and tuned away from.
+
+       The `frac > 0.03` gate is what keeps either off the roll-over finisher,
+       which calls hurt() every frame with a sliver of damage and would
+       otherwise stack six clouds a second in front of a chase camera. */
+    if (frac > 0.03) {
+      const took = biteChunkOn(by, victim, actorPos(victim), frac);
+      if (!took && typeof CBZ.goreBloom === "function") {
+        const bp = actorPos(victim);
+        if (bp) {
+          try {
+            CBZ.goreBloom(bp.x, (bp.y || 0) + 0.3, bp.z,
+              { amount: clamp(0.5 + frac * 4, 0.5, 1.8), arterial: frac > 0.12 });
+          } catch (e) {}
+        }
+      }
+    }
   }
 
   function surfaceHit(x, z, power) {
