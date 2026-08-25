@@ -49,9 +49,6 @@
                      water_float's flooding/sinking owner.
      baitEaten       mouthfuls taken out of a bait ball. The school is eaten
                      DOWN and then collapses; the number is the eating.
-     birds           gulls drawn to the surface over blood or a kill — the
-                     long-range read, and the only part of a marine kill that
-                     is visible above the water.
      scavengers      frames in which an animal was working a carcass, driven by
                      the same CBZ.predatorHunt every other hunter spends.
 */
@@ -86,7 +83,7 @@ const subjects = [
     id: "bait-ball",
     label: "A bait ball collapsing",
     scenario: "bait", seconds: 15,
-    focus: "A school with no teeth does not scatter when something comes for it — it BALLS, and the ball gets tighter and gets driven UP against the surface as more mouths arrive, because every attack comes from below and the only way out is up. Then it is eaten down and it breaks apart. One InstancedMesh, a couple of hundred bodies, one draw call. Look for the dense silver sphere pinned under the surface, the white water round it, and the gulls over the top.",
+    focus: "A school with no teeth does not scatter when something comes for it — it BALLS, and the ball gets tighter and gets driven UP against the surface as more mouths arrive, because every attack comes from below and the only way out is up. Then it is eaten down and it breaks apart. One InstancedMesh, a couple of hundred bodies, one draw call. Look for the dense silver sphere pinned under the surface and the white water round it.",
     state: "BAIT BALL · 3 FEEDING",
     shot: { dist: 26, height: 9, pitch: 0.34 },
   },
@@ -94,7 +91,7 @@ const subjects = [
     id: "carcass-crowd",
     label: "A carcass draws a crowd",
     scenario: "carcass", seconds: 16,
-    focus: "A dead animal in the water is the strongest chum there is, and until now nothing in the game came for it. Now the sharks smell it, circle it and work it — ticked by CBZ.predatorHunt with the CORPSE as the quarry, which is exactly why they circle rather than charge — the body visibly shrinks as it is eaten, and the birds are up over it. No UI says any of this.",
+    focus: "A dead animal in the water is the strongest chum there is, and until now nothing in the game came for it. Now the sharks smell it, circle it and work it — ticked by CBZ.predatorHunt with the CORPSE as the quarry, which is exactly why they circle rather than charge — and the body visibly shrinks as it is eaten. No UI says any of this.",
     state: "CARCASS · SCAVENGERS INBOUND",
     shot: { dist: 40, height: 15, pitch: 0.44 },
   },
@@ -442,7 +439,7 @@ async function stageMarinePredation(input) {
   // ---- RUN IT. The page's own frame, in fixed steps. ------------------------
   const steps = Math.round((subject.seconds || 20) / RUN);
   let hullMin = boat ? (boat.engineHp == null ? 100 : boat.engineHp) : -1;
-  let ballPeak = 0, birdPeak = 0;
+  let ballPeak = 0;
   for (let i = 0; i < steps; i++) {
     CBZ.hitstop = 0; CBZ.slowmo = 0;
     // hold the boat still: a moored hull makes the bite geometry the variable
@@ -466,7 +463,6 @@ async function stageMarinePredation(input) {
     if (CBZ.marineFrenzyAudit) {
       const f = CBZ.marineFrenzyAudit();
       if (f.fishDrawn > ballPeak) ballPeak = f.fishDrawn;
-      if (f.birds > birdPeak) birdPeak = f.birds;
     }
   }
 
@@ -541,7 +537,7 @@ async function stageMarinePredation(input) {
   label("state", subject.state, `position:absolute;right:26px;top:25px;color:${before ? "#ffb0b0" : "#7ff0bb"};font-size:11px;font-weight:900;letter-spacing:.1em`);
   label("read",
     `chum ${audit.chumSources || 0} · sharks near ${sharksNear} · bites ${audit.shipBites || 0}` +
-    `\nbait eaten ${frenzy.baitEaten || 0} · fish drawn ${ballPeak} · birds ${birdPeak}` +
+    `\nbait eaten ${frenzy.baitEaten || 0} · fish drawn ${ballPeak}` +
     `\nscavenging ${frenzy.scavengerFrames || 0} · hull ${hullMin} · feed lines ${feedLines}`,
     "position:absolute;right:26px;top:52px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:#9fe8c3;white-space:pre;text-align:right");
   label("source", new URL(input.sourceUrl).host + new URL(input.sourceUrl).pathname,
@@ -565,7 +561,6 @@ async function stageMarinePredation(input) {
       shipBites: audit.shipBites || 0,
       baitEaten: frenzy.baitEaten || 0,
       fishDrawn: ballPeak,
-      birds: birdPeak,
       scavengers: frenzy.scavengerFrames || 0,
       feedLines: feedLines,
     },
@@ -583,7 +578,7 @@ export default {
     "nothing at all. AFTER: one predation graph derived from the bestiary's own numbers decides who eats " +
     "whom and who MOBS whom; a megalodon closes its jaws across a speedboat's beam, crushes the hull, " +
     "throws the crew in the water and leaves them bleeding for the sharks it just drew; a school balls up " +
-    "under attack and collapses as it is eaten; a carcass draws a crowd; and gulls over the boil are the " +
+    "under attack and collapses as it is eaten; a carcass draws a crowd; and the boil over it is the " +
     "long-range read that makes you turn the boat. No HUD anywhere: the owner asked twice. " +
     "Orca pod tactics are a CONSUMER of this block's published pod primitives and are photographed by " +
     "city/wildlife_orca.js's own preset, not here.",
@@ -612,8 +607,8 @@ export default {
   stage: stageMarinePredation,
   metricsNote:
     "Every number is read over the same simulated seconds the picture was taken in: the blocks' own probes " +
-    "(CBZ.marineAudit, CBZ.marineFrenzyAudit) for chum, ship bites, mouthfuls, fish and gulls, and direct " +
-    "reads of the actors and the boat's engine for the rest. `fishDrawn` and `birds` are PEAKS across the " +
+    "(CBZ.marineAudit, CBZ.marineFrenzyAudit) for chum, ship bites, mouthfuls and fish, and direct " +
+    "reads of the actors and the boat's engine for the rest. `fishDrawn` is a PEAK across the " +
     "run rather than end-states, because a bait ball is at its most eaten one frame before it collapses " +
     "and is then gone — an end-of-run read would report zero for the frame that worked. `feedLines` is the " +
     "no-HUD promise measured from OUTSIDE the blocks, by wrapping the two things in this game that can " +
@@ -627,7 +622,6 @@ export default {
     shipBites: { label: "Bites landed on the hull", unit: "bites", better: "higher" },
     baitEaten: { label: "Mouthfuls taken out of the bait ball", unit: "bites", better: "higher" },
     fishDrawn: { label: "Bait fish on screen at the ball's peak", unit: "fish", better: "higher" },
-    birds: { label: "Gulls working the surface at the peak", unit: "birds", better: "higher" },
     scavengers: { label: "Frames an animal spent working a carcass", unit: "frames", better: "higher" },
     feedLines: { label: "HUD feed lines the event produced (must stay zero)", unit: "lines", better: "lower" },
   },

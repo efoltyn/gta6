@@ -7,9 +7,9 @@
 
    A marine fight is the least legible event in the game. It is small, it is
    under the surface, it is grey on grey, and by the time you are close enough
-   to read two animals fighting it is over. Real sailors do not spot the
-   predator — they spot the BIRDS, and the white water under them, and they
-   steer for it. That is the entire design of this file:
+   to read two animals fighting it is over. So the read has to be the water
+   itself: white water, a ball of fish driven up against the surface, blood.
+   That is the entire design of this file:
 
      1. BAIT BALL. A school of small fish under attack does not scatter, it
         BALLS — a tight sphere that gets tighter and gets driven UP against the
@@ -18,17 +18,11 @@
         hundred silver bodies cost one draw call, and it is the single most
         legible marine event there is.
 
-     2. THE BIRDS. Gulls wheel over anything at the surface that is bleeding or
-        being eaten, and they dive. Birds are visible from further away than
-        anything else in this game because they are ABOVE the water, against
-        the sky, and they move. They are the long-range read, and they are what
-        makes the player turn the boat.
-
-     3. THE BOIL. White water and blood at the surface, on a cadence scaled by
+     2. THE BOIL. White water and blood at the surface, on a cadence scaled by
         how many animals are feeding. Reuses waterSplashAt and goreBloom — no
         new particle system.
 
-     4. SCAVENGERS. A carcass in the water draws a crowd. This is not a fourth
+     3. SCAVENGERS. A carcass in the water draws a crowd. This is not a fourth
         AI loop: a scavenger is ticked by CBZ.predatorHunt with the carcass as
         its quarry (which is why they CIRCLE it, exactly like the real thing)
         and strikes through creature_combat, the same two drivers every other
@@ -38,8 +32,14 @@
    HOW IT COMPOSES WITH THE REST, which is the whole point of building it on
    top rather than beside: marine_predation's §7 makes a dead or wounded thing
    in the water CHUM; the chum draws sharks; the sharks feeding make a boil;
-   the boil draws birds; the birds are what the player sees at 600 m. Every
-   arrow in that chain already existed except the last two.
+   the boil is what the player sees. Every arrow in that chain already existed
+   except the last one.
+
+   NO BIRDS. There were gulls here — two flat triangles per instance, rolled on
+   their long axis instead of flapping. At 400 m that reads as a bird; anywhere
+   near a frenzy site, which is where they orbited, it reads as a paper plane.
+   Removed rather than fixed. If the sea ever wants a long-range read again it
+   should be a real winged rig, not a dart.
 
    NO HUD. Same contract as marine_predation.js, for the same reason: the
    owner said it twice. There is not a toast, a marker, an icon or a feed line
@@ -57,20 +57,19 @@
    DETERMINISM. Nothing here runs at world build. Sites are opened by gameplay
    events, and the per-fish parameters come from an integer hash rather than
    Math.random, so the same ball looks the same in both columns of a preset.
-   Per-frame liveliness (a gull deciding to dive) may use Math.random — the
-   same split creature_combat.js and arena_fights.js document.
+   Per-frame liveliness may use Math.random — the same split
+   creature_combat.js and arena_fights.js document.
 
    FLAGS (one-line reverts):
      CBZ.CONFIG.MARINE_FRENZY     the whole file
      CBZ.CONFIG.MARINE_BAITBALL   the bait ball
-     CBZ.CONFIG.MARINE_BIRDS      the gulls
      CBZ.CONFIG.MARINE_SCAVENGE   a carcass drawing a crowd
 
    PUBLIC API
      CBZ.marineFrenzyAt(x, z, opts)   open a site by hand:
                                         {boil:true, seconds, press} white water
-                                        and birds over an event; {carcass:actor}
-                                        a body; otherwise a bait ball
+                                        over an event; {carcass:actor} a body;
+                                        otherwise a bait ball
      CBZ.marineFrenzySites(out)       the live sites
      CBZ.marineScavengeStep(a, dt)    ONE seam, called by marine_predation's
                                       drive: true when scavenging owns the frame
@@ -86,19 +85,16 @@
   // ---- FLAGS ---------------------------------------------------------------
   if (CFG.MARINE_FRENZY == null) CFG.MARINE_FRENZY = true;
   if (CFG.MARINE_BAITBALL == null) CFG.MARINE_BAITBALL = true;
-  if (CFG.MARINE_BIRDS == null) CFG.MARINE_BIRDS = true;
   if (CFG.MARINE_SCAVENGE == null) CFG.MARINE_SCAVENGE = true;
   function ON() { return CFG.MARINE_FRENZY !== false && CFG.MARINE_PREDATION !== false; }
   function BALLS() { return ON() && CFG.MARINE_BAITBALL !== false; }
-  function BIRDS() { return ON() && CFG.MARINE_BIRDS !== false; }
   function SCAV() { return ON() && CFG.MARINE_SCAVENGE !== false; }
 
   // ---- tuning --------------------------------------------------------------
   const SITE_MAX = 3;          // concurrent frenzies. Three is already a lot of sea.
   const FISH_CAP = 260;        // instances in the ONE bait-ball mesh
-  const GULL_CAP = 22;         // instances in the ONE gull mesh
   const DRAW_R = 700;          // u — beyond this a site draws nothing
-  const BIRD_R = 900;          // u — birds are the LONG read, so they draw further
+  const KEEP_R = 1440;         // u — past this a site is forgotten, not just undrawn
   const POLL_HZ = 0.5;         // s between site scans (2 Hz)
   const SCHOOL_MIN = 10;       // herd[1] this big and no teeth = a bait species
   const BALL_R0 = 4.2;         // u — a calm ball's radius at species scale 1
@@ -119,7 +115,7 @@
   const _e = THREE ? new THREE.Euler() : null;
   const _p = THREE ? new THREE.Vector3() : null;
   const _s = THREE ? new THREE.Vector3(1, 1, 1) : null;
-  const AUDIT = { sites: 0, baitOpened: 0, baitEaten: 0, carcassOpened: 0, scavengers: 0, birds: 0, hudWrites: 0 };
+  const AUDIT = { sites: 0, baitOpened: 0, baitEaten: 0, carcassOpened: 0, scavengers: 0, hudWrites: 0 };
 
   function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
   function actorPos(a) { return a && (a.pos || (a.group && a.group.position)) || null; }
@@ -158,7 +154,7 @@
       live: false, kind: "bait", ref: null,
       x: 0, y: 0, z: 0, r: BALL_R0, r0: BALL_R0,
       food: 1, food0: 1, fish0: 0, feeders: 0, press: 0, t: 0, eatT: 0,
-      collapse: -1, boilT: 0, seedOff: 0, depth: 2.5, birds: 0, ttl: -1,
+      collapse: -1, boilT: 0, seedOff: 0, depth: 2.5, ttl: -1,
     };
   }
   for (let i = 0; i < SITE_MAX; i++) SITES.push(newSite());
@@ -245,11 +241,10 @@
 
   /* A BOIL WITH NOTHING IN IT YET. The third kind of site, and the one an
      outside caller actually wants: "something big just happened at this point
-     in the water". No school, no body — just white water and the birds it
-     raises, for as long as it is worth looking at. city/marine_predation.js
-     spends it the moment a megalodon opens a hull, because a sinking boat with
-     men in the water IS a frenzy site and the gulls over it are how you find
-     the wreck from the far side of the bay. */
+     in the water". No school, no body — just white water, for as long as it is
+     worth looking at. city/marine_predation.js spends it the moment a megalodon
+     opens a hull, because a sinking boat with men in the water IS a frenzy site
+     and the boil over it is how you find the wreck across the bay. */
   function openBoil(x, z, secs, press) {
     if (!ON()) return null;
     const s = freeSite();
@@ -307,7 +302,7 @@
         if (s.kind === "bait" && s.ref.dead) { s.collapse = s.collapse < 0 ? 0 : s.collapse; }
       }
       _t0 = s.x - C.x; _t1 = s.z - C.z;
-      if (_t0 * _t0 + _t1 * _t1 > (BIRD_R * 1.6) * (BIRD_R * 1.6)) { closeSite(s); continue; }
+      if (_t0 * _t0 + _t1 * _t1 > KEEP_R * KEEP_R) { closeSite(s); continue; }
       s.feeders = 0;
     }
     for (let i = 0; i < list.length; i++) {
@@ -470,151 +465,6 @@
       if (w >= FISH_CAP) break;
     }
     return w;
-  }
-
-  // ============================================================
-  //  §4. THE BIRDS. The long-range read, and the only part of a marine kill
-  //  that is visible ABOVE the water. One InstancedMesh, one glyph: a shallow
-  //  V with a nose and a tail, which is what a gull is at 400 m. The flap is
-  //  a roll oscillation rather than a hinged wing — at the range this exists
-  //  to be seen from, a rocking V reads as flapping and a hinged wing costs a
-  //  second mesh and a second matrix write for a difference nobody can see.
-  // ============================================================
-  let gullMesh = null;
-  const GULLS = [];
-  function ensureGullMesh() {
-    if (gullMesh) {
-      if (CBZ.scene && gullMesh.parent !== CBZ.scene) { try { CBZ.scene.add(gullMesh); } catch (e) {} }
-      return gullMesh;
-    }
-    if (!THREE || !CBZ.scene) return null;
-    const geo = new THREE.BufferGeometry();
-    // nose, right tip, left tip, tail — two triangles, +X forward.
-    const v = new Float32Array([
-      0.34, 0, 0, -0.14, 0.10, 0.62, -0.40, 0, 0,
-      0.34, 0, 0, -0.40, 0, 0, -0.14, 0.10, -0.62,
-    ]);
-    geo.setAttribute("position", new THREE.BufferAttribute(v, 3));
-    geo.computeVertexNormals();
-    const mat = new THREE.MeshLambertMaterial({
-      color: 0xf2f4f2, emissive: 0x4a5560, side: THREE.DoubleSide,
-    });
-    gullMesh = new THREE.InstancedMesh(geo, mat, GULL_CAP);
-    gullMesh.frustumCulled = false;
-    gullMesh.castShadow = false;
-    gullMesh.count = 0;
-    gullMesh.name = "marineGulls";
-    try { CBZ.scene.add(gullMesh); } catch (e) { gullMesh = null; }
-    for (let i = 0; i < GULL_CAP; i++) {
-      GULLS.push({
-        site: null, ang: h01(i, 11) * 6.283185307, r: 5 + h01(i, 12) * 11,
-        h: 5 + h01(i, 13) * 10, spd: 0.5 + h01(i, 14) * 0.5,
-        flap: 5 + h01(i, 15) * 5, dive: -1, sc: 0.9 + h01(i, 16) * 0.5,
-      });
-    }
-    return gullMesh;
-  }
-
-  /* HOW MANY BIRDS A SITE HAS EARNED. Birds are the amplifier, so they scale
-     with how much is actually going on: a lone shark nosing a carcass gets a
-     couple, a full frenzy gets the flock. They also work BLOOD with nothing
-     else attached to it — gore.js's chum list is polled straight, so the
-     player's own bleeding in the water raises birds, which is the cheapest
-     possible "you are being hunted and the whole sea knows" cue. */
-  function birdDemand(s) {
-    let n = 1 + Math.round(clamp(s.press, 0, 1) * 5);
-    if (s.kind === "carcass") n += 2;
-    // it has to be near enough to the surface for a bird to work it
-    const d = seaY(s.x, s.z) - s.y;
-    if (d > 9) n = Math.min(n, 1);
-    return clamp(n, 0, 8);
-  }
-
-  let chumSite = null;
-  function chumBirds() {
-    // a blood trail with nothing feeding on it yet still gets gulls: they are
-    // the first thing to arrive at anything on the surface.
-    if (typeof CBZ.goreChumList !== "function") return;
-    let list = null;
-    try { list = CBZ.goreChumList(); } catch (e) { return; }
-    if (!list || !list.length) { chumSite = null; return; }
-    const C = camPos();
-    if (!C) return;
-    let best = null, bd = BIRD_R * BIRD_R;
-    for (let i = 0; i < list.length; i++) {
-      const c = list[i];
-      if (!c) continue;
-      _t0 = c.x - C.x; _t1 = c.z - C.z;
-      const d2 = _t0 * _t0 + _t1 * _t1;
-      if (d2 < bd) { bd = d2; best = c; }
-    }
-    if (!best) { chumSite = null; return; }
-    chumSite = chumSite || { live: true, kind: "chum", x: 0, y: 0, z: 0, r: 5, press: 0.25, ref: null };
-    chumSite.x = best.x; chumSite.z = best.z; chumSite.y = seaY(best.x, best.z) - 0.4;
-  }
-
-  function drawBirds(dt) {
-    const mesh = BIRDS() ? ensureGullMesh() : gullMesh;
-    if (!mesh) return;
-    const C = camPos();
-    let w = 0;
-    if (BIRDS() && C) {
-      // assign birds to sites: the hot ones first, then the chum slick.
-      let want = 0;
-      for (let i = 0; i < SITES.length; i++) {
-        const s = SITES[i];
-        if (!s.live) continue;
-        _t0 = s.x - C.x; _t1 = s.z - C.z;
-        if (_t0 * _t0 + _t1 * _t1 > BIRD_R * BIRD_R) continue;
-        const n = birdDemand(s);
-        for (let k = 0; k < n && want < GULL_CAP; k++) GULLS[want++].site = s;
-      }
-      if (chumSite && want < GULL_CAP) {
-        _t0 = chumSite.x - C.x; _t1 = chumSite.z - C.z;
-        if (_t0 * _t0 + _t1 * _t1 <= BIRD_R * BIRD_R) {
-          for (let k = 0; k < 3 && want < GULL_CAP; k++) GULLS[want++].site = chumSite;
-        }
-      }
-      for (let i = want; i < GULLS.length; i++) GULLS[i].site = null;
-
-      for (let i = 0; i < GULLS.length; i++) {
-        const g = GULLS[i];
-        const s = g.site;
-        if (!s) continue;
-        g.ang += dt * g.spd * (0.55 + clamp(s.press, 0, 1) * 0.9);
-        // THE DIVE. Liveliness, so Math.random is allowed here (and only here).
-        if (g.dive < 0) {
-          if (Math.random() < dt * (0.06 + clamp(s.press, 0, 1) * 0.5)) g.dive = 0;
-        } else {
-          g.dive += dt;
-          if (g.dive > 1.5) {
-            g.dive = -1;
-            splash(s.x + Math.cos(g.ang) * g.r * 0.4, s.z + Math.sin(g.ang) * g.r * 0.4, 0.55);
-          }
-        }
-        const sy = seaY(s.x, s.z);
-        let hgt = g.h;
-        let rr = g.r;
-        if (g.dive >= 0) {
-          // down and back up: a parabola through the surface
-          const u = clamp(g.dive / 1.5, 0, 1);
-          const k = 1 - Math.abs(u * 2 - 1);
-          hgt = g.h * (1 - k) + 0.6 * k;
-          rr = g.r * (1 - k * 0.6);
-        }
-        _p.set(s.x + Math.cos(g.ang) * rr, sy + hgt, s.z + Math.sin(g.ang) * rr);
-        const head = g.ang + 1.5707963;
-        _e.set(Math.sin(g.ang * g.flap) * 0.55, -head, g.dive >= 0 ? -0.5 : -0.08);
-        _q.setFromEuler(_e);
-        _s.set(g.sc, g.sc, g.sc);
-        _m4.compose(_p, _q, _s);
-        mesh.setMatrixAt(w++, _m4);
-        if (w >= GULL_CAP) break;
-      }
-    }
-    if (w > 0 || mesh.count > 0) mesh.instanceMatrix.needsUpdate = true;
-    mesh.count = w;
-    AUDIT.birds = w;
   }
 
   // ============================================================
@@ -869,16 +719,15 @@
       sites: bait + carc, baitBalls: bait, carcasses: carc, foodLeft: food,
       baitOpened: AUDIT.baitOpened, baitEaten: AUDIT.baitEaten,
       carcassOpened: AUDIT.carcassOpened, scavengerFrames: AUDIT.scavengers,
-      birds: AUDIT.birds, fishDrawn: fishMesh ? fishMesh.count : 0,
+      fishDrawn: fishMesh ? fishMesh.count : 0,
       hudWrites: AUDIT.hudWrites,
     };
   };
   CBZ.marineFrenzyReset = function () {
     for (let i = 0; i < SITES.length; i++) closeSite(SITES[i]);
     AUDIT.baitOpened = AUDIT.baitEaten = AUDIT.carcassOpened = AUDIT.scavengers = 0;
-    AUDIT.birds = 0; AUDIT.sites = 0;
+    AUDIT.sites = 0;
     if (fishMesh) fishMesh.count = 0;
-    if (gullMesh) gullMesh.count = 0;
   };
 
   // ============================================================
@@ -892,20 +741,12 @@
       if (!(dt > 0)) return;
       if (!ON()) {
         if (fishMesh) fishMesh.count = 0;
-        if (gullMesh) gullMesh.count = 0;
-        // AND ZERO THE PROBE. It reports what is on screen, and with the flag
-        // off nothing is — leaving the last live count sitting in it made a
-        // reverted column report thirteen gulls it was not drawing, which is
-        // exactly the kind of number that gets believed.
-        AUDIT.birds = 0;
         return;
       }
       poll(dt);
       stepSites(dt);
       feedBalls(dt);
-      chumBirds();
       drawBalls(dt);
-      drawBirds(dt);
     });
   }
 })();

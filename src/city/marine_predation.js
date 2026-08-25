@@ -1154,10 +1154,10 @@
     // 5. THE MEN GO IN THE WATER, where §7 makes them bleed and the sea does
     //    the rest. Never our own damage path: cityKillPed / the ped bus owns it.
     throwOccupants(car, bx, bz, nx, nz);
-    /* 6. AND THE BIRDS COME UP. A sinking boat with men in the water is a
+    /* 6. AND THE WATER BOILS. A sinking boat with men in the water is a
        frenzy site by any definition, and city/marine_frenzy.js already owns
-       "white water and gulls over a point in the sea" — so this is one guarded
-       call rather than a second copy of it. It is also the only thing in this
+       "white water over a point in the sea" — so this is one guarded call
+       rather than a second copy of it. It is also the only thing in this
        sequence that is visible from the far side of the bay. */
     if (typeof CBZ.marineFrenzyAt === "function") {
       try { CBZ.marineFrenzyAt(bx, bz, { boil: true, seconds: 40, press: 0.9 }); } catch (e) {}
