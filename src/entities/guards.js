@@ -112,8 +112,8 @@
     g.data.offer = CBZ.econ.pickOffer("goods");
     g.data.name += " (bent)";
     g.data.talk = ["You didn't see me, I didn't see you.",
-                   "Cigs up front and I'll forget your face.",
-                   "Everyone's on the take in here, kid."];
+                   "You need it brought in, I'm the one who brings it.",
+                   "My shelf's open when my shift's quiet."];
   });
 
   function nameOf(g) {

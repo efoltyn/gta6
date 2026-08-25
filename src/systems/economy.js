@@ -863,9 +863,13 @@
      till is a price that lies the moment loyalty moves it. One function. */
   function bribeCost(actor) {
     if (!actor) return 10;
+    // Under the bridge doctrine no officer takes cigarettes AT ALL (see
+    // bribe()), so there is no cig price to print — the chip shows 0 and the
+    // transaction runs on loyalty or a name. Flag off restores the old till.
+    if (phoneBridge()) return 0;
     // GUARDS ONLY — the warden refuses cigarettes outright (see bribe()), so
     // he has no bribe price to print anywhere.
-    const base = actor.corrupt ? 5 : 10;                  // bent screws come cheap
+    const base = actor.corrupt ? 5 : 10;                  // bent officers come cheap
     const l = loyaltyOf(actor);
     // up to 40% off a standing arrangement; a count makes everything dearer
     let cost = Math.round(base * (1 - Math.min(0.40, l / 250)));
@@ -873,12 +877,27 @@
     return Math.max(2, cost);
   }
 
-  /* ---------- BRIBE: pay cigarettes to make a guard look away ----------
-     THE BOTTOM RUNG STAYS IN SMOKES, DELIBERATELY. Fourteen seconds of a man
-     looking at a wall is a favour, not a felony — it is the one thing a
-     corrections officer really does take in-kind, because in-kind is all it
-     is worth and nobody writes it down. PRISON_PHONE_BRIDGE does not touch
-     this verb; it only touches the transactions that end careers. */
+  /* ---------- BRIBE: make a guard look away ----------
+     NO OFFICER TAKES CIGARETTES. AT ALL. (Owner, 2026-08-26: "no officer in
+     a prison accepts fuckin cigs" — and the research agrees once you read it
+     straight: prison cigarettes are INMATE money, worth six dollars at any
+     gas station on his drive home, and taking anything off an inmate is a
+     fireable boundary violation that leaves evidence. The documented case of
+     cigarettes touching an officer runs the OTHER way — officers as
+     SUPPLIERS, cartons in at $16, packs out at 500% markup. The bent man is
+     not a customer. He is the mint.)
+
+     So under PRISON_PHONE_BRIDGE the bottom rung is SOCIAL, the way it
+     really is. Three ways a moment of blindness happens, none of them a
+     payment in goods:
+       · a NAME — you hold a snitch's name (n.snitchKnown, the same knowledge
+         ladder the yard uses) and hand it to a bent officer. Information is
+         the one inmate asset with real value to a uniform.
+       · a RELATIONSHIP — bought() (loyalty >= 35, built by shopping at his
+         shelf and feeding him names) gets the favour free, and SPENDS a
+         little goodwill each time, so the arrangement needs upkeep.
+       · nothing else. A clean officer refuses, remembers, and the attempt
+         itself is heat. Flag off = the old cigs-for-blindness till. */
   function bribe(actor) {
     /* THE WARDEN IS NOT FOR SALE IN CIGARETTES (owner, 2026-08-19: "he should
        not accept cigs... he legit acted like an inmate"). He used to take 25
@@ -892,9 +911,57 @@
       return { ok: false, msg: pick(VOICE.wardenNoCigs) };
     }
     if (actor.kind === "guard") {
-      // THE COUNT OUTRANKS MONEY. He is standing on a number with a clipboard
-      // and a supervisor; there is no price at which he turns round right now.
+      // THE COUNT OUTRANKS EVERYTHING. He is standing on a number with a
+      // clipboard and a supervisor; nothing turns him round right now.
       if (counting() && !bought(actor)) return { ok: false, msg: pick(VOICE.guardBusy) };
+      const who = nm(actor);
+      if (phoneBridge()) {
+        if (!actor.corrupt) {
+          // A CLEAN OFFICER REFUSES AND REMEMBERS. The offer itself is the
+          // mistake: he files your face, and the wing gets a little warmer.
+          actor.alert = Math.max(actor.alert || 0, 0.6);
+          addLoyalty(actor, -4);
+          if (CBZ.addHeat) CBZ.addHeat(3);
+          noteRead("heat", 5, who, 12);
+          return { ok: false, msg: pick(VOICE.guardClean) };
+        }
+        // A NAME BUYS A MOMENT. The one thing an inmate holds that a uniform
+        // can use — and handing it over is quiet business at the bars.
+        let known = null;
+        for (const n of CBZ.npcs || []) {
+          if (n && !n.dead && !n.escaped && n.snitchKnown && !n._nameSold) { known = n; break; }
+        }
+        if (known) {
+          known._nameSold = true;   // the racket has him now; the name spends once
+          // the racket leans on its new asset: his reporting cools, and the
+          // arrangement notices you fed it
+          known.reportedPlayerT = Math.max(0, (known.reportedPlayerT || 0) * 0.4);
+          addLoyalty(actor, 12);
+          actor.bribed = Math.round(12 * (1 + loyaltyOf(actor) / 160));
+          actor.alert = 0;
+          if (CBZ.addRacketStanding) CBZ.addRacketStanding(2);
+          noteRead("badge", 6, who, 13);
+          CBZ.sfx("coin");
+          return { ok: true, msg: `${nm(known)} talks to the office. — That, I can use. Go on, I'm watching the wall.` };
+        }
+        if (bought(actor)) {
+          // A RELATIONSHIP FAVOUR. Free at the point of use, and it draws the
+          // account down — the arrangement wants feeding (his shelf, a name).
+          addLoyalty(actor, -4);
+          actor.bribed = Math.round(14 * (1 + loyaltyOf(actor) / 160));
+          actor.alert = 0;
+          if (CBZ.addHeat) CBZ.addHeat(-6);
+          g.racketProtectionT = Math.max(g.racketProtectionT || 0, 8);
+          noteRead("badge", 6, who, 13);
+          return { ok: true, msg: pick(VOICE.guardPaid) };
+        }
+        // he sells; he does not buy — teach it once, in his own voice
+        if (!actor._saidNoCigs) {
+          actor._saidNoCigs = true;
+          return { ok: false, msg: "What am I going to do with prison smokes? I stop at a store like a person. Bring me a name, or buy off my shelf." };
+        }
+        return { ok: false, msg: "My shelf's for sale. My eyes aren't. Not for smokes." };
+      }
       const cost = bribeCost(actor);
       if (g.cigs < cost) return { ok: false, msg: `It's ${cost} to look the other way. ${pick(VOICE.guardShort)}` };
       addCigs(-cost);
@@ -904,7 +971,6 @@
       actor.bribed = Math.round(14 * (1 + loyaltyOf(actor) / 160));
       addLoyalty(actor, 14);
       actor.alert = 0;
-      const who = nm(actor);
       if (actor.corrupt) {
         if (CBZ.addHeat) CBZ.addHeat(-10);
         addRacketDebt(Math.max(1, Math.ceil(cost * 0.45)));
