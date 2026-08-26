@@ -1,0 +1,2271 @@
+{
+  "preset": {
+    "id": "shark-flesh",
+    "title": "Shark Sim — A Mouth Leaves A Hole, Not A Sticker",
+    "path": "tools/visual-presets/shark-flesh.mjs"
+  },
+  "generatedAt": "2026-08-26T03:42:06.202Z",
+  "only": null,
+  "reusedBeforeFrom": null,
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "frameSignature": "custom@1280x720",
+  "frames": [
+    {
+      "id": "custom",
+      "device": "custom",
+      "label": "1280x720",
+      "orientation": "fixed",
+      "width": 1280,
+      "height": 720,
+      "dsf": 1,
+      "mobile": false,
+      "ua": null,
+      "landscape": true
+    }
+  ],
+  "before": {
+    "requested": "http://127.0.0.1:8791/?mode=sharksim&seed=90210&cfg_BOOT_METER=0&visualCompare=before-1787715671898",
+    "final": "http://127.0.0.1:8791/?mode=sharksim&seed=90210&cfg_BOOT_METER=0&visualCompare=before-1787715671898"
+  },
+  "after": {
+    "requested": "http://127.0.0.1:8792/?mode=sharksim&seed=90210&cfg_BOOT_METER=0&visualCompare=after-1787715699111",
+    "final": "http://127.0.0.1:8792/?mode=sharksim&seed=90210&cfg_BOOT_METER=0&visualCompare=after-1787715699111"
+  },
+  "subjects": [
+    {
+      "id": "the-bite",
+      "ch": 0,
+      "label": "The Bite — Nothing Happens",
+      "focus": "A bull shark takes a wader in thigh-deep water, photographed at the instant of contact. BEFORE: the killfeed says EATEN BY A BULL SHARK and the body is untouched — no wound where the mouth was, every limb still on, not one drop of blood in the sea. trauma.js has no cause row matching \"eaten by a ...\", so the entire death-gore event was skipped, and the jaw print that did get stamped was stamped at the navel because creature_combat passed target.pos.y + 1.0. AFTER: the mark lands on the part the teeth closed on, the body leaves with less of itself, and the water goes red."
+    },
+    {
+      "id": "mist-over-the-sea",
+      "ch": 1,
+      "label": "Blood Is Never A Mist — The Lens On The Waterline",
+      "focus": "An orca mauled just under the surface, from a lens one metre above the swell looking flat across it. This is the frame the complaint was written about. BEFORE: the top half of every blood cloud is drawn in the AIR — updatePuffs clamps a puff's CENTRE to 5 cm under the surface while the sprite is metres across and still growing — so the plume the owner likes underwater reads as pink fog lying on the sea. AFTER: the lid clamps the whole quad, what reaches the surface flattens into a slick, and the air above the waterline is empty."
+    },
+    {
+      "id": "bite-strip",
+      "ch": 2,
+      "strip": {
+        "frames": 5,
+        "stepSec": 0.4
+      },
+      "label": "Two Seconds Of It — Strike, Bloom, Trail",
+      "focus": "Five frames of the same two seconds from the same waterline lens. The blood trail is the thing the owner already loves and the thing this pass must not break: it should still billow, still fold, still drift with the current and still follow the wounded body — while not one puff of it crosses the waterline."
+    },
+    {
+      "id": "deep-kill",
+      "ch": 3,
+      "label": "The Kill Cloud, From A Boat's Eye",
+      "focus": "The orca dies. BEFORE: gore.js's kill cloud seeds its shell on a sphere of the body's own scale — up to 2.2 m of that is spawned ABOVE the water, and the lid then pins each sprite's centre just under the surface with metres of it standing proud, which from up here is a pink cloud hovering over the swell. AFTER: the cloud is under the water where a cloud belongs, reddest at the wound and going brown with depth, and the only thing visible from above is the slick spreading over it."
+    },
+    {
+      "id": "orca-crater",
+      "ch": 4,
+      "label": "The Red Square, Animal Half — A Hole, Not A Plate",
+      "focus": "Close on the flank. BEFORE: the cut face is three nested BoxGeometry slabs whose ±0.15 corner jitter never breaks a rectangle, so a bite reads as a red plate lying on the animal. AFTER: a torn crater — a ragged outline, a bore that goes in, and a raw margin around it."
+    },
+    {
+      "id": "red-square",
+      "ch": 5,
+      "label": "The Red Square, Human Half — A Stump, Close",
+      "focus": "Exactly the same amputation on both sides: one CBZ.goreSever call on the same leg of the same body, on dry sand so nothing about the water can be blamed for the read. BEFORE: an axis-aligned untextured 36 x 15 x 36 cm BoxGeometry that leaves this renderer's sRGB encoder bright red — the owner's red square, literally. AFTER: a torn cross-section with a ragged silhouette, a dark bore and bone in the middle."
+    },
+    {
+      "id": "grows-back",
+      "ch": 6,
+      "label": "And A Second And A Half Later",
+      "focus": "Same camera, same body, 1.4 seconds on. BEFORE: the leg is back. gore.js's restore-on-reuse audit runs every 0.85 s and restores any severed actor that is still ALIVE, so surviving a shark attack quietly undid the amputation. AFTER: the audit still guarantees a recycled rig leaves whole — that is what it is for — but a living amputee stays an amputee."
+    }
+  ],
+  "captures": [
+    {
+      "id": "the-bite",
+      "frame": "custom",
+      "beforeFile": "01-the-bite.png",
+      "afterFile": "01-the-bite.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "side": "before",
+        "chapter": 0,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "spot": {
+            "x": 119.58996679475003,
+            "z": 526.6145280103939,
+            "depth": 0.8669132165529683,
+            "r": 140.31103897094727,
+            "ang": -0.5503903191365773
+          },
+          "medium": {
+            "depthM": 0.87,
+            "goreMedium": "water",
+            "seaY": -0.82,
+            "jawY": -1.04,
+            "victimDead": true,
+            "woundDecals": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0
+            }
+          },
+          "medium2": null,
+          "jaw": {
+            "x": 120.3556084796832,
+            "y": -1.040982484330021,
+            "z": 526.1443207752963
+          },
+          "diag": {
+            "tries": [],
+            "hitAt": 3.23,
+            "cam": [
+              116.7,
+              0.4,
+              530.4
+            ],
+            "camToVictim": 4.76,
+            "camToJaw": 5.61,
+            "woundAudit": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0
+            }
+          },
+          "goreAudit": {
+            "bits": 0,
+            "pools": 0,
+            "streaks": 0,
+            "slicks": 0,
+            "walls": 0,
+            "realism": true,
+            "debrisLaw": true,
+            "mode": "sharksim",
+            "boxGibs": 0,
+            "drops": 0,
+            "mist": 0,
+            "maxGibCm": 0,
+            "maxDropCm": 0,
+            "maxDropThickCm": 0,
+            "gibs": 0,
+            "severed": 0,
+            "severedRigs": 0,
+            "puffs": 0,
+            "pending": 0,
+            "float": 0,
+            "floatAt": null,
+            "slopeDecals": true,
+            "snowCover": 0,
+            "buried": 0,
+            "bloodVisible": 0
+          },
+          "chumSources": 0,
+          "aquatic": {
+            "rideableSpecies": 14,
+            "species": [
+              "great_white_shark",
+              "megalodon",
+              "hammerhead_shark",
+              "bull_shark",
+              "fish",
+              "sardine",
+              "tuna",
+              "marlin",
+              "barracuda",
+              "orca",
+              "dolphin",
+              "humpback_whale",
+              "manta_ray",
+              "sea_turtle"
+            ],
+            "mounted": true,
+            "mountedSpecies": "bull_shark",
+            "saddle": {
+              "x": 0.6012261674721951,
+              "y": 1.5643381141071635,
+              "width": 1.0605993112575718
+            },
+            "placedSocket": {
+              "x": 121.87067022158314,
+              "y": 0.08774626864350088,
+              "z": 525.209643661349
+            },
+            "speed": 0,
+            "verticalSpeed": 0,
+            "airborne": false,
+            "attacking": true,
+            "attackProgress": 0.818,
+            "attackDuration": 0.856,
+            "attackCooldown": 0.576,
+            "jawOpen": 0.016,
+            "attackTarget": "survivor",
+            "attackTargetDistance": 0,
+            "breachApex": 0,
+            "breachAirT": 0,
+            "breachVel": 9.73,
+            "canBreach": true,
+            "mounts": 1,
+            "breaches": 0,
+            "reentries": 0,
+            "attacks": 1,
+            "hits": 1,
+            "shipBites": 0,
+            "clamps": 0,
+            "clampT": 0,
+            "lastSpecies": "bull_shark",
+            "lastTarget": "survivor"
+          }
+        },
+        "metrics": {
+          "biteLanded": 1,
+          "woundMarksAtContact": 12,
+          "aerosolQuads": 0,
+          "bloodAboveSeaN": 0,
+          "bloodAboveSeaM": 0,
+          "plumePuffs": 0,
+          "slicks": 0,
+          "woundMarks": 12,
+          "woundToJawM": 0.58,
+          "limbsOff": 0,
+          "goreDrawn": 0
+        }
+      },
+      "after": {
+        "ok": true,
+        "side": "after",
+        "chapter": 0,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "spot": {
+            "x": 119.58996679475003,
+            "z": 526.6145280103939,
+            "depth": 0.8669132165529683,
+            "r": 140.31103897094727,
+            "ang": -0.5503903191365773
+          },
+          "medium": {
+            "depthM": 0.87,
+            "goreMedium": "water",
+            "seaY": -0.83,
+            "jawY": -1.07,
+            "victimDead": true,
+            "woundDecals": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0,
+              "biteCalls": 2,
+              "biteMarks": 1,
+              "woundCalls": 1,
+              "woundMarks": 0,
+              "refusals": 1,
+              "lastRefusal": "bite:rebite-throttle"
+            }
+          },
+          "medium2": null,
+          "jaw": {
+            "x": 120.35683703474675,
+            "y": -1.0676705717791755,
+            "z": 526.1435995140025
+          },
+          "diag": {
+            "tries": [],
+            "hitAt": 3.23,
+            "cam": [
+              116.7,
+              0.4,
+              530.4
+            ],
+            "camToVictim": 4.76,
+            "camToJaw": 5.61,
+            "woundAudit": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0,
+              "biteCalls": 2,
+              "biteMarks": 1,
+              "woundCalls": 1,
+              "woundMarks": 0,
+              "refusals": 1,
+              "lastRefusal": "bite:rebite-throttle"
+            }
+          },
+          "goreAudit": {
+            "bits": 1,
+            "pools": 0,
+            "streaks": 0,
+            "slicks": 2,
+            "walls": 0,
+            "realism": true,
+            "debrisLaw": true,
+            "mode": "sharksim",
+            "boxGibs": 0,
+            "drops": 0,
+            "mist": 0,
+            "maxGibCm": 0,
+            "maxDropCm": 0,
+            "maxDropThickCm": 0,
+            "gibs": 0,
+            "severed": 1,
+            "severedRigs": 1,
+            "puffs": 40,
+            "pending": 2,
+            "float": 0,
+            "floatAt": null,
+            "slopeDecals": true,
+            "snowCover": 0,
+            "buried": 0,
+            "bloodVisible": 0
+          },
+          "chumSources": 0,
+          "aquatic": {
+            "rideableSpecies": 14,
+            "species": [
+              "great_white_shark",
+              "megalodon",
+              "hammerhead_shark",
+              "bull_shark",
+              "fish",
+              "sardine",
+              "tuna",
+              "marlin",
+              "barracuda",
+              "orca",
+              "dolphin",
+              "humpback_whale",
+              "manta_ray",
+              "sea_turtle"
+            ],
+            "mounted": true,
+            "mountedSpecies": "bull_shark",
+            "saddle": {
+              "x": 0.601226167472165,
+              "y": 1.5643381141071637,
+              "width": 1.0605993112575718
+            },
+            "placedSocket": {
+              "x": 121.87506106626135,
+              "y": 0.08905869688419554,
+              "z": 525.206314047335
+            },
+            "speed": 0,
+            "verticalSpeed": 0,
+            "airborne": false,
+            "attacking": true,
+            "attackProgress": 0.817,
+            "attackDuration": 0.857,
+            "attackCooldown": 0.577,
+            "jawOpen": 0.023,
+            "attackTarget": "survivor",
+            "attackTargetDistance": 0.21,
+            "breachApex": 0,
+            "breachAirT": 0,
+            "breachVel": 9.73,
+            "canBreach": true,
+            "mounts": 1,
+            "breaches": 0,
+            "reentries": 0,
+            "attacks": 1,
+            "hits": 1,
+            "shipBites": 0,
+            "clamps": 0,
+            "clampT": 0,
+            "lastSpecies": "bull_shark",
+            "lastTarget": "survivor"
+          }
+        },
+        "metrics": {
+          "biteLanded": 1,
+          "woundMarksAtContact": 12,
+          "aerosolQuads": 0,
+          "bloodAboveSeaN": 0,
+          "bloodAboveSeaM": 0,
+          "plumePuffs": 40,
+          "slicks": 2,
+          "woundMarks": 12,
+          "woundToJawM": 0.86,
+          "limbsOff": 1,
+          "goreDrawn": 43
+        }
+      }
+    },
+    {
+      "id": "mist-over-the-sea",
+      "frame": "custom",
+      "beforeFile": "02-mist-over-the-sea.png",
+      "afterFile": "02-mist-over-the-sea.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "side": "before",
+        "chapter": 1,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "spot": {
+            "x": 119.58996679475003,
+            "z": 526.6145280103939,
+            "depth": 0.8669132165529683,
+            "r": 140.31103897094727,
+            "ang": -0.5503903191365773
+          },
+          "medium": {
+            "depthM": 0.87,
+            "goreMedium": "water",
+            "seaY": -0.82,
+            "jawY": -1.04,
+            "victimDead": true,
+            "woundDecals": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0
+            }
+          },
+          "medium2": {
+            "depthM": 9.5,
+            "goreMedium": "water",
+            "chum": 1
+          },
+          "jaw": {
+            "x": 120.3556084796832,
+            "y": -1.040982484330021,
+            "z": 526.1443207752963
+          },
+          "diag": {
+            "tries": [],
+            "hitAt": 3.23,
+            "cam": [
+              116.7,
+              0.4,
+              530.4
+            ],
+            "camToVictim": 4.76,
+            "camToJaw": 5.61,
+            "woundAudit": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0
+            }
+          },
+          "goreAudit": {
+            "bits": 0,
+            "pools": 0,
+            "streaks": 0,
+            "slicks": 2,
+            "walls": 0,
+            "realism": true,
+            "debrisLaw": true,
+            "mode": "sharksim",
+            "boxGibs": 0,
+            "drops": 0,
+            "mist": 0,
+            "maxGibCm": 0,
+            "maxDropCm": 0,
+            "maxDropThickCm": 0,
+            "gibs": 0,
+            "severed": 0,
+            "severedRigs": 0,
+            "puffs": 92,
+            "pending": 0,
+            "float": 0,
+            "floatAt": null,
+            "slopeDecals": true,
+            "snowCover": 0,
+            "buried": 0,
+            "bloodVisible": 0
+          },
+          "chumSources": 1,
+          "aquatic": {
+            "rideableSpecies": 14,
+            "species": [
+              "great_white_shark",
+              "megalodon",
+              "hammerhead_shark",
+              "bull_shark",
+              "fish",
+              "sardine",
+              "tuna",
+              "marlin",
+              "barracuda",
+              "orca",
+              "dolphin",
+              "humpback_whale",
+              "manta_ray",
+              "sea_turtle"
+            ],
+            "mounted": true,
+            "mountedSpecies": "bull_shark",
+            "saddle": {
+              "x": 0.6012261674721951,
+              "y": 1.5643381141071635,
+              "width": 1.0605993112575718
+            },
+            "placedSocket": {
+              "x": 121.81395772752063,
+              "y": 0.06283975017477417,
+              "z": 525.2497924569316
+            },
+            "speed": 0,
+            "verticalSpeed": 0,
+            "airborne": false,
+            "attacking": false,
+            "attackProgress": 0,
+            "attackDuration": 0.856,
+            "attackCooldown": 0,
+            "jawOpen": 0,
+            "attackTarget": null,
+            "attackTargetDistance": null,
+            "breachApex": 0,
+            "breachAirT": 0,
+            "breachVel": 9.73,
+            "canBreach": true,
+            "mounts": 1,
+            "breaches": 0,
+            "reentries": 0,
+            "attacks": 1,
+            "hits": 1,
+            "shipBites": 0,
+            "clamps": 0,
+            "clampT": 0,
+            "lastSpecies": "bull_shark",
+            "lastTarget": "survivor"
+          }
+        },
+        "metrics": {
+          "woundsLanded": 3,
+          "aerosolQuads": 0,
+          "bloodAboveSeaN": 28,
+          "bloodAboveSeaM": 2.42,
+          "plumePuffs": 64,
+          "slicks": 2
+        }
+      },
+      "after": {
+        "ok": true,
+        "side": "after",
+        "chapter": 1,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "spot": {
+            "x": 119.58996679475003,
+            "z": 526.6145280103939,
+            "depth": 0.8669132165529683,
+            "r": 140.31103897094727,
+            "ang": -0.5503903191365773
+          },
+          "medium": {
+            "depthM": 0.87,
+            "goreMedium": "water",
+            "seaY": -0.83,
+            "jawY": -1.07,
+            "victimDead": true,
+            "woundDecals": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0,
+              "biteCalls": 2,
+              "biteMarks": 1,
+              "woundCalls": 1,
+              "woundMarks": 0,
+              "refusals": 1,
+              "lastRefusal": "bite:rebite-throttle"
+            }
+          },
+          "medium2": {
+            "depthM": 9.5,
+            "goreMedium": "water",
+            "chum": 1
+          },
+          "jaw": {
+            "x": 120.35683703474675,
+            "y": -1.0676705717791755,
+            "z": 526.1435995140025
+          },
+          "diag": {
+            "tries": [],
+            "hitAt": 3.23,
+            "cam": [
+              116.7,
+              0.4,
+              530.4
+            ],
+            "camToVictim": 4.76,
+            "camToJaw": 5.61,
+            "woundAudit": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0,
+              "biteCalls": 2,
+              "biteMarks": 1,
+              "woundCalls": 1,
+              "woundMarks": 0,
+              "refusals": 1,
+              "lastRefusal": "bite:rebite-throttle"
+            }
+          },
+          "goreAudit": {
+            "bits": 1,
+            "pools": 0,
+            "streaks": 0,
+            "slicks": 9,
+            "walls": 0,
+            "realism": true,
+            "debrisLaw": true,
+            "mode": "sharksim",
+            "boxGibs": 0,
+            "drops": 0,
+            "mist": 0,
+            "maxGibCm": 0,
+            "maxDropCm": 0,
+            "maxDropThickCm": 0,
+            "gibs": 0,
+            "severed": 1,
+            "severedRigs": 1,
+            "puffs": 130,
+            "pending": 0,
+            "float": 0,
+            "floatAt": null,
+            "slopeDecals": true,
+            "snowCover": 0,
+            "buried": 0,
+            "bloodVisible": 0
+          },
+          "chumSources": 1,
+          "aquatic": {
+            "rideableSpecies": 14,
+            "species": [
+              "great_white_shark",
+              "megalodon",
+              "hammerhead_shark",
+              "bull_shark",
+              "fish",
+              "sardine",
+              "tuna",
+              "marlin",
+              "barracuda",
+              "orca",
+              "dolphin",
+              "humpback_whale",
+              "manta_ray",
+              "sea_turtle"
+            ],
+            "mounted": true,
+            "mountedSpecies": "bull_shark",
+            "saddle": {
+              "x": 0.601226167472165,
+              "y": 1.5643381141071637,
+              "width": 1.0605993112575718
+            },
+            "placedSocket": {
+              "x": 121.81513706330638,
+              "y": 0.06278743632930972,
+              "z": 525.2490688071111
+            },
+            "speed": 0,
+            "verticalSpeed": 0,
+            "airborne": false,
+            "attacking": false,
+            "attackProgress": 0,
+            "attackDuration": 0.857,
+            "attackCooldown": 0,
+            "jawOpen": 0,
+            "attackTarget": null,
+            "attackTargetDistance": null,
+            "breachApex": 0,
+            "breachAirT": 0,
+            "breachVel": 9.73,
+            "canBreach": true,
+            "mounts": 1,
+            "breaches": 0,
+            "reentries": 0,
+            "attacks": 1,
+            "hits": 1,
+            "shipBites": 0,
+            "clamps": 0,
+            "clampT": 0,
+            "lastSpecies": "bull_shark",
+            "lastTarget": "survivor"
+          }
+        },
+        "metrics": {
+          "woundsLanded": 3,
+          "aerosolQuads": 0,
+          "bloodAboveSeaN": 0,
+          "bloodAboveSeaM": 0,
+          "plumePuffs": 130,
+          "slicks": 8
+        }
+      }
+    },
+    {
+      "id": "bite-strip",
+      "frame": "custom",
+      "beforeFile": "03-bite-strip.png",
+      "afterFile": "03-bite-strip.png",
+      "beforeStrip": [
+        "03-bite-strip.png",
+        "03-bite-strip-t1.png",
+        "03-bite-strip-t2.png",
+        "03-bite-strip-t3.png",
+        "03-bite-strip-t4.png"
+      ],
+      "afterStrip": [
+        "03-bite-strip.png",
+        "03-bite-strip-t1.png",
+        "03-bite-strip-t2.png",
+        "03-bite-strip-t3.png",
+        "03-bite-strip-t4.png"
+      ],
+      "before": {
+        "ok": true,
+        "side": "before",
+        "chapter": 2,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "spot": {
+            "x": 119.58996679475003,
+            "z": 526.6145280103939,
+            "depth": 0.8669132165529683,
+            "r": 140.31103897094727,
+            "ang": -0.5503903191365773
+          },
+          "medium": {
+            "depthM": 0.87,
+            "goreMedium": "water",
+            "seaY": -0.82,
+            "jawY": -1.04,
+            "victimDead": true,
+            "woundDecals": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0
+            }
+          },
+          "medium2": {
+            "depthM": 9.5,
+            "goreMedium": "water",
+            "chum": 1
+          },
+          "jaw": {
+            "x": 120.3556084796832,
+            "y": -1.040982484330021,
+            "z": 526.1443207752963
+          },
+          "diag": {
+            "tries": [],
+            "hitAt": 3.23,
+            "cam": [
+              116.7,
+              0.4,
+              530.4
+            ],
+            "camToVictim": 4.76,
+            "camToJaw": 5.61,
+            "woundAudit": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0
+            }
+          },
+          "goreAudit": {
+            "bits": 0,
+            "pools": 0,
+            "streaks": 0,
+            "slicks": 2,
+            "walls": 0,
+            "realism": true,
+            "debrisLaw": true,
+            "mode": "sharksim",
+            "boxGibs": 0,
+            "drops": 0,
+            "mist": 0,
+            "maxGibCm": 0,
+            "maxDropCm": 0,
+            "maxDropThickCm": 0,
+            "gibs": 0,
+            "severed": 0,
+            "severedRigs": 0,
+            "puffs": 92,
+            "pending": 0,
+            "float": 0,
+            "floatAt": null,
+            "slopeDecals": true,
+            "snowCover": 0,
+            "buried": 0,
+            "bloodVisible": 0
+          },
+          "chumSources": 1,
+          "aquatic": {
+            "rideableSpecies": 14,
+            "species": [
+              "great_white_shark",
+              "megalodon",
+              "hammerhead_shark",
+              "bull_shark",
+              "fish",
+              "sardine",
+              "tuna",
+              "marlin",
+              "barracuda",
+              "orca",
+              "dolphin",
+              "humpback_whale",
+              "manta_ray",
+              "sea_turtle"
+            ],
+            "mounted": true,
+            "mountedSpecies": "bull_shark",
+            "saddle": {
+              "x": 0.6012261674721951,
+              "y": 1.5643381141071635,
+              "width": 1.0605993112575718
+            },
+            "placedSocket": {
+              "x": 121.81395772752063,
+              "y": 0.06283975017477417,
+              "z": 525.2497924569316
+            },
+            "speed": 0,
+            "verticalSpeed": 0,
+            "airborne": false,
+            "attacking": false,
+            "attackProgress": 0,
+            "attackDuration": 0.856,
+            "attackCooldown": 0,
+            "jawOpen": 0,
+            "attackTarget": null,
+            "attackTargetDistance": null,
+            "breachApex": 0,
+            "breachAirT": 0,
+            "breachVel": 9.73,
+            "canBreach": true,
+            "mounts": 1,
+            "breaches": 0,
+            "reentries": 0,
+            "attacks": 1,
+            "hits": 1,
+            "shipBites": 0,
+            "clamps": 0,
+            "clampT": 0,
+            "lastSpecies": "bull_shark",
+            "lastTarget": "survivor"
+          }
+        },
+        "metrics": {
+          "woundsLanded": 1,
+          "aerosolQuads": 0,
+          "bloodAboveSeaN": 36,
+          "bloodAboveSeaM": 2.8,
+          "plumePuffs": 56,
+          "slicks": 2
+        }
+      },
+      "after": {
+        "ok": true,
+        "side": "after",
+        "chapter": 2,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "spot": {
+            "x": 119.58996679475003,
+            "z": 526.6145280103939,
+            "depth": 0.8669132165529683,
+            "r": 140.31103897094727,
+            "ang": -0.5503903191365773
+          },
+          "medium": {
+            "depthM": 0.87,
+            "goreMedium": "water",
+            "seaY": -0.83,
+            "jawY": -1.07,
+            "victimDead": true,
+            "woundDecals": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0,
+              "biteCalls": 2,
+              "biteMarks": 1,
+              "woundCalls": 1,
+              "woundMarks": 0,
+              "refusals": 1,
+              "lastRefusal": "bite:rebite-throttle"
+            }
+          },
+          "medium2": {
+            "depthM": 9.5,
+            "goreMedium": "water",
+            "chum": 1
+          },
+          "jaw": {
+            "x": 120.35683703474675,
+            "y": -1.0676705717791755,
+            "z": 526.1435995140025
+          },
+          "diag": {
+            "tries": [],
+            "hitAt": 3.23,
+            "cam": [
+              116.7,
+              0.4,
+              530.4
+            ],
+            "camToVictim": 4.76,
+            "camToJaw": 5.61,
+            "woundAudit": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0,
+              "biteCalls": 2,
+              "biteMarks": 1,
+              "woundCalls": 1,
+              "woundMarks": 0,
+              "refusals": 1,
+              "lastRefusal": "bite:rebite-throttle"
+            }
+          },
+          "goreAudit": {
+            "bits": 1,
+            "pools": 0,
+            "streaks": 0,
+            "slicks": 9,
+            "walls": 0,
+            "realism": true,
+            "debrisLaw": true,
+            "mode": "sharksim",
+            "boxGibs": 0,
+            "drops": 0,
+            "mist": 0,
+            "maxGibCm": 0,
+            "maxDropCm": 0,
+            "maxDropThickCm": 0,
+            "gibs": 0,
+            "severed": 1,
+            "severedRigs": 1,
+            "puffs": 130,
+            "pending": 0,
+            "float": 0,
+            "floatAt": null,
+            "slopeDecals": true,
+            "snowCover": 0,
+            "buried": 0,
+            "bloodVisible": 0
+          },
+          "chumSources": 1,
+          "aquatic": {
+            "rideableSpecies": 14,
+            "species": [
+              "great_white_shark",
+              "megalodon",
+              "hammerhead_shark",
+              "bull_shark",
+              "fish",
+              "sardine",
+              "tuna",
+              "marlin",
+              "barracuda",
+              "orca",
+              "dolphin",
+              "humpback_whale",
+              "manta_ray",
+              "sea_turtle"
+            ],
+            "mounted": true,
+            "mountedSpecies": "bull_shark",
+            "saddle": {
+              "x": 0.601226167472165,
+              "y": 1.5643381141071637,
+              "width": 1.0605993112575718
+            },
+            "placedSocket": {
+              "x": 121.81513706330638,
+              "y": 0.06278743632930972,
+              "z": 525.2490688071111
+            },
+            "speed": 0,
+            "verticalSpeed": 0,
+            "airborne": false,
+            "attacking": false,
+            "attackProgress": 0,
+            "attackDuration": 0.857,
+            "attackCooldown": 0,
+            "jawOpen": 0,
+            "attackTarget": null,
+            "attackTargetDistance": null,
+            "breachApex": 0,
+            "breachAirT": 0,
+            "breachVel": 9.73,
+            "canBreach": true,
+            "mounts": 1,
+            "breaches": 0,
+            "reentries": 0,
+            "attacks": 1,
+            "hits": 1,
+            "shipBites": 0,
+            "clamps": 0,
+            "clampT": 0,
+            "lastSpecies": "bull_shark",
+            "lastTarget": "survivor"
+          }
+        },
+        "metrics": {
+          "woundsLanded": 1,
+          "aerosolQuads": 0,
+          "bloodAboveSeaN": 74,
+          "bloodAboveSeaM": 0.26,
+          "plumePuffs": 56,
+          "slicks": 8
+        }
+      }
+    },
+    {
+      "id": "deep-kill",
+      "frame": "custom",
+      "beforeFile": "04-deep-kill.png",
+      "afterFile": "04-deep-kill.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "side": "before",
+        "chapter": 3,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "spot": {
+            "x": 119.58996679475003,
+            "z": 526.6145280103939,
+            "depth": 0.8669132165529683,
+            "r": 140.31103897094727,
+            "ang": -0.5503903191365773
+          },
+          "medium": {
+            "depthM": 0.87,
+            "goreMedium": "water",
+            "seaY": -0.82,
+            "jawY": -1.04,
+            "victimDead": true,
+            "woundDecals": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0
+            }
+          },
+          "medium2": {
+            "depthM": 9.5,
+            "goreMedium": "water",
+            "chum": 1
+          },
+          "jaw": {
+            "x": 120.3556084796832,
+            "y": -1.040982484330021,
+            "z": 526.1443207752963
+          },
+          "diag": {
+            "tries": [],
+            "hitAt": 3.23,
+            "cam": [
+              116.7,
+              0.4,
+              530.4
+            ],
+            "camToVictim": 4.76,
+            "camToJaw": 5.61,
+            "woundAudit": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0
+            }
+          },
+          "goreAudit": {
+            "bits": 0,
+            "pools": 0,
+            "streaks": 0,
+            "slicks": 12,
+            "walls": 0,
+            "realism": true,
+            "debrisLaw": true,
+            "mode": "sharksim",
+            "boxGibs": 0,
+            "drops": 0,
+            "mist": 0,
+            "maxGibCm": 0,
+            "maxDropCm": 0,
+            "maxDropThickCm": 0,
+            "gibs": 0,
+            "severed": 0,
+            "severedRigs": 0,
+            "puffs": 129,
+            "pending": 0,
+            "float": 0,
+            "floatAt": null,
+            "slopeDecals": true,
+            "snowCover": 0,
+            "buried": 0,
+            "bloodVisible": 0
+          },
+          "chumSources": 2,
+          "aquatic": {
+            "rideableSpecies": 14,
+            "species": [
+              "great_white_shark",
+              "megalodon",
+              "hammerhead_shark",
+              "bull_shark",
+              "fish",
+              "sardine",
+              "tuna",
+              "marlin",
+              "barracuda",
+              "orca",
+              "dolphin",
+              "humpback_whale",
+              "manta_ray",
+              "sea_turtle"
+            ],
+            "mounted": true,
+            "mountedSpecies": "bull_shark",
+            "saddle": {
+              "x": 0.6012261674721951,
+              "y": 1.5643381141071635,
+              "width": 1.0605993112575718
+            },
+            "placedSocket": {
+              "x": 121.81395772752063,
+              "y": 0.06283965735762509,
+              "z": 525.2497929186775
+            },
+            "speed": 0,
+            "verticalSpeed": 0,
+            "airborne": false,
+            "attacking": false,
+            "attackProgress": 0,
+            "attackDuration": 0.856,
+            "attackCooldown": 0,
+            "jawOpen": 0,
+            "attackTarget": null,
+            "attackTargetDistance": null,
+            "breachApex": 0,
+            "breachAirT": 0,
+            "breachVel": 9.73,
+            "canBreach": true,
+            "mounts": 1,
+            "breaches": 0,
+            "reentries": 0,
+            "attacks": 1,
+            "hits": 1,
+            "shipBites": 0,
+            "clamps": 0,
+            "clampT": 0,
+            "lastSpecies": "bull_shark",
+            "lastTarget": "survivor"
+          }
+        },
+        "metrics": {
+          "aerosolQuads": 0,
+          "bloodAboveSeaN": 109,
+          "bloodAboveSeaM": 21.14,
+          "plumePuffs": 20,
+          "slicks": 12
+        }
+      },
+      "after": {
+        "ok": true,
+        "side": "after",
+        "chapter": 3,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "spot": {
+            "x": 119.58996679475003,
+            "z": 526.6145280103939,
+            "depth": 0.8669132165529683,
+            "r": 140.31103897094727,
+            "ang": -0.5503903191365773
+          },
+          "medium": {
+            "depthM": 0.87,
+            "goreMedium": "water",
+            "seaY": -0.83,
+            "jawY": -1.07,
+            "victimDead": true,
+            "woundDecals": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0,
+              "biteCalls": 2,
+              "biteMarks": 1,
+              "woundCalls": 1,
+              "woundMarks": 0,
+              "refusals": 1,
+              "lastRefusal": "bite:rebite-throttle"
+            }
+          },
+          "medium2": {
+            "depthM": 9.5,
+            "goreMedium": "water",
+            "chum": 1
+          },
+          "jaw": {
+            "x": 120.35683703474675,
+            "y": -1.0676705717791755,
+            "z": 526.1435995140025
+          },
+          "diag": {
+            "tries": [],
+            "hitAt": 3.23,
+            "cam": [
+              116.7,
+              0.4,
+              530.4
+            ],
+            "camToVictim": 4.76,
+            "camToJaw": 5.61,
+            "woundAudit": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0,
+              "biteCalls": 2,
+              "biteMarks": 1,
+              "woundCalls": 1,
+              "woundMarks": 0,
+              "refusals": 1,
+              "lastRefusal": "bite:rebite-throttle"
+            }
+          },
+          "goreAudit": {
+            "bits": 1,
+            "pools": 0,
+            "streaks": 0,
+            "slicks": 28,
+            "walls": 0,
+            "realism": true,
+            "debrisLaw": true,
+            "mode": "sharksim",
+            "boxGibs": 0,
+            "drops": 0,
+            "mist": 0,
+            "maxGibCm": 0,
+            "maxDropCm": 0,
+            "maxDropThickCm": 0,
+            "gibs": 0,
+            "severed": 1,
+            "severedRigs": 1,
+            "puffs": 127,
+            "pending": 0,
+            "float": 0,
+            "floatAt": null,
+            "slopeDecals": true,
+            "snowCover": 0,
+            "buried": 0,
+            "bloodVisible": 0
+          },
+          "chumSources": 2,
+          "aquatic": {
+            "rideableSpecies": 14,
+            "species": [
+              "great_white_shark",
+              "megalodon",
+              "hammerhead_shark",
+              "bull_shark",
+              "fish",
+              "sardine",
+              "tuna",
+              "marlin",
+              "barracuda",
+              "orca",
+              "dolphin",
+              "humpback_whale",
+              "manta_ray",
+              "sea_turtle"
+            ],
+            "mounted": true,
+            "mountedSpecies": "bull_shark",
+            "saddle": {
+              "x": 0.601226167472165,
+              "y": 1.5643381141071637,
+              "width": 1.0605993112575718
+            },
+            "placedSocket": {
+              "x": 121.81513706330638,
+              "y": 0.06278735167315097,
+              "z": 525.2490692282578
+            },
+            "speed": 0,
+            "verticalSpeed": 0,
+            "airborne": false,
+            "attacking": false,
+            "attackProgress": 0,
+            "attackDuration": 0.857,
+            "attackCooldown": 0,
+            "jawOpen": 0,
+            "attackTarget": null,
+            "attackTargetDistance": null,
+            "breachApex": 0,
+            "breachAirT": 0,
+            "breachVel": 9.73,
+            "canBreach": true,
+            "mounts": 1,
+            "breaches": 0,
+            "reentries": 0,
+            "attacks": 1,
+            "hits": 1,
+            "shipBites": 0,
+            "clamps": 0,
+            "clampT": 0,
+            "lastSpecies": "bull_shark",
+            "lastTarget": "survivor"
+          }
+        },
+        "metrics": {
+          "aerosolQuads": 0,
+          "bloodAboveSeaN": 0,
+          "bloodAboveSeaM": 0,
+          "plumePuffs": 127,
+          "slicks": 28
+        }
+      }
+    },
+    {
+      "id": "orca-crater",
+      "frame": "custom",
+      "beforeFile": "05-orca-crater.png",
+      "afterFile": "05-orca-crater.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "side": "before",
+        "chapter": 4,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "spot": {
+            "x": 119.58996679475003,
+            "z": 526.6145280103939,
+            "depth": 0.8669132165529683,
+            "r": 140.31103897094727,
+            "ang": -0.5503903191365773
+          },
+          "medium": {
+            "depthM": 0.87,
+            "goreMedium": "water",
+            "seaY": -0.82,
+            "jawY": -1.04,
+            "victimDead": true,
+            "woundDecals": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0
+            }
+          },
+          "medium2": {
+            "depthM": 9.5,
+            "goreMedium": "water",
+            "chum": 1
+          },
+          "jaw": {
+            "x": 120.3556084796832,
+            "y": -1.040982484330021,
+            "z": 526.1443207752963
+          },
+          "diag": {
+            "tries": [],
+            "hitAt": 3.23,
+            "cam": [
+              116.7,
+              0.4,
+              530.4
+            ],
+            "camToVictim": 4.76,
+            "camToJaw": 5.61,
+            "woundAudit": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0
+            }
+          },
+          "goreAudit": {
+            "bits": 0,
+            "pools": 0,
+            "streaks": 0,
+            "slicks": 13,
+            "walls": 0,
+            "realism": true,
+            "debrisLaw": true,
+            "mode": "sharksim",
+            "boxGibs": 0,
+            "drops": 0,
+            "mist": 0,
+            "maxGibCm": 0,
+            "maxDropCm": 0,
+            "maxDropThickCm": 0,
+            "gibs": 0,
+            "severed": 0,
+            "severedRigs": 0,
+            "puffs": 131,
+            "pending": 0,
+            "float": 0,
+            "floatAt": null,
+            "slopeDecals": true,
+            "snowCover": 0,
+            "buried": 0,
+            "bloodVisible": 0
+          },
+          "chumSources": 2,
+          "aquatic": {
+            "rideableSpecies": 14,
+            "species": [
+              "great_white_shark",
+              "megalodon",
+              "hammerhead_shark",
+              "bull_shark",
+              "fish",
+              "sardine",
+              "tuna",
+              "marlin",
+              "barracuda",
+              "orca",
+              "dolphin",
+              "humpback_whale",
+              "manta_ray",
+              "sea_turtle"
+            ],
+            "mounted": true,
+            "mountedSpecies": "bull_shark",
+            "saddle": {
+              "x": 0.6012261674721951,
+              "y": 1.5643381141071635,
+              "width": 1.0605993112575718
+            },
+            "placedSocket": {
+              "x": 121.81395772752063,
+              "y": 0.06283965735762242,
+              "z": 525.2497929186775
+            },
+            "speed": 0,
+            "verticalSpeed": 0,
+            "airborne": false,
+            "attacking": false,
+            "attackProgress": 0,
+            "attackDuration": 0.856,
+            "attackCooldown": 0,
+            "jawOpen": 0,
+            "attackTarget": null,
+            "attackTargetDistance": null,
+            "breachApex": 0,
+            "breachAirT": 0,
+            "breachVel": 9.73,
+            "canBreach": true,
+            "mounts": 1,
+            "breaches": 0,
+            "reentries": 0,
+            "attacks": 1,
+            "hits": 1,
+            "shipBites": 0,
+            "clamps": 0,
+            "clampT": 0,
+            "lastSpecies": "bull_shark",
+            "lastTarget": "survivor"
+          }
+        },
+        "metrics": {
+          "capMeshes": 9,
+          "boxCutFaces": 9,
+          "capSpanM": 1.24,
+          "plumePuffs": 19
+        }
+      },
+      "after": {
+        "ok": true,
+        "side": "after",
+        "chapter": 4,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "spot": {
+            "x": 119.58996679475003,
+            "z": 526.6145280103939,
+            "depth": 0.8669132165529683,
+            "r": 140.31103897094727,
+            "ang": -0.5503903191365773
+          },
+          "medium": {
+            "depthM": 0.87,
+            "goreMedium": "water",
+            "seaY": -0.83,
+            "jawY": -1.07,
+            "victimDead": true,
+            "woundDecals": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0,
+              "biteCalls": 2,
+              "biteMarks": 1,
+              "woundCalls": 1,
+              "woundMarks": 0,
+              "refusals": 1,
+              "lastRefusal": "bite:rebite-throttle"
+            }
+          },
+          "medium2": {
+            "depthM": 9.5,
+            "goreMedium": "water",
+            "chum": 1
+          },
+          "jaw": {
+            "x": 120.35683703474675,
+            "y": -1.0676705717791755,
+            "z": 526.1435995140025
+          },
+          "diag": {
+            "tries": [],
+            "hitAt": 3.23,
+            "cam": [
+              116.7,
+              0.4,
+              530.4
+            ],
+            "camToVictim": 4.76,
+            "camToJaw": 5.61,
+            "woundAudit": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0,
+              "biteCalls": 2,
+              "biteMarks": 1,
+              "woundCalls": 1,
+              "woundMarks": 0,
+              "refusals": 1,
+              "lastRefusal": "bite:rebite-throttle"
+            }
+          },
+          "goreAudit": {
+            "bits": 1,
+            "pools": 0,
+            "streaks": 0,
+            "slicks": 29,
+            "walls": 0,
+            "realism": true,
+            "debrisLaw": true,
+            "mode": "sharksim",
+            "boxGibs": 0,
+            "drops": 0,
+            "mist": 0,
+            "maxGibCm": 0,
+            "maxDropCm": 0,
+            "maxDropThickCm": 0,
+            "gibs": 0,
+            "severed": 1,
+            "severedRigs": 1,
+            "puffs": 130,
+            "pending": 0,
+            "float": 0,
+            "floatAt": null,
+            "slopeDecals": true,
+            "snowCover": 0,
+            "buried": 0,
+            "bloodVisible": 0
+          },
+          "chumSources": 2,
+          "aquatic": {
+            "rideableSpecies": 14,
+            "species": [
+              "great_white_shark",
+              "megalodon",
+              "hammerhead_shark",
+              "bull_shark",
+              "fish",
+              "sardine",
+              "tuna",
+              "marlin",
+              "barracuda",
+              "orca",
+              "dolphin",
+              "humpback_whale",
+              "manta_ray",
+              "sea_turtle"
+            ],
+            "mounted": true,
+            "mountedSpecies": "bull_shark",
+            "saddle": {
+              "x": 0.601226167472165,
+              "y": 1.5643381141071637,
+              "width": 1.0605993112575718
+            },
+            "placedSocket": {
+              "x": 121.81513706330638,
+              "y": 0.0627873516731483,
+              "z": 525.2490692282578
+            },
+            "speed": 0,
+            "verticalSpeed": 0,
+            "airborne": false,
+            "attacking": false,
+            "attackProgress": 0,
+            "attackDuration": 0.857,
+            "attackCooldown": 0,
+            "jawOpen": 0,
+            "attackTarget": null,
+            "attackTargetDistance": null,
+            "breachApex": 0,
+            "breachAirT": 0,
+            "breachVel": 9.73,
+            "canBreach": true,
+            "mounts": 1,
+            "breaches": 0,
+            "reentries": 0,
+            "attacks": 1,
+            "hits": 1,
+            "shipBites": 0,
+            "clamps": 0,
+            "clampT": 0,
+            "lastSpecies": "bull_shark",
+            "lastTarget": "survivor"
+          }
+        },
+        "metrics": {
+          "capMeshes": 9,
+          "boxCutFaces": 0,
+          "capSpanM": 1.32,
+          "plumePuffs": 130
+        }
+      }
+    },
+    {
+      "id": "red-square",
+      "frame": "custom",
+      "beforeFile": "06-red-square.png",
+      "afterFile": "06-red-square.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "side": "before",
+        "chapter": 5,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "spot": {
+            "x": 119.58996679475003,
+            "z": 526.6145280103939,
+            "depth": 0.8669132165529683,
+            "r": 140.31103897094727,
+            "ang": -0.5503903191365773
+          },
+          "medium": {
+            "depthM": 0.87,
+            "goreMedium": "water",
+            "seaY": -0.82,
+            "jawY": -1.04,
+            "victimDead": true,
+            "woundDecals": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0
+            }
+          },
+          "medium2": {
+            "depthM": 9.5,
+            "goreMedium": "water",
+            "chum": 1
+          },
+          "jaw": {
+            "x": 120.3556084796832,
+            "y": -1.040982484330021,
+            "z": 526.1443207752963
+          },
+          "diag": {
+            "tries": [],
+            "hitAt": 3.23,
+            "cam": [
+              116.7,
+              0.4,
+              530.4
+            ],
+            "camToVictim": 4.76,
+            "camToJaw": 5.61,
+            "woundAudit": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0
+            }
+          },
+          "goreAudit": {
+            "bits": 5,
+            "pools": 0,
+            "streaks": 0,
+            "slicks": 13,
+            "walls": 0,
+            "realism": true,
+            "debrisLaw": true,
+            "mode": "sharksim",
+            "boxGibs": 0,
+            "drops": 4,
+            "mist": 0,
+            "maxGibCm": 0,
+            "maxDropCm": 31,
+            "maxDropThickCm": 7,
+            "gibs": 0,
+            "severed": 1,
+            "severedRigs": 1,
+            "puffs": 119,
+            "pending": 2,
+            "float": 0,
+            "floatAt": null,
+            "slopeDecals": true,
+            "snowCover": 0,
+            "buried": 0,
+            "bloodVisible": 0
+          },
+          "chumSources": 2,
+          "aquatic": {
+            "rideableSpecies": 14,
+            "species": [
+              "great_white_shark",
+              "megalodon",
+              "hammerhead_shark",
+              "bull_shark",
+              "fish",
+              "sardine",
+              "tuna",
+              "marlin",
+              "barracuda",
+              "orca",
+              "dolphin",
+              "humpback_whale",
+              "manta_ray",
+              "sea_turtle"
+            ],
+            "mounted": true,
+            "mountedSpecies": "bull_shark",
+            "saddle": {
+              "x": 0.6012261674721951,
+              "y": 1.5643381141071635,
+              "width": 1.0605993112575718
+            },
+            "placedSocket": {
+              "x": 121.81395772752063,
+              "y": 0.06283965735761687,
+              "z": 525.2497929186776
+            },
+            "speed": 0,
+            "verticalSpeed": 0,
+            "airborne": false,
+            "attacking": false,
+            "attackProgress": 0,
+            "attackDuration": 0.856,
+            "attackCooldown": 0,
+            "jawOpen": 0,
+            "attackTarget": null,
+            "attackTargetDistance": null,
+            "breachApex": 0,
+            "breachAirT": 0,
+            "breachVel": 9.73,
+            "canBreach": true,
+            "mounts": 1,
+            "breaches": 0,
+            "reentries": 0,
+            "attacks": 1,
+            "hits": 1,
+            "shipBites": 0,
+            "clamps": 0,
+            "clampT": 0,
+            "lastSpecies": "bull_shark",
+            "lastTarget": "survivor"
+          }
+        },
+        "metrics": {
+          "stumpMeshes": 1,
+          "stumpIsBox": 1,
+          "limbsOff": 1
+        }
+      },
+      "after": {
+        "ok": true,
+        "side": "after",
+        "chapter": 5,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "spot": {
+            "x": 119.58996679475003,
+            "z": 526.6145280103939,
+            "depth": 0.8669132165529683,
+            "r": 140.31103897094727,
+            "ang": -0.5503903191365773
+          },
+          "medium": {
+            "depthM": 0.87,
+            "goreMedium": "water",
+            "seaY": -0.83,
+            "jawY": -1.07,
+            "victimDead": true,
+            "woundDecals": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0,
+              "biteCalls": 2,
+              "biteMarks": 1,
+              "woundCalls": 1,
+              "woundMarks": 0,
+              "refusals": 1,
+              "lastRefusal": "bite:rebite-throttle"
+            }
+          },
+          "medium2": {
+            "depthM": 9.5,
+            "goreMedium": "water",
+            "chum": 1
+          },
+          "jaw": {
+            "x": 120.35683703474675,
+            "y": -1.0676705717791755,
+            "z": 526.1435995140025
+          },
+          "diag": {
+            "tries": [],
+            "hitAt": 3.23,
+            "cam": [
+              116.7,
+              0.4,
+              530.4
+            ],
+            "camToVictim": 4.76,
+            "camToJaw": 5.61,
+            "woundAudit": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0,
+              "biteCalls": 2,
+              "biteMarks": 1,
+              "woundCalls": 1,
+              "woundMarks": 0,
+              "refusals": 1,
+              "lastRefusal": "bite:rebite-throttle"
+            }
+          },
+          "goreAudit": {
+            "bits": 6,
+            "pools": 0,
+            "streaks": 0,
+            "slicks": 29,
+            "walls": 0,
+            "realism": true,
+            "debrisLaw": true,
+            "mode": "sharksim",
+            "boxGibs": 0,
+            "drops": 4,
+            "mist": 0,
+            "maxGibCm": 0,
+            "maxDropCm": 29,
+            "maxDropThickCm": 7,
+            "gibs": 0,
+            "severed": 2,
+            "severedRigs": 2,
+            "puffs": 119,
+            "pending": 2,
+            "float": 0,
+            "floatAt": null,
+            "slopeDecals": true,
+            "snowCover": 0,
+            "buried": 0,
+            "bloodVisible": 0
+          },
+          "chumSources": 2,
+          "aquatic": {
+            "rideableSpecies": 14,
+            "species": [
+              "great_white_shark",
+              "megalodon",
+              "hammerhead_shark",
+              "bull_shark",
+              "fish",
+              "sardine",
+              "tuna",
+              "marlin",
+              "barracuda",
+              "orca",
+              "dolphin",
+              "humpback_whale",
+              "manta_ray",
+              "sea_turtle"
+            ],
+            "mounted": true,
+            "mountedSpecies": "bull_shark",
+            "saddle": {
+              "x": 0.601226167472165,
+              "y": 1.5643381141071637,
+              "width": 1.0605993112575718
+            },
+            "placedSocket": {
+              "x": 121.81513706330638,
+              "y": 0.06278735167314298,
+              "z": 525.2490692282578
+            },
+            "speed": 0,
+            "verticalSpeed": 0,
+            "airborne": false,
+            "attacking": false,
+            "attackProgress": 0,
+            "attackDuration": 0.857,
+            "attackCooldown": 0,
+            "jawOpen": 0,
+            "attackTarget": null,
+            "attackTargetDistance": null,
+            "breachApex": 0,
+            "breachAirT": 0,
+            "breachVel": 9.73,
+            "canBreach": true,
+            "mounts": 1,
+            "breaches": 0,
+            "reentries": 0,
+            "attacks": 1,
+            "hits": 1,
+            "shipBites": 0,
+            "clamps": 0,
+            "clampT": 0,
+            "lastSpecies": "bull_shark",
+            "lastTarget": "survivor"
+          }
+        },
+        "metrics": {
+          "stumpMeshes": 1,
+          "stumpIsBox": 0,
+          "limbsOff": 2
+        }
+      }
+    },
+    {
+      "id": "grows-back",
+      "frame": "custom",
+      "beforeFile": "07-grows-back.png",
+      "afterFile": "07-grows-back.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "side": "before",
+        "chapter": 6,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "spot": {
+            "x": 119.58996679475003,
+            "z": 526.6145280103939,
+            "depth": 0.8669132165529683,
+            "r": 140.31103897094727,
+            "ang": -0.5503903191365773
+          },
+          "medium": {
+            "depthM": 0.87,
+            "goreMedium": "water",
+            "seaY": -0.82,
+            "jawY": -1.04,
+            "victimDead": true,
+            "woundDecals": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0
+            }
+          },
+          "medium2": {
+            "depthM": 9.5,
+            "goreMedium": "water",
+            "chum": 1
+          },
+          "jaw": {
+            "x": 120.3556084796832,
+            "y": -1.040982484330021,
+            "z": 526.1443207752963
+          },
+          "diag": {
+            "tries": [],
+            "hitAt": 3.23,
+            "cam": [
+              116.7,
+              0.4,
+              530.4
+            ],
+            "camToVictim": 4.76,
+            "camToJaw": 5.61,
+            "woundAudit": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0
+            }
+          },
+          "goreAudit": {
+            "bits": 1,
+            "pools": 9,
+            "streaks": 0,
+            "slicks": 13,
+            "walls": 0,
+            "realism": true,
+            "debrisLaw": true,
+            "mode": "sharksim",
+            "boxGibs": 0,
+            "drops": 0,
+            "mist": 0,
+            "maxGibCm": 0,
+            "maxDropCm": 0,
+            "maxDropThickCm": 0,
+            "gibs": 0,
+            "severed": 0,
+            "severedRigs": 0,
+            "puffs": 61,
+            "pending": 0,
+            "float": 0.058,
+            "floatAt": [
+              3.1,
+              729.5
+            ],
+            "slopeDecals": true,
+            "snowCover": 0,
+            "buried": 0,
+            "bloodVisible": 9
+          },
+          "chumSources": 2,
+          "aquatic": {
+            "rideableSpecies": 14,
+            "species": [
+              "great_white_shark",
+              "megalodon",
+              "hammerhead_shark",
+              "bull_shark",
+              "fish",
+              "sardine",
+              "tuna",
+              "marlin",
+              "barracuda",
+              "orca",
+              "dolphin",
+              "humpback_whale",
+              "manta_ray",
+              "sea_turtle"
+            ],
+            "mounted": true,
+            "mountedSpecies": "bull_shark",
+            "saddle": {
+              "x": 0.6012261674721951,
+              "y": 1.5643381141071635,
+              "width": 1.0605993112575718
+            },
+            "placedSocket": {
+              "x": 121.81395772752063,
+              "y": 0.06283965735761354,
+              "z": 525.2497929186776
+            },
+            "speed": 0,
+            "verticalSpeed": 0,
+            "airborne": false,
+            "attacking": false,
+            "attackProgress": 0,
+            "attackDuration": 0.856,
+            "attackCooldown": 0,
+            "jawOpen": 0,
+            "attackTarget": null,
+            "attackTargetDistance": null,
+            "breachApex": 0,
+            "breachAirT": 0,
+            "breachVel": 9.73,
+            "canBreach": true,
+            "mounts": 1,
+            "breaches": 0,
+            "reentries": 0,
+            "attacks": 1,
+            "hits": 1,
+            "shipBites": 0,
+            "clamps": 0,
+            "clampT": 0,
+            "lastSpecies": "bull_shark",
+            "lastTarget": "survivor"
+          }
+        },
+        "metrics": {
+          "limbsOffLater": 0,
+          "legStillGone": 0
+        }
+      },
+      "after": {
+        "ok": true,
+        "side": "after",
+        "chapter": 6,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "spot": {
+            "x": 119.58996679475003,
+            "z": 526.6145280103939,
+            "depth": 0.8669132165529683,
+            "r": 140.31103897094727,
+            "ang": -0.5503903191365773
+          },
+          "medium": {
+            "depthM": 0.87,
+            "goreMedium": "water",
+            "seaY": -0.83,
+            "jawY": -1.07,
+            "victimDead": true,
+            "woundDecals": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0,
+              "biteCalls": 2,
+              "biteMarks": 1,
+              "woundCalls": 1,
+              "woundMarks": 0,
+              "refusals": 1,
+              "lastRefusal": "bite:rebite-throttle"
+            }
+          },
+          "medium2": {
+            "depthM": 9.5,
+            "goreMedium": "water",
+            "chum": 1
+          },
+          "jaw": {
+            "x": 120.35683703474675,
+            "y": -1.0676705717791755,
+            "z": 526.1435995140025
+          },
+          "diag": {
+            "tries": [],
+            "hitAt": 3.23,
+            "cam": [
+              116.7,
+              0.4,
+              530.4
+            ],
+            "camToVictim": 4.76,
+            "camToJaw": 5.61,
+            "woundAudit": {
+              "decals": 12,
+              "oversized": 0,
+              "cameraFacing": 0,
+              "biteCalls": 2,
+              "biteMarks": 1,
+              "woundCalls": 1,
+              "woundMarks": 0,
+              "refusals": 1,
+              "lastRefusal": "bite:rebite-throttle"
+            }
+          },
+          "goreAudit": {
+            "bits": 2,
+            "pools": 12,
+            "streaks": 0,
+            "slicks": 29,
+            "walls": 0,
+            "realism": true,
+            "debrisLaw": true,
+            "mode": "sharksim",
+            "boxGibs": 0,
+            "drops": 0,
+            "mist": 0,
+            "maxGibCm": 0,
+            "maxDropCm": 0,
+            "maxDropThickCm": 0,
+            "gibs": 0,
+            "severed": 1,
+            "severedRigs": 1,
+            "puffs": 60,
+            "pending": 0,
+            "float": 0.06,
+            "floatAt": [
+              2.4,
+              729.7
+            ],
+            "slopeDecals": true,
+            "snowCover": 0,
+            "buried": 0,
+            "bloodVisible": 12
+          },
+          "chumSources": 2,
+          "aquatic": {
+            "rideableSpecies": 14,
+            "species": [
+              "great_white_shark",
+              "megalodon",
+              "hammerhead_shark",
+              "bull_shark",
+              "fish",
+              "sardine",
+              "tuna",
+              "marlin",
+              "barracuda",
+              "orca",
+              "dolphin",
+              "humpback_whale",
+              "manta_ray",
+              "sea_turtle"
+            ],
+            "mounted": true,
+            "mountedSpecies": "bull_shark",
+            "saddle": {
+              "x": 0.601226167472165,
+              "y": 1.5643381141071637,
+              "width": 1.0605993112575718
+            },
+            "placedSocket": {
+              "x": 121.81513706330638,
+              "y": 0.06278735167314031,
+              "z": 525.2490692282579
+            },
+            "speed": 0,
+            "verticalSpeed": 0,
+            "airborne": false,
+            "attacking": false,
+            "attackProgress": 0,
+            "attackDuration": 0.857,
+            "attackCooldown": 0,
+            "jawOpen": 0,
+            "attackTarget": null,
+            "attackTargetDistance": null,
+            "breachApex": 0,
+            "breachAirT": 0,
+            "breachVel": 9.73,
+            "canBreach": true,
+            "mounts": 1,
+            "breaches": 0,
+            "reentries": 0,
+            "attacks": 1,
+            "hits": 1,
+            "shipBites": 0,
+            "clamps": 0,
+            "clampT": 0,
+            "lastSpecies": "bull_shark",
+            "lastTarget": "survivor"
+          }
+        },
+        "metrics": {
+          "limbsOffLater": 1,
+          "legStillGone": 1
+        }
+      }
+    }
+  ],
+  "browserMessages": [
+    {
+      "side": "before",
+      "type": "warning",
+      "text": "THREE.MeshLambertMaterial: 'flatShading' is not a property of this material.",
+      "count": 4
+    },
+    {
+      "side": "after",
+      "type": "warning",
+      "text": "THREE.MeshLambertMaterial: 'flatShading' is not a property of this material.",
+      "count": 5
+    }
+  ]
+}

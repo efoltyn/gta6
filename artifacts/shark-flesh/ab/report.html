@@ -1,0 +1,172 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Shark Sim — A Mouth Leaves A Hole, Not A Sticker</title><style>
+    @page { size: A4 landscape; margin: 0; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #0b1118; color: #eff5fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .page { width: 297mm; height: 210mm; page-break-after: always; overflow: hidden; background: linear-gradient(145deg,#0c141d,#172536); padding: 13mm 14mm 10mm; position: relative; }
+    .cover { display: flex; flex-direction: column; justify-content: space-between; }
+    .eyebrow { color: #80c9ff; letter-spacing: .18em; font-weight: 800; font-size: 12px; }
+    h1 { font-size: 39px; line-height: 1.03; margin: 8mm 0 4mm; max-width: 230mm; }
+    .dek { color: #bdcad5; font-size: 17px; line-height: 1.5; max-width: 225mm; }
+    .stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 5mm; margin: 7mm 0; }
+    .stat { border: 1px solid #314457; border-radius: 4mm; padding: 6mm; background: rgba(255,255,255,.035); }
+    .stat strong { display: block; font-size: 30px; } .stat span { color:#9fb1c0; font-size:12px; text-transform:uppercase; letter-spacing:.1em; }
+    .sources { display:grid; grid-template-columns:1fr 1fr; gap:5mm; }
+    .source { padding:5mm; border-radius:3mm; background:#101b27; border-left: 2mm solid #f06464; }
+    .source.after { border-color:#59d59a; } .source b { display:block; margin-bottom:2mm; } .source code { color:#aebdca; font-size:10px; overflow-wrap:anywhere; }
+    .method { color:#8fa2b2; font-size:11px; line-height:1.45; }
+    .detail header { height: 27mm; display:flex; align-items:flex-end; justify-content:space-between; gap:10mm; }
+    .detail header > div { display:flex; align-items:baseline; gap:4mm; }
+    .number { color:#547086; font-weight:800; font-size:18px; } h2 { margin:0; font-size:28px; }
+    .detail header p { color:#9fb2c2; margin:0 0 1mm; font-size:12px; text-align:right; max-width:120mm; }
+    .pair { height: 148mm; display:grid; grid-template-columns:1fr 1fr; gap:5mm; align-items:stretch; }
+    figure { margin:0; background:#111a23; border:1px solid #35485a; border-radius:3mm; overflow:hidden; display:flex; flex-direction:column; }
+    figure.before { border-top:2mm solid #f06464; } figure.after { border-top:2mm solid #59d59a; }
+    figcaption { height:11mm; padding:2.4mm 4mm; font-weight:850; font-size:13px; letter-spacing:.09em; flex:0 0 auto; }
+    figcaption small { float:right; color:#9babb8; font-size:9px; line-height:16px; }
+    /* CONTAIN, never cover. A cropped screenshot hides the very edge where a
+       responsive layout breaks — the gutter, the clipped button, the overflow. */
+    figure img { display:block; margin:auto; max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; min-height:0; }
+    .detail .pair figure img { max-height:135mm; }
+    .overview .frameGrid { height:150mm; display:grid; gap:4mm; align-items:start; }
+    .frameCell { height:100%; display:flex; flex-direction:column; gap:2mm; min-height:0; }
+    .frameName { color:#80c9ff; font-size:10px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; flex:0 0 auto; }
+    .frameShots { flex:1 1 auto; display:grid; grid-template-columns:1fr 1fr; gap:2mm; min-height:0; }
+    .frameShots figure { border-radius:2mm; border-top-width:1.2mm; }
+    .stageError { padding:4mm; color:#ffb3b3; font:11px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap:anywhere; }
+    footer { position:absolute; left:14mm; right:14mm; bottom:6mm; display:flex; justify-content:space-between; color:#6f8496; font:10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    /* Evidence must fit the delivered page, not merely the browser DOM.  A4
+       landscape has room for the declared compact audit, but the old 3 mm
+       row padding clipped the final rows even after raw metrics were filtered. */
+    .metrics table { width:100%; border-collapse:collapse; margin-top:3mm; font-size:10.2px; line-height:1.12; }
+    .metrics th { text-align:left; color:#80c9ff; letter-spacing:.08em; font-size:9px; text-transform:uppercase; padding:.9mm 2mm; border-bottom:1px solid #35485a; }
+    .metrics td { padding:.85mm 2mm; border-bottom:1px solid #22303f; font-variant-numeric:tabular-nums; }
+    .metrics td small { color:#8fa2b2; }
+    .metrics td.good { color:#59d59a; font-weight:800; }
+    .metrics td.bad { color:#f06464; font-weight:800; }
+    .filmstrip .stripRow { display:flex; gap:3mm; align-items:stretch; height:71mm; margin-top:3mm; }
+    .stripTag { writing-mode:vertical-rl; transform:rotate(180deg); text-align:center; font-weight:850; font-size:10px; letter-spacing:.12em; color:#f06464; flex:0 0 auto; }
+    .stripTag.after { color:#59d59a; }
+    .stripShots { flex:1 1 auto; display:grid; gap:2mm; min-width:0; }
+    .stripShots figure { border-top-width:1mm; }
+    .stripShots figcaption { height:7mm; font-size:9px; padding:1.6mm 2.4mm; }
+    .stripShots img { max-height:59mm; }
+  </style></head><body>
+    <section class="page cover">
+      <div><div class="eyebrow">DETERMINISTIC VISUAL COMPARISON</div><h1>Shark Sim — A Mouth Leaves A Hole, Not A Sticker</h1><p class="dek">Seven beats of one shark attack on a person, photographed in Shark Sim on both sides. BEFORE is pristine HEAD; AFTER is the working tree; the island, the seed, the victim, the bite geometry, the sim steps and the cameras are identical between them. Three failures the owner named in one sentence, each traced to a single line: the RED SQUARE is gore.js&#39;s stump cap, a BoxGeometry(1,1,1) at 36x15x36 cm that leaves this renderer&#39;s sRGB encoder bright red; IT DOESN&#39;T LOOK LIKE A BITE because creature_combat.js stamps the jaw print at target.pos.y + 1.0 (which wounds.js&#39;s pickPart resolves to an upper-leg panel, always) while limbs came off for a megalodon only and grew back inside 0.85 s under the restore-on-reuse audit; and the MIST OVER THE WATER is aerosol with no water awareness at all, fired at the jaw on every lunge, over a plume whose surface lid clamped a sprite&#39;s centre while metres of it stood above the waterline. After: the mark lands where the mouth closed, the body keeps losing what came off it, and every drop of blood is either in the water or on it.</p></div>
+      <div class="stats"><div class="stat"><strong>7</strong><span>matched subjects</span></div><div class="stat"><strong>1</strong><span>device frames</span></div><div class="stat"><strong>14</strong><span>browser screenshots</span></div></div>
+      <p class="method">Frames: 1280x720</p>
+      <div class="sources"><div class="source"><b>BEFORE · pristine HEAD</b><code>http://127.0.0.1:8791/?mode=sharksim&amp;seed=90210&amp;cfg_BOOT_METER=0&amp;visualCompare=before-1787715671898</code></div><div class="source after"><b>AFTER · working tree</b><code>http://127.0.0.1:8792/?mode=sharksim&amp;seed=90210&amp;cfg_BOOT_METER=0&amp;visualCompare=after-1787715699111</code></div></div>
+      <p class="method">Generated August 25, 2026 at 11:42 PM. Both columns boot index.html into ?mode=sharksim with a pinned seed and click the Shark Sim tile + PLAY exactly like a player. A per-page driver freezes the frame loop (draining the one already-queued rAF callback, or it re-stamps the camera at an arbitrary later tick), empties the pod and the rest of the crowd, stands ONE survivor in water of a searched depth, and pulls the production auto-bite trigger — CBZ.cityMountedAnimalAttack, the same call shark_sim.js makes every 0.12 s — so bite angles, creatureBiteWound, surv.hurt and the meal ledger all run as they do in play. The thigh-deep band is chosen deliberately: gore.js&#39;s woundInWater refuses water under 1.2 m, so the shore shallows are exactly where the old code takes the air branch, and that is where the owner was looking. Every number is read by this preset out of the live scene graph by a signature both builds share — camera-facing quads and pooled sprites at renderOrder 5 for blood, polygon-offset unlit decals for wound marks, a before/after mesh DIFF on the rig for the stump cap, the shared _tornCap flag for animal cut faces — so both columns are measured by one instrument.</p>
+    </section>
+    <section class="page metrics">
+    <header><div><span class="number">Σ</span><h2>Measurements</h2></div><p>bloodAboveSeaM is the mist complaint as one number: metres of blood drawn in the AIR over the sea. It has to reach zero, and not by removing blood — plumePuffs, the count of cloud that is properly under the water, must hold or rise in the same frame. goreDrawn is the bite complaint as one number: on HEAD a shark eating a person draws literally nothing, because trauma.js has no cause row for it. woundToJawM is the other half — on HEAD it is the distance from the shark&#39;s mouth to the victim&#39;s thigh, because every bite mark in the game was stamped at pos.y + 1.0. stumpIsBox and boxCutFaces are the red square itself, counted; both must be zero. legStillGone is the amputation that used to grow back inside a second.</p></header>
+    <table><thead><tr><th>Subject</th><th>Metric</th><th>Before</th><th>After</th><th>Δ</th></tr></thead><tbody><tr><td>The Bite — Nothing Happens</td><td>biteLanded</td><td>1</td><td>1</td><td class="">0%</td></tr>
+<tr><td>The Bite — Nothing Happens</td><td>woundMarksAtContact</td><td>12</td><td>12</td><td class="">0%</td></tr>
+<tr><td>The Bite — Nothing Happens, Blood Is Never A Mist — The Lens On The Waterline, Two Seconds Of It — Strike, Bloom, Trail, The Kill Cloud, From A Boat&#39;s Eye</td><td>Airborne aerosol quads alive over the sea</td><td>0</td><td>0</td><td class="">0</td></tr>
+<tr><td>The Bite — Nothing Happens</td><td>Blood quads/sprites breaking the surface</td><td>0</td><td>0</td><td class="">0</td></tr>
+<tr><td>The Bite — Nothing Happens</td><td>Highest blood drawn above the waterline <small>m</small></td><td>0</td><td>0</td><td class="">0</td></tr>
+<tr><td>The Bite — Nothing Happens</td><td>Plume puffs fully IN the water (the good stuff)</td><td>0</td><td>40</td><td class="good">+40</td></tr>
+<tr><td>The Bite — Nothing Happens</td><td>Blood slicks on the surface</td><td>0</td><td>2</td><td class="good">+2</td></tr>
+<tr><td>The Bite — Nothing Happens</td><td>Wound marks on the bitten body</td><td>12</td><td>12</td><td class="">0%</td></tr>
+<tr><td>The Bite — Nothing Happens</td><td>woundToJawM</td><td>0.58</td><td>0.86</td><td class="">+48%</td></tr>
+<tr><td>The Bite — Nothing Happens</td><td>Body parts actually missing from the victim</td><td>0</td><td>1</td><td class="good">+1</td></tr>
+<tr><td>The Bite — Nothing Happens</td><td>Gore drawn by a shark eating a person</td><td>0</td><td>43</td><td class="good">+43</td></tr>
+<tr><td>Blood Is Never A Mist — The Lens On The Waterline</td><td>woundsLanded</td><td>3</td><td>3</td><td class="">0%</td></tr>
+<tr><td>Blood Is Never A Mist — The Lens On The Waterline</td><td>Blood quads/sprites breaking the surface</td><td>28</td><td>0</td><td class="good">-100%</td></tr>
+<tr><td>Blood Is Never A Mist — The Lens On The Waterline</td><td>Highest blood drawn above the waterline <small>m</small></td><td>2.42</td><td>0</td><td class="good">-100%</td></tr>
+<tr><td>Blood Is Never A Mist — The Lens On The Waterline</td><td>Plume puffs fully IN the water (the good stuff)</td><td>64</td><td>130</td><td class="good">+103%</td></tr>
+<tr><td>Blood Is Never A Mist — The Lens On The Waterline, Two Seconds Of It — Strike, Bloom, Trail</td><td>Blood slicks on the surface</td><td>2</td><td>8</td><td class="good">+300%</td></tr>
+<tr><td>Two Seconds Of It — Strike, Bloom, Trail</td><td>woundsLanded</td><td>1</td><td>1</td><td class="">0%</td></tr>
+<tr><td>Two Seconds Of It — Strike, Bloom, Trail</td><td>Blood quads/sprites breaking the surface</td><td>36</td><td>74</td><td class="bad">+106%</td></tr>
+<tr><td>Two Seconds Of It — Strike, Bloom, Trail</td><td>Highest blood drawn above the waterline <small>m</small></td><td>2.8</td><td>0.26</td><td class="good">-91%</td></tr>
+<tr><td>Two Seconds Of It — Strike, Bloom, Trail</td><td>Plume puffs fully IN the water (the good stuff)</td><td>56</td><td>56</td><td class="">0%</td></tr>
+<tr><td>The Kill Cloud, From A Boat&#39;s Eye</td><td>Blood quads/sprites breaking the surface</td><td>109</td><td>0</td><td class="good">-100%</td></tr>
+<tr><td>The Kill Cloud, From A Boat&#39;s Eye</td><td>Highest blood drawn above the waterline <small>m</small></td><td>21.1</td><td>0</td><td class="good">-100%</td></tr>
+<tr><td>The Kill Cloud, From A Boat&#39;s Eye</td><td>Plume puffs fully IN the water (the good stuff)</td><td>20</td><td>127</td><td class="good">+535%</td></tr>
+<tr><td>The Kill Cloud, From A Boat&#39;s Eye</td><td>Blood slicks on the surface</td><td>12</td><td>28</td><td class="good">+133%</td></tr>
+<tr><td>The Red Square, Animal Half — A Hole, Not A Plate</td><td>capMeshes</td><td>9</td><td>9</td><td class="">0%</td></tr>
+<tr><td>The Red Square, Animal Half — A Hole, Not A Plate</td><td>Animal cut faces that are literally a BoxGeometry</td><td>9</td><td>0</td><td class="good">-100%</td></tr>
+<tr><td>The Red Square, Animal Half — A Hole, Not A Plate</td><td>Widest single cut face on the orca <small>m</small></td><td>1.24</td><td>1.32</td><td class="bad">+6%</td></tr>
+<tr><td>The Red Square, Animal Half — A Hole, Not A Plate</td><td>Plume puffs fully IN the water (the good stuff)</td><td>19</td><td>130</td><td class="good">+584%</td></tr>
+<tr><td>The Red Square, Human Half — A Stump, Close</td><td>stumpMeshes</td><td>1</td><td>1</td><td class="">0%</td></tr>
+<tr><td>The Red Square, Human Half — A Stump, Close</td><td>Stump caps that are literally a BoxGeometry</td><td>1</td><td>0</td><td class="good">-100%</td></tr>
+<tr><td>The Red Square, Human Half — A Stump, Close</td><td>Body parts actually missing from the victim</td><td>1</td><td>2</td><td class="good">+100%</td></tr>
+<tr><td>And A Second And A Half Later</td><td>..still missing 1.4 s later</td><td>0</td><td>1</td><td class="good">+1</td></tr>
+<tr><td>And A Second And A Half Later</td><td>The severed leg is still off the rig</td><td>0</td><td>1</td><td class="good">+1</td></tr></tbody></table>
+  </section>
+    
+<section class="page detail">
+      <header><div><span class="number">01</span><h2>The Bite — Nothing Happens</h2></div><p>A bull shark takes a wader in thigh-deep water, photographed at the instant of contact. BEFORE: the killfeed says EATEN BY A BULL SHARK and the body is untouched — no wound where the mouth was, every limb still on, not one drop of blood in the sea. trauma.js has no cause row matching &quot;eaten by a ...&quot;, so the entire death-gore event was skipped, and the jaw print that did get stamped was stamped at the navel because creature_combat passed target.pos.y + 1.0. AFTER: the mark lands on the part the teeth closed on, the body leaves with less of itself, and the water goes red.</p></header>
+      <div class="pair">
+        <figure class="before"><figcaption>BEFORE <small>BEFORE · pristine HEAD</small></figcaption><img src="shots/before/01-the-bite.png"></figure>
+        <figure class="after"><figcaption>AFTER <small>AFTER · working tree</small></figcaption><img src="shots/after/01-the-bite.png"></figure>
+      </div>
+      <footer><span>the-bite · 1280x720</span><span>Same island · same seed · same wader · same jaw · same sim seconds · same cameras</span></footer>
+    </section>
+
+
+<section class="page detail">
+      <header><div><span class="number">02</span><h2>Blood Is Never A Mist — The Lens On The Waterline</h2></div><p>An orca mauled just under the surface, from a lens one metre above the swell looking flat across it. This is the frame the complaint was written about. BEFORE: the top half of every blood cloud is drawn in the AIR — updatePuffs clamps a puff&#39;s CENTRE to 5 cm under the surface while the sprite is metres across and still growing — so the plume the owner likes underwater reads as pink fog lying on the sea. AFTER: the lid clamps the whole quad, what reaches the surface flattens into a slick, and the air above the waterline is empty.</p></header>
+      <div class="pair">
+        <figure class="before"><figcaption>BEFORE <small>BEFORE · pristine HEAD</small></figcaption><img src="shots/before/02-mist-over-the-sea.png"></figure>
+        <figure class="after"><figcaption>AFTER <small>AFTER · working tree</small></figcaption><img src="shots/after/02-mist-over-the-sea.png"></figure>
+      </div>
+      <footer><span>mist-over-the-sea · 1280x720</span><span>Same island · same seed · same wader · same jaw · same sim seconds · same cameras</span></footer>
+    </section>
+
+
+<section class="page detail">
+      <header><div><span class="number">03</span><h2>Two Seconds Of It — Strike, Bloom, Trail</h2></div><p>Five frames of the same two seconds from the same waterline lens. The blood trail is the thing the owner already loves and the thing this pass must not break: it should still billow, still fold, still drift with the current and still follow the wounded body — while not one puff of it crosses the waterline.</p></header>
+      <div class="pair">
+        <figure class="before"><figcaption>BEFORE <small>BEFORE · pristine HEAD</small></figcaption><img src="shots/before/03-bite-strip.png"></figure>
+        <figure class="after"><figcaption>AFTER <small>AFTER · working tree</small></figcaption><img src="shots/after/03-bite-strip.png"></figure>
+      </div>
+      <footer><span>bite-strip · 1280x720</span><span>Same island · same seed · same wader · same jaw · same sim seconds · same cameras</span></footer>
+    </section>
+<section class="page filmstrip">
+      <header><div><span class="number">▶</span><h2>Two Seconds Of It — Strike, Bloom, Trail · over time</h2></div><p>The same simulated seconds on both builds, photographed every 0.4s. Motion is the claim; the strip is the proof.</p></header>
+      <div class="stripRow"><span class="stripTag">BEFORE · pristine HEAD</span><div class="stripShots" style="grid-template-columns:repeat(5,1fr)"><figure class="before"><figcaption>t+0.0s</figcaption><img src="shots/before/03-bite-strip.png"></figure><figure class="before"><figcaption>t+0.4s</figcaption><img src="shots/before/03-bite-strip-t1.png"></figure><figure class="before"><figcaption>t+0.8s</figcaption><img src="shots/before/03-bite-strip-t2.png"></figure><figure class="before"><figcaption>t+1.2s</figcaption><img src="shots/before/03-bite-strip-t3.png"></figure><figure class="before"><figcaption>t+1.6s</figcaption><img src="shots/before/03-bite-strip-t4.png"></figure></div></div>
+      <div class="stripRow"><span class="stripTag after">AFTER · working tree</span><div class="stripShots" style="grid-template-columns:repeat(5,1fr)"><figure class="after"><figcaption>t+0.0s</figcaption><img src="shots/after/03-bite-strip.png"></figure><figure class="after"><figcaption>t+0.4s</figcaption><img src="shots/after/03-bite-strip-t1.png"></figure><figure class="after"><figcaption>t+0.8s</figcaption><img src="shots/after/03-bite-strip-t2.png"></figure><figure class="after"><figcaption>t+1.2s</figcaption><img src="shots/after/03-bite-strip-t3.png"></figure><figure class="after"><figcaption>t+1.6s</figcaption><img src="shots/after/03-bite-strip-t4.png"></figure></div></div>
+      <footer><span>bite-strip · film strip</span><span>Same island · same seed · same wader · same jaw · same sim seconds · same cameras</span></footer>
+    </section>
+
+<section class="page detail">
+      <header><div><span class="number">04</span><h2>The Kill Cloud, From A Boat&#39;s Eye</h2></div><p>The orca dies. BEFORE: gore.js&#39;s kill cloud seeds its shell on a sphere of the body&#39;s own scale — up to 2.2 m of that is spawned ABOVE the water, and the lid then pins each sprite&#39;s centre just under the surface with metres of it standing proud, which from up here is a pink cloud hovering over the swell. AFTER: the cloud is under the water where a cloud belongs, reddest at the wound and going brown with depth, and the only thing visible from above is the slick spreading over it.</p></header>
+      <div class="pair">
+        <figure class="before"><figcaption>BEFORE <small>BEFORE · pristine HEAD</small></figcaption><img src="shots/before/04-deep-kill.png"></figure>
+        <figure class="after"><figcaption>AFTER <small>AFTER · working tree</small></figcaption><img src="shots/after/04-deep-kill.png"></figure>
+      </div>
+      <footer><span>deep-kill · 1280x720</span><span>Same island · same seed · same wader · same jaw · same sim seconds · same cameras</span></footer>
+    </section>
+
+
+<section class="page detail">
+      <header><div><span class="number">05</span><h2>The Red Square, Animal Half — A Hole, Not A Plate</h2></div><p>Close on the flank. BEFORE: the cut face is three nested BoxGeometry slabs whose ±0.15 corner jitter never breaks a rectangle, so a bite reads as a red plate lying on the animal. AFTER: a torn crater — a ragged outline, a bore that goes in, and a raw margin around it.</p></header>
+      <div class="pair">
+        <figure class="before"><figcaption>BEFORE <small>BEFORE · pristine HEAD</small></figcaption><img src="shots/before/05-orca-crater.png"></figure>
+        <figure class="after"><figcaption>AFTER <small>AFTER · working tree</small></figcaption><img src="shots/after/05-orca-crater.png"></figure>
+      </div>
+      <footer><span>orca-crater · 1280x720</span><span>Same island · same seed · same wader · same jaw · same sim seconds · same cameras</span></footer>
+    </section>
+
+
+<section class="page detail">
+      <header><div><span class="number">06</span><h2>The Red Square, Human Half — A Stump, Close</h2></div><p>Exactly the same amputation on both sides: one CBZ.goreSever call on the same leg of the same body, on dry sand so nothing about the water can be blamed for the read. BEFORE: an axis-aligned untextured 36 x 15 x 36 cm BoxGeometry that leaves this renderer&#39;s sRGB encoder bright red — the owner&#39;s red square, literally. AFTER: a torn cross-section with a ragged silhouette, a dark bore and bone in the middle.</p></header>
+      <div class="pair">
+        <figure class="before"><figcaption>BEFORE <small>BEFORE · pristine HEAD</small></figcaption><img src="shots/before/06-red-square.png"></figure>
+        <figure class="after"><figcaption>AFTER <small>AFTER · working tree</small></figcaption><img src="shots/after/06-red-square.png"></figure>
+      </div>
+      <footer><span>red-square · 1280x720</span><span>Same island · same seed · same wader · same jaw · same sim seconds · same cameras</span></footer>
+    </section>
+
+
+<section class="page detail">
+      <header><div><span class="number">07</span><h2>And A Second And A Half Later</h2></div><p>Same camera, same body, 1.4 seconds on. BEFORE: the leg is back. gore.js&#39;s restore-on-reuse audit runs every 0.85 s and restores any severed actor that is still ALIVE, so surviving a shark attack quietly undid the amputation. AFTER: the audit still guarantees a recycled rig leaves whole — that is what it is for — but a living amputee stays an amputee.</p></header>
+      <div class="pair">
+        <figure class="before"><figcaption>BEFORE <small>BEFORE · pristine HEAD</small></figcaption><img src="shots/before/07-grows-back.png"></figure>
+        <figure class="after"><figcaption>AFTER <small>AFTER · working tree</small></figcaption><img src="shots/after/07-grows-back.png"></figure>
+      </div>
+      <footer><span>grows-back · 1280x720</span><span>Same island · same seed · same wader · same jaw · same sim seconds · same cameras</span></footer>
+    </section>
+
+  </body></html>
