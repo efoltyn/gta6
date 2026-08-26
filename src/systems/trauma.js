@@ -43,7 +43,8 @@
      2. THE CAUSE TABLE. What a given death does to a body, so the kill's gore
         follows its physics: torn apart by a tornado is the goriest thing on the
         island, crushed under rubble bursts and pools, a long fall SPLATS, a
-        beating bleeds out slow — and frozen / drowned / choked / irradiated /
+        beating bleeds out slow, a MAULING tears a limb off and floods the
+        water — and frozen / drowned / choked / irradiated /
         incinerated / vaporized draw NO BLOOD AT ALL. An unrecognised cause
         draws no blood either: the default is now silence, which is the whole
         inversion.
@@ -145,6 +146,32 @@
     // detaches. Most detach none — that restraint is the point, and it is why
     // a beating and a long fall now leave a whole body on the ground.
     //
+    /* MAULED / EATEN — TEETH, NOT A WEAPON, and until now not a row at all.
+       modes/shark_sim.js and city/wildlife_tame.js kill survivors with
+       "eaten by a bull shark" / "mauled by a bear", profile() matched nothing,
+       and deathGore's `!pr` branch marked the body _noBlood and drew LITERALLY
+       NOTHING. A shark could take a swimmer off the beach and the only
+       evidence in the world was a line of text. That is most of the owner's
+       "it doesn't look like I'm biting them".
+
+       A jaw TEARS rather than penetrates, so it bleeds harder and faster than
+       anything on this island short of the wind — and it is the one death here
+       that takes a piece of you with it, which is the entire point of a shark.
+       `style:"bite"` puts gore.js on its bite path (two opposing rows of torn
+       punctures stamped on the real rig via CBZ.bodyBite) and deliberately NOT
+       on the blade path: the arterial knife-arcs read completely wrong on a
+       mauling. limbs:1 is CBZ.goreSever taking a real arm or leg off the real
+       body, thrown along the jaw line the kill site hands us in imp.dir.
+
+       THE VOCABULARY IS gore.js's OWN, character for character, so the wound
+       stamp and the cause table can never disagree about what a bite is. THE
+       WORD BOUNDARIES ARE LOAD-BEARING: "beaten" and "beaten to death" are
+       live BLUNT causes in this game and both contain the substring "eaten" —
+       \beaten\b refuses them (there is no word boundary inside "beaten"), and
+       they fall through to the blunt row below exactly as they always did.
+       Ordered FIRST among the bleeding rows so "torn apart by a great white"
+       reads as the shark that did it rather than as the tornado. */
+    [/maul|bitten|\bbit\b|savag|devour|\beaten\b|shark|jaws/, { amount: 1.5, limbs: 1, style: "bite" }],
     // the island's worst: a tornado does not kill you, it disassembles you
     [/torn apart|tornado/, { amount: 1.75, limbs: 2, style: "tear", slowmo: 0.45 }],
     // crushed: burst and pooled, with the ground wearing most of it. Rubble
@@ -366,6 +393,19 @@
         actor: a, imp: imp || null, limbs: a.isPlayer ? 0 : (pr.limbs || 0),
         slowmo: a.isPlayer ? (pr.slowmo || 0.4) : (pr.slowmo || 0),
       };
+      /* WHAT THE KILL SITE ALREADY KNEW. A death that arrives with a real
+         contact point, a real mouth width or a stated medium has no reason to
+         make gore.js re-derive any of them:
+           imp.point  → gore() seats the wound THERE on the part actually bitten
+                        instead of at the generic body-centre this call passes
+           imp.jaw    → a great white's jaw print, not wounds.js's 0.22 default
+           imp.medium → the caller was IN the water and says so, so the wet
+                        branch cannot be missed by a metre of clear air over a
+                        swell. Every one is optional; nothing else changes. */
+      if (imp) {
+        if (imp.jaw != null) opts.jaw = imp.jaw;
+        if (imp.medium) opts.medium = imp.medium;
+      }
       switch (pr.style) {
         // TORN APART: omnidirectional by definition — gore()'s explosion path is
         // exactly the "no preferred direction, everything leaves at once" read.
@@ -374,6 +414,14 @@
         // BEATEN: gore()'s blunt beat — teeth and spit now, the bleed-out pool
         // spreading under the body a couple of seconds later.
         case "blunt": opts.melee = "blunt"; break;
+        /* BITTEN: gore.js's own bite path. It stamps the tooth-row wound on the
+           real body (CBZ.bodyBite) and fires NEITHER the arterial arcs nor the
+           slow bleed-out pool — a maul is not a knife and it is not a beating.
+           Said with opts.melee rather than left to gore()'s cause regex,
+           because the opts.actor route below hands it an EMPTY cause string:
+           gore() only ever sees the cause on the city's kill tap, so an island
+           bite would have arrived anonymous and been drawn as a bullet. */
+        case "bite": opts.melee = "bite"; break;
         // A LONG FALL: radial and LOW. Killing the direction gives the ring
         // spray; the wide extra pool below is the part that reads as a splat.
         case "splat": opts.dir = null; break;

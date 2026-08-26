@@ -261,9 +261,30 @@
     return a;
   }
 
+  /* HOW BIG IS THIS ONE, LIVE — not how big is its SPECIES.
+     `species.scale` is a CONSTANT and it was the wrong answer twice over: it
+     never knew the individual (a runt and a monster great white measured the
+     same), and since animals grow by eating (city/wildlife_traits.js's mass
+     ledger, which shark_sim's whole progression rides on) it does not even know
+     the body that is in front of you this second. Every jaw radius, lunge
+     reach and seize hold in this file derives from this number, so a shark
+     that had doubled in the sim still bit like the fry it started as — which
+     is exactly why the "can this mouth take a limb off" test below could only
+     ever be true for a megalodon. systems/predator.js already reads the live
+     answer for the same reason; this was the last stale copy of the question.
+     Consumed defensively — city/wildlife_traits.js is another block and may
+     load either side of this one — and the group's own live scale (which
+     wildlife.js writes as the EFFECTIVE scale, species constant included) is
+     the next-best truth before the constant is finally fallen back on. */
   function actorScale(a) {
-    if (a && a.species && typeof a.species.scale === 'number') return a.species.scale;
-    if (a && typeof a.scale === 'number') return a.scale;
+    if (!a) return 1;
+    if (a.species && typeof CBZ.wildlifeScale === 'function') {
+      try { var s = +CBZ.wildlifeScale(a); if (s > 0 && isFinite(s)) return s; } catch (e) {}
+    }
+    var g = a.group;
+    if (g && g.scale && g.scale.x > 0) return g.scale.x;
+    if (a.species && typeof a.species.scale === 'number') return a.species.scale;
+    if (typeof a.scale === 'number') return a.scale;
     return 1;
   }
 
@@ -1025,7 +1046,19 @@
     _bd.x = dx; _bd.y = 0.18; _bd.z = dz;   // a bite tears slightly upward
     _bo2.dir = _bd;
     _bo2.amount = Math.max(0.35, Math.min(1.9, sev));
-    _bo2.mist = sev > 0.85;                 // only a real crunch atomises anything
+    /* MIST IS AN AIR EVENT, AND ASKING FOR IT IN THE SEA WAS DISHONEST.
+       BITE_SEV.lunge is 1.0, so EVERY shark lunge asked gore.js to atomise
+       blood into airborne aerosol — and a shark's lunge almost always lands
+       underwater, where an aerosol is not a thing that can happen. The floating
+       pink haze the owner reported over the water was this request being
+       granted. gore.js now refuses aerosol over the sea, but a call site that
+       keeps asking for something impossible is a bug waiting to be re-granted:
+       ask the medium here too, so the request itself is true. */
+    var dry = true;
+    if (typeof CBZ.goreMedium === 'function') {
+      try { dry = CBZ.goreMedium(J.x, J.y, J.z) !== 'water'; } catch (e) {}
+    }
+    _bo2.mist = dry && sev > 0.85;          // only a real crunch, and only in air
     _bo2.pool = sev > 0.6;                  // only an open wound stains the ground
     _bo2.player = !!(target.isPlayer || (CBZ.player && target === CBZ.player));
     _bo2.sfx = sev > 0.7 ? 'hit' : false;
@@ -1090,25 +1123,118 @@
   // narrowed radius through the same call rather than getting a second wound
   // system. (`stomp` is a hoof, not a paired point — it stays out.)
   var GORE_SPAN = 0.55;
-  function biteWound(attacker, target, style) {
+  /* HOW WIDE IS THIS MOUTH, in metres of RADIUS — the one owner of the
+     question, because three call sites now need the same answer (the wound
+     stamp, the sever gate, and city/wildlife_tame.js threading it onto a kill
+     so gore.js stamps a great white's jaw print instead of a dog's default). */
+  function biteJawRadius(attacker, style) {
+    var jaw = Math.max(0.12, Math.min(1.2, 0.10 + actorScale(attacker) * 0.16));
+    // A TUSK PAIR IS NARROWER THAN A JAW: same paired-crescent wound, less span.
+    if (style === 'gore' || style === 'ram') jaw = Math.max(0.10, jaw * GORE_SPAN);
+    return jaw;
+  }
+  /* WHAT TAKES A LIMB OFF, AND WHY IT IS NOT A MAGIC NUMBER.
+
+     The old gate was `style === 'lunge' && actorScale(attacker) >= 1.6`, and
+     it was wrong in every direction at once. 1.6 is above the BULL SHARK
+     (0.95), the HAMMERHEAD (1.25) and the GREAT WHITE (1.2) — three of the
+     four playable sharks in the sim could never take anything off anybody, so
+     the entire fantasy of the mode ("it bit me and now my arm is gone") was
+     reachable only by the megalodon. And because actorScale read the SPECIES
+     CONSTANT, a shark that had eaten its way to twice its size was still
+     priced as a fry (fixed at actorScale itself, above).
+
+     The rule now is about the fight, not a tier:
+       • A MOUTH BIG ENOUGH FOR THE PART IT CLOSED ON. Measured in gape (jaw
+         diameter) against a human limb: an adult upper arm is ~0.14 m across,
+         a thigh ~0.2. A 0.34 m gape can close AROUND one; a terrier's 0.26
+         cannot, and never will however hard it bites.
+       • AT FULL COMMIT. A rush with the whole body behind it (sev >= 0.9,
+         which is `lunge` and nothing else) tears; a worrying nip does not.
+       • OR THE BITE THAT ENDED THEM. A kill is allowed to take something even
+         at a smaller gape — a wolf that kills you takes an arm with it — but
+         a dog's mouth still cannot, at any severity.
+     Tusks, horns, hooves and pecks are excluded outright: `gore`/`ram`/
+     `strike` open a body, they do not amputate. A caller that KNOWS this blow
+     is lethal says so (opts.kill); callers that cannot know simply omit it.
+     systems/childsafe.js still vetoes the dismemberment where it must, and
+     CBZ.goreSever owns the stump, the flying limb and the restore audit. */
+  var SEVER_GAPE = 0.34;        // metres of gape that can close around a limb
+  var SEVER_KILL_GAPE = 0.30;   // ..and what a killing bite may do it at
+  function biteMaySever(style, jaw, sev, kill) {
+    if (style !== 'lunge' && style !== 'maul' && style !== 'bite' && style !== 'bite_flank') return false;
+    var gape = jaw * 2;
+    if (gape >= SEVER_GAPE && sev >= 0.9) return true;
+    return !!kill && gape >= SEVER_KILL_GAPE;
+  }
+  /* biteWound(attacker, target, style [, at] [, o])
+       at  optional WORLD point where the mouth actually closed. `o.dir` is the
+           line it closed along; `o.kill` says this blow is lethal.
+     THE NAVEL BUG. This used to stamp every bite at `target.pos.y + 1.0`, i.e.
+     the victim's centre, at a fixed height — and wounds.js's pickPart splits
+     torso from legs at local y > 1.02, so a shark that closed its jaws on a
+     swimmer's SHOULDER put its tooth rows on an upper leg. Every bite in the
+     game, from every animal, landed on the same panel. The mounted bite path
+     already had the true clamped contact point on the victim's own surface one
+     frame earlier (wildlife_tame's `biteV`) and simply threw it away.
+     Callers that have no contact point (the land AI) fall back to the JAW's
+     own world position clamped onto the body, which is still the mouth's real
+     height and beats the navel by the whole length of a person. */
+  function biteWound(attacker, target, style, at, o) {
     if (typeof CBZ.bodyBite !== 'function') return;
     if (!target || !target.char || !target.pos) return;
     var g = attacker.group; if (!g) return;
-    var sc = actorScale(attacker);
-    var jaw = Math.max(0.12, Math.min(1.2, 0.10 + sc * 0.16));
-    if (style === 'gore' || style === 'ram') jaw = Math.max(0.10, jaw * GORE_SPAN);
+    var jaw = biteJawRadius(attacker, style);
     var sev = (style === 'lunge') ? 0.95 : (style === 'maul') ? 0.8 : (style === 'strike') ? 0.45
       : (style === 'gore' || style === 'ram') ? 0.75 : 0.6;
+    var tp = target.pos;
+    var haveAt = !!(at && at.x != null && at.y != null && at.z != null);
     try {
-      _bp.x = target.pos.x; _bp.y = target.pos.y + 1.0; _bp.z = target.pos.z;
-      _bo.jaw = jaw; _bo.sev = sev; _bo.sever = (style === 'lunge' && sc >= 1.6);
-      _bo.fromX = g.position.x; _bo.fromZ = g.position.z;
+      if (haveAt) {
+        _bp.x = at.x; _bp.y = at.y; _bp.z = at.z;
+        /* NO FACE-BIAS WHEN THE POINT IS REAL. bodyBite nudges the mark 0.4 m
+           toward fromX/fromZ to GUESS which face a bite came through when all
+           it was given was a body centre. A true contact point is already on
+           the surface facing the attacker, so nudging it again would drag a
+           chest bite out onto the near arm. Withheld on purpose. */
+        _bo.fromX = null; _bo.fromZ = null;
+      } else {
+        var J = jawWorld(attacker);
+        if (J) {
+          _bp.x = J.x; _bp.y = J.y; _bp.z = J.z;
+          // pull the mouth onto the body: a jaw hanging in the air just outside
+          // the victim still marks the surface nearest to it, never the middle.
+          var ox = _bp.x - tp.x, oz = _bp.z - tp.z;
+          var ol = Math.sqrt(ox * ox + oz * oz);
+          if (ol > 0.36) { _bp.x = tp.x + ox / ol * 0.36; _bp.z = tp.z + oz / ol * 0.36; }
+          // and keep it on a person: ankle at the bottom, crown at the top
+          if (_bp.y < tp.y + 0.25) _bp.y = tp.y + 0.25;
+          else if (_bp.y > tp.y + 2.05) _bp.y = tp.y + 2.05;
+        } else {
+          _bp.x = tp.x; _bp.y = tp.y + 1.0; _bp.z = tp.z;
+        }
+        _bo.fromX = g.position.x; _bo.fromZ = g.position.z;
+      }
+      _bo.jaw = jaw; _bo.sev = sev;
+      _bo.sever = biteMaySever(style, jaw, sev, o && o.kill);
+      /* THE LINE THE FLESH LEAVES ALONG. wounds.js hands opts.dir straight to
+         CBZ.goreSever, so a severed limb is thrown along the jaw's own line
+         rather than dropping where it stood. Given by the caller when it knows
+         the bite line, derived from body-centre-through-teeth when it does not. */
+      if (o && o.dir) { _bd2.x = +o.dir.x || 0; _bd2.y = +o.dir.y || 0; _bd2.z = +o.dir.z || 0; }
+      else {
+        _bd2.x = _bp.x - g.position.x; _bd2.y = 0; _bd2.z = _bp.z - g.position.z;
+      }
+      var dl2 = Math.sqrt(_bd2.x * _bd2.x + _bd2.z * _bd2.z);
+      if (dl2 > 0.001) { _bd2.x /= dl2; _bd2.z /= dl2; } else { _bd2.x = 1; _bd2.z = 0; }
+      _bo.dir = _bd2;
       CBZ.bodyBite(target, _bp, _bo);
     } catch (e) {}
   }
   // module-scope scratch for biteWound (allocation-free hot path)
   var _bp = { x: 0, y: 0, z: 0 };
-  var _bo = { jaw: 0.22, sev: 0.7, sever: false, fromX: 0, fromZ: 0 };
+  var _bd2 = { x: 0, y: 0, z: 0 };
+  var _bo = { jaw: 0.22, sev: 0.7, sever: false, fromX: 0, fromZ: 0, dir: null };
 
   function endAttack(actor) {
     // remove any residual lunge offset so repeated attacks don't drift
@@ -1439,6 +1565,10 @@
   CBZ.creatureJawReaches = jawReaches;
   CBZ.creatureBiteBlood = biteBlood;
   CBZ.creatureBiteWound = biteWound;    // mounted predators reuse the same paired wound owner
+  // How wide is this animal's mouth (RADIUS, metres). One owner — the mounted
+  // bite threads it onto its kill so systems/gore.js stamps the death wound
+  // with a great white's jaw print instead of wounds.js's 0.22 dog default.
+  CBZ.creatureJawRadius = biteJawRadius;
   CBZ.creatureRestY = restY;            // medium-aware rest height (land or water)
 
   /* ==========================================================================

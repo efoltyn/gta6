@@ -1292,9 +1292,96 @@
     return best;
   }
 
+  /* ============================================================
+     A PERSON BITTEN IN THE WATER BLEEDS INTO IT.
+
+     The animal-vs-animal path below has been rich for a while: a chunk off the
+     part the teeth closed on, a bloom at the contact point, one arbitrated
+     chum trail per wounded body, gore.js's kill cloud when it dies. The three
+     HUMAN branches called creatureBiteWound and the damage bus and then simply
+     STOPPED — no bloom, no trail, no cloud. A shark could take a swimmer's arm
+     off and the sea behind them stayed blue, which is this game's best effect
+     missing from the one bite the whole mode exists for.
+
+     Three calls, and every one of them asks the medium instead of assuming it:
+       • THE IMPACT, at the real contact point. gore.js's goreImpact is already
+         medium-aware — a bloom plus a surface slick under water, a spray plus
+         a ground pool in air — so ONE call is right for a shark in twelve
+         metres and right for a shark in the swash, and nothing here has to
+         re-implement a water test.
+       • THE TRAIL, through city/marine_predation.js's arbiter (CBZ.marineBleed)
+         and never a raw handle. gore.js caps the WHOLE GAME at twelve chum
+         sources and the arbiter owns the "which six of everything bleeding"
+         question; opening one per bite here would starve every other bleeder
+         on the map. A swimmer that got away now trails blood exactly the way a
+         wounded animal does — which is also what makes something else come.
+       • THE KILL CLOUD, and only for a death in water deep enough to be IN.
+         A wader killed in ankle-deep swash is a beach death, not an underwater
+         one, and must not get a plume — so the depth is asked, not assumed
+         (1.2 m is gore.js's own SWIMMABLE bar). Nothing else is added on a
+         kill: the death has already been through the mode's gore table
+         (systems/trauma.js, which finally has a maul row), and that path fires
+         its own blooms, slick and chum handle. trail:false so one corpse never
+         spends two of the twelve slots.
+
+     IT COSTS THE SNACK NOTHING. Only the three human kinds reach any of this,
+     so eating forty mackerel is the same flat, fast meal it has always been. */
+  const SWIMMABLE = 1.2;            // gore.js's own bar for "in it", not "standing in it"
+  const _biteDir = { x: 1, y: 0.12, z: 0 };
+  const _biteAt = { x: 0, y: 0, z: 0 };
+  const _biteWo = { dir: _biteDir, kill: false };
+  const _biteImp = { dir: _biteDir, amount: 1, mist: false, pool: true, sfx: false };
+  function biteMedium(x, y, z) {
+    if (typeof CBZ.goreMedium === "function") {
+      try { return CBZ.goreMedium(x, y, z); } catch (e) {}
+    }
+    if (typeof CBZ.predatorMedium === "function") {
+      try { return CBZ.predatorMedium(x, y, z); } catch (e) {}
+    }
+    return (y < seaY(x, z) && waterDepth(x, z) > 0.05) ? "water" : "air";
+  }
+  /* THE MOUTH CLOSES WHERE IT ACTUALLY CLOSED. creature_combat's biteWound
+     used to stamp every bite at the victim's centre at a fixed height, and
+     systems/wounds.js reads that height as an UPPER LEG — so a shark that
+     closed its jaws on a swimmer's shoulder marked their thigh, every time,
+     for every animal in the game. The clamped contact point on the victim's
+     own surface has been sitting in biteV one frame earlier the whole time and
+     was simply never passed. `kill` is what lets the mouth take a limb with
+     it; the caller knows whether this blow is the one that ends them. */
+  function biteHumanWound(a, target, kill) {
+    if (typeof CBZ.creatureBiteWound !== "function") return;
+    _biteWo.kill = !!kill;
+    try { CBZ.creatureBiteWound(a, target, "lunge", _biteAt, _biteWo); } catch (e) {}
+  }
+  function humanBiteBlood(target, killed, sev) {
+    const x = _biteAt.x, y = _biteAt.y, z = _biteAt.z;
+    const wet = biteMedium(x, y, z) === "water";
+    if (killed) {
+      if (wet && waterDepth(x, z) >= SWIMMABLE && typeof CBZ.goreKillCloud === "function") {
+        try { CBZ.goreKillCloud(x, y, z, { size: Math.min(2.2, 0.8 + sev), trail: false }); } catch (e) {}
+      }
+      return;                       // the death bus drew the rest of it
+    }
+    if (typeof CBZ.goreImpact === "function") {
+      _biteImp.amount = Math.max(0.5, Math.min(1.9, 0.8 + sev * 0.9));
+      // AEROSOL IS AN AIR EVENT. Asking for mist underwater is asking for the
+      // floating pink haze the owner reported; the medium answers it here.
+      _biteImp.mist = !wet && sev > 0.85;
+      try { CBZ.goreImpact(x, y, z, _biteImp); } catch (e) {}
+    }
+    // IT SWAM ON MAIMED, AND TRAILING.
+    if (wet && typeof CBZ.marineBleed === "function") {
+      try { CBZ.marineBleed(target, Math.max(0.35, Math.min(1, sev))); } catch (e) {}
+    }
+  }
+
   function damageBiteTarget(a, target, kind) {
     if (!target || target.dead) return false;
-    const sp = a.species, scale = Math.max(0.35, sp.scale || 1);
+    // LIVE SIZE, not the species constant — the same correction liveScale()
+    // exists for. Everything below (the knockback, the splash, the shake, the
+    // jaw width) is about the body that is actually in the water right now,
+    // and in the shark sim that body doubles as it eats.
+    const sp = a.species, scale = Math.max(0.35, liveScale(a));
     const mouth = jawWorld(a);
     const dist = biteDistance(target, mouth);
     // Use the same envelope selection used. This especially matters for the
@@ -1332,10 +1419,23 @@
     if (contest && contest.denied) return false;
     const damage = Math.max(1, Math.round(
       Math.max(8, sp.bite || 12) * (contest ? contest.mult : 1)));
+    /* THE BITE LINE AND THE CONTACT POINT, RESOLVED ONCE for everything that
+       needs them. `biteV` is the clamped contact on the target's own surface
+       (biteDistance wrote it above), and the line is the way the mouth is
+       actually pointing — the wound, any limb it takes off and the blood all
+       leave along it. Copied into a stable scratch because it rides into the
+       damage bus and out the far side into systems/trauma.js. */
+    _biteDir.x = Math.cos(ride.head); _biteDir.y = 0.12; _biteDir.z = Math.sin(ride.head);
+    _biteAt.x = biteV.x; _biteAt.y = biteV.y; _biteAt.z = biteV.z;
+    // HOW WIDE IS THIS MOUTH — creature_combat owns the question; threaded onto
+    // the kill so gore.js stamps a great white's jaw print, not a dog default.
+    const jawR = (typeof CBZ.creatureJawRadius === "function")
+      ? CBZ.creatureJawRadius(a, "lunge") : Math.max(0.12, Math.min(1.2, 0.10 + scale * 0.16));
+    const biteSev = Math.min(1, 0.5 + scale * 0.3);
     if (kind === "animal") {
       if (!CBZ.cityWildlifeHit) return false;
       CBZ.cityWildlifeHit(target,
-        { head: false, point: biteV, dir: { x: Math.cos(ride.head), y: 0.12, z: Math.sin(ride.head) }, from: a.pos },
+        { head: false, point: biteV, dir: _biteDir, from: a.pos },
         { damage: damage, by: a, cause: "eaten by a " + String(sp.name || sp.id).toLowerCase() });
       // A KILL BIGGER THAN YOU IS NOT A CHOMP. See THE CLAMP above; a snack
       // is unaffected because aboveWeight() measures both bodies.
@@ -1352,33 +1452,49 @@
       }
     } else if (kind === "cop") {
       if (!CBZ.cityHurtCop) return false;
-      if (CBZ.creatureBiteWound) CBZ.creatureBiteWound(a, target, "lunge");
+      biteHumanWound(a, target, false);
       CBZ.cityHurtCop(target, damage, {
         fromX: a.pos.x, fromZ: a.pos.z, force: 5 + scale * 2, fling: 2 + scale,
         byPlayer: true,
       });
+      humanBiteBlood(target, false, biteSev);
     } else if (kind === "ped") {
-      if (CBZ.creatureBiteWound) CBZ.creatureBiteWound(a, target, "lunge");
       target.hp = (target.hp == null ? 100 : target.hp) - damage;
-      if (target.hp <= 0 && CBZ.cityKillPed) {
+      const pedDown = target.hp <= 0 && !!CBZ.cityKillPed;
+      // the wound is stamped BEFORE the kill, on a body that still has all of
+      // itself — and it is told whether this is the blow that ends them, which
+      // is what decides whether the mouth takes a piece with it.
+      biteHumanWound(a, target, pedDown);
+      if (pedDown) {
         CBZ.cityKillPed(target, {
           fromX: a.pos.x, fromZ: a.pos.z, force: 5 + scale * 2, fling: 2 + scale,
-          byPlayer: true,
+          byPlayer: true, point: _biteAt, dir: _biteDir, jaw: jawR,
         }, "eaten by a " + String(sp.name || sp.id).toLowerCase());
       } else if (CBZ.body && CBZ.body.hit) {
         CBZ.body.hit(target, { fromX: a.pos.x, fromZ: a.pos.z, force: 4 + scale * 2, knockdown: 1.1 });
       }
+      humanBiteBlood(target, pedDown, biteSev);
     } else if (kind === "survivor") {
       // through the island's own damage bus, so the kill hits the killfeed
       // ("Mia R. was eaten by a bull shark"), the ragdoll fling, the gore
       // table — everything a disaster death already gets. x5 because a
       // shark bite on a person is a resolution, not a health tax.
       if (!CBZ.surv || !CBZ.surv.hurt) return false;
-      if (CBZ.creatureBiteWound) CBZ.creatureBiteWound(a, target, "lunge");
+      const lethal = (target.hp == null ? 100 : target.hp) - damage * 5 <= 0;
+      biteHumanWound(a, target, lethal);
       CBZ.surv.hurt(target, damage * 5, {
         fromX: a.pos.x, fromZ: a.pos.z, force: 5 + scale * 2, fling: 2 + scale,
         cause: "eaten by a " + String(sp.name || sp.id).toLowerCase(),
+        /* WHAT THE DEATH IS ALLOWED TO KNOW. systems/trauma.js hands these
+           straight through to gore.js: the real contact point (so the death
+           wound lands on the part the teeth closed on, not at the body's
+           centre), the mouth's own width, the line it closed along, and the
+           medium — a swimmer's chest sits a metre above the swell, which is
+           exactly how a wet kill used to test "air" and rain droplets. */
+        point: _biteAt, dir: _biteDir, jaw: jawR,
+        medium: biteMedium(_biteAt.x, _biteAt.y, _biteAt.z),
       });
+      humanBiteBlood(target, !!target.dead, biteSev);
     } else if (kind === "ship") {
       if (!CBZ.cityDamageCar) return false;
       const shipDamage = Math.max(145, Math.round(damage * 2.5));
