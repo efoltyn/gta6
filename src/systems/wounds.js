@@ -185,47 +185,23 @@
   //  IDENTICAL to r, i.e. a plain linear fade; and the `raw` band centred on
   //  r=0.72 computes `max(0, 1 - |r-0.72|*4)` = 0 at BOTH radii that exist, so
   //  the raw red ring was multiplied by zero on every vertex, always. What
-  //  actually shipped was a flat linear centre→rim gradient. That is the second
-  //  half of "it looks like a sticker", and it is why the bullet path below now
-  //  builds its own ring-subdivided disc (discGeo) instead of this one. This
-  //  geometry is left byte-identical because the bite/blade/bruise arcs are
-  //  tuned around it; only its true outer radius is now recorded for the clamp.
-  function rampGeo(seg, jitter, floor) {
-    const g = new THREE.CircleGeometry(1, seg);
-    g._shared = true;
-    const pos = g.attributes.position;
-    const p1 = Math.random() * 6.28, p2 = Math.random() * 6.28, p3 = Math.random() * 6.28;
-    const col = new Float32Array(pos.count * 3);
-    for (let i = 0; i < pos.count; i++) {
-      let x = pos.getX(i), y = pos.getY(i);
-      const r0 = Math.sqrt(x * x + y * y);
-      if (jitter && r0 > 0.25) {
-        // the same randomly-phased-sine rim wobble the soak blobs already use,
-        // just tighter — a punched hole is irregular, not lumpy
-        const a = Math.atan2(y, x);
-        const k = 1 + jitter * (Math.sin(a * 3 + p1) * 0.5 + Math.sin(a * 5 + p2) * 0.33 + Math.sin(a * 7 + p3) * 0.2);
-        x *= k; y *= k;
-        pos.setXY(i, x, y);
-      }
-      const r = Math.min(1, Math.sqrt(x * x + y * y));
-      // r^2 keeps the dark core tight and small instead of a soft grey wash —
-      // the pit should be a PIT, with the falloff crowded against the rim.
-      let v = floor + (1 - floor) * (r * r);
-      col[i * 3] = v;
-      // green/blue lag red slightly through the mid-band, so the ring just
-      // inside the rim goes raw and red rather than merely lighter.
-      const raw = 1 - 0.22 * Math.max(0, 1 - Math.abs(r - 0.72) * 4);
-      col[i * 3 + 1] = v * raw;
-      col[i * 3 + 2] = v * raw;
-    }
-    pos.needsUpdate = true;
-    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-    g._maxR = maxRadiusOf(g);
-    return g;
-  }
-  // The TRUE outer radius of a jittered disc (the rim wobble pushes vertices
-  // past 1.0). Every size clamp and the audit measure against THIS, not the
-  // nominal 1.0, or a stain could still overhang by its own wobble.
+  //  actually shipped was a flat linear centre→rim gradient.
+  //
+  //  SECOND CORRECTION (2026-08-26). The note above ended "this geometry is
+  //  left byte-identical because the bite/blade/bruise arcs are tuned around
+  //  it" — i.e. every wound a MOUTH leaves was left running on the broken
+  //  ramp, which is precisely the arc the owner is now complaining about
+  //  ("when i bit a person it dosnt look like im biting them"). A tooth
+  //  puncture drawn with a two-vertex linear fade and an opaque material is a
+  //  flat disc with a hard cut edge: a sticker, exactly as reported. rampGeo
+  //  is DELETED and G_WOUND is built by discGeo, the ring-subdivided fan the
+  //  bullet path already proved out, so the bite finally gets the dark bore
+  //  and the raw margin the comment has been promising since July.
+  //  (discGeo is a hoisted function declaration; it is defined below.)
+  //
+  //  The TRUE outer radius of a jittered disc (the rim wobble pushes vertices
+  //  past 1.0). Every size clamp and the audit measure against THIS, not the
+  //  nominal 1.0, or a stain could still overhang by its own wobble.
   function maxRadiusOf(g) {
     const p = g.attributes.position;
     let mx = 0;
@@ -235,8 +211,16 @@
     }
     return mx || 1;
   }
-  // 14 segments reads as round at contact range; the 0.30 floor is the pit.
-  const G_WOUND = rampGeo(14, 0.10, 0.30);
+  // THE BITE / BLADE / BRUISE DISC. Dark bore, ONE bright raw margin, and an
+  // outermost ring at ALPHA ZERO so the mark dissolves into skin instead of
+  // ending in a cut edge. 14 segments reads as round at contact range; the
+  // jitter is what makes it a tear rather than a stamp.
+  const G_WOUND = discGeo([
+    [0.00, 0.30, 1.00, 1.00],   // the pit — the old `floor`, now actually reachable
+    [0.42, 0.46, 0.98, 1.00],
+    [0.74, 0.96, 0.80, 0.95],   // the raw torn margin: THE one bright band
+    [1.00, 0.88, 0.84, 0.00],   // feathered out — no rim, no sticker
+  ], 14, 0.10);
   // soak stains: IRREGULAR blob outlines — a circle with per-vertex radial
   // jitter (sum of randomly-phased sines) baked ONCE at startup. 3 shared
   // geometries, randomly picked + spun + stretched per stain.
@@ -248,12 +232,21 @@
   //  fades out where it spread. Same free fix: a radial ramp in vertex colour,
   //  darkest at the centre, falling to nearly nothing at the rim so the stain
   //  DISSOLVES into the garment instead of being cut out of it.
+  //
+  //  AND IT DID NOT DISSOLVE, for two years, because a colour ramp on an
+  //  OPAQUE material cannot dissolve anything (2026-08-26). MAT_SOAK was a
+  //  plain MeshBasicMaterial with no `transparent`, so the rim vertices merely
+  //  went from near-black to a slightly-less-near-black and then stopped dead
+  //  at the outline. That is the hard cut edge, still there, still a sticker,
+  //  under a comment claiming it was fixed. The ramp now drives ALPHA as well
+  //  as brightness (r128 takes a 4-component `color` attribute — see the note
+  //  on unlit() below), so the stain genuinely ends in nothing.
   function blobGeo() {
     const g = new THREE.CircleGeometry(1, 14);
     g._shared = true;
     const pos = g.attributes.position;
     const p1 = Math.random() * 6.28, p2 = Math.random() * 6.28, p3 = Math.random() * 6.28;
-    const col = new Float32Array(pos.count * 3);
+    const col = new Float32Array(pos.count * 4);
     for (let i = 0; i < pos.count; i++) {
       let x = pos.getX(i), y = pos.getY(i);
       if (x * x + y * y >= 0.25) {                   // centre vertex stays put
@@ -266,10 +259,16 @@
       // MAT_SOAK, the edge all but vanishes into the cloth.
       const r = Math.min(1, Math.sqrt(x * x + y * y));
       const v = 1 - 0.82 * (r * r);
-      col[i * 3] = v; col[i * 3 + 1] = v * 0.94; col[i * 3 + 2] = v * 0.94;
+      col[i * 4] = v; col[i * 4 + 1] = v * 0.94; col[i * 4 + 2] = v * 0.94;
+      // A STAIN IS A GRADIENT, so a plain linear alpha is exactly right here
+      // and the two-radii CircleGeometry is not a defect for this one shape:
+      // opaque where the blood pooled, gone at the wicking edge. 0.92 rather
+      // than 1.0 at the centre so even the darkest soak lets a little cloth
+      // through — wet fabric, not paint.
+      col[i * 4 + 3] = 0.92 * (1 - r);
     }
     pos.needsUpdate = true;
-    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    g.setAttribute("color", new THREE.BufferAttribute(col, 4));
     g._maxR = maxRadiusOf(g);
     return g;
   }
@@ -279,12 +278,19 @@
   //
   //  Everything the old ramp wanted needs vertices at the radii being shaded,
   //  and CircleGeometry has none, so build the fan by hand. `stops` are ordered
-  //  outward from the centre as [radius, brightness, warm]:
+  //  outward from the centre as [radius, brightness, warm, alpha]:
   //    brightness MULTIPLIES the material's authored hex, so every wound TYPE
   //      keeps its own colour and only the SHADING lives here (same law as the
   //      old ramp — the geometry never introduces a hue of its own);
   //    warm scales green/blue only, so a band can go RAW RED rather than merely
-  //      lighter — which is what an abraded margin actually looks like.
+  //      lighter — which is what an abraded margin actually looks like;
+  //    alpha (optional, default 1) is the FEATHER. A wound is opaque where it
+  //      is a hole and has to reach zero before it reaches its outline, or the
+  //      decal ends in a cut edge and reads as a sticker no matter how good
+  //      the shading inside it is. r128's shader takes a 4-component `color`
+  //      attribute (USE_COLOR_ALPHA → `diffuseColor *= vColor`), verified in
+  //      the vendored build, so this costs one float per vertex and no
+  //      material, texture or second pass.
   //  `jitter` wobbles every ring by one shared randomly-phased sine sum, so the
   //  silhouette is torn but the bands stay concentric inside it.
   //
@@ -296,14 +302,16 @@
     const vN = 1 + (n - 1) * (seg + 1);
     const pos = new Float32Array(vN * 3);
     const nrm = new Float32Array(vN * 3);
-    const col = new Float32Array(vN * 3);
+    const col = new Float32Array(vN * 4);
     const idx = [];
     const p1 = Math.random() * 6.28, p2 = Math.random() * 6.28, p3 = Math.random() * 6.28;
     pos[0] = 0; pos[1] = 0; pos[2] = 0; nrm[2] = 1;
     col[0] = stops[0][1]; col[1] = stops[0][1] * stops[0][2]; col[2] = stops[0][1] * stops[0][2];
+    col[3] = stops[0][3] != null ? stops[0][3] : 1;
     let maxR = 0, v = 1;
     for (let s = 1; s < n; s++) {
       const r0 = stops[s][0], val = stops[s][1], warm = stops[s][2];
+      const alp = stops[s][3] != null ? stops[s][3] : 1;
       for (let i = 0; i <= seg; i++) {
         const a = (i / seg) * Math.PI * 2;
         const k = jitter
@@ -312,7 +320,8 @@
         const rr = r0 * k;
         pos[v * 3] = Math.cos(a) * rr; pos[v * 3 + 1] = Math.sin(a) * rr; pos[v * 3 + 2] = 0;
         nrm[v * 3 + 2] = 1;
-        col[v * 3] = val; col[v * 3 + 1] = val * warm; col[v * 3 + 2] = val * warm;
+        col[v * 4] = val; col[v * 4 + 1] = val * warm; col[v * 4 + 2] = val * warm;
+        col[v * 4 + 3] = alp;
         if (rr > maxR) maxR = rr;
         v++;
       }
@@ -327,7 +336,7 @@
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     g.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
-    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    g.setAttribute("color", new THREE.BufferAttribute(col, 4));
     g.setIndex(idx);
     g._shared = true;
     g._maxR = maxR || 1;
@@ -337,20 +346,20 @@
   // contrast bruise collar that dissolves into skin (a bright hard rim is what
   // read as a sticker). Nearly round — a punched hole is not ragged.
   const G_ENTRY = discGeo([
-    [0.00, 0.05, 1.00],   // the bore itself — near-black at any wound colour
-    [0.34, 0.09, 1.00],   // pit wall, still dark
-    [0.60, 0.85, 0.72],   // the raw torn margin: THE one bright band
-    [0.80, 0.44, 0.80],   // abrasion / stippling
-    [1.00, 0.20, 0.88],   // bruising, low contrast against skin
+    [0.00, 0.05, 1.00, 1.00],   // the bore itself — near-black at any wound colour
+    [0.34, 0.09, 1.00, 1.00],   // pit wall, still dark
+    [0.60, 0.85, 0.72, 1.00],   // the raw torn margin: THE one bright band
+    [0.80, 0.44, 0.80, 0.72],   // abrasion / stippling — starts letting skin through
+    [1.00, 0.20, 0.88, 0.00],   // bruising, gone by the outline (it was a cut edge)
   ], 16, 0.07);
   // EXIT: a cavity, not a bore. Brightest just off centre (wet, open tissue),
   // fading out, and TORN — the heavy rim jitter is the whole silhouette.
   const G_EXIT = discGeo([
-    [0.00, 0.58, 0.85],
-    [0.30, 0.95, 0.72],
-    [0.55, 0.62, 0.78],
-    [0.78, 0.34, 0.85],
-    [1.00, 0.13, 0.90],
+    [0.00, 0.58, 0.85, 1.00],
+    [0.30, 0.95, 0.72, 1.00],
+    [0.55, 0.62, 0.78, 1.00],
+    [0.78, 0.34, 0.85, 0.66],
+    [1.00, 0.13, 0.90, 0.00],
   ], 18, 0.30);
 
   function unlit(color, po) {
@@ -365,13 +374,45 @@
     // shading distance rather than on a physical gap you can see edge-on. The
     // stack is deliberately ordered — holes (-3) beat their soak stain (-1)
     // beats the body — so a stain can never swallow the hole it belongs to.
+    //
+    // ---- transparent + depthWrite:false, and both halves are deliberate ----
+    //
+    // WHY TRANSPARENT (owner, 2026-08-26, on being bitten: the marks are
+    // stickers). Every geometry above bakes a radial ramp that fades to
+    // nothing at the outline, and every one of those ramps was being THROWN
+    // AWAY, because an opaque material cannot fade to nothing — it can only
+    // fade to a slightly different colour and then stop dead at the triangle
+    // edge. A blood soak with a hard border is not blood. Turning blending on
+    // is what lets the alpha column of the vertex ramp actually reach the
+    // framebuffer, so a puncture and a stain end in skin instead of in a rim.
+    //
+    // WHY depthWrite IS OFF. A transparent surface that writes depth is a
+    // trap: its INVISIBLE fragments (alpha 0 out at the feathered rim) still
+    // stamp the depth buffer, so anything drawn later and further away —
+    // another decal, spray, the water veil, rain — is depth-rejected inside a
+    // disc-shaped region where nothing is drawn. That is a literal hole
+    // punched in the frame, and it is the standard way "I made my decal
+    // transparent" turns into "there is a circle of missing world on this
+    // guy's thigh". Off, the decal only READS depth, which is all it needs:
+    // polygonOffset biases the value used by the TEST as well as the write, so
+    // the mark still wins against the skin it sits on and still cannot z-fight
+    // it. What we give up is decal-vs-decal depth rejection, and that is the
+    // right thing to give up — two overlapping blood marks should BLEND (and
+    // darken, which is what real overlapping blood does), not fight.
+    //
+    // Ordering between a hole and its own soak is then a sort question, not a
+    // depth question, so it is answered explicitly at the spawn sites with
+    // renderOrder (soak 0.1 under hole 0.2). Deliberately fractional: whole
+    // numbers would jump the whole decal population past every other
+    // renderOrder-0 transparent in the scene.
     const m = new THREE.MeshBasicMaterial({
-      color, vertexColors: true,
+      color, vertexColors: true, transparent: true, depthWrite: false,
       polygonOffset: true, polygonOffsetFactor: po != null ? po : -3, polygonOffsetUnits: po != null ? po : -3,
     });
     m._shared = true;
     return m;
   }
+  const RO_SOAK = 0.1, RO_WOUND = 0.2;   // see the renderOrder note in unlit()
   const MAT_FRESH = unlit(0x4e070b);   // fresh entry wound: near-black red
   const MAT_DRY = unlit(0x351409);     // dried: dark brown scab
   const MAT_BRUISE = unlit(0x3a2334);  // blunt trauma: purple-dark, no hole
@@ -392,6 +433,27 @@
   const free = [];     // recycled meshes awaiting reuse
   const tmpV = new THREE.Vector3();
 
+  /* ---- THE REFUSAL LEDGER, and why a wound system needs one ---------------
+     2026-08-26, from a measured capture: a player shark bites a survivor bot
+     through the whole production path, aquaticMountAudit().hits increments,
+     the killfeed prints EATEN BY A BULL SHARK, the body ragdolls — and
+     CBZ.woundDecalAudit() reads {decals: 0}. Nothing on the body at all.
+
+     That took an afternoon to NOT diagnose, and the reason is structural:
+     every refusal in this file is a bare `return`, every caller between here
+     and the bite site wraps the call in `try {} catch (e) {}` (creature_combat
+     biteWound, wildlife_tame biteHumanWound — both swallow silently), and the
+     one thing the game could report was a count of what DID get drawn. A
+     system whose whole job is to leave evidence was the only system in the
+     chain leaving none about itself.
+
+     So every early return now stamps WHY, and the audit reports it. Cost:
+     one string store on a path that was about to abandon the call anyway, and
+     two counter increments on the path that succeeds. Read it with
+     CBZ.woundDecalAudit().lastRefusal — one probe call instead of a bisect. */
+  const LEDGER = { biteCalls: 0, biteMarks: 0, woundCalls: 0, woundMarks: 0, refusals: 0, lastRefusal: "" };
+  function refuse(why) { LEDGER.refusals++; LEDGER.lastRefusal = why; }
+
   function dist2Cam(x, z) {
     const c = CBZ.camera && CBZ.camera.position;
     if (!c) return 0;
@@ -399,36 +461,103 @@
     return dx * dx + dz * dz;
   }
 
-  // ---- which body part did the hit land on? --------------------------------
-  // Classified in the ACTOR ROOT's local frame (handles facing + ragdoll
-  // topple): head sphere flag wins outright, else height + lateral offset
-  // split torso / arm / leg, matching the rig layout in entities/character.js.
+  /* ---- WHICH BODY PART DID THE HIT LAND ON? -------------------------------
+
+     THIS WAS BROKEN, AND NOT SUBTLY. It classified a hit by comparing the
+     point's root-local y against the literals 1.98 (head), 1.02 (torso vs
+     legs), 1.40 (elbow) and 0.47 (knee), and |x| against 0.47 (arm). Those
+     numbers are correct for the rig entities/character.js built BEFORE
+     HUMAN_SCALE landed — a 2.60-unit tall body. The rig has since been shrunk
+     by a uniform 0.70 on `model` (config.js: CBZ.HUMAN_SCALE = 0.70; an adult
+     now stands ~1.82 m) and NOTHING here moved with it. Every threshold is
+     43% too high. Worked against the adult male, whose group-local landmarks
+     are hip 0.665, elbow 0.966, shoulder 1.288, chin 1.316, crown 1.736:
+
+       • y > 1.98 for a head can NEVER be true. The crown is at 1.736. A bite
+         or a bullet to the face only ever resolved to the head because the
+         CALLER passed head:true; a correct contact point could not.
+       • y > 1.02 for the torso puts the waistline three quarters of the way
+         up the chest, so every hit from the navel down — belly, hip, groin,
+         the whole lower torso — came back "leg", got seated on a thigh, and
+         (bullet path) started a LIMP.
+       • |x| > 0.47 for an arm sits outside the arm entirely: the adult arm
+         box spans 0.329 .. 0.539 from the midline, so the inner two thirds of
+         both arms answered "torso".
+       • y < 1.40 for the elbow is above the shoulder (1.288), so an arm hit
+         that did resolve ALWAYS took the forearm mesh — the exact "every arm
+         wound bunches at the elbow" failure the old comment says it fixed.
+       • y < 0.47 for the knee is above the real knee (0.329), so the bottom
+         third of the thigh was seated on the shin.
+
+     And a CHILD rig is shorter again, so on a child literally every hit
+     landed on a leg.
+
+     THE FIX IS TO STOP GUESSING. The rig is a pile of boxes whose live world
+     transforms we can read for free, so classify by asking the actual meshes
+     which one the point is nearest — the same measured, name-free method
+     partAt() already uses for wildlife, in the same file. It is correct for
+     the adult male, the female rig, a child, any future HUMAN_SCALE, and any
+     pose (a raised arm moves with its box), and there is no literal left in
+     it that can drift out of date again.
+
+     Cost: one subtree matrix update plus a box-distance test over ~13 meshes,
+     on a hit event that is already distance-gated to 45 u. */
+  const _ppP = new THREE.Vector3();
+  const _ppC = new THREE.Vector3();
+  // distance from the group-local point (x,y,z) to `mesh`'s box, in group units
+  function partDist(g, mesh, gsc, x, y, z) {
+    const prm = mesh.geometry && mesh.geometry.parameters;
+    if (!prm) return -1;
+    _ppC.setFromMatrixPosition(mesh.matrixWorld);
+    g.worldToLocal(_ppC);
+    const e = mesh.matrixWorld.elements;
+    const sc = (Math.sqrt(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]) || gsc) / gsc;
+    const hx = (prm.width || 0.3) * 0.5 * sc;
+    const hy = (prm.height || 0.3) * 0.5 * sc;
+    const hz = (prm.depth || 0.3) * 0.5 * sc;
+    const dx = Math.max(0, Math.abs(x - _ppC.x) - hx);
+    const dy = Math.max(0, Math.abs(y - _ppC.y) - hy);
+    const dz = Math.max(0, Math.abs(z - _ppC.z) - hz);
+    // the tie-break: a point inside two overlapping boxes (the pelvis laps the
+    // torso, a limb cap laps its segment) goes to the SMALLER one, which is
+    // the more specific answer and the one that carries the better read.
+    return Math.sqrt(dx * dx + dy * dy + dz * dz) + Math.min(0.12, hx * hy * hz * 0.9);
+  }
+  const _ppBest = { mesh: null, region: "torso" };
   function pickPart(actor, px, py, pz, headFlag) {
     const S = actor.char.skinSlots, g = actor.group;
-    g.updateWorldMatrix(true, false);
-    tmpV.set(px, py, pz);
-    g.worldToLocal(tmpV);
-    const x = tmpV.x, y = tmpV.y;
-    if ((headFlag || y > 1.98) && S.head && S.head[0]) return { mesh: S.head[0], region: "head" };
-    if (y > 1.02) {
-      if (Math.abs(x) > 0.47 && S.arms && S.arms.length === 2) {
-        // two-segment arms: below the elbow line (~1.38 in root space) the
-        // round hit the FOREARM mesh, not the upper arm — seat the decal on
-        // the mesh that actually contains the point or it clamps to the
-        // upper segment's end face and every arm wound bunches at the elbow.
-        const lower = y < 1.40 && S.armsLower && S.armsLower.length === 2 ? S.armsLower : null;
-        const list = lower || S.arms;
-        return x < 0 ? { mesh: list[0], region: "armL" } : { mesh: list[1], region: "armR" };
-      }
-      return { mesh: S.torso && S.torso[0], region: "torso" };
-    }
-    if (S.legs && S.legs.length === 2) {
-      // knee line sits ~0.47 in root space; below it the shin took the hit
-      const lower = y < 0.47 && S.legsLower && S.legsLower.length === 2 ? S.legsLower : null;
-      const list = lower || S.legs;
-      return x < 0 ? { mesh: list[0], region: "legL" } : { mesh: list[1], region: "legR" };
-    }
-    return { mesh: S.torso && S.torso[0], region: "torso" };
+    // the whole subtree at once: 13 separate updateWorldMatrix(true,false)
+    // calls would each re-walk the same parent chain.
+    g.updateWorldMatrix(true, true);
+    _ppP.set(px, py, pz);
+    g.worldToLocal(_ppP);
+    const x = _ppP.x, y = _ppP.y, z = _ppP.z;
+    // A HEAD FLAG STILL WINS OUTRIGHT. Callers that name a headshot know
+    // something the geometry does not (fpsmode's hit table, a kill cause), and
+    // that outranks any measurement.
+    if (headFlag && S.head && S.head[0]) return { mesh: S.head[0], region: "head" };
+    const ge = g.matrixWorld.elements;
+    const gsc = Math.sqrt(ge[0] * ge[0] + ge[1] * ge[1] + ge[2] * ge[2]) || 1;
+    let best = null, bestR = "torso", bestD = 1e9;
+    const consider = function (mesh, region) {
+      if (!mesh || !mesh.geometry) return;
+      const d = partDist(g, mesh, gsc, x, y, z);
+      if (d < 0 || d >= bestD) return;
+      bestD = d; best = mesh; bestR = region;
+    };
+    if (S.head) consider(S.head[0], "head");
+    if (S.torso) { consider(S.torso[0], "torso"); consider(S.torso[1], "torso"); }
+    if (S.pelvis) consider(S.pelvis[0], "torso");
+    if (S.arms && S.arms.length === 2) { consider(S.arms[0], "armL"); consider(S.arms[1], "armR"); }
+    if (S.armsLower && S.armsLower.length === 2) { consider(S.armsLower[0], "armL"); consider(S.armsLower[1], "armR"); }
+    if (S.legs && S.legs.length === 2) { consider(S.legs[0], "legL"); consider(S.legs[1], "legR"); }
+    if (S.legsLower && S.legsLower.length === 2) { consider(S.legsLower[0], "legL"); consider(S.legsLower[1], "legR"); }
+    if (!best) return { mesh: S.torso && S.torso[0], region: "torso" };
+    // tmpV is what the callers go on to re-derive the part-local point from;
+    // leave it holding the root-local point exactly as this function always has.
+    tmpV.copy(_ppP);
+    _ppBest.mesh = best; _ppBest.region = bestR;
+    return _ppBest;
   }
 
   // ---- seat a decal on a part: part-local point → snapped to the box face --
@@ -534,6 +663,7 @@
     const geo = G_SOAK[(Math.random() * 3) | 0];
     m.geometry = geo;
     m.material = MAT_SOAK;
+    m.renderOrder = RO_SOAK;      // under its own hole (see unlit()'s renderOrder note)
     const ax = faceAxis(part, lp);         // one face for the clamp AND the seat
     // A stain can never outgrow the panel it's soaked into — bigger than the
     // face, it reads as a rigid sheet hovering off the body (user-filmed).
@@ -668,19 +798,41 @@
       return CBZ.bodyWound(actor, wp,
         { head: opts.head, cal: 1.3, fromX: opts.fromX, fromZ: opts.fromZ, _fromBite: true });
     }
-    if (!actor || !wp || actor.culled || !CBZ.scene) return;
+    LEDGER.biteCalls++;
+    if (!actor) { refuse("bite:no-actor"); return; }
+    if (!wp) { refuse("bite:no-point"); return; }
+    if (actor.culled) { refuse("bite:culled"); return; }
+    if (!CBZ.scene) { refuse("bite:no-scene"); return; }
     const ch = actor.char;
-    if (!ch || !ch.skinSlots || !actor.group || actor.group.visible === false) return;
+    if (!ch) { refuse("bite:no-char"); return; }
+    if (!ch.skinSlots) { refuse("bite:no-skinSlots"); return; }
+    if (!actor.group) { refuse("bite:no-group"); return; }
+    /* WAS: `actor.group.visible === false` -> refuse.
+
+       That is a RENDER flag being used as an EXISTENCE test, and it is wrong
+       for a system whose marks are persistent state. entities/pedinstance.js,
+       city/crowd.js and city/police.js all park rigs by flipping `visible`,
+       and restrain.js seats a body the same way — so a hit taken while a rig
+       happens to be parked, instanced or seated was silently thrown away and
+       the body came back CLEAN. A wound is a fact about the body, not about
+       whether the renderer is drawing it this frame.
+
+       The honest test is whether the rig is in the world at all, and it is
+       the exact one the leak sweep at the bottom of this file already uses
+       (`!a.group.parent` -> drop the record). A detached group can carry no
+       decal because there is nothing to parent it to; an attached-but-hidden
+       one will show every mark the moment it is drawn again. */
+    if (!actor.group.parent) { refuse("bite:detached"); return; }
     let px = wp.x, py = wp.y, pz = wp.z;
-    if (px == null || py == null || pz == null) return;
-    if (dist2Cam(px, pz) > SPAWN_D2) return;                // only where it can be seen
+    if (px == null || py == null || pz == null) { refuse("bite:null-coord"); return; }
+    if (dist2Cam(px, pz) > SPAWN_D2) { refuse("bite:too-far"); return; }   // only where it can be seen
 
     // A bite is ONE event that intentionally lays many marks, so it stamps the
     // burst window rather than being throttled by it (the shotgun-pellet guard
     // in bodyWound would otherwise eat most of the tooth row). Re-biting the
     // same body inside the window is still refused.
     const now = performance.now();
-    if (now - (actor._biteT || -1e9) < 260) return;
+    if (now - (actor._biteT || -1e9) < 260) { refuse("bite:rebite-throttle"); return; }
     actor._biteT = now; actor._woundT = now; actor._woundBurst = 99;
 
     const sev = Math.max(0, Math.min(1, opts.sev != null ? opts.sev : 0.7));
@@ -695,7 +847,8 @@
 
     const pick = pickPart(actor, px, py, pz, !!opts.head);
     const part = pick.mesh;
-    if (!part || !part.geometry) return;
+    if (!part || !part.geometry) { refuse("bite:no-part"); return; }
+    LEDGER.biteMarks++;
 
     part.updateWorldMatrix(true, false);
     const lp = tmpV.set(px, py, pz);
@@ -750,6 +903,7 @@
         const m = meshFor(actor);
         m.geometry = G_WOUND;
         m.material = MAT_TORN;
+        m.renderOrder = RO_WOUND;
         _bl.x = cx; _bl.y = cy; _bl.z = cz;
         _bl[t1] += o1; _bl[t2] += o2;
         // jitter: teeth are not evenly spaced and a couple always tear wider
@@ -772,12 +926,37 @@
       }
     }
 
-    // THE TEAR: a bite bleeds far harder and faster than a bullet — one broad
-    // stain filling the whole jaw print, arriving fast, plus a heavier second
-    // bloom for a deep bite. This is most of what sells it at distance.
+    /* THE TEAR: a bite bleeds far harder and faster than a bullet — one broad
+       stain filling the whole jaw print, arriving fast, plus a heavier second
+       bloom for a deep bite. This is most of what sells it at distance.
+
+       AND IT WAS SIZED OFF THE JAW, WHICH IS THE ONE THING IT MUST NOT BE.
+       Measured on the adult male thigh (legW 0.34, legUp 0.48, so the panel a
+       bite seats on is 0.34 wide, half-span 0.17): a great white's 0.55 jaw
+       gives R = 0.289, and `R * (1.7 + sev*1.1)` at sev 0.7 asks for 0.714 —
+       a stain FOUR TIMES the width of the leg. spawnSoak's fitR() rail then
+       chopped it to 0.116 and the wound came out looking identical for every
+       animal in the game, because EVERY bite of consequence was pinned flat
+       against the safety rail. This file's own doctrine, thirty lines up in
+       the bullet path: "a design number that only works because the safety
+       rail catches it is not a design number."
+
+       So the stain is quoted the way the bullet's is — as a fraction of the
+       PANEL, with the jaw only deciding how much of that fraction it earns.
+       Finished width (after spawnSoak's own 0.8-1.3 growth jitter and the blob
+       geometry's ±41% rim wobble, i.e. ×1.48 at the mean) lands near 49% of
+       the panel for the first stain and 74% for the heavy second one, peaking
+       at 91% for a maximum-severity full-jaw bite. Heavy, unmistakably blood,
+       and it clears the 96% rail on its own arithmetic rather than by being
+       caught. woundDecalAudit().oversized therefore stays at zero without the
+       clamp ever having to fire. */
     _bl.x = cx; _bl.y = cy; _bl.z = cz;
-    spawnSoak(actor, part, _bl, R * (1.7 + sev * 1.1), 0.7);
-    if (sev > 0.55) spawnSoak(actor, part, _bl, R * (2.4 + sev * 1.4), 1.9);
+    // how much of the panel the jaw actually spans: a terrier gets ~0.5, a
+    // great white on a limb gets the lot. (biteHalf is the panel half-span
+    // already measured above for the tooth clamp — no second measurement.)
+    const jawSpan = Math.max(0.35, Math.min(1, R / (biteHalf * 1.5)));
+    spawnSoak(actor, part, _bl, biteHalf * (0.26 + sev * 0.10) * jawSpan, 0.7);
+    if (sev > 0.55) spawnSoak(actor, part, _bl, biteHalf * (0.36 + sev * 0.14) * jawSpan, 1.9);
 
     // A MAULED LEG is not a limp, it's a collapse. Reuse character.js's existing
     // legHurt channel (same field the bullet path writes) — no new state.
@@ -792,17 +971,39 @@
     // the flying part and the guaranteed restore-on-rig-reuse audit. We never
     // hide a limb ourselves; that bookkeeping has exactly one owner.
     if (opts.sever && CBZ.goreSever && !actor.isPlayer) {
+      // THE HEAD WAS MISSING FROM THIS MAP, and it is the one a shark takes.
+      // gore.js's STUMPS table has always carried a "head" entry (it is what
+      // death.js drives for the player's own decapitation, and severBody
+      // treats it as the whole neck group so the face flies with the skull) —
+      // this map simply never named it, so a bite to the head could not sever
+      // no matter how big the jaw or how explicit the caller. One entry.
+      // TORSO stays out on purpose: there is no stump for a body.
       const key = pick.region === "legL" ? "ll" : pick.region === "legR" ? "rl"
-        : pick.region === "armL" ? "la" : pick.region === "armR" ? "ra" : null;
-      if (key) { try { CBZ.goreSever(actor, key, { dir: opts.dir || null }); } catch (e) {} }
+        : pick.region === "armL" ? "la" : pick.region === "armR" ? "ra"
+        : pick.region === "head" ? "head" : null;
+      // AND IT LEAVES ALONG THE JAW'S LINE. gore.js throws a severed part
+      // along opts.dir and picks a RANDOM azimuth when there isn't one — so
+      // every limb this file took off flew in a direction unrelated to the
+      // animal that bit it. throughDir() already turns the caller's ray, or
+      // failing that its fromX/fromZ (which every predator here passes, and
+      // which IS attacker → bite point), into exactly that line.
+      if (key) { try { CBZ.goreSever(actor, key, { dir: opts.dir || throughDir(opts, wp) }); } catch (e) {} }
     }
   };
 
   // ---- CBZ.bodyWound(actor, worldPoint, opts) -------------------------------
   CBZ.bodyWound = function (actor, wp, opts) {
-    if (!actor || !wp || actor.culled || !CBZ.scene) return;
+    LEDGER.woundCalls++;
+    if (!actor) { refuse("wound:no-actor"); return; }
+    if (!wp) { refuse("wound:no-point"); return; }
+    if (actor.culled) { refuse("wound:culled"); return; }
+    if (!CBZ.scene) { refuse("wound:no-scene"); return; }
     const ch = actor.char;
-    if (!ch || !ch.skinSlots || !actor.group || actor.group.visible === false) return;
+    if (!ch) { refuse("wound:no-char"); return; }
+    if (!ch.skinSlots) { refuse("wound:no-skinSlots"); return; }
+    if (!actor.group) { refuse("wound:no-group"); return; }
+    // attachment, not `visible` — see the identical note in bodyBite above
+    if (!actor.group.parent) { refuse("wound:detached"); return; }
     opts = opts || {};
     // ONE-LINE ADOPTION for every biting creature already in the game: any caller
     // that already passes a melee type just says "bite" and gets the tooth-row
@@ -813,8 +1014,8 @@
       return CBZ.bodyBite(actor, wp, opts);
     }
     let px = wp.x, py = wp.y, pz = wp.z;
-    if (px == null || py == null || pz == null) return;
-    if (dist2Cam(px, pz) > SPAWN_D2) return;   // only where it can be seen
+    if (px == null || py == null || pz == null) { refuse("wound:null-coord"); return; }
+    if (dist2Cam(px, pz) > SPAWN_D2) { refuse("wound:too-far"); return; }   // only where it can be seen
 
     // burst window: a shotgun's pellets (or a same-frame double report) land
     // SCATTERED wounds, never a pool-flushing spray. CITY lets more pellets
@@ -823,7 +1024,7 @@
     const burstCap = cityWounds() ? 6 : 3;
     const now = performance.now();
     if (now - (actor._woundT || -1e9) < 90) {
-      if ((actor._woundBurst || 0) >= burstCap) return;
+      if ((actor._woundBurst || 0) >= burstCap) { refuse("wound:burst-cap"); return; }
       actor._woundBurst = (actor._woundBurst || 0) + 1;
     } else {
       actor._woundBurst = 1;
@@ -851,7 +1052,8 @@
 
     const pick = pickPart(actor, px, py, pz, !!opts.head);
     const part = pick.mesh;
-    if (!part || !part.geometry) return;
+    if (!part || !part.geometry) { refuse("wound:no-part"); return; }
+    LEDGER.woundMarks++;
 
     // ---- LEG HIT → LIMP (the "smart/realistic" read) -------------------------
     // a round/blade to a leg makes the actor favour it: entities/character.js
@@ -958,6 +1160,7 @@
     const rad = Math.max(sx, sy);
     m.geometry = geo;
     m.material = mat;
+    m.renderOrder = RO_WOUND;
     seat(m, part, lp, v2on ? proudFor(rad) : PROUD, undefined, ax, v2on ? rad * geo._maxR : 0);
     m.scale.set(sx, sy, 1);
     part.add(m);   // rides the part: animates, ragdolls and despawns with the rig
@@ -992,6 +1195,7 @@
         const em = meshFor(actor);
         em.geometry = G_EXIT;
         em.material = MAT_EXIT;
+        em.renderOrder = RO_WOUND;
         seat(em, part, ex, proudFor(er), undefined, ex.ax, er * G_EXIT._maxR);
         em.scale.set(esx, esy, 1);
         part.add(em);
@@ -1089,7 +1293,20 @@
       const rad = Math.max(Math.abs(m.scale.x), Math.abs(m.scale.y)) * mr;
       if (rad > tan) oversized++;     // its diameter meets/exceeds the face's width
     }
-    return { decals: decals, oversized: oversized, cameraFacing: cameraFacing };
+    return {
+      decals: decals, oversized: oversized, cameraFacing: cameraFacing,
+      // THE LEDGER (see its declaration up by the wound pools). `decals: 0`
+      // used to be the end of the conversation; now it comes with the reason.
+      //   biteCalls / woundCalls  — how many times we were ASKED
+      //   biteMarks / woundMarks  — how many got past every guard and drew
+      //   lastRefusal             — the exact guard that turned the last one away
+      // A call count of 0 means the failure is UPSTREAM of this file (nobody
+      // asked); calls > 0 with marks 0 means it is here, and lastRefusal says
+      // which line.
+      biteCalls: LEDGER.biteCalls, biteMarks: LEDGER.biteMarks,
+      woundCalls: LEDGER.woundCalls, woundMarks: LEDGER.woundMarks,
+      refusals: LEDGER.refusals, lastRefusal: LEDGER.lastRefusal,
+    };
   };
 
   // ============================================================
@@ -1170,7 +1387,21 @@
   function solidMat(c) {
     // unlit on purpose: torn tissue has to read as a DARK HOLE in the
     // silhouette, and a lit one blows out white against a sunlit sea edge-on.
-    const m = new THREE.MeshBasicMaterial({ color: c });
+    //
+    // vertexColors IS THE DEPTH. An unlit material has no shading of its own,
+    // so the ONLY thing that can make a solid piece of geometry read as a pit
+    // is a ramp baked into its vertices — MeshBasicMaterial multiplies its
+    // authored hex by the per-vertex colour, exactly the way the decal ramps
+    // above this line do. The ramp only ever multiplies DOWN (1.0 at the raw
+    // torn margin, 0.05 in the bore), so the brightest point of a wound is
+    // still precisely the hex chosen against the encoder below, and turning
+    // this on can only make the wound DARKER than the plank it replaced —
+    // which is the whole failure mode the encoder note guards against.
+    //
+    // CONTRACT: every geometry drawn with one of these materials MUST carry a
+    // `color` attribute or it renders BLACK. craterGeo() and chipGeo() both
+    // bake one; nothing else may use these three.
+    const m = new THREE.MeshBasicMaterial({ color: c, vertexColors: true });
     m._shared = true;                      // rig-disposal sweeps skip it
     return m;
   }
@@ -1201,38 +1432,169 @@
     try { return CBZ.waterVeilMaterial(base) || base; } catch (e) { return base; }
   }
 
-  /* ---- AND IT IS NOT A RECTANGLE ------------------------------------------
-     A torn edge is never square, and the cheapest possible way to say so is
-     to jitter the ONE shared unit box every wound in the game is built from:
-     paid once, at boot, and every cut face and every crater in every mode
-     gets a ragged silhouette for free. Two of them so overlapping layers do
-     not read as one shape scaled.
+  /* ---- IT WAS A BOX. THAT IS WHY IT LOOKED LIKE A RED SQUARE --------------
+     Owner, 2026-08-26: "it puts a red square where i bit them ... not this
+     geometry shit, real missing shit."
 
-     THE JITTER IS KEYED ON THE CORNER, not on the vertex. r128's BoxGeometry
-     carries 24 vertices for 8 corners (each face needs its own normal/uv), so
-     jittering per-vertex splits every corner three ways and opens visible
-     cracks along the seams. Hashing the ORIGINAL position instead moves all
-     three copies of a corner to the same place and the box stays closed. */
+     He is describing exactly what was here. Every cut face was
+     `new THREE.BoxGeometry(1,1,1)` with each CORNER nudged by up to +-0.15,
+     scaled `(ra*2, ra*2, th)` — a flat rectangular PLATE. The comment that
+     shipped with it claimed the jitter existed "so the three do not read as
+     nested squares", which is measurable nonsense: a +-0.15 wobble on a
+     +-0.50 box moves a corner by at most 30% of the half-width and leaves
+     four corners joined by four straight edges. It photographs as a
+     quadrilateral from every angle, at every distance, forever. And because
+     the materials are unlit on purpose, the SILHOUETTE was carrying the
+     entire read — so the silhouette being a rectangle was the whole bug.
+
+     WHAT REPLACES IT: a real torn crater, built as a closed solid of
+     revolution with a ragged rim.
+
+       ring A   the RIM, at local z = +0.5 (the outward face). 17 points at
+                strongly varied radii — 0.45 .. 1.00 of nominal, with a ~1-in-5
+                chance of a DEEP notch where a tooth took more — and each at
+                its own height, so the lip is ragged in profile as well as in
+                plan. No straight edge survives anywhere on the outline.
+       ring B   the bowl wall, 0.55 of the rim radius
+       ring C   the bore mouth, 0.26
+       D        the bore FLOOR, on the axis, at z = -0.36
+       ring E   the back rim at z = -0.5, joined to A by an outer side wall
+       F        the back cap centre
+
+     So it is a bowl pressed into a short cylinder: front bowl + side wall +
+     back cap, fully CLOSED. A grazing angle sees the outer wall, never the
+     inside of the animal — the failure a naked bowl (an open surface with
+     backface culling on) would have had.
+
+     THE +-0.5 EXTENTS ARE PRESERVED EXACTLY. The rim radii are normalised so
+     the widest point is 1.0 (i.e. 0.5 from the axis) and the rim heights are
+     shifted so the highest is exactly +0.5; the back is flat at -0.5. Every
+     sizing line downstream — `ra`, `th`, PIT_R/PIT_T, `cr`, the `full`
+     severance branch and creatureBiteChunkAudit's widestWound (which measures
+     the matrixWorld columns, i.e. the SCALE) — therefore means the same thing
+     it meant when this was a box, and none of them had to move.
+
+     THE COLOUR RAMP IS BAKED IN, which is what lets one mesh be a pit instead
+     of needing three plates to fake one. Bore near-black, bowl wall dark, ONE
+     bright band at the raw torn margin on the rim. Values multiply the
+     material hex (see solidMat) and never exceed 1.0, so the loudest pixel in
+     a wound is still MAT_RIM as authored against the sRGB encoder and the
+     bore is blacker than anything the old plates could reach.
+
+     Two shared variants, built once at boot, `_shared` so disposal sweeps
+     skip them. A wound still allocates NOTHING per bite. */
+  const CRATER_SEG = 17;                 // rim points (prime: the tear never lines up with itself)
   let GEO_TORN = null, GEO_TORN_B = null;
-  function jaggedBox(seed) {
-    const g = new THREE.BoxGeometry(1, 1, 1);
-    const arr = g.attributes.position.array;
-    for (let i = 0; i < arr.length; i += 3) {
-      // corner key: the unit box's coords are all +-0.5, so a sign triple
-      let h = (((arr[i] > 0 ? 1 : 0) * 73856093) ^ ((arr[i + 1] > 0 ? 1 : 0) * 19349663) ^
-               ((arr[i + 2] > 0 ? 1 : 0) * 83492791) ^ seed) >>> 0;
-      h = (h * 1664525 + 1013904223) >>> 0; arr[i] += (((h >>> 9) & 255) / 255 - 0.5) * 0.30;
-      h = (h * 1664525 + 1013904223) >>> 0; arr[i + 1] += (((h >>> 9) & 255) / 255 - 0.5) * 0.30;
-      h = (h * 1664525 + 1013904223) >>> 0; arr[i + 2] += (((h >>> 9) & 255) / 255 - 0.5) * 0.30;
+  function craterGeo(seed) {
+    const N = CRATER_SEG;
+    let s = (seed >>> 0) || 1;
+    const rnd = function () { s = (s * 1664525 + 1013904223) >>> 0; return (s >>> 8) / 16777216; };
+    // ---- the ragged rim: radius and height, per point ----------------------
+    const rw = new Float32Array(N), rz = new Float32Array(N);
+    let wmax = 0, zmin = 1;
+    for (let i = 0; i < N; i++) {
+      let k = 0.74 + rnd() * 0.26;
+      if (rnd() < 0.21) k *= 0.60 + rnd() * 0.18;   // a DEEP notch: a tooth took more here
+      rw[i] = k; if (k > wmax) wmax = k;
+      const h = rnd() * 0.17;                       // the lip is ragged in profile too
+      rz[i] = h; if (h < zmin) zmin = h;
     }
-    g.attributes.position.needsUpdate = true;
+    for (let i = 0; i < N; i++) { rw[i] /= wmax; rz[i] = 0.5 - (rz[i] - zmin); }
+    // ---- vertices ----------------------------------------------------------
+    // A[0..N-1] rim | B[N..] bowl wall | C[2N..] bore mouth | D bore floor |
+    // E[3N+1..] back rim | F back centre
+    const B_R = 0.55, C_R = 0.26, B_Z = 0.05, C_Z = -0.30, D_Z = -0.36;
+    const vN = 4 * N + 2;
+    const pos = new Float32Array(vN * 3);
+    const col = new Float32Array(vN * 3);
+    // [brightness, warm] per ring. warm scales green/blue only, so the rim can
+    // go RAW RED rather than merely lighter — the same trick discGeo uses.
+    const put = function (vi, x, y, z, v, warm) {
+      pos[vi * 3] = x; pos[vi * 3 + 1] = y; pos[vi * 3 + 2] = z;
+      col[vi * 3] = v; col[vi * 3 + 1] = v * warm; col[vi * 3 + 2] = v * warm;
+    };
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2, cs = Math.cos(a), sn = Math.sin(a);
+      const r = rw[i] * 0.5;
+      put(i,           cs * r,       sn * r,       rz[i], 1.00, 0.76);   // raw torn margin
+      put(N + i,       cs * r * B_R, sn * r * B_R, B_Z,   0.32, 0.88);   // pit wall
+      put(2 * N + i,   cs * r * C_R, sn * r * C_R, C_Z,   0.09, 1.00);   // bore
+      put(3 * N + 1 + i, cs * r,     sn * r,       -0.5,  0.15, 0.94);   // back rim (side wall foot)
+    }
+    put(3 * N, 0, 0, D_Z, 0.04, 1.00);            // D — the bore floor, near-black
+    put(4 * N + 1, 0, 0, -0.5, 0.04, 1.00);       // F — back cap centre
+    // ---- triangles ---------------------------------------------------------
+    // Winding follows discGeo's: an INNER-first strip and a CENTRE-first fan
+    // both come out front-facing toward +Z, which is the outward face here
+    // (seatPits aims +Z down the wound normal). The back cap is reversed.
+    const idx = [];
+    const D = 3 * N, F = 4 * N + 1, E0 = 3 * N + 1;
+    for (let i = 0; i < N; i++) {
+      const j = (i + 1) % N;
+      const a0 = i, a1 = j, b0 = N + i, b1 = N + j, c0 = 2 * N + i, c1 = 2 * N + j;
+      const e0 = E0 + i, e1 = E0 + j;
+      idx.push(b0, a0, a1, b0, a1, b1);          // bowl: rim -> wall
+      idx.push(c0, b0, b1, c0, b1, c1);          // bowl: wall -> bore mouth
+      idx.push(D, c0, c1);                       // bore floor fan
+      idx.push(a0, e0, e1, a0, e1, a1);          // outer side wall (normals radial)
+      idx.push(F, e1, e0);                       // back cap (faces -Z)
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    g.setIndex(idx);
+    // no normals: every material that draws this is MeshBasicMaterial, which
+    // never reads one. Skipping the attribute saves 70 vec3s and a per-vertex
+    // upload for something the shader would discard.
     g.computeBoundingBox(); g.computeBoundingSphere();
     g._shared = true;
     return g;
   }
   function tornGeo(i) {
-    if (!GEO_TORN) { GEO_TORN = jaggedBox(0x9e37c1); GEO_TORN_B = jaggedBox(0x51c10b); }
+    if (!GEO_TORN) { GEO_TORN = craterGeo(0x9e37c1); GEO_TORN_B = craterGeo(0x51c10b); }
     return i ? GEO_TORN_B : GEO_TORN;
+  }
+
+  /* ---- AND THE MEAT THAT LEFT THE BODY ------------------------------------
+     A crater says material is missing. Chunks flying off say it LEFT. This is
+     the old jaggedBox, kept for the one job it was ever right for: a chunk of
+     torn flesh is a LUMP, and a corner-jittered box is a lump for free.
+
+     THE JITTER IS KEYED ON THE CORNER, not on the vertex. r128's BoxGeometry
+     carries 24 vertices for 8 corners (each face needs its own normal/uv), so
+     jittering per-vertex splits every corner three ways and opens visible
+     cracks along the seams. Hashing the ORIGINAL position instead moves all
+     three copies of a corner to the same place and the box stays closed. The
+     jitter is +-0.45 here (it was +-0.30 when this was pretending to be a
+     wound) because nothing about a torn chunk should be square either. */
+  let GEO_CHIP = null, GEO_CHIP_B = null;
+  function chipGeo(seed) {
+    const g = new THREE.BoxGeometry(1, 1, 1);
+    const arr = g.attributes.position.array;
+    const col = new Float32Array(arr.length);
+    for (let i = 0; i < arr.length; i += 3) {
+      // corner key: the unit box's coords are all +-0.5, so a sign triple
+      let h = (((arr[i] > 0 ? 1 : 0) * 73856093) ^ ((arr[i + 1] > 0 ? 1 : 0) * 19349663) ^
+               ((arr[i + 2] > 0 ? 1 : 0) * 83492791) ^ seed) >>> 0;
+      h = (h * 1664525 + 1013904223) >>> 0; arr[i] += (((h >>> 9) & 255) / 255 - 0.5) * 0.45;
+      h = (h * 1664525 + 1013904223) >>> 0; arr[i + 1] += (((h >>> 9) & 255) / 255 - 0.5) * 0.45;
+      h = (h * 1664525 + 1013904223) >>> 0; arr[i + 2] += (((h >>> 9) & 255) / 255 - 0.5) * 0.45;
+      // the same corner hash drives the shading: one or two faces of a torn
+      // lump are raw and the rest is dark meat, and an unlit material can only
+      // say so through the colour attribute (which solidMat now requires).
+      h = (h * 1664525 + 1013904223) >>> 0;
+      const v = 0.34 + (((h >>> 9) & 255) / 255) * 0.66;
+      col[i] = v; col[i + 1] = v * 0.82; col[i + 2] = v * 0.82;
+    }
+    g.attributes.position.needsUpdate = true;
+    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    g.computeBoundingBox(); g.computeBoundingSphere();
+    g._shared = true;
+    return g;
+  }
+  function chipGeoOf(i) {
+    if (!GEO_CHIP) { GEO_CHIP = chipGeo(0x2b7f41); GEO_CHIP_B = chipGeo(0xd10e93); }
+    return i ? GEO_CHIP_B : GEO_CHIP;
   }
   const _cbv = new THREE.Vector3();
   const _half = new THREE.Vector3();     // half-extents in PARENT units (geometry x scale)
@@ -1377,9 +1739,40 @@
   const _tgt = new THREE.Vector3();
   const _dir = new THREE.Vector3();
   const _ray = new THREE.Raycaster();
-  const PIT_R = [0.82, 0.64, 0.40];      // tangential radius, as a fraction
-  const PIT_T = [0.22, 0.40, 0.55];      // thickness through the skin
-  const PIT_O = [0.00, 0.055, 0.10];     // how proud of the surface it sits
+  /* THE THREE LAYERS ARE NOW A TERRACE, NOT A STACK OF PLATES.
+
+     WHY THE OLD OFFSETS CANNOT SURVIVE THE CRATER. PIT_O used to push each
+     layer FURTHER out of the skin as it got darker and smaller (0, .055, .10),
+     because three flat plates can only be seen if each one stands proud of the
+     one under it. Handed real bowls, that ordering builds a black wart: the
+     near-black bore layer, being both thickest and proudest, ends up sticking
+     0.375*cr out of the flank.
+
+     AND YOU CANNOT SIMPLY RECESS THEM. The hull is an opaque closed shell; a
+     bowl sunk into it is not visible AT ALL, because nothing here cuts a hole
+     in the animal — the body's own front face is in front of the bore and wins
+     the depth test. Every visible part of a wound has to be OUTSIDE the skin.
+
+     So the read is built the only way it can be: each layer is a shallow bowl
+     that sits ENTIRELY above the surface, and they descend — widest/brightest/
+     highest first, narrowest/near-black/lowest last, each nesting inside the
+     mouth of the one outside it. What you see is a raised, everted, ragged lip
+     of raw margin stepping down through two darker terraces to a black bore
+     that meets the skin. That is a crater in relief instead of a crater in
+     paint, and it is the read a bite actually has.
+
+     PIT_LIP replaces PIT_O and is quoted against the layer's OWN thickness,
+     not against `cr`: the bowl's floor sits at local z = -0.36 of a +-0.5 box,
+     so a rim height of 0.93*th puts the floor 0.07*th PROUD (clear of the
+     skin, no z-fight) and the back cap 0.07*th BURIED (never visible, and it
+     provably cannot punch out the far side of the part because `cr` is capped
+     at 0.76 of the part's smallest half-extent). Quoting the lip against
+     thickness is also what lets a re-bitten wound deepen: `th` grows with
+     r.deep and the lip follows it instead of staying at a fixed fraction of a
+     width that has already hit its ceiling. */
+  const PIT_R = [0.88, 0.50, 0.26];      // tangential radius, as a fraction of cr
+  const PIT_T = [0.34, 0.22, 0.13];      // relief: rim-to-back thickness, fraction of cr
+  const PIT_LIP = 0.93;                  // rim height above the skin, fraction of the layer's own th
   function seatPits(r, mesh, wp, jawR, sev, full) {
     meshHalf(mesh, _half);               // (re)fills _geoH / _geoC, geometry units
     const hx = Math.max(0.01, _geoH.x), hy = Math.max(0.01, _geoH.y), hz = Math.max(0.01, _geoH.z);
@@ -1452,7 +1845,7 @@
        a ceiling at three quarters of the flank so it can never become the
        silhouette again. */
     let cr = full ? cross * 0.94
-                  : (jawR / wsc) * (0.36 + sev * 0.32) * (1 + r.deep * 0.8);
+                  : (jawR / wsc) * (0.36 + sev * 0.32) * (1 + r.deep * 1.5);
     // (the severance face is exempt from the crater's ceiling — a cut fin's
     // raw edge IS its cross-section, and clamping it to 0.76 of one left a
     // visible collar of intact skin around a piece that had come off)
@@ -1470,14 +1863,27 @@
       } else {
         m.material = cutMat(i);
       }
-      const ra = cr * PIT_R[i], th = Math.max(0.008, cr * PIT_T[i]);
-      // the seat, built in WORLD and then dropped into the part's frame: the
-      // surface point, plus a hair of proudness so each layer beats the one
-      // under it on real depth rather than on a polygonOffset fight, plus the
-      // ragged offset that stops the three reading as nested squares.
-      _org.copy(_pit).addScaledVector(_nrm, cr * PIT_O[i] * wsc);
+      const ra = cr * PIT_R[i];
+      // BITE THE SAME PLACE AGAIN AND IT GETS DEEPER, not merely wider. `cr`
+      // already grows with r.deep but is capped at 0.76 of the flank, so on a
+      // small part a second and third bite used to change nothing at all: the
+      // accumulator existed and was invisible. Relief is uncapped by that
+      // ceiling, so this is the channel that carries repeat bites, up to
+      // +47% at r.deep's own 0.85 rail.
+      const th = Math.max(0.008, cr * PIT_T[i] * (1 + (r.deep || 0) * 0.55));
+      // The seat, built in WORLD and then dropped into the part's frame. The
+      // offset puts the layer's RIM at PIT_LIP of its own thickness above the
+      // real surface (see the PIT_LIP note), i.e. the mesh CENTRE goes at
+      // rim - th/2: the whole bowl is outside the opaque hull and therefore
+      // visible, and the back cap is inside it and therefore never is.
+      _org.copy(_pit).addScaledVector(_nrm, (PIT_LIP - 0.5) * th * wsc);
       if (!full) {
-        const j = cr * wsc * 0.55;
+        // A HAIR of decentring so the terraces are not machined-concentric.
+        // It used to be 0.55*cr in every axis, which was fine for plates and
+        // is destructive for bowls: a quarter of the wound's own radius is
+        // enough to shove the black bore out through the side of the bright
+        // rim. 0.09 is visible as raggedness and cannot break the nesting.
+        const j = cr * wsc * 0.09;
         _org.x += (Math.random() - 0.5) * j;
         _org.y += (Math.random() - 0.5) * j;
         _org.z += (Math.random() - 0.5) * j;
@@ -1488,11 +1894,16 @@
       // resolves through the parent's world rotation in r128, so this is
       // correct for a child of a banking, rolling, swimming rig — and the
       // scale is written AFTER, because lookAt reads matrixWorld.
+      // The roll is free (it decorrelates the two shared variants' notches so
+      // three layers never repeat a silhouette); the TILT is not — it lifts
+      // one side of the rim off the skin by ra*sin(t), so it is now +-0.10 rad
+      // rather than +-0.25, which on the widest layer is 0.09*cr of lift
+      // against 0.32*cr of intended relief.
       m.scale.set(1, 1, 1);
       m.lookAt(_pit.x + _nrm.x, _pit.y + _nrm.y, _pit.z + _nrm.z);
       m.rotateZ(Math.random() * 6.283185307);
-      m.rotateX((Math.random() - 0.5) * 0.5);
-      m.rotateY((Math.random() - 0.5) * 0.5);
+      m.rotateX((Math.random() - 0.5) * 0.2);
+      m.rotateY((Math.random() - 0.5) * 0.2);
       m.scale.set(ra * 2, ra * 2, th);
     }
     _cbv.copy(_pit);                      // where the wound is, for the bloom seed
@@ -1545,6 +1956,101 @@
       BLEED.splice(i, 1);
     }
   }
+
+  /* ---- THE MEAT LEAVING THE BODY -----------------------------------------
+     Owner: "real missing shit". A crater is the AFTER. This is the DURING —
+     the material that came off, visibly coming off, on the frame the jaw
+     closes. Without it a bite is a wound that appears by magic; with it the
+     wound is the hole the chunks came out of.
+
+     A TRUNK bite is the case that needed it most. The trunk exemption a few
+     hundred lines down is correct and stays (an orca is ONE generated hull
+     mesh; shrinking it makes the whole animal shorter, which is the 5-metre
+     maroon plank that started all of this) — but it meant a bite to the body
+     removed nothing whatsoever. Now the crater deepens AND the flesh leaves.
+
+     WHY THESE ARE MADE HERE AND NOT ASKED FOR FROM gore.js. gore.js's only
+     public particle entries are goreBloom (blood puffs), goreImpact (a spray)
+     and gore() (a whole death event: flash, shake, kill context). None of
+     them emits a solid gib on request — severBody does, but only as part of
+     taking a named humanoid limb off a named humanoid rig. Rather than invent
+     a function in a file another builder owns, the chunks ride this file's
+     own shared torn geometry and its own cut materials, which is also what
+     keeps them inside the water veil with the wound they came out of.
+
+     ONLY IN WATER, and that is the file's existing law, not a new gate: the
+     same `wet` test that decides whether goreBloom fires. On land gore.js
+     already owns the debris for a mauling and a second, unarbitrated source
+     of flying meat would double it. Chunks in air also want ballistics,
+     bounce and a ground contact that nothing here has; in water they simply
+     decelerate and sink, which is three lines and always correct. */
+  const CHIPS = [];                      // {m, vx,vy,vz, t, life, rx,ry,rz, s}
+  const CHIP_FREE = [];                  // recycled meshes (no churn during a frenzy)
+  const CHIP_CAP = 30;                   // hard ceiling: a frenzy is many bites
+  const CHIP_SINK = -1.15;               // m/s^2 — gravity minus flesh's near-neutral buoyancy
+  const CHIP_DRAG = 2.6;                 // 1/s, applied as exp(-k*dt) so a long frame cannot overshoot
+  function dropChip(i) {
+    const c = CHIPS.splice(i, 1)[0];
+    if (c.m.parent) c.m.parent.remove(c.m);
+    if (CHIP_FREE.length < 18) CHIP_FREE.push(c.m);
+  }
+  // n chunks off the wound at (x,y,z), thrown along the surface normal (nx,ny,nz)
+  function tossChips(n, x, y, z, nx, ny, nz, woundR, sev) {
+    if (!CBZ.scene) return;
+    for (let k = 0; k < n; k++) {
+      if (CHIPS.length >= CHIP_CAP) dropChip(0);        // oldest first, same law as the decals
+      let m = CHIP_FREE.pop();
+      if (!m) {
+        m = new THREE.Mesh(chipGeoOf(k & 1), cutMat(k & 1));
+        m.castShadow = m.receiveShadow = false;
+      } else {
+        m.geometry = chipGeoOf(k & 1);
+        m.material = cutMat(k & 1);       // ALWAYS refetched: the veil twin is cached, not free
+      }
+      // a chunk is a fraction of the hole it came out of, and no two match
+      const s = Math.max(0.02, woundR * (0.16 + Math.random() * 0.26));
+      m.scale.set(s, s * (0.6 + Math.random() * 0.7), s * (0.6 + Math.random() * 0.7));
+      m.position.set(x + (Math.random() - 0.5) * woundR * 0.9,
+                     y + (Math.random() - 0.5) * woundR * 0.9,
+                     z + (Math.random() - 0.5) * woundR * 0.9);
+      m.rotation.set(Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28);
+      CBZ.scene.add(m);
+      // OUT ALONG THE NORMAL, hard, then the water takes it. No upward bias:
+      // meat is heavier than seawater, and a chunk that arcs UP reads as a
+      // firework. The spread is wide because a jaw does not aim.
+      const sp = (1.4 + Math.random() * 2.2) * (0.55 + sev * 0.75);
+      CHIPS.push({
+        m: m,
+        vx: nx * sp + (Math.random() - 0.5) * 1.9,
+        vy: ny * sp * 0.55 + (Math.random() - 0.5) * 1.1,
+        vz: nz * sp + (Math.random() - 0.5) * 1.9,
+        rx: (Math.random() - 0.5) * 7, ry: (Math.random() - 0.5) * 7, rz: (Math.random() - 0.5) * 7,
+        t: 0, life: 3.2 + Math.random() * 2.6, s: s,
+      });
+    }
+  }
+  function stepChips(dt) {
+    for (let i = CHIPS.length - 1; i >= 0; i--) {
+      const c = CHIPS[i], m = c.m;
+      c.t += dt;
+      const k = Math.exp(-CHIP_DRAG * dt);
+      c.vy += CHIP_SINK * dt;
+      c.vx *= k; c.vy *= k; c.vz *= k;
+      m.position.x += c.vx * dt; m.position.y += c.vy * dt; m.position.z += c.vz * dt;
+      m.rotation.x += c.rx * dt; m.rotation.y += c.ry * dt; m.rotation.z += c.rz * dt;
+      c.rx *= k; c.ry *= k; c.rz *= k;
+      // the last second is a shrink, not a pop: something eats it or it
+      // disperses. (Scale, not opacity — these share the opaque cut materials
+      // with the wound itself and must never fade one of those to transparent.)
+      const left = c.life - c.t;
+      if (left < 1) {
+        const f = Math.max(0, left);
+        m.scale.set(c.s * f, c.s * f, c.s * f);
+      }
+      if (c.t >= c.life) dropChip(i);
+    }
+  }
+  function chipsClear() { for (let i = CHIPS.length - 1; i >= 0; i--) dropChip(i); }
 
   CBZ.creatureBiteChunk = function (actor, wp, opts) {
     opts = opts || {};
@@ -1653,12 +2159,24 @@
       woundR = seatPits(r, mesh, wp, jawR, sev, true);
     } else {
       // A CRATER. The body is untouched; a jaw-sized hole is torn where the
-      // teeth actually closed, and it deepens if they close there again.
-      r.deep = Math.min(0.85, r.deep + 0.18 + sev * 0.2);
+      // teeth actually closed, and it deepens if they close there again —
+      // and it now READS as deepening, because seatPits spends r.deep on the
+      // wound's RELIEF as well as on its width, and width alone was already
+      // pinned at the 0.76-of-flank ceiling after the first or second bite.
+      r.deep = Math.min(0.85, r.deep + 0.24 + sev * 0.26);
       woundR = seatPits(r, mesh, wp, jawR, sev, false);
     }
 
     if (!wet) return true;                 // land: the caller owns the blood
+
+    /* THE MATERIAL THAT LEFT. Fired before the bloom so the chunks are already
+       moving when the blood arrives around them, and seeded from exactly the
+       same pair the bloom uses (_cbv = the wound's real world point, _nrm =
+       the flank's true outward normal, both left by seatPits) so the meat and
+       the blood leave along the same line. Count rides severity and size: a
+       nip throws two, an orca taking a fluke throws seven. */
+    tossChips(Math.max(2, Math.min(7, Math.round(2 + sev * 3 + woundR * 3.5))),
+      _cbv.x, _cbv.y, _cbv.z, _nrm.x, _nrm.y, _nrm.z, woundR, sev);
 
     /* BLOOD IN THE WATER, staged. _cbv is the wound's real world position
        (seatPits leaves it there) and _nrm is the surface it came out of —
@@ -1730,7 +2248,7 @@
     }
     return {
       actors: seen.length, chunks: CHUNKS.length, severed: severed, craters: craters,
-      veiled: veiled, bleeders: BLEED.length,
+      veiled: veiled, bleeders: BLEED.length, chips: CHIPS.length,
       deepest: Math.round(deepest * 100) / 100,
       widestWound: Math.round(widest * 100) / 100,
     };
@@ -1791,6 +2309,7 @@
   CBZ.clearWounds = function () {
     CBZ.creatureBiteChunkRestore(null);
     bleedStop(null);
+    chipsClear();                  // loose meat is scene-parented, so it does NOT go with the rigs
     for (let i = 0; i < wounds.length; i++) {
       const r = wounds[i];
       r.gone = true;
@@ -1821,6 +2340,9 @@
       // a death has to read on the frame it happens, not on the 1.1s sweep
       deadT += dt; if (deadT > 0.16) { deadT = 0; deathScan(); }
     }
+    // torn flesh in the water: at most 30 records, and only for the few
+    // seconds after a bite. One length check when nothing is being eaten.
+    if (CHIPS.length) stepChips(dt);
     if (!wounds.length) return;   // the whole system sleeps
     for (let i = growing.length - 1; i >= 0; i--) {
       const r = growing[i];

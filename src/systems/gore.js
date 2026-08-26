@@ -213,7 +213,8 @@
     return (0.038 + Math.random() * 0.052) * (k || 1) * (+CBZ.CONFIG.GORE_DROP_SCALE || 1);
   }
   const G_MIST = new THREE.SphereGeometry(1, 4, 3);   // legacy aerosol lump (realism OFF)
-  const G_GIB = new THREE.BoxGeometry(1, 1, 1);       // legacy chunk (realism OFF) + every stump cap
+  const G_GIB = new THREE.BoxGeometry(1, 1, 1);       // legacy chunk (realism OFF) only — the stump
+                                                      // is its own torn geometry now, see stumpGeo()
   const G_PLANE = new THREE.PlaneGeometry(1, 1);      // smears, drip streaks, aerosol billboards
   // TORN FLESH, NOT DICE: three irregular chunk silhouettes baked ONCE at
   // startup and picked at random per piece, so no two chunks share an outline
@@ -441,6 +442,48 @@
     if (d < -1.6 || !CBZ.cityWaterDepthAt) return false;
     try { return CBZ.cityWaterDepthAt(x, z) >= SWIMMABLE; } catch (e) { return false; }
   }
+  // ---- AEROSOL IS A DRY-AIR EFFECT -----------------------------------------
+  // Blood atomised over the SEA does not hang. It is centimetres-to-metres from
+  // a surface that takes every droplet, and it LANDS. The "mist" bit in this
+  // file is pure air physics — a camera-facing quad born with an UPWARD vy,
+  // expanding 3.2x over a 0.45-0.9 s life, and its per-frame updater has no
+  // water term in it anywhere. Its only guard was the module `wetEvent` flag,
+  // which is armed inside CBZ.gore() and NOWHERE ELSE. So every other emitter
+  // in the game hung pink aerosol in the air over open water:
+  //   • CBZ.goreImpact(opts.mist) — city/creature_combat.js's biteBlood() fires
+  //     it at jawWorld(attacker) on EVERY shark lunge (BITE_SEV.lunge = 1.0, so
+  //     `mist` is always true), and a surface-feeding shark's jaw is ABOVE the
+  //     swell, so woundInWater() answers "air" and the dry branch runs. This is
+  //     the one the owner is looking at.
+  //   • CBZ.gore.spray() and CBZ.gore()'s LAYER 2, whenever their wet gate fails
+  //     in the shore shallows (cityWaterDepthAt < SWIMMABLE) where the beach
+  //     crowd is actually eaten.
+  //   • neckStumpSpurt()'s aerosol cap over the open neck.
+  // (owner, watching a shark feed: "the blood clouds in water are great but they
+  // float like a mist over the water — blood is never a mist lol")
+  //
+  // One predicate, enforced at the single choke point all of those already go
+  // through (spawnBit), so there is no ninth copy of a water check. Ballistic
+  // DROPLETS are deliberately NOT banned: they are the half of a breaching bite
+  // that is real, and they now go INTO the water where they land — see the
+  // sea-surface test in the bits loop.
+  const MIST_AIRGAP = 3.5;      // more clear air than this above the swell = sky, not sea
+  // ONE-CELL, ONE-FRAME MEMO. A burst is 5-18 mist bits inside a 35 cm box all
+  // fired on the same frame, and "is this column open water" is a property of
+  // the COLUMN — asking per bit is 18 walks of isSurfaceWater (overDeck + the
+  // shore field) for one fact. Round to a metre and keep the last answer, so a
+  // burst pays one query and a burst somewhere else just replaces it. Reset with
+  // the other one-frame caches in the updater: the swell and the flood move.
+  let _msX = 1e9, _msY = 0, _msZ = 0, _msV = false;
+  function mistOverSea(x, y, z) {
+    const qx = Math.round(x), qy = Math.round(y), qz = Math.round(z);
+    if (qx === _msX && qy === _msY && qz === _msZ) return _msV;
+    _msX = qx; _msY = qy; _msZ = qz;
+    // submRaw is `surface - y`: positive under water, negative above it, and the
+    // DRY sentinel (-1e9) on land or with no water system, which this test
+    // rejects by magnitude alone. Allocation-free, one guarded query.
+    return (_msV = submRaw(x, y, z) > -MIST_AIRGAP);
+  }
   // public: anything can ask which medium a point is in. Deliberately NOT
   // gated on GORE_WATER — it answers honestly; the branch sites read the flag.
   CBZ.goreMedium = function (x, y, z) {
@@ -474,15 +517,62 @@
   function depthBand(d) { return d < 2 ? 0 : (d < 8 ? 1 : 2); }
 
   // ---- puff pool: sprites are recycled forever, never re-allocated -----------
+  /* THE SURFACE LID CLAMPS THE QUAD, NOT THE SPRITE'S CENTRE.
+     ------------------------------------------------------------------
+     A puff is a THREE.Sprite — a camera-facing quad — drawn at scale.set(sc,sc,1)
+     on the feathered blood texture, and `sc` GROWS every single frame (b.grow is
+     0.3-1.2/s over a 4.5-7.5 s haze life). The old lid pinned pos.y, the sprite's
+     CENTRE, five centimetres under the swell. Half of every plume was therefore
+     drawn ABOVE the waterline, and metres of a grown haze puff were. goreKillCloud
+     was worse again: it seeds its shell puffs at y + c*rad*0.7 with rad up to 3.2,
+     i.e. straight into the AIR, and puff() never clamped at spawn either.
+     From a camera above water that is precisely the "blood clouds float like a
+     mist over the water" in the report — the plume itself, not the aerosol.
+
+     So the lid is measured against the quad's VISIBLE extent. The blood texture
+     is feathered and fades out long before the corner, so the drawn radius is
+     about 0.42 * sc; keeping rim + gap under the surface keeps the whole sprite
+     in the water at every scale, at spawn as well as in flight.
+
+     Nothing BELOW the surface changes: same BLOOM_COLS ladder, same depth/age
+     bands, same turbulence, same current advection. The underwater trail the
+     owner calls one of the best things in the game is untouched — and the
+     air-spawned half of a kill cloud now joins it instead of hanging over it,
+     so there is MORE plume in the water, not less.
+
+     KNOWN TRADE, stated rather than hidden: in genuinely shallow water a grown
+     plume is wider than the column is deep, so keeping its rim under the swell
+     pushes its lower half into the seabed and the bed occludes it. That is the
+     honest read (blood in half a metre of water IS lying on the bottom), and
+     the alternative — a floorAt query per puff per frame — is the exact cost
+     this file already refuses to pay for the surface slicks. */
+  // LID_GAP is not cosmetic: b.sy is a CACHED surface sample (see the stagger in
+  // updatePuffs), so the gap has to swallow however far the swell can travel
+  // between two samples or the sea rises out from under a clamped puff and puts
+  // its rim back in the air. 18 cm covers the tightened ~0.2 s surface-tracking
+  // stagger with room to spare, and against a plume metres across it is invisible.
+  const PUFF_VIS = 0.42, LID_GAP = 0.18;
   const puffs = [], puffPool = [];
   function puffCap() { return CBZ.qScale ? CBZ.qScale(55, 210) : 110; }
   function puff(x, y, z, vx, vy, vz, size, life, haze, sy) {
     if (!CBZ.scene || puffs.length >= puffCap()) return null;
+    // CLAMP AT SPAWN, AGAINST THIS PUFF'S OWN COLUMN. A puff seeded in the air
+    // over the sea (goreKillCloud's shell, a bloom fired at a chest-high wound
+    // on a swimmer) is pulled under by its own visible radius instead of being
+    // born half out of the water and never tested until the first update tick.
+    // The caller's `sy` is NOT good enough for the clamp and the capture proved
+    // it: goreBloom samples the surface once at the wound and then scatters
+    // nine puffs over a metre of swell, so up to a third of a metre of rim can
+    // be born proud of a sea the caller never measured. One extra swell read
+    // per puff, on a path that spawns in bursts of about nine.
+    const surf = seaY(x, z);
+    const lid0 = surf - LID_GAP - size * PUFF_VIS;
+    if (y > lid0) y = lid0;
     let b = puffPool.pop();
     if (!b) {
       const sp = new THREE.Sprite(bloomMat(0, 0));
       sp.renderOrder = 5;
-      b = { s: sp, vx: 0, vy: 0, vz: 0, rise: 0, t: 0, life: 1, sc: 1, grow: 0.5, ph: 0, ph2: 0, freq: 1, wob: 0, band: -1, age: -1, cx: 0, cz: 0, curT: 0, sy: 0, haze: false };
+      b = { s: sp, vx: 0, vy: 0, vz: 0, rise: 0, t: 0, life: 1, sc: 1, grow: 0.5, ph: 0, ph2: 0, freq: 1, wob: 0, band: -1, age: -1, cx: 0, cz: 0, curT: 0, sy: 0, haze: false, surf: false };
       scene().add(sp);
     }
     b.s.position.set(x, y, z);
@@ -493,7 +583,7 @@
     b.ph = Math.random() * 6.28; b.ph2 = Math.random() * 6.28;
     b.freq = haze ? 0.7 + Math.random() * 0.7 : 1.6 + Math.random() * 1.6;
     b.wob = haze ? 0.1 + Math.random() * 0.09 : 0.26 + Math.random() * 0.2;
-    b.cx = 0; b.cz = 0; b.curT = 0; b.sy = sy != null ? sy : seaY(x, z);
+    b.cx = 0; b.cz = 0; b.curT = 0; b.sy = surf; b.surf = false;
     b.band = -1; b.age = -1;
     b.s.material = bloomMat(depthBand(Math.max(0, b.sy - y)), 0);
     b.s.scale.set(size, size, 1);
@@ -527,10 +617,31 @@
       b.vy = b.rise + (b.vy - b.rise) * dg;
       // the current and the surface are broad, slow fields — re-sample on a
       // jittered ~0.5s stagger instead of per puff per frame.
+      // A PUFF THAT HAS TOUCHED THE LID READS THE SWELL EVERY FRAME, and the
+      // measurement is why: on a 0.14-0.24 s stagger a surface-riding plume was
+      // still clamped against where the sea WAS, and the capture came back with
+      // sixty sprites standing up to 0.25 m proud of the waterline — the exact
+      // defect this whole block exists to remove, just small enough to look
+      // like foam. A swell crest travels further than the lid gap inside one
+      // stagger, so the only cache short enough is no cache. This is the same
+      // cost the water-splat updater in this file already pays for every slick
+      // on the surface, and for the same reason: the surface MOVES. Deep puffs
+      // keep the cheap stagger — they cannot break a surface they are nowhere
+      // near — and the current stays staggered for everyone, because a current
+      // is a slow, broad field and nothing is clamped against it.
+      // NEAR the surface, not just pinned ON it. A puff that has never touched
+      // the lid can still have its rim in the air: it is clamped against a sy
+      // sampled up to 0.75 s and several metres ago, and it only takes drifting
+      // over a trough for the sea to be lower here than where it was measured.
+      // The capture caught 57 sprites doing exactly that, up to 0.21 m proud —
+      // small enough to read as foam, which is what makes it worth removing.
+      // The band is generous because the test is cheap relative to being wrong.
+      const nearSurf = b.surf || pos.y + b.sc * PUFF_VIS > b.sy - 1.5;
+      if (nearSurf) b.sy = seaY(pos.x, pos.z);
       b.curT -= dt;
       if (b.curT <= 0) {
         b.curT = 0.45 + Math.random() * 0.3;
-        b.sy = seaY(pos.x, pos.z);
+        if (!nearSurf) b.sy = seaY(pos.x, pos.z);
         if (CBZ.waterField && CBZ.waterField.currentAt) {
           try { const c = CBZ.waterField.currentAt(pos.x, pos.z, undefined, _cur); b.cx = c.x * 0.5; b.cz = c.z * 0.5; } catch (e) { b.cx = b.cz = 0; }
         }
@@ -541,16 +652,54 @@
       pos.z += (b.vz + b.cz + Math.cos(b.ph * 0.83 + b.ph2) * b.wob) * dt;
       pos.y += (b.vy + Math.sin(b.ph * 0.61 + b.ph2) * b.wob * 0.5) * dt;
       // the surface is a LID: a plume cannot rise through it, it spreads out
-      // underneath (that spreading is what the slick decal reads as from above)
-      const lid = b.sy - 0.05;
-      if (pos.y > lid) { pos.y = lid; if (b.vy > 0) b.vy = 0; b.sc += b.sc * 0.35 * dt; }
+      // underneath. Measured against the QUAD's rim (see PUFF_VIS above), not
+      // against the sprite's centre — that off-by-half-a-sprite is the whole
+      // "mist over the water" read.
+      // GROW FIRST, THEN CLAMP. The scale that gets DRAWN is the one the lid has
+      // to be measured against: clamping against last frame's sc and then
+      // growing left 0.42*sc*grow*dt of rim above the swell every frame, which
+      // on a plume that has expanded to tens of units is decimetres of blood in
+      // the air — the whole bug, one frame late.
       b.sc *= 1 + b.grow * dt;
+      const pinned = pos.y > b.sy - LID_GAP - b.sc * PUFF_VIS;
+      if (pinned) {
+        if (b.vy > 0) b.vy = 0;
+        b.sc += b.sc * 0.35 * dt;        // pinned at the lid it keeps SPREADING sideways
+        pos.y = b.sy - LID_GAP - b.sc * PUFF_VIS;   // rim under the swell at the FINAL scale
+        // A PLUME THAT REACHES THE SURFACE BECOMES A SLICK. Blood arriving at
+        // the waterline stops being a volume and starts being a film, and this
+        // file already owns the film: CBZ.goreSlick, the decal that reads right
+        // from a boat and holds for 18-40 s. Fired once per puff, on first
+        // contact, through the shared 1-per-0.3 s budget.
+        if (!b.surf) {
+          b.surf = true;
+          b.curT = 0;                    // and re-read the swell NOW, then keep tracking it
+          surfaceSlick(pos.x, pos.z, b.haze ? 0.5 : 0.3);
+          // ...and a puff that has ALREADY SPENT most of its life climbing and
+          // is now just sitting on the lid gets its long tail trimmed, so it
+          // thins out instead of hovering while the slick does its job.
+          // DELIBERATELY NARROW. The measured baseline says the worst offender
+          // is goreKillCloud's shell, which is SPAWNED in the air (y + c*rad*0.7,
+          // rad up to 3.2) and is therefore pinned on its very first tick — that
+          // blood is brand new, it is the cloud the owner likes, and cutting it
+          // to a second would fix "blood above the water" by deleting blood.
+          // The half-life gate can never fire on a fresh puff; it only ever
+          // takes a tail off one that has already had most of its run.
+          if (b.t > b.life * 0.5 && b.life - b.t > 2.2) b.life = b.t + 2.2;
+        }
+      }
       b.s.scale.set(b.sc, b.sc, 1);
       // walk the ladder: older AND deeper both darken, and a puff that drifts
       // up into the shallows genuinely gets its red back.
       const f = b.t / b.life;
       const age = f < 0.35 ? 0 : (f < 0.72 ? 1 : 2);
-      const band = depthBand(Math.max(0, b.sy - pos.y));
+      // A PINNED PLUME IS AT THE SURFACE, whatever its centre's y says. The lid
+      // now sits a visible-RADIUS under the swell, so a grown haze puff riding it
+      // has its centre metres down and would walk into the 2-8 m murky-brown rung
+      // while its top edge is touching daylight. Depth for the colour ladder is
+      // the depth of the BLOOD, so a puff against the lid reads shallow — this
+      // keeps a surface plume exactly the arterial red it has always been.
+      const band = depthBand(pinned ? 0 : Math.max(0, b.sy - pos.y));
       if (age !== b.age || band !== b.band) { b.age = age; b.band = band; b.s.material = bloomMat(band, age); }
     }
   }
@@ -668,6 +817,22 @@
       cx: 0, cz: 0, curT: 0, syT: 0,
     });
   };
+
+  // ---- ONE BUDGET FOR "BLOOD REACHED THE SURFACE" ---------------------------
+  // Two paths now report an arrival at the waterline — a plume pinned under the
+  // lid, and a ballistic droplet punching through the swell — and both can fire
+  // in bursts of dozens. goreSlick's own cap is only slickCap() = 16-46 and
+  // updateChum can already spend ~10 slicks a second in a feeding frenzy, so
+  // an unthrottled arrival would evict the slicks the frenzy itself just laid
+  // (recycleFarSlick) and cost a live-surface re-read per decal per frame for
+  // nothing. ONE module timer, ~1 slick per 0.3 s, shared by both callers.
+  let surfSlickT = 0;
+  function surfaceSlick(x, z, amt) {
+    if (surfSlickT > 0) return false;
+    surfSlickT = 0.3;
+    CBZ.goreSlick(x, z, amt);
+    return true;
+  }
 
   /* THE KILL CLOUD — the payoff, and it is a different event from a bite.
      ------------------------------------------------------------------
@@ -827,6 +992,11 @@
       puffFromBit(x, y, z, vx, vy, vz, size, kind === "mist");
       return null;
     }
+    // AND NO AEROSOL OVER OPEN WATER AT ALL (see mistOverSea). The redirect
+    // above only covers emitters that came through CBZ.gore(); this one test
+    // covers every emitter in the file, including the three that never had a
+    // wet gate — the shark's per-lunge goreImpact above all.
+    if (kind === "mist" && waterOn() && mistOverSea(x, y, z)) return null;
     // Standing gibs are FADING debris now, not permanent evidence, so the pool
     // can be far smaller — a shootout can never leave a huge persistent pile.
     // With the debris law off (pre-pass revert) jail/survival keep the original
@@ -902,6 +1072,10 @@
       // of dropping it like a rock, and it blooms where it settles instead of
       // stamping a ground pool on the seabed. Always false on land.
       wet: wetEvent,
+      // jittered stagger for the droplet's sea-surface test (bits loop). Only
+      // "blood" reads it; the phase spread stops a whole spray querying the
+      // swell table on the same frame.
+      seaT: kind === "blood" ? Math.random() * 0.18 : 0,
       // a landed chunk is short-lived debris that SHRINKS/SINKS to nothing (see
       // the updater) so the ground clears after combat — not a permanent
       // coloured lump lying in the yard. With the debris law off, jail/survival
@@ -1676,27 +1850,130 @@
   //  its limbs reads FAKE (user-filmed). Now the actual body-part mesh on the
   //  victim's rig is HIDDEN, a clone of THAT part (same proportions, same
   //  clothing/skin materials — head flies with its face) launches from the
-  //  part's exact world transform, and a small dark-red cap seats at the
-  //  joint so the stump sells it.
+  //  part's exact world transform, and a torn cut face — bore, bone and hanging
+  //  flaps — seats at the joint so the stump sells it (see stumpGeo below).
   //
-  //  RESTORE IS GUARANTEED: rigs are pooled/recycled and the player respawns,
-  //  so every sever is held in a registry and a throttled audit restores
-  //  visibility + removes the stump the moment the actor is alive again,
-  //  culled (about to recycle), or wearing a different rig. CBZ.goreRestoreBody
+  //  RESTORE IS GUARANTEED WHERE IT HAS TO BE: rigs are pooled/recycled and the
+  //  player respawns, so every sever is held in a registry and a per-frame audit
+  //  restores visibility + removes the stump the moment the actor is culled,
+  //  parked, wearing a different rig, or alive again after being severed DEAD.
+  //  What it no longer does is regrow a limb off a living victim who simply
+  //  survived — see the permanence block on severAudit. CBZ.goreRestoreBody
   //  gives death.js an explicit same-frame restore on player respawn.
   // ============================================================
   const severed = [];                      // { actor, ch, items:[{ key, part, stump }] }
   const SEV_CAP = 24;
-  // joint geometry per part: stump position (parent-local) + cap size.
+  /* ---- THE STUMP IS A WOUND, NOT A CAP -------------------------------------
+     OWNER, on a shark taking a leg: "it puts a red square where i bit them."
+     He is describing this, literally:
+
+         stump = new THREE.Mesh(G_GIB, lambert(BLOOD_D));   // BoxGeometry(1,1,1)
+         stump.scale.set(J.sx, J.sy, J.sz);                 // legs: 0.36 x 0.15 x 0.36
+
+     A box. Untextured, axis-aligned, and BLOOD_D (0x5e070b) through this
+     renderer's outputEncoding = sRGBEncoding with r128 colour management OFF
+     comes out of the pipe near #a5xxxx — a bright, flat, unlit-looking red (the
+     same measurement the DECAL note at the top of this file was written for).
+     A 36 x 15 x 36 cm slab of that is the single most-seen object in a
+     dismemberment, and from every angle it is a rectangle.
+
+     The replacement is ONE lazily-built shared geometry and ONE shared
+     material, both _shared so the disposal sweeps skip them, with the entire
+     read carried in VERTEX COLOUR. That is the same trick systems/wounds.js's
+     rampGeo() uses for a bullet hole and for the same reason: a Lambert/Basic
+     material MULTIPLIES its colour by the per-vertex colour, so one material
+     can be pale bone at the axis and near-black in the bore with no texture,
+     no second draw call and no per-stump allocation. Five parts:
+       • a 13-gon cut face with a randomly-phased-sine rim wobble — an ODD
+         segment count so no two rim points sit opposite each other, and a
+         silhouette that is never a polygon you can name and never a rectangle
+       • a recessed BORE that ramps to near-black, so the wound reads as a HOLE
+         even where nothing is casting a shadow into it
+       • a proud pale BONE core: the one high-value note, and the thing that
+         says amputation rather than red paint
+       • a SKIRT of torn meat running back INTO the body, so the stump is a
+         solid seen edge-on instead of a disc floating at the joint (it sits
+         inside the torso/shoulder mesh, which is exactly where flesh belongs)
+       • four hanging FLAPS past the rim — the ragged outline you register first
+     Colours are authored DARK on purpose; see the DECAL note. flatShading is on
+     so the facets read as torn (r128 derives face normals in the shader, which
+     is why computeVertexNormals below is only the graceful-degradation path).
+     ~95 triangles, built once, shared by every stump in the world. */
+  let G_STUMP = null, M_STUMP = null;
+  const STUMP_BONE = [0.62, 0.58, 0.47];    // proud bone core — this pipe lifts it to pale ivory
+  const STUMP_BONE_D = [0.34, 0.31, 0.24];  // bone shading into the bore
+  const STUMP_BORE = [0.055, 0.008, 0.010]; // the hole: near-black, reads as depth with no shadow
+  const STUMP_RAW = [0.34, 0.048, 0.052];   // the raw margin at the cut rim
+  const STUMP_MEAT = [0.13, 0.016, 0.020];  // deep meat: the skirt and the hanging flaps
+  function stumpGeo() {
+    if (G_STUMP) return G_STUMP;
+    const N = 13;
+    const p1 = Math.random() * 6.28, p2 = Math.random() * 6.28, p3 = Math.random() * 6.28;
+    const rim = [], bore = [], core = [], skirt = [], rr = [];
+    for (let i = 0; i < N; i++) {
+      // the angle DECREASES with i, which is what makes a (centre, i, i+1) fan
+      // wind FRONT-face toward +Y — the direction the cut looks out of.
+      const a = -(i / N) * 6.28318;
+      const w = 1 + 0.17 * Math.sin(a * 3 + p1) + 0.12 * Math.sin(a * 5 + p2) + 0.08 * Math.sin(a * 7 + p3);
+      const cx = Math.cos(a), cz = Math.sin(a), R = 0.5 * w;
+      rr.push(R);
+      rim.push([cx * R, 0.015 + 0.035 * Math.sin(a * 4 + p2), cz * R]);   // the rim is not level either
+      bore.push([cx * 0.30 * w, -0.16, cz * 0.30 * w]);
+      core.push([cx * 0.13, 0.02, cz * 0.13]);
+      skirt.push([cx * R * 0.88, -0.42, cz * R * 0.88]);
+    }
+    const P = [], C = [];
+    function v(p, c) { P.push(p[0], p[1], p[2]); C.push(c[0], c[1], c[2]); }
+    function tri(a, ca, b, cb, c, cc) { v(a, ca); v(b, cb); v(c, cc); }
+    const CTR = [0, 0.05, 0];
+    for (let i = 0; i < N; i++) {
+      const j = (i + 1) % N;
+      tri(CTR, STUMP_BONE, core[i], STUMP_BONE_D, core[j], STUMP_BONE_D);            // bone core
+      tri(core[i], STUMP_BONE_D, bore[i], STUMP_BORE, bore[j], STUMP_BORE);          // bore funnel
+      tri(core[i], STUMP_BONE_D, bore[j], STUMP_BORE, core[j], STUMP_BONE_D);
+      tri(bore[i], STUMP_BORE, rim[i], STUMP_RAW, rim[j], STUMP_RAW);                // cut face
+      tri(bore[i], STUMP_BORE, rim[j], STUMP_RAW, bore[j], STUMP_BORE);
+      tri(rim[i], STUMP_RAW, skirt[i], STUMP_MEAT, skirt[j], STUMP_MEAT);            // skirt into the body
+      tri(rim[i], STUMP_RAW, skirt[j], STUMP_MEAT, rim[j], STUMP_RAW);
+      if (i % 3 === 1) {                                                             // four torn flaps
+        const am = -((i + 0.5) / N) * 6.28318, R2 = (rr[i] + rr[j]) * 0.71;
+        tri(rim[i], STUMP_RAW, [Math.cos(am) * R2, -0.30, Math.sin(am) * R2], STUMP_MEAT, rim[j], STUMP_RAW);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(P), 3));
+    g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(C), 3));
+    g.computeVertexNormals();
+    g._shared = true;
+    G_STUMP = g;
+    return g;
+  }
+  function stumpMat() {
+    if (M_STUMP) return M_STUMP;
+    // white base × per-vertex colour = the whole ramp in one material. DoubleSide
+    // because the hanging flaps are single-sheet tags and you WILL walk round
+    // them; r128 flips the normal for back faces, so they still light correctly.
+    M_STUMP = new THREE.MeshLambertMaterial({
+      color: 0xffffff, vertexColors: true, flatShading: true, side: THREE.DoubleSide,
+    });
+    M_STUMP._shared = true;                  // rm() must never dispose it
+    return M_STUMP;
+  }
+  // joint geometry per part: stump position (parent-local), the cut face's
+  // RADIUS, and `ay` — the joint AXIS, i.e. which way the open face looks along
+  // it. A neck stump faces UP and out of the shoulders (+1); a shoulder and a
+  // hip both face DOWN, along the limb that left (-1). That one number is what
+  // stops a head wearing an upside-down leg wound.
   // arms + head hang off ch.body; legs hang off the root group (character.js).
   const STUMPS = {
-    head: { px: 0, py: 1.96, pz: 0, sx: 0.38, sy: 0.16, sz: 0.38, onBody: true },
-    la: { px: -0.62, py: 1.78, pz: 0, sx: 0.32, sy: 0.15, sz: 0.32, onBody: true },
-    ra: { px: 0.62, py: 1.78, pz: 0, sx: 0.32, sy: 0.15, sz: 0.32, onBody: true },
-    ll: { px: -0.23, py: 0.9, pz: 0, sx: 0.36, sy: 0.15, sz: 0.36, onBody: false },
-    rl: { px: 0.23, py: 0.9, pz: 0, sx: 0.36, sy: 0.15, sz: 0.36, onBody: false },
+    head: { px: 0, py: 1.96, pz: 0, r: 0.19, onBody: true, ay: 1 },
+    la: { px: -0.62, py: 1.78, pz: 0, r: 0.16, onBody: true, ay: -1 },
+    ra: { px: 0.62, py: 1.78, pz: 0, r: 0.16, onBody: true, ay: -1 },
+    ll: { px: -0.23, py: 0.9, pz: 0, r: 0.18, onBody: false, ay: -1 },
+    rl: { px: 0.23, py: 0.9, pz: 0, r: 0.18, onBody: false, ay: -1 },
   };
   const SEV_LIMBS = ["ll", "rl", "la", "ra"];
+  const _svp = new THREE.Vector3();        // scratch for the stump's live world position
   function actorChar(a) { return a ? (a.char || (a.isPlayer ? CBZ.playerChar : null)) : null; }
   // "head" = the whole neck group so the face/hair/cap fly WITH the skull
   function partOf(ch, key) { return key === "head" ? ch.neck : (ch.parts ? ch.parts[key] : null); }
@@ -1716,23 +1993,46 @@
     if (part.visible === false && !opts.adopt) return false;
     // grab the part's world transform BEFORE anything moves this frame
     part.updateWorldMatrix(true, false);
+    // WHICH MEDIUM IS THIS JOINT ACTUALLY IN? `wetEvent` is armed inside
+    // CBZ.gore() and nowhere else, and systems/wounds.js's bodyBite calls
+    // CBZ.goreSever from OUTSIDE any gore event — so a leg bitten off a swimmer
+    // flew ballistically like a football and landed on the seabed as a dry gib,
+    // and the joint vented droplets INTO water rather than blood in it. One
+    // guarded submRaw off the world transform we just updated decides it
+    // honestly. Blood in the water is what the owner actually likes about this
+    // system; a severed limb is where it should be earning the most of it.
+    const _sm = part.matrixWorld.elements;
+    const wetHere = wetEvent || (waterOn() && woundInWater(_sm[12], _sm[13], _sm[14]));
     if (!r) {
       // Never make an existing corpse visibly regrow just to free a pool slot.
       // At the cap the new cosmetic sever is suppressed; the older body stays
       // anatomically consistent until its normal corpse/recycle cleanup.
       if (severed.length >= SEV_CAP) return false;
-      r = { actor, ch, items: [] };
+      // deadAtSever: was this body ALREADY a corpse when the part came off? It
+      // is the whole basis of the permanence rule in severAudit() below — a
+      // corpse that is alive again has been respawned or recycled, while a
+      // living person who loses a limb has simply lost it.
+      r = {
+        actor, ch, items: [],
+        deadAtSever: !!(actor.isPlayer ? (CBZ.player && CBZ.player.dead) : actor.dead),
+      };
       severed.push(r);
     }
     part.visible = false;
-    // ---- STUMP: a small dark-red cap seated at the joint, riding the rig ----
+    // ---- STUMP: the torn cut face seated at the joint, riding the rig ------
     const J = STUMPS[key];
     const parent = J.onBody ? (ch.body || ch.group) : ch.group;
     let stump = null;
     if (parent) {
-      stump = new THREE.Mesh(G_GIB, lambert(BLOOD_D)); // shared cached material — disposal sweeps skip it
-      stump.scale.set(J.sx, J.sy, J.sz);
+      stump = new THREE.Mesh(stumpGeo(), stumpMat());   // both _shared — disposal sweeps skip them
+      stump.scale.setScalar(J.r * 2);                   // the geometry is authored at radius 0.5
       stump.position.set(J.px, J.py, J.pz);
+      // ay flips the cut face along the joint axis (see STUMPS); the Y term is a
+      // free per-stump spin about that axis so no two amputations on one body,
+      // or on two bodies, present the same rim to the camera. Euler order XYZ
+      // applies Y first, so the spin happens in the face's own plane and the
+      // flip stays exact.
+      stump.rotation.set(J.ay < 0 ? Math.PI : 0, Math.random() * 6.28, 0);
       stump.castShadow = false;
       parent.add(stump);
     }
@@ -1746,7 +2046,14 @@
       [0.38, 0.92].forEach(function (delay, pulse) {
         after(delay, function () {
           if (!stump.parent || part.visible !== false || (actor && actor.culled)) return;
-          const wp = new THREE.Vector3(); stump.getWorldPosition(wp);
+          const wp = _svp; stump.getWorldPosition(wp);
+          // ARM THE MEDIUM PER BEAT, off the stump's LIVE position — a corpse
+          // sinks between pulses, and a body that fell in the water after the
+          // sever is bleeding into it now even though it wasn't then. spawnBit's
+          // own redirect turns these into blooms; the frame loop clears
+          // wetEvent the instant this callback returns, so the write is bounded.
+          const wet = waterOn() && woundInWater(wp.x, wp.y, wp.z);
+          if (wet) wetEvent = true;
           const n = pulse ? 2 : 4;
           for (let i = 0; i < n; i++) {
             const a = Math.random() * Math.PI * 2, sp = 0.6 + Math.random() * 1.8;
@@ -1754,7 +2061,13 @@
               Math.sin(a) * sp, 0.045 + Math.random() * 0.045,
               Math.random() < 0.55 ? BLOOD_BRT : BLOOD, "blood");
           }
-          if (pulse) spawnSplat(wp.x, wp.z, 0.32, BLOOD_D, true);
+          // and the pool the second pulse leaves is a GROUND pool. Under the sea
+          // that decal lands on the seabed in the dark; the surface slick is the
+          // thing anyone can actually see, so wet bleeds go there instead.
+          if (pulse) {
+            if (wet) surfaceSlick(wp.x, wp.z, 0.4);
+            else spawnSplat(wp.x, wp.z, 0.32, BLOOD_D, true);
+          }
         });
       });
     }
@@ -1807,18 +2120,22 @@
         limb: true,
         // and snow lies on a severed arm exactly as it lies on a pool
         snow0: snowCover(), snowNeed: 0.26 + Math.random() * 0.24,
-        wet: wetEvent,                        // a limb torn off underwater sinks, it doesn't fly
+        wet: wetHere,                         // a limb torn off underwater sinks, it doesn't fly
         // fade against the clone's OWN scale (a limb mesh isn't unit-scaled) so
         // the shrink reads right; vScale captures that base. City-only.
         fade: cityLimb, vScale: cityLimb ? fly.scale.clone() : null,
         life: cityLimb ? 14 + Math.random() * 6 : 9 + Math.random() * 5,
       });
-      // the wound VENTS at the joint — a bright burst riding the part out
+      // the wound VENTS at the joint — a bright burst riding the part out.
+      // Armed with the joint's real medium (see wetHere): under water that burst
+      // becomes a bloom through spawnBit's redirect instead of ballistic drops.
+      const prevWet = wetEvent; wetEvent = wetHere;
       for (let i = 0; i < 4; i++) {
         spawnBit(fly.position.x, fly.position.y, fly.position.z,
           dx * 2 + (Math.random() - 0.5) * 3, 3 + Math.random() * 3, dz * 2 + (Math.random() - 0.5) * 3,
           DROP_R(0.9), BLOOD_BRT, "blood");
       }
+      wetEvent = prevWet;
     }
     return true;
   }
@@ -1869,14 +2186,70 @@
       if (severed[i].actor === actor) { restoreRecord(severed[i]); severed.splice(i, 1); }
     }
   };
-  // the audit: any severed actor that's alive again (rig recycled / player
-  // respawned), culled, or wearing a fresh rig gets its parts back. One pass,
-  // throttled — leak-proof bookkeeping beats trusting every recycle path.
+  /* ---- AN AMPUTATION IS PERMANENT FOR THE LIFE IT HAPPENED IN --------------
+     The audit used to restore any severed record whose actor was ALIVE:
+
+         const alive = a && (a.isPlayer ? !(CBZ.player && CBZ.player.dead) : !a.dead);
+         if (!a || alive || a.culled || actorChar(a) !== r.ch) { restoreRecord(r); ... }
+
+     So a shark tore a swimmer's leg off, the flying leg and the stump appeared,
+     and within one audit tick (≤0.85 s) the leg POPPED BACK ON and the stump
+     vanished while the victim was still swimming — plus ch.legGone cleared, so
+     the one-legged collapse ended too. The audit's own comment says its job is
+     RIG RECYCLING and player respawn. "This person survived" was never the
+     question it was trying to answer; `alive` was just the cheapest proxy for
+     "this rig has been handed to somebody else", and it is a wrong one.
+
+     THE NEW RULE, and why it cannot leak a permanently one-legged pooled bot:
+
+     (1) !a / a.culled / actorChar(a) !== r.ch — unchanged, and still the
+         backbone. A rig that is gone, reaped, or now worn by a different
+         character always hands its parts back.
+
+     (2) a._parked — crowd.js's park() marks a pooled rig as off-map furniture
+         (city/crowd.js:1309) BEFORE assign() can hand it to a stranger. This
+         is the recycle path that (1) genuinely misses: park keeps the same
+         ped object AND the same ch, and assign() then clears dead/culled/
+         _parked in one go, so neither `culled` nor the char identity ever
+         changes across a full recycle.
+
+     (3) deadAtSever — a body that was a CORPSE when the part came off and is
+         alive again did not survive anything; it is a respawn (death.js also
+         calls CBZ.goreRestoreBody explicitly, so this is belt-and-braces) or a
+         corpse rig put back into service. Restore.
+
+     (4) a._crowd past SEV_RECYCLE2 — the one hole (2) cannot close by itself.
+         park() and assign() can run in the SAME frame (crowd.js updatePromotion
+         parks in loop 1 and promotes into a freed slot in loop 2), so `_parked`
+         is not a latch anything can be guaranteed to observe. What IS
+         guaranteed is the geometry: crowd.js parks only past PROMO_OUT2 = 48 m
+         from the player, and a walking body cannot cross from inside 38 m to
+         past 48 m in one frame. This audit now runs EVERY frame, so a pooled
+         rig is always handed back whole while it is still 38-48 m out, long
+         before any recycler can claim it — and 38 m of lens distance is where
+         a limb reappearing is a couple of pixels. `_crowd` is set once, at
+         construction, in crowd.js makePooled(), and it is the game-wide tag
+         for "ambient body that will be reused" (hitman/vips/racing/campaign
+         all gate on it). Every OTHER actor — named peds, gang members, island
+         NPCs, the player — is a real person whose rig is never handed to
+         someone else while alive: crowd.js CONSUMES the pool slot the moment a
+         promoted body dies (`pool[s] = { ped: makePooled(), idx: -1 }`), and
+         peds.js's corpse reap sets p.culled, which is clause (1).
+
+     Cost of running every frame instead of every 0.85 s: severed.length is
+     capped at SEV_CAP = 24 and each record is a handful of property reads. */
+  const SEV_RECYCLE2 = 38 * 38;
   function severAudit() {
     for (let i = severed.length - 1; i >= 0; i--) {
       const r = severed[i], a = r.actor;
-      const alive = a && (a.isPlayer ? !(CBZ.player && CBZ.player.dead) : !a.dead);
-      if (!a || alive || a.culled || actorChar(a) !== r.ch) { restoreRecord(r); severed.splice(i, 1); }
+      // (1)+(2) the rig is gone, reaped, parked, or worn by someone else
+      if (!a || a.culled || a._parked || actorChar(a) !== r.ch) { restoreRecord(r); severed.splice(i, 1); continue; }
+      const alive = a.isPlayer ? !(CBZ.player && CBZ.player.dead) : !a.dead;
+      if (!alive) continue;                     // a corpse keeps what was taken off it
+      // (3) a corpse that is alive again was respawned or recycled
+      if (r.deadAtSever) { restoreRecord(r); severed.splice(i, 1); continue; }
+      // (4) a living POOLED body, far enough out that a recycler may claim it
+      if (a._crowd && a.pos && dist2Cam(a.pos.x, a.pos.z) > SEV_RECYCLE2) { restoreRecord(r); severed.splice(i, 1); }
     }
   }
 
@@ -2326,10 +2699,12 @@
   CBZ.onAlways(8, function (dt) {
     if (dt <= 0) return;
     wetEvent = false;                    // bound any leaked wet event to one frame
+    if (surfSlickT > 0) surfSlickT -= dt; // the shared surface-slick budget (see surfaceSlick)
     // the terrain-gradient memo is a ONE-FRAME cache: a sinkhole opening or a
     // crater collapsing rewrites floorAt under us, and a decal stamped next
     // frame must fit the ground that is there NOW.
     if (slopeMemo.size) slopeMemo.clear();
+    _msX = 1e9;                          // and the aerosol-over-sea cell memo (see mistOverSea)
     if (!killTapped) installKillTap();   // peds.js loads after us — tap once it exists
     if (flashV > 0.002) { ensureFlash().style.opacity = String(Math.min(0.5, flashV)); flashV *= Math.pow(0.0012, dt); }
     else if (flashEl && flashEl.style.opacity !== "0") { flashEl.style.opacity = "0"; flashV = 0; }
@@ -2348,7 +2723,14 @@
     // throttled corpse-stain scan: bodies lying in a pool soak dark, once each
     // + the dismemberment audit: recycled/respawned rigs get their parts back
     stainT -= dt;
-    if (stainT <= 0) { stainT = 0.85; stainScan(); if (severed.length) severAudit(); }
+    if (stainT <= 0) { stainT = 0.85; stainScan(); }
+    // THE DISMEMBERMENT AUDIT RUNS EVERY FRAME. It used to ride the 0.85 s
+    // corpse-stain throttle, which was fine while its rule was "alive → restore"
+    // but is not fine now that the rule is a distance one: see clause (4) in
+    // severAudit — the guarantee that no pooled rig reaches crowd.js's park/
+    // assign swap still missing a leg depends on this test being made on the
+    // frame the body crosses SEV_RECYCLE2. At SEV_CAP = 24 records it is free.
+    if (severed.length) severAudit();
 
     // The debris law drives the realistic fade/settle/cull path; with it off,
     // jail/survival fall back to the original gib physics (read once per frame).
@@ -2419,6 +2801,30 @@
       // velocity, so the arc of a spray is legible as it falls.
       if (b.drop) aimDrop(m, b.vx, b.vy, b.vz);
       else { m.rotation.x += b.sx * dt; m.rotation.y += b.sy * dt; m.rotation.z += b.sz * dt; }
+      // A DROPLET THAT REACHES THE SEA GOES INTO IT. The only vertical test in
+      // this loop is decalFloorAt() — the terrain/seabed — so a drop thrown over
+      // water fell straight THROUGH the swell and stamped a splat in the dark
+      // under thirty metres of water, where nobody will ever see it. Crossing
+      // the live surface hands the drop to puffFromBit, the same ballistic→plume
+      // seam a wet event uses, so the spray off a breaching shark ends as blood
+      // IN the water (the thing the owner likes) instead of as seabed litter.
+      // Cost: one guarded submRaw on a jittered ~0.2 s stagger. A blood bit
+      // lives 0.7-1.5 s, so that is four to seven queries for its whole flight,
+      // not one per drop per frame — and submRaw short-circuits to DRY with no
+      // water system at all, so land maps pay a single function call.
+      if (b.kind === "blood" && waterOn()) {
+        b.seaT -= dt;
+        if (b.seaT <= 0) {
+          b.seaT = 0.16 + Math.random() * 0.08;
+          const sub = submRaw(m.position.x, m.position.y, m.position.z);
+          if (sub !== DRY && sub >= 0) {                 // at or under the live surface
+            puffFromBit(m.position.x, m.position.y, m.position.z, b.vx, b.vy, b.vz, b.baseScale, false);
+            // and enough of them together mark the surface (throttled: see surfaceSlick)
+            if (Math.random() < 0.3) surfaceSlick(m.position.x, m.position.z, 0.3);
+            rm(m); bits.splice(i, 1); continue;
+          }
+        }
+      }
       // the DRAWN ground (see decalFloorAt) — a gib resting on floorAt=0 was
       // buried to its eyeballs in the 8 cm sidewalk slab, same bug as the pools
       const fl = decalFloorAt(m.position.x, m.position.z);
