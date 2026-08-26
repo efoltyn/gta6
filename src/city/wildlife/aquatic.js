@@ -870,43 +870,55 @@
     sh.tri(gRoot, cB, back[0], back[out.length - 1]);
   }
 
-  /* ---- THE CAVITY GEOMETRY (reference sheet §6) --------------------------
-     An ellipsoid with its winding REVERSED, so the visible surface is the
-     interior. A closed inside-out surface beats a cone/BackSide tube here
-     for one reason: there is no angle — three-quarter, head-on, from below —
-     at which a sightline through the gape can miss it, so the opening always
-     reads as a bounded dark hole and never as a gap in the mesh. Looking in,
-     the near wall self-culls and you see the far wall receding to the back
-     pole. Triangles go into four groups along the axis (front rim -> throat)
-     so the depth darkening is painted per-band, no vertex colours needed on
-     r128 Lambert. Unit-space and cached once: every shark in the file scales
-     the one geometry. */
-  const AQ_CAVITY_HOLE = true;    // false = the old convex ellipsoid, one-line revert
-  function cavityHoleGeom() {
-    return cachedGeom("cavityHole|v1", function () {
-      const sh = new Shell(), SEG = 14, ST = 8;
-      const rings = [];
-      for (let i = 0; i <= ST; i++) {
-        const ph = (i / ST) * Math.PI;           // front pole (+x) -> back pole (-x)
-        const x = Math.cos(ph), r = Math.sin(ph);
-        const row = [];
-        for (let j = 0; j < SEG; j++) {
-          const th = (j / SEG) * Math.PI * 2;
-          row.push(sh.v(x, Math.sin(th) * r, Math.cos(th) * r));
-        }
-        rings.push(row);
-      }
-      for (let i = 0; i < ST; i++) {
-        const grp = i < 2 ? 0 : (i < 4 ? 1 : (i < 6 ? 2 : 3));
-        for (let j = 0; j < SEG; j++) {
-          const nj = (j + 1) % SEG;
-          // wound inside-out: the visible face is the INTERIOR (the pole rows
-          // degenerate to triangles inside Shell.quad, which skips the rest)
-          sh.quad(grp, rings[i][j], rings[i + 1][j], rings[i + 1][nj], rings[i][nj]);
-        }
-      }
-      return sh.geom();
-    });
+  /* ---- THE MOUTH INTERIOR (reference sheet §6) --------------------------
+     Owner, 2026-08-25: "when a shark opens its mouth you see deep inside its
+     massive mouth, not a protruding giant tongue."
+
+     Two generations of this failed the same way, and both failures were the
+     same mistake wearing different clothes: ONE BLOB, SCALED IN Y BY THE GAPE.
+
+       gen 1: an ellipsoid in the middle of the mouth, grown tenfold. It was
+              scaled about its own centre while the jaws swing about the hinge,
+              so at full gape a third of it hung in open water under the snout.
+              MeshLambert then lit its far wall to bright salmon: the tongue.
+       gen 2: the same trick anchored on the hinge and painted dark. Better
+              maths, same class of bug — a jaw ROTATES, and no amount of y-scale
+              tracks a 62-degree rotation. The front of the fan stayed out at
+              full jaw length while the real mandible tip had swung back and
+              down to two-fifths of it, so the bore still hung past the teeth.
+
+     There is no single mesh that can do this. An interior bounded by two parts
+     that move differently has to be built in the parts' own frames, so this is
+     THREE pieces, and each one is welded to whatever moves it:
+
+       ROOF   -> the upper jaw. The palate, arching up away from the gum band.
+       FLOOR  -> the mandible. The shallow basin the tongueless floor of a
+                 shark's mouth actually is; it travels with the chin.
+       THROAT -> the head. Behind the oral arc, where neither jaw reaches, a
+                 closed inside-out bore running a jaw-length back into the body
+                 and clamped inside the hull's own cross-section. This is the
+                 black at the back, and it is the only piece that has to fill a
+                 hole rather than skin a jaw.
+
+     Nothing scales. Nothing can protrude, because every surface is a fixed
+     distance from the bone that carries it. All of it is UNLIT and DoubleSide:
+     no light reaches the back of a throat, and a mouth interior seen from a
+     grazing angle must never turn into a hole in the mesh. */
+  const UNLIT_CACHE = new Map();
+  /* THESE HEX VALUES LOOK ABSURDLY DARK AND THEY ARE CORRECT. core/renderer.js
+     runs outputEncoding = sRGBEncoding with ColorManagement.enabled = false, so
+     an authored colour is treated as LINEAR and brightened on the way out:
+     0x53211f leaves the pipe at about rgb(140,85,70), a milk-chocolate brown.
+     That is the second half of why the old cavity read as a tongue — its wall
+     was never the dark it was written as. Author the throat in linear and it
+     lands where a throat belongs. 0x140505 -> ~rgb(80,43,43). */
+  function unlit(c) {
+    let mm = UNLIT_CACHE.get(c);
+    if (!mm) {
+      mm = new T.MeshBasicMaterial({ color: c, side: T.DoubleSide });
+      UNLIT_CACHE.set(c, mm);
+    }
+    return mm;
   }
 
   function addSharkMouth(g, T_, m, o) {
@@ -935,7 +947,6 @@
 
     const gum = m(o.gum || 0x8e3b42), gumDark = m(o.gumDark || 0x5e2229);
     const enamel = m(o.tooth || 0xf2ead6), root = m(o.toothRoot || 0xd6a9a4);
-    const cavityMat = m(o.cavity || 0x63262c);
     const skin = m(o.skin || 0xdfe4e6);
 
     // The jaw line is not level. It rises toward the corners so the whole arc
@@ -1063,33 +1074,6 @@
       return { mesh: mesh, count: rows.reduce(function (s, r) { return s + r.n; }, 0) };
     }
     /* ---------------------------------------------------------------- build */
-    /* §6: THE MOUTH IS A HOLE, NOT A LUMP. The cavity shipped as this same
-       ellipsoid wound OUTWARD — a convex pink object, so a wide gape framed
-       a bulging "pink rock" instead of an opening. Same footprint (proven to
-       hide inside every species' closed head), inverted: every sightline
-       through the gape now lands on the far INTERIOR wall, so the mouth
-       recedes from the money-shot angle and head-on alike. Depth is painted
-       in four bands front-to-back — maroon at the rim behind the teeth,
-       falling to near-black down the throat — and all the saturated pink
-       stays on the gum bands where §6 says it belongs. Its y-scale rides the
-       gape in applyGape below, so every driver (swimJaw, sharkJawProtrude,
-       the presets' direct posing) reveals it; at rest it is a hidden sliver.
-       One-line revert: AQ_CAVITY_HOLE = false at the top of this file. */
-    const cavity = AQ_CAVITY_HOLE
-      ? meshOf(cavityHoleGeom(), [cavityMat, m(o.cavityDeep || 0x47181c),
-        m(o.cavityThroat || 0x331216), m(o.cavityEnd || 0x241013)])
-      : new T.Mesh(
-        cachedGeom("cavity", function () { return new T.SphereGeometry(1, 12, 8); }), cavityMat);
-    cavity.name = "sharkMouthCavity";
-    // FOOTPRINT: the old ellipsoid ran from behind the hinge to PAST the lip
-    // (len*0.58 ± len*0.74) — poking out of the head, which is exactly what
-    // made it read as an object in the mouth. The hole stays INSIDE: front
-    // pole just behind the closed lip line, back pole just behind the hinge,
-    // seated a little low so the receding bore sits in the centre of the open
-    // gape rather than up against the palate.
-    cavity.position.set(hingeX + len * 0.42, hingeY - gap * 0.10, 0);
-    cavity.scale.set(len * 0.52, gap * 0.12, width * 0.42);
-    g.add(cavity);
 
     // THE UPPER ENVELOPE is the real head, not the teeth.  `upper` is the
     // articulation root that will also receive addSnoutShell's crown/rostrum;
@@ -1203,7 +1187,12 @@
         }
         return sh.geom();
       });
-      return meshOf(geo, [skin, m(o.chinDeck || 0x45191d)]);
+      // THE DECK IS THE FLOOR OF THE MOUTH, not a stripe on the chin. Lit, its
+      // 0x45191d rendered as a broad salmon plank running the whole mandible —
+      // the single biggest thing inside an open gape, and half of what the
+      // owner was pointing at. It joins the buccal sack and the liner in the
+      // unlit interior palette instead.
+      return meshOf(geo, [skin, unlit(o.chinDeck || 0x0b0304)]);
     }
 
     // the mandible: a slim seat under the lower gum — the pre-split clamp
@@ -1314,6 +1303,183 @@
     const dentalRake = o.dentalRake == null ? 0 : o.dentalRake;
     const snoutLift = o.snoutLift == null ? (hasUpperEnvelope ? 0.16 : 0) : o.snoutLift;
 
+    /* §6: THE INTERIOR IS TWO PIECES, AND EACH IS WELDED TO A BONE.
+
+       Built here, at the end, because the throat's proportions ARE the travel
+       numbers: what has to be plugged behind the oral arc is exactly what the
+       mandible's `travel` and the snout's `snoutLift` open up.
+
+       THE BUCCAL SACK rides the upper jaw. It is a CLOSED shell — palate,
+       two side walls, floor, front and back caps — lofted over the same plan
+       ellipse the gum bands and tooth rows are swept along, and it is the
+       whole answer to "you should see deep inside". A surface pair (a roof and
+       a floor on separate bones) cannot be, because at a 62-degree gape the
+       two rims are nowhere near each other and a side-on sightline goes in one
+       cheek and straight out of the other. A sack has cheeks.
+
+       Its floor is CLAMPED to the animal's own belly line at every station via
+       ringAt — the same min() the chin is cut with — so at rest it is buried
+       inside the closed chin, and at full gape it can never be the silhouette.
+       That clamp is why the mouth is shallow at the snout and deepens toward
+       the throat, which is also what a shark's mouth does.
+
+       THE LINER rides the mandible: a thin dark skin over the inner face of
+       the lower jaw, because otherwise the gum band's lit gingiva is the
+       biggest thing in the open mouth and the cave reads pink. */
+    function oralPlan(x) {
+      const u = clamp((x - cx) / rad, -1, 1);
+      return { u: u, hz: hw * Math.sqrt(Math.max(0, 1 - u * u)) * 0.92 };
+    }
+    /* THE FLOOR OF THE SACK STOPS AT THE CHIN'S DECK, and this is a hard
+       floor, not a preference. The chin is a SHELL: the deck is its top face,
+       and the space under it is the inside of a piece of the shark's body,
+       not room to put a mouth in. A sack dipping below the deck reads at rest
+       as a rust patch bleeding through the closed white chin — which is
+       exactly what it did on the first build. chinMesh cuts its deck at
+       rim - gap*0.12; sit a hair above that and the closed jaw hides
+       everything.
+
+       The depth the mouth loses here it gets back overhead: the palate can
+       arch as far up into the head as it likes, and behind it the throat runs
+       a jaw-length into the body. Depth belongs where there is body to put it
+       in, not hanging under a chin. */
+    function sackFloorAt(rimY) { return rimY - gap * 0.09; }
+    function sackRoofAt(x, topY) {
+      if (!o.rings || o.rings.length < 2) return topY;
+      const r = ringAt(o.rings, hingeX + x);
+      return Math.min(topY, (r.y + r.ry * 0.55) - hingeY);
+    }
+
+    const sack = meshOf(cachedGeom("buccalSack|v2|" + [hingeX, hingeY, len, width,
+      gap, cx, rad, A, cornerRise, upperY, lowerY,
+      JSON.stringify(o.rings || null)].join(","), function () {
+      const sh = new Shell(), N = 14, M = 10, xFront = cx + rad, xBack = -len * 0.16;
+      const top = [], bot = [];
+      for (let i = 0; i <= N; i++) {
+        const ti = i / N, x = lerp(xFront, xBack, ti);
+        const pl = oralPlan(x);
+        // the loft ramps in over the first fifth so the plan's forward tip
+        // stays pinched behind the front seal instead of splitting it
+        const fx = clamp(ti / 0.22, 0, 1);
+        const tr = [], br = [];
+        for (let j = 0; j <= M; j++) {
+          const sg = -1 + (2 * j) / M, z = pl.hz * sg;
+          const ang = Math.atan2(z / hw, pl.u), rise = riseAt(clamp(ang, -A, A));
+          const dome = (1 - sg * sg) * fx;
+          tr.push([x, sackRoofAt(x, upperY + rise + gap * 0.62 * dome), z]);
+          br.push([x, Math.max(lowerY + rise - gap * 0.30 * dome,
+            sackFloorAt(lowerY + rise)), z]);
+        }
+        top.push(tr); bot.push(br);
+      }
+      const band = function (ti) { return ti < 0.22 ? 0 : (ti < 0.45 ? 1 : (ti < 0.72 ? 2 : 3)); };
+      const q = function (g2, a2, b2, c2, d2) {
+        sh.quad(g2, sh.v(a2[0], a2[1], a2[2]), sh.v(b2[0], b2[1], b2[2]),
+          sh.v(c2[0], c2[1], c2[2]), sh.v(d2[0], d2[1], d2[2]));
+      };
+      for (let i = 0; i < N; i++) {
+        const grp = band((i + 0.5) / N);
+        for (let j = 0; j < M; j++) {
+          q(grp, top[i][j], top[i][j + 1], top[i + 1][j + 1], top[i + 1][j]);
+          q(grp, bot[i][j], bot[i][j + 1], bot[i + 1][j + 1], bot[i + 1][j]);
+        }
+        // THE CHEEKS: the two walls that stop a side-on sightline passing
+        // through the head, and the reason this is a sack and not two bowls
+        q(grp, top[i][0], bot[i][0], bot[i + 1][0], top[i + 1][0]);
+        q(grp, top[i][M], bot[i][M], bot[i + 1][M], top[i + 1][M]);
+      }
+      for (let j = 0; j < M; j++) {          // front and back caps
+        q(0, top[0][j], top[0][j + 1], bot[0][j + 1], bot[0][j]);
+        q(3, top[N][j], top[N][j + 1], bot[N][j + 1], bot[N][j]);
+      }
+      return sh.geom();
+    }), [unlit(o.cavity || 0x140505), unlit(o.cavityDeep || 0x070202),
+      unlit(0x020101), unlit(o.cavityEnd || 0x000000)]);
+    sack.name = "sharkBuccalSack";
+    dental.add(sack);
+
+    const liner = meshOf(cachedGeom("mandibleLiner|v3|" + [len, width, gap, cx, rad,
+      A, cornerRise, lowerY].join(","), function () {
+      const sh = new Shell(), N = 12, M = 10, xFront = cx + rad, xBack = 0;
+      const rows = [];
+      for (let i = 0; i <= N; i++) {
+        const ti = i / N, x = lerp(xFront, xBack, ti);
+        const pl = oralPlan(x), fx = clamp(ti / 0.22, 0, 1), row = [];
+        for (let j = 0; j <= M; j++) {
+          const sg = -1 + (2 * j) / M, z = pl.hz * sg;
+          const ang = Math.atan2(z / hw, pl.u);
+          // shallower than the chin's own recessed deck on purpose: dip below
+          // it and the deck wins the depth test, which is how a lit pink plank
+          // ended up being the biggest thing in an open mouth
+          row.push([x, lowerY + riseAt(clamp(ang, -A, A))
+            - gap * 0.075 * (1 - sg * sg) * fx, z]);
+        }
+        rows.push(row);
+      }
+      for (let i = 0; i < N; i++) {
+        const t = (i + 0.5) / N, grp = t < 0.3 ? 0 : (t < 0.65 ? 1 : 2);
+        for (let j = 0; j < M; j++) {
+          const p = [rows[i][j], rows[i][j + 1], rows[i + 1][j + 1], rows[i + 1][j]];
+          sh.quad(grp, sh.v(p[0][0], p[0][1], p[0][2]), sh.v(p[1][0], p[1][1], p[1][2]),
+            sh.v(p[2][0], p[2][1], p[2][2]), sh.v(p[3][0], p[3][1], p[3][2]));
+        }
+      }
+      return sh.geom();
+    }), [unlit(o.cavity || 0x140505), unlit(o.cavityDeep || 0x070202), unlit(0x020101)]);
+    liner.name = "sharkMandibleLiner";
+    lower.add(liner);
+
+    /* THE THROAT. Behind the oral arc neither jaw reaches, so this is the one
+       closed piece that fills a hole rather than skinning a bone: an
+       inside-out bore from inside the arc's back chord to a pole a full
+       jaw-length into the body, shut at both ends so no sightline escapes it.
+       Its section is clamped to the hull's own rings, which is the guarantee
+       the two scaled-blob generations never had — the bore is bounded by the
+       shark, so it can never become the shark's outline. */
+    const throat = meshOf(cachedGeom("sharkThroat|v1|" +
+      [hingeX, hingeY, len, width, gap, JSON.stringify(o.rings || null)].join(","),
+      function () {
+        const sh = new Shell(), SEG = 14, ST = 12;
+        const xF = len * 0.30, xB = -len * 1.05;
+        const rings = [];
+        for (let i = 0; i <= ST; i++) {
+          const t = i / ST, x = lerp(xF, xB, t);
+          const cap = Math.pow(Math.min(clamp((xF - x) / (len * 0.26), 0, 1),
+            clamp((x - xB) / (len * 0.34), 0, 1)), 0.55);
+          let ry = gap * 1.10 * cap, rz = width * 0.42 * cap;
+          if (o.rings && o.rings.length > 1) {
+            const r = ringAt(o.rings, hingeX + x);
+            const up = (r.y + r.ry * 0.86) - hingeY, dn = hingeY - (r.y - r.ry * 0.86);
+            ry = Math.min(ry, Math.max(gap * 0.10, Math.min(up, dn)));
+            rz = Math.min(rz, r.rz * 0.82);
+          }
+          const row = [];
+          for (let j = 0; j < SEG; j++) {
+            const th = (j / SEG) * Math.PI * 2;
+            row.push(sh.v(x, Math.sin(th) * ry, Math.cos(th) * rz));
+          }
+          rings.push(row);
+        }
+        for (let i = 0; i < ST; i++) {
+          const t = (i + 0.5) / ST;
+          const grp = t < 0.18 ? 0 : (t < 0.40 ? 1 : (t < 0.66 ? 2 : 3));
+          for (let j = 0; j < SEG; j++) {
+            const nj = (j + 1) % SEG;
+            // wound inside-out: the visible face is the INTERIOR (the pole
+            // rows degenerate to triangles inside Shell.quad, which skips them)
+            sh.quad(grp, rings[i][j], rings[i + 1][j], rings[i + 1][nj], rings[i][nj]);
+          }
+        }
+        return sh.geom();
+      }), [unlit(o.cavityDeep || 0x070202), unlit(0x020101), unlit(0x010000),
+      unlit(o.cavityEnd || 0x000000)]);
+    throat.name = "sharkThroat";
+    throat.position.set(hingeX, hingeY, 0);
+    g.add(throat);
+    // the authored-mouth contract still wants one named cavity handle; the
+    // throat is the piece that is a hole rather than a skinned jaw
+    const cavity = throat;
+
     const contract = {
       version: 4,
       shape: "articulated-body-envelope",
@@ -1358,7 +1524,6 @@
        rostrum lift and optional relative dental rake while preserving that one
        openness owner. CBZ.sharkJawProtrude exposes the same callback for tools
        that deliberately pose an authored animal outside the runtime loop. */
-    const cavityY0 = cavity.scale.y;
     function applyGape(k) {
       const oo = clamp(k, 0, 1);
       // The CROWN and the teeth now share this moving envelope.  The crown
@@ -1369,12 +1534,10 @@
       dental.position.x = oo * dentalProtrude;
       dental.position.y = -oo * dentalDrop;
       dental.rotation.z = -oo * dentalRake;
-      // the hole is revealed with the gape: a mouth-line sliver at rest, the
-      // full dark bore at commitment. Same (1 + o*9) swimJaw writes, and this
-      // runs during the group's own matrix solve, so the two writers can never
-      // disagree within a frame — and drivers that bypass swimJaw (the report
-      // presets pose the contract directly) still get the reveal.
-      cavity.scale.y = cavityY0 * (1 + oo * 9);
+      // NOTHING TO REVEAL. The roof rides `dental`, the floor rides `lower`
+      // and the throat is fixed in the head, so the interior opens because the
+      // jaws opened. The old scale-the-blob reveal is what put a lump in the
+      // mouth in the first place.
     }
     g._aquaticMouth.applyGape = applyGape;
     return g._aquaticMouth;

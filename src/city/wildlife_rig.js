@@ -560,9 +560,12 @@
         rig.jawUpper.position.x = rig.jawUpperX + o * (contract.protrude || 0);
         rig.jawUpper.position.y = rig.jawUpperY - o * (contract.upperDrop || 0);
       }
-      if (rig.jawCavity) {
+      if (rig.jawCavity && !rig.jawApplyGape) {
         // Reveal the recessed dark cavity with the gape; at rest it remains a
         // narrow mouth line instead of a coloured box stuck under the snout.
+        // A builder that publishes applyGape owns its own bore (the sharks
+        // fan theirs about the hinge, which this blanket tenfold cannot do),
+        // so do not write it here first and have it corrected a line later.
         rig.jawCavity.scale.y = rig.jawCavityScaleY * (1 + o * 9);
       }
       if (rig.jawApplyGape) rig.jawApplyGape(o);

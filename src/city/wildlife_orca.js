@@ -200,6 +200,23 @@
   //  probes below pick them up at RUNTIME and this kit becomes the fallback.
   //  Checked, never assumed — that file is being edited concurrently.
   // ============================================================
+  /* THE MOUTH INTERIOR IS UNLIT, and the hex values that follow look absurdly
+     dark because they are correct. core/renderer.js runs outputEncoding =
+     sRGBEncoding with ColorManagement.enabled = false, so an authored colour is
+     treated as LINEAR and brightened on the way out — then MeshLambert takes
+     the same key light as the whale's back on top of that. That is how a mouth
+     written as 0x100609 and a deck written as 0x32171c ended up rendering as
+     the broad salmon trough that filled every open orca gape: nothing was
+     wrong with the winding or the geometry, the interior was simply never the
+     dark it was written as. MeshBasic holds these where a throat belongs, and
+     DoubleSide keeps a grazing sightline from finding a hole in the mesh. */
+  const UNLIT_CACHE = new Map();
+  function unlit(c) {
+    let mm = UNLIT_CACHE.get(c);
+    if (!mm) { mm = new T.MeshBasicMaterial({ color: c, side: T.DoubleSide }); UNLIT_CACHE.set(c, mm); }
+    return mm;
+  }
+
   const GEOM = new Map();
   function cached(key, make) {
     let g = GEOM.get(key);
@@ -658,7 +675,7 @@
     // and the white with clear daylight on both sides.
     const black = m(0x0a0c10), white = m(0xf7faf8), saddle = m(0x717f88);
     const eyeM = m(0x04050a), pink = m(0x7a3a40), gum = m(0x6f353b), tooth = m(0xf2ead6);
-    const mouthDark = m(0x100609), deckGum = m(0x32171c);
+    const mouthDark = unlit(0x070202), deckGum = unlit(0x0b0304);
 
     const rings = ringsOf(HX0, HX1, HY, RY, RZ, HULL_RINGS);
     const hull = meshOf(cached(HULL_KEY, function () {
@@ -820,7 +837,7 @@
           }
         }
         return sh.geom();
-      }), [mouthDark, mouthDark, mouthDark, m(0x080305)])
+      }), [unlit(0x0b0304), unlit(0x050202), unlit(0x010101), unlit(0x000000)])
       : new T.Mesh(cached("orcaCavity", function () { return new T.SphereGeometry(1, 12, 8); }), pink);
     cavity.name = "orcaMouthCavity";
     // retracted from the old footprint (JAW_X+0.82 ± 0.86 reached the snout
