@@ -234,6 +234,19 @@
     const d = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
     v = norm3([v[0] - u[0] * d, v[1] - u[1] * d, v[2] - u[2] * d]);
     const w = norm3(cross3(u, v));
+    /* WHICH FACE IS THE UNDERSIDE. The blade's two faces are +w and -w, and
+       slot 1 (the pale belly) used to be nailed to -w. But a left/right pair
+       is built by NEGATING spanDir, which negates w — so on exactly one side
+       of every animal the "underside" faced the sky. On a hammerhead, whose
+       cephalofoil wings are horizontal, that is not subtle: one wing came out
+       white from above and the other grey. Every shark's pectorals and pelvics
+       had the same flip at a shallower angle.
+
+       Countershading follows GRAVITY, not winding order. So ask which way the
+       thickness axis actually points in the model's own frame, and let the
+       lower face wear the belly. A vertical blade (dorsal, caudal — w is
+       horizontal) has no lower face, w[1] is ~0, and nothing changes for it. */
+    const flipFaces = w[1] < -1e-3;
     const og = o.origin || [0, 0, 0];
     function pt(x, y, z) {
       return [og[0] + u[0] * x + v[0] * y + w[0] * z,
@@ -278,8 +291,12 @@
     }
     for (let i = 0; i < nS + nRoot; i++) {
       const hm = ((i - nRoot) + 0.5) / nS;
-      const gT = hm >= tipDark ? 2 : (hm < paleBase ? 3 : 0);
-      const gB = hm >= tipDark ? 2 : (under ? 1 : (hm < paleBase ? 3 : 0));
+      const gUp = hm >= tipDark ? 2 : (hm < paleBase ? 3 : 0);
+      const gDn = hm >= tipDark ? 2 : (under ? 1 : (hm < paleBase ? 3 : 0));
+      // rows[i][0] is the +w face and rows[i][1] the -w face; which of those
+      // two is the upper one depends on the mirror (see flipFaces).
+      const gT = flipFaces ? gDn : gUp;
+      const gB = flipFaces ? gUp : gDn;
       for (let j = 0; j < nC; j++) {
         // s = 0 is the TRAILING edge (x = mid - half), s = 1 the leading edge.
         const sm = (j + 0.5) / nC;
