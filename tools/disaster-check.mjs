@@ -59,6 +59,10 @@ const say = (m) => { if (!JSON_OUT) console.log(m); };
    run — they are the ones a legitimately smaller page may drop. */
 const CENSUS = [
   ["three", "window.THREE && THREE.REVISION"],
+  /* seed.js was silently dropped by the 21cd9bd minimizer and nothing noticed
+     for six days — the crowd ran on bare Math.random and ?seed=N was a no-op.
+     This is the census row that commit forgot to write. */
+  ["seed", "CBZ.seedStream && CBZ.hash01 && CBZ.WORLD_SEED != null"],
   ["arena", "CBZ.buildDisasterArena"],
   ["director", "CBZ.disasters && CBZ.disasters.force"],
   ["water", "CBZ.survSeaHeightAt && CBZ.waterSurgeSet"],

@@ -168,13 +168,23 @@ for (let i = 0; i < Math.min(a.length, b.length); i++) {
 }
 out.deterministicThrough = out.firstDivergence == null ? TICKS : out.firstDivergence - FP_EVERY;
 
+/* SEEDED IS AN ASSERTION, NOT A COMPARISON. When seed.js is missing from the
+   page, survBotAudit().seeded is false in BOTH runs, sched matches, and the
+   A-vs-B compare above has nothing to say — which is exactly how disaster.html
+   ran the crowd on bare Math.random for six days (21cd9bd dropped the script
+   tag and this tool kept comparing two equally-unseeded runs). */
+out.unseededPage = !!(a.length && a[0].sched && a[0].sched[2] !== 1);
+
 if (JSON_OUT) console.log(JSON.stringify(out, null, 1));
 else {
   console.log("");
   console.log("  page              " + out.url + "  (seed " + out.seed + ", " + BOTS + " bots)");
   console.log("  identical for     " + out.deterministicThrough + " / " + TICKS + " ticks" +
     "  (" + (out.deterministicThrough / 60).toFixed(1) + " s of match)");
-  if (out.firstDivergence == null) console.log("\n  DETERMINISM: two clients on this seed run the same match.");
+  if (out.unseededPage) {
+    console.log("  sched.seeded      false in both runs — the page has no CBZ.seedStream");
+    console.log("\n  DETERMINISM: NOT YET. The crowd is not seeded (seed.js missing from the page?) — two unseeded runs matching proves nothing.");
+  } else if (out.firstDivergence == null) console.log("\n  DETERMINISM: two clients on this seed run the same match.");
   else {
     console.log("  first divergence  tick " + out.firstDivergence +
       (out.detail.what.length ? " — " + out.detail.what.join(", ") : "") +

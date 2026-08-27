@@ -59,8 +59,9 @@
    DETERMINISM — everything here is closed-form trigonometry over fixed
    constants. No Math.random, no rng stream, no hash — including the land-box
    derivation (a fixed grid, a fixed-order flood fill, a stable sort) and both
-   procedural textures. The wave CLOCK is wall-clock (runtime-only FX,
-   explicitly allowed).
+   procedural textures. The wave CLOCK is the SIM clock (CBZ.now), not the
+   wall clock: swimmers ride this surface, so the crest height is hashed
+   state and the phase has to be pinnable. See CBZ.waterClock below.
 
    PUBLIC SURFACE ADDED BY THE DEPTH/SHORE PASS (all additive):
      CBZ.waterChopAmpAt(x,z)       chop-row amplitude scale (CPU)
@@ -387,7 +388,38 @@
   // Wrapped so sin() arguments stay small. Every consumer (both shaders and
   // the CPU query) reads THIS, so the rendered crest and the queried height
   // are the same crest.
+  //
+  // IT IS THE SIM CLOCK NOW, NOT THE WALL CLOCK. This was performance.now(),
+  // which was fair while the sea was pure FX — nothing the game recorded had a
+  // wave in it. That stopped being true the moment swimmers started riding the
+  // surface: an animal's pos.y IS citySeaHeightAt, and that is exactly what
+  // tools/determinism-check.mjs hashes. The tool pins CBZ.now and drives the
+  // world with CBZ.stepSim; it cannot pin performance.now(), so a wall-clock
+  // swell meant two identical runs sampled the wave at two different phases
+  // and every swimmer's Y "diverged" for no reason that exists in the world.
+  //
+  // CBZ.now is the clock the whole engine already runs on (core/loop.js): the
+  // rAF timestamp under the variable step, whole 1/60 ticks under the fixed
+  // step, a synthetic advance under stepSim. Under the variable step it IS
+  // performance.now() to within one frame, so city / sharksim / escape roll
+  // exactly as before; under the fixed step the sea now moves on the same
+  // ticks the swimmers do. Bonus: every call within one frame returns ONE
+  // value, so the shader uniform (waterDriveCommonUniforms) and the CPU query
+  // can no longer sample two different instants of the same frame.
+  //
+  // THE FALLBACK IS THE TITLE SCREEN. The fixed step only advances CBZ.now
+  // while g.state === "playing", so on a survival title card the sim clock
+  // stands still and a sea driven by it would be a photograph. While no match
+  // exists — state "title", or a clock nothing has written yet — wall time
+  // drives the swell exactly as it always did. "paused" / "won" / "lost" stay
+  // on the sim clock deliberately: the rest of the world is frozen there too
+  // (under the fixed step), so following it is both consistent and free of the
+  // phase jump that switching sources would cost.
   CBZ.waterClock = function () {
+    const g = CBZ.game;
+    const sim = CBZ.now;
+    if (g && g.state !== "title" && Number.isFinite(sim) && sim > 0)
+      return (sim * 0.001) % 3600;
     const ms = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
     return (ms * 0.001) % 3600;
   };

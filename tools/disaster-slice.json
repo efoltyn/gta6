@@ -4407,6 +4407,7 @@
  "droppedBytes": 22655210,
  "updatedAt": "2026-08-21T07:23:22.167Z",
  "pin": [
+  "src/core/seed.js",
   "src/core/prio.js",
   "src/core/batch.js",
   "src/core/staticfreeze.js",
