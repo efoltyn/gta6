@@ -1,5 +1,17 @@
 /* Shark Sim, before/after — WHAT A MOUTH LEAVES BEHIND.
 
+   HARNESS TRAP (see D.step below): in this engine every gore and wound emitter
+   distance-gates on CBZ.camera, gore emits at onAlways(8) and camera.js owns
+   the lens at onAlways(50) — so inside ONE CBZ.stepSim the emitters read the
+   camera the PREVIOUS step left behind. Any preset that stages an effect which
+   is emitted from inside stepSim must re-stamp its tripod AFTER each step, not
+   before. Set it before and the camera updater overwrites it in the same tick;
+   the effect is then emitted from wherever the game's own lens was and quietly
+   refused by the distance gate, which is indistinguishable from a broken
+   feature. Cost me two full capture runs. A `ba` adapter that offered a
+   "hold this camera across N sim steps" helper would remove this for good.
+
+
    Owner, 2026-08-25, playing Shark Sim:
      "when i bite someone it puts a red square where i bit them, and when i bit
       a person it dosnt look like im biting them, ripping limbs off etc... the
@@ -132,7 +144,8 @@ async function stageSharkFlesh(input) {
       unpin(a) {
         for (let i = D.pinned.length - 1; i >= 0; i--) if (D.pinned[i].a === a) D.pinned.splice(i, 1);
       },
-      /* THE LENS HAS TO BE RIGHT *DURING* THE STEP, NOT AFTER IT. Every gore
+      /* HARNESS TRAP: a staged emitter reads the camera the PREVIOUS tick left.
+         THE LENS HAS TO BE RIGHT *DURING* THE STEP, NOT AFTER IT. Every gore
          and wound emitter in this game distance-gates on CBZ.camera, and
          camera.js owns the lens at onAlways(50) while gore.js emits at
          onAlways(8) — so within one stepSim the emitters read the camera the
