@@ -85,7 +85,7 @@ if (!presetName || presetName === "help") {
   process.stdout.write(
     "\nusage: node tools/before-after.mjs <preset> [visual-compare flags]\n" +
     "       npm run ba -- <preset>\n" +
-    "       --gate      exit 2 if any declared metric regressed (use it as a check)\n" +
+    "       --gate      exit 2 if any metric regressed or any stage failed\n" +
     "       --no-pairs  skip the stitched side-by-side PNGs\n" +
     "baseline column: self = flag A/B against this same checkout (strongest),\n" +
     "                 pinned = the preset names its own before, deployed = the live site.\n" +
@@ -190,19 +190,23 @@ async function printSummary(dir) {
   const wM = Math.max(7, ...keys.map((k) => (specs[k].label || k).length));
   process.stdout.write(`\nMEASUREMENTS — ${meta.preset && meta.preset.title ? meta.preset.title : presetName}\n`);
   let lastSubject = null;
-  const tally = { better: 0, worse: 0, flat: 0, failed: failures.length };
+  const tally = { better: 0, matched: 0, worse: 0, flat: 0, failed: failures.length };
   for (const r of rows) {
     if (r.subject !== lastSubject) {
       process.stdout.write(`\n  ${r.subject}\n`);
       lastSubject = r.subject;
     }
     const spec = specs[r.key] || {};
-    let mark = " ";
-    if (typeof r.before === "number" && typeof r.after === "number" && r.after !== r.before) {
+    let mark = " ", matched = false;
+    if (spec.better === "equal" && r.before != null && r.after != null) {
+      matched = Object.is(r.before, r.after);
+      mark = matched ? "✓" : "✗";
+    } else if (typeof r.before === "number" && typeof r.after === "number" && r.after !== r.before) {
       const up = r.after > r.before;
       mark = spec.better === "lower" ? (up ? "✗" : "✓") : spec.better === "higher" ? (up ? "✓" : "✗") : "·";
     }
-    if (mark === "✓") tally.better++;
+    if (matched) tally.matched++;
+    else if (mark === "✓") tally.better++;
     else if (mark === "✗") tally.worse++;
     else tally.flat++;
     process.stdout.write(
@@ -224,7 +228,7 @@ async function printSummary(dir) {
      --gate this line becomes the process's exit status, which is what turns
      the whole tool from a thing you read into a check you can run. */
   process.stdout.write(
-    `\nVERDICT  ${tally.better} better \u00b7 ${tally.worse} worse \u00b7 ${tally.flat} unchanged` +
+    `\nVERDICT  ${tally.better} better \u00b7 ${tally.matched} matched \u00b7 ${tally.worse} worse \u00b7 ${tally.flat} unchanged` +
     (tally.failed ? ` \u00b7 ${tally.failed} FAILED` : "") +
     (tally.worse || tally.failed
       ? "  \u2190 " + [tally.worse ? "REGRESSIONS" : "", tally.failed ? "UNMEASURED" : ""].filter(Boolean).join(" + ")
@@ -297,7 +301,10 @@ async function writePairs(dir) {
     } catch (_) { /* one bad subject must not sink the run */ }
   }
   if (!written.length) return;
-  process.stdout.write("\nSIDE BY SIDE \u2014 open these (before | after, one file per subject):\n");
+  const heading = meta.only
+    ? `\nSINGLE-SIDE PREVIEWS \u2014 open these (${meta.only} only):\n`
+    : "\nSIDE BY SIDE \u2014 open these (before | after, one file per subject):\n";
+  process.stdout.write(heading);
   for (const f of written) process.stdout.write(`  ${f}\n`);
 }
 
@@ -323,6 +330,6 @@ child.on("exit", async (code) => {
     if (wantPairs) { try { await writePairs(reportDir); } catch (_) {} }
   }
   let exit = code == null ? 1 : code;
-  if (wantGate && !exit && tally && tally.worse) exit = 2;
+  if (wantGate && !exit && tally && (tally.worse || tally.failed)) exit = 2;
   process.exit(exit);
 });

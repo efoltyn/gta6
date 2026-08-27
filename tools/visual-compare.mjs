@@ -389,6 +389,15 @@ function recordBrowserMessage(type, value) {
   browserMessages.push(rec);
 }
 
+// Console warnings are evidence for the report, but a console error or an
+// uncaught runtime exception means the pictured state is not trustworthy.
+// Sum counts (rather than array length) because repeated errors are coalesced.
+function browserFailureCount(side) {
+  return browserMessages.reduce((total, message) =>
+    total + (message.side === side && (message.type === "error" || message.type === "exception")
+      ? message.count : 0), 0);
+}
+
 /* HOW LONG TO WAIT ON A FROZEN MAIN THREAD.
 
    Every CDP call here had a hard-wired 60 s ceiling, and for years that was
@@ -631,6 +640,7 @@ async function captureSide(side, sourceUrl, referenceResult = null) {
   for (let frameIndex = 0; frameIndex < frames.length; frameIndex++) {
   const frame = frames[frameIndex];
   await applyFrame(frame);
+  let browserFailureCursor = browserFailureCount(side);
   nav = await navigate(sourceUrl, side);
   for (let index = 0; index < subjects.length; index++) {
     const subject = subjects[index];
@@ -669,6 +679,7 @@ async function captureSide(side, sourceUrl, referenceResult = null) {
       // returned by the matching before capture. Presets opt in by reading it.
       referenceStage,
     };
+    const browserFailureStart = browserFailureCursor;
     let stageResult;
     try {
       stageResult = await evaluate(
@@ -778,6 +789,20 @@ async function captureSide(side, sourceUrl, referenceResult = null) {
         }
       } catch (_) {}
     }
+    const browserFailureNow = browserFailureCount(side);
+    if (browserFailureNow > browserFailureStart && stageResult && stageResult.ok === true) {
+      const evidence = browserMessages
+        .filter((message) => message.side === side && (message.type === "error" || message.type === "exception"))
+        .slice(-3)
+        .map((message) => `${message.type}: ${message.text}`)
+        .join(" | ");
+      stageResult = Object.assign({}, stageResult, {
+        ok: false,
+        error: `browser failure during capture: ${evidence || `${browserFailureNow - browserFailureStart} error(s)`}`,
+      });
+      process.stdout.write(`[${side}] ${subject.id} BROWSER FAILED (kept pixels): ${stageResult.error}\n`);
+    }
+    browserFailureCursor = browserFailureNow;
     captures.push({ frame, frameIndex, subject, subjectIndex: index, filename: shotFile, stage: stageResult, stripFiles });
   }
   }
@@ -863,15 +888,28 @@ function metricsRows(before, after) {
 function metricsPageHtml(before, after) {
   const rows = metricsRows(before, after);
   if (!rows.length) return "";
-  const body = rows.map((row) => {
+  /* A4 has a hard bottom edge. One unbounded table used to let Chrome clip
+     every metric after roughly row 27 while still producing a valid PDF.
+     Chunk deliberately below that measured limit; each continuation is a
+     real `.page`, repeats the context/header, and participates in page count. */
+  const ROWS_PER_PAGE = 24;
+  const pageCount = Math.ceil(rows.length / ROWS_PER_PAGE);
+  const rowHtml = (row) => {
+    // A metric can be ABSENT for a subject (no victim left to measure an escape
+    // angle once the fire is out). Number(null) is 0 and passes isFinite, so an
+    // unguarded delta printed a green "matched 0" for two missing readings and
+    // a percentage against a phantom zero baseline for one. The value column
+    // already says "—"; the delta column must not disagree with it.
+    const measured = row.before != null && row.after != null;
     const beforeValue = Number(row.before);
     const afterValue = Number(row.after);
     let deltaCell = "<td>—</td>";
-    if (Number.isFinite(beforeValue) && Number.isFinite(afterValue)) {
+    if (measured && Number.isFinite(beforeValue) && Number.isFinite(afterValue)) {
       const diff = afterValue - beforeValue;
       let tone = "";
       if (row.spec.better === "lower") tone = diff < 0 ? "good" : (diff > 0 ? "bad" : "");
       if (row.spec.better === "higher") tone = diff > 0 ? "good" : (diff < 0 ? "bad" : "");
+      if (row.spec.better === "equal") tone = diff === 0 ? "good" : "bad";
       if (beforeValue !== 0) {
         const pct = (diff / Math.abs(beforeValue)) * 100;
         deltaCell = `<td class="${tone}">${pct > 0 ? "+" : ""}${Math.round(pct)}%</td>`;
@@ -883,11 +921,16 @@ function metricsPageHtml(before, after) {
     return `<tr><td>${htmlEscape(row.subjectLabel)}</td>` +
       `<td>${htmlEscape(row.spec.label || row.key)}${row.spec.unit ? ` <small>${htmlEscape(row.spec.unit)}</small>` : ""}</td>` +
       `<td>${formatMetric(row.before)}</td><td>${formatMetric(row.after)}</td>${deltaCell}</tr>`;
+  };
+  const note = htmlEscape(preset.metricsNote || "Numbers captured live inside each build during staging. Same seed, same timeline, same machine — the source change is the variable.");
+  return Array.from({ length: pageCount }, (_, pageIndex) => {
+    const body = rows.slice(pageIndex * ROWS_PER_PAGE, (pageIndex + 1) * ROWS_PER_PAGE).map(rowHtml).join("\n");
+    const suffix = pageCount > 1 ? ` · ${pageIndex + 1}/${pageCount}` : "";
+    return `<section class="page metrics">
+      <header><div><span class="number">Σ</span><h2>Measurements${suffix}</h2></div><p>${note}</p></header>
+      <table><thead><tr><th>Subject</th><th>Metric</th><th>Before</th><th>After</th><th>Δ</th></tr></thead><tbody>${body}</tbody></table>
+    </section>`;
   }).join("\n");
-  return `<section class="page metrics">
-    <header><div><span class="number">Σ</span><h2>Measurements</h2></div><p>${htmlEscape(preset.metricsNote || "Numbers captured live inside each build during staging. Same seed, same timeline, same machine — the source change is the variable.")}</p></header>
-    <table><thead><tr><th>Subject</th><th>Metric</th><th>Before</th><th>After</th><th>Δ</th></tr></thead><tbody>${body}</tbody></table>
-  </section>`;
 }
 
 function reportHtml(before, after) {
@@ -896,7 +939,6 @@ function reportHtml(before, after) {
   const method = preset.method || "Every pair uses the actual registered model builder from its source URL. The runner holds subject, random seed, viewport, camera framing, backdrop, and lighting constant so the source change is the variable.";
   const metricPage = metricsPageHtml(before, after);
   const captureCount = subjects.length * frames.length;
-  const reportPageCount = captureCount + (frames.length > 1 ? subjects.length : 0) + 1 + (metricPage ? 1 : 0);
   // Captions follow the same precedence as the stage input: CLI override, then
   // the preset's own labels, then the historic deployed-vs-local defaults —
   // so a flag-A/B run never prints a lying "DEPLOYED" banner anywhere.
@@ -940,9 +982,9 @@ function reportHtml(before, after) {
     const stepSec = Number(subject.strip?.stepSec) || 0.5;
     const columns = Math.max(beforeFiles?.length || 0, afterFiles?.length || 0, 1);
     const row = (files, cls) => (files || []).map((file, i) =>
-      `<figure class="${cls}"><figcaption>t+${(i * stepSec).toFixed(1)}s</figcaption><img src="shots/${cls}/${htmlEscape(file)}"></figure>`).join("");
+      `<figure class="${cls}"><figcaption>t+${(i * stepSec).toFixed(2)}s</figcaption><img src="shots/${cls}/${htmlEscape(file)}"></figure>`).join("");
     return `<section class="page filmstrip">
-      <header><div><span class="number">▶</span><h2>${htmlEscape(subject.label || subject.id)} · over time</h2></div><p>The same simulated seconds on both builds, photographed every ${stepSec.toFixed(1)}s. Motion is the claim; the strip is the proof.</p></header>
+      <header><div><span class="number">▶</span><h2>${htmlEscape(subject.label || subject.id)} · over time</h2></div><p>The same simulated seconds on both builds, photographed every ${stepSec.toFixed(2)}s. Motion is the claim; the strip is the proof.</p></header>
       <div class="stripRow"><span class="stripTag">${beforeCaption}</span><div class="stripShots" style="grid-template-columns:repeat(${columns},1fr)">${row(beforeFiles, "before")}</div></div>
       <div class="stripRow"><span class="stripTag after">${afterCaption}</span><div class="stripShots" style="grid-template-columns:repeat(${columns},1fr)">${row(afterFiles, "after")}</div></div>
       <footer><span>${htmlEscape(subject.id)} · film strip</span><span>${htmlEscape(pairNote)}</span></footer>

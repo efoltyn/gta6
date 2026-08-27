@@ -85,11 +85,12 @@
   const THREE = window.THREE;
 
   if (CBZ.CONFIG.WILDFIRE_V2 == null) CBZ.CONFIG.WILDFIRE_V2 = true;
+  if (CBZ.CONFIG.WILDFIRE_RENDER_V3 == null) CBZ.CONFIG.WILDFIRE_RENDER_V3 = true;
 
   // hazard-placing draws come from THE shared survival stream (see the
   // determinism header in systems/disasters.js); FX jitter stays Math.random
   const rnd = () => (CBZ.survRnd ? CBZ.survRnd() : Math.random());
-  const jit = Math.random;
+  const jit = () => Math.random();
 
   const surv = () => CBZ.surv;
   const ground = (x, z) => (CBZ.surv && CBZ.surv.arena ? CBZ.surv.arena.groundHeightAt(x, z) : 0);
@@ -125,46 +126,301 @@
   }
   zeroStats();
 
-  /* ---- the drawn fire: instanced flames/glow, pooled smoke/embers ------- */
-  // One InstancedMesh per flame layer (fixed colour each, so no per-instance
-  // colour API is needed on r128), one for the ground glow, one for the scar.
+  /* ---- the drawn fire: GPU sprites, pooled smoke/embers ------------------
+     r128's PointsMaterial draws an untextured point as a literal square. That
+     was the whole visible failure here: 1,600 grey panes and three six-sided
+     cones can describe the right plume and still look nothing like one.
+
+     The V3 road is the small, native Three.js answer: one Points buffer per
+     effect, custom size/opacity attributes, and gl_PointCoord shaping in a
+     ShaderMaterial. Overlapping translucent billboards give smoke volume;
+     three animated flame tongues per crown give the front a broken edge. The
+     simulation, pools and draw-call budget stay where they were. The exact old
+     geometry remains behind WILDFIRE_RENDER_V3=false for matched A/B proof. */
   let FX = null;
   const dummy = new THREE.Object3D();
+
+  function fogUniforms(extra) {
+    return THREE.UniformsUtils.merge([THREE.UniformsLib.fog, extra]);
+  }
+
+  function flameMaterial() {
+    return new THREE.ShaderMaterial({
+      uniforms: fogUniforms({
+        uTime: { value: 0 }, uScale: { value: 320 }, uWind: { value: new THREE.Vector2(1, 0) },
+      }),
+      vertexShader: `
+        uniform float uScale;
+        uniform vec2 uWind;
+        attribute float aSize;
+        attribute float aAlpha;
+        attribute float aSeed;
+        varying float vAlpha;
+        varying float vSeed;
+        varying float vWindX;
+        #include <fog_pars_vertex>
+        void main() {
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          mvPosition.z += 1.15;   // sit clear of the crown box, not inside it
+          vec2 vw = (viewMatrix * vec4(uWind.x, 0.0, uWind.y, 0.0)).xy;
+          vWindX = length(vw) > 0.001 ? normalize(vw).x : 0.0;
+          vAlpha = aAlpha;
+          vSeed = aSeed;
+          gl_PointSize = min(220.0, max(0.0, aSize * uScale / max(1.0, -mvPosition.z)));
+          gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        varying float vAlpha;
+        varying float vSeed;
+        varying float vWindX;
+        #include <fog_pars_fragment>
+        void main() {
+          // gl_PointCoord.y runs DOWNWARD (0 = top of the sprite). Every term
+          // below is written in height-above-the-base, so flip the axis once
+          // here. Read straight, this shader drew a goblet: widest and hottest
+          // at the top, flat-cut where the tip should taper, wind bending the
+          // root instead of the tongue.
+          float y = 1.0 - gl_PointCoord.y;
+          float x = gl_PointCoord.x * 2.0 - 1.0;
+          float lick = sin(y * 10.0 + vSeed * 17.0 + uTime * 8.5) * (0.035 + y * 0.09);
+          float lean = vWindX * y * y * 0.48;
+          float width = (0.04 + 0.62 * pow(max(0.0, 1.0 - y), 0.76)) *
+            (0.9 + 0.1 * sin(vSeed * 31.0 + uTime * 10.0 - y * 7.0));
+          float q = abs(x - lean - lick) / max(0.04, width);
+          // A flame is a soft, folding sheet rather than a cut-out triangle.
+          // Feather the whole tongue and nibble its edge with two frequencies
+          // so overlapping points merge into one crown fire.
+          float body = 1.0 - smoothstep(0.58, 1.08, q);
+          body *= 0.90 + 0.10 * sin(y * 18.0 + x * 5.0 + vSeed * 37.0 + uTime * 11.0);
+          body *= smoothstep(0.01, 0.10, y);
+          body *= 1.0 - smoothstep(0.87 + 0.045 * sin(vSeed * 23.0 + uTime * 7.0), 1.0, y);
+          float core = pow(max(0.0, 1.0 - q), 2.1) * pow(max(0.0, 1.0 - y), 0.55);
+          vec3 color = mix(vec3(1.0, 0.075, 0.008), vec3(1.0, 0.38, 0.015), body);
+          color = mix(color, vec3(1.0, 0.78, 0.16), smoothstep(0.15, 0.78, core) * 0.82);
+          float alpha = body * vAlpha * (0.88 + 0.12 * sin(vSeed * 41.0 + uTime * 13.0));
+          if (alpha < 0.008) discard;
+          gl_FragColor = vec4(color, alpha);
+          #include <fog_fragment>
+        }
+      `,
+      transparent: true, depthWrite: false, blending: THREE.NormalBlending, fog: true,
+    });
+  }
+
+  function smokeMaterial() {
+    return new THREE.ShaderMaterial({
+      uniforms: fogUniforms({
+        uTime: { value: 0 }, uScale: { value: 320 }, uWind: { value: new THREE.Vector2(1, 0) },
+      }),
+      vertexShader: `
+        uniform float uScale;
+        uniform vec2 uWind;
+        attribute vec3 aColor;
+        attribute float aSize;
+        attribute float aAlpha;
+        attribute float aSeed;
+        attribute float aSurface;
+        attribute float aHot;
+        varying vec3 vColor;
+        varying float vAlpha;
+        varying float vSeed;
+        varying float vSurface;
+        varying float vHot;
+        varying vec2 vWind;
+        #include <fog_pars_vertex>
+        void main() {
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          vec2 vw = (viewMatrix * vec4(uWind.x, 0.0, uWind.y, 0.0)).xy;
+          vWind = length(vw) > 0.001 ? normalize(vw) : vec2(1.0, 0.0);
+          vColor = aColor;
+          vAlpha = aAlpha;
+          vSeed = aSeed;
+          vSurface = aSurface;
+          vHot = aHot;
+          gl_PointSize = min(240.0, max(0.0, aSize * uScale / max(1.0, -mvPosition.z)));
+          gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vColor;
+        varying float vAlpha;
+        varying float vSeed;
+        varying float vSurface;
+        varying float vHot;
+        varying vec2 vWind;
+        #include <fog_pars_fragment>
+        void main() {
+          vec2 p = (gl_PointCoord - 0.5) * 2.0;
+          if (vSurface > 0.5) {
+            vec2 crossWind = vec2(-vWind.y, vWind.x);
+            float along = dot(p, vWind) * 0.72;
+            float across = dot(p, crossWind) * 1.18;
+            p = vWind * along + crossWind * across;
+          }
+          p += vec2(sin(p.y * 4.1 + vSeed * 19.0), sin(p.x * 3.7 + vSeed * 29.0)) * 0.075;
+          float angle = atan(p.y, p.x);
+          float edge = 0.86 + 0.055 * sin(angle * 3.0 + vSeed * 19.0) +
+            0.035 * sin(angle * 7.0 - vSeed * 31.0);
+          float d = length(p);
+          // Gaussian falloff avoids the flat opaque centres that made a plume
+          // read as a chain of grey coins at distance. The irregular outer
+          // cutoff keeps each billboard from becoming a perfect circle.
+          float q = d / max(0.2, edge);
+          float body = exp(-2.65 * q * q) * (1.0 - smoothstep(0.78, 1.12, q));
+          float mottled = 0.90 + 0.10 * sin((p.x + vSeed) * 5.0) * sin((p.y - vSeed) * 4.0);
+          float alpha = body * mottled * vAlpha;
+          if (alpha < 0.006) discard;
+          // Same downward axis: this glow belongs on the puff's UNDERSIDE,
+          // where the fire is, so measure height from the bottom edge.
+          float h = 1.0 - gl_PointCoord.y;
+          float under = (1.0 - smoothstep(0.10, 0.78, h)) * vHot;
+          vec3 color = vColor + vec3(0.34, 0.085, 0.012) * under * body;
+          gl_FragColor = vec4(color, alpha);
+          #include <fog_fragment>
+        }
+      `,
+      transparent: true, depthWrite: false, fog: true,
+    });
+  }
+
+  function emberMaterial() {
+    return new THREE.ShaderMaterial({
+      uniforms: { uScale: { value: 320 } },
+      vertexShader: `
+        uniform float uScale;
+        attribute float aAlpha;
+        varying float vAlpha;
+        void main() {
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          vAlpha = aAlpha;
+          gl_PointSize = min(18.0, 1.5 + 0.22 * uScale / max(1.0, -mvPosition.z));
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        varying float vAlpha;
+        void main() {
+          float d = length(gl_PointCoord - 0.5) * 2.0;
+          float alpha = (1.0 - smoothstep(0.12, 1.0, d)) * vAlpha;
+          if (alpha < 0.01) discard;
+          vec3 color = mix(vec3(1.0, 0.22, 0.015), vec3(1.0, 0.92, 0.42), 1.0 - smoothstep(0.0, 0.5, d));
+          gl_FragColor = vec4(color, alpha);
+        }
+      `,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+  }
+
+  function radialGlowMap() {
+    const c = document.createElement("canvas"); c.width = c.height = 64;
+    const g = c.getContext("2d");
+    const r = g.createRadialGradient(32, 32, 1, 32, 32, 31);
+    r.addColorStop(0, "rgba(255,255,255,.88)");
+    r.addColorStop(0.28, "rgba(255,255,255,.54)");
+    r.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = r; g.fillRect(0, 0, 64, 64);
+    const t = new THREE.CanvasTexture(c);
+    t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter;
+    t.generateMipmaps = false; t._wildfireTexture = true;
+    return t;
+  }
+
+  function irregularDisc() {
+    const geo = new THREE.CircleGeometry(1, 28);
+    const p = geo.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i), a = Math.atan2(y, x), d = Math.hypot(x, y);
+      if (d < 0.01) continue;
+      const r = 0.88 + 0.08 * Math.sin(a * 3 + 0.7) + 0.06 * Math.sin(a * 7 - 0.3);
+      p.setXY(i, x * r, y * r);
+    }
+    p.needsUpdate = true; geo.rotateX(-Math.PI / 2); return geo;
+  }
+
   function buildFX(root) {
     if (FX) return;
-    const cone = new THREE.ConeGeometry(1, 2.4, 6);
-    cone.translate(0, 1.2, 0);                    // grow upward from the base
-    const layer = (color, opacity) => {
-      const m = new THREE.InstancedMesh(cone, new THREE.MeshBasicMaterial({
-        color, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending,
-      }), MAXFLAME);
-      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      m.count = 0; m.renderOrder = 8; m.frustumCulled = false;
-      m.userData.transient = true; root.add(m); return m;
+    /* Three.js allocates UUIDs with Math.random(). The old cone road creates
+       a different number of geometries/materials than the shader road, so a
+       rendering flag used to advance the GLOBAL random stream by a different
+       amount. Unrelated actor choices then diverged and even smoke-death totals
+       changed in a rendering-only A/B. Construction is synchronous: give UUID
+       allocation a private deterministic stream and restore the game's stream
+       immediately. Runtime puff jitter keeps using `jit` as before. */
+    const priorRandom = Math.random;
+    let fxSeed = (0x57464d33 ^ ((root && root.id) || 0)) >>> 0;
+    Math.random = function () {
+      fxSeed = (Math.imul(fxSeed, 1664525) + 1013904223) >>> 0;
+      return fxSeed / 4294967296;
     };
-    const discGeo = new THREE.CircleGeometry(1, 18);
-    discGeo.rotateX(-Math.PI / 2);
-    const glow = new THREE.InstancedMesh(discGeo, new THREE.MeshBasicMaterial({
-      color: 0xff3c08, transparent: true, opacity: 0.28, depthWrite: false, blending: THREE.AdditiveBlending,
+    try { buildFXMeshes(root); }
+    finally { Math.random = priorRandom; }
+  }
+
+  function buildFXMeshes(root) {
+    const renderV3 = CBZ.CONFIG.WILDFIRE_RENDER_V3 !== false;
+    let flames = [], flame = null;
+    if (renderV3) {
+      const fgeo = new THREE.BufferGeometry();
+      const count = MAXFLAME * 3;
+      fgeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(count * 3).fill(-9999), 3).setUsage(THREE.DynamicDrawUsage));
+      fgeo.setAttribute("aSize", new THREE.BufferAttribute(new Float32Array(count), 1).setUsage(THREE.DynamicDrawUsage));
+      fgeo.setAttribute("aAlpha", new THREE.BufferAttribute(new Float32Array(count), 1).setUsage(THREE.DynamicDrawUsage));
+      fgeo.setAttribute("aSeed", new THREE.BufferAttribute(new Float32Array(count), 1).setUsage(THREE.DynamicDrawUsage));
+      fgeo.setDrawRange(0, 0);
+      flame = new THREE.Points(fgeo, flameMaterial());
+      flame.renderOrder = 8; flame.frustumCulled = false;
+      flame.userData.transient = true; root.add(flame);
+    } else {
+      const cone = new THREE.ConeGeometry(1, 2.4, 6);
+      cone.translate(0, 1.2, 0);
+      const layer = (color, opacity) => {
+        const m = new THREE.InstancedMesh(cone, new THREE.MeshBasicMaterial({
+          color, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending,
+        }), MAXFLAME);
+        m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        m.count = 0; m.renderOrder = 8; m.frustumCulled = false;
+        m.userData.transient = true; root.add(m); return m;
+      };
+      flames = [layer(0xff3a0e, 0.8), layer(0xff7a1e, 0.7), layer(0xffd24a, 0.6)];
+    }
+
+    const glowGeo = new THREE.CircleGeometry(1, renderV3 ? 28 : 18);
+    glowGeo.rotateX(-Math.PI / 2);
+    const glow = new THREE.InstancedMesh(glowGeo, new THREE.MeshBasicMaterial({
+      color: 0xff3c08, map: renderV3 ? radialGlowMap() : null, transparent: true,
+      opacity: renderV3 ? 0.24 : 0.28, depthWrite: false, blending: THREE.AdditiveBlending,
     }), MAXFLAME);
     glow.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     glow.count = 0; glow.renderOrder = 5; glow.frustumCulled = false;
     glow.userData.transient = true; root.add(glow);
     // THE SCAR — the one mesh here that outlives the event on purpose.
-    const scar = new THREE.InstancedMesh(discGeo, new THREE.MeshBasicMaterial({
+    const scar = new THREE.InstancedMesh(renderV3 ? irregularDisc() : glowGeo, new THREE.MeshBasicMaterial({
       color: 0x14100b, transparent: true, opacity: 0.85, depthWrite: false,
     }), MAXSCAR);
     scar.count = 0; scar.renderOrder = 4; scar.frustumCulled = false;
     scar.userData.transient = true; root.add(scar);
 
-    // smoke: ONE Points cloud, per-particle colour so a puff lightens and
-    // greys as it disperses (r128 PointsMaterial vertexColors)
+    // smoke stays one pool and one draw call; V3 adds the attributes its
+    // organic edge, age fade and fire-lit underside need.
     const sgeo = new THREE.BufferGeometry();
     const spos = new Float32Array(MAXSMOKE * 3).fill(-9999);
     const scol = new Float32Array(MAXSMOKE * 3);
     sgeo.setAttribute("position", new THREE.BufferAttribute(spos, 3).setUsage(THREE.DynamicDrawUsage));
-    sgeo.setAttribute("color", new THREE.BufferAttribute(scol, 3).setUsage(THREE.DynamicDrawUsage));
-    const smoke = new THREE.Points(sgeo, new THREE.PointsMaterial({
+    sgeo.setAttribute(renderV3 ? "aColor" : "color", new THREE.BufferAttribute(scol, 3).setUsage(THREE.DynamicDrawUsage));
+    if (renderV3) {
+      sgeo.setAttribute("aSize", new THREE.BufferAttribute(new Float32Array(MAXSMOKE), 1).setUsage(THREE.DynamicDrawUsage));
+      sgeo.setAttribute("aAlpha", new THREE.BufferAttribute(new Float32Array(MAXSMOKE), 1).setUsage(THREE.DynamicDrawUsage));
+      sgeo.setAttribute("aSeed", new THREE.BufferAttribute(new Float32Array(MAXSMOKE), 1));
+      sgeo.setAttribute("aSurface", new THREE.BufferAttribute(new Float32Array(MAXSMOKE), 1).setUsage(THREE.DynamicDrawUsage));
+      sgeo.setAttribute("aHot", new THREE.BufferAttribute(new Float32Array(MAXSMOKE), 1).setUsage(THREE.DynamicDrawUsage));
+      const seed = sgeo.attributes.aSeed.array;
+      for (let i = 0; i < MAXSMOKE; i++) seed[i] = ((i * 0.61803398875) % 1 + 1) % 1;
+    }
+    const smoke = new THREE.Points(sgeo, renderV3 ? smokeMaterial() : new THREE.PointsMaterial({
       size: 3.6, vertexColors: true, transparent: true, opacity: 0.62, depthWrite: false, sizeAttenuation: true, fog: true,
     }));
     smoke.renderOrder = 9; smoke.frustumCulled = false;
@@ -173,7 +429,8 @@
     const egeo = new THREE.BufferGeometry();
     const epos = new Float32Array(MAXEMBER * 3).fill(-9999);
     egeo.setAttribute("position", new THREE.BufferAttribute(epos, 3).setUsage(THREE.DynamicDrawUsage));
-    const embers = new THREE.Points(egeo, new THREE.PointsMaterial({
+    if (renderV3) egeo.setAttribute("aAlpha", new THREE.BufferAttribute(new Float32Array(MAXEMBER), 1).setUsage(THREE.DynamicDrawUsage));
+    const embers = new THREE.Points(egeo, renderV3 ? emberMaterial() : new THREE.PointsMaterial({
       size: 0.2, color: 0xff8828, transparent: true, opacity: 0.8, depthWrite: false,
       blending: THREE.AdditiveBlending, sizeAttenuation: true,
     }));
@@ -181,7 +438,7 @@
     embers.userData.transient = true; root.add(embers);
 
     FX = {
-      root, flames: [layer(0xff3a0e, 0.8), layer(0xff7a1e, 0.7), layer(0xffd24a, 0.6)],
+      root, renderV3, flames, flame,
       glow, scar, scarUsed: 0,
       smoke, spuff: new Array(MAXSMOKE).fill(null), sFree: [],
       embers, epuff: new Array(MAXEMBER).fill(null), eFree: [],
@@ -192,11 +449,13 @@
   function disposeFX() {
     if (!FX) return;
     const kill = (m) => {
+      if (!m) return;
       if (m.parent) m.parent.remove(m);
       if (m.geometry) m.geometry.dispose();
+      if (m.material && m.material.map && m.material.map._wildfireTexture) m.material.map.dispose();
       if (m.material && m.material.dispose) m.material.dispose();
     };
-    FX.flames.forEach(kill); kill(FX.glow); kill(FX.scar); kill(FX.smoke); kill(FX.embers);
+    FX.flames.forEach(kill); kill(FX.flame); kill(FX.glow); kill(FX.scar); kill(FX.smoke); kill(FX.embers);
     FX = null;
   }
   // the FX root died with the arena (or the transient sweep took it): drop refs
@@ -227,7 +486,7 @@
       vx: F.wx * drift * (0.4 + jit() * 0.4), vz: F.wz * drift * (0.4 + jit() * 0.4),
       vy: surface ? 0.15 + jit() * 0.25 : 3.2 + jit() * 2.8, cw,
       age: 0, life: surface ? 9 + jit() * 5 : 5 + jit() * 3.5,
-      surface, dark: dense ? 0.75 + jit() * 0.25 : 0.5 + jit() * 0.3,
+      surface, dense: !!dense, dark: dense ? 0.75 + jit() * 0.25 : 0.5 + jit() * 0.3,
     };
   }
   function spawnEmber(x, y, z, vx, vy, vz, life) {
@@ -281,9 +540,18 @@
     stats.ignitions++;
     if (why === "spot") stats.spotFires++;
     if (t.foliage && t.foliage.material) {
-      // a deep flame red, not a yellow lamp — the bright part is the FLAMES
-      t.foliage.material.color.setHex(0xc23c0c);
-      if (t.foliage.material.emissive) { t.foliage.material.emissive.setHex(0xff3808); t.foliage.material.emissiveIntensity = 0.5; }
+      // Fuel is dark behind fire. Painting the canopy orange turned every
+      // burning crown into a luminous cube; the shader tongues own the light.
+      const v3 = CBZ.CONFIG.WILDFIRE_RENDER_V3 !== false;
+      // Kill the diffuse almost entirely: whatever the sun does to a lit box
+      // is exactly the `slab` look we are trying to lose. The crown's colour
+      // is EMISSIVE, which Lambert adds flat across every face, so a torching
+      // canopy glows evenly from within instead of showing a shaded top.
+      t.foliage.material.color.setHex(v3 ? 0x0c0705 : 0xc23c0c);
+      if (t.foliage.material.emissive) {
+        t.foliage.material.emissive.setHex(v3 ? 0x5a1c04 : 0xff3808);
+        t.foliage.material.emissiveIntensity = v3 ? 0.40 : 0.5;
+      }
     }
     addScar(t.x, t.z, 1.6 + rnd() * 0.8);
     if (CBZ.sfxAt) CBZ.sfxAt("fire", t.x, t.z); else if (CBZ.sfx) CBZ.sfx("fire");
@@ -293,7 +561,10 @@
     t.burning = 0; t.burnt = true; t._wfCharred = true;
     if (t.foliage) {
       if (t.foliage.material) { t.foliage.material.color.setHex(0x181008); if (t.foliage.material.emissive) { t.foliage.material.emissive.setHex(0x000000); } }
-      t.foliage.scale.set(0.72, 0.5, 0.72);    // the canopy is CONSUMED, not painted
+      // almost all crown fuel is gone — a charred clump on a bare trunk, but
+      // still a clump, not a pancake stuck to the top of the stick.
+      const v3burnt = CBZ.CONFIG.WILDFIRE_RENDER_V3 !== false;
+      t.foliage.scale.set(v3burnt ? 0.34 : 0.72, v3burnt ? 0.28 : 0.5, v3burnt ? 0.34 : 0.72);
     }
     if (t.trunk && t.trunk.material) t.trunk.material.color.setHex(0x140d08);
     // the ground under it stays black — and PATCHY, the way a burn actually
@@ -604,33 +875,92 @@
     if (!fxAlive()) return;
     F.t += dt;
     const B = F.burningList;
+    const pointScale = Math.max(1, ((CBZ.renderer && CBZ.renderer.domElement && CBZ.renderer.domElement.height) || 640) * 0.5);
+    if (FX.renderV3) {
+      FX.flame.material.uniforms.uTime.value = F.t;
+      FX.flame.material.uniforms.uScale.value = pointScale;
+      FX.flame.material.uniforms.uWind.value.set(F.wx, F.wz);
+      FX.smoke.material.uniforms.uTime.value = F.t;
+      FX.smoke.material.uniforms.uScale.value = pointScale;
+      FX.smoke.material.uniforms.uWind.value.set(F.wx, F.wz);
+      FX.embers.material.uniforms.uScale.value = pointScale;
+    }
 
-    // flames + glow: one matrix write per layer per torching tree. The
-    // flames WRAP THE CROWN — a torching conifer burns at its canopy, so the
-    // wide base cone sits at the crown's bottom and the bright tip licks
-    // clear above it. Flames at the trunk base behind a glowing box read as
-    // a street lamp (pass 3 of the storyboard proved it).
+    // Flames WRAP THE CROWN. V3 writes three soft GPU tongues into ONE point
+    // buffer; the revert road writes the old three cone instance buffers.
     const n = Math.min(MAXFLAME, B.length);
-    const L = FX.flames;
-    // per-layer: cone base radius and height offset RELATIVE to the crown base
-    const layerSpec = [
-      { s: 2.6, y: -0.8 }, { s: 1.8, y: 0.6 }, { s: 1.0, y: 2.0 },
-    ];
-    for (let k = 0; k < 3; k++) {
-      const mesh = L[k], spec = layerSpec[k];
+    if (FX.renderV3) {
+      const fg = FX.flame.geometry;
+      const fp = fg.attributes.position.array;
+      const fs = fg.attributes.aSize.array;
+      const fa = fg.attributes.aAlpha.array;
+      const fseed = fg.attributes.aSeed.array;
+      // A RING around the trunk, not a line across it. Three tongues on one
+      // axis all hid behind the crown from half the compass; spaced 120° apart
+      // one is always on the camera's side, so the box reads as fuel INSIDE
+      // the fire rather than a box with fire behind it.
+      // `rad` is a FRACTION of the crown's own half-width, not metres. The
+      // canopy shrinks as its fuel goes, so a fixed radius walked the outer
+      // tongues off the tree and left them burning in mid-air.
+      const spec = [
+        { size: 7.2, rad: 0.0, down: 0.0 },
+        { size: 5.8, rad: 0.85, down: 0.25 },
+        { size: 4.6, rad: 0.85, down: 0.55 },
+      ];
       for (let i = 0; i < n; i++) {
         const t = B[i];
         const ph = t._wfPh != null ? t._wfPh : 1;
-        const crownBase = (t.foliage ? t.foliage.position.y - 1.3 : ground(t.x, t.z) + 2);
-        const f = (0.75 + 0.35 * Math.sin(F.t * 12 + t.x + k * 2.1)) * (0.35 + 0.75 * ph);
-        dummy.position.set(t.x, crownBase + spec.y, t.z);
-        dummy.rotation.set(0, F.t * (0.6 + k * 0.3) + t.z, 0);
-        dummy.scale.set(spec.s * (1 + 0.12 * Math.sin(F.t * 17 + k)), spec.s * f, spec.s * (1 + 0.12 * Math.cos(F.t * 15 + k)));
-        dummy.updateMatrix();
-        mesh.setMatrixAt(i, dummy.matrix);
+        if (t.foliage) {
+          // Shrink the canopy UNIFORMLY as its fuel goes. Squashing Y harder
+          // than XZ turned a consumed crown into a wide flat slab; starting at
+          // 1.0 also removes the pop the old 0.80 first frame put on ignition.
+          const fuel = Math.max(0, Math.min(1, t.burning / Math.max(0.01, t._wfFuel)));
+          const sc = 0.55 + fuel * 0.45;
+          t.foliage.scale.set(sc, sc, sc);
+        }
+        const crownBase = (t.foliage ? t.foliage.position.y - 1.4 : ground(t.x, t.z) + 2);
+        const ring = t.x * 0.7 + t.z * 1.3;   // stable per-tree ring orientation
+        const gp = t.foliage && t.foliage.geometry && t.foliage.geometry.parameters;
+        const crownR = gp ? (gp.width * t.foliage.scale.x) / 2 : 1.2;
+        for (let k = 0; k < 3; k++) {
+          const j = i * 3 + k, s0 = spec[k];
+          const flicker = 0.9 + 0.1 * Math.sin(F.t * (9 + k * 1.7) + t.x * 0.31 + t.z * 0.17);
+          const size = s0.size * (0.55 + 0.45 * ph) * flicker;
+          const a = ring + k * 2.0944;
+          fp[j * 3] = t.x + Math.cos(a) * s0.rad * crownR + F.wx * s0.down;
+          fp[j * 3 + 1] = crownBase + size * 0.43 + k * 0.18;
+          fp[j * 3 + 2] = t.z + Math.sin(a) * s0.rad * crownR + F.wz * s0.down;
+          fs[j] = size;
+          fa[j] = Math.min(1, ph * 1.8) * (0.70 + k * 0.04);
+          fseed[j] = ((t.x * 0.013 + t.z * 0.017 + k * 0.271) % 1 + 1) % 1;
+        }
       }
-      mesh.count = n;
-      mesh.instanceMatrix.needsUpdate = true;
+      fg.setDrawRange(0, n * 3);
+      fg.attributes.position.needsUpdate = true;
+      fg.attributes.aSize.needsUpdate = true;
+      fg.attributes.aAlpha.needsUpdate = true;
+      fg.attributes.aSeed.needsUpdate = true;
+    } else {
+      const L = FX.flames;
+      const layerSpec = [
+        { s: 2.6, y: -0.8 }, { s: 1.8, y: 0.6 }, { s: 1.0, y: 2.0 },
+      ];
+      for (let k = 0; k < 3; k++) {
+        const mesh = L[k], spec = layerSpec[k];
+        for (let i = 0; i < n; i++) {
+          const t = B[i];
+          const ph = t._wfPh != null ? t._wfPh : 1;
+          const crownBase = (t.foliage ? t.foliage.position.y - 1.3 : ground(t.x, t.z) + 2);
+          const f = (0.75 + 0.35 * Math.sin(F.t * 12 + t.x + k * 2.1)) * (0.35 + 0.75 * ph);
+          dummy.position.set(t.x, crownBase + spec.y, t.z);
+          dummy.rotation.set(0, F.t * (0.6 + k * 0.3) + t.z, 0);
+          dummy.scale.set(spec.s * (1 + 0.12 * Math.sin(F.t * 17 + k)), spec.s * f, spec.s * (1 + 0.12 * Math.cos(F.t * 15 + k)));
+          dummy.updateMatrix();
+          mesh.setMatrixAt(i, dummy.matrix);
+        }
+        mesh.count = n;
+        mesh.instanceMatrix.needsUpdate = true;
+      }
     }
     for (let i = 0; i < n; i++) {
       const t = B[i];
@@ -647,13 +977,19 @@
 
     // smoke: rise, bend downwind, lighten, die
     const sp = FX.smoke.geometry.attributes.position.array;
-    const sc = FX.smoke.geometry.attributes.color.array;
+    const smokeColor = FX.renderV3 ? FX.smoke.geometry.attributes.aColor : FX.smoke.geometry.attributes.color;
+    const sc = smokeColor.array;
+    const ss = FX.renderV3 ? FX.smoke.geometry.attributes.aSize.array : null;
+    const sa = FX.renderV3 ? FX.smoke.geometry.attributes.aAlpha.array : null;
+    const ssurf = FX.renderV3 ? FX.smoke.geometry.attributes.aSurface.array : null;
+    const shot = FX.renderV3 ? FX.smoke.geometry.attributes.aHot.array : null;
     for (let i = 0; i < MAXSMOKE; i++) {
       const p = FX.spuff[i]; if (!p) continue;
       p.age += dt;
       if (p.age >= p.life) {
         FX.spuff[i] = null; FX.sFree.push(i);
         sp[i * 3] = -9999; sp[i * 3 + 1] = -9999; sp[i * 3 + 2] = -9999;
+        if (FX.renderV3) { ss[i] = 0; sa[i] = 0; shot[i] = 0; }
         continue;
       }
       const u = p.age / p.life;
@@ -685,24 +1021,43 @@
       // SMOKE-dark; a puff must never read as a white pane
       const g = 0.09 + 0.06 * (1 - p.dark) + 0.26 * u;
       sc[i * 3] = g * 1.12; sc[i * 3 + 1] = g * 0.98; sc[i * 3 + 2] = g * 0.84;
+      if (FX.renderV3) {
+        const fadeIn = Math.min(1, u / 0.08);
+        const fadeOut = u < 0.58 ? 1 : Math.max(0, (1 - u) / 0.42);
+        const base = p.surface ? 5.2 : 4.1;
+        ss[i] = base * (0.74 + u * (p.surface ? 1.0 : 1.2)) * (0.93 + 0.09 * Math.sin(i * 1.7));
+        sa[i] = (p.surface ? 0.22 : 0.28) * fadeIn * fadeOut * (0.75 + p.dark * 0.25);
+        ssurf[i] = p.surface ? 1 : 0;
+        shot[i] = (p.dense ? 1 : 0.35) * Math.max(0, 1 - u * 2.4);
+      }
     }
     FX.smoke.geometry.attributes.position.needsUpdate = true;
-    FX.smoke.geometry.attributes.color.needsUpdate = true;
+    smokeColor.needsUpdate = true;
+    if (FX.renderV3) {
+      FX.smoke.geometry.attributes.aSize.needsUpdate = true;
+      FX.smoke.geometry.attributes.aAlpha.needsUpdate = true;
+      FX.smoke.geometry.attributes.aSurface.needsUpdate = true;
+      FX.smoke.geometry.attributes.aHot.needsUpdate = true;
+    }
 
     const ep = FX.embers.geometry.attributes.position.array;
+    const ea = FX.renderV3 ? FX.embers.geometry.attributes.aAlpha.array : null;
     for (let i = 0; i < MAXEMBER; i++) {
       const p = FX.epuff[i]; if (!p) continue;
       p.age += dt;
       if (p.age >= p.life) {
         FX.epuff[i] = null; FX.eFree.push(i);
         ep[i * 3] = -9999; ep[i * 3 + 1] = -9999; ep[i * 3 + 2] = -9999;
+        if (FX.renderV3) ea[i] = 0;
         continue;
       }
       p.vy -= 1.2 * dt;                      // embers arc over and fall
       p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
       ep[i * 3] = p.x; ep[i * 3 + 1] = p.y; ep[i * 3 + 2] = p.z;
+      if (FX.renderV3) ea[i] = Math.max(0, 1 - p.age / p.life);
     }
     FX.embers.geometry.attributes.position.needsUpdate = true;
+    if (FX.renderV3) FX.embers.geometry.attributes.aAlpha.needsUpdate = true;
 
     // after stop(): the plume thins out instead of blinking off
     if (!F.live && F.smokeLinger > 0) F.smokeLinger -= dt;
@@ -743,7 +1098,11 @@
     }
     F.burningList.length = 0;
     F.spots.length = 0; F.smoulders.length = 0;
-    if (fxAlive()) { FX.flames.forEach((m) => { m.count = 0; }); FX.glow.count = 0; }
+    if (fxAlive()) {
+      FX.flames.forEach((m) => { m.count = 0; });
+      if (FX.flame) FX.flame.geometry.setDrawRange(0, 0);
+      FX.glow.count = 0;
+    }
   }
   function hardStop() {
     F.live = false; F.burningList.length = 0; F.spots.length = 0; F.smoulders.length = 0;
@@ -834,8 +1193,24 @@
         escapeAngleDeg = Math.round(Math.acos(Math.abs(dot)) * 180 / Math.PI);
       }
     }
+    let smokeAlphaMax = 0, smokeSizeMax = 0, smokeBufferLive = 0, pointSizeMaxPx = 0;
+    if (FX && FX.renderV3 && FX.smoke) {
+      const aa = FX.smoke.geometry.attributes.aAlpha.array;
+      const ss = FX.smoke.geometry.attributes.aSize.array;
+      const pp = FX.smoke.geometry.attributes.position.array;
+      for (let i = 0; i < aa.length; i++) {
+        if (aa[i] > smokeAlphaMax) smokeAlphaMax = aa[i];
+        if (ss[i] > smokeSizeMax) smokeSizeMax = ss[i];
+        if (pp[i * 3] > -9000 && aa[i] > 0) smokeBufferLive++;
+      }
+      try {
+        const gl = CBZ.renderer.getContext();
+        pointSizeMaxPx = gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)[1] || 0;
+      } catch (_) {}
+    }
     return {
       v2: !!(CBZ.CONFIG.WILDFIRE_V2 !== false),
+      renderV3: !!(FX && FX.renderV3),
       treesTotal: tr.length, treesBurning: burning, treesBurnt: burnt,
       ignitions: stats.ignitions,
       spotLaunched: stats.spotLaunched, spotFires: stats.spotFires, spotMaxM: stats.spotMaxM,
@@ -846,6 +1221,10 @@
       // only a claim when the module is actually running the fire
       plumeLenM: (CBZ.CONFIG.WILDFIRE_V2 !== false && F.seed) ? Math.round(plumeLen()) : 0,
       smokePuffsLive: FX ? MAXSMOKE - FX.sFree.length : 0,
+      smokeBufferLive,
+      smokeAlphaMax: +smokeAlphaMax.toFixed(3), smokeSizeMax: +smokeSizeMax.toFixed(2),
+      flameSpritesLive: FX && FX.renderV3 ? burning * 3 : 0,
+      pointSizeMaxPx,
       spotsInFlight: F.spots.length,
       escapeAngleDeg,
       windX: +F.wx.toFixed(2), windZ: +F.wz.toFixed(2),

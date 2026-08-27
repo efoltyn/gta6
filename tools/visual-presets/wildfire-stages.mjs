@@ -62,7 +62,7 @@ const subjects = [
   { id: "caught", requireFire: true, label: "Caught in the smoke",
     focus: "A person deep in the plume corridor. The choke damage that is killing them is the event's real killer — most wildfire deaths are smoke, not flame, and it carries its own killfeed cause ('suffocated in the wildfire smoke'). Before: smoke is cosmetic; standing here costs nothing until a flame touches you.",
     act: { atSecs: 14 },
-    cam: { aim: "victim", back: 9, up: 2.6, look: 1.2 } },
+    cam: { aim: "victim", back: 3.2, up: 1.8, look: 1.7 } },
 
   { id: "scar-air", requireFire: true, label: "The burn scar, from the air",
     focus: "The event is over. After: a black scar runs downwind across the island — charred ground under every burnt tree and every ember strike, consumed crowns, a green crosswind edge. Before: burnOut() deleted each ground scorch as it happened and end() disposed the rest, so the aftermath of a wildfire is a green island with some black boxes.",
@@ -79,6 +79,17 @@ async function stageFire(input) {
   const CBZ = window.CBZ;
   const T = window.THREE;
   if (!CBZ || !T) return { ok: false, missing: "CBZ/THREE" };
+  // `?seed` owns the world and disaster streams, but ambient actor/FX code
+  // still uses Math.random. Pin that last stream before Survival is started so
+  // a rendering-only A/B gets the same cast motion and the same smoke samples.
+  if (!window.__fireVisualRandomPinned) {
+    window.__fireVisualRandomPinned = true;
+    let visualSeed = 0x57464350;
+    Math.random = function () {
+      visualSeed = (Math.imul(visualSeed, 1664525) + 1013904223) >>> 0;
+      return visualSeed / 4294967296;
+    };
+  }
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const until = async (test, budgetMs, stepMs) => {
     const deadline = Date.now() + budgetMs;
@@ -124,7 +135,12 @@ async function stageFire(input) {
     overlay.innerHTML = "<div data-side></div><div data-name></div><div data-focus></div><div data-perf></div><div data-source></div>";
     document.body.appendChild(overlay);
 
-    S = window.__fireSeq = { overlay, cam: null, t0: null, origin: null };
+    let simSeed = 0x57465349;
+    const simRandom = function () {
+      simSeed = (Math.imul(simSeed, 1664525) + 1013904223) >>> 0;
+      return simSeed / 4294967296;
+    };
+    S = window.__fireSeq = { overlay, cam: null, t0: null, origin: null, simRandom };
     window.__cbzVisualCompare = {
       render() { try { CBZ.renderer.render(CBZ.scene, CBZ.camera); } catch (_) {} },
     };
@@ -140,22 +156,48 @@ async function stageFire(input) {
   let ticks = 0, totalMs = 0, maxMs = 0, over33 = 0;
   const step = (secs) => {
     const n = Math.max(0, Math.round(secs * 60));
-    for (let i = 0; i < n; i++) {
-      CBZ.hitstop = 0; CBZ.slowmo = 0;
-      const t0 = performance.now();
-      CBZ.stepSim(1 / 60);
-      const ms = performance.now() - t0;
-      ticks++; totalMs += ms;
-      if (ms > maxMs) maxMs = ms;
-      if (ms > 33) over33++;
-      heal();
-      // pin the fire's ORIGIN the first frame anything burns — every later
-      // "how far did it run" measurement is relative to this, on both builds
-      if (!S.origin) {
-        const tr = (CBZ.surv && CBZ.surv.arena && CBZ.surv.arena.flammable) || [];
-        for (const t of tr) if (t.burning > 0) { S.origin = { x: t.x, z: t.z }; break; }
+    // WebGL may allocate driver-side objects on first render, and Three's UUID
+    // allocator uses Math.random. Keep those draws on the ambient stream and
+    // give deterministic simulation steps their own stream; a new shader can
+    // no longer change who later walks into smoke.
+    const ambientRandom = Math.random;
+    Math.random = S.simRandom;
+    try {
+      for (let i = 0; i < n; i++) {
+        CBZ.hitstop = 0; CBZ.slowmo = 0;
+        const t0 = performance.now();
+        CBZ.stepSim(1 / 60);
+        const ms = performance.now() - t0;
+        ticks++; totalMs += ms;
+        if (ms > maxMs) maxMs = ms;
+        if (ms > 33) over33++;
+        heal();
+        // pin the fire's ORIGIN the first frame anything burns — every later
+        // "how far did it run" measurement is relative to this, on both builds
+        if (!S.origin) {
+          const tr = (CBZ.surv && CBZ.surv.arena && CBZ.surv.arena.flammable) || [];
+          for (const t of tr) if (t.burning > 0) { S.origin = { x: t.x, z: t.z }; break; }
+        }
       }
-    }
+    } finally { Math.random = ambientRandom; }
+  };
+  // Film-strip captures advance this frozen deterministic clock, not wall
+  // time, so both rendering roads show the same fire seconds in every frame.
+  window.__cbzVisualCompare.advance = function (secs) {
+    const camera = CBZ.camera;
+    const pos = camera.position.clone();
+    const quat = camera.quaternion.clone();
+    const projection = {
+      fov: camera.fov, near: camera.near, far: camera.far,
+      aspect: camera.aspect, zoom: camera.zoom,
+    };
+    step(Number(secs) || 0);
+    camera.position.copy(pos); camera.quaternion.copy(quat);
+    camera.fov = projection.fov; camera.near = projection.near;
+    camera.far = projection.far; camera.aspect = projection.aspect;
+    camera.zoom = projection.zoom; camera.updateProjectionMatrix();
+    if (typeof CBZ.skySync === "function") CBZ.skySync();
+    try { CBZ.renderer.render(CBZ.scene, CBZ.camera); } catch (_) {}
   };
   const stepUntilState = (want, budget) => {
     let guard = Math.round((budget || 30) * 10);
@@ -364,8 +406,14 @@ async function stageFire(input) {
     // toward the fire: the corridor's puffs stack up in depth exactly the
     // way the smoke reads to a person standing inside it (a crosswind
     // camera spreads the same puffs thin and photographs clear air)
-    eye = solveEye(a, w.x + perp.x * 0.25, w.z + perp.z * 0.25, cam.back || 13, cam.up || 2.8, cam.look || 2.4);
-    look = { x: a.x - w.x * 4, y: gy(a.x, a.z) + (cam.look || 2.4), z: a.z - w.z * 4 };
+    // Put the lens IN the measured puff neighbourhood. The old 9-13 m solved
+    // tripod photographed a clean street while truthfully reporting dozens of
+    // puffs around the victim — spatially correct metadata, failed picture.
+    const back = cam.back || 3.2;
+    const ex = a.x + w.x * back + perp.x * 0.6;
+    const ez = a.z + w.z * back + perp.z * 0.6;
+    eye = { x: ex, y: gy(ex, ez) + (cam.up || 1.8), z: ez };
+    look = { x: a.x - w.x * 5, y: gy(a.x, a.z) + (cam.look || 1.7), z: a.z - w.z * 5 };
     const sNow = best ? exposure(best.pos) / 40 : 0;
     let dbg = "";
     try { if (best && CBZ.wildfire && CBZ.wildfire.puffStats) { const ps = CBZ.wildfire.puffStats(best.pos.x, best.pos.z); dbg = " · " + ps.near + " puffs around them"; } } catch (_) {}
@@ -410,6 +458,18 @@ async function stageFire(input) {
   camera.position.set(eye.x, eye.y, eye.z);
   camera.lookAt(look.x, look.y, look.z);
   camera.updateProjectionMatrix();
+  // Survival normally tightens fog around the PLAYER. These captures use a
+  // detached evidence camera, so reproduce that same live smokeAt(camera)
+  // response for the first-person caught beat or the remote lens lies about
+  // visibility while the victim beside it is choking.
+  if (cam.aim === "victim" && CBZ.scene.fog && CBZ.wildfire && CBZ.wildfire.smokeAt) {
+    const localSmoke = Math.min(1, CBZ.wildfire.smokeAt(eye.x, eye.z));
+    if (localSmoke > 0.15) {
+      CBZ.scene.fog.color.setHex(0x4a2814);
+      CBZ.scene.fog.near = 16 - 11 * localSmoke;
+      CBZ.scene.fog.far = 145 - 100 * localSmoke;
+    }
+  }
   if (typeof CBZ.skySync === "function") CBZ.skySync();
   else {
     const rig = CBZ.skyDome && CBZ.skyDome.parent;
@@ -449,6 +509,7 @@ async function stageFire(input) {
   q("source").style.cssText = "position:absolute;bottom:10px;left:27px;color:#9cb0bf;font:10px ui-monospace,SFMono-Regular,Menlo,monospace";
 
   const metrics = {
+    renderV3: wa.renderV3 ? 1 : 0,
     treesBurnt: burnt.length,
     fireRunM: Math.round(fireRunM),
     spotFires: Number(wa.spotFires || 0),
@@ -459,6 +520,12 @@ async function stageFire(input) {
     escapeAngleDeg: wa.escapeAngleDeg == null ? null : Number(wa.escapeAngleDeg),
     scarM2: Number(wa.scarM2 || 0),
     smokeAheadM: Number(wa.plumeLenM || 0),
+    smokePuffsLive: Number(wa.smokePuffsLive || 0),
+    smokeBufferLive: Number(wa.smokeBufferLive || 0),
+    smokeAlphaMax: Number(wa.smokeAlphaMax || 0),
+    smokeSizeMax: Number(wa.smokeSizeMax || 0),
+    flameSpritesLive: Number(wa.flameSpritesLive || 0),
+    pointSizeMaxPx: Number(wa.pointSizeMaxPx || 0),
     tickAvgMs: ticks ? Number((totalMs / ticks).toFixed(2)) : 0,
     tickMaxMs: Number(maxMs.toFixed(1)),
     ticksOver33: over33,

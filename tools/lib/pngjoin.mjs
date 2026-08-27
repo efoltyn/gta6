@@ -261,36 +261,40 @@ export function stripPNGs(frames, opts = {}) {
   return encodePNG(out);
 }
 
-/** Stitch two PNG buffers into one labelled side-by-side PNG buffer.
-    Different-sized sides are allowed and are top-left aligned in a common
-    cell — a viewport change between the two builds is itself a finding, and
-    silently rescaling one side to match would hide it. */
+/** Stitch two PNG buffers into one labelled PNG buffer. With both inputs this
+    is the usual side-by-side comparison. With one input it is a true one-cell
+    preview — never a misleading empty BEFORE/AFTER half. Different-sized
+    sides are top-left aligned in a common cell; a viewport change is itself a
+    finding, and silently rescaling one side to match would hide it. */
 export function joinPNGs(beforeBuf, afterBuf, opts = {}) {
   const BAR = 26, GAP = 8, PAD = 6;
   const INK = [235, 238, 242], BG = [16, 19, 24], RULE = [70, 78, 90];
   const b = beforeBuf ? decodePNG(beforeBuf) : null;
   const a = afterBuf ? decodePNG(afterBuf) : null;
   if (!b && !a) throw new Error("joinPNGs: both sides missing");
+  const single = !b || !a;
   const cellW = Math.max(b ? b.width : 0, a ? a.width : 0);
   const cellH = Math.max(b ? b.height : 0, a ? a.height : 0);
-  const W = PAD * 2 + cellW * 2 + GAP;
+  const W = PAD * 2 + cellW * (single ? 1 : 2) + (single ? 0 : GAP);
   const H = PAD * 2 + BAR + cellH;
   const out = blank(W, H, BG);
 
   if (b) blit(out, b, PAD, PAD + BAR);
-  if (a) blit(out, a, PAD + cellW + GAP, PAD + BAR);
+  if (a) blit(out, a, single ? PAD : PAD + cellW + GAP, PAD + BAR);
 
   // the divider, so the eye lands on the seam and not on a picture edge
-  for (let y = PAD + BAR; y < H - PAD; y++) {
-    for (let x = PAD + cellW + 1; x < PAD + cellW + GAP - 1; x++) {
-      const d = (y * W + x) * 4;
-      out.data[d] = RULE[0]; out.data[d + 1] = RULE[1]; out.data[d + 2] = RULE[2];
+  if (!single) {
+    for (let y = PAD + BAR; y < H - PAD; y++) {
+      for (let x = PAD + cellW + 1; x < PAD + cellW + GAP - 1; x++) {
+        const d = (y * W + x) * 4;
+        out.data[d] = RULE[0]; out.data[d + 1] = RULE[1]; out.data[d + 2] = RULE[2];
+      }
     }
   }
   const left = "BEFORE" + (opts.beforeLabel ? "  " + opts.beforeLabel : "");
   const right = "AFTER" + (opts.afterLabel ? "  " + opts.afterLabel : "");
-  drawText(out, left, PAD + 2, PAD + 6, 2, INK);
-  drawText(out, right, PAD + cellW + GAP + 2, PAD + 6, 2, INK);
+  if (b) drawText(out, left, PAD + 2, PAD + 6, 2, INK);
+  if (a) drawText(out, right, single ? PAD + 2 : PAD + cellW + GAP + 2, PAD + 6, 2, INK);
   if (opts.title) {
     const tw = String(opts.title).length * 12;
     drawText(out, opts.title, Math.max(PAD, W - PAD - tw), PAD + 6, 2, INK);
