@@ -130,10 +130,47 @@
   rubbleMat._shared = true;
   const rubbleMat2 = new THREE.MeshLambertMaterial({ color: 0x554d44 }); // shadowed lumps in the heap
   rubbleMat2._shared = true;
-  // an irregular-ish concrete lump geo for heap pieces (a stretched box reads as
-  // a broken slab fragment better than the small flying-chunk box).
+  // Freshly torn concrete is lighter than the settled street heap. Keeping a
+  // separate shared pair lets the broken load path read against a dark room:
+  // pale aggregate on the new face, cooler grey on the undersides/shadows.
+  const fractureMat = new THREE.MeshLambertMaterial({ color: 0x8b8982 });
+  fractureMat._shared = true;
+  const fractureMat2 = new THREE.MeshLambertMaterial({ color: 0x666660 });
+  fractureMat2._shared = true;
+  // Legacy rubble was still a literal box. Keep it for the flag-off baseline,
+  // but build one shared angular reinforced-concrete fragment for the real path:
+  // an uneven six-sided slab prism, not a rock sphere and not masonry blocks.
   const rubbleGeo = new THREE.BoxGeometry(0.55, 0.4, 0.7);
   rubbleGeo._shared = true;
+  function jaggedSlabGeometry() {
+    const ring = [
+      [-0.46, -0.30], [-0.14, -0.52], [0.43, -0.34],
+      [0.48, 0.24], [0.08, 0.51], [-0.42, 0.31],
+    ];
+    const pos = [];
+    for (let layer = 0; layer < 2; layer++) {
+      const y = layer ? -0.16 : 0.16;
+      for (let i = 0; i < ring.length; i++) {
+        const p = ring[i];
+        pos.push(p[0] + (layer ? (i % 2 ? 0.025 : -0.018) : 0), y, p[1]);
+      }
+    }
+    const idx = [];
+    for (let i = 1; i < 5; i++) idx.push(0, i, i + 1);       // top
+    for (let i = 1; i < 5; i++) idx.push(6, 6 + i + 1, 6 + i); // underside
+    for (let i = 0; i < 6; i++) {
+      const n = (i + 1) % 6;
+      idx.push(i, 6 + i, n, n, 6 + i, 6 + n);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx); geo.computeVertexNormals(); geo.computeBoundingBox();
+    geo._shared = true;
+    return geo;
+  }
+  const jaggedSlabGeo = jaggedSlabGeometry();
+  if (CBZ.CONFIG.STRUCT_RPG_RUIN_V2 == null) CBZ.CONFIG.STRUCT_RPG_RUIN_V2 = true;
+  function reinforcedRuinOn() { return CBZ.CONFIG.STRUCT_RPG_RUIN_V2 !== false; }
   // exposed REBAR: a thin dark steel bar. One shared thin box (cheaper than a
   // cylinder, and at this gauge the silhouette is identical) bent into an L by a
   // child segment so it dangles + hooks like blown reinforcement.
@@ -143,6 +180,9 @@
   rebarGeo._shared = true;
   const rebar = [];                 // [{group, t, hold}] dangling-rebar props
   const REBAR_CAP = 28;             // bars across all live wounds
+  const ruinFrames = [];            // persistent broken slab/rebar frames
+  const RUIN_FRAME_CAP = 10;
+  const ruinStats = { events: 0, pieces: 0, bars: 0 };
 
   // ---- POOLED point-burst ring (CBZ.fxPool, default ON) ----------------------
   // THE EXPLOSION ALLOCATION SPIKE: the old pointBurst minted a fresh
@@ -1378,9 +1418,11 @@
          is what a slab actually breaks into, and the pile gets its bulk from
          the stacking above instead of from four enormous boxes. */
       const sc = Math.min(1.15, (big ? 1.1 + rng() * 0.7 : 0.55 + rng() * 0.65) * Math.min(1.25, size));
-      const mesh = new THREE.Mesh(big ? rubbleGeo : chunkGeo, rng() < 0.5 ? rubbleMat : rubbleMat2);
-      mesh.scale.set(sc, sc * (0.6 + rng() * 0.5), sc * (0.8 + rng() * 0.5));
-      const hh = (big ? 0.2 : CHUNK_HH) * sc;
+      const geo = reinforcedRuinOn() ? jaggedSlabGeo : (big ? rubbleGeo : chunkGeo);
+      const mesh = new THREE.Mesh(geo, rng() < 0.5 ? rubbleMat : rubbleMat2);
+      const sy = sc * (0.6 + rng() * 0.5);
+      mesh.scale.set(sc, sy, sc * (0.8 + rng() * 0.5));
+      const hh = reinforcedRuinOn() ? 0.16 * sy : (big ? 0.2 : CHUNK_HH) * sc;
       // SEAT IT ON WHAT IS ALREADY THERE. The cell's current top, or the ground
       // if this is the first piece to land here — never on air.
       const gy = floorAt(px, pz);
@@ -1444,6 +1486,88 @@
     }
   }
 
+  // ---- THE BROKEN LOAD PATH ------------------------------------------------
+  // The carve primitive correctly owns the real opening/colliders, but its
+  // remnant boxes necessarily leave a clean rectangular perimeter. This one
+  // bounded dressing group sits on THAT opening and makes the construction
+  // legible: irregular header/side teeth, a partly detached floor slab and
+  // reinforcement pulled out of the concrete. It is persistent physical
+  // geometry, never a soot/decal substitute, and the cap evicts the oldest
+  // distant history just like the debris population above.
+  function reinforcedRuinFrame(cx, cz, nx, nz, width, top, bottom, power) {
+    if (!reinforcedRuinOn()) return null;
+    while (ruinFrames.length >= RUIN_FRAME_CAP) {
+      const old = ruinFrames.shift();
+      if (old && old.group && old.group.parent) old.group.parent.remove(old.group);
+    }
+    const g = new THREE.Group();
+    g.position.set(cx + nx * 0.10, 0, cz + nz * 0.10);
+    g.rotation.y = Math.atan2(nx, nz);
+    const h = Math.max(1.2, top - bottom);
+    const heavy = power >= 2;
+    let pieces = 0, bars = 0;
+    const slab = function (x, y, z, sx, sy, sz, rz, mat) {
+      const m = new THREE.Mesh(jaggedSlabGeo, mat || (rng() < 0.5 ? fractureMat : fractureMat2));
+      m.position.set(x, y, z); m.scale.set(sx, sy, sz);
+      m.rotation.set((rng() - 0.5) * 0.10, (rng() - 0.5) * 0.16, rz || 0);
+      m.castShadow = true; m.receiveShadow = true; g.add(m); pieces++;
+      return m;
+    };
+    // Three unequal header teeth overlap the machined opening edge, destroying
+    // the rectangle silhouette without closing the room-sized breach again.
+    const spans = [0.31, 0.37, 0.32];
+    let cursor = -width * 0.5;
+    for (let i = 0; i < spans.length; i++) {
+      const span = width * spans[i];
+      slab(cursor + span * 0.5, top - 0.10 - (i === 1 ? 0.10 : 0), 0,
+        span / 0.88, 0.68 + i * 0.12, 0.42 + (i % 2) * 0.16,
+        (i - 1) * 0.075, i === 1 ? fractureMat2 : fractureMat);
+      cursor += span;
+    }
+    // Torn jamb teeth: short, offset pieces rather than two pristine columns.
+    slab(-width * 0.50, top - h * 0.30, 0.02, 0.50, Math.min(3.8, h * 1.35), 0.48, -0.12);
+    slab(width * 0.50, bottom + h * 0.28, 0.05, 0.46, Math.min(3.2, h * 1.05), 0.52, 0.15, fractureMat2);
+    // A fractured floor lip is still attached at the facade but kicks outward;
+    // heavy ordnance also leaves one diagonal slab hung across the exposed bay.
+    const lip = slab(width * 0.05, bottom + 0.16, 0.62,
+      Math.max(1.5, width * 0.72) / 0.88, 0.72, heavy ? 2.15 : 1.55,
+      (rng() - 0.5) * 0.12, fractureMat);
+    lip.rotation.x = heavy ? -0.20 : -0.12;
+    if (heavy) {
+      const hung = slab(width * 0.12, top - h * 0.30, 0.22,
+        Math.max(1.2, width * 0.54) / 0.88, 0.84, 0.72, -0.42, fractureMat2);
+      hung.rotation.x = 0.10;
+    }
+    const bar = function (x, y, z, len, rx, rz) {
+      const m = new THREE.Mesh(rebarGeo, rebarMat);
+      m.position.set(x, y, z); m.scale.y = len;
+      m.rotation.x = rx || 0; m.rotation.z = rz || 0;
+      m.castShadow = true; g.add(m); bars++;
+    };
+    // Header and sill reinforcement projects out of the concrete; side bars
+    // cross the chipped jambs. Small deterministic misalignment prevents a
+    // decorative fence-grid read while retaining a clear reinforced frame.
+    const nHead = Math.min(6, Math.max(3, Math.round(width * 0.65)));
+    for (let i = 0; i < nHead; i++) {
+      const bx = -width * 0.40 + (nHead === 1 ? 0 : i / (nHead - 1)) * width * 0.80;
+      const len = (heavy ? 1.55 : 1.05) + rng() * 0.55;
+      bar(bx, top - 0.03, len * 0.45, len, Math.PI / 2 + (rng() - 0.5) * 0.16, (rng() - 0.5) * 0.08);
+    }
+    for (let i = 0; i < 3; i++) {
+      const len = 0.75 + rng() * 0.65;
+      bar(-width * 0.28 + i * width * 0.28, bottom + 0.10, len * 0.40, len,
+        Math.PI / 2 + (rng() - 0.5) * 0.24, (rng() - 0.5) * 0.14);
+    }
+    bar(-width * 0.50, top - h * 0.54, 0.28, Math.min(1.4, h * 0.36), 0, Math.PI / 2 + 0.12);
+    bar(width * 0.50, bottom + h * 0.52, 0.26, Math.min(1.2, h * 0.32), 0, Math.PI / 2 - 0.15);
+
+    scene.add(g);
+    const rec = { group: g, pieces: pieces, bars: bars };
+    ruinFrames.push(rec);
+    ruinStats.events++; ruinStats.pieces += pieces; ruinStats.bars += bars;
+    return rec;
+  }
+
   // ---- SOOT RING decal hugging the wall around the wound ----
   // NO-OP by default. The argument that brought this back was "the old floating
   // brown decal was fake because it hung in EMPTY AIR; now there is a real carved
@@ -1494,6 +1618,7 @@
     //     deck — a slab edge to tear from; ground-line blasts get fewer bars)
     const nBar = top > 2.2 ? Math.round(3 + width * 0.8) : 2;
     dangleRebar(x, top - 0.1, z, nx, nz, width, Math.min(8, nBar));
+    reinforcedRuinFrame(x, z, nx, nz, width, top, bottom, power);
 
     // (4) soot ring on the face — PURGED by default (FX_WALL_WOUNDS); the call
     //     stays so flipping the flag restores the old read exactly.
@@ -1896,6 +2021,22 @@
     };
   };
 
+  CBZ.cityRuinAudit = function () {
+    let livePieces = 0, liveBars = 0;
+    for (let i = 0; i < ruinFrames.length; i++) {
+      livePieces += ruinFrames[i].pieces || 0;
+      liveBars += ruinFrames[i].bars || 0;
+    }
+    let heapPieces = 0;
+    for (let i = 0; i < chunks.length; i++) if (chunks[i] && chunks[i].heap) heapPieces++;
+    return {
+      flag: reinforcedRuinOn(), frames: ruinFrames.length,
+      jaggedPieces: livePieces, exposedBars: liveBars,
+      heapPieces: heapPieces, events: ruinStats.events,
+      totalPieces: ruinStats.pieces, totalBars: ruinStats.bars,
+    };
+  };
+
   // fresh run → cold facades (fpsmode's reset path calls this with the pocks)
   CBZ.cityBlastFxReset = function () {
     wounds.length = 0;
@@ -1904,6 +2045,9 @@
     scars.length = 0;
     for (const rb of rebar) scene.remove(rb.group);   // shared geo/mats — remove only
     rebar.length = 0;
+    for (const rf of ruinFrames) if (rf.group && rf.group.parent) rf.group.parent.remove(rf.group);
+    ruinFrames.length = 0;
+    ruinStats.events = ruinStats.pieces = ruinStats.bars = 0;
     if (_collapseSeen) _collapseSeen.clear();          // fresh run → un-throttle collapses
   };
 
@@ -2111,7 +2255,7 @@
   // second linked zero).
   (function parkBlastMats() {
     const pg = new THREE.BoxGeometry(0.01, 0.01, 0.01); pg._shared = true;
-    const fam = [chunkMat, chunkMatHot, rubbleMat, rubbleMat2, rebarMat];
+    const fam = [chunkMat, chunkMatHot, rubbleMat, rubbleMat2, fractureMat, fractureMat2, rebarMat];
     for (let i = 0; i < fam.length; i++) {
       const m = new THREE.Mesh(pg, fam[i]); m.visible = false; scene.add(m);
     }

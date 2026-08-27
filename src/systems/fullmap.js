@@ -27,6 +27,7 @@
   const readout = document.getElementById("fullMapReadout");
   const placeHint = document.getElementById("fullMapPlaceHint");
   const clearBtn = document.getElementById("fullMapClear");
+  const launchBtn = document.getElementById("fullMapLaunch");
   const legend = document.getElementById("fullMapLegend");
   const zoomWrap = document.getElementById("fullMapZoom");
   const zoomInBtn = document.getElementById("fullMapZoomIn");
@@ -48,6 +49,12 @@
 
   // sharksim reads as "survival" here on purpose: the island map IS its map.
   function mode() { const m = CBZ.game.mode || "escape"; return m === "sharksim" ? "survival" : m; }
+  function patriotContext() {
+    if (mode() !== "city" || (CBZ.CONFIG && CBZ.CONFIG.PATRIOT_V1 === false)) return false;
+    try { const r = CBZ.cityArmorRec && CBZ.cityArmorRec(); return !!(r && r.kind === "patriot"); }
+    catch (e) { return false; }
+  }
+  map.patriotContext = patriotContext;
 
   // ---- MAP_V2 (owner's overhaul flag) + the wanted-star read -----------------
   // MAP_V2 on ⇒ icons/marks/labels draw LIVE at the current zoom (never baked
@@ -244,6 +251,13 @@
   // Space handler below — that key is what a hand on a keyboard reaches for,
   // and this is what a thumb reaches for. Both land on clearWaypoint().
   if (clearBtn) clearBtn.addEventListener("click", function (e) { e.preventDefault(); clearWaypoint(); });
+  if (launchBtn) launchBtn.addEventListener("click", function (e) {
+    e.preventDefault();
+    if (!patriotContext() || !activeWaypoint("city") || !CBZ.cityArmorFire) return;
+    let fired = false;
+    try { fired = CBZ.cityArmorFire() !== false; } catch (err) { fired = false; }
+    if (fired) close();
+  });
 
   function nearLabel(x, z, which) {
     if (which === "city") {
@@ -321,10 +335,14 @@
     const which = mode(), b = boundsFor(which);
     x = Math.max(b.minX, Math.min(b.maxX, x));
     z = Math.max(b.minZ, Math.min(b.maxZ, z));
-    const snapped = nearLabel(x, z, which);
-    const wp = map.points[which] = { x: snapped.x, z: snapped.z, label: label || snapped.label };
-    rebuildRoute(wp);
-    if (CBZ.flashHint) CBZ.flashHint("Waypoint set - " + waypointDistance(wp) + "m", 1.5);
+    const fireControl = patriotContext();
+    // Fire control must preserve the exact crosshair. Navigation may helpfully
+    // snap a near-POI click to its door; a missile doing that would turn a roof/
+    // facade designation into an unrelated kerb strike.
+    const snapped = fireControl ? { x: x, z: z, label: "Patriot target" } : nearLabel(x, z, which);
+    const wp = map.points[which] = { x: snapped.x, z: snapped.z, label: fireControl ? "Patriot target" : (label || snapped.label) };
+    if (fireControl) map.routes[which] = null; else rebuildRoute(wp);
+    if (CBZ.flashHint) CBZ.flashHint((fireControl ? "Patriot target - " : "Waypoint set - ") + waypointDistance(wp) + "m", 1.5);
     updateGuide();
     if (map.active) draw();
     return wp;
@@ -462,9 +480,11 @@
   function drawWaypoint(p) {
     const wp = activeWaypoint();
     if (!wp) return;
-    traceRoute(ctx, p.x, p.z);
+    const fireControl = patriotContext();
+    if (!fireControl) traceRoute(ctx, p.x, p.z);
     const x = p.x(wp.x), z = p.z(wp.z), pulse = 7 + Math.sin(performance.now() * 0.008) * 2;
-    ctx.strokeStyle = "#7de7ff"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, z, pulse, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = fireControl ? "#ff7a3d" : "#7de7ff"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, z, pulse, 0, Math.PI * 2); ctx.stroke();
+    if (fireControl) { ctx.beginPath(); ctx.arc(x, z, pulse + 7, 0, Math.PI * 2); ctx.stroke(); }
     ctx.beginPath(); ctx.moveTo(x - 12, z); ctx.lineTo(x + 12, z); ctx.moveTo(x, z - 12); ctx.lineTo(x, z + 12); ctx.stroke();
     // YOUR OWN DESTINATION KEEPS ITS NAME. It is the one thing on this chart
     // you already chose, so making you hover to re-read it would be a downgrade.
@@ -2364,7 +2384,14 @@
   function draw() {
     if (!ctx) return;
     const which = mode(), p = map.projection = makeProjection(boundsFor(which));
-    if (titleEl) titleEl.textContent = MODE_TITLE[which] || "AREA MAP";
+    const fireControl = patriotContext();
+    if (titleEl) titleEl.textContent = fireControl ? "PATRIOT FIRE CONTROL" : (MODE_TITLE[which] || "AREA MAP");
+    if (placeHint && fireControl) placeHint.textContent = CBZ.touchMode ? "Tap the map to designate an impact point" : "Click the map to designate an impact point";
+    if (launchBtn) {
+      launchBtn.hidden = !fireControl;
+      launchBtn.disabled = !activeWaypoint("city");
+      launchBtn.textContent = CBZ.touchMode ? "LAUNCH PATRIOT" : "LAUNCH PATRIOT [L-CLICK]";
+    }
     // one frame, one census: every icon, label, overlap and pick below is
     // counted from scratch, which is what makes CBZ.mapAudit() a measurement
     // rather than an opinion.
@@ -2399,7 +2426,9 @@
     }
     const wp = activeWaypoint();
     const route = activeRoute();
-    if (readout) readout.textContent = wp ? "Route: " + waypointDistance(wp) + "m - " + wp.label + (route && route.kind === "fallback" ? " (direct)" : "") : "No waypoint set";
+    if (readout) readout.textContent = wp
+      ? (fireControl ? "Impact point: " : "Route: ") + waypointDistance(wp) + "m - " + wp.label + (!fireControl && route && route.kind === "fallback" ? " (direct)" : "")
+      : (fireControl ? "No impact point designated" : "No waypoint set");
     if (legend) {
       // The legend is rebuilt from scratch on every redraw, which was harmless
       // when it was six colour swatches and is NOT once it carries a dozen

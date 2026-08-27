@@ -310,6 +310,48 @@
   function _AXIS_Z() { if (!__axisZ) __axisZ = new THREE.Vector3(0, 0, 1); return __axisZ; }
   function _scale(sx, sy) { if (!__scaleV) __scaleV = new THREE.Vector3(); return __scaleV.set(sx, sy, 1); }
 
+  /* PUBLIC: A BLAST OPENED THE FACADE — the fake interior must stop pretending.
+
+     These panels are the arch-viz trick: one flat plane 0.18 m behind each
+     opening, painted with a room-depth gradient, that reads as a furnished
+     room ONLY while there is glass and a frame in front of it. Blow the bay
+     open (city/buildings.js carveHole) and the trick is standing in the hole
+     with nothing in front of it — MEASURED on an 8-storey office after a
+     missile: a flat tan billboard, banded like brick, filling the breach
+     across two storeys, in front of the real floor slabs the blast just
+     exposed. The illusion has to be removed with the wall it was hiding
+     behind.
+
+     Zero the instance scale for every panel whose centre lies in the world box
+     (an InstancedMesh has no per-instance visibility; a zero-scale matrix is
+     the cheap, allocation-free equivalent, and it keeps every other index
+     stable). cityInteriorGlowReset restores the whole pool on a new run, the
+     same way every other pooled record in the city comes back.
+
+     Returns how many it cleared, so a caller/gate can assert it happened. */
+  CBZ.cityInteriorGlowClearBox = function (minX, maxX, y0, y1, minZ, maxZ) {
+    if (!built || !ensureThree()) return 0;
+    if (!__clearM) { __clearM = new THREE.Matrix4(); __clearP = new THREE.Vector3(); }
+    var cleared = 0;
+    Object.keys(layers).forEach(function (k) {
+      var im = layers[k], n = counts[k];
+      for (var i = 0; i < n; i++) {
+        im.getMatrixAt(i, __clearM);
+        __clearP.setFromMatrixPosition(__clearM);
+        if (__clearP.x < minX || __clearP.x > maxX) continue;
+        if (__clearP.z < minZ || __clearP.z > maxZ) continue;
+        if (__clearP.y < y0 || __clearP.y > y1) continue;
+        if (__clearM.elements[0] === 0 && __clearM.elements[5] === 0) continue;   // already cleared
+        __clearM.makeScale(0, 0, 0);
+        im.setMatrixAt(i, __clearM);
+        cleared++;
+      }
+      if (cleared) im.instanceMatrix.needsUpdate = true;
+    });
+    return cleared;
+  };
+  var __clearM = null, __clearP = null;
+
   /* PUBLIC: wipe everything (new run / island regen). */
   CBZ.cityInteriorGlowReset = function () {
     if (!built) return;

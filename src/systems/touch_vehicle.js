@@ -41,8 +41,8 @@
               player could BOARD A TANK AND NEVER GET OUT: no EXIT, no FIRE,
               no dial, and the on-foot cluster is hidden by body.tveh-on the
               whole time. Now a real context.
-              FIRE  = tap → CBZ.cityArmorFire() (tank only; the truck has no
-                      gun, and a dead button is worse than no button)
+              FIRE  = tap → CBZ.cityArmorFire() (tank or map-targeted Patriot;
+                      an unarmed truck has no dead button)
               EXIT  = tap → CBZ.cityExitArmor()
      AUX RAIL (#tvAux) — a SECOND column standing directly above the dial, in
               the dial's own footprint, so weapon/ordnance controls never grow
@@ -359,12 +359,9 @@
       // water_helm crash-stop / astern path, not a road-car service brake.
       html = pill("tvBrake", "ASTERN", "tv-big tv-warn") + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm");
     } else if (next === "armor") {
-      // A TANK IS A GUN ON TRACKS AND A TRUCK IS NOT. The FIRE button is built
-      // only for the turreted hull — militaryvehicles.js's own fire path refuses
-      // anything else, and a lit button that refuses is worse than no button.
-      // The turret needs no control of its own: it already tracks cam.yaw, which
-      // on touch is the look drag, so aiming the gun is aiming the camera.
-      html = (isTank() ? FIRE_BTN : "") + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm");
+      // Only an actually armed hull gets FIRE. Tanks aim through the look drag;
+      // Patriots use the shared full-map target and launch through the same verb.
+      html = (isArmedArmor() ? FIRE_BTN : "") + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm");
     } else if (next === "heli") {
       html = pill("tvUp", "UP", "tv-big tv-go") + pill("tvDown", "DOWN", "tv-big") +
         FIRE_BTN + LOOK_BTN + VIEW_BTN + pill("tvExit", "EXIT", "tv-sm");
@@ -611,7 +608,10 @@
   const mountDive = () => !!(airV2() && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_MOUNT_DIVE !== false) &&
     CBZ.cityAquaticMountRiding && CBZ.cityAquaticMountRiding());
   function armorRec() { return CBZ.cityArmorRec ? CBZ.cityArmorRec() : null; }
-  function isTank() { const r = armorRec(); return !!(r && r.kind === "tank" && CBZ.cityArmorFire); }
+  function isArmedArmor() {
+    if (CBZ.cityArmorCanFire) return !!CBZ.cityArmorCanFire();
+    const r = armorRec(); return !!(r && (r.kind === "tank" || r.kind === "patriot") && CBZ.cityArmorFire);
+  }
 
   function doExit() {
     const P = CBZ.player; if (!P) return;
@@ -866,7 +866,7 @@
       // 0.85 s fireCD, not on rounds), so the ammo badge is HIDDEN rather than
       // shown empty — a blank counter is a claim that you have none.
       const fb = btnWrap.querySelector("#tvFire");
-      if (fb) show(fb, isTank());
+      if (fb) show(fb, isArmedArmor());
       if (ammoEl) ammoEl.style.display = "none";
     }
 
@@ -920,7 +920,7 @@
       const rec = armorRec();
       const read = CBZ.speedRead ? CBZ.speedRead(rec && rec.v)
         : { n: Math.round(Math.abs((rec && rec.v) || 0) * 2.2369), unit: "MPH" };
-      const sub = isTank() ? "TANK" : "ARMOR";
+      const sub = rec && rec.kind === "tank" ? "TANK" : rec && rec.kind === "patriot" ? "PATRIOT" : "ARMOR";
       if (read.n !== lastSpeed || sub !== lastSub) {
         lastSpeed = read.n; lastSub = sub;
         drawDial(read.n, read.unit === "KM/H" ? 120 : 75, read.unit, sub, false);

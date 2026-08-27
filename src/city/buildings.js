@@ -1572,6 +1572,16 @@
      sitting well under the 2.5 m the probe itself uses to recognise a wall.
      City facades never reach this test at all — they declare y0/y1. */
   const POST_SPAN = 1.2;
+  // The shell a wall/course belongs to — one hop through the mesh's parent
+  // group (makeBuilding stamps userData.bld). Null for scene-level props, the
+  // prison's world root, and anything not raised by makeBuilding.
+  function shellOf(c) {
+    const p = c && c.ref && c.ref.parent;
+    return (p && p.userData && p.userData.bld) || null;
+  }
+  function curtainBreachOn() {
+    return !(CBZ.CONFIG && CBZ.CONFIG.STRUCT_CURTAIN_BREACH_V1 === false);
+  }
   function wallBandOf(c) {
     if (c.y0 != null && c.y1 != null && isFinite(c.y0) && isFinite(c.y1)) return c;   // zero-alloc hot path
     if (!c.ref || c.ref.visible === false || !carveBounds) return null;
@@ -1609,7 +1619,7 @@
     carveDbg.maxThick = maxThick;
     // --- nearest WALL box whose y-span contains the hit ---
     const sr = opts.search != null ? opts.search : 2.6, sr2 = sr * sr;
-    let best = null, bestD = 1e9, bestY0 = 0, bestY1 = 0;
+    let best = null, bestD = 1e9, bestY0 = 0, bestY1 = 0, bestSy0 = 0, bestSy1 = 0;
     for (let i = 0; i < CBZ.colliders.length; i++) {
       const c = CBZ.colliders[i];
       if (!c.ref) continue;                                 // no mesh: nothing to hide or remnant
@@ -1620,8 +1630,51 @@
       const band = wallBandOf(c);
       if (!band) continue;                                  // heightless AND no readable mesh
       const cy0 = band.y0, cy1 = band.y1;
-      if (y < cy0 - 0.3 || y > cy1 + 0.3) continue;         // the box must CONTAIN the hit height
-      if (cy1 - cy0 < 1.6) continue;                        // sills / furniture slabs aren't walls
+      // A full-height wall box must CONTAIN the hit. A curtain-wall COURSE is
+      // height-tested against its STOREY instead, three lines down — a sill
+      // never contains a hit aimed at the glass above it.
+      if (cy1 - cy0 >= 1.6 && (y < cy0 - 0.3 || y > cy1 + 0.3)) continue;
+      /* A CURTAIN WALL IS AN ASSEMBLY, NOT A BOX (owner-filmed 2026-08-27:
+         "buildings don't look real when hit by an explosion" — MEASURED, a
+         direct MIM-104/missile row hit, power 3.0 radius 16, on an 8-storey
+         glass office left the facade WITHOUT A SCRATCH).
+
+         Here is the arithmetic of why. A city office storey's street face is
+         built (see the CLEAN CURTAIN-WALL FACADE block) out of exactly four
+         solid boxes plus a pane grid:
+             sill course   full width x 0.55 m   <- shorter than 1.6, rejected
+             header course full width x 0.45 m   <- shorter than 1.6, rejected
+             two end jambs 0.55 m x ~3.1 m       <- tall, but at the far CORNERS
+             the glazing    transparent          <- rejected two lines down
+         So at a hit in the middle of the face there was NOTHING ELIGIBLE, at
+         any power. carveHole returned "no eligible wall", cityDamageBuilding's
+         tier-3 promotion carved nothing, and the whole ordnance table — RPG,
+         missile, airstrike, C4 — could only ever break glass on the most
+         common building type in the game.
+
+         The 1.6 m rule is still right about what it was written for (window
+         sills, counters, plinths: things that are a LEDGE, not a wall). What it
+         got wrong is that a facade course is neither — it is one lamination of
+         a wall whose real structural unit is the STOREY. So a short box that is
+         a course OF A REAL SHELL is admitted, and the storey band it belongs to
+         (from that shell's own floor grid) is carried down to the opening: the
+         hole then runs floor-to-ceiling like a blown-open bay instead of being
+         clamped into a 0.55 m letterbox. Remnants stay clamped to the struck
+         COURSE, so the sill still survives left and right of the hole.
+         Flip STRUCT_CURTAIN_BREACH_V1 false → the exact old refusal. */
+      let cSy0 = 0, cSy1 = 0;                               // storey band, curtain courses only
+      if (cy1 - cy0 < 1.6) {
+        if (!curtainBreachOn()) continue;                   // sills / furniture slabs aren't walls
+        const shell = shellOf(c);
+        if (!shell) continue;                               // not a course of anything
+        // a course SPANS (same principle as A POST IS NOT A WALL below)
+        if (Math.max(c.maxX - c.minX, c.maxZ - c.minZ) < 2.5) continue;
+        const sFH = shell.FH > 0 ? shell.FH : 4.1;
+        const k = Math.max(0, Math.min((shell.storeys | 0) - 1, Math.floor(((cy0 + cy1) / 2) / sFH)));
+        cSy0 = k * sFH; cSy1 = Math.min(shell.h || (k + 1) * sFH, (k + 1) * sFH);
+        if (cSy1 - cSy0 < 1.6) continue;                    // degenerate grid: leave it alone
+        if (y < cSy0 - 0.3 || y > cSy1 + 0.3) continue;      // the STOREY must contain the hit
+      }
       // THICKNESS IS A PRICE, NOT A VETO. 0.9 m is right for ONE hit — a
       // single rocket should not open a structural pier. But a wall that has
       // absorbed enough explosive should go, which is the owner's "the parts
@@ -1656,6 +1709,7 @@
       const dx = x - sx, dz = z - sz, dd = dx * dx + dz * dz;
       if (dd > sr2 || dd >= bestD) continue;
       bestD = dd; best = c; bestY0 = cy0; bestY1 = cy1;
+      bestSy0 = cSy0; bestSy1 = cSy1;      // 0/0 for an ordinary full-height wall
     }
     const wall = best && best.ref;
     if (!wall) { carveDbg.result = "no eligible wall"; return null; }
@@ -1688,6 +1742,8 @@
     // is built against it, so a carved prison wall leaves properly height-gated
     // flanks/sill/header where the original collider was full-height.
     const y0 = bestY0, y1 = bestY1;
+    // A curtain-wall COURSE carries the storey band it is one lamination of.
+    const sy0 = bestSy0, sy1 = bestSy1, curtain = sy1 > sy0;
     const hit = horiz ? x : z;                              // where the blast struck along the wall axis
     // gap = the opening centred on the hit, clamped within the wall, sized to the blast
     // (opts.gapW overrides for callers that know the exact opening — window frames)
@@ -1724,14 +1780,21 @@
     // vertical opening, clamped to the storey box. A bottom near the floor
     // drops the SILL entirely (a blasted doorway); a top near the slab keeps
     // no header. Anything between leaves real partial-height remnants.
-    const yc = Math.max(y0 + 0.3, Math.min(y1 - 0.3, y));
-    let v0 = Math.max(y0, yc - r), v1 = Math.min(y1, yc + r);
+    /* THE OPENING'S CEILING IS THE STOREY, NOT THE COURSE. For a full-height
+       wall box these are the same two numbers. For a curtain-wall course they
+       are not: clamping the hole to the 0.55 m sill the rocket happened to
+       strike is how a blown-open bay becomes a letterbox. The REMNANTS below
+       stay clamped to y0/y1 (the course's own extent), so the sill still runs
+       left and right of the hole and no phantom full-storey slab is minted. */
+    const vy0 = curtain ? sy0 : y0, vy1 = curtain ? sy1 : y1;
+    const yc = Math.max(vy0 + 0.3, Math.min(vy1 - 0.3, y));
+    let v0 = Math.max(vy0, yc - r), v1 = Math.min(vy1, yc + r);
     // explicit vertical rect (window openings keep their sill + header exactly)
-    if (opts.v0 != null) v0 = Math.max(y0, opts.v0);
-    if (opts.v1 != null) v1 = Math.min(y1, opts.v1);
-    if (v1 - v0 < 1.0) { const vm = (v0 + v1) / 2; v0 = Math.max(y0, vm - 0.5); v1 = Math.min(y1, vm + 0.5); }
-    if (v0 - y0 < 0.55) v0 = y0;        // no ankle lip — clean walk-through bottom
-    if (y1 - v1 < 0.35) v1 = y1;
+    if (opts.v0 != null) v0 = Math.max(vy0, opts.v0);
+    if (opts.v1 != null) v1 = Math.min(vy1, opts.v1);
+    if (v1 - v0 < 1.0) { const vm = (v0 + v1) / 2; v0 = Math.max(vy0, vm - 0.5); v1 = Math.min(vy1, vm + 0.5); }
+    if (v0 - vy0 < 0.55) v0 = vy0;      // no ankle lip — clean walk-through bottom
+    if (vy1 - v1 < 0.35) v1 = vy1;
     /* THE ANKLE LIP ACROSS A STACKED FACADE. The line above has always meant
        "a breach near the bottom should reach the floor", but it measures
        against THIS BOX's own y0 — and a city facade is a stack of courses, so
@@ -1779,7 +1842,7 @@
     else { const off = horiz ? (z - fixed) : (x - fixed); outS = off >= 0 ? 1 : -1; }
 
     const wmat = wall.material;
-    const rec = { wall, col: c, remnCols: [], extras: [], wallWasLos: false,
+    const rec = { wall, col: c, remnCols: [], extras: [], wallWasLos: false, curtain: curtain,
       gap: { horiz, fixed, thick, u0, u1, v0, v1, y0, y1, px, pz, outS, parent, minU, maxU } };
 
     // hide the solid wall mesh + remove it from LOS (cops can see/shoot through).
@@ -1814,6 +1877,44 @@
       CBZ.colliders.push(col); rec.remnCols.push(col);
       if (rec.wallWasLos && CBZ.losBlockers) CBZ.losBlockers.push(m);
     }
+    /* The neighbour form of addRemnant: hide a course that runs past the
+       opening and rebuild the surviving run(s) from its OWN band, material and
+       parent. Kept separate from addRemnant because that one is bound to the
+       struck box's thickness/plane/material — a neighbour may be a different
+       course entirely (a 0.45 m header where the rocket struck the sill). */
+    let coursesCut = 0;
+    function cutCourseMesh(o, oU0, oU1, keepL, keepR) {
+      if (coursesCut >= 8) return;
+      const src = o.ref;
+      if (!src || src.visible === false || !src.material || !src.parent) return;
+      if (o.y0 == null || o.y1 == null || o.y1 - o.y0 < 0.08) return;
+      // Never cut a mesh that another live collider still depends on — the
+      // same shared-ref test the wholly-inside branch makes before hiding.
+      for (let k = 0; k < CBZ.colliders.length; k++) {
+        if (CBZ.colliders[k] !== o && CBZ.colliders[k].ref === src) return;
+      }
+      const par = src.parent, ppx = par.position.x, ppz = par.position.z;
+      const oFix = horiz ? (o.minZ + o.maxZ) / 2 : (o.minX + o.maxX) / 2;
+      const oThk = Math.max(0.06, horiz ? (o.maxZ - o.minZ) : (o.maxX - o.minX));
+      const rh = o.y1 - o.y0, ymid = (o.y0 + o.y1) / 2;
+      const piece = function (a, b) {
+        const fw = b - a; if (fw < 0.12) return;
+        const ucen = (a + b) / 2;
+        const wx = horiz ? ucen : oFix, wz = horiz ? oFix : ucen;
+        const bw = horiz ? fw : oThk, bd = horiz ? oThk : fw;
+        const g = new THREE.BoxGeometry(bw, rh, bd);
+        if (src.material.vertexColors) shadeGeo(g, o.y0 <= 0.2);
+        const m = new THREE.Mesh(g, src.material);
+        m.position.set(wx - ppx, ymid, wz - ppz);
+        m.castShadow = true; m.receiveShadow = true;
+        par.add(m); rec.extras.push(m);
+      };
+      if (keepL) piece(oU0, u0);
+      if (keepR) piece(u1, oU1);
+      src.visible = false; rec.hidRefs.push(src);
+      coursesCut++;
+    }
+
     // Remnants belong to the STRUCK box, so they are clamped to its own extent
     // (su0/su1). With an ordnance-sized gap the opening routinely runs past
     // both ends of that box; the flanks then come out negative-width and
@@ -1912,6 +2013,16 @@
         continue;
       }
       rec.clippedCols.push({ c: o, minX: o.minX, maxX: o.maxX, minZ: o.minZ, maxZ: o.maxZ });
+      // A COURSE THAT MERELY GETS CLIPPED STILL DRAWS ACROSS THE HOLE. The
+      // sweep above has always cut the physics of a neighbour that runs past
+      // the opening and left its PICTURE whole — invisible on a facade of
+      // 0.6 m segments (they land "wholly inside" and get hidden), glaring on
+      // a curtain wall, where the sill and header are ONE box the full width
+      // of the face: the blown-open bay kept a concrete curb across its floor
+      // and a lintel across its head, and read as a big window. Cut the mesh
+      // the same way the struck wall's is cut. Bounded so a huge opening over
+      // a finely-segmented facade cannot mint meshes without limit.
+      cutCourseMesh(o, oU0, oU1, keepL, keepR);
       if (keepL) {
         if (horiz) o.maxX = u0; else o.maxZ = u0;
         if (keepR) {                                            // both sides survive
@@ -1957,6 +2068,19 @@
       rec.hiddenDeco = rec.hiddenDeco || [];
       rec.hiddenDeco.push(rd);
     }
+    // THE FAKE INTERIOR GOES WITH THE GLASS IT WAS BEHIND. city/interiorlight.js
+    // parks one painted room-plane 0.18 m inside every opening; with the bay
+    // blown out it stands in the hole as a flat tan billboard in front of the
+    // real slabs. Box it out in world coords — a little slack on the wall axis
+    // so the inset panel is inside the box, generous on the plane axes.
+    if (CBZ.cityInteriorGlowClearBox) {
+      const gTol = thick / 2 + 0.85;
+      const gMinX = horiz ? u0 - 0.3 : fixed - gTol, gMaxX = horiz ? u1 + 0.3 : fixed + gTol;
+      const gMinZ = horiz ? fixed - gTol : u0 - 0.3, gMaxZ = horiz ? fixed + gTol : u1 + 0.3;
+      try {
+        rec.glowCleared = CBZ.cityInteriorGlowClearBox(gMinX, gMaxX, v0 - 0.4, v1 + 0.4, gMinZ, gMaxZ);
+      } catch (e) {}
+    }
 
     // --- DRESS: a room-deep dark INSET pocket (BackSide box — you look INTO
     //     it) with a warm spill quad at its back that glows after dusk, so an
@@ -1975,7 +2099,14 @@
     // real — the furnished room inside, the street outside — so ANY pocket
     // dress would block the view (USER-FILMED: shooting a window from inside
     // showed a gray panel instead of the street). Skip the dress entirely.
-    if (opts.open) {
+    // A CURTAIN-WALL BAY ALREADY HAS A ROOM BEHIND IT. The pocket dress below
+    // exists for a wall with nothing behind it but a building volume; an office
+    // storey has real floor slabs, real furniture and a real interior glow that
+    // you can already see THROUGH THE GLASS from the street. Building a 2.6 m
+    // prefab room inside that would put a box inside a box and z-fight the slab
+    // it is standing on. Same reasoning as opts.open, reached from the geometry
+    // rather than from the caller.
+    if (opts.open || curtain) {
       cityBreaches.push(rec);
       return rec;
     }
@@ -2187,6 +2318,34 @@
   }
   // PUBLIC primitive for city/fracture.js (ledger/caps/persistence live there)
   CBZ.cityCarveWall = carveHole;
+  /* THE FACADE LEDGER, in numbers a report can print. carveDbg already existed
+     for one-shot debugging; this is the cumulative read a before/after gate
+     needs: how many openings are standing, how much facade area is actually
+     gone, how many of those are curtain-wall bays (zero before
+     STRUCT_CURTAIN_BREACH_V1 — a glass office could not be opened at all), and
+     how many fake-interior panels were pulled out of them. */
+  CBZ.cityFacadeBreachAudit = function () {
+    let area = 0, curtainN = 0, glow = 0, remn = 0;
+    for (let i = 0; i < cityBreaches.length; i++) {
+      const b = cityBreaches[i], g = b && b.gap;
+      if (!g) continue;
+      area += Math.max(0, g.u1 - g.u0) * Math.max(0, g.v1 - g.v0);
+      if (b.curtain) curtainN++;
+      glow += b.glowCleared || 0;
+      remn += (b.extras ? b.extras.length : 0);
+    }
+    return {
+      flag: curtainBreachOn(),
+      openings: cityBreaches.length,
+      curtainOpenings: curtainN,
+      openArea: +area.toFixed(1),
+      glowPanelsCleared: glow,
+      ruinPieces: remn,
+      panesLost: shatteredPanes,
+      lastCarve: { result: carveDbg.result, gapU: carveDbg.gapU, gapV: carveDbg.gapV,
+                   cleared: carveDbg.cleared, clipped: carveDbg.clipped },
+    };
+  };
 
   // PUBLIC: plywood a hole over — the city patches its oldest wounds when the
   // fracture ledger overflows. A board + battens on the street face, a solid
@@ -4410,6 +4569,12 @@
     // physically inside THIS shell. Keep the ownership link on the mechanism,
     // not on a global "indoors" flag that could bless a different building.
     for (const dr of doorRecs) dr.building = built;
+    // THE SHELL A WALL BELONGS TO, reachable from any collider in one hop
+    // (collider.ref.parent.userData.bld). carveHole needs it to answer "what
+    // STOREY is this 0.55 m spandrel a course of" — see A CURTAIN WALL IS AN
+    // ASSEMBLY, NOT A BOX. Nothing else may treat this as an ownership edge;
+    // it is a read-only back-pointer to a record this function already made.
+    bgroup.userData.bld = built;
     // ---- THE SHELL REGISTRY (read by core/farcull.js's distance skyline) ----
     // WHAT BUILDINGS EXIST had only ever been answerable through `arena.lots`,
     // and a lot is an ECONOMY record — Zillow, shops, jobs, map POIs. Four

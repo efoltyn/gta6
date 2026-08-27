@@ -1202,7 +1202,8 @@
   // grille + headlights, mirrors, canvas bed with visible rib bows and a
   // tailgate, fenders over every axle, jerry cans on the bed side, exhaust
   // stack. Chunky voxel blocks in olive two-tone.
-  function makeTruck() {
+  function makeTruck(opts) {
+    opts = opts || {};
     const g = new THREE.Group();
     const GLASS = vmat("glass", M.glassDark), GUN = vmat("plastic", M.dark), RUBBER = vmat("tire", M.tire);
     box(g, 0, 0.55, 0.2, 1.9, 0.35, 7.4, M.steelD);       // chassis rails
@@ -1222,14 +1223,16 @@
     box(g, 0, 1.35, 4.12, 1.7, 0.14, 0.12, M.steelD);     // guard cross bar
     // mirrors off the cab front corners
     [-1, 1].forEach(function (s) { box(g, s * 1.25, 1.8, 2.8, 0.36, 0.3, 0.08, M.steelD); });
-    // COVERED BED — lower sides, tailgate, canvas volume + 3 rib bows proud of
-    // the canvas, jerry cans racked on the port side
-    box(g, 0, 1.0, -1.35, 2.3, 0.6, 3.6, M.oliveD);       // bed sides
-    box(g, 0, 1.05, -3.22, 2.3, 0.7, 0.14, M.oliveD);     // tailgate
-    box(g, 0, 1.95, -1.35, 2.26, 1.3, 3.5, M.olive);      // canvas cover
-    [-0.35, -1.35, -2.35].forEach(function (z) { box(g, 0, 2.62, z, 2.34, 0.1, 0.14, M.oliveL); });
-    box(g, -1.21, 1.05, -2.6, 0.14, 0.5, 0.34, M.sand);   // jerry can (flush on the side wall)
-    box(g, -1.21, 1.05, -3.0, 0.14, 0.5, 0.34, M.red);    // fuel can (red = petrol)
+    // COVERED BED — omitted only by the Patriot factory below, which uses this
+    // exact cab/chassis/wheel owner and replaces the rear with a launcher deck.
+    if (!opts.flatbed) {
+      box(g, 0, 1.0, -1.35, 2.3, 0.6, 3.6, M.oliveD);       // bed sides
+      box(g, 0, 1.05, -3.22, 2.3, 0.7, 0.14, M.oliveD);     // tailgate
+      box(g, 0, 1.95, -1.35, 2.26, 1.3, 3.5, M.olive);      // canvas cover
+      [-0.35, -1.35, -2.35].forEach(function (z) { box(g, 0, 2.62, z, 2.34, 0.1, 0.14, M.oliveL); });
+      box(g, -1.21, 1.05, -2.6, 0.14, 0.5, 0.34, M.sand);   // jerry can (flush on the side wall)
+      box(g, -1.21, 1.05, -3.0, 0.14, 0.5, 0.34, M.red);    // fuel can (red = petrol)
+    }
     // fenders over every axle + 6 wheels (single front, paired rear)
     [-1, 1].forEach(function (s) {
       box(g, s * 1.08, 1.0, 2.5, 0.4, 0.3, 1.4, M.oliveD);
@@ -1240,6 +1243,57 @@
     });
     mcyl(g, 1.02, 1.75, 1.24, 0.09, 0.09, 1.5, GUN, 8);   // exhaust stack behind the cab
     return { group: g, footW: 2.8, footL: 7.7, height: 2.7 };
+  }
+
+  // PATRIOT LAUNCHER TRUCK — the army truck's real shared chassis carrying an
+  // exposed four-round elevating rack. Local -Z is aft, so rotating the rack
+  // +45° lifts its rear mouths into the launch direction. Muzzle nodes are real
+  // transform children consumed by militaryvehicles.js; the projectile never
+  // guesses a duplicate position from the truck's heading.
+  function makePatriot() {
+    const made = makeTruck({ flatbed: true });
+    const g = made.group;
+    const GUN = vmat("plastic", M.dark);
+    box(g, 0, 1.02, -1.40, 2.42, 0.30, 4.05, M.oliveD);     // launcher deck
+    box(g, 0, 1.34, -0.10, 2.18, 0.42, 0.72, M.steelD);    // turntable pedestal
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.86, 0.94, 0.24, 14), cm(M.steelD));
+    ring.position.set(0, 1.55, -0.10); ring.castShadow = true; g.add(ring);
+
+    const rack = new THREE.Group();
+    rack.position.set(0, 1.62, -0.35);
+    rack.rotation.x = Math.PI / 4;
+    g.add(rack);
+    g.userData.patriotLauncher = rack;
+    g.userData.patriotMuzzles = [];
+    g.userData.patriotRounds = [];
+
+    // cradle/backplate makes the four long tubes one readable weapon rather
+    // than decorative sticks balanced above a truck bed.
+    box(rack, 0, 0, 0.45, 2.05, 1.08, 0.18, M.steelD);
+    const slots = [[-0.53, -0.29], [0.53, -0.29], [-0.53, 0.29], [0.53, 0.29]];
+    for (let i = 0; i < slots.length; i++) {
+      const sx = slots[i][0], sy = slots[i][1];
+      const tube = box(rack, sx, sy, -0.14, 0.44, 0.44, 5.08, M.oliveL);
+      tube.userData.patriotTube = i;
+      // dark end bands and a visible pale missile nose just proud of the aft
+      // mouth: there is no ambiguity about what the rack carries.
+      box(rack, sx, sy, -2.50, 0.48, 0.48, 0.18, M.steelD);
+      box(rack, sx, sy, 2.22, 0.48, 0.48, 0.18, M.steelD);
+      const nose = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.42, 10), cm(0xe7e4d2));
+      nose.rotation.x = -Math.PI / 2; nose.position.set(sx, sy, -2.72);
+      nose.castShadow = true; rack.add(nose);
+      const muzzle = new THREE.Object3D(); muzzle.position.set(sx, sy, -2.94); rack.add(muzzle);
+      g.userData.patriotRounds.push(nose);
+      g.userData.patriotMuzzles.push(muzzle);
+    }
+    // two braced hydraulic rams visibly explain why this several-ton rack can
+    // hold its angle instead of floating over the deck.
+    [-0.72, 0.72].forEach(function (x) {
+      const ram = mcyl(g, x, 1.58, -1.20, 0.07, 0.09, 1.35, GUN, 8);
+      ram.rotation.x = -0.62; ram.rotation.z = x < 0 ? -0.12 : 0.12;
+    });
+    g.userData.patriotAmmo = 4;
+    return { group: g, footW: made.footW, footL: made.footL, height: 5.25 };
   }
 
   // ========================================================================
@@ -1647,6 +1701,7 @@
     heli: makeHeli,
     tank: makeTank,
     truck: makeTruck,
+    patriot: makePatriot,
   };
 
   // ========================================================================
@@ -1712,7 +1767,11 @@
     // ---- MOTOR POOL: a line of tanks + armored trucks ----
     const mpZ = CEN_Z - 70;
     for (let i = 0; i < 5; i++) placeModel(root, makeTank, MINX + 70 + i * 26, mpZ, Math.PI / 2, 1, "tank", "Main Battle Tank");
-    for (let i = 0; i < 4; i++) placeModel(root, makeTruck, MINX + 70 + i * 26, mpZ - 18, Math.PI / 2, 1, "ground", "Armored Truck");
+    for (let i = 0; i < 4; i++) {
+      const patriot = (!CBZ.CONFIG || CBZ.CONFIG.PATRIOT_V1 !== false) && i < 2;
+      placeModel(root, patriot ? makePatriot : makeTruck, MINX + 70 + i * 26, mpZ - 18,
+        Math.PI / 2, 1, patriot ? "patriot" : "ground", patriot ? "MIM-104 Patriot" : "Armored Truck");
+    }
 
     // ---- HANGARS: big enterable sheds (engine building shells) ----
     // door faces -Z toward the apron/runway. Single big storey.

@@ -492,6 +492,7 @@ body.sim-view #interact{display:none !important;}
 body.full-map-open #fullMap{display:flex;}
 .fullmap-shell{width:min(1040px,96vw); padding:14px; box-sizing:border-box; background:rgba(13,23,36,.96); position:relative;}
 .fullmap-head,.fullmap-foot{display:flex; align-items:center; justify-content:space-between; gap:14px;}
+.fullmap-actions{display:flex; align-items:center; gap:10px;}
 .fullmap-head{padding:0 2px 11px;}
 .fullmap-head b{display:block; color:#7de7ff; font-size:18px; letter-spacing:2px;}
 .fullmap-head span,.fullmap-foot{color:rgba(235,245,255,.7); font-size:12px; letter-spacing:.4px;}
@@ -529,6 +530,13 @@ body.full-map-open #fullMap{display:flex;}
   letter-spacing:inherit; cursor:pointer;
 }
 .fullmap-clear:hover{color:#dffaff;}
+.fullmap-launch{
+  border:1px solid rgba(255,150,72,.8); border-radius:8px; padding:8px 13px;
+  color:#fff4df; background:rgba(142,55,21,.86); font:800 12px Fredoka,system-ui,sans-serif;
+  letter-spacing:.7px; cursor:pointer; box-shadow:0 0 18px rgba(255,105,34,.18);
+}
+.fullmap-launch:hover:not(:disabled){background:rgba(188,70,22,.95); border-color:#ffb15f;}
+.fullmap-launch:disabled{opacity:.38; cursor:default; box-shadow:none;}
 #waypointGuide{
   display:none; position:fixed; left:50%; bottom:22px; z-index:48; transform:translateX(-50%);
   align-items:center; gap:9px; padding:9px 12px; color:#dffaff; pointer-events:none;

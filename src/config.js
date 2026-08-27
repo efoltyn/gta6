@@ -699,6 +699,17 @@
   // doors/interiors/stairs/roof gameplay are untouched. Deterministic per lot
   // (CBZ.hash01, never rng()). Flip false to restore the flat-top box massing.
   if (CBZ.CONFIG.BUILDING_MASSING_V2 == null) CBZ.CONFIG.BUILDING_MASSING_V2 = true;
+  // BLASTED REINFORCED CONCRETE: a carved RPG/missile opening is dressed with
+  // persistent jagged slab teeth, torn steel and contact-stacked angular rubble.
+  // The old rectangular hole + box-rubble aftermath remains available for the
+  // matched visual baseline with ?cfg_STRUCT_RPG_RUIN_V2=0.
+  if (CBZ.CONFIG.STRUCT_RPG_RUIN_V2 == null) CBZ.CONFIG.STRUCT_RPG_RUIN_V2 = true;
+  // A CURTAIN WALL IS AN ASSEMBLY, NOT A BOX. A glass office storey's face is
+  // a 0.55 m sill course, a 0.45 m header course, two corner jambs and a pane
+  // grid — and carveHole's "a wall is at least 1.6 m tall and opaque" rule
+  // refused every one of them, so no ordnance in the game could open the most
+  // common building type in the city. Off restores that refusal exactly.
+  if (CBZ.CONFIG.STRUCT_CURTAIN_BREACH_V1 == null) CBZ.CONFIG.STRUCT_CURTAIN_BREACH_V1 = true;
   // WINDOW REVEALS V2 (reference adoption: window modules with reveal depth +
   // warm/cool lit spread). On → upper-floor clear panes recess ~0.09u behind the
   // outer wall face (real reveal shadow line) with a slim reveal-edge liner, and
@@ -743,6 +754,10 @@
   // "[M] map" tail (pointer-events:none, so there is nothing to retitle it to).
   // Flip false to restore the key legends everywhere.
   if (CBZ.CONFIG.MAP_TOUCH_LABELS == null) CBZ.CONFIG.MAP_TOUCH_LABELS = true;
+  // PATRIOT FIRE CONTROL: two motor-pool trucks carry real elevating launch
+  // racks and fire the shared pooled missile at the full map's one waypoint.
+  // Off restores ordinary covered trucks and the navigation-only map.
+  if (CBZ.CONFIG.PATRIOT_V1 == null) CBZ.CONFIG.PATRIOT_V1 = true;
   // BRIDGE WALL RULES: causeway guardrails + curb fall-guard colliders are
   // GAPPED wherever the deck crosses a registered road, so bridge walls only
   // exist over real water/gap spans — never across intersections/mouths.

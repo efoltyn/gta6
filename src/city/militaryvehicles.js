@@ -323,6 +323,7 @@
             : "" + (v.model ? v.model.name : (v.name || "Vehicle")),
           note: (civil ? (airliner ? "Hijack this commercial flight" : "Steal this aircraft")
             : v.kind === "tank" ? "Commandeer the tank"
+            : v.kind === "patriot" ? "Commandeer the missile battery"
             : v.kind === "heli" ? "Steal the helicopter"
             : v.kind === "plane" ? "Steal the aircraft"
             : "Steal the vehicle") + " · expect heat",
@@ -335,6 +336,7 @@
         label: function (v) {
           return v.civilian ? (v.flightKind === "airliner" ? "Hijack the airliner" : "Steal the private jet")
             : v.kind === "tank" ? "Commandeer the tank"
+            : v.kind === "patriot" ? "Commandeer the Patriot"
             : v.kind === "heli" ? "Steal the helicopter"
             : v.kind === "plane" ? "Steal the aircraft"
             : "Steal the vehicle";
@@ -431,7 +433,7 @@
     // THEFT + HEAT (mirror storage.js stealBaseJet): grand theft of military
     // hardware is instant, loud, and pins a hard manhunt. Ground = 3★, air = 4★.
     if (CBZ.cityCrime) { try { CBZ.cityCrime(120, { type: rec.civilian ? "aircraft-hijacking" : "grand-theft-military", x: rec.pos.x, z: rec.pos.z, instant: true }); } catch (e) {} }
-    if (CBZ.cityForceStars) { try { CBZ.cityForceStars(rec.kind === "ground" || rec.kind === "tank" ? 3 : 4); } catch (e) {} }
+    if (CBZ.cityForceStars) { try { CBZ.cityForceStars(rec.kind === "ground" || rec.kind === "tank" || rec.kind === "patriot" ? 3 : 4); } catch (e) {} }
     big(rec.civilian ? "Tower reports a " + name + " departing with no clearance, owner not aboard." : "Base alert: a " + name + " just rolled off the reservation. Units scrambling.");
     // No abstract bell for the theft flag. The visible base response, wanted
     // escalation and dispatch message carry the event without a sound following
@@ -501,7 +503,9 @@
     if (CBZ.city && CBZ.city.note) {
       const ctrl = rec.kind === "tank"
         ? "W/S drive · A/D turn hull · mouse aims turret · L-click FIRE · [E] out"
-        : "W/S drive · A/D turn · mouse look · [E] out";
+        : rec.kind === "patriot"
+          ? "W/S drive · A/D turn · [M] designate target · L-click LAUNCH · [E] out"
+          : "W/S drive · A/D turn · mouse look · [E] out";
       note("Driving the " + vehName(rec) + " — " + ctrl, 3.2);
     }
     return true;
@@ -570,10 +574,11 @@
   // player's position against every record (its own `armorIs` comment says so);
   // cityArmorRec is the honest answer whenever that file is next opened.
   CBZ.cityArmorRec = function () { return armor; };
+  function armedArmor(rec) { return !!(rec && (rec.kind === "tank" || rec.kind === "patriot")); }
+  CBZ.cityArmorCanFire = function () { return armedArmor(armor); };
   CBZ.cityArmorFire = function () {
-    if (!armor || armor.kind !== "tank") return false;   // the truck has no gun
-    fireTank(armor);
-    return true;
+    if (!armedArmor(armor)) return false;
+    return armor.kind === "patriot" ? firePatriot(armor) : fireTank(armor);
   };
 
   // One input route for every stealable machine. Pressing E/Y exits the
@@ -616,22 +621,26 @@
 
   // Declared at LOAD so the ordnance census counts a wired launcher, not a used
   // one (see aircraft.js's ordnance law).
-  if (CBZ.ordnanceSite) { try { CBZ.ordnanceSite("armor:tank-main", "missile"); } catch (e) {} }
+  if (CBZ.ordnanceSite) {
+    try { CBZ.ordnanceSite("armor:tank-main", "missile"); } catch (e) {}
+    try { CBZ.ordnanceSite("armor:patriot-map", "rpg"); } catch (e) {}
+  }
 
-  // L-click fires the tank's main gun while in a tank (pointer-locked, in city).
+  // L-click fires whichever real weapon the commanded ground hull owns. A
+  // Patriot still refuses until the full map has one designated waypoint.
   addEventListener("mousedown", function (e) {
     if (e.button !== 0) return;
-    if (!armor || armor.kind !== "tank") return;
+    if (!armedArmor(armor)) return;
     if (!activeCtx() || !document.pointerLockElement) return;
     e.preventDefault();
-    fireTank(armor);
+    CBZ.cityArmorFire();
   });
 
   // fire one main-gun shell from the turret muzzle, forward along the turret. A
   // real missile through CBZ.cityFireMissile (reuses the military missile pool +
   // blast); if the pool is saturated, a forward explosion so the gun still bites.
   function fireTank(rec) {
-    if (!rec || rec.fireCD > 0) return;
+    if (!rec || rec.fireCD > 0) return false;
     const ud = rec.group.userData;
     const turret = ud && ud.turret;
     const mLocal = (ud && ud.muzzleLocal) || new THREE.Vector3(0, 1.62, 5.7);
@@ -671,7 +680,140 @@
     sfx("whoosh");
     // a tank shell in the city is a crime → heat (guarded)
     if (CBZ.cityCrime) { try { CBZ.cityCrime(140, { x: rec.pos.x, z: rec.pos.z, type: "shots-fired" }); } catch (e) {} }
+    return true;
   }
+
+  const _patriotMuzzle = new THREE.Vector3();
+  function patriotWaypoint() {
+    try { return CBZ.fullMap && CBZ.fullMap.waypoint ? CBZ.fullMap.waypoint("city") : null; }
+    catch (e) { return null; }
+  }
+  function patriotTarget(wp) {
+    /* ASK THE SHELL FIRST. Resolving a designated point against COLLIDERS was
+       right in spirit and wrong on the most common building in the city: the
+       eligibility below wants a box at least 3.2 m tall, and a glass office
+       storey's face is a 0.55 m sill course, a 0.45 m header course and two
+       3.1 m jambs at the corners. Nothing qualified, so a waypoint dropped on
+       a downtown tower fell through to `floorAt + 0.65` and the round hit the
+       KERB — MEASURED: the map promised a building and the strike cratered the
+       crossing in front of it.
+       Every shell in the world is minted by cityMakeBuilding and registered on
+       the arena root, footprint and height included, so the question "is the
+       designated point a building" has a direct answer. Colliders remain the
+       fallback for everything raised outside that registry. */
+    const A = CBZ.city && CBZ.city.arena;
+    const shells = (A && A.root && A.root.userData && A.root.userData.shells) || null;
+    if (shells) {
+      let hit = null, hitD = 1e9;
+      for (let i = 0; i < shells.length; i++) {
+        const b = shells[i];
+        if (!b || !(b.h > 0)) continue;
+        const dx = Math.max(Math.abs(wp.x - b.ox) - b.w / 2, 0);
+        const dz = Math.max(Math.abs(wp.z - b.oz) - b.d / 2, 0);
+        const d = Math.hypot(dx, dz);
+        if (d > 4.5 || d >= hitD) continue;
+        hitD = d; hit = b;
+      }
+      if (hit) {
+        // the middle storeys: high enough to open a bay and expose a floor,
+        // low enough that the wound is legible from the street.
+        const y = Math.min(hit.h - 1.6, Math.max(3.4, hit.h * 0.45));
+        return { x: wp.x, y: y, z: wp.z };
+      }
+    }
+    let wall = null, best = 5.0;
+    const cols = CBZ.colliders || [];
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      const y0 = c.y0 == null ? 0 : c.y0, y1 = c.y1 == null ? 0 : c.y1;
+      const ex = c.maxX - c.minX, ez = c.maxZ - c.minZ;
+      if (y1 - y0 < 3.2 || Math.min(ex, ez) > 1.2 || c.noBreach) continue;
+      const sx = Math.max(c.minX, Math.min(c.maxX, wp.x));
+      const sz = Math.max(c.minZ, Math.min(c.maxZ, wp.z));
+      const d = Math.hypot(wp.x - sx, wp.z - sz);
+      if (d < best) { best = d; wall = c; }
+    }
+    if (wall) {
+      // A cityMakeBuilding facade is split into one collider band per storey.
+      // A first-match policy therefore always picked the ground band while the
+      // map promised a building target. Union the vertically aligned bands on
+      // this same face, then aim at the actual middle storeys.
+      const wx = wall.maxX - wall.minX, wz = wall.maxZ - wall.minZ;
+      const horiz = wx >= wz;
+      const face = horiz ? (wall.minZ + wall.maxZ) * 0.5 : (wall.minX + wall.maxX) * 0.5;
+      let band0 = wall.y0 == null ? 0 : wall.y0;
+      let band1 = wall.y1 == null ? band0 + 8 : wall.y1;
+      for (let i = 0; i < cols.length; i++) {
+        const c = cols[i];
+        const y0 = c.y0 == null ? 0 : c.y0, y1 = c.y1 == null ? 0 : c.y1;
+        const ex = c.maxX - c.minX, ez = c.maxZ - c.minZ;
+        if (y1 - y0 < 1.6 || Math.min(ex, ez) > 1.2 || c.noBreach || (ex >= ez) !== horiz) continue;
+        const cface = horiz ? (c.minZ + c.maxZ) * 0.5 : (c.minX + c.maxX) * 0.5;
+        if (Math.abs(cface - face) > 0.9) continue;
+        const sx = Math.max(c.minX, Math.min(c.maxX, wp.x));
+        const sz = Math.max(c.minZ, Math.min(c.maxZ, wp.z));
+        if (Math.hypot(wp.x - sx, wp.z - sz) > best + 0.75) continue;
+        band0 = Math.min(band0, y0); band1 = Math.max(band1, y1);
+      }
+      return { x: wp.x, y: Math.min(band1 - 1.2, Math.max(band0 + 3.0, band0 + (band1 - band0) * 0.46)), z: wp.z };
+    }
+    let floor = 0;
+    try { floor = CBZ.floorAt ? +CBZ.floorAt(wp.x, wp.z) : 0; } catch (e) { floor = 0; }
+    if (!isFinite(floor)) floor = 0;
+    // Roofs/raised terrain stay real target surfaces; flat streets get a low
+    // seat. The shared detonation then decides ground-coupled vs elevated FX.
+    return { x: wp.x, y: Math.max(0.8, floor + 0.65), z: wp.z };
+  }
+  function firePatriot(rec) {
+    if (!rec || rec.fireCD > 0 || !CBZ.cityFireMissileAt) return false;
+    const wp = patriotWaypoint();
+    if (!wp) {
+      note("Open the map and designate a Patriot impact point.", 2.4);
+      if (CBZ.fullMap && CBZ.fullMap.open) { try { CBZ.fullMap.open(); } catch (e) {} }
+      return false;
+    }
+    const ud = rec.group && rec.group.userData;
+    const muzzles = ud && ud.patriotMuzzles;
+    const rounds = ud && ud.patriotRounds;
+    if (rec.patriotAmmo == null) rec.patriotAmmo = ud && ud.patriotAmmo != null ? ud.patriotAmmo : 4;
+    if (rec.patriotAmmo <= 0) { note("Patriot rack empty.", 1.8); return false; }
+    const slot = Math.max(0, Math.min((muzzles && muzzles.length ? muzzles.length : 4) - 1, 4 - rec.patriotAmmo));
+    const muzzle = muzzles && muzzles[slot];
+    if (muzzle && muzzle.getWorldPosition) {
+      rec.group.updateWorldMatrix(true, true);
+      muzzle.getWorldPosition(_patriotMuzzle);
+    } else {
+      _patriotMuzzle.set(rec.pos.x, (rec.pos.y || 0) + 4.0, rec.pos.z);
+    }
+    const fired = CBZ.cityFireMissileAt(_patriotMuzzle.x, _patriotMuzzle.y, _patriotMuzzle.z,
+      patriotTarget(wp), { byPlayer: true, site: "armor:patriot-map", scale: 1.35 });
+    if (!fired) { note("Patriot launch rail busy.", 1.4); return false; }
+    if (rounds && rounds[slot]) rounds[slot].visible = false;
+    rec.patriotAmmo--;
+    rec.fireCD = 1.55;
+    if (CBZ.shake) { try { CBZ.shake(0.45); } catch (e) {} }
+    if (CBZ.cityCrime) { try { CBZ.cityCrime(180, { x: rec.pos.x, z: rec.pos.z, type: "missile-launch" }); } catch (e) {} }
+    note("Patriot away — target " + Math.round(Math.hypot(wp.x - rec.pos.x, wp.z - rec.pos.z)) + "m.", 1.8);
+    return true;
+  }
+
+  CBZ.cityPatriotAudit = function () {
+    const trucks = props.filter(function (v) { return v && v.kind === "patriot"; });
+    const flight = CBZ.cityPatriotMissileAudit ? CBZ.cityPatriotMissileAudit() : null;
+    let tubes = 0, visibleRounds = 0;
+    for (let i = 0; i < trucks.length; i++) {
+      const ud = trucks[i].group && trucks[i].group.userData;
+      tubes += ud && ud.patriotMuzzles ? ud.patriotMuzzles.length : 0;
+      if (ud && ud.patriotRounds) for (let j = 0; j < ud.patriotRounds.length; j++) if (ud.patriotRounds[j].visible !== false) visibleRounds++;
+    }
+    return {
+      flag: !CBZ.CONFIG || CBZ.CONFIG.PATRIOT_V1 !== false,
+      trucks: trucks.length, tubes: tubes, visibleRounds: visibleRounds,
+      commanding: !!(armor && armor.kind === "patriot"),
+      hasMapTarget: !!patriotWaypoint(), launches: flight ? flight.launches : 0,
+      impacts: flight ? flight.impacts : 0, sharedPool: !!(flight && flight.sharedPool),
+    };
+  };
 
   // ---- the ground-drive integration. Order 11.6 = just past the car sim (11)
   //      and before the aircraft sim (12). Owns rec.group + the player transform
@@ -744,8 +886,22 @@
       const maxStep = 1.4 * dt;                            // ~1.4 rad/s slew
       if (d > maxStep) d = maxStep; else if (d < -maxStep) d = -maxStep;
       ud.turret.rotation.y = cur + d;
-    } else if (rec.kind !== "tank" && CBZ.cam && CBZ.lerpAngle && Math.abs(rec.v) > 0.3 &&
-               !(CBZ.camRecenterSuspended && CBZ.camRecenterSuspended())) {
+    } else {
+      // The launcher rack slews toward the one canonical map point. Its fixed
+      // 45° elevation is authored in the model; this writes only local azimuth.
+      if (rec.kind === "patriot" && ud && ud.patriotLauncher) {
+        const wp = patriotWaypoint();
+        if (wp) {
+          let want = Math.atan2(wp.x - rec.pos.x, wp.z - rec.pos.z) - rec.heading;
+          let d = want - ud.patriotLauncher.rotation.y;
+          while (d > Math.PI) d -= Math.PI * 2;
+          while (d < -Math.PI) d += Math.PI * 2;
+          const step = Math.max(-0.75 * dt, Math.min(0.75 * dt, d));
+          ud.patriotLauncher.rotation.y += step;
+        }
+      }
+      if (CBZ.cam && CBZ.lerpAngle && Math.abs(rec.v) > 0.3 &&
+          !(CBZ.camRecenterSuspended && CBZ.camRecenterSuspended())) {
       // NON-TURRET ground (the armored truck): no independent gun, so frame it
       // like a car — gently ease the chase cam back BEHIND the hull as it rolls,
       // so you read the road ahead. Only while moving, and lazily, so the mouse
@@ -756,7 +912,8 @@
       // deliberate glance (a mouse look, or a touch look-drag, which is the
       // only way to look around at all on an iPad) was fought back every frame
       // while the truck was rolling.
-      CBZ.cam.yaw = CBZ.lerpAngle(CBZ.cam.yaw, rec.heading + Math.PI, 1 - Math.pow(0.2, dt));
+        CBZ.cam.yaw = CBZ.lerpAngle(CBZ.cam.yaw, rec.heading + Math.PI, 1 - Math.pow(0.2, dt));
+      }
     }
 
     if (rec.fireCD > 0) rec.fireCD = Math.max(0, rec.fireCD - dt);

@@ -223,6 +223,14 @@
   const jets = [];            // live fighter passes
   const missiles = [];        // active missiles (subset of the pool)
   const missilePool = [];     // recycled missile objects
+  // Patriot rounds share the missile pool but need the RPG compositor's soft,
+  // billowing smoke mask rather than the aircraft missile's hard grey spheres.
+  // Each sprite owns its opacity (the old mesh material is shared), and this
+  // small pool bounds both allocation and simultaneous smoke history.
+  const PATRIOT_SMOKE_CAP = 60;
+  const patriotSmokePool = [];
+  let patriotSmokeMade = 0;
+  const patriotStats = { launches: 0, impacts: 0, lastFlight: null, lastImpact: null };
   let cleanupBound = false;
 
   // shared geometry/materials — flagged ._shared so any disposer leaves them be
@@ -896,13 +904,44 @@
     }
     const flame = new THREE.Mesh(a.smoke, a.flameMat);
     flame.scale.set(0.42, 0.42, 1.45); flame.position.z = -1.05; grp.add(flame);
-    return { group: grp, flame, live: true, trail: [], dir: new THREE.Vector3(), life: 0, byPlayer: false, seek: null };
+    return { group: grp, flame, live: true, trail: [], dir: new THREE.Vector3(), life: 0, byPlayer: false, seek: null, route: null, site: null, fx: null };
+  }
+  function getPatriotSmoke() {
+    let s = patriotSmokePool.pop();
+    if (!s) {
+      if (patriotSmokeMade >= PATRIOT_SMOKE_CAP || !CBZ.cityBlastPuffAssets) return null;
+      const fx = CBZ.cityBlastPuffAssets();
+      if (!fx || !fx.smoke) return null;
+      const mat = new THREE.SpriteMaterial({
+        map: fx.smoke, color: 0x555b5f, transparent: true, opacity: 0.95,
+        depthWrite: false, depthTest: true,
+      });
+      s = new THREE.Sprite(mat);
+      s._patriotSmoke = true;
+      s.renderOrder = 6;
+      patriotSmokeMade++;
+    }
+    s.visible = true;
+    s.material.opacity = 0.95;
+    s.scale.set(1.35, 1.35, 1);
+    return s;
+  }
+  function releaseTrailPuff(s) {
+    if (!s) return;
+    if (s.parent) s.parent.remove(s);
+    if (s._patriotSmoke) {
+      s.visible = false;
+      s.material.opacity = 0;
+      if (patriotSmokePool.length < PATRIOT_SMOKE_CAP) patriotSmokePool.push(s);
+    }
   }
   function freeMissile(m) {
     m.live = false;
     if (m.group && m.group.parent) m.group.parent.remove(m.group);
-    for (const s of m.trail) { if (s.parent) s.parent.remove(s); }
+    for (const s of m.trail) releaseTrailPuff(s);
     m.trail.length = 0;
+    m.route = null; m.seek = null; m.site = null; m.fx = null; m._puffT = 0;
+    if (m.group) m.group.scale.setScalar(1);
     if (missilePool.length < MAX_MISSILES) missilePool.push(m);
   }
 
@@ -921,7 +960,8 @@
     const m = getMissile(); if (!m) return;
     m.group.position.set(fx, fy, fz);
     m.dir.set(target.x - fx, (target.y || 1) - fy, target.z - fz).normalize();
-    m.life = 0; m.byPlayer = !!byPlayer; m.seek = seek || null;
+    m.life = 0; m.byPlayer = !!byPlayer; m.seek = seek || null; m.route = null; m.site = null; m.fx = null; m._puffT = 0;
+    m.group.scale.setScalar(1);
     // orient nose along travel dir
     m.group.lookAt(fx + m.dir.x, fy + m.dir.y, fz + m.dir.z);
     r.add(m.group);
@@ -1217,6 +1257,95 @@
     return !!m;                                // false ⇒ pool was at MAX_MISSILES
   };
 
+  // ---- PUBLIC: a map-designated Patriot flight on the SAME missile pool ----
+  // Meteor Shower proved the useful silhouette: a visible body, one coherent
+  // incoming direction and a long smoke train ending in a real impact. A ground
+  // launcher needs a lofted path rather than the disaster's falling rock, so we
+  // attach four cubic control points to the ordinary pooled missile record.
+  // updateMissiles remains the only transform writer and detonate() remains the
+  // only blast owner. No second projectile or explosion engine is introduced.
+  CBZ.cityFireMissileAt = function (x, y, z, target, opts) {
+    if (!g || g.mode !== "city" || !target) return false;
+    if (CBZ.CONFIG && CBZ.CONFIG.PATRIOT_V1 === false) return false;
+    opts = opts || {};
+    const tx = +target.x, tz = +target.z;
+    if (!isFinite(tx) || !isFinite(tz)) return false;
+    const ty = isFinite(+target.y) ? +target.y : 1.0;
+    const dx = tx - x, dz = tz - z, dist = Math.hypot(dx, dz);
+    if (dist < 8) return false;                 // never launch back into the truck
+    const ux = dx / dist, uz = dz / dist;
+    /* THE LOFT IS THE WHOLE SILHOUETTE. Meteor Shower reads because the rock
+       crosses a lot of SKY before it arrives; a surface-to-surface round has to
+       climb to do the same. The first pass capped the apex at 105 m and the
+       flight at 6.5 s, which is a sensible ceiling for a 400 m shot and a
+       nearly FLAT skim for a 1.5 km one — the map lets you designate anywhere
+       in the city, so the long shot is the common case, not the edge case.
+       Apex now stays proportional to range (roughly a 1:4 climb) up to a real
+       ceiling, and the clock is paced off distance so the arc reads at any
+       range instead of turning into a tracer. */
+    const rise = Math.max(38, Math.min(240, 26 + dist * 0.23));
+    const apex = Math.max(y, ty) + rise;
+    const targetPoint = { x: tx, y: ty, z: tz };
+    const m = launchMissile(x, y, z, targetPoint, opts.byPlayer !== false, null);
+    if (!m) return false;
+    const approach = Math.min(90, Math.max(16, dist * 0.26));
+    const duration = Math.max(2.0, Math.min(9, 1.35 + dist / 135));
+    m.route = {
+      t: 0, duration: duration,
+      p0: { x: x, y: y, z: z },
+      p1: { x: x + ux * Math.min(10, dist * 0.06), y: apex, z: z + uz * Math.min(10, dist * 0.06) },
+      p2: { x: tx - ux * approach, y: apex - rise * 0.08, z: tz - uz * approach },
+      p3: targetPoint,
+    };
+    m.site = opts.site || "armor:patriot-map";
+    // THE OWNER NAMED THE CLOUD: "explode on impact with the beautiful rpg
+    // cloud". So the warhead identity travels WITH the round and detonate()
+    // spends the bus's rpg row, scaled up for the size of the thing that
+    // arrived — not the heavy/missile row whose additive fireball whites out
+    // the very building it just hit.
+    m.fx = { kind: opts.fxKind || "rpg", scale: opts.fxScale > 0 ? opts.fxScale : 1.45 };
+    m.group.scale.setScalar(Math.max(1, Math.min(1.7, opts.scale || 1.35)));
+    const site = ordSite(m.site, m.fx.kind); site.calls++;
+    patriotStats.launches++;
+    patriotStats.lastFlight = {
+      from: { x: x, y: y, z: z }, to: { x: tx, y: ty, z: tz },
+      distance: +dist.toFixed(1), apex: +apex.toFixed(1), duration: +duration.toFixed(2),
+    };
+    return true;
+  };
+
+  CBZ.cityPatriotMissileAudit = function () {
+    let liveRoutes = 0, smokePuffs = 0, live = null, trail = null;
+    for (let i = 0; i < missiles.length; i++) {
+      if (missiles[i] && missiles[i].route) {
+        liveRoutes++;
+        if (!live) {
+          const m = missiles[i], q = m.route, p = m.group.position;
+          live = { x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2),
+            progress: q.duration > 0 ? +(q.t / q.duration).toFixed(3) : 1 };
+        }
+      }
+      if (missiles[i] && missiles[i].trail) {
+        smokePuffs += missiles[i].trail.length;
+        const tr = missiles[i].trail;
+        if (!trail && tr.length) {
+          const h = tr[tr.length - 1], t0 = tr[0];
+          trail = { n: tr.length,
+            head: { x: +h.position.x.toFixed(1), y: +h.position.y.toFixed(1), z: +h.position.z.toFixed(1),
+              op: +Number(h.material.opacity).toFixed(2), s: +h.scale.x.toFixed(2), vis: h.visible !== false, inScene: !!h.parent },
+            tail: { x: +t0.position.x.toFixed(1), y: +t0.position.y.toFixed(1), z: +t0.position.z.toFixed(1),
+              op: +Number(t0.material.opacity).toFixed(2), s: +t0.scale.x.toFixed(2), vis: t0.visible !== false, inScene: !!t0.parent } };
+        }
+      }
+    }
+    return {
+      launches: patriotStats.launches, impacts: patriotStats.impacts,
+      liveRoutes: liveRoutes, smokePuffs: smokePuffs,
+      lastFlight: patriotStats.lastFlight, lastImpact: patriotStats.lastImpact,
+      live: live, trail: trail, sharedPool: true, sharedDetonation: true,
+    };
+  };
+
   // ---- PUBLIC: missile/blast tuning (so a player salvo reads punchy) --------
   // Read-only-ish knobs the player aircraft can consult. MISSILE_SPD/MAX_MISSILES
   // are the shared pool's tunables; the blast power/radius mirror detonate()'s
@@ -1249,7 +1378,7 @@
       // stays a straight-line projectile exactly as before). Capped turn rate
       // means a target that keeps maneuvering can fly the missile off its
       // tail; a target holding a straight line gets walked down.
-      if (m.seek && m.life > HOMING_ARM_T && CBZ.aeroPhysics) {
+      if (!m.route && m.seek && m.life > HOMING_ARM_T && CBZ.aeroPhysics) {
         const tp = m.seek();
         if (tp) {
           // a lockon.js seek carries its own per-weapon turn-rate cap (air-to-air
@@ -1262,20 +1391,66 @@
         }
       }
       const prevX = p.x, prevY = p.y, prevZ = p.z;
-      const step = missileSpd() * dt;
-      p.x += m.dir.x * step; p.y += m.dir.y * step; p.z += m.dir.z * step;
+      let routeHit = false, step = 0;
+      if (m.route) {
+        const q = m.route;
+        q.t = Math.min(q.duration, q.t + dt);
+        const u = q.duration > 0 ? q.t / q.duration : 1;
+        const v = 1 - u, vv = v * v, uu = u * u;
+        p.x = vv * v * q.p0.x + 3 * vv * u * q.p1.x + 3 * v * uu * q.p2.x + uu * u * q.p3.x;
+        p.y = vv * v * q.p0.y + 3 * vv * u * q.p1.y + 3 * v * uu * q.p2.y + uu * u * q.p3.y;
+        p.z = vv * v * q.p0.z + 3 * vv * u * q.p1.z + 3 * v * uu * q.p2.z + uu * u * q.p3.z;
+        // Analytic tangent keeps the missile body aligned to the actual curve.
+        m.dir.set(
+          3 * vv * (q.p1.x - q.p0.x) + 6 * v * u * (q.p2.x - q.p1.x) + 3 * uu * (q.p3.x - q.p2.x),
+          3 * vv * (q.p1.y - q.p0.y) + 6 * v * u * (q.p2.y - q.p1.y) + 3 * uu * (q.p3.y - q.p2.y),
+          3 * vv * (q.p1.z - q.p0.z) + 6 * v * u * (q.p2.z - q.p1.z) + 3 * uu * (q.p3.z - q.p2.z)
+        );
+        if (m.dir.lengthSq() > 1e-6) m.dir.normalize();
+        m.group.lookAt(p.x + m.dir.x, p.y + m.dir.y, p.z + m.dir.z);
+        step = Math.hypot(p.x - prevX, p.y - prevY, p.z - prevZ);
+        routeHit = u >= 1;
+      } else {
+        step = missileSpd() * dt;
+        p.x += m.dir.x * step; p.y += m.dir.y * step; p.z += m.dir.z * step;
+      }
       m.life += dt;
-      // smoke trail — recycle puffs, cap count so it never grows unbounded
-      if (m.trail.length < 10) {
-        const puff = new THREE.Mesh(a.smoke, a.smokeMat);
-        puff.position.copy(p); puff._age = 0; r.add(puff); m.trail.push(puff);
+      /* SMOKE TRAIL — cap count so it never grows unbounded.
+
+         THE TRAIL THAT STOPPED AT THE PAD. Emission used to be one puff PER
+         FRAME against a fixed cap, which is fine for a straight-line missile
+         that lives well under a second and never reaches its ceiling. A lofted
+         Patriot flies ~3 s: the cap filled in the first 0.47 s, emission then
+         stopped for good, and the whole column sat 150 m back near the
+         launcher while the round flew on naked — MEASURED, 28 live puffs on
+         the ledger and an empty sky around the missile in the plate.
+         Rate is now TIME-based, so `trailLife / EMIT` puffs cover the whole
+         live window no matter how long the flight is, and the cap is a ceiling
+         rather than the thing that decides where the trail ends. */
+      const routed = !!m.route;
+      const trailCap = routed ? 48 : 10;
+      const trailLife = routed ? 1.55 : 0.9;
+      const emitEvery = routed ? 0.033 : 0;   // ~47 puffs across trailLife: a train, not a dotted line
+      m._puffT = (m._puffT || 0) + dt;
+      if (m.trail.length < trailCap && (!emitEvery || m._puffT >= emitEvery)) {
+        if (emitEvery) m._puffT = 0;
+        const puff = routed ? getPatriotSmoke() : new THREE.Mesh(a.smoke, a.smokeMat);
+        if (puff) {
+          puff.position.copy(p); puff._age = 0; r.add(puff); m.trail.push(puff);
+        }
       }
       for (let j = m.trail.length - 1; j >= 0; j--) {
         const s = m.trail[j]; s._age += dt;
-        // shared smoke mat (can't fade opacity per-puff) → grow + reap instead
-        const k = 1 - s._age / 0.9;
-        if (k <= 0) { if (s.parent) s.parent.remove(s); m.trail.splice(j, 1); continue; }
-        s.scale.setScalar(0.4 + (1 - k) * 1.6);
+        const k = 1 - s._age / trailLife;
+        if (k <= 0) { releaseTrailPuff(s); m.trail.splice(j, 1); continue; }
+        if (s._patriotSmoke) {
+          const size = 1.35 + (1 - k) * 2.6;
+          s.scale.set(size, size, 1);
+          s.material.opacity = Math.max(0, k * 0.95);
+        } else {
+          // Ordinary aircraft missiles retain their shared-material geometry.
+          s.scale.setScalar(0.4 + (1 - k) * 1.6);
+        }
       }
       // detonate on ground, on a building (losBlockers), or after a max life.
       // PACE V2: the step is swept at <=0.8m samples from the previous tip to
@@ -1284,8 +1459,10 @@
       // 60fps, up to 15m at the dt clamp) cannot tunnel through a thin wall
       // or skip past its locked target between frames. Legacy path (flag
       // off) keeps the original endpoint-only tests byte-identical.
-      let hit = false, hx = p.x, hy = p.y, hz = p.z;
-      if (missilePaceOn() && step > 0.9) {
+      let hit = routeHit, hx = p.x, hy = p.y, hz = p.z;
+      if (routeHit && m.route) {
+        hx = m.route.p3.x; hy = m.route.p3.y; hz = m.route.p3.z;
+      } else if (!m.route && missilePaceOn() && step > 0.9) {
         const nSamp = Math.min(24, Math.ceil(step / 0.8));
         for (let s = 1; s <= nSamp && !hit; s++) {
           const k = s / nSamp;
@@ -1295,15 +1472,21 @@
           else if (hitsBlocker(_sweepP)) { hit = true; hx = sx; hy = sy; hz = sz; }
           else if (m.seek && m.seek.prox && m.seek.prox(sx, sy, sz)) { hit = true; hx = sx; hy = sy; hz = sz; }
         }
-      } else {
+      } else if (!m.route) {
         if (p.y <= 0.6) { hit = true; hy = 0.4; }
         if (!hit && hitsBlocker(p)) hit = true;
         // proximity fuse (lockon.js seeks only): a near-miss on the locked
         // vehicle still detonates instead of sailing past
         if (!hit && m.seek && m.seek.prox && m.seek.prox(p.x, p.y, p.z)) hit = true;
       }
-      if (!hit && m.life > 3.2) hit = true;        // safety self-destruct
-      if (hit) { detonate(hx, hy, hz, m.byPlayer); freeMissile(m); missiles.splice(i, 1); }
+      if (!hit && !m.route && m.life > 3.2) hit = true;        // safety self-destruct
+      if (hit) {
+        if (m.route) {
+          patriotStats.impacts++;
+          patriotStats.lastImpact = { x: +hx.toFixed(1), y: +hy.toFixed(1), z: +hz.toFixed(1) };
+        }
+        detonate(hx, hy, hz, m.byPlayer, m.fx); freeMissile(m); missiles.splice(i, 1);
+      }
     }
   }
 
@@ -1326,8 +1509,19 @@
   // byPlayer (default false) marks this detonation as the player's — the blast
   // is then a player crime + does player-attributed kills. Gunship/jet missiles
   // pass nothing → false (police fire, no crime on you).
-  function detonate(x, y, z, byPlayer) {
+  function detonate(x, y, z, byPlayer, fx) {
     byPlayer = !!byPlayer;
+    /* WHICH CLOUD A ROUND MAKES IS THE CALLER'S TO NAME. Every user of this
+       pool used to land on the "missile" row (3.0 x r16, fx "heavy"), and
+       MEASURED at 50 m that row paints a ~40 m pure-white additive disc — two
+       building-widths of blown-out screen with no fire colour in it at all,
+       because ~35 overlapping full-opacity sprites sum past white long before
+       the ramp gets to orange. The owner named the read he wants by name:
+       Patriot rounds "should explode on impact with the beautiful rpg cloud".
+       So a caller may hand over an ordnance identity + scale, and the bus's own
+       table does the rest. Default is the exact old missile row. */
+    const row = (fx && fx.kind) || "missile";
+    const scale = fx && fx.scale > 0 ? fx.scale : 1;
     // THE MISSILE NAMES ITS ORDNANCE (systems/impactbus.js). This one function
     // is BOTH the shared missile pool (jet rails, gunship, tank main gun, the
     // modshop channel) and the 5-star called-in airstrike — they have always
@@ -1339,11 +1533,11 @@
     // cityAirstrikeExplosion could not. Degrade: flag off => the exact old
     // pair, fallback included.
     if (CBZ.detonate && CBZ.CONFIG && CBZ.CONFIG.ORDNANCE_BUS_ALL !== false) {
-      CBZ.detonate(x, y, z, "missile", { byPlayer: byPlayer });
+      CBZ.detonate(x, y, z, row, { byPlayer: byPlayer, scale: scale });
     } else if (CBZ.cityAirstrikeExplosion) {
-      CBZ.cityAirstrikeExplosion(x, z, { power: 3.0, radius: 16, byPlayer: byPlayer, y: y });   // BIGGER blast, ~48m kill radius — a 5★ airstrike levels the block
+      CBZ.cityAirstrikeExplosion(x, z, { power: 3.0 * scale, radius: 16, byPlayer: byPlayer, y: y });   // BIGGER blast, ~48m kill radius — a 5★ airstrike levels the block
     } else if (CBZ.cityExplosion) {
-      CBZ.cityExplosion(x, z, { power: 2.2, radius: 11, byPlayer: byPlayer });
+      CBZ.cityExplosion(x, z, { power: 2.2 * scale, radius: 11, byPlayer: byPlayer });
     }
     // cinematic structural damage on a building hit (buildings agent provides it)
     if (y > 1.5 && CBZ.cityDamageBuilding) {

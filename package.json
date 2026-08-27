@@ -19,6 +19,8 @@
     "test:traversal": "node tools/test-character-traversal.mjs",
     "test:traversal-browser": "node tools/test-character-traversal-browser.mjs",
     "visual:parkour": "node tools/before-after.mjs parkour-moves --keep-going",
+    "test:patriot-building": "node tools/test-patriot-building-contract.mjs",
+    "visual:patriot-building": "node tools/before-after.mjs patriot-building --keep-going",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
