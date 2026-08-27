@@ -82,15 +82,21 @@
    forward onto the new function, and the blast handler is idempotent per blast
    via a private opts._waterSeen flag (the demolition.js _demoSeen pattern).
 
-   VISUALS reuse world/water_wake.js's ONE pooled THREE.Points system through
-   CBZ.waterEmit()/CBZ.waterEmitFree(). This file allocates no geometry, no
-   material and no mesh of its own, and every burst is sized against the same
-   CBZ.qScale budget the wakes and rain already share.
+   VISUALS are composed entirely out of world/water_wake.js's primitives —
+   CBZ.waterEmit() for airborne spray and surface foam (its `ride` flag chooses
+   billboard or real in-plane geometry) and CBZ.waterCrown() for the erupting
+   sheet. This file allocates no geometry, no material and no mesh of its own,
+   and every burst is sized against the same CBZ.qScale budget the wakes and
+   rain already share (CBZ.waterEmitFree / CBZ.waterFoamFree report the
+   headroom).
 
-   DETERMINISM: runtime-only presentation, so Math.random is permitted here for
-   particle jitter exactly as water_wake.js documents. Nothing in the FX path
-   touches world generation. The one gameplay effect — the underwater blast
-   lethality — is a pure function of the blast's own arguments.
+   DETERMINISM: runtime-only presentation, so randomness is permitted here for
+   particle jitter exactly as water_wake.js documents — and, exactly as that
+   file does, it is drawn from a file-local mulberry32 (fxRand) rather than
+   Math.random, so an impact vocabulary can never perturb the simulation's
+   shared stream. Nothing in the FX path touches world generation. The one
+   gameplay effect — the underwater blast lethality — is a pure function of the
+   blast's own arguments.
 
    FLAGS (declared below, each a one-line revert):
      CBZ.CONFIG.WATER_IMPACT        the bus + the bullet/impact wraps
@@ -132,6 +138,34 @@
     return CFG.WATER_IMPACT === false || CFG.WATER_V2 === false;
   }
   function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+  /* ---- THE FX RANDOM STREAM — NOT Math.random ---------------------------
+     Every jitter value in this file comes from HERE, and the reason is the
+     A/B harness rather than the game. A visual before/after pass seeds ONE
+     global Math.random from an LCG so both columns walk the same dice; any
+     path that draws a different NUMBER of values between the two builds
+     desynchronises everything downstream of it, and presentation is exactly
+     the kind of code whose draw count changes when you improve it (a crown
+     that now takes a seed, a distance gate that now rolls to thin distant
+     spray). FX must never be able to move the simulation's dice.
+
+     So: mulberry32, seeded once, file-local. Same statistical quality, same
+     cost, zero coupling — the sim's stream is untouched no matter how much
+     water this file decides to throw. (The sibling file uses a different
+     seed constant so the two streams cannot march in step.)
+
+     This is still runtime-only presentation and nothing here touches world
+     generation, so it is not a determinism requirement — it is an isolation
+     one. */
+  let _fxSeed = 0x85EBCA6B >>> 0;
+  function fxRand() {
+    _fxSeed = (_fxSeed + 0x6D2B79F5) >>> 0;
+    let t = _fxSeed;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
   function seaY() { return CBZ.waterSeaY ? CBZ.waterSeaY() : (CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48); }
   function surfY(x, z) {
     return CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(x, z) : seaY();
@@ -172,13 +206,22 @@
   // speed a body outsplashes a bullet by ~90x of momentum, and a car outsplashes
   // a body, because sqrt(mass) says so. What differs between kinds is the SHAPE
   // (the vocabulary), not the yardstick.
+  //
+  // THE CEILINGS USED TO BE THE BUG. body capped at 2.4 and vehicle at 2.8,
+  // which were honest numbers when the only caller was a swimmer stepping off
+  // a quay — and then shark_sim.js started asking for a breach and
+  // wildlife_tame.js for a ridden megalodon's reentry, and both were served the
+  // same splash a person makes because the clamp ate the difference. The curve
+  // below is unchanged; only the room it is allowed to use grew, so a twenty-
+  // tonne animal coming down out of the air scores ~6 where a diver scores ~0.8
+  // and the ORDERING is still momentum's, not an author's.
   const KINDS = {
     bullet:  { mass: 0.008, speed: 380, clear: 1.2, min: 0.30, max: 1.0 },
-    body:    { mass: 78,    speed: 8,   clear: 2.4, min: 0.30, max: 2.4 },
-    vehicle: { mass: 1400,  speed: 14,  clear: 2.8, min: 0.80, max: 2.8 },
-    debris:  { mass: 12,    speed: 9,   clear: 1.6, min: 0.25, max: 2.0 },
+    body:    { mass: 78,    speed: 8,   clear: 2.4, min: 0.30, max: 6.5 },
+    vehicle: { mass: 1400,  speed: 14,  clear: 2.8, min: 0.80, max: 5.0 },
+    debris:  { mass: 12,    speed: 9,   clear: 1.6, min: 0.25, max: 3.0 },
     drop:    { mass: 0.5,   speed: 5,   clear: 1.0, min: 0.10, max: 1.0 },
-    blast:   { mass: 900,   speed: 20,  clear: 6.0, min: 0.20, max: 3.0 },
+    blast:   { mass: 900,   speed: 20,  clear: 6.0, min: 0.20, max: 4.0 },
   };
   // Momentum (kg^0.5 * m/s) that scores strength 1.0 — a 78kg body going in at
   // 8 m/s, i.e. someone thrown off a quay. The 0.55 exponent compresses the
@@ -272,68 +315,102 @@
   // wearing the big-splash shape is exactly what makes gunfire into water look
   // toylike, and it is the single most common water impact in the game.
   function fxBullet(x, sy, z, s) {
-    const n = Math.min(6, 3 + Math.round(s * 2));
+    const n = Math.min(9, 5 + Math.round(s * 3));
     for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = Math.random() * 0.16 * s;         // very tight radius
+      const a = fxRand() * Math.PI * 2;
+      const r = fxRand() * 0.16 * s;         // very tight radius
       emit({
         x: x + Math.cos(a) * r, y: sy + 0.04, z: z + Math.sin(a) * r,
-        vx: Math.cos(a) * (0.35 + Math.random() * 0.5),
-        vy: 3.0 + Math.random() * 2.6 * s,        // the spurt: fast, straight up
-        vz: Math.sin(a) * (0.35 + Math.random() * 0.5),
-        size: 0.055 + Math.random() * 0.05 * s, grow: -0.02,
-        ttl: 0.30 + Math.random() * 0.22, alpha: 0.9,
+        vx: Math.cos(a) * (0.5 + fxRand() * 0.8),
+        vy: 4.2 + fxRand() * 3.4 * s,        // the spurt: fast, straight up
+        vz: Math.sin(a) * (0.5 + fxRand() * 0.8),
+        size: 0.085 + fxRand() * 0.075 * s, grow: -0.02,
+        ttl: 0.34 + fxRand() * 0.26, alpha: 0.95,
       });
     }
-    emit({ x: x, y: sy + 0.03, z: z, size: 0.10 * s, grow: 0.95 * s, ttl: 0.44, ring: true, ride: true, alpha: 0.62 });
+    // and the pin-prick of white water it leaves behind
+    emit({ x: x, y: sy + 0.03, z: z, size: 0.22 * s, grow: 1.9 * s, ttl: 0.5, ring: true, ride: true, alpha: 0.7 });
   }
 
-  // DROP — a rain dimple. One ring, occasionally a single bead.
+  // DROP — a rain dimple. One ring, occasionally a single bead. Gated on foam
+  // HEADROOM, because rain arrives at up to 46 Hz and a squall must never be
+  // able to spend the pool a splash is about to need.
   function fxDrop(x, sy, z, s) {
-    emit({ x: x, y: sy + 0.02, z: z, size: 0.06 * s, grow: 0.62, ttl: 0.62, ring: true, ride: true, alpha: 0.55 });
-    if (Math.random() < 0.12 * s) {
-      emit({ x: x, y: sy + 0.03, z: z, vy: 0.9 + Math.random() * 0.6, size: 0.04, grow: -0.02, ttl: 0.22, alpha: 0.7 });
+    if (CBZ.waterFoamFree && CBZ.waterFoamFree() < 40) return;
+    emit({ x: x, y: sy + 0.02, z: z, size: 0.10 * s, grow: 0.85, ttl: 0.7, ring: true, ride: true, alpha: 0.6 });
+    if (fxRand() < 0.16 * s) {
+      emit({ x: x, y: sy + 0.03, z: z, vy: 1.1 + fxRand() * 0.8, size: 0.05, grow: -0.02, ttl: 0.26, alpha: 0.75 });
     }
   }
 
-  // BODY / VEHICLE / DEBRIS — crown + rebound jet + settling ring.
-  //   crown  a radial burst of droplets thrown OUT and up at the rim
+  // BODY / VEHICLE / DEBRIS — THE SHEET, then the grain, then the water left
+  // behind. In that order, because that is the order the eye reads them.
+  //
+  //   sheet  the CROWN: a hollow cone of water that erupts, flares, tears at
+  //          the rim and falls back. Real geometry (world/water_wake.js's
+  //          CBZ.waterCrown), and the reason a big impact now reads as MASS.
+  //          It is the silhouette; everything else is detail on it.
+  //   crown  a radial burst of ballistic droplets thrown OUT and up at the rim,
+  //          giving the sheet its grain and outliving it in the air
   //   jet    a central upward spike; its HEIGHT scales with impact speed (the
   //          rebound jet a real cavity throws when it collapses)
-  //   ring   an expanding, fading ring left riding the swell behind it
+  //   wash   white water standing at the entry point, and the expanding
+  //          collapse rings riding away from it across the live swell
   // `jet` 0 suppresses the spike (debris and glancing entries just crown).
+  //
+  // s runs about 0.3 (a dropped bottle) to 6.5 (a megalodon coming down out of
+  // a breach). Every number below is linear in s so the ordering is the
+  // momentum curve's and nothing is special-cased for a big animal.
   function fxCrown(x, sy, z, s, jet) {
+    // ---- the sheet -------------------------------------------------------
+    if (s > 0.5 && CBZ.waterCrown) {
+      CBZ.waterCrown({
+        x: x, z: z,
+        r: 0.22 + 0.45 * s,                 // 0.7 m for a diver, 3.0 m for a meg
+        grow: 0.5 + 0.55 * s,
+        h: 0.8 + 1.55 * s,                  // 2.3 m for a diver, 10.5 m for a meg
+        ttl: 0.5 + 0.10 * s,
+        // DELIBERATELY TRANSLUCENT. A sheet of thrown water is mostly air;
+        // the first cut ran to 0.92 and photographed as a milk bucket.
+        alpha: Math.min(0.72, 0.40 + s * 0.09),
+      });
+    }
+    // ---- the grain -------------------------------------------------------
     const slots = free();
-    const nCrown = Math.max(4, Math.min(Math.round(6 + s * 11), Math.round(slots * 0.45)));
+    const nCrown = Math.max(5, Math.min(Math.round(8 + s * 13), Math.round(slots * 0.5)));
     for (let i = 0; i < nCrown; i++) {
-      const a = (i / nCrown) * Math.PI * 2 + Math.random() * 0.5;
-      const r = 0.28 + Math.random() * 0.55 * s;
-      const out = 1.5 + Math.random() * 1.9 * s;
+      const a = (i / nCrown) * Math.PI * 2 + fxRand() * 0.5;
+      const r = 0.28 + fxRand() * 0.55 * s;
+      const out = 1.6 + fxRand() * 2.2 * s;
       emit({
         x: x + Math.cos(a) * r * 0.55, y: sy + 0.06, z: z + Math.sin(a) * r * 0.55,
-        vx: Math.cos(a) * out, vy: 1.5 + Math.random() * 2.4 * s, vz: Math.sin(a) * out,
-        size: 0.13 + Math.random() * 0.20 * s, grow: -0.02,
-        ttl: 0.45 + Math.random() * 0.5, alpha: 0.95,
+        vx: Math.cos(a) * out, vy: 2.0 + fxRand() * 3.0 * s, vz: Math.sin(a) * out,
+        size: 0.10 + fxRand() * (0.09 + 0.05 * s) * (0.6 + s * 0.22), grow: -0.02,
+        ttl: 0.5 + fxRand() * (0.5 + s * 0.16), alpha: 0.95,
       });
     }
     if (jet > 0) {
       // The rebound spike: a tight column of beads whose launch speed (hence
-      // apex height) tracks the impact. 3-5 beads reads as one spike and costs
-      // almost nothing out of the pool.
-      const nJet = 3 + Math.round(Math.min(2, s));
-      const v0 = (3.4 + s * 4.2) * jet;
+      // apex height) tracks the impact. It is what comes back UP out of the
+      // cavity a moment after the sheet has gone out sideways.
+      const nJet = 3 + Math.round(Math.min(6, s * 1.3));
+      const v0 = (4.0 + s * 3.4) * jet;
       for (let i = 0; i < nJet; i++) {
         emit({
-          x: x + (Math.random() - 0.5) * 0.12, y: sy + 0.05, z: z + (Math.random() - 0.5) * 0.12,
-          vx: (Math.random() - 0.5) * 0.5, vy: v0 * (0.72 + Math.random() * 0.42), vz: (Math.random() - 0.5) * 0.5,
-          size: 0.15 + Math.random() * 0.16 * s, grow: -0.03,
-          ttl: 0.55 + Math.random() * 0.55, alpha: 1,
+          x: x + (fxRand() - 0.5) * 0.12 * s, y: sy + 0.05, z: z + (fxRand() - 0.5) * 0.12 * s,
+          vx: (fxRand() - 0.5) * 0.6, vy: v0 * (0.72 + fxRand() * 0.42), vz: (fxRand() - 0.5) * 0.6,
+          size: 0.13 + fxRand() * (0.10 + s * 0.06), grow: -0.03,
+          ttl: 0.65 + fxRand() * (0.55 + s * 0.12), alpha: 1,
         });
       }
     }
-    // the collapse / settling rings
-    emit({ x: x, y: sy + 0.03, z: z, size: 0.42 * s, grow: 2.9 * s, ttl: 1.25, ring: true, ride: true, alpha: 0.82 });
-    emit({ x: x, y: sy + 0.03, z: z, size: 0.20 * s, grow: 1.5 * s, ttl: 0.85, ring: true, ride: true, alpha: 0.66 });
+    // ---- the water left behind -------------------------------------------
+    // A WASH (a filled patch of churned white, ride without ring) where the
+    // thing actually went in, and two RINGS travelling away from it. The wash
+    // is what stops a big entry leaving a clean hole in the sea.
+    emit({ x: x, y: sy + 0.03, z: z, size: 0.9 * s + 0.4, grow: 0.9 * s, ttl: 0.8 + 0.2 * s, ride: true, alpha: 0.45 });
+    emit({ x: x, y: sy + 0.03, z: z, size: 0.5 * s, grow: 2.4 * s, ttl: 1.1 + 0.14 * s, ring: true, ride: true, alpha: 0.85 });
+    emit({ x: x, y: sy + 0.03, z: z, size: 0.24 * s, grow: 1.3 * s, ttl: 0.85, ring: true, ride: true, alpha: 0.68 });
   }
 
   // ============================================================
@@ -358,15 +435,15 @@
     if (depth > 0.25) {
       const nDome = Math.max(3, Math.min(Math.round(5 + P * 5), Math.round(free() * 0.3)));
       for (let i = 0; i < nDome; i++) {
-        const a = Math.random() * Math.PI * 2;
-        const r = Math.random() * (0.4 + P * 0.6);
+        const a = fxRand() * Math.PI * 2;
+        const r = fxRand() * (0.4 + P * 0.6);
         emit({
-          x: x + Math.cos(a) * r, y: y + Math.random() * 0.4, z: z + Math.sin(a) * r,
-          vx: Math.cos(a) * (0.8 + Math.random() * 1.2 * P),
-          vy: 2.2 + Math.random() * 2.6 + depth * 0.35,
-          vz: Math.sin(a) * (0.8 + Math.random() * 1.2 * P),
-          size: 0.18 + Math.random() * 0.28 * P, grow: 0.35,
-          ttl: 0.5 + Math.random() * 0.5 + depth * 0.05, alpha: 0.5,
+          x: x + Math.cos(a) * r, y: y + fxRand() * 0.4, z: z + Math.sin(a) * r,
+          vx: Math.cos(a) * (0.8 + fxRand() * 1.2 * P),
+          vy: 2.2 + fxRand() * 2.6 + depth * 0.35,
+          vz: Math.sin(a) * (0.8 + fxRand() * 1.2 * P),
+          size: 0.18 + fxRand() * 0.28 * P, grow: 0.35,
+          ttl: 0.5 + fxRand() * 0.5 + depth * 0.05, alpha: 0.5,
         });
       }
     }
@@ -381,20 +458,32 @@
     const t2 = 0.05 + depth * 0.045;
     const waves = 3;
     const nCol = Math.max(4, Math.min(Math.round((CBZ.qScale ? CBZ.qScale(7, 22) : 16) * Math.min(2.2, P)), 34));
+    // The shaft itself is real geometry — a TALL, NARROW crown, which is
+    // exactly what a depth charge throws and what a body entry does not. Same
+    // primitive as the entry sheet, different proportions; there is no second
+    // column implementation to keep in step.
+    later(t2, function () {
+      if (!CBZ.waterCrown) return;
+      CBZ.waterCrown({
+        x: x, z: z,
+        r: 0.5 + P * 0.55, grow: 0.7 + P * 0.6,
+        h: 5.0 + P * 6.0, ttl: 1.1 + P * 0.25, alpha: 0.68,
+      });
+    });
     for (let w = 0; w < waves; w++) {
       later(t2 + w * 0.06, function () {
         const per = Math.max(1, Math.min(Math.round(nCol / waves), Math.round(free() * 0.35)));
         const spread = 0.30 + P * 0.26;
         for (let i = 0; i < per; i++) {
-          const a = Math.random() * Math.PI * 2;
-          const r = Math.random() * spread;
+          const a = fxRand() * Math.PI * 2;
+          const r = fxRand() * spread;
           emit({
             x: x + Math.cos(a) * r, y: sy + 0.05, z: z + Math.sin(a) * r,
-            vx: Math.cos(a) * (0.5 + Math.random() * 0.9),
-            vy: v0 * (0.68 + Math.random() * 0.46),
-            vz: Math.sin(a) * (0.5 + Math.random() * 0.9),
-            size: 0.22 + Math.random() * 0.24 * P, grow: 0.30,
-            ttl: 1.5 + Math.random() * 1.1, alpha: 1,
+            vx: Math.cos(a) * (0.5 + fxRand() * 0.9),
+            vy: v0 * (0.68 + fxRand() * 0.46),
+            vz: Math.sin(a) * (0.5 + fxRand() * 0.9),
+            size: 0.22 + fxRand() * 0.24 * P, grow: 0.30,
+            ttl: 1.5 + fxRand() * 1.1, alpha: 1,
           });
         }
         if (w === 0) {
@@ -415,17 +504,17 @@
       const n = Math.max(3, Math.min(Math.round(5 + P * 7), Math.round(free() * 0.35)));
       const rr = 0.7 + P * 1.1;
       for (let i = 0; i < n; i++) {
-        const a = (i / n) * Math.PI * 2 + Math.random() * 0.6;
-        const r = rr * (0.4 + Math.random() * 0.8);
+        const a = (i / n) * Math.PI * 2 + fxRand() * 0.6;
+        const r = rr * (0.4 + fxRand() * 0.8);
         emit({
           x: x + Math.cos(a) * r,
-          y: sy + (apex - sy) * (0.55 + Math.random() * 0.45),
+          y: sy + (apex - sy) * (0.55 + fxRand() * 0.45),
           z: z + Math.sin(a) * r,
-          vx: Math.cos(a) * (0.7 + Math.random() * 1.3),
-          vy: -0.5 - Math.random() * 1.6,
-          vz: Math.sin(a) * (0.7 + Math.random() * 1.3),
-          size: 0.12 + Math.random() * 0.18 * P, grow: -0.01,
-          ttl: 1.5 + Math.random() * 1.0, alpha: 0.85,
+          vx: Math.cos(a) * (0.7 + fxRand() * 1.3),
+          vy: -0.5 - fxRand() * 1.6,
+          vz: Math.sin(a) * (0.7 + fxRand() * 1.3),
+          size: 0.12 + fxRand() * 0.18 * P, grow: -0.01,
+          ttl: 1.5 + fxRand() * 1.0, alpha: 0.85,
         });
       }
     });
@@ -881,7 +970,16 @@
         const feel = c._playerCarFeel;
         if (feel ? feel.marine : body === "boat") { c._wiY = c.pos.y; c._wiWet = 1; continue; }
         const mass = (body === "truck" || body === "bus") ? 4200 : 1400;
-        checkEntry(c, c.pos.x, c.pos.y, c.pos.z, "vehicle", mass, Math.abs(+c.v || 0), dt);
+        // THE HEIGHT IS ON THE GROUP, NOT ON pos. THIS DETECTOR NEVER FIRED.
+        // city/vehicles.js writes the ride height straight into
+        // car.group.position (seatCar():325 for traffic, :4840 for the driven
+        // car) and never touches car.pos.y at all — it stays at whatever the
+        // record was constructed with, i.e. 0, forever. So `wet = py <= sy +
+        // 0.25` was asking "is 0 below the sea", the sea is at about -0.48,
+        // and the answer was no for every car in the game in every frame.
+        // A car driven off a quay made no splash, ever, and this is why.
+        const cy = (c.group && c.group.position) ? c.group.position.y : c.pos.y;
+        checkEntry(c, c.pos.x, cy, c.pos.z, "vehicle", mass, Math.abs(+c.v || 0), dt);
       }
     }
 

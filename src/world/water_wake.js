@@ -1,69 +1,78 @@
 /* ============================================================
    src/world/water_wake.js — SPLASHES, WAKES AND RAIN RIPPLES.
 
-   The engine had NO water VFX of any kind. Grepping "splash" across the repo
-   turned up explosion splash-damage and one audio cue in city/swim.js — no
-   particle, no decal, no foam trail. A boat crossed the harbour leaving the
-   surface as undisturbed as a photograph, and a body hitting the water made a
-   noise and nothing else.
-
-   WHY THE SPRITES ARE OFF (owner, 2026-08-11: "anything that renders as
-   camera facing is slop")
+   WHAT WAS WRONG (owner, 2026-08-26: "there is no splashing in any water")
    -------------------------------------------------------------------------
-   THE BILLBOARD POOL DESCRIBED BELOW NO LONGER DRAWS. WATER_WAKE_SPRITES
-   defaults to false and every path into it is dead. Read the rest of this
-   header as the record of what was built and why it was wrong, not as a
-   description of what you see in the game.
+   He was right, and it was one line. CFG.WATER_WAKE_SPRITES defaulted to
+   FALSE, spawn() refused every caller on that flag, and CBZ.waterEmitFree()
+   answered 0 — so the ENTIRE water particle system of this game drew nothing,
+   everywhere, in every mode. Not a starved budget, not a mode gate, not a
+   sub-pixel size: the pool was never allocated and the THREE.Points object
+   was never added to a scene. ~30 live call sites were emitting into it —
+   city/swim.js's entry and exit, shark_sim.js's breach (strength 3.2-4.6),
+   wildlife_tame.js's ridden breach (1.3-9), wildlife_orca.js's spout and
+   landing, marine_frenzy, marine_predation, every bullet through
+   water_impact.js's bus, every rain drop, every boat's bow wave and rooster
+   tail — and every one of them was a function call that returned false.
 
-   The fault is one sentence: a THREE.Points sprite is ALWAYS screen-aligned,
-   and surface foam is a thing that LIES IN THE WATER PLANE. Everything this
-   pool spawned with ride:true — the Kelvin bow rings, the transom boil, the
-   prop wash, the splash collapse rings, the rain dimples — was correctly
-   re-seated onto the live swell every frame and then drawn as a flat disc
-   facing the camera. You play with your eye 1.5-3 m over the sea, so a ring
-   15 m out is seen at about a 6 degree grazing angle: its minor axis should
-   project to roughly a tenth of its major axis, a sliver lying on the water.
-   The billboard drew it at full height. A perfect upright white circle
-   standing on the sea IS a bubble, and that is exactly what the owner saw.
-   Close range made it worse — gl_PointSize clamps at 220 px, so a swimmer's
-   own collapse ring filled a fifth of the screen with one soft white disc
-   (world/water_underwater.js's preset author hit this too and wrote it down:
-   "photographed his own splash sprites from 20 cm away — the frame was foam,
-   not water"). Nothing broke up the shape either: one flat tint, no noise, no
-   rotation (point sprites cannot rotate), depthWrite off, so they stacked as
-   identical translucent discs.
-
-   THE PROOF THE ANSWER WAS ALREADY HERE: the RIBBON below is real geometry
-   whose every vertex re-reads CBZ.citySeaHeightAt, so it lies IN the surface,
-   foreshortens correctly and takes UVs. It is the one part of this file that
-   never read as a bubble, and it still runs. If surface foam is ever rebuilt,
-   it is rebuilt the ribbon's way — flat quads in the water plane, not sprites.
-   The only thing here a billboard was ever honest about is genuinely AIRBORNE
-   spray (chine sheet, rooster tail, ballistic droplets), and that is the one
-   thing worth reviving if the sea ever looks empty.
-
+   WHY IT HAD BEEN TURNED OFF, AND WHY THAT WAS THE WRONG FIX
    -------------------------------------------------------------------------
-   This is one pooled THREE.Points system — ONE draw call, one texture, one
-   custom shader — serving four emitters:
+   The complaint behind it was real (owner, 2026-08-11: "anything that renders
+   as camera facing is slop"). A THREE.Points sprite is ALWAYS screen-aligned,
+   and SURFACE FOAM IS A THING THAT LIES IN THE WATER PLANE. You play with your
+   eye 1.5-3 m over the sea, so a foam ring 15 m out is seen at about a 6 degree
+   grazing angle: it should project to a sliver. The billboard drew it as a
+   perfect upright white circle standing on the water, which IS a bubble, which
+   is what he saw. The previous pass answered that by killing the whole pool —
+   taking the genuinely AIRBORNE spray, which a billboard is honest about, down
+   with the foam it was never suited to.
 
-     • SPLASHES   — droplets thrown up when something enters the water
-                    (city/swim.js's entry, the camera going under, and any
-                    caller of CBZ.waterSplashAt).
-     • BOAT WAKE  — an expanding foam ring pair off the stern that traces the
-                    classic V, plus bow spray once the hull is up on speed.
-     • SWIM WASH  — small rings shed by a swimming player, rate tied to stroke.
-     • RAIN       — dimples on the surface wherever systems/weather.js reports
-                    rain (that system is opt-in, so this is free when dry).
+   THE FIX IS THE SPLIT, NOT THE SWITCH
+   -------------------------------------------------------------------------
+   `ride` already told us which was which and nobody read it as a RENDERING
+   decision. Now it is the only one:
 
-   Rings and droplets share one texture: a 256x128 atlas whose left half is a
-   soft droplet and right half a ring, selected per particle by an attribute,
-   so both live in the same buffer and the same draw.
+     ride:false  AIRBORNE. Ballistic droplets and torn sheet in the air. A
+                 billboard is correct here — a flying drop of water has no
+                 orientation to betray — so these are the pooled THREE.Points,
+                 rewritten: no texture atlas, a procedural shape in
+                 gl_PointCoord, and VELOCITY-ALIGNED. The vertex program
+                 projects a step along the particle's own velocity into screen
+                 space and hands the fragment the angle, so fast spray SMEARS
+                 along its travel into a teardrop and slow spray stays a bead.
+                 Lit from the top so it reads as water catching the light
+                 against a dark sea rather than as smoke.
+     ride:true   SURFACE. Never a billboard again. Real flat geometry IN the
+                 water plane, every vertex re-reading CBZ.citySeaHeightAt so
+                 the foam lies on the live swell and foreshortens honestly at
+                 a grazing angle. Two profiles over one mesh: a RING (a crest
+                 with nothing inside it — impact collapse, Kelvin bow wave,
+                 rain dimple) and a WASH (a filled patch, brightest in the
+                 middle — prop churn, transom boil). The churn texture is
+                 sampled in WORLD space, so an expanding ring travels THROUGH
+                 the foam instead of looking like a decal being scaled up.
 
-   THE POOL IS NOW A PUBLIC PRIMITIVE. world/water_impact.js (the water impact
-   bus) composes its own impact vocabularies — the bullet spurt, the body crown
-   + rebound jet, the depth-charge dome/column/spray — out of THIS pool via
-   CBZ.waterEmit(). There is exactly ONE water particle system in the game and
-   this is it; nothing downstream may allocate a second one.
+   ...plus one thing the old system had no vocabulary for at all:
+
+     THE CROWN SHEET. A real impact does not throw beads, it throws a WALL of
+     water: a hollow cone that erupts from the entry point, flares outward,
+     tears into filaments at the rim and falls back. That silhouette is what
+     makes a splash read as mass. It is a pooled MESH (a 4-ring cone strip per
+     slot, base riding the swell), torn open in the fragment shader by the
+     shared ripple noise so it is columns of water and not a lampshade. One
+     draw call for every crown alive. CBZ.waterCrown() is its hook, and
+     world/water_impact.js's body/vehicle/blast vocabularies drive it.
+
+   So: FOUR drawables, four draw calls, one system.
+     points     airborne spray                  (THREE.Points, procedural)
+     surfMesh   surface foam rings and washes   (flat geometry, rides swell)
+     crownMesh  the erupting sheet              (cone strips, rides swell)
+     ribMesh    the persistent stern trail      (unchanged, it was always right)
+
+   THE RIBBON IS THE PROOF THIS IS THE RIGHT SHAPE: it is the one part of this
+   file that never read as a bubble, and it is the one part that was already
+   real geometry re-seating on the live surface every frame. The surface foam
+   and the crown are built its way.
 
    ============================================================
    CBZ.waterWakeFor(obj, dt, opts?) — THE ONE WAKE HOOK
@@ -118,12 +127,10 @@
    true angle from idle to full throttle with no dispersion maths at all.
    Speed moves the width, the opacity and the emission rate — never the angle.
 
-   THE RIBBON (world/water_wake.js's only mesh)
+   THE RIBBON (the persistent stern trail)
    -------------------------------------------
-   The persistent trail is a trail-mesh strip, not particles. It is not a
-   second particle system: it delivers what the pool structurally CANNOT — a
-   10-second wake at zero pool cost — and by taking the trail off the pool it
-   leaves the whole tier-scaled particle budget for the four spray components.
+   A trail-mesh strip, not particles. It delivers what a particle pool
+   structurally CANNOT — a 10-second wake at zero pool cost.
      • Vertex PAIRS are emitted at the transom, gated by a MINIMUM DISTANCE
        MOVED (so a slow or stopped boat never spams overlapping points).
      • They live in a PREALLOCATED Float32Array ring buffer with a wrapping
@@ -132,7 +139,7 @@
        buffer is built once and never rebuilt. Unused points collapse onto the
        newest vertex, so they cost zero fragments.
      • Every vertex re-reads CBZ.citySeaHeightAt each frame, exactly as the
-       foam rings do, so the trail RIDES the swell instead of cutting crests.
+       foam does, so the trail RIDES the swell instead of cutting crests.
      • V scrolls with arc length since emission, U runs across the rails,
        alpha is exp(-age/tau), width grows as sqrt(age) (turbulent spreading —
        the 19.47deg divergence is the RINGS' job, not the trail's).
@@ -147,28 +154,26 @@
    _throttle it is used directly; otherwise it is recovered from measured
    acceleration plus a reverse term (vehicles.js keeps throttle as a local).
 
-   Every ring re-reads CBZ.citySeaHeightAt each frame, so foam RIDES the swell
-   instead of sitting on a flat plane through the crests — the same oracle the
-   hull and the shader use.
-
    Determinism: this is runtime-only presentation, never world generation, so
-   Math.random is explicitly permitted here (see CLAUDE.md). Nothing in this
-   file touches gameplay state.
+   randomness is permitted here (see CLAUDE.md). It does NOT come from
+   Math.random, though — every jitter in this file is drawn from a file-local
+   mulberry32 (fxRand, below), so the FX can never move the simulation's shared
+   dice. Nothing in this file touches gameplay state.
 
-   Budget: the pool is sized by CBZ.qScale, so tier 0 gets a fifth of the
-   particles tier 4 does, and the whole system self-disables when its budget
-   would be zero. Every component checks how full the pool already is before
-   it emits, in priority order (bow wave and prop wash first, rooster tail
-   last), so three RIBs and a superyacht degrade gracefully instead of
-   starving the rain and the splashes. Ribbons cost the pool NOTHING, so the
-   persistent trail survives budget pressure intact.
+   Budget: every pool is sized by CBZ.qScale, so tier 0 gets a fraction of what
+   tier 4 does. Every wake component checks how full the pools already are
+   before it emits, in priority order (bow wave and prop wash first, rooster
+   tail last), so three RIBs and a superyacht degrade gracefully instead of
+   starving the rain and the splashes. Ribbons cost the pools NOTHING.
 
-   FLAGS
-     CBZ.CONFIG.WATER_WAKE_SPRITES (default OFF, here) the billboard pool. OFF
-                                   -> no buffers, no texture, no Points object,
-                                   and spawn() refuses every caller including
-                                   world/water_impact.js. The ribbon is NOT
-                                   affected. Revert: ?cfg_WATER_WAKE_SPRITES=1
+   COLOUR: this renderer runs the legacy linear pipeline (outputEncoding =
+   sRGBEncoding, ColorManagement off), so an authored hex is treated as LINEAR
+   and comes out brighter than the swatch — the trap that once rendered 0x53211f
+   as rgb(140,85,70). Foam and spray are authored at the top of the range where
+   that transform is nearly the identity, and calibrated against a screenshot of
+   the dark sea rather than against the constant.
+
+   FLAGS (no new ones — see CLAUDE.md's no-flag law)
      CBZ.CONFIG.WATER_WAKE_FX      (default ON, declared in world/water_spec.js)
                                    OFF -> nothing is created and nothing ticks.
      CBZ.CONFIG.WATER_WAKE_V2      (default ON, here) OFF -> the four-component
@@ -179,6 +184,9 @@
                                    ever created; the particles are untouched.
      CBZ.CONFIG.WATER_WAKE_DRIFT   (default ON, here) OFF -> drifting bodies /
                                    flooded cars stop making their own wakes.
+   WATER_WAKE_SPRITES IS GONE. It was the bug. The reason it existed — surface
+   foam drawn as a billboard — cannot happen any more, because surface foam is
+   no longer drawn by the billboard path at all; `ride` routes it to geometry.
 ============================================================ */
 (function () {
   "use strict";
@@ -207,117 +215,104 @@
   // One-line revert: ?cfg_WATER_WAKE_DRIFT=0
   if (CFG.WATER_WAKE_DRIFT == null) CFG.WATER_WAKE_DRIFT = true;
 
-  // WATER_WAKE_SPRITES — THE BILLBOARD POOL, DEFAULT OFF (owner, 2026-08-11).
-  // See "WHY THE SPRITES ARE OFF" in the header. A THREE.Points sprite is
-  // always screen-aligned, and surface foam is a thing that LIES IN THE WATER
-  // PLANE, so every ring this pool drew was a perfect upright white circle
-  // where the geometry demands a foreshortened ellipse — bubbles standing on
-  // the sea. OFF: nothing is built, nothing is spawned, nothing is drawn; the
-  // emitters still run because they also drive the RIBBON, which is real flat
-  // geometry and is untouched.
-  // One-line revert: ?cfg_WATER_WAKE_SPRITES=1
-  if (CFG.WATER_WAKE_SPRITES == null) CFG.WATER_WAKE_SPRITES = false;
+  // The one gate. WATER_V2 is the whole-stack master switch (water_spec.js).
+  function fxOn() { return CFG.WATER_WAKE_FX !== false && CFG.WATER_V2 !== false; }
 
-  // The one gate every billboard path asks. Kept separate from WATER_WAKE_FX
-  // so turning the sprites off cannot take the ribbon down with them.
-  function spritesOn() {
-    return CFG.WATER_WAKE_SPRITES !== false &&
-      CFG.WATER_WAKE_FX !== false && CFG.WATER_V2 !== false;
+  function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
+
+  /* ---- THE FX RANDOM STREAM — NOT Math.random ---------------------------
+     Every jitter value in this file comes from HERE, and the reason is the
+     A/B harness rather than the game. A visual before/after pass seeds ONE
+     global Math.random from an LCG so both columns walk the same dice; any
+     path that draws a different NUMBER of values between the two builds
+     desynchronises everything downstream of it, and presentation is exactly
+     the kind of code whose draw count changes when you improve it (a crown
+     that now takes a seed, a distance gate that now rolls to thin distant
+     spray). FX must never be able to move the simulation's dice.
+
+     So: mulberry32, seeded once, file-local. Same statistical quality, same
+     cost, zero coupling — the sim's stream is untouched no matter how much
+     water this file decides to throw. (The sibling file uses a different
+     seed constant so the two streams cannot march in step.)
+
+     This is still runtime-only presentation and nothing here touches world
+     generation, so it is not a determinism requirement — it is an isolation
+     one. */
+  let _fxSeed = 0x9E3779B9 >>> 0;
+  function fxRand() {
+    _fxSeed = (_fxSeed + 0x6D2B79F5) >>> 0;
+    let t = _fxSeed;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
 
-  const MAX = 640;                 // buffer size (tier-4 cap), allocated once
-  function budget() { return Math.max(0, (CBZ.qScale ? CBZ.qScale(120, MAX) : 360) | 0); }
+  function surfY(x, z) {
+    return CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(x, z)
+      : (CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48);
+  }
 
   const KIND_DROP = 0, KIND_RING = 1;
-
-  let points = null, geo = null, mat = null;
-  let pos = null, aSize = null, aAlpha = null, aKind = null;
-  let vel = null, life = null, maxLife = null, grow = null, size0 = null, ride = null, alpha0 = null;
-  let drag = null;                 // per-particle horizontal damping for riding foam
-  let count = 0;
-  let built = false;
-
-  // Default per-second retention for foam riding the surface (the historical
-  // value). 1 = no damping at all, used by the Kelvin wake rings so their
-  // lateral offset grows linearly with age and the V holds its angle.
-  const RIDE_DRAG = 0.22;
   // tan(19.47deg) — the Kelvin half-angle, a constant of deep-water gravity
   // waves and independent of hull speed.
   const TAN_KELVIN = 0.353553;
+  // Default per-second retention for foam riding the surface. 1 = no damping
+  // at all, used by the Kelvin wake rings so their lateral offset grows
+  // linearly with age and the V holds its angle.
+  const RIDE_DRAG = 0.22;
 
-  // ---- the atlas: soft droplet | ring -------------------------------------
-  // Deterministic canvas drawing (gradients, no noise) — same technique
-  // world/materials.js uses for its procedural textures.
-  function buildTexture() {
-    const W = 256, H = 128;
-    const cv = document.createElement("canvas");
-    cv.width = W; cv.height = H;
-    const g = cv.getContext("2d");
-    g.clearRect(0, 0, W, H);
+  // ============================================================
+  //  A. AIRBORNE SPRAY — the pooled THREE.Points, rewritten
+  // ============================================================
+  // No atlas: the droplet is drawn procedurally in gl_PointCoord, which is what
+  // lets it be VELOCITY-ALIGNED (a texture cannot rotate on a point sprite; a
+  // shader can). BEWARE: gl_PointCoord is Y-DOWN. A previous wave drew a flame
+  // upside down on exactly this, so the very first thing the fragment does is
+  // flip into a Y-UP frame and everything after that reads as screen space.
+  const MAX = 1024;
+  function budget() { return Math.max(0, (CBZ.qScale ? CBZ.qScale(220, MAX) : 620) | 0); }
 
-    // left half: a soft droplet / foam blob
-    let grd = g.createRadialGradient(64, 64, 0, 64, 64, 62);
-    grd.addColorStop(0.00, "rgba(255,255,255,1.00)");
-    grd.addColorStop(0.42, "rgba(240,252,255,0.72)");
-    grd.addColorStop(1.00, "rgba(225,246,250,0.00)");
-    g.fillStyle = grd;
-    g.beginPath(); g.arc(64, 64, 62, 0, Math.PI * 2); g.fill();
+  // Airborne droplets are authored in METRES and they are small — a bullet
+  // spurt bead is 6 cm. At a 40 m gameplay distance that projects to under two
+  // pixels, which is the difference between "spray" and "nothing". Real spray
+  // at distance reads as a white MASS, so every bead is drawn a little larger
+  // than its physical size and the shader enforces a pixel floor. ONE named
+  // constant rather than a fudge scattered through thirty call sites.
+  const DROP_GAIN = 1.9;
+  const DROP_MIN_PX = 2.6;
 
-    // right half: a ring (surface ripple / wake crest)
-    grd = g.createRadialGradient(192, 64, 0, 192, 64, 62);
-    grd.addColorStop(0.00, "rgba(255,255,255,0.00)");
-    grd.addColorStop(0.58, "rgba(255,255,255,0.00)");
-    grd.addColorStop(0.78, "rgba(248,255,255,0.85)");
-    grd.addColorStop(0.93, "rgba(230,248,252,0.30)");
-    grd.addColorStop(1.00, "rgba(230,248,252,0.00)");
-    g.fillStyle = grd;
-    g.beginPath(); g.arc(192, 64, 62, 0, Math.PI * 2); g.fill();
+  let points = null, geo = null, mat = null;
+  let pos = null, aSize = null, aAlpha = null, aVel = null;
+  let vel = null, life = null, maxLife = null, grow = null, size0 = null, alpha0 = null;
+  let count = 0;
 
-    const t = new THREE.CanvasTexture(cv);
-    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
-    t.magFilter = THREE.LinearFilter;
-    t.minFilter = THREE.LinearFilter;
-    t.generateMipmaps = false;
-    t.name = "cbz-water-particles";
-    return t;
-  }
-
-  function build() {
-    if (built) return;
-    // WATER_WAKE_SPRITES off: never allocate the buffers, never build the
-    // texture, never add a Points object to the scene. NOT latched, so the
-    // flag can be flipped back on live and the pool builds on the next call.
-    if (!spritesOn()) return;
-    built = true;
-    if (typeof document === "undefined") return;
-
+  function buildPoints() {
+    if (points || typeof document === "undefined" || !CBZ.scene) return;
     pos = new Float32Array(MAX * 3);
     aSize = new Float32Array(MAX);
     aAlpha = new Float32Array(MAX);
-    aKind = new Float32Array(MAX);
+    aVel = new Float32Array(MAX * 3);
     vel = new Float32Array(MAX * 3);
     life = new Float32Array(MAX);
     maxLife = new Float32Array(MAX);
     grow = new Float32Array(MAX);
     size0 = new Float32Array(MAX);
-    ride = new Float32Array(MAX);        // 1 = re-seat onto the live surface
-    alpha0 = new Float32Array(MAX);      // spawn opacity, faded by age
-    drag = new Float32Array(MAX);        // per-second velocity retention (ride only)
+    alpha0 = new Float32Array(MAX);
 
     geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
     geo.setAttribute("aSize", new THREE.BufferAttribute(aSize, 1).setUsage(THREE.DynamicDrawUsage));
     geo.setAttribute("aAlpha", new THREE.BufferAttribute(aAlpha, 1).setUsage(THREE.DynamicDrawUsage));
-    geo.setAttribute("aKind", new THREE.BufferAttribute(aKind, 1).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute("aVel", new THREE.BufferAttribute(aVel, 3).setUsage(THREE.DynamicDrawUsage));
     geo.setDrawRange(0, 0);
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 1e6);
 
     mat = new THREE.ShaderMaterial({
-      name: "CBZ Water Particles",
+      name: "CBZ Water Spray",
       uniforms: {
-        uMap: { value: buildTexture() },
-        uColor: { value: new THREE.Color(0xe6f4f6) },
+        uTint: { value: new THREE.Color(0x9fd0dd) },   // the cool underside
         uPix: { value: 600 },
+        uAspect: { value: 1.7 },
       },
       transparent: true,
       depthWrite: false,
@@ -326,31 +321,63 @@
       vertexShader: [
         "attribute float aSize;",
         "attribute float aAlpha;",
-        "attribute float aKind;",
+        "attribute vec3 aVel;",
         "uniform float uPix;",
+        "uniform float uAspect;",
         "varying float vAlpha;",
-        "varying float vKind;",
+        "varying float vAng;",
+        "varying float vStretch;",
         "void main() {",
         "  vAlpha = aAlpha;",
-        "  vKind = aKind;",
         "  vec4 mv = modelViewMatrix * vec4(position, 1.0);",
-        "  gl_Position = projectionMatrix * mv;",
-        // perspective point size, clamped so a ring right under the camera
-        // cannot blow past the driver's max point size
-        "  gl_PointSize = clamp(aSize * uPix / max(1.0, -mv.z), 1.0, 220.0);",
+        "  vec4 clip = projectionMatrix * mv;",
+        "  gl_Position = clip;",
+        // THE SMEAR. Project a short step ALONG this droplet's own velocity and
+        // hand the fragment the screen-space angle it makes. A point sprite
+        // cannot rotate, but its CONTENTS can, and that is the whole trick:
+        // fast spray becomes a teardrop lying along its travel, slow spray
+        // stays a bead, and nothing has to be a second particle system.
+        "  vec4 c2 = projectionMatrix * (modelViewMatrix * vec4(position + aVel * 0.035, 1.0));",
+        "  vec2 s0 = clip.xy / max(1e-4, abs(clip.w));",
+        "  vec2 s1 = c2.xy / max(1e-4, abs(c2.w));",
+        "  vec2 d = (s1 - s0) * vec2(uAspect, 1.0);",
+        "  float dl = length(d);",
+        "  vAng = dl > 1e-5 ? atan(d.y, d.x) : 0.0;",
+        "  vStretch = clamp(1.0 + dl * 22.0, 1.0, 3.4);",
+        // Perspective size, floored so distant spray still reads as white water
+        // instead of dissolving into sub-pixel nothing, and capped so a droplet
+        // passing the lens cannot fill the frame.
+        "  float px = aSize * uPix / max(0.35, -mv.z);",
+        "  gl_PointSize = clamp(px * (0.55 + 0.45 * vStretch), " + DROP_MIN_PX.toFixed(1) + ", 190.0);",
         "}",
       ].join("\n"),
       fragmentShader: [
-        "uniform sampler2D uMap;",
-        "uniform vec3 uColor;",
+        "uniform vec3 uTint;",
         "varying float vAlpha;",
-        "varying float vKind;",
+        "varying float vAng;",
+        "varying float vStretch;",
         "void main() {",
-        "  vec2 uv = vec2(gl_PointCoord.x * 0.5 + vKind * 0.5, gl_PointCoord.y);",
-        "  vec4 t = texture2D(uMap, uv);",
-        "  float a = t.a * vAlpha;",
-        "  if (a < 0.012) discard;",
-        "  gl_FragColor = vec4(uColor * t.rgb, a);",
+        // gl_PointCoord IS Y-DOWN. Flip once, here, and every line below reads
+        // as ordinary screen space with +y up.
+        "  vec2 pc = vec2(gl_PointCoord.x - 0.5, 0.5 - gl_PointCoord.y);",
+        "  float ca = cos(vAng), sa = sin(vAng);",
+        "  float rx = (pc.x * ca + pc.y * sa) / vStretch;",   // along travel
+        "  float ry = -pc.x * sa + pc.y * ca;",               // across it
+        // ...and the TAIL narrows: a thrown drop is a head with a thread behind
+        // it, not a symmetric capsule.
+        "  ry *= 1.0 + max(0.0, -rx) * (vStretch - 1.0) * 2.4;",
+        "  float d = length(vec2(rx, ry)) * 2.0;",
+        "  if (d > 1.0) discard;",
+        "  float body = 1.0 - smoothstep(0.30, 1.0, d);",
+        "  float core = pow(1.0 - d, 3.0);",
+        "  float a = vAlpha * (body * 0.80 + core * 0.55);",
+        "  if (a < 0.010) discard;",
+        // LIT FROM ABOVE. The top of a drop is a specular white, the underside
+        // keeps the sea's colour. It costs one mix and it is the whole reason
+        // this reads as water catching light rather than as smoke.
+        "  float up = clamp(pc.y * 2.2 + 0.5, 0.0, 1.0);",
+        "  vec3 col = mix(uTint, vec3(1.0), clamp(0.34 + 0.66 * up * (0.45 + 0.55 * core), 0.0, 1.0));",
+        "  gl_FragColor = vec4(col, min(1.0, a));",
         "  #include <tonemapping_fragment>",
         "  #include <encodings_fragment>",
         "}",
@@ -358,50 +385,642 @@
     });
 
     points = new THREE.Points(geo, mat);
-    points.name = "world-water-particles";
+    points.name = "world-water-spray";
     points.frustumCulled = false;
-    points.renderOrder = 4;             // over the sea, under the rain cloud (5)
+    points.renderOrder = 5;             // over the foam and the crown
     points.userData.dynamic = true;     // batch + farcull exempt
     points.userData.waterFx = true;
     points.visible = false;
-    if (CBZ.scene) CBZ.scene.add(points);
+    CBZ.scene.add(points);
   }
 
-  // ---- spawning -----------------------------------------------------------
-  function spawn(x, y, z, vx, vy, vz, size, growPerSec, ttl, kind, rideSurface, alpha, dragV) {
-    // THE ONE CHOKE POINT. Every emitter in this file and every impact
-    // vocabulary in world/water_impact.js reaches the billboards through here,
-    // so one gate kills all of them and no caller needs to know.
-    if (!spritesOn()) return false;
+  // ---- THE VISIBILITY GATE ------------------------------------------------
+  // A splash 400 m away is a few pixels and it must not be allowed to spend a
+  // slot the splash in FRONT of you is about to need. The wake vocabulary has
+  // always done this (resolve()'s `dg`); the impact bus never did, so a shark
+  // sim breaching across the bay could fill the whole pool with spray nobody
+  // could see and starve the one entry the player was looking at — measured at
+  // 977 of 1024 droplets alive from off-screen sources alone.
+  // Full rate inside NEAR, thinned out to a quarter at FAR, refused past it.
+  // Full rate inside NEAR, thinned to a fifth by FADE, held there out to CUT,
+  // nothing beyond. The floor matters: a megalodon breaching 500 m off is a
+  // thing you are supposed to SEE and turn the boat toward, so it keeps a
+  // fifth of its spray rather than disappearing at a hard edge.
+  const FX_NEAR = 90, FX_FADE = 400, FX_CUT = 700, FX_FLOOR = 0.22;
+  function visGain(x, z) {
+    const cam = CBZ.camera;
+    if (!cam || !cam.position) return 1;
+    const dx = x - cam.position.x, dz = z - cam.position.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 > FX_CUT * FX_CUT) return 0;
+    if (d2 <= FX_NEAR * FX_NEAR) return 1;
+    const d = Math.sqrt(d2);
+    return Math.max(FX_FLOOR, 1 - (d - FX_NEAR) / (FX_FADE - FX_NEAR) * (1 - FX_FLOOR));
+  }
+  function visPass(x, z) {
+    const g = visGain(x, z);
+    return g >= 1 || (g > 0 && fxRand() < g);
+  }
+
+  // One AIRBORNE droplet. Ballistic: gravity is integrated in the tick and it
+  // dies the moment it goes under the live surface.
+  function spawnDrop(x, y, z, vx, vy, vz, size, growPerSec, ttl, alpha) {
     if (!pos || count >= budget()) return false;
+    if (!visPass(x, z)) return false;
     const i = count++;
     pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
     vel[i * 3] = vx; vel[i * 3 + 1] = vy; vel[i * 3 + 2] = vz;
-    size0[i] = size; aSize[i] = size; grow[i] = growPerSec;
+    aVel[i * 3] = vx; aVel[i * 3 + 1] = vy; aVel[i * 3 + 2] = vz;
+    size0[i] = size * DROP_GAIN; aSize[i] = size0[i];
+    grow[i] = growPerSec * DROP_GAIN;
     life[i] = 0; maxLife[i] = ttl > 0 ? ttl : 0.5;
-    aKind[i] = kind;
     alpha0[i] = alpha == null ? 1 : alpha;
     aAlpha[i] = alpha0[i];
-    ride[i] = rideSurface ? 1 : 0;
-    drag[i] = dragV == null ? RIDE_DRAG : dragV;
     return true;
   }
 
-  function kill(i) {
+  function killDrop(i) {
     const last = --count;
     if (i !== last) {
-      pos[i * 3] = pos[last * 3]; pos[i * 3 + 1] = pos[last * 3 + 1]; pos[i * 3 + 2] = pos[last * 3 + 2];
-      vel[i * 3] = vel[last * 3]; vel[i * 3 + 1] = vel[last * 3 + 1]; vel[i * 3 + 2] = vel[last * 3 + 2];
-      aSize[i] = aSize[last]; aAlpha[i] = aAlpha[last]; aKind[i] = aKind[last];
+      for (let k = 0; k < 3; k++) {
+        pos[i * 3 + k] = pos[last * 3 + k];
+        vel[i * 3 + k] = vel[last * 3 + k];
+        aVel[i * 3 + k] = aVel[last * 3 + k];
+      }
+      aSize[i] = aSize[last]; aAlpha[i] = aAlpha[last];
       life[i] = life[last]; maxLife[i] = maxLife[last]; grow[i] = grow[last];
-      size0[i] = size0[last]; ride[i] = ride[last]; alpha0[i] = alpha0[last];
-      drag[i] = drag[last];
+      size0[i] = size0[last]; alpha0[i] = alpha0[last];
     }
   }
 
-  function surfY(x, z) {
-    return CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(x, z)
-      : (CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48);
+  // ============================================================
+  //  B. SURFACE FOAM — REAL FLAT GEOMETRY IN THE WATER PLANE
+  // ============================================================
+  // Everything that used to be a `ride:true` billboard is here instead. Each
+  // slot is an annulus strip: SURF_SEG segments, an inner rail and an outer
+  // rail, every vertex re-reading CBZ.citySeaHeightAt so the foam lies ON the
+  // live swell. Seen at a grazing angle it foreshortens into a sliver, which
+  // is what a ring of foam on the sea actually does and what the billboard
+  // could never do.
+  //
+  // TWO PROFILES over ONE mesh, chosen per slot by aProf:
+  //   RING (1) a crest with nothing inside it — the impact collapse ring, the
+  //            Kelvin bow wave, a rain dimple. Its band is a roughly CONSTANT
+  //            width that the radius travels outward through, not a shape
+  //            scaled up, because that is the difference between a ripple and
+  //            a zooming decal.
+  //   WASH (0) a filled patch brightest in the middle — prop churn, transom
+  //            boil, the white water left where something went in.
+  const SURF_SLOTS = 112;
+  const SURF_SEG = 18;
+  const SURF_VERTS = (SURF_SEG + 1) * 2;
+  function surfBudget() {
+    const n = CBZ.qScale ? CBZ.qScale(26, SURF_SLOTS) : 80;
+    return Math.max(0, Math.min(SURF_SLOTS, n | 0));
+  }
+
+  let surfMesh = null, surfGeo = null, surfMat = null;
+  let surfPos = null, surfA = null, surfProf = null;
+  const surfSlot = [];
+  let surfCount = 0;
+
+  function buildSurf() {
+    if (surfMesh || typeof document === "undefined" || !CBZ.scene || !CBZ.waterRippleTexture) return;
+
+    const V = SURF_SLOTS * SURF_VERTS;                 // 4256 — comfortably Uint16
+    surfPos = new Float32Array(V * 3);
+    surfA = new Float32Array(V);
+    surfProf = new Float32Array(V);
+    const uv = new Float32Array(V * 2);
+    const idx = new Uint16Array(SURF_SLOTS * SURF_SEG * 6);
+    let w = 0;
+    for (let s = 0; s < SURF_SLOTS; s++) {
+      const b = s * SURF_VERTS;
+      for (let k = 0; k <= SURF_SEG; k++) {
+        const v0 = (b + k * 2) * 2, v1 = v0 + 2;
+        uv[v0] = 0; uv[v0 + 1] = k / SURF_SEG;         // inner rail
+        uv[v1] = 1; uv[v1 + 1] = k / SURF_SEG;         // outer rail
+      }
+      for (let k = 0; k < SURF_SEG; k++) {
+        const a0 = b + k * 2, a1 = a0 + 1, b0 = a0 + 2, b1 = a0 + 3;
+        idx[w++] = a0; idx[w++] = b0; idx[w++] = a1;
+        idx[w++] = a1; idx[w++] = b0; idx[w++] = b1;
+      }
+      surfSlot.push({ live: false, x: 0, z: 0, r0: 0, gr: 0, age: 0, ttl: 1, a0: 1, prof: 1, vx: 0, vz: 0, drag: RIDE_DRAG, bear: 0, arc: Math.PI, dirty: false });
+    }
+
+    surfGeo = new THREE.BufferGeometry();
+    surfGeo.setAttribute("position", new THREE.BufferAttribute(surfPos, 3).setUsage(THREE.DynamicDrawUsage));
+    surfGeo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    surfGeo.setAttribute("aA", new THREE.BufferAttribute(surfA, 1).setUsage(THREE.DynamicDrawUsage));
+    surfGeo.setAttribute("aProf", new THREE.BufferAttribute(surfProf, 1).setUsage(THREE.DynamicDrawUsage));
+    surfGeo.setIndex(new THREE.BufferAttribute(idx, 1));
+    surfGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 1e6);
+
+    surfMat = new THREE.ShaderMaterial({
+      name: "CBZ Water Foam",
+      uniforms: {
+        // NO new texture: the sea's own tiling ripple map is already a seamless
+        // high-frequency field and water_spec.js's cbzSurf() already uses it as
+        // a noise lookup. One water noise source, not two.
+        uMap: { value: CBZ.waterRippleTexture() },
+        uColor: { value: new THREE.Color(0xf2fbfd) },
+        uTime: { value: 0 },
+      },
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      side: THREE.DoubleSide,
+      blending: THREE.NormalBlending,
+      vertexShader: [
+        "attribute float aA;",
+        "attribute float aProf;",
+        "varying float vA;",
+        "varying float vProf;",
+        "varying vec2 vUv2;",
+        "varying vec2 vW;",
+        "void main() {",
+        "  vA = aA; vProf = aProf; vUv2 = uv; vW = position.xz;",
+        "  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);",
+        "}",
+      ].join("\n"),
+      fragmentShader: [
+        "uniform sampler2D uMap;",
+        "uniform vec3 uColor;",
+        "uniform float uTime;",
+        "varying float vA;",
+        "varying float vProf;",
+        "varying vec2 vUv2;",
+        "varying vec2 vW;",
+        "void main() {",
+        "  if (vA < 0.004) discard;",
+        "  float u = clamp(vUv2.x, 0.0, 1.0);",
+        // WORLD-ANCHORED churn. The foam texture stays put in the world while
+        // the ring expands THROUGH it — the single cue that separates a real
+        // ripple from a decal being scaled up.
+        "  float n1 = texture2D(uMap, vW * 0.090 + vec2(uTime * 0.011, uTime * -0.008)).r;",
+        "  float n2 = texture2D(uMap, vW * 0.033 + vec2(-uTime * 0.006, uTime * 0.005)).g;",
+        "  float churn = clamp(0.36 + (n1 - 0.5) * 2.4 + (n2 - 0.5) * 1.5, 0.0, 1.0);",
+        // (GLSL ES 1.0 leaves a reversed-edge smoothstep formally undefined, so
+        // every one below is written edge0 < edge1 and inverted by hand — the
+        // same rule water_spec.js's shore functions follow.)
+        "  float ring = 1.0 - smoothstep(0.0, 1.0, abs(u - 0.62) * 2.4);",
+        // A WASH feathers all the way from its centre. The first cut held it
+        // flat to u=0.22 and floored the churn at 0.30, which drew the white
+        // water under a big entry as a hard-edged solid ellipse sitting on the
+        // sea. Now the noise can punch right through it.
+        "  float wash = pow(1.0 - u, 1.6);",
+        "  float ringSel = min(vProf, 1.0);",
+        "  float prof = mix(wash, ring, ringSel);",
+        // vProf 2 == an ARC: a Kelvin crest is a piece of a circle, not a
+        // circle, and drawing the whole ring is what made a boat's wake read
+        // as a chain of hula hoops. Feather both cut ends so the arc has no
+        // visible start or finish.
+        "  prof *= mix(1.0, 1.0 - smoothstep(0.60, 1.0, abs(vUv2.y * 2.0 - 1.0)), step(1.5, vProf));",
+        "  float a = vA * prof * (mix(0.10, 0.34, ringSel) + 0.90 * churn);",
+        // the rim is EATEN by the noise, so the outline is never a clean circle
+        "  a *= 1.0 - smoothstep(0.50, 1.0, u) * (1.0 - churn) * 1.15;",
+        "  if (a < 0.004) discard;",
+        "  gl_FragColor = vec4(uColor, clamp(a, 0.0, 1.0));",
+        "  #include <tonemapping_fragment>",
+        "  #include <encodings_fragment>",
+        "}",
+      ].join("\n"),
+    });
+
+    surfMesh = new THREE.Mesh(surfGeo, surfMat);
+    surfMesh.name = "world-water-foam";
+    surfMesh.frustumCulled = false;
+    surfMesh.renderOrder = 3.5;         // over the sea and the ribbon, under the spray
+    surfMesh.userData.dynamic = true;
+    surfMesh.userData.waterFx = true;
+    surfMesh.visible = false;
+    CBZ.scene.add(surfMesh);
+  }
+
+  // Park a slot's whole vertex region on one point: every triangle in it is
+  // zero-area and rasterises into exactly nothing.
+  function surfCollapse(s) {
+    const b = s * SURF_VERTS;
+    for (let k = 0; k < SURF_VERTS; k++) {
+      const v = b + k;
+      surfPos[v * 3] = 0; surfPos[v * 3 + 1] = -9999; surfPos[v * 3 + 2] = 0;
+      surfA[v] = 0;
+    }
+  }
+
+  // prof: 0 = WASH (filled patch), 1 = RING (full circle), 2 = ARC (a crest
+  // over `arcHalf` radians either side of `bear`, feathered at both ends).
+  function spawnSurf(x, z, dia, growDia, ttl, alpha, prof, vx, vz, dragV, bear, arcHalf) {
+    if (!surfPos) return false;
+    if (!visPass(x, z)) return false;
+    const cap = surfBudget();
+    let slot = -1;
+    for (let s = 0; s < cap; s++) if (!surfSlot[s].live) { slot = s; break; }
+    if (slot < 0) return false;
+    const sl = surfSlot[slot];
+    sl.live = true; sl.dirty = true;
+    sl.x = x; sl.z = z;
+    sl.r0 = Math.max(0.05, dia * 0.5);
+    sl.gr = growDia * 0.5;
+    sl.age = 0; sl.ttl = ttl > 0 ? ttl : 0.8;
+    sl.a0 = alpha == null ? 1 : alpha;
+    sl.prof = prof;
+    sl.vx = vx || 0; sl.vz = vz || 0;
+    sl.drag = Number.isFinite(dragV) ? dragV : RIDE_DRAG;
+    sl.bear = Number.isFinite(bear) ? bear : 0;
+    sl.arc = (prof > 1.5 && arcHalf > 0) ? Math.min(Math.PI, arcHalf) : Math.PI;
+    surfCount++;
+    return true;
+  }
+
+  function surfTick(dt) {
+    if (!surfMesh || !surfPos) return;
+    const cap = surfBudget();
+    let any = false, touched = false;
+    for (let s = 0; s < surfSlot.length; s++) {
+      const sl = surfSlot[s];
+      if (s >= cap || !sl.live) {
+        if (sl.live) { sl.live = false; surfCount--; }
+        if (sl.dirty) { surfCollapse(s); sl.dirty = false; touched = true; }
+        continue;
+      }
+      sl.age += dt;
+      const t = sl.age / sl.ttl;
+      if (t >= 1) { sl.live = false; surfCount--; surfCollapse(s); sl.dirty = false; touched = true; continue; }
+      // the ocean current carries foam; the Kelvin rings pass drag 1 so their
+      // lateral rate never decays and the V they trace holds its true angle.
+      if (sl.drag < 0.999) {
+        const k = Math.pow(sl.drag, dt);
+        sl.vx *= k; sl.vz *= k;
+      }
+      sl.x += sl.vx * dt; sl.z += sl.vz * dt;
+
+      const r = Math.max(0.06, sl.r0 + sl.gr * sl.age);
+      // A RING's band is a roughly constant crest the radius travels outward
+      // through; a WASH is filled to its centre.
+      // A WIDER, SOFTER CREST. The first cut made the band 0.30 + 0.20r with a
+      // crisp profile, and a boat's shed rings then read as a chain of separate
+      // hula hoops lying on the sea instead of as one churned wake. Wide enough
+      // that consecutive rings overlap is what makes a wake a wake.
+      const band = sl.prof > 0.5 ? Math.min(r, 0.45 + r * 0.36) : r;
+      const ri = Math.max(0, r - band);
+      const fade = sl.prof > 0.5
+        ? (1 - t) * (1 - t) * Math.min(1, t * 9)          // rings breathe in, then thin
+        : Math.min(1, (1 - t) * 2.3) * Math.min(1, t * 12);
+      const a = sl.a0 * fade;
+      const b = s * SURF_VERTS;
+      /* RIDE THE SWELL WITH A PLANE, NOT WITH 38 ORACLE CALLS.
+         CBZ.citySeaHeightAt is not free — it sums the swell table AND asks the
+         depth/shore fields for its amplitude — and asking it per VERTEX cost
+         over four thousand calls a frame with the pool full, on top of the
+         ribbon's own eleven hundred. So each patch samples it three times (its
+         centre and two 2 m finite differences) and rides the tangent plane
+         those describe. The longest swell row has a ~100 m wavelength, so a
+         patch a few metres across is a tenth of a wave and a plane fit is
+         accurate to millimetres; the clamp only exists so a 30 m blast ring
+         cannot extrapolate itself into the air. Same oracle either way, so the
+         island backend is used on the island exactly as before. */
+      const cy0 = surfY(sl.x, sl.z);
+      const gx = (surfY(sl.x + 2, sl.z) - cy0) * 0.5;
+      const gz = (surfY(sl.x, sl.z + 2) - cy0) * 0.5;
+      const a0 = sl.bear - sl.arc, span = sl.arc * 2;
+      for (let k = 0; k <= SURF_SEG; k++) {
+        const ang = a0 + (k / SURF_SEG) * span;
+        const cs = Math.cos(ang), sn = Math.sin(ang);
+        const idx0 = cs * ri, idz0 = sn * ri, odx = cs * r, odz = sn * r;
+        const v0 = b + k * 2, v1 = v0 + 1;
+        const iy = Math.max(-1.2, Math.min(1.2, gx * idx0 + gz * idz0));
+        const oy = Math.max(-1.2, Math.min(1.2, gx * odx + gz * odz));
+        surfPos[v0 * 3] = sl.x + idx0; surfPos[v0 * 3 + 1] = cy0 + iy + 0.06; surfPos[v0 * 3 + 2] = sl.z + idz0;
+        surfPos[v1 * 3] = sl.x + odx; surfPos[v1 * 3 + 1] = cy0 + oy + 0.06; surfPos[v1 * 3 + 2] = sl.z + odz;
+        surfA[v0] = a; surfA[v1] = a;
+        surfProf[v0] = sl.prof; surfProf[v1] = sl.prof;
+      }
+      sl.dirty = true;
+      touched = true;
+      any = true;
+    }
+    surfMesh.visible = any;
+    if (touched) {
+      surfGeo.attributes.position.needsUpdate = true;
+      surfGeo.attributes.aA.needsUpdate = true;
+      surfGeo.attributes.aProf.needsUpdate = true;
+    }
+    if (any) surfMat.uniforms.uTime.value = CBZ.waterClock ? CBZ.waterClock() : 0;
+  }
+
+  function surfClearAll() {
+    if (!surfPos) return;
+    for (let s = 0; s < surfSlot.length; s++) {
+      surfSlot[s].live = false; surfSlot[s].dirty = false;
+      surfCollapse(s);
+    }
+    surfCount = 0;
+    if (surfMesh) surfMesh.visible = false;
+  }
+
+  // ============================================================
+  //  C. THE CROWN SHEET — the wall of water an impact throws up
+  // ============================================================
+  // The thing the old vocabulary had no word for. A real entry does not throw
+  // beads, it throws a hollow CONE that erupts, flares outward, tears into
+  // filaments at the rim and falls back — and that silhouette is what makes a
+  // splash read as mass rather than as confetti. A megalodon coming down is a
+  // house-sized sheet; a body off a quay is a metre of it; the same four
+  // numbers describe both.
+  //
+  // Each slot is a 4-ring cone strip whose BASE rides the live swell. The rim
+  // is torn open in the fragment shader by the shared ripple noise, so it is
+  // columns of water and never a lampshade.
+  const CROWN_SLOTS = 8;
+  const CROWN_SEG = 26;
+  const CROWN_RINGS = 4;
+  const CROWN_VERTS = CROWN_RINGS * (CROWN_SEG + 1);
+  function crownBudget() {
+    const n = CBZ.qScale ? CBZ.qScale(2, CROWN_SLOTS) : 6;
+    return Math.max(0, Math.min(CROWN_SLOTS, n | 0));
+  }
+
+  let crownMesh = null, crownGeo = null, crownMat = null;
+  let crownPos = null, crownA = null, crownSeed = null;
+  const crownSlot = [];
+  let crownCount = 0;
+
+  function buildCrown() {
+    if (crownMesh || typeof document === "undefined" || !CBZ.scene || !CBZ.waterRippleTexture) return;
+
+    const V = CROWN_SLOTS * CROWN_VERTS;
+    crownPos = new Float32Array(V * 3);
+    crownA = new Float32Array(V);
+    crownSeed = new Float32Array(V);
+    const uv = new Float32Array(V * 2);
+    const idx = new Uint16Array(CROWN_SLOTS * (CROWN_RINGS - 1) * CROWN_SEG * 6);
+    let w = 0;
+    for (let s = 0; s < CROWN_SLOTS; s++) {
+      const b = s * CROWN_VERTS;
+      for (let j = 0; j < CROWN_RINGS; j++) {
+        for (let k = 0; k <= CROWN_SEG; k++) {
+          const v = (b + j * (CROWN_SEG + 1) + k) * 2;
+          uv[v] = j / (CROWN_RINGS - 1);          // 0 base .. 1 rim
+          uv[v + 1] = k / CROWN_SEG;              // around
+        }
+      }
+      for (let j = 0; j < CROWN_RINGS - 1; j++) {
+        for (let k = 0; k < CROWN_SEG; k++) {
+          const a0 = b + j * (CROWN_SEG + 1) + k, a1 = a0 + 1;
+          const c0 = a0 + (CROWN_SEG + 1), c1 = c0 + 1;
+          idx[w++] = a0; idx[w++] = c0; idx[w++] = a1;
+          idx[w++] = a1; idx[w++] = c0; idx[w++] = c1;
+        }
+      }
+      crownSlot.push({ live: false, x: 0, z: 0, r0: 1, gr: 1, h: 2, age: 0, ttl: 1, a0: 1, dirty: false });
+    }
+
+    crownGeo = new THREE.BufferGeometry();
+    crownGeo.setAttribute("position", new THREE.BufferAttribute(crownPos, 3).setUsage(THREE.DynamicDrawUsage));
+    crownGeo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    crownGeo.setAttribute("aA", new THREE.BufferAttribute(crownA, 1).setUsage(THREE.DynamicDrawUsage));
+    crownGeo.setAttribute("aSeed", new THREE.BufferAttribute(crownSeed, 1).setUsage(THREE.DynamicDrawUsage));
+    crownGeo.setIndex(new THREE.BufferAttribute(idx, 1));
+    crownGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 1e6);
+
+    crownMat = new THREE.ShaderMaterial({
+      name: "CBZ Water Crown",
+      uniforms: {
+        uMap: { value: CBZ.waterRippleTexture() },
+        uColor: { value: new THREE.Color(0xf6fdff) },
+        uTime: { value: 0 },
+      },
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      side: THREE.DoubleSide,
+      blending: THREE.NormalBlending,
+      vertexShader: [
+        "attribute float aA;",
+        "attribute float aSeed;",
+        "varying float vA;",
+        "varying float vSeed;",
+        "varying vec2 vUvC;",
+        "void main() {",
+        "  vA = aA; vSeed = aSeed; vUvC = uv;",
+        "  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);",
+        "}",
+      ].join("\n"),
+      fragmentShader: [
+        "uniform sampler2D uMap;",
+        "uniform vec3 uColor;",
+        "uniform float uTime;",
+        "varying float vA;",
+        "varying float vSeed;",
+        "varying vec2 vUvC;",
+        "void main() {",
+        "  if (vA < 0.004) discard;",
+        "  float u = clamp(vUvC.x, 0.0, 1.0);",
+        // VERTICAL FILAMENTS. A sheet of thrown water is COLUMNS with air
+        // between them, not a membrane — and the first cut of this shader only
+        // tore the rim, which drew a translucent drinking glass standing on
+        // the sea. Three decorrelated lookups, all high-frequency AROUND the
+        // cone and low-frequency UP it, so the noise runs in vertical streaks.
+        "  float n1 = texture2D(uMap, vec2(vUvC.y * 11.0 + vSeed, u * 0.55 - uTime * 0.45)).r;",
+        "  float n2 = texture2D(uMap, vec2(vUvC.y * 4.0 - vSeed * 0.7, u * 0.30 - uTime * 0.24)).g;",
+        "  float n3 = texture2D(uMap, vec2(vUvC.y * 23.0 + vSeed * 1.7, u * 0.90)).b;",
+        "  float fil = clamp(0.34 + (n1 - 0.5) * 2.9 + (n2 - 0.5) * 1.9 + (n3 - 0.5) * 0.9, 0.0, 1.0);",
+        // THE SHEET IS CUT INTO COLUMNS ALL THE WAY DOWN, not just shredded at
+        // the top: at the base a bit under half the circumference is open air,
+        // and by the rim only the strongest fifth survives. That is the whole
+        // difference between a wall of water and a tumbler.
+        "  float cut = fil * 1.55 - 0.52 - u * 0.62;",
+        "  if (cut < 0.0) discard;",
+        "  float a = vA * clamp(cut * 2.4, 0.0, 1.0) * (0.30 + 0.85 * fil);",
+        // AND THE BASE DISSOLVES. The cone's lowest ring is a hard geometric
+        // boundary lying in the water plane, and drawn at full alpha it cut a
+        // crisp white line across the sea at the foot of every splash. Fading
+        // the bottom eighth hands the join to the foam wash underneath, which
+        // has no edge at all.
+        "  a *= smoothstep(0.0, 0.14, u);",
+        "  if (a < 0.006) discard;",
+        "  gl_FragColor = vec4(uColor, clamp(a, 0.0, 1.0));",
+        "  #include <tonemapping_fragment>",
+        "  #include <encodings_fragment>",
+        "}",
+      ].join("\n"),
+    });
+
+    crownMesh = new THREE.Mesh(crownGeo, crownMat);
+    crownMesh.name = "world-water-crown";
+    crownMesh.frustumCulled = false;
+    crownMesh.renderOrder = 4;
+    crownMesh.userData.dynamic = true;
+    crownMesh.userData.waterFx = true;
+    crownMesh.visible = false;
+    CBZ.scene.add(crownMesh);
+  }
+
+  function crownCollapse(s) {
+    const b = s * CROWN_VERTS;
+    for (let k = 0; k < CROWN_VERTS; k++) {
+      const v = b + k;
+      crownPos[v * 3] = 0; crownPos[v * 3 + 1] = -9999; crownPos[v * 3 + 2] = 0;
+      crownA[v] = 0;
+    }
+  }
+
+  // PUBLIC: throw a sheet of water up out of the surface at (x,z).
+  //   r      base radius of the cone, metres
+  //   grow   radial growth per second
+  //   h      peak height of the rim, metres
+  //   ttl    seconds; the sheet rises through ~a third of it and falls back
+  //   alpha  peak opacity
+  // Returns true if a slot was free. world/water_impact.js's body / vehicle /
+  // blast vocabularies are the callers; nothing else needs to know it exists.
+  CBZ.waterCrown = function (o) {
+    if (!o || !fxOn()) return false;
+    buildCrown();
+    if (!crownPos) return false;
+    // YOU CANNOT SEE A CROWN YOU ARE STANDING INSIDE, and drawing it anyway
+    // fills the whole frame with white — the exact failure world/water_under-
+    // water.js's preset author recorded ("photographed his own splash sprites
+    // from 20 cm away — the frame was foam, not water"), and its
+    // camera-breaks-the-surface call lands the eye at the centre of the entry
+    // by construction. The droplets still fly (spray on the lens is real); the
+    // SHEET stands down whenever the lens is inside its flared footprint and
+    // below its rim.
+    const cam = CBZ.camera;
+    const r0 = Math.max(0.12, +o.r || 0.5);
+    const h = Math.max(0.2, +o.h || 1.5);
+    if (cam && cam.position) {
+      const dx = cam.position.x - (+o.x || 0), dz = cam.position.z - (+o.z || 0);
+      const d2 = dx * dx + dz * dz;
+      if (d2 > FX_CUT * FX_CUT) return false;     // over the horizon of interest
+      const foot = r0 * 1.62 + 0.6;
+      if (d2 < foot * foot &&
+          cam.position.y < surfY(+o.x || 0, +o.z || 0) + h) return false;
+    }
+    const cap = crownBudget();
+    let slot = -1;
+    for (let s = 0; s < cap; s++) if (!crownSlot[s].live) { slot = s; break; }
+    if (slot < 0) {
+      // A bigger splash outranks a smaller one that is already fading: the
+      // megalodon must never lose its sheet to three raindrops' worth of crown.
+      let worst = -1, worstScore = 1e9;
+      for (let s = 0; s < cap; s++) {
+        const c = crownSlot[s];
+        const score = c.h * (1 - c.age / c.ttl);
+        if (score < worstScore) { worstScore = score; worst = s; }
+      }
+      if (worst < 0 || worstScore >= h * 0.6) return false;
+      slot = worst;
+      crownCount--;
+    }
+    const sl = crownSlot[slot];
+    sl.live = true; sl.dirty = true;
+    sl.x = +o.x || 0; sl.z = +o.z || 0;
+    sl.r0 = r0;
+    sl.gr = Number.isFinite(+o.grow) ? +o.grow : sl.r0 * 0.9;
+    sl.h = h;
+    sl.age = 0; sl.ttl = (+o.ttl > 0) ? +o.ttl : 0.9;
+    sl.a0 = o.alpha == null ? 0.85 : +o.alpha;
+    sl.seed = fxRand() * 10;
+    crownCount++;
+    return true;
+  };
+
+  function crownTick(dt) {
+    if (!crownMesh || !crownPos) return;
+    const cap = crownBudget();
+    let any = false, touched = false;
+    for (let s = 0; s < crownSlot.length; s++) {
+      const sl = crownSlot[s];
+      if (s >= cap || !sl.live) {
+        if (sl.live) { sl.live = false; crownCount--; }
+        if (sl.dirty) { crownCollapse(s); sl.dirty = false; touched = true; }
+        continue;
+      }
+      sl.age += dt;
+      const t = sl.age / sl.ttl;
+      if (t >= 1) { sl.live = false; crownCount--; crownCollapse(s); sl.dirty = false; touched = true; continue; }
+      const r = sl.r0 + sl.gr * sl.age;
+      // UP FAST, DOWN SLOW. sin(pi * t^0.62) peaks around a third of the life
+      // and returns to zero at the end, which is the beat of a real column:
+      // the water is thrown, it hangs, it comes back.
+      const hh = sl.h * Math.sin(Math.PI * Math.pow(t, 0.62));
+      const fade = Math.min(1, t * 14) * (1 - t * t);
+      const b = s * CROWN_VERTS;
+      // one plane fit per sheet, for the same reason the foam does it
+      const cy0 = surfY(sl.x, sl.z);
+      const gx = (surfY(sl.x + 2, sl.z) - cy0) * 0.5;
+      const gz = (surfY(sl.x, sl.z + 2) - cy0) * 0.5;
+      for (let k = 0; k <= CROWN_SEG; k++) {
+        const ang = (k / CROWN_SEG) * Math.PI * 2;
+        const cs = Math.cos(ang), sn = Math.sin(ang);
+        const by = cy0 + Math.max(-1.2, Math.min(1.2, gx * cs * r + gz * sn * r));
+        // A RAGGED RIM. Water does not come up to one height all the way round
+        // — the first cut did, and a constant-height cone is exactly what read
+        // as a tumbler. Two harmonics of the angle, phased off the slot's own
+        // seed, so no two sheets in flight have the same profile and none of
+        // them has a flat top. (Cheap: it is the same two sines per vertex ring
+        // the swell table already costs.)
+        const wob = Math.max(0.34, 0.70 + 0.30 * Math.sin(ang * 3 + sl.seed * 6.1) +
+          0.18 * Math.sin(ang * 7 - sl.seed * 3.3));
+        const hAng = hh * wob;
+        for (let j = 0; j < CROWN_RINGS; j++) {
+          const fj = j / (CROWN_RINGS - 1);
+          const rr = r * (1 + 1.05 * fj * fj);          // flares HARD outward
+          const v = b + j * (CROWN_SEG + 1) + k;
+          crownPos[v * 3] = sl.x + cs * rr;
+          crownPos[v * 3 + 1] = by + 0.05 + hAng * Math.pow(fj, 0.78);
+          crownPos[v * 3 + 2] = sl.z + sn * rr;
+          crownA[v] = sl.a0 * fade * (1 - 0.42 * fj);
+          crownSeed[v] = sl.seed;
+        }
+      }
+      sl.dirty = true;
+      touched = true;
+      any = true;
+    }
+    crownMesh.visible = any;
+    if (touched) {
+      crownGeo.attributes.position.needsUpdate = true;
+      crownGeo.attributes.aA.needsUpdate = true;
+      crownGeo.attributes.aSeed.needsUpdate = true;
+    }
+    if (any) crownMat.uniforms.uTime.value = CBZ.waterClock ? CBZ.waterClock() : 0;
+  }
+
+  function crownClearAll() {
+    if (!crownPos) return;
+    for (let s = 0; s < crownSlot.length; s++) { crownSlot[s].live = false; crownSlot[s].dirty = false; crownCollapse(s); }
+    crownCount = 0;
+    if (crownMesh) crownMesh.visible = false;
+  }
+
+  // ---- the one builder every path calls ------------------------------------
+  // NOT LATCHED on failure: a call before CBZ.scene exists must be a no-op that
+  // retries, never a permanent self-disable. (The old build() latched `built`
+  // even when it bailed, so one early caller could orphan the whole system.)
+  function build() {
+    if (!fxOn()) return;
+    buildPoints();
+    buildSurf();
+    buildCrown();
+  }
+
+  // ---- THE DISPATCHER ------------------------------------------------------
+  // `ride` is the RENDERING decision now, and it is the only one. Everything on
+  // the surface is geometry in the water plane; everything in the air is a
+  // billboard, which is the one thing a billboard is honest about.
+  function spawn(x, y, z, vx, vy, vz, size, growPerSec, ttl, kind, rideSurface, alpha, dragV, bear, arcHalf) {
+    if (!fxOn()) return false;
+    if (rideSurface || kind === KIND_RING) {
+      const ring = kind === KIND_RING;
+      return spawnSurf(x, z, size, growPerSec, ttl,
+        alpha == null ? 1 : alpha,
+        ring ? (arcHalf > 0 ? 2 : 1) : 0,
+        vx, vz, dragV, bear, arcHalf);
+    }
+    return spawnDrop(x, y, z, vx, vy, vz, size, growPerSec, ttl, alpha);
   }
 
   // ============================================================
@@ -409,23 +1028,24 @@
   // ============================================================
   // world/water_impact.js builds every impact vocabulary (bullet spurt, body
   // crown + rebound jet, depth-charge dome / column / falling spray) out of
-  // THIS call, so the whole game still draws its water in one THREE.Points
-  // pass. Fields (all optional except x/y/z):
+  // THIS call. Fields (all optional except x/y/z):
   //   x,y,z      spawn point (world)
-  //   vx,vy,vz   initial velocity; droplets are ballistic, rings drift
-  //   size       start size (world metres at the point-size reference)
-  //   grow       size change per second (rings expand, droplets shrink)
+  //   vx,vy,vz   initial velocity; airborne drops are ballistic, foam drifts
+  //   size       start DIAMETER (world metres)
+  //   grow       diameter change per second (rings expand, droplets shrink)
   //   ttl        lifetime in seconds
-  //   ring       true -> the ring half of the atlas, false -> a droplet
-  //   ride       true -> re-seat on the LIVE swell every frame (surface foam)
+  //   ring       true -> a surface crest ring; false -> a droplet or a wash
+  //   ride       true -> SURFACE geometry riding the live swell
+  //              false -> an AIRBORNE billboard droplet
   //   alpha      spawn opacity
-  //   drag       per-second velocity retention for riding foam (1 = none)
+  //   drag       per-second velocity retention for surface foam (1 = none)
+  //   bear,arc   ring only: draw a CREST over `arc` radians either side of the
+  //              bearing `bear` instead of a whole circle, feathered at both
+  //              ends. A Kelvin bow wave is an arc; a collapse ring is not.
   // Returns true if a slot was available. Never throws, never allocates.
   CBZ.waterEmit = function (o) {
-    if (!o) return false;
-    if (CFG.WATER_WAKE_FX === false || CFG.WATER_V2 === false) return false;
+    if (!o || !fxOn()) return false;
     build();
-    if (!pos) return false;
     return spawn(+o.x || 0, +o.y || 0, +o.z || 0,
       +o.vx || 0, +o.vy || 0, +o.vz || 0,
       o.size > 0 ? +o.size : 0.14,
@@ -434,65 +1054,76 @@
       o.ring ? KIND_RING : KIND_DROP,
       !!o.ride,
       o.alpha == null ? 1 : +o.alpha,
-      Number.isFinite(o.drag) ? +o.drag : RIDE_DRAG);
+      Number.isFinite(o.drag) ? +o.drag : RIDE_DRAG,
+      +o.bear || 0,
+      o.arc > 0 ? +o.arc : 0);
   };
 
-  // Slots still free this frame. Impact vocabularies size their bursts against
-  // this so a depth charge borrows from the SAME tier-scaled budget the wakes
-  // and rain live in instead of starving them.
+  // Airborne slots still free this frame. Impact vocabularies size their bursts
+  // against this so a depth charge borrows from the SAME tier-scaled budget the
+  // wakes and rain live in instead of starving them.
+  // Free SURFACE slots. The rain gate asks this up to 46 times a second, so it
+  // must not be CBZ.waterFxAudit() — that allocates an object per raindrop.
+  CBZ.waterFoamFree = function () {
+    if (!fxOn()) return 0;
+    build();
+    if (!surfPos) return 0;
+    return Math.max(0, surfBudget() - surfCount);
+  };
+
   CBZ.waterEmitFree = function () {
-    // Zero with the sprites off, so an impact vocabulary sizes its burst at
-    // nothing and never runs the loop at all, instead of computing a hundred
-    // ballistic beads for a spawn() that will refuse every one.
-    if (!spritesOn()) return 0;
+    if (!fxOn()) return 0;
+    build();
+    if (!pos) return 0;
     return Math.max(0, budget() - count);
   };
 
-  // PUBLIC (legacy, signature FROZEN — city/swim.js and world/water_underwater.js
-  // are the existing callers): a body hitting (or leaving) the water.
-  // `strength` 0..1+ scales the droplet count and how high they are thrown.
+  // PUBLIC (legacy, signature FROZEN — city/swim.js, shark_sim.js,
+  // wildlife_tame.js, wildlife_orca.js, marine_frenzy.js, marine_predation.js
+  // and world/water_underwater.js are the callers): a body hitting (or leaving)
+  // the water. `strength` scales the whole event.
   //
-  // This now DELEGATES to the impact bus (CBZ.waterHit, world/water_impact.js)
-  // so those two callers get the calibrated crown + rebound-jet + settling-ring
-  // vocabulary and the momentum-scaled audio for free, with no edit to their
-  // files. The inline burst below stays as the fallback for when the bus is
-  // absent (flag off, file not loaded) or the point is not over water.
+  // THE RANGE IS 0.15..9, NOT 0.15..2.5. The old clamp was authored when the
+  // only caller was a swimmer stepping off a quay, and it silently flattened
+  // every big caller written since: shark_sim.js asks for 4.6 on a breach,
+  // wildlife_tame.js asks for up to 9 on a ridden megalodon's reentry, and both
+  // were being served a 2.5 — the same splash a person makes. Mass now scales
+  // with the SQUARE of the dial, so the dial is a size and the momentum curve
+  // in water_impact.js does the rest: 1 is a person, 4 is a car off a bridge,
+  // 9 is twenty tonnes of shark coming down.
   CBZ.waterSplashAt = function (x, y, z, strength) {
-    if (CFG.WATER_WAKE_FX === false || CFG.WATER_V2 === false) return;
-    const s = Math.max(0.15, Math.min(2.5, +strength || 1));
+    if (!fxOn()) return;
+    const s = Math.max(0.15, Math.min(9, +strength || 1));
     if (CBZ.waterHit) {
-      // A body-class entry: mass fixed at a human, speed recovered from the
-      // caller's strength dial so momentum (and therefore splash size AND
-      // loudness) still track what the caller asked for.
       try {
-        if (CBZ.waterHit(x, y, z, { kind: "body", mass: 78, speed: 2.6 + s * 5.6 })) return;
+        if (CBZ.waterHit(x, y, z, { kind: "body", mass: 78 * s * s, speed: 3 + s * 2.4 })) return;
       } catch (e) {}
     }
+    // Fallback for when the bus is absent (file not loaded) or the point is not
+    // over water: the same shape, authored inline.
     build();
     if (!pos) return;
     const sy = surfY(x, z);
-    const n = Math.round(6 + s * 12);
+    const n = Math.min(64, Math.round(7 + s * 7));
     for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = 0.25 + Math.random() * 0.7 * s;
-      spawn(x + Math.cos(a) * r * 0.4, sy + 0.05, z + Math.sin(a) * r * 0.4,
-        Math.cos(a) * r * 1.7, 1.6 + Math.random() * 2.6 * s, Math.sin(a) * r * 1.7,
-        0.16 + Math.random() * 0.20 * s, -0.02, 0.45 + Math.random() * 0.5, KIND_DROP, false, 0.95);
+      const a = fxRand() * Math.PI * 2;
+      const r = 0.25 + fxRand() * 0.7 * s;
+      spawnDrop(x + Math.cos(a) * r * 0.4, sy + 0.05, z + Math.sin(a) * r * 0.4,
+        Math.cos(a) * r * 1.7, 2.2 + fxRand() * 2.6 * s, Math.sin(a) * r * 1.7,
+        0.14 + fxRand() * 0.16 * s, -0.02, 0.5 + fxRand() * 0.5, 0.95);
     }
-    // the collapse ring left behind
-    spawn(x, sy + 0.03, z, 0, 0, 0, 0.5 * s, 3.2 * s, 1.15, KIND_RING, true, 0.85);
-    spawn(x, sy + 0.03, z, 0, 0, 0, 0.25 * s, 1.7 * s, 0.8, KIND_RING, true, 0.7);
+    CBZ.waterCrown({ x: x, z: z, r: 0.30 + s * 0.42, grow: 0.8 + s * 0.9, h: 0.9 + s * 1.5, ttl: 0.55 + s * 0.13, alpha: 0.8 });
+    spawnSurf(x, z, 0.9 * s, 6.4 * s, 1.2, 0.85, 1, 0, 0, RIDE_DRAG);
   };
 
   // PUBLIC: a persistent ripple/foam ring, e.g. a swimmer's stroke wash.
   CBZ.waterRippleAt = function (x, z, size, ttl) {
-    if (CFG.WATER_WAKE_FX === false || CFG.WATER_V2 === false) return;
+    if (!fxOn()) return;
     build();
-    if (!pos) return;
-    spawn(x, surfY(x, z) + 0.03, z, 0, 0, 0,
-      size > 0 ? size : 0.35, (size > 0 ? size : 0.35) * 1.6,
-      ttl > 0 ? ttl : 1.1, KIND_RING, true, 0.7);
+    const d = size > 0 ? size : 0.35;
+    spawnSurf(x, z, d, d * 1.7, ttl > 0 ? ttl : 1.1, 0.7, 1, 0, 0, RIDE_DRAG);
   };
+
 
   // ============================================================
   //  THE TRAILING RIBBON — the persistent stern wake, one draw call
@@ -811,7 +1442,6 @@
   // ============================================================
   //  CBZ.waterWakeFor — the one hook, and the four components
   // ============================================================
-  function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
   function fin(v) { return Number.isFinite(v) ? +v : null; }
   // first finite positive of the arguments, else the last one
   function pickPos(a, b, c, d) {
@@ -848,7 +1478,14 @@
   // How full the pool already is. Components emit in priority order, so under
   // load a superyacht plus three RIBs lose the rooster tail before they lose
   // the bow wave, and the rain and splash budget is never starved.
-  function room(frac) { return count < budget() * frac; }
+  // ...measured across BOTH pools, because a wake component spends whichever
+  // one its `ride` flag routes it to and the fuller of the two is the one that
+  // is about to refuse. Taking only the droplet count here let a harbour full
+  // of boats fill the foam mesh and keep asking for more rings.
+  function room(frac) {
+    const b = Math.max(1, budget()), sb = Math.max(1, surfBudget());
+    return Math.max(count / b, surfCount / sb) < frac;
+  }
 
   function resolve(obj, opts, dt) {
     const st = _st;
@@ -965,12 +1602,17 @@
     const off = st.beam * 0.40 + 0.12;
     for (let k = 0; k < n; k++) {
       for (let s = -1; s <= 1; s += 2) {
+        // ...and it is shed as an ARC facing OUTBOARD, not as a full circle.
+        // The Kelvin crest is the outboard piece; drawing the inboard half too
+        // laid a hoop across the boat's own track and the shed rings then read
+        // as a chain of rings on the sea instead of one continuous V.
         spawn(bx + st.rx * off * s, by, bz + st.rz * off * s,
           st.rx * vLat * s, 0, st.rz * vLat * s,
           0.30 + amp * 0.55 + st.beam * 0.10,
           (0.9 + amp * 1.6) * (0.6 + st.beam * 0.18),
           1.5 + amp * 1.4,
-          KIND_RING, true, (0.18 + amp * 0.44) * st.dg, 1.0);
+          KIND_RING, true, (0.18 + amp * 0.44) * st.dg, 1.0,
+          Math.atan2(st.rz * s, st.rx * s), 1.05);
       }
     }
   }
@@ -1029,13 +1671,13 @@
     }
     // hard churn throws loose white water — along the SAME jet, so reverse and
     // hard-over both look like the thrust is actually going somewhere
-    if (st.churn > 0.55 && room(0.80) && Math.random() < st.churn * 0.55 * st.dg) {
-      const a = Math.random() * Math.PI * 2;
+    if (st.churn > 0.55 && room(0.80) && fxRand() < st.churn * 0.55 * st.dg) {
+      const a = fxRand() * Math.PI * 2;
       spawn(px, py + 0.06, pz,
         wx * jet * 0.5 + Math.cos(a) * 0.7,
-        0.9 + Math.random() * 1.3 * st.churn,
+        0.9 + fxRand() * 1.3 * st.churn,
         wz * jet * 0.5 + Math.sin(a) * 0.7,
-        0.09 + Math.random() * 0.09, -0.03, 0.34, KIND_DROP, false, 0.72);
+        0.09 + fxRand() * 0.09, -0.03, 0.34, KIND_DROP, false, 0.72);
     }
   }
 
@@ -1057,17 +1699,22 @@
       const lat = 2.4 + 5.4 * pl + st.spd * 0.10;
       for (let k = 0; k < n; k++) {
         const s = (k & 1) ? 1 : -1;
-        const j = (Math.random() - 0.5) * st.loa * 0.30;
+        const j = (fxRand() - 0.5) * st.loa * 0.30;
         // A planing powerboat heels INTO its turn, so the INSIDE chine is the
         // loaded one and throws the harder sheet. `s === sign(steer)` is that
         // side, and it costs one multiply.
         const bias = 1 + 0.45 * st.steer * s;
+        // The sheet a planing hull throws is BEAM-SIZED, not bead-sized — a
+        // 2.1 m runabout at 14 m/s puts up a wall of white a metre high. The
+        // old fixed 0.08-0.18 m drew a RIB's chine spray at the same grain as
+        // a raindrop and it disappeared past twenty metres.
         spawn(cx + st.fx * j + st.rx * off * s, cy, cz + st.fz * j + st.rz * off * s,
           st.rx * lat * bias * s + st.fx * st.spd * 0.30,
-          0.45 + pl * 1.15 + Math.random() * 0.5,
+          0.9 + pl * 2.0 + fxRand() * 0.9,
           st.rz * lat * bias * s + st.fz * st.spd * 0.30,
-          0.08 + Math.random() * 0.10, -0.04, 0.28 + pl * 0.24,
-          KIND_DROP, false, (0.46 + pl * 0.40) * st.dg);
+          (0.11 + fxRand() * 0.13) * (0.7 + st.beam * 0.24 + pl * 0.5), -0.04,
+          0.34 + pl * 0.34,
+          KIND_DROP, false, (0.50 + pl * 0.42) * st.dg);
       }
     }
     // the rooster tail is genuinely ballistic — velocity plus gravity, short
@@ -1081,13 +1728,14 @@
       const ty = surfY(st.sx, st.sz) + 0.05;
       const up = 2.2 + pl * 4.6 + st.spd * 0.12;
       for (let k = 0; k < n; k++) {
-        const j = (Math.random() - 0.5) * st.beam * 0.9;
+        const j = (fxRand() - 0.5) * st.beam * 0.9;
         spawn(st.sx + st.rx * j, ty, st.sz + st.rz * j,
-          -st.fx * (0.8 + st.spd * 0.10) + st.rx * (Math.random() - 0.5) * 1.5,
-          up * (0.75 + Math.random() * 0.5),
-          -st.fz * (0.8 + st.spd * 0.10) + st.rz * (Math.random() - 0.5) * 1.5,
-          0.10 + Math.random() * 0.13, -0.03, 0.5 + pl * 0.5,
-          KIND_DROP, false, (0.45 + pl * 0.35) * st.dg);
+          -st.fx * (0.8 + st.spd * 0.10) + st.rx * (fxRand() - 0.5) * 1.5,
+          up * (0.75 + fxRand() * 0.5),
+          -st.fz * (0.8 + st.spd * 0.10) + st.rz * (fxRand() - 0.5) * 1.5,
+          (0.13 + fxRand() * 0.16) * (0.7 + st.beam * 0.22 + pl * 0.45), -0.03,
+          0.6 + pl * 0.6,
+          KIND_DROP, false, (0.50 + pl * 0.38) * st.dg);
       }
     }
   }
@@ -1113,7 +1761,7 @@
         st.rx * (0.5 + vN * 1.0) * s + st.fx * st.spd * 0.16,
         0.35 + vN * 0.55,
         st.rz * (0.5 + vN * 1.0) * s + st.fz * st.spd * 0.16,
-        0.07 + Math.random() * 0.07, -0.03, 0.22 + vN * 0.14,
+        0.07 + fxRand() * 0.07, -0.03, 0.22 + vN * 0.14,
         KIND_DROP, false, (0.30 + vN * 0.22) * st.dg);
     }
   }
@@ -1206,9 +1854,9 @@
     swimAcc += dt;
     if (swimAcc >= 0.30) {
       swimAcc = 0;
-      const a = Math.random() * Math.PI * 2, r = 0.35 + Math.random() * 0.4;
+      const a = fxRand() * Math.PI * 2, r = 0.35 + fxRand() * 0.4;
       CBZ.waterRippleAt(P.pos.x + Math.cos(a) * r, P.pos.z + Math.sin(a) * r,
-        0.30 + Math.random() * 0.2, 1.0);
+        0.30 + fxRand() * 0.2, 1.0);
     }
 
     if (!swimHave) { swimPx = P.pos.x; swimPz = P.pos.z; swimHave = true; return; }
@@ -1277,8 +1925,8 @@
     rainAcc -= n;
     if (n > 12) n = 12;
     for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = 3 + Math.sqrt(Math.random()) * 34;
+      const a = fxRand() * Math.PI * 2;
+      const r = 3 + Math.sqrt(fxRand()) * 34;
       const x = cam.position.x + Math.cos(a) * r, z = cam.position.z + Math.sin(a) * r;
       if (!CBZ.cityWaterAt(x, z)) continue;
       const sy = surfY(x, z);
@@ -1295,43 +1943,32 @@
 
   // Order 60 (CBZ.PRIO.PRESENTATION): after vehicles (<=38.5), buoyancy (38.5)
   // and swim (45.8) have settled every position this reads, and before the HUD.
+  function hideAll() {
+    if (points) points.visible = false;
+    if (surfMesh) surfMesh.visible = false;
+    if (crownMesh) crownMesh.visible = false;
+    if (ribMesh) ribMesh.visible = false;
+  }
+
   CBZ.onUpdate(CBZ.PRIO ? CBZ.PRIO.PRESENTATION : 60, function (dt) {
     frameSeq++;
-    if (CFG.WATER_WAKE_FX === false || CFG.WATER_V2 === false) {
-      if (points) points.visible = false;
-      if (ribMesh) ribMesh.visible = false;
-      return;
-    }
+    if (!fxOn()) { hideAll(); return; }
     const g = CBZ.game;
-    // The swim wash, the splash rings and the rain dimples are water effects,
-    // not city effects. On the island this pass hid the whole buffer, so
-    // city/swim.js's waterSplashAt() on every entry and exit emitted into a
-    // points cloud that was never drawn — a silent, invisible plunge.
+    // The wash, the splash rings and the rain dimples are WATER effects, not
+    // city effects: CBZ.waterModeOn() is true in the city AND on the survival /
+    // shark-sim island, which is the whole reason a plunge on the island draws
+    // anything at all.
     if (!g || !(CBZ.waterModeOn ? CBZ.waterModeOn() : g.mode === "city")) {
-      if (points) points.visible = false;
+      hideAll();
       count = 0;
+      surfClearAll();
+      crownClearAll();
       ribClearAll();
       return;
     }
     build();
-    // SPRITES OFF: the emitters below STILL RUN, because CBZ.waterWakeFor also
-    // feeds the ribbon — real geometry whose vertices sit in the water surface,
-    // which is the one part of this system that was never a billboard. Only
-    // spawn() is dead. Skipping the emitters here would have taken every boat's
-    // trail with the bubbles.
-    if (!spritesOn()) {
-      if (points) points.visible = false;
-      count = 0;
-      dt = Math.min(0.1, dt || 0);
-      emitBoatWakes(dt);
-      emitSwim(dt);
-      emitDriftWakes(dt);
-      emitRain(dt);
-      ribTick(dt);
-      return;
-    }
     if (!points || !pos) return;
-    if (budget() <= 0) { points.visible = false; ribClearAll(); return; }
+    if (budget() <= 0) { hideAll(); surfClearAll(); crownClearAll(); ribClearAll(); return; }
 
     dt = Math.min(0.1, dt || 0);
 
@@ -1340,41 +1977,39 @@
     emitDriftWakes(dt);
     emitRain(dt);
     ribTick(dt);
+    surfTick(dt);
+    crownTick(dt);
 
-    // ---- integrate ----
+    // ---- integrate the AIRBORNE spray ----
+    // Ballistic, and it dies the instant it goes back under the live surface —
+    // which is what makes a burst read as water thrown and caught rather than
+    // as a puff that dissolves in mid-air.
     for (let i = count - 1; i >= 0; i--) {
       life[i] += dt;
       const t = life[i] / maxLife[i];
-      if (t >= 1) { kill(i); continue; }
-      if (ride[i]) {
-        // foam sits ON the water: re-seat it on the live swell every frame,
-        // and let the ocean current drift it, so a wake does not sit still in
-        // a moving sea.
-        const x = pos[i * 3] + vel[i * 3] * dt, z = pos[i * 3 + 2] + vel[i * 3 + 2] * dt;
-        pos[i * 3] = x; pos[i * 3 + 2] = z;
-        pos[i * 3 + 1] = surfY(x, z) + 0.035;
-        // drag[i] === 1 -> undamped: the Kelvin wake rings keep their lateral
-        // rate forever so the V they trace holds a true 19.47deg half-angle.
-        const dr = drag[i];
-        if (dr < 0.999) {
-          const k = Math.pow(dr, dt);
-          vel[i * 3] *= k;
-          vel[i * 3 + 2] *= k;
+      if (t >= 1) { killDrop(i); continue; }
+      vel[i * 3 + 1] -= 9.2 * dt;
+      pos[i * 3] += vel[i * 3] * dt;
+      pos[i * 3 + 1] += vel[i * 3 + 1] * dt;
+      pos[i * 3 + 2] += vel[i * 3 + 2] * dt;
+      // the shader reads the LIVE velocity to orient the smear, so a droplet
+      // arcs over and its streak turns over with it.
+      aVel[i * 3] = vel[i * 3]; aVel[i * 3 + 1] = vel[i * 3 + 1]; aVel[i * 3 + 2] = vel[i * 3 + 2];
+      // ONLY A FALLING DROPLET CAN CROSS THE SURFACE DOWNWARD, so only a
+      // falling droplet has to pay for the oracle. Exactly equivalent, and it
+      // halves the sea queries this loop makes with the pool full.
+      const sy = vel[i * 3 + 1] < 0 ? surfY(pos[i * 3], pos[i * 3 + 2]) : -1e9;
+      if (pos[i * 3 + 1] < sy) {
+        // A drop that lands leaves a mark. Only the bigger ones, and only
+        // sometimes, or a megalodon's crown would spend the whole foam pool on
+        // its own rain.
+        if (aSize[i] > 0.30 && surfCount < surfBudget() * 0.7 && fxRand() < 0.18) {
+          spawnSurf(pos[i * 3], pos[i * 3 + 2], aSize[i] * 1.6, aSize[i] * 3.4, 0.55, 0.42, 1, 0, 0, RIDE_DRAG);
         }
-      } else {
-        vel[i * 3 + 1] -= 9.2 * dt;                 // droplets are ballistic
-        pos[i * 3] += vel[i * 3] * dt;
-        pos[i * 3 + 1] += vel[i * 3 + 1] * dt;
-        pos[i * 3 + 2] += vel[i * 3 + 2] * dt;
-        const sy = surfY(pos[i * 3], pos[i * 3 + 2]);
-        if (pos[i * 3 + 1] < sy && vel[i * 3 + 1] < 0) { kill(i); continue; }
+        killDrop(i); continue;
       }
       aSize[i] = Math.max(0.02, size0[i] + grow[i] * life[i]);
-      // rings thin out smoothly across their whole life (an expanding ring
-      // that stayed opaque would read as a hard disc); droplets hold their
-      // opacity and only fade as they land.
-      const fade = aKind[i] > 0.5 ? (1 - t) * (1 - t) : Math.min(1, (1 - t) * 2.4);
-      aAlpha[i] = alpha0[i] * fade;
+      aAlpha[i] = alpha0[i] * Math.min(1, (1 - t) * 2.6);
     }
 
     // ---- publish ----
@@ -1384,18 +2019,42 @@
       geo.attributes.position.needsUpdate = true;
       geo.attributes.aSize.needsUpdate = true;
       geo.attributes.aAlpha.needsUpdate = true;
-      geo.attributes.aKind.needsUpdate = true;
+      geo.attributes.aVel.needsUpdate = true;
     }
 
     // Perspective point-size scale in DEVICE pixels: half the drawing-buffer
     // height over tan(halfFov). Re-read every frame because the quality slider
-    // moves the device pixel ratio live.
+    // moves the device pixel ratio live. uAspect makes the screen-space
+    // velocity angle honest on a non-square canvas — without it every streak
+    // lies about its direction by the aspect ratio.
     const cam = CBZ.camera, r = CBZ.renderer;
     if (cam && r && r.domElement) {
-      const h = r.domElement.height || 600;
+      const h = r.domElement.height || 600, w = r.domElement.width || 800;
       mat.uniforms.uPix.value = (h * 0.5) / Math.tan((cam.fov || 62) * 0.5 * Math.PI / 180);
+      mat.uniforms.uAspect.value = w / Math.max(1, h);
     }
   });
 
   CBZ.waterParticleCount = function () { return count; };
+
+  // PROBE: what is actually alive on the water right now, by drawable. A
+  // headless pass can read this straight after a CBZ.stepSim burst and know
+  // whether an impact drew anything at all — the number that was zero,
+  // everywhere, in every mode, before this pass.
+  CBZ.waterFxAudit = function () {
+    return {
+      drops: count,
+      dropBudget: budget(),
+      foam: surfCount,
+      foamBudget: surfBudget(),
+      crowns: crownCount,
+      built: !!points,
+      visible: {
+        spray: !!(points && points.visible),
+        foam: !!(surfMesh && surfMesh.visible),
+        crown: !!(crownMesh && crownMesh.visible),
+        ribbon: !!(ribMesh && ribMesh.visible),
+      },
+    };
+  };
 })();

@@ -4805,6 +4805,31 @@
     let sinkY = 0;
     if (noWater && !marine && onWater) {
       const GRACE = 0.35, SINK_T = 2.2, BAIL = 1.3, DEPTH = -1.6;
+      /* THE SPLASH. world/water_impact.js's passive entry sweep cannot see this
+         one: it watches a car's HEIGHT cross the live surface, and the driven
+         car has no height to cross — over water this function skips
+         terrainSeat entirely and seats the hull at a flat rideY of 0 until
+         sinkY starts pulling it under, which is already a second after it went
+         in. So a car driven off a quay at 25 m/s arrived in the bay in total
+         silence with the sea undisturbed.
+
+         The moment the wheels are over water IS the entry, and this branch is
+         the only place in the game that knows it. One call, sized by the car's
+         own speed and class, and CBZ.waterHit no-ops itself if the point turns
+         out not to be over water after all. */
+      if (!car._waterT && CBZ.waterHit) {
+        const body = (car.model && car.model.body) || "";
+        try {
+          CBZ.waterHit(car.pos.x, CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(car.pos.x, car.pos.z) : 0, car.pos.z, {
+            kind: "vehicle",
+            mass: (body === "truck" || body === "bus") ? 4200 : 1400,
+            // a car that RAMPED into the bay is falling as well as travelling,
+            // and the fall is most of the momentum that makes the splash big
+            speed: Math.max(3, Math.hypot(vmag || 0, Math.abs(car._airVy || 0))),
+            src: car,
+          });
+        } catch (e) {}
+      }
       car._waterT = (car._waterT || 0) + dt;
       if (car._waterT > GRACE) {
         car._flooded = true;
