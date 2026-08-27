@@ -943,8 +943,25 @@
     // species' NATURAL size. Herd size is a per-species TRAIT (how they group);
     // `count` is set by the ratio system (how many exist). The two are
     // decoupled — that's what makes the mix scalable.
-    let placed = 0, guard = 0, dry = 0;
-    while (placed < count && guard++ < 400) {
+    /* GROUPS ARE CARVED UP FRONT, WHOLE. The old per-iteration draw clamped
+       the last group to whatever count was left over, which manufactured two
+       artifacts the sea made obvious: a scrap "school" of 2 sardines trailing
+       the real one, and a rare pod animal (the ratio system hands an orca ~3)
+       spawning the SAME minimum-size group every single boot — the opposite
+       of a range. So: presence of a herding species means at least ONE group
+       of natural size, every group is at least the species minimum, and the
+       remainder folds into the last group instead of becoming a scrap. */
+    const sizes = [];
+    if (sp.herd && sp.herd[1] > 1) {
+      let left = Math.max(count, sp.herd[0]);
+      while (left > 0) {
+        let h = sp.herd[0] + ((rng() * (sp.herd[1] - sp.herd[0] + 1)) | 0);
+        if (left - h < sp.herd[0]) h = left;   // absorb the remainder — no scrap group
+        sizes.push(h); left -= h;
+      }
+    } else for (let i = 0; i < count; i++) sizes.push(1);
+    let placed = 0, guard = 0, dry = 0, s = 0;
+    while (s < sizes.length && guard++ < 400) {
       const regs = sp.aquatic ? null : biomeRegions(sp.biome);
       if (!sp.aquatic && (!regs || !regs.length)) return placed;
       const anchor = sp.aquatic ? oceanPoint(rng, sp) : regionPoint(regs[(rng() * regs.length) | 0], rng);
@@ -954,8 +971,7 @@
          telling you this body does not fit (a marlin in a 270 m bowl), and
          THAT is the species to leave out rather than freeze in place. */
       if (!anchor) { if (!sp.aquatic || ++dry >= 3) return placed; continue; }
-      let herd = sp.herd ? (sp.herd[0] + ((rng() * (sp.herd[1] - sp.herd[0] + 1)) | 0)) : 1;
-      herd = Math.min(herd, count - placed);
+      const herd = sizes[s]; s++;
       const hr = newHerd(sp);            // this cluster moves & panics as ONE unit
       for (let h = 0; h < herd; h++) {
         let jx = anchor.x + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
@@ -4003,12 +4019,17 @@
      It takes the POINTS rather than a centre and a radius: the caller is the
      one that knows which water its world will let a body swim in, and a
      jitter applied in here could put half a school over the fence. Returns
-     the actors placed. */
-  CBZ.cityWildlifeSpawnHerd = function (id, points) {
+     the actors placed.
+
+     `into` (optional) is an existing herd from a previous call's actors
+     (made[0].herd): a school too big to build in one frame arrives over a few
+     ticks and must still be ONE herd, or the late arrivals are independent
+     random walks that never join the ball. */
+  CBZ.cityWildlifeSpawnHerd = function (id, points, into) {
     const sp = (CBZ.WILDLIFE_SPECIES || {})[id];
     const made = [];
     if (!sp || !root || !points || !points.length) return made;
-    const hr = points.length > 1 ? newHerd(sp) : null;
+    const hr = into || (points.length > 1 ? newHerd(sp) : null);
     for (let i = 0; i < points.length; i++) {
       const p = points[i];
       if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.z)) continue;

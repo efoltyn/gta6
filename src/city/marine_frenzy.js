@@ -260,14 +260,17 @@
   }
 
   /* WHAT COUNTS AS A BAIT SPECIES, and it is not a list of fish names. It is
-     "no teeth, and the bestiary says it appears in big numbers" — the same
-     discipline marine_predation's predation graph uses, read off rows that
-     already exist. Sardine (herd up to 60) and mackerel (up to 20) qualify;
-     a tuna (up to 9) does not, and neither does anything that bites back. */
+     "no teeth, SMALL, and the bestiary says it appears in big numbers" — read
+     off rows that already exist. Sardine (herd up to 70) and mackerel (up to
+     30) qualify; a tuna does not, and neither does anything that bites back.
+     The hp term is load-bearing: bait is a body you eat in mouthfuls. Without
+     it, widening the dolphin pod to a realistic 12 (danger 0, no bite) would
+     have turned dolphin pods into bait balls. */
   function isBaitSpecies(sp) {
     if (!sp || !sp.aquatic) return false;
     if ((sp.bite || 0) > 0) return false;
     if ((sp.danger || 0) > 0) return false;
+    if ((sp.hp || 0) > 20) return false;
     const h = sp.herd;
     return Array.isArray(h) && (+h[1] || 0) >= SCHOOL_MIN;
   }

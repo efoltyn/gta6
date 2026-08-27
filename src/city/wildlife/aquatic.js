@@ -2242,7 +2242,9 @@
   S({
     id: "fish", name: "Mackerel", biome: "water", rarity: "common",
     hp: 5, fur: "Fresh Fish", furValue: 8, meat: "Fish Fillet", meatValue: 5,
-    herd: [10, 20], packs: 4, spd: 2.0, danger: 0, aquatic: true,
+    // real mackerel school by the hundreds of thousands; game-scaled this is
+    // "a proper swirling shoal", clearly smaller than a sardine ball
+    herd: [12, 30], packs: 4, spd: 2.0, danger: 0, aquatic: true,
     scale: 0.5, color: 0x6a8fa8,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
@@ -2327,7 +2329,9 @@
   S({
     id: "sardine", name: "Sardine", biome: "water", rarity: "common",
     hp: 3, fur: "Fresh Fish", furValue: 4, meat: "Fish Fillet", meatValue: 3,
-    herd: [26, 60], spd: 2.3, danger: 0, aquatic: true,
+    // the biggest school in this sea, always — surveyed sardine schools run
+    // ~25 to millions; the RATIO to mackerel is what's kept here
+    herd: [25, 70], spd: 2.3, danger: 0, aquatic: true,
     scale: 0.34, color: 0x9fb4c2, clearance: 14, swimDepth: 0.55,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
@@ -2552,7 +2556,7 @@
   S({
     id: "barracuda", name: "Great Barracuda", biome: "water",
     rarity: "common", hp: 34, fur: "Fresh Fish", furValue: 46,
-    meat: "Fish Fillet", meatValue: 14, herd: [1, 4], spd: 3.1, danger: 0.3,
+    meat: "Fish Fillet", meatValue: 14, herd: [1, 2], spd: 3.1, danger: 0.3,
     bite: 10, aquatic: true, scale: 0.6, color: 0xa9b6bd,
     clearance: 26, swimDepth: 1.2,
     build: function (ctx) {
@@ -2655,7 +2659,9 @@
   S({
     id: "orca", name: "Orca", biome: "water", rarity: "rare",
     hp: 620, fur: "Orca Hide", furValue: 520, meat: "Whale Meat", meatValue: 44,
-    herd: [3, 6], spd: 3.4, danger: 0.5, bite: 42, aquatic: true,
+    // transient pods run 2-7, residents 5-50; [3,8] is the game-scaled band
+    // (wildlife_orca.js re-registers this species — keep its herd in step)
+    herd: [3, 8], spd: 3.4, danger: 0.5, bite: 42, aquatic: true,
     scale: 1.55, color: 0x14171b, clearance: 110, swimDepth: 2.6,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
@@ -2715,7 +2721,10 @@
   //      dorsal, a short beak, a notched horizontal fluke.
   S({
     id: "dolphin", name: "Dolphin", biome: "water", rarity: "common",
-    hp: 40, fur: "Dolphin Hide", furValue: 70, packs: 3, herd: [4, 8],
+    // coastal bottlenose pods are 2-15; the old [4,8] max was capped by
+    // marine_frenzy's bait test (herd max ≥ 10 + no teeth = bait), which now
+    // also requires a small body, so a real pod no longer reads as a bait ball
+    hp: 40, fur: "Dolphin Hide", furValue: 70, packs: 3, herd: [4, 12],
     spd: 3.0, danger: 0, aquatic: true, scale: 0.9, color: 0x5c6873,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
@@ -2771,7 +2780,7 @@
   S({
     id: "humpback_whale", name: "Humpback Whale", biome: "water",
     rarity: "rare", hp: 900, fur: "Whale Blubber", furValue: 600,
-    meat: "Whale Meat", meatValue: 50, packs: 2, spd: 1.6, danger: 0.1,
+    meat: "Whale Meat", meatValue: 50, packs: 2, herd: [1, 2], spd: 1.6, danger: 0.1,
     aquatic: true, scale: 1.6, color: 0x2f3c45,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();

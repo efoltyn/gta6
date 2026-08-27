@@ -93,7 +93,7 @@
     { name: "The Aurora",  dist: 660, crates: 2, val: 500, gold: true },
   ];
   // SwiftShader-sane caps (≤ ~40 active creatures, pooled)
-  const CAP = { sharks: 6, pods: 2, orcas: 3, schools: 4, seals: 3 };
+  const CAP = { sharks: 6, pods: 2, orcas: 4, schools: 4, seals: 3 };
   const NEAR = 340;            // run the full sim only within this of the field
   const o2Rate = (depth) => 1 + Math.max(0, depth) * 0.025;   // ported dive clock
 
@@ -571,7 +571,9 @@
   const dummy = new THREE.Object3D();
   function spawnSchool(x, z) {
     if (chain.schools.length >= CAP.schools) return null;
-    const n = 22;
+    // a school is a size drawn per school, not a constant: every ball in this
+    // sea used to be exactly 22 fish, which no two real schools ever are
+    const n = 14 + ((Math.random() * 21) | 0);          // 14..34
     const mesh = new THREE.InstancedMesh(fishGeo, fishMat, n);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.frustumCulled = false; V.creatureRoot.add(mesh);
@@ -921,7 +923,10 @@
   function spawnDolphins(x, z) {
     if (chain.pods.length >= CAP.pods) return null;
     const pod = { members: [], wx: x, wz: z, leaveT: 0, escorting: false };
-    for (let i = 0; i < 5; i++) {
+    // coastal pods run 2-15 in the wild; 3..7 is the game-scaled band, and
+    // drawing it per pod is what keeps two pods from ever being twins
+    const podN = 3 + ((Math.random() * 5) | 0);          // 3..7
+    for (let i = 0; i < podN; i++) {
       pod.members.push({ kind: "dolphin", mesh: acquire("dolphin"), pod,
         pos: { x: x + (Math.random() - 0.5) * 8, y: SEA_Y() - 1.6, z: z + (Math.random() - 0.5) * 8 },
         yaw: Math.random() * 6.28, pitch: 0, tailT: Math.random() * 6, slot: i,
@@ -995,7 +1000,9 @@
   /* ---- ORCAS (the apex event) ---- */
   function spawnOrcas(x, z) {
     const arr = [];
-    for (let i = 0; i < 3 && chain.orcas.length < CAP.orcas; i++) {
+    // a transient hunting pod is 2-7 animals; 2..4 here (CAP allows 4)
+    const podN = 2 + ((Math.random() * 3) | 0);          // 2..4
+    for (let i = 0; i < podN && chain.orcas.length < CAP.orcas; i++) {
       const o = { kind: "orca", mesh: acquire("orca"), pos: { x: x + (Math.random() - 0.5) * 14, y: SEA_Y() - 2.5, z: z + (Math.random() - 0.5) * 14 },
         yaw: 0, pitch: 0, tailT: Math.random() * 6, alive: true, target: null, thrashT: 0, eatT: 0, spoutCd: 3 + Math.random() * 8, leaveT: 60 };
       chain.orcas.push(o); arr.push(o);

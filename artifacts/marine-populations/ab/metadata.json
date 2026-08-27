@@ -1,0 +1,285 @@
+{
+  "preset": {
+    "id": "marine-populations",
+    "title": "Shark Sim — A School Is A Range, Not A Constant",
+    "path": "tools/visual-presets/marine-populations.mjs"
+  },
+  "generatedAt": "2026-08-27T02:26:53.982Z",
+  "only": null,
+  "reusedBeforeFrom": null,
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "frameSignature": "custom@1280x720",
+  "frames": [
+    {
+      "id": "custom",
+      "device": "custom",
+      "label": "1280x720",
+      "orientation": "fixed",
+      "width": 1280,
+      "height": 720,
+      "dsf": 1,
+      "mobile": false,
+      "ua": null,
+      "landscape": true
+    }
+  ],
+  "before": {
+    "requested": "http://127.0.0.1:8791/?mode=sharksim&seed=90210&cfg_BOOT_METER=0&visualCompare=before-1787797586818",
+    "final": "http://127.0.0.1:8791/?mode=sharksim&seed=90210&cfg_BOOT_METER=0&visualCompare=before-1787797586818"
+  },
+  "after": {
+    "requested": "http://127.0.0.1:8845/?mode=sharksim&seed=90210&cfg_BOOT_METER=0&visualCompare=after-1787797600446",
+    "final": "http://127.0.0.1:8845/?mode=sharksim&seed=90210&cfg_BOOT_METER=0&visualCompare=after-1787797600446"
+  },
+  "subjects": [
+    {
+      "id": "the-sea-census",
+      "ch": 0,
+      "label": "The Sea, From Above — Every Group Counted",
+      "focus": "An aerial over the player's patch of sea after the restocker has settled. The numbers under this frame are the whole complaint: how many groups exist, how many of them are exact same-size twins of another group of their species, and how many are scraps smaller than any real school. BEFORE: quota-clipped scraps and twin groups. AFTER: every group drawn whole from a researched range."
+    },
+    {
+      "id": "bait-ball",
+      "ch": 1,
+      "label": "The Biggest School In The Water",
+      "focus": "The camera stands over the largest fish school the census found. Real sardine schools run from ~25 into the millions and are always the biggest thing in the water column; game-scaled that means the top school here should read as a BALL — dozens of bodies — not a loose dozen. BEFORE: schools capped near 16 and topped up in scraps. AFTER: sardine balls of 20-45 arriving whole (in instalments if they beat the one-frame build budget, but into ONE herd)."
+    },
+    {
+      "id": "dolphin-pod",
+      "ch": 2,
+      "label": "A Pod, Not A Couple",
+      "focus": "The largest dolphin group in the sea. Coastal bottlenose pods are 2-15 animals; this sim shipped with pods of two to three. BEFORE: 2-3 dolphins. AFTER: pods drawn from 4-9, sized differently every time they form."
+    },
+    {
+      "id": "orca-pod",
+      "ch": 3,
+      "label": "The Orca Pod Rolls In",
+      "focus": "Wherever the orcas are, the lens goes. Transient hunting pods run 2-7, residents 5-50; the ratio system plans ~3 orcas for this island, and the old seeder truncated the pod to exactly that plan — the same pod of 3, every boot. AFTER: the pod is drawn whole from 3-8, so its size is a fact about THIS boot, not a constant."
+    }
+  ],
+  "captures": [
+    {
+      "id": "the-sea-census",
+      "frame": "custom",
+      "beforeFile": "01-the-sea-census.png",
+      "afterFile": "01-the-sea-census.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "side": "before",
+        "chapter": 0,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "groupTable": "barracuda:3,3,2 | bull_shark:1,1,1 | dolphin:4,2 | fish:12,10,4,3,1 | great_white_shark:1 | hammerhead_shark:1 | humpback_whale:1 | manta_ray:1 | marlin:1 | megalodon:1 | orca:1,1,1 | sardine:13,10,7,5,1 | sea_turtle:2,2,1 | tuna:1"
+        },
+        "metrics": {
+          "seaBodies": 98,
+          "groupsTotal": 15,
+          "underNatural": 8,
+          "scrapSchools": 6,
+          "biggestSchool": 13,
+          "dolphinPodMax": 4,
+          "dolphinPodMin": 2,
+          "orcaPodSize": 3,
+          "groupTable": "barracuda:3,3,2 | bull_shark:1,1,1 | dolphin:4,2 | fish:12,10,4,3,1 | great_white_shark:1 | hammerhead_shark:1 | humpback_whale:1 | manta_ray:1 | marlin:1 | megalodon:1 | orca:1,1,1 | sardine:13,10,7,5,1 | sea_turtle:2,2,1 | tuna:1"
+        }
+      },
+      "after": {
+        "ok": true,
+        "side": "after",
+        "chapter": 0,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "groupTable": "barracuda:2,2,1,1 | bull_shark:1,1,1 | dolphin:6,4 | fish:26,13,12 | great_white_shark:1 | hammerhead_shark:1 | humpback_whale:1 | manta_ray:1 | marlin:1 | megalodon:1 | orca:3 | sardine:25,25,23 | sea_turtle:2,1,1,1 | tuna:3"
+        },
+        "metrics": {
+          "seaBodies": 160,
+          "groupsTotal": 13,
+          "underNatural": 0,
+          "scrapSchools": 0,
+          "biggestSchool": 26,
+          "dolphinPodMax": 6,
+          "dolphinPodMin": 4,
+          "orcaPodSize": 3,
+          "groupTable": "barracuda:2,2,1,1 | bull_shark:1,1,1 | dolphin:6,4 | fish:26,13,12 | great_white_shark:1 | hammerhead_shark:1 | humpback_whale:1 | manta_ray:1 | marlin:1 | megalodon:1 | orca:3 | sardine:25,25,23 | sea_turtle:2,1,1,1 | tuna:3"
+        }
+      }
+    },
+    {
+      "id": "bait-ball",
+      "frame": "custom",
+      "beforeFile": "02-bait-ball.png",
+      "afterFile": "02-bait-ball.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "side": "before",
+        "chapter": 1,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "groupTable": "barracuda:3,3,2 | bull_shark:1,1,1 | dolphin:4,2 | fish:12,10,4,3,1 | great_white_shark:1 | hammerhead_shark:1 | humpback_whale:1 | manta_ray:1 | marlin:1 | megalodon:1 | orca:1,1,1 | sardine:13,10,7,5,1 | sea_turtle:2,2,1 | tuna:1"
+        },
+        "metrics": {
+          "shotSchool": 13,
+          "seaBodies": 98,
+          "groupsTotal": 15,
+          "underNatural": 8,
+          "scrapSchools": 6,
+          "biggestSchool": 13,
+          "dolphinPodMax": 4,
+          "dolphinPodMin": 2,
+          "orcaPodSize": 3,
+          "groupTable": "barracuda:3,3,2 | bull_shark:1,1,1 | dolphin:4,2 | fish:12,10,4,3,1 | great_white_shark:1 | hammerhead_shark:1 | humpback_whale:1 | manta_ray:1 | marlin:1 | megalodon:1 | orca:1,1,1 | sardine:13,10,7,5,1 | sea_turtle:2,2,1 | tuna:1"
+        }
+      },
+      "after": {
+        "ok": true,
+        "side": "after",
+        "chapter": 1,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "groupTable": "barracuda:2,2,1,1 | bull_shark:1,1,1 | dolphin:6,4 | fish:26,13,12 | great_white_shark:1 | hammerhead_shark:1 | humpback_whale:1 | manta_ray:1 | marlin:1 | megalodon:1 | orca:3 | sardine:25,25,23 | sea_turtle:2,1,1,1 | tuna:3"
+        },
+        "metrics": {
+          "shotSchool": 26,
+          "seaBodies": 160,
+          "groupsTotal": 13,
+          "underNatural": 0,
+          "scrapSchools": 0,
+          "biggestSchool": 26,
+          "dolphinPodMax": 6,
+          "dolphinPodMin": 4,
+          "orcaPodSize": 3,
+          "groupTable": "barracuda:2,2,1,1 | bull_shark:1,1,1 | dolphin:6,4 | fish:26,13,12 | great_white_shark:1 | hammerhead_shark:1 | humpback_whale:1 | manta_ray:1 | marlin:1 | megalodon:1 | orca:3 | sardine:25,25,23 | sea_turtle:2,1,1,1 | tuna:3"
+        }
+      }
+    },
+    {
+      "id": "dolphin-pod",
+      "frame": "custom",
+      "beforeFile": "03-dolphin-pod.png",
+      "afterFile": "03-dolphin-pod.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "side": "before",
+        "chapter": 2,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "groupTable": "barracuda:3,3,2 | bull_shark:1,1,1 | dolphin:4,2 | fish:12,10,4,3,1 | great_white_shark:1 | hammerhead_shark:1 | humpback_whale:1 | manta_ray:1 | marlin:1 | megalodon:1 | orca:1,1,1 | sardine:13,10,7,5,1 | sea_turtle:2,2,1 | tuna:1"
+        },
+        "metrics": {
+          "shotPod": 4,
+          "seaBodies": 98,
+          "groupsTotal": 15,
+          "underNatural": 8,
+          "scrapSchools": 6,
+          "biggestSchool": 13,
+          "dolphinPodMax": 4,
+          "dolphinPodMin": 2,
+          "orcaPodSize": 3,
+          "groupTable": "barracuda:3,3,2 | bull_shark:1,1,1 | dolphin:4,2 | fish:12,10,4,3,1 | great_white_shark:1 | hammerhead_shark:1 | humpback_whale:1 | manta_ray:1 | marlin:1 | megalodon:1 | orca:1,1,1 | sardine:13,10,7,5,1 | sea_turtle:2,2,1 | tuna:1"
+        }
+      },
+      "after": {
+        "ok": true,
+        "side": "after",
+        "chapter": 2,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "groupTable": "barracuda:2,2,1,1 | bull_shark:1,1,1 | dolphin:6,4 | fish:26,13,12 | great_white_shark:1 | hammerhead_shark:1 | humpback_whale:1 | manta_ray:1 | marlin:1 | megalodon:1 | orca:3 | sardine:25,25,23 | sea_turtle:2,1,1,1 | tuna:3"
+        },
+        "metrics": {
+          "shotPod": 6,
+          "seaBodies": 160,
+          "groupsTotal": 13,
+          "underNatural": 0,
+          "scrapSchools": 0,
+          "biggestSchool": 26,
+          "dolphinPodMax": 6,
+          "dolphinPodMin": 4,
+          "orcaPodSize": 3,
+          "groupTable": "barracuda:2,2,1,1 | bull_shark:1,1,1 | dolphin:6,4 | fish:26,13,12 | great_white_shark:1 | hammerhead_shark:1 | humpback_whale:1 | manta_ray:1 | marlin:1 | megalodon:1 | orca:3 | sardine:25,25,23 | sea_turtle:2,1,1,1 | tuna:3"
+        }
+      }
+    },
+    {
+      "id": "orca-pod",
+      "frame": "custom",
+      "beforeFile": "04-orca-pod.png",
+      "afterFile": "04-orca-pod.png",
+      "beforeStrip": null,
+      "afterStrip": null,
+      "before": {
+        "ok": true,
+        "side": "before",
+        "chapter": 3,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "groupTable": "barracuda:3,3,2 | bull_shark:1,1,1 | dolphin:4,2 | fish:12,10,4,3,1 | great_white_shark:1 | hammerhead_shark:1 | humpback_whale:1 | manta_ray:1 | marlin:1 | megalodon:1 | orca:1,1,1 | sardine:13,10,7,5,1 | sea_turtle:2,2,1 | tuna:1"
+        },
+        "metrics": {
+          "shotOrcas": 1,
+          "seaBodies": 98,
+          "groupsTotal": 15,
+          "underNatural": 8,
+          "scrapSchools": 6,
+          "biggestSchool": 13,
+          "dolphinPodMax": 4,
+          "dolphinPodMin": 2,
+          "orcaPodSize": 3,
+          "groupTable": "barracuda:3,3,2 | bull_shark:1,1,1 | dolphin:4,2 | fish:12,10,4,3,1 | great_white_shark:1 | hammerhead_shark:1 | humpback_whale:1 | manta_ray:1 | marlin:1 | megalodon:1 | orca:1,1,1 | sardine:13,10,7,5,1 | sea_turtle:2,2,1 | tuna:1"
+        }
+      },
+      "after": {
+        "ok": true,
+        "side": "after",
+        "chapter": 3,
+        "debug": {
+          "state": "playing",
+          "mode": "sharksim",
+          "groupTable": "barracuda:2,2,1,1 | bull_shark:1,1,1 | dolphin:6,4 | fish:26,13,12 | great_white_shark:1 | hammerhead_shark:1 | humpback_whale:1 | manta_ray:1 | marlin:1 | megalodon:1 | orca:3 | sardine:25,25,23 | sea_turtle:2,1,1,1 | tuna:3"
+        },
+        "metrics": {
+          "shotOrcas": 3,
+          "seaBodies": 160,
+          "groupsTotal": 13,
+          "underNatural": 0,
+          "scrapSchools": 0,
+          "biggestSchool": 26,
+          "dolphinPodMax": 6,
+          "dolphinPodMin": 4,
+          "orcaPodSize": 3,
+          "groupTable": "barracuda:2,2,1,1 | bull_shark:1,1,1 | dolphin:6,4 | fish:26,13,12 | great_white_shark:1 | hammerhead_shark:1 | humpback_whale:1 | manta_ray:1 | marlin:1 | megalodon:1 | orca:3 | sardine:25,25,23 | sea_turtle:2,1,1,1 | tuna:3"
+        }
+      }
+    }
+  ],
+  "browserMessages": [
+    {
+      "side": "before",
+      "type": "warning",
+      "text": "THREE.MeshLambertMaterial: 'flatShading' is not a property of this material.",
+      "count": 4
+    },
+    {
+      "side": "after",
+      "type": "warning",
+      "text": "THREE.MeshLambertMaterial: 'flatShading' is not a property of this material.",
+      "count": 4
+    }
+  ]
+}

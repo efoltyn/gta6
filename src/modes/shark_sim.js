@@ -203,11 +203,20 @@
        • NO ORCAS. podPressure owns the threat curve, and a second spawner for
          the same species is exactly the parallel system that ends with two
          pieces of code arguing about how frightened you should be. -- */
+  /* THE WANTS ARE RESEARCHED RATIOS, GAME-SCALED. Real sardine schools run
+     from ~25 into the millions and are always the biggest thing in the water
+     column; mackerel shoal in the hundreds of thousands but tighter and
+     smaller than a sardine ball; a coastal bottlenose pod is 2-15 (the old
+     "pod" of 2-3 was a couple, not a pod); great barracuda are solitary as
+     adults; green turtles cruise alone. `g` is the NATURAL group range and a
+     group is always drawn whole from it — never clipped to the quota gap,
+     which is how this sea used to end up with a "school" of 3 sardines and
+     every dolphin pod the same size. */
   const SEA_WANT = [
-    { id: "fish",       n: 30, g: [8, 14] },   // mackerel — the snack AND the bait ball
-    { id: "sardine",    n: 36, g: [10, 16] },
-    { id: "barracuda",  n: 8,  g: [1, 3] },
-    { id: "dolphin",    n: 6,  g: [2, 3] },
+    { id: "fish",       n: 45, g: [12, 30] },  // mackerel — the snack AND the bait ball
+    { id: "sardine",    n: 70, g: [20, 45] },  // the big ball, visibly outnumbering everything
+    { id: "barracuda",  n: 6,  g: [1, 2] },
+    { id: "dolphin",    n: 12, g: [4, 9] },
     { id: "sea_turtle", n: 5,  g: [1, 2] },
   ];
   /* THE RIVALS — other sharks, and how many of them depends on what you are.
@@ -223,7 +232,7 @@
   /* THE CEILING. Wildlife's own tick measures ~985 animals in 1.4 ms, so this
      is not a frame budget — it is a "how full should this ocean feel" knob,
      and the answer for a sea that is the entire playfield is FULL. */
-  const SEA_CAP = 150;                 // total live sea bodies before we stop adding
+  const SEA_CAP = 170;                 // total live sea bodies before we stop adding
   const seaTally = {};
   function seaCensus() {
     for (const k in seaTally) delete seaTally[k];
@@ -268,9 +277,11 @@
      are sixteen independent random walks that have scattered inside a couple
      of seconds at a mackerel's cruise. A scattered school is invisible (the
      sea's sight lines are shorter than the spacing) and it never balls. */
-  function spawnGroup(id, n, minD, maxD) {
-    const at = seaPointNear(clearanceOf(id), minD, maxD);
-    if (!at) return 0;
+  /* `pend` continues a school already arriving: same anchor, same herd, so a
+     ball bigger than one tick's build budget is still ONE cohesive shoal. */
+  function spawnGroup(id, n, minD, maxD, pend) {
+    const at = pend ? pend.at : seaPointNear(clearanceOf(id), minD, maxD);
+    if (!at) return null;
     const ring = at.ring;
     const pts = [];
     for (let i = 0; i < n; i++) {
@@ -284,10 +295,13 @@
       if (want !== rr) { x = ring.cx + dx / rr * want; z = ring.cz + dz / rr * want; }
       pts.push({ x: x, z: z });
     }
-    if (CBZ.cityWildlifeSpawnHerd) return CBZ.cityWildlifeSpawnHerd(id, pts).length;
+    if (CBZ.cityWildlifeSpawnHerd) {
+      const made = CBZ.cityWildlifeSpawnHerd(id, pts, pend && pend.herd);
+      return { made: made.length, herd: made.length ? made[0].herd : (pend && pend.herd) || null, at: at };
+    }
     let made = 0;
     for (const p of pts) if (CBZ.cityWildlifeSpawnAt(id, p.x, p.z)) made++;
-    return made;
+    return { made: made, herd: null, at: at };
   }
   function stockSea() {
     if (!CBZ.cityWildlifeSpawnAt || !CBZ.survNavRing || !CBZ.player) return;
@@ -304,15 +318,35 @@
        one frame, which is a visible hitch to buy a thing whose whole point is
        that you never notice it arriving. */
     let bodies = 18;
-    for (let k = 0; k < SEA_WANT.length && budget > 0 && bodies > 0; k++) {
+    /* A SCHOOL BIGGER THAN ONE TICK'S BUILD BUDGET arrives in instalments —
+       next tick, same anchor, same herd — instead of being clipped to the
+       budget (a clipped draw is how every school converged on the same
+       size). While one is mid-arrival nothing else starts. */
+    const pend = sim.seaPend;
+    if (pend) {
+      const r = spawnGroup(pend.id, Math.min(pend.left, bodies), 45, 85, pend);
+      if (r && r.made) {
+        sim.seaAdds = (sim.seaAdds || 0) + r.made;
+        pend.left -= r.made; bodies -= r.made; budget--;
+        if (!pend.herd) pend.herd = r.herd;
+      } else pend.left = 0;                    // the sea refused; let it go
+      if (pend.left <= 0) sim.seaPend = null;
+    }
+    for (let k = 0; k < SEA_WANT.length && budget > 0 && bodies > 0 && !sim.seaPend; k++) {
       sim.seaIx = ((sim.seaIx || 0) + 1) % SEA_WANT.length;
       const row = SEA_WANT[sim.seaIx];
       const have = t[row.id] || 0;
-      if (have >= row.n) continue;
-      const n = Math.min(row.n - have, bodies,
-        row.g[0] + ((Math.random() * (row.g[1] - row.g[0] + 1)) | 0));
-      const made = spawnGroup(row.id, n, 45, 85);
-      if (made) { sim.seaAdds = (sim.seaAdds || 0) + made; budget--; bodies -= made; }
+      /* the group is drawn WHOLE from the natural range. If the gap to the
+         quota is smaller than the minimum group, the species is full enough:
+         skip it rather than top it up with a scrap. */
+      if (row.n - have < row.g[0]) continue;
+      const size = row.g[0] + ((Math.random() * (row.g[1] - row.g[0] + 1)) | 0);
+      const r = spawnGroup(row.id, Math.min(size, bodies), 45, 85);
+      if (r && r.made) {
+        sim.seaAdds = (sim.seaAdds || 0) + r.made;
+        budget--; bodies -= r.made;
+        if (size > r.made) sim.seaPend = { id: row.id, left: size - r.made, at: r.at, herd: r.herd };
+      }
     }
     // ..and the rivals on their own slower clock: one shark every four passes,
     // because meeting another shark should be an event and not traffic.
@@ -322,7 +356,8 @@
     const want = rivalWant();
     for (const id in want) {
       if ((t[id] || 0) >= want[id]) continue;
-      sim.seaAdds = (sim.seaAdds || 0) + spawnGroup(id, 1, 55, 95);
+      const r = spawnGroup(id, 1, 55, 95);
+      if (r) sim.seaAdds = (sim.seaAdds || 0) + r.made;
       return;
     }
   }

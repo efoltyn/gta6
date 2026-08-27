@@ -1010,7 +1010,7 @@
   const ORCA_SPECIES = {
     id: "orca", name: "Orca", biome: "water", rarity: "rare",
     hp: 620, fur: "Orca Hide", furValue: 520, meat: "Whale Meat", meatValue: 44,
-    herd: [3, 6], packs: 3, spd: 3.4, danger: 0.5, bite: 42, aquatic: true,
+    herd: [3, 8], packs: 3, spd: 3.4, danger: 0.5, bite: 42, aquatic: true,
     scale: 1.55, color: 0x0a0c10, clearance: 110, swimDepth: 2.6,
     build: build,
   };
