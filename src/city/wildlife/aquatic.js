@@ -395,6 +395,11 @@
   CBZ.aquaticHull = function (mats, rings, o) { return hullMesh(mats, rings, o || {}); };
   CBZ.aquaticHullGeometry = hullShell;
   CBZ.aquaticBodyRings = bodyRings;
+  // ONE weld rule for the whole ocean: wildlife_orca.js builds its own hull
+  // from its own ring grammar, but a tail joint is a tail joint, and a second
+  // copy of this arithmetic is exactly how the two descriptions drifted apart
+  // in the first place. See weldedSleeve below.
+  CBZ.aquaticWeldedSleeve = function (hullRings, o) { return weldedSleeve(hullRings, o); };
 
   /* ======================================================================
      THE HULL. Elliptical cross-sections with a SHAPED countershading line.
@@ -521,6 +526,98 @@
     const t = b.x === a.x ? 0 : clamp((x - a.x) / (b.x - a.x), 0, 1);
     return { x: x, y: lerp(a.y, b.y, t), ry: lerp(a.ry, b.ry, t), rz: lerp(a.rz, b.rz, t) };
   }
+
+  /* ======================================================================
+     THE TAIL WELD (owner, 2026-08-27: "where the tail meets the body the
+     tail part is much wider than the body part — the tail circle is much
+     bigger, when they should be identical so the tail looks connected").
+
+     A caudal peduncle is not a cone bolted to the back of an animal. It IS
+     the body, continued past the station where the hull mesh stops. But it
+     has to be a SEPARATE mesh, because the swim rig hinges it against a
+     rigid trunk — so for years every species here carried TWO independent
+     descriptions of the same cross-section: the hull's profile curve, and a
+     hand-typed front ring on the sleeve. Nothing kept them in step, and
+     nothing ever did: measured on the shipped models, the sleeve's front rim
+     was 1.03x the hull's circle on the great white, 1.13x on the hammerhead,
+     1.31x on the dolphin, 1.88x on the humpback and 2.06x on the orca. Seen
+     head-on, the orca's tail was a tube twice the diameter of the animal it
+     grew out of; seen from the side, the body tapered to a point and a
+     bigger cone started behind it.
+
+     `weldedSleeve` deletes the second description. The front ring is READ OFF
+     THE HULL at the station where the sleeve emerges, so the two circles are
+     the same circle by construction and cannot drift when either profile is
+     retuned later. The taper behind it also LEAVES at the hull's own slope:
+     the exponent of the power curve is solved from the hull's measured taper
+     at the weld, so the silhouette has no kink at the seam either — matching
+     radius alone still leaves a visible corner where the two skins meet.
+
+     What a species still declares is what only it knows: where the stock ends
+     and how thin it gets there.
+
+       at     [x, y] the sleeve mesh is placed at, in root space
+       x1     the WELD, in sleeve-local x (the sleeve's front face)
+       x0     the tip station, in sleeve-local x
+       tipRy  half-height / half-width at that tip
+       tipRz
+       sides  MUST be the hull's own side count: the two rings are then the
+              same polygon, not two polygons inscribed in the same ellipse.
+
+     WHY THE SLEEVE STILL LEAVES SLIGHTLY SHALLOWER THAN THE HULL (SLOPE_K):
+     on the sharks the sleeve is pushed a fifth of a metre INTO the hull, and
+     that buried overlap is what hides the wedge the swim rig's hinge opens
+     when the tail beats. Matching the hull's taper exactly would lay the two
+     skins on top of each other through that overlap and they would z-fight.
+     Leaving at 72% of the hull's slope diverges the sleeve outward from the
+     first millimetre — the hull's tail stays buried — while the seam still
+     reads as one curve, because the radii are equal AT the weld and it is a
+     step in radius, not a soft change of slope, that the eye reads as a joint.
+     ====================================================================== */
+  const SLOPE_K = 0.72;
+  function weldedSleeve(hullRings, o) {
+    const weldX = o.x1, tipX = o.x0, L = Math.max(1e-4, weldX - tipX);
+    const w = ringAt(hullRings, o.at[0] + weldX);            // the hull's own circle
+    // the hull's taper AT the weld, per unit of x — measured, never typed
+    const probe = ringAt(hullRings, o.at[0] + weldX + L * 0.25);
+    // ry(t) = tip + (weld - tip) * t^p, t = 0 at the tip, 1 at the weld.
+    // dry/dx at the weld is (weld - tip) * p / L, so p is the hull's slope
+    // expressed in the sleeve's own coordinates. Clamped: a hull that flares
+    // hard behind the weld must not be allowed to fold the stock into a waist
+    // (p too high) or blow it into a cylinder (p too low).
+    function expo(hullR, tipR) {
+      const drop = w[hullR] - o[tipR];
+      if (!(drop > 1e-4)) return 1;
+      const slope = Math.max(0, (probe[hullR] - w[hullR]) / (L * 0.25));
+      return clamp(slope * SLOPE_K * L / drop, 0.65, 2.6);
+    }
+    const py = expo("ry", "tipRy"), pz = expo("rz", "tipRz");
+    const n = Math.max(3, o.n || 5), out = [];
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1);
+      out.push({
+        x: lerp(tipX, weldX, t),
+        y: w.y - o.at[1],                    // coaxial with the hull's tail
+        ry: o.tipRy + (w.ry - o.tipRy) * Math.pow(t, py),
+        rz: o.tipRz + (w.rz - o.tipRz) * Math.pow(t, pz),
+      });
+    }
+    return out;
+  }
+  // build it, name it (every sleeve in this file used to be anonymous, which
+  // is why the tools that measure this joint have to find it by shape), and
+  // hang it on the animal at the one position the weld was solved for.
+  function tailSleeve(g, mats, hullRings, o) {
+    const ped = hullMesh(mats, weldedSleeve(hullRings, o), {
+      sides: o.sides || 12, bellyCut: o.bellyCut,
+      ragged: o.ragged == null ? 0.05 : o.ragged, seed: o.seed,
+    });
+    ped.name = "tailSleeve";
+    ped.position.set(o.at[0], o.at[1], 0);
+    g.add(ped);
+    return ped;
+  }
+
   function surfPt(rings, x, ang, out) {
     const r = ringAt(rings, x);
     return [x + (out || 0) * 0, r.y + Math.sin(ang) * r.ry, Math.cos(ang) * r.rz];
@@ -1851,14 +1948,10 @@
 
       // PEDUNCLE — a tapered sleeve over the hull's tail, so the swim rig has
       // a body section to carry the wave instead of a rectangular block.
-      const ped = hullMesh([grey, white], [
-        { x: -0.502, y: 0.000, ry: 0.044, rz: 0.027 },
-        { x: -0.28, y: 0.000, ry: 0.085, rz: 0.048 },
-        { x: 0.10, y: 0.000, ry: 0.155, rz: 0.098 },
-        { x: 0.46, y: 0.000, ry: 0.245, rz: 0.172 },
-      ], { sides: 12, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 23 });
-      ped.position.set(-1.88, 0.860, 0);
-      g.add(ped);
+      tailSleeve(g, [grey, white], GW_RINGS, {
+        at: [-1.88, 0.860], x0: -0.502, x1: 0.46, tipRy: 0.044, tipRz: 0.027,
+        sides: 16, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 23,
+      });
 
       // CAUDAL FIN — tall crescent, UPPER LOBE CLEARLY LONGER (§4).
       fin([grey, white], [-2.10, 0.900, 0], {
@@ -1974,14 +2067,10 @@
         rearTipBack: 0.18, apexRound: 0.08, thick: 0.065, spanSteps: 4, chordSteps: 3,
         spanDir: [0, -1, 0], chordDir: [1, 0, 0],
       });
-      const ped = hullMesh([dark, white], [
-        { x: -0.744, y: 0, ry: 0.068, rz: 0.042 },
-        { x: -0.42, y: 0, ry: 0.13, rz: 0.075 },
-        { x: 0.16, y: 0, ry: 0.25, rz: 0.16 },
-        { x: 0.66, y: 0, ry: 0.38, rz: 0.27 },
-      ], { sides: 12, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 53 });
-      ped.position.set(-2.46, 0.98, 0);
-      g.add(ped);
+      tailSleeve(g, [dark, white], MEG_RINGS, {
+        at: [-2.46, 0.98], x0: -0.744, x1: 0.66, tipRy: 0.068, tipRz: 0.042,
+        sides: 16, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 53,
+      });
       fin([dark, white], [-2.82, 1.02, 0], {
         span: 2.25, chordRoot: 0.92, chordTip: 0.10, sweep: 0.30, concavity: 0.24,
         rearTipH: 0.10, rearTipBack: 0.40, apexRound: 0.05, thick: 0.14,
@@ -2099,14 +2188,10 @@
         rearTipBack: 0.10, apexRound: 0.08, thick: 0.035, spanSteps: 4, chordSteps: 3,
         spanDir: [0, -1, 0], chordDir: [1, 0, 0],
       });
-      const ped = hullMesh([grey, pale], [
-        { x: -0.464, y: 0, ry: 0.039, rz: 0.024 },
-        { x: -0.26, y: 0, ry: 0.075, rz: 0.042 },
-        { x: 0.10, y: 0, ry: 0.140, rz: 0.090 },
-        { x: 0.42, y: 0, ry: 0.215, rz: 0.150 },
-      ], { sides: 12, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 64 });
-      ped.position.set(-1.76, 0.90, 0);
-      g.add(ped);
+      tailSleeve(g, [grey, pale], HH_RINGS, {
+        at: [-1.76, 0.90], x0: -0.464, x1: 0.42, tipRy: 0.039, tipRz: 0.024,
+        sides: 14, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 64,
+      });
       fin([grey, pale], [-1.98, 0.94, 0], {
         span: 1.42, chordRoot: 0.46, chordTip: 0.05, sweep: 0.32, concavity: 0.26,
         rearTipH: 0.10, rearTipBack: 0.20, apexRound: 0.05, thick: 0.07,
@@ -2217,14 +2302,10 @@
         rearTipBack: 0.10, apexRound: 0.08, thick: 0.035, spanSteps: 4, chordSteps: 3,
         spanDir: [0, -1, 0], chordDir: [1, 0, 0],
       });
-      const ped = hullMesh([grey, white], [
-        { x: -0.432, y: 0, ry: 0.044, rz: 0.027 },
-        { x: -0.24, y: 0, ry: 0.085, rz: 0.048 },
-        { x: 0.10, y: 0, ry: 0.150, rz: 0.098 },
-        { x: 0.40, y: 0, ry: 0.240, rz: 0.170 },
-      ], { sides: 12, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 74 });
-      ped.position.set(-1.58, 0.88, 0);
-      g.add(ped);
+      tailSleeve(g, [grey, white], BULL_RINGS, {
+        at: [-1.58, 0.88], x0: -0.432, x1: 0.40, tipRy: 0.044, tipRz: 0.027,
+        sides: 14, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 74,
+      });
       fin([grey, white], [-1.78, 0.92, 0], {
         span: 1.06, chordRoot: 0.46, chordTip: 0.05, sweep: 0.30, concavity: 0.24,
         rearTipH: 0.10, rearTipBack: 0.19, apexRound: 0.05, thick: 0.065,
@@ -2314,10 +2395,10 @@
           spanDir: [-0.2, -0.86, s2 * 0.47], chordDir: [1, 0, 0],
         });
       });
-      const ped = hullMesh([back, belly], bodyRings(-0.472, 0.1, 0,
-        [0.015, 0.03, 0.075], [0.0108, 0.02, 0.048], 4),
-        { sides: 10, bellyCut: [-0.28], ragged: 0.04, seed: 82 });
-      ped.position.set(-0.92, 0.50, 0); g.add(ped);
+      tailSleeve(g, [back, belly], rings, {
+        at: [-0.92, 0.50], x0: -0.472, x1: 0.1, tipRy: 0.015, tipRz: 0.0108,
+        sides: 12, bellyCut: [-0.28], ragged: 0.04, seed: 82,
+      });
       [1, -1].forEach(function (s2) {
         fin([back, belly], [-1.22, 0.50 + s2 * 0.02, 0], {
           span: 0.44, chordRoot: 0.20, chordTip: 0.03, sweep: 0.42, concavity: 0.30,
@@ -2384,10 +2465,10 @@
           spanDir: [-0.45, -0.30, s2 * 0.84], chordDir: [1, 0, 0],
         });
       });
-      const ped = hullMesh([back, silver], bodyRings(-0.33, 0.06, 0,
-        [0.01, 0.02, 0.05], [0.0076, 0.014, 0.03], 4),
-        { sides: 8, bellyCut: [-0.24], ragged: 0.04, seed: 84 });
-      ped.position.set(-0.66, 0.40, 0); g.add(ped);
+      tailSleeve(g, [back, silver], rings, {
+        at: [-0.66, 0.40], x0: -0.33, x1: 0.06, tipRy: 0.01, tipRz: 0.0076,
+        sides: 10, bellyCut: [-0.24], ragged: 0.04, seed: 84,
+      });
       [1, -1].forEach(function (s2) {
         fin([back, silver], [-0.86, 0.40 + s2 * 0.01, 0], {
           span: 0.30, chordRoot: 0.13, chordTip: 0.02, sweep: 0.42, concavity: 0.30,
@@ -2471,10 +2552,10 @@
         return sh.geom();
       }), [finlet]);
       g.add(finlets);
-      const ped = hullMesh([back, belly], bodyRings(-0.588, 0.14, 0,
-        [0.0275, 0.055, 0.135], [0.0162, 0.03, 0.085], 4),
-        { sides: 10, bellyCut: [-0.30], ragged: 0.04, seed: 86 });
-      ped.position.set(-1.42, 0.78, 0); g.add(ped);
+      tailSleeve(g, [back, belly], rings, {
+        at: [-1.42, 0.78], x0: -0.588, x1: 0.14, tipRy: 0.0275, tipRz: 0.0162,
+        sides: 14, bellyCut: [-0.30], ragged: 0.04, seed: 86,
+      });
       [1, -1].forEach(function (s2) {
         fin([back], [-1.30, 0.78, s2 * 0.09], {   // the peduncle keel
           span: 0.10, chordRoot: 0.30, chordTip: 0.06, sweep: 0.1, concavity: 0.04,
@@ -2553,10 +2634,10 @@
           spanDir: [-0.25, -0.92, s2 * 0.30], chordDir: [1, 0, 0],
         });
       });
-      const ped = hullMesh([back, belly], bodyRings(-0.646, 0.16, 0,
-        [0.0275, 0.055, 0.15], [0.0162, 0.03, 0.085], 4),
-        { sides: 10, bellyCut: [-0.32], ragged: 0.04, seed: 88 });
-      ped.position.set(-1.74, 0.88, 0); g.add(ped);
+      tailSleeve(g, [back, belly], rings, {
+        at: [-1.74, 0.88], x0: -0.646, x1: 0.16, tipRy: 0.0275, tipRz: 0.0162,
+        sides: 14, bellyCut: [-0.32], ragged: 0.04, seed: 88,
+      });
       [1, -1].forEach(function (s2) {
         fin([back, belly], [-2.12, 0.88 + s2 * 0.03, 0], {
           span: 1.16, chordRoot: 0.40, chordTip: 0.05, sweep: 0.58, concavity: 0.34,
@@ -2648,10 +2729,10 @@
           spanDir: [-0.2, -0.88, s2 * 0.43], chordDir: [1, 0, 0],
         });
       });
-      const ped = hullMesh([silver, belly], bodyRings(-0.472, 0.1, 0,
-        [0.0175, 0.035, 0.085], [0.013, 0.024, 0.055], 4),
-        { sides: 10, bellyCut: [-0.30], ragged: 0.04, seed: 92 });
-      ped.position.set(-1.34, 0.55, 0); g.add(ped);
+      tailSleeve(g, [silver, belly], rings, {
+        at: [-1.34, 0.55], x0: -0.472, x1: 0.1, tipRy: 0.0175, tipRz: 0.013,
+        sides: 12, bellyCut: [-0.30], ragged: 0.04, seed: 92,
+      });
       [1, -1].forEach(function (s2) {
         fin([back, belly], [-1.64, 0.55 + s2 * 0.02, 0], {
           span: 0.58, chordRoot: 0.24, chordTip: 0.03, sweep: 0.48, concavity: 0.32,
@@ -2683,9 +2764,15 @@
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
       const black = m(0x14171b), white = m(0xf4f6f6), saddle = m(0x4b545c), eye = m(0x06070a);
+      // THE TAILSTOCK IS PART OF THE BODY CURVE. The first pair of numbers is
+      // where the hull hands over to the tail sleeve, and while the sleeve was
+      // free to be any size the hull was allowed to taper to a spindle there
+      // and let a fatter cone start behind it. Welded, that spindle would be
+      // the whole tailstock — so it carries the depth the cone used to fake,
+      // laterally compressed the way a cetacean's peduncle actually is.
       const rings = bodyRings(-2.30, 3.20, 1.00,
-        [0.22, 0.62, 0.82, 0.86, 0.80, 0.66, 0.42],
-        [0.20, 0.56, 0.74, 0.78, 0.72, 0.58, 0.34], 13);
+        [0.30, 0.62, 0.82, 0.86, 0.80, 0.66, 0.42],
+        [0.17, 0.56, 0.74, 0.78, 0.72, 0.58, 0.34], 13);
       const hull = hullMesh([black, white, saddle], rings, {
         sides: 14, bellyCut: [-0.52, -0.34, -0.30, -0.34, -0.30, -0.10, 0.30],
         ragged: 0.05, seed: 95, paintKey: "orca-marks",
@@ -2717,10 +2804,10 @@
           spanDir: [-0.36, -0.34, s2 * 0.87], chordDir: [1, 0, s2 * 0.1],
         });
       });
-      const ped = hullMesh([black, white], bodyRings(-1.026, 0.3, 0,
-        [0.08, 0.16, 0.4], [0.054, 0.1, 0.3], 5),
-        { sides: 12, bellyCut: [-0.42], ragged: 0.04, seed: 96 });
-      ped.position.set(-2.60, 1.00, 0); g.add(ped);
+      tailSleeve(g, [black, white], rings, {
+        at: [-2.60, 1.00], x0: -1.026, x1: 0.3, tipRy: 0.08, tipRz: 0.054,
+        sides: 14, bellyCut: [-0.42], ragged: 0.04, seed: 96,
+      });
       const fluke = finsMesh([black, white], [-3.20, 1.00, 0], [1, -1].map(function (s2) {
         return {
           span: 1.30, chordRoot: 0.86, chordTip: 0.06, sweep: 0.62, concavity: 0.26,
@@ -2747,8 +2834,8 @@
       const m = ctx.mat, g = new T.Group();
       const grey = m(0x5c6873), pale = m(0xd6dde1), eye = m(0x0d1013);
       const rings = bodyRings(-1.45, 2.10, 0.82,
-        [0.13, 0.36, 0.46, 0.47, 0.42, 0.30, 0.14],
-        [0.11, 0.32, 0.41, 0.42, 0.37, 0.26, 0.12], 12);
+        [0.16, 0.36, 0.46, 0.47, 0.42, 0.30, 0.14],      // [0] = the tail weld
+        [0.10, 0.32, 0.41, 0.42, 0.37, 0.26, 0.12], 12);
       const hull = hullMesh([grey, pale], rings,
         { sides: 12, bellyCut: [-0.46, -0.30, -0.24, -0.26, -0.34, -0.44], ragged: 0.06, seed: 97 });
       hull.name = "cetaceanHull"; g.add(hull);
@@ -2775,10 +2862,10 @@
           under: true, spanDir: [-0.42, -0.34, s2 * 0.84], chordDir: [1, 0, s2 * 0.1],
         });
       });
-      const ped = hullMesh([grey, pale], bodyRings(-0.6, 0.18, 0,
-        [0.0375, 0.075, 0.185], [0.0297, 0.055, 0.14], 4),
-        { sides: 10, bellyCut: [-0.40], ragged: 0.04, seed: 99 });
-      ped.position.set(-1.62, 0.82, 0); g.add(ped);
+      tailSleeve(g, [grey, pale], rings, {
+        at: [-1.62, 0.82], x0: -0.6, x1: 0.18, tipRy: 0.0375, tipRz: 0.0297,
+        sides: 12, bellyCut: [-0.40], ragged: 0.04, seed: 99,
+      });
       const fluke = finsMesh([grey, pale], [-2.02, 0.82, 0], [1, -1].map(function (s2) {
         return {
           span: 0.62, chordRoot: 0.46, chordTip: 0.04, sweep: 0.60, concavity: 0.26,
@@ -2803,8 +2890,8 @@
       const m = ctx.mat, g = new T.Group();
       const dark = m(0x2f3c45), white = m(0xdae0e2), groove = m(0x232d34), knob = m(0x3c4952);
       const rings = bodyRings(-3.10, 3.70, 0.95,
-        [0.26, 0.80, 1.02, 1.05, 1.00, 0.86, 0.55],
-        [0.22, 0.72, 0.94, 0.98, 0.94, 0.82, 0.50], 14);
+        [0.34, 0.80, 1.02, 1.05, 1.00, 0.86, 0.55],      // [0] = the tail weld
+        [0.20, 0.72, 0.94, 0.98, 0.94, 0.82, 0.50], 14);
       const hull = hullMesh([dark, white, groove], rings, {
         sides: 14, bellyCut: [-0.52, -0.40, -0.30, -0.18, 0.02, 0.10, -0.10],
         ragged: 0.05, seed: 101, paintKey: "humpback-grooves",
@@ -2843,10 +2930,10 @@
           spanDir: [-0.30, -0.24, s2 * 0.92], chordDir: [1, 0, s2 * 0.1],
         });
       });
-      const ped = hullMesh([dark, white], bodyRings(-1.21, 0.35, 0,
-        [0.1, 0.2, 0.5], [0.0756, 0.14, 0.36], 5),
-        { sides: 12, bellyCut: [-0.44], ragged: 0.04, seed: 102 });
-      ped.position.set(-3.45, 0.95, 0); g.add(ped);
+      tailSleeve(g, [dark, white], rings, {
+        at: [-3.45, 0.95], x0: -1.21, x1: 0.35, tipRy: 0.1, tipRz: 0.0756,
+        sides: 14, bellyCut: [-0.44], ragged: 0.04, seed: 102,
+      });
       const fluke = finsMesh([dark, white], [-4.15, 0.95, 0], [1, -1].map(function (s2) {
         return {
           span: 1.85, chordRoot: 1.05, chordTip: 0.06, sweep: 0.66, concavity: 0.30,

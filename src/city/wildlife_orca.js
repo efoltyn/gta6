@@ -589,8 +589,17 @@
   //  balance number.
   // ============================================================
   const HX0 = -2.35, HX1 = 3.25, HY = 1.05, HLEN = HX1 - HX0;   // 5.60 model units
-  const RY = [0.18, 0.44, 0.68, 0.85, 0.92, 0.92, 0.86, 0.72, 0.34];
-  const RZ = [0.14, 0.38, 0.60, 0.75, 0.82, 0.82, 0.78, 0.66, 0.30];
+  /* RY[0]/RZ[0] ARE THE TAIL WELD, not a nose-cone. Owner, 2026-08-27: "the
+     tail circle is much bigger [than the body's], when they should be
+     identical". They were 0.18 x 0.14 while the peduncle sleeve bolted on
+     behind them was 0.42 x 0.30 — the hull tapered to a spindle and a tube
+     twice its diameter started at the seam. The sleeve is now measured off
+     this curve (see the peduncle below), so this pair IS the tailstock:
+     it carries the depth the cone used to fake (0.30, about a third of the
+     0.92 max — an orca's real proportion) and is laterally compressed to 0.16,
+     which is what makes a peduncle read as a blade instead of a sausage. */
+  const RY = [0.30, 0.44, 0.68, 0.85, 0.92, 0.92, 0.86, 0.72, 0.34];
+  const RZ = [0.16, 0.38, 0.60, 0.75, 0.82, 0.82, 0.78, 0.66, 0.30];
   /* HOW FINE THE SKIN IS, and it is the marking resolution, not a polish
      number. At 34x24 the countershading boundary — which the reference sheet
      calls a HARD, RAGGED, high-contrast line — snapped to whole columns and
@@ -661,7 +670,7 @@
     return s < cut ? 1 : 0;
   }
 
-  const HULL_KEY = "orcaHull|mouth-envelope-v3|" + HULL_RINGS + "x" + HULL_SIDES;
+  const HULL_KEY = "orcaHull|mouth-envelope-v3|tailweld1|" + HULL_RINGS + "x" + HULL_SIDES;
 
   function build(ctx) {
     const m = ctx.mat, g = new T.Group();
@@ -764,12 +773,24 @@
       g.add(f);
     });
 
-    // the tailstock — flattened side to side, which is why an orca's peduncle
-    // reads as a blade and a shark's as a cylinder
-    const ped = meshOf(cached("orcaPeduncle|v1", function () {
+    /* THE TAILSTOCK — flattened side to side, which is why an orca's peduncle
+       reads as a blade and a shark's as a cylinder.
+
+       Its front ring is NOT typed here. It is read off `rings` at the station
+       this mesh is placed at, by the same weld arithmetic every animal in
+       city/wildlife/aquatic.js uses — so the circle where the tail meets the
+       body is the body's own circle, and stays that way if RY/RZ are ever
+       retuned. The side count matches the hull's for the same reason: two
+       polygons inscribed in one ellipse are not one surface.
+
+       Only the far end is a decision this species gets to make: how thin the
+       stock is where the flukes take over. */
+    const ped = meshOf(cached("orcaPeduncle|weld1", function () {
       return hullGeom({
-        rings: ringsOf(-0.78, 0.34, 0, [0.17, 0.42], [0.10, 0.30], 6),
-        sides: 14,
+        rings: CBZ.aquaticWeldedSleeve(rings, {
+          at: [-2.64, HY], x0: -0.78, x1: 0.34, tipRy: 0.17, tipRz: 0.10, n: 6,
+        }),
+        sides: HULL_SIDES,
         paint: function (i, u, j, ang, af, s) { return s < -0.34 ? 1 : 0; },
       });
     }), [black, white]);
