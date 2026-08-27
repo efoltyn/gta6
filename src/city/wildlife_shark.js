@@ -1088,6 +1088,17 @@
       yaw: 0, ph: null, bank: 0, tailExposed: 0,
       root: null, fin: null, wake: null, bow: null, sz: 1, finExposed: 0,
       tail: null, spray: null, sprayMat: null,
+      /* ---- THE BREACH (see §THE BREACH). `air` is the phase: 0 in the water,
+         1 climbing under it, 2 out of it. Everything else is the arc. `shed`
+         is the caller-owned scratch CBZ.marineBreachShed writes through, so a
+         breach allocates nothing per frame. */
+      air: 0, airY: 0, airVy: 0, airT: 0, airTotal: 0, airSpin: 1, airApex: 0,
+      airVmax: 0, airA: 0, airOut: 0,
+      pitchUp: 0, pitchDown: 0, rollPeak: 0, alignErr: 0,
+      airPitch: 0, airRoll: 0, airWhy: "", breachCd: 2 + hash1(
+        Math.round((a.group ? a.group.position.x * 3.1 + a.group.position.z * 7.7 : 0)) | 0) * 14,
+      breachTry: 0, breaches: 0, bx: null, bz: null, hv: 0, exited: false,
+      shed: {},
       plan: null, shadow: null, shadowMat: null, bodySil: null, bodyMat: null,
       // one deterministic phase per animal, so a pod does not sway in lockstep
       // and the same world always sways the same way (the determinism law).
@@ -1206,6 +1217,28 @@
     const s = ensure(a), grp = a.group;
     if (!grp || !dt) return false;
     s.owned = true;
+    /* A BODY THAT HAS LEFT THE WATER IS NOT SWIMMING. Two things below are
+       wrong for it and both are wrong in a way that would look like a bug: the
+       turn, because a thrown body does not steer (that is exactly why a real
+       breaching shark can MISS), and moveInWater's clearance fence, which is a
+       fence around water — a leap that cannot cross it stops dead in mid-air
+       over a sandbar. So while §THE BREACH owns this animal it carries x/z
+       ballistically along the heading it launched on, and y is not touched
+       here at all. Both come straight back the frame it lands. */
+    if (s.air) {
+      /* ...and the charge is SPENT ON THE CLIMB, not carried through it. A
+         great white's rush is ~22 m/s; carried into the air unchanged it makes
+         a 26 m skip at a 25-degree flight path, which is a fish being thrown
+         rather than a fish leaping. The animal is still swimming while it is
+         climbing (phase 1, full speed — that is what closes the range), and
+         then most of the forward speed becomes height at the surface. */
+      const flight = Math.max(0, speed || 0) * (s.air === 2 ? BREACH_CARRY : 1) * dt;
+      grp.position.x += Math.cos(a.heading) * flight;
+      grp.position.z += Math.sin(a.heading) * flight;
+      if (a._waterMove) { a._waterMove.x = grp.position.x; a._waterMove.z = grp.position.z; }
+      if (CBZ.faceAnimalHeading) CBZ.faceAnimalHeading(grp, a.heading);
+      return true;
+    }
     // a shark turns with its whole body — no instant pivots, ever
     const turn = (s.meg ? TURN_RATE * 0.6 : TURN_RATE) * dt;
     let d = shortest((want == null ? a.heading : want) - a.heading);
@@ -1279,6 +1312,13 @@
   // that law also caps how far a bed may ever lift a body: a stranded shark
   // shows its back, it does not take off.
   function depth(a, s, dt, t) {
+    /* A BODY IN THE AIR IS NOT AT A DEPTH. §THE BREACH owns group.position.y
+       for the whole arc. Deferring rather than "lifting the clamp" is the
+       honest shape here: the submersion clamp below is precisely the thing
+       that made a leap impossible (the first clamp is what kept every shark in
+       this game under the waterline forever), and the seabed clamp has nothing
+       underneath a body that is over the water. Both come back on landing. */
+    if (s.air) return;
     const grp = a.group;
     const surf = surfaceAt(grp.position.x, grp.position.z, t);
     s.dive += (s.diveWant - s.dive) * Math.min(1, dt * (s.meg ? 0.85 : 1.3));
@@ -1295,6 +1335,442 @@
     }
     grp.position.y += (y - grp.position.y) * Math.min(1, dt * 3.5);
   }
+
+  // ============================================================
+  //  §THE BREACH — the one thing in this file that leaves the water.
+  //
+  //  Until this section existed a shark in this game COULD NOT get out of the
+  //  sea, and not by accident: depth() above has two clamps and the first of
+  //  them ("keep the torso under") is unconditional, so the ceiling on every
+  //  wild shark's y was 0.92 of its own draft under the waterline, forever. A
+  //  great white taking a seal at the surface is the single most photographed
+  //  thing this animal does and the engine had no way to express it.
+  //
+  //  THE SHAPE IS THE ORCA'S, THE PHYSICS IS THE PLAYER'S. city/wildlife_orca.js
+  //  solved the hard half years of frames ago and its comment says why: the act
+  //  must never write group.position.y directly, or depth() reads the raised y
+  //  back on the next frame and the animal sinks through its own act. Its
+  //  answer is a flag that suspends the clamp for the duration. This takes the
+  //  same idea one step further — while `s.air` is set, depth() DEFERS
+  //  ENTIRELY and this section is the only owner of y — because a shark's leap
+  //  is not a scripted sine like an orca's breach act, it is a real ballistic
+  //  arc, and a target-and-ease depth track flattens a ballistic arc into a
+  //  bump. The orca is not touched: it keeps its acts, its sine and its clamp
+  //  suspension exactly as they are.
+  //
+  //  The numbers are not a second opinion either: the apex, the launch speed
+  //  and the gravity all come from city/wildlife_tame.js's published solve
+  //  (CBZ.marineBreachVel / marineBreachG), which is the same one the RIDDEN
+  //  shark leaps with. A wild great white and the player's great white jump
+  //  identically, because they are the same jump.
+  //
+  //  IT HAPPENS FOR TWO REASONS, and nothing else:
+  //    1. THE STRIKE. A committed rush on prey that is at the top of the water
+  //       carries through and out. It is triggered at the range where the climb
+  //       and the charge actually MEET (solved, not typed), which is why it
+  //       comes out under the seal rather than beside it — and why, like the
+  //       real thing, it can miss: a body in the air does not steer.
+  //    2. THE SPECTACLE. Rarely, in deep water, for nothing. This is the one
+  //       the owner sees from four hundred metres away and turns the boat for.
+  //  No flag. A shark that can leave the water is not a feature you switch on.
+  // ============================================================
+  const BREACH_COOL = 11;        // s an animal waits between its own leaps
+  /* HOW RARE IS RARE. One roll every ~26 s per animal and a quarter of them
+     take, so a given shark leaps for nothing about once every two minutes it
+     spends cruising deep water within sight — and only while it is CRUISING,
+     which means never while it is working on you. With three or four sharks in
+     the water that is a sea that throws one every half minute or so: often
+     enough to be a thing that happens, rare enough that you look up. */
+  const IDLE_EVERY = 26;         // s between idle rolls, per animal
+  const IDLE_P = 0.26;           // ...and how many of those rolls take
+  // How much of the charge survives the waterline as forward speed. The rest
+  // became height. Spent by swim()'s airborne branch above and seeded into the
+  // measured horizontal speed at the moment of the exit, so the pose and the
+  // trajectory can never disagree about it.
+  const BREACH_CARRY = 0.45;
+  const BREACH_PASS_R = 460;     // u — beyond this the pass costs one hypot
+  const TRAIL_R = 230;           // u — beyond this the shed trail is not drawn
+  const BREACH_G_DEF = 17.5;     // only if wildlife_tame.js is not in this build
+  const BREACH_ROLL_DEF = 0.42;
+  const BAUDIT = {
+    breaches: 0, strikes: 0, idles: 0, landings: 0, aborted: 0, drops: 0,
+    lastWhy: "", lastApex: 0, lastAirT: 0, lastKg: 0, lastSpd: 0,
+    lastPitchUp: 0, lastPitchDown: 0, lastRoll: 0, lastAlignErr: 0, lastLen: 0,
+  };
+
+  function breachG() {
+    if (typeof CBZ.marineBreachG === "function") {
+      try { const g = +CBZ.marineBreachG(); if (g > 0) return g; } catch (e) {}
+    }
+    return BREACH_G_DEF;
+  }
+  function rollAmt() {
+    if (typeof CBZ.marineBreachRoll === "function") {
+      try { const r = +CBZ.marineBreachRoll(); if (r > 0) return r; } catch (e) {}
+    }
+    return BREACH_ROLL_DEF;
+  }
+  function liveSz(a) {
+    if (typeof CBZ.wildlifeScale === "function" && a.species) {
+      try { const v = +CBZ.wildlifeScale(a); if (v > 0 && isFinite(v)) return v; } catch (e) {}
+    }
+    const g = a.group;
+    if (g && g.scale && g.scale.x > 0) return g.scale.x;
+    return (a.species && a.species.scale) || 1;
+  }
+  function breachVel(scale) {
+    if (typeof CBZ.marineBreachVel === "function") {
+      try { const v = +CBZ.marineBreachVel(scale); if (v > 0 && isFinite(v)) return v; } catch (e) {}
+    }
+    return Math.sqrt(2 * BREACH_G_DEF * (0.9 + scale * 1.9));
+  }
+  function bodyLenOf(a) {
+    if (typeof CBZ.marineBodyLenLive === "function") {
+      try { const L = +CBZ.marineBodyLenLive(a); if (L > 0 && isFinite(L)) return L; } catch (e) {}
+    }
+    return 4 * liveSz(a);
+  }
+  // ONE waterline crossing, momentum-true, through the shared primitive. The
+  // fallback is the legacy dial and is a fallback ONLY — it is the thing that
+  // reported every animal in this game as a 78 kg diver.
+  function waterCross(a, x, surf, z, speed, exit) {
+    if (typeof CBZ.marineBreachCross === "function") {
+      try { return +CBZ.marineBreachCross(a, x, surf, z, speed, exit, bodyLenOf(a)) || 0; } catch (e) {}
+    }
+    if (typeof CBZ.waterSplashAt === "function") {
+      try { CBZ.waterSplashAt(x, surf, z, 2.2); } catch (e) {}
+    }
+    return 0;
+  }
+  // What is this animal hunting right now? systems/predator.js parks the live
+  // quarry on the hunt scratch it already keeps per actor, and BOTH drivers
+  // that can own a shark (this file's player hunt and marine_predation.js's
+  // prey hunt) go through it — so this answers for either without either
+  // needing to know about the breach.
+  function quarryOf(a) {
+    const h = a._hunt;
+    const q = h && h._fightTarget;
+    if (!q || q.dead) return null;
+    if (CBZ.player && q === CBZ.player) return CBZ.player.pos || null;
+    return q.pos || (q.group && q.group.position) || null;
+  }
+  // Enough sea to come up out of AND to come back down into. A leap in three
+  // feet of water is a stranding, not a breach.
+  function deepEnough(a, draft) {
+    const g = a.group;
+    if (typeof CBZ.cityWaterDepthAt !== "function") return true;
+    let col = 0;
+    try { col = +CBZ.cityWaterDepthAt(g.position.x, g.position.z) || 0; } catch (e) { col = 0; }
+    return col > draft * 1.7 + 1.2;
+  }
+
+  /* WHEN A CHARGE BECOMES A LEAP. Every one of these is a condition of the
+     photograph: the animal is committed, the prey is at the top of the water,
+     the animal is UNDER it, it is pointed at it, and it is at the range where
+     the climb and the charge arrive together. That last one is solved rather
+     than typed — the climb takes as long as the body's own depth divided by
+     its launch speed, and in that time the charge covers whatever it is
+     actually doing — which is why one number cannot serve a bull shark and a
+     megalodon and why this comes out UNDER the seal instead of beside it. */
+  function strikeWants(a, s, surf, draft) {
+    if (s.state !== "rush") return false;
+    const qp = quarryOf(a);
+    if (!qp) return false;
+    const g = a.group;
+    const dx = qp.x - g.position.x, dz = qp.z - g.position.z;
+    const gap = Math.hypot(dx, dz);
+    const len = bodyLenOf(a);
+    const down = surf - g.position.y;
+    if (down < draft * 0.75) return false;               // it is not below anything
+    // the prey has to be at the top of the water
+    if (qp.y != null) {
+      const qs = surfaceAt(qp.x, qp.z, clock());
+      if (qs - qp.y > draft * 0.55 + 1.4) return false;
+    }
+    if (Math.abs(shortest(Math.atan2(dz, dx) - a.heading)) > 0.7) return false;
+    const climb = down / Math.max(3, breachVel(liveSz(a)) * 0.7);
+    const want = Math.max(len * 0.6, s.hv * climb);
+    if (gap > want * 1.55 || gap < want * 0.45) return false;
+    return deepEnough(a, draft);
+  }
+
+  function beginBreach(a, s, why, surf) {
+    const g = a.group;
+    const sz = liveSz(a);
+    const V = breachVel(sz);
+    // HOW IT GETS TO THE SURFACE. Not a teleport and not a constant: the climb
+    // is solved so the body arrives at the waterline doing exactly the launch
+    // speed, from wherever it happened to be — so what you see from a boat is
+    // a dark shape ACCELERATING up out of the blue, which is the half of the
+    // strike that happens before anything leaves the water.
+    const d0 = Math.max(0.6, Math.min(9, surf - g.position.y));
+    const v0 = V * 0.35;
+    s.air = 1;
+    s.airVy = v0; s.airVmax = V;
+    s.airA = (V * V - v0 * v0) / (2 * d0);
+    s.airY = g.position.y - surf;
+    s.airT = 0; s.airApex = 0; s.exited = false; s.airOut = 0;
+    s.airTotal = (2 * V) / breachG();
+    // which way it comes over at the top — deterministic, so the same body in
+    // the same place always rolls the same way, and arbitrary enough that a
+    // sequence of breaches does not read as a machine
+    s.airSpin = ((Math.floor(Math.abs(g.position.x) * 7 + Math.abs(g.position.z) * 13) & 1) ? 1 : -1);
+    s.airWhy = why;
+    s.pitchUp = 0; s.pitchDown = 0; s.rollPeak = 0; s.alignErr = 0;
+    s.breachCd = BREACH_COOL;
+    s.breaches++;
+    s.shed.acc = 0;
+    BAUDIT.breaches++;
+    if (why === "strike") BAUDIT.strikes++; else BAUDIT.idles++;
+    return true;
+  }
+
+  // A breach that is interrupted (the animal died, was seized, was rolled by a
+  // pod, or simply left the pass radius mid-air) must put the body back in the
+  // water rather than leave it hanging over it.
+  function endBreach(a, s) {
+    if (!s.air) return;
+    s.air = 0; s.airOut = 0; s.airPitch = 0; s.airRoll = 0; s.airY = 0; s.airVy = 0;
+    const g = a.group;
+    if (g) {
+      const draft = a.swimDepth || 2;
+      const surf = surfaceAt(g.position.x, g.position.z, clock());
+      g.position.y = surf - draft * 1.1;
+      s.dive = draft * 1.1;
+    }
+    BAUDIT.aborted++;
+  }
+
+  function landBreach(a, s, surf, draft, dist) {
+    const g = a.group;
+    const fall = Math.abs(s.airVy);
+    s.air = 0; s.airOut = 0.3;
+    BAUDIT.landings++;
+    BAUDIT.lastWhy = s.airWhy;
+    BAUDIT.lastApex = +(s.airApex || 0).toFixed(2);
+    BAUDIT.lastAirT = +(s.airT || 0).toFixed(2);
+    BAUDIT.lastSpd = +fall.toFixed(2);
+    BAUDIT.lastPitchUp = +(s.pitchUp || 0).toFixed(3);
+    BAUDIT.lastPitchDown = +(s.pitchDown || 0).toFixed(3);
+    BAUDIT.lastRoll = +(s.rollPeak || 0).toFixed(3);
+    BAUDIT.lastAlignErr = +(s.alignErr || 0).toFixed(4);
+    BAUDIT.lastLen = +bodyLenOf(a).toFixed(2);
+    const kg = waterCross(a, g.position.x, surf, g.position.z, fall, false);
+    BAUDIT.lastKg = Math.round(kg);
+    // IT PUNCHES UNDER. Landing exactly on the waterline and stopping is the
+    // thing that makes a leap look weightless; the plunge target is carried and
+    // depth()'s own ease brings it back up, so the recovery is the depth
+    // system's, not a second animation.
+    s.dive = draft * (0.9 + Math.min(1.6, fall * 0.055));
+    g.position.y = surf - Math.max(0.22, draft * 0.22);
+    s.airY = 0; s.airVy = 0;
+    if (s.airWhy === "strike" && CBZ.swimJaw && s.state !== "seize") {
+      try { CBZ.swimJaw(a, 0); } catch (e) {}
+    }
+    // A LANDING YOU CAN FEEL, if you are near enough to feel it. Falls off with
+    // the square of the distance, which is what stops a shark breaching on the
+    // horizon from shaking the player's camera.
+    if (typeof CBZ.shake === "function" && dist < 110) {
+      const near = Math.max(0, 1 - dist / 110);
+      const amt = (0.22 + Math.min(0.85, kg * 0.00006) + fall * 0.012) * near * near;
+      if (amt > 0.02) { try { CBZ.shake(Math.min(1.6, amt)); } catch (e) {} }
+    }
+  }
+
+  function breachTick(a, s, dt, dist) {
+    const g = a.group;
+    const t = clock();
+    const surf = surfaceAt(g.position.x, g.position.z, t);
+    const draft = a.swimDepth || 2;
+
+    /* HOW FAST IS IT ACTUALLY GOING SIDEWAYS. Read off the transform, never
+       asked of a driver — the same trick proxy() uses — so the arc's pitch is
+       right whether predatorHunt, marine_predation or wildlife.js's own wander
+       is steering the body this frame. */
+    const dx = s.bx == null ? 0 : g.position.x - s.bx;
+    const dz = s.bz == null ? 0 : g.position.z - s.bz;
+    s.bx = g.position.x; s.bz = g.position.z;
+    const inst = dt > 0 ? Math.sqrt(dx * dx + dz * dz) / dt : 0;
+    s.hv += (Math.min(40, inst) - s.hv) * Math.min(1, dt * 6);
+
+    if (s.breachCd > 0) s.breachCd -= dt;
+
+    if (!s.air) {
+      if (s.airOut > 0) {
+        // ease the arc's pose out rather than snapping the body flat the frame
+        // it touches the water — the entry splash is exactly where a snap shows
+        s.airOut -= dt;
+        const e = Math.min(1, dt * 7);
+        s.airPitch += (0 - s.airPitch) * e;
+        s.airRoll += (0 - s.airRoll) * e;
+        g.rotation.z = s.airPitch;
+        g.rotation.x += s.airRoll;
+      }
+      if (a._seizedBy || a._mpRoll || a.hp <= 0 || s.bail > 0) return;
+      if (s.breachCd > 0) return;
+      if (strikeWants(a, s, surf, draft)) { beginBreach(a, s, "strike", surf); return; }
+      s.breachTry -= dt;
+      if (s.breachTry > 0) return;
+      s.breachTry = IDLE_EVERY * (0.6 + hash1((Math.round(t * 11) ^ 0x51ee) | 0) * 0.9);
+      // ONLY WHILE IT IS CRUISING. A shark that has your scent is doing
+      // something; a shark that jumps for fun in the middle of stalking you is
+      // a shark that has stopped being frightening.
+      if (s.state !== "cruise") return;
+      if (hash1((Math.round(g.position.x * 3.1 + g.position.z * 7.7) ^ Math.round(t * 31)) | 0) > IDLE_P) return;
+      if (!deepEnough(a, draft)) return;
+      beginBreach(a, s, "idle", surf);
+      return;
+    }
+
+    // ---- the arc ------------------------------------------------------------
+    s.airT += dt;
+    if (s.air === 1) {
+      s.airVy = Math.min(s.airVmax, s.airVy + s.airA * dt);
+      s.airY += s.airVy * dt;
+      // the curtain of water comes up with the head, a beat before the origin
+      // crosses — the body is already dragging the sea up by then
+      if (!s.exited && s.airY >= -draft * 0.35) {
+        s.exited = true;
+        waterCross(a, g.position.x, surf, g.position.z, s.airVy, true);
+      }
+      if (s.airY >= 0) {
+        s.air = 2; s.airVy = s.airVmax; s.airT = 0;
+        // the charge becomes height at the waterline (see swim()'s BREACH_CARRY):
+        // seeded here so the very first airborne frame already poses on the real
+        // flight path instead of easing into it over the next third of a second
+        s.hv *= BREACH_CARRY;
+      }
+    } else {
+      s.airVy -= breachG() * dt;
+      s.airY += s.airVy * dt;
+    }
+    if (s.airY > s.airApex) s.airApex = s.airY;
+
+    // ---- the body speaks ----------------------------------------------------
+    // The nose points exactly where the animal is going: nose-up on the climb,
+    // level across the top, nose-down into the water. Never animated — derived,
+    // which is what `alignErr` below exists to keep honest.
+    s.airPitch = Math.max(-1.25, Math.min(1.32, Math.atan2(s.airVy, Math.max(0.8, s.hv))));
+    const u = s.air === 2 ? Math.max(0, Math.min(1, s.airT / Math.max(0.25, s.airTotal))) : 0;
+    s.airRoll = s.airSpin * rollAmt() * Math.sin(u * 2.67);
+    if (s.airPitch > (s.pitchUp || 0)) s.pitchUp = s.airPitch;
+    if (s.airPitch < (s.pitchDown || 0)) s.pitchDown = s.airPitch;
+    if (Math.abs(s.airRoll) > (s.rollPeak || 0)) s.rollPeak = Math.abs(s.airRoll);
+    const err = Math.abs(s.airPitch - Math.atan2(s.airVy, Math.max(0.001, s.hv)));
+    if (err > (s.alignErr || 0)) s.alignErr = err;
+
+    g.position.y = surf + s.airY;
+    // A BREACH IS THE ONE THING YOU HAVE TO BE ALLOWED TO SEE. The body's LOD
+    // hides it outside ~62% of the sense radius and the surface proxy draws a
+    // dorsal in its place; a fin cutting the water while the animal it belongs
+    // to is four metres above it is the double-fin bug with extra steps. One
+    // line settles both: the body draws, and proxy()'s own "only while the real
+    // one is not drawn" test folds the stand-in away by itself.
+    g.visible = true;
+    g.rotation.z = s.airPitch;      // ABSOLUTE — animateSwim assigns this outright
+    g.rotation.x += s.airRoll;      // ADDITIVE — the orca's applyPose law
+
+    // ---- and it sheds water all the way down --------------------------------
+    if (s.airY > -draft * 0.2 && dist < TRAIL_R && typeof CBZ.marineBreachShed === "function") {
+      const o = s.shed;
+      o.x = g.position.x; o.y = g.position.y; o.z = g.position.z;
+      o.heading = a.heading; o.pitch = s.airPitch;
+      o.len = bodyLenOf(a);
+      o.vx = Math.cos(a.heading) * s.hv; o.vz = Math.sin(a.heading) * s.hv;
+      o.vy = s.airVy; o.dt = dt; o.airT = s.airT; o.airTotal = s.airTotal;
+      try { BAUDIT.drops += CBZ.marineBreachShed(o) || 0; } catch (e) {}
+    }
+    // MOUTH OPEN. A strike that comes out of the water with its jaws shut is a
+    // fish jumping; the gape is the whole photograph. Written every frame of
+    // the arc so nothing else's zero can stick to it mid-flight.
+    if (s.airWhy === "strike" && CBZ.swimJaw) {
+      try { CBZ.swimJaw(a, 0.9); } catch (e) {}
+    }
+
+    if (s.air === 2 && s.airVy < 0 && s.airY <= -draft * 0.18) {
+      landBreach(a, s, surf, draft, dist);
+    }
+  }
+
+  /* THE PASS. onUpdate(47.22): AFTER wildlife.js's tick (47.1) — which is where
+     animateSwim writes rotation.x and rotation.z — and after
+     marine_predation.js's own 47.15, so the arc's pose survives both. It is its
+     own pass rather than a call inside sharkBrain for the same reason the orca's
+     is: sharkBrain does not run at all on the frames marine_predation owns the
+     animal, and a body that is halfway through a ballistic arc must be
+     integrated on EVERY frame or it hangs in the air.
+
+     DISTANCE-GATED HARD: a shark half a kilometre away costs one species
+     compare and one Math.hypot. */
+  function breachPass(dt) {
+    if (!(dt > 0) || !ON()) return;
+    const list = CBZ.cityWildlife;
+    if (!list || !list.length) return;
+    const P = (CBZ.player && CBZ.player.pos) || null;
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      if (!a || !a.group || a.tamed || a.ridden || a._despawned) continue;
+      const sp = a.species;
+      if (!sp || !sp.aquatic || (sp.danger || 0) < 0.5) continue;
+      // The orca has its own surface acts (city/wildlife_orca.js §5) and its own
+      // pose pass. It also carries a _shark state, because that file's wrapper
+      // builds one — so this exclusion is load-bearing, not tidiness.
+      if (sp.id === "orca") continue;
+      const s = a._shark;
+      if (!s) continue;                     // state is ensure()'s to build, never this pass's
+      if (a.dead) { if (s.air) endBreach(a, s); continue; }
+      const d = P ? Math.hypot(a.group.position.x - P.x, a.group.position.z - P.z) : 1e9;
+      if (d > BREACH_PASS_R) {
+        if (s.air) endBreach(a, s);
+        continue;
+      }
+      breachTick(a, s, dt, d);
+    }
+  }
+  if (CBZ.onUpdate) CBZ.onUpdate(47.22, breachPass);
+
+  /* THE ARC, AS NUMBERS — tools/visual-presets/shark-breach.mjs reads this
+     instead of reaching into the state, so the report and the behaviour cannot
+     drift apart. `alignErr` is the one that has to stay at zero: it is how far
+     the body's attitude ever sat from its own velocity vector, and a non-zero
+     value means somebody started animating the pose instead of deriving it. */
+  CBZ.sharkBreachAudit = function () {
+    let air = 0, ready = 0;
+    const list = CBZ.cityWildlife || [];
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i], s = a && a._shark;
+      if (!s || !a.species || a.species.id === "orca") continue;
+      if (s.air) air++;
+      if (!s.air && s.breachCd <= 0) ready++;
+    }
+    return {
+      airborne: air, ready: ready,
+      breaches: BAUDIT.breaches, strikes: BAUDIT.strikes, idles: BAUDIT.idles,
+      landings: BAUDIT.landings, aborted: BAUDIT.aborted, trailDrops: BAUDIT.drops,
+      lastWhy: BAUDIT.lastWhy, lastApex: BAUDIT.lastApex, lastAirT: BAUDIT.lastAirT,
+      lastEntryKg: BAUDIT.lastKg, lastEntrySpd: BAUDIT.lastSpd, lastLenM: BAUDIT.lastLen,
+      lastPitchUp: BAUDIT.lastPitchUp, lastPitchDown: BAUDIT.lastPitchDown,
+      lastRoll: BAUDIT.lastRoll, lastAlignErr: BAUDIT.lastAlignErr,
+    };
+  };
+  /* THE TOOLING SEAM. A preset cannot stand on a beach for four minutes waiting
+     for a 30%-per-24-seconds roll to come up, and faking the leap by writing
+     `s.air` from outside would photograph a preset's animation rather than this
+     file's. So the STARTER is public and everything downstream — the climb, the
+     arc, the pose, the two splashes, the shed trail, the landing — is exactly
+     what an idle roll or a strike would have run. Returns false if this animal
+     genuinely cannot leap from where it is standing, which is itself the
+     answer on a build where the behaviour does not exist. */
+  CBZ.sharkBreachNow = function (a, why) {
+    if (!ON() || !a || !a.group || a.dead || a.tamed || a.ridden) return false;
+    const sp = a.species;
+    if (!sp || !sp.aquatic || (sp.danger || 0) < 0.5 || sp.id === "orca") return false;
+    const s = ensure(a);
+    if (s.air) return false;
+    const surf = surfaceAt(a.group.position.x, a.group.position.z, clock());
+    if (!deepEnough(a, a.swimDepth || 2)) return false;
+    return beginBreach(a, s, why === "strike" ? "strike" : "idle", surf);
+  };
 
   // ============================================================
   //  THE ONE ENTRY POINT — ticked by wildlife.js's aquatic branch.

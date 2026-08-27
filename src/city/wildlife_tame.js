@@ -98,6 +98,13 @@
   // The one gravity the airborne mount integrates under, shared with the launch
   // solve so "how much air" and "how fast do I leave" can never disagree.
   const BREACH_G = 17.5;
+  // How far a breaching body comes over onto its flank at the top of the arc.
+  // 0.42 rad is 24 degrees — enough that the whole side of the animal turns to
+  // the camera, short of the barrel roll that would read as a dolphin trick.
+  const BREACH_ROLL = 0.42;
+  // Caller-owned scratch for CBZ.marineBreachShed (see the waterline section):
+  // the trail runs every frame of an arc and must not allocate.
+  const _rideShed = {};
 
   /* ---- HOW BIG IS THE BODY UNDER THE RIDER, RIGHT NOW --------------------
      Every `a.species.scale` in this file meant "how big is this animal" and
@@ -199,7 +206,9 @@
     // depth, a great white clears a body length, and a megalodon throws 5.8 m
     // of air and stays up for 1.6 SECONDS — enormous and heavy, which is what
     // makes it read as mass rather than as a bigger dolphin.
-    const apex = id === "dolphin" ? 6.9 : (0.9 + scale * 1.9);
+    // (the non-dolphin solve is breachApexFor() below — ONE law, so a wild
+    //  shark in city/wildlife_shark.js and the player's mount jump identically)
+    const apex = id === "dolphin" ? 6.9 : breachApexFor(scale);
     const canBreach = BREACH_ON() ? (hunter || id === "dolphin" || /whale|ray|tuna|marlin|sailfish/.test(id))
                                   : id === "dolphin";
     return (AQUATIC_RIDES[sp.id] = {
@@ -1140,6 +1149,12 @@
     mounts: 0, breaches: 0, reentries: 0, attacks: 0, hits: 0, shipBites: 0,
     clamps: 0,
     lastSpecies: null, lastTarget: null,
+    // THE ARC, as numbers. Everything below is written by the breach itself and
+    // read by tools/visual-presets/shark-breach.mjs, so the pictures and the
+    // table describe the same jump.
+    lastApex: 0, lastAirT: 0, lastPitchUp: 0, lastPitchDown: 0, lastRoll: 0,
+    lastAlignErr: 0, lastEntryKg: 0, lastEntrySpd: 0,
+    lastEntryKind: "", trailDrops: 0, crossDrops: 0,
   };
 
   function aquaticMounted(a) { return !!(a && a.species && a.species.aquatic && ride.water); }
@@ -1848,6 +1863,211 @@
     return !!(ride.mount && ride.water && aquaticMounted(ride.mount) && !ride.mount.dead);
   };
 
+  /* ============================================================
+     A BIG BODY CROSSING THE WATERLINE — the shared physical event.
+
+     A breach happens twice: the animal comes OUT and then it comes back IN,
+     and both are the same event with the sign flipped — a few tonnes of fish
+     trading places with a few tonnes of water. Two files need it (the ridden
+     mount below, and the wild sharks in city/wildlife_shark.js), so it is
+     published here rather than typed twice; this file loads first, and the
+     consumer degrades to nothing if it is ever loaded alone.
+
+     WHY THIS EXISTS AT ALL — the megalodon splashed like a swimmer. Every
+     breach in this game went through the legacy CBZ.waterSplashAt, and that
+     function's contract CLAMPS its strength dial to 2.5 and then hands the
+     impact bus `{ kind: "body", mass: 78 }`. Seventy-eight kilograms. So a
+     bull shark, a great white and a sixteen-metre megalodon all re-entered the
+     sea as the same 78 kg diver at the same clamped speed, and the "make the
+     splash bigger" dial the callers were turning had been saturated for years.
+     world/water_impact.js sizes everything off sqrt(mass) * speed and has a
+     `vehicle` vocabulary sitting right there for a mass a body cannot reach.
+     The fix is not a bigger number — it is telling the truth about the animal.
+  ============================================================ */
+
+  /* HOW LONG IS THIS BODY, RIGHT NOW. city/marine_predation.js publishes the
+     MEASURED length (a world box off the rig, cached per actor) and that is the
+     one measurement anybody should be making — but its cache predates the mass
+     economy, so a shark that has eaten its way up a tier still reports the
+     length it was measured at. Rather than re-measure (a setFromObject over the
+     whole rig) this remembers the scale the measurement was taken at and
+     carries the ratio, which is exact for a body that only ever grows by
+     uniform scale — which is precisely how wildlife_traits.js grows one. */
+  function bodyLenLive(a) {
+    if (!a) return 4;
+    let m = a._breachLen;
+    if (!m) {
+      let L = 0;
+      if (typeof CBZ.marineBodyLen === "function") {
+        try { L = +CBZ.marineBodyLen(a); } catch (e) { L = 0; }
+      }
+      if (!(L > 0) || !isFinite(L)) L = 4 * ((a.species && a.species.scale) || 1);
+      m = a._breachLen = { L: L, s: Math.max(0.05, liveScale(a)) };
+    }
+    return m.L * (Math.max(0.05, liveScale(a)) / m.s);
+  }
+  /* HOW MANY KILOGRAMS OF ANIMAL. city/marine_predation.js:308 already owns the
+     game's one marine mass law — `tonnesOf(a) = 0.014 * L^2.8` off that same
+     measured length, which is what decides whether a shark can move a hull —
+     and it is private to that file. This is that law in kilograms rather than a
+     second opinion: if the two ever disagree, marine_predation.js is the owner
+     and this is the copy to fix. MEASURED on the live rigs at seed 90210: a
+     ridden bull shark at 4.95 m comes out at 1.24 t, a great white at 5.34 m at
+     1.52 t, and a megalodon that has eaten its way to 22.7 m at 87.6 t. The
+     first two land in world/water_impact.js's `body` and `vehicle` vocabularies
+     respectively; the third saturates the vehicle one, which is correct — there
+     is no louder answer the sea has. */
+  function bodyKg(a) {
+    const L = bodyLenLive(a);
+    return Math.max(8, 14 * Math.pow(L, 2.8));
+  }
+  CBZ.marineBodyLenLive = bodyLenLive;
+  CBZ.marineBodyKg = bodyKg;
+
+  /* HOW MUCH AIR A BODY OF THIS SIZE GETS, and therefore how fast it has to
+     leave the water. This is the solve aquaticRideDef already did for the
+     ridden mount, lifted out and published so the WILD bodies in
+     city/wildlife_shark.js leap by the same physics the player's does instead
+     of by a second set of numbers that would immediately drift. The number
+     authored is the one a person can picture — a bull shark clears about its
+     own depth, a great white a body length, a megalodon 5.8 m — and the launch
+     speed, the hang time and the entry speed are all consequences of it under
+     the one BREACH_G everybody integrates with. */
+  function breachApexFor(scale) { return 0.9 + Math.max(0.25, +scale || 1) * 1.9; }
+  CBZ.marineBreachApex = breachApexFor;
+  CBZ.marineBreachVel = function (scale) { return Math.sqrt(2 * BREACH_G * breachApexFor(scale)); };
+  CBZ.marineBreachG = function () { return BREACH_G; };
+  CBZ.marineBreachRoll = function () { return BREACH_ROLL; };
+
+  /* THE CURTAIN A BODY DRAGS THROUGH THE SURFACE. world/water_impact.js's
+     vocabulary is calibrated for things going IN (crown, rebound jet, settling
+     ring); nothing in it describes a body coming OUT, which throws a torn
+     sheet of water UP and outward off its own flanks. That is raw droplets, so
+     it is CBZ.waterEmit — the public pool primitive — and the count is sized
+     off the mass and clipped to whatever the pool has spare, so a breach can
+     never starve the wakes and the rain it shares a budget with. */
+  function breachSheet(x, surf, z, kg, len, up, fx, fz) {
+    if (typeof CBZ.waterEmit !== "function") return 0;
+    const free = typeof CBZ.waterEmitFree === "function" ? CBZ.waterEmitFree() : 90;
+    if (!(free > 4)) return 0;
+    const n = Math.max(6, Math.min(Math.round(free * 0.4),
+      Math.round(12 + Math.cbrt(Math.max(1, kg)) * 3.2)));
+    const r0 = Math.max(0.5, len * 0.22);
+    let made = 0;
+    for (let i = 0; i < n; i++) {
+      const ang = (i / n) * 6.283185307 + Math.random() * 0.7;
+      const rr = r0 * (0.35 + Math.random() * 0.95);
+      const ox = Math.cos(ang) * rr, oz = Math.sin(ang) * rr;
+      // biased along the body's own line: the sheet peels off the flanks and
+      // trails the animal rather than standing up as a symmetric fountain
+      const bx = fx * len * 0.16 * (Math.random() - 0.7);
+      const bz = fz * len * 0.16 * (Math.random() - 0.7);
+      if (CBZ.waterEmit({
+        x: x + ox + bx, y: surf + 0.05 + Math.random() * 0.4, z: z + oz + bz,
+        vx: ox * (1.5 + Math.random() * 1.4) - fx * 1.2,
+        vy: up * (0.32 + Math.random() * 0.62),
+        vz: oz * (1.5 + Math.random() * 1.4) - fz * 1.2,
+        size: 0.12 + Math.min(0.5, len * 0.028) * (0.6 + Math.random()),
+        grow: -0.06, ttl: 0.55 + Math.random() * 0.85, alpha: 0.9,
+      })) made++;
+    }
+    return made;
+  }
+
+  /* ONE END OF THE ARC. Fired at the launch and again at the re-entry, with the
+     animal's honest mass and the vertical speed it is actually carrying, so the
+     sea answers a megalodon the way it answers a bus and a bull shark the way
+     it answers a bull shark. Returns the kilograms it reported (0 if the point
+     was not over water at all — a leap that lands on sand is a beaching, and
+     the caller still owes it a thud). */
+  function breachCross(a, x, surf, z, speed, exit, len) {
+    const kg = bodyKg(a);
+    const spd = Math.max(1.5, Math.abs(speed));
+    // Past ~1.4 t the sea stops answering like a diver went in. `vehicle` is
+    // the vocabulary water_impact.js already calibrated at exactly that mass —
+    // a flatter, wider crown with a damped rebound jet, which is what a long
+    // heavy body landing on its side actually makes.
+    const kind = kg >= 1400 ? "vehicle" : "body";
+    let fired = false;
+    if (typeof CBZ.waterHit === "function") {
+      try {
+        fired = !!CBZ.waterHit(x, surf, z, { kind: kind, mass: kg, speed: spd });
+      } catch (e) { fired = false; }
+    }
+    if (!fired) {
+      // Not over water (a beaching), or the bus is not in this build. The
+      // legacy call is the fallback and ONLY the fallback.
+      if (typeof CBZ.waterSplashAt === "function") {
+        try { CBZ.waterSplashAt(x, surf, z, Math.min(2.5, 1.1 + Math.cbrt(kg) * 0.09)); } catch (e) {}
+      }
+      return 0;
+    }
+    const L = len > 0 ? len : bodyLenLive(a);
+    const heading = a && a.heading != null ? a.heading : 0;
+    const drops = breachSheet(x, surf, z, kg, L,
+      exit ? spd * 0.55 : spd * 0.34, Math.cos(heading), Math.sin(heading));
+    AQUATIC_AUDIT.crossDrops += drops;
+    AQUATIC_AUDIT.lastEntryKind = kind;
+    if (!exit) { AQUATIC_AUDIT.lastEntryKg = Math.round(kg); AQUATIC_AUDIT.lastEntrySpd = +spd.toFixed(2); }
+    return kg;
+  }
+  CBZ.marineBreachCross = breachCross;
+
+  /* WATER COMES OFF A BODY THAT IS IN THE AIR, ALL THE WAY DOWN. A shark that
+     leaves the sea dry is a model on a wire; the trail is the single cheapest
+     thing that says "this was under the water a moment ago". Droplets are shed
+     from points along the BODY AXIS (nose to tail, through the live pitch), they
+     inherit the body's velocity, and the rate decays through the arc — heaviest
+     in the first fraction of a second after the exit, a thin drizzle by the top.
+     `o` is a caller-owned scratch object, so this allocates nothing. */
+  function breachShed(o) {
+    if (typeof CBZ.waterEmit !== "function") return 0;
+    const dt = +o.dt || 0;
+    if (!(dt > 0)) return 0;
+    const len = Math.max(0.6, +o.len || 3);
+    /* RATE: bigger animals carry more water, and the sheet thins as it drains.
+       MEASURED and then raised: the first cut shed 18 droplets over a 1.2 s arc
+       off a five-metre body, which at any real viewing distance is nothing at
+       all — a shark that leaves the sea has a skin's worth of water on it and
+       it comes off in the first half second. ~45 over the same arc reads as a
+       body that was underwater a moment ago. The per-frame cap and the pool
+       share below still keep it from eating the wakes' budget. */
+    const wet = Math.max(0, Math.min(1, 1 - (+o.airT || 0) / Math.max(0.35, (+o.airTotal || 1) * 0.85)));
+    const rate = (16 + len * 8.5) * (0.22 + wet * 1.05);
+    o.acc = (+o.acc || 0) + rate * dt;
+    let n = Math.floor(o.acc);
+    if (n <= 0) return 0;
+    o.acc -= n;
+    const free = typeof CBZ.waterEmitFree === "function" ? CBZ.waterEmitFree() : 90;
+    if (free < 3) { o.acc = 0; return 0; }
+    n = Math.min(n, 8, Math.max(1, Math.round(free * 0.25)));
+    const h = +o.heading || 0, p = +o.pitch || 0;
+    const ch = Math.cos(p), sh = Math.sin(p);
+    const ax = Math.cos(h) * ch, ay = sh, az = Math.sin(h) * ch;   // the body's own axis
+    const nx = -Math.sin(h), nz = Math.cos(h);                     // and its beam
+    let made = 0;
+    for (let i = 0; i < n; i++) {
+      // -0.5 at the nose .. +0.5 at the tail, biased aft (that is where the
+      // water actually leaves a fish)
+      const u = (Math.random() * 0.55 + Math.random() * 0.55) - 0.42;
+      const s = u * len;
+      const side = (Math.random() - 0.5) * len * 0.16;
+      if (CBZ.waterEmit({
+        x: (+o.x || 0) + ax * s + nx * side,
+        y: (+o.y || 0) + ay * s + (Math.random() - 0.45) * len * 0.07,
+        z: (+o.z || 0) + az * s + nz * side,
+        vx: (+o.vx || 0) * 0.55 + nx * side * 2.2 + (Math.random() - 0.5) * 1.1,
+        vy: (+o.vy || 0) * 0.42 - 0.6 - Math.random() * 1.1,
+        vz: (+o.vz || 0) * 0.55 + nz * side * 2.2 + (Math.random() - 0.5) * 1.1,
+        size: 0.085 + Math.min(0.34, len * 0.019) * (0.5 + Math.random()),
+        grow: -0.07, ttl: 0.42 + Math.random() * 0.7, alpha: 0.82,
+      })) made++;
+    }
+    AQUATIC_AUDIT.trailDrops += made;
+    return made;
+  }
+  CBZ.marineBreachShed = breachShed;
+
   CBZ.cityAquaticMountStep = function (dt) {
     const a = ride.mount, P = CBZ.player;
     if (!a || !P || !aquaticMounted(a) || P.dead || P.driving || a.dead) return false;
@@ -1878,9 +2098,21 @@
     }
     const sprint = !blockedInput && !!keys.shift && len > 0.001 && (P.stamina == null || P.stamina > 0);
     const wantSpeed = len > 0.001 ? (sprint ? R.sprint : R.cruise) : 0;
-    const accel = wantSpeed > W.v ? 8.5 + R.cruise * 0.7 : 5.5 + R.cruise * 0.35;
-    const dv = Math.max(-accel * fdt, Math.min(accel * fdt, wantSpeed - W.v));
-    W.v = Math.max(0, W.v + dv);
+    if (W.airborne) {
+      /* THERE IS NOTHING TO PUSH AGAINST. This accelerator is a tail beating
+         WATER, and it ran unconditionally — so the launch's conversion of the
+         charge into climb was undone in half a second while the animal was
+         metres above the sea. MEASURED (bull shark, seed 90210): the launch cut
+         the forward speed to 8.8 m/s and by the entry frame it was back at
+         16.85, which took the flight path from 50 degrees down to 28 and turned
+         the leap back into a skip. In the air the body keeps exactly what it
+         left with, less a whisper of drag. */
+      W.v *= Math.exp(-0.25 * fdt);
+    } else {
+      const accel = wantSpeed > W.v ? 8.5 + R.cruise * 0.7 : 5.5 + R.cruise * 0.35;
+      const dv = Math.max(-accel * fdt, Math.min(accel * fdt, wantSpeed - W.v));
+      W.v = Math.max(0, W.v + dv);
+    }
     P.sprint = sprint; P.speed = W.v;
 
     const bodyScale = Math.max(0.35, liveScale(a));
@@ -1929,7 +2161,48 @@
       W.y += W.vy * fdt;
       W.airT = (W.airT || 0) + fdt;
       if (W.y - surf > (W.airPeak || 0)) W.airPeak = W.y - surf;
-      W.pitch = Math.max(-0.72, Math.min(1.18, Math.atan2(W.vy, Math.max(4, W.v))));
+      /* THE BODY IS ITS OWN FLIGHT PATH. This used to read
+         `atan2(W.vy, Math.max(4, W.v))` and the max() is not the problem — the
+         problem was upstream, at the launch, which SHOVED the horizontal speed
+         up to 1.04x sprint at the exact moment the animal is supposed to be
+         spending it on climb. A great white left the water at 10.6 m/s up and
+         16.2 m/s along: a 33-degree flight path, i.e. a skip across the surface
+         with 19 m of range, and the one frame of authored 0.78 rad at the
+         launch was the only moment the body ever looked like it was leaping.
+         The launch below now converts the run-up instead of adding to it, so
+         the path itself is 55 degrees (MEASURED, great white, seed 90210:
+         nose-up 55.1 at the steepest and nose-down 56.8 into the water, against
+         44.7 and 26.6 before) and this line is free to be the honest
+         answer: the nose points exactly where the animal is going, all the way
+         from a steep climb, through level at the top, to a nose-down entry. */
+      W.pitch = Math.max(-1.25, Math.min(1.32, Math.atan2(W.vy, Math.max(0.8, W.v))));
+      /* AND IT ROLLS THROUGH THE ARC. A breaching shark is not a dart — it
+         comes over onto a flank at the top and shows you its whole side, which
+         is the read every breach photograph is. Peaks just past the apex and is
+         still carrying some of it into the water, which is what puts the flank
+         into the entry splash. */
+      const u = Math.max(0, Math.min(1, W.airT / Math.max(0.25, W.airTotal || 1)));
+      W.roll = (W.airSpin || 1) * BREACH_ROLL * Math.sin(u * 2.67);
+      if (W.pitch > (W.pitchUp || 0)) W.pitchUp = W.pitch;
+      if (W.pitch < (W.pitchDown || 0)) W.pitchDown = W.pitch;
+      if (Math.abs(W.roll) > (W.rollPeak || 0)) W.rollPeak = Math.abs(W.roll);
+      // THE ALIGNMENT, measured rather than asserted: how far the body's
+      // attitude sits from its true velocity vector. It has to stay at zero —
+      // an arc whose pose is animated instead of derived is a lie the pictures
+      // cannot show you.
+      const trueA = Math.atan2(W.vy, Math.max(0.001, W.v));
+      const err = Math.abs(W.pitch - trueA);
+      if (err > (W.alignErr || 0)) W.alignErr = err;
+      /* SHEDDING. Water comes off a body in the air all the way down. Emitted
+         from points along the live body AXIS (through the live pitch), so the
+         trail hangs off the animal rather than off a point in space. */
+      _rideShed.x = P.pos.x; _rideShed.y = W.y; _rideShed.z = P.pos.z;
+      _rideShed.heading = ride.head; _rideShed.pitch = W.pitch;
+      _rideShed.len = bodyLenLive(a);
+      _rideShed.vx = Math.cos(ride.head) * W.v; _rideShed.vz = Math.sin(ride.head) * W.v;
+      _rideShed.vy = W.vy; _rideShed.dt = fdt;
+      _rideShed.airT = W.airT; _rideShed.airTotal = W.airTotal || 1;
+      breachShed(_rideShed);
       // A LEAP CAN LAND ON SAND. The old test only ever asked about the
       // waterline, so a breach that cleared the swash kept "falling" to a sea
       // floor that was not under it and popped up a frame later. The ground is
@@ -1948,15 +2221,30 @@
         AQUATIC_AUDIT.reentries++;
         AQUATIC_AUDIT.lastApex = +(W.airPeak || 0).toFixed(2);
         AQUATIC_AUDIT.lastAirT = +(W.airT || 0).toFixed(2);
-        // A SPLASH IS THE SIZE OF THE BODY THAT MADE IT. One constant 2.8 read
-        // as the same dimple for a bull shark and for a sixteen-metre animal.
-        if (CBZ.waterSplashAt) {
-          CBZ.waterSplashAt(P.pos.x, surf, P.pos.z,
-            Math.min(9, 1.5 + bodyScale * 1.9 + fall * 0.10));
+        AQUATIC_AUDIT.lastPitchUp = +(W.pitchUp || 0).toFixed(3);
+        AQUATIC_AUDIT.lastPitchDown = +(W.pitchDown || 0).toFixed(3);
+        AQUATIC_AUDIT.lastRoll = +(W.rollPeak || 0).toFixed(3);
+        AQUATIC_AUDIT.lastAlignErr = +(W.alignErr || 0).toFixed(4);
+        /* A SPLASH IS THE MASS THAT MADE IT, NOT A DIAL. The line here used to
+           be CBZ.waterSplashAt(..., 1.5 + scale*1.9 + fall*0.1), and every one
+           of those terms was thrown away: waterSplashAt clamps its strength to
+           2.5 and then reports the impact bus a SEVENTY-EIGHT KILOGRAM body at
+           a speed recovered from that clamped dial. A bull shark and a
+           sixteen-metre megalodon therefore made exactly the same splash and
+           exactly the same noise, and turning the number up did nothing at all.
+           One honest call instead: the animal's own kilograms and the vertical
+           speed it is genuinely carrying, and water_impact.js's momentum law
+           (sqrt(mass) * speed) does the rest — including the audio gain, so the
+           hand-forced sfx that used to double it here is gone with it. */
+        const entryKg = breachCross(a, P.pos.x, surf, P.pos.z, fall, false, bodyLenLive(a));
+        // ...and a leap that comes down on the beach still lands: no water to
+        // displace, so it is a thud, and the shake is the whole report.
+        if (CBZ.shake) {
+          CBZ.shake(Math.min(2.4, 0.35 + bodyScale * 0.30 + fall * 0.020 +
+            (entryKg > 0 ? Math.min(0.7, entryKg * 0.00006) : 0)));
         }
-        if (CBZ.sfx) { try { CBZ.sfx("water", { volume: Math.min(1.6, 0.9 + bodyScale * 0.25), force: true }); } catch (e) {} }
-        if (CBZ.shake) CBZ.shake(Math.min(1.6, 0.45 + bodyScale * 0.22 + fall * 0.012));
-        W.airT = 0; W.airPeak = 0;
+        W.airT = 0; W.airPeak = 0; W.airTotal = 0;
+        W.pitchUp = 0; W.pitchDown = 0; W.rollPeak = 0; W.alignErr = 0;
       }
     } else {
       const wantVy = vin > 0 ? (R.rise || 4) : (vin < 0 ? -(R.dive || 4) : 0);
@@ -1986,18 +2274,69 @@
       if (W.y < bedY) { W.y = bedY; if (W.vy < 0) W.vy = 0; }
       if (W.y > effTop) { W.y = effTop; if (W.vy > 0) W.vy *= 0.42; }
       W.pitch += (Math.max(-0.62, Math.min(0.72, W.vy * 0.115)) - W.pitch) * Math.min(1, fdt * 4.2);
-      // THE LAUNCH. Sprint + rise, held until the body is actually at the top
-      // of its column and still climbing — you cannot breach from twenty metres
-      // down, and you cannot breach standing still. The gate stays exactly what
-      // the dolphin's always was; what changed is WHO passes it (SHARK_BREACH)
-      // and how much air the pass is worth (R.breachVel, solved from the body).
-      if (R.breach && sprint && vin > 0 && W.breachCd <= 0 && W.vy > 1.2 && W.y >= topY - 0.08) {
-        W.airborne = true; W.vy = R.breachVel || 15.5;
+      /* THE LAUNCH. Sprint + rise, held until the body is at the top of its
+         column — you cannot breach from twenty metres down, and you cannot
+         breach standing still.
+
+         THE `W.vy > 1.2` TERM WAS A COIN FLIP, NOT A CONDITION, and it is gone.
+         The surface clamp three lines up multiplies a rising W.vy by 0.42 on
+         EVERY frame the body is pinned at the top of its column, against a
+         vertical accelerator that adds 0.4 m/s per frame — a steady state of
+         about 0.29 m/s. So the moment the animal ARRIVED where it is supposed
+         to launch from, the gate it had to pass could no longer open, and the
+         only breaches that ever fired were the ones that caught the single
+         approach frame in which the body first crossed into the 8 cm window
+         while still travelling at 0.15 m per frame. Roughly a coin flip, and
+         after that the player could hold sprint+rise forever and get nothing.
+         MEASURED: a megalodon held both keys at the top of its column for six
+         seconds and never left the water, in a build that launched a great
+         white in a third of a second.
+
+         Being at the top and asking to go up IS the condition: `vin > 0` is the
+         intent, `sprint` is the run-up, and `effTop` (not topY) is where the
+         body actually is — in shallow water the bed is the ceiling, and a shark
+         launching off the bottom with its dorsal already out is a real breach
+         and used to be an impossible one. */
+      if (R.breach && sprint && vin > 0 && W.breachCd <= 0 && W.y >= effTop - 0.12) {
+        W.airborne = true;
+        /* THE APEX IS ABOVE THE WATER, NOT ABOVE THE LAUNCH. R.breachVel is
+           solved to clear `apex` metres against BREACH_G — but the launch does
+           not happen at the waterline, it happens at the top of the body's
+           column, which for a big animal is metres DOWN: a megalodon's own
+           surface clamp sits it 3.37 m under, so it spent well over half of its
+           authored 5.8 m of air just getting to the surface and cleared the sea
+           by 2.4 m. The bigger the animal, the more of its jump it lost, which
+           is precisely backwards. Adding the launch depth back under the root
+           gives every body the air it was authored to have, measured from the
+           only line anybody watching cares about. */
+        W.vy = Math.sqrt(Math.pow(R.breachVel || 15.5, 2) +
+                         2 * BREACH_G * Math.max(0, surf - W.y));
         W.airT = 0; W.airPeak = 0;
-        W.v = Math.max(W.v, R.sprint * 1.04); W.pitch = 0.78;
+        /* THE RUN-UP IS SPENT, NOT ADDED TO. `W.v = Math.max(W.v, R.sprint *
+           1.04)` was the single line that made this a hop: at 16 m/s along and
+           10.5 m/s up a great white left the water on a 33-degree path and
+           travelled nineteen metres, which from a chase camera is a body
+           skipping across the sea. A breaching animal converts the charge into
+           climb — it arrives at the surface going UP — so the forward speed is
+           cut here and the same launch velocity buys a ~50-degree spear arc
+           with about half the range and all of the height. Everything else
+           (apex, hang time, entry speed) is unchanged: they were always solved
+           from R.breachVel and R.breachVel has not moved. */
+        W.v = Math.max((R.cruise || 6) * 0.42, W.v * 0.52);
+        W.pitch = Math.max(-1.25, Math.min(1.32, Math.atan2(W.vy, Math.max(0.8, W.v))));
+        // total hang time, solved once so the roll can be phased against the
+        // whole arc instead of against a clock that does not know when it ends
+        W.airTotal = (2 * W.vy) / BREACH_G;
+        // WHICH WAY IT COMES OVER. Deterministic (the same body at the same
+        // heading always rolls the same way) and effectively arbitrary, so a
+        // sequence of breaches does not read as a machine.
+        W.airSpin = ((Math.floor(Math.abs(ride.head) * 997) & 1) ? 1 : -1);
+        W.pitchUp = W.pitch; W.pitchDown = 0; W.rollPeak = 0; W.alignErr = 0;
         AQUATIC_AUDIT.breaches++;
-        if (CBZ.waterSplashAt) CBZ.waterSplashAt(P.pos.x, surf, P.pos.z, 1.3 + bodyScale * 1.2);
-        if (CBZ.sfx) { try { CBZ.sfx("water", { volume: 1, force: true }); } catch (e) {} }
+        // THE EXIT. The same waterline crossing as the landing with the sign
+        // flipped — a curtain of water dragged up out of the hole the body just
+        // left, sized by the same mass. It used to be the 78 kg diver too.
+        breachCross(a, P.pos.x, surf, P.pos.z, W.vy, true, bodyLenLive(a));
         if (CBZ.shake) CBZ.shake(0.42 + bodyScale * 0.12);
       }
     }
@@ -2015,6 +2354,12 @@
       W.roll = Math.max(-0.5, Math.min(0.5,
         Math.sin((W.groundT || 0) * 6.4) * 0.34 * Math.min(1, 0.25 + W.v)));
       W.lastHead = ride.head;
+    } else if (W.airborne) {
+      /* HANDS OFF THE ROLL IN THE AIR. The turn-roll below is a bank into a
+         steering input and it ran unconditionally, so it overwrote the arc's
+         own roll every frame — which is why a breach used to come out of the
+         water perfectly upright no matter what. In the air the arc owns it. */
+      W.thrashT = 0; W.lastHead = ride.head;
     } else {
       W.thrashT = 0;
       W.roll += ((shortestAngle(ride.head - W.lastHead) / fdt) * -0.065 - W.roll) * Math.min(1, fdt * 4);
@@ -2061,7 +2406,7 @@
      no fight with camera.lookAt and nothing to unwind when we stand down.
   ============================================================ */
   const _diveWant = new THREE.Vector3(), _diveDir = new THREE.Vector3();
-  function aquaticDiveCamera() {
+  function aquaticDiveCamera(dt) {
     if (!DIVE_ON()) return;
     const a = ride.mount, W = ride.water, P = CBZ.player, cam = CBZ.camera;
     if (!cam || !a || !W || !P || a.dead || P.dead || !aquaticMounted(a)) return;
@@ -2073,6 +2418,34 @@
     if (CBZ.fps && CBZ.fps.active) return;      // first person already rides the body
     const surf = seaY(P.pos.x, P.pos.z);
     const sub = surf - W.y;                     // the BODY's submergence, not the rider's seat
+    /* ---- THE LENS CROSSES THE SURFACE WITH THE BODY -----------------------
+       Everything world/water_underwater.js draws — the fog ramp, the caustic
+       ceiling, the god rays, the waterline band, the 820 Hz muffle — is decided
+       from the CAMERA's own depth (its eyeDepth() asks citySeaHeightAt where
+       the EYE is, not where the animal is). A breach is the one move in this
+       game that takes the body from under the water to five metres over it in
+       half a second, and NOTHING owned that crossing: the lerp below stands
+       down the instant the body leaves the water (sub goes negative, so k <= 0
+       and it returns), and camera.js's boom smooth-damps toward the rider on a
+       time constant tuned for walking. So the world stayed green through the
+       best part of the jump, which is exactly the frame this whole pass is for.
+
+       This is a FLOOR under the eye, never a target: while the body is out of
+       the water the lens is dragged out with it, at least as fast as the body
+       is leaving, and the moment camera.js has the lens above the line this
+       does nothing at all. It cannot fight the boom because it can only ever
+       push the same way gravity is not. */
+    if (W.airborne) {
+      const camSurf = seaY(cam.position.x, cam.position.z);
+      const out = Math.max(0, W.y - surf);
+      const wantY = camSurf + Math.min(1.9, 0.30 + out * 0.55);
+      if (cam.position.y < wantY) {
+        const step = Math.max(7, Math.abs(W.vy) + 5) *
+          Math.max(0.001, Math.min(0.08, dt || 0.016));
+        cam.position.y = Math.min(wantY, cam.position.y + step);
+      }
+      return;
+    }
     // Dead band at the surface so a swell can never make the frame breathe, and
     // full authority by ~2.6 m down — the depth at which the old rig had the
     // lens still in the air and the whole treatment still switched off.
@@ -2156,14 +2529,22 @@
     const surf = seaY(P.pos.x, P.pos.z);
     const v = new THREE.Vector3();
     if (cam) cam.getWorldPosition(v);
+    // THE EYE'S OWN WATERLINE, not the body's. water_underwater.js's eyeDepth()
+    // asks citySeaHeightAt at the CAMERA's x/z; measuring the camera against
+    // the surface under the animal is a different number and quietly disagrees
+    // with the thing that actually decides whether the world is tinted.
+    const camSurf = cam ? seaY(v.x, v.z) : surf;
     return {
       species: a.species ? a.species.id : null,
       bodyDepth: +(surf - W.y).toFixed(2),
-      camDepth: cam ? +(surf - v.y).toFixed(2) : null,
+      camDepth: cam ? +(camSurf - v.y).toFixed(2) : null,
       submerged: CBZ.cityCameraSubmerged ? !!CBZ.cityCameraSubmerged() : null,
       airborne: !!W.airborne, vy: +(W.vy || 0).toFixed(2),
       apex: +(W.airPeak || 0).toFixed(2),
       surf: +surf.toFixed(2),
+      pitch: +(W.pitch || 0).toFixed(3),
+      roll: +(W.roll || 0).toFixed(3),
+      speed: +(W.v || 0).toFixed(2),
     };
   };
 
@@ -2450,6 +2831,23 @@
       breachApex: AQUATIC_AUDIT.lastApex || 0, breachAirT: AQUATIC_AUDIT.lastAirT || 0,
       breachVel: a && rideDef(a.species) ? +(rideDef(a.species).breachVel || 0).toFixed(2) : 0,
       canBreach: !!(a && rideDef(a.species) && rideDef(a.species).breach),
+      /* THE ARC. Everything a picture of a jump can be argued about, as
+         numbers: how far the nose came up and how far it went down, how far
+         the body came over onto its flank, how far its attitude ever sat from
+         its own velocity vector (which must stay at zero — a pose that is
+         animated instead of derived is the thing this pass replaced), and what
+         the sea was told the landing weighed. */
+      breachPitchUp: AQUATIC_AUDIT.lastPitchUp || 0,
+      breachPitchDown: AQUATIC_AUDIT.lastPitchDown || 0,
+      breachRoll: AQUATIC_AUDIT.lastRoll || 0,
+      breachAlignErr: AQUATIC_AUDIT.lastAlignErr || 0,
+      breachEntryKg: AQUATIC_AUDIT.lastEntryKg || 0,
+      breachEntrySpd: AQUATIC_AUDIT.lastEntrySpd || 0,
+      breachEntryKind: AQUATIC_AUDIT.lastEntryKind || "",
+      breachTrailDrops: AQUATIC_AUDIT.trailDrops || 0,
+      breachCrossDrops: AQUATIC_AUDIT.crossDrops || 0,
+      bodyKg: a ? Math.round(bodyKg(a)) : 0,
+      bodyLenM: a ? +bodyLenLive(a).toFixed(2) : 0,
       mounts: AQUATIC_AUDIT.mounts, breaches: AQUATIC_AUDIT.breaches,
       reentries: AQUATIC_AUDIT.reentries, attacks: AQUATIC_AUDIT.attacks,
       hits: AQUATIC_AUDIT.hits, shipBites: AQUATIC_AUDIT.shipBites,
