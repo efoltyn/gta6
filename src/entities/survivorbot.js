@@ -4,9 +4,16 @@
    Reuses the FPS engine's character rig (makeCharacter) and procedural
    locomotion (animChar) — proving the thesis that the movement/animation
    foundation makes a crowd game cheap. The 4800-line prison brain is NOT
-   loaded; bots run a lean 3-state FSM: WANDER → FLEE (disaster) →
-   DEAD. They take damage from the same disasters as the player,
-   so eliminations happen naturally with no bot-vs-bot combat.
+   loaded; bots run a lean FSM: WANDER → FLEE (disaster) → PANIC (a
+   predator in the water with them) → DEAD. They take damage from the
+   same disasters as the player, so eliminations happen naturally with
+   no bot-vs-bot combat.
+
+   AND THEY ARE BODIES IN WATER, NOT WALKERS UNDER IT. See the block at
+   THE CROWD CAN SWIM below: wading, swimming and panic all come off the
+   same depth query, the stroke is entities/character.js's shared swim
+   cycle (the player's own), and every stroke lands on
+   world/water_impact.js's momentum bus.
 
    Perf for 100 actors on r128/browser:
      • LOD     — bots far from camera skip animChar (freeze pose).
@@ -24,6 +31,136 @@
   const BOT_RADIUS = 0.5;
   const ANIM_DIST2 = 62 * 62;     // beyond this, freeze animation
   let frame = 0;
+
+  /* ============================================================
+     THE CROWD CAN SWIM.
+
+     Every survivor's mover used to end in these two lines:
+
+         b.pos.y = CBZ.surv.floorAt(b.pos.x, b.pos.z);
+         animChar(b.char, b.speed, dt);
+
+     — the RAW SEABED HEIGHT and the LAND WALK CYCLE, with no idea that water
+     exists. So in Shark Sim the people in the sea were not swimming badly,
+     they were walking on the bottom of it: a land gait, feet planted on the
+     bed, the water closing over their heads as the shelf fell away. The whole
+     premise of the mode is a crowd in the water and none of them were in it.
+
+     The swimmer this game already has is city/swim.js's, and it is very good —
+     graduated submergence, drag-first velocity, a buoyancy oscillator on the
+     live wave surface. It is also PLAYER-ONLY and always was. Nothing here
+     re-implements it:
+
+       • the STROKE is character.js's shared cycle (CBZ.makeSwimAnim /
+         swimAnimStep / poseSwimmer) — the same joints the player swims with,
+         because a body is a body;
+       • the WATER is asked of the same oracles the player's swimmer asks —
+         CBZ.citySeaHeightAt for the live crest, CBZ.survFloodDepthMeanAt for
+         the column over the bed (MEAN, so a swell rolling past cannot flip a
+         body between wading and swimming several times a second);
+       • the SPLASH is world/water_impact.js's momentum bus, the same one the
+         player now strokes into.
+
+     What IS this file's own is the three-state body: WADE (feet down, walk
+     slowed by the water on you) -> SWIM (prone at the surface, stroking at a
+     target) -> PANIC (a shark is in the water with you). The numbers below are
+     city/swim.js's own thresholds, deliberately shared so a bot and the player
+     stop wading at the same depth.
+     ============================================================ */
+  const BODY_H = 1.7;             // physics.js's body height — the submergence unit
+  const SWIM_ENTER = 1.35;        // swim.js SWIM_DEPTH: this deep and you are off your feet
+  const SWIM_LEAVE = 1.05;        // swim.js STAND_DEPTH: shallower and you get them back
+  const WADE_SLOW = 0.58;         // swim.js: fraction of the step the water takes
+  const FLOAT_DEPTH = 1.275;      // swim.js: feet below the surface on a floating body
+  const SWIM_SPEED = 1.15;        // m/s — an unhurried survivor's crawl
+  const PANIC_SPEED = 2.10;       // m/s — everything they have
+  const WATER_TURN = 0.05;        // per-second retention: a body turns slowly in water
+  const PANIC_R = 22;             // m — a predator this close and you stop swimming
+  const PANIC_HOLD = 5;           // s — you do not calm down the instant the fin turns
+
+  function seaAt(x, z) { return CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(x, z) : -1e9; }
+  function bedAt(x, z) { return CBZ.surv ? CBZ.surv.floorAt(x, z) : 0; }
+  // Metres of water over the bed here, measured against MEAN sea level.
+  function waterDepth(x, z) {
+    if (CBZ.survFloodDepthMeanAt) return Math.max(0, CBZ.survFloodDepthMeanAt(x, z));
+    return Math.max(0, seaAt(x, z) - bedAt(x, z));
+  }
+
+  /* WHO IS IN THE WATER WITH THEM — one list, rebuilt on a slow cadence.
+     Scanning the whole bestiary per bot per frame is a hundred scans of an
+     array that changes about twice a second; the honest shape is ONE small
+     array of things that could eat you (typically three or four: the ridden
+     shark, its rivals, an orca pod), rebuilt every REFRESH frames and then
+     read by a handful of distance tests inside the brain — which is itself
+     already on a 3-or-7 frame stride. */
+  const threats = [];
+  const THREAT_REFRESH = 12;      // frames (~0.2s at 60Hz)
+  function refreshThreats() {
+    threats.length = 0;
+    const list = CBZ.cityWildlife;
+    if (!list) return;
+    const ridden = CBZ.sharkSim && CBZ.sharkSim.shark;
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      if (!a || a.dead || !a.pos || !a.species) continue;
+      if (!a.species.aquatic) continue;
+      // danger >= 0.5 is wildlife_species.js's own "charges and bites" line.
+      // The player's own shark is ALWAYS a threat regardless of what it is
+      // riding as, because that is the animal this whole mode is about.
+      if (a !== ridden && !(+a.species.danger >= 0.5)) continue;
+      threats.push(a);
+    }
+  }
+  function nearestThreat(x, z) {
+    let best = null, bd = PANIC_R * PANIC_R;
+    for (let i = 0; i < threats.length; i++) {
+      const a = threats[i];
+      const dx = a.pos.x - x, dz = a.pos.z - z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < bd) { bd = d2; best = a; }
+    }
+    return best;
+  }
+
+  /* THE SPLASH BUDGET. water_impact.js sizes and plays every hit it is given;
+     thirty panicking swimmers at two strokes a second would give it sixty. The
+     VFX are pooled and cheap and stay — the AUDIO is what would turn a beach
+     into white noise, so `quiet` is spent on a small budget near the camera and
+     everything else splashes silently. */
+  let splashes = 0, entries = 0;
+  let audibleT = 0, audibleN = 0;
+  function audible(x, z) {
+    const cam = CBZ.camera;
+    if (!cam) return false;
+    const dx = x - cam.position.x, dz = z - cam.position.z;
+    if (dx * dx + dz * dz > 30 * 30) return false;
+    const now = CBZ.now || 0;
+    if (now - audibleT > 1000) { audibleT = now; audibleN = 0; }
+    if (audibleN >= 3) return false;
+    audibleN++;
+    return true;
+  }
+  // A hand going in. Momentum-true: a forearm at stroke speed, not a body.
+  function strokeSplash(b, surf, panic) {
+    if (!CBZ.waterHit) return;
+    CBZ.waterHit(b.pos.x, surf, b.pos.z, {
+      kind: "body",
+      mass: panic ? 16 : 6,
+      speed: panic ? 3.6 : 2.1,
+      quiet: !audible(b.pos.x, b.pos.z),
+      src: b,
+    });
+    splashes++;
+  }
+  // Leaving your feet: a whole body's worth of water displaced at once.
+  function entrySplash(b, surf) {
+    if (!CBZ.waterHit) return;
+    CBZ.waterHit(b.pos.x, surf, b.pos.z, {
+      kind: "body", mass: 78, speed: 2.6,
+      quiet: !audible(b.pos.x, b.pos.z), src: b,
+    });
+    splashes++; entries++;
+  }
 
   // bright Roblox-lobby palette so the crowd reads as 100 distinct players
   const SKIN = [0xf0c39a, 0xe8b58c, 0xc08a5a, 0x8a5a3a, 0x6b4a32, 0xd8a177, 0xf2cbb0];
@@ -117,6 +254,34 @@
     return { frame: frame, matchNo: matchNo, bots: CBZ.bots.length, seeded: !!botRng };
   };
 
+  /* THE CROWD'S WATER LIFE AS NUMBERS. `onBed` is the bug this block exists to
+     kill: living bodies standing on the seabed with more than a body height of
+     water over them. It has to read 0. `surfaced` is the same population seen
+     from the other side — how many of the people who are out of their depth are
+     actually AT the surface. */
+  CBZ.survBotWaterAudit = function () {
+    const bots = CBZ.bots || [];
+    let wet = 0, swimming = 0, panicking = 0, deep = 0, onBed = 0, surfaced = 0;
+    for (let i = 0; i < bots.length; i++) {
+      const b = bots[i];
+      if (!b || b.dead || !b.pos) continue;
+      const d = waterDepth(b.pos.x, b.pos.z);
+      if (d > 0.25) wet++;
+      if (b.swim) swimming++;
+      if (b.state === "panic" || b.panicT > 0) panicking++;
+      if (d < SWIM_ENTER) continue;
+      deep++;
+      const surf = seaAt(b.pos.x, b.pos.z);
+      if (b.pos.y <= surf - d + 0.35) onBed++;
+      if (Math.abs(b.pos.y - (surf - FLOAT_DEPTH)) <= 0.6) surfaced++;
+    }
+    return {
+      wet: wet, swimming: swimming, panicking: panicking,
+      deep: deep, onBed: onBed, surfaced: surfaced,
+      threats: threats.length, splashes: splashes, entries: entries,
+    };
+  };
+
   /* THE SHARK SIM'S LARDER: one bot, at a stated point, mid-match. It joins
      the same array, the same wander stream and the same think schedule as
      the drop's own crowd — makeBot IS the spawner, this is just a door to
@@ -147,10 +312,98 @@
     CBZ.bots.length = 0;
   };
 
+  /* HOW FAR OUT YOU HAVE TO SWIM BEFORE YOU ARE SWIMMING. Walked outward along
+     one bearing against the arena's own bathymetry rather than assumed, because
+     the shelf is not the same steepness twice and a hardcoded "waterline + 25"
+     is dry sand on one island and open ocean on another. Returns 0 when this
+     bearing has no swimmable water in reach (a lagoon, a spit) and the caller
+     falls back to the wade band. Cached per bearing bucket for a second: the
+     seabed does not move and this is the only place in the file that probes it
+     more than once. */
+  const _swimR = new Float32Array(32);
+  const _swimRT = new Float32Array(32);
+  function swimmableRadius(ring, ang) {
+    const k = ((ang / 6.28318) * 32 | 0) & 31;
+    const now = CBZ.now || 0;
+    if (_swimRT[k] && now - _swimRT[k] < 4000) return _swimR[k];
+    const wl = ring.wl != null ? ring.wl : ring.r1;
+    const cs = Math.cos(ang), sn = Math.sin(ang);
+    let found = 0;
+    for (let r = wl; r <= wl + 90; r += 3) {
+      if (waterDepth(ring.cx + cs * r, ring.cz + sn * r) >= SWIM_ENTER + 0.55) { found = r; break; }
+    }
+    _swimR[k] = found; _swimRT[k] = now || 1;
+    return found;
+  }
+
+  /* YOU GO WHERE YOU DECIDED TO GO.
+
+     `pause` was doing two jobs and doing neither: it was the dwell AND the
+     leg's whole lifetime. A target is tens of metres away and pause is 0.6-2.8
+     s, so a body never arrived anywhere — it took 1.7 s of one heading, then
+     1.7 s of another, for the whole match. Three things fall out of that, all
+     measured on HEAD:
+
+       • a swim leg is abandoned a metre and a half into the wade, every time,
+         so nobody in this mode could reach swimmable water;
+       • the average of headings drawn uniformly round a circle points at the
+         island's CENTRE, so the crowd is under a constant inland pull;
+       • and the only reason the beach did not visibly empty is the arrival
+         freeze in move() below, which pinned every body that ever reached a
+         target and stopped it deciding anything again.
+
+     So `pause` is now only the DWELL — how long you stand where you got to —
+     and this is the leg: you keep going until you are there (or until the leg
+     clock says you plainly cannot get there, which is what stops a body
+     walking into a rock for the rest of the match). */
+  function committed(b) {
+    if (b.pause < -45) return false;                 // gave up: it cannot get there
+    const dx = b.target.x - b.pos.x, dz = b.target.z - b.pos.z;
+    return dx * dx + dz * dz >= 1;                   // still on its way
+  }
+
   // ---- the lean brain: decide target + state ----
   function think(b) {
     if (b.dead) return;
     let fx = 0, fz = 0, urgent = 0;
+
+    /* A SHARK IN THE WATER WITH YOU OUTRANKS EVERY OTHER REASON TO MOVE, and
+       it is the only reason in this file that is not weather. It sits above
+       the disaster vector deliberately: a tsunami is a direction, a shark is
+       a bearing you keep checking.
+
+       The flee heading is the SHORE and the shark at once. Shore alone swims
+       you straight through the animal when it is between you and the beach;
+       away-from-shark alone swims you out to sea, which is worse than being
+       bitten. Weighted toward the beach because that is where the water ends.
+
+       (No brnd() is drawn on this path, exactly like the disaster branch below
+       — the wander stream's DRAW COUNT is match state and only the wander
+       branch may spend from it.) */
+    if (b.wet) {
+      const foe = nearestThreat(b.pos.x, b.pos.z);
+      if (foe) { b.panicT = PANIC_HOLD; b.foe = foe; }   // move() bleeds it back down
+      if (b.panicT > 0) {
+        const a = b.foe && !b.foe.dead ? b.foe : null;
+        let ax = 0, az = 0;
+        if (a) {
+          ax = b.pos.x - a.pos.x; az = b.pos.z - a.pos.z;
+          const am = Math.hypot(ax, az) || 1; ax /= am; az /= am;
+        }
+        const ring = CBZ.sharkSimShoreRing;
+        const cx = ring ? ring.cx : (CBZ.surv && CBZ.surv.arena ? CBZ.surv.arena.center.x : b.pos.x);
+        const cz = ring ? ring.cz : (CBZ.surv && CBZ.surv.arena ? CBZ.surv.arena.center.z : b.pos.z);
+        let sx = cx - b.pos.x, sz = cz - b.pos.z;
+        const sm = Math.hypot(sx, sz) || 1; sx /= sm; sz /= sm;
+        let gx = sx + ax * 0.85, gz = sz + az * 0.85;
+        const gm = Math.hypot(gx, gz) || 1;
+        b.state = "panic";
+        b.urg = 1;
+        b.pause = 0;
+        b.target.set(b.pos.x + (gx / gm) * 30, 0, b.pos.z + (gz / gm) * 30);
+        return;
+      }
+    } else if (b.panicT > 0) { b.panicT = 0; b.foe = null; }
 
     // run from the active disaster (there are no zones — the hazard itself
     // is the only pressure a survivor reacts to)
@@ -171,7 +424,7 @@
       // wander the island
       b.state = "wander";
       b.urg = 0;
-      if (b.pause <= 0) {
+      if (b.pause <= 0 && !committed(b)) {
         const arena = CBZ.surv.arena;
         /* SEEDED, because where ninety-nine people wander is match state, not
            decoration: on Math.random two clients on the same seed had a
@@ -182,20 +435,85 @@
         const ring = CBZ.sharkSimShoreRing;   // shark sim: the crowd lives on the sand
         const a = brnd() * 6.28;
         if (ring) {
-          /* ONE DRAW, SHAPED. Uniform across the whole band put as many people
-             out at the deep edge as on the dry sand, which reads as a crowd
-             that has waded into the sea for no reason. Two thirds pick the
-             beach, the rest wade — and the waders spread out to thigh-deep,
-             which is the water the ridden shark can now reach. Still exactly
-             ONE brnd(): the draw COUNT is match state (see above), so the
-             shape may change and the count may not. */
+          /* ONE DRAW, SHAPED, THREE BANDS. Uniform across the whole band put as
+             many people out at the deep edge as on the dry sand, which reads as
+             a crowd that has waded into the sea for no reason. Still exactly ONE
+             brnd(): the draw COUNT is match state (see above), so the shape may
+             change and the count may not.
+
+             THE THIRD BAND IS NEW AND IT IS THE POINT. The published ring stops
+             at r1 = waterline + 9 m, and this foreshore is 0.83 m deep at
+             waterline + 8 — so the deepest anyone ever stood was mid-thigh and
+             NOT ONE PERSON IN THIS MODE COULD EVER HAVE BEEN SWIMMING, whatever
+             the mover underneath them did. A beach where nobody is out of their
+             depth is not a beach, and a shark game whose entire larder is
+             standing in a foot of water has no sea in it. So the top of the
+             draw goes swimming — 1% of it for a body that is already wet,
+             0.1% for one on the sand — at a radius searched for against the same
+             depth oracle the mover steers by rather than guessed.
+
+             WHO SWIMS DEPENDS ON WHETHER THEY ARE ALREADY WET, which is both
+             the obvious human fact and the only version of this that WORKS. A
+             flat 1% across the whole crowd was measured on a real match: three
+             outstanding swim legs and ONE person actually off their feet in
+             sixty seconds, because the pick is spread over ninety-nine bodies
+             of whom eighty are on dry sand thirty metres from water they would
+             have to walk to. Somebody standing waist-deep is six metres from
+             the shelf and has already made the decision, so the wet band draws
+             it at 5% and the towels at 0.5%.
+
+             THOSE TWO NUMBERS ARE A RATE, NOT A SHARE, and they were solved
+             against the measured crowd rather than picked. With legs that now
+             run to completion a body decides about once every eight seconds,
+             so forty survivors make ~5 decisions a second, a quarter of them
+             from bodies already in the water: 1.25*0.05 + 3.75*0.005 = 0.08
+             swim legs a second. A round trip out past the shelf and back is
+             about fifty seconds, so the sea holds ~4 swimmers at a time — a
+             handful off a busy beach. The first cut of this used a SEVENTH of
+             every draw and made the whole beach a regatta.
+
+             AND THE SHARE IS SELF-LIMITING, which matters because a swim leg is
+             not like any other: every other leg is abandoned and re-rolled
+             inside ~1.7 s, while a swim leg HOLDS until the body arrives (see
+             committed()) and the round trip is most of a minute. So a small
+             share of the DRAW is a large share of the SEA — the first cut of
+             this used a seventh and turned the whole beach into a regatta.
+             The dry/wet split below (0.66) is the number that was already here. */
           const u = brnd();
           const wl = ring.wl != null ? ring.wl : ring.r1;
           const dry = Math.max(0.5, wl - 0.5 - ring.r0);
           const wet = Math.max(0.5, ring.r1 - wl + 0.5);
-          const d = u < 0.66 ? ring.r0 + (u / 0.66) * dry
-                             : (wl - 0.5) + ((u - 0.66) / 0.34) * wet;
-          b.target.set(ring.cx + Math.cos(a) * d, 0, ring.cz + Math.sin(a) * d);
+          const swimU = b.wet ? 0.95 : 0.995;     // see above: wet bodies swim
+          /* THE BEARING IS RELATIVE TO THE BODY, NOT TO THE ISLAND, and this is
+             the other half of the arrival fix below.
+
+             Every wander target this file has ever set was at a FRESH ABSOLUTE
+             bearing round the ring — and because `pause` (~1.7 s) is far shorter
+             than the walk to a point tens of metres away, a survivor never
+             arrives anywhere: it takes 1.7 s of one heading, then 1.7 s of
+             another. With headings drawn uniformly round a circle the average of
+             that walk points AT THE CENTRE, so the crowd migrates inland. That
+             never showed because bodies used to freeze on arrival (below);
+             unfreeze them and the beach empties — measured, 7 people in the
+             water at t=5 s and 0 by t=10 s.
+
+             Spent as an OFFSET from where the body already is, the same draw
+             makes a crowd that mills ALONG the shore while the band above still
+             decides how far up the sand or out into the sea each leg goes. The
+             swim band gets a tighter cone because a swim is a committed leg and
+             should not start with a hundred-metre walk to a different beach. */
+          const own = Math.atan2(b.pos.z - ring.cz, b.pos.x - ring.cx);
+          let d;
+          if (u < 0.66) d = ring.r0 + (u / 0.66) * dry;
+          else if (u < swimU) d = (wl - 0.5) + ((u - 0.66) / (swimU - 0.66)) * wet;
+          else d = 0;
+          let th = own + (a / 6.28 - 0.5) * (d ? 1.6 : 0.9);
+          if (!d) {
+            const swimR = swimmableRadius(ring, th);
+            const f = (u - swimU) / (1 - swimU);
+            d = swimR > 0 ? swimR + f * 14 : (wl - 0.5) + f * wet;
+          }
+          b.target.set(ring.cx + Math.cos(th) * d, 0, ring.cz + Math.sin(th) * d);
         } else {
           const d = brnd() * arena.radius * 0.6;
           b.target.set(arena.center.x + Math.cos(a) * d, 0, arena.center.z + Math.sin(a) * d);
@@ -241,23 +559,147 @@
   // ---- locomotion (every frame; only for living, non-busy bots) ----
   function move(b, dt, animate) {
     // fleeing reads urgency: a bot brushing a threat jogs (~1.55×), one caught
-    // outside the closing zone or under a strike marker SPRINTS (~2.15×)
-    const spd = b.state === "flee" ? b.baseSpeed * (1.55 + 0.6 * (b.urg || 0)) : (b.state === "move" ? b.baseSpeed * 1.25 : b.baseSpeed);
+    // outside the closing zone or under a strike marker SPRINTS (~2.15×). A
+    // body with a shark behind it is at the top of that scale by definition.
+    const running = b.state === "flee" || b.state === "panic";
+    const spd = running ? b.baseSpeed * (1.55 + 0.6 * (b.urg || 0)) : (b.state === "move" ? b.baseSpeed * 1.25 : b.baseSpeed);
     if (botTraverse(b, dt, spd)) return;
     const dx = b.target.x - b.pos.x, dz = b.target.z - b.pos.z;
     const dist = Math.hypot(dx, dz);
-    if (b.pause > 0) b.pause -= dt;
+    if (b.panicT > 0) b.panicT -= dt;
+    // `pause` keeps counting past zero (floored) so committed() has a leg clock
+    // and a body that can never reach its target eventually gives up on it.
+    // Every read of `pause` is either `<= 0` or Math.max(_, 0.4), so this is
+    // invisible to everything that was already here.
+    if (b.pause > -90) b.pause -= dt;
+
+    /* HOW MUCH WATER IS ON THIS BODY. One query, every frame, for every living
+       survivor — and on dry land it answers 0 and every line below it is the
+       code that was always here, to the digit. Measured against MEAN sea level
+       (survFloodDepthMeanAt) rather than the live crest, because the wade/swim
+       hysteresis reads it: on the wavy surface a swell rolling past flips a
+       body between wading and swimming several times a second, and each flip
+       is an entry splash. city/swim.js learned this the same way. */
+    const depth = waterDepth(b.pos.x, b.pos.z);
+    b.wet = depth > 0.25;
+    const wasSwim = !!b.swim;
+    if (depth >= SWIM_ENTER) b.swim = true;
+    else if (depth <= SWIM_LEAVE) b.swim = false;
+    if (b.swim) { swimStep(b, dt, dx, dz, dist, depth, animate, !wasSwim); return; }
+    if (wasSwim && b.char) b.char.swimming = false;
+
+    // ---- feet on the ground (or on the bed, in the shallows) ---------------
+    // Wading is not a state, it is a scale: the water takes more of the step
+    // the deeper it gets, and the walk cycle slows with it because b.speed is
+    // what animChar reads. At depth 0 this is exactly 1.0 and nothing changed.
+    // swim.js's own grading: sub = depth/BODY_H, and control is fully aquatic
+    // at SWIM_BLEND (0.5) of a body height.
+    const step = depth > 0.02 ? spd * (1 - WADE_SLOW * Math.min(1, depth / (BODY_H * 0.5))) : spd;
     if (dist > 0.5) {
-      b.pos.x += (dx / dist) * spd * dt;
-      b.pos.z += (dz / dist) * spd * dt;
+      b.pos.x += (dx / dist) * step * dt;
+      b.pos.z += (dz / dist) * step * dt;
       b.group.rotation.y = lerpAngle(b.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.0008, dt));
-      b.speed = spd;
-    } else { b.speed = 0; if (b.state === "wander") b.pause = Math.max(b.pause, 0.4); }
+      b.speed = step;
+      b._arrived = false;
+    } else {
+      b.speed = 0;
+      /* YOU ARRIVE ONCE. This clamp ran on EVERY frame the body was within half
+         a metre of its target, so `pause` was pinned at 0.4 and could never
+         reach zero — and think()'s re-roll is gated on `pause <= 0`. A survivor
+         that reached its spot therefore STOOD THERE FOR THE REST OF THE MATCH.
+
+         Measured on HEAD, sixty seconds of a ninety-nine-body crowd: the number
+         of people standing in water deeper than 0.25 m went 16 -> 17, the
+         deepest anyone stood went 0.86 m -> 1.00 m, and the whole population
+         produced TWO new wander decisions. The beach is a diorama, and it is
+         also why the swim band looked broken before it was — a body cannot
+         decide to swim if it has stopped deciding anything.
+
+         The intent was obviously a floor applied ON ARRIVAL: stand here a beat
+         before picking somewhere new. Latched, that is what it does. */
+      // The dwell is per-body and costs no new draw: `reactivity` is already
+      // one, so a twitchy survivor moves on in half a second and a placid one
+      // stands in the surf for four.
+      if (b.state === "wander" && !b._arrived) {
+        b._arrived = true;
+        b.pause = Math.max(b.pause, 0.5 + (+b.reactivity || 0) * 3.5);
+      }
+    }
     // bots walk the terrain only (they don't climb); pass their body span so the
     // height-gated upper-floor walls of buildings don't block them at ground level
     if (CBZ.collide) CBZ.collide(b.pos, BOT_RADIUS, b.pos.y, b.pos.y + 1.7);
     b.pos.y = CBZ.surv ? CBZ.surv.floorAt(b.pos.x, b.pos.z) : 0;
     if (animate) animChar(b.char, b.speed, dt);
+  }
+
+  /* ---- IN THE WATER, OFF THE BOTTOM ---------------------------------------
+     The body is a float with a stroke on it, not a walker with its feet in the
+     wrong place. Nothing here is a second swimmer: the altitude is the same
+     float line city/swim.js settles the player on, the surface is the same live
+     crest, the pose is character.js's shared cycle, and the splash is
+     water_impact.js's momentum bus.
+
+     `animChar` still runs FIRST, at zero speed, and that is deliberate rather
+     than wasteful: it is exactly the composition the player's own swim uses
+     (physics animates the rig, then the water overwrites the joints it owns),
+     it keeps the hip-pivot compensation and the head/torso idle alive under the
+     stroke, and it is what makes climbing back out of the water a damped blend
+     into the walk instead of a snap. */
+  function swimStep(b, dt, dx, dz, dist, depth, animate, entered) {
+    /* EVERY BODY ON ITS OWN BEAT. Ten states created at zero on the same tick
+       advance by the same dt for ever, so a line of survivors strokes in
+       PERFECT UNISON — synchronised swimming, which is a very funny thing to
+       find in a shark game and not what anybody asked for. Offset from the
+       bot's own `reactivity`, which is already a per-body draw from the spawn
+       stream, so the crowd is out of phase and stays deterministic. */
+    let st = b.swimAnim;
+    if (!st) {
+      st = b.swimAnim = CBZ.makeSwimAnim();
+      const r = +b.reactivity || 0;
+      st.stroke = r * 6.283;
+      st.tread = ((r * 3.7) % 1) * 6.283;
+    }
+    const panic = b.state === "panic" || b.panicT > 0;
+    const surf = seaAt(b.pos.x, b.pos.z);
+    b._arrived = false;          // the land branch's arrival latch means nothing out here
+
+    // HORIZONTAL. A stroke builds and bleeds; it does not start and stop like a
+    // footfall, so the speed is eased rather than assigned and a body that
+    // arrives keeps gliding for a beat.
+    const want = dist > 0.8 ? (panic ? PANIC_SPEED : SWIM_SPEED) : 0;
+    b.speed = damp(b.speed, want, panic ? 3.4 : 1.9, dt);
+    if (dist > 1e-4 && b.speed > 1e-4) {
+      b.pos.x += (dx / dist) * b.speed * dt;
+      b.pos.z += (dz / dist) * b.speed * dt;
+    }
+    if (dist > 0.8) {
+      b.group.rotation.y = lerpAngle(b.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(WATER_TURN, dt));
+    }
+    if (CBZ.collide) CBZ.collide(b.pos, BOT_RADIUS, b.pos.y, b.pos.y + 1.7);
+
+    /* VERTICAL. The float line is the same one the player settles on —
+       FLOAT_DEPTH below the LIVE surface, so the body rides the swell instead
+       of sitting on a plane — clamped off the bed so a swimmer crossing a
+       shallow bar never sinks through it. Eased rather than assigned, which is
+       what makes leaving your feet look like leaving your feet: the body lifts
+       off the bottom over about half a second. */
+    const bedY = surf - depth;
+    const floatY = Math.max(bedY + 0.22, surf - FLOAT_DEPTH);
+    if (entered) { b._floatY = b.pos.y; entrySplash(b, surf); }
+    b._floatY = b._floatY == null ? floatY : b._floatY + (floatY - b._floatY) * (1 - Math.exp(-6 * dt));
+
+    // ANIMATION. Panic runs the cycle hot AND layers the thrash on top; both
+    // ease, so a body that has just seen a fin comes apart over a beat rather
+    // than switching animation.
+    st.rate = panic ? 2.25 : 1;
+    st.thrash = damp(st.thrash || 0, panic ? 1 : 0, panic ? 5 : 3, dt);
+    CBZ.swimAnimStep(st, b.speed, dt);
+    b.pos.y = b._floatY + st.bob;
+    if (st.beat > 0) strokeSplash(b, surf, panic);
+    if (animate) {
+      animChar(b.char, 0, dt);
+      CBZ.poseSwimmer(b.char, st, null);
+    }
   }
 
   // ---- corpse persistence (see the block in the update loop) ----
@@ -272,6 +714,10 @@
   CBZ.onUpdate(23, function (dt) {
     if (!CBZ.islandModeOn(CBZ.game.mode)) return;
     frame++;
+    // ONE scan of the bestiary for the whole crowd, on its own slow clock. See
+    // refreshThreats: a hundred bots each scanning it would be a hundred scans
+    // of a list that changes twice a second.
+    if (frame % THREAT_REFRESH === 0) refreshThreats();
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;   // VIEW: animation + corpse LOD
     const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;                 // SIM: think cadence (see below)
     const bots = CBZ.bots;
@@ -358,9 +804,15 @@
     if (CBZ.humanContact) {
       CBZ.humanContact.resolve(sepList, dt, {
         mode: "survival",
+        /* A SWIMMER HAS NO FLOOR. This clamp re-planted every separated body on
+           the terrain height — which for anyone in the water is the SEABED, and
+           it ran at order 26, three orders after the mover had just floated them
+           to the surface. So without the `a.swim` test the crowd was pulled
+           back down to the bottom every frame by the collision pass and the
+           swim looked like it did nothing at all. */
         clamp(a) {
           if (CBZ.collide) CBZ.collide(a.pos, a.r || BOT_RADIUS, a.pos.y, a.pos.y + 1.7);
-          if (!a._p) a.pos.y = CBZ.surv ? CBZ.surv.floorAt(a.pos.x, a.pos.z) : 0;
+          if (!a._p && !a.swim) a.pos.y = CBZ.surv ? CBZ.surv.floorAt(a.pos.x, a.pos.z) : 0;
         },
       });
       return;

@@ -1596,6 +1596,133 @@
     return true;
   }
 
+  /* ============================================================
+     SWIMMING — ONE POSER, EVERY BODY.
+
+     This is city/swim.js's crawl/tread pose, lifted out of it verbatim and
+     made char-agnostic. It used to read CBZ.playerChar and a module-level
+     phase record inside that file, which meant the only body in this game
+     that could swim was the player — and in Shark Sim the beach crowd was
+     therefore WALKING ON THE SEABED, land gait and all, with the water up
+     over their heads.
+
+     WHO OWNS WHAT:
+       • the CALLER owns the state object (makeSwimAnim()) — one per swimmer,
+         so a hundred bodies each carry their own stroke phase and their own
+         glide/tread blend. Nothing here is module state.
+       • swimAnimStep() ADVANCES that state and returns the tread's vertical
+         pulse, which the caller adds to its own buoyancy solve before it
+         writes a position. (Two calls, not one, because the bob has to be in
+         the position the pose is then given — swim.js's ordering, preserved.)
+       • poseSwimmer() only WRITES JOINTS. It never moves anybody.
+
+     The player's numbers are unchanged to the last digit: st.rate defaults to
+     1 and st.thrash defaults to 0, which is the code that was there.
+
+     st.beat is the one thing that is new and it is not animation — it counts
+     HALF stroke cycles, i.e. hands entering the water, so a caller can hang a
+     splash off the stroke instead of guessing a timer.
+     ============================================================ */
+  function makeSwimAnim() {
+    return {
+      stroke: 0, tread: 0, mood: 0,      // phases + the glide(0)/tread(1) blend
+      treading: false, bob: 0, beat: 0,
+      rate: 1,                           // cadence multiplier (panic runs hot)
+      thrash: 0,                         // 0 = swimming, 1 = drowning-scared
+    };
+  }
+
+  function swimAnimStep(st, spd, dt) {
+    if (!st) return 0;
+    if (!(dt > 0)) { st.beat = 0; return st.bob || 0; }
+    const rate = st.rate > 0 ? st.rate : 1;
+    st.treading = spd < 0.35;
+    const moodTarget = st.treading ? 1 : 0;
+    st.mood += (moodTarget - st.mood) * (1 - Math.exp(-4.5 * dt));
+    const was = st.stroke;
+    st.stroke += dt * (2.0 + Math.min(3, spd) * 0.55) * rate;   // ~3s glide cycle
+    st.tread += dt * 2.55 * rate;                               // ~2.5s tread cycle
+    // one BEAT per half cycle: that is one hand going in.
+    st.beat = Math.floor(st.stroke / Math.PI) - Math.floor(was / Math.PI);
+    // The tread's own vertical pulse: you sink a few centimetres between
+    // eggbeater kicks and pop back on each one.
+    st.bob = Math.sin(st.tread * 2) * 0.055 * st.mood;
+    return st.bob;
+  }
+
+  // opts: { pos } world position to stamp on the rig root (optional — a rig
+  //        whose group.position IS the actor's pos needs nothing),
+  //       { vy } the swimmer's vertical velocity, which pitches the body
+  //        nose-down/up when it is driving through the column.
+  function poseSwimmer(ch, st, opts) {
+    if (!ch || !ch.group || !st) return false;
+    const o = opts || {};
+    ch.swimming = true;
+    if (o.pos) ch.group.position.copy(o.pos);
+    const m = st.mood;                      // 0 = gliding crawl, 1 = treading
+    const sw = Math.sin(st.stroke);
+    const tw = Math.sin(st.tread);
+    // Body attitude: flat and prone while swimming, near-vertical while
+    // treading, nose-down/up when you are actively driving through the column.
+    const pitchDrive = Math.max(-0.55, Math.min(0.55, -(+o.vy || 0) * 0.22));
+    ch.group.rotation.x = 0;
+    if (ch.body) {
+      ch.body.rotation.x = (0.30 + pitchDrive) * (1 - m) + 0.95 * m;
+      ch.body.position.y = (Math.sin(st.stroke * 2) * 0.028) * (1 - m) + (tw * 0.02) * m;
+    }
+    if (ch.parts) {
+      // crawl: big alternating overhead sweep. tread: short sculling arcs.
+      const laC = -1.20 + sw * 0.62, raC = -1.20 - sw * 0.62;
+      const laT = -0.35 + Math.sin(st.tread * 2) * 0.42, raT = -0.35 - Math.sin(st.tread * 2) * 0.42;
+      if (ch.parts.la) { ch.parts.la.rotation.x = laC * (1 - m) + laT * m; ch.parts.la.rotation.z = -0.28 - 0.34 * m; }
+      if (ch.parts.ra) { ch.parts.ra.rotation.x = raC * (1 - m) + raT * m; ch.parts.ra.rotation.z = 0.28 + 0.34 * m; }
+      // crawl: flutter kick. tread: eggbeater — the legs circle out of phase.
+      const llC = sw * 0.30, rlC = -sw * 0.30;
+      const llT = 0.55 + Math.sin(st.tread * 2) * 0.42, rlT = 0.55 - Math.cos(st.tread * 2) * 0.42;
+      if (ch.parts.ll) ch.parts.ll.rotation.x = llC * (1 - m) + llT * m;
+      if (ch.parts.rl) ch.parts.rl.rotation.x = rlC * (1 - m) + rlT * m;
+    }
+    if (ch.low) {
+      if (ch.low.la) ch.low.la.rotation.x = -0.45 * (1 - m) - 0.85 * m;
+      if (ch.low.ra) ch.low.ra.rotation.x = -0.45 * (1 - m) - 0.85 * m;
+      if (ch.low.ll) ch.low.ll.rotation.x = (0.35 + Math.max(0, -sw) * 0.25) * (1 - m) + (0.9 + Math.max(0, tw) * 0.3) * m;
+      if (ch.low.rl) ch.low.rl.rotation.x = (0.35 + Math.max(0, sw) * 0.25) * (1 - m) + (0.9 + Math.max(0, -tw) * 0.3) * m;
+    }
+    /* PANIC IS NOT A FASTER STROKE. Somebody who thinks they are about to be
+       eaten stops swimming: the arms come clear of the water and beat OVER the
+       head, the torso rolls hard side to side, and the legs stop kicking in
+       any pattern at all. Layered ON TOP of the tread so it is one continuous
+       body going to pieces rather than a second animation cutting in. Skipped
+       entirely at thrash 0, which is the player's path and every calm body. */
+    const th = st.thrash > 0 ? Math.min(1, st.thrash) : 0;
+    if (th > 0) {
+      const f = Math.sin(st.tread * 3.3), gg = Math.cos(st.tread * 2.7);
+      if (ch.body) {
+        ch.body.rotation.x += 0.20 * th * gg;
+        ch.body.rotation.z = f * 0.26 * th;
+      }
+      if (ch.parts) {
+        /* CLAMPED, because the flail is added to whatever mood the body is
+           already in. A panicking swimmer is MOVING, so the base pose is the
+           crawl (-1.20 ∓ 0.62) and the thrash adds another -2.25 on top: past
+           -pi the shoulder rotates THROUGH vertical and the arm comes back up
+           behind the body, which reads as a broken rig rather than a frightened
+           one. -2.6 rad is the arm straight overhead and a little back, which
+           is as far as a shoulder goes. */
+        const FLAIL = -2.6;
+        if (ch.parts.la) { ch.parts.la.rotation.x = Math.max(FLAIL, ch.parts.la.rotation.x + (-1.45 - f * 0.80) * th); ch.parts.la.rotation.z -= 0.50 * th; }
+        if (ch.parts.ra) { ch.parts.ra.rotation.x = Math.max(FLAIL, ch.parts.ra.rotation.x + (-1.45 + f * 0.80) * th); ch.parts.ra.rotation.z += 0.50 * th; }
+        if (ch.parts.ll) ch.parts.ll.rotation.x += gg * 0.55 * th;
+        if (ch.parts.rl) ch.parts.rl.rotation.x -= gg * 0.55 * th;
+      }
+      if (ch.low) {
+        if (ch.low.ll) ch.low.ll.rotation.x = Math.max(0, ch.low.ll.rotation.x + (0.45 + gg * 0.40) * th);
+        if (ch.low.rl) ch.low.rl.rotation.x = Math.max(0, ch.low.rl.rotation.x + (0.45 - gg * 0.40) * th);
+      }
+    }
+    return true;
+  }
+
   /* ---- the layered animation update ----
      speed: current planar speed (units/s). dt: seconds.
 
@@ -4244,6 +4371,11 @@
   };
   CBZ.animChar = animChar;
   CBZ.poseSkydiver = poseSkydiver;
+  // THE SWIM POSE, shared. city/swim.js drives the player with these three and
+  // entities/survivorbot.js drives ninety-nine other people with the same ones.
+  CBZ.makeSwimAnim = makeSwimAnim;
+  CBZ.swimAnimStep = swimAnimStep;
+  CBZ.poseSwimmer = poseSwimmer;
   CBZ.lockCharacterHips = lockCharacterHips;
   CBZ.gaitPhaseDelta = gaitPhaseDelta;
   CBZ.deathPose = deathPose;

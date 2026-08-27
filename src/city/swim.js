@@ -294,14 +294,20 @@
   // ---- STATE ---------------------------------------------------------------
   let swimming = false;
   let px = 0, pz = 0;                  // last pass's position (the intent anchor)
-  const S = {
+  // The player's swimmer record. The ANIMATION half of it (stroke/tread/mood/
+  // bob/beat/rate/thrash) is character.js's shared swim-cycle state — the very
+  // same record entities/survivorbot.js gives every one of its ninety-nine
+  // people — so there is one stroke cycle in this game and this is the player's
+  // copy of it, not a second implementation with the same numbers typed twice.
+  const S = Object.assign(CBZ.makeSwimAnim ? CBZ.makeSwimAnim() : {
+    stroke: 0, tread: 0, mood: 0, treading: false, bob: 0, beat: 0, rate: 1, thrash: 0,
+  }, {
     vx: 0, vz: 0, vy: 0,               // the swimmer's own velocity
     y: 0,                              // the altitude we own
-    stroke: 0, tread: 0, mood: 0,      // animation phases + the glide/tread blend
     sub: 0, surf: 0, bed: 0,           // last sampled submergence / surface / depth
-    diving: false, treading: false, headUnder: false, sinking: false,
+    diving: false, headUnder: false, sinking: false,
     hurtT: 0, drownT: 0, gaspAt: -9e9,
-  };
+  });
   let drownDeaths = 0;          // SWIM_SINK ratchet: real drownings this session
   let breath = BREATH_MAX;
   let climbPress = false;              // consumed keydown/tap edge (see below)
@@ -750,10 +756,19 @@
     P._swim = true;
     if (CBZ.playerChar) CBZ.playerChar.swimming = true;
     const fall = Math.max(0, fallSpeed != null ? fallSpeed : -(P.vy || 0));
-    // Impact splash scales with how hard you hit it — a step off the quay
-    // barely dimples the surface, a fall off a bridge throws real spray.
-    // world/water_wake.js owns the particles; the audio cue below is unchanged.
-    if (CBZ.waterSplashAt) {
+    /* Impact splash scales with how hard you hit it — a step off the quay
+       barely dimples the surface, a fall off a bridge throws real spray.
+       THROUGH THE MOMENTUM BUS, not the legacy strength dial: waterHit sizes
+       the crown, the rebound jet, the settling ring AND the audio gain from
+       sqrt(mass)*speed, so an 78 kg body entering at its real fall speed is
+       one number rather than a hand-tuned 0.55..2.15. water_wake.js still owns
+       the particles underneath; this only changes who does the arithmetic.
+       waterSplashAt stays as the fallback for a page loaded without the bus. */
+    if (CBZ.waterHit) {
+      CBZ.waterHit(P.pos.x, P.pos.y, P.pos.z, {
+        kind: "body", mass: 78, speed: Math.max(2.2, fall), src: P,
+      });
+    } else if (CBZ.waterSplashAt) {
       CBZ.waterSplashAt(P.pos.x, P.pos.y, P.pos.z, 0.55 + Math.min(1.6, fall * 0.16));
     }
     // Carry the fall in as plunge momentum instead of discarding it: a dive
@@ -791,8 +806,10 @@
     P._fallPeak = 0;
     hidePrompt();
     if (CBZ.playerChar) CBZ.playerChar.swimming = false;
-    // hauling out drags a sheet of water up with you
-    if (CBZ.waterSplashAt) CBZ.waterSplashAt(P.pos.x, P.pos.y, P.pos.z, 0.55);
+    // hauling out drags a sheet of water up with you — same bus, a body
+    // leaving slowly rather than a body arriving fast.
+    if (CBZ.waterHit) CBZ.waterHit(P.pos.x, P.pos.y, P.pos.z, { kind: "body", mass: 78, speed: 1.6, src: P });
+    else if (CBZ.waterSplashAt) CBZ.waterSplashAt(P.pos.x, P.pos.y, P.pos.z, 0.55);
     if (spot) {
       P.pos.x = spot.x; P.pos.z = spot.z;
       // A spot that carries its own height is a BOAT deck (climbSpot's boat
@@ -1079,16 +1096,14 @@
 
     // 5. Animation moods. Moving = the long glide-heavy stroke; stationary =
     //    a shorter, more vigorous tread with its own per-cycle bob.
+    //    THE PHASES ARE NOT OWNED HERE ANY MORE. entities/character.js owns the
+    //    one swim cycle in this game (CBZ.swimAnimStep advances S in place and
+    //    hands back the tread's vertical pulse); `S` is simply this swimmer's
+    //    copy of it. Same numbers, same ordering — the bob still lands in the
+    //    position the pose is given, which is why this is two calls and not one.
     const spd = Math.hypot(S.vx, S.vz);
-    S.treading = spd < 0.35;
-    const moodTarget = S.treading ? 1 : 0;
-    S.mood += (moodTarget - S.mood) * (1 - Math.exp(-4.5 * fdt));
-    S.stroke += fdt * (2.0 + Math.min(3, spd) * 0.55);     // ~3s glide cycle
-    S.tread += fdt * 2.55;                                 // ~2.5s tread cycle
+    const treadBob = CBZ.swimAnimStep(S, spd, fdt);
     P._swimPhase = S.stroke;
-    // The tread's own vertical pulse, ON TOP of the buoyancy solve: you sink a
-    // few centimetres between eggbeater kicks and pop back on each one.
-    const treadBob = Math.sin(S.tread * 2) * 0.055 * S.mood;
 
     P.pos.y = S.y + treadBob;
     P.vy = 0;                    // nothing outside this file integrates our Y
@@ -1101,6 +1116,7 @@
     px = P.pos.x; pz = P.pos.z;
 
     poseSwimmer(P, spd);
+    strokeSplash(P, surf, sub);
     breathStep(P, surf, dt);
     tireStep(P, dt, hard);
     climbStep(A, P, dt, sub);
@@ -1145,40 +1161,36 @@
   // Physics synced the rig before this pass, so without this the visible
   // character would stand on its pre-swim floor. Water owns the final pose and
   // transform for the frame.
+  //
+  // THE POSE ITSELF LIVES IN entities/character.js NOW (CBZ.poseSwimmer). It
+  // was written here, for CBZ.playerChar, off this file's private phase record
+  // — which is why the only body in this game that could swim was the player,
+  // and why Shark Sim's beach crowd walked the seabed with a land gait. The
+  // joints are identical; what moved is WHO may ask for them.
   function poseSwimmer(P, spd) {
-    const ch = CBZ.playerChar;
-    if (!ch || !ch.group) return;
-    ch.swimming = true;
-    ch.group.position.copy(P.pos);
-    const m = S.mood;                       // 0 = gliding crawl, 1 = treading
-    const sw = Math.sin(S.stroke);
-    const tw = Math.sin(S.tread);
-    // Body attitude: flat and prone while swimming, near-vertical while
-    // treading, nose-down/up when you are actively driving through the column.
-    const pitchDrive = Math.max(-0.55, Math.min(0.55, -S.vy * 0.22));
-    ch.group.rotation.x = 0;
-    if (ch.body) {
-      ch.body.rotation.x = (0.30 + pitchDrive) * (1 - m) + 0.95 * m;
-      ch.body.position.y = (Math.sin(S.stroke * 2) * 0.028) * (1 - m) + (tw * 0.02) * m;
-    }
-    if (ch.parts) {
-      // crawl: big alternating overhead sweep. tread: short sculling arcs.
-      const laC = -1.20 + sw * 0.62, raC = -1.20 - sw * 0.62;
-      const laT = -0.35 + Math.sin(S.tread * 2) * 0.42, raT = -0.35 - Math.sin(S.tread * 2) * 0.42;
-      if (ch.parts.la) { ch.parts.la.rotation.x = laC * (1 - m) + laT * m; ch.parts.la.rotation.z = -0.28 - 0.34 * m; }
-      if (ch.parts.ra) { ch.parts.ra.rotation.x = raC * (1 - m) + raT * m; ch.parts.ra.rotation.z = 0.28 + 0.34 * m; }
-      // crawl: flutter kick. tread: eggbeater — the legs circle out of phase.
-      const llC = sw * 0.30, rlC = -sw * 0.30;
-      const llT = 0.55 + Math.sin(S.tread * 2) * 0.42, rlT = 0.55 - Math.cos(S.tread * 2) * 0.42;
-      if (ch.parts.ll) ch.parts.ll.rotation.x = llC * (1 - m) + llT * m;
-      if (ch.parts.rl) ch.parts.rl.rotation.x = rlC * (1 - m) + rlT * m;
-    }
-    if (ch.low) {
-      if (ch.low.la) ch.low.la.rotation.x = -0.45 * (1 - m) - 0.85 * m;
-      if (ch.low.ra) ch.low.ra.rotation.x = -0.45 * (1 - m) - 0.85 * m;
-      if (ch.low.ll) ch.low.ll.rotation.x = (0.35 + Math.max(0, -sw) * 0.25) * (1 - m) + (0.9 + Math.max(0, tw) * 0.3) * m;
-      if (ch.low.rl) ch.low.rl.rotation.x = (0.35 + Math.max(0, sw) * 0.25) * (1 - m) + (0.9 + Math.max(0, -tw) * 0.3) * m;
-    }
+    return CBZ.poseSwimmer(CBZ.playerChar, S, { pos: P.pos, vy: S.vy });
+  }
+
+  /* EVERY STROKE PUTS A HAND IN THE WATER, and until now the sea did not
+     notice. world/water_impact.js is the one bus that sizes a splash and its
+     audio from real momentum (sqrt(mass)*speed), and it had no swimmer on it
+     at all: the whole of swimming produced exactly two splashes, one on entry
+     and one on climbing out. A hand entering at ~2 m/s is a slap, not a
+     cannonball, so the mass passed is a forearm's worth and not a body's —
+     `body` is still the right vocabulary because what it wants to draw is a
+     small crown and a ring, not a bullet's spike. */
+  function strokeSplash(P, surf, sub) {
+    if (!S.beat || !CBZ.waterHit) return;
+    // A hand only breaks the surface if the body is AT the surface. Underwater
+    // the same stroke is silent, which is the whole point of being under.
+    if (sub > 0.95 || S.headUnder) return;
+    const hard = S.mood < 0.5;              // gliding crawl, not sculling
+    CBZ.waterHit(P.pos.x, surf, P.pos.z, {
+      kind: "body",
+      mass: hard ? 7 : 4,
+      speed: hard ? 2.4 : 1.6,
+      src: P,
+    });
   }
 
   // ---- breath --------------------------------------------------------------
