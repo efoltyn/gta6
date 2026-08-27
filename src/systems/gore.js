@@ -796,25 +796,36 @@
     if (worst >= 0) { freeSlick(splats[worst]); splats.splice(worst, 1); }
   }
   const SLICK_LOD2 = 130 * 130;   // beyond this a film of blood on water is nothing
-  CBZ.goreSlick = function (x, z, amount) {
+  /* opts (all optional) — a slick that was THROWN somewhere rather than simply
+     bleeding where it lies. The swash uses all three: a wave lifts blood off
+     the sand, hurls it seaward at backwash speed (vx/vz, dying over `decay`
+     seconds as the sheet loses its run), and the cloud must not follow the
+     water DOWN through the beach when the sheet drains — `floorY` is the sand
+     it was lifted from, and the surface re-read never seats below it. */
+  CBZ.goreSlick = function (x, z, amount, opts) {
     if (!waterOn() || !CBZ.scene) return;
     if (dist2Cam(x, z) > SLICK_LOD2) return;              // distance LOD: don't spawn
     if (slickN >= slickCap()) recycleFarSlick();
     if (splats.length > (CBZ.qScale ? CBZ.qScale(85, 300) : 170)) recycleFarSplat();
     const amt = Math.max(0.3, Math.min(3, amount == null ? 1 : amount));
+    const o = opts || {};
+    const floorY = isFinite(+o.floorY) ? +o.floorY : null;
     const m = new THREE.Mesh(blob(), slickMat());
     m.rotation.x = -Math.PI / 2;
     m.rotation.z = Math.random() * 6.28;
-    m.position.set(x, seaY(x, z) + 0.06, z);
+    const sy = seaY(x, z) + 0.06;
+    m.position.set(x, floorY != null ? Math.max(sy, floorY + 0.03) : sy, z);
     m.renderOrder = 3; m.scale.set(0.1, 0.1, 1);
     scene().add(m);
     const near = dist2Cam(x, z) < 24 * 24;
+    const bt = Math.max(0, +o.decay || 0);
     slickN++;
     splats.push({
       m, water: true, t: 0, grow: 0.9 + amt * 1.6, max: 0.9 + amt * 1.6, growT: 6,
       hold: near ? 40 : 18, fade: 16,
       ax: 0.82 + Math.random() * 0.36, az: 0.82 + Math.random() * 0.36,
       cx: 0, cz: 0, curT: 0, syT: 0,
+      bx: +o.vx || 0, bz: +o.vz || 0, bt, bt0: bt || 1, floorY,
     });
   };
 
@@ -1779,6 +1790,155 @@
     }
     const d = submRaw(x, floorAt(x, z), z);
     return (d === DRY || !isFinite(d)) ? 0 : d;
+  }
+
+  /* ============================================================
+     THE SWASH TAKES THE BLOOD (GORE_SWASH).
+
+     OWNER, 2026-08-27, on the shark game's beach: "when water runs over those
+     blood marks currently the blood marks stay there but are hidden while
+     water covers and then they are still there after when water moves back."
+
+     He is describing exactly what the code did. A maul on the sand stamps
+     ground pools (gore.js LAYER 4 + the landing droplets), the sea washes up
+     over them every few seconds, and NOTHING HAPPENED: the ocean mesh drew
+     over the decal while the crest was on it, the crest went out, and the same
+     crisp arterial mark was still lying there — through wave after wave, for
+     the pool's whole 26-75 s clock. Blood on a beach is a stain the SEA TAKES,
+     and takes visibly: the sheet lifts it, the backwash carries it out as a
+     cloud, and each run-up leaves less behind until the sand is clean.
+
+     WHY GORE_WASH ABOVE COULD NEVER HAVE DONE THIS. It asks washDepthAt, and
+     washDepthAt asks the MEAN water column on purpose — a flood is a slow
+     thing, and reading the live crest there would strobe every decal in a
+     town. But mean sea level over dry sand is BELOW the sand by definition, so
+     on a beach that query is 0 forever and no decal above the mean waterline
+     was ever a candidate. The two questions are genuinely different:
+
+        GORE_WASH   "is this ground UNDER standing water?"  -> mean column
+        GORE_SWASH  "did a wave just RUN OVER this mark?"   -> live crest
+
+     so this reads the crest, and it wants the strobe: each rising edge IS one
+     wave, and one wave is one bite out of the stain. Hysteresis (3.5 cm on,
+     1 cm off) keeps a crest that hovers at the threshold from counting twice.
+
+     WHAT IT COSTS. Nothing at all outside the island modes (see the gate
+     below): one boolean per frame in the city and in the prison. On the island
+     it is one live-surface read — five sines out of the shared swell table —
+     per candidate decal per ~0.12 s, and a decal outside the tidal band is
+     retired after a single query and never asked again (s.swashOff). Measured
+     on the disaster island: a kill pool and its spray on the beach leave ~15
+     candidates; a pool up on the high ground leaves none.
+
+     A DECAL DOES NOT COME BACK. dilute only rises; when it reaches 1 the mark
+     retires. That is the whole point of the read the owner wants: the tide
+     goes out and the sand is CLEAN, not merely un-occluded.
+  ============================================================ */
+  /* ISLAND WORLDS ONLY, AND THAT IS NOT A SHORTCUT — IT IS THE MEASUREMENT.
+     This law needs two things: ground with real heights, and a sea that is
+     drawn wherever it is higher than that ground. The disaster island has
+     both (arena.groundHeightAt is a real bathymetry, and its ocean mesh
+     carries uSeaHasLandMask = 0 — measured — so the sand is the only thing
+     hiding the water). The city has neither: CBZ.floorAt is a flat 0 over the
+     whole map INCLUDING the open sea (waterfield.js:466 measured 0.00 at all
+     199 aquatic actors), so a height test there would nominate every street in
+     town, and the city sea is hard-discarded at a baked land mask whose edge
+     only moves with surge — its beach apron sits at +0.048 with the highest
+     crest at -0.06, so water never runs over city sand in the first place.
+     Nothing to model, and this way the city pays one boolean per frame. */
+  if (CBZ.CONFIG.GORE_SWASH == null) CBZ.CONFIG.GORE_SWASH = true;
+  function swashOn() {
+    return CBZ.CONFIG.GORE_SWASH !== false
+      && !!(CBZ.game && CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game.mode) && CBZ.survSeaHeightAt);
+  }
+  const SWASH_ON = 0.035;      // m of water over the mark that counts as covered
+  const SWASH_OFF = 0.010;     // and how far it must drain before the next wave counts
+
+  // mean sea level in this world — the island publishes its own, the city's
+  // is the shared water spec's, and a world with no water at all answers 0.
+  function meanSeaY() {
+    if (CBZ.survSeaMeanY) {
+      try { const v = CBZ.survSeaMeanY(); if (isFinite(v)) return v; } catch (e) {}
+    }
+    if (CBZ.waterSeaY) { try { const v = CBZ.waterSeaY(); if (isFinite(v)) return v; } catch (e) {} }
+    return CBZ.SEA_Y != null ? CBZ.SEA_Y : 0;
+  }
+  // metres of water standing over the point the decal is actually SEATED at,
+  // measured against the LIVE crest — the same surface the ocean mesh is drawn
+  // at, which is what makes this test agree with what the player sees covering
+  // the mark. Negative on dry sand, and never NaN.
+  function swashDepth(x, y, z) {
+    try { const s = CBZ.survSeaHeightAt(x, z); return isFinite(s) ? s - y : -1; } catch (e) { return -1; }
+  }
+  // ONE test per decal, ever: is this mark inside the band a wave can reach?
+  // Above it is inland; below it is already submerged, and the standing-water
+  // path above owns that one. A tsunami RAISES mean sea level, and a decal
+  // this test retired is then picked up by GORE_WASH instead — which is the
+  // right division of labour, because a surge is standing water, not a wave.
+  function swashBand(s) {
+    const m = meanSeaY();
+    if (!isFinite(m)) return false;
+    // A metre either side of mean sea level covers every crest this world's
+    // swell table can raise, with room for a storm's gain on top. Measured at
+    // the island's waterline: 0.35 m peak to trough seen from 130 m away, and
+    // about half a metre with the lens on it — water_spec.js scales wave
+    // amplitude by distance from the CAMERA, so the swell a decal actually
+    // meets is the swell the player is standing next to.
+    const gap = s.m.position.y - m;
+    return gap < 1.2 && gap > -1.2;
+  }
+  // WHICH WAY IS OUT. The backwash runs down the beach, so the cloud is thrown
+  // along the ground's own fall line. On sand flat enough to have no fall line
+  // (or with the slope model off) the water itself answers: the deeper side is
+  // seaward. Two extra sea reads, only on the frame a wave actually lands.
+  const _sea = { x: 0, z: 0 };
+  function seawardAt(x, y, z) {
+    let dx = 0, dz = 0;
+    if (slopeOn()) { const g = groundGrad(x, z); dx = -g.gx; dz = -g.gz; }
+    if (Math.hypot(dx, dz) < 0.01) {
+      const e = 2;
+      dx = swashDepth(x + e, y, z) - swashDepth(x - e, y, z);
+      dz = swashDepth(x, y, z + e) - swashDepth(x, y, z - e);
+    }
+    const l = Math.hypot(dx, dz);
+    if (l > 0.001) { _sea.x = dx / l; _sea.z = dz / l; } else { _sea.x = 0; _sea.z = 0; }
+    return _sea;
+  }
+  /* ONE WAVE, ONE BITE. The sheet lifts a share of what is left of the mark,
+     that share leaves as a cloud in the water, and the mark keeps the rest —
+     thinner (dilute) and smaller (the pool is eaten from its edges). Three or
+     four run-ups and there is nothing left, which is about what a real tide
+     line does to a stain and, more to the point, is slow enough that you SEE
+     it happen instead of watching a decal pop out of existence. */
+  let swashEvents = 0;              // every run-up that ever took a bite, this match
+  function swashTake(s, depth) {
+    const x = s.m.position.x, y = s.m.position.y, z = s.m.position.z;
+    swashEvents++;
+    const left = 1 - (s.dilute || 0);
+    // a sheet you can see your feet through lifts less than a knee-deep run-up
+    const bite = Math.min(left, 0.30 + Math.min(0.34, depth * 0.55) + Math.random() * 0.12);
+    s.dilute = Math.min(1, (s.dilute || 0) + bite);
+    s.grow = Math.max((s.max || s.grow) * 0.34, s.grow * (1 - bite * 0.4));
+    s.swashN = (s.swashN || 0) + 1;
+    /* A DROPLET DOES NOT MAKE A CLOUD. The spray around a maul lands as
+       dozens of marks a hand across (spawnSplat grows of 0.08-0.21); giving
+       each one a slick would put twenty clouds in the water for one bite and
+       spend the whole slick budget on flecks. Only a real mark — a pool, a
+       drip trail, a smear — has enough in it to colour water. The flecks still
+       dilute and still go; they just go quietly. */
+    if (!waterOn() || (s.max || s.grow) < 0.4) return;
+    // THE CLOUD IS THE EVENT. A film on the water where the mark was, thrown
+    // seaward at backwash speed and handed to the current after a couple of
+    // seconds — and floored at the sand, so when the sheet drains out from
+    // under it what is left is a diluted stain on wet sand rather than a decal
+    // that sank through the beach chasing a surface that left.
+    const amt = Math.max(0.3, Math.min(2.4, (s.max || 1) * 0.55 * (0.55 + bite)));
+    const d = seawardAt(x, y, z);
+    const sp = 0.9 + Math.random() * 0.7;
+    CBZ.goreSlick(x + d.x * 0.2, z + d.z * 0.2, amt,
+      { vx: d.x * sp, vz: d.z * sp, decay: 1.5 + Math.random(), floorY: y });
+    // and in water with any body to it, the cloud has a third dimension
+    if (depth > 0.25) CBZ.goreBloom(x, y + depth * 0.45, z, { amount: Math.min(1.2, amt * 0.6) });
   }
 
   /* ============================================================
@@ -2889,6 +3049,26 @@
             s.hold = Math.min(s.hold, s.t);      // straight into the fade window
             s.fade = Math.min(s.fade, 2.4);      // and gone in a couple of seconds
             s.washT = -1;                        // decided; stop paying for the query
+            // and it goes somewhere: standing water lifting a stain is the same
+            // event as a wave lifting one, so it gets the same cloud.
+            if (swashOn() && !s.dilute) swashTake(s, 0.4);
+          }
+        }
+      }
+      /* AND A WAVE RUNNING OVER IT TAKES A BITE (GORE_SWASH). See the block at
+         the head of this file. One live-crest read per candidate decal per
+         ~0.12 s; the band test retires everything that is not on a shoreline
+         after a single query, and a mark washed to nothing retires here. */
+      if (!s.water && swashOn() && !s.swashOff) {
+        s.swashT = (s.swashT || 0) - dt;
+        if (s.swashT <= 0) {
+          s.swashT = 0.09 + Math.random() * 0.05;
+          if (s.swashBand === undefined) s.swashBand = swashBand(s);
+          if (!s.swashBand) s.swashOff = true;
+          else {
+            const wd = swashDepth(s.m.position.x, s.m.position.y, s.m.position.z);
+            if (!s.wetNow && wd > SWASH_ON) { s.wetNow = true; swashTake(s, wd); }
+            else if (s.wetNow && wd < SWASH_OFF) s.wetNow = false;
           }
         }
       }
@@ -2909,6 +3089,15 @@
           }
         }
         s.m.position.x += s.cx * dt; s.m.position.z += s.cz * dt;
+        // THE BACKWASH. A slick the swash lifted off the sand leaves with the
+        // water that lifted it — fast at first, then handed over to the
+        // current as the sheet loses its run. Zero for every other slick, so
+        // this is one branch and no maths for blood that just bled where it is.
+        if (s.bt > 0) {
+          const k = s.bt / (s.bt0 || 1);
+          s.m.position.x += s.bx * k * dt; s.m.position.z += s.bz * k * dt;
+          s.bt -= dt;
+        }
         // THE SURFACE RE-READ IS THROTTLED, and skipped outright when the slick
         // is too far to read. citySeaHeightAt walks the whole swell table, and
         // this used to run for every slick every frame — up to ~300 full swell
@@ -2918,7 +3107,11 @@
         if (s.syT <= 0) {
           s.syT = 0.066;
           if (dist2Cam(s.m.position.x, s.m.position.z) < 60 * 60) {
-            s.m.position.y = seaY(s.m.position.x, s.m.position.z) + 0.06;
+            const y = seaY(s.m.position.x, s.m.position.z) + 0.06;
+            // a slick born ON THE SAND never sinks through it: when the sheet
+            // drains out from under a washed cloud what is left is a diluted
+            // film lying on wet sand, not a decal chasing a surface that left.
+            s.m.position.y = s.floorY != null ? Math.max(y, s.floorY + 0.03) : y;
           }
         }
         const kw = Math.min(1, s.t / s.growT);
@@ -2949,8 +3142,12 @@
       // paint-pink; blood sitting on a light floor reads dark.
       // GOING UNDER: a surface slick is ON the water and is never snowed on.
       const under = s.water ? 0 : buriedBy(s, snowCoverNow);
-      s.m.material.opacity = (s.water ? 0.42 : (realism() ? 0.88 : 0.66)) * fadeIn * fadeOut * (1 - under);
-      if (under >= 1 || s.t > s.hold + s.fade) { freeSlick(s); splats.splice(i, 1); }
+      // DILUTION: what the sea has already carried off is not on the sand any
+      // more. It only ever rises, so a mark the waves have thinned does not
+      // come back crisp when the water goes out.
+      const dil = s.dilute > 0 ? Math.min(1, s.dilute) : 0;
+      s.m.material.opacity = (s.water ? 0.42 : (realism() ? 0.88 : 0.66)) * fadeIn * fadeOut * (1 - under) * (1 - dil);
+      if (under >= 1 || dil >= 1 || s.t > s.hold + s.fade) { freeSlick(s); splats.splice(i, 1); }
     }
 
     for (let i = walls.length - 1; i >= 0; i--) {
@@ -3026,12 +3223,19 @@
         else { drops++; if (span > maxDrop) maxDrop = span; if (thick > fatDrop) fatDrop = thick; }
       }
     const cov = snowCover();
-    let visible = 0, buried = 0;
+    let visible = 0, buried = 0, washes = 0, diluted = 0, candidates = 0;
     for (let i = 0; i < splats.length; i++) {
       const s = splats[i];
       if (s.water) continue;
       const u = buriedBy(s, cov);
-      if (u >= 1) buried++; else visible += (1 - u);
+      // DILUTION COUNTS AS GONE. `bloodVisible` is the ratchet a beach test
+      // reads — what is still lying on the sand — so what the sea has already
+      // carried off must come out of it exactly as snow burial does.
+      const d = s.dilute > 0 ? Math.min(1, s.dilute) : 0;
+      washes += s.swashN || 0;
+      if (d > 0) diluted++;
+      if (s.swashBand) candidates++;
+      if (u >= 1 || d >= 1) buried++; else visible += (1 - u) * (1 - d);
     }
     return {
       bits: bits.length, pools, streaks, slicks: water, walls: walls.length,
@@ -3050,6 +3254,14 @@
       float: +worst.toFixed(3), floatAt: worstAt,
       slopeDecals: slopeOn(),
       snowCover: +cov.toFixed(3), buried,
+      /* GORE_SWASH. `swashWashes` is the MATCH total, not a sum over what is
+         still lying there: a mark the sea finished off is the strongest
+         evidence the law works and it deletes its own record, so counting live
+         decals would report a perfect wash as zero (it did, first time out).
+         The other two are live: marks the sea has thinned so far, and marks
+         sitting in the band where it could reach them at all. */
+      swashWashes: swashEvents, swashLiveWashes: washes,
+      swashDiluted: diluted, swashCandidates: candidates,
       // sum of per-decal visibility: 0 means the ground reads clean even
       // though records may still exist mid-bury.
       bloodVisible: +visible.toFixed(2),
@@ -3067,7 +3279,7 @@
     for (const b of puffs) rm(b.s); puffs.length = 0;
     for (const b of puffPool) rm(b.s); puffPool.length = 0;
     chum.length = 0; chumOut.length = 0; wetEvent = false;
-    later.length = 0; killCtx = null;
+    later.length = 0; killCtx = null; swashEvents = 0;   // the match total is per match
     flashV = 0; if (flashEl) flashEl.style.opacity = "0";
   };
 
