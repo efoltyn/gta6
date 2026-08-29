@@ -710,6 +710,12 @@
   // refused every one of them, so no ordnance in the game could open the most
   // common building type in the city. Off restores that refusal exactly.
   if (CBZ.CONFIG.STRUCT_CURTAIN_BREACH_V1 == null) CBZ.CONFIG.STRUCT_CURTAIN_BREACH_V1 = true;
+  // CONSERVATION OF MATTER (owner: "I HATE FAKE DEBRIS ... IT MUST COME FROM
+  // SOMEWHERE"). Every fragment a blast throws is diced out of a solid the
+  // carve is removing in the same breath and carries that solid's own material;
+  // the point-and-count rubble/avalanche spawners are retired. Off restores
+  // them and the invented pile they built.
+  if (CBZ.CONFIG.DEBRIS_CONSERVED_V1 == null) CBZ.CONFIG.DEBRIS_CONSERVED_V1 = true;
   // WINDOW REVEALS V2 (reference adoption: window modules with reveal depth +
   // warm/cool lit spread). On → upper-floor clear panes recess ~0.09u behind the
   // outer wall face (real reveal shadow line) with a slim reveal-edge liner, and

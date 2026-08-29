@@ -589,6 +589,14 @@
     const P = CBZ.player;
     if (!P || !P.pos || P.dead || !activeCtx()) return false;
     if (P._aircraft && CBZ.cityPlayerAircraftExit) { CBZ.cityPlayerAircraftExit(); return true; }
+    /* THE PLAYER'S OWN "GET OUT", AND ONLY HIS. city/passengerseat.js turns
+       this press into a JUMP when the car is doing more than walking pace —
+       which is the whole point of an exit key on a moving vehicle. It is routed
+       through the INPUT path rather than by wrapping cityExitVehicle, because
+       that verb is also how a mission, a chop shop, a sold car and a flooded
+       engine put you on the pavement, and none of those is you deciding to
+       throw yourself out of a door. */
+    if (P._vehicle && CBZ.cityVehicleGetOut && CBZ.cityVehicleGetOut()) return true;
     if (P._vehicle && CBZ.cityExitVehicle) { CBZ.cityExitVehicle(); return true; }
     if (armor) { exitArmor(); return true; }
     if (P.driving) return false; // boats/animals keep their owning controller

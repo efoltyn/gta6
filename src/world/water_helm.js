@@ -238,6 +238,7 @@
   // ============================================================
   //  THE HELM
   // ============================================================
+  const NO_HELM = Object.freeze(Object.create(null));   // an unmanned wheel
   CBZ.marineHelm = function (car, dt, D) {
     if (CFG.WATER_HELM === false) return false;
     if (!car || !car.pos || !car.group || car.dead) return false;
@@ -255,7 +256,13 @@
     dt = Math.min(dt, 0.05);                          // never integrate a stall
 
     const P = CBZ.player;
-    const k = CBZ.keys || {};
+    // NOBODY AT THE HELM. A player who has stepped back from the wheel to ride
+    // is still aboard — this file still owns the hull's frame, its camera and
+    // its engine voice — but the throttle and the helm are no longer his, so
+    // the input comes out of an empty bag and the hull carries its way off
+    // exactly as the drag model already says it should. (Same statement
+    // vehicles.js's road loop makes; city/passengerseat.js owns the state.)
+    const k = (CBZ.cityPaxAboard && CBZ.cityPaxAboard(car)) ? NO_HELM : (CBZ.keys || {});
 
     // ---- 1. INPUT --------------------------------------------------------
     let throttle = 0;

@@ -150,16 +150,28 @@
      depth/0.073 IS metres-from-the-waterline on the slope the species
      clearance numbers were tuned for — a bull shark's 12 puts it in the
      same waist-deep surf here as on the city coast. The second term walls
-     the swimmable ring from the outside at radius+150, comfortably inside
-     the rendered sea (seabed ring ends at radius+170), so a mount cannot be
-     piloted off the edge of the world. Because depth reads the LIVE mean
-     sea (surge included), a tsunami genuinely opens the island to a ridden
-     shark and closes it again as the water leaves. */
+     the swimmable ring from the outside at the rim of the DRAWN seabed
+     (arena.seaR, ~3 km — see seaFenceR below), so a mount cannot be piloted
+     off the edge of the world. Because depth reads the LIVE mean sea (surge
+     included), a tsunami genuinely opens the island to a ridden shark and
+     closes it again as the water leaves. */
+  /* THE OUTER WALL OF THE SEA. This was a flat radius+150 — a 270 m pen
+     around a 120 m island, sized for a world whose drawn seabed once stopped
+     at r 290. The bed has been out at radius+500 for a while and now runs to
+     radius+3000, so the pen was the only thing keeping the ocean small: a
+     ridden shark crossed it in twenty seconds and then ground against it
+     (blocked steps, wall slides, the radial "safe direction" fighting the
+     player — the whole "movement goes to hell far out" feel). The fence now
+     tracks the drawn bed's own rim, 200 m inside it, so drawn == navigable
+     stays one fact and growing the sea is one number in disaster_arena.js. */
+  function seaFenceR(A) {
+    return (+A.seaR > 0 ? +A.seaR : A.radius + 350) - 200;
+  }
   function islandShore(x, z) {
     const A = CBZ.surv.arena;
     const rr = Math.hypot(x - A.center.x, z - A.center.z);
     const depth = CBZ.survFloodDepthMeanAt ? Math.max(0, CBZ.survFloodDepthMeanAt(x, z)) : 0;
-    return Math.max(-depth / SHORE_SLOPE, rr - (A.radius + 150));
+    return Math.max(-depth / SHORE_SLOPE, rr - seaFenceR(A));
   }
   function angleDelta(a, b) {
     let d = b - a;
@@ -208,7 +220,7 @@
       const rr = Math.hypot(dx, dz) || 1;
       const rx = dx / rr, rz = dz / rr;
       const depth = CBZ.survFloodDepthMeanAt ? Math.max(0, CBZ.survFloodDepthMeanAt(x, z)) : 0;
-      const atFence = (rr - (A.radius + 150)) > -depth / SHORE_SLOPE;
+      const atFence = (rr - seaFenceR(A)) > -depth / SHORE_SLOPE;
       const ax = atFence ? -rx : rx, az = atFence ? -rz : rz;   // the safe radial
       const tx1 = -az, tz1 = ax, tx2 = az, tz2 = -ax;
       const d1 = tx1 * hx + tz1 * hz, d2 = tx2 * hx + tz2 * hz;
@@ -367,7 +379,9 @@
     const A = CBZ.surv.arena;
     const cx = A.center.x, cz = A.center.z;
     const need = -Math.max(0, +clearance || 0) * 0.6;
-    const far = A.radius * 3 + 400;
+    // Scan past the fence, wherever it is: capped at radius*3+400 this would
+    // have silently clipped the measured ring to 760 m under a 3 km fence.
+    const far = seaFenceR(A) + 24;
     const STEP = 6;
     let inR = -1, outR = -1;
     for (let rr = A.radius * 0.85; rr <= far; rr += STEP) {

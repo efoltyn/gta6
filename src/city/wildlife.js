@@ -166,16 +166,28 @@
       FIELD.cx = +c.x; FIELD.cz = +c.z;
       FIELD.r0 = R * ISLE_R0; FIELD.r1 = R * ISLE_R1;
       /* ..UNLESS THE WORLD ITSELF ANSWERS, in which case the multiples above
-         are a guess and this is a fact. 6.5R is 780 m of "sea" around a 120 m
-         island, and the disaster island's navigator walls the swimmable water
-         at radius+150 — so five hundred metres of that band was water no
-         animal placed in it could move a metre in, and most of the sea life
-         landed there. CBZ.survNavRing (world/water_survival.js) is the same
-         fence measured rather than repeated here; asked for a mid-size body
-         (a dolphin's 23 m of clearance) it describes the sea generally
-         instead of one species' corner of it. */
+         are a guess and this is a fact. The island's navigator walls the
+         swimmable water at its own fence (once radius+150, now the rim of the
+         drawn seabed ~3 km out), and a band guessed from radius multiples can
+         land animals in water the mover refuses — where they freeze on their
+         first step. CBZ.survNavRing (world/water_survival.js) is the fence
+         measured rather than repeated here; asked for a mid-size body (a
+         dolphin's 23 m of clearance) it describes the sea generally instead
+         of one species' corner of it. */
       const ring = CBZ.survNavRing && CBZ.survNavRing(23);
-      if (ring && ring.r1 > ring.r0) { FIELD.r0 = ring.r0; FIELD.r1 = ring.r1; }
+      /* The measured ring's INNER edge is a fact this band wants (the real
+         shoreline). Its OUTER edge is the sea fence, and that is now ~3 km
+         out — the whole drawn ocean. This band is not "where swimming is
+         possible", it is where AMBIENT life spawns and how much of it there
+         is (censusCapacity scales on this band's area), so it stays a ring
+         around the island: r1 keeps the 6.5R footprint guess, clamped inside
+         the navigable sea. The shark sim's own stocking ignores this band
+         entirely and spawns around the player, which is what populates the
+         open water however far out a shark roams. */
+      if (ring && ring.r1 > ring.r0) {
+        FIELD.r0 = ring.r0;
+        FIELD.r1 = Math.min(Math.max(FIELD.r1, ring.r0 + 60), ring.r1);
+      }
       return FIELD;
     }
     return FIELD;                                  // keep whatever we had
@@ -495,7 +507,10 @@
       const a = r() * Math.PI * 2;
       let x, z;
       if (ring) {
-        const rad = ring.r0 + Math.min(r(), r()) * (ring.r1 - ring.r0);
+        // Same clamp as the band above: the navigable sea runs ~3 km out now,
+        // and ambient life sampled over all of it is ambient life nobody meets.
+        const outR = Math.min(ring.r1, Math.max(FIELD.r1, ring.r0 + 60));
+        const rad = ring.r0 + Math.min(r(), r()) * (outR - ring.r0);
         x = ring.cx + Math.cos(a) * rad; z = ring.cz + Math.sin(a) * rad;
       } else {
         const rad = FIELD.r0 + r() * (FIELD.r1 - FIELD.r0);

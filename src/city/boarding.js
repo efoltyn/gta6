@@ -1045,6 +1045,24 @@
       return out;
     },
     seatOf: function (ped) { return ped && ped._cbzSeat ? ped._cbzSeat.seat : null; },
+    /* THE DOOR, WITHOUT AN ARC. A leaf is built and posed by this file and
+       shut by the per-frame sweep above, which is exactly right — "the only
+       way a car door can be open is that somebody is going through it right
+       now". A player throwing himself out of a moving car IS somebody going
+       through it; he simply is not running one of these arcs, because he is
+       not an NPC being walked to a chair. So the seam is the pose call and
+       nothing else: the caller re-asserts it every frame it wants the door
+       open (order < 33.5) and the sweep shuts it the frame they stop, which
+       keeps the invariant a sweep rather than a promise. */
+    door: function (veh, seatId, t) {
+      if (!on() || !veh) return false;
+      const seat = seatById(veh, seatId || "shotgun");
+      if (!seat) return false;
+      const leaf = leafFor(veh, seat);
+      if (!leaf) return false;
+      poseLeaf(leaf, seat, t == null ? 1 : t);
+      return true;
+    },
     squadBoard: squadBoard, squadAlight: squadAlight,
     arcs: function () { return arcs.length; },
     freeSeats: function (veh) {
@@ -1461,8 +1479,15 @@
     const car = (opts && opts.veh) || (ped._cbzSeat && ped._cbzSeat.veh) || (P && P._vehicle) || nearestBoardable(P.pos.x, P.pos.z, 26);
     if (!car || car.dead) return false;
     if (car.airClass || car.aircraft) return false;      // a plane is not a truck
-    // you cannot hand over a wheel you are holding
-    if (P && P.driving && P._vehicle === car) { try { CBZ.cityExitVehicle(); } catch (e) {} }
+    /* YOU CANNOT HAND OVER A WHEEL YOU ARE HOLDING — but throwing you out onto
+       the kerb was never what "have them run it to the warehouse" meant. Slide
+       across to the shotgun seat instead and RIDE, which is the whole point of
+       giving somebody else the keys; only fall back to the old step-out when
+       the passenger seat is not available (flag off, no cabin, seat taken). */
+    if (P && P.driving && P._vehicle === car) {
+      const rode = !!(CBZ.citySeatShift && CBZ.citySeatShift({ to: "shotgun", quiet: true }));
+      if (!rode) { try { CBZ.cityExitVehicle(); } catch (e) {} }
+    }
     const seat = seatById(car, "driver");
     if (!seat) return false;
     const rec = { ped: ped, car: car, dest: dest, t: 0 };
@@ -1493,7 +1518,14 @@
     const A = CBZ.city && CBZ.city.arena;
     for (let i = driving.length - 1; i >= 0; i--) {
       const rec = driving[i], car = rec.car, ped = rec.ped;
-      if (!car || car.dead || !car.group || !car.group.parent || car.player ||
+      /* `car.player` still ends a run — a car you have taken the wheel of is
+         not one your companion is delivering. The ONE exception is the car you
+         are riding SHOTGUN in: the record stays `player` (the camera, the HUD
+         and the exit all hang off that), you are simply not the one driving.
+         vehicles.js's own loop stands down for exactly this case, so this
+         remains the only integrator on the car. */
+      const rideAlong = car && car.player && CBZ.cityPaxAboard && CBZ.cityPaxAboard(car);
+      if (!car || car.dead || !car.group || !car.group.parent || (car.player && !rideAlong) ||
           !usable(ped) || ped.inCar !== car) { stopDriving(ped); continue; }
       const dest = rec.dest;
       const dx = dest.x - car.pos.x, dz = dest.z - car.pos.z;

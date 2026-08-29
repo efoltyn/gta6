@@ -599,8 +599,20 @@
        patches survive as low-frequency tone blotches in the same attribute.
        Still one draw call, and thirteen fewer than before. */
     const BED_R0 = SHORE_R - 1;        // shares the shore ring's outer rim exactly
-    const BED_R1 = R + 500;            // 620 m — well inside the 1400 m ocean plane
-    const BED_RINGS = 40, BED_SECT = 96;
+    /* BED_R1 is THE SIZE OF THE OCEAN. It is published on the descriptor as
+       arena.seaR, and water_survival.js walls the swimmable sea 200 m inside
+       it — so the drawn bed and the navigable water can never disagree, and
+       growing the sea is growing this one number. R + 3000 is ~25x the
+       island's radius: the old fence (radius + 150) was a 270 m pen that a
+       ridden shark crossed in twenty seconds and then ground against, which
+       is the "invisible wall" this replaces. Past r ~241 the shelf is flat
+       at -62 m, so the far bed costs nothing but the vertices that draw it. */
+    const BED_R1 = R + 3000;
+    // 92 rings keeps the squared distribution's ~1 m spacing off the beach
+    // (2600-odd metres at ^1.7 needs the extra rings the old 620 m span got
+    // from 40); the outer rings stretch to ~50 m, which a flat abyssal plain
+    // renders indistinguishably from fine ones.
+    const BED_RINGS = 92, BED_SECT = 96;
     function bss(e0, e1, x2) { let t = (x2 - e0) / (e1 - e0); t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); }
     (function seaFloor() {
       const flat = CBZ.CONFIG.SURV_SEABED === false;
@@ -1705,6 +1717,9 @@
     arena = {
       root, center: { x: cx, z: cz }, radius: R,
       ocean, oceanY: OCEAN_Y,
+      // outer radius of the drawn seabed — water_survival.js derives the
+      // swimmable-sea fence from this (seaR - 200), so drawn == navigable
+      seaR: BED_R1,
       hills, fragile, flammable, cars, elevators, glass: allGlass, groundHeightAt,
       randomPoint(minD, maxD) {
         const a = rng() * Math.PI * 2;

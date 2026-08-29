@@ -508,6 +508,7 @@ async function stagePatriot(input) {
 
   // read the live ledgers AFTER the world is where the shot wants it
   const fa = CBZ.cityFacadeBreachAudit ? CBZ.cityFacadeBreachAudit() : {};
+  const da = CBZ.cityDebrisAudit ? CBZ.cityDebrisAudit() : {};
   const ra = CBZ.cityRuinAudit ? CBZ.cityRuinAudit() : {};
   const pa = CBZ.cityPatriotAudit ? CBZ.cityPatriotAudit() : {};
   const ma = flightAudit();
@@ -525,6 +526,7 @@ async function stagePatriot(input) {
     q("detail").textContent =
       "facade " + (fa.openings || 0) + " openings / " + (fa.curtainOpenings || 0) + " curtain bays / " +
       (fa.openArea || 0) + " m² open · ruin " + (ra.jaggedPieces || 0) + " slabs / " + (ra.exposedBars || 0) + " bars" +
+      " · debris " + (da.shedPieces || 0) + " shed / " + (da.inventedPieces || 0) + " invented / x" + (da.conservation || 0) +
       " · Patriot " + (pa.tubes || 0) + " tubes / " + (ma.launches || 0) + " away / " + (ma.impacts || 0) + " impacts";
     q("detail").style.cssText = "position:absolute;left:26px;bottom:27px;color:#a4bac8;font:11px ui-monospace,SFMono-Regular,Menlo,monospace";
   }
@@ -541,6 +543,10 @@ async function stagePatriot(input) {
       mapFireControl: (CBZ.fullMap && CBZ.fullMap.patriotContext && CBZ.fullMap.patriotContext()) ? 1 : 0,
       missileLaunches: Number(ma.launches || 0),
       missileImpacts: Number(ma.impacts || 0),
+      debrisShed: Number(da.shedPieces || 0),
+      debrisInvented: Number(da.inventedPieces || 0),
+      debrisVolume: Number(da.shedVolume || 0),
+      rimCellsKept: Number(da.keptRimCells || 0),
     } };
 }
 
@@ -552,8 +558,8 @@ export default {
   afterLabel: "AFTER · REAL BREACH / PATRIOT",
   pairNote: "Same seed, same buildings, same cameras, same simulated second; only STRUCT_CURTAIN_BREACH_V1, STRUCT_RPG_RUIN_V2 and PATRIOT_V1 change",
   defaultBefore: "local",
-  beforeParams: { cfg_STRUCT_CURTAIN_BREACH_V1: 0, cfg_STRUCT_RPG_RUIN_V2: 0, cfg_PATRIOT_V1: 0 },
-  afterParams: { cfg_STRUCT_CURTAIN_BREACH_V1: 1, cfg_STRUCT_RPG_RUIN_V2: 1, cfg_PATRIOT_V1: 1 },
+  beforeParams: { cfg_STRUCT_CURTAIN_BREACH_V1: 0, cfg_STRUCT_RPG_RUIN_V2: 0, cfg_PATRIOT_V1: 0, cfg_DEBRIS_CONSERVED_V1: 0 },
+  afterParams: { cfg_STRUCT_CURTAIN_BREACH_V1: 1, cfg_STRUCT_RPG_RUIN_V2: 1, cfg_PATRIOT_V1: 1, cfg_DEBRIS_CONSERVED_V1: 1 },
   urlParams: { seed: 90210 },
   viewport: { width: 1200, height: 740 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
@@ -570,6 +576,10 @@ export default {
     mapFireControl: { label: "Map in fire-control context", unit: "1=yes", better: "higher" },
     missileLaunches: { label: "Map-designated launches", better: "higher" },
     missileImpacts: { label: "Designated impacts", better: "higher" },
+    debrisShed: { label: "Debris cut from removed material", better: "higher" },
+    debrisInvented: { label: "Debris invented from nothing", better: "lower" },
+    debrisVolume: { label: "Volume of shed material", unit: "m³", better: "higher" },
+    rimCellsKept: { label: "Rim cells that survived (the ragged edge)", better: "higher" },
   },
   subjects,
   stage: stagePatriot,

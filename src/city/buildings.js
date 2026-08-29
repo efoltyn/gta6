@@ -1492,6 +1492,9 @@
       // inherit a facade quietly missing its sill run and its mullions.)
       if (b.clearedCols) for (const cc of b.clearedCols) { if (CBZ.colliders.indexOf(cc) === -1) { CBZ.colliders.push(cc); dirty = true; } }
       if (b.clippedCols) for (const q of b.clippedCols) { q.c.minX = q.minX; q.c.maxX = q.maxX; q.c.minZ = q.minZ; q.c.maxZ = q.maxZ; dirty = true; }
+      // Rim cells are real geometry on a SHARED cube — remove them, never
+      // dispose them, or the next shed in the world draws nothing.
+      if (b.shedKept) for (const k of b.shedKept) { if (k.parent) k.parent.remove(k); }
       if (b.hidRefs) for (const hr of b.hidRefs) hr.visible = true;
       // restore the original wall mesh + its collider. A BATCH-V2 merged wall
       // renders through its slice in the merged shell — restore the slice and
@@ -1954,6 +1957,23 @@
        what addRemnant already does for the struck wall, applied to its
        neighbours. Every edit is recorded on the rec so resetBreaches puts the
        facade back byte-for-byte on a new run. */
+    /* WHAT LEAVES THE WORLD IS WHAT LANDS IN THE STREET. Every solid this carve
+       takes out is recorded here as {box, mat} and handed to crashfx's
+       CBZ.cityShedSolid below, which dices it and throws the cells. Nothing
+       else mints debris for this event. See CONSERVATION OF MATTER. */
+    rec.shed = [];
+    rec.shedKept = [];         // rim cells welded to the shell (shared geo: never disposed)
+    const shedBox = (a, b, ry0, ry1, mat) => {
+      if (!mat || b - a < 0.04 || ry1 - ry0 < 0.04) return;
+      rec.shed.push({
+        minX: horiz ? a : fixed - thick / 2, maxX: horiz ? b : fixed + thick / 2,
+        minY: ry0, maxY: ry1,
+        minZ: horiz ? fixed - thick / 2 : a, maxZ: horiz ? fixed + thick / 2 : b,
+        mat: mat,
+      });
+    };
+    // the struck course itself, clipped to the opening
+    shedBox(Math.max(minU, u0), Math.min(maxU, u1), Math.max(y0, v0), Math.min(y1, v1), wmat);
     rec.clearedCols = [];      // lifted out whole (restored on reset)
     rec.clippedCols = [];      // {c, minX, maxX, minZ, maxZ} originals to restore
     rec.hidRefs = [];          // meshes hidden because they sat inside the hole
@@ -1993,6 +2013,9 @@
         // mesh is not also carrying another live collider somewhere else.
         CBZ.colliders.splice(oi, 1);
         rec.clearedCols.push(o);
+        if (o.ref && o.ref.material && o.y0 != null && o.y1 != null && !(o.ref.material.transparent)) {
+          shedBox(oU0, oU1, o.y0, o.y1, o.ref.material);          // it went; it falls
+        }
         if (o.ref && o.ref.visible !== false && o.ref !== wall) {
           let shared = false;
           for (let k = 0; k < CBZ.colliders.length && !shared; k++) if (CBZ.colliders[k].ref === o.ref) shared = true;
@@ -2023,6 +2046,9 @@
       // the same way the struck wall's is cut. Bounded so a huge opening over
       // a finely-segmented facade cannot mint meshes without limit.
       cutCourseMesh(o, oU0, oU1, keepL, keepR);
+      if (o.ref && o.ref.material && !o.ref.material.transparent) {
+        shedBox(Math.max(oU0, u0), Math.min(oU1, u1), o.y0, o.y1, o.ref.material);
+      }
       if (keepL) {
         if (horiz) o.maxX = u0; else o.maxZ = u0;
         if (keepR) {                                            // both sides survive
@@ -2053,6 +2079,17 @@
       gp.shattered = true; shatteredPanes++;
       if (gp.mesh) gp.mesh.visible = false; else paneShow(gp, false);
       if (gp.col) { const gi = CBZ.colliders.indexOf(gp.col); if (gi >= 0) CBZ.colliders.splice(gi, 1); }
+      // A PANE IS MATERIAL TOO. It leaves in the same instant the concrete
+      // does, so it falls as ITS OWN glass rather than as more grey masonry —
+      // which is why a curtain wall now sheds mostly glass and a brick pier
+      // sheds mostly brick, with nobody tuning a ratio.
+      const gm = (gp.mesh && gp.mesh.material) || (gp.proxy && gp.proxy.material) || null;
+      if (gm) rec.shed.push({
+        minX: gp.x - gp.hw, maxX: gp.x + gp.hw,
+        minY: gp.y - gp.hh, maxY: gp.y + gp.hh,
+        minZ: gp.z - gp.hd, maxZ: gp.z + gp.hd,
+        mat: gm, glass: true,
+      });
     }
     // interior band dressing (sky slab + mullions) floating across the gap —
     // hide every record overlapping the opening rect on this wall, or the
@@ -2073,6 +2110,33 @@
     // blown out it stands in the hole as a flat tan billboard in front of the
     // real slabs. Box it out in world coords — a little slack on the wall axis
     // so the inset panel is inside the box, generous on the plane axes.
+    /* FLUSH THE SHED. One place, after every removal this carve makes is known,
+       so the budget can be spent across the real solids in proportion to how
+       much of each actually went — a 0.55 m sill course gets a handful of
+       cells, a two-storey brick pier gets the lion's share, and the total is
+       bounded whatever the ordnance was. Glass dices finer than concrete
+       because glass breaks smaller. */
+    if (CBZ.cityShedSolid && rec.shed.length) {
+      let vol = 0;
+      for (const b of rec.shed) vol += (b.maxX - b.minX) * (b.maxY - b.minY) * (b.maxZ - b.minZ);
+      const TOTAL = 130;
+      const outN = { nx: horiz ? 0 : outS, nz: horiz ? outS : 0 };
+      for (const b of rec.shed) {
+        const v = (b.maxX - b.minX) * (b.maxY - b.minY) * (b.maxZ - b.minZ);
+        const share = vol > 0 ? v / vol : 0;
+        const budget = Math.max(3, Math.round(TOTAL * share));
+        try {
+          CBZ.cityShedSolid(b, b.mat, {
+            nx: outN.nx, nz: outN.nz, power: (r || 1.3) * 0.55,
+            parent: freeStanding ? null : parent,
+            // glass does not leave a ragged lip hanging in a window head
+            rim: b.glass ? 0 : 0.32,
+            budget: b.glass ? Math.min(budget, 10) : budget,
+            keptOut: rec.shedKept,
+          });
+        } catch (e) {}
+      }
+    }
     if (CBZ.cityInteriorGlowClearBox) {
       const gTol = thick / 2 + 0.85;
       const gMinX = horiz ? u0 - 0.3 : fixed - gTol, gMaxX = horiz ? u1 + 0.3 : fixed + gTol;

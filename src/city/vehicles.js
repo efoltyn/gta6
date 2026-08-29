@@ -1452,6 +1452,15 @@
     return true;
   }
 
+  /* WHICH CHAIR. `ci.seatX` is the DRIVER's half-track and this file's law
+     (see the seat-side note in city/boarding.js) is that the player sits at
+     +seatX, so the shotgun seat is the same number mirrored. One sign, and
+     the whole seated solve — the fit, the lean, the cushion, the first-person
+     head drop — is reused rather than copied. */
+  function seatSideX(car, ci) {
+    return (CBZ.cityPaxAboard && CBZ.cityPaxAboard(car)) ? -ci.seatX : ci.seatX;
+  }
+
   function seatDriver(car, dt) {
     const ch = CBZ.playerChar;
     const ci = cabinFrame(car);
@@ -1461,7 +1470,7 @@
     if (drv.car !== car) { drv.car = car; drv.fit = fitSeatedRig(ch, ci); drv.steer = 0; }
     const s = drv.fit;
     vis.updateWorldMatrix(true, false);
-    _drvV.set(ci.seatX, ci.floorY, ci.seatZ).applyMatrix4(vis.matrixWorld);
+    _drvV.set(seatSideX(car, ci), ci.floorY, ci.seatZ).applyMatrix4(vis.matrixWorld);
     ch.group.position.copy(_drvV);
     // the rig faces its own local +Z and so does the car body, so the car's
     // full attitude (terrain pitch, weight-transfer roll, heading) copies over
@@ -1485,7 +1494,11 @@
     while (dh > Math.PI) dh -= Math.PI * 2;
     while (dh < -Math.PI) dh += Math.PI * 2;
     car._drvHeading = car.heading;
-    const want = Math.max(-1, Math.min(1, -(dh / Math.max(0.001, dt)) * 1.35));
+    // A PASSENGER HAS NO WHEEL. driveSteer is what puts both hands out in
+    // front of the chest; leaving it running in the shotgun seat is a man
+    // steering thin air, so the hands ease back to rest instead.
+    const want = (CBZ.cityPaxAboard && CBZ.cityPaxAboard(car))
+      ? 0 : Math.max(-1, Math.min(1, -(dh / Math.max(0.001, dt)) * 1.35));
     drv.steer += (want - drv.steer) * Math.min(1, dt * 8);
     ch.driveSteer = drv.steer;
     // FIRST PERSON: you are inside this body, so drop the two parts of it that
@@ -1537,6 +1550,15 @@
   }
   CBZ.carDriverRelease = releaseDriver;
   CBZ.carDriverSeated = function () { return !!drv.car; };
+  /* THE SEAT SOLVE, FOR A FRAME THIS LOOP DID NOT RUN. When somebody else is
+     driving (city/boarding.js's companion errand) the player loop stands down,
+     and the body in the cabin still has to be seated, scaled, leaned and
+     animated. That is this function and nothing else, so the passenger file
+     calls it rather than growing a second copy of a solve this one owns.
+     Returns false when the thing has no cabin (a bike, a hull). */
+  CBZ.carSeatPlayer = function (car, dt) {
+    return !!(driverWanted(car) && seatDriver(car, dt || 0.016));
+  };
   CBZ.carDriverAudit = function () {
     let occ = 0, cars = 0;
     const list = CBZ.cityCars || [];
@@ -3844,13 +3866,23 @@
     // teaches the seat must teach THAT seat
     const helmHint = CBZ.isMarineHull && CBZ.isMarineHull(car) && CBZ.boatStandUp
       && (!CBZ.CONFIG || CBZ.CONFIG.BOAT_WALK !== false);
+    // A KEY A THUMB CANNOT PRESS IS NOT A HINT. The seat swap is named only on
+    // the surface that can reach it — on touch the SEAT pill is the control and
+    // it already wears its own label.
+    const seatHint = (CBZ.citySeatShift && !CBZ.touchMode &&
+      (!CBZ.CONFIG || CBZ.CONFIG.PASSENGER_SEAT_V1 !== false)) ? "  [G] passenger" : "";
     CBZ.city && CBZ.city.note(helmHint
       ? "At the helm" + worth + " · [SPACE] get up  [V] wheel view"
-      : "Driving" + worth + " · [E] out  [C] car style", 1.8);
+      : "Driving" + worth + " · [E] out  [C] car style" + seatHint, 1.8);
     return true;
   };
   CBZ.cityExitVehicle = function () {
     const P = CBZ.player, car = P._vehicle;
+    // WHICH DOOR YOU CAME OUT OF. Read the seat BEFORE the state is torn down;
+    // a passenger steps out onto the kerb side, which is the one thing about
+    // his exit that is different from the driver's. (city/passengerseat.js's
+    // release also clears the ride, so this is the only place that has to ask.)
+    const paxSide = !!(CBZ.cityPaxAboard && car && CBZ.cityPaxAboard(car));
     P.driving = false; P._vehicle = null;
     if (CBZ.carAudio) CBZ.carAudio.stop();    // key off — the engine voice dies with the seat
     if (car && car._skid) car._skid.on = false;
@@ -3864,11 +3896,15 @@
     releaseDriver();          // unfold, un-scale, give the head back
     CBZ.playerChar.group.visible = true;
     if (car) {
-      const ox = Math.cos(car.heading) * 1.6, oz = -Math.sin(car.heading) * 1.6;
+      // The car's local +X is (cos h, −sin h) — its LEFT flank, the driver's
+      // door. A passenger leaves through the other one, so the side is a sign.
+      const side = paxSide ? -1 : 1;
+      const ox = Math.cos(car.heading) * 1.6 * side, oz = -Math.sin(car.heading) * 1.6 * side;
       P.pos.set(car.pos.x + ox, 0, car.pos.z + oz);
       P.grounded = true; P.vy = 0;
       CBZ.playerChar.group.position.copy(P.pos);
     }
+    if (CBZ.cityPaxRelease) CBZ.cityPaxRelease(car);
   };
 
   function anyWitness(x, z, r) {
@@ -4341,12 +4377,33 @@
   CBZ.cityVehicleRunOver = runOver;
   CBZ.cityVehicleTickDamage = tickDamageStage;
 
+  /* THE DEAD KEYBOARD. A player who has slid across to the shotgun seat is
+     still IN this car — same P.driving, same P._vehicle, so the camera, the
+     HUD, the minimap, the audio and the exit path all carry on believing what
+     they already believed — but the pedals and the wheel are on the other side
+     of the cabin now. Rather than gate throttle, brake, handbrake and steer in
+     four places, the loop below reads its input out of an EMPTY BAG: every
+     `k["w"]` is false, so the car runs the coast-and-friction branch it already
+     has for a driver who is touching nothing. Nobody is driving, so the car
+     rolls to a stop. That is not a special case; it is the arithmetic.
+     (city/passengerseat.js owns the state; feature-detected, so with that file
+     absent this is the live keyboard exactly as before.) */
+  const NO_KEYS = Object.freeze(Object.create(null));
+  function paxIn(car) { return !!(CBZ.cityPaxAboard && CBZ.cityPaxAboard(car)); }
+
   // ---- player driving (order 11) ----
   CBZ.onUpdate(11, function (dt) {
     if (g.mode !== "city") return;
     const P = CBZ.player;
     if (!P.driving || !P._vehicle || P.dead) return;
-    const car = P._vehicle, k = CBZ.keys;
+    const car = P._vehicle;
+    // SOMEBODY ELSE HAS THE WHEEL. When a companion is driving and the player
+    // is riding, boarding.js's own driver loop integrates this car — running
+    // this one on top of it would move it twice in a frame. The passenger file
+    // owns the seat/camera/visual sync for that case and says so by returning
+    // true here.
+    if (CBZ.cityPaxChauffeured && CBZ.cityPaxChauffeured(car)) return;
+    const k = paxIn(car) ? NO_KEYS : CBZ.keys;
     const D = carDynamics(car);
     // ---- THE MARINE HELM SEAM (world/water_helm.js) ------------------------
     // A hull is not a car. Everything below this line — the tyre grip model,
@@ -4426,7 +4483,10 @@
     // ---- steering: smooth input + speed-sensitive bicycle-model yaw. This
     //      keeps low-speed parking controllable and removes instant high-speed
     //      direction changes while preserving arcade authority. ----
-    const touchSteer = CBZ.touchCarSteerValue ? CBZ.touchCarSteerValue(car) : null;
+    // The tilt/steer seam is a SECOND input surface, so the dead-keyboard rule
+    // has to hold here too — an iPad left flat on the passenger's knee must not
+    // steer a car nobody is driving.
+    const touchSteer = (k !== NO_KEYS && CBZ.touchCarSteerValue) ? CBZ.touchCarSteerValue(car) : null;
     let steer = Number.isFinite(touchSteer) ? touchSteer : 0;
     if (!Number.isFinite(touchSteer)) {
       if (k["a"]) steer += 1;
@@ -5438,7 +5498,18 @@
          the road when it moved. `_heldBy` is the hold's own back-pointer, so
          there is nothing to keep in sync. */
       if (c._heldBy) continue;
-      if (c.player || c.dead || !c.ai || !c.road) {
+      /* A CAR NOBODY IS STEERING NEEDS NO LANE. The wreck branch below is the
+         only driverless-motion path this file owns — it bleeds speed, slides
+         the real lateral momentum on the real surface, collides with buildings
+         and settles as abandoned — and `c.ai && c.road` locked it out of
+         exactly the car that needs it most: the one you have just thrown
+         yourself out of, which by construction has neither (driving clears the
+         AI flag, promotion clears the lane). Measured before this line: a car
+         bailed from at 26 m/s stopped dead on the frame the door opened.
+         `_runaway` is set in ONE place — city/passengerseat.js's jump — so no
+         existing traffic case changes shape. */
+      const runaway = c._runaway === true && c.wreckT > 0;
+      if (c.player || c.dead || (!runaway && (!c.ai || !c.road))) {
         if (!c.player && !c.dead) {
           // settled = parkSeat's own cache says nothing moved since last frame.
           // A settled parked car 60m+ from the camera is completely inert, so
@@ -5501,8 +5572,18 @@
       if (c.wreckT > 0) {
         setBrake(c, false);               // nobody's on the pedal mid-spin
         c.wreckT -= dt;
-        c.v *= Math.pow(0.04, dt);
-        if (c.vx != null) { c.vx *= Math.pow(0.04, dt); c.vz *= Math.pow(0.04, dt); }
+        /* TWO KINDS OF DRIVERLESS. A SPIN-OUT is a car that has just been hit
+           and is scrubbing off its energy sideways: 0.04/s is a fast, correct
+           stop. A RUNAWAY is a car whose driver simply left — nothing has hit
+           it, the wheels are still pointing where they were, and it should
+           carry on down the road on its own momentum and coast to a halt the
+           way an unattended car actually does. Same branch, same slip and wall
+           handling; one number tells them apart, and `_runaway` is set only by
+           whoever opened the door at speed. */
+        const decay = c._runaway ? Math.pow(0.62, dt) : Math.pow(0.04, dt);
+        c.v *= decay;
+        if (c.vx != null) { c.vx *= decay; c.vz *= decay; }
+        if (c._runaway && Math.abs(c.v) < 0.35) { c._runaway = false; c.wreckT = Math.min(c.wreckT, 0.2); }
         c.spin = (c.spin || 0) * Math.pow(0.25, dt);
         c.heading += c.spin * dt;
         aiSlipStep(c, dt, 5.5);           // bleeds lateral slip by surface grip; rewrites c.vx/vz/v

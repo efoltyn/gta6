@@ -1308,6 +1308,23 @@
      ?cfg_FOLLOWER_ORDERS_V1=0 (the verbs) · ?cfg_CAR_DOOR_ARC=0 (just the
      player's own car door beat, leaving companions boarding). -->
 <script src="src/city/boarding.js?v=racerstory1"></script>
+<!-- THE OTHER SEAT (owner: "a button should move me to passenger ... and then
+     if I go to the door I can even jump out"). [G] / the SEAT pill slides the
+     player across to the shotgun seat of a car or back from a boat's helm: the
+     shipped seat solve mirrored to −seatX, and the driving loop reading its
+     keys out of a frozen empty object so the machine coasts to a stop with
+     nobody at the controls. Opening the door above walking pace is a real jump
+     — the shared CBZ.body.fling launch, road rash scaled by speed, and the car
+     carrying on driverless down vehicles.js's own wreck-coast path. Also makes
+     boarding.js's "run it to the warehouse" a ride instead of a kerb.
+     Must load AFTER vehicles.js (the seat solve + the exit it mirrors) and
+     boarding.js (seats, and the door leaf it poses).
+     Reverts: ?cfg_PASSENGER_SEAT_V1=0 (the whole seat + button) ·
+     ?cfg_VEHICLE_BAIL=0 (just the jump — the old stop-dead step-out returns) ·
+     ?cfg_PAX_CHAUFFEUR=0 (riding while a companion drives). PAX_AIRCRAFT is
+     declared and OFF: a passenger deck in a machine the player is flying is
+     playeraircraft.js/bailout.js's wave, and the button says so. -->
+<script src="src/city/passengerseat.js?v=pax1"></script>
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->

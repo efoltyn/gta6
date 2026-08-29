@@ -103,6 +103,9 @@
     if (CBZ.cityChuteState && CBZ.cityChuteState()) return "chute";
     const craft = P._aircraft;
     if (craft) return craft.kind === "heli" ? "heli" : "plane";
+    // Riding outranks the vehicle you are riding IN: the controls in the
+    // shotgun seat are not the driving card with two rows crossed out.
+    if (CBZ.cityPaxRiding && CBZ.cityPaxRiding()) return "pax";
     if (P.driving && P._vehicle) {
       const feel = P._vehicle._playerCarFeel;
       const marine = CBZ.isMarineHull ? CBZ.isMarineHull(P._vehicle)
@@ -337,13 +340,15 @@
       ["W / S", "Accelerate / brake and reverse"],
       ["A / D", "Steer"],
       ["Space", "Handbrake"],
-      ["F", "Get out"],
+      ["G", "Slide over to the passenger seat"],
+      ["F", "Get out — moving, that means jump"],
     ],
     touchRows: [
       ["GAS / BRAKE", "Accelerate / brake and reverse"],
       ["LEFT / RIGHT", "Steer"],
       ["TILT", "Optional gentle tilt steering"],
-      ["EXIT", "Get out"],
+      ["SEAT", "Slide over to the passenger seat"],
+      ["EXIT / JUMP OUT", "Get out — moving, that means jump"],
     ],
     note: "Watch the fuel bar on the dash, run dry and the engine quits. Gas stations refuel on E.",
     touchNote: "Tilt is optional and calibrates from how you are holding the iPad when you switch it on.",
@@ -366,6 +371,23 @@
       ["VIEW", "The wheel view"],
       ["EXIT", "Over the side"],
     ],
+  });
+
+  // city/passengerseat.js. Riding is a real seat, not a paused drive, and the
+  // two things you can do from it are the two things the card says.
+  C.declare("pax", {
+    title: "Riding",
+    rows: [
+      ["G", "Take the wheel back"],
+      ["F", "Open the door — moving, that means jump"],
+      ["Mouse", "Look around"],
+    ],
+    touchRows: [
+      ["TAKE THE WHEEL", "Back to the driver's seat"],
+      ["JUMP OUT", "Open the door — moving, that means jump"],
+      ["LOOK BACK", "Hold to look behind"],
+    ],
+    note: "Nobody is driving unless somebody else is: an empty wheel means the car coasts to a stop. Jumping out at speed hurts, and the car keeps going without you.",
   });
 
   // Evidence: which contexts have a card, and which the player has read.

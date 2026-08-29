@@ -1834,8 +1834,8 @@
      catalogue is a deviation from it. Read docs/SHARK-REFERENCE.md alongside.
      ============================================================ */
   const GW_RINGS = [
-    { x: -1.62, y: 0.860, ry: 0.170, rz: 0.115 },
-    { x: -1.15, y: 0.855, ry: 0.320, rz: 0.225 },
+    { x: -1.62, y: 0.860, ry: 0.235, rz: 0.165 },   // THE TAILSTOCK (see weldedSleeve)
+    { x: -1.15, y: 0.855, ry: 0.350, rz: 0.245 },
     { x: -0.50, y: 0.850, ry: 0.500, rz: 0.375 },
     { x: 0.20, y: 0.850, ry: 0.600, rz: 0.455 },
     { x: 0.85, y: 0.860, ry: 0.615, rz: 0.485 },   // MAX GIRTH — the pectoral line
@@ -1950,7 +1950,7 @@
       // PEDUNCLE — a tapered sleeve over the hull's tail, so the swim rig has
       // a body section to carry the wave instead of a rectangular block.
       tailSleeve(g, [grey, white], GW_RINGS, {
-        at: [-1.88, 0.860], x0: -0.502, x1: 0.46, tipRy: 0.044, tipRz: 0.027,
+        at: [-1.88, 0.860], x0: -0.502, x1: 0.46, tipRy: 0.060, tipRz: 0.038,
         sides: 16, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 23,
       });
 
@@ -1977,8 +1977,8 @@
      mouth you could park a dinghy in.
      ============================================================ */
   const MEG_RINGS = [
-    { x: -2.10, y: 0.98, ry: 0.26, rz: 0.18 },
-    { x: -1.35, y: 0.96, ry: 0.58, rz: 0.42 },
+    { x: -2.10, y: 0.98, ry: 0.360, rz: 0.255 },   // THE TAILSTOCK (see weldedSleeve)
+    { x: -1.35, y: 0.96, ry: 0.640, rz: 0.460 },
     { x: -0.35, y: 0.95, ry: 0.92, rz: 0.72 },
     { x: 0.60, y: 0.96, ry: 1.02, rz: 0.83 },     // max girth, forward of centre
     { x: 1.60, y: 0.99, ry: 0.95, rz: 0.80 },
@@ -2069,7 +2069,7 @@
         spanDir: [0, -1, 0], chordDir: [1, 0, 0],
       });
       tailSleeve(g, [dark, white], MEG_RINGS, {
-        at: [-2.46, 0.98], x0: -0.744, x1: 0.66, tipRy: 0.068, tipRz: 0.042,
+        at: [-2.46, 0.98], x0: -0.744, x1: 0.66, tipRy: 0.090, tipRz: 0.056,
         sides: 16, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 53,
       });
       fin([dark, white], [-2.82, 1.02, 0], {
@@ -2092,8 +2092,8 @@
      a white underside, instead of a rectangular bar across the face.
      ============================================================ */
   const HH_RINGS = [
-    { x: -1.50, y: 0.90, ry: 0.155, rz: 0.105 },
-    { x: -0.85, y: 0.90, ry: 0.320, rz: 0.220 },
+    { x: -1.50, y: 0.90, ry: 0.175, rz: 0.120 },   // THE TAILSTOCK (see weldedSleeve)
+    { x: -0.85, y: 0.90, ry: 0.350, rz: 0.235 },
     { x: -0.10, y: 0.90, ry: 0.460, rz: 0.330 },
     { x: 0.60, y: 0.91, ry: 0.470, rz: 0.350 },
     { x: 1.20, y: 0.92, ry: 0.400, rz: 0.300 },
@@ -2190,7 +2190,7 @@
         spanDir: [0, -1, 0], chordDir: [1, 0, 0],
       });
       tailSleeve(g, [grey, pale], HH_RINGS, {
-        at: [-1.76, 0.90], x0: -0.464, x1: 0.42, tipRy: 0.039, tipRz: 0.024,
+        at: [-1.76, 0.90], x0: -0.464, x1: 0.42, tipRy: 0.050, tipRz: 0.031,
         sides: 14, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 64,
       });
       fin([grey, pale], [-1.98, 0.94, 0], {
@@ -2213,8 +2213,8 @@
      MEETS. Same grammar, blunter everything.
      ============================================================ */
   const BULL_RINGS = [
-    { x: -1.32, y: 0.88, ry: 0.180, rz: 0.130 },
-    { x: -0.75, y: 0.87, ry: 0.400, rz: 0.310 },
+    { x: -1.32, y: 0.88, ry: 0.225, rz: 0.170 },   // THE TAILSTOCK (see weldedSleeve)
+    { x: -0.75, y: 0.87, ry: 0.430, rz: 0.335 },
     { x: -0.05, y: 0.88, ry: 0.580, rz: 0.470 },
     { x: 0.60, y: 0.89, ry: 0.600, rz: 0.500 },
     { x: 1.20, y: 0.92, ry: 0.520, rz: 0.460 },
@@ -2304,7 +2304,7 @@
         spanDir: [0, -1, 0], chordDir: [1, 0, 0],
       });
       tailSleeve(g, [grey, white], BULL_RINGS, {
-        at: [-1.58, 0.88], x0: -0.432, x1: 0.40, tipRy: 0.044, tipRz: 0.027,
+        at: [-1.58, 0.88], x0: -0.432, x1: 0.40, tipRy: 0.058, tipRz: 0.036,
         sides: 14, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 74,
       });
       fin([grey, white], [-1.78, 0.92, 0], {
@@ -2772,8 +2772,8 @@
       // the whole tailstock — so it carries the depth the cone used to fake,
       // laterally compressed the way a cetacean's peduncle actually is.
       const rings = bodyRings(-2.30, 3.20, 1.00,
-        [0.30, 0.62, 0.82, 0.86, 0.80, 0.66, 0.42],
-        [0.17, 0.56, 0.74, 0.78, 0.72, 0.58, 0.34], 13);
+        [0.40, 0.64, 0.82, 0.86, 0.80, 0.66, 0.42],      // [0] = the tail weld
+        [0.24, 0.57, 0.74, 0.78, 0.72, 0.58, 0.34], 13);
       const hull = hullMesh([black, white, saddle], rings, {
         sides: 14, bellyCut: [-0.52, -0.34, -0.30, -0.34, -0.30, -0.10, 0.30],
         ragged: 0.05, seed: 95, paintKey: "orca-marks",
@@ -2806,7 +2806,7 @@
         });
       });
       tailSleeve(g, [black, white], rings, {
-        at: [-2.60, 1.00], x0: -1.026, x1: 0.3, tipRy: 0.08, tipRz: 0.054,
+        at: [-2.60, 1.00], x0: -1.026, x1: 0.3, tipRy: 0.10, tipRz: 0.062,
         sides: 14, bellyCut: [-0.42], ragged: 0.04, seed: 96,
       });
       const fluke = finsMesh([black, white], [-3.20, 1.00, 0], [1, -1].map(function (s2) {
@@ -2835,8 +2835,8 @@
       const m = ctx.mat, g = new T.Group();
       const grey = m(0x5c6873), pale = m(0xd6dde1), eye = m(0x0d1013);
       const rings = bodyRings(-1.45, 2.10, 0.82,
-        [0.16, 0.36, 0.46, 0.47, 0.42, 0.30, 0.14],      // [0] = the tail weld
-        [0.10, 0.32, 0.41, 0.42, 0.37, 0.26, 0.12], 12);
+        [0.21, 0.38, 0.46, 0.47, 0.42, 0.30, 0.14],      // [0] = the tail weld
+        [0.115, 0.33, 0.41, 0.42, 0.37, 0.26, 0.12], 12);
       const hull = hullMesh([grey, pale], rings,
         { sides: 12, bellyCut: [-0.46, -0.30, -0.24, -0.26, -0.34, -0.44], ragged: 0.06, seed: 97 });
       hull.name = "cetaceanHull"; g.add(hull);
@@ -2864,7 +2864,7 @@
         });
       });
       tailSleeve(g, [grey, pale], rings, {
-        at: [-1.62, 0.82], x0: -0.6, x1: 0.18, tipRy: 0.0375, tipRz: 0.0297,
+        at: [-1.62, 0.82], x0: -0.6, x1: 0.18, tipRy: 0.045, tipRz: 0.034,
         sides: 12, bellyCut: [-0.40], ragged: 0.04, seed: 99,
       });
       const fluke = finsMesh([grey, pale], [-2.02, 0.82, 0], [1, -1].map(function (s2) {
@@ -2891,8 +2891,8 @@
       const m = ctx.mat, g = new T.Group();
       const dark = m(0x2f3c45), white = m(0xdae0e2), groove = m(0x232d34), knob = m(0x3c4952);
       const rings = bodyRings(-3.10, 3.70, 0.95,
-        [0.34, 0.80, 1.02, 1.05, 1.00, 0.86, 0.55],      // [0] = the tail weld
-        [0.20, 0.72, 0.94, 0.98, 0.94, 0.82, 0.50], 14);
+        [0.46, 0.84, 1.02, 1.05, 1.00, 0.86, 0.55],      // [0] = the tail weld
+        [0.27, 0.74, 0.94, 0.98, 0.94, 0.82, 0.50], 14);
       const hull = hullMesh([dark, white, groove], rings, {
         sides: 14, bellyCut: [-0.52, -0.40, -0.30, -0.18, 0.02, 0.10, -0.10],
         ragged: 0.05, seed: 101, paintKey: "humpback-grooves",
@@ -2932,7 +2932,7 @@
         });
       });
       tailSleeve(g, [dark, white], rings, {
-        at: [-3.45, 0.95], x0: -1.21, x1: 0.35, tipRy: 0.1, tipRz: 0.0756,
+        at: [-3.45, 0.95], x0: -1.21, x1: 0.35, tipRy: 0.12, tipRz: 0.085,
         sides: 14, bellyCut: [-0.44], ragged: 0.04, seed: 102,
       });
       const fluke = finsMesh([dark, white], [-4.15, 0.95, 0], [1, -1].map(function (s2) {
