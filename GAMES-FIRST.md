@@ -108,6 +108,16 @@ in isolation — but the package is what ships.
 
 ## Roles, not one-shots (the platform rule)
 
+> **CONTESTED 2026-08-05 — do not act on this section without reading
+> `docs/plan/engine-oneshot.md` first.** Owner: *"the modes within Gang City are
+> much shittier than the other three games… those three other things are just
+> one HTML connected to other things."* The three modes this section proposes to
+> dissolve (escape · survival · gungame) are the three the owner rates highest,
+> and the cheapest game in the repo (`modes/gungame.js`, 934 lines) got that way
+> by BORROWING a world it never builds — not by mounting inside one. The
+> paragraph below still diagnoses the right problem; its prescription is the one
+> in dispute.
+
 The owner's framing: this is "Roblox but even more recursive" — the endgame is
 agents composing NEW games from the engine's prebuilt sim and architecture.
 What blocks that today is the one-shot shape: the jail mode and disaster mode
