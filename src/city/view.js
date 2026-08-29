@@ -7,10 +7,12 @@
    cinematic orbit (CBZ.cityCam.death, set by city/death.js).
 
    NEW: the [V] this file has refused mid-drive since it was written now
-   does something when the thing you are driving is a CAR — see THE
-   DRIVER'S SEAT below. Aircraft keep their own owner (city/cockpit_view.js
-   claims the key whenever P._aircraft is set, and returns immediately when
-   it is not), so the two listeners can never both fire.
+   does something when the thing you are driving is a CAR or a BOAT — see
+   THE DRIVER'S SEAT below (a hull's eye comes off its registered helm
+   station instead of a cabin frame). Aircraft keep their own owner
+   (city/cockpit_view.js claims the key whenever P._aircraft is set, and
+   returns immediately when it is not), so the two listeners can never both
+   fire.
 
    Also owns THE CITY AT NIGHT pass: at dusk every storefront sign, neon
    trim, window band and lit interior gets ONE emissive lift (and ONE
@@ -64,10 +66,11 @@
     if (CBZ.cityMenuOpen) return;
     if (e.key && e.key.toLowerCase() === "v" && !e.repeat && vFreshPress()) {
       if (CBZ.player.driving) {
-        // A CAR NOW ANSWERS [V]. Aircraft do not reach here: cockpit_view.js
-        // owns the key while P._aircraft is set, and carFpToggle refuses
-        // anything without a cabin (bikes, boats), so the old early return
-        // stays the outcome for every case it used to cover.
+        // A CAR — AND NOW A BOAT — ANSWERS [V]. Aircraft do not reach here:
+        // cockpit_view.js owns the key while P._aircraft is set. carFpToggle
+        // still refuses anything without an eye to sit at (bikes, an
+        // unregistered hull), so the old early return stays the outcome for
+        // those.
         if (CBZ.player._aircraft) return;
         if (carFpToggle()) e.preventDefault();
         return;
@@ -138,10 +141,24 @@
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
   function fpOff() { return CFG.CAR_FP_VIEW === false; }
 
-  /* The car you could sit in right now, or null. A bike has no cabin, a boat
-     has a helm the owner already likes, an aircraft belongs to cockpit_view —
-     all three answer null through the ONE cabin query in city/vehicles.js
-     rather than by re-typing a style regex here. */
+  /* THE HELM EYE — a boat's seat solve. A hull has no cabinFrame (cabinFrame
+     refuses carStyle "boat" by design), but every registered hull carries a
+     helm station on its own spec (water_hulls.js deriveSpec: authored
+     flybridge / upper-deck bridge / aft-cockpit points where the ratios can't
+     know, derived trawler proportions everywhere else). Null = a hull the
+     registry doesn't know — those run road physics and get no seat. */
+  function helmEye(car) {
+    const S = car._hullSpec
+      || (CBZ.marineHulls && CBZ.marineHulls.specFor ? CBZ.marineHulls.specFor(car) : null);
+    return (S && S.helm) ? S.helm : null;
+  }
+  function isHull(car) { return !!(CBZ.isMarineHull && CBZ.isMarineHull(car)); }
+
+  /* The vehicle you could sit in right now, or null. A bike has no cabin and
+     an aircraft belongs to cockpit_view — both answer null. A CAR answers
+     through the ONE cabin query in city/vehicles.js; a BOAT answers through
+     its hull spec's helm station (the owner ask: first person at the wheel of
+     the boat, not just the car). */
   function fpCarNow() {
     if (fpOff() || !THREE) return null;
     const P = CBZ.player;
@@ -151,7 +168,8 @@
     const car = P._vehicle;
     if (!car || car.dead) return null;
     const feel = car._playerCarFeel;
-    if (feel && (feel.marine || feel.air || feel.twoWheel)) return null;
+    if (feel && (feel.air || feel.twoWheel)) return null;
+    if ((feel && feel.marine) || isHull(car)) return helmEye(car) ? car : null;
     const ci = CBZ.carCabinInfo ? CBZ.carCabinInfo(car) : null;
     return (ci && ci.eye) ? car : null;
   }
@@ -185,7 +203,9 @@
     fpCar = fpOn ? car : null;
     resetHead();
     if (fpOn) faceForward(car);
-    if (CBZ.city && CBZ.city.note) CBZ.city.note(fpOn ? "Driver's seat" : "Chase view", 1.0);
+    if (CBZ.city && CBZ.city.note) {
+      CBZ.city.note(fpOn ? (isHull(car) ? "At the wheel" : "Driver's seat") : "Chase view", 1.0);
+    }
     return true;
   }
   CBZ.carFpToggle = carFpToggle;
@@ -207,18 +227,26 @@
   CBZ.carFpPose = function (fdt) {
     const car = fpCarNow();
     if (!car) { if (fpOn) { fpOn = false; fpCar = null; resetHead(); } return null; }
+    const marine = isHull(car);
     if (!fpOn) {
       if (!fpWant && CFG.CAR_FP_DEFAULT !== true) {
-        if (!fpTold && CBZ.city && CBZ.city.note) { fpTold = true; CBZ.city.note("[V] driver's seat", 1.6); }
+        if (!fpTold && CBZ.city && CBZ.city.note) {
+          fpTold = true;
+          CBZ.city.note(marine ? "[V] the wheel view" : "[V] driver's seat", 1.6);
+        }
         return null;
       }
       fpOn = true; resetHead(); faceForward(car);
     }
     if (fpCar !== car) { fpCar = car; resetHead(); faceForward(car); }
-    const ci = CBZ.carCabinInfo ? CBZ.carCabinInfo(car) : null;
+    const ci = marine ? null : (CBZ.carCabinInfo ? CBZ.carCabinInfo(car) : null);
+    const eye = marine ? helmEye(car) : (ci && ci.eye);
     const grp = car.group;
-    if (!ci || !ci.eye || !grp || !grp.parent) { fpOn = false; return null; }
-    const vis = (grp.userData && grp.userData.carVisual) || grp;
+    if (!eye || !grp || !grp.parent) { fpOn = false; return null; }
+    // A hull's live attitude — heading, trim, heel, the wave seat water_
+    // buoyancy composes — is all on the GROUP; carVisual carries the crash
+    // deformation only cars have. So a boat's eye rides the group itself.
+    const vis = marine ? grp : ((grp.userData && grp.userData.carVisual) || grp);
     const dt = clamp(fdt == null ? 0.016 : fdt, 0.0001, 0.1);
 
     // ---- head physics, in cabin-local metres ----------------------------
@@ -247,9 +275,9 @@
       head.buzz = Math.sin(head.t * 41) * amp + Math.sin(head.t * 97) * amp * 0.4;
     }
 
-    // ---- where the eye is, in the car's own frame ------------------------
+    // ---- where the eye is, in the vehicle's own frame --------------------
     vis.updateWorldMatrix(true, false);
-    _v.set(ci.eye.x + head.x, ci.eye.y + head.buzz, ci.eye.z + head.z);
+    _v.set(eye.x + head.x, eye.y + head.buzz, eye.z + head.z);
     _v.applyMatrix4(vis.matrixWorld);
 
     // ---- where it looks --------------------------------------------------

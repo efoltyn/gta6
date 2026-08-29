@@ -354,12 +354,17 @@
     rows: [
       ["W / S", "Throttle ahead / astern"],
       ["A / D", "Steer"],
-      ["F", "Step off"],
+      ["Space", "Get up — walk your own deck, step back to the wheel to take her"],
+      ["Ctrl", "Crash-stop / full astern"],
+      ["V", "The wheel view"],
+      ["E", "Over the side"],
     ],
     touchRows: [
       ["STICK", "Throttle and steer"],
       ["ASTERN", "Crash-stop / reverse thrust"],
-      ["EXIT", "Step off"],
+      ["GET UP", "Out of the seat, onto your deck"],
+      ["VIEW", "The wheel view"],
+      ["EXIT", "Over the side"],
     ],
   });
 

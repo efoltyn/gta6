@@ -1278,15 +1278,29 @@
       // inside a 30m commercial airliner, so the "third-person" hijack view was
       // mostly tail/fuselage. Cars and older craft keep the exact defaults.
       const craft = player._aircraft;
+      // A HULL IS FRAMED BY ITS OWN LENGTH — the same lesson the aircraft
+      // comment above already records. The fixed car boom sat INSIDE anything
+      // bigger than the runabout: the 34m yacht filled the frame with its own
+      // superstructure and the 156m flagship swallowed the camera whole. Boats
+      // publish no craft record, but every registered hull carries its spec on
+      // the car (water_hulls.js specFor caches `_hullSpec`), so the chase
+      // pulls back, up and ahead with LOA. The floors ARE the old constants
+      // and the runabout (6.2m) sits under all of them — small boats frame
+      // byte-identically to before.
+      const hull = !craft && player._vehicle ? player._vehicle._hullSpec : null;
+      const hLoa = hull ? (hull.loa || 6) : 0;
       // CAM_TP_TOUCH_ZOOM: a pinch dollies the whole boom IN OR OUT ALONG
       // ITSELF — back and up take the same factor, so the depression angle is
       // untouched and the shot stays the shot the owner framed; only its reach
       // changes. `ahead` is a look-lead, not a boom, so it is deliberately not
       // scaled (trimming it would swing the aim point, not the camera).
       const tzk = CBZ.camTouchTrim();
-      const back = (craft && craft.cameraBack != null ? craft.cameraBack : 9.5) * tzk;
-      const up = (craft && craft.cameraUp != null ? craft.cameraUp : 10.0) * tzk;
-      const ahead = craft && craft.cameraAhead != null ? craft.cameraAhead : 6.0;
+      const back = (craft && craft.cameraBack != null ? craft.cameraBack
+        : hull ? Math.max(9.5, hLoa * 1.05 + 2) : 9.5) * tzk;
+      const up = (craft && craft.cameraUp != null ? craft.cameraUp
+        : hull ? Math.max(10.0, hLoa * 0.40 + 3.5) : 10.0) * tzk;
+      const ahead = craft && craft.cameraAhead != null ? craft.cameraAhead
+        : hull ? Math.max(6.0, hLoa * 0.30) : 6.0;
       const tx = player.pos.x - cfx * back, ty = player.pos.y + up, tz = player.pos.z - cfz * back;
       // AIRCRAFT FOLLOW AT SPEED (FLIGHT_SPEED_V2): a fixed 0.12s boom lags
       // ~smoothTime·speed behind its target, so at the new jet top speeds the
@@ -1305,7 +1319,12 @@
       camera.position.y = smoothDamp(camera.position.y, ty, camV.y, posS, fdt);
       camera.position.z = smoothDamp(camera.position.z, tz, camV.z, posS, fdt);
       look.x = smoothDamp(look.x, player.pos.x + cfx * ahead, lookV.x, lookSf, fdt);
-      look.y = smoothDamp(look.y, player.pos.y + 0.6, lookV.y, lookSf, fdt);
+      // The look point rides at deck height on a hull — the player pos is the
+      // WATERLINE on a boat, and a camera 60m up staring at the waterline puts
+      // a superyacht in the bottom third of the frame. 0.6 is the car constant
+      // and the small-boat floor.
+      const lookUp = hull ? Math.max(0.6, (hull.deckY || 0) * 0.8) : 0.6;
+      look.y = smoothDamp(look.y, player.pos.y + lookUp, lookV.y, lookSf, fdt);
       look.z = smoothDamp(look.z, player.pos.z + cfz * ahead, lookV.z, lookSf, fdt);
       camera.lookAt(look);
       if (shakeAmt > 0.001) { const s = shakeAmt; camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; shakeAmt *= Math.pow(0.0006, fdt); if (shakeAmt < 0.01) shakeAmt = 0; }

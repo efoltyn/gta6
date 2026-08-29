@@ -260,6 +260,17 @@
       slamV: 6.0 * Math.pow(L / 34, 0.25),
       deckY: S.freeboard + 0.07, boardY: S.platY + 0.09,
       sternOffset: L * 0.5,
+      // THE BRIDGE EYE — the same numbers buildYacht §5 draws the bridge from
+      // (bTier = second-from-top tier, console clamped human-sized), so the
+      // first-person helm (city/view.js) and the take-the-helm walk-up point
+      // (city/boatwalk.js) land you standing between the helm seats, behind
+      // the console, looking out the raked glass. A different formula here is
+      // a captain steering from inside a bulkhead.
+      helm: {
+        x: 0,
+        y: S.deckY[Math.max(1, S.tiers - 1)] + 1.66,
+        z: S.supZ1[Math.max(1, S.tiers - 1)] - clamp(0.032 * L, 1.65, 4.25) - 0.9,
+      },
       wakeScale: 5.0 * (S.beam / 7.6),
       audio: "truck",
     };
@@ -1218,6 +1229,8 @@
         heelSign: -1, heelGain: 0.028, maxHeel: 0.24,
         rideAbove: 0.05, waveGain: 1.05, slamV: 2.6,
         deckY: 0.14, boardY: 0.30, sternOffset: 2.75,
+        // standing aft of the centre console (buildSkiff draws it z -0.22..0.24)
+        helm: { x: 0, y: 1.68, z: -0.8 },
         wakeScale: 0.7, audio: "bike",
       },
       feel: { accel: 1.15, top: 0.66, turn: 1.35, drift: 1.45, roll: 0.9 },
@@ -1239,6 +1252,9 @@
         heelSign: 1, heelGain: 0.034, maxHeel: 0.12,
         rideAbove: 0.05, waveGain: 0.62, slamV: 5.0,
         deckY: 2.43, boardY: 2.43, sternOffset: 9.0,
+        // at the wheel buildTrawler bolts at (-0.48, SHEER+1.20, 3.72), on the
+        // wheelhouse sole (2.43) — the offset wheel is the authored art
+        helm: { x: -0.48, y: 4.01, z: 3.12 },
         wakeScale: 2.6, audio: "truck",
       },
       feel: { accel: 0.34, top: 0.30, turn: 0.30, drift: 0.85, roll: 0.5 },
@@ -1258,6 +1274,9 @@
         heelSign: -1, heelGain: 0.021, maxHeel: 0.17,
         rideAbove: 0.05, waveGain: 0.60, slamV: 4.0,
         deckY: 1.48, boardY: 0.35, sternOffset: 6.6,
+        // a convertible is driven from the FLYBRIDGE (sole SHEER+2.20, twin
+        // seats at z -0.4) — seated eye up on the perch, not in the saloon
+        helm: { x: 0, y: 4.68, z: -0.4 },
         wakeScale: 2.0, audio: "truck",
       },
       feel: { accel: 0.60, top: 0.82, turn: 0.50, drift: 1.15, roll: 0.5 },
@@ -1280,6 +1299,10 @@
         heelSign: 1, heelGain: 0.075, maxHeel: 0.34,
         rideAbove: 0.05, waveGain: 0.80, slamV: 4.6,
         deckY: 1.14, boardY: 1.14, sternOffset: 6.75,
+        // a sailboat is steered from the AFT cockpit, standing behind the
+        // binnacle wheel at z -2.6 — the derived forward-wheelhouse ratio
+        // would put the eye on the coachroof
+        helm: { x: 0, y: 2.49, z: -3.3 },
         wakeScale: 1.1, audio: "truck",
       },
       feel: { accel: 0.30, top: 0.24, turn: 0.55, drift: 0.9, roll: 1.0 },

@@ -467,6 +467,19 @@
       // Geometry the boarding / marina / wake layers read.
       deckY: h.deckY, boardY: h.boardY,
       sternOffset: h.sternOffset != null ? h.sternOffset : loa * 0.5,
+      // THE HELM STATION, hull-local: where a body drives her from, and the
+      // first-person eye (city/view.js) / the take-the-helm walk-up point
+      // (city/boatwalk.js). Authored per hull wherever the wheelhouse is
+      // somewhere no ratio can know (a flybridge, an upper-deck bridge);
+      // derived otherwise from the trawler proportions captain.js already
+      // proves reproduce a real wheelhouse (helmZ = loa*0.13 + 0.70). Planing
+      // hulls are driven SEATED at a console, displacement hulls STANDING at
+      // a wheel — that difference is the eye height.
+      helm: h.helm || {
+        x: 0,
+        y: (h.deckY != null ? h.deckY : 0.8) + (canPlane ? 1.24 : 1.58),
+        z: Math.min(loa * 0.130, 6) + 0.70,
+      },
       wakeScale: h.wakeScale != null ? h.wakeScale : 1,
       audio: h.audio || "truck",
       topKts: h.topKts, cruiseKts: h.cruiseKts, planeKts: h.planeKts,
@@ -1243,6 +1256,10 @@
       heelSign: -1, heelGain: 0.020, maxHeel: 0.16,
       rideAbove: 0.05, waveGain: 0.55, slamV: 4.2,
       deckY: 1.35, boardY: 0.31, sternOffset: 7.50,
+      // driven from the FLYBRIDGE (research §F: under 20m the helm IS the
+      // flybridge) — sole 3.81, seated eye behind the console at z 1.6-2.5.
+      // The derived formula would seat you inside the saloon below it.
+      helm: { x: 0, y: 5.11, z: 1.0 },
       wakeScale: 2.2, audio: "truck",                   // diesels
     },
     feel: { accel: 0.55, top: 0.78, turn: 0.45, drift: 1.1, roll: 0.5 },
@@ -1272,6 +1289,10 @@
       // A 34m 260-tonne hull in a 0.4m swell should BARELY move.
       rideAbove: 0.05, waveGain: 0.22, slamV: 6.0,
       deckY: 2.37, boardY: 0.44, sternOffset: 17.40,
+      // the WHEELHOUSE is forward on the upper deck (buildYacht §F): helm
+      // chairs at z 4.9 on the Y.UPPER (5.30) sole, console at z 5.2-6.8.
+      // Seated eye in the starboard chair, screens on the crosshair.
+      helm: { x: -0.85, y: 6.62, z: 4.92 },
       wakeScale: 5.0, audio: "truck",
     },
     feel: { accel: 0.22, top: 0.40, turn: 0.16, drift: 0.7, roll: 0.35 },
