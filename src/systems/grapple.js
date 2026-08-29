@@ -534,7 +534,7 @@
           p.vx *= 0.55; p.vz *= 0.55;
           p.spin *= 0.6; p.spinZ *= 0.6;
           p.shock = Math.max(p.shock, 0.4);
-          if (CBZ.shake && near(grp.position, 16)) CBZ.shake(0.18);
+          if (CBZ.shake && lensNear(grp.position, 16)) CBZ.shake(0.18);
           poseActor(a, p, dt);
           return true;
         }
@@ -551,7 +551,7 @@
         // here — kick the limb springs with the impact so the body flops
         // loose into the sprawl the moment it actually hits something.
         if (!a.dead && intactOn()) kickRag(a, p, Math.min(1.6, 0.5 + impact * 0.05), 0, a._deathSeed);
-        if (CBZ.shake && near(grp.position, 16)) CBZ.shake(Math.min(0.4, 0.12 + impact * 0.012));
+        if (CBZ.shake && lensNear(grp.position, 16)) CBZ.shake(Math.min(0.4, 0.12 + impact * 0.012));
         if (CBZ.sfx && impact > 9 && near(grp.position, 12)) CBZ.sfx("hit");
       }
       poseActor(a, p, dt);
@@ -655,6 +655,17 @@
   function near(pos, r) {
     const c = CBZ.camera.position; const dx = pos.x - c.x, dz = pos.z - c.z;
     return dx * dx + dz * dz < r * r;
+  }
+  /* A LANDING ONLY GETS THE LENS IF YOU DIDN'T THROW IT. The ragdoll landing
+     jolts below exist so that a body an explosion threw past you lands with
+     weight. While you are RIDING an animal every flung body in the water is
+     one your own jaws just launched, they land one after another, and each
+     one bounced AND settled — two more camera shakes per mouthful, on top of
+     the bite's own. In Shark Sim that is a body landing every couple of
+     seconds forever, which is not weight, it is an earthquake. */
+  function lensNear(pos, r) {
+    if (CBZ.cityMountedAnimal && CBZ.cityMountedAnimal()) return false;
+    return near(pos, r);
   }
 
   // CITY: a downed/dead rig laid flat (rotation.x ≈ ±90°) has its mid-height at

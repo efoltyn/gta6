@@ -800,7 +800,19 @@
       // would shove it back off the car it is crossing.
       if (!b.dead && !b._traversal && !(CBZ.body && CBZ.body.busy(b))) sepList.push(b);
     }
-    if (!CBZ.player.dead) { playerEntry.pos = CBZ.player.pos; playerEntry.r = CBZ.player.radius || 0.55; sepList.push(playerEntry); }
+    /* A RIDER HAS NO BODY. While the player is mounted, CBZ.player.pos is a
+       SEAT the mount republishes every tick — there is no person standing in
+       the water. Pushing it in here handed the crowd an invisible 0.55 m
+       pedestrian travelling at shark speed, and humancontact.js's on-foot
+       charge rule (speed >= 6.2 && sprint, which a swimming shark always
+       satisfies) then RAN EVERY SWIMMER OVER by touch: a knockdown, a
+       "run-over" reaction, a KO sound and CBZ.shake(0.10) per body, re-armed
+       every 0.75 s per person, for as long as you swam through the crowd.
+       That is a large part of why Shark Sim felt like an earthquake — see
+       tools/shark-shake-check.mjs. The shark's own hull is the physical thing
+       in the water and city/wildlife.js owns it; the seat is not a collider. */
+    const riding = !!(CBZ.cityMountedAnimal && CBZ.cityMountedAnimal());
+    if (!CBZ.player.dead && !riding) { playerEntry.pos = CBZ.player.pos; playerEntry.r = CBZ.player.radius || 0.55; sepList.push(playerEntry); }
     if (CBZ.humanContact) {
       CBZ.humanContact.resolve(sepList, dt, {
         mode: "survival",

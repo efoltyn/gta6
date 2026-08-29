@@ -1090,6 +1090,15 @@
     // Used ONLY for time-integration of the damps/exp-chase below; the velocity
     // calc keeps the world dt so look-ahead/FOV pacing is unchanged.
     const fdt = (CBZ.feelCam && CBZ.feelDt != null) ? CBZ.feelDt : dt;
+    /* SHAKE-DT: the shake envelope decays in WALL time, which is what its own
+       "real-time under load" comment always claimed and what it never did.
+       feelDt is multiplied by loop.js's time dilation, so a hit-stop (x0.06)
+       or a slow-mo (x0.32) all but STOPS the decay: a 1.0 jolt fired together
+       with doSlowmo(0.42) — which is exactly what Shark Sim's evolution beat
+       does — held the lens at near-full amplitude for the whole ceremony
+       instead of falling off in its usual ~0.4 s. Screen shake is a lens
+       effect, not a world event; slowing the world must not lengthen it. */
+    const sdt = Math.max(0.0005, Math.min(0.1, CBZ.wallDt != null ? CBZ.wallDt : fdt));
     _camFrame++;                 // senseRoom answers once per frame (see it)
     // ---- CAMERA POLISH per-frame state (cheap, runs in every branch) ----
     if (flT > 0 && !flHold) flT = Math.max(0, flT - fdt);          // free-look decay after the glance
@@ -1181,7 +1190,7 @@
         camera.position.x += (Math.random() - 0.5) * shakeAmt;
         camera.position.y += (Math.random() - 0.5) * shakeAmt;
         camera.position.z += (Math.random() - 0.5) * shakeAmt;
-        shakeAmt *= Math.pow(0.0006, fdt);
+        shakeAmt *= Math.pow(0.0006, sdt);
         if (shakeAmt < 0.01) shakeAmt = 0;
       }
       fov = smoothDamp(fov, acv.fov || 52, fovV, 0.14, fdt);
@@ -1263,7 +1272,7 @@
             camera.position.x += (Math.random() - 0.5) * s;
             camera.position.y += (Math.random() - 0.5) * s;
             camera.position.z += (Math.random() - 0.5) * s;
-            shakeAmt *= Math.pow(0.0006, fdt);
+            shakeAmt *= Math.pow(0.0006, sdt);
             if (shakeAmt < 0.01) shakeAmt = 0;
           }
           return;
@@ -1327,7 +1336,7 @@
       look.y = smoothDamp(look.y, player.pos.y + lookUp, lookV.y, lookSf, fdt);
       look.z = smoothDamp(look.z, player.pos.z + cfz * ahead, lookV.z, lookSf, fdt);
       camera.lookAt(look);
-      if (shakeAmt > 0.001) { const s = shakeAmt; camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; shakeAmt *= Math.pow(0.0006, fdt); if (shakeAmt < 0.01) shakeAmt = 0; }
+      if (shakeAmt > 0.001) { const s = shakeAmt; camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; shakeAmt *= Math.pow(0.0006, sdt); if (shakeAmt < 0.01) shakeAmt = 0; }
       fov = smoothDamp(fov, 66, fovV, 0.18, fdt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
       // AIRCRAFT BANK (CAM_AIR_BANK): lean the chase camera into a fraction of
       // the craft's roll — you feel the bank without the horizon whipping.
@@ -1387,7 +1396,7 @@
         const ey = camera.position.y;
         look.set(player.pos.x + fX * cp * 6, ey - sp * 6, player.pos.z + fZ * cp * 6);
         camera.lookAt(look);
-        if (shakeAmt > 0.001) { const s = shakeAmt; camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; shakeAmt *= Math.pow(0.0006, fdt); if (shakeAmt < 0.01) shakeAmt = 0; }
+        if (shakeAmt > 0.001) { const s = shakeAmt; camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; shakeAmt *= Math.pow(0.0006, sdt); if (shakeAmt < 0.01) shakeAmt = 0; }
         // FOV must be ADS-AWARE so this writer and fpsmode.js's ADS writer AGREE.
         // Both run every frame in city first-person (this at onAlways(50), fpsmode
         // at onAlways(52)). If this always eased toward the 70° hip while fpsmode
@@ -2020,7 +2029,7 @@
       camera.position.x += (Math.random() - 0.5) * s;
       camera.position.y += (Math.random() - 0.5) * s;
       camera.position.z += (Math.random() - 0.5) * s;
-      shakeAmt *= Math.pow(0.0006, fdt); // fast decay (real-time under load)
+      shakeAmt *= Math.pow(0.0006, sdt); // fast decay, in REAL time — see sdt
       if (shakeAmt < 0.01) shakeAmt = 0;
     }
 

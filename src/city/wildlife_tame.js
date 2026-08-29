@@ -1136,11 +1136,16 @@
     mount: null, head: 0, phase: 0, lx: 0, lz: 0, visual: null, water: null,
     attackT: 0, attackDur: 0, attackCd: 0, attackHit: false, attackHitP: -1,
     target: null, targetKind: null, attackPitch: 0, attackRoll: 0,
+    lensT: 0,                 // refractory on the bite's camera jolt (see damageBiteTarget)
     // the above-weight-kill ceremony (see THE CLAMP below)
     clampT: 0, clampDur: 0, clampVictim: null, clampChum: null, clampBeat: -1, clampOrder: "",
   };
   const seatV = new THREE.Vector3();
   const riderHipV = new THREE.Vector3();
+  // the same seat, solved WITHOUT the bite animation — see "THE LENS DOES NOT
+  // RIDE THE BITE" at the 49.8 presentation pass
+  const camSeatV = new THREE.Vector3();
+  const camEul = new THREE.Euler();
   const jawV = new THREE.Vector3();
   const biteV = new THREE.Vector3();
   const biteBox = new THREE.Box3();
@@ -1517,6 +1522,11 @@
            exactly how a wet kill used to test "air" and rain droplets. */
         point: _biteAt, dir: _biteDir, jaw: jawR,
         medium: biteMedium(_biteAt.x, _biteAt.y, _biteAt.z),
+        // THE MOUTH OWNS THE LENS FOR THIS MOUTHFUL. Without this the same
+        // bite shook the camera twice — once below, once again out of
+        // gore.js's death beat — and Shark Sim lands a mouthful every couple
+        // of seconds.
+        lens: false,
       });
       humanBiteBlood(target, !!target.dead, biteSev);
     } else if (kind === "ship") {
@@ -1534,7 +1544,40 @@
     } else return false;
     if (CBZ.waterSplashAt) CBZ.waterSplashAt(biteV.x, seaY(biteV.x, biteV.z), biteV.z, Math.min(3.8, 0.7 + scale));
     if (CBZ.sfx) { try { CBZ.sfx("hit", { volume: Math.min(1.2, 0.55 + scale * 0.18) }); } catch (e) {} }
-    if (CBZ.shake) CBZ.shake(Math.min(0.85, 0.18 + scale * 0.18));
+    /* ---- ONE MOUTHFUL, ONE SMALL JOLT ----------------------------------
+       This was `min(0.85, 0.18 + scale * 0.18)`: the lens shake GREW with the
+       body, so a megalodon threw a car-crash-grade 0.83 at the camera on
+       EVERY bite. Shark Sim's only verb is biting, a fed shark bites every
+       two or three seconds, and camera.js's shake envelope runs about 0.4 s —
+       so the top of the ladder was a permanently shaking screen. Measured on
+       a stocked beach: 88 shake calls in 90 s, the lens jittering 21 % of all
+       ticks (tools/shark-shake-check.mjs --feast). That is the earthquake.
+
+       Size is now felt as WEIGHT instead of as camera noise: a bigger mouth
+       already makes a bigger splash and a deeper sound, and a KILL stops time
+       for a beat, which reads as mass. The lens gets a flat tap it can always
+       recover from before the next mouthful.
+
+       The kill also tells gore.js to keep its hands off the lens (lens:false
+       in the hurt opts above) — one event must not fire two shakes. */
+    const killed = !!(target && target.dead);
+    /* NO HITSTOP PER MOUTHFUL, and this was tried and measured out. A short
+       freeze is the classic way to sell a big bite, but hitstop collapses
+       loop.js's feel-dt to about a millimetre of a frame, systems/camera.js
+       smooth-damps the boom on that same feel-dt, and the frame the freeze
+       lifts the lens catches up all at once. Measured: a repeatable ~0.95 m
+       camera lurch on the release tick, once per kill, i.e. every second or
+       two forever. A punch you throw occasionally can afford that; a verb you
+       perform continuously cannot. The bite's weight is the splash, the jaw,
+       the sound and (below) an occasional jolt. */
+    /* PUNCTUATION, NOT A METRONOME. A nibble gets no lens at all, and a kill
+       gets one only if the last one is more than a second behind it. A fed
+       shark lands a mouthful every second or two forever — measured on a
+       stocked beach, 59 of them in 90 s — and camera.js's shake envelope runs
+       about 0.4 s, so a jolt per meal simply never lets the lens settle. That
+       is the difference between "this bite had weight" and "the screen is
+       vibrating", and it is what the owner was calling an earthquake. */
+    if (killed && CBZ.shake && ride.lensT <= 0) { ride.lensT = 1.1; CBZ.shake(0.20); }
     AQUATIC_AUDIT.hits++;
     AQUATIC_AUDIT.lastTarget = kind;
     // the shark sim's meal ledger: told about every LANDED mounted bite,
@@ -1802,10 +1845,26 @@
     ride.attackT += dt;
     const p = Math.min(1, ride.attackT / ride.attackDur);
     a._atkAnim = p;
+    /* ---- THE LUNGE POSE, AND THE STEP THAT USED TO BE IN IT --------------
+       The wind-up drops the nose to -0.20 rad by p = 0.42; the strike branch
+       then started from `sin(0) * 0.34` = ZERO. So on the single tick that
+       crossed p = 0.42 the body's pitch jumped 0.20 rad — 11 degrees — in one
+       frame, on EVERY bite. aquaticSeatY multiplies that pitch by the seat's
+       forward arm (V.x, several metres on a great white or a megalodon)
+       before the camera ever sees it, so one bite threw the lens most of a
+       metre sideways with no shake call involved at all. Measured with
+       CBZ.shake stubbed out entirely, the camera still jittered on 14 % of
+       ticks: tools/shark-shake-check.mjs --feast --noshake.
+
+       `s` blends the wind-up out as the strike comes in, so the curve is
+       continuous at the hand-over (q = 0 gives -0.20, the wind-up's own last
+       value) and still reaches the full +0.34 at the top of the strike. The
+       animation is unchanged in shape; it just no longer teleports. */
     if (p < 0.42) ride.attackPitch = -0.20 * Math.min(1, p / 0.42);
     else {
       const q = (p - 0.42) / 0.58;
-      ride.attackPitch = Math.sin(Math.min(1, q * 1.4) * Math.PI) * 0.34;
+      const s = Math.min(1, q * 3);
+      ride.attackPitch = -0.20 * (1 - s) + Math.sin(Math.min(1, q * 1.4) * Math.PI) * 0.34 * s;
       ride.attackRoll = Math.sin(q * 9) * 0.09 * (1 - q);
     }
     // Contact is a WINDOW, not one magic animation frame. A fast shark can
@@ -2411,7 +2470,9 @@
       W.roll += ((shortestAngle(ride.head - W.lastHead) / fdt) * -0.065 - W.roll) * Math.min(1, fdt * 4);
       W.roll = Math.max(-0.42, Math.min(0.42, W.roll)); W.lastHead = ride.head;
     }
-    P.pos.y = W.y + aquaticSeatY(V, W.pitch + ride.attackPitch);
+    // the camera root, not the drawn rider: the strike animation stays off it
+    // (see "THE LENS DOES NOT RIDE THE BITE" at the 49.8 presentation pass)
+    P.pos.y = W.y + aquaticSeatY(V, W.pitch);
     P.vy = W.vy; P.grounded = false; P._fallPeak = 0;
     P._swim = false; P._aquaticMount = a;
     return true;
@@ -2544,7 +2605,7 @@
     if (!V) return false;
     const P = CBZ.player;
     if (P && ride.water && V.aquatic) {
-      P.pos.y = ride.water.y + aquaticSeatY(V, ride.water.pitch + (ride.attackPitch || 0));
+      P.pos.y = ride.water.y + aquaticSeatY(V, ride.water.pitch);
     }
     if (P) P._rideJump = V.jump;
     return true;
@@ -2698,6 +2759,7 @@
     ride.visual = null; ride.water = null;
     ride.attackT = ride.attackCd = 0; ride.attackHitP = -1; ride.target = null; ride.targetKind = null;
     ride.attackPitch = ride.attackRoll = 0;
+    ride.lensT = 0;
     a._atkAnim = -1;
     if (CBZ.swimJaw) CBZ.swimJaw(a, 0);
     P._mountedAnimal = null;
@@ -2802,6 +2864,7 @@
     // Gallop bob only while grounded and moving. Airborne motion is the shared
     // ballistic root itself; adding a second sine there would make the animal
     // detach visually from its collision trajectory.
+    if (ride.lensT > 0) ride.lensT = Math.max(0, ride.lensT - dt);
     ride.phase += dt * (moving ? 9 : 0.6);
     const bob = !W && moving && !airborne ? Math.abs(Math.sin(ride.phase)) * 0.09 * liveScale(a) : 0;
     const rootY = W ? W.y : P.pos.y;
@@ -2834,7 +2897,23 @@
       ch._mountSocketZ = gz + seatV.z;
       const charY = rootY + bob + seatV.y - riderHipV.y;
       ch.group.position.set(gx + seatV.x - riderHipV.x, charY, gz + seatV.z - riderHipV.z);
-      if (W) P.pos.y = charY;                           // camera follows the rider, not a whale's belly
+      /* ---- THE LENS DOES NOT RIDE THE BITE ------------------------------
+         P.pos.y is not where the rider is drawn — the rider is drawn above,
+         glued to the animal with the full pose, and it should be. P.pos.y is
+         the point systems/camera.js FRAMES, and it was solved off the same
+         euler, which means it inherited the strike animation: a ±0.34 rad
+         nose swing plus a 0.09 rad thrash at about five hertz, every couple
+         of seconds, for as long as the shark kept eating. That is the game's
+         core loop vibrating the screen.
+
+         So the camera root is solved from the SWIM pose only (roll/pitch out
+         of the water integrator, the same yaw). The shark still lunges, the
+         rider still rides it, and the lens holds still while it happens. */
+      if (W) {
+        camEul.set(W.roll, a.group.rotation.y, W.pitch, a.group.rotation.order);
+        camSeatV.set(V.x, V.y, 0).applyEuler(camEul);
+        P.pos.y = rootY + bob + camSeatV.y - riderHipV.y;
+      }
       ch.riding = {
         width: V.width,
         moving: moving,

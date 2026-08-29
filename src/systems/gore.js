@@ -2510,6 +2510,14 @@
     const px = -dz, pz = dx;
     const skin = opts.skin != null ? opts.skin : 0xc98a5e;
     const cloth = opts.cloth != null ? opts.cloth : 0xd24a32;
+    /* opts.lens === false — THE CALLER ALREADY JOLTED THE CAMERA for this
+       exact event, so this death must not jolt it a second time. One event,
+       one shake. Nothing else here changes; the blood, the pools and the
+       dismemberment are untouched. The case that forced it: a mounted shark
+       bite fires its own lens tap in city/wildlife_tame.js and THEN routes the
+       kill through surv.hurt → trauma.js → here, so every mouthful shook the
+       camera twice — and in Shark Sim a mouthful lands every two seconds. */
+    const lens = opts.lens !== false;
 
     // --- REAL DISMEMBERMENT (severity follows WHAT actually hit them) --------
     //   muzzle-close shotgun headshot → the head can sever; every other round
@@ -2592,7 +2600,7 @@
       // hunting animal reads (CBZ.goreChumList) — it is what makes a body in
       // the water actually pull something toward it instead of being decor.
       CBZ.goreChum(x, y + 0.6, z, Math.min(1, 0.5 + amt * 0.3), 7 + amt * 2);
-      if (CBZ.shake) CBZ.shake(0.26 * amt + (opts.player ? 0.4 : 0) + (boom ? 0.2 : 0));
+      if (CBZ.shake && lens) CBZ.shake(0.26 * amt + (opts.player ? 0.4 : 0) + (boom ? 0.2 : 0));
       // lens blood is a ONE-BEAT device, and red barely exists at depth: the
       // jolt lands and is gone, instead of tinting the whole dive red.
       flashV = Math.max(flashV, (0.32 * amt + (opts.player ? 0.18 : 0)) * 0.45);
@@ -2728,7 +2736,7 @@
       spawnStreak(x - dx * 0.8, z - dz * 0.8, dx, dz, sl);
     }
 
-    if (CBZ.shake) CBZ.shake(0.26 * amt + (opts.player ? 0.4 : 0) + (boom ? 0.2 : 0));
+    if (CBZ.shake && lens) CBZ.shake(0.26 * amt + (opts.player ? 0.4 : 0) + (boom ? 0.2 : 0));
     flashV = Math.max(flashV, 0.32 * amt + (opts.player ? 0.18 : 0));
     if (opts.slowmo && CBZ.doSlowmo) CBZ.doSlowmo(opts.slowmo);
     if (opts.sfx && CBZ.sfx) CBZ.sfx(typeof opts.sfx === "string" ? opts.sfx : "hit");
