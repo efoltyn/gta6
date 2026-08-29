@@ -509,7 +509,7 @@
       const k = (b - 4.6) / 2.4;
       return 0.30 * Math.exp(-k * k) - FORE_DROP * s;
     }
-    function seabedAt(x, z) {
+    function baseSeabedAt(x, z) {
       const dist = Math.hypot(x - cx, z - cz);
       let h = coastHeightAt(dist);
       /* Dune relief on the far coast's DRY sand only — a perfect circle of
@@ -525,6 +525,82 @@
         h += w * Math.min(2.4, (h - 0.4) * 0.6);
       }
       return h;
+    }
+    /* ---- THE ARCHIPELAGO ---------------------------------------------------
+       OWNER: "why even make it a pen and not just make there be more islands
+       like main island that just spawn past horizon." The verdict on infinite
+       vs finite: FINITE — a match is a seeded 10-minute run and every law in
+       this sea (the radial nav envelope, the determinism gate, the disaster
+       director, the tools) assumes one measurable world; infinity buys a
+       session-based mode nothing and costs a streaming rewrite. But the
+       FEELING of islands past the horizon is exactly buyable inside a finite
+       sea, because island fog is 380 m: islets scattered across 2.3 km of
+       open water genuinely emerge from the fog one after another as you swim,
+       which IS the fantasy, endlessly cheaper.
+
+       Eleven islets on their OWN rng stream (the island layout stays
+       byte-identical), placed by rejection: 520-1980 m out (the first one
+       horizon past the fog, the last with its foot well inside the far
+       coast's climb), 290 m clear of each other, and 16 degrees clear of the
+       +X ray so survNavRing's envelope line never crosses one. Two grow big
+       enough for greenery and palms; the rest are sandbar cays. Each wears
+       the SAME 1.9 m / 26 m foreshore as every other beach in this sea, so
+       the grounding and beaching laws hold on all of them unchanged. */
+    const islets = [];
+    (function placeIslets() {
+      let s3 = 771177;
+      const r3 = () => { s3 = (s3 * 1103515245 + 12345) & 0x7fffffff; return s3 / 0x7fffffff; };
+      for (let tries = 0; tries < 700 && islets.length < 11; tries++) {
+        const ang = r3() * Math.PI * 2;
+        // 520 m in — one horizon past the fog (380 m), so the first cay
+        // appears just as the island disappears, and there is a next one
+        // in reach the whole way out
+        const rr = 520 + r3() * 1460;
+        const wantBig = islets.filter((i) => i.big).length < 2 && r3() < 0.3;
+        const rw = wantBig ? 85 + r3() * 40 : 26 + r3() * 38;
+        if (Math.abs(Math.atan2(Math.sin(ang), Math.cos(ang))) < 0.28) continue;
+        const x = cx + Math.cos(ang) * rr, z = cz + Math.sin(ang) * rr;
+        let ok = true;
+        for (const o of islets) if (Math.hypot(o.x - x, o.z - z) < o.rw + rw + 290) { ok = false; break; }
+        if (!ok) continue;
+        islets.push({ x, z, rw, big: wantBig, peak: wantBig ? 5.5 + r3() * 2 : 1.5 + r3() * 1.1 });
+      }
+    })();
+    // an islet's height at `di` metres from its centre: interior dome down
+    // through the standard foreshore, then a 0.6 fall to the abyssal plain
+    function isletHeightAt(it, di) {
+      const b = it.rw - di;              // + inside its waterline
+      if (b < 0) {
+        const s = -b;
+        return s <= FAR_FORE ? -s * (FORE_DROP / FAR_FORE)
+                             : -(FORE_DROP + (s - FAR_FORE) * 0.6);
+      }
+      const fore = Math.min(FAR_FORE, it.rw * 0.45);
+      if (b <= fore) return b * (FORE_DROP / FAR_FORE);
+      const t = Math.min(1, (b - fore) / Math.max(1, it.rw - fore));
+      const lip = fore * (FORE_DROP / FAR_FORE);
+      return lip + (it.peak - lip) * (t * t * (3 - 2 * t));
+    }
+    function isletFieldAt(x, z) {
+      let h = -1e9;
+      for (let i = 0; i < islets.length; i++) {
+        const it = islets[i];
+        const dx = x - it.x, dz = z - it.z, reach = it.rw + 132;
+        if (dx > reach || dx < -reach || dz > reach || dz < -reach) continue;
+        const v = isletHeightAt(it, Math.hypot(dx, dz));
+        if (v > h) h = v;
+      }
+      return h;
+    }
+    /* ONE height field, still: physics, the nav depth oracle and the islet
+       meshes all read this max. The BIG bed mesh alone draws baseSeabedAt —
+       its mid-sea rings run ~50 m and would render a 30 m cay as a four-
+       vertex lump, so each islet gets its own fine mesh whose rim tucks
+       under the plain (see isletMeshes below). */
+    function seabedAt(x, z) {
+      const b = baseSeabedAt(x, z);
+      const i = isletFieldAt(x, z);
+      return i > b ? i : b;
     }
     function groundHeightAt(x, z) {
       let h = 0;
@@ -710,9 +786,11 @@
           const a = (j / BED_SECT) * Math.PI * 2;
           const lx = Math.cos(a) * rr, ly = Math.sin(a) * rr;
           const wx = cx + lx, wz = cz - ly;
-          // seabedAt, not coastHeightAt: the far dunes' angular relief must be
-          // IN the drawn surface, or drawn and walked split on the far beach
-          const y = flat ? -1.35 : seabedAt(wx, wz);
+          // baseSeabedAt: the far dunes' angular relief must be IN the drawn
+          // surface (or drawn and walked split on the far beach) but the
+          // islets must NOT be — this grid samples ~50 m mid-sea and would
+          // draw them as lumps; they get their own fine meshes below
+          const y = flat ? -1.35 : baseSeabedAt(wx, wz);
           pos[v * 3] = lx; pos[v * 3 + 1] = ly; pos[v * 3 + 2] = y;
           // metres of water standing over this vertex — the ONE thing the bed's
           // colour depends on (world/terrain_overhaul.js, refs 3 and 5)
@@ -765,6 +843,69 @@
       seabed.receiveShadow = true;
       seabed.userData.terrain = true;    // batch.js / farcull.js keep their hands off
       root.add(seabed);
+    })();
+
+    /* ---- THE ARCHIPELAGO'S MESHES: one fine radial patch per islet, all
+       merged into ONE draw call. Built straight in world-space XZ (no
+       rotated-ring gymnastics), every vertex on isletHeightAt — the same
+       function physics maxes in — with explicit rings pinning the foreshore
+       and waterline exactly as the far coast's are. The outermost rim is
+       forced 0.6 m UNDER the plain the big bed draws, a terrain skirt that
+       hides the seam instead of z-fighting it. Underwater the slopes read
+       through the translucent sea as pale shallows — which is how you spot
+       a cay from a distance, exactly as it should be. */
+    (function isletMeshes() {
+      if (CBZ.CONFIG.SURV_SEABED === false || !islets.length) return;
+      const pos = [], col = [], idx = [];
+      const sandWet = new THREE.Color(0x6a5b40), sandDry = new THREE.Color(0x8a7a58);
+      const grass = new THREE.Color(0x4f7a33);
+      const shelfC = new THREE.Color(0x1c303a), deepC = new THREE.Color(0x060d15);
+      const c = new THREE.Color();
+      const SECT = 40;
+      for (const it of islets) {
+        const ringR = [0, it.rw * 0.35, it.rw * 0.62, it.rw * 0.82];
+        for (const o of [-8, -3, 0, 4, 10, 17, 26, 45, 75, 132]) {
+          const rr = it.rw + o;
+          if (rr > ringR[ringR.length - 1] + 1) ringR.push(rr);  // guard keeps small cays monotonic
+        }
+        const base0 = pos.length / 3;
+        for (let i = 0; i < ringR.length; i++) {
+          const rim = i === ringR.length - 1;
+          for (let j = 0; j <= SECT; j++) {
+            const a = (j / SECT) * Math.PI * 2;
+            const wx = it.x + Math.cos(a) * ringR[i], wz = it.z + Math.sin(a) * ringR[i];
+            let y = isletHeightAt(it, ringR[i]);
+            if (rim) y = Math.min(y, baseSeabedAt(wx, wz) - 0.6);
+            pos.push(wx - cx, y, wz - cz);
+            const column = OCEAN_Y - y;
+            c.copy(sandWet).lerp(sandDry, bss(0.15, 1.6, -column));
+            if (it.big) c.lerp(grass, bss(1.6, 3.4, y));
+            c.multiplyScalar(1 - bss(1, 20, column) * 0.46);
+            c.lerp(shelfC, bss(10, 30, column));
+            c.lerp(deepC, bss(20, 50, column));
+            col.push(c.r, c.g, c.b);
+          }
+        }
+        for (let i = 0; i < ringR.length - 1; i++) {
+          for (let j = 0; j < SECT; j++) {
+            const a = base0 + i * (SECT + 1) + j, b = a + 1, d = a + SECT + 1, e = d + 1;
+            idx.push(a, b, d, b, e, d);
+          }
+        }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pos), 3));
+      geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(col), 3));
+      geo.setIndex(idx);
+      geo.computeVertexNormals();
+      geo.computeBoundingSphere();
+      const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide });
+      mat.name = "survival-islets";      // never water/ocean/sea (test contract)
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(cx, 0, cz);
+      mesh.receiveShadow = true;
+      mesh.userData.terrain = true;
+      root.add(mesh);
     })();
 
     /* ---- DRESSING: THIS IS A SEA FLOOR, NOT A GRADIENT --------------------
@@ -1771,6 +1912,28 @@
       const foliage = box(x, TREES2 ? gy + th + 0.9 : gy + th + 1.2, z, 2.4 + rng(), 2.6, 2.4 + rng(), 0x3f9a4f);
       flammable.push({ x, z, trunk, foliage, trunkCol: trunk.userData.collider, burning: 0, burnt: false });
     }
+    // ---- the archipelago's palms: the same box trees on the two big islets,
+    // on their OWN rng stream so the main island's layout stays byte-identical.
+    // They join `flammable`, so they burn and regrow with everything else.
+    (function isletPalms() {
+      let s4 = 90911;
+      const rng4 = () => { s4 = (s4 * 1103515245 + 12345) & 0x7fffffff; return s4 / 0x7fffffff; };
+      for (const it of islets) {
+        if (!it.big) continue;
+        const n = 3 + ((rng4() * 3) | 0);
+        for (let k = 0; k < n; k++) {
+          const a = rng4() * Math.PI * 2, d = rng4() * it.rw * 0.55;
+          const x = it.x + Math.cos(a) * d, z = it.z + Math.sin(a) * d;
+          const gy = groundHeightAt(x, z);
+          if (gy < 1.2) continue;                 // stay off the wet sand
+          const th = 3.2 + rng4() * 1.6;
+          const trunk = box(x, gy + th / 2 - 0.15, z, 0.42, th + 0.3, 0.42, 0x7a5a33, { solid: true });
+          if (trunk.userData.collider) trunk.userData.collider.noCam = true;
+          const foliage = box(x, gy + th + 0.7, z, 2.1 + rng4(), 1.7, 2.1 + rng4(), 0x3f9a4f);
+          flammable.push({ x, z, trunk, foliage, trunkCol: trunk.userData.collider, burning: 0, burnt: false });
+        }
+      }
+    })();
 
     if (CBZ.bootStep) CBZ.bootStep("island:rocks");
     // ---- rocks / cover ----
@@ -1794,9 +1957,13 @@
       ocean, oceanY: OCEAN_Y,
       // the far coast's WATERLINE radius — where the sea visibly ends in
       // sand. water_survival.js reads it for its flood backstop (seaR + 150,
-      // buried under the far dunes) and its safe-radial midpoint; the actual
-      // wall is the beach itself, via the depth field.
+      // buried under the far dunes); the actual wall is the beach itself,
+      // via the depth field.
       seaR: FAR_WL,
+      // the archipelago: {x, z, rw (waterline radius), peak, big} per islet —
+      // published for tools and spawners; physics reads them via the height
+      // field, never this list
+      islets,
       hills, fragile, flammable, cars, elevators, glass: allGlass, groundHeightAt,
       randomPoint(minD, maxD) {
         const a = rng() * Math.PI * 2;

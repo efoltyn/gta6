@@ -219,18 +219,25 @@
     const leftS = islandShore(x + Math.cos(leftA) * probe * 0.82, z + Math.sin(leftA) * probe * 0.82);
     const rightS = islandShore(x + Math.cos(rightA) * probe * 0.82, z + Math.sin(rightA) * probe * 0.82);
     if (frontS >= -clearance) {
-      const dx = x - A.center.x, dz = z - A.center.z;
-      const rr = Math.hypot(dx, dz) || 1;
-      const rx = dx / rr, rz = dz / rr;
-      /* Which way is safe water? The sea is an annulus with a beach on BOTH
-         rims now, so the answer is by hemisphere: island side → seaward,
-         far-coast side → inward. Mid-sea is unambiguous — a body is only
-         ever steering off a shore it is within probe reach (~44 m) of. The
-         old test compared the radius fence against the depth term, which
-         cannot tell the far BEACH from the far fence (a real shore shrinks
-         the depth term itself). */
-      const farSide = rr > (A.radius + (+A.seaR > 0 ? +A.seaR : A.radius + 300)) * 0.5;
-      const ax = farSide ? -rx : rx, az = farSide ? -rz : rz;   // the safe radial
+      /* Which way is safe water? This used to be "the radial, flipped at the
+         fence" — fine for a sea with one round shore. This sea has THREE
+         kinds of shore now (the island, the far coast, nine islets), and the
+         one thing they share is the depth field, so the safe direction is
+         its downhill: the sampled gradient of islandShore, exactly what the
+         city's own mover uses. Two extra analytic samples, only on the
+         blocked-front branch. The radial survives as the degenerate-gradient
+         fallback (dead flat water mid-annulus). */
+      const c0 = islandShore(x, z);
+      const gx2 = islandShore(x + 6, z) - c0, gz2 = islandShore(x, z + 6) - c0;
+      const gm = Math.hypot(gx2, gz2);
+      let ax, az;
+      if (gm > 1e-4) { ax = -gx2 / gm; az = -gz2 / gm; }
+      else {
+        const dx = x - A.center.x, dz = z - A.center.z;
+        const rr = Math.hypot(dx, dz) || 1;
+        const farSide = rr > (A.radius + (+A.seaR > 0 ? +A.seaR : A.radius + 300)) * 0.5;
+        ax = (farSide ? -dx : dx) / rr; az = (farSide ? -dz : dz) / rr;
+      }
       const tx1 = -az, tz1 = ax, tx2 = az, tz2 = -ax;
       const d1 = tx1 * hx + tz1 * hz, d2 = tx2 * hx + tz2 * hz;
       // Hold last frame's tangent through a near-tie, or a body running
@@ -323,7 +330,22 @@
         const want = Math.max(ring.r0 + inset, Math.min(ring.r1 - inset, rr));
         const max = +maxRadius > 0 ? +maxRadius : 1e9;
         if (Math.abs(want - rr) > max) return null;
-        return { x: ring.cx + dx / rr * want, z: ring.cz + dz / rr * want, moved: true };
+        /* The annulus has ISLETS in it now, so the radial answer can land on
+           a cay. The ring is still the envelope; the point is validated
+           against the real field, and a dry hit walks a few candidates —
+           around, then outward past the islet's ~130 m foot — before giving
+           the radial answer back (old behaviour, and the mover's own slide
+           handles the rest). */
+        const need = Math.max(0, +clearance || 0) * 0.6;
+        const px = ring.cx + dx / rr * want, pz = ring.cz + dz / rr * want;
+        if (islandShore(px, pz) < -need) return { x: px, z: pz, moved: true };
+        const a0 = Math.atan2(dz, dx);
+        for (const [da, dr] of [[0.1, 0], [-0.1, 0], [0.22, 0], [-0.22, 0], [0, 150], [0.1, 150], [-0.1, 150]]) {
+          const w2 = Math.min(ring.r1 - inset, want + dr), a2 = a0 + da;
+          const qx = ring.cx + Math.cos(a2) * w2, qz = ring.cz + Math.sin(a2) * w2;
+          if (islandShore(qx, qz) < -need) return { x: qx, z: qz, moved: true };
+        }
+        return { x: px, z: pz, moved: true };
       };
     }
     if (typeof wf.randomWaterPoint === "function") {
@@ -350,9 +372,19 @@
            wildlife LOD radius, so it may as well not exist. The play ring is
            the first hundred metres of water off the beach and that is where
            the fish go. */
-        const rr = r0 + Math.min(rf(), rf()) * (r1 - r0);
-        const a = rf() * Math.PI * 2;
-        return { x: ring.cx + Math.cos(a) * rr, z: ring.cz + Math.sin(a) * rr };
+        /* ..and validated POINTWISE, because the ring is only the envelope —
+           there are islets in the annulus, and a point on a cay's sand is a
+           frozen animal. Islets cover a few percent of the ring, so the
+           retry almost never fires twice. */
+        const need = Math.max(0, +(o.clearance) || 0) * 0.6;
+        let px = 0, pz = 0;
+        for (let t = 0; t < 12; t++) {
+          const rr = r0 + Math.min(rf(), rf()) * (r1 - r0);
+          const a = rf() * Math.PI * 2;
+          px = ring.cx + Math.cos(a) * rr; pz = ring.cz + Math.sin(a) * rr;
+          if (islandShore(px, pz) < -need) return { x: px, z: pz };
+        }
+        return null;                     // honest refusal beats a frozen body
       };
     }
   }

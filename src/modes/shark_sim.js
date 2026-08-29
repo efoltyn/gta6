@@ -261,12 +261,16 @@
     const P = CBZ.player;
     const ring = CBZ.survNavRing && CBZ.survNavRing(clearance);
     if (!ring || !P) return null;
+    const wf = CBZ.waterField;
     for (let i = 0; i < 14; i++) {
       const ang = Math.random() * 6.283;
       const d = minD + Math.random() * (maxD - minD);
       const x = P.pos.x + Math.cos(ang) * d, z = P.pos.z + Math.sin(ang) * d;
       const rr = Math.hypot(x - ring.cx, z - ring.cz);
       if (rr < ring.r0 + 2 || rr > ring.r1 - 2) continue;
+      // the ring is only the ENVELOPE — the annulus has islets in it, and a
+      // school anchored on a cay's sand is a school frozen on its first step
+      if (wf && wf.isNavigableWater && !wf.isNavigableWater(x, z, clearance * 0.6)) continue;
       return { x: x, z: z, ring: ring };
     }
     return null;

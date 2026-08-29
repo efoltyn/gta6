@@ -296,6 +296,35 @@ try {
   if (!(far.navR1 > 1500)) fail("open ocean: survNavRing r1=" + far.navR1 + " m — the measured sea is still a pen");
   if (!(far.oceanDx >= 0 && far.oceanDx < 1100 && far.oceanDz < 1100)) fail("open ocean: water tile did not follow the camera (offset " + far.oceanDx + "/" + far.oceanDz + " m)");
   else pass("water tile riding with the camera (" + far.oceanDx + "/" + far.oceanDz + " m off), " + far.depth + " m of water below, navRing out to " + far.navR1 + " m");
+  /* THE ARCHIPELAGO (owner: "make there be more islands like main island
+     that just spawn past horizon"): islets scattered across the annulus,
+     each a real shore (dry at its centre, open water past its foot), drawn
+     by its own mesh, and invisible to the spawners — no fish may ever be
+     dealt onto a cay's sand. All static evals, no sim time. */
+  const arch = await rig.evl(`(() => {
+    const A = CBZ.surv.arena, wf = CBZ.waterField;
+    const isl = A.islets || [];
+    let dry = 0, wet = 0, spawnBad = 0, spawnNull = 0, drawn = 0;
+    CBZ.scene.traverse((o) => { if (o.material && o.material.name === "survival-islets") drawn++; });
+    for (const it of isl) {
+      if (!wf.isNavigableWater(it.x, it.z, 1.2)) dry++;
+      if (wf.isNavigableWater(it.x + it.rw + 160, it.z, 8)) wet++;
+    }
+    for (let k = 0; k < 150; k++) {
+      const p = wf.randomWaterPoint(Math.random, { clearance: 6 });
+      if (!p) { spawnNull++; continue; }
+      if (!wf.isNavigableWater(p.x, p.z, 3)) spawnBad++;
+    }
+    return { n: isl.length, dry, wet, drawn, spawnBad, spawnNull };
+  })()`);
+  report.stages.openOcean.archipelago = arch;
+  if (!(arch.n >= 6)) fail("archipelago: only " + arch.n + " islets placed");
+  else if (!(arch.dry === arch.n && arch.wet === arch.n)) fail("archipelago: " + arch.dry + "/" + arch.n + " dry at centre, " + arch.wet + "/" + arch.n + " open water past the foot");
+  else pass(arch.n + " islets: every centre is dry land, every foot returns to open water");
+  if (!(arch.drawn === 1)) fail("archipelago: islet mesh not in the scene (found " + arch.drawn + ")");
+  if (!(arch.spawnBad === 0 && arch.spawnNull < 8)) fail("archipelago: " + arch.spawnBad + "/150 spawn points on land, " + arch.spawnNull + " refusals — fish will freeze on the cays");
+  else pass("150 spawn draws, zero on land (" + arch.spawnNull + " honest refusals)");
+
   /* THE PEN IS SAND, NOT A FENCE (owner: "the pen should be land and beach
      like there is on the island"). Park just off the far coast, drive
      straight at it, and assert the shark runs AGROUND: it stops in the far
