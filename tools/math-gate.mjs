@@ -825,6 +825,7 @@ const PASS = `(() => {
       if (fr.razorEdges > 0) out.fails.push("CLEARINGS READ AS CIRCLES: " + fr.razorEdges +
         " with a one-ring tree line " + JSON.stringify(fr.clearings.filter(function (c) { return c.razor; })));
       if (fr.judged < 3) out.fails.push("forestRim judged only " + fr.judged + " clearings - the ratchet stopped asking");
+    }
     // NO TWO TREES ARE THE SAME MESH (world/vegetation.js). cloned counts
     // SITES that drew a real stand out of a single crown variant while the
     // kit was offering more than one - the cloned-tree tell, named rather
