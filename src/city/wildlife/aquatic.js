@@ -802,7 +802,15 @@
       const count = o.pores || 46, pr = o.poreSize || 0.018;
       const x0 = o.poreX0, x1 = o.poreX1, spread = o.poreSpread == null ? 0.85 : o.poreSpread;
       const pRings = o.snoutRings || rings;
-      const key = "pore|" + [count, pr, x0, x1, spread, o.poreSeed || 5].join(",") + "|" + JSON.stringify(pRings);
+      // A PORE NEEDS SKIN UNDER IT. These are hash-placed on the rostrum
+      // rings' theoretical underside, but on a split-body mouth that underside
+      // is the NOTCH: the skin there belongs to the chin, which swings away
+      // while the pores stay parented to the snout — grey plates floating in
+      // the open gape, and z-fighting the closed chin at rest. Inside the
+      // authored oral plan and below the seam, there is no snout skin, so no
+      // pore.
+      const mo2 = o.mouth && mouthSplitOn() ? o.mouth : null;
+      const key = "pore|v2|" + [count, pr, x0, x1, spread, o.poreSeed || 5, !!mo2].join(",") + "|" + JSON.stringify(pRings);
       const geo = cachedGeom(key, function () {
         const sh = new Shell();
         for (let i = 0; i < count; i++) {
@@ -811,6 +819,12 @@
           const x = lerp(x0, x1, u * u * 0.85 + 0.08);
           const ang = -Math.PI * 0.5 + (w2 - 0.5) * 2 * spread;
           const sk = onSkin(pRings, x, ang, 0.006);
+          if (mo2) {
+            const mu = (sk.p[0] - mo2.hingeX - mo2.length * 0.18) / (mo2.length * 0.82);
+            const mv = sk.p[2] / (mo2.width * 0.5);
+            if (mu * mu + mv * mv < 1.15 * 1.15 &&
+              sk.p[1] < mo2.hingeY + mo2.gap * 0.30) continue;
+          }
           const tang = norm3(cross3(sk.n, [1, 0, 0]));
           const fwd = norm3(cross3(tang, sk.n));
           const s2 = pr * (0.65 + h01(i, 3, 9) * 0.7);
@@ -1464,7 +1478,7 @@
       return Math.min(topY, (r.y + r.ry * 0.55) - hingeY);
     }
 
-    const sack = meshOf(cachedGeom("buccalSack|v2|" + [hingeX, hingeY, len, width,
+    const sack = meshOf(cachedGeom("buccalSack|v3|" + [hingeX, hingeY, len, width,
       gap, cx, rad, A, cornerRise, upperY, lowerY,
       JSON.stringify(o.rings || null)].join(","), function () {
       const sh = new Shell(), N = 14, M = 10, xFront = cx + rad, xBack = -len * 0.16;
@@ -1506,9 +1520,36 @@
         q(0, top[0][j], top[0][j + 1], bot[0][j + 1], bot[0][j]);
         q(3, top[N][j], top[N][j + 1], bot[N][j + 1], bot[N][j]);
       }
+      /* THE OUTSIDE OF A CHEEK IS THE ANIMAL, NOT THE MOUTH. Every face above
+         is interior — unlit near-black, DoubleSide — but the sack hangs off
+         the upper jaw, so the moment the chin swings away its cheeks' outer
+         sides, its floor's underside and its front pinch face the WORLD:
+         every shark wore a maroon curtain below its open mouth, its closed
+         tooth gaps punched maroon wedges, and the sack's own box was the
+         silhouette against open water. A gaping great white shows pale
+         protruded-jaw tissue there, so group 4 lays a thin outset wrap over
+         exactly those faces, painted with the body's lit skin. The offset
+         keeps it clear of the dark walls' depth without ever reaching the
+         chin deck below or the tooth arc outside. */
+      const wOff = gap * 0.022;
+      const qW = function (a2, b2, c2, d2, n2) {
+        const P = [a2, b2, c2, d2].map(function (p2) {
+          return [p2[0] + n2[0] * wOff, p2[1] + n2[1] * wOff, p2[2] + n2[2] * wOff];
+        });
+        sh.quadN(4, n2, P, P.map(function (p2) { return sh.v(p2[0], p2[1], p2[2]); }));
+      };
+      for (let i = 0; i < N; i++) {
+        for (let j = 0; j < M; j++)          // the floor's underside
+          qW(bot[i][j], bot[i][j + 1], bot[i + 1][j + 1], bot[i + 1][j], [0, -1, 0]);
+        // the cheeks' outer walls
+        qW(top[i][0], bot[i][0], bot[i + 1][0], top[i + 1][0], [0, 0, -1]);
+        qW(top[i][M], bot[i][M], bot[i + 1][M], top[i + 1][M], [0, 0, 1]);
+      }
+      for (let j = 0; j < M; j++)            // the front pinch
+        qW(top[0][j], top[0][j + 1], bot[0][j + 1], bot[0][j], [1, 0, 0]);
       return sh.geom();
     }), [unlit(o.cavity || 0x140505), unlit(o.cavityDeep || 0x070202),
-      unlit(0x020101), unlit(o.cavityEnd || 0x000000)]);
+      unlit(0x020101), unlit(o.cavityEnd || 0x000000), skin]);
     sack.name = "sharkBuccalSack";
     dental.add(sack);
 
@@ -1886,7 +1927,7 @@
         mouth: MOUTH,
       });
       addSharkFaceDetails(g, T, m, {
-        rings: GW_RINGS, snout: snout, snoutRings: GW_SNOUT,
+        rings: GW_RINGS, snout: snout, snoutRings: GW_SNOUT, mouth: MOUTH,
         eyeX: 2.10, eyeY: 1.065, eyeZ: 0.335, eyeSize: 0.055, dark: 0x07090a,
         noseX: 2.36, noseY: 0.782, noseZ: 0.115, nostrilLen: 0.15, nostrilWidth: 0.026,
         gillX: 1.56, gillY: 0.90, gillZ: 0, gills: 5, gillCenter: -0.11,
@@ -2018,7 +2059,7 @@
         mouth: MOUTH,
       });
       addSharkFaceDetails(g, T, m, {
-        rings: MEG_RINGS, snout: snout, snoutRings: MEG_SNOUT,
+        rings: MEG_RINGS, snout: snout, snoutRings: MEG_SNOUT, mouth: MOUTH,
         eyeX: 3.34, eyeY: 1.315, eyeZ: 0.505, eyeSize: 0.085, dark: 0x07090a,
         noseX: 3.72, noseY: 0.942, noseZ: 0.19, nostrilLen: 0.24, nostrilWidth: 0.042,
         gillX: 2.62, gillY: 1.0, gillZ: 0, gills: 5, gillCenter: -0.14,
@@ -2253,7 +2294,7 @@
         mouth: MOUTH,
       });
       addSharkFaceDetails(g, T, m, {
-        rings: BULL_RINGS, snout: snout, snoutRings: BULL_SNOUT,
+        rings: BULL_RINGS, snout: snout, snoutRings: BULL_SNOUT, mouth: MOUTH,
         eyeX: 1.80, eyeY: 1.150, eyeZ: 0.260, eyeSize: 0.048, dark: 0x07090a,
         noseX: 1.98, noseY: 0.806, noseZ: 0.105, nostrilLen: 0.13, nostrilWidth: 0.024,
         gillX: 1.28, gillY: 0.90, gillZ: 0, gills: 5, gillCenter: -0.14,
