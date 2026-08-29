@@ -174,8 +174,13 @@ export function stageMarineWeld(input) {
   const fracWide = (pedSec && maxRz > 0) ? pedSec.rz / maxRz : 0;
   const ratioY = (pedSec && hullSec && hullSec.ry > 0) ? pedSec.ry / hullSec.ry : 0;
   const ratioZ = (pedSec && hullSec && hullSec.rz > 0) ? pedSec.rz / hullSec.rz : 0;
+  // PROUD, and it cannot be negative. A rim measuring inside the skin is the
+  // sleeve correctly BURIED (the hull is sampled a hair forward, where it is
+  // naturally fatter), so the raw signed value rewards burying it deeper and
+  // deeper — which is not the goal and made the gate cry regression over a
+  // millimetre of nothing. Zero is the target and zero is the floor.
   const stepMM = (pedSec && hullSec)
-    ? Math.max(pedSec.ry - hullSec.ry, pedSec.rz - hullSec.rz) * sc * 1000 : 0;
+    ? Math.max(0, Math.max(pedSec.ry - hullSec.ry, pedSec.rz - hullSec.rz) * sc * 1000) : 0;
 
   function outline(mesh, x, cy, n) {
     const pts = [];
@@ -292,8 +297,10 @@ export function stageMarineWeld(input) {
   return {
     ok: true, species: subject.species,
     metrics: {
-      weldRatioDeep: Number(ratioY.toFixed(3)),
-      weldRatioWide: Number(ratioZ.toFixed(3)),
+      // THE TARGET IS 1.00, NOT ZERO, so the ratio itself cannot be gated
+      // ("lower is better" would score a welded 0.98 as a regression against a
+      // welded 0.99). The gateable quantity is the DISTANCE from a weld.
+      weldMismatchPct: Number((Math.max(Math.abs(ratioY - 1), Math.abs(ratioZ - 1)) * 100).toFixed(1)),
       weldStepMM: Number(stepMM.toFixed(1)),
       jointFracDeep: Number((fracDeep * 100).toFixed(1)),
       jointFracWide: Number((fracWide * 100).toFixed(1)),
@@ -315,11 +322,10 @@ export default {
   subjects,
   stage: stageMarineWeld,
   metrics: {
-    weldRatioDeep: { label: "Tail sleeve depth ÷ body depth at the joint (1.00 = welded)", unit: "x", better: "lower" },
-    weldRatioWide: { label: "Tail sleeve width ÷ body width at the joint (1.00 = welded)", unit: "x", better: "lower" },
+    weldMismatchPct: { label: "How far the tail's circle is from the body's own circle at the joint (0 = welded)", unit: "%", better: "lower" },
     weldStepMM: { label: "How far the tail's rim stands proud of the body's skin", unit: "mm", better: "lower" },
     jointFracDeep: { label: "Joint depth as a share of the body's deepest section — does the tailstock have meat", unit: "%", better: "higher" },
     jointFracWide: { label: "Joint width as a share of the body's widest section", unit: "%", better: "higher" },
   },
-  metricsNote: "1.00x is the whole target: the tail's circle and the body's circle are the same circle. Anything above 1.00 is a tube of the wrong size pushed into the back of the animal, and the step in millimetres is how far that rim sticks out at the species' shipped scale.",
+  metricsNote: "Two different questions, and a tail has to pass both. weldMismatchPct and weldStepMM ask whether the tail's circle IS the body's circle — a tube of the wrong size pushed into the back of the animal fails here. jointFracDeep/Wide ask whether that shared circle is big enough to be a tailstock at all: two matched circles can still be a wire where the most muscular part of the animal belongs.",
 };
