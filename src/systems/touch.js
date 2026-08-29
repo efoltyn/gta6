@@ -1632,6 +1632,7 @@
   if (CBZ.isTouchDevice()) enable();
 
   // controls only show while actually playing; weapon buttons only while armed
+  const SHARK_SIM_HIDE = ["tfire", "tjump", "tview"];
   CBZ.onAlways(98, function () {
     if (!built) return;
     const root = document.getElementById("touch");
@@ -1655,6 +1656,19 @@
     // If the player entered a road car while still holding the on-foot stick,
     // release it before another frame can leak its WASD into the car.
     if (carButtonsActive() && stick.id !== null) releaseStick();
+    // SHARK SIM: move is the whole game on the glass. The bite is automatic
+    // (modes/shark_sim.js pulls the mount's own trigger), RISE/DIVE are
+    // touch_vehicle's mount rail, and the view is a settings choice now
+    // (CBZ.sharkSimViewSet) — so FIRE, JUMP and the eye button are chrome
+    // with no verb behind them. Owner 2026-08-29: "just rise dive and the
+    // move pad". JUMP was even a duplicate: Space IS rise on a mount.
+    const sharkSim = CBZ.game.mode === "sharksim";
+    for (let i = 0; i < SHARK_SIM_HIDE.length; i++) {
+      const sb = document.getElementById(SHARK_SIM_HIDE[i]);
+      if (!sb) continue;
+      const want = sharkSim ? "none" : "";
+      if (sb.style.display !== want) sb.style.display = want;
+    }
     // ARMED MEANS HOLDING A GUN, NOT LOOKING DOWN THE BARREL OF THE CAMERA.
     // (owner: "reload and gunswitch show even before I get a gun.")
     // `fps.active` is FIRST-PERSON MODE — a view, not an inventory. The prison

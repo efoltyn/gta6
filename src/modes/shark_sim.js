@@ -1076,6 +1076,95 @@
   function hideHud() {
     if (hud) hud.style.display = "none";
     if (flashEl) flashEl.style.opacity = "0";
+    viewCardClose();      // every hideHud caller means "another card owns the screen now"
+  }
+
+  /* ---- THE VIEW IS A CHOICE, NOT A BUTTON --------------------------------
+     Owner, 2026-08-29: "remove attack jump and eye button … it should be in
+     settings to change view and when you first load game you choose and then
+     in pause settings you should be able to change it."
+
+     A shark has exactly two views: the chase boom ("chase") and fpsmode's
+     first person riding the shark's own eye ("eye" — systems/fpsmode.js's
+     aquatic-mount seat). The choice is made ONCE, on the first shark match
+     this device ever runs, on a card that owns the screen the way the title
+     card does (a decision is not mid-play, so it is not a words-over-water
+     violation); after that it lives in the pause Settings panel
+     (systems/settings.js reads the two seams below) and the eye button is
+     gone from the touch glass (systems/touch.js hides it in this mode).
+     [V] on a keyboard still toggles live — the pref is where a match STARTS,
+     not a cage. */
+  const VIEW_KEY = "CBZ_SHARK_VIEW_V1";
+  let viewCard = null;
+  function viewPref() {
+    try {
+      const v = localStorage.getItem(VIEW_KEY);
+      return v === "eye" || v === "chase" ? v : null;
+    } catch (e) { return null; }
+  }
+  function viewApply(v) {
+    if (CBZ.setFPS) { try { CBZ.setFPS(v === "eye"); } catch (e) {} return; }
+    const fpOn = !!(CBZ.fps && CBZ.fps.active);
+    if ((v === "eye") !== fpOn && CBZ.toggleFPS) { try { CBZ.toggleFPS(); } catch (e) {} }
+  }
+  CBZ.sharkSimViewGet = function () {
+    return viewPref() || ((CBZ.fps && CBZ.fps.active) ? "eye" : "chase");
+  };
+  CBZ.sharkSimViewSet = function (v) {
+    v = v === "eye" ? "eye" : "chase";
+    try { localStorage.setItem(VIEW_KEY, v); } catch (e) {}
+    if (g.mode === "sharksim" && sim.on) viewApply(v);
+    return v;
+  };
+  function viewCardClose() {
+    if (!viewCard) return;
+    if (viewCard.parentNode) viewCard.parentNode.removeChild(viewCard);
+    viewCard = null;
+  }
+  function viewChooser() {
+    if (viewCard) return;
+    viewCard = document.createElement("div");
+    viewCard.id = "sharkviewpick";
+    viewCard.style.cssText = "position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;" +
+      "align-items:center;justify-content:center;gap:18px;background:rgba(4,10,18,.55);" +
+      "font-family:Fredoka,system-ui,sans-serif;text-align:center";
+    const title = document.createElement("div");
+    title.textContent = "PICK YOUR VIEW";
+    title.style.cssText = "font-size:clamp(26px,5vw,44px);font-weight:700;color:#9fe870;letter-spacing:2px;" +
+      "text-shadow:0 4px 0 #14532d,0 8px 18px rgba(0,0,0,.55)";
+    const sub = document.createElement("div");
+    sub.textContent = "change it any time in pause settings";
+    sub.style.cssText = "font-size:clamp(13px,2.2vw,17px);color:#bcd0e2;margin-top:-8px";
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:16px;flex-wrap:wrap;justify-content:center;padding:0 16px";
+    const mk = function (v, big, small) {
+      const b = document.createElement("button");
+      b.style.cssText = "min-width:min(220px,42vw);padding:20px 22px;border-radius:16px;cursor:pointer;" +
+        "border:2px solid rgba(159,232,112,.5);background:rgba(8,16,26,.88);color:#eaf4ff;" +
+        "font-family:inherit;font-size:19px;font-weight:700;letter-spacing:1px;" +
+        "box-shadow:0 6px 18px rgba(0,0,0,.45);touch-action:manipulation";
+      const s = document.createElement("div");
+      s.textContent = small;
+      s.style.cssText = "font-size:12.5px;font-weight:400;color:#8fb2cc;margin-top:5px;letter-spacing:.4px";
+      b.appendChild(document.createTextNode(big));
+      b.appendChild(s);
+      b.addEventListener("click", function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        CBZ.sharkSimViewSet(v);
+        viewCardClose();
+        openingFlash();          // the card held the opening banner back; release it
+      });
+      row.appendChild(b);
+    };
+    mk("chase", "OCEAN VIEW", "see your whole shark");
+    mk("eye", "SHARK EYES", "first person, jaws first");
+    viewCard.appendChild(title);
+    viewCard.appendChild(sub);
+    viewCard.appendChild(row);
+    document.body.appendChild(viewCard);
+  }
+  function openingFlash() {
+    flash("YOU ARE THE SHARK", "eat fish and swimmers · avoid the pod · become the MEGALODON");
   }
 
   // ---- match lifecycle ---------------------------------------------------
@@ -1114,9 +1203,19 @@
                           // one-frame window where a man sits on the shark
     buildHud();
     hudNow();
-    flash("YOU ARE THE SHARK", "eat fish and swimmers · avoid the pod · become the MEGALODON");
     sim.on = true;
     sim.needsTeardown = true;
+    // The view: a saved choice is applied silently; a device that has never
+    // chosen gets the chooser card, which holds the opening banner until the
+    // pick lands (openingFlash fires from the card's own buttons). A TOOL RUN
+    // (shark-sim-check, every visual preset — always CDP-driven, so
+    // navigator.webdriver is true) has nobody to tap the card and must not
+    // capture it over every shot: it gets the chase default, unsaved, and
+    // ?cfg_SHARK_VIEW=eye can stage the other camera.
+    const pv = viewPref() || (CFG.SHARK_VIEW === "eye" || CFG.SHARK_VIEW === "chase" ? CFG.SHARK_VIEW : null);
+    if (pv) { viewApply(pv); openingFlash(); }
+    else if (typeof navigator !== "undefined" && navigator.webdriver) { viewApply("chase"); openingFlash(); }
+    else viewChooser();
   }
 
   function teardown() {
@@ -1128,6 +1227,7 @@
     if (cur && cur === sim.shark && CBZ.cityDismount) { try { CBZ.cityDismount(); } catch (e) {} }
     restoreRider();
     hideHud();
+    viewCardClose();                     // an unanswered chooser must not outlive the mode
     g.invuln = 0;                        // never leak the rider shield into another mode
     CBZ.sharkSimShoreRing = null;
     podRestore();                        // every orca we raised goes back to its own draft

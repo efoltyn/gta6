@@ -176,6 +176,21 @@
         rangeRow("stgTotalPop", "Total population", 60, 900, 20, 140, false) +
         "<div class='stg-note warn'>Applies next time you load in, not instant (total population is fixed at boot).</div>" +
       "</div>" +
+      // SHARK SIM ONLY (hidden otherwise, see refreshSharkViewUI): the game's
+      // view is chosen here rather than on a HUD button — the eye button is
+      // off the touch glass in that mode (systems/touch.js), and
+      // modes/shark_sim.js owns the pref + the live apply via these seams.
+      "<div class='stg-section' id='stgSharkSection' style='display:none'>" +
+        "<h4>SHARK VIEW</h4>" +
+        "<div class='stg-row'>" +
+          "<label>Camera</label>" +
+          "<span class='stg-seg'>" +
+            "<button type='button' id='stgViewChase'>Ocean view</button>" +
+            "<button type='button' id='stgViewEye'>Shark eyes</button>" +
+          "</span>" +
+        "</div>" +
+        "<div class='stg-note'>Applies now and every time the shark game starts.</div>" +
+      "</div>" +
       "<button class='stg-close' id='stgCloseBtn'>Done</button>";
 
     document.body.appendChild(panel);
@@ -264,9 +279,28 @@
       refreshPopUI();
     });
 
+    // ---- shark view (only rendered while the shark game is the mode) ----
+    const elSharkSec = panel.querySelector("#stgSharkSection");
+    const elVChase = panel.querySelector("#stgViewChase");
+    const elVEye = panel.querySelector("#stgViewEye");
+    function refreshSharkViewUI() {
+      const on = g.mode === "sharksim" && !!CBZ.sharkSimViewGet;
+      elSharkSec.style.display = on ? "" : "none";
+      if (!on) return;
+      const v = CBZ.sharkSimViewGet();
+      elVChase.classList.toggle("on", v === "chase");
+      elVEye.classList.toggle("on", v === "eye");
+    }
+    function pickSharkView(v) {
+      if (CBZ.sharkSimViewSet) CBZ.sharkSimViewSet(v);
+      refreshSharkViewUI();
+    }
+    elVChase.addEventListener("click", function () { pickSharkView("chase"); });
+    elVEye.addEventListener("click", function () { pickSharkView("eye"); });
+
     panel.querySelector("#stgCloseBtn").addEventListener("click", close);
 
-    panel._refresh = function () { refreshQualityUI(); refreshDensityUI(); refreshPopUI(); };
+    panel._refresh = function () { refreshQualityUI(); refreshDensityUI(); refreshPopUI(); refreshSharkViewUI(); };
     return panel;
   }
 

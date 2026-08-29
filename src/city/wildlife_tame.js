@@ -1286,7 +1286,16 @@
   }
   function selectBiteTarget(a, R) {
     const mouth = jawWorld(a);
-    const best = { target: null, kind: null, d: biteReach(a) };
+    /* THE MOUTH HUNTS WIDER THAN IT CLOSES. Acquisition runs at 1.6x the
+       closing reach: startAquaticAttack's lunge is solved from pick.d so it
+       covers the difference, the homing in cityAquaticMountStep bends the
+       body onto the meal while the jaw is opening, and the contact WINDOW in
+       tickAquaticAttack still tests the honest biteReach geometry — a pick
+       that stays out of reach is a whiffed lunge, never a phantom kill.
+       This is what makes the shark sim's buttonless auto-bite start the
+       strike while the food is still a body-length away instead of waiting
+       until the mouth is already on it. */
+    const best = { target: null, kind: null, d: biteReach(a) * 1.6 };
     const list = animals();
     for (let i = 0; i < list.length; i++) considerBiteTarget(list[i], "animal", mouth, best.d, best);
     const peds = CBZ.cityPeds || [];
@@ -1817,6 +1826,12 @@
       : (p < 0.30 ? ease(p / 0.30) : (p > 0.70 ? 1 - ease((p - 0.70) / 0.30) : 1));
     if (CBZ.swimJaw) CBZ.swimJaw(a, open);
     if (p >= 1) {
+      /* A WHIFF IS NOT A MEAL. The recovery beat after a bite that landed
+         reads as swallowing; after one that missed it reads as a jammed jaw —
+         worst in the shark sim, where there is no trigger to pull early and
+         the wider acquisition above means more strikes start at range. Keep a
+         short beat so the jaw visibly resets, drop the rest of the cooldown. */
+      if (!ride.attackHit) ride.attackCd = Math.min(ride.attackCd, 0.18);
       ride.attackT = 0; ride.target = null; ride.targetKind = null;
       ride.attackHitP = -1;
       ride.attackPitch = 0; ride.attackRoll = 0; a._atkAnim = -1;
@@ -2096,6 +2111,23 @@
       if (d > maxTurn) d = maxTurn; else if (d < -maxTurn) d = -maxTurn;
       ride.head += d;
     }
+    /* BITE HOMING. While a bite is in flight at a live target, the body
+       borrows steering authority toward it — clamped and brief (a bite lasts
+       well under a second), stronger than the player's own turn but never a
+       snap. With acquisition wider than the closing reach the lunge has a gap
+       to cross, and "move is the only control" (shark sim) means nobody can
+       line the mouth up by hand mid-strike; this is the difference between an
+       auto-bite that lands and one that flaps at the water next to a fish.
+       The player's steering above still writes first — this only bends it. */
+    const biteTgt = (ride.attackT > 0 && ride.target && !ride.target.dead && ride.target.pos)
+      ? ride.target : null;
+    if (biteTgt) {
+      const wantB = Math.atan2(biteTgt.pos.z - P.pos.z, biteTgt.pos.x - P.pos.x);
+      const seek = Math.max(R.turn || 2.2, 2.2) * 1.7 * fdt;
+      let db = shortestAngle(wantB - ride.head);
+      if (db > seek) db = seek; else if (db < -seek) db = -seek;
+      ride.head += db;
+    }
     const sprint = !blockedInput && !!keys.shift && len > 0.001 && (P.stamina == null || P.stamina > 0);
     const wantSpeed = len > 0.001 ? (sprint ? R.sprint : R.cruise) : 0;
     if (W.airborne) {
@@ -2247,10 +2279,24 @@
         W.pitchUp = 0; W.pitchDown = 0; W.rollPeak = 0; W.alignErr = 0;
       }
     } else {
-      const wantVy = vin > 0 ? (R.rise || 4) : (vin < 0 ? -(R.dive || 4) : 0);
-      const va = vin ? 12 : 5.5;
+      let wantVy = vin > 0 ? (R.rise || 4) : (vin < 0 ? -(R.dive || 4) : 0);
+      let vAct = !!vin;
+      /* ..AND THE DEPTH CLOSES TOO. An explicit rise/dive always wins, but
+         with no thumb on the axis a bite in flight pulls the body's column
+         toward the meal's — the missing metre of depth was most auto-bite
+         whiffs (a shark cruising at its own draft over a wader's ankles).
+         The bed floor and surface top clamps below still own where the body
+         may actually be, so this can never bury or beach anything. */
+      if (!vAct && biteTgt && biteTgt.pos.y != null) {
+        const dy = biteTgt.pos.y - W.y;
+        if (Math.abs(dy) > 0.25) {
+          wantVy = Math.max(-(R.dive || 4), Math.min(R.rise || 4, dy * 2.4));
+          vAct = true;
+        }
+      }
+      const va = vAct ? 12 : 5.5;
       W.vy += Math.max(-va * fdt, Math.min(va * fdt, wantVy - W.vy));
-      if (!vin) W.vy *= Math.exp(-2.8 * fdt);
+      if (!vAct) W.vy *= Math.exp(-2.8 * fdt);
       W.y += W.vy * fdt;
       // THE BED IS THE GROUND, asked of the bathymetry oracle — not "the
       // surface minus a column we made up". In a foot of swash that puts the

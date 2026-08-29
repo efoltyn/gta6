@@ -304,6 +304,13 @@ body.campaign-canonical-title #title .mode-sharksim-only{display:none !important
   background:#7fd0ff; border:2px solid #16181f; cursor:pointer;
 }
 #settingsPanel input[type="checkbox"]{width:17px; height:17px; accent-color:#7fd0ff; cursor:pointer;}
+#settingsPanel .stg-seg{display:flex; gap:6px;}
+#settingsPanel .stg-seg button{
+  pointer-events:auto; cursor:pointer; font-family:inherit; font-weight:700; font-size:12.5px;
+  color:#cfd6e2; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.16);
+  padding:7px 13px; border-radius:9px;
+}
+#settingsPanel .stg-seg button.on{color:#0c1118; background:#7fd0ff; border-color:#7fd0ff;}
 #settingsPanel .stg-note{font-size:11px; color:#8a93a3; margin-top:4px;}
 #settingsPanel .stg-note.warn{color:#ffd451;}
 #settingsPanel .stg-close{
