@@ -313,6 +313,16 @@
     { x: 700, z: -1645, r0: 20, r1: 130, w: 0.78 },
     { x: 410, z: -1570, r0: 28, r1: 178, w: 0.70 },
   ];
+  /* THE GRAIN OF THE RANGE. A mountain range is built by a force acting
+     along a LINE, and its crests and valleys run parallel to that line. Both
+     noise fields below were isotropic, so the flanks between the five
+     authored summits were a field of unrelated humps with no crest connecting
+     them. CBZ.mtnStrikeOf reads the strike off THESE PEAKS' own principal
+     axis — nobody types a bearing, and moving a summit moves the grain with
+     it. `aniso` is how hard the domain is squashed across strike: 1 is the
+     old isotropic field exactly. */
+  const MERCY_STRIKE = CBZ.mtnStrikeOf ? CBZ.mtnStrikeOf(MERCY_PEAKS) : 0;
+  const MERCY_ANISO = 1.75;
   const _erO = { v: 0, slope: 0, gx: 0, gz: 0 };
   const _drO = { carve: 0, bed: 0, terrace: 0, bank: 0, t: 1 };
   const _tlO = { smooth: 0, fill: 0 };
@@ -361,12 +371,16 @@
     const ridge = CBZ.mtnRidgeMF(x, z, {
       oct: 5, cell: 260, lac: 2.07, gain: 0.54, sharp: 1.6,
       warp: 130, warpCell: 700, salt: S_RIDGE,
+      strike: MERCY_STRIKE, aniso: MERCY_ANISO,
     });
     // 2. derivative-damped fbm — er.slope is the bedrock steepness signal the
     //    talus/terrace/strata terms all key off.
     const er = CBZ.mtnErode(x, z, {
       oct: 5, cell: 210, lac: 2.03, gain: 0.5, damp: 1.35,
       warp: 90, warpCell: 620, salt: S_ERODE,
+      // the bedrock shares the crest's grain, but more weakly: erosion works
+      // across the strike as well as along it.
+      strike: MERCY_STRIKE, aniso: 1 + (MERCY_ANISO - 1) * 0.55,
     }, _erO);
     // 3. drainage — branching V-valleys, deepest between the crests
     const dr = CBZ.mtnDrainage(x, z, {
@@ -622,6 +636,11 @@
     const s = Math.pow(m.s, 0.62);
     return { x: m.x, z: m.z, r0: 40 + 30 * s, r1: 150 + 230 * s, w: 0.85 };
   });
+  // The far panorama's grain, read off its own summit scatter exactly like
+  // Mount Mercy's. A range seen at kilometre distances is nothing BUT its
+  // crest line, so this is where the anisotropy earns the most.
+  const GREAT_STRIKE = CBZ.mtnStrikeOf ? CBZ.mtnStrikeOf(GREAT_MACRO_PEAKS) : 0;
+  const GREAT_ANISO = 1.85;
   function greaterMercyMacroA(x, z) {
     let sum2 = 0;
     for (let i = 0; i < GREAT_LOBES.length; i++) {
@@ -679,10 +698,12 @@
     const ridge = CBZ.mtnRidgeMF(x, z, {
       oct: 5, cell: 600, lac: 2.07, gain: 0.55, sharp: 1.7,
       warp: 300, warpCell: 1700, salt: S_GRIDGE,
+      strike: GREAT_STRIKE, aniso: GREAT_ANISO,
     });
     const er = CBZ.mtnErode(x, z, {
       oct: 5, cell: 470, lac: 2.03, gain: 0.5, damp: 1.25,
       warp: 210, warpCell: 1400, salt: S_GERODE,
+      strike: GREAT_STRIKE, aniso: 1 + (GREAT_ANISO - 1) * 0.55,
     }, _erO);
     const dr = CBZ.mtnDrainage(x, z, {
       oct: 4, cell: 1750, width: 0.32, warp: 430, salt: S_GRIVER,
@@ -1146,9 +1167,21 @@
           const conc = CBZ.mtnConcavity ? CBZ.mtnConcavity(mountainHeightAt, wx, wz, 14, 0.055) : 0;
           // Same correction as the Greater Range, one scale down: 24 m put the
           // snowline barely above the valley floor of a 260 m massif.
+          // THE SHED TEST READS THE LANDFORM, NOT THE CRAGS. `slope` above
+          // comes off the rendered normal, which carries this massif's 9-27u
+          // chipped rock relief — steep almost everywhere on a mountain face,
+          // so the shed term was stripping cover off benches whose LANDFORM is
+          // a 25 degree shelf. Same 14 m stencil the concavity above already
+          // walks, so it is four more reads on the same memo.
+          const sHold = CBZ.mtnSlopeAt ? CBZ.mtnSlopeAt(mountainHeightAt, wx, wz, 14) : null;
           const cover = CBZ.mtnSnowCover(wx - DX, wz - DZ, y, slope, faceLight, {
             line: 58, band: 70, aspect: 40, wob: 22, shed0: 0.13, shed1: 0.50, salt: S_SNOW,
             concave: conc, gully: 34, spine: 0.5, patch: 0.8, patchCell: 95,
+            slopeHold: sHold,
+            // LEDGES: the same bedding field mercyMacroA cut the benches with
+            // and mtnStrataTint painted the bands with, so the white lands on
+            // the tread you can stand on, under its own colour band.
+            ledge: 0.55, bedSalt: S_STRATA, step: 16, dip: 24, dipCell: 560, dipCell2: 155,
           });
           rc.copy(snowShadow).lerp(snowLit, 0.70 + 0.27 * faceLight);
           rc.lerp(iceBlue, cold);
@@ -1352,9 +1385,14 @@
           // the upper THIRD, where the reference photographs put it, and the
           // gully term then walks it back down the couloirs to ~22 m — snow
           // running down the concavities past bare rock, which is the look.
+          const gHold = CBZ.mtnSlopeAt ? CBZ.mtnSlopeAt(greaterMercyHeightAt, wx, wz, 30) : null;
           const cover = CBZ.mtnSnowCover(wx - DX, wz - DZ, y, slope, faceLight, {
             line: 96, band: 140, aspect: 70, wob: 40, shed0: 0.14, shed1: 0.54, salt: S_GSNOW,
             concave: gconc, gully: 74, spine: 0.58, patch: 0.85, patchCell: 190,
+            slopeHold: gHold,
+            // one scale up: 34 u beds, so the ledge lines are the ones a
+            // kilometre-distant eye actually resolves on this range.
+            ledge: 0.5, bedSalt: S_GSTRATA, step: 34, dip: 52, dipCell: 1250, dipCell2: 340,
           });
           rc.copy(coldSnow).lerp(snow, 0.68 + faceLight * 0.29);
           rc.lerp(shadeSnow, (1 - faceLight) * 0.22);

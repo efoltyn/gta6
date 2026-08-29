@@ -487,8 +487,16 @@
     // so the tsunami can pull the whole sea OUT during its warning and surge
     // it back in as the flood — reset() always parks it back at OCEAN_Y.
     const OCEAN_Y = -0.8;
+    /* The displaced sheet is 2 km on a side and FOLLOWS THE CAMERA (see the
+       47.9 update below) — the swimmable sea now runs ~3 km out (arena.seaR /
+       water_survival.js's fence), so a tile parked on the island's centre
+       would run out of water long before the fence does. 2048 covers the
+       longest fog draw any island weather asks for (volcano dusk, fogFar
+       2400: the rim sits half-fogged over a drawn seabed, not over void). */
+    const OCEAN_SPAN = 2048;
     const sharedWater = !!(CBZ.waterBuildDisasterGeometry && CBZ.makeDisasterWaterMaterial);
-    const oceanGeo = sharedWater ? CBZ.waterBuildDisasterGeometry(1400) : new THREE.PlaneGeometry(1400, 1400);
+    const oceanGeo = sharedWater ? CBZ.waterBuildDisasterGeometry(OCEAN_SPAN)
+      : new THREE.PlaneGeometry(OCEAN_SPAN, OCEAN_SPAN);
     const oceanMat = sharedWater ? CBZ.makeDisasterWaterMaterial({
       name: "Survival Ocean Water", color: 0x155878, shallowColor: 0x3195a7,
       amp: 0.86, chop: 0.72, foam: 0.34,
@@ -529,9 +537,26 @@
     // but before the camera (50). Following the surge at 27.85 would have
     // rendered the sea one frame behind the level everything else used — and
     // would have left the mesh a frame high on the tick a tsunami ends.
+    /* THE SEA FOLLOWS THE CAMERA. The waves are computed in WORLD space
+       (makeDisasterWaterMaterial's vertex stage runs the swell table on
+       modelMatrix * position), so translating the mesh never moves a crest —
+       but the vertices do slide through the wave field, so the tile snaps to
+       its own vertex pitch and the sampling lattice stays put in the world.
+       This is what lets a 2 km sheet carry a ~3 km swimmable sea: wherever
+       the camera goes, the water under it is real displaced ocean, and the
+       rim stays a fog-width away. Reads LAST frame's camera (this runs at
+       47.9, the camera moves at 50) — the tile is a kilometre deep on every
+       side, so a frame of camera travel is nothing. */
+    const oceanGrid = oceanGeo.userData && oceanGeo.userData.waterDisasterGrid;
+    const oceanPitch = oceanGrid ? oceanGrid.span / oceanGrid.segments : 16;
     if (CBZ.onUpdate) CBZ.onUpdate(47.9, function () {
       if (!arena || !CBZ.game || !CBZ.islandModeOn(CBZ.game.mode)) return;
       ocean.position.y = arena_meanY();
+      const cam = CBZ.camera;
+      if (cam) {
+        ocean.position.x = cx + Math.round((cam.position.x - cx) / oceanPitch) * oceanPitch;
+        ocean.position.z = cz + Math.round((cam.position.z - cz) / oceanPitch) * oceanPitch;
+      }
       if (sharedWater) CBZ.waterDriveDisasterSurface(ocean, arenaWave);
     });
 

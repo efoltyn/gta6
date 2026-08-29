@@ -825,6 +825,19 @@ const PASS = `(() => {
       if (fr.razorEdges > 0) out.fails.push("CLEARINGS READ AS CIRCLES: " + fr.razorEdges +
         " with a one-ring tree line " + JSON.stringify(fr.clearings.filter(function (c) { return c.razor; })));
       if (fr.judged < 3) out.fails.push("forestRim judged only " + fr.judged + " clearings - the ratchet stopped asking");
+    // NO TWO TREES ARE THE SAME MESH (world/vegetation.js). cloned counts
+    // SITES that drew a real stand out of a single crown variant while the
+    // kit was offering more than one - the cloned-tree tell, named rather
+    // than assumed. Pinned at 0. variants/instances print beside it so a
+    // "fix" that just stops asking (K forced to 1, or nobody registering)
+    // cannot pass for an adoption.
+    if (CBZ.vegetationVariantAudit) {
+      const vv = CBZ.vegetationVariantAudit();
+      out.vegVariants = "arch " + vv.archetypes + " variants " + vv.variants +
+        " sites " + vv.sites + " inst " + vv.instances + " cloned " + vv.cloned + " tier " + vv.tier;
+      if (vv.cloned > 0) out.fails.push("CLONED CROWNS: " + vv.cloned + " " + JSON.stringify(vv.clonedSites));
+      if (vv.enabled && vv.tier >= 1 && vv.variants <= vv.archetypes) out.fails.push("VEG VARIANT SET COLLAPSED: " + vv.variants + " variants for " + vv.archetypes + " archetypes at tier " + vv.tier);
+      if (!vv.instances) out.fails.push("veg variant kit is live and nothing registered a use");
     }
     if (CBZ.backcountrySolids && CBZ.backcountrySolids.carpet) {
       const bs = CBZ.backcountrySolids;
@@ -1203,6 +1216,29 @@ async function runSeed(seed, label) {
   tinfo(`${label}: arena ${r.arena || "-"} | frontGlass ${r.frontGlass || "-"} | elevators ${r.elevators || "-"}`);
   tinfo(`${label}: map ${r.map || "-"} | crowdSpawn ${r.crowdSpawn || "-"} | platforms ${r.platforms == null ? "-" : r.platforms}`);
   tinfo(`${label}: cockpit ${r.cockpit || "-"} | wounds ${r.wounds || "-"} | cabin ${r.cabin || "-"} | power ${r.power || "-"}`);
+  tmark(`${label}: traffic ${r.traffic || "-"} | motion ${r.motion || "-"}`);
+  tmark(`${label}: origins ${r.origins || "-"} | gov ${r.gov || "-"} | airside ${r.airside || "-"}`);
+  tmark(`${label}: raceTools ${r.raceTools || "-"} | racer ${r.racerCareer || "-"}`);
+  tmark(`${label}: hitman ${r.hitman || "-"} | raceLadder ${r.raceLadder || "-"}`);
+  tmark(`${label}: presidency ${r.presidency || "-"} | captain ${r.captain || "-"} | gungame ${r.gungame || "-"}`);
+  tmark(`${label}: loyalty ${r.loyalty || "-"}`);
+  tmark(`${label}: take ${r.take || "-"}`);
+  tmark(`${label}: till ${r.till || "-"}`);
+  tmark(`${label}: clearance ${r.clearance || "-"}`);
+  tmark(`${label}: airnet ${r.airnet || "-"}`);
+  tmark(`${label}: fxwarm ${r.fxwarm || "-"} | platGrid ${r.platGrid || "-"} | airspace ${r.airspace || "-"}`);
+  tmark(`${label}: holds ${r.holds || "-"}`);
+  tmark(`${label}: pedInst ${r.pedInst || "-"}`);
+  tmark(`${label}: venues ${r.venues || "-"} | fishing ${r.fishing || "-"} | ranks ${r.ranks || "-"}`);
+  if (r.ranksEmpty) tmark(`${label}: rank slots with nobody in them: ${r.ranksEmpty}`);
+  if (r.ranksVerbless) tmark(`${label}: rungs that unlock nothing: ${r.ranksVerbless}`);
+  tmark(`${label}: street ${r.street || "-"} | stunts ${r.stunts || "-"}`);
+  tmark(`${label}: ground ${r.ground || "-"} | backdrop ${r.backdrop || "-"} | peaks ${r.peaks || "-"} | swim ${r.swim || "-"} | waterShared ${r.waterShared || "-"}`);
+  tmark(`${label}: pools ${r.pools || "-"}`);
+  tmark(`${label}: forestLook ${r.forestLook || "-"} | backcountry ${r.backcountry || "-"} | vegVariants ${r.vegVariants || "-"}`);
+  tmark(`${label}: arena ${r.arena || "-"} | frontGlass ${r.frontGlass || "-"} | elevators ${r.elevators || "-"}`);
+  tmark(`${label}: map ${r.map || "-"} | crowdSpawn ${r.crowdSpawn || "-"} | platforms ${r.platforms == null ? "-" : r.platforms}`);
+  tmark(`${label}: cockpit ${r.cockpit || "-"} | wounds ${r.wounds || "-"} | cabin ${r.cabin || "-"} | power ${r.power || "-"}`);
   // BODIES AND WHAT THEY ARE WEARING. Both audits have asserted above for a
   // while and neither was ever printed — so a passing run showed no evidence
   // that anybody had checked whether people still have clothes on, which is

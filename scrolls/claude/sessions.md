@@ -4730,3 +4730,130 @@ new script tag in index.html ships to the App Store build unless somebody
 adds it to `drop` or re-measures. A new module that is not for the disaster
 game needs a manifest line in the same commit — that is the whole takeover,
 in one sentence.
+## 2026-08-11 — EVERY TREE WAS THE SAME TREE, AND NO RANGE HAD A GRAIN
+
+Owner handed over `Braffolk/fable5-world-demo` (LAAS — a 21k-line procedural
+WebGPU world built to a UE5 reference bar) with *"READ THIS ENTIRELY WE NEED
+MOUNTIAN AND TREE IMPROVEMENT"*. Its brief carries a **banned-outcomes list**,
+and two entries on it described this repo exactly:
+
+> *Cloned trees (shared mesh, varied only by rotation/scale).*
+> *Distant mountains as smooth fBm humps.*
+
+Nothing in LAAS is liftable as code — it is TypeScript, WebGPU, TSL, compute
+shaders, against three r185; we are r128 WebGL script tags. What transfers is
+the **diagnosis**, and both of its diagnoses were true here and measurable.
+
+### THE WOOD WAS ONE MESH — `world/vegetation.js`
+
+`vegetationKit.geometry(kind)` published exactly ONE geometry per archetype, so
+every mature crown in Redhollow, every canopy across the whole Backcountry and
+every conifer on the massif was the SAME five icosahedron lobes, varied only by
+rotation and scale. **53,807 trees, nine shapes.**
+
+The fix is not "grow a unique tree per instance" — this renderer draws
+vegetation as `InstancedMesh`, so that is thousands of draw calls. It is LAAS's
+own affordable form (their D5: *K structural variants per species per LOD ring*)
+in this kit's idiom: **K seeded variants per archetype, dealt by a POSITION
+hash.** A crown is a core lobe over the trunk axis plus arms on a golden-angle
+spiral, their length set by a CROWN ENVELOPE (`dome`/`ellipsoid`/`flat`/
+`irregular` — LAAS's `crownEnvelope`, one level up from the branching grammar
+`treeaudit.js` already owns) and skewed by a per-variant **light-competition
+bias**, so one flank carries the long arms like a tree that grew beside a gap.
+
+Two invariants keep it free of consequences, both enforced by `normalise()`:
+**every variant shares variant 0's bounding box** (consumers scale crowns by
+`folR/folH` and TREES_V2's connection law proves canopy-over-trunk overlap — a
+taller or wider variant would silently break both), and **every variant covers
+its own axis** (the core lobe is ≥ ~0.2 R wide, far past any bole this kit
+publishes). Variant 0 IS the hand-authored arrangement, so flag-off and quality
+tier 0 are the old world byte for byte. Trunks are deliberately NOT varied:
+`BIOME_SOLID_TRUNKS` sizes its collider from the geometry's own base radius, so
+a per-variant bole needs a per-variant collider radius threaded through four
+biome owners — and a bole is a cylinder at every distance that matters.
+
+Adoption is one per-instance split where you walk (`city/biome_forest.js`:
+mature crowns, spires and the subcanopy storey each become one InstancedMesh
+per variant, sized to exactly the trees that chose it) and one per-CHUNK pick
+where you don't (`city/continent.js` already builds a mesh set per 1.6 km chunk,
+so the silhouette changes across the country for **zero** extra draw calls, and
+the ~3.5 km visible disc spans a dozen-odd chunks). Because the choice is a
+position hash and not a draw on either file's sequential rng, **not one cabin,
+trail, tent, deer or stem moved** — determinism held on the first run.
+
+    seed 90210, tier 2 (K = 2)
+    redhollow-mature-crowns      2593 from 1 mesh  ->  1265 / 1328
+    redhollow-conifer-spires      381 from 1 mesh  ->   180 /  201
+    redhollow-subcanopy-crowns    662 from 1 mesh  ->   335 /  327
+    backcountry (122 chunks)      1 mesh each      ->  61 / 60 chunks per variant
+    treeAudit floating/unseated/broken            ->  0 / 0 / 0 (unchanged)
+
+Ratchet `CBZ.vegetationVariantAudit().cloned` — SITES that drew a real stand
+(≥40 instances) out of a single variant while the kit offered more — **pinned at
+0 in `tools/math-gate.mjs`**, which also fails a collapsed variant set and a
+kit nobody registered a use against, so "switch the feature off" and "stop
+asking" cannot pass for an adoption.
+
+### A RANGE IS BUILT ALONG A LINE — `CBZ.mtnStrikeOf`
+
+Every noise field in the geology kit was **isotropic**: rotated per octave so it
+never locked to the world grid, but with no preferred direction at all. Real
+mountains have one — a range is built by a force acting along a line and its
+crests and valleys run parallel to it. Measured on Mount Mercy, mean |Δridge|
+over 40 m along vs across the summit axis: **0.077 / 0.074, ratio 0.96.** No
+grain whatsoever; the flanks between the five authored summits were a field of
+unrelated humps with nothing connecting them.
+
+`mtnErode` and `mtnRidgeMF` now take `{strike, aniso}` — one rotation into the
+strike frame plus a scale ACROSS it, applied ONCE before the octave loop, so the
+per-octave rotation that follows decorrelates the FINE detail (the grain is a
+landform fact; metre-scale crags on a cliff face have no strike). `aniso: 1` is
+the old field exactly, which is what makes adopting it free.
+
+**Nobody types a bearing.** `CBZ.mtnStrikeOf(peaks)` reads the strike off the
+range's OWN summits — the principal axis of the summit scatter, in closed form —
+so moving a peak moves the grain with it and a typed bearing can never go stale.
+Mount Mercy's five summits solve to **4.0°**; the crest anisotropy goes
+**0.96 → 1.387** (crests change 39% faster across the strike than along it).
+
+### SNOW RESTS ON THE MOUNTAIN, NOT ON THE BOULDERS
+
+LAAS's `BiomeSnow.ts` carries a measured note we had the same bug for:
+*"texel-scale crags make the 1 m slope ≥2.7 everywhere on the massif — snow
+holds on the landform, not the micro-relief."* `mtnSnowCover`'s shed term was
+reading the slope off the RENDERED normal, which on these massifs carries the
+9–27 u chipped rock relief `biome_snow.js` deliberately adds. Measured over the
+alpine band: **mean fine slope 0.265 against mean landform slope 0.218** — the
+shed test was stripping cover off benches whose landform is a 25° shelf, and the
+field only ever closed over the few genuinely smooth shoulders.
+
+`o.slopeHold` (absent → the fine slope, as before) takes the same 14 m / 30 m
+stencil the callers already walk for `mtnConcavity`, so it is four more reads on
+a memo they already share. And **LEDGE ACCUMULATION** (the spec floor item we
+had never built): `mtnTerrace` cuts this ground into bedding benches with a flat
+TREAD and a steep RISER, and the cover field was computed from the same bedding
+number and never introduced to it. `o.ledge` + `o.bedSalt` fill the REMAINING
+headroom on the tread, in the same warped non-parallel field the geometry was
+cut with and the colour bands were painted with — so the white lands on the
+ledge you can stand on, under the band that belongs to it.
+
+    Mount Mercy (y > 60)     mean cover 0.210 -> 0.313    deep (>0.6) 18.8% -> 24.2%
+    Greater Range (y > 100)  mean cover 0.298 -> 0.385    deep (>0.6) 28.0% -> 32.7%
+    of which the ledge term  +0.054 mean
+
+Both ranges stay far from the white-cardboard-cutout failure the previous wave
+fought — the couloir/spine/patch law still owns the pattern; this only stops a
+car-sized boulder from shedding a snowfield.
+
+Flags `VEG_VARIANTS` · `VEG_VARIANT_MAX` · `MOUNT_RIDGE_STRIKE` ·
+`MOUNT_SNOW_LANDFORM` · `MOUNT_SNOW_LEDGES`, every one degrade-safe to the old
+value. `MATHGATE: ok` on seeds 90210 and 1337 with determinism.
+
+**WHAT WE DID NOT TAKE, AND WHY.** LAAS's hydraulic pipe-model erosion (≥500
+iterations on a 2048² GPU grid) is the one thing that would beat our
+derivative-damped fbm, and it is structurally unavailable: our terrain must stay
+a PURE FUNCTION of (x, z) because `mtnGridCache` hands the same closure to the
+mesh loop and the physics floor oracle, and a simulation has no closed form to
+sample. Their per-instance unique hero trees, octahedral impostors and GPU
+clustered-Poisson scatter all assume compute shaders and indirect draws that
+r128 does not have. Declaring the gap beats shipping a half-simulated one.

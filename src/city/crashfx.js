@@ -1331,6 +1331,7 @@
     const tl = Math.hypot(tx, tz);
     if (tl < 1e-4) { tx = 1; tz = 0; } else { tx /= tl; tz /= tl; }
     const n = Math.min(CHUNK_CAP, Math.max(0, Math.round(7 + 5 * power)));   // cap to the pool: a huge-power blast must not spin the recycle loop / mega-spawn
+    shedStats.invented += n;          // ditto: these shards are off no wall
     while (chunks.length > CHUNK_CAP - n) recycleChunk();
     const fall = Math.sqrt(Math.max(0.5, y) / 8.8);   // time to reach the street under chunk gravity
     for (let i = 0; i < n; i++) {
@@ -1369,6 +1370,186 @@
   // fracture.js pours wall-hole debris through this same pooled cascade
   CBZ.cityFacadeAvalanche = facadeAvalanche;
 
+  /* ============================================================
+     CONSERVATION OF MATTER — "ALL DEBRIS SHOULD COME OFF OF SOMETHING"
+
+     OWNER, 2026-08-29: "I HATE FAKE DEBRIS ... RPG DAMAGE AND DEBRIS SHOULD BE
+     VOXEL ONLY. NO FAKE DEBRIS. IT MUST COME FROM SOMEWHERE."
+
+     He is right, and rubbleHeap() below is the confession. It takes a POINT and
+     a COUNT and invents `14 + width*4 + power*6` lumps of a shared grey out of
+     nothing, next to a wall it never looked at. The flying half (facadeAvalanche)
+     invents `7 + 5*power` more. Neither knows what was removed, what it was made
+     of, or how much of it there was — so a rocket into a pale glass office and a
+     rocket into a brown brick warehouse shed the identical grey pile, and a
+     0.5 m nick shed the same heap as a two-storey bay.
+
+     THE LAW HERE: every piece of debris is CUT OUT of a specific solid that is
+     being removed from the world in the same breath, carries THAT solid's own
+     material, starts at the sub-volume it occupied inside it, and the volume of
+     the pieces is the volume of the hole. Think voxel — not a voxel engine, the
+     voxel BOOKKEEPING: the wall is diced on a grid, the cells inside the blast
+     leave, and what lands on the pavement is those cells and nothing else.
+
+     Two consequences worth having on purpose:
+       * the pile is the colour of the building, because it IS the building;
+       * a curtain wall sheds two thin concrete courses and a lot of glass while
+         a brick pier sheds a mountain, without anyone tuning a count.
+
+     The perimeter is diced too, and cells on the rim are KEPT (welded to the
+     shell, no collider — they are a lip, not a wall). That is where the ragged
+     edge comes from now: it is material that survived, not a decorative tooth
+     laid over a machined rectangle.
+     ============================================================ */
+  if (CBZ.CONFIG.DEBRIS_CONSERVED_V1 == null) CBZ.CONFIG.DEBRIS_CONSERVED_V1 = true;
+  function conservedOn() { return CBZ.CONFIG.DEBRIS_CONSERVED_V1 !== false; }
+  // ONE shared unit cube for every fragment. It carries an all-white colour
+  // attribute so a source material with vertexColors (every fake-AO wall in
+  // buildings.js is vcMat) multiplies by 1 and shows its true colour instead of
+  // sampling an attribute that isn't there and coming out black.
+  let _cubeGeo = null;
+  function cubeGeo() {
+    if (_cubeGeo) return _cubeGeo;
+    _cubeGeo = new THREE.BoxGeometry(1, 1, 1);
+    const n = _cubeGeo.attributes.position.count, col = new Float32Array(n * 3);
+    col.fill(1);
+    _cubeGeo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    _cubeGeo._shared = true;
+    return _cubeGeo;
+  }
+  // The pile a shed builds. Same "seat it on what is already there" discipline
+  // the invented heap used, except the things being seated are real fragments
+  // that flew here. Persistent across events (a second rocket piles onto the
+  // first), bounded, and cleared with the rest of the world.
+  const PILE_CELL = 0.5;
+  const pileTop = new Map();
+  function pileSeat(x, z, hh) {
+    const key = Math.round(x / PILE_CELL) + "," + Math.round(z / PILE_CELL);
+    const g = floorAt(x, z);
+    const top = pileTop.has(key) ? pileTop.get(key) : g;
+    // a cell that has grown a metre and a half of pile spills back to the deck
+    // rather than towering: that is what makes a heap taper.
+    const seat = (top - g) > 1.5 ? g : top;
+    if (pileTop.size > 900) pileTop.clear();
+    pileTop.set(key, seat + hh * (1.05 + rng() * 0.45));
+    return seat + hh;
+  }
+  const shedStats = { events: 0, pieces: 0, kept: 0, volShed: 0, volRemoved: 0, invented: 0 };
+
+  /* PUBLIC: dice a solid that is being removed and hand the world its pieces.
+
+     box  — WORLD aabb of the material leaving: {minX,maxX,minY,maxY,minZ,maxZ}
+     mat  — the SOURCE mesh's material. Not a debris palette: the actual one.
+     o.nx/o.nz  outward normal of the face (which way the pieces are thrown)
+     o.power    blast strength, scales the throw
+     o.parent   optional group to weld KEPT rim cells to (the building shell),
+                so they translate/cull with the building instead of floating in
+                world space after a demolition
+     o.rim      0..1 — how much of the perimeter survives as a ragged lip
+     o.budget   max pieces this call may mint (cells get BIGGER, never fewer,
+                so the volume still balances)
+     Returns { pieces, kept, volume } — the audit reads this, so "is any of this
+     invented" is a question with a number for an answer. */
+  CBZ.cityShedSolid = function (box, mat, o) {
+    o = o || {};
+    if (!conservedOn() || !box || !mat || !scene) return { pieces: 0, kept: 0, volume: 0 };
+    const w = box.maxX - box.minX, h = box.maxY - box.minY, d = box.maxZ - box.minZ;
+    if (!(w > 0.02 && h > 0.02 && d > 0.005)) return { pieces: 0, kept: 0, volume: 0 };
+    const vol = w * h * d;
+    const budget = Math.max(4, Math.min(o.budget || 70, CHUNK_CAP - 8));
+    // Cell size is chosen so the grid FITS the budget. A wall too big to dice
+    // finely gets coarser lumps — it never gets fewer metres of concrete.
+    let cell = Math.max(0.26, Math.min(0.95, Math.cbrt(vol / Math.max(6, budget * 0.55))));
+    let nx = Math.max(1, Math.round(w / cell)), ny = Math.max(1, Math.round(h / cell));
+    let nz = Math.max(1, Math.round(d / Math.max(cell, d)));      // thin walls stay one cell deep
+    let guard = 8;
+    while (nx * ny * nz > budget && guard-- > 0) {
+      cell *= 1.28;
+      nx = Math.max(1, Math.round(w / cell)); ny = Math.max(1, Math.round(h / cell));
+    }
+    const cw = w / nx, ch = h / ny, cd = d / nz;
+    const on = nNorm(o.nx || 0, o.nz || 0);
+    const onx = on.x, onz = on.y;
+    let tx = -onz, tz = onx;
+    const power = Math.max(0.6, Math.min(3, o.power || 1.4));
+    const rim = Math.max(0, Math.min(0.9, o.rim == null ? 0.34 : o.rim));
+    let pieces = 0, kept = 0;
+    for (let i = 0; i < nx; i++) {
+      for (let j = 0; j < ny; j++) {
+        for (let k = 0; k < nz; k++) {
+          const px = box.minX + (i + 0.5) * cw;
+          const py = box.minY + (j + 0.5) * ch;
+          const pz = box.minZ + (k + 0.5) * cd;
+          // THE RAGGED EDGE IS SURVIVING MATERIAL. A cell on the top or side rim
+          // may stay welded to the shell; the bottom rim never does, or the
+          // walk-through grows a kerb the player cannot step over.
+          const edge = (i === 0 || i === nx - 1 || j === ny - 1);
+          const keep = rim > 0 && edge && j > 0 && rng() < rim;
+          const m = new THREE.Mesh(cubeGeo(), mat);
+          m.scale.set(cw * 0.98, ch * 0.98, cd * 0.98);
+          m.castShadow = true; m.receiveShadow = true;
+          if (keep) {
+            const par = o.parent;
+            if (par) {
+              m.position.set(px - par.position.x, py - par.position.y, pz - par.position.z);
+              par.add(m);
+            } else { m.position.set(px, py, pz); scene.add(m); }
+            m.rotation.set((rng() - 0.5) * 0.18, (rng() - 0.5) * 0.22, (rng() - 0.5) * 0.18);
+            kept++;
+            if (o.keptOut) o.keptOut.push(m);
+            continue;
+          }
+          m.position.set(px, py, pz);
+          m.rotation.set(rng() * 3, rng() * 6.28, rng() * 3);
+          while (chunks.length > CHUNK_CAP - 1) recycleChunk();
+          scene.add(m);
+          // thrown out of the face, faster the nearer the cell was to the middle
+          const midU = 1 - Math.abs((i + 0.5) / nx - 0.5) * 2;
+          const sp = (0.9 + midU * 2.4) * power;
+          chunks.push({
+            mesh: m, hh: ch * 0.49,
+            vx: onx * sp + tx * (rng() - 0.5) * 2.2 * power,
+            vy: (rng() - 0.25) * 2.6 * power,
+            vz: onz * sp + tz * (rng() - 0.5) * 2.2 * power,
+            spin: (rng() - 0.5) * 9, t: 0, life: 1.4 + rng() * 1.4,
+            rest: 0, settled: false, trail: -1, pile: true,
+          });
+          pieces++;
+        }
+      }
+    }
+    shedStats.events++; shedStats.pieces += pieces; shedStats.kept += kept;
+    shedStats.volShed += vol * (pieces / Math.max(1, pieces + kept));
+    shedStats.volRemoved += vol;
+    return { pieces: pieces, kept: kept, volume: vol };
+  };
+
+  /* The receipt. "Invented" counts pieces minted by the old point-and-count
+     spawners; on the conserved path it must be ZERO, and the ratio of shed
+     volume to removed volume must sit at 1. Both are in the before/after table
+     precisely because "no fake debris" is a claim somebody has to be able to
+     check. */
+  CBZ.cityDebrisAudit = function () {
+    let live = 0, sourced = 0, piled = 0;
+    for (let i = 0; i < chunks.length; i++) {
+      const c = chunks[i]; if (!c) continue;
+      live++;
+      if (c.pile) { sourced++; if (c.settled) piled++; }
+    }
+    return {
+      flag: conservedOn(),
+      shedEvents: shedStats.events,
+      shedPieces: shedStats.pieces,
+      keptRimCells: shedStats.kept,
+      inventedPieces: shedStats.invented,
+      removedVolume: +shedStats.volRemoved.toFixed(2),
+      shedVolume: +shedStats.volShed.toFixed(2),
+      conservation: shedStats.volRemoved > 0
+        ? +(shedStats.volShed / shedStats.volRemoved).toFixed(3) : 0,
+      liveDebris: live, sourcedDebris: sourced, settledPile: piled,
+    };
+  };
+
   // ---- PERSISTENT RUBBLE HEAP at the base of a wall wound ----
   // Real blasted reinforced concrete dumps a HEAP of masonry on the sidewalk
   // (Red Faction / MechAssault: "down to a pile of dusty rubble"). The flying
@@ -1394,6 +1575,7 @@
   const HEAP_CELL = 0.55;               // height-field resolution (≈ one lump wide)
   const heapTop = new Map();            // "i,j" -> current top of the pile in that cell
   function rubbleHeap(cx, cz, nx, nz, spread, size, count) {
+    shedStats.invented += count;      // this pile came from nowhere; say so
     // tangent along the wall so the pile is wider than it is deep
     let tx = -nz, tz = nx; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
     const groundN = nNorm(nx, nz);
@@ -1604,21 +1786,32 @@
     // normalize the outward normal in the ground plane
     const gn = nNorm(nx, nz); nx = gn.x; nz = gn.y;
 
-    // (1) avalanche down the face (scaled to the hit, not capped to a dribble)
-    facadeAvalanche(x, y, z, nx, nz, Math.min(2.2, power + 0.2));
-
-    // (2) the persistent RUBBLE HEAP at the base — sized to the hole. A wider,
-    //     more powerful hole drops a bigger, deeper pile of more pieces.
-    const heapN = Math.round(14 + width * 4 + power * 6);
-    const heapSpread = 1.4 + width * 0.5;
-    const heapSize = 1.0 + power * 0.25;
-    rubbleHeap(x, z, nx, nz, heapSpread, heapSize, heapN);
+    /* (1)+(2) THE FALLING AND THE FALLEN. Both of these used to be invented at
+       this point: an avalanche of `7 + 5*power` shards off a shared grey and a
+       heap of `14 + width*4 + power*6` lumps off another, neither of which had
+       ever looked at the wall. On the conserved path the carve has ALREADY shed
+       the real material through CBZ.cityShedSolid — the pieces flying past this
+       line are cells of that wall, in that wall's colour, and they are on their
+       way to becoming the pile. Minting a second, fake population next to them
+       is exactly the "fake blocks that are supposed to be rubble" read.
+       Flag off → both invented spawners return, byte for byte. */
+    if (!conservedOn()) {
+      facadeAvalanche(x, y, z, nx, nz, Math.min(2.2, power + 0.2));
+      const heapN = Math.round(14 + width * 4 + power * 6);
+      rubbleHeap(x, z, nx, nz, 1.4 + width * 0.5, 1.0 + power * 0.25, heapN);
+    }
 
     // (3) dangling REBAR off the broken header (only if the wound is up off the
-    //     deck — a slab edge to tear from; ground-line blasts get fewer bars)
+    //     deck — a slab edge to tear from; ground-line blasts get fewer bars).
+    //     Reinforcement is NOT debris: it is the steel that was always inside
+    //     that slab, still rooted in it and now exposed. It stays.
     const nBar = top > 2.2 ? Math.round(3 + width * 0.8) : 2;
     dangleRebar(x, top - 0.1, z, nx, nz, width, Math.min(8, nBar));
-    reinforcedRuinFrame(x, z, nx, nz, width, top, bottom, power);
+    // The jagged-tooth overlay was a DECORATION laid over a machined rectangle
+    // to hide that the rectangle was machined. With the opening diced, the rim
+    // is ragged because real cells survived on it — so the overlay is retired
+    // on the conserved path rather than competing with the material it fakes.
+    if (!conservedOn()) reinforcedRuinFrame(x, z, nx, nz, width, top, bottom, power);
 
     // (4) soot ring on the face — PURGED by default (FX_WALL_WOUNDS); the call
     //     stays so flipping the flag restores the old read exactly.
@@ -1745,7 +1938,10 @@
     // (b) a SECOND avalanche tier sheeting the FULL facade from wound to street —
     //     a much larger drop than the core ruin's, with a tall staggered dust
     //     column so the whole wall visibly cascades, not just the wound lip.
-    facadeAvalanche(x, y, z, nx, nz, Math.min(2.4, power + 0.3));
+    // Second avalanche tier: invented shards, so it goes with the first (see
+    // CONSERVATION OF MATTER). The dust column below is DUST, not debris — a
+    // blast really does make it out of nothing you can pick up — and stays.
+    if (!conservedOn()) facadeAvalanche(x, y, z, nx, nz, Math.min(2.4, power + 0.3));
     const drop = Math.min(Math.max(3, top - 0.5), 26);   // extend the cascade to the wound HEIGHT
     const nCol = Math.round(8 + power * 4);
     for (let i = 0; i < nCol; i++) {
@@ -1765,14 +1961,16 @@
     // (c) the COLLAPSE CURTAIN — 12–18 extra pooled chunks (power-scaled, capped)
     //     raining the full height from the wound up to the street, biased down.
     const curtainN = Math.min(18, Math.round(12 + power * 3));
-    collapseCurtain(x, z, nx, nz, Math.max(top, y + width), bottom, width, curtainN);
+    if (!conservedOn()) collapseCurtain(x, z, nx, nz, Math.max(top, y + width), bottom, width, curtainN);
 
     // (d) a FATTER, taller persistent rubble heap (~1.5x spread + count) — a bomb
     //     dumps a deeper pile of masonry on the sidewalk than a rocket.
-    const heapN = Math.round((14 + width * 4 + power * 6) * 1.5);
-    const heapSpread = (1.4 + width * 0.5) * 1.5;
-    const heapSize = (1.0 + power * 0.25) * 1.15;
-    rubbleHeap(x, z, nx, nz, heapSpread, heapSize, heapN);
+    if (!conservedOn()) {
+      const heapN = Math.round((14 + width * 4 + power * 6) * 1.5);
+      const heapSpread = (1.4 + width * 0.5) * 1.5;
+      const heapSize = (1.0 + power * 0.25) * 1.15;
+      rubbleHeap(x, z, nx, nz, heapSpread, heapSize, heapN);
+    }
   };
 
   // ============================================================
@@ -2048,6 +2246,9 @@
     for (const rf of ruinFrames) if (rf.group && rf.group.parent) rf.group.parent.remove(rf.group);
     ruinFrames.length = 0;
     ruinStats.events = ruinStats.pieces = ruinStats.bars = 0;
+    pileTop.clear();
+    shedStats.events = shedStats.pieces = shedStats.kept = 0;
+    shedStats.volShed = shedStats.volRemoved = shedStats.invented = 0;
     if (_collapseSeen) _collapseSeen.clear();          // fresh run → un-throttle collapses
   };
 
@@ -2163,7 +2364,7 @@
         // a RUBBLE-HEAP piece is the permanent ruin — it persists far longer
         // (the population-pool recycle still evicts it if space is needed AND
         // it's off-screen, so it never pops out under the player's eye).
-        if (c.rest > (c.heap ? 180 : 18)) { scene.remove(c.mesh); chunks.splice(i, 1); }
+        if (c.rest > ((c.heap || c.pile) ? 180 : 18)) { scene.remove(c.mesh); chunks.splice(i, 1); }
         continue;
       }
       c.vy -= grav * 0.8 * dt; // mild gravity so shrapnel hangs
@@ -2183,6 +2384,13 @@
         if (slow || c.t > c.life) {
           c.settled = true; c.rest = 0;
           c.vx = c.vy = c.vz = 0; c.spin = 0;
+          // A SHED FRAGMENT LANDS ON THE PILE, NOT THROUGH IT. Ordinary chunks
+          // rest on the road; a piece cut out of a wall is one of dozens
+          // arriving at the same few square metres, and resting them all at
+          // floor level lays a flat mosaic instead of a heap. Seat it on
+          // whatever already occupies that cell — the mound then builds itself
+          // out of real contacts, and it is made of the wall.
+          if (c.pile) p.y = pileSeat(p.x, p.z, hh);
           // lie flat on the deck rather than frozen at a tumble angle
           c.mesh.rotation.x = (rng() - 0.5) * 0.5;
           c.mesh.rotation.z = (rng() - 0.5) * 0.5;

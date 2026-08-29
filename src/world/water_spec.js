@@ -2042,8 +2042,12 @@
 
   CBZ.waterBuildDisasterGeometry = function (span, segments) {
     const tier = Math.max(0, Math.min(4, (CBZ.qualityLevel == null ? 2 : CBZ.qualityLevel) | 0));
-    const byTier = [64, 88, 120, 144, 168];
-    const seg = Math.max(16, (segments | 0) || byTier[tier]);
+    // Metres per vertex, per tier. This used to be a fixed segment count
+    // (64..168) tuned against the original 1400 m sheet; quoting it as PITCH
+    // keeps the swell sampling density identical when a caller asks for a
+    // bigger sheet, instead of silently aliasing the wave table.
+    const pitchByTier = [21.9, 15.9, 11.7, 9.7, 8.3];
+    const seg = Math.max(16, (segments | 0) || Math.round(span / pitchByTier[tier]));
     const geo = new THREE.PlaneGeometry(span, span, seg, seg);
     geo.rotateX(-Math.PI / 2);
     geo.userData.waterDisasterGrid = { span: span, segments: seg };

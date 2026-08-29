@@ -2357,7 +2357,7 @@
         }
         const crownJ = CBZ.hash01 ? CBZ.hash01(px, pz, 8809) : 0.5;
         const alt = st.grad ? st.grad.alt : 0;
-        let bb = cbb, idx;
+        let bb = C.cbb || cbb, idx;
         if (conifer && C.spires) {
           // The spire carries its foliage down the bole and its tip 30-45%
           // above the broadleaf roof — that overshoot IS the reference's
@@ -2369,7 +2369,7 @@
           dummy.rotation.set(0, rot, 0);
           dummy.scale.set(sc * (0.92 + crownJ * 0.34), sy, sc * (0.92 + crownJ * 0.34));
           dummy.updateMatrix(); C.spires.setMatrixAt(C.ci, dummy.matrix);
-          bb = sbb; idx = C.ci;
+          bb = C.sbb || sbb; idx = C.ci;
         } else {
           const cr = sc * (1.14 + crownJ * 0.28);
           const ch = sc * (0.86 + hs * 0.20);
@@ -2377,7 +2377,7 @@
           dummy.rotation.set(0, rot, 0);
           dummy.scale.set(cr, ch, cr);
           dummy.updateMatrix(); C.canopies.setMatrixAt(C.bi, dummy.matrix);
-          bb = cbb; idx = C.bi;
+          bb = C.cbb || cbb; idx = C.bi;
         }
         if (parts && bb) {
           CBZ.treeAabbPush(parts, dummy.matrix, bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z);
@@ -2428,6 +2428,29 @@
           for (let i = 0; i < nT; i++) if (ch.stems[i].conifer) cone++;
           const broad = nT - cone;
           const C = { ti: 0, bi: 0, ci: 0 };
+          /* ---- A COUNTRY THAT IS NOT ONE TREE ---------------------------
+             world/vegetation.js now grows K structurally different crowns per
+             archetype. Redhollow splits its stand PER INSTANCE because you
+             walk through it; out here the forest is already one mesh set per
+             1.6 km CHUNK, so the variant is chosen per chunk instead — the
+             silhouette changes across the country for exactly ZERO extra draw
+             calls, and the visible disc (~3.5 km) always spans a dozen-odd
+             chunks, so every variant is on screen at once anyway. Honest
+             limitation: two neighbouring trees inside one chunk still share a
+             mesh, which at these ranges is a sub-pixel fact.
+             The choice is a POSITION hash on the chunk centre — no draw on
+             any sequential stream, so not one stem, cabin or animal moves. */
+          function chunkGeo(kind, base) {
+            if (!SCENERY || !VKIT || !VKIT.variantAt) return base;
+            const v = VKIT.variantAt(ch.cx, ch.cz, kind);
+            // Variant 0 is noted too — the audit's question is "how many
+            // variants did this site actually draw", and a site that reported
+            // only its non-zero picks would read as cloned however well it
+            // mixed.
+            if (VKIT.noteUse) VKIT.noteUse("continent", kind, v, 1);
+            if (!v) return base;
+            return VKIT.geometry(kind, v) || base;
+          }
           if (nT) {
             C.trunks = new THREE.InstancedMesh(trunkG, trunkMat, nT);
             C.tCol = new Float32Array(nT * 3);
@@ -2436,21 +2459,28 @@
             ch.meshes.push(C.trunks);
           }
           if (broad) {
-            C.canopies = new THREE.InstancedMesh(canopyG, canopyMat, broad);
+            const g = chunkGeo("landscape-crown", canopyG);
+            C.canopies = new THREE.InstancedMesh(g, canopyMat, broad);
+            // every variant shares variant 0's bounding box by construction,
+            // but the audit chain is proved from the geometry that actually
+            // draws — never from a stand-in.
+            C.cbb = g === canopyG ? cbb : (TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(g) : null);
             C.cCol = new Float32Array(broad * 3);
             C.canopies.name = "backcountry-tree-canopies";
             C.canopies.userData.forestColors = C.cCol;
             ch.meshes.push(C.canopies);
           }
           if (cone && spireG) {
-            C.spires = new THREE.InstancedMesh(spireG, canopyMat, cone);
+            const g = chunkGeo("conifer-spire", spireG);
+            C.spires = new THREE.InstancedMesh(g, canopyMat, cone);
+            C.sbb = g === spireG ? sbb : (TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(g) : null);
             C.sCol = new Float32Array(cone * 3);
             C.spires.name = "backcountry-conifer-spires";
             C.spires.userData.forestColors = C.sCol;
             ch.meshes.push(C.spires);
           }
           if (ch.scrub.length && scrubG) {
-            C.scrubs = new THREE.InstancedMesh(scrubG, canopyMat, ch.scrub.length);
+            C.scrubs = new THREE.InstancedMesh(chunkGeo("krummholz", scrubG), canopyMat, ch.scrub.length);
             C.kCol = new Float32Array(ch.scrub.length * 3);
             C.scrubs.name = "backcountry-krummholz";
             C.scrubs.userData.forestColors = C.kCol;
