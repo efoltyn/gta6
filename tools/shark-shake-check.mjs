@@ -38,6 +38,7 @@ const OFF = argv.filter((a, i) => argv[i - 1] === "--off");
 const FEAST = has("--feast");          // keep meat in front of the mouth: real play, not an empty sea
 const TIER = +arg("--tier", "-1");     // force a rung of the ladder before measuring
 const NOSHAKE = has("--noshake");      // ablation: stub CBZ.shake, leave everything else
+const PREY = has("--prey");            // the other side of the game: the pod is on YOU
 const say = (m) => { if (!JSON_OUT) console.log(m); };
 
 const rig = await launch({ rafBudget: 0 });
@@ -64,8 +65,30 @@ const FEED_SRC = `(() => {
   }
   return placed;
 })()`;
+/* THE POD IS ON YOU. Parks the orcas on top of the player's shark with full
+   hunger and keeps the shark alive, so the run measures what the game does to
+   the camera while something is EATING the player rather than the reverse. */
+const PREY_SRC = `(() => {
+  const S = CBZ.sharkSim.shark, P = CBZ.player; if (!S) return 0;
+  let n = 0;
+  for (const a of CBZ.cityWildlife) {
+    if (a.dead || !a.species || a === S) continue;
+    if (a.species.id !== "orca") continue;
+    const ang = n * 2.1;
+    a.pos.x = S.pos.x + Math.cos(ang) * 9; a.pos.z = S.pos.z + Math.sin(ang) * 9;
+    if (a._waterMove) { a._waterMove.x = a.pos.x; a._waterMove.z = a.pos.z; }
+    a.hunger = 1; a.target = S;
+    n++;
+  }
+  // book the damage the pod actually landed, THEN heal, so the shark survives
+  // the whole measurement window without hiding whether it was ever bitten
+  if (window.__SHK) window.__SHK.dmg = (window.__SHK.dmg || 0) + Math.max(0, (S.maxHp || 0) - (S.hp || 0));
+  S.hp = S.maxHp;
+  return n;
+})()`;
 const burst = (sec) => rig.evl(
   `(() => { for (let i = 0, n = ${Math.max(1, Math.round(sec * 60))}; i < n; i++) {
+      ${PREY ? `if (i % 45 === 0) { ${PREY_SRC}; }` : ""}
       ${FEAST ? `if (i % 45 === 0) { ${FEED_SRC}; }` : ""}
       CBZ.stepSim(1/60);
     } return true; })()`);
@@ -260,6 +283,9 @@ try {
     hitstop: S.hitstop, slowmo: S.slowmo, by: S.by, calls: S.calls.slice(-60),
     n: S.calls.length,
     stage: S.stage, jumps: S.jumps,
+    dmgTaken: +(S.dmg || 0).toFixed(0),
+    sharkHp: CBZ.sharkSim.shark ? +(CBZ.sharkSim.shark.hp || 0).toFixed(0) : -1,
+    seized: !!(CBZ.predatorDebug && CBZ.predatorDebug().seizes),
     hardHits: CBZ.humanContact ? CBZ.humanContact.stats().hardHits : -1,
     blocks: CBZ.humanContact ? CBZ.humanContact.stats().blocks : -1,
     pSpeed: +(CBZ.player.speed || 0).toFixed(2), pSprint: !!CBZ.player.sprint,
@@ -279,6 +305,7 @@ try {
   say("  CAMERA JITTER DUTY  " + (dutyMove * 100).toFixed(1) + "%  " +
       "(ticks with >2 cm of zig-zag)   mean " + (S.jitter / Math.max(1, S.ticks)).toFixed(3) +
       " m   max " + S.jmax.toFixed(2) + " m");
+  say("  damage the pod landed on you: " + S.dmgTaken);
   say("  hardPlayerContact HITS " + S.hardHits + "   blocks " + S.blocks +
       "   |  player speed " + S.pSpeed + " sprint " + S.pSprint + " mode " + S.mode +
       " mounted " + S.mounted + "  |  bots alive " + S.botsAlive + " down " + S.botsDown);

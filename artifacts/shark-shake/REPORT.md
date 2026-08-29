@@ -92,3 +92,47 @@ Per mouthful: shake calls −62 %, total shake amplitude −78 %, peak single jo
 The swim integrator still puts 5–15 cm second-differences into the body/seat while
 cruising at 15 m/s (`0b_body` in the tool's output). It is below everything removed here
 and the camera smooths most of it, but it is the next thing in this territory.
+
+---
+
+# Follow-up: the shake was pointed the wrong way
+
+Owner, after the first pass: *"if im getting eaten the shaking is awesome like if im
+getting bit actively and shaken idk just a thought but otherwise it should be almost
+entirely taken out."*
+
+Measured first, and it was the exact inversion of that:
+
+| 90 game-seconds | shakes fired |
+|---|---|
+| eating a stocked beach | 57 |
+| **three orcas landing 566 damage on you** | **0** |
+
+Nothing in the game shook the camera when something was eating the player. The reason:
+`systems/predator.js` gates its whole player-facing layer (dread, stinger, trauma shake,
+drop) on the victim *being* the player — and while you are mounted the victim is your
+animal, not you. `wildlife.js`'s `cityWildlifeHit` even returns early for a tamed animal.
+
+## What changed
+
+- `city/wildlife.js` — `cityWildlifeHit` publishes `CBZ.rideDamageFelt(a, dmg)`. It is
+  the single funnel every damage class already arrives through, so it is the one place
+  that can tell a rider they are being eaten.
+- `city/wildlife_tame.js` — receives it as two channels: **the bite** (one jolt per hit,
+  `0.28 + 3.2 × (dmg / maxHp)`, so a nip is a knock and a megalodon closing on you is a
+  slam) and **the mob** (a sustained ~6 Hz rumble, topped up in amplitude *and* time by
+  every hit, decaying the moment they let go — a pod working you over shakes the screen
+  continuously; one nip does not).
+- Everything self-inflicted came out: the player's own bite jolt is **gone**, the death
+  roll's per-half-turn `shake(0.5)` (~2.3/s for the whole roll) is **gone**, the clamp's
+  opening slam 1.1 → 0.30, the evolution beat 1.0 → 0.35.
+
+## Result
+
+| | shakes | duty | note |
+|---|---|---|---|
+| eating, 120 s, 33 meals | **7** (0.06/s) | 3.9 % | 3 evolutions, 3 water entries, 1 stray |
+| being eaten, 90 s, 559 dmg | **152** (1.74/s) | 21.5 % | 31 bite jolts + 121 rumble pulses |
+
+Originally the eating case ran at 21 % duty and 0.98 shakes/s. It is now 3.9 % and
+0.06/s, and the shake budget lives entirely on the pod.

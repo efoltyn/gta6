@@ -191,9 +191,16 @@
      the same one-second clock.
 
      THREE THINGS THIS IS CAREFUL ABOUT:
-       • ARRIVALS ARE UNSEEN. 45-85 m out, which is past the wildlife LOD
-         radius at the lowest quality tier (90 m) and well past it at any
-         other, so nothing is ever watched to pop into existence.
+       • ARRIVALS ARE UNSEEN — and since 2026-08-29 that is MEASURED rather
+         than asserted. The old claim ("45-85 m, past the wildlife LOD radius
+         at the lowest quality tier") was never the real reason: the LOD radius
+         is 360 u at the shipping tier, so it has never hidden anything at
+         45 m. What actually hid an arrival was the water — the underwater fog
+         closed at 16-40 m. Now that world/water_underwater.js solves a real
+         sighting range (and a look-up line of sight can run half again as far
+         as a level one), the floor is read off that range instead of guessed:
+         arrivalFloor() below asks CBZ.waterSight.maxRange() for the longest
+         sight line this water has and stands the spawner outside it.
        • FISH ARRIVE AS SHOALS, on one anchor, and that is load-bearing rather
          than decorative: city/marine_frenzy.js opens a BAIT BALL when a bait
          species (mackerel, sardine — the two rows whose herd maximum clears
@@ -283,6 +290,22 @@
      sea's sight lines are shorter than the spacing) and it never balls. */
   /* `pend` continues a school already arriving: same anchor, same herd, so a
      ball bigger than one tick's build budget is still ONE cohesive shoal. */
+  /* HOW FAR OUT AN ARRIVAL HAS TO BE TO GO UNWATCHED. The longest sight line
+     in this water, plus a margin — never below the 45 m the ring has always
+     used, and capped so a freak-clear sea cannot push a school outside the
+     navigable annulus and starve the spawner. Above water CBZ.waterSight
+     returns the mode's own fog far (hundreds of metres), which is why the
+     result is clamped rather than trusted: a surfaced shark is not supposed
+     to move the fish spawner to the horizon. */
+  function arrivalFloor() {
+    let r = 45;
+    try {
+      const ws = CBZ.waterSight;
+      if (ws && CBZ.cityCameraSubmerged && CBZ.cityCameraSubmerged()) r = ws.maxRange() * 1.22;
+    } catch (e) {}
+    return Math.max(45, Math.min(72, r));
+  }
+
   function spawnGroup(id, n, minD, maxD, pend) {
     const at = pend ? pend.at : seaPointNear(clearanceOf(id), minD, maxD);
     if (!at) return null;
@@ -328,7 +351,7 @@
        size). While one is mid-arrival nothing else starts. */
     const pend = sim.seaPend;
     if (pend) {
-      const r = spawnGroup(pend.id, Math.min(pend.left, bodies), 45, 85, pend);
+      const r = spawnGroup(pend.id, Math.min(pend.left, bodies), arrivalFloor(), arrivalFloor() + 40, pend);
       if (r && r.made) {
         sim.seaAdds = (sim.seaAdds || 0) + r.made;
         pend.left -= r.made; bodies -= r.made; budget--;
@@ -345,7 +368,7 @@
          skip it rather than top it up with a scrap. */
       if (row.n - have < row.g[0]) continue;
       const size = row.g[0] + ((Math.random() * (row.g[1] - row.g[0] + 1)) | 0);
-      const r = spawnGroup(row.id, Math.min(size, bodies), 45, 85);
+      const r = spawnGroup(row.id, Math.min(size, bodies), arrivalFloor(), arrivalFloor() + 40);
       if (r && r.made) {
         sim.seaAdds = (sim.seaAdds || 0) + r.made;
         budget--; bodies -= r.made;
@@ -360,7 +383,7 @@
     const want = rivalWant();
     for (const id in want) {
       if ((t[id] || 0) >= want[id]) continue;
-      const r = spawnGroup(id, 1, 55, 95);
+      const r = spawnGroup(id, 1, arrivalFloor() + 10, arrivalFloor() + 50);
       if (r) sim.seaAdds = (sim.seaAdds || 0) + r.made;
       return;
     }
@@ -702,7 +725,12 @@
       } catch (e) {}
     }
     if (CBZ.marineSurfaceHit) { try { CBZ.marineSurfaceHit(x, z, 4); } catch (e) {} }
-    if (CBZ.shake) CBZ.shake(1.0);
+    /* A BEAT, NOT A SLAM. Owner, 2026-08-29: the lens is for what is being
+       done TO you; everything else comes almost entirely out. Evolving is the
+       biggest thing you do to yourself, so it keeps a jolt — but a third of
+       the old one, because the swell, the splash ring and the slow-mo already
+       carry it and this one fired straight into a 0.42 s slow-mo. */
+    if (CBZ.shake) CBZ.shake(0.35);
     if (CBZ.doSlowmo) CBZ.doSlowmo(0.42);
     if (CBZ.sfx) { try { CBZ.sfx("win", { volume: 0.5 }); } catch (e) {} }
     sim.evolveBeats = (sim.evolveBeats || 0) + 1;

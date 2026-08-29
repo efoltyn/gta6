@@ -1137,6 +1137,7 @@
     attackT: 0, attackDur: 0, attackCd: 0, attackHit: false, attackHitP: -1,
     target: null, targetKind: null, attackPitch: 0, attackRoll: 0,
     lensT: 0,                 // refractory on the bite's camera jolt (see damageBiteTarget)
+    hurtT: 0, hurtAmp: 0, hurtAcc: 0,   // THE ONLY THING THAT SHAKES THE LENS — see rideDamageFelt
     // the above-weight-kill ceremony (see THE CLAMP below)
     clampT: 0, clampDur: 0, clampVictim: null, clampChum: null, clampBeat: -1, clampOrder: "",
   };
@@ -1577,7 +1578,11 @@
        about 0.4 s, so a jolt per meal simply never lets the lens settle. That
        is the difference between "this bite had weight" and "the screen is
        vibrating", and it is what the owner was calling an earthquake. */
-    if (killed && CBZ.shake && ride.lensT <= 0) { ride.lensT = 1.1; CBZ.shake(0.20); }
+    /* AND YOUR OWN MOUTH GETS NOTHING. This was the game's loudest shake and
+       it fired on the one event the player performs constantly. The bite is
+       already the splash, the jaws, the sound, the body growing and the thing
+       in front of you dying; it does not also need the lens. The lens is
+       reserved for what is being done TO you — see rideDamageFelt. */
     AQUATIC_AUDIT.hits++;
     AQUATIC_AUDIT.lastTarget = kind;
     // the shark sim's meal ledger: told about every LANDED mounted bite,
@@ -1678,7 +1683,7 @@
     }
     if (CBZ.goreBloom) { try { CBZ.goreBloom(j.x, j.y, j.z, { amount: 0.8 }); } catch (e) {} }
     if (CBZ.waterSplashAt) { try { CBZ.waterSplashAt(j.x, seaY(j.x, j.z), j.z, 4.2); } catch (e) {} }
-    if (CBZ.shake) CBZ.shake(1.1);
+    if (CBZ.shake) CBZ.shake(0.30);   // the grab lands; the roll below no longer kicks
     if (CBZ.doSlowmo) CBZ.doSlowmo(0.5);
     if (CBZ.sfx) { try { CBZ.sfx("hit", { volume: 1 }); } catch (e) {} }
     AQUATIC_AUDIT.clamps = (AQUATIC_AUDIT.clamps || 0) + 1;
@@ -1740,7 +1745,10 @@
           try { CBZ.goreBloom(j.x, j.y, j.z, { amount: 0.5 }); } catch (er) {}
         }
         if (CBZ.marineSurfaceHit) { try { CBZ.marineSurfaceHit(j.x, j.z, 2.4); } catch (er) {} }
-        if (CBZ.shake) CBZ.shake(0.5);
+        /* NO KICK PER HALF TURN. CLAMP_HZ is 1.15, so this fired ~2.3 times a
+           second for the whole roll — the most literal earthquake in the game,
+           and it was YOU doing the shaking. The half-turn beat is the piece
+           coming away, the blood and the surface breaking; that is plenty. */
         if (CBZ.sfx) { try { CBZ.sfx("hit", { volume: 0.7 }); } catch (er) {} }
       }
     } else {
@@ -2759,7 +2767,7 @@
     ride.visual = null; ride.water = null;
     ride.attackT = ride.attackCd = 0; ride.attackHitP = -1; ride.target = null; ride.targetKind = null;
     ride.attackPitch = ride.attackRoll = 0;
-    ride.lensT = 0;
+    ride.lensT = 0; ride.hurtT = 0; ride.hurtAmp = 0; ride.hurtAcc = 0;
     a._atkAnim = -1;
     if (CBZ.swimJaw) CBZ.swimJaw(a, 0);
     P._mountedAnimal = null;
@@ -2813,6 +2821,48 @@
      closure it cannot see, so it is published here as a getter/setter pair in
      one function rather than as a raw handle to the ride object. Passing a
      number turns the mount; passing nothing just asks. */
+  /* ============================================================
+     BEING EATEN IS THE ONLY THING THAT SHAKES THE LENS.
+
+     Owner, 2026-08-29: "if im getting eaten the shaking is awesome like if im
+     getting bit actively and shaken idk just a thought but otherwise it should
+     be almost entirely taken out."
+
+     That is a design, not a tuning note, and it inverts what this game was
+     doing. Measured with tools/shark-shake-check.mjs: eating a stocked beach
+     fired 57 shakes in 90 s, while three orcas landing 566 damage ON the
+     player fired ZERO — every jolt in the game came from the player's own
+     mouth. So every self-inflicted jolt below is gone or cut to a beat, and
+     the whole shake budget moved here.
+
+     TWO CHANNELS, because "bit" and "shaken" are two different feelings:
+       · THE BITE  — one jolt per hit, scaled by how much of you it took. A
+                     nip off a small orca is a knock; a megalodon closing on
+                     you is a slam.
+       · THE MOB   — a sustained rumble at ~6 Hz for as long as they keep
+                     landing hits, topped up by each one and decaying the
+                     moment they let go. A pod working you over shakes the
+                     screen continuously; one nip does not. The 6 Hz re-drive
+                     is systems/impactbus.js's rumble trick: a per-frame
+                     CBZ.shake re-triggers camera.js's envelope every frame and
+                     reads as a buzz rather than as weight.
+     ============================================================ */
+  CBZ.rideDamageFelt = function (a, dmg) {
+    if (!a || a !== ride.mount || !(dmg > 0)) return;
+    const P = CBZ.player;
+    if (!P || P.dead || g.state !== "playing") return;
+    // how much of YOU that bite took: a fraction, so it reads the same on a
+    // bull shark and on a megalodon rather than tracking raw hit points
+    const maxHp = a.maxHp || (a.species && a.species.hp) || 100;
+    const bit = Math.max(0, Math.min(1, dmg / Math.max(1, maxHp)));
+    if (CBZ.shake) { try { CBZ.shake(Math.min(1.3, 0.28 + bit * 3.2)); } catch (e) {} }
+    // the mob: each hit tops the rumble up and extends it. Stacking amplitude
+    // (not just time) is what makes three orcas feel different from one.
+    ride.hurtAmp = Math.min(0.55, ride.hurtAmp + 0.10 + bit * 1.1);
+    ride.hurtT = Math.min(2.2, ride.hurtT + 0.55 + bit * 2.0);
+    if (CBZ.sfx) { try { CBZ.sfx("hit", { volume: Math.min(1, 0.45 + bit * 1.2) }); } catch (e) {} }
+  };
+
   CBZ.cityMountedHeading = function (h) {
     if (typeof h === "number" && isFinite(h)) {
       ride.head = h;
@@ -2865,6 +2915,19 @@
     // ballistic root itself; adding a second sine there would make the animal
     // detach visually from its collision trajectory.
     if (ride.lensT > 0) ride.lensT = Math.max(0, ride.lensT - dt);
+    /* THE MOB RUMBLE (see rideDamageFelt). Driven at ~6 Hz, never per frame,
+       and it falls off with its own remaining time so letting go of you reads
+       as relief rather than as a cut. */
+    if (ride.hurtT > 0) {
+      ride.hurtT = Math.max(0, ride.hurtT - dt);
+      ride.hurtAmp = Math.max(0, ride.hurtAmp - dt * 0.30);
+      ride.hurtAcc += dt;
+      if (ride.hurtAcc >= 0.16) {
+        ride.hurtAcc = 0;
+        const k = ride.hurtT / 2.2;
+        if (CBZ.shake && ride.hurtAmp > 0.02) { try { CBZ.shake(ride.hurtAmp * (0.35 + k)); } catch (e) {} }
+      }
+    } else ride.hurtAmp = 0;
     ride.phase += dt * (moving ? 9 : 0.6);
     const bob = !W && moving && !airborne ? Math.abs(Math.sin(ride.phase)) * 0.09 * liveScale(a) : 0;
     const rootY = W ? W.y : P.pos.y;

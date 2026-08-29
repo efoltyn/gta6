@@ -1207,6 +1207,17 @@
     const dmg = Math.max(1, Math.round((w && w.damage || 20) * (hit && hit.head ? (w && w.headMult || 2) : 1) * fall));
     a.hitCount++;
     a.hp -= dmg;
+    /* SOMETHING IS BITING THE THING YOU ARE RIDING. This is the single funnel
+       every damage class already arrives through (see the long note further
+       down), so it is the one place that can tell the rider they are being
+       eaten. Owner, 2026-08-29: "if I'm getting eaten the shaking is awesome
+       ... otherwise it should be almost entirely taken out." Measured before
+       this line existed: three orcas landed 566 damage on the player's shark
+       over 90 seconds and the camera never moved once — the whole player-
+       facing feedback layer in systems/predator.js is gated on the victim
+       BEING the player, and while you are mounted the victim is your animal.
+       city/wildlife_tame.js owns what it feels like; this just reports it. */
+    if (CBZ.rideDamageFelt) { try { CBZ.rideDamageFelt(a, dmg); } catch (e) {} }
     // blood spritz where reachable (reuse the shared gore if present).
     if (hit && hit.point && CBZ.gore && CBZ.gore.spray) {
       try { CBZ.gore.spray(hit.point, hit.head ? 0.9 : 0.55, hit.dir || null); } catch (e) {}
