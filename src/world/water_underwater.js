@@ -221,9 +221,159 @@
   // both windows. What changes is genuinely near-shore water — under 18 m —
   // which gets bluer sooner, which is what the photographs show.
   const BASIN_LIGHT = 2, BASIN_DARK = 18;
-  // How far you can see, by `k`. Linear THREE.Fog, so this is literally "how
-  // far can you see" — long over sand (ref 3), short in the deep (ref 5).
-  const FOG_FAR_SHALLOW = 40, FOG_FAR_MID = 24, FOG_FAR_DEEP = 16;
+  /* ============================================================
+     HOW FAR YOU CAN SEE — Duntley, not a ramp. (2026-08-29.)
+
+     THE COMPLAINT. Owner: "when my shark dives and goes underwater, it's
+     seeing other sharks and fish distance is small af ... I feel like oh wow a
+     shark is at sea level and then I dive and I can't see the shark any more
+     when it's decently close."
+
+     THE BUG IS ONE CONFUSION: THIS FILE MADE DEEP WATER MURKY. `farK` used to
+     be driven by `k`, the COLOUR grade — and `k` is 72% the eye's own depth
+     (see medium()). So swimming down did not merely darken the picture, it
+     shortened the sighting range from 40 m to 16 m, as though the water
+     thickened as you descended. It does not. It is the same water. What
+     changes with depth is the LIGHT, not the CLARITY, and this file already
+     models the light three separate ways (the RAMP, driveLight, the day
+     factor). Grading the range off the same number counted it a fourth time
+     and turned every dive into a fog bank.
+
+     WHAT ACTUALLY SETS A SIGHTING RANGE. You do not detect an animal by its
+     brightness, you detect it by its CONTRAST against the water directly
+     behind it, and Duntley (1963, "Light in the Sea", JOSA 53:214) gives the
+     law that contrast obeys along a path of sight:
+
+         C(r) = C0 * exp( -( c - K * u ) * r )
+
+       c  the BEAM attenuation coefficient of the water (absorption plus
+          scattering) — the rate at which the animal's own radiance difference
+          is stripped out of the beam. THIS is the clarity of the water, and it
+          is a property of the WATER, not of how deep you are in it.
+       K  the DIFFUSE attenuation coefficient of the ambient field — the rate
+          at which daylight dies with depth.
+       u  the upward component of the unit line of sight: +1 straight up, 0
+          level, -1 straight down.
+
+     The K*u term is the whole answer to the owner's sentence. Looking UP, the
+     water behind the animal is shallower than the water at your own eye, so
+     the background it is silhouetted against is BRIGHTER than the background
+     your eye is adapted to, and the contrast GROWS with every metre of that
+     difference. Looking DOWN, the background is darker than your reference and
+     the animal washes into the abyss. A shark at the surface seen from 20 m
+     down is the single most visible thing in the ocean; the old model made it
+     the least.
+
+     Detection at threshold contrast eps gives the sighting range:
+
+         R(u) = ln( |C0(u)| / eps ) / ( c - K*u )
+
+     and |C0| is ITSELF a function of direction, because a body seen from below
+     is a silhouette whatever colour its belly is while a body seen from above
+     is genuinely camouflaged. R(0) is written into fog.far here; the shape of
+     R around it goes to the shader as two coefficients through
+     CBZ.setFogAniso (core/renderer.js), which scales the PATH LENGTH per
+     fragment — algebraically the same thing as scaling the range, and the only
+     way one scalar THREE.Fog can be anisotropic at all. See sightRange().
+
+     WHY THE DEEP IS NOT MURKY AND THE SHALLOWS ARE NOT CLEAR. The clearest
+     water on earth is open oligotrophic ocean; a sand flat is clear because it
+     is a sand flat, not because it is shallow. The one thing that genuinely
+     dirties water in this world is (a) being an inland lake and (b) being in
+     the surf, where breaking waves hold sand in suspension. So `c` is set by
+     those two and by nothing else, and the abyss is the clearest water in the
+     game — which is what ref 5, an open-blue-water photograph you can see
+     thirty metres through, actually shows.
+  ============================================================ */
+  /* THE CONTRAST THRESHOLD, eps. Blackwell's 90,000-observation study (1946,
+     JOSA 36:624), refitted by Crumey (2014, MNRAS 442:2600), puts the large-
+     target photopic asymptote at C = 2.72e-3 for 50% forced-choice detection,
+     and x2.4 for what Blackwell called "common-sense seeing" — call it 0.0065.
+     The number used here is 0.0082, because that is the one that reproduces
+     the EMPIRICALLY VALIDATED sighting range: Zaneveld & Pegau (2003, Opt.
+     Express 11:2997) found "visibility is equal to 4.8 divided by the photopic
+     beam attenuation coefficient ... accurate with an average error of less
+     than 10% in a wide variety of coastal and inland waters", and
+     ln(1/0.0082) = 4.80. Duntley's own bracket is 4/c to 5/c.
+     NOT 0.02. That is the Koschmieder atmospheric convention (3.9/c) and it is
+     also the right value for a SMALL target — Duntley's own observer
+     calibration measures ~0.02 at 5 arcmin. A 3 m shark at 40 m subtends 258
+     arcmin. It is a large target, and the large-target threshold applies. */
+  const EPS_DAY = 0.0082;
+  // ...and in the dark, from the same Crumey fit's scotopic branch:
+  //   C = 7.633e-3 * L^-0.25 - 7.174e-3    (L = adaptation luminance, cd/m^2)
+  // valid below the Weber knee at L = 0.354 cd/m^2, then the same x2.4 for
+  // seeing rather than guessing. Capped, because a pitch-dark sea should be
+  // short-sighted, not blind.
+  const EPS_KNEE = 0.354, EPS_SCOTO_A = 7.633e-3, EPS_SCOTO_B = 7.174e-3;
+  const EPS_SEE = 2.4, EPS_MAX = 0.45;
+  /* NO SHARK BONUS, and that is a measurement, not an oversight. A tapetum
+     lucidum buys a shark roughly a log unit of sensitivity — but the contrast
+     thresholds actually measured on sharks are 1.3%, 1.6% and 2.9% (Ryan et
+     al. 2016 J Exp Biol 219:3971; 2017 J Comp Physiol A 203:197), i.e. two to
+     four times WORSE than the human large-target figure above. The two effects
+     very nearly cancel, and the player is looking at a screen with human eyes
+     anyway. */
+
+  /* THE INHERENT CONTRAST OF A BODY, BY DIRECTION — and this is the half of
+     the asymmetry that is NOT about the water.
+
+     A body seen FROM BELOW is a silhouette against downwelling light, and it
+     is a silhouette no matter what colour its belly is: Johnsen (2002, Proc R
+     Soc B 269:243) computes the reflectance an animal would need to disappear
+     when viewed from below and gets 1e8 to 1e16 — physically impossible.
+     Confirmed on the animal in question (Ryan et al. 2024, Curr Biol 34:5789):
+     "any object, even if its ventral surface is white due to countershading,
+     will appear as a dark silhouette when viewed from below." So C0 = 1.0
+     looking up, and countershading buys the shark NOTHING there.
+
+     Horizontally a pale flank buys about 20% (sighting distance 80% of a black
+     target's). From ABOVE, against the upwelling gloom, countershading finally
+     works properly and a dark dorsal surface is worth roughly C0 = 0.2.
+
+     An EARLIER DRAFT OF THIS FILE HAD THIS BACKWARDS — it argued that
+     countershading is evolved to cancel the up/down asymmetry, so C0 could be
+     left flat. It does not: it cancels the DOWNWARD half and cannot touch the
+     upward half. Getting it right roughly doubles the total asymmetry, from
+     1.5x to about 3x, which is why "the one that gets you is the one from
+     below" is a real sentence and not a saying. */
+  const C0_UP = 1.00, C0_LEVEL = 0.80, C0_DOWN = 0.20;
+
+  /* THE WATER TYPES. c (beam attenuation) and Kd (diffuse attenuation), m^-1,
+     at ~490 nm — the band that survives furthest in sea water and therefore
+     the one that sets the range. Kd values are Jerlov's, as retabulated with
+     ranges by Aas, Hojerslev, Hokedal & Sorensen (2013, Oceanologia 55:471).
+
+       SEA   Jerlov oceanic IB (Kd 0.031-0.048): the clear tropical water every
+             reference photograph in this file was shot in. 4.8/c = 38 m, which
+             is what a diver means by "a really good day".
+       SURF  the breaking zone, milky with its own sand — Jerlov coastal 5-9,
+             where visibility is measured in single metres, not tens.
+       LAKE  an inland body. These two numbers are almost exactly two MEASURED
+             lakes: Tyler's Lake Pend Oreille (alpha 0.40-0.46, K 0.178-0.22 at
+             480 nm) and Duntley's Diamond Island (alpha 0.585, K 0.350
+             photopic, 14 determinations each).
+     Kd/c lands in 0.30-0.45 for all three, which is where every certified
+     measured pair sits. */
+  const C_SEA = 0.127, KD_SEA = 0.042;    // Jerlov IB   — level ~36 m
+  const C_SURF = 1.60, KD_SURF = 0.600;   // true surf   — level ~2.9 m
+  const C_LAKE = 0.55, KD_LAKE = 0.220;   // inland lake — level ~8.3 m
+  /* The surf band, by the seabed depth under the eye, and it is DELIBERATELY
+     NARROW. Shallow is not the same as turbid — a Bahamas sand flat in 5 m of
+     water is the clearest thing in this game, and ref 3 reads its bottom
+     thirty metres out. Only the actual wash, where waves are breaking and
+     holding sand up, is milk. Past 3 m of water this term is zero. */
+  const SURF_STIR = 0.6, SURF_CLEAR = 3.0;
+  // Surface illuminance, lux, for the ambient-luminance term. Sun at 65 deg is
+  // 107,600 lx and at 16.8 deg is 21,500 lx (BuShips Natural Illumination
+  // Charts, via Preisendorfer, Hydrologic Optics I sec 1.9); a full moon is
+  // about 0.27 lx. CBZ.dayness is a 0..1 cosmetic curve, so it is shaped by an
+  // exponent to span that six-decade range instead of a linear sixth of noon.
+  const E_NOON = 110000, E_NIGHT = 0.3, E_SHAPE = 2.2;
+  // Preisendorfer's measured rule for optically deep water: about 50x more
+  // illuminance reaches a horizontal plane from above than from below, so the
+  // irradiance reflectance R_inf is 0.02. Nadir luminance = 0.02 * E / pi.
+  const R_INF = 0.02;
   // Beer-Lambert extinction per metre of EYE depth, R/G/B. Much gentler than
   // the old (0.45, 0.09, 0.045) because the ramp above already carries the
   // hue; this is only the trim that keeps red dying first.
@@ -405,9 +555,14 @@
   const SHAFT_H = 22;
 
   // The backdrop shell (see THE EMPTY PIXEL, below). Radius only has to clear
-  // the longest fog range this file ever writes (FOG_FAR_SHALLOW * the 1.9x
-  // look-up bonus = 76 m) by a wide margin at the frustum corners, and stay
-  // well inside every camera's far plane.
+  // the longest EFFECTIVE fog range this file can produce by a wide margin at
+  // the frustum corners, and stay well inside every camera's far plane. That
+  // ceiling is now R0 at its clearest (~36 m) divided by the anisotropy's
+  // steepest look-up multiplier (clamped at 0.30), i.e. under 120 m in the
+  // worst case and ~56 m in the sea you actually swim in. 260 clears both.
+  // If you ever raise C_SEA's clarity past a 75 m R0, raise this too —
+  // a backdrop inside the fog range stops saturating and becomes a visible
+  // dark sphere around the eye.
   const BACKDROP_R = 260;
 
   let fxRoot = null, ceiling = null, ceilU = null, shafts = null, shaftMat = null;
@@ -828,7 +983,7 @@
     if (myFog || !scene || !scene.fog) return;
     savedFog = scene.fog;
     savedNear = savedFog.near; savedFar = savedFog.far;
-    myFog = new THREE.Fog(savedFog.color.getHex(), 0.6, FOG_FAR_SHALLOW);
+    myFog = new THREE.Fog(savedFog.color.getHex(), 0.6, _sight.r0);
     lastNear = myFog.near; lastFar = myFog.far;
     scene.fog = myFog;
   }
@@ -840,6 +995,10 @@
     savedFog.far = savedFar;
     myFog = null; savedFog = null;
     lastNear = lastFar = -1;
+    // The medium is gone; so is its anisotropy. Belt and braces with the dry
+    // early-return in the main pass — surfacing must not leave a sphere of
+    // water bent around a dry camera.
+    if (CBZ.setFogAniso) CBZ.setFogAniso(0, 0);
     driveLight(0, 0);              // give the world its daylight back at once
     releaseSky(scene);
     // Stop re-asserting a water colour onto a Fog we no longer own. sky.js
@@ -1124,6 +1283,104 @@
     return k;
   }
 
+  /* THE SIGHTING RANGE OF THIS WATER, AT THIS EYE, RIGHT NOW.
+     Allocation-free: writes into `out` and returns it.
+
+       out.c/kd    the medium's optics here (1/m)
+       out.eps     the threshold contrast the eye is working at right now
+       out.lum     nadir adaptation luminance at the eye (cd/m^2)
+       out.r0      the LEVEL sighting range, metres  =  ln(C0_LEVEL/eps) / c
+       out.aniso   \  the two floats the fog shader needs. See below.
+       out.sil     /
+
+     WHAT DEPTH IS ALLOWED TO DO. Nothing to `c` — it is the same water.
+     Duntley's equation has no depth term in it at all; depth enters ONLY
+     through the eye, by changing which adaptation luminance you are working
+     at. Beam attenuation is measured to be near depth-invariant (Tyler's Lake
+     Pend Oreille profile moves ~12% over 5-55 m), and in clear open ocean it
+     usually DROPS below the mixed layer.
+
+     So the range shortens with depth exactly as much as the water's own Kd
+     says it should, and no more. Run the numbers and that turns out to be
+     almost nothing where it matters: in clear sea in full sun the nadir
+     luminance does not reach the Weber knee until about 170 m down, so the
+     level range at 5 m and at 30 m is NUMERICALLY IDENTICAL. In a lake
+     (Kd 0.22) the knee arrives at 35 m; at night it is already past before you
+     get wet. That is the whole "it gets darker, not foggier" claim, and it is
+     the reason the old 40 -> 16 m ramp had to go.
+
+     THE TWO SHADER FLOATS. The full range law is
+         R(u) = ln(|C0(u)| / eps) / (c - Kd*u)
+     which is not linear in u, and the fog shader gets one multiply on the path
+     length. So the CPU solves the law at u = +1 and u = -1 and hands over the
+     two coefficients of the shader's own shape,
+         m(u) = (1 - aniso*u) * (1 + sil * max(0, -u))
+     which is exact at u = -1, 0, +1 and monotone in between. `aniso` carries
+     the medium's own anisotropy plus the small upward contrast bonus; `sil`
+     carries the DOWNWARD penalty, which is where the C0 asymmetry nearly all
+     lives (looking down at a countershaded animal over the deep is the one
+     direction where camouflage actually works). */
+  function sightRange(eyeDepth, bedDepth, inland, sun01, out) {
+    const stir = 1 - smoothstep(SURF_STIR, SURF_CLEAR, bedDepth);
+    let c = C_SEA + (C_SURF - C_SEA) * stir;
+    let kd = KD_SEA + (KD_SURF - KD_SEA) * stir;
+    if (inland > 0) { c += (C_LAKE - c) * inland; kd += (KD_LAKE - kd) * inland; }
+
+    // Adaptation luminance at the eye, and the threshold contrast that buys.
+    const E = E_NIGHT + (E_NOON - E_NIGHT) * Math.pow(clamp01(sun01), E_SHAPE);
+    const L = Math.max(1e-7, R_INF * E * Math.exp(-kd * Math.max(0, eyeDepth)) / Math.PI);
+    const eps = L >= EPS_KNEE ? EPS_DAY
+      : Math.min(EPS_MAX, Math.max(EPS_DAY,
+          EPS_SEE * (EPS_SCOTO_A * Math.pow(L, -0.25) - EPS_SCOTO_B)));
+
+    // ln(C0/eps) at the three anchors — the numerator of R at each.
+    const aUp = Math.log(C0_UP / eps), aLv = Math.log(C0_LEVEL / eps);
+    const aDn = Math.log(Math.max(1.02, C0_DOWN / eps));   // never let it go negative
+    const k = kd / c;
+    // R(+1)/R(0) and R(-1)/R(0), from the full law.
+    const up = (aUp / aLv) / Math.max(0.35, 1 - k);
+    const dn = (aDn / aLv) / (1 + k);
+    // ...solved back into the shader's two coefficients.
+    const aniso = Math.max(0, Math.min(0.65, 1 - 1 / Math.max(1.0001, up)));
+    const sil = Math.max(0, Math.min(2.5, 1 / Math.max(0.05, (1 + aniso) * dn) - 1));
+
+    out.c = c; out.kd = kd; out.eps = eps; out.lum = L;
+    out.aniso = aniso; out.sil = sil;
+    out.r0 = aLv / c;
+    return out;
+  }
+  const _sight = { c: C_SEA, kd: KD_SEA, eps: EPS_DAY, lum: 700, aniso: 0.36, sil: 0.40, r0: 36 };
+  // The shader's own path-length shape, so a tool and a pixel cannot disagree.
+  function sightMul(aniso, sil, u) {
+    const uu = u < -1 ? -1 : (u > 1 ? 1 : u);
+    return Math.max(0.30, (1 - aniso * uu) * (1 + sil * Math.max(0, -uu)));
+  }
+
+  /* THE MEASUREMENT SEAM. Everything that wants to reason about "can this be
+     seen from here" — tools/shark-sight-check.mjs, the ba preset, and
+     modes/shark_sim.js deciding how far out an arrival has to be to go
+     unwatched — asks this instead of re-deriving the model. rangeAt(u) is the
+     shader's own formula, so a tool and a pixel cannot disagree. */
+  CBZ.waterSight = {
+    get r0() { return _sight.r0; },
+    get aniso() { return submerged ? _sight.aniso : 0; },
+    get sil() { return submerged ? _sight.sil : 0; },
+    get c() { return _sight.c; },
+    get kd() { return _sight.kd; },
+    get eps() { return _sight.eps; },
+    get lum() { return _sight.lum; },
+    // How far you can see a body whose direction from the eye has upward
+    // component u. Above water this is the mode's own fog far, unchanged.
+    rangeAt: function (u) {
+      const far = (CBZ.scene && CBZ.scene.fog && CBZ.scene.fog.far) || _sight.r0;
+      if (!submerged) return far;
+      return far / sightMul(_sight.aniso, _sight.sil, u);
+    },
+    // The longest sight line this water has, i.e. straight up. What a spawner
+    // must clear if its arrivals are to go unwatched.
+    maxRange: function () { return CBZ.waterSight.rangeAt(1); },
+  };
+
   function rgb(t, a) {
     return "rgba(" + Math.round(Math.max(0, Math.min(1, t.r)) * 255) + "," +
       Math.round(Math.max(0, Math.min(1, t.g)) * 255) + "," +
@@ -1215,6 +1472,9 @@
     // on a frame we skipped.
     if (!submerged && shown <= 0.002) {
       if (overlay && overlay.style.display !== "none") overlay.style.display = "none";
+      // Dry: the fog goes back to being a sphere. This is the ONLY value at
+      // which a dry frame is bit-identical to the pre-anisotropy build.
+      if (CBZ.setFogAniso) CBZ.setFogAniso(0, 0);
       return;
     }
 
@@ -1233,6 +1493,18 @@
     // can see in it is the fog RANGE below, not a density fudge.
     const density = 1 + (MURK_LAKE - 1) * inland;
     kDepth = medium(Math.max(0, depth), bedDepth, density, inland, day, _tint);
+    /* THE SIGHTING RANGE, solved from the same three facts the colour is
+       graded on — but through the optics, not through the grade. `shown` fades
+       the anisotropy in over the same 0.22 s as everything else, so breaking
+       the surface does not snap the far field sideways. */
+    sightRange(Math.max(0, depth), bedDepth, inland,
+      CBZ.dayness != null ? CBZ.dayness : 1, _sight);
+    /* NOT MULTIPLIED BY `shown`. These two are properties of the WATER, so
+       they are constant for a whole dive and setFogAniso's program walk costs
+       nothing in steady state — where easing them in would have made the walk
+       run on every frame of the transition for no visible gain, since the fog
+       RANGE itself switches instantly at the surface crossing anyway. */
+    if (CBZ.setFogAniso) CBZ.setFogAniso(submerged ? _sight.aniso : 0, submerged ? _sight.sil : 0);
     // SURFACE-FROM-BELOW (ref 5): looking up toward the sun, the ceiling is
     // bright and rippling; looking down or out, it is not. One dot product,
     // faded out by the eye's own depth and by the day.
@@ -1250,7 +1522,36 @@
         // DISTANCE goes turquoise, and distance is the fog's job, not the
         // overlay's. Through the deep k (~0.8) this still evaluates to the
         // shipped 0.888; at k = 0.1 it is 0.43 instead of 0.64.
-        overlay.style.opacity = String(Math.min(0.96, 0.36 + kDepth * 0.66) * shown);
+        /* THE VEIL MUST NOT BE THE PICTURE (2026-08-29). At the deep k this
+           evaluated to 0.96, which means the RENDERED FRAME — the sea, the
+           bed, the other sharks — reached the screen at four percent strength
+           and everything else you were looking at was a DOM gradient. That was
+           survivable while the fog range was 16 m, because at 16 m everything
+           past a body length was already the medium's own colour and the
+           overlay was painting over a flat frame anyway. It is not survivable
+           now: the whole point of the range rework above is that an animal at
+           twenty metres has contrast again, and a 96% wash spends it.
+
+           A veil is path radiance, and path radiance is a function of
+           DISTANCE, which a screen-space div cannot know. So the division of
+           labour is: the FOG owns distance (it already converges on exactly
+           this colour), and the overlay owns only the two things fog cannot
+           express — the vertical shape of the column (bright ceiling, dark
+           floor) and the near-field tint that says you are inside a medium.
+           Both of those survive at 0.72; at 0.96 they were the entire image.
+
+           HOW FAR DOWN, MEASURED RATHER THAN GUESSED. Duntley says a body at
+           18 m in this water keeps exp(-c*18) = exp(-2.29) = 10% of its
+           inherent contrast, and 10% is far above the ~2% an eye needs. The
+           veil then multiplies THAT: at 0.96 it left 0.4%, invisible; at 0.72
+           it leaves 2.8%, right on the threshold; at 0.45 it leaves 5.5%,
+           which is comfortably seen. So 0.45 is not a taste call — it is the
+           largest veil that does not spend the range this wave just bought.
+
+           The ramp's SHALLOW end barely moves (k = 0.1 gives 0.35 against the
+           old 0.43), because the shallows were never the problem: this only
+           reshapes the deep end, where the sheet had reached 96%. */
+        overlay.style.opacity = String(Math.min(0.45, 0.30 + kDepth * 0.46) * shown);
         if (rays) rays.style.opacity = String(Math.max(0, 0.34 - d01 * 0.34) * shown);
         paintOverlay(depth, kDepth);
       }
@@ -1271,9 +1572,14 @@
       savedNear = myFog.near; savedFar = myFog.far;
     }
 
-    // Quality tiers scale the whole world's view distance; scale ours with it
-    // so a Fastest-tier machine is not paying for 40 metres of fogged water.
-    const q = CBZ.qScale ? CBZ.qScale(0.62, 1.0) : 1;
+    /* Quality tiers scale the whole world's view distance. Underwater that
+       lever buys almost nothing — the seabed and the animals are drawn by
+       their own LOD, not by the fog range, so a shorter slab saves fill and
+       little else — while it costs the player exactly the thing this wave is
+       about. 0.62 turned a 26 m sea into a 16 m one on the tier most phones
+       land in, which is where the complaint came from. Narrowed to 0.85: the
+       lowest tier still concedes something, and it is 3 m rather than 10. */
+    const q = CBZ.qScale ? CBZ.qScale(0.85, 1.0) : 1;
     // The FOG colour is the medium, warmed toward the surface glow by how far
     // up you are looking. THREE.Fog carries one colour, so this is where the
     // "bright ceiling" reaches the geometry — the DOM gradient in paintOverlay
@@ -1295,15 +1601,26 @@
     // Visibility by `k`, not by eye depth: a metre under the surface in a 60 m
     // trench is already dark blue with the far wall gone, and ten metres down
     // over a sandbar still reads the bottom (ref 3).
-    const farK = kDepth < 0.5
-      ? FOG_FAR_SHALLOW + (FOG_FAR_MID - FOG_FAR_SHALLOW) * (kDepth * 2)
-      : FOG_FAR_MID + (FOG_FAR_DEEP - FOG_FAR_MID) * ((kDepth - 0.5) * 2);
-    // LOOKING UP SEES FURTHER, and it is not a cheat: there is less water
-    // between the eye and the surface than between the eye and the horizon, so
-    // the same medium is measurably clearer straight up. Without this the deep
-    // dive is correct and boring — the surface sits past the fog limit and
-    // ref 5's whole subject, the bright rippling ceiling, is never drawn.
-    myFog.far = farK * (1 + glow * 0.9) * q / density;
+    /* THE RANGE IS THE WATER'S, NOT THE COLOUR GRADE'S. `far` is now R0 out of
+       sightRange() — a horizontal sighting range solved from this medium's own
+       beam attenuation — and the DIRECTION half of Duntley's law lives in the
+       shader, where it can be evaluated per fragment against the actual
+       bearing of the thing you are looking at.
+
+       WHAT WAS HERE BEFORE, AND WHY BOTH HALVES OF IT WERE WRONG:
+         `farK` ramped 40 -> 16 m off `kDepth`, the COLOUR grade, which is 72%
+         the eye's own depth. Diving thickened the water. It does not.
+         `(1 + glow*0.9)` was a look-up bonus keyed on WHERE THE CAMERA POINTS
+         and faded out by (1 - d01*0.85), i.e. it switched itself off exactly
+         as you went deep — the one place the upward advantage is largest. And
+         being a camera-pitch term it could not help at all with the owner's
+         actual case: a shark 20 m above you and 15 m out, while you look
+         level, is at u = 0.8 and should be the most visible animal in the sea.
+         The shader's per-fragment u gives it that; a camera scalar never could.
+       The lake divisor is gone from here too: murk is now inside `c`, where it
+       belongs, so it shortens the range through the physics instead of through
+       a post-multiply. */
+    myFog.far = _sight.r0 * q;
     /* THE FIRST FEW METRES OF WATER ARE GLASS (2026-08-25). `near` was a flat
        0.4 m, which means smoothstep started eating a body the moment it left
        the lens: at the phone's own tier (far ~17 m) the ridden shark four to

@@ -202,35 +202,137 @@
        for every material type including the ones that DO upload cameraPosition. */
     const CAM_Y = "( -dot( viewMatrix[1].xyz, viewMatrix[3].xyz ) )";
 
-    if (wantHeight) {
-      // APPEND, never rewrite: world.js's ocean and terrain_overhaul.js both
-      // post-process `fogDepth` right after including fog_vertex, and
-      // src/vendor/WaterReflect.js includes these chunks too. Appending a new
-      // varying leaves every one of those intact.
-      // cbzFogRaw is the TRUE view depth, captured at the tail of the chunk —
-      // i.e. BEFORE any builder's post-multiply. world/terrain_overhaul.js's
-      // `terrainFogScale` and world.js's ocean both rewrite `fogDepth` AFTER
-      // including this chunk, so `fogDepth` downstream is a LOOK, not a
-      // distance. AERIAL_FOG_MELT needs the real one (see installFog below).
-      THREE.ShaderChunk.fog_pars_vertex = parsV +
-        "\n#ifdef USE_FOG\n  varying float cbzFogY;\n  varying float cbzFogRaw;\n#endif\n";
-      THREE.ShaderChunk.fog_vertex = vtx +
-        "\n#ifdef USE_FOG\n" +
-        "  cbzFogY = " + CAM_Y + " + dot( mvPosition.xyz, viewMatrix[1].xyz );\n" +
-        "  cbzFogRaw = fogDepth;\n" +
-        "#endif\n";
-      THREE.ShaderChunk.fog_pars_fragment = parsF +
-        "\n#ifdef USE_FOG\n  varying float cbzFogY;\n  varying float cbzFogRaw;\n#endif\n";
-    }
+    /* ONE APPENDED VARYING BLOCK FOR BOTH FEATURES.
+       cbzFogY  — the fragment's WORLD height (aerial perspective / the melt).
+       cbzFogRaw— the TRUE view depth, captured at the tail of the chunk, i.e.
+                  BEFORE any builder's post-multiply. world/terrain_overhaul.js's
+                  `terrainFogScale` and world.js's ocean both rewrite `fogDepth`
+                  AFTER including this chunk, so `fogDepth` downstream is a
+                  LOOK, not a distance. AERIAL_FOG_MELT needs the real one.
+       cbzFogUp — THE UP-COMPONENT OF THE LINE OF SIGHT, u in Duntley's contrast
+                  transmittance law (see UNDERWATER ANISOTROPY below). +1 when
+                  the fragment is straight above the eye, -1 straight below, 0
+                  level. It costs nothing extra to derive: `dot( mvPosition.xyz,
+                  viewMatrix[1].xyz )` is ALREADY the fragment's world height
+                  RELATIVE TO THE CAMERA (viewMatrix[1].xyz is the world-Y row
+                  of R-transpose — the same identity CAM_Y is built on), so
+                  dividing it by the view-space radial length gives the exact
+                  unit up-component with one length() and one divide. No camera
+                  position, no second matrix, correct under skinning and
+                  instancing because mvPosition already carries both.
+                  NOTE the radial length and NOT fogDepth: r128's fog_vertex
+                  sets fogDepth = -mvPosition.z, which is PLANAR depth, and
+                  Δy/planar is not a unit vector's y off-axis (it reads 0.577
+                  for a fragment 30° up instead of 0.500).
+       APPEND, never rewrite: world.js's ocean, terrain_overhaul.js and
+       src/vendor/WaterReflect.js all include these chunks and post-process
+       `fogDepth` right after. Appending leaves every one of those intact. */
+    THREE.ShaderChunk.fog_pars_vertex = parsV +
+      "\n#ifdef USE_FOG\n  varying float cbzFogY;\n  varying float cbzFogRaw;\n" +
+      "  varying float cbzFogUp;\n#endif\n";
+    THREE.ShaderChunk.fog_vertex = vtx +
+      "\n#ifdef USE_FOG\n" +
+      "  float cbzRelY = dot( mvPosition.xyz, viewMatrix[1].xyz );\n" +
+      "  cbzFogY = " + CAM_Y + " + cbzRelY;\n" +
+      "  cbzFogRaw = fogDepth;\n" +
+      "  cbzFogUp = cbzRelY / max( length( mvPosition.xyz ), 1e-4 );\n" +
+      "#endif\n";
+    THREE.ShaderChunk.fog_pars_fragment = parsF +
+      "\n#ifdef USE_FOG\n  varying float cbzFogY;\n  varying float cbzFogRaw;\n" +
+      "  varying float cbzFogUp;\n  uniform float cbzUwAniso;\n  uniform float cbzUwSil;\n#endif\n";
 
     const H = Math.max(1, +CBZ.CONFIG.RENDER_FOG_HEIGHT || 110);
     const FLOOR = Math.max(0, Math.min(0.95, +CBZ.CONFIG.RENDER_FOG_FLOOR));
 
+    /* ---- 4. UNDERWATER ANISOTROPY — Duntley's contrast transmittance ------
+       WHY FOG IS NOT A SPHERE UNDERWATER. Owner, 2026-08-29: "when my shark
+       dives and goes underwater, it's seeing other sharks and fish distance is
+       small af ... a shark is at sea level and then I dive and I can't see the
+       shark anymore when it's decently close."
+
+       He is right, and the reason is physics the old model never had. What you
+       actually detect underwater is not brightness, it is CONTRAST against the
+       background water in the same direction, and contrast does not decay the
+       same way in every direction. Duntley (1963, "Light in the Sea", JOSA
+       53:214) — the apparent contrast of a target at range r along a path of
+       sight is
+
+           C(r) = C0 * exp( -( c - K * u ) * r )
+
+       where c is the BEAM attenuation coefficient of the water (absorption +
+       scattering, the rate at which the target's own radiance difference is
+       stripped out), K is the DIFFUSE attenuation coefficient of the ambient
+       light field (the rate at which daylight dies with depth), and u is the
+       upward component of the unit line of sight: +1 straight up, 0 level, -1
+       straight down. The K*u term is not a fudge — it is the background you
+       are judging the target against. Looking UP, the water behind the target
+       is shallower than the water at your own eye, so the background is
+       BRIGHTER than your local reference and the silhouette gains contrast
+       with every metre; looking DOWN, the background is darker than your
+       reference and the target washes into it.
+
+       Detection at threshold contrast eps gives the sighting range
+
+           R(u) = ln( |C0(u)| / eps ) / ( c - K * u )
+
+       THREE.Fog carries one scalar range for the whole scene, so we cannot
+       scale `fogFar` per fragment — but scaling the DISTANCE by the reciprocal
+       is algebraically identical:
+
+           smoothstep( near, far, d * m(u) ) saturates at
+           d = far / m(u),  so  m(u) = R(0) / R(u).                        QED
+
+       and m is the two-coefficient shape below. It is not linear in u, because
+       R is not: |C0| is itself a function of direction. A body seen FROM BELOW
+       is a silhouette against downwelling light whatever colour its belly is
+       (Johnsen 2002, Proc R Soc B 269:243, computes the reflectance needed to
+       hide from below and gets 1e8-1e16), while a body seen from ABOVE against
+       the gloom is where countershading finally works. So the C0 asymmetry is
+       almost entirely a DOWNWARD penalty, and it gets its own coefficient:
+
+           m(u) = ( 1 - cbzUwAniso*u ) * ( 1 + cbzUwSil * max(0, -u) )
+
+       world/water_underwater.js solves the full law at u = -1, 0, +1 and hands
+       over the two numbers that make this exact at all three. Four ALU ops and
+       one varying, no texture fetch, no new program variant.
+
+       WHY THE SIGN IS THIS WAY ROUND, since the literature publishes both.
+       Duntley/Tyler/Taylor 1959 (SIO Ref 59-39) write the exponent as
+       (alpha - K cos theta) in the SWIMMER-CENTRED convention, where a
+       downward path of sight has zenith angle 180 deg and cos theta = -1
+       (Preisendorfer, Hydrologic Optics I sec 1.9, states this explicitly and
+       works the example alpha - K cos theta = 0.43 - 0.17*(-0.50) = 0.51).
+       The theory chapters of the same book use +K cos theta because they
+       measure direction from the FIELD, not the swimmer. Two published forms,
+       opposite signs, identical physics. cbzFogUp is +1 straight up, which is
+       cos theta in the swimmer convention, hence the minus.
+
+       WHY IT IS SAFE ABOVE WATER. `cbzUwAniso` is zero unless world/
+       water_underwater.js is actively grading a submerged eye, and zero makes
+       the multiplier exactly 1.0 — the same float, bit for bit, so no dry
+       frame anywhere in the game changes by a single ULP. It has to be gated:
+       an anisotropic range in air would break the seam law (a fragment at
+       fogFar would no longer be fog.color, and core/sky.js paints the dome
+       horizon with exactly that colour).
+
+       WHY A UNIFORM AND NOT A BAKED CONSTANT. The obvious cheap gate is
+       "camera below SEA_Y", but the shark sim is played on the flooded
+       disaster island, whose surface is survFloodDepth's, not the city ocean's
+       -0.48. The one authority on "is the eye wet, and in what" is
+       water_underwater.js's own eyeDepth() against CBZ.citySeaHeightAt, so the
+       value is pushed from there. See CBZ.setFogAniso below for how one float
+       reaches every program without r128's per-material uniform plumbing. */
     const body = ["#ifdef USE_FOG",
+      // THE ANISOTROPIC PATH LENGTH. A no-op (x 1.0) whenever both coefficients
+      // are 0, which is every dry frame in the game — same float, bit for bit.
+      // The max() is the clamp Kd/c -> 1 needs (the upward range would run to
+      // infinity); 0.30 caps the look-up advantage at 3.3x the level range.
+      "  float cbzFogD = fogDepth * max( 0.30,",
+      "    ( 1.0 - cbzUwAniso * cbzFogUp ) * ( 1.0 + cbzUwSil * max( 0.0, -cbzFogUp ) ) );",
       "  #ifdef FOG_EXP2",
-      "    float cbzFogFactor = 1.0 - exp( - fogDensity * fogDensity * fogDepth * fogDepth );",
+      "    float cbzFogFactor = 1.0 - exp( - fogDensity * fogDensity * cbzFogD * cbzFogD );",
       "  #else",
-      "    float cbzFogFactor = smoothstep( fogNear, fogFar, fogDepth );",
+      "    float cbzFogFactor = smoothstep( fogNear, fogFar, cbzFogD );",
       "  #endif"];
 
     if (wantHeight) {
@@ -419,6 +521,69 @@
 
   CBZ.renderer = renderer;
   CBZ.canvas = renderer.domElement;
+
+  /* ============================================================
+     CBZ.setFogAniso(aniso, sil) — TWO FLOATS, EVERY PROGRAM.
+
+     `cbzUwAniso` and `cbzUwSil` (see installFog above) are uniforms the fog
+     chunk declares but that r128 will never upload, because r128 only uploads uniforms that
+     appear in the MATERIAL's own uniforms object, and there is no supported
+     way to add one to every built-in material at once. A GLSL ES uniform with
+     no initializer reads 0, and (0, 0) is exactly the dry no-op, so the
+     DEFAULT is already correct and this function only ever has to move them
+     OFF zero.
+
+     So we write it the only way that reaches every shader without touching
+     three's plumbing: walk the renderer's own program cache (renderer.info.
+     programs, which IS WebGLPrograms' live array in r128), and for each
+     program that actually compiled the uniform, bind it and set the float.
+     `state.useProgram(null)` afterwards drops WebGLState's cached program id
+     so the next setProgram re-binds properly instead of trusting a stale
+     cache — bypassing the state cache without clearing it is how you get one
+     mesh rendered with another material's uniforms.
+
+     COST DISCIPLINE. Both are properties of the WATER, not of the frame: they
+     are solved from c, Kd and the eye's contrast threshold, so they are
+     effectively constant during a dive and (0, 0) the rest of the time.
+     Quantised to 0.01, a whole dive costs one push going in and one coming
+     out, and nothing in between. A push is ~3 GL calls per fogged program
+     (~150 on a loaded city), so the amortised cost is far under a microsecond
+     per frame. Programs compiled AFTER a push would miss it, so the cache
+     LENGTH is part of the dirty test — but only while the values are non-zero,
+     because a fresh program already reads the zeros we would be writing.
+  ============================================================ */
+  (function installFogAniso() {
+    const gl = renderer.getContext();
+    let sentA = 0, sentS = 0, sentLen = -1;
+    CBZ.setFogAniso = function (aniso, sil) {
+      let a = +aniso, b = +sil;
+      if (!Number.isFinite(a)) a = 0;
+      if (!Number.isFinite(b)) b = 0;
+      // 0.65 keeps the look-up multiplier at or above 0.35, which is the clamp
+      // Kd/c -> 1 needs; 2.5 is a downward range of 1/3.5 of the level one,
+      // past anything the C0 anchors can ask for.
+      a = a < 0 ? 0 : (a > 0.65 ? 0.65 : a);
+      b = b < 0 ? 0 : (b > 2.5 ? 2.5 : b);
+      a = Math.round(a * 100) / 100;
+      b = Math.round(b * 100) / 100;
+      const list = renderer.info && renderer.info.programs;
+      if (!list) return;
+      const quiet = (a === 0 && b === 0);
+      if (a === sentA && b === sentS && (quiet || list.length === sentLen)) return;
+      for (let i = 0; i < list.length; i++) {
+        const p = list[i];
+        if (!p || !p.program || !p.getUniforms) continue;
+        let m;
+        try { m = p.getUniforms().map; } catch (e) { continue; }
+        if (!m || !m.cbzUwAniso) continue;
+        gl.useProgram(p.program);
+        gl.uniform1f(m.cbzUwAniso.addr, a);
+        if (m.cbzUwSil) gl.uniform1f(m.cbzUwSil.addr, b);
+      }
+      try { renderer.state.useProgram(null); } catch (e) {}
+      sentA = a; sentS = b; sentLen = list.length;
+    };
+  })();
 
   // One scheduler owns shadow refreshes. Previously this file requested a
   // shadow pass every 2-3 frames while daynight.js independently requested one
