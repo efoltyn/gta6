@@ -1924,6 +1924,44 @@
     }
   }
 
+  // ---- THE RACKET MAP (city/racket.js, feature-detected) ------------------
+  // Every store paying protection wears its crew's colour as a small badge on
+  // top of the lot ink — per STORE, not per district, so the conquest reads
+  // at street grain: extort a counter and ITS square flips on this map, in
+  // whichever city the store stands (racket state spans every settlement's
+  // lots, unlike the mainland-only zone grid above). Drawn after plates.lots
+  // so the badge sits on the building, hover-labelled through pickAdd like
+  // every other live glyph. O(protected stores), range-culled.
+  function drawStoreControl(p) {
+    if (!CBZ.cityRacketStores) return;
+    let stores = null;
+    try { stores = CBZ.cityRacketStores(); } catch (e) { return; }
+    if (!stores || !stores.length) return;
+    for (const s of stores) {
+      const lot = s.lot;
+      const mx = p.x(lot.cx), mz = p.z(lot.cz);
+      if (mx < -20 || mx > W + 20 || mz < -20 || mz > H + 20) continue;
+      const col = hex6(s.mine ? 0xffd451 : s.color);
+      const sz = Math.max(4, Math.min(11, (lot.w || 16) * p.sc * 0.32));
+      ctx.fillStyle = col; ctx.globalAlpha = 0.85;
+      ctx.fillRect(mx - sz / 2, mz - sz / 2, sz, sz);
+      ctx.globalAlpha = 1; ctx.strokeStyle = "rgba(6,9,14,.85)"; ctx.lineWidth = 1;
+      ctx.strokeRect(mx - sz / 2, mz - sz / 2, sz, sz);
+      // your stores with money waiting flag it — the map is the collection route
+      if (s.mine && s.owed > 0) {
+        ctx.fillStyle = "#ffd451"; ctx.font = "700 8px Fredoka, sans-serif"; ctx.textAlign = "center";
+        ctx.fillText("$", mx, mz - sz / 2 - 2);
+        stats.labels++;
+      }
+      stats.icons++;
+      pickAdd(mx, mz, sz + 2, "racket", s.name,
+        (s.owner ? s.owner + " — " : "") +
+        (s.mine ? "pays you" : "pays the " + ((CBZ.cityGangById && CBZ.cityGangById(s.gang)) || { name: "crew" }).name) +
+        " $" + (s.trib || 0) + "/day" +
+        (s.mine && s.owed > 0 ? " · $" + s.owed + " in the drawer" : ""), lot.cx, lot.cz);
+    }
+  }
+
   // ---- DISTRICT FIELD on the map: name + busy-ness at a glance ------------
   // WHY: districts have personalities (config CITY.districts — packed Midtown,
   // dead Dockyard, volatile Southside) and the full map is where a crime gets
@@ -2284,6 +2322,7 @@
     if (detail) {
       drawGangTurf(p);
       compositePlate(plates.lots, p);
+      drawStoreControl(p);
       for (let i = 0; i < (CBZ.cityPeds || []).length; i += Math.max(1, Math.ceil(CBZ.cityPeds.length / 380))) {
         const ped = CBZ.cityPeds[i]; if (!ped.dead) dot(ped.pos.x, ped.pos.z, p,
           CBZ.cityTargetsPlayer && CBZ.cityTargetsPlayer(ped) ? "#ff3b35" : "rgba(232,238,245,.62)",

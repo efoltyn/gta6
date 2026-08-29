@@ -470,16 +470,29 @@
     // rare: a scrap of street intel (flavor feed line, no new system)
     CBZ.city.note(mailIntelLine(sp.x, sp.z), 2.4);
   }
+  // THE REGISTER MINTER IS DEAD (till doctrine — shops.js's header law): a
+  // stick-up moves money OUT OF THE DRAWER'S REAL BALANCE via CBZ.cityTill,
+  // never a rolled constant. city/racket.js owns the full modern chain
+  // (drawer take + owner memory + protector retaliation); the inline path
+  // below is the degrade-safe fallback for a build without that file, and
+  // even it routes through the till so this verb can never print again.
   function robRegister(v) {
-    const ped = v;
-    const take = 150 + ((Math.random() * 400) | 0) + (ped.cash || 0);
+    const ped = v, lot = ped && ped.vendor;
+    if (lot && CBZ.cityRacket && CBZ.cityRacket.rob) {
+      CBZ.cityRacket.rob(lot, { armed: !!(CBZ.cityHasGun && CBZ.cityHasGun()) });
+      return;
+    }
+    let take = ped.cash | 0;
+    if (lot && CBZ.cityTill && CBZ.cityTill.take) {
+      const r = CBZ.cityTill.take(lot, { point: "register", frac: 1, by: "player", rob: true });
+      take += (r && r.taken) | 0;
+    }
     ped.cash = 0; ped.robbed = true; ped.alarmed = 10;
-    CBZ.city.addCash(take); CBZ.city.addRespect(3);
+    if (take > 0) { CBZ.city.addCash(take); CBZ.city.big("ROBBERY + $" + take); if (CBZ.sfx) CBZ.sfx("coin"); }
+    else CBZ.city.note("The register is empty — this place was already bled.", 1.8);
+    CBZ.city.addRespect(2);
     CBZ.cityAlarm(ped.pos.x, ped.pos.z, 26, 1.5, CBZ.city.playerActor);
     CBZ.cityCrime && CBZ.cityCrime(160, { x: ped.pos.x, z: ped.pos.z, type: "armed-robbery" });
-    ped.vendor = null;
-    CBZ.city.big("ROBBERY + $" + take);
-    if (CBZ.sfx) CBZ.sfx("coin");
   }
 
   // Advance the prospect/initiation/put-in-work relationship FROM THE STREET.

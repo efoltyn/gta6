@@ -739,6 +739,10 @@
       if (!gg || !gg.turf) continue; const oc = gg.isPlayer ? 0xffd451 : gg.color;
       for (const lot of gg.turf) owner.set(lot, oc);
     }
+    // the RACKET wash (city/racket.js, feature-detected): storefronts paying
+    // protection carry their crew's colour too, so the radar reads the whole
+    // territory war — blocks AND the businesses on them.
+    if (CBZ.cityRacketOwnerFill) CBZ.cityRacketOwnerFill(owner);
     const R2 = (R + 26) * (R + 26);
     const DQ = A.districts || [];
 

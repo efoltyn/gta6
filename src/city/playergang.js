@@ -510,6 +510,12 @@
     return true;
   };
 
+  // WHICH crew you're courting (or null) — city/racket.js reads this so a
+  // prospect can put in work the racket way: extort a store and BRING IT TO
+  // THE CREW (the store signs to them, your standing jumps). One read, no
+  // state exposed beyond the id.
+  CBZ.cityProspectGangId = function () { return prospecting ? prospecting.gangId : null; };
+
   // current prospect standing 0..1 (legacy read used by interact.js for the
   // "they're warming to you" standing line) — the OVERALL task-sequence progress.
   CBZ.cityProspectStanding = function () {
@@ -1007,9 +1013,17 @@
       if (M) {
         const rec = gangRecById(M.gangId);
         const pip = CBZ.cityRankName ? CBZ.cityRankName(M.rank) : M.rank;
+        // THE BOOK (city/racket.js, feature-detected): a made man reads his
+        // ledger — stores he runs, cash in drawers, the crew's open job.
+        const bk = CBZ.cityRacketBook ? CBZ.cityRacketBook() : null;
         hudEl.innerHTML =
           "<div style='font-weight:700;color:" + hex6(rec ? rec.color : 0x8a93a3) + "'>" + (rec ? rec.name : "Crew") + "</div>" +
           "<div style='color:#aeb6c2'>You: <b style='color:#e8eef7'>" + pip + "</b> · Bodies " + M.bodies + "</div>" +
+          (bk ? "<div style='color:#aeb6c2'>Book <b style='color:#e8eef7'>" + bk.stores + "</b>" +
+                (bk.owed > 0 ? " · <b style='color:#ffd166'>$" + bk.owed + "</b> in drawers" : "") +
+                (bk.hot > 0 ? " · owes the crew $" + bk.hot : "") + "</div>" +
+                (bk.job ? "<div style='color:#ffd166;font-size:12px'>" + bk.job + "</div>" : "")
+              : "") +
           "<div style='color:#8a93a3;font-size:11px;margin-top:2px'>Put in work to climb · [O] crew</div>";
         hudEl.style.display = "block"; return;
       }
@@ -1030,9 +1044,13 @@
     const mem = liveMembers();
     const lts = mem.filter((m) => m.rank === "lt").length;
     const orderName = { follow: "FOLLOW", attack: "ATTACK", hold: "HOLD", disperse: "DISPERSE", raid: "RAID STASH", fortify: "FORTIFY" }[pg.order] || "—";
+    // the boss's ledger line (city/racket.js, feature-detected): the book is
+    // as much "your gang" as the bodies are
+    const bk = CBZ.cityRacketBook ? CBZ.cityRacketBook() : null;
     hudEl.innerHTML =
       "<div style='font-weight:700;color:" + hex6(pg.color) + "'>" + (pg.name || "Your Gang") + "</div>" +
-      "<div style='color:#aeb6c2'>Crew <b style='color:#e8eef7'>" + mem.length + "</b> · Lts " + lts + " · Turf " + pg.turf.length + "</div>" +
+      "<div style='color:#aeb6c2'>Crew <b style='color:#e8eef7'>" + mem.length + "</b> · Lts " + lts + " · Turf " + pg.turf.length +
+      (bk && bk.stores ? " · Book <b style='color:#e8eef7'>" + bk.stores + "</b>" + (bk.owed > 0 ? " <span style='color:#ffd166'>($" + bk.owed + ")</span>" : "") : "") + "</div>" +
       "<div style='color:#ffd166'>Order: <b>" + orderName + "</b></div>" +
       "<div style='color:#8a93a3;font-size:11px;margin-top:2px'>[O] orders menu</div>";
     hudEl.style.display = "block";

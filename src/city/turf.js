@@ -119,6 +119,21 @@
         }
         tally[gang.id] = { lots, bodies, gang };
       }
+      // THE RACKET COUNTS (city/racket.js, feature-detected): a store paying
+      // protection inside the zone is held ground exactly like a turf lot —
+      // extorting a block's storefronts IS taking the district, which is what
+      // makes protection the conquerable map layer instead of a side ledger.
+      if (CBZ.cityRacketZoneTally) {
+        const rt = CBZ.cityRacketZoneTally(z);
+        if (rt) for (const id in rt) {
+          if (!tally[id]) {
+            const gg = id === "player" ? gangs.find((x) => x && x.isPlayer) : (CBZ.cityGangById && CBZ.cityGangById(id));
+            if (!gg || gg.absorbed) continue;
+            tally[id] = { lots: 0, bodies: 0, gang: gg };
+          }
+          tally[id].lots += rt[id];
+        }
+      }
       // owner = most turf-lots in the zone (ties broken by bodies)
       let bestId = null, best = -1, bestBodies = -1, total = 0;
       for (const id in tally) {
