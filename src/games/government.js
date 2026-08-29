@@ -154,7 +154,8 @@
   function bag() { return S || (S = C.state(function () { return { nextNightDay: 0 }; })); }
 
   /* ---------------- helpers ----------------------------------------------- */
-  function worldDayNow() { return CBZ.worldDay ? CBZ.worldDay() : (CBZ.dayCount ? CBZ.dayCount() : 0); }
+  // the calendar, spelled once for every package (ctx.time.day)
+  function worldDayNow() { return C ? C.time.day() : 0; }
   function arenaLive() { return !!(CBZ.city && CBZ.city.arena && CBZ.city.arena.root); }
   function worldOf(lx, lz) { const o = (V && V._venue && V._venue.origin) || { x: 0, z: 0 }; return { x: o.x + lx, z: o.z + lz }; }
   function fmt(n) { return "$" + Math.round(n).toLocaleString("en-US"); }

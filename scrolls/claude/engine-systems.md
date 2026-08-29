@@ -208,6 +208,33 @@ Before building anything adjacent, wire into the existing system:
   grid, mountains-outside-snow, city-on-mountain, region overlaps) and
   `tools/world-audit.mjs` (object overlaps/lint). Terrain/layout changes
   verify with THESE (no-visual closed loop), then the smoke gate.
+- **The world verbs — `ctx.time` · `ctx.water` · `ctx.weather`**
+  (`src/core/packages.js`). The cast, the props, the money and the missions
+  were already one-liners for a package author; the WORLD was not, so every
+  package that wanted the sea or the clock re-derived the same degrade chain by
+  hand — `ocean.js` had its own `surfaceY`/`depthAt` pair, `government.js` its
+  own `worldDay` fallback, `jail.js` its own guarded `dayPhase` roll. Three
+  files, three spellings, one engine underneath. Now: `ctx.time.set("dusk")`,
+  `ctx.time.advance(days)`, `ctx.time.day/hour/phase/isNight`,
+  `ctx.weather("storm", 90)` (named presets → `CBZ.weatherDrive`; `"clear"`
+  releases and weather.js bleeds it back to ambient over ~3.5 s so a scene
+  ending never snaps the sky), `ctx.water.at/depth/surfaceY/bedY/navigable/
+  nearest/flood`. **THE COORDINATE LAW**: everything you BUILD is venue-LOCAL
+  (`solid`/`light`/`npc`/`zone`/`mission`), everything you ASK ABOUT THE WORLD
+  is WORLD-space (`water`/`time`/`weather`) — a harbour does not move when the
+  venue moves, and pretending the sea is local is a lie the author has to undo
+  on every call (ocean.js undid it by hand, twice). Cross with
+  `ctx.toWorld`/`ctx.toLocal`. **NOTHING HERE DRAWS WATER** — `waterfield.js`
+  owns the only surface and audits for rivals (`privateWaterPlanes` is a live
+  scan), so `ctx.water.flood(m, secs)` raises the REAL field and the swimmer,
+  the drowning, the buoyancy and the gore medium follow for free. Reads always
+  work; the DRIVERS (`weather`, `flood`, `time.set/advance`) answer to
+  `CBZ.CONFIG.PKG_WORLD_DRIVE = false`, which makes each an inert `return false`
+  while reads carry on. `CBZ.cityHour(v)` is now a getter/**setter** to make
+  this possible: the sky clock (`dayPhase`) was always settable and the ped
+  schedule clock was not, so anything that moved the world to dusk moved the
+  LIGHT and left every ped running its 10am errands. `ctx.time.set()` is the
+  only sanctioned mover of both.
 - **Roles / ranks / allegiance** — `src/city/factions.js` (`CBZ.factions`). The
   ONE place an organisation is declared. `CBZ.factions.declare({id, name,
   ranks:["Recruit","Private",…], wage, heat, hostileTo, admission, bind})` and

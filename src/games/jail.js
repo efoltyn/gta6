@@ -1376,9 +1376,11 @@
       } else if (INM.phase === "held" || INM.phase === "prying" || INM.phase === "breakout") {
         // THE TRANSPORT CLOCK. It runs through every holding-cell phase, so the
         // pry and the run for the gap are a race against a real van, not a
-        // decoration. The day rolls while you wait (dayPhase-aware, as before).
+        // decoration. The day rolls while you wait — ctx.time.advance carries
+        // the midnight wrap onto the CALENDAR and drags the ped schedule with
+        // the sky, which the raw dayPhase bump silently dropped on the floor.
         INM.transportT -= dt;
-        if (CBZ.dayPhase) { try { CBZ.dayPhase(CBZ.dayPhase() + dt * SERVE_DAY_RATE); } catch (e) {} }
+        if (C) C.time.advance(dt * SERVE_DAY_RATE);
         const mark = Math.ceil(INM.transportT);
         if (INM._tMark !== mark && (mark === 20 || mark === 10 || mark === 5)) {
           INM._tMark = mark;
