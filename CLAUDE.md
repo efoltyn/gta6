@@ -26,3 +26,9 @@ changed and why.
 
 If you think the way I built something is wrong, say so directly and fix it. Don't work
 around it to stay consistent with it.
+
+
+<!-- harness:pointer -->
+Harness contract: **/Users/elifoltyn/harness/AGENTS.md** — read it first. It lists the
+tools available on this machine and the finish-line rule: a task that changes
+anything ends with an artifact on disk, not a prose summary.
