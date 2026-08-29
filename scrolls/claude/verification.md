@@ -69,6 +69,23 @@ every time. The real rules:
   render path; run before a big deploy or when render code changed),
   `tools/terrain-map-audit.mjs` (deep terrain sweep), `tools/aimlib.js`
   (honest camera aiming from probes),
+  `tools/solid-census.mjs` (**IS WHAT WE DREW WHAT WE MADE SOLID?** — the two
+  ledgers nothing else cross-checks. It reads every near-vertical triangle in
+  the scene as a BARRIER RUN and every `CBZ.colliders` record as a SOLID, then
+  reports six numbers: GHOST m of drawn barrier with no collider under it,
+  PIERCE crossings where one structure's wall runs through another's interior,
+  ROADBLOCK m2 / ROADCUT m of carriageway obstructed, DOUBLE m2 of two
+  colliders on one patch of ground, PHANTOM m2 of wall-thin solid with nothing
+  drawn in it. `--group <re>` censuses a named venue (footprint read from the
+  scene, never typed); `--sweep` walks the NAME LIST rather than the ground,
+  because gang city is 17.6 x 15.7 km and a 240 m raster of it is 4,700
+  probes of mostly sea. Note the direction: `ghost-collider-check.mjs` finds a
+  collider with no geometry, this finds GEOMETRY WITH NO COLLIDER, which no
+  screenshot can show you — a fence you walk through is drawn correctly. It
+  found the speedway paddock fence at 17.3% solid, 286 m drawn with holes to
+  43.8 m, because `CBZ.venueSite.fence` registers nothing unless it is handed
+  a ledger and that one call site wasn't. Gates: `--max-ghost/--max-pierce/
+  --max-roadblock/--max-roadcut`),
   `tools/breach-check.mjs` (ENOUGH IS ENOUGH — does explosive ACCUMULATE?
   Measures, live: the charge table is the doctrinal 2/5/7/10 rows; ONE 5 lb
   contact brick opens a wall; N standoff rockets do the same and REPORTS N

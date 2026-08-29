@@ -292,14 +292,27 @@
   // hides the world body to prevent face clipping. These are not second physics
   // arms: a small camera-child viewmodel mirrors the same phase record as the
   // full character pose—simple block hands in the wind, then both hands on two risers.
+  //
+  // THE HANDS WEAR WHAT YOU WEAR (2026-08-16). They used to carry their own
+  // private wardrobe: a hard-coded 0x2d79ad sleeve and a hard-coded 0xe7ae83
+  // skin. So you could jump out of a window in a black suit and spend the
+  // entire freefall looking down at a blue long-sleeve shirt worn by nobody in
+  // the city, on hands whose tone did not even match the player rig's own
+  // (0xf0c39a). Geometry, pose, phase logic, render order and the depth
+  // behaviour below are all UNCHANGED — the only thing that moved is where the
+  // two colours come from: outfits.js's cityArmColors reads them straight off
+  // the body you are actually wearing, so these are your arms, not a lookalike.
+  const FP_SLEEVE_FALLBACK = 0x2d79ad;   // the pre-2026-08-16 literals, kept as
+  const FP_SKIN_FALLBACK = 0xe7ae83;     // the no-body floor: the rig always builds
+
   function makeFirstPersonRig() {
     if (!THREE) return null;
     const rig = new THREE.Group();
     rig.name = "bailout-first-person-rig";
     rig.userData.bailoutFirstPerson = true;
     rig.position.z = -0.42; // keep the hands readable without filling the lens
-    const skin = new THREE.MeshBasicMaterial({ color: 0xe7ae83, depthTest: false, depthWrite: false });
-    const sleeve = new THREE.MeshBasicMaterial({ color: 0x2d79ad, depthTest: false, depthWrite: false });
+    const skin = new THREE.MeshBasicMaterial({ color: FP_SKIN_FALLBACK, depthTest: false, depthWrite: false });
+    const sleeve = new THREE.MeshBasicMaterial({ color: FP_SLEEVE_FALLBACK, depthTest: false, depthWrite: false });
     const web = new THREE.MeshBasicMaterial({ color: 0x1e2731, depthTest: false, depthWrite: false });
     const line = new THREE.LineBasicMaterial({ color: 0xe9edf1, transparent: true, opacity: 0.86, depthTest: false, depthWrite: false });
     const brakeLine = new THREE.LineBasicMaterial({ color: 0xe84b3d, transparent: true, opacity: 0.94, depthTest: false, depthWrite: false });
@@ -346,9 +359,35 @@
     brakeLines.visible = false;
     rig.add(brakeLines);
     rig._bailoutParts = { left, right, risers, brakeLines };
+    // The two materials the wardrobe owns. They are private to this rig (never
+    // cmat cache entries), so setHex on them is safe by construction — the
+    // clone-on-write trap cityPaintSlot exists for cannot apply here.
+    rig._bailoutSkin = {
+      sleeveMat: sleeve, skinMat: skin,
+      sleeve: FP_SLEEVE_FALLBACK, skin: FP_SKIN_FALLBACK,
+    };
     rig.traverse(function (o) { o.renderOrder = 1200; o.frustumCulled = false; });
     rig.visible = false;
+    dressFirstPersonRig(rig);   // born dressed, even for a tool that builds it bare
     return rig;
+  }
+
+  // Re-dress the viewmodel from the body. Called on every ensure — i.e. every
+  // frame of a fall — because a rig built ONCE and cached forever cannot hold a
+  // decision made at build time: you change clothes between jumps, and a
+  // viewmodel that has to remember to re-ask is one that will eventually
+  // forget. cityArmColors is memoised for exactly this, and the two setHex
+  // calls only fire on a colour that actually moved.
+  function dressFirstPersonRig(rig) {
+    const s = rig && rig._bailoutSkin;
+    if (!s) return false;
+    const c = (CBZ.cityArmColors && CBZ.cityArmColors()) || null;
+    const sleeve = (c && c.sleeve != null) ? c.sleeve : FP_SLEEVE_FALLBACK;
+    const skin = (c && c.skin != null) ? c.skin : FP_SKIN_FALLBACK;
+    let moved = false;
+    if (s.sleeve !== sleeve) { s.sleeve = sleeve; s.sleeveMat.color.setHex(sleeve); moved = true; }
+    if (s.skin !== skin) { s.skin = skin; s.skinMat.color.setHex(skin); moved = true; }
+    return moved;
   }
 
   function poseFirstPersonRig(rig, state) {
@@ -395,6 +434,9 @@
       F.fpRig = makeFirstPersonRig();
       if (F.fpRig && CBZ.camera) CBZ.camera.add(F.fpRig);
     }
+    // The rig is built ONCE and cached forever, so the dress cannot live at
+    // build time: you change clothes between jumps.
+    dressFirstPersonRig(F.fpRig);
     return F.fpRig;
   }
 
@@ -406,6 +448,7 @@
   CBZ.cityEnsureBailoutHarness = ensureHarness;
   CBZ.cityBuildBailoutFirstPerson = makeFirstPersonRig;
   CBZ.cityPoseBailoutFirstPerson = poseFirstPersonRig;
+  CBZ.cityDressBailoutFirstPerson = dressFirstPersonRig;
 
 
   function beginFall(fromCraft) {

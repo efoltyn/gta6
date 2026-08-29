@@ -502,9 +502,20 @@
   // the gun viewmodels already look great so they stay untouched.)
   const fists = new THREE.Group();
   const HAND_REST = { x: 0.26, y: -0.26, z: 0.04, rx: 0.16, ry: -0.34, rz: -0.12 };
+  // THE FIST WEARS WHAT YOU WEAR. This sleeve was born 0xff7a1a — the prison
+  // jumpsuit entities/player.js BUILDS the rig in — and never moved again, so
+  // every outfit in the game was contradicted by the one arm you can always
+  // see. The literals stay as the floor (an undressed player IS in the jumpsuit,
+  // so nothing about the opening minutes changes); dressFists() below re-reads
+  // them off the live body. Nothing about how the fist moves, punches or
+  // depth-sorts changes — only what colour it is.
+  const FIST_SLEEVE_FALLBACK = 0xff7a1a;
+  const FIST_SKIN_FALLBACK = 0xf0c39a;
+  const fistSleeve = new THREE.MeshLambertMaterial({ color: FIST_SLEEVE_FALLBACK });
+  const fistKnuckle = new THREE.MeshLambertMaterial({ color: 0xe7b58c });
   (function buildHand() {
-    const sleeve = new THREE.MeshLambertMaterial({ color: 0xff7a1a });
-    const knuckMat = new THREE.MeshLambertMaterial({ color: 0xe7b58c });
+    const sleeve = fistSleeve;
+    const knuckMat = fistKnuckle;
     const g = new THREE.Group();
     const forearm = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.17, 0.46), sleeve);
     forearm.position.set(0, 0, 0.16);            // recedes toward the camera
@@ -519,6 +530,34 @@
     g.rotation.set(HAND_REST.rx, HAND_REST.ry, HAND_REST.rz);
     fists.add(g); fists.userData.hand = g;
   })();
+
+  // Re-read the sleeve/skin off the body whenever its wardrobe moves. Called
+  // every frame the fist is up: city/outfits.js's cityArmColors is memoised for
+  // exactly this, and the setHex calls only fire on a colour that actually
+  // moved. Late-bound and guarded because this file loads BEFORE outfits.js —
+  // no wardrobe loaded, no change, and the literals above stand.
+  // the ratio the two authored literals already had (0xe7b58c under 0xf0c39a)
+  const KNUCKLE_SHADE = 0.94;
+  function shadeHex(hex, k) {
+    const r = Math.max(0, Math.min(255, Math.round(((hex >> 16) & 255) * k)));
+    const gg = Math.max(0, Math.min(255, Math.round(((hex >> 8) & 255) * k)));
+    const b = Math.max(0, Math.min(255, Math.round((hex & 255) * k)));
+    return (r << 16) | (gg << 8) | b;
+  }
+  let fistSleeveHex = FIST_SLEEVE_FALLBACK, fistSkinHex = FIST_SKIN_FALLBACK;
+  function dressFists() {
+    const c = (CBZ.cityArmColors && CBZ.cityArmColors()) || null;
+    const sleeveHex = (c && c.sleeve != null) ? c.sleeve : FIST_SLEEVE_FALLBACK;
+    const skinHex = (c && c.skin != null) ? c.skin : FIST_SKIN_FALLBACK;
+    if (fistSleeveHex !== sleeveHex) { fistSleeveHex = sleeveHex; fistSleeve.color.setHex(sleeveHex); }
+    if (fistSkinHex !== skinHex) {
+      fistSkinHex = skinHex;
+      mat.skin.color.setHex(skinHex);
+      // keep the knuckle ridge one shade under the hand at ANY tone, or a fist
+      // stops reading as a fist and becomes a flat block.
+      fistKnuckle.color.setHex(shadeHex(skinHex, KNUCKLE_SHADE));
+    }
+  }
 
   vm.add(gun, fists);
   fists.traverse((obj) => {
@@ -4245,6 +4284,7 @@
     const fpStowingGun = fps.active && fpSwapT > 0 && !!fpSwapFrom && !fpSwapTo && fpSwapP < 0.80;
     gun.visible = armed() || fpStowingGun;
     fists.visible = !armed() && !fpStowingGun;
+    if (fists.visible) dressFists();
 
     if (muzzleT > 0) {
       muzzleT -= dt;
