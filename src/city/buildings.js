@@ -2138,6 +2138,54 @@
         } catch (e) {}
       }
     }
+    /* TELL THE LEDGER WHAT IS PHYSICALLY GONE.
+
+       city/structural.js has carried a `severWidth` input since it was written
+       — "METRES of the struck floor's load-bearing cross-section physically
+       REMOVED. Geometry, not damage" — and it is the input its whole 9/11 model
+       turns on: a sever takes a floor straight past its failure threshold, the
+       yield latches how long the structure has left, and collapse.js runs the
+       grammar. Nothing in the game had ever set it. MEASURED: eighteen rockets
+       through the base of a 52-storey tower, `sever: 0.000`.
+
+       The carve is the only code that knows. It is opening a hole of a known
+       width in a known face of a known storey, so it accumulates that width per
+       floor per face on the shell and reports the RUNNING TOTAL — which is what
+       makes "keep shooting the bottom until it comes down" a real sentence
+       rather than a wish. Damage is not double-counted: the ordnance row that
+       caused this carve was already priced by the bus, and this call carries
+       amount 0 and geometry only. */
+    const shell = (parent && parent.userData && parent.userData.bld) || null;
+    if (shell && CBZ.structure && CBZ.structure.hit && !opts.quiet) {
+      const sFH = shell.FH > 0 ? shell.FH : 4.1;
+      const vMid = (v0 + v1) / 2;
+      const k = Math.max(0, Math.floor(vMid / sFH));
+      const open = (shell._openW || (shell._openW = {}));
+      open[k] = (open[k] || 0) + (u1 - u0);
+      /* RESOLVE IT AGAINST THE WHOLE FLOOR, NOT THE FACE WE HIT. Handing over a
+         raw severWidth lets structural.js divide by the cross-section
+         PERPENDICULAR TO TRAVEL — which is right for an airframe flying through
+         a tower and wrong for a man with a rocket launcher standing on one
+         pavement. MEASURED against the engine's own constants: one face as the
+         denominator condemns a 52-storey tower after TWO full-width carves; the
+         floor's real load-bearing run, 2*(w+d), takes EIGHT. Eight is a
+         magazine emptied into the base, which is the thing being asked for;
+         two is a stray rocket levelling a skyscraper.
+         So we pass the fraction pre-resolved (the API takes either), and it
+         accumulates across every face of that storey — because it does not
+         matter which side you stand on, it matters how much of the floor is
+         gone. */
+      const perim = 2 * ((shell.w > 0 ? shell.w : 10) + (shell.d > 0 ? shell.d : 10));
+      const sev = Math.min(1, open[k] / Math.max(8, perim));
+      const wx = horiz ? (u0 + u1) / 2 : fixed, wz = horiz ? fixed : (u0 + u1) / 2;
+      try {
+        CBZ.structure.hit(wx, vMid, wz, 0, {
+          kind: "breach", sever: sev,
+          dirx: horiz ? 0 : outS, dirz: horiz ? outS : 0,
+          byPlayer: !!opts.byPlayer,
+        });
+      } catch (e) {}
+    }
     if (CBZ.cityInteriorGlowClearBox) {
       const gTol = thick / 2 + 0.85;
       const gMinX = horiz ? u0 - 0.3 : fixed - gTol, gMaxX = horiz ? u1 + 0.3 : fixed + gTol;

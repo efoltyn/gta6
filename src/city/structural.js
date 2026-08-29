@@ -105,9 +105,36 @@
   // demolition.js's old curve was `2 + storeys*1.2 + (w*d)/300` against a raw
   // `power * prox` per blast. Our rows multiply struct*power, so an RPG
   // (2.0*1.9 = 3.8) still needs ~3 hits on a shop and ~6 on a fat block.
-  function capacityOf(b) {
-    return 12 + b.storeys * 7 + (b.w * b.d) / 26;
+  /* EVERY NUMBER IN HERE IS DERIVED FROM b, AND b IS NOT ALWAYS COMPLETE.
+
+     MEASURED, 2026-08-29: eighteen rockets into the base of the city's tallest
+     tower (52 storeys, 166 m) left it at `cap: NaN, storeys: 1, floors: [NaN],
+     collapsible: false`. The lot that `lotAt` resolved carries a building
+     record with no `storeys`, so this expression returned NaN — and NaN is not
+     a wrong number here, it is a DISABLED BUILDING: `bite = amount / cap` is
+     NaN, the first hit writes NaN into the floor array, every later comparison
+     against a threshold is false, `loadPathFailure` can never fire, and the
+     tower burns forever at stage BURNING without ever being condemned. Two
+     other NaN traps in this file are already written up (the `Math.floor()||0`
+     seat guard and the `|| 12` height guard in beginCollapse); this is the
+     third and it was silently switching off the whole feature for exactly the
+     buildings the feature exists for.
+     Derive what is missing rather than propagating NaN. */
+  function storeysOf(b) {
+    const st = Math.round(+b.storeys);
+    if (st > 0) return st;
+    const h = +b.h, fh = +b.FH > 0 ? +b.FH : 3.2;
+    const fromH = Math.round(h / fh);
+    return fromH > 0 ? fromH : 1;
   }
+  function planOf(b) {
+    const w = +b.w > 0 ? +b.w : 10, d = +b.d > 0 ? +b.d : 10;
+    return w * d;
+  }
+  function capacityOf(b) {
+    return 12 + storeysOf(b) * 7 + planOf(b) / 26;
+  }
+
   const STAGE = { INTACT: 0, SCARRED: 1, WOUNDED: 2, BURNING: 3, CRITICAL: 4, COLLAPSING: 5, RUBBLE: 6 };
   // Stage thresholds as a fraction of capacity. Wide bands on purpose: most
   // hits should visibly move the building without condemning it.
@@ -305,6 +332,7 @@
   let deferredSweepHead = 0, deferredSweepCount = 0;
   const deferredByWave = new Map();       // waveId -> Set<lot>, prevents re-queue while pending
   const S = (CBZ.structure = {});
+  S.storeysOf = storeysOf;      // probes ask "what does the ledger think this is"
   S.STAGE = STAGE;
   S.onStage = null;                  // fn(rec, stage) — mission/HUD seam
   S.onCollapse = null;               // fn({x, z, lot, by, storeys}) — mission seam
@@ -375,10 +403,16 @@
     for (let i = 0; i < A.lots.length; i++) {
       const lot = A.lots[i], b = lot.building;
       if (!b || lot.demolished) continue;
+      /* NaN IS NOT A DISTANCE. With an incomplete footprint `d` comes out NaN,
+         and NaN passes BOTH guards below (`NaN > margin` is false, `NaN >= bd`
+         is false), so a stub becomes `best` and poisons `bd` for the rest of
+         the loop. Excluding such lots outright was worse — MEASURED, it made
+         lotAt return null for a tower that has a perfectly good record — so
+         the fix is narrow: a non-finite distance simply does not compete. */
       const dx = Math.max(0, Math.abs(x - b.ox) - b.w / 2);
       const dz = Math.max(0, Math.abs(z - b.oz) - b.d / 2);
       const d = Math.hypot(dx, dz);
-      if (d > margin || d >= bd) continue;
+      if (!(d >= 0) || d > margin || d >= bd) continue;
       bd = d; best = lot;
     }
     return best;
@@ -395,7 +429,7 @@
     if (rec && rec.stage >= STAGE.RUBBLE && !lot.demolished) { ledger.delete(lot); rec = null; }
     if (rec) return rec;
     const b = lot.building;
-    const n = Math.max(1, b.storeys | 0);
+    const n = Math.max(1, storeysOf(b));   // never 1-because-undefined: see capacityOf
     rec = {
       lot: lot, b: b, key: Math.round(lot.cx) + "," + Math.round(lot.cz),
       dmg: 0, cap: capacityOf(b), stage: STAGE.INTACT,
@@ -487,7 +521,15 @@
      ============================================================ */
   S.hit = function (x, y, z, amount, opts) {
     opts = opts || {};
-    if (!CBZ.CONFIG.STRUCT_LEDGER || !inCity() || !(amount > 0)) return null;
+    /* A SEVER IS NEWS EVEN WITH NO DAMAGE ATTACHED. The carve that physically
+       removes a wall already has its damage counted by the ordnance row that
+       caused it; what the ledger has never been told is the GEOMETRY — how
+       many metres of the struck floor's cross-section are now missing. That
+       call arrives with amount 0 and a severWidth, and refusing it here is why
+       `sever` read 0.000 after eighteen rockets through a tower's base. */
+    const severOnly = !(amount > 0) && (opts.severWidth > 0 || opts.sever > 0);
+    if (!CBZ.CONFIG.STRUCT_LEDGER || !inCity() || (!(amount > 0) && !severOnly)) return null;
+    if (severOnly) amount = 0;
     // The legacy bridge (systems/impactbus.js's cityDamageBuilding wrapper) is
     // suppressed for the duration of a blast — see CBZ.impact.inBlast() there
     // for why. Checked HERE rather than in the wrapper so any future legacy

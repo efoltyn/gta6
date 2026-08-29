@@ -121,7 +121,8 @@
     "city:host": "node tools/cityhost.mjs",
     "city": "node tools/city.mjs",
     "city:story": "node tools/city-story.mjs",
-    "visual:debris-conserved": "node tools/before-after.mjs debris-conserved --keep-going"
+    "visual:debris-conserved": "node tools/before-after.mjs debris-conserved --keep-going",
+    "test:collapse-loadpath": "node tools/test-collapse-loadpath.mjs"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.0",
