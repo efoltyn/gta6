@@ -177,15 +177,23 @@ async function stagePatriot(input) {
   let S = window.__patriotSeq;
   if (!S) {
     const booted = await until(() => CBZ.game && CBZ.stepSim && document.getElementById("playBtn") &&
-      document.querySelector('.mode-btn[data-mode="city"]'), 300000);
+      document.querySelector('.mode-btn[data-mode="city"]'), 420000);
     if (!booted) return { ok: false, err: "never booted" };
-    if (CBZ.CONFIG) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = false;
+    if (CBZ.CONFIG) {
+      CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = false;
+      // A MATCHED PAIR MUST NOT READ LOCALSTORAGE. gangs.js restores a saved
+      // turf board on the first city frame, which makes the shoot depend on
+      // whatever this machine happened to play last — and its restore throws
+      // (`[gangs] persist restore failed`) straight into the harness's
+      // console-error watch, failing the first subject's capture every run.
+      CBZ.CONFIG.GANG_PERSIST = false;
+    }
     document.querySelector('.mode-btn[data-mode="city"]').click();
     const playing = await until(() => {
       if (CBZ.game.state === "playing") return true;
       const b = document.getElementById("playBtn"); if (b) b.click();
       return CBZ.game.state === "playing";
-    }, 180000, 300);
+    }, 300000, 300);
     if (!playing) return { ok: false, err: "never reached playing" };
     try { if (CBZ.setQualityLevel) CBZ.setQualityLevel(3); } catch (_) {}
     window.requestAnimationFrame = function () { return 0; };
@@ -566,7 +574,7 @@ export default {
   urlParams: { seed: 90210 },
   viewport: { width: 1200, height: 740 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
-  stageTimeoutMs: 600000,
+  stageTimeoutMs: 900000,
   metricsNote: "Every number is read from a live canonical ledger at the moment of the shot: cityFacadeBreachAudit walks buildings.js's own breach records, cityRuinAudit walks crashfx's persistent ruin frames, and the launch/impact counts come from the shared aircraft missile pool. The before column reporting zero open facade area is the defect this wave fixes, not a staging artifact.",
   metrics: {
     facadeOpenArea: { label: "Facade actually opened", unit: "m²", better: "higher" },

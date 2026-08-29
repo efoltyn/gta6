@@ -1450,7 +1450,7 @@
     pileTop.set(key, seat + hh * (1.05 + rng() * 0.45));
     return seat + hh;
   }
-  const shedStats = { events: 0, pieces: 0, kept: 0, volShed: 0, volRemoved: 0, invented: 0 };
+  const shedStats = { events: 0, pieces: 0, kept: 0, volShed: 0, volKept: 0, volRemoved: 0, invented: 0 };
 
   /* PUBLIC: dice a solid that is being removed and hand the world its pieces.
 
@@ -1480,12 +1480,22 @@
        only a ceiling, and it makes cells COARSER (never fewer), so the metres
        still balance on a wall too big to dice at that size. */
     let cell = Math.max(0.3, Math.min(0.95, o.cell || 0.5));
-    let nx = Math.max(1, Math.round(w / cell)), ny = Math.max(1, Math.round(h / cell));
-    let nz = Math.max(1, Math.round(d / Math.max(cell, d)));      // thin walls stay one cell deep
-    let guard = 8;
+    /* DICE ALL THREE AXES ON THE SAME GRID. The first pass special-cased the Z
+       extent as "the wall thickness, keep it one cell deep" — which is true for
+       a wall running along X and catastrophically false for one running along
+       Z, where Z is the LENGTH. MEASURED: a 9 m run came out as a single 9 m
+       cell and the street filled with lilac planks three metres long. A thin
+       axis needs no special case: 0.28 m over a 0.52 m grid rounds to one cell
+       on its own. */
+    let nx = Math.max(1, Math.round(w / cell));
+    let ny = Math.max(1, Math.round(h / cell));
+    let nz = Math.max(1, Math.round(d / cell));
+    let guard = 10;
     while (nx * ny * nz > budget && guard-- > 0) {
-      cell *= 1.28;
-      nx = Math.max(1, Math.round(w / cell)); ny = Math.max(1, Math.round(h / cell));
+      cell *= 1.26;
+      nx = Math.max(1, Math.round(w / cell));
+      ny = Math.max(1, Math.round(h / cell));
+      nz = Math.max(1, Math.round(d / cell));
     }
     const cw = w / nx, ch = h / ny, cd = d / nz;
     const on = nNorm(o.nx || 0, o.nz || 0);
@@ -1555,8 +1565,15 @@
         }
       }
     }
+    /* THE BOOKS. Cells that stayed welded to the rim were never REMOVED, so
+       counting them against the ratio understates it — they are their own line.
+       volShed and volRemoved are accumulated independently from the cell grid,
+       so the ratio is 1.000 by construction and drifts the moment any path
+       mints a piece with no cell behind it or drops a cell on the floor. */
+    const cellVol = (w / nx) * (h / ny) * (d / nz);
     shedStats.events++; shedStats.pieces += pieces; shedStats.kept += kept;
-    shedStats.volShed += vol * (pieces / Math.max(1, pieces + kept));
+    shedStats.volShed += cellVol * pieces;
+    shedStats.volKept += cellVol * kept;
     shedStats.volRemoved += vol;
     return { pieces: pieces, kept: kept, volume: vol };
   };
@@ -1579,10 +1596,11 @@
       shedPieces: shedStats.pieces,
       keptRimCells: shedStats.kept,
       inventedPieces: shedStats.invented,
-      removedVolume: +shedStats.volRemoved.toFixed(2),
+      removedVolume: +(shedStats.volRemoved - shedStats.volKept).toFixed(2),
       shedVolume: +shedStats.volShed.toFixed(2),
-      conservation: shedStats.volRemoved > 0
-        ? +(shedStats.volShed / shedStats.volRemoved).toFixed(3) : 0,
+      keptVolume: +shedStats.volKept.toFixed(2),
+      conservation: (shedStats.volRemoved - shedStats.volKept) > 0.001
+        ? +(shedStats.volShed / (shedStats.volRemoved - shedStats.volKept)).toFixed(3) : 0,
       liveDebris: live, sourcedDebris: sourced, settledPile: piled,
     };
   };
@@ -2285,7 +2303,7 @@
     ruinStats.events = ruinStats.pieces = ruinStats.bars = 0;
     pileTop.clear();
     shedStats.events = shedStats.pieces = shedStats.kept = 0;
-    shedStats.volShed = shedStats.volRemoved = shedStats.invented = 0;
+    shedStats.volShed = shedStats.volKept = shedStats.volRemoved = shedStats.invented = 0;
     if (_collapseSeen) _collapseSeen.clear();          // fresh run → un-throttle collapses
   };
 

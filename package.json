@@ -120,7 +120,8 @@
     "visual:npc-tactics": "node tools/visual-compare.mjs --preset npc-tactics --subjects cops-standoff,firefight,stop-profile,hide-break --no-open",
     "city:host": "node tools/cityhost.mjs",
     "city": "node tools/city.mjs",
-    "city:story": "node tools/city-story.mjs"
+    "city:story": "node tools/city-story.mjs",
+    "visual:debris-conserved": "node tools/before-after.mjs debris-conserved --keep-going"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.0",

@@ -12,6 +12,7 @@ const [config, crash, island, aircraft, armor, map, touch, html, bld, glow] = aw
   read("src/systems/fullmap.js"), read("src/systems/touch_vehicle.js"), read("index.html"),
   read("src/city/buildings.js"), read("src/city/interiorlight.js"),
 ]);
+const crashfx = crash;
 
 function section(source, start, end) {
   const a = source.indexOf(start); assert.notEqual(a, -1, `missing ${start}`);
@@ -113,4 +114,32 @@ assert.match(glow, /CBZ\.cityInteriorGlowClearBox = function/);
 assert.match(carve, /if \(cy1 - cy0 >= 1\.6 && \(y < cy0 - 0\.3 \|\| y > cy1 \+ 0\.3\)\) continue;/,
   "the full-height containment test must not veto a course before the storey band exists");
 
-console.log("PASS building/Patriot contract: curtain-wall breach, storey-tall opening, cut courses, no fake interior in the hole, rpg-row warhead, shared missile pool, exact map target, tube transforms, touch launch");
+// ---- ALL DEBRIS COMES OFF SOMETHING --------------------------------------
+// The law: a fragment is a cell of a solid the carve is removing, carrying that
+// solid's own material. These guard the three ways it could quietly rot back
+// into a spawner: the primitive losing its source material, the carve stopping
+// feeding it, or the invented spawners being let back onto the conserved path.
+assert.match(config, /DEBRIS_CONSERVED_V1[^\n]*= true/);
+assert.match(crashfx, /CBZ\.cityShedSolid = function \(box, mat, o\)/,
+  "the shed primitive takes the SOURCE MATERIAL, not a debris palette");
+assert.match(crashfx, /const m = new THREE\.Mesh\(cubeGeo\(\), mat\);/,
+  "every fragment must be built with the source material it came off");
+assert.match(crashfx, /if \(!conservedOn\(\)\) \{\s*\n\s*facadeAvalanche/,
+  "the invented avalanche + heap must be gated off the conserved path");
+assert.match(crashfx, /shedStats\.invented \+= count;/,
+  "an invented pile must confess its count to the audit");
+assert.match(crashfx, /CBZ\.cityDebrisAudit = function/);
+const shed = section(bld, "if (CBZ.cityShedSolid && rec.shed.length)", "if (CBZ.cityInteriorGlowClearBox)");
+assert.match(shed, /CBZ\.cityShedSolid\(b, b\.mat, \{/,
+  "the carve must hand over each removed solid with its own material");
+assert.match(bld, /shedBox\(Math\.max\(minU, u0\), Math\.min\(maxU, u1\)/,
+  "the struck course sheds the part of itself inside the opening");
+assert.match(bld, /mat: gm, glass: true,/,
+  "a removed pane sheds as its own glass, not as more masonry");
+// A shed cell must never be handed to a disposer: the cube geometry is shared.
+assert.match(bld, /if \(b\.shedKept\) for \(const k of b\.shedKept\) \{ if \(k\.parent\) k\.parent\.remove\(k\); \}/,
+  "rim cells are removed without disposing the shared geometry");
+assert.doesNotMatch(section(bld, "for (const m of b.extras)", "for (const rc of b.remnCols)"),
+  /shedKept/, "shed cells must not enter the extras list, which disposes geometry");
+
+console.log("PASS building/Patriot contract: curtain-wall breach, storey-tall opening, cut courses, no fake interior in the hole, conserved debris (nothing invented), rpg-row warhead, shared missile pool, exact map target, tube transforms, touch launch");
