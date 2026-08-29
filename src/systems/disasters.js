@@ -904,58 +904,54 @@
     //      back wall from the OPPOSITE direction, then the tail. The surge is
     //      the killer and it goes through the ONE water lever (surgeSet), so
     //      the drowning, the floating cars and the corpses all come free.
-    //      HURRICANE_V2=false (or hurricane.js missing) plays the legacy
-    //      windstorm below, verbatim. ----
+    //      Every occurrence ROLLS A SIZE — a Saffir-Simpson category off the
+    //      seeded stream, biased by the round's intensity — and vmax, gusts,
+    //      duration, eye quality, surge and scour all follow it. The legacy
+    //      one-wind-number windstorm and its HURRICANE_V2 flag are purged;
+    //      git is the undo. ----
     hurricane: {
       name: "HURRICANE", emoji: "", warnSecs: 5, gap: 7, cause: "killed by hurricane debris", tint: 0x46505a,
-      // an eye + two eyewalls need room to be three different experiences;
-      // the legacy windstorm keeps its old 20 s
-      get activeSecs() { return this._v2() ? 26 : 20; },
-      _v2() { return CBZ.CONFIG.HURRICANE_V2 !== false && !!CBZ.hurricane; },
+      // an eye + two eyewalls need room to be three different experiences,
+      // and a BIG storm LASTS: cat-1 ~22 s, cat-5 ~35 s
+      get activeSecs() { return Math.round(19 + 3.2 * (this._catF || 3)); },
+      _v2() { return !!CBZ.hurricane; },
       warn(ctx) {
         narrate("hint", "HURRICANE inbound, brace and hold on!", 3); sound("wind");
         const a = rnd() * 6.28; ctx.st.wx = Math.cos(a); ctx.st.wz = Math.sin(a);
-        ctx.st.gustCd = 2; ctx.st.turn = (rnd() - 0.5) * 0.2;
-        if (this._v2()) {
-          // the TRACK is a rule (it decides who floods and who stands in the
-          // wall), so its bearing and offset come from the seeded stream
-          ctx.st.h2 = 1;
-          CBZ.hurricane.begin({
-            cx: ctx.cx, cz: ctx.cz, R: ctx.R, intensity: ctx.intensity,
-            duration: this.warnSecs + this.activeSecs,
-            bearing: a, offset: (rnd() - 0.5) * ctx.R * 0.35,
-          });
-          return;
-        }
-        ctx.st.debris = CBZ.fx.particleCloud({ mode: "swirl", color: 0x7a6f5a, count: 200, radius: ctx.R * 0.7, top: 10, size: 0.3, opacity: 0.6, vMin: 8, vMax: 16 });
-        ctx.st.debris.setActive(0.15);
+        ctx.st.gustCd = 2;
+        /* MAGNITUDE: a Saffir-Simpson category rolled per occurrence off the
+           seeded stream. The round's escalating intensity BIASES the roll —
+           it does not replace it: an early round can still draw a monster,
+           a late round can still draw a cat-3. Everything downstream reads
+           this one number (vmax, gusts, duration, eye quality, surge,
+           structural scour). Rolled BEFORE activeSecs is read — duration is
+           a function of it. */
+        const u = rnd();
+        this._catF = Math.max(1, Math.min(5, 1 + 4 * (0.8 * u - 0.05 + 0.4 * ctx.intensity)));
+        if (!this._v2()) return;
+        // the TRACK is a rule (it decides who floods and who stands in the
+        // wall), so its bearing and offset come from the seeded stream
+        ctx.st.h2 = 1;
+        CBZ.hurricane.begin({
+          cx: ctx.cx, cz: ctx.cz, R: ctx.R, catF: this._catF,
+          duration: this.warnSecs + this.activeSecs,
+          bearing: a, offset: (rnd() - 0.5) * ctx.R * 0.35,
+        });
       },
       warnTick(dt, ctx) {
+        if (!ctx.st.h2) return;
         const k = 1 - dir.t / (this.warnSecs || 1);
-        if (ctx.st.h2) {
-          // the OUTER BANDS: the field's own far edge is already over the
-          // island, so the first squalls and the first lean are the real
-          // storm arriving, not a scripted ramp
-          const H = CBZ.hurricane;
-          H.tick(dt, camPos().x, camPos().z);
-          weather(H.localWeather(camPos().x, camPos().z));
-          const w = H.windAt(CBZ.player.pos.x, CBZ.player.pos.z);
-          const p = CBZ.player._phys || (CBZ.player._phys = { kx: 0, kz: 0 });
-          p.kx = (p.kx || 0) + w.x * w.speed * 0.09 * k * dt;
-          p.kz = (p.kz || 0) + w.z * w.speed * 0.09 * k * dt;
-          if (CBZ.shake) CBZ.shake(Math.min(0.12, 0.02 + w.speed * 0.004));
-          if (rnd() < dt * 2 * k) sound("wind");
-          return;
-        }
-        weather({ rain: k * 0.5, wind: k * 14, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: k * 0.35, fogColor: 0x46505a });
-        ctx.st.debris.setActive(0.15 + k * 0.5);
-        ctx.st.debris.update(dt, camPos().x, 3, camPos().z);
-        // a real (small) push on the player from second one: the wind is not a
-        // state that switches on, it is a force that grows
+        // the OUTER BANDS: the field's own far edge is already over the
+        // island, so the first squalls and the first lean are the real
+        // storm arriving, not a scripted ramp
+        const H = CBZ.hurricane;
+        H.tick(dt, camPos().x, camPos().z);
+        weather(H.localWeather(camPos().x, camPos().z));
+        const w = H.windAt(CBZ.player.pos.x, CBZ.player.pos.z);
         const p = CBZ.player._phys || (CBZ.player._phys = { kx: 0, kz: 0 });
-        p.kx = (p.kx || 0) + ctx.st.wx * 2.6 * k * dt;
-        p.kz = (p.kz || 0) + ctx.st.wz * 2.6 * k * dt;
-        if (CBZ.shake) CBZ.shake(0.03 + 0.08 * k);
+        p.kx = (p.kx || 0) + w.x * w.speed * 0.09 * k * dt;
+        p.kz = (p.kz || 0) + w.z * w.speed * 0.09 * k * dt;
+        if (CBZ.shake) CBZ.shake(Math.min(0.12, 0.02 + w.speed * 0.004));
         if (rnd() < dt * 2 * k) sound("wind");
       },
       warnThreat() { return 0.35; },
@@ -963,49 +959,9 @@
         if (ctx.st.h2) return CBZ.hurricane.safeDir(x, z);
         return { x: -(ctx.st.wx || 0), z: -(ctx.st.wz || 0) };
       },
-      start(ctx) {
-        if (ctx.st.h2) return;                       // the field is already live
-        ctx.st.debris.setActive(0.8);
-      },
+      start() { /* the field went live in warn() */ },
       active(dt, ctx) {
-        // h2 set means V2 ran this storm — never fall into the legacy body
-        // (its state was never built) even if the module's storm is gone
-        if (ctx.st.h2) { if (CBZ.hurricane && CBZ.hurricane.active()) this._v2Active(dt, ctx); return; }
-        ctx.env.fog = 0x46505a; ctx.env.fogNear = 16; ctx.env.fogFar = 120; ctx.env.sunInt = 0.5; ctx.env.hemiColor = 0x8a98a6;
-        ctx.st.debris.update(dt, camPos().x, 4, camPos().z);
-        // the wind slowly veers so its direction can't be simply outrun
-        const ang = Math.atan2(ctx.st.wz, ctx.st.wx) + ctx.st.turn * dt;
-        ctx.st.wx = Math.cos(ang); ctx.st.wz = Math.sin(ang);
-        // ONE WIND FIELD: the hurricane's bearing IS the weather's bearing, so
-        // the rain streaks the way the storm blows and the tornado (which
-        // already biases off CBZ.weather) inherits it.
-        weather({ rain: 0.95, wind: 20 + 8 * ctx.intensity, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: 0.6, fogColor: 0x46505a });
-        const w = windVec();
-        const wx = w.speed > 0.5 ? w.x : ctx.st.wx, wz = w.speed > 0.5 ? w.z : ctx.st.wz;
-        if (rnd() < dt * 2) sound("wind");
-        if (CBZ.shake) CBZ.shake(0.12 + 0.18 * ctx.intensity);
-        // steady downwind drag on everyone
-        const drag = 3.2 + scale(2, ctx);
-        surv().forEachActor(function (a) {
-          if (CBZ.body && CBZ.body.busy(a)) return;
-          if (sheltered(a)) return;                    // indoors breaks the wind
-          if (a.isPlayer) { const p = CBZ.player._phys || (CBZ.player._phys = { kx: 0, kz: 0 }); p.kx = (p.kx || 0) + wx * drag * dt; p.kz = (p.kz || 0) + wz * drag * dt; }
-          else { a.pos.x += wx * drag * dt; a.pos.z += wz * drag * dt; if (CBZ.collide) CBZ.collide(a.pos, 0.5); a.pos.y = floor(a.pos.x, a.pos.z); }
-        });
-        // violent gusts: a hard shove + a chance to be knocked flat
-        ctx.st.gustCd -= dt;
-        if (ctx.st.gustCd <= 0) {
-          ctx.st.gustCd = 1.6 + rnd() * 1.8;
-          if (CBZ.shake) CBZ.shake(0.45);
-          sound("wind");
-          surv().forEachActor(function (a) { if (sheltered(a)) return; if (CBZ.body) CBZ.body.hit(a, { dir: { x: wx, z: wz }, force: 9 + scale(4, ctx), knockdown: rnd() < 0.35 ? 1.0 : 0 }); });
-          // A gust that can knock a body flat also strips a roof — but only a
-          // little per gust. ~10 gusts in a 20 s hurricane, so 0.02-0.04 each
-          // takes the town from intact to glass-out and no further; a
-          // hurricane that levelled every building would leave nothing for the
-          // quake or the wave to do, and the ledger is shared between them.
-          structureSweep(ctx.cx, ctx.cz, ctx.R, 0.02 + 0.02 * ctx.intensity, ctx, { kind: "tornado", dirx: wx, dirz: wz });
-        }
+        if (ctx.st.h2 && CBZ.hurricane && CBZ.hurricane.active()) this._v2Active(dt, ctx);
       },
       /* THE V2 STORM. Everything below reads the FIELD at each body's own
          position — there is no "the wind" any more, only the wind where you
@@ -1024,9 +980,21 @@
         weather(lw);
         const rCam = Math.hypot(camPos().x - S.eyeX, camPos().z - S.eyeZ);
         if (rCam < S.eyeR) {
+          /* INSIDE THE EYE there is nothing to look AT — the cylinder-mesh
+             eyewall (the eye that photographed as an office tower) is gone.
+             The wall is the DISTANCE THE RAIN LETS YOU SEE: fog opens to
+             about the eyewall's range and no further, so the world ends in
+             murk exactly where the wall stands while the sun and sky open
+             overhead. `open` scales with eye QUALITY — a ragged low-category
+             lull barely brightens; only a real eye springs the trap. */
           const u = 1 - rCam / S.eyeR;
-          ctx.env.fog = 0x93a7b8; ctx.env.fogNear = 40; ctx.env.fogFar = 220 + 800 * u;
-          ctx.env.sunInt = 0.55 + 0.65 * u; ctx.env.hemiColor = 0xc2d3e0; ctx.env.hemiInt = 0.75;
+          const open = Math.max(0, 1 - S.calmK * 2.4);
+          const wallDist = (S.eyeR - rCam) + S.eyeR * 0.8;
+          ctx.env.fog = 0x6e7d8b;
+          ctx.env.fogNear = Math.max(18, wallDist * 0.35);
+          ctx.env.fogFar = Math.max(40, Math.min(300, wallDist * (1 + 0.6 * open)));
+          ctx.env.sunInt = 0.45 + 0.75 * u * open;
+          ctx.env.hemiColor = 0xc2d3e0; ctx.env.hemiInt = 0.5 + 0.35 * open;
         } else {
           ctx.env.fog = 0x46505a; ctx.env.fogNear = 14;
           ctx.env.fogFar = Math.max(55, 200 - lw.wind * 3.2);
@@ -1091,10 +1059,15 @@
           }
         });
         // ---- gust turbulence on top of the mean field ----
+        // a gust is an IMPULSE, not a new constant: the burst spikes the whole
+        // field's envelope (drag, debris, rain lean, shake all breathe as one)
+        // and the body shove lands on top of it. Big storms gust harder and
+        // more often.
         ctx.st.gustCd -= dt;
         if (ctx.st.gustCd <= 0) {
-          ctx.st.gustCd = 1.4 + rnd() * 1.7;
+          ctx.st.gustCd = (1.0 + rnd() * 1.6) * (S.catF >= 4 ? 0.75 : 1);
           H.count("gusts", 1);
+          H.gustBurst(0.2 + 0.06 * S.catF + rnd() * 0.2);
           sound("wind");
           const camW = H.windAt(camPos().x, camPos().z);
           if (CBZ.shake && camW.speed > 14) CBZ.shake(Math.min(0.5, camW.speed * 0.012));
@@ -1106,6 +1079,37 @@
             if (down) H.count("knockdowns", 1);
             if (CBZ.body) CBZ.body.hit(a, { dir: { x: w.x, z: w.z }, force: 4 + w.speed * 0.24, knockdown: down ? 1.0 : 0 });
           });
+          // A CAT-4/5 GUST AT EYEWALL SPEEDS TAKES A CAR: same fling path the
+          // surge uses, so the collider leaves with the body. Below that the
+          // per-frame shiver below is all a parked car does — its collider is
+          // the truth until the wind actually wins.
+          if (ctx.arena.cars) for (let i = 0; i < ctx.arena.cars.length; i++) {
+            const car = ctx.arena.cars[i];
+            if (car.flung) continue;
+            const w = H.windAt(car.x, car.z);
+            if (w.speed > 48 && rnd() < 0.22) {
+              flingCar(car, w.x, w.z, 3.5 + (w.speed - 48) * 0.2, 1.4);
+              H.count("carsFlung", 1);
+            }
+          }
+        }
+        // ---- parked cars SHIVER on their springs in real wind (visual only;
+        //      restored to rest when the wind lets go) ----
+        if (ctx.arena.cars) for (let i = 0; i < ctx.arena.cars.length; i++) {
+          const car = ctx.arena.cars[i];
+          if (car.flung || !car.group) continue;
+          const w = H.windAt(car.x, car.z);
+          if (w.speed > 26) {
+            const k = Math.min(1, (w.speed - 26) / 30);
+            car._windRock = 1;
+            car.group.position.x = car.x + w.x * 0.09 * k * Math.sin(CBZ.now * 0.011 + i * 1.7);
+            car.group.position.z = car.z + w.z * 0.09 * k * Math.sin(CBZ.now * 0.013 + i * 2.1);
+            car.group.rotation.z = 0.045 * k * Math.sin(CBZ.now * 0.009 + i);
+          } else if (car._windRock) {
+            car._windRock = 0;
+            car.group.position.x = car.x; car.group.position.z = car.z;
+            car.group.rotation.z = 0;
+          }
         }
         // ---- the EYEWALL scours the roofs it is standing over — an annulus
         //      that walks across the town with the storm, so damage maps the
@@ -1116,21 +1120,21 @@
         ctx.st.scourCd = (ctx.st.scourCd || 0) - dt;
         if (ctx.st.scourCd <= 0) {
           ctx.st.scourCd += 0.25;
+          // category prices the scour: a cat-1 rattles glass, a cat-5 takes
+          // the roofs — while the shared ledger still stops short of a
+          // levelled town (the quake and the wave draw on the same budget)
           structureSweepRing(ctx, S.eyeX, S.eyeZ, S.eyeR, S.rmw * 2.3,
-            (0.032 + 0.022 * ctx.intensity) * 0.25);
+            (0.013 + 0.011 * S.catF) * 0.25);
         }
       },
       end(ctx) {
         weatherOff();
-        if (ctx.st.h2) {
-          CBZ.hurricane.end();
-          surgeSet(0);
-          if (CBZ.waterEventClear) CBZ.waterEventClear("survival-flood");
-          const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
-          if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; }
-          return;
-        }
-        if (ctx.st.debris) ctx.st.debris.dispose();
+        if (!ctx.st.h2) return;
+        CBZ.hurricane.end();
+        surgeSet(0);
+        if (CBZ.waterEventClear) CBZ.waterEventClear("survival-flood");
+        const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
+        if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; }
       },
       threat(x, z, ctx) {
         if (ctx.st.h2 && CBZ.hurricane.active()) {

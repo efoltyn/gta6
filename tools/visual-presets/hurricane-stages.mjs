@@ -35,8 +35,23 @@
    (deterministic across builds and --subjects subsets), not from a stored
    first-pass solve that a subset run would not have.
 
-   Flag A/B against THIS checkout: before is ?cfg_HURRICANE_V2=0 — the old
-   one-wind-number storm — after is the cyclone. Same seed, same island. */
+   BUILD A/B, not flag A/B (the HURRICANE_V2 flag is purged — git is the
+   undo): before is the served --before build (HEAD's cyclone with its
+   cylinder-mesh eyewall and one-size storm), after is this checkout.
+   Same seed, same island.
+
+   FILM STRIPS + FEEL METRICS (the wind-room pass): a still cannot carry
+   "you feel it, you don't see it", so the eyewall and eye beats each grow a
+   `strip` — the same simulated seconds photographed as a row — and the
+   stage exposes __cbzVisualCompare.advance()/metrics() so the strip is also
+   MEASURED: wind at the player, gust variance, how far the wind physically
+   shoved the player, knockdowns during the photographed seconds. The
+   pictures show the force; the numbers count it.
+
+   BEATS ARE FRACTIONS, NOT SECONDS: the storm's duration now scales with
+   its rolled Saffir-Simpson category, so `atFrac` pins each beat to a
+   fraction of THIS storm's active phase (t0 = timeLeft at activation),
+   which lands on the same structural moment at any category. */
 
 const subjects = [
   { id: "bands-a", label: "Outer bands — frame 1 of 2", pair: "bands",
@@ -48,14 +63,16 @@ const subjects = [
     act: { extraSecs: 0.12 },
     cam: { aim: "tripod", up: 2.3 } },
 
-  /* From here every beat is pinned to an ABSOLUTE sim-second of the active
-     phase (`atSecs`), quake-stages style, so a --subjects subset lands on the
-     same moment as the full storyboard. V2 timeline (26 s active, track speed
-     ~14 m/s): front eyewall over town ~7.5 s, eye over the island center
-     ~9-12.5 s, surge peak ~12 s, back eyewall ~14 s, tail from ~19 s. */
+  /* From here every beat is pinned to a FRACTION of the active phase
+     (`atFrac`, of t0 = timeLeft at activation), so a --subjects subset lands
+     on the same moment as the full storyboard AND the same structural moment
+     at any rolled category (duration now scales with category). Shape of the
+     track at any size: front eyewall over town ~0.19, eye over the island
+     center ~0.33-0.45, surge peak ~0.4, back eyewall ~0.49, tail ~0.68. */
   { id: "frontwall-a", requireHurricane: true, label: "Front eyewall — frame 1 of 2", pair: "frontwall",
-    focus: "The deterministic town tripod at the height of the FRONT wall: near-whiteout, debris flat on the wind, gusts knocking people down. Note the streaming direction — the back-wall pair from this same tripod shows it reversed.",
-    act: { atSecs: 5.0 },
+    strip: { frames: 6, stepSec: 0.35 },
+    focus: "The deterministic town tripod at the height of the FRONT wall: near-whiteout, debris flat on the wind, gusts knocking people down. Note the streaming direction — the back-wall pair from this same tripod shows it reversed. The film strip is the wind room: 2.1 s of the player being shoved, debris crossing the frame, gusts arriving as impulses.",
+    act: { atFrac: 0.19 },
     cam: { aim: "tripod", up: 2.3 } },
   { id: "frontwall-b", requireHurricane: true, label: "Front eyewall — frame 2 of 2", pair: "frontwall",
     focus: "0.12 s later from the same tripod. Debris displacement between the two frames IS the wind vector, drawn by the world itself.",
@@ -63,22 +80,24 @@ const subjects = [
     cam: { aim: "tripod", up: 2.3 } },
 
   { id: "eye-inside", requireHurricane: true, label: "THE EYE — inside the calm",
-    focus: "Camera at the LIVE eye center. The rain has stopped, the fog has opened to a kilometre, the sun is back — and the rotating cloud wall stands in a full circle around you. This is the moment that kills people: it reads as 'over'. On the before build there is no eye anywhere, and this frame photographs more of the same storm.",
-    act: { atSecs: 8.7 },
+    strip: { frames: 5, stepSec: 0.9 },
+    focus: "Camera at the LIVE eye center. The rain has stopped, the sky has opened, the sun is back — and the world DISSOLVES into the murk of the wall at the eye's radius: no cloud cylinder, no mesh, just the distance the rain lets you see. On the before build the wall is a textured cylinder — a building. The strip holds the calm long enough to trust it, which is the trap.",
+    act: { atFrac: 0.335 },
     cam: { aim: "eye", up: 2.0 } },
   { id: "eye-sky", requireHurricane: true, label: "THE EYE — the wall from within",
     focus: "Still inside the eye, tilted up at the wall's rim: clear sky overhead, the eyewall's cloud cylinder all round. The back half of the storm is that wall, coming this way.",
-    act: { atSecs: 9.4 },
+    act: { atFrac: 0.36 },
     cam: { aim: "eyeup" } },
 
   { id: "surge", requireHurricane: true, label: "Storm surge — the water is the killer",
     focus: "The sea driven metres above its resting level through the ONE shared surge lever. Camera solved to the deepest flooded ground this run: streets underwater, cars afloat and carried, bots swimming or drowned. The before build's hurricane never touches the sea.",
-    act: { atSecs: 10.4 },
+    act: { atFrac: 0.40 },
     cam: { aim: "flood", back: 28, up: 9 } },
 
   { id: "backwall-a", requireHurricane: true, label: "Back eyewall — frame 1 of 2", pair: "backwall",
-    focus: "The SAME tripod as the front-wall pair, after the eye has passed. The far wall has arrived and the wind is blowing the OPPOSITE way — compare the streaming direction against the front-wall frames.",
-    act: { atSecs: 12.8 },
+    strip: { frames: 6, stepSec: 0.35 },
+    focus: "The SAME tripod as the front-wall pair, after the eye has passed. The far wall has arrived and the wind is blowing the OPPOSITE way — compare the streaming direction against the front-wall frames, and this strip against the front-wall strip: the same room, the wind reversed.",
+    act: { atFrac: 0.49 },
     cam: { aim: "tripod", up: 2.3 } },
   { id: "backwall-b", requireHurricane: true, label: "Back eyewall — frame 2 of 2", pair: "backwall",
     focus: "0.12 s later. Same tripod, reversed displacement. Four frames, one camera: band → front wall → back wall, and the reversal is in the pixels.",
@@ -87,7 +106,7 @@ const subjects = [
 
   { id: "tail", requireHurricane: true, label: "The tail — draining and damage",
     focus: "The storm moving off: wind falling, the surge draining back out, and the town wearing the eyewall's track — glass out, facades spalling, the worst building framed. The ledger this damage sits in is shared with the quake and the wave.",
-    act: { atSecs: 17.7 },
+    act: { atFrac: 0.68 },
     cam: { aim: "worst", back: 38, up: 18, look: 6 } },
 ];
 
@@ -131,9 +150,9 @@ async function stageHurricane(input) {
     try { if (CBZ.setQualityLevel) CBZ.setQualityLevel(3); } catch (_) {}
 
     // The seam, honestly declared: index.html should carry the tag already;
-    // a build that predates the patch gets the module injected so the AFTER
-    // side photographs the real work. The flag still decides whether the def
-    // uses it, so the before side (cfg_HURRICANE_V2=0) is unaffected.
+    // a build that somehow lacks it gets the module injected so the frame
+    // photographs a storm instead of a no-op. Both sides serve their OWN
+    // build's module — this changes nothing on a build that has the tag.
     if (!CBZ.hurricane) {
       await new Promise((resolve) => {
         const s = document.createElement("script");
@@ -154,9 +173,62 @@ async function stageHurricane(input) {
     overlay.innerHTML = "<div data-side></div><div data-name></div><div data-focus></div><div data-perf></div><div data-source></div>";
     document.body.appendChild(overlay);
 
-    S = window.__hurSeq = { overlay, t0: null };
+    S = window.__hurSeq = { overlay, t0: null, lastCam: null, strip: null };
     window.__cbzVisualCompare = {
       render() { try { CBZ.renderer.render(CBZ.scene, CBZ.camera); } catch (_) {} },
+      /* FILM-STRIP STEPPER: the runner calls advance(stepSec) between strip
+         captures. Step the frozen sim, sample the wind ON THE PLAYER each
+         tick (the wind room, measured), then re-park the camera the stage
+         solved — the engine's controller re-follows the player every tick,
+         and it is the PLAYER who is left free to be shoved (that drift is a
+         metric, not an accident). */
+      advance(sec) {
+        const n = Math.max(1, Math.round((Number(sec) || 0.5) * 60));
+        for (let i = 0; i < n; i++) {
+          CBZ.hitstop = 0; CBZ.slowmo = 0;
+          CBZ.stepSim(1 / 60);
+          if (CBZ.player) { CBZ.player.hp = 100; CBZ.player.dead = false; }
+          const st = S.strip;
+          if (st && CBZ.player && CBZ.player.pos) {
+            let w = null;
+            try {
+              w = (CBZ.hurricane && CBZ.hurricane.active && CBZ.hurricane.active())
+                ? CBZ.hurricane.windAt(CBZ.player.pos.x, CBZ.player.pos.z)
+                : (CBZ.weatherWind ? CBZ.weatherWind() : null);
+            } catch (_) {}
+            st.samples.push(w ? w.speed : 0);
+          }
+        }
+        const lc = S.lastCam;
+        if (lc) {
+          CBZ.camera.position.set(lc.eye.x, lc.eye.y, lc.eye.z);
+          CBZ.camera.lookAt(lc.look.x, lc.look.y, lc.look.z);
+          CBZ.camera.updateProjectionMatrix();
+        }
+        if (typeof CBZ.skySync === "function") CBZ.skySync();
+        try { CBZ.renderer.render(CBZ.scene, CBZ.camera); } catch (_) {}
+      },
+      /* Merged into the subject's metrics after the strip: the numbers and
+         the pictures describe the same photographed seconds. */
+      metrics() {
+        const st = S.strip;
+        if (!st) return null;
+        const a = st.samples, n = a.length || 1;
+        let mean = 0; for (let i = 0; i < a.length; i++) mean += a[i];
+        mean /= n;
+        let v = 0, peak = 0;
+        for (let i = 0; i < a.length; i++) { v += (a[i] - mean) * (a[i] - mean); if (a[i] > peak) peak = a[i]; }
+        v /= n;
+        const p = CBZ.player && CBZ.player.pos;
+        const ha2 = (typeof CBZ.hurricaneAudit === "function") ? CBZ.hurricaneAudit() : {};
+        return {
+          stripWindMean: +mean.toFixed(1),
+          stripWindPeak: +peak.toFixed(1),
+          stripGustSd: +Math.sqrt(v).toFixed(2),
+          stripPlayerDrift: p ? +Math.hypot(p.x - st.p0x, p.z - st.p0z).toFixed(2) : 0,
+          stripKnockdowns: Math.max(0, Number(ha2.knockdowns || 0) - st.kd0),
+        };
+      },
     };
   }
 
@@ -200,13 +272,15 @@ async function stageHurricane(input) {
     if (act.force === "hurricane") S.t0 = null;
   }
   if (act.untilState) stepUntilState(act.untilState, 40);
-  if (act.atSecs != null) {
+  if (act.atSecs != null || act.atFrac != null) {
     if (CBZ.disasters.state() !== "active") stepUntilState("active", 40);
     if (S.t0 == null) S.t0 = CBZ.disasters.timeLeft();
+    // atFrac scales with THIS storm's rolled duration; atSecs kept for callers
+    const target = act.atSecs != null ? act.atSecs : act.atFrac * S.t0;
     let guard = 900;
     while (guard-- > 0 && CBZ.disasters.state() === "active" &&
            CBZ.disasters.current() === "HURRICANE" &&
-           (S.t0 - CBZ.disasters.timeLeft()) < act.atSecs) step(0.1);
+           (S.t0 - CBZ.disasters.timeLeft()) < target) step(0.1);
   }
   if (act.extraSecs) step(act.extraSecs);
 
@@ -323,7 +397,7 @@ async function stageHurricane(input) {
      then re-solve and shoot. Continuation frames of a pair skip this — their
      camera never moved. */
   let solved = solveCam();
-  const isContinuation = act.atSecs == null && act.force == null && act.untilState == null;
+  const isContinuation = act.atSecs == null && act.atFrac == null && act.force == null && act.untilState == null;
   if (!isContinuation) {
     /* The engine's camera controller re-follows the PLAYER every tick, so
        parking CBZ.camera would settle the weather around the wrong point:
@@ -362,6 +436,13 @@ async function stageHurricane(input) {
   const ha = (typeof CBZ.hurricaneAudit === "function") ? CBZ.hurricaneAudit() : {};
   const da = (typeof CBZ.disasterAudit === "function") ? CBZ.disasterAudit() : {};
 
+  // arm the film-strip hooks for THIS subject: the camera to re-park after
+  // each advance(), and the baseline the strip's feel metrics measure from
+  S.lastCam = { eye, look };
+  S.strip = (CBZ.player && CBZ.player.pos)
+    ? { samples: [], p0x: CBZ.player.pos.x, p0z: CBZ.player.pos.z, kd0: Number(ha.knockdowns || 0) }
+    : null;
+
   const before = input.side === "before";
   const q = (n) => S.overlay.querySelector(`[data-${n}]`);
   q("side").textContent = before ? input.beforeLabel : input.afterLabel;
@@ -393,6 +474,10 @@ async function stageHurricane(input) {
   const eyeBeat = cam.aim === "eye" || cam.aim === "eyeup";
   const lateBeat = subject.id.startsWith("backwall") || subject.id === "tail" || eyeBeat;
   const metrics = {
+    // the rolled Saffir-Simpson category and its sustained ceiling — the
+    // before build predates the roll and honestly reports 0
+    category: Number(ha.category || 0),
+    stormVmax: Number(ha.vmax || 0),
     camPeakWind: v2live ? Number(ha.camPeakWind || 0) : legacyWind,
     // "wind on you during the eye" — if no eye ever reached the camera this
     // is the storm's own gale, so a structureless storm scores its full wind
@@ -422,18 +507,25 @@ async function stageHurricane(input) {
 export default {
   id: "hurricane-stages",
   title: "The Hurricane Gets Its Structure",
-  description: "One seeded survival match per build, the director forced to the hurricane and stepped through the same simulated seconds. Before (cfg_HURRICANE_V2=0): one wind number for the whole island, slowly veering, with a camera-glued swirl cloud — a windstorm. After: a cyclone that TRACKS across the island — outer bands, a screaming front eyewall, a storm surge that puts the low streets underwater, then THE EYE (sudden calm, open sky, the trap), then the back wall with the wind physically reversed. Front and back eyewall are shot from the same deterministic tripod so the reversal is in the pixels.",
-  beforeLabel: "BEFORE · V2 OFF",
-  afterLabel: "AFTER · CYCLONE",
+  description: "One seeded survival match per build, the director forced to the hurricane and stepped through the same structural moments. Before (the served --before build): the cyclone wearing a 96 m textured CYLINDER as its eyewall — the eye that looked like a building — every storm the same size, cars ignoring the wind. After: the wall is murk, not a mesh (the eye is a sudden calm with open sky, ringed by the distance the rain lets you see), every storm rolls a Saffir-Simpson category off the run seed (cat-1 is a bad wind you lean through; cat-5 takes roofs, floats streets and throws cars), gusts arrive as impulses the film strips photograph, and the strip metrics count the feel: wind on the player, gust variance, metres the wind physically shoved you.",
+  beforeLabel: "BEFORE · MESH EYE, ONE SIZE",
+  afterLabel: "AFTER · WIND ROOM",
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
   defaultBefore: "local",
-  beforeParams: { cfg_HURRICANE_V2: 0 },
-  afterParams: { cfg_HURRICANE_V2: 1 },
+  beforeParams: {},
+  afterParams: {},
   stageTimeoutMs: 480000,
-  metricsNote: "Numbers come from CBZ.hurricaneAudit() (live evidence, not claims: eyePassedCam only fires if the camera felt real wind BEFORE the calm; windReversed dots two wind bearings sampled at the island center on either side of the eye) plus CBZ.disasterAudit(). eyeCalm is the wind on the camera during the eye — a storm with no eye scores its own peak gale there, which is the point.",
+  metricsNote: "Strip metrics are sampled over exactly the photographed film-strip seconds: wind at the player each tick, the player’s net displacement (the wind is the only thing moving them), knockdowns during the strip. The rest come from CBZ.hurricaneAudit() (live evidence, not claims: eyePassedCam only fires if the camera felt real wind BEFORE the calm; windReversed dots two wind bearings sampled at the island center on either side of the eye) plus CBZ.disasterAudit(). eyeCalm is the wind on the camera during the eye — a storm with no eye scores its own peak gale there, which is the point.",
   metrics: {
+    category: { label: "Saffir-Simpson category (rolled)", better: "higher" },
+    stormVmax: { label: "Sustained wind ceiling", unit: "m/s", better: "higher" },
+    stripWindMean: { label: "Strip: wind on player, mean", unit: "m/s", better: "higher" },
+    stripWindPeak: { label: "Strip: wind on player, peak gust", unit: "m/s", better: "higher" },
+    stripGustSd: { label: "Strip: gust variance (sd)", better: "higher" },
+    stripPlayerDrift: { label: "Strip: player shoved", unit: "m", better: "higher" },
+    stripKnockdowns: { label: "Strip: knockdowns while filming", better: "higher" },
     camPeakWind: { label: "Peak wind at camera", better: "higher" },
     eyeCalm: { label: "Wind in the eye (calm)", better: "lower" },
     eyePassedCam: { label: "Eye passed the camera", better: "higher" },

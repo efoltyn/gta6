@@ -209,9 +209,23 @@
   // start with zero drawn; draw range grows with intensity
   geo.setDrawRange(0, 0);
 
+  // soft radial sprite: a bare gl point draws a hard SQUARE, and a sky full
+  // of identical white squares reads as an effect, not as precipitation
+  const dropTex = (function () {
+    const c = document.createElement("canvas");
+    c.width = c.height = 32;
+    const g = c.getContext("2d");
+    const grad = g.createRadialGradient(16, 16, 2, 16, 16, 15);
+    grad.addColorStop(0, "rgba(255,255,255,0.95)");
+    grad.addColorStop(0.55, "rgba(255,255,255,0.5)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = grad; g.fillRect(0, 0, 32, 32);
+    return new THREE.CanvasTexture(c);
+  })();
   const mat = new THREE.PointsMaterial({
     color: 0xbcd2e8,
-    size: 0.16,
+    map: dropTex,
+    size: 0.2,               // soft falloff hides the sprite's outer third
     transparent: true,
     opacity: 0.0,            // faded in via intensity
     depthWrite: false,       // don't fight the depth buffer / no z-fighting
