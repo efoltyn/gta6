@@ -28,7 +28,7 @@ const subjects = [
   { id: "in-flight", label: "0.4 s — what is in the air", focus: "Same rocket, same wall, same instant. BEFORE: a spray of shared dark-grey shards that exist only because a number said so. AFTER: cells of that wall, in that wall's colour, leaving the volume they occupied." },
   { id: "pile", label: "6 s — what is on the ground", focus: "Close on the base of the wound. BEFORE: invented lumps off a debris palette, in a pile whose size came from an arithmetic expression. AFTER: the material that left the facade, stacked where it fell, sized by how much of the building actually went." },
   { id: "wound", label: "The edge of the hole", focus: "BEFORE: a machined rectangle with a decorative jagged tooth laid over it. AFTER: the perimeter is diced too and the cells that survived are still welded to the shell — the edge is ragged because material is missing, not because something was drawn on top." },
-  { id: "two-colours", label: "Two buildings, two rubbles", focus: "The proof. Two shells of clearly different wall colour, one rocket each. BEFORE: both piles are the same grey, because the palette is the same. AFTER: each pile is the colour of the building it came off." },
+  { id: "other-building", label: "The same rocket, a different building", focus: "The proof, read against plate 2. A second shell of a different wall colour takes the identical rocket. BEFORE its pile is the same grey as the first building's, because the palette is the same one. AFTER it is ITS OWN colour — compare it with plate 2 and the two piles do not match, because neither of them came from a palette." },
 ];
 
 async function stageDebris(input) {
@@ -191,8 +191,12 @@ async function stageDebris(input) {
       if (c.b === cands[0].b || !c.ok) continue;
       const s = spec(c);
       const d = Math.hypot(s.x - one.x, s.z - one.z);
-      if (d < 40 || d > 190) continue;
-      const sc = Math.abs(lum(s.colour) - lum(one.colour)) - Math.abs(d - 95) * 0.25;
+      // CLOSE ENOUGH THAT ONE FRAME HOLDS BOTH PILES. At 150 m apart a single
+      // shot containing both wounds has to stand so far back that the rubble is
+      // a few pixels of grey either way — which is the one thing this plate
+      // must not be ambiguous about.
+      if (d < 32 || d > 85) continue;
+      const sc = Math.abs(lum(s.colour) - lum(one.colour)) - Math.abs(d - 55) * 0.35;
       if (sc > best) { best = sc; two = s; }
     }
     if (!two) two = spec(cands[1] || cands[0]);
@@ -210,31 +214,16 @@ async function stageDebris(input) {
       wound: eyeFor(one, [[11, 0.6, 3, 54], [14, 1.0, 5, 54], [9, 0.4, -3, 58]]),
     };
     // the two-colour plate stands between the pair, looking at the midpoint
-    // BOTH WOUNDS OR IT PROVES NOTHING. The tripod has to stand where it can see
-    // the base of BOTH facades at once — a point above the roofs photographs two
-    // roofs. Try a ring of standoffs on both flanks and take the first that has
-    // a clear line to each pile.
-    const mx = (one.x + two.x) / 2, mz = (one.z + two.z) / 2;
-    const sep = Math.max(30, Math.hypot(two.x - one.x, two.z - one.z));
-    const ux2 = (two.x - one.x) / sep, uz2 = (two.z - one.z) / sep;
-    const px = -uz2, pz = uz2 * 0 + ux2;      // perpendicular to the pair
-    const lowOne = { x: one.x, y: 2.2, z: one.z, tx: one.tx, tz: one.tz, width: one.width };
-    const lowTwo = { x: two.x, y: 2.2, z: two.z, tx: two.tx, tz: two.tz, width: two.width };
-    let twoEye = null;
-    for (const s2 of [1, -1]) {
-      for (const D of [0.75, 0.95, 1.2, 1.5]) {
-        for (const H of [7, 11, 16]) {
-          const e = { x: mx + px * sep * D * s2, y: H, z: mz + pz * sep * D * s2 };
-          if (wet(e.x, e.z) || solidAt(e.x, e.y, e.z, 2) || insideShell(e.x, e.y, e.z)) continue;
-          if (!losClear(e, lowOne) || !losClear(e, lowTwo)) continue;
-          twoEye = e; break;
-        }
-        if (twoEye) break;
-      }
-      if (twoEye) break;
-    }
-    if (!twoEye) twoEye = { x: mx + px * sep * 0.95, y: 11, z: mz + pz * sep * 0.95 };
-    cams.two = { eye: twoEye, look: { x: mx, y: 3.2, z: mz }, fov: 58 };
+    /* ONE BUILDING PER PLATE. Three attempts at a single frame holding BOTH
+       wounds all failed the same way — the only tripods with line of sight to
+       two bases 60-150 m apart were jammed against a monument, inside an
+       office, or under a deck, and a plate that photographs a wall proves
+       nothing. The comparison the plate exists to make survives being split
+       across two pages: this one is shot with the SAME close-pile camera as
+       plate 2, on a building of a different colour, and the reader puts them
+       side by side. Cheap, reliable, and it makes the same point. */
+    cams.other = eyeFor({ x: two.x, y: 1.8, z: two.z, nx: two.nx, nz: two.nz, tx: two.tx, tz: two.tz, width: two.width },
+      [[13, 1.6, 4, 52], [16, 2.2, 7, 52], [11, 1.2, -5, 56], [20, 3, -10, 50], [24, 4, 12, 50]]);
 
     S = window.__debrisSeq = { one, two, hud, cams, fired: false, firedTwo: false, t: 0 };
     window.__cbzVisualCompare = { render() { try { CBZ.renderer.render(CBZ.scene, CBZ.camera); } catch (_) {} } };
@@ -266,14 +255,16 @@ async function stageDebris(input) {
   daylight(); clean();
 
   if (!S.fired) { rocket(S.one); S.fired = true; S.t = 0; }
-  if (id === "two-colours" && !S.firedTwo) { rocket(S.two); S.firedTwo = true; }
+  // Its own six seconds, so this plate is a SETTLED pile like plate 2 — two
+  // piles at the same age is the comparison; a fireball against a pile is not.
+  if (id === "other-building" && !S.firedTwo) { rocket(S.two); S.firedTwo = true; seconds(6); }
 
   let state = "";
   const on = !CBZ.CONFIG || CBZ.CONFIG.DEBRIS_CONSERVED_V1 !== false;
   if (id === "in-flight") { advanceTo(0.4); pose(S.cams.inFlight); state = on ? "cells of that wall, leaving the volume they occupied" : "a shared grey, spawned by a count"; }
   else if (id === "pile") { advanceTo(6); pose(S.cams.pile); state = on ? "the material that left the facade, where it fell" : "invented lumps off a debris palette"; }
   else if (id === "wound") { advanceTo(6); pose(S.cams.wound); state = on ? "ragged because material is missing" : "a machined rectangle with a tooth drawn on it"; }
-  else { advanceTo(6); pose(S.cams.two); state = on ? "each pile is the colour of its own building" : "two buildings, one grey"; }
+  else { advanceTo(6); pose(S.cams.other); state = on ? "a different building, so a different rubble" : "a different building, the same grey"; }
 
   daylight(); clean();
   const da = CBZ.cityDebrisAudit ? CBZ.cityDebrisAudit() : {};
