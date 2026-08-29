@@ -586,9 +586,15 @@ const PASS = `(() => {
     if (CBZ.gungameAudit) {
       const gga = CBZ.gungameAudit();
       const ggm = gga.maps ? gga.maps.length : 0;
-      out.gungame = gga.rungs + "rungs maps=" + ggm;
+      out.gungame = gga.rungs + "rungs maps=" + ggm + " leak=" + gga.prisonLeak;
       if (ggm < 2) out.fails.push("gungame maps fell to " + ggm + " (jail + island are the floor)");
       if (gga.rungs < 5) out.fails.push("gungame ladder shrank to " + gga.rungs + " rungs");
+      // THE PRISON SIM MUST NOT REACH AN ARENA MATCH (modes/gungame.js header:
+      // "IT BORROWS THE GEOMETRY, NEVER THE GAME"). Heat that arrived after a
+      // match started means detection.js's wanted machine is running under a
+      // deathmatch again — which is where the escape prompts, the guard radio
+      // and the snitch popups come from. Reads 0 outside a live match.
+      if (gga.prisonLeak > 0) out.fails.push("PRISON SIM LEAKED INTO A GUN GAME MATCH: heat +" + gga.prisonLeak + " (ratchet 0)");
     }
     // WAR BAND'S REPLACEMENT. The package was DELETED 2026-07-29 — owner:
     // "the whole war band code, it was a dumb idea, but it's really what this

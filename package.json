@@ -53,6 +53,7 @@
     "test:tp-gun": "node tools/tp-gun-view-check.mjs",
     "test:tp-gun-shots": "node tools/tp-gun-view-check.mjs --shots",
     "test:battle-revert": "node tools/battle-check.mjs --revert",
+    "test:gungame-quiet": "node tools/gungame-quiet-check.mjs",
     "test:prison-sit": "node tools/prison-sit-check.mjs",
     "test:prison-jitter": "node tools/prison-jitter-check.mjs",
     "test:prison-nav": "node tools/prison-nav-check.mjs",

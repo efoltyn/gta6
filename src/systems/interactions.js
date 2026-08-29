@@ -492,6 +492,23 @@
   }
 
   function updateInteractions(dt) {
+    /* THE ESCAPE IS A SCENARIO, NOT A MAP (2026-08-19).
+       Everything below this line is the prison BREAKOUT: the keycard on the
+       floor, the yard door's card reader, the breaker box you sabotage, the
+       camera cones, the vents you crawl through. It had no mode gate at all —
+       the gate was the WIN check at the bottom — so it ran in every mode, and
+       modes/gungame.js plays a deathmatch on this exact geometry. Walk over a
+       grate mid-match and the arena printed "Crouch [C] to enter vent / hatch"
+       at you; stand on the breaker and it offered "Press [E] to Sabotage
+       Power"; touch the keycard and setObjective rewrote your objective to
+       "Cross the yard or scout tunnels for another way out." A vent that
+       teleports you off the map is not a feature of a gun game.
+       (The city was already living with the near-miss version of this — see
+       doorCloseKey's guard, which exists because the compound shares the
+       city's coordinate space near the origin. One gate at the top is what
+       that comment wanted and could not have on its own.) */
+    if (!CBZ.game || CBZ.game.mode !== "escape") return;
+
     // ---- keycard ----
     if (!keycard.collected) {
       keycard.group.rotation.y += dt * 2;

@@ -103,13 +103,40 @@
     return null;
   }
 
+  /* ---- THE PRISON IS A SCENARIO, NOT A MAP --------------------------------
+     modes/gungame.js plays a DEATHMATCH on the prison's geometry
+     (CBZ.prisonRoot), and this whole file kept running underneath it: every
+     shot fired in a Gun Game match called CBZ.reportCrime, which asked the
+     hidden guards whether they saw it, poured heat into g.detection, and —
+     when no guard had eyes on you — walked CBZ.npcs looking for a snitch and
+     printed "<match bot> saw that." over the man you were shooting. Measured
+     mid-match: heat 31/100 in 45 s, 1608 guard-flashlight ticks, seventeen
+     reported crimes. None of it is part of a deathmatch, and one of its
+     symptoms is a popup, which is how it got noticed.
+
+     The wanted system belongs to the ESCAPE scenario alone. Not "not
+     survival" — that read as a list of exceptions and every mode added since
+     has silently joined the wrong side of it. City owns its own wanted ladder
+     (city/police.js) and nothing outside this file's own prison callers reads
+     g.detection, so escape is the whole of it.
+
+     Deliberately a LOCAL predicate and not a new CBZ.* export: this is a
+     scenario question, the same one-liner lockdown.js, capture.js,
+     intimidate.js and prisonshanks.js already ask for themselves, and
+     systems/modecaps.js is explicit that the capability bus is for shared
+     engine verbs (its own revert path answers `mode === "city"`, which would
+     be exactly wrong here). systems/interactions.js and systems/killstreaks.js
+     ask it the same way, in their own files. ------------------------------ */
+  function prisonSim() { return g.mode === "escape"; }
+
   // anyone can pour heat on (combat, theft, escape attempts call this).
   // After strike two (systems/capture.js three-strikes arc) the block never
   // fully relaxes: g.strikeHeatFloor keeps a minimum simmer under the heat
   // bar. Jail-only — the floor is ignored outside escape mode and cleared by
   // state.js resetGame().
   CBZ.addHeat = function (n) {
-    const floor = (g.mode === "escape" && g.strikeHeatFloor) || 0;
+    if (!prisonSim()) return;             // no ledger outside the scenario that reads it
+    const floor = g.strikeHeatFloor || 0;
     g.detection = Math.max(floor, Math.min(100, g.detection + n));
   };
   CBZ.addComplaint = function (n) { g.complaints = Math.max(0, Math.min(100, (g.complaints || 0) + n)); };
@@ -668,6 +695,12 @@
   }
 
   CBZ.reportCrime = function (amount, meta) {
+    // THE ONE CHOKE POINT for "somebody may have seen that" — fpsmode's every
+    // shot, combat.js's every punch, economy.js's every lift. Outside the
+    // escape scenario there is no block to hear about it, so the whole chain
+    // (guard witness → case pressure → snitch line → heat) stops here rather
+    // than at four call sites that would each have to remember.
+    if (!prisonSim()) return;
     meta = metaWithPlayerPos(meta || {});
     const copCrime = meta.actorRole === "cop" || g.role === "cop";
     if (copCrime) {
@@ -688,7 +721,16 @@
   };
 
   function updateDetection(dt) {
-    if (CBZ.islandModeOn(g.mode)) return;   // no wanted/heat system in the island games
+    // ESCAPE ONLY (see THE PRISON IS A SCENARIO, NOT A MAP above). This used
+    // to read `if (g.mode === "survival") return;` — an exception list, so
+    // Gun Game inherited the entire wanted machine the day it was written.
+    // (the bar itself is written direct, not through wantedShown — that helper
+    // FORCES itself visible when JAIL_WANTED_HUD_LIVE is off, which is right
+    // inside the scenario and exactly wrong outside it.)
+    if (!prisonSim()) {
+      if (detectWrap && !detectWrap.classList.contains("quiet")) { wantedOn = false; detectWrap.classList.add("quiet"); }
+      return;
+    }
     decayCase(dt);
     if (g.invuln > 0) g.invuln -= dt;
     if ((g.racketProtectionT || 0) > 0) {
