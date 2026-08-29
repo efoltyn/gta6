@@ -219,8 +219,27 @@
       "#tveh #tvAux .tvrow{display:flex;flex-direction:row;gap:8px;}" +
       "#tveh #tvAux .tvbtn{min-width:96px;}" +
       "#tveh #tvAux .tvrow .tvbtn{min-width:60px;padding:8px 10px;}" +
+      /* SHARK SIM (.tv-shark on #tveh, see layout()): FIRE and JUMP are off
+         the glass in this mode (systems/touch.js), so their corner thumb
+         spots are empty — and that corner is exactly where the owner wants
+         DIVE/RISE (2026-08-29: "they should be where the attack and jump
+         buttons were"). #tveh sits at right:14/bottom:18 (+safe area) and
+         #tbtns at right:16/bottom:22, so right:2/bottom:4 inside the layer
+         lands the rail on the on-foot cluster's own corner. Column-reverse
+         already puts DIVE (first) at the bottom where FIRE was, RISE above
+         it where JUMP was; the sizes are FIRE's 84 and JUMP's 72, round,
+         same 12px gap as #tbtns. */
+      "#tveh.tv-shark #tvAux{right:2px;bottom:4px;align-items:center;gap:12px;}" +
+      "#tveh.tv-shark #tvAux .tvbtn{width:84px;height:84px;min-width:84px;min-height:84px;" +
+      "border-radius:50%;padding:0;font-size:15px;}" +
+      "#tveh.tv-shark #tvAux #tvMRise{width:72px;height:72px;min-width:72px;min-height:72px;font-size:13px;}" +
       "@media (max-width:820px){#tveh #tvAux{right:118px;bottom:120px;}" +
-      "#tveh #tvAux .tvbtn{min-width:86px;min-height:42px;font-size:13px;}}";
+      "#tveh #tvAux .tvbtn{min-width:86px;min-height:42px;font-size:13px;}" +
+      // ..and the small-screen sizes track .tbtn's own shrink (mobile.css
+      // takes .tbig to 70 and .tjump to 58 on phones)
+      "#tveh.tv-shark #tvAux{right:2px;bottom:4px;}" +
+      "#tveh.tv-shark #tvAux .tvbtn{width:70px;height:70px;min-width:70px;min-height:70px;font-size:13px;}" +
+      "#tveh.tv-shark #tvAux #tvMRise{width:58px;height:58px;min-width:58px;min-height:58px;font-size:11.5px;}}";
     document.head.appendChild(s);
   }
   function build() {
@@ -327,6 +346,10 @@
 
   function layout(next) {
     mode = next;
+    // SHARK SIM wears its own rail dress (see auxCss): DIVE/RISE stand in the
+    // empty FIRE/JUMP corner as round thumb buttons. Class, not a second
+    // layout — the pills, their order and their handlers are identical.
+    if (root) root.classList.toggle("tv-shark", next === "mount" && CBZ.game.mode === "sharksim");
     clearHeld();
     heldFns.length = 0;          // the DOM these released is about to be replaced
     if (!btnWrap) return;

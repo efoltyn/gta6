@@ -1208,13 +1208,19 @@
     // The view: a saved choice is applied silently; a device that has never
     // chosen gets the chooser card, which holds the opening banner until the
     // pick lands (openingFlash fires from the card's own buttons). A TOOL RUN
-    // (shark-sim-check, every visual preset — always CDP-driven, so
-    // navigator.webdriver is true) has nobody to tap the card and must not
-    // capture it over every shot: it gets the chase default, unsaved, and
-    // ?cfg_SHARK_VIEW=eye can stage the other camera.
+    // (shark-sim-check, every visual preset, any CDP probe) has nobody to tap
+    // the card and must not capture it over every shot: it gets the chase
+    // default, unsaved, and ?cfg_SHARK_VIEW=eye can stage the other camera.
+    // navigator.webdriver alone was NOT the tool test it claims to be — the
+    // harness's Chromes speak raw CDP without --enable-automation, so it
+    // stayed false and the first capture run photographed the card over every
+    // frame. The belt is the repo's own tooling grammar: every tool pins
+    // ?seed= or stages ?cfg_ flags, and no player types either.
+    const toolRun = (typeof navigator !== "undefined" && navigator.webdriver) ||
+      /[?&](seed=|cfg_)/.test(location.search);
     const pv = viewPref() || (CFG.SHARK_VIEW === "eye" || CFG.SHARK_VIEW === "chase" ? CFG.SHARK_VIEW : null);
     if (pv) { viewApply(pv); openingFlash(); }
-    else if (typeof navigator !== "undefined" && navigator.webdriver) { viewApply("chase"); openingFlash(); }
+    else if (toolRun) { viewApply("chase"); openingFlash(); }
     else viewChooser();
   }
 
