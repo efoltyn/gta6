@@ -149,23 +149,26 @@
      drops ~1.9 m over the 26 m beach (world/disaster_arena.js), so
      depth/0.073 IS metres-from-the-waterline on the slope the species
      clearance numbers were tuned for — a bull shark's 12 puts it in the
-     same waist-deep surf here as on the city coast. The second term walls
-     the swimmable ring from the outside at the rim of the DRAWN seabed
-     (arena.seaR, ~3 km — see seaFenceR below), so a mount cannot be piloted
-     off the edge of the world. Because depth reads the LIVE mean sea (surge
-     included), a tsunami genuinely opens the island to a ridden shark and
-     closes it again as the water leaves. */
-  /* THE OUTER WALL OF THE SEA. This was a flat radius+150 — a 270 m pen
-     around a 120 m island, sized for a world whose drawn seabed once stopped
-     at r 290. The bed has been out at radius+500 for a while and now runs to
-     radius+3000, so the pen was the only thing keeping the ocean small: a
-     ridden shark crossed it in twenty seconds and then ground against it
+     same waist-deep surf here as on the city coast. And because the sea now
+     ends in a REAL far coast (disaster_arena.js's FAR_WL: the bed climbs
+     back out of the plain through the same foreshore profile), the SAME
+     depth term is what stops a shark out there — it runs aground on sand it
+     can see, no invisible wall involved. Because depth reads the LIVE mean
+     sea (surge included), a tsunami genuinely opens both shores to a ridden
+     shark and closes them again as the water leaves. */
+  /* THE FLOOD BACKSTOP — normally unreachable. The outer wall of the sea
+     used to be this radius term alone: a flat radius+150, a 270 m invisible
+     pen a ridden shark crossed in twenty seconds and then ground against
      (blocked steps, wall slides, the radial "safe direction" fighting the
-     player — the whole "movement goes to hell far out" feel). The fence now
-     tracks the drawn bed's own rim, 200 m inside it, so drawn == navigable
-     stays one fact and growing the sea is one number in disaster_arena.js. */
+     player). The owner's verdict on that — "the pen should be land and
+     beach, like there is on the island" — is now the far coast, and the
+     depth term above IS the wall. This term survives only as a backstop
+     150 m inland of the far waterline, under the dunes: dry land in any
+     normal sea, it only ever bites when a surge floods the far beach deep
+     enough to swim over, and it is what keeps that shark inside the drawn
+     world instead of sailing off its edge. */
   function seaFenceR(A) {
-    return (+A.seaR > 0 ? +A.seaR : A.radius + 350) - 200;
+    return (+A.seaR > 0 ? +A.seaR + 150 : A.radius + 150);
   }
   function islandShore(x, z) {
     const A = CBZ.surv.arena;
@@ -219,9 +222,15 @@
       const dx = x - A.center.x, dz = z - A.center.z;
       const rr = Math.hypot(dx, dz) || 1;
       const rx = dx / rr, rz = dz / rr;
-      const depth = CBZ.survFloodDepthMeanAt ? Math.max(0, CBZ.survFloodDepthMeanAt(x, z)) : 0;
-      const atFence = (rr - seaFenceR(A)) > -depth / SHORE_SLOPE;
-      const ax = atFence ? -rx : rx, az = atFence ? -rz : rz;   // the safe radial
+      /* Which way is safe water? The sea is an annulus with a beach on BOTH
+         rims now, so the answer is by hemisphere: island side → seaward,
+         far-coast side → inward. Mid-sea is unambiguous — a body is only
+         ever steering off a shore it is within probe reach (~44 m) of. The
+         old test compared the radius fence against the depth term, which
+         cannot tell the far BEACH from the far fence (a real shore shrinks
+         the depth term itself). */
+      const farSide = rr > (A.radius + (+A.seaR > 0 ? +A.seaR : A.radius + 300)) * 0.5;
+      const ax = farSide ? -rx : rx, az = farSide ? -rz : rz;   // the safe radial
       const tx1 = -az, tz1 = ax, tx2 = az, tz2 = -ax;
       const d1 = tx1 * hx + tz1 * hz, d2 = tx2 * hx + tz2 * hz;
       // Hold last frame's tangent through a near-tie, or a body running
@@ -366,12 +375,12 @@
      away from here". Keep the two in step if that threshold ever changes.
 
      NULL MEANS THE BODY DOES NOT FIT, and callers must honour it instead of
-     placing something anyway. This mattered constantly when the fence was a
+     placing something anyway. This mattered constantly when the sea was a
      270 m pen (a blue marlin's 150 m of clearance had no overlap at all, and
      a marlin spawned anyway is a marlin frozen where it spawned); with the
-     fence at the drawn seabed's rim (~3 km) nearly everything fits, but the
-     contract stands — the fence can shrink again, and the refusal is what
-     keeps a shrink from quietly filling the sea with frozen bodies.
+     sea running ~2.4 km to its far coast nearly everything fits, but the
+     contract stands — the sea can shrink again, and the refusal is what
+     keeps a shrink from quietly filling it with frozen bodies.
 
      Sampled along +X only: the shelf under this sea is a function of radius
      alone (world/disaster_arena.js's coastHeightAt), and the four hills that

@@ -441,6 +441,42 @@
     const SHELF_KNEE = 4;              // m past SHORE_R the original slope holds (r <= 150)
     const SHELF_RAMP = 9;              // m over which the slope eases to its deep value
     const SHELF_DEEP = 0.66;           // m of depth per m out, past the break
+    /* ---- THE FAR COAST: THE SEA ENDS IN SAND, NOT IN A FENCE --------------
+       OWNER: "the pen should be land and beach like there is on the island,
+       real fucking pen." The sea used to end in an invisible navigator wall
+       (water_survival.js) — first at radius+150, then pushed to ~3 km, but
+       still a wall: the shark stopped in 62 m of open water for no reason a
+       player could see. Now the reason is VISIBLE and PHYSICAL: at FAR_WL the
+       bed climbs back out of the abyssal plain through the same foreshore
+       profile as the island's own beach (1.9 m over 26 m — the exact surf
+       slope every species clearance and the ride's grounding law were tuned
+       against), crosses a real waterline, and rises into low dunes. A shark
+       that swims out far enough runs aground on sand it can see, exactly as
+       it does at the island; a big enough surge floods the far beach and
+       opens it, exactly as it does the island's.
+
+       Everything below reads this through the ONE height function, so the
+       far coast is simultaneously drawn (the bed mesh), walked (ground
+       oracle), and navigated (survFloodDepthMeanAt goes to zero there, which
+       is what the island mover's shore law runs on) — no second fence to
+       keep in step. */
+    const FAR_WL = R + 2400;           // the far coast's waterline radius — THE SIZE OF THE SEA
+    const FAR_FORE = 26;               // its foreshore width — the island's own
+    const FAR_RISE = 0.66;             // underwater climb toward it, mirror of SHELF_DEEP
+    const FAR_TOUCH = FAR_FORE + (DEEP - FORE_DROP) / FAR_RISE;  // ~117 m out: where the climb leaves the plain
+    const DUNE_H = 7;                  // dune crest height above mean sea
+    const DUNE_W = 150;                // m of dry sand from waterline to crest
+    // Height at `e` metres SEAWARD of the far waterline (negative e = up the
+    // far beach). Slope is continuous through the waterline (0.073 both
+    // sides), so the shore reads as one surface, not a crease.
+    function farCoastAt(e) {
+      if (e > FAR_FORE) return -Math.min(DEEP, FORE_DROP + (e - FAR_FORE) * FAR_RISE);
+      if (e >= 0) return -e * (FORE_DROP / FAR_FORE);
+      const b = -e;                    // metres inland of the far waterline
+      if (b <= FAR_FORE) return b * (FORE_DROP / FAR_FORE);
+      const s = Math.min(1, (b - FAR_FORE) / (DUNE_W - FAR_FORE));
+      return FORE_DROP + (DUNE_H - FORE_DROP) * (s * s * (3 - 2 * s));
+    }
     // Metres of water over the bed `d` metres past SHORE_R. The ramp is the
     // integral of a smoothstep between the two slopes, so the profile is C1 —
     // no visible crease in the drawn bed where the break happens.
@@ -458,6 +494,10 @@
     // consumer — physics, the drawn shore ring, the drawn seabed ring — reads
     // THIS, which is what keeps drawn and walked from ever being two surfaces.
     function coastHeightAt(dist) {
+      // past the abyssal plain the FAR coast owns the height — including
+      // every radius beyond it, so the world's edge is land, never water
+      const e = FAR_WL - dist;
+      if (e < FAR_TOUCH) return farCoastAt(e);
       const d = dist - SHORE_R;
       if (d > 0) return -shelfDepth(d);
       if (!BEACH2) return 0;
@@ -469,7 +509,23 @@
       const k = (b - 4.6) / 2.4;
       return 0.30 * Math.exp(-k * k) - FORE_DROP * s;
     }
-    function seabedAt(x, z) { return coastHeightAt(Math.hypot(x - cx, z - cz)); }
+    function seabedAt(x, z) {
+      const dist = Math.hypot(x - cx, z - cz);
+      let h = coastHeightAt(dist);
+      /* Dune relief on the far coast's DRY sand only — a perfect circle of
+         beach reads as a compass rose. Analytic, deterministic, and ZERO at
+         and below the waterline band, so every radial water law stays exact
+         (survNavRing measures along +X alone and stays honest). Frequencies
+         are low on purpose: at r 2400 the bed mesh samples ~118 m arcs, and
+         anything faster than these periods would alias into grid moiré. */
+      if (h > 0.4 && dist > FAR_WL - FAR_FORE) {
+        const a = Math.atan2(z - cz, x - cx);
+        const w = Math.sin(a * 5 + 1.7) * 0.55 + Math.sin(a * 13 + 4.2) * 0.30 +
+                  Math.sin(a * 29 + 0.6) * 0.15;
+        h += w * Math.min(2.4, (h - 0.4) * 0.6);
+      }
+      return h;
+    }
     function groundHeightAt(x, z) {
       let h = 0;
       for (let i = 0; i < hills.length; i++) {
@@ -488,11 +544,13 @@
     // it back in as the flood — reset() always parks it back at OCEAN_Y.
     const OCEAN_Y = -0.8;
     /* The displaced sheet is 2 km on a side and FOLLOWS THE CAMERA (see the
-       47.9 update below) — the swimmable sea now runs ~3 km out (arena.seaR /
-       water_survival.js's fence), so a tile parked on the island's centre
-       would run out of water long before the fence does. 2048 covers the
-       longest fog draw any island weather asks for (volcano dusk, fogFar
-       2400: the rim sits half-fogged over a drawn seabed, not over void). */
+       47.9 update below) — the sea runs to a real far coast ~2.4 km out
+       (FAR_WL / arena.seaR), so a tile parked on the island's centre would
+       run out of water long before the sand does. 2048 covers the longest
+       fog draw any island weather asks for (volcano dusk, fogFar 2400: the
+       rim sits half-fogged over a drawn seabed, not over void). Where the
+       far coast rises above the sea, the land simply occludes the sheet —
+       the same way the island always has. */
     const OCEAN_SPAN = 2048;
     const sharedWater = !!(CBZ.waterBuildDisasterGeometry && CBZ.makeDisasterWaterMaterial);
     const oceanGeo = sharedWater ? CBZ.waterBuildDisasterGeometry(OCEAN_SPAN)
@@ -599,20 +657,31 @@
        patches survive as low-frequency tone blotches in the same attribute.
        Still one draw call, and thirteen fewer than before. */
     const BED_R0 = SHORE_R - 1;        // shares the shore ring's outer rim exactly
-    /* BED_R1 is THE SIZE OF THE OCEAN. It is published on the descriptor as
-       arena.seaR, and water_survival.js walls the swimmable sea 200 m inside
-       it — so the drawn bed and the navigable water can never disagree, and
-       growing the sea is growing this one number. R + 3000 is ~25x the
-       island's radius: the old fence (radius + 150) was a 270 m pen that a
-       ridden shark crossed in twenty seconds and then ground against, which
-       is the "invisible wall" this replaces. Past r ~241 the shelf is flat
-       at -62 m, so the far bed costs nothing but the vertices that draw it. */
-    const BED_R1 = R + 3000;
-    // 92 rings keeps the squared distribution's ~1 m spacing off the beach
-    // (2600-odd metres at ^1.7 needs the extra rings the old 620 m span got
-    // from 40); the outer rings stretch to ~50 m, which a flat abyssal plain
-    // renders indistinguishably from fine ones.
-    const BED_RINGS = 92, BED_SECT = 96;
+    /* The mesh ends 260 m up the far beach — behind the dune crest, so the
+       world's visible edge is dry sand you cannot see past, not a rim of
+       floating water. The size of the OCEAN itself is FAR_WL above; this is
+       just how much of its far shore gets drawn. */
+    const BED_R1 = FAR_WL + 260;
+    /* RING RADII ARE A LIST, NOT A FORMULA. The old squared distribution was
+       right for a bed that only ever got flatter with distance — fine rings
+       at the island beach, ~50 m at the horizon. But the far coast puts a
+       second beach AT the horizon, and a 26 m foreshore sampled by 50 m
+       rings is a shoreline drawn one triangle wide (the drawn waterline
+       wandering tens of metres off the walked one — exactly the split the
+       header above forbids). So: the squared run covers island beach →
+       abyssal plain, then explicit rings pin every breakpoint of the far
+       profile — climb start, foreshore, THE WATERLINE ITSELF, beach, dune
+       shoulder, crest. */
+    const bedRadii = [];
+    (function () {
+      const powEnd = FAR_WL - FAR_TOUCH - 60;    // where the plain hands over
+      const POW_RINGS = 74;
+      for (let i = 0; i <= POW_RINGS; i++)
+        bedRadii.push(BED_R0 + (powEnd - BED_R0) * Math.pow(i / POW_RINGS, 1.7));
+      for (const o of [-117, -84, -55, -34, -26, -18, -10, -4, 0, 5, 12, 20, 26, 42, 66, 96, 132, 180, 260])
+        bedRadii.push(FAR_WL + o);
+    })();
+    const BED_RINGS = bedRadii.length - 1, BED_SECT = 128;
     function bss(e0, e1, x2) { let t = (x2 - e0) / (e1 - e0); t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); }
     (function seaFloor() {
       const flat = CBZ.CONFIG.SURV_SEABED === false;
@@ -629,21 +698,27 @@
       // 0.79-luma sand under that is white however good the ramp is.
       const bedSand = new THREE.Color(0x5d5038), bedSilt = new THREE.Color(0x413a2b);
       const bedShelf = new THREE.Color(0x1c303a), bedDeep = new THREE.Color(0x060d15);
+      // the far coast's DRY sand, above the waterline: sun-bleached against
+      // the submerged ramp, but held under the luma the rig's ~2x lighting
+      // would clip (the 0.79-luma lesson above)
+      const drySand = new THREE.Color(0x8a7a58);
       const c = new THREE.Color();
       let v = 0;
       for (let i = 0; i <= BED_RINGS; i++) {
-        // squared distribution: ~1 m rings off the beach, ~30 m at the horizon
-        const rr = BED_R0 + (BED_R1 - BED_R0) * Math.pow(i / BED_RINGS, 1.7);
+        const rr = bedRadii[i];
         for (let j = 0; j <= BED_SECT; j++) {
           const a = (j / BED_SECT) * Math.PI * 2;
           const lx = Math.cos(a) * rr, ly = Math.sin(a) * rr;
-          const y = flat ? -1.35 : coastHeightAt(rr);
           const wx = cx + lx, wz = cz - ly;
+          // seabedAt, not coastHeightAt: the far dunes' angular relief must be
+          // IN the drawn surface, or drawn and walked split on the far beach
+          const y = flat ? -1.35 : seabedAt(wx, wz);
           pos[v * 3] = lx; pos[v * 3 + 1] = ly; pos[v * 3 + 2] = y;
           // metres of water standing over this vertex — the ONE thing the bed's
           // colour depends on (world/terrain_overhaul.js, refs 3 and 5)
           const column = OCEAN_Y - y;
           c.copy(bedSand).lerp(bedSilt, bss(5, 24, column));
+          c.lerp(drySand, bss(0.15, 2.2, -column) * 0.85);   // out of the water → beach
           // a sloping bed should read as a slope: one multiplicative tone
           // fall-off with the column, applied BEFORE the deep lerps so both
           // deep endpoints stay exact
@@ -1717,9 +1792,11 @@
     arena = {
       root, center: { x: cx, z: cz }, radius: R,
       ocean, oceanY: OCEAN_Y,
-      // outer radius of the drawn seabed — water_survival.js derives the
-      // swimmable-sea fence from this (seaR - 200), so drawn == navigable
-      seaR: BED_R1,
+      // the far coast's WATERLINE radius — where the sea visibly ends in
+      // sand. water_survival.js reads it for its flood backstop (seaR + 150,
+      // buried under the far dunes) and its safe-radial midpoint; the actual
+      // wall is the beach itself, via the depth field.
+      seaR: FAR_WL,
       hills, fragile, flammable, cars, elevators, glass: allGlass, groundHeightAt,
       randomPoint(minD, maxD) {
         const a = rng() * Math.PI * 2;

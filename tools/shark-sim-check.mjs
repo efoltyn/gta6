@@ -296,6 +296,37 @@ try {
   if (!(far.navR1 > 1500)) fail("open ocean: survNavRing r1=" + far.navR1 + " m — the measured sea is still a pen");
   if (!(far.oceanDx >= 0 && far.oceanDx < 1100 && far.oceanDz < 1100)) fail("open ocean: water tile did not follow the camera (offset " + far.oceanDx + "/" + far.oceanDz + " m)");
   else pass("water tile riding with the camera (" + far.oceanDx + "/" + far.oceanDz + " m off), " + far.depth + " m of water below, navRing out to " + far.navR1 + " m");
+  /* THE PEN IS SAND, NOT A FENCE (owner: "the pen should be land and beach
+     like there is on the island"). Park just off the far coast, drive
+     straight at it, and assert the shark runs AGROUND: it stops in the far
+     surf in grounding-depth water — not fence-stopped in deep open water —
+     with real drawn land rising beyond it. */
+  await rig.evl(`(() => {
+    const A = CBZ.surv.arena, P = CBZ.player;
+    P.pos.x = A.center.x + (A.seaR - 90); P.pos.z = A.center.z;
+    const dx = P.pos.x - A.center.x, dz = P.pos.z - A.center.z;
+    if (CBZ.cam) CBZ.cam.yaw = Math.atan2(-dx, -dz);   // face the far beach
+    return 1;
+  })()`);
+  await rig.evl(`(CBZ.keys.w = true, CBZ.keys.shift = true)`);
+  await burst(14);
+  await rig.evl(`(CBZ.keys.w = false, CBZ.keys.shift = false)`);
+  const beach = await rig.evl(`(() => {
+    const A = CBZ.surv.arena, P = CBZ.player;
+    const g = A.groundHeightAt(A.center.x + A.seaR + 80, A.center.z);
+    return {
+      r: +(${radiusOf}).toFixed(0), seaR: A.seaR,
+      depth: +(CBZ.survFloodDepthMeanAt(P.pos.x, P.pos.z)).toFixed(2),
+      landBeyond: +g.toFixed(2),
+    };
+  })()`);
+  report.stages.openOcean.beach = beach;
+  if (!(beach.r > beach.seaR - 60 && beach.r < beach.seaR + 30)) fail("far coast: drove at the beach from 90 m out and stopped at r=" + beach.r + " (waterline " + beach.seaR + ") — that is a fence stop, not a grounding");
+  else if (!(beach.depth < 1.3)) fail("far coast: stopped at the waterline but in " + beach.depth + " m of water — grounded on nothing");
+  else pass("ran aground on the far coast at r=" + beach.r + " (waterline " + beach.seaR + "), " + beach.depth + " m of surf under the hull");
+  if (!(beach.landBeyond > 1)) fail("far coast: no land beyond the waterline (ground at +80 m = " + beach.landBeyond + " m) — the beach is not drawn/walked");
+  else pass("dry land rises beyond it (+" + beach.landBeyond + " m at 80 m inland)");
+  await shot("2b-far-coast-aground");
   // Leave the world as stage 2 left it: a kilometre-plus commute back would
   // put stage 3's surf staging at the mercy of this stage's swim, and stages
   // must not decide each other. Position is player-authoritative on a ride
