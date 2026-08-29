@@ -105,6 +105,8 @@
 
   CBZ.registerFacade("spanish", {
     label: "Spanish Colonial Mansion",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — Spanish colonial is adobe under lime stucco.
+    structure: "adobe",
     crownsRoof: true,
     // This grammar builds its own entrance — a carved frontispiece with spiral pilasters and a scalloped shell over a recessed alcove — so the kit
     // must not stack its generic reveal on top of it. The doorway is still

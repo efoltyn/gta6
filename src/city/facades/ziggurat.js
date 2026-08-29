@@ -66,6 +66,8 @@
 
   CBZ.registerFacade("ziggurat", {
     label: "Zoning Setback Tower",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a zoning-setback tower is a concrete frame with setbacks.
+    structure: "concrete",
     crownsRoof: true,
     minStoreys: 12,
     build: function (ctx, F, spec) {

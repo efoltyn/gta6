@@ -93,6 +93,8 @@
 
   CBZ.registerFacade("manor", {
     label: "English Manor",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — an English manor is stone rubble walls with timber floors.
+    structure: "masonry",
     crownsRoof: true,
     maxStoreys: 4,
     build: function (ctx, F, spec) {

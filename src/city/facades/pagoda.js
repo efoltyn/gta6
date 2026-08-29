@@ -61,6 +61,8 @@
 
   CBZ.registerFacade("pagoda", {
     label: "Tiered Eaves",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a pagoda is interlocking timber with no nails.
+    structure: "timber",
     crownsRoof: true,
     build: function (ctx, F, spec) {
       const FH = ctx.FH, ST = Math.max(1, ctx.storeys | 0), rTop = ctx.rTop;

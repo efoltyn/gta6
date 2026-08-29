@@ -122,6 +122,8 @@
 
   CBZ.registerFacade("ranch", {
     label: "Plain House",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a plain house is stick-built timber on a slab.
+    structure: "timber",
     crownsRoof: true,
     maxStoreys: 4,
     build: function (ctx, F, spec) {

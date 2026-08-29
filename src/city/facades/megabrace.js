@@ -58,6 +58,8 @@
 
   CBZ.registerFacade("megabrace", {
     label: "Braced Tube",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a braced tube is diagonal steel megabracing.
+    structure: "steel",
     crownsRoof: true,
     minStoreys: 20,
     build: function (ctx, F, spec) {

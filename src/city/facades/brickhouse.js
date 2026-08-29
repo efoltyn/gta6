@@ -114,6 +114,8 @@
 
   CBZ.registerFacade("brickhouse", {
     label: "Brick Colonial House",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a Georgian house is solid brick, two wythes deep.
+    structure: "brick",
     crownsRoof: true,
     // This grammar builds its own entrance — a pedimented Georgian doorcase with pilasters, sidelights, a transom and a radiating fanlight — so the kit
     // must not stack its generic reveal on top of it. The doorway is still

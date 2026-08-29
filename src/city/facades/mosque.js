@@ -48,6 +48,8 @@
 
   CBZ.registerFacade("mosque", {
     label: "Grand Mosque",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — cut stone piers carrying masonry domes.
+    structure: "stone",
     crownsRoof: true,
     build: function (ctx, F, spec) {
       spec = spec || {};

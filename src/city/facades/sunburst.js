@@ -71,6 +71,8 @@
 
   CBZ.registerFacade("sunburst", {
     label: "Radiator Crown",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a radiator-crown tower is a riveted steel frame.
+    structure: "steel",
     crownsRoof: true,
     minStoreys: 14,
     build: function (ctx, F, spec) {

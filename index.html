@@ -1318,7 +1318,19 @@
      RUBBLE). nukefx + aircraftimpact register FX/consumers by name.
      MUST precede strategic.js, which now routes its B-2/nuke through the bus. -->
 <script src="src/systems/impactbus.js?v=nukefield2"></script>
-<script src="src/city/structural.js?v=nukefield1"></script>
+<!-- THE COLLAPSE ENGINE. The ONE answer to "what does a building look like
+     while it is being destroyed", shared by the city ledger (structural.js),
+     the disaster island (systems/disasters.js) and anything else that
+     condemns a structure. Derives what the building is MADE OF from the
+     facade grammar it is wearing (city/facade_kit.js's `structure:` field)
+     and picks a collapse grammar to match — pancake / topple / shear / fold /
+     crumble — then disintegrates it into real debris instead of scaling a
+     grey box down. Also owns the progressive damage skin on buildings that
+     are still standing. Reverts: ?cfg_COLLAPSE_V2=0 (both callers fall back
+     to the collapse they had) · ?cfg_COLLAPSE_FRAGMENTS=0 (motion without
+     debris) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
+<script src="src/city/collapse.js?v=collapse1"></script>
+<script src="src/city/structural.js?v=collapse1"></script>
 <script src="src/city/nukefx.js?v=nukefield4"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from

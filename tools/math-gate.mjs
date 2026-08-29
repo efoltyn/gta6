@@ -265,6 +265,33 @@ const PASS = `(() => {
     if (mc.blastModes < 4) out.fails.push("modeCaps: blast-capable modes fell to " + mc.blastModes + " (expect 4)");
   } catch (e) { out.fails.push("modeCapsAudit threw: " + (e && e.message)); } }
   else out.fails.push("modeCapsAudit MISSING (systems/modecaps.js not loaded)");
+  // ---- THE COLLAPSE ENGINE (city/collapse.js). One shared answer to "what
+  // does a building look like while it is being destroyed", used by the city
+  // ledger and the disaster island. hardcoded counts the registered facade
+  // grammars that have NOT declared what they are built of ('structure:' in
+  // city/facade_kit.js) and are therefore falling back to this file's
+  // inference instead of their author's knowledge. Every grammar declares one
+  // today, so it is pinned at 0 — a 32nd grammar that forgets pushes it up.
+  // modes/materials prove the registries are actually populated: a file
+  // dropping out of the load order shows up as a fall to zero, which is the
+  // failure that would silently give every building on the map one motion.
+  if (CBZ.collapseAudit) { try { const ca = CBZ.collapseAudit();
+    out.collapse = "facades=" + ca.facades + " hardcoded=" + ca.hardcoded +
+      " modes=" + ca.modes.length + " materials=" + ca.materials.length;
+    if (ca.hardcoded > 0) out.fails.push("FACADE GRAMMARS WITH NO DECLARED MATERIAL rose to " + ca.hardcoded + " (ratchet 0): " + JSON.stringify(ca.missing));
+    if (ca.modes.length < 5) out.fails.push("collapse grammars fell to " + ca.modes.length + " (expect 5: pancake/topple/shear/fold/crumble)");
+    if (ca.facades < 31) out.fails.push("registered facade grammars fell to " + ca.facades + " (expect >=31)");
+  } catch (e) { out.fails.push("collapseAudit threw: " + (e && e.message)); } }
+  else out.fails.push("collapseAudit MISSING (city/collapse.js not loaded)");
+  // The island's half of the same invariant: legacyFalls counts buildings the
+  // disaster island brought down on its OWN sink-into-the-ground ticker rather
+  // than on the shared engine. Pinned at 0 — a non-zero number means the
+  // island has quietly re-grown a second collapse.
+  if (CBZ.disasterAudit) { try { const da = CBZ.disasterAudit();
+    if (da.legacyFalls > 0) out.fails.push("ISLAND BUILDINGS FELL ON THE LEGACY TICKER: " + da.legacyFalls + " (ratchet 0)");
+    if (da.collapseShared === false) out.fails.push("the disaster island is not wired to the shared collapse engine");
+  } catch (e) { /* the island audit is only meaningful in survival; its own
+                   block elsewhere in this gate owns reporting it missing */ } }
   // ---- THE CHARGE TABLE (systems/breach.js). Real urban-breaching doctrine
   // published once so a prison door and a bank vault price themselves in the
   // same unit - pounds of C4. unreachable counts registered targets whose

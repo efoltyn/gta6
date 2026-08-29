@@ -95,6 +95,8 @@
 
   CBZ.registerFacade("queenanne", {
     label: "Queen Anne Painted Lady",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a painted lady is balloon-framed softwood.
+    structure: "timber",
     crownsRoof: true,
     maxStoreys: 4,
     build: function (ctx, F, spec) {

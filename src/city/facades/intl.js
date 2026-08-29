@@ -66,6 +66,8 @@
 
   CBZ.registerFacade("intl", {
     label: "Seagram Curtain Wall",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — Seagram is a bronze-and-glass curtain wall on a steel frame.
+    structure: "glassbox",
     crownsRoof: true,
     minStoreys: 10,
     build: function (ctx, F, spec) {

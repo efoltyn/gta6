@@ -48,6 +48,8 @@
 
   CBZ.registerFacade("brick", {
     label: "Chicago Loft",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a Chicago loft is load-bearing brick on heavy timber.
+    structure: "brick",
     crownsRoof: true,
     build: function (ctx, F, spec) {
       const FH = ctx.FH, ST = Math.max(1, ctx.storeys | 0), rTop = ctx.rTop;

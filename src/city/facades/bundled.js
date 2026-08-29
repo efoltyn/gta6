@@ -74,6 +74,8 @@
 
   CBZ.registerFacade("bundled", {
     label: "Bundled Tube",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a bundled tube is nine steel tubes sharing their walls.
+    structure: "steel",
     crownsRoof: true,
     minStoreys: 16,
     build: function (ctx, F, spec) {

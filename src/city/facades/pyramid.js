@@ -63,6 +63,8 @@
 
   CBZ.registerFacade("pyramid", {
     label: "Tapered Spire",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a tapered spire is a reinforced concrete core.
+    structure: "concrete",
     crownsRoof: true,
     minStoreys: 16,
     build: function (ctx, F, spec) {

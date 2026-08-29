@@ -112,6 +112,8 @@
 
   CBZ.registerFacade("techhouse", {
     label: "Modern Tech House",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a modern tech house is steel posts and full-height glazing.
+    structure: "glassbox",
     crownsRoof: true,
     // A house grammar: the auto-picker must never hand it to a tower, where
     // one cantilever and one roof plane would simply be lost.

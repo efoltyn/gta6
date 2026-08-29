@@ -131,6 +131,8 @@
 
   CBZ.registerFacade("plantation", {
     label: "Antebellum Plantation House",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — an antebellum house is heavy timber frame on brick piers.
+    structure: "timber",
     crownsRoof: true,
     // This grammar builds its own entrance — pilasters, sidelights, a stepped fanlight and a cornice with carriage lamps — so the kit
     // must not stack its generic reveal on top of it. The doorway is still

@@ -114,6 +114,8 @@
 
   CBZ.registerFacade("machiya", {
     label: "Japanese Residence",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a machiya is post-and-beam timber with earth infill.
+    structure: "timber",
     crownsRoof: true,
     // A minka is two storeys, three at the very most (a town machiya with a
     // low attic over the shop). Never a block, so the city-wide auto-picker

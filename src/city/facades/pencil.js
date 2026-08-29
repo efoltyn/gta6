@@ -62,6 +62,8 @@
 
   CBZ.registerFacade("pencil", {
     label: "Supertall Slim",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a supertall slim is a high-strength reinforced concrete core.
+    structure: "concrete",
     crownsRoof: true,
     minStoreys: 20,
     build: function (ctx, F, spec) {

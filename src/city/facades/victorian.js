@@ -75,6 +75,8 @@
 
   CBZ.registerFacade("victorian", {
     label: "Second Empire",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — Second Empire is timber frame under a slate mansard.
+    structure: "timber",
     crownsRoof: true,
     build: function (ctx, F, spec) {
       const W = ctx.w, D = ctx.d, FH = ctx.FH, ST = Math.max(1, ctx.storeys);
