@@ -1510,7 +1510,6 @@
     }), [unlit(o.cavity || 0x140505), unlit(o.cavityDeep || 0x070202),
       unlit(0x020101), unlit(o.cavityEnd || 0x000000)]);
     sack.name = "sharkBuccalSack";
-    sack.visible = false; // DIAG
     dental.add(sack);
 
     const liner = meshOf(cachedGeom("mandibleLiner|v3|" + [len, width, gap, cx, rad,

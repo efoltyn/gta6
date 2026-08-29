@@ -2131,6 +2131,7 @@
             parent: freeStanding ? null : parent,
             // glass does not leave a ragged lip hanging in a window head
             rim: b.glass ? 0 : 0.32,
+            cell: b.glass ? 0.42 : 0.52,          // glass breaks smaller than concrete
             budget: b.glass ? Math.min(budget, 10) : budget,
             keptOut: rec.shedKept,
           });

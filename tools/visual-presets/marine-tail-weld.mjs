@@ -157,6 +157,21 @@ export function stageMarineWeld(input) {
   // behind the rim, so it is never sampled at the sleeve's own station)
   const pedSec = sectionAt(sleeve.m, weldX - 1e-4, axisY);
   const hullSec = sectionAt(hull.m, weldX + eps, axisY);
+  // THE JOINT'S SHARE OF THE ANIMAL. Matching the two circles is only half the
+  // job: two matched circles can still be a wire where a tailstock belongs.
+  // Owner, once the first fix landed: "BOTH should be wider where they meet."
+  // So the report also carries the joint measured against the body's own
+  // widest section — the one number that says whether the tail has any meat.
+  let maxRy = 0, maxRz = 0;
+  for (let i = 0; i <= 40; i++) {
+    const x = hull.bb.min.x + bodyLen * (0.0005 + (i / 40) * 0.999);
+    const s = sectionAt(hull.m, x, axisY);
+    if (!s) continue;
+    if (s.ry > maxRy) maxRy = s.ry;
+    if (s.rz > maxRz) maxRz = s.rz;
+  }
+  const fracDeep = (pedSec && maxRy > 0) ? pedSec.ry / maxRy : 0;
+  const fracWide = (pedSec && maxRz > 0) ? pedSec.rz / maxRz : 0;
   const ratioY = (pedSec && hullSec && hullSec.ry > 0) ? pedSec.ry / hullSec.ry : 0;
   const ratioZ = (pedSec && hullSec && hullSec.rz > 0) ? pedSec.rz / hullSec.rz : 0;
   const stepMM = (pedSec && hullSec)
@@ -267,7 +282,8 @@ export function stageMarineWeld(input) {
   phase.textContent = `tail rim ${pedSec ? pedSec.ry.toFixed(3) + " x " + pedSec.rz.toFixed(3) : "?"}  ·  body ${hullSec ? hullSec.ry.toFixed(3) + " x " + hullSec.rz.toFixed(3) : "?"}`;
   phase.style.cssText = "position:absolute;right:28px;top:54px;color:#d7eef8;font:12px ui-monospace,SFMono-Regular,Menlo,monospace";
   const metric = overlay.querySelector("[data-metric]");
-  metric.textContent = `tail/body  ${ratioY.toFixed(2)}x deep · ${ratioZ.toFixed(2)}x wide   ·   step ${stepMM.toFixed(0)} mm`;
+  metric.textContent = `match ${ratioY.toFixed(2)}x · step ${stepMM.toFixed(0)} mm`
+    + `   |   joint girth ${(fracDeep * 100).toFixed(0)}% deep · ${(fracWide * 100).toFixed(0)}% wide of the body's widest`;
   metric.style.cssText = "position:absolute;right:27px;bottom:22px;padding:7px 10px;border-radius:6px;background:rgba(3,18,28,.76);color:#bfeeff;font:11px ui-monospace,SFMono-Regular,Menlo,monospace";
   const source = overlay.querySelector("[data-source]");
   source.textContent = new URL(input.sourceUrl).host + new URL(input.sourceUrl).pathname;
@@ -279,6 +295,8 @@ export function stageMarineWeld(input) {
       weldRatioDeep: Number(ratioY.toFixed(3)),
       weldRatioWide: Number(ratioZ.toFixed(3)),
       weldStepMM: Number(stepMM.toFixed(1)),
+      jointFracDeep: Number((fracDeep * 100).toFixed(1)),
+      jointFracWide: Number((fracWide * 100).toFixed(1)),
     },
     camera: { framedHeight: framedH, position: cameraPosition.slice(), target: cameraTarget.slice(), up: cameraUp.slice() },
   };
@@ -300,6 +318,8 @@ export default {
     weldRatioDeep: { label: "Tail sleeve depth ÷ body depth at the joint (1.00 = welded)", unit: "x", better: "lower" },
     weldRatioWide: { label: "Tail sleeve width ÷ body width at the joint (1.00 = welded)", unit: "x", better: "lower" },
     weldStepMM: { label: "How far the tail's rim stands proud of the body's skin", unit: "mm", better: "lower" },
+    jointFracDeep: { label: "Joint depth as a share of the body's deepest section — does the tailstock have meat", unit: "%", better: "higher" },
+    jointFracWide: { label: "Joint width as a share of the body's widest section", unit: "%", better: "higher" },
   },
   metricsNote: "1.00x is the whole target: the tail's circle and the body's circle are the same circle. Anything above 1.00 is a tube of the wrong size pushed into the back of the animal, and the step in millimetres is how far that rim sticks out at the species' shipped scale.",
 };

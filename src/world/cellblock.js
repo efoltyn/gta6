@@ -141,6 +141,13 @@
   // ONE-LINE REVERT. config.js's generic ?cfg_ sweep runs before this file,
   // so a URL override already sits in CONFIG and this guard leaves it alone.
   if (CFG.PRISON_CELLS_V2 == null) CFG.PRISON_CELLS_V2 = true;
+  // The two halves of "a man sits ON his bunk": where his hips go (the pose,
+  // see bunkSpot) and whether there is room for his head when they get there
+  // (the geometry, see bunkRig). Declared together and up here because the
+  // rack is BUILT at parse time — a default written further down the file
+  // would arrive after the bunk it governs.
+  if (CFG.PRISON_BUNK_PERCH == null) CFG.PRISON_BUNK_PERCH = true;
+  if (CFG.PRISON_BUNK_HEADROOM == null) CFG.PRISON_BUNK_HEADROOM = true;
 
   /* ==========================================================
      0. THE SHELL — identical on BOTH paths. The footprint never moves,
@@ -387,6 +394,13 @@
             rec._housingUnit = j.own._housingUnit;
             rec._housingStack = j.own;
           }
+          // WHAT IS OVER THIS BED. Only the LOWER rack of a stack has a
+          // ceiling, and it is the thing that decides whether a body sitting
+          // on the edge can hold its head up (entities/character.js reads it
+          // through seatRef.ceiling). Same frame as the anchor's own floor,
+          // which for both racks in this wing is y=0.
+          const bnk = j.own.bunk;
+          if (j.slot === "bed" && bnk && bnk.rackUnder != null) rec.ceiling = bnk.rackUnder;
         }
       }
       else PP.plain++;
@@ -1644,11 +1658,11 @@
   function postIn(c, pose) {
     const b = paceBox(c, pose === "bunk");
     const s = pose === "bars" ? barsSpot(c)
-      : (pose === "bunk" && c.bunk ? bunkSpot(c) : { x: c.x, z: c.z });
+      : (pose === "bunk" && c.bunk ? bunkSpot(c, bunkStyle(c)) : { x: c.x, z: c.z });
     if (postV2()) clampInto(b, s);
     return s;
   }
-  function bunkSpot(c) {
+  function bunkSpot(c, style) {
     // THE NEAR LONG EDGE OF THE BUNK — and it is always an X offset, because
     // every bunk in this wing is laid out ALONG Z (fitOutCell passes "z" for
     // both rows). The side-row branch used to offset in Z, which is offsetting
@@ -1660,7 +1674,37 @@
     // kept in step by hand — the frame is a collider now and a seat spot that
     // disagrees with it by a centimetre is a body inside a wall.
     const b = c.bunk;
-    return { x: b.x + (c.dz !== 0 ? 1 : c.dx) * (b.latOut - 0.01), z: b.z };
+    const lat = c.dz !== 0 ? 1 : c.dx;
+    if (style === "back") {
+      // Hips a body's depth off the head end, so the shoulders land against
+      // the pillow and the wall behind it, and the legs run down the bed.
+      // Barely off centre laterally: he is IN the bed, not on its lip.
+      return { x: b.x + lat * 0.06, z: b.z - 0.72, face: Math.atan2(0, 1) };
+    }
+    return { x: b.x + lat * (b.latOut - 0.01), z: b.z };
+  }
+  /* THREE WAYS TO SIT ON YOUR OWN BUNK (owner: "they should be laying back
+     sitting in the bed more relaxed... add more variants, not too many").
+
+     Perching on the edge is what you do when you are ABOUT to do something —
+     waiting for a door, talking through the bars, putting your boots on. It
+     is not what a man does with eight hours of his own bed and nowhere to be,
+     and thirteen cells of identical edge-perchers read as one animation
+     played thirteen times.
+
+       edge   perched on the near edge, feet on the concrete, ducked forward.
+       back   sat INTO the bed at the head end, back against the wall the
+              pillow is under, legs out along the mattress. The lean is
+              BACKWARD; the duck solve still applies, leaned the other way.
+       brace  edge again, but weight thrown back onto straight arms planted
+              behind the hips. Half-relaxed: the pose of a man mid-sentence.
+
+     It is a POSITION HASH like cellPose above, so a cell always holds the
+     same man doing the same thing — a trait, not a die re-rolled every few
+     seconds. */
+  function bunkStyle(c) {
+    const r = h01(c.x, c.z, 8451);
+    return r < 0.40 ? "edge" : (r < 0.74 ? "back" : "brace");
   }
   /* A BODY THAT IS NOT LYING OR SITTING ON THE BUNK MUST NOT BE INSIDE IT.
      `unseat` handed the rig back to the walk pose and left it standing exactly
@@ -1683,6 +1727,7 @@
       if (n.target) n.target.x = p.x;
     }
   }
+  const SEAT_KIND = { edge: "bunk", back: "bunk-back", brace: "bunk-brace" };
 
   let cast = false;
   function dealCast() {
@@ -1782,9 +1827,18 @@
         if (!pre) continue;
         n.target.set(s.x, 0, s.z);
         n.pause = Math.max(n.pause || 0, 0.6);
-        n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(c.dx, c.dz), 1 - Math.pow(0.02, dt));
+        // FACE OUT OF THE BED for the edge/brace perch; the "back" style
+        // publishes its own yaw (down the mattress, against the pillow wall).
+        const face = s.face == null ? Math.atan2(c.dx, c.dz) : s.face;
+        n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, face, 1 - Math.pow(0.02, dt));
         if (n.char && CBZ.setCharPose) {
-          n.char.seatRef = n.char.seatRef || { cushion: c.bunk.top, floorBelow: 0 };
+          // `kind` is not decoration: entities/character.js's SEAT_POSTURE
+          // reads it — edge is the ducked bunk perch, back/brace are the two
+          // relaxed reads of the same mattress. `ceiling` is the upper deck's
+          // underside so the pose ducks this particular body under it.
+          const style = n._bunkStyle || (n._bunkStyle = bunkStyle(c));
+          n.char.seatRef = n.char.seatRef || { cushion: c.bunk.top, floorBelow: 0,
+            ceiling: c.bunk.deckY || 0, kind: SEAT_KIND[style] || "bunk" };
           CBZ.setCharPose(n.char, "sit");
         }
       } else if (pose === "bars" && pre) {
@@ -1932,6 +1986,7 @@
     lockAll: lockAll,
     resetDoors: resetDoors,
     playerSpawn: playerSpawn,
+    bunkStyle: bunkStyle,
     // geometry other systems may want without re-deriving it
     height: CH, doorWidth: DOOR_W,
     /* THE HALL PUBLISHES ITS OWN HALF-WIDTH. tools/prison-polish-check.mjs
@@ -1943,6 +1998,37 @@
        little, so the samples stay inside the clear lane by construction. */
     hallHalf: ROWS3 ? IFACE - 0.5 : 6,
     bounds: { minX: IX0, maxX: IX1, minZ: IZN, maxZ: -7.5 },
+  };
+
+  /* IS THE MAN ON HIS BUNK ACTUALLY ON IT — measured, not eyeballed.
+     One number per seated body: how far his hips are from the bunk's centre
+     line, across the mattress. The mattress half-width is MLAT/2 = 0.525
+     (bunkRig), so anything beyond that is a body sitting on air in front of
+     his own bed, and `offMattress` is the count of them. A storyboard can
+     publish this beside the picture instead of arguing about the picture. */
+  const MATT_HALF = 0.525, MATT_HALF_LON = 1.175;
+  CBZ.cellSitAudit = function () {
+    const out = { seated: 0, offMattress: 0, worstOverhangCm: 0, latCm: [], styles: {} };
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i], n = c.owner;
+      if (!n || n === "player" || !c.bunk || !n.group) continue;
+      if (n._cellPose !== "bunk" || !n.char || !n.char.sitting) continue;
+      const lat = Math.abs(n.group.position.x - c.bunk.x);
+      // Both axes, because "back" sits down the bed rather than across it and
+      // an audit that only measured lateral drift would pass a man sitting on
+      // the pillow, in mid-air, at the head end.
+      const lon = Math.abs(n.group.position.z - c.bunk.z);
+      const st = n._bunkStyle || "edge";
+      out.styles[st] = (out.styles[st] || 0) + 1;
+      out.seated++;
+      out.latCm.push(Math.round(lat * 100));
+      const over = Math.max(lat - MATT_HALF, lon - MATT_HALF_LON);
+      if (over > 0) {
+        out.offMattress++;
+        if (over * 100 > out.worstOverhangCm) out.worstOverhangCm = Math.round(over * 100);
+      }
+    }
+    return out;
   };
 
   /* ==========================================================
@@ -2067,7 +2153,7 @@
           && !(n.ko > 0) && !n.intimidMode && !(n.huntPlayer > 0)
           && n.aiState !== "fight" && n.aiState !== "flee"
           && !(CBZ.propArcActive && CBZ.propArcActive(n))) {
-        const sp = bunkSpot(c), p = n.group.position;
+        const sp = bunkSpot(c, bunkStyle(c)), p = n.group.position;
         if (Math.hypot(p.x - sp.x, p.z - sp.z) > 0.3) seatDrift++;
       }
       if (n && n !== "player" && n.target && !n.dead && !n.escaped && !(n.ko > 0)

@@ -589,17 +589,23 @@
   //  balance number.
   // ============================================================
   const HX0 = -2.35, HX1 = 3.25, HY = 1.05, HLEN = HX1 - HX0;   // 5.60 model units
-  /* RY[0]/RZ[0] ARE THE TAIL WELD, not a nose-cone. Owner, 2026-08-27: "the
-     tail circle is much bigger [than the body's], when they should be
-     identical". They were 0.18 x 0.14 while the peduncle sleeve bolted on
-     behind them was 0.42 x 0.30 — the hull tapered to a spindle and a tube
-     twice its diameter started at the seam. The sleeve is now measured off
-     this curve (see the peduncle below), so this pair IS the tailstock:
-     it carries the depth the cone used to fake (0.30, about a third of the
-     0.92 max — an orca's real proportion) and is laterally compressed to 0.16,
-     which is what makes a peduncle read as a blade instead of a sausage. */
-  const RY = [0.30, 0.44, 0.68, 0.85, 0.92, 0.92, 0.86, 0.72, 0.34];
-  const RZ = [0.16, 0.38, 0.60, 0.75, 0.82, 0.82, 0.78, 0.66, 0.30];
+  /* THE REAR THIRD IS THE TAILSTOCK. The sleeve is measured off this curve
+     (see the peduncle below), so the first three entries are not a taper into
+     nothing — they ARE the tail the animal swims with, and they were far too
+     thin. Owner, 2026-08-27: "the tail circle is much bigger [than the
+     body's]"; then, once the two matched: "BOTH should be wider where they
+     meet." He is right, and this is where the width has to come from.
+
+     0.18 x 0.14 at the seam was 20% of max girth. A real orca at 84% of its
+     length still carries HALF its maximum depth — the tailstock is the most
+     muscular part of the animal, not a stalk — and the two rings in front of
+     it were undersized for the same reason: the fat sleeve was hiding what
+     the hull was doing behind the dorsal. The rear now grades 0.42 / 0.58 /
+     0.74 into the unchanged mid-body, and stays laterally compressed (0.28
+     wide against 0.42 deep) because that flattening is what makes a peduncle
+     read as a blade rather than a sausage. */
+  const RY = [0.42, 0.58, 0.74, 0.85, 0.92, 0.92, 0.86, 0.72, 0.34];
+  const RZ = [0.28, 0.46, 0.63, 0.75, 0.82, 0.82, 0.78, 0.66, 0.30];
   /* HOW FINE THE SKIN IS, and it is the marking resolution, not a polish
      number. At 34x24 the countershading boundary — which the reference sheet
      calls a HARD, RAGGED, high-contrast line — snapped to whole columns and
@@ -670,7 +676,7 @@
     return s < cut ? 1 : 0;
   }
 
-  const HULL_KEY = "orcaHull|mouth-envelope-v3|tailweld1|" + HULL_RINGS + "x" + HULL_SIDES;
+  const HULL_KEY = "orcaHull|mouth-envelope-v3|tailstock2|" + HULL_RINGS + "x" + HULL_SIDES;
 
   function build(ctx) {
     const m = ctx.mat, g = new T.Group();
@@ -785,10 +791,10 @@
 
        Only the far end is a decision this species gets to make: how thin the
        stock is where the flukes take over. */
-    const ped = meshOf(cached("orcaPeduncle|weld1", function () {
+    const ped = meshOf(cached("orcaPeduncle|weld2", function () {
       return hullGeom({
         rings: CBZ.aquaticWeldedSleeve(rings, {
-          at: [-2.64, HY], x0: -0.78, x1: 0.34, tipRy: 0.17, tipRz: 0.10, n: 6,
+          at: [-2.64, HY], x0: -0.78, x1: 0.34, tipRy: 0.20, tipRz: 0.115, n: 6,
         }),
         sides: HULL_SIDES,
         paint: function (i, u, j, ang, af, s) { return s < -0.34 ? 1 : 0; },

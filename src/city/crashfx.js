@@ -1407,15 +1407,31 @@
   // attribute so a source material with vertexColors (every fake-AO wall in
   // buildings.js is vcMat) multiplies by 1 and shows its true colour instead of
   // sampling an attribute that isn't there and coming out black.
-  let _cubeGeo = null;
+  // FOUR of them, at descending brightness. A pile whose every lump samples the
+  // identical value reads as a stack of dice however well you shuffle it; real
+  // broken concrete is the same material at a dozen exposures, some faces fresh
+  // and some in shadow. Four shared geometries buy that for free — the wall
+  // materials are vcMat (vertexColors), so the attribute is a per-piece tone
+  // control and costs no extra material and no extra draw-call class.
+  const _cubeGeos = [];
   function cubeGeo() {
-    if (_cubeGeo) return _cubeGeo;
-    _cubeGeo = new THREE.BoxGeometry(1, 1, 1);
-    const n = _cubeGeo.attributes.position.count, col = new Float32Array(n * 3);
-    col.fill(1);
-    _cubeGeo.setAttribute("color", new THREE.BufferAttribute(col, 3));
-    _cubeGeo._shared = true;
-    return _cubeGeo;
+    if (!_cubeGeos.length) {
+      const TONES = [1.0, 0.87, 0.74, 0.62];
+      for (const t of TONES) {
+        const g = new THREE.BoxGeometry(1, 1, 1);
+        const n = g.attributes.position.count, col = new Float32Array(n * 3);
+        // top faces catch a little more light than undersides — the box's
+        // second face group is +Y in three's BoxGeometry vertex order.
+        for (let i = 0; i < n; i++) {
+          const up = i >= 16 && i < 20 ? 1.12 : (i >= 20 && i < 24 ? 0.82 : 1);
+          col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = Math.min(1, t * up);
+        }
+        g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+        g._shared = true;
+        _cubeGeos.push(g);
+      }
+    }
+    return _cubeGeos[(rng() * _cubeGeos.length) | 0];
   }
   // The pile a shed builds. Same "seat it on what is already there" discipline
   // the invented heap used, except the things being seated are real fragments
@@ -1457,9 +1473,13 @@
     if (!(w > 0.02 && h > 0.02 && d > 0.005)) return { pieces: 0, kept: 0, volume: 0 };
     const vol = w * h * d;
     const budget = Math.max(4, Math.min(o.budget || 70, CHUNK_CAP - 8));
-    // Cell size is chosen so the grid FITS the budget. A wall too big to dice
-    // finely gets coarser lumps — it never gets fewer metres of concrete.
-    let cell = Math.max(0.26, Math.min(0.95, Math.cbrt(vol / Math.max(6, budget * 0.55))));
+    /* THE GRID IS SIZED IN METRES, NOT IN PIECES. Deriving the cell from the
+       budget made every solid dice to the same COUNT, so a thin sill course
+       came apart into gravel and a pier into boulders. A fragment of blasted
+       facade is about half a metre across whatever it came off; the budget is
+       only a ceiling, and it makes cells COARSER (never fewer), so the metres
+       still balance on a wall too big to dice at that size. */
+    let cell = Math.max(0.3, Math.min(0.95, o.cell || 0.5));
     let nx = Math.max(1, Math.round(w / cell)), ny = Math.max(1, Math.round(h / cell));
     let nz = Math.max(1, Math.round(d / Math.max(cell, d)));      // thin walls stay one cell deep
     let guard = 8;
@@ -1483,10 +1503,27 @@
           // THE RAGGED EDGE IS SURVIVING MATERIAL. A cell on the top or side rim
           // may stay welded to the shell; the bottom rim never does, or the
           // walk-through grows a kerb the player cannot step over.
-          const edge = (i === 0 || i === nx - 1 || j === ny - 1);
-          const keep = rim > 0 && edge && j > 0 && rng() < rim;
+          /* THE RAGGED EDGE IS SURVIVING MATERIAL. Sides always qualify; the top
+             row only when there IS a top row distinct from the bottom one. The
+             old `j > 0` guard kept a blast from leaving a kerb across the
+             walk-through — but a 0.55 m sill course dices to a SINGLE row, so
+             `j > 0` was never true on exactly the courses that frame a
+             curtain-wall bay, and their edges stayed machined. Excluding the
+             bottom row by name instead keeps the doorway clean and lets the
+             jambs come apart. */
+          const edge = (i === 0 || i === nx - 1 || (ny > 1 && j === ny - 1));
+          const keep = rim > 0 && edge && rng() < rim;
+          /* ONE CELL OF THE GRID, BROKEN. A cube per cell is honest bookkeeping
+             and a terrible rock: concrete does not shatter on a lattice. So the
+             cell's VOLUME is kept and its shape is thrown away — two random
+             axis factors and a third derived to balance them, which turns one
+             grid into slabs, shards and blocks without a single extra metre of
+             material entering the world. */
+          const fa = 0.55 + rng() * 1.05, fb = 0.55 + rng() * 1.05;
+          const fc = 1 / (fa * fb);
+          const sx = cw * 0.99 * fa, sy = ch * 0.99 * fb, sz = cd * 0.99 * Math.min(1.6, fc);
           const m = new THREE.Mesh(cubeGeo(), mat);
-          m.scale.set(cw * 0.98, ch * 0.98, cd * 0.98);
+          m.scale.set(sx, sy, sz);
           m.castShadow = true; m.receiveShadow = true;
           if (keep) {
             const par = o.parent;
@@ -1507,7 +1544,7 @@
           const midU = 1 - Math.abs((i + 0.5) / nx - 0.5) * 2;
           const sp = (0.9 + midU * 2.4) * power;
           chunks.push({
-            mesh: m, hh: ch * 0.49,
+            mesh: m, hh: Math.max(0.05, sy * 0.5),
             vx: onx * sp + tx * (rng() - 0.5) * 2.2 * power,
             vy: (rng() - 0.25) * 2.6 * power,
             vz: onz * sp + tz * (rng() - 0.5) * 2.2 * power,

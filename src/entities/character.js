@@ -1365,8 +1365,12 @@
     bench: "bench", pew: "bench", park: "bench",
     // A BOTTOM BUNK IS A BENCH WITH A CEILING. Same perch, but there is a
     // steel rack ~90 cm over the mattress, so nobody sits up straight on one:
-    // they duck. world/cellblock.js declares `kind: "bunk"` for the cell pose.
+    // they duck. world/cellblock.js declares these three for its cell poses —
+    // one bed, three things to do on it (edge / back to the wall / braced
+    // back on your arms), because thirteen identical perchers read as one
+    // animation played thirteen times.
     bunk: "bunk", bed: "bunk", mattress: "bunk",
+    "bunk-back": "bunkback", "bunk-brace": "bunkbrace",
     // BEHIND A WHEEL. A driver is not a passenger who happens to be at the
     // front: the hands leave the lap and go OUT to a rim, the shins reach
     // forward for pedals instead of hanging, and the head stays up on the
@@ -2135,6 +2139,44 @@
               neckX = 0.16 + (leanX - 0.34) * 0.5;       // the head follows the spine down
             }
           }
+        } else if (post === "bunkback" || post === "bunkbrace") {
+          /* THE TWO RELAXED READS OF THE SAME MATTRESS.
+
+             `bunkback` is a man sat INTO his bed: hips well down the
+             mattress, shoulders on the wall the pillow is under, legs run out
+             along the bed instead of hanging off it. `bunkbrace` keeps the
+             feet on the concrete but throws the weight back onto straight
+             arms planted behind the hips.
+
+             Both lean BACKWARD, which is the whole difference the owner
+             asked for — and backward is not a free direction under a steel
+             rack, so the duck solve below still runs, only mirrored: the
+             crown drops by crown x cos(lean) whichever way the spine goes. */
+          const backward = true;
+          sitY = post === "bunkback" ? -0.10 : -0.06;
+          if (post === "bunkback") {
+            leanX = -0.30 + sv * 0.05;
+            // arms loose at the sides, forearms fallen into the lap — a
+            // relaxed man's elbows stay IN, they do not fly out like a chair
+            // with armrests he does not have
+            armX = -0.20; armZ = 0.11; elb = -0.78;
+            neckX = -0.04;                     // head back, eyes on the ceiling
+          } else {
+            leanX = -0.22 + sv * 0.05;
+            // hands planted on the mattress BEHIND the hips: the arm swings
+            // back past the shoulder and the elbow goes nearly straight,
+            // which is the silhouette that says "propped up", not "reaching".
+            armX = 0.62; armZ = 0.20; elb = -0.10;
+            neckX = 0.02;
+          }
+          if (ref.ceiling > 0) {
+            const met = ch.group && ch.group.userData && ch.group.userData.characterMetric;
+            const stand = (met && met.height > 0) ? met.height + 0.15 : 1.97;
+            const crown = Math.max(0.40, stand - hipF);
+            const avail = ref.ceiling - 0.03 - hipF;
+            const duck = Math.acos(Math.max(0.60, Math.min(1, avail / crown)));
+            if (duck > Math.abs(leanX)) leanX = (backward ? -1 : 1) * Math.min(0.62, duck);
+          }
         } else if (post === "drive") {
           // BEHIND A WHEEL. A car seat's backrest is close to vertical, so the
           // spine barely leans; what makes a driver a driver is above the
@@ -2164,7 +2206,17 @@
         // scale, while a real 0.45-0.50 m chair needs a longer seated drop.
         const chairTh = 1.38;                            // 79° from vertical
         const chairShin = (drop - THIGH * Math.cos(chairTh)) / SHIN;
-        if (post === "drive") {
+        if (post === "bunkback") {
+          // LEGS ALONG THE BED, not down to a floor that is 79 cm below the
+          // mattress he is sitting on. Same shape of answer as the driver
+          // below and for the same reason: the floor-reaching solve has
+          // nothing to reach, and letting it try would hang two shins through
+          // the bunk frame. Thigh level down the mattress, knee barely bent,
+          // heels resting on the bedding.
+          th = 1.58;                                     // ~90°: flat down the bed
+          fold = 0.12;                                   // a knee, not a plank
+          shinScale = 1;
+        } else if (post === "drive") {
           // A DRIVER'S LEGS GO FORWARD, NOT DOWN. A car's floor pan sits a
           // hand's width below the cushion, so the floor-reaching solve below
           // has nothing to reach: it would either drive the knee down through

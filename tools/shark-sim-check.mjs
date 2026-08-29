@@ -242,6 +242,67 @@ try {
   else pass("sprinted " + moved.toFixed(1) + " m (speed " + (p1.v || 0).toFixed(1) + " m/s)");
   if (!(turned > 3)) fail("steering leg barely moved (" + turned.toFixed(1) + " m)");
 
+  // ================= STAGE 2.5: THE OPEN OCEAN ============================
+  /* The sea used to end 150 m past the island's radius — an invisible wall
+     (water_survival.js's nav fence) that a sprinting shark hit in about
+     twenty seconds and then ground against: blocked steps, wall slides, the
+     radial "safe direction" fighting the stick. The fence now tracks the
+     drawn seabed's rim (arena.seaR, ~3 km). This stage drives straight out
+     to sea for 75 game-seconds and asserts the world keeps being an ocean:
+     the shark crosses the old fence line by a wide margin, its last leg
+     covers water at the same stride as its first (no far-out movement rot),
+     there is deep water under it, and the displaced water tile has followed
+     the camera out instead of being left parked over the island. */
+  say("— stage 2.5: the open ocean —");
+  await rig.evl(PEACE);
+  const homePos = await rig.evl(`({ x: CBZ.player.pos.x, z: CBZ.player.pos.z })`);
+  await rig.evl(`(() => {
+    const A = CBZ.surv.arena, P = CBZ.player;
+    const dx = P.pos.x - A.center.x, dz = P.pos.z - A.center.z;
+    if (CBZ.cam) CBZ.cam.yaw = Math.atan2(-dx, -dz);
+    return 1;
+  })()`);
+  const radiusOf = `Math.hypot(CBZ.player.pos.x - CBZ.surv.arena.center.x, CBZ.player.pos.z - CBZ.surv.arena.center.z)`;
+  await rig.evl(`(CBZ.keys.w = true, CBZ.keys.shift = true)`);
+  const legs = [];
+  for (let i = 0; i < 5; i++) {
+    const a = await rig.evl(`({ x: CBZ.player.pos.x, z: CBZ.player.pos.z })`);
+    await burst(15);
+    const b = await rig.evl(`({ x: CBZ.player.pos.x, z: CBZ.player.pos.z, r: ${radiusOf} })`);
+    legs.push({ m: +Math.hypot(b.x - a.x, b.z - a.z).toFixed(1), r: +b.r.toFixed(0) });
+    await rig.evl(PEACE);   // hunters re-converge over a 75 s swim; this stage asserts the sea, not the pod
+  }
+  await rig.evl(`(CBZ.keys.w = false, CBZ.keys.shift = false)`);
+  const far = await rig.evl(`(() => {
+    const A = CBZ.surv.arena, P = CBZ.player, cam = CBZ.camera;
+    const ring = CBZ.survNavRing ? CBZ.survNavRing(1.2) : null;
+    return {
+      r: +(${radiusOf}).toFixed(0),
+      depth: +(CBZ.survFloodDepthMeanAt(P.pos.x, P.pos.z)).toFixed(1),
+      seaR: A.seaR || 0,
+      navR1: ring ? +ring.r1.toFixed(0) : 0,
+      oceanDx: cam && A.ocean ? +Math.abs(A.ocean.position.x - cam.position.x).toFixed(0) : -1,
+      oceanDz: cam && A.ocean ? +Math.abs(A.ocean.position.z - cam.position.z).toFixed(0) : -1,
+    };
+  })()`);
+  report.stages.openOcean = { legs, far };
+  const oldFence = await rig.evl(`CBZ.surv.arena.radius + 150`);
+  if (!(far.r > oldFence + 120)) fail("open ocean: shark stopped at r=" + far.r + " m (old fence " + oldFence.toFixed(0) + ") — the wall is back");
+  else pass("swam to r=" + far.r + " m — " + (far.r - oldFence).toFixed(0) + " m past the old fence");
+  const firstLeg = legs[0].m, lastLeg = legs[legs.length - 1].m;
+  if (!(lastLeg > firstLeg * 0.6)) fail("open ocean: stride collapsed far out (" + firstLeg + " m first 15 s vs " + lastLeg + " m last)");
+  else pass("full stride far out (" + firstLeg + " m first 15 s leg, " + lastLeg + " m last)");
+  if (!(far.depth > 5)) fail("open ocean: only " + far.depth + " m of water under the shark far out");
+  if (!(far.navR1 > 1500)) fail("open ocean: survNavRing r1=" + far.navR1 + " m — the measured sea is still a pen");
+  if (!(far.oceanDx >= 0 && far.oceanDx < 1100 && far.oceanDz < 1100)) fail("open ocean: water tile did not follow the camera (offset " + far.oceanDx + "/" + far.oceanDz + " m)");
+  else pass("water tile riding with the camera (" + far.oceanDx + "/" + far.oceanDz + " m off), " + far.depth + " m of water below, navRing out to " + far.navR1 + " m");
+  // Leave the world as stage 2 left it: a kilometre-plus commute back would
+  // put stage 3's surf staging at the mercy of this stage's swim, and stages
+  // must not decide each other. Position is player-authoritative on a ride
+  // (wildlife_tame integrates from P.pos), so this teleports the mount too.
+  await rig.evl(`(CBZ.player.pos.x = ${homePos.x}, CBZ.player.pos.z = ${homePos.z}, 1)`);
+  await burst(1.2);
+
   // ================= STAGE 3: IT EATS ON ITS OWN ==========================
   say("— stage 3: automatic bite —");
   await rig.evl(PEACE);

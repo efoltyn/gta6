@@ -103,10 +103,12 @@ async function stagePatriot(input) {
   // that one line. Spreading the test across the width of the facade rejects a
   // foreground occluder, which is what "can I photograph this" actually means.
   const seesFacade = (eye, w) => {
-    const half = Math.min(14, w.width * 0.32);
+    const a = Math.min(15, w.width * 0.46), b = Math.min(9, w.width * 0.26);
     return losClear(eye, { x: w.x, y: w.y, z: w.z }) &&
-      losClear(eye, { x: w.x + w.tx * half, y: w.y + 3, z: w.z + w.tz * half }) &&
-      losClear(eye, { x: w.x - w.tx * half, y: w.y - 2, z: w.z - w.tz * half });
+      losClear(eye, { x: w.x + w.tx * b, y: w.y + 3, z: w.z + w.tz * b }) &&
+      losClear(eye, { x: w.x - w.tx * b, y: w.y - 2, z: w.z - w.tz * b }) &&
+      losClear(eye, { x: w.x + w.tx * a, y: w.y + 1, z: w.z + w.tz * a }) &&
+      losClear(eye, { x: w.x - w.tx * a, y: w.y + 1, z: w.z - w.tz * a });
   };
   // First tripod in the list that is standing in open air AND has the shot.
   const clearEye = (w, tries) => {
@@ -358,7 +360,8 @@ async function stagePatriot(input) {
 
     const cams = {
       rpgWide: towerEye(rpg),
-      rpgClose: clearEye(rpg, [[21, 0.4, 7, 54], [24, 1.2, 11, 54], [19, 0.2, -7, 56], [27, 2, -14, 54], [31, 3, 18, 52]]),
+      rpgClose: clearEye(rpg, [[21, 0.4, 7, 54], [24, 1.2, 11, 54], [19, 0.2, -7, 56], [27, 2, -14, 54],
+        [31, 3, 18, 52], [23, 1, 0, 56], [34, 4, -22, 52], [28, 2.5, 22, 54]]),
       launcher: truckCam(vehicle.pos.x, vehicle.pos.z, vehicle.heading || 0, vehicle.pos.y || 0,
         [[12.5, 5.0, -10.0], [-12.5, 5.0, -10.0], [13.5, 6.0, 8.0], [-13.5, 6.0, 8.0], [15, 8, -16]], [0, 2.1, -0.8, 44]),
       launch: truckCam(fx, fz, fireHeading, fireY,

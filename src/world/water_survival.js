@@ -366,10 +366,12 @@
      away from here". Keep the two in step if that threshold ever changes.
 
      NULL MEANS THE BODY DOES NOT FIT, and callers must honour it instead of
-     placing something anyway. An orca wants ~8 m of water (so: at least 156 m
-     out) and 66 m of room inside a 270 m fence (so: at most 209 m out); a
-     blue marlin's 150 leaves no overlap at all, and a marlin spawned anyway
-     is a marlin frozen on the spot where it spawned.
+     placing something anyway. This mattered constantly when the fence was a
+     270 m pen (a blue marlin's 150 m of clearance had no overlap at all, and
+     a marlin spawned anyway is a marlin frozen where it spawned); with the
+     fence at the drawn seabed's rim (~3 km) nearly everything fits, but the
+     contract stands — the fence can shrink again, and the refusal is what
+     keeps a shrink from quietly filling the sea with frozen bodies.
 
      Sampled along +X only: the shelf under this sea is a function of radius
      alone (world/disaster_arena.js's coastHeightAt), and the four hills that
