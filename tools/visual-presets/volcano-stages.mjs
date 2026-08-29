@@ -4,16 +4,14 @@
    the rAF loop, forces the director to the volcano, and photographs the same
    simulated seconds of the same seeded eruption on both sides.
 
-   FLAG A/B AS OF 2026-08-23: both sides are THIS checkout; the before side
-   boots with ?cfg_VOLCANO_V3=0. (The deployed build stopped answering the
-   harness's readiness probe, and a before that cannot boot is not a
-   baseline.) VOLCANO_V3 is the eruption's SKY wave — the ~180 m fog-exempt
-   column, the ash ledger back on as a downwind WEDGE instead of the
-   island-wide blanket that got it switched off on 2026-08-16, and the sun
-   dimming toward darkness-at-noon as the deposit builds. The lava, the
-   pyroclastic current and the lahar are identical on both sides, so their
-   beats double as regression controls: any drift there is a bug, not a
-   feature.
+   FLAG A/B AS OF 2026-08-26: both sides are THIS checkout; the before side
+   boots with ?cfg_VOLCANO_PLUME_V2=0. That is the exact current geometric
+   bead-column. The after side keeps the same eruption, wind, ash, lava and
+   lighting but replaces those giant synchronized cards with the RPG blast's
+   lumpy smoke mask, per-puff grow/drift/fade, a dense dark core and an
+   irregular cauliflower edge. The column is also brought back from a
+   seven-mountain-height needle to the broader landscape proportion in the
+   owner's two reference photographs.
 
    VOLCANO ONLY (owner, 2026-08-15: "I just wanted the volcano to be more
    real... I never mentioned nuke"). The four nuke-finale beats this preset
@@ -75,20 +73,33 @@ const subjects = [
     act: { force: "volcano", untilState: "warn", extraSecs: 4.2 },
     cam: { lane: true, ahead: 60, side: 26, alt: 26, fallback: { x: 108, y: 46, z: 672, ax: 0, ay: 20, az: 600 } } },
 
-  { id: "column", label: "The eruption column — the silhouette", hud: false,
-    focus: "THE V3 MONEY SHOT. An eruption column is the most dramatic silhouette in nature; the before side's is ~60 m — barely twice the mountain — and the eruption's own 380 m fog wall eats its head. After: ~180 m of fog-exempt soot standing over the island, cauliflower head leaning downwind. Same emitter, same sprite count, zero extra draw calls.",
+  { id: "column-young", label: "The young plume — smoke is born at the vent", hud: false,
+    focus: "At t+2.4 s the plume must grow continuously out of the hot throat. Before: separated opaque coins. After: small hot RPG-style billows overlap into a dark core, cool to soot and travel upward—no fixed seats and no bouncing.",
+    act: { force: "volcano", untilState: "active", extraSecs: 2.4, pinWind: [0.7, -0.7] },
+    cam: { volcano: true, dist: 62, alt: 10, aboveVent: 38, fov: 72 } },
+
+  { id: "column", label: "The mature eruption column — the silhouette", hud: false,
+    focus: "The matched wide read at t+8 s. Before is the current seven-cone-height bead chain. After must be a shorter, broader, continuous soot volume with a turbulent cauliflower crown and the same pinned wind lean.",
     /* force: this beat used to inherit whatever disaster the director
        happened to be on — run alone (`--subjects column`) it photographed a
        LIGHTNING STORM and reported ok:true, the exact order-dependence the
        header note above forbids. */
     /* pinWind perpendicular to the tripod's sightline, so the column leans
        in PROFILE — a lean toward or away from the lens reads as nothing. */
-    act: { force: "volcano", untilState: "active", extraSecs: 6, pinWind: [0.7, -0.7] },
-    /* the tripod stands ~205 m offshore so a 55° lens can hold the full
-       pillar: at that distance the vertical half-field is ~105 m, which is
-       the after column's head with margin — and the same frame is what
-       shows the before column barely clearing the peak. */
-    cam: { x: 150, y: 55, z: 745, ax: 0, ay: 85, az: 600 } },
+    act: { force: "volcano", untilState: "active", extraSecs: 8, pinWind: [0.7, -0.7] },
+    /* Wide enough to hold the old oversized head and the new landscape-scale
+       plume in one locked frame. */
+    cam: { volcano: true, dist: 172, alt: 25, aboveVent: 70, fov: 64 } },
+
+  { id: "column-close", label: "The smoke at reading distance — no cards", hud: false,
+    focus: "Close enough to judge the mask and overlap. The silhouette needs ragged multi-scale edges, darker self-shadowed core, lighter thinning fringes and independent puff rotation/fade—the exact cues that make the RPG smoke convincing.",
+    act: { force: "volcano", untilState: "active", extraSecs: 8, pinWind: [0.7, -0.7] },
+    cam: { volcano: true, dist: 54, alt: 9, aboveVent: 46, fov: 74 } },
+
+  { id: "eruption-night", label: "Night eruption — fire under ash", hud: false,
+    focus: "The first reference regime: a dark cone, connected incandescent lava, a white-orange throat, and a charcoal plume whose base catches the eruption glow without turning the whole cloud brown.",
+    act: { night: true, force: "volcano", untilState: "active", extraSecs: 9, pinWind: [0.7, -0.7] },
+    cam: { volcano: true, dist: 58, alt: 9, aboveVent: 43, fov: 74 } },
 
   { id: "lava-day", label: "Lava close-up — opaque crust", hud: false,
     focus: "CONTROL — THE BIBLE SHOT (owner's Etna close-up, 2026-08-15): a DARK crusted surface with a bright connected LACE of melt cracked through it. V3 does not touch the lava; the two sides must match. vol_lavaTransparent must read 0 on both.",
@@ -333,7 +344,53 @@ async function stageVolcano(input) {
   const ringHazard = () => hazards().find((h) => h && !h.line && h.fill === false);
   let aimed = null, aimNote = "tripod";
   const cam = subject.cam || {};
-  if (cam.lane || cam.lahar) {
+  if (cam.volcano) {
+    /* REFERENCE FRAMING: the cone is the subject, not a tiny prop behind the
+       skyline. Stand just offshore and elect the first compass bearing with a
+       clear ray to the crater, so the mountain fills the lower frame while
+       the plume owns the sky. Same election on both sides; no smoke object is
+       considered a blocker. */
+    try {
+      const hill = (CBZ.surv && CBZ.surv.arena) ? CBZ.surv.arena.hills[0] : { x: 0, z: 600, peak: 26 };
+      const gAtV = (x, z) => (CBZ.surv && CBZ.surv.arena ? CBZ.surv.arena.groundHeightAt(x, z) : 0);
+      const solids = [];
+      CBZ.scene.traverse((ob) => {
+        if (ob.isMesh && ob.visible && !(ob.userData && ob.userData.waterSurface)) solids.push(ob);
+      });
+      const ray = new T.Raycaster();
+      const vent = new T.Vector3(hill.x, hill.peak + 3, hill.z);
+      const clearRay = (px, py, pz, target) => {
+        const origin = new T.Vector3(px, py, pz);
+        const dir = target.clone().sub(origin), len = dir.length() || 1;
+        dir.multiplyScalar(1 / len); ray.set(origin, dir); ray.near = 0.1; ray.far = Math.max(0.2, len - 10);
+        try { return ray.intersectObjects(solids, false).length === 0; } catch (_) { return false; }
+      };
+      const dist = cam.dist || 140, alt = cam.alt || 20;
+      const baseA = cam.angle != null ? cam.angle : -Math.PI * 0.5;
+      const angles = [];
+      for (let i = 0; i < 16; i++) angles.push(baseA + i * Math.PI * 0.125);
+      let pick = null;
+      for (const a of angles) {
+        const px = hill.x + Math.cos(a) * dist, pz = hill.z + Math.sin(a) * dist;
+        const py = Math.max(0, gAtV(px, pz)) + alt;
+        if (!pick) pick = { x: px, y: py, z: pz };
+        // Crater plus both shoulders: a tower beside the vent is still a bad
+        // volcano portrait even when the one centre ray technically lands.
+        const vx = Math.cos(a), vz = Math.sin(a), sx = -vz, sz = vx;
+        const shoulder = (hill.r || 36) * 0.68;
+        const left = new T.Vector3(hill.x + sx * shoulder, 8, hill.z + sz * shoulder);
+        const right = new T.Vector3(hill.x - sx * shoulder, 8, hill.z - sz * shoulder);
+        if (clearRay(px, py, pz, vent) && clearRay(px, py, pz, left) && clearRay(px, py, pz, right)) {
+          pick = { x: px, y: py, z: pz }; break;
+        }
+      }
+      aimed = {
+        x: pick.x, y: pick.y, z: pick.z,
+        ax: hill.x, ay: hill.peak + (cam.aboveVent != null ? cam.aboveVent : 48), az: hill.z,
+      };
+      aimNote = "offshore volcano";
+    } catch (_) {}
+  } else if (cam.lane || cam.lahar) {
     const H = cam.lane ? lineHazard() : (ringHazard() || lineHazard());
     if (H) {
       const dx = H.dx != null ? H.dx : 1, dz = H.dz != null ? H.dz : 0;
@@ -510,7 +567,7 @@ async function stageVolcano(input) {
 
   const camera = CBZ.camera;
   camera.aspect = input.width / input.height;
-  camera.fov = 55;
+  camera.fov = cam.fov || 55;
   camera.near = 0.5;
   // NOTE: `far` is deliberately NOT forced here. The finale's frustum is the
   // thing under test — src/systems/disasters.js widens it off the live cloud's
@@ -558,9 +615,9 @@ async function stageVolcano(input) {
   query("side").textContent = before ? input.beforeLabel : input.afterLabel;
   query("side").style.cssText = `position:absolute;top:22px;left:26px;padding:7px 11px;border-radius:7px;background:${before ? "#c94c4c" : "#218b60"};font-size:12px;font-weight:900;letter-spacing:.12em`;
   query("name").textContent = subject.label;
-  query("name").style.cssText = "position:absolute;top:212px;left:26px;font-size:22px;font-weight:800;letter-spacing:-.02em;max-width:360px";
+  query("name").style.cssText = "position:absolute;top:202px;left:26px;font-size:21px;font-weight:800;line-height:1.08;letter-spacing:-.02em;max-width:430px";
   query("focus").textContent = `${CBZ.disasters.current() || "—"} · ${CBZ.disasters.state()} · cam ${aimNote} · far ${Math.round(camera.far)}`;
-  query("focus").style.cssText = "position:absolute;top:250px;left:27px;color:#c0cfda;font-size:12px;font-weight:550";
+  query("focus").style.cssText = "position:absolute;top:266px;left:27px;color:#c0cfda;font-size:12px;font-weight:550";
 
   let vol = null, dis = null;
   try { vol = CBZ.volcanoAudit ? CBZ.volcanoAudit() : null; } catch (_) {}
@@ -614,11 +671,11 @@ async function stageVolcano(input) {
 export default {
   id: "volcano-stages",
   title: "The Stratovolcano",
-  description: "Flag A/B on this checkout: the before side boots with cfg_VOLCANO_V3=0. V3 is the eruption's sky — the ~180 m fog-exempt column, ashfall back as a downwind WEDGE (the 2026-08-16 island-wide blanket was a spread-parameter bug, not a reason to delete the hazard), roof loads and the choke back with it, and the sun dimming toward darkness-at-noon as the deposit builds. Lava/pyro/lahar beats are regression controls. The travelling beats aim themselves off CBZ.disasters.hazards(); the ash beats aim off the weather's own wind vector.",
+  description: "Flag A/B on this checkout: cfg_VOLCANO_PLUME_V2=0 is the current geometric bead-column; after uses the RPG blast's real lumpy smoke mask and per-puff lifecycle to build a denser core, irregular cauliflower edge and shorter/broader landscape silhouette. All other eruption systems remain matched controls.",
   defaultBefore: "local",
-  beforeParams: { cfg_VOLCANO_V3: 0 },
-  beforeLabel: "BEFORE · VOLCANO_V3=0",
-  afterLabel: "AFTER · VOLCANO_V3=1",
+  beforeParams: { cfg_VOLCANO_PLUME_V2: 0 },
+  beforeLabel: "BEFORE · GEOMETRIC PLUME",
+  afterLabel: "AFTER · RPG-SMOKE PLUME",
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
@@ -642,6 +699,9 @@ export default {
     vol_lavaScars: { label: "Cooled flows kept as scars", better: "higher" },
     vol_ventGlows: { label: "Incandescent vent aprons", better: "higher" },
     vol_ashColumns: { label: "Sprite ash columns", better: "higher" },
+    vol_columnPuffs: { label: "Overlapping plume puffs", better: "higher" },
+    vol_organicColumns: { label: "Organic lifecycle columns", better: "higher" },
+    vol_blastSmokeColumns: { label: "Columns sharing RPG smoke mask", better: "higher" },
     vol_pyroLive: { label: "Pyroclastic flows live", better: "higher" },
     /* V3 brings the ash LEDGER back as a downwind wedge (see the flag note
        in world/volcanofx.js), so depth is a feature again — on the axis,

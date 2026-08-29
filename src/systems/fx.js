@@ -39,6 +39,10 @@
   // ---------------------------------------------------------------
   fx.particleCloud = function (o) {
     o = o || {};
+    // A staged effect may supply a local stream so adding/removing that purely
+    // visual cloud does not reroll gameplay decisions elsewhere in the frame.
+    // Every existing caller omits it and keeps the shared Math.random path.
+    const random = typeof o.random === "function" ? o.random : rng;
     // cloud budget rides the perf/quality slider — tier0 sheds ~60% of motes
     // (default AND explicit counts), Best (tier 4) is byte-identical. Scaled
     // here only, never at call sites, so every disaster def inherits it.
@@ -60,14 +64,14 @@
     for (let i = 0; i < MAX; i++) seed(i, 0, 0, 0, true);
 
     function seed(i, cx, cy, cz, anywhere) {
-      const a = rng() * Math.PI * 2;
-      const r = Math.sqrt(rng()) * radius;
+      const a = random() * Math.PI * 2;
+      const r = Math.sqrt(random()) * radius;
       const off = i * 3;
       pos[off] = cx + Math.cos(a) * r;
       pos[off + 2] = cz + Math.sin(a) * r;
-      if (mode === "rise") pos[off + 1] = cy + (anywhere ? rng() * (top) : rng() * 1.5);
-      else pos[off + 1] = cy + (anywhere ? rng() * top : top + rng() * 4);
-      vel[i] = vMin + rng() * (vMax - vMin);
+      if (mode === "rise") pos[off + 1] = cy + (anywhere ? random() * (top) : random() * 1.5);
+      else pos[off + 1] = cy + (anywhere ? random() * top : top + random() * 4);
+      vel[i] = vMin + random() * (vMax - vMin);
       ang[i] = a; rad[i] = r;
     }
 
@@ -121,7 +125,7 @@
               const dx = pos[off] - cx, dz = pos[off + 2] - cz;
               if (dx * dx + dz * dz > r2) recycle = true;
             }
-            if (recycle) { seed(i, cx, cy, cz, false); pos[i * 3 + 1] = cy + top + rng() * 4; }
+            if (recycle) { seed(i, cx, cy, cz, false); pos[i * 3 + 1] = cy + top + random() * 4; }
           }
         }
         geo.setDrawRange(0, live);

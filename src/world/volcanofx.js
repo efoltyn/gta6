@@ -136,6 +136,18 @@
                 walks toward darkness-at-noon instead of holding a fixed tint.
      False is the one-line revert to the 2026-08-16 build. */
   if (CBZ.CONFIG.VOLCANO_V3 == null) CBZ.CONFIG.VOLCANO_V3 = true;
+  /* VOLCANO_PLUME_V2 (2026-08-26): smoke is a VOLUME, not a stack of coins.
+     The first sprite column fixed the old point-cloud haze, but thirty fully
+     opaque, similarly sized billboards still photographed as a vertical bead
+     chain. V2 keeps the one canonical emitter and borrows the RPG blast's
+     actual lumpy smoke mask when crashfx is present. Every puff owns the same
+     grow / drift / fade lifecycle as an RPG puff, while overlapping core,
+     shoulder and edge populations build one continuous convecting mass.
+
+     Default follows V3 so ?cfg_VOLCANO_V3=0 remains the complete pre-sky
+     revert it promised. ?cfg_VOLCANO_PLUME_V2=0 isolates the exact geometric
+     column for matched before/after work without touching lava, ash or light. */
+  if (CBZ.CONFIG.VOLCANO_PLUME_V2 == null) CBZ.CONFIG.VOLCANO_PLUME_V2 = CBZ.CONFIG.VOLCANO_V3 !== false;
   /* ASH IS BACK ON, because what was OFF was never the ledger — it was the
      BLANKET. The 2026-08-16 owner note ("the ash covering the map is not
      needed... the ash covers everything in a dumb way, idc if it's
@@ -1068,8 +1080,7 @@
      shared cauliflower alpha, sizes growing with height (a plume expands
      as it entrains air), bending downwind with height squared (drag
      integrates). Dark tiers only — the photograph's pillar is soot against
-     sky; the rose light at its base is the separate lit-underside cloud
-     the director already owns.
+     sky; the V2 puffs cool from a brief rose-lit throat into neutral soot.
 
      OWNER, 2026-08-16: "when smoke comes out of the volcano it looks like
      flat bouncing circle ish things — look at the rpg explosion and how it
@@ -1082,14 +1093,10 @@
      vent, climbs the axis while it expands, decelerates into the head,
      spreads sideways there (that crowd IS the cauliflower bulge), and is
      recycled back to the vent inside the one part of the mass dense enough
-     to mask it. Nothing oscillates; all motion is travel. The churn comes
-     from the shared materials' slow rotation (the pyro current's trick) and
-     the whole mass slowly turning about its own axis.
-
-     Materials are OWNED, not the pyro pool's: the pyro drives its shared
-     materials' rotation every tick it is alive, and two systems steering
-     one uniform is a fight. A column costs its own four materials and
-     disposes them.
+     to mask it. Nothing oscillates; all motion is travel. V2 follows the RPG
+     pool's decisive detail: each puff owns its material state, so rotations,
+     opacity and cooling never advance in lockstep. Every owned material is
+     disposed with the column; the shared RPG/fallback texture is not.
      ============================================================ */
   V.ashColumn = function (o) {
     o = o || {};
@@ -1098,6 +1105,7 @@
     const baseY = o.y != null ? +o.y : 0;
     const height = o.height > 0 ? +o.height : 55;
     const r0 = o.r > 0 ? +o.r : 7;
+    const organic = CBZ.CONFIG.VOLCANO_PLUME_V2 !== false;
     const mats = [];
     // one step below where they should read: the eruption's warm fog and the
     // output encoding both lift these on the way to the screen (same lesson
@@ -1110,51 +1118,169 @@
        to matter. Soot against sky owes the air nothing (city/nukefx.js's
        lobes made the same call), so the caller may exempt it. */
     const useFog = o.fogless ? false : true;
-    for (let i = 0; i < COL_TIERS.length; i++) {
-      mats.push(new THREE.SpriteMaterial({
-        map: puffTex(i % 3), color: COL_TIERS[i],
-        transparent: true, opacity: 1, depthWrite: false, fog: useFog,
-        blending: THREE.NormalBlending, rotation: i * 1.7,
-      }));
+    if (!organic) {
+      for (let i = 0; i < COL_TIERS.length; i++) {
+        mats.push(new THREE.SpriteMaterial({
+          map: puffTex(i % 3), color: COL_TIERS[i],
+          transparent: true, opacity: 1, depthWrite: false, fog: useFog,
+          blending: THREE.NormalBlending, rotation: i * 1.7,
+        }));
+      }
     }
-    // a few more than the fixture build had: an emitter always has part of
-    // its roster in transit, and the deleted 500-mote ash rain pays for it
-    const N = qi(18, 30);
+    /* EXACTLY THE RPG'S MASK when that shared owner is loaded. The standalone
+       disaster slice intentionally omits the city blast module, so the
+       volcano's own cauliflower cutout is the degrade-safe fallback. No copy,
+       no second texture upload and, critically, no geometric smoke mesh. */
+    let blastSmoke = null;
+    if (organic && CBZ.cityBlastPuffAssets) {
+      try { const A = CBZ.cityBlastPuffAssets(); blastSmoke = A && A.smoke; } catch (e) {}
+    }
+    // The old path is kept byte-for-byte behind the flag. The denser path uses
+    // smaller interlocking puffs: density replaces the old handful of huge
+    // discs, just as the RPG fireball builds a continuous shape from overlap.
+    const legacyN = qi(18, 30);
+    const N = organic ? qi(80, 156) : legacyN;
     const grp = new THREE.Group();
     grp.frustumCulled = false;
     parent.add(grp);
-    /* the lifecycle, in seconds of climb. u = life/RISE: 0 birth at the
-       vent, 1 arrival at the head, then a HOLD to 1.35 spreading in the
-       cauliflower before the puff recycles. Births are staggered across one
-       full cycle so the column is a column, not a pulse — and so it STANDS
-       UP over its first seconds for free, led by its own leading puff.
-       6 s, not longer: the cycle time IS the birth rate (N puffs per
-       1.35 RISE), and the first cut at 7.5 s put nine puffs in the air by
-       the time the storyboard photographs the young column — a head on a
-       thread of beads, not a pillar. */
-    const RISE = 6;
+    /* u = life/RISE: 0 birth at the vent, 1 arrival at the head, then a
+       bounded cauliflower hold before recycle. V2 births across the full
+       seven-second cycle: it grows honestly from an empty vent, then reaches
+       a steady state where every lifecycle age is represented and no recycle
+       can open a missing-age hole through the middle. */
+    const LEGACY_RISE = 6;
+    const RISE = organic ? 5 : LEGACY_RISE;
+    const END = organic ? 1.4 : 1.35;
+    // A local seeded stream makes the richer silhouette stable without
+    // stealing random calls from bomb, lava and hazard gameplay downstream.
+    let seed = (((x * 73856093) | 0) ^ ((z * 19349663) | 0) ^ 0x61a5c3d7) >>> 0;
+    const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    /* The current/old constructor consumes four global randoms per puff. Burn
+       the same four on the V2 path, then keep all new visual richness local,
+       so the A/B does not quietly reroll the lava fan or volcanic bombs. */
+    if (organic) for (let i = 0; i < legacyN * 4; i++) Math.random();
+    const legacyLives = organic ? new Float32Array(legacyN) : null;
+    if (legacyLives) for (let i = 0; i < legacyN; i++) legacyLives[i] = -(i / legacyN) * LEGACY_RISE * 1.35;
     const puffs = [];
     for (let i = 0; i < N; i++) {
-      const m = new THREE.Sprite(mats[0]);
+      let m = null;
+      if (organic) {
+        /* RPG parity means per-puff material state. Shared materials made every
+           old billboard rotate and fade in lockstep; crashfx gives each puff
+           its own rotation, opacity and temperature, which is why its cloud
+           never resolves into a repeated card pattern. */
+        const role = i % 10 < 3 ? 0 : (i % 10 < 8 ? 1 : 2); // core / body / edge
+        const cold = role === 0 ? 0x050606 : (role === 1 ? 0x10110f : 0x292824);
+        const mat = new THREE.SpriteMaterial({
+          map: blastSmoke || puffTex(i % 3), color: cold,
+          transparent: true, opacity: 0, depthWrite: false, depthTest: true,
+          fog: useFog, blending: THREE.NormalBlending, rotation: rnd() * 6.2832,
+        });
+        mats.push(mat);
+        m = new THREE.Sprite(mat);
+      } else {
+        m = new THREE.Sprite(mats[0]);
+      }
       m.renderOrder = 7;
       m.visible = false;
       grp.add(m);
-      puffs.push({
-        m: m, tier: 0,
-        life: -(i / N) * RISE * 1.35,
-        ang: Math.random() * 6.28,          // seat around the axis
-        rr: 0.2 + Math.random() * 0.8,      // seat across the column
-        ph: Math.random() * 6.28,
-        sz: 0.8 + Math.random() * 0.5,
-      });
+      if (!organic) {
+        puffs.push({
+          m: m, tier: 0,
+          life: -(i / N) * RISE * 1.35,
+          ang: Math.random() * 6.28,
+          rr: 0.2 + Math.random() * 0.8,
+          ph: Math.random() * 6.28,
+          sz: 0.8 + Math.random() * 0.5,
+        });
+      } else {
+        const role = i % 10 < 3 ? 0 : (i % 10 < 8 ? 1 : 2);
+        const rr = role === 0 ? 0.05 + rnd() * 0.34 : (role === 1 ? 0.18 + rnd() * 0.58 : 0.62 + rnd() * 0.44);
+        puffs.push({
+          m: m, role: role,
+          /* Births fill the whole cycle at a constant cadence. Before one
+             cycle has elapsed the plume honestly grows upward; afterwards
+             every lifecycle age is represented at once, so recycle cannot
+             open a missing-age hole halfway up the column. */
+          life: -(i / N) * RISE * END,
+          ang: rnd() * 6.2832,
+          rr: rr,
+          ph: rnd() * 6.2832,
+          sz: (role === 0 ? 0.76 : (role === 1 ? 0.64 : 0.52)) + rnd() * (role === 2 ? 0.28 : 0.34),
+          aspect: 0.72 + rnd() * 0.58,
+          spin: (rnd() - 0.5) * (role === 2 ? 0.24 : 0.15),
+          wind: 0.76 + rnd() * 0.38,
+          maxOp: role === 0 ? 0.68 : (role === 1 ? 0.5 : 0.22),
+        });
+      }
     }
     let t = 0, dead = false;
     const handle = {
-      kind: "column", group: grp,
+      kind: "column", group: grp, puffCount: N, organic: organic,
+      usesBlastSmoke: !!blastSmoke,
       update(dt, wx, wz) {
         if (dead) return handle;
         t += dt;
         const bx = wx || 0, bz = wz || 0;
+        if (organic) {
+          /* Preserve the OLD updater's global-random cadence too. Its only
+             calls happen when one of the thirty legacy puffs recycles. This
+             virtual clock keeps all non-visual eruption outcomes aligned. */
+          for (let i = 0; i < legacyLives.length; i++) {
+            legacyLives[i] += dt;
+            if (legacyLives[i] / LEGACY_RISE < 1.35) continue;
+            legacyLives[i] = 0;
+            Math.random(); Math.random(); Math.random();
+          }
+          for (let i = 0; i < puffs.length; i++) {
+            const P = puffs[i];
+            P.life += dt;
+            if (P.life < 0) { P.m.visible = false; continue; }
+            let u = P.life / RISE;
+            if (u >= END) {
+              P.life = 0; u = 0;
+              P.ang = rnd() * 6.2832;
+              P.ph = rnd() * 6.2832;
+              P.wind = 0.76 + rnd() * 0.38;
+            }
+            const climb = Math.min(1, u);
+            // Buoyant ash leaves the throat fast, then crowds at neutral
+            // buoyancy. That crowd—not one giant disc—is the cauliflower head.
+            const hh = 1 - Math.pow(1 - climb, 1.42);
+            const hold = Math.max(0, u - 1);
+            const head = clamp(hold / (END - 1), 0, 1);
+            const axisR = r0 * (0.22 + 0.76 * hh + 1.45 * head);
+            const lean = height * 0.27 * hh * hh * P.wind;
+            // A slow helical roll belongs to convection; there is no sinusoid
+            // added to world position, so no puff bounces around a fixed seat.
+            const drift = P.ang + hh * 0.72 + t * (0.018 + P.spin * 0.08);
+            const radial = axisR * P.rr * (1 + head * (P.role === 2 ? 0.55 : 0.24));
+            const capLift = head * height * (0.025 + 0.055 * Math.sin(P.ph));
+            P.m.position.set(
+              x + Math.cos(drift) * radial + bx * lean,
+              baseY + hh * height + capLift,
+              z + Math.sin(drift) * radial + bz * lean
+            );
+            // Many smaller, non-uniform cards interlock. The old 1.5*rad
+            // scale made each individual puff the size of a building and let
+            // the eye count it; this keeps the mass dense without readable
+            // circles, then broadens only once the head actually forms.
+            const born = clamp(u / 0.085, 0, 1);
+            const dying = u < 1.18 ? 1 : clamp((END - u) / (END - 1.18), 0, 1);
+            const sc = r0 * (0.54 + 1.22 * hh + 0.68 * head) * P.sz;
+            P.m.scale.set(sc * P.aspect, sc * (1.1 - (P.aspect - 0.72) * 0.28), 1);
+            P.m.material.opacity = P.maxOp * born * dying;
+            P.m.material.rotation += P.spin * dt;
+            // RPG smoke glows briefly where it hands off from fire, then
+            // cools to neutral soot. Edge puffs catch more sky than the core.
+            const heat = clamp(1 - u * 7.5, 0, 1);
+            const cold = P.role === 0 ? 0x050606 : (P.role === 1 ? 0x10110f : 0x292824);
+            P.m.material.color.setHex(cold);
+            if (heat > 0) { _c4.setHex(P.role === 2 ? 0x713019 : 0x3f1b10); P.m.material.color.lerp(_c4, heat * 0.7); }
+            P.m.visible = P.m.material.opacity > 0.015 && sc > 0.05;
+          }
+          return handle;
+        }
         // the slow boil, at zero position cost: the shared materials turn at
         // their own rates, shuffled across the roster (the pyro's trick)
         for (let i = 0; i < mats.length; i++) mats[i].rotation = i * 1.7 + t * (0.05 + i * 0.02);
@@ -2169,6 +2295,13 @@
       const g = LIVE.pyro[i].group;
       if (g) pyroBlobs += g.children.length;
     }
+    let columnPuffs = 0, organicColumns = 0, blastSmokeColumns = 0;
+    for (let i = 0; i < LIVE.column.length; i++) {
+      const c = LIVE.column[i];
+      columnPuffs += c.puffCount || (c.group ? c.group.children.length : 0);
+      if (c.organic) organicColumns++;
+      if (c.usesBlastSmoke) blastSmokeColumns++;
+    }
     let ashPeak = 0, ashCells = 0;
     for (let i = 0; i < LIVE.ash.length; i++) {
       ashPeak = Math.max(ashPeak, LIVE.ash[i].peakDepth);
@@ -2198,6 +2331,9 @@
       lavaBranches: census.branches,
       ventGlows: LIVE.vent.length,
       ashColumns: LIVE.column.length,
+      columnPuffs: columnPuffs,
+      organicColumns: organicColumns,
+      blastSmokeColumns: blastSmokeColumns,
       pyroLive: LIVE.pyro.length, pyroBlobs: pyroBlobs,
       laharLive: LIVE.lahar.length,
       ashFields: LIVE.ash.length, ashCells: ashCells,

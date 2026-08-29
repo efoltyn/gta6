@@ -2977,28 +2977,37 @@
     if (ctx.st.erupting) return; ctx.st.erupting = true;
     const h = ctx.arena.hills[0];
     const V = vfx();
+    const V3 = CBZ.CONFIG.VOLCANO_V3 !== false;
+    const plumeV2 = V3 && CBZ.CONFIG.VOLCANO_PLUME_V2 !== false;
     try { volAliveAtStart = surv().aliveCount(); } catch (e) { volAliveAtStart = -1; }
     narrate("banner", "VOLCANIC ERUPTION");
     narrate("hint", "THE MOUNTAIN ERUPTS, stay off the lava!", 3);
     if (CBZ.shake) CBZ.shake(0.9); sound("explosion"); sound("rumble");
     // a fountain of glowing lava bursting UP out of the summit vent
-    ctx.st.erFountain = CBZ.fx.particleCloud({ mode: "rise", color: 0xff6a1a, count: 260, radius: 7, top: 22, size: 0.3, opacity: 0.85, vMin: 12, vMax: 22, drift: 3 }); ctx.st.erFountain.setActive(0.95);
+    ctx.st.erFountain = CBZ.fx.particleCloud({
+      mode: "rise", color: 0xff6a1a,
+      // V2's smoke owns the mass. The Points cloud goes back to being the
+      // fast spatter accent instead of a tall tube of evenly sized glitter.
+      count: plumeV2 ? 140 : 260, radius: plumeV2 ? 5.5 : 7,
+      top: plumeV2 ? 17 : 22, size: plumeV2 ? 0.2 : 0.3,
+      opacity: plumeV2 ? 0.72 : 0.85, vMin: 12, vMax: 22, drift: 3,
+    }); ctx.st.erFountain.setActive(plumeV2 ? 0.82 : 0.95);
     /* a towering dark ash column above the fountain. V2 gets the SPRITE
        column (volcanofx ashColumn — a pillar with a silhouette, built like
        the pyroclastic current's mass); the flag revert keeps the old dotted
        Points cloud verbatim. */
     if (V && V.ashColumn) {
-      /* V3: THE COLUMN IS THE SILHOUETTE. At 52-68 m the pillar was barely
-         twice the 26 m mountain — a smudge that scene fog then ate. A real
-         eruption column is the most dramatic shape in nature, and on a 240 m
-         island a ~180 m fog-exempt pillar is what reads as that from every
-         beach. Same sprite count as before — the emitter's puffs scale with
-         `height`/`r`, so the drama costs zero extra draw calls. */
-      const V3 = CBZ.CONFIG.VOLCANO_V3 !== false;
+      /* V3 makes the column fog-exempt so the landmark does not dissolve in
+         its own weather. PLUME_V2 then changes the shape and population; the
+         flag-off dimensions below preserve the former ~180 m needle. */
       ctx.st.erColumn = V.ashColumn({
         x: h.x, z: h.z, y: h.peak + 3,
-        height: V3 ? 150 + 55 * ctx.intensity : 52 + 16 * ctx.intensity,
-        r: V3 ? 11 + 4 * ctx.intensity : 6.5 + 2.5 * ctx.intensity,
+        /* The former 180 m needle was seven mountain-heights tall. The
+           references are broad convecting plumes whose visible column is
+           roughly three to five cone-heights; V2 widens the mass and brings
+           its top back into that landscape scale. Flag-off is byte-identical. */
+        height: plumeV2 ? 96 + 38 * ctx.intensity : (V3 ? 150 + 55 * ctx.intensity : 52 + 16 * ctx.intensity),
+        r: plumeV2 ? 10 + 4.5 * ctx.intensity : (V3 ? 11 + 4 * ctx.intensity : 6.5 + 2.5 * ctx.intensity),
         fogless: V3,
         parent: root(),
       });
@@ -3011,7 +3020,19 @@
        vent it is standing on. A second short rising cloud in ember colours
        under the dark one is that underside; without it the column reads as
        a grey smudge that merely starts near the mountain. */
-    ctx.st.erSmokeLit = CBZ.fx.particleCloud({ mode: "rise", color: 0xd06a35, count: 110, radius: 8, top: 15, size: 0.5, opacity: 0.32, vMin: 4, vMax: 8, drift: 3 }); ctx.st.erSmokeLit.setActive(0.75);
+    /* V2 carries the RPG-style hot-to-soot handoff inside the column's own
+       puffs. Keeping this second point cloud underneath would restore the
+       floating-dot silhouette the repair removes. The flag-off path stays
+       exactly as it was for the comparator. */
+    if (CBZ.CONFIG.VOLCANO_PLUME_V2 === false) {
+      /* Local visual RNG: V2 can remove this cloud without rerolling the wind,
+         lava fan and bomb stream that are meant to stay matched controls. */
+      let smokeSeed = (((h.x * 73856093) | 0) ^ ((h.z * 19349663) | 0) ^ 0x5a17c9e3) >>> 0;
+      const smokeRandom = function () { smokeSeed = (smokeSeed * 1664525 + 1013904223) >>> 0; return smokeSeed / 4294967296; };
+      ctx.st.erSmokeLit = CBZ.fx.particleCloud({ mode: "rise", color: 0xd06a35, count: 110, radius: 8, top: 15, size: 0.5, opacity: 0.32, vMin: 4, vMax: 8, drift: 3, random: smokeRandom }); ctx.st.erSmokeLit.setActive(0.75);
+    } else {
+      ctx.st.erSmokeLit = null;
+    }
     /* NO ash raining over the island any more — OWNER, 2026-08-16: "the ash
        everywhere is just so dumb, idc if it's realistic". The 300 grey motes
        that fell here went the same way as the ground blanket. */
