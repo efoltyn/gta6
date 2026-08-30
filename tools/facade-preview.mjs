@@ -16,6 +16,7 @@
    Usage:
      node tools/facade-preview.mjs mastaba
      node tools/facade-preview.mjs mastaba minoan --subject block
+     node tools/facade-preview.mjs zimbabwe:block swahili:house
      node tools/facade-preview.mjs shikhara --subject tower --out /tmp/s.png
 
    Prints the same metrics the catalogue plates carry, plus two counts the
@@ -59,7 +60,8 @@ for (let i = 0; i < argv.length; i++) {
   else ids.push(a);
 }
 if (!ids.length || opt.help) {
-  console.log("usage: node tools/facade-preview.mjs <id> [<id>...] [--subject house|block|tower] [--out file.png]");
+  console.log("usage: node tools/facade-preview.mjs <id>[:house|block|tower] [<id>...] [--subject <default>] [--out file.png]");
+  console.log("  batch everything into ONE call: the page boot is ~6.5s, each facade after it ~1.5s");
   console.log("  renders src/city/facades/<id>.js without it being wired into index.html");
   process.exit(ids.length ? 0 : 1);
 }
@@ -69,8 +71,18 @@ const SUBJ = {
   block: { w: 22, d: 16, storeys: 4, color: 0xb9b3a6, doorSide: 1 },
   house: { w: 15, d: 11, storeys: 2, color: 0xc8bfae, doorSide: 1 },
 };
-const famName = typeof opt.subject === "string" ? opt.subject : "block";
-const subject = SUBJ[famName] || SUBJ.block;
+/* ONE BOOT, ANY MIX OF SUBJECTS. Booting the page costs ~6.5 s and rendering
+   a facade costs ~1.5 s, so the only thing that matters for speed is not
+   booting twice. An era with two houses and a block was paying the boot
+   twice purely because --subject was global. Per-id override: `swahili:house`
+   alongside `zimbabwe:block`, with --subject as the default for bare ids. */
+const defFam = typeof opt.subject === "string" ? opt.subject : "block";
+const jobs = ids.map((raw) => {
+  const c = raw.indexOf(":");
+  const id = c === -1 ? raw : raw.slice(0, c);
+  const fam = c === -1 ? defFam : raw.slice(c + 1);
+  return { id: id, fam: SUBJ[fam] ? fam : defFam };
+});
 
 // ---------- server ----------
 let serverProc = null, baseUrl = typeof opt.url === "string" ? opt.url : null;
@@ -375,7 +387,8 @@ async function main() {
   const outDir = path.join(ROOT, "tools/shots");
   await mkdir(outDir, { recursive: true });
   let bad = 0;
-  for (const id of ids) {
+  for (const job of jobs) {
+    const id = job.id, famName = job.fam, subject = SUBJ[famName];
     const file = path.join(ROOT, "src/city/facades", id + ".js");
     if (!await inject(file)) { console.error(`!! ${file} does not exist`); bad++; continue; }
     const known = await evaluate(`!!CBZ.facadeDef(${JSON.stringify(id)})`);
