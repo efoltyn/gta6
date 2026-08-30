@@ -885,28 +885,29 @@
      next form is.
 
      What is left is that one fact and nothing else — a 3 px wordless sliver
-     seated with the health/stamina bars at the bottom, at the width they are
-     already at, so it belongs to the same instrument cluster instead of
-     floating alone at the top of the screen. It fills as you eat, flares white
+     seated with the health/stamina bars in the TOP-LEFT corner (hud.css moves
+     that cluster there in this mode), at the width they are already at, so it
+     belongs to the same instrument cluster instead of floating alone. It fills as you eat, flares white
      for the beat the ladder climbs (evolveBeat's swell owns the screen at that
      moment), empties into the new rung, and after the MEGALODON — which has
      nothing left to become — it fades out for good. Nothing to eat "next" is a
      thing the HUD should stop having an opinion about.
 
      It hangs off #survBars deliberately, and OUT OF ITS FLOW. That element
-     already carries the island's bottom-centre width, its centring, and the
+     already carries the cluster's width, its anchoring, and the
      `.sbar`/`.slab`/`.sbarbg` row grammar the health and stamina bars are
      built from — so the sliver borrows all of it (including an EMPTY label
      cell, which holds the column so the bar lines up under the other two
-     without a single hard-coded offset) and prints nothing.
+     without a single hard-coded offset) and prints nothing. Wherever the
+     cluster is pinned, the sliver goes with it.
 
-     Out of the flow because css/interact_touch.css measured this cluster:
-     #survBars is 66 px tall (bottom:24 + 42) and the portrait touch dock was
-     given 78 px of clearance against exactly that number. #survBars is pinned
-     by its BOTTOM, so an extra row in the flow grows the box UPWARD and eats
-     that clearance. `position:absolute;bottom:-9px` instead: the sliver hangs
-     into the 24 px gap under the stamina bar, the measured height of the
-     cluster does not change, and no touch rail moves on any device.
+     Out of the flow because a third row in the flow changes the cluster's
+     measured height, and css/interact_touch.css measured it: #survBars is
+     66 px tall and the portrait touch dock was given 78 px of clearance
+     against exactly that number for the modes that still keep it at the
+     bottom. `position:absolute;bottom:-9px` instead: the sliver hangs 9 px
+     under the stamina bar, the box's own height never changes, and no touch
+     rail moves on any device.
 
      ?cfg_SHARK_HUD_WORDLESS=0 restores the old pill verbatim — species name,
      bar, "→ NEXT" — which is the before/after preset's BEFORE.
@@ -962,8 +963,8 @@
       host.appendChild(hud);
     } else {
       // no island cluster (a bare mount test page): stand where it would have
-      hud.style.cssText = "position:fixed;left:50%;bottom:12px;transform:translateX(-50%);" +
-        "width:min(360px,72vw);height:3px;border-radius:2px;z-index:45;pointer-events:none;" +
+      hud.style.cssText = "position:fixed;left:18px;top:70px;" +
+        "width:min(268px,54vw);height:3px;border-radius:2px;z-index:45;pointer-events:none;" +
         "background:rgba(0,0,0,.42);overflow:hidden;opacity:1;transition:opacity .7s ease";
       hud.appendChild(hudBar);
       document.body.appendChild(hud);

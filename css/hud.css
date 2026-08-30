@@ -793,6 +793,29 @@ body.mode-survival #objective:not(.killfeed){ display:none; }
 #survBars .sbarbg{ flex:1; height:14px; border-radius:10px; background:rgba(0,0,0,.45); overflow:hidden; box-shadow:inset 0 2px 4px rgba(0,0,0,.5); }
 #hpBar{ height:100%; width:100%; border-radius:10px; background:#3ad17a; transition:width .12s linear, background .2s; }
 #stamBar{ height:100%; width:100%; border-radius:10px; background:#5bc8ff; transition:width .12s linear; }
+
+/* ---- SHARK SIM: the cluster moves to the TOP-LEFT --------------------------
+   Owner's call. Shark Sim is played looking DOWN through water with the whole
+   bottom edge busy — the DIVE/RISE column on touch, the swash and the shore
+   where every meal is — and a bottom-centre bar sits right where the mouth is
+   pointed. The top-left corner is empty in this mode (the objective panel is
+   hidden in every island mode, the radar only fades in during escape, and the
+   corner killfeed lives on the RIGHT), so the vitals take it: read once, out
+   of the way of the water.
+
+   It stays the SAME cluster — same #survBars, same .sbar rows, same writers in
+   systems/survivalhud.js — only re-anchored, so the wordless evolve sliver
+   (modes/shark_sim.js appends it as an out-of-flow row at bottom:-9px) rides
+   along under the stamina bar exactly as it did at the bottom of the screen.
+   Narrower here than the bottom-centre 360: a corner readout should not run a
+   third of the way across the screen. */
+body.mode-sharksim #survBars{
+  left:18px; top:18px; bottom:auto; transform:none; width:min(268px,54vw);
+}
+body.mode-sharksim #survBars .sbar:first-child{ margin-top:0; }
+/* the degrade-safe casualty panel shares the top-left corner in island modes;
+   in sharksim it drops below the vitals instead of printing over them. */
+body.mode-sharksim #objective.killfeed{ top:104px; }
 /* X2: survival/escape hunger meter (city mode already has its own #cFood bar) */
 
 /* ============================================================
