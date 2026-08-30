@@ -493,11 +493,52 @@
     return inWater(x, y, z) ? "water" : "air";
   };
 
-  // ---- the pooled colour ladder: [depth band][age band] ----------------------
+  /* ---- the pooled colour ladder: [depth band][age band] --------------------
+     THE OWNER SAW YELLOW BLOOD, AND HE WAS LOOKING AT THIS TABLE. The three
+     rungs below used to be authored as swatches — "murky brown" and
+     "green-black" — and never once checked against what this renderer does to
+     them. Run through the real chain (core/renderer.js: outputEncoding =
+     sRGBEncoding with r128 colour management OFF, so a hex is treated as
+     LINEAR, times RENDER_EXPOSURE 1.16 / 0.6 = a 1.93x multiply, then ACES,
+     which desaturates toward white as it brightens, then the grade) they came
+     out as:
+
+         0x5c2a10  "murky brown"  ->  rgb(202,134, 63)  #CA863F   amber
+         0x452d15  "murky brown"  ->  rgb(177,140, 82)  #B18C52   tan
+         0x33301a  "murky brown"  ->  rgb(151,145, 97)  #979161   OLIVE-YELLOW
+         0x243a20  "green-black"  ->  rgb(123,160,112)  #7BA070   sage GREEN
+         0x1a2a18  "green-black"  ->  rgb( 97,134, 92)  #61865C   sage green
+         0x101a10  "green-black"  ->  rgb( 65, 98, 68)  #416244   sage green
+
+     0x33301a is the whole bug in one number: R 51, G 48, B 26 is an OLIVE
+     before it is anything else — green riding at 94% of red with blue crushed
+     is the definition of yellow — and the encoder then lifts all three into
+     the light. "Green-black" never reached black at all; it reached sage.
+     The blood texture cannot dilute any of it: bloodTexture() is pure white
+     with an alpha feather, so this colour IS the pixel.
+
+     Re-solved against that exact chain instead of by eye, holding two
+     invariants at every rung: green never rises above 60% of red (it lands at
+     ~45%, so the hue can never leave blood), and blue stays lowest of the
+     three (blue over green is slate, not blood). What they render as now:
+
+         0x3d130d -> rgb(168, 75, 56)   dark red-brown
+         0x2d0f0b -> rgb(140, 62, 50)
+         0x220d09 -> rgb(116, 55, 43)
+         0x160806 -> rgb( 83, 36, 34)   near-black maroon
+         0x100604 -> rgb( 64, 29, 27)
+         0x0b0401 -> rgb( 46, 21, 20)
+
+     The PHYSICS this models is real and stays (water eats red first, so blood
+     goes brown and then black with depth) — what is gone is the claim that it
+     turns YELLOW or GREEN on the way, which no amount of red absorption can
+     do. Absorption can only ever take a channel AWAY. Every rung here is now
+     darker and browner than the one above it, and none of them invents light
+     that was not in the blood to begin with. */
   const BLOOM_COLS = [
-    [0xb01218, 0x8e0f15, 0x7a0d12],   // < 2m   still arterial — red survives here
-    [0x5c2a10, 0x452d15, 0x33301a],   // 2-8m   the red is already gone: murky brown
-    [0x243a20, 0x1a2a18, 0x101a10],   // > 8m   green-black into near-black
+    [0xb01218, 0x8e0f15, 0x7a0d12],   // < 5m   still arterial — red survives here
+    [0x3d130d, 0x2d0f0b, 0x220d09],   // 5-15m  the red is going: dark red-brown
+    [0x160806, 0x100604, 0x0b0401],   // > 15m  near-black maroon, into black
   ];
   const BLOOM_ALPHA = [0.5, 0.3, 0.12];
   const bloomMats = [];
@@ -514,7 +555,16 @@
     }
     return m;
   }
-  function depthBand(d) { return d < 2 ? 0 : (d < 8 ? 1 : 2); }
+  /* AND THE BANDS WERE TOO SHALLOW BY HALF. "The red is already gone" at TWO
+     METRES is not what happens in sunlit water — at 2 m blood is still plainly
+     red, and 2 m is exactly the depth this game is played at: the shark sim's
+     whole beach is a shelf. On top of that the tint is being applied TWICE,
+     because world/water_spec.js's own depth attenuation is already dimming
+     anything seen through the column. Half of every plume in the mode was
+     being handed to a non-red rung it had not earned. 5 m and 15 m keep the
+     shelf arterial and save the brown for water that is actually deep.
+     One number each if that reads wrong in play. */
+  function depthBand(d) { return d < 5 ? 0 : (d < 15 ? 1 : 2); }
 
   // ---- puff pool: sprites are recycled forever, never re-allocated -----------
   /* THE SURFACE LID CLAMPS THE QUAD, NOT THE SPRITE'S CENTRE.
