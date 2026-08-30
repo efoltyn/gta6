@@ -327,7 +327,43 @@
   micro.elapsed = 0;
   micro.frames = 0;
   micro.fps = 0;
-  let _fpsAcc = 0, _fpsN = 0, _last = 0, _raf = 0;
+  let _fpsAcc = 0, _fpsN = 0, _last = null, _wall = null, _raf = 0;
+
+  /* ---- A TIME SCALE IS A SUBSTEP, NEVER A MULTIPLY ------------------------
+     A page that wants the world to run at 8x cannot get there by handing this
+     loop eight times the dt. Every integrator on the far side of these hooks
+     — a man walking, a bullet flying, a circle resolve pushing two bodies
+     apart — is only correct for a step of the size it was tuned against, and
+     one 133 ms step is how a soldier ends up on the other side of a mesa. So
+     the loop takes its dt from a clock the page may WARP, and then splits
+     whatever comes back into steps of at most maxStep.
+
+     Four knobs, and their defaults are today's loop EXACTLY: maxStep 0.1 is
+     the dt clamp this file has always had, maxSubsteps 1 is one step per
+     frame, simClock null is rAF's own timestamp, and stepBudgetMs 0 is no
+     wall budget. A page that sets none of them cannot tell this comment was
+     written. games/warlord.html sets all four from CBZ.warlord.clock.
+
+     THE BUDGET IS THE SAFETY. Substepping is unbounded work per frame, so a
+     slow machine at a high scale would spend the whole frame in the sim and
+     never draw. When the loop has spent stepBudgetMs it stops substepping and
+     the world FALLS BEHIND the clock — which is survivable and measurable —
+     instead of the page freezing, which is neither.
+
+     WHAT A HOOK CAN ASK. subCount/subIndex say where in the frame it is, and
+     `drawing` is true on exactly one substep per frame: the one the render
+     follows. Presentation work (a mixer flushing voices, an LOD swap) checks
+     it and runs once; frameDt is that frame's real WALL seconds, for anything
+     scheduled against a real timeline like audio. */
+  micro.simClock = null;        // () => game milliseconds; null = rAF's own
+  micro.maxStep = 0.1;          // biggest dt any hook may ever be handed
+  micro.maxSubsteps = 1;        // 1 = one step per frame — today's loop
+  micro.stepBudgetMs = 0;       // wall ms the substep loop may spend; 0 = uncapped
+  micro.subCount = 1;           // substeps this frame
+  micro.subIndex = 0;           // which one is running
+  micro.drawing = true;         // true on the last substep — the drawn one
+  micro.frameDt = 0;            // this frame's WALL seconds (unscaled, clamped)
+  micro.simDt = 0;              // game seconds this frame has delivered so far
 
   // A BRIDGED HOOK THAT CANNOT RUN HERE GETS RETIRED, NOT RE-THROWN.
   // Loading a city module for the assets inside it also brings its per-frame
@@ -374,6 +410,12 @@
     CBZ.camera.position.z -= _shookZ;
   }
 
+  // The wall stopwatch the substep budget is spent against — never the sim
+  // clock, which is the thing being budgeted.
+  const nowMsRaw = (typeof performance !== "undefined" && performance.now)
+    ? function () { return performance.now(); }
+    : function () { return Date.now(); };
+
   function runBridged(entry, dt, band) {
     if (entry.dead) return;
     try { entry.fn(dt); entry.fails = 0; }
@@ -389,16 +431,36 @@
 
   function tick(now) {
     _raf = requestAnimationFrame(tick);
-    if (!_last) _last = now;
+    // WALL first, always, and it is its own measurement: fps, micro.elapsed
+    // and anything scheduled against a real timeline are about how fast this
+    // machine is drawing, which a time scale must not be allowed to lie about.
+    if (_wall === null) _wall = now;
+    let wdt = (now - _wall) / 1000;
+    _wall = now;
+    if (!(wdt > 0)) wdt = 0;
+    if (wdt > 0.1) wdt = 0.1;
+    micro.frameDt = wdt;
+
+    // …and the SIM clock second. Same number unless the page warped it.
+    const clk = micro.simClock ? +micro.simClock() : now;
+    if (_last === null) _last = clk;
     // dt clamp: a tab that was backgrounded for 40 s must not teleport every
     // projectile in the world through a building on the first frame back.
-    let dt = (now - _last) / 1000;
-    _last = now;
+    // The ceiling is now the substep budget rather than a bare 0.1, because
+    // the budget is what actually bounds the work — see maxSubsteps above.
+    let dt = (clk - _last) / 1000;
+    _last = clk;
     if (!(dt > 0)) dt = 0;
-    if (dt > 0.1) dt = 0.1;
+    const maxStep = micro.maxStep > 0 ? micro.maxStep : 0.1;
+    const maxSub = micro.maxSubsteps > 1 ? Math.floor(micro.maxSubsteps) : 1;
+    if (dt > maxStep * maxSub) dt = maxStep * maxSub;
+    // n substeps of EQUAL size, so a frame's steps are all the same shape and
+    // nothing gets a ragged last one.
+    const n = dt > maxStep ? Math.min(maxSub, Math.ceil(dt / maxStep)) : 1;
+    const sdt = n > 1 ? dt / n : dt;
+
     micro.frames++;
-    _shakeDecay(dt);
-    _fpsAcc += dt; _fpsN++;
+    _fpsAcc += wdt; _fpsN++;
     if (_fpsAcc >= 0.5) { micro.fps = Math.round(_fpsN / _fpsAcc); _fpsAcc = 0; _fpsN = 0; }
     // the engine's own registry first, in ITS declared order (see the bridge
     // in ensureHelpers): `always` runs even while paused, by contract.
@@ -407,27 +469,52 @@
       CBZ.always.sort(function (a, b) { return a.order - b.order; });
       CBZ.updaters.sort(function (a, b) { return a.order - b.order; });
     }
-    for (let i = 0; i < CBZ.always.length; i++) runBridged(CBZ.always[i], dt, "always");
-    /* THE PAUSE KEY IS OWNED HERE, ABOVE THE GATE, and that is the whole point.
-       A page that toggles micro.paused from inside its own onFrame hook can
-       pause once and never unpause: the hooks are exactly what the gate below
-       stops running. Every page hits this the same way, so it is not a page's
-       problem to solve. Set micro.pauseKey = null to own it yourself. */
-    if (micro.pauseKey && input.down[micro.pauseKey]) micro.paused = !micro.paused;
-    // A PAUSED PAGE CANNOT DRAW ITS OWN "PAUSED", because the frame hooks are
-    // precisely what stopped. So the state goes on the document, where CSS can
-    // still see it, and studio's HUD reads the mark.
-    if (micro.paused !== _wasPaused) {
-      _wasPaused = micro.paused;
-      try { document.body.classList.toggle("micro-paused", !!micro.paused); } catch (e) {}
-    }
-    if (!micro.paused) {
-      micro.elapsed += dt;
-      for (let i = 0; i < CBZ.updaters.length; i++) runBridged(CBZ.updaters[i], dt, "update");
-      for (let i = 0; i < frameHooks.length; i++) {
-        try { frameHooks[i].fn(dt, micro.elapsed); }
-        catch (e) { console.error("[micro frame " + (frameHooks[i].id || i) + "]", e); }
+    micro.subCount = n;
+    micro.simDt = 0;
+    const budget = micro.stepBudgetMs > 0 ? micro.stepBudgetMs : 0;
+    const spendFrom = budget ? now : 0;
+    for (let s = 0; s < n; s++) {
+      /* THE LAST SUBSTEP IS DECIDED AT THE TOP OF THE ITERATION, not at the
+         bottom, because the budget can end the frame early: if `drawing` were
+         computed as (s === n-1) a budget cut would leave a frame in which no
+         substep was ever the drawn one, and every presentation hook that
+         gates on it would silently skip that frame. */
+      const spent = budget && s > 0 && (nowMsRaw() - spendFrom) > budget;
+      const last = spent || s === n - 1;
+      micro.subIndex = s;
+      micro.drawing = last;
+      micro.simDt = (s + 1) * sdt;
+      _shakeDecay(sdt);
+      for (let i = 0; i < CBZ.always.length; i++) runBridged(CBZ.always[i], sdt, "always");
+      /* THE PAUSE KEY IS OWNED HERE, ABOVE THE GATE, and that is the whole point.
+         A page that toggles micro.paused from inside its own onFrame hook can
+         pause once and never unpause: the hooks are exactly what the gate below
+         stops running. Every page hits this the same way, so it is not a page's
+         problem to solve. Set micro.pauseKey = null to own it yourself.
+         Read on the FIRST substep only: input.down is a one-frame edge and
+         re-reading it eight times is eight toggles from one keypress. */
+      if (s === 0 && micro.pauseKey && input.down[micro.pauseKey]) micro.paused = !micro.paused;
+      // A PAUSED PAGE CANNOT DRAW ITS OWN "PAUSED", because the frame hooks are
+      // precisely what stopped. So the state goes on the document, where CSS can
+      // still see it, and studio's HUD reads the mark.
+      if (micro.paused !== _wasPaused) {
+        _wasPaused = micro.paused;
+        try { document.body.classList.toggle("micro-paused", !!micro.paused); } catch (e) {}
       }
+      if (!micro.paused) {
+        // micro.elapsed is the RENDER clock and stays on wall seconds: it is
+        // read as an animation phase (shake oscillation, a marching gait) and
+        // as a "did the other module draw recently" handshake, and both of
+        // those are questions about frames, not about world time. Advanced
+        // once per frame, on the first substep, exactly as it always was.
+        if (s === 0) micro.elapsed += wdt;
+        for (let i = 0; i < CBZ.updaters.length; i++) runBridged(CBZ.updaters[i], sdt, "update");
+        for (let i = 0; i < frameHooks.length; i++) {
+          try { frameHooks[i].fn(sdt, micro.elapsed); }
+          catch (e) { console.error("[micro frame " + (frameHooks[i].id || i) + "]", e); }
+        }
+      }
+      if (last) { micro.subCount = s + 1; break; }
     }
     // A page that draws its OWN views (a multi-viewport gallery, a split
     // screen, a render-to-texture pass) must be able to stop the default
@@ -446,7 +533,7 @@
     input.endFrame();
   }
 
-  micro.start = function () { if (!_raf) { _last = 0; _raf = requestAnimationFrame(tick); } };
+  micro.start = function () { if (!_raf) { _last = null; _wall = null; _raf = requestAnimationFrame(tick); } };
   micro.stop = function () { if (_raf) { cancelAnimationFrame(_raf); _raf = 0; } };
 
   /* ---- HEADLESS SIM STEP (tools only — inert in normal play) --------------
@@ -462,6 +549,11 @@
      `micro.elapsed` advances, because cooldowns and phases are read off it. */
   micro.stepSim = function (dt) {
     dt = dt > 0 ? dt : 1 / 60;
+    /* A HAND-DRIVEN STEP IS ALWAYS THE DRAWN ONE. Tools call this in a burst
+       and then screenshot; a presentation hook that gates on micro.drawing
+       would otherwise never run in any headless capture. */
+    micro.subCount = 1; micro.subIndex = 0; micro.drawing = true;
+    micro.frameDt = dt; micro.simDt = dt;
     if (bridgeDirty) {
       bridgeDirty = false;
       CBZ.always.sort(function (a, b) { return a.order - b.order; });

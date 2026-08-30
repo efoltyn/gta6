@@ -1259,6 +1259,8 @@
     M.over = true; M.live = false;
     M.winner = winner; M.why = why;
     if (timer) { clearInterval(timer); timer = 0; }
+    // the shared clock is over; the speed slider is the player's again
+    if (W.clock && W.clock.release) W.clock.release("MATCH");
     if (W.territory && W.territory.autoWar) { try { W.territory.autoWar(true); } catch (e) {} }
     if (isHost()) send("wlmend", { win: winner, why: why });
     note("end", (winner ? wlName(winner) : "NOBODY") + " wins — " + why);
@@ -1379,6 +1381,37 @@
   function begin(o) {
     o = o || {};
     M.live = true; M.over = false;
+    /* ============ THE SPEED SLIDER STOPS AT THE EDGE OF A MATCH ============
+       games/warlord.html ships a game-speed control that runs the island up
+       to 64x, and it is genuinely useful — you stand still and the world
+       comes to you. It has no honest meaning here and the refusal is the
+       feature, not a missing one.
+
+       The clock above is `matchT = (Date.now() - T0) / 1000` and the header
+       of this file spends forty lines on why. Seven warlords ride one island
+       against ONE clock; T0 is eased toward the host's opinion so two
+       machines converge rather than step. There is no version of "I run time
+       at 8x" that does not mean one of two things: either every rule in here
+       (income, AI cadence, the battle deadline, the twenty-minute victory
+       check) is integrated against a number the other six do not have — an
+       instant, silent, unrecoverable desync — or the local presentation runs
+       fast over a match that does not, which is a lie drawn at 60 fps.
+
+       The third option, a HOST-AUTHORITATIVE shared scale, was considered and
+       is genuinely buildable: warp T0 on the host and ship the scale on
+       wlmsync. It was rejected for this pass because matchT is deliberately
+       derivable from Date.now() and nothing else — that is the property that
+       survives a hidden tab, a 90-second battle and a late joiner — and a
+       shared scale makes it derivable only from Date.now() PLUS a replayed
+       history of every scale change. That is the accumulator this file
+       already refused, wearing a different hat.
+
+       So: core.js takes a HOLD and pins the scale at 1 for the life of the
+       match. The hold lives in the clock rather than in the slider's disabled
+       attribute because a disabled control is a suggestion and a clock that
+       refuses is a rule — nothing can set the scale while a match is up, not
+       the keyboard, not ?speed=, not the console. The readout says MATCH. */
+    if (W.clock && W.clock.hold) W.clock.hold("MATCH");
     M.seed = o.seed | 0 || (W.state.seed | 0) || 1337;
     M.len = o.len || MATCH_SEC;
     M.host = o.host !== false;

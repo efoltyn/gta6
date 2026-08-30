@@ -80,6 +80,32 @@ const SCREENS = [
   { id: "campaign", why: "riding — the HUD, the compass, the map button",
     set: `(async () => { return CBZ.warlord.phase() === "campaign"; })()` },
 
+  /* SECOND, AND BEFORE ANY MATCH IS OPENED. `encounter-in-match` below starts
+     a demo match, and a live match PINS the clock at 1x by design (match.js —
+     seven warlords share one wall clock), so this screen has to reach 64x
+     before that happens. It leaves the island fast-forwarding behind every
+     screen after it, which is harmless for a layout measurement and is also
+     free extra coverage of the pill at speed — the parties are calmed here so
+     nothing rides in and takes the phase mid-measurement. */
+  { id: "speed-max", why: "the game-speed pill at its widest — 64× with a lag tag",
+    set: `(async () => {
+      const W = CBZ.warlord;
+      if (!W.clock) return false;
+      W.setPhase("campaign");
+      for (let i = 0; i < W.state.bands.length; i++) W.state.bands[i].cooldown = 1e9;
+      W.clock.setScale(64);
+      const b = document.getElementById("wlSpeed"), t = document.getElementById("wlSpeedT");
+      /* THE TAG IS FORCED, not waited for: it appears only when the machine
+         is failing to deliver the asked-for rate, which is a property of the
+         machine and not something a layout gate may depend on. The layout
+         question is "does the pill still fit when it is carrying one", and
+         that is answerable without reproducing the condition. */
+      if (b) b.classList.add("lag");
+      if (t) { t.textContent = "19× REAL"; t.classList.add("on"); }
+      await new Promise(r => setTimeout(r, 200));
+      return !!(b && b.classList.contains("on"));
+    })()` },
+
   { id: "encounter", why: "the meeting rail: ATTACK / DEMAND / HIRE / INSPECT / RIDE AWAY",
     set: `(async () => {
       const W = CBZ.warlord;
@@ -149,7 +175,12 @@ const SCREENS = [
    a <button>, or something wearing one of this game's button classes. The
    hit test is the whole point — see rule 2 in the header. */
 const MEASURE = (safeT, safeB, safeL, safeR, minHit) => `(() => {
-  const SEL = "button, .wl-btn, .vbtn, .vtoggle, [role=button]";
+  /* A SLIDER IS A CONTROL. This list was buttons only, so games/warlord.html's
+     game-speed slider — a fixed layer at the top left, exactly where two
+     other fixed layers already live — was invisible to all four rules. A
+     range input is dragged by a thumb like everything else here and it is
+     just as coverable. */
+  const SEL = "button, .wl-btn, .vbtn, .vtoggle, [role=button], input[type=range]";
   const vw = window.innerWidth, vh = window.innerHeight;
   const out = [];
   const nodes = Array.prototype.slice.call(document.querySelectorAll(SEL));

@@ -148,6 +148,62 @@
   #hud b{font-size:15px;letter-spacing:.06em}
   #hud .chip{font-size:11px;letter-spacing:.16em;opacity:.75}
 
+  /* ---- THE SPEED CONTROL ----
+     OWNER: "a slider to speed up and slow down game speed going up to
+     insanely fast so you can basically not move and people come to you."
+
+     WHERE IT SITS, AND WHY THERE. Every corner of this game is already
+     spoken for: the HUD owns the top strip, wardrobe.js's FIT button the top
+     left at +52, campaign.js's MAP button and zoom pair the top right at +52
+     and +100, the compass the bottom centre, match.js's strip and the verb
+     rail the bottom edge. The one free block is the top LEFT under FIT, which
+     is the mirror of the zoom column — so the pill goes there, at the same
+     14 px inset off the same --wl-safe-* variables everything else on this
+     page uses, and at --z-camp because it IS campaign furniture.
+
+     IT IS A RANGE INPUT ON PURPOSE. A row of nine buttons is nine controls
+     for the fits gate to place on an iPhone SE; one slider is one control, it
+     is draggable with a thumb, it is the shape every strategy game has used
+     for this since Civilization, and the keyboard (, and .) drives the same
+     one number. 34 px tall because the gate's floor is 28 and a thumb is not
+     a mouse. The track is generous and the thumb is square so a finger can
+     find it without a hover state to help.
+
+     THE READOUT IS A CHIP, NOT AN EXPLANATION — tools/button-gate.mjs's whole
+     law. "64×" is the setting. A second muted tag appears only when there is
+     something true to say that the setting does not: MATCH when a live match
+     has pinned the clock (see match.js), or the achieved rate when the
+     machine cannot deliver what was asked for. */
+  #wlSpeed{position:fixed;z-index:var(--z-camp);display:none;align-items:center;gap:9px;
+    left:calc(var(--wl-safe-l) + 14px);top:calc(var(--wl-safe-t) + 104px);
+    padding:5px 11px 5px 9px;border-radius:13px;
+    background:rgba(12,9,5,.62);border:1px solid rgba(255,255,255,.2)}
+  #wlSpeed.on{display:flex}
+  #wlSpeed input[type=range]{appearance:none;-webkit-appearance:none;
+    width:126px;height:34px;margin:0;background:none;cursor:pointer;display:block}
+  #wlSpeed input[type=range]::-webkit-slider-runnable-track{height:5px;border-radius:3px;
+    background:rgba(255,255,255,.22)}
+  #wlSpeed input[type=range]::-moz-range-track{height:5px;border-radius:3px;
+    background:rgba(255,255,255,.22)}
+  #wlSpeed input[type=range]::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;
+    width:16px;height:22px;margin-top:-8.5px;border-radius:5px;background:var(--hot);
+    border:1px solid rgba(0,0,0,.45)}
+  #wlSpeed input[type=range]::-moz-range-thumb{width:16px;height:22px;border-radius:5px;
+    background:var(--hot);border:1px solid rgba(0,0,0,.45)}
+  #wlSpeed input[type=range]:disabled{opacity:.35;cursor:not-allowed}
+  #wlSpeedV{font:700 13px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.08em;
+    font-variant-numeric:tabular-nums;min-width:34px;text-align:right}
+  #wlSpeed.fast #wlSpeedV{color:var(--hot)}
+  #wlSpeed.slow #wlSpeedV{color:var(--steel)}
+  #wlSpeedT{font:700 9px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.16em;
+    opacity:.55;display:none}
+  #wlSpeedT.on{display:block}
+  #wlSpeed.lag #wlSpeedT{opacity:.9;color:var(--gold)}
+  /* A PHONE IN LANDSCAPE IS 393 px TALL and the pill would sit 104 px into
+     it beside a right-hand verb column; it still fits, but the track does not
+     need to be desktop-wide to be draggable there. */
+  @media (max-height:520px){#wlSpeed input[type=range]{width:104px}}
+
   /* ---- THE VERB RAIL — what replaced the pop-up screens ----
      A game that never pauses cannot have a modal in it. You can be mid-menu
      and get attacked, and there is nothing in reality that stops the world
@@ -163,9 +219,20 @@
      ATTACK / DEMAND / RIDE AWAY and the encounter could not be answered at
      all. The rail now docks above whatever that bar currently is, and 0px
      when there is no match. */
+  /* THE TOP OF THE RAIL'S COLUMN CLEARS THE SPEED PILL, and it had to be
+     measured to be believed: on an iPhone SE in a live match the footer is
+     ~110 px, the roster body is capped at 34vh, and the whole column grew
+     upward until its header sat at y=128 — directly on top of the slider at
+     y=130. tools/warlord-fits.mjs's hit test caught it on exactly one of
+     seven frames, which is the entire reason that test is a hit test and not
+     a bounding box. 158 px is the pill's own bottom edge plus a gap; the body
+     inside the rail is a flex child that shrinks and scrolls, so the cost is
+     a shorter roster window on the smallest phone and nothing else. The two
+     column layouts below put the rail on the right, where it never shares a
+     column with the pill, and they take the 46 px back. */
   #verbs{position:fixed;left:0;right:0;z-index:var(--z-verbs);display:none;
     bottom:calc(var(--wl-safe-b) + var(--wl-footer) + 14px);
-    top:calc(var(--wl-safe-t) + 46px);
+    top:calc(var(--wl-safe-t) + 158px);
     padding:0 calc(var(--wl-safe-r) + 12px) 0 calc(var(--wl-safe-l) + 12px);
     pointer-events:none}
   /* THE RAIL IS A FLEX COLUMN PINNED TO THE BOTTOM OF WHAT IS LEFT, not a
@@ -241,6 +308,7 @@
      Height is the constraint there, not width. */
   @media (min-width:900px), (min-width:600px) and (max-height:520px){
     #verbs{left:auto;right:0;width:clamp(300px,34vw,400px);
+      top:calc(var(--wl-safe-t) + 46px);
       padding:0 calc(var(--wl-safe-r) + 18px) 0 18px}
     #verbs .vin{max-width:none;margin:0}
     #verbs .vbody{max-height:min(58vh,540px)}
@@ -299,7 +367,13 @@
      rule they all have to remember is a rule one of them will not. */
   body.wl-screen #wlCampHud,
   body.wl-screen #wlWardBtn,
+  body.wl-screen #wlSpeed,
   body.wl-screen #verbs{display:none !important}
+  /* #wlSpeed is in that list and #hud carries the truth instead: the speed
+     chip in the strip is the ONE thing that follows you into the armoury,
+     because at 8x a screen is not a stop — it is eight times the wages. The
+     slider itself would land on top of the map's own controls at that exact
+     coordinate, and the keyboard (, .) still reaches it from a screen. */
   /* #wl-match deliberately STAYS. The whole design is that the clock never
      pauses, so hiding the countdown behind the armoury would be the interface
      telling the player the lie the engine refuses to tell. #stage pads its
@@ -325,6 +399,11 @@
   <div id="bootst">OPENING THE STUDIO</div>
 </div>
 <div id="hud"></div>
+<div id="wlSpeed">
+  <input id="wlSpeedR" type="range" min="0" max="8" step="1" value="2" aria-label="GAME SPEED">
+  <b id="wlSpeedV">1×</b>
+  <span id="wlSpeedT"></span>
+</div>
 <div id="stage"></div>
 <div id="verbs"></div>
 <div id="toasts"></div>
@@ -597,18 +676,160 @@ function start() {
     const show = p === "campaign" || p === "encounter" || p === "outpost" || p === "armoury";
     h.classList.toggle("on", show);
     if (!show) return;
+    const C = W.clock;
     h.innerHTML =
       '<b>' + (S.army.length + 1) + ' MEN</b>' +
       '<span class="chip wl-gold">$' + S.gold + '</span>' +
       '<span class="chip">DAY ' + S.day + '</span>' +
       '<span class="chip wl-dim">-$' + W.payroll() + '/DAY</span>' +
-      (S.prisoners.length ? '<span class="chip">' + S.prisoners.length + ' PRISONERS</span>' : '');
+      (S.prisoners.length ? '<span class="chip">' + S.prisoners.length + ' PRISONERS</span>' : '') +
+      /* THE ONE THING THAT OUTRANKS A SCREEN. The slider is campaign
+         furniture and hides under the armoury; this chip does not, because a
+         day at 8x costs eight days of wages while you are reading a roster
+         and the strip is where DAY and -$/DAY already are. Absent at 1x on
+         purpose: a readout that is always there is furniture, and a readout
+         that appears only when something is true is information. */
+      (C.scale() !== 1 ? '<span class="chip" style="color:var(--hot)">' + C.label() + '</span>' : '');
   }
   W.on("phase", paintHud);
   W.on("army", paintHud);
   W.on("gold", paintHud);
   W.on("dawn", paintHud);
+  W.on("clock", paintHud);
   ctx.paintHud = paintHud;
+
+  /* ============================================================ THE SPEED
+     THE SLIDER, THE KEYBOARD, AND THE LOOP THAT OBEYS THEM.
+
+     THREE THINGS HAD TO BE TRUE BEFORE A SLIDER COULD EXIST, and none of them
+     is the slider.
+
+     1. A BIG dt IS NOT MANY SMALL ONES. Handing the frame's dt × 64 to the
+        world is how a man walks through a mesa and how two men resolve out
+        of each other in the wrong direction. So core/microboot.js's tick()
+        now splits the frame into SUBSTEPS of at most W.clock.MAX_STEP and
+        runs the whole hook chain once per substep. Nothing downstream was
+        told about the speed at all; every integrator still gets a step the
+        size it was tuned against. 1/30 s is finer than the clamp every one
+        of them already imposes on itself.
+
+     2. THREE FILES KEPT THEIR OWN CLOCK. campaign.js's worldTick (the day,
+        the wages, every band walking), battle.js's frame and events.js's
+        weather all read performance.now() directly and threw the loop's dt
+        away — deliberately, so a slow machine would not run the world in
+        slow motion. Multiplying a dt they do not read would have moved
+        nothing the owner asked to see. All three now ask W.clock.now(),
+        which is the same monotonic millisecond count with the speed in it.
+
+     3. A SLOW MACHINE MUST FALL BEHIND, NOT FREEZE. Substepping is unbounded
+        work per frame, so the loop carries a wall budget (BUDGET_MS) and
+        stops substepping when it is spent. That is why the readout reports
+        the ACHIEVED rate as well as the asked-for one: at 64x on a laptop
+        with three hundred men in a battle the honest answer is not 64.
+
+     THE PLAYER STANDING STILL IS THE POINT. He does not need sixty rendered
+     frames of not walking; he needs the island to have moved. So the frame
+     still draws exactly once — the substeps are the world advancing, not
+     sixty-four pictures of it. */
+  (function speedControl() {
+    const C = W.clock;
+    const box = el("wlSpeed"), slider = el("wlSpeedR"),
+          val = el("wlSpeedV"), tag = el("wlSpeedT");
+    if (!box || !slider) return;
+
+    /* ONE CLOCK, ASKED — NOT COPIED. The loop does not hold a scale of its
+       own that something has to remember to keep in step; it holds a
+       reference to the function that owns the number. There is exactly one
+       time scale in this game and it lives in core.js. */
+    CBZ.micro.simClock = C.now;
+    CBZ.micro.maxStep = C.MAX_STEP;
+    CBZ.micro.maxSubsteps = C.MAX_SUB;
+    CBZ.micro.stepBudgetMs = C.BUDGET_MS;
+
+    slider.max = String(C.SPEEDS.length - 1);
+    slider.value = String(C.index());
+
+    function paint() {
+      /* A HOLD OUTLIVING ITS REASON IS A CONTROL THAT NEVER COMES BACK. The
+         match takes the hold in begin() and drops it in end(); if a match is
+         neither live nor over the hold is stale, so it is re-derived here
+         rather than trusted. */
+      if (C.heldFor() === "MATCH" && W.match && W.match.live &&
+          !W.match.live() && !(W.matchState && W.matchState.over)) C.release("MATCH");
+      const held = C.heldFor();
+      const s = C.scale();
+      slider.disabled = !!held;
+      if (slider.value !== String(C.index())) slider.value = String(C.index());
+      val.textContent = C.label();
+      box.classList.toggle("fast", s > 1);
+      box.classList.toggle("slow", s < 1);
+      /* THE SECOND TAG ONLY SAYS THINGS THE FIRST ONE CANNOT. Held: name the
+         holder. Falling behind by more than a fifth: name the real rate. */
+      const ach = C.achieved();
+      const lag = !held && s > 1 && ach < s * 0.8;
+      box.classList.toggle("lag", lag);
+      const t = held ? held : lag ? C.label(Math.max(1, Math.round(ach))) + " REAL" : "";
+      tag.textContent = t;
+      tag.classList.toggle("on", !!t);
+    }
+
+    slider.addEventListener("input", function () { C.setIndex(+slider.value); });
+    /* A DRAG ON THE TRACK MUST NOT ALSO BE A CLICK ON THE GROUND. The
+       campaign reads pointerdown on the window to set a ride destination, so
+       without this every speed change also ordered the warlord to walk into
+       the sea. */
+    ["pointerdown", "pointerup", "click", "touchstart"].forEach(function (e) {
+      box.addEventListener(e, function (ev) { ev.stopPropagation(); }, true);
+    });
+
+    /* THE KEYBOARD IS THE SAME ONE NUMBER. , and . are the < and > keys —
+       the marks every media transport in the world uses for slower and
+       faster — and 0 is the way back to real time. Digits 1-5 belong to the
+       verb rail and 1-4 to battle orders, so 0 is the only digit free.
+       Ignored while something is being typed into, because the multiplayer
+       lobby has a name field. */
+    window.addEventListener("keydown", function (e) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA") && t !== slider) return;
+      if (e.code === "Comma") { e.preventDefault(); C.nudge(-1); }
+      else if (e.code === "Period") { e.preventDefault(); C.nudge(1); }
+      else if (e.code === "Digit0") { e.preventDefault(); C.setScale(1); }
+    });
+
+    W.on("clock", paint);
+    W.on("phase", function () {
+      const p = W.phase();
+      box.classList.toggle("on",
+        p === "campaign" || p === "encounter" || p === "outpost" || p === "armoury");
+      paint();
+    });
+
+    /* THE LOOP REPORTS WHAT IT ACTUALLY DELIVERED, once per drawn frame.
+       Order 1000 is after everything including feel.js's mixer at 900, so
+       micro.simDt is final. */
+    /* THE ACHIEVED RATE IS MEASURED AGAINST THE UNCLAMPED WALL CLOCK, and it
+       had to be told to: micro.frameDt is clamped at 0.1 s (a backgrounded
+       tab must not hand a hook forty seconds), so on a 10 fps machine a
+       230 ms frame reported 100 ms and the readout claimed the loop was
+       running at 2.3x while sitting at 1x. The ratio is game seconds
+       delivered over REAL seconds spent, and nothing in the middle may
+       protect either number. */
+    let paintN = 0, lastWall = 0;
+    CBZ.micro.onFrame(function () {
+      if (!CBZ.micro.drawing) return;
+      const w = C.wall();
+      if (lastWall) C.deliver(CBZ.micro.simDt, (w - lastWall) / 1000);
+      lastWall = w;
+      if (++paintN % 15 === 0) paint();
+    }, { order: 1000, id: "warlord-speed" });
+
+    /* ?speed=N boots straight into a rate. Every tool that measures this
+       feature needs to state it in a URL rather than reach into the page. */
+    const q = parseFloat(Q.get("speed"));
+    if (q > 0) C.setScale(q);
+    paint();
+  })();
 
   /* ---- the stage helper every screen uses instead of touching innerHTML ---- */
   /* ONE OWNER OF THE SCREEN, ENFORCED HERE INSTEAD OF REMEMBERED EVERYWHERE.

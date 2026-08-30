@@ -931,7 +931,13 @@
     root.add(oasisWater);
     const palms = makePalms();
     if (palms) root.add(palms);
-    scCX = scCZ = NaN;
+    /* (e8f2040 deleted the scatter system and left `scCX = scCZ = NaN;` here.
+        Both declarations went with the system, this file is "use strict", and
+        assigning to an undeclared name in strict mode THROWS — so build()
+        died on this line and games/warlord.html has raised no island at all
+        since that commit. Nothing rendered, so nothing looked wrong; the tell
+        was a ReferenceError in the console of a page whose screenshots were
+        all of a boot screen.) */
     CBZ.scene.add(root);
     built = true; visible = true;
 
