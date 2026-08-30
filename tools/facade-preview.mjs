@@ -18,12 +18,20 @@
      node tools/facade-preview.mjs mastaba minoan --subject block
      node tools/facade-preview.mjs shikhara --subject tower --out /tmp/s.png
 
-   Prints the same metrics the catalogue plates carry, plus SOLID — how many
-   colliders THE FACADE ITSELF added, over a bare-shell baseline raised in the
-   same session. The catalogue cannot show it (CBZ.facadeStudio unwinds
-   colliders after every raise) and a raw count would be useless anyway: it is
-   mostly the shell's own walls and panes. SOLID=0 means every column, post
-   and pier that grammar draws is a ghost you walk through.
+   Prints the same metrics the catalogue plates carry, plus two counts the
+   catalogue cannot show (CBZ.facadeStudio unwinds colliders after every raise,
+   so they are gathered by intercepting the push):
+
+     SOLID  colliders the FACADE itself made, counted by their ref === null
+            signature — buildings.js mints an sbox collider refless on purpose
+            because the box has no mesh of its own. SOLID=0 means every column,
+            post and pier that grammar draws is a ghost you walk through.
+     wall   the building's TOTAL collider count, which is mostly the shell.
+            Expect it to FALL sharply under wall:"own" — that mode deletes
+            ~130 small glass-pane colliders and replaces them with a handful of
+            big solid wall boxes carrying {solid,los}. Fewer records, same
+            solidity. Watching the delta instead of the refless count is how
+            you talk yourself into thinking a solid wall went missing.
 
    KNOWN DUPLICATION: the studio harness and the corner-fit camera are also in
    tools/facade-catalog.mjs. They were copied rather than shared because that
@@ -192,10 +200,24 @@ const HARNESS = String.raw`(() => {
     // raise (facade_demo.js), so the count cannot be read afterwards —
     // intercept the push instead. This is the number that says whether a
     // facade's ornament is solid or whether the player runs through it.
-    let colliders = 0, platforms = 0;
+    let colliders = 0, platforms = 0, sboxes = 0;
     const cPush = CBZ.colliders.push.bind(CBZ.colliders);
     const pPush = CBZ.platforms.push.bind(CBZ.platforms);
-    CBZ.colliders.push = function () { colliders += arguments.length; return cPush.apply(null, arguments); };
+    CBZ.colliders.push = function () {
+      colliders += arguments.length;
+      // An sbox collider is minted with ref === null on purpose (buildings.js
+      // says so where it builds one: the box has no mesh of its own). That is
+      // the exact signature of "the FACADE made this solid", and it is the
+      // only honest way to count it — a before/after delta cannot, because
+      // wall:"own" also deletes ~130 glass-pane colliders and replaces them
+      // with a handful of big solid wall boxes, which reads as a NEGATIVE
+      // facade contribution while the wall is in fact just as solid.
+      for (let i = 0; i < arguments.length; i++) {
+        const c = arguments[i];
+        if (c && c.ref === null) sboxes++;
+      }
+      return cPush.apply(null, arguments);
+    };
     CBZ.platforms.push = function () { platforms += arguments.length; return pPush.apply(null, arguments); };
     let err = null, g;
     try { g = CBZ.facadeStudio(style, { subject: subject }); }
@@ -233,7 +255,7 @@ const HARNESS = String.raw`(() => {
     });
     if (pad) pad.visible = true;
     const c = box.getCenter(new T.Vector3()), sz = box.getSize(new T.Vector3());
-    return { error: err, colliders: colliders, platforms: platforms,
+    return { error: err, colliders: colliders, platforms: platforms, sboxes: sboxes,
       crownM: Math.round(Math.max(0, top - shellTop) * 10) / 10,
       roofTopM: Math.round(top * 10) / 10,
       decoBoxes: Math.round(decoBoxes), realMeshes: realMeshes, triangles: Math.round(tris),
@@ -371,7 +393,6 @@ async function main() {
     await evaluate(`CBZ.CONFIG.FACADE_KIT_CITY = true`);
     const m = JSON.parse(await evaluate(
       `JSON.stringify(window.__fp.raise(${JSON.stringify(id)}, ${JSON.stringify(subject)}))`));
-    m.facadeColliders = m.colliders - bare.colliders;
     m.facadePlats = m.platforms - bare.platforms;
     if (m.error) { console.error(`!! ${id} THREW: ${m.error}`); bad++; }
     const B = m.box;
@@ -387,11 +408,11 @@ async function main() {
       `window.__fp.sheet(window.__fp._u, ${JSON.stringify(id + "  —  three-quarter · pavement · rear")})`);
     const out = typeof opt.out === "string" ? opt.out : path.join(outDir, `preview-${id}.jpg`);
     await writeFile(out, Buffer.from(sheet.split(",")[1], "base64"));
-    console.log(`${id.padEnd(14)} ${famName.padEnd(6)} SOLID=${String(m.facadeColliders).padStart(3)} walk=${String(m.facadePlats).padStart(2)}` +
+    console.log(`${id.padEnd(14)} ${famName.padEnd(6)} SOLID=${String(m.sboxes).padStart(3)} wall=${String(m.colliders).padStart(3)} walk=${String(m.facadePlats).padStart(2)}` +
       `  crown=+${m.crownM}m top=${m.roofTopM}m  deco=${m.decoBoxes} minted=${m.realMeshes} tris=${m.triangles}`);
     console.log(`  -> ${out}`);
     if (m.realMeshes > 40) console.error(`  !! ${m.realMeshes} minted meshes — the kit's budget is about 40. Use boxes.`);
-    if (m.facadeColliders === 0) console.error(
+    if (m.sboxes === 0) console.error(
       `  !! this facade added 0 colliders — every column, post and pier it draws can be walked through.` +
       ` Emit load-bearing masses with ctx.sbox (falls back to ctx.dbox).`);
   }

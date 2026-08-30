@@ -3281,23 +3281,61 @@
     if (MASONRY_ON && !opts.facade && !opts.retail && !opts.showroom && !opts.office
         && !opts.garageGround && !opts.boarded && storeys <= 5
         && CBZ.hash01 && CBZ.hash01(ox, oz, 0xb21f) < 0.45) FACADE = "brick";
-    const punched = FACADE === "brick";
+    // ---- WHO OWNS THE ROOF, AND WHO OWNS THE WALL PLANE -------------------
+    // Two questions, both the facade kit's, both answerable ONLY here — the
+    // shell commits to its roofline and to its entire window wall hundreds of
+    // lines below, long before dressFacade() runs, and a grammar cannot
+    // un-build either one after the fact. Both go through the SAME resolve()
+    // inside facade_kit.js off the SAME position-hash closure, so they can
+    // never disagree about which grammar this building is wearing.
+    //
+    // ROOF: a dome, a minaret or a mansard must not have the host's own spire
+    // growing up through it.
+    //
+    // WALL: the owner's complaint, verbatim — "CHICAGO LOFT SHOWS WINDOWS I
+    // LOVE THAT BUT SOME MIGHT NOT WANT TO SHOW THE WINDOWS." The glazing
+    // band, sill, header, mullions, panes and the furnished lit room behind
+    // them are all built in the storey loop below, so every grammar inherited
+    // an office window wall whether or not its culture had glass. `wall:` on
+    // registerFacade lets a grammar say so BEFORE the wall exists.
+    const facadeHash = function (salt) { return CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42; };
+    const facadeTakesRoof = !!(CBZ.facadeCrownsRoof && CBZ.facadeCrownsRoof(
+      opts.dress || null, facadeHash, storeys));
+    const facadeWall = CBZ.facadeWallMode
+      ? CBZ.facadeWallMode(opts.dress || null, facadeHash, storeys) : "keep";
+    /* THE WALL PLANE, DECIDED ONCE. `punched` was `FACADE === "brick"` — a
+       hardcoded name test that answered exactly this question for exactly one
+       archetype. It is FOLDED IN here rather than left running beside the new
+       flag: the brick archetype is simply a shell that declares "frame", the
+       same word a grammar declares, and one variable comes out the far end.
+         "frame"  smaller openings on the masonry/residential rhythm — piers
+                  between real punched holes with the lit room behind them.
+         "own"    solid wall, no glazing at all. The grammar draws whatever
+                  openings its culture actually has, or none. The DOOR is
+                  still built, in every mode.
+         "keep"   the office curtain-wall band. Default, and unchanged.
+       A grammar that declares nothing resolves to "keep", which leaves the
+       archetype's own answer standing — so every facade written before the
+       flag renders exactly as it did. */
+    const wallMode = facadeWall !== "keep" ? facadeWall
+      : (FACADE === "brick" ? "frame" : "keep");
+    const punched = wallMode === "frame";   // masonry/residential window rhythm
+    const wallOwn = wallMode === "own";     // shell emits solid wall; the facade opens it
     const civicF = FACADE === "civic";
     const fortified = FACADE === "fortified";
-    const MASONRY = punched || civicF || fortified;
+    /* WHAT THE SHELL IS MADE OF stays an ARCHETYPE question and not a wall-mode
+       one. The masonry palette, the veneer tiles and the ghost sign describe a
+       brick or stone BUILDING; a grammar that merely wants punched openings is
+       not asking to be repainted in a city brick colourway (it brings its own)
+       nor to be given a 1920s painted advert. So this reads FACADE directly,
+       where `punched` used to stand — identical value for every archetype, now
+       independent of who asked for the openings. */
+    const MASONRY = FACADE === "brick" || civicF || fortified;
     // MASONRY PALETTE — a SMALL fixed colourway set (world/textures_masonry.js)
     // deliberately shared city-wide so the flat structural walls still bucket
     // together for core/batch.js. Position-hashed pick (never rng), so lot #23's
     // brick colour is decidable without building lots 0..22.
     const civicSpec = opts.civic || null;
-    // FACADE KIT: does the requested facade crown the roof? This has to be
-    // answered HERE, before the roofline code below, because the shell decides
-    // its own setback crown and corner finials long before dressFacade() runs.
-    // A dome, a minaret, a mansard or a setback tower must not have the host's
-    // own spire growing up through it.
-    const facadeTakesRoof = !!(CBZ.facadeCrownsRoof && CBZ.facadeCrownsRoof(
-      opts.dress || null,
-      function (salt) { return CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42; }, storeys));
     let MPAL = null;
     if (MASONRY && CBZ.masonryPalette) {
       // ashlar STONE for the monumental trades; the humbler civic kinds that
@@ -3350,6 +3388,139 @@
       if (!arr) { arr = []; decoGeos.set(col, arr); }
       arr.push(g);
     }
+    /* ---- sbox — DECO YOU CANNOT WALK THROUGH ------------------------------
+       OWNER (verbatim): "beautiful simple facades should all have colliders
+       and not be able to just run thru them."
+
+       He is right, and it was total: across the 31 grammars in city/facades/
+       there are ~297 `ctx.dbox` calls and ZERO `ctx.lbox` calls. dbox (just
+       above) only pushes geometry into the merged deco buckets — no mesh, no
+       collider, ever — so every colonnade, portico, gallery, buttress, portal
+       jamb and minaret in the kit was thin air you jogged through.
+
+       WHY NOT JUST USE lbox. lbox mints an INDIVIDUAL MESH per call. That is
+       what makes it able to carry a collider, and it is also why it must not
+       be the answer here: property 4 of the kit (see the facade_kit.js header)
+       is that a dressed building costs the same DRAW CALLS as a bare one, and
+       a Chicago Loft alone emits 1,452 deco boxes. Routing those through lbox
+       would put well over a thousand meshes on one building. Do not "fix" this
+       back to lbox.
+
+       THE FACT THAT MAKES THIS CHEAP: a collider is an AABB record pushed onto
+       CBZ.colliders. It costs ZERO draw calls — the only price is the
+       per-frame collision test, so what matters is the COUNT, not the
+       rendering. sbox therefore draws through the free merged path (dbox) and
+       pushes ONE collider record, in exactly the shape and into exactly the
+       two arrays lbox's `o.solid` branch uses (CBZ.colliders + the
+       building-local `cols`, so demolition can splice it back out).
+
+       THE COUNT DISCIPLINE, which is what keeps the idea affordable. A player
+       can only run into what is in the WALKABLE BAND, so a box that cannot be
+       walked into silently degrades to a plain dbox. Four gates, cheapest
+       first:
+         · SIZE — under SBOX_MIN in BOTH horizontal axes: dentils, mouldings,
+           tile courses, beads. Not an obstacle, just a collision test.
+         · DEPTH — it does not stand SBOX_PROUD past the shell's own wall
+           plane. Surface relief (string courses, casings, spandrel panels,
+           flush pier faces) is backed by a wall box that is already solid and
+           already stops you 0.3 m later, which nobody can feel. This is the
+           gate that does most of the work: on a Greek Revival house it takes
+           941 candidate boxes down to 31.
+         · HEIGHT — its underside more than SBOX_REACH above the nearest
+           walkable surface under it. A cornice at 12 m, a dome, a pediment, a
+           finial row, a fourth-floor pilaster: all free, automatically.
+         · KERB — its top within SBOX_STEP (physics.js's own STEP_UP) of that
+           surface. You walk up a plinth; a collider there would ring the
+           building with an invisible moat.
+       What is left is what you can actually walk into — column shafts, porch
+       posts, buttress bases, portal jambs, galleries. MEASURED, with every
+       single ornament box on the building routed through sbox (the worst case;
+       real adoption is per-call and far more selective): brick 9, greekrev 31,
+       mosque 39, intl 91, plantation 122, queenanne 147.
+
+       "NEAREST WALKABLE SURFACE" is read off the building's OWN platform
+       records (`plats`: the foundation, every floor slab, the stair ramps and
+       landings), falling back to ground level. Exterior ornament stands proud
+       of the wall, outside every slab footprint, so it measures from the
+       ground — correct: a colonnade is walkable-into and its cornice is not.
+       Ornament sitting ON the roof slab measures from the roof, which is also
+       correct, because the roof is somewhere you stand.
+
+       ref IS NULL, DELIBERATELY. This box has no mesh of its own — its
+       triangles live inside a merged bucket shared with every other box of the
+       same colour, and hiding one is not possible. Every consumer that wants a
+       mesh (carveHole, fracture, crashfx, batch's carveable set) already skips
+       a refless collider on its first line, so an sbox is a movement blocker
+       and nothing else: explosions carve the shell's real walls, not the
+       ornament hung on them. */
+    let dressCtx = null;       // this building's ctxC, once it exists (see sbox)
+    const SBOX_REACH = 2.6;    // m above a walkable surface a body can still meet
+    const SBOX_MIN = 0.35;     // m — under this in BOTH horizontal axes it is trim
+    const SBOX_STEP = 0.45;    // m — physics.js STEP_UP: this is a kerb, you walk up it
+    const SBOX_PROUD = 0.30;   // m — less than this off the wall plane is surface relief
+    function sboxWalkTop(wx, wz, y0) {
+      let best = 0;                                   // ground, always walkable
+      for (let i = 0; i < plats.length; i++) {
+        const p = plats[i];
+        if (p.top <= best || p.top > y0 + 0.05) continue;
+        if (wx < p.minX || wx > p.maxX || wz < p.minZ || wz > p.maxZ) continue;
+        best = p.top;
+      }
+      return best;
+    }
+    /* THE DOORWAY IS NEVER BLOCKED. facade_kit.js's dressFacade CARVES the
+       doorway out of any box a grammar lays across it — but it carves the
+       DRAWING, and a collider is not drawing. An sbox run of plinth or a
+       portico's stylobate crossing the entrance would therefore wall the
+       player out of a building they can see the open door of, which breaks
+       interiors, pednav and the mission layer. So a box standing in the
+       doorway keeps its geometry and loses its collider. Only boxes low
+       enough to matter are tested: anything clearing the door head is
+       something you walk UNDER. */
+    function sboxAtDoor(lx, ly, lz, bw, bh, bd) {
+      if (ly - bh / 2 > DOORH + 0.2) return false;
+      const dx = lx - localDoor.x, dz = lz - localDoor.z;
+      const inward = dx * localDoor.nx + dz * localDoor.nz;   // along the door's normal
+      const cross = dx * localDoor.nz - dz * localDoor.nx;    // across the opening
+      // nx/nz are axis-aligned, so these projections of the AABB are exact
+      const halfIn = Math.abs(localDoor.nx) * bw / 2 + Math.abs(localDoor.nz) * bd / 2;
+      const halfCr = Math.abs(localDoor.nz) * bw / 2 + Math.abs(localDoor.nx) * bd / 2;
+      return Math.abs(inward) - halfIn < 1.8 && Math.abs(cross) - halfCr < DOORW / 2 + 0.35;
+    }
+    function sbox(lx, ly, lz, bw, bh, bd, col) {
+      /* DRAW THROUGH WHATEVER dbox IS RIGHT NOW. During a facade's build,
+         dressFacade swaps ctx.dbox for the doorway-carving wrapper and puts
+         the real one back afterwards. An sbox that called the raw dbox would
+         be the one emitter in the building that draws straight across the
+         entrance. `dressCtx` is this building's own ctxC, so the box takes
+         exactly the path a ctx.dbox call would. */
+      const emit = (dressCtx && dressCtx.dbox) || dbox;
+      emit(lx, ly, lz, bw, bh, bd, col);              // drawn exactly like a dbox, always
+      if (bw < SBOX_MIN && bd < SBOX_MIN) return;     // trim: nothing to run into
+      const y0 = ly - bh / 2, y1 = ly + bh / 2;
+      /* CLADDING IS NOT AN OBSTACLE. A box that does not stand proud of the
+         shell's own wall plane — siding courses, flush casings, muntins,
+         panel infill, the great majority of what a grammar emits — is backed
+         by a wall box that is already solid and already stops you. Only what
+         projects past the envelope can be walked into. Above the roofline the
+         rule is off: a box inside the footprint up there stands on the roof
+         deck, which is somewhere you walk. */
+      if (y1 <= rTop && Math.abs(lx) + bw / 2 <= w / 2 + SBOX_PROUD
+          && Math.abs(lz) + bd / 2 <= d / 2 + SBOX_PROUD) return;
+      // A KERB IS NOT A WALL. Under physics.js's STEP_UP you walk up it, and a
+      // collider here would be a moat around the building instead of a plinth.
+      if (y1 <= SBOX_STEP) return;
+      // ground settles the reach test outright; only a HIGH box is worth a scan
+      if (y0 > SBOX_REACH) {
+        const base = sboxWalkTop(ox + lx, oz + lz, y0);
+        if (y0 - base > SBOX_REACH) return;         // over head height: free
+        if (y1 - base <= SBOX_STEP) return;         // a kerb on that surface
+      }
+      if (sboxAtDoor(lx, ly, lz, bw, bh, bd)) return;
+      const c = { minX: ox + lx - bw / 2, maxX: ox + lx + bw / 2, minZ: oz + lz - bd / 2, maxZ: oz + lz + bd / 2, ref: null, y0: y0, y1: y1 };
+      CBZ.colliders.push(c); cols.push(c);
+    }
+
     function flushDeco() {
       const BGU = THREE.BufferGeometryUtils;
       decoGeos.forEach(function (geos, col) {
@@ -3578,7 +3749,11 @@
         // The OLD `side*0.86` shrink left a see-through strip at BOTH the door and
         // the corner (owner-filmed gaps); span the full `side` to seal them.
         const side = (w - DOORW) / 2 - 0.7;                   // glass span each side of the door gap
-        if (side > 1.0) {
+        // WALL MODE "own": a grammar with no glass in its culture does not get
+        // a plate-glass shopfront either. It keeps its door, its header and its
+        // corner posts and takes the solid-flank path below — the same one a
+        // too-narrow front already takes, so the corner still reads closed.
+        if (!wallOwn && side > 1.0) {
           const fcx = -(DOORW / 2 + side / 2), fcx2 = DOORW / 2 + side / 2;
           for (const fc of [fcx, fcx2]) {
             gridGlass(fc, gy, zz + goff, side, gph, 0.05, true, { solid: true, tint: tintIdx, kind: "clear", role: "storefront" });
@@ -3600,7 +3775,7 @@
         const osn = (f.s === 2 ? -1 : 1);
         const goff = osn * (WT / 2 + 0.06);
         const side = (d - DOORW) / 2 - 0.7;
-        if (side > 1.0) {
+        if (!wallOwn && side > 1.0) {          // "own" → solid flanks (see the ±z face)
           const fcz = -(DOORW / 2 + side / 2), fcz2 = DOORW / 2 + side / 2;
           for (const fc of [fcz, fcz2]) {
             gridGlass(xx + goff, gy, fc, side, gph, 0.05, false, { solid: true, tint: tintIdx, kind: "clear", role: "storefront" });
@@ -3693,8 +3868,14 @@
             const winY0 = ly - FH / 2 + sillH, winY1 = ly + FH / 2 - hdrH;
             const winCy = (winY0 + winY1) / 2, winPh = winY1 - winY0;
             const ostreet = (f.s === 0 ? -1 : 1);
+            // WALL MODE "own": no glass anywhere on this shell, so each flank
+            // beside the door is one solid wall box — the same box the
+            // too-narrow case already builds, carrying wallOpt's collider +
+            // LOS. The DOOR ITSELF and its frame are built in EVERY mode: a
+            // building the player cannot enter breaks interiors, pednav and
+            // the mission layer, and no facade is worth that.
             for (const fc of [fcx, fcx2]) {
-              if (side <= 1.2) { lbox(fc, ly, f.z, side, FH, WT, color, wallOpt); continue; }   // too narrow to glaze
+              if (wallOwn || side <= 1.2) { lbox(fc, ly, f.z, side, FH, WT, color, wallOpt); continue; }   // too narrow to glaze
               const sgn = fc < 0 ? -1 : 1;                    // -1 = left flank
               lbox(fc, winY0 - sillH / 2, f.z, side, sillH, WT, color, wallOpt);   // sill
               lbox(fc, winY1 + hdrH / 2, f.z, side, hdrH, WT, color, wallOpt);     // header
@@ -3715,7 +3896,8 @@
             const winCy = (winY0 + winY1) / 2, winPh = winY1 - winY0;
             const ostreet = (f.s === 2 ? -1 : 1);
             for (const fc of [fcz, fcz2]) {
-              if (side <= 1.2) { lbox(f.x, ly, fc, WT, FH, side, color, wallOpt); continue; }
+              // "own" → solid flank (see the +/-z face above for why the door stays)
+              if (wallOwn || side <= 1.2) { lbox(f.x, ly, fc, WT, FH, side, color, wallOpt); continue; }
               const sgn = fc < 0 ? -1 : 1;
               lbox(f.x, winY0 - sillH / 2, fc, WT, sillH, side, color, wallOpt);
               lbox(f.x, winY1 + hdrH / 2, fc, WT, hdrH, side, color, wallOpt);
@@ -3779,6 +3961,32 @@
               }
             }
           }
+        } else if (wallOwn) {
+          /* ===== WALL MODE "own": SOLID WALL, NO GLAZING =====================
+             The grammar's culture has no glass — a mudbrick ziggurat, a Maya
+             temple, a Neolithic hut — so the shell hands it an unbroken wall
+             plane and gets out of the way. Whatever openings the culture
+             actually has are cut by the grammar itself in dressFacade().
+
+             THE COLLIDER, AND WHY THIS BOX CANNOT BE DECO. The branch below
+             says it outright: "the solid clear pane doubles as the height-
+             gated collider that used to be the wall box, so nobody falls out
+             an upper-floor window." This mode deletes that pane, so the wall
+             box has to take the job back — collider AND losBlocker, or players
+             fall out of every upper floor of every ancient building and cops
+             shoot through the walls. `wallOpt` is exactly {solid:true,
+             los:true}: the same pair every sill, header and pier carries, and
+             the box spans the full storey (k*FH .. k*FH+FH) so the height gate
+             covers the whole floor with no seam.
+
+             Everything downstream still works because nothing here is skipped
+             except the glass: the floor slabs and b.floorTops are built later
+             and untouched (elevators keep their stops), veneerBand's promise
+             that brick never crosses an opening is trivially kept when there
+             is no opening, and cityInteriorGlow / addCityGlass simply have
+             nothing to record for this face. */
+          if (f.horiz) lbox(0, ly, f.z, w, FH, f.dd, color, wallOpt);
+          else lbox(f.x, ly, 0, f.w, FH, d, color, wallOpt);
         } else {
           // REAL WINDOW OPENING — built like retailFront/showroomFront, but on
           // every storey: the wall is FRAMED (solid sill + header + jambs) around
@@ -4545,6 +4753,10 @@
         color, TRIM, BASE, PIL, MULL,
         hash: bhash,
         dbox: dbox,
+        // SAME BOX, PLUS A COLLIDER when it is something you could walk into.
+        // Draw-call identical to dbox (it calls it); see the long note on the
+        // function for the count discipline and for why this is not lbox.
+        sbox: sbox,
         lbox: lbox,
         /* PAINT THE DOOR. The shell hangs the leaf long before a facade runs,
            and it has no idea what palette that facade is about to put on the
@@ -4619,6 +4831,7 @@
           m.renderOrder = 3; bgroup.add(m);
         },
       };
+      dressCtx = ctxC;      // sbox draws through ctxC.dbox — see its note
       if (MASONRY) {
         // BRICK/STONE VENEER — the spandrel band under every storey's sills plus
         // the header band under each floor line (never the TOP one: the corbelled
