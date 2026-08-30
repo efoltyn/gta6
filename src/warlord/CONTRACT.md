@@ -44,12 +44,25 @@ closeScreen, paintHud, menu}`.
 | `encounter` | army.js | the fight/hire/demand card is up |
 | `battle` | battle.js | real 3D war, campaign hidden |
 | `aftermath` | army.js | dead counted, loot taken, prisoners decided |
-| `outpost` | outpost.js | trading |
+| ~~`outpost`~~ | — | **retired.** See below. |
 | `armoury` | loadout.js | assigning kit |
 
 `events.js` and `territory.js` take the screen without owning a phase — an
 event card and the strategic map are both things that happen *over* the
 campaign. They use `ctx.screen`/`ctx.closeScreen` and hand it straight back.
+
+**And so does trading.** `outpost.js` used to own an `outpost` phase, and the
+cost of that claim was the whole world: taking it fires `phase:leave:campaign`,
+campaign.js answers with `showAll(false)`, and the island, your column, every
+band, the outpost's own huts and the campaign HUD are all switched off. The
+owner met that as *"barren desert and man with a crate popup with no man
+there"* — the panel was talking about a trading post over a hidden world. A
+phase is a claim that one module owns the SCREEN; a docked verb rail does not
+own the screen, so it does not take one. `W.setPhase("outpost")` is called by
+nobody now (campaign.js still sets it one line before `W.outpost.open`, which
+hands it straight back) and the name survives only in core.js's enum for old
+save files. THE SAME IS TRUE OF `encounter`, which army.js still claims for a
+rail — it hides the band the card is about.
 
 ## The modules
 
