@@ -85,9 +85,6 @@
         for (let k = 0; k < ST; k++) F.band(ctx, f, k * FH + FH * 0.5, FH, 0.16, P.course(k * 3 + f.s), 0.3);
         for (const t of F.bayLines(f, F.bayCount(f, 4.6, 2, 5), mg))
           F.sRib(ctx, f, t, pod.top, rTop - 0.1, cl(u * 0.055, 0.38, 0.8), 0.34, P.light);
-      }
-      F.openingGrid(ctx, og);
-      for (const f of F.faces(ctx)) {
         for (const b of F.bays(f, F.bayCount(f, 4.6, 2, 5), mg)) {
           const ww = cl(b.w * 0.30, 0.28, 1.6), wh = cl(FH * 0.44, 0.5, FH * 0.7);
           if (!F.clearsDoor(ctx, f, b.t, ww + 1.6)) continue;
@@ -101,6 +98,7 @@
           }
         }
       }
+      F.openingGrid(ctx, og);
       F.cornice(ctx, { y: rTop, kind: "dentil", pal: P, col: P.light, dark: gold });
 
       // ---- 3. THE TERRACES ---------------------------------------------
@@ -141,8 +139,7 @@
       let hy = by + BH;
       ring(hy - bh * 0.6, bh * 1.1, R * 0.42, gold);                             // the gilt throat band
       ctx.dbox(0, hy + R * 0.18, 0, R * 0.86, R * 0.36, R * 0.86, P.light);      // the harmika
-      ctx.dbox(0, hy + R * 0.40, 0, R * 0.62, R * 0.14, R * 0.62, gold);
-      hy += R * 0.48;
+      ctx.dbox(0, hy + R * 0.40, 0, R * 0.62, R * 0.14, R * 0.62, gold); hy += R * 0.48;
       const hH = cl(R * 1.9, 1.8, 8.0), nR = cl(Math.round(hH / cl(u * 0.035, 0.26, 0.6)), 9, 20);
       ctx.dbox(0, hy + hH * 0.5, 0, R * 0.16, hH, R * 0.16, goldD);              // the mast
       for (let i = 0; i < nR; i++) {

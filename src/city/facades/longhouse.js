@@ -12,15 +12,17 @@
            of leaving a flat deck. F.thatch narrows at h/0.9 per metre of
            run, so the roof height is solved BACKWARDS from the span it has
            to close — the same move colonnade makes for an entablature. On
-           the preview house that is ~8.5 m of thatch over 2.5 m of wall:
-           roughly 75% of the silhouette is straw, which is the read.
+           the preview house that is ~2.8 m of wall under ~12 m of straw:
+           roughly 80% of the silhouette is roof, which is the read.
 
-   THE RIDGE RUNS PERPENDICULAR TO THE DOOR FACE, always. A longhouse has one
-   door and it is in a gable end; the shell decides which face the door is on
-   and a facade cannot move it, so the ROOF turns instead. That also keeps the
-   sweeping eaves — the deep low overhangs — on the two blank flanks where
-   nothing has to get past them, and it is why no thatch course ever hangs
-   into the doorway.
+   THE RIDGE RUNS ALONG THE PLAN'S LONG AXIS, and that is not negotiable: it
+   is what makes the thing a LONGhouse. The first version turned the ridge to
+   follow the door face instead, so that the door always landed in a gable
+   end — and on a squarish plan that produced a PYRAMID, which is a temple,
+   not a house. The door is dealt with where it actually is: the shell decides
+   its face, and section E stands a porch out through the eave to mark it.
+   Nothing overhangs the doorway itself, because the eave springs at
+   DOOR_H + 0.6 — above the kit's carve, so no thatch course is ever cut.
 
    CROSSED RIDGE POLES at both apexes are the other half of the silhouette:
    the paired rafters carried past the ridge and lashed, which every
@@ -70,17 +72,15 @@
          the shell's slab and its rail poking out through the straw, which is
          exactly how the first version of this failed. So this run loses only
          a little overhang and holds full width until it is clear of rTop. */
-      const nS = Math.max(4, Math.round((rTop + 0.3 - eave) / 0.42));
-      const skirt = rTop + 0.30 - eave;
+      const skirt = rTop + 0.30 - eave, nS = Math.max(4, Math.round(skirt / 0.42));
       for (let k = 0; k < nS; k++) {
-        const u = (k + 0.5) / nS, y = eave + skirt * u, o2 = over * (1 - u * 0.45);
+        const u = (k + 0.5) / nS, o2 = over * (1 - u * 0.45);
         const sw = ctx.w + ((along === "z") ? o2 : over) * 2;
         const sd = ctx.d + ((along === "z") ? over : o2) * 2;
-        ctx.dbox(0, y, 0, sw, skirt / nS + 0.06, sd, P.course(k + 12));
-        if (k === 0) {                                  // the thick shaggy cut lip
-          ctx.dbox(0, eave + skirt / nS * 0.30, 0, sw + 0.18, skirt / nS * 1.5, sd + 0.18, F.shade(P.roof, 0.88));
-          ctx.dbox(0, eave - 0.12, 0, sw + 0.04, 0.26, sd + 0.04, F.shade(P.roof, 0.46));
-        }
+        ctx.dbox(0, eave + skirt * u, 0, sw, skirt / nS + 0.06, sd, P.course(k + 12));
+        // the thick shaggy cut lip, and the deep shadow under it
+        if (k === 0) ctx.dbox(0, eave + skirt / nS * 0.30, 0, sw + 0.18, skirt / nS * 1.6, sd + 0.18, F.shade(P.roof, 0.86));
+        if (k === 0) ctx.dbox(0, eave - 0.14, 0, sw + 0.04, 0.28, sd + 0.04, F.shade(P.roof, 0.46));
       }
       // A2. the upper slopes, which close to a real ridge: F.thatch narrows at
       // h/0.9 per metre of run, so the height is solved BACKWARDS from the
@@ -101,25 +101,24 @@
         F.sBox(ctx, f, 0, foot / 2, f.span + 0.60, foot, 0.38, T.shadow, 0);
         F.band(ctx, f, (foot + wallTop) / 2, wallTop - foot, 0.20, F.shade(DAUB, 0.72), 0.24, 0);
         const n = Math.max(4, Math.round(f.span / clamp(unit * 0.10, 0.42, 0.80)));
-        for (let i = 0; i <= n; i++) {
-          const t = -f.span / 2 + i * (f.span / n);
-          F.rib(ctx, f, t, foot, wallTop + 0.10, (f.span / n) * 0.62, 0.29,
-            F.shade(T.course(i + f.s * 5), 0.86));
-        }
+        for (let i = 0; i <= n; i++) F.rib(ctx, f, -f.span / 2 + i * (f.span / n), foot,
+          wallTop + 0.10, (f.span / n) * 0.62, 0.29, F.shade(T.course(i + f.s * 5), 0.86));
         // the wall plate the rafter feet land on
         F.band(ctx, f, wallTop + 0.14, 0.24, 0.40, T.dark, 0.30, 0);
       }
 
       // ---- C. THE GABLE FRAME -------------------------------------
-      // Heavy hewn posts standing PROUD OF THE GABLE PLANE — not tucked under
-      // the overhang, where they come out looking like columns embedded in
-      // straw — each rising to the underside of the slope above it.
+      // Heavy hewn posts standing just proud of the UPPER gable plane, each
+      // rising to the underside of the slope above it. Not under the eave
+      // overhang (they read as columns embedded in straw) and not out at the
+      // skirt's own plane either (the slope leaves them behind and they end up
+      // as free-standing poles beside the building).
       const pr = clamp(unit * 0.058, 0.22, 0.48);
       const hRun = (along === "z" ? ctx.w : ctx.d) / 2 + over;
       for (const f of F.faces(ctx)) {
         if ((along === "z") !== f.horiz) continue;      // gable ends only
         for (let i = -1; i <= 1; i++) {
-          const t = i * f.span * 0.32, dn = f.halfN + over + pr * 0.8;
+          const t = i * f.span * 0.32, dn = f.halfN + over * 0.55 + pr * 0.7;
           if (!F.clearsDoor(ctx, f, t, pr * 4)) continue;   // never in the doorway
           const topY = eave + (ridgeY - eave) * Math.pow(1 - Math.abs(t) / hRun, 0.85) * 0.92;
           F.boxShaft(ctx, f.horiz ? t : f.out * dn, 0, f.horiz ? f.out * dn : t,
@@ -131,7 +130,7 @@
       // Paired rafters carried past the apex and lashed. Stepped boxes: a
       // rotated box is a lie you can see from any other angle.
       const halfLen = (along === "z" ? ctx.d : ctx.w) / 2 + over * 0.55;
-      const pl = clamp(unit * 0.34, 1.3, 3.4);
+      const pl = clamp(unit * 0.44, 1.7, 4.6);
       const put = function (a, y, s, c, n) {           // a = across the gable
         if (along === "z") ctx.dbox(a, y, n, s, s * 0.9, s, c); else ctx.dbox(n, y, a, s, s * 0.9, s, c);
       };

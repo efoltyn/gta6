@@ -63,13 +63,16 @@
       const rTop = ctx.rTop, FH = ctx.FH, unit = Math.min(ctx.w, ctx.d);
       const P = F.palette(ctx, "basalt", { pull: 0.62, grain: 0.16 });
       const red = F.mix(P.dark, 0x8e2f1e, 0.62);           // the oxide stucco the whole city wore
-      const pl = function (a, b, c, e, y) { ctx.plat(Math.min(a, b), Math.max(a, b), Math.min(c, e), Math.max(c, e), y); };
+      const pl = function (a, b, c, q, y, rmp) { ctx.plat(Math.min(a, b), Math.max(a, b), Math.min(c, q), Math.max(c, q), y, rmp); };
 
-      // THE STAIR takes the face opposite the door (see the header). Its face
-      // and width are settled HERE because every frame band has to be cut for
-      // it: a tablero running on THROUGH a stairway is the giveaway that the
-      // ornament was drawn without knowing where the stair was.
-      const sf = F.face(ctx, ctx.doorSide ^ 1), sw = clamp(sf.span * 0.52, 4.0, 12.0);
+      // THE STAIR IS ON THE ENTRANCE FACE — the face the player arrives at, and
+      // the only one where a broad frontal stair means anything. Its face, its
+      // width and the portal gap are settled HERE because every frame band has
+      // to be cut for it: a tablero running on THROUGH a stairway is the
+      // giveaway that the ornament was drawn without knowing where the stair
+      // was, and the flight has to be cut for the doorway at its foot.
+      const e = F.entrance(ctx), sf = e.f, hw = e.gap / 2 + 1.0;
+      const sw = clamp(sf.span * 0.62, 4.0, 13.0);
 
       // ---- A. THE REPEATING UNIT ----------------------------------
       const n = clamp(Math.round(rTop / clamp(FH * 1.15, 2.8, 4.2)), 3, 7);
@@ -102,17 +105,23 @@
         const W = ctx.w / 2 + pf, D = ctx.d / 2 + pf, Wu = ctx.w / 2 + pu, Du = ctx.d / 2 + pu;
         for (const sg of [-1, 1]) { pl(-W, W, sg * Du, sg * D, y0 + uh); pl(sg * Wu, sg * W, -Du, Du, y0 + uh); }
       }
-      // the entrance jambs at plaza level
-      const df = F.face(ctx, ctx.doorSide), hw = F.entrance(ctx).gap / 2 + 1.0;
-      for (const sg of [-1, 1]) F.sRib(ctx, df, sg * hw, 0, tH + 0.3, 0.60, p0, P.light, 0);
+      // the jambs of the passage that runs under the stair to the real door
+      for (const sg of [-1, 1]) F.sRib(ctx, sf, sg * hw, 0, tH + 0.3, 0.60, p0, P.light, 0);
 
-      // ---- B. THE BROAD FRONTAL STAIR (never the door's face) ------
-      const run = p0 * 1.20;
-      const nS = Math.max(8, Math.ceil(rTop / 0.40));
+      // ---- B. THE BROAD FRONTAL STAIR -----------------------------
+      // Cut for the doorway at its foot: a portal, then a passage under the
+      // treads to the real hinged leaf. The walk ramp is SPLIT either side of
+      // that passage — one ramp across the middle would carry anyone heading
+      // for the door up the stair instead, which is the same bug as walling
+      // the door off and harder to see.
+      const run = p0 * 1.20, nS = Math.max(8, Math.ceil(rTop / 0.40)), r = rTop / nS;
+      const bw = sw / 2 - hw;
       for (let i = 0; i < nS; i++) {
-        const u = (i + 1) / nS, r = rTop / nS;
-        F.obox(ctx, sf, 0, u * rTop - r / 2, sw, r, run / nS + 0.10,
-          sf.halfN + run * (1 - u) + run / nS, i % 2 ? P.base : P.light, i < 2);
+        const u = (i + 1) / nS, cy = u * rTop - r / 2, dep = run / nS + 0.10;
+        const outN = sf.halfN + run * (1 - u) + run / nS;
+        if (cy - r / 2 < e.head + 0.2 && bw > 0.6) {
+          for (const sg of [-1, 1]) F.obox(ctx, sf, sg * (hw + bw / 2), cy, bw, r, dep, outN, P.light, i < 2);
+        } else F.obox(ctx, sf, 0, cy, sw, r, dep, outN, i % 2 ? P.base : P.light, false);
       }
       // THE ALFARDAS: heavy sloping cheeks, each capped with its own little
       // tablero, which is what stops the stair reading as a bare ramp
@@ -122,11 +131,13 @@
         F.obox(ctx, sf, sg * (sw / 2 + aw * 0.6), u * rTop + 0.70, aw, rTop / 8 + 1.4, run / 8 + 0.40, outN, P.base, i < 2);
         F.obox(ctx, sf, sg * (sw / 2 + aw * 0.6), u * rTop + rTop / 16 + 1.30, aw + 0.24, 0.34, run / 8 + 0.58, outN, P.light);
       }
-      const o0 = sf.out * sf.halfN, o1 = sf.out * (sf.halfN + run);
-      const rmp = sf.horiz ? { z0: ctx.oz + o1, z1: ctx.oz + o0, y0: 0, y1: rTop }
-        : { axis: "x", x0: ctx.ox + o1, x1: ctx.ox + o0, y0: 0, y1: rTop };
-      if (sf.horiz) ctx.plat(-sw / 2, sw / 2, Math.min(o0, o1), Math.max(o0, o1), rTop, rmp);
-      else ctx.plat(Math.min(o0, o1), Math.max(o0, o1), -sw / 2, sw / 2, rTop, rmp);
+      const o0 = sf.out * sf.halfN, o1 = sf.out * (sf.halfN + run), tp = rTop + ctx.pp;
+      for (const sg of [-1, 1]) {
+        const t0 = sg * hw, t1 = sg * sw / 2;
+        const rmp = sf.horiz ? { z0: ctx.oz + o1, z1: ctx.oz + o0, y0: 0, y1: tp }
+          : { axis: "x", x0: ctx.ox + o1, x1: ctx.ox + o0, y0: 0, y1: tp };
+        if (sf.horiz) pl(t0, t1, o0, o1, tp, rmp); else pl(o0, o1, t0, t1, tp, rmp);
+      }
 
       // ---- C. THE TOP OF THE PLATFORM -----------------------------
       // The shell builds a cold blue-grey parapet ring at the roofline before

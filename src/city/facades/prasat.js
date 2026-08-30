@@ -119,15 +119,17 @@
       const nC = cl(Math.round((rTop - pod.top) / cl(FH * 0.16, 0.45, 0.90)), 6, 30), cH = (rTop - pod.top) / nC;
       const every = Math.max(3, Math.round(nC / (ST + 1)));   // where a sandstone string course lands
       for (const f of F.faces(ctx)) for (let i = 0; i < nC; i++) {
-        F.band(ctx, f, pod.top + cH * (i + 0.5), cH + 0.03, i % every ? 0.22 : 0.32, i % every ? P.course(i) : Q.light, 0.3);
+        F.band(ctx, f, pod.top + cH * (i + 0.5), cH + 0.03, i % every ? 0.20 : 0.26, i % every ? P.course(i) : Q.light, 0.3);
       }
       for (const f of F.flanks(ctx)) {
         const dw = Math.min(f.span * 0.20, 2.3), dh = Math.min(FH * 1.25, (rTop - pod.top) * 0.52), y0 = pod.top + 0.10;
-        F.box(ctx, f, 0, y0 + dh / 2, dw, dh, 0.10, P.shadow, 0.01);           // the sunk sham leaf
-        for (let i = 1; i < 6; i++) F.box(ctx, f, 0, y0 + dh * i / 6, dw * 0.84, 0.10, 0.20, Q.trim, 0.02);  // its carved registers
-        for (const sg of [-1, 1]) F.sRib(ctx, f, sg * (dw / 2 + 0.20), y0, y0 + dh + 0.24, 0.36, 0.30, Q.light);  // colonnettes
-        F.box(ctx, f, 0, y0 + dh + 0.42, dw + 1.1, 0.40, 0.36, Q.light);        // lintel
-        for (let k = 0; k < 3; k++) F.box(ctx, f, 0, y0 + dh + 0.74 + k * 0.34, (dw + 0.9) * (1 - k * 0.26), 0.34, 0.34 - k * 0.07, k ? Q.light : Q.trim);
+        // EVERY PIECE STANDS PROUD OF THE FACING COURSES (0.26). A sham door
+        // drawn at cladding depth is swallowed by its own wall.
+        F.box(ctx, f, 0, y0 + dh / 2, dw, dh, 0.30, P.shadow, 0.01);            // the sham leaf slab
+        for (let i = 1; i < 4; i++) F.box(ctx, f, 0, y0 + dh * i / 4, dw * 0.84, 0.13, 0.38, Q.trim, 0.02);  // its carved registers
+        for (const sg of [-1, 1]) F.sRib(ctx, f, sg * (dw / 2 + 0.20), y0, y0 + dh + 0.24, 0.36, 0.48, Q.light);  // colonnettes
+        F.box(ctx, f, 0, y0 + dh + 0.42, dw + 1.1, 0.40, 0.52, Q.light);        // lintel
+        for (let k = 0; k < 3; k++) F.box(ctx, f, 0, y0 + dh + 0.74 + k * 0.34, (dw + 0.9) * (1 - k * 0.26), 0.34, 0.50 - k * 0.08, k ? Q.light : Q.trim);
       }
       F.cornice(ctx, { y: rTop, kind: "corbel", pal: Q });
       // the terrace the five towers stand on: a paved deck and a low parapet,

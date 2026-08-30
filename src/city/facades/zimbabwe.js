@@ -130,9 +130,9 @@
       // ---- C. THE WALL HEAD. One rounded cap course and nothing else: no
       // coping, no parapet, and above all no merlons.
       const pT = pAt(rTop), RT = rAt(pT), RF = F.roof(ctx);
-      for (const f of F.faces(ctx)) F.band(ctx, f, rTop - 0.06, 0.30, pT * 0.90, P.course(nC + 1), (pT - RT) * 2, 0);
-      corners(pT * 0.90, RT, rTop - 0.06, 0.30, P.course(nC + 1), false);
-      ctx.dbox(RF.cx, rTop + ctx.pp * 0.5, RF.cz, RF.w, Math.max(0.06, ctx.pp), RF.d, F.shade(P.base, 0.88));
+      for (const f of F.faces(ctx)) F.band(ctx, f, rTop + 0.12, 0.58, pT * 0.90, P.course(nC + 1), (pT - RT) * 2, 0);
+      corners(pT * 0.90, RT, rTop + 0.12, 0.58, P.course(nC + 1), false);
+      ctx.dbox(RF.cx, rTop + ctx.pp * 0.5, RF.cz, RF.w, Math.max(0.06, ctx.pp), RF.d, F.shade(P.base, 0.72));
       ctx.plat(RF.cx - RF.w / 2, RF.cx + RF.w / 2, RF.cz - RF.d / 2, RF.cz + RF.d / 2, rTop + ctx.pp);
 
       // ---- D. THE CONICAL TOWER. Solid granite, no door, no window, no

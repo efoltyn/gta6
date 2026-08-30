@@ -73,24 +73,34 @@
         F.ring(ctx, y + FH - 0.12, 0.14, 0.31, P.light, 0.34, 0);
       }
       F.corners(ctx, H / 2, H, clamp(unit * 0.05, 0.5, 1.1), 0.24, P.light);   // ashlar quoins
+      // THE MASONRY PIERS. The shell punches its holes on a fixed rhythm
+      // (buildings.js: 0.7 m corner margin, one bay per ~2.6 m). Left
+      // undressed, a wall of 2 m holes reads as an office glazing band, so
+      // these ribs land exactly on the shell's OWN piers and the elevation
+      // comes back as stone panels between real openings.
+      for (const f of F.faces(ctx)) {
+        const us = f.span - 1.4, nw = Math.max(1, Math.round(us / 2.6)), cell = us / nw;
+        const pw2 = Math.max(0.34, cell - Math.min(2.0, cell * 0.68) - 0.12);
+        for (let i = 0; i <= nw; i++) F.sRib(ctx, f, -us / 2 + i * cell, 0, H - 0.15, pw2, 0.15, P.light);
+      }
 
       // ---- B. THE DOWNWARD-TAPERING COLUMN ------------------------
       // Wider at the head than the foot — the opposite of every other column
       // in the kit, and the whole reason this grammar is recognisable.
       const e = F.entrance(ctx), f0 = e.f;
       const dep = clamp(unit * 0.13, 1.3, 2.6);                      // how far the well stands out
-      const r0 = clamp(unit * 0.021, 0.17, 0.32), r1 = r0 * 1.55;    // foot, then head
+      const r0 = clamp(unit * 0.019, 0.15, 0.30), r1 = r0 * 2.05;    // foot, then head
       const cq = dep - r1 * 1.25;                                    // the shaft axis, off the wall
-      const taper = function (t, y0, h, sc) {
-        const ra = r0 * sc, rb = r1 * sc, lh = h / 5;
-        F.obox(ctx, f0, t, y0 + 0.10, rb * 2.3, 0.20, rb * 2.3, f0.halfN + cq + rb * 1.15, BLK, true);
-        for (let k = 0; k < 5; k++) {
-          const r = ra + (rb - ra) * ((k + 0.5) / 5), y = y0 + 0.20 + lh * (k + 0.5);
+      const taper = function (t, y0, top, sc) {       // y0 → top is the WHOLE post
+        const ra = r0 * sc, rb = r1 * sc, sy = y0 + 0.22, sh = top - sy - rb * 1.15, lh = sh / 6;
+        F.obox(ctx, f0, t, y0 + 0.11, rb * 2.3, 0.22, rb * 2.3, f0.halfN + cq + rb * 1.15, BLK, true);
+        for (let k = 0; k < 6; k++) {                  // the shaft SWELLING as it rises
+          const r = ra + (rb - ra) * ((k + 0.5) / 6), y = sy + lh * (k + 0.5);
           F.obox(ctx, f0, t, y, r * 1.98, lh + 0.02, r * 1.10, f0.halfN + cq + r * 0.55, RED, true);
           F.obox(ctx, f0, t, y, r * 1.10, lh + 0.02, r * 1.98, f0.halfN + cq + r * 0.99, RED, true);
         }
-        F.obox(ctx, f0, t, y0 + h + rb * 0.28, rb * 2.5, rb * 0.62, rb * 2.5, f0.halfN + cq + rb * 1.25, BLK);
-        F.obox(ctx, f0, t, y0 + h + rb * 0.74, rb * 3.0, rb * 0.30, rb * 3.0, f0.halfN + cq + rb * 1.50, BLK);
+        F.obox(ctx, f0, t, top - rb * 0.80, rb * 2.7, rb * 0.64, rb * 2.7, f0.halfN + cq + rb * 1.35, BLK);
+        F.obox(ctx, f0, t, top - rb * 0.30, rb * 3.2, rb * 0.36, rb * 3.2, f0.halfN + cq + rb * 1.60, BLK);
       };
       // the central intercolumniation is WIDENED to clear the door, which is
       // the same answer F.colonnade gives and the reason no post is dropped
@@ -101,7 +111,7 @@
 
       // ---- C. THE LIGHT-WELL AND ITS BALCONY ----------------------
       const dY = Math.max(FH, e.head + 0.40);            // the deck, clear of the door head
-      for (const t of ts) taper(t, 0, dY - 0.62, 1);
+      for (const t of ts) taper(t, 0, dY - 0.50, 1);
       F.obox(ctx, f0, 0, dY - 0.30, half * 2 + r1 * 3, 0.36, dep + 0.18, f0.halfN + dep + 0.18, TMB);
       F.obox(ctx, f0, 0, dY - 0.05, half * 2 + r1 * 3.6, 0.22, dep + 0.36, f0.halfN + dep + 0.36, P.light);
       ctx.plat(f0.horiz ? -half : f0.out * f0.halfN, f0.horiz ? half : f0.out * (f0.halfN + dep),
@@ -109,7 +119,7 @@
         f0.horiz ? Math.max(f0.out * f0.halfN, f0.out * (f0.halfN + dep)) : half, dY);
       const uH = Math.min(FH * 0.95, H - dY - 0.8);
       if (uH > 1.3) {
-        for (const t of ts) taper(t, dY + 0.10, uH - 0.55, 0.90);
+        for (const t of ts) taper(t, dY + 0.10, dY + uH - 0.48, 0.90);
         F.obox(ctx, f0, 0, dY + uH - 0.30, half * 2 + r1 * 3, 0.34, dep + 0.18, f0.halfN + dep + 0.18, TMB);
         F.obox(ctx, f0, 0, dY + 0.60, half * 2, 0.80, 0.26, f0.halfN + dep + 0.30, RED);   // balustrade
         F.obox(ctx, f0, 0, dY + 1.06, half * 2 + 0.34, 0.18, 0.42, f0.halfN + dep + 0.38, P.light);

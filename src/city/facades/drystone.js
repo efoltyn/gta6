@@ -89,13 +89,18 @@
             const s = 0x7d10 + f.s * 37 + k * 11 + i;
             const jit = 0.87 + h(s) * 0.30;                // no two stones sit alike
             const p = drum(t, f.span, y0) * jit;
-            // always wider than the gap to its neighbour: a stone that left a
-            // hole would show the shell's own pale wall through the rubble
-            F.sRib(ctx, f, t, y0, y0 + cH, step * (1.04 + h(s + 1) * 0.52), p,
-              P.course(k * 5 + i + f.s * 3));
+            // always wider than the gap to its neighbour — a stone that left a
+            // hole would show the shell's own pale wall through the rubble —
+            // but never so far past the corner that it becomes a shelf
+            const len = Math.min(step * (1.04 + h(s + 1) * 0.52),
+              (f.span / 2 + 0.22 - Math.abs(t)) * 2);
+            F.sRib(ctx, f, t, y0, y0 + cH, len, p, P.course(k * 5 + i + f.s * 3));
+            // the bed joint, drawn ON this stone's own face rather than as a
+            // band round the building: a band is struck at the mid-face
+            // projection and therefore juts out past the corners as a shelf,
+            // which is what turned the first version's corners into a comb
+            F.box(ctx, f, t, y0 + 0.07, len, 0.13, p + 0.02, F.shade(P.shadow, 0.60));
           }
-          // the shadow slot where this lift beds down on the one below
-          F.band(ctx, f, y0 + 0.05, 0.12, drum(0, f.span, y0) * 0.55, F.shade(P.shadow, 0.62), 0.2, 0);
         }
       }
 

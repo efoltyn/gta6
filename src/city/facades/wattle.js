@@ -60,7 +60,7 @@
       const T = F.palette(ctx, "timber", { pull: 0.96, grain: 0.30 });
       // daub is mud, not plaster: a bright infill panel between dark stakes
       // reads as a shuttered window, which is the whole failure mode here
-      const DAUB = F.shade(F.mix(P.base, 0xc7b492, 0.50), 0.86);
+      const DAUB = F.shade(F.mix(P.base, 0xbca987, 0.55), 0.82);
 
       // ---- THE ROUND PLAN -----------------------------------------
       const B = clamp(unit * 0.105, 0.42, 1.15);        // belly at mid-face
@@ -125,10 +125,8 @@
         ctx.cone(0, eave + CH * u * 0.55, 0, Rc * (1 - u * 0.50), CH * (1 - u * 0.50),
           k === 0 ? F.shade(P.roof, 0.86) : P.course(k * 3 + 5));
       }
-      if (layers < 2) {
-        // budget spent: an honest stepped thatch cone in free boxes
-        F.thatch(ctx, { pal: P, y0: eave, h: CH, over: Rc - Math.max(ctx.w, ctx.d) / 2 });
-      }
+      // budget spent: an honest stepped thatch cone in free boxes instead
+      if (layers < 2) F.thatch(ctx, { pal: P, y0: eave, h: CH, over: Rc - Math.max(ctx.w, ctx.d) / 2 });
       // the shaggy cut eave, and the bound topknot over the smoke hole
       if (layers) ctx.cone(0, eave - 0.55, 0, Rc * 1.045, 1.5, F.shade(P.roof, 0.74));
       const tk = clamp(unit * 0.05, 0.22, 0.5);

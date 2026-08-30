@@ -65,7 +65,7 @@
       const S = F.solid(ctx);
       const P = F.palette(ctx, "ashlar", { pull: 0.88, grain: 0.18 });
       const red = F.mix(P.dark, 0x9c3222, 0.66);          // the stucco was painted
-      const pl = function (a, b, c, e, y) { ctx.plat(Math.min(a, b), Math.max(a, b), Math.min(c, e), Math.max(c, e), y); };
+      const pl = function (a, b, c, e, y, rmp) { ctx.plat(Math.min(a, b), Math.max(a, b), Math.min(c, e), Math.max(c, e), y, rmp); };
 
       // ---- A. THE STEEP BANK --------------------------------------
       const n = clamp(Math.round(rTop / 2.4), 4, 9);      // tiers
@@ -89,36 +89,44 @@
           pl(sg * Wu, sg * W, -Du, Du, y0 + th);
         }
       }
-      // the passage jambs at plaza level
-      const df = F.face(ctx, ctx.doorSide), hw = F.entrance(ctx).gap / 2 + 0.9;
-      for (const sg of [-1, 1]) F.sRib(ctx, df, sg * hw, 0, th, 0.55, p0, P.light, 0);
+      // the jambs of the passage that runs under the stair to the real door
+      const hw = F.entrance(ctx).gap / 2 + 0.9;
+      for (const sg of [-1, 1]) F.sRib(ctx, F.face(ctx, ctx.doorSide), sg * hw, 0, th, 0.55, p0, P.light, 0);
 
-      // ---- B. THE GREAT STAIR (the back face — never the door's) ---
-      const sf = F.face(ctx, ctx.doorSide ^ 1);
-      const sw = clamp(sf.span * 0.42, 3.0, 9.0);
+      // ---- B. THE GREAT STAIR, ON THE ENTRANCE FACE ---------------
+      // The composition IS plaza -> stair -> cella door -> comb, read as one
+      // vertical line from the pavement. Put the flight on any other face and
+      // the elevation a player actually meets is a blank battered bank.
+      // The door survives because the flight is CUT for it: a portal at the
+      // foot, a passage under the treads to the real hinged leaf, and the walk
+      // ramp SPLIT either side of that passage — one continuous ramp across
+      // the middle would carry anyone heading for the door up the stair.
+      const e = F.entrance(ctx), sf = e.f;
+      const sw = clamp(sf.span * 0.62, 3.2, 13.0);
       const run = p0 * 1.35;                               // ~70°: a ladder, on purpose
-      const nS = Math.max(8, Math.ceil(rTop / 0.40));
+      const nS = Math.max(8, Math.ceil(rTop / 0.40)), r = rTop / nS;
+      const bw = sw / 2 - hw;                              // one cheek of the portal
       for (let i = 0; i < nS; i++) {
-        const u = (i + 1) / nS, r = rTop / nS;
-        F.obox(ctx, sf, 0, u * rTop - r / 2, sw, r, run / nS + 0.10,
-          sf.halfN + run * (1 - u) + run / nS, i % 2 ? P.base : P.light, i < 2);
+        const u = (i + 1) / nS, cy = u * rTop - r / 2;
+        const outN = sf.halfN + run * (1 - u) + run / nS, dep = run / nS + 0.10;
+        if (cy - r / 2 < e.head + 0.2 && bw > 0.6) {
+          for (const sg of [-1, 1]) F.obox(ctx, sf, sg * (hw + bw / 2), cy, bw, r, dep, outN, P.light, i < 2);
+        } else F.obox(ctx, sf, 0, cy, sw, r, dep, outN, i % 2 ? P.shadow : P.light, false);
       }
       const cw2 = clamp(unit * 0.055, 0.45, 1.10);         // the balustrade cheeks
-      for (const sg of [-1, 1]) for (let i = 0; i < 8; i++) {
-        const u = (i + 0.5) / 8;
-        F.obox(ctx, sf, sg * (sw / 2 + cw2 * 0.6), u * rTop + 0.55, cw2, rTop / 8 + 1.1,
-          run / 8 + 0.35, sf.halfN + run * (1 - u) + run / 8, P.dark, i < 2);
+      for (const sg of [-1, 1]) for (let i = 0, u = 0.0625; i < 8; i++, u += 0.125)
+        F.obox(ctx, sf, sg * (sw / 2 + cw2 * 0.6), u * rTop + 0.34, cw2, rTop / 8 + 0.68, run / 8 + 0.30, sf.halfN + run * (1 - u) + run / 8, P.dark, i < 2);
+      // TWO ramp platforms, never a collider, landing flush with the roof deck
+      const o0 = sf.out * sf.halfN, o1 = sf.out * (sf.halfN + run), top = rTop + ctx.pp;
+      for (const sg of [-1, 1]) {
+        const t0 = sg * hw, t1 = sg * sw / 2;
+        const rmp = sf.horiz ? { z0: ctx.oz + o1, z1: ctx.oz + o0, y0: 0, y1: top }
+          : { axis: "x", x0: ctx.ox + o1, x1: ctx.ox + o0, y0: 0, y1: top };
+        if (sf.horiz) pl(t0, t1, o0, o1, top, rmp); else pl(o0, o1, t0, t1, top, rmp);
       }
-      // ONE ramp platform under the whole flight, so it is climbable and the
-      // treads above are pure decoration (see F.steps for the same discipline)
-      const o0 = sf.out * sf.halfN, o1 = sf.out * (sf.halfN + run);
-      const rmp = sf.horiz ? { z0: ctx.oz + o1, z1: ctx.oz + o0, y0: 0, y1: rTop }
-        : { axis: "x", x0: ctx.ox + o1, x1: ctx.ox + o0, y0: 0, y1: rTop };
-      if (sf.horiz) ctx.plat(-sw / 2, sw / 2, Math.min(o0, o1), Math.max(o0, o1), rTop, rmp);
-      else ctx.plat(Math.min(o0, o1), Math.max(o0, o1), -sw / 2, sw / 2, rTop, rmp);
 
       // ---- C. THE SUMMIT AND ITS CELLA ----------------------------
-      const R = F.roof(ctx), deck = rTop + ctx.pp;
+      const R = F.roof(ctx), deck = top;
       // the deck is laid to the WALL line, not the slab line: the shell's own
       // roof slab is a cold blue-grey and a sliver of it showing round the
       // summit is the one colour on the building that is not this temple's
@@ -151,13 +159,9 @@
         const m = Math.max(2, Math.round(L / clamp(unit * 0.075, 0.55, 1.20)));
         for (let i = 0; i < m; i++) {                      // the piercing: pier, hole, pier
           const t = -L / 2 + (i + 0.5) * (L / m);
-          put(t, y + rh * 0.62, (L / m) * 0.54, rh * 0.68, thk, P.course(r * 5 + i));
-          if (r < 2) put(t, y + rh * 0.62, (L / m) * 0.30, rh * 0.34, thk + 0.10, red);
+          put(t, y + rh * 0.62, (L / m) * 0.54, rh * 0.68, thk, r < 2 ? red : P.course(r * 5 + i));
         }
       }
-      // the crest blocks that finish it, so the comb terminates instead of just stopping
-      const cn = Math.max(3, Math.round(len / clamp(unit * 0.13, 0.9, 2.0))), cs = len * 0.60 / cn;
-      for (let i = 0; i < cn; i++) put(-len * 0.30 + (i + 0.5) * cs, deck + ch + combH + 0.30, cs * 0.60, 0.60, t0 * 0.72, P.light);
     },
   });
 })();
