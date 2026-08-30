@@ -931,7 +931,6 @@
     root.add(oasisWater);
     const palms = makePalms();
     if (palms) root.add(palms);
-    scCX = scCZ = NaN;
     CBZ.scene.add(root);
     built = true; visible = true;
 
