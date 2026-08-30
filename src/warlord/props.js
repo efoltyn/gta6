@@ -677,7 +677,10 @@
     // TRUNK RADIUS 0.15/0.26, not 0.20/0.34. A date palm's trunk is about
     // 40 cm across; the first pass drew 68 cm and nine of them read as a
     // colonnade rather than a grove.
-    const lean = opts.lean == null ? r.range(-0.20, 0.20) : opts.lean;
+    // +/- 0.30 rad. A palm grows toward the light and away from the wind and
+    // nothing in a grove is plumb; at 0.16 and then 0.20 they photographed as
+    // a colonnade of identical vertical posts.
+    const lean = opts.lean == null ? r.range(-0.30, 0.30) : opts.lean;
     const yaw = opts.yaw == null ? r.f() * TAU : opts.yaw;
     cyl(g, 0.12, 0.21, h, 7, M("palmTrunk"), 0, h / 2 - 0.25, 0);
     // the leaf-scar collar rings that make a palm trunk a palm trunk
@@ -2337,16 +2340,16 @@
        scorch mark: decals bulge up. */
     // JITTERED RADII: a perfect annulus of green around a perfect blue disc
     // photographed as a rubber ring on a swimming pool. Water finds a shape.
-    const bank = new THREE.Mesh(dishGeo(8.2, 0.45, 0.06, 20, 4.6, 0.16), M("sandDark"));
+    const bank = new THREE.Mesh(dishGeo(8.2, 0.45, 0.06, 26, 4.6, 0.09), M("sandDark"));
     bank.position.set(2.5, 0, 3);
     bank.receiveShadow = true;
     near.add(bank);
-    const pool = new THREE.Mesh(dishGeo(4.8, 0.1, 0.1, 20, 0, 0.14), M("water"));
+    const pool = new THREE.Mesh(dishGeo(4.8, 0.1, 0.1, 24, 0, 0.10), M("water"));
     pool.position.set(2.5, 0, 3);
     near.add(pool);
     // the green ring that only grows where the water is — the single loudest
     // "there is water here" signal on a sand-coloured map
-    const grass = new THREE.Mesh(dishGeo(11.5, 0.06, 0.5, 20, 8.0, 0.22), M("frond"));
+    const grass = new THREE.Mesh(dishGeo(11.5, 0.06, 0.5, 26, 8.0, 0.12), M("frond"));
     grass.position.set(2.5, 0, 3);
     grass.receiveShadow = true;
     near.add(grass);

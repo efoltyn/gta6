@@ -882,7 +882,7 @@
      because those three genuinely can race and the first one is the truth. */
   function settle(id, out) {
     const P = M.pending[id];
-    if (!P || M.applied[id]) return;
+    if (!P || M.applied[id]) return null;
     M.applied[id] = 1;
     delete M.pending[id];
     if (LIVE_ID === id) LIVE_ID = 0;
@@ -921,6 +921,31 @@
     checkElimination();
     paintStrip();
     if (boardOpen) drawBoard();
+    return out;
+  }
+
+  /* THE ONE EXIT FOR A BATTLE I OWNED. Both ways a watched fight can end — an
+     aftermath screen with a real casualty list, or a plain return to the sand
+     — come through here, because the first version had them as two listeners
+     and only ONE of them broadcast the result. Measured in the three-browser
+     run: the attacker's own board flipped the region and both other warlords
+     sat on FIGHTING for the full hundred and fifty seconds until the deadline
+     agreed with him. A battle owner that settles silently is not an owner. */
+  function finishWatched(id, report) {
+    const P = M.pending[id];
+    if (!P) return false;
+    let out = null;
+    if (report && report.outcome) {
+      out = {
+        win: report.outcome === "won",
+        al: Math.min(P.men, (report.yourDead || []).length),
+        dl: Math.min(P.def, (report.theirDead || []).length),
+        src: "3d",
+      };
+    }
+    out = settle(id, out);
+    if (out) send("wlmres", { id: id, win: out.win, al: out.al, dl: out.dl });
+    return !!out;
   }
 
   /* MEN LOST BY NAME. The endgame screen is the thing people screenshot and a
@@ -1272,8 +1297,16 @@
           }
         }
         if (m.ally) {
+          /* THE SYNC IS AUTHORITATIVE BUT IT IS NOT INSTANTANEOUS. A snapshot
+             the host sent at t=44 arrives at t=45, by which time this client
+             has already been told directly about an alliance sealed at 44.6 —
+             and a straight overwrite DELETES it, for the up-to-three seconds
+             until the next snapshot. Measured in the three-browser run: a
+             bystander saw an alliance blink out and back in. So an alliance
+             newer than the snapshot survives it; everything older obeys it. */
           const want = {};
           for (let i = 0; i < m.ally.length; i++) want[m.ally[i]] = M.ally[m.ally[i]] || matchT();
+          for (const k in M.ally) if (M.ally[k] > (m.t || 0) - 1) want[k] = M.ally[k];
           M.ally = want;
         }
         checkElimination();
@@ -1312,15 +1345,31 @@
     });
   }
   function adoptSlots(slots) {
-    if (!slots) return;
+    if (!slots) return 0;
+    let added = 0;
     for (let i = 0; i < slots.length; i++) {
       const s = slots[i];
       if (M.wl[s.id]) { M.wl[s.id].name = s.name; continue; }
       const w = makeWarlord(s);
       M.wl[s.id] = w;
       M.order.push(s.id);
+      added++;
     }
     M.order.sort(function (a, b) { return M.wl[a].slot - M.wl[b].slot; });
+    /* A WARLORD WHO ARRIVED MID-MATCH IS PLACED HERE, ON EVERY CLIENT, from
+       the seed and his slot. The first version only placed people inside
+       begin(), so a late joiner existed on the guests' scoreboards with no
+       ground, no home and no colour on the map — visible, and not actually in
+       the match. Nothing about the placement is sent; it never needs to be. */
+    if (added && M.live) {
+      assignHomes();
+      for (let i = 0; i < M.order.length; i++) {
+        const w = M.wl[M.order[i]];
+        if (w.home && !ownerOf(w.home)) { setOwner(w.home, w.id, true); w.men = CAP_BASE * 0.5; }
+      }
+      registerOwners();
+    }
+    return added;
   }
 
   /* ============================================================ START
@@ -2206,7 +2255,7 @@
         if (!LIVE_ID) return;
         const id = LIVE_ID;
         LIVE_ID = 0;
-        W.match.battleDone(id, report);
+        finishWatched(id, report);
       });
       /* A BATTLE THAT ENDED WITHOUT AN AFTERMATH (a retreat straight back to
          the campaign) must not leave the match waiting on a screen that is
@@ -2215,7 +2264,7 @@
         if (!LIVE_ID) return;
         const id = LIVE_ID;
         LIVE_ID = 0;
-        if (M.pending[id]) settle(id, null);
+        if (M.pending[id]) finishWatched(id, null);
       });
 
       /* THE MULTIPLAYER BUTTON NEEDS NOTHING FROM ME. An earlier draft of this
@@ -2294,17 +2343,7 @@
        eight machines take — as long as it beats the deadline. If it does not,
        the deadline already decided and this is ignored, which is the whole
        point of THE BATTLE RULE point 5. */
-    battleDone: function (id, report) {
-      const P = M.pending[id];
-      if (!P) return false;
-      const win = report && (report.outcome === "won");
-      const al = report ? (report.yourDead || []).length : 0;
-      const dl = report ? (report.theirDead || []).length : 0;
-      const out = { win: win, al: Math.min(P.men, al), dl: Math.min(P.def, dl), src: "3d" };
-      settle(id, out);
-      send("wlmres", { id: id, win: out.win, al: out.al, dl: out.dl });
-      return true;
-    },
+    battleDone: finishWatched,
 
     /* Every number a test or a preset might want to gate on, in one call.
        `stallMax` is the proof the clock never paused: it is the largest gap
