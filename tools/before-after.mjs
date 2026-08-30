@@ -53,7 +53,7 @@
 
 import { spawn } from "node:child_process";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { joinPNGs } from "./lib/pngjoin.mjs";
+import { joinPNGs, stripPNGs, stackPNGs } from "./lib/pngjoin.mjs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -299,6 +299,49 @@ async function writePairs(dir) {
       await writeFile(out, joinPNGs(bBuf, aBuf, { title: cap.id, beforeLabel, afterLabel }));
       written.push(out);
     } catch (_) { /* one bad subject must not sink the run */ }
+    /* AND IF IT WAS A FILM STRIP, PAIR THE WHOLE STRIP.
+
+       A strip subject writes `<name>.png` plus `<name>-t1..tN.png`, but only
+       the base file is recorded in metadata — so the pair above was built from
+       frame ONE. For a strip subject that is the single least informative
+       frame in the run: the strip exists precisely because the claim is that
+       something MOVES, and frame one is the frame before it has moved. A
+       megalodon rising at a diver photographed at t0 is forty metres away and
+       past the visible range, so the contact sheet showed two rectangles of
+       empty water for the subject that carried the whole result, and a caller
+       reading pairs/ would have concluded the feature did nothing.
+       So: find the frames on disk, and emit a second image with the before run
+       over the after run, frame for frame in the same columns. */
+    try {
+      const base = (cap.afterFile || cap.beforeFile).replace(/\.png$/i, "");
+      const frameNames = [];
+      for (let i = 1; i <= 24; i++) {
+        const n = `${base}-t${i}.png`;
+        try { await readFile(path.join(shots, cap.afterFile ? "after" : "before", n)); frameNames.push(n); }
+        catch (_) { break; }
+      }
+      if (frameNames.length) {
+        const rowFor = async (dirName) => {
+          const frames = [];
+          // frame 0 is the base capture; the -tN files continue from it
+          const all = [path.basename(base) + ".png", ...frameNames];
+          for (let i = 0; i < all.length; i++) {
+            try { frames.push({ buf: await readFile(path.join(shots, dirName, all[i])), label: "t" + i }); }
+            catch (_) {}
+          }
+          return frames.length ? stripPNGs(frames, {}) : null;
+        };
+        const bRow = await rowFor("before"), aRow = await rowFor("after");
+        const rows = [];
+        if (bRow) rows.push({ buf: bRow, label: "BEFORE " + beforeLabel });
+        if (aRow) rows.push({ buf: aRow, label: "AFTER  " + afterLabel });
+        if (rows.length) {
+          const so = path.join(pairDir, base + "-strip.png");
+          await writeFile(so, stackPNGs(rows, { title: cap.id + " (strip)" }));
+          written.push(so);
+        }
+      }
+    } catch (_) { /* the strip pair is a bonus; never sink a good run for it */ }
   }
   if (!written.length) return;
   const heading = meta.only

@@ -261,6 +261,39 @@ export function stripPNGs(frames, opts = {}) {
   return encodePNG(out);
 }
 
+/** Stack PNG buffers VERTICALLY into one labelled PNG buffer.
+
+    Exists for the A/B of a FILM STRIP. joinPNGs puts two images side by side,
+    which is right for two frames and wrong for two strips: six frames beside
+    six frames is a 15,000px-wide ribbon nobody can read. Two rows — the before
+    run over the after run, frame for frame, same columns — is how anyone
+    actually compares two sequences.
+
+    Rows are left-aligned in a common width rather than rescaled: a strip that
+    came back a different size is itself a finding, and quietly stretching it
+    to match would hide that. */
+export function stackPNGs(rows, opts = {}) {
+  const BAR = 26, GAP = 10, PAD = 6;
+  const INK = [235, 238, 242], BG = [16, 19, 24];
+  const imgs = rows.map((r) => ({ img: decodePNG(r.buf), label: r.label || "" }));
+  if (!imgs.length) throw new Error("stackPNGs: no rows");
+  const W = PAD * 2 + Math.max(...imgs.map((r) => r.img.width));
+  const H = PAD * 2 + imgs.reduce((s, r) => s + BAR + r.img.height, 0) + GAP * (imgs.length - 1);
+  const out = blank(W, H, BG);
+  let y = PAD;
+  for (let i = 0; i < imgs.length; i++) {
+    drawText(out, imgs[i].label, PAD + 2, y + 6, 2, INK);
+    y += BAR;
+    blit(out, imgs[i].img, PAD, y);
+    y += imgs[i].img.height + GAP;
+  }
+  if (opts.title) {
+    const tw = String(opts.title).length * 12;
+    drawText(out, opts.title, Math.max(PAD, W - PAD - tw), PAD + 6, 2, INK);
+  }
+  return encodePNG(out);
+}
+
 /** Stitch two PNG buffers into one labelled PNG buffer. With both inputs this
     is the usual side-by-side comparison. With one input it is a true one-cell
     preview — never a misleading empty BEFORE/AFTER half. Different-sized

@@ -2613,6 +2613,25 @@
     const dx = tp.x - hp.x, dz = tp.z - hp.z;
     const dist = Math.hypot(dx, dz);
     const toT = Math.atan2(dz, dx);
+    /* THE VERTICAL SEPARATION, AND WHY IT IS NOT IN `dist`.
+       ----------------------------------------------------------------------
+       `dist` is horizontal, and for the eight states of this machine that is
+       right: the scent, the circle and the orbit are all plan-view geometry
+       and a shark that circled you in three dimensions would be a satellite.
+       But the CONTACT test at the end of `rush` used that same flat number,
+       and in water that is a hole you can drive a megalodon through — one
+       hanging 15 m directly below a diver scores dist ~= 0 and bites, without
+       ever closing the only gap that actually separated it from its dinner.
+       That is not a hypothetical: until city/wildlife_shark.js §THE ASCENT
+       existed, biting from directly underneath while never rising was the
+       ONLY thing a shark could do to a submerged target, because its depth
+       was a per-state constant off the waterline that never looked at where
+       the quarry was.
+       So the vertical gap is measured separately and spent in exactly one
+       place — the reach test below — where it turns "close in plan" back into
+       "actually touching". Land hunters are untouched (`sub` is false and dy
+       is dropped); so is every horizontal state. */
+    const dy = (tp.y != null && hp.y != null) ? tp.y - hp.y : 0;
     const isP = isPlayerActor(target);
     // one distance test per frame; every player-facing cue below reads it.
     const score = scoring(hunter, isP);
@@ -2931,7 +2950,19 @@
         // dist > reach), so for the last frame or two of a rush BOTH movers ran
         // and the closing speed doubled — a visible pop right on the bite.
         // One owner per metre.
-        if (dist <= Math.max(reach, ssR.stop * 1.18)) {
+        /* ...AND IT HAS TO BE AT YOUR DEPTH, NOT MERELY ABOVE YOUR HEAD (see
+           `dy` above). The allowance is deliberately the hunter's OWN draft on
+           top of its reach, not zero: a shark is a body, not a point, and one
+           whose centre sits 4.75 m under a floating swimmer still has several
+           metres of head much nearer than that — demanding centre-to-centre
+           contact would make the ordinary surface bite, which has worked for
+           this file's whole life, start missing. What it does rule out is the
+           case that was never a bite at all: a megalodon staging eighteen
+           metres beneath a diver and scoring a hit without ever leaving the
+           dark. That one now has to climb, and §THE ASCENT is how it does. */
+        const vOK = !sub || Math.abs(dy) <=
+          reach + Math.abs(hunter.swimDepth || actorScale(hunter) * 2);
+        if (vOK && dist <= Math.max(reach, ssR.stop * 1.18)) {
           // NOT EVERYTHING CARRIES YOU OFF. A rhino, a bison, a moose and a
           // kicking elk commit exactly as hard as a bear does, but the commit
           // ENDS at the impact — they hit you and they are past you and

@@ -133,6 +133,14 @@
   // swim depth. Without this every style's `position.y = rest + yOff` dragged a
   // shark down to the seabed, which is why no water creature could ever use the
   // shared driver. Degrades to floorAt if the water API is absent.
+  // "does this actor's depth belong to a swim solver rather than to the
+  // ground?" — one predicate, so restY and the vertical write below can never
+  // disagree about which regime an actor is in.
+  function swimsY(actor) {
+    var sp = actor && actor.species;
+    return !!((sp && sp.aquatic) || (actor && actor._swims));
+  }
+
   function restY(actor, x, z) {
     var sp = actor && actor.species;
     if ((sp && sp.aquatic) || (actor && actor._swims)) {
@@ -743,7 +751,33 @@
     var prevY = actor._yawOff || 0;
     if (yawOff !== 0 || prevY !== 0) { g.rotation.y += yawOff - prevY; actor._yawOff = yawOff; }
 
-    g.position.y = gy + yOff;
+    /* THE VERTICAL, AND WHO OWNS IT.
+       ------------------------------------------------------------------
+       `gy` is restY(), and for anything that swims restY() answers
+       `seaHeight - swimDepth` — the species' NOMINAL RESTING DRAFT. Writing
+       that absolutely, every frame of every swing, means a swimming attacker
+       is TELEPORTED to its resting depth for the whole duration of its bite,
+       from wherever in the water column it actually was. On land that is
+       right (the ground is the ground). In water it is simply false: a shark
+       at forty metres does not rise to seven to bite you.
+       Caught with a write trap on a megalodon rising at a diver: `animateAttack`
+       yanked the body from -26.6 to -7.1 and city/wildlife_shark.js's §THE
+       ASCENT pushed it back down, alternating, every single frame of the
+       strike. But it is not the ascent's bug and it did not arrive with it —
+       every deep bite in this game has been fought at the resting draft:
+       the orca's deep takedowns, marine_predation's hunts, any strike below
+       the surface layer.
+       So a swimmer's depth stays owned by the system that solves it (the
+       shark's depth()/ascent, the orca's acts, wildlife.js's column), and the
+       swing contributes its `yOff` as a DELTA — the same discipline the lunge
+       above uses, and for the same reason ("so position never drifts").
+       Land actors keep the absolute write, unchanged. */
+    if (swimsY(actor)) {
+      var prevYO = actor._atkYOff || 0;
+      if (yOff !== 0 || prevYO !== 0) { g.position.y += yOff - prevYO; actor._atkYOff = yOff; }
+    } else {
+      g.position.y = gy + yOff;
+    }
     g.rotation.x = (pitchZ !== 0) ? roll : pitch;      // aquatic: rotation.x is the ROLL
     if (pitchZ !== 0) g.rotation.z = pitchZ;           // ..and rotation.z is the true pitch
     else if (style === 'maul' || roll !== 0) g.rotation.z = roll;
@@ -1305,6 +1339,9 @@
     // the backhand's yaw offset is given back on the same terms as the lunge:
     // a swing abandoned mid-arc must not leave the body permanently turned
     if (g && actor._yawOff) { g.rotation.y -= actor._yawOff; actor._yawOff = 0; }
+    // ...and the swimmer's vertical offset on the same terms: a swing
+    // abandoned mid-arc must not leave the body permanently lifted.
+    if (g && actor._atkYOff) { g.position.y -= actor._atkYOff; actor._atkYOff = 0; }
     actor._lungeAmt = 0;
     actor._lungeCap = null;
     actor._atkAnim = -1;

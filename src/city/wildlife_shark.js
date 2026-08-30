@@ -94,6 +94,11 @@
   // SHARK_SURFACE_LIFE the fin BANKING into its turns, spray peeling off the
   //                   blade at speed, and the submerged mass swaying as it
   //                   swims.                              off -> all static.
+  // SHARK_ASCENT      §THE ASCENT — the hunt gets its VERTICAL axis: the
+  //                   staging depth is measured from the QUARRY instead of
+  //                   from the waterline, and the rush becomes a solved climb
+  //                   up out of the dark.  off -> the old surface-relative
+  //                   constants, i.e. a torpedo at a fixed depth.
   if (CBZ.CONFIG) {
     if (CBZ.CONFIG.SHARK_FIN_V2 == null) CBZ.CONFIG.SHARK_FIN_V2 = true;
     if (CBZ.CONFIG.SHARK_WAKE_V2 == null) CBZ.CONFIG.SHARK_WAKE_V2 = true;
@@ -101,6 +106,7 @@
     if (CBZ.CONFIG.SHARK_SHADOW_VIEW == null) CBZ.CONFIG.SHARK_SHADOW_VIEW = true;
     if (CBZ.CONFIG.SHARK_TAIL_TIP == null) CBZ.CONFIG.SHARK_TAIL_TIP = true;
     if (CBZ.CONFIG.SHARK_SURFACE_LIFE == null) CBZ.CONFIG.SHARK_SURFACE_LIFE = true;
+    if (CBZ.CONFIG.SHARK_ASCENT == null) CBZ.CONFIG.SHARK_ASCENT = true;
   }
 
   // ---- tuning ------------------------------------------------------------
@@ -146,6 +152,58 @@
   function diveMul(state) {
     if (SITLOW() && DIVE_LOW[state] != null) return DIVE_LOW[state];
     return DIVE[state] != null ? DIVE[state] : (SITLOW() ? DIVE_LOW.cruise : DIVE.cruise);
+  }
+
+  /* §THE ASCENT — WHAT THE TABLE ABOVE FORGOT, AND WHY IT MATTERS.
+     ------------------------------------------------------------------------
+     Every number in DIVE is a depth BELOW THE WATERLINE. Read that again with
+     a diver in the water: it means the entire hunt is solved in plan view.
+     `predatorHunt` closes on `Math.hypot(dx, dz)`, this file answers "how deep
+     am I?" with a per-state constant times the animal's draft, and NOTHING
+     anywhere in the shark's brain has ever asked where its quarry actually is
+     in the water column. A megalodon (draft 7.8 m) hunting you rides at
+     0.9 x 7.8 = 7 m on the circle and 1.9 x 7.8 = 14.8 m on the rush whether
+     you are floating on the surface or hanging at forty metres — and because
+     the range test is horizontal, it bites you from fifteen metres underneath
+     without ever coming up. The one animal on earth whose signature kill is a
+     vertical ambush out of the dark was the one animal here that could not
+     move on the vertical axis at all.
+
+     It is not that this engine cannot do it. city/wildlife_orca.js line ~2728
+     already sets `diveWant` from `surfaceAt(...) - qp.y` — the orca has matched
+     its quarry's depth for as long as that file has existed. The capability
+     was simply never wired to the shark. This is that wiring.
+
+     THE LAW: a hunting shark's depth is measured FROM ITS QUARRY, not from the
+     waterline. It wants to be `under(state)` metres BELOW whatever it is
+     hunting.
+
+     Note what that does to the existing behaviour: for a quarry AT the surface
+     (`qDepth == 0`) it evaluates to exactly `draft * DIVE[state]`, which is the
+     old number, to the bit. Every great-white-off-the-beach read this file has
+     ever shipped — the dorsal up on the scent, the fin on the circle, the
+     shadow under the swimmer — is preserved unchanged, because for a surface
+     swimmer the two formulations are the same expression. What changes is
+     only the case the old table could not express at all: a quarry that is
+     itself underwater. Then the shark goes under IT.
+
+     WHY THE MEGALODON GETS ITS OWN COLUMN. `vanish` already special-cases it
+     (22 x draft against the great white's 9) for exactly the reason this
+     table does: it is a 22 m open-ocean animal and the shelf a great white
+     stalks on is not where it lives. Staging a meg seven metres under a diver
+     puts a body twice the diver's visible range directly in frame, so the
+     ambush is over before it starts. It stages in the dark, at the edge of
+     visibility, and buys back the distance on the climb. */
+  const UNDER = {
+    scent: 1.5, circle: 1.35, bump: 1.05, rush: 1.9, seize: 0.8,
+  };
+  const UNDER_MEG = {
+    scent: 3.4, circle: 3.0, bump: 1.6, rush: 2.4, seize: 0.8,
+  };
+  const ASCENT_ON = () => !(CBZ.CONFIG && CBZ.CONFIG.SHARK_ASCENT === false);
+  function underMul(s, state) {
+    const T = (s && s.meg) ? UNDER_MEG : UNDER;
+    return T[state] != null ? T[state] : null;
   }
   // shoreline clearance by hunt state, as a fraction of the spawn clearance.
   // This is the estuary law above, in one table.
@@ -1099,6 +1157,12 @@
         Math.round((a.group ? a.group.position.x * 3.1 + a.group.position.z * 7.7 : 0)) | 0) * 14,
       breachTry: 0, breaches: 0, bx: null, bz: null, hv: 0, exited: false,
       shed: {},
+      /* ---- §THE ASCENT. `asc` is 1 while the solved climb owns y and the
+         pitch; `ascOut` is the ease-out that puts the nose back to level
+         without a snap, exactly as `airOut` does for the arc. */
+      asc: 0, ascVy: 0, ascVmax: 0, ascA: 0, ascT: 0, ascFrom: 0,
+      ascClimb: 0, ascPitch: 0, ascPeak: 0, ascOut: 0, ascents: 0, ascDepth: 0,
+      ascHold: 0,
       plan: null, shadow: null, shadowMat: null, bodySil: null, bodyMat: null,
       // one deterministic phase per animal, so a pod does not sway in lockstep
       // and the same world always sways the same way (the determinism law).
@@ -1280,6 +1344,11 @@
       grp.position.x += Math.cos(a.heading) * speed * dt;
       grp.position.z += Math.sin(a.heading) * speed * dt;
     }
+    // §THE ASCENT: aim the staging depth at the QUARRY before resolving it.
+    // Here rather than in onState() because onState only fires on transitions
+    // and a quarry that is diving moves between them — the whole point is to
+    // stay under something that is going down.
+    aimDepth(a, s, t, dt);
     depth(a, s, dt, t);
     if (CBZ.faceAnimalHeading) CBZ.faceAnimalHeading(grp, a.heading);
     return moved;
@@ -1319,6 +1388,10 @@
        this game under the waterline forever), and the seabed clamp has nothing
        underneath a body that is over the water. Both come back on landing. */
     if (s.air) return;
+    // ...and §THE ASCENT owns it on the climb, for the identical reason: a
+    // solved acceleration read back as a target depth is a solved
+    // acceleration flattened into an ease.
+    if (s.asc) return;
     const grp = a.group;
     const surf = surfaceAt(grp.position.x, grp.position.z, t);
     s.dive += (s.diveWant - s.dive) * Math.min(1, dt * (s.meg ? 0.85 : 1.3));
@@ -1396,6 +1469,9 @@
     breaches: 0, strikes: 0, idles: 0, landings: 0, aborted: 0, drops: 0,
     lastWhy: "", lastApex: 0, lastAirT: 0, lastKg: 0, lastSpd: 0,
     lastPitchUp: 0, lastPitchDown: 0, lastRoll: 0, lastAlignErr: 0, lastLen: 0,
+    // §THE ASCENT
+    ascents: 0, ascMiss: 0, lastAscClimb: 0, lastAscPitch: 0, lastAscVy: 0,
+    lastAscWhy: "", lastAscFrames: 0, lastAscQY: 0, lastAscY: 0,
   };
 
   function breachG() {
@@ -1480,6 +1556,302 @@
     const want = Math.max(len * 0.6, s.hv * climb);
     if (gap > want * 1.55 || gap < want * 0.45) return false;
     return deepEnough(a, draft);
+  }
+
+  /* ============================================================
+       §THE ASCENT — THE ATTACK FROM UNDERNEATH.
+
+     strikeWants() above is the same event as this one, and reading the two
+     together is the fastest way to see what was missing. It has five
+     conditions and one of them is `the prey has to be at the top of the
+     water`:
+
+         if (qs - qp.y > draft * 0.55 + 1.4) return false;
+
+     That line is correct FOR A BREACH — you cannot leap out of the sea at
+     something hanging fifteen metres down, and a shark that tried would be
+     jumping over its own dinner. But it was the only place in this file that
+     ever looked at the quarry's depth, and it looked at it solely to say NO.
+     So the single most photographed thing this animal does — coming up out of
+     the dark, from below, at something that is itself underwater — was not
+     merely unimplemented, it was specifically excluded.
+
+     Hence the split. They partition the space between them, on exactly the
+     same threshold, so no beat can ever claim both:
+
+         prey shallower than draft*0.55 + 1.4  ->  strikeWants -> THE BREACH
+         prey deeper than that                 ->  ascentWants -> THE ASCENT
+
+     THE PHYSICS IS THE BREACH'S, because it is the same climb. beginBreach
+     solves `A = (V^2 - v0^2) / (2*d0)` so the body arrives at the waterline
+     doing exactly its launch speed from wherever it happened to be, and its
+     comment says why that matters: what you see from above is a dark shape
+     ACCELERATING out of the blue rather than rising at a constant rate. That
+     is the half of the strike that happens underwater, it is the entire shot
+     the owner described, and it works just as well when the terminal surface
+     is a diver at 15 m as when it is the waterline. Only the target height
+     changes. Nothing here is eased, tweened or keyframed: vertical speed is
+     integrated, and the body's PITCH is read back out of that same velocity
+     (`atan2(vy, hv)`, exactly as the arc does at line ~1649), so the nose
+     points where the animal is actually going because it cannot do anything
+     else.
+
+     WHAT IT DOES NOT OWN. The breach takes x/z as well, because a body in the
+     air does not steer. This does not: a climbing shark is still swimming, so
+     swim() keeps driving the horizontals and the ascent owns nothing but `y`
+     and the pitch that follows from it. That also makes it far cheaper to be
+     wrong about — an interrupted ascent leaves a shark swimming, not a shark
+     hanging in mid-water.
+  ============================================================ */
+  const ASC_HOLD = 1.6;          // s held at the quarry's depth after arriving
+  const ASC_MAX_T = 3.2;         // s — an ascent that has not arrived has missed
+  const ASC_V0_K = 0.30;         // fraction of launch speed already moving at the start
+
+  // How deep is this shark's quarry, right now, below the live surface?
+  // Returns null when there is no quarry or it has no height — the two cases
+  // where the old waterline-relative table is still the only answer available.
+  function quarryDepthOf(a, t) {
+    const qp = quarryOf(a);
+    if (!qp || qp.y == null) return null;
+    const qs = surfaceAt(qp.x, qp.z, t);
+    return { depth: Math.max(0, qs - qp.y), y: qp.y, x: qp.x, z: qp.z, surf: qs };
+  }
+
+  /* THE STAGING DEPTH, per frame. See §THE ASCENT's table comment: the number
+     is measured from the quarry, and for a quarry at the surface it collapses
+     to exactly the old `draft * DIVE[state]`. Called from swim() immediately
+     before depth(), which is the one place per frame that already owns this
+     animal's y. */
+  function aimDepth(a, s, t, dt) {
+    if (!ASCENT_ON() || s.air || s.asc) return;
+    const q = quarryDepthOf(a, t);
+    const draft = a.swimDepth || 2.5;
+    /* IT ARRIVED — IT DOES NOT THEN SINK AWAY AGAIN. The UNDER table is the
+       STAGING offset for the run-in, and applying it the instant the climb
+       finishes is a bug with a very specific look: the megalodon completes a
+       21 m ascent, reaches the diver, and is immediately pulled fifteen metres
+       back down toward its own rush depth while the bite is still trying to
+       land. So a completed ascent buys a short window at the quarry's own
+       depth — long enough for creature_combat to put the teeth somewhere —
+       before the staging law resumes. */
+    if (s.ascHold > 0) {
+      s.ascHold -= (dt || 0);
+      if (q) { s.diveWant = q.depth + draft * 0.15; return; }
+    }
+    const mul = underMul(s, s.state);
+    if (mul == null) return;              // cruise / vanish / disengage: waterline states
+    if (!q) return;
+    s.diveWant = q.depth + draft * mul;
+  }
+
+  /* IS THIS THE MOMENT? Same shape as strikeWants: every condition is a
+     condition of the photograph. Returns a solved plan, or null for "not yet".
+
+     THE RANGE IS SOLVED, NOT TYPED, and it is solved the way strikeWants says
+     a breach is: `the climb and the charge arrive together`. That sentence is
+     the entire trigger. The shark is already closing horizontally at its own
+     rush speed, so the time it has left is `gap / hv` — and the only question
+     is whether it can cover the vertical `climb` in exactly that long:
+
+         climb = v0*tc + 1/2*A*tc^2      ->   A = 2*(climb - v0*tc) / tc^2
+         peak vertical speed             =    v0 + A*tc   (must be <= V)
+
+     Read what that does as the animal closes. Far out, tc is large, the
+     required A is negative — it has more time than it needs, so it holds its
+     staging depth and keeps coming. As the gap shrinks A rises through zero
+     and climbs; the ascent begins at the FIRST frame the solve is positive,
+     which is the earliest moment it can leave and still arrive on time, and
+     therefore the longest, most visible climb available. Closer still and the
+     required peak exceeds what the body can do — it has left it too late, so
+     it does not start at all and takes the pass as a miss.
+
+     The first cut typed the range instead (`gap > want * 1.7` and nothing
+     else), and it was wrong in the one way that matters: with no lower bound
+     it rejected the good moment at 40 m and accepted the hopeless one at 12 m.
+     Measured, the megalodon then spent 2.3 s climbing honestly while its
+     18 m/s charge carried it 41 m — it arrived at the diver's DEPTH and 21 m
+     past the diver. Arriving together is not a refinement of the trigger; it
+     is the trigger. */
+  function ascentWants(a, s, surf, draft) {
+    if (!ASCENT_ON() || s.air || s.asc) return null;
+    if (s.state !== "rush") return null;
+    if (a._seizedBy || a._mpRoll || a.hp <= 0 || s.bail > 0) return null;
+    const q = quarryDepthOf(a, clock());
+    if (!q) return null;
+    // THE COMPLEMENT OF strikeWants' SURFACE GATE. Shallower than this is a
+    // breach and belongs to the code above; deeper than it could never be
+    // attacked from below at all until now.
+    if (q.depth <= draft * 0.55 + 1.4) return null;
+    const g = a.group;
+    // IT HAS TO BE UNDER THE THING IT IS EATING. This is the whole feature; a
+    // "rush from below" that starts level with the prey is just a rush.
+    const climb = q.y - g.position.y;
+    if (climb < draft * 0.6) return null;
+    // ...and pointed at it.
+    const dx = q.x - g.position.x, dz = q.z - g.position.z;
+    const gap = Math.hypot(dx, dz);
+    if (Math.abs(shortest(Math.atan2(dz, dx) - a.heading)) > 0.8) return null;
+    // ...and able to arrive with itself.
+    const V = breachVel(liveSz(a));
+    const v0 = V * ASC_V0_K;
+    const tc = gap / Math.max(2, s.hv);
+    if (!(tc > 0.12)) return null;                  // already on top of it
+    const A = 2 * (climb - v0 * tc) / (tc * tc);
+    if (!(A > 0)) return null;                      // still has time in hand
+    if (v0 + A * tc > V) return null;               // left it too late
+    return { climb: climb, v0: v0, A: A, V: V };
+  }
+
+  function beginAscent(a, s, plan) {
+    const g = a.group;
+    const climb = plan.climb;
+    s.asc = 1;
+    s.ascVy = plan.v0;
+    s.ascVmax = plan.V;
+    s.ascA = plan.A;
+    s.ascT = 0;
+    s.ascFrames = 0;
+    s.ascFrom = g.position.y;
+    s.ascClimb = climb;
+    /* THE CLIMB OWNS ITS OWN DEPTH, and this is not a stylistic choice — it is
+       the difference between an act that works and one that gets silently
+       shredded. §THE BREACH keeps `airY` (height relative to the surface) and
+       ASSIGNS `g.position.y = surf + s.airY` every frame; it never accumulates
+       into the transform. The first cut of this function did accumulate
+       (`g.position.y += vy * dt`), and a single stray write from anywhere else
+       in the engine therefore became a permanent offset the climb then carried
+       for the rest of its run.
+       That is not hypothetical either. Traced frame by frame on a megalodon
+       rising at a diver: frames 15-43 climbed honestly at 0.2-0.34 m per frame,
+       and then between frame 43 and 44 the body moved 23.18 m up the water
+       column in one tick while `ascVy` was 10.19 m/s — i.e. 0.34 m of that jump
+       was ours and 22.8 m of it was not. Something else in the frame had parked
+       the animal at its resting draft, and because the climb was accumulating
+       it simply continued from up there, sailed past the quarry, and reported
+       "arrived" 10 m ABOVE the diver it was supposed to be eating.
+       Holding the depth here and assigning it makes that class of bug
+       impossible rather than merely fixed: whoever else writes y, the next
+       ascent frame puts the body back on its own solved trajectory. */
+    s.ascDepth = surfaceAt(g.position.x, g.position.z, clock()) - g.position.y;
+    s.ascPitch = 0;
+    s.ascPeak = 0;
+    s.ascOut = 0;
+    s.ascents++;
+    BAUDIT.ascents++;
+    return true;
+  }
+
+  /* Hand y back to depth() with NO STEP IN IT. depth() eases toward
+     `surf - s.dive`, so leaving a stale s.dive behind would yank the body back
+     down to its staging depth the instant the climb ended — the animal would
+     visibly recoil off its own strike. Re-seeding s.dive from where the body
+     actually IS makes the hand-back continuous by construction. */
+  function endAscent(a, s, surf, why) {
+    if (!s.asc) return;
+    s.asc = 0;
+    BAUDIT.lastAscWhy = why || "";
+    BAUDIT.lastAscFrames = s.ascFrames || 0;
+    { const qq = quarryDepthOf(a, clock());
+      BAUDIT.lastAscQY = qq ? +qq.depth.toFixed(2) : -1;
+      BAUDIT.lastAscY = +(surf - a.group.position.y).toFixed(2); }
+    s.ascOut = 0.45;                       // ease the nose back to level
+    s.dive = Math.max(0, surf - a.group.position.y);
+    BAUDIT.lastAscClimb = +(s.ascPeak || 0).toFixed(2);
+    BAUDIT.lastAscPitch = +(s.ascPitch || 0).toFixed(3);
+    BAUDIT.lastAscVy = +(s.ascVy || 0).toFixed(2);
+    s.ascVy = 0;
+  }
+
+  function ascentTick(a, s, dt, surf, draft, dist) {
+    const g = a.group;
+    s.ascT += dt;
+    s.ascFrames = (s.ascFrames || 0) + 1;
+
+    const qNow = quarryDepthOf(a, clock());
+
+    /* ---- the climb, RE-SOLVED EVERY FRAME ---------------------------------
+       beginAscent's solve is a prediction, and a prediction made once is a
+       prediction that is wrong by the time it matters: the quarry keeps
+       sinking or rising, and the shark's own closing speed is still building
+       when the ascent starts. Measured on the one-shot version — it left on a
+       gentle 4.9 m/s solve computed against a horizontal speed the animal had
+       not reached yet, the real closure turned out faster, and 3.2 s later it
+       timed out still 4.8 m under the diver.
+       So the same arithmetic runs again on every frame against what is
+       actually true now: the climb REMAINING, the gap remaining, and the speed
+       it is really making. That is a guidance law rather than an animation —
+       the acceleration is whatever it currently takes to arrive together, and
+       an animal that falls behind pulls harder by itself. */
+    if (qNow) {
+      const rem = qNow.y - g.position.y;
+      const gapN = Math.hypot(qNow.x - g.position.x, qNow.z - g.position.z);
+      const tc = gapN / Math.max(2, s.hv);
+      if (rem > 0 && tc > 0.08) {
+        const need = 2 * (rem - s.ascVy * tc) / (tc * tc);
+        // clamped so a late correction is a hard pull, never a rocket
+        s.ascA = Math.max(-s.ascVmax * 2, Math.min(s.ascVmax * 3, need));
+      }
+    }
+
+    // Integrated into the ascent's OWN depth and then ASSIGNED (see the note in
+    // beginAscent): the trajectory is ours, and nothing else's write to y can
+    // become a permanent offset on it.
+    s.ascVy = Math.max(0, Math.min(s.ascVmax, s.ascVy + s.ascA * dt));
+    s.ascDepth -= s.ascVy * dt;
+    g.position.y = surf - s.ascDepth;
+    const gained = g.position.y - s.ascFrom;
+    if (gained > s.ascPeak) s.ascPeak = gained;
+
+    // ---- the body points where it is going --------------------------------
+    // Derived, never authored — the same expression the ballistic arc uses, so
+    // a shark climbing at 12 m/s while swimming at 14 m/s is nose-up 40
+    // degrees because the arithmetic says so and for no other reason.
+    s.ascPitch = Math.max(-1.25, Math.min(1.32,
+      Math.atan2(s.ascVy, Math.max(0.8, s.hv))));
+    g.rotation.z = s.ascPitch;             // ABSOLUTE — animateSwim assigns outright
+
+    // A SHARK COMING UP AT YOU HAS ITS MOUTH OPEN. docs/SHARK-REFERENCE.md §1
+    // is the whole brief for this shot and the gape is the photograph; the
+    // breach writes its own jaw every frame for exactly this reason (nothing
+    // else's zero may stick to it mid-strike). It opens ON the climb, so the
+    // gape arrives with the teeth.
+    if (CBZ.swimJaw) {
+      const u = Math.max(0, Math.min(1, gained / Math.max(0.6, s.ascClimb)));
+      try { CBZ.swimJaw(a, 0.25 + u * 0.7); } catch (e) {}
+    }
+
+    // A BODY CLIMBING AT YOU IS THE ONE THING YOU HAVE TO BE ALLOWED TO SEE —
+    // the same law the breach states at line ~1666, and for the same reason:
+    // the LOD would otherwise hide the animal and leave its stand-in dorsal
+    // cutting the surface above an attack the player never gets to watch.
+    g.visible = true;
+
+    const q = qNow;
+
+    // ---- and it is over when the teeth arrive ------------------------------
+    // ARRIVED: level with the quarry, which is where creature_combat's own
+    // reach test takes the frame.
+    if (q && g.position.y >= q.y - draft * 0.25) {
+      s.ascHold = ASC_HOLD;
+      endAscent(a, s, surf, "arrived");
+      return;
+    }
+    // BROKE THE SURFACE: the quarry rose into the air (a swimmer climbing a
+    // ladder) or the solve overshot. Hand the rest of the climb to the arc
+    // that already owns air — the ascent's whole job was the water.
+    if (g.position.y >= surf - draft * 0.92) {
+      endAscent(a, s, surf, "surface");
+      if (s.breachCd <= 0 && deepEnough(a, draft)) beginBreach(a, s, "strike", surf);
+      return;
+    }
+    // MISSED, or lost it. A shark that has been climbing for three seconds is
+    // no longer arriving anywhere.
+    if (!q || s.ascT > ASC_MAX_T || s.state !== "rush" ||
+        a._seizedBy || a._mpRoll || a.hp <= 0) {
+      endAscent(a, s, surf, !q ? "lost" : (s.ascT > ASC_MAX_T ? "timeout" : "state:" + s.state));
+      BAUDIT.ascMiss++;
+      return;
+    }
   }
 
   function beginBreach(a, s, why, surf) {
@@ -1589,6 +1961,23 @@
 
     if (s.breachCd > 0) s.breachCd -= dt;
 
+    /* §THE ASCENT, integrated here for the same reason the arc is: it owns
+       group.position.y across frames, so it must run on EVERY frame — a climb
+       stepped only on the frames sharkBrain happens to own would stall in
+       mid-water exactly like a half-integrated breach hangs in the air. It
+       goes first because a body already climbing is not a candidate to start
+       climbing, and because an ascent that breaks the surface hands itself to
+       beginBreach below. */
+    if (s.asc) { ascentTick(a, s, dt, surf, draft, dist); return; }
+    if (s.ascOut > 0) {
+      s.ascOut -= dt;
+      s.ascPitch += (0 - s.ascPitch) * Math.min(1, dt * 6);
+      g.rotation.z = s.ascPitch;
+      if (CBZ.swimJaw && s.state !== "seize" && s.state !== "rush") {
+        try { CBZ.swimJaw(a, 0); } catch (e) {}
+      }
+    }
+
     if (!s.air) {
       if (s.airOut > 0) {
         // ease the arc's pose out rather than snapping the body flat the frame
@@ -1601,6 +1990,11 @@
         g.rotation.x += s.airRoll;
       }
       if (a._seizedBy || a._mpRoll || a.hp <= 0 || s.bail > 0) return;
+      // THE ASCENT IS NOT ON THE BREACH'S COOLDOWN. BREACH_COOL exists so an
+      // animal does not leap every eleven seconds; an attack that never leaves
+      // the water is not a leap and is gated by the hunt's own rush instead.
+      const plan = ascentWants(a, s, surf, draft);
+      if (plan) { beginAscent(a, s, plan); ascentTick(a, s, dt, surf, draft, dist); return; }
       if (s.breachCd > 0) return;
       if (strikeWants(a, s, surf, draft)) { beginBreach(a, s, "strike", surf); return; }
       s.breachTry -= dt;
@@ -1763,6 +2157,57 @@
      drift apart. `alignErr` is the one that has to stay at zero: it is how far
      the body's attitude ever sat from its own velocity vector, and a non-zero
      value means somebody started animating the pose instead of deriving it. */
+  /* §THE ASCENT, AS NUMBERS — the same contract sharkBreachAudit has, for the
+     same reason: tools/visual-presets/megalodon-from-below.mjs reads THIS, so
+     the report can never describe an attack the code stopped performing.
+
+     Everything is measured against the live quarry, because that is the whole
+     claim being made. `belowQuarryM` is the feature in one number — how far
+     UNDER the thing it is hunting this shark is sitting. Positive means it is
+     underneath you, which is the entire ambush; the pre-ascent code could only
+     ever produce a number relative to the waterline, so for a diver it went
+     firmly negative (the shark stages ABOVE you, between you and the light,
+     which is precisely backwards). `pitchDeg` has to be positive during a
+     climb and it is derived from velocity, never authored — the same honesty
+     check `alignErr` performs for the arc. */
+  CBZ.sharkAscentRead = function (a) {
+    const s = a && a._shark;
+    if (!s || !a.group) return null;
+    const t = clock();
+    const g = a.group;
+    const surf = surfaceAt(g.position.x, g.position.z, t);
+    const q = quarryDepthOf(a, t);
+    return {
+      state: s.state || "",
+      climbing: s.asc ? 1 : 0,
+      airborne: s.air ? 1 : 0,
+      depthM: +(surf - g.position.y).toFixed(2),
+      quarryDepthM: q ? +q.depth.toFixed(2) : null,
+      // THE ONE NUMBER. > 0 = underneath its quarry, which is the ambush.
+      belowQuarryM: q ? +(q.y - g.position.y).toFixed(2) : null,
+      gapM: q ? +Math.hypot(q.x - g.position.x, q.z - g.position.z).toFixed(2) : null,
+      vyMS: +(s.asc ? s.ascVy : 0).toFixed(2),
+      pitchDeg: +((g.rotation.z || 0) * 57.29578).toFixed(1),
+      ascents: s.ascents || 0,
+      breaches: s.breaches || 0,
+    };
+  };
+  CBZ.sharkAscentAudit = function () {
+    let climbing = 0;
+    const list = CBZ.cityWildlife || [];
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i] && list[i]._shark;
+      if (s && s.asc) climbing++;
+    }
+    return {
+      climbing: climbing, ascents: BAUDIT.ascents, missed: BAUDIT.ascMiss,
+      lastClimbM: BAUDIT.lastAscClimb, lastPitchRad: BAUDIT.lastAscPitch,
+      lastVyMS: BAUDIT.lastAscVy, lastWhy: BAUDIT.lastAscWhy,
+      lastFrames: BAUDIT.lastAscFrames, lastQuarryDepthM: BAUDIT.lastAscQY,
+      lastOwnDepthM: BAUDIT.lastAscY,
+    };
+  };
+
   CBZ.sharkBreachAudit = function () {
     let air = 0, ready = 0;
     const list = CBZ.cityWildlife || [];

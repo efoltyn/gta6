@@ -3746,9 +3746,30 @@
           // draft, not a change of Y after the fact), so nothing can bob its
           // way out of the sea, and the shared law keeps a body out of the bed
           // in the shallows without ever lifting it clear of the surface.
-          grp.position.y = aquaticBodyY(grp.position.x, grp.position.z,
-            (a.swimDepth || 1) - Math.sin(a.bob) * 0.055,
-            aquaticBedLift(a), waterTime);
+          //
+          // ...UNLESS SOMETHING IS MID-FLIGHT. city/wildlife_shark.js's
+          // breachPass owns group.position.y ACROSS FRAMES for two acts — a
+          // ballistic breach (`air`) and §THE ASCENT's solved climb (`asc`) —
+          // and both integrate a velocity rather than easing toward a target.
+          // This line is a hard SET, not an ease, and the wander it belongs to
+          // runs on exactly the frames the shark brain declines the actor. So
+          // one declined frame in the middle of an act teleports the body back
+          // to `surface - swimDepth` and the act carries on from there as if
+          // nothing happened. Measured on a megalodon climbing at a diver: the
+          // body jumped 21 m up the water column in a single frame, sailed
+          // straight past the quarry it was rising at, and the ascent's own
+          // arrival test then fired 10 m ABOVE the diver — because by the time
+          // it was consulted the animal really was above it. The breach has
+          // always had the same exposure; it is simply harder to catch because
+          // its arc is short.
+          // `ascOut` is in the test because the hand-back needs covering too:
+          // the frame an act finishes is exactly when this line would snap the
+          // body back up to its resting draft and undo the arrival.
+          if (!(a._shark && (a._shark.air || a._shark.asc || a._shark.ascOut > 0))) {
+            grp.position.y = aquaticBodyY(grp.position.x, grp.position.z,
+              (a.swimDepth || 1) - Math.sin(a.bob) * 0.055,
+              aquaticBedLift(a), waterTime);
+          }
         } else {
           // Legacy radial-band fallback when this module is unit-loaded alone.
           const nx = grp.position.x + Math.cos(a.heading) * a.spd * hdA.spd * dt * 6;
@@ -3773,9 +3794,12 @@
           // treatment. Both sides now run the ONE shared law (aquaticBodyY),
           // so a shark is UNDER the sea by its own body depth wherever the sea
           // happens to be this frame, surge included.
-          grp.position.y = aquaticBodyY(grp.position.x, grp.position.z,
-            (a.swimDepth || aquaticBodyDepth(sp)) - Math.sin(a.bob) * 0.12 * SZ(a),
-            aquaticBedLift(a));
+          // (same mid-act guard as the navigable-water branch above)
+          if (!(a._shark && (a._shark.air || a._shark.asc || a._shark.ascOut > 0))) {
+            grp.position.y = aquaticBodyY(grp.position.x, grp.position.z,
+              (a.swimDepth || aquaticBodyDepth(sp)) - Math.sin(a.bob) * 0.12 * SZ(a),
+              aquaticBedLift(a));
+          }
         }
         faceAnimalHeading(grp, a.heading);
         if (LIVE()) animateSwim(a, dt);               // the shared tail/fluke beat
