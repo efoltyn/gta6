@@ -4434,10 +4434,28 @@
     // FACADE MASSING: parapet height varies per building (0.55..1.05, was a
     // flat 0.7) and a coping lip caps it — rooflines stop reading identical.
     const pp = 0.55 + vhash * 0.5;
-    lbox(slabCx, rTop + pp / 2, d / 2 - WT / 2, slabW, pp, WT, 0x8b9097, { los: true });
-    lbox(w / 2 - WT / 2, rTop + pp / 2, slabCz, WT, pp, slabD, 0x8b9097, { los: true });
-    lbox(slabCx, rTop + pp / 2, -d / 2 + WT / 2, slabW, pp, WT, 0x8b9097, { los: true });
-    lbox(-w / 2 + WT / 2, rTop + pp / 2, slabCz, WT, pp, slabD, 0x8b9097, { los: true });
+    /* THE PARAPET'S COLOUR IS THE WALL'S, ON A BUILDING WHOSE WALL THE FACADE
+       OWNS. 0x8b9097 is a cool blue-grey coping and it is right on the office
+       shell it was drawn for. It is wrong on every wall:"own" grammar, and
+       three agents building three unrelated eras — Mesoamerica, South Asia,
+       the Bronze Age — each reported the same thing independently and each
+       wrote the same two lines of cladding into their own file to hide it.
+       One of them called it the highest-value fix available.
+
+       That is the one-city problem again, arriving as MATERIAL after it was
+       solved as geometry: "own" hands a grammar the wall plane but the shell
+       keeps painting its own leftovers on top, so a mudbrick ziggurat and a
+       granite temple both get an office coping.
+
+       Fixed here rather than in seventeen facade files, because the shell is
+       what knows it is being overruled. `color` is the host wall tone every
+       grammar already derives its palette from (ctx.pal.wall || ctx.color),
+       so the parapet lands in the same family as whatever the facade clad with, instead of a colour from another building. */
+    const rimCol = wallOwn ? color : 0x8b9097;
+    lbox(slabCx, rTop + pp / 2, d / 2 - WT / 2, slabW, pp, WT, rimCol, { los: true });
+    lbox(w / 2 - WT / 2, rTop + pp / 2, slabCz, WT, pp, slabD, rimCol, { los: true });
+    lbox(slabCx, rTop + pp / 2, -d / 2 + WT / 2, slabW, pp, WT, rimCol, { los: true });
+    lbox(-w / 2 + WT / 2, rTop + pp / 2, slabCz, WT, pp, slabD, rimCol, { los: true });
     dbox(slabCx, rTop + pp + 0.05, d / 2 - WT / 2, slabW + 0.1, 0.1, WT + 0.16, TRIM);
     dbox(w / 2 - WT / 2, rTop + pp + 0.05, slabCz, WT + 0.16, 0.1, slabD + 0.1, TRIM);
     dbox(slabCx, rTop + pp + 0.05, -d / 2 + WT / 2, slabW + 0.1, 0.1, WT + 0.16, TRIM);

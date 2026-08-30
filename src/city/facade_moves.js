@@ -163,11 +163,17 @@
         has to be dropped. Engaged (pilasters) or freestanding (portico).
         o: face clear entH count order(doric|ionic|tuscan|corinthian)
            engaged(bool) depth base ring(bool) round(bool) even(bool) pal
-     F.blindNiche(ctx,f,o) → {top}
+     F.blindNiche(ctx,f,o) → {top}          o.inset = the depth your CLADDING
+                                            stands at (default 0.01 = the bare
+                                            shell wall). Clad proud of it and
+                                            forget this and the niche is buried.
         A recessed panel with an arched or flat head — the wall articulated
         where a culture has no window.
         o: t y0 h wid recess kind col dark sill(bool) pal
-     F.openingGrid(ctx,o) → {count}
+     F.openingGrid(ctx,o) → {count}         o.inset — same rule as blindNiche.
+                                            A negative inset is inside the
+                                            shell's solid wall box and is not
+                                            drawn at all.
         THE CULTURE'S OWN WINDOWS, for a facade that declared wall:"own" and
         therefore has a solid wall with no glazing to frame.
         o: shape(rect|arch|lancet|slit|round|none) rows per storey, sill height
@@ -1006,12 +1012,21 @@
     const wid = Math.max(0.3, num(o.wid, h * 0.45));
     const rec = Math.max(0.06, num(o.recess, clamp(wid * 0.16, 0.10, 0.32)));
     const col = num(o.col, pal.base), dark = num(o.dark, pal.shadow);
+    /* WHERE THE WALL ACTUALLY IS. `inset` was hardcoded to 0.01 — the SHELL's
+       wall plane — which is right only for a grammar that draws straight onto
+       it. Three agents on three unrelated eras hit the same wall: any facade
+       that clads or batters its wall stands its own courses proud of 0.01, so
+       every niche it drew was buried behind its own stonework and simply never
+       appeared. swahili escaped it only by thinning its plaster to 0.065,
+       baroque gave up and hand-rolled its niches, and it is why sahelian's
+       slits do not show. Pass the depth your cladding stands at. */
+    const ins = num(o.inset, 0.01);
     if (!F.clearsDoor(ctx, f, t, wid + 1.2)) return { top: y0 };
-    // the recess: a dark ground left ON the wall plane, so the jambs in front
+    // the recess: a dark ground left ON the wall face, so the jambs in front
     // of it become the reveal
-    F.box(ctx, f, t, y0 + h / 2, wid, h, 0.08, dark, 0.01);
+    F.box(ctx, f, t, y0 + h / 2, wid, h, 0.08, dark, ins);
     for (const sg of [-1, 1]) {
-      F.sRib(ctx, f, t + sg * (wid / 2 + rec * 0.55), y0 - 0.05, y0 + h + 0.10, rec * 1.1, rec, F.shade(col, 1.03));
+      F.sRib(ctx, f, t + sg * (wid / 2 + rec * 0.55), y0 - 0.05, y0 + h + 0.10, rec * 1.1, rec, F.shade(col, 1.03), ins);
     }
     const kind = o.kind || "round";
     if (kind === "flat") {
@@ -1055,9 +1070,11 @@
           if (!F.clearsDoor(ctx, f, b.t, ww + 1.6)) continue;
           count++;
           const p = num(o.proj, 0.10);
-          // the opening, left on the wall plane so the reveal in front of it
-          // is the wall's own thickness
-          F.box(ctx, f, b.t, sill + wh / 2, ww, wh, p, reveal, 0.01);
+          // the opening, left on the wall FACE so the reveal in front of it is
+          // the wall's own thickness. `inset` for the same reason blindNiche
+          // takes one: on a battered or clad wall 0.01 is a foot inside the
+          // courses and the window is never drawn at all.
+          F.box(ctx, f, b.t, sill + wh / 2, ww, wh, p, reveal, num(o.inset, 0.01));
           if (shape !== "slit") {
             F.box(ctx, f, b.t, sill + wh / 2, ww * 0.82, wh * 0.86, p * 0.5, glass, 0.02);
           }
@@ -1996,7 +2013,12 @@
     const rise = Math.max(0.6, Math.min(top - 0.9 - spring, wid * (kind === "pointed" ? 0.75 : 0.5)));
     const rq = Math.max(0.06, depth - clamp(depth * 0.42, 0.2, 0.6));
     F.sBox(ctx, f, 0, (spring + rise * 0.5) / 1, wid, spring + rise + 0.4, 0.14, F.shade(dark, 0.9), rq);
-    F.arch(ctx, f, 0, spring, wid * 0.86, rise, 0.16, rq + 0.12, col, kind);
+    /* THE RING HAS TO STAND ON THE GROUND IT FRAMES. The recess ground above
+       is a 0.14-deep box at inset rq, so its outer FACE is at rq + 0.14 — and
+       the ring was being drawn at rq + 0.12, two centimetres BEHIND the plane
+       it is supposed to sit on. It was never visible on any portal in the kit;
+       caravanserai noticed and drew its own voussoirs over the top. */
+    F.arch(ctx, f, 0, spring, wid * 0.86, rise, 0.16, rq + 0.16, col, kind);
     if (o.muqarnas !== false && rise > 0.9) {
       const tiers = 4, th = Math.min(0.42, rise / (tiers + 1));
       for (let r = 0; r < tiers; r++) {
