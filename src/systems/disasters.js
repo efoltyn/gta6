@@ -3440,6 +3440,42 @@
     const ashCap = Math.min(1, 0.12 + 2.1 * M);
     const ashK = CBZ.CONFIG.VOLCANO_V3 !== false
       ? Math.min(ashCap, (ctx.st.erAge || 0) / ashRamp) : 0;
+    /* ---- AND THE ASH LANDS. ------------------------------------------------
+       OWNER, 2026-08-30, after the quad field was deleted: "ash should be like
+       gray snow like real world". He is right and the engine already agreed —
+       systems/weather.js whitens every up-facing surface in the world for a
+       blizzard through ONE fragment-shader term, no geometry, arrive-and-melt.
+       Ash is that with a grey pigment, a vent to fall from and a wind to fall
+       on. So this drives the same coat instead of building anything:
+
+         STRENGTH follows the SAME ashK the sky darkening uses, so the ground
+         greys at exactly the rate the sun chokes. One number, one cause; they
+         cannot drift apart the way a separate deposit ledger did.
+         REACH is the island, but the LOBE is what makes it a place — upwind
+         stays green for the whole event, which is the property the wedge
+         rewrite was chasing and could not draw without a lattice.
+         IT IS A LOOK, AND ONLY A LOOK. Nothing reads it back. There is no
+         choke, no roof load and no ledger hanging off this: the deposit's
+         damage was deleted with the deposit and it stays deleted until
+         somebody decides it should exist, on purpose, with a picture already
+         proven. Turning a tint into a hazard is a separate argument. */
+    if (CBZ.weatherAshCoat) {
+      CBZ.weatherAshCoat({
+        // 0.95, not 1: even a buried street keeps a little of its own colour,
+        // and a fully saturated coat is how you get "grey filter". The first
+        // cut used 0.86 and then lost most of it again to a radial and a drift
+        // term that both averaged well under 1 — the product landed near 0.14
+        // and photographed as a faint desaturation. The falloffs are the
+        // wedge's job, not the strength's; this number is what the AXIS gets.
+        k: 0.95 * ashK,
+        x: h.x, z: h.z, r: ctx.R * 1.15,
+        windX: ctx.st.erWindX || 1, windZ: ctx.st.erWindZ || 0,
+        // a big eruption's fall is wider and softer-edged; a burp's is a tight
+        // sector on the cone's own shoulder (the deleted field's own tuning,
+        // which was right about the SHAPE and wrong only about the medium)
+        lobe: 3.4 - 1.6 * M,
+      });
+    }
     ctx.env.fog = lerpHex(0x120b08, lerpHex(0x2e211c, 0x181310, ashK), dk);
     ctx.env.fogNear = 55; ctx.env.fogFar = 380 - 90 * ashK;
     /* AND IT MUST NOT PAINT THE ISLAND PEACH. 0xff6a3a is a fully saturated

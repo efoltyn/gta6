@@ -143,13 +143,13 @@ const subjects = [
     cam: { lahar: true, ahead: 34, side: 22, alt: 24, fallback: { x: 62, y: 20, z: 660, ax: 0, ay: 6, az: 612 } } },
 
   { id: "ash-onset", label: "Right when it starts — the checkers arrive", hud: false,
-    focus: "THE OWNER'S EXACT COMPLAINT, 2026-08-30: 'literally right when the volcano starts, these ash checkers cover the whole ground of the world.' Shot PLUMB DOWN over the ground 5 s into the eruption, which is when he saw it. Before: a lattice of grey quads switching on across the grass at uniform pitch. After: grass. ashGridPeriodicity and ashFleckCount are that difference as two numbers, measured off the photograph rather than off an audit either side could lie about.",
+    focus: "THE OWNER'S EXACT COMPLAINT, 2026-08-30: 'literally right when the volcano starts, these ash checkers cover the whole ground of the world.' Shot PLUMB DOWN over the ground 5 s into the eruption, which is when he saw it. Before: a lattice of grey quads switching on across the grass at uniform pitch. After: the same grey arriving as a SHADER COAT — a smooth aperiodic tint on up-facing surfaces, no cells to count. Both sides should read as ashfall; only one of them should read as a grid. ashGridPeriodicity and ashFleckCount are that difference, measured off the photograph rather than off an audit either side could lie about.",
     act: { day: true, force: "volcano", untilState: "active", extraSecs: 5, pinWind: [0.6, 0.8] },
     ashMetric: true,
     cam: { ashfield: true, out: 0.5, side: 0.3, alt: 72, fov: 60, fallback: { x: 46, y: 80, z: 662, ax: 46, ay: 0, az: 664 } } },
 
   { id: "ash-wedge", label: "The ground, mid-eruption, from the side", hud: false,
-    focus: "The same tripod that used to prove the downwind wedge was 'a hazard with an outside'. It photographs the argument's end instead: mid-eruption the island keeps its own colour edge to edge while the mountain does every violent thing it did before. Before: the downwind half greying under a tiled deposit. After: lava, flow, column, mud — and grass.",
+    focus: "THE WEDGE, KEPT — the property the deleted field was right about. Mid-eruption from the flank: the downwind ground greys while the upwind side holds its colour, on BOTH sides. Before draws that wedge with four thousand quads; after evaluates it per fragment off world position, so it has an outside without having a pitch. If the after side is uniformly grey edge to edge, the lobe is broken and that is what this beat catches.",
     act: { day: true, force: "volcano", untilState: "active", extraSecs: 10, pinWind: [0.6, 0.8] },
     cam: { wedge: true, along: 0.72, side: 0.5, alt: 34, fallback: { x: 46, y: 26, z: 662, ax: 0, ay: 8, az: 600 } } },
 
@@ -175,7 +175,7 @@ const subjects = [
     cam: { lava: true, scar: true, frame: 0.5, out: 24, alt: 12, behind: 2, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
 
   { id: "ash-aftermath", label: "The morning after — ash is weather, not wallpaper", hud: false,
-    focus: "THE SAME COMPLAINT, ONE EVENT LATER: 'the ash left afterwards is like a CHECKERBOARD over the map'. Shot PLUMB DOWN ~6 s after the eruption ends — the state the island then sits in for the REST OF THE MATCH, which is what made this the worst of the four. Before: a frozen lattice that outlives the disaster that made it. After: the island the match started with, plus the lava scars and the set lahar, which are the two scars worth keeping because you can see what made them. ashResidueDepth must be 0 on the after side.",
+    focus: "THE SAME COMPLAINT, ONE EVENT LATER: 'the ash left afterwards is like a CHECKERBOARD over the map'. Shot PLUMB DOWN ~6 s after the eruption ends — the state the island then sits in for the REST OF THE MATCH, which is what made this the worst of the four. That was TWO faults, the lattice and the permanence, and the coat answers both: no grid, and it blows away over about a minute instead of lying there forever. At +6 s the after side should still be visibly dirty (ash does not vanish the instant the vent shuts) and visibly SMOOTH.",
     act: { day: true, force: "volcano", untilState: "active", pinWind: [0.6, 0.8], untilIdle: true, extraSecs: 6 },
     strip: { frames: 3, stepSec: 2.2 },
     ashMetric: true,
@@ -808,6 +808,10 @@ async function stageVolcano(input) {
   };
   carry(vol, "vol_");
   carry(dis, "audit_");
+  // THE COAT IS IN A THIRD FILE NOW. Ash stopped being the volcano's own
+  // geometry on 2026-08-30 and became a term in the shared weather surface
+  // coat, so the audit that can say whether it is actually ON is weather's.
+  try { carry(CBZ.weatherAudit ? CBZ.weatherAudit() : null, "wx_"); } catch (_) {}
 
   return {
     ok: true,
@@ -874,6 +878,12 @@ export default {
     vol_ashPeakDepth: { label: "Ground ash deposited", unit: "m", better: "lower" },
     ashResidueDepth: { label: "Ash left after the event", unit: "m", better: "lower" },
     vol_ashFields: { label: "Ground ash fields built", better: "lower" },
+    /* THE COAT, MEASURED RATHER THAN SQUINTED AT. ashCoat is the live strength
+       of the shader term; coatedMaterials is how many big surfaces are
+       carrying the uniforms at all — if that is 0 the coat is not broken, it
+       simply never got applied, and those are very different bugs. */
+    wx_ashCoat: { label: "Ash coat strength", better: "higher" },
+    wx_coatedMaterials: { label: "Surfaces carrying the coat", better: "higher" },
     sunIntensity: { label: "Sun at capture (ash blots it)", better: "lower" },
     audit_pyroRuns: { label: "Pyroclastic runs", better: "higher" },
     audit_laharRuns: { label: "Lahar runs", better: "higher" },

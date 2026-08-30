@@ -478,6 +478,18 @@
   if (CFG.CITY_RAIN_POOLS == null) CFG.CITY_RAIN_POOLS = true;
   if (CFG.WEATHER_SNOW_COVER == null) CFG.WEATHER_SNOW_COVER = true;
   if (CFG.WEATHER_SURFACE_COAT == null) CFG.WEATHER_SURFACE_COAT = true;
+  /* WEATHER_ASH_COAT (2026-08-30): ASH IS GREY SNOW. Owner's read, and it is
+     the right one — a fine particulate that falls out of the sky, lands on
+     every up-facing surface and does not run off is the same physical thing
+     snow is, and this file already paints snow correctly in ONE line of
+     fragment shader. The volcano's own deposit tried to be geometry instead:
+     four thousand alpha-cut quads on a lattice, rewritten four times, rejected
+     four times, finally deleted (see world/volcanofx.js). It could never have
+     worked — a periodic array of discrete patches reads as a periodic array of
+     discrete patches. The coat cannot have that failure mode: there is no
+     grid, no patch and no geometry to see, because the ground is being TINTED
+     rather than covered. ?cfg_WEATHER_ASH_COAT=0 is the one-line revert. */
+  if (CFG.WEATHER_ASH_COAT == null) CFG.WEATHER_ASH_COAT = true;
   if (CFG.WEATHER_FLOOD_HAZARD == null) CFG.WEATHER_FLOOD_HAZARD = true;
 
   // ---- the two integrators ---------------------------------------------
@@ -583,6 +595,7 @@
   CBZ.weatherGroundReset = function () {
     pool = poolAmb = 0; cover = 0; wetLook = 0;
     floodHold = 0; uFlood.value.set(0, 0, 0, 0);
+    ashHold = 0; ashTgt.k = 0; uAsh.value.set(0, 0, 0, 1);
     if (CBZ.groundWaterSet) CBZ.groundWaterSet(0);
     if (CBZ.groundWaterFrontSet) CBZ.groundWaterFrontSet(null);
   };
@@ -632,6 +645,48 @@
     floodTgt.flow = Math.max(0, +o.flow || 0);
     floodHold = 1.2;
   };
+  /* ---- ASHFALL AS A COAT, NOT AS GEOMETRY (2026-08-30) -------------------
+     Two uniforms, and everything the deleted quad field was reaching for:
+       uCbzAsh   x  strength 0..1
+                 yz vent position in world XZ
+                 w  reach in metres
+       uCbzAshW  xy unit wind vector (the fall's downwind axis)
+                 z  lobe exponent — how tight the downwind wedge is
+                 w  unused
+     THE WEDGE IS THE POINT, and it is why this is not the "grey screen filter"
+     the 2026-08-16 note complained about. The strength is evaluated PER
+     FRAGMENT off world position: it falls off radially from the vent and is
+     multiplied by a downwind lobe, so the deposit has an OUTSIDE — an upwind
+     beach that keeps its own colour while the downwind town greys over. The
+     old field did the same maths on the CPU and then had to draw the answer
+     with quads; here the answer IS the drawing, at zero geometry.
+
+     HOLD-DECAYED, and asymmetrically: it builds over a few seconds while the
+     caller keeps asserting, and bleeds away over about a minute once the
+     eruption stops. That asymmetry is the 2026-08-13 complaint's real answer —
+     "the ash left afterwards is like a CHECKERBOARD over the map" was two
+     faults, the lattice AND the fact that it lay there untouched for the rest
+     of the match. There is no lattice now, and it does not stay. */
+  const uAsh = { value: new THREE.Vector4(0, 0, 0, 1) };
+  const uAshW = { value: new THREE.Vector4(1, 0, 2.2, 0) };
+  const ashTgt = { k: 0, x: 0, z: 0, r: 140, wx: 1, wz: 0, lobe: 2.2 };
+  let ashHold = 0;
+  const ASH_RISE = 0.22;   // strength/sec while the caller is asserting
+  const ASH_FADE = 0.016;  // ...and how fast it blows and washes away after
+  CBZ.weatherAshCoat = function (o) {
+    if (CFG.WEATHER_ASH_COAT === false) return false;
+    if (!o) { ashHold = 0; return false; }
+    ashTgt.k = Math.max(0, Math.min(1, +o.k || 0));
+    if (Number.isFinite(o.x)) ashTgt.x = +o.x;
+    if (Number.isFinite(o.z)) ashTgt.z = +o.z;
+    if (o.r > 0) ashTgt.r = +o.r;
+    const m = Math.hypot(+o.windX || 0, +o.windZ || 0);
+    if (m > 1e-4) { ashTgt.wx = (+o.windX) / m; ashTgt.wz = (+o.windZ) / m; }
+    if (o.lobe > 0) ashTgt.lobe = +o.lobe;
+    ashHold = 1.2;
+    return true;
+  };
+
   /* WHY THE WATER IS NOT JUST A DARK PATCH. Three terms, all free:
      · a FRESNEL sky reflection — water read at a grazing angle is mostly sky,
        which is the single strongest cue that a surface is wet rather than
@@ -705,7 +760,68 @@
     "    gl_FragColor.rgb = mix(gl_FragColor.rgb, cbzWater, cbzW);\n" +
     "  }\n" +
     "}\n" +
-    "if (uCbzSnowK > 0.001) gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.93, 0.95, 0.99), clamp(uCbzSnowK * cbzUp, 0.0, 1.0));\n";
+    "if (uCbzSnowK > 0.001) gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.93, 0.95, 0.99), clamp(uCbzSnowK * cbzUp, 0.0, 1.0));\n" +
+    /* ASH: the same one-line idea as the snow above, plus the two things ash
+       has that snow does not — a SOURCE it falls from and a WIND it falls on.
+       Everything below is per-fragment maths on world position, so there is
+       no pitch for a checkerboard to live at, at any distance or zoom. */
+    "if (uCbzAsh.x > 0.001) {\n" +
+    "  vec2 cbzAD = vCbzWP.xz - uCbzAsh.yz;\n" +
+    "  float cbzADl = length(cbzAD);\n" +
+    // radial: full out to a quarter of the reach, gone at the reach. The vent
+    // itself is never the deepest point on a real fall (the column carries the
+    // load downwind before it drops), but it is where the fall STARTS, and a
+    // hole in the middle of the deposit reads as a bug.
+    "  float cbzARad = 1.0 - smoothstep(uCbzAsh.w * 0.50, uCbzAsh.w, cbzADl);\n" +
+    // the lobe: 1 straight downwind, 0 straight upwind, raised to an exponent
+    // that sets how tight the sector is. This is the "hazard with an outside".
+    "  float cbzAAlong = cbzADl > 0.5 ? dot(cbzAD / cbzADl, uCbzAshW.xy) : 1.0;\n" +
+    "  float cbzALobe = pow(max(0.0, 0.5 + 0.5 * cbzAAlong), uCbzAshW.z);\n" +
+    // DRIFTS. Three long waves at deliberately incommensurate frequencies
+    // (wavelengths ~22 m, ~69 m, ~146 m): the sum never repeats inside the
+    // island, so the deposit gets lees and thin patches without ever handing
+    // the eye a period to lock onto. This is the whole lesson of the deleted
+    // field stated as arithmetic — the failure was PERIODICITY, not tiling
+    // per se, and a value that varies smoothly and aperiodically cannot have it.
+    "  float cbzADrift = 1.0\n" +
+    "    + 0.15 * sin(vCbzWP.x * 0.0430 + vCbzWP.z * 0.0171)\n" +
+    "    + 0.12 * sin(vCbzWP.x * 0.0111 - vCbzWP.z * 0.0287)\n" +
+    "    + 0.08 * sin(vCbzWP.x * 0.0910 + vCbzWP.z * 0.0730);\n" +
+    "  float cbzAK = clamp(uCbzAsh.x * cbzARad * cbzALobe * cbzADrift * cbzUp, 0.0, 0.94);\n" +
+    /* THE PIGMENT, AND WHY THE FLOOR IS SO HIGH. Fresh volcanic ash is a
+       LIGHT material — roughly 0.6 albedo, the colour of cement dust — and the
+       one thing it must never do is read as shade. The first cut drove this
+       colour straight off the sky/fog luminance, which was defensible physics
+       and a bad picture: an eruption deliberately crushes the fog to 0x2e211c,
+       so the ash came out near-black and the deposit photographed as a smudge
+       of shadow on the grass. Measured, that was lum 0.14 -> a 0.10 pigment.
+       Worse, the island's terrain is UNLIT material (tools/visual-presets
+       /volcano-stages.mjs documents this): the ground stays bright however
+       dark the scene light gets, so a coat that darkens with the sky is
+       painting shadow onto something that has none.
+       So the ambient term is kept, because a midnight island wearing glowing
+       grey is the old field's emissive bug, but it is FLOORED well above the
+       eruption's murk. Ash stays ash; only the night takes it down. */
+    /* The clamp is DELIBERATELY narrow. Ash is a pigment, not a light: it
+       should look like the same material at noon, under a blotted sun and at
+       midnight, varying only as much as any other surface does. A wide range
+       gave two failures in two runs — near-black under the eruption's own fog
+       (reads as shadow), then near-white once floored (reads as snow). 0.75 to
+       1.05 keeps it unmistakably grey in every regime the volcano produces
+       while still taking the night down, which is all the ambient term was
+       ever for. */
+    "  float cbzALum = clamp(dot(uCbzSky.rgb, vec3(0.299, 0.587, 0.114)) * 1.6, 0.75, 1.05);\n" +
+    /* THIS CONSTANT IS IN LINEAR SPACE, AND THAT COST TWO RUNS. The coat is
+       injected at <tonemapping_fragment>, which is BEFORE r128's
+       <encodings_fragment> — and core/renderer.js sets outputEncoding =
+       sRGBEncoding. So whatever is written here is gamma-encoded on the way
+       out: a "mid grey" 0.50 leaves the shader as sRGB 0.74 and photographs as
+       SNOW, which is exactly what the first two passes did. 0.19 linear is
+       sRGB ~0.47 — the dirty cement grey ash actually is.
+       (The snow line above writes 0.93 and means white, so it never exposed
+       this; anything that wants a MIDTONE here must convert.) */
+    "  gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.190, 0.181, 0.170) * cbzALum, cbzAK);\n" +
+    "}\n";
 
   // EVERY COATED MATERIAL IS A SHADER RECOMPILE, and a storm that recompiles a
   // thousand of them on the frame it starts is a freeze. So the sweep is
@@ -748,6 +864,8 @@
       sh.uniforms.uCbzFront = uFront;
       sh.uniforms.uCbzSky = uSky;
       sh.uniforms.uCbzFlood = uFlood;
+      sh.uniforms.uCbzAsh = uAsh;
+      sh.uniforms.uCbzAshW = uAshW;
       sh.vertexShader = "varying vec3 vCbzWP;\nvarying float vCbzUp;\n" + vs.replace(
         "#include <fog_vertex>",
         "vCbzWP = (modelMatrix * vec4(transformed, 1.0)).xyz;\n" +
@@ -759,6 +877,7 @@
         "#include <fog_vertex>");
       sh.fragmentShader = "uniform float uCbzSnowK;\nuniform float uCbzWetK;\n" +
         "uniform vec4 uCbzPool;\nuniform vec4 uCbzFront;\nuniform vec4 uCbzSky;\nuniform vec4 uCbzFlood;\n" +
+        "uniform vec4 uCbzAsh;\nuniform vec4 uCbzAshW;\n" +
         "varying vec3 vCbzWP;\nvarying float vCbzUp;\n" + fs.replace(anchor, COAT_FS + anchor);
     };
     mat.customProgramCacheKey = function () { return "cbzCoat|" + prevSrc; };
@@ -826,7 +945,22 @@
     fv.z += ((floodHold > 0 ? floodTgt.band : 0) - fv.z) * fk;
     fv.w += ((floodHold > 0 ? floodTgt.flow : 0) - fv.w) * fk;
     if (fv.x < 0.004 && floodHold <= 0) fv.set(0, 0, 0, 0);
-    if (!coatScanned && (wetLook > 0.004 || cover > 0.004 || pool > 0.004)) coatScan();
+    /* THE ASH EASES BOTH WAYS, at two different rates (see the uniform note
+       above): it builds while the eruption asserts it and blows away slowly
+       once nothing does. The vent, reach, wind and lobe are snapped rather
+       than eased — they are a description of WHERE the fall is, and easing a
+       position would drag the whole deposit across the island. */
+    ashHold -= dt || 0;
+    const av = uAsh.value;
+    const ashWant = ashHold > 0 ? ashTgt.k : 0;
+    const ashStep = (ashWant > av.x ? ASH_RISE : ASH_FADE) * (dt || 0);
+    av.x += Math.max(-ashStep, Math.min(ashStep, ashWant - av.x));
+    if (av.x < 0.002) av.x = 0;
+    av.y = ashTgt.x; av.z = ashTgt.z; av.w = ashTgt.r;
+    uAshW.value.set(ashTgt.wx, ashTgt.wz, ashTgt.lobe, 0);
+    if (CFG.WEATHER_ASH_COAT === false) av.x = 0;
+
+    if (!coatScanned && (wetLook > 0.004 || cover > 0.004 || pool > 0.004 || av.x > 0.004)) coatScan();
     // patched a FEW at a time: a material recompiles on needsUpdate, and
     // recompiling four hundred of them on one frame is a visible stall.
     for (let n = 0; n < 3 && coatQueue.length; n++) coatMat(coatQueue.pop());
@@ -1065,7 +1199,8 @@
     // GROUND is dry too — otherwise a storm would leave the streets flooded
     // for the rest of the session.
     const groundLive = pool > 0.0005 || cover > 0.0005 || wetLook > 0.0005 ||
-      drv.pool > 0.0005 || drv.cover >= 0 || coatQueue.length > 0;
+      drv.pool > 0.0005 || drv.cover >= 0 || coatQueue.length > 0 ||
+      uAsh.value.x > 0.0005 || ashHold > 0;
     // DARK-PATH EARLY-OUT: with the ambient storm off and nothing driving,
     // the whole tick is skipped — the throttled indoor test used to scan
     // CBZ.platforms and raycast 5×/sec for a cloud that could never appear.
@@ -1286,6 +1421,11 @@
       groundWaterPeak: +poolPeak.toFixed(3),
       snowCover: +cover.toFixed(3),
       snowCoverPeak: +coverPeak.toFixed(3),
+      /* THE ASH COAT AS A NUMBER — and specifically as a number that is NOT a
+         count of anything drawn, because nothing is drawn. `ashGeometry` is
+         the ratchet the four deleted rewrites earned: it must stay 0 forever. */
+      ashCoat: +uAsh.value.x.toFixed(3),
+      ashCoatGeometry: 0,
       wetness: +wetLook.toFixed(3),
       coatedMaterials: coated.length,
       coatPending: coatQueue.length,
@@ -1298,6 +1438,7 @@
         groundWater: CFG.WEATHER_GROUND_WATER !== false,
         cityPools: CFG.CITY_RAIN_POOLS !== false,
         snowCover: CFG.WEATHER_SNOW_COVER !== false,
+        ashCoat: CFG.WEATHER_ASH_COAT !== false,
         coat: CFG.WEATHER_SURFACE_COAT !== false,
         hazard: CFG.WEATHER_FLOOD_HAZARD !== false,
       },

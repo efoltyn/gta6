@@ -101,12 +101,24 @@
    discrete patches painted on terrain reads as a lattice, because that
    is what it is. The whole builder and its ledger are DELETED.
 
-   Ash still exists as ATMOSPHERE — the eruption column (ashColumn), the
-   pyroclastic cloud, and systems/weather.js's airborne fall. What is
-   gone is only the thing that was ever complained about: paint on the
-   ground. Do not bring it back with a shader, a decal atlas, or a
-   ground-material tint either; if the ground must change colour, that
-   is a terrain-material job, not four thousand quads.
+   WHAT REPLACED IT, the same day, at the owner's suggestion: "ash should
+   be like gray snow like real world". systems/weather.js already lays
+   snow on the whole world through ONE fragment-shader term — no
+   geometry, arrive-and-melt — and ash is physically the same event with
+   a grey pigment. So the deposit is now CBZ.weatherAshCoat(): a
+   per-fragment tint on up-facing surfaces, with a radial falloff from
+   the vent and a downwind lobe so it still has an outside. It has no
+   cells, no quads and no pitch, which is the one property four rewrites
+   of this builder could never buy.
+
+   THE LESSON, stated so the next rewrite does not happen: the failure
+   was never the ash, the palette or the spread parameter. It was
+   drawing a continuous field with DISCRETE GEOMETRY. Anything that
+   samples smoothly per fragment is fine; anything that puts a
+   repeating array of objects on the ground will be rejected again.
+
+   Ash also still exists as ATMOSPHERE — the eruption column
+   (ashColumn), the pyroclastic cloud, and the airborne fall.
 
    ALL THREE TAKE THE SAME TWO ARGUMENTS and nothing about a game mode:
    `groundAt(x, z)` and `parent` (an Object3D). Hand them the arena's
