@@ -1,4 +1,4 @@
-<title>Five Commits, Six Tombstones</title>
+<title>Six Commits, Six Tombstones</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
 <style>
 :root{
@@ -184,8 +184,8 @@ footer p{max-width:none;margin-bottom:7px}
     <span>2026-08-29</span><span class="dot">/</span>
     <span class="mono">2023a26 &rarr; c7dfb59</span>
   </div>
-  <h1>Five Commits, Six Tombstones</h1>
-  <p class="standfirst">Everything uncommitted was one wave, seventeen hours cold. Everything unmerged was already dead &mdash; except one branch nobody has touched since August 20.</p>
+  <h1>Six Commits, Six Tombstones</h1>
+  <p class="standfirst">Everything uncommitted was one wave, seventeen hours cold. Everything unmerged was already dead &mdash; including the one branch I first argued was worth saving.</p>
 
   <div class="verdicts">
     <div class="v yes">
@@ -196,12 +196,12 @@ footer p{max-width:none;margin-bottom:7px}
     <div class="v no">
       <div class="lab">The six branches</div>
       <div class="big">Do not merge</div>
-      <div class="sub">Five are tombstones. So is the 2,105-line stash.</div>
+      <div class="sub">All six are tombstones. So is the 2,105-line stash.</div>
     </div>
     <div class="v">
-      <div class="lab">Waiting on you</div>
-      <div class="big">One cabinet</div>
-      <div class="sub">6,072 additive lines of tooling that touch zero game files.</div>
+      <div class="lab">Left to merge</div>
+      <div class="big">Nothing</div>
+      <div class="sub">All six. The last candidate was superseded outside this repo.</div>
     </div>
   </div>
 </header>
@@ -381,8 +381,8 @@ footer p{max-width:none;margin-bottom:7px}
       </tr>
       <tr>
         <td class="name">claude/before-after-tool-arch-i72lov</td>
-        <td><span class="tag keep">Lost work</span></td>
-        <td>6,072 additive lines under <code>ba/</code>. <code>git diff main...ref -- src/ tools/ index.html</code> is <strong>empty</strong>.</td>
+        <td><span class="tag dead">Superseded</span></td>
+        <td>Merges clean (+6,072, zero game files) &mdash; but <code>~/harness</code>, a separate repo <em>outside</em> this one begun a week later, already is the cabinet. See below.</td>
       </tr>
       <tr>
         <td class="name">claude/jail-game-popups-m4mtxp</td>
@@ -415,15 +415,30 @@ footer p{max-width:none;margin-bottom:7px}
 </section>
 
 <section>
-  <div class="eyebrow">Your call</div>
-  <h2>The cabinet, and one wave train</h2>
-  <p>Two things are genuinely missing from main, and neither should be swept in alongside a disaster wave.</p>
+  <div class="eyebrow">The correction</div>
+  <h2>The cabinet already exists &mdash; outside this repo</h2>
+  <p>I first reported <code>before-after-tool-arch-i72lov</code> as the one branch worth rescuing: 6,072 additive lines, merges clean, touches no game file. That was wrong, and the owner caught it in a sentence &mdash; <em class="q">&ldquo;if it&rsquo;s ancient code you might be looking at the wrong shit.&rdquo;</em></p>
+  <p><code>~/harness</code> is its own git repository, <strong>begun 2026-08-27 &mdash; a week after that branch</strong> &mdash; and it is committed to nightly. Its log is the branch&rsquo;s own goals, delivered:</p>
+  <div class="tscroll">
+  <table>
+    <thead><tr><th>What the branch was building</th><th>What <code>~/harness</code> already shipped</th></tr></thead>
+    <tbody>
+      <tr><td><code>ba/lib/store.mjs</code> &mdash; durable receipt archive</td><td>&ldquo;The cabinet is one ledger: artifacts belong to the session that made them&rdquo;</td></tr>
+      <tr><td><code>ba/lib/show.mjs</code> &mdash; receipt renderer</td><td>&ldquo;A receipt is not an empty thumbnail: show the facts it carries&rdquo;</td></tr>
+      <tr><td><code>ba/lib/adopt.mjs</code>, <code>agents.mjs</code></td><td>&ldquo;The Library: 591 closed sessions, and a way to take them&rdquo;</td></tr>
+      <tr><td><code>ba/lib/serve.mjs</code> &mdash; HTTP viewer</td><td>&ldquo;harness phone: the cabinet on the LAN, behind a key&rdquo;</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p style="margin-top:18px">It also lives in the right place. Machine-wide tooling belongs to the machine, not inside one game &mdash; which is exactly what <code>~/harness/AGENTS.md</code> says it is. Merging the branch would have planted a second, older copy of the cabinet inside <code>gta6</code>.</p>
 
-  <h3>1. The <code>ba/</code> package &mdash; 6,072 lines, zero risk</h3>
-  <p>Main has a 335-line one-shot CLI. The branch turns it into a durable receipt archive, a browsable cabinet, an HTTP viewer, agent-parameterized runs, and an engine decoupled from this repo through <code>ba.config.mjs</code> so every existing preset keeps working unmodified. It touches no game file, so it cannot conflict with anything in flight &mdash; but it is big enough that it deserves its own look rather than a silent merge. <strong>Say the word and I&rsquo;ll bring it over on its own.</strong></p>
+  <div class="call warn">
+    <h3>Why the triage missed it</h3>
+    <p>The subagent was pointed at <code>/Users/elifoltyn/Downloads/gta6</code> and asked whether main superseded each branch. It answered honestly for the repo it could see. Nothing in that question could ever have found a replacement sitting one directory up. <strong>When the candidate is tooling, search outside the repo before calling it lost.</strong></p>
+  </div>
 
-  <h3>2. The survival tsunami is still one crest</h3>
-  <p>The <em>city</em> tsunami got a real wave train in <code>5995e02</code> &mdash; <code>waves</code>, <code>waveN</code>, relative peaks, and the big one usually not arriving first. The survival island&rsquo;s tsunami in <code>disasters.js</code> still runs <code>warn &rarr; sweep &rarr; flooded &rarr; drain</code>: zero hits for <code>wave2</code> or <code>drawback</code>. The unmerged branch has a drawback-and-second-surge phase machine for it. That one is a real feature, not a merge &mdash; worth building fresh against the code as it now stands.</p>
+  <h3>What is still genuinely missing</h3>
+  <p>One thing, and it is a build rather than a merge: the <em>survival</em> tsunami in <code>disasters.js</code> still runs <code>warn &rarr; sweep &rarr; flooded &rarr; drain</code> &mdash; a single crest, zero hits for <code>wave2</code> or <code>drawback</code> &mdash; while the <em>city</em> tsunami got a real train in <code>5995e02</code>. Worth writing fresh against the code as it now stands.</p>
 </section>
 
 <section>
@@ -438,7 +453,7 @@ footer p{max-width:none;margin-bottom:7px}
 </section>
 
 <footer>
-  <p><strong>main is up to date.</strong> <span class="mono">2023a26 &rarr; c7dfb59</span>, five commits, pushed. Local and origin are level.</p>
+  <p><strong>main is up to date.</strong> <span class="mono">2023a26 &rarr; 8afa6ae</span>, six commits, pushed. Nothing is waiting to be merged &mdash; all 135 refs are either already in main or superseded.</p>
   <p>Published at <a href="https://claude.ai/code/artifact/7ce046d4-2d10-452c-9d7a-2ebe58af43f7">claude.ai/code/artifact/7ce046d4</a>.</p>
   <p>A second session was writing <code>wildlife_tame.js</code>, <code>wounds.js</code> and <code>water_impact.js</code> throughout &mdash; every commit here was staged by explicit path, and none of that work was touched.</p>
 </footer>
