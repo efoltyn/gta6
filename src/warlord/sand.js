@@ -580,6 +580,19 @@
         "  vDeep = aDeep;",
         "  vec4 mv = modelViewMatrix * instanceMatrix * vec4(position, 1.0);",
         "  vFade *= 1.0 - smoothstep(uFar * 0.62, uFar, -mv.z);",
+        /* THE DEAD AND THE DISTANT ARE THROWN OUT OF CLIP SPACE, and this is
+           the single most important line in the file for performance. The
+           first version discarded them in the FRAGMENT stage, which means
+           every one of 3 800 pooled quads still rasterised every frame and
+           still paid a texture fetch per covered pixel before deciding it
+           was invisible. On a long ride the road is hundreds of overlapping
+           transparent quads deep, so a strip capture that should have taken
+           seconds sat for nineteen minutes on one frame and had to be
+           killed. Pushing gl_Position outside the clip volume culls the
+           triangle before rasterisation: a print that has faded out, or one
+           four hundred metres away, now costs a vertex shader and nothing
+           else. */
+        "  if (vFade <= 0.004) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }",
         /* the print's own tangent frame, so the fragment stage can light the
            hole's gradient against the world sun without a normal map */
         "  vTanX = normalize((instanceMatrix * vec4(1.0, 0.0, 0.0, 0.0)).xyz);",
@@ -608,11 +621,21 @@
            goes into shadow — which is what a footprint IS. A baked
            highlight cannot do this: turn the foot 90 degrees, or wait two
            hours of game clock, and a baked one is lit from the wrong side. */
-        "  float e = 0.012;",
-        "  float du = texture2D(uTex, uv + vec2(e, 0.0)).r - texture2D(uTex, uv - vec2(e, 0.0)).r;",
-        "  float dv = texture2D(uTex, uv + vec2(0.0, e)).r - texture2D(uTex, uv - vec2(0.0, e)).r;",
-        "  vec3 n = normalize(vTanX * (du * 9.0 * vDeep) + vTanY * (dv * 9.0 * vDeep) + vec3(0.0, 1.0, 0.0) * 0.55);",
-        "  float lam = clamp(dot(n, normalize(uSun)), -1.0, 1.0);",
+        /* FOUR EXTRA TAPS, AND ONLY A PRINT PAYS THEM. The churn tile is
+           the overdraw hog — a road is many wide quads deep — and it has no
+           coherent micro-relief to light in the first place: trampled ground
+           is a change of TONE, not a shape. Skipping the gradient on tile 3
+           takes four texture fetches off every fragment of the layer that
+           has the most of them, and takes nothing at all off the layer the
+           lighting is actually for. */
+        "  float lam = 0.0;",
+        "  if (vTile < 2.5) {",
+        "    float e = 0.012;",
+        "    float du = texture2D(uTex, uv + vec2(e, 0.0)).r - texture2D(uTex, uv - vec2(e, 0.0)).r;",
+        "    float dv = texture2D(uTex, uv + vec2(0.0, e)).r - texture2D(uTex, uv - vec2(0.0, e)).r;",
+        "    vec3 n = normalize(vTanX * (du * 9.0 * vDeep) + vTanY * (dv * 9.0 * vDeep) + vec3(0.0, 1.0, 0.0) * 0.55);",
+        "    lam = clamp(dot(n, normalize(uSun)), -1.0, 1.0);",
+        "  }",
         /* AMBIENT OCCLUSION IN THE HOLE, which is half of why a depression
            reads as a depression and not as a stain. The deeper the texel,
            the less sky it can see. The FLOOR is 0.70 and that number came
@@ -1101,7 +1124,14 @@
      This runs itself off W.state, so the trail exists whether or not
      campaign.js ever adopts a line of this file. That is deliberate: the
      siblings are being written in parallel and the pictures cannot wait. */
-  const COLUMN_STEP = 2.4;
+  /* 3.2 m, NOT 2.4, AND TWO TILES ACROSS, NOT THREE. Both numbers are the
+     same lesson: a road is BUILT out of overlapping transparent quads and
+     the thing that kills a frame is how many of them stack over one pixel.
+     At 2.4 m with three tiles every ground point sat under about eight
+     layers of blended geometry; at 3.2 m with two it is nearer three, the
+     road looks the same from the ridge, and the pool covers half again as
+     much ground before it recycles. */
+  const COLUMN_STEP = 3.2;
   let colX = null, colZ = null, colAcc = 0, colYaw = 0;
   function stepColumn() {
     if (FLAG_OLD || FLAG_NOPRINTS) return;
@@ -1123,7 +1153,7 @@
       const back = 3.0 + Math.sqrt(men) * 0.5;
       const cx = x - Math.sin(colYaw) * back, cz = z - Math.cos(colYaw) * back;
       const band = bandWidth(men);
-      const tiles = Math.max(1, Math.round(band / 3.4));
+      const tiles = Math.max(1, Math.min(2, Math.round(band / 3.4)));
       for (let t = 0; t < tiles; t++) {
         const off = tiles === 1 ? 0 : (t / (tiles - 1) - 0.5) * (band - band / tiles);
         S.churn(cx + Math.cos(colYaw) * off, cz - Math.sin(colYaw) * off,

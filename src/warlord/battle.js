@@ -460,6 +460,8 @@
     const s = SIDES.mine;
     const at = { x: MAP.cx + s.dir * (GAP() / 2 + 4), z: MAP.cz };
     const rig = CBZ.studio.cast("officer", { color: 0xffb347, variant: 1 });
+    // the fit you chose in the wardrobe, on the man who walks into the fight
+    if (rig && W.wardrobe && W.wardrobe.dressYou) W.wardrobe.dressYou(rig);
     if (rig) {
       rig.position.set(at.x, MAP.groundAt(at.x, at.z), at.z);
       scene.add(rig);

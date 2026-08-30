@@ -379,6 +379,12 @@
        `officer` because the wardrobe reads as somebody in charge and that is
        free characterisation. */
     youRig = CBZ.studio && CBZ.studio.cast ? CBZ.studio.cast("officer", { color: 0xc46a33, variant: 3 }) : null;
+    /* AND THEN YOU PUT YOUR OWN CLOTHES ON. wardrobe.js shipped a lazy wrap
+       around studio.cast to dress the warlord until this line existed —
+       which worked, and which is a monkeypatch on an engine entry point that
+       every man in the game goes through. Calling it explicitly is two lines
+       and removes a whole class of surprise. */
+    if (youRig && W.wardrobe && W.wardrobe.dressYou) W.wardrobe.dressYou(youRig);
     if (youRig) root.add(youRig);
     else {
       // people pack absent: a placeholder that is honestly a placeholder

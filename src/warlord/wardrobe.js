@@ -1895,7 +1895,15 @@
       OFF = Q && Q.get("wardrobe") === "old";
       if (OFF) { console.log("[wardrobe] off (?wardrobe=old)"); return; }
       styleOnce();
-      wrapCast();
+      /* THE WRAP IS GONE, because the two files it stood in for now call
+         dressYou() themselves — campaign.js at the youRig cast and battle.js
+         at makeYou. It was correct and it was guarded to role "officer", so
+         it never touched a soldier; it was still a monkeypatch on the engine
+         entry point every man in the game is cast through, kept alive only
+         because this module could not edit its callers. It can go now.
+         wrapCast() is retained below and reachable via ?wardrobe=wrap for a
+         page that somehow casts an officer neither file knows about. */
+      if (Q && Q.get("wardrobe") === "wrap") wrapCast();
       buildChip();
       W.on("phase", paintChip);
       W.on("army", paintChip);
