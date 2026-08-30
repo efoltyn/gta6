@@ -810,6 +810,36 @@
      away is not a landmark). */
   const SC_CELL = 256, SC_RING = 4;         // ±4 cells = 1.15 km of dressing
   const SC_CAP = { rock: 900, brush: 1100, bone: 220, wreck: 30 };
+
+  /* ---- WHAT MAY LIE ON WHICH GROUND, and why an erg gets NOTHING ----
+     The first version of this scatter placed rocks and dead brush on every
+     biome except the salt pan, which put a field of pebbles and twigs across
+     the dunes. That is not a taste call, it is wrong about sand: an erg is
+     MOBILE. A dune migrates metres a year, so anything that lands on one is
+     buried within a season or left behind on the interdune floor — a slip
+     face with gravel sitting on it is a picture of a hillside, not a dune.
+     Every reference photograph of the Rub al Khali, from the Sentinel-2
+     overhead down to a man standing on a crest, is the same: unbroken sand
+     to the horizon, and the only texture is wind ripple.
+
+     So the erg, the pan and the beach are BARE, and the material that used
+     to be smeared evenly over the island is concentrated where it actually
+     occurs — which is also the only way the four provinces read as four
+     different places instead of one place with four names:
+
+       rock    boulders spalled off the mesa walls, and the most of it
+       gravel  a reg: a stone pavement is literally what the biome IS
+       wadi    the one place with water, so the only place brush lives
+       dune    nothing.  salt  nothing.  shore  nothing.
+
+     `dens` is the share of candidate points that survive; the kind cuts are
+     read against the same `roll` the old code used, so the shapes and sizes
+     are unchanged — only WHERE they are allowed. */
+  const SC_GROUND = {
+    rock:   { dens: 1.00, rock: 0.80, brush: 0.97, bone: 0.995 },
+    gravel: { dens: 0.85, rock: 0.62, brush: 0.93, bone: 0.985 },
+    wadi:   { dens: 0.70, rock: 0.30, brush: 0.96, bone: 0.990 },
+  };
   let scatter = null, scCX = NaN, scCZ = NaN;
 
   /* THE SCATTER GEOMETRY IS props.js's, AND IT ASKED. That file publishes
@@ -882,7 +912,12 @@
         const bx = gx * SC_CELL, bz = gz * SC_CELL;
         // one hash decides how busy this cell is at all — cheap reject
         const busy = hash(bx, bz, 71);
-        const count = 6 + Math.floor(busy * 16);
+        /* 10-36 candidates, up from 6-22. Three of the six biomes now take
+           nothing at all, so the same per-cell count would have thinned the
+           rock country too — the point is to MOVE the dressing, not to end
+           up with a bare island. The caps above are unchanged and still bind
+           first when you are standing in the middle of a mesa field. */
+        const count = 10 + Math.floor(busy * 26);
         for (let i = 0; i < count; i++) {
           const x = bx + hash(bx + i * 13, bz, 101 + i) * SC_CELL;
           const z = bz + hash(bx, bz + i * 17, 211 + i) * SC_CELL;
@@ -890,16 +925,19 @@
           const y = heightAt(x, z);
           if (y < 0.6) continue;
           const b = biomeAt(x, z);
-          if (b === "salt" && i > 1) continue;             // the pan is empty. that is its job.
+          // dune, salt, shore and oasis are bare ground — see SC_GROUND.
+          const G = SC_GROUND[b];
+          if (!G) continue;
+          if (G.dens < 1 && hash(x, z, 503) > G.dens) continue;
           const roll = hash(x, z, 307);
           const yaw = hash(x, z, 401) * TAU;
-          if (b === "rock" || b === "gravel" || roll < 0.55) {
+          if (roll < G.rock) {
             const s = 0.42 + hash(x, z, 409) * (b === "rock" ? 1.9 : 0.95);
             nR = put(scatter.rock, nR, x, y + s * 0.45, z, yaw, s, s * (0.6 + roll * 0.7), s);
-          } else if (roll < 0.9) {
+          } else if (roll < G.brush) {
             const s = 0.6 + hash(x, z, 419) * 0.9;
             nB = put(scatter.brush, nB, x, y + s * 0.5, z, yaw, s, s, s);
-          } else if (roll < 0.975) {
+          } else if (roll < G.bone) {
             nO = put(scatter.bone, nO, x, y + 0.12, z, yaw, 1, 1, 0.6 + roll);
           } else if (D.slopeAt(x, z) < 0.16) {
             nW = put(scatter.wreck, nW, x, y + 0.7, z, yaw, 1, 1, 1);

@@ -197,7 +197,15 @@
      Outposts and bands are placed ONCE per campaign, off the seeded stream,
      so the same seed is the same island with the same people on it. */
 
-  const OUTPOST_KINDS = [
+  /* THE FALLBACK TABLE ONLY. outpost.js owns the real kinds (W.OUTPOST_KINDS:
+     depot/camp/well/market, each with a label and a tag) and this list is the
+     shape used ONLY when that file did not load. It was called OUTPOST_KINDS
+     and that name shadowing the global is exactly how the nameplate shipped
+     reading "MARA undefined undefined": makeOutpost's real path returned
+     outpost.js's object, which has neither .label nor .note, and nothing
+     noticed because this table — which does have them — was sitting right
+     there under the same name. */
+  const FALLBACK_KINDS = [
     { kind: "depot", label: "DEPOT", note: "guns and powder", colour: 0xb0763a },
     { kind: "camp",  label: "CAMP",  note: "men for hire",    colour: 0x7a8f4a },
     { kind: "town",  label: "TOWN",  note: "both, dearer",    colour: 0xc2a05a },
@@ -272,13 +280,23 @@
       const o = W.outpost.build(k, p.x, p.z);
       if (o) {
         o.name = name;               // this file owns the naming; it knows the place
+        /* AND THE WORDS UNDER THE NAME. outpost.js keeps a kind's label and
+           tag in its KINDS table and does not copy them onto the object it
+           builds, so the campaign nameplate — which prints name + label with
+           note underneath — read "MARA undefined undefined" over every oasis
+           on the island. Stamped here rather than looked up at the plate,
+           because the plate is not the only reader and the next one would
+           have hit the same hole. */
+        const OK = W.OUTPOST_KINDS && W.OUTPOST_KINDS[k];
+        o.label = o.label || (OK && OK.label) || String(k).toUpperCase();
+        o.note = o.note || (OK && OK.tag) || "";
         o.y = y;
         o.at = at || null;
         o.biome = W.desert.biomeAt(p.x, p.z);
         return o;
       }
     }
-    const K = OUTPOST_KINDS.filter(function (k) { return k.kind === kind; })[0] || OUTPOST_KINDS[0];
+    const K = FALLBACK_KINDS.filter(function (k) { return k.kind === kind; })[0] || FALLBACK_KINDS[0];
     return {
       id: "op" + (S.outposts.length + 1),
       name: name, kind: kind, label: K.label, note: K.note,
@@ -983,14 +1001,14 @@
       '#wlCampHud .plate.op{border-color:#ffb15a;color:#ffd7bd}' +
       '#wlCampHud .plate.peer{border-color:#7fa8c8;color:#d8ecff}' +
       '#wlCompass{position:absolute;left:50%;transform:translateX(-50%);' +
-        'bottom:calc(env(safe-area-inset-bottom,0px) + 14px);opacity:.9}' +
-      '#wlMapBtn{position:absolute;right:calc(env(safe-area-inset-right,0px) + 14px);' +
-        'top:calc(env(safe-area-inset-top,0px) + 52px);pointer-events:auto;cursor:pointer;' +
+        'bottom:calc(var(--wl-safe-b, env(safe-area-inset-bottom,0px)) + 14px);opacity:.9}' +
+      '#wlMapBtn{position:absolute;right:calc(var(--wl-safe-r, env(safe-area-inset-right,0px)) + 14px);' +
+        'top:calc(var(--wl-safe-t, env(safe-area-inset-top,0px)) + 52px);pointer-events:auto;cursor:pointer;' +
         'appearance:none;border:1px solid rgba(255,255,255,.2);border-radius:12px;' +
         'background:rgba(12,9,5,.62);color:#f4ecd8;padding:10px 13px;font:700 12px/1 ui-sans-serif,system-ui,sans-serif;' +
         'letter-spacing:.16em}' +
-      '#wlZoom{position:absolute;right:calc(env(safe-area-inset-right,0px) + 14px);' +
-        'top:calc(env(safe-area-inset-top,0px) + 100px);display:flex;flex-direction:column;gap:8px}' +
+      '#wlZoom{position:absolute;right:calc(var(--wl-safe-r, env(safe-area-inset-right,0px)) + 14px);' +
+        'top:calc(var(--wl-safe-t, env(safe-area-inset-top,0px)) + 100px);display:flex;flex-direction:column;gap:8px}' +
       '#wlZoom button{pointer-events:auto;cursor:pointer;width:42px;height:42px;border-radius:12px;' +
         'border:1px solid rgba(255,255,255,.2);background:rgba(12,9,5,.62);color:#f4ecd8;' +
         'font:700 18px/1 ui-sans-serif,system-ui,sans-serif}' +

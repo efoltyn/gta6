@@ -1161,8 +1161,8 @@
     const css = document.createElement("style");
     css.id = "wgpOldCss";
     css.textContent =
-      "#wgpOldFire{position:fixed;right:calc(env(safe-area-inset-right,0px) + 20px);" +
-      "bottom:calc(env(safe-area-inset-bottom,0px) + 130px);width:86px;height:86px;border-radius:50%;" +
+      "#wgpOldFire{position:fixed;right:calc(var(--wl-safe-r, env(safe-area-inset-right,0px)) + 20px);" +
+      "bottom:calc(var(--wl-safe-b, env(safe-area-inset-bottom,0px)) + 130px);width:86px;height:86px;border-radius:50%;" +
       "background:rgba(196,69,58,.42);border:2px solid rgba(255,255,255,.28);z-index:47;" +
       "pointer-events:auto;display:flex;align-items:center;justify-content:center;" +
       "font:800 13px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.1em;color:#f4ecd8}" +

@@ -1754,7 +1754,9 @@
     '#wlTerrCv{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:grab}' +
     '#wlTerrCv:active{cursor:grabbing}' +
     '#wlTerrTop{position:relative;z-index:2;display:flex;gap:10px;align-items:center;' +
-      'padding:calc(env(safe-area-inset-top,0px) + 42px) 13px 8px;' +
+      'padding:calc(var(--wl-safe-t, env(safe-area-inset-top,0px)) + 46px) ' +
+      'calc(var(--wl-safe-r, env(safe-area-inset-right,0px)) + 13px) 8px ' +
+      'calc(var(--wl-safe-l, env(safe-area-inset-left,0px)) + 13px);' +
       'background:linear-gradient(rgba(8,6,4,.88),rgba(8,6,4,0));pointer-events:none}' +
     '#wlTerrTop b{font:800 15px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.1em;white-space:nowrap}' +
     '#wlTerrTop .chip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}' +
@@ -1770,7 +1772,10 @@
       'display:flex;border:1px solid rgba(255,255,255,.18);background:rgba(8,6,4,.5)}' +
     '#wlTerrShare i{display:block;height:100%;transition:width .5s cubic-bezier(.2,.8,.2,1)}' +
     '#wlTerrCard{position:relative;z-index:2;margin-top:auto;' +
-      'padding:12px 13px calc(env(safe-area-inset-bottom,0px) + 13px);' +
+      /* + --wl-footer: this card is the bottom of a FIXED full-bleed layer,
+         so #stage's own bottom padding does not reach it and RIDE HERE sat
+         under the match strip. */
+      'padding:12px 13px calc(var(--wl-safe-b, env(safe-area-inset-bottom,0px)) + var(--wl-footer,0px) + 13px);' +
       'background:linear-gradient(rgba(8,6,4,0),rgba(8,6,4,.88) 52%);pointer-events:none}' +
     '#wlTerrCard .in{pointer-events:auto;max-width:620px;margin:0 auto;' +
       'border:1px solid rgba(255,255,255,.14);border-radius:14px;background:rgba(18,14,9,.92);padding:11px 13px}' +
@@ -2007,7 +2012,7 @@
     view.cz = clamp(view.cz, -lim, lim);
   }
 
-  let hidden = null, stageZ = null;
+  let hidden = null;
   /* campaign.js hands its MAP button over with {x, z, dist} — where you are
      and how far its camera was pulled back — and it publishes `campaign:zoom`
      for the same reason: it wants the pull-back and this map to feel like one
@@ -2022,14 +2027,14 @@
     if (!ensure()) { W.toast("the island is not raised yet", "bad"); return; }
     open = true;
     ctx.screen(screenHtml());
-    /* THE STAGE HAS TO COME UP OVER campaign.js's HUD. #stage is z-index 40
-       and #wlCampHud is 45, so a map painted into the stage would be under
-       the compass and under the very button that opened it. Raising the
-       stage for the life of this screen and putting it back on close is one
-       line and touches nobody else's file; hiding the campaign HUD is the
-       other half, because a compass over a strategic map is noise. */
-    const stg = ctx.stage || document.getElementById("stage");
-    if (stg) { stageZ = stg.style.zIndex; stg.style.zIndex = "66"; }
+    /* NO Z-INDEX HACK HERE ANY MORE. This used to raise #stage to 66 for the
+       life of the map, because #stage was 40 and campaign.js's compass was
+       45 — and that fixed the compass by burying the match strip, which put
+       the BOARD button under the map on every device frame measured. The
+       stage now outranks all campaign furniture by the ladder stated in
+       games/warlord.html, and the strip outranks the stage on purpose. All
+       that is left here is hiding the compass, which is a real decision: a
+       compass over a strategic map is noise. */
     hidden = document.getElementById("wlCampHud");
     if (hidden) hidden.style.display = "none";
     const oldMap = document.getElementById("wlMap");
@@ -2074,8 +2079,6 @@
     tintFull();                       // finish any half-spread claim instantly
     const ctx = T.ctx;
     if (ctx && ctx.closeScreen) ctx.closeScreen();
-    const stg = ctx && (ctx.stage || document.getElementById("stage"));
-    if (stg) stg.style.zIndex = stageZ || "";
     if (hidden) hidden.style.display = "";
     hidden = null; cv = null; g2 = null; paths = null; pathsKey = "";
     W.emit("territory:close", null);

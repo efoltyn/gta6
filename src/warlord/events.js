@@ -812,7 +812,7 @@
               loyMove(-4, "the army does not trust deserters");
               reconcile();
             } },
-          { key: "pick", label: "TAKE THE THREE WHO LOOK LIKE SOLDIERS", show: n >= 6,
+          { key: "pick", label: "TAKE THE BEST THREE", show: n >= 6,
             hint: "+3 men · they cost the same as any levy · the rest remember you",
             run: function () {
               for (let i = 0; i < 3; i++) join("levy", guns[i], 0.45);
@@ -1573,7 +1573,7 @@
               loyMove(-10, "you paid another warlord");
               S.fame = Math.max(0, S.fame - 8);
             } },
-          { key: "defy", label: "SEND THE RIDER BACK WITHOUT HIS HORSE", cls: "hot",
+          { key: "defy", label: "SEND HIM BACK ON FOOT", cls: "hot",
             hint: "+fame · " + esc(b.name) + " starts hunting you",
             run: function () {
               b.mood = "hunt"; b.goal = { x: S.you.x, z: S.you.z }; b.cooldown = 0;
@@ -1621,7 +1621,7 @@
               ev().unrest = Math.max(0, ev().unrest - 2);
               reconcile();
             } },
-          { key: "let", label: "OPEN THE GATE. ANYONE WHO WANTS TO GO, GOES.", cls: "",
+          { key: "let", label: "OPEN THE GATE", cls: "",
             hint: "-" + men(cut.length) + " · the ones who stay are yours",
             run: function () {
               for (let i = 0; i < cut.length; i++) W.removeSoldier(cut[i].id, false);

@@ -1483,8 +1483,8 @@
     const s = document.createElement("style");
     s.id = "wlWardrobeCss";
     s.textContent =
-      '#wlWardBtn{position:fixed;z-index:46;left:calc(env(safe-area-inset-left,0px) + 14px);' +
-        'top:calc(env(safe-area-inset-top,0px) + 52px);display:none;align-items:center;gap:7px;' +
+      '#wlWardBtn{position:fixed;z-index:46;left:calc(var(--wl-safe-l, env(safe-area-inset-left,0px)) + 14px);' +
+        'top:calc(var(--wl-safe-t, env(safe-area-inset-top,0px)) + 52px);display:none;align-items:center;gap:7px;' +
         'appearance:none;cursor:pointer;border:1px solid rgba(255,255,255,.2);border-radius:12px;' +
         'background:rgba(12,9,5,.62);color:#f4ecd8;padding:9px 12px;' +
         'font:700 12px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.16em}' +

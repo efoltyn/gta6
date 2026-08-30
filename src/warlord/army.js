@@ -305,32 +305,99 @@
     const oddsWord = odds > 0.75 ? "you should win" : odds > 0.55 ? "an even fight"
       : odds > 0.3 ? "you are outmatched" : "they will destroy you";
 
-    /* THE READOUT SURVIVES THE POP-UP. The first attempt at un-blocking this
-       screen deleted the tables and left five bare verbs, and that was the
-       wrong lesson — the content was never the complaint. What a rider needs
-       before committing an army is exactly this: what they are made of, what
-       they are carrying, and the two bars side by side. It is the same markup
-       the card used; it just lives in a strip that does not stop the world. */
+    /* THE READOUT IS A PICTURE NOW, NOT A SPREADSHEET. The pop-up died two
+       revisions ago and the tables came with it into the rail, which fixed
+       the blocking and kept the wrong shape: a sentence ("210 men, mostly 120
+       soldiers, best gun rpg / rocket launcher, 1% — they will destroy you")
+       on top of a twelve-row scrolling list of "1 RAIDER · RPG / ROCKET
+       LAUNCHER · PLATE RIG". Nobody reads that with a band riding at them,
+       and the campaign clock does not stop while they try.
+
+       Three facts decide this and all three are now shapes:
+         · THE ODDS   one split bar, your colour against theirs, with the
+                      number and the verdict said once instead of three times.
+         · WHAT THEY  one stacked bar segmented by TIER — the segment widths
+           ARE MADE   are the composition, so forty levies and fifteen
+           OF         veterans are different PICTURES, not different sentences.
+         · WHAT THEY  chips, biggest first, capped at four with a "+N" — the
+           CARRY      long tail of one-offs was most of the old table's rows
+                      and none of its information.
+       The full per-man roster is not gone: INSPECT opens it, which is what
+       the code comment has claimed since the rail was written while
+       paintRoster sat unreachable. */
+    const TIER_COLOUR = { levy: "#8d8267", raider: "#c07f3a", soldier: "#c4593a", veteran: "#ffd166" };
+    const total = Math.max(1, band.men.length);
+
+    // composition by tier, strongest first — the same order groupsOf uses
+    const byTier = {};
+    for (let i = 0; i < band.men.length; i++) {
+      const t = band.men[i].tier;
+      byTier[t] = (byTier[t] || 0) + 1;
+    }
+    const tiers = Object.keys(byTier).sort(function (a, b) { return W.tierIndex(b) - W.tierIndex(a); });
+    let stack = "", legend = "";
+    for (let i = 0; i < tiers.length; i++) {
+      const t = tiers[i], n = byTier[t], pct = (n / total) * 100;
+      const c = TIER_COLOUR[t] || "#8d8267";
+      // the count goes INSIDE the segment, but only where it fits — a number
+      // clipped to "1" in a 4% sliver is worse than no number
+      stack += '<i style="width:' + pct.toFixed(2) + '%;background:' + c + '">' +
+        (pct > 11 ? n : "") + '</i>';
+      legend += '<span><em style="background:' + c + '"></em>' + n + " " +
+        esc(W.tier(t).label) + '</span>';
+    }
+
+    // what they are carrying, biggest count first
+    const byGun = {};
+    for (let i = 0; i < band.men.length; i++) {
+      const w = band.men[i].wid;
+      byGun[w] = (byGun[w] || 0) + 1;
+    }
+    const guns = Object.keys(byGun).sort(function (a, b) { return byGun[b] - byGun[a]; });
+    let chips = "";
+    for (let i = 0; i < guns.length && i < 4; i++) {
+      chips += '<span class="wl-chip"><b>' + byGun[guns[i]] + '</b> ' + esc(W.gunLabel(guns[i])) + '</span>';
+    }
+    if (guns.length > 4) chips += '<span class="wl-chip wl-dim">+' + (guns.length - 4) + '</span>';
+    let armoured = 0, bestArm = "none";
+    for (let i = 0; i < band.men.length; i++) {
+      const a = band.men[i].armour || "none";
+      if (a === "none") continue;
+      armoured++;
+      if (W.armour(a).soak > W.armour(bestArm).soak) bestArm = a;
+    }
+    if (armoured) chips += '<span class="wl-chip arm"><b>' + armoured + '</b> ' + esc(W.armour(bestArm).label) + '</span>';
+
+    const myShare = mine / Math.max(1, mine + theirs);
     const body =
-      '<div class="wl-small" style="line-height:1.7">' + esc(comp.text) + '.<br>' +
-        '<span class="wl-dim">' + esc(armourLine(band.men)) + '. carrying about $' +
-        (band.gold | 0) + '.</span></div>' +
-      '<div class="wl-lbl">THE ODDS</div>' +
-      '<div class="wl-row"><span>YOU <b>' + Math.round(mine) + '</b></span>' +
-        bar(mine / Math.max(1, mine + theirs), "var(--hot)") + '</div>' +
-      '<div class="wl-row"><span>THEM <b>' + Math.round(theirs) + '</b></span>' +
-        bar(theirs / Math.max(1, mine + theirs), colour) + '</div>' +
-      '<div class="wl-row wl-small wl-dim"><span>' + W.armySize() + ' of yours against ' +
-        band.men.length + ' of theirs</span></div>' +
-      '<div class="wl-lbl">THE MEN OPPOSITE</div>' + gh +
-      (asked ? '<div class="wl-row wl-small" style="color:var(--blood)">they already told you no.</div>' : '') +
-      (price == null ? '<div class="wl-row wl-small wl-dim">' + esc(hireWhy(band) || "") + '</div>' : '') +
-      (rob ? '<div class="wl-row wl-small wl-dim">you outnumber them badly enough to just take it — gold and guns, no prisoners.</div>' : '');
+      '<div class="wl-split">' +
+        '<i style="width:' + (myShare * 100).toFixed(2) + '%;background:var(--hot)"></i>' +
+        '<i style="width:' + ((1 - myShare) * 100).toFixed(2) + '%;background:' + colour + '"></i>' +
+      '</div>' +
+      '<div class="wl-ends"><span>YOU ' + W.armySize() + '</span><span>' +
+        band.men.length + ' THEM</span></div>' +
+      '<div class="wl-verdict"><b>' + Math.round(odds * 100) + '%</b> &mdash; ' + oddsWord + '</div>' +
+      '<div class="wl-lbl">THEIR MEN</div>' +
+      '<div class="wl-stack">' + stack + '</div>' +
+      '<div class="wl-legend">' + legend + '</div>' +
+      '<div class="wl-lbl">CARRYING</div>' +
+      '<div class="wl-chips">' + chips + '</div>' +
+      (asked ? '<div class="wl-row wl-small" style="color:var(--blood)">they already told you no.</div>' : "") +
+      (rob ? '<div class="wl-row wl-small wl-dim">you outnumber them badly enough to just take it.</div>' : "");
 
     ctx.verbs({
       title: band.name,
-      sub: band.men.length + " MEN &middot; " + comp.short + " &middot; " +
-           Math.round(odds * 100) + "% &mdash; " + oddsWord +
+      // the header is IDENTITY only. The odds used to be said here, again in
+      // the body and a third time on the ATTACK chip; a number repeated three
+      // times is not emphasis, it is noise in the one line that has to fit on
+      // a 390 px phone.
+      /* The faction only earns its place when it is not already the name.
+         "SAND BANDITS · 210 MEN · SAND BANDITS" was on screen — the band name
+         IS the faction label for every bandit crew, so the header said the
+         same thing twice in a line that has to fit on a 390 px phone. */
+      sub: band.men.length + " MEN" +
+           (String(F.label).toUpperCase() === String(band.name).toUpperCase()
+             ? "" : " &middot; " + esc(F.label)) +
            (band.mood === "hunt" ? " &middot; HUNTING YOU" : ""),
       body: body,
       options: [
@@ -341,8 +408,9 @@
         (price != null
           ? { label: "HIRE", note: "$" + price, disabled: W.state.gold < price,
               on: function () { hireBand(price); } }
-          : { label: "HIRE", note: "never", disabled: true, on: function () {} }),
+          : { label: "HIRE", note: hireWhy(band) ? "never" : "no", disabled: true, on: function () {} }),
         (rob ? { label: "ROB", note: "no fight", on: robBand } : null),
+        { label: "INSPECT", note: "every man", on: paintRoster },
         { label: "RIDE AWAY", on: leaveBand },
       ],
     });

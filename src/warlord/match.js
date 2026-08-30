@@ -1490,8 +1490,10 @@
     styled = true;
     const s = G.document.createElement("style");
     s.textContent = `
-    #wl-match{position:fixed;left:0;right:0;bottom:0;z-index:55;
-      padding:8px 12px calc(env(safe-area-inset-bottom,0px) + 8px);
+    #wl-match{position:fixed;left:0;right:0;bottom:0;z-index:var(--z-match,64);
+      padding:8px calc(var(--wl-safe-r, env(safe-area-inset-right,0px)) + 12px)
+              calc(var(--wl-safe-b, env(safe-area-inset-bottom,0px)) + 8px)
+              calc(var(--wl-safe-l, env(safe-area-inset-left,0px)) + 12px);
       background:linear-gradient(#0000,#0b0906 42%);display:none;
       font:600 12px/1.25 ui-sans-serif,system-ui,-apple-system,sans-serif}
     #wl-match.on{display:block}
@@ -1562,10 +1564,32 @@
     strip.className = "on";
     G.document.body.appendChild(strip);
     paintStrip();
+    publishHeight();
+  }
+  /* THE STRIP TELLS THE PAGE HOW TALL IT IS, and this is not decoration: the
+     match bar and the verb rail are both fixed to the bottom at z-index 55,
+     so on a live match the bar sat ON TOP of the encounter's buttons and
+     ATTACK / DEMAND / RIDE AWAY were unclickable — cut off by a strip that
+     was drawn after them. A typed offset in the page's CSS would be wrong
+     the moment this bar gains or loses a row, so it publishes its measured
+     height as --wl-footer and the rail docks above whatever that is. Zero
+     when there is no match, which is the singleplayer layout unchanged. */
+  function publishHeight() {
+    if (!G.document || !G.document.documentElement) return;
+    /* getBoundingClientRect, NOT offsetParent: a position:fixed element has
+       no offsetParent — it is null even when the strip is on screen — so the
+       first version of this published 0 every time and the rail went right on
+       sitting under the bar it was supposed to clear. */
+    const vis = strip && G.getComputedStyle(strip).display !== "none";
+    const h = vis ? Math.ceil(strip.getBoundingClientRect().height) : 0;
+    G.document.documentElement.style.setProperty("--wl-footer", (h || 0) + "px");
   }
   function removeStrip() {
     if (strip && strip.parentNode) strip.parentNode.removeChild(strip);
     strip = null;
+    if (G.document && G.document.documentElement) {
+      G.document.documentElement.style.setProperty("--wl-footer", "0px");
+    }
   }
   function territoryBar(markLeader) {
     const total = Math.max(1, regions().length);
@@ -1618,6 +1642,9 @@
       '</div>';
     const b = strip.querySelector("#mtBoard");
     if (b) b.onclick = function () { boardOpen ? closeBoard() : board(); };
+    // the bar grows a row when somebody is fighting — republish, or the verb
+    // rail is docked above a height this strip stopped being two paints ago
+    publishHeight();
   }
   function leader() {
     const a = living();
