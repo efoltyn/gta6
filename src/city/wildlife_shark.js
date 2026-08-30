@@ -122,7 +122,30 @@
   // still short enough that the LOD budget holds.
   const SHOW_F = 0.62;          // fraction of SENSE_R inside which the BODY is visible
   const FIN_F = 1.25;           // fin/wake proxy draws inside senseR * this
-  const TURN_RATE = 1.15;       // rad/s — a shark turns with its whole body
+  /* HOW FAST A BODY COMES ROUND, and it is a property of the BODY, not a
+     constant. This was one number for every animal in the sea — a 2 m reef
+     shark and a 12.7 m orca both swung at 66 deg/s — with a hand-written
+     `* 0.6` bolted on for the megalodon because that one was obviously wrong.
+     A big animal turns wider: at a similar speed the angular rate falls with
+     length, so the megalodon's exception is not an exception, it is the law
+     nobody had written down. TURN_REF/TURN_FALL are set so a great white
+     lands on the old 1.15 and a megalodon lands on the 0.69 that was tuned by
+     hand, which is why this changes no hunt that was already good and fixes
+     every one in between. */
+  const TURN_RATE = 1.15;       // rad/s at TURN_REF metres — a shark turns with its whole body
+  const TURN_REF = 5.0;         // m — the great white this rate was measured on
+  const TURN_FALL = 0.35;       // rate ~ (ref/len)^this
+  function turnRate(a) {
+    const s = a && a._shark;
+    if (s && s.turnR > 0) return s.turnR;
+    let len = 0;
+    if (typeof CBZ.marineBodyLen === "function") { try { len = +CBZ.marineBodyLen(a) || 0; } catch (e) {} }
+    if (!(len > 0.5)) len = TURN_REF * ((a && a.species && a.species.scale) || 1) / 1.2;
+    const r = TURN_RATE * Math.pow(TURN_REF / len, TURN_FALL);
+    const clamped = Math.max(0.45, Math.min(2.2, r));
+    if (s) s.turnR = clamped;
+    return clamped;
+  }
   const STUCK_BAIL = 0.9;       // s of blocked movement before it gives up the hunt
   // depth targets, as a MULTIPLE of the species' authored swim depth
   /* HOW DEEP THIS SHARK WANTS TO BE, per hunt state, as a multiple of its own
@@ -1240,7 +1263,7 @@
       return true;
     }
     // a shark turns with its whole body — no instant pivots, ever
-    const turn = (s.meg ? TURN_RATE * 0.6 : TURN_RATE) * dt;
+    const turn = turnRate(a) * dt;
     let d = shortest((want == null ? a.heading : want) - a.heading);
     if (d > turn) d = turn; else if (d < -turn) d = -turn;
     a.heading += d;
