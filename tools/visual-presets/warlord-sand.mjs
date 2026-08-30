@@ -73,7 +73,7 @@ const subjects = [
   },
   {
     id: "column-road", kind: "column", army: 180, dist: 120, yaw: 1.15, walk: 0,
-    strip: { frames: 5, stepSec: 2.4 },
+    strip: { frames: 4, stepSec: 2.6 },
     label: "A Column Crossing A Dune — The Road Forms",
     focus: "181 men riding an erg, five frames over ten simulated seconds. The road is NOT two hundred boot prints — at this range a boot is a fifth of a pixel and two hundred of them are still a fifth of a pixel. It is a band of churned sand stamped once every 2.4 m of ride, whose width and depth come from the roster size, with real boots scattered through it for the ten metres where a foot shape can be read. That is why the trail costs O(metres ridden) and not O(men).",
   },
@@ -322,7 +322,7 @@ async function stageSand(input) {
       C.camYaw(sub.yaw); C.camDist(sub.dist);
       X.calm(); X.step(200);
       C.dest(ERG.x + Math.sin(sub.yaw) * 1400, ERG.z + Math.cos(sub.yaw) * 1400);
-      for (let i = 0; i < 22; i++) { X.calm(); X.step(30); }
+      for (let i = 0; i < 16; i++) { X.calm(); X.step(30); }
     }
     C.camYaw(sub.yaw); C.camDist(sub.dist);
     X.calm(); X.step(10);
