@@ -19,6 +19,9 @@
      W.props.cover(kind, opts)     sandbag | gabion | barricade | ruin |
                                    boulder | slab | bank | palm | crate
      W.props.coverField(list)      a whole battlefield's cover, batched
+     W.props.house(opts)           a mud-brick dwelling — city/villagekit.js's
+                                   hut, repainted for this page's colour space
+     W.props.stall(opts)           a counter, a shade over it, and the goods
      W.props.bivouac(opts)         YOUR camp: fires, bedrolls, picket, rifles
      W.props.palm/fire/tent/...    the pieces, exposed, because a second copy
                                    of a palm is exactly what this file exists
@@ -30,6 +33,11 @@
    `userData.colliders` = the boxes that are real cover, in LOCAL metres. The
    caller places it. Nothing here touches W.state, and nothing here adds
    itself to the scene.
+
+   AN OUTPOST ALSO CARRIES `userData.folk` — where the PEOPLE stand, in the
+   same local metres. This file does not draw a man and must not: campaign.js
+   already owns forty-eight pooled studio.cast rigs and every rule about
+   dressing, seating and animating them. See THE FOLK, below.
 
    ---------------------------------------------------------------------
    WHAT I REUSED, AND WHAT I HAD TO MAKE, AND WHY
@@ -48,6 +56,11 @@
        already ships one would be the single dumbest thing in this file.
      · CBZ.weaponAppearance.<id> — the REAL rifles, for the stacked-arms pile
        in a camp. Three actual AKs leaning together, not three brown boxes.
+     · CBZ.assets + city/villagekit.js — the repo's OWN mud-brick huts, which
+       is where every house at every outpost comes from. Two script tags on
+       games/warlord.html, no city world. The full search that landed on it,
+       and why every other house and facade in this repo cannot run on this
+       page, is written up at HOUSES below.
 
    HAD TO MAKE, and why the existing one did not fit:
      · The outposts, the banners, the tents, the shade cloth, the well head,
@@ -2038,6 +2051,301 @@
     return g;
   };
 
+  /* ============================================================ HOUSES
+     THE OWNER, LOOKING AT AN OUTPOST: "HAVE A GUY WITH A CRATE OR A SMALL
+     STAND SELLING SHIT AND A LITTLE HOUSE — WE LEGIT HAVE HOUSES AND FACADES
+     ALREADY CODED YOU JUST NEED TO LOOK."
+
+     He is right, and the thing he is right about is city/villagekit.js. I
+     went and looked before writing a single BoxGeometry. What is actually in
+     this repo, and the verdict on each:
+
+       city/villagekit.js  ✔ USED, AND IT IS THE WHOLE HOUSE. hut_round,
+         hut_square, shack_lean — mud-brick and adobe dwellings at 3-4 m with
+         a slab roof, a doorway gap that follows the hut's own facing, and a
+         made bedroll (pallet, roll, turned-down blanket, pillow) on the
+         floor. It needs city/assets.js — a registry that wants THREE and CBZ
+         and nothing else — and CBZ.cmat, which the `look` pack already puts
+         on this page. No CBZ.city, no lot, no block, no heightfield, and it
+         never touches a scene. Two script tags on games/warlord.html.
+       city/facades/desertmod.js (+ adobe, ranch, spanish, brickhouse)
+         ✗ NOT REACHABLE FROM THIS PAGE, and the scale is the second reason,
+         not the first. facade_kit's contract is that a builder emits ONLY
+         through a ctx, and that ctx is minted inside city/buildings.js — so
+         running desertmod means loading the whole `citycore` pack:
+         buildings.js (9 074 lines), BufferGeometryUtils, furniture.js. What
+         it then hands back is a dressed shell of up to four storeys over a
+         22 m x 16 m plan. That is a mid-block office. A well in an erg does
+         not have one.
+       world/desertcity.js ✗ adds itself to CBZ.scene on build, has no
+         single-building entry point, and its smallest structure is a 22 m
+         blast shelter on 5 m posts. (archive/prison-v1's copy is byte
+         identical — one file, not two.)
+       city/towngen.js     ✗ generates a SETTLEMENT on a road grid with lots.
+         Its own village recipe is 2 x 2 blocks of 34 x 30 m, which is larger
+         than the entire compound an outpost is.
+       city/construction.js ✗ DEAD. The first IIFE hits a bare `return` at
+         line 81 and has since systems/building.js replaced it, so
+         build-wall / build-doorframe have never been registered.
+       city/biome_desert.js ✗ lives inside CBZ.addLandmass and needs the
+         archipelago contract. Its four small buildings are cityMakeBuilding
+         calls, so it is the facade route with extra steps.
+
+     WHAT VILLAGEKIT NEEDED FROM THIS FILE, and it is two seams, not geometry:
+
+       THE COLOUR. This file's header does the arithmetic: the page runs
+       outputEncoding = sRGBEncoding with ACES on top, so a hex is STORED
+       linear and encoded on the way out, and desert.js's sand arrives at
+       0xE8-0xF1 on screen. villagekit's palettes are authored the way a
+       person means a hex — ADOBE[0] is 0xc9a97a, "sandy tan" — so a hut
+       dropped on this page unchanged is a white lump on white sand, which is
+       the exact defect the owner photographed at the old box village.
+       tone() puts every one of its colours through the sRGB transfer and one
+       scale factor. Its shared cmat instances are never written to; the swap
+       mints new ones, so the city keeps its own huts.
+
+       THE COLLIDERS. hutInterior pushes its wall ring straight into
+       CBZ.colliders, in WORLD axes, off the x/z it was handed. Every factory
+       in this file builds AT THE ORIGIN and lets the caller place it, so a
+       hut built here would have staked four walls in the middle of the sea.
+       So the build runs with CBZ.colliders swapped for a scratch array and
+       what lands in it is converted into this file's own local
+       {x,y,z,w,h,d}. That is also what keeps the hut walk-into-able once
+       place() registers them: the doorway gap survives the trip. */
+
+  /* villagekit's hexes are sRGB; this file's are linear-and-scaled. TONE_K
+     is not a taste knob — it is fixed by making villagekit's hut wall land
+     on this file's own `sand`: srgbToLinear(0xc9) = 0.591 against 0x31/255 =
+     0.192, so 0.325. Rounded to 0.33 and applied to all three channels, so
+     the hue villagekit chose survives the correction and only the level
+     moves. */
+  const TONE_K = 0.33;
+  const _toned = new Map();
+  function srgbLin(v) { return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
+  function tone(hex) {
+    let m = _toned.get(hex);
+    if (m) return m;
+    const c = new THREE.Color(hex);
+    const out = new THREE.Color(srgbLin(c.r) * TONE_K, srgbLin(c.g) * TONE_K, srgbLin(c.b) * TONE_K);
+    const lh = out.getHex();
+    m = CBZ.cmat ? CBZ.cmat(lh) : new THREE.MeshLambertMaterial({ color: lh });
+    _toned.set(hex, m);
+    return m;
+  }
+
+  const HOUSE_KINDS = ["hut_square", "hut_round", "shack_lean"];
+  P.houseKinds = HOUSE_KINDS.slice();
+
+  /* A HOUSE. Returns a group at the origin, walls on the ground, facing +Z
+     with its doorway on -Z, `userData.colliders` in local metres and
+     `userData.h` its ridge height.
+
+     `rot` IS QUANTISED TO A QUARTER TURN and that is villagekit's rule, not
+     a shortcut: hutInterior picks which of the four wall runs gets the
+     doorway gap off `round(rot / (PI/2))`, and it pushes those walls as
+     world-axis AABBs. At any other angle the gap and the walls stop agreeing
+     and the door is in a wall. */
+  P.house = function (opts) {
+    opts = opts || {};
+    const r = stream(opts.seed == null ? 3 : opts.seed);
+    const g = new THREE.Group();
+    g.userData.colliders = [];
+    const A = CBZ.assets;
+    const key = opts.kind || HOUSE_KINDS[(r.f() * HOUSE_KINDS.length) | 0];
+    const def = A && A.get ? A.get(key) : null;
+    if (!def) {
+      /* villagekit is not on the page. The boot list marks the warlord batch
+         optional on purpose — a missing file costs you a feature, not the
+         game — so an outpost with no houses in it is a worse outpost and not
+         a broken one. Named, so audit() can say so out loud. */
+      g.userData.missing = key;
+      return g;
+    }
+    const rot = Math.round((opts.rot || 0) / (Math.PI / 2)) * (Math.PI / 2);
+    const s = opts.scale || 1;
+    const inner = new THREE.Group();
+    const held = CBZ.colliders;
+    const scratch = [];
+    try {
+      CBZ.colliders = scratch;
+      def.build({ group: inner, x: 0, z: 0, rot: rot, rng: r.f, scale: s });
+    } catch (e) {
+      g.userData.error = String((e && e.message) || e);
+    } finally {
+      CBZ.colliders = held;
+    }
+    g.add(inner);
+    // repaint into this page's linear palette, and give every wall a shadow
+    inner.traverse(function (o) {
+      if (!o.isMesh) return;
+      if (o.material && o.material.color) o.material = tone(o.material.color.getHex());
+      o.castShadow = true; o.receiveShadow = true;
+    });
+    /* AND THE DOORWAY IS PULLED ONTO THE WALL IT BELONGS TO. hutInterior
+       parks its doorway plane at `-fhz + 0.05`, where fhz is the def's
+       FOOTPRINT half-depth — and the footprint is deliberately larger than
+       the building (hut_square is a 3.3 m box inside a 2.0 m half-footprint),
+       because a footprint is what the town generator reserves, not what the
+       walls measure. So the door hangs 30 cm proud of the house: from ten
+       metres it reads as a dark slab floating in front of a hut, which is
+       precisely the kind of thing that gets photographed and complained
+       about. Fixed here rather than in villagekit.js because that file is the
+       city's and this is a warlord-page framing of it; measured off the
+       biggest mesh in the hut, which is the wall, so it holds for the round
+       one and the lean-to as well as the square. */
+    let wall = null, vol = 0;
+    const bb = new THREE.Box3(), sz = new THREE.Vector3();
+    inner.children.forEach(function (o) {
+      if (!o.isMesh || !o.geometry) return;
+      bb.setFromObject(o); bb.getSize(sz);
+      const v = sz.x * sz.y * sz.z;
+      if (v > vol) { vol = v; wall = o; }
+    });
+    if (wall) {
+      bb.setFromObject(wall); bb.getSize(sz);
+      const hz = sz.z / 2;
+      inner.children.forEach(function (o) {
+        if (!o.isMesh || o === wall || !o.geometry) return;
+        bb.setFromObject(o); bb.getSize(sz);
+        if (sz.z > 0.14 || sz.y < 0.9) return;          // only the door plate
+        if (o.position.z < -hz) o.position.z = -hz + 0.05;
+      });
+    }
+    /* THE TURN GOES ON LAST, on purpose. Box3.setFromObject answers in world
+       axes; measuring the wall through an already-rotated parent would hand
+       back the hut's X extent as its Z on every odd quarter-turn. All three
+       kits happen to be square in plan so it would not have shown, and a
+       silent right answer for the wrong reason is how the next kit breaks. */
+    inner.rotation.y = rot;
+    for (let i = 0; i < scratch.length; i++) {
+      const b = scratch[i];
+      col(g.userData.colliders,
+        (b.minX + b.maxX) / 2, (b.y0 + b.y1) / 2, (b.minZ + b.maxZ) / 2,
+        Math.max(0.1, b.maxX - b.minX), Math.max(0.1, b.y1 - b.y0), Math.max(0.1, b.maxZ - b.minZ),
+        "house");
+    }
+    g.userData.h = (def.y1 || 3) * s;
+    g.userData.hx = (def.footprint ? def.footprint.hx : 2) * s;
+    g.userData.kind = key;
+    return g;
+  };
+
+  /* A HAMLET — n houses on an arc, each turned so its door faces the middle
+     of the compound, which is what makes three buildings read as a place
+     somebody lives rather than three objects. `at` is the arc's centre
+     bearing and `spread` how wide it opens. */
+  function hamlet(near, far, CS, opts) {
+    const r = stream(opts.seed == null ? 5 : opts.seed);
+    const n = opts.n || 3;
+    const GY = opts.gy || FLAT;
+    for (let i = 0; i < n; i++) {
+      const a = opts.at + (n === 1 ? 0 : ((i / (n - 1)) - 0.5) * (opts.spread == null ? 1.1 : opts.spread));
+      const rr = opts.r * r.range(0.88, 1.12);
+      const x = Math.cos(a) * rr, z = Math.sin(a) * rr;
+      /* THE DOOR LOOKS INWARD. The hut's doorway is on its local -Z, so the
+         facing that puts it toward the compound centre is the bearing back
+         to the origin — snapped to the quarter turn villagekit needs. */
+      const face = Math.atan2(-x, -z) + Math.PI;
+      const h = P.house({ seed: (opts.seed || 5) * 17 + i * 7, rot: face, kind: opts.kind });
+      const hy = (opts.y == null ? -0.12 : opts.y) + GY(x, z);
+      h.position.set(x, hy, z);
+      near.add(h);
+      pushCols(CS, h, x, hy, z, 0);
+      if (far) {
+        // at 3 km a 3.3 m hut is a pixel; the far block is deliberately fat,
+        // the same trade farCrane() states
+        box(far, 6.4, 4.4, 6.4, M("sandDark"), x, 2.2, z);
+      }
+    }
+  }
+
+  /* ============================================================ THE STALL
+     "HAVE A GUY WITH A CRATE OR A SMALL STAND SELLING SHIT." This is the
+     stand, and every one of the four kinds gets one, because every one of
+     the four kinds is a place you walk up to and BUY something — that is
+     what outpost.js's whole screen is. A counter, a shade over it, what is
+     for sale ON it, and a crate at the end for the man to sit on.
+
+     The counter is 1.05 m: a man's rig is 1.8 m and stands BEHIND it, so the
+     bar crosses him at the waist. At the 0.75 m the first pass used he
+     looked like he was standing behind a coffee table. */
+  P.stall = function (opts) {
+    opts = opts || {};
+    const g = new THREE.Group();
+    const r = stream(opts.seed == null ? 9 : opts.seed);
+    const w = opts.w || 5.0, d = opts.d || 3.4;
+    const shade = P.canopy({ w: w + 1.2, d: d + 1.4, h: opts.h || 2.85, mat: opts.mat || "tarp" });
+    g.add(shade);
+    // the counter, along local X, with the trader's side at -Z
+    box(g, w, 1.05, 0.7, M("wood"), 0, 0.52, 0.55);
+    box(g, w + 0.4, 0.1, 0.95, M("woodDark"), 0, 1.08, 0.55);      // the top board
+    for (let s = -1; s <= 1; s += 2) box(g, 0.16, 1.0, 0.6, M("woodDark"), s * (w / 2 - 0.2), 0.5, 0.55);
+    // the goods: small crates on the counter, and the stock behind it
+    const on = P.crates({ n: 5, spread: w * 0.32, seed: (opts.seed || 9) * 3 });
+    on.scale.setScalar(0.34);
+    on.position.set(r.range(-0.6, 0.6), 1.13, 0.55);
+    g.add(on);
+    const behind = P.crates({ n: 7, spread: 1.3, seed: (opts.seed || 9) * 7 });
+    behind.scale.setScalar(0.8);
+    behind.position.set(-w * 0.28, -0.05, -1.15);
+    g.add(behind);
+    const dr = P.drums({ n: 3, spread: 0.8, seed: (opts.seed || 9) * 11, mat: opts.drums || "rust" });
+    dr.position.set(w * 0.34, -0.05, -1.2);
+    g.add(dr);
+    // and the crate he sits on when nobody is buying
+    box(g, 0.8, 0.8, 0.8, M("wood"), -w * 0.42, 0.36, -0.85, r.range(-0.3, 0.3));
+    g.userData.colliders = [];
+    col(g.userData.colliders, 0, 0.52, 0.55, w, 1.05, 0.7, "counter");
+    return g;
+  };
+
+  /* ============================================================ THE FOLK
+     WHERE THE PEOPLE STAND. This file does not draw a man and must not: the
+     campaign already owns forty-eight pooled CBZ.studio.cast rigs, dresses
+     them through W.outfits, seats them with W.sand.plant and walks them on
+     CBZ.animChar, and a second way to put a body on this island is exactly
+     the drift CONTRACT.md exists to stop.
+
+     What this file DOES own is where the counter is. So each outpost
+     publishes `userData.folk` — anchors in LOCAL metres, `{x,z,yaw,role}` —
+     and campaign.js turns them into world coordinates and asks its own pool
+     for bodies. yaw is the local facing, 0 being +Z, which composes with the
+     group's own rotation the way any child does.
+
+     ROLES, and they are not decoration — campaign.js picks a man's tier off
+     them, so a trader is not dressed as a levy: `trader` the one you buy
+     from, `guard` the ones with rifles, `hand` the labour, `idler` whoever
+     is sat about. */
+  function folk(list, x, z, yaw, role) {
+    list.push({ x: x, z: z, yaw: yaw || 0, role: role || "idler" });
+    return list;
+  }
+  // face the compound centre from wherever you are standing
+  function facing(x, z) { return Math.atan2(-x, -z); }
+
+  /* A STALL, TURNED TO FACE THE PLACE IT SITS IN. The counter's customer side
+     is the stall's local +Z, so the yaw that points it at the middle of the
+     compound is atan2(-x, -z) — and the trader, who stands 1.35 m behind his
+     own counter, therefore comes out 1.35 m FURTHER from the centre than the
+     stall is, which is exactly where a man behind a counter stands. Derived
+     rather than typed, so moving a stall moves its trader with it and the two
+     can never drift apart. */
+  function standAt(near, CS, F, x, z, opts) {
+    opts = opts || {};
+    const rr = Math.max(0.001, Math.hypot(x, z));
+    const yaw = Math.atan2(-x, -z);
+    const y = opts.y == null ? -0.12 : opts.y;
+    const st = P.stall(opts);
+    const sy2 = y + (opts.gy || FLAT)(x, z);
+    st.position.set(x, sy2, z);
+    st.rotation.y = yaw;
+    near.add(st);
+    pushCols(CS, st, x, sy2, z, yaw);
+    const k = 1 + 1.35 / rr;
+    folk(F, x * k, z * k, yaw, "trader");
+    return st;
+  }
+
   /* ============================================================ OUTPOSTS
      THE FOUR PLACES. outpost.js already declares what they DO; this is what
      they LOOK like, and the rule for all four is the same:
@@ -2062,6 +2370,10 @@
      buries itself on the other. Everything here is sunk 0.2-0.3 m into the
      sand instead and the terrain shows through, which is both cheaper and
      correct on ground that is never flat. */
+  /* opts: {seed, colour, lod, lodR, groundAt}. `groundAt(x, z) -> y` is the
+     compound's own ground, in local metres — see THE GROUND above. Without
+     it everything is built on a flat plane, which is what the gallery wants
+     and what a battlefield already is. */
   P.outpost = function (kind, opts) {
     opts = opts || {};
     const build = { depot: buildDepot, camp: buildCamp, well: buildWell, market: buildMarket }[kind];
@@ -2072,12 +2384,44 @@
   P.well = function (o) { return buildWell(o || {}); };
   P.market = function (o) { return buildMarket(o || {}); };
 
+  /* ============================================================ THE GROUND
+     A COMPOUND IS NOT ONE RIGID OBJECT AND PRETENDING IT IS IS WHAT MAKES
+     THINGS FLOAT.
+
+     The note above says why there is no hardstand: a flat disc on a dune
+     floats a metre on one side and buries itself on the other. That is true
+     of the disc AND of everything standing on it. campaign.js levels the pad
+     before it stands an outpost up, but level is 20 m of ground within a
+     couple of metres, not a table — and a 2.6 m hut with 0.6 m of daylight
+     under one corner is the single loudest "this is fake" an outpost can
+     emit. The first pass photographed exactly that at three of the four
+     kinds.
+
+     THE SEAM IS A FUNCTION, NOT A HEIGHTFIELD. This file must not know what
+     desert.js is; the caller passes `groundAt(x, z)` — local metres in, a
+     local height OUT, relative to the compound's own plane — and everything
+     that is its own object is seated on what that function says. It is
+     called at BUILD time and not after, and that ordering is load-bearing:
+     core/batch.js welds the inert meshes together inside finish(), so a
+     house re-seated afterwards would be moving an empty group while its
+     geometry stayed baked where it was.
+
+     WHAT DOES *NOT* GET IT, and the rule is the same one a builder uses: a
+     thing that is rigid in the world stays rigid. The container row is one
+     12 m steel box, the gantry straddles it, a 22 m sandbag run is one wall,
+     the oasis bowl is one hollow. Those are sunk into the sand and let the
+     terrain cut them, which is what actually happens to them. Huts, tents,
+     palms, stalls, drums, fires and crates are separate objects standing on
+     the ground and they each get their own answer. */
+  const FLAT = function () { return 0; };
+
   function shellFor(opts) {
     const g = new THREE.Group();
     const near = new THREE.Group();
     const far = new THREE.Group();
     g.add(near); g.add(far);
     g.userData.colliders = [];
+    g.userData.folk = [];             // where the people stand — see THE FOLK
     g.userData.near = near; g.userData.far = far;
     return g;
   }
@@ -2095,6 +2439,7 @@
     const near = g.userData.near, far = g.userData.far;
     const r = stream(opts.seed == null ? 7 : opts.seed);
     const CS = g.userData.colliders;
+    const GY = opts.groundAt || FLAT;
     if (OLD) { oldBlock(near, CS, 14, 3, "metalDark"); return finish(g, opts); }
 
     /* --- THE CONTAINER YARD. Six of them, and they are laid out as a ROW
@@ -2168,19 +2513,35 @@
     }
 
     const crates = P.crates({ n: 20, spread: 4.0, seed: (opts.seed || 7) * 11 });
-    crates.position.set(-2.5, -0.1, 3.5);
+    crates.position.set(-2.5, -0.1 + GY(-2.5, 3.5), 3.5);
     near.add(crates);
     pushCols(CS, crates, -2.5, -0.1, 3.5, 0);
     const drums = P.drums({ n: 12, spread: 2.6, seed: (opts.seed || 7) * 13 });
-    drums.position.set(8.5, -0.05, 6.5);
+    drums.position.set(8.5, -0.05 + GY(8.5, 6.5), 6.5);
     near.add(drums);
 
     const shade = P.canopy({ w: 8, d: 6, h: 3.1, mat: "tarp" });
-    shade.position.set(7, -0.15, -1);
+    shade.position.set(7, -0.15 + GY(7, -1), -1);
     near.add(shade);
     const mast = P.banner(opts.colour == null ? 0xb9a13f : opts.colour, { h: 13, seed: opts.seed || 7 });
-    mast.position.set(-15, -0.2, 9);
+    mast.position.set(-15, -0.2 + GY(-15, 9), 9);
     g.add(mast);                       // outside near/far: the flag flies at both
+
+    /* THE STALL AND THE PORT HOUSES. A depot is the one kind where the guns
+       arriving is the whole story, so its stand sits in the open with the
+       crane behind it and its two buildings are the office and the store,
+       off to the landward side clear of the container row. */
+    const F = g.userData.folk;
+    standAt(near, CS, F, -8.5, 8.0, { seed: (opts.seed || 7) * 23, w: 5.4, mat: "tarp", drums: "metalDark", gy: GY });
+    hamlet(near, far, CS, { n: 2, at: -0.55, spread: 0.7, r: 16, seed: (opts.seed || 7) * 31, gy: GY });
+    // two hands working the row, a man at the crane leg, two on the wall, one
+    // sat on the drums. Facings are derived from where each of them stands.
+    folk(F, -4.0, -6.5, facing(-4.0, -6.5), "hand");
+    folk(F, 3.5, -3.6, facing(3.5, -3.6) + 0.8, "hand");
+    folk(F, 0.5, -8.4, facing(0.5, -8.4), "hand");
+    folk(F, -3.5, 10.2, facing(-3.5, 10.2) + Math.PI, "guard");
+    folk(F, 4.5, 10.4, facing(4.5, 10.4) + Math.PI, "guard");
+    folk(F, 8.0, 5.2, facing(8.0, 5.2) - 0.5, "idler");
 
     // ---- THE FAR SILHOUETTE: crane over a container block ----
     farCrane(far, H * 1.2, SPAN * 1.1);
@@ -2222,6 +2583,7 @@
     const near = g.userData.near, far = g.userData.far;
     const r = stream(opts.seed == null ? 13 : opts.seed);
     const CS = g.userData.colliders;
+    const GY = opts.groundAt || FLAT;
     if (OLD) { oldBlock(near, CS, 10, 2.5, "canvasDark"); return finish(g, opts); }
 
     /* FOURTEEN RIDGE TENTS IN TWO ARCS, not one. A single ring of nine at
@@ -2244,7 +2606,8 @@
         const a = -1.35 + (i / (n - 1)) * 2.7 + (ring ? 0.15 : 0);
         const rr = R * r.range(0.93, 1.07);
         list.push({
-          x: Math.cos(a) * rr, z: Math.sin(a) * rr, y: -0.1,
+          x: Math.cos(a) * rr, z: Math.sin(a) * rr,
+          y: -0.1 + GY(Math.cos(a) * rr, Math.sin(a) * rr),
           yaw: a + Math.PI / 2 + r.range(-0.16, 0.16),
           s: r.range(0.95, 1.2), sy: r.range(0.95, 1.15), tint: r.f(),
         });
@@ -2261,7 +2624,7 @@
       cyl(bell, 0.05, 3.2, 4.2, 10, MD("canvas"), 0, 2.1, 0);
       cyl(bell, 3.3, 3.3, 0.55, 10, M("canvasDark"), 0, 0.27, 0);
       cyl(bell, 0.07, 0.07, 5.4, 5, M("wood"), 0, 2.7, 0);
-      bell.position.set(s * 5.2, -0.2, -9.0);
+      bell.position.set(s * 5.2, -0.2 + GY(s * 5.2, -9.0), -9.0);
       bell.rotation.y = r.f() * TAU;
       near.add(bell);
       col(CS, s * 5.2, 1.6, -9.0, 6.2, 3.2, 6.2, "tent");
@@ -2274,7 +2637,7 @@
     for (let i = 0; i < 3; i++) {
       const a = -1.3 + i * 1.3;
       const f = P.fire({ seed: (opts.seed || 13) * 7 + i, smokeH: 13 + i * 3 });
-      f.position.set(Math.cos(a) * 5.2, -0.05, Math.sin(a) * 5.2);
+      f.position.set(Math.cos(a) * 5.2, -0.05 + GY(Math.cos(a) * 5.2, Math.sin(a) * 5.2), Math.sin(a) * 5.2);
       near.add(f);
     }
     // a cook pot over the middle one
@@ -2282,7 +2645,7 @@
     for (let s = -1; s <= 1; s += 2) cyl(pot, 0.06, 0.06, 2.2, 5, M("wood"), s * 0.9, 1.1, 0, 0, 0, s * 0.22);
     box(pot, 2.1, 0.07, 0.07, M("wood"), 0, 2.15, 0);
     cyl(pot, 0.44, 0.36, 0.6, 8, M("metalDark"), 0, 1.3, 0);
-    pot.position.set(5.2, 0, 0);
+    pot.position.set(5.2, GY(5.2, 0), 0);
     near.add(pot);
 
     // the arms: four rifle stacks, which is what says RECRUIT rather than
@@ -2290,7 +2653,7 @@
     for (let i = 0; i < 4; i++) {
       const a = 0.3 + i * 0.5;
       const st = P.armStack({ seed: (opts.seed || 13) * 29 + i, id: i & 1 ? "ak47" : "carbine" });
-      st.position.set(Math.cos(a) * 6.4, -0.05, Math.sin(a) * 6.4);
+      st.position.set(Math.cos(a) * 6.4, -0.05 + GY(Math.cos(a) * 6.4, Math.sin(a) * 6.4), Math.sin(a) * 6.4);
       st.rotation.y = r.f() * TAU;
       near.add(st);
     }
@@ -2308,21 +2671,39 @@
       b.rotation.y = -(a + Math.PI / posts) + Math.PI / 2;
       b.castShadow = false;
     }
-    cor.position.set(11, -0.1, 8);
+    cor.position.set(11, -0.1 + GY(11, 8), 8);
     near.add(cor);
 
     const crates = P.crates({ n: 10, spread: 2.4, seed: (opts.seed || 13) * 17 });
-    crates.position.set(-8.0, -0.1, -1.5);
+    crates.position.set(-8.0, -0.1 + GY(-8.0, -1.5), -1.5);
     near.add(crates);
     pushCols(CS, crates, -11, -0.1, -4, 0);
     // a lean-to awning off the bell tents: cloth catches the eye at range
     const awn = P.canopy({ w: 7, d: 4.5, h: 2.6, mat: "canvasDark" });
-    awn.position.set(0, -0.15, -12.5);
+    awn.position.set(0, -0.15 + GY(0, -12.5), -12.5);
     near.add(awn);
 
     const mast = P.banner(opts.colour == null ? 0x4a8f5a : opts.colour, { h: 11, seed: opts.seed || 13 });
-    mast.position.set(0, -0.2, -5.5);
+    mast.position.set(0, -0.2 + GY(0, -5.5), -5.5);
     g.add(mast);
+
+    /* THE MEN, AND THIS IS THE KIND WHOSE STOCK IS PEOPLE. outpost.js's own
+       blurb is "men at the water, looking for a warlord", so the camp carries
+       the most bodies of the four and they are round the fires and the arm
+       stacks rather than lined up: a queue is a menu, a fire with four men at
+       it is a place. The houses go in the horseshoe's mouth, on the open
+       side, so you ride past somebody's front door to reach the recruiter. */
+    const F = g.userData.folk;
+    standAt(near, CS, F, -7.0, 6.0, { seed: (opts.seed || 13) * 23, w: 4.6, mat: "canvasDark", drums: "hide", gy: GY });
+    hamlet(near, far, CS, { n: 3, at: Math.PI, spread: 1.0, r: 13.5, seed: (opts.seed || 13) * 37, gy: GY });
+    folk(F, 1.9, -6.7, facing(1.9, -6.7), "idler");
+    folk(F, 7.0, 0.3, facing(7.0, 0.3), "idler");
+    folk(F, 1.9, 6.7, facing(1.9, 6.7), "idler");
+    folk(F, 7.6, 2.4, facing(7.6, 2.4) + 1.1, "hand");
+    folk(F, 5.4, 5.8, facing(5.4, 5.8) - 0.9, "hand");
+    folk(F, -3.0, -7.0, facing(-3.0, -7.0) + Math.PI, "guard");
+    folk(F, 3.0, -7.2, facing(3.0, -7.2) + Math.PI, "guard");
+    folk(F, 9.6, 7.0, facing(9.6, 7.0) + 0.6, "idler");
 
     // ---- FAR: a cluster of triangles and three smoke columns ---------
     const flist = [];
@@ -2355,6 +2736,7 @@
     const near = g.userData.near, far = g.userData.far;
     const r = stream(opts.seed == null ? 23 : opts.seed);
     const CS = g.userData.colliders;
+    const GY = opts.groundAt || FLAT;
     if (OLD) { oldBlock(near, CS, 6, 2, "palmTrunk"); return finish(g, opts); }
 
     /* THE WATER IS FLAT AND ITS BANK IS THE BOWL. Two drafts wrong before
@@ -2391,7 +2773,8 @@
       const a = i / 11 * TAU + r.range(-0.26, 0.26);
       const rr = r.range(9.0, 14.0);
       const p = P.palm({ seed: (opts.seed || 23) * 31 + i, h: r.range(6.0, 13.5) });
-      p.position.set(2.5 + Math.cos(a) * rr, -0.2, 3 + Math.sin(a) * rr);
+      const pxx = 2.5 + Math.cos(a) * rr, pzz = 3 + Math.sin(a) * rr;
+      p.position.set(pxx, -0.2 + GY(pxx, pzz), pzz);
       near.add(p);
       col(CS, p.position.x, 1.6, p.position.z, 0.8, 3.2, 0.8, "palm");
     }
@@ -2424,7 +2807,7 @@
        a palm trunk or under the shade sail, and it is the one object that
        turns "an oasis" into "a well somebody dug" — if it is not the first
        thing you see the outpost has no name. */
-    wh.position.set(9.5, -0.15, -4.5);
+    wh.position.set(9.5, -0.15 + GY(9.5, -4.5), -4.5);
     near.add(wh);
     col(CS, 9.5, 0.8, -4.5, 4.3, 1.6, 4.3, "well");
 
@@ -2432,20 +2815,33 @@
     // horizontal in a landscape of verticals, which is why a well reads
     // differently from a camp at range even though both are cloth.
     const sail = P.canopy({ w: 9, d: 7, h: 3.2, sag: 1.5, mat: "canvas" });
-    sail.position.set(-9.5, -0.15, 8.0);
+    sail.position.set(-9.5, -0.15 + GY(-9.5, 8.0), 8.0);
     near.add(sail);
     const trough = new THREE.Group();
     box(trough, 3.6, 0.5, 0.9, M("wood"), 0, 0.25, 0);
     box(trough, 3.6, 0.12, 0.78, M("water"), 0, 0.46, 0);
-    trough.position.set(-3.0, -0.15, -8);
+    trough.position.set(-3.0, -0.15 + GY(-3.0, -8), -8);
     trough.rotation.y = 0.3;
     near.add(trough);
     // a low mud-brick wall, half fallen — somebody lived here
     const rn = ruin(7, 1.5, 0.9, r);
-    rn.position.set(7.5, -0.15, -7);
+    rn.position.set(7.5, -0.15 + GY(7.5, -7), -7);
     rn.rotation.y = 0.5;
     near.add(rn);
-    pushCols(CS, rn, 7.5, -0.15, -7, 0.5);
+    pushCols(CS, rn, 7.5, rn.position.y, -7, 0.5);
+
+    /* SOMEBODY LIVES AT THE WELL, WHICH IS THE POINT OF A WELL. The half
+       fallen wall above already says somebody DID; two standing houses beside
+       it say somebody still does, and that is the difference between a
+       landmark and a ruin. They sit away from the water on the dry side —
+       nobody builds in the bottom of the bowl their own well is in. */
+    const F = g.userData.folk;
+    standAt(near, CS, F, -9.5, -3.0, { seed: (opts.seed || 23) * 23, w: 4.2, h: 2.7, mat: "canvas", drums: "metalDark", gy: GY });
+    hamlet(near, far, CS, { n: 2, at: -2.2, spread: 1.0, r: 14, seed: (opts.seed || 23) * 41, gy: GY });
+    folk(F, -8.5, 7.0, facing(-8.5, 7.0) + 0.4, "idler");      // under the sail
+    folk(F, 8.2, -4.0, facing(8.2, -4.0) + 0.3, "hand");       // at the winch
+    folk(F, -3.5, -6.8, facing(-3.5, -6.8) - 0.6, "hand");     // at the trough
+    folk(F, -9.8, -9.6, facing(-9.8, -9.6) + Math.PI, "idler");// on his own step
 
     // ---- FAR: palm crowns and the sail. No mast: a well has no flag. ----
     /* STAGGER THE CROWNS. Eleven identical blocks at one height around one
@@ -2476,6 +2872,7 @@
     const near = g.userData.near, far = g.userData.far;
     const r = stream(opts.seed == null ? 41 : opts.seed);
     const CS = g.userData.colliders;
+    const GY = opts.groundAt || FLAT;
     if (OLD) { oldBlock(near, CS, 9, 2.5, "tarp"); return finish(g, opts); }
 
     /* THE MARKET IS THE ONE WITH NO MAST. Four wide low canopies in two
@@ -2491,14 +2888,15 @@
         w: r.range(5.5, 7.5), d: r.range(4.5, 5.5), h: r.range(2.7, 3.2),
         mat: stallCols[i % stallCols.length],
       });
-      c.position.set(side * 4.8, -0.15, z + r.range(-0.5, 0.5));
+      const gz = GY(side * 4.8, z);
+      c.position.set(side * 4.8, -0.15 + gz, z + r.range(-0.5, 0.5));
       c.rotation.y = r.range(-0.12, 0.12);
       near.add(c);
-      col(CS, side * 4.8, 1.0, z, 1.2, 2.0, 4.4, "stall");
+      col(CS, side * 4.8, 1.0 + gz, z, 1.2, 2.0, 4.4, "stall");
       // the counter under it, and the goods on it
-      box(near, 0.9, 0.9, 4.6, M("wood"), side * 3.4, 0.3, z);
+      box(near, 0.9, 0.9, 4.6, M("wood"), side * 3.4, 0.3 + GY(side * 3.4, z), z);
       const goods = P.crates({ n: 5, spread: 1.5, seed: (opts.seed || 41) * (i + 3) });
-      goods.position.set(side * 5.9, -0.15, z + 1.4);
+      goods.position.set(side * 5.9, -0.15 + GY(side * 5.9, z + 1.4), z + 1.4);
       goods.scale.setScalar(0.6);
       near.add(goods);
     }
@@ -2510,30 +2908,54 @@
     for (let i = 0; i < 6; i++) {
       const side = i % 2 ? 1 : -1;
       const z = -7 + Math.floor(i / 2) * 6.4;
-      cyl(near, 0.07, 0.09, 3.6, 5, M("wood"), side * 2.4, 1.6, z);
+      const ly = GY(side * 2.4, z);
+      cyl(near, 0.07, 0.09, 3.6, 5, M("wood"), side * 2.4, 1.6 + ly, z);
       // A LAMP NEEDS A HOOD. A bare 0.42 m emissive cube on a stick read as a
       // stick with an orange dot; the dark shade above it is what makes the
       // glow look like it is coming OUT of something.
-      box(near, 0.9, 0.16, 0.9, M("metalDark"), side * 2.4, 3.78, z);
+      box(near, 0.9, 0.16, 0.9, M("metalDark"), side * 2.4, 3.78 + ly, z);
       const globe = new THREE.Mesh(BG(0.62, 0.5, 0.62), M("ember"));
-      globe.position.set(side * 2.4, 3.42, z);
+      globe.position.set(side * 2.4, 3.42 + ly, z);
       near.add(globe);
     }
     const f = P.fire({ seed: (opts.seed || 41) * 3, smokeH: 7 });
-    f.position.set(0, -0.05, 8);
+    f.position.set(0, -0.05 + GY(0, 8), 8);
     near.add(f);
     const bales = P.drums({ n: 7, spread: 2.0, mat: "hide", seed: (opts.seed || 41) * 19 });
-    bales.position.set(0, -0.1, -11);
+    bales.position.set(0, -0.1 + GY(0, -11), -11);
     near.add(bales);
     const rn = ruin(9, 2.4, 1.1, r);
-    rn.position.set(-10, -0.15, 2);
+    rn.position.set(-10, -0.15 + GY(-10, 2), 2);
     rn.rotation.y = Math.PI / 2;
     near.add(rn);
-    pushCols(CS, rn, -10, -0.15, 2, Math.PI / 2);
+    pushCols(CS, rn, -10, rn.position.y, 2, Math.PI / 2);
     // one banner, small, on a stall — not a mast
     const b = P.banner(opts.colour == null ? 0x8f4fb8 : opts.colour, { h: 4.4, fly: 1.6, seed: opts.seed || 41 });
     b.position.set(-4.8, 2.6, -5.5);
     g.add(b);
+
+    /* THE MARKET DOES NOT GET A STALL ADDED TO IT — it is five of them
+       already, and the counter under each canopy was here before this pass.
+       What it was missing is anybody standing behind those counters, and a
+       far end to the lane. The keepers stand OUTSIDE their own counters at
+       x = ±5.2 facing across it, which is what makes the gap between the two
+       rows read as a lane you walk down rather than a gap between props.
+
+       And three houses close the -Z end. A night market is held in a place,
+       and the place it is held in is the edge of somebody's village — which
+       is also the only thing that stops the lane running off into open sand
+       at both ends, the way the first pass photographed. */
+    const F = g.userData.folk;
+    for (let i = 0; i < 4; i++) {
+      const side = i % 2 ? 1 : -1;
+      const z = -5.5 + Math.floor(i / 2) * 5.8;
+      // he faces ACROSS the lane, at his own customers: -x side looks to +x
+      folk(F, side * 5.2, z, side > 0 ? -Math.PI / 2 : Math.PI / 2, i === 0 ? "trader" : "hand");
+    }
+    folk(F, 0.0, -2.0, 0.4, "idler");
+    folk(F, 0.6, 4.0, Math.PI - 0.3, "idler");
+    folk(F, 1.6, 7.0, facing(1.6, 7.0), "guard");
+    hamlet(near, far, CS, { n: 3, at: -Math.PI / 2, spread: 1.3, r: 15, seed: (opts.seed || 41) * 43, gy: GY });
 
     // ---- FAR: two low dark bars and a fire glow. No verticals. -------
     for (let s = -1; s <= 1; s += 2) box(far, 7, 3.4, 19, M("tarp"), s * 4.8, 2.6, 0);
@@ -2695,6 +3117,12 @@
       guns: !!(CBZ.weaponAppearance && CBZ.weaponAppearance.ak47),
       banners: liveBanners.length, fires: liveFires.length, lod: lodList.length,
       batch: !!CBZ.batchStaticUnder,
+      /* THE HOUSES ARE SOMEBODY ELSE'S CODE AND THAT HAS TO BE VISIBLE HERE.
+         city/villagekit.js is loaded by games/warlord.html and is optional on
+         purpose; if it 404s every outpost silently loses its buildings, and
+         "silently" is the failure mode this line exists to kill. */
+      houseKit: !!(CBZ.assets && CBZ.assets.get && CBZ.assets.get("hut_square")),
+      housePaints: _toned.size,
       draws: info ? info.render.calls : null,
       tris: info ? info.render.triangles : null,
       old: OLD,
