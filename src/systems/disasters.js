@@ -221,6 +221,9 @@
   function floodDepth(x, z) { return CBZ.survFloodDepthAt ? CBZ.survFloodDepthAt(x, z) : -9; }
   // city/tsunami.js's easing, so both events in the game breathe the same way
   function ease(u) { return u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2; }
+  // the tail value of the flash flood recession limb, so the curve can be
+  // normalised to reach dry exactly at the horn (see flashflood.active)
+  const RECESS_END = Math.exp(-3.1);
   // the nearest hill that will still be DRY at `need` metres — the honest
   // answer to "where do I run", and what the bots' safeDir hands them
   function uphill(ctx, x, z, need) {
@@ -879,17 +882,30 @@
       active(dt, ctx) {
         ctx.env.fog = 0x59636b; ctx.env.fogNear = 22; ctx.env.fogFar = 150; ctx.env.sunInt = 0.55; ctx.env.hemiColor = 0x97a6b3;
         ctx.st.t += dt;
-        // rise (0.42) → stand (0.26) → drain (0.32). Water goes UP fast and
-        // out slowly, which is what makes the drain the part that strands you.
+        /* THE HYDROGRAPH RAN BACKWARDS. The comment here has always claimed
+           "water goes UP fast and out slowly" and the numbers have always done
+           the opposite: rise 0.42, drain 0.32 — the flood took LONGER to
+           arrive than to leave, which is a bathtub filling, not a flash flood.
+           A real one is the most asymmetric curve in hydrology: minutes of
+           rise, a sharp peak, then an exponential recession measured in hours.
+           rise 0.16 → stand 0.10 → recession 0.74, and the recession is an
+           actual exp(-3.1 r) limb rather than an eased ramp, normalised so it
+           still reaches dry at the horn instead of stepping off a residue.
+           This is what makes the DRAIN the part that strands you: by the time
+           you decide the worst is over you are still standing in it. */
         const u = Math.min(1, ctx.st.t / Math.max(1, ctx.activeSecs));
         const peak = ctx.st.peak;
         let s, pk;
         // the rise CONTINUES from what the warning already put on the ground
         // (0.18 m of standing rain) — starting the ramp at zero would drain the
         // streets for a beat at the exact moment the flood arrives
-        if (u < 0.42) { const e = ease(u / 0.42); s = peak * e; pk = 0.18 + (ctx.st.pool - 0.18) * e; }
-        else if (u < 0.68) { s = peak * (1 - 0.06 * ((u - 0.42) / 0.26)); pk = ctx.st.pool; }
-        else { const e = 1 - ease((u - 0.68) / 0.32); s = peak * 0.94 * e; pk = ctx.st.pool * e; }
+        if (u < 0.16) { const e = ease(u / 0.16); s = peak * e; pk = 0.18 + (ctx.st.pool - 0.18) * e; }
+        else if (u < 0.26) { s = peak * (1 - 0.06 * ((u - 0.16) / 0.10)); pk = ctx.st.pool; }
+        else {
+          const r = (u - 0.26) / 0.74;
+          const e = (Math.exp(-3.1 * r) - RECESS_END) / (1 - RECESS_END);
+          s = peak * 0.94 * e; pk = ctx.st.pool * e;
+        }
         // THE STREETS AND THE SEA, moved together through the two sanctioned
         // levers and nothing else.
         weather({ rain: 1, wind: 8, windDir: { x: ctx.st.wx, z: ctx.st.wz },

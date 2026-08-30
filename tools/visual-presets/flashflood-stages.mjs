@@ -43,12 +43,18 @@ const subjects = [
 
   /* From here every beat is pinned to an ABSOLUTE sim-second of the flood's
      active phase (atSecs), so a --subjects subset photographs the same moment
-     as the full storyboard. Def timeline (activeSecs 18): the front runs the
-     channel from t=0 and stands down at ~9.9 s; rise 0-7.6 s, stand 7.6-12.2,
-     drain 12.2-18. */
+     as the full storyboard. atSecs only ever steps FORWARD, so these MUST stay
+     in ascending time order.
+
+     Def timeline (activeSecs 18), REMAPPED for the corrected hydrograph: the
+     front still runs the channel from t=0 and stands down at ~9.9 s, but the
+     water now rises 0-2.9 s, stands 2.9-4.7, and recedes 4.7-18 on an
+     exponential limb. Every beat below moved with it — the old times were
+     written against a curve that took longer to arrive than to leave, so
+     "the lake at full depth" at 12.4 s would now photograph a puddle. */
   { id: "front-a", requireFlood: true, label: "THE FRONT — frame 1 of 2",
     focus: "Dry ground in the foreground, a wall of moving water arriving behind it — the shot the whole event exists for. Before: the street gets shinier along an invisible line. After: a churning crest of spray and mud with debris tumbling in it, standing proud of the water behind.",
-    act: { atSecs: 3.4 },
+    act: { atSecs: 1.8 },
     cam: { aim: "front", ahead: 22, up: 12 } },
   { id: "front-b", requireFlood: true, label: "THE FRONT — frame 2 of 2", pair: "front",
     focus: "The same camera 0.12 s later. A real front covers more than a metre between these frames; the spray has moved and the streaks on the sheet have advected. A flood that is identical in both frames is a painting.",
@@ -57,22 +63,22 @@ const subjects = [
 
   { id: "knockdown", requireFlood: true, label: "Six inches of moving water",
     focus: "Someone in the shallow moving water near the front — the depth that looks wadeable and is not. The knockdown physics read the same field on both sides; the after side is the one where you can SEE why (opaque brown water, streaming, churned).",
-    act: { atSecs: 5.6 },
+    act: { atSecs: 3.6 },
     cam: { aim: "wetbot", back: 9, up: 2.6, look: 0.6 } },
-
-  { id: "car-adrift", requireFlood: true, label: "Two feet floats a car",
-    focus: "A car picked up by the channel. Both sides fling it off the same shared depth threshold (0.6 m); the after side surrounds it with water that reads as something that could carry a car.",
-    act: { atSecs: 8.2 },
-    cam: { aim: "car", back: 15, up: 4, look: 0.8 } },
 
   { id: "lake", requireFlood: true, label: "The stand — an opaque lake in the streets",
     focus: "The front has done its work and the event is a lake at full depth. Before: a clear blue-grey sheet you can see the road through. After: suspended mud — you cannot see the ground under real floodwater, which is precisely why people step into it.",
-    act: { atSecs: 12.4 },
+    act: { atSecs: 4.4 },
     cam: { aim: "channel", back: 26, up: 13, look: 1 } },
 
+  { id: "car-adrift", requireFlood: true, label: "Two feet floats a car",
+    focus: "A car picked up by the channel. Both sides fling it off the same shared depth threshold (0.6 m); the after side surrounds it with water that reads as something that could carry a car.",
+    act: { atSecs: 5.6 },
+    cam: { aim: "car", back: 15, up: 4, look: 0.8 } },
+
   { id: "drain", requireFlood: true, label: "The drain — what the water leaves",
-    focus: "Water goes up fast and out slowly; the drain is the part that strands whoever climbed onto something. On the after side the entrained flotsam grounds in the streets as the level drops — the junk line a real flash flood leaves.",
-    act: { atSecs: 16.6 },
+    focus: "Water goes up fast and out slowly — genuinely, now — and the drain is the part that strands whoever climbed onto something. Staged mid-recession, where the level is visibly dropping rather than already gone. On the after side the entrained flotsam grounds in the streets as the level drops — the junk line a real flash flood leaves.",
+    act: { atSecs: 11.0 },
     cam: { aim: "channel", back: 24, up: 7, look: 0.8 } },
 ];
 
