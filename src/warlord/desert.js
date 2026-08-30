@@ -931,7 +931,13 @@
     root.add(oasisWater);
     const palms = makePalms();
     if (palms) root.add(palms);
-    scCX = scCZ = NaN;
+    /* THE SCATTER'S LAST LINE OUTLIVED THE SCATTER. e8f2040 deleted the
+       dressing system and its `let scCX, scCZ` with it, and left this reset
+       of the two variables standing in a "use strict" file: build() threw
+       ReferenceError on the FIRST island every time, so the desert never
+       finished, __warlordReady never fired and games/warlord.html did not
+       boot at all on origin/main. Found by tools/visual-presets/warlord-horde
+       when the BEFORE column would not reach the campaign phase. */
     CBZ.scene.add(root);
     built = true; visible = true;
 
