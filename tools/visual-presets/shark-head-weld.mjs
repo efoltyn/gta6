@@ -68,6 +68,20 @@ const subjects = [
     state: "REST · THREE-QUARTER", metric: "Head girth vs body girth",
   },
   {
+    id: "gw-mouth-front", kind: "mouth", species: HERO,
+    probe: [[0.663, 0.462], [0.69, 0.33], [0.70, 0.59], [0.655, 0.36]],
+    label: "Great White — The Front Of The Mouth, Closed",
+    focus: "Owner: \"there are too many pieces on the front of the great white's mouth — it looks like white chunks all over, poorly streamlined.\" This is that view. A closed shark mouth is skin, one crease, and the tips of the teeth; anything else in this frame is a piece that should not be there.",
+    state: "REST · MOUTH FRONT", metric: "How many separate pale pieces the jaw is made of",
+  },
+  {
+    id: "gw-mouth-parts", kind: "mouth", species: HERO, parts: true,
+    probe: [[0.663, 0.462], [0.69, 0.33], [0.70, 0.59], [0.655, 0.36]],
+    label: "Great White — The Same Mouth, One Colour Per Piece",
+    focus: "The diagnostic that names them. Every mesh in its own flat colour at the identical camera: this is how you tell a lip from a gum from a liner from a sack, and how many of them are stacked on the same square centimetre of jaw.",
+    state: "PART MAP · MOUTH FRONT", metric: "One colour per mesh",
+  },
+  {
     id: "gw-parts", kind: "parts", species: HERO,
     label: "Great White — What Every Piece Of The Head Is",
     focus: "A diagnostic: each mesh in its own flat colour, same camera as the three-quarter page. This is how the white slabs in the gape stopped being a mystery.",
@@ -134,10 +148,16 @@ function stageSharkHead(input) {
 
   // POSE IT WITH THE PRODUCTION RIG when a gape is asked for, so an open mouth
   // on this page is the same open mouth the game shows.
+  /* EVERY PAGE IS RIGGED, INCLUDING THE CLOSED ONES — and this was a real
+     staging error. The authored geometry is not the rest pose: production
+     CBZ.swimJaw(actor, 0) applies the contract's own restClose on top of it,
+     so a page that skipped the rig photographed a mouth STANDING OPEN by that
+     margin and reported its exposed gums and interior as the animal. Build the
+     rig on every subject and drive it to the gape the page asks for. */
   let actor = null;
-  if (subject.open != null && CBZ.buildSwimRig && CBZ.swimJaw) {
+  if (CBZ.buildSwimRig && CBZ.swimJaw) {
     actor = { species: species, group: g, pos: g.position, heading: 0, faceH: 0, dead: false };
-    try { CBZ.buildSwimRig(actor); CBZ.swimJaw(actor, subject.open); } catch (e) { actor = null; }
+    try { CBZ.buildSwimRig(actor); CBZ.swimJaw(actor, Number(subject.open) || 0); } catch (e) { actor = null; }
   }
   g.updateMatrixWorld(true);
 
@@ -293,9 +313,14 @@ function stageSharkHead(input) {
      colour so a blob in the gape can be NAMED. Kept in the preset (rather
      than done by hand in a console) because the next person to look at this
      mouth will want it too. */
-  const PART_HUES = ["#ff5f5f", "#ffd23f", "#4ad991", "#5aa9ff", "#c77dff", "#ff9f45", "#3ddad7", "#ff6fb5", "#b6ff3d", "#8f8fff"];
+  // 20 hues, because at 10 the palette WRAPPED and two different pieces in
+  // the same square centimetre of jaw came back the same colour — which is
+  // exactly the question this page exists to answer.
+  const PART_HUES = ["#ff5f5f", "#ffd23f", "#4ad991", "#5aa9ff", "#c77dff", "#ff9f45", "#3ddad7", "#ff6fb5",
+    "#b6ff3d", "#8f8fff", "#d94a4a", "#a37b00", "#0f8f5a", "#0b4ea8", "#6a1fb0", "#8a4b00", "#0d7a78",
+    "#a8005c", "#5f8f00", "#3a3aa8"];
   let partLegend = "";
-  if (subject.kind === "parts") {
+  if (subject.parts || subject.kind === "parts") {
     let n = 0;
     const seen = new Map();
     g.traverse(function (o) {
@@ -335,6 +360,15 @@ function stageSharkHead(input) {
     target = [frontX - headSpan * 0.42, headSec.cy, 0];
     position = [target[0], headSec.cy, bodyLen * 8];
     up = [0, 1, 0];
+  } else if (subject.kind === "mouth") {
+    /* THE FRONT OF THE MOUTH, from where a diver sees it: low, close, and off
+       the centreline, which is the angle every one of the owner's photographs
+       is taken from and the one that shows whether the jaw is one surface or
+       a pile of pieces. */
+    framedHeight = headSpan * 0.42;
+    target = [frontX - headSpan * 0.30, headSec.cy - maxRy * 0.42, 0];
+    position = [target[0] + bodyLen * 1.1, target[1] - bodyLen * 0.22, bodyLen * 1.05];
+    up = [0, 1, 0];
   } else if (subject.kind === "quarter" || subject.kind === "parts") {
     framedHeight = headSpan * 1.05;
     target = [frontX - headSpan * 0.38, headSec.cy, 0];
@@ -358,6 +392,54 @@ function stageSharkHead(input) {
   studio.renderer.setSize(input.width, input.height, false);
   studio.renderer.render(scene, camera);
 
+  /* HOW MANY PIECES IS THIS MOUTH MADE OF — the owner's sentence, counted.
+     A grid of rays through the frame, each one asking the scene which mesh it
+     landed on: `mouthPieces` is how many DIFFERENT meshes hold more than half
+     a per cent of the picture, and `cavityPct` is how much of a CLOSED mouth
+     is interior — buccal sack, throat, mandible liner — which should be none
+     of it, because those parts are inside the animal. Both are read off the
+     same rendered geometry on both columns, so neither can be argued with. */
+  let mouthPieces = null, cavityPct = null;
+  if (subject.kind === "mouth" && subject.open == null) {
+    const pr2 = new T.Raycaster();
+    const seen = {}, GX = 48, GY = 30;
+    let hits = 0, cav = 0;
+    for (let iy = 0; iy < GY; iy++) {
+      for (let ix = 0; ix < GX; ix++) {
+        pr2.setFromCamera({ x: ((ix + 0.5) / GX) * 2 - 1, y: 1 - ((iy + 0.5) / GY) * 2 }, camera);
+        const h2 = pr2.intersectObject(g, true);
+        if (!h2.length) continue;
+        hits++;
+        const nm = h2[0].object.name || "(unnamed)";
+        seen[nm] = (seen[nm] || 0) + 1;
+        if (/Sack|Throat|Liner/.test(nm)) cav++;
+      }
+    }
+    let n = 0;
+    for (const nm in seen) if (seen[nm] > hits * 0.005) n++;
+    mouthPieces = n;
+    cavityPct = hits ? (cav / hits) * 100 : 0;
+  }
+
+  /* ASK THE PICTURE WHAT IT IS SHOWING. A part map tells you the pieces are
+     there; it does not tell you which one is the dark arch at pixel (790,350),
+     and guessing cost this wave three capture cycles. `probe` fires a ray from
+     the camera through named screen points and reports the first mesh it hits,
+     which is the same question a person asks by pointing at the frame. */
+  let probed = "";
+  if (subject.probe && subject.probe.length) {
+    const pr = new T.Raycaster();
+    probed = subject.probe.map(function (pt) {
+      pr.setFromCamera({ x: pt[0] * 2 - 1, y: 1 - pt[1] * 2 }, camera);
+      const hit = pr.intersectObject(g, true);
+      if (!hit.length) return "(" + pt[0].toFixed(2) + "," + pt[1].toFixed(2) + ")=(nothing)";
+      const h0 = hit[0];
+      const mi = h0.face && h0.face.materialIndex != null ? h0.face.materialIndex : -1;
+      return "(" + pt[0].toFixed(2) + "," + pt[1].toFixed(2) + ")=" + (h0.object.name || "(unnamed)")
+        + "#g" + mi + "@" + h0.point.x.toFixed(2) + "," + h0.point.y.toFixed(2) + "," + h0.point.z.toFixed(2);
+    }).join("  ");
+  }
+
   // ---- captions ----------------------------------------------------------
   const after = input.side === "after", overlay = studio.overlay;
   const side = overlay.querySelector("[data-side]");
@@ -373,7 +455,7 @@ function stageSharkHead(input) {
   phase.textContent = `head ${headSec.rz.toFixed(3)} wide x ${headSec.ry.toFixed(3)} deep  ·  body ${maxRz.toFixed(3)} x ${maxRy.toFixed(3)}`;
   phase.style.cssText = "position:absolute;right:28px;top:54px;color:#d7eef8;font:12px ui-monospace,SFMono-Regular,Menlo,monospace";
   const metric = overlay.querySelector("[data-metric]");
-  metric.textContent = partLegend || `head ${headWidthPct.toFixed(0)}% of the body's width · girth kink ${kink("r").toFixed(0)} mm · waist ${waist("r").toFixed(0)} mm`;
+  metric.textContent = probed || partLegend || `head ${headWidthPct.toFixed(0)}% of the body's width · girth kink ${kink("r").toFixed(0)} mm · waist ${waist("r").toFixed(0)} mm`;
   metric.style.cssText = "position:absolute;right:27px;bottom:22px;padding:7px 10px;border-radius:6px;background:rgba(3,18,28,.76);color:#bfeeff;font:11px ui-monospace,SFMono-Regular,Menlo,monospace";
   const source = overlay.querySelector("[data-source]");
   source.textContent = new URL(input.sourceUrl).host + new URL(input.sourceUrl).pathname;
@@ -400,11 +482,20 @@ function stageSharkHead(input) {
     outline: prof.map(function (s2) {
       return [Number(s2.x.toFixed(3)), Number(s2.rz.toFixed(3)), Number(s2.ry.toFixed(3)), Number(s2.r.toFixed(3))];
     }),
-    metrics: Object.assign({
-      headWidthPct: Number(headWidthPct.toFixed(1)),
-      headDeepPct: Number(headDeepPct.toFixed(1)),
-      headFlatPct: Number((headSec.ry > 0 ? (headSec.rz / headSec.ry) * 100 : 0).toFixed(1)),
-    }, shape),
+    /* ONE PAGE OWNS EACH CLAIM. The shape numbers describe the animal, not
+       the camera, so reporting them on all eleven pages multiplied every
+       sub-millimetre wobble by eleven and buried the page that actually moved.
+       The outline pages carry the outline; the mouth pages carry the mouth. */
+    metrics: mouthPieces != null ? {
+      mouthPieces: mouthPieces,
+      cavityPct: Number(cavityPct.toFixed(2)),
+    } : (subject.kind === "plan" || subject.kind === "profile" || subject.kind === "body"
+      ? Object.assign({
+        headWidthPct: Number(headWidthPct.toFixed(1)),
+        headDeepPct: Number(headDeepPct.toFixed(1)),
+        headFlatPct: Number((headSec.ry > 0 ? (headSec.rz / headSec.ry) * 100 : 0).toFixed(1)),
+      }, shape)
+      : {}),
     camera: { framedHeight: framedH, position: cameraPosition.slice(), target: cameraTarget.slice(), up: cameraUp.slice() },
   };
 }
@@ -430,6 +521,8 @@ export default {
     crownKinkMM: { label: "Sharpest corner in the crown line", unit: "mm", better: "lower" },
     girthWaistMM: { label: "Deepest pinch in the girth behind the head (a neck)", unit: "mm", better: "lower" },
     headFlatPct: { label: "Head width against its own depth (a great white's head is a wedge, not a ball)", unit: "%", better: "higher" },
+    mouthPieces: { label: "Separate pieces visible in the closed mouth frame", better: "lower" },
+    cavityPct: { label: "Share of a CLOSED mouth that is mouth INTERIOR showing through", unit: "%", better: "lower" },
   },
   metricsNote: "The pinch is reported on the GIRTH and not on the width alone, and that is a measurement decision worth writing down: this animal wears rake scars that stand four millimetres off its flank, so a width read from four rays picks a scar as the widest thing on the shark and calls the skin behind it a waist. The girth is the equivalent-circle radius of a twenty-eight ray fan, which a scar cannot move. headWidthPct is the owner's sentence as a number: how much of the animal's beam the head actually carries. planKinkMM and crownKinkMM are second differences of the measured outline — a taper is a change, a weld failure is a change IN the change, i.e. a corner — reported in millimetres of the real animal. waistMM catches the other shape of the same defect: an outline that narrows behind the head and widens again is a neck, and a shark has no neck.",
 };

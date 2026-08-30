@@ -1166,6 +1166,15 @@
     const gum = m(o.gum || 0x8e3b42), gumDark = m(o.gumDark || 0x5e2229);
     const enamel = m(o.tooth || 0xf2ead6), root = m(o.toothRoot || 0xd6a9a4);
     const skin = m(o.skin || 0xdfe4e6);
+    /* AND ONE DOUBLE-SIDED COPY OF IT. The buccal sack's outer wrap is swept
+       with ONE winding for both cheeks — they face opposite ways, so on one
+       flank of every shark in this game that wrap was back-facing and culled,
+       and the dark cavity wall behind it showed through the closed mouth as an
+       arch. Found by firing a ray through that arch and asking the scene what
+       it hit (the probe in tools/visual-presets/shark-head-weld.mjs):
+       sharkBuccalSack, on the side the winding loses. One material per animal,
+       no vertices moved, both flanks fixed. */
+    const skinWrap = skin.clone(); skinWrap.side = T_.DoubleSide;
 
     // The jaw line is not level. It rises toward the corners so the whole arc
     // follows the underside of the head — which is what actually seats the
@@ -1217,12 +1226,52 @@
            line; the tissue is still there, it just stops standing out of the
            face. */
         const kIn = up ? 0.75 : 1, kOut = (up ? 0.50 : 0.55) * (1 - front * 0.82);
+        /* ---- THE LIP COVERS THE TEETH, WHICH IS WHY A CLOSED SHARK MOUTH IS
+           A LINE ------------------------------------------------------------
+           Owner, 2026-08-30, on the front of the great white's mouth: "there
+           are too many pieces — it looks like white chunks all over, poorly
+           streamlined."  Photographed and counted (the part-map page): at rest
+           SIX surfaces were in that square centimetre — rostrum, upper gum,
+           upper tooth field, lower tooth field, lower gum, chin — with the
+           buccal sack showing between the crowns.
+
+           The cause is that the tooth row is 0.145 long and the lip band that
+           is supposed to cover it reached 0.0135 down: the crowns hung into
+           the gap between the two bands, and through that gap you could see
+           the inside of the animal. Every reference photograph of a closed
+           great white shows the opposite — skin, one dark crease, and the TIPS
+           of the upper teeth, with the gums nowhere. So each band's outer face
+           now carries a SKIRT that reaches most of a crown toward the other
+           jaw. Nothing is added and nothing is deleted: the same band is
+           simply as deep as the teeth it is the lip for. */
+        /* THE TWO SKIRTS ARE NOT THE SAME LENGTH, and that asymmetry IS the
+           closed-mouth silhouette: an upper lip that comes most of the way
+           down over its crowns, a lower lip that comes only a quarter of the
+           way up, and the tips of the upper teeth overhanging the gap between
+           them. Made them equal once and the mouth vanished into the face —
+           one blank white surface, which is a different wrong picture. */
+        /* 0.42, and this number is a trade the geometry cannot dodge: the
+           skirt is rigid and rides the upper jaw, so whatever it hides at rest
+           it also hides at full gape. Long enough to close the mouth into a
+           line, short enough that the crowns are still the thing you see when
+           it opens. */
+        const skirtK = up ? (o.lipSkirt == null ? 0.42 : o.lipSkirt)
+          : (o.lipSkirtLower == null ? 0.26 : o.lipSkirtLower);
+        /* AND IT DRAPES DEEPER AT THE CORNER, not shallower. The corner is
+           where the part map found the last of the chunks: a column of buccal
+           sack and tooth field showing between the end of the upper lip and
+           the chin's rim, which on a real animal is the deepest fold of skin
+           on the whole mouth. Tapering the skirt there (the first attempt)
+           opened that gap wider; growing it closes it. */
+        const corner3 = Math.pow(Math.abs(a) / (A || 1), 3);
+        const skirt = toothH * skirtK * (up ? 1 + corner3 * 0.55 : 1 - corner3 * 0.30);
         const kGum = up ? 0.80 : 1, kLipDn = up ? 0.21 : 0.45;
         const kLipUp = up ? (split ? 1.05 : 0.21) : 0.45;
         rows.push({
           a: a,
           c: [corner(-railIn * kIn, gumH * 0.5 * kGum), corner(-railIn * kIn, -gumH * 0.5 * kGum),
-            corner(railOut * kOut, -lipH * kLipDn), corner(railOut * kOut, lipH * kLipUp)],
+            corner(railOut * kOut, -lipH * kLipDn - (up ? skirt : 0)),
+            corner(railOut * kOut, lipH * kLipUp + (up ? 0 : skirt))],
         });
       }
       // face 0 inner, 1 bottom, 2 outer, 3 top.  Gingiva belongs on the wet
@@ -1248,7 +1297,9 @@
     function band(y, up, name, parent) {
       const key = "jawband3|" + mouthSplitOn() + "|" +
         [y, up, gumH, lipH, lipRecess, railIn, railOut, len, width, A, cornerRise].join(",");
-      const geo = cachedGeom(key, function () { return bandGeom(y, up, 14); });
+      // 20 stations, not 14: the skirt's edge is now a visible line on the
+      // face, and at 14 the teeth behind it poked through between stations.
+      const geo = cachedGeom(key, function () { return bandGeom(y, up, 20); });
       // both jaws' world-facing faces are the PALE jaw skin: in the
       // photographs the protruded upper jaw is whitish-pink, and painting it
       // the dark dorsal colour is exactly what made it read as a bolted-on
@@ -1263,7 +1314,10 @@
             toward the corners, serrated, pink where enamel meets gum ------- */
     function toothField(up) {
       const rows = o.toothRows || [
-        { n: rowTeeth, r: 1.00, size: 1.00, rake: 0.16 },
+        // r = 0.965, not 1.00: the front row is pulled a hair inboard so the
+        // lip's outer face is genuinely OUTSIDE it and the crowns cannot poke
+        // through the skin they are supposed to be behind.
+        { n: rowTeeth, r: 0.95, size: 1.00, rake: 0.16 },
         { n: rowTeeth, r: 0.86, size: 0.70, rake: 0.62 },
         { n: Math.max(5, (rowTeeth * 0.55) | 0), r: 0.72, size: 0.44, rake: 1.02 },
       ];
@@ -1353,7 +1407,15 @@
           // the rim rides the seam; at the very corner it reaches a little
           // higher still, up behind the notched hull edge, so no sightline
           // finds daylight between cheek and chin on a closed head
-          const rim = lowerY - gumH * 0.12 + rise + gap * 0.10 * Math.pow(aA / (A || 1), 6);
+          /* THE CORNER OF THE MOUTH IS SKIN, NOT A SLOT. Forward of the hull's
+             cut face there is no cheek: whatever covers the join between the
+             snout shell's seam and the chin has to BE the chin. At gap*0.10
+             with a sixth-power ramp it reached that seam only in the last few
+             degrees, and the part map found what was behind the gap — two
+             walls of buccal sack, framing a dark arch cut into the side of the
+             jaw from every low three-quarter angle. Reach the seam earlier and
+             further and the corner closes into a fold. */
+          const rim = lowerY - gumH * 0.12 + rise + gap * 0.26 * Math.pow(aA / (A || 1), 4);
           let bot = Math.min((b.y - b.ry) - hingeY, rim - gap * 0.36);
           let rz = Math.min(b.rz * 0.96, hw * 1.30);
           if (wx > lastX) {
@@ -1561,9 +1623,16 @@
        THE LINER rides the mandible: a thin dark skin over the inner face of
        the lower jaw, because otherwise the gum band's lit gingiva is the
        biggest thing in the open mouth and the cave reads pink. */
+    /* 0.84, NOT 0.92 — THE SACK LIVES INSIDE THE LIPS. Coloured by part, the
+       last chunks on the closed mouth were two columns of buccal sack standing
+       at the mouth CORNER, outboard of the gum band that is supposed to be the
+       outside of the animal there: from a low three-quarter view that read as
+       a dark arch cut into the jaw. The cavity is a cavity; it has no business
+       reaching the skin. Costs the open mouth nothing visible — the sack's
+       walls are still the cheeks you see down the throat. */
     function oralPlan(x) {
       const u = clamp((x - cx) / rad, -1, 1);
-      return { u: u, hz: hw * Math.sqrt(Math.max(0, 1 - u * u)) * 0.92 };
+      return { u: u, hz: hw * Math.sqrt(Math.max(0, 1 - u * u)) * 0.78 };
     }
     /* THE FLOOR OF THE SACK STOPS AT THE CHIN'S DECK, and this is a hard
        floor, not a preference. The chin is a SHELL: the deck is its top face,
@@ -1578,7 +1647,10 @@
        arch as far up into the head as it likes, and behind it the throat runs
        a jaw-length into the body. Depth belongs where there is body to put it
        in, not hanging under a chin. */
-    function sackFloorAt(rimY) { return rimY - gap * 0.09; }
+    // ..and its floor keeps further off the chin's deck than it used to: at
+    // gap*0.09 the wrap under the sack was surfacing through the closed chin
+    // in patches, which is the same defect pointing down instead of forward.
+    function sackFloorAt(rimY) { return rimY - gap * 0.03; }
     function sackRoofAt(x, topY) {
       if (!o.rings || o.rings.length < 2) return topY;
       const r = ringAt(o.rings, hingeX + x);
@@ -1588,7 +1660,15 @@
     const sack = meshOf(cachedGeom("buccalSack|v3|" + [hingeX, hingeY, len, width,
       gap, cx, rad, A, cornerRise, upperY, lowerY,
       JSON.stringify(o.rings || null)].join(","), function () {
-      const sh = new Shell(), N = 14, M = 10, xFront = cx + rad, xBack = -len * 0.16;
+      /* THE SACK STOPS BEHIND THE SEAL. Its front wall used to stand exactly
+         ON the arc's front point, which is where the lip band and the front
+         seal also are — so above and below the narrow band, a wall of mouth
+         cavity was the front of the animal. Painted green to find it, it came
+         out as two slabs standing proud of a closed jaw with the dark of the
+         cavity between them: the owner's "white chunks", most of them, in one
+         object. Six per cent of a jaw behind the seal there is skin in front
+         of it from every angle. */
+      const sh = new Shell(), N = 14, M = 10, xFront = cx + rad - len * 0.06, xBack = -len * 0.16;
       const top = [], bot = [];
       for (let i = 0; i <= N; i++) {
         const ti = i / N, x = lerp(xFront, xBack, ti);
@@ -1596,9 +1676,17 @@
         // the loft ramps in over the first fifth so the plan's forward tip
         // stays pinched behind the front seal instead of splitting it
         const fx = clamp(ti / 0.22, 0, 1);
+        /* AND IT PINCHES AT THE BACK TOO. The rear cap sat at full plan width
+           a sixth of a jaw behind the hinge — right in the hull's mouth notch
+           — and the part map found it looking out through the corner of the
+           closed mouth as a tall dark ARCH cut into the side of the jaw, on
+           every low three-quarter view. A throat narrows; nothing about this
+           animal is a rectangular box at its widest where it meets the body. */
+        const bx = clamp((ti - 0.50) / 0.50, 0, 1);
+        const hzAt = pl.hz * (1 - 0.46 * bx * bx);
         const tr = [], br = [];
         for (let j = 0; j <= M; j++) {
-          const sg = -1 + (2 * j) / M, z = pl.hz * sg;
+          const sg = -1 + (2 * j) / M, z = hzAt * sg;
           const ang = Math.atan2(z / hw, pl.u), rise = riseAt(clamp(ang, -A, A));
           const dome = (1 - sg * sg) * fx;
           tr.push([x, sackRoofAt(x, upperY + rise + gap * 0.62 * dome), z]);
@@ -1655,8 +1743,17 @@
       for (let j = 0; j < M; j++)            // the front pinch
         qW(top[0][j], top[0][j + 1], bot[0][j + 1], bot[0][j], [1, 0, 0]);
       return sh.geom();
+    /* AND THE WRAP IS DOUBLE-SIDED, which is the whole reason it was not
+       working. The outer skin over the sack's cheeks is swept with ONE winding
+       for both walls — they face opposite ways, so on one flank of every shark
+       in this game the wrap was back-facing and culled, and the dark cavity
+       wall behind it showed through the closed mouth as an arch. Found by
+       firing a ray through that arch and asking the scene what it hit
+       (shark-head-weld's probe): sharkBuccalSack, on the side the winding
+       loses. Painting the wrap DoubleSide fixes both flanks without touching
+       a single vertex, and costs one material per animal. */
     }), [unlit(o.cavity || 0x140505), unlit(o.cavityDeep || 0x070202),
-      unlit(0x020101), unlit(o.cavityEnd || 0x000000), skin]);
+      unlit(0x020101), unlit(o.cavityEnd || 0x000000), skinWrap]);
     sack.name = "sharkBuccalSack";
     dental.add(sack);
 
@@ -1885,6 +1982,21 @@
         st.push({ pts: pts, v: v, ang: ang, yc: r.y - py, ry: ry });
       }
       function skinGrp(am, i, k, u) {
+        /* THE GUM LINE. Above the tooth row a shark is oral tissue, not belly:
+           in every reference photograph the upper teeth stand against a dark
+           margin, and that contrast IS what makes them read as teeth. This
+           shell painted its countershading white all the way down to the seam,
+           so at full gape the crowns were white-on-white and the whole upper
+           jaw came back as one blank bar — the owner's "white chunks" seen
+           from inside the mouth instead of outside it. The two courses nearest
+           the seam take the interior material, on both flanks. */
+        // ..and it is a MARGIN, not a course. Painting whole courses dark put
+        // a red stripe down the side of the head, because a course near the
+        // seam is nearly vertical and covers a lot of face. Measured against
+        // the station's own seam angle instead: eight degrees of oral tissue,
+        // and skin above it.
+        const seamA = st[i] && st[i].ang ? st[i].ang[0] : -1.4;
+        if (am < seamA + 0.14 || am > Math.PI - seamA - 0.14) return 2;
         const s = Math.sin(am);
         /* THE RAGGED EDGE IS A HINT, NOT A SAW. At +/-0.11 in sin-space the
            jitter was wider than the gap between two stations, so adjacent
@@ -2062,7 +2174,17 @@
          gum band came out past the cheek on both sides — from above, a pink
          rail running outside the skull. 0.72 with a slimmer outer rail puts
          the corners just inside the face, which is where a mouth goes. */
-      const MOUTH = { hingeX: 1.62, hingeY: 0.716, length: 0.90, width: 0.72, gap: 0.30, cornerRise: 0.135, snoutShell: true, railOut: 0.72 * 0.055 };
+      /* AND THE CORNER OF THE MOUTH WRAPS BACK, which is where the last of
+         the owner's "white chunks" were hiding. The jaw arc stopped at
+         0.49pi — a hair short of a half ellipse — so the gum bands ended at
+         x = 1.805 while the buccal sack behind them ran back to 1.476 and the
+         hull's own skin stopped at 1.683. Between those three numbers was a
+         slot with nothing in it, and a raycast probe through the dark arch in
+         the closed mouth named what was looking out of it: the sack. A real
+         shark's mouth line curves back UNDER the cheek past its widest point;
+         at 0.56pi ours does too, and the band that is the lip is there to
+         cover the hole. */
+      const MOUTH = { hingeX: 1.62, hingeY: 0.716, length: 0.90, width: 0.72, gap: 0.30, cornerRise: 0.135, snoutShell: true, railOut: 0.72 * 0.055, arcSpan: Math.PI * 0.56 };
       addSharkHull(g, {
         // 20, not 16, and only on the hero: head-on, the face is the one part
         // of this animal a player is ever close enough to count the flats on,
