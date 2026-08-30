@@ -1587,7 +1587,17 @@
       if (m.resT <= 0) { m.resT = 0.25; micro.resolveCircle(m.pos, m.rad, m.pos.y, 1.8); }
     }
     m.speed = spd;
-    m.pos.y = MAP.groundAt(m.pos.x, m.pos.z);
+    /* WHERE HIS BOOTS MEET THE SAND. sand.plant seats him on the drawn
+       surface and leans him into the slope; it also stamps the print, which
+       is what turns a charge across a dune into a road you can see from the
+       ridge. MAP.groundAt stays the fallback and stays the truth the sim
+       uses for everything else — plant is a RENDERING answer. */
+    if (W.sand && W.sand.plant) {
+      W.sand.plant(m.group, m.pos.x, m.pos.z, m.yaw,
+                   { id: m.i, dt: sdt, speed: spd, ground: MAP.groundAt });
+    } else {
+      m.pos.y = MAP.groundAt(m.pos.x, m.pos.z);
+    }
 
     // OFF THE EDGE OF THE WORLD. A routed man who reaches his own baseline has
     // left the battle: he lives, he is not a prisoner, and he is not a body
@@ -1607,7 +1617,11 @@
       while (dy > Math.PI) dy -= Math.PI * 2;
       while (dy < -Math.PI) dy += Math.PI * 2;
       m.yaw += dy * Math.min(1, sdt * 7);
-      m.group.rotation.y = m.yaw;
+      /* THE YAW IS NOT WRITTEN HERE ANY MORE when sand.js is planting him:
+         plant() sets a full orientation (yaw plus the lean into the slope)
+         and a bare rotation.y assignment after it clobbers the lean on
+         exactly the men who are moving — which is every man who matters. */
+      if (!(W.sand && W.sand.plant)) m.group.rotation.y = m.yaw;
     }
 
     // ---- the trigger ----

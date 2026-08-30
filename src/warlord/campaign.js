@@ -1254,9 +1254,18 @@
 
   function placeYou(dt, speed) {
     const D = W.desert;
-    const y = D.heightAt(S.you.x, S.you.z);
-    youRig.position.set(S.you.x, y, S.you.z);
-    youRig.rotation.y = S.you.yaw;
+    /* SAND OWNS WHERE A BODY MEETS THE GROUND. plant() seats him on the
+       surface that is actually DRAWN (desert.renderHeightAt — the analytic
+       height is up to 1.6 m off on a steep face), leans him into the slope,
+       and stamps the print he leaves. Guarded: without sand.js he stands on
+       the analytic height plumb, which is what he did before. */
+    if (W.sand && W.sand.plant) {
+      W.sand.plant(youRig, S.you.x, S.you.z, S.you.yaw,
+                   { id: "you", dt: dt, speed: speed, r: 0.54 });
+    } else {
+      youRig.position.set(S.you.x, D.heightAt(S.you.x, S.you.z), S.you.z);
+      youRig.rotation.y = S.you.yaw;
+    }
     if (CBZ.animChar && youRig.userData.charRig) {
       try { CBZ.animChar(youRig.userData.charRig, speed > 0.3 ? Math.min(speed, 6.2) : 0, dt); } catch (e) {}
     }

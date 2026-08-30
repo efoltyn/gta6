@@ -130,6 +130,18 @@ async function stageSand(input) {
          analytic answer on a ring the width of the body. A plumb body on a
          slope scores badly on BOTH at once, which is exactly the failure
          being fixed and is not something a single number can show. */
+      /* THE GROUND THIS RULER MEASURES AGAINST IS THE ONE THAT GETS DRAWN.
+         The first version of this preset compared the sole to D.heightAt,
+         the analytic surface — which is not where the sand is on screen, so
+         it was scoring a body against a surface nobody can see and charging
+         it for the clipmap's chord as if that were the body's fault. Both
+         columns are read against D.renderHeightAt now (falling back to
+         heightAt only if desert.js does not publish it), so the number means
+         what it says: how far the sole is under, or over, the sand in the
+         picture. */
+      ground(x, z) {
+        return D.renderHeightAt ? D.renderHeightAt(x, z) : D.heightAt(x, z);
+      },
       contact(r) {
         const rig = X.rig();
         if (!rig) return null;
@@ -143,7 +155,7 @@ async function stageSand(input) {
           // the base plane's height over (x,z)
           const py = Math.abs(n.y) < 1e-3 ? p.y
             : p.y - (n.x * (x - p.x) + n.z * (z - p.z)) / n.y;
-          const g = D.heightAt(x, z);
+          const g = X.ground(x, z);
           if (g - py > bury) bury = g - py;
           if (py - g > flo) flo = py - g;
         }
@@ -214,19 +226,49 @@ async function stageSand(input) {
 
       metrics() {
         const m = {};
-        const c = X.contact(0.54);            // the cast body is 1.08 m wide
+        /* TWO RADII, AND BOTH ARE HONEST — which is why neither replaced
+           the other. 0.54 m is the cast rig's own half-width off its Box3,
+           so it charges the body for its ARMS: on a slope an arm really is
+           nearer the sand than a shoulder, and a rigid 1.08 m body can
+           never lie flush on ground that folds inside its own width. That
+           is the conservative worst case and it is the number this preset
+           has reported from the start, kept so the series stays comparable.
+           0.22 m is the boots — the only part of him that can actually be
+           BURIED, and the thing the owner was looking at. */
+        const c = X.contact(0.54);
         if (c) { m.bootBuryCm = Math.round(c.bury * 1000) / 10; m.bootFloatCm = Math.round(c.float * 1000) / 10; }
-        // the hypothesis, measured on the live page in both columns
-        if (W.sand && W.sand.renderedY) {
-          let n = 0, acc = 0;
+        const f = X.contact(0.22);
+        if (f) { m.soleBuryCm = Math.round(f.bury * 1000) / 10; m.soleFloatCm = Math.round(f.float * 1000) / 10; }
+        /* TWO SEPARATE THINGS, MEASURED SEPARATELY, because the first
+           version of this preset conflated them under one name.
+
+           chordCm is HOW WRONG THE OLD ANSWER WAS: the mean gap between the
+           analytic surface and the drawn triangle over a 90 m disc. It is a
+           property of the terrain, identical in both columns, and it is the
+           size of the error a foot seated at heightAt used to inherit.
+
+           lodErrCm is a CHECK ON THE FIX, not on the terrain: desert.js's
+           renderHeightAt reconstructs the drawn triangle from the lattice,
+           sand.js's renderedY reads the actual vertex buffer out of the
+           scene, and the two are independent routes to the same number. It
+           must read zero. If it ever does not, the clipmap has changed shape
+           and the reconstruction has not been told — which is a silent
+           class of bug worth one metric. */
+        if (W.sand && W.sand.renderedY && D.renderHeightAt) {
+          let n = 0, chord = 0, recon = 0;
           for (let i = 0; i < 200; i++) {
             const a = (i * 0.618033988) * Math.PI * 2, r = Math.sqrt((i + 0.5) / 200) * 90;
             const x = ST.you.x + Math.cos(a) * r, z = ST.you.z + Math.sin(a) * r;
-            const y = W.sand.renderedY(x, z);
-            if (y == null) continue;
-            acc += Math.abs(y - D.heightAt(x, z)); n++;
+            const mesh = W.sand.renderedY(x, z);
+            if (mesh == null) continue;
+            chord += Math.abs(D.renderHeightAt(x, z) - D.heightAt(x, z));
+            recon += Math.abs(D.renderHeightAt(x, z) - mesh);
+            n++;
           }
-          if (n) m.lodErrCm = Math.round(acc / n * 1000) / 10;
+          if (n) {
+            m.chordCm = Math.round(chord / n * 1000) / 10;
+            m.lodErrCm = Math.round(recon / n * 10000) / 100;
+          }
         }
         const a = W.sand && W.sand.audit ? W.sand.audit() : null;
         m.printsLive = a ? a.prints : 0;
@@ -297,13 +339,14 @@ async function stageSand(input) {
   for (let t = 0; t < 400 && W.phase() !== "campaign"; t++) await sleep(120);
   if (W.phase() !== "campaign") return { ok: false, missing: "campaign phase (" + W.phase() + ")" };
   X.calm();
-  /* 07:48, NOT MIDDAY. The sun's elevation is the whole difference between
-     a print you can see and a print you cannot: at 09:12 the erg photographs
-     as a blown white sheet and both the hollow and the lit rim wash out
-     against it. A low sun rakes across the ground, so the dune has relief
-     and the print's far wall catches light the near wall does not. Same hour
+  /* 09:12, AND IT WAS 07:48 FOR ONE RUN. The low sun rakes nicely across a
+     dune flank, which is why it was tried — and it took the whole frame down
+     to a flat brown at luminance 87-97, where a print's hollow and its lit
+     rim have no contrast left to work with and the close-up photographed as
+     empty ground. The print shading is proportional to the sand's own tone,
+     so it needs a lit ground to be visible on, not a raking one. Same hour
      on both sides, obviously. */
-  ST.hour = 7.8;
+  ST.hour = 9.2;
 
   const wantArmy = sub.army || 10;
   if (ST.army.length < wantArmy) {
@@ -424,11 +467,14 @@ export default {
   method:
     "Both sides are this checkout served by the same local server; the before side adds ?sand=old, the revert switch src/warlord/sand.js ships for itself. The page's ?go=1 boots straight onto the island. The driver then scans the real height field for a spot at the slope each subject is named after (a deterministic golden-angle spiral, first best match, identical in both columns), teleports the player there, gives the seven-level clipmap 220 frames to rebuild, and WALKS him along a contour of that slope by writing W.state.you — which is what the campaign's own input path writes, so the breadcrumbs, the follower column, the gait and the clipmap follow are all real. The camera is then placed by the preset rather than by the game, because campaign.js clamps its pull-back at 16 m and the thing under test is where a boot meets sand; nothing steps the sim between the camera and the capture. The two column subjects share ONE ride: ridge-view reuses the ground column-road churned, because re-riding would photograph a second road and caption the two as one.",
   metricsNote:
-    "bootBuryCm and bootFloatCm are the whole fix in two numbers, and they are read off the rig's REAL world transform in both columns — the body's own base plane against desert.js's analytic ground on a ring the width of the body — so one ruler measures a plumb body and a leaned one. A plumb man on a slope scores badly on BOTH at once, which is why neither alone would have caught this. lodErrCm is the hypothesis this work opened by disproving: the mean |rendered - analytic| height error over a 90 m disc, read out of the clipmap's own vertex buffer. It has NO preferred direction and both columns should print about the same small number — if it ever grows, the LOD really has drifted and the theory was right after all. printsLive/churnLive/markTris/markDraws are the budget: the entire ground record is three draw calls and a few thousand triangles whatever the army size, because the column's road is stamped per METRE RIDDEN and not per man. groundUs against heightUs is what the fix costs per query — five height samples where there was one — declared rather than claimed.",
+    "soleBuryCm/soleFloatCm are the headline: how far the BOOTS are under or over the sand, measured on a 0.22 m foot patch. bootBuryCm/bootFloatCm are the same ruler at the cast rig's full 1.08 m half-width, so they charge the body for its arms — a rigid body can never lie flush on ground that folds inside its own width, and that residual is the deliberate partial lean, not an error. Both are reported because moving to the flattering one alone would be moving the goalposts. bootBuryCm and bootFloatCm are the whole fix in two numbers, and they are read off the rig's REAL world transform in both columns — the body's own base plane against desert.js's analytic ground on a ring the width of the body — so one ruler measures a plumb body and a leaned one. A plumb man on a slope scores badly on BOTH at once, which is why neither alone would have caught this. lodErrCm is the hypothesis this work opened by disproving: the mean |rendered - analytic| height error over a 90 m disc, read out of the clipmap's own vertex buffer. It has NO preferred direction and both columns should print about the same small number — if it ever grows, the LOD really has drifted and the theory was right after all. printsLive/churnLive/markTris/markDraws are the budget: the entire ground record is three draw calls and a few thousand triangles whatever the army size, because the column's road is stamped per METRE RIDDEN and not per man. groundUs against heightUs is what the fix costs per query — five height samples where there was one — declared rather than claimed.",
   metrics: {
-    bootBuryCm: { label: "Sole buried below the sand", unit: "cm", better: "lower" },
-    bootFloatCm: { label: "Sole floating above the sand", unit: "cm", better: "lower" },
-    lodErrCm: { label: "Rendered vs analytic ground (the disproved theory)", unit: "cm mean |err|" },
+    soleBuryCm: { label: "Boots buried below the sand", unit: "cm", better: "lower" },
+    soleFloatCm: { label: "Boots floating above the sand", unit: "cm", better: "lower" },
+    bootBuryCm: { label: "Whole body below the sand (worst case, arms included)", unit: "cm", better: "lower" },
+    bootFloatCm: { label: "Whole body above the sand (worst case, arms included)", unit: "cm", better: "lower" },
+    chordCm: { label: "Gap between analytic and drawn ground", unit: "cm mean" },
+    lodErrCm: { label: "renderHeightAt vs the actual vertex buffer", unit: "cm mean |err|", better: "lower" },
     printsLive: { label: "Footprints in the ground", unit: "prints", better: "higher" },
     churnLive: { label: "Churned road quads", unit: "quads", better: "higher" },
     markDraws: { label: "Draw calls for the whole ground record", unit: "calls" },

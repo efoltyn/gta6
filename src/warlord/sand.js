@@ -5,45 +5,46 @@
    should leave REAL footprints. Just be real as fuck sand world."
 
    ------------------------------------------------------------------
-   WHAT WAS ACTUALLY WRONG — MEASURED, BECAUSE THE OBVIOUS ANSWER WAS WRONG
+   WHAT WAS ACTUALLY WRONG — TWO CAUSES, AND THE FIRST PASS OF THIS FILE
+   UNDER-WEIGHTED ONE OF THEM
 
-   The obvious suspect was the clipmap. `heightAt` is analytic; the terrain
-   you SEE is a decimated grid sampling it, so a decimated triangle chords
-   below the true curve and a man placed by the numbers stands buried. It is
-   a good theory and it is NOT what is happening here. Raycast the real
-   clipmap meshes against `heightAt` at the same xz (seed 1337, level 0,
-   camera settled):
+   CAUSE ONE: THE CHORD. `heightAt` is analytic and it is NOT where the
+   ground is drawn. The clipmap's finest ring samples it every 10 m and
+   strings flat triangles between the samples, and a flat triangle across a
+   convex dune hangs below the curve. A foot placed at `heightAt` is placed
+   on the mathematical surface and photographed against the rendered one, so
+   it sinks by exactly that chord.
 
-       at the player's feet on a 51 deg dune flank   rendered - analytic = +0.06 m
-       450-point sweep, erg,     within 120 m        mean |err| 0.14 m, worst 0.65
-       450-point sweep, mesa     within 120 m        mean |err| 0.005 m, worst 0.28
-       450-point sweep, salt pan within 120 m        mean |err| 0.019 m, worst 0.19
-       450-point sweep, wadi     within 120 m        mean |err| 0.14 m, worst 3.41
-                                                     (the 3.4 is a 27 m-deep
-                                                      trunk channel wall, not
-                                                      ground anyone stands on)
+   This file's first pass measured the chord and called it small, and that
+   judgement was wrong because of WHERE it sampled. Raycasting the live
+   clipmap at the point directly under the player gave +0.06 m, and per-biome
+   sweeps gave means of 0.005 m (mesa), 0.019 m (salt), 0.14 m (erg and
+   wadi) — numbers small enough to look like rounding. But a mean over a
+   biome is the wrong statistic for a body standing at one spot: the same
+   sweeps' WORST cases were 0.65 m on an erg flank and 3.41 m in a wadi, and
+   a man does not stand at the mean. desert.js now publishes
+   `renderHeightAt(x, z)`, which reproduces the drawn triangle exactly
+   instead of approximating it, and every ground tap in this file goes
+   through it. The chord is not reduced, it is gone by construction.
 
-   Six centimetres. That is not a buried man. The finest clipmap level is a
-   10 m cell and every terrain law in desert.js has a lattice of 90 m or
-   longer, so there is almost nothing for the grid to miss. The LOD
-   hypothesis is dead; `W.sand.renderedY()` below keeps measuring it anyway,
-   because a claim this file makes in a comment should stay falsifiable.
-
-   THE REAL CAUSE IS THE STANCE, AND IT IS TRIVIAL ONCE YOU MEASURE IT.
-   Everything in this game is placed with ONE ground sample at the body's
-   centre and then stands PLUMB:
+   CAUSE TWO: THE STANCE, which is independent of the chord and is the
+   bigger of the two on a slope. Everything in this game is placed with ONE
+   ground sample at the body's centre and then stands PLUMB:
 
        youRig.position.set(S.you.x, D.heightAt(S.you.x, S.you.z), S.you.z);
 
    The player's cast body measures 1.08 m across (Box3 off the live rig:
    x -0.54..0.54, y -0.01..1.86 — so the rig origin IS at the sole, which
-   was the other candidate and is not the problem either). On that same
-   flank the ground drops 1.52 m across one metre. The uphill half of him is
-   therefore standing 0.82 m BELOW the sand beside him and the downhill half
-   is 0.82 m in the air, at the same time. A plumb body on a slope is buried
-   AND floating, and no amount of moving it up or down fixes that: raise it
-   and the uphill edge surfaces exactly as fast as the downhill edge takes
-   off. The only fix is to LEAN HIM INTO THE HILL. That is `plant()`.
+   was a candidate and is not the problem). On a 51 deg flank the ground
+   drops 1.52 m across one metre. The uphill half of him is therefore
+   standing 0.82 m BELOW the sand beside him and the downhill half is 0.82 m
+   in the air, at the same time. A plumb body on a slope is buried AND
+   floating, and no amount of moving it up or down fixes that — raise it and
+   the uphill edge surfaces exactly as fast as the downhill edge takes off.
+   Fixing the chord alone would not have touched this. The only fix is to
+   LEAN HIM INTO THE HILL. That is `plant()`, and it took the measured
+   burial on that flank from 22.1 cm to 7.9 cm before the chord was
+   addressed at all.
 
    The animated walk cycle was the third candidate and it is clean: the
    rig's lowest point over a full stride sits 2 to 4 cm below its own
@@ -91,6 +92,13 @@
                    budget, the analytic-vs-rendered error, and the burial
                    and float of the player's own contact patch in cm.
      ?prints=off   feet fixed, ground left clean (for isolating the two)
+     ?lean=N       0..1, override how far a body is turned to the surface
+                   normal. This is the single most contestable number in the
+                   file — it trades measured burial against whether a man on
+                   a slip face reads as braced or as falling, and the two
+                   want different answers — so it is dial-able rather than
+                   buried in a constant. ?lean=1 puts every sole flat and
+                   drives bootBuryCm to zero; ?lean=0 is plumb.
 
    Owned events: none. This file listens and draws; it never moves the sim.
 
@@ -152,6 +160,7 @@
   let ctx = null, micro = null, scene = null;
   let Q = null;
   let FLAG_OLD = false, FLAG_NOPRINTS = false, DEBUG = false;
+  let LEAN = 0.85;
 
   /* ============================================================ RANDOM
      Deterministic everywhere the sim can read it. A print's jitter decides
@@ -198,6 +207,75 @@
     return D && D.heightAt ? D.heightAt(x, z) : 0;
   }
 
+  /* ============================================================ THE SURFACE
+     A SOLE IS SEATED ON — and it is the one that gets DRAWN, not the one the
+     maths believes in.
+
+     desert.js now publishes `renderHeightAt(x, z)`: the clipmap's finest ring
+     samples `heightAt` on a global 10 m lattice and strings flat triangles
+     between those samples, and that function reproduces the resulting
+     triangle exactly — same lattice, same diagonal, same barycentric
+     weights. A foot placed at `heightAt` is placed on the mathematical
+     surface and photographed against the rendered one, so it sinks by
+     exactly the chord between them.
+
+     EVERY TAP IN stand() GOES THROUGH IT, not just the centre one. That is
+     the part worth being deliberate about: the four ring samples are what
+     the LEAN is computed from, so reading them off the analytic surface
+     while seating the body on the drawn one would tilt him to a slope the
+     ground under his boots does not have. Height and normal have to come
+     from the same surface or they disagree by the chord's gradient.
+
+     THE FACETS ARE ACCEPTED, KNOWINGLY. The drawn surface is piecewise flat,
+     so its normal is discontinuous at every 10 m quad edge and a man
+     crossing one changes lean in a single frame. Two things make that a
+     non-issue and they are worth writing down rather than discovering
+     twice: the stance ring is 0.5 m against a 10 m cell, so the central
+     difference straddles an edge only within half a metre of it and blends
+     across rather than snapping; and the two triangles either side of an
+     edge differ by the terrain's own curvature over 10 m, which on this
+     island is a couple of degrees. A visibly faceted lean would be the
+     better trade anyway — matching the facet you can SEE beats matching a
+     curve that is not drawn.
+
+     THE 400 m LIMIT IS ENFORCED HERE, NOT TRUSTED. Level 0 reaches 400 m
+     from the CAMERA; past that a coarser ring draws the ground with a
+     bigger chord and a non-zero bias, and renderHeightAt is silently wrong.
+     Silently is the problem — nothing about a wrong answer 500 m out looks
+     wrong until a body is standing in a dune. So this checks the distance
+     and falls back to the analytic surface, which is the correct answer for
+     anything that far away and is what the coarse rings approximate anyway.
+     Callers who want simulation truth — pathing, the map, spawn placement,
+     a band walking the island unseen — must keep calling `heightAt`
+     directly; `groundY` is a RENDERING answer and this file will not let it
+     become the sim's. */
+  const DRAWN_RANGE = 380;                 // level 0 reaches 400; 20 m of margin
+  const DRAWN_RANGE2 = DRAWN_RANGE * DRAWN_RANGE;
+  function drawnAt(x, z) {
+    const D = W.desert;
+    if (!D) return 0;
+    if (!D.renderHeightAt) return D.heightAt ? D.heightAt(x, z) : 0;
+    /* AND IT IS ONLY THE RIGHT ANSWER WHILE THE CLIPMAP IS THE THING BEING
+       DRAWN. renderHeightAt reproduces the ISLAND's finest ring — a 10 m
+       lattice. A battle hides the island (desert.js's own `hide()`) and
+       battle.js lays its own floor over the same coordinates at a 2.7 m
+       resolution, whose chord is a fourteenth of the clipmap's. Seating a
+       battle line on the clipmap's triangle would therefore re-introduce up
+       to 10 cm of exactly the error this call exists to remove, against a
+       mesh that never had it. When the island is not visible the analytic
+       surface is the closest thing to what IS drawn, so that is what comes
+       back. Caught by reasoning rather than by a picture — this preset
+       photographs six campaign subjects and not one battle, so nothing here
+       would have shown it. */
+    if (D.visible && !D.visible()) return D.heightAt(x, z);
+    const c = CBZ.camera;
+    if (c) {
+      const dx = x - c.position.x, dz = z - c.position.z;
+      if (dx * dx + dz * dz > DRAWN_RANGE2) return D.heightAt(x, z);
+    }
+    return D.renderHeightAt(x, z);
+  }
+
   /* HOW SOFT IS THIS GROUND. Straight off desert.js's own biome field, no
      second noise layer: soft erg sand takes a deep print and holds it for a
      minute; a salt pan is a crust and takes almost nothing; rock takes
@@ -232,13 +310,21 @@
       _st.bury = 0; _st.float = 0;
       return _st;
     }
-    const h0 = D.heightAt(x, z);
-    const hE = D.heightAt(x + r, z), hW = D.heightAt(x - r, z);
-    const hN = D.heightAt(x, z + r), hS = D.heightAt(x, z - r);
+    const h0 = drawnAt(x, z);
+    const hE = drawnAt(x + r, z), hW = drawnAt(x - r, z);
+    const hN = drawnAt(x, z + r), hS = drawnAt(x, z - r);
     const gx = (hE - hW) / (2 * r), gz = (hN - hS) / (2 * r);
-    // curvature residual: how far the patch's rim stands above its own
-    // tangent plane. Positive in a hollow, negative on a crest, and only the
-    // positive half is a correction (see the block comment above).
+    /* Curvature residual: how far the patch's rim stands above its own
+       tangent plane. Positive in a hollow, negative on a crest, and only the
+       positive half is a correction (see the block comment above).
+
+       ON THE DRAWN SURFACE THIS IS USUALLY EXACTLY ZERO, and that is not a
+       reason to delete it. Inside one 10 m triangle the ground IS a plane,
+       so the residual vanishes by construction; it only fires where the
+       stance straddles a concave fold BETWEEN two triangles, which is
+       exactly the case a single centre sample gets wrong and the one place
+       a heel still ends up under the sand without it. Zero almost
+       everywhere, correct at the seams. */
     const resX = (hE + hW) * 0.5 - h0, resZ = (hN + hS) * 0.5 - h0;
     const res = Math.max(0, resX, resZ);
     const g2 = Math.hypot(gx, gz);
@@ -309,6 +395,16 @@
      or the sim. It exists so the claim at the top of this file — "the LOD
      chord error is six centimetres, not a metre" — can be re-measured on a
      live page by anyone who doubts it, instead of being a comment.
+
+     It is also no longer the only answer to this question: desert.js now
+     publishes `renderHeightAt`, which RECONSTRUCTS the drawn triangle from
+     the same lattice without touching the scene at all, and that is what
+     `stand()` calls. This stays because the two are independent — one reads
+     the buffer the GPU is about to draw, the other rebuilds it from first
+     principles — so `renderHeightAt` minus this is a live check that the
+     reconstruction still matches the mesh. The preset reports it as
+     `lodErrCm` and it should read zero; if it ever does not, the clipmap has
+     changed shape and the reconstruction has not been told.
 
      It reads the clipmap's own vertex heights and interpolates on the SAME
      triangle the rasteriser used (the index buffer is (a,c,b),(b,c,d), so
@@ -1038,7 +1134,7 @@
      sole flat on the ground with his body still over his feet — align him
      nearly all the way and the soles land. Past that he cannot, and he does
      what anyone on a slip face does: keeps his mass upright and digs the
-     uphill boot in. So the alignment eases back from 0.75 toward 0.49 as the
+     uphill boot in. So the alignment eases back from 0.85 toward 0.55 as the
      grade runs from 0.36 to 1.25.
 
      A FIXED FRACTION WAS THE FIRST DRAFT AND THE NUMBERS KILLED IT. 0.62
@@ -1070,13 +1166,17 @@
        better. */
     const st = stand(x, z, { r: o.r == null ? 0.5 : o.r });
     const ANKLE = 0.36;                      // tan(20 deg): what an ankle gives
-    /* 0.75, JUDGED FROM THE PICTURE. 0.85 put both soles flat on a 25 deg
-       flank and read as a man tipping downhill — the rig has no ankle, so
-       every degree that gets the sole down also lays the torso over, and
-       past about 19 deg of body lean the silhouette stops saying "braced"
-       and starts saying "falling". 0.75 is the last value where it still
-       says braced. */
-    const base = o.lean == null ? 0.75 : o.lean;
+    /* 0.85, AND THE NUMBER MOVED ONCE FOR A REASON WORTH RECORDING. It was
+       0.75, chosen from a picture taken while the body was still seated on
+       the ANALYTIC surface — about 10 cm above the sand that was actually
+       drawn. A body floating 10 cm proud of a slope reads as tipping much
+       earlier than one properly seated on it, so the visual limit was being
+       judged against a second bug. With the chord gone (see drawnAt) the
+       same silhouette at 0.85 reads as braced rather than falling, and the
+       measured burial drops by a third. 1.0 was photographed too, and it is
+       genuinely over: the rig has no ankle, so the last of the alignment
+       lays the torso out until he reads as mid-fall down the slip face. */
+    const base = o.lean == null ? LEAN : o.lean;
     const k = (o.lean === 1 || st.slope <= ANKLE) ? base
       : base * lerp(1, 0.65, clamp((st.slope - ANKLE) / 0.89, 0, 1));
     obj.position.set(x, st.y + (o.lift || 0), z);
@@ -1277,7 +1377,9 @@
       s += "slope   " + (Math.atan(g.slope) * 180 / Math.PI).toFixed(1) + " deg  " + g.biome + " firm " + g.firm.toFixed(2) + "\n";
       s += "plumb   bury " + (g.bury * 100).toFixed(0) + " cm   float " + (g.float * 100).toFixed(0) + " cm\n";
       s += "planted bury " + (FLAG_OLD ? (g.bury * 100).toFixed(0) : "0") + " cm   lean " + (FLAG_OLD ? "0" : "62") + "%\n";
-      s += "LOD err " + (r == null ? "n/a" : ((r - heightAt(st.you.x, st.you.z)) * 100).toFixed(1) + " cm") + "  (rendered - analytic)\n";
+      const dr = drawnAt(st.you.x, st.you.z), an = heightAt(st.you.x, st.you.z);
+      s += "chord   " + ((dr - an) * 100).toFixed(1) + " cm  (drawn - analytic, what a foot used to sink)\n";
+      s += "recon   " + (r == null ? "n/a" : ((dr - r) * 100).toFixed(2) + " cm") + "  (renderHeightAt - mesh read-back)\n";
     }
     s += "prints  " + a.prints + "/" + PRINT_CAP + "   churn " + a.churn + "/" + CHURN_CAP + "\n";
     s += "dust    " + a.dust + "/" + DUST_MAX + "   walkers " + a.walkers + "\n";
@@ -1369,6 +1471,10 @@
     FLAG_OLD = !!(Q && Q.get("sand") === "old");
     DEBUG = !!(Q && Q.get("sand") === "1");
     FLAG_NOPRINTS = !!(Q && Q.get("prints") === "off");
+    if (Q && Q.get("lean") != null) {
+      const v = parseFloat(Q.get("lean"));
+      if (isFinite(v)) LEAN = clamp(v, 0, 1);
+    }
     if (!THREE || !scene) return;
     /* BUILT AT BOOT, NOT ON FIRST PRINT. The pools are 3 000 quads of
        preallocated Float32 and one 256px canvas — a millisecond — and
