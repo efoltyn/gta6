@@ -44,9 +44,6 @@
      · CBZ.batchStaticUnder (core/batch.js, in this page's NEED list) — a
        depot leaves this file as ~13 draw calls instead of ~70 because the
        inert boxes get merged before the group is returned. Measured below.
-     · CBZ.makeRock (world/rockscliffs.js) — the scrape/spall boulder. Its
-       fractured facets are what a desert boulder looks like and an
-       Icosahedron is not; I am not writing a second one. See LAZY, below.
      · CBZ.studio.model("truck"|"tank"|"cargo"|"heli") — the repo's SHIPPED
        military models. A burnt-out truck is that truck, tilted, sunk and
        charred. Redrawing a truck out of boxes when city/island_military.js
@@ -57,28 +54,55 @@
    HAD TO MAKE, and why the existing one did not fit:
      · The outposts, the banners, the tents, the shade cloth, the well head,
        the wrecking/charring, the sandbag walls. Nothing like these exists.
+     · The fractured boulder. I went to reuse world/rockscliffs.js's
+       CBZ.makeRock and it is DEAD ON r128 — it reads `.index` off an
+       IcosahedronGeometry that r128 does not index, bails to a stub path,
+       and hands back a normal-less icosahedron that renders black. Proven
+       in the browser and written up at scrapeRock() below. Same algorithm,
+       plus the vertex weld that makes it run.
      · A palm. world/vegetation.js's kit is temperate (trunk/crown/spire) and
        city/beach.js DOES have a good leaning palm — but it is written inline
        inside cityBuildBeach(), reads that function's local rng and pier
        position, and is not callable. Extracting it means editing beach.js,
        which is not mine to edit. So the palm here copies its TECHNIQUE
-       (instanced trunk + a crown hub instance + six drooping fronds, the
-       trunk-top read off the instance matrix rather than re-derived with
-       hand trig — beach.js's own TREES_V2 bug note) and none of its code.
+       (a trunk, a crown hub sat at the true trunk top, and a ring of
+       drooping fronds whose inner ends run THROUGH the hub — beach.js's own
+       TREES_V2 bug note is about getting that seat wrong) and none of its
+       code. Eleven fronds rather than six, and each is a curved tapered
+       strip rather than a flat plank; see frondGeo().
      · Sandbags/crates/barricades. world/crates.js and world/clutter.js draw
        these, but both are LOAD-TIME PASSES that stamp the prison yard at
        fixed coordinates off CBZ.WORLD/CBZ.DIM. They are not factories, they
        are not in any studio pack, and razorwire.js/towers.js would throw at
        load on this page (`CBZ.DIM.YH` of a prison that does not exist here).
 
-   LAZY, and why: rockscliffs.js and the military models are in NO studio
-   pack, so this page does not have them. boot() appends both — a script tag
-   and one studio.need() — and nothing in this file builds until it is asked.
-   A wreck asked for before the models land is EMPTY and fills itself when
-   they arrive, rather than being a box that later disagrees with the same
-   wreck built one second later. Shape stability beats being on screen a
-   frame earlier; a prop that changes shape when a chunk reloads is the exact
-   defect the determinism rule exists to stop.
+   LAZY, and why: the military models are in NO studio pack, so this page
+   does not have them. boot() asks the studio for the pack and nothing here
+   builds until it is asked. A wreck asked for before the models land is
+   EMPTY and fills itself when they arrive, rather than being a box that
+   later disagrees with the same wreck built one second later. Shape
+   stability beats being on screen a frame earlier; a prop that changes shape
+   when a chunk reloads is the exact defect the determinism rule exists to
+   stop.
+
+   AND TWO ENGINE BUGS THIS FILE HAD TO ROUTE AROUND, both verified in a
+   headless browser and neither of them in a file I own:
+     1. CBZ.makeRock (world/rockscliffs.js) is dead on r128 — details at
+        scrapeRock() below. Every rock it has ever returned was a smooth,
+        normal-less icosahedron that renders black.
+     2. games/warlord.html DOUBLE-LIGHTS the scene. CBZ.micro.boot() builds
+        a hemi+sun pair unless told `lights:false`, and the page then calls
+        micro.lights() again with its own numbers — which ADDS a second
+        pair. Measured on the live page: HemisphereLight 0.62 + 0.62 and
+        DirectionalLight 1.05 + 1.12, so the whole game is lit at about
+        twice the intended level and ACES tone mapping turns that into a
+        set of white paper models. The fix is one word in warlord.html's
+        micro.boot call (`lights: false`) or moving the light options into
+        it. Worth about 1.8x on every lit surface. This file does NOT fix
+        it — one file owning another file's sun is a third bug — it counts
+        the lights, warns once, and reports them in audit().lights. It is
+        the smaller half of why everything photographs white; see the
+        palette block for the larger half.
 
    DETERMINISM: every variation comes off W.rngFrom(seed) or W.hash01. There
    is no Math.random in this file.
@@ -97,7 +121,7 @@
           ?props=1       the gallery — every prop in a row on a flat pad, so
                          this file is never blocked on another agent's.
           ?wrecks=box    do not lazy-load the military pack; box wrecks.
-          ?proprock=box  do not lazy-load rockscliffs.js; icosahedron rocks.
+          ?proprock=box  skip the scrape; plain icosahedron boulders.
 ============================================================ */
 (function () {
   "use strict";
@@ -128,36 +152,55 @@
      because that is their JOB, they are how you recognise a place and a
      faction from a kilometre away.
 
-     AND IT IS AUTHORED A THIRD DARKER THAN IT LOOKS, twice over. The
-     renderer runs ACESFilmicToneMapping with sRGB output, which lifts and
-     desaturates everything on the way to the screen — a hex that reads
-     "weathered canvas" in an editor arrives as cream. The first pass was
-     authored at face value and photographed as a set of white paper models
-     on a white floor. Every entry here is roughly 0.62x the value it is
-     meant to read as, measured against the gallery shots. */
+     AND IT IS AUTHORED IN LINEAR, WHICH MEANS MUCH DARKER THAN IT LOOKS.
+     This took three passes and two wrong theories, so all of it is written
+     down rather than only the answer.
+
+     The renderer runs outputEncoding = sRGBEncoding with ACES tone mapping.
+     r128 has ColorManagement off, so a hex you type is stored as a LINEAR
+     value and only encoded on the way out: linear 0.48 (0x7a) leaves as 0.72
+     on screen (0xb8) before a single light touches it. Multiply by the
+     scene's hemi + sun and it is white.
+
+     WRONG THEORY 1 — "shave 35% off". Did it, photographed it, still white.
+     WRONG THEORY 2 — "it is the page's double lighting" (which is real, see
+     the header, and worth about 1.8x on its own). Removed the duplicate
+     pair for one gallery run, photographed it, and the picture barely moved.
+     The encoding was always the bigger half, and the gallery now
+     photographs the lighting the game actually ships so the pictures are of
+     the game rather than of a corrected version of it.
+
+     THE ANSWER: author for CONTRAST AGAINST THE GROUND rather than for a
+     remembered colour. desert.js's sand runs 0.34-0.52 linear
+     (C_SAND_LO/HI); everything here that has to READ against that sand is
+     authored at 0.10-0.30 linear, which looks like mud in an editor and
+     like a weathered desert object on screen. Five entries below are
+     desert.js's own scatter values verbatim — a boulder this file draws and
+     a boulder desert.js instances are the same rock and must never be two
+     different browns. */
   const COL = {
-    sand:       0x9c7f4c,
-    sandDark:   0x6d5733,
-    canvas:     0xa89771,   // tent cloth, sun-bleached
-    canvasDark: 0x7d6b48,
-    tarp:       0x5f5844,
-    wood:       0x54401f,
-    woodDark:   0x33270f,
-    metal:      0x5c646c,
-    metalDark:  0x2a3036,
-    rust:       0x6e3b1e,
-    char:       0x141210,   // what a burnt thing is
-    rock:       0x6b5f4a,   // matched to desert.js's scatter rock on purpose
-    rockDark:   0x4d442f,
-    palmTrunk:  0x4e3b22,   // matched to desert.js's oasis palms, same reason
-    frond:      0x2c5a1e,
-    bone:       0xbfb499,
-    rope:       0x8a7550,
-    hide:       0x5b4028,
-    water:      0x2a6070,
-    boxRed:     0x8c3a24,
-    boxBlue:    0x1f4a63,
-    boxGreen:   0x35563a,
+    sand:       0x7a6238,   // the pad only — between desert.js's C_SAND_LO/HI
+    sandDark:   0x574024,   // = desert.js C_SAND_LO exactly
+    canvas:     0x6b5f42,   // tent cloth, sun-bleached
+    canvasDark: 0x473c26,
+    tarp:       0x2f2b20,
+    wood:       0x2c2110,
+    woodDark:   0x1a1409,
+    metal:      0x30363d,
+    metalDark:  0x161a1f,
+    rust:       0x3c1f0e,
+    char:       0x0c0a08,   // what a burnt thing is
+    rock:       0x453b2f,   // = desert.js's scatter rock, exactly
+    rockDark:   0x2b2419,
+    palmTrunk:  0x33270f,   // = desert.js's oasis palm trunk, exactly
+    frond:      0x1c3b12,   // = desert.js's oasis palm frond, exactly
+    bone:       0x77705d,
+    rope:       0x4a3d28,
+    hide:       0x2e1e10,
+    water:      0x123c47,
+    boxRed:     0x53200f,
+    boxBlue:    0x0f2937,
+    boxGreen:   0x1a2d1c,
     ember:      0xff7a2a,
   };
   const _mats = {};
@@ -198,8 +241,8 @@
   function smokeMat() {
     if (!_smokeMat) {
       _smokeMat = new THREE.MeshBasicMaterial({
-        color: 0xbfb5a4, transparent: true, opacity: 0.16, depthWrite: false,
-        side: THREE.DoubleSide, fog: true,
+        color: 0x9c9280, transparent: true, opacity: 1, depthWrite: false,
+        side: THREE.DoubleSide, vertexColors: true,
       });
     }
     return _smokeMat;
@@ -269,22 +312,108 @@
      the fractured boulder and the military models. Both are pulled here, at
      boot, and both have an explicit "not yet" state so nothing builds a
      provisional shape it would later contradict. */
-  let rockReady = false, rockAsked = false;
-  const rockWaiters = [];
-  function wantRock() {
-    if (rockAsked || NO_ROCK || OLD) return;
-    rockAsked = true;
-    if (CBZ.makeRock) { rockReady = true; return; }
-    if (!G.document || !CBZ.studio || !CBZ.studio.root) return;
-    const s = G.document.createElement("script");
-    s.src = CBZ.studio.root + "world/rockscliffs.js";
-    s.async = false;
-    s.onload = function () {
-      rockReady = !!CBZ.makeRock;
-      while (rockWaiters.length) { try { rockWaiters.shift()(); } catch (e) {} }
-    };
-    s.onerror = function () { console.warn("[warlord/props] rockscliffs.js did not load; boulders are icosahedra"); };
-    G.document.head.appendChild(s);
+  /* ---- THE ROCK, AND WHY THIS FILE HAS ITS OWN SCRAPE ----------------
+     I went to reuse world/rockscliffs.js's CBZ.makeRock and it does not
+     work on r128. Verified in the browser, not guessed:
+
+         new THREE.IcosahedronGeometry(1, 1).index  ->  null
+
+     r128's PolyhedronGeometry emits a NON-indexed BufferGeometry. makeRock
+     reads `src.index` to build its vertex adjacency, finds nothing, takes
+     the branch its own comment calls a "headless/stub-safe bail", and
+     returns `out` carrying ONLY a position attribute — no scrape, and no
+     normals. So every caller of makeRock in this repo gets a smooth
+     icosahedron, and any Lambert material drawn with it renders BLACK,
+     because a Lambert with no normal attribute has nothing to light. That
+     is not a warlord bug and I cannot fix it from here: rockscliffs.js is
+     not my file. The one-line fix over there is to weld the source before
+     reading its index (BufferGeometryUtils.mergeVertices, or the same
+     position-key weld this file does below) — worth doing, because the
+     "fractured boulder" that file is entirely about has never once run.
+
+     So the scrape lives here, and it is the SAME algorithm rockscliffs.js
+     describes — flood-fill a hop-neighbourhood from a seed vertex and
+     project those vertices onto a plane through the seed, inward only, so
+     each pass carves a flat chipped facet. What it adds is the weld that
+     makes adjacency exist at all. ~45 lines against shipping black rocks. */
+  function weld(geo) {
+    const pos = geo.attributes.position;
+    const key = new Map();
+    const verts = [];        // Vector3
+    const index = [];
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const k = Math.round(x * 1e4) + "," + Math.round(y * 1e4) + "," + Math.round(z * 1e4);
+      let at = key.get(k);
+      if (at === undefined) { at = verts.length; key.set(k, at); verts.push(new THREE.Vector3(x, y, z)); }
+      index.push(at);
+    }
+    return { verts: verts, index: index };
+  }
+  function adjacency(index, n) {
+    const adj = [];
+    for (let i = 0; i < n; i++) adj.push([]);
+    const link = function (a, b) { if (adj[a].indexOf(b) < 0) adj[a].push(b); };
+    for (let t = 0; t < index.length; t += 3) {
+      const a = index[t], b = index[t + 1], c = index[t + 2];
+      link(a, b); link(b, a); link(b, c); link(c, b); link(c, a); link(a, c);
+    }
+    return adj;
+  }
+  function scrapeRock(radius, seed, detail, tune) {
+    const r = W.rngFrom(seed || 1);
+    const src = new THREE.IcosahedronGeometry(radius, detail == null ? 1 : detail);
+    const w = weld(src);
+    const verts = w.verts, index = w.index;
+    const adj = adjacency(index, verts.length);
+    const SCRAPES = ((tune && tune.scrapes) || 11) + Math.floor(r() * 6);
+    const HOPS = ((tune && tune.hops) || 1) + Math.floor(r() * 2);
+    const dMin = radius * ((tune && tune.depthMin != null) ? tune.depthMin : 0.05);
+    // 0.45, not 0.32. At 0.32 a field of 120 photographed as smooth potatoes
+    // with a few flat spots — the facets have to be deep enough to catch a
+    // different amount of sun from their neighbours or the shape is lost.
+    const dMax = radius * ((tune && tune.depthMax != null) ? tune.depthMax : 0.45);
+    const n = new THREE.Vector3(), tmp = new THREE.Vector3();
+    for (let s = 0; s < SCRAPES; s++) {
+      const seedV = Math.floor(r() * verts.length) % verts.length;
+      // flood out HOPS edges from the seed
+      let ring = [seedV];
+      const got = { };
+      got[seedV] = 1;
+      for (let h = 0; h < HOPS; h++) {
+        const next = [];
+        for (let i = 0; i < ring.length; i++) {
+          const nb = adj[ring[i]];
+          for (let k = 0; k < nb.length; k++) if (!got[nb[k]]) { got[nb[k]] = 1; next.push(nb[k]); }
+        }
+        ring = next;
+      }
+      // the cutting plane: through the seed, pulled inward along its own
+      // position-as-normal by a random depth. INWARD ONLY — a scrape removes
+      // material, it never bulges the rock out.
+      n.copy(verts[seedV]).normalize();
+      const depth = dMin + r() * (dMax - dMin);
+      const planeD = verts[seedV].dot(n) - depth;
+      for (const kStr in got) {
+        const v = verts[kStr | 0];
+        const d = v.dot(n) - planeD;
+        if (d > 0) v.addScaledVector(n, -d);
+      }
+    }
+    if (tune && tune.squashY != null) for (let i = 0; i < verts.length; i++) verts[i].y *= tune.squashY;
+    // non-indexed write-back: every triangle owns its verts, so
+    // computeVertexNormals gives flat facets — the crisp chipped look the
+    // whole exercise is for.
+    const arr = new Float32Array(index.length * 3);
+    for (let t = 0; t < index.length; t++) {
+      const v = verts[index[t]];
+      arr[t * 3] = v.x; arr[t * 3 + 1] = v.y; arr[t * 3 + 2] = v.z;
+    }
+    const out = new THREE.BufferGeometry();
+    out.setAttribute("position", new THREE.BufferAttribute(arr, 3));
+    out.computeVertexNormals();
+    src.dispose();
+    return out;
   }
 
   let milState = "idle";              // idle | loading | ready | absent
@@ -487,27 +616,86 @@
      the cheap way: this palm leans by rotating the whole GROUP, so the trunk
      top is trivially (0, h, 0) in group space and there is no trig to get
      wrong. */
+  let _frondGeo = null;
+  /* A FROND IS A CURVE, NOT A PLANK. The first draft made each frond one
+     flat box rotated down by a fixed droop, and nine palms came out as a
+     grove of beach parasols — the fronds stuck out dead straight and all at
+     the same angle. A real palm frond leaves the crown almost horizontal,
+     bends over its own length and hangs at the tip. So it is one strip of
+     four quads that narrows AND droops harder as it goes out, built once
+     and shared by every palm in the game. Eleven per crown, not seven:
+     seven leaves gaps you can see the sky through from underneath. */
+  function frondGeo() {
+    if (_frondGeo) return _frondGeo;
+    const SEG = 5, LEN = 3.1;
+    const t = [];
+    const at = function (u) {
+      const x = u * LEN;
+      const y = -Math.pow(u, 1.9) * LEN * 0.95;      // the hang
+      const w = 0.34 * (1 - Math.pow(u, 1.6)) + 0.05; // the taper
+      return { x: x, y: y, w: w };
+    };
+    for (let i = 0; i < SEG; i++) {
+      const a = at(i / SEG), b = at((i + 1) / SEG);
+      // a shallow V section, so the frond has a spine and catches light on
+      // two planes instead of reading as a ribbon
+      const dip = 0.10;
+      const q = [
+        [a.x, a.y, -a.w], [b.x, b.y, -b.w], [b.x, b.y - dip, 0], [a.x, a.y - dip, 0],
+        [a.x, a.y - dip, 0], [b.x, b.y - dip, 0], [b.x, b.y, b.w], [a.x, a.y, a.w],
+      ];
+      for (let h = 0; h < 2; h++) {
+        const o = h * 4;
+        t.push(q[o][0], q[o][1], q[o][2], q[o + 1][0], q[o + 1][1], q[o + 1][2], q[o + 2][0], q[o + 2][1], q[o + 2][2]);
+        t.push(q[o][0], q[o][1], q[o][2], q[o + 2][0], q[o + 2][1], q[o + 2][2], q[o + 3][0], q[o + 3][1], q[o + 3][2]);
+      }
+    }
+    _frondGeo = soup(t);
+    return _frondGeo;
+  }
+
+  /* A PALM. Technique borrowed from city/beach.js's TREES_V2 note: the crown
+     hub sits at the trunk top and the fronds are pulled INWARD so their
+     inner ends run through it. The bug that note records — deriving the
+     leaned top with hand trig and a wrong sign, so the frond ring floats
+     beside the trunk — is avoided here the cheap way: this palm leans by
+     rotating the whole GROUP, so the trunk top is trivially (0, h, 0) in
+     group space and there is no trig left to get wrong. */
   P.palm = function (opts) {
     opts = opts || {};
     const g = new THREE.Group();
     const r = stream(opts.seed);
     const h = opts.h || r.range(6.5, 10.5);
-    const lean = opts.lean == null ? r.range(-0.16, 0.16) : opts.lean;
+    // TRUNK RADIUS 0.15/0.26, not 0.20/0.34. A date palm's trunk is about
+    // 40 cm across; the first pass drew 68 cm and nine of them read as a
+    // colonnade rather than a grove.
+    const lean = opts.lean == null ? r.range(-0.20, 0.20) : opts.lean;
     const yaw = opts.yaw == null ? r.f() * TAU : opts.yaw;
-    cyl(g, 0.20, 0.34, h, 6, M("palmTrunk"), 0, h / 2 - 0.25, 0);
-    // the fibrous boss the fronds actually grow out of
-    cyl(g, 0.44, 0.30, 0.7, 6, M("palmTrunk"), 0, h - 0.2, 0);
-    const n = 7;
-    for (let i = 0; i < n; i++) {
-      const a = yaw + i * (TAU / n) + r.range(-0.16, 0.16);
-      const len = r.range(2.5, 3.6);
-      const droop = r.range(0.30, 0.55);
-      const f = box(g, len, 0.09, 0.66, M("frond"),
-        Math.cos(a) * (len * 0.42), h - 0.05 - len * 0.42 * Math.sin(droop), Math.sin(a) * (len * 0.42));
-      f.rotation.set(0, -a, -droop);
+    cyl(g, 0.12, 0.21, h, 7, M("palmTrunk"), 0, h / 2 - 0.25, 0);
+    // the leaf-scar collar rings that make a palm trunk a palm trunk
+    for (let i = 0; i < 4; i++) {
+      cyl(g, 0.155, 0.155, 0.11, 7, M("woodDark"), 0, h * (0.35 + i * 0.16), 0);
     }
-    if (r.chance(0.55)) {                       // dates, because a palm has a colour on it
-      const b = box(g, 0.5, 0.4, 0.5, M("rust"), 0, h - 0.55, 0);
+    cyl(g, 0.30, 0.20, 0.5, 7, M("palmTrunk"), 0, h - 0.15, 0);   // the fibrous boss
+    const n = 11;
+    const fg = frondGeo();
+    for (let i = 0; i < n; i++) {
+      const a = yaw + i * (TAU / n) + r.range(-0.12, 0.12);
+      /* -0.18 to +0.26, not 0.05 to 0.42. Positive lift raises the frond,
+         and a whole crown of raised fronds is a fern star seen from above —
+         which is what nine of these photographed as. Half the fronds now
+         start below horizontal and the geometry's own hang takes them the
+         rest of the way down. */
+      const lift = r.range(-0.18, 0.26);
+      const f = new THREE.Mesh(fg, MD("frond"));
+      f.position.set(0, h - 0.1, 0);
+      f.rotation.set(0, -a, lift);
+      f.scale.setScalar(r.range(0.8, 1.15));
+      f.castShadow = true;
+      g.add(f);
+    }
+    if (r.chance(0.5)) {                       // dates, because a palm has a colour on it
+      const b = box(g, 0.55, 0.45, 0.55, M("rust"), 0, h - 0.6, 0);
       b.rotation.y = yaw;
     }
     g.rotation.z = lean;
@@ -528,11 +716,11 @@
     const r = stream(opts.seed);
     const rad = opts.r || 0.9;
     // stone ring
-    const ring = new THREE.InstancedMesh(BG(0.34, 0.24, 0.3), M("rock"), 9);
+    const ring = new THREE.InstancedMesh(BG(0.46, 0.34, 0.4), M("rockDark"), 9);
     const d = new THREE.Object3D();
     for (let i = 0; i < 9; i++) {
       const a = i / 9 * TAU + r.range(-0.1, 0.1);
-      d.position.set(Math.cos(a) * rad, 0.1, Math.sin(a) * rad);
+      d.position.set(Math.cos(a) * rad, 0.15, Math.sin(a) * rad);
       d.rotation.set(0, a, r.range(-0.2, 0.2));
       d.scale.setScalar(r.range(0.75, 1.3));
       d.updateMatrix(); ring.setMatrixAt(i, d.matrix);
@@ -548,8 +736,8 @@
     // the live half: embers + smoke, tagged dynamic so batch.js leaves it be
     const live = new THREE.Group();
     live.userData.dynamic = true;
-    const flame = new THREE.Mesh(CG(0.02, 0.42, 1.0, 6), M("ember"));
-    flame.position.y = 0.55;
+    const flame = new THREE.Mesh(CG(0.03, 0.55, 1.35, 6), M("ember"));
+    flame.position.y = 0.72;
     live.add(flame);
     if (opts.smoke !== false) {
       const H = opts.smokeH || 11;
@@ -567,23 +755,54 @@
     g.userData.colliders = [];
     return g;
   };
-  // a smoke column: two crossed tapered quads, widening and fading upward.
+  /* A SMOKE COLUMN, and the first one was a disaster: two crossed quads at a
+     flat 0.16 opacity, 4.6 m wide at the top, which photographed as a giant
+     white light-shaft fanning off the top of the frame — it read as a bug in
+     the renderer, not as smoke. Two fixes, both from the picture:
+
+       1. IT FADES OUT. r128 supports vertex ALPHA (a 4-component `color`
+          attribute plus material.vertexColors — `vertexAlphas` in the
+          program cache; confirmed in the vendored bundle before relying on
+          it), so the plume goes to zero alpha at the top in ONE draw call
+          instead of needing a stack of quads at stepped opacities.
+       2. IT IS A QUARTER THE WIDTH. Real smoke off a cook fire is a thin
+          rope that shears downwind, not a cone.
+
+     Still two crossed quads and still unlit, because at the range this is
+     FOR — the thing that says "a camp is over there" from a kilometre — the
+     silhouette is the whole information content. */
   function smokeCol(h) {
-    const w0 = 0.7, w1 = h * 0.42;
-    const t = [];
-    function quad(ax, az) {
-      // (-w0..w0) at the base, (-w1..w1) at the top, leaning downwind in +x
-      const drift = h * 0.35;
+    const w0 = 0.45, w1 = h * 0.13;
+    const SEG = 4;
+    const pos = [], colr = [];
+    function strip(ax, az) {
+      const drift = h * 0.30;
       const p = function (u, v) {
         const wq = w0 + (w1 - w0) * v;
         return [ax * u * wq + drift * v * v, v * h, az * u * wq];
       };
-      const a = p(-1, 0), b = p(1, 0), c = p(1, 1), e = p(-1, 1);
-      t.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
-      t.push(a[0], a[1], a[2], c[0], c[1], c[2], e[0], e[1], e[2]);
+      /* 0.46 at the base. The first pass was 0.16 flat and photographed as a
+         white light-shaft; the correction to 0.30-with-falloff went too far
+         the other way and the camp had no plume at all at the range the
+         plume exists FOR. */
+      const a = function (v) { return 0.46 * (1 - v) * (1 - v * 0.35); };
+      for (let j = 0; j < SEG; j++) {
+        const v0 = j / SEG, v1 = (j + 1) / SEG;
+        const q = [p(-1, v0), p(1, v0), p(1, v1), p(-1, v1)];
+        const av = [a(v0), a(v0), a(v1), a(v1)];
+        const tri = [0, 1, 2, 0, 2, 3];
+        for (let k = 0; k < 6; k++) {
+          const i = tri[k];
+          pos.push(q[i][0], q[i][1], q[i][2]);
+          colr.push(1, 1, 1, av[i]);
+        }
+      }
     }
-    quad(1, 0); quad(0, 1);
-    return soup(t);
+    strip(1, 0); strip(0, 1);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pos), 3));
+    g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(colr), 4));
+    return g;
   }
 
   /* A RIDGE TENT, as one prism geometry rather than five boxes, because a
@@ -591,7 +810,13 @@
   let _tentGeo = null;
   function tentGeo() {
     if (_tentGeo) return _tentGeo;
-    const w = 1.6, h = 1.0, l = 2.3;      // half-extents; instances scale it
+    /* HALF-EXTENTS, and the first draft got them wrong in the way that only
+       a photograph shows: w 1.6 / h 1.0 is a 3.2 m wide tent 1 m at the
+       ridge, which from a camera 12 m up is a triangle lying FLAT on the
+       sand. A real ridge tent is taller than it is half-wide. 1.15 / 1.85 /
+       1.75 is a 2.3 m wide, 1.85 m tall, 3.5 m long tent — you can stand up
+       in the middle of it, and it has a silhouette from above. */
+    const w = 1.15, h = 1.85, l = 1.75;
     const t = [];
     const A = [-w, 0, -l], B = [w, 0, -l], C = [w, 0, l], D = [-w, 0, l];
     const R0 = [0, h, -l], R1 = [0, h, l];
@@ -599,13 +824,19 @@
     tri(A, R0, R1); tri(A, R1, D);         // left slope
     tri(B, C, R1); tri(B, R1, R0);         // right slope
     tri(A, B, R0);                         // back gable
-    tri(D, R1, C);                         // front gable
+    // the FRONT is open: a triangle with its apex cut away, so the tent has
+    // a door you can see into. A closed gable at both ends is a wedge; the
+    // gap is what makes nine of these read as tents rather than as bunting.
+    const F0 = [-w, 0, l], F1 = [w, 0, l], M0 = [-w * 0.42, h * 0.6, l], M1 = [w * 0.42, h * 0.6, l];
+    tri(F0, M0, R1); tri(F0, R1, M1); tri(F0, M1, F1);
     _tentGeo = soup(t);
     return _tentGeo;
   }
   P.tents = function (list, opts) {
     opts = opts || {};
-    const im = new THREE.InstancedMesh(tentGeo(), M(opts.mat || "canvas"), list.length);
+    // DOUBLE-SIDED, because the front gable is open and a single-sided tent
+    // is a hole you can see the sand through from the wrong angle.
+    const im = new THREE.InstancedMesh(tentGeo(), MD(opts.mat || "canvas"), list.length);
     const d = new THREE.Object3D();
     const hasCol = !!im.setColorAt;
     const c = new THREE.Color();
@@ -644,11 +875,45 @@
     }
     return soup(t);
   }
+  /* A DISH: a circle whose middle is pushed down (or an annulus, when
+     `inner` is given). Used for the oasis pool and its grass ring. Two
+     radii and two heights beats a flat CircleGeometry for the same cost,
+     and it is the difference between water you can see and water you
+     cannot. */
+  function dishGeo(radius, rimY, midY, seg, inner, jitter) {
+    const t = [];
+    const ri = inner || 0;
+    const j = jitter || 0;
+    // per-ANGLE, not per-vertex, so segment i's two corners agree with their
+    // neighbours' and the ring stays closed
+    const wob = [];
+    for (let i = 0; i <= seg; i++) wob.push(1 + (W.hash01(i * 7.3, radius, 991) - 0.5) * 2 * j);
+    wob[seg] = wob[0];
+    for (let i = 0; i < seg; i++) {
+      const a0 = i / seg * TAU, a1 = (i + 1) / seg * TAU;
+      const r0 = radius * wob[i], r1 = radius * wob[i + 1];
+      const o0 = [Math.cos(a0) * r0, rimY, Math.sin(a0) * r0];
+      const o1 = [Math.cos(a1) * r1, rimY, Math.sin(a1) * r1];
+      if (ri > 0) {
+        const i0 = [Math.cos(a0) * ri * wob[i], midY, Math.sin(a0) * ri * wob[i]];
+        const i1 = [Math.cos(a1) * ri * wob[i + 1], midY, Math.sin(a1) * ri * wob[i + 1]];
+        t.push(i0[0], i0[1], i0[2], o1[0], o1[1], o1[2], o0[0], o0[1], o0[2]);
+        t.push(i0[0], i0[1], i0[2], i1[0], i1[1], i1[2], o1[0], o1[1], o1[2]);
+      } else {
+        t.push(0, midY, 0, o1[0], o1[1], o1[2], o0[0], o0[1], o0[2]);
+      }
+    }
+    return soup(t);
+  }
+
   P.canopy = function (opts) {
     opts = opts || {};
     const g = new THREE.Group();
     const w = opts.w || 6, d = opts.d || 5, h = opts.h || 2.9;
-    const cloth = new THREE.Mesh(sagGeo(w, d, opts.sag == null ? h * 0.22 : opts.sag, 4),
+    // SAG 0.42 OF THE HEIGHT, not 0.22. At 0.22 five canopies photographed as
+    // five flat sheets of plywood — the droop is the whole difference between
+    // "cloth" and "a plane with a cloth colour on it".
+    const cloth = new THREE.Mesh(sagGeo(w, d, opts.sag == null ? h * 0.42 : opts.sag, 4),
       MD(opts.mat || "tarp"));
     cloth.position.y = h;
     cloth.castShadow = true; cloth.receiveShadow = true;
@@ -948,7 +1213,17 @@
     const clothMat = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide });
     const cloth = new THREE.InstancedMesh(BG(fly / CLOTH_SEG, hoist, 0.03), clothMat, cap * CLOTH_SEG);
     pole.castShadow = cloth.castShadow = true;
-    pole.count = finial.count = cloth.count = 0;
+    /* ALLOCATE instanceColor UP FRONT. THIS IS THE BUG THAT PAINTED SIXTY
+       FLAGS BLACK. r128's InstancedMesh.setColorAt lazily creates the
+       attribute sized `new Float32Array(this.count * 3)` — using the count
+       AT THE MOMENT OF THE FIRST CALL. The field starts empty so that count
+       was 0, every colour write went into a zero-length buffer, and the
+       whole field rendered at rgb(0,0,0). Nothing throws; you just get a
+       row of black flags and no idea why. Sized here, filled white, so the
+       first add() writes into a real buffer. */
+    cloth.instanceColor = new THREE.InstancedBufferAttribute(
+      new Float32Array(cap * CLOTH_SEG * 3).fill(1), 3);
+    cloth.count = finial.count = pole.count = 0;
     pole.frustumCulled = finial.frustumCulled = cloth.frustumCulled = false;
     g.add(pole); g.add(finial); g.add(cloth);
     const items = [];
@@ -960,6 +1235,20 @@
       count: function () { return items.length; },
       add: function (x, y, z, colour, scale) {
         if (items.length >= cap) return null;
+        /* ?propkit=old — THE HONEST BEFORE for the batching claim. There was
+           never an "old bannerField"; what a page would have done without one
+           is build a flag per band, as its own group, as its own draw call.
+           So that is what the revert does, and the A/B measures exactly the
+           thing the brief asks about: sixty banners, sixty draws, against
+           sixty banners, three draws. */
+        if (OLD) {
+          const one = P.banner(colour, { h: h * (scale || 1), seed: items.length + 1 });
+          one.position.set(x, y, z);
+          one.scale.setScalar(scale || 1);
+          g.add(one);
+          items.push({ x: x, y: y, z: z, s: scale || 1, phase: 0, solo: one });
+          return one;
+        }
         const i = items.length;
         const s = scale || 1;
         d.position.set(x, y + h * 0.5 * s, z); d.rotation.set(0, 0, 0); d.scale.set(s, s, s);
@@ -984,6 +1273,7 @@
         pole.count = finial.count = cloth.count = 0;
       },
       tick: function (t, camPos) {
+        if (OLD) return;
         const liveR = opts.liveR || 300;
         const r2 = liveR * liveR;
         for (let i = 0; i < items.length; i++) {
@@ -1009,30 +1299,20 @@
   };
 
   /* ============================================================ ROCKS
-     CBZ.makeRock's scrape algorithm, four variants, built once and shared by
-     every boulder, gabion and rubble pile in the game. If rockscliffs.js
-     has not landed yet the fallback is a plain icosahedron — which is what
-     desert.js's scatter already uses, so the game is no worse than it was;
-     it just is not better yet. */
+     Four scraped variants, built lazily and shared by every boulder,
+     gabion and rubble pile in the game. Variant 3 is squashed flat: real
+     talus is plate-shaped because it splits along bedding, and a field of
+     uniform potatoes at a cliff foot reads wrong. ?proprock=box swaps in a
+     plain icosahedron for the A/B. */
   const rockGeos = [];
   function rockGeo(i) {
     i = i % 4;
     if (rockGeos[i]) return rockGeos[i];
-    let g = null;
-    if (rockReady && CBZ.makeRock) {
-      try { g = CBZ.makeRock(1, 9001 + i * 137, 1, i === 3 ? { squashY: 0.42, scrapes: 11 } : null); } catch (e) { g = null; }
-    }
-    if (!g) g = new THREE.IcosahedronGeometry(1, i === 3 ? 0 : 1);
-    rockGeos[i] = g;
-    return g;
+    rockGeos[i] = NO_ROCK
+      ? new THREE.IcosahedronGeometry(1, 1)
+      : scrapeRock(1, 9001 + i * 137, 1, i === 3 ? { squashY: 0.40, scrapes: 11 } : null);
+    return rockGeos[i];
   }
-  /* A GEOMETRY BUILT BEFORE rockscliffs.js LANDED KEEPS ITS SHAPE. There is
-     no live swap here on purpose: a boulder that silently becomes a different
-     boulder one second after it was drawn is the exact "the prop changed when
-     the chunk reloaded" failure the determinism rule exists to stop. boot()
-     asks for the file immediately and nothing builds a rock until it is
-     needed, so in practice the fallback is only ever reached with ?proprock=box
-     or a 404. */
 
   /* ============================================================ COVER
      The things a man hides behind. Every one of these is sized against
@@ -1286,8 +1566,11 @@
       if (!m) {
         m = src.clone();
         if (m.color) {
-          m.color.multiplyScalar(1 - amount);
-          m.color.lerp(new THREE.Color(COL.char), amount * 0.55);
+          // toward the char colour first, THEN down. Multiplying alone kept
+          // the tank's olive hue and just made it a darker olive — it read as
+          // a tank in shadow, not a burnt one. Burnt things lose their hue.
+          m.color.lerp(new THREE.Color(COL.char), amount);
+          m.color.multiplyScalar(1 - amount * 0.5);
         }
         if (m.emissive) m.emissive.setHex(0x000000);
         m._shared = false;
@@ -1313,9 +1596,15 @@
     // scorch: a dark disc under everything. Cheap, and it is what says
     // "burned" from above, where the campaign camera actually looks.
     if (!OLD) {
-      const disc = new THREE.Mesh(new THREE.CircleGeometry(kind === "plane" ? 11 : 5.2, 14), M("char"));
-      disc.rotation.x = -Math.PI / 2;
-      disc.position.y = 0.04;
+      const R0 = kind === "plane" ? 15 : 7.0;
+      /* A SHALLOW DOME, and the first draft had it upside down. It was a
+         DISH — rim at +0.02, middle at -0.22 — which is what a burnt-out
+         vehicle really scours out, and on the gallery's flat pad the middle
+         went UNDER the ground and the scorch mark photographed as a thin
+         ring with nothing inside it. Any decal on procedural terrain has to
+         bulge UP, never down: +0.06 in the middle to +0.005 at the rim rides
+         over a dune instead of sinking into it. */
+      const disc = new THREE.Mesh(dishGeo(R0, 0.005, 0.06, 16), M("char"));
       disc.receiveShadow = true;
       g.add(disc);
     }
@@ -1331,7 +1620,12 @@
       if (m) {
         shell.add(m);
         seat(m, sink);
-        charify(m, kind === "tank" ? 0.5 : 0.62);
+        // 0.85, not 0.5. At 0.5 the shipped tank photographed as a tank in
+        // shadow — still recognisably olive — because the page's over-bright
+        // lighting and ACES lift a dark colour a long way back up. A burnt
+        // thing has no hue left in it at all.
+        charify(m, kind === "tank" ? 0.85 : 0.88);
+        breakOff(m, r);
         shell.userData.real = true;
       } else {
         primitiveWreck(shell, kind, r);
@@ -1339,7 +1633,44 @@
       }
       shell.rotation.set(tilt * r.range(-1, 1), r.f() * TAU, tilt * r.range(0.4, 1));
       // debris, always ours: the model does not come pre-broken
-      debrisInto(g, r, kind === "plane" ? 14 : 6, kind === "plane" ? 18 : 8);
+      debrisInto(g, r, kind === "plane" ? 20 : 9, kind === "plane" ? 20 : 9);
+    }
+
+    /* SOMETHING HAS TO BE MISSING. The first pass tilted the shipped model,
+       sank it and charred it, and photographed as a PARKED tank with a dark
+       paint job. A wreck is a thing with a piece torn off, so one or two of
+       the model's own sub-assemblies get displaced and dropped on the sand
+       beside it.
+
+       WHICH ones is measured, not guessed: only children whose bounding
+       volume is under a quarter of the whole are eligible, so the pass can
+       take a wing, a gear leg, a turret or a hatch and can never take the
+       fuselage and leave the wheels floating. If the model is one welded
+       mesh nothing happens and the tilt/char/debris still carry it. */
+    function breakOff(model, rr) {
+      const kids = model.children.slice();
+      if (kids.length < 3) return 0;
+      const whole = new THREE.Box3().setFromObject(model);
+      const wv = Math.max(1e-3, (whole.max.x - whole.min.x) * (whole.max.y - whole.min.y) * (whole.max.z - whole.min.z));
+      const cand = [];
+      const bb = new THREE.Box3();
+      for (let i = 0; i < kids.length; i++) {
+        bb.setFromObject(kids[i]);
+        if (!isFinite(bb.min.x)) continue;
+        const v = (bb.max.x - bb.min.x) * (bb.max.y - bb.min.y) * (bb.max.z - bb.min.z);
+        if (v > 0 && v < wv * 0.25) cand.push(kids[i]);
+      }
+      if (!cand.length) return 0;
+      const n = Math.min(cand.length, 1 + Math.floor(rr.f() * 2));
+      for (let i = 0; i < n; i++) {
+        const k = cand[Math.floor(rr.f() * cand.length) % cand.length];
+        const a = rr.f() * TAU, d = rr.range(3.5, 9);
+        k.position.x += Math.cos(a) * d;
+        k.position.z += Math.sin(a) * d;
+        k.position.y = -whole.min.y - 0.2;      // dropped, lying on the sand
+        k.rotation.set(rr.range(-0.6, 0.6), rr.f() * TAU, rr.range(1.0, 2.2));
+      }
+      return n;
     }
     if (OLD || milState === "ready" || milState === "absent") fill();
     else onMil(function () { fill(); settle(shell); });
@@ -1514,16 +1845,26 @@
       const f = P.fire({ seed: (opts.seed || 1) * 17 + i, smokeH: 9 });
       f.position.set(Math.cos(a) * R * 0.55, 0, Math.sin(a) * R * 0.55);
       near.add(f);
-      // bedrolls around each fire, because that is where men sleep
+      /* BEDROLLS, and the first pass drew them as 2.0 x 0.72 flat slabs all
+         at the same radius, which photographed as a wheel of white planks
+         radiating off each fire — a diagram of a camp, not a camp. A bedroll
+         is a rolled blanket: a low cylinder lying down, with a lump at the
+         head where the pack is, at a scattered radius. */
       const per = Math.min(7, Math.ceil(men / fires));
       for (let k = 0; k < per; k++) {
-        const b = k / per * TAU + r.range(-0.2, 0.2);
-        const rr = 2.0 + r.range(0, 0.6);
+        const b = k / per * TAU + r.range(-0.35, 0.35);
+        const rr = 1.9 + r.range(0, 1.1);
         const roll = new THREE.Group();
-        box(roll, 2.0, 0.2, 0.72, M("canvasDark"), 0, 0.1, 0);
-        box(roll, 0.5, 0.26, 0.5, M("hide"), -0.85, 0.2, 0);   // the pack at the head
+        cyl(roll, 0.26, 0.26, 1.85, 6, M("canvasDark"), 0, 0.26, 0, 0, 0, Math.PI / 2);
+        // two straps and a dark end: without them a rolled blanket is a
+        // white sausage, which is exactly what twenty-eight of them
+        // photographed as
+        box(roll, 0.09, 0.56, 0.56, M("hide"), 0.42, 0.26, 0);
+        box(roll, 0.09, 0.56, 0.56, M("hide"), -0.42, 0.26, 0);
+        cyl(roll, 0.27, 0.27, 0.06, 6, M("woodDark"), 0.93, 0.26, 0, 0, 0, Math.PI / 2);
+        box(roll, 0.5, 0.34, 0.46, M("hide"), -1.05, 0.18, 0);   // the pack at the head
         roll.position.set(f.position.x + Math.cos(b) * rr, 0, f.position.z + Math.sin(b) * rr);
-        roll.rotation.y = b + Math.PI / 2;
+        roll.rotation.y = b + Math.PI / 2 + r.range(-0.25, 0.25);
         near.add(roll);
       }
     }
@@ -1545,27 +1886,41 @@
     cyl(pl, 0.09, 0.11, 1.7, 5, M("wood"), span / 2, 0.85, 0);
     const rope = box(pl, span, 0.05, 0.05, M("rope"), 0, 1.5, 0);
     rope.castShadow = false;
-    pl.position.set(0, 0, -R * 1.05);
+    pl.position.set(0, 0, -R * 0.98);
     near.add(pl);
     // the cart your baggage lives in
     const cart = new THREE.Group();
-    box(cart, 2.6, 0.2, 1.6, M("woodDark"), 0, 0.85, 0);
-    box(cart, 2.6, 0.55, 0.12, M("wood"), 0, 1.15, 0.75);
-    box(cart, 2.6, 0.55, 0.12, M("wood"), 0, 1.15, -0.75);
+    box(cart, 2.8, 0.18, 1.5, M("woodDark"), 0, 0.78, 0);
+    box(cart, 2.8, 0.5, 0.12, M("wood"), 0, 1.05, 0.7);
+    box(cart, 2.8, 0.5, 0.12, M("wood"), 0, 1.05, -0.7);
+    box(cart, 0.12, 0.5, 1.5, M("wood"), -1.4, 1.05, 0);
     for (let s = -1; s <= 1; s += 2) {
-      const wl = new THREE.Mesh(new THREE.TorusGeometry(0.66, 0.08, 4, 10), M("woodDark"));
-      wl.position.set(0.1, 0.68, s * 0.9); wl.rotation.y = Math.PI / 2; wl.castShadow = true;
+      const wl = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.09, 4, 12), M("woodDark"));
+      wl.position.set(0.15, 0.72, s * 0.86); wl.rotation.y = Math.PI / 2; wl.castShadow = true;
       cart.add(wl);
+      for (let k = 0; k < 5; k++) {
+        const sp = box(cart, 1.34, 0.07, 0.07, M("woodDark"), 0.15, 0.72, s * 0.86);
+        sp.rotation.set(0, Math.PI / 2, k * Math.PI / 5);
+      }
     }
-    box(cart, 2.2, 0.5, 1.2, M("canvas"), 0, 1.4, 0);
-    cart.position.set(R * 0.95, 0, R * 0.5);
+    // shafts, so it reads as a CART and not a crate on wheels
+    box(cart, 2.2, 0.09, 0.09, M("wood"), -2.5, 0.62, 0.4);
+    box(cart, 2.2, 0.09, 0.09, M("wood"), -2.5, 0.62, -0.4);
+    // the load: a tarpaulin over it, sagging, not a lid
+    const load = new THREE.Mesh(sagGeo(2.6, 1.5, 0.35, 3), MD("canvas"));
+    load.position.set(0, 1.35, 0);
+    load.castShadow = true;
+    cart.add(load);
+    cart.position.set(R * 1.05, 0, R * 0.45);
     cart.rotation.y = r.f() * TAU;
     near.add(cart);
-    col(g.userData.colliders, cart.position.x, 0.9, cart.position.z, 2.8, 1.6, 2.0, "cart");
+    col(g.userData.colliders, cart.position.x, 0.85, cart.position.z, 3.0, 1.7, 2.2, "cart");
 
     if (opts.banner !== false) {
-      const b = P.banner(opts.colour == null ? 0xd9b979 : opts.colour, { h: 8.5, seed: opts.seed || 1 });
-      b.position.set(0, 0, R * 0.2);
+      // 6 m, not 8.5: in a nine-metre camp an eight-and-a-half-metre mast is
+      // the only thing in the photograph.
+      const b = P.banner(opts.colour == null ? 0xd9b979 : opts.colour, { h: 6.0, seed: opts.seed || 1 });
+      b.position.set(0, 0, R * 0.25);
       g.add(b);
     }
     settleNear(near);
@@ -1703,96 +2058,108 @@
     const CS = g.userData.colliders;
     if (OLD) { oldBlock(near, CS, 14, 3, "metalDark"); return finish(g, opts); }
 
-    // --- the containers: three on the ground, one stacked, one askew ----
-    const paints = ["boxRed", "boxBlue", "boxGreen", "rust"];
+    /* --- THE CONTAINER YARD. Six of them, and they are laid out as a ROW
+       with a stack on the end rather than scattered, because a row of boxes
+       all the same size and all the same way up is a SHAPE and a scatter of
+       boxes is noise. The first pass put four in a heap inside the crane's
+       legs and photographed as one long pale sofa. */
+    const paints = ["boxRed", "boxBlue", "boxGreen", "rust", "boxRed", "boxBlue"];
     const lay = [
-      { x: -6, z: -9, yaw: 0, y: 0 },
-      { x: -6, z: -6.2, yaw: 0, y: 0 },
-      { x: -6, z: -9, yaw: 0, y: 2.62 },
-      { x: 9.5, z: 2, yaw: Math.PI / 2, y: 0 },
+      { x: 0,    z: -11.0, y: 0,    yaw: 0,           len: 12.2 },
+      { x: 0,    z: -8.0,  y: 0,    yaw: 0,           len: 12.2 },
+      { x: 0,    z: -5.0,  y: 0,    yaw: 0,           len: 12.2 },
+      { x: -0.6, z: -11.0, y: 2.62, yaw: 0,           len: 12.2 },
+      { x: 0.4,  z: -8.0,  y: 2.62, yaw: 0,           len: 12.2 },
+      { x: 13.0, z: 3.0,   y: 0,    yaw: Math.PI / 2, len: 6.1  },
     ];
     for (let i = 0; i < lay.length; i++) {
       const L = lay[i];
-      const c = P.container({ paint: paints[i % paints.length], len: i === 3 ? 6.1 : 12.2 });
+      const c = P.container({ paint: paints[i % paints.length], len: L.len });
       c.position.set(L.x, L.y - 0.22, L.z);
-      c.rotation.y = L.yaw + r.range(-0.04, 0.04);
+      c.rotation.y = L.yaw + r.range(-0.03, 0.03);
       near.add(c);
       if (L.y === 0) {
-        const cw = (i === 3 ? 6.1 : 12.2), cd = 2.44;
-        const sw = Math.abs(cw * Math.cos(L.yaw)) + Math.abs(cd * Math.sin(L.yaw));
-        const sd = Math.abs(cw * Math.sin(L.yaw)) + Math.abs(cd * Math.cos(L.yaw));
+        const sw = Math.abs(L.len * Math.cos(L.yaw)) + Math.abs(2.44 * Math.sin(L.yaw));
+        const sd = Math.abs(L.len * Math.sin(L.yaw)) + Math.abs(2.44 * Math.cos(L.yaw));
         col(CS, L.x, 1.2, L.z, sw, 2.4, sd, "container");
       }
     }
 
-    /* --- THE CRANE. This is the whole silhouette. 16 m to the beam:
-       enough to clear a stacked pair with room to lift, and tall enough to
-       be a real pixel at a kilometre where the containers are not. */
+    /* --- THE CRANE, and it is the whole silhouette. 14 m to the beam, span
+       18 m — it has to STRADDLE the container row, because a gantry standing
+       beside its containers reads as a swing set, which is exactly what the
+       first pass photographed as. Legs 0.34 m and dark: the first pass drew
+       0.42 m legs in bright steel and the frame outweighed the cargo. */
     const crane = new THREE.Group();
-    const H = 16, SPAN = 15;
+    const H = 14, SPAN = 18;
     for (let s = -1; s <= 1; s += 2) {
       for (let t = -1; t <= 1; t += 2) {
-        const leg = box(crane, 0.42, H, 0.42, M("metal"), s * SPAN / 2 + t * 0.9, H / 2, t * 1.6);
-        leg.rotation.x = -t * 0.09;      // splay, so it reads as a frame not a post
+        const leg = box(crane, 0.34, H, 0.34, M("metal"), s * SPAN / 2 + t * 0.8, H / 2, t * 3.2);
+        leg.rotation.x = -t * 0.055;      // splay, so it reads as a frame not a post
       }
-      // leg bracing, the diagonal that makes it read as a frame
-      box(crane, 0.28, 4.6, 0.28, M("metalDark"), s * SPAN / 2, 5.0, 0, 0, 0.62, 0);
-      box(crane, 0.3, 3.8, 0.3, M("metalDark"), s * SPAN / 2, H - 2.6, 0, 0, -0.62, 0);
-      col(CS, s * SPAN / 2, 1.2, 0, 2.6, 2.4, 3.6, "crane");
+      // the diagonals. Without them a gantry is four sticks and a plank.
+      box(crane, 0.24, 7.2, 0.24, M("metalDark"), s * SPAN / 2, 4.2, 0, 0, 0.72, 0);
+      box(crane, 0.24, 6.4, 0.24, M("metalDark"), s * SPAN / 2, H - 3.4, 0, 0, -0.72, 0);
+      box(crane, 0.3, 0.3, 7.0, M("metalDark"), s * SPAN / 2, H - 0.4, 0);
+      col(CS, s * SPAN / 2, 1.2, 0, 2.2, 2.4, 7.2, "crane");
     }
-    box(crane, SPAN + 3.0, 0.75, 1.0, M("metal"), 0, H, 0);
-    box(crane, SPAN + 3.0, 0.24, 0.24, M("metalDark"), 0, H + 0.55, 0);
-    // trolley + hook on a cable — the detail that makes it a CRANE and not
-    // a gantry, and it is three boxes
-    const tx = r.range(-4, 4);
-    box(crane, 1.5, 0.6, 1.4, M("rust"), tx, H - 0.6, 0);
-    box(crane, 0.08, 6.4, 0.08, M("metalDark"), tx, H - 4.1, 0);
-    box(crane, 0.7, 0.7, 0.7, M("metalDark"), tx, H - 7.5, 0);
-    crane.position.set(-6, 0, -7.6);
+    box(crane, SPAN + 2.4, 0.9, 1.2, M("metal"), 0, H, 0);
+    box(crane, SPAN + 2.4, 0.3, 0.3, M("metalDark"), 0, H + 0.62, 0.55);
+    box(crane, SPAN + 2.4, 0.3, 0.3, M("metalDark"), 0, H + 0.62, -0.55);
+    // trolley + hook on a cable — three boxes, and it is what makes the
+    // frame a CRANE rather than a gantry
+    const tx = r.range(-5, 5);
+    box(crane, 1.7, 0.8, 1.6, M("rust"), tx, H - 0.85, 0);
+    box(crane, 0.09, 7.4, 0.09, M("metalDark"), tx, H - 5.1, 0);
+    box(crane, 0.9, 0.9, 0.9, M("metalDark"), tx, H - 8.9, 0);
+    crane.position.set(0, 0, -8);
     near.add(crane);
 
     // --- the wall, the crates, the drums, the mast --------------------
-    const wall = P.sandbags({ len: 16, h: 1.2, curve: 2.2, seed: (opts.seed || 7) * 3 });
-    wall.position.set(2, -0.1, 9.5);
+    const wall = P.sandbags({ len: 22, h: 1.25, curve: 3.0, seed: (opts.seed || 7) * 3 });
+    wall.position.set(0, -0.1, 11.5);
     near.add(wall);
-    pushCols(CS, wall, 2, -0.1, 9.5, 0);
-    const wall2 = P.gabion({ len: 7, h: 1.5, d: 1.1, seed: (opts.seed || 7) * 5 });
-    wall2.position.set(-13, -0.1, 3);
-    wall2.rotation.y = Math.PI / 2;
-    near.add(wall2);
-    pushCols(CS, wall2, -13, -0.1, 3, Math.PI / 2);
+    pushCols(CS, wall, 0, -0.1, 11.5, 0);
+    for (let i = 0; i < 2; i++) {
+      const gab = P.gabion({ len: 8, h: 1.6, d: 1.2, seed: (opts.seed || 7) * (5 + i) });
+      gab.position.set((i ? 1 : -1) * 15, -0.1, 2);
+      gab.rotation.y = Math.PI / 2;
+      near.add(gab);
+      pushCols(CS, gab, (i ? 1 : -1) * 15, -0.1, 2, Math.PI / 2);
+    }
 
-    const crates = P.crates({ n: 16, spread: 3.4, seed: (opts.seed || 7) * 11 });
-    crates.position.set(3.5, -0.1, 1.5);
+    const crates = P.crates({ n: 20, spread: 4.0, seed: (opts.seed || 7) * 11 });
+    crates.position.set(-2.5, -0.1, 3.5);
     near.add(crates);
-    pushCols(CS, crates, 3.5, -0.1, 1.5, 0);
-    const drums = P.drums({ n: 10, spread: 2.4, seed: (opts.seed || 7) * 13 });
-    drums.position.set(8, -0.05, -6);
+    pushCols(CS, crates, -2.5, -0.1, 3.5, 0);
+    const drums = P.drums({ n: 12, spread: 2.6, seed: (opts.seed || 7) * 13 });
+    drums.position.set(8.5, -0.05, 6.5);
     near.add(drums);
 
-    // a lifting frame with a cargo net-ish tarp, and the mast
-    const shade = P.canopy({ w: 7, d: 5, h: 3.1, mat: "tarp" });
-    shade.position.set(-1, -0.15, 6.5);
+    const shade = P.canopy({ w: 8, d: 6, h: 3.1, mat: "tarp" });
+    shade.position.set(7, -0.15, -1);
     near.add(shade);
     const mast = P.banner(opts.colour == null ? 0xb9a13f : opts.colour, { h: 13, seed: opts.seed || 7 });
-    mast.position.set(12, -0.2, 8);
+    mast.position.set(-15, -0.2, 9);
     g.add(mast);                       // outside near/far: the flag flies at both
 
-    // ---- THE FAR SILHOUETTE: crane + a container row, over-scaled ----
-    farCrane(far, H * 1.15, SPAN * 1.2);
-    for (let i = 0; i < 3; i++) {
-      box(far, 14, 3.4, 3.2, M("metalDark"), -6, 1.7 + i * 3.45, -9 + i * 3.2);
+    // ---- THE FAR SILHOUETTE: crane over a container block ----
+    farCrane(far, H * 1.2, SPAN * 1.1);
+    for (let i = 0; i < 2; i++) {
+      box(far, 14, 3.6, 9, M("metalDark"), 0, 1.8 + i * 3.7, -8 + i * 1.5);
     }
-    box(far, 8, 3.2, 3.2, M("metalDark"), 10, 1.6, 2);
-    box(far, 18, 1.8, 3.0, M("sandDark"), 2, 0.9, 9.5);   // the wall, as a bar
+    box(far, 8, 3.4, 3.4, M("metalDark"), 13, 1.7, 3);
+    box(far, 24, 2.0, 3.2, M("sandDark"), 0, 1.0, 11.5);   // the wall, as a bar
 
     return finish(g, opts);
   }
   function farCrane(far, H, SPAN) {
+    // deliberately fat: at 3 km a 0.34 m leg is a tenth of a pixel and the
+    // crane vanishes, taking the depot's whole identity with it.
     for (let s = -1; s <= 1; s += 2) {
-      box(far, 0.9, H, 0.9, M("metal"), -6 + s * SPAN / 2, H / 2, -7.6);
+      box(far, 1.2, H, 1.2, M("metal"), s * SPAN / 2, H / 2, -8);
     }
-    box(far, SPAN + 3, 1.4, 1.6, M("metal"), -6, H, -7.6);
+    box(far, SPAN + 3, 1.8, 2.0, M("metal"), 0, H, -8);
   }
   function pushCols(CS, sub, x, y, z, yaw) {
     const sc = sub.userData.colliders || [];
@@ -1818,103 +2185,125 @@
     const CS = g.userData.colliders;
     if (OLD) { oldBlock(near, CS, 10, 2.5, "canvasDark"); return finish(g, opts); }
 
-    /* NINE RIDGE TENTS IN A HORSESHOE, not a grid and not a circle. A grid
-       reads as a base and a circle reads as a ritual; a horseshoe open
-       toward the water is what a hiring camp on an oasis actually is, and it
-       gives the player somewhere to ride IN to. */
+    /* FOURTEEN RIDGE TENTS IN TWO ARCS, not one. A single ring of nine at
+       13 m came out as a thin scattered necklace with a hole in the middle —
+       from above it was a shape with no mass in it. Two staggered arcs give
+       the camp a wall of canvas to read against, which is what says "there
+       are men here" rather than "somebody pitched a tent". Still a horseshoe
+       and still open toward the water, so the player has somewhere to ride
+       in to. */
     const list = [];
-    const R = 13;
-    for (let i = 0; i < 9; i++) {
-      const a = -1.9 + (i / 8) * 4.4;
-      const rr = R * r.range(0.86, 1.12);
-      list.push({
-        x: Math.cos(a) * rr, z: Math.sin(a) * rr, y: -0.12,
-        yaw: a + Math.PI / 2 + r.range(-0.2, 0.2),
-        s: r.range(1.0, 1.35), sy: r.range(1.0, 1.3), tint: r.f(),
-      });
+    for (let ring = 0; ring < 2; ring++) {
+      /* SIXTEEN TENTS OVER 155 DEGREES, and the arc is the fix. At 6 and 8
+         tents spread over 235 degrees they were 6 m apart on a 2.3 m tent —
+         a necklace, not a camp, and from above it read as random scatter.
+         Tighter arc, more tents, and the horseshoe's mouth is now narrow
+         enough to be a gate you ride in through. */
+      const R = 10.0 + ring * 4.0;
+      const n = 7 + ring * 2;
+      for (let i = 0; i < n; i++) {
+        const a = -1.35 + (i / (n - 1)) * 2.7 + (ring ? 0.15 : 0);
+        const rr = R * r.range(0.93, 1.07);
+        list.push({
+          x: Math.cos(a) * rr, z: Math.sin(a) * rr, y: -0.1,
+          yaw: a + Math.PI / 2 + r.range(-0.16, 0.16),
+          s: r.range(0.95, 1.2), sy: r.range(0.95, 1.15), tint: r.f(),
+        });
+      }
     }
     near.add(P.tents(list, {}));
     for (let i = 0; i < list.length; i++) {
       const t = list[i];
-      col(CS, t.x, 0.9, t.z, 3.6 * t.s, 1.8, 4.8 * t.s, "tent");
+      col(CS, t.x, 0.9, t.z, 2.6 * t.s, 1.8, 3.8 * t.s, "tent");
     }
     // two big bell tents at the head — the captains'
     for (let s = -1; s <= 1; s += 2) {
       const bell = new THREE.Group();
-      cyl(bell, 0.05, 3.4, 3.6, 9, M("canvas"), 0, 1.8, 0);
-      cyl(bell, 3.5, 3.5, 0.5, 9, M("canvasDark"), 0, 0.25, 0);
-      cyl(bell, 0.06, 0.06, 4.6, 5, M("wood"), 0, 2.3, 0);
-      bell.position.set(s * 5.5, -0.2, -9.5);
+      cyl(bell, 0.05, 3.2, 4.2, 10, MD("canvas"), 0, 2.1, 0);
+      cyl(bell, 3.3, 3.3, 0.55, 10, M("canvasDark"), 0, 0.27, 0);
+      cyl(bell, 0.07, 0.07, 5.4, 5, M("wood"), 0, 2.7, 0);
+      bell.position.set(s * 5.2, -0.2, -9.0);
       bell.rotation.y = r.f() * TAU;
       near.add(bell);
-      col(CS, s * 5.5, 1.4, -9.5, 6.4, 2.8, 6.4, "tent");
+      col(CS, s * 5.2, 1.6, -9.0, 6.2, 3.2, 6.2, "tent");
     }
 
     /* THREE FIRES WITH SMOKE, and the smoke is the long-range read. A tent
-       is 3 m and invisible at a kilometre; an 11 m smoke column that widens
-       to 4 m is not. This is the same trick a real army gave itself away
-       with, which is a good sign it works. */
+       is 3.5 m and invisible at a kilometre; a 14 m smoke column is not.
+       This is the same trick a real army gave itself away with, which is a
+       good sign it works. */
     for (let i = 0; i < 3; i++) {
-      const a = -1.2 + i * 1.2;
-      const f = P.fire({ seed: (opts.seed || 13) * 7 + i, smokeH: 11 + i * 2 });
-      f.position.set(Math.cos(a) * 5.5, -0.05, Math.sin(a) * 5.5);
+      const a = -1.3 + i * 1.3;
+      const f = P.fire({ seed: (opts.seed || 13) * 7 + i, smokeH: 13 + i * 3 });
+      f.position.set(Math.cos(a) * 5.2, -0.05, Math.sin(a) * 5.2);
       near.add(f);
     }
     // a cook pot over the middle one
     const pot = new THREE.Group();
-    for (let s = -1; s <= 1; s += 2) cyl(pot, 0.06, 0.06, 2.0, 5, M("wood"), s * 0.8, 1.0, 0, 0, 0, s * 0.22);
-    box(pot, 1.9, 0.06, 0.06, M("wood"), 0, 1.95, 0);
-    cyl(pot, 0.42, 0.34, 0.55, 8, M("metalDark"), 0, 1.2, 0);
-    pot.position.set(Math.cos(0) * 5.5, 0, 0);
+    for (let s = -1; s <= 1; s += 2) cyl(pot, 0.06, 0.06, 2.2, 5, M("wood"), s * 0.9, 1.1, 0, 0, 0, s * 0.22);
+    box(pot, 2.1, 0.07, 0.07, M("wood"), 0, 2.15, 0);
+    cyl(pot, 0.44, 0.36, 0.6, 8, M("metalDark"), 0, 1.3, 0);
+    pot.position.set(5.2, 0, 0);
     near.add(pot);
 
-    // the arms: four rifle stacks and a rack, which is what says RECRUIT
+    // the arms: four rifle stacks, which is what says RECRUIT rather than
+    // "some people are camping"
     for (let i = 0; i < 4; i++) {
-      const a = 0.4 + i * 0.55;
+      const a = 0.3 + i * 0.5;
       const st = P.armStack({ seed: (opts.seed || 13) * 29 + i, id: i & 1 ? "ak47" : "carbine" });
-      st.position.set(Math.cos(a) * 8.5, -0.05, Math.sin(a) * 8.5);
+      st.position.set(Math.cos(a) * 6.4, -0.05, Math.sin(a) * 6.4);
       st.rotation.y = r.f() * TAU;
       near.add(st);
     }
-    // a rope corral for whatever mounts.js parks here
+    /* A ROPE CORRAL, and it moved. At radius 6.5 out at z=16 it was a big
+       empty octagon in the foreground of every shot with nothing in it —
+       it read as an abstract diagram. Small, tucked against the tent line,
+       where a picket actually goes. */
     const cor = new THREE.Group();
-    const posts = 9, CR = 6.5;
+    const posts = 8, CR = 4.2;
     for (let i = 0; i < posts; i++) {
       const a = i / posts * TAU;
-      cyl(cor, 0.08, 0.1, 1.5, 5, M("wood"), Math.cos(a) * CR, 0.7, Math.sin(a) * CR);
-      const b = box(cor, CR * TAU / posts + 0.3, 0.05, 0.05, M("rope"),
-        Math.cos(a + Math.PI / posts) * CR, 1.25, Math.sin(a + Math.PI / posts) * CR);
+      cyl(cor, 0.07, 0.09, 1.4, 5, M("wood"), Math.cos(a) * CR, 0.65, Math.sin(a) * CR);
+      const b = box(cor, CR * TAU / posts + 0.3, 0.04, 0.04, M("rope"),
+        Math.cos(a + Math.PI / posts) * CR, 1.15, Math.sin(a + Math.PI / posts) * CR);
       b.rotation.y = -(a + Math.PI / posts) + Math.PI / 2;
       b.castShadow = false;
     }
-    cor.position.set(-2, -0.1, 16);
+    cor.position.set(11, -0.1, 8);
     near.add(cor);
 
-    const crates = P.crates({ n: 8, spread: 2.2, seed: (opts.seed || 13) * 17 });
-    crates.position.set(9, -0.1, -4);
+    const crates = P.crates({ n: 10, spread: 2.4, seed: (opts.seed || 13) * 17 });
+    crates.position.set(-8.0, -0.1, -1.5);
     near.add(crates);
-    pushCols(CS, crates, 9, -0.1, -4, 0);
+    pushCols(CS, crates, -11, -0.1, -4, 0);
+    // a lean-to awning off the bell tents: cloth catches the eye at range
+    const awn = P.canopy({ w: 7, d: 4.5, h: 2.6, mat: "canvasDark" });
+    awn.position.set(0, -0.15, -12.5);
+    near.add(awn);
 
     const mast = P.banner(opts.colour == null ? 0x4a8f5a : opts.colour, { h: 11, seed: opts.seed || 13 });
-    mast.position.set(0, -0.2, -12.5);
+    mast.position.set(0, -0.2, -5.5);
     g.add(mast);
 
     // ---- FAR: a cluster of triangles and three smoke columns ---------
     const flist = [];
-    for (let i = 0; i < 9; i++) {
-      const a = -1.9 + (i / 8) * 4.4;
-      flist.push({ x: Math.cos(a) * R, z: Math.sin(a) * R, y: 0, yaw: a, s: 2.6, sy: 2.6, tint: 0.5 });
+    for (let ring = 0; ring < 2; ring++) {
+      const R = 10.0 + ring * 4.0, n = 7 + ring * 2;
+      for (let i = 0; i < n; i++) {
+        const a = -1.35 + (i / (n - 1)) * 2.7;
+        flist.push({ x: Math.cos(a) * R, z: Math.sin(a) * R, y: 0, yaw: a, s: 2.2, sy: 2.2, tint: 0.5 });
+      }
     }
     far.add(P.tents(flist, {}));
-    box(far, 8, 6, 8, M("canvas"), -5.5, 3, -9.5);
-    box(far, 8, 6, 8, M("canvas"), 5.5, 3, -9.5);
+    box(far, 7, 7, 7, M("canvasDark"), -5.2, 3.5, -9.0);
+    box(far, 7, 7, 7, M("canvasDark"), 5.2, 3.5, -9.0);
     const fsm = new THREE.Group();
-    fsm.userData.dynamic = true;       // basic-material smoke: never batch it
+    fsm.userData.dynamic = true;       // vertex-alpha smoke: never batch it
     for (let i = 0; i < 3; i++) {
-      const a = -1.2 + i * 1.2;
-      const s = new THREE.Mesh(smokeCol(26 + i * 5), smokeMat());
-      s.position.set(Math.cos(a) * 5.5, 1, Math.sin(a) * 5.5);
-      fsm.add(s);
+      const a = -1.3 + i * 1.3;
+      const sm = new THREE.Mesh(smokeCol(30 + i * 6), smokeMat());
+      sm.position.set(Math.cos(a) * 5.2, 1, Math.sin(a) * 5.2);
+      fsm.add(sm);
     }
     far.add(fsm);
 
@@ -1929,66 +2318,87 @@
     const CS = g.userData.colliders;
     if (OLD) { oldBlock(near, CS, 6, 2, "palmTrunk"); return finish(g, opts); }
 
-    // the water: a small dark disc, because green in a desert is the signal
-    const pool = new THREE.Mesh(new THREE.CircleGeometry(4.6, 18), M("water"));
-    pool.rotation.x = -Math.PI / 2;
-    pool.position.set(2.5, -0.25, 3);
-    pool.receiveShadow = true;
+    /* THE WATER IS FLAT AND ITS BANK IS THE BOWL. Two drafts wrong before
+       this one: a flat disc at -0.25 was under the ground and invisible, and
+       a dish with its middle at -0.55 was invisible for the same reason —
+       anything below the ground plane is below the ground plane, and on
+       procedural terrain "sink it" is only ever right for things with sides.
+       So the water is a flat sheet slightly PROUD of the sand, and the read
+       as "a hollow with water in it" comes from a ring of darker bank
+       falling from +0.45 down to the waterline around it. Same trick as a
+       scorch mark: decals bulge up. */
+    // JITTERED RADII: a perfect annulus of green around a perfect blue disc
+    // photographed as a rubber ring on a swimming pool. Water finds a shape.
+    const bank = new THREE.Mesh(dishGeo(8.2, 0.45, 0.06, 20, 4.6, 0.16), M("sandDark"));
+    bank.position.set(2.5, 0, 3);
+    bank.receiveShadow = true;
+    near.add(bank);
+    const pool = new THREE.Mesh(dishGeo(4.8, 0.1, 0.1, 20, 0, 0.14), M("water"));
+    pool.position.set(2.5, 0, 3);
     near.add(pool);
-    // and the grass ring that only grows where the water is
-    const grass = new THREE.Mesh(new THREE.RingGeometry(4.4, 7.4, 18), M("frond"));
-    grass.rotation.x = -Math.PI / 2;
-    grass.position.set(2.5, -0.28, 3);
+    // the green ring that only grows where the water is — the single loudest
+    // "there is water here" signal on a sand-coloured map
+    const grass = new THREE.Mesh(dishGeo(11.5, 0.06, 0.5, 20, 8.0, 0.22), M("frond"));
+    grass.position.set(2.5, 0, 3);
     grass.receiveShadow = true;
     near.add(grass);
 
     // THE PALMS, in a broken ring — a perfect ring reads as planted, and
     // this is meant to read as the reason the well is here
-    for (let i = 0; i < 9; i++) {
-      const a = i / 9 * TAU + r.range(-0.3, 0.3);
-      const rr = r.range(6.5, 11.5);
-      const p = P.palm({ seed: (opts.seed || 23) * 31 + i, h: r.range(7, 11) });
+    for (let i = 0; i < 11; i++) {
+      /* PUSHED OUT TO 9-14 m AND OFF THE WEST SIDE. At 6-12.5 m two of them
+         landed on top of the well head and one stood in the shade sail, so
+         the two objects that NAME the place were both behind a trunk. */
+      const a = i / 11 * TAU + r.range(-0.26, 0.26);
+      const rr = r.range(9.0, 14.0);
+      const p = P.palm({ seed: (opts.seed || 23) * 31 + i, h: r.range(6.0, 13.5) });
       p.position.set(2.5 + Math.cos(a) * rr, -0.2, 3 + Math.sin(a) * rr);
       near.add(p);
       col(CS, p.position.x, 1.6, p.position.z, 0.8, 3.2, 0.8, "palm");
     }
 
-    /* THE WELL HEAD. A stone drum, a timber A-frame, a winch and a bucket on
-       a rope. Nine boxes and a cylinder, and it is the one thing that names
-       the place — a ring of palms is an oasis, a ring of palms with a winch
-       over a hole is a WELL, which is a thing somebody built. */
+    /* THE WELL HEAD, at 1.4x the first draft's size and moved clear of the
+       shade sail. It was 3 m across and standing under a 9 m sail, so the
+       one object that NAMES this place — a ring of palms is an oasis, a ring
+       of palms with a winch over a hole is a WELL, which is a thing somebody
+       built — was the one object you could not see. */
     const wh = new THREE.Group();
-    const drum = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.6, 1.0, 12, 1, true), MD("rock"));
-    drum.position.y = 0.5;
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.15, 1.3, 14, 1, true), MD("rock"));
+    drum.position.y = 0.65;
     drum.castShadow = drum.receiveShadow = true;
     wh.add(drum);
-    cyl(wh, 1.55, 1.55, 0.16, 12, M("rockDark"), 0, 1.0, 0);
-    const dark = new THREE.Mesh(new THREE.CircleGeometry(1.42, 12), M("char"));
-    dark.rotation.x = -Math.PI / 2; dark.position.y = 0.86;
+    cyl(wh, 2.1, 2.1, 0.2, 14, M("rockDark"), 0, 1.3, 0);
+    const dark = new THREE.Mesh(new THREE.CircleGeometry(1.9, 14), M("char"));
+    dark.rotation.x = -Math.PI / 2; dark.position.y = 1.12;
     wh.add(dark);
     for (let s = -1; s <= 1; s += 2) {
-      box(wh, 0.16, 3.2, 0.16, M("wood"), s * 1.5, 1.6, 0.5, 0, 0, -s * 0.22);
-      box(wh, 0.16, 3.2, 0.16, M("wood"), s * 1.5, 1.6, -0.5, 0, 0, -s * 0.22);
-      box(wh, 0.14, 1.3, 0.14, M("wood"), s * 1.5, 2.4, 0, 0, Math.PI / 2, 0.9);
+      box(wh, 0.2, 4.4, 0.2, M("wood"), s * 2.0, 2.2, 0.7, 0, 0, -s * 0.24);
+      box(wh, 0.2, 4.4, 0.2, M("wood"), s * 2.0, 2.2, -0.7, 0, 0, -s * 0.24);
+      box(wh, 0.16, 1.8, 0.16, M("wood"), s * 2.0, 3.2, 0, 0, Math.PI / 2, 0.9);
     }
-    cyl(wh, 0.18, 0.18, 2.6, 8, M("woodDark"), 0, 2.95, 0, 0, 0, Math.PI / 2);
-    box(wh, 0.1, 0.5, 0.1, M("wood"), 1.45, 2.7, 0, 0, 0, 0.7);   // the handle
-    box(wh, 0.04, 1.9, 0.04, M("rope"), 0.3, 2.0, 0);
-    box(wh, 0.42, 0.42, 0.42, M("woodDark"), 0.3, 0.9, 0);        // the bucket
-    wh.position.set(-4.5, -0.15, -2);
+    box(wh, 4.6, 0.24, 0.24, M("wood"), 0, 4.05, 0);          // the head beam
+    cyl(wh, 0.24, 0.24, 3.2, 8, M("woodDark"), 0, 3.85, 0, 0, 0, Math.PI / 2);
+    box(wh, 0.12, 0.7, 0.12, M("wood"), 1.85, 3.5, 0, 0, 0, 0.7);   // the handle
+    box(wh, 0.05, 2.4, 0.05, M("rope"), 0.4, 2.6, 0);
+    box(wh, 0.55, 0.55, 0.55, M("woodDark"), 0.4, 1.3, 0);          // the bucket
+    /* AND THE HEAD MOVED TO THE OPEN SIDE. Twice now it has ended up behind
+       a palm trunk or under the shade sail, and it is the one object that
+       turns "an oasis" into "a well somebody dug" — if it is not the first
+       thing you see the outpost has no name. */
+    wh.position.set(9.5, -0.15, -4.5);
     near.add(wh);
-    col(CS, -4.5, 0.6, -2, 3.2, 1.2, 3.2, "well");
+    col(CS, 9.5, 0.8, -4.5, 4.3, 1.6, 4.3, "well");
 
     // SHADE CLOTH — the wide flat thing. A pale sail 8 m across is the only
     // horizontal in a landscape of verticals, which is why a well reads
     // differently from a camp at range even though both are cloth.
-    const sail = P.canopy({ w: 9, d: 7, h: 3.2, sag: 0.9, mat: "canvas" });
-    sail.position.set(-4.5, -0.15, 5.5);
+    const sail = P.canopy({ w: 9, d: 7, h: 3.2, sag: 1.5, mat: "canvas" });
+    sail.position.set(-9.5, -0.15, 8.0);
     near.add(sail);
     const trough = new THREE.Group();
     box(trough, 3.6, 0.5, 0.9, M("wood"), 0, 0.25, 0);
     box(trough, 3.6, 0.12, 0.78, M("water"), 0, 0.46, 0);
-    trough.position.set(-1.5, -0.15, -6);
+    trough.position.set(-3.0, -0.15, -8);
     trough.rotation.y = 0.3;
     near.add(trough);
     // a low mud-brick wall, half fallen — somebody lived here
@@ -1999,16 +2409,24 @@
     pushCols(CS, rn, 7.5, -0.15, -7, 0.5);
 
     // ---- FAR: palm crowns and the sail. No mast: a well has no flag. ----
-    for (let i = 0; i < 9; i++) {
-      const a = i / 9 * TAU;
-      const rr = 9;
-      box(far, 5.2, 1.6, 5.2, M("frond"), 2.5 + Math.cos(a) * rr, 10.5, 3 + Math.sin(a) * rr);
-      box(far, 1.2, 10, 1.2, M("palmTrunk"), 2.5 + Math.cos(a) * rr, 5, 3 + Math.sin(a) * rr);
+    /* STAGGER THE CROWNS. Eleven identical blocks at one height around one
+       radius over a green disc photographed as a birthday cake at 900 m —
+       a shape nothing in a desert has. Varying the height and the radius per
+       tree turns it back into a grove. */
+    for (let i = 0; i < 11; i++) {
+      const a = i / 11 * TAU;
+      const rr = 9.0 + W.hash01(i, 1, 771) * 4.5;
+      const hh = 8.5 + W.hash01(i, 2, 773) * 4.5;
+      box(far, 5.4, 1.7, 5.4, M("frond"), 2.5 + Math.cos(a) * rr, hh, 3 + Math.sin(a) * rr, a);
+      box(far, 1.1, hh, 1.1, M("palmTrunk"), 2.5 + Math.cos(a) * rr, hh / 2, 3 + Math.sin(a) * rr);
     }
-    box(far, 10, 0.8, 8, M("canvas"), -4.5, 3.6, 5.5);
-    const fp = new THREE.Mesh(new THREE.CircleGeometry(6.5, 12), M("water"));
-    fp.rotation.x = -Math.PI / 2; fp.position.set(2.5, 0.1, 3);
+    box(far, 11, 1.0, 9, M("canvas"), -9.5, 3.8, 8.0);
+    const fp = new THREE.Mesh(new THREE.CircleGeometry(7.0, 12), M("water"));
+    fp.rotation.x = -Math.PI / 2; fp.position.set(2.5, 0.15, 3);
     far.add(fp);
+    const fgr = new THREE.Mesh(new THREE.CircleGeometry(9.5, 14), M("frond"));
+    fgr.rotation.x = -Math.PI / 2; fgr.position.set(2.5, 0.05, 3);
+    far.add(fgr);
 
     return finish(g, opts);
   }
@@ -2029,19 +2447,19 @@
     const stallCols = ["tarp", "canvasDark", "rust", "boxBlue"];
     for (let i = 0; i < 5; i++) {
       const side = i % 2 ? 1 : -1;
-      const z = -6 + Math.floor(i / 2) * 6.5;
+      const z = -5.5 + Math.floor(i / 2) * 5.8;
       const c = P.canopy({
         w: r.range(5.5, 7.5), d: r.range(4.5, 5.5), h: r.range(2.7, 3.2),
         mat: stallCols[i % stallCols.length],
       });
-      c.position.set(side * 5.5, -0.15, z + r.range(-0.6, 0.6));
+      c.position.set(side * 4.8, -0.15, z + r.range(-0.5, 0.5));
       c.rotation.y = r.range(-0.12, 0.12);
       near.add(c);
-      col(CS, side * 5.5, 1.0, z, 1.2, 2.0, 4.4, "stall");
+      col(CS, side * 4.8, 1.0, z, 1.2, 2.0, 4.4, "stall");
       // the counter under it, and the goods on it
-      box(near, 0.9, 0.9, 4.6, M("wood"), side * 3.9, 0.3, z);
+      box(near, 0.9, 0.9, 4.6, M("wood"), side * 3.4, 0.3, z);
       const goods = P.crates({ n: 5, spread: 1.5, seed: (opts.seed || 41) * (i + 3) });
-      goods.position.set(side * 6.4, -0.15, z + 1.4);
+      goods.position.set(side * 5.9, -0.15, z + 1.4);
       goods.scale.setScalar(0.6);
       near.add(goods);
     }
@@ -2052,10 +2470,14 @@
        globe under this repo's fog reads as a lit lamp anyway. */
     for (let i = 0; i < 6; i++) {
       const side = i % 2 ? 1 : -1;
-      const z = -8 + Math.floor(i / 2) * 7.5;
-      cyl(near, 0.07, 0.09, 3.6, 5, M("wood"), side * 2.2, 1.6, z);
-      const globe = new THREE.Mesh(BG(0.42, 0.42, 0.42), M("ember"));
-      globe.position.set(side * 2.2, 3.5, z);
+      const z = -7 + Math.floor(i / 2) * 6.4;
+      cyl(near, 0.07, 0.09, 3.6, 5, M("wood"), side * 2.4, 1.6, z);
+      // A LAMP NEEDS A HOOD. A bare 0.42 m emissive cube on a stick read as a
+      // stick with an orange dot; the dark shade above it is what makes the
+      // glow look like it is coming OUT of something.
+      box(near, 0.9, 0.16, 0.9, M("metalDark"), side * 2.4, 3.78, z);
+      const globe = new THREE.Mesh(BG(0.62, 0.5, 0.62), M("ember"));
+      globe.position.set(side * 2.4, 3.42, z);
       near.add(globe);
     }
     const f = P.fire({ seed: (opts.seed || 41) * 3, smokeH: 7 });
@@ -2065,17 +2487,17 @@
     bales.position.set(0, -0.1, -11);
     near.add(bales);
     const rn = ruin(9, 2.4, 1.1, r);
-    rn.position.set(-11, -0.15, 2);
+    rn.position.set(-10, -0.15, 2);
     rn.rotation.y = Math.PI / 2;
     near.add(rn);
-    pushCols(CS, rn, -11, -0.15, 2, Math.PI / 2);
+    pushCols(CS, rn, -10, -0.15, 2, Math.PI / 2);
     // one banner, small, on a stall — not a mast
     const b = P.banner(opts.colour == null ? 0x8f4fb8 : opts.colour, { h: 4.4, fly: 1.6, seed: opts.seed || 41 });
-    b.position.set(-5.5, 2.6, -6);
+    b.position.set(-4.8, 2.6, -5.5);
     g.add(b);
 
     // ---- FAR: two low dark bars and a fire glow. No verticals. -------
-    for (let s = -1; s <= 1; s += 2) box(far, 7, 3.4, 20, M("tarp"), s * 5.5, 2.6, 0);
+    for (let s = -1; s <= 1; s += 2) box(far, 7, 3.4, 19, M("tarp"), s * 4.8, 2.6, 0);
     box(far, 20, 0.6, 22, M("sandDark"), 0, 0.3, 0);
     const fg = new THREE.Mesh(BG(2.4, 2.4, 2.4), M("ember"));
     fg.position.set(0, 1.4, 8);
@@ -2186,13 +2608,66 @@
     if (cam) P.lodTick(cam.position);
   }
 
+  /* ============================================================ MEASURE
+     The two claims in this file's brief, as numbers, taken the only way a
+     draw-call claim can honestly be taken: render with everything else
+     hidden and read the renderer's own counter.
+
+       fieldDraws  the sixty-banner field plus the hundred-and-twenty-rock
+                   cover field, together, in draw calls
+       coverBoxes  how many registered colliders combat_iq would actually
+                   ACCEPT as cover — its own thresholds, applied here
+                   (systems/combat_iq.js: height >= 0.85, foot <= 1.2, and at
+                   least 0.7 across). A prop that draws beautifully and fails
+                   this test is scenery, and the point of this file is that
+                   the cover is real. */
+  P.measure = function (fields) {
+    const R = CBZ.renderer, cam = CBZ.camera, scene = CBZ.scene;
+    const out = { fieldDraws: null, coverBoxes: 0, totalDraws: null, tris: null };
+    const boxes = (CBZ.micro && CBZ.micro.colliders) || [];
+    for (let i = 0; i < boxes.length; i++) {
+      const c = boxes[i];
+      if (!c || !c.warlordProp) continue;
+      const h = (c.y1 == null) ? 99 : c.y1 - (c.y0 || 0);
+      if (h < 0.85 || (c.y0 || 0) > 1.2) continue;
+      if ((c.maxX - c.minX) < 0.7 && (c.maxZ - c.minZ) < 0.7) continue;
+      out.coverBoxes++;
+    }
+    if (!R || !cam || !scene) return out;
+    R.render(scene, cam);
+    out.totalDraws = R.info.render.calls;
+    out.tris = R.info.render.triangles;
+    if (fields && fields.length && galleryRoot) {
+      const was = [];
+      galleryRoot.traverse(function (o) { if (o !== galleryRoot && o.parent === galleryRoot) was.push([o, o.visible]); });
+      for (let i = 0; i < was.length; i++) was[i][0].visible = fields.indexOf(was[i][0]) >= 0;
+      /* FRUSTUM CULLING WOULD MAKE THIS NUMBER A LIE. The camera is wherever
+         the current tripod put it, and the two fields are eighty metres
+         apart — so a shot framed on the depot would report "0 draw calls for
+         sixty banners", which is true and useless. Culling off for the
+         measurement, restored after: the number then means "what these
+         fields cost when you are looking at them", which is the number the
+         claim is about. */
+      const culled = [];
+      for (let i = 0; i < fields.length; i++) {
+        fields[i].traverse(function (o) { if (o.isMesh) { culled.push([o, o.frustumCulled]); o.frustumCulled = false; } });
+      }
+      R.render(scene, cam);
+      out.fieldDraws = R.info.render.calls;
+      for (let i = 0; i < culled.length; i++) culled[i][0].frustumCulled = culled[i][1];
+      for (let i = 0; i < was.length; i++) was[i][0].visible = was[i][1];
+      R.render(scene, cam);
+    }
+    return out;
+  };
+
   /* ============================================================ AUDIT */
   P.audit = function () {
     const info = CBZ.renderer && CBZ.renderer.info;
     return {
       materials: Object.keys(_mats).length,
       geometries: _geo.size,
-      rockSource: rockReady ? "rockscliffs.makeRock" : "icosahedron fallback",
+      rockSource: NO_ROCK ? "icosahedron (?proprock=box)" : "local scrape (rockscliffs.makeRock is dead on r128 — see comment)",
       wreckSource: milState === "ready" ? "studio.model (shipped)" : milState,
       guns: !!(CBZ.weaponAppearance && CBZ.weaponAppearance.ak47),
       banners: liveBanners.length, fires: liveFires.length, lod: lodList.length,
@@ -2200,6 +2675,7 @@
       draws: info ? info.render.calls : null,
       tris: info ? info.render.triangles : null,
       old: OLD,
+      lights: lightReport,
     };
   };
 
@@ -2209,21 +2685,70 @@
      campaign.js or battle.js being finished, and it is what the before/after
      preset photographs. */
   const SHOTS = P.SHOTS = [
-    { id: "depot",    label: "ARMS DEPOT",     eye: [-96, 13, 44],  aim: [-90, 5, 0],   fov: 44 },
-    { id: "camp",     label: "RECRUIT CAMP",   eye: [-16, 12, 42],  aim: [-20, 3, 0],   fov: 46 },
-    { id: "well",     label: "WELL / OASIS",   eye: [46, 11, 40],   aim: [42, 3, 2],    fov: 46 },
-    { id: "market",   label: "NIGHT MARKET",   eye: [104, 10, 38],  aim: [98, 3, 0],    fov: 46 },
-    { id: "banners",  label: "FACTION BANNERS", eye: [-40, 7, 118], aim: [-16, 5, 92],  fov: 40 },
-    { id: "field",    label: "SIXTY BANNERS",  eye: [86, 24, 132],  aim: [86, 4, 92],   fov: 50 },
-    { id: "wrecks",   label: "WRECKAGE",       eye: [-40, 12, 196], aim: [-20, 2, 156], fov: 50 },
-    { id: "cover",    label: "BATTLE COVER",   eye: [-10, 8, 250],  aim: [10, 1.5, 214], fov: 52 },
-    { id: "camp2",    label: "YOUR BIVOUAC",   eye: [4, 9, 300],    aim: [0, 2, 276],   fov: 46 },
-    { id: "range",    label: "SILHOUETTES AT 900 m", eye: [10, 120, 900], aim: [0, 10, 0], fov: 26 },
+    { id: "depot",    label: "ARMS DEPOT",      eye: [-62, 15, 36],  aim: [-90, 4, -3],  fov: 44 },
+    { id: "camp",     label: "RECRUIT CAMP",    eye: [-20, 15, 44],  aim: [-20, 3, -4],  fov: 46 },
+    { id: "well",     label: "WELL / OASIS",    eye: [52, 14, 34],   aim: [42, 3, 2],    fov: 50 },
+    { id: "market",   label: "NIGHT MARKET",    eye: [98, 13, 34],   aim: [98, 2, 0],    fov: 46 },
+    { id: "banners",  label: "FACTION BANNERS", eye: [-36, 6, 112],  aim: [-36, 5, 92],  fov: 44 },
+    { id: "field",    label: "SIXTY BANNERS",   eye: [86, 22, 128],  aim: [86, 4, 92],   fov: 48 },
+    { id: "wrecks",   label: "WRECKAGE",        eye: [0, 34, 236],   aim: [0, 1, 156],   fov: 44 },
+    { id: "cover",    label: "BATTLE COVER",    eye: [0, 13, 244],   aim: [0, 1.2, 214], fov: 46 },
+    { id: "rockfield", label: "120 ROCKS, BATCHED", eye: [150, 16, 268], aim: [150, 1, 214], fov: 48 },
+    { id: "camp2",    label: "YOUR BIVOUAC",    eye: [0, 12, 298],   aim: [0, 1.2, 276], fov: 46 },
+    /* THE ONE THAT JUSTIFIES THE FAR LOD. 880 m back and fov 14: the four
+       outposts span 188 m and the frame is 341 m wide at that range, so they
+       fill just over half of it and a 17 m crane is ~59 px. Worked out
+       rather than eyeballed, because at fov 24 the first pass put the whole
+       island in a third of the frame and every silhouette was six pixels —
+       which proves nothing either way. */
+    { id: "range",    label: "SILHOUETTES AT 880 m", eye: [4, 140, 880], aim: [4, 16, -4], fov: 14 },
   ];
+
+  /* THE PAGE IS DOUBLE-LIT. Counted and reported, NOT fixed, and the
+     pictures are why — both attempts are written down.
+
+     THE BUG: CBZ.micro.boot() builds a hemi+sun pair unless told
+     `lights: false`; games/warlord.html then calls micro.lights() with its
+     own desert numbers, which ADDS a second pair. Measured live:
+     HemisphereLight 0.62 + 0.62 and DirectionalLight 1.05 + 1.12. A sunlit
+     top face is therefore multiplied by roughly 3.1 before ACES, so any
+     colour above about 0.32 linear arrives at the screen as white.
+
+     THE BUG: CBZ.micro.boot() builds a hemi+sun pair unless told
+     `lights: false`; games/warlord.html then calls micro.lights() with its
+     own desert numbers, which ADDS a second pair. Measured live:
+     HemisphereLight 0.62 + 0.62 and DirectionalLight 1.05 + 1.12.
+
+     I DID remove the duplicate pair here for one run, on the theory that it
+     was what made every photograph white. It was not — see the palette
+     block; sRGB output encoding was always the bigger half — and staging
+     the lighting meant the gallery was a picture of a game nobody plays.
+     So this counts, warns, names the one-word fix, and changes nothing.
+     Two files owning the sun is a third bug anyway. */
+  function auditLights() {
+    const scene = CBZ.scene;
+    if (!scene) return 0;
+    const hemis = [], suns = [];
+    scene.traverse(function (o) {
+      if (o.isHemisphereLight) hemis.push(o);
+      else if (o.isDirectionalLight) suns.push(o);
+    });
+    lightReport = { hemi: hemis.length, sun: suns.length };
+    if (hemis.length > 1 || suns.length > 1) {
+      console.warn("[warlord/props] games/warlord.html double-lights the scene: " +
+        hemis.length + " hemisphere + " + suns.length + " directional. Everything in the " +
+        "game is roughly 1.8x brighter than intended. The fix is `lights: false` in the " +
+        "page's CBZ.micro.boot() call, or moving its light options into it. NOT fixed " +
+        "here — this gallery photographs the lighting the game actually ships.");
+    }
+    return hemis.length + suns.length;
+  }
+  let lightReport = null;
 
   P.gallery = function () {
     const scene = CBZ.scene;
     if (!scene || galleryRoot) return galleryRoot;
+    auditLights();
     galleryRoot = new THREE.Group();
     galleryRoot.name = "warlordPropGallery";
     // a pad, big enough that no shot sees its edge
@@ -2252,14 +2777,19 @@
     }
     galleryRoot.add(field.group);
     galleryField = field;
+    P.fields = [field.group];
 
+    // 55 m apart, not 40: the cargo plane is 45 m across the wings and at
+    // 40 m spacing it stood in the truck's lap.
     const wk = P.wreckKinds;
     for (let i = 0; i < wk.length; i++) {
-      put(P.wreck(wk[i], { seed: 100 + i * 7 }), -80 + i * 40, 156, i * 0.7);
+      put(P.wreck(wk[i], { seed: 100 + i * 7 }), -110 + i * 55, 156, i * 0.7);
     }
+    // and the cover row goes the other way: 9 m, not 20. Nine kinds over 160 m
+    // needed a camera so far back that every one of them was forty pixels.
     const ck = P.coverKinds;
     for (let i = 0; i < ck.length; i++) {
-      put(P.cover(ck[i], { w: 3.2, h: 1.9, d: 2.4, seed: 200 + i * 11 }), -70 + i * 20, 214, i * 0.4);
+      put(P.cover(ck[i], { w: 3.2, h: 1.9, d: 2.4, seed: 200 + i * 11 }), -36 + i * 9, 214, i * 0.4);
     }
     // and one real field: 120 boulders, batched, so the draw count is honest
     const list = [];
@@ -2273,6 +2803,7 @@
     const cf = P.coverField(list);
     cf.group.position.set(150, 0, 214);
     galleryRoot.add(cf.group);
+    P.fields.push(cf.group);
 
     put(P.bivouac({ men: 40, seed: 5, colour: 0xd9b979 }), 0, 276, 0);
 
@@ -2307,7 +2838,6 @@
   P.needs = [];
   P.boot = function (ctx) {
     P.ctx = ctx;
-    wantRock();
     wantMil();
     if (CBZ.onUpdate) CBZ.onUpdate(46.0, tickAll);
     if (ctx && ctx.Q && ctx.Q.get("audit") === "1") {
@@ -2321,8 +2851,7 @@
        a timer fired. */
     const start = Date.now();
     (function waitThenBuild() {
-      const ready = (rockReady || NO_ROCK || OLD || Date.now() - start > 6000) &&
-                    (milState === "ready" || milState === "absent" || Date.now() - start > 6000);
+      const ready = milState === "ready" || milState === "absent" || Date.now() - start > 8000;
       if (!ready) { setTimeout(waitThenBuild, 60); return; }
       if (ctx && ctx.closeScreen) ctx.closeScreen();
       const hud = ctx && ctx.hud;
@@ -2332,11 +2861,21 @@
          so props.js is never blocked on campaign.js existing. The screen is
          closed by hand instead, and micro's own render loop draws CBZ.scene
          whether or not anybody owns a phase. */
-      P.gallery();
-      P.look(Q.get("shot") || "depot");
+      /* A THROW IN HERE USED TO BE A HANG. The readiness flag is what every
+         photography tool waits on, so an exception while building the
+         gallery presented as "the page never came up" with no error anywhere
+         — I lost two headless runs to exactly that. The flag is raised
+         either way and the error is published beside it. */
       G.__warlordProps = P;
+      try {
+        P.gallery();
+        P.look(Q.get("shot") || "depot");
+        console.log("[warlord/props] gallery", P.audit());
+      } catch (e) {
+        G.__warlordPropsError = String((e && e.stack) || e);
+        console.error("[warlord/props] gallery failed", e);
+      }
       G.__warlordPropsReady = true;
-      try { console.log("[warlord/props] gallery", P.audit()); } catch (e) {}
     })();
   };
   W.module("props", P);

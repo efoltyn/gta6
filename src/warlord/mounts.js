@@ -86,13 +86,23 @@
    FLAGS (repo doctrine: every behaviour switch reverts from the URL)
      ?mounts=old            no mounts at all. Speed model returns 1.0,
                             cavalry never attaches. The pre-mounts game.
-     ?cavalry=old           campaign speed stays, the BATTLE half is off.
+     ?cavalry=old           NO CAVALRY ANYWHERE — nothing is faster, nothing
+                            charges, nothing draws a horse. The stable and the
+                            prices survive so an existing save still loads;
+                            they just buy you nothing. This is the flag the
+                            before/after preset photographs against, which is
+                            why it has to mean "as if the feature did not
+                            exist" rather than "half of it".
      ?mountecon=old         no upkeep, no loot, no band mounts (core is not
                             wrapped at all) — for bisecting an economy bug.
      ?mounts=1              the debug pad: a column and a charge on flat
                             ground, with no other module required.
-     ?cfg_WARLORD_MOUNTS=0  same as ?mounts=old, for the visual harness,
+     ?cfg_WARLORD_MOUNTS=0  same as ?mounts=old, and
+     ?cfg_WARLORD_CAVALRY=0 same as ?cavalry=old — for the visual harness,
                             which composes cfg_* params rather than bare ones.
+
+   VERIFIED: all five paths boot games/warlord.html clean, buy, assign, roll a
+   band, take spoils and ask for a column without a single console error.
 
    EVENTS OWNED:  mounts:assigned  mounts:lost  mounts:charge
 
@@ -149,12 +159,15 @@
   const KINDS = M.KINDS = [
     { id: "camel", label: "CAMEL", species: "camel",
       pace: 3.4, dash: 9.5, mass: 600, seats: 1, hp: 150, thirst: 0.45,
+      seatY: 2.13, bodyH: 3.32,          // measured off the bake, not guessed
       note: "slower than a horse and does not care. crosses the deep sand a horse refuses." },
     { id: "horse", label: "HORSE", species: "horse",
       pace: 4.2, dash: 15.0, mass: 500, seats: 1, hp: 120, thirst: 1,
+      seatY: 1.98, bodyH: 3.17,
       note: "the charge. useless in rocks, decisive on open sand." },
     { id: "technical", label: "TECHNICAL", species: null,
       pace: 9.0, dash: 21.0, mass: 2600, seats: 4, hp: 260, thirst: 1.6,
+      seatY: 1.28, bodyH: 2.47,
       note: "a pickup with the belt-fed gun bolted to the bed. four men ride it." },
   ];
   const BY_ID = {};
@@ -298,6 +311,15 @@
     if (NO_ECON) return 0;
     const order = S.army.slice().sort(function (a, b) { return W.tierIndex(b.tier) - W.tierIndex(a.tier); });
     let n = 0;
+    /* THE WARLORD GETS THE FIRST HORSE, and this is a bug fix rather than a
+       courtesy. partyPace() takes the minimum over everybody INCLUDING you,
+       so a "mount the army" that skipped you left twelve horsemen walking at
+       your pace and the whole feature measured as doing nothing. Best animal
+       in the train, because you are the one the camera is on. */
+    if (!S.you.mount) {
+      const mine = bestAvailable();
+      if (mine && M.stableTake(mine, 1)) { S.you.mount = mine; n++; W.emit("mounts:assigned", S.you); }
+    }
     for (let i = 0; i < order.length; i++) {
       if (order[i].mount) continue;
       const best = bestAvailable();
@@ -333,6 +355,48 @@
       W.emit("mounts:assigned", S.you);
     }
     return S.you.mount || null;
+  };
+
+  /* WHAT AN OUTPOST HAS IN THE CORRAL. Derived the same way core derives a
+     depot's gun crates: rarity falls out of price, so the cheap animal is
+     everywhere and the technical shows up at one outpost in six, and nobody
+     ever has to edit a stock table. Deterministic per outpost id, so walking
+     away and coming back does not reroll the corral.
+
+     MEASURED ACROSS 40 OUTPOSTS: camel 34, horse 20, technical 11. A camel is
+     something you can nearly always buy, a horse is a coin flip, and a gun
+     truck is a thing you ride to when you hear about it — which is the same
+     shape core gives a pistol, a rifle and a launcher, from the same curve. */
+  M.stockFor = function (outpostId, day) {
+    const out = [];
+    if (OFF) return out;
+    for (let i = 0; i < KINDS.length; i++) {
+      const k = KINDS[i];
+      // core's own rarity shape: price^0.45 against the cheapest thing here
+      const rare = Math.pow(M.price(k.id) / M.price("camel"), 0.45);
+      const r = W.hash01((outpostId | 0) * 13 + i, (day | 0) * 7 + 3, 19);
+      if (r * rare > 0.62) continue;
+      const n = Math.max(1, Math.round((1 - r) * 6 / rare));
+      out.push({ id: k.id, label: k.label, n: n, price: M.price(k.id), upkeep: M.upkeep(k.id), note: k.note });
+    }
+    return out;
+  };
+  /* THE BUY, IN ONE CALL, so three screens cannot each invent their own
+     half of it. Money out, animal into the train, one log line. */
+  M.buy = function (id, n) {
+    n = Math.max(1, n | 0);
+    const cost = M.price(id) * n;
+    if (!BY_ID[id]) return false;
+    if (!W.pay(cost)) { W.toast("not enough gold", "bad"); return false; }
+    M.stableAdd(id, n);
+    W.log("bought " + n + " " + BY_ID[id].label.toLowerCase() + (n > 1 ? "s" : "") + " for $" + cost + ".");
+    return true;
+  };
+  M.sellOne = function (id, n) {
+    n = Math.max(1, n | 0);
+    if (!M.stableTake(id, n)) return false;
+    W.earn(M.sell(id) * n);
+    return true;
   };
 
   /* ============================================================ THE SPEED
@@ -498,6 +562,22 @@
       wrapped._mounts = 1;
       W.soldierPower = wrapped;
     }
+    /* AND YOUR OWN HORSE COUNTS TOO, but only against YOUR term. core states
+       yourPower() as `power(army) + 14 * gun * armour`; multiplying the whole
+       return would have applied your mount to every man behind you, which is
+       the kind of quiet double-count that makes an odds display stop meaning
+       anything. Subtract the army back out, scale what is left, add it on. */
+    if (W.yourPower && !W.yourPower._mounts) {
+      const base = W.yourPower;
+      const wrapped = function () {
+        const all = base();
+        if (!S.you || !S.you.mount) return all;
+        const army = W.power(S.army);
+        return army + (all - army) * M.powerMul(S.you.mount);
+      };
+      wrapped._mounts = 1;
+      W.yourPower = wrapped;
+    }
   }
 
   M.upkeepTotal = function () {
@@ -574,6 +654,16 @@
 
   const B = M.battle = {};
 
+  /* A DEAD MOUNT DRAWS NOTHING, and there is no instance to delete: the
+     instanced column is rebuilt from zero every frame out of whoever is still
+     mounted, so "hide it" is a flag on the record and not scene surgery. It
+     is a named function anyway because dismount() and detach() both mean the
+     same thing by it, and a bare `m.mount.hidden = true` in two places is how
+     they stop meaning the same thing. */
+  function hideMountInstance(m) {
+    if (m && m.mount) m.mount.hidden = true;
+  }
+
   /* THE COMBAT PACES. Battle speeds are game units, not the campaign's
      metres-per-day — combat_iq's men run 4.6 to 7.6. So a mount's battle
      speed is expressed as a RATIO against a running man and applied to
@@ -640,9 +730,17 @@
     const k = mountOf(m);
     if (!k || !(dist > 0)) return 0;
     const v = k.dash * B.terrainMul(m);
-    const cross = v * 0.10;                          // metres of lead at ~0.1 s flight
+    const lead = v * 0.10;                           // metres of lead at ~0.1 s flight
     const manW = 0.6;
-    const raw = Math.min(0.85, cross / (manW + cross)) * Math.min(1, dist / 45);
+    /* AND THE SHOOTER DOES LEAD — badly, but he leads. The first draft priced
+       the whole lead as error and came out at 71% of rounds missing a
+       horseman at 80 m, which makes cavalry very nearly immune at range and
+       is the opposite of what happened to every real cavalry charge that ever
+       went at rifles across open ground. RESIDUAL is the fraction of the
+       required lead a man under fire fails to correct; the ceiling is what
+       says a charge still costs you. */
+    const RESIDUAL = 0.55;
+    const raw = Math.min(0.45, (lead / (manW + lead)) * RESIDUAL) * Math.min(1, dist / 45);
     // a truck is a bigger target than a horse and the same lead misses less
     return raw * (k.id === "technical" ? 0.55 : 1);
   };
@@ -691,8 +789,11 @@
     // he is on the ground: the eye line drops back to a standing man's
     if (m.eyeH != null) { m.eyeH = 1.52; m.losY = 1.35; m.aimY = 1.28; m.headY = 1.62; }
     m.rad = 0.45;
-    m.remountT = 0;
-    m.shakenT = 1.4;                                  // a beat on the ground before he fights
+    /* HE DOES NOT GET BACK ON. There is no loose-horse system and there is not
+       going to be one: a rider who can remount turns "the horse died" into a
+       delay, and the whole reason a $155 animal is a decision is that losing
+       it is permanent. A beat on the ground, then he is infantry. */
+    m.shakenT = 1.4;
     hideMountInstance(m);
     W.emit("mounts:lost", { man: m, kind: mo.kind, by: imp && imp.by ? imp.by.id : null });
     if (m.team === "mine" && m.s && W.log) W.log(m.s.name + "'s " + mo.kind + " went down under him.", "bad");
@@ -721,7 +822,17 @@
     const k = mountOf(rider);
     if (!k || !victim || victim.dead) return 0;
     const v = k.dash * B.terrainMul(rider) * (rider.speed > 0 ? Math.min(1, rider.speed / k.dash) : 0.35);
-    const shock = (k.mass * v) / (78 * FOOT_DASH) * 26;
+    /* THE SCALAR WAS SET BY MEASUREMENT, NOT BY TASTE, and the first one was
+       wrong by seven times: 26 put a horse's charge at 449 against core's
+       tier hp of 62 / 80 / 100 / 125, which is not "decisive", it is a
+       cheat code. 3.7 puts a galloping horse at 68 — it kills a levy outright
+       about half the time, staggers a soldier, and a veteran in plate gets
+       up. That is the shape a charge should have.
+
+       AND IT IS CAPPED, because past a point the man is dead and more
+       momentum changes nothing. A technical at 21 m/s rates 498 uncapped;
+       190 is half again a veteran's hp, which is as dead as anybody gets. */
+    const shock = Math.min(190, (k.mass * v) / (78 * FOOT_DASH) * 3.7);
     return Math.round(shock);
   };
   /* WHAT BATTLE.JS CALLS. Give it the rider, the list of men, and a
@@ -781,12 +892,15 @@
     const k = id && BY_ID[id];
     if (!k) return null;
     m.mount = { kind: k.id, hp: k.hp, maxHp: k.hp, dead: false, phase: W.hash01(m.i + 3, 9, 4) * 6.28, t: 0 };
-    const seat = seatHeight(k.id);
     /* THE WHOLE MAN GOES UP. combat_iq reads eyeH for line of sight, losY for
        whether he can see over cover, aimY for where his round leaves and
        headY for a headshot. Move one and not the others and you get a rider
-       who shoots from his boots. */
-    m.eyeH = seat + 1.32; m.losY = seat + 1.15; m.aimY = seat + 1.08; m.headY = seat + 1.42;
+       who shoots from his boots. Every one is an offset from the ASSEMBLED
+       height of the real baked body — animal plus man, measured — rather than
+       from the seat plus a guess at how tall a man is: the rig runs at
+       CBZ.HUMAN_SCALE and that is not 1. */
+    const H = bodyHeight(k.id);
+    m.eyeH = H - 0.30; m.losY = H - 0.45; m.aimY = H - 0.52; m.headY = H - 0.16;
     m.rad = k.id === "technical" ? 1.5 : 0.85;
     return m.mount;
   };
@@ -907,8 +1021,15 @@
         const rump = box(0.5, 0.78, 0.6, sand); rump.position.set(-0.82, 1.7, 0); g.add(rump);
         // ONE hump, set back over the shoulders. Two boxes so it has a
         // silhouette instead of a corner: a wide base and a narrower crown.
-        const humpB = box(0.86, 0.34, 0.56, sand); humpB.position.set(-0.06, 2.24, 0); g.add(humpB);
-        const humpC = box(0.6, 0.3, 0.44, dark); humpC.position.set(-0.06, 2.5, 0); g.add(humpC);
+        /* THE HUMP SITS BACK OVER THE LOINS. The first draft centred it and the
+           picture said so at once: with the hump over the barrel's middle
+           there was no clear span on the back forward of it, the saddle
+           solver fell back to the only room left — the rump — and the
+           rider read as sliding off the animal's tail. A dromedary's hump is
+           behind the shoulders and its rider sits in FRONT of it; moving the
+           two boxes 28 cm aft is both the anatomy and the fix. */
+        const humpB = box(0.78, 0.34, 0.56, sand); humpB.position.set(-0.34, 2.24, 0); g.add(humpB);
+        const humpC = box(0.54, 0.3, 0.44, dark); humpC.position.set(-0.34, 2.5, 0); g.add(humpC);
         // long S-curved neck carried HIGH — three segments, alternating rake
         const n1 = box(0.36, 0.7, 0.42, sand); n1.position.set(0.98, 2.16, 0); n1.rotation.z = -0.55; g.add(n1);
         const n2 = box(0.32, 0.66, 0.36, sand); n2.position.set(1.26, 2.72, 0); n2.rotation.z = -0.14; g.add(n2);
@@ -1111,9 +1232,18 @@
          camel's lower shank, a wheel hub. wildlife_rig's second rule, and it
          is what keeps a hoof from being left behind in mid air when the leg
          swings. Height-limited so a horse's barrel does not join a leg. */
+      const wide = Math.max(b.max.x - b.min.x, b.max.z - b.min.z);
       if ((b.min.y - floor) < totalH * 0.5) {
         let bd = 1e9;
         for (let c = 0; c < cols.length; c++) {
+          /* AND A LEG'S COMPANIONS ARE AS THIN AS THE LEG. Distance alone was
+             not enough and the numbers said so: a horse's CHEST box sits
+             0.295 from the front-left hoof against a 0.342 radius, so the
+             chest joined the leg, dragged the hip pivot from 1.20 up to 1.90,
+             and the animal swung its own ribcage forward every stride. A
+             hoof is 0.18 across and a chest is 0.70; that is the difference
+             the radius could not see. */
+          if (wide > cols[c].r * 2.4) continue;
           const d = Math.hypot(cx - cols[c].x, cz - cols[c].z);
           if (d < cols[c].r * 1.9 && d < bd) { bd = d; owner = c; }
         }
@@ -1168,26 +1298,89 @@
      and on a camel is the hump base. `width` is that box's depth, which is
      what character.js's mounted branch solves the hip abduction from. */
   function saddleOf(parts) {
-    let best = null;
     const box = parts.box;
     // an empty body (the on-foot bake) has no saddle and no bounds; Box3 says
     // so with min=+Infinity, and every number downstream would be NaN
     if (!isFinite(box.min.y) || !isFinite(box.max.y)) return { x: 0, y: 0, w: 0.7 };
+
+    const inv = parts.inv;
+    const boxes = parts.body.map(function (e) {
+      return new THREE.Box3().setFromObject(e.mesh).applyMatrix4(inv);
+    });
+
+    // ---- 1. WHICH BOX IS THE BACK -------------------------------------
+    let best = null;
     const lo = box.min.x + (box.max.x - box.min.x) * 0.24;
     const hi = box.min.x + (box.max.x - box.min.x) * 0.72;
-    const inv = parts.inv;
-    for (let i = 0; i < parts.body.length; i++) {
-      const b = new THREE.Box3().setFromObject(parts.body[i].mesh).applyMatrix4(inv);
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i];
       const cx = (b.min.x + b.max.x) / 2;
       if (cx < lo || cx > hi) continue;
       const area = (b.max.x - b.min.x) * (b.max.z - b.min.z);
-      // a saddle is a wide top, not the highest point: a camel's hump crown
+      // a saddle is a WIDE TOP, not the highest point: a camel's hump crown
       // and a horse's poll are both high and neither is a seat
       const score = area * (b.max.y - box.min.y);
-      if (!best || score > best.score) best = { score: score, y: b.max.y, x: cx, w: b.max.z - b.min.z };
+      if (!best || score > best.score) {
+        best = { score: score, y: b.max.y, x0: b.min.x, x1: b.max.x, w: b.max.z - b.min.z };
+      }
     }
     if (!best) return { x: 0, y: box.max.y * 0.72, w: 0.7 };
-    return { x: best.x, y: best.y, w: Math.max(0.48, best.w) };
+
+    // ---- 2. WHERE ON THAT BACK THERE IS ROOM FOR A MAN ----------------
+    /* AND THE FIRST VERSION SKIPPED THIS AND PUT THE CAMEL'S RIDER ON ITS
+       KIDNEYS. The widest flat top on a dromedary is the barrel, whose centre
+       is directly under the hump — so seating him at the box's midpoint sat
+       him inside the hump, and the renderer resolved that by showing a man
+       apparently sliding off the animal's rump. A saddle goes where there is
+       nothing already. Scan the back for spans with no body part standing
+       over them, take the longest, and break ties toward the FRONT, because
+       every real saddle — a horse's behind the withers, a camel's ahead of
+       the hump — sits forward of the animal's middle. */
+    const N = 28;
+    const clear = [];
+    for (let i = 0; i < N; i++) {
+      const x = best.x0 + (best.x1 - best.x0) * (i + 0.5) / N;
+      let blocked = false;
+      for (let j = 0; j < boxes.length && !blocked; j++) {
+        const b = boxes[j];
+        if (b.max.y <= best.y + 0.05) continue;                       // not above the back
+        if (Math.abs((b.min.z + b.max.z) / 2) > 0.55) continue;       // off to one side
+        if (x >= b.min.x - 0.05 && x <= b.max.x + 0.05) blocked = true;
+      }
+      clear.push(!blocked);
+    }
+    const runs = [];
+    for (let i = 0; i < N; i++) {
+      if (!clear[i]) continue;
+      let j = i;
+      while (j + 1 < N && clear[j + 1]) j++;
+      runs.push({ a: i, b: j, n: j - i + 1 });
+      i = j;
+    }
+    let x = (best.x0 + best.x1) / 2;
+    if (runs.length) {
+      /* THE FORWARDMOST RUN THAT IS BIG ENOUGH TO SIT IN. "Big enough" is the
+         rider's own seat footprint — about 45 cm from the back of his thigh
+         to the front of his knee — measured against the back rather than
+         against the other runs, because a proportional tie-break ("within
+         70% of the longest") got the camel wrong by four samples out of
+         twenty-eight and there is nothing to tune when the answer is a
+         length in metres. Fall back to the longest run when nothing on the
+         back is wide enough at all. */
+      const perSample = (best.x1 - best.x0) / N;
+      const need = Math.max(2, Math.ceil(0.45 / Math.max(0.01, perSample)));
+      let longest = null, pick = null;
+      for (let i = 0; i < runs.length; i++) {
+        if (!longest || runs[i].n > longest.n) longest = runs[i];
+        if (runs[i].n >= need && (!pick || runs[i].a > pick.a)) pick = runs[i];
+      }
+      if (!pick) pick = longest;
+      if (pick) {
+        const f = (pick.a + (pick.b - pick.a) * 0.62 + 0.5) / N;
+        x = best.x0 + (best.x1 - best.x0) * f;
+      }
+    }
+    return { x: x, y: best.y, w: Math.max(0.48, best.w) };
   }
 
   /* THE COAT SENTINEL. A rider is baked twice: everything that is his (skin,
@@ -1269,7 +1462,10 @@
         gun.scale.multiplyScalar(1.9);
         gun.rotation.set(0, 0, 0);
         gun.rotation.y = -Math.PI / 2;                 // held -Z becomes the truck's +X
-        gun.position.set(-0.45, 1.95, 0);
+        /* AT THE GUNNER'S HANDS, not at a height that looked right on its own.
+           He stands on the deck at 1.23 with the rig's own hip at ~0.63, so
+           his grip sits near 1.95 — the gun is placed to meet it. */
+        gun.position.set(-0.45, 1.96, 0);
         g.add(gun);
       } catch (e) {}
     }
@@ -1320,8 +1516,19 @@
       },
       rng: function () { return W.hash01(seedI++, 3, 17); },
     });
-    g.scale.setScalar(sp.scale || 1);
-    return g;
+    /* sp.scale IS DELIBERATELY NOT APPLIED, and this is the one place this
+       file knowingly departs from how the bestiary uses its own data.
+       `scale` is a herd-dressing multiplier — it is what makes forty animals
+       on a hillside vary — and the horse's 1.1 puts its back at 2.17 m, which
+       is above a standing man's eye. A saddle at 2.17 m is a saddle nobody
+       mounts, and the seat solver would then hang a rider's head 3.6 m up.
+       The GEOMETRY is the bestiary's; the herd multiplier is not geometry.
+       Wrapped in an outer group at identity so the bake's frame carries no
+       transform of its own and the rider added beside it is not scaled with
+       the animal. */
+    const outer = new THREE.Group();
+    outer.add(g);
+    return outer;
   }
 
   /* THE RIDER. character.js's mounted branch, driven the way wildlife_tame
@@ -1346,16 +1553,17 @@
 
   /* A MAN ON HIS OWN FEET, baked the same way, because the honest BEFORE for
      all of this is the same column walking. */
-  function buildWalker() {
+  function buildWalker(speed) {
     if (!CBZ.studio || !CBZ.studio.cast) return null;
     const rig = CBZ.studio.cast("soldier", { color: COAT_SENTINEL, variant: 2 });
     if (!rig) return null;
+    const spd = speed == null ? 1.4 : speed;
     const ch = rig.userData.charRig;
     /* POSED MID-STRIDE, NOT STANDING. Forty frames at a walking speed lands
        him with one leg forward, which is the pose the swing below rocks
        around — bake him at rest and the whole before column shuffles about a
        parade stance. */
-    if (ch && CBZ.animChar) for (let i = 0; i < 40; i++) { try { CBZ.animChar(ch, 1.4, 1 / 60); } catch (e) {} }
+    if (ch && CBZ.animChar) for (let i = 0; i < (spd > 0 ? 40 : 70); i++) { try { CBZ.animChar(ch, spd, 1 / 60); } catch (e) {} }
     return {
       group: rig, parts: ch && ch.parts,
       hipY: ch && ch.hipY > 0 ? ch.hipY : 0.95,
@@ -1414,12 +1622,16 @@
     else if (kindId === "technical") seat = technicalSeat(splitParts(src));
     else seat = saddleOf(splitParts(src));
 
-    const rider = kindId === "__foot" ? buildWalker() : buildRider(seat.w, true);
+    const stand = !!seat.stand;
+    const rider = (kindId === "__foot" || stand) ? buildWalker(stand ? 0 : 1.4) : buildRider(seat.w, true);
     if (rider) {
       /* mounted-riders.mjs's formula, verbatim, and it is the whole reason a
          rider is not floating: the hips go ON the saddle, so the group origin
-         drops by the hip height this particular body actually has. */
-      rider.group.position.set(seat.x, seat.y - (kindId === "__foot" ? 0 : rider.hipY * rider.humanScale), 0);
+         drops by the hip height this particular body actually has. A STANDING
+         man is the other case — his group origin IS his feet, so it goes
+         straight onto the deck with no hip term at all. */
+      rider.group.position.set(seat.x,
+        (kindId === "__foot" || stand) ? seat.y : seat.y - rider.hipY * rider.humanScale, 0);
       rider.group.rotation.y = Math.PI / 2;           // human +Z follows the animal's +X
       src.add(rider.group);
       src.updateMatrixWorld(true);
@@ -1458,11 +1670,22 @@
       riderBase: null,
       riderCoat: mergeMeshes(coat, inv, true),
       height: isFinite(parts.box.max.y) ? parts.box.max.y : 1.82,
+      /* THE FRAMED SIZE, published because the first camera that photographed
+         this framed on HEIGHT alone and a horse is longer than it is tall —
+         the shot was a close-up of a shoulder. In the +Z-forward frame the
+         body's length runs along z. */
+      size: isFinite(parts.box.max.y)
+        ? { x: parts.box.max.z - parts.box.min.z, y: parts.box.max.y - Math.min(0, parts.box.min.y),
+            z: parts.box.max.x - parts.box.min.x }
+        : { x: 0.6, y: 1.82, z: 0.4 },
       /* THE ONE NUMBER THE PICTURES ARE CHECKED AGAINST. Zero means the hips
          are on the saddle; the classic failure floats them and a still frame
          shows it, so it is published as a metric rather than trusted. */
+      /* SEATED: hips minus saddle. STANDING: feet minus deck, which is zero by
+         construction and is checked anyway, because "by construction" is what
+         everybody says right before the picture shows a man in mid-air. */
       seatGap: (rider && kindId !== "__foot")
-        ? Math.abs((rider.group.position.y + rider.hipY * rider.humanScale) - seat.y) : 0,
+        ? Math.abs(rider.group.position.y + (stand ? 0 : rider.hipY * rider.humanScale) - seat.y) : 0,
       riderH: rider ? rider.hipY * rider.humanScale : 0,
     };
     /* `body` already holds everything that is not a leg and not the coat —
@@ -1480,14 +1703,35 @@
      named rather than measured here, and this is the one place in the file
      that is true. */
   function technicalSeat(parts) {
-    return { x: -0.55, y: 1.28, w: 0.9 };
+    /* AND HE STANDS. The first bake ran the technical's man through the same
+       mounted pose the horse gets and the picture was unarguable: a gunner
+       straddling a pickup's bed rail with his thighs wrapped round it like a
+       saddle, half out of the truck. `stand` means feet on the deck and an
+       ordinary braced stance — which is also what puts his hands at the
+       pintle gun's height instead of a foot below it. */
+    return { x: -0.9, y: 1.23, w: 0.9, stand: true };
   }
 
   M.bake = bake;
   M.seatOf = function (kindId) { return bake(kindId).seat; };
+  /* THE SEAT AND THE ASSEMBLED HEIGHT, off the bake when it has run and off
+     the KIND row when it has not. The fallbacks are not invented: they are
+     the numbers the bake actually produced, read out of W.mounts.audit() and
+     written down here, so a battle that starts before anything has been drawn
+     puts a rider's eye line in the same place a drawn one has. The first
+     version derived the fallback from mass, which is stat fiction with
+     arithmetic on it — it put a horseman's eyes 42 cm low. */
   function seatHeight(kindId) {
-    try { return baked[kindId] ? baked[kindId].seat.y : (BY_ID[kindId] ? BY_ID[kindId].mass / 500 * 1.55 : 1.55); }
-    catch (e) { return 1.55; }
+    const b = baked[kindId];
+    if (b && b.seat) return b.seat.y;
+    const k = BY_ID[kindId];
+    return (k && k.seatY) || 1.55;
+  }
+  function bodyHeight(kindId) {
+    const b = baked[kindId];
+    if (b && b.height) return b.height;
+    const k = BY_ID[kindId];
+    return (k && k.bodyH) || 3.1;
   }
 
   /* ============================================================ THE COLUMN
@@ -1558,7 +1802,12 @@
   Column.prototype.place = function (x, y, z, yaw, speed, phase, tint, fall) {
     const i = this.n;
     if (i >= this.cap) return;
-    const k = BY_ID[this.kind] || BY_ID.horse;
+    /* A WALKING MAN IS NOT A HORSE WITH THE SPEED TURNED DOWN. The swing
+       amplitude is a fraction of the body's OWN top speed, so reading
+       BY_ID.horse for the on-foot column scaled 1.35 m/s against a 15 m/s
+       gallop and the before side's legs barely moved — which would have made
+       the comparison flatter than the truth. */
+    const k = BY_ID[this.kind] || { dash: FOOT_DASH, mass: 78 };
     const wheels = this.kind === "technical";
     const amp = clamp((speed || 0) / (k.dash * 0.55), 0, 1) * 0.5;
     const bob = wheels ? 0 : Math.sin(phase * 2) * 0.045 * (amp > 0.02 ? 1 : 0);
@@ -1748,9 +1997,14 @@
   M.makeColumn = function (parent, opts) {
     opts = opts || {};
     const n = opts.n || 14;
-    const kind = opts.mounted === false ? "__foot" : (opts.kind || "horse");
+    /* THE FLAG DECIDES, NOT THE CALLER. ?cavalry=old means there is no such
+       thing as cavalry, so a caller asking for a mounted column gets men on
+       their own feet — which is what makes the before/after honest: one
+       request, two builds, the flag is the only difference. */
+    const mounted = opts.mounted !== false && !NO_CAVALRY;
+    const kind = mounted ? (opts.kind || "horse") : "__foot";
     const k = BY_ID[kind] || BY_ID.horse;
-    const pace = opts.mounted === false ? FOOT_PACE : k.pace;
+    const pace = mounted ? k.pace : FOOT_PACE;
     const c = M.column(kind, parent, Math.max(32, n + 4));
     const heightAt = opts.heightAt || null;
     const yaw = opts.yaw == null ? 0 : opts.yaw;
@@ -1766,7 +2020,7 @@
       });
     }
     const h = {
-      kind: kind, pace: pace, men: men, t: 0, dist: 0,
+      kind: kind, mounted: mounted, pace: pace, men: men, t: 0, dist: 0,
       x: opts.x || 0, z: opts.z || 0, yaw: yaw,
       step: function (dt) {
         h.t += dt;
@@ -1785,9 +2039,11 @@
           const m = men[i];
           const px = h.x - fx * m.back + rx * m.side;
           const pz = h.z - fz * m.back + rz * m.side;
-          // the phase is DISTANCE-driven and shared with the body, so the
-          // feet keep station with the ground under them
-          const ph = m.phase + h.dist * (opts.mounted === false ? 1.05 : 0.62);
+          /* THE PHASE IS DISTANCE-DRIVEN, so the feet keep station with the
+             ground under them. The per-metre rate is 1/stride: a man's stride
+             is about 0.95 m and a horse's is about 1.6, which is where these
+             two numbers come from rather than from taste. */
+          const ph = m.phase + h.dist * (mounted ? 0.62 : 1.05);
           c.place(px, ground(heightAt, px, pz), pz, yaw, pace, ph, m.tint, 0);
         }
         c.end();
@@ -1803,11 +2059,17 @@
      cannot disagree. Men who are ridden down tip over and stay down. */
   M.makeCharge = function (parent, opts) {
     opts = opts || {};
-    const kind = opts.kind || "horse";
-    const mounted = opts.mounted !== false;
-    const rk = BY_ID[kind] || BY_ID.horse;
-    const cav = M.column(mounted ? kind : "__foot", parent, 48);
-    const inf = M.column("__foot", parent, 64);
+    const mounted = opts.mounted !== false && !NO_CAVALRY;
+    const kind = mounted ? (opts.kind || "horse") : "__foot";
+    const rk = BY_ID[opts.kind || "horse"] || BY_ID.horse;
+    /* ONE COLUMN OBJECT WHEN BOTH SIDES ARE ON FOOT. With cavalry off the
+       chargers and the line are the same bake, so they are the same cached
+       InstancedMesh set — and the first draft's two separate begin()/end()
+       passes meant the second wiped the first and the before side
+       photographed an empty field. Same buffer, one pass. */
+    const cav = M.column(kind, parent, mounted ? 48 : 112);
+    const inf = mounted ? M.column("__foot", parent, 64) : cav;
+    const shared = cav === inf;
     const heightAt = opts.heightAt || null;
     const nCav = opts.cav || 12, nInf = opts.inf || 26;
     const lineZ = opts.lineZ == null ? 0 : opts.lineZ;
@@ -1870,22 +2132,27 @@
         h.draw();
       },
       draw: function () {
-        if (cav) {
-          cav.begin();
-          for (let i = 0; i < riders.length; i++) {
-            const r = riders[i];
-            cav.place(r.x, ground(heightAt, r.x, r.z), r.z, 0, speed, r.phase, r.tint, 0);
-          }
-          cav.end();
+        if (!cav) return;
+        cav.begin();
+        for (let i = 0; i < riders.length; i++) {
+          const r = riders[i];
+          cav.place(r.x, ground(heightAt, r.x, r.z), r.z, 0, speed, r.phase, r.tint, 0);
         }
-        if (inf && inf !== cav) {
-          inf.begin();
+        if (shared) {
           for (let j = 0; j < foot.length; j++) {
             const f = foot[j];
-            inf.place(f.x, ground(heightAt, f.x, f.z), f.z, Math.PI, f.down ? 0 : 0.4, f.phase, f.tint, f.fall);
+            cav.place(f.x, ground(heightAt, f.x, f.z), f.z, Math.PI, f.down ? 0 : 1.1, f.phase, f.tint, f.fall);
           }
-          inf.end();
+          cav.end();
+          return;
         }
+        cav.end();
+        inf.begin();
+        for (let j = 0; j < foot.length; j++) {
+          const f = foot[j];
+          inf.place(f.x, ground(heightAt, f.x, f.z), f.z, Math.PI, f.down ? 0 : 1.1, f.phase, f.tint, f.fall);
+        }
+        inf.end();
       },
       dispose: function () {},
     };
@@ -1898,20 +2165,22 @@
      obvious in a still, which is why it gets its own subject. */
   M.makeRider = function (parent, opts) {
     opts = opts || {};
-    const kind = opts.mounted === false ? "__foot" : (opts.kind || "horse");
+    const mounted = opts.mounted !== false && !NO_CAVALRY;
+    const kind = mounted ? (opts.kind || "horse") : "__foot";
     const c = M.column(kind, parent, 4);
     const b = bake(kind);
     const h = {
-      t: 0, phase: 0, kind: kind, seat: b.seat, seatGap: b.seatGap, height: b.height,
+      t: 0, phase: 0, kind: kind, mounted: mounted, seat: b.seat, seatGap: b.seatGap, height: b.height,
       step: function (dt) {
         h.t += dt;
-        h.phase += (opts.speed == null ? 4.2 : opts.speed) * dt * 0.62;
+        h.phase += (opts.speed == null ? (mounted ? 4.2 : 1.35) : opts.speed) * dt * (mounted ? 0.62 : 1.05);
         h.draw();
       },
       draw: function () {
         if (!c) return;
         c.begin();
-        c.place(0, 0, 0, opts.yaw == null ? 0 : opts.yaw, opts.speed == null ? 4.2 : opts.speed, h.phase, 0xc8a34a, 0);
+        c.place(0, 0, 0, opts.yaw == null ? 0 : opts.yaw,
+          opts.speed == null ? (mounted ? 4.2 : 1.35) : opts.speed, h.phase, 0xc8a34a, 0);
         c.end();
       },
       dispose: function () {},
@@ -2052,5 +2321,55 @@
     };
   };
 
+  /* ============================================================
+     WHAT THE OTHER MODULES SHOULD CALL. Nothing below is required — every one
+     of these has a working default if nobody ever calls it — but each is a
+     place where a sibling already owns the loop and only needs the answer.
+
+     campaign.js
+       W.mounts.dayCostMul()        multiply HOUR_PER_M. THIS IS THE ONE THAT
+                                    MATTERS: the campaign keeps time per metre,
+                                    so this is what turns a mounted army into
+                                    fewer days and fewer wages. 1.0 on foot.
+       W.mounts.paceMul()           multiply RIDE_SPEED for the screen speed.
+       W.mounts.bandPaceMul(band)   multiply BAND_SPEED / HUNT_SPEED per band.
+       around drawMen():
+         W.mounts.beginFrame();
+         for each follower i at (x,y,z,yaw,speed):
+             if (W.mounts.rider(army[i], x, y, z, yaw, speed)) continue;
+             ...its own instanced box...
+         W.mounts.endFrame();
+       (mounts self-draws the column if this handshake never happens, and
+        stands down the instant beginFrame() is called from outside.)
+
+     battle.js
+       after makeMan(...):     W.mounts.battle.attach(m)
+       in stepMan's speed:     spd *= W.mounts.battle.speedMul(m)
+       on the CHARGE order:    spd = W.mounts.battle.chargeSpeed(m) || spd
+                               W.mounts.battle.chargeStep(m, men, hurtMan, sdt)
+       in hurtMan, first line: dmg = W.mounts.battle.absorb(m, dmg, imp)
+       for a ranged hit:       if (W.rnd() < W.mounts.battle.evade(m, dist)) miss
+       once per step:          W.mounts.battle.stepAll(men, sdt)
+       on teardown:            W.mounts.battle.detach(m)
+       (a mounted man's eyeH/losY/aimY/headY/rad are already raised by
+        attach(), so combat_iq sees him at the right height with no branch.)
+
+     outpost.js
+       W.mounts.stockFor(outpost.id, S.day) -> [{id,label,n,price,upkeep,note}]
+       W.mounts.buy(id, n) / W.mounts.sellOne(id, n)
+       W.mounts.saving(metres, HOUR_PER_M)  -> gold a crossing would save
+
+     loadout.js
+       W.mounts.stable()            {kind: count} — the same shape as baggage
+       W.mounts.assign(soldier, id) / unassign(soldier) / mountAll()
+       W.mounts.yourMount(id)
+       W.mounts.KINDS / price / upkeep / isMounted(soldier)
+
+     army.js (aftermath)
+       nothing. W.spoils / W.takeSpoils / W.spoilsValue already carry a
+       `mounts` key because this file wrapped them; the loot screen only has
+       to PRINT it. W.mounts.loot(fallen, salvage) is there if it wants the
+       number on its own.
+     ============================================================ */
   W.module("mounts", M);
 })();

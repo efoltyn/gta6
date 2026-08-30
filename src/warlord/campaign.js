@@ -5,7 +5,7 @@
    column of men behind him that gets LONGER. Everything in this file
    serves that picture or gets out of its way.
 
-   CONTROLS ARE THE WHOLE PITCH, so they are two verbs and no more:
+   CONTROLS ARE THE WHOLE PITCH, so they are three verbs and no more:
 
      TAP / CLICK THE GROUND  →  ride there. A marker drops where you
        pointed and he goes. The pick is an analytic march against
@@ -95,6 +95,7 @@
      ?guest=1        boot as a sim GUEST: render bands, never roll them
 
    Events raised here: `campaign:ready` `campaign:dest` `campaign:band`
+   `campaign:peer` — you tapped another warlord's column
    `campaign:zoom` — {dist, t, yaw, x, z}. territory.js reads this so its
    ownership map and this camera are the same view at two ranges.
 ============================================================ */
@@ -164,18 +165,18 @@
   let menBody = null, menHead = null, banner = null, pole = null;
   let marker = null, markerT = 0;
   let dest = null;                 // {x,z} or null
-  let camYaw = 0, camDist = 46, camDistWant = 46, camHeight = 0;
+  let camYaw = 0, camDist = 46, camDistWant = 46;
   let breadcrumbs = [];            // [{x,z}] newest last
   let crumbAcc = 0;
   let travelled = 0;
   let hudRoot = null, plateBox = null, compass = null, compassG = null, mapWrap = null;
-  let bandTick = 0, fightTick = 0, spawnTick = 0;
-  let lastWall = 0;
+  const outpostBoxes = [];         // the colliders raiseOutposts registered
+  let fightTick = 0, spawnTick = 0;
+  let lastWall = 0, clockH = null;
   let chase = null;                // the band you tapped, if any
   let lastZoomSent = -1;
   const peerDraw = [];             // {x,z,size,colour,name} rebuilt each frame
   let nearBand = null, nearOutpost = null;
-  const _v = { x: 0, z: 0 };
 
   /* ============================================================ THE WORLD
      Outposts and bands are placed ONCE per campaign, off the seeded stream,
@@ -390,6 +391,7 @@
     W.on("newgame", function () {
       S.you.placed = false;
       outpostsRaised = false;
+      clockH = null;
       breadcrumbs.length = 0;
       dest = null;
     });
@@ -423,6 +425,18 @@
      the geometry reads an unbound attribute, which is (0,0,0). Both, then:
      a constant white vertex colour on the geometry so USE_COLOR is real,
      and instanceColor multiplied over it. */
+  /* AND THE BUFFER HAS TO BE ALLOCATED BY HAND. r128's setColorAt sizes the
+     new instanceColor off `this.count`, not off the instance CAPACITY — and
+     these meshes are constructed with count = 0 because nothing is drawn on
+     frame one. So the very first setColorAt allocated a Float32Array of
+     length ZERO, every write fell on the floor, and the army rendered black.
+     Read back off the live page: instanceColor.array.length === 0. */
+  function colourable(mesh, cap) {
+    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
+    mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    return mesh;
+  }
+
   function whiteColors(geo) {
     const n = geo.attributes.position.count;
     const a = new Float32Array(n * 3);
@@ -442,6 +456,7 @@
     menBody.frustumCulled = menHead.frustumCulled = false;
     menBody.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     menHead.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    colourable(menBody, MEN_CAP); colourable(menHead, MEN_CAP);
     menBody.count = menHead.count = 0;
     root.add(menBody); root.add(menHead);
 
@@ -459,6 +474,7 @@
     pole.frustumCulled = banner.frustumCulled = false;
     pole.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     banner.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    colourable(banner, 160);
     pole.count = banner.count = 0;
     root.add(pole); root.add(banner);
   }
@@ -518,6 +534,20 @@
   }
   function raiseOutposts() {
     while (outpostRoot.children.length) outpostRoot.remove(outpostRoot.children[0]);
+    /* AND TAKE THE OLD COLLIDERS OUT. microboot has addCollider and no
+       remove, so every new game used to leave the previous island's huts
+       standing as invisible walls you could ride into in the middle of an
+       empty erg. Splice ours out by identity and rebuild the broadphase —
+       exactly what desert.battlefieldAt's clear() does with its cover. */
+    if (outpostBoxes.length && micro.colliders) {
+      for (let i = outpostBoxes.length - 1; i >= 0; i--) {
+        const at = micro.colliders.indexOf(outpostBoxes[i]);
+        if (at >= 0) micro.colliders.splice(at, 1);
+      }
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      if (micro.rebuildColliderGrid) micro.rebuildColliderGrid();
+    }
+    outpostBoxes.length = 0;
     for (let i = 0; i < S.outposts.length; i++) {
       const o = S.outposts[i];
       const g = new THREE.Group();
@@ -535,7 +565,7 @@
         hut.rotation.y = a;
         hut.castShadow = hut.receiveShadow = true;
         g.add(hut);
-        micro.addBoxCollider(o.x + hx, o.y + hut.position.y, o.z + hz, w, h, w * 0.85);
+        outpostBoxes.push(micro.addBoxCollider(o.x + hx, o.y + hut.position.y, o.z + hz, w, h, w * 0.85));
       }
       const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 16, 6),
         new THREE.MeshLambertMaterial({ color: 0x4a3d2c }));
@@ -848,8 +878,34 @@
     return best;
   }
 
+  /* A PEER IS A PARTY AND TAPPING ONE IS THE SAME GESTURE. What happens next
+     is NOT this file's decision — attacking another human is warnet's
+     business (consent, latency, whose sim wins) — so the tap rides at him
+     and hands the seam over. Guarded, because warnet may not be loaded. */
+  function pickPeer(sx, sy) {
+    const w = window.innerWidth, h = window.innerHeight;
+    let best = null, bd = 46;
+    for (let i = 0; i < peerDraw.length; i++) {
+      const q = peerDraw[i];
+      _pick.set(q.x, W.desert.heightAt(q.x, q.z) + 7, q.z).project(camera);
+      if (_pick.z > 1) continue;
+      const d = Math.hypot((_pick.x * 0.5 + 0.5) * w - sx, (-_pick.y * 0.5 + 0.5) * h - sy);
+      if (d < bd) { bd = d; best = q; }
+    }
+    return best;
+  }
+
   function rideTo(sx, sy) {
     if (!camera) return;
+    const peer = pickPeer(sx, sy);
+    if (peer) {
+      chase = null;
+      dest = { x: peer.x, z: peer.z };
+      W.emit("campaign:peer", peer);
+      if (W.warnet && W.warnet.engage) { try { W.warnet.engage(peer); } catch (e) {} }
+      else W.toast("riding at " + peer.name);
+      return;
+    }
     const tgt = pickParty(sx, sy);
     if (tgt) {
       chase = tgt;
@@ -967,19 +1023,25 @@
     if (!(dt > 0)) return;
     if (dt > 3600) dt = 3600;
 
-    // ---- the day, on real seconds -------------------------------------
+    /* ---- the day, on real seconds -------------------------------------
+       THE CLOCK IS CONTINUOUS AND S.hour IS ITS SHADOW. The first version
+       kept only the 0-24 hour and asked two questions — "did we wrap past
+       24" and "did we cross 06:00" — which are the SAME crossing counted
+       twice, so every in-game day paid its wages twice over. One monotonic
+       counter, and the number of dawns is the difference between two floor
+       divisions: correct for a normal frame, and correct for a wake-up that
+       spans four days without a special case.
+
+       It re-syncs from S.hour when the two disagree, because W.load()
+       restores S.hour out from under this file and a save loaded at 03:00
+       must not owe eleven days of wages. */
     if (!FLAG_NOCLOCK) {
-      const before = S.hour;
-      S.hour += dt / HOUR_SECS;
-      let rolled = 0;
-      while (S.hour >= 24) { S.hour -= 24; rolled++; }
-      // dawn is the day boundary and core owns everything it costs
-      const crossed = rolled > 0 || (before < 6 && S.hour >= 6);
-      if (crossed) {
-        // a long sleep can span several dawns; pay every one of them
-        const dawns = Math.max(1, rolled);
-        for (let i = 0; i < Math.min(dawns, 8); i++) W.dawn();
-      }
+      if (clockH === null || Math.abs(((clockH % 24) + 24) % 24 - S.hour) > 0.5) clockH = S.hour;
+      const prev = clockH;
+      clockH += dt / HOUR_SECS;
+      S.hour = ((clockH % 24) + 24) % 24;
+      const dawns = Math.floor((clockH - 6) / 24) - Math.floor((prev - 6) / 24);
+      for (let i = 0; i < Math.min(dawns, 8); i++) W.dawn();
     }
 
     /* THE PARTIES. Normal frames take the real dt in one go — accumulating
@@ -1138,8 +1200,24 @@
     const zt = clamp((camDist - 16) / (520 - 16), 0, 1);
     const ms = 1 + zt * 2.2;
     const spread = 1 + zt * 1.1;
+    /* THE COLUMN FITS THE PATH YOU HAVE ACTUALLY RIDDEN. Fixed spacing looks
+       right after a long ride and piles the whole army on one breadcrumb in
+       the first thirty seconds of a game — which is exactly when the player
+       is looking hardest at their new men. Spacing is the ideal, capped by
+       what the trail can actually carry. */
+    const avail = Math.max(8, (breadcrumbs.length - 1) * TRAIL_STEP - 4);
+    /* AND THE COLUMN MUST FIT IN FRONT OF THE CAMERA. The camera sits behind
+       him along the same axis the trail runs down, so a column longer than
+       the camera is far back has its tail level with — or behind — the eye,
+       and the army pair came back twice with half the men off the bottom
+       edge. Capped at 40% of the pull-back: at 150 m that is a 60 m column
+       whose last man sits comfortably inside the lower third. Packing them
+       tighter also reads as MORE men, which is the direction this shot
+       wants to be wrong in. */
+    const gap = Math.min(2.15 * spread, avail / Math.max(1, drawN),
+                         (camDist * 0.40) / Math.max(1, drawN));
     for (let i = 0; i < drawN; i++) {
-      const back = (4 + i * 2.15) * spread;            // metres behind you
+      const back = 4 + i * gap;                        // metres behind you
       const idx = breadcrumbs.length - 1 - Math.floor(back / TRAIL_STEP);
       const c = breadcrumbs[idx < 0 ? 0 : idx];
       if (!c) break;
@@ -1244,7 +1322,15 @@
   function updateCamera(dt) {
     camDist = lerp(camDist, camDistWant, Math.min(1, dt * 5));
     const t = clamp((camDist - 16) / (520 - 16), 0, 1);
-    const pitch = lerp(0.20, 0.86, Math.pow(t, 0.72));
+    /* THE FIRST DRAFT'S PITCH CURVE WAS TOO FLAT ALL THE WAY UP. At 95 m it
+       gave 21° above horizontal, which points the camera ALONG a dune's
+       windward face — the erg pair came back with the bottom two-thirds of
+       the frame as one featureless slope while the ranks of dunes it was
+       supposed to be showing sat squashed into a strip near the horizon.
+       0.26→0.90 over pow(0.62) is 22° over the shoulder (still a rider's
+       view, still shows the sky) and 38° by the time you have pulled back
+       far enough to be reading the ground as a map. */
+    const pitch = lerp(0.26, 0.90, Math.pow(t, 0.62));
     const D = W.desert;
     const gy = D.heightAt(S.you.x, S.you.z);
     const back = Math.cos(pitch) * camDist;
@@ -1265,14 +1351,18 @@
        precision for nothing the player can ever see. */
     if (camera.near !== 2.2) { camera.near = 2.2; camera.updateProjectionMatrix(); }
     camera.position.set(cx, cy, cz);
-    // look slightly AHEAD of him, not at him: the horizon and the ground he
-    // is riding into are the shot, his back is not
-    const la = 0.18 + t * 0.5;
+    /* LOOK AHEAD WHEN RIDING, LOOK AT HIM WHEN LOOKING AT HIM. Look-ahead
+       used to GROW with the pull-back, which is exactly backwards: at
+       strategic zoom the thing you pulled back to see is your own column,
+       and it trails BEHIND him — the army pair came back with the far half
+       of the column off the bottom of the frame. Close in it is a riding
+       camera and leads him; pulled back it centres on him and the trail
+       lies across the lower third where you can count it. */
+    const la = 0.30 - t * 0.80;
     camera.lookAt(
       S.you.x + Math.sin(camYaw) * camDist * la,
       gy + 1.4 + camDist * 0.06,
       S.you.z + Math.cos(camYaw) * camDist * la);
-    camHeight = cy;
     /* PUBLISH THE ZOOM. territory.js is building an openfront-style ownership
        map over this same island, and the pull-back and that map have to feel
        like one view at two ranges rather than two separate screens. So the
@@ -1306,7 +1396,6 @@
   function stepBands(dt, myPower) {
     const D = W.desert;
     if (myPower == null) myPower = W.yourPower();
-    bandTick += dt;
     for (let i = 0; i < S.bands.length; i++) {
       const b = ensureBandFields(S.bands[i]);
       if (b.cooldown > 0) b.cooldown -= dt;
@@ -1566,6 +1655,7 @@
       army: S.army.length, drawnMen: menBody ? menBody.count : 0,
       you: { x: Math.round(S.you.x), z: Math.round(S.you.z), y: Math.round(W.desert.heightAt(S.you.x, S.you.z)) },
       hour: Math.round(S.hour * 10) / 10, day: S.day, camDist: Math.round(camDist),
+      ridden: Math.round(travelled),
       trail: breadcrumbs.length, dest: dest ? { x: Math.round(dest.x), z: Math.round(dest.z) } : null,
       simHost: C.simHost, peers: peerDraw.length, chasing: !!chase,
     };

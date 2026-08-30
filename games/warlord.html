@@ -138,6 +138,36 @@ const Q = new URLSearchParams(location.search);
    any of them.
 
    WARLORD is the game — the only genuinely new code on the page. */
+/* ============================================================ THE DEAD
+   DECLARED BEFORE THE LOAD, AND THAT ORDERING IS THE WHOLE POINT.
+
+   These four lines sat inside start() for six commits and did nothing at all.
+   city/ragdoll.js opens with `if (CFG.RAGDOLL_ANY_MODE == null) CFG.
+   RAGDOLL_ANY_MODE = false;` — it is loaded by studio.need() as part of the
+   `ragdoll` pack, so by the time start() ran the value was already false, the
+   `== null` guard never fired, and EVERY MAN IN EVERY BATTLE FELL LIKE A
+   PLANK. The page was asking for real corpses politely, after the answer had
+   already been given. battle.html declares the same flags above its own load
+   for exactly this reason; this page copied the values and not the position,
+   which is the more expensive half.
+
+   Found by battle.js's own probe reporting `solving: 0` — a number nobody
+   would have thought to look at, on a page whose screenshots all looked fine.
+
+   WHY THE BUDGETS DIFFER FROM THE CITY'S. quadruped_ragdoll and city/ragdoll
+   were both sized for a camera standing IN a fight, where only a handful of
+   deaths can ever be near you. This game flies a camera over an ARMY and a
+   whole rank goes down in the same second, so the caps are ceilings rather
+   than allocations: the pool grows only as bodies actually arrive, and the
+   active cap freezes the OLDEST settling corpse rather than refusing a fresh
+   one. Every number here is a ?cfg_* away from the shipped default. */
+CBZ.CONFIG = CBZ.CONFIG || {};
+if (CBZ.CONFIG.RAGDOLL_ANY_MODE == null) CBZ.CONFIG.RAGDOLL_ANY_MODE = true;
+if (CBZ.CONFIG.RAGDOLL_RANGE == null) CBZ.CONFIG.RAGDOLL_RANGE = 170;
+if (CBZ.CONFIG.RAGDOLL_ACTIVE == null) CBZ.CONFIG.RAGDOLL_ACTIVE = 28;
+if (CBZ.CONFIG.RAGDOLL_POOL == null) CBZ.CONFIG.RAGDOLL_POOL = 110;
+CBZ.ragdollDriven = true;
+
 const NEED = ["caps", "people", "ragdoll", "fx", "damage", "sound", "batch"];
 const ARMOURY = [
   "weapons/weapon-data.js",
@@ -258,18 +288,6 @@ function start() {
         Math.max(0.1, (yHi == null ? p.y + 0.2 : yHi) - (yLo == null ? p.y : yLo)));
     };
   }
-  /* THE DEAD ARE THE POINT OF A WAR GAME, so the two corpse solvers get this
-     page's budgets rather than the city's. Same numbers battle.html measured:
-     the city's eight-body cap was chosen for a camera standing IN a fight,
-     and this camera flies over an army where a whole rank goes down at once. */
-  CBZ.CONFIG = CBZ.CONFIG || {};
-  const C = CBZ.CONFIG;
-  if (C.RAGDOLL_ANY_MODE == null) C.RAGDOLL_ANY_MODE = true;
-  if (C.RAGDOLL_RANGE == null) C.RAGDOLL_RANGE = 170;
-  if (C.RAGDOLL_ACTIVE == null) C.RAGDOLL_ACTIVE = 28;
-  if (C.RAGDOLL_POOL == null) C.RAGDOLL_POOL = 110;
-  CBZ.ragdollDriven = true;
-
   const COARSE = CBZ.studio.touchDevice;
   if (COARSE) document.body.classList.add("coarse");
 

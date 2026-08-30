@@ -244,8 +244,9 @@
   .wl-la-st{font-size:10.5px;letter-spacing:.05em;opacity:.5;font-variant-numeric:tabular-nums;margin-top:2px}
   .wl-la-act{display:flex;gap:6px;align-items:center;flex-shrink:0}
   .wl-la-act .wl-btn{padding:9px 12px;font-size:12px}
-  /* clears the fixed MEN/$/DAY strip — see outpost.js's copy of this note */
-  .wl-hudpad{padding-top:calc(env(safe-area-inset-top,0px) + 30px)}
+  /* clears the fixed MEN/$/DAY strip; --wl-hud is measured by
+     outpost.js's clearHud(), which is the one place that measurement lives */
+  .wl-hudpad{padding-top:var(--wl-hud,44px)}
   .wl-la-grp{width:100%;display:flex;justify-content:space-between;align-items:center;gap:10px;
     padding:12px 13px;margin:0 0 8px;border:1px solid rgba(255,255,255,.12);border-radius:12px;
     background:rgba(255,255,255,.03);cursor:pointer;text-align:left}
@@ -304,9 +305,12 @@
   function reportCard() {
     if (!LAST) return "";
     const r = LAST;
+    // "old" is the ?autoarm=old revert and it is still AUTO-ARM from the
+    // player's side — it was labelled STRIPPED by falling off the end of this
+    // ternary, which the before/after pair caught.
+    const TITLE = { auto: "AUTO-ARM", old: "AUTO-ARM", top: "HANDED OUT", armour: "ARMOUR", strip: "STRIPPED" };
     let h = '<div class="wl-card"><div class="wl-lbl" style="margin:0 0 6px">' +
-      (r.mode === "auto" ? "AUTO-ARM" : r.mode === "top" ? "HANDED OUT" : r.mode === "armour" ? "ARMOUR" : "STRIPPED") +
-      ' — WHAT IT DID</div><div class="wl-la-rep">';
+      (TITLE[r.mode] || "DONE") + ' — WHAT IT DID</div><div class="wl-la-rep">';
     if (r.stripped) h += '<span class="dim">took ' + r.stripped + ' guns back into the cart and dealt the whole army from one pile.</span><br>';
     const gids = Object.keys(r.guns).sort(function (a, b) { return W.gunPrice(b) - W.gunPrice(a); });
     for (let i = 0; i < gids.length; i++) {
@@ -468,6 +472,7 @@
       '</div>';
     const node = ctx.screen('<div class="wl-hudpad">' + h + '</div>');
     if (ctx.paintHud) ctx.paintHud();
+    if (W.outpost && W.outpost.clearHud) W.outpost.clearHud();
     wire(node);
   }
 

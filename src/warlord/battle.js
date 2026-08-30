@@ -208,6 +208,11 @@
 
     return {
       cx: cx, cz: cz, groundAt: groundAt, relief: relief, cover: cover,
+      // WHOSE GROUND THIS IS. The audit used to report "is battlefieldAt
+      // available", which is a different question and answered true even under
+      // ?ground=own — so the one flag that exists to tell the two grounds apart
+      // could not be checked from the audit it was added for.
+      fromDesert: !!(bf && bf.groundAt),
       // A DUNE IS NOT MADE OF COLLIDERS — battle.html's own finding. A sight
       // line across real sand has to sample the sand, or a man puts rounds
       // through twenty metres of crest. Only armed where the ground genuinely
@@ -271,9 +276,16 @@
       // the crests catch the sun and the troughs hold the shade — one channel
       // of height, which is what makes a dune field read as dunes in a still
       const t = clamp((pos.getY(i) - lo) / Math.max(0.001, hi - lo), 0, 1);
-      col[i * 3] = 0.68 + t * 0.20;
-      col[i * 3 + 1] = 0.57 + t * 0.19;
-      col[i * 3 + 2] = 0.36 + t * 0.15;
+      /* THE SAND IS DARKER THAN SAND LOOKS. A Lambert vertex colour is
+         multiplied by the light, and this page's sun plus hemisphere lands
+         around 1.26 — so a 0.68-0.88 base clips every crest to white and a
+         dune field with 21 m of measured relief in it photographs as a sheet
+         of paper, which is exactly what the ?ground=own capture showed.
+         0.42-0.62 lands at 0.53-0.78 lit: sand, with the crest-to-trough
+         separation still readable. */
+      col[i * 3] = 0.42 + t * 0.20;
+      col[i * 3 + 1] = 0.34 + t * 0.18;
+      col[i * 3 + 2] = 0.21 + t * 0.13;
     }
     g.setAttribute("color", new THREE.BufferAttribute(col, 3));
     g.computeVertexNormals();
@@ -288,7 +300,7 @@
     // the inside of the sky dome. The battle fog (see start()) eats the seam.
     const sk = new THREE.PlaneGeometry(9000, 9000);
     sk.rotateX(-Math.PI / 2);
-    const sm = new THREE.Mesh(sk, new THREE.MeshLambertMaterial({ color: 0xb59a68 }));
+    const sm = new THREE.Mesh(sk, new THREE.MeshLambertMaterial({ color: 0x8f7a52 }));
     sm.position.set(cx, lo - 0.4, cz);
     sm.receiveShadow = true;
     sm.matrixAutoUpdate = false; sm.updateMatrix();
@@ -667,6 +679,15 @@
         if (m.routed) s.routing++;
       }
       s.powerNow = W.power(standing(s));
+      /* AND THE WARLORD COUNTS ON BOTH SIDES OF THE FRACTION. power0 has
+         included his 14 since start() — he is worth about a dozen men and the
+         encounter card says so — but powerNow was built from the ROSTER alone,
+         so your army began every battle with `lost` already at 14/power0 and
+         carried that phantom casualty to the end. Small (0.07 of morale on a
+         34-man force) and entirely one-sided, which is the worst kind: your
+         side broke first in every run of the storyboard and the cause was an
+         asymmetry in a fraction rather than anything on the field. */
+      if (k === "mine" && !YOU.dead) s.powerNow += 14;
     });
     ["mine", "them"].forEach(function (k) {
       const s = SIDES[k], foe = SIDES[k === "mine" ? "them" : "mine"];
@@ -2118,7 +2139,6 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     if (Q && Q.get("frozen") === "1" && micro.stop) micro.stop();
     // a person who clicks the world wants to be IN it
     document.addEventListener("pointerdown", onWorldPointer);
-    W.on("phase:leave:battle", teardown);
   }
   function onWorldPointer(e) {
     if (!live || over) return;
@@ -2143,19 +2163,57 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
        no second "player gun" geometry in this game and there must not be, or
        the rifle in your hands and the rifle you loot stop being one object.
 
-       AND THE HAND POSE HAS TO COME OFF IT. buildActorWeapon leaves the model
-       at rotation (+π/2, π, 0) and offset (0.02,0.02,0.03), which is a pose
-       relative to a FOREARM — actorweapons' own comment says so. Parented
-       straight to the lens that reads as a rifle lying sideways across the
-       screen: measured on the first capture, an AK filled the bottom-right
-       quarter of a 1180x700 frame. The appearance factories author their
-       muzzle down -Z (see fallbackWeapon's userData.muzzle), which is already
-       the camera's forward, so the right pose here is no rotation at all —
-       just down and to the right, and far enough back that a 0.88 m rifle
-       reads as a rifle at a 70-degree field of view. */
-    viewGun.position.set(0.17, -0.20, -0.62);
-    viewGun.rotation.set(0.03, 0.02, 0);
-    viewGun.scale.multiplyScalar(0.9);
+       AND ITS POSE IS MEASURED, NOT GUESSED, because two rounds of guessing
+       produced two bad frames. buildActorWeapon leaves the model at rotation
+       (+PI/2, PI, 0) with a small offset — a pose relative to a FOREARM, which
+       actorweapons' own comment says outright. Parented straight to a camera
+       that reads as a rifle lying sideways across the screen (first capture),
+       and hand-picking a rotation and a scale to fix it produced a grey slab
+       filling the bottom-centre of the frame (third capture). The armoury spans
+       a 0.2 m pistol to a 1.2 m launcher, so ONE hand-typed offset cannot be
+       right for all of them anyway.
+
+       So the box is measured and the pose is derived from it: find the model's
+       longest axis, turn that axis to point down -Z (the camera's forward),
+       and scale the whole thing so its length is VIEW_LEN on screen. Every gun
+       in the armoury then sits the same way at the same apparent size, and a
+       gun added tomorrow needs no line here. VIEW_LEN is 0.34 m held 0.62 m
+       from a 70-degree lens, which is about 28 degrees of frame — a rifle you
+       can see, in the corner, not a wall. */
+    /* 0.27 m at 0.68 m from a 70-degree lens is about 22 degrees of frame:
+       a rifle you can identify — the AK's wood and magazine read clearly at
+       this size — held low and right, without owning a quarter of the picture.
+       Measured off the captures: 0.34 at 0.62 was still reading as a wall. */
+    const VIEW_LEN = 0.27;
+    const box = new THREE.Box3().setFromObject(viewGun);
+    const sz = new THREE.Vector3();
+    box.getSize(sz);
+    const longest = Math.max(sz.x, sz.y, sz.z) || 1;
+    viewGun.rotation.set(0, 0, 0);
+    // turn the long axis onto -Z. The appearance factories author down -Z or
+    // along X depending on the gun; the box says which, so nothing here has to
+    // know one weapon's name.
+    if (sz.x >= sz.y && sz.x >= sz.z) viewGun.rotation.y = Math.PI / 2;
+    else if (sz.y > sz.z) viewGun.rotation.x = -Math.PI / 2;
+    viewGun.scale.multiplyScalar(VIEW_LEN / longest);
+    /* AND IT IS RE-HUNG FROM ITS CENTRE, MEASURED AFTER THE TURN. A weapon
+       model's origin is its GRIP, not its middle, and the first version of
+       this subtracted a centre measured BEFORE the rotation was applied — an
+       offset in the wrong frame, which slides the gun somewhere different for
+       every weapon whose long axis is not already -Z. Measure once more with
+       the rotation and scale on it, inside the holder, and the number is
+       exact for any gun in the armoury. */
+    const holder = new THREE.Group();
+    holder.add(viewGun);
+    holder.updateMatrixWorld(true);
+    const mid = new THREE.Vector3();
+    new THREE.Box3().setFromObject(viewGun).getCenter(mid);
+    viewGun.position.sub(mid);
+    holder.position.set(0.23, -0.20, -0.68);
+    // nose slightly DOWN: a man walking with a rifle carries it at low ready,
+    // and the first pass sat it nose-up like a parade rest
+    holder.rotation.set(-0.07, 0.06, 0);
+    viewGun = holder;
     CBZ.camera.add(viewGun);
     if (!CBZ.camera.parent) scene.add(CBZ.camera);   // r128: children of a
     // detached camera are never traversed by the renderer
@@ -2209,6 +2267,14 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       hemi.color.setHex(0xcfc2a4);
       hemi.groundColor.setHex(0x8f7850);
     }
+    /* AND THE FOG COLOUR, HERE FOR THE SAME REASON. start() sets the battle's
+       fog near/far once and they hold — but microboot's lights() hook restores
+       the fog COLOUR alongside the intensities on every always-tick, so the
+       battle's haze was being repainted the campaign's pale sky-bottom sixty
+       times a second and the far half of every frame washed to white. Same
+       trick, same free restore: written after the hook, gone the moment the
+       battle stops running. */
+    if (scene.fog) scene.fog.color.setHex(0xc8ad7e);
   }
 
   let lastWall = 0;
@@ -2530,6 +2596,13 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       Q = c.Q;
       THREE = c.THREE;
       keys();
+      /* THE TEARDOWN LISTENER IS REGISTERED ONCE, AT BOOT — not in start().
+         W.on() has no dedupe, so registering it per battle stacks a listener
+         per fight: three encounters in and the bus is calling teardown three
+         times on one phase change. It early-returns when the battle is already
+         down, so nothing broke, which is exactly what makes this the kind of
+         leak that survives to ship. */
+      W.on("phase:leave:battle", teardown);
 
       /* THE PAGE'S CBZ.floorAt SHIM CALLS THESE TWO BY NAME. They must exist
          from boot, not from start(), or the first campaign frame asks a
@@ -2617,7 +2690,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
                x: Math.round(YOU.pos.x), z: Math.round(YOU.pos.z) },
         field: { cx: Math.round(MAP.cx), cz: Math.round(MAP.cz), relief: MAP.relief,
                  terrainLos: MAP.terrainLos, cover: MAP.cover.length, gap: GAP(),
-                 desert: !!(W.desert && W.desert.battlefieldAt) },
+                 desert: !!MAP.fromDesert },
         bodies: men.length, corpses: corpses.length, solving: deadSolving,
         fps: micro.fps || 0,
         reuse: {

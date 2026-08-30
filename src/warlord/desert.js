@@ -246,12 +246,22 @@
      is a THREE-STEP QUANTISED field, so tops are flat tables at 30/50/70 m
      and neighbouring mesas stand at honestly different heights. */
   function rockAt(x, z) {
-    const mask = smr(vn(x, z, 700, S(801)), 0.500, 0.585);
+    /* THE WALL IS 70 m OF TALUS, NOT A CLIFF, and the mesa-field pair is why.
+       A 0.500-0.585 band on a 700 m lattice puts the whole rise inside about
+       30 m of ground — narrower than the second LOD ring's 20 m cell and
+       under one cell at the third — so the grid caught the wall on some
+       vertices and missed it on others and every mesa flank photographed
+       with a hard triangular sawtooth cut into it. Widening the band to
+       0.470-0.620 spreads the rise over ~70 m: still 35-40°, still reads as
+       stone rather than a hill, and real mesas have a talus apron anyway.
+       A heightfield cannot draw a vertical cliff; pretending otherwise just
+       draws the aliasing instead. */
+    const mask = smr(vn(x, z, 700, S(801)), 0.470, 0.620);
     const tier = Math.floor(vn(x, z, 1900, S(809)) * 2.999);
     const top = 30 + tier * 20;
     const floor = 5 + (vn(x, z, 900, S(813)) - 0.5) * 9;
     // buttes: a second, much tighter mask standing on the plateau
-    const butte = smr(vn(x, z, 300, S(811)), 0.640, 0.672) * 20 * mask;
+    const butte = smr(vn(x, z, 300, S(811)), 0.618, 0.702) * 20 * mask;
     return lerp(floor, top, mask) + butte + (vn(x, z, 140, S(817)) - 0.5) * 1.6 * (1 - mask);
   }
 
@@ -470,7 +480,7 @@
   const C_SAND_LO = [0.34, 0.25, 0.14], C_SAND_HI = [0.52, 0.42, 0.26];
   const C_ROCK_LO = [0.16, 0.10, 0.07], C_ROCK_HI = [0.31, 0.20, 0.13];
   const C_CAP = [0.28, 0.25, 0.21];
-  const C_SALT = [0.70, 0.69, 0.64], C_CRACK = [0.36, 0.33, 0.27];
+  const C_SALT = [0.60, 0.59, 0.55], C_CRACK = [0.32, 0.29, 0.24];
   const C_GRAVEL = [0.26, 0.22, 0.16];
   const C_SILT = [0.20, 0.17, 0.11];
   const C_WET = [0.20, 0.16, 0.12], C_BEACH = [0.52, 0.45, 0.31];
@@ -505,8 +515,13 @@
     }
     if (b === "salt") {
       // polygon cracks: a high-frequency iso-contour, painted not modelled
-      const cr = Math.abs(vn(x, z, 22, S(1201)) - 0.5);
-      mix3(C_SALT, C_CRACK, cr < 0.055 ? 1 - cr / 0.055 : 0, out);
+      /* 62 m polygons. Real salt polygons are under three metres across and
+         at 10 m per vertex that is not a thing this mesh can hold — the
+         first version asked for 22 m ones and the pan photographed as blank
+         white paper, because the contour fell between vertices nearly
+         everywhere. Draw the cracks at a size the grid can actually carry. */
+      const cr = Math.abs(vn(x, z, 62, S(1201)) - 0.5);
+      mix3(C_SALT, C_CRACK, cr < 0.075 ? 1 - cr / 0.075 : 0, out);
     } else if (b === "rock") {
       mix3(C_ROCK_LO, C_ROCK_HI, vn(x, z, 60, S(1211)), out);
       mix3(out, C_CAP, clamp(1 - slope * 5.5, 0, 1) * smr(y, 26, 34), out);
@@ -647,7 +662,19 @@
         const zl = heightBuf[t - (j > 0 ? VN : 0)], zr = heightBuf[t + (j < N ? VN : 0)];
         const slope = Math.hypot((xr - xl) * inv, (zr - zl) * inv);
         colourAt(cx + (k - RING) * cell, wz, y, slope, _c);
-        col[o] = _c[0]; col[o + 1] = _c[1]; col[o + 2] = _c[2];
+        /* CURVATURE SHADING — the cheapest ambient occlusion there is, and
+           the single biggest thing between "rolling cream hills" and "an
+           erg". A Lambert sun tells you which way a face points and nothing
+           at all about whether it is in a hollow, so a dune trough lit
+           head-on photographed exactly as bright as the crest above it and
+           the whole desert flattened into paper. This compares the vertex to
+           the mean of its four neighbours — already in the buffer, so it is
+           four adds — and darkens hollows, brightens crests. Clamped hard
+           because the same term at the foot of a mesa would paint a black
+           halo round it. */
+        const curv = ((xl + xr + zl + zr) * 0.25 - y) / cell;
+        const ao = 1 - clamp(curv * 4.6, -0.20, 0.38);
+        col[o] = _c[0] * ao; col[o + 1] = _c[1] * ao; col[o + 2] = _c[2] * ao;
       }
     }
     L.geo.attributes.position.needsUpdate = true;
@@ -665,24 +692,45 @@
        island photographs as a hot sky over dead-flat blue without it, and
        one specular highlight is the whole difference between "water" and
        "a blue plane". */
-    const m = new THREE.MeshPhongMaterial({ color: 0x123b52, shininess: 84, specular: 0x6fa8bd });
+    /* THE SEA IS TRANSLUCENT, and that is the whole difference between
+       "water" and "a blue plane". r128 draws opaque first, so the SEABED is
+       already in the buffer when this blends over it: the sand shelf shows
+       through in the shallows and goes dark as the bottom falls away, which
+       is the depth gradient that makes a coast read. depthWrite off (the
+       plane must not occlude what it is tinting) with the depth TEST still
+       on, so the island above the waterline still occludes it correctly —
+       the same trick games/battle.html's ocean uses, for the same reason.
+       Phong rather than Lambert for one specular highlight: a desert island
+       under a hot sky with no glint on the water looks like a map.
+
+       THE BASE COLOUR IS DARKER THAN IT LOOKS IT SHOULD BE. ACES plus the
+       sRGB output transform lifts mid-tones hard, and 0x0d3247 — already a
+       dark navy on paper — photographed as a bright tropical cyan against
+       this sand. Judge a water colour from the screenshot, never from the
+       hex. */
+    const m = new THREE.MeshPhongMaterial({
+      color: 0x07202e, shininess: 88, specular: 0x3f7288,
+      transparent: true, opacity: 0.80, depthWrite: false,
+    });
     const mesh = new THREE.Mesh(g, m);
     mesh.position.y = SEA_Y;
     mesh.receiveShadow = false;
     mesh.matrixAutoUpdate = false;
     mesh.updateMatrix();
-    mesh.renderOrder = -20;
+    mesh.renderOrder = 6;
     return mesh;
   }
   function makeOasisWater() {
     const grp = new THREE.Group();
-    const mat = new THREE.MeshPhongMaterial({ color: 0x1c5560, shininess: 92, specular: 0x8fc4cc });
+    const mat = new THREE.MeshPhongMaterial({ color: 0x14424c, shininess: 92, specular: 0x7fb4bd,
+      transparent: true, opacity: 0.84, depthWrite: false });
     for (let i = 0; i < oases.length; i++) {
       const o = oases[i];
       const g = new THREE.CircleGeometry(o.r * 0.62, 22);
       g.rotateX(-Math.PI / 2);
       const m = new THREE.Mesh(g, mat);
       m.position.set(o.x, o.waterY, o.z);
+      m.renderOrder = 6;
       m.matrixAutoUpdate = false; m.updateMatrix();
       grp.add(m);
     }
@@ -967,11 +1015,19 @@
 
   /* ============================================================ THE BATTLEFIELD
      battle.js asks: "we fought HERE — what does the ground look like?" It
-     gets a LOCAL frame: (0,0) is the fight, y=0 is the ground under it, and
-     every cover box is in those coordinates, because a battle arena is
-     built around the origin and making it do the subtraction is how the
-     arena ends up 40 m in the air. `origin` is published for anything that
-     wants to go back to world space.
+     gets the answer in WORLD COORDINATES, because that is where the battle
+     actually happens: battle.js keeps the fight at the encounter's real
+     (cx, cz) on the island so the men stand on the ground the campaign put
+     them on, and it calls back with `groundAt(cx + sx, cz + sz)`.
+
+     THE FIRST DRAFT OF THIS RETURNED A LOCAL FRAME — (0,0) at the fight,
+     heights relative to it — on the assumption that an arena is built at
+     the origin. It is not, and the mismatch is silent and total: every
+     ground query landed at twice the offset (heightAt(2·cx, 2·cz)), so the
+     battle sampled a patch of desert several kilometres from the fight and
+     the cover boxes went with it. Caught by reading the consumer instead of
+     assuming it. `origin` is still published for anything that wants to
+     work relative to the fight.
 
      COVER IS DERIVED FROM THE BIOME, not sprinkled: a salt pan fight is
      open ground and a mesa field fight is a maze, and that difference is
@@ -997,18 +1053,28 @@
     radius = radius > 0 ? radius : 170;
     const base = heightAt(wx, wz);
     const biome = biomeAt(wx, wz);
-    // RELIEF: rms height deviation across the arena, in metres. battle.js
-    // uses it to decide whether this is a firefight across open ground or a
-    // scramble — it is one number and it is measured, not asserted.
+    /* RELIEF IS PEAK-TO-PEAK, NOT RMS, and that is a compatibility fact
+       rather than a taste: battle.js computes its OWN fallback relief as
+       (hi - lo) over a 12 m grid and gates terrain line-of-sight on
+       `relief > 6`. Handing it an RMS number — three to four times smaller
+       for the same ground — meant a battle in real dune country reported
+       1.3 m of relief and switched terrain LOS off, so men shot each other
+       through twenty metres of crest. Same measure, same grid spacing, so
+       the two paths are interchangeable. `rms` is published beside it for
+       anyone who wants the smoother number. */
     let acc = 0, n = 0, lo = 1e9, hi = -1e9;
-    for (let i = 0; i < 24; i++) {
-      const a = i * 0.618034 * TAU, r = radius * Math.sqrt((i + 0.5) / 24);
-      const y = heightAt(wx + Math.cos(a) * r, wz + Math.sin(a) * r) - base;
-      acc += y * y; n++;
-      if (y < lo) lo = y;
-      if (y > hi) hi = y;
+    const gstep = 12;
+    for (let sx = -radius; sx <= radius; sx += gstep) {
+      for (let sz = -radius; sz <= radius; sz += gstep) {
+        if (sx * sx + sz * sz > radius * radius) continue;
+        const y = heightAt(wx + sx, wz + sz) - base;
+        acc += y * y; n++;
+        if (y < lo) lo = y;
+        if (y > hi) hi = y;
+      }
     }
-    const relief = Math.sqrt(acc / n);
+    const relief = Math.round((hi - lo) * 10) / 10;
+    const rms = Math.sqrt(acc / Math.max(1, n));
 
     const spec = COVER_BY_BIOME[biome] || COVER_BY_BIOME.gravel;
     const cover = [];
@@ -1016,21 +1082,24 @@
       const a = W.hash01(wx + i * 37, wz, 1601 + i) * TAU;
       const r = radius * (0.12 + 0.86 * Math.sqrt(W.hash01(wx, wz + i * 41, 1699 + i)));
       const lx = Math.cos(a) * r, lz = Math.sin(a) * r;
-      const gy = heightAt(wx + lx, wz + lz) - base;
-      const t = W.hash01(wx + lx, wz + lz, 1721);
+      const cxw = wx + lx, czw = wz + lz;
+      const t = W.hash01(cxw, czw, 1721);
       const w = lerp(spec.w[0], spec.w[1], t);
-      const h = lerp(spec.h[0], spec.h[1], W.hash01(wx + lx, wz + lz, 1733));
-      const d = w * (0.55 + W.hash01(wx + lx, wz + lz, 1741) * 0.9);
-      cover.push({ x: lx, z: lz, y: gy, w: w, h: h, d: d,
-                   yaw: W.hash01(wx + lx, wz + lz, 1747) * TAU, kind: spec.kind });
+      const h = lerp(spec.h[0], spec.h[1], W.hash01(cxw, czw, 1733));
+      const d = w * (0.55 + W.hash01(cxw, czw, 1741) * 0.9);
+      // WORLD coordinates, and `local` alongside for anyone who wants the
+      // fight-relative frame. battle.js reads x/z straight into addBoxCollider.
+      cover.push({ x: cxw, z: czw, y: heightAt(cxw, czw), w: w, h: h, d: d,
+                   lx: lx, lz: lz, yaw: W.hash01(cxw, czw, 1747) * TAU, kind: spec.kind });
     }
 
     let raised = null;
     return {
       origin: { x: wx, z: wz, y: base },
-      biome: biome, relief: relief, drop: lo, rise: hi, radius: radius,
-      groundAt: function (lx, lz) { return heightAt(wx + lx, wz + lz) - base; },
-      worldGroundAt: function (lx, lz) { return heightAt(wx + lx, wz + lz); },
+      biome: biome, relief: relief, rms: rms, drop: lo, rise: hi, radius: radius,
+      // WORLD in, WORLD out — the frame battle.js already calls in.
+      groundAt: function (x, z) { return heightAt(x, z); },
+      localGroundAt: function (lx, lz) { return heightAt(wx + lx, wz + lz) - base; },
       cover: cover,
       /* register the cover as real boxes. Same call every wall in this repo
          uses, so combat_iq treats them as cover and segmentBlocked treats
@@ -1047,6 +1116,7 @@
           raised.push(M.addBoxCollider(ox + c.x, oy + c.y + c.h / 2, oz + c.z,
             c.w, c.h, c.d, { warlordCover: true }));
         }
+        if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
         return raised;
       },
       clear: function () {

@@ -396,11 +396,15 @@
   .wl-op-row.gone{opacity:.4}
   .wl-op-row.gone .wl-op-left{color:var(--blood);opacity:.9}
   /* THE STRIP OVERLAPS EVERYTHING. #hud is fixed to the top of the page and
-     #stage's own padding is 18px, so at phone width the persistent MEN/$/DAY
-     line sat straight on top of this screen's title. Every screen that shows
-     the strip clears it here. (It is the shell's padding that is really
-     wrong; this file cannot reach it.) */
-  .wl-hudpad{padding-top:calc(env(safe-area-inset-top,0px) + 30px)}
+     #stage's own padding is 18px, so at phone width the persistent
+     MEN/$/DAY line sat straight on top of this screen's title. Every screen
+     that shows the strip clears it by this much. (It is the shell's padding
+     that is really wrong; this file cannot reach it.)
+     THE HEIGHT IS MEASURED, NOT TYPED — see clearHud(). A fixed 30px was
+     right until the strip grew a LOYAL chip and wrapped to two lines at
+     320pt, and the title went straight back under it. Anything that can be
+     added to that strip by another file must not be able to break this one. */
+  .wl-hudpad{padding-top:var(--wl-hud,44px)}
   .wl-op-note{font-size:11.5px;letter-spacing:.06em;opacity:.62;line-height:1.5}
   .wl-op-note b{color:var(--hot);font-weight:600}
   @media (max-width:420px){
@@ -422,6 +426,16 @@
      and that is not a rating this file invented: it is W.gunCombat, the exact
      term core's soldierPower multiplies a man by. Two numbers off the weapon
      record follow it, so the rating always has its provenance next to it. */
+  /* Published rather than private: loadout.js paints under the same fixed
+     strip and must not carry a second copy of this measurement. */
+  function clearHud() {
+    if (!G.document) return;
+    const h = G.document.getElementById("hud");
+    const px = (h && h.classList.contains("on")) ? Math.ceil(h.getBoundingClientRect().height) + 10 : 4;
+    G.document.documentElement.style.setProperty("--wl-hud", px + "px");
+  }
+  if (G.addEventListener) G.addEventListener("resize", clearHud);
+
   function statLine(id) {
     const w = W.gun(id);
     if (!w) return "bare hands";
@@ -698,6 +712,7 @@
     const html = o.kind === "camp" ? drawCamp(o) : o.kind === "well" ? drawWell(o) : drawTrade(o);
     const node = ctx.screen('<div class="wl-hudpad">' + html + '</div>');
     if (ctx.paintHud) ctx.paintHud();
+    clearHud();                       // after paintHud: the strip must exist to be measured
     wire(node, o);
   }
 
@@ -806,6 +821,7 @@
     // looted gun is worth without inventing a second opinion about it
     buyPrice: buyPrice, sellPrice: sellPrice, hirePrice: hirePrice,
     statLine: statLine,
+    clearHud: clearHud,
     current: function () { return CUR; },
   });
 })();

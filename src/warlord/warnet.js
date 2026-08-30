@@ -325,7 +325,14 @@
        already written, on the server, and reusing it means no new server
        code and no way for a guest to forge a world tick. */
     N.on("world", function (m) {
-      if (m && m.id != null && m.id !== N.id) ping("snapshot", m.d, m.id);
+      /* NO SENDER STAMP ON THIS LANE. server.js stamps `m.id = p.id` on a
+         t:"state" frame but NOT on a t:"world" one — it just checks the
+         sender is the sim host and rebroadcasts verbatim. The first draft
+         guarded on `m.id != null` and therefore threw away every world tick
+         it was ever sent. The check is unnecessary anyway: the relay only
+         forwards this frame from the host, and never back to the sender, so
+         anything arriving here is by construction the host's and not ours. */
+      if (m) ping("snapshot", m.d, m.id != null ? m.id : N.hostId);
     });
 
     N.onEv("wl", function (m) {
@@ -488,10 +495,18 @@
     }
   }
 
+  /* match.js OWNS THE LOBBY the moment it exists; this file never competes
+     with it for the screen. Two routes get us there and both have to work:
+     match.js may let this delegate, or it may replace W.warnet.lobby with its
+     own and keep this one as W.warnet.peerLobby (which is what it actually
+     does, because it owns one file and may not edit this one). The identity
+     check is what keeps the second route from being an infinite loop — when
+     match.js has already taken the entry point, the function it would
+     delegate to IS this one, so it falls through to the connect card
+     instead. */
   function lobby() {
-    // match.js owns the lobby the moment it exists; this file never competes
-    // with it for the screen.
-    if (hasMatch()) return W.match.lobby();
+    const installed = W.warnet && W.warnet.lobby;
+    if (hasMatch() && W.match.lobby !== installed && W.match.lobby !== lobby) return W.match.lobby();
     connectCard();
   }
 

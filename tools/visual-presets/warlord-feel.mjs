@@ -63,7 +63,7 @@ const RIFLE_SUBJECTS = [
   { id: "rifle-20", label: "Twenty rifles", rifles: 20, sec: 8, warm: 7, dist: 42, pitch: -0.24,
     focus: "A SKIRMISH — about 32 requests a second. The naive column simply plays all 32 as discrete gun voices. The mixer is already sitting on its near-field ceiling, but the bed is only part way up: read `density` here against the 300-rifle page. That GAP between the two pages is the claim that the crackle bed tracks the real rate of fire, rather than being a loop somebody switched on when a battle started." },
   { id: "rifle-300", label: "Three hundred rifles", rifles: 300, sec: 10, warm: 10, dist: 40, pitch: -0.22,
-    focus: "THE HEADLINE. Three hundred rifles is ~480 shot requests a second arriving at the mixer, and it is the SAME ~4800 requests on both sides — check `shotsRequested` first; if it differs, everything else on this page is void. BEFORE: every one of them becomes a gun voice. Read `voices` and `nodes` on the before panel: hundreds of discrete reports a second and thousands of AudioNodes a second minted and thrown away, which is why a big fight sounds like a broken machine gun rather than a war. AFTER: `voices` sits on the token bucket's 22/s ceiling (1/0.045 s, the transient fusion window — two reports closer than that fuse into one percept, so the extra nodes buy nothing), `grains` sits on its 14/s cap, `culled` is ~95% and `density` is pinned at 1.00 with the bed at full gain. That 95% is not thrown away. It IS the wash." },
+    focus: "THE HEADLINE. Three hundred rifles is ~480 shot requests a second arriving at the mixer, and it is the SAME ~4800 requests on both sides — check `shotsRequested` first; if it differs, everything else on this page is void. BEFORE: every one of them becomes a gun voice. Read `voices` and `nodes` on the before panel: hundreds of discrete reports a second and thousands of AudioNodes a second minted and thrown away, which is why a big fight sounds like a broken machine gun rather than a war. AFTER: `voices` sits on the token bucket's 22/s ceiling (1/0.045 s, the transient fusion window — two reports closer than that fuse into one percept, so the extra nodes buy nothing), `grains` sits on its 14/s cap, `folded->bed` is ~95% and `density` is pinned at 1.00 with the bed at full gain. That 95% is not thrown away. It IS the wash." },
 ];
 
 const subjects = BIOME_SUBJECTS.concat(RIFLE_SUBJECTS);
@@ -218,7 +218,7 @@ async function stageWarlordFeel(input) {
       voiceHz: Math.round(f.voiceHz * 10) / 10,
       peakVoiceHz: Math.round(f.peakVoiceHz * 10) / 10,
       grainHz: Math.round(f.grainHz * 10) / 10,
-      foldedPct: f.cullPct,
+      foldedPct: f.foldedPct,
       nodeHz: Math.round(f.nodeHz * 10) / 10,
       nodesTotal: f.nodes,
       density: Math.round(f.density * 100) / 100,

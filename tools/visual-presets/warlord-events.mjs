@@ -29,18 +29,25 @@
     read. ?stage=0 turns that off. That door obeys ?events=off, deliberately.
   - the screens live in #stage (.wl-h headline, .wl-pick choice buttons); the
     persistent strip is #hud and events.js appends .wl-evchip spans to it.
-  - the phone frame is where this can break: a choice button carries a label
-    AND a price line, and .wl-btns is a flex-wrap row. The picks are forced to
-    display:block/width:100% in events.js's own CSS for exactly that reason,
-    and this preset exists partly to keep checking it at 393pt.
+  - the phone frame is where this breaks, and it already has, three times:
+    (1) #stage is z-index 40 and sits UNDER both the shell's strip (50) and
+    campaign.js's map/zoom furniture (45), so the first phone frame had "35 MEN
+    $1240 DAY 1" printed through the middle of the headline — events.js now
+    lifts its own screen to 55 while a card is up; (2) the shell's .wl-grid is
+    minmax(180px,1fr), which collapses to one column at 393pt and turned three
+    numbers into three full-width slabs — events.js ships its own 112px stat
+    grid; (3) the storm's particle cloud photographed as confetti and was cut.
+    None of those three is a metric anybody would have thought to declare.
 
-  WHY THE SUBJECTS ARE THESE SIX. One card that shows the SHAPE (a headline,
-  four lines, three priced buttons), one card that proves the cards read state
-  (the schism names a man out of your actual roster and counts a third of your
-  actual army), the loyalty panel, the storm, the endgame's progress screen and
-  the run summary. If a picture of any of those cannot be judged by eye, the
-  camera is in the wrong place — every one of them is a full-screen DOM panel,
-  so the camera is the viewport and the framing is the layout.
+  WHY THE SUBJECTS ARE THESE SEVEN. One card that shows the SHAPE (a headline,
+  four lines, three priced buttons), one that proves the cards read state (the
+  schism names a man out of your actual roster and counts a third of your
+  actual army), the loyalty panel, the storm as a picture of the WORLD, the
+  storm as a decision, the endgame's progress screen, the chronicle and the run
+  summary. Six of those are full-screen DOM panels, so the camera is the
+  viewport and the framing IS the layout — which is why this shoots a phone
+  frame as well as a laptop one, and why the phone frame is the one that has
+  found every bug so far.
 */
 
 // laptop for the shape the thing was designed at, iPhone 16 because a wl-pick
@@ -94,11 +101,23 @@ export default {
         "paid, and the men who are thinking about leaving BY NAME. Also the LOYAL chip in the top strip — " +
         "that chip is the whole 'visible before it kills you' requirement." },
     { id: "storm", event: "storm",
-      label: "A sandstorm, and the choice it puts in front of you",
+      label: "A sandstorm over the island",
       focus:
-        "AFTER: fog pulled to a fifth of its range, ochre air, airborne grit, a SANDSTORM chip in the " +
-        "strip, and a card whose two answers are 'lose the day' or 'lose men'. BEFORE: the same fixed haze " +
-        "the island has always had." },
+        "The one subject that is a PICTURE OF THE WORLD rather than a panel, so the card is deliberately " +
+        "left closed. AFTER: the whole sky goes brown, the far shore stops existing (fog far-plane 11000 m " +
+        "-> 1500 m), and a SANDSTORM chip appears in the strip. BEFORE: the fixed blue-and-cream haze the " +
+        "island has always had, and a horizon you can see all the way to." },
+    { id: "storm-card", event: "storm-card",
+      label: "...and the choice it puts in front of you",
+      focus:
+        "AFTER: two answers and both of them cost. MAKE CAMP prices the lost day in real wages off " +
+        "W.payroll(); RIDE INTO IT names how many men and guns the sand takes. There is no free option." },
+    { id: "chronicle", event: "chronicle",
+      label: "The chronicle",
+      focus:
+        "AFTER: W.state.log read back as a history — grouped by day, coloured by kind, under the run's " +
+        "numbers. In a game where every man has a name the log is the save file's soul; before this it " +
+        "was a strip that scrolled past you once." },
     { id: "four", event: "war",
       label: "The endgame has a progress bar",
       focus:
@@ -173,7 +192,7 @@ export default {
          card is the decision, the fog and the grit are the thing it is about,
          and they are driven off the day's rolled weather rather than by the
          card. Same two lines events.js's own ?event=storm door runs. */
-      if (want === "storm") {
+      if (want === "storm" || want === "storm-card") {
         try {
           const ev = W.state.flags && W.state.flags.ev;
           if (ev) { ev.wea = "storm"; ev.weaP = 1; ev.camped = 0; }
@@ -183,7 +202,14 @@ export default {
         // snapping, on purpose, so a storm has to be given its seconds
         await wait(4500);
       }
-      if (want === "loyalty") { try { E.loyaltyScreen(); fired = true; } catch (_) {} }
+      if (want === "storm") {
+        /* the card is deliberately NOT fired for this one: the claim is the
+           air, and an opaque full-screen card is a picture of a card. */
+        fired = true;
+      }
+      else if (want === "storm-card") { try { fired = !!E.fire("storm"); } catch (_) {} }
+      else if (want === "chronicle") { try { E.chronicle(); fired = true; } catch (_) {} }
+      else if (want === "loyalty") { try { E.loyaltyScreen(); fired = true; } catch (_) {} }
       else if (want === "war") { try { E.war(); fired = true; } catch (_) {} }
       else if (want === "over") {
         try {

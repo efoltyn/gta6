@@ -132,7 +132,7 @@
   const FUSE_S = 0.045;
   const NEAR_HZ = 1 / FUSE_S;            // 22.2 discrete voices/s
   const NEAR_BURST = 3;                  // a volley must still be able to crack
-  const NEAR_PER_FRAME = 4;              // never more than 4 in any one frame
+  const BURST_AHEAD = 0.12;              // s — never schedule further ahead than this
   const NEAR_M = 60;
   const OWN_M = 6;
   const SATURATE_HZ = 45;
@@ -206,7 +206,7 @@
      reading. Restores itself if the module is torn down. */
   const M = {
     reqAll: 0, reqNear: 0, reqFar: 0,       // shot requests since boot
-    voices: 0, grains: 0, culled: 0,        // what the mixer actually did
+    voices: 0, grains: 0, folded: 0,        // what the mixer actually did
     nodes: 0,                               // AudioNodes minted (?feel=1 only)
     reqHz: 0, voiceHz: 0, grainHz: 0, nodeHz: 0,
     density: 0, bedGain: 0, meanDist: 0,
@@ -455,7 +455,7 @@
       o.dist = i.dist; o.ghost = i.ghost; o.volume = i.volume;   // 10k slots
       o.pitch = i.pitch; o.delay = i.delay; o.force = i.force;
       qn++;
-    } else M.culled++;
+    } else M.folded++;
   }
 
   /* THE FLUSH. Nearest first, your own shot first of all, spend the bucket,
@@ -464,50 +464,65 @@
      so a frame's shots are all in hand before any of them is decided. */
   function flushShots(dt) {
     if (qn === 0) { spendNoShots(dt); return; }
-
-    // sort by distance, but your own report jumps the queue unconditionally
     const q = frameQ;
-    for (let i = 1; i < qn; i++) {
-      const v = q[i]; const key = (v.mine || v.d <= OWN_M) ? -1 : v.d;
-      let j = i - 1;
-      while (j >= 0) {
-        const u = q[j]; const uk = (u.mine || u.d <= OWN_M) ? -1 : u.d;
-        if (uk <= key) break;
-        q[j + 1] = u; j--;
-      }
-      q[j + 1] = v;
-    }
-
+    for (let i = 0; i < qn; i++) q[i].done = false;
     tokens = Math.min(NEAR_BURST, tokens + dt * NEAR_HZ);
     let spent = 0;
+
+    /* YOUR OWN REPORT SKIPS EVERYTHING — the bucket, the queue order and the
+       spacing. The one sound in the mix you caused must never be the one that
+       got culled. */
     for (let i = 0; i < qn; i++) {
       const s = q[i];
-      const own = s.mine || s.d <= OWN_M;
-      if (!own) {
-        if (s.d > NEAR_M) break;               // sorted: everything past here is far
-        if (spent >= NEAR_PER_FRAME || tokens < 1) break;
-        // and never two voices closer together than the fusion window, even
-        // if the bucket is full — that IS the fusion window's whole point
-        if (simT - lastVoiceT < FUSE_S) break;
-        tokens -= 1;
-      }
-      spent++;
-      lastVoiceT = simT;
-      M.voices++;
-      emitVoice(s);
+      if (s.mine || s.d <= OWN_M) { s.done = true; spent++; M.voices++; emitVoice(s, 0); }
     }
-    M.culled += (qn - spent);
+
+    /* THE BURST, AND WHY IT IS SCHEDULED RATHER THAN DROPPED. The first cut
+       broke out of this loop whenever the last voice was inside the fusion
+       window, which at 60 fps means at most ONE near voice per frame ever —
+       NEAR_BURST was dead code and a rank firing together came out as a single
+       tick. The fusion window is a SPACING requirement, not a per-frame quota.
+       So extra voices in a frame are pushed out in FUSE_S steps using
+       audio.js's own opts.delay (the same field it already uses for the speed
+       of sound), and lastVoiceT tracks when the last voice will SOUND rather
+       than when it was decided.
+
+       BURST_AHEAD caps how far ahead anything may be scheduled: a report
+       queued more than ~120 ms out is stale news in a firefight, and the man
+       who fired it has been shot at twice since.
+
+       Nearest-first by selection, not by sorting: at most three voices are
+       ever chosen, so sorting 512 candidates to pick three was O(n^2) for
+       nothing. */
+    let slotT = Math.max(lastVoiceT + FUSE_S, simT);
+    while (tokens >= 1 && slotT - simT < BURST_AHEAD) {
+      let best = -1, bd = 1e9;
+      for (let i = 0; i < qn; i++) {
+        const s = q[i];
+        if (s.done || s.d > NEAR_M) continue;
+        if (s.d < bd) { bd = s.d; best = i; }
+      }
+      if (best < 0) break;
+      const s = q[best];
+      s.done = true; tokens -= 1; spent++; M.voices++;
+      emitVoice(s, slotT - simT);
+      lastVoiceT = slotT;
+      slotT += FUSE_S;
+    }
+
+    M.folded += (qn - spent);
     qn = 0;
     spendNoShots(dt);
   }
 
-  function emitVoice(s) {
+  function emitVoice(s, wait) {
     const raw = CBZ.__feelRawSfx || CBZ.sfx;
     if (!raw) return;
     // hand it back to audio.js exactly as it was asked for. The gun voices,
     // the far-field bus, the compressor and the sample bank are all theirs;
-    // this file only ever decided WHETHER.
+    // this file only ever decided WHETHER, and WHEN.
     const o = s.o || voiceOpts;
+    if (wait > 0.0005) o.delay = (o.delay || 0) + wait;
     safe(function () { raw.call(CBZ, s.name, o); });
   }
 
@@ -679,7 +694,7 @@
   F.shot = function (o) {
     if (OFF) return;
     o = o || {};
-    if (MIXER_OLD) { meter(o.dist || 0); M.voices++; emitVoice({ name: o.name || "shoot_carbine", o: o.opts }); return; }
+    if (MIXER_OLD) { meter(o.dist || 0); M.voices++; emitVoice({ name: o.name || "shoot_carbine", o: o.opts }, 0); return; }
     pushShot(o.name || "shoot_carbine", o.dist, o.opts, o.mine);
   };
 
@@ -1111,11 +1126,11 @@
   const SHAKE_DECAY = 1.6;   // per second — roughly CBZ.shake's own decay rate
   function shakeReq(m) {
     if (!CBZ.shake) return;
-    if (SHAKE_OLD || OFF) { CBZ.__feelRawShake ? CBZ.__feelRawShake.call(CBZ, m) : CBZ.shake(m); return; }
+    const rawShake = CBZ.__feelRawShake;
+    if (SHAKE_OLD || OFF) { (rawShake || CBZ.shake).call(CBZ, m); return; }
     const scale = 1 / (1 + shakeSpent * 1.35);
     shakeSpent += m * scale;
-    const raw = CBZ.__feelRawShake || CBZ.shake;
-    raw.call(CBZ, m * scale);
+    (rawShake || CBZ.shake).call(CBZ, m * scale);
   }
   function wrapShake() {
     if (SHAKE_OLD || OFF || CBZ.__feelRawShake || typeof CBZ.shake !== "function") return;
@@ -1283,7 +1298,7 @@
       "requested   " + pad(a.reqHz, 6) + " /s   total " + a.reqAll + "\n" +
       "voices      " + pad(a.voiceHz, 6) + " /s   total " + a.voices + "\n" +
       "grains      " + pad(a.grainHz, 6) + " /s   total " + a.grains + "\n" +
-      "culled      " + pad(a.culled, 6) + "      " + a.cullPct + "%\n" +
+      "folded->bed " + pad(a.folded, 6) + "      " + a.foldedPct + "%\n" +
       "nodes       " + pad(a.nodeHz, 6) + " /s   total " + a.nodes + "\n" +
       "density   " + bar(a.density) + " " + a.density.toFixed(2) + "\n" +
       "bed gain  " + bar(a.bedGain / 0.42) + " " + a.bedGain.toFixed(3) + "\n" +
@@ -1306,7 +1321,7 @@
      debugging by console. Allocates one object; not called per frame in
      normal play. */
   F.audit = function () {
-    const cull = M.reqAll > 0 ? Math.round((M.culled / M.reqAll) * 1000) / 10 : 0;
+    const fold = M.reqAll > 0 ? Math.round((M.folded / M.reqAll) * 1000) / 10 : 0;
     return {
       on: !OFF, mixer: !MIXER_OLD, debug: DEBUG, muted: muted, unlocked: unlocked,
       ctxState: ctx ? ctx.state : "none",
@@ -1314,7 +1329,7 @@
       fps: Math.round((CBZ.micro && CBZ.micro.fps) || 0),
       simT: Math.round(simT * 100) / 100,
       reqAll: M.reqAll, reqNear: M.reqNear, reqFar: M.reqFar,
-      voices: M.voices, grains: M.grains, culled: M.culled, cullPct: cull,
+      voices: M.voices, grains: M.grains, folded: M.folded, foldedPct: fold,
       nodes: M.nodes, nodeHz: M.nodeHz,
       reqHz: M.reqHz, voiceHz: M.voiceHz, grainHz: M.grainHz,
       peakReqHz: Math.round(M.peakReqHz * 10) / 10,
@@ -1339,7 +1354,7 @@
   G.__warlordFeel = F;
 
   F.reset = function () {
-    M.reqAll = M.reqNear = M.reqFar = M.voices = M.grains = M.culled = M.nodes = 0;
+    M.reqAll = M.reqNear = M.reqFar = M.voices = M.grains = M.folded = M.nodes = 0;
     M.peakVoiceHz = M.peakReqHz = 0; loadFired = 0;
     rateHz = 0; M.voiceHz = 0; M.grainHz = 0; M.nodeHz = 0;
     return true;

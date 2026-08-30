@@ -39,10 +39,11 @@
        example; this one is the same call with a different colour). We do NOT
        ship a second wind field or a second fog tint. weather.js is not in any
        studio pack so it is injected on first use — injected, never forked.
-     · systems/fx.js       — CBZ.fx.particleCloud is the pooled Points cloud
-       every disaster in this repo draws its rain/ash/snow out of. The
-       airborne grit is one of those with a sand colour and a lateral drift.
-       No new particle system was written for this file.
+     · systems/fx.js       — CBZ.fx.particleCloud was tried three ways for the
+       airborne grit and CUT, with the measurements written down at the storm
+       code below. The storm is carried by the air instead. No new particle
+       system was written for this file, and none was left in at 5% opacity to
+       prove something had been attempted.
      · core.js             — every number here comes off W.tier / W.gunPrice /
        W.payroll / W.power / W.surrenderChance / W.makeBand. There is no
        parallel economy in this file and no invented stat.
@@ -236,6 +237,17 @@
     if (W.armySize() > v.peak) v.peak = W.armySize();
   }
 
+  /* DID CORE PAY THEM THIS MORNING. Reading S.gold after the fact does not
+     answer it: core deducts the wage bill and a warlord who paid his last
+     dollar ends the dawn on zero looking exactly like one who paid nothing.
+     core.js logs the two cases in different words on its way through, and the
+     "log" event fires BEFORE the "dawn" event, so the sentence itself is the
+     signal — exact, and it costs one listener. */
+  let unpaidToday = false;
+  W.on("log", function (row) {
+    if (row && typeof row.text === "string" && row.text.indexOf("could not pay") === 0) unpaidToday = true;
+  });
+
   function loyalty() { return Math.round(ev().loy); }
   function loyMove(delta, why) {
     if (FLAG_NOLOYALTY) return;
@@ -376,36 +388,105 @@
     });
   }
 
-  let grit = null, gritOn = 0;
-  function ensureGrit() {
-    if (grit || !CBZ.fx || !CBZ.fx.particleCloud) return grit;
-    /* THE AIRBORNE SAND IS fx.particleCloud, the same pooled Points every
-       disaster in this repo throws rain and ash out of. `fall` with a large
-       lateral drift reads as horizontal grit at this camera distance, and it
-       costs one draw call. Writing a second Points system for sand would have
-       been the third one in the repo. */
-    grit = CBZ.fx.particleCloud({
-      count: 420, radius: 42, top: 34, bottom: -6,
-      mode: "fall", vMin: 4, vMax: 11,
-      color: 0xd8b477, size: 0.42, opacity: 0.5,
-    });
-    return grit;
+  /* THERE IS NO PARTICLE CLOUD IN THIS SANDSTORM, AND THAT IS THE ANSWER
+     RATHER THAN A GAP. Three drafts of one went in — CBZ.fx.particleCloud,
+     the pooled Points every disaster in this repo throws rain and ash out of,
+     which was the right thing to reach for and is still the right thing for a
+     camera standing in the weather. Photographed at this camera it never once
+     read as sand:
+
+       draft 1  radius 42, size 0.42, no drift — a small ball of motes hanging
+                around the lens 25 m above a valley you can see for kilometres
+                across. On the phone frame: six white squares in the corner of
+                the sky.
+       draft 2  radius 170, drift 34 m/s — the arithmetic kills it. A mote
+                spawned 120 m up falling at 4 m/s needs thirty seconds to reach
+                eye level and the wind carries it out of the cloud in five, so
+                every mote recycled while still high overhead.
+       draft 3  radius 300, drift 9, 900 motes — the geometry finally worked
+                and the LOOK still did not. Untextured Points are squares; at
+                sand colour they are invisible against sand and visible only
+                against the sky, so a storm rendered as pale confetti hanging
+                over a clear desert. Worse than nothing, because it reads as a
+                bug rather than as weather.
+
+     What actually carries a sandstorm at a strategic camera is the AIR: the
+     far shore stops existing (the fog far-plane, below) and the whole sky goes
+     brown (tintStorm, below). Both of those are one line each and both are
+     measurable. So the cloud is gone rather than left in at 5% opacity to
+     prove something was attempted. If this game ever gets a ground-level
+     camera — a battle fought inside a storm — fx.particleCloud is still the
+     right call there, and drafts 1-3 above are the numbers not to use. */
+
+  /* HOW BROWN THE AIR IS, 0..1 — one number, so the fog far-plane, the fog
+     colour and the sky dome can never disagree about how bad it is. */
+  function stormTint() {
+    const v = ev();
+    if (FLAG_NOWEATHER || W.phase() !== "campaign") return 0;
+    return v.wea === "storm" ? v.weaP : v.wea === "haze" ? v.weaP * 0.4 : 0;
+  }
+
+  /* THE COLOUR OF THE AIR IS campaign.js's, AND THAT IS WHY THIS IS A FRAME
+     HOOK AND NOT PART OF THE TICK ABOVE.
+
+     campaign.js's tintDay() writes scene.fog.color, scene.background and the
+     sky dome's two uniforms ABSOLUTELY every frame off its day-cycle
+     keyframes — that is correct, it owns the clock. systems/weather.js does
+     its own fog lerp from an `always` hook, and always hooks run BEFORE frame
+     hooks, so on this page weather.js's ochre was being overwritten by the
+     day tint sixty times a second and MEASURED as a 1-hex-digit change: the
+     first sandstorm screenshot had a perfectly clear blue-and-cream sky in it.
+
+     So the storm tint runs as a frame hook at order 20 — after campaign's -20
+     — and LERPS what the day cycle just decided toward sand rather than
+     replacing it. A sandstorm at dawn is still a dawn. weather.js keeps the
+     job it can actually do here, which is the wind vector everything reads. */
+  const _sand = { lo: 0xc2914f, hi: 0x9d7440 };
+  let _cA = null, _cB = null;
+  function tintStorm() {
+    const k = stormTint();
+    if (k < 0.004) return;
+    const THREE = G.THREE;
+    if (!THREE) return;
+    if (!_cA) { _cA = new THREE.Color(); _cB = new THREE.Color(); }
+    const scene = CBZ.scene;
+    _cA.setHex(_sand.lo);
+    const kk = Math.min(0.92, k);
+    if (scene && scene.fog && scene.fog.color) scene.fog.color.lerp(_cA, kk);
+    if (scene && scene.background && scene.background.isColor) scene.background.lerp(_cA, kk);
+    const dome = CBZ.micro && CBZ.micro.skyDome;
+    if (dome && dome.material && dome.material.uniforms) {
+      const u = dome.material.uniforms;
+      if (u.bottomColor && u.bottomColor.value) u.bottomColor.value.lerp(_cA, kk);
+      if (u.topColor && u.topColor.value) { _cB.setHex(_sand.hi); u.topColor.value.lerp(_cB, Math.min(0.85, k)); }
+    }
   }
 
   let fogSaved = null;
-  function driveWeather(dt) {
+  function driveWeather(dt, rawDt) {
+    rawDt = rawDt == null ? dt : rawDt;
     const v = ev();
     const scene = CBZ.scene;
     const live = !FLAG_NOWEATHER && W.phase() === "campaign" && (v.wea === "storm" || v.wea === "haze" || isNight());
-    const stormK = (v.wea === "storm" ? v.weaP : v.wea === "haze" ? v.weaP * 0.4 : 0);
+    const stormK = stormTint();
 
     if (!live) {
+      /* THE FOG IS SHARED AND battle.js SAVES IT. It stashes scene.fog on the
+         way into a fight and puts it back on the way out — so a storm that was
+         still easing its fog back while the battle started would have its
+         half-restored numbers saved as "the campaign's fog" and written back
+         permanently on teardown. The island would come out of one sandstorm
+         wearing it forever. So leaving the campaign SNAPS the fog back in the
+         same frame rather than easing; only an ongoing campaign gets the ease. */
       if (fogSaved && scene && scene.fog) {
-        scene.fog.near += (fogSaved.near - scene.fog.near) * Math.min(1, dt * 1.2);
-        scene.fog.far += (fogSaved.far - scene.fog.far) * Math.min(1, dt * 1.2);
-        if (Math.abs(scene.fog.far - fogSaved.far) < 30) { scene.fog.far = fogSaved.far; scene.fog.near = fogSaved.near; fogSaved = null; }
+        if (W.phase() !== "campaign") {
+          scene.fog.far = fogSaved.far; scene.fog.near = fogSaved.near; fogSaved = null;
+        } else {
+          scene.fog.near += (fogSaved.near - scene.fog.near) * Math.min(1, dt * 1.2);
+          scene.fog.far += (fogSaved.far - scene.fog.far) * Math.min(1, dt * 1.2);
+          if (Math.abs(scene.fog.far - fogSaved.far) < 30) { scene.fog.far = fogSaved.far; scene.fog.near = fogSaved.near; fogSaved = null; }
+        }
       }
-      if (grit) { gritOn += (0 - gritOn) * Math.min(1, dt * 2); grit.setActive(gritOn); grit.update(dt, 0, 0, 0); }
       return;
     }
 
@@ -416,7 +497,12 @@
          the bands you could see from the dune stop being visible with it. */
       const wantFar = visibility();
       const wantNear = W.lerp(FOG_CLEAR_NEAR, 90, clamp(stormK, 0, 1));
-      const k = Math.min(1, dt * 0.9);
+      /* 1.6 rather than 0.9, and the dt is NOT the tick's clamped one: this
+         page runs at two frames a second under SwiftShader, and clamping dt to
+         0.1 there meant the storm needed thirty real seconds to close the
+         horizon — measured, on the very screenshot that was supposed to show
+         it arriving. A ramp has to be in SECONDS, not in frames. */
+      const k = Math.min(1, Math.min(0.5, rawDt) * 1.6);
       scene.fog.far += (wantFar - scene.fog.far) * k;
       scene.fog.near += (wantNear - scene.fog.near) * k;
     }
@@ -424,42 +510,40 @@
     if (stormK > 0.02) {
       ensureWeatherFile();
       /* THE ONE WEATHER. Same adoption call systems/blizzard.js makes, with a
-         desert's colour instead of a whiteout's: no rain, no snow, wind and
-         fog asserted every frame with a short hold so the release eases. This
-         is why there is no wind field or fog tint of our own in this file. */
+         desert's numbers instead of a whiteout's: no rain, no snow, the wind
+         asserted every frame with a short hold so the release eases. This is
+         why there is no wind field of our own anywhere in this file — anything
+         else on this island that wants to know which way the sand is going
+         (a banner, a mount, the mixer) reads CBZ.weatherWind() and gets the
+         same vector the fog was built from.
+
+         weather.js's OWN fog term is asserted here too and does not win on
+         this page — campaign.js rewrites scene.fog.color absolutely every
+         frame from its day cycle, which is correct and is why tintStorm exists
+         below. It is left in the call because it costs nothing and it is the
+         right thing on any page that does not have a day-tint of its own. */
       if (CBZ.weatherDrive) {
         CBZ.weatherDrive({
           rain: 0, snow: 0,
-          wind: 9 + 16 * stormK, windDir: { x: ev().wx, z: ev().wz },
+          wind: 9 + 16 * stormK, windDir: { x: v.wx, z: v.wz },
           fog: 0.35 + 0.5 * stormK, fogColor: 0xc59a5c,
         }, 0.6);
       }
-      const g = ensureGrit();
-      if (g) {
-        gritOn += (clamp(stormK, 0, 1) - gritOn) * Math.min(1, dt * 1.4);
-        g.setActive(gritOn);
-        const cam = CBZ.camera;
-        const cx = cam ? cam.position.x : S.you.x;
-        const cz = cam ? cam.position.z : S.you.z;
-        const cy = cam ? cam.position.y - 14 : 0;
-        g.points.material.opacity = Math.min(0.6, 0.12 + gritOn * 0.5);
-        // the drift IS the wind vector, so the grit and the fog agree
-        g.update(dt, cx, cy, cz);
-        g.points.position.set(0, 0, 0);
-      }
-    } else if (grit) {
-      gritOn += (0 - gritOn) * Math.min(1, dt * 2);
-      grit.setActive(gritOn);
-      grit.update(dt, S.you.x, 0, S.you.z);
     }
+
   }
 
   /* THE STORM AND THE DARK BOTH HIDE YOU, and that is a real mechanic rather
-     than a caption: a band that cannot see you cannot start an encounter, and
-     one that was hunting you loses the trail. Implemented by holding their
-     cooldown down — the same field campaign.js already uses to stop a band
-     re-engaging — instead of reaching into campaign's contact test, which is
-     not this file's to edit. */
+     than a caption: a band that cannot see you cannot start an encounter.
+
+     THE COOLDOWN IS THE MECHANISM. campaign.js's contact test only fires the
+     encounter when `b.cooldown <= 0`, so holding it above zero on everything
+     within the cover radius genuinely means they ride past you — and it does
+     it without this file reaching into campaign's contact test, which is not
+     ours to edit. The mood nudge underneath is only a nudge: campaign's own AI
+     re-decides hunt/flee off the power ratio about every 1.5 s and will happily
+     put a strong band back on hunt. That is correct — a sandstorm should hide
+     you, not delete somebody's intentions. */
   function hideMe(dt) {
     if (FLAG_NOWEATHER) return;
     const v = ev();
@@ -502,15 +586,58 @@
       ".wl-ch .ln.bad{color:#ffc9c4}.wl-ch .ln.good{color:#c9ffd4}",
       ".wl-name{display:inline-block;margin:0 10px 4px 0;font-size:12px;opacity:.78;font-weight:500}",
       ".wl-name b{opacity:.45;font-size:10px;letter-spacing:.12em;font-weight:600}",
+      /* AN EVENT CARD IS MODAL AND THE SHELL DOES NOT KNOW THAT. #stage is
+         z-index 40, campaign.js's own furniture (the MAP button, the zoom
+         pair, the compass, the nameplates) is 45 and warlord.html's strip is
+         50 — so the first phone screenshot of this file came back with "35 MEN
+         $1240 DAY 1" printed straight through the middle of the headline and
+         a MAP button sitting on the card. Every OTHER screen in this game gets
+         away with 40 because it changes PHASE, and campaign hides itself on
+         the way out; this file deliberately does not change phase, so it has
+         to lift its own screen instead. 55 clears the strip and the furniture
+         and still sits UNDER the world map (60) and the toasts (70), which is
+         right: the map is a bigger claim on the screen than a card is. */
+      "body.wl-card-up #stage{z-index:55}",
       "#hud .chip.act{pointer-events:auto;cursor:pointer;opacity:.95}",
       "#hud .chip.act:hover{color:var(--hot)}",
+      /* THE STAT TILES ARE THIS FILE'S, NOT THE SHELL'S. The shell's .wl-grid
+         is minmax(180px,1fr), which is right for the outpost's stock rows and
+         wrong here: at 393pt it collapses to ONE column, so the loyalty panel's
+         three numbers became three full-width slabs and 500px of scrolling
+         before the names — measured on the phone frame, which is the whole
+         reason this preset shoots one. 112px puts three across on a phone and
+         eight across on a laptop, which is what a row of numbers wants. */
+      ".wl-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:8px;margin-bottom:10px}",
+      ".wl-stat{border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:9px 10px;background:rgba(255,255,255,.03)}",
+      ".wl-stat b{display:block;font-size:19px;letter-spacing:-.01em;font-weight:700;margin-top:3px}",
+      /* a man and his verdict, on one line that cannot wrap through itself:
+         the first draft used the shell's .wl-row and "Ferro Mbeki VETERAN · 0
+         FIGHTS" broke across the middle of the phrase with the verdict hanging
+         off the right of the second line. */
+      ".wl-man{display:flex;gap:10px;align-items:baseline;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06)}",
+      ".wl-man:last-child{border-bottom:0}",
+      ".wl-man .who{min-width:0}",
+      ".wl-man .who i{display:block;font-style:normal;font-size:10px;letter-spacing:.16em;opacity:.45;margin-top:2px}",
+      ".wl-man .st{font-size:10px;letter-spacing:.14em;opacity:.62;white-space:nowrap;text-align:right;flex:0 0 auto}",
       ".wl-four{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}",
       ".wl-four .w{border:1px solid rgba(255,255,255,.12);border-radius:13px;padding:11px 12px;background:rgba(255,255,255,.03)}",
       ".wl-four .w.dead{opacity:.42;border-color:rgba(196,69,58,.4)}",
       ".wl-four .w b{display:block;font-size:14px;letter-spacing:.04em;margin-bottom:3px}",
-      "@media (max-width:430px){.wl-h{font-size:24px}.wl-ev .body{font-size:14px}}",
+      "@media (max-width:430px){.wl-h{font-size:24px}.wl-ev .body{font-size:14px}.wl-stat b{font-size:16px}}",
     ].join("\n");
     document.head.appendChild(s);
+  }
+
+  /* ONE DOOR IN AND ONE DOOR OUT for everything this file puts on screen, so
+     the modal class can never be left on the body by a path that forgot it. */
+  function takeScreen(html) {
+    try { document.body.classList.add("wl-card-up"); } catch (e) {}
+    return ctx.screen(html);
+  }
+  function giveBackScreen() {
+    try { document.body.classList.remove("wl-card-up"); } catch (e) {}
+    if (ctx && ctx.closeScreen) ctx.closeScreen();
+    if (ctx && ctx.paintHud) ctx.paintHud();
   }
 
   function canOpen() {
@@ -519,6 +646,12 @@
     if (W.phase() !== "campaign") return false;
     const st = ctx.el ? ctx.el("stage") : document.getElementById("stage");
     if (st && st.classList.contains("on")) return false;   // somebody else owns it
+    /* AND NOT OVER THE WORLD MAP. campaign.js's #wlMap is z-index 60 — above
+       the lift above — so a card fired while the player is reading the island
+       would go up UNDERNEATH it and be answered blind. It is also simply rude:
+       he is in the middle of deciding where to ride. */
+    const map = document.getElementById("wlMap");
+    if (map && getComputedStyle(map).display !== "none") return false;
     return true;
   }
 
@@ -547,7 +680,7 @@
         (c.hint ? '<i>' + esc(c.hint) + '</i>' : '') + '</button>';
     }
     html += '</div>';
-    ctx.screen(html);
+    takeScreen(html);
     for (let i = 0; i < choices.length; i++) {
       const c = choices[i];
       const b = ctx.el("evP" + i);
@@ -565,10 +698,15 @@
 
   function closeCard() {
     CARD = null;
-    if (ctx && ctx.closeScreen) ctx.closeScreen();
+    giveBackScreen();
     paintChips();
   }
   E.cardOpen = function () { return !!CARD; };
+  /* PUBLISHED so another module can take the screen back if it genuinely needs
+     it (and so a headless test can put a card away without a click). Nobody
+     should be calling this to jump the queue — canOpen() already refuses to
+     open over somebody else's phase. */
+  E.close = function () { if (CARD) closeCard(); };
 
   /* ============================================================ HELPERS
      Small sentences the library uses over and over. Every one of them reads a
@@ -577,6 +715,7 @@
      there is no price of that thing. */
   function size() { return W.armySize(); }
   function men(n) { return n === 1 ? "1 man" : n + " men"; }
+  function guns(n) { return n === 1 ? "1 gun" : n + " guns"; }
   function biome() { const D = W.desert; return (D && D.biomeAt) ? D.biomeAt(S.you.x, S.you.z) : "dune"; }
   function place() {
     const b = biome();
@@ -978,7 +1117,7 @@
     weight: function () { return (ev().wea === "storm" && ev().camped !== S.day) ? 3.2 : 0; },
     build: function () {
       const loss = Math.max(1, Math.round(size() * 0.05 * ev().weaP));
-      const guns = Math.max(1, Math.round(size() * 0.04));
+      const gunsLost = Math.max(1, Math.round(size() * 0.04));
       return {
         title: 'A BROWN <em>WALL</em>',
         sub: "SANDSTORM",
@@ -995,13 +1134,13 @@
               loyMove(+3, "you did not march them into it");
             } },
           { key: "push", label: "RIDE INTO IT", cls: "bad",
-            hint: "keep the day · lose about " + men(loss) + " and " + guns + " guns · nobody can see you either",
+            hint: "keep the day · lose about " + men(loss) + " and " + guns(gunsLost) + " · nobody can see you either",
             run: function () {
               const cut = faction(0.5).slice(0, loss);
               for (let i = 0; i < cut.length; i++) { bury(cut[i], "lost in a sandstorm"); W.removeSoldier(cut[i].id, false); }
               S.stats.lost += cut.length;
               const bag = Object.keys(S.baggage);
-              for (let i = 0; i < guns && bag.length; i++) W.unstash(bag[Math.floor(W.rnd() * bag.length)], 1);
+              for (let i = 0; i < gunsLost && bag.length; i++) W.unstash(bag[Math.floor(W.rnd() * bag.length)], 1);
               W.log("rode into the storm. " + cut.length + " men walked out of the column and were not found.", "bad");
               loyMove(-6, "you marched them into a sandstorm");
               reconcile();
@@ -1885,14 +2024,14 @@
           : band ? W.bandSize(band) + " MEN, STILL OUT THERE" : "GONE") + '</div></div>';
     }
 
-    ctx.screen(
+    takeScreen(
       '<div class="wl-ch">' +
       '<h1 class="wl-h">' + (won ? 'THE ISLAND IS <em>YOURS</em>' : 'IT <em>ENDS</em> HERE') + '</h1>' +
       '<p class="wl-sub">DAY ' + S.day + ' · ' + esc(title()) + '</p>' +
       '<div class="wl-card"><div style="opacity:.9;line-height:1.5;font-weight:500">' +
         esc(v.over ? v.over.why : "") + '</div></div>' +
       '<div class="wl-lbl">THE RUN</div>' +
-      '<div class="wl-grid">' +
+      '<div class="wl-stats">' +
         statCard("DAYS", S.day) +
         statCard("BIGGEST COLUMN", v.peak + " MEN") +
         statCard("BATTLES", (st.battles || 0) + " — " + (st.won || 0) + " WON") +
@@ -1917,8 +2056,8 @@
   }
 
   function statCard(label, val) {
-    return '<div class="wl-card"><div class="wl-small wl-dim">' + esc(label) + '</div>' +
-           '<div style="font-size:24px;letter-spacing:-.01em">' + esc(String(val)) + '</div></div>';
+    return '<div class="wl-stat"><div class="wl-small wl-dim">' + esc(label) + '</div>' +
+           '<b>' + esc(String(val)) + '</b></div>';
   }
 
   /* ---- THE CHRONICLE ---- */
@@ -1935,11 +2074,11 @@
     }
     if (!body) body = '<div class="wl-dim">Nothing has happened yet.</div>';
     const st = S.stats || {};
-    ctx.screen(
+    takeScreen(
       '<div class="wl-ch">' +
       '<h1 class="wl-h">THE <em>CHRONICLE</em></h1>' +
       '<p class="wl-sub">DAY ' + S.day + ' · ' + W.armySize() + ' MEN · ' + esc(title()) + '</p>' +
-      '<div class="wl-grid">' +
+      '<div class="wl-stats">' +
         statCard("BATTLES", (st.battles || 0) + " — " + (st.won || 0) + " WON") +
         statCard("YOUR DEAD", v.fallen.length) +
         statCard("LOYALTY", loyalty() + " " + mood().label) +
@@ -1952,7 +2091,7 @@
     const b = ctx.el("chBack");
     if (b) b.onclick = function () {
       if (back) back();
-      else { ctx.closeScreen(); if (ctx.paintHud) ctx.paintHud(); }
+      else giveBackScreen();
     };
   }
   E.chronicle = function () { if (!FLAG_NOEVENTS) openChronicle(null); };
@@ -1967,21 +2106,21 @@
     for (let i = 0; i < list.length; i++) {
       const s = list[i];
       const bd = bondOf(s);
-      rows += '<div class="wl-row"><span>' + esc(s.name) + ' <span class="wl-small wl-dim">' +
-        esc(W.tier(s.tier).label) + ' · ' + (s.battles || 0) + ' FIGHTS</span></span>' +
-        '<span class="wl-small ' + (bd < 0.3 ? "" : "wl-dim") + '">' +
-        (bd < 0.22 ? "WOULD LEAVE TONIGHT" : bd < 0.4 ? "LISTENING TO OTHERS" : bd < 0.62 ? "STAYING FOR NOW" : "YOURS") +
+      rows += '<div class="wl-man"><span class="who">' + esc(s.name) +
+        '<i>' + esc(W.tier(s.tier).label) + ' · ' + (s.battles || 0) + ' FIGHTS</i></span>' +
+        '<span class="st">' +
+        (bd < 0.22 ? "WOULD LEAVE TONIGHT" : bd < 0.4 ? "LISTENING" : bd < 0.62 ? "STAYING FOR NOW" : "YOURS") +
         '</span></div>';
     }
     if (!rows) rows = '<div class="wl-dim">There is nobody behind you to have an opinion.</div>';
     const pressed = S.army.filter(function (s) { return (v.base[s.id] || BASE_UNKNOWN) <= BASE_PRESSED + 0.02; }).length;
-    ctx.screen(
+    takeScreen(
       '<div class="wl-ev">' +
       '<h1 class="wl-h">THE ARMY\'S <em>OPINION</em></h1>' +
       '<p class="wl-sub">' + esc(m.label) + ' — ' + loyalty() + ' / 100</p>' +
       '<div class="wl-card">' + meter(loyalty() / 100, loyalty() < 30 ? "bad" : loyalty() > 70 ? "good" : "") +
         '<div class="wl-small wl-dim" style="margin-top:6px">' + esc(m.note) + '</div></div>' +
-      '<div class="wl-grid">' +
+      '<div class="wl-stats">' +
         statCard("CEILING", Math.round(avgBond() * 100) + " / 100") +
         statCard("PRESSED MEN", pressed + " of " + S.army.length) +
         statCard("EXECUTIONS", (S.stats && S.stats.executed) || 0) +
@@ -2002,7 +2141,7 @@
       '</div></div>'
     );
     const b = ctx.el("loBack");
-    if (b) b.onclick = function () { ctx.closeScreen(); if (ctx.paintHud) ctx.paintHud(); };
+    if (b) b.onclick = function () { giveBackScreen(); };
     const c = ctx.el("loCh");
     if (c) c.onclick = function () { openChronicle(openLoyalty); };
     const w = ctx.el("loWar");
@@ -2034,7 +2173,7 @@
         '</div>';
     }
     const done = v.fell.length, total = L.length;
-    ctx.screen(
+    takeScreen(
       '<div class="wl-ch">' +
       '<h1 class="wl-h">THE <em>FOUR</em></h1>' +
       '<p class="wl-sub">' + done + " OF " + total + ' BROKEN' + (v.last ? " · THE LAST WAR" : "") + '</p>' +
@@ -2050,7 +2189,7 @@
       '</div></div>'
     );
     const b = ctx.el("waBack");
-    if (b) b.onclick = function () { ctx.closeScreen(); if (ctx.paintHud) ctx.paintHud(); };
+    if (b) b.onclick = function () { giveBackScreen(); };
     const c = ctx.el("waCh");
     if (c) c.onclick = function () { openChronicle(openWar); };
   }
@@ -2103,6 +2242,8 @@
      function: two things that both fire "at dawn" from two files drift apart
      the first time somebody changes one of them. */
   function onDawn() {
+    const wasUnpaid = unpaidToday;
+    unpaidToday = false;
     reconcile();
     rollWeather();
 
@@ -2112,9 +2253,7 @@
          0.3 rather than 1 so a single good day cannot launder a bad month. */
       const ceiling = avgBond() * 100;
       v.loy += (ceiling - v.loy) * 0.3;
-      // did core pay them? It logs it either way; the roster is the tell —
-      // core sheds men when it cannot pay, so a shrunk roster is an unpaid one
-      const paid = S.gold > 0 || W.payroll() === 0;
+      const paid = !wasUnpaid;
       loyMove(paid ? 1.4 : -15, paid ? "paid" : "not paid");
       if (v.wea === "heat") loyMove(-2.5, "marched in killing heat");
       if (S.prisoners.length > S.army.length * 0.5 && S.prisoners.length > 4) {
@@ -2145,7 +2284,13 @@
       if (v.loy < 26 && v.unrest === 0 && S.day - (v.warned || 0) > 5 && canOpen() && !FLAG_NOEVENTS) {
         v.warned = S.day;
         fire("ringleader");
-      } else if (v.unrest >= 1 && W.chance(mutinyRisk())) {
+      } else if (v.unrest >= 1 && canOpen() && W.chance(mutinyRisk())) {
+        /* canOpen() GATES THE ROLL, not just the card. W.dawn() is also called
+           from outpost.js's rest and from this file's own caravan card, and a
+           mutiny that resolved while the depot screen was up would stamp its
+           card over somebody else's phase — the exact two-modules-drawing bug
+           the contract exists to stop. Not rolling costs nothing: unrest keeps
+           climbing and it happens on the road, which is where it belongs. */
         mutiny();
       } else if (v.unrest >= 1 && S.day - (v.warned || 0) > 3 && canOpen() && !FLAG_NOEVENTS) {
         v.warned = S.day;
@@ -2253,10 +2398,18 @@
   let lastX = 0, lastZ = 0, since = 0, next = 1400, slow = 0, hadPos = false;
   E.driven = false;
 
+  let lastWall = 0;
   function tick(dt) {
     if (!ctx) return;
-    dt = Math.min(0.1, dt || 0.016);
-    driveWeather(dt);
+    /* THE ENGINE'S dt IS NOT WALL TIME HERE. Under SwiftShader this page runs
+       at one or two frames a second, and every ramp in this file is written in
+       seconds — so the real elapsed wall clock drives them, and the engine's
+       dt only drives the things that are genuinely per-frame. */
+    const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+    const rawDt = lastWall ? Math.min(1, (now - lastWall) / 1000) : 0.016;
+    lastWall = now;
+    dt = Math.min(0.1, dt || rawDt || 0.016);
+    driveWeather(dt, rawDt);
 
     if (W.phase() !== "campaign") { hadPos = false; return; }
     slow -= dt;
@@ -2346,7 +2499,15 @@
     if (typeof orig === "function") {
       c.paintHud = function () { orig(); safe(paintChips); };
     }
-    W.on("phase", function () { safe(paintChips); });
+    W.on("phase", function (t) {
+      /* warlord.html closes the stage itself on the way into campaign and
+         battle. It knows nothing about our modal class, so it would leave it
+         on the body and quietly lift the NEXT module's screen over the strip. */
+      if (t && (t.to === "campaign" || t.to === "battle")) {
+        try { document.body.classList.remove("wl-card-up"); } catch (e) {}
+      }
+      safe(paintChips);
+    });
     W.on("army", function () { reconcile(); safe(paintChips); });
     W.on("gold", function () { safe(paintChips); });
 
@@ -2357,7 +2518,6 @@
       ev();
       hadPos = false; since = 0; next = 1400;
       fogSaved = null;
-      if (grit) { gritOn = 0; grit.setActive(0); }
     });
     W.on("campaign:ready", function () { safe(raiseTheFour); safe(rollWeather); safe(paintChips); });
     W.on("phase:campaign", function () { setTimeout(function () { safe(pending); }, 600); });
@@ -2365,6 +2525,10 @@
     W.on("dawn", function () { if (!ev().four) safe(raiseTheFour); });
 
     if (CBZ.onAlways) CBZ.onAlways(96, function (dt) { safe(function () { tick(dt); }); });
+    /* order 20, i.e. AFTER campaign.js's day tint at -20. See tintStorm. */
+    if (CBZ.micro && CBZ.micro.onFrame) {
+      CBZ.micro.onFrame(function () { safe(tintStorm); }, { order: 20, id: "warlord-sandfog" });
+    }
 
     /* THE DEBUG DOOR. ?event=<id> fires any card the moment the island is up,
        which is what the screenshot tool drives and what makes writing a new

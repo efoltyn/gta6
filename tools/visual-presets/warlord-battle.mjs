@@ -55,15 +55,15 @@ const subjects = [
 
   { id: "flank-wing", label: "FLANK — the wing swings wide",
     focus: "THE FIRST REAL DECISION. FLANK sends men who are out of contact to an anchor 90 degrees off the fight axis, on the side of the enemy mass with fewer of them in it, and hands them straight back to combat_iq the moment they arrive — so the gunfight on the wing is still the engine's, and only the WALK is the order's. The wing has to read as a wing: a limb reaching around the enemy mass, not a second frontal rank.",
-    at: 28, order: "flank", cam: { mode: "cmd", pitch: 0.34, yaw: 1.55 } },
+    at: 22, order: "flank", cam: { mode: "cmd", pitch: 0.34, yaw: 1.55 } },
 
   { id: "charge-lands", label: "CHARGE, from inside the line",
     focus: "THE ORDER THAT FINISHES IT, photographed from where the brief says you should be: in it. CHARGE does not call combat_iq's posture() at all — posture exists to hold a weapon's preferred distance, which is precisely what a charge refuses to do — so the goal becomes the enemy himself and the slot becomes 'push'. Look for the line breaking into a run and the warlord's own rifle, the same actorweapons model every NPC carries, in the corner of the frame. The counters move together: charging costs YOU men too.",
-    at: 42, order: "charge", cam: { mode: "fps" } },
+    at: 30, order: "charge", cam: { mode: "fps" } },
 
   { id: "the-rout", label: "The line breaks",
     focus: "THE WHOLE POINT OF THE FLAG. AFTER: a third of an army is gone — power-weighted, so its veterans count for more than its levies — morale falls under the men's own nerve rows and the levies break first, running for their own map edge while the veterans hold. BEFORE (?morale=old): nobody CAN break, so the same simulated second is two intact lines still grinding. If both frames look the same, the mechanic is not doing anything.",
-    at: 58, cam: { mode: "cmd", pitch: 0.40, yaw: 1.55 } },
+    at: 38, cam: { mode: "cmd", pitch: 0.40, yaw: 1.55 } },
 
   { id: "aftermath", label: "The dead, by name",
     focus: "THE PAYOFF SCREEN, which is the reason core.js gives every man a name. Your dead listed individually, the wounded who fight at 60% until they rest, promotions, the guns stripped off every body on the field with what they are worth, and the enemy survivors as PRISONERS to conscript, ransom, release or execute. The before side reaches this screen too — later, bloodier, and with fewer prisoners, because an army that cannot break has to be killed to the last man instead of captured standing on the field.",
@@ -190,8 +190,8 @@ export default {
      which is a campaign encounter a warlord would actually take: better men,
      not more of them, which is the game's own thesis about who gets the good
      rifle. */
-  urlParams: { battle: 1, frozen: 1, mine: 34, them: 34, seed: 1337, gun: "ak47",
-    faction: "militia", myfaction: "company" },
+  urlParams: { battle: 1, frozen: 1, mine: 24, them: 52, seed: 1337, gun: "ak47",
+    faction: "militia", myfaction: "legion" },
   readyExpression: "!!(window.CBZ && window.CBZ.warlord)",
   // the first subject pays the whole studio boot under a software rasteriser
   stageTimeoutMs: 600000,

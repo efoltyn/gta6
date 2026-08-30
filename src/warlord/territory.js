@@ -135,8 +135,23 @@
     for (let i = 0; i < F.length; i++) T.registerOwner({ id: F[i].id, label: F[i].label, colour: F[i].colour });
   }
   T.ownerList = function () { baseOwners(); return ownerOrder.slice(); };
+  /* THE MAP IS A DIFFERENT JOB FROM A BANNER, and the first photograph of
+     this screen proved it. core.js gives SAND BANDITS 0xc4593a — a perfect
+     colour for a rag on a pole in a desert, and 5 degrees of hue away from
+     your own 0xff8a3d. Side by side on the ownership wash they read as one
+     faction with two moods, and the share bar put them adjacent, which was
+     worse. DESERT LEGION's 0xb9a13f had the same problem against the sand
+     itself: olive over dune is mud.
+
+     So the map keeps its own palette for exactly the colours that collide,
+     and nothing else changes: the banners in the world, the nameplates and
+     the band dots on the campaign minimap are all still core's. Overriding
+     core's colour globally would have been the wrong fix — a red bandit
+     banner is not what anybody asked for. */
+  const MAP_TINT = { bandit: 0xd8382c, legion: 0xe0c341 };
   function ownerColour(id) {
     if (!id) return NONE_COLOUR;
+    if (MAP_TINT[id] != null) return MAP_TINT[id];
     baseOwners();
     const r = OWNERS[id];
     return r ? r.colour : NONE_COLOUR;
@@ -461,6 +476,153 @@
     segs = list;
   }
 
+
+  /* ============================================================ SMOOTHING
+     THE RASTER IS 52 M A CELL, AND AT MAP ZOOM THAT IS A STAIRCASE. The
+     first zoomed photograph of a single holding showed ten-pixel steps down
+     every frontier - precisely the "grid on sand" look the whole warped
+     Voronoi scheme exists to avoid, arriving through the back door of the
+     renderer instead of the generator.
+
+     So the segments are walked into CHAINS - all the segments separating the
+     same pair of holdings, end to end, in order - and each chain is LOW-PASS
+     FILTERED: ten passes of a 1-2-1 binomial kernel along the polyline.
+
+     The first attempt was two rounds of Chaikin corner-cutting, which is the
+     obvious answer and is wrong here, and the second zoomed photograph is
+     why. Chaikin cuts CORNERS; a raster staircase is not a corner, it is a
+     periodic wiggle 26 m in amplitude, and two rounds left about half of it
+     - five visible pixels of zigzag down every frontier at map zoom. It also
+     doubles the point count per round, so the fix (more rounds) costs 2^n
+     points to draw. The binomial pass attenuates that wiggle by a half each
+     time, keeps the point count exactly where it was, and after ten passes
+     the deviation from the raster is under half a cell - so the drawn line
+     and at() still agree about which side of a border a man stands on,
+     which is the constraint the whole thing has to respect.
+
+     Each point carries the chain's NORMAL, pointing into region `a`, so the
+     map can stroke a frontier twice - offset half a stroke into each side,
+     in each side's own colour. THE COASTLINE IS IN HERE TOO (b = -1, the
+     sea): a nation whose coast is not drawn in its own colour is the single
+     thing that makes a territory map unreadable at a glance, and the first
+     draft skipped every coastal segment. */
+  let chains = [];
+  function buildChains() {
+    chains = [];
+    if (!segs || !segs.length) return;
+    const groups = new Map();
+    for (let i = 0; i < segs.length; i++) {
+      const s = segs[i];
+      const k = (s.a < s.b ? s.a + "," + s.b : s.b + "," + s.a);
+      let L = groups.get(k);
+      if (!L) { L = []; groups.set(k, L); }
+      L.push(s);
+    }
+    const NKW = GS + 3;
+    function nk(x, z) { return Math.round((x + BOUNDS) / CELL) * NKW + Math.round((z + BOUNDS) / CELL); }
+    groups.forEach(function (list, k) {
+      const parts = k.split(",");
+      const A = parseInt(parts[0], 10);
+      const B = parseInt(parts[1], 10);
+      const nodes = new Map();
+      const used = new Uint8Array(list.length);
+      for (let i = 0; i < list.length; i++) {
+        const s = list[i];
+        const k1 = nk(s.x1, s.z1), k2 = nk(s.x2, s.z2);
+        let L1 = nodes.get(k1); if (!L1) { L1 = []; nodes.set(k1, L1); }
+        L1.push(i);
+        let L2 = nodes.get(k2); if (!L2) { L2 = []; nodes.set(k2, L2); }
+        L2.push(i);
+      }
+      function nextFrom(node, skip) {
+        const L = nodes.get(node);
+        if (!L) return -1;
+        for (let i = 0; i < L.length; i++) if (L[i] !== skip && !used[L[i]]) return L[i];
+        return -1;
+      }
+      // chain ENDS first, so an open frontier comes out whole rather than as
+      // two halves that each get their own smoothing pass and disagree
+      const order = [];
+      nodes.forEach(function (L) { if (L.length === 1) order.push(L[0]); });
+      for (let i = 0; i < list.length; i++) order.push(i);
+      for (let oi = 0; oi < order.length; oi++) {
+        const start = order[oi];
+        if (used[start]) continue;
+        used[start] = 1;
+        const s0 = list[start];
+        const pts = [s0.x1, s0.z1, s0.x2, s0.z2];
+        let node = nk(s0.x2, s0.z2), prev = start;
+        for (;;) {
+          const nx = nextFrom(node, prev);
+          if (nx < 0) break;
+          used[nx] = 1;
+          const s = list[nx];
+          const kA = nk(s.x1, s.z1);
+          if (kA === node) { pts.push(s.x2, s.z2); node = nk(s.x2, s.z2); }
+          else { pts.push(s.x1, s.z1); node = kA; }
+          prev = nx;
+        }
+        node = nk(s0.x1, s0.z1); prev = start;
+        for (;;) {
+          const nx = nextFrom(node, prev);
+          if (nx < 0) break;
+          used[nx] = 1;
+          const s = list[nx];
+          const kA = nk(s.x1, s.z1);
+          if (kA === node) { pts.unshift(s.x2, s.z2); node = nk(s.x2, s.z2); }
+          else { pts.unshift(s.x1, s.z1); node = kA; }
+          prev = nx;
+        }
+        if (pts.length < 6) continue;                 // two cells is not a border
+        const closed = Math.hypot(pts[0] - pts[pts.length - 2], pts[1] - pts[pts.length - 1]) < CELL * 0.6;
+        chains.push(finishChain(smoothPoly(pts, closed, 10), closed, A, B));
+      }
+    });
+  }
+  /* A 1-2-1 PASS ALONG THE POLYLINE. Endpoints of an open chain are pinned:
+     a frontier has to keep meeting the two frontiers it forks into, and
+     letting the ends drift opened visible gaps at every three-region
+     junction in the first run. */
+  function smoothPoly(p, closed, passes) {
+    const n = p.length / 2;
+    if (n < 4) return p;
+    let a = p.slice(), b = new Array(p.length);
+    for (let k = 0; k < passes; k++) {
+      for (let i = 0; i < n; i++) {
+        if (!closed && (i === 0 || i === n - 1)) { b[i * 2] = a[i * 2]; b[i * 2 + 1] = a[i * 2 + 1]; continue; }
+        const i0 = (i - 1 + n) % n, i1 = (i + 1) % n;
+        b[i * 2] = (a[i0 * 2] + 2 * a[i * 2] + a[i1 * 2]) * 0.25;
+        b[i * 2 + 1] = (a[i0 * 2 + 1] + 2 * a[i * 2 + 1] + a[i1 * 2 + 1]) * 0.25;
+      }
+      const t = a; a = b; b = t;
+    }
+    return a;
+  }
+
+  function finishChain(p, closed, A, B) {
+    const n = p.length / 2;
+    const px = new Float32Array(p);
+    const nrm = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      const i0 = closed ? (i - 1 + n) % n : Math.max(0, i - 1);
+      const i1 = closed ? (i + 1) % n : Math.min(n - 1, i + 1);
+      const dx = px[i1 * 2] - px[i0 * 2], dz = px[i1 * 2 + 1] - px[i0 * 2 + 1];
+      const L = Math.hypot(dx, dz) || 1;
+      nrm[i * 2] = -dz / L; nrm[i * 2 + 1] = dx / L;
+    }
+    /* WHICH SIDE IS `A` ON. Asked of the raster once per chain, at its
+       middle, where a chain is least likely to be running along a junction:
+       step CELL*0.9 up the normal and see who is there. Flipping every point
+       at once keeps the two coloured half-strokes on the correct sides for
+       the whole frontier, which is what tells a player who is on each side
+       of a line without tapping it. */
+    const m = Math.floor(n / 2);
+    const tx = px[m * 2] + nrm[m * 2] * CELL * 0.9;
+    const tz = px[m * 2 + 1] + nrm[m * 2 + 1] * CELL * 0.9;
+    if (rawAt(tx, tz) !== A) { for (let i = 0; i < nrm.length; i++) nrm[i] = -nrm[i]; }
+    return { a: A, b: B, closed: closed, px: px, nrm: nrm, n: n };
+  }
+
   let generating = false;
   function generate(force) {
     if (FLAG_OFF && !force) return false;
@@ -483,6 +645,7 @@
       rasterise(anchors);
       measure(anchors);
       edges();
+      buildChains();
       builtSeed = seed;
       ISLAND_MEN = 0;
       for (let i = 0; i < REG.length; i++) ISLAND_MEN += supportOf(REG[i]);
@@ -736,11 +899,111 @@
      A faction's strength is what it holds plus what it has walking around:
      the income of its regions (which is the men that ground feeds) plus the
      real power of its real bands on the map. Nothing invented. */
+  /* MEN, NOT MONEY, AND THIS WAS A REAL BUG. The first draft compared a
+     faction's STRENGTH (its income, in gold) against a region's DEFENCE (its
+     garrison, in core's power units) and called the ratio odds. Those are
+     different units: a headless twenty-five-dawn run had every attacker at
+     ~2700 against every defender at ~380, so no garrison of any size could
+     ever hold anything and the whole "hold it or lose it" loop was decided
+     before the dice were thrown. Exactly the stat fiction CLAUDE.md bans —
+     arithmetic on two things that are not the same thing.
+
+     Both sides are now POWER, core's own unit, and the bridge between "men
+     this ground feeds" and "power" is measured off core rather than typed: a
+     levy with a sidearm, which is the cheapest real man in the game and
+     precisely what a holding raises when somebody rides at it. */
+  let LEVY_POWER = 0;
+  function levyPower() {
+    if (!LEVY_POWER) {
+      try { LEVY_POWER = W.soldierPower(W.makeSoldier("levy", "sidearm")); } catch (e) { LEVY_POWER = 0.65; }
+      if (!(LEVY_POWER > 0)) LEVY_POWER = 0.65;
+    }
+    return LEVY_POWER;
+  }
+  // what a holding can put in the field on its own: the men it feeds, as power
+  function levies(r) { return supportOf(r) * levyPower(); }
+  T.leviesOf = levies;
+
+  // what a faction's GROUND is worth: the men it feeds plus what it garrisons
+  function groundStrength(ownerId) {
+    ensure();
+    const t = tState();
+    let n = 0;
+    for (let i = 0; i < REG.length; i++) {
+      if ((t.own[REG[i].id] || null) !== (ownerId || null)) continue;
+      n += levies(REG[i]) + T.garrisonPower(REG[i].id);
+    }
+    return n;
+  }
+  /* AN ARMY IS SOMEWHERE. The second thing the headless run caught: a
+     faction's roaming warbands were added to its strength once and then
+     pressed EVERY frontier region it owned, simultaneously, from wherever
+     they happened to be. A three-hundred-man Desert Legion column parked on
+     the south shore was besieging the north coast at the same time, which
+     put every attacker near 2 200 against every defender near 300 and made
+     garrisoning pointless again for a second, different reason.
+
+     So a band only counts against the region it is standing in and the ones
+     that touch it. That is also the version the player can READ: the big dot
+     next to your border IS the threat, and moving it away IS the relief. The
+     map stops being a table of numbers you cannot see. */
+  let bandCache = null, bandCacheAt = -1;
+  function bandsByRegion() {
+    const tNow = now();
+    if (bandCache && tNow - bandCacheAt < 500) return bandCache;
+    bandCacheAt = tNow;
+    bandCache = {};
+    const B = S().bands || [];
+    for (let i = 0; i < B.length; i++) {
+      const idx = rawAt(B[i].x, B[i].z);
+      if (idx < 0) continue;
+      (bandCache[idx] = bandCache[idx] || []).push(B[i]);
+    }
+    return bandCache;
+  }
+  function nearForce(ownerId, r) {
+    const map = bandsByRegion();
+    let n = 0;
+    const look = [r.idx];
+    for (let i = 0; i < r.neighbours.length; i++) {
+      const nb = T.byId(r.neighbours[i]);
+      if (nb) look.push(nb.idx);
+    }
+    for (let k = 0; k < look.length; k++) {
+      const L = map[look[k]];
+      if (!L) continue;
+      for (let i = 0; i < L.length; i++) {
+        if (L[i].faction !== ownerId) continue;
+        /* A COLUMN THAT IS WALKING SOMEWHERE IS NOT A SIEGE. core already
+           tracks what a band is DOING, and the map already draws a hunting
+           band brighter than a roaming one, so the pressure it applies is
+           read off the same field rather than invented: a band that is
+           hunting is committed, a camped one is sitting on the ground, a
+           roaming one has somewhere else to be, and one that is running is
+           not a threat to anybody. Without this every warband on the island
+           was besieging whatever it happened to walk past, which put a
+           three-hundred-man column's full weight on four different holdings
+           over four days as it crossed them. */
+        const m = L[i].mood;
+        const commit = m === "hunt" ? 1 : m === "camp" ? 0.7 : m === "flee" ? 0 : 0.35;
+        n += W.bandPower(L[i]) * 0.5 * commit;
+      }
+    }
+    if (ownerId === "you") {
+      const you = S().you;
+      const yIdx = rawAt(you.x, you.z);
+      if (look.indexOf(yIdx) >= 0) n += W.yourPower();
+    }
+    return n;
+  }
+
+  // the public number: everything this warlord has, anywhere. match.js and
+  // the audit want the total; pressureOn deliberately does not.
   function strengthOf(ownerId) {
-    let n = T.income(ownerId);
-    if (ownerId === "you") return n + W.yourPower();
+    let n = groundStrength(ownerId);
     const B = S().bands || [];
     for (let i = 0; i < B.length; i++) if (B[i].faction === ownerId) n += W.bandPower(B[i]) * 0.5;
+    if (ownerId === "you") n += W.yourPower();
     return n;
   }
   T.strengthOf = strengthOf;
@@ -755,14 +1018,48 @@
     if (!r) return 0;
     const t = tState();
     const own = t.own[r.id] || null;
-    if (!own) return T.regionIncome(r) * 0.35;             // nobody's — thin local levies
-    let d = T.garrisonPower(r.id) + T.regionIncome(r) * 0.9;
+    if (!own) return levies(r) * 0.35;                     // nobody's — thin local levies
+    let d = T.garrisonPower(r.id) + levies(r) * 0.9;
     const settled = clamp((S().day - (t.taken[r.id] || 0)) / 6, 0, 1);
     d *= 0.55 + 0.45 * settled;
     if (own === "you" && Math.hypot(S().you.x - r.x, S().you.z - r.z) < 1400) d += W.yourPower();
     return d;
   }
   T.defenceOf = defenceOf;
+
+  /* HOW MUCH FRONTIER IS THIS WARLORD HOLDING. The third thing the headless
+     run caught, and the ugliest: with the units fixed and the armies pinned
+     to where they stand, RIVAL WARLORD still ate nineteen of twenty-two
+     regions in twenty-five dawns. A snowball, and the reason is that his
+     ground strength grew with every province while the cost of holding the
+     ones he already had stayed zero.
+
+     A levy defends the ground he lives on; he does not march. So an empire's
+     field strength at any ONE frontier is its total divided across ALL the
+     frontier it is standing on, weighted by how much of it is here. A
+     compact realm with one contested border brings everything; a sprawling
+     one with fifteen brings a fifteenth. That is the whole anti-runaway
+     brake, it is one honest sentence about levies rather than a fudge
+     factor, and it is the reason a big empire is worth attacking. */
+  let frontCache = null, frontCacheAt = -1;
+  function frontierContact(ownerId) {
+    const tNow = now();
+    if (!frontCache || tNow - frontCacheAt > 500) { frontCache = {}; frontCacheAt = tNow; }
+    const key = ownerId || "-";
+    if (frontCache[key] != null) return frontCache[key];
+    const t = tState();
+    let n = 0;
+    for (let i = 0; i < REG.length; i++) {
+      const r = REG[i];
+      if ((t.own[r.id] || null) !== (ownerId || null)) continue;
+      for (let k = 0; k < r.neighbours.length; k++) {
+        if ((t.own[r.neighbours[k]] || null) === (ownerId || null)) continue;
+        n += r.border[r.neighbours[k]] || 1;
+      }
+    }
+    frontCache[key] = n;
+    return n;
+  }
 
   function pressureOn(r) {
     const t = tState();
@@ -773,18 +1070,16 @@
       if (!nOwn || nOwn === own) continue;
       tally[nOwn] = (tally[nOwn] || 0) + (r.border[r.neighbours[i]] || 1);
     }
-    let total = 0;
-    for (let i = 0; i < r.neighbours.length; i++) total += r.border[r.neighbours[i]] || 1;
     const keys = Object.keys(tally);
     let best = null, bs = 0, from = null;
     for (let i = 0; i < keys.length; i++) {
-      /* A FACTION ONLY BRINGS WHAT IT CAN REACH: its full strength times the
-         share of this region's frontier it actually stands on. That is what
-         stops a faction on the far shore threatening everything at once, and
-         what makes a salient with three enemy neighbours the thing that
-         falls — which is a picture the player can read off the map. */
-      const share = tally[keys[i]] / Math.max(1, total);
-      const s = strengthOf(keys[i]) * (0.35 + 0.65 * share);
+      /* WHAT HE CAN ACTUALLY BRING HERE: his levies, times this frontier's
+         share of every frontier he is holding, plus whatever of his army is
+         standing in or next to this region. The floor of 0.06 is there so an
+         enormous empire still presses SOMEWHERE rather than dissolving into
+         a uniform nothing; the cap of 1 is arithmetic. */
+      const share = clamp(tally[keys[i]] / Math.max(1, frontierContact(keys[i])), 0.06, 1);
+      const s = groundStrength(keys[i]) * share + nearForce(keys[i], r);
       if (s > bs) { bs = s; best = keys[i]; }
     }
     if (!best) return null;
@@ -804,11 +1099,18 @@
      changes that fast cannot be planned against. Three flips on a
      twenty-two region island is one visible move a day, which is what a
      strategy map should feel like between sessions. */
+  /* A HOLDING THAT JUST CHANGED HANDS CANNOT CHANGE AGAIN FOR THREE DAWNS.
+     Without this the log read: LEGION took KHOR AMANI from COMPANY / COMPANY
+     took KHOR AMANI from LEGION / LEGION took KHOR AMANI from COMPANY, every
+     dawn, forever — the brittleness rule in defenceOf makes a fresh capture
+     easy to take back, and two evenly matched factions turn that into a
+     metronome. A border that ticks is worse than no border at all. */
+  const CONSOLIDATE = 3;
+
   function warDawn() {
     const t = tState();
     const flips = [];
-    const cap = Math.max(2, Math.round(REG.length / 8));
-    const cand = [];
+    const mine = [], theirs = [];
     for (let i = 0; i < REG.length; i++) {
       const r = REG[i];
       const p = pressureOn(r);
@@ -816,30 +1118,49 @@
       const odds = W.odds(p.force, defenceOf(r));
       const own = t.own[r.id] || null;
       if (own === "you") t.press[r.id] = odds > 0.5 ? (t.press[r.id] || 0) + 1 : 0;
-      cand.push({ r: r, p: p, odds: odds, own: own });
+      if (S().day - (t.taken[r.id] || 0) < CONSOLIDATE) continue;
+      (own === "you" ? mine : theirs).push({ r: r, p: p, odds: odds, own: own });
     }
-    /* WEAKEST FIRST. Sorting by how badly a region is outmatched means the
-       flips that happen are the ones a player could see coming off the map,
-       rather than three arbitrary ones out of nine equally likely. */
-    cand.sort(function (a, b) { return b.odds - a.odds; });
-    for (let i = 0; i < cand.length && flips.length < cap; i++) {
-      const c = cand[i];
-      /* THE ROLL, and it is deliberately not "odds > 0.5 wins". A 55/45 front
-         should move sometimes and not every single dawn, or the map
-         oscillates and every border is noise. Squaring the odds is what makes
-         a marginal advantage take a week and an overwhelming one take a day. */
-      if (!W.chance(c.odds * c.odds * 0.9)) continue;
-      if (c.own === "you" && (t.press[c.r.id] || 0) < 2) {
-        /* YOUR GROUND GETS ONE WARNING. Without it a player who was in a
-           battle when the front moved simply finds a province gone with no
-           way to have known, and "conquer everything and idle" is replaced by
-           "be punished at random". */
-        W.log(ownerLabel(c.p.owner) + " is massing on " + c.r.name + ".", "bad");
-        continue;
-      }
+    /* THE ROLL, and it is deliberately not "odds > 0.5 wins". A 55/45 front
+       should move sometimes and not every single dawn, or the map oscillates
+       and every border is noise. Squaring the odds is what makes a marginal
+       advantage take a week and an overwhelming one take a day. */
+    function roll(c) {
+      if (!W.chance(c.odds * c.odds * 0.9)) return false;
       T.claim(c.r.id, c.p.owner, { fromRegion: c.p.from });
       flips.push({ region: c.r.id, to: c.p.owner });
+      return true;
     }
+    /* YOUR FRONTIER IS RESOLVED FIRST AND WITHOUT A CAP, and that is not a
+       balance tweak, it is the fix for a bug the headless run found: the cap
+       is three flips a dawn, the list was sorted by odds, and two factions
+       shoving each other over the same province produced three higher-odds
+       candidates EVERY dawn — so the player's ground, sitting at 96% lost,
+       was permanently shielded by somebody else's churn. He held four
+       regions for twenty-five days against overwhelming pressure and never
+       saw a thing. What happens to YOUR holdings is the game; what happens
+       between two AIs is scenery, and scenery does not get to queue ahead. */
+    for (let i = 0; i < mine.length; i++) {
+      const c = mine[i];
+      /* YOUR GROUND GETS ONE WARNING. Without it a player who was in a battle
+         when the front moved simply finds a province gone with no way to have
+         known, and "conquer everything and idle" is replaced by "be punished
+         at random". */
+      if ((t.press[c.r.id] || 0) < 2) {
+        if (c.odds > 0.5) W.log(ownerLabel(c.p.owner) + " is massing on " + c.r.name + ".", "bad");
+        continue;
+      }
+      roll(c);
+    }
+    /* AND THE FACTIONS GET THREE. The cap is not decoration: uncapped, a
+       strong faction flipped nine regions in one dawn, the log became
+       unreadable, and a map that changes that fast cannot be planned
+       against. Weakest first, so the flips that happen are the ones a player
+       could see coming off the map. */
+    const cap = Math.max(2, Math.round(REG.length / 8));
+    theirs.sort(function (a, b) { return b.odds - a.odds; });
+    let n = 0;
+    for (let i = 0; i < theirs.length && n < cap; i++) if (roll(theirs[i])) n++;
     return flips;
   }
 
@@ -1075,12 +1396,12 @@
     return true;
   }
 
-  const TOP_INSET = 112, BOT_INSET = 178;   // the header strip and the card
+  const TOP_INSET = 108, BOT_INSET = 152;   // the header strip and the card
   function fitView(w, h) {
     const D = W.desert;
     const R = (D && D.RADIUS) || 6700;
     const uh = Math.max(140, h - TOP_INSET - BOT_INSET);
-    view.mpp = (R * 2.22) / Math.max(1, Math.min(w, uh));
+    view.mpp = (R * 2.42) / Math.max(1, Math.min(w, uh));
     view.cx = 0;
     // put the island's middle in the middle of the BAND, not of the viewport
     view.cz = (h / 2 - TOP_INSET - uh / 2) * view.mpp;
@@ -1117,55 +1438,61 @@
     const t = tState();
     const own = [];
     for (let i = 0; i < REG.length; i++) own.push(t.own[REG[i].id] || null);
+    const SEA = " sea";                    // a string no owner id can equal
     const hair = new Path2D();
     const casing = new Path2D();
     const byColour = {};
-    const BW = 2.6;
-    for (let i = 0; i < segs.length; i++) {
-      const s = segs[i];
-      if (s.a < 0 || s.b < 0) continue;
-      const x1 = sx(s.x1, w), y1 = sy(s.z1, h), x2 = sx(s.x2, w), y2 = sy(s.z2, h);
-      if ((x1 < -20 && x2 < -20) || (y1 < -20 && y2 < -20) || (x1 > w + 20 && x2 > w + 20) || (y1 > h + 20 && y2 > h + 20)) continue;
-      hair.moveTo(x1, y1); hair.lineTo(x2, y2);
-      const oa = own[s.a], ob = own[s.b];
-      if (oa === ob) continue;
-      casing.moveTo(x1, y1); casing.lineTo(x2, y2);
-      // offset half a stroke to each side, along the edge's own normal
-      for (let side = 0; side < 2; side++) {
-        const me = side === 0 ? oa : ob;
-        if (!me) continue;
-        const sg = side === 0 ? -1 : 1;
-        const ox = s.ax ? 0 : sg * BW * 0.5, oy = s.ax ? sg * BW * 0.5 : 0;
-        const key = ownerColour(me);
-        const p = byColour[key] || (byColour[key] = new Path2D());
-        p.moveTo(x1 + ox, y1 + oy); p.lineTo(x2 + ox, y2 + oy);
-      }
-    }
-    // contested frontiers get their own dashed path, drawn crawling
+    const BW = 2.6, HALF = BW * 0.5;
     const hot = {};
     for (let c = 0; c < contested.length; c++) hot[contested[c].idx] = contested[c].by;
     const hotPaths = {};
-    for (let i = 0; i < segs.length; i++) {
-      const s = segs[i];
-      if (s.a < 0 || s.b < 0) continue;
-      const oa = own[s.a], ob = own[s.b];
-      if (oa === ob) continue;
-      let by = null;
-      if (hot[s.a] && hot[s.a] === ob) by = ob;
-      else if (hot[s.b] && hot[s.b] === oa) by = oa;
-      if (!by) continue;
-      const key = ownerColour(by);
-      const p = hotPaths[key] || (hotPaths[key] = new Path2D());
-      p.moveTo(sx(s.x1, w), sy(s.z1, h)); p.lineTo(sx(s.x2, w), sy(s.z2, h));
+    const sel = selected ? new Path2D() : null;
+    const buf = [];
+
+    function feed(path, ch, off) {
+      for (let i = 0; i < ch.n; i++) {
+        const X = buf[i * 2] + (off ? ch.nrm[i * 2] * off : 0);
+        const Y = buf[i * 2 + 1] + (off ? ch.nrm[i * 2 + 1] * off : 0);
+        if (i === 0) path.moveTo(X, Y); else path.lineTo(X, Y);
+      }
+      if (ch.closed) path.closePath();
     }
-    // the selection ring
-    let sel = null;
-    if (selected) {
-      sel = new Path2D();
-      for (let i = 0; i < segs.length; i++) {
-        const s = segs[i];
-        if (s.a !== selected.idx && s.b !== selected.idx) continue;
-        sel.moveTo(sx(s.x1, w), sy(s.z1, h)); sel.lineTo(sx(s.x2, w), sy(s.z2, h));
+
+    for (let ci = 0; ci < chains.length; ci++) {
+      const ch = chains[ci];
+      const oa = ch.a >= 0 ? own[ch.a] : SEA;
+      const ob = ch.b >= 0 ? own[ch.b] : SEA;
+      const isCoast = ch.a < 0 || ch.b < 0;
+      const differ = oa !== ob;
+      const touchSel = !!selected && (ch.a === selected.idx || ch.b === selected.idx);
+      const isHot = (hot[ch.a] && hot[ch.a] === ob) || (hot[ch.b] && hot[ch.b] === oa);
+      if (!differ && !touchSel && isCoast) continue;
+      let minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
+      for (let i = 0; i < ch.n; i++) {
+        const X = sx(ch.px[i * 2], w), Y = sy(ch.px[i * 2 + 1], h);
+        buf[i * 2] = X; buf[i * 2 + 1] = Y;
+        if (X < minx) minx = X;
+        if (X > maxx) maxx = X;
+        if (Y < miny) miny = Y;
+        if (Y > maxy) maxy = Y;
+      }
+      if (maxx < -30 || maxy < -30 || minx > w + 30 || miny > h + 30) continue;
+      if (!isCoast) feed(hair, ch, 0);
+      if (touchSel) feed(sel, ch, 0);
+      if (!differ) continue;
+      feed(casing, ch, 0);
+      if (oa !== SEA && oa) {
+        const k = ownerColour(oa);
+        feed(byColour[k] || (byColour[k] = new Path2D()), ch, HALF);
+      }
+      if (ob !== SEA && ob) {
+        const k = ownerColour(ob);
+        feed(byColour[k] || (byColour[k] = new Path2D()), ch, -HALF);
+      }
+      if (isHot) {
+        const by = (hot[ch.a] && hot[ch.a] === ob) ? ob : oa;
+        const k = ownerColour(by);
+        feed(hotPaths[k] || (hotPaths[k] = new Path2D()), ch, 0);
       }
     }
     paths = { hair: hair, casing: casing, byColour: byColour, hot: hotPaths, sel: sel, bw: BW, own: own };
@@ -1213,7 +1540,7 @@
     /* 2. THE WASH */
     if (tintCv) {
       g.save();
-      g.globalAlpha = 0.46;
+      g.globalAlpha = 0.52;
       g.imageSmoothingEnabled = true;
       g.drawImage(tintCv, dx, dy, dw, dw);
       g.restore();
@@ -1224,7 +1551,15 @@
     if (key !== pathsKey) { buildPaths(w, h); pathsKey = key; }
     if (paths) {
       g.lineCap = "butt";
-      g.strokeStyle = "rgba(20,14,8,.28)"; g.lineWidth = 1;
+      /* TWO-TONE HAIRLINE. A single dark 1 px line vanished over dark rock
+         and a single light one vanished over the salt pan, so on the day-one
+         picture — the one where SEVENTEEN of the twenty-two holdings are
+         unclaimed — the island read as one blob with five coloured patches
+         on it, and the player could not see what there was to take. Dark
+         under, light over: it survives both grounds. */
+      g.strokeStyle = "rgba(16,11,6,.42)"; g.lineWidth = 2.2;
+      g.stroke(paths.hair);
+      g.strokeStyle = "rgba(252,242,220,.34)"; g.lineWidth = 0.9;
       g.stroke(paths.hair);
       g.strokeStyle = "rgba(10,7,4,.72)"; g.lineWidth = paths.bw * 2 + 1.4;
       g.stroke(paths.casing);
@@ -1372,6 +1707,10 @@
         g.fillText(sub, px, py + size * 1.16);
       }
     }
+    /* published so the before/after tool can MEASURE the anti-collision rule
+       rather than take my word for it: how many names the map wanted to draw
+       and how many it could fit without one landing on another. */
+    T.lastLabels = { drawn: taken.length, wanted: order.length };
     g.textAlign = "left";
     g.textBaseline = "alphabetic";
 
@@ -1418,6 +1757,9 @@
       'padding:calc(env(safe-area-inset-top,0px) + 42px) 13px 8px;' +
       'background:linear-gradient(rgba(8,6,4,.88),rgba(8,6,4,0));pointer-events:none}' +
     '#wlTerrTop b{font:800 15px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.1em;white-space:nowrap}' +
+    '#wlTerrTop .chip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}' +
+    '@media (max-width:430px){#wlTerrTop b{font-size:13px}#wlTerrTop .chip{font-size:9.5px;letter-spacing:.08em}' +
+      '#wlTerr .wl-btn{padding:8px 10px;font-size:11px}}' +
     '#wlTerrTop .chip{font:700 11px/1.3 ui-sans-serif,system-ui,sans-serif;letter-spacing:.14em;opacity:.82}' +
     '#wlTerrTop .sp{flex:1}' +
     '#wlTerrTop button{pointer-events:auto}' +
@@ -1429,7 +1771,7 @@
     '#wlTerrShare i{display:block;height:100%;transition:width .5s cubic-bezier(.2,.8,.2,1)}' +
     '#wlTerrCard{position:relative;z-index:2;margin-top:auto;' +
       'padding:12px 13px calc(env(safe-area-inset-bottom,0px) + 13px);' +
-      'background:linear-gradient(rgba(8,6,4,0),rgba(8,6,4,.9) 24%);pointer-events:none}' +
+      'background:linear-gradient(rgba(8,6,4,0),rgba(8,6,4,.88) 52%);pointer-events:none}' +
     '#wlTerrCard .in{pointer-events:auto;max-width:620px;margin:0 auto;' +
       'border:1px solid rgba(255,255,255,.14);border-radius:14px;background:rgba(18,14,9,.92);padding:11px 13px}' +
     '#wlTerrCard h3{margin:0 0 2px;font:800 17px/1.1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.02em}' +
@@ -1476,7 +1818,9 @@
     const hold = document.getElementById("wlTerrHold");
     if (hold) {
       const mine = T.held("you");
-      hold.textContent = mine.length + "/" + REG.length + " HELD · +$" + T.income("you") + "/DAY";
+      // short on purpose: on a 393 pt phone the long form ellipsised away
+      // the income, which is the one number on this strip worth reading
+      hold.textContent = mine.length + "/" + REG.length + " · +$" + T.income("you") + "/DAY";
     }
   }
 
@@ -1655,7 +1999,7 @@
     const R = (D && D.RADIUS) || 6700;
     const w = cv ? (cv.clientWidth || G.innerWidth) : 900;
     const h = cv ? (cv.clientHeight || G.innerHeight) : 600;
-    return clamp(m, 3.2, (R * 2.6) / Math.max(1, Math.min(w, h)));
+    return clamp(m, 5.5, (R * 2.6) / Math.max(1, Math.min(w, h)));
   }
   function clampView() {
     const lim = BOUNDS * 1.05;
@@ -1791,8 +2135,9 @@
     }
     return {
       seed: S().seed, regions: REG.length, cells: GS, cellM: Math.round(CELL),
-      segs: segs ? segs.length : 0,
+      segs: segs ? segs.length : 0, chains: chains.length,
       islandMen: Math.round(ISLAND_MEN), perArableKm2: Math.round(MEN_PER_ARABLE_KM2),
+      levyPower: Math.round(levyPower() * 100) / 100,
       byOwner: byOwner, yourIncome: inc, war: WAR_ON && !FLAG_NOWAR,
       snapshotBytes: JSON.stringify(T.snapshot()).length,
       names: REG.map(function (r) { return r.name; }),

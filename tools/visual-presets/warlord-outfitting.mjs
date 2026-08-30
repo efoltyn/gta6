@@ -84,14 +84,20 @@ export default {
     cartLeft: { label: "Guns left unassigned in the cart", unit: "guns", better: "lower" },
     crateDepth: { label: "Units of gun in one depot's crates", unit: "units", better: "lower" },
     crateLines: { label: "Distinct guns a depot deals in", unit: "lines", better: "lower" },
-    contentOverflow: { label: "Screen content below the fold", unit: "px", better: "lower" },
+    listOverflow: { label: "Price list running below the fold", unit: "px", better: "lower" },
+    primaryVisible: { label: "Primary action reachable without scrolling", unit: "1=yes", better: "higher" },
+    primaryReach: { label: "Screenfuls of scrolling to the primary action", unit: "screens", better: "lower" },
     hudOverlap: { label: "Fixed strip overlapping the screen title", unit: "px", better: "lower" },
   },
   metricsNote:
     "Measured live in the page. armyPower is W.yourPower() (core's own number, army plus you); menArmed counts " +
     "men whose weapon id is not \"fists\". crateDepth and crateLines are read off the first ARMS DEPOT's own " +
-    "stock table. hudOverlap is the pixel overlap between the fixed #hud strip and the screen's <h1>, which is " +
-    "the layout bug the first run of this preset found at 393pt and is the reason the number is declared at all.",
+    "stock table. hudOverlap is the pixel overlap between the fixed #hud strip and the screen's <h1> — the layout " +
+    "bug the first run of this preset found at 393pt, which is the reason the number is declared at all. " +
+    "listOverflow is reported ONLY by the two outpost subjects: it measures a PRICE LIST running off the bottom, " +
+    "and the first run of this preset scored the armoury a regression on it purely because the winning side's " +
+    "AUTO-ARM report has more to say. A screen is not worse for explaining itself, so that subject no longer " +
+    "reports the number rather than the number being quietly reinterpreted.",
 
   // A named function expression: the runner ships this through stage.toString(),
   // and a shorthand method does not survive being wrapped in parentheses.
@@ -153,22 +159,41 @@ export default {
       const a = hud.getBoundingClientRect(), b = h1.getBoundingClientRect();
       hudOverlap = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
     }
-    const contentOverflow = stage ? Math.max(0, stage.scrollHeight - stage.clientHeight) : 0;
+    /* THE PRIMARY ACTION. Every screen here has exactly one thing you came to
+       do, and it is always the first `.wl-btn.hot`: the top price in the
+       crates, REST at the well, AUTO-ARM in the armoury. "Can you do it
+       without scrolling" is the ultra-simple constraint stated as a number. */
+    const prim = stage ? stage.querySelector(".wl-btn.hot") : null;
+    let primaryVisible = 0, primaryReach = 0;
+    if (prim) {
+      const r = prim.getBoundingClientRect();
+      const vis = r.top >= -1 && r.bottom <= window.innerHeight + 1;
+      primaryVisible = vis ? 1 : 0;
+      if (!vis) primaryReach = Math.max(0, (r.bottom - window.innerHeight) / Math.max(1, window.innerHeight));
+    }
+
+    const metrics = {
+      armyPower: Math.round(W.yourPower()),
+      menArmed: menArmed,
+      cartLeft: cartLeft,
+      crateDepth: crateDepth,
+      crateLines: crateLines,
+      primaryVisible: primaryVisible,
+      primaryReach: primaryReach,
+      hudOverlap: hudOverlap,
+    };
+    /* Only the outpost screens report list length. See metricsNote: on the
+       armoury this number punished the side that explains what it did. */
+    if (act === "depot" || act === "camp") {
+      metrics.listOverflow = stage ? Math.max(0, stage.scrollHeight - stage.clientHeight) : 0;
+    }
 
     return {
       ok: true,
       act: act,
       frame: input.frame ? input.frame.id : null,
       outpost: act === "depot" ? depot.name : act === "camp" ? camp.name : null,
-      metrics: {
-        armyPower: Math.round(W.yourPower()),
-        menArmed: menArmed,
-        cartLeft: cartLeft,
-        crateDepth: crateDepth,
-        crateLines: crateLines,
-        contentOverflow: contentOverflow,
-        hudOverlap: hudOverlap,
-      },
+      metrics: metrics,
     };
   },
 };

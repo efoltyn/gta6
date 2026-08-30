@@ -92,8 +92,8 @@
                    to warnet's own peer list. Single player is unaffected
                    either way — nothing below runs until a match starts.
    ?matchlen=N     match length in minutes (default 20)
-   ?matchai=N      AI warlords to fill the lobby with (default 3)
    ?matchclock=tick  REVERT: the naive accumulator clock, for A/B measuring
+   ?matchai=N      AI warlords to fill empty slots with (default 3)
 ============================================================ */
 (function () {
   "use strict";
@@ -125,7 +125,9 @@
      core.js says a BAND is 10–40 men, a COMPANY 40–120 and an ARMY 120–320.
      Holding four regions must feel like a company and holding half the island
      must feel like an army, so cap = 20 + regions*18: four regions is 92 (a
-     company), twenty-four is 452 (past an army). Growth is logistic against
+     company), and all twenty-two of territory.js's real regions is 416 — an
+     ARMY, and the biggest force in the game, which is what winning the island
+     ought to feel like. Growth is logistic against
      that cap at GROW per region per second — 0.055 is one man every 18 s on
      your single home region, which is the pace that makes the first ten
      minutes growth rather than a coin-flip rush.
@@ -138,6 +140,29 @@
      BATTLE_MAX — the deadline. battle.js's own fights end at 60–120 s and its
      hard cap is longer; 150 s is that ceiling plus the slack a phone needs to
      finish a teardown. Past it the match stops waiting for anybody.
+
+     HOW LONG A BATTLE TAKES, and this is the number that turned out to decide
+     the whole pacing of the match. The first version settled every unwatched
+     battle in the same tick it was ordered, and the result was measurable and
+     absurd: on the demo board an AI warlord went from one region to FIFTY-NINE
+     PERCENT OF THE ISLAND in sixty seconds of real time, and three of the six
+     warlords were eliminated before a human could have opened the board once.
+     A conquest with no duration is not a conquest, it is an assignment.
+
+     So a battle takes as long as what it has to break: FIGHT_BASE + defenders
+     × FIGHT_PER, capped at BATTLE_MAX. The slope is not invented — battle.js
+     reports 60–120 s for its 3D fights and those field 20–60 men a side, so
+     20 + 40×1.2 = 68 s and 20 + 60×1.2 = 92 s land inside its own measured
+     range. Small grabs are quick, an assault on a real army takes two minutes
+     and everybody watching the board can see it coming.
+
+     Note what this deliberately is NOT: a march. Distance was the obvious
+     model and it does not work here — campaign.js rides at 15.5 m/s and its
+     own comment measures a crossing of this island at fourteen minutes, so a
+     literal march between two adjacent region centres is three minutes and a
+     twenty-minute match would fit six conquests in it. openfront's answer is
+     the right one and it is also the honest one: your men are already on the
+     border. What costs time is breaking the people standing on it.
 
      DOM_PCT / DOM_HOLD — sixty percent of the island held for sixty seconds.
      An even eight-way split is 12.5%, so 60% means you have beaten everyone
@@ -155,6 +180,7 @@
   const CAP_BASE = 20, CAP_PER = 18;
   const COMMIT = 0.5;
   const BATTLE_MAX = 150;
+  const FIGHT_BASE = 20, FIGHT_PER = 1.2;
   const DOM_PCT = 0.6, DOM_HOLD = 60;
   const GUARD_SEC = 20, GUARD_MUL = 1.5;
   const SYNC_SEC = 3;
@@ -250,19 +276,38 @@
 
   function territory() { return (W.territory && W.territory.regions) ? W.territory : null; }
 
+  /* territory.js publishes `T.regions` as an ARRAY (the same object, always —
+     it says so). The first draft of this called it, got "not a function",
+     swallowed the throw and quietly ran on the fallback board for a whole
+     session while territory.js sat there fully built. Accept both shapes and
+     never let a guard hide a working sibling again. */
+  function terrRegions(T) {
+    if (!T) return null;
+    /* AND IT BUILDS LAZILY. `T.regions` is the same array object forever, but
+       it is EMPTY until territory.js's own ensure() has rasterised the island
+       — which nothing had done yet at match start, so the first fixed version
+       of this read a length of zero and quietly ran the 48-region fallback
+       next to territory's real 22-region board. Two boards, one island: the
+       precise failure CLAUDE.md names. Any query forces the build; held(null)
+       is the cheapest one that takes no arguments it could get wrong. */
+    if (T.held) { try { T.held(null); } catch (e) {} }
+    else if (T.at) { try { T.at(0, 0); } catch (e) {} }
+    const r = T.regions;
+    if (Array.isArray(r)) return r.length ? r : null;
+    if (typeof r === "function") { try { const l = r(); return (l && l.length) ? l : null; } catch (e) { return null; } }
+    return null;
+  }
+
   function buildRegions() {
     const T = territory();
-    if (T) {
-      let list = null;
-      try { list = T.regions(); } catch (e) { list = null; }
-      if (list && list.length) {
-        REG = list.map(function (r, i) {
-          return { id: r.id == null ? "r" + i : r.id, x: r.x || 0, z: r.z || 0,
-                   name: r.name || ("REGION " + (i + 1)) };
-        });
-        buildAdj();
-        return;
-      }
+    const list = terrRegions(T);
+    if (list && list.length) {
+      REG = list.map(function (r, i) {
+        return { id: r.id == null ? "r" + i : r.id, x: r.x || 0, z: r.z || 0,
+                 name: r.name || ("REGION " + (i + 1)), nb: r.neighbours || null };
+      });
+      buildAdj();
+      return;
     }
     /* THE FALLBACK. Golden-angle spiral so the points are evenly spread with
        no lattice artefacts, jittered off hash01 so two seeds look different,
@@ -294,19 +339,19 @@
     return a + " " + b;
   }
   function buildAdj() {
-    const T = territory();
     ADJ = {};
-    if (T && T.adjacent) {
-      let ok = true;
-      for (let i = 0; i < REG.length; i++) {
-        let a = null;
-        try { a = T.adjacent(REG[i].id); } catch (e) { a = null; }
-        if (!a) { ok = false; break; }
-        ADJ[REG[i].id] = a.slice();
-      }
-      if (ok) return;
-      ADJ = {};
+    /* territory.js already computed the real borders — it rasterises the
+       island and links regions that share cells, and it publishes the shared
+       frontier LENGTH alongside. Nearest-neighbour below is a guess at that
+       graph; if the real one is here, the guess must never run. */
+    let ok = REG.length > 0;
+    for (let i = 0; i < REG.length; i++) {
+      const nb = REG[i].nb;
+      if (!nb || !nb.length) { ok = false; break; }
+      ADJ[REG[i].id] = nb.slice();
     }
+    if (ok) return;
+    ADJ = {};
     /* K NEAREST, MADE SYMMETRIC. A one-way border is the bug that lets a
        warlord be attacked from a region he cannot attack back into, and it is
        invisible until somebody complains about it in a match. */
@@ -343,13 +388,28 @@
      loaded. Every write also MIRRORS into territory.claim() so its map paints
      the right colours. If territory.js later wants to be authoritative, this
      one function is the only place that changes. */
+  /* territory.js calls the local player "you" everywhere — its log lines, its
+     one-warning-before-you-lose-ground rule, its map legend. So the match's
+     own id for me is TRANSLATED on the way in rather than registering a
+     second identity for the same man; every other warlord keeps his match id,
+     which is what territory.registerOwner exists for. */
+  function terrOwner(wid) { return wid === M.me ? "you" : (wid || null); }
+  function registerOwners() {
+    const T = W.territory;
+    if (!T || !T.registerOwner) return;
+    for (let i = 0; i < M.order.length; i++) {
+      const w = M.wl[M.order[i]];
+      try { T.registerOwner({ id: terrOwner(w.id), label: w.name, colour: w.colour }); } catch (e) {}
+    }
+  }
+
   function ownerOf(rid) { return M.own[rid] || ""; }
-  function setOwner(rid, wid) {
+  function setOwner(rid, wid, quiet) {
     const was = M.own[rid] || "";
     if (was === wid) return;
     M.own[rid] = wid;
     const T = W.territory;
-    if (T && T.claim) { try { T.claim(rid, wid, { match: true }); } catch (e) {} }
+    if (T && T.claim) { try { T.claim(rid, terrOwner(wid), { quiet: !!quiet }); } catch (e) {} }
     W.emit("match:claim", { rid: rid, from: was, to: wid });
   }
   function regionsOf(wid) {
@@ -398,14 +458,25 @@
 
      FARTHEST-POINT SAMPLING over the region centres. Start from the region
      the seed picks, then repeatedly take the region furthest from everything
-     already taken. That is the standard max-min placement and it is what makes
-     the opening ten minutes growth instead of a coin-flip rush: on the 48-node
-     fallback board it lands eight warlords a MEASURED 4.6–6.1 km apart, and
-     campaign.js rides at well under 30 m/s, so the nearest neighbour is three
-     minutes of hard riding away and only after you have taken what is between
-     you. A ring of eight would be simpler and is worse — it puts everybody the
-     same distance from the middle, so the centre of the island is an eight-way
-     race on a starting pistol. */
+     already taken. That is the standard max-min placement.
+
+     WHAT IT ACTUALLY MEASURES, on territory.js's real 22-region island, as
+     the minimum distance between any two homes (W.match.audit().spawnSepKm):
+
+         2 warlords  7.5 km      6 warlords  4.4 km
+         4 warlords  5.4 km      8 warlords  2.8 – 3.7 km over five seeds
+
+     campaign.js rides at RIDE_SPEED = 15.5 m/s, so even the worst full lobby
+     puts your nearest rival THREE MINUTES of hard riding away, and you have to
+     cross whatever is between you to get there. That is the number the "first
+     ten minutes is growth, not a coin-flip rush" claim rests on, and it is
+     written here rather than asserted because an earlier draft of this comment
+     claimed 4.6–6.1 km — a figure from the fallback board that the real one
+     never produced. Measure, then claim.
+
+     A ring of eight would be simpler and is worse: it puts everybody the same
+     distance from the middle, so the centre of the island becomes an eight-way
+     race decided by who rode straight, on a starting pistol. */
   function spawnPoints(n) {
     const L = regions();
     if (!L.length) return [];
@@ -433,8 +504,16 @@
      directly, and finally to a local loopback so a solo-with-AI match is the
      same code path as an eight-player one — the single most useful property
      in this file, because it means solo is not a special case that rots. */
+  /* AM I ON A WIRE. Deliberately warnet.online() (the socket is up) and NOT
+     warnet.connected() (the socket is up AND the world handshake landed):
+     between those two moments every client answered "not connected", every
+     client therefore answered isHost() = true, and eight hosts each ran the
+     AI and each broadcast an authoritative sync. The window is short and it is
+     exactly the window a lobby lives in. */
   function connected() {
-    if (W.warnet && W.warnet.connected) { try { return !!W.warnet.connected(); } catch (e) {} }
+    const N = W.warnet;
+    if (N && N.online) { try { if (N.online()) return true; } catch (e) {} }
+    if (N && N.connected) { try { if (N.connected()) return true; } catch (e) {} }
     return !!(CBZ.net && CBZ.net.active);
   }
   function isHost() {
@@ -449,9 +528,32 @@
     if (CBZ.net && CBZ.net.active && CBZ.net.sendEv) { try { CBZ.net.sendEv(obj); return true; } catch (e) {} }
     return false;              // solo: nobody to tell, and nothing is lost
   }
-  const VERBS = ["wlmhello", "wlmstart", "wlmsync", "wlmatk", "wlmres",
+  const VERBS = ["wlmstart", "wlmsync", "wlmatk", "wlmres",
                  "wlmally", "wlmallyok", "wlmbreak", "wlmend"];
   let wired = false;
+  /* A WARLORD WHO ARRIVES AFTER THE START. warnet publishes the join
+     lifecycle, so this needs no handshake verb of its own: the host gives the
+     newcomer the next free slot and re-broadcasts the roster. He is placed on
+     a home derived from that slot, at the CURRENT match time — he does not
+     replay the eight minutes he missed, which is the whole reason the clock is
+     wall time and not a counter. */
+  function wireLifecycle() {
+    if (!W.warnet || !W.warnet.onJoin) return;
+    try {
+      W.warnet.onJoin(function (id, name) {
+        if (!M.live || !isHost()) return;
+        const w = joinWarlord({ peerId: id, name: name });
+        if (!w) return;
+        assignHomes();
+        if (w.home && !ownerOf(w.home)) { setOwner(w.home, w.id, true); w.men = CAP_BASE * 0.5; }
+        registerOwners();
+        note("join", (name || "a warlord") + " rides in");
+        sendStart();
+        sendSync();
+      });
+    } catch (e) {}
+  }
+
   function wire() {
     if (wired) return;
     /* Bound lazily and once. warnet may install net.js long after this file
@@ -559,6 +661,15 @@
          is the common case, and it makes the most frequent situation the one
          that needs a fallback. */
 
+  /* A WATCHED BATTLE ALWAYS GETS THE FULL CEILING, because it is the one on
+     somebody's screen and battle.js's fights run to 120 s — cutting a player's
+     fight short at the twenty-two seconds a two-man garrison is worth would be
+     the deadline eating the only battle anybody is looking at. */
+  function fightSec(def, watched) {
+    if (watched) return BATTLE_MAX;
+    return clamp(FIGHT_BASE + def * FIGHT_PER, FIGHT_BASE, BATTLE_MAX);
+  }
+
   function battleSeed(id, rid) {
     const i = Math.max(0, regions().indexOf(region(rid)));
     return W.hash01(id, i, M.seed);
@@ -607,7 +718,24 @@
         }
       } catch (e) { /* fall through — a broken sibling must not end the match */ }
     }
-    /* THE FALLBACK. core.odds() bends a power ratio through a soft curve
+    /* SECOND CHOICE: warnet publishes `resolve(seed, a, b)` as "the pure
+       function both clients must agree on, exported so match.js can own the
+       rules". Power here is MEN, because men are the only currency a match
+       has and every man in one is worth about the same — the tier spread that
+       makes core's power model necessary belongs to the campaign, not to a
+       region changing hands. */
+    if (W.warnet && W.warnet.resolve) {
+      try {
+        const r = W.warnet.resolve(Math.round(seed * 0x7fffffff), { pw: atk }, { pw: def });
+        if (r && typeof r.aWins === "boolean") {
+          return { win: r.aWins, al: Math.round(atk * r.aLoss), dl: Math.round(def * r.bLoss),
+                   src: "warnet.resolve" };
+        }
+      } catch (e) {}
+    }
+
+    /* LAST RESORT, when neither sibling is on the page. core.odds() bends a
+       power ratio through a soft curve
        because a 2:1 advantage is not a 100% win — the encounter screen has
        printed that number to players since day one and this must not contradict
        it. Losses: the loser is broken (70–100% gone), the winner pays in
@@ -652,13 +780,41 @@
     return false;
   }
 
+  /* ONE ATTACK IN FLIGHT PER WARLORD. Without this rule the first run of the
+     demo had FORTY-FOUR concurrent battles on a 48-region island — five AI
+     warlords each dribbling half their men at a new region every six seconds,
+     nothing ever settling, and a board where every tile said FIGHTING. One at
+     a time is also the honest reading of "send half your men": you sent them,
+     they are gone, you wait. It costs nothing to explain and it is the whole
+     pacing of the match. */
+  function busy(wid) {
+    for (const id in M.pending) if (M.pending[id].wid === wid) return true;
+    return false;
+  }
+
   function attack(wid, rid) {
     const w = wl(wid);
-    if (!w || !canAttack(wid, rid)) return false;
+    if (!w || !canAttack(wid, rid) || busy(wid)) return false;
     const men = Math.floor(w.men * COMMIT);
     if (men < 1) return false;
     const id = (w.slot + 1) * 1e6 + (++M.seq);        // unique without a coordinator
-    const msg = { id: id, wid: wid, rid: rid, men: men, at: Math.round(matchT() * 1000) };
+    /* WHETHER THIS BATTLE WILL BE WATCHED IS ONE BIT, AND IT GOES ON THE WIRE.
+       The first draft gave EVERY battle the BATTLE_MAX deadline, which meant
+       an AI fighting an AI on the far side of the island took a hundred and
+       fifty seconds to change a region nobody was looking at — a live world
+       moving at the speed of a fight nobody is in. Only a battle somebody is
+       actually watching in 3D needs the deadline; everything else is
+       resolve() and it lands this second. */
+    const show = wid === M.me && !w.ai && !!(W.battle && W.battle.start) && !liveBattle();
+    /* THE DEFENCE IS SENT, NOT RECOMPUTED. Every client runs the same pure
+       decide() on the same seed, but only if it is fed the same two numbers —
+       and the DEFENDER's number is men ÷ regions, which each client simulates
+       for itself and therefore drifts on by a man or two between syncs. Two
+       clients an integer apart at the boundary of odds() decide the battle
+       differently, and then they disagree about who owns a region forever.
+       The attacker states the defence he attacked into; everybody applies it. */
+    const msg = { id: id, wid: wid, rid: rid, men: men, def: defenceOf(rid),
+                  p: show ? 1 : 0, at: Math.round(matchT() * 1000) };
     applyAttack(msg);
     send("wlmatk", msg);
     return true;
@@ -668,11 +824,12 @@
     if (M.pending[m.id] || M.applied[m.id]) return;
     const w = wl(m.wid);
     if (!w) return;
-    const def = defenceOf(m.rid);
+    const def = m.def == null ? defenceOf(m.rid) : m.def;
     w.men = Math.max(0, w.men - m.men);
     const P = {
-      id: m.id, wid: m.wid, rid: m.rid, men: m.men, def: def,
-      defWid: ownerOf(m.rid), at: m.at / 1000, due: matchT() + BATTLE_MAX,
+      id: m.id, wid: m.wid, rid: m.rid, men: m.men, def: def, show: !!m.p,
+      defWid: ownerOf(m.rid), at: m.at / 1000,
+      due: matchT() + fightSec(def, !!m.p),
     };
     M.pending[m.id] = P;
     W.emit("match:attack", P);
@@ -682,16 +839,18 @@
       W.toast(wlName(m.wid) + " IS ATTACKING " + (r ? r.name : m.rid), "bad");
       note("attack", wlName(m.wid) + " attacks " + (r ? r.name : m.rid));
     }
-    paintStrip();
-    if (boardOpen) drawBoard();
 
     /* THE ATTACKER'S CAMERA. Only the attacker, only if he is a human, only
        if he is here, and only one at a time — a second 3D battle while one is
        live would be two modules owning the screen, which the contract bans. */
-    if (m.wid === M.me && !w.ai && W.battle && W.battle.start && !liveBattle()) {
+    if (P.show && m.wid === M.me) {
+      LIVE_ID = m.id;
       present(P);
     }
+    paintStrip();
+    if (boardOpen) drawBoard();
   }
+  let LIVE_ID = 0;                                     // the 3D battle I am watching
 
   function liveBattle() {
     try { return !!(W.battle && W.battle.live && W.battle.live()); } catch (e) { return false; }
@@ -726,6 +885,7 @@
     if (!P || M.applied[id]) return;
     M.applied[id] = 1;
     delete M.pending[id];
+    if (LIVE_ID === id) LIVE_ID = 0;
     if (!out) out = P.decided || decide(P.men, P.def, battleSeed(P.id, P.rid), P.wid, P.defWid);
 
     const A = wl(P.wid), D = P.defWid ? wl(P.defWid) : null;
@@ -901,13 +1061,11 @@
       const score = (send_ - d) / Math.max(1, d) + (ownerOf(rid) ? 0.4 : 0);
       if (score > bestScore) { bestScore = score; best = rid; }
     }
-    if (best) {
-      const men = Math.floor(w.men * COMMIT);
-      const id = (w.slot + 1) * 1e6 + (++M.seq);
-      const msg = { id: id, wid: wid, rid: best, men: men, at: Math.round(matchT() * 1000) };
-      applyAttack(msg);
-      send("wlmatk", msg);
-    }
+    /* AN AI GOES THROUGH THE SAME attack() A PLAYER'S TAP GOES THROUGH. The
+       first draft built the message itself, which meant the one-attack-per-
+       warlord rule and the presentation bit both had to be remembered twice —
+       and the AI copy is the one that would silently drift. */
+    if (best) attack(wid, best);
   }
 
   /* ============================================================ THE TICK
@@ -920,9 +1078,18 @@
     if (!M.live || M.over) return;
     if (TICKCLOCK) M.tickAcc += 1;                    // the revert clock, for measuring
     const t = matchT();
-    const dt = Math.max(0, t - M.lastT);
-    if (dt > M.stallMax) M.stallMax = dt;
+    const raw = Math.max(0, t - M.lastT);
+    if (raw > M.stallMax) M.stallMax = raw;
     M.lastT = t;
+    /* CATCH UP, BUT ONLY FROM TIME THAT WAS ACTUALLY PLAYED. A tab that was
+       hidden for four seconds must do four seconds of work — that is the whole
+       point of integrating. A jump of two hundred seconds is not four seconds
+       of play, it is the clock being ADOPTED (a late joiner taking the host's
+       time, or ?match=demo winding T0 back to photograph a mid-match board),
+       and paying a warlord two hundred seconds of recruitment for it hands him
+       a free army. Sixty seconds is past any plausible stall and short of any
+       adoption. */
+    const dt = Math.min(raw, 60);
 
     // ---- MEN. Logistic against a cap set by how much island you hold.
     for (let i = 0; i < M.order.length; i++) {
@@ -1025,6 +1192,12 @@
       const w = M.wl[M.order[i]];
       if (!w || !w.alive) continue;
       if (regionsOf(w.id) > 0) continue;
+      /* A WARLORD WHOSE WHOLE ARMY IS STILL WALKING HAS NOT LOST. Without
+         this, committing half your men and losing your last region in the
+         same twenty seconds ends your match while the men who would have
+         retaken it are mid-fight — an elimination the player could not have
+         prevented and would not understand. */
+      if (busy(w.id)) continue;
       w.alive = false;
       w.men = 0;
       note("out", wlName(w.id) + " holds nothing and is finished");
@@ -1061,6 +1234,7 @@
     M.over = true; M.live = false;
     M.winner = winner; M.why = why;
     if (timer) { clearInterval(timer); timer = 0; }
+    if (W.territory && W.territory.autoWar) { try { W.territory.autoWar(true); } catch (e) {} }
     if (isHost()) send("wlmend", { win: winner, why: why });
     note("end", (winner ? wlName(winner) : "NOBODY") + " wins — " + why);
     W.emit("match:over", { winner: winner, why: why });
@@ -1076,20 +1250,27 @@
   }
   function recv(verb, m) {
     if (!m) return;
-    if (verb === "wlmhello") {
-      if (!M.live || !isHost()) return;
-      joinWarlord({ peerId: m.pid, name: m.nm });
-      sendStart();
-      return;
-    }
     if (verb === "wlmstart") { adoptStart(m); return; }
     if (!M.live) return;
     switch (verb) {
       case "wlmsync": {
         if (isHost()) return;                          // I am the one who sends these
         easeClock(m.t || 0);
-        if (m.own) { for (const k in m.own) setOwner(k, m.own[k]); }
-        if (m.men) { for (const k in m.men) if (M.wl[k] && k !== M.me) M.wl[k].men = m.men[k]; }
+        if (m.own) { for (const k in m.own) setOwner(k, m.own[k], true); }
+        if (m.men) {
+          for (const k in m.men) {
+            if (!M.wl[k]) continue;
+            if (k !== M.me) { M.wl[k].men = m.men[k]; continue; }
+            /* MY OWN ARMY IS MINE — until it is plainly wrong. Both machines
+               run the identical logistic on the identical region count, so
+               they track each other to within a man; snapping every three
+               seconds would make my own troop count flicker for no reason.
+               A gap past 15% is not drift, it is a battle one side applied
+               and the other did not, and then the host is right. */
+            const gap = Math.abs(M.wl[k].men - m.men[k]);
+            if (gap > Math.max(4, m.men[k] * 0.15)) M.wl[k].men = m.men[k];
+          }
+        }
         if (m.ally) {
           const want = {};
           for (let i = 0; i < m.ally.length; i++) want[m.ally[i]] = M.ally[m.ally[i]] || matchT();
@@ -1114,7 +1295,7 @@
   function sendStart() {
     const slots = M.order.map(function (id) {
       const w = M.wl[id];
-      return { id: w.id, name: w.name, slot: w.slot, ai: w.ai, peerId: w.peerId, home: w.home };
+      return { id: w.id, name: w.name, slot: w.slot, ai: w.ai, peerId: w.peerId, colour: w.colour };
     });
     send("wlmstart", { seed: M.seed, len: M.len, slots: slots, t: matchT() });
   }
@@ -1136,10 +1317,8 @@
       const s = slots[i];
       if (M.wl[s.id]) { M.wl[s.id].name = s.name; continue; }
       const w = makeWarlord(s);
-      w.home = s.home;
       M.wl[s.id] = w;
       M.order.push(s.id);
-      if (w.home) { setOwner(w.home, w.id); w.men = CAP_BASE * 0.5; }
     }
     M.order.sort(function (a, b) { return M.wl[a].slot - M.wl[b].slot; });
   }
@@ -1166,12 +1345,27 @@
        regions are DERIVED, not sent: the entire shared board costs four
        bytes on the wire, once. */
     W.newGame({ seed: M.seed, mode: "net", name: o.name || (meWL() && meWL().name) || "WARLORD" });
+    /* AND THE ORDER OF THESE THREE LINES IS THE BUG THIS FILE ALREADY HAD.
+       territory.js rasterises its regions from W.state.seed, so a board read
+       before newGame() is the PREVIOUS seed's board — different ids, different
+       neighbours, different names. The first version picked spawn points on
+       that stale board and then handed them to a match running on the real
+       one, and the only symptom was a spawn separation that changed every time
+       you looked at it. Reseed, THEN build, THEN place. */
+    REG = null; ADJ = null;
     buildRegions();
 
     M.T0 = nowMs() - (o.hostT || 0) * 1000;
 
     adoptSlots(o.slots);
     if (!M.order.length) console.warn("[match] started with no warlords");
+    /* Homes are computed here, on every client, from the seed and the slot —
+       so they are never on the wire and can never disagree. */
+    assignHomes();
+    for (let i = 0; i < M.order.length; i++) {
+      const w = M.wl[M.order[i]];
+      if (w.home && !ownerOf(w.home)) { setOwner(w.home, w.id, true); w.men = CAP_BASE * 0.5; }
+    }
 
     // put every warlord on his home region, and you on the ground at yours
     const mine = M.wl[M.me];
@@ -1180,6 +1374,16 @@
       if (r) { W.state.you.x = r.x; W.state.you.z = r.z; }
     }
     syncMyArmy();
+
+    registerOwners();
+    wireLifecycle();
+    /* TWO CONQUEST ENGINES ON ONE MAP IS THE BUG THIS WHOLE FILE EXISTS TO
+       AVOID. territory.js runs its own faction war on the day clock
+       (warDawn), which is exactly right for the singleplayer campaign and
+       exactly wrong in a match, where the front moves because a warlord
+       ordered it to. Off for the duration, back on at the end — it is a
+       shared module and this file borrowed it. */
+    if (W.territory && W.territory.autoWar) { try { W.territory.autoWar(false); } catch (e) {} }
 
     wire();
     if (timer) clearInterval(timer);
@@ -1211,8 +1415,17 @@
     assignHomes();
     return w;
   }
+  /* HOMES ARE DERIVED, NOT SENT — and they are indexed by SLOT off a full
+     eight-point set rather than by how many warlords happen to be here.
+
+     The first version sampled exactly as many points as there were players
+     and handed them out in join order, which has two faults that only show up
+     in a real lobby: a warlord's home MOVED when somebody else joined, and
+     the eight-player board was a different board from the three-player one on
+     the same seed. Slot is the one identity that is stable from the lobby to
+     the last minute, so it is what indexes the placement. */
   function assignHomes() {
-    const pts = spawnPoints(Math.max(M.order.length, 2));
+    const pts = spawnPoints(SLOTS);
     for (let i = 0; i < M.order.length; i++) {
       const w = M.wl[M.order[i]];
       const p = pts[w.slot % pts.length] || pts[i % pts.length];
@@ -1370,7 +1583,13 @@
      colour and your name, you see who else is in, and it starts. The one
      addition this game needs is SOLO WITH AI on the same screen, because a
      lobby that needs friends before you can try it is a lobby nobody tries. */
-  let LOBBY = { name: "", slot: 0, url: "", ai: Math.max(0, +(Q.get("matchai") || 3) || 3) };
+  /* `+(Q.get("matchai") || 3)` — the version this replaces — read ?matchai=0
+     as three AI warlords, because "0" is a truthy string. The one place a
+     falsy-looking query value is meaningful is the one place it broke. */
+  const AI_Q = Q.get("matchai");
+  let LOBBY = { name: "", slot: 0, url: "",
+                ai: AI_Q == null || AI_Q === "" ? 3 : Math.max(0, Math.min(SLOTS - 1, +AI_Q || 0)) };
+  let SEED_HINT = 0;             // the island somebody else already declared
   function lobby() {
     if (OFF) {                                        // ?match=old — the revert
       if (W.warnet && W.warnet.lobby) return W.warnet.lobby();
@@ -1385,16 +1604,25 @@
     }
     drawLobby();
   }
+  /* EVERYONE IN THE ROOM, ME INCLUDED — and that "me included" is not
+     defensive padding, it is a fix. net.js's player table is everyone ELSE;
+     the first version built the lobby straight off it, so the host started a
+     match whose roster did not contain the host. He watched three other
+     warlords ride out on an island he owned nothing on.
+
+     Sorted by relay id, which is the one ordering every client already agrees
+     on without sending anything, and it is therefore what slots are cut from. */
   function lobbyPlayers() {
-    /* Everyone the relay says is here, plus me. warnet owns the player table;
-       if it is not connected this is a list of one, which is exactly what a
-       solo lobby should show. */
     const out = [];
-    if (CBZ.net && CBZ.net.active && CBZ.net.players) {
-      CBZ.net.players.forEach(function (p) { out.push({ id: p.id, name: p.name, me: p.id === CBZ.net.id }); });
-      out.sort(function (a, b) { return a.id - b.id; });
+    const online = !!(CBZ.net && CBZ.net.active);
+    if (online && CBZ.net.players) {
+      CBZ.net.players.forEach(function (p) {
+        if (p.id === CBZ.net.id) return;
+        out.push({ id: p.id, name: p.name, me: false });
+      });
     }
-    if (!out.length) out.push({ id: 0, name: LOBBY.name, me: true });
+    out.push({ id: online ? CBZ.net.id : 0, name: LOBBY.name, me: true });
+    out.sort(function (a, b) { return a.id - b.id; });
     return out;
   }
   function drawLobby() {
@@ -1511,33 +1739,59 @@
     }
     W.toast("multiplayer transport did not load", "bad");
   }
+  /* THE ROSTER. SLOT IS POSITION IN THE ID-SORTED ROOM, full stop — it is
+     identity (which spawn you get, which colour you are) and it must be the
+     same integer on every machine, so it is derived from the one ordering the
+     relay already imposes rather than negotiated.
+
+     The previous version tried to let a player's COLOUR choice set his slot,
+     and the arithmetic for skipping a taken slot (`slot === LOBBY.slot ? ++slot
+     : slot` inside a loop that also incremented slot) produced duplicate and
+     skipped slots the moment three people were in the room. Colour is a
+     preference; slot is an identity; conflating them was the mistake. */
   function startFromLobby() {
     const inRoom = lobbyPlayers();
-    const pid = myPeerId();
-    M.me = widForPeer(pid);
+    M.me = widForPeer(myPeerId());
     M.wl = {}; M.order = [];
     const slots = [];
-    let slot = 0;
-    for (let i = 0; i < inRoom.length; i++) {
+    for (let i = 0; i < inRoom.length && i < SLOTS; i++) {
       const p = inRoom[i];
-      const isMe = p.me;
       slots.push({
-        id: widForPeer(p.id), name: isMe ? LOBBY.name : p.name,
-        slot: isMe ? LOBBY.slot : (slot === LOBBY.slot ? ++slot : slot), ai: false, peerId: p.id,
+        id: widForPeer(p.id), name: p.me ? LOBBY.name : p.name,
+        slot: i, ai: false, peerId: p.id,
+        /* YOUR COLOUR IS YOURS; EVERYBODY ELSE'S IS DERIVED. The host builds
+           this roster and only knows its OWN pick, so a guest is painted the
+           colour warnet already paints him — COLS[peerId % 8], the identical
+           rule, so the lobby, the board and the map cannot disagree. Letting a
+           guest carry his own choice needs one line of lobby identity on the
+           wire and warnet is the right place for it; see the report. */
+        colour: p.me ? COLS[LOBBY.slot % COLS.length] : COLS[p.id % COLS.length],
       });
-      slot++;
     }
-    for (let i = 0; i < LOBBY.ai && slots.length < SLOTS; i++) {
-      let s = 0;
-      while (slots.some(function (x) { return x.slot === s; })) s++;
-      slots.push({ id: "ai" + s, name: aiName(s), slot: s, ai: true, peerId: null });
+    // no two warlords the same colour, resolved by slot order without a message
+    for (let i = 0; i < slots.length; i++) {
+      for (let k = 0; k < i; k++) {
+        if (slots[k].colour !== slots[i].colour) continue;
+        let c = 0;
+        while (slots.some(function (x) { return x.colour === COLS[c % COLS.length]; }) && c < COLS.length) c++;
+        slots[i].colour = COLS[c % COLS.length];
+        break;
+      }
     }
-    // homes are assigned once, from the seed, so every client agrees
-    const seed = (parseInt(Q.get("seed") || "", 10) || (W.state.seed | 0) || 1337);
-    M.seed = seed; REG = null; ADJ = null; buildRegions();
-    const pts = spawnPoints(slots.length);
-    for (let i = 0; i < slots.length; i++) slots[i].home = pts[slots[i].slot % pts.length].id;
-
+    for (let i = 0; slots.length < SLOTS && i < LOBBY.ai; i++) {
+      const sl = slots.length;
+      slots.push({ id: "ai" + sl, name: aiName(sl), slot: sl, ai: true, peerId: null,
+                   colour: COLS[sl % COLS.length] });
+    }
+    const seed = SEED_HINT || (parseInt(Q.get("seed") || "", 10) || (W.state.seed | 0) || 1337);
+    /* THE ISLAND IS ANNOUNCED THROUGH warnet's OWN HANDSHAKE, not just inside
+       wlmstart. warnet gates its peer layer (the other warlords as parties on
+       your map) on having a world, so a match that only told its own protocol
+       would leave everybody invisible to everybody on the sand. Four bytes,
+       one call, and both layers know the same island. */
+    if (!SEED_HINT && W.warnet && W.warnet.setWorld) {
+      try { W.warnet.setWorld({ seed: seed, day: 1, hour: 7 }); } catch (e) {}
+    }
     ctx.closeScreen();
     begin({ seed: seed, len: MATCH_SEC, slots: slots, me: M.me, host: true, name: LOBBY.name, hostT: 0 });
     sendStart();
@@ -1645,7 +1899,7 @@
       '<div class="wl-card">' + wls + '</div>' +
       '<div class="wl-btns">' +
         '<button class="wl-btn hot" id="mtClose">BACK TO THE SAND</button>' +
-        ((W.territory && W.territory.map) ? '<button class="wl-btn" id="mtMap">THE MAP</button>' : "") +
+        (terrMap() ? '<button class="wl-btn" id="mtMap">THE MAP</button>' : "") +
       '</div>'
     );
 
@@ -1688,7 +1942,15 @@
     }
     ctx.el("mtClose").onclick = closeBoard;
     const mp = ctx.el("mtMap");
-    if (mp) mp.onclick = function () { closeBoard(); try { W.territory.map(); } catch (e) {} };
+    if (mp) mp.onclick = function () { closeBoard(); const f = terrMap(); if (f) try { f(); } catch (e) {} };
+  }
+  /* territory.js owns the strategic map and opens it itself. Which name it
+     opens under has changed twice while this game was being written, so ask
+     for any of them rather than pinning one and losing the button. */
+  function terrMap() {
+    const T = W.territory;
+    if (!T) return null;
+    return T.toggle || T.open || T.map || null;
   }
   function fightingAt(rid) {
     const t = matchT();
@@ -1832,9 +2094,6 @@
                    slot: i, ai: i !== 0, peerId: i === 0 ? 0 : null });
     }
     const seed = o.seed || parseInt(Q.get("seed") || "", 10) || 1337;
-    M.seed = seed; REG = null; ADJ = null; buildRegions();
-    const pts = spawnPoints(n);
-    for (let i = 0; i < n; i++) slots[i].home = pts[i % pts.length].id;
     begin({ seed: seed, len: MATCH_SEC, slots: slots, me: "p0", host: true, hostT: 0 });
     /* FAST-FORWARD BY MOVING T0, not by running a loop — the clock is wall
        time, so "six minutes in" is literally "T0 was six minutes ago". Then
@@ -1842,16 +2101,24 @@
        rather than a blank start. */
     const fwd = o.at == null ? 380 : o.at;
     M.T0 -= fwd * 1000;
+    M.lastT = matchT();          // the rewind is not elapsed play — see tick()'s dt clamp
+    /* HOMES ARE UNTOUCHABLE HERE, and the first draft got this backwards: it
+       spread the random ownership first and repaired homes afterwards, so a
+       later warlord's home repair overwrote an earlier warlord's ONLY region
+       and the demo booted with two of six already eliminated. Everybody keeps
+       his home; the rest of the island is dealt out around it. */
+    const homes = {};
+    for (let i = 0; i < M.order.length; i++) homes[M.wl[M.order[i]].home] = 1;
     const L = regions();
     for (let i = 0; i < L.length; i++) {
+      if (homes[L[i].id]) continue;
       const r = W.hash01(i, 47, seed);
-      if (r < 0.42) continue;                          // 42% of the island still neutral
+      if (r < 0.28) continue;                          // some of the island still neutral
       const who = M.order[Math.floor(W.hash01(i, 53, seed) * M.order.length) % M.order.length];
-      setOwner(L[i].id, who);
+      setOwner(L[i].id, who, true);
     }
     for (let i = 0; i < M.order.length; i++) {
       const wme = M.wl[M.order[i]];
-      if (!regionsOf(wme.id) && wme.home) setOwner(wme.home, wme.id);
       wme.men = Math.round(capOf(wme.id) * (0.42 + W.hash01(wme.slot, 61, seed) * 0.5));
       wme.raised = wme.men * 1.9;
       wme.battles = 2 + Math.floor(W.hash01(wme.slot, 67, seed) * 7);
@@ -1866,6 +2133,17 @@
       acceptAlly(M.order[0], M.order[1]);
       if (M.order.length > 3) acceptAlly(M.order[2], M.order[3]);
       if (o.betray !== false && M.order.length > 3) breakAlly(M.order[2], M.order[3]);
+      /* THE LEDGER IS A TIMELINE, and a demo that makes three alliances in the
+         same millisecond prints "19:58, 19:58, 19:58" — which is the one thing
+         the endgame screen must not look like, because WHEN somebody betrayed
+         you is the whole content of that panel. Spread the fixture's events
+         across the match that supposedly happened. */
+      const spread = [0.18, 0.36, 0.61];
+      for (let i = 0, k = 0; i < M.events.length; i++) {
+        if (M.events[i].kind !== "ally" && M.events[i].kind !== "betray") continue;
+        M.events[i].t = matchT() * (spread[k] || 0.8);
+        k++;
+      }
     }
     // backfill the history graph so the endgame has a shape to draw
     for (let s = 0; s <= Math.floor(fwd / SAMPLE_SEC); s++) {
@@ -1880,6 +2158,25 @@
       M.samples.push({ t: s * SAMPLE_SEC, share: sh });
     }
     M.lastSample = Math.floor(matchT() / SAMPLE_SEC);
+    /* ONE BATTLE LEFT RUNNING. A mid-match board with nothing contested on it
+       is a picture of a lull, and the thing worth photographing about this
+       game is a region changing hands while seven other people carry on. So
+       the demo leaves exactly one attack in flight, against ground the player
+       holds, marked as watched so it carries the countdown. */
+    if (o.fight !== false) {
+      const held = regions().filter(function (r) { return ownerOf(r.id) === M.me; });
+      for (let i = 0; i < held.length; i++) {
+        const A = adjacent(held[i].id);
+        for (let k = 0; k < A.length; k++) {
+          const foe = ownerOf(A[k]);
+          if (!foe || foe === M.me || allied(M.me, foe)) continue;
+          applyAttack({ id: 999001, wid: foe, rid: held[i].id, p: 1,
+                        men: Math.floor(M.wl[foe].men * COMMIT),
+                        at: Math.round(matchT() * 1000) });
+          i = held.length; break;
+        }
+      }
+    }
     syncMyArmy();
     paintStrip();
     return M;
@@ -1893,18 +2190,56 @@
       styleOnce();
       if (OFF) return;                                 // ?match=old: completely inert
 
-      /* THE MULTIPLAYER BUTTON. games/warlord.html wires its menu straight to
-         W.warnet.lobby(), and this agent owns exactly one file and may not
-         edit that one. So the transport's lobby DELEGATES to the match lobby
-         at boot — the shell's button reaches the right screen today, without a
-         second copy of the menu and without touching warnet's source.
-         ?matchlobby=old restores warnet's own peer screen. THIS IS A SEAM, NOT
-         A DESIGN: the shell should call W.match.lobby() directly and then
-         these six lines come out. */
-      if (W.warnet && Q.get("matchlobby") !== "old") {
-        const inner = W.warnet.lobby;
-        W.warnet.lobby = function () { lobby(); };
-        W.warnet.peerLobby = inner;
+      /* THE SEAM THAT MAKES PLAYING THE BATTLE WORTH ANYTHING, and it needed
+         no edit to anybody else's file. army.js ends every fight with
+         `W.setPhase("aftermath", report)`, and core fires `phase:aftermath`
+         with that exact report as its payload — so the battle owner's REAL
+         casualty list is already on the bus. Take it, settle the match battle
+         with it, and broadcast it once. If it never comes (the player quit,
+         the page died, the fight overran) the deadline in tick() has already
+         settled the same battle from resolve(), and settle() is idempotent by
+         id, so whichever of the two got there first is the one truth.
+
+         battle.js may also call W.match.battleDone(id, report) directly when
+         it grows a match-aware exit; this listener is what makes today work. */
+      W.on("phase:aftermath", function (report) {
+        if (!LIVE_ID) return;
+        const id = LIVE_ID;
+        LIVE_ID = 0;
+        W.match.battleDone(id, report);
+      });
+      /* A BATTLE THAT ENDED WITHOUT AN AFTERMATH (a retreat straight back to
+         the campaign) must not leave the match waiting on a screen that is
+         already gone. */
+      W.on("phase:campaign", function () {
+        if (!LIVE_ID) return;
+        const id = LIVE_ID;
+        LIVE_ID = 0;
+        if (M.pending[id]) settle(id, null);
+      });
+
+      /* THE MULTIPLAYER BUTTON NEEDS NOTHING FROM ME. An earlier draft of this
+         file monkey-patched W.warnet.lobby so the shell's button would reach
+         this screen. It does not need to: warnet.js's own lobby() already
+         tests for W.match.lobby and hands straight over. Two files arranging
+         the same handoff is the drift CLAUDE.md is about, so the patch is
+         gone and the one arrangement that exists lives in warnet.
+
+         The guest side of the seed handshake, though, is mine: warnet fires
+         `world` when somebody sets the island, and a guest sitting in the
+         lobby should be looking at that seed rather than its own guess. */
+      /* SUBSCRIBE AT BOOT, NOT AT begin(). This is the bug that made the
+         three-browser test produce one live match and two blank ones: wire()
+         was called from begin(), so a GUEST — who by definition has not begun
+         anything yet — had no listener for the wlmstart that was supposed to
+         start him. He sat in the lobby watching a match he was already in.
+
+         It is inert in single player: warnet.on() only appends to a table that
+         nothing ever fires unless a socket is open. */
+      wire();
+
+      if (W.warnet && W.warnet.onWorld) {
+        try { W.warnet.onWorld(function (w) { if (w && w.seed) SEED_HINT = w.seed | 0; }); } catch (e) {}
       }
 
       /* Nothing below this line runs in single player. No timer, no DOM, no
