@@ -68,7 +68,7 @@ for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (!a.startsWith("--")) continue;
   const k = a.slice(2);
-  const flag = ["no-pdf", "help", "html-only"].includes(k);
+  const flag = ["no-pdf", "help", "html-only", "sameness"].includes(k);
   opt[k] = flag ? true : (argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[++i] : true);
 }
 if (opt.help) { console.log("usage: node tools/facade-catalog.mjs [--only a,b] [--out dir] [--url URL] [--no-pdf] [--html-only]"); process.exit(0); }
@@ -295,6 +295,14 @@ const HARNESS = String.raw`(() => {
   for (const child of Array.from(document.body.children)) {
     if (child !== cv) child.style.visibility = "hidden";
   }
+
+  // The elevation sheet wants the building and nothing else: with a ground
+  // plane in shot the horizon lands across the middle of every cell and gets
+  // confused with the floor rules drawn over them.
+  S.ground = (on) => {
+    ground.visible = !!on;
+    holder.traverse((o) => { if (o.name === "facadePad") o.visible = !!on; });
+  };
 
   S.clear = () => {
     while (holder.children.length) {
@@ -525,6 +533,156 @@ const PX = {
   house: { hero: [1000, 1060], small: [1100, 556] },
 };
 
+/* ============================================================
+   THE SAMENESS SHEET (--sameness).
+
+   The catalogue answers "which of these do I want". This answers the question
+   the catalogue provokes: WHY DO THIRTY-ONE CULTURES READ AS ONE CITY.
+
+   The answer is not lighting and it is not the studio. It is that the facade
+   kit is, by design, ADDITIVE ORNAMENT ON ONE SHELL — and the shell is built
+   before dressFacade() ever runs (buildings.js:4652). So this sheet does the
+   only honest thing: photographs the bare shell and six supposedly unrelated
+   cultures dead-on from the same tripod at the same scale, and rules the
+   shell's own constants across all seven.
+
+     FH = 3.2 m                     buildings.js:100 — a MODULE constant, not
+                                    a per-building value and not something a
+                                    spec can set
+     sill 0.55, header 0.45         buildings.js:4164, the office glazing band,
+     bay pitch 1.5 m                on every storey of every face
+     modern = storeys >= 3          buildings.js:3461 — the only thing that
+                                    varies, and it varies on HEIGHT, not on
+                                    what the building is
+     one rectangular prism, w x d   there is no other plan form
+
+   Every floor line lands on the same rule in every cell. That is the finding,
+   and no amount of ornament above it can move it.
+
+   The lens is 22 degrees from 46 m, which is near-orthographic: the rules are
+   EXACT on the front wall plane and a shade generous for ornament standing in
+   front of it. The ground is hidden so the horizon cannot be mistaken for a
+   rule.
+============================================================ */
+const ELEV = { fov: 22, halfH: 9.2, aimY: 8.6, w: 820, hpx: 520 };
+const SAME = [
+  { id: null, label: "THE SHELL", note: "What all six of the others actually are. Everything past this point is applied to this." },
+  { id: "mosque", label: "Grand Mosque", note: "Ottoman / Mughal" },
+  { id: "pagoda", label: "Tiered Eaves", note: "East Asian" },
+  { id: "adobe", label: "Pueblo Adobe", note: "Puebloan / Saharan" },
+  { id: "gothic", label: "Gothic Revival", note: "Northern European medieval" },
+  { id: "brick", label: "Chicago Loft", note: "American industrial" },
+  { id: "victorian", label: "Second Empire", note: "French 19th century" },
+];
+function elevationCam(subject) {
+  const dz = ELEV.halfH / Math.tan((ELEV.fov / 2) * Math.PI / 180);
+  return { x: 0, y: ELEV.aimY, z: subject.d / 2 + dz,
+    ax: 0, ay: ELEV.aimY, az: 0, fov: ELEV.fov, w: ELEV.w, h: ELEV.hpx };
+}
+// world height -> fraction down the plate. Exact on the front wall plane.
+const yFrac = (y) => 0.5 - 0.5 * (y - ELEV.aimY) / ELEV.halfH;
+
+async function sameness() {
+  const dir = path.resolve(ROOT, "artifacts/facade-sameness");
+  await rm(dir, { recursive: true, force: true });
+  await mkdir(path.join(dir, "shots"), { recursive: true });
+  await ensureServer();
+  await launchChrome();
+  const deadline = Date.now() + 180000;
+  let ready = null;
+  while (Date.now() < deadline && ready !== "ready") {
+    ready = await evaluate(HARNESS).catch(() => null);
+    if (ready !== "ready") await sleep(500);
+  }
+  if (ready !== "ready") throw new Error("page never exposed CBZ.facadeStudio");
+
+  const subject = SUBJ.block;
+  const cam = elevationCam(subject);
+  const cells = [];
+  for (const c of SAME) {
+    /* THE BARE SHELL IS NOT WHAT AN UNDRESSED CALL GIVES YOU. FACADE_KIT_CITY
+       defaults ON (facade_kit.js:109) and hands every undressed building a
+       grammar by position hash — so the first pass photographed a mosque and
+       captioned it "THE SHELL". The flag has to come off for that one raise,
+       and go straight back on: an explicit dress always wins, so leaving it
+       off would change nothing for the other six and it would still be a lie
+       waiting for whoever reads this next. */
+    if (!c.id) await evaluate(`CBZ.CONFIG.FACADE_KIT_CITY = false`);
+    await evaluate(`window.__fc.raise(${JSON.stringify(c.id)}, ${JSON.stringify(subject)})`);
+    if (!c.id) await evaluate(`CBZ.CONFIG.FACADE_KIT_CITY = true`);
+    await evaluate(`window.__fc.ground(false)`);
+    const dataUrl = await evaluate(`window.__fc.shoot(${JSON.stringify(cam)})`);
+    const file = `shots/${c.id || "shell"}.jpg`;
+    await writeFile(path.join(dir, file), Buffer.from(dataUrl.split(",")[1], "base64"));
+    cells.push({ ...c, file });
+    console.log("  " + (c.id || "shell"));
+  }
+  const htmlPath = path.join(dir, "index.html");
+  await writeFile(htmlPath, sameHtml(cells));
+  const pdfPath = path.join(dir, "one-city.pdf");
+  await new Promise((resolve, reject) => {
+    execFile(CHROME, ["--headless=new", "--no-sandbox", "--disable-gpu",
+      "--no-pdf-header-footer", `--print-to-pdf=${pdfPath}`, pathToFileURL(htmlPath).href,
+    ], { cwd: ROOT, timeout: 180000, maxBuffer: 1024 * 1024 }, (err) => err ? reject(err) : resolve());
+  });
+  console.log("wrote " + pdfPath);
+}
+
+function sameHtml(cells) {
+  // buildings.js:4164 with modern = storeys >= 3 (buildings.js:3461)
+  const FHc = 3.2, SILL = 0.55, HDR = 0.45, ST = 4;
+  const rules = [];
+  for (let k = 0; k <= ST; k++) {
+    rules.push(`<i class="fl" style="top:${(yFrac(k * FHc) * 100).toFixed(3)}%">${k === 0 ? "0 m" : (k === ST ? "roof 12.8" : (k * FHc).toFixed(1))}</i>`);
+  }
+  for (let k = 0; k < ST; k++) {
+    const t = yFrac(k * FHc + FHc - HDR), b = yFrac(k * FHc + SILL);
+    rules.push(`<i class="wz" style="top:${(t * 100).toFixed(3)}%;height:${((b - t) * 100).toFixed(3)}%"></i>`);
+  }
+  const ruleHtml = rules.join("");
+  const grid = cells.map((c) => `<figure class="cell${c.id ? "" : " shell"}">
+      <div class="im"><img src="${c.file}">${ruleHtml}</div>
+      <figcaption><strong>${esc(c.label)}</strong><span>${esc(c.note)}</span></figcaption>
+    </figure>`).join("");
+  return `<!doctype html><meta charset="utf-8"><title>One City</title>
+<style>
+  @page { size: letter landscape; margin: 0.4in; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.5 "Helvetica Neue", Helvetica, Arial, sans-serif; color: #17181a; background: #fff; }
+  h1 { margin: 0; font-size: 30px; letter-spacing: -0.025em; }
+  .lede { color: #55585e; margin: 7px 0 14px; max-width: 9.4in; font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 9px; }
+  .cell { margin: 0; }
+  .im { position: relative; aspect-ratio: ${ELEV.w} / ${ELEV.hpx}; border: 1px solid #d6d9dd; overflow: hidden; background: #bcd2e8; }
+  .im img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cell.shell .im { border: 2px solid #17181a; }
+  /* the shell's own constants, ruled across every culture */
+  .fl { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed #d92b2b;
+    font-style: normal; font-size: 7px; color: #d92b2b; padding-left: 2px; line-height: 1; }
+  .wz { position: absolute; left: 0; right: 0; background: rgba(217,43,43,0.11); }
+  figcaption { font-size: 10px; line-height: 1.3; margin-top: 4px; display: flex; flex-direction: column; }
+  figcaption span { color: #8a8d93; font-size: 9px; }
+  .note { grid-column: span 1; align-self: stretch; font-size: 11px; color: #45484e;
+    border-left: 3px solid #d92b2b; padding: 2px 0 2px 9px; }
+  .note h4 { margin: 0 0 5px; font-size: 10px; letter-spacing: 0.11em; text-transform: uppercase; color: #17181a; }
+  .note p { margin: 0 0 7px; }
+  .note code { font-family: ui-monospace, Menlo, monospace; font-size: 10px; }
+  .foot { margin-top: 12px; padding-top: 7px; border-top: 1px solid #d8dade; font-size: 10px; color: #8a8d93; }
+</style>
+<h1>Why thirty-one cultures read as one city</h1>
+<p class="lede">Seven dead-on elevations, same tripod, same scale, ground hidden. The red rules are not drawn per building — they are the <b>shell's</b> constants, ruled at the same heights across all seven. Every culture's floors land on them, because the shell is built before the facade runs and the facade is only allowed to decorate it.</p>
+<div class="grid">${grid}
+  <div class="note">
+    <h4>What is shared, in the source</h4>
+    <p><code>FH = 3.2 m</code> — floor-to-floor, a module constant in <code>buildings.js:100</code>. Not a per-building value, not something a facade can set. A machiya has 2.4 m floors, a temple has bays instead of storeys, and a prayer hall has neither.</p>
+    <p><code>sill 0.55 · header 0.45 · bay 1.5 m</code> — <code>buildings.js:4164</code>. The same glazing band on every storey of all four faces (the pink band above). The only thing that varies is <code>modern = storeys &gt;= 3</code> — it varies on <em>height</em>, not on what the building is.</p>
+    <p>One rectangular prism, <code>w &times; d</code>. There is no courtyard, no compound, no wall, no gate — and a villa, a riad and a siheyuan are all <em>the void in the middle</em>, not the wall around it.</p>
+    <p>One palette per district. Culture reads as colour at 100 m before it reads as ornament at 10 m.</p>
+  </div>
+</div>
+<p class="foot">Rules are exact on the front wall plane (22&deg; lens at 46 m, near-orthographic); ornament standing proud of that plane projects a shade large. Generated by <code>tools/facade-catalog.mjs --sameness</code>.</p>`;
+}
+
 // ---------- run ----------
 /* --html-only re-lays the sheet out of the catalog.json a previous run left
    behind, without booting a browser or re-photographing anything. Typography
@@ -548,6 +706,7 @@ async function relayout() {
 }
 
 async function main() {
+  if (opt.sameness) return sameness();
   if (opt["html-only"]) return relayout();
   await rm(OUTDIR, { recursive: true, force: true });
   await mkdir(path.join(OUTDIR, "shots"), { recursive: true });
