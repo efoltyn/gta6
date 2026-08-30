@@ -85,18 +85,15 @@
         F.box(ctx, ff, 0, y + h * 0.88, wid + 0.55, h * 0.30, dep + 0.34, LT);
       };
       const pediment = function (y, wid, h, dep) {
-        for (let k = 0; k < 7; k++) {
-          const u = (k + 0.5) / 7;
-          F.box(ctx, ff, 0, y + (k + 0.5) * (h / 7), wid * (1 - u * 0.94), h / 7 + 0.04, dep, k % 2 ? F.shade(LT, 0.94) : LT);
-        }
+        for (let k = 0; k < 7; k++) F.box(ctx, ff, 0, y + (k + 0.5) * (h / 7), wid * (1 - ((k + 0.5) / 7) * 0.94),
+          h / 7 + 0.04, dep, k % 2 ? F.shade(LT, 0.94) : LT);
       };
 
       // ---- A. THE NAVE BEHIND -------------------------------------
-      const flanks = [0, 1, 2, 3].filter((s) => s !== ctx.doorSide).map((s) => F.face(ctx, s));
-      F.pierBay(ctx, { pal: P, faces: flanks, y1: H - 0.85, head: null, spandrel: false, per: FH * 1.5 });
-      F.openingGrid(ctx, { pal: P, faces: flanks, shape: "arch", hFrac: 0.52, wFrac: 0.30, sillFrac: 0.34,
-        hi: 4, y0: Math.max(0, ctx.storeys - 2) * FH });
-      F.cornice(ctx, { pal: P, faces: flanks, y: H + 0.30, kind: "bracket", col: LT });
+      const nave = F.flanks(ctx);
+      F.pierBay(ctx, { pal: P, faces: nave, y1: H - 0.85, head: null, spandrel: false, per: FH * 1.5 });
+      F.openingGrid(ctx, { pal: P, faces: nave, shape: "arch", hFrac: 0.52, wFrac: 0.30, sillFrac: 0.34, hi: 4, y0: Math.max(0, ctx.storeys - 2) * FH });
+      F.cornice(ctx, { pal: P, faces: nave, y: H + 0.30, kind: "bracket", col: LT });
       F.parapetWalk(ctx, { pal: P, h: clamp(FH * 0.22, 0.4, 0.8), col: P.base, capCol: LT });
 
       // ---- B. THE FRONT, IN THREE LAYERS OF DEPTH -----------------
@@ -107,8 +104,7 @@
         F.box(ctx, ff, sg * q[0], y1 - 0.22, PW * 1.28, 0.30, q[1] + 0.12, LT);            // its capital
         F.box(ctx, ff, sg * q[0], 0.26, PW * 1.20, 0.52, q[1] + 0.10, LT);                 // and its base
       }
-      entab(y1, ent1, span + 0.3, P0 * 1.3);
-      entab(y1, ent1, (tMid + PW) * 2 + 0.4, P0 * 2.4);                                    // the ressaut
+      entab(y1, ent1, span + 0.3, P0 * 1.3);   entab(y1, ent1, (tMid + PW) * 2 + 0.4, P0 * 2.4);   // + the ressaut
 
       // ---- C. NICHES, AND THE SAINTS IN THEM ----------------------
       for (const sg of [-1, 1]) for (const q of [[(tIn + PW * 1.16 + tMid) / 2, y1 * 0.34, y1 * 0.44, P0 * 1.5],
@@ -128,24 +124,19 @@
       for (const sg of [-1, 1]) F.sRib(ctx, ff, sg * (dw / 2 + 0.45), 0, dy + 0.1, 0.88, dp, LT);
       F.box(ctx, ff, 0, dy + 0.28, dw + 2.1, 0.46, dp + 0.14, LT);                          // the lintel
       const Wp = (dw + 2.1) * 0.5, Rp = Math.min(1.15, Wp * 0.38);
-      for (let k = 0; k < 6; k++) {
+      for (let k = 0; k < 6; k++) for (const sg of [-1, 1]) {
         const u = 0.32 + ((k + 0.5) / 6) * 0.68;                                            // BROKEN: no crown
         const yy = dy + 0.60 + Rp * Math.sqrt(Math.max(0, 1 - u * u));
-        for (const sg of [-1, 1]) {
-          F.box(ctx, ff, sg * Wp * u, yy, Wp * 0.16, 0.32, dp + 0.20, LT);
-          F.box(ctx, ff, sg * Wp * u, yy + 0.24, Wp * 0.17, 0.18, dp + 0.28, F.shade(LT, 0.90));
-        }
+        F.box(ctx, ff, sg * Wp * u, yy, Wp * 0.16, 0.32, dp + 0.20, LT);
+        F.box(ctx, ff, sg * Wp * u, yy + 0.24, Wp * 0.17, 0.18, dp + 0.28, F.shade(LT, 0.90));
       }
-      for (let k = 0; k < 3; k++) {                                                          // the cartouche in the gap
-        F.box(ctx, ff, 0, dy + 0.95 + k * 0.30, Wp * (0.44 - k * 0.10), 0.34, dp + 0.26 + k * 0.06, k === 1 ? F.shade(LT, 0.84) : LT);
-      }
+      for (let k = 0; k < 3; k++) F.box(ctx, ff, 0, dy + 0.95 + k * 0.30, Wp * (0.44 - k * 0.10), 0.34, dp + 0.26 + k * 0.06, k === 1 ? F.shade(LT, 0.84) : LT);
 
       // ---- E. THE VOLUTES -----------------------------------------
       const vH = Math.max(1.0, hUp - 0.18), vL = tOut + PW - wUp / 2, vN = 22, vw = vL / vN + 0.05;
       for (const sg of [-1, 1]) {
         for (let i = 0; i < vN; i++) {
-          const u = (i + 0.5) / vN, hh = vH * (0.5 + 0.5 * Math.cos(Math.PI * u));
-          const t = sg * (wUp / 2 + u * vL);
+          const u = (i + 0.5) / vN, hh = vH * (0.5 + 0.5 * Math.cos(Math.PI * u)), t = sg * (wUp / 2 + u * vL);
           F.box(ctx, ff, t, y2 + hh / 2, vw, hh, P0 * 1.1, F.shade(P.base, 0.93));
           // TWO parallel mouldings riding the curve, not one edge: a volute is
           // a BAND with a fascia and an under-mould, and one lonely cap course
@@ -174,8 +165,7 @@
       F.box(ctx, ff, 0, fy + 1.25, 0.26, 1.90, P0 * 2.0, LT);
       F.box(ctx, ff, 0, fy + 1.55, 1.05, 0.26, P0 * 2.0, LT);
       for (const sg of [-1, 1]) {                                                            // flame finials on the volutes
-        F.box(ctx, ff, sg * (wUp / 2 + vL * 0.93), y2 + 2.00, 0.60, 1.10, P0 * 2.0, LT);
-        F.box(ctx, ff, sg * (wUp / 2 + vL * 0.93), y2 + 2.85, 0.28, 0.70, P0 * 1.8, LT);
+        F.box(ctx, ff, sg * (wUp / 2 + vL * 0.93), y2 + 2.00, 0.60, 1.10, P0 * 2.0, LT);   F.box(ctx, ff, sg * (wUp / 2 + vL * 0.93), y2 + 2.85, 0.28, 0.70, P0 * 1.8, LT);
       }
     },
   });

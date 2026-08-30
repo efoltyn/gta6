@@ -72,24 +72,28 @@
       const sh = F.mix(P.roof, 0x2a2620, 0.35);
 
       // ---- A. THE PODKLET LINE ------------------------------------
-      const pk = cl(FH * 0.22, 0.50, 0.95);          // top of the undercroft
+      const pk = cl(FH * 0.30, 0.68, 1.25);          // top of the undercroft
 
       // ---- B. THE LOG COURSES -------------------------------------
       const ch = cl(FH * 0.115, 0.26, 0.42);         // one log's diameter
-      const lug = cl(u * 0.038, 0.30, 0.66);         // how far the ends run past
+      const lug = cl(u * 0.048, 0.36, 0.80);         // how far the ends run past
       const N = Math.ceil(rTop / ch);
       for (let k = 0; k < N; k++) {
         const cy = k * ch + ch / 2;
         if (cy > rTop - 0.05) break;
         const j = 0.90 + ctx.hash(0x1b00 + k) * 0.16;         // hewn, not milled
         const t = ch * j, low = cy < pk;
-        const c = low ? F.shade(P.course(k), 0.68) : P.course(k);
+        const c = low ? F.shade(P.course(k), 0.56) : P.course(k);
         const cL = F.shade(c, 1.18), cD = F.shade(c, 0.62);
         const p = cl(ch * (low ? 1.20 : 0.98), 0.32, 0.52);   // proud of the wall
         // SOLID only where a body can meet it. sbox refuses the rest anyway,
         // and asking it 200 times for boxes 6 m up is 200 wasted scans.
         const E = cy < 2.7 ? S : ctx.dbox;
-        const ox = (k % 2) ? lug : lug * 0.32, oz = (k % 2) ? lug * 0.32 : lug;
+        // MEASURED PAST THE PERPENDICULAR LOG, not past the wall. A course
+        // that only reaches the wall plane has its end buried inside the log
+        // it is notched into and the corner comes out mitred — which is the
+        // one thing a log house never looks like.
+        const ox = (k % 2) ? p + lug : -p * 0.15, oz = (k % 2) ? -p * 0.15 : p + lug;
         for (const sg of [-1, 1]) {
           E(0, cy, sg * (hd + p / 2), ctx.w + ox * 2, t, p, c);
           E(sg * (hw + p / 2), cy, 0, p, t, ctx.d + oz * 2, c);
@@ -100,28 +104,34 @@
           ctx.dbox(sg * (hw + p * 0.58), cy - t * 0.46, 0, p * 0.74, 0.07, ctx.d + oz * 2 + 0.02, cD);
         }
       }
-      const wp = cl(ch * 1.20, 0.32, 0.52) + 0.20;   // everything else stands off this
+      const wp = cl(ch * 1.20, 0.32, 0.52) + lug + 0.16;   // everything stands off this
+      // THE OKLADNOY VENETS: the heavy sill beam the living floor lands on,
+      // and the line that says the dark courses below it are a cellar.
+      F.ring(ctx, pk + 0.10, 0.26, cl(ch * 1.30, 0.40, 0.62), F.shade(P.base, 0.80), 0.5, 0);
 
       // ---- C. THE ROOF --------------------------------------------
       // Ridge PERPENDICULAR to the door face, so the street gets the gable.
       const zAxis = F.face(ctx, ctx.doorSide).horiz;
+      const rov = cl(u * 0.075, 0.50, 1.30);
+      const hT = (zAxis ? ctx.w : ctx.d) / 2 + rov;
       const roof = F.gableRoof(ctx, { pal: P, col: sh, axis: zAxis ? "z" : "x",
-        over: cl(u * 0.075, 0.50, 1.30), courses: 14, verge: false,
-        rise: cl(u * 0.62, FH * 0.85, u * 1.05) });
+        over: rov, courses: 15, verge: false, rise: cl(hT * 0.98, FH * 0.90, u * 1.30) });
 
       // ---- D. THE PRICHELINY --------------------------------------
       // Carved boards down both rakes of the gable with a scalloped edge, and
       // the polotentse hung at the apex. Emitted in world coordinates rather
       // than through F.box because the gable plane stands `over` past the
       // wall the face helpers measure from.
-      const gN = 12, gp = (zAxis ? hd : hw) + roof.over;
+      const gN = 15, gp = (zAxis ? hd : hw) + roof.over;
+      const gb = roof.halfT0 / gN + 0.34;                    // covers its own step
       for (const sg of [-1, 1]) {
         for (let i = 0; i < gN; i++) {
-          const v = (i + 0.5) / gN, ht = roof.halfT0 * (1 - v), y = roof.y0 + roof.h * v;
+          const v = (i + 0.5) / gN, ht = roof.halfT0 * (1 - v) - gb * 0.34;
+          const y = roof.y0 + roof.h * v;
           for (const sq of [-1, 1]) {
             const bx = zAxis ? sq * ht : sg * gp, bz = zAxis ? sg * gp : sq * ht;
-            ctx.dbox(bx, y, bz, zAxis ? 0.32 : 0.36, roof.h / gN + 0.06, zAxis ? 0.36 : 0.32, carve);
-            ctx.dbox(bx, y - 0.28, bz, zAxis ? 0.22 : 0.30, 0.32, zAxis ? 0.30 : 0.22,
+            ctx.dbox(bx, y, bz, zAxis ? gb : 0.36, roof.h / gN + 0.07, zAxis ? 0.36 : gb, carve);
+            ctx.dbox(bx, y - 0.30, bz, zAxis ? gb * 0.72 : 0.30, 0.34, zAxis ? 0.30 : gb * 0.72,
               i % 2 ? carveD : carve);                       // the scallop
           }
         }

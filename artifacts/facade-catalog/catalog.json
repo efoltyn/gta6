@@ -1,411 +1,135 @@
 [
   {
     "n": 1,
-    "id": "intl",
-    "fam": "tower",
-    "note": "Seagram, 1958. Bronze mullions on an absolutely regular grid, a plaza, a lobby set back behind free-standing columns. No ornament anywhere — it survives on proportion alone.",
-    "city": "A corporate downtown. The three siblings are the variations Mies's imitators made: travertine spandrels, a black-steel version, a white-marble civic slab.",
-    "label": "Seagram Curtain Wall",
+    "id": "drystone",
+    "era": "neolithic",
+    "fam": "house",
+    "note": "Skara Brae / broch. Coursed unmortared rubble battering inward, a corbelled roof closing to a smoke hole, a creep entrance under one massive lintel. No windows.",
+    "city": "A Neolithic settlement — huts, a passage tomb, a stone circle, a souterrain. The oldest thing a city can be.",
+    "label": "Dry-Stone Broch",
     "subject": {
-      "w": 34,
-      "d": 28,
-      "storeys": 40,
-      "color": 9279398,
+      "w": 15,
+      "d": 11,
+      "storeys": 2,
+      "color": 13156270,
       "doorSide": 1
     },
     "shots": {
-      "hero": "shots/01-intl-hero.jpg",
-      "street": "shots/01-intl-street.jpg",
-      "back": "shots/01-intl-back.jpg"
+      "hero": "shots/01-drystone-hero.jpg",
+      "street": "shots/01-drystone-street.jpg",
+      "back": "shots/01-drystone-back.jpg"
     },
     "metrics": {
-      "crownM": 3.5,
-      "aboveShell": 9,
-      "roofTopM": 131.5,
-      "decoBoxes": 5666,
-      "realMeshes": 4,
-      "triangles": 68000,
+      "crownM": 5.6,
+      "aboveShell": 18,
+      "roofTopM": 12,
+      "decoBoxes": 681,
+      "realMeshes": 0,
+      "triangles": 8172,
       "box": {
-        "cx": 0,
-        "cy": 65.41120025634766,
-        "cz": 5.739999771118164,
-        "sx": 43.52000045776367,
-        "sy": 131.94240051269531,
-        "sz": 49,
+        "cx": -0.02651214599609375,
+        "cy": 5.665000171661377,
+        "cz": 0.2809872627258301,
+        "sx": 18.490692138671875,
+        "sy": 12.450000343322754,
+        "sz": 15.058025360107422,
         "minY": -0.5599999999999999,
-        "maxY": 131.3824005126953,
-        "maxZ": 30.239999771118164
+        "maxY": 11.890000343322754,
+        "maxZ": 7.809999942779541
       }
     },
-    "portrait": true
+    "portrait": false
   },
   {
     "n": 2,
-    "id": "ziggurat",
-    "fam": "tower",
-    "note": "The 1916 New York zoning envelope: mandatory setbacks stepping the tower back from the street as it rises, so the shape is a law made visible.",
-    "city": "Pre-war Manhattan. Siblings: the wedding-cake hotel, the setback courthouse, the stepped power-company HQ.",
-    "label": "Zoning Setback Tower",
+    "id": "longhouse",
+    "era": "neolithic",
+    "fam": "house",
+    "note": "The roof IS the building: enormous thatch sweeping nearly to the ground, crossed ridge poles, heavy gable posts, one door, no windows.",
+    "city": "A forest-clearing village of longhouses, a palisade, a granary on posts.",
+    "label": "Neolithic Longhouse",
     "subject": {
-      "w": 34,
-      "d": 28,
-      "storeys": 40,
-      "color": 9279398,
+      "w": 15,
+      "d": 11,
+      "storeys": 2,
+      "color": 13156270,
       "doorSide": 1
     },
     "shots": {
-      "hero": "shots/02-ziggurat-hero.jpg",
-      "street": "shots/02-ziggurat-street.jpg",
-      "back": "shots/02-ziggurat-back.jpg"
+      "hero": "shots/02-longhouse-hero.jpg",
+      "street": "shots/02-longhouse-street.jpg",
+      "back": "shots/02-longhouse-back.jpg"
     },
     "metrics": {
-      "crownM": 40.5,
-      "aboveShell": 17,
-      "roofTopM": 168.5,
-      "decoBoxes": 5745,
-      "realMeshes": 3,
-      "triangles": 69134,
+      "crownM": 10.1,
+      "aboveShell": 34,
+      "roofTopM": 16.5,
+      "decoBoxes": 303,
+      "realMeshes": 0,
+      "triangles": 3636,
       "box": {
         "cx": 0,
-        "cy": 83.93646398451993,
-        "cz": 0.038399696350097656,
-        "sx": 46.32640075683594,
-        "sy": 168.99292796903987,
-        "sz": 40.40320014953613,
+        "cy": 7.95637580871582,
+        "cz": 0.22449994087219238,
+        "sx": 19.579999923706055,
+        "sy": 17.03275161743164,
+        "sz": 15.919000148773193,
         "minY": -0.5599999999999999,
-        "maxY": 168.43292796903987,
-        "maxZ": 20.239999771118164
+        "maxY": 16.47275161743164,
+        "maxZ": 8.184000015258789
       }
     },
-    "portrait": true
+    "portrait": false
   },
   {
     "n": 3,
-    "id": "pyramid",
-    "fam": "tower",
-    "note": "Transamerica. A tapered spire with the whole elevation converging on a point, wing buttresses at the shoulders.",
-    "city": "A skyline of tapers — obelisk, needle, stepped cone. Rare and expensive to over-use; one per district.",
-    "label": "Tapered Spire",
+    "id": "wattle",
+    "era": "neolithic",
+    "fam": "house",
+    "note": "Conical thatch over daub walls showing the stake-and-weave beneath, a ring of posts, a two-post porch. Made to read round on a rectangular plan.",
+    "city": "An Iron Age roundhouse cluster inside a ditch and bank.",
+    "label": "Wattle Roundhouse",
     "subject": {
-      "w": 34,
-      "d": 28,
-      "storeys": 40,
-      "color": 9279398,
+      "w": 15,
+      "d": 11,
+      "storeys": 2,
+      "color": 13156270,
       "doorSide": 1
     },
     "shots": {
-      "hero": "shots/03-pyramid-hero.jpg",
-      "street": "shots/03-pyramid-street.jpg",
-      "back": "shots/03-pyramid-back.jpg"
+      "hero": "shots/03-wattle-hero.jpg",
+      "street": "shots/03-wattle-street.jpg",
+      "back": "shots/03-wattle-back.jpg"
     },
     "metrics": {
-      "crownM": 64.3,
-      "aboveShell": 11,
-      "roofTopM": 192.3,
-      "decoBoxes": 7546,
-      "realMeshes": 2,
-      "triangles": 90712,
+      "crownM": 13.6,
+      "aboveShell": 13,
+      "roofTopM": 20,
+      "decoBoxes": 382,
+      "realMeshes": 6,
+      "triangles": 4836,
       "box": {
         "cx": 0,
-        "cy": 95.8089999961853,
+        "cy": 9.709201545715333,
         "cz": 0,
-        "sx": 48.1328010559082,
-        "sy": 192.73799999237062,
-        "sz": 47.01279830932617,
+        "sx": 21.192129135131836,
+        "sy": 20.538403091430663,
+        "sz": 21.737123489379883,
         "minY": -0.5599999999999999,
-        "maxY": 192.17799999237062,
-        "maxZ": 23.506399154663086
+        "maxY": 19.978403091430664,
+        "maxZ": 10.868561744689941
       }
     },
-    "portrait": true
+    "portrait": false
   },
   {
     "n": 4,
-    "id": "sunburst",
-    "fam": "tower",
-    "note": "Chrysler's radiator crown: stacked arcs of decreasing radius, dormer eyes, a spire. The crown is the entire building's argument.",
-    "city": "The crown competition of 1930 — every tower in the district trying to out-terminate the last one. The richest sibling set in the kit.",
-    "label": "Radiator Crown",
-    "subject": {
-      "w": 34,
-      "d": 28,
-      "storeys": 40,
-      "color": 9279398,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/04-sunburst-hero.jpg",
-      "street": "shots/04-sunburst-street.jpg",
-      "back": "shots/04-sunburst-back.jpg"
-    },
-    "metrics": {
-      "crownM": 35.3,
-      "aboveShell": 11,
-      "roofTopM": 163.3,
-      "decoBoxes": 6808,
-      "realMeshes": 2,
-      "triangles": 81858,
-      "box": {
-        "cx": 0,
-        "cy": 81.30968002821731,
-        "cz": 0,
-        "sx": 39.61199951171875,
-        "sy": 163.73936005643463,
-        "sz": 33.61199951171875,
-        "minY": -0.5599999999999999,
-        "maxY": 163.17936005643463,
-        "maxZ": 16.805999755859375
-      }
-    },
-    "portrait": true
-  },
-  {
-    "n": 5,
-    "id": "bundled",
-    "fam": "tower",
-    "note": "Sears/Willis. Nine square tubes in a 3x3 bundle that stop at different heights. Almost no surface treatment; pure massing.",
-    "city": "A structural-expression downtown: tube, bundle, diagonal, hat truss. Cold, enormous, recognisable at 20 km.",
-    "label": "Bundled Tube",
-    "subject": {
-      "w": 34,
-      "d": 28,
-      "storeys": 40,
-      "color": 9279398,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/05-bundled-hero.jpg",
-      "street": "shots/05-bundled-street.jpg",
-      "back": "shots/05-bundled-back.jpg"
-    },
-    "metrics": {
-      "crownM": 54,
-      "aboveShell": 16,
-      "roofTopM": 182,
-      "decoBoxes": 5711,
-      "realMeshes": 4,
-      "triangles": 68756,
-      "box": {
-        "cx": 0,
-        "cy": 90.68740001306533,
-        "cz": 1.853600025177002,
-        "sx": 37.757598876953125,
-        "sy": 182.49480002613066,
-        "sz": 35.46480083465576,
-        "minY": -0.5599999999999999,
-        "maxY": 181.93480002613066,
-        "maxZ": 19.586000442504883
-      }
-    },
-    "portrait": true
-  },
-  {
-    "n": 6,
-    "id": "megabrace",
-    "fam": "tower",
-    "note": "The braced tube — giant X-bracing crossing many storeys on the outside of the glass, structure as the only ornament.",
-    "city": "Siblings: the diagrid, the outrigger belt truss, the exposed mega-column. An engineer's city.",
-    "label": "Braced Tube",
-    "subject": {
-      "w": 34,
-      "d": 28,
-      "storeys": 40,
-      "color": 9279398,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/06-megabrace-hero.jpg",
-      "street": "shots/06-megabrace-street.jpg",
-      "back": "shots/06-megabrace-back.jpg"
-    },
-    "metrics": {
-      "crownM": 31.5,
-      "aboveShell": 12,
-      "roofTopM": 159.5,
-      "decoBoxes": 6426,
-      "realMeshes": 4,
-      "triangles": 77336,
-      "box": {
-        "cx": 0,
-        "cy": 79.5322599977493,
-        "cz": 1.7230005264282227,
-        "sx": 46.81999969482422,
-        "sy": 160.18451999549862,
-        "sz": 44.266000747680664,
-        "minY": -0.5599999999999999,
-        "maxY": 159.62451999549862,
-        "maxZ": 23.856000900268555
-      }
-    },
-    "portrait": true
-  },
-  {
-    "n": 7,
-    "id": "faceted",
-    "fam": "tower",
-    "note": "Bank of China, 1990. The prism is CUT: quadrants rise to four different heights with long diagonals running across dozens of storeys.",
-    "city": "A crystal district. Siblings are the other cuts — the sheared top, the twisted shaft, the folded plate.",
-    "label": "Faceted Prism",
-    "subject": {
-      "w": 34,
-      "d": 28,
-      "storeys": 40,
-      "color": 9279398,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/07-faceted-hero.jpg",
-      "street": "shots/07-faceted-street.jpg",
-      "back": "shots/07-faceted-back.jpg"
-    },
-    "metrics": {
-      "crownM": 44.8,
-      "aboveShell": 47,
-      "roofTopM": 172.8,
-      "decoBoxes": 6427,
-      "realMeshes": 3,
-      "triangles": 77260,
-      "box": {
-        "cx": 0,
-        "cy": 86.13399999976158,
-        "cz": 0.4199995994567871,
-        "sx": 37.91999816894531,
-        "sy": 173.38799999952317,
-        "sz": 32.75999927520752,
-        "minY": -0.5599999999999999,
-        "maxY": 172.82799999952317,
-        "maxZ": 16.799999237060547
-      }
-    },
-    "portrait": true
-  },
-  {
-    "n": 8,
-    "id": "neogothic",
-    "fam": "tower",
-    "note": "Woolworth, the Cathedral of Commerce: a Gothic cathedral stretched to 60 storeys, buttresses and pinnacles all the way up.",
-    "city": "The 1913 skyline where every tower borrowed a cathedral. Siblings: Tribune Tower's flying buttresses, a spired campanile, a Gothic crown on a stone shaft.",
-    "label": "Cathedral of Commerce",
-    "subject": {
-      "w": 34,
-      "d": 28,
-      "storeys": 40,
-      "color": 9279398,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/08-neogothic-hero.jpg",
-      "street": "shots/08-neogothic-street.jpg",
-      "back": "shots/08-neogothic-back.jpg"
-    },
-    "metrics": {
-      "crownM": 62.3,
-      "aboveShell": 10,
-      "roofTopM": 190.3,
-      "decoBoxes": 8346,
-      "realMeshes": 0,
-      "triangles": 100152,
-      "box": {
-        "cx": 0,
-        "cy": 94.79422637939453,
-        "cz": 0,
-        "sx": 42.20512008666992,
-        "sy": 190.70845275878906,
-        "sz": 35.6910400390625,
-        "minY": -0.5599999999999999,
-        "maxY": 190.14845275878906,
-        "maxZ": 17.84552001953125
-      }
-    },
-    "portrait": true
-  },
-  {
-    "n": 9,
-    "id": "postmodern",
-    "fam": "tower",
-    "note": "AT&T, 1984. A classical broken pediment on top of a skyscraper — deliberately absurd, deliberately memorable.",
-    "city": "The 1980s. Siblings: the Chippendale sibling, the pink granite arch, the temple-front bank. A city with a sense of humour.",
-    "label": "Broken Pediment",
-    "subject": {
-      "w": 34,
-      "d": 28,
-      "storeys": 40,
-      "color": 9279398,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/09-postmodern-hero.jpg",
-      "street": "shots/09-postmodern-street.jpg",
-      "back": "shots/09-postmodern-back.jpg"
-    },
-    "metrics": {
-      "crownM": 14.5,
-      "aboveShell": 11,
-      "roofTopM": 142.5,
-      "decoBoxes": 8275,
-      "realMeshes": 0,
-      "triangles": 99300,
-      "box": {
-        "cx": 0,
-        "cy": 70.90800354003906,
-        "cz": 0,
-        "sx": 37.36000061035156,
-        "sy": 142.93600708007813,
-        "sz": 31.360000610351562,
-        "minY": -0.5599999999999999,
-        "maxY": 142.37600708007812,
-        "maxZ": 15.680000305175781
-      }
-    },
-    "portrait": true
-  },
-  {
-    "n": 10,
-    "id": "pencil",
-    "fam": "tower",
-    "note": "The supertall slim: a 1:12 shaft, open mechanical floors punched through it for wind, a razor top.",
-    "city": "Billionaires' Row. Siblings: the setback needle, the concrete-core stack, the paired-tower slot. A city of impossibly thin things.",
-    "label": "Supertall Slim",
-    "subject": {
-      "w": 20,
-      "d": 18,
-      "storeys": 48,
-      "color": 9279398,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/10-pencil-hero.jpg",
-      "street": "shots/10-pencil-street.jpg",
-      "back": "shots/10-pencil-back.jpg"
-    },
-    "metrics": {
-      "crownM": 31.9,
-      "aboveShell": 13,
-      "roofTopM": 185.5,
-      "decoBoxes": 7190,
-      "realMeshes": 2,
-      "triangles": 86440,
-      "box": {
-        "cx": 0,
-        "cy": 92.51299999892714,
-        "cz": 0.07575035095214844,
-        "sx": 23.959999084472656,
-        "sy": 186.1459999978543,
-        "sz": 22.111499786376953,
-        "minY": -0.5599999999999999,
-        "maxY": 185.5859999978543,
-        "maxZ": 11.131500244140625
-      }
-    },
-    "portrait": true
-  },
-  {
-    "n": 11,
-    "id": "brick",
+    "id": "urziggurat",
+    "era": "bronze",
     "fam": "block",
-    "note": "Chicago loft, c.1905. Load-bearing brick read as STRUCTURE: piers between the bays, segmental arches, a corbelled cornice, cast-iron storefront, fire escape down the flank.",
-    "city": "A warehouse district that became lofts. Siblings: the mill building, the printing house, the brick-and-timber garment block.",
-    "label": "Chicago Loft",
+    "note": "Ur. Three receding battered terraces, a monumental triple stair, reeded pilaster-and-buttress rhythm on every face, a shrine on the summit. Not to be confused with the 1916 zoning tower that shares the word.",
+    "city": "A Mesopotamian temple-city: ziggurat, mudbrick courtyard houses, a walled precinct, a gate of glazed brick.",
+    "label": "Mudbrick Ziggurat",
     "subject": {
       "w": 22,
       "d": 16,
@@ -414,158 +138,39 @@
       "doorSide": 1
     },
     "shots": {
-      "hero": "shots/11-brick-hero.jpg",
-      "street": "shots/11-brick-street.jpg",
-      "back": "shots/11-brick-back.jpg"
-    },
-    "metrics": {
-      "crownM": 2.2,
-      "aboveShell": 8,
-      "roofTopM": 15,
-      "decoBoxes": 1452,
-      "realMeshes": 0,
-      "triangles": 17424,
-      "box": {
-        "cx": -0.2871999740600586,
-        "cy": 7.181999893188476,
-        "cz": 0,
-        "sx": 23.985599517822266,
-        "sy": 15.483999786376954,
-        "sz": 17.41119956970215,
-        "minY": -0.5599999999999999,
-        "maxY": 14.923999786376953,
-        "maxZ": 8.705599784851074
-      }
-    },
-    "portrait": false
-  },
-  {
-    "n": 12,
-    "id": "stone",
-    "fam": "block",
-    "note": "Ashlar bank in three parts — rusticated base, plain shaft, attic over a heavy cornice — with a giant order solved backwards from the roofline.",
-    "city": "A financial quarter of stone institutions: the exchange, the courthouse, the trust company, the library.",
-    "label": "Ashlar Bank",
-    "subject": {
-      "w": 22,
-      "d": 16,
-      "storeys": 4,
-      "color": 12170150,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/12-stone-hero.jpg",
-      "street": "shots/12-stone-street.jpg",
-      "back": "shots/12-stone-back.jpg"
-    },
-    "metrics": {
-      "crownM": 1.9,
-      "aboveShell": 10,
-      "roofTopM": 14.8,
-      "decoBoxes": 1870,
-      "realMeshes": 10,
-      "triangles": 23256,
-      "box": {
-        "cx": 0,
-        "cy": 7.14197847366333,
-        "cz": 1.2109999656677246,
-        "sx": 23.920000076293945,
-        "sy": 15.40395694732666,
-        "sz": 20.342000007629395,
-        "minY": -0.5599999999999999,
-        "maxY": 14.84395694732666,
-        "maxZ": 11.381999969482422
-      }
-    },
-    "portrait": false
-  },
-  {
-    "n": 13,
-    "id": "artdeco",
-    "fam": "block",
-    "note": "1930 setback commercial block. Fluted piers run base to crown with the spandrels pushed back behind them; nothing horizontal is allowed to cross a pier.",
-    "city": "A whole deco main street: theatre, department store, telephone exchange, hotel.",
-    "label": "Deco Tower",
-    "subject": {
-      "w": 22,
-      "d": 16,
-      "storeys": 4,
-      "color": 12170150,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/13-artdeco-hero.jpg",
-      "street": "shots/13-artdeco-street.jpg",
-      "back": "shots/13-artdeco-back.jpg"
-    },
-    "metrics": {
-      "crownM": 6.5,
-      "aboveShell": 13,
-      "roofTopM": 19.3,
-      "decoBoxes": 1209,
-      "realMeshes": 1,
-      "triangles": 14588,
-      "box": {
-        "cx": 0,
-        "cy": 9.337021016865823,
-        "cz": 0.15000009536743164,
-        "sx": 23.081600189208984,
-        "sy": 19.794042033731643,
-        "sz": 17.381600379943848,
-        "minY": -0.5599999999999999,
-        "maxY": 19.234042033731644,
-        "maxZ": 8.840800285339355
-      }
-    },
-    "portrait": false
-  },
-  {
-    "n": 14,
-    "id": "brutalist",
-    "fam": "block",
-    "note": "Beton brut. Every opening a hole punched through a thick wall, hooded so it throws a hard shadow all day; board-formed plank lines; lifted on pilotis.",
-    "city": "A concrete civic campus — city hall, the library, the parking structure, the housing slab. Grim and coherent.",
-    "label": "Beton Brut",
-    "subject": {
-      "w": 22,
-      "d": 16,
-      "storeys": 4,
-      "color": 12170150,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/14-brutalist-hero.jpg",
-      "street": "shots/14-brutalist-street.jpg",
-      "back": "shots/14-brutalist-back.jpg"
+      "hero": "shots/04-urziggurat-hero.jpg",
+      "street": "shots/04-urziggurat-street.jpg",
+      "back": "shots/04-urziggurat-back.jpg"
     },
     "metrics": {
       "crownM": 5.7,
-      "aboveShell": 11,
+      "aboveShell": 12,
       "roofTopM": 18.5,
-      "decoBoxes": 979,
+      "decoBoxes": 569,
       "realMeshes": 0,
-      "triangles": 11748,
+      "triangles": 6828,
       "box": {
         "cx": 0,
-        "cy": 8.935898513793946,
-        "cz": -0.20760011672973633,
-        "sx": 24.54400062561035,
-        "sy": 18.99179702758789,
-        "sz": 19.232800483703613,
+        "cy": 9.009999961853028,
+        "cz": 3.1929993629455566,
+        "sx": 27.91200065612793,
+        "sy": 19.139999923706053,
+        "sz": 28.297999382019043,
         "minY": -0.5599999999999999,
-        "maxY": 18.43179702758789,
-        "maxZ": 9.40880012512207
+        "maxY": 18.579999923706055,
+        "maxZ": 17.341999053955078
       }
     },
     "portrait": false
   },
   {
-    "n": 15,
-    "id": "hightech",
+    "n": 5,
+    "id": "mastaba",
+    "era": "bronze",
     "fam": "block",
-    "note": "Inside-out, Lloyd's / Pompidou: the frame stands proud of the glass, the risers and stair are outside, and the roof plant is architecture.",
-    "city": "A services-on-the-outside quarter. Siblings: the exposed-truss shed, the tension-rod atrium, the gantry-served lab.",
-    "label": "Exostructure",
+    "note": "Egyptian. Walls battering inward, a torus roll up every corner, a cavetto cornice flaring at the top, a pylon gate with flagstaff niches.",
+    "city": "A Nile temple precinct — pylon, hypostyle hall, mastaba tombs, an avenue of sphinxes.",
+    "label": "Mastaba & Pylon",
     "subject": {
       "w": 22,
       "d": 16,
@@ -574,78 +179,39 @@
       "doorSide": 1
     },
     "shots": {
-      "hero": "shots/15-hightech-hero.jpg",
-      "street": "shots/15-hightech-street.jpg",
-      "back": "shots/15-hightech-back.jpg"
+      "hero": "shots/05-mastaba-hero.jpg",
+      "street": "shots/05-mastaba-street.jpg",
+      "back": "shots/05-mastaba-back.jpg"
     },
     "metrics": {
-      "crownM": 7,
-      "aboveShell": 39,
-      "roofTopM": 19.8,
-      "decoBoxes": 1521,
-      "realMeshes": 27,
-      "triangles": 19316,
-      "box": {
-        "cx": -0.8804802894592285,
-        "cy": 9.595000023841859,
-        "cz": -0.619999885559082,
-        "sx": 26.309760093688965,
-        "sy": 20.310000047683715,
-        "sz": 20.007999420166016,
-        "minY": -0.5599999999999999,
-        "maxY": 19.750000047683717,
-        "maxZ": 9.383999824523926
-      }
-    },
-    "portrait": false
-  },
-  {
-    "n": 16,
-    "id": "gothic",
-    "fam": "block",
-    "note": "Gothic Revival civic front: buttresses stepping back as they rise, pinnacles breaking the roofline, tracery, a rose window over a deep portal. Everything ends in a point.",
-    "city": "An old-world cathedral town — the hall, the guild, the college quad, the parish church.",
-    "label": "Gothic Revival",
-    "subject": {
-      "w": 22,
-      "d": 16,
-      "storeys": 4,
-      "color": 12170150,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/16-gothic-hero.jpg",
-      "street": "shots/16-gothic-street.jpg",
-      "back": "shots/16-gothic-back.jpg"
-    },
-    "metrics": {
-      "crownM": 7,
-      "aboveShell": 9,
-      "roofTopM": 19.8,
-      "decoBoxes": 4598,
+      "crownM": 9.2,
+      "aboveShell": 13,
+      "roofTopM": 22,
+      "decoBoxes": 1090,
       "realMeshes": 0,
-      "triangles": 55176,
+      "triangles": 13080,
       "box": {
         "cx": 0,
-        "cy": 9.616160125732423,
-        "cz": 0,
-        "sx": 25.99839973449707,
-        "sy": 20.352320251464842,
-        "sz": 19.99839973449707,
+        "cy": 10.695999832153321,
+        "cz": 0.5321121215820312,
+        "sx": 27.00985336303711,
+        "sy": 22.51199966430664,
+        "sz": 22.074077606201172,
         "minY": -0.5599999999999999,
-        "maxY": 19.792320251464844,
-        "maxZ": 9.999199867248535
+        "maxY": 21.95199966430664,
+        "maxZ": 11.569150924682617
       }
     },
     "portrait": false
   },
   {
-    "n": 17,
-    "id": "mosque",
+    "n": 6,
+    "id": "minoan",
+    "era": "bronze",
     "fam": "block",
-    "note": "Dome on a buttressed drum, a minaret off one corner, horseshoe arcade, monumental pishtaq portal.",
-    "city": "An Islamic old city: the great mosque, the madrasa, the caravanserai, the covered bazaar. Big cultural payoff.",
-    "label": "Grand Mosque",
+    "note": "Knossos. The downward-tapering column — wider at the top, the opposite of every other column in the kit — red and black banding, a colonnaded light-well, horns of consecration on the parapet.",
+    "city": "An Aegean palace town: the palace, storerooms, a theatral area, terraced houses down to a harbour.",
+    "label": "Minoan Palace",
     "subject": {
       "w": 22,
       "d": 16,
@@ -654,434 +220,35 @@
       "doorSide": 1
     },
     "shots": {
-      "hero": "shots/17-mosque-hero.jpg",
-      "street": "shots/17-mosque-street.jpg",
-      "back": "shots/17-mosque-back.jpg"
+      "hero": "shots/06-minoan-hero.jpg",
+      "street": "shots/06-minoan-street.jpg",
+      "back": "shots/06-minoan-back.jpg"
     },
     "metrics": {
-      "crownM": 16,
-      "aboveShell": 28,
-      "roofTopM": 28.8,
-      "decoBoxes": 1645,
-      "realMeshes": 25,
-      "triangles": 22602,
-      "box": {
-        "cx": -1.4069786071777344,
-        "cy": 14.096807365395483,
-        "cz": 1.858889102935791,
-        "sx": 25.767290115356445,
-        "sy": 29.313614730790963,
-        "sz": 20.64222240447998,
-        "minY": -0.5599999999999999,
-        "maxY": 28.753614730790964,
-        "maxZ": 12.180000305175781
-      }
-    },
-    "portrait": false
-  },
-  {
-    "n": 18,
-    "id": "pagoda",
-    "fam": "block",
-    "note": "Timber frame under deep tiered eaves with upturned corners on visible dougong brackets. The lowest eave projects the furthest.",
-    "city": "An East Asian temple quarter: gate, hall, drum tower, pagoda proper.",
-    "label": "Tiered Eaves",
-    "subject": {
-      "w": 22,
-      "d": 16,
-      "storeys": 4,
-      "color": 12170150,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/18-pagoda-hero.jpg",
-      "street": "shots/18-pagoda-street.jpg",
-      "back": "shots/18-pagoda-back.jpg"
-    },
-    "metrics": {
-      "crownM": 12.5,
-      "aboveShell": 27,
-      "roofTopM": 25.3,
-      "decoBoxes": 2527,
-      "realMeshes": 16,
-      "triangles": 31068,
-      "box": {
-        "cx": 0,
-        "cy": 12.404800148010255,
-        "cz": 0,
-        "sx": 33.74800109863281,
-        "sy": 25.929600296020507,
-        "sz": 27.74799919128418,
-        "minY": -0.5599999999999999,
-        "maxY": 25.369600296020508,
-        "maxZ": 13.87399959564209
-      }
-    },
-    "portrait": false
-  },
-  {
-    "n": 19,
-    "id": "adobe",
-    "fam": "block",
-    "note": "Earthen mass: battered walls thickening to the base, projecting vigas, stepped massing, small deep-set windows, a latilla porch. Irregularity IS the style.",
-    "city": "A pueblo/Saltlands town — mission church, trading post, stacked terraced dwellings.",
-    "label": "Pueblo Adobe",
-    "subject": {
-      "w": 22,
-      "d": 16,
-      "storeys": 4,
-      "color": 12170150,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/19-adobe-hero.jpg",
-      "street": "shots/19-adobe-street.jpg",
-      "back": "shots/19-adobe-back.jpg"
-    },
-    "metrics": {
-      "crownM": 1.7,
-      "aboveShell": 24,
-      "roofTopM": 14.5,
-      "decoBoxes": 1382,
-      "realMeshes": 10,
-      "triangles": 16912,
-      "box": {
-        "cx": 0.8841667175292969,
-        "cy": 6.920084209442138,
-        "cz": 0,
-        "sx": 28.590835571289062,
-        "sy": 14.960168418884278,
-        "sz": 23.838590621948242,
-        "minY": -0.5599999999999999,
-        "maxY": 14.400168418884277,
-        "maxZ": 11.919295310974121
-      }
-    },
-    "portrait": false
-  },
-  {
-    "n": 20,
-    "id": "victorian",
-    "fam": "block",
-    "note": "Second Empire. Mansard roof with dormers punching through, projecting oriel bays, a deep bracketed cornice over a cast-iron storefront.",
-    "city": "A 19th-century downtown: the opera house, the hotel, the department store, the rooming block.",
-    "label": "Second Empire",
-    "subject": {
-      "w": 22,
-      "d": 16,
-      "storeys": 4,
-      "color": 12170150,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/20-victorian-hero.jpg",
-      "street": "shots/20-victorian-street.jpg",
-      "back": "shots/20-victorian-back.jpg"
-    },
-    "metrics": {
-      "crownM": 5.4,
-      "aboveShell": 18,
-      "roofTopM": 18.3,
-      "decoBoxes": 2787,
-      "realMeshes": 12,
-      "triangles": 34276,
-      "box": {
-        "cx": -0.36639976501464844,
-        "cy": 8.90622399523163,
-        "cz": 0.36639976501464844,
-        "sx": 26.09280014038086,
-        "sy": 18.932447990463256,
-        "sz": 20.09280014038086,
-        "minY": -0.5599999999999999,
-        "maxY": 18.372447990463257,
-        "maxZ": 10.412799835205078
-      }
-    },
-    "portrait": false
-  },
-  {
-    "n": 21,
-    "id": "queenanne",
-    "fam": "house",
-    "note": "The painted lady: asymmetric mass, a corner turret, a wraparound porch, three colours of shingle and spindlework everywhere.",
-    "city": "An 1890s residential hill. Siblings: Stick, Shingle, Eastlake. The most ornament per square metre in the kit.",
-    "label": "Queen Anne Painted Lady",
-    "subject": {
-      "w": 15,
-      "d": 11,
-      "storeys": 2,
-      "color": 13156270,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/21-queenanne-hero.jpg",
-      "street": "shots/21-queenanne-street.jpg",
-      "back": "shots/21-queenanne-back.jpg"
-    },
-    "metrics": {
-      "crownM": 9.1,
-      "aboveShell": 24,
+      "crownM": 2.7,
+      "aboveShell": 8,
       "roofTopM": 15.5,
-      "decoBoxes": 2598,
-      "realMeshes": 15,
-      "triangles": 31954,
-      "box": {
-        "cx": 0.4633750915527344,
-        "cy": 7.509999961853027,
-        "cz": 1.1870250701904297,
-        "sx": 18.962749481201172,
-        "sy": 16.139999923706053,
-        "sz": 15.106550216674805,
-        "minY": -0.5599999999999999,
-        "maxY": 15.579999923706055,
-        "maxZ": 8.740300178527832
-      }
-    },
-    "portrait": false
-  },
-  {
-    "n": 22,
-    "id": "greekrev",
-    "fam": "house",
-    "note": "A temple bolted to a house: gable turned to the road, full-height colonnade in front of it, a real pediment with a shadowed tympanum, painted dead white.",
-    "city": "A courthouse-square town of white temple fronts — bank, academy, two churches, the big house on the hill.",
-    "label": "Greek Revival Mansion",
-    "subject": {
-      "w": 15,
-      "d": 11,
-      "storeys": 2,
-      "color": 13156270,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/22-greekrev-hero.jpg",
-      "street": "shots/22-greekrev-street.jpg",
-      "back": "shots/22-greekrev-back.jpg"
-    },
-    "metrics": {
-      "crownM": 6.1,
-      "aboveShell": 15,
-      "roofTopM": 12.5,
-      "decoBoxes": 1176,
-      "realMeshes": 6,
-      "triangles": 14496,
+      "decoBoxes": 1944,
+      "realMeshes": 4,
+      "triangles": 23336,
       "box": {
         "cx": 0,
-        "cy": 5.949750156402588,
-        "cz": 1.6587498188018799,
-        "sx": 17.030000686645508,
-        "sy": 13.019500312805176,
-        "sz": 15.627500057220459,
+        "cy": 7.487218589782715,
+        "cz": 1.0836248397827148,
+        "sx": 22.856000900268555,
+        "sy": 16.09443717956543,
+        "sz": 19.023250579833984,
         "minY": -0.5599999999999999,
-        "maxY": 12.459500312805176,
-        "maxZ": 9.47249984741211
+        "maxY": 15.53443717956543,
+        "maxZ": 10.595250129699707
       }
     },
     "portrait": false
   },
   {
-    "n": 23,
-    "id": "plantation",
-    "fam": "house",
-    "note": "Antebellum: a two-storey gallery running the full width on both floors, columns from ground to roof, hipped roof with dormers.",
-    "city": "A river road of galleried houses, an overseer's cottage, a raised creole townhouse.",
-    "label": "Antebellum Plantation House",
-    "subject": {
-      "w": 15,
-      "d": 11,
-      "storeys": 2,
-      "color": 13156270,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/23-plantation-hero.jpg",
-      "street": "shots/23-plantation-street.jpg",
-      "back": "shots/23-plantation-back.jpg"
-    },
-    "metrics": {
-      "crownM": 5.1,
-      "aboveShell": 18,
-      "roofTopM": 11.5,
-      "decoBoxes": 2694,
-      "realMeshes": 2,
-      "triangles": 32488,
-      "box": {
-        "cx": 0,
-        "cy": 5.415000171661377,
-        "cz": 0.13949966430664062,
-        "sx": 20.690000534057617,
-        "sy": 11.950000343322754,
-        "sz": 16.9689998626709,
-        "minY": -0.5599999999999999,
-        "maxY": 11.390000343322754,
-        "maxZ": 8.62399959564209
-      }
-    },
-    "portrait": false
-  },
-  {
-    "n": 24,
-    "id": "manor",
-    "fam": "house",
-    "note": "English manor: steep gables, half-timbering, tall grouped chimney stacks, leaded casements, a stone porch bay.",
-    "city": "A Tudor village — inn, church, market hall, timbered terrace.",
-    "label": "English Manor",
-    "subject": {
-      "w": 15,
-      "d": 11,
-      "storeys": 2,
-      "color": 13156270,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/24-manor-hero.jpg",
-      "street": "shots/24-manor-street.jpg",
-      "back": "shots/24-manor-back.jpg"
-    },
-    "metrics": {
-      "crownM": 11.4,
-      "aboveShell": 20,
-      "roofTopM": 17.8,
-      "decoBoxes": 1086,
-      "realMeshes": 6,
-      "triangles": 13224,
-      "box": {
-        "cx": 0,
-        "cy": 8.636841994639397,
-        "cz": 0.8556592464447021,
-        "sx": 16.820600509643555,
-        "sy": 18.39368398927879,
-        "sz": 14.662682056427002,
-        "minY": -0.5599999999999999,
-        "maxY": 17.833683989278793,
-        "maxZ": 8.187000274658203
-      }
-    },
-    "portrait": false
-  },
-  {
-    "n": 25,
-    "id": "brickhouse",
-    "fam": "house",
-    "note": "Georgian/Colonial: solid brick laid symmetrically about a centre door, side-gabled roof, a chimney at each end. Its argument is DECORUM.",
-    "city": "A colonial town of manners — meeting house, tavern, the row houses, the governor's house.",
-    "label": "Brick Colonial House",
-    "subject": {
-      "w": 15,
-      "d": 11,
-      "storeys": 2,
-      "color": 13156270,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/25-brickhouse-hero.jpg",
-      "street": "shots/25-brickhouse-street.jpg",
-      "back": "shots/25-brickhouse-back.jpg"
-    },
-    "metrics": {
-      "crownM": 6.6,
-      "aboveShell": 16,
-      "roofTopM": 13,
-      "decoBoxes": 1408,
-      "realMeshes": 2,
-      "triangles": 17056,
-      "box": {
-        "cx": 0,
-        "cy": 6.2380001258850095,
-        "cz": 0.459399938583374,
-        "sx": 16.24799919128418,
-        "sy": 13.59600025177002,
-        "sz": 13.408799648284912,
-        "minY": -0.5599999999999999,
-        "maxY": 13.03600025177002,
-        "maxZ": 7.16379976272583
-      }
-    },
-    "portrait": false
-  },
-  {
-    "n": 26,
-    "id": "spanish",
-    "fam": "house",
-    "note": "Spanish Colonial: white stucco, a low-pitch clay barrel-tile roof, arcaded loggia, wrought iron, a bell-gable.",
-    "city": "A mission town: the mission itself, the hacienda, the plaza arcade, the courtyard house.",
-    "label": "Spanish Colonial Mansion",
-    "subject": {
-      "w": 15,
-      "d": 11,
-      "storeys": 2,
-      "color": 13156270,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/26-spanish-hero.jpg",
-      "street": "shots/26-spanish-street.jpg",
-      "back": "shots/26-spanish-back.jpg"
-    },
-    "metrics": {
-      "crownM": 7.6,
-      "aboveShell": 21,
-      "roofTopM": 14,
-      "decoBoxes": 1701,
-      "realMeshes": 5,
-      "triangles": 20932,
-      "box": {
-        "cx": 0,
-        "cy": 6.668714285543986,
-        "cz": 1.4189999103546143,
-        "sx": 16.672000885009766,
-        "sy": 14.457428571087974,
-        "sz": 17.381999492645264,
-        "minY": -0.5599999999999999,
-        "maxY": 13.897428571087973,
-        "maxZ": 10.109999656677246
-      }
-    },
-    "portrait": false
-  },
-  {
-    "n": 27,
-    "id": "machiya",
-    "fam": "house",
-    "note": "Japanese townhouse/minka: a low timber frame with pale plaster infill, a veranda deck along the street face, one enormous tiled roof with deep eaves.",
-    "city": "A machiya street — shop-house, teahouse, gate house, storehouse (kura).",
-    "label": "Japanese Residence",
-    "subject": {
-      "w": 15,
-      "d": 11,
-      "storeys": 2,
-      "color": 13156270,
-      "doorSide": 1
-    },
-    "shots": {
-      "hero": "shots/27-machiya-hero.jpg",
-      "street": "shots/27-machiya-street.jpg",
-      "back": "shots/27-machiya-back.jpg"
-    },
-    "metrics": {
-      "crownM": 4.6,
-      "aboveShell": 14,
-      "roofTopM": 11,
-      "decoBoxes": 1370,
-      "realMeshes": 2,
-      "triangles": 16600,
-      "box": {
-        "cx": 0,
-        "cy": 5.2349998664855955,
-        "cz": 0.18600010871887207,
-        "sx": 19.959999084472656,
-        "sy": 11.589999732971192,
-        "sz": 16.332000255584717,
-        "minY": -0.5599999999999999,
-        "maxY": 11.029999732971191,
-        "maxZ": 8.35200023651123
-      }
-    },
-    "portrait": false
-  },
-  {
-    "n": 28,
+    "n": 7,
     "id": "romanvilla",
+    "era": "classical",
     "fam": "house",
     "note": "Roman villa: a low tile roof, a colonnaded peristyle, stuccoed masonry, a courtyard the building wraps.",
     "city": "A Mediterranean antique quarter — villa, baths, forum stoa, insula.",
@@ -1094,9 +261,9 @@
       "doorSide": 1
     },
     "shots": {
-      "hero": "shots/28-romanvilla-hero.jpg",
-      "street": "shots/28-romanvilla-street.jpg",
-      "back": "shots/28-romanvilla-back.jpg"
+      "hero": "shots/07-romanvilla-hero.jpg",
+      "street": "shots/07-romanvilla-street.jpg",
+      "back": "shots/07-romanvilla-back.jpg"
     },
     "metrics": {
       "crownM": 3.9,
@@ -1120,8 +287,1731 @@
     "portrait": false
   },
   {
+    "n": 8,
+    "id": "adobe",
+    "era": "americas",
+    "fam": "block",
+    "note": "Earthen mass: battered walls thickening to the base, projecting vigas, stepped massing, small deep-set windows, a latilla porch. Irregularity IS the style.",
+    "city": "A pueblo/Saltlands town — mission church, trading post, stacked terraced dwellings.",
+    "label": "Pueblo Adobe",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/08-adobe-hero.jpg",
+      "street": "shots/08-adobe-street.jpg",
+      "back": "shots/08-adobe-back.jpg"
+    },
+    "metrics": {
+      "crownM": 1.7,
+      "aboveShell": 24,
+      "roofTopM": 14.5,
+      "decoBoxes": 1382,
+      "realMeshes": 10,
+      "triangles": 16912,
+      "box": {
+        "cx": 0.8841667175292969,
+        "cy": 6.920084209442138,
+        "cz": 0,
+        "sx": 28.590835571289062,
+        "sy": 14.960168418884278,
+        "sz": 23.838590621948242,
+        "minY": -0.5599999999999999,
+        "maxY": 14.400168418884277,
+        "maxZ": 11.919295310974121
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 9,
+    "id": "mayatemple",
+    "era": "americas",
+    "fam": "block",
+    "note": "Tikal. A far steeper stepped pyramid than a ziggurat, a small cella on the summit, and a roof comb standing above it taller than the cella itself. The comb is the silhouette.",
+    "city": "A Maya city — temple pyramids, a palace range, a ballcourt, stelae in a plaza.",
+    "label": "Maya Temple-Pyramid",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/09-mayatemple-hero.jpg",
+      "street": "shots/09-mayatemple-street.jpg",
+      "back": "shots/09-mayatemple-back.jpg"
+    },
+    "metrics": {
+      "crownM": 14.2,
+      "aboveShell": 23,
+      "roofTopM": 27,
+      "decoBoxes": 245,
+      "realMeshes": 0,
+      "triangles": 2940,
+      "box": {
+        "cx": 0,
+        "cy": 13.208840103149415,
+        "cz": 0.6554999351501465,
+        "sx": 29.47599983215332,
+        "sy": 27.537680206298827,
+        "sz": 24.786999702453613,
+        "minY": -0.5599999999999999,
+        "maxY": 26.977680206298828,
+        "maxZ": 13.048999786376953
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 10,
+    "id": "puuc",
+    "era": "americas",
+    "fam": "block",
+    "note": "Uxmal. A plain lower wall and, above a medial moulding, an encrusted upper frieze of stone mosaic: colonnettes, stepped fret, stacked long-nosed masks at the corners.",
+    "city": "A Puuc hill town: palace, nunnery quadrangle, arch gateway, chultun cisterns.",
+    "label": "Puuc Palace",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/10-puuc-hero.jpg",
+      "street": "shots/10-puuc-street.jpg",
+      "back": "shots/10-puuc-back.jpg"
+    },
+    "metrics": {
+      "crownM": 1.2,
+      "aboveShell": 7,
+      "roofTopM": 14,
+      "decoBoxes": 1459,
+      "realMeshes": 0,
+      "triangles": 17508,
+      "box": {
+        "cx": 0,
+        "cy": 6.743219585418701,
+        "cz": 0.15000009536743164,
+        "sx": 25.479999542236328,
+        "sy": 14.606439170837403,
+        "sz": 19.77999973297119,
+        "minY": -0.5599999999999999,
+        "maxY": 14.046439170837402,
+        "maxZ": 10.039999961853027
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 11,
+    "id": "talud",
+    "era": "americas",
+    "fam": "block",
+    "note": "Teotihuacan. A repeating unit stacked up the elevation — sloping talud, then a framed vertical tablero that oversails it. The projecting frame throws the shadow that makes the profile.",
+    "city": "The Avenue of the Dead: platforms, apartment compounds, a painted precinct.",
+    "label": "Talud-Tablero Platform",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/11-talud-hero.jpg",
+      "street": "shots/11-talud-street.jpg",
+      "back": "shots/11-talud-back.jpg"
+    },
+    "metrics": {
+      "crownM": 1.2,
+      "aboveShell": 8,
+      "roofTopM": 14,
+      "decoBoxes": 260,
+      "realMeshes": 0,
+      "triangles": 3120,
+      "box": {
+        "cx": 0,
+        "cy": 6.743219585418701,
+        "cz": 0.31494808197021484,
+        "sx": 29.920207977294922,
+        "sy": 14.606439170837403,
+        "sz": 24.55010414123535,
+        "minY": -0.5599999999999999,
+        "maxY": 14.046439170837402,
+        "maxZ": 12.59000015258789
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 12,
+    "id": "gothic",
+    "era": "medieval",
+    "fam": "block",
+    "note": "Gothic Revival civic front: buttresses stepping back as they rise, pinnacles breaking the roofline, tracery, a rose window over a deep portal. Everything ends in a point.",
+    "city": "An old-world cathedral town — the hall, the guild, the college quad, the parish church.",
+    "label": "Gothic Revival",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/12-gothic-hero.jpg",
+      "street": "shots/12-gothic-street.jpg",
+      "back": "shots/12-gothic-back.jpg"
+    },
+    "metrics": {
+      "crownM": 7,
+      "aboveShell": 9,
+      "roofTopM": 19.8,
+      "decoBoxes": 4598,
+      "realMeshes": 0,
+      "triangles": 55176,
+      "box": {
+        "cx": 0,
+        "cy": 9.616160125732423,
+        "cz": 0,
+        "sx": 25.99839973449707,
+        "sy": 20.352320251464842,
+        "sz": 19.99839973449707,
+        "minY": -0.5599999999999999,
+        "maxY": 19.792320251464844,
+        "maxZ": 9.999199867248535
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 13,
+    "id": "manor",
+    "era": "medieval",
+    "fam": "house",
+    "note": "English manor: steep gables, half-timbering, tall grouped chimney stacks, leaded casements, a stone porch bay.",
+    "city": "A Tudor village — inn, church, market hall, timbered terrace.",
+    "label": "English Manor",
+    "subject": {
+      "w": 15,
+      "d": 11,
+      "storeys": 2,
+      "color": 13156270,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/13-manor-hero.jpg",
+      "street": "shots/13-manor-street.jpg",
+      "back": "shots/13-manor-back.jpg"
+    },
+    "metrics": {
+      "crownM": 11.4,
+      "aboveShell": 20,
+      "roofTopM": 17.8,
+      "decoBoxes": 1086,
+      "realMeshes": 6,
+      "triangles": 13224,
+      "box": {
+        "cx": 0,
+        "cy": 8.636841994639397,
+        "cz": 0.8556592464447021,
+        "sx": 16.820600509643555,
+        "sy": 18.39368398927879,
+        "sz": 14.662682056427002,
+        "minY": -0.5599999999999999,
+        "maxY": 17.833683989278793,
+        "maxZ": 8.187000274658203
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 14,
+    "id": "stave",
+    "era": "medieval",
+    "fam": "house",
+    "note": "Borgund. Steeply pitched shingled roofs stacked in diminishing tiers climbing to a point, dragon-head finials at the gables, an external gallery on posts, vertical stave planking.",
+    "city": "A Norse valley: stave church, longhouse farmstead, a stabbur on staddle stones, a boathouse.",
+    "label": "Stave Church",
+    "subject": {
+      "w": 15,
+      "d": 11,
+      "storeys": 2,
+      "color": 13156270,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/14-stave-hero.jpg",
+      "street": "shots/14-stave-street.jpg",
+      "back": "shots/14-stave-back.jpg"
+    },
+    "metrics": {
+      "crownM": 16.6,
+      "aboveShell": 29,
+      "roofTopM": 23,
+      "decoBoxes": 1124,
+      "realMeshes": 0,
+      "triangles": 13488,
+      "box": {
+        "cx": 0,
+        "cy": 11.182532043457032,
+        "cz": 0.14999985694885254,
+        "sx": 19.674999237060547,
+        "sy": 23.48506408691406,
+        "sz": 15.974999904632568,
+        "minY": -0.5599999999999999,
+        "maxY": 22.925064086914062,
+        "maxZ": 8.137499809265137
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 15,
+    "id": "izba",
+    "era": "medieval",
+    "fam": "house",
+    "note": "Horizontal log courses with interlocked corners whose ends project past the wall at every course, a raised podklet, a carved bargeboard, nalichniki window surrounds.",
+    "city": "A Russian village — izby along one street, a wooden church, a bathhouse, a well crane.",
+    "label": "Russian Izba",
+    "subject": {
+      "w": 15,
+      "d": 11,
+      "storeys": 2,
+      "color": 13156270,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/15-izba-hero.jpg",
+      "street": "shots/15-izba-street.jpg",
+      "back": "shots/15-izba-back.jpg"
+    },
+    "metrics": {
+      "crownM": 8.4,
+      "aboveShell": 10,
+      "roofTopM": 14.8,
+      "decoBoxes": 712,
+      "realMeshes": 0,
+      "triangles": 8544,
+      "box": {
+        "cx": 0,
+        "cy": 7.099250049591064,
+        "cz": 0.8521997928619385,
+        "sx": 17.419200897216797,
+        "sy": 15.31850009918213,
+        "sz": 15.123599529266357,
+        "minY": -0.5599999999999999,
+        "maxY": 14.758500099182129,
+        "maxZ": 8.413999557495117
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 16,
+    "id": "mosque",
+    "era": "islamic",
+    "fam": "block",
+    "note": "Dome on a buttressed drum, a minaret off one corner, horseshoe arcade, monumental pishtaq portal.",
+    "city": "An Islamic old city: the great mosque, the madrasa, the caravanserai, the covered bazaar. Big cultural payoff.",
+    "label": "Grand Mosque",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/16-mosque-hero.jpg",
+      "street": "shots/16-mosque-street.jpg",
+      "back": "shots/16-mosque-back.jpg"
+    },
+    "metrics": {
+      "crownM": 16,
+      "aboveShell": 28,
+      "roofTopM": 28.8,
+      "decoBoxes": 1645,
+      "realMeshes": 25,
+      "triangles": 22602,
+      "box": {
+        "cx": -1.4069786071777344,
+        "cy": 14.096807365395483,
+        "cz": 1.858889102935791,
+        "sx": 25.767290115356445,
+        "sy": 29.313614730790963,
+        "sz": 20.64222240447998,
+        "minY": -0.5599999999999999,
+        "maxY": 28.753614730790964,
+        "maxZ": 12.180000305175781
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 17,
+    "id": "caravanserai",
+    "era": "islamic",
+    "fam": "block",
+    "note": "A fortified block with corner towers, a crenellated parapet and almost no openings, spending everything on one monumental iwan portal projecting above the parapet.",
+    "city": "A Silk Road halt: caravanserai, covered bazaar, madrasa, a domed cistern.",
+    "label": "Caravanserai",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/17-caravanserai-hero.jpg",
+      "street": "shots/17-caravanserai-street.jpg",
+      "back": "shots/17-caravanserai-back.jpg"
+    },
+    "metrics": {
+      "crownM": 3.7,
+      "aboveShell": 9,
+      "roofTopM": 16.5,
+      "decoBoxes": 637,
+      "realMeshes": 0,
+      "triangles": 7644,
+      "box": {
+        "cx": 0,
+        "cy": 8.009999961853028,
+        "cz": 0.05557584762573242,
+        "sx": 27.217697143554688,
+        "sy": 17.139999923706053,
+        "sz": 21.328848838806152,
+        "minY": -0.5599999999999999,
+        "maxY": 16.579999923706055,
+        "maxZ": 10.720000267028809
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 18,
+    "id": "shikhara",
+    "era": "southasia",
+    "fam": "block",
+    "note": "Khajuraho. A curvilinear tower of stacked receding courses that rises vertically then curves in, an amalaka disc and pot finial at the apex, a mandapa porch under its own stepped roof, a star-pointed plan.",
+    "city": "A Nagara temple town: shikhara, tank with ghats, a pillared hall, subsidiary shrines.",
+    "label": "Nagara Temple",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/18-shikhara-hero.jpg",
+      "street": "shots/18-shikhara-street.jpg",
+      "back": "shots/18-shikhara-back.jpg"
+    },
+    "metrics": {
+      "crownM": 27.2,
+      "aboveShell": 65,
+      "roofTopM": 40,
+      "decoBoxes": 501,
+      "realMeshes": 7,
+      "triangles": 6502,
+      "box": {
+        "cx": 0,
+        "cy": 19.73689302901731,
+        "cz": 3.3298001289367676,
+        "sx": 26.176000595092773,
+        "sy": 40.593786058034624,
+        "sz": 26.83560085296631,
+        "minY": -0.5599999999999999,
+        "maxY": 40.03378605803462,
+        "maxZ": 16.747600555419922
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 19,
+    "id": "prasat",
+    "era": "southasia",
+    "fam": "block",
+    "note": "Angkor. A quincunx — one central tower and four at the corners — each a stack of diminishing storeys with antefix horns at every tier, false doors on three sides, naga balustrades.",
+    "city": "A Khmer temple-city: prasat, gopura gates, a baray reservoir, a laterite causeway.",
+    "label": "Khmer Prasat",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/19-prasat-hero.jpg",
+      "street": "shots/19-prasat-street.jpg",
+      "back": "shots/19-prasat-back.jpg"
+    },
+    "metrics": {
+      "crownM": 21.2,
+      "aboveShell": 37,
+      "roofTopM": 34,
+      "decoBoxes": 640,
+      "realMeshes": 1,
+      "triangles": 7722,
+      "box": {
+        "cx": 0,
+        "cy": 16.769939899769838,
+        "cz": 3.1140003204345703,
+        "sx": 27.104000091552734,
+        "sy": 34.65987979953968,
+        "sz": 27.332000732421875,
+        "minY": -0.5599999999999999,
+        "maxY": 34.09987979953968,
+        "maxZ": 16.780000686645508
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 20,
+    "id": "stupa",
+    "era": "southasia",
+    "fam": "block",
+    "note": "Bagan. A bell on a stepped terrace under an hti — a spire of diminishing rings — with a pyatthat, the multi-tiered spired roof, over the entrance hall.",
+    "city": "A plain of pagodas: stupa, ordination hall, monastery, a pyatthat gate.",
+    "label": "Stupa & Pyatthat",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/20-stupa-hero.jpg",
+      "street": "shots/20-stupa-street.jpg",
+      "back": "shots/20-stupa-back.jpg"
+    },
+    "metrics": {
+      "crownM": 27.5,
+      "aboveShell": 24,
+      "roofTopM": 40.3,
+      "decoBoxes": 1622,
+      "realMeshes": 2,
+      "triangles": 19626,
+      "box": {
+        "cx": 0,
+        "cy": 19.831941129773313,
+        "cz": 2.0675601959228516,
+        "sx": 26.639999389648438,
+        "sy": 40.78388225954663,
+        "sz": 24.77511978149414,
+        "minY": -0.5599999999999999,
+        "maxY": 40.22388225954663,
+        "maxZ": 14.455120086669922
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 21,
+    "id": "pagoda",
+    "era": "eastasia",
+    "fam": "block",
+    "note": "Timber frame under deep tiered eaves with upturned corners on visible dougong brackets. The lowest eave projects the furthest.",
+    "city": "An East Asian temple quarter: gate, hall, drum tower, pagoda proper.",
+    "label": "Tiered Eaves",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/21-pagoda-hero.jpg",
+      "street": "shots/21-pagoda-street.jpg",
+      "back": "shots/21-pagoda-back.jpg"
+    },
+    "metrics": {
+      "crownM": 12.5,
+      "aboveShell": 27,
+      "roofTopM": 25.3,
+      "decoBoxes": 2527,
+      "realMeshes": 16,
+      "triangles": 31068,
+      "box": {
+        "cx": 0,
+        "cy": 12.404800148010255,
+        "cz": 0,
+        "sx": 33.74800109863281,
+        "sy": 25.929600296020507,
+        "sz": 27.74799919128418,
+        "minY": -0.5599999999999999,
+        "maxY": 25.369600296020508,
+        "maxZ": 13.87399959564209
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 22,
+    "id": "machiya",
+    "era": "eastasia",
+    "fam": "house",
+    "note": "Japanese townhouse/minka: a low timber frame with pale plaster infill, a veranda deck along the street face, one enormous tiled roof with deep eaves.",
+    "city": "A machiya street — shop-house, teahouse, gate house, storehouse (kura).",
+    "label": "Japanese Residence",
+    "subject": {
+      "w": 15,
+      "d": 11,
+      "storeys": 2,
+      "color": 13156270,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/22-machiya-hero.jpg",
+      "street": "shots/22-machiya-street.jpg",
+      "back": "shots/22-machiya-back.jpg"
+    },
+    "metrics": {
+      "crownM": 4.6,
+      "aboveShell": 14,
+      "roofTopM": 11,
+      "decoBoxes": 1370,
+      "realMeshes": 2,
+      "triangles": 16600,
+      "box": {
+        "cx": 0,
+        "cy": 5.2349998664855955,
+        "cz": 0.18600010871887207,
+        "sx": 19.959999084472656,
+        "sy": 11.589999732971192,
+        "sz": 16.332000255584717,
+        "minY": -0.5599999999999999,
+        "maxY": 11.029999732971191,
+        "maxZ": 8.35200023651123
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 23,
+    "id": "sahelian",
+    "era": "africa",
+    "fam": "block",
+    "note": "Djenne. Engaged buttress piers running the full height and ending in cone finials, toron palm beams studding the whole elevation in a grid, battered mud walls, a parapet of pinnacles. No windows.",
+    "city": "A Sahelian city of earth: the great mosque, a merchant quarter, mud granaries, a Friday market square.",
+    "label": "Sahelian Mudbrick",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/23-sahelian-hero.jpg",
+      "street": "shots/23-sahelian-street.jpg",
+      "back": "shots/23-sahelian-back.jpg"
+    },
+    "metrics": {
+      "crownM": 3.7,
+      "aboveShell": 19,
+      "roofTopM": 16.5,
+      "decoBoxes": 1637,
+      "realMeshes": 8,
+      "triangles": 20604,
+      "box": {
+        "cx": 0.021709442138671875,
+        "cy": 8.031204162765027,
+        "cz": 0.15355253219604492,
+        "sx": 27.140960693359375,
+        "sy": 17.18240832553005,
+        "sz": 21.472121238708496,
+        "minY": -0.5599999999999999,
+        "maxY": 16.622408325530053,
+        "maxZ": 10.889613151550293
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 24,
+    "id": "zimbabwe",
+    "era": "africa",
+    "fam": "block",
+    "note": "The Great Enclosure. Coursed granite laid without mortar, battering and thickening enormously at the base, almost no openings, a chevron course near the top and a solid conical tower.",
+    "city": "A dry-stone capital: the enclosure, the hill complex, narrow parallel passages, a valley of daga huts.",
+    "label": "Great Zimbabwe Dry-Stone",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/24-zimbabwe-hero.jpg",
+      "street": "shots/24-zimbabwe-street.jpg",
+      "back": "shots/24-zimbabwe-back.jpg"
+    },
+    "metrics": {
+      "crownM": 1.9,
+      "aboveShell": 9,
+      "roofTopM": 14.8,
+      "decoBoxes": 1191,
+      "realMeshes": 0,
+      "triangles": 14292,
+      "box": {
+        "cx": 1.6533961296081543,
+        "cy": 7.089999885559082,
+        "cz": -0.8876681327819824,
+        "sx": 29.540696144104004,
+        "sy": 15.299999771118165,
+        "sz": 23.18466281890869,
+        "minY": -0.5599999999999999,
+        "maxY": 14.739999771118164,
+        "maxZ": 10.704663276672363
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 25,
+    "id": "swahili",
+    "era": "africa",
+    "fam": "house",
+    "note": "Lamu. Coral rag under lime plaster, a flat terrace roof behind a low parapet, a deeply carved timber door in a frame far larger than it needs, zidaka niches, a baraza bench at the street.",
+    "city": "A Swahili stone town: merchant houses, a mosque, a customs house, alleys too narrow for carts.",
+    "label": "Swahili Coral-Stone",
+    "subject": {
+      "w": 15,
+      "d": 11,
+      "storeys": 2,
+      "color": 13156270,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/25-swahili-hero.jpg",
+      "street": "shots/25-swahili-street.jpg",
+      "back": "shots/25-swahili-back.jpg"
+    },
+    "metrics": {
+      "crownM": 0.8,
+      "aboveShell": 6,
+      "roofTopM": 7.3,
+      "decoBoxes": 507,
+      "realMeshes": 0,
+      "triangles": 6084,
+      "box": {
+        "cx": 0,
+        "cy": 3.3740000438690188,
+        "cz": 0.2962498664855957,
+        "sx": 15.9350004196167,
+        "sy": 7.868000087738037,
+        "sz": 12.52750015258789,
+        "minY": -0.5599999999999999,
+        "maxY": 7.308000087738037,
+        "maxZ": 6.559999942779541
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 26,
+    "id": "palazzo",
+    "era": "renaissance",
+    "fam": "block",
+    "note": "Strozzi. Three storeys getting smoother as they rise — rock-faced, then channelled, then near-ashlar — bifora windows, corner quoin chains, and an enormous cornice throwing a hard band of shade.",
+    "city": "A Florentine quarter: palazzi, a loggia, a baptistery, a bridge lined with shops.",
+    "label": "Florentine Palazzo",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/26-palazzo-hero.jpg",
+      "street": "shots/26-palazzo-street.jpg",
+      "back": "shots/26-palazzo-back.jpg"
+    },
+    "metrics": {
+      "crownM": 1.4,
+      "aboveShell": 9,
+      "roofTopM": 14.3,
+      "decoBoxes": 5419,
+      "realMeshes": 0,
+      "triangles": 65028,
+      "box": {
+        "cx": 0,
+        "cy": 6.850000114440918,
+        "cz": 0,
+        "sx": 26,
+        "sy": 14.820000228881836,
+        "sz": 20,
+        "minY": -0.5599999999999999,
+        "maxY": 14.260000228881836,
+        "maxZ": 10
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 27,
+    "id": "baroque",
+    "era": "renaissance",
+    "fam": "block",
+    "note": "Il Gesu. A two-storey front stitched by great volute scrolls, giant-order pilasters layered so the centre steps forward, statue niches, a broken segmental pediment. A wall that swells.",
+    "city": "A baroque capital: church fronts, a fountain square, a palace, an obelisk on an axis.",
+    "label": "Baroque Church Front",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/27-baroque-hero.jpg",
+      "street": "shots/27-baroque-street.jpg",
+      "back": "shots/27-baroque-back.jpg"
+    },
+    "metrics": {
+      "crownM": 7,
+      "aboveShell": 11,
+      "roofTopM": 19.8,
+      "decoBoxes": 1042,
+      "realMeshes": 0,
+      "triangles": 12504,
+      "box": {
+        "cx": 0,
+        "cy": 9.652000160217286,
+        "cz": 0.24599981307983398,
+        "sx": 23.760000228881836,
+        "sy": 20.42400032043457,
+        "sz": 18.251999855041504,
+        "minY": -0.5599999999999999,
+        "maxY": 19.86400032043457,
+        "maxZ": 9.371999740600586
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 28,
+    "id": "palladian",
+    "era": "renaissance",
+    "fam": "house",
+    "note": "Villa Rotonda. A piano nobile over a rusticated basement, a full temple-front portico, flanking wings, a serliana window, a shallow dome. Raised and arched where Greek Revival is grounded and gabled.",
+    "city": "A Veneto landscape of villas, barchesse, a walled garden, a canal.",
+    "label": "Palladian Villa",
+    "subject": {
+      "w": 15,
+      "d": 11,
+      "storeys": 2,
+      "color": 13156270,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/28-palladian-hero.jpg",
+      "street": "shots/28-palladian-street.jpg",
+      "back": "shots/28-palladian-back.jpg"
+    },
+    "metrics": {
+      "crownM": 9.1,
+      "aboveShell": 20,
+      "roofTopM": 15.5,
+      "decoBoxes": 1233,
+      "realMeshes": 7,
+      "triangles": 15584,
+      "box": {
+        "cx": 0,
+        "cy": 7.412800006365775,
+        "cz": 1.433499813079834,
+        "sx": 17.049999237060547,
+        "sy": 15.945600012731552,
+        "sz": 15.776999473571777,
+        "minY": -0.5599999999999999,
+        "maxY": 15.385600012731551,
+        "maxZ": 9.321999549865723
+      }
+    },
+    "portrait": false
+  },
+  {
     "n": 29,
+    "id": "greekrev",
+    "era": "colonial",
+    "fam": "house",
+    "note": "A temple bolted to a house: gable turned to the road, full-height colonnade in front of it, a real pediment with a shadowed tympanum, painted dead white.",
+    "city": "A courthouse-square town of white temple fronts — bank, academy, two churches, the big house on the hill.",
+    "label": "Greek Revival Mansion",
+    "subject": {
+      "w": 15,
+      "d": 11,
+      "storeys": 2,
+      "color": 13156270,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/29-greekrev-hero.jpg",
+      "street": "shots/29-greekrev-street.jpg",
+      "back": "shots/29-greekrev-back.jpg"
+    },
+    "metrics": {
+      "crownM": 6.1,
+      "aboveShell": 15,
+      "roofTopM": 12.5,
+      "decoBoxes": 1176,
+      "realMeshes": 6,
+      "triangles": 14496,
+      "box": {
+        "cx": 0,
+        "cy": 5.949750156402588,
+        "cz": 1.6587498188018799,
+        "sx": 17.030000686645508,
+        "sy": 13.019500312805176,
+        "sz": 15.627500057220459,
+        "minY": -0.5599999999999999,
+        "maxY": 12.459500312805176,
+        "maxZ": 9.47249984741211
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 30,
+    "id": "plantation",
+    "era": "colonial",
+    "fam": "house",
+    "note": "Antebellum: a two-storey gallery running the full width on both floors, columns from ground to roof, hipped roof with dormers.",
+    "city": "A river road of galleried houses, an overseer's cottage, a raised creole townhouse.",
+    "label": "Antebellum Plantation House",
+    "subject": {
+      "w": 15,
+      "d": 11,
+      "storeys": 2,
+      "color": 13156270,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/30-plantation-hero.jpg",
+      "street": "shots/30-plantation-street.jpg",
+      "back": "shots/30-plantation-back.jpg"
+    },
+    "metrics": {
+      "crownM": 5.1,
+      "aboveShell": 18,
+      "roofTopM": 11.5,
+      "decoBoxes": 2694,
+      "realMeshes": 2,
+      "triangles": 32488,
+      "box": {
+        "cx": 0,
+        "cy": 5.415000171661377,
+        "cz": 0.13949966430664062,
+        "sx": 20.690000534057617,
+        "sy": 11.950000343322754,
+        "sz": 16.9689998626709,
+        "minY": -0.5599999999999999,
+        "maxY": 11.390000343322754,
+        "maxZ": 8.62399959564209
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 31,
+    "id": "brickhouse",
+    "era": "colonial",
+    "fam": "house",
+    "note": "Georgian/Colonial: solid brick laid symmetrically about a centre door, side-gabled roof, a chimney at each end. Its argument is DECORUM.",
+    "city": "A colonial town of manners — meeting house, tavern, the row houses, the governor's house.",
+    "label": "Brick Colonial House",
+    "subject": {
+      "w": 15,
+      "d": 11,
+      "storeys": 2,
+      "color": 13156270,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/31-brickhouse-hero.jpg",
+      "street": "shots/31-brickhouse-street.jpg",
+      "back": "shots/31-brickhouse-back.jpg"
+    },
+    "metrics": {
+      "crownM": 6.6,
+      "aboveShell": 16,
+      "roofTopM": 13,
+      "decoBoxes": 1408,
+      "realMeshes": 2,
+      "triangles": 17056,
+      "box": {
+        "cx": 0,
+        "cy": 6.2380001258850095,
+        "cz": 0.459399938583374,
+        "sx": 16.24799919128418,
+        "sy": 13.59600025177002,
+        "sz": 13.408799648284912,
+        "minY": -0.5599999999999999,
+        "maxY": 13.03600025177002,
+        "maxZ": 7.16379976272583
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 32,
+    "id": "spanish",
+    "era": "colonial",
+    "fam": "house",
+    "note": "Spanish Colonial: white stucco, a low-pitch clay barrel-tile roof, arcaded loggia, wrought iron, a bell-gable.",
+    "city": "A mission town: the mission itself, the hacienda, the plaza arcade, the courtyard house.",
+    "label": "Spanish Colonial Mansion",
+    "subject": {
+      "w": 15,
+      "d": 11,
+      "storeys": 2,
+      "color": 13156270,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/32-spanish-hero.jpg",
+      "street": "shots/32-spanish-street.jpg",
+      "back": "shots/32-spanish-back.jpg"
+    },
+    "metrics": {
+      "crownM": 7.6,
+      "aboveShell": 21,
+      "roofTopM": 14,
+      "decoBoxes": 1701,
+      "realMeshes": 5,
+      "triangles": 20932,
+      "box": {
+        "cx": 0,
+        "cy": 6.668714285543986,
+        "cz": 1.4189999103546143,
+        "sx": 16.672000885009766,
+        "sy": 14.457428571087974,
+        "sz": 17.381999492645264,
+        "minY": -0.5599999999999999,
+        "maxY": 13.897428571087973,
+        "maxZ": 10.109999656677246
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 33,
+    "id": "brick",
+    "era": "industrial",
+    "fam": "block",
+    "note": "Chicago loft, c.1905. Load-bearing brick read as STRUCTURE: piers between the bays, segmental arches, a corbelled cornice, cast-iron storefront, fire escape down the flank.",
+    "city": "A warehouse district that became lofts. Siblings: the mill building, the printing house, the brick-and-timber garment block.",
+    "label": "Chicago Loft",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/33-brick-hero.jpg",
+      "street": "shots/33-brick-street.jpg",
+      "back": "shots/33-brick-back.jpg"
+    },
+    "metrics": {
+      "crownM": 2.2,
+      "aboveShell": 8,
+      "roofTopM": 15,
+      "decoBoxes": 1452,
+      "realMeshes": 0,
+      "triangles": 17424,
+      "box": {
+        "cx": -0.2871999740600586,
+        "cy": 7.181999893188476,
+        "cz": 0,
+        "sx": 23.985599517822266,
+        "sy": 15.483999786376954,
+        "sz": 17.41119956970215,
+        "minY": -0.5599999999999999,
+        "maxY": 14.923999786376953,
+        "maxZ": 8.705599784851074
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 34,
+    "id": "stone",
+    "era": "industrial",
+    "fam": "block",
+    "note": "Ashlar bank in three parts — rusticated base, plain shaft, attic over a heavy cornice — with a giant order solved backwards from the roofline.",
+    "city": "A financial quarter of stone institutions: the exchange, the courthouse, the trust company, the library.",
+    "label": "Ashlar Bank",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/34-stone-hero.jpg",
+      "street": "shots/34-stone-street.jpg",
+      "back": "shots/34-stone-back.jpg"
+    },
+    "metrics": {
+      "crownM": 1.9,
+      "aboveShell": 10,
+      "roofTopM": 14.8,
+      "decoBoxes": 1870,
+      "realMeshes": 10,
+      "triangles": 23256,
+      "box": {
+        "cx": 0,
+        "cy": 7.14197847366333,
+        "cz": 1.2109999656677246,
+        "sx": 23.920000076293945,
+        "sy": 15.40395694732666,
+        "sz": 20.342000007629395,
+        "minY": -0.5599999999999999,
+        "maxY": 14.84395694732666,
+        "maxZ": 11.381999969482422
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 35,
+    "id": "victorian",
+    "era": "industrial",
+    "fam": "block",
+    "note": "Second Empire. Mansard roof with dormers punching through, projecting oriel bays, a deep bracketed cornice over a cast-iron storefront.",
+    "city": "A 19th-century downtown: the opera house, the hotel, the department store, the rooming block.",
+    "label": "Second Empire",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/35-victorian-hero.jpg",
+      "street": "shots/35-victorian-street.jpg",
+      "back": "shots/35-victorian-back.jpg"
+    },
+    "metrics": {
+      "crownM": 5.4,
+      "aboveShell": 18,
+      "roofTopM": 18.3,
+      "decoBoxes": 2787,
+      "realMeshes": 12,
+      "triangles": 34276,
+      "box": {
+        "cx": -0.36639976501464844,
+        "cy": 8.90622399523163,
+        "cz": 0.36639976501464844,
+        "sx": 26.09280014038086,
+        "sy": 18.932447990463256,
+        "sz": 20.09280014038086,
+        "minY": -0.5599999999999999,
+        "maxY": 18.372447990463257,
+        "maxZ": 10.412799835205078
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 36,
+    "id": "queenanne",
+    "era": "industrial",
+    "fam": "house",
+    "note": "The painted lady: asymmetric mass, a corner turret, a wraparound porch, three colours of shingle and spindlework everywhere.",
+    "city": "An 1890s residential hill. Siblings: Stick, Shingle, Eastlake. The most ornament per square metre in the kit.",
+    "label": "Queen Anne Painted Lady",
+    "subject": {
+      "w": 15,
+      "d": 11,
+      "storeys": 2,
+      "color": 13156270,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/36-queenanne-hero.jpg",
+      "street": "shots/36-queenanne-street.jpg",
+      "back": "shots/36-queenanne-back.jpg"
+    },
+    "metrics": {
+      "crownM": 9.1,
+      "aboveShell": 24,
+      "roofTopM": 15.5,
+      "decoBoxes": 2598,
+      "realMeshes": 15,
+      "triangles": 31954,
+      "box": {
+        "cx": 0.4633750915527344,
+        "cy": 7.509999961853027,
+        "cz": 1.1870250701904297,
+        "sx": 18.962749481201172,
+        "sy": 16.139999923706053,
+        "sz": 15.106550216674805,
+        "minY": -0.5599999999999999,
+        "maxY": 15.579999923706055,
+        "maxZ": 8.740300178527832
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 37,
+    "id": "intl",
+    "era": "early20",
+    "fam": "tower",
+    "note": "Seagram, 1958. Bronze mullions on an absolutely regular grid, a plaza, a lobby set back behind free-standing columns. No ornament anywhere — it survives on proportion alone.",
+    "city": "A corporate downtown. The three siblings are the variations Mies's imitators made: travertine spandrels, a black-steel version, a white-marble civic slab.",
+    "label": "Seagram Curtain Wall",
+    "subject": {
+      "w": 34,
+      "d": 28,
+      "storeys": 40,
+      "color": 9279398,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/37-intl-hero.jpg",
+      "street": "shots/37-intl-street.jpg",
+      "back": "shots/37-intl-back.jpg"
+    },
+    "metrics": {
+      "crownM": 3.5,
+      "aboveShell": 9,
+      "roofTopM": 131.5,
+      "decoBoxes": 5666,
+      "realMeshes": 0,
+      "triangles": 67992,
+      "box": {
+        "cx": 0,
+        "cy": 65.41120025634766,
+        "cz": 5.739999771118164,
+        "sx": 43.52000045776367,
+        "sy": 131.94240051269531,
+        "sz": 49,
+        "minY": -0.5599999999999999,
+        "maxY": 131.3824005126953,
+        "maxZ": 30.239999771118164
+      }
+    },
+    "portrait": true
+  },
+  {
+    "n": 38,
+    "id": "ziggurat",
+    "era": "early20",
+    "fam": "tower",
+    "note": "The 1916 New York zoning envelope: mandatory setbacks stepping the tower back from the street as it rises, so the shape is a law made visible.",
+    "city": "Pre-war Manhattan. Siblings: the wedding-cake hotel, the setback courthouse, the stepped power-company HQ.",
+    "label": "Zoning Setback Tower",
+    "subject": {
+      "w": 34,
+      "d": 28,
+      "storeys": 40,
+      "color": 9279398,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/38-ziggurat-hero.jpg",
+      "street": "shots/38-ziggurat-street.jpg",
+      "back": "shots/38-ziggurat-back.jpg"
+    },
+    "metrics": {
+      "crownM": 40.5,
+      "aboveShell": 17,
+      "roofTopM": 168.5,
+      "decoBoxes": 5745,
+      "realMeshes": 3,
+      "triangles": 69134,
+      "box": {
+        "cx": 0,
+        "cy": 83.93646398451993,
+        "cz": 0.038399696350097656,
+        "sx": 46.32640075683594,
+        "sy": 168.99292796903987,
+        "sz": 40.40320014953613,
+        "minY": -0.5599999999999999,
+        "maxY": 168.43292796903987,
+        "maxZ": 20.239999771118164
+      }
+    },
+    "portrait": true
+  },
+  {
+    "n": 39,
+    "id": "sunburst",
+    "era": "early20",
+    "fam": "tower",
+    "note": "Chrysler's radiator crown: stacked arcs of decreasing radius, dormer eyes, a spire. The crown is the entire building's argument.",
+    "city": "The crown competition of 1930 — every tower in the district trying to out-terminate the last one. The richest sibling set in the kit.",
+    "label": "Radiator Crown",
+    "subject": {
+      "w": 34,
+      "d": 28,
+      "storeys": 40,
+      "color": 9279398,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/39-sunburst-hero.jpg",
+      "street": "shots/39-sunburst-street.jpg",
+      "back": "shots/39-sunburst-back.jpg"
+    },
+    "metrics": {
+      "crownM": 35.3,
+      "aboveShell": 11,
+      "roofTopM": 163.3,
+      "decoBoxes": 6808,
+      "realMeshes": 2,
+      "triangles": 81858,
+      "box": {
+        "cx": 0,
+        "cy": 81.30968002821731,
+        "cz": 0,
+        "sx": 39.61199951171875,
+        "sy": 163.73936005643463,
+        "sz": 33.61199951171875,
+        "minY": -0.5599999999999999,
+        "maxY": 163.17936005643463,
+        "maxZ": 16.805999755859375
+      }
+    },
+    "portrait": true
+  },
+  {
+    "n": 40,
+    "id": "neogothic",
+    "era": "early20",
+    "fam": "tower",
+    "note": "Woolworth, the Cathedral of Commerce: a Gothic cathedral stretched to 60 storeys, buttresses and pinnacles all the way up.",
+    "city": "The 1913 skyline where every tower borrowed a cathedral. Siblings: Tribune Tower's flying buttresses, a spired campanile, a Gothic crown on a stone shaft.",
+    "label": "Cathedral of Commerce",
+    "subject": {
+      "w": 34,
+      "d": 28,
+      "storeys": 40,
+      "color": 9279398,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/40-neogothic-hero.jpg",
+      "street": "shots/40-neogothic-street.jpg",
+      "back": "shots/40-neogothic-back.jpg"
+    },
+    "metrics": {
+      "crownM": 62.3,
+      "aboveShell": 10,
+      "roofTopM": 190.3,
+      "decoBoxes": 8346,
+      "realMeshes": 0,
+      "triangles": 100152,
+      "box": {
+        "cx": 0,
+        "cy": 94.79422637939453,
+        "cz": 0,
+        "sx": 42.20512008666992,
+        "sy": 190.70845275878906,
+        "sz": 35.6910400390625,
+        "minY": -0.5599999999999999,
+        "maxY": 190.14845275878906,
+        "maxZ": 17.84552001953125
+      }
+    },
+    "portrait": true
+  },
+  {
+    "n": 41,
+    "id": "artdeco",
+    "era": "early20",
+    "fam": "block",
+    "note": "1930 setback commercial block. Fluted piers run base to crown with the spandrels pushed back behind them; nothing horizontal is allowed to cross a pier.",
+    "city": "A whole deco main street: theatre, department store, telephone exchange, hotel.",
+    "label": "Deco Tower",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/41-artdeco-hero.jpg",
+      "street": "shots/41-artdeco-street.jpg",
+      "back": "shots/41-artdeco-back.jpg"
+    },
+    "metrics": {
+      "crownM": 6.5,
+      "aboveShell": 13,
+      "roofTopM": 19.3,
+      "decoBoxes": 1209,
+      "realMeshes": 1,
+      "triangles": 14588,
+      "box": {
+        "cx": 0,
+        "cy": 9.337021016865823,
+        "cz": 0.15000009536743164,
+        "sx": 23.081600189208984,
+        "sy": 19.794042033731643,
+        "sz": 17.381600379943848,
+        "minY": -0.5599999999999999,
+        "maxY": 19.234042033731644,
+        "maxZ": 8.840800285339355
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 42,
+    "id": "pyramid",
+    "era": "late20",
+    "fam": "tower",
+    "note": "Transamerica. A tapered spire with the whole elevation converging on a point, wing buttresses at the shoulders.",
+    "city": "A skyline of tapers — obelisk, needle, stepped cone. Rare and expensive to over-use; one per district.",
+    "label": "Tapered Spire",
+    "subject": {
+      "w": 34,
+      "d": 28,
+      "storeys": 40,
+      "color": 9279398,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/42-pyramid-hero.jpg",
+      "street": "shots/42-pyramid-street.jpg",
+      "back": "shots/42-pyramid-back.jpg"
+    },
+    "metrics": {
+      "crownM": 64.3,
+      "aboveShell": 11,
+      "roofTopM": 192.3,
+      "decoBoxes": 7546,
+      "realMeshes": 2,
+      "triangles": 90712,
+      "box": {
+        "cx": 0,
+        "cy": 95.8089999961853,
+        "cz": 0,
+        "sx": 48.1328010559082,
+        "sy": 192.73799999237062,
+        "sz": 47.01279830932617,
+        "minY": -0.5599999999999999,
+        "maxY": 192.17799999237062,
+        "maxZ": 23.506399154663086
+      }
+    },
+    "portrait": true
+  },
+  {
+    "n": 43,
+    "id": "bundled",
+    "era": "late20",
+    "fam": "tower",
+    "note": "Sears/Willis. Nine square tubes in a 3x3 bundle that stop at different heights. Almost no surface treatment; pure massing.",
+    "city": "A structural-expression downtown: tube, bundle, diagonal, hat truss. Cold, enormous, recognisable at 20 km.",
+    "label": "Bundled Tube",
+    "subject": {
+      "w": 34,
+      "d": 28,
+      "storeys": 40,
+      "color": 9279398,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/43-bundled-hero.jpg",
+      "street": "shots/43-bundled-street.jpg",
+      "back": "shots/43-bundled-back.jpg"
+    },
+    "metrics": {
+      "crownM": 54,
+      "aboveShell": 16,
+      "roofTopM": 182,
+      "decoBoxes": 5711,
+      "realMeshes": 4,
+      "triangles": 68756,
+      "box": {
+        "cx": 0,
+        "cy": 90.68740001306533,
+        "cz": 1.853600025177002,
+        "sx": 37.757598876953125,
+        "sy": 182.49480002613066,
+        "sz": 35.46480083465576,
+        "minY": -0.5599999999999999,
+        "maxY": 181.93480002613066,
+        "maxZ": 19.586000442504883
+      }
+    },
+    "portrait": true
+  },
+  {
+    "n": 44,
+    "id": "megabrace",
+    "era": "late20",
+    "fam": "tower",
+    "note": "The braced tube — giant X-bracing crossing many storeys on the outside of the glass, structure as the only ornament.",
+    "city": "Siblings: the diagrid, the outrigger belt truss, the exposed mega-column. An engineer's city.",
+    "label": "Braced Tube",
+    "subject": {
+      "w": 34,
+      "d": 28,
+      "storeys": 40,
+      "color": 9279398,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/44-megabrace-hero.jpg",
+      "street": "shots/44-megabrace-street.jpg",
+      "back": "shots/44-megabrace-back.jpg"
+    },
+    "metrics": {
+      "crownM": 31.5,
+      "aboveShell": 12,
+      "roofTopM": 159.5,
+      "decoBoxes": 6426,
+      "realMeshes": 4,
+      "triangles": 77336,
+      "box": {
+        "cx": 0,
+        "cy": 79.5322599977493,
+        "cz": 1.7230005264282227,
+        "sx": 46.81999969482422,
+        "sy": 160.18451999549862,
+        "sz": 44.266000747680664,
+        "minY": -0.5599999999999999,
+        "maxY": 159.62451999549862,
+        "maxZ": 23.856000900268555
+      }
+    },
+    "portrait": true
+  },
+  {
+    "n": 45,
+    "id": "faceted",
+    "era": "late20",
+    "fam": "tower",
+    "note": "Bank of China, 1990. The prism is CUT: quadrants rise to four different heights with long diagonals running across dozens of storeys.",
+    "city": "A crystal district. Siblings are the other cuts — the sheared top, the twisted shaft, the folded plate.",
+    "label": "Faceted Prism",
+    "subject": {
+      "w": 34,
+      "d": 28,
+      "storeys": 40,
+      "color": 9279398,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/45-faceted-hero.jpg",
+      "street": "shots/45-faceted-street.jpg",
+      "back": "shots/45-faceted-back.jpg"
+    },
+    "metrics": {
+      "crownM": 44.8,
+      "aboveShell": 47,
+      "roofTopM": 172.8,
+      "decoBoxes": 6427,
+      "realMeshes": 3,
+      "triangles": 77260,
+      "box": {
+        "cx": 0,
+        "cy": 86.13399999976158,
+        "cz": 0.4199995994567871,
+        "sx": 37.91999816894531,
+        "sy": 173.38799999952317,
+        "sz": 32.75999927520752,
+        "minY": -0.5599999999999999,
+        "maxY": 172.82799999952317,
+        "maxZ": 16.799999237060547
+      }
+    },
+    "portrait": true
+  },
+  {
+    "n": 46,
+    "id": "postmodern",
+    "era": "late20",
+    "fam": "tower",
+    "note": "AT&T, 1984. A classical broken pediment on top of a skyscraper — deliberately absurd, deliberately memorable.",
+    "city": "The 1980s. Siblings: the Chippendale sibling, the pink granite arch, the temple-front bank. A city with a sense of humour.",
+    "label": "Broken Pediment",
+    "subject": {
+      "w": 34,
+      "d": 28,
+      "storeys": 40,
+      "color": 9279398,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/46-postmodern-hero.jpg",
+      "street": "shots/46-postmodern-street.jpg",
+      "back": "shots/46-postmodern-back.jpg"
+    },
+    "metrics": {
+      "crownM": 14.5,
+      "aboveShell": 11,
+      "roofTopM": 142.5,
+      "decoBoxes": 8275,
+      "realMeshes": 0,
+      "triangles": 99300,
+      "box": {
+        "cx": 0,
+        "cy": 70.90800354003906,
+        "cz": 0,
+        "sx": 37.36000061035156,
+        "sy": 142.93600708007813,
+        "sz": 31.360000610351562,
+        "minY": -0.5599999999999999,
+        "maxY": 142.37600708007812,
+        "maxZ": 15.680000305175781
+      }
+    },
+    "portrait": true
+  },
+  {
+    "n": 47,
+    "id": "pencil",
+    "era": "late20",
+    "fam": "tower",
+    "note": "The supertall slim: a 1:12 shaft, open mechanical floors punched through it for wind, a razor top.",
+    "city": "Billionaires' Row. Siblings: the setback needle, the concrete-core stack, the paired-tower slot. A city of impossibly thin things.",
+    "label": "Supertall Slim",
+    "subject": {
+      "w": 20,
+      "d": 18,
+      "storeys": 48,
+      "color": 9279398,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/47-pencil-hero.jpg",
+      "street": "shots/47-pencil-street.jpg",
+      "back": "shots/47-pencil-back.jpg"
+    },
+    "metrics": {
+      "crownM": 31.9,
+      "aboveShell": 13,
+      "roofTopM": 185.5,
+      "decoBoxes": 7190,
+      "realMeshes": 2,
+      "triangles": 86440,
+      "box": {
+        "cx": 0,
+        "cy": 92.51299999892714,
+        "cz": 0.07575035095214844,
+        "sx": 23.959999084472656,
+        "sy": 186.1459999978543,
+        "sz": 22.111499786376953,
+        "minY": -0.5599999999999999,
+        "maxY": 185.5859999978543,
+        "maxZ": 11.131500244140625
+      }
+    },
+    "portrait": true
+  },
+  {
+    "n": 48,
+    "id": "brutalist",
+    "era": "late20",
+    "fam": "block",
+    "note": "Beton brut. Every opening a hole punched through a thick wall, hooded so it throws a hard shadow all day; board-formed plank lines; lifted on pilotis.",
+    "city": "A concrete civic campus — city hall, the library, the parking structure, the housing slab. Grim and coherent.",
+    "label": "Beton Brut",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/48-brutalist-hero.jpg",
+      "street": "shots/48-brutalist-street.jpg",
+      "back": "shots/48-brutalist-back.jpg"
+    },
+    "metrics": {
+      "crownM": 5.7,
+      "aboveShell": 11,
+      "roofTopM": 18.5,
+      "decoBoxes": 979,
+      "realMeshes": 0,
+      "triangles": 11748,
+      "box": {
+        "cx": 0,
+        "cy": 8.935898513793946,
+        "cz": -0.20760011672973633,
+        "sx": 24.54400062561035,
+        "sy": 18.99179702758789,
+        "sz": 19.232800483703613,
+        "minY": -0.5599999999999999,
+        "maxY": 18.43179702758789,
+        "maxZ": 9.40880012512207
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 49,
+    "id": "hightech",
+    "era": "late20",
+    "fam": "block",
+    "note": "Inside-out, Lloyd's / Pompidou: the frame stands proud of the glass, the risers and stair are outside, and the roof plant is architecture.",
+    "city": "A services-on-the-outside quarter. Siblings: the exposed-truss shed, the tension-rod atrium, the gantry-served lab.",
+    "label": "Exostructure",
+    "subject": {
+      "w": 22,
+      "d": 16,
+      "storeys": 4,
+      "color": 12170150,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/49-hightech-hero.jpg",
+      "street": "shots/49-hightech-street.jpg",
+      "back": "shots/49-hightech-back.jpg"
+    },
+    "metrics": {
+      "crownM": 7,
+      "aboveShell": 39,
+      "roofTopM": 19.8,
+      "decoBoxes": 1521,
+      "realMeshes": 27,
+      "triangles": 19316,
+      "box": {
+        "cx": -0.8804802894592285,
+        "cy": 9.595000023841859,
+        "cz": -0.619999885559082,
+        "sx": 26.309760093688965,
+        "sy": 20.310000047683715,
+        "sz": 20.007999420166016,
+        "minY": -0.5599999999999999,
+        "maxY": 19.750000047683717,
+        "maxZ": 9.383999824523926
+      }
+    },
+    "portrait": false
+  },
+  {
+    "n": 50,
     "id": "desertmod",
+    "era": "contemporary",
     "fam": "house",
     "note": "Palm Springs, 1962. A single thin roof blade with 2-6 m of overhang, steel posts, plate glass, a breeze-block screen. Architecture as the management of sun.",
     "city": "A mid-century desert suburb: butterfly roof, folded plate, the post-and-beam, the screen-wall bungalow.",
@@ -1134,9 +2024,9 @@
       "doorSide": 1
     },
     "shots": {
-      "hero": "shots/29-desertmod-hero.jpg",
-      "street": "shots/29-desertmod-street.jpg",
-      "back": "shots/29-desertmod-back.jpg"
+      "hero": "shots/50-desertmod-hero.jpg",
+      "street": "shots/50-desertmod-street.jpg",
+      "back": "shots/50-desertmod-back.jpg"
     },
     "metrics": {
       "crownM": 3.6,
@@ -1160,8 +2050,9 @@
     "portrait": false
   },
   {
-    "n": 30,
+    "n": 51,
     "id": "techhouse",
+    "era": "contemporary",
     "fam": "house",
     "note": "Contemporary glass house: stacked cantilevered volumes, floor-to-ceiling glazing, a wood-slat screen, a flat roof with a parapet.",
     "city": "A hillside of modern spec houses. The least characterful pick, and the most likely to read as generic.",
@@ -1174,9 +2065,9 @@
       "doorSide": 1
     },
     "shots": {
-      "hero": "shots/30-techhouse-hero.jpg",
-      "street": "shots/30-techhouse-street.jpg",
-      "back": "shots/30-techhouse-back.jpg"
+      "hero": "shots/51-techhouse-hero.jpg",
+      "street": "shots/51-techhouse-street.jpg",
+      "back": "shots/51-techhouse-back.jpg"
     },
     "metrics": {
       "crownM": 1.6,
@@ -1200,8 +2091,9 @@
     "portrait": false
   },
   {
-    "n": 31,
+    "n": 52,
     "id": "ranch",
+    "era": "contemporary",
     "fam": "house",
     "note": "Plain house. A long low box, shallow gable, picture window, an attached carport. Deliberately the boring one — it is what a street NEEDS between the loud ones.",
     "city": "Post-war tract suburbia: ranch, split-level, cape, minimal traditional. Background architecture, and a city is mostly background.",
@@ -1214,9 +2106,9 @@
       "doorSide": 1
     },
     "shots": {
-      "hero": "shots/31-ranch-hero.jpg",
-      "street": "shots/31-ranch-street.jpg",
-      "back": "shots/31-ranch-back.jpg"
+      "hero": "shots/52-ranch-hero.jpg",
+      "street": "shots/52-ranch-street.jpg",
+      "back": "shots/52-ranch-back.jpg"
     },
     "metrics": {
       "crownM": 4.9,
@@ -1238,5 +2130,128 @@
       }
     },
     "portrait": false
+  },
+  {
+    "n": 53,
+    "id": "arcology",
+    "era": "future",
+    "fam": "tower",
+    "note": "Planted terraces stepping back on every face, sky-bridges between masses, and a wind-scoop void punched clean through the upper mass — a hole in the building.",
+    "city": "A vertical district: linked arcologies, sky-farms, a ground plane given back to water.",
+    "label": "Arcology Terrace",
+    "subject": {
+      "w": 34,
+      "d": 28,
+      "storeys": 40,
+      "color": 9279398,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/53-arcology-hero.jpg",
+      "street": "shots/53-arcology-street.jpg",
+      "back": "shots/53-arcology-back.jpg"
+    },
+    "metrics": {
+      "crownM": 36.5,
+      "aboveShell": 10,
+      "roofTopM": 164.5,
+      "decoBoxes": 5665,
+      "realMeshes": 0,
+      "triangles": 67980,
+      "box": {
+        "cx": 2.8309993743896484,
+        "cy": 81.94499847412109,
+        "cz": 0,
+        "sx": 44.917999267578125,
+        "sy": 165.0099969482422,
+        "sz": 33.25600051879883,
+        "minY": -0.5599999999999999,
+        "maxY": 164.4499969482422,
+        "maxZ": 16.628000259399414
+      }
+    },
+    "portrait": true
+  },
+  {
+    "n": 54,
+    "id": "printed",
+    "era": "future",
+    "fam": "tower",
+    "note": "Printed in place. Continuous horizontal bead courses running unbroken around the building, each offset from the last so the wall swells and waists. No straight vertical edge anywhere.",
+    "city": "A printed settlement — lobed towers, extruded low blocks, a landscape with no right angles.",
+    "label": "Printed Shell",
+    "subject": {
+      "w": 34,
+      "d": 28,
+      "storeys": 40,
+      "color": 9279398,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/54-printed-hero.jpg",
+      "street": "shots/54-printed-street.jpg",
+      "back": "shots/54-printed-back.jpg"
+    },
+    "metrics": {
+      "crownM": 17.5,
+      "aboveShell": 15,
+      "roofTopM": 145.5,
+      "decoBoxes": 4445,
+      "realMeshes": 0,
+      "triangles": 53340,
+      "box": {
+        "cx": 0.23928260803222656,
+        "cy": 72.51616546630859,
+        "cz": -0.10382461547851562,
+        "sx": 62.70661163330078,
+        "sy": 146.1523309326172,
+        "sz": 56.70661163330078,
+        "minY": -0.5599999999999999,
+        "maxY": 145.5923309326172,
+        "maxZ": 28.249481201171875
+      }
+    },
+    "portrait": true
+  },
+  {
+    "n": 55,
+    "id": "masstimber",
+    "era": "future",
+    "fam": "tower",
+    "note": "CLT and glulam. A heavy timber grid standing outside the glass, warm against cool grey, and planted setback terraces where the structure steps in. Warm and orthogonal where high-tech is metal and industrial.",
+    "city": "A timber downtown: CLT towers, a market hall on glulam arches, planted decks.",
+    "label": "Mass Timber Tower",
+    "subject": {
+      "w": 34,
+      "d": 28,
+      "storeys": 40,
+      "color": 9279398,
+      "doorSide": 1
+    },
+    "shots": {
+      "hero": "shots/55-masstimber-hero.jpg",
+      "street": "shots/55-masstimber-street.jpg",
+      "back": "shots/55-masstimber-back.jpg"
+    },
+    "metrics": {
+      "crownM": 27.8,
+      "aboveShell": 11,
+      "roofTopM": 155.8,
+      "decoBoxes": 6191,
+      "realMeshes": 0,
+      "triangles": 74292,
+      "box": {
+        "cx": 0,
+        "cy": 77.63999816894531,
+        "cz": 0,
+        "sx": 43.25,
+        "sy": 156.39999633789063,
+        "sz": 37.25,
+        "minY": -0.5599999999999999,
+        "maxY": 155.83999633789062,
+        "maxZ": 18.625
+      }
+    },
+    "portrait": true
   }
 ]

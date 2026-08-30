@@ -62,21 +62,15 @@
 
       /* THE SHELL'S OWN PUNCHED OPENINGS, recomputed (buildings.js:4144), and
          the row test that tells a course to step around them. */
-      const wins = function (f) {
-        const us = f.span - 1.4, n = Math.max(1, Math.round(us / 2.6)), cell = us / n, out = [];
-        for (let i = 0; i < n; i++) out.push({ t: -us / 2 + (i + 0.5) * cell, w: Math.min(2.0, cell * 0.68) });
-        return out;
-      };
-      const openRow = function (cy, hh) {
-        for (let k = 0; k < ctx.storeys; k++) if (cy + hh > k * FH + 0.96 && cy - hh < (k + 1) * FH - 0.06) return true;
-        return false;
-      };
+      const wins = function (f) { const us = f.span - 1.4, n = Math.max(1, Math.round(us / 2.6)), c = us / n;
+        return Array.from({ length: n }, (_, i) => ({ t: -us / 2 + (i + 0.5) * c, w: Math.min(2.0, c * 0.68) })); };
+      const rows = []; for (let k = 0; k < ctx.storeys; k++) rows.push([k * FH + 0.96, (k + 1) * FH - 0.06]);
+      const openRow = function (cy, hh) { return rows.some((r) => cy + hh > r[0] && cy - hh < r[1]); };
 
       // THE THREE FINISHES, by height.
       const PB = clamp(unit * 0.030, 0.26, 0.52), PM = PB * 0.55, PT = PB * 0.28;
       const nB = ctx.storeys >= 6 ? 2 : 1;
-      const zY = [Math.min(nB * FH, yTop * 0.52),
-        Math.min((nB + Math.max(1, Math.round((ctx.storeys - nB) * 0.55))) * FH, yTop * 0.84)];
+      const zY = [Math.min(nB * FH, yTop * 0.52), Math.min((nB + Math.max(1, Math.round((ctx.storeys - nB) * 0.55))) * FH, yTop * 0.84)];
       const zone = function (y) { return y < zY[0] ? 0 : (y < zY[1] ? 1 : 2); };
 
       // ---- A. THE WALL, COURSE BY COURSE --------------------------
@@ -88,10 +82,7 @@
           const y0 = c * ch, cy = y0 + ch / 2, z = zone(cy), pr = z === 0 ? PB : (z === 1 ? PM : PT);
           const holes = cy - ch / 2 < e.head + 0.4 ? F.doorHoles(ctx, f, 0.9) : [];
           if (openRow(cy, ch / 2)) for (const wd of ws) holes.push([wd.t - wd.w / 2 - 0.30, wd.t + wd.w / 2 + 0.30]);
-          const free = function (t, w) {
-            for (const q of holes) if (t + w / 2 > q[0] && t - w / 2 < q[1]) return false;
-            return true;
-          };
+          const free = function (t, w) { return !holes.some((q) => t + w / 2 > q[0] && t - w / 2 < q[1]); };
           F.segBand(ctx, f, cy, ch - 0.05, pr, P.course(c), holes, 0.12, 0, cy < 2.6);
           F.segBand(ctx, f, y0 + 0.04, z === 1 ? 0.15 : 0.09, pr * (z === 1 ? 0.30 : 0.58),
             F.shade(P.shadow, z === 2 ? 1.10 : 0.78), holes, 0.08, 0);
@@ -134,18 +125,14 @@
           F.arch(ctx, f, wd.t, sp, aw + 0.10, rise, 0.19, pr + 0.02, LT, "round");           // enclosing
           F.rib(ctx, f, wd.t, y0, y1 - 0.68, 0.17, pr + 0.12, LT);                           // colonnette
           F.box(ctx, f, wd.t, y1 - 0.74, 0.40, 0.16, pr + 0.18, LT);                         // its capital
-          for (const sg of [-1, 1]) F.arch(ctx, f, wd.t + sg * (aw * 0.25 + 0.03), y1 - 0.58,
-            aw * 0.42, aw * 0.21, 0.08, pr + 0.10, LT, "round");                             // the two lights
+          for (const sg of [-1, 1]) F.arch(ctx, f, wd.t + sg * (aw * 0.25 + 0.03), y1 - 0.58, aw * 0.42, aw * 0.21, 0.08, pr + 0.10, LT, "round");
           F.box(ctx, f, wd.t, y1 + 0.06, 0.26, 0.26, pr + 0.14, F.shade(P.shadow, 0.7));     // roundel
         }
       }
 
       // ---- C. CHAINED QUOINS --------------------------------------
       const qH = Math.max(0.44, cH * 1.15), qN = Math.max(3, Math.floor(yTop / qH));
-      for (let i = 0; i < qN; i++) {
-        F.corners(ctx, (i + 0.5) * qH, qH * 0.90, (i % 2) ? qH * 1.2 : qH * 2.2,
-          PB + 0.12, (i % 2) ? P.course(i + 3) : LT);
-      }
+      for (let i = 0; i < qN; i++) F.corners(ctx, (i + 0.5) * qH, qH * 0.90, (i % 2) ? qH * 1.2 : qH * 2.2, PB + 0.12, (i % 2) ? P.course(i + 3) : LT);
 
       // ---- D. THE PORTAL ------------------------------------------
       // One big round-arched hole. The kit carves the real doorway out of

@@ -67,7 +67,6 @@
       const wood = F.mix(P.light, 0xc79a5e, 0.45), woodD = F.shade(wood, 0.76), woodL = F.shade(wood, 1.12);
       const cool = F.mix(P.shadow, 0x8f9aa0, 0.72);       // the cool grey field the frame stands against
       const leaf = F.mix(0x3a7a3a, P.base, 0.14), leafL = F.mix(0x7cb355, P.base, 0.16);
-      const S = F.solid(ctx);
 
       // ---- A. THE FRAME LINE. One tier every M storeys; the standoff steps
       // IN a notch at each one, which is what makes a terrace a setback and
