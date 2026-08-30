@@ -2574,9 +2574,42 @@
     const ROWS = TSU_PROFILE.length, COLS = TSU_COLS;
     const geoms = [], mats = [];
 
-    // per-column jitter so the front churns instead of reading as a ruler
+    /* Per-column jitter so the front churns instead of reading as a ruler —
+       and (2026-08-29, "the wave just looks a little fake") three structural
+       fixes folded into the same two arrays so every foam layer that welds to
+       them (lipH/lipZ below) inherits them for free:
+
+       1. THE END-CAP IS GONE. The wall used to carry its full crest height at
+          column 0 and column COLS, so from any angle along the shore you could
+          see a flat vertical EDGE where the wave simply stopped sideways — the
+          single biggest "it's a mesh" tell. The crest now tapers into the sea
+          over the outer ~14% of the width (smoothstep, floored at 8% so the
+          last column is dying whitewater, not a degenerate sliver).
+       2. THE CREST IS NOT ONE HEIGHT. White noise (±10%) never breaks a
+          ruler; two low-frequency sines beating against each other do — runs
+          of crest stand taller and lower by ±25%, the way a real front breaks
+          up on the bathymetry under it.
+       3. THE FRONT IS NOT ONE LINE. A low-frequency bow in the lip's forward
+          throw makes sections of the crest LEAD and LAG by metres, so the
+          wave stops arriving everywhere at the same instant. It rides zJit,
+          which the wall applies toward the crest and the foam welds read
+          directly — the foot stays on the waterline the level owns. */
     const zJit = [], hJit = [];
-    for (let c = 0; c <= COLS; c++) { zJit.push((rnd() - 0.5) * 4.5); hJit.push(0.9 + rnd() * 0.2); }
+    const phA = rnd() * 6.283, phB = rnd() * 6.283, phC = rnd() * 6.283;
+    for (let c = 0; c <= COLS; c++) {
+      const u = c / COLS;
+      const edge = Math.min(1, Math.min(u, 1 - u) / 0.14);
+      const taper = 0.08 + 0.92 * edge * edge * (3 - 2 * edge);
+      const lf = 1 + 0.15 * Math.sin(u * 9.7 + phA) + 0.11 * Math.sin(u * 23 + phB);
+      zJit.push((rnd() - 0.5) * 4.5 + Math.sin(u * 6.9 + phC) * 3.4);
+      hJit.push((0.9 + rnd() * 0.2) * lf * taper);
+    }
+    // evidence for the storyboard: how un-ruler the crest actually is
+    let hMean = 0; for (let c = 0; c <= COLS; c++) hMean += hJit[c];
+    hMean /= COLS + 1;
+    let hVar = 0; for (let c = 0; c <= COLS; c++) { const d = hJit[c] - hMean; hVar += d * d; }
+    const crestVar = Math.sqrt(hVar / (COLS + 1)) / Math.max(0.001, hMean);
+    const endTaper = Math.min(hJit[0], hJit[COLS]) / Math.max(0.001, hMean);
     const n = ROWS * (COLS + 1);
     const pos = new Float32Array(n * 3);
     const col = new Float32Array(n * 3);
@@ -2662,6 +2695,9 @@
          wave actually tears. A per-shred coin flip alone gives even grit. */
       const dens = 0.62 + 0.24 * Math.sin(x * 0.052 + 1.7) + 0.18 * Math.sin(x * 0.017 - 0.6);
       if (rnd() > dens) continue;
+      // where the crest has tapered into the sea there is no lip to shred:
+      // foam riding a crest that is not there was the old floating-fleck tell
+      if (lipH(x) < 0.3) continue;
       const back = rnd() < 0.3;
       if (back) {
         pushShred(crestF, {
@@ -2778,6 +2814,7 @@
       // cards drew attention to themselves in the first place. And they are
       // faint — aerated water on a face is a hint of texture, not a stripe.
       const tx = (rnd() - 0.5) * W * 0.94;
+      if (lipH(tx) < 0.3) continue;              // no face left to streak here
       pushTear(tearF, {
         x: tx, y: H * (0.6 + rnd() * 0.18) * lipH(tx), z: (1.3 + rnd() * 1.2) * zs + lipZ(tx) * 0.7,
         wid: 0.28 + rnd() * 0.5, len: H * (0.1 + rnd() * 0.18),
@@ -2840,6 +2877,10 @@
     return {
       group: grp, wall: wall, basePos: new Float32Array(pos),
       cols: COLS, rows: ROWS, baseH: H, width: W,
+      // evidence: relative std-dev of crest height along the front (0 = a
+      // ruler), and the end columns' height as a fraction of the mean (1 =
+      // the old flat end-cap, ~0.08 = the crest dies into the sea)
+      crestVar: crestVar, endTaper: endTaper,
       colClean: colClean, colMud: colMud, mudMix: -1,
       crestL: crestL, tornL: tornL, sprayL: sprayL, footL: footL, boilL: boilL,
       tearL: tearL, wakeL: wakeL,
