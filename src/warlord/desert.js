@@ -423,6 +423,10 @@
   D.SEA_Y = SEA_Y;
   D.oases = oases;
   D.heightAt = heightAt;
+  /* Assigned late, after makeLevel's scope exists. The rendered surface —
+     see the block above renderHeightAt for why this is a different question
+     from heightAt and must never replace it. */
+  D.renderHeightAt = function (x, z) { return renderHeightAt(x, z); };
   D.biomeAt = biomeAt;
   D.coastAt = coastAt;
   D.slopeAt = function (x, z) { return slopeOf(heightAt, x, z); };
@@ -571,6 +575,62 @@
   let built = false, visible = false;
   const heightBuf = new Float32Array(VN * VN);
   const dirtyQueue = [];
+
+  /* ============================================================ THE SURFACE
+     YOU CAN SEE — as opposed to the surface the maths believes in.
+
+     heightAt() is analytic and exact and it is NOT where the ground is drawn.
+     The terrain is a clipmap: the ring you stand in samples heightAt every
+     10 m and joins those samples with flat triangles, and a flat triangle
+     strung between two points on a convex dune hangs BELOW the curve it
+     approximates. Measured on this island by tools/visual-presets/
+     warlord-sand.mjs: 9.9 cm of chord error on gentle ground and 17.3 cm on
+     a steep flank.
+
+     That is the whole reason men looked buried on hills. A foot placed at
+     heightAt is placed on the mathematical surface and drawn against the
+     rendered one, so it sinks by exactly the chord — worst on the steepest
+     ground, which is precisely where the owner reported it. sand.js measured
+     the same error and compensated for it with an offset, which halved it;
+     an offset cannot remove it, because the error varies across every single
+     quad and vanishes at the corners.
+
+     So: ask the mesh instead of the function. This reproduces the rendered
+     surface exactly rather than approximating it — same lattice, same
+     diagonal, same barycentric weights the GPU uses — which means the error
+     is not reduced, it is GONE BY CONSTRUCTION for anything standing inside
+     the finest ring.
+
+     THREE THINGS MAKE IT CHEAP AND EXACT:
+       · Level 0's lattice is global. cx = round(camX/cell)*cell and cell is
+         10, so every level-0 vertex sits on a multiple of 10 no matter where
+         the camera is — the snap cancels and this needs no camera state.
+       · Level 0's bias is -0.45 * 0 = 0. The vertex-lowering that separates
+         the coarse rings does not apply on the ring you walk on, so there is
+         nothing to add back.
+       · The winding is fixed: idx.push(a, c, b, b, c, d) with a=(k,j),
+         b=(k+1,j), c=(k,j+1), d=(k+1,j+1). The diagonal is c-b, so u+v<=1 is
+         the a,c,b triangle and u+v>1 is the b,c,d one.
+
+     LIMIT, stated rather than hidden: level 0 reaches RING*CELL0 = 400 m from
+     the camera. Past that the ground is drawn by a coarser ring with a bigger
+     chord AND a non-zero bias, and this function is wrong. Everything that
+     needs it — your boots, your column, a battle line — is inside 400 m, and
+     a man 400 m away is four pixels tall. Callers wanting the analytic truth
+     (pathing, the map, spawn placement) must keep using heightAt: this is a
+     RENDERING answer and it must never become the sim's. */
+  function renderHeightAt(x, z) {
+    const cell = CELL0;
+    const gx = Math.floor(x / cell) * cell;
+    const gz = Math.floor(z / cell) * cell;
+    const u = (x - gx) / cell, v = (z - gz) / cell;
+    const ya = heightAt(gx, gz);
+    const yb = heightAt(gx + cell, gz);
+    const yc = heightAt(gx, gz + cell);
+    if (u + v <= 1) return ya + (yb - ya) * u + (yc - ya) * v;
+    const yd = heightAt(gx + cell, gz + cell);
+    return yd + (yc - yd) * (1 - u) + (yb - yd) * (1 - v);
+  }
 
   function makeLevel(i) {
     const cell = CELL0 * Math.pow(2, FLAG_FLATLOD ? 6 : i);
