@@ -1963,9 +1963,27 @@
     // how much ash makes the ground READ as covered (a few cm)
     const FULL = o.full > 0 ? +o.full : 0.05;
 
+    /* SMOOTH MOTTLE, NOT PER-CELL DICE. The 2026-08-23 build hashed an
+       independent `gain` per cell — which is NOISE AT EXACTLY GRID FREQUENCY,
+       the strongest checkerboard signal a grid can emit. OWNER, 2026-08-29:
+       "like a CHECKERBOARD of ash ... so fucking dumb it's funny." The mottle
+       is now a smooth value-noise FIELD sampled at each cell: neighbours
+       agree, blotches span several cells, and the deposit reads as drifts
+       and lees instead of a tiled atlas. */
+    function vnoise(x, z, wl, s2) {
+      const gx = Math.floor(x / wl), gz = Math.floor(z / wl);
+      let fx = x / wl - gx, fz = z / wl - gz;
+      fx = fx * fx * (3 - 2 * fx); fz = fz * fz * (3 - 2 * fz);
+      const a = h01(gx, gz, s2), b = h01(gx + 1, gz, s2);
+      const c = h01(gx, gz + 1, s2), d2 = h01(gx + 1, gz + 1, s2);
+      return a + (b - a) * fx + (c - a) * fz + (a - b - c + d2) * fx * fz;
+    }
     const cells = [];
     // i*NC+j -> cell index, so depthAt() is O(1) instead of a scan over ~500
-    // cells per actor per frame (the ash DOT asks once per actor per tick)
+    // cells per actor per frame (the ash DOT asks once per actor per tick).
+    // (The DRAWN patch is jittered off the lattice below; the ledger keeps the
+    // lattice for O(1) lookup — half a cell of disagreement between where the
+    // grit chokes you and where the patch is painted is under 2 m.)
     const grid = new Int32Array(NC * NC).fill(-1);
     for (let i = 0; i < NC; i++) {
       for (let j = 0; j < NC; j++) {
@@ -1973,22 +1991,30 @@
         const z = cz - R + (j + 0.5) * cell;
         if (Math.hypot(x - cx, z - cz) > R * 1.02) continue;
         grid[i * NC + j] = cells.length;
-        /* THE GRID MUST NOT LOOK LIKE A GRID. Axis-aligned same-size quads
-           read as a chequerboard the moment they saturate — the ash stops
-           being a deposit and becomes a texture atlas. A hashed rotation and
-           a +-18% size jitter per cell is the whole fix, and it is free:
-           the patches still tile the same area, they just stop agreeing
-           about where their edges are. */
+        /* THE GRID MUST NOT BE A GRID AT ALL. Hashed rotation and size jitter
+           (the old fix) still left every patch CENTRED on its lattice point —
+           a periodic array of similar blobs is a checkerboard no matter how
+           each blob is dressed. The centres themselves now leave the lattice:
+           +-45% of a cell each way, which is enough to destroy the visible
+           periodicity while every centre stays inside reach of its own cell's
+           ledger entry. */
+        const jx = x + (h01(x, z, salt + 61) - 0.5) * cell * 0.9;
+        const jz = z + (h01(x, z, salt + 67) - 0.5) * cell * 0.9;
         const ang = h01(x, z, salt + 71) * Math.PI * 0.5;
         // wide size spread: patches that are all one size read as leopard
         // print no matter how organic each individual outline is
         const jit = 0.58 + 0.92 * h01(x, z, salt + 89);
+        const n1 = vnoise(jx, jz, cell * 4.8, salt + 103);
+        const n2 = vnoise(jx, jz, cell * 1.9, salt + 131);
         const C = {
-          x: x, z: z, y: 0, w: cell, d: cell, depth: 0, roof: false,
+          x: jx, z: jz, y: 0, w: cell, d: cell, depth: 0, roof: false,
           ang: ang, jit: jit, probed: false, cy: null,
-          // per-cell coverage gain: the drift does not arrive as a straight
-          // edge, it mottles, and one hashed multiplier is the whole effect
-          gain: 0.55 + 0.95 * h01(x, z, salt + 103),
+          // peakD: the most ash this cell ever held — the wear pass below
+          // reads it to know a patch is ERODING (and should streak downwind)
+          // rather than still accumulating. shed: slope factor, set on probe.
+          peakD: 0, shed: 1,
+          // two octaves of the smooth field: broad drifts + local texture
+          gain: 0.42 + 1.15 * (0.62 * n1 + 0.38 * n2),
         };
         cells.push(C);
       }
@@ -2062,6 +2088,9 @@
     parent.add(mesh);
 
     let dirty = true, wT = 0, peak = 0, dead = false;
+    // the last wind the field was given — the erosion pass combs streaks
+    // along it (writeCell's angW). Radians, world XZ bearing.
+    let windAng = 0;
     /* ---- THE DEPOSIT LIES ON THE GROUND — AND THE PROBES ARE AMORTISED. --
        OWNER, 2026-08-13: "ash is the worst, theres random cubes and floating
        flat gray squares all around". The cure was corner-accurate draping:
@@ -2089,6 +2118,14 @@
       for (let k = 0; k < 4; k++) {
         C.cy[k] = groundAt(C.x + ox[k] * ca - oz[k] * sa, C.z + ox[k] * sa + oz[k] * ca);
       }
+      /* STEEP GROUND SHEDS ASH. Real deposits sit in lees and hollows and
+         thin out on faces — read the slope off the corners this probe just
+         paid for, and let it scale the VISUAL coverage (the damage ledger
+         keeps the raw depth: grit in the air chokes you on a slope too). */
+      let lo = C.cy[0], hi = C.cy[0];
+      for (let k = 1; k < 4; k++) { const v = C.cy[k]; if (v < lo) lo = v; if (v > hi) hi = v; }
+      const slope = (hi - lo) / Math.max(0.5, hw0 * 2);
+      C.shed = clamp(1 - (slope - 0.18) * 1.3, 0.3, 1);
     }
 
     function writeCell(n) {
@@ -2101,22 +2138,50 @@
         }
         return;
       }
-      const cov = clamp((C.depth / FULL) * (C.roof ? 1 : (C.gain || 1)), 0, 1);
+      const cov = clamp((C.depth / FULL) * (C.roof ? 1 : (C.gain || 1) * (C.shed || 1)), 0, 1);
+      /* NO ASH, NO PATCH. The old floor (`grow = 0.28 + ...`) drew a >=1 m
+         dark quad on EVERY ground cell from the moment the field was built —
+         a permanent lattice of grey flecks over the whole island, upwind
+         included, that outlived the eruption. That lattice IS the owner's
+         checkerboard-over-the-map. Zero coverage now draws zero. */
+      if (cov < 0.02) {
+        // roofs included: an unloaded roof wore the same 28%-size dark patch
+        const v0 = n * 4 * 3;
+        for (let k = 0; k < 4; k++) {
+          pos[v0 + k * 3] = C.x; pos[v0 + k * 3 + 1] = C.y; pos[v0 + k * 3 + 2] = C.z;
+        }
+        return;
+      }
       // quads grow from a point at their cell centre; neighbours overlap at
       // full coverage, which is what welds them into one blanket
       const jit = C.roof ? 1 : (C.jit || 1);
-      /* The patch never shrinks to a point, and at full coverage it is WIDER
-         than its cell so neighbours weld. The alpha cutout eats ~20% of the
-         quad, so the geometry has to overshoot for the deposit to close up. */
+      /* At full coverage the patch is WIDER than its cell so neighbours weld.
+         The alpha cutout eats ~20% of the quad, so the geometry has to
+         overshoot for the deposit to close up. */
       const grow = 0.28 + 0.72 * cov;
-      const hw = C.w * 1.05 * grow * jit, hd = C.d * 1.05 * grow * jit;
+      /* THE WIND WORKS THE DEPOSIT INTO STREAKS. A cell that is ERODING
+         (depth below the most it ever held) stretches along the wind and
+         narrows across it, and its hashed rotation walks over to the wind
+         bearing — so a thinning field reads as wind-combed lees and tails,
+         not as the same dots politely getting smaller. */
+      const wornK = (!C.roof && C.peakD > 0.012)
+        ? clamp(1 - C.depth / C.peakD, 0, 1) : 0;
+      let angW = C.roof ? 0 : (C.ang || 0);
+      if (wornK > 0.01) {
+        let dA = windAng - angW;
+        dA -= Math.PI * Math.round(dA / Math.PI);   // quads are pi-symmetric
+        angW += dA * wornK;
+      }
+      const hw = C.w * 1.05 * grow * jit * (1 + 0.75 * wornK);
+      const hd = C.d * 1.05 * grow * jit * (1 - 0.5 * wornK);
       /* The deposit stands a FEW CENTIMETRES proud of what it covers — it is
          a layer of dust, not a plinth. The old 0.6 x depth lift was reading
          the ledger's metres as if they were the sheet's own thickness. */
       const lift = (C.roof ? 0.03 : 0.02) + Math.min(0.3, C.depth) * 0.15;
       const v = n * 4 * 3;
-      // roofs keep their footprint; ground patches spin on their own hash
-      const ca = C.roof ? 1 : Math.cos(C.ang || 0), sa = C.roof ? 0 : Math.sin(C.ang || 0);
+      // roofs keep their footprint; ground patches spin on their own hash,
+      // combed toward the wind as they erode (angW above)
+      const ca = C.roof ? 1 : Math.cos(angW), sa = C.roof ? 0 : Math.sin(angW);
       const qx = [-hw, hw, hw, -hw], qz = [-hd, -hd, hd, hd];
       for (let k = 0; k < 4; k++) {
         pos[v + k * 3] = C.x + qx[k] * ca - qz[k] * sa;
@@ -2165,7 +2230,11 @@
                  spread (0..1 how much falls off-axis),
                  lobe (downwind cosine exponent, default 2.2 — higher = a
                  tighter wedge; the V3 caller raises it so the fall is a
-                 sector you can stand outside of, not a map filter) } */
+                 sector you can stand outside of, not a map filter),
+                 reach (m of downwind carry, default R*0.55 — magnitude),
+                 rain (0..1, erosion accelerant when rate is 0) }
+         rate <= 0 (or spec omitted) = NO SUPPLY: the field ERODES — see the
+         weather-works-on-it branch below. */
       update(dt, spec) {
         if (dead) return handle;
         spec = spec || {};
@@ -2188,10 +2257,14 @@
           const wz = spec.windZ != null ? +spec.windZ : 0;
           const wl = Math.hypot(wx, wz) || 1;
           const ux = wx / wl, uz = wz / wl;
+          windAng = Math.atan2(uz, ux);
           const sx = spec.srcX != null ? +spec.srcX : cx;
           const sz = spec.srcZ != null ? +spec.srcZ : cz;
           const spread = spec.spread != null ? clamp(+spec.spread, 0, 1) : 0.18;
           const lobeP = spec.lobe > 0 ? +spec.lobe : 2.2;
+          // how far downwind the fall carries — the caller's magnitude sets
+          // it (a burp dusts the cone, the big one reaches the town)
+          const reach = spec.reach > 0 ? +spec.reach : R * 0.55;
           for (let n = 0; n < cells.length; n++) {
             const C = cells[n];
             const dx = C.x - sx, dz = C.z - sz;
@@ -2200,14 +2273,43 @@
             // plus a small isotropic term for the dusting near the vent
             const dot = (dx * ux + dz * uz) / d;
             const lobe = dot > 0 ? Math.pow(dot, lobeP) : 0;
-            const fall = 1 / (1 + (d / (R * 0.55)) * (d / (R * 0.55)));
+            const fall = 1 / (1 + (d / reach) * (d / reach));
             const k = (spread + (1 - spread) * lobe) * fall;
             if (k > 0.001) {
               C.depth += rate * k * step;
+              if (C.depth > C.peakD) C.peakD = C.depth;
               if (C.depth > peak) peak = C.depth;
             }
           }
           dirty = true;
+        } else {
+          /* NO SUPPLY -> THE WEATHER WORKS ON IT. OWNER, 2026-08-29: "I'd get
+             it being like snow MAYBE for a sec" — a deposit that lies there
+             for the rest of the match is wallpaper, not weather. Once the
+             plume stops feeding the field, wind strips it and rain washes it:
+             a dusting is gone in seconds (the linear term), a deep drift
+             wears for a couple of minutes (the proportional term), steep
+             ground and roofs clear first, and writeCell above streaks the
+             survivors downwind as they thin. The scar tick in
+             systems/disasters.js passes {windX, windZ, rain} through here. */
+          if (spec.windX != null || spec.windZ != null) {
+            const wxE = +spec.windX || 0, wzE = +spec.windZ || 0;
+            if (Math.hypot(wxE, wzE) > 0.001) windAng = Math.atan2(wzE, wxE);
+          }
+          const rainK = spec.rain > 0 ? Math.min(1, +spec.rain) : 0;
+          const wear = 1 + 4 * rainK;
+          let m = 0, any = false;
+          for (let n = 0; n < cells.length; n++) {
+            const C = cells[n];
+            if (C.depth <= 0) continue;
+            const expo = C.roof ? 1.4 : (2 - (C.shed || 1));   // exposed strips faster
+            C.depth -= (0.0016 + C.depth * 0.028) * wear * expo * step;
+            if (C.depth < 0.0004) C.depth = 0;
+            else if (C.depth > m) m = C.depth;
+            any = true;
+          }
+          peak = m;
+          if (any) dirty = true;
         }
         if (dirty) {
           dirty = false;
