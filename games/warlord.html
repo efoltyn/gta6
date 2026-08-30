@@ -91,6 +91,52 @@
   #hud b{font-size:15px;letter-spacing:.06em}
   #hud .chip{font-size:11px;letter-spacing:.16em;opacity:.75}
 
+  /* ---- THE VERB RAIL — what replaced the pop-up screens ----
+     A game that never pauses cannot have a modal in it. You can be mid-menu
+     and get attacked, and there is nothing in reality that stops the world
+     while you read a card. So anything that happens IN THE WORLD — meeting a
+     band, reaching a depot — docks a strip of one-word verbs at the bottom of
+     the screen and leaves the world running behind it, exactly the way
+     systems/interact.js does it for the city and the disaster island. Full
+     screens are now only for things that genuinely are a stop: the map, the
+     armoury, the end of a run. */
+  #verbs{position:fixed;left:0;right:0;z-index:55;display:none;
+    bottom:calc(env(safe-area-inset-bottom,0px) + 14px);
+    padding:0 12px;pointer-events:none}
+  #verbs.on{display:block}
+  #verbs .vin{max-width:760px;margin:0 auto;pointer-events:auto}
+  #verbs .vhead{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;
+    margin:0 0 8px;padding:8px 12px;border-radius:12px;
+    background:rgba(18,14,9,.82);border:1px solid rgba(255,255,255,.12)}
+  /* THE READOUT. The content that used to be a full-screen card lives here
+     instead: same tables, same numbers, but capped in height, scrolling
+     inside itself, translucent, and — the whole point — sitting in a strip
+     that does not cover the world or eat a click meant for the ground. */
+  #verbs .vbody{margin:0 0 8px;padding:10px 12px;border-radius:12px;
+    background:rgba(18,14,9,.86);border:1px solid rgba(255,255,255,.12);
+    max-height:min(42vh,340px);overflow:auto;-webkit-overflow-scrolling:touch}
+  #verbs .vbody.hid{display:none}
+  #verbs .vbody .wl-row{padding:5px 0}
+  #verbs .vbody .wl-lbl{margin:10px 0 5px}
+  #verbs .vbody .wl-card{border:0;background:none;padding:0;margin:0 0 6px}
+  #verbs .vtoggle{appearance:none;border:0;background:none;color:var(--ink);
+    opacity:.55;font-size:11px;letter-spacing:.18em;cursor:pointer;padding:2px 0;margin-left:auto}
+  @media (max-width:420px){#verbs .vbody{max-height:34vh}}
+  #verbs .vhead b{font-size:16px;letter-spacing:.06em}
+  #verbs .vhead .vsub{font-size:11px;letter-spacing:.14em;opacity:.62}
+  #verbs .vrow{display:flex;gap:8px;flex-wrap:wrap}
+  #verbs .vbtn{appearance:none;flex:1 1 auto;min-width:96px;
+    border:1px solid rgba(255,255,255,.18);border-radius:12px;
+    background:rgba(18,14,9,.86);color:var(--ink);
+    padding:13px 12px;cursor:pointer;letter-spacing:.1em;font-size:13px;
+    display:flex;flex-direction:column;align-items:center;gap:3px}
+  #verbs .vbtn:active{transform:translateY(1px)}
+  #verbs .vbtn .vk{font-size:10px;opacity:.45;letter-spacing:.18em}
+  #verbs .vbtn.hot{border-color:var(--hot);background:rgba(255,138,61,.2);color:#ffd7bd}
+  #verbs .vbtn.bad{border-color:var(--blood);background:rgba(196,69,58,.2)}
+  #verbs .vbtn[disabled]{opacity:.32;cursor:not-allowed}
+  @media (max-width:420px){#verbs .vbtn{min-width:0;flex:1 1 30%;font-size:12px;padding:12px 6px}}
+
   /* ---- toasts ---- */
   #toasts{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 92px);
     z-index:70;display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none}
@@ -111,6 +157,7 @@
 </div>
 <div id="hud"></div>
 <div id="stage"></div>
+<div id="verbs"></div>
 <div id="toasts"></div>
 
 <script src="../src/core/studio.js?v=warlord1"></script>
@@ -356,11 +403,105 @@ function start() {
     s.classList.remove("on");
     s.innerHTML = "";
   };
+
+  /* ============================================================ THE VERBS
+     ctx.verbs({title, sub, options:[{label, note, key, kind, disabled, on}]})
+
+     THE REPLACEMENT FOR THE POP-UP, and the argument for it is one sentence:
+     you cannot be mid-menu and get attacked. This game's clock never stops —
+     that is the whole multiplayer design — so a modal screen over a live
+     world is a lie about what is happening behind it, and in a match it is
+     also a way to die while reading. There is no pop-up in reality either; a
+     man who rides up to an armed camp gets a choice, not a dialog box.
+
+     So a world interaction docks ONE-WORD verbs at the bottom of the screen
+     and nothing else changes: the camera still runs, the band still walks,
+     the day still turns, and if somebody attacks you mid-decision the attack
+     happens. Same grammar systems/interact.js uses for the city and the
+     disaster island — a short rail of verbs, a price or a consequence as a
+     small chip inside the button, and the result spoken as a toast rather
+     than another panel.
+
+     Keys 1-5 bind automatically so a desktop player never reaches for the
+     mouse, and the whole rail is thumb-height on a phone. */
+  let verbKeyHandler = null;
+  ctx.verbs = function (spec) {
+    const box = el("verbs");
+    if (!box) return;
+    const opts = (spec.options || []).filter(Boolean);
+    let html = '<div class="vin">';
+    if (spec.title || spec.sub) {
+      html += '<div class="vhead">' +
+        (spec.title ? '<b>' + spec.title + '</b>' : '') +
+        (spec.sub ? '<span class="vsub">' + spec.sub + '</span>' : '') +
+        (spec.body ? '<button class="vtoggle" id="vToggle">HIDE</button>' : '') + '</div>';
+    }
+    /* THE BODY IS THE CONTENT, NOT A SUMMARY OF IT. The first pass at killing
+       the pop-ups threw the readout away and left five bare verbs, and that
+       was the wrong lesson: the tables were never the problem — BLOCKING was.
+       A composition breakdown, an odds bar and a roster are exactly what a
+       decision needs, so they come back verbatim; they just live in a strip
+       that the world keeps running behind, that never swallows a tap meant
+       for the ground, and that a thumb can fold away. */
+    if (spec.body) html += '<div class="vbody" id="vBody">' + spec.body + '</div>';
+    html += '<div class="vrow">';
+    opts.forEach(function (o, i) {
+      html += '<button class="vbtn ' + (o.kind || '') + '" data-i="' + i + '"' +
+        (o.disabled ? ' disabled' : '') + '>' +
+        '<span>' + o.label + '</span>' +
+        '<span class="vk">' + (o.key || (i + 1)) + (o.note ? ' · ' + o.note : '') + '</span>' +
+        '</button>';
+    });
+    html += '</div></div>';
+    box.innerHTML = html;
+    box.classList.add("on");
+
+    const fire = function (i) {
+      const o = opts[i];
+      if (!o || o.disabled) return;
+      /* THE RAIL CLOSES BEFORE THE HANDLER RUNS, always. A verb that opens
+         another rail would otherwise be racing its own teardown, and the
+         first draft left two docks stacked on screen. */
+      ctx.closeVerbs();
+      if (typeof o.on === "function") o.on();
+    };
+    Array.prototype.forEach.call(box.querySelectorAll(".vbtn"), function (b) {
+      b.onclick = function () { fire(parseInt(b.dataset.i, 10)); };
+    });
+    const tog = el("vToggle"), bodyEl = el("vBody");
+    if (tog && bodyEl) {
+      tog.onclick = function () {
+        const hid = bodyEl.classList.toggle("hid");
+        tog.textContent = hid ? "SHOW" : "HIDE";
+      };
+    }
+    /* A RAIL CAN BE REPAINTED WITHOUT BEING REOPENED — a purchase changes the
+       stock list under the same verbs, and tearing the whole dock down to
+       redraw one table is what made the old screen flicker on every tap. */
+    ctx.verbsBody = function (htm) {
+      const b = el("vBody");
+      if (b) b.innerHTML = htm;
+    };
+    verbKeyHandler = function (e) {
+      const n = parseInt(e.key, 10);
+      if (n >= 1 && n <= opts.length) { e.preventDefault(); fire(n - 1); }
+    };
+    window.addEventListener("keydown", verbKeyHandler);
+  };
+  ctx.closeVerbs = function () {
+    const box = el("verbs");
+    if (box) { box.classList.remove("on"); box.innerHTML = ""; }
+    if (verbKeyHandler) { window.removeEventListener("keydown", verbKeyHandler); verbKeyHandler = null; }
+  };
+  ctx.verbsOpen = function () { const b = el("verbs"); return !!(b && b.classList.contains("on")); };
   /* A SCREEN THAT IS NOT THE CURRENT PHASE'S SCREEN MUST NOT BE UP. Every
      module gets this for free rather than each of them remembering to tear
      its own DOM down — forgetting once leaves a dead menu over a live game. */
   W.on("phase", function (t) {
     if (t.to === "campaign" || t.to === "battle") ctx.closeScreen();
+    // a battle or a full screen takes the world; a dangling verb rail over
+    // either is the same bug the rail exists to remove
+    if (t.to === "battle" || t.to === "armoury" || t.to === "over") ctx.closeVerbs();
   });
 
   /* ---- boot the modules, then hand the screen to the menu ---- */

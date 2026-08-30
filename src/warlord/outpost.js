@@ -724,35 +724,118 @@
       const t = e.target && e.target.closest ? e.target.closest("button") : null;
       if (!t) return;
       const n = parseInt(t.getAttribute("data-n") || "1", 10) || 1;
-      if (t.hasAttribute("data-tab")) { TAB = t.getAttribute("data-tab"); draw(); return; }
-      if (t.hasAttribute("data-buy")) { buy(o, t.getAttribute("data-buy"), n); draw(); return; }
-      if (t.hasAttribute("data-sell")) { sell(o, t.getAttribute("data-sell"), n); draw(); return; }
+      const redraw = (OLD_OUTPOST_UI || !ctx.verbs) ? draw : function () { repaint(o); };
+      if (t.hasAttribute("data-tab")) { TAB = t.getAttribute("data-tab"); redraw(); return; }
+      if (t.hasAttribute("data-buy")) { buy(o, t.getAttribute("data-buy"), n); redraw(); return; }
+      if (t.hasAttribute("data-sell")) { sell(o, t.getAttribute("data-sell"), n); redraw(); return; }
       if (t.hasAttribute("data-abuy")) {
         const id = t.getAttribute("data-abuy"), p = armourBuyPrice(o, id);
         if ((o.armourStock[id] || 0) > 0 && W.pay(p)) { o.armourStock[id]--; W.stashArmour(id, 1); W.toast(W.armour(id).label + " into the baggage", "good"); }
         else W.toast("cannot afford it", "bad");
-        draw(); return;
+        redraw(); return;
       }
       if (t.hasAttribute("data-asell")) {
         const id = t.getAttribute("data-asell");
         if (W.unstashArmour(id, 1)) { W.earn(armourSellPrice(o, id)); o.armourStock[id] = (o.armourStock[id] || 0) + 1; }
-        draw(); return;
+        redraw(); return;
       }
-      if (t.hasAttribute("data-hire")) { hire(o, t.getAttribute("data-hire"), n); draw(); return; }
-      if (t.id === "opRest") { rest(o); draw(); return; }
+      if (t.hasAttribute("data-hire")) { hire(o, t.getAttribute("data-hire"), n); redraw(); return; }
+      if (t.id === "opRest") { rest(o); redraw(); return; }
       if (t.id === "opArm") { if (W.loadout && W.loadout.open) W.loadout.open({ back: function () { open(o); } }); else W.toast("loadout.js did not load", "bad"); return; }
       if (t.id === "opLeave") { close(); return; }
     };
   }
 
+  const OLD_OUTPOST_UI = (function () {
+    try { return new URLSearchParams(location.search).get("outpostui") === "old"; }
+    catch (e) { return false; }
+  })();
+
+  /* ARRIVING SOMEWHERE IS NOT A MENU.
+
+     open() used to throw the whole trading screen up the instant you reached
+     a depot, which meant riding past one at speed took the world off you
+     whether you wanted to trade or not — and in a match, where the clock
+     never stops, that is a way to be attacked while a price list you did not
+     ask for is covering the screen. The owner's rule: no popups.
+
+     So arriving docks a verb rail and nothing else. The world keeps running,
+     you can ignore it and ride on, and the LIST — which genuinely is a thing
+     you stop to read, twenty crates deep and rebuilt on every purchase —
+     only takes the screen when you actually press BUY. That is the same line
+     the encounter draws: a decision is a rail, a document is a screen.
+
+     ?outpostui=old restores the straight-to-screen behaviour. */
   function open(o) {
     if (!o) return;
     o.seen = true;
     CUR = o;
     TAB = "buy";
     W.setPhase("outpost", o);
-    draw();
+    if (OLD_OUTPOST_UI || !ctx.verbs) { draw(); }
+    else { rail(o); }
     W.emit("outpost:open", o);
+  }
+
+  /* What this place actually offers, as verbs. Each kind gets only the ones
+     it can honour — a well has no crates and a depot has no beds — because a
+     disabled button you can never press is just a smaller lie. */
+  /* THE CRATES STAY. Only the blocking went.
+
+     The stock list, the prices, the tier pool, the rest bill — all of it is
+     the same markup the full-screen trader drew, rendered into the rail's own
+     scrolling panel instead of over the top of the island. You can read a
+     twenty-crate depot, buy from it, and still see the dune line and the
+     party coming over it, because in a match that party is real and it is not
+     waiting for you to finish shopping.
+
+     A purchase repaints the PANEL, never the dock — redrawing the whole rail
+     on every tap is what made the old screen flicker. */
+  function railBody(o) {
+    return o.kind === "camp" ? drawCamp(o)
+         : o.kind === "well" ? drawWell(o)
+         : drawTrade(o);
+  }
+  function repaint(o) {
+    if (ctx.verbsBody) ctx.verbsBody(railBody(o));
+    const node = document.getElementById("vBody");
+    if (node) wire(node, o);
+    if (ctx.paintHud) ctx.paintHud();
+  }
+
+  function rail(o) {
+    const S = W.state;
+    const opts = [];
+    if (o.kind === "camp") {
+      let pool = 0;
+      for (const t in o.pool) pool += o.pool[t] || 0;
+      opts.push({ label: "RECRUIT", kind: "hot",
+                  note: pool ? pool + " for hire" : "nobody left",
+                  disabled: !pool,
+                  on: function () { TAB = "hire"; rail(o); } });
+    } else if (o.kind === "well") {
+      const hurt = S.army.filter(function (m) { return m.wounded; }).length;
+      opts.push({ label: "REST", kind: "hot",
+                  note: hurt ? hurt + " wounded" : "nobody hurt",
+                  on: function () { TAB = "rest"; rail(o); } });
+    } else {
+      opts.push({ label: "BUY", kind: TAB === "buy" ? "hot" : "",
+                  on: function () { TAB = "buy"; rail(o); } });
+      opts.push({ label: "SELL", note: "your cart",
+                  on: function () { TAB = "sell"; rail(o); } });
+    }
+    if (W.loadout && W.loadout.open) {
+      opts.push({ label: "ARM MEN", note: "loadout", on: function () { W.loadout.open(); } });
+    }
+    opts.push({ label: "RIDE ON", on: close });
+    ctx.verbs({
+      title: o.name,
+      sub: ((KINDS[o.kind] || KINDS.depot).tag) + " &middot; $" + S.gold + " on you",
+      body: railBody(o),
+      options: opts,
+    });
+    const node = document.getElementById("vBody");
+    if (node) wire(node, o);
   }
 
   function close() {
@@ -811,6 +894,7 @@
       }
     },
     place: place,
+    build: build,          // campaign.js picks the SPOT; this makes the PLACE
     open: open,
     close: close,
     restock: restock,

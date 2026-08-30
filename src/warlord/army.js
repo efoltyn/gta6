@@ -142,7 +142,23 @@
       parts.push(r.n + " " + label + " with " + W.gunLabel(top).toLowerCase() +
         (others > 0 ? " (+" + others + " other gun" + (others === 1 ? "" : "s") + ")" : ""));
     }
-    return { rows: rows, text: parts.join(", ") };
+    /* AND A SHORT FORM, for the verb rail's one header line. The long text
+       is right for a screen you stopped to read and far too long for a strip
+       docked over a live world — "22 levies with 9mm sidearms, 14 raiders
+       with AK-47s, 4 veterans with M249 LMGs" wraps to three lines on a
+       phone and buries the only thing a rider needs at a glance: what the
+       BULK of that party is and whether anything in it outclasses him. So:
+       the heaviest tier present, and the best gun anyone in the party is
+       carrying, which together are the whole threat assessment. */
+    let best = null;
+    for (let i = 0; i < men.length; i++) {
+      if (!best || W.gunPrice(men[i].wid) > W.gunPrice(best)) best = men[i].wid;
+    }
+    const topTier = rows.length ? W.tier(rows[0].tier).label.toLowerCase() : "men";
+    const short = (rows.length > 1 ? "mostly " : "") +
+      (rows.length ? rows[0].n + " " + topTier + (rows[0].n === 1 ? "" : "s") : "") +
+      (best ? ", best gun " + W.gunLabel(best).toLowerCase() : "");
+    return { rows: rows, text: parts.join(", "), short: short };
   }
 
   function armourLine(men) {
@@ -214,6 +230,34 @@
     paintEncounter(opts);
   }
 
+  const OLD_ENCOUNTER_UI = (function () {
+    try { return new URLSearchParams(location.search).get("encounterui") === "old"; }
+    catch (e) { return false; }
+  })();
+
+  /* the card this replaced, kept whole so ?encounterui=old is a real revert
+     and the two can be photographed against each other rather than argued
+     about. It is dead on every default boot. */
+  function paintEncounterScreen(opts, D) {
+    ctx.screen(
+      '<h1 class="wl-h" style="color:' + D.colour + '">' + esc(D.band.name) + '</h1>' +
+      '<p class="wl-sub">' + D.band.men.length + ' MEN &middot; ' + esc(D.F.label) + '</p>' +
+      '<div class="wl-card"><div class="wl-small">' + esc(D.comp.text) + '</div></div>' +
+      '<div class="wl-lbl">THE MEN OPPOSITE</div><div class="wl-card">' + D.gh + '</div>' +
+      '<div class="wl-btns">' +
+        '<button class="wl-btn hot" id="eFight">ATTACK</button>' +
+        '<button class="wl-btn" id="eSurr"' + (D.asked ? " disabled" : "") + '>DEMAND SURRENDER</button>' +
+        (D.price != null ? '<button class="wl-btn" id="eHire">HIRE $' + D.price + '</button>' : '') +
+        (D.rob ? '<button class="wl-btn" id="eRob">ROB THEM</button>' : '') +
+        '<button class="wl-btn" id="eLeave">RIDE AWAY</button>' +
+      '</div>');
+    ctx.el("eFight").onclick = function () { startBattle({}); };
+    const sb = ctx.el("eSurr"); if (sb) sb.onclick = demandSurrender;
+    const hb = ctx.el("eHire"); if (hb) hb.onclick = function () { hireBand(D.price); };
+    const rb = ctx.el("eRob"); if (rb) rb.onclick = robBand;
+    ctx.el("eLeave").onclick = leaveBand;
+  }
+
   function paintEncounter(opts) {
     opts = opts || {};
     const band = curBand;
@@ -236,60 +280,100 @@
         (g.armour !== "none" ? " &middot; " + esc(W.armour(g.armour).label) : "") + '</span></div>';
     }
 
+    /* ============================================================ NO POP-UP
+       This was a full-screen card and it should never have been one. The
+       campaign clock does not stop — in a match six other warlords are still
+       riding — so a modal here is a lie about what is happening behind it,
+       and it is a way to be attacked while reading a stat block. The owner's
+       words: you cannot be mid-popup and get attacked, and there are no
+       popups in reality.
+
+       So the meeting is a VERB RAIL docked at the bottom, the way
+       systems/interact.js has always done a walk-up in this engine. The
+       world keeps running behind it. What used to be four cards of tables is
+       now the two facts a decision actually needs — how many of them, and
+       what the odds are — spoken in the header, with the consequences as
+       chips inside the buttons. The full breakdown has not been deleted; it
+       is one tap away on INSPECT, which is a screen because reading a roster
+       IS a thing you stop to do.
+
+       ?encounterui=old restores the card. */
+    if (OLD_ENCOUNTER_UI) return paintEncounterScreen(opts, {
+      band: band, mine: mine, theirs: theirs, odds: odds, surr: surr, comp: comp,
+      price: price, rob: rob, F: F, colour: colour, asked: asked, gh: gh });
+
+    const oddsWord = odds > 0.75 ? "you should win" : odds > 0.55 ? "an even fight"
+      : odds > 0.3 ? "you are outmatched" : "they will destroy you";
+
+    /* THE READOUT SURVIVES THE POP-UP. The first attempt at un-blocking this
+       screen deleted the tables and left five bare verbs, and that was the
+       wrong lesson — the content was never the complaint. What a rider needs
+       before committing an army is exactly this: what they are made of, what
+       they are carrying, and the two bars side by side. It is the same markup
+       the card used; it just lives in a strip that does not stop the world. */
+    const body =
+      '<div class="wl-small" style="line-height:1.7">' + esc(comp.text) + '.<br>' +
+        '<span class="wl-dim">' + esc(armourLine(band.men)) + '. carrying about $' +
+        (band.gold | 0) + '.</span></div>' +
+      '<div class="wl-lbl">THE ODDS</div>' +
+      '<div class="wl-row"><span>YOU <b>' + Math.round(mine) + '</b></span>' +
+        bar(mine / Math.max(1, mine + theirs), "var(--hot)") + '</div>' +
+      '<div class="wl-row"><span>THEM <b>' + Math.round(theirs) + '</b></span>' +
+        bar(theirs / Math.max(1, mine + theirs), colour) + '</div>' +
+      '<div class="wl-row wl-small wl-dim"><span>' + W.armySize() + ' of yours against ' +
+        band.men.length + ' of theirs</span></div>' +
+      '<div class="wl-lbl">THE MEN OPPOSITE</div>' + gh +
+      (asked ? '<div class="wl-row wl-small" style="color:var(--blood)">they already told you no.</div>' : '') +
+      (price == null ? '<div class="wl-row wl-small wl-dim">' + esc(hireWhy(band) || "") + '</div>' : '') +
+      (rob ? '<div class="wl-row wl-small wl-dim">you outnumber them badly enough to just take it — gold and guns, no prisoners.</div>' : '');
+
+    ctx.verbs({
+      title: band.name,
+      sub: band.men.length + " MEN &middot; " + comp.short + " &middot; " +
+           Math.round(odds * 100) + "% &mdash; " + oddsWord +
+           (band.mood === "hunt" ? " &middot; HUNTING YOU" : ""),
+      body: body,
+      options: [
+        { label: "ATTACK", kind: "hot", note: Math.round(odds * 100) + "%",
+          on: function () { startBattle({}); } },
+        { label: "DEMAND", note: asked ? "refused" : Math.round(surr * 100) + "%",
+          disabled: !!asked, on: demandSurrender },
+        (price != null
+          ? { label: "HIRE", note: "$" + price, disabled: W.state.gold < price,
+              on: function () { hireBand(price); } }
+          : { label: "HIRE", note: "never", disabled: true, on: function () {} }),
+        (rob ? { label: "ROB", note: "no fight", on: robBand } : null),
+        { label: "RIDE AWAY", on: leaveBand },
+      ],
+    });
+  }
+
+  /* THE ROSTER, which IS worth a screen: reading forty men's kit is a thing
+     you deliberately stop to do, and nothing is chasing you while you do it
+     that was not already chasing you. Backs straight out to the rail. */
+  function paintRoster() {
+    const band = curBand;
+    if (!band) return;
+    const groups = groupsOf(band.men);
+    let gh = "";
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
+      gh += '<div class="wl-row"><span><b>' + g.count + '</b> ' + esc(g.label) +
+        '</span><span class="wl-small wl-dim">' + esc(g.gun) +
+        (g.armour !== "none" ? " &middot; " + esc(W.armour(g.armour).label) : "") + '</span></div>';
+    }
+    const colour = "#" + (band.colour || 0xc4593a).toString(16).padStart(6, "0");
     ctx.screen(
       '<h1 class="wl-h" style="color:' + colour + '">' + esc(band.name) + '</h1>' +
-      '<p class="wl-sub">' + band.men.length + ' MEN &middot; ' + esc(F.label) +
-        (band.mood === "hunt" ? ' &middot; <span style="color:var(--blood)">HUNTING YOU</span>' : '') + '</p>' +
-
-      '<div class="wl-card">' +
-        '<div class="wl-small" style="opacity:.85;line-height:1.7">' + esc(comp.text) + '.<br>' +
-        '<span class="wl-dim">' + esc(armourLine(band.men)) + '. they are carrying about $' +
-        (band.gold | 0) + '.</span></div>' +
-      '</div>' +
-
-      '<div class="wl-lbl">THE ODDS</div>' +
-      '<div class="wl-card">' +
-        '<div class="wl-row"><span>YOUR STRENGTH <b>' + Math.round(mine) + '</b></span>' +
-          bar(mine / Math.max(1, mine + theirs), "var(--hot)") + '</div>' +
-        '<div class="wl-row"><span>THEIRS <b>' + Math.round(theirs) + '</b></span>' +
-          bar(theirs / Math.max(1, mine + theirs), colour) + '</div>' +
-        '<div class="wl-row"><span>IF YOU FIGHT</span><b style="color:' +
-          (odds > 0.6 ? "#8fdc9a" : odds > 0.35 ? "var(--gold)" : "var(--blood)") + '">' +
-          Math.round(odds * 100) + '% </b></div>' +
-        '<div class="wl-row wl-small wl-dim"><span>' + W.armySize() + ' of yours against ' +
-          band.men.length + ' of theirs</span></div>' +
-      '</div>' +
-
-      '<div class="wl-lbl">THE MEN OPPOSITE</div>' +
-      '<div class="wl-card">' + gh + '</div>' +
-
-      '<div class="wl-btns">' +
-        '<button class="wl-btn hot" id="eFight">ATTACK</button>' +
-        '<button class="wl-btn" id="eSurr"' + (asked ? " disabled" : "") + '>DEMAND SURRENDER' +
-          '<span class="wl-small wl-dim"> ' + Math.round(surr * 100) + '%</span></button>' +
-        (price != null
-          ? '<button class="wl-btn" id="eHire"' + (W.state.gold < price ? " disabled" : "") +
-            '>HIRE THEM <span class="wl-gold">$' + price + '</span></button>'
-          : '<button class="wl-btn ghost" disabled>WILL NOT BE HIRED</button>') +
-        (rob ? '<button class="wl-btn" id="eRob">ROB THEM</button>' : '') +
-        '<button class="wl-btn" id="eLeave">RIDE AWAY</button>' +
-      '</div>' +
-      '<div class="wl-card wl-small wl-dim" style="margin-top:14px">' +
-        (asked ? 'they already told you no. now it is a fight or a retreat.<br>' : '') +
-        (price == null ? esc(hireWhy(band) || "") + '<br>' : '') +
-        (rob ? 'you outnumber them badly enough to simply take what they carry — their gold and their guns, and they walk. no prisoners, no promotions.<br>' : '') +
-        'a demand that fails leaves them hunting you, and you fight it on their terms.' +
-      '</div>'
+      '<p class="wl-sub">' + band.men.length + ' MEN &middot; ' + esc(W.faction(band.faction).label) + '</p>' +
+      '<div class="wl-card"><div class="wl-small" style="line-height:1.7">' +
+        esc(composition(band.men).text) + '.<br><span class="wl-dim">' +
+        esc(armourLine(band.men)) + '. they are carrying about $' + (band.gold | 0) +
+        '.</span></div></div>' +
+      '<div class="wl-lbl">THE MEN OPPOSITE</div><div class="wl-card">' + gh + '</div>' +
+      '<div class="wl-btns"><button class="wl-btn hot" id="rBack">BACK</button></div>'
     );
-
-    ctx.el("eFight").onclick = function () { startBattle({}); };
-    const sb = ctx.el("eSurr");
-    if (sb) sb.onclick = demandSurrender;
-    const hb = ctx.el("eHire");
-    if (hb) hb.onclick = function () { hireBand(price); };
-    const rb = ctx.el("eRob");
-    if (rb) rb.onclick = robBand;
-    ctx.el("eLeave").onclick = leaveBand;
+    ctx.el("rBack").onclick = function () { ctx.closeScreen(); paintEncounter({}); };
   }
 
   function startBattle(opts) {

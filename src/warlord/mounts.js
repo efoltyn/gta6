@@ -167,7 +167,7 @@
       note: "the charge. useless in rocks, decisive on open sand." },
     { id: "technical", label: "TECHNICAL", species: null,
       pace: 9.0, dash: 21.0, mass: 2600, seats: 4, hp: 260, thirst: 1.6,
-      seatY: 1.28, bodyH: 2.47,
+      seatY: 1.23, bodyH: 3.10,   // the gunner STANDS on the deck, so the assembly is a man taller
       note: "a pickup with the belt-fed gun bolted to the bed. four men ride it." },
   ];
   const BY_ID = {};
@@ -386,7 +386,7 @@
   M.buy = function (id, n) {
     n = Math.max(1, n | 0);
     const cost = M.price(id) * n;
-    if (!BY_ID[id]) return false;
+    if (!BY_ID[id] || NO_ECON) return false;
     if (!W.pay(cost)) { W.toast("not enough gold", "bad"); return false; }
     M.stableAdd(id, n);
     W.log("bought " + n + " " + BY_ID[id].label.toLowerCase() + (n > 1 ? "s" : "") + " for $" + cost + ".");
@@ -1859,13 +1859,19 @@
     push(this.mBody); push(this.mCoat);
     for (let q = 0; q < 4; q++) push(this.mLegs[q]);
   };
+  /* DISPOSE THE MESHES, NEVER THE GEOMETRY. The buffers belong to bake(),
+     which is cached per kind for the life of the page and shared by the
+     campaign column, the battle, the debug pad and the visual harness at
+     once. Disposing them here freed GL buffers that four other callers still
+     pointed at — three.js quietly re-uploads, so it cost a full re-upload per
+     subject rather than crashing, which is exactly the kind of bug that never
+     gets found. Materials are ours; drop those. */
   Column.prototype.dispose = function () {
-    const self = this;
     this.group.traverse(function (o) {
-      if (o.isInstancedMesh) { o.geometry && o.geometry.dispose && o.geometry.dispose(); o.material && o.material.dispose(); }
+      if (o.isInstancedMesh && o.material && o.material.dispose) o.material.dispose();
     });
     if (this.group.parent) this.group.parent.remove(this.group);
-    self.n = 0;
+    this.n = 0;
   };
   M.Column = Column;
 
@@ -1878,6 +1884,9 @@
   M.column = function (kindId, parent, cap) {
     if (!THREE || !CBZ.studio) return null;
     let c = columns[kindId];
+    // a caller asking for more instances than the cached column can hold gets
+    // a bigger one rather than a silently truncated army
+    if (c && cap && cap > c.cap) { c.dispose(); c = columns[kindId] = null; }
     if (!c) {
       try { c = columns[kindId] = new Column(kindId, cap || 160); }
       catch (e) { console.warn("[warlord/mounts] bake failed for " + kindId, e); columns[kindId] = null; return null; }
@@ -1952,6 +1961,11 @@
   let lastX = null, lastZ = null;
   function selfDrive(dt) {
     if (OFF || !THREE || W.phase() !== "campaign") return;
+    /* THE PAD OWNS EVERY COLUMN WHEN IT IS UP. ?mounts=1 sets the campaign
+       phase so the rest of the page behaves, which means this would also run
+       — and beginFrame() zeroes EVERY column, including the pad's. It only
+       worked because of hook registration order, which is not a reason. */
+    if (pad) return;
     const now = (CBZ.micro && CBZ.micro.elapsed) || 0;
     if (now - extDrawT < 1.0) return;                 // somebody else is drawing
     const D = W.desert;
@@ -2244,7 +2258,7 @@
        hemisphere are tuned for 14 km of desert seen from 60 m up; at 0xd9b979
        under those lights the pad reads as a sheet of white paper and the
        riders vanish into it. */
-    const ground = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x9c7942 }));
+    const ground = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x6f5326 }));
     ground.receiveShadow = true;
     root.add(ground);
 

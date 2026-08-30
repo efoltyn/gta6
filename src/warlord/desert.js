@@ -752,11 +752,25 @@
   const SC_CAP = { rock: 900, brush: 1100, bone: 220, wreck: 30 };
   let scatter = null, scCX = NaN, scCZ = NaN;
 
+  /* THE SCATTER GEOMETRY IS props.js's, AND IT ASKED. That file publishes
+     `scatterKit()` — a real weathered rock, a dead desert BUSH (seven splayed
+     twigs) rather than the cone this file used to draw, a rib bone, a burnt
+     chassis — with the note that "a cone in a desert reads as a Christmas
+     tree and desert.js's scatter is full of them". It was right. The SYSTEM
+     stays here (instanced, hash-placed, camera-following, which is the part
+     that has to know about the terrain); only the shapes come from there, so
+     a rock at 900 m and the same rock at 4 m in a battle are one rock.
+     Falls back to primitives when props.js is absent — this file must still
+     work on a page that did not load it. */
   function makeScatter() {
     if (FLAG_NOSCATTER || !THREE.InstancedMesh) return null;
     const grp = new THREE.Group();
-    function im(geo, colour, cap, shadow) {
-      const m = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: colour }), cap);
+    let K = null;
+    if (W.props && typeof W.props.scatterKit === "function") {
+      try { K = W.props.scatterKit(); } catch (e) { K = null; }
+    }
+    function im(geo, mat, colour, cap, shadow) {
+      const m = new THREE.InstancedMesh(geo, mat || new THREE.MeshLambertMaterial({ color: colour }), cap);
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       m.castShadow = !!shadow; m.receiveShadow = false;
       m.frustumCulled = false;
@@ -764,14 +778,22 @@
       grp.add(m);
       return m;
     }
-    const s = {
-      root: grp,
-      rock: im(new THREE.IcosahedronGeometry(1, 0), 0x453b2f, SC_CAP.rock, true),
-      brush: im(new THREE.ConeGeometry(0.7, 1.1, 5), 0x37331d, SC_CAP.brush, false),
-      bone: im(new THREE.BoxGeometry(0.24, 0.24, 2.1), 0x9c957f, SC_CAP.bone, false),
-      wreck: im(new THREE.BoxGeometry(2.2, 1.4, 5.0), 0x3a2a20, SC_CAP.wreck, true),
+    const pick = function (name, fallbackGeo, fallbackColour) {
+      const e = K && K[name];
+      return e && e.geo ? { geo: e.geo, mat: e.mat || null } : { geo: fallbackGeo, mat: null, colour: fallbackColour };
     };
-    return s;
+    const r = pick("rock", new THREE.IcosahedronGeometry(1, 0), 0x453b2f);
+    const b = pick("brush", new THREE.ConeGeometry(0.7, 1.1, 5), 0x37331d);
+    const o = pick("bone", new THREE.BoxGeometry(0.24, 0.24, 2.1), 0x9c957f);
+    const w = pick("wreck", new THREE.BoxGeometry(2.2, 1.4, 5.0), 0x3a2a20);
+    return {
+      root: grp,
+      fromProps: !!K,
+      rock: im(r.geo, r.mat, r.colour, SC_CAP.rock, true),
+      brush: im(b.geo, b.mat, b.colour, SC_CAP.brush, false),
+      bone: im(o.geo, o.mat, o.colour, SC_CAP.bone, false),
+      wreck: im(w.geo, w.mat, w.colour, SC_CAP.wreck, true),
+    };
   }
 
   const _m4 = THREE ? new THREE.Matrix4() : null;
@@ -1104,17 +1126,138 @@
       /* register the cover as real boxes. Same call every wall in this repo
          uses, so combat_iq treats them as cover and segmentBlocked treats
          them as walls without anybody writing a second cover system. */
+      /* RAISE MEANS RAISE THE BATTLEFIELD — ground, cover and all — and the
+         first version of this only registered colliders. That is not a
+         detail: battle.js reads `raised` as "desert.js has put the field in
+         the scene" and its very next lines are
+
+             if (!raised) rockMesh(c, groundAt);
+             if (!raised) groundMesh(cx, cz, groundAt);
+
+         so a raise() that draws nothing means the fight happens on NO
+         GROUND AT ALL, with the campaign island hidden behind it. Reported
+         from the battle side as "battlefieldAt grounds render flat: 10.2 m
+         of relief measured, no crest visible" — the relief was real, the
+         mesh was never built. Read the consumer, not the noun.
+
+         The patch is 2.7 m per vertex over 430 m: forty times finer than the
+         campaign clipmap can afford at that span, evaluated from the same
+         heightAt, so the dune you rode over is the dune you fight on. */
       raise: function (o) {
         if (raised) return raised;
         o = o || {};
-        const ox = o.x || 0, oy = o.y || 0, oz = o.z || 0;
         const M = CBZ.micro;
-        raised = [];
-        if (!M || !M.addBoxCollider) return raised;
-        for (let i = 0; i < cover.length; i++) {
-          const c = cover[i];
-          raised.push(M.addBoxCollider(ox + c.x, oy + c.y + c.h / 2, oz + c.z,
-            c.w, c.h, c.d, { warlordCover: true }));
+        raised = { cols: [], meshes: [] };
+        if (!THREE || !CBZ.scene) return raised;
+
+        // ---- the ground ------------------------------------------------
+        const span = radius * 2 + 90, seg = 160;
+        const g = new THREE.PlaneGeometry(span, span, seg, seg);
+        g.rotateX(-Math.PI / 2);
+        const pos = g.attributes.position;
+        const nv = pos.count, side = seg + 1;
+        const hbuf = new Float32Array(nv);
+        let lo = 1e9;
+        for (let i = 0; i < nv; i++) {
+          const y = heightAt(wx + pos.getX(i), wz + pos.getZ(i));
+          hbuf[i] = y; pos.setY(i, y);
+          if (y < lo) lo = y;
+        }
+        const cell = span / seg;
+        const cbuf = new Float32Array(nv * 3);
+        for (let j = 0; j < side; j++) {
+          for (let k = 0; k < side; k++) {
+            const i = j * side + k, oi = i * 3;
+            const xl = hbuf[i - (k > 0 ? 1 : 0)], xr = hbuf[i + (k < seg ? 1 : 0)];
+            const zl = hbuf[i - (j > 0 ? side : 0)], zr = hbuf[i + (j < seg ? side : 0)];
+            const slope = Math.hypot((xr - xl) / (2 * cell), (zr - zl) / (2 * cell));
+            colourAt(wx + pos.getX(i), wz + pos.getZ(i), hbuf[i], slope, _c);
+            // same curvature term the island uses, so the arena and the
+            // campaign are visibly the same desert and not two deserts
+            const curv = ((xl + xr + zl + zr) * 0.25 - hbuf[i]) / cell;
+            const ao = 1 - clamp(curv * 4.6, -0.20, 0.38);
+            cbuf[oi] = _c[0] * ao; cbuf[oi + 1] = _c[1] * ao; cbuf[oi + 2] = _c[2] * ao;
+          }
+        }
+        g.setAttribute("color", new THREE.BufferAttribute(cbuf, 3));
+        g.computeVertexNormals();
+        const gm = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+        gm.position.set(wx, 0, wz);
+        gm.receiveShadow = true;
+        gm.userData.terrain = true;
+        CBZ.scene.add(gm);
+        raised.meshes.push(gm);
+
+        /* THE SKIRT. The campaign island is HIDDEN while a battle owns the
+           screen, so past the patch there is nothing but sky dome. One flat
+           plane at the field's floor, in the field's own colour, and the
+           battle's fog eats the seam — battle.js does exactly this when it
+           draws its own ground, and skipping it is how a fight ends up
+           standing on a floating tile. */
+        const sk = new THREE.PlaneGeometry(9000, 9000);
+        sk.rotateX(-Math.PI / 2);
+        colourAt(wx, wz, base, 0.02, _c);
+        const skm = new THREE.Mesh(sk, new THREE.MeshLambertMaterial({
+          color: new THREE.Color(_c[0] * 0.92, _c[1] * 0.92, _c[2] * 0.92) }));
+        skm.position.set(wx, lo - 0.6, wz);
+        skm.receiveShadow = false;
+        skm.matrixAutoUpdate = false; skm.updateMatrix();
+        skm.userData.terrain = true;
+        CBZ.scene.add(skm);
+        raised.meshes.push(skm);
+
+        /* THE COVER IS props.js's, NOT MINE. It ships coverField() for
+           exactly this list shape and its boulders/slabs/banks/palms are
+           real objects rather than the boxes I would otherwise draw a second
+           time. Falls back to plain boxes when props.js is not on the page,
+           because desert.js must not be the reason a slice page has no
+           cover. */
+        let placed = false;
+        if (W.props && typeof W.props.coverField === "function") {
+          try {
+            const local = [];
+            for (let i = 0; i < cover.length; i++) {
+              const c = cover[i];
+              local.push({ x: c.x - wx, y: c.y, z: c.z - wz, w: c.w, h: c.h, d: c.d,
+                           yaw: c.yaw, kind: c.kind });
+            }
+            const grp = W.props.coverField(local, {});
+            if (grp) {
+              grp.position.set(wx, 0, wz);
+              CBZ.scene.add(grp);
+              raised.meshes.push(grp);
+              const pc = grp.userData && grp.userData.colliders;
+              if (M && M.addBoxCollider && pc) {
+                for (let i = 0; i < pc.length; i++) {
+                  const q = pc[i];
+                  raised.cols.push(M.addBoxCollider(wx + q.x, q.y, wz + q.z, q.w, q.h, q.d,
+                    { warlordCover: true }));
+                }
+              }
+              placed = true;
+            }
+          } catch (e) { console.warn("[warlord/desert] props.coverField", e); placed = false; }
+        }
+        if (!placed) {
+          const rockG = new THREE.IcosahedronGeometry(1, 0);
+          const rockM = new THREE.MeshLambertMaterial({ color: 0x453b2f });
+          for (let i = 0; i < cover.length; i++) {
+            const c = cover[i];
+            const m = new THREE.Mesh(rockG, rockM);
+            m.position.set(c.x, c.y + c.h * 0.42, c.z);
+            m.scale.set(c.w * 0.6, c.h * 0.6, c.d * 0.6);
+            m.rotation.y = c.yaw;
+            m.castShadow = m.receiveShadow = true;
+            CBZ.scene.add(m);
+            raised.meshes.push(m);
+          }
+        }
+        if (M && M.addBoxCollider && !placed) {
+          for (let i = 0; i < cover.length; i++) {
+            const c = cover[i];
+            raised.cols.push(M.addBoxCollider(c.x, c.y + c.h / 2, c.z, c.w, c.h, c.d,
+              { warlordCover: true }));
+          }
         }
         if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
         return raised;
@@ -1123,11 +1266,23 @@
         if (!raised) return;
         const M = CBZ.micro;
         if (M && M.colliders) {
-          for (let i = raised.length - 1; i >= 0; i--) {
-            const at = M.colliders.indexOf(raised[i]);
+          for (let i = raised.cols.length - 1; i >= 0; i--) {
+            const at = M.colliders.indexOf(raised.cols[i]);
             if (at >= 0) M.colliders.splice(at, 1);
           }
-          if (M.rebuildColliderGrid) { if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); M.rebuildColliderGrid(); }
+          if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+          if (M.rebuildColliderGrid) M.rebuildColliderGrid();
+        }
+        for (let i = 0; i < raised.meshes.length; i++) {
+          const m = raised.meshes[i];
+          if (m.parent) m.parent.remove(m);
+          m.traverse(function (o) {
+            if (o.geometry) o.geometry.dispose();
+            if (o.material && !o.material._shared) {
+              if (Array.isArray(o.material)) o.material.forEach(function (x) { x.dispose(); });
+              else o.material.dispose();
+            }
+          });
         }
         raised = null;
       },
@@ -1150,6 +1305,7 @@
     return {
       seed: SEED, radius: RADIUS, bounds: BOUNDS, oases: oases.length,
       levels: levels.length, landPct: Math.round(land / tries * 100), biomes: counts,
+      scatterFromProps: !!(scatter && scatter.fromProps),
       flags: { plain: FLAG_PLAIN, scatter: !FLAG_NOSCATTER, lod: !FLAG_FLATLOD },
     };
   };

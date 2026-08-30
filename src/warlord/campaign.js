@@ -230,17 +230,51 @@
     }
     return null;
   }
+  /* WHO BUILDS AN OUTPOST — and for two days the answer was "both of us".
+
+     This file placed outposts at landmarks and constructed them itself, with
+     its own kinds ("town") and its own fields. outpost.js placed them too,
+     with `stock`, `armourStock`, `pool`, `capital` and `markup`. Both pushed
+     into W.state.outposts. Riding up to one of THESE and pressing BUY threw
+     `Cannot convert undefined or null to object` out of Object.keys(o.stock),
+     because this constructor had never heard of stock — the exact "two
+     modules invent two versions of one thing" failure CONTRACT.md exists to
+     stop, and neither agent could see it alone.
+
+     The split is now the obvious one. This file knows WHERE an outpost
+     belongs — at an oasis, on a landing a boat could reach — because it owns
+     the island and the ride. outpost.js knows WHAT one is, because it owns
+     the trading. So geography is chosen here and construction is delegated
+     there, and the standalone constructor below survives only for a page
+     where outpost.js failed to load, where a marker you cannot trade with
+     still beats no landmark at all. */
   function makeOutpost(name, kind, p, at) {
+    const y = p.y != null ? p.y : W.desert.heightAt(p.x, p.z);
+    if (W.outpost && W.outpost.build) {
+      /* outpost.js has no "town" — its kinds are depot/camp/well/market.
+         A town at an oasis is a well; a town on the coast is a depot. */
+      const k = kind === "town" ? (at ? "well" : "depot") : kind;
+      const o = W.outpost.build(k, p.x, p.z);
+      if (o) {
+        o.name = name;               // this file owns the naming; it knows the place
+        o.y = y;
+        o.at = at || null;
+        o.biome = W.desert.biomeAt(p.x, p.z);
+        return o;
+      }
+    }
     const K = OUTPOST_KINDS.filter(function (k) { return k.kind === kind; })[0] || OUTPOST_KINDS[0];
     return {
       id: "op" + (S.outposts.length + 1),
       name: name, kind: kind, label: K.label, note: K.note,
-      x: p.x, z: p.z, y: p.y != null ? p.y : W.desert.heightAt(p.x, p.z),
+      x: p.x, z: p.z, y: y,
       at: at || null,
       colour: K.colour,
       biome: W.desert.biomeAt(p.x, p.z),
       wealth: clamp(0.3 + W.rnd() * 0.6, 0.2, 0.95),
       restocked: 0,
+      // never let a fallback outpost crash a trader that expects these
+      stock: {}, armourStock: {}, pool: {},
     };
   }
 
@@ -500,24 +534,54 @@
      tier photographed as the same dark speck on a pale dune. */
   const TIER_COLOUR = { levy: 0xc9b489, raider: 0xd2743c, soldier: 0x7fa05e, veteran: 0x5f88b4 };
 
-  /* ============================================================ MARKER */
+  /* ============================================================ MARKER
+     A SCUFF IN THE SAND, NOT A BEACON.
+
+     This used to be a pulsing orange ring under a twenty-six metre beam with
+     depthTest off, so it shone THROUGH dunes and mesas and sat on screen for
+     the whole ride. The owner's word for it was "dumb" and he is right: it is
+     a strategy-game cursor standing in the middle of a desert nobody else in
+     the world can see. Nothing in this game should be a floating UI object in
+     the world — a warlord pointing at a horizon does not plant a light there.
+
+     So the tap leaves what a tap would actually leave: a scuff of disturbed
+     sand where you pointed, which puffs once and is gone inside a second. It
+     confirms the input landed — the only job the marker ever really had —
+     and then it stops existing. depthTest is ON now, so a dune in front of it
+     hides it, the way a dune does.
+
+     Where you are actually going is answered by the man turning and riding,
+     which is information the world already carries. ?marker=beacon restores
+     the old ring and beam for anyone who wants to compare. */
+  const MARKER_OLD = QP.get("marker") === "beacon";
   function buildMarker() {
     const g = new THREE.Group();
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(2.4, 3.4, 24),
-      new THREE.MeshBasicMaterial({ color: 0xffb15a, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthTest: false }));
-    ring.rotation.x = -Math.PI / 2;
-    ring.renderOrder = 900;
-    g.add(ring);
-    /* A BEAM, because a ring on the ground 900 m away behind a dune is not
-       on screen at all and the whole point of the marker is that you can see
-       where you told him to go. depthTest off so it reads through terrain. */
-    const beam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.35, 0.35, 26, 6, 1, true),
-      new THREE.MeshBasicMaterial({ color: 0xffb15a, transparent: true, opacity: 0.30, depthTest: false, side: THREE.DoubleSide }));
-    beam.position.y = 13;
-    beam.renderOrder = 899;
-    g.add(beam);
+    if (MARKER_OLD) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(2.4, 3.4, 24),
+        new THREE.MeshBasicMaterial({ color: 0xffb15a, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthTest: false }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.renderOrder = 900;
+      g.add(ring);
+      const beam = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.35, 0.35, 26, 6, 1, true),
+        new THREE.MeshBasicMaterial({ color: 0xffb15a, transparent: true, opacity: 0.30, depthTest: false, side: THREE.DoubleSide }));
+      beam.position.y = 13;
+      beam.renderOrder = 899;
+      g.add(beam);
+    } else {
+      /* Two flat discs of kicked sand, offset and counter-rotating as they
+         fade, so the puff has some life in it without being a particle
+         system. Sand colour, not UI orange — it is dirt, not a waypoint. */
+      for (let i = 0; i < 2; i++) {
+        const d = new THREE.Mesh(
+          new THREE.CircleGeometry(1.5 + i * 0.9, 14),
+          new THREE.MeshBasicMaterial({ color: i ? 0xbfa274 : 0xd8c49a, transparent: true, opacity: 0.5 }));
+        d.rotation.x = -Math.PI / 2;
+        d.position.y = 0.02 + i * 0.01;
+        g.add(d);
+      }
+    }
     g.visible = false;
     marker = g;
     root.add(g);
@@ -940,6 +1004,7 @@
     const x = ox + dx * hi, z = oz + dz * hi;
     if (!D.onLand(x, z)) { W.toast("that is the sea", "bad"); return; }
     dest = { x: x, z: z };
+    markAt(x, z);
     W.emit("campaign:dest", dest);
   }
 
@@ -1090,11 +1155,25 @@
     // ---- where is he going ----------------------------------------------
     let wantX = 0, wantZ = 0;
     if (stickLive) {
-      // camera-relative: forward is where you are looking, which is the only
-      // mapping that survives a camera you can swing
+      /* CAMERA-RELATIVE, AND THE SIGNS ARE NOT A MATTER OF TASTE.
+
+         This rotated by MINUS camYaw and shipped that way: push the stick
+         forward after swinging the camera and the man rode backwards. At
+         yaw 0 the wrong matrix and the right one are identical, which is
+         exactly why it survived — every test that started the game and
+         pushed forward passed.
+
+         The camera is placed at (-sin, -cos) * back and looks toward
+         (+sin, +cos), so in world space:
+             camera forward = ( sin(camYaw),  cos(camYaw) )
+             camera right   = ( cos(camYaw), -sin(camYaw) )
+         and the stick is (x = right, y = forward) — studio.controls builds
+         move.y from axis("KeyS","KeyW"), so +y is forward on the keyboard
+         and the touch stick negates screen-y to match. Project the stick
+         onto those two vectors and there is nothing left to get wrong. */
       const cs = Math.cos(camYaw), sn = Math.sin(camYaw);
-      wantX = mx * cs - my * sn;
-      wantZ = mx * sn + my * cs;
+      wantX = my * sn + mx * cs;
+      wantZ = my * cs - mx * sn;
     } else if (dest) {
       // a chased party moves; the destination is the party, not the spot
       if (chase) {
@@ -1302,15 +1381,42 @@
     return bn;
   }
 
+  /* THE SCUFF LIVES FOR ITS OWN SECOND, not for the length of the ride.
+     The old marker's visibility was tied to `dest`, so it pulsed on screen
+     for the entire journey — that is what made it furniture. Now the tap
+     starts a clock and the puff spreads and fades on that clock alone; the
+     destination can outlive it by four minutes and nothing is drawn. */
+  const MARKER_LIFE = 0.95;
   function drawMarker(dt) {
     if (!marker) return;
-    marker.visible = !!dest;
-    if (!dest) return;
+    if (MARKER_OLD) {
+      marker.visible = !!dest;
+      if (!dest) return;
+      markerT += dt;
+      const y = W.desert.heightAt(dest.x, dest.z);
+      marker.position.set(dest.x, y + 0.25, dest.z);
+      const p = 1 + Math.sin(markerT * 3.4) * 0.16;
+      marker.scale.set(p, 1, p);
+      return;
+    }
     markerT += dt;
-    const y = W.desert.heightAt(dest.x, dest.z);
-    marker.position.set(dest.x, y + 0.25, dest.z);
-    const p = 1 + Math.sin(markerT * 3.4) * 0.16;
-    marker.scale.set(p, 1, p);
+    const t = markerT / MARKER_LIFE;
+    if (t >= 1) { marker.visible = false; return; }
+    marker.visible = true;
+    // spreads as it settles, and thins out — sand does not pulse
+    const spread = 0.75 + t * 0.9;
+    marker.scale.set(spread, 1, spread);
+    for (let i = 0; i < marker.children.length; i++) {
+      const m = marker.children[i].material;
+      if (m) m.opacity = (i ? 0.34 : 0.5) * (1 - t) * (1 - t);
+    }
+  }
+  // the tap RESTARTS the clock and parks the puff — called where dest is set
+  function markAt(x, z) {
+    if (!marker) return;
+    markerT = 0;
+    marker.position.set(x, W.desert.heightAt(x, z) + 0.03, z);
+    marker.visible = true;
   }
 
   /* ============================================================ THE CAMERA
@@ -1635,7 +1741,7 @@
   }
 
   /* ============================================================ API */
-  C.dest = function (x, z) { dest = { x: x, z: z }; chase = null; return dest; };
+  C.dest = function (x, z) { dest = { x: x, z: z }; chase = null; markAt(x, z); return dest; };
   C.engage = engage;
   /* the camera's strategic-ness, for territory.js and anything else that has
      to agree with this view. t is 0 over-the-shoulder .. 1 fully pulled back. */

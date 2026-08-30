@@ -252,15 +252,57 @@
      it: the first draft's ^0.86 flattened a 62× spread into a 1.6× one, and
      an armoury where every gun costs about the same is an armoury with no
      decisions in it. */
+  /* WHAT ONE ROCKET IS WORTH, AND THE SECOND TIME I READ A FIELD THAT DOES
+     NOT EXIST.
+
+     The commit that fixed the $18 bazooka said, at length, that a price model
+     which reads one field and calls the answer derived is a fiction with
+     arithmetic on it. That fix then read `w.blast`. There is no `w.blast`.
+     The engine-wide names — used by city/aircraft.js, city/economy.js,
+     city/explosives.js and systems/fpsmode.js alike — are `blastRadius` and
+     `blastPower`, so every explosive in this game was silently valued at a
+     10 m fallback. Caught by outpost.js's agent, not by me, and not by any
+     screenshot.
+
+     Two things are worth recording about it. First, the PRICE barely moved,
+     because the six-man cap below swallows the difference between a 10 m and
+     a 13 m blast — it was a latent bug, harmless today and waiting for the
+     first weapon with a small blast. Second, and this is the part that did
+     cost something: `blastPower` was being ignored outright. It is a real
+     scalar the whole engine already agrees on, calibrated against a grenade
+     at 1.0 — an RPG is 1.9, an aircraft bomb 3.0 — and dropping it meant a
+     grenade launcher and a 500 lb bomb were priced as the same object.
+
+     So the model reads BOTH real fields and nothing invented:
+
+       men caught   a battle line runs about one man per 28 m² (measured off
+                    the spawn spacing battle.html uses), capped at six —
+                    past six the catch is limited by where men actually stand
+                    rather than by how big the bang is
+       per man      45 × blastPower, i.e. scaled off the engine's own
+                    grenade-relative lethality instead of a number I picked
+
+     AND IT COMPLAINS WHEN THE FIELD IS MISSING, which is the actual lesson.
+     A silent `|| 10` is what let this survive two commits; a weapon flagged
+     explosive with no blast radius is a data bug and should say so once. */
+  const _blastWarned = {};
+  function blastPerShot(w) {
+    const r = w.blastRadius || w.blast || w.radius || 0;
+    if (!r && !_blastWarned[w.id]) {
+      _blastWarned[w.id] = 1;
+      try { console.warn("[warlord] " + w.id + " is explosive but has no blastRadius"); } catch (e) {}
+    }
+    const men = Math.min(6, Math.PI * Math.pow(r || 10, 2) / 28);
+    return men * 45 * (w.blastPower || 1);
+  }
+
   function gunValue(id) {
     const w = W.gun(id);
     if (!w) return 120;
     const delay = w.fireDelay || w.interval || 0.5;
     const mag = w.magSize || w.mag || 10;
     const reload = w.reloadTime || w.reload || 2;
-    const per = w.explosive
-      ? Math.min(6, Math.PI * Math.pow(w.blast || 10, 2) / 28) * 70
-      : (w.damage || 20) * (w.pellets || 1);
+    const per = w.explosive ? blastPerShot(w) : (w.damage || 20) * (w.pellets || 1);
     const sustained = per * mag / Math.max(0.2, mag * delay + reload);
     const reach = Math.min(1.9, 0.55 + (w.range || 60) / 130);
     const lethal = Math.min(1, per / 100);

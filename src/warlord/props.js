@@ -813,7 +813,7 @@
          white light-shaft; the correction to 0.30-with-falloff went too far
          the other way and the camp had no plume at all at the range the
          plume exists FOR. */
-      const a = function (v) { return 0.46 * (1 - v) * (1 - v * 0.35); };
+      const a = function (v) { return 0.38 * (1 - v) * (1 - v * 0.35); };
       for (let j = 0; j < SEG; j++) {
         const v0 = j / SEG, v1 = (j + 1) / SEG;
         const q = [p(-1, v0), p(1, v0), p(1, v1), p(-1, v1)];
@@ -876,7 +876,12 @@
       d.updateMatrix(); im.setMatrixAt(i, d.matrix);
       // per-tent bleach: real canvas in a desert is nine shades of the same
       // colour, and one flat tint is the loudest "generated" signal there is
-      if (hasCol) { const k = 0.82 + (t.tint == null ? 0.3 : t.tint) * 0.34; c.setHex(COL[opts.mat || "canvas"]).multiplyScalar(k); im.setColorAt(i, c); }
+      /* canvasDark, NOT canvas. A tent in a desert reads DARKER than the
+         sand around it, because what you see from above is its two shaded
+         slopes and its own shadow — a tent tinted the same value as the
+         ground is invisible from a campaign camera, which is where this
+         object is looked at most. */
+      if (hasCol) { const k = 0.82 + (t.tint == null ? 0.3 : t.tint) * 0.34; c.setHex(COL[opts.mat || "canvasDark"]).multiplyScalar(k); im.setColorAt(i, c); }
     }
     im.instanceMatrix.needsUpdate = true;
     if (hasCol && im.instanceColor) im.instanceColor.needsUpdate = true;
@@ -1096,11 +1101,11 @@
       d.position.set(x, lying ? 0.29 : 0.44, z);
       d.rotation.set(lying ? Math.PI / 2 : 0, r.f() * TAU, 0);
       d.scale.setScalar(1);
-      d.updateMatrix(); im2(body, i, d.matrix);
+      d.updateMatrix(); body.setMatrixAt(i, d.matrix);
       const yy = d.position.y;
       for (let k = 0; k < 2; k++) {
         d.position.y = lying ? yy : yy + (k ? 0.24 : -0.24);
-        d.updateMatrix(); im2(rib, i * 2 + k, d.matrix);
+        d.updateMatrix(); rib.setMatrixAt(i * 2 + k, d.matrix);
       }
       d.position.y = yy;
     }
@@ -1110,7 +1115,6 @@
     g.userData.colliders = [];
     return g;
   };
-  function im2(m, i, mat) { m.setMatrixAt(i, mat); }
 
   /* A SHIPPING CONTAINER. Six boxes: body, two door leaves, a top rail, a
      bottom rail and a lock bar. The corrugation a real container has is
@@ -1962,7 +1966,7 @@
       b.position.set(0, 0, R * 0.25);
       g.add(b);
     }
-    settleNear(near);
+    settle(near);
     return g;
   };
 
@@ -2060,8 +2064,6 @@
      buries itself on the other. Everything here is sunk 0.2-0.3 m into the
      sand instead and the terrain shows through, which is both cheaper and
      correct on ground that is never flat. */
-  function settleNear(near) { settle(near); }
-
   P.outpost = function (kind, opts) {
     opts = opts || {};
     const build = { depot: buildDepot, camp: buildCamp, well: buildWell, market: buildMarket }[kind];
