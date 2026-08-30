@@ -51,26 +51,74 @@
    measurement is taken by THIS file out of the live scene graph, so both sides
    are read by one ruler rather than by each build's own audit. */
 
+/* TEN BEATS, EVERY ONE OF THEM A FILM STRIP.
+
+   The first cut of this report was four still pairs and it was not enough to
+   argue with: a wound is a THREE-DIMENSIONAL object and one angle cannot say
+   whether it stands off the skin, and "it disappears" is a claim about TIME
+   that no single frame can answer at all. ba's strip hook is the cheap
+   multiplier — an extra frame is a re-render, not a re-run of the chapter — so
+   every subject below is a row of frames on each side, and the driver is
+   allowed to move the CAMERA between them as well as the clock.
+
+     ORBIT   the lens walks around the wound. This is the pucker's own test:
+             a bowl standing off a flank is a lump from every bearing, a cut
+             lying in the skin stays a line.
+     DOLLY   the lens walks IN, to arm's length. Magnify before judging a shot.
+     TIME    the clock runs and the camera does not. This is the owner's "falls
+             off in 10 sec", asked directly.
+
+   The strip mode is chosen per subject by id (see D.stripMode below). */
 const subjects = [
   {
-    id: "the-report-shot", ch: 0,
-    label: "The Owner's Shot — Three Bites Into An Orca's Flank",
-    focus: "The exact complaint, staged: an orca bitten three times along one flank, seen close from the side. BEFORE: three round everted lips standing off the skin — red discs stuck onto a translucent body. AFTER: rakes of tapered cuts lying flat along the line the teeth dragged, black at the parting and raw at the lips.",
+    id: "orbit-the-wound", ch: 0, strip: { frames: 6, stepSec: 0 },
+    label: "Three Bites, Six Bearings — The Pucker's Own Test",
+    focus: "The owner's complaint, walked around. Three bites into one flank of an orca held four metres down, then the lens orbits the wound through 140 degrees. BEFORE: three round everted lips that stand off the skin from every bearing — the silhouette gives them away at the grazing angles, where they read as beads stuck onto the animal. AFTER: a rake of cuts that stays a line at every bearing, because it is lying IN the flank rather than sitting on it.",
   },
   {
-    id: "five-bites-later", ch: 1,
-    label: "Five Bites Later — Does Any Of It Stay?",
-    focus: "Two more bites, a second apart, further down the same flank, then the same lens. BEFORE: the count of wound meshes on the animal has not moved, because the fourth and fifth bites picked up the SAME three meshes and carried them to the new spot — the earlier wounds are gone. AFTER: every rake is still where the teeth put it.",
+    id: "dolly-in", ch: 0, strip: { frames: 5, stepSec: 0 },
+    label: "The Same Wound, From Eight Metres To Arm's Length",
+    focus: "The lens walks in. Close enough, BEFORE resolves into what the owner actually described: a solid red lump with a raised rim, sitting proud of the skin like something pressed onto it. AFTER resolves into two or three tapered slits with raw margins and a near-black parting down each — the black line is the wound, and the margin is the skin it opened.",
   },
   {
-    id: "the-piece", ch: 2,
-    label: "The Piece — In The Jaw, Then On The Bottom",
-    focus: "A bite that takes a whole tail lobe off a shark. BEFORE: the fin gets smaller and a handful of gristle chips drift off; the lobe itself is nowhere. AFTER: the lobe is a real object with the fin's own geometry and material — it rides in the attacker's mouth, gets thrown by the shake, and sinks.",
+    id: "grazing", ch: 0, strip: { frames: 4, stepSec: 0 },
+    label: "Edge-On — Where Relief Has Nowhere To Hide",
+    focus: "Four raking angles, almost along the flank. This is the harshest test there is for a wound that is really a bump: at a grazing incidence the crater's relief becomes its whole silhouette and it reads as a lump on the animal's outline. The cut is 0.01-0.03 m proud and simply is not there in profile.",
   },
   {
-    id: "kin-and-cull", ch: 3,
-    label: "A Shark Bites A Shark — And Then Nothing Heals It",
-    focus: "Two things the owner's sentence assumes and the old build refused. LEFT of the frame: one shark bites another of the same species. BEFORE, marine_predation.js declined the wound outright — a pod squabble is not a meal — so nothing marks the body. Then the whole scene is culled for two seconds and brought back: BEFORE, the per-frame leak sweep 'freed' the record by calling the RESTORE path, which un-shrinks the bitten part and deletes every wound on it, so the animal comes back unbitten. AFTER, the sweep drops the ledger entry and leaves the body alone.",
+    id: "five-bites", ch: 1, strip: { frames: 5, stepSec: 0 },
+    label: "Five Bites Later — Orbited",
+    focus: "Two more bites further down the same flank, then the same orbit. The count is the story: BEFORE the animal carries the same number of wound meshes it carried after ONE bite, because bites four and five picked those meshes up and carried them to the new spot. AFTER, every rake is still where its teeth put it.",
+  },
+  {
+    id: "does-it-stay", ch: 1, strip: { frames: 6, stepSec: 5 },
+    label: "Thirty Seconds, One Camera — 'Falls Off In 10 Sec'",
+    focus: "The clock runs and nothing else moves. This is the owner's sentence asked as a question: photograph the same wound every five simulated seconds for half a minute. Blood thins on both sides, which is right and is what he said was fair. What must not happen is the WOUND going anywhere.",
+  },
+  {
+    id: "taking-the-tail", ch: 2, strip: { frames: 6, stepSec: 0.4 },
+    label: "A Tail Lobe Comes Off — Two And A Half Seconds",
+    focus: "The severance itself, frame by frame. BEFORE: the fin shrinks and a handful of gristle drifts away; the third of the fluke that is now missing exists at no coordinate in the world, so what you actually watch is a fin retracting. AFTER: the lobe leaves the body as the part's own geometry and material, and the raw cross-section it left behind is the 'skin under the fin ripped off' the owner asked for.",
+  },
+  {
+    id: "where-it-went", ch: 2, strip: { frames: 6, stepSec: 1.3 },
+    label: "In The Mouth, Then Thrown, Then On The Bottom",
+    focus: "Follow the piece. It rides in the attacker's authored jaw for about a second and a third — banking and rolling with the head that took it, because its transform is read off the mouth seam every frame — then the shake throws it with that head's own velocity, and it sinks, tumbles down, and comes to rest on the sea floor. BEFORE has nothing to follow.",
+  },
+  {
+    id: "shark-bites-shark", ch: 3, strip: { frames: 5, stepSec: 0 },
+    label: "A Shark Bites A Shark — The Case That Left No Mark At All",
+    focus: "The owner's sentence names this one first, and the old build refused it outright: marine_predation.js declined any same-species wound ('a pod squabble is not a meal'), so a shark chewed by its own kind took the damage and came out geometrically untouched. Orbited, so you can see there is nothing on any side of it.",
+  },
+  {
+    id: "nothing-heals-it", ch: 3, strip: { frames: 4, stepSec: 0 },
+    label: "Culled And Brought Back — Housekeeping Is Not A Doctor",
+    focus: "The rig is culled for two seconds and restored. BEFORE: the per-frame leak sweep 'freed' its record by calling the wound RESTORE path, which un-shrinks the bitten part and deletes every wound on it — the animal comes back with its tail regrown and its cuts gone, which is a second, entirely separate way for a wound to vanish while you are looking at it. AFTER: the sweep drops a ledger entry and does not touch the body.",
+  },
+  {
+    id: "dry-land", ch: 4, strip: { frames: 4, stepSec: 0 },
+    label: "Regression — The Same Code Bites A Land Animal",
+    focus: "systems/wounds.js is not a marine file; every land animal in the game goes through the same seat. A bitten land animal has to come out of this looking no worse — a jaw-sized wound on its flank, no water veil, no blood plume in a sea it is nowhere near — and it now carries a rake of cuts instead of a raised bowl for the same reason everything in the ocean does.",
   },
 ];
 
@@ -198,27 +246,70 @@ async function stageSharkBiteCut(input) {
 
          It stays UNDER the surface on purpose: world/water_underwater.js reads
          the camera, and a lens that breaks the water loses the grade the owner
-         is looking through. */
-      flankShot(a, atFrac, backK) {
+         is looking through. `dry` turns that clamp off for the land chapter,
+         where the sea height is a number about somewhere else entirely. */
+      shotAt(a, o) {
+        o = o || {};
         a.group.updateMatrixWorld(true);
         const bb = new T.Box3().setFromObject(a.group);
         const c = bb.getCenter(new T.Vector3()), s = bb.getSize(new T.Vector3());
-        const h = a.heading || 0, fx = Math.cos(h), fz = Math.sin(h);
-        const nx = -fz, nz = fx;
+        const h = a.heading || 0;
         const L = Math.max(s.x, s.z);
-        const tx = c.x + fx * L * atFrac, tz = c.z + fz * L * atFrac;
-        /* AIM HIGH ON THE BODY AND STAND WELL BACK, and the blood is why. The
-           cuts are on the flank and gore.js quite correctly puts a cloud at
-           every one of them, so a lens four metres off the wound photographs
-           the cloud and nothing else — the first framing with this helper came
-           back as two red smudges over a white belly. Aiming at the upper
-           flank puts the dark back and its cuts ABOVE the plume, and the extra
-           standoff keeps the whole animal in frame behind it. */
-        const ty = c.y + s.y * 0.30;
-        const d = Math.max(5.0, L * backK);
-        const cy = Math.min(D.seaY(tx, tz) - 0.8, ty + d * 0.42);
-        D.tripod(tx + nx * d, cy, tz + nz * d, tx, ty, tz);
-        return { x: tx, y: ty, z: tz, d: d };
+        const tx = c.x + Math.cos(h) * L * (o.along || 0);
+        const tz = c.z + Math.sin(h) * L * (o.along || 0);
+        const ty = c.y + s.y * (o.aim == null ? 0.30 : o.aim);
+        /* THE FLOOR IS THE ANIMAL'S OWN BEAM, not a constant. A dolly quoted
+           only against LENGTH walks the lens straight through the side of a
+           body that is two metres wide: the closest frame of the first strip
+           was taken from INSIDE the orca and photographed open water. Stand
+           off at least half the beam plus a metre, always. */
+        const d = Math.max(0.5 * Math.min(s.x, s.z) + 1.0, L * (o.dist == null ? 1.05 : o.dist));
+        /* THE BEARING IS RELATIVE TO THE ANIMAL, and it has to be: the orbit
+           has to stay on the side the teeth landed on. maul() bites whichever
+           flank the lens was on when it fired, and that lens was at yaw 0, so
+           every frame of an orbit is quoted as an offset from there. */
+        const b = h + Math.PI * 0.5 + (o.yaw || 0);
+        const up = o.up == null ? 0.42 : o.up;
+        let cy = ty + d * up;
+        if (!o.dry) cy = Math.min(D.seaY(tx, tz) - 0.6, cy);
+        D.tripod(tx + Math.cos(b) * d, cy, tz + Math.sin(b) * d, tx, ty, tz);
+        return { x: tx, y: ty, z: tz, d: d, L: L };
+      },
+      // the old name, kept because three chapters call it
+      flankShot(a, atFrac, backK) {
+        return D.shotAt(a, { along: atFrac, dist: backK });
+      },
+
+      /* ---- THE STRIP RIG -----------------------------------------------
+         ba photographs a subject, then calls advance(stepSec) and photographs
+         it again, N times. What "advance" MEANS is this file's business, and
+         for a wound it is three different things:
+
+           orbit   walk the lens around the body. Nothing else moves. This is
+                   the only way a still report can argue about relief, because
+                   relief is exactly the thing that changes with bearing.
+           dolly   walk the lens IN toward the wound.
+           time    run the clock and hold the camera still.
+
+         A TRAP THAT COST TWO RUNS' WORTH OF FRAMES EARLIER IN THIS FILE: the
+         game's own camera update runs INSIDE stepSim and snaps the lens back
+         onto the player's shark, so any strip that advances the clock must
+         re-aim afterwards or every frame after the first is a photograph of
+         the player's own tail. D.reaim is re-run after every step, always. */
+      reaim() { if (D._aim) D._aim(); },
+      setAim(fn) { D._aim = fn; fn(); },
+      stripStep(sec) {
+        const m = D.strip || {};
+        if (m.mode === "orbit") {
+          D.yaw = (D.yaw || 0) + (m.step || 0.42);
+          D.reaim();
+        } else if (m.mode === "dolly") {
+          D.dist = (D.dist == null ? (m.from || 1.15) : D.dist) * (m.k || 0.66);
+          D.reaim();
+        } else {
+          D.sec(sec > 0 ? sec : 0.5);
+          D.reaim();
+        }
       },
 
       /* Everything that is not this experiment goes away: a pod converging on
@@ -332,6 +423,15 @@ async function stageSharkBiteCut(input) {
          THIS change is the one wounds.js publishes itself, on both builds:
          BLEED.length — how many bitten animals are still bleeding from a
          wound. That is the owner's "the line lets blood out". */
+      spritesNear(x, z, r) {
+        let n = 0; const r2 = r * r;
+        CBZ.scene.traverse(function (o) {
+          if (!o.isSprite || o.visible === false) return;
+          const dx = o.position.x - x, dz = o.position.z - z;
+          if (dx * dx + dz * dz <= r2) n++;
+        });
+        return n;
+      },
       bleeders() {
         if (typeof CBZ.creatureBiteChunkAudit !== "function") return 0;
         try { return CBZ.creatureBiteChunkAudit().bleeders || 0; } catch (e) { return 0; }
@@ -395,7 +495,9 @@ async function stageSharkBiteCut(input) {
         } else CBZ.renderer.render(CBZ.scene, CBZ.camera);
         await new Promise((r) => setTimeout(r, 1200));
       },
-      advance(sec) { D.sec(sec); },
+      // ba's strip hook. What "advance" means here depends on the subject —
+      // see D.stripStep: a bearing, a step closer, or five seconds of clock.
+      async advance(sec) { D.stripStep(sec); },
     };
   }
 
@@ -535,9 +637,11 @@ async function stageSharkBiteCut(input) {
         D.sec(0.5);
         D.tail();
       }
-      // PIECE_CARRY is 1.35 s in the jaw, so this is the frame just after the
-      // shake throws it — the lobe is loose in the water and still moving.
-      D.sec(1.6);
+      /* THE SETTLE BELONGS TO THE SUBJECT THAT NEEDS IT. `where-it-went` wants
+         the lobe already out of the jaw (PIECE_CARRY is 1.35 s), so it waits.
+         `taking-the-tail` is a strip OF the severance and has to start on the
+         frame the teeth closed, or its first three frames are all aftermath. */
+      if (sub.id !== "taking-the-tail") D.sec(1.6);
       D.tail();
       out.piecesInWater = D.pieces();
       out.tailScaleAfter = Number(D.partScale(prey).toFixed(3));
@@ -675,11 +779,144 @@ async function stageSharkBiteCut(input) {
          constant, and look at it from above its own back. */
       D.flankShot(prey, -0.02, 1.15);
     },
+    /* 4 — THE REGRESSION THAT MATTERS MOST, and it is not in the sea at all.
+       systems/wounds.js is a universal file: every land animal in this game
+       goes through the same seat, the same materials and now the same gash
+       geometry. A bitten wolf on a beach has to come out of this looking no
+       worse than it did — a jaw-sized wound on its flank, no water veil, and
+       NO blood plume, because gore.js clamps every puff to the sea surface as
+       a lid and a bite in a forest used to spend capped pool slots on clouds
+       sitting at y=0 under the terrain. */
+    async function land() {
+      const at = D.ringPoint(D.angle() + 1.05, Math.max(4, D.waterline - 26));
+      let id = null;
+      const want = ["wolf", "boar", "deer", "bear", "coyote", "goat", "cow", "horse"];
+      const SP = CBZ.WILDLIFE_SPECIES || {};
+      for (let i = 0; i < want.length && !id; i++) if (SP[want[i]] && !SP[want[i]].aquatic) id = want[i];
+      if (!id) for (const k in SP) { if (SP[k] && !SP[k].aquatic && SP[k].build) { id = k; break; } }
+      if (!id || !CBZ.cityWildlifeSpawnAt) throw new Error("no land species to bite");
+      const a = CBZ.cityWildlifeSpawnAt(id, at.x, at.z);
+      if (!a) throw new Error("land spawn refused: " + id);
+      const gy = CBZ.surv.floorAt ? CBZ.surv.floorAt(at.x, at.z) : 0;
+      a.hunger = 0;
+      D.landA = a;
+      out.landSpecies = id;
+      D.pin(a, at.x, gy, at.z, D.angle() + 1.05 + Math.PI * 0.5);
+      /* AND THE PLAYER COMES ASHORE WITH IT. Wildlife visibility is LOD'd off
+         the PLAYER, not off the camera, and the player in this preset is a
+         shark forty metres out to sea — so a coyote staged on the beach spawned
+         with group.visible === false, creatureBiteChunk refused it on that gate
+         alone, and the regression chapter measured a clean zero on BOTH columns
+         while looking straight at the animal. A detached tripod is not the same
+         thing as being there. */
+      CBZ.player.pos.x = at.x - 3; CBZ.player.pos.z = at.z - 3; CBZ.player.pos.y = gy;
+      D.step(4);
+      if (a.group) a.group.visible = true;
+      out.landVisible = !!(a.group && a.group.visible !== false);
+      out.landCulled = !!a.culled;
+      D.step(2);
+      D.hold();
+      a.group.updateMatrixWorld(true);
+      const box = new T.Box3().setFromObject(a.group);
+      const c = box.getCenter(new T.Vector3()), sz = box.getSize(new T.Vector3());
+      D.shotAt(a, { along: -0.08, dist: 1.5, aim: 0.35, up: 0.30, dry: true });
+      const puffsBefore = D.spritesNear(c.x, c.z, 30);
+      const dirL = { x: Math.cos(D.angle()), y: 0, z: Math.sin(D.angle()) };
+      try {
+        out.landBiteTook = !!CBZ.creatureBiteChunk(a,
+          { x: c.x, y: c.y + sz.y * 0.12, z: c.z + Math.min(sz.x, sz.z) * 0.5 },
+          { jaw: 0.34, sev: 0.8, dir: dirL, bleedS: 10 });
+      } catch (e) { out.landBiteTook = "threw: " + e.message; }
+      a.group.updateMatrixWorld(true);
+      D.shotAt(a, { along: -0.08, dist: 1.5, aim: 0.35, up: 0.30, dry: true });
+      const m = D.measure(a.group), L = Math.max(sz.x, sz.z);
+      out.landWoundVsBodyPct = Number(((m.len / Math.max(0.4, L)) * 100).toFixed(1));
+      out.landPuckerRatioPct = Number((m.ratio * 100).toFixed(1));
+      out.landMarks = m.n;
+      // a land bite has no business putting blood plumes in the sea
+      out.landSeaPuffs = Math.max(0, D.spritesNear(c.x, c.z, 30) - puffsBefore);
+    },
   ];
 
   while (D.chapter < sub.ch) {
     D.chapter++;
     await CH[D.chapter]();
+  }
+
+  /* ---- WHAT THIS SUBJECT'S STRIP IS FOR ----------------------------------
+     The chapters put the world in a state; this decides what the row of frames
+     photographed out of that state is ARGUING. Every aim closure is re-run
+     after each step (D.reaim), which is what keeps a time strip pointed at the
+     wound instead of at the player's tail. */
+  const orca = D.orca, prey = D.prey;
+  D.yaw = 0; D.dist = null; D.up = null;
+  switch (sub.id) {
+    case "orbit-the-wound":
+      D.yaw = -1.00;
+      D.strip = { mode: "orbit", step: 0.46 };
+      D.setAim(() => D.shotAt(orca, { along: -0.16, dist: 1.05, aim: 0.30, yaw: D.yaw }));
+      break;
+    case "dolly-in":
+      D.dist = 1.15;
+      D.strip = { mode: "dolly", k: 0.72 };
+      D.setAim(() => D.shotAt(orca, { along: -0.16, dist: D.dist, aim: 0.26, up: 0.30 }));
+      break;
+    case "grazing":
+      // low and nearly along the flank: relief IS the silhouette at this
+      // incidence, which is the one thing a bowl cannot survive
+      D.yaw = 1.02;
+      D.strip = { mode: "orbit", step: 0.22 };
+      D.setAim(() => D.shotAt(orca, { along: -0.16, dist: 0.72, aim: 0.24, up: 0.03, yaw: D.yaw }));
+      break;
+    case "five-bites":
+      D.yaw = -0.85;
+      D.strip = { mode: "orbit", step: 0.44 };
+      D.setAim(() => D.shotAt(orca, { along: -0.22, dist: 1.15, aim: 0.30, yaw: D.yaw }));
+      break;
+    case "does-it-stay":
+      D.strip = { mode: "time" };
+      D.setAim(() => D.shotAt(orca, { along: -0.20, dist: 1.00, aim: 0.28 }));
+      break;
+    case "taking-the-tail":
+      D.strip = { mode: "time" };
+      D.setAim(() => D.shotAt(prey, { along: -0.40, dist: 0.85, aim: 0.30, up: 0.30 }));
+      break;
+    case "where-it-went":
+      /* THE PIECE IS THE SUBJECT, SO THE PIECE IS WHAT THE LENS FOLLOWS — and
+         on the BEFORE side there is nothing to follow, which is the finding.
+         Falling back to the stump keeps both columns pointed at the same place
+         for the same reason rather than one of them wandering. */
+      D.strip = { mode: "time" };
+      D.setAim(() => {
+        let p = null;
+        CBZ.scene.traverse((o) => { if (!p && o.isMesh && o._cbzPiece) p = o; });
+        if (p) {
+          p.getWorldPosition(D._pv = D._pv || new T.Vector3());
+          const v = D._pv;
+          D.tripod(v.x + 3.2, Math.min(D.seaY(v.x, v.z) - 0.6, v.y + 2.2), v.z + 3.2, v.x, v.y, v.z);
+        } else {
+          D.shotAt(prey, { along: -0.40, dist: 1.05, aim: 0.25, up: 0.30 });
+        }
+      });
+      break;
+    case "shark-bites-shark":
+      D.yaw = -0.75;
+      D.strip = { mode: "orbit", step: 0.40 };
+      D.setAim(() => D.shotAt(prey, { along: -0.02, dist: 1.05, aim: 0.32, yaw: D.yaw }));
+      break;
+    case "nothing-heals-it":
+      D.yaw = -0.55;
+      D.strip = { mode: "orbit", step: 0.38 };
+      D.setAim(() => D.shotAt(prey, { along: -0.10, dist: 0.95, aim: 0.30, yaw: D.yaw }));
+      break;
+    case "dry-land":
+      D.yaw = -0.60;
+      D.strip = { mode: "orbit", step: 0.40 };
+      D.setAim(() => D.shotAt(D.landA, { along: -0.08, dist: 1.5, aim: 0.35, up: 0.30, dry: true, yaw: D.yaw }));
+      break;
+    default:
+      D.strip = { mode: "time" };
+      break;
   }
 
   await window.__cbzVisualCompare.render();
@@ -698,11 +935,11 @@ async function stageSharkBiteCut(input) {
 export default {
   id: "shark-bite-cut",
   title: "Shark Sim Bites — A Cut, Not A Puckering Lip",
-  description: "Four beats of the same staged fight in Shark Sim, photographed on both sides with one driver. The owner's report is frame one: a bite left 'a puckering lip ... like a red piece of playdough got stuck to them', and it vanished within seconds. All three of those are real and separate. THE SHAPE was three nested bowls of revolution seated ENTIRELY ABOVE THE SKIN — the file's own comment called it 'a raised, everted, ragged lip' — replaced now by a rake of 2-3 tapered ragged CUTS laid along the line the attacker was travelling, standing about a ninth of their own width off the flank. THE DISAPPEARANCE was never a timer: the wound record was keyed on the MESH, and a shark or an orca is one generated hull mesh, so the next bite picked up the same three meshes and carried them to the new point — cuts now append and are evicted only by a global budget. THE PIECE went nowhere: a severed fin lobe is now a real object with the part's own geometry and material, carried in the attacker's jaw before it is thrown, then sinking to the sea floor. And the leak sweep that ran every 1.1 s was calling the RESTORE path on any culled or reparented rig, i.e. healing it. Same-species bites, which the pod code refused outright, now mark a body too.",
+  description: "Ten beats of the same staged fight in Shark Sim, and every one of them is a FILM STRIP rather than a still — around eighty photographs in all, both columns driven by one file. The owner's report is beat one: a bite left \"a puckering lip ... like a red piece of playdough got stuck to them\", and it vanished within seconds. Three of those are separate defects and the strips are what tell them apart. THE SHAPE was three nested bowls of revolution seated ENTIRELY ABOVE THE SKIN — the file's own comment called it \"a raised, everted, ragged lip\" — so the lens ORBITS it, walks IN to arm's length, and drops to a grazing incidence where relief has nowhere to hide; it is a rake of tapered CUTS now, laid along the line the attacker was travelling and standing about a ninth of their own width off the flank. THE DISAPPEARANCE was never a timer: the wound record was keyed on the MESH, and a shark or an orca is one generated hull mesh, so the next bite picked up the same three meshes and carried them to the new point — the thirty-second strip asks that question directly, with the clock running and the camera still. THE PIECE went nowhere: a severed fin lobe is now a real object with the part's own geometry and material, and two strips follow it out of the body, into the attacker's jaw, and down to the sea floor. Behind those, three bites that silently did nothing at all — an animal that went immune after four bitten parts, a pod flank point quoted at the full fin span so the teeth closed in open water, and a same-species refusal that deleted the case the owner names first — plus a per-frame leak sweep that answered \"this rig left the scene\" by calling the wound RESTORE path, i.e. by healing it. The last beat is the regression that matters most: the same code bites a land animal.",
   beforeLabel: "BEFORE · HEAD",
   afterLabel: "AFTER · working tree",
   pairNote: "Same island · same seed · same animals · same bite points · same jaw · same cameras",
-  method: "Both columns boot index.html into ?mode=sharksim with a pinned seed and click the Shark Sim tile + PLAY exactly like a player. A per-page driver freezes the frame loop, quiets the pod, stages the animals at fixed points four metres down (depth is what lets the lens get above an animal's back and still stay under the water), and bites them through the production CBZ.creatureBiteChunk. In the two wound-SHAPE beats gore.js's burst is muted for the staged bites — identically on both columns, same function, same calls, same frames — because a tan cloud seeded on the cuts is an opaque wall over the exact pixels the columns differ in; the blood runs untouched in the other two beats and the chum trail off the wound is never muted anywhere (and, for the same-species beat, through CBZ.marineHurt — the one bus every marine blow arrives on). The `dir` and `by` options the AFTER build reads are extra keys the BEFORE build simply ignores, so the identical call is legal on both. Every measurement is taken by the preset out of the live scene graph: wound meshes carry `_tornCap` on both builds, and their world extents come from the matrixWorld columns so a rotated wound is measured honestly. The Z column is the relief (both builds aim the wound's thin axis down the surface normal) and the longest of X/Y is the footprint — puckerRatio is the mean of relief over footprint, which is the shape argument in one number.",
+  method: "EIGHTY-ODD FRAMES, ONE DRIVER. Every subject is a ba film strip: the page is photographed, then this preset's own advance() hook moves something and it is photographed again. What moves is the subject's argument — an ORBIT walks the lens around the wound (the only way stills can argue about relief, because relief is exactly what changes with bearing), a DOLLY walks it in to arm's length, and a TIME strip runs the clock with the camera held still. Both columns photograph the identical bearings and the identical simulated seconds. Both columns boot index.html into ?mode=sharksim with a pinned seed and click the Shark Sim tile + PLAY exactly like a player. A per-page driver freezes the frame loop, quiets the pod, stages the animals at fixed points four metres down (depth is what lets the lens get above an animal's back and still stay under the water), and bites them through the production CBZ.creatureBiteChunk. In the two wound-SHAPE beats gore.js's burst is muted for the staged bites — identically on both columns, same function, same calls, same frames — because a tan cloud seeded on the cuts is an opaque wall over the exact pixels the columns differ in; the blood runs untouched in the other two beats and the chum trail off the wound is never muted anywhere (and, for the same-species beat, through CBZ.marineHurt — the one bus every marine blow arrives on). The `dir` and `by` options the AFTER build reads are extra keys the BEFORE build simply ignores, so the identical call is legal on both. Every measurement is taken by the preset out of the live scene graph: wound meshes carry `_tornCap` on both builds, and their world extents come from the matrixWorld columns so a rotated wound is measured honestly. The Z column is the relief (both builds aim the wound's thin axis down the surface normal) and the longest of X/Y is the footprint — puckerRatio is the mean of relief over footprint, which is the shape argument in one number.",
   beforeParams: { mode: "sharksim", seed: "90210", cfg_BOOT_METER: "0" },
   afterParams: { mode: "sharksim", seed: "90210", cfg_BOOT_METER: "0" },
   stageTimeoutMs: 420000,
@@ -720,6 +957,9 @@ export default {
     marksLostToCull: { label: "Wounds deleted by the leak sweep (healed by housekeeping)", better: "lower" },
     tailRegrewPct: { label: "How much of the bitten-off tail grew back during the cull", unit: "%", better: "lower" },
     bleeders: { label: "Bitten animals still bleeding from a wound", better: "higher" },
+    landPuckerRatioPct: { label: "Land regression: relief over footprint on a bitten land animal", unit: "%", better: "lower" },
+    landWoundVsBodyPct: { label: "Land regression: wound footprint as a share of that animal's length", unit: "%" },
+    landSeaPuffs: { label: "Land regression: sea-clamped blood puffs spawned by a DRY bite", better: "lower" },
   },
   metricsNote: "puckerRatioPct is the whole shape argument: a solid of revolution 0.9 m across standing 0.3 m proud reads as a lump of playdough stuck to the animal, and a slit whose relief is a ninth of its width reads as a cut. piecesInWater counts meshes tagged `_cbzPiece`, which the BEFORE build never creates — a zero there is the finding (the severed lobe existed nowhere at all), not a measurement failure. woundLengthM carries NO direction on purpose: once the relief is a hundredth of the footprint the wound is a cut, and whether that cut is 0.7 m or 1.9 m long is a tuning question, not the fix — declaring 'higher is better' there would have scored the surface-fitting pass (which trims a rake until its tips stop hanging off a curving flank) as a regression. marksLostToCull and tailRegrewPct are the healing bug measured directly: the old per-frame leak sweep answered 'this rig left the scene' by calling the wound RESTORE path, so a rig that was culled for two seconds came back with its fin regrown and its cuts gone.",
   viewport: { width: 1280, height: 720 },

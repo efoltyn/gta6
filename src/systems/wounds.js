@@ -2217,7 +2217,20 @@
       return;
     }
     if (!node) return;
-    const at = { x: 0, y: 0, z: 0 };
+    /* A REAL Vector3, AND THAT IS NOT PEDANTRY — IT WAS A PER-FRAME CRASH.
+       This was `{ x: 0, y: 0, z: 0 }`, and r128's Object3D.getWorldPosition
+       does `target.setFromMatrixPosition(this.matrixWorld)`: handed a plain
+       object it throws TypeError, every frame, out of an onAlways updater —
+       which takes the whole tick down with it.
+
+       It was unreachable dead code until this pass. bleedFor asks
+       CBZ.marineBleed first and returns the moment that succeeds, and
+       marine_predation's arbiter accepted every request while a body could
+       only ever hold one wound. Cuts accumulate now, so more animals bleed at
+       once, the six-slot arbiter starts refusing — and the refusal drops into
+       this fallback, which had never once run. Five of ten staged captures
+       died on it before the frame that would have shown the fix. */
+    const at = new THREE.Vector3();
     const rec = { actor: actor, h: null, node: node, at: at };
     // gore.js reads x() then y() then z() in that order every frame, so the
     // one world-position read rides on x and the other two are free.
