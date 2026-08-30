@@ -2008,7 +2008,14 @@
   }
 
   let hidden = null, stageZ = null;
-  function open_() {
+  /* campaign.js hands its MAP button over with {x, z, dist} — where you are
+     and how far its camera was pulled back — and it publishes `campaign:zoom`
+     for the same reason: it wants the pull-back and this map to feel like one
+     view at two ranges rather than two unrelated screens. So a player who was
+     already looking at the horizon gets the whole island, and one who was
+     down at ground level gets the map opened around where he is standing.
+     ?terrzoom=fit always opens on the whole island. */
+  function open_(opts) {
     if (open) return;
     const ctx = T.ctx;
     if (!ctx || !ctx.screen) return;
@@ -2036,6 +2043,14 @@
        is the one thing a strategic map must never be. Where you are is a dot
        on it; what everybody holds is the picture. */
     fitView(cv.clientWidth || G.innerWidth, cv.clientHeight || G.innerHeight);
+    if (opts && opts.x != null && QP.get("terrzoom") !== "fit") {
+      // campaign's camera runs 16 m (over his shoulder) to 520 m (strategic)
+      const t = clamp(((opts.dist == null ? 520 : opts.dist) - 16) / 504, 0, 1);
+      if (t < 0.55) {
+        view.mpp = clampZoom(view.mpp * (0.28 + 0.72 * (t / 0.55)));
+        view.cx = opts.x; view.cz = opts.z == null ? view.cz : opts.z;
+      }
+    }
     clampView();
     bind();
     tintFull();
@@ -2151,6 +2166,15 @@
     T.ctx = ctx;
     void root;
     if (FLAG_OFF) {
+      /* AND THE REVERT HAS TO ACTUALLY REVERT. campaign.js now hands its MAP
+         button over with `if (W.territory && W.territory.open)` and returns —
+         so simply doing nothing here left ?terr=off with NO map at all: the
+         button called straight into a module that had decided not to exist.
+         The before side of tools/visual-presets/warlord-map.mjs photographed
+         a man standing in a sandstorm twice before I worked that out. Taking
+         the entry points off the published object is what makes the guard
+         upstream see the truth. */
+      T.open = null; T.close = null; T.toggle = null; T.focus = null;
       try { console.log("[warlord/territory] ?terr=off — no regions, campaign keeps its map"); } catch (e) {}
       return;
     }
@@ -2161,7 +2185,15 @@
        one. Registered at boot, which is before campaign.enter() binds
        anything, so this listener is always first in the capture phase.
        ?terrmap=old hands the button back. */
-    if (!FLAG_OLDMAP) {
+    /* THE MAP BUTTON. campaign.js now routes its own button and its own M key
+       here — `toggleMap()` calls W.territory.open({x,z,dist}) and returns —
+       so on a current build there is nothing to intercept and intercepting
+       anyway would only throw away the camera it is trying to hand me. This
+       capture listener is the FALLBACK for a build whose campaign.js does not
+       do that yet; it costs one closure and it is the difference between "the
+       map button does nothing" and a map. ?terrmap=old disables it. */
+    const campaignRoutes = !!(W.campaign && W.campaign.map);
+    if (!FLAG_OLDMAP && !campaignRoutes) {
       document.addEventListener("click", function (e) {
         const btn = e.target && e.target.closest && e.target.closest("#wlMapBtn");
         if (!btn) return;
