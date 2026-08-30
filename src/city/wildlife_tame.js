@@ -1359,6 +1359,7 @@
      so eating forty mackerel is the same flat, fast meal it has always been. */
   const SWIMMABLE = 1.2;            // gore.js's own bar for "in it", not "standing in it"
   const _biteDir = { x: 1, y: 0.12, z: 0 };
+  const _clampDir = { x: 0, y: 0, z: 0 };
   const _biteAt = { x: 0, y: 0, z: 0 };
   const _biteWo = { dir: _biteDir, kill: false };
   const _biteImp = { dir: _biteDir, amount: 1, mist: false, pool: true, sfx: false };
@@ -1479,7 +1480,12 @@
         // clamped contact on the target's own surface, so the material comes
         // off the part the teeth actually closed on and not off its middle.
         const sev = Math.max(0.25, Math.min(1, 0.7 * (contest ? contest.mult : 1)));
-        try { CBZ.creatureBiteChunk(target, biteV, { jaw: biteReach(a) * 0.32, sev: sev, bleedS: 12 }); } catch (e) {}
+        // _biteDir is the line this mouth came in on — the cuts run along it,
+        // and `by` is what puts a severed fin in THIS animal's jaw.
+        try {
+          CBZ.creatureBiteChunk(target, biteV,
+            { jaw: biteReach(a) * 0.32, sev: sev, dir: _biteDir, by: a, bleedS: 12 });
+        } catch (e) {}
       }
     } else if (kind === "cop") {
       if (!CBZ.cityHurtCop) return false;
@@ -1735,7 +1741,14 @@
       if (beat !== ride.clampBeat) {
         ride.clampBeat = beat;
         if (CBZ.creatureBiteChunk) {
-          try { CBZ.creatureBiteChunk(v, j, { jaw: biteReach(a) * 0.38, sev: 0.85, bleedS: 12 }); } catch (er) {}
+          /* THE ROLL IS THE RAKE. A death roll drags the teeth across the
+             body as the head turns, so the cuts follow the animal's own
+             heading and the lobe that comes off is thrown by the shake. */
+          _clampDir.x = Math.cos(a.heading || 0); _clampDir.y = 0; _clampDir.z = Math.sin(a.heading || 0);
+          try {
+            CBZ.creatureBiteChunk(v, j,
+              { jaw: biteReach(a) * 0.38, sev: 0.85, dir: _clampDir, by: a, bleedS: 12 });
+          } catch (er) {}
         }
         /* EVERY OTHER HALF TURN, and measured before it was tuned: a bloom on
            every beat put six overlapping clouds inside a chase camera that is

@@ -1076,6 +1076,7 @@
   const _goreDir = { x: 0, y: 0, z: 0 };
   const _goreOpts = { amount: 1, dir: _goreDir, medium: "air", player: false, sfx: true, melee: "blade" };
   const _woundP = { x: 0, y: 0, z: 0 };
+  const _woundDir = { x: 1, y: 0, z: 0 };
   const _woundOpts = { head: false, cal: 1.5, melee: "blade", fromX: 0, fromZ: 0 };
   const _sfxOpts = { volume: 1 };
   // the QTE tick must NEVER be eaten by the sample bank's per-name cooldown —
@@ -1336,8 +1337,15 @@
     if (target && CBZ.creatureBiteChunk && !(target.char && target.char.skinSlots)) {
       _woundP.x = _jaw.x; _woundP.y = _jaw.y; _woundP.z = _jaw.z;
       try {
+        // the cuts run along the attacker's own line, and the attacker is
+        // named so a lobe it takes off rides in ITS mouth before it is thrown
+        const ah = (h.attacker && h.attacker.heading != null)
+          ? h.attacker.heading
+          : ((h.attacker && h.attacker.group) ? -h.attacker.group.rotation.y : 0);
+        _woundDir.x = Math.cos(ah); _woundDir.y = 0; _woundDir.z = Math.sin(ah);
         CBZ.creatureBiteChunk(target, _woundP, {
-          jaw: 0.28 + amount * 0.5, sev: Math.min(1, 0.4 + amount * 0.5), bleedS: 14,
+          jaw: 0.28 + amount * 0.5, sev: Math.min(1, 0.4 + amount * 0.5),
+          dir: _woundDir, by: h.attacker || null, bleedS: 14,
         });
       } catch (e) {}
     }

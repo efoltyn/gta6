@@ -593,7 +593,15 @@
   function biteChunkOn(a, t, tp, frac) {
     if (typeof CBZ.creatureBiteChunk !== "function") return false;
     if (!a || !t || !tp || !a.species || !t.species) return false;
-    if (a.species === t.species) return false;        // a pod squabble is not a meal
+    /* IT USED TO REFUSE A SAME-SPECIES BITE — "a pod squabble is not a meal" —
+       and that rule quietly deleted the case the owner reports on: a shark
+       biting ANOTHER SHARK left no mark at all, because two great whites are
+       one species. Teeth do not check a species list. A blow that got through
+       hurt() has already done real damage and paid the CHUNK_EVERY throttle;
+       whether the two animals are related is not what decides if there is a
+       cut afterwards. Kept only as a SEVERITY discount: a squabble draws blood
+       without taking a fin off. */
+    const kin = a.species === t.species;
     const now = (typeof performance !== "undefined" ? performance.now() : Date.now()) * 0.001;
     if (now - (t._mpChunkT || -1e9) < CHUNK_EVERY) return false;
     t._mpChunkT = now;
@@ -605,17 +613,42 @@
     // along the body: how far back the attacker is, clamped to the real length
     let along = (hp.x - tp.x) * fx + (hp.z - tp.z) * fz;
     along = clamp(along, -L * 0.92, L * 0.6);
-    // and out to the flank on the side it came from
+    /* AND OUT TO THE FLANK ON THE SIDE IT CAME FROM — BUT NOT ALL THE WAY OUT.
+       B is half of bodyBeam, and bodyBeam is a measured ENVELOPE: on anything
+       with pectorals it is the fin span, not the hull's width. Quoting the
+       bite point at the full B therefore put the teeth in open water outside
+       the body on every finned animal in the sea, systems/wounds.js's partAt
+       found no part within reach, and the bite returned false — silently, with
+       full damage still applied. A shark chewed by its own kind took the hp
+       loss and came out of it unmarked, which is indistinguishable from the
+       wound code being broken and is how this was found (the preset's control
+       call seated a wound on the same body in the same frame, and the pod's
+       own bite would not).
+
+       0.78 is inside the hull of every rig here and still on the flank rather
+       than on the spine, and a point slightly INSIDE the body is free: partAt
+       measures distance to a box and the seat itself is a raycast that comes
+       back to the real surface either way. */
     let side = (hp.x - tp.x) * -fz + (hp.z - tp.z) * fx;
-    side = side >= 0 ? B : -B;
+    side = (side >= 0 ? B : -B) * 0.78;
     _ck.x = tp.x + fx * along - fz * side;
     _ck.z = tp.z + fz * along + fx * side;
     _ck.y = (tp.y || 0) + (Math.random() - 0.5) * B * 0.5;
+    /* THE LINE THE TEETH DRAGGED. A bite is not a stamp: both animals are
+       still moving when the jaw closes, so the cuts run along the ATTACKER's
+       own heading. Handing that over is what turns a rake of slits from a
+       decoration into a record of the pass that made it — an orca crossing the
+       beam leaves marks across the flank, one coming up the tail leaves them
+       down it. */
+    const ah = (a.heading != null) ? a.heading : (a.group ? -a.group.rotation.y : face);
+    _cd.x = Math.cos(ah); _cd.y = 0; _cd.z = Math.sin(ah);
     let took = false;
     try {
       took = CBZ.creatureBiteChunk(t, _ck, {
-        jaw: gapeOf(a) * 0.45,
-        sev: clamp((frac || 0.1) * 6 + sizeOf(a) / Math.max(0.2, sizeOf(t)) * 0.4, 0.3, 1),
+        jaw: gapeOf(a) * (kin ? 0.34 : 0.45),
+        sev: clamp((frac || 0.1) * 6 + sizeOf(a) / Math.max(0.2, sizeOf(t)) * 0.4, 0.3, 1) * (kin ? 0.7 : 1),
+        dir: _cd,
+        by: a,
         bleedS: 16,
       });
       if (took) AUDIT.chunks = (AUDIT.chunks || 0) + 1;
@@ -623,6 +656,7 @@
     return !!took;
   }
   const _ck = { x: 0, y: 0, z: 0 };
+  const _cd = { x: 0, y: 0, z: 0 };
   function ramOpts(a) {
     const m = mp(a);
     if (m.ram) return m.ram;
