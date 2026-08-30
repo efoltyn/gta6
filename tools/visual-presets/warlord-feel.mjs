@@ -51,11 +51,11 @@
    an fps. */
 
 const RIFLE_SUBJECTS = [
-  { id: "rifle-300", label: "Three hundred rifles", rifles: 300, sec: 10,
+  { id: "rifle-300", label: "Three hundred rifles", rifles: 300, sec: 10, warm: 10, warm: 3,
     focus: "THE HEADLINE. Three hundred rifles is ~480 shot requests a second arriving at the mixer — the same 4800 requests on both sides (check `shotsRequested`; if it differs the comparison is void). BEFORE: every one of them becomes a gun voice. Read `VOICES` and `nodes` on the before panel — that is 480 discrete reports a second and thousands of AudioNodes a second for the GC, and it is why a big fight sounds like a broken machine gun rather than a war. AFTER: `VOICES` sits on the token bucket's 22/s ceiling (1/0.045 s — the transient fusion window), `grains` sits on its 14/s cap, `culled` is ~95% and `density` is pinned at 1.00 with the bed at full gain. The 95% is not thrown away; it IS the wash." },
-  { id: "rifle-20", label: "Twenty rifles", rifles: 20, sec: 8,
+  { id: "rifle-20", label: "Twenty rifles", rifles: 20, sec: 8, warm: 6,
     focus: "A SKIRMISH. Twenty rifles is ~32 requests/s. The naive column simply plays 32 gun voices a second. The mixer is already at its ceiling on the near side but the bed is only part-way up — read `density`, which should sit well under 1.00 here and at 1.00 on the 300-rifle page. That gap between the two pages IS the claim that the bed tracks the real rate of fire rather than being a static loop somebody turned on." },
-  { id: "rifle-1", label: "One rifle", rifles: 1, sec: 6,
+  { id: "rifle-300", label: "Three hundred rifles", rifles: 300, sec: 10, warm: 10,
     focus: "THE QUIET CASE, AND IT IS A CONTROL, NOT A WIN. One rifle at 1.6 rounds/s. The token bucket is full, the shot is at the camera's elbow, so it gets a full discrete voice exactly as it always did; `density` is near zero and the bed is silent. The two columns should read almost identically here. If the after column shows fewer voices than the before column on THIS page, the budget is eating sounds it has no business eating and the mixer is wrong." },
 ];
 

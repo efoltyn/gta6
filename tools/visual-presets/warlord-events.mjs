@@ -54,7 +54,10 @@ export default {
     "Six moments of everything that can now happen on the island besides a fight. " +
     "Both sides are this checkout; only ?events=off differs.",
   frameList: FRAMES,
-  urlParams: { go: 1, seed: 1337 },
+  /* ?event= RIDES THE URL because the debug door only reads it at boot, and
+     the door is also what stages the 34-man column every state-reading card
+     needs. Later subjects re-fire through E.fire against that same column. */
+  urlParams: { go: 1, seed: 1337, event: "rival", stage: 34 },
   defaultBefore: "local",
   /* AN OBJECT, NOT A STRING — visual-compare.mjs does Object.entries on this,
      while the CLI's --before-params takes the "k=v" string form. Handing the
@@ -177,7 +180,7 @@ export default {
         } catch (_) {}
         // let the fog and the grit ease in — driveWeather lerps rather than
         // snapping, on purpose, so a storm has to be given its seconds
-        await wait(2600);
+        await wait(4500);
       }
       if (want === "loyalty") { try { E.loyaltyScreen(); fired = true; } catch (_) {} }
       else if (want === "war") { try { E.war(); fired = true; } catch (_) {} }

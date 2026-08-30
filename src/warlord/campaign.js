@@ -411,11 +411,31 @@
      for the man the camera is standing next to and the wrong answer for
      the four hundred read at 200 m. */
   const MEN_CAP = 980;
+  /* r128 NEEDS BOTH HALVES OF THE COLOUR PATH, and finding that out cost a
+     screenshot of an army rendered in solid black. `setColorAt` fills
+     `instanceColor` and the vertex shader multiplies it into `vColor`, but
+     in this revision the varying is only DECLARED (and the fragment stage
+     only reads it) under USE_COLOR — which comes from
+     `material.vertexColors`, not from the instance attribute. So an
+     InstancedMesh with per-instance colours and vertexColors:false gets a
+     broken colour path and paints black. Turning vertexColors on alone is
+     the other half of the same trap: USE_COLOR with no `color` attribute on
+     the geometry reads an unbound attribute, which is (0,0,0). Both, then:
+     a constant white vertex colour on the geometry so USE_COLOR is real,
+     and instanceColor multiplied over it. */
+  function whiteColors(geo) {
+    const n = geo.attributes.position.count;
+    const a = new Float32Array(n * 3);
+    a.fill(1);
+    geo.setAttribute("color", new THREE.BufferAttribute(a, 3));
+    return geo;
+  }
+
   function buildMen() {
-    const bodyG = new THREE.CylinderGeometry(0.26, 0.38, 1.30, 6);
-    const headG = new THREE.BoxGeometry(0.34, 0.34, 0.34);
-    const bodyM = new THREE.MeshLambertMaterial({ color: 0xffffff });
-    const headM = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    const bodyG = whiteColors(new THREE.CylinderGeometry(0.26, 0.38, 1.30, 6));
+    const headG = whiteColors(new THREE.BoxGeometry(0.34, 0.34, 0.34));
+    const bodyM = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+    const headM = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
     menBody = new THREE.InstancedMesh(bodyG, bodyM, MEN_CAP);
     menHead = new THREE.InstancedMesh(headG, headM, MEN_CAP);
     menBody.castShadow = true;
@@ -432,10 +452,10 @@
        that" decision has no information in it. Log, not linear, because a
        linear pole for 300 men is 120 m tall and looks like a bug. */
     const poleG = new THREE.CylinderGeometry(0.13, 0.13, 1, 5);
-    const flagG = new THREE.BoxGeometry(1, 0.62, 0.12);
+    const flagG = whiteColors(new THREE.BoxGeometry(1, 0.62, 0.12));
     flagG.translate(0.5, 0, 0);
     pole = new THREE.InstancedMesh(poleG, new THREE.MeshLambertMaterial({ color: 0x3b3128 }), 160);
-    banner = new THREE.InstancedMesh(flagG, new THREE.MeshLambertMaterial({ color: 0xffffff }), 160);
+    banner = new THREE.InstancedMesh(flagG, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), 160);
     pole.frustumCulled = banner.frustumCulled = false;
     pole.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     banner.instanceMatrix.setUsage(THREE.DynamicDrawUsage);

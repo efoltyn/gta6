@@ -1015,8 +1015,35 @@
        because a discovery rule that finds five legs on a camel (the shank
        boxes) must not hand back five instanced meshes for a four-legged
        animal, and a rule that finds two on a man must not pad to four. */
-    const cols = [];
+    /* IF THE BUILDER TAGGED IT, BELIEVE THE BUILDER. Discovery is for bodies
+       this file did not build — the bestiary's animals, whose authors never
+       heard of us. For the two we DO build the answer is known exactly, and
+       guessing it was measurably worse:
+         · a WHEEL is a disc, wide and round and not remotely "tall and thin",
+           so the discovery rule found zero legs on the technical and the
+           truck slid across the sand on frozen tyres;
+         · a MAN's thigh and shin are each about a sixth of his height, which
+           landed either side of the rule's threshold depending on the frame,
+           and the rule's "anything on this column rides with it" radius then
+           swallowed his pelvis into one leg.
+       character.js already names ch.parts.ll and ch.parts.rl, and buildTechnical
+       knows which cylinders are wheels. Tagged columns win outright. */
+    const tagged = [];
     for (let i = 0; i < meshes.length; i++) {
+      const u = meshes[i].userData;
+      if (u && u.mountLeg != null) {
+        const q = u.mountLeg | 0;
+        if (!tagged[q]) {
+          const pv = u.mountPivot
+            ? new THREE.Vector3(u.mountPivot.x, u.mountPivot.y, u.mountPivot.z).applyMatrix4(inv)
+            : new THREE.Vector3((boxes[i].min.x + boxes[i].max.x) / 2, boxes[i].max.y, (boxes[i].min.z + boxes[i].max.z) / 2);
+          tagged[q] = { x: pv.x, z: pv.z, top: pv.y, r: 0.3, h: 1, idx: q };
+        }
+      }
+    }
+
+    const cols = [];
+    for (let i = 0; i < meshes.length && !tagged.length; i++) {
       const b = boxes[i];
       const h = b.max.y - b.min.y;
       const w = Math.max(b.max.x - b.min.x, b.max.z - b.min.z);
@@ -1035,6 +1062,8 @@
     }
     cols.sort(function (a, b2) { return b2.h - a.h; });
     cols.length = Math.min(4, cols.length);
+    if (tagged.length) { cols.length = 0; for (let q = 0; q < tagged.length; q++) if (tagged[q]) cols.push(tagged[q]); }
+    const explicit = !!tagged.length;
 
     /* FRONT/BACK AND LEFT/RIGHT, off the columns' own medians rather than the
        sign of x and z. THE FIRST DRAFT USED THE SIGNS and it broke on the one
@@ -1055,6 +1084,20 @@
       const b = boxes[i];
       const cx = (b.min.x + b.max.x) / 2, cz = (b.min.z + b.max.z) / 2;
       let owner = -1;
+      const u = meshes[i].userData;
+      if (explicit) {
+        // a tagged body says exactly which meshes are legs; nothing else is
+        if (u && u.mountLeg != null) {
+          for (let c = 0; c < cols.length; c++) if (cols[c].idx === (u.mountLeg | 0)) { owner = c; break; }
+        }
+        if (owner < 0) { body.push({ mesh: meshes[i] }); continue; }
+        legs[owner].push({ mesh: meshes[i] });
+        if (!hips[owner]) {
+          hips[owner] = new THREE.Vector3(cols[owner].x, cols[owner].top, cols[owner].z);
+          info[owner] = { front: cols[owner].front, left: cols[owner].left };
+        }
+        continue;
+      }
       /* ANYTHING STACKED ON A LEG'S OWN COLUMN RIDES WITH IT — a hoof, a
          camel's lower shank, a wheel hub. wildlife_rig's second rule, and it
          is what keeps a hoof from being left behind in mid air when the leg
@@ -1165,14 +1208,20 @@
     // WHEELS: four cylinders on the ground, which the leg discovery below
     // reads as four legs — and a wheel spinning about its axle is exactly
     // what the leg swing already does.
-    [[1.25, 0.98], [1.25, -0.98], [-1.15, 0.98], [-1.15, -0.98]].forEach(function (o) {
+    [[1.25, 0.98], [1.25, -0.98], [-1.15, 0.98], [-1.15, -0.98]].forEach(function (o, qi) {
+      const axle = { x: o[0], y: 0.48, z: o[1] };
       const w = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.48, 0.34, 12), mat(RUB));
       w.rotation.x = Math.PI / 2;
       w.position.set(o[0], 0.48, o[1]);
+      // TAGGED, not discovered: a wheel is a disc and no "tall thin
+      // ground-touching" rule will ever find it. The pivot is the AXLE, which
+      // is what makes the spin a spin instead of a wobble about the tread.
+      w.userData.mountLeg = qi; w.userData.mountPivot = axle;
       g.add(w);
       const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.36, 8), mat(0x6c6156));
       hub.rotation.x = Math.PI / 2;
       hub.position.set(o[0], 0.48, o[1]);
+      hub.userData.mountLeg = qi; hub.userData.mountPivot = axle;
       g.add(hub);
     });
     /* THE GUN IS THE ARMOURY'S. CBZ.buildActorWeapon("lmg") is the same M249
@@ -1269,8 +1318,38 @@
     const rig = CBZ.studio.cast("soldier", { color: COAT_SENTINEL, variant: 2 });
     if (!rig) return null;
     const ch = rig.userData.charRig;
+    /* POSED MID-STRIDE, NOT STANDING. Forty frames at a walking speed lands
+       him with one leg forward, which is the pose the swing below rocks
+       around — bake him at rest and the whole before column shuffles about a
+       parade stance. */
     if (ch && CBZ.animChar) for (let i = 0; i < 40; i++) { try { CBZ.animChar(ch, 1.4, 1 / 60); } catch (e) {} }
-    return { group: rig, hipY: ch && ch.hipY > 0 ? ch.hipY : 0.95, humanScale: (rig.userData && rig.userData.humanScale) || 1 };
+    return {
+      group: rig, parts: ch && ch.parts,
+      hipY: ch && ch.hipY > 0 ? ch.hipY : 0.95,
+      humanScale: (rig.userData && rig.userData.humanScale) || 1,
+    };
+  }
+
+  /* THE MAN'S OWN LEGS, named by character.js rather than guessed at. `ll`
+     and `rl` are the hip joints; everything under them (thigh, knee group,
+     shin, boot) is that leg, and the joint's world position is the pivot the
+     swing rotates about — which is what makes a walk cycle out of the same
+     four InstancedMeshes that carry a horse's. */
+  function tagWalkerLegs(parts) {
+    const map = [parts.ll, parts.rl];
+    const wp = new THREE.Vector3();
+    for (let q = 0; q < map.length; q++) {
+      const root = map[q];
+      if (!root) continue;
+      root.updateMatrixWorld(true);
+      root.getWorldPosition(wp);
+      const pivot = { x: wp.x, y: wp.y, z: wp.z };
+      root.traverse(function (o) {
+        if (!o.isMesh) return;
+        o.userData.mountLeg = q;
+        o.userData.mountPivot = pivot;
+      });
+    }
   }
 
   function splitCoat(list) {
@@ -1311,6 +1390,7 @@
       rider.group.rotation.y = Math.PI / 2;           // human +Z follows the animal's +X
       src.add(rider.group);
       src.updateMatrixWorld(true);
+      if (kindId === "__foot" && rider.parts) tagWalkerLegs(rider.parts);
     }
 
     const parts = splitParts(src);

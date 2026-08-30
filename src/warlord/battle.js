@@ -1809,6 +1809,14 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
   }
   function setCam(mode) {
     camMode = mode;
+    /* AND THE LENS MOVES NOW, NOT NEXT FRAME. stepCamera() is what actually
+       places the camera and it only runs inside frame() — so a tool that
+       switches to first person and renders immediately (which is exactly what
+       a screenshot preset does) photographed the PREVIOUS seat. MEASURED: the
+       subject captioned "CHARGE, from inside the line" came back as a wide
+       command shot with no viewmodel in it. One framing pass here costs
+       nothing and removes the whole class of stale-camera capture. */
+    if (live && MAP && YOU) safe(function () { stepCamera(0.016); });
     const b = document.getElementById("wbCam");
     if (b) b.textContent = mode === "fps" ? "FIRST PERSON" : mode === "third" ? "OVER SHOULDER" : "COMMAND";
     if (mode !== "cmd" && micro.lock && !ctx.coarse) micro.lock();
