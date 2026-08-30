@@ -133,7 +133,7 @@
   let simT = 0, over = false, started = false;
   let hud = null, frameFn = null, capped = { mine: 0, them: 0 };
   let MAP = null, band = null, report = null, startOpts = null;
-  let fogSave = null, shadowSave = null;
+  let fogSave = null, shadowSave = null, camSave = null;
   let deadSolving = 0;
   let fxBudget = 0;
   let injectDt = 0;                 // the probe's clock — see __warlordBattle
@@ -2154,6 +2154,44 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       scene.fog.near = 420; scene.fog.far = 2900;
     }
 
+    /* THE BATTLE OWNS ITS OWN NEAR PLANE, and this is a leak the fog save
+       above was already the template for.
+
+       campaign.js sets camera.near = 2.2 every frame it runs, for a good
+       reason it documents: its lens looks at a 12 km coastline, and at
+       near=0.35/far=16000 the depth buffer has about 11 m of resolution out
+       there, so the sea and the sea bed traded pixels in stripes across the
+       horizon. Correct — for a camera whose nearest subject is a man 16 m
+       away. It is wrong the instant you are IN the fight, because the
+       nearest subject is then a gun 31 cm from your eye, and nothing ever
+       set it back on the way in.
+
+       MEASURED: gunplay.audit() reported armed, sidearm, 17/17 in the mag,
+       reticle dead centre — and the screenshot showed empty hands. The
+       viewmodel was present, visible and correctly placed at (0, 0.075,
+       -0.31); it was simply seven times inside the near plane. Nothing was
+       broken except that the weapon was being drawn behind the lens.
+
+       0.1 is city/scene.js's own value and its comment says why — "camera
+       children are used for first-person viewmodels" — which is the file
+       fpsmode.js was written against. Matching it rather than inventing a
+       third number.
+
+       AND THE FAR PLANE IS LEFT ALONE, which the first attempt got wrong and
+       a screenshot caught. Pulling far in to 6000 looked free — battle fog
+       ends at 2900, so nothing past 3 km is drawable anyway — except that
+       micro.sky's dome has a radius of 15000, so a 6 km far plane clipped
+       the SKY. The battle photographed under a flat sheet of fog colour with
+       no horizon gradient at all. Depth precision out there costs nothing
+       here because the fog has already eaten everything beyond 2900; the
+       sky is the one thing at that distance that still has to draw. */
+    const _cam = CBZ.camera;
+    if (_cam) {
+      camSave = { near: _cam.near, far: _cam.far };
+      _cam.near = 0.1;
+      _cam.updateProjectionMatrix();
+    }
+
     SIDES.mine = makeSide("mine", -1, 0xffb347, 0);
     SIDES.them = makeSide("them", 1, band.colour || 0xc4593a, 1, band);
     SIDES.mine.order = "hold";
@@ -2600,6 +2638,14 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       scene.fog.near = fogSave.near; scene.fog.far = fogSave.far;
     }
     fogSave = null;
+    // and hand the lens back exactly as it was — campaign.js re-asserts its
+    // own 2.2 on its next frame anyway, but a module that leaves the camera
+    // changed is the bug this block exists to stop repeating
+    if (camSave && CBZ.camera) {
+      CBZ.camera.near = camSave.near; CBZ.camera.far = camSave.far;
+      CBZ.camera.updateProjectionMatrix();
+    }
+    camSave = null;
     const R = CBZ.renderer || (micro && micro.renderer);
     if (R && R.shadowMap && shadowSave != null) R.shadowMap.enabled = shadowSave;
     shadowSave = null;

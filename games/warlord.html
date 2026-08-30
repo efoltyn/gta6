@@ -372,6 +372,27 @@ function start() {
      something that fades in as you ride. The fog colour is derived by
      micro.sky from its own horizon — never type a fog colour twice. */
   CBZ.micro.boot({
+    /* NEAR 0.1, AND THE GUN IN YOUR HANDS IS THE ONLY REASON.
+
+       microboot defaults near to 0.35 m. systems/fpsmode.js hangs its
+       viewmodel off the camera at z = -0.31 — measured, that is the
+       knuckle ridge at (0, 0.075, -0.31) — so at the default the weapon
+       sits 4 cm INSIDE the near plane and is clipped away entirely. The
+       audit said armed, gun sidearm, 17/17 in the mag, reticle dead centre;
+       the screenshot showed empty hands. Nothing was broken except that the
+       thing was being drawn behind the lens.
+
+       city/scene.js has used 0.1 since the beginning and says why in its own
+       comment — "camera children are used for first-person viewmodels" —
+       which is the file fpsmode was written against. Matching it rather than
+       inventing a third number.
+
+       The cost is honest and worth stating: near 0.1 against a 16 km far
+       plane is a 160,000:1 depth ratio where the city runs 10,000:1, so
+       distant coplanar surfaces have less depth resolution to argue with.
+       The island's own far geometry is terrain and a sea plate nine metres
+       below it, which is not a close call at any range. */
+    near: 0.1,
     far: 16000,
     sky: { top: 0x4478ad, bottom: 0xe6cda1, fogNear: 1400, fogFar: 11000, radius: 15000 },
     lights: { skyColor: 0xcfe0f2, groundColor: 0xbf9a5e, sunColor: 0xfff1cf,
