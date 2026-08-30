@@ -1640,6 +1640,7 @@
      new code here is "where is the camera and did the ray hit anybody". */
   const CAMS = ["fps", "third", "cmd"];
   let camMode = "fps";
+  let hudSyncOrders = null;      // set by buildHud; keeps the order rail honest
   let hurtFlash = 0;
   /* THE COMMAND SEAT'S DEFAULTS, and the first draft's were a satellite photo:
    120 m out at 0.55 rad puts the lens 62 m up, which draws a 1.8 m man as two
@@ -1923,26 +1924,64 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
         '<div class="ammo" id="wbAmmo"></div></div>' +
       '<div class="ret"><button id="wbRetreat">RETREAT</button></div>' +
       '<div class="fire" id="wbFire">FIRE</div>' +
-      '<div class="ord">' +
-        '<button data-o="charge">1 CHARGE</button>' +
-        '<button data-o="hold" class="on">2 HOLD</button>' +
-        '<button data-o="flank">3 FLANK</button>' +
-        '<button data-o="fallback">4 FALL BACK</button>' +
-        '<button id="wbCam">FIRST PERSON</button>' +
-      '</div>' +
+      /* THE ORDERS ARE FOR AN ARMY, so they only exist when there is one.
+         The owner rode out alone, picked a fight, and was handed CHARGE /
+         HOLD / FLANK / FALL BACK with nobody to give them to — four buttons
+         that could not do anything, on the one screen where a mis-tap costs
+         you the run. Fighting alone is not a degenerate case in this game,
+         it is DAY ONE and the whole opening: you start with no men and you
+         earn them. So the command rail is built empty and filled by
+         syncOrderRail() below, and a lone warlord gets a camera toggle and a
+         trigger, which is the entire control surface he actually has. */
+      '<div class="ord" id="wbOrders"></div>' +
       '<div class="cross" id="wbCross"></div>' +
       '<div class="hit" id="wbHit"></div>' +
       '<div class="note" id="wbNote"></div>';
     document.body.appendChild(root);
     hud = root;
 
-    root.querySelectorAll("[data-o]").forEach(function (b) {
-      b.addEventListener("click", function (e) { e.stopPropagation(); setOrder(b.dataset.o, "mine"); });
-    });
-    document.getElementById("wbCam").addEventListener("click", function (e) { e.stopPropagation(); cycleCam(); });
+    syncOrderRail();
     document.getElementById("wbRetreat").addEventListener("click", function (e) {
       e.stopPropagation(); endBattle("retreat", "YOU BREAK OFF");
     });
+
+    /* Rebuilt whenever the size of your command changes — which in this game
+       is constantly, because men die and prisoners join. It is cheap (five
+       buttons) and it is the only way the rail can stay honest about what you
+       can actually order. */
+    function syncOrderRail() {
+      /* wbOrders, NOT wbOrd — the header already owns wbOrd for the current
+         order NAME, and the first draft of this rail reused that id. Two
+         elements answered to it, getElementById returned the header span,
+         and the rail and the order readout spent the battle overwriting each
+         other: the buttons vanished and the header read "HOLD" as a div. */
+      const ord = document.getElementById("wbOrders");
+      if (!ord) return;
+      // the men you can give an order to: your side, alive, not you
+      let commanded = 0;
+      for (let i = 0; i < men.length; i++) {
+        const m = men[i];
+        if (m && m.team === "mine" && !m.dead && !m.fled && !m.isYou) commanded++;
+      }
+      const had = ord.getAttribute("data-n");
+      if (had === String(commanded)) return;          // nothing changed; don't churn the DOM
+      ord.setAttribute("data-n", String(commanded));
+      let h = "";
+      if (commanded > 0) {
+        h += '<button data-o="charge">1 CHARGE</button>' +
+             '<button data-o="hold" class="' + ((SIDES.mine && SIDES.mine.order === "hold") ? "on" : "") + '">2 HOLD</button>' +
+             '<button data-o="flank">3 FLANK</button>' +
+             '<button data-o="fallback">4 FALL BACK</button>';
+      }
+      h += '<button id="wbCam">' + (camMode === "fps" ? "THIRD PERSON" : "FIRST PERSON") + '</button>';
+      ord.innerHTML = h;
+      ord.querySelectorAll("[data-o]").forEach(function (b) {
+        b.addEventListener("click", function (e) { e.stopPropagation(); setOrder(b.dataset.o, "mine"); });
+      });
+      const cam = document.getElementById("wbCam");
+      if (cam) cam.addEventListener("click", function (e) { e.stopPropagation(); cycleCam(); });
+    }
+    hudSyncOrders = syncOrderRail;
     const fb = document.getElementById("wbFire");
     fb.addEventListener("pointerdown", function (e) { e.stopPropagation(); touchFire = true; });
     fb.addEventListener("pointerup", function () { touchFire = false; });
@@ -1975,6 +2014,12 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
   }
   let uiT = 0;
   function paintHud(dt) {
+    /* THE RAIL FOLLOWS THE ARMY. Orders appear the frame you actually have
+       somebody to order and vanish the frame your last man goes down — which
+       during a rout is a real transition the player should feel, not a set of
+       buttons that keep pretending. syncOrderRail no-ops unless the count
+       changed, so this costs a compare. */
+    if (hudSyncOrders) hudSyncOrders();
     const h = document.getElementById("wbHit");
     if (h) { hurtFlash = Math.max(0, hurtFlash - dt * 1.6); h.style.opacity = hurtFlash.toFixed(2); }
     if (noteT > 0 && (noteT -= dt) <= 0) {
