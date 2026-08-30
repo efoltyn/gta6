@@ -189,7 +189,7 @@ async function stageVolcano(input) {
   const until = async (test, budgetMs, stepMs) => {
     const deadline = Date.now() + budgetMs;
     while (Date.now() < deadline) {
-      try { if (test()) return true; } catch (_) {}
+      try { if (test()) return true; } catch (e) { if (e && e.__baFatal) throw e; /* HARNESS TRAP: an empty catch here hid every staging failure */ }
       await wait(stepMs || 250);
     }
     return false;
@@ -224,10 +224,28 @@ async function stageVolcano(input) {
       return CBZ.game.state === "playing";
     }, 180000, 300);
     if (!playing) return { ok: false, err: "never reached playing" };
+    /* HARNESS TRAP: "playing" IS NOT "playing THE RIGHT WORLD". This gate used
+       to stop at CBZ.game.state === "playing", which the CITY satisfies. When
+       the survival click did not take, every shot below was captured in the
+       city — and because the camera resolver invented a volcano when it could
+       not find one (see cam.volcano), the run produced a full, confident
+       receipt of a skyline with a smudge of smoke in it. The 2026-08-29
+       volcano-wave-final report is 29 pages of exactly that. Prove the world
+       exists before photographing it. */
+    const inWorld = await until(
+      () => CBZ.game.mode === "survival" && CBZ.surv && CBZ.surv.arena &&
+            CBZ.surv.arena.hills && CBZ.surv.arena.hills.length > 0,
+      60000, 300
+    );
+    if (!inWorld) {
+      return { ok: false, err: "never reached the SURVIVAL world (mode=" +
+        (CBZ.game && CBZ.game.mode) + ", arena=" + !!(CBZ.surv && CBZ.surv.arena) +
+        ") — the volcano does not exist here, so every shot would be a lie" };
+    }
     if (!CBZ.disasters || typeof CBZ.disasters.force !== "function") {
       return { ok: false, err: "no CBZ.disasters.force" };
     }
-    try { if (CBZ.setQualityLevel) CBZ.setQualityLevel(3); } catch (_) {}
+    try { if (CBZ.setQualityLevel) CBZ.setQualityLevel(3); } catch (e) { if (e && e.__baFatal) throw e; /* HARNESS TRAP: an empty catch here hid every staging failure */ }
 
     window.requestAnimationFrame = function () { return 0; };
     await wait(700);
@@ -254,7 +272,7 @@ async function stageVolcano(input) {
             if (typeof CBZ.skySync === "function") CBZ.skySync();
           }
           CBZ.renderer.render(CBZ.scene, CBZ.camera);
-        } catch (_) {}
+        } catch (e) { if (e && e.__baFatal) throw e; /* HARNESS TRAP: an empty catch here hid every staging failure */ }
       },
       /* the film-strip hook: step THIS page's frozen sim by stepSec so both
          sides photograph identical simulated seconds. Self-contained (this
@@ -308,8 +326,8 @@ async function stageVolcano(input) {
   // NIGHT: the lava beat only proves "it lights its surroundings" in the dark.
   // dayPhase is the engine's own clock write, so this is the same night the
   // game has, not a light rig invented for a screenshot.
-  if (act.night && CBZ.dayPhase) { try { CBZ.dayPhase(0.93); } catch (_) {} }
-  if (act.day && CBZ.dayPhase) { try { CBZ.dayPhase(0.42); } catch (_) {} }
+  if (act.night && CBZ.dayPhase) { try { CBZ.dayPhase(0.93); } catch (e) { if (e && e.__baFatal) throw e; /* HARNESS TRAP: an empty catch here hid every staging failure */ } }
+  if (act.day && CBZ.dayPhase) { try { CBZ.dayPhase(0.42); } catch (e) { if (e && e.__baFatal) throw e; /* HARNESS TRAP: an empty catch here hid every staging failure */ } }
 
   /* THE BODY COUNT. Read the lobby BEFORE this beat simulates anything, so
      `killedThisBeat` is the deaths those exact simulated seconds caused and
@@ -360,7 +378,7 @@ async function stageVolcano(input) {
      the clock again AFTER the sim has run, and give it a couple of
      simulated seconds (not a couple of ticks: the light rig LERPS toward
      the clock, and 0.1 s photographs the lerp's starting point — midday). */
-  if (act.night && CBZ.dayPhase) { try { CBZ.dayPhase(0.93); step(2.5); } catch (_) {} }
+  if (act.night && CBZ.dayPhase) { try { CBZ.dayPhase(0.93); step(2.5); } catch (e) { if (e && e.__baFatal) throw e; /* HARNESS TRAP: an empty catch here hid every staging failure */ } }
 
   // GROUND ZERO: put the player where the front is about to arrive, so the
   // whiteout is photographed from inside the blast and not next to it.
@@ -399,7 +417,7 @@ async function stageVolcano(input) {
       const gy = arena ? arena.groundHeightAt(cxp, czp) : 0;
       aimed = { x: cxp, y: gy + (cam.alt || 72), z: czp, ax: cxp, ay: gy, az: czp + 2 };
       aimNote = "plumb over the wedge";
-    } catch (_) {}
+    } catch (e) { if (e && e.__baFatal) throw e; /* HARNESS TRAP: an empty catch here hid every staging failure */ }
   } else if (cam.volcano) {
     /* REFERENCE FRAMING: the cone is the subject, not a tiny prop behind the
        skyline. Stand just offshore and elect the first compass bearing with a
@@ -407,7 +425,13 @@ async function stageVolcano(input) {
        the plume owns the sky. Same election on both sides; no smoke object is
        considered a blocker. */
     try {
-      const hill = (CBZ.surv && CBZ.surv.arena) ? CBZ.surv.arena.hills[0] : { x: 0, z: 600, peak: 26 };
+      /* HARNESS TRAP: never invent the subject. This read used to fall back to a
+         hardcoded { x: 0, z: 600, peak: 26 } — a mountain that exists nowhere —
+         so a camera asked to stand 62 m off the vent stood 62 m off NOTHING and
+         photographed whatever happened to be there. A missing arena is a failed
+         stage, not a default coordinate. */
+      const hill = (CBZ.surv && CBZ.surv.arena && CBZ.surv.arena.hills) ? CBZ.surv.arena.hills[0] : null;
+      if (!hill) throw Object.assign(new Error("no survival arena: there is no volcano to aim at"), { __baFatal: true });
       const gAtV = (x, z) => (CBZ.surv && CBZ.surv.arena ? CBZ.surv.arena.groundHeightAt(x, z) : 0);
       const solids = [];
       CBZ.scene.traverse((ob) => {
@@ -425,27 +449,61 @@ async function stageVolcano(input) {
       const baseA = cam.angle != null ? cam.angle : -Math.PI * 0.5;
       const angles = [];
       for (let i = 0; i < 16; i++) angles.push(baseA + i * Math.PI * 0.125);
-      let pick = null;
-      for (const a of angles) {
-        const px = hill.x + Math.cos(a) * dist, pz = hill.z + Math.sin(a) * dist;
-        const py = Math.max(0, gAtV(px, pz)) + alt;
-        if (!pick) pick = { x: px, y: py, z: pz };
-        // Crater plus both shoulders: a tower beside the vent is still a bad
-        // volcano portrait even when the one centre ray technically lands.
-        const vx = Math.cos(a), vz = Math.sin(a), sx = -vz, sz = vx;
-        const shoulder = (hill.r || 36) * 0.68;
-        const left = new T.Vector3(hill.x + sx * shoulder, 8, hill.z + sz * shoulder);
-        const right = new T.Vector3(hill.x - sx * shoulder, 8, hill.z - sz * shoulder);
-        if (clearRay(px, py, pz, vent) && clearRay(px, py, pz, left) && clearRay(px, py, pz, right)) {
-          pick = { x: px, y: py, z: pz }; break;
+      /* HARNESS TRAP: THE ELECTION USED TO ELECT A BLOCKED BEARING. `pick` was
+         seeded with the FIRST candidate unconditionally (`if (!pick) pick =
+         ...`), so when all sixteen bearings were blocked the loop simply ended
+         and the camera shot from a blocked one anyway — standing behind the
+         island's towers, aiming at a crater it could not see. The whole 29-page
+         volcano-wave-final report was captured that way: correct sim, real
+         metrics, and a photograph of a skyline with a smudge in it. A camera
+         that cannot see its subject is a FAILED stage, not a default.
+
+         It also only ever tried ONE distance. The vent is ~26 m of hill under a
+         190 m column, so at the close framings the towers win every bearing.
+         Back off and climb until the crater and both shoulders are clear. */
+      let pick = null, picked = null;
+      const rings = [[dist, alt], [dist * 1.6, alt + 14], [dist * 2.4, alt + 34],
+                     [dist * 3.4, alt + 62], [dist * 4.6, alt + 96]];
+      for (const [d, y0] of rings) {
+        for (const a of angles) {
+          const px = hill.x + Math.cos(a) * d, pz = hill.z + Math.sin(a) * d;
+          const py = Math.max(0, gAtV(px, pz)) + y0;
+          // Crater plus both shoulders: a tower beside the vent is still a bad
+          // volcano portrait even when the one centre ray technically lands.
+          const vx = Math.cos(a), vz = Math.sin(a), sx = -vz, sz = vx;
+          const shoulder = (hill.r || 36) * 0.68;
+          const left = new T.Vector3(hill.x + sx * shoulder, 8, hill.z + sz * shoulder);
+          const right = new T.Vector3(hill.x - sx * shoulder, 8, hill.z - sz * shoulder);
+          /* THE COLUMN IS THE SUBJECT, SO TEST THE COLUMN. Electing on the
+             crater and its shoulders alone passed a bearing with a tower
+             standing straight through the plume — which is the one thing a
+             shot called "the silhouette" exists to show. Sample the aim point
+             and two heights up the column as well. */
+          const aimY = hill.peak + (cam.aboveVent != null ? cam.aboveVent : 48);
+          const colA = new T.Vector3(hill.x, aimY, hill.z);
+          const colB = new T.Vector3(hill.x, hill.peak + (aimY - hill.peak) * 0.5, hill.z);
+          if (clearRay(px, py, pz, vent) && clearRay(px, py, pz, left) && clearRay(px, py, pz, right) &&
+              clearRay(px, py, pz, colA) && clearRay(px, py, pz, colB)) {
+            pick = { x: px, y: py, z: pz };
+            picked = { d: Math.round(d), alt: Math.round(y0), bearing: Math.round(a * 57.3) };
+            break;
+          }
         }
+        if (pick) break;
+      }
+      if (!pick) {
+        throw Object.assign(new Error(
+          "no clear bearing to the crater at any of " + rings.length +
+          " distances (" + Math.round(dist) + "-" + Math.round(dist * 4.6) +
+          " m): every angle is blocked, so this shot would photograph a wall"),
+          { __baFatal: true });
       }
       aimed = {
         x: pick.x, y: pick.y, z: pick.z,
         ax: hill.x, ay: hill.peak + (cam.aboveVent != null ? cam.aboveVent : 48), az: hill.z,
       };
-      aimNote = "offshore volcano";
-    } catch (_) {}
+      aimNote = "offshore volcano @ " + picked.d + "m/" + picked.alt + "m";
+    } catch (e) { if (e && e.__baFatal) throw e; /* HARNESS TRAP: an empty catch here hid every staging failure */ }
   } else if (cam.lane || cam.lahar) {
     const H = cam.lane ? lineHazard() : (ringHazard() || lineHazard());
     if (H) {
@@ -484,7 +542,8 @@ async function stageVolcano(input) {
       if (cam.scar && A && A.lavaScarTips && A.lavaScarTips.length) {
         tips = A.lavaScarTips; mids = A.lavaScarMids || mids;
       }
-      const hill = (CBZ.surv && CBZ.surv.arena) ? CBZ.surv.arena.hills[0] : { x: 0, z: 600 };
+      const hill = (CBZ.surv && CBZ.surv.arena && CBZ.surv.arena.hills) ? CBZ.surv.arena.hills[0] : null;
+      if (!hill) throw Object.assign(new Error("no survival arena: there is no volcano to aim at"), { __baFatal: true });   // HARNESS TRAP: see cam.volcano
       /* PREFER A FLOW STILL ON THE CONE. "Furthest tip from the hill" used
          to be the whole rule, and once the flows learned to branch and run
          long it reliably elected a nose deep in the town — where the tripod
@@ -580,7 +639,7 @@ async function stageVolcano(input) {
         aimed = { x: cxp, y: cyp, z: czp, ax: mx, ay: my + 1.2, az: mz };
         aimNote = "lava flank";
       }
-    } catch (_) {}
+    } catch (e) { if (e && e.__baFatal) throw e; /* HARNESS TRAP: an empty catch here hid every staging failure */ }
   } else if (cam.wedge) {
     /* THE WIND AIMS THE CAMERA. The ash wedge has no hazards() entry — it is
        ground, not a front — but its axis IS the weather's wind vector, which
@@ -590,7 +649,8 @@ async function stageVolcano(input) {
        look at the mid-wedge ground. On the before side the identical tripod
        photographs the same ground staying green, which is the comparison. */
     try {
-      const hill = (CBZ.surv && CBZ.surv.arena) ? CBZ.surv.arena.hills[0] : { x: 0, z: 600 };
+      const hill = (CBZ.surv && CBZ.surv.arena && CBZ.surv.arena.hills) ? CBZ.surv.arena.hills[0] : null;
+      if (!hill) throw Object.assign(new Error("no survival arena: there is no volcano to aim at"), { __baFatal: true });   // HARNESS TRAP: see cam.volcano
       const R = (CBZ.SURV && CBZ.SURV.arena && CBZ.SURV.arena.radius) || 120;
       const w = CBZ.weatherWind ? CBZ.weatherWind() : null;
       let wx = 1, wz = 0;
@@ -611,7 +671,7 @@ async function stageVolcano(input) {
         ax: lx, ay: gAtW(lx, lz) + (cam.lookY != null ? cam.lookY : 6), az: lz,
       };
       aimNote = cam.upwind ? "upwind wide" : "downwind wedge";
-    } catch (_) {}
+    } catch (e) { if (e && e.__baFatal) throw e; /* HARNESS TRAP: an empty catch here hid every staging failure */ }
   }
   if (!aimed && cam.fallback) { aimed = cam.fallback; aimNote = "fallback tripod"; }
   if (act.needLine && !lineHazard()) {
@@ -661,7 +721,7 @@ async function stageVolcano(input) {
      final thing before the render the harness will flush. The metrics
      record sunInt/fog below, so a capture whose picture disagrees with its
      own staged lighting can be caught by number instead of by squint. */
-  if (act.night && CBZ.dayPhase) { try { CBZ.dayPhase(0.93); step(0.5); } catch (_) {} }
+  if (act.night && CBZ.dayPhase) { try { CBZ.dayPhase(0.93); step(0.5); } catch (e) { if (e && e.__baFatal) throw e; /* HARNESS TRAP: an empty catch here hid every staging failure */ } }
   if (CBZ.renderer.info && CBZ.renderer.info.reset) CBZ.renderer.info.reset();
   CBZ.renderer.render(CBZ.scene, camera);
   const render = (CBZ.renderer.info && CBZ.renderer.info.render) || {};
@@ -734,7 +794,7 @@ async function stageVolcano(input) {
         if (area >= 3 && area <= 260) comps++;
       }
       ashFlecks = comps;
-    } catch (_) {}
+    } catch (e) { if (e && e.__baFatal) throw e; /* HARNESS TRAP: an empty catch here hid every staging failure */ }
   }
 
   const before = input.side === "before";
@@ -747,8 +807,8 @@ async function stageVolcano(input) {
   query("focus").style.cssText = "position:absolute;top:266px;left:27px;color:#c0cfda;font-size:12px;font-weight:550";
 
   let vol = null, dis = null;
-  try { vol = CBZ.volcanoAudit ? CBZ.volcanoAudit() : null; } catch (_) {}
-  try { dis = CBZ.disasterAudit ? CBZ.disasterAudit() : null; } catch (_) {}
+  try { vol = CBZ.volcanoAudit ? CBZ.volcanoAudit() : null; } catch (e) { if (e && e.__baFatal) throw e; /* HARNESS TRAP: an empty catch here hid every staging failure */ }
+  try { dis = CBZ.disasterAudit ? CBZ.disasterAudit() : null; } catch (e) { if (e && e.__baFatal) throw e; /* HARNESS TRAP: an empty catch here hid every staging failure */ }
 
   query("perf").textContent = ticks
     ? `sim ${ticks} ticks · avg ${(totalMs / ticks).toFixed(1)}ms · worst ${maxMs.toFixed(0)}ms\n` +
@@ -763,8 +823,8 @@ async function stageVolcano(input) {
   // the sky clock and the LIGHTS at capture — the numbers that catch "night
   // was actually dawn" without anyone having to squint at a thumbnail
   let dph = -1, sunNow = -1;
-  try { dph = Number(CBZ.dayPhase().toFixed(3)); } catch (_) {}
-  try { sunNow = Number(CBZ.sun.intensity.toFixed(3)); } catch (_) {}
+  try { dph = Number(CBZ.dayPhase().toFixed(3)); } catch (e) { if (e && e.__baFatal) throw e; /* HARNESS TRAP: an empty catch here hid every staging failure */ }
+  try { sunNow = Number(CBZ.sun.intensity.toFixed(3)); } catch (e) { if (e && e.__baFatal) throw e; /* HARNESS TRAP: an empty catch here hid every staging failure */ }
   const metrics = {
     dayPhase: dph,
     sunIntensity: sunNow,
