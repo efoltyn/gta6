@@ -461,6 +461,14 @@ async function stageVolcano(input) {
          It also only ever tried ONE distance. The vent is ~26 m of hill under a
          190 m column, so at the close framings the towers win every bearing.
          Back off and climb until the crater and both shoulders are clear. */
+      /* NOTE (2026-08-30): a frustum-coverage score lived here briefly and was
+         WRONG — it capped ray.far at the distance to the cone, so it only ever
+         counted things BETWEEN the camera and the vent. The towers that fill
+         the close beats are BEYOND the cone: they are the island's skyline in
+         the background of a 72-degree lens at 62 m, not occluders. Nothing is
+         blocked, so no occlusion test can fix those framings. What they need
+         is composition — a tighter fov or a higher angle that puts the cone
+         and its plume against sky. Left undone: unverifiable at load 134. */
       let pick = null, picked = null;
       const rings = [[dist, alt], [dist * 1.6, alt + 14], [dist * 2.4, alt + 34],
                      [dist * 3.4, alt + 62], [dist * 4.6, alt + 96]];
