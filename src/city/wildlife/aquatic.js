@@ -2569,19 +2569,94 @@
      into the surf (clearance 12), so it is the shark the player actually
      MEETS. Same grammar, blunter everything.
      ============================================================ */
+  /* OWNER, 2026-08-30: "the body is too wide diameter for the head and tall,
+     way too puffer, and doesn't match where they meet — looking very dumb,
+     like a fat dog." He is right on all three counts, and the three are one
+     table. MEASURED on the shipped animal: 27.7% of total length deep and
+     23.1% wide, which is not a shark, it is a manatee — and FATTER in both
+     axes than the great white two hundred lines down, when a white shark is
+     the deeper-bodied animal of the two. A real Carcharhinus leucas, the
+     stockiest requiem shark there is, runs about 18% deep and 16% wide.
+
+     The third complaint is the great white's OWN head-weld bug (see GW_RINGS),
+     which the bull never got the fix for. The beam used to let go 8% before
+     the head had even started and then fall off a cliff into it: 0.460 at the
+     gills, 0.360 at the next station. So the face read as a small ball plugged
+     into a barrel, with a visible wall between them. The rule the great white
+     already follows: THE CHEEK KEEPS THE BEAM. Width is carried forward
+     through the gill field almost intact and is given up only at the mouth
+     corner; DEPTH is what goes, and it goes early. That is what turns the
+     section over from deeper-than-wide (a body) to wider-than-deep (a broad
+     flat head) BEFORE the weld rather than at it, so the shell picks up a
+     cross-section it already matches.
+
+     Two stations are new (-0.96 and 1.04). The old table asked one straight
+     segment to cover 0.65 of body from the shoulder to the gills and another
+     to cover the whole head weld, and a lerp across a span that long is a
+     ramp with corners at both ends, not a curve. ---- */
   const BULL_RINGS = [
-    { x: -1.32, y: 0.88, ry: 0.225, rz: 0.170 },   // THE TAILSTOCK (see weldedSleeve)
-    { x: -0.75, y: 0.87, ry: 0.430, rz: 0.335 },
-    { x: -0.05, y: 0.88, ry: 0.580, rz: 0.470 },
-    { x: 0.60, y: 0.89, ry: 0.600, rz: 0.500 },
-    { x: 1.20, y: 0.92, ry: 0.520, rz: 0.460 },
-    // buried inside the rostrum from here forward (see weldedRostrum)
-    { x: 1.66, y: 0.98, ry: 0.345, rz: 0.360 },
-    { x: 1.84, y: 1.00, ry: 0.255, rz: 0.290 },
+    { x: -1.32, y: 0.880, ry: 0.152, rz: 0.118 },   // THE TAILSTOCK (see weldedSleeve)
+    { x: -0.96, y: 0.874, ry: 0.236, rz: 0.188 },
+    { x: -0.58, y: 0.870, ry: 0.306, rz: 0.252 },
+    { x: -0.05, y: 0.876, ry: 0.377, rz: 0.322 },
+    { x: 0.60, y: 0.888, ry: 0.402, rz: 0.352 },   // MAX GIRTH — the pectoral line
+    { x: 1.04, y: 0.902, ry: 0.360, rz: 0.352 },   // THE GILL FIELD — full beam, depth already easing
+    /* THE CHEEK, and the station the whole complaint turns on: rz is now the
+       LARGER of the pair. The head is wider than it is deep before the snout
+       shell ever starts, which is both what a bull shark looks like from in
+       front and what makes the weld invisible — the shell's own tip is
+       flattened the same way (tipRz > tipRy below).
+
+       AND THE BEAM LETS GO HERE, NOT AT THE WELD. First attempt held the full
+       beam all the way to the weld station, which fixed the step and bought a
+       worse bug: weldedRostrum reads the hull's TAPER at the weld and leaves
+       on it, so a hull that arrives flat hands the shell a slope of nothing,
+       the exponent floors at 0.55, and the snout comes out a CYLINDER with a
+       rounded-off end. There has to be hull between the cheek and the weld for
+       the shell to inherit a taper from — the great white leaves 0.21 of it
+       (1.45 -> 1.66) and this now leaves the same 0.19.
+
+       THE SECTION TURNS OVER ACROSS THESE TWO STATIONS, and that is the whole
+       answer to "way too puffer". Head-on, the shipped animal was a circle
+       (rz/ry = 0.94 at the cheek) with a round chin under it, which is a
+       balloon, not a shark. Depth is now given up nearly twice as fast as
+       width through the head, so the section runs 0.98 round at the gills ->
+       1.30 at the weld -> 1.5 at the nose: a broad flattened wedge that gets
+       flatter the further forward you read it. The snout shell inherits it
+       for free, because its rim IS this circle. */
+    { x: 1.22, y: 0.914, ry: 0.300, rz: 0.350 },
+    { x: 1.46, y: 0.936, ry: 0.222, rz: 0.298 },
+    /* ..and from here forward the hull is BURIED INSIDE THE ROSTRUM (see
+       weldedRostrum). These two are never seen: they carry the mouth notch and
+       give the gill and pore fields a cross-section, kept inside the shell. */
+    { x: 1.72, y: 0.974, ry: 0.184, rz: 0.254 },
+    { x: 1.88, y: 1.000, ry: 0.148, rz: 0.210 },
   ];
-  const BULL_BELLY = [-0.36, -0.30, -0.14, 0.14, -0.02, -0.22, -0.30];
+  // The countershading line, per ring — low along the cheek, kicking hard UP
+  // behind the pectoral. One array, used by BOTH the hull and the rostrum;
+  // the hull call used to re-type it as a literal, which is a second copy
+  // waiting to drift out of step with this one.
+  /* The kick used to be +0.14 at the pectoral against a flank deep enough to
+     absorb it. On this one it drew a white rectangle on the side of the animal
+     — the seam climbing a quarter of the section in one ring step, with the
+     coarse station spacing turning the ramp into a wall at each end. Same
+     shape, a third of the amplitude. */
+  const BULL_BELLY = [-0.36, -0.33, -0.29, -0.22, -0.04, -0.07, -0.11, -0.18, -0.25, -0.30];
+  /* THE WELD STATION IS THE HULL'S OWN CAP, DERIVED AND NOT TYPED. addSharkHull
+     hands the head front to the jaw shells at `hingeX + length*0.07` and caps
+     itself there with a flat disc. The shipped table solved the shell at 1.39
+     against a cap at 1.4146, so 25 mm of hull stood PAST the shell's rim and
+     ended in that disc — a ledge you can see as a ring right round the head in
+     the three-quarter view, and the literal "doesn't match where they meet".
+     Solved AT the cap the two rims are the same circle to the last decimal
+     (measured: 0.00 mm proud), and the disc is interior to the shell's own
+     forward cone, so there is nothing left to catch the light. It is written
+     as the expression rather than as 1.4146 so that moving the mouth can never
+     silently re-open the ledge. */
+  const MOUTH_HINGE_X = 1.36, MOUTH_LENGTH = 0.78;
   const BULL_ROSTRUM = rostrumOf(BULL_RINGS, BULL_BELLY, {
-    x1: 1.39, x0: 2.16, tipRy: 0.145, tipRz: 0.225, tipY: 1.025, tipCut: -0.46, n: 5,
+    x1: MOUTH_HINGE_X + MOUTH_LENGTH * 0.07,   // == the hull's own cap. See above.
+    x0: 2.16, tipRy: 0.140, tipRz: 0.215, tipY: 1.006, tipCut: -0.46, n: 6,
   });
   const BULL_SNOUT = BULL_ROSTRUM.rings;
   S({
@@ -2593,20 +2668,34 @@
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
       const grey = m(0x464e52), white = m(0xf0f2f2), finDark = m(0x394045), finTip = m(0x252b2f);
-      const MOUTH = { hingeX: 1.36, hingeY: 0.716, length: 0.78, width: 0.56, gap: 0.28, cornerRise: 0.12, snoutShell: true };
+      /* THE MOUTH RIDES THE HEAD IT IS CUT INTO. Every number below is the
+         same FRACTION of the head's local section it always was, re-solved
+         against the slimmer one: the hinge sits 0.427 of the half-depth below
+         the spine, the arc spans 67% of the half-beam, and the gape and teeth
+         scale with the depth. Left at the shipped values on this head the jaw
+         hung below the belly line and the teeth read like a bear trap. */
+      const MOUTH = {
+        hingeX: MOUTH_HINGE_X, hingeY: 0.818, length: MOUTH_LENGTH,
+        width: 0.500, gap: 0.149, cornerRise: 0.064, snoutShell: true,
+      };
       addSharkHull(g, {
-        top: grey, belly: white, sides: 14, rings: BULL_RINGS,
-        bellyCut: [-0.36, -0.30, -0.14, 0.14, -0.02, -0.22, -0.30],
-        ragged: 0.075, seed: 71, profile: "stocky-blunt",
+        // 24, not the shipped 14. The countershading seam is quantised to
+        // whole faces (see hullShell's bucket()), so a coarse hull draws the
+        // kick behind the pectoral as a white RECTANGLE on the flank rather
+        // than a line — and 14 sides also left the head visibly polygonal
+        // head-on, which is the view the "puffer" complaint came from.
+        top: grey, belly: white, sides: 24, rings: BULL_RINGS,
+        bellyCut: BULL_BELLY,
+        ragged: 0.055, seed: 71, profile: "stocky-blunt",
         mouth: MOUTH, interior: m(0x3a1518),
       });
       addSharkMouth(g, T, m, Object.assign({}, MOUTH, {
         rings: BULL_RINGS,
-        toothHeight: 0.135, toothWidth: 0.108, rowTeeth: 17,
+        toothHeight: 0.075, toothWidth: 0.063, rowTeeth: 19,
         maxOpen: 1.00, skin: 0xf0f2f2,
       }));
       const snout = addSharkRostrum(g, [grey, white, m(0x421a1e)], BULL_SNOUT, {
-        pivotX: 1.66, pivotY: 0.980, sides: 14,
+        pivotX: 1.66, pivotY: 0.966, sides: 24,
         bellyCut: BULL_ROSTRUM.belly, ragged: 0.055, seed: 72, tuck: 0.90,
         mouth: MOUTH,
       });
@@ -2614,9 +2703,9 @@
         rings: BULL_RINGS, snout: snout, snoutRings: BULL_SNOUT, mouth: MOUTH,
         eyeX: 1.80, eyeY: 1.150, eyeZ: 0.260, eyeSize: 0.048, dark: 0x07090a,
         noseX: 1.98, noseY: 0.806, noseZ: 0.105, nostrilLen: 0.13, nostrilWidth: 0.024,
-        gillX: 1.28, gillY: 0.90, gillZ: 0, gills: 5, gillCenter: -0.14,
-        gillHeight: 0.29, gillStep: 0.10, gillWidth: 0.055, gillAngle: 0.22,
-        gillColor: 0xc3cccd,
+        gillX: 1.28, gillY: 0.898, gillZ: 0, gills: 5, gillCenter: -0.11,
+        gillHeight: 0.180, gillStep: 0.10, gillWidth: 0.046, gillAngle: 0.22,
+        gillColor: 0xaeb8ba,
         pores: 40, poreSize: 0.017, poreX0: 1.70, poreX1: 2.12, poreSpread: 0.95,
         poreSeed: 34, poreColor: 0x424a4e,
       });
@@ -2626,43 +2715,43 @@
         foldColor: 0x4f585c, skinSeed: 73, mouth: MOUTH,
       });
       function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-      fin([finDark, finDark, finDark, m(0x5f686c)], [0.25, 1.32, 0], {
-        span: 0.98, chordRoot: 0.92, chordTip: 0.14, sweep: 0.60, concavity: 0.30,
+      fin([finDark, finDark, finDark, m(0x5f686c)], [0.25, 1.169, 0], {
+        span: 0.66, chordRoot: 0.62, chordTip: 0.10, sweep: 0.60, concavity: 0.30,
         leadBow: 0.07, rearTipH: 0.09, rearTipBack: 0.30, apexRound: 0.30,
         thick: 0.12, spanSteps: 6, chordSteps: 5, paleBase: 0.18, trailPale: 0.17,
         spanDir: [0, 1, 0], chordDir: [1, 0, 0],
       });
-      fin([finDark], [-0.85, 1.14, 0], {
-        span: 0.26, chordRoot: 0.26, chordTip: 0.04, sweep: 0.55, concavity: 0.28,
+      fin([finDark], [-0.85, 1.047, 0], {
+        span: 0.21, chordRoot: 0.26, chordTip: 0.04, sweep: 0.55, concavity: 0.28,
         rearTipBack: 0.11, apexRound: 0.10, thick: 0.04, spanSteps: 4, chordSteps: 3,
         spanDir: [0, 1, 0], chordDir: [1, 0, 0],
       });
       [1, -1].forEach(function (s2) {
-        fin([grey, white, finTip], [0.64, 0.520, s2 * 0.39], {
-          span: 1.02, chordRoot: 0.58, chordTip: 0.05, sweep: 0.66, concavity: 0.24,
+        fin([grey, white, finTip], [0.64, 0.639, s2 * 0.276], {
+          span: 0.84, chordRoot: 0.52, chordTip: 0.05, sweep: 0.66, concavity: 0.24,
           rearTipH: 0.09, rearTipBack: 0.18, apexRound: 0.05, thick: 0.075,
           spanSteps: 6, chordSteps: 4, under: true, tipDark: 0.78,
           spanDir: [-0.497, -0.200, s2 * 0.845], chordDir: [1, 0.06, s2 * 0.16],
         });
-        fin([grey, white], [-0.52, 0.470, s2 * 0.20], {
-          span: 0.36, chordRoot: 0.32, chordTip: 0.04, sweep: 0.55, concavity: 0.22,
+        fin([grey, white], [-0.52, 0.606, s2 * 0.137], {
+          span: 0.30, chordRoot: 0.28, chordTip: 0.04, sweep: 0.55, concavity: 0.22,
           rearTipBack: 0.10, apexRound: 0.07, thick: 0.042, spanSteps: 4, chordSteps: 3,
           under: true, spanDir: [-0.160, -0.883, s2 * 0.441], chordDir: [1, 0, s2 * 0.1],
         });
-        fin([grey], [-1.18, 0.880, s2 * 0.15], {
-          span: 0.13, chordRoot: 0.40, chordTip: 0.09, sweep: 0.12, concavity: 0.05,
+        fin([grey], [-1.18, 0.879, s2 * 0.103], {
+          span: 0.10, chordRoot: 0.36, chordTip: 0.09, sweep: 0.12, concavity: 0.05,
           rearTipH: 0.20, rearTipBack: 0.04, apexRound: 0.50, thick: 0.045,
           spanSteps: 3, chordSteps: 3, spanDir: [0, 0, s2], chordDir: [1, 0, 0],
         });
       });
-      fin([grey], [-0.85, 0.500, 0], {
-        span: 0.24, chordRoot: 0.24, chordTip: 0.03, sweep: 0.55, concavity: 0.25,
+      fin([grey], [-0.85, 0.631, 0], {
+        span: 0.20, chordRoot: 0.21, chordTip: 0.03, sweep: 0.55, concavity: 0.25,
         rearTipBack: 0.10, apexRound: 0.08, thick: 0.035, spanSteps: 4, chordSteps: 3,
         spanDir: [0, -1, 0], chordDir: [1, 0, 0],
       });
       tailSleeve(g, [grey, white], BULL_RINGS, {
-        at: [-1.58, 0.88], x0: -0.432, x1: 0.40, tipRy: 0.058, tipRz: 0.036,
-        sides: 14, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 74,
+        at: [-1.58, 0.88], x0: -0.432, x1: 0.40, tipRy: 0.036, tipRz: 0.024,
+        sides: 24, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 74,
       });
       fin([grey, white], [-1.78, 0.92, 0], {
         span: 1.06, chordRoot: 0.46, chordTip: 0.05, sweep: 0.30, concavity: 0.24,
