@@ -244,6 +244,23 @@
     _twoSide[key] = m;
     return m;
   }
+  /* WHITE, FOR ANYTHING THAT TINTS PER INSTANCE. r128's InstancedMesh
+     multiplies instanceColor INTO the material's diffuse, so an InstancedMesh
+     whose material is already canvasDark and whose setColorAt writes
+     canvasDark renders canvasDark SQUARED. That is what it always did; it
+     only became visible when the palette went properly linear and a hundred
+     and seventy sandbags photographed as a line of charcoal briquettes.
+     Anything that calls setColorAt takes its base from here and carries the
+     real colour in the instance. */
+  let _white = null, _whiteD = null;
+  function MW(twoSided) {
+    if (twoSided) {
+      if (!_whiteD) { _whiteD = new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide }); _whiteD._shared = true; }
+      return _whiteD;
+    }
+    if (!_white) { _white = new THREE.MeshLambertMaterial({ color: 0xffffff }); _white._shared = true; }
+    return _white;
+  }
   // smoke/haze wants its own transparent material and must never be batched
   let _smokeMat = null;
   function smokeMat() {
@@ -847,7 +864,7 @@
     opts = opts || {};
     // DOUBLE-SIDED, because the front gable is open and a single-sided tent
     // is a hole you can see the sand through from the wrong angle.
-    const im = new THREE.InstancedMesh(tentGeo(), MD(opts.mat || "canvas"), list.length);
+    const im = new THREE.InstancedMesh(tentGeo(), MW(true), list.length);
     const d = new THREE.Object3D();
     const hasCol = !!im.setColorAt;
     const c = new THREE.Color();
@@ -952,7 +969,7 @@
     const rows = Math.max(2, Math.round(h / 0.26));
     const per = Math.max(2, Math.round(len / 0.62));
     const g = new THREE.Group();
-    const im = new THREE.InstancedMesh(BG(0.6, 0.26, 0.42), M("canvasDark"), rows * per + 4);
+    const im = new THREE.InstancedMesh(BG(0.6, 0.26, 0.42), MW(false), rows * per + 4);
     const d = new THREE.Object3D();
     const c = new THREE.Color();
     let n = 0;
@@ -1140,6 +1157,7 @@
   P.wind = function (dirRad) { if (dirRad != null) WIND.dir = dirRad; return WIND; };
 
   const CLOTH_SEG = 3;
+
   function clothChain(t, phase, fly, drop, out) {
     // returns CLOTH_SEG {x,y,z,yaw,pitch} steps walked out from (0,0,0)
     let px = 0, py = 0, pz = 0;
@@ -1162,10 +1180,20 @@
   // one cloth material per faction colour, not one per flag: five factions on
   // the map is five materials however many standards are flying.
   const _clothMats = {};
+  /* A BANNER IS THE ONE THING ALLOWED TO SHOUT, AND SHOUTING IS WHY IT GOES
+     WHITE. core.js's faction hexes (0xc4593a, 0x4a8f5a, ...) are picked to be
+     legible in HTML, where they are sRGB; fed to r128 as LINEAR and then
+     multiplied by the sun they clip, and five factions arrive on the sand as
+     five shades of cream. Scaled to 0.42 the hue survives tone mapping and a
+     legion banner is still gold at four hundred metres — which is the entire
+     job of the object. core.js's numbers are not touched; they are correct
+     for the HUD that also uses them. */
+  const CLOTH_LINEAR = 0.42;
   function clothMatFor(hex) {
     let m = _clothMats[hex];
     if (!m) {
-      m = new THREE.MeshLambertMaterial({ color: hex, side: THREE.DoubleSide });
+      const c = new THREE.Color(hex).multiplyScalar(CLOTH_LINEAR);
+      m = new THREE.MeshLambertMaterial({ color: c, side: THREE.DoubleSide });
       m._shared = true;
       _clothMats[hex] = m;
     }
@@ -1267,7 +1295,7 @@
         d.position.set(x, y + h * s + 0.1 * s, z);
         d.updateMatrix(); finial.setMatrixAt(i, d.matrix);
         if (cloth.setColorAt) {
-          c.setHex(colour == null ? 0xc4593a : colour);
+          c.setHex(colour == null ? 0xc4593a : colour).multiplyScalar(CLOTH_LINEAR);
           for (let k = 0; k < CLOTH_SEG; k++) cloth.setColorAt(i * CLOTH_SEG + k, c);
         }
         const rec = { x: x, y: y, z: z, s: s, phase: (i * 1.937) % TAU };

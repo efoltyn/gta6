@@ -2161,6 +2161,24 @@
         }
         inf.end();
       },
+      /* THE PAD REPLAYS THE CHARGE. Without this ?mounts=1 shows one charge
+         and then a field of corpses forever, which is a debug entry that
+         answers the question once. The before/after preset never calls it —
+         a strip must photograph one continuous event. */
+      reset: function () {
+        h.t = 0; h.impacts = 0; h.damage = 0; h.closed = 0;
+        for (let i = 0; i < riders.length; i++) {
+          const row = Math.floor((i + 1) / 2);
+          riders[i].z = startZ - row * 2.2;
+          riders[i].cool = 0; riders[i].dist = 0;
+        }
+        for (let j = 0; j < foot.length; j++) {
+          foot[j].down = false; foot[j].fall = 0;
+          foot[j].x = ((j % 13) - 6) * 2.1 + (W.hash01(j, 3, 7) - 0.5) * 0.5;
+          foot[j].z = lineZ + Math.floor(j / 13) * 2.4;
+        }
+        h.draw();
+      },
       dispose: function () {},
     };
     h.draw();
@@ -2222,15 +2240,27 @@
     const p = g.attributes.position;
     for (let i = 0; i < p.count; i++) p.setY(i, dune(p.getX(i), p.getZ(i)));
     g.computeVertexNormals();
-    const ground = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0xd9b979 }));
+    /* DARKER THAN THE ISLAND'S SAND ON PURPOSE. The page's own sun and
+       hemisphere are tuned for 14 km of desert seen from 60 m up; at 0xd9b979
+       under those lights the pad reads as a sheet of white paper and the
+       riders vanish into it. */
+    const ground = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x9c7942 }));
     ground.receiveShadow = true;
     root.add(ground);
 
-    const col = M.makeColumn(root, { n: 16, kind: "horse", x: -120, z: -40, yaw: Math.PI * 0.42, heightAt: dune });
-    const chg = M.makeCharge(root, { kind: "horse", cav: 12, inf: 26, lineZ: 60, startZ: -10, heightAt: dune });
+    const col = M.makeColumn(root, { n: 12, kind: "horse", x: -46, z: -74, yaw: 0.35, spacing: 4.2, heightAt: dune });
+    const chg = M.makeCharge(root, { kind: "horse", cav: 12, inf: 26, lineZ: 6, startZ: -22, heightAt: dune });
+    const col0 = { x: col.x, z: col.z };
     pad = {
       root: root, dune: dune, column: col, charge: chg, t: 0,
-      step: function (dt) { pad.t += dt; col.step(dt); chg.step(dt); },
+      step: function (dt) {
+        pad.t += dt;
+        col.step(dt);
+        // the column rides a loop rather than off the edge of the pad
+        if (Math.hypot(col.x - col0.x, col.z - col0.z) > 190) { col.x = col0.x; col.z = col0.z; }
+        chg.step(dt);
+        if (chg.t > 7.5) chg.reset();
+      },
     };
     if (ctx.closeScreen) ctx.closeScreen();
     W.setPhase("campaign");
@@ -2242,9 +2272,10 @@
     ctx.micro.onFrame(function (dt) {
       pad.step(Math.min(0.05, dt));
       if (cam) {
-        const a = pad.t * 0.16;
-        cam.position.set(Math.sin(a) * 74, 26 + Math.sin(a * 0.7) * 6, Math.cos(a) * 74 + 20);
-        cam.lookAt(0, 4, 22);
+        // in close enough to see a horse: 46 m, not 74
+        const a = pad.t * 0.13;
+        cam.position.set(Math.sin(a) * 46, 15 + Math.sin(a * 0.7) * 4, Math.cos(a) * 46 - 4);
+        cam.lookAt(0, 2.5, -4);
       }
     }, { order: 6, id: "warlord-mount-pad" });
     return pad;
