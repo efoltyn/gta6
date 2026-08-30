@@ -1,0 +1,831 @@
+<!doctype html><meta charset="utf-8"><title>Facade Catalogue</title>
+<style>
+  @page { size: letter landscape; margin: 0.4in; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.5 "Helvetica Neue", Helvetica, Arial, sans-serif; color: #17181a; background: #fff; }
+  h1, h2, h3 { margin: 0; font-weight: 700; letter-spacing: -0.01em; }
+  .page { page-break-after: always; }
+  .page:last-child { page-break-after: auto; }
+
+  /* ---- cover ---- */
+  .cover { display: flex; flex-direction: column; justify-content: center; min-height: 7.4in; padding: 0 0.3in; }
+  .cover h1 { font-size: 54px; line-height: 1.02; letter-spacing: -0.03em; }
+  .cover .sub { font-size: 19px; color: #55585e; margin-top: 14px; max-width: 7.6in; }
+  .cover .how { margin-top: 34px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; border-top: 2px solid #17181a; padding-top: 18px; }
+  .cover .how h4 { margin: 0 0 5px; font-size: 12px; letter-spacing: 0.10em; text-transform: uppercase; }
+  .cover .how p { margin: 0; font-size: 12.5px; color: #45484e; }
+  .cover .strip { margin-top: auto; padding-top: 26px; display: grid; grid-template-columns: repeat(9, 1fr); gap: 7px; }
+  .cover .strip div { position: relative; aspect-ratio: 0.86; background: #fff; border: 1px solid #d6d9dd; overflow: hidden; }
+  .cover .strip img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .cover .strip b { position: absolute; left: 0; top: 0; background: #17181a; color: #fff; font-size: 10px; padding: 1px 4px; min-width: 17px; text-align: center; }
+  .cover .foot { margin-top: 16px; padding-top: 22px; font-size: 11.5px; color: #7a7d84; border-top: 1px solid #d8dade; }
+
+  /* ---- index ---- */
+  .idx h1 { font-size: 23px; }
+  .idx > p { color: #55585e; margin: 5px 0 11px; max-width: 10in; font-size: 12px; }
+  .idxgroup { margin-bottom: 8px; }
+  .idxgroup h3 { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #17181a;
+    border-bottom: 1.5px solid #17181a; padding-bottom: 3px; margin-bottom: 7px; display: flex; justify-content: space-between; }
+  .idxgroup h3 span { color: #8a8d93; font-weight: 500; }
+  .grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+  .thumb { margin: 0; }
+  .imgwrap { position: relative; aspect-ratio: 1.72; overflow: hidden; background: #fff; border: 1px solid #d6d9dd; }
+  .imgwrap img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .imgwrap b { position: absolute; left: 0; top: 0; background: #17181a; color: #fff; font-size: 11px;
+    min-width: 19px; text-align: center; padding: 1px 4px; }
+  .thumb figcaption { font-size: 8px; line-height: 1.2; margin-top: 2px; display: flex; flex-direction: column; }
+  .thumb figcaption span { color: #8a8d93; font-family: ui-monospace, Menlo, monospace; font-size: 7.5px; }
+
+  /* ---- plate ---- */
+  .plate { page-break-after: always; height: 7.5in; display: flex; flex-direction: column; }
+  .plate header { display: flex; align-items: flex-start; gap: 14px; border-bottom: 2px solid #17181a; padding-bottom: 7px; }
+  .plate .num { font-size: 46px; font-weight: 800; line-height: 0.85; letter-spacing: -0.04em; }
+  .plate h2 { font-size: 25px; }
+  .plate .kick { margin: 3px 0 0; font-size: 11px; color: #6c6f75; letter-spacing: 0.03em; text-transform: uppercase; }
+  .plate .kick code { font-family: ui-monospace, Menlo, monospace; text-transform: none; }
+  .plate .body { display: grid; grid-template-columns: 1.42fr 1fr; gap: 14px; flex: 1; min-height: 0; padding-top: 10px; }
+  /* A portrait hero contained in a wide column is limited by height and shows
+     small; give the tower plates a squarer column so the tall shot is big. */
+  .plate.portrait .body { grid-template-columns: 0.92fr 1fr; }
+  .big { display: flex; flex-direction: column; min-height: 0; }
+  .big img { width: 100%; flex: 1; min-height: 0; object-fit: cover; background: #fff; border: 1px solid #d6d9dd; }
+  .side { display: flex; flex-direction: column; min-height: 0; }
+  .note { margin: 0 0 7px; font-size: 12.5px; }
+  .city { margin: 0 0 9px; font-size: 12px; color: #45484e; background: #f2f3f5; border-left: 3px solid #17181a; padding: 6px 8px; }
+  .city em { font-style: normal; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; font-size: 10px; }
+  /* STACKED, not side by side. Two 195 px columns made every street shot
+     a stamp; the side column's full width is where they can be read. */
+  .smalls { display: grid; grid-template-rows: 1fr 1fr; gap: 8px; flex: 1; min-height: 0; }
+  .smalls div { display: flex; flex-direction: column; min-height: 0; }
+  .smalls img { width: 100%; flex: 1; min-height: 0; object-fit: cover; background: #fff; border: 1px solid #d6d9dd; }
+  .cap { font-size: 9px; color: #8a8d93; margin-top: 3px; letter-spacing: 0.02em; }
+  .met { width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: 9px; font-size: 10px; }
+  .met td { border-top: 1px solid #dfe1e5; padding: 3px 2px; color: #45484e; }
+  .met td:nth-child(1), .met td:nth-child(3) { width: 33%; }
+  .met td:nth-child(2) { padding-right: 12px; }
+  .met td:nth-child(2), .met td:nth-child(4) { text-align: right; font-weight: 700; color: #17181a; }
+  .met i { color: #9a9da3; font-style: normal; }
+  .plate footer { display: flex; justify-content: space-between; border-top: 1px solid #d8dade; margin-top: 8px;
+    padding-top: 5px; font-size: 10px; color: #8a8d93; letter-spacing: 0.05em; text-transform: uppercase; }
+</style>
+<div class="page cover">
+  <h1>Thirty-one facades.<br>Pick ten.</h1>
+  <p class="sub">Every grammar the facade kit has, photographed on the same shell within its family, from three angles. Reply with the numbers you want and each one becomes a whole cultural city — the picked facade plus three more siblings in the same tradition.</p>
+  <div class="how">
+    <div><h4>Three-quarter</h4><p>The honest single frame: entrance face and one flank at once, so ornament applied only to the front cannot hide.</p></div>
+    <div><h4>From the pavement</h4><p>Where a player actually meets the building. Judges the door, the reach, and whether it still reads from underneath.</p></div>
+    <div><h4>Rear three-quarter</h4><p>The cheat detector: a facade that spent everything on the door elevation looks fine in the other two frames and empty here. On tower plates this frame is the crown instead — a tower wraps all four faces by construction, and what it lives on is how it ends.</p></div>
+  </div>
+  <div class="strip"><div><img src="shots/01-intl-hero.jpg"><b>1</b></div><div><img src="shots/04-sunburst-hero.jpg"><b>4</b></div><div><img src="shots/08-neogothic-hero.jpg"><b>8</b></div><div><img src="shots/11-brick-hero.jpg"><b>11</b></div><div><img src="shots/15-hightech-hero.jpg"><b>15</b></div><div><img src="shots/18-pagoda-hero.jpg"><b>18</b></div><div><img src="shots/22-greekrev-hero.jpg"><b>22</b></div><div><img src="shots/25-brickhouse-hero.jpg"><b>25</b></div><div><img src="shots/29-desertmod-hero.jpg"><b>29</b></div></div>
+  <p class="foot">31 registered, 31 plated &middot; one hard key light, shadows on, neutral pad, no city &middot; towers 34&times;28 m at 40 storeys, blocks 22&times;16 m at 4, houses 15&times;11 m at 2 &middot; generated by <code>tools/facade-catalog.mjs</code></p>
+</div>
+<div class="page idx">
+  <h1>The whole sheet</h1>
+  <p>Numbers come from a literal order in the tool, not from registry order — so <b>“I want 4, 9, 17 and 22”</b> still means the same four buildings next week. Full plate for each on the pages that follow.</p>
+  <section class="idxgroup"><h3>TOWERS<span>10</span></h3><div class="grid"><figure class="thumb"><div class="imgwrap"><img src="shots/01-intl-hero.jpg"><b>1</b></div>
+        <figcaption><strong>Seagram Curtain Wall</strong><span>intl</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/02-ziggurat-hero.jpg"><b>2</b></div>
+        <figcaption><strong>Zoning Setback Tower</strong><span>ziggurat</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/03-pyramid-hero.jpg"><b>3</b></div>
+        <figcaption><strong>Tapered Spire</strong><span>pyramid</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/04-sunburst-hero.jpg"><b>4</b></div>
+        <figcaption><strong>Radiator Crown</strong><span>sunburst</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/05-bundled-hero.jpg"><b>5</b></div>
+        <figcaption><strong>Bundled Tube</strong><span>bundled</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/06-megabrace-hero.jpg"><b>6</b></div>
+        <figcaption><strong>Braced Tube</strong><span>megabrace</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/07-faceted-hero.jpg"><b>7</b></div>
+        <figcaption><strong>Faceted Prism</strong><span>faceted</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/08-neogothic-hero.jpg"><b>8</b></div>
+        <figcaption><strong>Cathedral of Commerce</strong><span>neogothic</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/09-postmodern-hero.jpg"><b>9</b></div>
+        <figcaption><strong>Broken Pediment</strong><span>postmodern</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/10-pencil-hero.jpg"><b>10</b></div>
+        <figcaption><strong>Supertall Slim</strong><span>pencil</span></figcaption></figure></div></section><section class="idxgroup"><h3>BLOCKS · mid-rise<span>10</span></h3><div class="grid"><figure class="thumb"><div class="imgwrap"><img src="shots/11-brick-hero.jpg"><b>11</b></div>
+        <figcaption><strong>Chicago Loft</strong><span>brick</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/12-stone-hero.jpg"><b>12</b></div>
+        <figcaption><strong>Ashlar Bank</strong><span>stone</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/13-artdeco-hero.jpg"><b>13</b></div>
+        <figcaption><strong>Deco Tower</strong><span>artdeco</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/14-brutalist-hero.jpg"><b>14</b></div>
+        <figcaption><strong>Beton Brut</strong><span>brutalist</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/15-hightech-hero.jpg"><b>15</b></div>
+        <figcaption><strong>Exostructure</strong><span>hightech</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/16-gothic-hero.jpg"><b>16</b></div>
+        <figcaption><strong>Gothic Revival</strong><span>gothic</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/17-mosque-hero.jpg"><b>17</b></div>
+        <figcaption><strong>Grand Mosque</strong><span>mosque</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/18-pagoda-hero.jpg"><b>18</b></div>
+        <figcaption><strong>Tiered Eaves</strong><span>pagoda</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/19-adobe-hero.jpg"><b>19</b></div>
+        <figcaption><strong>Pueblo Adobe</strong><span>adobe</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/20-victorian-hero.jpg"><b>20</b></div>
+        <figcaption><strong>Second Empire</strong><span>victorian</span></figcaption></figure></div></section><section class="idxgroup"><h3>HOUSES<span>11</span></h3><div class="grid"><figure class="thumb"><div class="imgwrap"><img src="shots/21-queenanne-hero.jpg"><b>21</b></div>
+        <figcaption><strong>Queen Anne Painted Lady</strong><span>queenanne</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/22-greekrev-hero.jpg"><b>22</b></div>
+        <figcaption><strong>Greek Revival Mansion</strong><span>greekrev</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/23-plantation-hero.jpg"><b>23</b></div>
+        <figcaption><strong>Antebellum Plantation House</strong><span>plantation</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/24-manor-hero.jpg"><b>24</b></div>
+        <figcaption><strong>English Manor</strong><span>manor</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/25-brickhouse-hero.jpg"><b>25</b></div>
+        <figcaption><strong>Brick Colonial House</strong><span>brickhouse</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/26-spanish-hero.jpg"><b>26</b></div>
+        <figcaption><strong>Spanish Colonial Mansion</strong><span>spanish</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/27-machiya-hero.jpg"><b>27</b></div>
+        <figcaption><strong>Japanese Residence</strong><span>machiya</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/28-romanvilla-hero.jpg"><b>28</b></div>
+        <figcaption><strong>Roman Villa</strong><span>romanvilla</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/29-desertmod-hero.jpg"><b>29</b></div>
+        <figcaption><strong>Desert Modern House</strong><span>desertmod</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/30-techhouse-hero.jpg"><b>30</b></div>
+        <figcaption><strong>Modern Tech House</strong><span>techhouse</span></figcaption></figure><figure class="thumb"><div class="imgwrap"><img src="shots/31-ranch-hero.jpg"><b>31</b></div>
+        <figcaption><strong>Plain House</strong><span>ranch</span></figcaption></figure></div></section>
+</div>
+<article class="plate portrait">
+      <header>
+        <div class="num">1</div>
+        <div class="ttl"><h2>Seagram Curtain Wall</h2>
+          <p class="kick">TOWERS &middot; <code>intl</code> &middot; 34&times;28 m, 40 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/01-intl-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Seagram, 1958. Bronze mullions on an absolutely regular grid, a plaza, a lobby set back behind free-standing columns. No ornament anywhere — it survives on proportion alone.</p>
+          <p class="city"><em>As a city:</em> A corporate downtown. The three siblings are the variations Mies's imitators made: travertine spandrels, a black-steel version, a white-marble civic slab.</p>
+          <div class="smalls">
+            <div><img src="shots/01-intl-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/01-intl-back.jpg"><span class="cap">The crown — the whole identity at skyline distance</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+3.5 m</td><td>Tallest point</td><td>131.5 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>9</td><td>Triangles</td><td>68,000</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>5666</td><td>Minted meshes <i>(not)</i></td><td>4</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Seagram Curtain Wall</span><span>PICK BY NUMBER — <b>1</b></span></footer>
+    </article><article class="plate portrait">
+      <header>
+        <div class="num">2</div>
+        <div class="ttl"><h2>Zoning Setback Tower</h2>
+          <p class="kick">TOWERS &middot; <code>ziggurat</code> &middot; 34&times;28 m, 40 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/02-ziggurat-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">The 1916 New York zoning envelope: mandatory setbacks stepping the tower back from the street as it rises, so the shape is a law made visible.</p>
+          <p class="city"><em>As a city:</em> Pre-war Manhattan. Siblings: the wedding-cake hotel, the setback courthouse, the stepped power-company HQ.</p>
+          <div class="smalls">
+            <div><img src="shots/02-ziggurat-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/02-ziggurat-back.jpg"><span class="cap">The crown — the whole identity at skyline distance</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+40.5 m</td><td>Tallest point</td><td>168.5 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>17</td><td>Triangles</td><td>69,134</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>5745</td><td>Minted meshes <i>(not)</i></td><td>3</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Zoning Setback Tower</span><span>PICK BY NUMBER — <b>2</b></span></footer>
+    </article><article class="plate portrait">
+      <header>
+        <div class="num">3</div>
+        <div class="ttl"><h2>Tapered Spire</h2>
+          <p class="kick">TOWERS &middot; <code>pyramid</code> &middot; 34&times;28 m, 40 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/03-pyramid-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Transamerica. A tapered spire with the whole elevation converging on a point, wing buttresses at the shoulders.</p>
+          <p class="city"><em>As a city:</em> A skyline of tapers — obelisk, needle, stepped cone. Rare and expensive to over-use; one per district.</p>
+          <div class="smalls">
+            <div><img src="shots/03-pyramid-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/03-pyramid-back.jpg"><span class="cap">The crown — the whole identity at skyline distance</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+64.3 m</td><td>Tallest point</td><td>192.3 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>11</td><td>Triangles</td><td>90,712</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>7546</td><td>Minted meshes <i>(not)</i></td><td>2</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Tapered Spire</span><span>PICK BY NUMBER — <b>3</b></span></footer>
+    </article><article class="plate portrait">
+      <header>
+        <div class="num">4</div>
+        <div class="ttl"><h2>Radiator Crown</h2>
+          <p class="kick">TOWERS &middot; <code>sunburst</code> &middot; 34&times;28 m, 40 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/04-sunburst-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Chrysler's radiator crown: stacked arcs of decreasing radius, dormer eyes, a spire. The crown is the entire building's argument.</p>
+          <p class="city"><em>As a city:</em> The crown competition of 1930 — every tower in the district trying to out-terminate the last one. The richest sibling set in the kit.</p>
+          <div class="smalls">
+            <div><img src="shots/04-sunburst-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/04-sunburst-back.jpg"><span class="cap">The crown — the whole identity at skyline distance</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+35.3 m</td><td>Tallest point</td><td>163.3 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>11</td><td>Triangles</td><td>81,858</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>6808</td><td>Minted meshes <i>(not)</i></td><td>2</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Radiator Crown</span><span>PICK BY NUMBER — <b>4</b></span></footer>
+    </article><article class="plate portrait">
+      <header>
+        <div class="num">5</div>
+        <div class="ttl"><h2>Bundled Tube</h2>
+          <p class="kick">TOWERS &middot; <code>bundled</code> &middot; 34&times;28 m, 40 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/05-bundled-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Sears/Willis. Nine square tubes in a 3x3 bundle that stop at different heights. Almost no surface treatment; pure massing.</p>
+          <p class="city"><em>As a city:</em> A structural-expression downtown: tube, bundle, diagonal, hat truss. Cold, enormous, recognisable at 20 km.</p>
+          <div class="smalls">
+            <div><img src="shots/05-bundled-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/05-bundled-back.jpg"><span class="cap">The crown — the whole identity at skyline distance</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+54 m</td><td>Tallest point</td><td>182 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>16</td><td>Triangles</td><td>68,756</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>5711</td><td>Minted meshes <i>(not)</i></td><td>4</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Bundled Tube</span><span>PICK BY NUMBER — <b>5</b></span></footer>
+    </article><article class="plate portrait">
+      <header>
+        <div class="num">6</div>
+        <div class="ttl"><h2>Braced Tube</h2>
+          <p class="kick">TOWERS &middot; <code>megabrace</code> &middot; 34&times;28 m, 40 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/06-megabrace-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">The braced tube — giant X-bracing crossing many storeys on the outside of the glass, structure as the only ornament.</p>
+          <p class="city"><em>As a city:</em> Siblings: the diagrid, the outrigger belt truss, the exposed mega-column. An engineer's city.</p>
+          <div class="smalls">
+            <div><img src="shots/06-megabrace-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/06-megabrace-back.jpg"><span class="cap">The crown — the whole identity at skyline distance</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+31.5 m</td><td>Tallest point</td><td>159.5 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>12</td><td>Triangles</td><td>77,336</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>6426</td><td>Minted meshes <i>(not)</i></td><td>4</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Braced Tube</span><span>PICK BY NUMBER — <b>6</b></span></footer>
+    </article><article class="plate portrait">
+      <header>
+        <div class="num">7</div>
+        <div class="ttl"><h2>Faceted Prism</h2>
+          <p class="kick">TOWERS &middot; <code>faceted</code> &middot; 34&times;28 m, 40 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/07-faceted-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Bank of China, 1990. The prism is CUT: quadrants rise to four different heights with long diagonals running across dozens of storeys.</p>
+          <p class="city"><em>As a city:</em> A crystal district. Siblings are the other cuts — the sheared top, the twisted shaft, the folded plate.</p>
+          <div class="smalls">
+            <div><img src="shots/07-faceted-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/07-faceted-back.jpg"><span class="cap">The crown — the whole identity at skyline distance</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+44.8 m</td><td>Tallest point</td><td>172.8 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>47</td><td>Triangles</td><td>77,260</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>6427</td><td>Minted meshes <i>(not)</i></td><td>3</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Faceted Prism</span><span>PICK BY NUMBER — <b>7</b></span></footer>
+    </article><article class="plate portrait">
+      <header>
+        <div class="num">8</div>
+        <div class="ttl"><h2>Cathedral of Commerce</h2>
+          <p class="kick">TOWERS &middot; <code>neogothic</code> &middot; 34&times;28 m, 40 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/08-neogothic-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Woolworth, the Cathedral of Commerce: a Gothic cathedral stretched to 60 storeys, buttresses and pinnacles all the way up.</p>
+          <p class="city"><em>As a city:</em> The 1913 skyline where every tower borrowed a cathedral. Siblings: Tribune Tower's flying buttresses, a spired campanile, a Gothic crown on a stone shaft.</p>
+          <div class="smalls">
+            <div><img src="shots/08-neogothic-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/08-neogothic-back.jpg"><span class="cap">The crown — the whole identity at skyline distance</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+62.3 m</td><td>Tallest point</td><td>190.3 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>10</td><td>Triangles</td><td>100,152</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>8346</td><td>Minted meshes <i>(not)</i></td><td>0</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Cathedral of Commerce</span><span>PICK BY NUMBER — <b>8</b></span></footer>
+    </article><article class="plate portrait">
+      <header>
+        <div class="num">9</div>
+        <div class="ttl"><h2>Broken Pediment</h2>
+          <p class="kick">TOWERS &middot; <code>postmodern</code> &middot; 34&times;28 m, 40 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/09-postmodern-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">AT&amp;T, 1984. A classical broken pediment on top of a skyscraper — deliberately absurd, deliberately memorable.</p>
+          <p class="city"><em>As a city:</em> The 1980s. Siblings: the Chippendale sibling, the pink granite arch, the temple-front bank. A city with a sense of humour.</p>
+          <div class="smalls">
+            <div><img src="shots/09-postmodern-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/09-postmodern-back.jpg"><span class="cap">The crown — the whole identity at skyline distance</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+14.5 m</td><td>Tallest point</td><td>142.5 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>11</td><td>Triangles</td><td>99,300</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>8275</td><td>Minted meshes <i>(not)</i></td><td>0</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Broken Pediment</span><span>PICK BY NUMBER — <b>9</b></span></footer>
+    </article><article class="plate portrait">
+      <header>
+        <div class="num">10</div>
+        <div class="ttl"><h2>Supertall Slim</h2>
+          <p class="kick">TOWERS &middot; <code>pencil</code> &middot; 20&times;18 m, 48 storeys (slim plan — this grammar's own)</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/10-pencil-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">The supertall slim: a 1:12 shaft, open mechanical floors punched through it for wind, a razor top.</p>
+          <p class="city"><em>As a city:</em> Billionaires' Row. Siblings: the setback needle, the concrete-core stack, the paired-tower slot. A city of impossibly thin things.</p>
+          <div class="smalls">
+            <div><img src="shots/10-pencil-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/10-pencil-back.jpg"><span class="cap">The crown — the whole identity at skyline distance</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+31.9 m</td><td>Tallest point</td><td>185.5 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>13</td><td>Triangles</td><td>86,440</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>7190</td><td>Minted meshes <i>(not)</i></td><td>2</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Supertall Slim</span><span>PICK BY NUMBER — <b>10</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">11</div>
+        <div class="ttl"><h2>Chicago Loft</h2>
+          <p class="kick">BLOCKS · mid-rise &middot; <code>brick</code> &middot; 22&times;16 m, 4 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/11-brick-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Chicago loft, c.1905. Load-bearing brick read as STRUCTURE: piers between the bays, segmental arches, a corbelled cornice, cast-iron storefront, fire escape down the flank.</p>
+          <p class="city"><em>As a city:</em> A warehouse district that became lofts. Siblings: the mill building, the printing house, the brick-and-timber garment block.</p>
+          <div class="smalls">
+            <div><img src="shots/11-brick-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/11-brick-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+2.2 m</td><td>Tallest point</td><td>15 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>8</td><td>Triangles</td><td>17,424</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>1452</td><td>Minted meshes <i>(not)</i></td><td>0</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Chicago Loft</span><span>PICK BY NUMBER — <b>11</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">12</div>
+        <div class="ttl"><h2>Ashlar Bank</h2>
+          <p class="kick">BLOCKS · mid-rise &middot; <code>stone</code> &middot; 22&times;16 m, 4 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/12-stone-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Ashlar bank in three parts — rusticated base, plain shaft, attic over a heavy cornice — with a giant order solved backwards from the roofline.</p>
+          <p class="city"><em>As a city:</em> A financial quarter of stone institutions: the exchange, the courthouse, the trust company, the library.</p>
+          <div class="smalls">
+            <div><img src="shots/12-stone-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/12-stone-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+1.9 m</td><td>Tallest point</td><td>14.8 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>10</td><td>Triangles</td><td>23,256</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>1870</td><td>Minted meshes <i>(not)</i></td><td>10</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Ashlar Bank</span><span>PICK BY NUMBER — <b>12</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">13</div>
+        <div class="ttl"><h2>Deco Tower</h2>
+          <p class="kick">BLOCKS · mid-rise &middot; <code>artdeco</code> &middot; 22&times;16 m, 4 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/13-artdeco-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">1930 setback commercial block. Fluted piers run base to crown with the spandrels pushed back behind them; nothing horizontal is allowed to cross a pier.</p>
+          <p class="city"><em>As a city:</em> A whole deco main street: theatre, department store, telephone exchange, hotel.</p>
+          <div class="smalls">
+            <div><img src="shots/13-artdeco-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/13-artdeco-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+6.5 m</td><td>Tallest point</td><td>19.3 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>13</td><td>Triangles</td><td>14,588</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>1209</td><td>Minted meshes <i>(not)</i></td><td>1</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Deco Tower</span><span>PICK BY NUMBER — <b>13</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">14</div>
+        <div class="ttl"><h2>Beton Brut</h2>
+          <p class="kick">BLOCKS · mid-rise &middot; <code>brutalist</code> &middot; 22&times;16 m, 4 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/14-brutalist-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Beton brut. Every opening a hole punched through a thick wall, hooded so it throws a hard shadow all day; board-formed plank lines; lifted on pilotis.</p>
+          <p class="city"><em>As a city:</em> A concrete civic campus — city hall, the library, the parking structure, the housing slab. Grim and coherent.</p>
+          <div class="smalls">
+            <div><img src="shots/14-brutalist-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/14-brutalist-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+5.7 m</td><td>Tallest point</td><td>18.5 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>11</td><td>Triangles</td><td>11,748</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>979</td><td>Minted meshes <i>(not)</i></td><td>0</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Beton Brut</span><span>PICK BY NUMBER — <b>14</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">15</div>
+        <div class="ttl"><h2>Exostructure</h2>
+          <p class="kick">BLOCKS · mid-rise &middot; <code>hightech</code> &middot; 22&times;16 m, 4 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/15-hightech-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Inside-out, Lloyd's / Pompidou: the frame stands proud of the glass, the risers and stair are outside, and the roof plant is architecture.</p>
+          <p class="city"><em>As a city:</em> A services-on-the-outside quarter. Siblings: the exposed-truss shed, the tension-rod atrium, the gantry-served lab.</p>
+          <div class="smalls">
+            <div><img src="shots/15-hightech-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/15-hightech-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+7 m</td><td>Tallest point</td><td>19.8 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>39</td><td>Triangles</td><td>19,316</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>1521</td><td>Minted meshes <i>(not)</i></td><td>27</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Exostructure</span><span>PICK BY NUMBER — <b>15</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">16</div>
+        <div class="ttl"><h2>Gothic Revival</h2>
+          <p class="kick">BLOCKS · mid-rise &middot; <code>gothic</code> &middot; 22&times;16 m, 4 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/16-gothic-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Gothic Revival civic front: buttresses stepping back as they rise, pinnacles breaking the roofline, tracery, a rose window over a deep portal. Everything ends in a point.</p>
+          <p class="city"><em>As a city:</em> An old-world cathedral town — the hall, the guild, the college quad, the parish church.</p>
+          <div class="smalls">
+            <div><img src="shots/16-gothic-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/16-gothic-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+7 m</td><td>Tallest point</td><td>19.8 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>9</td><td>Triangles</td><td>55,176</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>4598</td><td>Minted meshes <i>(not)</i></td><td>0</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Gothic Revival</span><span>PICK BY NUMBER — <b>16</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">17</div>
+        <div class="ttl"><h2>Grand Mosque</h2>
+          <p class="kick">BLOCKS · mid-rise &middot; <code>mosque</code> &middot; 22&times;16 m, 4 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/17-mosque-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Dome on a buttressed drum, a minaret off one corner, horseshoe arcade, monumental pishtaq portal.</p>
+          <p class="city"><em>As a city:</em> An Islamic old city: the great mosque, the madrasa, the caravanserai, the covered bazaar. Big cultural payoff.</p>
+          <div class="smalls">
+            <div><img src="shots/17-mosque-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/17-mosque-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+16 m</td><td>Tallest point</td><td>28.8 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>28</td><td>Triangles</td><td>22,602</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>1645</td><td>Minted meshes <i>(not)</i></td><td>25</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Grand Mosque</span><span>PICK BY NUMBER — <b>17</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">18</div>
+        <div class="ttl"><h2>Tiered Eaves</h2>
+          <p class="kick">BLOCKS · mid-rise &middot; <code>pagoda</code> &middot; 22&times;16 m, 4 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/18-pagoda-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Timber frame under deep tiered eaves with upturned corners on visible dougong brackets. The lowest eave projects the furthest.</p>
+          <p class="city"><em>As a city:</em> An East Asian temple quarter: gate, hall, drum tower, pagoda proper.</p>
+          <div class="smalls">
+            <div><img src="shots/18-pagoda-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/18-pagoda-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+12.5 m</td><td>Tallest point</td><td>25.3 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>27</td><td>Triangles</td><td>31,068</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>2527</td><td>Minted meshes <i>(not)</i></td><td>16</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Tiered Eaves</span><span>PICK BY NUMBER — <b>18</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">19</div>
+        <div class="ttl"><h2>Pueblo Adobe</h2>
+          <p class="kick">BLOCKS · mid-rise &middot; <code>adobe</code> &middot; 22&times;16 m, 4 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/19-adobe-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Earthen mass: battered walls thickening to the base, projecting vigas, stepped massing, small deep-set windows, a latilla porch. Irregularity IS the style.</p>
+          <p class="city"><em>As a city:</em> A pueblo/Saltlands town — mission church, trading post, stacked terraced dwellings.</p>
+          <div class="smalls">
+            <div><img src="shots/19-adobe-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/19-adobe-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+1.7 m</td><td>Tallest point</td><td>14.5 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>24</td><td>Triangles</td><td>16,912</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>1382</td><td>Minted meshes <i>(not)</i></td><td>10</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Pueblo Adobe</span><span>PICK BY NUMBER — <b>19</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">20</div>
+        <div class="ttl"><h2>Second Empire</h2>
+          <p class="kick">BLOCKS · mid-rise &middot; <code>victorian</code> &middot; 22&times;16 m, 4 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/20-victorian-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Second Empire. Mansard roof with dormers punching through, projecting oriel bays, a deep bracketed cornice over a cast-iron storefront.</p>
+          <p class="city"><em>As a city:</em> A 19th-century downtown: the opera house, the hotel, the department store, the rooming block.</p>
+          <div class="smalls">
+            <div><img src="shots/20-victorian-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/20-victorian-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+5.4 m</td><td>Tallest point</td><td>18.3 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>18</td><td>Triangles</td><td>34,276</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>2787</td><td>Minted meshes <i>(not)</i></td><td>12</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Second Empire</span><span>PICK BY NUMBER — <b>20</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">21</div>
+        <div class="ttl"><h2>Queen Anne Painted Lady</h2>
+          <p class="kick">HOUSES &middot; <code>queenanne</code> &middot; 15&times;11 m, 2 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/21-queenanne-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">The painted lady: asymmetric mass, a corner turret, a wraparound porch, three colours of shingle and spindlework everywhere.</p>
+          <p class="city"><em>As a city:</em> An 1890s residential hill. Siblings: Stick, Shingle, Eastlake. The most ornament per square metre in the kit.</p>
+          <div class="smalls">
+            <div><img src="shots/21-queenanne-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/21-queenanne-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+9.1 m</td><td>Tallest point</td><td>15.5 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>24</td><td>Triangles</td><td>31,954</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>2598</td><td>Minted meshes <i>(not)</i></td><td>15</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Queen Anne Painted Lady</span><span>PICK BY NUMBER — <b>21</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">22</div>
+        <div class="ttl"><h2>Greek Revival Mansion</h2>
+          <p class="kick">HOUSES &middot; <code>greekrev</code> &middot; 15&times;11 m, 2 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/22-greekrev-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">A temple bolted to a house: gable turned to the road, full-height colonnade in front of it, a real pediment with a shadowed tympanum, painted dead white.</p>
+          <p class="city"><em>As a city:</em> A courthouse-square town of white temple fronts — bank, academy, two churches, the big house on the hill.</p>
+          <div class="smalls">
+            <div><img src="shots/22-greekrev-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/22-greekrev-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+6.1 m</td><td>Tallest point</td><td>12.5 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>15</td><td>Triangles</td><td>14,496</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>1176</td><td>Minted meshes <i>(not)</i></td><td>6</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Greek Revival Mansion</span><span>PICK BY NUMBER — <b>22</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">23</div>
+        <div class="ttl"><h2>Antebellum Plantation House</h2>
+          <p class="kick">HOUSES &middot; <code>plantation</code> &middot; 15&times;11 m, 2 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/23-plantation-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Antebellum: a two-storey gallery running the full width on both floors, columns from ground to roof, hipped roof with dormers.</p>
+          <p class="city"><em>As a city:</em> A river road of galleried houses, an overseer's cottage, a raised creole townhouse.</p>
+          <div class="smalls">
+            <div><img src="shots/23-plantation-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/23-plantation-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+5.1 m</td><td>Tallest point</td><td>11.5 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>18</td><td>Triangles</td><td>32,488</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>2694</td><td>Minted meshes <i>(not)</i></td><td>2</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Antebellum Plantation House</span><span>PICK BY NUMBER — <b>23</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">24</div>
+        <div class="ttl"><h2>English Manor</h2>
+          <p class="kick">HOUSES &middot; <code>manor</code> &middot; 15&times;11 m, 2 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/24-manor-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">English manor: steep gables, half-timbering, tall grouped chimney stacks, leaded casements, a stone porch bay.</p>
+          <p class="city"><em>As a city:</em> A Tudor village — inn, church, market hall, timbered terrace.</p>
+          <div class="smalls">
+            <div><img src="shots/24-manor-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/24-manor-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+11.4 m</td><td>Tallest point</td><td>17.8 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>20</td><td>Triangles</td><td>13,224</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>1086</td><td>Minted meshes <i>(not)</i></td><td>6</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>English Manor</span><span>PICK BY NUMBER — <b>24</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">25</div>
+        <div class="ttl"><h2>Brick Colonial House</h2>
+          <p class="kick">HOUSES &middot; <code>brickhouse</code> &middot; 15&times;11 m, 2 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/25-brickhouse-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Georgian/Colonial: solid brick laid symmetrically about a centre door, side-gabled roof, a chimney at each end. Its argument is DECORUM.</p>
+          <p class="city"><em>As a city:</em> A colonial town of manners — meeting house, tavern, the row houses, the governor's house.</p>
+          <div class="smalls">
+            <div><img src="shots/25-brickhouse-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/25-brickhouse-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+6.6 m</td><td>Tallest point</td><td>13 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>16</td><td>Triangles</td><td>17,056</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>1408</td><td>Minted meshes <i>(not)</i></td><td>2</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Brick Colonial House</span><span>PICK BY NUMBER — <b>25</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">26</div>
+        <div class="ttl"><h2>Spanish Colonial Mansion</h2>
+          <p class="kick">HOUSES &middot; <code>spanish</code> &middot; 15&times;11 m, 2 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/26-spanish-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Spanish Colonial: white stucco, a low-pitch clay barrel-tile roof, arcaded loggia, wrought iron, a bell-gable.</p>
+          <p class="city"><em>As a city:</em> A mission town: the mission itself, the hacienda, the plaza arcade, the courtyard house.</p>
+          <div class="smalls">
+            <div><img src="shots/26-spanish-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/26-spanish-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+7.6 m</td><td>Tallest point</td><td>14 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>21</td><td>Triangles</td><td>20,932</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>1701</td><td>Minted meshes <i>(not)</i></td><td>5</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Spanish Colonial Mansion</span><span>PICK BY NUMBER — <b>26</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">27</div>
+        <div class="ttl"><h2>Japanese Residence</h2>
+          <p class="kick">HOUSES &middot; <code>machiya</code> &middot; 15&times;11 m, 2 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/27-machiya-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Japanese townhouse/minka: a low timber frame with pale plaster infill, a veranda deck along the street face, one enormous tiled roof with deep eaves.</p>
+          <p class="city"><em>As a city:</em> A machiya street — shop-house, teahouse, gate house, storehouse (kura).</p>
+          <div class="smalls">
+            <div><img src="shots/27-machiya-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/27-machiya-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+4.6 m</td><td>Tallest point</td><td>11 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>14</td><td>Triangles</td><td>16,600</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>1370</td><td>Minted meshes <i>(not)</i></td><td>2</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Japanese Residence</span><span>PICK BY NUMBER — <b>27</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">28</div>
+        <div class="ttl"><h2>Roman Villa</h2>
+          <p class="kick">HOUSES &middot; <code>romanvilla</code> &middot; 15&times;11 m, 2 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/28-romanvilla-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Roman villa: a low tile roof, a colonnaded peristyle, stuccoed masonry, a courtyard the building wraps.</p>
+          <p class="city"><em>As a city:</em> A Mediterranean antique quarter — villa, baths, forum stoa, insula.</p>
+          <div class="smalls">
+            <div><img src="shots/28-romanvilla-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/28-romanvilla-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+3.9 m</td><td>Tallest point</td><td>10.3 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>14</td><td>Triangles</td><td>18,420</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>1495</td><td>Minted meshes <i>(not)</i></td><td>4</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Roman Villa</span><span>PICK BY NUMBER — <b>28</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">29</div>
+        <div class="ttl"><h2>Desert Modern House</h2>
+          <p class="kick">HOUSES &middot; <code>desertmod</code> &middot; 15&times;11 m, 2 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/29-desertmod-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Palm Springs, 1962. A single thin roof blade with 2-6 m of overhang, steel posts, plate glass, a breeze-block screen. Architecture as the management of sun.</p>
+          <p class="city"><em>As a city:</em> A mid-century desert suburb: butterfly roof, folded plate, the post-and-beam, the screen-wall bungalow.</p>
+          <div class="smalls">
+            <div><img src="shots/29-desertmod-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/29-desertmod-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+3.6 m</td><td>Tallest point</td><td>10 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>18</td><td>Triangles</td><td>11,136</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>928</td><td>Minted meshes <i>(not)</i></td><td>0</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Desert Modern House</span><span>PICK BY NUMBER — <b>29</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">30</div>
+        <div class="ttl"><h2>Modern Tech House</h2>
+          <p class="kick">HOUSES &middot; <code>techhouse</code> &middot; 15&times;11 m, 2 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/30-techhouse-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Contemporary glass house: stacked cantilevered volumes, floor-to-ceiling glazing, a wood-slat screen, a flat roof with a parapet.</p>
+          <p class="city"><em>As a city:</em> A hillside of modern spec houses. The least characterful pick, and the most likely to read as generic.</p>
+          <div class="smalls">
+            <div><img src="shots/30-techhouse-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/30-techhouse-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+1.6 m</td><td>Tallest point</td><td>8 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>9</td><td>Triangles</td><td>6,012</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>481</td><td>Minted meshes <i>(not)</i></td><td>3</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Modern Tech House</span><span>PICK BY NUMBER — <b>30</b></span></footer>
+    </article><article class="plate">
+      <header>
+        <div class="num">31</div>
+        <div class="ttl"><h2>Plain House</h2>
+          <p class="kick">HOUSES &middot; <code>ranch</code> &middot; 15&times;11 m, 2 storeys</p></div>
+      </header>
+      <div class="body">
+        <div class="big"><img src="shots/31-ranch-hero.jpg"><span class="cap">Three-quarter — the honest single frame</span></div>
+        <div class="side">
+          <p class="note">Plain house. A long low box, shallow gable, picture window, an attached carport. Deliberately the boring one — it is what a street NEEDS between the loud ones.</p>
+          <p class="city"><em>As a city:</em> Post-war tract suburbia: ranch, split-level, cape, minimal traditional. Background architecture, and a city is mostly background.</p>
+          <div class="smalls">
+            <div><img src="shots/31-ranch-street.jpg"><span class="cap">From the pavement — the entrance</span></div>
+            <div><img src="shots/31-ranch-back.jpg"><span class="cap">Rear three-quarter — is it a stage set?</span></div>
+          </div>
+          <table class="met">
+            <tr><td>Crown above the bare shell</td><td>+4.9 m</td><td>Tallest point</td><td>11.3 m</td></tr>
+            <tr><td>Things breaking the roofline</td><td>18</td><td>Triangles</td><td>15,428</td></tr>
+            <tr><td>Merged deco boxes <i>(free)</i></td><td>1279</td><td>Minted meshes <i>(not)</i></td><td>1</td></tr>
+          </table>
+        </div>
+      </div>
+      <footer><span>Plain House</span><span>PICK BY NUMBER — <b>31</b></span></footer>
+    </article>
