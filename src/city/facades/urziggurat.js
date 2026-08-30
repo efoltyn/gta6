@@ -122,13 +122,13 @@
       // vaulted over above head height: the kit's own carve would leave a
       // 1.9 m slot, which is too mean to find under six metres of mudbrick.
       const e = F.entrance(ctx), ff = e.f, ty = T[0].y1;
-      const run = clamp(ty * 1.15, 2.8, 8.0), cw = clamp(ff.span * 0.34, 4.6, 7.6);
+      const run = clamp(ty * 1.35, 3.2, 9.0), cw = clamp(ff.span * 0.34, 4.6, 7.6);
       const slot = e.gap / 2 + 0.35, room = Math.max(0.9, ff.span / 2 - cw / 2 - 0.75);
       const fw = clamp(Math.min(cw * 0.40, room * 0.55), 0.7, 3.0);
       const nT = Math.max(5, Math.round(ty / 0.55));
       for (let i = 0; i < nT; i++) {
         const th = ty * (nT - i) / nT, dep = run / nT + 0.03, u = i / nT;
-        const outN = ff.halfN + i * (run / nT) + dep, hd = Math.min(th, e.head + 0.30);
+        const outN = ff.halfN + T[0].p + i * (run / nT) + dep, hd = Math.min(th, e.head + 0.30);
         for (const sg of [-1, 1]) {
           F.obox(ctx, ff, sg * (slot + (cw / 2 - slot) / 2), hd / 2, cw / 2 - slot, hd, dep, outN, P.course(i + 21), true);
           F.obox(ctx, ff, sg * (cw / 2 + 0.28), th / 2 + 0.16, 0.50, th + 0.32, dep, outN, P.dark, true);
@@ -139,12 +139,16 @@
       }
       // ONE continuous ramp under the whole flight, no collider — a monumental
       // stair must never be able to seal the door it stands over
-      const n0 = ff.out * ff.halfN, n1 = ff.out * (ff.halfN + run);
+      const n0 = ff.out * (ff.halfN + T[0].p), n1 = ff.out * (ff.halfN + T[0].p + run);
       const lo = Math.min(n0, n1), hi = Math.max(n0, n1);
       if (ff.horiz) ctx.plat(-cw / 2, cw / 2, lo, hi, ty, { z0: ctx.oz + n1, z1: ctx.oz + n0, y0: 0, y1: ty });
       else ctx.plat(lo, hi, -cw / 2, cw / 2, ty, { axis: "x", x0: ctx.ox + n1, x1: ctx.ox + n0, y0: 0, y1: ty });
 
       // ---- C. THE SUMMIT SHRINE -----------------------------------
+      // the shell's own pale roof rim is showing at the top of the last
+      // collar: cap it with the summit terrace's own mud parapet
+      F.ring(ctx, H + 0.30, 0.62, T[2].p + 0.14, P.course(52), 0.4, 0);
+      F.ring(ctx, H + 0.66, 0.16, T[2].p + 0.22, P.light, 0.4, 0);
       const R = F.roof(ctx), deck = H + ctx.pp;
       ctx.dbox(R.cx, H + ctx.pp * 0.5, R.cz, R.w, Math.max(0.06, ctx.pp), R.d, F.shade(P.base, 0.90));
       ctx.plat(R.cx - R.w / 2, R.cx + R.w / 2, R.cz - R.d / 2, R.cz + R.d / 2, deck);

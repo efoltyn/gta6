@@ -57,8 +57,10 @@
       const rTop = ctx.rTop, FH = ctx.FH, unit = Math.min(ctx.w, ctx.d);
       const h = function (s) { return ctx.hash(s); };
       const P = F.palette(ctx, "thatch", { pull: 0.92, grain: 0.32 });
-      const T = F.palette(ctx, "timber", { pull: 0.90, grain: 0.28 });
-      const DAUB = F.mix(P.light, 0xd2c0a0, 0.60);
+      const T = F.palette(ctx, "timber", { pull: 0.96, grain: 0.30 });
+      // daub is mud, not plaster: a bright infill panel between dark stakes
+      // reads as a shuttered window, which is the whole failure mode here
+      const DAUB = F.shade(F.mix(P.base, 0xc7b492, 0.50), 0.86);
 
       // ---- THE ROUND PLAN -----------------------------------------
       const B = clamp(unit * 0.105, 0.42, 1.15);        // belly at mid-face
@@ -76,17 +78,17 @@
         const step = f.span / n;
         for (let i = 0; i < n; i++) {
           const t = -f.span / 2 + (i + 0.5) * step, p = bulge(t, f.span);
-          F.rib(ctx, f, t, foot, rTop, step * 0.34, p + 0.05, T.course(i + f.s * 7));
+          F.rib(ctx, f, t, foot, rTop, step * 0.40, p + 0.06, F.shade(T.course(i + f.s * 7), 0.88));
           if (h(0x9c10 + f.s * 23 + i) < 0.30) {
             // the daub has come off here: hazel withies woven through the stakes
             for (let r = 0; r < rows; r++) {
               const y = foot + (r + 0.55) * (rTop - foot) / rows;
-              F.box(ctx, f, t, y, step * 1.04, 0.13, p + 0.10, T.dark);
+              F.box(ctx, f, t, y, step * 1.04, 0.13, p + 0.11, T.dark);
             }
           } else {
             // and here it is still on, one hand-thrown panel per bay
-            F.rib(ctx, f, t, foot, rTop - 0.05, step * 1.08, p + 0.13,
-              F.shade(DAUB, 0.92 + h(0x9c40 + f.s * 19 + i) * 0.16));
+            F.rib(ctx, f, t, foot, rTop - 0.05, step * 1.08, p + 0.12,
+              F.shade(DAUB, 0.90 + h(0x9c40 + f.s * 19 + i) * 0.18));
           }
         }
       }
@@ -129,10 +131,9 @@
       }
       // the shaggy cut eave, and the bound topknot over the smoke hole
       if (layers) ctx.cone(0, eave - 0.55, 0, Rc * 1.045, 1.5, F.shade(P.roof, 0.74));
-      for (let k = 0; k < 3; k++) {
-        const s = clamp(unit * 0.05, 0.22, 0.5) * (1 - k * 0.22);
-        ctx.dbox(0, eave + CH * 1.02 + k * s * 1.3, 0, s * 2.2, s * 1.3, s * 2.2, P.course(k + 60));
-      }
+      const tk = clamp(unit * 0.05, 0.22, 0.5);
+      for (let k = 0; k < 3; k++) ctx.dbox(0, eave + CH * 1.02 + k * tk * 1.2, 0,
+        tk * (2.2 - k * 0.4), tk * 1.3, tk * (2.2 - k * 0.4), P.course(k + 60));
 
       // ---- D. THE PORCH: TWO POSTS AND A LINTEL -------------------
       const e = F.entrance(ctx), fe = e.f;

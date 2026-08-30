@@ -64,10 +64,8 @@
     wall: "own",
     crownsRoof: true,
     build: function (ctx, F, spec) {
-      spec = spec || {};
       const rTop = ctx.rTop, FH = ctx.FH, unit = Math.min(ctx.w, ctx.d);
-      const h = function (s) { return ctx.hash(s); };
-      const P = F.palette(ctx, "granite", { pull: 0.96, grain: 0.22 });
+      const P = F.palette(ctx, "granite", { pull: 1, dim: 0.74, grain: 0.22 });
       const sbox = ctx.sbox || ctx.dbox;
       const ent = F.entrance(ctx);
 
@@ -75,8 +73,7 @@
       // it. R <= 3.41*p is not a taste number: the shell's square corner sits
       // that far inside the drum, and a larger R leaves it sticking out of the
       // curve like a fin.
-      const P0 = clamp(unit * 0.10, 0.65, 1.75);       // what the foot adds
-      const PT = clamp(unit * 0.035, 0.30, 0.60);      // what is left at the head
+      const P0 = clamp(unit * 0.10, 0.65, 1.75), PT = clamp(unit * 0.035, 0.30, 0.60);
       const pAt = function (y) { return PT + P0 * Math.pow(1 - clamp(y / rTop, 0, 1), 1.35); };
       const rAt = function (p) { return Math.min(p * 2.9, unit * 0.34); };
 
@@ -101,8 +98,7 @@
       // proudest, so one collider band there is the whole mass's footprint.
       const nC = clamp(Math.round(rTop / clamp(FH * 0.16, 0.40, 0.62)), 6, 30);
       const cH = rTop / nC;
-      const lint = clamp(FH * 0.82, 2.45, 3.10);       // head of the way in
-      const gapH = ent.gap / 2 + 0.45;
+      const lint = clamp(FH * 0.82, 2.45, 3.10), gapH = ent.gap / 2 + 0.45;   // the way in
       for (let k = 0; k < nC; k++) {
         const y0 = k * cH, cy = y0 + cH / 2, p = pAt(cy), R = rAt(p);
         const col = P.course(k), sol = y0 < 1.30;
@@ -142,16 +138,14 @@
       // ---- D. THE CONICAL TOWER. Solid granite, no door, no window, no
       // stair: a granary at monumental scale, and the failure mode is a
       // turret, so it gets no opening and no crenellation of any kind.
-      const fl = F.flanks(ctx), fi = (h(0x2b10) * fl.length) | 0;
-      const tf = fl[fi], r0 = clamp(unit * 0.16, 1.00, 2.40);
-      const TH = rTop + clamp(FH * 0.55, 1.10, 2.40);
-      const tt = (h(0x2b11) < 0.5 ? -1 : 1) * tf.span * 0.17;
-      const tD = tf.halfN + pAt(TH * 0.3) + r0 * 0.42;
-      const NL = clamp(Math.round(TH / 0.50), 8, 26);
+      const fl = F.flanks(ctx), fi = (ctx.hash(0x2b10) * fl.length) | 0, tf = fl[fi];
+      const r0 = clamp(unit * 0.16, 1.00, 2.40), TH = rTop + clamp(FH * 0.6, 1.20, 2.60);
+      const tt = (ctx.hash(0x2b11) < 0.5 ? -1 : 1) * tf.span * 0.17, NL = clamp(Math.round(TH / 0.38), 8, 34);
+      const tD = tf.halfN + pAt(TH * 0.3) + r0 * 0.66;
       for (let j = 0; j < NL; j++) {
         const u = j / NL, band = (j === NL - 4);       // its own dentelle course
         F.boxShaft(ctx, tf.horiz ? tt : tf.out * tD, u * TH, tf.horiz ? tf.out * tD : tt,
-          TH / NL + 0.02, r0 * (1 - Math.pow(u, 1.25) * 0.62) * (band ? 1.16 : 1),
+          TH / NL + 0.02, r0 * (1 - Math.pow(u, 1.2) * 0.70) * (band ? 1.18 : 1),
           band ? P.light : P.course(j + 7), null, u * TH < 1.30);
       }
 
@@ -159,8 +153,8 @@
       // width off the first. Two masses and a slot is the whole plan of the
       // site, and it is what stops the silhouette reading as a block.
       const pf = fl[(fi + 1) % fl.length];
-      const G = clamp(unit * 0.09, 0.90, 1.60);
-      const PH = clamp(rTop * 0.42, FH * 0.9, 4.60), TW = clamp(unit * 0.055, 0.45, 0.95);
+      const G = clamp(unit * 0.09, 0.90, 1.60), PH = clamp(rTop * 0.42, FH * 0.9, 4.60);
+      const TW = clamp(unit * 0.055, 0.45, 0.95);
       for (let i = 0; i < 3; i++) {
         const tw = TW * (1 - i * 0.17), lh = PH / 3;
         F.obox(ctx, pf, 0, i * lh + lh / 2, pf.span * 0.80 - i * tw * 1.4, lh + 0.02, tw,
@@ -174,7 +168,7 @@
       for (const sg of [-1, 1]) {
         const jt = sg * (gapH + jr * 0.55);
         F.boxShaft(ctx, df.horiz ? jt : df.out * jn, 0, df.horiz ? df.out * jn : jt,
-          lint, jr, P.light, null, true);
+          lint, jr, P.course(4), null, true);
       }
       F.box(ctx, df, 0, lint + 0.24, gapH * 2 + jr * 2.4, 0.44, pD + 0.16, P.dark, 0);
       F.box(ctx, df, 0, lint + 0.52, gapH * 2 + jr * 1.6, 0.16, pD + 0.06, P.course(2), 0);

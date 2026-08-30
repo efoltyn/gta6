@@ -100,9 +100,8 @@
             F.box(ctx, f, t, y + 0.36 + par + bh / 2, (f.span / n) * 0.82, bh, pt * 0.92, col, p - pt);
             F.box(ctx, f, t, y + 0.10 - bh * 0.5, (f.span / n) * 0.70, bh, pt * 0.55, col, p - pt);  // SPILLING over the lip
           }
-          const a = f.out * f.halfN, b = f.out * (f.halfN + p);   // the deck is somewhere you can stand
-          if (f.horiz) ctx.plat(-ctx.w / 2, ctx.w / 2, Math.min(a, b), Math.max(a, b), y + 0.36);
-          else ctx.plat(Math.min(a, b), Math.max(a, b), -ctx.d / 2, ctx.d / 2, y + 0.36);
+          const a = Math.min(f.out * f.halfN, f.out * (f.halfN + p)), b = a + p;   // the deck is somewhere to stand
+          if (f.horiz) ctx.plat(-ctx.w / 2, ctx.w / 2, a, b, y + 0.36); else ctx.plat(a, b, -ctx.d / 2, ctx.d / 2, y + 0.36);
         }
       }
 
@@ -112,18 +111,19 @@
       // gaps between the bridges are the holes that make one shell read as
       // two buildings from a kilometre away.
       const fl = F.flanks(ctx), sf = fl[(h(0x71a0) * fl.length) | 0];
-      const gap = D0 + clamp(unit * 0.03, 0.6, 1.1), bw = clamp(unit * 0.11, 1.6, 3.0);
-      const sLen = sf.span * 0.44, sH = H * (0.52 + h(0x71a1) * 0.16), n0 = sf.halfN + gap;
+      const gap = D0 + clamp(unit * 0.03, 0.6, 1.1), bw = clamp(unit * 0.15, 2.0, 4.2);
+      const sLen = sf.span * 0.34, sH = H * (0.52 + h(0x71a1) * 0.16), n0 = sf.halfN + gap;
       const sCol = F.shade(P.base, 0.88);   // its own tone: a NEIGHBOUR, not a wing of the tower
+      // OFF A CORNER, never a face centre: a mass parked mid-face hides behind
+      // the tower from three quarters of the compass and the air between them
+      // never reads. Past the corner, both are in the same silhouette.
+      const t0 = (h(0x71a2) < 0.5 ? -1 : 1) * (sf.span * 0.5 - sLen * 0.28);
       // put/platN carry the four-face bookkeeping once, so the massing below
       // stays readable instead of being a wall of horiz ternaries.
       const put = function (E, cN, y, ln, hh, wd, col) {
-        if (sf.horiz) E(0, y, sf.out * cN, ln, hh, wd, col); else E(sf.out * cN, y, 0, wd, hh, ln, col);
-      };
-      const platN = function (cN, wd, ln, top) { const c = sf.out * cN;
-        if (sf.horiz) ctx.plat(-ln / 2, ln / 2, c - wd / 2, c + wd / 2, top);
-        else ctx.plat(c - wd / 2, c + wd / 2, -ln / 2, ln / 2, top);
-      };
+        if (sf.horiz) E(t0, y, sf.out * cN, ln, hh, wd, col); else E(sf.out * cN, y, t0, wd, hh, ln, col); };
+      const platN = function (cN, wd, ln, top) { const c = sf.out * cN, a = t0 - ln / 2, b = t0 + ln / 2;
+        if (sf.horiz) ctx.plat(a, b, c - wd / 2, c + wd / 2, top); else ctx.plat(c - wd / 2, c + wd / 2, a, b, top); };
       for (let i = 0; i < 3; i++) {
         const sh = sH / 3, wd = bw * (1 - i * 0.14), ln = sLen * (1 - i * 0.12), cN = n0 + wd / 2, y = i * sh;
         put(i === 0 ? S : ctx.dbox, cN, y + sh / 2, ln, sh, wd, i % 2 ? sCol : P.base);
@@ -152,7 +152,7 @@
       for (const sg of [-1, 1]) {
         const cx = R.cx + sg * (R.w / 2 - fw / 2);
         ctx.dbox(cx, H + legH / 2, R.cz, fw, legH, fd, P.base);
-        ctx.dbox(cx, H + legH * 0.5, R.cz, fw + 0.22, legH * 0.86, fd * 0.64, P.glass);
+        ctx.dbox(cx, H + legH * 0.5, R.cz, fw + 0.22, legH * 0.86, fd * 0.64, P.glass);   // the legs are lived in
         ctx.dbox(cx, H + legH + 0.1, R.cz, fw + 0.7, 0.36, fd + 0.7, P.light);
       }
       ctx.dbox(R.cx, H + legH + capH / 2, R.cz, R.w, capH, fd, P.light);
@@ -160,7 +160,7 @@
       ctx.dbox(R.cx, H + legH + capH + 0.9, R.cz, R.w * 0.9, 0.7, fd * 0.9, leaf);   // the roof garden, up top
       const tr = Math.min(R.w * 0.13, legH * 0.20), ty = H + legH * 0.28, th = legH * 0.54;
       F.boxShaft(ctx, R.cx, ty, R.cz, th, tr * 0.30, P.trim, null, false);
-      for (let i = 0; i < 3; i++) {   // a vertical-axis turbine: three blades on a ring
+      for (let i = 0; i < 3; i++) {   // a vertical-axis turbine: three blades on a ring, and its spokes
         const a = (i / 3) * Math.PI * 2 + 0.4, bx = R.cx + Math.cos(a) * tr, bz = R.cz + Math.sin(a) * tr;
         ctx.dbox(bx, ty + th / 2, bz, tr * 0.30, th * 0.92, tr * 0.30, P.light);
         for (const e of [0, th]) ctx.dbox((R.cx + bx) / 2, ty + e, (R.cz + bz) / 2, Math.abs(bx - R.cx) + 0.2, 0.16, Math.abs(bz - R.cz) + 0.2, P.trim);

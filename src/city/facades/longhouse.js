@@ -58,8 +58,7 @@
       const DAUB = F.mix(P.light, 0xcdbb98, 0.55);
 
       // ---- A. THE ROOF, SOLVED FIRST ------------------------------
-      const dF = F.face(ctx, ctx.doorSide);
-      const along = dF.horiz ? "z" : "x";               // door face = gable end
+      const along = ctx.w >= ctx.d ? "x" : "z";         // the ridge is the LONG axis
       const over = clamp(unit * 0.20, 1.1, 2.8);
       const eave = Math.max(F.DOOR_H + 0.60, rTop * 0.30);
 
@@ -112,19 +111,19 @@
       }
 
       // ---- C. THE GABLE FRAME -------------------------------------
-      // Heavy hewn posts on the two ends, each rising to the underside of the
-      // slope directly above it, so the frame reads as what carries the roof.
+      // Heavy hewn posts standing PROUD OF THE GABLE PLANE — not tucked under
+      // the overhang, where they come out looking like columns embedded in
+      // straw — each rising to the underside of the slope above it.
       const pr = clamp(unit * 0.058, 0.22, 0.48);
+      const hRun = (along === "z" ? ctx.w : ctx.d) / 2 + over;
       for (const f of F.faces(ctx)) {
         if ((along === "z") !== f.horiz) continue;      // gable ends only
         for (let i = -1; i <= 1; i++) {
-          const t = i * f.span * 0.30;
-          if (!F.clearsDoor(ctx, f, t, pr * 4)) continue;   // the centre post would
-          const hRun = (along === "z" ? ctx.w : ctx.d) / 2 + over;        // block the door
-          const topY = eave + (ridgeY - eave) * Math.pow(1 - Math.abs(t) / hRun, 0.85) * 0.95;
-          const px = f.horiz ? t : f.out * (f.halfN + over * 0.50);
-          const pz = f.horiz ? f.out * (f.halfN + over * 0.50) : t;
-          F.boxShaft(ctx, px, 0, pz, topY, pr, T.base, F.mix(T.base, 0xffffff, 0.14), true);
+          const t = i * f.span * 0.32, dn = f.halfN + over + pr * 0.8;
+          if (!F.clearsDoor(ctx, f, t, pr * 4)) continue;   // never in the doorway
+          const topY = eave + (ridgeY - eave) * Math.pow(1 - Math.abs(t) / hRun, 0.85) * 0.92;
+          F.boxShaft(ctx, f.horiz ? t : f.out * dn, 0, f.horiz ? f.out * dn : t,
+            topY, pr, T.base, F.mix(T.base, 0xffffff, 0.14), true);
         }
       }
 
@@ -133,40 +132,34 @@
       // rotated box is a lie you can see from any other angle.
       const halfLen = (along === "z" ? ctx.d : ctx.w) / 2 + over * 0.55;
       const pl = clamp(unit * 0.34, 1.3, 3.4);
+      const put = function (a, y, s, c, n) {           // a = across the gable
+        if (along === "z") ctx.dbox(a, y, n, s, s * 0.9, s, c); else ctx.dbox(n, y, a, s, s * 0.9, s, c);
+      };
       for (const sg of [-1, 1]) {
         const n = sg * (halfLen - pl * 0.12);
-        for (const sx of [-1, 1]) {
-          const a0 = sx * pl * 0.80, a1 = -sx * pl * 0.34;
-          const y0 = ridgeY - pl * 0.62, y1 = ridgeY + pl * 0.78;
-          for (let k = 0; k < 8; k++) {
-            const u = (k + 0.5) / 8;
-            const a = a0 + (a1 - a0) * u, y = y0 + (y1 - y0) * u;
-            const s = pl * 0.115 * (1 - u * 0.25);
-            if (along === "z") ctx.dbox(a, y, n, s, (y1 - y0) / 6, s, T.course(k + 3));
-            else ctx.dbox(n, y, a, s, (y1 - y0) / 6, s, T.course(k + 3));
-          }
+        for (const sx of [-1, 1]) for (let k = 0; k < 8; k++) {
+          const u = (k + 0.5) / 8;
+          put(sx * pl * (0.80 - 1.14 * u), ridgeY + pl * (-0.62 + 1.40 * u),
+            pl * 0.155 * (1 - u * 0.25), T.course(k + 3), n);
         }
-        // the lashing where the two poles cross
-        if (along === "z") ctx.dbox(0, ridgeY + pl * 0.20, n, pl * 0.42, pl * 0.16, pl * 0.30, T.dark);
-        else ctx.dbox(n, ridgeY + pl * 0.20, 0, pl * 0.30, pl * 0.16, pl * 0.42, T.dark);
+        put(0, ridgeY + pl * 0.20, pl * 0.34, T.dark, n);       // the lashing
       }
 
       // ---- E. THE ONE DOOR ----------------------------------------
       const e = F.entrance(ctx), fe = e.f;
-      const dp = clamp(unit * 0.14, 0.8, 1.8);
-      const dh = F.DOOR_H + 0.80;
+      const dp = clamp(unit * 0.16, 1.0, 2.2), dh = F.DOOR_H + 0.85;
       for (const sg of [-1, 1]) {
-        const t = sg * (e.gap / 2 + pr * 1.5);
-        const px = fe.horiz ? t : fe.out * (fe.halfN + dp);
-        const pz = fe.horiz ? fe.out * (fe.halfN + dp) : t;
-        F.boxShaft(ctx, px, 0, pz, dh, pr * 1.15, T.light, F.mix(T.light, 0xffffff, 0.18), true);
+        const t = sg * (e.gap / 2 + pr * 1.5), dn = fe.halfN + dp;
+        F.boxShaft(ctx, fe.horiz ? t : fe.out * dn, 0, fe.horiz ? fe.out * dn : t,
+          dh, pr * 1.15, T.light, F.mix(T.light, 0xffffff, 0.18), true);
       }
       F.obox(ctx, fe, 0, dh + 0.20, e.gap + pr * 5.0, 0.36, dp + pr * 2.6, fe.halfN + dp + pr * 1.3, T.dark);
-      // a little thatch hood, so the entrance reads as a hole under straw
+      // a little thatch hood, so the entrance breaks the eave and you can see
+      // from 30 m which end of a hundred feet of straw the door is at
       for (let k = 0; k < 4; k++) {
         const u = (k + 0.5) / 4;
-        F.obox(ctx, fe, 0, dh + 0.44 + u * 0.62, (e.gap + pr * 6) * (1 - u * 0.22), 0.22,
-          (dp + pr * 3.2) * (1 - u * 0.42), fe.halfN + dp + pr * 1.7 - u * 0.25, P.course(k + 7));
+        F.obox(ctx, fe, 0, dh + 0.44 + u * 0.66, (e.gap + pr * 6) * (1 - u * 0.22), 0.24,
+          (dp + pr * 3.4) * (1 - u * 0.42), fe.halfN + dp + pr * 1.9 - u * 0.25, P.course(k + 7));
       }
       // the daub cheeks of the doorway: laid across it so the kit's carve
       // turns them into a real reveal in a real wall

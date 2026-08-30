@@ -116,12 +116,14 @@
         for (const sx of [-1, 1]) for (const sz of [-1, 1]) for (let k = 0; k < 3; k++)
           ctx.dbox(sx * tw * 0.45, ty + th + 0.18 + tw * k * 0.055, sz * tw * 0.45,
             tw * (0.09 - k * 0.026), tw * (0.07 - k * 0.012), tw * (0.09 - k * 0.026), k === 2 ? gold : P.light);
-        ty += th + 0.18; tw *= 0.80;
+        ty += th + 0.18; tw *= 0.86;
       }
 
       // ---- 4. THE BELL --------------------------------------------------
-      const R = tw * 0.60, BH = R * 2.2, N = cl(Math.round(BH / cl(u * 0.05, 0.30, 0.80)), 10, 24), bh = BH / N;
-      for (let k = 0; k < 3; k++) ring(ty + k * bh * 0.75, bh * 0.80, R * (1.22 - k * 0.07), k ? P.light : P.dark);
+      // THE BELL MUST STAND INSIDE ITS TERRACE. Springing bands wider than the
+      // platform under them is what turns terraces + bell + hti into one cone.
+      const R = tw * 0.49, BH = R * 1.85, N = cl(Math.round(BH / cl(u * 0.035, 0.22, 0.55)), 12, 28), bh = BH / N;
+      for (let k = 0; k < 3; k++) ring(ty + k * bh * 0.75, bh * 0.80, R * (1.15 - k * 0.06), k === 1 ? gold : P.dark);
       const by = ty + bh * 2.25;
       for (let i = 0; i < N; i++) {
         const t = (i + 0.5) / N;
@@ -137,10 +139,11 @@
       // in a point fine enough to read as a needle against the sky. If it is
       // missing the bell just stops, and a stupa that stops is a silo.
       let hy = by + BH;
+      ring(hy - bh * 0.6, bh * 1.1, R * 0.42, gold);                             // the gilt throat band
       ctx.dbox(0, hy + R * 0.18, 0, R * 0.86, R * 0.36, R * 0.86, P.light);      // the harmika
       ctx.dbox(0, hy + R * 0.40, 0, R * 0.62, R * 0.14, R * 0.62, gold);
       hy += R * 0.48;
-      const hH = cl(R * 2.6, 2.0, 11.0), nR = cl(Math.round(hH / cl(u * 0.035, 0.26, 0.6)), 9, 20);
+      const hH = cl(R * 1.9, 1.8, 8.0), nR = cl(Math.round(hH / cl(u * 0.035, 0.26, 0.6)), 9, 20);
       ctx.dbox(0, hy + hH * 0.5, 0, R * 0.16, hH, R * 0.16, goldD);              // the mast
       for (let i = 0; i < nR; i++) {
         const t = i / nR;
@@ -153,13 +156,15 @@
       const e = F.entrance(ctx), fd = e.f, pD = cl(u * 0.32, 1.6, 4.2);
       const pW = Math.min(fd.span * 0.52, e.gap + cl(fd.span * 0.30, 2.4, 6.0));
       const por = F.porch(ctx, { face: fd, pal: P, depth: pD, width: pW, roof: "flat", posts: 2,
-        deckTop: Math.min(pod.top, F.STEP_RISE), roofCol: P.dark,
+        deckTop: Math.min(pod.top, F.STEP_RISE), roofCol: F.shade(P.roof, 0.72),
         eave: cl(FH * 1.15 + 0.4, e.head + 0.7, rTop - 0.8) });
       const cx = fd.horiz ? 0 : fd.out * (fd.halfN + pD / 2), cz = fd.horiz ? fd.out * (fd.halfN + pD / 2) : 0;
-      let py = por.eave + 0.22, pw = Math.min(pW * 1.02, pD * 2.2);
+      // the pyatthat is the SECOND spire and must stay the smaller one: tied to
+      // the bell's own radius, or on a small host it out-tops the stupa.
+      let py = por.eave + 0.22, pw = Math.min(pW * 0.98, pD * 2.1, R * 1.9);
       for (let i = 0, nT = cl(Math.round(3 + u * 0.10), 4, 7); i < nT; i++) {
         const rh = Math.max(0.12, pw * 0.10), bd = Math.max(0.18, pw * 0.17);
-        ctx.dbox(cx, py + rh / 2, cz, pw, rh, pw, P.roof);                        // the tier plate
+        ctx.dbox(cx, py + rh / 2, cz, pw, rh, pw, F.shade(P.roof, 0.72));         // the tier plate
         ctx.dbox(cx, py + rh + 0.03, cz, pw * 0.94, rh * 0.45, pw * 0.94, gold);  // its gilt lip
         for (const sx of [-1, 1]) for (const sz of [-1, 1])                        // corner flame licks
           ctx.dbox(cx + sx * pw * 0.47, py + rh * 1.9, cz + sz * pw * 0.47, pw * 0.07, rh * 2.6, pw * 0.07, gold);
