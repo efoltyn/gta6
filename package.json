@@ -74,6 +74,8 @@
     "test:racer": "node tools/racer-story-check.mjs",
     "visual:racer-opening": "node tools/before-after.mjs racer-opening",
     "ba": "node tools/before-after.mjs",
+    "ba:head": "node tools/ba-head.mjs",
+    "visual:volcano-ash": "node tools/ba-head.mjs volcano-stages --owned src/world/volcanofx.js,src/systems/disasters.js --subjects ash-onset,ash-wedge,dark-noon,ash-aftermath --keep-going",
     "visual:beach": "node tools/before-after.mjs beach-shores",
     "visual:beast-deaths": "node tools/before-after.mjs beast-deaths",
     "visual:soldier-deaths": "node tools/before-after.mjs soldier-deaths",

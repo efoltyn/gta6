@@ -4,14 +4,22 @@
    the rAF loop, forces the director to the volcano, and photographs the same
    simulated seconds of the same seeded eruption on both sides.
 
-   FLAG A/B AS OF 2026-08-26: both sides are THIS checkout; the before side
-   boots with ?cfg_VOLCANO_PLUME_V2=0. That is the exact current geometric
-   bead-column. The after side keeps the same eruption, wind, ash, lava and
-   lighting but replaces those giant synchronized cards with the RPG blast's
-   lumpy smoke mask, per-puff grow/drift/fade, a dense dark core and an
-   irregular cauliflower edge. The column is also brought back from a
-   seven-mountain-height needle to the broader landscape proportion in the
-   owner's two reference photographs.
+   HEAD vs WORKING TREE AS OF 2026-08-30 (the ash-removal wave). There is no
+   flag to flip any more, because the thing under test was DELETED rather than
+   switched off: `node tools/ba-head.mjs volcano-stages` serves pristine HEAD
+   as the before column and this checkout as the after one. Run it that way or
+   the before column is the deployed build, which is honest but forty commits
+   wide.
+
+   WHAT THE ASH BEATS NOW ARGUE. For four waves the ground ash deposit was the
+   thing being defended: bigger cells, an eroded alpha cutout, jittered
+   centres, smooth value-noise mottle, a downwind wedge instead of an island-
+   wide blanket. The owner rejected every one of them on sight, in the same
+   words each time, ending 2026-08-30: "these ash checkers cover the whole
+   ground of the world. It's so stupid." So the deposit is gone, and these
+   beats exist to photograph its absence — the mountain still erupting, the
+   column still standing, the lava and the flow and the mud all untouched,
+   and the GROUND still being the ground.
 
    VOLCANO ONLY (owner, 2026-08-15: "I just wanted the volcano to be more
    real... I never mentioned nuke"). The four nuke-finale beats this preset
@@ -37,14 +45,19 @@
      pyroclastic  THE MONEY SHOT. The density current mid-descent, flank-on,
                   racing toward the town side of the island.
      lahar        wet concrete in the channel, boulders riding it.
-     ash-street   the graying blanket over the town, with roofs failing under
-                  the load.
+     ash-onset    PLUMB DOWN a few seconds in — the exact moment the owner
+                  named ("literally right when the volcano starts"). Before:
+                  the lattice arrives. After: grass.
      lava-night   close-up. Opaque crust, incandescent channels, and the flow
                   lighting the hillside at night.
 
    Metrics ride the two ratchets: CBZ.volcanoAudit() (lavaTransparent MUST be
    0 — that is the owner's "see thru" complaint as a number) and
-   CBZ.disasterAudit() (pyroRuns / laharRuns / ashRoofCollapses).
+   CBZ.disasterAudit() (pyroRuns / laharRuns). The ash rows are now a DELETION
+   ratchet: ashFields / ashCells / ashPeakDepth are pinned at 0 in the audit,
+   so a future build that quietly reinstates ground ash shows up as a number
+   that stopped being zero. The pixel metrics below do not trust the audit at
+   all — they measure the photograph.
 
    AND THE BODY COUNT, which is the owner's OTHER complaint — "the volcano
    kills way too many people and randomly" — as a number. `aliveNow` and
@@ -129,13 +142,19 @@ const subjects = [
     act: { force: "volcano", untilState: "active", extraSecs: 11.5 },
     cam: { lahar: true, ahead: 34, side: 22, alt: 24, fallback: { x: 62, y: 20, z: 660, ax: 0, ay: 6, az: 612 } } },
 
-  { id: "ash-wedge", label: "The wedge — ash with an outside", hud: false,
-    focus: "THE FLAG'S EARN-BACK. VOLCANO_ASH_LOAD went default-off on 2026-08-16 because spread 0.16 greyed the WHOLE island at once — a screen filter, not a place. V3 refits the fall as a downwind wedge (spread 0.05, lobe^3.2): mid-eruption the downwind ground is visibly greying while the upwind side keeps its colour. Before-side: no ash anywhere — and no roof loads, no choke, no indoors tension either.",
+  { id: "ash-onset", label: "Right when it starts — the checkers arrive", hud: false,
+    focus: "THE OWNER'S EXACT COMPLAINT, 2026-08-30: 'literally right when the volcano starts, these ash checkers cover the whole ground of the world.' Shot PLUMB DOWN over the ground 5 s into the eruption, which is when he saw it. Before: a lattice of grey quads switching on across the grass at uniform pitch. After: grass. ashGridPeriodicity and ashFleckCount are that difference as two numbers, measured off the photograph rather than off an audit either side could lie about.",
+    act: { day: true, force: "volcano", untilState: "active", extraSecs: 5, pinWind: [0.6, 0.8] },
+    ashMetric: true,
+    cam: { ashfield: true, out: 0.5, side: 0.3, alt: 72, fov: 60, fallback: { x: 46, y: 80, z: 662, ax: 46, ay: 0, az: 664 } } },
+
+  { id: "ash-wedge", label: "The ground, mid-eruption, from the side", hud: false,
+    focus: "The same tripod that used to prove the downwind wedge was 'a hazard with an outside'. It photographs the argument's end instead: mid-eruption the island keeps its own colour edge to edge while the mountain does every violent thing it did before. Before: the downwind half greying under a tiled deposit. After: lava, flow, column, mud — and grass.",
     act: { day: true, force: "volcano", untilState: "active", extraSecs: 10, pinWind: [0.6, 0.8] },
     cam: { wedge: true, along: 0.72, side: 0.5, alt: 34, fallback: { x: 46, y: 26, z: 662, ax: 0, ay: 8, az: 600 } } },
 
   { id: "dark-noon", label: "Darkness at noon — the ash blots the sun", hud: false,
-    focus: "Late in the event, staged at MIDDAY, shot wide from upwind. After: the deposit is deep downwind, the sun is choked to a fraction (metrics record sunIntensity), the fog wall has closed in with a visible cause, roofs are failing under the load through the one structural ledger (audit_ashRoofCollapses). Before: bright noon over a clean island for the whole event.",
+    focus: "THE FEATURE THAT SURVIVED THE DELETION. Late in the event, staged at MIDDAY, shot wide from upwind. Darkness-at-noon used to be driven by the ground deposit's peak depth; it now rides the eruption's own age and magnitude, so the sun still chokes (sunIntensity), the fog wall still closes in, and the cause is the column overhead instead of paint underfoot. The two sides should look CLOSE in the sky and different only on the ground — if the after side is brighter, the rewire is mis-tuned and that is the regression this beat is for.",
     act: { day: true, force: "volcano", untilState: "active", extraSecs: 17.5, pinWind: [0.6, 0.8] },
     cam: { wedge: true, upwind: true, along: 0.55, side: 0.15, alt: 42, lookY: 40, fallback: { x: -120, y: 44, z: 540, ax: 30, ay: 40, az: 620 } } },
 
@@ -156,7 +175,7 @@ const subjects = [
     cam: { lava: true, scar: true, frame: 0.5, out: 24, alt: 12, behind: 2, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
 
   { id: "ash-aftermath", label: "The morning after — ash is weather, not wallpaper", hud: false,
-    focus: "THE OWNER'S NAMED COMPLAINT: 'the ash left afterwards is like a CHECKERBOARD over the map'. Shot PLUMB DOWN over the downwind wedge ~6 s after the eruption ends. Before: a frozen lattice of same-pitch quads — every ground cell drawing a dark fleck even at zero coverage — that lies there untouched for the rest of the match. After: a continuous drifted field (jittered centres, spatially-correlated mottle, slope shedding) already thinning and streaking away on the wind. ashGridPeriodicity is the checkerboard as a number — luminance self-similarity at exactly the cell pitch; positive = periodic lattice. ashResidueDepth should FALL across the strip on the after side only.",
+    focus: "THE SAME COMPLAINT, ONE EVENT LATER: 'the ash left afterwards is like a CHECKERBOARD over the map'. Shot PLUMB DOWN ~6 s after the eruption ends — the state the island then sits in for the REST OF THE MATCH, which is what made this the worst of the four. Before: a frozen lattice that outlives the disaster that made it. After: the island the match started with, plus the lava scars and the set lahar, which are the two scars worth keeping because you can see what made them. ashResidueDepth must be 0 on the after side.",
     act: { day: true, force: "volcano", untilState: "active", pinWind: [0.6, 0.8], untilIdle: true, extraSecs: 6 },
     strip: { frames: 3, stepSec: 2.2 },
     ashMetric: true,
@@ -801,13 +820,14 @@ async function stageVolcano(input) {
 export default {
   id: "volcano-stages",
   title: "The Stratovolcano",
-  description: "Flag A/B on this checkout: cfg_VOLCANO_PLUME_V2=0 is the current geometric bead-column; after uses the RPG blast's real lumpy smoke mask and per-puff lifecycle to build a denser core, irregular cauliflower edge and shorter/broader landscape silhouette. All other eruption systems remain matched controls.",
-  defaultBefore: "local",
-  /* beforeParams used to pin cfg_VOLCANO_PLUME_V2=0 — the 2026-08-26 plume
-     wave's flag A/B. That earn-back shipped; the preset is back to a plain
-     tree-vs-tree comparison (flagless waves: HEAD worktree as --before). */
-  beforeLabel: "BEFORE · THIS CHECKOUT @ HEAD",
-  afterLabel: "AFTER · ASH FIELD + MAGNITUDE",
+  description: "The ground ash deposit is deleted (2026-08-30) after four rewrites the owner rejected on sight. These beats photograph its absence against everything the eruption still does: the column, the lava, the pyroclastic flow, the lahar and the darkness at noon are all matched controls. Run with tools/ba-head.mjs so BEFORE is pristine HEAD rather than the deployed build.",
+  /* NO defaultBefore. There is no flag left to flip — the deposit was deleted,
+     not switched off — so a same-checkout A/B is impossible by construction.
+     tools/ba-head.mjs passes pristine HEAD as --before; without it this falls
+     through to before-after.mjs's deployed-build default, which is a true
+     before for the ash but is also every other commit since the last deploy. */
+  beforeLabel: "BEFORE · GROUND ASH",
+  afterLabel: "AFTER · NO GROUND ASH",
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
@@ -835,21 +855,25 @@ export default {
     vol_organicColumns: { label: "Organic lifecycle columns", better: "higher" },
     vol_blastSmokeColumns: { label: "Columns sharing RPG smoke mask", better: "higher" },
     vol_pyroLive: { label: "Pyroclastic flows live", better: "higher" },
-    /* V3 brings the ash LEDGER back as a downwind wedge (see the flag note
-       in world/volcanofx.js), so depth is a feature again — on the axis,
-       where the wedge is, never map-wide. The roof-collapse row returns
-       with the mechanic: roofs failing under load inside one event is the
-       indoors-tension the 2026-08-16 removal threw out with the blanket. */
-    vol_ashPeakDepth: { label: "Downwind ash deposited", unit: "m", better: "higher" },
-    /* THE OWNER'S NAMED COMPLAINT AS NUMBERS (aftermath beat only). Lattice
-       periodicity: luminance self-similarity at exactly the deposit's cell
-       pitch, plumb-down — positive means the ground repeats at grid pitch,
-       i.e. a checkerboard. Residue: ash still standing after the event ends —
-       it must thin away like snow, not lie there for the rest of the match. */
+    /* THE DELETION RATCHET. Every one of these is a number that must now be
+       ZERO on the after side, and each says a different thing if it is not.
+       The two pixel metrics are the ones that matter, because they measure the
+       PHOTOGRAPH: no audit key can talk them out of a lattice on the grass.
+         periodicity  luminance self-similarity at exactly the old deposit's
+                      cell pitch, plumb-down. Positive = the ground repeats at
+                      grid pitch = a checkerboard, whatever built it.
+         flecks       connected grey components of 3..260 analysis-px. The
+                      town's own greys score on both sides, so the DELTA is
+                      the ash. A tiled field scores in the hundreds.
+         depth/residue  the ledger itself, live and after the event. Pinned to
+                      0 in the audit today; a build that reinstates ground ash
+                      makes them speak again, which is the point of keeping
+                      the rows rather than deleting them with the feature. */
     ashGridPeriodicity: { label: "Ash checkerboard (lattice periodicity)", better: "lower" },
     ashFleckCount: { label: "Isolated grey flecks (checkerboard dots)", better: "lower" },
+    vol_ashPeakDepth: { label: "Ground ash deposited", unit: "m", better: "lower" },
     ashResidueDepth: { label: "Ash left after the event", unit: "m", better: "lower" },
-    audit_ashRoofCollapses: { label: "Roofs lost to ash load", better: "higher" },
+    vol_ashFields: { label: "Ground ash fields built", better: "lower" },
     sunIntensity: { label: "Sun at capture (ash blots it)", better: "lower" },
     audit_pyroRuns: { label: "Pyroclastic runs", better: "higher" },
     audit_laharRuns: { label: "Lahar runs", better: "higher" },

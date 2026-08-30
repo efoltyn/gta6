@@ -75,10 +75,11 @@
 
    THE STRATOVOLCANO (2026-08-03). The eruption is no longer one hazard with
    a see-through orange box on it. world/volcanofx.js owns four builders —
-   opaque crusted lava, the pyroclastic density current, the lahar and the
-   ash LOAD — all keyed on a position + a height field so a city-side
-   eruption calls the same code. Its flags (VOLCANO_V2 · VOLCANO_PYRO ·
-   VOLCANO_LAHAR · VOLCANO_ASH_LOAD) are declared THERE, in the owning file;
+   opaque crusted lava, the pyroclastic density current and the lahar — all
+   keyed on a position + a height field so a city-side eruption calls the
+   same code. (There was a fourth, the ground ash LOAD; it was deleted on
+   2026-08-30 after four failed rewrites — see that file's header.) Its flags (VOLCANO_V2 · VOLCANO_PYRO ·
+   VOLCANO_LAHAR) are declared THERE, in the owning file;
    VOLCANO_V2=false (or the older SURV_VOLCANO_LAVA_V2=false) drops this file
    back to the legacy additive streams, which are kept verbatim as the revert
    path and counted by disasterAudit().lavaLegacy.
@@ -3056,15 +3057,15 @@
   // through city/nukefx.js's real whiteout sheet instead of a second one.
   if (CBZ.CONFIG.NUKE_FINALE_REAL == null) CBZ.CONFIG.NUKE_FINALE_REAL = true;
 
-  /* THE ASH LADDER, in metres of deposited ash, and the three numbers are
-     deliberately close together: the whole point of ashfall is that the SAME
-     accumulation that starts hurting the people outside is on its way to
-     killing the people who correctly went inside. VISUAL_FULL is only when
-     the blanket stops thickening on screen; the depth keeps climbing. */
-  const ASH_DOT_DEPTH = 0.006;   // shreds unsheltered lungs
-  const ASH_VISUAL_FULL = 0.16;  // continuous grey blanket on screen
-  const ASH_ROOF_FAIL = 0.055;   // the roof starts failing under the load
-  let pyroRuns = 0, laharRuns = 0, ashRoofCollapses = 0, lavaLegacy = 0, whiteouts = 0;
+  /* THE ASH LADDER IS GONE, with the ground deposit it measured (2026-08-30).
+     ASH_DOT_DEPTH / ASH_VISUAL_FULL / ASH_ROOF_FAIL priced a field of grey
+     quads that the owner rejected on sight four separate times; see the note
+     at the top of world/volcanofx.js. The choke and the roof-load collapses
+     went with it rather than becoming invisible damage over clean ground —
+     that exact bug ("the geometric stand-in wedge") was deleted here once
+     already and is not worth re-earning. The volcano's kill list is now four
+     things you can SEE coming: the flow, the lava, the lahar and the bombs. */
+  let pyroRuns = 0, laharRuns = 0, lavaLegacy = 0, whiteouts = 0;
   /* THE BODY COUNT, because the owner's "kills way too many people" deserves
      a number that a later edit cannot quietly undo. `volcanoDeaths` is the
      drop in the live roster across an eruption — measured off the mode's own
@@ -3199,6 +3200,11 @@
 
   function startEruption(ctx) {
     if (ctx.st.erupting) return; ctx.st.erupting = true;
+    // SECONDS SINCE THE VENT OPENED. Added 2026-08-30 because the env
+    // darkening used to read the ground deposit's peak depth as its clock,
+    // and the deposit is gone. An eruption's own age is the honest clock for
+    // "how much ash is in the air by now" anyway.
+    ctx.st.erAge = 0;
     const h = ctx.arena.hills[0];
     const V = vfx();
     const V3 = CBZ.CONFIG.VOLCANO_V3 !== false;
@@ -3357,21 +3363,6 @@
           haze: i % 2 === 0,
         }));
       }
-      /* ---- ASHFALL AS A LOAD: one field, plus every standing roof ---- */
-      if (CBZ.CONFIG.VOLCANO_ASH_LOAD !== false) {
-        const F = ctx.arena.fragile || [];
-        const AL = V.ashLoad({
-          cx: ctx.cx, cz: ctx.cz, r: ctx.R, groundAt: gAt(ctx),
-          parent: root(), roofs: F.length + 8, salt: 6151, full: ASH_VISUAL_FULL,
-        });
-        ctx.st.erAshLoad = AL;
-        ctx.st.erRoofs = [];
-        for (let i = 0; i < F.length; i++) {
-          const b = F[i]; if (b.fallen) continue;
-          ctx.st.erRoofs.push({ b: b, id: AL.addRoof({ x: b.x, z: b.z, y: b.h + 0.05, w: b.w, d: b.d, ref: b }) });
-        }
-        ctx.st.erRoofT = 0;
-      }
       /* ---- the two travelling hazards are SCHEDULED, not immediate: a
               cone has to build a column before it can collapse one ---- */
       /* A BURP DOES NOT COLLAPSE A COLUMN, and it melts no meltwater: the
@@ -3405,6 +3396,7 @@
 
   function tickEruption(dt, ctx) {
     if (!ctx.st.erupting) return;
+    ctx.st.erAge = (ctx.st.erAge || 0) + dt;
     const h = ctx.arena.hills[0];
     const V = vfx();
     const M = ctx.st.erMag != null ? ctx.st.erMag : 0.42;
@@ -3423,14 +3415,31 @@
        dayK() is the sun's own elevation off core/daynight.js. */
     const dk = dayK();
     /* V3: ASH BLOTS THE SUN. The one thing every eyewitness account of a real
-       ashfall agrees on is darkness at noon — and the fixed 0.5 sun above
-       could never say it. ashK follows the DEPOSIT (the field's own peak
-       depth), so the sky darkens exactly as fast as the ground greys and a
-       revert of the ash flag reverts the darkness with it. The fog wall
-       tightens with it — 380 → ~290 at full load, still twice the 2026-08-16
-       "island-wide grey-out" distance, and now it has a visible cause. */
-    const ashK = (CBZ.CONFIG.VOLCANO_V3 !== false && ctx.st.erAshLoad)
-      ? Math.min(1, ctx.st.erAshLoad.peakDepth / 0.3) : 0;
+       ashfall agrees on is darkness at noon, and the fixed 0.5 sun above could
+       never say it. This USED to ride the ground deposit's peak depth; with
+       the deposit deleted (2026-08-30) it rides what actually makes the air
+       dark, which is the COLUMN — how long this eruption has been lofting ash
+       and how big it is. It still climbs over roughly the same ~25 s as the
+       old deposit did, so the look is unchanged; it simply no longer needs
+       four thousand quads on the grass to justify itself. The fog wall
+       tightens with it — 380 → ~290 at full darkness, still twice the
+       2026-08-16 "island-wide grey-out" distance, and the cause is visible
+       overhead instead of underfoot. */
+    /* CALIBRATED AGAINST THE THING IT REPLACED, not guessed. The first cut of
+       this (age/25, scaled by magnitude) photographed 2.7x brighter than the
+       deposit-driven original at the dark-noon beat — and dragged the fog wall
+       out with it, which showed up as +600 draw calls. Two terms instead:
+         RAMP  seconds to full darkness. The old deposit crossed its 0.3 m
+               saturation at ~13 s on a default eruption; a big one lofts
+               faster, a burp slower.
+         CAP   how dark this eruption can EVER get. A burp must not black out
+               the sky no matter how long you stand there — that was free when
+               the driver was a deposit that stopped accumulating, and has to
+               be said out loud now that the driver is a clock. */
+    const ashRamp = 16 - 6 * M;
+    const ashCap = Math.min(1, 0.12 + 2.1 * M);
+    const ashK = CBZ.CONFIG.VOLCANO_V3 !== false
+      ? Math.min(ashCap, (ctx.st.erAge || 0) / ashRamp) : 0;
     ctx.env.fog = lerpHex(0x120b08, lerpHex(0x2e211c, 0x181310, ashK), dk);
     ctx.env.fogNear = 55; ctx.env.fogFar = 380 - 90 * ashK;
     /* AND IT MUST NOT PAINT THE ISLAND PEACH. 0xff6a3a is a fully saturated
@@ -3577,60 +3586,6 @@
       if (ctx.st.lahar) ctx.st.lahar.update(dt);
     }
 
-    /* ---------------- ASH AS A LOAD ---------------- */
-    const AL = ctx.st.erAshLoad;
-    if (AL) {
-      AL.update(dt, {
-        /* Metres of ash per second on the plume axis. Calibrated against the
-           ladder above so ONE 20 s eruption walks the whole arc: the ground
-           downwind is dusted within a second or two (the choke starts), the
-           blanket is continuous downwind near the end, and the downwind roofs
-           cross ASH_ROOF_FAIL at about two thirds — so "indoors saves you from
-           the ash until the roof goes" is something that HAPPENS inside one
-           event instead of a rule on paper. Upwind stays green, which is what
-           makes the wedge readable at all. */
-        /* magnitude owns the fall: a burp lays a dusting you watch settle,
-           the big one buries the downwind town and takes its roofs */
-        rate: 0.003 + 0.043 * M,
-        reach: ctx.R * (0.3 + 0.45 * M),
-        windX: ctx.st.erWindX, windZ: ctx.st.erWindZ,
-        /* V3: A WEDGE, NOT A BLANKET. spread 0.16 put a sixth of the axis
-           rate on every cell — the whole island greyed at once, which is
-           precisely the "covers everything in a dumb way" that got the
-           entire ash ledger switched off on 2026-08-16. At 0.05/lobe 3.2
-           the fall is a sector: the downwind town greys, chokes and loses
-           roofs while the upwind beach stays green — a hazard with an
-           outside, which is what makes it a hazard at all. */
-        srcX: h.x, srcZ: h.z,
-        // a big eruption's wedge is wider and softer-edged; a burp's is a
-        // tight sector on the cone's own shoulder
-        spread: CBZ.CONFIG.VOLCANO_V3 !== false ? 0.03 + 0.04 * M : 0.16,
-        lobe: CBZ.CONFIG.VOLCANO_V3 !== false ? 3.6 - 1.4 * M : 2.2,
-      });
-      // ROOFS FAIL UNDER THE LOAD, through the ONE ledger. Wet ash is ~1000
-      // kg/m3: a quarter-metre on a flat roof is a quarter of a tonne per
-      // square metre, and light-frame roofs go at about that. Checked at 2 Hz
-      // — the ledger accumulates, so the cadence only sets how fast, not if.
-      ctx.st.erRoofT = (ctx.st.erRoofT || 0) - dt;
-      if (ctx.st.erRoofT <= 0 && ctx.st.erRoofs) {
-        ctx.st.erRoofT = 0.5;
-        const wasCause = surv()._cause;
-        for (let i = 0; i < ctx.st.erRoofs.length; i++) {
-          const R = ctx.st.erRoofs[i];
-          if (!R.b || R.b.fallen) continue;
-          const dep = AL.roofDepth(R.id);
-          if (dep < ASH_ROOF_FAIL) continue;
-          // the killfeed has to name the ROOF, not the volcano — collapse()
-          // crushes the footprint with the director's default cause
-          surv()._cause = "crushed by an ash-laden roof";
-          const stage = structureHit(R.b, 0.75 * (dep / ASH_ROOF_FAIL), ctx, { kind: "ashload" });
-          if (R.b.fallen) { ashRoofCollapses++; AL.clearCell(R.id); }
-          else if (stage >= 2) AL.clearCell(R.id);   // it shed its load as it spalled
-        }
-        surv()._cause = wasCause;
-      }
-    }
-
     /* ---------------- THE ACTOR PASS ----------------
        Ordered by how fast the thing kills you, which is also the order in
        which the world gives you a chance: the flow first (none), then the
@@ -3698,44 +3653,13 @@
           return;
         }
       }
-      /* 5) ASHFALL — glass in the lungs, and a roof is a real answer to it.
-         THE ASH FIELD IS THE ONLY AUTHORITY ON WHERE THERE IS ASH. V3
-         (2026-08-23) turned the field back on as a downwind WEDGE — the
-         2026-08-16 default-off was aimed at the island-wide blanket, and
-         world/volcanofx.js's flag note carries that investigation. The rule
-         survives unchanged either way: the choke reads depthAt() off the
-         drawn field, so no picture, no damage — the geometric stand-in
-         wedge that once choked people over clean ground stays deleted. */
-      if (!sheltered(a)) {
-        let choke = 0;
-        /* AND IT IS A GRADIENT, NOT A SWITCH. The measurement that found this:
-           with the bombs throttled and the flow's tail made survivable, ONE
-           beat of the storyboard still killed 68 of the 100 in eleven seconds
-           — and it was this line. A binary test at 6 mm meant a DUSTING did
-           the same 11 damage a second as half a metre of the stuff, so within
-           a few seconds of the plume establishing, every unsheltered actor on
-           the downwind half of the island was on the same clock and the island
-           emptied. That is the owner's "kills way too many people" with no
-           hazard on screen doing it.
-
-           A gradient makes the ash a place you leave rather than a timer you
-           are on: nothing at the edge of the fall, and even standing in the
-           worst of it you have the better part of the eruption to move. The
-           roofs are still what actually kills indoors, through the ledger. */
-        if (AL) {
-          /* THE RAMP HAS TO OUTRUN THE FALL. This plume lays down ~0.2 m on
-             its axis inside eight seconds — the rate is calibrated so roofs
-             actually reach ASH_ROOF_FAIL inside one event, and that feature is
-             worth keeping — so a gradient that saturated at 10 cm was back to
-             being a switch by the time anyone could walk out of it. At 35 cm
-             the worst ground on the island still leaves you most of the
-             eruption, and everywhere else is a real gradient you can read off
-             the colour of the ground you are standing on. */
-          const d = AL.depthAt(ax, az);
-          choke = Math.max(0, Math.min(1, (d - ASH_DOT_DEPTH) / 0.35));
-        }
-        if (choke > 0) surv().hurt(a, scale(3.4, ctx) * choke * dt, { cause: "choked by volcanic ash" });
-      }
+      /* 5) THERE IS NO ASHFALL DAMAGE. The choke read depthAt() off the ground
+         deposit, on the standing rule that the field is the only authority on
+         where there is ash — no picture, no damage. The deposit is deleted
+         (2026-08-30), so the damage goes with it. Resist the obvious "just
+         use a wedge off the wind bearing": that stand-in existed, it choked
+         people over visibly clean ground, and it was deleted for it. If ash
+         should hurt again it needs something on screen to hurt you first. */
     });
 
     /* ---------------- LAVA BOMBS ----------------
@@ -3841,16 +3765,12 @@
        ash does not wash off between disasters. Both stay in the world for the
        rest of the match and are cleared when the mode is torn down. */
     if (ctx.st.lahar) { volScars.push(ctx.st.lahar.harden()); ctx.st.lahar = null; }
-    if (ctx.st.erAshLoad) { volScars.push(ctx.st.erAshLoad); ctx.st.erAshLoad = null; }
     /* A SCAR IS A MEMORY, NOT A LEAK. Two eruptions can legitimately happen
-       in one match (the volcano, plus the earthquake's surprise one), and a
-       third would only be stacking a second full ash field on top of an
-       identical one. With the ash ledger back on (V3) one eruption leaves
-       THREE scars — lava composite, set lahar, ash field — so the old cap
-       of four evicted the first eruption's lava the moment the second one
-       ended. Six holds exactly the two legitimate eruptions' full memory. */
-    while (volScars.length > 6) { const old = volScars.shift(); try { old.dispose(); } catch (e) {} }
-    ctx.st.erRoofs = null;
+       in one match (the volcano, plus the earthquake's surprise one). With the
+       ash field deleted an eruption leaves TWO scars — lava composite and set
+       lahar — so four holds exactly the two legitimate eruptions' full memory.
+       (It was six while the ash field was a third scar per eruption.) */
+    while (volScars.length > 4) { const old = volScars.shift(); try { old.dispose(); } catch (e) {} }
     ctx.st.erWindX = ctx.st.erWindZ = null;
     ctx.st.erupting = false;
   }
@@ -3865,23 +3785,13 @@
         for (let i = 0; i < volScars.length; i++) { try { volScars[i].dispose(); } catch (e) {} }
         volScars.length = 0;
       } else {
-        /* a set deposit still has to tick — and the ASH is being WORKED ON
-           by the weather now: the live wind strips it into streaks, rain
-           washes it (world/volcanofx.js ashLoad's no-supply branch). The
-           lava scar just finishes its colour walk. */
-        let scarSpec = null;
+        /* A SET SCAR STILL TICKS: the lahar finishes hardening, the lava
+           scar finishes its colour walk. The wind/rain weathering branch that
+           used to live here belonged to the ash deposit — it stripped the
+           blanket into streaks and rained it off — and it went with the
+           deposit on 2026-08-30. Nothing left in volScars wants a spec. */
         for (let i = 0; i < volScars.length; i++) {
-          try {
-            const sc = volScars[i];
-            if (sc && sc.kind === "ash") {
-              if (!scarSpec) {
-                const w = windVec();
-                let rn = 0; try { rn = (CBZ.weather && CBZ.weather.intensity) || 0; } catch (e2) {}
-                scarSpec = { windX: w.x, windZ: w.z, rain: rn };
-              }
-              sc.update(dt, scarSpec);
-            } else sc.update(dt, null);
-          } catch (e) {}
+          try { volScars[i].update(dt, null); } catch (e) {}
         }
       }
     }
@@ -3949,17 +3859,10 @@
       if (P.r > 0.7) { const d = Math.hypot(x - P.m.position.x, z - P.m.position.z); if (d < P.r + 3) t = Math.max(t, Math.min(0.95, 1 - (d - P.r * 0.85) / 3)); }
     });
     if (ctx.st.lahar && ctx.st.lahar.hitTest(x, z)) t = Math.max(t, 0.8);
-    /* THE ASH IS BACK, SO THE FLEEING READS AGAIN. The 2026-08-16 build cut
-       this term because bots emptying a visibly clean half of the island
-       looked like broken pathing — correct, WITH the field deleted. V3's
-       field is a visible grey wedge, so the term returns as a gradient read
-       off the same depthAt() the choke uses: bots drift out of exactly the
-       ground the player can see greying over. Capped at 0.5 — leaving the
-       wedge must never outrank fleeing the flow, the melt or the mud. */
-    if (CBZ.CONFIG.VOLCANO_V3 !== false && ctx.st.erAshLoad) {
-      const ad = ctx.st.erAshLoad.depthAt(x, z);
-      if (ad > ASH_DOT_DEPTH) t = Math.max(t, Math.min(0.5, (ad - ASH_DOT_DEPTH) / 0.35));
-    }
+    /* NO ASH TERM. Bots fled the deposit's downwind wedge; with the deposit
+       deleted there is nothing to flee, and a term off a bearing alone would
+       put the whole lobby to windward for a hazard nobody can see — which is
+       exactly the "broken pathing" read the 2026-08-16 build cut it for. */
     return t;
   }
 
@@ -5815,18 +5718,12 @@
          from a uniform draw over the whole map. */
       volcanoDeaths: volcanoDeaths,
       volcanoBombs: bombsThrown,
-      ashRoofCollapses: ashRoofCollapses,
-      // the two numbers that say WHY a roof did or did not go: how many roofs
-      // are actually carrying a load, and the heaviest load any of them has
-      ashRoofs: (st.erRoofs && st.erRoofs.length) || 0,
-      ashRoofMax: (function () {
-        const R = st.erRoofs, A = st.erAshLoad;
-        if (!R || !A) return 0;
-        let m = 0;
-        for (let i = 0; i < R.length; i++) m = Math.max(m, A.roofDepth(R[i].id));
-        return +m.toFixed(3);
-      })(),
-      ashPeakDepth: volA ? volA.ashPeakDepth : 0,
+      // PINNED AT ZERO ON PURPOSE (2026-08-30). The ground deposit and its
+      // roof-load ledger are deleted; these keys stay so any harness reading
+      // them keeps working, and so a future reinstatement of ground ash is
+      // visible here as a number that stopped being zero.
+      ashRoofCollapses: 0, ashRoofs: 0, ashRoofMax: 0, ashPeakDepth: 0,
+      groundAshDeleted: volA ? volA.groundAshDeleted !== false : true,
       volcanoLights: volA ? volA.lights : 0,
       nukeUsedNukefx: nukeFxRuns > 0,
       nukeFxRuns: nukeFxRuns,

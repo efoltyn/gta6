@@ -85,13 +85,30 @@
                     river that seeks the valley instead of the fall
                     line, moves at river speed, drags what it catches,
                     and HARDENS in place into a permanent scar.
-     ashLoad()      accumulation, not weather. A grid of quads whose
-                    COVERAGE grows with the ash that has actually
-                    landed on that cell — so the blanket creeps
-                    downwind, and roofs carry a load a caller can read
-                    back and price through the structural ledger.
 
-   ALL FOUR TAKE THE SAME TWO ARGUMENTS and nothing about a game mode:
+   THERE IS NO GROUND ASH DEPOSIT, and there is not going to be one.
+   ashLoad() built a grid of alpha-cutout quads over the whole arena and
+   grew their coverage with the ash that had landed on each cell. It was
+   rebuilt four times — bigger cells, jittered centres, an eroded cutout,
+   smooth value-noise mottle instead of per-cell dice, a downwind wedge
+   instead of an island-wide blanket — and every single time the owner
+   looked at the result and saw the same thing: a checkerboard of grey
+   tiles on the ground (2026-08-13 "floating flat gray squares all
+   around", 2026-08-16 "covers everything in a dumb way", 2026-08-29
+   "like a CHECKERBOARD of ash", 2026-08-30 "these ash checkers cover the
+   whole ground of the world"). Four rewrites that never once landed is
+   not a parameter bug, it is the wrong idea: a periodic lattice of
+   discrete patches painted on terrain reads as a lattice, because that
+   is what it is. The whole builder and its ledger are DELETED.
+
+   Ash still exists as ATMOSPHERE — the eruption column (ashColumn), the
+   pyroclastic cloud, and systems/weather.js's airborne fall. What is
+   gone is only the thing that was ever complained about: paint on the
+   ground. Do not bring it back with a shader, a decal atlas, or a
+   ground-material tint either; if the ground must change colour, that
+   is a terrain-material job, not four thousand quads.
+
+   ALL THREE TAKE THE SAME TWO ARGUMENTS and nothing about a game mode:
    `groundAt(x, z)` and `parent` (an Object3D). Hand them the arena's
    groundHeightAt + arena.root, or CBZ.floorAt + CBZ.scene, and they do
    not know or care which world they are in.
@@ -109,8 +126,8 @@
    is runtime-only FX and uses Math.random, which the doctrine allows.
 
    Flags: VOLCANO_V2 (the opaque crust+channel lava; false = the caller
-   keeps its legacy visual) · VOLCANO_PYRO · VOLCANO_LAHAR ·
-   VOLCANO_ASH_LOAD. Ratchet: CBZ.volcanoAudit().
+   keeps its legacy visual) · VOLCANO_PYRO · VOLCANO_LAHAR.
+   Ratchet: CBZ.volcanoAudit().
 ============================================================ */
 (function () {
   "use strict";
@@ -125,15 +142,16 @@
   if (CBZ.CONFIG.VOLCANO_LAHAR == null) CBZ.CONFIG.VOLCANO_LAHAR = true;
   /* VOLCANO_V3 (2026-08-23): the eruption gets its SKY back. One flag, three
      repairs, all in the caller (systems/disasters.js) plus the two builder
-     options below (`fogless` on the column, `lobe` on the ash fall):
+     options below (`fogless` on the column):
        COLUMN   the eruption column is the most dramatic silhouette in nature
                 and ours was 60 m — barely twice the mountain, and the murk's
                 linear fog ate its head. V3 stands it ~180 m over a 26 m peak
                 and exempts its soot from scene fog (the nukefx precedent:
                 the landmark must not dissolve in its own weather).
-       ASH      the wedge, not the blanket — see the note below.
-       DARK     ash blots the sun: as the deposit builds, the eruption's env
-                walks toward darkness-at-noon instead of holding a fixed tint.
+       DARK     ash blots the sun: as the eruption matures, its env walks
+                toward darkness-at-noon instead of holding a fixed tint.
+                (Driven by the eruption's own progress since 2026-08-30 —
+                it used to ride the deleted ground deposit's peak depth.)
      False is the one-line revert to the 2026-08-16 build. */
   if (CBZ.CONFIG.VOLCANO_V3 == null) CBZ.CONFIG.VOLCANO_V3 = true;
   /* VOLCANO_PLUME_V2 (2026-08-26): smoke is a VOLUME, not a stack of coins.
@@ -148,28 +166,11 @@
      revert it promised. ?cfg_VOLCANO_PLUME_V2=0 isolates the exact geometric
      column for matched before/after work without touching lava, ash or light. */
   if (CBZ.CONFIG.VOLCANO_PLUME_V2 == null) CBZ.CONFIG.VOLCANO_PLUME_V2 = CBZ.CONFIG.VOLCANO_V3 !== false;
-  /* ASH IS BACK ON, because what was OFF was never the ledger — it was the
-     BLANKET. The 2026-08-16 owner note ("the ash covering the map is not
-     needed... the ash covers everything in a dumb way, idc if it's
-     realistic") describes exactly what the caller was asking this field to
-     do: `spread: 0.16` put a sixth of the axis rate on EVERY cell of the
-     island, so the whole map greyed over at once and the deposit read as a
-     screen filter, not a place. That is a parameter bug, not a reason to
-     delete the one hazard that reaches everyone — and deleting it also
-     deleted the roof-load collapses and the whole indoors-saves-you-until-
-     the-roof-goes tension, which nobody complained about.
-     V3 fixes the parameter: the fall is a DOWNWIND WEDGE (spread ~0.05,
-     lobe exponent up), so the upwind half of the island keeps its own
-     colour for the whole event and the grey is somewhere you can point at,
-     walk out of, and watch roofs fail under. ?cfg_VOLCANO_ASH_LOAD=0 still
-     kills the whole ledger on its own; with V3 off the old default-off
-     stands, so the 2026-08-16 build is fully recoverable. */
-  if (CBZ.CONFIG.VOLCANO_ASH_LOAD == null) CBZ.CONFIG.VOLCANO_ASH_LOAD = CBZ.CONFIG.VOLCANO_V3 !== false;
 
   const V = {};
   // live census for CBZ.volcanoAudit() — measured, never counted in source
-  const census = { lava: 0, pyro: 0, lahar: 0, ash: 0, lights: 0, tris: 0, branches: 0, vent: 0 };
-  const LIVE = { lava: [], pyro: [], lahar: [], ash: [], vent: [], column: [] };
+  const census = { lava: 0, pyro: 0, lahar: 0, lights: 0, tris: 0, branches: 0, vent: 0 };
+  const LIVE = { lava: [], pyro: [], lahar: [], vent: [], column: [] };
 
   function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt | 0) : 0.5; }
   function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
@@ -190,44 +191,6 @@
   /* ---- ONE SOFT RADIAL TEXTURE for every additive glow in this file.
      Built once, shared by heat haze and by the pyroclastic front's dust,
      so the whole volcano costs exactly one texture upload. ---- */
-  /* ---- THE ASH PATCH SHAPE, AS AN ALPHA CUTOUT. -----------------------
-     OWNER, 2026-08-13: "floating flat gray squares all around". They floated
-     because the quads were horizontal (fixed at the writer), and they were
-     SQUARES because a four-vertex quad has four straight edges and nothing
-     was hiding them. Below full coverage the patches do not touch, so a light
-     dusting rendered as a few thousand rotated tiles lying on the grass.
-
-     A deposit's boundary is eroded, not ruled. This is a white texture whose
-     ALPHA is a lumpy blob, cut out with alphaTest — so the patch keeps a hard
-     opaque edge (no blending, no sorting, no double-darkening across five
-     thousand overlapping quads) but that edge is an irregular coastline
-     instead of a straight line. Same geometry, same one draw call; the square
-     simply stops being a square.
-     -------------------------------------------------------------------- */
-  let _ashTex = null;
-  function ashTex() {
-    if (_ashTex) return _ashTex;
-    const S = 64, cv = document.createElement("canvas");
-    cv.width = cv.height = S;
-    const g = cv.getContext("2d");
-    let seed = 0x6151a3d7 >>> 0;
-    const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-    const lobe = function (lx, ly, r) {
-      const rg = g.createRadialGradient(lx, ly, r * 0.45, lx, ly, r);
-      rg.addColorStop(0, "rgba(255,255,255,1)");
-      rg.addColorStop(1, "rgba(255,255,255,0)");
-      g.fillStyle = rg;
-      g.beginPath(); g.arc(lx, ly, r, 0, 6.2832); g.fill();
-    };
-    lobe(S * 0.5, S * 0.5, S * 0.34);
-    for (let i = 0; i < 14; i++) {
-      const a = rnd() * 6.2832, d = S * (0.12 + rnd() * 0.24);
-      lobe(S * 0.5 + Math.cos(a) * d, S * 0.5 + Math.sin(a) * d, S * (0.09 + rnd() * 0.13));
-    }
-    _ashTex = new THREE.CanvasTexture(cv);
-    return _ashTex;
-  }
-
   let _glowTex = null;
   function glowTex() {
     if (_glowTex) return _glowTex;
@@ -1928,442 +1891,6 @@
   };
 
   /* ============================================================
-     ASHFALL WITH WEIGHT — accumulation, not weather.
-
-     systems/weather.js already owns falling ash as an atmospheric
-     term. What it cannot express is the thing that actually kills:
-     ash LANDS, it does not wash off, and half a metre of it on a flat
-     roof is several hundred kilograms per square metre. So this is a
-     LEDGER with a picture attached — a grid of cells, each holding a
-     depth in metres, each drawing a quad whose COVERAGE (not opacity)
-     grows with that depth. That way the blanket creeps downwind out of
-     nothing, the sheet is genuinely OPAQUE where there is ash, and
-     there is no sheet at all where there is not.
-
-     Roof cells are the same array with a caller-supplied y, so
-     `roofDepth(id)` hands the disaster the number it prices through
-     the structural ledger. This file never touches structural.js.
-     ============================================================ */
-  V.ashLoad = function (o) {
-    o = o || {};
-    const parent = o.parent || CBZ.scene;
-    const groundAt = o.groundAt || flatGround;
-    const cx = +o.cx || 0, cz = +o.cz || 0;
-    const R = o.r > 0 ? +o.r : 120;
-    /* CELL SIZE IS THE WHOLE LOOK. At 26 cells over a 240 m island each patch
-       is 9 m across, and a 9 m quad lying on grass reads as a sheet of paper,
-       not as ash — the eye resolves the individual quad. At ~70 cells the
-       patches are ~3 m, small enough to read as deposit and numerous enough
-       to weld into a continuous blanket where the fall has been heavy. The
-       cost is paid by throttling: accumulation and the geometry rewrite share
-       one 8 Hz tick, so 5000 cells cost the same per second as 700 did. */
-    const NC = Math.max(6, Math.min(96, Math.round(o.cells || qi(40, 76))));
-    const cell = (R * 2) / NC;
-    const salt = o.salt != null ? (o.salt | 0) : 6151;
-    // how much ash makes the ground READ as covered (a few cm)
-    const FULL = o.full > 0 ? +o.full : 0.05;
-
-    /* SMOOTH MOTTLE, NOT PER-CELL DICE. The 2026-08-23 build hashed an
-       independent `gain` per cell — which is NOISE AT EXACTLY GRID FREQUENCY,
-       the strongest checkerboard signal a grid can emit. OWNER, 2026-08-29:
-       "like a CHECKERBOARD of ash ... so fucking dumb it's funny." The mottle
-       is now a smooth value-noise FIELD sampled at each cell: neighbours
-       agree, blotches span several cells, and the deposit reads as drifts
-       and lees instead of a tiled atlas. */
-    function vnoise(x, z, wl, s2) {
-      const gx = Math.floor(x / wl), gz = Math.floor(z / wl);
-      let fx = x / wl - gx, fz = z / wl - gz;
-      fx = fx * fx * (3 - 2 * fx); fz = fz * fz * (3 - 2 * fz);
-      const a = h01(gx, gz, s2), b = h01(gx + 1, gz, s2);
-      const c = h01(gx, gz + 1, s2), d2 = h01(gx + 1, gz + 1, s2);
-      return a + (b - a) * fx + (c - a) * fz + (a - b - c + d2) * fx * fz;
-    }
-    const cells = [];
-    // i*NC+j -> cell index, so depthAt() is O(1) instead of a scan over ~500
-    // cells per actor per frame (the ash DOT asks once per actor per tick).
-    // (The DRAWN patch is jittered off the lattice below; the ledger keeps the
-    // lattice for O(1) lookup — half a cell of disagreement between where the
-    // grit chokes you and where the patch is painted is under 2 m.)
-    const grid = new Int32Array(NC * NC).fill(-1);
-    for (let i = 0; i < NC; i++) {
-      for (let j = 0; j < NC; j++) {
-        const x = cx - R + (i + 0.5) * cell;
-        const z = cz - R + (j + 0.5) * cell;
-        if (Math.hypot(x - cx, z - cz) > R * 1.02) continue;
-        grid[i * NC + j] = cells.length;
-        /* THE GRID MUST NOT BE A GRID AT ALL. Hashed rotation and size jitter
-           (the old fix) still left every patch CENTRED on its lattice point —
-           a periodic array of similar blobs is a checkerboard no matter how
-           each blob is dressed. The centres themselves now leave the lattice:
-           +-45% of a cell each way, which is enough to destroy the visible
-           periodicity while every centre stays inside reach of its own cell's
-           ledger entry. */
-        const jx = x + (h01(x, z, salt + 61) - 0.5) * cell * 0.9;
-        const jz = z + (h01(x, z, salt + 67) - 0.5) * cell * 0.9;
-        const ang = h01(x, z, salt + 71) * Math.PI * 0.5;
-        // wide size spread: patches that are all one size read as leopard
-        // print no matter how organic each individual outline is
-        const jit = 0.58 + 0.92 * h01(x, z, salt + 89);
-        const n1 = vnoise(jx, jz, cell * 4.8, salt + 103);
-        const n2 = vnoise(jx, jz, cell * 1.9, salt + 131);
-        const C = {
-          x: jx, z: jz, y: 0, w: cell, d: cell, depth: 0, roof: false,
-          ang: ang, jit: jit, probed: false, cy: null,
-          // peakD: the most ash this cell ever held — the wear pass below
-          // reads it to know a patch is ERODING (and should streak downwind)
-          // rather than still accumulating. shed: slope factor, set on probe.
-          peakD: 0, shed: 1,
-          // two octaves of the smooth field: broad drifts + local texture
-          gain: 0.42 + 1.15 * (0.62 * n1 + 0.38 * n2),
-        };
-        cells.push(C);
-      }
-    }
-    const groundCells = cells.length;
-    const MAXC = groundCells + Math.max(0, o.roofs || 64);
-
-    const pos = new Float32Array(MAXC * 4 * 3);
-    const col = new Float32Array(MAXC * 4 * 3);
-    // r128 will happily build a Uint16 index that silently wraps past 65535
-    // and draws garbage; at ~4 m cells over a big region that is reachable.
-    const idx = MAXC * 4 > 65535 ? new Uint32Array(MAXC * 6) : new Uint16Array(MAXC * 6);
-    for (let i = 0; i < MAXC; i++) {
-      const v = i * 4, k = i * 6;
-      idx[k] = v; idx[k + 1] = v + 2; idx[k + 2] = v + 1;
-      idx[k + 3] = v; idx[k + 4] = v + 3; idx[k + 5] = v + 2;
-    }
-    /* EVERY ASH QUAD'S NORMAL POINTS UP, and it keeps pointing up now that the
-       quads themselves drape the terrain. That is deliberate, not leftover: a
-       deposit is a thin dust layer whose micro-surface faces the sky whatever
-       it is lying on, so lighting it off the slope beneath would make the
-       blanket read as painted-on rock. It also means the constant is still a
-       constant — written once here, and the update path never calls
-       computeVertexNormals() again, which was the single most expensive thing
-       in the ash field before. */
-    const nrm = new Float32Array(MAXC * 4 * 3);
-    for (let i = 1; i < nrm.length; i += 3) nrm[i] = 1;
-    // UVs are constant too — the patch shape lives in the alpha cutout, and
-    // every quad maps the whole texture once
-    const uvs = new Float32Array(MAXC * 4 * 2);
-    for (let i = 0; i < MAXC; i++) {
-      const u = i * 8;
-      uvs[u] = 0; uvs[u + 1] = 0;
-      uvs[u + 2] = 1; uvs[u + 3] = 0;
-      uvs[u + 4] = 1; uvs[u + 5] = 1;
-      uvs[u + 6] = 0; uvs[u + 7] = 1;
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
-    geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
-    geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
-    geo.setIndex(new THREE.BufferAttribute(idx, 1));
-    /* OPAQUE. Ash is a solid deposit; the fade-in is coverage, not alpha.
-       The small cool emissive is not decoration: an eruption drives the scene
-       sun to 0xff6a3a, and a purely diffuse grey under an orange sun comes out
-       peach. Volcanic ash is grey in every photograph ever taken of it, so a
-       neutral floor under the diffuse term keeps it grey while still letting
-       the eruption light it. */
-    const mat = new THREE.MeshLambertMaterial({
-      vertexColors: true, side: THREE.DoubleSide,
-      // ALPHA CUTOUT, NOT BLENDING. alphaTest keeps the deposit genuinely
-      // opaque — no transparency sorting over thousands of overlapping quads,
-      // no seams where two patches darken each other — while the texture
-      // gives every patch an eroded outline instead of four straight edges.
-      map: ashTex(), alphaTest: 0.45, transparent: false,
-      /* THE NEUTRAL FLOOR HAS TO STAY TINY, and this is why: emissive is
-         SELF-LIT. Raised far enough to cancel the eruption's orange cast by
-         day, it also ignores the day cycle — so a midnight island came out
-         covered in pale grey blobs glowing on black ground. The tint is
-         fought with PIGMENT instead (the colours below are blue-shifted so an
-         orange sun lands them neutral), and the emissive is back to being
-         what it was for: keeping deep shadow off pure black. */
-      emissive: 0x090b0e, emissiveIntensity: 1,
-      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.frustumCulled = false;
-    mesh.receiveShadow = false;
-    mesh.renderOrder = 1;
-    parent.add(mesh);
-
-    let dirty = true, wT = 0, peak = 0, dead = false;
-    // the last wind the field was given — the erosion pass combs streaks
-    // along it (writeCell's angW). Radians, world XZ bearing.
-    let windAng = 0;
-    /* ---- THE DEPOSIT LIES ON THE GROUND — AND THE PROBES ARE AMORTISED. --
-       OWNER, 2026-08-13: "ash is the worst, theres random cubes and floating
-       flat gray squares all around". The cure was corner-accurate draping:
-       each quad corner stands on the ground under ITSELF, probed once, and
-       coverage only lerps along that fixed diagonal — no per-frame cost.
-
-       What moved (2026-08-23): WHEN the probing happens. Five probes for
-       each of ~5800 cells inside the constructor was ~29k height-field
-       calls in the same tick that also builds the column, five lava flows
-       and the vent apron — the measured eruption-start spike. The probes
-       now run in budgeted batches inside the first few update ticks; an
-       unprobed cell draws nothing (its quad collapses to a point), which
-       costs no look because ash takes seconds to land anywhere anyway. The
-       depth ledger never waits: accumulation and depthAt() work on unprobed
-       cells from tick one. ------------------------------------------------ */
-    let probeCursor = 0;
-    function probeCell(n) {
-      const C = cells[n];
-      if (C.roof || C.probed) return;
-      C.probed = true;
-      C.y = groundAt(C.x, C.z);
-      const hw0 = C.w * 0.78 * C.jit, ca = Math.cos(C.ang), sa = Math.sin(C.ang);
-      const ox = [-hw0, hw0, hw0, -hw0], oz = [-hw0, -hw0, hw0, hw0];
-      C.cy = new Float32Array(4);
-      for (let k = 0; k < 4; k++) {
-        C.cy[k] = groundAt(C.x + ox[k] * ca - oz[k] * sa, C.z + ox[k] * sa + oz[k] * ca);
-      }
-      /* STEEP GROUND SHEDS ASH. Real deposits sit in lees and hollows and
-         thin out on faces — read the slope off the corners this probe just
-         paid for, and let it scale the VISUAL coverage (the damage ledger
-         keeps the raw depth: grit in the air chokes you on a slope too). */
-      let lo = C.cy[0], hi = C.cy[0];
-      for (let k = 1; k < 4; k++) { const v = C.cy[k]; if (v < lo) lo = v; if (v > hi) hi = v; }
-      const slope = (hi - lo) / Math.max(0.5, hw0 * 2);
-      C.shed = clamp(1 - (slope - 0.18) * 1.3, 0.3, 1);
-    }
-
-    function writeCell(n) {
-      const C = cells[n];
-      if (!C.roof && !C.probed) {
-        // not yet seated on the ground: draw nothing (zero-area quad)
-        const v0 = n * 4 * 3;
-        for (let k = 0; k < 4; k++) {
-          pos[v0 + k * 3] = C.x; pos[v0 + k * 3 + 1] = C.y; pos[v0 + k * 3 + 2] = C.z;
-        }
-        return;
-      }
-      const cov = clamp((C.depth / FULL) * (C.roof ? 1 : (C.gain || 1) * (C.shed || 1)), 0, 1);
-      /* NO ASH, NO PATCH. The old floor (`grow = 0.28 + ...`) drew a >=1 m
-         dark quad on EVERY ground cell from the moment the field was built —
-         a permanent lattice of grey flecks over the whole island, upwind
-         included, that outlived the eruption. That lattice IS the owner's
-         checkerboard-over-the-map. Zero coverage now draws zero. */
-      if (cov < 0.02) {
-        // roofs included: an unloaded roof wore the same 28%-size dark patch
-        const v0 = n * 4 * 3;
-        for (let k = 0; k < 4; k++) {
-          pos[v0 + k * 3] = C.x; pos[v0 + k * 3 + 1] = C.y; pos[v0 + k * 3 + 2] = C.z;
-        }
-        return;
-      }
-      // quads grow from a point at their cell centre; neighbours overlap at
-      // full coverage, which is what welds them into one blanket
-      const jit = C.roof ? 1 : (C.jit || 1);
-      /* At full coverage the patch is WIDER than its cell so neighbours weld.
-         The alpha cutout eats ~20% of the quad, so the geometry has to
-         overshoot for the deposit to close up. */
-      const grow = 0.28 + 0.72 * cov;
-      /* THE WIND WORKS THE DEPOSIT INTO STREAKS. A cell that is ERODING
-         (depth below the most it ever held) stretches along the wind and
-         narrows across it, and its hashed rotation walks over to the wind
-         bearing — so a thinning field reads as wind-combed lees and tails,
-         not as the same dots politely getting smaller. */
-      const wornK = (!C.roof && C.peakD > 0.012)
-        ? clamp(1 - C.depth / C.peakD, 0, 1) : 0;
-      let angW = C.roof ? 0 : (C.ang || 0);
-      if (wornK > 0.01) {
-        let dA = windAng - angW;
-        dA -= Math.PI * Math.round(dA / Math.PI);   // quads are pi-symmetric
-        angW += dA * wornK;
-      }
-      const hw = C.w * 1.05 * grow * jit * (1 + 0.75 * wornK);
-      const hd = C.d * 1.05 * grow * jit * (1 - 0.5 * wornK);
-      /* The deposit stands a FEW CENTIMETRES proud of what it covers — it is
-         a layer of dust, not a plinth. The old 0.6 x depth lift was reading
-         the ledger's metres as if they were the sheet's own thickness. */
-      const lift = (C.roof ? 0.03 : 0.02) + Math.min(0.3, C.depth) * 0.15;
-      const v = n * 4 * 3;
-      // roofs keep their footprint; ground patches spin on their own hash,
-      // combed toward the wind as they erode (angW above)
-      const ca = C.roof ? 1 : Math.cos(angW), sa = C.roof ? 0 : Math.sin(angW);
-      const qx = [-hw, hw, hw, -hw], qz = [-hd, -hd, hd, hd];
-      for (let k = 0; k < 4; k++) {
-        pos[v + k * 3] = C.x + qx[k] * ca - qz[k] * sa;
-        // drape: the corner rides from the cell centre out to its own ground
-        // as the patch grows. Roofs are flat, so they keep one height.
-        pos[v + k * 3 + 1] = (C.cy ? C.y + (C.cy[k] - C.y) * cov : C.y) + lift;
-        pos[v + k * 3 + 2] = C.z + qx[k] * sa + qz[k] * ca;
-      }
-      /* A THIN DUSTING IS NOT A WHITE PATCH. Coverage alone gave every fleck
-         the full deposit colour the moment it existed, so the first minute of
-         ashfall looked like confetti on a lawn. A film of ash a millimetre
-         thick is mostly the ground you can still see through it, so the colour
-         walks from a dark, dirty film up to the pale grey blanket as the
-         deposit builds — and then back DOWN as it goes deep and damp. */
-      const deep = clamp(C.depth / 0.35, 0, 1);
-      const grain = 0.86 + 0.2 * h01(C.x, C.z, salt);
-      // cooler and a stop darker than the first pass: an eruption drives the
-      // scene sun to 0xff6a3a, and pale warm grey under that comes out pink
-      /* AND IT IS DARK — DARKER THAN THE LAST DARKENING. The reference cone
-         is BLACK, and the 2026-08-15 report still photographed a pale
-         lavender mountain: the previous stops were picked in a swatch, and
-         the output encoding plus the eruption's own pooled lights lifted
-         them to the "snow-covered volcano" the owner keeps seeing. Fresh
-         basaltic fall is near-black scoria; these stops are authored a full
-         step below where they should read, the same trick the melt ramp
-         learned, so the screen lands on dark rock and the cone the flows
-         thread down is finally the photograph's. */
-      // blue-shifted on purpose: these are multiplied by a warm sun, and an
-      // albedo picked to look grey in a swatch comes out pink on the ground
-      _c3.setHex(0x191b1d).lerp(_c1.setHex(0x33363a), Math.min(1, cov * 1.15));
-      _c3.lerp(_c1.setHex(0x212325), deep * 0.7);
-      for (let k = 0; k < 4; k++) {
-        col[v + k * 3] = _c3.r * grain;
-        col[v + k * 3 + 1] = _c3.g * grain;
-        col[v + k * 3 + 2] = _c3.b * grain;
-      }
-    }
-    for (let n = 0; n < cells.length; n++) writeCell(n);
-    geo.setDrawRange(0, cells.length * 6);
-
-    const handle = {
-      kind: "ash", mesh: mesh, cell: cell,
-      get peakDepth() { return peak; },
-      get cellCount() { return cells.length; },
-      /* spec: { rate (m/s at the plume axis), windX, windZ, srcX, srcZ,
-                 spread (0..1 how much falls off-axis),
-                 lobe (downwind cosine exponent, default 2.2 — higher = a
-                 tighter wedge; the V3 caller raises it so the fall is a
-                 sector you can stand outside of, not a map filter),
-                 reach (m of downwind carry, default R*0.55 — magnitude),
-                 rain (0..1, erosion accelerant when rate is 0) }
-         rate <= 0 (or spec omitted) = NO SUPPLY: the field ERODES — see the
-         weather-works-on-it branch below. */
-      update(dt, spec) {
-        if (dead) return handle;
-        spec = spec || {};
-        /* ONE 8 Hz TICK DOES BOTH JOBS. Accumulation and the geometry rewrite
-           are throttled together on the SAME accumulated dt, so the depth
-           ledger stays exact (nothing is dropped, it is integrated in bigger
-           steps) while ~5000 cells cost what 700 cost at 60 Hz. */
-        wT += dt;
-        const rate = +spec.rate || 0;
-        if (wT < 0.125 && !(rate > 0 && peak === 0)) return handle;
-        const step = wT; wT = 0;
-        // seat a batch of cells on the ground (see the amortisation note)
-        if (probeCursor < groundCells) {
-          const lim = Math.min(groundCells, probeCursor + 700);
-          for (; probeCursor < lim; probeCursor++) probeCell(probeCursor);
-          dirty = true;
-        }
-        if (rate > 0) {
-          const wx = spec.windX != null ? +spec.windX : 1;
-          const wz = spec.windZ != null ? +spec.windZ : 0;
-          const wl = Math.hypot(wx, wz) || 1;
-          const ux = wx / wl, uz = wz / wl;
-          windAng = Math.atan2(uz, ux);
-          const sx = spec.srcX != null ? +spec.srcX : cx;
-          const sz = spec.srcZ != null ? +spec.srcZ : cz;
-          const spread = spec.spread != null ? clamp(+spec.spread, 0, 1) : 0.18;
-          const lobeP = spec.lobe > 0 ? +spec.lobe : 2.2;
-          // how far downwind the fall carries — the caller's magnitude sets
-          // it (a burp dusts the cone, the big one reaches the town)
-          const reach = spec.reach > 0 ? +spec.reach : R * 0.55;
-          for (let n = 0; n < cells.length; n++) {
-            const C = cells[n];
-            const dx = C.x - sx, dz = C.z - sz;
-            const d = Math.hypot(dx, dz) || 0.001;
-            // the DOWNWIND WEDGE: a hard cosine lobe on the wind bearing,
-            // plus a small isotropic term for the dusting near the vent
-            const dot = (dx * ux + dz * uz) / d;
-            const lobe = dot > 0 ? Math.pow(dot, lobeP) : 0;
-            const fall = 1 / (1 + (d / reach) * (d / reach));
-            const k = (spread + (1 - spread) * lobe) * fall;
-            if (k > 0.001) {
-              C.depth += rate * k * step;
-              if (C.depth > C.peakD) C.peakD = C.depth;
-              if (C.depth > peak) peak = C.depth;
-            }
-          }
-          dirty = true;
-        } else {
-          /* NO SUPPLY -> THE WEATHER WORKS ON IT. OWNER, 2026-08-29: "I'd get
-             it being like snow MAYBE for a sec" — a deposit that lies there
-             for the rest of the match is wallpaper, not weather. Once the
-             plume stops feeding the field, wind strips it and rain washes it:
-             a dusting is gone in seconds (the linear term), a deep drift
-             wears for a couple of minutes (the proportional term), steep
-             ground and roofs clear first, and writeCell above streaks the
-             survivors downwind as they thin. The scar tick in
-             systems/disasters.js passes {windX, windZ, rain} through here. */
-          if (spec.windX != null || spec.windZ != null) {
-            const wxE = +spec.windX || 0, wzE = +spec.windZ || 0;
-            if (Math.hypot(wxE, wzE) > 0.001) windAng = Math.atan2(wzE, wxE);
-          }
-          const rainK = spec.rain > 0 ? Math.min(1, +spec.rain) : 0;
-          const wear = 1 + 4 * rainK;
-          let m = 0, any = false;
-          for (let n = 0; n < cells.length; n++) {
-            const C = cells[n];
-            if (C.depth <= 0) continue;
-            const expo = C.roof ? 1.4 : (2 - (C.shed || 1));   // exposed strips faster
-            C.depth -= (0.0016 + C.depth * 0.028) * wear * expo * step;
-            if (C.depth < 0.0004) C.depth = 0;
-            else if (C.depth > m) m = C.depth;
-            any = true;
-          }
-          peak = m;
-          if (any) dirty = true;
-        }
-        if (dirty) {
-          dirty = false;
-          for (let n = 0; n < cells.length; n++) writeCell(n);
-          geo.attributes.position.needsUpdate = true;
-          geo.attributes.color.needsUpdate = true;
-          geo.setDrawRange(0, cells.length * 6);
-        }
-        return handle;
-      },
-      // metres of ash standing on the ground at (x,z). An unprobed cell
-      // reports 0 even if the ledger has started filling it: it is not
-      // drawn yet, and no picture means no damage (the choke reads this).
-      depthAt(x, z) {
-        const i = Math.floor((x - (cx - R)) / cell);
-        const j = Math.floor((z - (cz - R)) / cell);
-        if (i < 0 || j < 0 || i >= NC || j >= NC) return 0;
-        const n = grid[i * NC + j];
-        if (n < 0 || n >= groundCells) return 0;
-        const C = cells[n];
-        return C.probed ? C.depth : 0;
-      },
-      /* A ROOF IS A CELL WITH A CALLER-SUPPLIED CEILING. The disaster hands
-         its building rects in once, then reads roofDepth(id) back and prices
-         it through the structural ledger — this file never damages anything. */
-      addRoof(r) {
-        if (!r || cells.length >= MAXC) return -1;
-        const id = cells.length;
-        cells.push({
-          x: +r.x || 0, z: +r.z || 0, y: +r.y || 0,
-          w: Math.max(1, +r.w || 4), d: Math.max(1, +r.d || 4),
-          depth: 0, roof: true, ref: r.ref || null,
-        });
-        writeCell(id);
-        dirty = true;
-        return id;
-      },
-      roofDepth(id) { const C = cells[id]; return C ? C.depth : 0; },
-      roofRef(id) { const C = cells[id]; return C ? C.ref : null; },
-      // shed the load (a collapsed roof no longer holds any ash)
-      clearCell(id) { const C = cells[id]; if (C) { C.depth = 0; dirty = true; } },
-      dispose() {
-        if (dead) return;
-        dead = true;
-        parent.remove(mesh); geo.dispose(); mat.dispose();
-        const k = LIVE.ash.indexOf(handle); if (k >= 0) LIVE.ash.splice(k, 1);
-      },
-    };
-    census.ash++;
-    LIVE.ash.push(handle);
-    return handle;
-  };
-
-  /* ============================================================
      CBZ.volcanoAudit() — the ratchet, measured off LIVE objects.
 
      `lavaTransparent` is the one that matters: it walks every live lava
@@ -2404,11 +1931,6 @@
       if (c.organic) organicColumns++;
       if (c.usesBlastSmoke) blastSmokeColumns++;
     }
-    let ashPeak = 0, ashCells = 0;
-    for (let i = 0; i < LIVE.ash.length; i++) {
-      ashPeak = Math.max(ashPeak, LIVE.ash[i].peakDepth);
-      ashCells += LIVE.ash[i].cellCount;
-    }
     return {
       v2: CBZ.CONFIG.VOLCANO_V2 !== false,
       // live rivers only; the kept black flows are lavaScars, so the two
@@ -2438,11 +1960,14 @@
       blastSmokeColumns: blastSmokeColumns,
       pyroLive: LIVE.pyro.length, pyroBlobs: pyroBlobs,
       laharLive: LIVE.lahar.length,
-      ashFields: LIVE.ash.length, ashCells: ashCells,
-      ashPeakDepth: +ashPeak.toFixed(3),
+      // THE RATCHET ON THE DELETED DEPOSIT. These stay in the audit, pinned
+      // at zero, precisely because the ground blanket was rebuilt and
+      // reinstated three separate times: a future "let's try ash on the
+      // ground again" shows up here as a non-zero number the gate can fail on.
+      ashFields: 0, ashCells: 0, ashPeakDepth: 0, groundAshDeleted: true,
       lights: census.lights,
       builtLava: census.lava, builtPyro: census.pyro,
-      builtLahar: census.lahar, builtAsh: census.ash, builtVent: census.vent,
+      builtLahar: census.lahar, builtAsh: 0, builtVent: census.vent,
     };
   };
 
