@@ -345,14 +345,25 @@
   //  — redirects blood/mist into a bloom puff while a wet event is in flight.
   //  So the whole file gains the medium, not just the shark that prompted it.
   //
-  //  COLOUR SCIENCE (the part that makes this read as researched): water
-  //  absorbs red roughly 100x faster than blue. Blood inside ~2m is still
-  //  arterial red; by 8m it is a murky brown; past ~10m it is GREEN-BLACK.
-  //  That wrongness is the horror ASSET — it does not read as "a pool of
-  //  blood", it reads as something leaking out of you into the dark. Colour is
-  //  a 3x3 ladder over (depth band x age band): nine SHARED materials, never
-  //  one per puff and never written to per frame — a puff only ever swaps
-  //  which shared material it points at.
+  //  COLOUR: BLOOD IS RED. There used to be a "colour science" ladder here
+  //  that browned the plume with depth and went green-black past ~10 m, on the
+  //  grounds that water absorbs red about 100x faster than blue. The physics
+  //  is real; the feature was not. Owner, 2026-08-30: "blood should be
+  //  fucking red — get rid of the murky brown blood."
+  //
+  //  He is right, and the reason is worth keeping so nobody rebuilds it. Red
+  //  absorption is about the LIGHT REACHING the blood, and this engine already
+  //  models that: world/water_spec.js attenuates everything seen through the
+  //  water column, and the plume is drawn through it like everything else. So
+  //  the ladder was tinting a second time, on top of the tint the renderer had
+  //  already applied — and doing it with hand-picked hexes that nobody ran
+  //  through the encoder, which is how "murky brown" reached the screen as
+  //  #CA863F amber and "green-black" as #7BA070 sage. Yellow blood.
+  //  Absorption can only ever take a channel AWAY; it cannot invent green.
+  //
+  //  So colour is now ONE dimension — age — and every rung of it is arterial
+  //  red. Three SHARED materials, never one per puff and never written to per
+  //  frame: a puff only ever swaps which shared material it points at.
   //
   //  MOTION: a plume that rises straight reads as SMOKE. Blood tumbles and
   //  folds, so every puff carries its own noise phase and a sin/cos wander,
@@ -493,28 +504,46 @@
     return inWater(x, y, z) ? "water" : "air";
   };
 
-  // ---- the pooled colour ladder: [depth band][age band] ----------------------
-  const BLOOM_COLS = [
-    [0xb01218, 0x8e0f15, 0x7a0d12],   // < 2m   still arterial — red survives here
-    [0x5c2a10, 0x452d15, 0x33301a],   // 2-8m   the red is already gone: murky brown
-    [0x243a20, 0x1a2a18, 0x101a10],   // > 8m   green-black into near-black
-  ];
+  /* ---- the pooled colour ladder: ONE dimension, and it is age -------------
+     BLOOD IS RED. This used to be a 3x3 table that browned the plume past 2 m
+     and went "green-black" past 8 m. It rendered as neither: run through this
+     renderer's real chain (outputEncoding = sRGBEncoding with r128 colour
+     management OFF, so a hex is treated as LINEAR, times RENDER_EXPOSURE
+     1.16 / 0.6 = a 1.93x multiply, then ACES, which desaturates toward white
+     as it brightens) the "murky brown" rung came out #CA863F amber, #B18C52
+     tan and #979161 OLIVE-YELLOW, and the "green-black" rung came out #7BA070
+     sage GREEN. 0x33301a was the whole thing in one number: R 51, G 48, B 26
+     is an olive before the encoder even touches it. Nothing diluted it either
+     — bloodTexture() is pure white with an alpha feather, so the material
+     colour IS the pixel.
+
+     The table is gone rather than recalibrated, and that is the owner's call
+     and the right one. Depth-tinting blood here was always double-counting:
+     world/water_spec.js already attenuates everything seen through the water
+     column, the plume included, so the renderer was doing the physics and this
+     table was doing it a second time by hand. What is left is the fade a
+     cloud actually has — it thins and darkens as it disperses — and every
+     rung of it is arterial.
+
+     Three shared materials now instead of nine. `age` indexes them directly.
+     If depth ever wants to read differently again, do it by dimming what is
+     already red, never by moving the hue: absorption can only take a channel
+     AWAY, so no amount of it turns blood yellow or green. */
+  const BLOOM_COLS = [0xb01218, 0x8e0f15, 0x7a0d12];   // fresh -> settled -> old, all arterial
   const BLOOM_ALPHA = [0.5, 0.3, 0.12];
   const bloomMats = [];
-  function bloomMat(band, age) {
-    const i = band * 3 + age;
-    let m = bloomMats[i];
+  function bloomMat(age) {
+    let m = bloomMats[age];
     if (!m) {
       m = new THREE.SpriteMaterial({
-        map: bloodTexture(), color: BLOOM_COLS[band][age],
+        map: bloodTexture(), color: BLOOM_COLS[age],
         transparent: true, opacity: BLOOM_ALPHA[age], depthWrite: false,
       });
       m._shared = true;                  // rm() must never dispose a ladder rung
-      bloomMats[i] = m;
+      bloomMats[age] = m;
     }
     return m;
   }
-  function depthBand(d) { return d < 2 ? 0 : (d < 8 ? 1 : 2); }
 
   // ---- puff pool: sprites are recycled forever, never re-allocated -----------
   /* THE SURFACE LID CLAMPS THE QUAD, NOT THE SPRITE'S CENTRE.
@@ -534,8 +563,8 @@
      about 0.42 * sc; keeping rim + gap under the surface keeps the whole sprite
      in the water at every scale, at spawn as well as in flight.
 
-     Nothing BELOW the surface changes: same BLOOM_COLS ladder, same depth/age
-     bands, same turbulence, same current advection. The underwater trail the
+     Nothing BELOW the surface changes: same BLOOM_COLS rungs, same age fade,
+     same turbulence, same current advection. The underwater trail the
      owner calls one of the best things in the game is untouched — and the
      air-spawned half of a kill cloud now joins it instead of hanging over it,
      so there is MORE plume in the water, not less.
@@ -570,9 +599,9 @@
     if (y > lid0) y = lid0;
     let b = puffPool.pop();
     if (!b) {
-      const sp = new THREE.Sprite(bloomMat(0, 0));
+      const sp = new THREE.Sprite(bloomMat(0));
       sp.renderOrder = 5;
-      b = { s: sp, vx: 0, vy: 0, vz: 0, rise: 0, t: 0, life: 1, sc: 1, grow: 0.5, ph: 0, ph2: 0, freq: 1, wob: 0, band: -1, age: -1, cx: 0, cz: 0, curT: 0, sy: 0, haze: false, surf: false };
+      b = { s: sp, vx: 0, vy: 0, vz: 0, rise: 0, t: 0, life: 1, sc: 1, grow: 0.5, ph: 0, ph2: 0, freq: 1, wob: 0, age: -1, cx: 0, cz: 0, curT: 0, sy: 0, haze: false, surf: false };
       scene().add(sp);
     }
     b.s.position.set(x, y, z);
@@ -584,8 +613,8 @@
     b.freq = haze ? 0.7 + Math.random() * 0.7 : 1.6 + Math.random() * 1.6;
     b.wob = haze ? 0.1 + Math.random() * 0.09 : 0.26 + Math.random() * 0.2;
     b.cx = 0; b.cz = 0; b.curT = 0; b.sy = surf; b.surf = false;
-    b.band = -1; b.age = -1;
-    b.s.material = bloomMat(depthBand(Math.max(0, b.sy - y)), 0);
+    b.age = -1;
+    b.s.material = bloomMat(0);
     b.s.scale.set(size, size, 1);
     b.s.visible = true;
     puffs.push(b);
@@ -689,18 +718,12 @@
         }
       }
       b.s.scale.set(b.sc, b.sc, 1);
-      // walk the ladder: older AND deeper both darken, and a puff that drifts
-      // up into the shallows genuinely gets its red back.
+      // walk the ladder: a cloud thins and darkens as it disperses. Depth is
+      // NOT a factor any more — see BLOOM_COLS. The renderer's own water column
+      // already dims anything seen through it, and blood is red at every depth.
       const f = b.t / b.life;
       const age = f < 0.35 ? 0 : (f < 0.72 ? 1 : 2);
-      // A PINNED PLUME IS AT THE SURFACE, whatever its centre's y says. The lid
-      // now sits a visible-RADIUS under the swell, so a grown haze puff riding it
-      // has its centre metres down and would walk into the 2-8 m murky-brown rung
-      // while its top edge is touching daylight. Depth for the colour ladder is
-      // the depth of the BLOOD, so a puff against the lid reads shallow — this
-      // keeps a surface plume exactly the arterial red it has always been.
-      const band = depthBand(pinned ? 0 : Math.max(0, b.sy - pos.y));
-      if (age !== b.age || band !== b.band) { b.age = age; b.band = band; b.s.material = bloomMat(band, age); }
+      if (age !== b.age) { b.age = age; b.s.material = bloomMat(age); }
     }
   }
 
