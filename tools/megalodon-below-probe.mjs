@@ -55,33 +55,22 @@ const q = OFF ? "&cfg_SHARK_ASCENT=0" : "";
 const rig = await launch({ rafBudget: 0 });
 await rig.open("index.html", `seed=${SEED}&cfg_BOOT_METER=0${q}`);
 if (!await rig.wait("window.CBZ && CBZ.game && CBZ.stepSim", 240000)) {
-  console.error("page never published CBZ"); const jumps = await evl(`(window.__yJumps||[])`);
-if (Array.isArray(jumps) && jumps.length) {
-  say("\n  Y JUMPS (>3 m in one assignment)");
-  for (const j of jumps.slice(0, 6)) say(`    ${j.from} -> ${j.to}\n       ${j.at}`);
-}
-const tr = await evl(`(CBZ.sharkAscentAudit ? CBZ.sharkAscentAudit().trace : [])`);
-if (Array.isArray(tr) && tr.length) {
-  say("\n  ASCENT TRACE  [frame, ownDepth, quarryDepth, vy, draft, arrivalMargin]");
-  for (const r of tr.slice(0, 60)) say("    " + JSON.stringify(r));
-}
-await rig.close(); process.exit(1);
+  console.error("page never published CBZ"); await rig.close(); process.exit(1);
 }
 
 const burst = (sec) => rig.evl(
   `(() => { for (let i=0,n=${Math.max(1, Math.round(sec * 30))}; i<n; i++) { CBZ.hitstop=0; CBZ.slowmo=0; CBZ.stepSim(1/30); } return true; })()`);
 async function evl(src) { return rig.evl(`(()=>{try{return (${src})}catch(e){return {__err:String(e&&e.message||e)}}})()`); }
-const die = async (m) => { console.error(m); const jumps = await evl(`(window.__yJumps||[])`);
-if (Array.isArray(jumps) && jumps.length) {
-  say("\n  Y JUMPS (>3 m in one assignment)");
-  for (const j of jumps.slice(0, 6)) say(`    ${j.from} -> ${j.to}\n       ${j.at}`);
-}
-const tr = await evl(`(CBZ.sharkAscentAudit ? CBZ.sharkAscentAudit().trace : [])`);
-if (Array.isArray(tr) && tr.length) {
-  say("\n  ASCENT TRACE  [frame, ownDepth, quarryDepth, vy, draft, arrivalMargin]");
-  for (const r of tr.slice(0, 60)) say("    " + JSON.stringify(r));
-}
-await rig.close(); process.exit(1); };
+const die = async (m) => {
+  console.error(m);
+  const jumps = await evl(`(window.__yJumps||[])`);
+  if (Array.isArray(jumps) && jumps.length) {
+    say("\n  Y JUMPS (>3 m in one assignment)");
+    for (const j of jumps.slice(0, 6)) say(`    ${j.from} -> ${j.to}\n       ${j.at}`);
+  }
+  await rig.close();
+  process.exit(1);
+};
 
 // ---- boot into free play ---------------------------------------------------
 say(`booting free play  (SHARK_ASCENT ${OFF ? "OFF — the old code path" : "ON"})`);
@@ -293,10 +282,5 @@ const jumps = await evl(`(window.__yJumps||[])`);
 if (Array.isArray(jumps) && jumps.length) {
   say("\n  Y JUMPS (>3 m in one assignment)");
   for (const j of jumps.slice(0, 6)) say(`    ${j.from} -> ${j.to}\n       ${j.at}`);
-}
-const tr = await evl(`(CBZ.sharkAscentAudit ? CBZ.sharkAscentAudit().trace : [])`);
-if (Array.isArray(tr) && tr.length) {
-  say("\n  ASCENT TRACE  [frame, ownDepth, quarryDepth, vy, draft, arrivalMargin]");
-  for (const r of tr.slice(0, 60)) say("    " + JSON.stringify(r));
 }
 await rig.close();

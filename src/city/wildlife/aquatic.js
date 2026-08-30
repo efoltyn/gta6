@@ -101,6 +101,34 @@
         /(^|[?&])sharkmouth=off(&|$)/.test(location.search)) return false;
     return !(CBZ.CONFIG && CBZ.CONFIG.SHARK_MOUTH_SPLIT === false);
   }
+  /* SHARK_MAW_TRIM — the buccal sack, cut down. Owner, looking at the
+     prey's-eye shot: "find the black square in the mouth it's retarded and
+     make it smaller it's sticking out."
+
+     He is describing sharkBuccalSack, and it took a paint pass to prove it
+     rather than a guess: every dark mesh in the head was tinted a primary
+     colour and the mouth photographed from the prey's eye
+     (tools/shark-mouth-paint.mjs). The sack came back as a single object
+     filling most of the gape and standing PROUD of the tooth arc with hard
+     straight edges and sharp corners — dark from in front, because you are
+     looking into an unlit interior, and pale from directly below, because
+     from there you see its lit outer wrap. One object, two readings, and
+     "black square" is a fair description of both.
+
+     §6 of docs/SHARK-REFERENCE.md is the law it was breaking: the cavity must
+     RECEDE. So the trim is mostly about where the sack STARTS — pulled deeper
+     behind the front seal so it can never be the frontmost thing in the gape
+     — plus a narrower plan that keeps it inside the tooth ring and a shallower
+     dome so it is a recess rather than a box. Depth is not the thing being
+     removed; PROTRUSION is.
+
+     ?sharkmaw=off or CBZ.CONFIG.SHARK_MAW_TRIM=false restores the old numbers
+     byte for byte. */
+  function mawTrimOn() {
+    if (typeof location !== "undefined" && location.search &&
+        /(^|[?&])sharkmaw=off(&|$)/.test(location.search)) return false;
+    return !(CBZ.CONFIG && CBZ.CONFIG.SHARK_MAW_TRIM === false);
+  }
   /* The SEAM — the closed-mouth line on the side of the head, y as a function
      of x. It follows the gum arc: level at the front lip, rising toward the
      jaw corner exactly like addSharkMouth's riseAt, so the hull notch, the
@@ -1654,9 +1682,15 @@
        a dark arch cut into the jaw. The cavity is a cavity; it has no business
        reaching the skin. Costs the open mouth nothing visible — the sack's
        walls are still the cheeks you see down the throat. */
+    const MAW = mawTrimOn();
+    // 0.78 -> 0.68: the sack's half-width, as a fraction of the mouth's. The
+    // old plan carried it out to within a hair of the tooth arc, so its
+    // corners cleared the crowns and became the silhouette; inside 0.68 the
+    // teeth ring it from every angle.
+    const sackPlanK = MAW ? 0.68 : 0.78;
     function oralPlan(x) {
       const u = clamp((x - cx) / rad, -1, 1);
-      return { u: u, hz: hw * Math.sqrt(Math.max(0, 1 - u * u)) * 0.78 };
+      return { u: u, hz: hw * Math.sqrt(Math.max(0, 1 - u * u)) * sackPlanK };
     }
     /* THE FLOOR OF THE SACK STOPS AT THE CHIN'S DECK, and this is a hard
        floor, not a preference. The chin is a SHELL: the deck is its top face,
@@ -1681,7 +1715,12 @@
       return Math.min(topY, (r.y + r.ry * 0.55) - hingeY);
     }
 
-    const sack = meshOf(cachedGeom("buccalSack|v3|" + [hingeX, hingeY, len, width,
+    /* THE FLAG IS IN THE CACHE KEY. cachedGeom hands back one geometry per
+       key for the life of the page, so a key that does not mention the trim
+       would serve whichever shape happened to be built first to both sides of
+       an A/B — which is a comparison of nothing. */
+    const sack = meshOf(cachedGeom("buccalSack|v4|" + (MAW ? "trim" : "old") + "|" +
+      [hingeX, hingeY, len, width,
       gap, cx, rad, A, cornerRise, upperY, lowerY,
       JSON.stringify(o.rings || null)].join(","), function () {
       /* THE SACK STOPS BEHIND THE SEAL. Its front wall used to stand exactly
@@ -1692,7 +1731,13 @@
          cavity between them: the owner's "white chunks", most of them, in one
          object. Six per cent of a jaw behind the seal there is skin in front
          of it from every angle. */
-      const sh = new Shell(), N = 14, M = 10, xFront = cx + rad - len * 0.06, xBack = -len * 0.16;
+      /* THE FRONT WALL GOES DEEPER IN. This is the whole fix: at 6% of a jaw
+         behind the seal the sack's front pinch was still level with the tooth
+         row, so the first thing the eye met looking into an open mouth was a
+         flat slab rather than an opening. 16% puts a tooth's depth of daylight
+         in front of it and the cavity reads as something you look INTO. */
+      const sh = new Shell(), N = 14, M = 10,
+        xFront = cx + rad - len * (MAW ? 0.16 : 0.06), xBack = -len * 0.16;
       const top = [], bot = [];
       for (let i = 0; i <= N; i++) {
         const ti = i / N, x = lerp(xFront, xBack, ti);
@@ -1713,8 +1758,11 @@
           const sg = -1 + (2 * j) / M, z = hzAt * sg;
           const ang = Math.atan2(z / hw, pl.u), rise = riseAt(clamp(ang, -A, A));
           const dome = (1 - sg * sg) * fx;
-          tr.push([x, sackRoofAt(x, upperY + rise + gap * 0.62 * dome), z]);
-          br.push([x, Math.max(lowerY + rise - gap * 0.30 * dome,
+          // shallower arch: a recess, not a box. The roof still climbs into
+          // the head (that is where a mouth's depth belongs, per the note
+          // above) — it just stops trying to be the size of the head.
+          tr.push([x, sackRoofAt(x, upperY + rise + gap * (MAW ? 0.48 : 0.62) * dome), z]);
+          br.push([x, Math.max(lowerY + rise - gap * (MAW ? 0.22 : 0.30) * dome,
             sackFloorAt(lowerY + rise)), z]);
         }
         top.push(tr); bot.push(br);
@@ -1781,7 +1829,12 @@
     sack.name = "sharkBuccalSack";
     dental.add(sack);
 
-    const liner = meshOf(cachedGeom("mandibleLiner|v3|" + [len, width, gap, cx, rad,
+    // ...and the liner's key carries the trim too, because it is cut from the
+    // same oralPlan the sack is: change the plan width and this geometry
+    // changes with it, so a key that omitted the flag would hand an A/B the
+    // first shape built and call it both columns.
+    const liner = meshOf(cachedGeom("mandibleLiner|v4|" + (MAW ? "trim" : "old") + "|" +
+      [len, width, gap, cx, rad,
       A, cornerRise, lowerY].join(","), function () {
       const sh = new Shell(), N = 12, M = 10, xFront = cx + rad, xBack = 0;
       const rows = [];

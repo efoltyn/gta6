@@ -443,3 +443,79 @@ it should be near ZERO, because the whole point is that it came up to your
 depth instead of biting you from the dark (`arrivalVerticalM`). Scoring the raw
 number "higher is better" made a megalodon closing from 6.89 m under the diver
 to 3.96 m read as a regression.
+
+---
+
+## 12. THE BLACK SQUARE IN THE MOUTH (owner, 2026-08-30)
+
+Owner, on the prey's-eye shot from §11: **"find the black square in the mouth
+it's retarded and make it smaller it's sticking out."**
+
+### FINDING IT, RATHER THAN GUESSING
+
+Worth recording the method, because two rounds of bounding-box arithmetic gave
+two different answers and one of them confidently accused the animal's GILLS of
+being in front of its teeth. (The bug was mine: taking a WORLD axis-aligned box
+and transforming its corners back into body space re-bounds an already-inflated
+box through a rotation. Measure with the mesh's own geometry bounds through the
+relative matrix instead.)
+
+What settled it was `tools/shark-mouth-paint.mjs`: tint every dark mesh in the
+head a primary colour, open the jaws, photograph the mouth from the prey's eye,
+and look. The answer is then a picture, not an inference.
+
+It is **`sharkBuccalSack`** — one object filling most of the gape and standing
+proud of the tooth arc with hard straight edges and sharp corners. It reads
+DARK from in front (you are looking into an unlit interior) and PALE from
+directly below (from there you see its lit outer wrap). One mesh, two readings;
+"black square" describes both.
+
+Three things about the staging cost a run each and are worth knowing before
+using that tool:
+
+- The animal must be IN WATER. Free play starts in the city, so spawning it at
+  player+30 puts it on land and drops a below-the-mouth lens under the terrain
+  — the frame comes back solid black.
+- `applyGape` only drives the UPPER jaw; its own comment says it "leaves the
+  mandible to whoever owns the hinge". Pose with it alone and you photograph a
+  shark with its chin shut.
+- `CBZ.swimJaw` owns the hinge, early-outs when handed the openness it last
+  applied (clear `rig.jawK` first), and the shark's own brain re-zeroes the gape
+  on any frame it is not committed — so the jaw must be opened on the last line
+  before the shutter, after every stepSim.
+
+### THE TRIM (`SHARK_MAW_TRIM`, `?sharkmaw=off` reverts)
+
+§6's law is that the cavity must RECEDE. The sack was breaking it by starting
+level with the tooth row, so the first thing the eye met looking into an open
+mouth was a flat slab rather than an opening. **Protrusion is what is removed
+here, not depth** — the roof still arches up into the head, which is where a
+mouth's depth belongs.
+
+| | before | after |
+|---|---|---|
+| front wall, behind the seal | 6% of a jaw | **16%** |
+| plan half-width vs the mouth's | 0.78 | **0.68** |
+| roof dome | `gap * 0.62` | **`gap * 0.48`** |
+| floor dip | `gap * 0.30` | **`gap * 0.22`** |
+
+Measured on a megalodon at full gape with `tools/shark-mouth-parts.mjs`, tooth
+line identical (1.63) on both sides: sack width **0.86 → 0.76**, depth
+**1.75 → 1.59**, and its front face moved from **0.13 to 0.29 behind the tooth
+line** — more than twice the clearance. The mandible liner is cut from the same
+`oralPlan` and narrows with it (0.86 → 0.75). The throat is untouched.
+
+Both cache keys carry the flag (`buccalSack|v4|trim`, `mandibleLiner|v4|trim`):
+`cachedGeom` hands back one geometry per key for the life of the page, so a key
+that did not mention the trim would serve whichever shape was built first to
+BOTH sides of an A/B.
+
+### A PRE-EXISTING RED TEST, NOT CAUSED BY THIS
+
+`npm run test:predator-mouth-envelope` fails `lower body-envelope gape contract`
+for all four sharks, on `cavityReveal < 3`. That metric reads
+`rig.jawCavity.scale.y`, which `swimJaw` only writes **when the builder does NOT
+publish `applyGape`** — and every shark publishes one, deliberately ("a builder
+that publishes applyGape owns its own bore"). So the assertion contradicts the
+design it is testing and reports 1 forever. Verified red on the committed tree
+with this change stashed. Left alone: it wants the test updated, not the code.
