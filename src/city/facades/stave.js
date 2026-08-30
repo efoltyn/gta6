@@ -143,7 +143,7 @@
 
       // THE TOWER on the ridge. Turret size is capped by rTop as well as by
       // the plan, or a one-storey chapel grows a cathedral spire.
-      const NT = ctx.storeys >= 2 ? 3 : 2;   let tw = cl(Math.min(u * 0.24, rTop * 0.30), 0.80, 2.40);
+      const NT = ctx.storeys >= 2 ? 3 : 2;   let tw = cl(Math.min(u * 0.24, rTop * 0.30), 0.80, 3.20);
       for (let k = 1; k <= NT; k++) {
         const dh = tw * 0.95, last = k === NT;
         ctx.dbox(0, ty + dh / 2, 0, tw * 2, dh, tw * 2, tim);                 // the drum

@@ -65,7 +65,7 @@
       // the crown reads as a mosque.
       const LEAD = F.mix(F.shade(P.base, 0.62), 0x8e969a, 0.55);
       const e = F.entrance(ctx), ff = e.f;
-      const pod = F.STEP_RISE, yB = Math.min(FH * 0.92, H * 0.34);   // the rusticated basement
+      const pod = F.STEP_RISE, yB = Math.min(FH * 0.92, H * 0.34), nob = Math.min(ctx.storeys - 1, 1);
 
       // the shell's own punched openings (buildings.js:4144), so the dressing
       // lands on the real holes rather than beside them
@@ -82,7 +82,6 @@
       // holes stay holes, plus the aedicule each opening wears. The piano
       // nobile is the storey the villa is FOR, so it alone gets consoles and
       // a cornice head; a house where every floor is important has none.
-      const nob = Math.min(ctx.storeys - 1, 1);
       for (const f of F.faces(ctx)) {
         const ws = wins(f), hs = ws.map((wd) => [wd.t - wd.w / 2 - 0.05, wd.t + wd.w / 2 + 0.05]);
         for (let k = 0; k < ctx.storeys; k++) {
@@ -92,7 +91,7 @@
           F.segBand(ctx, f, (a + b) / 2, b - a, 0.10, P.light, hs, 0.12, 0);
           for (const wd of ws) {
             if (k === 0 && !F.clearsDoor(ctx, f, wd.t, wd.w + 1.0)) continue;
-            F.box(ctx, f, wd.t, a - 0.17, wd.w + 0.58, 0.22, 0.30, LT);                       // sill
+            F.box(ctx, f, wd.t, a - 0.17, wd.w + 0.58, 0.22, 0.30, LT);   // sill, then the architrave jambs
             for (const sg of [-1, 1]) F.rib(ctx, f, wd.t + sg * (wd.w / 2 + 0.14), a - 0.05, b + 0.05, 0.26, 0.22, LT);
             F.box(ctx, f, wd.t, b + 0.17, wd.w + 0.60, 0.24, 0.26, LT);                       // architrave head
             if (k !== nob) continue;
@@ -122,15 +121,13 @@
       // of each flank, which is where a villa puts its best room.
       for (const f of sides) {
         const sy = nob * FH + 0.55, sh = Math.min(FH * 0.64, H - sy - 1.30);
-        const cw = clamp(f.span * 0.16, 1.0, 2.4), lw = cw * 0.52;
-        const rise = Math.min(cw * 0.5, H - 0.80 - sy - sh);
+        const cw = clamp(f.span * 0.16, 1.0, 2.4), lw = cw * 0.52, rise = Math.min(cw * 0.5, H - 0.80 - sy - sh);
         if (sh < 1.0 || rise < 0.3 || f.span < 6) continue;
         F.box(ctx, f, 0, sy + sh * 0.5 + 0.15, cw + lw * 2 + 1.6, sh + rise + 1.0, 0.16, P.light, -0.02);
         F.box(ctx, f, 0, sy + sh * 0.5, cw, sh, 0.10, DK, 0.06);   F.arch(ctx, f, 0, sy + sh, cw, rise, 0.16, 0.28, LT, "round");   // the arched centre light
         for (const sg of [-1, 1]) {
-          F.box(ctx, f, sg * (cw / 2 + 0.30 + lw / 2), sy + sh * 0.38, lw, sh * 0.76, 0.10, DK, 0.06);
-          F.rib(ctx, f, sg * (cw / 2 + 0.24), sy - 0.10, sy + sh + 0.05, 0.28, 0.30, LT);   F.rib(ctx, f, sg * (cw / 2 + 0.36 + lw), sy - 0.10, sy + sh + 0.05, 0.28, 0.30, LT);   // the paired colonnettes
-          F.box(ctx, f, sg * (cw / 2 + 0.30 + lw / 2), sy + sh * 0.80, lw + 0.95, 0.24, 0.34, LT);
+          F.box(ctx, f, sg * (cw / 2 + 0.30 + lw / 2), sy + sh * 0.38, lw, sh * 0.76, 0.10, DK, 0.06);   F.box(ctx, f, sg * (cw / 2 + 0.30 + lw / 2), sy + sh * 0.80, lw + 0.95, 0.24, 0.34, LT);
+          F.rib(ctx, f, sg * (cw / 2 + 0.24), sy - 0.10, sy + sh + 0.05, 0.28, 0.30, LT);   F.rib(ctx, f, sg * (cw / 2 + 0.36 + lw), sy - 0.10, sy + sh + 0.05, 0.28, 0.30, LT);   // paired colonnettes
         }
         F.box(ctx, f, 0, sy - 0.20, cw + lw * 2 + 1.5, 0.24, 0.36, LT);                         // the common sill
       }

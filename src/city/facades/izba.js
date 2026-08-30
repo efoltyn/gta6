@@ -142,8 +142,8 @@
         const n = F.bayCount(f, cl(u * 0.32, 2.1, 3.6), 2, 5);
         for (const b of F.bays(f, n, cl(f.span * 0.14, 0.9, 2.4))) {
           for (let k = 0; k < ctx.storeys; k++) {
-            const wh = cl(FH * 0.30, 0.70, 1.20), ww = cl(b.w * 0.36, 0.60, 1.15), sy = k * FH + Math.max(pk + 0.25, FH * 0.40);
-            if (sy + wh > rTop - 0.2 || !F.clearsDoor(ctx, f, b.t, ww + 2.4)) continue;
+            const wh = cl(FH * 0.30, 0.70, 1.20), ww = cl(b.w * 0.36, 0.60, 1.15), sy = k * FH + (k ? FH * 0.34 : Math.max(pk + 0.25, FH * 0.40));
+            if (sy + wh + 0.95 > rTop || !F.clearsDoor(ctx, f, b.t, ww + 2.4)) continue;
             F.box(ctx, f, b.t, sy + wh / 2, ww, wh, wp - 0.12, P.glass, 0.02);
             for (const sg of [-1, 1]) {                      // the glazing bar and the side boards
               F.box(ctx, f, b.t + sg * ww * 0.02, sy + wh / 2, 0.07, wh - 0.06, wp - 0.06, carve, 0.02);
