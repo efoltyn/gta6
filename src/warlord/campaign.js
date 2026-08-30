@@ -46,11 +46,19 @@
    through the wadi you rode down instead of sliding after you as a rigid
    blob. Only 60 of them are DRAWN — the roster can be a thousand and the
    difference between sixty men and four hundred on screen at this camera
-   distance is nothing you can count, while sixty voxel rigs would be a
-   thousand draw calls. The drawn men are instanced (2 draw calls for
-   every man on the island, yours and theirs); YOU are a real studio.cast
-   rig, because the one body the camera is actually near has to be a real
-   body.
+   distance is nothing you can count.
+
+   AND EVERY MAN WITHIN 150 m OF THE CAMERA IS A REAL BODY. Not a marker, not
+   a billboard: a CBZ.studio.cast rig with arms and legs, dressed by
+   W.outfits.cast in his own army's uniform, walking on CBZ.animChar and
+   seated on the drawn sand by W.sand.plant — the same man battle.js fields,
+   because it is the same call. Forty-eight of them, pooled and recycled,
+   handed to whoever is nearest the eye. Past 150 m the men are instanced
+   again — four draw calls for every man on the island, yours and theirs —
+   but the instance is an eleven-box MAN cut to the rig's own proportions,
+   not the six-sided cone with a head on it that this file shipped for
+   months. See THE MEN below for the measurements, the budget and the
+   revert flag.
 
    THE WORLD IS ON WALL TIME AND IT NEVER STOPS. This is a multiplayer
    island — openfront's shared board with Bannerlord's parties on it — and
@@ -89,6 +97,7 @@
 
    Flags:
      ?bands=N        population override (default scales with the island)
+     ?men=old        the old cone impostors, no near-band rigs (the A/B)
      ?trail=off      draw no followers (the honest A/B for the trail)
      ?clock=off      freeze the day cycle at noon
      ?bandai=off     bands walk their goals and never react to you
@@ -115,6 +124,12 @@
   const FLAG_NOCLOCK = QP.get("clock") === "off";
   const FLAG_NOBANDAI = QP.get("bandai") === "off";
   const FLAG_GUEST = QP.get("guest") === "1";
+  /* THE CONE, ON PURPOSE. ?men=old restores the six-sided cylinder-and-box
+     every man on this map used to be, with the old camera-driven size lie and
+     no near-band rigs at all — so the thing the owner complained about can be
+     photographed beside the thing that replaced it. Repo doctrine: every
+     behaviour change ships with its own revert. */
+  const FLAG_MEN_OLD = QP.get("men") === "old";
 
   const C = W.campaign = W.campaign || {};
   /* ONE PEER ROLLS THE DICE. Default true so single player is unchanged;
@@ -162,7 +177,7 @@
   let root = null;                 // everything this file draws
   let controls = null;
   let you = null, youRig = null;   // the real cast body
-  let menBody = null, menHead = null, banner = null, pole = null;
+  let menBody = null, menLegs = null, menHead = null, menCap = null, banner = null, pole = null;
   let marker = null, markerT = 0;
   let dest = null;                 // {x,z} or null
   let camYaw = 0, camDist = 46, camDistWant = 46;
@@ -392,7 +407,14 @@
         new THREE.MeshLambertMaterial({ color: 0xc46a33 }));
       root.add(youRig);
     }
-    youRig.castShadow = true;
+    /* AND HE CASTS A SHADOW, WHICH HE DID NOT. `group.castShadow = true` is a
+       no-op in three.js — the flag is read per MESH — so this line has been
+       decoration since it was written, and it did not matter while the only
+       other bodies on the map were instanced cones with the flag set on the
+       InstancedMesh itself. It matters now: the pooled rigs beside him set it
+       on their meshes, so the warlord would have been the one man on the
+       island standing on clean sand. */
+    youRig.traverse(function (o) { if (o.isMesh) o.castShadow = true; });
 
     buildMen();
     buildMarker();
@@ -429,6 +451,13 @@
       if (W.desert.show) W.desert.show();
     });
     W.on("newgame", function () {
+      /* THE POOL SURVIVES A NEW GAME; ITS ASSIGNMENTS DO NOT. The forty-eight
+         bodies are expensive (19 ms each) and generic until they are dressed,
+         so rebuilding them would be a second of stall for nothing. The KEYS
+         are soldier ids from a world that no longer exists, and a slot still
+         claiming one would hand a dead man's uniform to whoever inherits his
+         id. Release them all; they re-dress on demand. */
+      for (let i = 0; i < rigSlots.length; i++) releaseSlot(rigSlots[i]);
       S.you.placed = false;
       outpostsRaised = false;
       clockH = null;
@@ -446,13 +475,114 @@
   }
 
   /* ============================================================ THE MEN
-     ONE PAIR OF INSTANCED MESHES for every drawn man on the island — your
-     column and every warband inside BAND_DRAW. Measured on this laptop:
-     60 studio.cast rigs is ~1 100 draw calls and 22 fps; this is 2 draw
-     calls and the frame does not notice. A voxel rig is the right answer
-     for the man the camera is standing next to and the wrong answer for
-     the four hundred read at 200 m. */
+     TWO BANDS, AND THE NEAR ONE IS MADE OF REAL BODIES.
+
+     WHAT THIS REPLACES AND WHY. Every man on this map used to be a six-sided
+     tapered cylinder with a box on top — your whole column and all forty
+     warbands. The owner's word for it: "the NPCs look like fucking cone
+     glitchy people on the map instead of like the character", and he is
+     right. The file's own comment defended it with a real measurement (60
+     studio.cast rigs is ~1 100 draw calls and 22 fps; a cone is 2 calls), and
+     that measurement is still true — the CONCLUSION was wrong. It solved the
+     four-hundred-men-at-200-m case and then applied that answer to the six
+     men walking three metres from the camera, where a cone is indefensible
+     and where the whole fantasy of the game lives.
+
+     So: two bands, with the boundary where the pixels say it should be.
+
+       NEAR (< 150 m of the CAMERA)  a real CBZ.studio.cast rig, dressed by
+         W.outfits.cast, walking on CBZ.animChar, seated by W.sand.plant.
+         Arms, legs, a gait, the faction's own uniform. The same body
+         battle.js fields, because it is literally the same call.
+       FAR (beyond)  still instanced — four draw calls for every man on the
+         island, yours and theirs — but the instance is an ELEVEN-BOX MAN, not
+         a cone: two booted legs, a pelvis, a torso, a shoulder yoke, two arms,
+         a face and a cap, cut to the rig's own proportions. Four meshes rather
+         than one because a man is four COLOURS: his shirt, his trousers, his
+         skin and his hat. The cone had one, which is most of why it was a
+         cone.
+
+     WHERE 150 m COMES FROM. Vertical fov here is 68°, so at 1080p the screen
+     spans 1.35 rad over 1080 px ≈ 800 px/rad. A 1.75 m man at 150 m subtends
+     0.0117 rad — 9 px tall, with limbs one pixel wide. That is the range at
+     which a rig stops buying anything a box silhouette cannot buy. It is also
+     comfortably inside desert.renderHeightAt's stated 400 m validity limit,
+     which matters more than it looks: the rig is seated on the DRAWN ground
+     by sand.plant and the impostor has to stand on that same surface or the
+     swap is a vertical jump of up to 1.6 m on a dune face.
+
+     THE POOL IS 48 AND IT IS RECYCLED, NEVER REBUILT. Measured on this box:
+     one W.outfits.cast is 19.3 ms and one W.outfits.dress onto an existing
+     rig is 0.52 ms — 37x cheaper. Building a rig per man per entry would be a
+     stutter every time you turned the camera. So there are 48 bodies, they
+     are built ONE PER FRAME as demand appears (two in a frame is a visible
+     hitch at 19 ms each), they are handed to whichever men are nearest the
+     camera, and they are re-dressed only when the man in the slot changes.
+
+     WHY 48. battle.js measured 1 109 draw calls with 40 rigs in frame on this
+     same page and ships at playable framerate. The campaign also draws the
+     island — 105 calls of clipmap, banners, props and outposts. Holding the
+     whole campaign under battle.js's demonstrated number leaves ~1 000 calls
+     for men. Measured on this box: forty rigs in frame is 1 109 draw calls
+     against a 105-call empty island, i.e. 25.1 calls a rig with everything
+     visible and 19.4 with all six of the rig's detail meshes hidden — this
+     file hides four of them (the face), which lands near 21. Say 21 and the
+     budget is 47 bodies. Forty-eight, and it is not a coincidence.
+
+     WHAT IT ACTUALLY COSTS, measured after the fact on the worst case this
+     game can build — forty warbands crowded inside the drawn radius, the pool
+     saturated, your forty-man column in frame: 679 draw calls and 170 k tris,
+     against 110 calls and 136 k for the cone. Under the ceiling with room to
+     spare, because frustum culling means the men BEHIND the camera cost
+     nothing and half the pool usually is.
+
+     THE SWAP DOES NOT POP, and that is four separate things:
+       · the impostor is cut from CBZ.charProfile() — the same table the rig
+         is built from — times CBZ.HUMAN_SCALE, so the proportions cannot
+         drift apart when somebody edits the body.
+       · both stand on renderHeightAt inside 400 m (see above).
+       · both take their colours from W.outfits.marks / the same fit record.
+       · 150 m in, 178 m out. A man walking the boundary would otherwise
+         flicker between forms every time the camera breathed.
+
+     ?men=old restores the cone, byte for byte, so the two can be photographed
+     against each other. That is what the before/after pair is FOR. */
   const MEN_CAP = 980;
+  const RIG_POOL = 48;          // see above: battle.js's own measured budget
+  const NEAR_IN = 150;          // m from the camera — acquire a rig
+  const NEAR_OUT = 178;         // m — release it. The gap is the hysteresis.
+  const RIG_BUILD_PER_FRAME = 1;  // one cast() is 19 ms; two is a hitch
+  const RIG_DRESS_PER_FRAME = 4;  // one dress() is 0.5 ms
+  const FACE_LOD = 26;          // m: past this the four face meshes go. They
+                                // are 4 of the rig's 25.1 draw calls and they
+                                // are sub-pixel at 26 m.
+  const ANIM_EVERY_1 = 45, ANIM_EVERY_2 = 95;   // gait update rate by range
+  /* RENDER HEIGHT IS ONLY VALID TO 400 m — desert.js says so at the top of
+     renderHeightAt, and past it the ground is drawn by a coarser ring with a
+     bias this function does not model. Inside it, use it for everybody so the
+     rigs and the impostors stand on one surface; outside it, the analytic
+     height, where a man is four pixels and nobody can see the difference. */
+  const DRAWN_GROUND_R2 = 400 * 400;
+
+  /* THE SIZE LIE MOVED FROM THE CAMERA TO THE MAN, and that is a correctness
+     fix, not a tweak. Men are drawn bigger than life as the view pulls back —
+     Total War and Bannerlord both do it — because a life-sized man at 520 m
+     is under two pixels and the strategic view is the whole game. The old
+     rule scaled every man by the CAMERA's pull-back, which meant that at
+     camDist 150 your column stood 58% taller than YOU did, one metre in front
+     of you, at the exact range the new near band puts real bodies there. Same
+     rig, two sizes, side by side. Scaling by each man's own distance from the
+     camera instead makes the lie fade in where it is needed and stay out of
+     the near band entirely, and — the reason it matters here — it gives the
+     rig and the impostor the SAME number at the swap boundary. The player
+     goes through it too, so he grows with his men rather than shrinking into
+     them. */
+  const LIE_NEAR = 60, LIE_FAR = 520, LIE_MAX = 3.2;
+  function manScale(d) {
+    if (FLAG_MEN_OLD) return 1 + clamp((camDist - 16) / (520 - 16), 0, 1) * 2.2;
+    return 1 + (LIE_MAX - 1) * clamp((d - LIE_NEAR) / (LIE_FAR - LIE_NEAR), 0, 1);
+  }
+
   /* r128 NEEDS BOTH HALVES OF THE COLOUR PATH, and finding that out cost a
      screenshot of an army rendered in solid black. `setColorAt` fills
      `instanceColor` and the vertex shader multiplies it into `vColor`, but
@@ -485,20 +615,210 @@
     return geo;
   }
 
+  /* MERGE THE IMPOSTOR INTO ONE BUFFER, because the draw-call argument the
+     cone was built on is still the right argument at range — a nine-box man
+     drawn as nine InstancedMeshes would be nine draw calls for the same
+     picture. One geometry, one InstancedMesh, and the per-box shade rides in
+     the geometry's own `color` attribute where it is MULTIPLIED by the
+     instance colour: tint 0.30 on the boots makes them dark whatever uniform
+     the man is wearing, 0.80 on the legs makes trousers a shade off the
+     shirt. That is a free second tone per man on a path that only carries
+     one. r128's BufferGeometryUtils is not loaded on this page and there is
+     no reason to load it for twenty lines. */
+  function mergeBoxes(parts, scale) {
+    let total = 0;
+    const built = [];
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      const g = new THREE.BoxGeometry(p.w, p.h, p.d).toNonIndexed();
+      g.translate(p.x || 0, p.y, p.z || 0);
+      total += g.attributes.position.count;
+      built.push({ g: g, t: p.tint == null ? 1 : p.tint });
+    }
+    const pos = new Float32Array(total * 3);
+    const nor = new Float32Array(total * 3);
+    const col = new Float32Array(total * 3);
+    let o = 0;
+    for (let i = 0; i < built.length; i++) {
+      const g = built[i].g, t = built[i].t, c = g.attributes.position.count;
+      pos.set(g.attributes.position.array, o * 3);
+      nor.set(g.attributes.normal.array, o * 3);
+      for (let k = 0; k < c; k++) { col[(o + k) * 3] = t; col[(o + k) * 3 + 1] = t; col[(o + k) * 3 + 2] = t; }
+      o += c;
+      g.dispose();
+    }
+    const out = new THREE.BufferGeometry();
+    out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    out.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+    out.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    if (scale !== 1) out.scale(scale, scale, scale);
+    out.computeBoundingSphere();
+    return out;
+  }
+
+  /* THE IMPOSTOR IS CUT FROM THE RIG'S OWN TABLE. CBZ.charProfile() is the
+     one place a body's proportions live (entities/character.js), and
+     CBZ.HUMAN_SCALE is what the rig is drawn at. Reading them here rather
+     than typing eleven box sizes is the only version of this that cannot drift:
+     change the body and the impostor follows it in the same commit. The
+     fallback numbers are the shipped adult male, kept so a page without the
+     people pack still fields a man-shaped speck instead of throwing.
+
+     ORIGIN AT THE FEET, unlike the cone, whose body and head instances each
+     carried their own hand-typed height offset. Feet-at-zero means the
+     impostor takes the SAME matrix the rig gets from sand.plant, and the two
+     forms cannot disagree about where the ground is. */
+  const PROFILE_FALLBACK = {
+    legUp: 0.48, legLo: 0.47, legW: 0.34, hipX: 0.23, shoeH: 0.20,
+    armUp: 0.46, armLo: 0.46, armW: 0.30, armX: 0.62,
+    pelvisW: 0.84, pelvisH: 0.20, pelvisD: 0.48,
+    torsoW: 0.92, torsoH: 0.95, torsoD: 0.50,
+    collarW: 0.94, collarH: 0.18, collarD: 0.52, headSize: 0.60,
+  };
+  function impostorGeometry() {
+    let P = null;
+    try { P = CBZ.charProfile ? CBZ.charProfile() : null; } catch (e) { P = null; }
+    if (!P || !P.torsoH) P = PROFILE_FALLBACK;
+    const HS = (CBZ.HUMAN_SCALE > 0) ? CBZ.HUMAN_SCALE : 0.70;
+    const hipY = P.legUp + P.legLo;
+    const neckY = hipY - 0.005 + P.torsoH - 0.015;
+    const shoulderY = neckY - 0.04;
+    const armL = P.armUp + P.armLo;
+    const legH = hipY - P.shoeH;
+    /* THE GAP BETWEEN THE LEGS IS THE WHOLE READ. hipX 0.23 with legW 0.34
+       leaves 0.12 of daylight up the middle, and that slot is the single
+       feature that separates "a man" from "a bollard" at 60 m — more than the
+       arms, which foreshorten to nothing head-on. It is the rig's own number;
+       do not close it up to save two triangles.
+
+       THE TROUSERS ARE THEIR OWN MESH BECAUSE THEY ARE THEIR OWN COLOUR, and
+       the swap strip is what proved it. A fit's `legs` hex is frequently
+       nothing like its `torso` — khaki shirt over black trousers is half this
+       catalogue — so shading the torso colour down for the legs gave every
+       impostor tan trousers beside a rig wearing dark ones, on a part of the
+       silhouette that is a third of the man. One more instanced mesh for every
+       man on the island; still four draw calls where a single rig is
+       twenty-five. */
+    const legs = mergeBoxes([
+      // boots: dark ALWAYS. outfits.js's own rule — the one tone that never
+      // reads as sand — and here it doubles as the thing that stops the legs
+      // dissolving into the ground they are standing on. A shade of the
+      // trousers rather than the fit's own boot hex, because a fifth mesh to
+      // carry one more colour across two boxes eleven centimetres tall is not
+      // a trade worth making.
+      { w: P.legW * 1.02, h: P.shoeH, d: P.legW * 1.45, x: -P.hipX, y: P.shoeH / 2, z: 0.05, tint: 0.34 },
+      { w: P.legW * 1.02, h: P.shoeH, d: P.legW * 1.45, x: P.hipX, y: P.shoeH / 2, z: 0.05, tint: 0.34 },
+      { w: P.legW, h: legH, d: P.legW, x: -P.hipX, y: P.shoeH + legH / 2, tint: 1 },
+      { w: P.legW, h: legH, d: P.legW, x: P.hipX, y: P.shoeH + legH / 2, tint: 1 },
+      { w: P.pelvisW, h: P.pelvisH, d: P.pelvisD, y: hipY + 0.03, tint: 1 },
+    ], HS);
+    const body = mergeBoxes([
+      { w: P.torsoW, h: P.torsoH, d: P.torsoD, y: hipY - 0.005 + P.torsoH / 2, tint: 1 },
+      { w: P.collarW, h: P.collarH, d: P.collarD, y: shoulderY, tint: 1 },
+      /* THE ARMS ARE DARKER THAN THE SHIRT ON PURPOSE. Geometrically they are
+         the rig's own boxes, but flat-shaded at the rig's exact tone the
+         torso and both arms merge into one wide rectangle and the man reads
+         a head wider than he is. On the rig the sleeves sit in their own
+         fold shadow; 0.88 is that shadow, and it is what puts a waist back
+         into the silhouette. */
+      { w: P.armW, h: armL, d: P.armW, x: -P.armX, y: shoulderY - armL / 2, tint: 0.88 },
+      { w: P.armW, h: armL, d: P.armW, x: P.armX, y: shoulderY - armL / 2, tint: 0.88 },
+    ], HS);
+    /* THE HEAD IS TWO MESHES BECAUSE IT IS TWO COLOURS, and getting that
+       wrong was the first thing the swap-boundary pair showed. marks() answers
+       ONE head hex and it is the HAT when the man has one, so painting the
+       whole head with it gave every impostor a solid pale-blue block for a
+       skull — a lego head — beside rigs whose heads read as a small dark cap
+       over a tan face. Same silhouette, completely different creature.
+       So: a FACE cube on a constant dusty skin (no per-instance colour at all;
+       skin at 165 m is one colour for everybody) and a CAP slab carrying the
+       hat hex. It costs one draw call for every man on the island and it is
+       the difference between a man and a bollard with a light on it. For a
+       bare-headed man marks() already answers skin, so the slab just becomes
+       the top of his head and nothing special-cases it.
+
+       THE CAP SLAB IS WHAT MAKES THE HEIGHTS AGREE. The rig measures 1.862 m
+       to the top of its cap (read off a live Box3) and a bare head box tops
+       out at 1.736; the slab spans exactly that gap, so a man is the same
+       height in both forms and the swap has nothing vertical in it. */
+    const face = mergeBoxes([
+      { w: P.headSize, h: P.headSize, d: P.headSize, y: neckY + P.headSize / 2, tint: 1 },
+    ], HS);
+    const cap = mergeBoxes([
+      { w: P.headSize * 1.08, h: 0.18, d: P.headSize * 1.08, y: neckY + P.headSize + 0.09, tint: 1 },
+    ], HS);
+    return { body: body, legs: legs, face: face, cap: cap };
+  }
+
+  /* THE MEAN OF studio.js's OWN SKIN TABLE. CASTING picks a rig's tone out of
+     six (0xc9a07a 0x8d5a3b 0x6b4228 0xe0b894 0x4a2f1e 0xa87551) off the
+     variant index, and the pool spreads its forty-eight bodies across all of
+     them. At the range an impostor is drawn, one face is four pixels; the
+     honest single answer is the average of what the rigs beside it actually
+     are, not the lightest of the six, which is what outfits.js's bare-head
+     branch happens to use. Channel means of that table, rounded. */
+  /* AND THIS ONE IS DELIBERATELY *NOT* CONVERTED. Every cloth colour on an
+     impostor goes through toLinear because outfits.js converts the same hexes
+     before they reach a rig's material — but outfits.js states, and means, that
+     it leaves SKIN AND HAIR alone: entities/character.js owns those and sets
+     them raw. So the rig's face renders from an unconverted sRGB hex, and an
+     impostor face that WAS converted came back a shade of dark brown standing
+     next to rigs with tan faces. Match what is actually on the rig, not what
+     the theory says should be. */
+  const IMPOSTOR_SKIN = 0x996f50;
+
   function buildMen() {
-    const bodyG = whiteColors(new THREE.CylinderGeometry(0.26, 0.38, 1.30, 6));
-    const headG = whiteColors(new THREE.BoxGeometry(0.34, 0.34, 0.34));
+    let bodyG, faceG, capG = null, legsG = null;
+    if (FLAG_MEN_OLD) {
+      // the cone, for the A/B. This is what the owner was looking at.
+      bodyG = whiteColors(new THREE.CylinderGeometry(0.26, 0.38, 1.30, 6));
+      faceG = whiteColors(new THREE.BoxGeometry(0.34, 0.34, 0.34));
+    } else {
+      const g = impostorGeometry();
+      bodyG = g.body; legsG = g.legs; faceG = g.face; capG = g.cap;
+    }
     const bodyM = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
-    const headM = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
     menBody = new THREE.InstancedMesh(bodyG, bodyM, MEN_CAP);
-    menHead = new THREE.InstancedMesh(headG, headM, MEN_CAP);
     menBody.castShadow = true;
-    menBody.frustumCulled = menHead.frustumCulled = false;
+    menBody.frustumCulled = false;
     menBody.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    colourable(menBody, MEN_CAP);
+    menBody.count = 0;
+    root.add(menBody);
+
+    if (legsG) {
+      menLegs = new THREE.InstancedMesh(legsG,
+        new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), MEN_CAP);
+      menLegs.castShadow = true;
+      menLegs.frustumCulled = false;
+      menLegs.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      colourable(menLegs, MEN_CAP);
+      menLegs.count = 0;
+      root.add(menLegs);
+    }
+
+    /* THE FACE NEEDS NO PER-INSTANCE COLOUR AT ALL, which is why it is worth
+       having as its own mesh: one flat material, no instanceColor buffer, no
+       vertexColors, no r128 USE_COLOR trap to fall into. In the cone revert
+       this mesh IS the old head box and it keeps the old colour path. */
+    menHead = new THREE.InstancedMesh(faceG,
+      FLAG_MEN_OLD ? new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true })
+                   : new THREE.MeshLambertMaterial({ color: IMPOSTOR_SKIN }), MEN_CAP);
+    menHead.frustumCulled = false;
     menHead.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    colourable(menBody, MEN_CAP); colourable(menHead, MEN_CAP);
-    menBody.count = menHead.count = 0;
-    root.add(menBody); root.add(menHead);
+    if (FLAG_MEN_OLD) colourable(menHead, MEN_CAP);
+    menHead.count = 0;
+    root.add(menHead);
+
+    if (capG) {
+      menCap = new THREE.InstancedMesh(capG,
+        new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), MEN_CAP);
+      menCap.frustumCulled = false;
+      menCap.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      colourable(menCap, MEN_CAP);
+      menCap.count = 0;
+      root.add(menCap);
+    }
 
     /* THE BANNER IS THE MAP MARKER, and it is a real object in the world so
        it obeys the terrain and the fog like everything else. Its height and
@@ -534,11 +854,6 @@
     if (colour != null && mesh.setColorAt) { _col.setHex(colour); mesh.setColorAt(n, _col); }
     return n + 1;
   }
-
-  /* Bright enough to read AGAINST SAND, which is the only background this
-     game has. The first pass used mid-tones picked in the abstract and every
-     tier photographed as the same dark speck on a pale dune. */
-  const TIER_COLOUR = { levy: 0xc9b489, raider: 0xd2743c, soldier: 0x7fa05e, veteran: 0x5f88b4 };
 
   /* ============================================================ MARKER
      A SCUFF IN THE SAND, NOT A BEACON.
@@ -1241,8 +1556,9 @@
     D.follow(lerp(S.you.x, camera.position.x, 0.28), lerp(S.you.z, camera.position.z, 0.28));
 
     // ---- draw -----------------------------------------------------------
-    placeYou(dt, moved / Math.max(dt, 0.0001));
-    drawMen();
+    youSpeed = moved / Math.max(dt, 0.0001);
+    placeYou(dt, youSpeed);
+    drawMen(dt);
     drawMarker(dt);
     updateCamera(dt);
     paintPlates();
@@ -1266,34 +1582,370 @@
       youRig.position.set(S.you.x, D.heightAt(S.you.x, S.you.z), S.you.z);
       youRig.rotation.y = S.you.yaw;
     }
+    /* AND HE GROWS WITH HIS MEN. The size lie used to be the camera's, so
+       every man on the island scaled with the pull-back and the one body that
+       did NOT was the player's — at strategic zoom his own column stood three
+       times his height around him. manScale is now per-body distance, so
+       running him through it costs one call and makes him the same man as the
+       men beside him at every range. Over the shoulder it returns exactly 1
+       and nothing moves. */
+    const lie = manScale(camera.position.distanceTo(youRig.position));
+    if (youRig.scale.x !== lie) youRig.scale.setScalar(lie);
     if (CBZ.animChar && youRig.userData.charRig) {
       try { CBZ.animChar(youRig.userData.charRig, speed > 0.3 ? Math.min(speed, 6.2) : 0, dt); } catch (e) {}
     }
   }
 
-  /* ============================================================ THE TRAIL
+  /* ============================================================ THE COLUMN
      Followers ride the breadcrumb, not the player: a man 40 m back is where
      YOU were 40 m ago, which is what makes the column bend through a wadi
      instead of cutting the corner like a rubber band. The lateral offset is
      hashed off the man's index so the column is a column and not a line,
-     and so it does not shimmer as the roster changes. */
-  function drawMen() {
-    let n = 0;
+     and so it does not shimmer as the roster changes.
+
+     DRAWING IS NOW TWO PASSES, NOT ONE. The old function walked the column
+     and the bands and wrote instance matrices as it went, which is why there
+     was nowhere to put a "this man is close enough to be a real body"
+     decision: by the time you knew his distance you had already drawn him.
+     So: GATHER every man on the island into a reused record list, DECIDE
+     which of them the 48 rigs go to, and only then draw — rigs for the near
+     ones, instances for everybody else. Nothing here allocates per frame. */
+
+  /* ---- one drawable man. Reused; menDrawN says how many are live ---- */
+  const menDraw = [];
+  let menDrawN = 0;
+  const nearIdx = [];
+  const wantKey = Object.create(null);
+  let youSpeed = 0;
+  function pushMan(key, x, z, y, yaw, bob, ms, mk, s, band, spd) {
+    let m = menDraw[menDrawN];
+    if (!m) m = menDraw[menDrawN] = {};
+    m.key = key; m.x = x; m.z = z; m.y = y; m.yaw = yaw; m.bob = bob; m.ms = ms;
+    m.body = mk.body; m.legs = mk.legs; m.head = mk.head; m.s = s; m.band = band; m.spd = spd;
+    m.d2 = 0; m.rig = null;
+    menDrawN++;
+    return m;
+  }
+
+  /* THE GROUND A MAN STANDS ON, and it is two different questions at two
+     ranges. Inside 400 m the DRAWN surface is what matters, because that is
+     where the rigs are and sand.plant seats them on it — an impostor on the
+     analytic height beside a rig on the drawn one is a swap that jumps up to
+     1.6 m on a dune face. Past 400 m renderHeightAt is not merely expensive
+     (measured 1.18 µs against heightAt's 0.36) but WRONG: desert.js says in
+     so many words that level 0 of the clipmap only reaches that far. */
+  function manGroundY(x, z, d2) {
+    const D = W.desert;
+    return (d2 < DRAWN_GROUND_R2 && D.renderHeightAt) ? D.renderHeightAt(x, z) : D.heightAt(x, z);
+  }
+
+  /* CACHED, AND THE MEASUREMENT IS WORTH WRITING DOWN BECAUSE IT IS LOPSIDED.
+     W.outfits.marks() costs 19 ms the FIRST time it is asked about a given man
+     — it indexes the catalogue, picks his fit, weathers it, pushes it off the
+     sand's luminance and, for a camouflaged fit, builds the pattern texture to
+     read its mean colour — and 2.35 µs every time after that, off outfits.js's
+     own caches. The old code called it for every drawn man on every frame and
+     paid the 2.35: 0.14 ms with sixty men in the column, and 2.3 ms in a field
+     of forty warbands where nine hundred and eighty bodies are drawn. Not the
+     biggest number in the frame, and not nothing either, for an answer that
+     cannot change unless the man changes armies. Cache it on the soldier,
+     keyed on the band he is being drawn for; the near band needs the same
+     record every frame anyway to decide whether a pooled rig is still wearing
+     the right uniform. */
+  /* Bright enough to read AGAINST SAND, which is the only background this
+     game has. The first pass used mid-tones picked in the abstract and every
+     tier photographed as the same dark speck on a pale dune. Only reached on
+     a page where outfits.js failed to load. */
+  const TIER_FALLBACK = { levy: 0xc9b489, raider: 0xd2743c, soldier: 0x7fa05e, veteran: 0x5f88b4 };
+
+  /* THE MEN ON THIS MAP HAVE BEEN RENDERING TWICE AS BRIGHT AS THE MEN IN THE
+     GAME, and it is the same bug three other files in this module already have
+     a paragraph about. `microboot.js:1234` sets
+     `renderer.outputEncoding = THREE.sRGBEncoding`, so r128 takes every colour
+     handed to the shader — material.color AND instanceColor — as LINEAR and
+     applies the sRGB transfer once on the way out. outfits.js's tables are
+     authored in sRGB (that is what a hex means to a person) and its apply()
+     runs every one of them through toLinear() at the seam; desert.js states
+     its sand as measured linear albedo for the same reason and says its first
+     draft "photographed as white paper"; camo.js tags its own textures.
+
+     marks() answers in the AUTHORED space — sample() is documented as
+     converting back precisely so the two can be compared — and this file was
+     pushing those hexes straight into setColorAt. So the rig beside the
+     impostor was correct and the impostor was washed out, which is exactly
+     what the swap-boundary strip photographed: dark navy men at 168 m turning
+     pale blue-grey at 186 m with nothing but the LOD changing. It is also a
+     fair part of why the cone looked like a plastic bollard rather than a man
+     — that pale wash is what ?men=old still shows, deliberately, because the
+     revert has to be the thing the owner actually complained about.
+
+     Same transfer function as outfits.js's lin1, cached the same way, applied
+     once per man when his mark is computed rather than per frame.
+     (The BANNER is left alone: it is a map marker painted in the faction hex
+     core publishes, it sits beside a pole and a nameplate that are equally
+     unconverted, and making one of the three correct would make the set
+     look wrong.) */
+  const _linCache = new Map();
+  function lin1(c) { return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+  function toLinear(hex) {
+    if (hex == null || FLAG_MEN_OLD) return hex;
+    const k = hex | 0;
+    let v = _linCache.get(k);
+    if (v !== undefined) return v;
+    v = (Math.round(lin1(((k >> 16) & 255) / 255) * 255) << 16) |
+        (Math.round(lin1(((k >> 8) & 255) / 255) * 255) << 8) |
+        Math.round(lin1((k & 255) / 255) * 255);
+    _linCache.set(k, v);
+    return v;
+  }
+
+  function shade(hex, k) {
+    return (Math.round(((hex >> 16) & 255) * k) << 16) |
+           (Math.round(((hex >> 8) & 255) * k) << 8) | Math.round((hex & 255) * k);
+  }
+  /* A WeakMap, NOT A FIELD ON THE SOLDIER, and that is not fussiness. W.save()
+     is `JSON.stringify(W.state)` — every man in your army and every man in
+     every one of forty band rosters — so a cache written onto the soldier ends
+     up in localStorage, in the multiplayer snapshot, and back out of a load as
+     stale colours from whatever the catalogue looked like at save time. The
+     soldier record is core's, and this is a rendering answer. */
+  const markCache = new WeakMap();
+  function markOf(s, band) {
+    const bk = band ? (band.id == null ? "?" : band.id) : "-";
+    const hit = markCache.get(s);
+    if (hit && hit.bk === bk) return hit.mk;
+    const O = W.outfits;
+    let mk = null;
+    if (O && O.marks) { try { mk = O.marks(s, band || null); } catch (e) { mk = null; } }
+    if (!mk) mk = { body: TIER_FALLBACK[s.tier] || 0x9c8f6d, head: 0xd9b48c };
+    /* AND THE TROUSERS, WHICH marks() DOES NOT ANSWER. It was written for the
+       cone, which had one colour, so it hands back a torso hex and a head hex
+       and stops. The trousers are a third of a man's silhouette and in this
+       catalogue they are routinely nothing like his shirt. Rather than invent
+       a second colour model, this asks outfits.js's OWN public helpers in the
+       exact order its own apply() asks them — forSoldier for the record,
+       detail for the wear, then weathered and readable — so the impostor's
+       legs are the same hex the rig's legs get painted, not a guess derived
+       from the shirt. A camouflaged man wears one pattern over both, so his
+       legs take marks()' camo mean. */
+    let legs = null;
+    if (O && O.forSoldier && O.detail && O.readable && O.weathered) {
+      try {
+        const rec = O.forSoldier(s, band || null);
+        const det = O.detail(s, band || null, rec);
+        const c = rec.colors || {};
+        legs = (rec.camo || c.legs == null) ? mk.body
+             : O.readable(O.weathered(c.legs, det.wear || 0), false);
+      } catch (e) { legs = null; }
+    }
+    mk = { body: toLinear(mk.body), head: toLinear(mk.head),
+           legs: toLinear(legs == null ? shade(mk.body, 0.78) : legs) };
+    markCache.set(s, { bk: bk, mk: mk });
+    return mk;
+  }
+  // a band that arrived over the wire with no roster, and the page with no
+  // outfits.js at all: one colour, and the legs a shade of it
+  function flatMark(bodyCol, headCol) {
+    _flat.body = toLinear(bodyCol); _flat.legs = toLinear(shade(bodyCol, 0.78));
+    _flat.head = toLinear(headCol);
+    return _flat;
+  }
+  const _flat = { body: 0, legs: 0, head: 0 };
+
+  /* PEERS ARE PARTIES AND THEIR MEN ARE MEN. W.state.peers carries
+     {id,name,x,z,size,colour} and no roster — warnet.js never sends one,
+     because the map is derivable and a roster is not. But this file's own
+     rule is that a human column and a computer column are the SAME OBJECT on
+     screen, and that rule breaks the moment AI bands get real bodies and
+     peers get boxes. So a peer's men are minted here, deterministically off
+     his id, as a rival warlord's soldiers — the faction core already has for
+     exactly this. They are display-only and never enter W.state. */
+  const peerMen = Object.create(null);
+  function peerMan(pid, k) {
+    const key = pid + ":" + k;
+    let s = peerMen[key];
+    if (!s) {
+      let h = 0;
+      for (let i = 0; i < key.length; i++) h = (h * 131 + key.charCodeAt(i)) | 0;
+      s = peerMen[key] = { id: Math.abs(h) % 100000, tier: (k % 4 === 0) ? "veteran" : (k % 3 === 0) ? "soldier" : "raider" };
+    }
+    return s;
+  }
+  const peerBands = Object.create(null);
+  function peerBand(pid) {
+    return peerBands[pid] || (peerBands[pid] = { id: "peer:" + pid, faction: "warlord" });
+  }
+
+  /* ---- the pool. 48 bodies, built one per frame, recycled forever ---- */
+  const rigSlots = [];
+  const rigByKey = Object.create(null);
+  let rigsBuilt = 0, rigsShown = 0, rigsDressed = 0;
+
+  function buildSlot() {
+    if (!CBZ.studio || !CBZ.studio.cast) return null;
+    /* CAST ONCE AS A GENERIC SOLDIER AND DRESS AFTERWARDS. W.outfits.cast
+       builds AND paints; this pool only ever needs the building half, because
+       every man who lands in the slot re-dresses it anyway. `variant` is what
+       gives the pool its faces and hair, and it is fixed per SLOT rather than
+       per man on purpose: it costs a rebuild to change, and forty-eight
+       different heads is already more variety than a column at 40 m shows. */
+    const g = CBZ.studio.cast("soldier", { variant: rigsBuilt * 2 + 1 });
+    if (!g) return null;
+    g.visible = false;
+    g.traverse(function (o) { if (o.isMesh) o.castShadow = true; });
+    root.add(g);
+    const ch = g.userData.charRig;
+    const face = [];
+    if (ch && ch.face) for (const k in ch.face) if (ch.face[k]) face.push(ch.face[k]);
+    const slot = { rig: g, char: ch, face: face, faceOn: true, key: null, fit: null, animF: rigsBuilt & 3 };
+    rigSlots.push(slot);
+    rigsBuilt++;
+    return slot;
+  }
+
+  function releaseSlot(slot) {
+    if (slot.key != null) delete rigByKey[slot.key];
+    slot.key = null;
+    slot.rig.visible = false;
+  }
+
+  function fitKeyOf(m) {
+    return m.s ? ("s" + m.s.id + "/" + (m.band ? m.band.id : "-")) : ("c" + m.body);
+  }
+
+  /* WHO GETS A BODY. Nearest to the CAMERA wins — not nearest to the player,
+     and not "your men first". A distance ring is the only allocation rule
+     that cannot produce the thing it exists to prevent: two men standing
+     shoulder to shoulder, one a rig and one a box. Your column usually wins
+     it anyway, because the camera is behind you looking at it. */
+  function assignRigs(dt) {
+    rigsShown = 0; rigsDressed = 0;
+    if (FLAG_MEN_OLD) return;
+    const cam = camera.position;
+    nearIdx.length = 0;
+    for (let i = 0; i < menDrawN; i++) {
+      const m = menDraw[i];
+      const dx = m.x - cam.x, dy = m.y - cam.y, dz = m.z - cam.z;
+      m.d2 = dx * dx + dy * dy + dz * dz;
+      /* HYSTERESIS, AND IT IS NOT DECORATION. Without the 28 m gap a man
+         parked on the boundary swaps form on every camera breath — the
+         camera lerps, so his distance oscillates by metres with nothing
+         moving — and a flickering man is worse than a permanently blocky
+         one. In at 150, out at 178. */
+      const lim = rigByKey[m.key] ? NEAR_OUT : NEAR_IN;
+      if (m.d2 < lim * lim) nearIdx.push(i);
+    }
+    if (nearIdx.length > RIG_POOL) {
+      nearIdx.sort(function (a, b) { return menDraw[a].d2 - menDraw[b].d2; });
+      nearIdx.length = RIG_POOL;
+    }
+    for (const k in wantKey) delete wantKey[k];
+    for (let i = 0; i < nearIdx.length; i++) wantKey[menDraw[nearIdx[i]].key] = 1;
+    for (let i = 0; i < rigSlots.length; i++) {
+      const s = rigSlots[i];
+      if (s.key != null && !wantKey[s.key]) releaseSlot(s);
+    }
+    let builds = 0, dresses = 0;
+    for (let i = 0; i < nearIdx.length; i++) {
+      const m = menDraw[nearIdx[i]];
+      let slot = rigByKey[m.key];
+      if (!slot) {
+        for (let j = 0; j < rigSlots.length && !slot; j++) if (rigSlots[j].key == null) slot = rigSlots[j];
+        /* ONE BUILD PER FRAME. Measured: W.outfits.cast is 19.3 ms and
+           studio.cast alone is most of it. Two in a frame is a visible
+           hitch; the man rides as an impostor for the frame or two it takes
+           his body to exist, which nobody has ever noticed and everybody
+           would notice the stutter. */
+        if (!slot && rigsBuilt < RIG_POOL && builds < RIG_BUILD_PER_FRAME) { slot = buildSlot(); builds++; }
+        if (!slot) continue;
+        slot.key = m.key; rigByKey[m.key] = slot; slot.fit = null;
+      }
+      const fk = fitKeyOf(m);
+      if (slot.fit !== fk) {
+        /* AND FOUR DRESSES. 0.52 ms each, so four is 2 ms — the budget for a
+           camera swing that hands the whole pool to new men at once. Until a
+           slot is dressed it stays hidden and its man draws as an impostor,
+           because showing him would put the LAST man's uniform on him. */
+        if (dresses >= RIG_DRESS_PER_FRAME) continue;
+        let ok = false;
+        if (m.s && W.outfits && W.outfits.dress) {
+          try { W.outfits.dress(slot.rig, m.s, m.band || null); ok = true; } catch (e) { ok = false; }
+        }
+        if (!ok) continue;
+        slot.fit = fk; dresses++; rigsDressed++;
+      }
+      m.rig = slot;
+    }
+    // ---- seat, scale, animate every man who got one ----
+    for (let i = 0; i < nearIdx.length; i++) {
+      const m = menDraw[nearIdx[i]];
+      if (!m.rig) continue;
+      placeRig(m, dt);
+      rigsShown++;
+    }
+  }
+
+  function placeRig(m, dt) {
+    const slot = m.rig, g = slot.rig;
+    g.visible = true;
+    /* SEATED BY sand.js LIKE EVERY OTHER BODY IN THE GAME — on the surface
+       that is actually DRAWN, leaning into the slope. NO `dt`, deliberately:
+       passing it makes plant() stamp a footprint, and sand.js's own comment
+       says why the column must not — "asking each of them to stamp prints
+       would be sixty times the cost for a mark four pixels wide", so the
+       column's ground record is laid off the PLAYER's path instead. The
+       stance radius scales with the man because the size lie scales him. */
+    if (W.sand && W.sand.plant) {
+      W.sand.plant(g, m.x, m.z, m.yaw, { r: 0.5 * m.ms });
+    } else {
+      g.position.set(m.x, m.y, m.z);
+      g.rotation.set(0, m.yaw, 0);
+    }
+    if (g.scale.x !== m.ms) g.scale.setScalar(m.ms);
+    /* THE FACE IS FOUR DRAW CALLS AND IT IS SUB-PIXEL AT 26 m. Eyes, brow
+       and mouth off entities/npc.js's own LOD pattern (n.char.detail); the
+       hair and the cap are deliberately NOT touched, because the head is the
+       colour that carries a man's tier at every range and a bald frame would
+       be a real visual change rather than a saving. */
+    const wantFace = m.d2 < FACE_LOD * FACE_LOD;
+    if (slot.faceOn !== wantFace) {
+      slot.faceOn = wantFace;
+      for (let i = 0; i < slot.face.length; i++) slot.face[i].visible = wantFace;
+    }
+    if (CBZ.animChar && slot.char) {
+      // battle.js's rate ladder, same reason: a gait resolved every fourth
+      // frame at 95 m is indistinguishable from one resolved every frame.
+      const every = m.d2 < ANIM_EVERY_1 * ANIM_EVERY_1 ? 1 : m.d2 < ANIM_EVERY_2 * ANIM_EVERY_2 ? 2 : 4;
+      slot.animF = (slot.animF + 1) & 1023;
+      if ((slot.animF % every) === 0) {
+        try { CBZ.animChar(slot.char, m.spd, dt * every); } catch (e) {}
+      }
+    }
+  }
+
+  /* ============================================================ THE DRAW */
+  /* WHAT THE MEN COST, PUBLISHED. This function is the most expensive
+     per-frame loop on the game's main screen and the whole LOD is a trade
+     against it, so the trade should not have to be re-measured by hand every
+     time somebody touches it. An EMA of its own wall time, two performance.now
+     calls a frame, readable from audit() and from the before/after preset. */
+  let menMs = 0;
+  function drawMen(dt) {
+    const _t0 = performance.now();
+    menDrawN = 0;
     const D = W.desert;
     const army = S.army;
+    const cam = camera.position;
     const drawN = FLAG_NOTRAIL ? 0 : Math.min(DRAWN_FOLLOWERS, army.length);
     const t = micro.elapsed;
-    /* MEN GROW AS THE CAMERA PULLS BACK, and this is a deliberate lie. At
-       520 m a life-sized man is under two pixels: the strategic view — the
-       one the whole game is about, where you look down at your column and
-       at what is coming for you — showed an empty desert with some dirt
-       specks on it. Total War and Bannerlord both scale their unit markers
-       for exactly this reason. 1x over the shoulder where he stands next to
-       a real studio.cast body and must match it, up to 3.2x at full pull-
-       back where nothing is next to him to compare against. */
-    const zt = clamp((camDist - 16) / (520 - 16), 0, 1);
-    const ms = 1 + zt * 2.2;
-    const spread = 1 + zt * 1.1;
+    /* THE COLUMN'S OWN SCALE, for the spacing rules only. Every man is drawn
+       at manScale(his own distance) — see the note on the size lie — but the
+       gap between men and the width of the cluster have to be decided ONCE
+       for the whole column or it fans out with distance. The column sits
+       about camDist from the eye by construction (the camera is behind him,
+       along the same axis the trail runs down), so that is the number. */
+    const colMs = manScale(camDist);
+    const spread = 1 + (colMs - 1) * 0.5;
     /* THE COLUMN FITS THE PATH YOU HAVE ACTUALLY RIDDEN. Fixed spacing looks
        right after a long ride and piles the whole army on one breadcrumb in
        the first thirty seconds of a game — which is exactly when the player
@@ -1308,38 +1960,42 @@
        whose last man sits comfortably inside the lower third. Packing them
        tighter also reads as MORE men, which is the direction this shot
        wants to be wrong in. */
-    const gap = Math.min(2.15 * spread, avail / Math.max(1, drawN),
-                         (camDist * 0.40) / Math.max(1, drawN));
+    /* AND THE FLOOR IS A BODY. That 40% cap was tuned when a man was a cone —
+       a cone has no depth and no arms, so forty of them at 0.62 m spacing read
+       as a dense column rather than as forty objects inside each other. A rig
+       measures 0.67 m front to back and 1.08 m across; below about 1.15 m of
+       spacing the near band photographs as a single writhing mass with heads
+       on it, which is what the first column pair came back looking like.
+       Floor it at a body's length and let the tail run past the bottom edge
+       when the camera is very close — a man walking out of frame behind you is
+       what actually happens when you are stood among your own men. */
+    const gap = Math.max(1.15, Math.min(2.15 * spread, avail / Math.max(1, drawN),
+                         (camDist * 0.40) / Math.max(1, drawN)));
     for (let i = 0; i < drawN; i++) {
       const back = 4 + i * gap;                        // metres behind you
       const idx = breadcrumbs.length - 1 - Math.floor(back / TRAIL_STEP);
       const c = breadcrumbs[idx < 0 ? 0 : idx];
       if (!c) break;
-      const j1 = (W.hash01(i * 31 + 7, 3, 21) - 0.5) * 7.0 * (1 + zt * 0.35);
+      const j1 = (W.hash01(i * 31 + 7, 3, 21) - 0.5) * 7.0 * (1 + (spread - 1) * 0.7);
       const j2 = (W.hash01(i * 17 + 5, 9, 23) - 0.5) * 3.0;
       const x = c.x + j1, z = c.z + j2;
-      const y = D.heightAt(x, z);
-      const s = W.tier(army[i].tier);
+      const dx = x - cam.x, dz = z - cam.z;
+      const ms = manScale(Math.sqrt(dx * dx + dz * dz));
+      const y = manGroundY(x, z, dx * dx + dz * dz);
       const bob = Math.sin(t * 5.2 + i * 1.7) * 0.055;
       const yaw = S.you.yaw + (W.hash01(i, 1, 27) - 0.5) * 0.5;
-      /* THE COLUMN WEARS WHAT THE BATTLE WILL DRESS IT IN. These are two
-         InstancedMesh colours, not a rig, so they cannot carry a painted
-         uniform — but they must not CONTRADICT one either. outfits.marks()
-         answers off the same fit record battle.js hands to studio.cast, so
-         the man who is a green militiaman in your column is a green
-         militiaman when the fight starts. The tier palette below is the
-         fallback for a page without outfits.js. */
-      let col = TIER_COLOUR[army[i].tier] || 0x9c8f6d, headCol = 0xd9b48c;
-      if (W.outfits && W.outfits.marks) {
-        const mk = W.outfits.marks(army[i], null);
-        if (mk) { if (mk.body != null) col = mk.body; if (mk.head != null) headCol = mk.head; }
-      }
-      n = inst(menBody, n, x, y + (0.65 + bob) * ms, z, yaw, ms, ms, ms, col);
-      inst(menHead, n - 1, x, y + (1.48 + bob) * ms, z, yaw, ms, ms, ms, headCol);
+      /* THE COLUMN WEARS WHAT THE BATTLE WILL DRESS IT IN. A man near the
+         camera is a real rig wearing his real fit; a man past the near band
+         is two instance colours off the SAME record — outfits.marks() answers
+         off the same fit battle.js hands to studio.cast — so the green
+         militiaman in your column is a green militiaman when the fight
+         starts and is the same green at both LODs. */
+      pushMan("a" + army[i].id, x, z, y, yaw, bob, ms, markOf(army[i], null), army[i], null, youSpeed);
+      if (menDrawN >= MEN_CAP) break;
     }
     // ---- every band close enough to see -------------------------------
     let bn = 0;
-    for (let i = 0; i < S.bands.length && n < MEN_CAP - 20; i++) {
+    for (let i = 0; i < S.bands.length && menDrawN < MEN_CAP - 20; i++) {
       const b = S.bands[i];
       const d = Math.hypot(b.x - S.you.x, b.z - S.you.z);
       if (d > BAND_DRAW) continue;
@@ -1349,50 +2005,116 @@
          reading as "a bigger blob", and the BANNER is what carries the
          count at any distance you would care about it from. */
       const show = clamp(Math.round(Math.sqrt(size) * 1.5), 2, 14);
-      for (let k = 0; k < show && n < MEN_CAP; k++) {
+      const bdx = b.x - cam.x, bdz = b.z - cam.z;
+      const bms = manScale(Math.sqrt(bdx * bdx + bdz * bdz));
+      const bspread = 1 + (bms - 1) * 0.5;
+      // a camped or paused party stands still; stepBands publishes the number
+      const bspd = b.spd == null ? 0 : b.spd;
+      for (let k = 0; k < show && menDrawN < MEN_CAP; k++) {
         const a = W.hash01(b.x + k, b.z, 41 + k) * TAU;
-        const rr = (1.6 + W.hash01(b.x, b.z + k, 51 + k) * (2.2 + Math.sqrt(size) * 0.75)) * spread;
+        const rr = (1.6 + W.hash01(b.x, b.z + k, 51 + k) * (2.2 + Math.sqrt(size) * 0.75)) * bspread;
         const x = b.x + Math.cos(a + b.yaw) * rr, z = b.z + Math.sin(a + b.yaw) * rr;
-        const y = W.desert.heightAt(x, z);
+        const dx = x - cam.x, dz = z - cam.z, d2 = dx * dx + dz * dz;
+        const y = manGroundY(x, z, d2);
         const bob = Math.sin(micro.elapsed * 4.6 + k * 2.1 + i) * 0.05;
-        n = inst(menBody, n, x, y + (0.65 + bob) * ms, z, b.yaw, ms, ms, ms, b.colour);
-        inst(menHead, n - 1, x, y + (1.48 + bob) * ms, z, b.yaw, ms, ms, ms, 0xc79a63);
+        /* THE BAND'S OWN ROSTER, not one flat hex for all fourteen. core
+           builds `men` up front precisely because the battle puts THOSE men
+           on the sand, so the party you are looking at can show its tiers —
+           the veteran in the helmet next to the bare-headed levy — instead of
+           fourteen identical specks in the faction colour. The banner already
+           carries "which army is that" at any range. */
+        const s = (b.men && b.men[k]) || null;
+        pushMan("b" + b.id + ":" + k, x, z, y, b.yaw, bob, manScale(Math.sqrt(d2)),
+                s ? markOf(s, b) : flatMark(b.colour, 0xc79a63), s, b, bspd);
       }
       if (bn < 160) bn = party(bn, b.x, b.z, size, b.colour, b.yaw);
     }
     /* OTHER WARLORDS ARE PARTIES, not a special case. They come off
        W.state.peers — the contract's own home for them — and go through the
-       exact instanced bodies and the exact banner an AI band uses, so a
-       human column and a computer column are the same object on screen and
-       neither can drift into looking "more real" than the other. warnet.js
-       keeps the map up to date and never draws anything. */
+       exact same LOD, the exact same banner and (see peerMan) the exact same
+       uniform painter an AI band uses, so a human column and a computer
+       column are the same object on screen and neither can drift into looking
+       "more real" than the other. warnet.js keeps the map up to date and
+       never draws anything. */
     peerDraw.length = 0;
     for (const pid in S.peers) {
       const q = S.peers[pid];
       if (!q || q.x == null) continue;
       const d = Math.hypot(q.x - S.you.x, q.z - S.you.z);
       peerDraw.push({ x: q.x, z: q.z, d: d, name: q.name || "WARLORD", size: q.size || 1, colour: q.colour == null ? 0xd8d0c0 : q.colour });
-      if (d > BAND_DRAW || n >= MEN_CAP - 20) continue;
+      if (d > BAND_DRAW || menDrawN >= MEN_CAP - 20) continue;
       const size = Math.max(1, q.size || 1);
       const show = clamp(Math.round(Math.sqrt(size) * 1.5), 1, 14);
       const yaw = q.yaw || 0;
-      for (let k = 0; k < show && n < MEN_CAP; k++) {
+      const pdx = q.x - cam.x, pdz = q.z - cam.z;
+      const pspread = 1 + (manScale(Math.sqrt(pdx * pdx + pdz * pdz)) - 1) * 0.5;
+      const pb = peerBand(pid);
+      for (let k = 0; k < show && menDrawN < MEN_CAP; k++) {
         const a = W.hash01(q.x + k, q.z, 41 + k) * TAU;
-        const rr = 1.6 + W.hash01(q.x, q.z + k, 51 + k) * (2.2 + Math.sqrt(size) * 0.75);
+        const rr = (1.6 + W.hash01(q.x, q.z + k, 51 + k) * (2.2 + Math.sqrt(size) * 0.75)) * pspread;
         const x = q.x + Math.cos(a + yaw) * rr, z = q.z + Math.sin(a + yaw) * rr;
-        const y = W.desert.heightAt(x, z);
-        n = inst(menBody, n, x, y + 0.65 * ms, z, yaw, ms, ms, ms, q.colour);
-        inst(menHead, n - 1, x, y + 1.48 * ms, z, yaw, ms, ms, ms, 0xc79a63);
+        const dx = x - cam.x, dz = z - cam.z, d2 = dx * dx + dz * dz;
+        const s = peerMan(pid, k);
+        pushMan("p" + pid + ":" + k, x, z, manGroundY(x, z, d2), yaw, 0, manScale(Math.sqrt(d2)),
+                markOf(s, pb), s, pb, 1.6);
       }
       if (bn < 160) bn = party(bn, q.x, q.z, size, q.colour, yaw);
     }
-    menBody.count = n; menHead.count = n;
+
+    // ---- hand out the bodies, then instance whoever did not get one ----
+    assignRigs(dt);
+
+    let n = 0;
+    for (let i = 0; i < menDrawN; i++) {
+      const m = menDraw[i];
+      if (m.rig) continue;
+      /* THE IMPOSTOR'S ORIGIN IS AT ITS FEET, so one matrix seats both the
+         body and the head and neither can drift from the other or from the
+         rig. The bob is the only motion a merged instance can carry — legs
+         cannot swing inside a shared buffer — and at 150 m a stride is three
+         pixels wide, so it buys nothing a vertical breath does not. */
+      n = instMan(n, m.x, m.y + m.bob * m.ms, m.z, m.yaw, m.ms, m.body, m.legs, m.head);
+    }
+    menBody.count = menHead.count = n;
     menBody.instanceMatrix.needsUpdate = menHead.instanceMatrix.needsUpdate = true;
     if (menBody.instanceColor) menBody.instanceColor.needsUpdate = true;
     if (menHead.instanceColor) menHead.instanceColor.needsUpdate = true;
+    if (menCap) {
+      menCap.count = menLegs.count = n;
+      menCap.instanceMatrix.needsUpdate = menLegs.instanceMatrix.needsUpdate = true;
+      if (menCap.instanceColor) menCap.instanceColor.needsUpdate = true;
+      if (menLegs.instanceColor) menLegs.instanceColor.needsUpdate = true;
+    }
     pole.count = bn; banner.count = bn;
     pole.instanceMatrix.needsUpdate = banner.instanceMatrix.needsUpdate = true;
     if (banner.instanceColor) banner.instanceColor.needsUpdate = true;
+    menMs = menMs * 0.9 + (performance.now() - _t0) * 0.1;
+  }
+
+  /* ONE MATRIX, TWO MESHES. The body and the head are separate InstancedMeshes
+     only because they are separate COLOURS; they share a transform, so compose
+     it once. (The cone's two halves each carried their own hand-typed vertical
+     offset and a separate compose, which is how the head ended up 1.48 m up a
+     body that had been scaled by 3.2.) */
+  function instMan(n, x, y, z, yaw, ms, bodyCol, legCol, headCol) {
+    if (n >= MEN_CAP) return n;
+    if (FLAG_MEN_OLD) {
+      // the cone's own offsets, byte for byte, so ?men=old is a real revert
+      inst(menBody, n, x, y + 0.65 * ms, z, yaw, ms, ms, ms, bodyCol);
+      inst(menHead, n, x, y + 1.48 * ms, z, yaw, ms, ms, ms, headCol);
+      return n + 1;
+    }
+    _e.set(0, yaw, 0); _q.setFromEuler(_e);
+    _p3.set(x, y, z); _s3.set(ms, ms, ms);
+    _m4.compose(_p3, _q, _s3);
+    menBody.setMatrixAt(n, _m4);
+    menLegs.setMatrixAt(n, _m4);
+    menHead.setMatrixAt(n, _m4);
+    menCap.setMatrixAt(n, _m4);
+    if (menBody.setColorAt) { _col.setHex(bodyCol); menBody.setColorAt(n, _col); }
+    if (menLegs.setColorAt) { _col.setHex(legCol); menLegs.setColorAt(n, _col); }
+    if (menCap.setColorAt) { _col.setHex(headCol); menCap.setColorAt(n, _col); }
+    return n + 1;
   }
 
   /* ONE BANNER RULE for AI bands, peers and anything else that is a party:
@@ -1570,6 +2292,11 @@
       }
       const dx = tx - b.x, dz = tz - b.z;
       const d = Math.hypot(dx, dz);
+      /* WHAT SPEED IS THIS PARTY WALKING AT. The near band drives real gaits
+         off it (CBZ.animChar takes m/s), and a camped party whose men are
+         marching on the spot is the tell that the animation is decoration
+         rather than the sim. One assignment; the AI above already solved it. */
+      b.spd = (sp > 0 && d > 2) ? sp : 0;
       if (sp > 0 && d > 2) {
         let ux = dx / d, uz = dz / d;
         const nx = b.x + ux * sp * dt, nz = b.z + uz * sp * dt;
@@ -1785,6 +2512,11 @@
     return {
       live: live, bands: S.bands.length, outposts: S.outposts.length,
       army: S.army.length, drawnMen: menBody ? menBody.count : 0,
+      men: { impostors: menBody ? menBody.count : 0, rigs: rigsShown,
+             pool: rigsBuilt, poolCap: RIG_POOL, dressedThisFrame: rigsDressed,
+             near: NEAR_IN, out: NEAR_OUT, cone: FLAG_MEN_OLD,
+             ms: Math.round(menMs * 1000) / 1000 },
+      calls: (CBZ.renderer && CBZ.renderer.info) ? CBZ.renderer.info.render.calls : null,
       you: { x: Math.round(S.you.x), z: Math.round(S.you.z), y: Math.round(W.desert.heightAt(S.you.x, S.you.z)) },
       hour: Math.round(S.hour * 10) / 10, day: S.day, camDist: Math.round(camDist),
       ridden: Math.round(travelled),
