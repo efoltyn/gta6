@@ -1072,10 +1072,19 @@
        quadrants whose gait table happened to give both the SAME phase, and
        the on-foot column walked with its feet welded together. Medians are
        correct for two legs, four legs and four wheels alike. */
-    const mx = median(cols.map(function (c) { return c.x; }));
-    const mz = median(cols.map(function (c) { return c.z; }));
+    const xs = cols.map(function (c) { return c.x; }), zs = cols.map(function (c) { return c.z; });
+    const mx = median(xs), mz = median(zs);
+    const spreadX = xs.length ? Math.max.apply(null, xs) - Math.min.apply(null, xs) : 0;
+    const spreadZ = zs.length ? Math.max.apply(null, zs) - Math.min.apply(null, zs) : 0;
+    /* AND A BIPED HAS NO FRONT PAIR. Two legs sit at the same x, so a median
+       test on x splits them on floating-point noise and the gait table then
+       handed BOTH the same phase — the on-foot column walked with its feet
+       welded together, twice, in two different ways. If the columns do not
+       spread along the body axis at all, every leg is "front" and the whole
+       gait falls out of left/right, which is exactly what a walk is. */
+    const hasFrontBack = spreadX > spreadZ * 0.4 && spreadX > 0.05;
     for (let c = 0; c < cols.length; c++) {
-      cols[c].front = cols[c].x >= mx;
+      cols[c].front = hasFrontBack ? cols[c].x >= mx : true;
       cols[c].left = cols[c].z >= mz;
     }
 
@@ -1109,11 +1118,35 @@
           if (d < cols[c].r * 1.9 && d < bd) { bd = d; owner = c; }
         }
       }
+      /* THE RIDER IS NEVER PART OF THE ANIMAL'S LEG. He straddles: his thigh
+         is abducted outward and his boot hangs down the flank, which puts
+         both within the discovery radius of the front leg on that side —
+         measured, and it dragged the horse's hip pivot from 1.20 up to 1.90,
+         so the front legs pivoted about the middle of the barrel. He is
+         tagged when he is seated and refused here. */
+      if (owner >= 0 && meshes[i].userData && meshes[i].userData.mountRider) owner = -1;
       if (owner < 0) { body.push({ mesh: meshes[i] }); continue; }
       legs[owner].push({ mesh: meshes[i] });
       if (!hips[owner]) {
         hips[owner] = new THREE.Vector3(cols[owner].x, cols[owner].top, cols[owner].z);
         info[owner] = { front: cols[owner].front, left: cols[owner].left };
+      }
+    }
+    /* THE PIVOT IS THE TOP OF THE WHOLE LEG, not of the box that seeded the
+       column. A camel's leg is discovered from its SHANK (the upper leg
+       starts too high off the ground to seed anything), so the seed's top is
+       the knee — and a leg swinging about its knee drives the thigh straight
+       through the barrel. Recomputed here from everything the column
+       actually owns, which is the shoulder. */
+    if (!explicit) {
+      for (let q = 0; q < 4; q++) {
+        if (!legs[q].length || !hips[q]) continue;
+        let top = -1e9;
+        for (let i = 0; i < legs[q].length; i++) {
+          const bb = new THREE.Box3().setFromObject(legs[q][i].mesh).applyMatrix4(inv);
+          if (bb.max.y > top) top = bb.max.y;
+        }
+        if (top > -1e8) hips[q].y = top;
       }
     }
     for (let q = 0; q < 4; q++) {
@@ -1390,7 +1423,8 @@
       rider.group.rotation.y = Math.PI / 2;           // human +Z follows the animal's +X
       src.add(rider.group);
       src.updateMatrixWorld(true);
-      if (kindId === "__foot" && rider.parts) tagWalkerLegs(rider.parts);
+      if (kindId === "__foot") { if (rider.parts) tagWalkerLegs(rider.parts); }
+      else rider.group.traverse(function (o) { if (o.isMesh) o.userData.mountRider = 1; });
     }
 
     const parts = splitParts(src);

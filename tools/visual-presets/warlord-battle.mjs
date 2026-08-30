@@ -183,7 +183,15 @@ export default {
   beforeLabel: "BEFORE · MORALE OFF (fight to the last man)",
   afterLabel: "AFTER · MORALE AND ROUT",
   viewport: { width: 1180, height: 700 },
-  urlParams: { battle: 1, frozen: 1, mine: 34, them: 34, seed: 1337, gun: "ak47", faction: "militia" },
+  /* BOTH ROSTERS COME OUT OF makeBand, so the two armies are built by the same
+     constructor and carry armour the same way — the first run of this preset
+     hand-rolled the player's side with no armour at all and photographed a
+     handicap match. The player's side is a FREE COMPANY against a MILITIA,
+     which is a campaign encounter a warlord would actually take: better men,
+     not more of them, which is the game's own thesis about who gets the good
+     rifle. */
+  urlParams: { battle: 1, frozen: 1, mine: 34, them: 34, seed: 1337, gun: "ak47",
+    faction: "militia", myfaction: "company" },
   readyExpression: "!!(window.CBZ && window.CBZ.warlord)",
   // the first subject pays the whole studio boot under a software rasteriser
   stageTimeoutMs: 600000,

@@ -1566,8 +1566,21 @@
     const p = CBZ.combatIQ && CBZ.combatIQ.profile ? CBZ.combatIQ.profile(m) : null;
     const fireMax = p ? Math.min(125, p.hi * 2.6 + 8) : 60;
     if (!m.sees || dist > fireMax) return;
+    /* A FLANKING MAN SHOOTS. battle.html's trigger gate excludes the "flank"
+       slot and it is right to: there, "flank" is combat_iq's word for "you do
+       not hold the fire token, go work an angle", and a man without the token
+       is supposed to be quiet.
+
+       Here "flank" is also an ORDER — a manoeuvre a person chose — and under
+       that order a man walks up to fifty metres around the enemy mass. With
+       the donor's gate he made that entire walk without pulling a trigger
+       once, which turns a flank into a column of free targets: MEASURED on the
+       third before/after pair, ordering FLANK at t=28 in an even 34 v 34 lost
+       the battle by t=39, and the same fight held on HOLD. A flank that cannot
+       shoot is not a flank, it is a parade. */
     if (m.slot !== "fire" && m.slot !== "peek" && m.slot !== "push" &&
-        m.slot !== "sidestep" && m.slot !== "fallback" && dist > 12) return;
+        m.slot !== "sidestep" && m.slot !== "fallback" &&
+        m.slot !== "flank" && dist > 12) return;
     if (m.cool > 0) return;
     m.sees = eyeLos(m, tgt);
     if (!m.sees) { m.cool = 0.12; return; }

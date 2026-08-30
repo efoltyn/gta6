@@ -53,6 +53,7 @@ export default {
   description:
     "Six moments of everything that can now happen on the island besides a fight. " +
     "Both sides are this checkout; only ?events=off differs.",
+  page: "games/warlord.html",
   frameList: FRAMES,
   /* ?event= RIDES THE URL because the debug door only reads it at boot, and
      the door is also what stages the 34-man column every state-reading card

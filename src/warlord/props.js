@@ -122,36 +122,42 @@
      city/beach.js make — so if the city is ever on the page beside us we
      share ITS instances too rather than minting near-duplicates.
 
-     The desert palette is deliberately narrow and low-chroma. The first pass
-     used saturated tent canvas and shipping-container reds straight off a
-     reference photo; against desert.js's sand (0xc8ab74-ish at noon) they
-     read as toys. Everything is pulled toward the sand except the three
-     container paints and the banners, which are the only things allowed to
-     shout — and they shout because that is their JOB, they are how you
-     recognise a place and a faction from a kilometre away. */
+     The desert palette is deliberately narrow and low-chroma. Everything is
+     pulled toward the sand except the three container paints and the
+     banners, which are the only things allowed to shout — and they shout
+     because that is their JOB, they are how you recognise a place and a
+     faction from a kilometre away.
+
+     AND IT IS AUTHORED A THIRD DARKER THAN IT LOOKS, twice over. The
+     renderer runs ACESFilmicToneMapping with sRGB output, which lifts and
+     desaturates everything on the way to the screen — a hex that reads
+     "weathered canvas" in an editor arrives as cream. The first pass was
+     authored at face value and photographed as a set of white paper models
+     on a white floor. Every entry here is roughly 0.62x the value it is
+     meant to read as, measured against the gallery shots. */
   const COL = {
-    sand:       0xbda574,
-    sandDark:   0x8e7647,
-    canvas:     0xcbbc98,   // tent cloth, sun-bleached
-    canvasDark: 0xa08a5f,
-    tarp:       0x8a7f63,
-    wood:       0x6d5233,
-    woodDark:   0x483722,
-    metal:      0x767c82,
-    metalDark:  0x3d434a,
-    rust:       0x8b4e2e,
-    char:       0x241f1a,   // what a burnt thing is
-    rock:       0x8a7a63,   // matched to desert.js's scatter rock on purpose
-    rockDark:   0x6b5f4c,
-    palmTrunk:  0x6b5334,   // matched to desert.js's oasis palms, same reason
-    frond:      0x3d6f2c,
-    bone:       0xd8cfb4,
-    rope:       0xa8946c,
-    hide:       0x7a5a3c,
-    water:      0x3f7f8f,
-    boxRed:     0x9c4a35,
-    boxBlue:    0x2f5a72,
-    boxGreen:   0x4a6a48,
+    sand:       0x9c7f4c,
+    sandDark:   0x6d5733,
+    canvas:     0xa89771,   // tent cloth, sun-bleached
+    canvasDark: 0x7d6b48,
+    tarp:       0x5f5844,
+    wood:       0x54401f,
+    woodDark:   0x33270f,
+    metal:      0x5c646c,
+    metalDark:  0x2a3036,
+    rust:       0x6e3b1e,
+    char:       0x141210,   // what a burnt thing is
+    rock:       0x6b5f4a,   // matched to desert.js's scatter rock on purpose
+    rockDark:   0x4d442f,
+    palmTrunk:  0x4e3b22,   // matched to desert.js's oasis palms, same reason
+    frond:      0x2c5a1e,
+    bone:       0xbfb499,
+    rope:       0x8a7550,
+    hide:       0x5b4028,
+    water:      0x2a6070,
+    boxRed:     0x8c3a24,
+    boxBlue:    0x1f4a63,
+    boxGreen:   0x35563a,
     ember:      0xff7a2a,
   };
   const _mats = {};
