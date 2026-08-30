@@ -33,8 +33,21 @@
      the dead        CBZ.deathPose + CBZ.cityRagdoll      (city/ragdoll.js)
      dropped rifles  CBZ.weaponPhysics.drop   (systems/actorweapons.js)
      the ground      W.desert.battlefieldAt() (warlord/desert.js)
+     YOUR gun        systems/fpsmode.js       (via warlord/gunplay.js)
    Nothing above is reimplemented here. What IS this file: who is on which
-   side, morale, the four orders, the player, the cameras, and the report.
+   side, morale, the four orders, and the report.
+
+   THE PLAYER'S GUN USED TO BE THE EXCEPTION AND IT WAS THE WRONG ONE. This
+   file carried its own aim, its own trigger, its own cone magnet, its own
+   ammo, its own viewmodel and its own two camera seats, under a comment
+   claiming systems/fpsmode.js could not be stood up here. Every reason in that
+   comment was checkable and every one of them was false — warlord/gunplay.js
+   opens with the list. So the fork is gone: the warlord now shoots with the
+   same file the jail and gun game shoot with, mounted through the same
+   route-the-name shims games/warlord.html already installs for
+   queryCollidersNear / floorAt / collide. What is left here of the player is
+   what a BATTLE owns and a gun does not: where he spawns, that he is in the
+   roster, that being shot hurts him, and the command seat.
 
    WHERE THE DONOR IS WRONG AND THIS FILE DOES IT DIFFERENTLY (CLAUDE.md: the
    codebase is not a bible) — each is commented at its site:
@@ -57,6 +70,10 @@
      ?tlos=0       the dunes stop blocking sight lines
      ?men=N        per-side fielding cap (default 300 — see MEN_CAP)
      ?battle=1     debug: drop straight into a test battle at boot
+     ?gunplay=old  warlord/gunplay.js's legacy path — the hand-rolled player
+                   controller this file used to carry, kept whole so the new
+                   one can be photographed against it. The A/B.
+     ?gunplay=0    no player gunplay at all (watch the AI war)
 ============================================================ */
 (function () {
   "use strict";
@@ -112,7 +129,7 @@
   let live = false;
   let scene = null, micro = null;
   let men = [], corpses = [], sinking = [], dropGuns = [], addedCols = [], addedMeshes = [];
-  let YOU = null, youRig = null, viewGun = null;
+  let YOU = null, youRig = null;
   let simT = 0, over = false, started = false;
   let hud = null, frameFn = null, capped = { mine: 0, them: 0 };
   let MAP = null, band = null, report = null, startOpts = null;
@@ -1630,14 +1647,18 @@
   }
 
   /* ============================================================ THE WARLORD
-     A compact first-person/third-person controller, and it is deliberately NOT
-     systems/fpsmode.js. That file is 4 400 lines of CITY player — it wants
-     CBZ.game.state, the inventory, the wanted ladder, the HUD, the vehicle
-     seams — and standing it up on a slice page would mean stubbing a game.
-     What IS reused is every piece of it that is actually about a gun:
-     weapon-data's numbers, actorweapons' viewmodel, gunfx's tracer/flash/
-     impact, and the same hurtMan funnel every NPC round goes through. The only
-     new code here is "where is the camera and did the ray hit anybody". */
+     WHAT IS LEFT OF HIM HERE. His body, his health, his spawn, and the command
+     seat. HIS GUN IS NOT HERE and must never come back: warlord/gunplay.js
+     mounts systems/fpsmode.js — the repo's one player weapon system, the same
+     one games/index.html's jail and modes/gungame.js drive — and that file
+     owns the aim, the trigger, the spread, the recoil pattern, ADS, the
+     reload, the reticle, the hit marker, the falloff and the weapon switch.
+     The old hand-rolled version of all of that lives on behind ?gunplay=old
+     inside gunplay.js, which is where it can be deleted in one go.
+
+     THE COMMAND SEAT stays here because it is not a gun: it is the Bannerlord
+     chair over your own army, it belongs to the battle, and gunplay.js hands
+     the lens back the moment the mode is "cmd". */
   const CAMS = ["fps", "third", "cmd"];
   let camMode = "fps";
   let hudSyncOrders = null;      // set by buildHud; keeps the order rail honest
@@ -1649,128 +1670,102 @@
    which keeps the horizon in frame and the men legible. */
 const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
 
-  function stepYou(dt) {
-    const IN = micro.input;
-    const T = micro.touch;
-    if (YOU.dead) return;
-    if (YOU.reloadT > 0) { YOU.reloadT -= dt; if (YOU.reloadT <= 0) YOU.mag = YOU.magSize; }
-    if (YOU.cool > 0) YOU.cool -= dt;
-
-    // look — mouse, drag, or the right thumb; all three arrive as input.mx/mz
-    if (IN && (camMode === "fps" || camMode === "third")) {
-      YOU.yaw -= IN.mx * (IN.sensitivity || 0.0022);
-      YOU.pitch = clamp(YOU.pitch - IN.mz * (IN.sensitivity || 0.0022), -1.2, 1.2);
-    }
-
-    if (camMode === "cmd") {
-      // COMMAND CAMERA: the Bannerlord seat. It flies, it does not fight.
-      const fwd = 60 * dt * (cmd.dist / 90 + 0.4);
-      let mx = IN ? IN.axis("KeyA", "KeyD") : 0, mz = IN ? IN.axis("KeyS", "KeyW") : 0;
-      if (T && T.active && T.stick.mag > 0.05) { mx += T.stick.x; mz += -T.stick.y; }
-      if (mx || mz) {
-        cmd.x += (-Math.sin(cmd.yaw) * mz - Math.cos(cmd.yaw) * mx) * fwd;
-        cmd.z += (-Math.cos(cmd.yaw) * mz + Math.sin(cmd.yaw) * mx) * fwd;
-      }
-      if (IN) {
-        cmd.yaw -= IN.mx * 0.004;
-        cmd.pitch = clamp(cmd.pitch - IN.mz * 0.003, 0.16, 1.4);
-        if (IN.wheel) { cmd.auto = false; cmd.dist = clamp(cmd.dist * (IN.wheel > 0 ? 1.12 : 0.9), 24, 320); }
-      }
-      YOU.speed = 0;
-      return;
-    }
-
-    // walk
+  /* DRIVING THE COMMAND SEAT. It flies, it does not fight, and that is exactly
+     why it stayed in this file when the gun left: WASD here is not a man
+     walking, it is a commander panning over his own army, and the wheel is not
+     a weapon switch. This used to live inside stepYou() beside the trigger,
+     which is the only reason it read as part of the player controller. */
+  function stepCommand(dt) {
+    const IN = micro.input, T = micro.touch;
+    const fwd = 60 * dt * (cmd.dist / 90 + 0.4);
     let mx = IN ? IN.axis("KeyA", "KeyD") : 0, mz = IN ? IN.axis("KeyS", "KeyW") : 0;
-    if (T && T.active && T.stick.mag > 0.05) { mx = T.stick.x; mz = -T.stick.y; }
-    const sprint = (IN && IN.isDown("ShiftLeft")) || (T && T.stick.rim);
-    const base = (sprint ? 7.4 : 4.8) * (1 - W.armour(W.state.you.armour).slow);
-    const len = Math.hypot(mx, mz);
-    if (len > 0.01) {
-      const s = base / Math.max(1, len);
-      const sy = Math.sin(YOU.yaw), cy = Math.cos(YOU.yaw);
-      YOU.pos.x += (sy * mz + cy * mx) * s * dt;
-      YOU.pos.z += (cy * mz - sy * mx) * s * dt;
-      micro.resolveCircle(YOU.pos, 0.45, YOU.pos.y, 1.8);
-      YOU.speed = base * Math.min(1, len);
-    } else YOU.speed = 0;
-    YOU.pos.y = MAP.groundAt(YOU.pos.x, YOU.pos.z);
-    if (youRig) youRig.rotation.y = YOU.yaw;
-
-    // trigger — held mouse, the touch FIRE latch, or SPACE
-    const firing = (IN && (IN.buttons[0] || IN.isDown("Space"))) || touchFire;
-    if (firing && YOU.cool <= 0 && YOU.reloadT <= 0) playerShoot();
-    if (IN && IN.pressed("KeyR") && YOU.mag < YOU.magSize) reloadYou();
-    if (YOU.mag <= 0 && YOU.reloadT <= 0) reloadYou();
-  }
-  let touchFire = false;
-  function reloadYou() {
-    const w = CBZ.weaponById(YOU.wid);
-    YOU.reloadT = (w && (w.reloadTime || w.reload)) || 1.4;
+    if (T && T.active && T.stick.mag > 0.05) { mx += T.stick.x; mz += -T.stick.y; }
+    if (mx || mz) {
+      cmd.x += (-Math.sin(cmd.yaw) * mz - Math.cos(cmd.yaw) * mx) * fwd;
+      cmd.z += (-Math.cos(cmd.yaw) * mz + Math.sin(cmd.yaw) * mx) * fwd;
+    }
+    if (IN) {
+      cmd.yaw -= IN.mx * 0.004;
+      cmd.pitch = clamp(cmd.pitch - IN.mz * 0.003, 0.16, 1.4);
+      if (IN.wheel) { cmd.auto = false; cmd.dist = clamp(cmd.dist * (IN.wheel > 0 ? 1.12 : 0.9), 24, 320); }
+    }
+    if (YOU) YOU.speed = 0;
   }
 
-  const _ray = { o: null, d: null };
-  function playerShoot() {
-    const w = CBZ.weaponById(YOU.wid) || {};
-    YOU.cool = w.fireDelay || w.interval || 0.2;
-    YOU.mag--;
-    SIDES.mine.shots++;
-    const cam = CBZ.camera;
-    _ray.o = _ray.o || V(); _ray.d = _ray.d || V();
-    _ray.o.copy(cam.position);
-    cam.getWorldDirection(_ray.d);
-    /* AIM ASSIST, AND IT IS A CONE, NOT A MAGNET. A thumb on glass cannot hold
-       a 0.5° hold at 60 m and the brief asks for a game that plays on touch, so
-       the ray snaps to the nearest enemy inside a small cone — 2.2° on a
-       mouse, 5° on a coarse pointer, and nothing at all outside the cone.
-       Range is the gun's own listed range, so a pistol still cannot reach. */
-    const cone = Math.cos((ctx.coarse ? 5 : 2.2) * Math.PI / 180);
-    const range = w.range || 80;
-    let best = null, bestD = 1e9;
-    for (let i = 0; i < men.length; i++) {
-      const o = men[i];
-      if (o.dead || o.fled || o.team === "mine") continue;
-      const ox = o.pos.x - _ray.o.x, oy = (o.pos.y + o.aimY) - _ray.o.y, oz = o.pos.z - _ray.o.z;
-      const d = Math.hypot(ox, oy, oz);
-      if (d > range || d < 0.5) continue;
-      const dot = (ox * _ray.d.x + oy * _ray.d.y + oz * _ray.d.z) / d;
-      if (dot < cone) continue;
-      if (d < bestD) { bestD = d; best = o; }
-    }
-    let hitPoint = null;
-    if (best) {
-      // and the round still has to get there: sand and rocks are not optional
-      const ay = _ray.o.y, by = best.pos.y + best.aimY;
-      if (micro.segmentBlocked(_ray.o.x, ay, _ray.o.z, best.pos.x, by, best.pos.z) ||
-          (MAP.terrainLos && terrainBlocked(_ray.o.x, ay, _ray.o.z, best.pos.x, by, best.pos.z))) best = null;
-    }
-    if (best) {
-      hitPoint = _v.set(best.pos.x, best.pos.y + best.aimY, best.pos.z);
-    } else {
-      hitPoint = _v.copy(_ray.o).addScaledVector(_ray.d, range);
-      const g = MAP.groundAt(hitPoint.x, hitPoint.z);
-      if (hitPoint.y < g) hitPoint.y = g;
-    }
-    const from = _muz.copy(cam.position).addScaledVector(_ray.d, 0.9);
-    from.y -= 0.12;
-    CBZ.tracer(from, hitPoint, { shooter: YOU, targetActor: best || null, muzzle: true,
-      muzzleScale: (w.flash ? 0.5 + w.flash : 0.9) });
-    if (w.sfx) safe(function () { CBZ.sfx(w.sfx, { dist: 2, volume: (w.sfxVol || 1) * 0.55, pitch: w.sfxPitch || 1 }); });
-    CBZ.shake && CBZ.shake(Math.min(0.6, (w.shake || 0.3) * 0.5));
-    if (best) {
-      SIDES.mine.hits++;
-      /* THE WARLORD'S OWN ROUND IS THE WEAPON'S OWN DAMAGE, raw. He is not an
-         NPC and combat_iq's derived-damage ladder is a model of NPC competence,
-         not of a player's trigger finger — routing his shots through it would
-         hand the player an accuracy roll he already made with his own hand. */
-      hurtMan(best, (w.damage || 24) * (w.pellets || 1) * 0.55, { by: YOU, raw: true });
-      if (CBZ.bodyWound) safe(function () { CBZ.bodyWound(best, hitPoint, {}); });
-    } else {
-      CBZ.bulletImpact(hitPoint, { x: 0, y: 1, z: 0 }, { kind: "dust", power: 0.7 });
-    }
-    // and being shot at is information the other side acts on
-    if (best && CBZ.combatIQ && CBZ.combatIQ.suppress) CBZ.combatIQ.suppress(best, 1.1);
+  /* THE SEAM gunplay.js drives the warlord through. Functions, not state: this
+     is the only door out of the battle, so a gun system cannot reach in and
+     change anything the battle did not offer. Every entry lands on a rule that
+     already existed in this file. */
+  function gunplayApi() {
+    return {
+      THREE: THREE, micro: micro, ctx: ctx, coarse: !!ctx.coarse,
+      setCam: setCam,
+      live: function () { return live && !over; },
+      you: YOU,
+      youRig: youRig,
+      men: function () { return men; },
+      groundAt: function (x, z) { return MAP.groundAt(x, z); },
+      losBlockers: addedMeshes,        // the rocks. Your rounds stop on cover too.
+      blocked: function (ax, ay, az, bx, by, bz) {
+        return micro.segmentBlocked(ax, ay, az, bx, by, bz) ||
+          (MAP.terrainLos && terrainBlocked(ax, ay, az, bx, by, bz));
+      },
+      /* A ROUND FROM THE WARLORD LANDS THROUGH THE SAME TWO FUNCTIONS AN NPC'S
+         DOES. fpsmode has already taken the weapon's own damage off m.hp by
+         the time hit() is called (gunplay.js's knockback shim explains the
+         seam and puts the armour soak back); what is left is the part that is
+         the BATTLE's: suppression, who he turns on, and the kill funnel with
+         its ragdoll, dropped rifle, kill credit, morale and corpse budget. */
+      /* THE ONE SOAK FORMULA, lent out rather than copied. gunplay.js has to
+         re-apply the warlord's round through armour (fpsmode has no soak
+         concept and takes the raw damage off itself), and a second
+         `dmg - soak` written over there is exactly how two files start
+         disagreeing about what a plate does. */
+      soak: function (m, dmg) { return hurtOne(m, dmg); },
+      hit: function (m, dealt) {
+        if (!m || m.dead || over) return;
+        if (CBZ.combatIQ && CBZ.combatIQ.suppress) CBZ.combatIQ.suppress(m, 0.9);
+        if (!m.tgt || m.tgt.dead) m.tgt = YOU;
+        SIDES.mine.hits++;
+        if (m.hp <= 0) killMan(m, { by: YOU });
+      },
+      kill: function (m) { if (m && !m.dead && !over) killMan(m, { by: YOU }); },
+      shot: function (n) { SIDES.mine.shots += (n || 1); },
+      hitCount: function () { SIDES.mine.hits++; },
+      // the legacy controller's own damage call — one funnel, still
+      legacyHurt: function (m, dmg) { hurtMan(m, dmg, { by: YOU, raw: true }); },
+    };
   }
+  const GP = function () { return W.gunplay || null; };
+
+  /* ---- LOADING THE GUN, and why it is done from here.
+     games/warlord.html's WARLORD list is the page's, not this file's, and
+     gunplay.js arrived after it was written. That is fine and arguably right:
+     this file is gunplay.js's only consumer, a campaign ride does not need a
+     first-person weapon system, and the page's boot bar is already forty files
+     long on a phone. So the module fetches its own dependency at boot and the
+     first battle waits on it — one round trip, once, off the critical path of
+     the title screen. (If the page ever DOES list it, the file's own family
+     guard makes this a no-op.)
+     The orchestrator may add "warlord/gunplay.js" to that list; nothing here
+     needs to change if it does. */
+  let gunplayReady = null;
+  function loadGunplay() {
+    if (gunplayReady) return gunplayReady;
+    gunplayReady = new Promise(function (resolve) {
+      if (W.gunplay) return resolve(true);
+      const src = (CBZ.studio && CBZ.studio.root ? CBZ.studio.root : "../src/") + "warlord/gunplay.js";
+      const el = document.createElement("script");
+      el.src = src; el.async = false;
+      el.onload = function () { resolve(true); };
+      el.onerror = function () { console.warn("[warlord/battle] gunplay.js did not load"); resolve(false); };
+      document.head.appendChild(el);
+    }).then(function () {
+      return W.gunplay ? W.gunplay.ensure() : false;
+    });
+    return gunplayReady;
+  }
+  let gunplayDone = false;
 
   /* ============================================================ CAMERA */
   function camDist2(p) {
@@ -1810,53 +1805,46 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       if (py < g) py = g;
       c.position.set(px, py, pz);
       c.lookAt(cmd.x, fy + 1.2, cmd.z);
-      if (viewGun) viewGun.visible = false;
       if (youRig) youRig.visible = true;
       return;
     }
-    const eye = YOU.pos.y + YOU.eyeH;
-    const dir = new THREE.Vector3(Math.sin(YOU.yaw) * Math.cos(YOU.pitch), Math.sin(YOU.pitch),
-                                  Math.cos(YOU.yaw) * Math.cos(YOU.pitch));
-    if (camMode === "fps") {
-      c.position.set(YOU.pos.x, eye, YOU.pos.z);
-      c.lookAt(YOU.pos.x + dir.x, eye + dir.y, YOU.pos.z + dir.z);
-      if (youRig) youRig.visible = false;
-      if (viewGun) viewGun.visible = true;
-    } else {
-      /* OVER THE SHOULDER, NOT BEHIND THE HEAD. The first draft put the lens
-         on the man's own bearing at 4.6 m and he filled the middle of the
-         frame — measured on a capture where a charging army 100 m up the field
-         was entirely behind his torso. A shoulder camera is offset SIDEWAYS so
-         the body sits in a corner and the fight owns the frame; the offset is
-         the rig's own shoulder width plus a body, not a number. */
-      const back = 5.4, up = 1.35, side = 1.05;
-      const rx = Math.cos(YOU.yaw), rz = -Math.sin(YOU.yaw);   // the man's right
-      let px = YOU.pos.x - dir.x * back + rx * side;
-      let pz = YOU.pos.z - dir.z * back + rz * side;
-      let py = eye + up - dir.y * back;
-      const g = MAP.groundAt(px, pz) + 1.2;
-      if (py < g) py = g;
-      c.position.set(px, py, pz);
-      c.lookAt(YOU.pos.x + dir.x * 14 + rx * side, eye + dir.y * 14, YOU.pos.z + dir.z * 14 + rz * side);
-      if (youRig) youRig.visible = true;
-      if (viewGun) viewGun.visible = false;
-    }
+    /* THE OTHER TWO SEATS BELONG TO THE GUN. First person and over-the-
+       shoulder are not camera modes here, they are the two ways fpsmode.js
+       presents a weapon (fps.active vs shoulderActive), and the lens has to be
+       exactly where the aim is or the reticle lies about where the round goes
+       — which is precisely what the fork's third person did. gunplay.js places
+       both from the aim direction fpsmode publishes, one frame ahead of
+       fpsmode's own pass. Nothing to do here. */
   }
   function setCam(mode) {
     camMode = mode;
-    /* AND THE LENS MOVES NOW, NOT NEXT FRAME. stepCamera() is what actually
-       places the camera and it only runs inside frame() — so a tool that
-       switches to first person and renders immediately (which is exactly what
-       a screenshot preset does) photographed the PREVIOUS seat. MEASURED: the
-       subject captioned "CHARGE, from inside the line" came back as a wide
-       command shot with no viewmodel in it. One framing pass here costs
-       nothing and removes the whole class of stale-camera capture. */
-    if (live && MAP && YOU) safe(function () { stepCamera(0.016); });
+    /* AND THE LENS MOVES NOW, NOT NEXT FRAME. stepCamera()/gunplay place the
+       camera and both only run inside a frame — so a tool that switches to
+       first person and renders immediately (which is exactly what a screenshot
+       preset does) photographed the PREVIOUS seat. MEASURED: the subject
+       captioned "CHARGE, from inside the line" came back as a wide command
+       shot with no viewmodel in it. One framing pass costs nothing and removes
+       the whole class of stale-camera capture. */
+    const gp = GP();
+    if (gp && gp.on()) gp.camera(mode);
+    if (mode === "cmd" && live && MAP && YOU) safe(function () { stepCamera(0.016); });
+    /* THE BUTTON NAMES WHERE IT TAKES YOU, in both places that write it.
+       syncOrderRail below has always labelled it as the DESTINATION ("THIRD
+       PERSON" while you are in first) and this line labelled it as the CURRENT
+       seat ("FIRST PERSON" while you are in first) — two conventions on one
+       button, and whichever ran last won. Caught on the first before/after
+       pair: a first-person frame with a button on it reading FIRST PERSON. */
     const b = document.getElementById("wbCam");
-    if (b) b.textContent = mode === "fps" ? "FIRST PERSON" : mode === "third" ? "OVER SHOULDER" : "COMMAND";
-    if (mode !== "cmd" && micro.lock && !ctx.coarse) micro.lock();
+    if (b) b.textContent = camLabel(mode);
+    if (mode === "cmd" && micro.lock && micro.unlock && !ctx.coarse) safe(function () { micro.unlock(); });
   }
-  function cycleCam() { setCam(CAMS[(CAMS.indexOf(camMode) + 1) % CAMS.length]); }
+  function cycleCam() { setCam(nextCam(camMode)); }
+  function nextCam(m) { return CAMS[(CAMS.indexOf(m) + 1) % CAMS.length]; }
+  // what the toggle takes you to next, named for the seat you will land in
+  function camLabel(m) {
+    const to = nextCam(m);
+    return to === "fps" ? "FIRST PERSON" : to === "third" ? "OVER SHOULDER" : "COMMAND";
+  }
 
   /* ============================================================ THE HUD
      Four orders, a retreat, two morale bars and the two things a man in a
@@ -1882,7 +1870,20 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
         "backdrop-filter:blur(6px)}" +
       "#wb .ord button.on{background:rgba(255,138,61,.34);border-color:#ff8a3d}" +
       "#wb .ord button.bad{border-color:#c4453a}" +
-      "body.coarse #wb .ord button{padding:15px 17px;font-size:13px}" +
+      /* A PHONE HAS NO NUMBER KEYS, so the digits come off and the buttons
+         get small enough to sit on ONE row. At 393 pt the four orders plus a
+         camera toggle wrapped to five rows up the middle of the screen, on top
+         of the trigger and on top of the warlord's own health panel — the
+         touch cluster is drawn by warlord/gunplay.js above this rail and had
+         nowhere to be. The repo's own touch doctrine says the movement and
+         combat controls are ICONS and a prompt spells the VERB, never a
+         keyboard letter; this rail was doing the opposite on the one device
+         where the letter means nothing. */
+      "body.coarse #wb .ord button{padding:12px 10px;font-size:11px;letter-spacing:.06em}" +
+      "body.coarse #wb .ord{max-width:99vw;gap:5px;justify-content:center}" +
+      "body.coarse #wb .ord button .k{display:none}" +
+      "body.coarse #wb .me{bottom:calc(env(safe-area-inset-bottom,0px) + 124px)}" +
+      "body.coarse #wb .ret{bottom:calc(env(safe-area-inset-bottom,0px) + 124px)}" +
       "#wb .me{position:absolute;left:calc(env(safe-area-inset-left,0px) + 14px);bottom:calc(env(safe-area-inset-bottom,0px) + 74px);" +
         "padding:9px 12px;border-radius:12px;background:rgba(12,10,7,.55);border:1px solid rgba(255,255,255,.12)}" +
       "#wb .hp{width:132px;height:5px;border-radius:3px;background:rgba(255,255,255,.16);margin:6px 0 6px;overflow:hidden}" +
@@ -1892,14 +1893,8 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
         "text-align:right;font-size:11px;letter-spacing:.12em;opacity:.8}" +
       "#wb .feed p{margin:0 0 3px}" +
       "#wb .ret{position:absolute;right:calc(env(safe-area-inset-right,0px) + 14px);bottom:calc(env(safe-area-inset-bottom,0px) + 74px);pointer-events:auto}" +
-      "#wb .fire{position:absolute;right:calc(env(safe-area-inset-right,0px) + 20px);bottom:calc(env(safe-area-inset-bottom,0px) + 130px);" +
-        "width:86px;height:86px;border-radius:50%;background:rgba(196,69,58,.42);border:2px solid rgba(255,255,255,.28);" +
-        "pointer-events:auto;display:none;align-items:center;justify-content:center;font:800 13px/1 inherit;letter-spacing:.1em}" +
-      "body.coarse #wb .fire{display:flex}" +
       "#wb .ret button{appearance:none;border:1px solid #c4453a;background:rgba(12,10,7,.66);color:#ffc9c4;" +
         "border-radius:12px;padding:10px 13px;font:700 11px/1 inherit;letter-spacing:.14em;cursor:pointer}" +
-      "#wb .cross{position:absolute;left:50%;top:50%;width:3px;height:3px;margin:-1.5px 0 0 -1.5px;border-radius:50%;" +
-        "background:rgba(255,255,255,.85);box-shadow:0 0 0 1px rgba(0,0,0,.6)}" +
       "#wb .hit{position:absolute;inset:0;background:radial-gradient(120% 90% at 50% 50%,transparent 45%,rgba(196,69,58,.55));opacity:0}" +
       "#wb .note{position:absolute;left:50%;top:20%;transform:translateX(-50%);font-size:clamp(16px,4.4vw,30px);" +
         "letter-spacing:.12em;opacity:0;transition:opacity .35s;text-shadow:0 2px 12px #000;white-space:nowrap}" +
@@ -1923,7 +1918,6 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       '<div class="me"><div id="wbName">WARLORD</div><div class="hp"><s id="wbHp"></s></div>' +
         '<div class="ammo" id="wbAmmo"></div></div>' +
       '<div class="ret"><button id="wbRetreat">RETREAT</button></div>' +
-      '<div class="fire" id="wbFire">FIRE</div>' +
       /* THE ORDERS ARE FOR AN ARMY, so they only exist when there is one.
          The owner rode out alone, picked a fight, and was handed CHARGE /
          HOLD / FLANK / FALL BACK with nobody to give them to — four buttons
@@ -1934,7 +1928,6 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
          syncOrderRail() below, and a lone warlord gets a camera toggle and a
          trigger, which is the entire control surface he actually has. */
       '<div class="ord" id="wbOrders"></div>' +
-      '<div class="cross" id="wbCross"></div>' +
       '<div class="hit" id="wbHit"></div>' +
       '<div class="note" id="wbNote"></div>';
     document.body.appendChild(root);
@@ -1967,13 +1960,20 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       if (had === String(commanded)) return;          // nothing changed; don't churn the DOM
       ord.setAttribute("data-n", String(commanded));
       let h = "";
+      // the digit is a KEYBOARD hint; on glass it is a lie taking up a third
+      // of the button. See the coarse CSS above.
+      const n = function (d, label) { return ctx.coarse ? label : (d + " " + label); };
       if (commanded > 0) {
-        h += '<button data-o="charge">1 CHARGE</button>' +
-             '<button data-o="hold" class="' + ((SIDES.mine && SIDES.mine.order === "hold") ? "on" : "") + '">2 HOLD</button>' +
-             '<button data-o="flank">3 FLANK</button>' +
-             '<button data-o="fallback">4 FALL BACK</button>';
+        h += '<button data-o="charge">' + n(1, "CHARGE") + '</button>' +
+             '<button data-o="hold" class="' + ((SIDES.mine && SIDES.mine.order === "hold") ? "on" : "") + '">' + n(2, "HOLD") + '</button>' +
+             '<button data-o="flank">' + n(3, "FLANK") + '</button>' +
+             '<button data-o="fallback">' + n(4, "FALL BACK") + '</button>';
       }
-      h += '<button id="wbCam">' + (camMode === "fps" ? "THIRD PERSON" : "FIRST PERSON") + '</button>';
+      /* THE SEAT TOGGLE IS A BUTTON ONCE. gunplay.js draws a view icon in the
+         thumb cluster on a coarse pointer, and a second worded one in the
+         command rail is the same verb twice, in the row where a mis-tap
+         changes your army's orders. */
+      if (!ctx.coarse) h += '<button id="wbCam">' + camLabel(camMode) + '</button>';
       ord.innerHTML = h;
       ord.querySelectorAll("[data-o]").forEach(function (b) {
         b.addEventListener("click", function (e) { e.stopPropagation(); setOrder(b.dataset.o, "mine"); });
@@ -1982,10 +1982,12 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       if (cam) cam.addEventListener("click", function (e) { e.stopPropagation(); cycleCam(); });
     }
     hudSyncOrders = syncOrderRail;
-    const fb = document.getElementById("wbFire");
-    fb.addEventListener("pointerdown", function (e) { e.stopPropagation(); touchFire = true; });
-    fb.addEventListener("pointerup", function () { touchFire = false; });
-    fb.addEventListener("pointercancel", function () { touchFire = false; });
+    /* THE TRIGGER, THE CROSSHAIR AND THE THUMB PAD ARE NOT DRAWN HERE ANY
+       MORE. The reticle is the repo's own #crosshair (the one the jail and gun
+       game aim with, with its .hot/.dry/.blocked/.locked states) and the touch
+       cluster is microboot's thumb grammar wired to fpsmode's own verbs — both
+       built by warlord/gunplay.js. A second FIRE button over the first is how
+       two files start disagreeing about whether the trigger is down. */
     if (ctx.coarse && micro.touch && micro.touch.init) safe(function () { micro.touch.init(); });
   }
   function paintOrders() {
@@ -2025,8 +2027,6 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     if (noteT > 0 && (noteT -= dt) <= 0) {
       const n = document.getElementById("wbNote"); if (n) n.classList.remove("on");
     }
-    const cr = document.getElementById("wbCross");
-    if (cr) cr.style.display = camMode === "fps" ? "block" : "none";
     uiT -= dt;
     if (uiT > 0) return;
     uiT = 0.2;
@@ -2050,8 +2050,14 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       }
     }
     setW2("wbHp", clamp(YOU.hp / YOU.maxHp, 0, 1));
-    setText("wbAmmo", YOU.reloadT > 0 ? "RELOADING" : YOU.mag + " / " + YOU.magSize +
-      "   " + W.gunLabel(YOU.wid) + "   " + YOU.kills + " KILLS");
+    /* THE ROUNDS ARE NOT PRINTED HERE ANY MORE. fpsmode's own #ammo readout —
+       the big tabular "30 / 30  RES 120" with the weapon's name over it that
+       the jail and gun game use — is already on screen, and the first capture
+       after the mount had BOTH: the same magazine written twice, eight inches
+       apart, in two different fonts. This panel keeps the two things that are
+       the WARLORD's rather than the gun's: how hurt he is, and his tally. */
+    const gp = GP();
+    setText("wbAmmo", gp && gp.on() ? gp.tally() : "");
     setText("wbName", W.state.you.name + (YOU.dead ? " — DOWN" : ""));
   }
   function setText(id, t) { const e = document.getElementById(id); if (e && e.textContent !== String(t)) e.textContent = t; }
@@ -2067,6 +2073,13 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
   function start(opts) {
     if (live) return;
     opts = opts || {};
+    /* THE FIGHT WAITS FOR THE GUN. One await, only ever on the first battle of
+       a session — a battle that begins before fpsmode has arrived is a battle
+       the player spends silently falling back to the fork. */
+    if (!gunplayDone) {
+      loadGunplay().then(function () { gunplayDone = true; start(opts); });
+      return;
+    }
     startOpts = opts;
     band = opts.band || W.makeBand({ size: 20 });
     THREE = G.THREE;
@@ -2076,7 +2089,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
 
     simT = 0; over = false; started = false; live = true; lastWall = 0;
     men = []; corpses = []; sinking = []; dropGuns = []; addedCols = []; addedMeshes = [];
-    _claim.length = 0; deadSolving = 0; hurtFlash = 0; touchFire = false;
+    _claim.length = 0; deadSolving = 0; hurtFlash = 0;
     cmd.init = 0;
 
     /* THE DEAD FELL LIKE PLANKS AND THE PAGE THOUGHT IT HAD FIXED THAT.
@@ -2162,8 +2175,13 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     }
 
     buildHud();
+    /* THE GUN GOES ON BEFORE THE CAMERA IS CHOSEN. gunplay.mount() is what
+       makes CBZ.fpsActive/shoulderActive mean anything, and setCam routes
+       straight into it — asking for a seat before the gun exists is asking a
+       system that is not there yet. */
+    const gp = GP();
+    if (gp) safe(function () { gp.mount(gunplayApi()); });
     setCam(ctx.coarse ? "third" : "fps");
-    buildViewGun();
     paintOrders();
     const capNote = (capped.mine + capped.them) > 0
       ? (capped.mine + capped.them) + " MEN HELD WITH THE BAGGAGE — FIELD CAP " + cap + " A SIDE (?men=N)"
@@ -2187,7 +2205,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
   }
   function onWorldPointer(e) {
     if (!live || over) return;
-    if (e.target && e.target.closest && e.target.closest("#wb .ord,#wb .ret,#wb .fire")) return;
+    if (e.target && e.target.closest && e.target.closest("#wb .ord,#wb .ret,#microTouch")) return;
     if (camMode !== "cmd" && micro.lock && !ctx.coarse) micro.lock();
   }
   function makeSide(key, dir, colour, vseed) {
@@ -2199,70 +2217,12 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       wingBias: key === "mine" ? 0 : 1,
     };
   }
-  function buildViewGun() {
-    if (!CBZ.buildActorWeapon) return;
-    viewGun = safe(function () { return CBZ.buildActorWeapon(W.state.you.wid); });
-    if (!viewGun) return;
-    /* THE VIEWMODEL IS THE SAME GUN THE NPCs CARRY — actorweapons' own model,
-       at actorweapons' own real-dimension scale, parented to the lens. There is
-       no second "player gun" geometry in this game and there must not be, or
-       the rifle in your hands and the rifle you loot stop being one object.
-
-       AND ITS POSE IS MEASURED, NOT GUESSED, because two rounds of guessing
-       produced two bad frames. buildActorWeapon leaves the model at rotation
-       (+PI/2, PI, 0) with a small offset — a pose relative to a FOREARM, which
-       actorweapons' own comment says outright. Parented straight to a camera
-       that reads as a rifle lying sideways across the screen (first capture),
-       and hand-picking a rotation and a scale to fix it produced a grey slab
-       filling the bottom-centre of the frame (third capture). The armoury spans
-       a 0.2 m pistol to a 1.2 m launcher, so ONE hand-typed offset cannot be
-       right for all of them anyway.
-
-       So the box is measured and the pose is derived from it: find the model's
-       longest axis, turn that axis to point down -Z (the camera's forward),
-       and scale the whole thing so its length is VIEW_LEN on screen. Every gun
-       in the armoury then sits the same way at the same apparent size, and a
-       gun added tomorrow needs no line here. VIEW_LEN is 0.34 m held 0.62 m
-       from a 70-degree lens, which is about 28 degrees of frame — a rifle you
-       can see, in the corner, not a wall. */
-    /* 0.27 m at 0.68 m from a 70-degree lens is about 22 degrees of frame:
-       a rifle you can identify — the AK's wood and magazine read clearly at
-       this size — held low and right, without owning a quarter of the picture.
-       Measured off the captures: 0.34 at 0.62 was still reading as a wall. */
-    const VIEW_LEN = 0.27;
-    const box = new THREE.Box3().setFromObject(viewGun);
-    const sz = new THREE.Vector3();
-    box.getSize(sz);
-    const longest = Math.max(sz.x, sz.y, sz.z) || 1;
-    viewGun.rotation.set(0, 0, 0);
-    // turn the long axis onto -Z. The appearance factories author down -Z or
-    // along X depending on the gun; the box says which, so nothing here has to
-    // know one weapon's name.
-    if (sz.x >= sz.y && sz.x >= sz.z) viewGun.rotation.y = Math.PI / 2;
-    else if (sz.y > sz.z) viewGun.rotation.x = -Math.PI / 2;
-    viewGun.scale.multiplyScalar(VIEW_LEN / longest);
-    /* AND IT IS RE-HUNG FROM ITS CENTRE, MEASURED AFTER THE TURN. A weapon
-       model's origin is its GRIP, not its middle, and the first version of
-       this subtracted a centre measured BEFORE the rotation was applied — an
-       offset in the wrong frame, which slides the gun somewhere different for
-       every weapon whose long axis is not already -Z. Measure once more with
-       the rotation and scale on it, inside the holder, and the number is
-       exact for any gun in the armoury. */
-    const holder = new THREE.Group();
-    holder.add(viewGun);
-    holder.updateMatrixWorld(true);
-    const mid = new THREE.Vector3();
-    new THREE.Box3().setFromObject(viewGun).getCenter(mid);
-    viewGun.position.sub(mid);
-    holder.position.set(0.23, -0.20, -0.68);
-    // nose slightly DOWN: a man walking with a rifle carries it at low ready,
-    // and the first pass sat it nose-up like a parade rest
-    holder.rotation.set(-0.07, 0.06, 0);
-    viewGun = holder;
-    CBZ.camera.add(viewGun);
-    if (!CBZ.camera.parent) scene.add(CBZ.camera);   // r128: children of a
-    // detached camera are never traversed by the renderer
-  }
+  /* buildViewGun() IS GONE. The first-person gun in your hands and the
+     carried gun on your back are both fpsmode.js's — built from the same
+     weapons/appearances factories, posed by systems/gunhands.js so the off
+     hand actually holds the handguard, and swapped when you switch guns. This
+     file used to build a third copy and hand-pose it from a bounding box; that
+     is one weapon model too many and it could never reload. */
 
   function updateCOM() {
     ["mine", "them"].forEach(function (k) {
@@ -2351,7 +2311,13 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
         if (simT - moraleAt > 0.5) { updateMorale(); moraleAt = simT; }
         if (simT - cmdAt > 6) { enemyCommand(); cmdAt = simT; }
         for (let i = 0; i < men.length; i++) stepMan(men[i], sdt);
-        stepYou(sdt);
+        /* THE WARLORD IS NOT STEPPED HERE. gunplay.js drives him from
+           CBZ.onAlways(51.5) — immediately before systems/fpsmode.js's own
+           onAlways(52) — because fpsmode's viewmodel, its reticle projection
+           and its held-trigger auto fire all read the camera and the aim, so
+           the lens must already be where this frame's input put it. Driven
+           from here instead (a frame hook, which microboot runs AFTER every
+           always-hook) every burst photographed the previous frame's aim. */
         if (deadSolving > 0 && CBZ.ragdollStep) CBZ.ragdollStep(sdt);
         rebuildFine();
         separateSolve(Math.min(0.9, sdt * 26));
@@ -2366,6 +2332,13 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       const m = men[i];
       if (m.fled || m.retired) continue;
       if (m.dead && !m.isYou) continue;
+      /* THE WARLORD IS POSED BY warlord/gunplay.js, at onAlways(51.5), which
+         is BEFORE systems/fpsmode.js locks his barrel onto the reticle. Posing
+         him here — a frame hook, i.e. after every always-hook — moved the hand
+         socket out from under a barrel lock that had already been computed
+         against it, and his rifle photographed pointing well above his own
+         sights. gunplay.js's comment carries the measurement. */
+      if (m.isYou) continue;
       const d2 = (m.pos.x - camP.x) * (m.pos.x - camP.x) + (m.pos.z - camP.z) * (m.pos.z - camP.z);
       m.animF = ((m.animF || 0) + 1) & 1023;
       const every = d2 < 70 * 70 ? 1 : d2 < 150 * 150 ? 2 : 4;
@@ -2375,15 +2348,6 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
         // to real cover and he would stand up straight behind it.
         m.char.crouch = m.slot === "cover" || m.slot === "peek";
         safe(function () { CBZ.animChar(m.char, m.speed, dt * every); });
-      }
-      if (m.isYou) {
-        /* THE WARLORD'S BODY POINTS WHERE HIS LENS POINTS. actorAimAt lays the
-           weapon arm on a TARGET, and the player has no target — he has a
-           bearing. So the rig takes the look direction directly; anything else
-           is a man walking forward with his rifle aimed somewhere else. */
-        if (youRig) youRig.rotation.y = m.yaw;
-        if (m.char) m.char.aimPitch = m.pitch;
-        continue;
       }
       const engaged = m.tgt && !m.tgt.dead && m.sees && !m.routed;
       if (engaged && d2 < 190 * 190 && CBZ.actorAimAt) {
@@ -2395,6 +2359,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
         if (m._weaponProp.visible !== show) m._weaponProp.visible = show;
       }
     }
+    if (camMode === "cmd") stepCommand(dt);
     stepCamera(dt);
     paintHud(dt);
 
@@ -2595,11 +2560,8 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     if (micro.rebuildColliderGrid) micro.rebuildColliderGrid();
 
-    if (viewGun) {
-      if (viewGun.parent) viewGun.parent.remove(viewGun);
-      safe(function () { CBZ.studio.drop(viewGun); });
-      viewGun = null;
-    }
+    const gp = GP();
+    if (gp) safe(function () { gp.unmount(); });
     if (MAP && typeof MAP.clear === "function") safe(function () { MAP.clear(); });
     if (fogSave && scene.fog) {
       scene.fog.color.setHex(fogSave.hex);
@@ -2641,6 +2603,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       Q = c.Q;
       THREE = c.THREE;
       keys();
+      loadGunplay().then(function () { gunplayDone = true; });
       /* THE TEARDOWN LISTENER IS REGISTERED ONCE, AT BOOT — not in start().
          W.on() has no dedupe, so registering it per battle stacks a listener
          per fight: three encounters in and the bus is calling teardown three

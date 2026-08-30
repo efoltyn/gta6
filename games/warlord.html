@@ -343,14 +343,39 @@ function start() {
   if (COARSE) document.body.classList.add("coarse");
 
   /* ---- one canvas, one loop, for the whole game ---- */
-  CBZ.micro.boot({ far: 16000 });
-  /* THE AIR IS THE PLACE. A desert read from 60 m up is mostly haze, so the
-     sky's own horizon colour becomes the fog colour (micro.sky derives it —
-     never type the fog colour twice) and the far plane is pushed out to
-     16 km because the island is 14 km across and its far shore has to be a
-     thing you can SEE from a dune, not a thing that fades in as you ride. */
-  CBZ.micro.sky({ top: 0x4478ad, bottom: 0xe6cda1, fogNear: 1400, fogFar: 11000, radius: 15000 });
-  CBZ.micro.lights({ skyColor: 0xcfe0f2, groundColor: 0xbf9a5e, sunColor: 0xfff1cf, sun: 1.12, shadowSpan: 260 });
+  /* ONE SKY AND ONE SUN, AND IT TOOK TWO AGENTS TO NOTICE.
+
+     This page used to call micro.boot(), then micro.sky(), then
+     micro.lights(). boot() ALREADY RAISES BOTH unless you tell it not to
+     (`if (opts.sky !== false) micro.sky(...)`, same for lights), so the
+     island was lit by two hemispheres and two suns under two nested sky
+     domes — measured in the live scene: hemi [0.62, 0.37], dir [1.05, 0.79],
+     domes 2, for 2.82x the intended exposure into an ACES curve.
+
+     NOTHING LOOKED BROKEN, which is why it survived. It looked BLEACHED, and
+     bleached is a thing you accept as a style. What it actually cost is the
+     top half of the tonal range: at 2.82x, a dune albedo of 0.34 renders at
+     sRGB 234 and a lit crest at 0.52 renders at 242 — eight levels apart, so
+     the dunes had no shape and every sand-coloured thing in the game was the
+     same white. Two separate agents independently measured this while
+     authoring content (props.js first, then camo.js) and BOTH worked around
+     it by hand-darkening their palettes, which is exactly how a bad default
+     spreads: every author pays for it separately and none of them can fix it.
+
+     So the sky and the lights are boot()'s parameters now, which is what they
+     always were. Anything authored against the old exposure has to be
+     re-tuned against this, and that is the correct direction of travel.
+
+     THE AIR IS THE PLACE: the far plane is 16 km because the island is 14 km
+     across and its far shore has to be something you SEE from a dune, not
+     something that fades in as you ride. The fog colour is derived by
+     micro.sky from its own horizon — never type a fog colour twice. */
+  CBZ.micro.boot({
+    far: 16000,
+    sky: { top: 0x4478ad, bottom: 0xe6cda1, fogNear: 1400, fogFar: 11000, radius: 15000 },
+    lights: { skyColor: 0xcfe0f2, groundColor: 0xbf9a5e, sunColor: 0xfff1cf,
+              sun: 1.12, hemi: 0.5, shadowSpan: 260 },
+  });
 
   const ctx = {
     THREE: THREE, CBZ: CBZ, W: W,
