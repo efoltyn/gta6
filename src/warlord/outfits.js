@@ -1067,7 +1067,15 @@
        veteran's is a band on a helmet AND the yoke under it. That is the
        whole 200 m tier read and it is two lines. */
     const headHex = headColour(rec, det);
-    headwear(ch, det.head, headHex, det.rank >= 2 ? (det.rankHex != null ? det.rankHex : det.accent) : null);
+    /* THE BAND GOES ON EVERY ISSUED HAT, not just a veteran's. It was
+       rank>=2 in the first pass and the line-of-battle shot showed why that
+       was wrong: the Legion and the Free Company carry their colour ONLY in
+       the cloth, and their cloth is deliberately quiet, so two thirds of both
+       armies had nothing on them that said whose they were. A cap band is
+       one cached box on a man who already has a hat, and it is the highest-
+       value pixel in this file — it sits at the top of the silhouette, which
+       is the last part of a man with clean sky behind it at range. */
+    headwear(ch, det.head, headHex, det.rank >= 1 ? (det.rankHex != null ? det.rankHex : det.accent) : null);
 
     relinearSkin(ch);
     ch._wlFit = rec.id;

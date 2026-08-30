@@ -14,27 +14,37 @@
    ------------------------------------------------------------------
    WHERE THE CLOTHES COME FROM, AND WHY THERE IS NO SECOND PAINTER
 
-   This repo already has a wardrobe, and it is very good: city/clothes.js
-   paints a garment onto a rig's cloth boxes as one 128x256 canvas atlas
-   (lapels, plackets, cargo pockets, a tie with a knot in it, camo blots) and
-   city/outfits.js is the record catalog plus the one safe slot-tinter
-   (`cityPaintSlot` — the clone-on-write that stops a recolor bleeding across
-   the shared cmat pool). games/warlord.html does not load either file: its
-   `people` studio pack is entities/character.js + poses + bodymass and
-   nothing else, so on this page `CBZ.cityRecolorRig` is undefined.
+   Two files already do this job well and neither of them is mine.
 
-   The first draft of this file therefore wrote its own painter. That was the
-   wrong answer twice over: a flat colour on five body regions makes a black
-   suit read as a black bin bag (measured — see the report), and it is the
-   fifth copy of the clone-on-write bug city/outfits.js explicitly named a
-   function to stop anybody writing again.
+   `warlord/outfits.js` (sibling wave) dresses every army on the island, and
+   it solved every hard part: the hand-off to the painted-garment atlas, the
+   camo materials camo.js makes, `readable()` — which pushes any cloth colour
+   off the sand's own luminance so a khaki uniform is not invisible at 200 m —
+   weathering, webbing, a badge, and the whole headwear ladder (bare / rag /
+   shemagh / cap / beret / helmet). Its header names the player's wardrobe as
+   a consumer and it ships `player(spec)` for exactly this file. So the
+   wardrobe hands it a record and it does the painting: `W.outfits.apply`.
 
-   So the wardrobe LOADS THE REAL PAINTER instead. Two script tags, off the
-   critical path, appended on idle: city/clothes.js then city/outfits.js.
-   Both were probed on this page and both run clean here — clothes.js needs
-   only THREE/CBZ.CONFIG/cmat/boxGeom (all present via the `look` pack), and
-   outfits.js needs `CBZ.game`, which studio already publishes. Nothing on
-   this page is forked and no colour set is authored twice.
+   `city/clothes.js` is the atlas underneath that — one 128x256 canvas per
+   outfit KEY, one CanvasTexture, one shared MeshLambertMaterial, and lapels,
+   plackets, cargo pockets, a tie with a knot in it and camo blots come free
+   at the same draw-call cost as a flat box. outfits.js pulls it in already;
+   `ready()` below only waits for the exported NAME and appends its own script
+   tag if nobody else did, so the picker is never blocked on a sibling.
+
+   city/outfits.js is deliberately NOT pulled in — the same judgement
+   warlord/outfits.js states at length: it opens `const g = CBZ.game`, owns a
+   disguise/heat/economy model, installs save wraps and runs a per-frame
+   integrity sweep over CBZ.npcs, none of which means anything on a page whose
+   people are warband rosters. What this file wants from it is the CATALOGUE,
+   and a catalogue is data: the colour sets below are cited by their
+   city/outfits.js record id and copied verbatim.
+
+   The first draft of this file wrote its own flat painter over five body
+   regions. That was wrong twice: a black suit painted as five flat colours
+   reads as a black bin bag (it is in the first contact sheet), and it would
+   have been the fifth copy of the clone-on-write bug city/outfits.js
+   explicitly named a function to stop anybody writing again.
 
    THE SUITS ARE TAKEN ACROSS BY NAME, not by copying hexes: SUIT_LOOKS below
    names Charcoal / Navy / Black / Navy Pinstripe / Charcoal Pinstripe /
@@ -170,7 +180,7 @@
     { name: "Detail Midnight",     body: 0x151b2c, tie: 0x0b0e18, pattern: "solid", legs: 0x131826 },
     /* SERVICE DRESS. A tunic is a suit with a military palette: the shirt and
        tie under an open coat is exactly what a class-A uniform looks like. */
-    { name: "Sand Service Tunic",  body: 0xbfa87c, tie: 0x3a3021, pattern: "solid", legs: 0xb29a70 },
+    { name: "Sand Service Tunic",  body: 0xae9670, tie: 0x33291b, pattern: "solid", legs: 0xa28a64 },
     { name: "Olive Service Tunic", body: 0x565c3a, tie: 0x1d2016, pattern: "solid", legs: 0x4b5131 },
     { name: "Legion Dress Tunic",  body: 0x8d7930, tie: 0x241f10, pattern: "solid", legs: 0x7d6b2a, vest: 0x6d5c23 },
     /* GENERALS. Double-breasted + peak lapel is the whole silhouette read at
@@ -681,10 +691,11 @@
       accent: fit.accent != null ? fit.accent : (K.badgeColor != null ? K.badgeColor : 0xd9b64a),
       boots: c.shoes,
       head: SIB_HEAD[K.head] ? K.head : "none",
-      // WEAR IS A STATEMENT ABOUT THE FIT, not about the man. Field kit is
-      // sun-bleached because it lives outdoors; a dress coat comes out of a
-      // trunk and a suit was pressed this morning. 0.28/0.12/0 measured by
-      // eye against the sand in the preview, which is the only test there is.
+      // WEAR IS A STATEMENT ABOUT THE FIT, not about the man — outfits.js
+      // reads it as sun-bleach. Field kit and rags live outdoors; a dress
+      // coat comes out of a trunk and a suit was pressed this morning, so
+      // those stay at 0. 0.22 was picked by looking: at 0.4 the desert
+      // fatigues went the same value as the sand behind them.
       wear: fit.wear != null ? fit.wear : (fit.group === "field" || fit.group === "rag" ? 0.22 : 0),
       rank: fit.role === "general" ? 3 : (fit.role === "officer" ? 2 : 1),
     };
