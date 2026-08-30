@@ -1127,10 +1127,64 @@
      question, because three call sites now need the same answer (the wound
      stamp, the sever gate, and city/wildlife_tame.js threading it onto a kill
      so gore.js stamps a great white's jaw print instead of a dog's default). */
-  function biteJawRadius(attacker, style) {
+  /* THE VICTIM'S OWN CROSS-SECTION, in metres of radius: half the SMALLEST
+     dimension of the body as it is actually built and posed right now. One
+     Box3 per bite, on the same rig the caller's contact test already measured,
+     and it needs no species table — it answers for a mackerel, a person and a
+     twelve-metre orca with one rule. */
+  var _vBox = null, _vSize = null;
+  function victimCrossR(victim) {
+    var g = victim && (victim.group || (victim.char && victim.char.group));
+    if (!g || typeof THREE === 'undefined' || !THREE.Box3) return 0;
+    try {
+      if (!_vBox) { _vBox = new THREE.Box3(); _vSize = new THREE.Vector3(); }
+      g.updateMatrixWorld(true);
+      /* MESHES ONLY. setFromObject swallows the whole subtree, and a rig can
+         carry a name plate, a marker sprite or a shadow quad that is a metre
+         across and nothing to do with the body — which would hand back a
+         cross-section twice the animal's real thickness and defeat the bound. */
+      _vBox.makeEmpty();
+      g.traverse(function (o) {
+        if (o.isMesh && o.visible !== false && o.geometry) _vBox.expandByObject(o);
+      });
+      if (_vBox.isEmpty()) _vBox.setFromObject(g);
+      _vBox.getSize(_vSize);
+      var thin = Math.min(_vSize.x, Math.min(_vSize.y, _vSize.z));
+      var long = Math.max(_vSize.x, Math.max(_vSize.y, _vSize.z));
+      if (!(thin > 0) || !isFinite(thin)) return 0;
+      /* TWO BOUNDS, AND THE TIGHTER ONE WINS. Half the body's THICKNESS is the
+         honest one — a bite cannot be wider than the flank it goes through —
+         but a shape whose thin axis is not thin (a person with their arms out,
+         a manta) would let it through, so a wound is also capped at a fifth of
+         the body's LENGTH. A great white's bite on a person spans about 40 cm
+         of a 1.8 m body, which is where the 0.22 comes from. */
+      return Math.min(thin * 0.5, long * 0.22);
+    } catch (e) { return 0; }
+  }
+  /* ---- A MOUTH CANNOT TAKE MORE THAN THERE IS -----------------------------
+     Owner, 2026-08-29, playing Shark Sim: "the cuts can literally be bigger
+     than the fucking animal."  They could, and the number that did it was
+     never this function's: city/wildlife_tame.js sized every mounted bite off
+     its own ACQUISITION RANGE (`biteReach(a) * 0.32` — at least 0.96 m of
+     radius, 3.2 m for a grown megalodon, and 0.38 of it again on every
+     half-turn of the death roll), and systems/wounds.js clamps opts.jaw at an
+     absolute 3.5 m with nothing in it about the body being bitten.  A six
+     metre gash across a 1.4 m tuna is not a tuning error, it is a category
+     error: a wound is a hole IN something, so the something bounds it.
+
+     `victim` is optional and the bound is only ever a REDUCTION, so the land
+     AI's paired-crescent decal (which stamps a humanoid it has already found)
+     is byte-identical without it.  What must NOT be bounded is the sever gate
+     — whether a mouth can close around a limb is a fact about the MOUTH — so
+     biteWound below asks twice, once for each question, and says which. */
+  function biteJawRadius(attacker, style, victim) {
     var jaw = Math.max(0.12, Math.min(1.2, 0.10 + actorScale(attacker) * 0.16));
     // A TUSK PAIR IS NARROWER THAN A JAW: same paired-crescent wound, less span.
     if (style === 'gore' || style === 'ram') jaw = Math.max(0.10, jaw * GORE_SPAN);
+    if (victim) {
+      var c = victimCrossR(victim);
+      if (c > 0 && c < jaw) jaw = Math.max(0.08, c);
+    }
     return jaw;
   }
   /* WHAT TAKES A LIMB OFF, AND WHY IT IS NOT A MAGIC NUMBER.
@@ -1184,7 +1238,10 @@
     if (typeof CBZ.bodyBite !== 'function') return;
     if (!target || !target.char || !target.pos) return;
     var g = attacker.group; if (!g) return;
+    // the MOUTH decides what may be torn off; the BODY decides how big a mark
+    // it can wear (see biteJawRadius — two questions, one owner)
     var jaw = biteJawRadius(attacker, style);
+    var mark = biteJawRadius(attacker, style, target);
     var sev = (style === 'lunge') ? 0.95 : (style === 'maul') ? 0.8 : (style === 'strike') ? 0.45
       : (style === 'gore' || style === 'ram') ? 0.75 : 0.6;
     var tp = target.pos;
@@ -1215,7 +1272,7 @@
         }
         _bo.fromX = g.position.x; _bo.fromZ = g.position.z;
       }
-      _bo.jaw = jaw; _bo.sev = sev;
+      _bo.jaw = mark; _bo.sev = sev;
       _bo.sever = biteMaySever(style, jaw, sev, o && o.kill);
       /* THE LINE THE FLESH LEAVES ALONG. wounds.js hands opts.dir straight to
          CBZ.goreSever, so a severed limb is thrown along the jaw's own line
@@ -1569,6 +1626,16 @@
   // bite threads it onto its kill so systems/gore.js stamps the death wound
   // with a great white's jaw print instead of wounds.js's 0.22 dog default.
   CBZ.creatureJawRadius = biteJawRadius;
+  /* THE SAME BOUND, FOR CALLERS THAT MEASURE THEIR OWN MOUTH. marine_predation
+     has gapeOf() and predator.js scales its jaw off the worry amount; neither
+     should have to learn what a Box3 is to be told that a cut cannot be longer
+     than the animal wearing it. */
+  CBZ.creatureWoundR = function (jaw, victim) {
+    var j = +jaw || 0.2;
+    if (!victim) return j;
+    var c = victimCrossR(victim);
+    return (c > 0 && c < j) ? Math.max(0.08, c) : j;
+  };
   CBZ.creatureRestY = restY;            // medium-aware rest height (land or water)
 
   /* ==========================================================================

@@ -1344,7 +1344,10 @@
           : ((h.attacker && h.attacker.group) ? -h.attacker.group.rotation.y : 0);
         _woundDir.x = Math.cos(ah); _woundDir.y = 0; _woundDir.z = Math.sin(ah);
         CBZ.creatureBiteChunk(target, _woundP, {
-          jaw: 0.28 + amount * 0.5, sev: Math.min(1, 0.4 + amount * 0.5),
+          // ..bounded by the body being worried: a cut is a hole IN something
+          jaw: (typeof CBZ.creatureWoundR === "function")
+            ? CBZ.creatureWoundR(0.28 + amount * 0.5, target) : 0.28 + amount * 0.5,
+          sev: Math.min(1, 0.4 + amount * 0.5),
           dir: _woundDir, by: h.attacker || null, bleedS: 14,
         });
       } catch (e) {}

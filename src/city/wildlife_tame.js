@@ -1139,6 +1139,7 @@
     target: null, targetKind: null, attackPitch: 0, attackRoll: 0,
     lensT: 0,                 // refractory on the bite's camera jolt (see damageBiteTarget)
     hurtT: 0, hurtAmp: 0, hurtAcc: 0,   // THE ONLY THING THAT SHAKES THE LENS — see rideDamageFelt
+    engulf: null, engulfBy: null,   // the meal being drawn into the mouth, and by whom (THE MEAL GOES IN)
     // the above-weight-kill ceremony (see THE CLAMP below)
     clampT: 0, clampDur: 0, clampVictim: null, clampChum: null, clampBeat: -1, clampOrder: "",
   };
@@ -1288,8 +1289,37 @@
     best.target = target; best.kind = kind; best.d = d;
     return best;
   }
-  function biteReach(a) {
+  /* ---- TWO DIFFERENT QUESTIONS, AND ONE NUMBER USED TO ANSWER BOTH -------
+     Owner, 2026-08-29, playing Shark Sim: "biting, legit things don't go into
+     the mouth — the bite happens when a thing is a foot ahead of the mouth."
+
+     ACQUISITION is "what am I hunting": it must be generous, because the
+     strike is a lunge that takes most of a second and the body has to be
+     allowed to commit to a meal that is still a body-length away.  CONTACT is
+     "did my teeth arrive", and it must be honest, because it is the moment
+     something dies.
+
+     One function answered both, and it answered with a THREE METRE SPHERE
+     (the `Math.max(3.0, ...)` floor) tested against the target's bounding
+     BOX — so a great white killed a tuna whose nose was still two metres
+     clear of its teeth, and a megalodon at scale 4 killed things six metres
+     out.  Nothing was ever bitten on screen; things died in front of a face.
+
+     Split, and named for what each one is.  Acquisition keeps the old number
+     exactly, so hunting, homing and the auto-bite trigger feel identical.
+     Contact is now the MOUTH: creature_combat owns how wide that is, and the
+     tolerance on top of it is a hand's width, not a car length. */
+  function biteAcquireRange(a) {
     return Math.max(3.0, Math.max(0.35, liveScale(a)) * 2.5);
+  }
+  function jawRadiusOf(a, victim) {
+    if (typeof CBZ.creatureJawRadius === "function") {
+      try { return CBZ.creatureJawRadius(a, "lunge", victim); } catch (e) {}
+    }
+    return Math.max(0.12, Math.min(1.2, 0.10 + Math.max(0.35, liveScale(a)) * 0.16));
+  }
+  function biteReach(a) {
+    return Math.max(0.35, jawRadiusOf(a) * 1.9);
   }
   function selectBiteTarget(a, R) {
     const mouth = jawWorld(a);
@@ -1302,7 +1332,7 @@
        This is what makes the shark sim's buttonless auto-bite start the
        strike while the food is still a body-length away instead of waiting
        until the mouth is already on it. */
-    const best = { target: null, kind: null, d: biteReach(a) * 1.6 };
+    const best = { target: null, kind: null, d: biteAcquireRange(a) * 1.6 };
     const list = animals();
     for (let i = 0; i < list.length; i++) considerBiteTarget(list[i], "animal", mouth, best.d, best);
     const peds = CBZ.cityPeds || [];
@@ -1419,7 +1449,12 @@
     // Use the same envelope selection used. This especially matters for the
     // megalodon's jaw below a surface hull: accepting a target at 6.5 m and
     // then shrinking the strike to 5.1 m made the visible bite a fake miss.
-    if (dist > biteReach(a) || !inBiteFront(mouth, biteV)) return false;
+    /* A HULL IS NOT A FISH. Everything with a body gets the tooth-line test;
+       a boat's bounding box is its own hull, and the megalodon's jaw closes on
+       plating it cannot sink into, so the hull keeps a boarding tolerance of
+       one more mouth-width. Every living target is now bitten at the teeth. */
+    const reach = biteReach(a) * (kind === "ship" ? 3.2 : 1);
+    if (dist > reach || !inBiteFront(mouth, biteV)) return false;
     /* ============================================================
        AND NOW THE GEOMETRY DECIDES WHAT IT WAS WORTH.
 
@@ -1461,8 +1496,9 @@
     _biteAt.x = biteV.x; _biteAt.y = biteV.y; _biteAt.z = biteV.z;
     // HOW WIDE IS THIS MOUTH — creature_combat owns the question; threaded onto
     // the kill so gore.js stamps a great white's jaw print, not a dog default.
-    const jawR = (typeof CBZ.creatureJawRadius === "function")
-      ? CBZ.creatureJawRadius(a, "lunge") : Math.max(0.12, Math.min(1.2, 0.10 + scale * 0.16));
+    // HOW WIDE IS THIS MOUTH — and, because a wound is a hole in a body,
+    // never wider than the body it just closed on (creature_combat owns both).
+    const jawR = jawRadiusOf(a, target);
     const biteSev = Math.min(1, 0.5 + scale * 0.3);
     if (kind === "animal") {
       if (!CBZ.cityWildlifeHit) return false;
@@ -1482,9 +1518,12 @@
         const sev = Math.max(0.25, Math.min(1, 0.7 * (contest ? contest.mult : 1)));
         // _biteDir is the line this mouth came in on — the cuts run along it,
         // and `by` is what puts a severed fin in THIS animal's jaw.
+        // jawR, NOT a fraction of the acquisition range: THE CUT IS THE SIZE OF
+        // THE MOUTH, bounded by the animal wearing it. That one argument is what
+        // made a mounted bite rake a body longer than the body.
         try {
           CBZ.creatureBiteChunk(target, biteV,
-            { jaw: biteReach(a) * 0.32, sev: sev, dir: _biteDir, by: a, bleedS: 12 });
+            { jaw: jawR, sev: sev, dir: _biteDir, by: a, bleedS: 12 });
         } catch (e) {}
       }
     } else if (kind === "cop") {
@@ -1747,7 +1786,7 @@
           _clampDir.x = Math.cos(a.heading || 0); _clampDir.y = 0; _clampDir.z = Math.sin(a.heading || 0);
           try {
             CBZ.creatureBiteChunk(v, j,
-              { jaw: biteReach(a) * 0.38, sev: 0.85, dir: _clampDir, by: a, bleedS: 12 });
+              { jaw: jawRadiusOf(a, v), sev: 0.85, dir: _clampDir, by: a, bleedS: 12 });
           } catch (er) {}
         }
         /* EVERY OTHER HALF TURN, and measured before it was tuned: a bloom on
@@ -1805,6 +1844,11 @@
     if (ride.clampT > 0) return false;                  // the finish is not interruptible
     const pick = selectBiteTarget(a, R);
     ride.target = pick.target; ride.targetKind = pick.kind;
+    releaseEngulf();
+    if (engulfable(a, pick.target, pick.kind)) {
+      ride.engulf = pick.target;
+      AQUATIC_AUDIT.engulfs = (AQUATIC_AUDIT.engulfs || 0) + 1;
+    }
     // The mounted animal and the wild predator now use creature_combat's one
     // aquatic bite clock. The old 0.56 s chomp (0.72 for every megalodon
     // target) could open and clamp between two readable frames; cooldown also
@@ -1852,6 +1896,100 @@
     return pick.target ? pick : null;
   };
 
+  /* ============================================================
+     THE MEAL GOES IN THE MOUTH.
+
+     Owner, 2026-08-29: "biting, legit things don't go into the mouth — the
+     bite happens when a thing is a foot ahead of the mouth."
+
+     Tightening contact to the tooth line (biteReach, above) is only half of
+     it.  A shark does not bite where a fish happens to be; it takes the fish
+     IN.  Real ram feeding is a mouth arriving over a body, and the water in
+     front of an opening gape moves with it — which is why a bitten fish looks
+     drawn in rather than hit.  Nothing in this file ever moved the meal, so
+     even a perfectly-placed strike photographed as two bodies that never
+     touched.
+
+     From the moment the gape is wide enough to admit it, a snack-sized target
+     is pulled along the line to the tooth ring and sunk PAST it by half its
+     own length, so the jaws close around its middle instead of on water.  The
+     pull is an exponential approach on real dt — frame-rate independent, and
+     it reads as suction rather than as a teleport — and it accelerates as the
+     jaws close, so the last few centimetres happen at the bite.
+
+     WHAT IS NOT TOUCHED.  Anything past ENGULF_MAX of the eater's own length
+     is fought for, not swallowed: a megalodon does not inhale an orca, and
+     the above-weight kill has its own ceremony (THE CLAMP).  A hull is never
+     moved at all.  If the teeth do not arrive on one of those, the strike
+     whiffs — which is the point of an honest contact test.
+
+     REUSED, NOT REBUILT.  These are the same three writes tickClamp already
+     makes on a carcass — group.position, actor.pos and the water mover's own
+     copy — from the same onAlways(49.8) pass, i.e. AFTER wildlife.js's animal
+     tick, so this is the last word on where the meal is for the frame.
+
+     ?cfg_BITE_ENGULF=0 restores the old bite-at-arm's-length. */
+  const ENGULF_MAX = 0.62;      // meal length as a fraction of the eater's, that a mouth can take in
+  const ENGULF_FROM = 0.26;     // bite progress where the gape is wide enough to admit it
+  const ENGULF_TO = 0.86;       // ..and where the jaws have shut on it
+  const engV = new THREE.Vector3();
+  function mealLen(t, kind) {
+    if (kind !== "animal") return 1.8;                     // a person, near enough
+    return CBZ.marineBodyLen ? CBZ.marineBodyLen(t) : Math.max(0.35, liveScale(t)) * 6;
+  }
+  function engulfable(a, t, kind) {
+    if (CBZ.CONFIG.BITE_ENGULF === false) return false;
+    if (!t || !t.group || !t.group.parent || kind === "ship") return false;
+    if (t._jawHeld || t._seizedBy) return false;
+    const la = CBZ.marineBodyLen ? CBZ.marineBodyLen(a) : Math.max(0.35, liveScale(a)) * 6;
+    const lt = mealLen(t, kind);
+    return la > 0 && lt > 0 && lt <= la * ENGULF_MAX;
+  }
+  function releaseEngulf() {
+    /* THE HOLDER IS REMEMBERED, not re-derived from ride.mount — dismount
+       clears the mount and the release runs after it, so comparing against
+       ride.mount would leave `_jawHeld` set on the meal for good and quietly
+       exempt that animal from ever being counter-bitten again. */
+    const t = ride.engulf;
+    if (t && t._jawHeld === ride.engulfBy) t._jawHeld = null;
+    ride.engulf = null; ride.engulfBy = null;
+  }
+  function engulfPull(a, dt, p) {
+    const t = ride.engulf;
+    if (!t) return;
+    // a corpse is KEPT — the mouth carries what it just killed through the
+    // shut, which is the whole picture the owner said was missing
+    if (!t.group || !t.group.parent || t.culled) { releaseEngulf(); return; }
+    if (p < ENGULF_FROM) return;
+    const mouth = jawWorld(a);              // jawV
+    const d = biteDistance(t, mouth);       // writes biteV = the nearest point ON the meal
+    if (!isFinite(d)) return;
+    /* WHERE THE MEAL WANTS TO BE: its own surface on the tooth ring, then sunk
+       past it by the smaller of half its body and the mouth's own depth, so a
+       mackerel disappears whole and a seal is held across the teeth. */
+    const inset = Math.min(mealLen(t, ride.targetKind) * 0.5, jawRadiusOf(a) * 1.35);
+    engV.set(mouth.x - biteV.x - Math.cos(ride.head) * inset,
+             mouth.y - biteV.y,
+             mouth.z - biteV.z - Math.sin(ride.head) * inset);
+    const k = Math.min(1, Math.max(0, (p - ENGULF_FROM) / (ENGULF_TO - ENGULF_FROM)));
+    const alpha = 1 - Math.exp(-dt * (5 + 26 * k * k));
+    const g = t.group;
+    const nx = g.position.x + engV.x * alpha;
+    const ny = g.position.y + engV.y * alpha;
+    const nz = g.position.z + engV.z * alpha;
+    g.position.set(nx, ny, nz);
+    if (t.pos) { t.pos.x = nx; t.pos.y = ny; t.pos.z = nz; }
+    if (t._waterMove) { t._waterMove.x = nx; t._waterMove.z = nz; }
+    t._jawHeld = a; ride.engulfBy = a;      // nothing counter-bites out of a mouth
+  }
+  // read by tools: how far the meal's own surface is from the tooth ring right
+  // now, in metres — 0 means the jaws are on it
+  CBZ.cityAquaticBiteGap = function () {
+    const a = ride.mount, t = ride.target || ride.engulf;
+    if (!a || !t || !t.group || !t.group.parent) return null;
+    return +biteDistance(t, jawWorld(a)).toFixed(3);
+  };
+
   function tickAquaticAttack(a, dt) {
     // THE CEREMONY OWNS THE FRAME. While a clamp is running it writes both
     // pose channels itself and no new bite may start — otherwise the auto-fire
@@ -1867,6 +2005,7 @@
     ride.attackT += dt;
     const p = Math.min(1, ride.attackT / ride.attackDur);
     a._atkAnim = p;
+    engulfPull(a, dt, p);            // THE MEAL GOES IN THE MOUTH (above)
     /* ---- THE LUNGE POSE, AND THE STEP THAT USED TO BE IN IT --------------
        The wind-up drops the nose to -0.20 rad by p = 0.42; the strike branch
        then started from `sin(0) * 0.34` = ZERO. So on the single tick that
@@ -1913,6 +2052,7 @@
          the wider acquisition above means more strikes start at range. Keep a
          short beat so the jaw visibly resets, drop the rest of the cooldown. */
       if (!ride.attackHit) ride.attackCd = Math.min(ride.attackCd, 0.18);
+      releaseEngulf();
       ride.attackT = 0; ride.target = null; ride.targetKind = null;
       ride.attackHitP = -1;
       ride.attackPitch = 0; ride.attackRoll = 0; a._atkAnim = -1;
@@ -3092,6 +3232,7 @@
     if (CBZ.playerChar) CBZ.playerChar.riding = {
       width: ride.visual.width, moving: false, airborne: false, phase: 0
     };
+    releaseEngulf();
     ride.attackT = ride.attackCd = 0; ride.attackHitP = -1; ride.target = null; ride.targetKind = null;
     const help = aquatic
       ? (ride.visual.breach ? " · hold sprint + rise near the surface to BREACH; E dismounts." :
@@ -3153,6 +3294,7 @@
     // BEFORE the mount reference goes: endClamp puts the Euler order back on
     // THIS body and unpins whatever it was holding.
     if (ride.clampT > 0) endClamp(a);
+    releaseEngulf();
     ride.mount = null; a.ridden = false;
     ride.visual = null; ride.water = null;
     ride.attackT = ride.attackCd = 0; ride.attackHitP = -1; ride.target = null; ride.targetKind = null;

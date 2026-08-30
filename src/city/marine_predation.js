@@ -645,7 +645,9 @@
     let took = false;
     try {
       took = CBZ.creatureBiteChunk(t, _ck, {
-        jaw: gapeOf(a) * (kin ? 0.34 : 0.45),
+        // ..and never wider than the fish it is being cut into: creature_combat
+        // owns that bound, because a wound is a hole IN something.
+        jaw: woundR(gapeOf(a) * (kin ? 0.34 : 0.45), t),
         sev: clamp((frac || 0.1) * 6 + sizeOf(a) / Math.max(0.2, sizeOf(t)) * 0.4, 0.3, 1) * (kin ? 0.7 : 1),
         dir: _cd,
         by: a,
@@ -654,6 +656,9 @@
       if (took) AUDIT.chunks = (AUDIT.chunks || 0) + 1;
     } catch (e) { took = false; }
     return !!took;
+  }
+  function woundR(j, victim) {
+    return (typeof CBZ.creatureWoundR === "function") ? CBZ.creatureWoundR(j, victim) : j;
   }
   const _ck = { x: 0, y: 0, z: 0 };
   const _cd = { x: 0, y: 0, z: 0 };
