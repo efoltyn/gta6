@@ -130,6 +130,10 @@
      photographed beside the thing that replaced it. Repo doctrine: every
      behaviour change ships with its own revert. */
   const FLAG_MEN_OLD = QP.get("men") === "old";
+  /* ?folk=off — the outposts still stand, and nobody is in them. The honest
+     A/B for the people, and the thing the owner was actually looking at:
+     "a man with a crate popup with no man there". */
+  const FLAG_NOFOLK = QP.get("folk") === "off";
 
   const C = W.campaign = W.campaign || {};
   /* ONE PEER ROLLS THE DICE. Default true so single player is unchanged;
@@ -185,7 +189,6 @@
   let crumbAcc = 0;
   let travelled = 0;
   let hudRoot = null, plateBox = null, compass = null, compassG = null, mapWrap = null;
-  const outpostBoxes = [];         // the colliders raiseOutposts registered
   let fightTick = 0, spawnTick = 0;
   let lastWall = 0, clockH = null;
   let chase = null;                // the band you tapped, if any
@@ -214,6 +217,27 @@
   function placeOutposts() {
     const D = W.desert;
     S.outposts.length = 0;
+    /* ITS OWN STREAM, AND THAT IS A BUG FIX, NOT A STYLE CHOICE. This
+       function used to draw from the campaign's single shared stream, so
+       where every outpost on the island stood depended on how many times
+       anything else had rolled a die before enter() ran. Booting the same
+       seed twice put the first depot three kilometres from where it had
+       been, because the world tick runs on the WALL CLOCK in every phase and
+       how many times it has fired before the island comes up is a property
+       of the machine and not of the seed. Measured by booting seed 1337
+       twice and diffing W.state.outposts.
+
+       That is a campaign that cannot be replayed, which is the exact thing
+       core.js's DICE note says the seeded stream exists to prevent, and on a
+       shared island it is worse than an inconvenience: two peers on one seed
+       would have put their depots in different places.
+
+       A stream of its own, seeded off S.seed, makes where the outposts are a
+       property of the seed and of nothing else. (The BANDS are still drawn
+       from the shared stream and still move with boot timing. Same bug one
+       layer up, and not this pass's to fix — a band is not a landmark and
+       nothing navigates by one.) */
+    const R = W.rngFrom(((S.seed | 0) * 7919 + 13) >>> 0);
     /* SIX TO NINE, and they are placed AT LANDMARKS rather than at random:
        an outpost in the middle of an anonymous erg is a shop you can only
        find by accident. Every oasis gets one (that is what an oasis is FOR
@@ -224,12 +248,26 @@
     let n = 0;
     for (let i = 0; i < D.oases.length && n < 5; i++) {
       const o = D.oases[i];
-      const p = D.landPoint(W.rnd, { near: { x: o.x, z: o.z }, nearR: o.r * 2.4, maxSlope: 0.24 });
+      /* THE FLATTEST OF TEN DRAWS. landPoint answers "somewhere near this
+         oasis that is not a cliff"; it has no idea a compound is 20 m wide.
+         Ten candidates and keep the best pad — cheap (130 heightAt calls)
+         and it is the difference between a camp on a slope and a camp on a
+         floor. First acceptable wins, so a flat oasis costs one draw. */
+      let p = null, bestR = 1e9;
+      for (let t = 0; t < 10; t++) {
+        const q = D.landPoint(R, { near: { x: o.x, z: o.z }, nearR: o.r * 2.4, maxSlope: 0.24 });
+        if (!q) continue;
+        const pad = padAt(q.x, q.z);
+        if (pad.wet) continue;                  // landPoint knows the sea, not the pond
+        if (pad.relief < bestR) { bestR = pad.relief; p = q; }
+        if (pad.relief <= PAD_OK) break;
+      }
+      if (!p) continue;
       S.outposts.push(makeOutpost(named[n % named.length], n % 3 === 1 ? "camp" : "town", p, o.name));
       n++;
     }
     for (let guard = 0; guard < 400 && S.outposts.length < 8; guard++) {
-      const a = W.rnd() * TAU;
+      const a = R() * TAU;
       const p = coastPoint(a);
       if (!p) continue;
       let clash = false;
@@ -240,8 +278,51 @@
       S.outposts.push(makeOutpost(named[n % named.length], n % 2 ? "depot" : "camp", p, null));
       n++;
     }
+    /* AND THE NIGHT MARKET, WHICH HAS NEVER ONCE EXISTED IN A GAME.
+
+       outpost.js declares four kinds. This function makes three. The oasis
+       loop draws from {camp, town} and the coast loop from {depot, camp}, so
+       `market` has never been reachable in a campaign — outpost.js's whole
+       paragraph about why the fourth kind earns its place (the only buyer
+       who pays 0.55 on the dollar, so forty looted pistols have an exit, and
+       the only seller who ignores rarity, so a launcher can be planned for)
+       has been describing a place that does not exist. Its own PATTERN table
+       has a market in it and nothing calls that function.
+
+       WHERE IT GOES IS THE ARGUMENT FOR IT EXISTING. outpost.js says "deep
+       in the interior where nobody official goes", which is also the only
+       part of a 14 km island the other three kinds never send you to: the
+       depots are on the water and the camps and wells are at the oases, all
+       of which are coastal or mid-radius. So the market is placed inside the
+       inner third, at least 2 km from anything already standing, and the
+       island finally has a reason to ride through its own middle. */
+    for (let guard = 0, made = 0; guard < 600 && made < 2; guard++) {
+      const a = R() * TAU;
+      const rr = D.RADIUS * (0.10 + R() * 0.24);
+      const x = Math.cos(a) * rr, z = Math.sin(a) * rr;
+      if (!D.onLand(x, z) || D.slopeAt(x, z) > 0.20) continue;
+      const pad = padAt(x, z);
+      if (pad.wet || pad.relief > PAD_OK) continue;
+      let clash = false;
+      for (let i = 0; i < S.outposts.length; i++) {
+        if (Math.hypot(S.outposts[i].x - x, S.outposts[i].z - z) < 2000) { clash = true; break; }
+      }
+      if (clash) continue;
+      S.outposts.push(makeOutpost(named[n % named.length], "market", { x: x, z: z }, null));
+      n++; made++;
+    }
     return S.outposts;
   }
+  /* THE FLATNESS TEST EVERY PLACER HAS TO PASS, and it is not the same test
+     as `slopeAt`. A slope reading is one derivative at one point; a compound
+     is 20 m across and 12 m of it is a rigid container row. 0.22 at the
+     centre is 4.4 m of rise to the edge of the pad, which is a depot with
+     one end in the air — measured on the first pass, where the depot's
+     ground came back at 6.59 m peak to peak while the camps and wells sat
+     under 0.8. levelPad() can nudge a compound 180 m to improve on what it
+     was handed, and it cannot rescue a placer that only ever hands it hills.
+     So the placers ask for a PAD now and the search is the polish. */
+  const PAD_OK = 1.7;                // metres peak-to-peak a compound tolerates
   function coastPoint(a) {
     const D = W.desert;
     // walk in from beyond the coast until the ground is 4 m up: a landing,
@@ -249,7 +330,9 @@
     for (let r = D.RADIUS + 1100; r > 800; r -= 40) {
       const x = Math.cos(a) * r, z = Math.sin(a) * r;
       const y = D.heightAt(x, z);
-      if (y > 4 && D.slopeAt(x, z) < 0.22) return { x: x, z: z, y: y };
+      if (y <= 4 || D.slopeAt(x, z) >= 0.22) continue;
+      const pad = padAt(x, z);
+      if (!pad.wet && pad.relief <= PAD_OK) return { x: x, z: z, y: y };
     }
     return null;
   }
@@ -304,7 +387,9 @@
       at: at || null,
       colour: K.colour,
       biome: W.desert.biomeAt(p.x, p.z),
-      wealth: clamp(0.3 + W.rnd() * 0.6, 0.2, 0.95),
+      // positional, not drawn: this is the no-outpost.js fallback and a
+      // roll here would shift every later draw on the shared stream
+      wealth: clamp(0.3 + W.hash01(p.x, p.z, 91) * 0.6, 0.2, 0.95),
       restocked: 0,
       // never let a fallback outpost crash a trader that expects these
       stock: {}, armourStock: {}, pool: {},
@@ -476,6 +561,9 @@
          claiming one would hand a dead man's uniform to whoever inherits his
          id. Release them all; they re-dress on demand. */
       for (let i = 0; i < rigSlots.length; i++) releaseSlot(rigSlots[i]);
+      // and the outpost staff, for the same reason: those keys name outposts
+      // on an island that no longer exists
+      for (const k in folkMen) delete folkMen[k];
       S.you.placed = false;
       outpostsRaised = false;
       clockH = null;
@@ -927,59 +1015,363 @@
   }
 
   /* ============================================================ OUTPOSTS
-     Four boxes and a mast. That is not laziness — an outpost's SCREEN is
-     outpost.js's job and this is the thing you ride at, which needs to be
-     recognisable from a kilometre and nothing more. */
+     WHAT WAS HERE WAS FIVE BoxGeometry HUTS ON A HASHED RING, A CYLINDER
+     MAST AND A FLAG, and a comment calling that deliberate: "an outpost's
+     SCREEN is outpost.js's job and this is the thing you ride at, which
+     needs to be recognisable from a kilometre and nothing more." The owner
+     rode at one and photographed what that actually is — two featureless
+     slabs half sunk in the sand, no person, no stall, no building, and in
+     his light both of them black — and then the trading screen opened over
+     the top of it. Both halves of that picture are bugs in this function.
+
+       THE COLOUR. props.js's header does the arithmetic with a calculator
+       and three photographs: this page runs outputEncoding = sRGBEncoding
+       with ACES over it, so a hex typed into a material is STORED linear and
+       encoded on the way out, and desert.js's sand lands at 0xE8-0xF1 on
+       screen. The huts were painted 0xbaa07a as though a hex meant what a
+       person means by it, which through that chain is blank white paper.
+       Photographed both ways in the before/after pair and in the owner's own
+       screenshot: a sunlit face comes out very slightly paler than the sand
+       behind it and vanishes into it, and a face in its own shade drops to
+       hemisphere ambient and comes out as the black slab he sent. Same bug;
+       which half you get depends on where the sun is. Every colour at an
+       outpost now comes out of props.js's own linear table instead.
+
+       THE SINK. The huts were seated on `heightAt`, the ANALYTIC surface,
+       and drawn against the clipmap, which draws `renderHeightAt`.
+       desert.js states the gap in metres: 9.9 cm on gentle ground and
+       17.3 cm on a flank. It is the same bug that used to bury the men.
+
+     AND THE FIND THAT MADE THIS A DELETION RATHER THAN A REWRITE: props.js
+     HAS SHIPPED A FINISHED DEPOT, CAMP, WELL AND MARKET THIS WHOLE TIME —
+     near geometry, a far silhouette, colliders, LOD, batched to about a
+     dozen draw calls apiece — AND NOTHING HAS EVER CALLED IT. `grep -rn
+     "props.outpost" src/` returned exactly one hit and it was the doc
+     comment at the top of props.js. desert.js's NO SCATTER note even says
+     "outpost and camp props — props.js places those AT places, on purpose",
+     which was true of the intention and false of the code. So this function
+     builds no geometry at all now. It picks the ground, asks props.js for
+     the place, and stands it up. */
+
   let outpostRoot = null, outpostsRaised = false;
+  const outpostGroups = [];        // the props group per outpost, by index
+  const raiseQ = [];               // outposts still waiting to be built
+
   function buildOutpostProps() {
     outpostRoot = new THREE.Group();
     root.add(outpostRoot);
   }
+
+  /* ============================================================ THE PAD
+     A COMPOUND IS A FLOOR, AND A FLOOR NEEDS SOMEWHERE LEVEL TO STAND ON.
+
+     props.js refuses to lay a hardstand under an outpost and says why: "on
+     desert.js's dunes a 36 m disc floats a metre on one side and buries
+     itself on the other". That is the right call, and it hands this file the
+     other half of the job — if props.js will not flatten the ground, the
+     ground has to be flat before the props arrive.
+
+     placeOutposts() already asks for slope under 0.22-0.24 AT THE POINT,
+     which is not the same question: 0.22 sustained across a 20 m compound is
+     4.4 m of rise, and the depot's container row is 12 m long. So the spot
+     it chose becomes the CENTRE OF A SEARCH rather than the answer. Sixty
+     candidates on a golden-angle spiral out to 180 m, each scored on the
+     peak-to-peak relief of a 13-point pad around it, with a small bias
+     against moving — the landmark reason this outpost is at this oasis or on
+     this landing survives a 100 m nudge and does not survive being somewhere
+     else entirely.
+
+     Cost: 60 x 13 heightAt per outpost, nine outposts, about 7 000 calls at
+     desert.js's own measured 0.36 us — 2.5 ms, once, at world build.
+
+     AND THE SEAT IS THE DRAWN SURFACE, NOT THE ANALYTIC ONE. renderHeightAt
+     reproduces exactly what the clipmap's finest ring draws and is
+     camera-independent by construction (desert.js: "the snap cancels and
+     this needs no camera state"), so it is the right answer here even for an
+     outpost 6 km away — by the time its near geometry is visible at all you
+     are inside the 420 m where that ring is what is under it. Averaged over
+     the pad rather than sampled at the centre: a rigid compound sits on the
+     mean of the ground it covers, and a centre sample buries the uphill
+     half. */
+  const PAD_R = 20;                 // the compound's own footprint
+  const GOLD = 2.399963229728653;   // golden angle — a spiral with no axis bias
+
+  /* THE FLATTEST GROUND AT AN OASIS IS THE BOTTOM OF THE POND, and that cost
+     a whole before/after run to find out. The first version of this search
+     scored candidates on relief alone and reported a triumph — the well's
+     ground went from 4.50 m peak-to-peak to 0.00 — and the photograph was a
+     compound standing in six feet of water with the camera submerged, palms
+     coming out of a lake and the shade sail floating on it. A pond floor IS
+     perfectly level. desert.js's own palm placer already knows this and
+     skips anything below `o.waterY + 0.2`; landPoint does not, because
+     onLand() answers about the SEA and an oasis is a bowl dug into the land.
+
+     0.8 m of freeboard rather than 0.2: a palm only has to have its trunk
+     out of the water, a compound has men standing in it and a wall of
+     containers, and the waterline moves nowhere near enough to justify
+     splitting hairs. */
+  function wet(x, z, y) {
+    const D = W.desert;
+    const list = D.oases || [];
+    for (let i = 0; i < list.length; i++) {
+      const o = list[i];
+      const dx = x - o.x, dz = z - o.z;
+      if (dx * dx + dz * dz > o.r * o.r) continue;
+      if (y < o.waterY + 0.8) return true;
+    }
+    return false;
+  }
+
+  function padAt(x, z) {
+    const D = W.desert;
+    let lo = 1e9, hi = -1e9, sum = 0, soaked = false;
+    const N = 13;
+    for (let i = 0; i < N; i++) {
+      const a = i * GOLD;
+      const rr = Math.sqrt((i + 0.35) / N) * PAD_R;
+      const px = x + Math.cos(a) * rr, pz = z + Math.sin(a) * rr;
+      const y = D.heightAt(px, pz);
+      if (y < lo) lo = y;
+      if (y > hi) hi = y;
+      // ANY of the thirteen, not the centre: a compound with one corner in
+      // the water is still a compound in the water.
+      if (!soaked && (!D.onLand(px, pz) || wet(px, pz, y))) soaked = true;
+      sum += (D.renderHeightAt ? D.renderHeightAt(px, pz) : y);
+    }
+    return { relief: hi - lo, y: sum / N, wet: soaked };
+  }
+  /* AND THE SEARCH IS BOUNDED IN Z AS WELL AS IN X, WHICH THE FIRST PASS WAS
+     NOT — it moved two outposts onto mesa tops. The mesa law quantises
+     plateau heights, so a mesa roof is EXACTLY flat and scores zero relief;
+     a 130 m candidate on one therefore beat a beach with 0.8 m of swell by
+     the margin of the distance bias. The audit came back with a recruit camp
+     and an ARMS DEPOT both sitting at y = 70.00, and a depot is where the
+     boats land. Flat is not the only thing an outpost has to be. A compound
+     levels the ground it stands on; it does not climb a cliff to find better
+     ground, so a candidate more than 3 m off the height it was placed at is
+     not a candidate. */
+  const PAD_CLIMB = 3.0;
+  function levelPad(o) {
+    const D = W.desert;
+    const y0 = D.heightAt(o.x, o.z);
+    let best = null;
+    for (let i = 0; i < 60; i++) {
+      const a = i * GOLD;
+      const rr = Math.sqrt(i / 60) * 180;      // i === 0 is the spot as placed
+      const x = o.x + Math.cos(a) * rr, z = o.z + Math.sin(a) * rr;
+      if (!D.onLand(x, z)) continue;
+      const p = padAt(x, z);
+      if (p.wet) continue;                      // see wet(): a pond floor is level
+      if (Math.abs(p.y - y0) > PAD_CLIMB) continue;
+      /* 4 mm of relief per metre moved. At that rate the full 180 m walk has
+         to buy three quarters of a metre of levelling to be worth taking,
+         which is about where the difference stops being visible under a
+         compound this size anyway. */
+      const score = p.relief + rr * 0.004;
+      if (!best || score < best.score) best = { x: x, z: z, y: p.y, relief: p.relief, score: score };
+    }
+    return best;
+  }
+
   function raiseOutposts() {
-    while (outpostRoot.children.length) outpostRoot.remove(outpostRoot.children[0]);
-    /* AND TAKE THE OLD COLLIDERS OUT. microboot has addCollider and no
-       remove, so every new game used to leave the previous island's huts
-       standing as invisible walls you could ride into in the middle of an
-       empty erg. Splice ours out by identity and rebuild the broadphase —
-       exactly what desert.battlefieldAt's clear() does with its cover. */
-    if (outpostBoxes.length && micro.colliders) {
-      for (let i = outpostBoxes.length - 1; i >= 0; i--) {
-        const at = micro.colliders.indexOf(outpostBoxes[i]);
-        if (at >= 0) micro.colliders.splice(at, 1);
-      }
-      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-      if (micro.rebuildColliderGrid) micro.rebuildColliderGrid();
+    // drop everything the last island left standing, colliders included
+    for (let i = 0; i < outpostGroups.length; i++) {
+      const g = outpostGroups[i];
+      if (!g) continue;
+      if (W.props) { W.props.unplace(g); W.props.forget(g); }
+      if (g.parent) g.parent.remove(g);
+      /* AND THE MERGED GEOMETRY GOES WITH IT. core/batch.js welds each
+         outpost's inert meshes into a handful of NEW BufferGeometries that
+         nothing else references, so leaving them behind leaks a compound's
+         worth of vertex buffers per new game. The shared caches (boxGeom,
+         props.js's cylinder table, its instanced pieces) tag themselves
+         `_shared` precisely so a sweep like this can tell them apart. */
+      g.traverse(function (o) {
+        if (o.isMesh && o.geometry && !o.geometry._shared && o.geometry.dispose) o.geometry.dispose();
+      });
     }
-    outpostBoxes.length = 0;
-    for (let i = 0; i < S.outposts.length; i++) {
+    outpostGroups.length = 0;
+    raiseQ.length = 0;
+    if (micro.rebuildColliderGrid) micro.rebuildColliderGrid();
+    for (let i = 0; i < S.outposts.length; i++) raiseQ.push(i);
+    /* NEAREST FIRST, AND ONE PER FRAME AFTER THE FIRST. A depot is a crane,
+       six containers, twenty crates, a sandbag run, a stall and two houses;
+       nine of those in one frame is a stall you can see. The rig pool next
+       door already works to the same rule and says why. The nearest one is
+       built immediately, because a game that opens beside an outpost must
+       not open beside an empty patch of sand. */
+    raiseQ.sort(function (a, b) { return dist2(S.outposts[a]) - dist2(S.outposts[b]); });
+    pumpOutposts(1);
+  }
+  function dist2(o) {
+    const dx = o.x - S.you.x, dz = o.z - S.you.z;
+    return dx * dx + dz * dz;
+  }
+
+  function pumpOutposts(n) {
+    if (!W.props || !W.props.outpost) return;
+    for (let k = 0; k < (n || 1) && raiseQ.length; k++) raiseOne(raiseQ.shift());
+  }
+
+  function raiseOne(i) {
+    const o = S.outposts[i];
+    if (!o) return;
+    /* LEVEL ONCE AND REMEMBER IT. A save reloads an outpost that has already
+       been moved, and re-running the search from there would find the same
+       pad — it is already the flattest thing within 130 m and the bias
+       rewards standing still — but "would" is not "does", and a landmark
+       that creeps a metre per load drifts off its own oasis over a long
+       campaign. */
+    if (!o.pad) {
+      const p = levelPad(o);
+      if (p) {
+        o.x = p.x; o.z = p.z; o.y = p.y;
+        o.relief = Math.round(p.relief * 100) / 100;
+      } else {
+        o.y = W.desert.renderHeightAt ? W.desert.renderHeightAt(o.x, o.z) : W.desert.heightAt(o.x, o.z);
+      }
+      o.pad = 1;
+      o.yaw = W.hash01(o.x, o.z, 97) * TAU;
+    }
+    /* outpost.js's four kinds are props.js's four kinds by construction —
+       the KINDS table and the four build functions were written against each
+       other. A fallback outpost, from a page where outpost.js failed to
+       load, carries this file's own "town", which is a well at an oasis and
+       a depot on a landing: the same mapping makeOutpost() already uses. */
+    const kind = o.kind === "town" ? (o.at ? "well" : "depot") : o.kind;
+    /* AND THE COMPOUND IS TOLD WHERE ITS OWN GROUND IS. props.js seats every
+       free-standing thing it builds — huts, tents, palms, the stall, the
+       fires, the drums — on whatever this function answers, and leaves the
+       genuinely rigid things (the container row, the gantry that straddles
+       it, a 22 m sandbag wall, the oasis bowl) sunk into the sand where the
+       terrain can cut them. It has to be a function handed in rather than a
+       heightfield read out, because props.js must not know what desert.js
+       is, and it has to be called at BUILD time because core/batch.js welds
+       the inert meshes together before the group is handed back — a hut
+       re-seated afterwards would be an empty group moving away from its own
+       baked geometry.
+
+       renderHeightAt, not heightAt: this is the surface that is DRAWN, the
+       same one sand.plant stands the men on, so the trader's boots and the
+       floor of the hut behind him agree. */
+    const D = W.desert;
+    const cy = Math.cos(o.yaw), sy = Math.sin(o.yaw);
+    const groundAt = function (lx, lz) {
+      const wx = o.x + lx * cy + lz * sy;
+      const wz = o.z - lx * sy + lz * cy;
+      return (D.renderHeightAt ? D.renderHeightAt(wx, wz) : D.heightAt(wx, wz)) - o.y;
+    };
+    let g = null;
+    try {
+      g = W.props.outpost(kind, {
+        seed: Math.floor(Math.abs(o.x) * 7 + Math.abs(o.z) * 13) + i * 101,
+        colour: o.colour,
+        groundAt: groundAt,
+      });
+    } catch (e) {
+      console.error("[warlord] outpost props", e);
+      return;
+    }
+    if (!g) return;
+    outpostRoot.add(g);
+    W.props.place(g, o.x, o.y, o.z, o.yaw);
+    outpostGroups[i] = g;
+  }
+
+  /* ============================================================ THE PEOPLE
+     "A MAN WITH A CRATE POPUP WITH NO MAN THERE."
+
+     props.js publishes `userData.folk` on every outpost it builds: where the
+     people stand, in the compound's own local metres, with a facing and a
+     role. It deliberately does not draw one, and neither does this function
+     — everything below hands them to `pushMan`, which is the same queue the
+     player's column and every warband on the island go through. That means
+     the trader gets a real CBZ.studio.cast rig dressed by W.outfits, seated
+     on the drawn sand by W.sand.plant and breathing on CBZ.animChar the
+     moment the 48-slot pool has room and the camera is inside 150 m, and an
+     instanced impostor at every range past that, with the same hysteresis,
+     the same size lie and the same colours as everybody else. A second way
+     to put a body on this island is exactly the drift CONTRACT.md exists to
+     stop, and it is what a hand-rolled "shopkeeper rig" here would have been.
+
+     THEY STAND STILL, WHICH IS THE POINT. spd 0 means animChar's `moving`
+     is false, so the rig breathes and settles instead of walking on the
+     spot, and the old failure — a T-pose — cannot happen because an
+     undressed slot is never shown at all.
+
+     ROLE PICKS THE TIER, so the man behind the counter is not dressed as a
+     levy. It is the only thing role does; outfits.js does the rest off the
+     same record a soldier carries in a battle. */
+  const FOLK_DRAW = 900;            // past this an outpost is a silhouette
+  const FOLK_TIER = { trader: "veteran", guard: "soldier", hand: "levy", idler: "raider" };
+  const FOLK_GUN = { trader: "revolver", guard: "ak47", hand: "sidearm", idler: "carbine" };
+  const folkMen = Object.create(null);
+  function folkMan(o, k, role) {
+    const key = o.id + ":" + k;
+    let s = folkMen[key];
+    if (s) return s;
+    /* A REAL W.makeSoldier RECORD, NOT A {id, tier} STUB, and the difference
+       is whether the man gets a body at all. W.outfits.dress() reads wid,
+       armour and hp off the record the way it does for a man in a battle;
+       handed a stub it throws, assignRigs catches, `ok` stays false and the
+       slot is claimed and never shown — so the trader would have burned a
+       rig slot and still drawn as a four-box impostor at two metres. Found
+       by asking why rigsAtPost was zero in a shot taken from six metres.
+
+       THE ID IS HASHED, NOT DRAWN. W.nextId() is a counter, so minting these
+       lazily at draw time would give the same man a different id depending on
+       how far you had ridden before you first looked at him — which desyncs
+       two peers watching one island and makes a before/after pair disagree
+       about a variant. Display-only, and never entering W.state, is exactly
+       the contract peerMan() next door already states. */
+    let h = 0;
+    for (let n = 0; n < key.length; n++) h = (h * 131 + key.charCodeAt(n)) | 0;
+    const id = 700000 + (Math.abs(h) % 90000);
+    const tier = FOLK_TIER[role] || "levy";
+    s = W.makeSoldier ? W.makeSoldier(tier, FOLK_GUN[role] || "sidearm", { id: id })
+                      : { id: id, tier: tier, wid: "sidearm", armour: "none", hp: 10, maxHp: 10 };
+    folkMen[key] = s;
+    return s;
+  }
+
+  function drawFolk() {
+    if (FLAG_NOFOLK) return 0;
+    let drawn = 0;
+    const cam = camera.position;
+    for (let i = 0; i < S.outposts.length && menDrawN < MEN_CAP - 16; i++) {
+      const g = outpostGroups[i];
+      if (!g) continue;
+      const list = g.userData.folk;
+      if (!list || !list.length) continue;
       const o = S.outposts[i];
-      const g = new THREE.Group();
-      g.position.set(o.x, o.y, o.z);
-      const wm = new THREE.MeshLambertMaterial({ color: 0xbaa07a });
-      const rm = new THREE.MeshLambertMaterial({ color: 0x7d6244 });
-      for (let j = 0; j < 5; j++) {
-        const a = (j / 5) * TAU + W.hash01(o.x, o.z, 61 + j) * 0.9;
-        const r = 10 + W.hash01(o.x + j, o.z, 71) * 12;
-        const w = 4 + W.hash01(o.x, o.z + j, 81) * 4;
-        const h = 3 + W.hash01(o.x + j, o.z + j, 91) * 2.6;
-        const hut = new THREE.Mesh(new THREE.BoxGeometry(w, h, w * 0.85), j % 2 ? wm : rm);
-        const hx = Math.cos(a) * r, hz = Math.sin(a) * r;
-        hut.position.set(hx, W.desert.heightAt(o.x + hx, o.z + hz) - o.y + h / 2, hz);
-        hut.rotation.y = a;
-        hut.castShadow = hut.receiveShadow = true;
-        g.add(hut);
-        outpostBoxes.push(micro.addBoxCollider(o.x + hx, o.y + hut.position.y, o.z + hz, w, h, w * 0.85));
+      const dx0 = o.x - S.you.x, dz0 = o.z - S.you.z;
+      if (dx0 * dx0 + dz0 * dz0 > FOLK_DRAW * FOLK_DRAW) continue;
+      /* THE COMPOUND'S OWN ROTATION, and it has to be props.place's, not a
+         second opinion about it. A child at local (lx, lz) under a group
+         with rotation.y = yaw sits at (lx cos + lz sin, -lx sin + lz cos) —
+         the same two lines place() uses to put that compound's colliders in
+         the world, so a man at the counter anchor is at the counter and not
+         beside it. */
+      const yaw = g.rotation.y, cy = Math.cos(yaw), sy = Math.sin(yaw);
+      for (let k = 0; k < list.length && menDrawN < MEN_CAP; k++) {
+        const f = list[k];
+        const x = o.x + f.x * cy + f.z * sy;
+        const z = o.z - f.x * sy + f.z * cy;
+        const dx = x - cam.x, dz = z - cam.z, d2 = dx * dx + dz * dz;
+        const ms = manScale(Math.sqrt(d2));
+        /* A MAN STANDING AT A STALL IS NOT MARCHING, so the only motion he
+           carries is the breath the rig gives him and a slower sway than a
+           man on the road. The hash keeps two men at the same fire off the
+           same beat, which is what a rank of identical bobbing does look
+           like when they share one. */
+        const bob = Math.sin(micro.elapsed * 1.9 + W.hash01(k, i, 311) * TAU) * 0.03;
+        const s = folkMan(o, k, f.role);
+        pushMan("f" + o.id + ":" + k, x, z, manGroundY(x, z, d2), yaw + f.yaw, bob, ms,
+                markOf(s, null), s, null, 0);
+        drawn++;
       }
-      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 16, 6),
-        new THREE.MeshLambertMaterial({ color: 0x4a3d2c }));
-      mast.position.y = 8;
-      g.add(mast);
-      const flag = new THREE.Mesh(new THREE.BoxGeometry(4.4, 2.4, 0.16),
-        new THREE.MeshLambertMaterial({ color: o.colour }));
-      flag.position.set(2.4, 14.4, 0);
-      g.add(flag);
-      outpostRoot.add(g);
     }
+    return drawn;
   }
 
   /* ============================================================ THE HUD
@@ -1573,6 +1965,13 @@
        actually looking at. Split the difference toward him. */
     D.follow(lerp(S.you.x, camera.position.x, 0.28), lerp(S.you.z, camera.position.z, 0.28));
 
+    /* ONE COMPOUND PER FRAME UNTIL THE QUEUE IS EMPTY (see raiseOutposts);
+       after that this is a length check on an empty array. The near/far swap
+       is NOT driven from here — props.js's own tickAll already calls
+       lodTick(camera.position) off CBZ.onUpdate, and two callers of a
+       toggle is how one of them ends up being the one that is wrong. */
+    if (raiseQ.length) pumpOutposts(1);
+
     // ---- draw -----------------------------------------------------------
     youSpeed = moved / Math.max(dt, 0.0001);
     placeYou(dt, youSpeed);
@@ -1947,7 +2346,7 @@
      against it, so the trade should not have to be re-measured by hand every
      time somebody touches it. An EMA of its own wall time, two performance.now
      calls a frame, readable from audit() and from the before/after preset. */
-  let menMs = 0;
+  let menMs = 0, folkShown = 0;
   function drawMen(dt) {
     const _t0 = performance.now();
     menDrawN = 0;
@@ -2078,6 +2477,15 @@
       }
       if (bn < 160) bn = party(bn, q.x, q.z, size, q.colour, yaw);
     }
+
+    /* ---- and the people standing at the outposts --------------------
+       LAST INTO THE LIST AND THAT IS DELIBERATE. assignRigs allocates the
+       48 bodies purely on distance to the CAMERA, so where a man is pushed
+       from cannot change whether he gets one — a trader two metres away
+       beats the whole column whatever order he arrived in. Being last only
+       decides who is dropped at MEN_CAP, and losing the last men in a
+       thousand-body field is the right thing to lose. */
+    folkShown = drawFolk();
 
     // ---- hand out the bodies, then instance whoever did not get one ----
     assignRigs(dt);
@@ -2524,12 +2932,63 @@
   C.camDist = function (d) { if (d != null) camDistWant = clamp(d, 16, 520); return camDistWant; };
   C.camYaw = function (a) { if (a != null) camYaw = a; return camYaw; };
   C.live = function () { return live; };
+  /* WHERE THE PEOPLE AT AN OUTPOST ACTUALLY ARE, in world metres, and it is
+     published for two reasons that are the same reason. A photograph of
+     "the trader" has to be AIMED at the trader rather than at the middle of
+     the compound and a hope; and "is there a man at the stall" is a question
+     a test should be able to ASK, not infer from a pixel. Same two lines of
+     rotation the draw uses, so what a tool is told is where the man is. */
+  C.folkAt = function (o) {
+    const i = S.outposts.indexOf(o);
+    const g = i < 0 ? null : outpostGroups[i];
+    const list = (g && g.userData.folk) || [];
+    const cy = Math.cos(g ? g.rotation.y : 0), sy = Math.sin(g ? g.rotation.y : 0);
+    const out = [];
+    for (let k = 0; k < list.length; k++) {
+      const f = list[k];
+      out.push({ x: o.x + f.x * cy + f.z * sy, z: o.z - f.x * sy + f.z * cy,
+                 yaw: (g ? g.rotation.y : 0) + f.yaw, role: f.role });
+    }
+    return out;
+  };
+  C.outpostGroup = function (o) {
+    const i = S.outposts.indexOf(o);
+    return i < 0 ? null : (outpostGroups[i] || null);
+  };
   C.map = toggleMap;
   C.spawnBand = spawnBand;
+  function outpostAudit() {
+    let raised = 0, folkAnchors = 0, houses = 0, worst = 0, missing = 0;
+    for (let i = 0; i < S.outposts.length; i++) {
+      const o = S.outposts[i];
+      if (o.relief != null && o.relief > worst) worst = o.relief;
+      const g = outpostGroups[i];
+      if (!g) continue;
+      raised++;
+      folkAnchors += (g.userData.folk || []).length;
+      g.traverse(function (n) {
+        if (n.userData && n.userData.kind) houses++;
+        if (n.userData && n.userData.missing) missing++;
+      });
+    }
+    return {
+      raised: raised, queued: raiseQ.length, houses: houses, houseKitMissing: missing,
+      folkAnchors: folkAnchors, folkDrawn: folkShown,
+      padReliefM: Math.round(worst * 100) / 100,
+    };
+  }
+
   C.audit = function () {
     return {
       live: live, bands: S.bands.length, outposts: S.outposts.length,
       army: S.army.length, drawnMen: menBody ? menBody.count : 0,
+      /* WHAT AN OUTPOST ACTUALLY IS ON SCREEN, because it was a lie for
+         months and nothing here could have said so. `raised` counts the
+         props.js compounds actually standing; `folk` the men drawn at them
+         this frame; `padRelief` the worst peak-to-peak ground under any
+         compound after levelPad, which is the number that says whether
+         anything is floating. */
+      posts: outpostAudit(),
       men: { impostors: menBody ? menBody.count : 0, rigs: rigsShown,
              pool: rigsBuilt, poolCap: RIG_POOL, dressedThisFrame: rigsDressed,
              near: NEAR_IN, out: NEAR_OUT, cone: FLAG_MEN_OLD,

@@ -931,7 +931,16 @@
     root.add(oasisWater);
     const palms = makePalms();
     if (palms) root.add(palms);
-    scCX = scCZ = NaN;
+    /* `scCX = scCZ = NaN;` STOOD HERE AND IT MEANT DESERT WARLORD DID NOT
+       BOOT. Those were the scatter's chunk-cursor variables; e8f2040 deleted
+       the scatter and its `let scatter = null, scCX = NaN, scCZ = NaN;`
+       declaration and left this one write behind. This file is "use strict",
+       so an assignment to an undeclared name is not a new global — it is a
+       ReferenceError, thrown from build(), on the line before the island is
+       added to the scene. Every boot ended in an unhandled rejection reading
+       "scCZ is not defined", the page sat on its loading bar forever, and
+       nothing that photographs this game could get a frame out of it.
+       Found by a smoke test that could not reach __warlordReady. */
     CBZ.scene.add(root);
     built = true; visible = true;
 
