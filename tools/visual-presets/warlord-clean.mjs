@@ -1,43 +1,39 @@
-/* DESERT WARLORD — AN ERG HAS NOTHING ON IT.
+/* DESERT WARLORD — THE ISLAND IS BARE.
 
-   OWNER, 2026-08-30, with two photographs of the Rub al Khali and one of a
-   man standing on a dune crest:
+   OWNER, 2026-08-30, three times, each time after a partial fix:
 
        "remove all the random debris from the desert the whole pint of these
         beatiful dunes is that theres no debris thats why they were made lol"
+       "threre are still rocsk int he desert"
+       "remove them"
 
-   He is describing a real property of sand seas, not a preference. An erg is
-   MOBILE: a dune migrates metres a year, so anything that falls on one is
-   buried within a season or left behind on the interdune floor. There is no
-   gravel on a slip face anywhere on Earth. Every one of his references — the
-   Sentinel-2 overhead, the crest at sunrise, the ripple field — is unbroken
-   sand to the horizon, and the only texture in any of them is wind ripple.
+   desert.js had an instanced, camera-following, hash-placed dressing system —
+   rocks, dead brush, rib bones, burnt chassis, about two thousand objects out
+   to a kilometre. Two passes tried to keep it and place it correctly: first
+   gated on biomeAt, which still left 45.1% of every instance standing on sand
+   because the provinces blend and the argmax label lies; then gated on the
+   blend weight itself, which got that to zero and left stone on the mesa
+   feet and the gravel plain. He looked at that and said remove them.
 
-   desert.js's scatter did not know that. It placed rocks, dead brush, bones
-   and wrecks on every biome except the salt pan, at one density, which put a
-   field of pebbles and twigs across the dunes AND left the gravel plain — a
-   reg, a stone pavement, the one landform that IS scattered rock — looking
-   exactly the same as the sand.
+   He is right about the reference. Every photograph of a sand sea is bare
+   ground to the horizon, and what carries it is the SURFACE — the dune law,
+   the curvature shading, the ripple bands, the light. Objects strewn over it
+   do not add detail, they add clutter, and they destroy the one property that
+   makes the landform read as enormous: there is nothing on it to give scale.
 
-   So the material was not deleted, it was MOVED to where it occurs: the mesa
-   country where boulders spall off the walls, the gravel plain, and the wadi
-   floor where the water is and therefore where the brush is. Dune, pan, beach
-   and oasis take nothing.
-
-   THE BEFORE IS THE DEPLOYED BUILD, not a flag: this is a placement rule, and
-   a flag for it would be a second placement rule to keep alive. Both columns
-   are seed 1337, the same six coordinates, the same camera, the same hour,
-   `?weather=off` on both so a sandstorm cannot roll into one of them.
+   So the system is deleted, not flagged off, and props.js's scatterKit() went
+   with it as its only caller. What did NOT go: the oasis palms (a landmark,
+   the only thing you navigate by), battlefieldAt's cover boxes (built from
+   COVER_BY_BIOME and a positional hash, and they never read the scatter — a
+   battle still has rocks to hide behind), and props placed AT outposts.
 
    WHAT TO LOOK FOR
-     · the erg    — before: specks all over the sand, including on the slip
-                    faces. after: nothing but the dune and its own shadow.
-     · the crest  — the shot closest to his photograph. Any dark speck on the
-                    windward ramp is the bug.
-     · the reg    — the gravel plain should now be VISIBLY the stony one; if
-                    the two columns look the same here the material did not
-                    move, it just went away.
-     · rock       — the mesa foot should have MORE on it than before, not less.
+     · every subject — the after column has NOTHING lying on the ground. Not
+       fewer objects: none. `total` is the whole claim and it is zero.
+     · the mesa and the reg had the most of it after the last pass; they are
+       the shots where the deletion is most visible.
+     · the oasis palms must still be there. If they went too, the wrong thing
+       was deleted.
 */
 
 /* Read off seed 1337's biomeAt. dune/crest are erg; reg and mesa are where
@@ -57,12 +53,12 @@ const subjects = [
     focus: "Standing on a ridge at the hour his reference was taken. Any dark speck on the windward ramp or in the trough is the thing that was removed; the only texture that belongs at this range is the curvature shading." },
 
   { id: "the-reg", x: 0, z: 0, findBiome: "gravel", dist: 60, yaw: 0.4, hour: 10.2,
-    label: "The Gravel Plain — Where The Stone Actually Went",
-    focus: "A reg is a stone pavement; that is what the landform is. It used to carry the same thin scatter as the dunes. It now carries the density the dunes were wasting, which is the half of this change that is not a deletion." },
+    label: "The Gravel Plain — The Last Place That Still Had Stone",
+    focus: "After the blend gate this was where most of the surviving scatter lived, which is why it is the clearest shot of the deletion. The ground colour still says reg; nothing is lying on it." },
 
   { id: "the-mesa", x: PLACE.mesa.x, z: PLACE.mesa.z, dist: 55, yaw: -2.749, hour: 9.2,
-    label: "Rock Country — Boulders Belong At A Mesa Foot",
-    focus: "Real mesas shed their walls into their own spall. This is the biome that should have gained, not lost: if the after side is emptier here the rule is inverted." },
+    label: "Rock Country — The Mesa Carries Itself",
+    focus: "The argument for keeping boulders anywhere was strongest here: a real mesa sheds its walls into its own spall. It is still the strongest argument and it still lost, because the mesa is a SHAPE and the shape is doing the work — the flat top and the steep side read at a kilometre with nothing at their foot." },
 ];
 
 async function stageClean(input) {
@@ -120,6 +116,16 @@ async function stageClean(input) {
           });
         }
         m.dunePct = m.total ? Math.round((m.onDune / m.total) * 1000) / 10 : 0;
+        /* THE GUARD ON THE OTHER SIDE. Every count above going to zero is
+           also what deleting the oasis palms would look like, and the palms
+           are the only thing on this island you navigate by. Counted from the
+           whole root, separately, and it must NOT be zero. */
+        m.palms = 0;
+        if (rt && rt.traverse) {
+          rt.traverse(function (o) {
+            if (o.isInstancedMesh && o.parent !== sc) m.palms += o.count;
+          });
+        }
         if (CBZ.renderer && CBZ.renderer.info) {
           m.drawCalls = CBZ.renderer.info.render.calls;
           m.triangles = Math.round(CBZ.renderer.info.render.triangles / 1000);
@@ -186,18 +192,19 @@ export default {
   method:
     "Two servers, two checkouts: origin/main on one port and this tree on the other, both booted with ?go=1&seed=1337&weather=off. The preset teleports the player to fixed world coordinates, sets the hour and the camera through the campaign's own API, and advances CBZ.stepSim for 34 frames so the seven clipmap levels and the scatter refill settle identically on both sides. The gravel subject SEARCHES for its ground on a seeded spiral rather than using a typed coordinate, so it photographs a real gravel plain on both columns even if the province fields are ever retuned.",
   metrics: {
-    onSand:   { label: "Objects standing on sand (by blend, not label)", unit: "instances", better: "lower" },
-    onDune:   { label: "Objects lying on the dunes", unit: "instances", better: "lower" },
+    total:    { label: "Objects lying on the ground, anywhere", unit: "instances", better: "lower" },
+    onSand:   { label: "…of those, standing on sand (by blend, not label)", unit: "instances", better: "lower" },
+    onDune:   { label: "…on ground labelled dune", unit: "instances", better: "lower" },
     onSalt:   { label: "Objects on the salt pan", unit: "instances", better: "lower" },
     onShore:  { label: "Objects on the beach", unit: "instances", better: "lower" },
     onRock:   { label: "Objects in rock country", unit: "instances" },
     onGravel: { label: "Objects on the gravel plain", unit: "instances" },
     onWadi:   { label: "Objects in the wadi", unit: "instances" },
+    palms:    { label: "Oasis palms still standing", unit: "instances" },
     dunePct:  { label: "Share of all scatter that is on sand", unit: "%", better: "lower" },
-    total:    { label: "Scatter instances drawn", unit: "instances" },
     drawCalls: { label: "Draw calls", unit: "calls" },
     triangles: { label: "Triangles submitted", unit: "k tris" },
   },
   metricsNote:
-    "onDune is the whole claim and it has to reach zero: an erg is mobile ground and buries what lands on it. onRock and onGravel are where that material went, and they are deliberately NOT declared better:lower — a gravel plain with nothing on it is not a gravel plain, and a gate that rewarded emptiness there would be gating the wrong thing. total may move either way: the per-cell candidate count went up to pay for three biomes now taking nothing at all.",
+    "total is the whole claim and it has to be zero — not lower, zero. onSand and the per-biome counts are kept so a future pass that re-adds a scatter cannot quietly re-add it to the sand: they were the numbers that caught the first two attempts. palms is the guard on the other side, because the oasis trees are instanced under the same root and deleting them would look, in every other metric, like success. OLD NOTE: onDune is the whole claim and it has to reach zero: an erg is mobile ground and buries what lands on it. onRock and onGravel are where that material went, and they are deliberately NOT declared better:lower — a gravel plain with nothing on it is not a gravel plain, and a gate that rewarded emptiness there would be gating the wrong thing. total may move either way: the per-cell candidate count went up to pay for three biomes now taking nothing at all.",
 };

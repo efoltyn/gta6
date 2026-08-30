@@ -80,7 +80,7 @@
    Flags (repo doctrine — every behaviour switch has a revert param):
      ?terrain=plain   one dune octave, no provinces, no wadis, no mesas
                       (the honest one-flag "before" for the A/B tool)
-     ?scatter=off     no rocks/brush/bones/wrecks/palms
+     ?palms=off       no oasis palms (there is no other dressing)
      ?lod=flat        the coarsest level only — silhouette, no detail
 ============================================================ */
 (function () {
@@ -95,7 +95,8 @@
     catch (e) { return { get: function () { return null; } }; }
   })();
   const FLAG_PLAIN = QP.get("terrain") === "plain";
-  const FLAG_NOSCATTER = QP.get("scatter") === "off";
+  // the only dressing left on this island is the oasis palms — see NO SCATTER
+  const FLAG_NOPALMS = QP.get("palms") === "off" || QP.get("scatter") === "off";
   const FLAG_FLATLOD = QP.get("lod") === "flat";
 
   /* ============================================================ THE SHAPE */
@@ -110,9 +111,10 @@
      exactly right for "the same rock is always here" and pure overhead on a
      lattice index that is already an integer. heightAt runs this ~50 times
      per call and a clipmap rebuild is 4 225 calls, so this is the hot path
-     in the file: two imuls, no rounding, no branch. W.hash01 is still what
-     the SCATTER uses (see below) because scatter is keyed off world metres
-     and must not move when a chunk reloads. */
+     in the file: two imuls, no rounding, no branch. W.hash01 is the ORDER-
+     INDEPENDENT one, used by anything keyed off world metres that must not
+     move when a chunk reloads — the oasis placement and battlefieldAt's
+     cover. */
   function h2(ix, iz, salt) {
     let n = (Math.imul(ix | 0, 73856093) ^ Math.imul(iz | 0, 19349663) ^ Math.imul(salt | 0, 83492791)) | 0;
     n = Math.imul(n ^ (n >>> 13), 0x85ebca6b);
@@ -430,11 +432,13 @@
   D.biomeAt = biomeAt;
   D.coastAt = coastAt;
   /* HOW MUCH SAND IS UNDER THIS POINT, 0..1. biomeAt answers with the ARGMAX
-     province, which is the right answer for "what is this place called" and
-     the wrong one for "may a rock lie here": the provinces BLEND, so a point
-     whose winner is `gravel` by a hair can still be nine-tenths dune — the
-     ground there looks, and is drawn as, sand. The scatter needs the blend
-     weight, not the label. */
+     province, which is the right answer for "what is this place called" and a
+     misleading one for "what is this ground actually made of": the provinces
+     BLEND, so a point whose winner is `gravel` by a hair can still be
+     nine-tenths dune, and heightAt draws it as dune. Written for the scatter
+     gate, which no longer exists — see NO SCATTER — and kept because it is
+     the only way to ask that question, and because the visual gate uses it to
+     assert that nothing is standing on sand. */
   D.sandiness = function (x, z) {
     if (!inited) ensureInit();
     const P = provinceAt(x, z, coastAt(x, z));
@@ -582,7 +586,7 @@
   const CELL0 = 10;             // metres per quad, finest level
   const LEVELS = FLAG_FLATLOD ? 1 : 7;
 
-  let root = null, levels = [], water = null, oasisWater = null, scatterRoot = null;
+  let root = null, levels = [], water = null, oasisWater = null;
   let built = false, visible = false;
   const heightBuf = new Float32Array(VN * VN);
   const dirtyQueue = [];
@@ -808,98 +812,39 @@
     return grp;
   }
 
-  /* ============================================================ SCATTER
-     Instanced, deterministic, and keyed off W.hash01 of the WORLD position
-     of the cell — so a rock is in the same place after you ride away and
-     come back, which is the whole reason this is not Math.random. The
-     scatter follows the camera in 256 m cells out to ~1.1 km; past that the
-     props are sub-pixel and the terrain colour is carrying the look.
+  /* ============================================================ NO SCATTER
+     THIS IS WHERE THE SCATTER WAS, and the note is here because the next
+     person to look at an empty desert will want to add one back.
 
-     Palms are NOT in this system: they belong to the oases, there are only
-     a couple of hundred of them, and they must be there whether or not you
-     are standing next to them (an oasis you cannot see from a kilometre
-     away is not a landmark). */
-  const SC_CELL = 256, SC_RING = 4;         // ±4 cells = 1.15 km of dressing
-  const SC_CAP = { rock: 900, brush: 1100, bone: 220, wreck: 30 };
+     There was an instanced, camera-following, hash-placed dressing system:
+     rocks, dead brush, rib bones and burnt chassis, ~2000 objects out to a
+     kilometre. It was removed on the owner's instruction, twice — first for
+     the dunes ("the whole point of these beautiful dunes is that there's no
+     debris, that's why they were made"), then for the rest of the island
+     ("remove them").
 
-  /* ---- WHAT MAY LIE ON WHICH GROUND, and why an erg gets NOTHING ----
-     The first version of this scatter placed rocks and dead brush on every
-     biome except the salt pan, which put a field of pebbles and twigs across
-     the dunes. That is not a taste call, it is wrong about sand: an erg is
-     MOBILE. A dune migrates metres a year, so anything that lands on one is
-     buried within a season or left behind on the interdune floor — a slip
-     face with gravel sitting on it is a picture of a hillside, not a dune.
-     Every reference photograph of the Rub al Khali, from the Sentinel-2
-     overhead down to a man standing on a crest, is the same: unbroken sand
-     to the horizon, and the only texture is wind ripple.
+     He is right about the reference. Every photograph of the Rub al Khali —
+     the Sentinel-2 overhead, a crest at low sun, a ripple field — is bare
+     ground to the horizon. The thing that carries a desert at this range is
+     the SURFACE: the dune law, the curvature shading, the ripples, the light.
+     Objects scattered over it do not add detail, they add clutter, and they
+     break the one quality that makes the landform read as enormous, which is
+     that there is nothing on it to give you scale.
 
-     So the erg, the pan and the beach are BARE, and the material that used
-     to be smeared evenly over the island is concentrated where it actually
-     occurs — which is also the only way the four provinces read as four
-     different places instead of one place with four names:
+     WHAT DID NOT GO WITH IT, so nobody re-adds these by mistake:
+       · the oasis palms      — a landmark, not dressing. An oasis you cannot
+                                see from a kilometre away is not a landmark,
+                                and they are the only thing you navigate by.
+       · battlefield cover    — battlefieldAt() builds its own cover boxes
+                                from COVER_BY_BIOME and a positional hash, and
+                                never read this system. A battle still has
+                                rocks to hide behind; the campaign does not
+                                have them lying around underfoot.
+       · outpost and camp props — props.js places those AT places, on purpose.
 
-       rock    boulders spalled off the mesa walls, and the most of it
-       gravel  a reg: a stone pavement is literally what the biome IS
-       wadi    the one place with water, so the only place brush lives
-       dune    nothing.  salt  nothing.  shore  nothing.
-
-     `dens` is the share of candidate points that survive; the kind cuts are
-     read against the same `roll` the old code used, so the shapes and sizes
-     are unchanged — only WHERE they are allowed. */
-  const SC_GROUND = {
-    rock:   { dens: 1.00, rock: 0.80, brush: 0.97, bone: 0.995 },
-    gravel: { dens: 0.85, rock: 0.62, brush: 0.93, bone: 0.985 },
-    wadi:   { dens: 0.70, rock: 0.30, brush: 0.96, bone: 0.990 },
-  };
-  let scatter = null, scCX = NaN, scCZ = NaN;
-
-  /* THE SCATTER GEOMETRY IS props.js's, AND IT ASKED. That file publishes
-     `scatterKit()` — a real weathered rock, a dead desert BUSH (seven splayed
-     twigs) rather than the cone this file used to draw, a rib bone, a burnt
-     chassis — with the note that "a cone in a desert reads as a Christmas
-     tree and desert.js's scatter is full of them". It was right. The SYSTEM
-     stays here (instanced, hash-placed, camera-following, which is the part
-     that has to know about the terrain); only the shapes come from there, so
-     a rock at 900 m and the same rock at 4 m in a battle are one rock.
-     Falls back to primitives when props.js is absent — this file must still
-     work on a page that did not load it. */
-  function makeScatter() {
-    if (FLAG_NOSCATTER || !THREE.InstancedMesh) return null;
-    const grp = new THREE.Group();
-    // named so a census can separate the DRESSING from the oasis palms, which
-    // are instanced under the same root and are not scatter — the first count
-    // of "objects lying on sand" was 780 palm trunks and fronds
-    grp.name = "wlScatter";
-    let K = null;
-    if (W.props && typeof W.props.scatterKit === "function") {
-      try { K = W.props.scatterKit(); } catch (e) { K = null; }
-    }
-    function im(geo, mat, colour, cap, shadow) {
-      const m = new THREE.InstancedMesh(geo, mat || new THREE.MeshLambertMaterial({ color: colour }), cap);
-      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      m.castShadow = !!shadow; m.receiveShadow = false;
-      m.frustumCulled = false;
-      m.count = 0;
-      grp.add(m);
-      return m;
-    }
-    const pick = function (name, fallbackGeo, fallbackColour) {
-      const e = K && K[name];
-      return e && e.geo ? { geo: e.geo, mat: e.mat || null } : { geo: fallbackGeo, mat: null, colour: fallbackColour };
-    };
-    const r = pick("rock", new THREE.IcosahedronGeometry(1, 0), 0x453b2f);
-    const b = pick("brush", new THREE.ConeGeometry(0.7, 1.1, 5), 0x37331d);
-    const o = pick("bone", new THREE.BoxGeometry(0.24, 0.24, 2.1), 0x9c957f);
-    const w = pick("wreck", new THREE.BoxGeometry(2.2, 1.4, 5.0), 0x3a2a20);
-    return {
-      root: grp,
-      fromProps: !!K,
-      rock: im(r.geo, r.mat, r.colour, SC_CAP.rock, true),
-      brush: im(b.geo, b.mat, b.colour, SC_CAP.brush, false),
-      bone: im(o.geo, o.mat, o.colour, SC_CAP.bone, false),
-      wreck: im(w.geo, w.mat, w.colour, SC_CAP.wreck, true),
-    };
-  }
+     If a future pass wants texture on the sand again, the answer is in the
+     SURFACE (finer ripple bands, a wind-streak layer, better grazing light),
+     not a second object scatter. */
 
   const _m4 = THREE ? new THREE.Matrix4() : null;
   const _q = THREE ? new THREE.Quaternion() : null;
@@ -915,69 +860,8 @@
     return n + 1;
   }
 
-  function refillScatter(camX, camZ) {
-    if (!scatter) return;
-    const cx = Math.round(camX / SC_CELL), cz = Math.round(camZ / SC_CELL);
-    if (cx === scCX && cz === scCZ) return;
-    scCX = cx; scCZ = cz;
-    const hash = W.hash01;
-    let nR = 0, nB = 0, nO = 0, nW = 0;
-    for (let gz = cz - SC_RING; gz <= cz + SC_RING; gz++) {
-      for (let gx = cx - SC_RING; gx <= cx + SC_RING; gx++) {
-        const bx = gx * SC_CELL, bz = gz * SC_CELL;
-        // one hash decides how busy this cell is at all — cheap reject
-        const busy = hash(bx, bz, 71);
-        /* 10-36 candidates, up from 6-22. Three of the six biomes now take
-           nothing at all, so the same per-cell count would have thinned the
-           rock country too — the point is to MOVE the dressing, not to end
-           up with a bare island. The caps above are unchanged and still bind
-           first when you are standing in the middle of a mesa field. */
-        const count = 10 + Math.floor(busy * 26);
-        for (let i = 0; i < count; i++) {
-          const x = bx + hash(bx + i * 13, bz, 101 + i) * SC_CELL;
-          const z = bz + hash(bx, bz + i * 17, 211 + i) * SC_CELL;
-          if (coastAt(x, z) < 12) continue;
-          const y = heightAt(x, z);
-          if (y < 0.6) continue;
-          const b = biomeAt(x, z);
-          // dune, salt, shore and oasis are bare ground — see SC_GROUND.
-          const G = SC_GROUND[b];
-          if (!G) continue;
-          /* AND THE LABEL IS NOT ENOUGH. Gating on biomeAt alone still left
-             45% of the scatter standing on sand, measured. Two ways through:
-             the provinces BLEND, so a point whose argmax is `gravel` by a hair
-             can be nine-tenths dune and is DRAWN as dune; and a wadi is a cut
-             through whatever it crosses, including the erg, so "wadi" over
-             sand is still sand. Both are answered by the same question — how
-             much dune is actually under this point — which is what sandiness()
-             returns. 0.15 is where the blend stops contributing anything you
-             can see in the surface. */
-          if (D.sandiness(x, z) > 0.15) continue;
-          if (G.dens < 1 && hash(x, z, 503) > G.dens) continue;
-          const roll = hash(x, z, 307);
-          const yaw = hash(x, z, 401) * TAU;
-          if (roll < G.rock) {
-            const s = 0.42 + hash(x, z, 409) * (b === "rock" ? 1.9 : 0.95);
-            nR = put(scatter.rock, nR, x, y + s * 0.45, z, yaw, s, s * (0.6 + roll * 0.7), s);
-          } else if (roll < G.brush) {
-            const s = 0.6 + hash(x, z, 419) * 0.9;
-            nB = put(scatter.brush, nB, x, y + s * 0.5, z, yaw, s, s, s);
-          } else if (roll < G.bone) {
-            nO = put(scatter.bone, nO, x, y + 0.12, z, yaw, 1, 1, 0.6 + roll);
-          } else if (D.slopeAt(x, z) < 0.16) {
-            nW = put(scatter.wreck, nW, x, y + 0.7, z, yaw, 1, 1, 1);
-          }
-        }
-      }
-    }
-    scatter.rock.count = nR; scatter.rock.instanceMatrix.needsUpdate = true;
-    scatter.brush.count = nB; scatter.brush.instanceMatrix.needsUpdate = true;
-    scatter.bone.count = nO; scatter.bone.instanceMatrix.needsUpdate = true;
-    scatter.wreck.count = nW; scatter.wreck.instanceMatrix.needsUpdate = true;
-  }
-
   function makePalms() {
-    if (FLAG_NOSCATTER || !THREE.InstancedMesh || !oases.length) return null;
+    if (FLAG_NOPALMS || !THREE.InstancedMesh || !oases.length) return null;
     const grp = new THREE.Group();
     const per = 26;
     const cap = oases.length * per;
@@ -1047,8 +931,6 @@
     root.add(oasisWater);
     const palms = makePalms();
     if (palms) root.add(palms);
-    scatter = makeScatter();
-    if (scatter) { scatterRoot = scatter.root; root.add(scatterRoot); }
     scCX = scCZ = NaN;
     CBZ.scene.add(root);
     built = true; visible = true;
@@ -1058,7 +940,6 @@
     // feet is a man standing in the sky.
     const c = opts.at || { x: 0, z: 0 };
     for (let i = 0; i < levels.length; i++) fillLevel(levels[i], c.x, c.z);
-    refillScatter(c.x, c.z);
     mapCache = {};
     return root;
   };
@@ -1079,7 +960,7 @@
       if (o.geometry) o.geometry.dispose();
       if (o.material) { if (Array.isArray(o.material)) o.material.forEach(function (m) { m.dispose(); }); else o.material.dispose(); }
     });
-    root = null; levels = []; water = null; oasisWater = null; scatter = null; scatterRoot = null;
+    root = null; levels = []; water = null; oasisWater = null;
     built = false; visible = false;
     dirtyQueue.length = 0;
   };
@@ -1100,7 +981,6 @@
     for (let i = 0; i < levels.length; i++) {
       if (levels[i].dirty) { fillLevel(levels[i], camX, camZ); break; }
     }
-    refillScatter(camX, camZ);
   };
 
   /* ============================================================ THE MAP
@@ -1428,8 +1308,7 @@
     return {
       seed: SEED, radius: RADIUS, bounds: BOUNDS, oases: oases.length,
       levels: levels.length, landPct: Math.round(land / tries * 100), biomes: counts,
-      scatterFromProps: !!(scatter && scatter.fromProps),
-      flags: { plain: FLAG_PLAIN, scatter: !FLAG_NOSCATTER, lod: !FLAG_FLATLOD },
+      flags: { plain: FLAG_PLAIN, palms: !FLAG_NOPALMS, lod: !FLAG_FLATLOD },
     };
   };
 

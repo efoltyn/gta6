@@ -23,8 +23,6 @@
      W.props.palm/fire/tent/...    the pieces, exposed, because a second copy
                                    of a palm is exactly what this file exists
                                    to stop
-     W.props.scatterKit()          shared geometry+material for desert.js's
-                                   instanced scatter (see NOTE TO desert.js)
      W.props.place(g, x,y,z, yaw)  put it in the world and register its cover
      W.props.lodTick(camPos)       near/far swap, driven off CBZ.onUpdate
 
@@ -2547,29 +2545,13 @@
     return finish(g, opts);
   }
 
-  /* ============================================================ NOTE TO desert.js
-     desert.js's scatter builds its own four instanced primitives inline —
-     an IcosahedronGeometry rock, a cone brush, a box bone, a box wreck. That
-     is exactly the right SHAPE of system (instanced, hash-placed, camera
-     following) and exactly the wrong geometry, and it is a one-line change
-     to fix, from this side of the fence:
-
-         const K = W.props.scatterKit();
-         rock: im(K.rock.geo, K.rock.colour, SC_CAP.rock, true),
-
-     scatterKit hands back the same geometry the hero props use — the
-     scraped boulder, a real dead bush, a rib arc, a burnt chassis — with the
-     colours already matched to this file's palette. It builds nothing until
-     it is called. */
-  P.scatterKit = function () {
-    return {
-      rock:  { geo: rockGeo(0), colour: COL.rock, mat: M("rock") },
-      rock2: { geo: rockGeo(3), colour: COL.rockDark, mat: M("rockDark") },
-      brush: { geo: brushGeo(), colour: 0x6a6238, mat: M("frond") },
-      bone:  { geo: ribGeo(), colour: COL.bone, mat: M("bone") },
-      wreck: { geo: chassisGeo(), colour: COL.char, mat: M("char") },
-    };
-  };
+  /* scatterKit() WAS HERE, and it is gone with its only caller. It published
+     this file's rock / bush / bone / wreck geometry so desert.js's world
+     scatter drew the same objects the hero props do. desert.js no longer has
+     a scatter — the owner asked for the island to be bare, twice — so this
+     was an exported function with nothing on the other end of it. The
+     geometry itself stays: the props that actually place rocks (boulder
+     fields, gabions, rubble at a collapsed wall) still use rockGeo(). */
   let _brush = null, _rib = null, _chassis = null;
   function brushGeo() {
     if (_brush) return _brush;
