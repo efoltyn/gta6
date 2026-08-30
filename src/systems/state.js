@@ -296,6 +296,9 @@
     // GUN GAME: a bot finished the ladder first — its own fill owns the card
     // (ladder standings, not disaster placement).
     if (g.mode === "gungame") { if (CBZ.gungameFillResult) CBZ.gungameFillResult(false); return; }
+    // SHARK SIM: a dead shark has no battle-royale placement and survived no
+    // disasters — modes/shark_sim.js fills the ladder run's own numbers.
+    if (g.mode === "sharksim" && CBZ.sharkSimFillResult) { CBZ.sharkSimFillResult(false); return; }
     fillSurvResult(false);
     styleLossCard(false);
   }
@@ -304,9 +307,12 @@
   function winGame(reason, actor) {
     if (g.state === "won") return;
     setState("won"); CBZ.sfx("win");
-    // sharksim shares the island's win card, but only DISASTER wins land in
-    // the persistent disaster record — an apex-predator run is its own game.
-    if (g.mode === "survival" || g.mode === "sharksim") { fillSurvResult(true); if (g.mode === "survival" && CBZ.recordSurvWin) CBZ.recordSurvWin(); return; }
+    // sharksim shares the island's win card but not its COPY: "VICTORY ROYALE
+    // · #1 of 100 · Disasters" over an apex-predator run is the disaster
+    // game's scoreboard on another game's screen (modes/shark_sim.js fills
+    // it), and only DISASTER wins land in the persistent disaster record.
+    if (g.mode === "sharksim" && CBZ.sharkSimFillResult) { CBZ.sharkSimFillResult(true); return; }
+    if (g.mode === "survival") { fillSurvResult(true); if (CBZ.recordSurvWin) CBZ.recordSurvWin(); return; }
     // GUN GAME: the player landed the final rung's kill — the shared win card
     // shows the ladder result (gungame.js owns the fill).
     if (g.mode === "gungame") { if (CBZ.gungameFillResult) CBZ.gungameFillResult(true); return; }

@@ -569,7 +569,7 @@ export default {
     snoutLiftRad: { label: "Rostrum lift at full gape", unit: "rad", better: "higher" },
     gapePastRostrumM: { label: "Upper tooth row past the closed rostrum tip at full gape", unit: "m", better: "higher" },
     poreCount: { label: "Ampullae of Lorenzini pores", unit: "", better: "higher" },
-    scarCount: { label: "Rake scars on the dorsal skin", unit: "", better: "higher" },
+    scarCount: { label: "Rake scars on the dorsal skin (deleted 2026-08-30 — see megalodon-camera)", unit: "" },
     foldCount: { label: "Flank wrinkle folds behind the head", unit: "", better: "higher" },
     planWidthRatio: { label: "Hull width over body length from directly above (a narrow torpedo is small)", unit: "×", better: "lower" },
     meshes: { label: "Meshes in the animal (draw calls before batching)", unit: "", better: "lower" },

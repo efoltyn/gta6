@@ -930,13 +930,32 @@
   }
 
   /* ======================================================================
-     SKIN: rake scars on the dark dorsal surface + horizontal flank folds
-     behind the head. Both merged into ONE two-group mesh.
+     SKIN: horizontal flank folds behind the head.
+
+     THE RAKE SCARS ARE GONE (owner, 2026-08-30: "find the white markers on
+     the backs of all sharks ... and get rid of them"). They were pale ribbons
+     (0x99a3a7 .. 0xaeb6b8) laid on the UPPER surfaces only, i.e. on the one
+     part of the animal that is dark — so on every shark in the game, from
+     every angle a chase camera or a swimmer actually uses, they did not read
+     as healed bite marks. They read as white stickers stuck to the back.
+     The intent was fine and the execution could not survive contact with the
+     countershading it was painted against, so the feature is deleted rather
+     than retuned: a scar you have to squint at is not worth four species'
+     worth of parameters and a per-species geometry cache entry.
+
+     `?cfg_SHARK_RAKE_SCARS=1` puts them back, for the before/after tool and
+     for anyone who wants to argue the other side with a picture.
+
+     The FOLDS stay. They are dark (0x4d565c), they sit on the flank where the
+     countershading boundary already is, and they are the cheap crease read
+     the reference sheet asked for. Nothing about them was the complaint.
      ====================================================================== */
+  function rakeScarsOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.SHARK_RAKE_SCARS); }
   function addSharkSkin(g, m, o) {
     const rings = o.rings;
     if (!rings) return;
-    const scars = o.scars == null ? 9 : o.scars, folds = o.folds == null ? 3 : o.folds;
+    const scars = rakeScarsOn() ? (o.scars == null ? 9 : o.scars) : 0;
+    const folds = o.folds == null ? 3 : o.folds;
     if (!scars && !folds) return;
     const seed = o.skinSeed || 17;
     // scars stop at the jaw corner when the head front is jaw shells — a rake
