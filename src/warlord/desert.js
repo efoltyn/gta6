@@ -467,13 +467,13 @@
      over 1.0 everywhere and the whole island photographed as white paper —
      the first strategic screenshot is unusable and it is entirely this.
      Dry sand really is about 0.40 linear; these are measured-ish albedos. */
-  const C_SAND_LO = [0.40, 0.30, 0.17], C_SAND_HI = [0.62, 0.52, 0.33];
+  const C_SAND_LO = [0.34, 0.25, 0.14], C_SAND_HI = [0.52, 0.42, 0.26];
   const C_ROCK_LO = [0.16, 0.10, 0.07], C_ROCK_HI = [0.31, 0.20, 0.13];
   const C_CAP = [0.28, 0.25, 0.21];
-  const C_SALT = [0.80, 0.79, 0.74], C_CRACK = [0.40, 0.37, 0.31];
-  const C_GRAVEL = [0.29, 0.25, 0.18];
+  const C_SALT = [0.70, 0.69, 0.64], C_CRACK = [0.36, 0.33, 0.27];
+  const C_GRAVEL = [0.26, 0.22, 0.16];
   const C_SILT = [0.20, 0.17, 0.11];
-  const C_WET = [0.22, 0.18, 0.13], C_BEACH = [0.62, 0.55, 0.38];
+  const C_WET = [0.20, 0.16, 0.12], C_BEACH = [0.52, 0.45, 0.31];
   const C_GREEN = [0.09, 0.19, 0.05];
   const C_SEABED = [0.10, 0.14, 0.11];
   const _c = [0, 0, 0];

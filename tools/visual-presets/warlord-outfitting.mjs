@@ -118,12 +118,11 @@ export default {
     if (act === "depot") W.outpost.open(depot);
     else if (act === "camp") W.outpost.open(camp);
     else if (act === "armouryBefore") W.loadout.open();
-    else if (act === "armouryAfter") { W.loadout.autoArm(); W.loadout.open(); W.loadout.autoArm(); }
+    else if (act === "armouryAfter") { W.loadout.autoArm(); W.loadout.open(); }
     else if (act === "lobby") { W.setPhase("menu"); W.warnet.lobby(); }
 
-    // armouryAfter runs autoArm twice on purpose: open() clears the last
-    // report (it must, or a stale report survives a screen you re-entered),
-    // so the report on screen has to be produced after the screen exists.
+    // AUTO-ARM then open: loadout.js keeps its last report until the screen
+    // is LEFT, so the "what it did" card is on the photographed frame.
     await sleep(320);
 
     const stage = document.getElementById("stage");

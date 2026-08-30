@@ -34,7 +34,12 @@
   const Q = new URLSearchParams(G.location ? G.location.search : "");
   const OLD_AUTO = Q.get("outfit") === "old" || Q.get("autoarm") === "old";
 
-  let ctx = null, BACK = null, LAST = null, OPEN_TIER = null, OPEN_MAN = null, PICK = null;
+  let ctx = null, BACK = null, LAST = null, OPEN_TIER = null, PICK = null;
+  /* THE ROSTER IS THE SPREADSHEET, so it starts CLOSED. Owner's steer:
+     "ultra simple mechanics... AUTO-ARM should be the button 90% of players
+     ever press." The default screen is therefore strength, one big button,
+     and what it did — the per-man list is one tap away for the other 10%. */
+  let SHOW_ROSTER = false;
 
   /* ============================================================ THE NUMBERS
      BASE POWER is core's own soldierPower with the gun factor divided out.
@@ -254,6 +259,10 @@
   .wl-la-rep i{font-style:normal;color:var(--hot)}
   .wl-la-rep .dim{opacity:.5}
   .wl-la-w{color:var(--blood);font-size:10px;letter-spacing:.14em}
+  .wl-la-big{display:block;width:100%;padding:20px 16px;font-size:17px;letter-spacing:.1em;margin:16px 0 0}
+  .wl-la-cap{display:block;margin:8px 0 0;text-align:center;text-transform:lowercase;letter-spacing:.06em}
+  .wl-la-minor{justify-content:center}
+  .wl-la-minor .wl-btn{padding:9px 12px;font-size:11.5px;opacity:.72}
   @media (max-width:420px){ .wl-la-pw b{font-size:26px} .wl-la-nm{font-size:13px} }`;
   function styleOnce() {
     if (G.document && !G.document.getElementById("wl-la-css")) {
@@ -394,12 +403,15 @@
 
   function rosterCard() {
     const gs = groups();
-    let h = '<div class="wl-lbl">YOUR MEN</div>';
-    if (!gs.length) return h + '<div class="wl-card"><div class="wl-small wl-dim">you ride alone. hire men at a recruit camp.</div></div>';
+    if (!gs.length) return '<div class="wl-lbl">YOUR MEN</div><div class="wl-card"><div class="wl-small wl-dim">you ride alone. hire men at a recruit camp.</div></div>';
+    let h = '<button class="wl-la-grp' + (SHOW_ROSTER ? " on" : "") + '" id="laRoster" style="margin-top:18px">' +
+      '<span>EVERY MAN</span><span class="n">' + W.state.army.length + ' IN ' + gs.length +
+      ' STACKS' + (SHOW_ROSTER ? '  ▾' : '  ▸') + '</span></button>';
+    if (!SHOW_ROSTER) return h;
     for (let i = 0; i < gs.length; i++) {
       const g = gs[i];
       const k = keyOf(g);
-      const open = OPEN_TIER === k;
+      const open = OPEN_TIER == null ? i === 0 : OPEN_TIER === k;
       const armed = g.men.filter(function (s) { return s.wid && s.wid !== "fists"; }).length;
       const hurt = g.men.filter(function (s) { return s.wounded; }).length;
       // army.js's stacks already carry the gun and armour; the fallback's do not
@@ -438,17 +450,16 @@
       '<p class="wl-sub">WHO CARRIES WHAT</p>';
     h += powerStrip();
     h += reportCard();
-    h += '<div class="wl-lbl">DO IT IN BULK</div><div class="wl-card">' +
-      '<div class="wl-btns" style="margin-top:0">' +
-        '<button class="wl-btn hot" id="laAuto">AUTO-ARM ALL</button>' +
+    /* ONE BUTTON, THE SIZE OF THE DECISION. The other three are the same
+       size as each other and smaller than it, because they are the ones a
+       player reaches for after they already know what AUTO-ARM does. */
+    h += '<button class="wl-btn hot wl-la-big" id="laAuto">AUTO-ARM EVERYONE</button>' +
+      '<div class="wl-small wl-dim wl-la-cap">the cart and their hands, best gun to best man</div>' +
+      '<div class="wl-btns wl-la-minor">' +
         '<button class="wl-btn" id="laTop">ARM BEST 20</button>' +
         '<button class="wl-btn" id="laArmour">ARMOUR FRONT</button>' +
         '<button class="wl-btn bad" id="laStrip">STRIP LEVIES</button>' +
-      '</div>' +
-      '<div class="wl-small wl-dim" style="margin-top:10px">' +
-        'AUTO-ARM takes every gun back — the cart AND the ones your men are holding — and deals ' +
-        'the whole pile out best-to-best. It is the largest army strength these guns can produce.' +
-      '</div></div>';
+      '</div>';
     h += youCard();
     h += rosterCard();
     h += '<div class="wl-btns" style="margin-top:20px">' +
@@ -476,6 +487,7 @@
       if (t.id === "laArmour") { armourFront(); draw(); return; }
       if (t.id === "laStrip") { stripTier("levy"); draw(); return; }
       if (t.id === "laBack") { close(); return; }
+      if (t.id === "laRoster") { SHOW_ROSTER = !SHOW_ROSTER; PICK = null; draw(); return; }
       if (t.id === "laShop") { if (W.outpost && W.outpost.open) W.outpost.open(W.outpost.current()); return; }
       if (t.hasAttribute("data-tier")) {
         const tr = t.getAttribute("data-tier");
@@ -503,12 +515,15 @@
   function open(opts) {
     opts = opts || {};
     BACK = opts.back || null;
-    LAST = null; PICK = null;
-    if (OPEN_TIER == null) {
-      // open the tier you actually came here for: the best men you own
-      const gs = groups();
-      OPEN_TIER = gs.length ? keyOf(gs[0]) : null;
-    }
+    PICK = null;
+    /* THE REPORT SURVIVES A REDRAW, and is cleared when you LEAVE the screen
+       (below) rather than when you enter it. Clearing on entry meant
+       autoArm() followed by open() — which is what the debug hook and the
+       photography preset both do — painted the screen with no explanation of
+       what had just happened to 27 men. */
+    // the roster stays shut on entry; when it is opened, the strongest stack
+    // is the one that opens with it — that is the one the question is about.
+    OPEN_TIER = null;
     W.setPhase("armoury");
     draw();
     W.emit("armoury:open");
@@ -522,7 +537,7 @@
     else { W.setPhase("menu"); W.emit("mainmenu"); }
   }
 
-  W.on("phase:leave:armoury", function () { PICK = null; });
+  W.on("phase:leave:armoury", function () { PICK = null; LAST = null; });
 
   /* ============================================================ DEMO FIXTURE
      ?armoury=1 and the before/after tool both need a warband that exists
@@ -569,10 +584,8 @@
             W.newGame({ seed: parseInt(Q.get("seed") || "", 10) || 1337 });
           }
           demo();
+          if (Q.get("auto") === "1") autoArm();
           open();
-          // open() clears the last report on purpose; the ?auto=1 hook wants
-          // the report ON SCREEN, so it runs after and repaints.
-          if (Q.get("auto") === "1") { autoArm(); draw(); }
         }, 0);
       }
     },

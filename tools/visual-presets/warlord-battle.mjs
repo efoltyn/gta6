@@ -21,19 +21,27 @@
    condition all at once and leaves battle.html's behaviour exactly. Every pixel
    and every number of difference is that flag.
 
-   IT IS A STUDIO, NOT A GALLERY. The page boots, battle.js's freeze() stops the
-   rAF clock, and advance() is the only time that passes — the same injected-dt
-   seam a person's frame-step key would use, so both builds photograph the
-   IDENTICAL simulated seconds rather than whatever a software rasteriser
-   happened to render. Subjects run in declaration order inside one page per
-   side, so they are a storyboard of one battle and not five battles.
+   IT IS A STUDIO, NOT A GALLERY. The page boots ?frozen=1 — battle.js begins
+   with its clock STOPPED, which matters more than it sounds: a tool cannot
+   freeze a battle before the battle exists, so on the first run of this preset
+   an unknown number of real frames had already elapsed by the time the stage
+   function got its hands on the page, and one side had taken a casualty at the
+   beat the other was still at full strength. Frozen from birth, both builds
+   start at simulated second zero and every second after that is one somebody
+   asked for. advance() is the only time that passes, through the same
+   injected-dt seam a person's frame-step key would use.
+
+   Subjects run in declaration order inside one page per side, so they are a
+   STORYBOARD of one battle rather than five battles — and the order they are
+   in is a commander's order, not a list: hold and trade, turn the wing, then
+   charge the thing you have already broken.
 
    WHAT EACH PICTURE HAS TO SHOW, because a metric can only check what somebody
    already thought to declare:
      lines-closing  two ranked lines walking at each other across real dunes
+     flank-wing     a wing genuinely swung wide, not a second frontal line
      charge-lands   the CHARGE order arriving — first person, from inside the
                     line, the warlord's own rifle in frame
-     flank-wing     a wing genuinely swung wide, not a second frontal line
      the-rout       men running for the map edge. THIS is the subject the flag
                     exists for: with morale off there is nothing to photograph
                     here but two lines still grinding.
@@ -42,20 +50,20 @@
 
 const subjects = [
   { id: "lines-closing", label: "The two lines close",
-    focus: "THE OPENING. Two ranked columns of real soldier objects — every man carrying the wid and armour his roster row says — walking at each other across the piece of the island the encounter happened on. Identical on both sides by construction: morale has nothing to do until somebody dies. If these two frames are not the same picture, the A/B is not controlled and nothing after it means anything.",
-    at: 11, cam: { mode: "cmd", dist: 74, pitch: 0.30, yaw: 1.55 } },
-
-  { id: "charge-lands", label: "CHARGE, from inside the line",
-    focus: "THE ORDER LANDING, photographed from where the brief says you should be: in it. CHARGE does not call combat_iq's posture() at all — posture exists to hold a weapon's preferred distance, which is precisely what a charge refuses to do — so the goal becomes the enemy himself and the slot becomes 'push'. Look for the line breaking into a run and the warlord's own rifle in the corner of the frame. The counters move together: charging costs YOU men too.",
-    at: 20, order: "charge", cam: { mode: "fps" } },
+    focus: "THE OPENING. Two ranked columns of real soldier objects — every man carrying the wid and armour his roster row says — walking at each other across the piece of the island the encounter happened on. Identical on both sides by construction: morale has nothing to do until somebody dies, and the page boots ?frozen=1 so both builds genuinely start at simulated second zero. If these two frames are not the same picture, the A/B is not controlled and nothing after it means anything.",
+    at: 12, cam: { mode: "cmd", pitch: 0.26, yaw: 1.55 } },
 
   { id: "flank-wing", label: "FLANK — the wing swings wide",
-    focus: "FLANK sends men out of contact to an anchor 90 degrees off the fight axis, on the side of the enemy mass with fewer of them in it, and hands them back to combat_iq the moment they arrive — so the gunfight on the wing is still the engine's, only the WALK is the order's. The wing has to read as a wing: a limb reaching around the enemy mass, not a second frontal rank.",
-    at: 34, order: "flank", cam: { mode: "cmd", dist: 96, pitch: 0.42, yaw: 1.55 } },
+    focus: "THE FIRST REAL DECISION. FLANK sends men who are out of contact to an anchor 90 degrees off the fight axis, on the side of the enemy mass with fewer of them in it, and hands them straight back to combat_iq the moment they arrive — so the gunfight on the wing is still the engine's, and only the WALK is the order's. The wing has to read as a wing: a limb reaching around the enemy mass, not a second frontal rank.",
+    at: 28, order: "flank", cam: { mode: "cmd", pitch: 0.34, yaw: 1.55 } },
+
+  { id: "charge-lands", label: "CHARGE, from inside the line",
+    focus: "THE ORDER THAT FINISHES IT, photographed from where the brief says you should be: in it. CHARGE does not call combat_iq's posture() at all — posture exists to hold a weapon's preferred distance, which is precisely what a charge refuses to do — so the goal becomes the enemy himself and the slot becomes 'push'. Look for the line breaking into a run and the warlord's own rifle, the same actorweapons model every NPC carries, in the corner of the frame. The counters move together: charging costs YOU men too.",
+    at: 42, order: "charge", cam: { mode: "fps" } },
 
   { id: "the-rout", label: "The line breaks",
-    focus: "THE WHOLE POINT OF THE FLAG. AFTER: a third of an army is gone — power-weighted, so its veterans count for more than its levies — morale falls under the men's own nerve rows and the levies break first, running for their own map edge while the veterans hold. BEFORE (?morale=old): nobody can break, so the same simulated second is two intact lines still trading. If both frames look the same, the mechanic is not doing anything.",
-    at: 52, cam: { mode: "cmd", dist: 118, pitch: 0.46, yaw: 1.55 } },
+    focus: "THE WHOLE POINT OF THE FLAG. AFTER: a third of an army is gone — power-weighted, so its veterans count for more than its levies — morale falls under the men's own nerve rows and the levies break first, running for their own map edge while the veterans hold. BEFORE (?morale=old): nobody CAN break, so the same simulated second is two intact lines still grinding. If both frames look the same, the mechanic is not doing anything.",
+    at: 58, cam: { mode: "cmd", pitch: 0.40, yaw: 1.55 } },
 
   { id: "aftermath", label: "The dead, by name",
     focus: "THE PAYOFF SCREEN, which is the reason core.js gives every man a name. Your dead listed individually, the wounded who fight at 60% until they rest, promotions, the guns stripped off every body on the field with what they are worth, and the enemy survivors as PRISONERS to conscript, ransom, release or execute. The before side reaches this screen too — later, bloodier, and with fewer prisoners, because an army that cannot break has to be killed to the last man instead of captured standing on the field.",
@@ -154,6 +162,7 @@ async function stageWarlordBattle(input) {
   const cam = subject.cam || { mode: "cmd" };
   B.camera(cam.mode);
   if (cam.mode === "cmd") {
+    // no dist => battle.js sizes the range off the two masses' own separation
     B.look({ dist: cam.dist, pitch: cam.pitch, yaw: cam.yaw });
   }
   // one framing pass, then draw — the caller must not have to advance the
@@ -167,12 +176,14 @@ export default {
   title: "Desert Warlord: The Battle You Command, and the Army That Breaks",
   description:
     "Both sides are this checkout on the same seed with the same men on the same sand; the before side boots ?morale=old, battle.js's own one-line revert of the morale/rout layer, which leaves games/battle.html's fight-to-the-last-man behaviour exactly. The rAF clock is frozen and battle.js's advance() is the only time that passes, so both builds photograph the identical simulated seconds.",
+  // the game is a standalone page under games/, not the build's index.html
+  page: "games/warlord.html",
   defaultBefore: "local",
   beforeParams: { morale: "old" },
   beforeLabel: "BEFORE · MORALE OFF (fight to the last man)",
   afterLabel: "AFTER · MORALE AND ROUT",
   viewport: { width: 1180, height: 700 },
-  urlParams: { battle: 1, mine: 34, them: 34, seed: 1337, gun: "ak47", faction: "militia" },
+  urlParams: { battle: 1, frozen: 1, mine: 34, them: 34, seed: 1337, gun: "ak47", faction: "militia" },
   readyExpression: "!!(window.CBZ && window.CBZ.warlord)",
   // the first subject pays the whole studio boot under a software rasteriser
   stageTimeoutMs: 600000,
@@ -187,17 +198,17 @@ export default {
     enemyAlive: { label: "Enemy standing", unit: "men" },
     yourDead: { label: "Your dead", unit: "men", better: "lower" },
     enemyDead: { label: "Enemy dead", unit: "men" },
-    moraleMine: { label: "Your morale", unit: "0-1", better: "higher" },
+    moraleMine: { label: "Your morale", unit: "0-1" },
     moraleThem: { label: "Enemy morale", unit: "0-1" },
-    routing: { label: "Men running", unit: "men" },
+    routing: { label: "Men running", unit: "men", better: "higher" },
     fled: { label: "Men off the field", unit: "men" },
-    corpsesSolved: { label: "Corpses on the ragdoll solver", unit: "bodies", better: "higher" },
-    relief: { label: "Ground relief across the field", unit: "m", better: "higher" },
+    corpsesSolved: { label: "Corpses on the ragdoll solver", unit: "bodies" },
+    relief: { label: "Ground relief across the field", unit: "m" },
     fps: { label: "Frame rate", unit: "fps", better: "higher" },
     battleEndT: { label: "Length of the whole battle", unit: "s", better: "lower" },
     prisoners: { label: "Prisoners taken", unit: "men", better: "higher" },
     armyAfter: { label: "Your army after", unit: "men", better: "higher" },
-    lootGuns: { label: "Guns in the cart after", unit: "guns", better: "higher" },
+    lootGuns: { label: "Guns in the cart after", unit: "guns" },
   },
   subjects,
   stage: stageWarlordBattle,

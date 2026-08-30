@@ -415,20 +415,22 @@
     }
   }
 
+  /* THE ONE NUMBER THAT DECIDES A PURCHASE, first. The first draft printed
+     DMG · RATE · RANGE · MAG and left the player doing the arithmetic in his
+     head to compare two rows — a spreadsheet, which is the thing this game is
+     explicitly not. So the row LEADS with what the gun is worth in a fight,
+     and that is not a rating this file invented: it is W.gunCombat, the exact
+     term core's soldierPower multiplies a man by. Two numbers off the weapon
+     record follow it, so the rating always has its provenance next to it. */
   function statLine(id) {
     const w = W.gun(id);
-    if (!w) return "no record";
-    const rate = 1 / Math.max(0.03, w.fireDelay || w.interval || 0.5);
-    const dmg = w.explosive ? Math.round(85 * (w.blastPower || 1.4)) : (w.damage || 0);
-    const parts = [
-      (w.explosive ? "BLAST " : "DMG ") + dmg + (w.pellets > 1 ? "×" + w.pellets : ""),
-      rate.toFixed(1).replace(/\.0$/, "") + "/S",
-      (w.range || 0) + "M",
-      "MAG " + (w.magSize || w.mag || 1),
-    ];
-    if (w.explosive) parts.push("R" + (w.blastRadius || 7) + "M");
-    if (w.nonlethal) parts.push("NON-LETHAL");
-    return parts.join("  ·  ");
+    if (!w) return "bare hands";
+    const fight = W.gunCombat ? W.gunCombat(id) : 1;
+    const hit = w.explosive
+      ? "BLAST R" + (w.blastRadius || w.blast || 10) + "M"
+      : "DMG " + (w.damage || 0) + (w.pellets > 1 ? "×" + w.pellets : "");
+    return "×" + fight.toFixed(2) + " IN A FIGHT  ·  " + hit + "  ·  " + (w.range || 0) + "M" +
+      (w.nonlethal ? "  ·  NON-LETHAL" : "");
   }
 
   function cartCount() {
@@ -461,9 +463,8 @@
     const K = KINDS[o.kind] || KINDS.depot;
     let h = head(o);
     h += '<div class="wl-card"><div class="wl-op-note">' + K.blurb +
-      '<br>Guns you buy go into the <b>baggage train</b>, not into a man\'s hands — ' +
-      'hand them out in the <b>ARMOURY</b>. Carrying ' + cartCount() + ' loose guns.' +
-      '</div></div>';
+      ' Guns go to the <b>baggage train</b> — hand them out in the <b>ARMOURY</b>. ' +
+      'Carrying ' + cartCount() + '.</div></div>';
 
     h += '<div class="wl-op-tabs">' +
       '<button class="wl-btn' + (TAB === "buy" ? " on" : "") + '" data-tab="buy">BUY</button>' +
@@ -545,10 +546,8 @@
     const S = W.state;
     let h = head(o);
     h += '<div class="wl-card"><div class="wl-op-note">' + KINDS.camp.blurb +
-      '<br>Hiring drains the pool — more men walk in each morning. Every man you take on ' +
-      'costs his wage <b>every dawn</b>: you are paying <b>$' + W.payroll() + '/day</b> for ' +
-      (S.army.length) + ' men right now.' +
-      '</div></div>';
+      ' Hiring drains the pool; more walk in each morning. Every man costs his wage ' +
+      'every dawn — you pay <b>$' + W.payroll() + '/day</b> for ' + S.army.length + '.</div></div>';
     h += '<div class="wl-lbl">MEN AVAILABLE</div><div class="wl-card">';
     let any = false;
     for (let i = 0; i < W.TIERS.length; i++) {
@@ -582,9 +581,8 @@
     const cost = restCost();
     let h = head(o);
     h += '<div class="wl-card"><div class="wl-op-note">' + KINDS.well.blurb +
-      '<br>A wounded man fights at <b>62%</b> until he rests. Resting costs a day — ' +
-      'and a day costs you <b>$' + W.payroll() + '</b> in wages, on top of the water.' +
-      '</div></div>';
+      ' A wounded man fights at <b>62%</b> until he rests, and resting costs a day — ' +
+      'so it also costs <b>$' + W.payroll() + '</b> in wages.</div></div>';
     h += '<div class="wl-lbl">THE HURT</div><div class="wl-card">';
     if (!hurt.length) h += '<div class="wl-op-note">nobody here is hurt. drink and ride on.</div>';
     else {

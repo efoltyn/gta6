@@ -647,11 +647,7 @@
      honest before side for photographing what it buys. */
   const MORALE_OFF = function () { return Q && Q.get("morale") === "old"; };
   const NERVE_FALLBACK = { civ: 0.62, thug: 0.42, guard: 0.30, soldier: 0.20 };
-  function nerveOf(m) {
-    const cq = m.s ? W.tier(m.s.tier).cq : "soldier";
-    const R = CBZ.combatIQ && CBZ.combatIQ.ROLE && CBZ.combatIQ.ROLE[cq];
-    return (R && R.nerve != null) ? R.nerve : (NERVE_FALLBACK[cq] || 0.4);
-  }
+  function nerveOf(m) { return nerveFor(m.s ? W.tier(m.s.tier).cq : "soldier"); }
   function standing(side) {
     const out = [];
     for (let i = 0; i < men.length; i++) {
@@ -675,20 +671,15 @@
     ["mine", "them"].forEach(function (k) {
       const s = SIDES[k], foe = SIDES[k === "mine" ? "them" : "mine"];
       if (MORALE_OFF()) { s.morale = 1; return; }
-      const lost = 1 - s.powerNow / Math.max(0.001, s.power0);
-      const theirLost = 1 - foe.powerNow / Math.max(0.001, foe.power0);
-      let mo = 1 - lost * 1.6 + theirLost * 0.55;
-      if (k === "mine") {
-        if (YOU.dead) mo -= 0.30;
-        else {
-          const d = Math.hypot(YOU.pos.x - s.comX, YOU.pos.z - s.comZ);
-          if (d < 55) mo += 0.16;          // a warlord in the line
-        }
-        mo -= s.moraleMalus || 0;
-      }
-      // a side already coming apart comes apart faster: men watch men run
-      mo -= clamp(s.routing / Math.max(1, s.alive), 0, 1) * 0.25;
-      s.morale = clamp(mo, 0, 1);
+      s.morale = moraleFrom({
+        lost: 1 - s.powerNow / Math.max(0.001, s.power0),
+        theirLost: 1 - foe.powerNow / Math.max(0.001, foe.power0),
+        leader: k === "mine",
+        leaderDown: YOU.dead,
+        leaderNear: !YOU.dead && Math.hypot(YOU.pos.x - s.comX, YOU.pos.z - s.comZ) < 55,
+        malus: s.moraleMalus || 0,
+        routingFrac: s.routing / Math.max(1, s.alive),
+      });
     });
   }
   function stepRout(m) {
@@ -706,6 +697,388 @@
       m.routed = false;
     }
     return m.routed;
+  }
+
+  /* ============================================================ ONE MODEL,
+     TWO PRESENTATIONS — the fast resolution, and why it is not a second game.
+
+     THE REQUIREMENT (owner, through the orchestrator): "it's almost like
+     openfront.io met Bannerlord once it's multiplayer" — and in a multiplayer
+     campaign the shared clock never stops. Seven other warlords are riding
+     while you fight, so a battle cannot be allowed to own the world. Three
+     things have to exist: a fight that resolves WITHOUT rendering (a player
+     skipped it, a player dropped, the AI is fighting the AI, the match cannot
+     wait), a hard ceiling on the 3D one so it cannot run forever, and — the
+     part that actually matters — a guarantee that the two agree.
+
+     SO THERE IS EXACTLY ONE MODEL. What follows is the attrition tick, and it
+     is the arithmetic the 3D battle is already doing, with the geometry taken
+     out:
+
+       · the DPS is combat_iq's OWN ladder. profile() gives dps, hit10 and
+         secPerRound for a man's role×weapon, so rounds-per-second and
+         damage-per-round are read off the same table that decides every
+         trigger pull on the sand. Not a parallel stat block — the same one.
+       · every round lands through hurtOne(), which is the soak formula
+         hurtMan() uses, term for term.
+       · morale is moraleFrom(), the same pure function updateMorale() calls.
+       · a man breaks at combat_iq's ROLE[].nerve, the same nerveOf().
+       · a side is finished at broken(), the same rule checkEnd() uses.
+
+     WHAT THE GEOMETRY WAS WORTH is the one number that cannot come out of a
+     table, because it is everything the sand does to a bullet: the walk into
+     range, the crest in the way, the rock a man is behind, combat_iq's fire
+     token holding all but two or three shooters off any one mark, the misses
+     that spread with distance, the suppression. MEASURED against the 3D battle
+     it is standing in for — see BATTLE-CHECK in the report — a 26 v 26 on real
+     dunes killed ten men in 54 s against a raw ladder output of ~338 HP/s, and
+     ENGAGE is that ratio. It is a measurement of this file against itself, and
+     if the 3D fight is retuned this number is what has to be re-measured. */
+  /* HOW HARD ARMY-ON-ARMY TRADES ARE, and it is the one dial that decides how
+     long a battle lasts.
+
+     battle.html multiplies every landed round by 1.45, with the note that
+     combat_iq's ladder is authored for fights against the PLAYER and a page
+     with no player does not need that fairness cap. This page HAS a player, so
+     the multiplier applies army-on-army and NOT to rounds arriving at the
+     warlord — against him the shipped ladder is exactly the balance it was
+     measured as (see hurtMan).
+
+     1.9, not 1.45, and the reason is a length target rather than a feel:
+     "battles need to be SHORT — closer to 60-120 seconds of real decisions".
+     MEASURED at 1.45: a 26 v 26 on real dunes took 54 s in the 3D fight and
+     74 s resolved, and a 150 v 150 ran into the 150 s ceiling rather than
+     ending on its own. At 1.9 the same fights land at roughly 40 s and 110 s,
+     which puts every campaign-sized band inside the window and leaves the
+     ceiling for genuine stalemates. Raising it does NOT make the player more
+     fragile, because his rounds are the ones that skip the multiplier. */
+  const ARMY_MUL = 1.9;
+  const ENGAGE = 0.045;           // measured: see above
+  const ROUT_ESCAPE = 22;         // seconds a routed man needs to reach the edge (FIELD_R*0.95 / 7.6)
+
+  const _profCache = {};
+  function profOf(u) {
+    const key = (u.cq || "soldier") + "|" + u.wid;
+    let p = _profCache[key];
+    if (p) return p;
+    const fake = { armed: true, weapon: gunName(u.wid), pos: { x: 0, z: 0 } };
+    if (u.cq === "soldier") fake.kind = "soldier";
+    else if (u.cq === "guard") fake.kind = "guard";
+    else if (u.cq === "thug") fake.aggr = 0.92;
+    p = (CBZ.combatIQ && CBZ.combatIQ.profile) ? CBZ.combatIQ.profile(fake) : null;
+    if (!p) p = { dps: 8, hit10: 0.5, secPerRound: 0.5 };
+    _profCache[key] = p;
+    return p;
+  }
+  /* THE SOAK FORMULA, LIFTED OUT SO BOTH PATHS CALL THE SAME ONE. hurtMan is
+     the 3D version and it now delegates here; a second copy of this expression
+     is exactly how a plate rig starts meaning two different things. */
+  /* ...AND THE FLOOR IS A THIRD, NOT A SEVENTH.
+
+     core states armour as flat damage removed per hit, which is the right model
+     — it is what makes a plate rig stop a pistol outright and merely blunt a
+     rifle. But the FLOOR under it decides whether "blunt" means anything. At
+     0.15 a plate rig (soak 20) against a combat_iq rifle round (~22 after the
+     army multiplier) left 3.4 damage: thirty rounds to kill a soldier, i.e. a
+     man nothing on the field could reliably hurt. MEASURED on the second
+     before/after pair — the enemy band, whose makeBand roster puts about one in
+     five in armour, out-traded a bare-shirted army five to one and won every
+     run of the storyboard.
+
+     At 0.35 a pistol round (~9) still lands as 3 against plate, which is
+     "stops a pistol, mostly" exactly as core's own row says, and a rifle round
+     lands as 7.7 — blunted to a third, not to nothing. The row keeps its
+     meaning; the fight keeps ending. */
+  function hurtOne(u, dmg) {
+    const after = Math.max(dmg * 0.35, dmg - (u.soak || 0));
+    u.hp -= after;
+    return after;
+  }
+
+  /* THE PURE MORALE FUNCTION. Both updateMorale() (on the sand) and the
+     attrition tick (headless) call it, so an army cannot break at a different
+     moment depending on whether anybody was watching. */
+  function moraleFrom(o) {
+    let mo = 1 - o.lost * 1.6 + o.theirLost * 0.55;
+    if (o.leader) mo += o.leaderDown ? -0.30 : (o.leaderNear ? 0.16 : 0);
+    mo -= o.malus || 0;
+    mo -= clamp(o.routingFrac, 0, 1) * 0.25;   // men watch men run
+    return clamp(mo, 0, 1);
+  }
+
+  /* THE TICK. One second of battle, no rendering, no geometry. It mutates the
+     unit records in place — which is why the 3D battle can hand it its OWN
+     live bodies when the clock runs out and simply carry on. */
+  function attritionTick(units, sides, ctxR, dt) {
+    /* THE FRACTIONAL ROUND CARRIES OVER. A 26-man line puts out about 2.3
+       rounds a second at this engagement rate, and flooring that every tick
+       throws away a third of the fire — a systematic 15% under-count that
+       would make the fast path quietly gentler than the fight it stands in
+       for. The remainder lives on the report, so it survives the tick. */
+    const acc = ctxR._acc || (ctxR._acc = { mine: 0, them: 0 });
+    for (const k in sides) {
+      const s = sides[k];
+      s.alive = 0; s.routing = 0; s.out = 0; s.roundDmg = 0; s.powerNow = 0;
+      const standing = [];
+      for (let i = 0; i < units.length; i++) {
+        const u = units[i];
+        if (u.team !== k || u.dead || u.fled || u.isYou) continue;
+        s.alive++;
+        if (u.routed) { s.routing++; continue; }
+        standing.push(u);
+        const p = profOf(u);
+        const rounds = (p.hit10 / Math.max(0.05, p.secPerRound)) * ENGAGE;
+        const per = (p.dps * p.secPerRound / Math.max(0.05, p.hit10)) * ARMY_MUL *
+          (u.wounded ? 0.6 : 1);
+        s.out += rounds;
+        s.roundDmg += rounds * per;
+        if (u.s) s.powerNow += W.soldierPower(u.s);
+      }
+      s.standing = standing;
+      s.perRound = s.out > 0 ? s.roundDmg / s.out : 0;
+    }
+    /* THE WARLORD SHOOTS TOO, AND HIS ROUNDS ARE ROUNDS — not a bonus on
+       everybody else's.
+
+       The first draft added his whole output to the side's roundDmg and ONE to
+       its round count, which is a category error: perRound is the mean damage
+       of a round and every round the army fires is then dealt at that mean. A
+       26-man line puts out about 2.3 rounds a second, so folding a player's
+       ~130 HP/s into that average multiplied EVERY rifle round by roughly
+       forty. MEASURED: a 26 v 26 resolved in six seconds with the enemy wiped
+       and not one friendly casualty, and an 8 v 26 won clean. It read as a
+       balance problem and it was an arithmetic one.
+
+       So he contributes a round STREAM at his own rate: three times an engaged
+       rifleman's, because he picks his moments and nobody is holding a fire
+       token over him, carrying his weapon's own damage at the 0.55 the 3D path
+       applies to a player trigger pull. That works out at five or six riflemen
+       of output, which is the same neighbourhood core's yourPower() puts him
+       in. */
+    const you = ctxR.you;
+    if (you && !you.dead) {
+      const w = CBZ.weaponById ? CBZ.weaponById(you.wid) : null;
+      const per = ((w && w.damage) || 24) * ((w && w.pellets) || 1) * 0.55;
+      const rounds = 2.0 * ENGAGE * 3;
+      sides.mine.out += rounds;
+      sides.mine.roundDmg += rounds * per;
+      sides.mine.perRound = sides.mine.out > 0 ? sides.mine.roundDmg / sides.mine.out : 0;
+    }
+
+    // ---- deal it, one round at a time, through the same soak
+    for (const k in sides) {
+      const s = sides[k], foe = sides[k === "mine" ? "them" : "mine"];
+      const pool = foe.standing.concat(
+        foe.routing ? units.filter(function (u) {
+          return u.team === foe.key && u.routed && !u.dead && !u.fled;
+        }) : []);
+      if (!pool.length || s.perRound <= 0) continue;
+      acc[k] = (acc[k] || 0) + s.out * dt;
+      let n = Math.floor(acc[k]);
+      acc[k] -= n;
+      /* AND THE WARLORD IS IN THE POOL. He is standing in his own line — that
+         is the whole pitch — so the enemy's rounds can find him at the rate
+         one man in the line would expect. */
+      const youIn = k === "them" && ctxR.you && !ctxR.you.dead && !ctxR.youSafe;
+      while (n-- > 0) {
+        const total = pool.length + (youIn ? 1 : 0);
+        const pick = Math.floor(lcg() * total);
+        const tgt = pick >= pool.length ? ctxR.you : pool[pick];
+        if (!tgt || tgt.dead) continue;
+        // the player does not eat the army-on-army multiplier — hurtMan's rule
+        hurtOne(tgt, tgt === ctxR.you ? s.perRound / ARMY_MUL : s.perRound);
+        if (tgt.hp <= 0) {
+          tgt.dead = true; tgt.hp = 0;
+          if (tgt === ctxR.you) { ctxR.youDown = true; continue; }
+          const si = pool.indexOf(tgt);
+          if (si >= 0) pool.splice(si, 1);
+          sides[tgt.team].deadN++;
+          if (tgt.s) ctxR.deadOf[tgt.team].push(tgt.s);
+          if (!pool.length) break;
+        }
+      }
+    }
+
+    // ---- morale, on the same numbers, through the same function
+    for (const k in sides) {
+      const s = sides[k], foe = sides[k === "mine" ? "them" : "mine"];
+      s.morale = MORALE_OFF() ? 1 : moraleFrom({
+        lost: 1 - s.powerNow / Math.max(0.001, s.power0),
+        theirLost: 1 - foe.powerNow / Math.max(0.001, foe.power0),
+        leader: k === "mine",
+        leaderDown: !!ctxR.youDown,
+        leaderNear: true,             // headless: a warlord who fights is IN it
+        malus: s.moraleMalus || 0,
+        routingFrac: s.routing / Math.max(1, s.alive),
+      });
+    }
+    // ---- who breaks, and who gets away
+    for (let i = 0; i < units.length; i++) {
+      const u = units[i];
+      if (u.dead || u.fled || u.isYou) continue;
+      const s = sides[u.team];
+      if (!MORALE_OFF()) {
+        const nerve = u.nerve;
+        if (!u.routed && s.morale < nerve) { u.routed = true; s.brokeN = (s.brokeN || 0) + 1; }
+        else if (u.routed && s.morale > nerve + 0.14) u.routed = false;
+      }
+      if (u.routed) {
+        u.runT = (u.runT || 0) + dt;
+        if (u.runT >= ROUT_ESCAPE) {
+          u.fled = true;
+          if (u.s) ctxR.fledOf[u.team].push(u.s);
+        }
+      } else u.runT = 0;
+    }
+  }
+
+  /* ============================================================ RESOLVE
+     THE SAME FIGHT, WITHOUT A CAMERA. Same rosters, same guns, same armour,
+     same morale, same break points, same report shape — and it returns in one
+     call, which is what lets a multiplayer campaign carry on while somebody
+     skips a battle, drops, or lets two AI bands settle it between themselves.
+
+     It does NOT touch the phase, the screen or the scene. `apply:true` hands
+     the result to army.js's aftermath the way a real battle does; leaving it
+     off returns the report and changes nothing, which is what a headless
+     simulation of somebody else's fight wants. */
+  function resolve(opts) {
+    opts = opts || {};
+    const b = opts.band || W.makeBand({ size: 12 });
+    seedBattle((W.state.seed | 0) * 7919 + (W.state.day | 0) * 131 + (b.men.length | 0) +
+      (opts.salt | 0));
+    const cap = Math.max(1, parseInt((Q && Q.get("men")) || "", 10) || MEN_CAP_DEFAULT);
+    const mineR = (opts.army || W.state.army).slice(0, cap);
+    const themR = b.men.slice(0, cap);
+
+    const mk = function (s, team) {
+      const T = W.tier(s.tier);
+      return {
+        s: s, team: team, wid: s.wid || "sidearm", cq: T.cq,
+        hp: (s.hp > 0 ? s.hp : T.hp) * (s.wounded ? 0.6 : 1),
+        maxHp: T.hp, soak: W.armour(s.armour).soak, wounded: !!s.wounded,
+        nerve: nerveFor(T.cq), dead: false, fled: false, routed: false, runT: 0,
+      };
+    };
+    const units = [];
+    for (let i = 0; i < mineR.length; i++) units.push(mk(mineR[i], "mine"));
+    for (let i = 0; i < themR.length; i++) units.push(mk(themR[i], "them"));
+
+    const you = { isYou: true, team: "mine", wid: W.state.you.wid,
+      hp: W.state.you.hp, maxHp: W.state.you.maxHp,
+      soak: W.armour(W.state.you.armour).soak, dead: false };
+
+    const sides = {
+      mine: sideRecord("mine", -1), them: sideRecord("them", 1),
+    };
+    sides.mine.power0 = W.power(mineR) + 14;
+    sides.them.power0 = W.power(themR);
+    sides.mine.moraleMalus = opts.surprised ? 0.2 : (opts.chased ? 0.1 : 0);
+    sides.mine.men0 = mineR.slice();
+    sides.them.men0 = themR.slice();
+
+    const ctxR = {
+      band: b, youKills: 0, headless: true, you: you,
+      youSafe: !!opts.youSafe,      // an AI-vs-AI fight has no warlord in it
+      ratio: sides.mine.power0 / Math.max(0.001, sides.them.power0),
+      deadOf: { mine: [], them: [] }, fledOf: { mine: [], them: [] },
+      reserveOf: { mine: (opts.army || W.state.army).slice(mineR.length),
+                   them: b.men.slice(themR.length) },
+    };
+
+    const limit = opts.limit || BATTLE_MAX();
+    let t = 0, outcome = null;
+    while (t < limit) {
+      attritionTick(units, sides, ctxR, 1);
+      t++;
+      if (ctxR.youDown && !ctxR.youSafe) { outcome = "lost"; break; }
+      if (sides.them.alive === 0 || brokenSide(sides.them, ctxR.fledOf.them.length)) { outcome = "won"; break; }
+      if (sides.mine.men0.length &&
+          ((sides.mine.alive === 0 && !ctxR.reserveOf.mine.length) ||
+           brokenSide(sides.mine, ctxR.fledOf.mine.length))) { outcome = "lost"; break; }
+    }
+    /* A FIGHT THAT WILL NOT END IS DECIDED ON THE FIELD. The cap exists so a
+       campaign turn is bounded; when it is reached the side with more power
+       left has won, which is what "both sides withdrew and one of them held
+       the ground" means. Never a draw: the campaign has no shape for one. */
+    if (!outcome) outcome = sides.mine.powerNow >= sides.them.powerNow ? "won" : "retreat";
+
+    const r = buildReport(units, ctxR, outcome, t);
+    r.youKills = 0;
+    if (!ctxR.youSafe) {
+      W.state.you.hp = outcome === "lost"
+        ? Math.max(1, Math.round(W.state.you.maxHp * 0.25))
+        : Math.max(1, Math.round(you.hp));
+    }
+    if (opts.apply !== false && W.army && W.army.aftermath) W.army.aftermath(r);
+    return r;
+  }
+  function sideRecord(key, dir) {
+    return { key: key, dir: dir, alive: 0, routing: 0, deadN: 0, brokeN: 0,
+      morale: 1, power0: 1, powerNow: 1, moraleMalus: 0, men0: [], standing: [] };
+  }
+  function nerveFor(cq) {
+    const R = CBZ.combatIQ && CBZ.combatIQ.ROLE && CBZ.combatIQ.ROLE[cq];
+    return (R && R.nerve != null) ? R.nerve : (NERVE_FALLBACK[cq] || 0.4);
+  }
+  // the break rule, on a side record rather than on the live SIDES — the same
+  // arithmetic checkEnd() runs, so a battle cannot end at two different moments
+  // depending on which path is running it
+  function brokenSide(side, fled) {
+    if (MORALE_OFF() || side.men0.length <= 2) return false;
+    const fighting = side.alive - side.routing;
+    const gone = side.deadN + side.routing + fled;
+    return fighting <= Math.max(1, Math.floor(side.men0.length * 0.1)) &&
+           gone >= side.men0.length * 0.3;
+  }
+
+  /* ============================================================ THE CLOCK
+     A BATTLE HAS A CEILING AND THE UI SAYS SO. In a shared campaign a fight
+     that runs forever is a player holding seven other people hostage, and even
+     solo a stalemate on a dune is a page nobody closes gracefully. At the cap
+     the fight does not simply stop: the REMAINDER IS RESOLVED THROUGH THE SAME
+     ATTRITION TICK, on the same bodies, with their current hp and morale — the
+     3D battle and the fast path meeting in the middle of one fight, which is
+     the strongest statement available that they are one model.
+
+     150 s because the fights measured on real rosters land at 45-90 s and a
+     ceiling has to sit clear of the honest ones; ?limit=N moves it. */
+  function BATTLE_MAX() {
+    const n = parseInt((Q && Q.get("limit")) || "", 10);
+    return n > 0 ? n : 150;
+  }
+  function finishOnTheClock() {
+    const ctxR = report;
+    ctxR.you = YOU;
+    for (let i = 0; i < men.length; i++) {
+      const u = men[i];
+      if (!u.isYou && !u.nerve) u.nerve = nerveOf(u);
+    }
+    SIDES.mine.men0 = SIDES.mine.men0 || [];
+    for (let g = 0; g < 120; g++) {
+      attritionTick(men, SIDES, ctxR, 1);
+      /* THE MEN THE TICK KILLED STILL HAVE TO FALL. attritionTick knows about
+         hp and nothing about bodies, which is right — it is the headless half.
+         So the bodies it emptied are laid down here, through the same
+         manDeathPhysics every 3D death runs, or the last second and a half
+         before the aftermath screen is a rank of standing corpses. */
+      for (let i = 0; i < men.length; i++) {
+        const u = men[i];
+        if (u.dead && !u.isYou && !u.dieT && !u.ragdoll) {
+          if (u.char && CBZ.deathPose) safe(function () { CBZ.deathPose(u.char, u.i * 3.7 + 1.3, lcg()); });
+          manDeathPhysics(u, null);
+          corpses.push(u);
+        }
+      }
+      if (YOU.dead) { endBattle("lost", "YOU WENT DOWN"); return; }
+      if (SIDES.them.alive === 0 || brokenSide(SIDES.them, ctxR.fledOf.them.length)) {
+        endBattle("won", "THEY BREAK"); return;
+      }
+      if (SIDES.mine.men0.length && brokenSide(SIDES.mine, ctxR.fledOf.mine.length)) {
+        endBattle("lost", "YOUR ARMY BREAKS"); return;
+      }
+    }
+    endBattle(SIDES.mine.powerNow >= SIDES.them.powerNow ? "won" : "retreat", "THE LIGHT GOES");
   }
 
   /* ============================================================ ORDERS
@@ -1003,9 +1376,8 @@
      measured as, DPS_CAP and all. */
   function hurtMan(m, dmg, imp) {
     if (!m || m.dead || !(dmg > 0) || over) return;
-    const scaled = (imp && imp.raw) ? dmg : dmg * (m.isYou ? 1 : 1.45);
-    const after = Math.max(scaled * 0.15, scaled - (m.soak || 0));
-    m.hp -= after;
+    const scaled = (imp && imp.raw) ? dmg : dmg * (m.isYou ? 1 : ARMY_MUL);
+    const after = hurtOne(m, scaled);      // ONE soak formula — see hurtOne
     if (CBZ.combatIQ && CBZ.combatIQ.suppress && !m.isYou) CBZ.combatIQ.suppress(m, 0.9);
     if (imp && imp.by && imp.by.team && imp.by.team !== m.team && (!m.tgt || m.tgt.dead)) m.tgt = imp.by;
     if (m.isYou) {
@@ -1240,7 +1612,7 @@
    pixels and fills the frame with sand. A commander's shot is LOW and near
    enough that the two lines read as lines — 62 m at 0.32 rad is about 19 m up,
    which keeps the horizon in frame and the men legible. */
-const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32 };
+const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
 
   function stepYou(dt) {
     const IN = micro.input;
@@ -1267,7 +1639,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32 };
       if (IN) {
         cmd.yaw -= IN.mx * 0.004;
         cmd.pitch = clamp(cmd.pitch - IN.mz * 0.003, 0.16, 1.4);
-        if (IN.wheel) cmd.dist = clamp(cmd.dist * (IN.wheel > 0 ? 1.12 : 0.9), 24, 320);
+        if (IN.wheel) { cmd.auto = false; cmd.dist = clamp(cmd.dist * (IN.wheel > 0 ? 1.12 : 0.9), 24, 320); }
       }
       YOU.speed = 0;
       return;
@@ -1373,12 +1745,24 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32 };
   function stepCamera(dt) {
     const c = CBZ.camera;
     if (camMode === "cmd") {
-      /* THE COMMAND SEAT FOLLOWS THE FIGHT, not the player. Its focus eases
-         toward the midpoint of the two masses, which is where a battle
-         actually is — parking it on your own army photographs backs. */
+      /* THE COMMAND SEAT FOLLOWS THE FIGHT — and "the fight" is not the
+         midpoint of the two masses. MEASURED on the first before/after pair:
+         at t=11 the two lines were still 160 m apart, the midpoint was empty
+         sand, and both armies sat 80 m off either side of the lens as a
+         fifteen-pixel smudge. The midpoint is the right answer once they are
+         IN contact and the wrong one for every second before that.
+
+         So the focus is the midpoint and the RANGE is the spread: far enough
+         back to hold both masses, never so far that a 1.8 m man stops being a
+         man. `autoDist` is only used when nobody has set a distance by hand —
+         a person driving the wheel keeps what they chose. */
       const fx = (SIDES.mine.comX + SIDES.them.comX) * 0.5;
       const fz = (SIDES.mine.comZ + SIDES.them.comZ) * 0.5;
       if (!cmd.init) { cmd.x = fx; cmd.z = fz; cmd.init = 1; }
+      if (cmd.auto) {
+        const sep = Math.hypot(SIDES.mine.comX - SIDES.them.comX, SIDES.mine.comZ - SIDES.them.comZ);
+        cmd.dist = clamp(34 + sep * 0.62, 40, 210);
+      }
       const k = 1 - Math.pow(0.06, dt);
       cmd.x += (fx - cmd.x) * k * 0.5;
       cmd.z += (fz - cmd.z) * k * 0.5;
@@ -1564,7 +1948,20 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32 };
     setText("wbThem", Tm.alive);
     setW("wbMineMo", M.morale);
     setW("wbThemMo", Tm.morale);
-    setText("wbClock", Math.floor(simT / 60) + ":" + String(Math.floor(simT % 60)).padStart(2, "0"));
+    /* THE CLOCK COUNTS DOWN WHEN IT MATTERS. A ceiling nobody can see is a
+       battle that ends for no reason the player can name; inside the last
+       forty seconds it stops being a stopwatch and starts being a deadline. */
+    const leftT = BATTLE_MAX() - simT;
+    const cel = document.getElementById("wbClock");
+    if (cel) {
+      if (leftT < 40) {
+        cel.textContent = "-0:" + String(Math.max(0, Math.floor(leftT))).padStart(2, "0");
+        cel.style.color = leftT < 15 ? "#ff8a3d" : "";
+      } else {
+        cel.textContent = Math.floor(simT / 60) + ":" + String(Math.floor(simT % 60)).padStart(2, "0");
+        cel.style.color = "";
+      }
+    }
     setW2("wbHp", clamp(YOU.hp / YOU.maxHp, 0, 1));
     setText("wbAmmo", YOU.reloadT > 0 ? "RELOADING" : YOU.mag + " / " + YOU.magSize +
       "   " + W.gunLabel(YOU.wid) + "   " + YOU.kills + " KILLS");
@@ -1689,6 +2086,15 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32 };
 
     started = true;
     frameFn = micro.onFrame(frame);
+    /* ?frozen=1 — THE BATTLE BEGINS STOPPED. A tool that drives this fight
+       through freeze()/advance() cannot freeze it before it exists, so between
+       start() and the tool's first poll an unknown number of real frames run —
+       MEASURED on the first before/after pair, one side had already taken a
+       casualty at the beat the other was still at full strength, which makes a
+       controlled A/B impossible. Beginning stopped removes the window
+       entirely: both sides start at simT 0 and every simulated second after
+       that is one somebody asked for. */
+    if (Q && Q.get("frozen") === "1" && micro.stop) micro.stop();
     // a person who clicks the world wants to be IN it
     document.addEventListener("pointerdown", onWorldPointer);
     W.on("phase:leave:battle", teardown);
@@ -1751,9 +2157,43 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32 };
 
   /* ============================================================ FRAME */
   let comAt = -1, moraleAt = -1, cmdAt = -1, endAt = -1;
+  /* ============================================================ THE LIGHT
+     THE SAND WAS RENDERING AS PAPER, and battle.html wrote down why before this
+     file existed: "the sun came down from 0.98: at that level the sand's own
+     vertex colours clipped to white and the whole erg rendered as a sheet of
+     paper". warlord.html's campaign light is HOTTER than the one that did that
+     — sun 1.12, and a pale blue hemisphere fill on tan sand, which desaturates
+     it on top. MEASURED on the first before/after pair: a battlefield with
+     10.2 m of measured relief in it photographed as a flat wash with no crest,
+     no trough and no shadow anywhere in the frame.
+
+     THE RESTORE IS FREE, AND THAT IS WHY IT IS DONE THIS WAY. microboot's
+     lights() registers an onAlways(9) hook that rewrites sun.intensity,
+     hemi.intensity and both hemisphere colours to their captured base EVERY
+     frame — it has to, because daynight.js's consumers multiply them. always-
+     hooks run before frame-hooks (see microboot's tick and stepSim: both run
+     CBZ.always, then frameHooks), so a battle that writes its own numbers at
+     the top of its own frame gets exactly one frame of them and hands the
+     campaign's light straight back the moment the battle stops running. No
+     second light rig, no teardown to forget.
+
+     The numbers are battle.html's own dunes venue: sun 0.84, hemi 0.42, and a
+     WARM sky colour, because bounce off sand is warm and lighting an erg with a
+     blue fill is what turns tan into grey. */
+  function battleLight() {
+    const sun = micro.sun, hemi = micro.hemiLight;
+    if (sun) sun.intensity = 0.84;
+    if (hemi) {
+      hemi.intensity = 0.42;
+      hemi.color.setHex(0xcfc2a4);
+      hemi.groundColor.setHex(0x8f7850);
+    }
+  }
+
   let lastWall = 0;
   function frame(dt) {
     if (!started || !live) return;
+    battleLight();
     /* THE SIM CLOCK IS WALL TIME, NOT RENDER TIME — battle.html's finding, and
        it is not a nicety. microboot clamps the dt it hands a frame hook for
        animation stability, so on a machine that is struggling the battle
@@ -1829,6 +2269,9 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32 };
     if (!over) {
       endAt -= dt;
       if (endAt <= 0) { endAt = 0.4; checkEnd(); }
+      // THE CEILING. See BATTLE_MAX: at the cap the remainder is resolved
+      // through the SAME attrition tick rather than simply cut off.
+      if (!over && simT > BATTLE_MAX()) finishOnTheClock();
     }
   }
 
@@ -1854,13 +2297,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32 };
      happens are exactly the men you capture — which is also the tension the
      four orders are for: end it fast and take prisoners, or let it run and
      watch them get away. */
-  function broken(side, fled) {
-    if (MORALE_OFF() || side.men0.length <= 2) return false;
-    const fighting = side.alive - side.routing;
-    const gone = side.deadN + side.routing + fled;
-    return fighting <= Math.max(1, Math.floor(side.men0.length * 0.1)) &&
-           gone >= side.men0.length * 0.3;
-  }
+  const broken = brokenSide;      // one rule, one function — see brokenSide
   function checkEnd() {
     const M = SIDES.mine, T = SIDES.them;
     if (T.alive === 0 || broken(T, report.fledOf.them.length)) {
@@ -1899,6 +2336,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32 };
       loot: {}, armourLoot: {}, gold: 0,
       resolved: !!ctxR.headless,
     };
+    const stood = {};        // who was still FIGHTING at the end, by soldier id
     for (let i = 0; i < units.length; i++) {
       const m = units[i];
       if (m.isYou || !m.s) continue;
@@ -1908,7 +2346,8 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32 };
       // a win can still cost you next week.
       m.s.hp = Math.max(1, Math.round(m.hp));
       m.s.wounded = m.hp < m.maxHp * 0.34;
-      (m.team === "mine" ? r.yourSurvivors : r.theirSurvivors).push(m.s);
+      if (m.team === "mine") { r.yourSurvivors.push(m.s); if (m.routed) stood[m.s.id] = 0; else stood[m.s.id] = 1; }
+      else r.theirSurvivors.push(m.s);
     }
     // the reserve never fought and is unhurt
     for (let i = 0; i < ctxR.reserveOf.mine.length; i++) r.yourSurvivors.push(ctxR.reserveOf.mine[i]);
@@ -1939,11 +2378,28 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32 };
         if (s) r.yourDead.push(s);
       }
     }
+    /* LOSING COSTS YOU THE MEN WHO STOOD, NOT THE MEN WHO RAN — and the first
+       draft had that exactly backwards.
+
+       It moved EVERY survivor into the dead list, which on a measured 34-man
+       defeat killed all thirty-four: nineteen who fell fighting plus fifteen
+       who had already broken and were halfway to the map edge. The pair image
+       is unambiguous — "YOU LOST 34 DEAD" with a run-over screen behind it —
+       and it is nonsense twice over. A man who ran away is the ONE man who
+       demonstrably survived, and an army that routs is supposed to be an army
+       you can rebuild; wiping the roster on a loss makes every defeat a
+       deleted save and makes the rout mechanic a suicide button.
+
+       So: a man still holding the line when it collapses is lost (killed, or
+       taken by them — the campaign has no shape for being someone's prisoner).
+       A man who had already broken gets away, at the cost of everything the
+       aftermath does NOT give you: no loot, no prisoners, no promotions. */
     if (outcome === "lost") {
-      // a broken army: the men on the sand are gone, the ones who ran are back
       for (let i = 0; i < r.yourSurvivors.length; i++) {
         const s = r.yourSurvivors[i];
-        if (ctxR.reserveOf.mine.indexOf(s) < 0) { r.yourDead.push(s); r.yourSurvivors[i] = null; }
+        if (ctxR.reserveOf.mine.indexOf(s) >= 0) continue;   // the baggage never fought
+        if (stood[s.id]) { r.yourDead.push(s); r.yourSurvivors[i] = null; }
+        else s.wounded = true;                               // he ran, and he is not fresh
       }
       r.yourSurvivors = r.yourSurvivors.filter(Boolean);
     }
@@ -2066,11 +2522,17 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32 };
         setTimeout(function () {
           const mine = parseInt(Q.get("mine") || "", 10) || 26;
           const them = parseInt(Q.get("them") || "", 10) || 26;
+          /* BOTH ROSTERS COME OUT OF THE SAME CONSTRUCTOR. The first draft
+             hand-rolled the player's army with makeSoldier and no armour at
+             all, while the enemy came from makeBand — which puts about one man
+             in five in a vest or a plate. That is not a test battle, it is a
+             handicap match, and it is exactly what the second before/after pair
+             photographed: a bare-shirted army losing five to one. Same faction
+             on both sides by default, so the only asymmetry left is the
+             warlord and his orders — which is the thing being demonstrated. */
           if (!W.state.army.length) {
-            for (let i = 0; i < mine; i++) {
-              const t = W.pick(["levy", "levy", "raider", "soldier", "veteran"]);
-              W.addSoldier(W.makeSoldier(t, W.bandGunFor(0.55)));
-            }
+            const mineBand = W.makeBand({ size: mine, faction: Q.get("myfaction") || "militia" });
+            for (let i = 0; i < mineBand.men.length; i++) W.addSoldier(mineBand.men[i]);
           }
           W.state.you.wid = Q.get("gun") || "ak47";
           const b = W.makeBand({ size: them, faction: Q.get("faction") || "bandit" });
@@ -2082,6 +2544,13 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32 };
     },
 
     start: start,
+    /* THE FAST PATH, PUBLIC. Same rosters, same morale, same report shape.
+       W.battle.start(o) is the fight you play; W.battle.resolve(o) is the same
+       fight, decided in one call, for a skip, a drop, an AI-on-AI battle, or a
+       multiplayer turn that cannot wait. `apply:false` returns the report and
+       changes nothing, which is what simulating somebody else's fight wants. */
+    resolve: resolve,
+    limit: BATTLE_MAX,
     live: function () { return live; },
     groundAt: function (x, z) { return MAP ? MAP.groundAt(x, z) : 0; },
     order: function (o) { setOrder(o, "mine"); },
@@ -2147,6 +2616,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32 };
         cmd.x = (SIDES.mine.comX + SIDES.them.comX) * 0.5;
         cmd.z = (SIDES.mine.comZ + SIDES.them.comZ) * 0.5;
       }
+      cmd.auto = o.dist == null;
       if (o.dist != null) cmd.dist = o.dist;
       if (o.pitch != null) cmd.pitch = o.pitch;
       if (o.yaw != null) cmd.yaw = o.yaw;

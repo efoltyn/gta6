@@ -168,10 +168,9 @@
   let breadcrumbs = [];            // [{x,z}] newest last
   let crumbAcc = 0;
   let travelled = 0;
-  let lastDawnDay = 0;
   let hudRoot = null, plateBox = null, compass = null, compassG = null, mapWrap = null;
   let bandTick = 0, fightTick = 0, spawnTick = 0;
-  let lastWall = 0, simAcc = 0;
+  let lastWall = 0;
   let chase = null;                // the band you tapped, if any
   let lastZoomSent = -1;
   const peerDraw = [];             // {x,z,size,colour,name} rebuilt each frame
@@ -327,6 +326,7 @@
     }
     camYaw = S.you.yaw;
     dest = null;
+    if (!lastWall) lastWall = performance.now();
     showAll(true);
     W.setPhase("campaign");
     live = true;
@@ -362,6 +362,22 @@
     bindPointer();
 
     micro.onFrame(step, { order: 5, id: "warlord-campaign" });
+    /* THE DAY TINT IS THE BASE COAT AND IT RUNS FIRST. events.js ships
+       weather — a sandstorm has to be able to grey the sun out — and two
+       modules writing CBZ.sun in the same frame is decided purely by hook
+       order. So the clock's tint goes in at -20, before every gameplay hook,
+       and anything that wants to modify the light runs after it and wins.
+       (microboot's own restore is an `always` hook, which runs before all of
+       these, so this still lands on a clean rig every frame.) */
+    micro.onFrame(function () { if (built) tintDay(); }, { order: -20, id: "warlord-daytint" });
+    /* THE WORLD, ON THE WALL CLOCK, IN EVERY PHASE. `always` is the engine's
+       own name for "runs even while paused" and that is exactly the contract
+       a shared island needs: the bands must keep walking while this player
+       is reading an encounter card, fighting a battle, or has the tab in the
+       background. Order 30 is after microboot's own light restore (9) and
+       after nothing else on this page. */
+    if (CBZ.onAlways) CBZ.onAlways(30, worldTick);
+    else micro.onFrame(function () { worldTick(); }, { order: -5 });
 
     /* THE ISLAND IS HIDDEN, NOT DESTROYED, when the battle takes the screen.
        Rebuilding 14 km of terrain after every fight is ~30 k heightAt calls
@@ -396,8 +412,8 @@
      the four hundred read at 200 m. */
   const MEN_CAP = 980;
   function buildMen() {
-    const bodyG = new THREE.CylinderGeometry(0.20, 0.30, 1.30, 6);
-    const headG = new THREE.BoxGeometry(0.30, 0.32, 0.30);
+    const bodyG = new THREE.CylinderGeometry(0.26, 0.38, 1.30, 6);
+    const headG = new THREE.BoxGeometry(0.34, 0.34, 0.34);
     const bodyM = new THREE.MeshLambertMaterial({ color: 0xffffff });
     const headM = new THREE.MeshLambertMaterial({ color: 0xffffff });
     menBody = new THREE.InstancedMesh(bodyG, bodyM, MEN_CAP);
@@ -443,7 +459,10 @@
     return n + 1;
   }
 
-  const TIER_COLOUR = { levy: 0x9c8f6d, raider: 0xa5643c, soldier: 0x6f7f57, veteran: 0x4d5f74 };
+  /* Bright enough to read AGAINST SAND, which is the only background this
+     game has. The first pass used mid-tones picked in the abstract and every
+     tier photographed as the same dark speck on a pale dune. */
+  const TIER_COLOUR = { levy: 0xc9b489, raider: 0xd2743c, soldier: 0x7fa05e, veteran: 0x5f88b4 };
 
   /* ============================================================ MARKER */
   function buildMarker() {
@@ -527,6 +546,7 @@
       '#wlCampHud .plate.hunt{border-color:#c4453a;color:#ffc9c4}' +
       '#wlCampHud .plate.flee{border-color:#5aa86a;color:#c9ffd4}' +
       '#wlCampHud .plate.op{border-color:#ffb15a;color:#ffd7bd}' +
+      '#wlCampHud .plate.peer{border-color:#7fa8c8;color:#d8ecff}' +
       '#wlCompass{position:absolute;left:50%;transform:translateX(-50%);' +
         'bottom:calc(env(safe-area-inset-bottom,0px) + 14px);opacity:.9}' +
       '#wlMapBtn{position:absolute;right:calc(env(safe-area-inset-right,0px) + 14px);' +
@@ -574,7 +594,18 @@
     });
   }
 
+  /* THE OWNERSHIP MAP IS NOT MINE. territory.js owns regions, factions and
+     who holds what, and two world maps on one island is exactly the kind of
+     duplication this repo's rules exist to stop — so if it is loaded, the
+     MAP button is its button and this file's own screen never opens. What
+     stays here is the FALLBACK: a page booted without territory.js still has
+     to be able to see where it is. Both draw the same W.desert.mapTexture;
+     only the layer on top differs. */
   function toggleMap() {
+    if (W.territory && W.territory.open) {
+      try { W.territory.open({ x: S.you.x, z: S.you.z, dist: camDist }); return; }
+      catch (e) { console.error("[warlord] territory.open", e); }
+    }
     if (!mapWrap) return;
     const on = !mapWrap.classList.contains("on");
     mapWrap.classList.toggle("on", on);
@@ -616,6 +647,13 @@
       g.globalAlpha = b.mood === "hunt" ? 1 : 0.8;
       g.beginPath(); g.arc(p.x, p.y, r, 0, TAU); g.fill();
       g.globalAlpha = 1;
+    }
+    for (let i = 0; i < peerDraw.length; i++) {
+      const q = peerDraw[i], pp = P(q.x, q.z);
+      g.strokeStyle = "#" + ("000000" + (q.colour >>> 0).toString(16)).slice(-6);
+      g.lineWidth = 2;
+      g.beginPath(); g.arc(pp.x, pp.y, 2 + Math.sqrt(q.size) * 0.42, 0, TAU); g.stroke();
+      g.fillStyle = "rgba(255,255,255,.85)"; g.fillText(q.name, pp.x + 6, pp.y + 3);
     }
     const me = P(S.you.x, S.you.z);
     g.strokeStyle = "#fff"; g.lineWidth = 2;
@@ -766,8 +804,43 @@
      different dune. heightAt knows the real ground everywhere, so this is
      both more accurate and independent of which LOD happens to be there. */
   const _ndc = new THREE.Vector3();
+  const _pick = new THREE.Vector3();
+
+  /* TAP A PARTY TO ENGAGE IT, and the pick is SCREEN-SPACE on purpose. A
+     warband two kilometres out is three metres wide in the world and forty
+     pixels wide on the glass; asking "did the ground ray land within 30 m of
+     it" makes the far half of the island untappable, which is exactly the
+     kind of thing that turns one verb into two. 46 px, nearest wins, and the
+     ride target then TRACKS the party — you are chasing a thing that is
+     running away, not the coordinate it was standing on when you tapped. */
+  function pickParty(sx, sy) {
+    const w = window.innerWidth, h = window.innerHeight;
+    let best = null, bd = 46;
+    for (let i = 0; i < S.bands.length; i++) {
+      const b = S.bands[i];
+      if (Math.hypot(b.x - S.you.x, b.z - S.you.z) > BAND_DRAW) continue;
+      _pick.set(b.x, W.desert.heightAt(b.x, b.z) + 6, b.z).project(camera);
+      if (_pick.z > 1) continue;
+      const px = (_pick.x * 0.5 + 0.5) * w, py = (-_pick.y * 0.5 + 0.5) * h;
+      const d = Math.hypot(px - sx, py - sy);
+      if (d < bd) { bd = d; best = b; }
+    }
+    return best;
+  }
+
   function rideTo(sx, sy) {
     if (!camera) return;
+    const tgt = pickParty(sx, sy);
+    if (tgt) {
+      chase = tgt;
+      dest = { x: tgt.x, z: tgt.z };
+      W.emit("campaign:dest", dest);
+      const d = Math.hypot(tgt.x - S.you.x, tgt.z - S.you.z);
+      if (d < CONTACT * 1.6) engage(tgt);
+      else W.toast("riding at " + W.bandSize(tgt) + " " + tgt.name);
+      return;
+    }
+    chase = null;
     const w = window.innerWidth, h = window.innerHeight;
     _ndc.set((sx / w) * 2 - 1, -(sy / h) * 2 + 1, 0.5);
     _ndc.unproject(camera);
@@ -804,11 +877,11 @@
   const SKYKEY = [
     { h: 0,  sun: 0.10, sc: 0x7f9ad0, hemi: 0.24, hc: 0x33456b, gc: 0x241f2a, fog: 0x131b2c, top: 0x0a1226, bot: 0x1d2740 },
     { h: 5,  sun: 0.14, sc: 0x9aa8d8, hemi: 0.28, hc: 0x46557d, gc: 0x2b2630, fog: 0x2a2f42, top: 0x14203c, bot: 0x4a4258 },
-    { h: 6.6, sun: 0.86, sc: 0xffa863, hemi: 0.50, hc: 0x9fb0d4, gc: 0x6b5540, fog: 0xd39a6a, top: 0x2f5f96, bot: 0xf0b070 },
-    { h: 9,  sun: 1.10, sc: 0xfff0cc, hemi: 0.62, hc: 0xcfe0f2, gc: 0xbf9a5e, fog: 0xe6cda1, top: 0x4478ad, bot: 0xe6cda1 },
-    { h: 14, sun: 1.22, sc: 0xfffaf0, hemi: 0.66, hc: 0xd6e6f6, gc: 0xc7a267, fog: 0xefdcb6, top: 0x3f74ad, bot: 0xefdcb6 },
-    { h: 17.5, sun: 1.02, sc: 0xffd9a0, hemi: 0.58, hc: 0xc9d8ee, gc: 0xb08a55, fog: 0xe8b986, top: 0x3c6ea8, bot: 0xe8b986 },
-    { h: 19.4, sun: 0.62, sc: 0xff8f4a, hemi: 0.42, hc: 0x9fadd0, gc: 0x7a5c3c, fog: 0xc9743f, top: 0x2a4a80, bot: 0xd98a4a },
+    { h: 6.6, sun: 0.74, sc: 0xffa863, hemi: 0.36, hc: 0x8798bc, gc: 0x6b4a26, fog: 0xd39a6a, top: 0x2f5f96, bot: 0xf0b070 },
+    { h: 9,  sun: 0.95, sc: 0xfff0cc, hemi: 0.40, hc: 0x9ebbd8, gc: 0xa87233, fog: 0xe6cda1, top: 0x4478ad, bot: 0xe6cda1 },
+    { h: 14, sun: 1.02, sc: 0xfffaf0, hemi: 0.42, hc: 0xa7c2dc, gc: 0xb07a38, fog: 0xefdcb6, top: 0x3f74ad, bot: 0xefdcb6 },
+    { h: 17.5, sun: 0.88, sc: 0xffd9a0, hemi: 0.38, hc: 0x9fb6d2, gc: 0x9c6a30, fog: 0xe8b986, top: 0x3c6ea8, bot: 0xe8b986 },
+    { h: 19.4, sun: 0.56, sc: 0xff8f4a, hemi: 0.36, hc: 0x9fadd0, gc: 0x7a5c3c, fog: 0xc9743f, top: 0x2a4a80, bot: 0xd98a4a },
     { h: 21,  sun: 0.16, sc: 0x8f9ed0, hemi: 0.28, hc: 0x4d5c84, gc: 0x322b34, fog: 0x39364a, top: 0x18244a, bot: 0x54465e },
     { h: 24, sun: 0.10, sc: 0x7f9ad0, hemi: 0.24, hc: 0x33456b, gc: 0x241f2a, fog: 0x131b2c, top: 0x0a1226, bot: 0x1d2740 },
   ];
@@ -852,6 +925,67 @@
     }
   }
 
+  /* ============================================================ THE WORLD TICK
+     Wall time, every phase, paused or not. Nothing here draws and nothing
+     here reads input — this is the part of the campaign that is true for
+     everybody on the island, including the parts of it nobody is looking at.
+
+     THE CATCH-UP IS THE POINT. `dt` is measured off performance.now(), not
+     off the frame delta, so a tab that was hidden for ninety seconds wakes
+     up ninety seconds later in the world rather than exactly where it left.
+     The CLOCK takes the whole elapsed time; the BAND MOTION is stepped in
+     0.25 s substeps (a party at 8 m/s must not teleport 700 m through a
+     mesa in one integration step) and capped at CATCHUP_MAX of them, so a
+     wake-up after an hour costs 30 s of walking and one frame, not a
+     minute of frozen page. */
+  function worldTick() {
+    if (!built) return;
+    const now = performance.now();
+    if (!lastWall) { lastWall = now; return; }
+    let dt = (now - lastWall) / 1000;
+    lastWall = now;
+    if (!(dt > 0)) return;
+    if (dt > 3600) dt = 3600;
+
+    // ---- the day, on real seconds -------------------------------------
+    if (!FLAG_NOCLOCK) {
+      const before = S.hour;
+      S.hour += dt / HOUR_SECS;
+      let rolled = 0;
+      while (S.hour >= 24) { S.hour -= 24; rolled++; }
+      // dawn is the day boundary and core owns everything it costs
+      const crossed = rolled > 0 || (before < 6 && S.hour >= 6);
+      if (crossed) {
+        // a long sleep can span several dawns; pay every one of them
+        const dawns = Math.max(1, rolled);
+        for (let i = 0; i < Math.min(dawns, 8); i++) W.dawn();
+      }
+    }
+
+    /* THE PARTIES. Normal frames take the real dt in one go — accumulating
+       into fixed 0.25 s ticks was the first version and it made every band
+       on the island advance in 1.5 m hops four times a second, which reads
+       as lag, not as walking. Substepping is ONLY for the catch-up case,
+       where the alternative is a party integrating 700 m in one step and
+       walking through a mesa on the way.
+
+       yourPower() is hoisted out of the loop: it sums the whole roster, and
+       a thousand-man army times sixty bands times a hundred catch-up
+       substeps is six million calls for a number that cannot change inside
+       one wake-up. */
+    const myPower = W.yourPower();
+    if (dt <= 0.3) {
+      stepBands(dt, myPower);
+    } else {
+      let left = dt, steps = 0;
+      while (left > 0.0001 && steps < CATCHUP_MAX) {
+        const h = Math.min(0.25, left);
+        stepBands(h, myPower);
+        left -= h; steps++;
+      }
+    }
+  }
+
   /* ============================================================ THE FRAME */
   function step(dt) {
     if (!live) return;
@@ -864,7 +998,7 @@
     let mx = 0, my = 0;
     if (controls) { mx = controls.move.x; my = controls.move.y; }
     const stickLive = Math.hypot(mx, my) > 0.12;
-    if (stickLive) dest = null;                       // you took the reins
+    if (stickLive) { dest = null; chase = null; }      // you took the reins
 
     // camera swing: drag/right-side thumb, or Q/E
     if (controls) camYaw += controls.look.x;
@@ -880,10 +1014,16 @@
       wantX = mx * cs - my * sn;
       wantZ = mx * sn + my * cs;
     } else if (dest) {
-      const dx = dest.x - S.you.x, dz = dest.z - S.you.z;
+      // a chased party moves; the destination is the party, not the spot
+      if (chase) {
+        if (S.bands.indexOf(chase) < 0) { chase = null; dest = null; }
+        else { dest.x = chase.x; dest.z = chase.z; }
+      }
+      if (!dest) { wantX = 0; wantZ = 0; }
+      const dx = dest ? dest.x - S.you.x : 0, dz = dest ? dest.z - S.you.z : 0;
       const d = Math.hypot(dx, dz);
-      if (d < 4) { dest = null; }
-      else { wantX = dx / d; wantZ = dz / d; }
+      if (!dest || (d < 4 && !chase)) { dest = null; chase = null; }
+      else if (d > 0.5) { wantX = dx / d; wantZ = dz / d; }
     }
 
     const wl = Math.hypot(wantX, wantZ);
@@ -916,17 +1056,6 @@
     const moved = Math.hypot(S.you.x - you0x, S.you.z - you0z);
     travelled += moved;
 
-    // ---- the clock ------------------------------------------------------
-    if (!FLAG_NOCLOCK) {
-      const before = S.hour;
-      S.hour += moved * HOUR_PER_M + dt * 0.0032;     // a trickle so a camp still passes time
-      if (S.hour >= 24) S.hour -= 24;
-      // dawn is the day boundary: crossing 06:00 upward is a new day, and
-      // core owns everything that costs (wages, desertion, restock)
-      const crossed = (before < 6 && S.hour >= 6) || (before > S.hour && S.hour >= 6);
-      if (crossed && S.day !== lastDawnDay) { lastDawnDay = S.day; W.dawn(); }
-    }
-
     // ---- breadcrumbs: the shape of the column ---------------------------
     crumbAcc += moved;
     if (crumbAcc >= TRAIL_STEP || !breadcrumbs.length) {
@@ -936,7 +1065,8 @@
     }
 
     // ---- the world ------------------------------------------------------
-    stepBands(dt);
+    // NOT stepBands: the parties are on the wall clock in worldTick, so they
+    // keep walking while this file is not the one drawing.
     /* THE CLIPMAP FOLLOWS THE MAN, NOT THE EYE. At strategic zoom the camera
        is 500 m behind him, and centring the fine ring on the camera puts the
        8 m ground behind the shot and the 32 m ground under the thing you are
@@ -948,7 +1078,6 @@
     drawMen();
     drawMarker(dt);
     updateCamera(dt);
-    tintDay();
     paintPlates();
     paintCompass();
 
@@ -978,21 +1107,32 @@
     const army = S.army;
     const drawN = FLAG_NOTRAIL ? 0 : Math.min(DRAWN_FOLLOWERS, army.length);
     const t = micro.elapsed;
+    /* MEN GROW AS THE CAMERA PULLS BACK, and this is a deliberate lie. At
+       520 m a life-sized man is under two pixels: the strategic view — the
+       one the whole game is about, where you look down at your column and
+       at what is coming for you — showed an empty desert with some dirt
+       specks on it. Total War and Bannerlord both scale their unit markers
+       for exactly this reason. 1x over the shoulder where he stands next to
+       a real studio.cast body and must match it, up to 3.2x at full pull-
+       back where nothing is next to him to compare against. */
+    const zt = clamp((camDist - 16) / (520 - 16), 0, 1);
+    const ms = 1 + zt * 2.2;
+    const spread = 1 + zt * 1.1;
     for (let i = 0; i < drawN; i++) {
-      const back = 4 + i * 2.15;                       // metres behind you
+      const back = (4 + i * 2.15) * spread;            // metres behind you
       const idx = breadcrumbs.length - 1 - Math.floor(back / TRAIL_STEP);
       const c = breadcrumbs[idx < 0 ? 0 : idx];
       if (!c) break;
-      const j1 = (W.hash01(i * 31 + 7, 3, 21) - 0.5) * 9.5;
-      const j2 = (W.hash01(i * 17 + 5, 9, 23) - 0.5) * 3.2;
+      const j1 = (W.hash01(i * 31 + 7, 3, 21) - 0.5) * 7.0 * (1 + zt * 0.35);
+      const j2 = (W.hash01(i * 17 + 5, 9, 23) - 0.5) * 3.0;
       const x = c.x + j1, z = c.z + j2;
       const y = D.heightAt(x, z);
       const s = W.tier(army[i].tier);
       const bob = Math.sin(t * 5.2 + i * 1.7) * 0.055;
       const yaw = S.you.yaw + (W.hash01(i, 1, 27) - 0.5) * 0.5;
       const col = TIER_COLOUR[army[i].tier] || 0x9c8f6d;
-      n = inst(menBody, n, x, y + 0.65 + bob, z, yaw, 1, 1, 1, col);
-      inst(menHead, n - 1, x, y + 1.48 + bob, z, yaw, 1, 1, 1, 0xc9a07a);
+      n = inst(menBody, n, x, y + (0.65 + bob) * ms, z, yaw, ms, ms, ms, col);
+      inst(menHead, n - 1, x, y + (1.48 + bob) * ms, z, yaw, ms, ms, ms, 0xd9b48c);
     }
     // ---- every band close enough to see -------------------------------
     let bn = 0;
@@ -1008,20 +1148,40 @@
       const show = clamp(Math.round(Math.sqrt(size) * 1.5), 2, 14);
       for (let k = 0; k < show && n < MEN_CAP; k++) {
         const a = W.hash01(b.x + k, b.z, 41 + k) * TAU;
-        const rr = 1.6 + W.hash01(b.x, b.z + k, 51 + k) * (2.2 + Math.sqrt(size) * 0.75);
+        const rr = (1.6 + W.hash01(b.x, b.z + k, 51 + k) * (2.2 + Math.sqrt(size) * 0.75)) * spread;
         const x = b.x + Math.cos(a + b.yaw) * rr, z = b.z + Math.sin(a + b.yaw) * rr;
         const y = W.desert.heightAt(x, z);
         const bob = Math.sin(micro.elapsed * 4.6 + k * 2.1 + i) * 0.05;
-        n = inst(menBody, n, x, y + 0.65 + bob, z, b.yaw, 1, 1, 1, b.colour);
-        inst(menHead, n - 1, x, y + 1.48 + bob, z, b.yaw, 1, 1, 1, 0xb4834f);
+        n = inst(menBody, n, x, y + (0.65 + bob) * ms, z, b.yaw, ms, ms, ms, b.colour);
+        inst(menHead, n - 1, x, y + (1.48 + bob) * ms, z, b.yaw, ms, ms, ms, 0xc79a63);
       }
-      if (bn < 160) {
-        const ph = 5 + 2.6 * Math.log(size + 1) / Math.LN2;
-        const fw = 1.6 + 0.9 * Math.log(size + 1) / Math.LN2;
-        const by = W.desert.heightAt(b.x, b.z);
-        bn = inst(pole, bn, b.x, by + ph / 2, b.z, 0, 1, ph, 1, null);
-        inst(banner, bn - 1, b.x + 0.12, by + ph - fw * 0.42, b.z, b.yaw * 0.3, fw, fw * 0.62, 1, b.colour);
+      if (bn < 160) bn = party(bn, b.x, b.z, size, b.colour, b.yaw);
+    }
+    /* OTHER WARLORDS ARE PARTIES, not a special case. They come off
+       W.state.peers — the contract's own home for them — and go through the
+       exact instanced bodies and the exact banner an AI band uses, so a
+       human column and a computer column are the same object on screen and
+       neither can drift into looking "more real" than the other. warnet.js
+       keeps the map up to date and never draws anything. */
+    peerDraw.length = 0;
+    for (const pid in S.peers) {
+      const q = S.peers[pid];
+      if (!q || q.x == null) continue;
+      const d = Math.hypot(q.x - S.you.x, q.z - S.you.z);
+      peerDraw.push({ x: q.x, z: q.z, d: d, name: q.name || "WARLORD", size: q.size || 1, colour: q.colour == null ? 0xd8d0c0 : q.colour });
+      if (d > BAND_DRAW || n >= MEN_CAP - 20) continue;
+      const size = Math.max(1, q.size || 1);
+      const show = clamp(Math.round(Math.sqrt(size) * 1.5), 1, 14);
+      const yaw = q.yaw || 0;
+      for (let k = 0; k < show && n < MEN_CAP; k++) {
+        const a = W.hash01(q.x + k, q.z, 41 + k) * TAU;
+        const rr = 1.6 + W.hash01(q.x, q.z + k, 51 + k) * (2.2 + Math.sqrt(size) * 0.75);
+        const x = q.x + Math.cos(a + yaw) * rr, z = q.z + Math.sin(a + yaw) * rr;
+        const y = W.desert.heightAt(x, z);
+        n = inst(menBody, n, x, y + 0.65 * ms, z, yaw, ms, ms, ms, q.colour);
+        inst(menHead, n - 1, x, y + 1.48 * ms, z, yaw, ms, ms, ms, 0xc79a63);
       }
+      if (bn < 160) bn = party(bn, q.x, q.z, size, q.colour, yaw);
     }
     menBody.count = n; menHead.count = n;
     menBody.instanceMatrix.needsUpdate = menHead.instanceMatrix.needsUpdate = true;
@@ -1030,6 +1190,18 @@
     pole.count = bn; banner.count = bn;
     pole.instanceMatrix.needsUpdate = banner.instanceMatrix.needsUpdate = true;
     if (banner.instanceColor) banner.instanceColor.needsUpdate = true;
+  }
+
+  /* ONE BANNER RULE for AI bands, peers and anything else that is a party:
+     height and flag scale with log2(head count), so six men and two hundred
+     are tellable apart at strategic zoom without a 120 m pole. */
+  function party(bn, x, z, size, colour, yaw) {
+    const ph = 5 + 2.6 * Math.log(size + 1) / Math.LN2;
+    const fw = 1.6 + 0.9 * Math.log(size + 1) / Math.LN2;
+    const by = W.desert.heightAt(x, z);
+    bn = inst(pole, bn, x, by + ph / 2, z, 0, 1, ph, 1, null);
+    inst(banner, bn - 1, x + 0.12, by + ph - fw * 0.42, z, (yaw || 0) * 0.3, fw, fw * 0.62, 1, colour);
+    return bn;
   }
 
   function drawMarker(dt) {
@@ -1081,19 +1253,47 @@
       gy + 1.4 + camDist * 0.06,
       S.you.z + Math.cos(camYaw) * camDist * la);
     camHeight = cy;
+    /* PUBLISH THE ZOOM. territory.js is building an openfront-style ownership
+       map over this same island, and the pull-back and that map have to feel
+       like one view at two ranges rather than two separate screens. So the
+       camera's strategic-ness is a number anybody can read, and it is emitted
+       on a real change rather than sixty times a second. */
+    if (Math.abs(camDist - lastZoomSent) > camDist * 0.06) {
+      lastZoomSent = camDist;
+      W.emit("campaign:zoom", { dist: camDist, t: t, yaw: camYaw, x: S.you.x, z: S.you.z });
+    }
     // the sky dome is centred on the origin and the island is 16 km wide;
     // ride far enough and you can reach its wall. Carry it with you.
     if (micro.skyDome) micro.skyDome.position.set(cx, 0, cz);
   }
 
   /* ============================================================ THE BANDS */
-  function stepBands(dt) {
+  /* A BAND OFF THE WIRE HAS NONE OF THIS FILE'S FIELDS ON IT. core.makeBand
+     declares the party; the goal, the memory of losing to you, the heading
+     and the AI stagger are CAMPAIGN facts this file adds. In multiplayer the
+     host's bands arrive as plain state, so normalise on the way in rather
+     than trusting that everything in S.bands was minted here. */
+  function ensureBandFields(b) {
+    if (b.yaw == null) b.yaw = W.hash01(b.x, b.z, 5) * TAU;
+    if (b.scared == null) b.scared = 0;
+    if (b.think == null) b.think = W.hash01(b.x, b.z, 6) * 1.6;
+    if (b.pause == null) b.pause = 0;
+    if (b.cooldown == null) b.cooldown = 0;
+    if (!b.goal && C.simHost) pickGoal(b);
+    return b;
+  }
+
+  function stepBands(dt, myPower) {
     const D = W.desert;
-    const myPower = W.yourPower();
+    if (myPower == null) myPower = W.yourPower();
     bandTick += dt;
     for (let i = 0; i < S.bands.length; i++) {
-      const b = S.bands[i];
+      const b = ensureBandFields(S.bands[i]);
       if (b.cooldown > 0) b.cooldown -= dt;
+      /* A GUEST NEVER MOVES A BAND. It renders the host's, keeps their
+         cooldowns ticking (that is local courtesy, not authority) and stops.
+         Every line below this one is an act of authorship. */
+      if (!C.simHost) { b.y = D.heightAt(b.x, b.z); continue; }
       const dxp = S.you.x - b.x, dzp = S.you.z - b.z;
       const dp = Math.hypot(dxp, dzp);
 
@@ -1164,13 +1364,13 @@
 
     // ---- they fight EACH OTHER, off screen, resolved abstractly ---------
     fightTick += dt;
-    if (fightTick > 4.5) {
+    if (C.simHost && fightTick > 4.5) {
       fightTick = 0;
       resolveOneBandFight();
     }
     // ---- the island never empties ---------------------------------------
     spawnTick += dt;
-    if (spawnTick > 9) {
+    if (C.simHost && spawnTick > 9) {
       spawnTick = 0;
       const want = bandTarget();
       if (S.bands.length < want) {
@@ -1240,6 +1440,20 @@
     return "the " + D.biomeAt(x, z) + " country";
   }
 
+  /* ONE DOOR TO THE ENCOUNTER, whether you rode into a party or tapped it. */
+  function engage(b) {
+    if (!b || b.cooldown > 0) return false;
+    b.cooldown = 12;
+    chase = null; dest = null;
+    W.emit("campaign:band", b);
+    W.setPhase("encounter", { band: b });
+    // army.js owns the card. It may not exist yet — this file must not be
+    // the reason the page dies when a sibling module is missing.
+    if (W.army && W.army.encounter) { try { W.army.encounter(b); } catch (e) { console.error("[warlord] encounter", e); } }
+    else W.toast(b.name + " — " + W.bandSize(b) + " men (army.js not loaded)", "bad");
+    return true;
+  }
+
   /* ============================================================ CONTACT */
   function checkContacts() {
     nearBand = null; nearOutpost = null;
@@ -1248,16 +1462,7 @@
       const b = S.bands[i];
       const d = Math.hypot(b.x - S.you.x, b.z - S.you.z);
       if (d < bd) { bd = d; nearBand = b; }
-      if (d < CONTACT && b.cooldown <= 0) {
-        b.cooldown = 12;
-        W.emit("campaign:band", b);
-        W.setPhase("encounter", { band: b });
-        // army.js owns the card. It may not exist yet — this file must not
-        // be the reason the page dies when a sibling module is missing.
-        if (W.army && W.army.encounter) { try { W.army.encounter(b); } catch (e) { console.error("[warlord] encounter", e); } }
-        else W.toast(b.name + " — " + W.bandSize(b) + " men (army.js not loaded)", "bad");
-        return;
-      }
+      if (d < CONTACT && engage(b)) return;
     }
     for (let i = 0; i < S.outposts.length; i++) {
       const o = S.outposts[i];
@@ -1290,6 +1495,12 @@
         text: W.bandSize(b) + " " + b.name, sub: b.mood === "hunt" ? "COMING FOR YOU" :
           b.mood === "flee" ? "RUNNING" : Math.round(d) + "m", cls: b.mood });
     }
+    for (let i = 0; i < peerDraw.length && list.length < 8; i++) {
+      const q = peerDraw[i];
+      if (q.d > NAMEPLATE_R * 2.2) continue;
+      list.push({ x: q.x, y: W.desert.heightAt(q.x, q.z) + 11, z: q.z, d: q.d,
+        text: q.size + " " + q.name, sub: "WARLORD", cls: "peer" });
+    }
     if (nearOutpost) {
       const d = Math.hypot(nearOutpost.x - S.you.x, nearOutpost.z - S.you.z);
       list.push({ x: nearOutpost.x, y: nearOutpost.y + 20, z: nearOutpost.z, d: d,
@@ -1315,7 +1526,14 @@
   }
 
   /* ============================================================ API */
-  C.dest = function (x, z) { dest = { x: x, z: z }; return dest; };
+  C.dest = function (x, z) { dest = { x: x, z: z }; chase = null; return dest; };
+  C.engage = engage;
+  /* the camera's strategic-ness, for territory.js and anything else that has
+     to agree with this view. t is 0 over-the-shoulder .. 1 fully pulled back. */
+  C.zoom = function () {
+    return { dist: camDist, t: clamp((camDist - 16) / (520 - 16), 0, 1), yaw: camYaw, x: S.you.x, z: S.you.z };
+  };
+  C.setSimHost = function (on) { C.simHost = !!on; return C.simHost; };
   C.you = function () { return S.you; };
   C.camDist = function (d) { if (d != null) camDistWant = clamp(d, 16, 520); return camDistWant; };
   C.camYaw = function (a) { if (a != null) camYaw = a; return camYaw; };
@@ -1329,6 +1547,7 @@
       you: { x: Math.round(S.you.x), z: Math.round(S.you.z), y: Math.round(W.desert.heightAt(S.you.x, S.you.z)) },
       hour: Math.round(S.hour * 10) / 10, day: S.day, camDist: Math.round(camDist),
       trail: breadcrumbs.length, dest: dest ? { x: Math.round(dest.x), z: Math.round(dest.z) } : null,
+      simHost: C.simHost, peers: peerDraw.length, chasing: !!chase,
     };
   };
 

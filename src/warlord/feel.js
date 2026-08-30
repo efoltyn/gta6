@@ -435,15 +435,26 @@
   const voiceOpts = {};    // reused: the naive path's per-shot object churn is
                            // itself part of what this file removes
 
-  function pushShot(name, dist, opts, mine) {
+  const EMPTY = {};
+  /* THE METER RUNS ON BOTH SIDES OF THE A/B. ?mixer=old still counts what was
+     asked for and at what range — otherwise the naive side's overlay is blank
+     where the after side's has numbers, and a blank panel photographs as
+     "the instrument is broken" rather than as "this is the before". */
+  function meter(d) {
     M.reqAll++; rateAcc++;
-    const d = (dist == null || !isFinite(dist)) ? 0 : Math.max(0, dist);
     distAcc += d; distN++;
     if (d <= NEAR_M) M.reqNear++; else M.reqFar++;
+  }
+  function pushShot(name, dist, opts, mine) {
+    const d = (dist == null || !isFinite(dist)) ? 0 : Math.max(0, dist);
+    meter(d);
     if (qn < 512) {                  // a hard ceiling on the queue itself: a
-      const s = frameQ[qn] || (frameQ[qn] = {});   // frame that somehow asks
-      s.name = name; s.d = d; s.opts = opts; s.mine = !!mine;  // for 10k shots
-      qn++;                                        // must not allocate 10k slots
+      const s = frameQ[qn] || (frameQ[qn] = { o: {} });  // frame that somehow
+      s.name = name; s.d = d; s.mine = !!mine;           // asks for 10k shots
+      const o = s.o, i = opts || EMPTY;                  // must not allocate
+      o.dist = i.dist; o.ghost = i.ghost; o.volume = i.volume;   // 10k slots
+      o.pitch = i.pitch; o.delay = i.delay; o.force = i.force;
+      qn++;
     } else M.culled++;
   }
 
@@ -496,7 +507,7 @@
     // hand it back to audio.js exactly as it was asked for. The gun voices,
     // the far-field bus, the compressor and the sample bank are all theirs;
     // this file only ever decided WHETHER.
-    const o = s.opts || voiceOpts;
+    const o = s.o || voiceOpts;
     safe(function () { raw.call(CBZ, s.name, o); });
   }
 
@@ -581,11 +592,94 @@
     M.grains++;
   }
 
+  /* ---- THE MEASUREMENT SEAM ------------------------------------------------
+     battle.js's own "studio seam" doctrine (battle.js:2004): freeze the clock,
+     drive a known input, read the numbers back. This file's whole claim is a
+     number — voices per second under a load of N rifles — and a claim you
+     cannot re-measure is a claim.
+
+     load() puts N rifles on a line and fires them through THE REAL CALL PATH:
+     CBZ.sfx("shoot_*", {dist, ghost, volume, delay}), which is byte for byte
+     the object battle.js builds at battle.js:936. So it cannot cheat — with
+     ?mixer=old the wrapper is transparent and every one of those calls lands
+     in audio.js exactly as a real battle's would.
+
+     THE GEOMETRY IS REAL, not a random number. Three hundred men hold about
+     two hundred metres of front; battle.js's command camera sits tens of
+     metres back and above. dist is therefore hypot(camera-standoff, position
+     along the line, rank depth) for each rifle in turn — which is why a
+     300-man load has a mean distance near 90 m and a 1-rifle load is at the
+     camera's elbow. Seeded, so both sides of an A/B see identical distances.
+
+     RATE: 1.6 rounds/s/rifle. combat_iq hands battle.js a per-shot cooldown
+     (battle.js:1528 `m.cool = r.cd`) that sits around 0.6 s for a rifle in
+     the middle of its ladder; 1/0.62 is 1.6. Not a taste number.
+
+     FRAME CAP: 26 sfx calls per frame, because that is battle.js's own
+     fxBudget (battle.js:920) and the "before" side has to be the shipped
+     before, cap included — otherwise the naive number is one this game never
+     actually produces. */
+  let loadJob = null, loadFired = 0;
+  F.load = function (o) {
+    o = o || {};
+    const n = Math.max(0, o.rifles | 0);
+    if (!n) { loadJob = null; return false; }
+    loadJob = {
+      n: n,
+      rate: o.rate == null ? 1.6 : +o.rate,       // rounds/s per rifle
+      span: o.span == null ? Math.min(240, 14 + n * 0.7) : +o.span,
+      stand: o.stand == null ? 70 : +o.stand,     // camera standoff, metres
+      depth: o.depth == null ? 16 : +o.depth,     // rank depth, metres
+      name: o.name || "shoot_ak47",
+      cap: o.cap == null ? 26 : o.cap | 0,        // battle.js's fxBudget
+      cut: o.cut == null ? 230 : +o.cut,          // battle.js's own sfx cutoff
+      left: o.seconds == null ? 1e9 : +o.seconds,
+      rnd: lcg(o.seed == null ? 0xfee7 : o.seed | 0),
+      debt: 0, fired: 0,
+    };
+    return true;
+  };
+  F.loadOff = function () { loadJob = null; return true; };
+  F.loading = function () { return loadJob ? { rifles: loadJob.n, rate: loadJob.rate, fired: loadJob.fired } : null; };
+
+  const _lo = { dist: 0, ghost: true, volume: 0.8, pitch: 1, delay: 0 };
+  function runLoad(dt) {
+    const J = loadJob;
+    if (!J || J.left <= 0) return;
+    J.left -= dt;
+    J.debt += J.n * J.rate * dt;
+    let thisFrame = 0;
+    while (J.debt >= 1 && thisFrame < J.cap) {
+      J.debt -= 1;
+      /* HALF THE RIFLES ARE YOURS. You stand in your own line, so your men
+         are spread along it around you (a few metres to a few tens) and
+         theirs are the same line's width away across the gap. That split is
+         what the near budget exists to arbitrate: your own line's fire is
+         the fire that has to punch through the wash. */
+      const mine = J.rnd() < 0.5;
+      const along = (J.rnd() - 0.5) * J.span;
+      const back = (J.rnd() - 0.5) * J.depth;
+      const d = mine ? Math.hypot(along * 0.5, back * 0.5 + 8)
+                     : Math.hypot(along, J.stand + back);
+      thisFrame++;
+      if (d > J.cut) continue;             // battle.js does not request these
+      J.fired++; loadFired++;
+      // THE REAL CALL. Not F.shot() — the wrapper, so ?mixer=old is genuinely
+      // the shipped path and not a second opinion about it.
+      _lo.dist = d;
+      _lo.volume = mine ? 0.9 : 0.8;
+      _lo.delay = d > 40 ? d / 343 : 0;    // battle.js:938, speed of sound
+      const sfx = CBZ.sfx;
+      if (sfx) safe(function () { sfx.call(CBZ, J.name, _lo); });
+    }
+    if (J.debt > J.cap) J.debt = J.cap;    // never bank a backlog into a burst
+  }
+
   /* ---- the front doors ---------------------------------------------------- */
   F.shot = function (o) {
     if (OFF) return;
     o = o || {};
-    if (MIXER_OLD) { M.reqAll++; M.voices++; emitVoice({ name: o.name || "shoot_carbine", opts: o.opts }); return; }
+    if (MIXER_OLD) { meter(o.dist || 0); M.voices++; emitVoice({ name: o.name || "shoot_carbine", o: o.opts }); return; }
     pushShot(o.name || "shoot_carbine", o.dist, o.opts, o.mine);
   };
 
@@ -600,13 +694,23 @@
     CBZ.sfx = function (name, opts) {
       // only gunfire is routed. `shoot_*` is weapon-data's own naming and
       // audio.js's GUNS table key — one convention, already established.
+      /* NO PHASE GATE. The first draft only routed gunfire during `battle`,
+         which was a phase test standing in for a load test — and it meant a
+         studio or a campaign skirmish silently took the naive path. The
+         budget already handles the light case correctly: one shot with a full
+         token bucket at close range gets a full discrete voice and a bed
+         density of ~0.02, i.e. exactly what it used to get. So route always,
+         and let the numbers decide. */
       if (!MIXER_OLD && typeof name === "string" && name.charCodeAt(0) === 115 /* s */ &&
-          name.lastIndexOf("shoot_", 0) === 0 && inBattle) {
+          name.lastIndexOf("shoot_", 0) === 0) {
         const d = opts && opts.dist != null ? opts.dist : null;
         pushShot(name, d, opts, !!(opts && opts.dist != null && opts.dist <= OWN_M));
         return null;
       }
-      if (MIXER_OLD && typeof name === "string" && name.lastIndexOf("shoot_", 0) === 0) { M.reqAll++; M.voices++; }
+      if (MIXER_OLD && typeof name === "string" && name.lastIndexOf("shoot_", 0) === 0) {
+        meter(opts && opts.dist != null ? opts.dist : 0);
+        M.voices++;
+      }
       return raw.call(CBZ, name, opts);
     };
     CBZ.sfx.__feel = true;
@@ -1171,7 +1275,10 @@
     const mode = MIXER_OLD ? "NAIVE (mixer=old)" : "MIXER";
     ovl.textContent =
       "FEEL — " + mode + (muted ? "  [MUTED]" : "") + "\n" +
-      "phase " + a.phase + "   ctx " + a.ctxState + "   fps " + a.fps + "\n" +
+      "phase " + a.phase + "   ctx " + a.ctxState +
+        (a.ctxState === "suspended" ? " (no gesture; nodes still minted)" : "") +
+        "   fps " + a.fps + "\n" +
+      (a.load ? "load " + a.load + " rifles @ " + a.loadRate + "/s\n" : "") +
       "-- GUNS ------------------\n" +
       "requested   " + pad(a.reqHz, 6) + " /s   total " + a.reqAll + "\n" +
       "voices      " + pad(a.voiceHz, 6) + " /s   total " + a.voices + "\n" +
@@ -1218,6 +1325,8 @@
       army: COL.n, column: COL.gain, pace: COL.pace,
       moraleMine: MOR.mine, moraleThem: MOR.them, waver: MOR.waver, routing: MOR.routing,
       shake: shakeSpent,
+      load: loadJob ? loadJob.n : 0, loadRate: loadJob ? loadJob.rate : 0,
+      loadFired: loadFired,
       music: MUSIC_ON ? MUS.state : "off",
       reuse: {
         audio: !!(CBZ.__feelRawSfx || CBZ.sfx), hush: !!CBZ.audioHush,
@@ -1231,7 +1340,7 @@
 
   F.reset = function () {
     M.reqAll = M.reqNear = M.reqFar = M.voices = M.grains = M.culled = M.nodes = 0;
-    M.peakVoiceHz = M.peakReqHz = 0;
+    M.peakVoiceHz = M.peakReqHz = 0; loadFired = 0;
     rateHz = 0; M.voiceHz = 0; M.grainHz = 0; M.nodeHz = 0;
     return true;
   };
@@ -1246,6 +1355,7 @@
     dt = dt > 0 && dt < 0.5 ? dt : 1 / 60;
     simT += dt;
     readEar(dt);
+    runLoad(dt);
     flushShots(dt);
     updateAmbience(dt);
     updateColumn(dt);
