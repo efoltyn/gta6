@@ -3665,10 +3665,31 @@
         const hdA = DRIVE(a);
         if (a._baseClear > 0) a.waterClearance = a._baseClear * (1.5 - hdA.bold * 0.5);
         a.bob += dt * (1.2 + a.spd * 0.2);
+        /* A BODY IN THE WATER CANNOT TELEPORT ITS FACING. This used to add the
+           whole random turn to `heading` on ONE FRAME — up to 23 degrees in a
+           thirtieth of a second, which on a twelve-metre orca is not a turn,
+           it is the animal snapping to a new direction, and it is a large part
+           of what the owner sees as "the animation zigzags while it swims
+           straight". The visible yaw of a marine body is exactly -heading, so
+           anything written here lands on the mesh unfiltered.
+
+           THE DRAW IS UNCHANGED (same call, same order, so the stream is not
+           disturbed). What changes is that it names a TARGET and the body
+           swings onto it at a rate, which is the law every other steering path
+           in this file already uses — the herd blend two blocks down, the
+           tamed follow after it, the land wander's own faceH clamp. */
         a.turnT -= dt;
         if (a.turnT <= 0) {
-          a.heading += (Math.random() - 0.5) * 0.8 * hdA.restless;
+          a.wanderH = a.heading + (Math.random() - 0.5) * 0.8 * hdA.restless;
           a.turnT = (3 + Math.random() * 4) / hdA.restless;
+        }
+        if (a.wanderH != null) {
+          let dw = a.wanderH - a.heading;
+          while (dw > Math.PI) dw -= 2 * Math.PI; while (dw < -Math.PI) dw += 2 * Math.PI;
+          if (Math.abs(dw) < 0.004) a.wanderH = null;          // arrived: stop steering
+          // ..and a big body comes round slower than a small one, which is the
+          // whole difference between a whale turning and a sardine flicking.
+          else a.heading += dw * Math.min(1, dt * 3.0 / (0.6 + SZ(a)));
         }
         /* ---- A SCHOOL IS A SCHOOL. -------------------------------------
            This block existed twice in this file — once in landWalk and once

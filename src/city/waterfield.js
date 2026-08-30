@@ -709,23 +709,158 @@
   const FEELER_TIE = 0.06;      // |feeler error| under which last frame's side is held
   const TANGENT_HYST = 0.25;    // dot-product margin before the tangent may flip
 
-  function moveInWater(x, z, heading, distance, clearance, t, out) {
-    distance = Math.max(0, +distance || 0);
-    clearance = Math.max(2, +clearance || 8);
+  /* ============================================================
+     ..AND WHAT v2 STILL GOT WRONG (owner, 2026-08-30: "orcas move way too
+     right-to-left, glitchy — it's not the orca MOVING right to left, it's the
+     ANIMATION of an orca swimming straight that looks like it's zigzagging").
+
+     MEASURED, tools/orca-swim-check.mjs (in the shark sim, so on the island's
+     copy of this body — world/water_survival.js's islandMove, which carried
+     the same two faults and is now this same solver): an orca in 400 units of
+     open water, with `blocked` false on every frame and no shore anywhere
+     near it, turns +0.76 DEGREES PER FRAME — every frame, forever. 23 deg/s,
+     a 27 u circle, never once straight. The visible yaw of a marine body is
+     -a.heading (nothing in the tail rig touches yaw; that was checked by
+     trapping every write to the euler), so a heading that is always turning
+     IS the zigzag, and it snaps 5.8 deg in a single frame once a coast is
+     within reach.
+
+     TWO FAULTS, and v2 introduced neither — it inherited both and then hid
+     them behind a filter that switches itself off exactly when it is needed.
+
+     1. AVOIDANCE HAS FULL AUTHORITY AT ANY RANGE INSIDE `clearance`, and
+        `clearance` is a SPAWN standoff, not a steering radius. An orca
+        declares 110 (the largest in the bestiary — the megalodon asks for
+        88), the hunger lean multiplies it to as much as 165, and the "near
+        land, drift inward" band is a further 3.4x on top: 374 units. Inside
+        all of that the caller's own heading was simply DISCARDED and replaced
+        by a shore-avoidance vector. A whale a quarter-kilometre from the
+        nearest sand was being steered as if it were about to run aground, so
+        it never swam anywhere straight.
+
+     2. THE LOW-PASS ON `desired` SATURATES, AND THEN IT STEERS. The constant
+        was `min(1, distance * 0.9 + 0.02)`: that reaches 1.0 — no filtering
+        whatever — at 1.09 u per frame, and a cruising orca covers 1.5 to 4.0.
+        Worse, `out._des` persists across frames with nothing that ever resets
+        it, so in genuinely open water (where `desired` is just `heading`) the
+        stale target and the capped heading chase each other and lock into a
+        CONSTANT-RATE TURN. That is the 0.76 deg/frame above, exactly: two
+        first-order lags and a rate cap, circling.
+
+     THE FIX KEEPS v2's LAW (steering rides distance actually moved) and gives
+     it the two things it was missing:
+
+       URGENCY. Every avoidance term is scaled by how close the shore actually
+       is as a FRACTION of the band it is being judged against — 0 at the far
+       edge, 1 at the waterline. A shore 400 u off now bends the course by
+       nothing; one under the belly still turns the animal hard.
+
+       A FILTER THAT REMEMBERS THE SEA, NOT THE TURN. Nothing about the
+       animal's own course survives a frame any more: what is low-passed and
+       carried in the nav object is the world-space direction of safe water
+       and the lateral feeler error — facts about the shore — and the steering
+       target is then rebuilt from the CURRENT heading every frame, so it
+       stays self-limiting and can never lag into a fight with the caller. In
+       open water nothing is remembered at all. See THE FILTER below for why
+       the two obvious alternatives (filtering the target, filtering the
+       correction) both fail.
+     ============================================================ */
+  const DRIFT_LEN = 0.30;       // x clearance — steering filter length, relaxed
+  const URGENT_LEN = 1.2;       // u — ..and hard against a shore, where it must react
+  const HERE_BAND = 3.4;        // x clearance — outer edge of the "near land" pull
+
+  // 0 where the shore is still a whole band away, 1 where it is on the body.
+  function urgency(s, band) {
+    const u = (s + band) / band;
+    return u <= 0 ? 0 : u >= 1 ? 1 : u;
+  }
+
+  /* ============================================================
+     THE STEERING SOLVER — ONE COPY, TWO SEAS.
+
+     This logic used to exist TWICE: here, and again in world/water_survival.js
+     as `islandMove`, which is a hand port of an older revision of this
+     function for the survival island's sea (its shore is derived from flood
+     DEPTH, because the city continent is never built out there). That file's
+     own comment records the last time the two drifted — "SAME STEERING SHAPE
+     WAS A LIE UNTIL NOW" — and they had drifted again by the time the orca
+     zigzag was measured, because the fix below landed here and the island
+     kept the old body. So there is now one solver and two SHORE ORACLES,
+     which is the only thing that ever genuinely differed.
+
+       shoreAt(x, z)        signed distance to land; >= 0 IS land
+       inwardAt(x, z, o)    unit vector toward safe water, written into o
+
+     Returns the steered heading. The step itself, the current, and the
+     navigability test stay with each caller — those parts really are
+     different seas.
+     ============================================================ */
+  const _inw = { x: 0, z: 0 };
+
+  /* THE FILTER, AND WHAT IT IS ALLOWED TO REMEMBER.
+
+     Capping the turn alone still lets a feeler reading that flips between two
+     frames drive the body to the cap in one direction and then the other — the
+     square wave you can see on the marine-tail steering page. So something has
+     to be low-passed, and WHICH THING decides whether the navigator can fight
+     the caller.
+
+     It used to be `desired`, an absolute heading. That is a target the body is
+     chasing, so a stale one keeps pulling it back toward a course it has
+     already left; with the caller re-steering every frame the two lags locked
+     into a constant-rate turn, and an orca in 400 units of open water circled
+     at 23 deg/s without one frame of straight swimming. Filtering the CHANGE
+     instead is worse still: a correction re-applied every frame integrates
+     rather than converging, and the body turns further the longer it is
+     applied.
+
+     What is filtered here is the SHORE — the world-space direction of safe
+     water, and the lateral feeler error. Those are facts about the sea, not
+     about the animal's course, so smoothing them cannot fight anything the
+     caller wants; the target is then rebuilt from the CURRENT heading each
+     frame and stays self-limiting. In open water nothing is remembered at all.
+
+     `1 - exp(-distance / len)` composes exactly under subdivision, so this is
+     the same filter at 30, 60 and 144 fps — the linear ramp it replaces only
+     approximated that, and only below 1.09 u/frame, while a cruising orca
+     covers 1.5 to 4.0 and so got no filtering whatsoever. `len` is the
+     animal's own scale while it is relaxed and collapses to ~1 u when it is
+     hard against a beach, so a whale glides and a fish in the surf reacts. */
+  function filterK(distance, clearance, urg) {
+    const len = Math.max(URGENT_LEN, clearance * DRIFT_LEN * (1 - urg) + URGENT_LEN * urg);
+    return 1 - Math.exp(-distance / len);
+  }
+  function smoothAvoid(out, avoid, distance, clearance, urg) {
+    if (!out) return avoid;
+    out._avoid = (out._avoid != null && isFinite(out._avoid))
+      ? out._avoid + angleDelta(out._avoid, avoid) * filterK(distance, clearance, urg)
+      : avoid;
+    return out._avoid;
+  }
+  function forget(out) { out._side = 0; out._tan = 0; out._avoid = null; out._err = 0; }
+
+  function steerHeading(x, z, heading, distance, clearance, out, shoreAt, inwardAt) {
     const v2 = CFG.MARINE_STEER_V2 !== false;
     const probe = Math.max(10, Math.min(44, distance * 6 + clearance * 1.4));
     const hx = Math.cos(heading), hz = Math.sin(heading);
-    const frontS = coastAt(x + hx * probe, z + hz * probe);
+    const frontS = shoreAt(x + hx * probe, z + hz * probe);
     const leftA = heading - 0.72, rightA = heading + 0.72;
-    const leftS = coastAt(x + Math.cos(leftA) * probe * 0.82, z + Math.sin(leftA) * probe * 0.82);
-    const rightS = coastAt(x + Math.cos(rightA) * probe * 0.82, z + Math.sin(rightA) * probe * 0.82);
+    const leftS = shoreAt(x + Math.cos(leftA) * probe * 0.82, z + Math.sin(leftA) * probe * 0.82);
+    const rightS = shoreAt(x + Math.cos(rightA) * probe * 0.82, z + Math.sin(rightA) * probe * 0.82);
+    // v2's target is always expressed RELATIVE TO THE CALLER'S HEADING and
+    // recomputed from scratch each frame, so it is self-limiting: as the body
+    // swings onto it the remaining error shrinks to nothing. What persists
+    // across frames is the SHORE, never the turn — see the filter below.
     let desired = heading;
+    let urg = 0;                  // how close the thing being dodged really is
 
     if (frontS >= -clearance) {
-      const n = shoreGradient(x + hx * probe * 0.5, z + hz * probe * 0.5, 7, _grad);
+      urg = v2 ? urgency(frontS, clearance) : 1;
+      inwardAt(x + hx * probe * 0.5, z + hz * probe * 0.5, _inw);
+      const ax = _inw.x, az = _inw.z;
       // Blend inward with the tangent closest to the current direction. This
       // makes animals follow a bay instead of repeatedly headbutting its edge.
-      const tx1 = -n.z, tz1 = n.x, tx2 = n.z, tz2 = -n.x;
+      const tx1 = -az, tz1 = ax, tx2 = az, tz2 = -ax;
       const d1 = tx1 * hx + tz1 * hz, d2 = tx2 * hx + tz2 * hz;
       let useFirst = d1 >= d2;
       if (v2) {
@@ -734,8 +869,14 @@
         if (out) out._tan = useFirst ? 1 : -1;
       }
       const tx = useFirst ? tx1 : tx2, tz = useFirst ? tz1 : tz2;
-      desired = Math.atan2(-n.z * 0.82 + tz * 0.58, -n.x * 0.82 + tx * 0.58);
+      const avoid = Math.atan2(az * 0.82 + tz * 0.58, ax * 0.82 + tx * 0.58);
+      // BLENDED BY RANGE, not switched on at full strength the moment a coast
+      // enters the band. At the outer edge this is nothing; at the waterline
+      // it is the whole avoidance vector.
+      desired = v2 ? heading + angleDelta(heading, smoothAvoid(out, avoid, distance, clearance, urg)) * urg
+                   : avoid;
     } else if (v2 && (leftS >= -clearance || rightS >= -clearance)) {
+      urg = Math.max(urgency(leftS, clearance), urgency(rightS, clearance));
       // PROPORTIONAL, NOT BANG-BANG. v1 slammed `desired` a fixed 0.72 rad to
       // one side the instant either feeler touched, so a body running down a
       // channel crossed the centre line and slammed back the other way — every
@@ -751,41 +892,55 @@
         err = prev * FEELER_TIE;
       }
       if (out && err !== 0) out._side = err > 0 ? 1 : -1;
-      desired = heading + err * 0.72;
+      if (out) {
+        const k = filterK(distance, clearance, urg);
+        out._err = isFinite(out._err) ? out._err + (err - out._err) * k : err;
+        err = out._err;
+      }
+      desired = heading + err * 0.72 * urg;
     } else if (!v2 && leftS >= -clearance && rightS < leftS) {
       desired = rightA;
     } else if (!v2 && rightS >= -clearance && leftS < rightS) {
       desired = leftA;
     } else {
-      const here = coastAt(x, z);
-      if (here > -clearance * 3.4) {
-        const n = shoreGradient(x, z, 7, _grad);
-        const inward = Math.atan2(-n.z, -n.x);
+      const here = shoreAt(x, z);
+      const band = clearance * HERE_BAND;
+      if (here > -band) {
+        inwardAt(x, z, _inw);
+        const inward = Math.atan2(_inw.z, _inw.x);
         // v1 pulled 18% of the way inward EVERY FRAME (a ~0.09 s time constant
         // at 60fps) and fought whatever the caller was steering toward, which
-        // is the other half of the left-right limit cycle.
-        const pull = v2 ? Math.min(0.18, distance * 0.22) : 0.18;
-        desired = heading + angleDelta(heading, inward) * pull;
-      } else if (v2 && out) { out._side = 0; out._tan = 0; }   // open water: forget
+        // is the other half of the left-right limit cycle. v2 tied it to
+        // distance travelled; it is now ALSO tied to range, because for an orca
+        // this band is 374 units wide and full strength at its far edge is not
+        // a course correction, it is a permanent turn.
+        urg = v2 ? urgency(here, band) : 1;
+        const pull = v2 ? Math.min(0.18, distance * 0.22) * urg : 0.18;
+        const aim = v2 ? smoothAvoid(out, inward, distance, clearance, urg) : inward;
+        desired = heading + angleDelta(heading, aim) * pull;
+      } else if (v2 && out) { forget(out); }                   // open water: forget
     }
 
-    // THE STEERING TARGET HAS INERTIA TOO. Capping the turn alone still lets a
-    // feeler reading that flips between two frames drive the body to the cap in
-    // one direction and then the other — the square wave you can see on the
-    // marine-tail steering page. `desired` is therefore low-passed in the
-    // caller's own persistent nav object, and the filter constant rides
-    // DISTANCE TRAVELLED like everything else here, so it is the same filter at
-    // any frame rate. A genuine shore does not disappear in three frames; a
-    // sampling flip does.
-    if (v2 && out) {
-      if (out._des != null && isFinite(out._des)) {
-        desired = out._des + angleDelta(out._des, desired) * Math.min(1, distance * 0.9 + 0.02);
-      }
-      out._des = desired;
-    }
     // Turn rate is capped, preventing instant 180-degree pops at shorelines.
     const cap = v2 ? Math.min(0.34, Math.max(TURN_FLOOR, distance * TURN_PER_UNIT)) : 0.34;
-    heading += Math.max(-cap, Math.min(cap, angleDelta(heading, desired)));
+    return { heading: heading + Math.max(-cap, Math.min(cap, angleDelta(heading, desired))),
+             shore: frontS };
+  }
+  CBZ.waterSteer = steerHeading;
+
+  // The city's inward normal: the sampled shore gradient points AT land, so
+  // safe water is the other way.
+  function cityInward(x, z, o) {
+    const n = shoreGradient(x, z, 7, _grad);
+    o.x = -n.x; o.z = -n.z;
+    return o;
+  }
+
+  function moveInWater(x, z, heading, distance, clearance, t, out) {
+    distance = Math.max(0, +distance || 0);
+    clearance = Math.max(2, +clearance || 8);
+    const st = steerHeading(x, z, heading, distance, clearance, out, coastAt, cityInward);
+    heading = st.heading;
     let nx = x + Math.cos(heading) * distance;
     let nz = z + Math.sin(heading) * distance;
     const cur = currentAt(x, z, t, _cur);
@@ -794,7 +949,7 @@
     let blocked = !isNavigableWater(nx, nz, clearance * 0.55);
     if (blocked) { nx = x; nz = z; }
     out = out || {};
-    out.x = nx; out.z = nz; out.heading = heading; out.blocked = blocked; out.shore = frontS;
+    out.x = nx; out.z = nz; out.heading = heading; out.blocked = blocked; out.shore = st.shore;
     return out;
   }
 

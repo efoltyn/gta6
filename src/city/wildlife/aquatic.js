@@ -2340,10 +2340,22 @@
           thick: 0.24, spanSteps: 5, chordSteps: 4, under: true,
           spanDir: [0, 0, s2], chordDir: [1, 0, 0],
         });
-        const e = new T.Mesh(cachedGeom("eye|0.105", function () {
-          return new T.SphereGeometry(0.105, 8, 6);
+        /* THE EYE. A great hammerhead's eye is SMALL — it is the cephalofoil
+           that is wide, and putting them a metre apart is what sells the head.
+           This one was a full round r=0.105 sphere: on a 1.25x animal that is
+           a 26 cm eyeball, twice the great white's (0.055) and bigger than the
+           megalodon's (0.085) on a body a quarter the size, and it stood proud
+           of the wing tip (1.27 + 0.105 > the 1.30 the wing ends at) because,
+           unlike every other eye in this file, it never got the flatten the
+           shared face builder applies. So it read as a googly eye stuck on a
+           stick. Same radius and the same (0.85, 1, 0.6) squash as the rest of
+           the bestiary now: sunk into the end of the wing, where it lives. */
+        const e = new T.Mesh(cachedGeom("eye|0.052", function () {
+          return new T.SphereGeometry(0.052, 8, 6);
         }), eye);
-        e.name = "sharkEye"; e.position.set(1.90, 0.925, s2 * 1.27); g.add(e);
+        e.name = "sharkEye"; e.position.set(1.90, 0.925, s2 * 1.27);
+        e.scale.set(0.85, 1, 0.6);
+        g.add(e);
       });
       addSharkFaceDetails(g, T, m, {
         rings: HH_RINGS, eyeSize: 0, eyeX: 0, eyeY: 0, eyeZ: 0, dark: 0x0d1114,

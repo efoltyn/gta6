@@ -504,7 +504,14 @@
      Same 55/75 m hysteresis the text used: the threshold keeps its meaning,
      only its expression changed. */
   const podLocked = [];              // the orcas currently in the read
-  const POD_TURN = 0.11;             // rad per scan of steering authority we borrow
+  // Steering authority borrowed from the pod's own mover, as a RATE. It used
+  // to be 0.11 rad "per scan" — and the scan is 5 Hz, so the whole 0.11 was
+  // dumped on the one frame the scan landed on and nothing happened for the
+  // six frames between it: a 6.3-degree SNAP, five times a second, on top of
+  // whatever the mover was already turning. That is the same authority this
+  // rate carries (0.11 / 0.2 s), spread over the frames it belongs to, which
+  // is what the comment at the convergence has always claimed it did.
+  const POD_TURN_RATE = 0.55;        // rad/s
   function podRestore() {
     podLocked.length = 0;
     sim._podClose = false;
@@ -519,34 +526,47 @@
     const P = CBZ.player;
     sim.podScanT = (sim.podScanT || 0) - dt;
     sim.podWakeT = (sim.podWakeT || 0) - dt;
-    if (sim.podScanT > 0 && sim.podWakeT > 0) return;
     const scan = sim.podScanT <= 0;
-    if (scan) sim.podScanT = 0.2;
-    let near = 1e9, nearest = null;
-    podLocked.length = 0;
-    orcas(function (a) {
-      const d = Math.hypot(a.pos.x - P.pos.x, a.pos.z - P.pos.z);
-      if (d < near) { near = d; nearest = a; }
-      if (d > 110) return;
-      podLocked.push(a);
-    });
-    // enter at 55 m, let go at 75 — a read that flickers is a read ignored
     const was = !!sim._podClose;
-    sim._podClose = near < (was ? 75 : 55);
+    let nearest = null;
+    if (scan) {
+      sim.podScanT = 0.2;
+      let near = 1e9;
+      podLocked.length = 0;
+      orcas(function (a) {
+        const d = Math.hypot(a.pos.x - P.pos.x, a.pos.z - P.pos.z);
+        if (d < near) { near = d; nearest = a; }
+        if (d > 110) return;
+        podLocked.push(a);
+      });
+      // enter at 55 m, let go at 75 — a read that flickers is a read ignored
+      sim._podClose = near < (was ? 75 : 55);
+    }
+    /* THE CONVERGENCE IS PER FRAME, THE SCAN IS NOT. The whole body of this
+       function used to sit behind the scan/wake gate, so the one thing in it
+       that touches an animal's TRANSFORM ran at 5 Hz and moved it in steps.
+       The scan (who is in the read, is the pod close) genuinely does not need
+       to run every frame; a heading does. */
+    if (sim._podClose) {
+      for (let i = 0; i < podLocked.length; i++) {
+        const a = podLocked[i];
+        if (a.dead || a.heading == null) continue;
+        // CONVERGE. Borrowed authority, not seized: a clamped turn toward the
+        // bearing to you, so the mover keeps owning the turn and the fins come
+        // round rather than snapping. Only while the lock holds.
+        const want = Math.atan2(P.pos.z - a.pos.z, P.pos.x - a.pos.x);
+        const dh = shortest(want - a.heading);
+        const step = POD_TURN_RATE * dt;
+        a.heading += Math.max(-step, Math.min(step, dh));
+        if (a._waterMove) a._waterMove.heading = a.heading;
+      }
+    }
+    if (!scan && sim.podWakeT > 0) return;         // nothing left to do this frame
     for (let i = 0; i < podLocked.length; i++) {
       const a = podLocked[i];
       const d = Math.hypot(a.pos.x - P.pos.x, a.pos.z - P.pos.z);
       a.hunger = Math.max(a.hunger || 0, sim._podClose ? 1 : 0.9);
       const k = Math.max(0, Math.min(1, (d - 18) / 92));
-      // CONVERGE. Borrowed authority, not seized: a clamped step toward the
-      // bearing to you, so the mover keeps owning the turn and the fins come
-      // round rather than snapping. Only while the lock holds.
-      if (scan && sim._podClose && a.heading != null) {
-        const want = Math.atan2(P.pos.z - a.pos.z, P.pos.x - a.pos.x);
-        const dh = shortest(want - a.heading);
-        a.heading += Math.max(-POD_TURN, Math.min(POD_TURN, dh));
-        if (a._waterMove) a._waterMove.heading = a.heading;
-      }
       // THE WAKE, behind the fin, faster the nearer it is.
       if (sim.podWakeT <= 0 && CBZ.marineSurfaceHit && d < 95) {
         const L = CBZ.marineBodyLen ? CBZ.marineBodyLen(a) : 7;
