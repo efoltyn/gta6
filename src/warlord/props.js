@@ -170,37 +170,45 @@
      photographs the lighting the game actually ships so the pictures are of
      the game rather than of a corrected version of it.
 
-     THE ANSWER: author for CONTRAST AGAINST THE GROUND rather than for a
-     remembered colour. desert.js's sand runs 0.34-0.52 linear
-     (C_SAND_LO/HI); everything here that has to READ against that sand is
-     authored at 0.10-0.30 linear, which looks like mud in an editor and
-     like a weathered desert object on screen. Five entries below are
-     desert.js's own scatter values verbatim — a boulder this file draws and
-     a boulder desert.js instances are the same rock and must never be two
-     different browns. */
+     THE ANSWER, ARRIVED AT WITH A CALCULATOR AND THEN A PHOTOGRAPH: work
+     backwards from the pixel. screen = sRGB(ACES(colour x light)). For a
+     prop to land at a mid 0.5 on screen it needs ACES output 0.22, which
+     needs a lit value of ~0.15, which at this scene's ~2.3 of effective sun
+     means a stored colour of ~0.065 — hex 0x11. Every value below is that
+     arithmetic, and they look like mud in an editor because linear
+     authoring for a bright sun looks like mud in an editor.
+
+     WHICH MAKES desert.js's SAND A PROBLEM WORTH NAMING, not copying. Its
+     C_SAND runs 0.34-0.52 linear; through the same chain that arrives at
+     0xE8-0xF1, so the island's entire tonal range is four percent of the
+     screen's, at the top. An earlier pass here matched those numbers exactly
+     "so a boulder is the same brown in both files" and the boulders came out
+     white. Matching a white is matching nothing. These are the same colours
+     scaled by 0.40 — the same multiplier desert.js's own palette wants — so
+     the two stay in step the moment either is corrected. */
   const COL = {
-    sand:       0x7a6238,   // the pad only — between desert.js's C_SAND_LO/HI
-    sandDark:   0x574024,   // = desert.js C_SAND_LO exactly
-    canvas:     0x6b5f42,   // tent cloth, sun-bleached
-    canvasDark: 0x473c26,
-    tarp:       0x2f2b20,
-    wood:       0x2c2110,
-    woodDark:   0x1a1409,
-    metal:      0x30363d,
-    metalDark:  0x161a1f,
-    rust:       0x3c1f0e,
-    char:       0x0c0a08,   // what a burnt thing is
-    rock:       0x453b2f,   // = desert.js's scatter rock, exactly
-    rockDark:   0x2b2419,
-    palmTrunk:  0x33270f,   // = desert.js's oasis palm trunk, exactly
-    frond:      0x1c3b12,   // = desert.js's oasis palm frond, exactly
-    bone:       0x77705d,
-    rope:       0x4a3d28,
-    hide:       0x2e1e10,
-    water:      0x123c47,
-    boxRed:     0x53200f,
-    boxBlue:    0x0f2937,
-    boxGreen:   0x1a2d1c,
+    sand:       0x312716,   // the gallery pad
+    sandDark:   0x231a0e,
+    canvas:     0x2b261a,   // tent cloth, sun-bleached
+    canvasDark: 0x1c180f,
+    tarp:       0x13110d,
+    wood:       0x120d06,
+    woodDark:   0x0a0805,
+    metal:      0x131618,
+    metalDark:  0x090a0c,
+    rust:       0x180c06,
+    char:       0x060605,   // what a burnt thing is
+    rock:       0x1c1813,
+    rockDark:   0x110e0a,
+    palmTrunk:  0x141006,
+    frond:      0x0b1807,
+    bone:       0x302d25,
+    rope:       0x1e1810,
+    hide:       0x120c06,
+    water:      0x07181c,
+    boxRed:     0x210d06,
+    boxBlue:    0x061016,
+    boxGreen:   0x0a120b,
     ember:      0xff7a2a,
   };
   const _mats = {};

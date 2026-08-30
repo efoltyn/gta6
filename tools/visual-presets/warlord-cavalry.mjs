@@ -173,15 +173,15 @@ async function stageCavalry(input) {
        the head 150 m from the camera's own look-at and photographed empty
        sand on both sides. */
     subject = MS.column(root, {
-      n: 12, kind: sub.kind, x: 0, z: 0, yaw: 0.05, spacing: 3.8, heightAt,
+      n: 9, kind: sub.kind, x: 0, z: 0, yaw: 0.05, spacing: 4.0, heightAt,
     });
     /* IN CLOSE ENOUGH TO SEE A HORSE. The first framing held the column in
        shot and made every rider four pixels tall, which answers "did they
        move" and not "is that a horse". 63 m of stand-off holds the 45 m
        column plus the ~24 m the mounted side covers over the strip, at a
        three-quarter angle so the column has depth instead of being a row. */
-    camPos = [42, 15, 26];
-    camTarget = [-4, 2.5, -16];
+    camPos = [32, 12, 24];
+    camTarget = [-2, 2.5, -13];
   } else {
     /* THE GAP HAS TO BE CROSSABLE INSIDE THE STRIP. The first version put the
        line 78 m from the start; five frames 0.45 s apart is 1.8 s, a gallop
@@ -190,15 +190,18 @@ async function stageCavalry(input) {
        27 m at 15 m/s lands the first impact at ~1.8 s, which is frame four of
        a 0.6 s strip: two frames closing, one landing, one aftermath. */
     subject = MS.charge(root, {
-      kind: sub.kind, cav: 12, inf: 26, lineZ: 4, startZ: -23, heightAt,
+      kind: sub.kind, cav: 12, inf: 26, lineZ: 2, startZ: -20, heightAt,
     });
     /* BOTH FORMATIONS, WHOLE, WITH THE ACTION IN THE MIDDLE OF THE FRAME.
        The first camera put the wedge half off the right edge on frame one
        and left the bottom two-thirds of the picture as empty sand. Standing
-       off 50 m on the flank gives ~58 m of frame width, which holds the line
-       at z=+8, the wedge's tail at z=-33, and the ~36 m it covers. */
-    camPos = [48, 17, -8];
-    camTarget = [-2, 1.5, -8];
+       off 52 m on the flank gives ~58 m of frame width, which holds the line
+       at z=+2, the wedge's tail at z=-30, and the ~36 m it rides through —
+       and it centres the IMPACT rather than the empty ground before it, so
+       the strip's last frame is the wedge inside the line and not the wedge
+       leaving the picture. */
+    camPos = [50, 17, -6];
+    camTarget = [-2, 1.6, -6];
   }
   st.subject = subject;
 

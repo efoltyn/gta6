@@ -1417,8 +1417,12 @@
     // nose toward +X, wheels on the ground at y=0 — the bestiary's convention,
     // kept here so the bake and the saddle solver do not need a special case
     box(3.9, 0.28, 1.9, DARK, 0, 0.62, 0);            // chassis
-    box(1.5, 0.78, 1.86, TAN, 0.55, 1.1, 0);          // cab
-    box(0.9, 0.5, 1.7, GLASS, 1.28, 1.28, 0);         // windscreen
+    /* A CAB THAT CLEARS THE BED SIDES. At 0.78 high it topped out at 1.49
+       against bed rails at 1.41, and in a side-on still the truck read as an
+       open trough with a lump in it rather than as a pickup. */
+    box(1.5, 1.05, 1.86, TAN, 0.55, 1.32, 0);         // cab
+    box(0.9, 0.52, 1.7, GLASS, 1.3, 1.5, 0);          // windscreen
+    box(1.56, 0.1, 1.9, TAN_D, 0.5, 1.86, 0);         // roof lip
     box(1.0, 0.62, 1.86, TAN_D, 1.55, 0.95, 0);       // bonnet
     box(0.28, 0.3, 1.7, DARK, 2.05, 0.82, 0);         // grille
     box(1.9, 0.46, 1.86, TAN, -1.0, 0.98, 0);         // bed floor
@@ -1459,13 +1463,16 @@
     if (CBZ.buildActorWeapon) {
       try {
         const gun = CBZ.buildActorWeapon("lmg");
-        gun.scale.multiplyScalar(1.9);
+        /* 1.35, NOT 1.9. At 1.9 the M249's barrel reached past the truck's own
+           bonnet — the picture read as a gun with a car attached. A pintle
+           gun is about a third longer than a carried one, not double. */
+        gun.scale.multiplyScalar(1.35);
         gun.rotation.set(0, 0, 0);
         gun.rotation.y = -Math.PI / 2;                 // held -Z becomes the truck's +X
         /* AT THE GUNNER'S HANDS, not at a height that looked right on its own.
            He stands on the deck at 1.23 with the rig's own hip at ~0.63, so
            his grip sits near 1.95 — the gun is placed to meet it. */
-        gun.position.set(-0.45, 1.96, 0);
+        gun.position.set(-0.62, 1.96, 0);
         g.add(gun);
       } catch (e) {}
     }
