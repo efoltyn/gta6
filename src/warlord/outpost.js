@@ -376,17 +376,31 @@
   .wl-op-tabs{display:flex;gap:8px;margin:14px 0 6px}
   .wl-op-tabs .wl-btn{padding:8px 16px;font-size:12px}
   .wl-op-tabs .wl-btn.on{border-color:var(--hot);background:rgba(255,138,61,.16);color:#ffd7bd}
-  .wl-op-row{display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:center;
+  /* THE ROW IS FLEX, NOT GRID, and that is a repair rather than a preference:
+     as a two-column grid a name that wrapped ("BOLT SNIPER · 2 IN CART" at
+     393pt) pushed the stat line into a third grid row and the price button
+     stopped lining up with anything. Flex with one text block that is allowed
+     to shrink puts the tap target on the right at every width. */
+  .wl-op-row{display:flex;gap:10px;align-items:center;
     padding:10px 0;border-bottom:1px solid rgba(255,255,255,.07)}
   .wl-op-row:last-child{border-bottom:0}
+  .wl-op-txt{flex:1;min-width:0}
   .wl-op-nm{font-size:14px;letter-spacing:.03em}
-  .wl-op-st{font-size:10.5px;letter-spacing:.05em;opacity:.5;font-variant-numeric:tabular-nums}
-  .wl-op-act{grid-column:2;grid-row:1/span 2;display:flex;gap:6px;align-items:center;flex-shrink:0}
-  .wl-op-act .wl-btn{padding:9px 12px;font-size:13px;font-variant-numeric:tabular-nums}
-  .wl-op-act .wl-btn.mini{padding:9px 8px;font-size:11px;opacity:.7}
-  .wl-op-left{font-size:10.5px;letter-spacing:.12em;opacity:.5;min-width:44px;text-align:right}
-  .wl-op-row.gone{opacity:.34}
-  .wl-op-row.gone .wl-op-left{color:var(--blood);opacity:.85}
+  .wl-op-st{font-size:10.5px;letter-spacing:.05em;opacity:.5;font-variant-numeric:tabular-nums;margin-top:2px}
+  .wl-op-act{display:flex;gap:6px;align-items:center;flex-shrink:0}
+  .wl-op-act .wl-btn{padding:10px 13px;font-size:13px;font-variant-numeric:tabular-nums}
+  .wl-op-act .wl-btn.mini{padding:10px 9px;font-size:11px;opacity:.7}
+  /* HOW MANY ARE LEFT is the whole design, so it rides on the name line where
+     it is read, not in a fixed column that stole 44px of the name's width. */
+  .wl-op-left{font-size:10.5px;letter-spacing:.12em;opacity:.55}
+  .wl-op-row.gone{opacity:.4}
+  .wl-op-row.gone .wl-op-left{color:var(--blood);opacity:.9}
+  /* THE STRIP OVERLAPS EVERYTHING. #hud is fixed to the top of the page and
+     #stage's own padding is 18px, so at phone width the persistent MEN/$/DAY
+     line sat straight on top of this screen's title. Every screen that shows
+     the strip clears it here. (It is the shell's padding that is really
+     wrong; this file cannot reach it.) */
+  .wl-hudpad{padding-top:calc(env(safe-area-inset-top,0px) + 30px)}
   .wl-op-note{font-size:11.5px;letter-spacing:.06em;opacity:.62;line-height:1.5}
   .wl-op-note b{color:var(--hot);font-weight:600}
   @media (max-width:420px){
@@ -426,12 +440,12 @@
 
   function head(o) {
     const K = KINDS[o.kind] || KINDS.depot;
-    const S = W.state;
     return '<div class="wl-op-top">' +
         '<h1 class="wl-h" style="margin:0">' + o.name + '</h1>' +
       '</div>' +
-      '<p class="wl-sub" style="margin:-8px 0 12px">' + K.label + '  ·  ' + K.tag +
-        '  ·  DAY ' + S.day + '  ·  <span class="wl-gold">$' + S.gold + '</span></p>';
+      /* the persistent strip is already showing MEN / $ / DAY two centimetres
+         above this line — printing them again was the same numbers twice. */
+      '<p class="wl-sub" style="margin:-8px 0 12px">' + K.label + '  ·  ' + K.tag + '</p>';
   }
 
   function footer() {
@@ -465,10 +479,11 @@
         const broke = p > S.gold, out = n <= 0;
         const have = S.baggage[id] || 0;
         h += '<div class="wl-op-row' + (broke || out ? " gone" : "") + '">' +
-          '<div class="wl-op-nm">' + W.gunLabel(id) + (have ? ' <span class="wl-dim wl-small">· ' + have + ' IN CART</span>' : '') + '</div>' +
+          '<div class="wl-op-txt"><div class="wl-op-nm">' + W.gunLabel(id) +
+            '  <span class="wl-op-left">' + (out ? "NONE LEFT" : n + " LEFT") + '</span>' +
+            (have ? ' <span class="wl-dim wl-small">· ' + have + ' IN CART</span>' : '') + '</div>' +
           '<div class="wl-op-st">' + statLine(id) + '</div>' +
-          '<div class="wl-op-act">' +
-            '<span class="wl-op-left">' + (out ? "NONE" : n + " LEFT") + '</span>' +
+          '</div><div class="wl-op-act">' +
             '<button class="wl-btn' + (broke || out ? "" : " hot") + '" data-buy="' + id + '" data-n="1"' +
               (broke || out ? " disabled" : "") + '>$' + p + '</button>' +
             (n >= 5 && p * 5 <= S.gold ? '<button class="wl-btn mini" data-buy="' + id + '" data-n="5">×5</button>' : '') +
@@ -484,10 +499,11 @@
           const broke = p > S.gold, out = n <= 0;
           const have = S.armourBag[A.id] || 0;
           h += '<div class="wl-op-row' + (broke || out ? " gone" : "") + '">' +
-            '<div class="wl-op-nm">' + A.label + (have ? ' <span class="wl-dim wl-small">· ' + have + ' IN CART</span>' : '') + '</div>' +
+            '<div class="wl-op-txt"><div class="wl-op-nm">' + A.label +
+              '  <span class="wl-op-left">' + (out ? "NONE LEFT" : n + " LEFT") + '</span>' +
+              (have ? ' <span class="wl-dim wl-small">· ' + have + ' IN CART</span>' : '') + '</div>' +
             '<div class="wl-op-st">SOAK ' + A.soak + '  ·  SPEED −' + Math.round(A.slow * 100) + '%  ·  ' + A.note + '</div>' +
-            '<div class="wl-op-act">' +
-              '<span class="wl-op-left">' + (out ? "NONE" : n + " LEFT") + '</span>' +
+            '</div><div class="wl-op-act">' +
               '<button class="wl-btn' + (broke || out ? "" : " hot") + '" data-abuy="' + A.id + '"' +
                 (broke || out ? " disabled" : "") + '>$' + p + '</button>' +
             '</div></div>';
@@ -501,9 +517,9 @@
       for (let i = 0; i < ids.length; i++) {
         const id = ids[i], n = S.baggage[id], p = sellPrice(o, id);
         h += '<div class="wl-op-row">' +
-          '<div class="wl-op-nm">' + W.gunLabel(id) + ' <span class="wl-dim wl-small">×' + n + '</span></div>' +
+          '<div class="wl-op-txt"><div class="wl-op-nm">' + W.gunLabel(id) + ' <span class="wl-dim wl-small">×' + n + '</span></div>' +
           '<div class="wl-op-st">' + statLine(id) + '</div>' +
-          '<div class="wl-op-act">' +
+          '</div><div class="wl-op-act">' +
             '<button class="wl-btn" data-sell="' + id + '" data-n="1">$' + p + '</button>' +
             (n > 1 ? '<button class="wl-btn mini" data-sell="' + id + '" data-n="' + n + '">ALL $' + (p * n) + '</button>' : '') +
           '</div></div>';
@@ -512,9 +528,9 @@
       for (let i = 0; i < aids.length; i++) {
         const A = W.armour(aids[i]), n = S.armourBag[A.id], p = armourSellPrice(o, A.id);
         h += '<div class="wl-op-row">' +
-          '<div class="wl-op-nm">' + A.label + ' <span class="wl-dim wl-small">×' + n + '</span></div>' +
+          '<div class="wl-op-txt"><div class="wl-op-nm">' + A.label + ' <span class="wl-dim wl-small">×' + n + '</span></div>' +
           '<div class="wl-op-st">SOAK ' + A.soak + '  ·  ' + A.note + '</div>' +
-          '<div class="wl-op-act">' +
+          '</div><div class="wl-op-act">' +
             '<button class="wl-btn" data-asell="' + A.id + '" data-n="1">$' + p + '</button>' +
           '</div></div>';
       }
@@ -542,11 +558,12 @@
       const broke = p > S.gold, out = n <= 0;
       const many = Math.min(n, Math.floor(S.gold / Math.max(1, p)), 10);
       h += '<div class="wl-op-row' + (broke || out ? " gone" : "") + '">' +
-        '<div class="wl-op-nm">' + T.label + ' <span class="wl-dim wl-small">· ' + T.note + '</span></div>' +
+        '<div class="wl-op-txt"><div class="wl-op-nm">' + T.label +
+          '  <span class="wl-op-left">' + (out ? "NONE LEFT" : n + " LEFT") + '</span>' +
+          '<br><span class="wl-dim wl-small" style="letter-spacing:.06em">' + T.note + '</span></div>' +
         '<div class="wl-op-st">HP ' + T.hp + '  ·  ACC ' + Math.round(T.acc * 100) + '%  ·  WAGE $' + T.wage + '/DAY  ·  ' +
           (i >= 2 ? "BRINGS HIS OWN SIDEARM" : "ARRIVES UNARMED") + '</div>' +
-        '<div class="wl-op-act">' +
-          '<span class="wl-op-left">' + (out ? "NONE" : n + " LEFT") + '</span>' +
+        '</div><div class="wl-op-act">' +
           '<button class="wl-btn' + (broke || out ? "" : " hot") + '" data-hire="' + T.id + '" data-n="1"' +
             (broke || out ? " disabled" : "") + '>$' + p + '</button>' +
           (many >= 5 ? '<button class="wl-btn mini" data-hire="' + T.id + '" data-n="5">×5</button>' : '') +
@@ -576,15 +593,15 @@
       for (let i = 0; i < W.TIERS.length; i++) {
         const T = W.TIERS[i];
         if (!byTier[T.id]) continue;
-        h += '<div class="wl-op-row"><div class="wl-op-nm">' + T.label + ' <span class="wl-dim wl-small">×' + byTier[T.id] + '</span></div>' +
+        h += '<div class="wl-op-row"><div class="wl-op-txt"><div class="wl-op-nm">' + T.label + ' <span class="wl-dim wl-small">×' + byTier[T.id] + '</span></div>' +
           '<div class="wl-op-st">WATER AND SHADE  ·  $' + (T.wage * 6) + ' EACH</div>' +
-          '<div class="wl-op-act"><span class="wl-op-left">' + byTier[T.id] + ' HURT</span></div></div>';
+          '</div><div class="wl-op-act"><span class="wl-op-left">' + byTier[T.id] + ' HURT</span></div></div>';
       }
     }
     if (S.you.hp < S.you.maxHp) {
-      h += '<div class="wl-op-row"><div class="wl-op-nm">' + S.you.name + ' <span class="wl-dim wl-small">· you</span></div>' +
+      h += '<div class="wl-op-row"><div class="wl-op-txt"><div class="wl-op-nm">' + S.you.name + ' <span class="wl-dim wl-small">· you</span></div>' +
         '<div class="wl-op-st">' + Math.round(S.you.hp) + ' / ' + S.you.maxHp + ' HP</div>' +
-        '<div class="wl-op-act"><span class="wl-op-left">HURT</span></div></div>';
+        '</div><div class="wl-op-act"><span class="wl-op-left">HURT</span></div></div>';
     }
     h += '</div>';
     h += '<div class="wl-btns">' +
@@ -681,7 +698,7 @@
     if (!o || !ctx || !ctx.screen) return;
     styleOnce();
     const html = o.kind === "camp" ? drawCamp(o) : o.kind === "well" ? drawWell(o) : drawTrade(o);
-    const node = ctx.screen(html);
+    const node = ctx.screen('<div class="wl-hudpad">' + html + '</div>');
     if (ctx.paintHud) ctx.paintHud();
     wire(node, o);
   }
@@ -767,7 +784,9 @@
             }
             place(9);
           }
-          if (W.state.gold < 3000) { W.state.gold = 3600; W.emit("gold", W.state.gold); }
+          // enough to buy most of a crate list but not the top of it — the
+          // screen has to show BOTH the affordable and the unaffordable row.
+          if (W.state.gold < 1200) { W.state.gold = 1200; W.emit("gold", W.state.gold); }
           if (W.loadout && W.loadout.demo && !W.state.army.length) W.loadout.demo();
           const kind = want === "1" ? (Q.get("kind") || "depot") : want;
           let o = null;

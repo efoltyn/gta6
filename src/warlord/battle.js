@@ -144,7 +144,13 @@
      Meshes are only built for boxes when desert.js declined to raise anything,
      so we never draw a second copy of a rock it already put there. */
   function buildGround(cx, cz) {
-    const bf = (W.desert && typeof W.desert.battlefieldAt === "function")
+    /* ?ground=own refuses desert.js and fights on this file's own sand. It is
+       the revert for "the encounter happens on the real island", and it is
+       also the only way to tell whose ground is flat when a battlefield
+       photographs as a wash of tan — which is exactly the question the first
+       capture raised. */
+    const bf = (W.desert && typeof W.desert.battlefieldAt === "function" &&
+                !(Q && Q.get("ground") === "own"))
       ? safe(function () { return W.desert.battlefieldAt(cx, cz, FIELD_R); }) : null;
 
     let groundAt = null, relief = 0, cover = [], raised = false, clearFn = null;
@@ -438,6 +444,11 @@
       kind: "soldier",
     };
     m.target.copy(m.pos);
+    /* AND HE CARRIES THE GUN HE IS CARRYING. Without this the third-person
+       warlord walked into his own war empty-handed while every levy behind him
+       held a rifle — the viewmodel is only ever visible in first person, so the
+       hands have to be filled by the same call that fills everybody else's. */
+    if (CBZ.syncActorWeapon) safe(function () { CBZ.syncActorWeapon(m); });
     return m;
   }
 
@@ -1224,7 +1235,12 @@
   const CAMS = ["fps", "third", "cmd"];
   let camMode = "fps";
   let hurtFlash = 0;
-  const cmd = { x: 0, z: 0, dist: 90, yaw: 0.9, pitch: 0.72 };
+  /* THE COMMAND SEAT'S DEFAULTS, and the first draft's were a satellite photo:
+   120 m out at 0.55 rad puts the lens 62 m up, which draws a 1.8 m man as two
+   pixels and fills the frame with sand. A commander's shot is LOW and near
+   enough that the two lines read as lines — 62 m at 0.32 rad is about 19 m up,
+   which keeps the horizon in frame and the men legible. */
+const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32 };
 
   function stepYou(dt) {
     const IN = micro.input;
@@ -1388,13 +1404,21 @@
       if (youRig) youRig.visible = false;
       if (viewGun) viewGun.visible = true;
     } else {
-      const back = 4.6, up = 1.1;
-      let px = YOU.pos.x - dir.x * back, pz = YOU.pos.z - dir.z * back;
+      /* OVER THE SHOULDER, NOT BEHIND THE HEAD. The first draft put the lens
+         on the man's own bearing at 4.6 m and he filled the middle of the
+         frame — measured on a capture where a charging army 100 m up the field
+         was entirely behind his torso. A shoulder camera is offset SIDEWAYS so
+         the body sits in a corner and the fight owns the frame; the offset is
+         the rig's own shoulder width plus a body, not a number. */
+      const back = 5.4, up = 1.35, side = 1.05;
+      const rx = Math.cos(YOU.yaw), rz = -Math.sin(YOU.yaw);   // the man's right
+      let px = YOU.pos.x - dir.x * back + rx * side;
+      let pz = YOU.pos.z - dir.z * back + rz * side;
       let py = eye + up - dir.y * back;
       const g = MAP.groundAt(px, pz) + 1.2;
       if (py < g) py = g;
       c.position.set(px, py, pz);
-      c.lookAt(YOU.pos.x + dir.x * 6, eye + dir.y * 6, YOU.pos.z + dir.z * 6);
+      c.lookAt(YOU.pos.x + dir.x * 14 + rx * side, eye + dir.y * 14, YOU.pos.z + dir.z * 14 + rz * side);
       if (youRig) youRig.visible = true;
       if (viewGun) viewGun.visible = false;
     }
@@ -1780,7 +1804,15 @@
         m.char.crouch = m.slot === "cover" || m.slot === "peek";
         safe(function () { CBZ.animChar(m.char, m.speed, dt * every); });
       }
-      if (m.isYou) continue;
+      if (m.isYou) {
+        /* THE WARLORD'S BODY POINTS WHERE HIS LENS POINTS. actorAimAt lays the
+           weapon arm on a TARGET, and the player has no target — he has a
+           bearing. So the rig takes the look direction directly; anything else
+           is a man walking forward with his rifle aimed somewhere else. */
+        if (youRig) youRig.rotation.y = m.yaw;
+        if (m.char) m.char.aimPitch = m.pitch;
+        continue;
+      }
       const engaged = m.tgt && !m.tgt.dead && m.sees && !m.routed;
       if (engaged && d2 < 190 * 190 && CBZ.actorAimAt) {
         CBZ.actorAimAt(m, m.tgt, dt);
@@ -1845,29 +1877,30 @@
     }
   }
 
-  function endBattle(outcome, why) {
-    if (over) return;
-    over = true;
-    report.outcome = outcome;
-    report.duration = simT;
-    note(why || "");
-    W.toast(why || "", outcome === "won" ? "good" : "bad");
+  /* ============================================================ THE REPORT
+     ONE BUILDER, TWO PRESENTATIONS. The 3D battle and the headless resolve()
+     both end here, because the aftermath screen must not be able to tell which
+     one it is reading — a fast-resolved fight that hands back a differently
+     shaped result is a second battle model wearing the first one's name, and
+     the moment those two disagree the multiplayer campaign has two truths.
 
-    /* THE REPORT. Every list is soldier objects the campaign already owns, and
-       it is built from what is on the sand rather than from a counter — a
-       counter and a roster can disagree and the roster is the one that is
-       real. */
+     `units` is the only thing the two paths hand over differently: on the sand
+     it is the live bodies, headless it is plain records with the same four
+     fields. Everything below reads .s / .team / .dead / .fled / .hp / .maxHp
+     and nothing else, which is exactly why the same function can serve both. */
+  function buildReport(units, ctxR, outcome, dur) {
     const r = {
-      band: band, outcome: outcome, duration: simT, youKills: report.youKills,
-      ratio: report.ratio,
-      yourDead: report.deadOf.mine.slice(),
-      yourFled: report.fledOf.mine.slice(),
-      theirDead: report.deadOf.them.slice(),
+      band: ctxR.band, outcome: outcome, duration: dur, youKills: ctxR.youKills || 0,
+      ratio: ctxR.ratio,
+      yourDead: ctxR.deadOf.mine.slice(),
+      yourFled: ctxR.fledOf.mine.slice(),
+      theirDead: ctxR.deadOf.them.slice(),
       yourSurvivors: [], theirSurvivors: [],
       loot: {}, armourLoot: {}, gold: 0,
+      resolved: !!ctxR.headless,
     };
-    for (let i = 0; i < men.length; i++) {
-      const m = men[i];
+    for (let i = 0; i < units.length; i++) {
+      const m = units[i];
       if (m.isYou || !m.s) continue;
       if (m.dead || m.fled) continue;
       // THE MEN WHO ARE STILL STANDING keep the hp they finished on, and a man
@@ -1878,8 +1911,8 @@
       (m.team === "mine" ? r.yourSurvivors : r.theirSurvivors).push(m.s);
     }
     // the reserve never fought and is unhurt
-    for (let i = 0; i < report.reserveOf.mine.length; i++) r.yourSurvivors.push(report.reserveOf.mine[i]);
-    for (let i = 0; i < report.reserveOf.them.length; i++) r.theirSurvivors.push(report.reserveOf.them[i]);
+    for (let i = 0; i < ctxR.reserveOf.mine.length; i++) r.yourSurvivors.push(ctxR.reserveOf.mine[i]);
+    for (let i = 0; i < ctxR.reserveOf.them.length; i++) r.theirSurvivors.push(ctxR.reserveOf.them[i]);
 
     /* THE LOOT IS EVERY BODY ON THE FIELD, YOURS INCLUDED. A warlord strips his
        own dead — the rifle Kaseem was carrying is worth exactly as much now as
@@ -1893,11 +1926,11 @@
         if (s.wid && s.wid !== "fists") r.loot[s.wid] = (r.loot[s.wid] || 0) + 1;
         if (s.armour && s.armour !== "none") r.armourLoot[s.armour] = (r.armourLoot[s.armour] || 0) + 1;
       }
-      if (outcome === "won") r.gold = band.gold | 0;
+      if (outcome === "won") r.gold = (ctxR.band && ctxR.band.gold) | 0;
     }
     /* A RETREAT COSTS LOOT AND MEN, which is what makes it a decision rather
        than a free undo: your dead stay where they fell with their guns, and a
-       third of the men still on the field do not make it out. */
+       quarter of the men still on the field do not make it out. */
     if (outcome === "retreat") {
       r.loot = {}; r.armourLoot = {};
       const lose = Math.floor(r.yourSurvivors.length * 0.28);
@@ -1910,14 +1943,25 @@
       // a broken army: the men on the sand are gone, the ones who ran are back
       for (let i = 0; i < r.yourSurvivors.length; i++) {
         const s = r.yourSurvivors[i];
-        if (report.reserveOf.mine.indexOf(s) < 0) { r.yourDead.push(s); r.yourSurvivors[i] = null; }
+        if (ctxR.reserveOf.mine.indexOf(s) < 0) { r.yourDead.push(s); r.yourSurvivors[i] = null; }
       }
       r.yourSurvivors = r.yourSurvivors.filter(Boolean);
-      W.state.you.hp = Math.max(1, Math.round(W.state.you.maxHp * 0.25));
-    } else {
-      W.state.you.hp = Math.max(1, Math.round(YOU.hp));
     }
     r.theirSurvivors = r.theirSurvivors.filter(function (s) { return s; });
+    return r;
+  }
+
+  function endBattle(outcome, why) {
+    if (over) return;
+    over = true;
+    report.outcome = outcome;
+    report.duration = simT;
+    note(why || "");
+    W.toast(why || "", outcome === "won" ? "good" : "bad");
+
+    const r = buildReport(men, report, outcome, simT);
+    if (outcome === "lost") W.state.you.hp = Math.max(1, Math.round(W.state.you.maxHp * 0.25));
+    else W.state.you.hp = Math.max(1, Math.round(YOU.hp));
 
     // hand the screen over after a beat, so the last frame of the battle is a
     // frame of the battle and not a menu

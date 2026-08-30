@@ -18,11 +18,19 @@
        argues with you about where you are going is a game with two
        drivers.
 
-   And the camera is not a third verb: it follows behind on its own,
-   Q/E or a drag swings it, the wheel or a pinch pulls it from
-   over-the-shoulder out to a strategic view of the whole valley. There
-   is NO mouse-look mode and nothing needs pointer lock. That is the
-   natural-disaster game's grammar and it is the one the owner asked for.
+     TAP A PARTY  →  ride at it and engage it. The pick is screen-space,
+       so a party two kilometres out is a 46 px target rather than a
+       three-metre one, and the ride target TRACKS it — you are chasing a
+       thing that is running, not a coordinate it used to be at.
+
+   And the camera is not a fourth verb: it follows behind on its own,
+   a drag swings it, the wheel or a pinch pulls it from over-the-shoulder
+   out to a strategic view of the whole valley. There is NO mouse-look
+   mode and nothing needs pointer lock.
+
+   THAT IS THE ENTIRE CONTROL SURFACE and it is a hard line. Every key on
+   this page (WASD, Q/E, M) is a CONVENIENCE for something already reachable
+   with one tap, and if a player has to learn one, this file has failed.
 
    WHY studio.controls AND NOT A NEW CONTROL SCHEME. It already owns the
    WASD-or-stick branch, the touch furniture, the pause button a phone
@@ -44,21 +52,51 @@
    rig, because the one body the camera is actually near has to be a real
    body.
 
-   THE CLOCK IS DRIVEN BY TRAVEL, not by the wall. `W.state.hour` advances
-   with metres ridden; crossing 06:00 calls W.dawn() and core takes the
-   wages and the deserters. core/daynight.js was read and is NOT used: it
-   runs a free clock off real seconds, it is wired into CBZ.lightRig and
-   core/sky.js which this page does not load, and its whole contract is
-   "time passes while you stand still" — which is the opposite of a
-   campaign where a day is a day's ride.
+   THE WORLD IS ON WALL TIME AND IT NEVER STOPS. This is a multiplayer
+   island — openfront's shared board with Bannerlord's parties on it — and
+   several warlords ride it at once, so the clock cannot be "time passes
+   when I do something". `W.state.hour` advances on REAL seconds, the bands
+   keep walking while you are inside a battle, an encounter card or a shop,
+   and if the tab was in the background for ninety seconds the world catches
+   up on the wall clock rather than pretending nothing happened.
+
+   Mechanically that means the world tick is a `CBZ.onAlways` hook, not a
+   `micro.onFrame` one: `always` runs in every phase AND while the engine is
+   paused, which is the engine's own contract for exactly this. Only the
+   DRAWING is gated on being the live phase. The first draft ticked the
+   world from the render hook and the island froze solid the moment a battle
+   took the screen — in single player you cannot tell, and in multiplayer it
+   is the whole game being wrong.
+
+   NOT EVERY CLIENT ROLLS THE DICE. In multiplayer one peer is the sim host
+   and everyone else RENDERS what it is sent, so all the AI (moods, goals,
+   band-vs-band, respawn) sits behind `C.simHost`. A guest still draws
+   S.bands, still detects its own contacts, still runs its own clock — it
+   just never invents a band or moves one. And nothing here assumes it is
+   the only writer of `W.state.bands`: a band that arrives over the wire has
+   none of this file's fields on it, so every band is normalised on the way
+   into the loop instead of being trusted to have been made here.
+
+   PEERS ARE PARTIES. Other warlords are drawn by THIS FILE, straight off
+   `W.state.peers` ({id,name,x,z,size,colour}) — the contract's own home for
+   them — through the same instanced bodies and the same banner the AI bands
+   use, so a human party and a computer party are the same object on screen.
+   warnet.js only has to keep that map up to date; it never draws.
+
+   core/daynight.js was read and is NOT used: it is wired into CBZ.lightRig
+   and core/sky.js which this page does not load, and it owns its own
+   free-running cycle — this clock has to be the one the network agrees on.
 
    Flags:
      ?bands=N        population override (default scales with the island)
      ?trail=off      draw no followers (the honest A/B for the trail)
      ?clock=off      freeze the day cycle at noon
      ?bandai=off     bands walk their goals and never react to you
+     ?guest=1        boot as a sim GUEST: render bands, never roll them
 
    Events raised here: `campaign:ready` `campaign:dest` `campaign:band`
+   `campaign:zoom` — {dist, t, yaw, x, z}. territory.js reads this so its
+   ownership map and this camera are the same view at two ranges.
 ============================================================ */
 (function () {
   "use strict";
@@ -75,8 +113,16 @@
   const FLAG_NOTRAIL = QP.get("trail") === "off";
   const FLAG_NOCLOCK = QP.get("clock") === "off";
   const FLAG_NOBANDAI = QP.get("bandai") === "off";
+  const FLAG_GUEST = QP.get("guest") === "1";
 
   const C = W.campaign = W.campaign || {};
+  /* ONE PEER ROLLS THE DICE. Default true so single player is unchanged;
+     warnet.js flips it false on a guest and this file becomes a renderer
+     for whatever S.bands it is handed. Everything gated by it is an
+     AUTHORING act — inventing a band, moving one, deciding a fight. A guest
+     still runs its own clock, its own camera and its own contact test,
+     because those are about the player in front of this screen. */
+  C.simHost = !FLAG_GUEST;
   const TAU = Math.PI * 2;
   const clamp = W.clamp;
   const lerp = W.lerp;
@@ -91,8 +137,15 @@
   const BAND_SPEED = 6.2;       // they walk, you ride. The gap is what makes
                                 // "outrun them" a real option.
   const HUNT_SPEED = 8.4;       // a band that wants you moves like it means it
-  const HOUR_PER_M = 1 / 820;   // 820 m of riding is an hour. Falls out of the
-                                // line above: 13 km across ≈ 16 h.
+  /* AN HOUR IS 45 REAL SECONDS, and that number is derived, not chosen: the
+     island is 13 km across and a ride across it at RIDE_SPEED takes about
+     14 real minutes, which used to be defined as one day's ride. Keeping
+     that identity on a wall clock puts a 24 h day at 18 real minutes and an
+     hour at 45 s. The shape of the pacing is unchanged; what changed is that
+     it is now the same for everybody on the island whether they are riding,
+     shopping or in a battle. */
+  const HOUR_SECS = 45;
+  const CATCHUP_MAX = 120;      // sim substeps a single wake-up may run — see worldTick
   const DRAWN_FOLLOWERS = 60;   // see the header. The roster is uncapped.
   const CONTACT = 26;           // metres. The encounter card comes up here.
   const OUTPOST_R = 46;
@@ -118,6 +171,10 @@
   let lastDawnDay = 0;
   let hudRoot = null, plateBox = null, compass = null, compassG = null, mapWrap = null;
   let bandTick = 0, fightTick = 0, spawnTick = 0;
+  let lastWall = 0, simAcc = 0;
+  let chase = null;                // the band you tapped, if any
+  let lastZoomSent = -1;
+  const peerDraw = [];             // {x,z,size,colour,name} rebuilt each frame
   let nearBand = null, nearOutpost = null;
   const _v = { x: 0, z: 0 };
 
@@ -490,7 +547,7 @@
       '#wlMap .cap{font:700 11px/1.4 ui-sans-serif,system-ui,sans-serif;letter-spacing:.22em;opacity:.6;color:#f4ecd8}' +
       '</style>' +
       '<div id="wlPlates"></div>' +
-      '<canvas id="wlCompass" width="520" height="34"></canvas>' +
+      '<canvas id="wlCompass" width="460" height="36"></canvas>' +
       '<button id="wlMapBtn">MAP</button>' +
       '<div id="wlZoom"><button id="wlIn">+</button><button id="wlOut">&minus;</button></div>';
     document.body.appendChild(d);
@@ -576,10 +633,10 @@
      the game actually asks. */
   function paintCompass() {
     if (!compassG) return;
-    const g = compassG, w = compass.width, h = compass.height;
-    g.clearRect(0, 0, w, h);
-    g.fillStyle = "rgba(12,9,5,.55)";
-    g.fillRect(0, 0, w, h);
+    const g = compassG, w = compass.width;
+    g.clearRect(0, 0, w, compass.height);
+    g.fillStyle = "rgba(12,9,5,.42)";
+    g.fillRect(0, 0, w, compass.height);
     const yaw = camYaw;
     const span = 2.4;                     // radians of heading shown across the ribbon
     function px(a) {
@@ -588,27 +645,41 @@
       while (d < -Math.PI) d += TAU;
       return w / 2 + (d / span) * w;
     }
-    function tick(a, label, colour, big) {
+    /* TWO ROWS, and it is not decoration: the first draft drew the cardinals
+       and both waypoints on ONE baseline and the readout said "WADUST GATE"
+       — two labels straight through each other. Cardinals get the top row,
+       waypoints the bottom, and a waypoint that would overlap the one
+       already drawn is dropped rather than smeared over it. */
+    const used = [];
+    function tick(a, label, colour, row) {
       const x = px(a);
-      if (x < -30 || x > w + 30) return;
-      g.strokeStyle = colour; g.lineWidth = big ? 2 : 1;
-      g.beginPath(); g.moveTo(x, big ? 6 : 12); g.lineTo(x, h - 12); g.stroke();
-      g.fillStyle = colour;
-      g.font = "700 9px ui-sans-serif,system-ui,sans-serif";
+      if (x < -40 || x > w + 40) return;
+      const yTick = row ? 18 : 8, yText = row ? 30 : 15;
+      g.strokeStyle = colour; g.lineWidth = row ? 1 : 2;
+      g.beginPath(); g.moveTo(x, yTick); g.lineTo(x, yTick + (row ? 5 : 6)); g.stroke();
       g.textAlign = "center";
-      g.fillText(label, x, h - 3);
+      g.font = row ? "700 9px ui-sans-serif,system-ui,sans-serif" : "700 11px ui-sans-serif,system-ui,sans-serif";
+      if (row) {
+        const half = g.measureText(label).width / 2 + 5;
+        for (let i = 0; i < used.length; i++) if (Math.abs(used[i] - x) < half * 2) return;
+        used.push(x);
+      }
+      g.fillStyle = colour;
+      g.fillText(label, x, yText);
     }
-    const CARD = [["N", 0], ["E", Math.PI / 2], ["S", Math.PI], ["W", -Math.PI / 2]];
-    for (let i = 0; i < CARD.length; i++) tick(CARD[i][1], CARD[i][0], "rgba(244,236,216,.55)", true);
+    const CARD = [["N", 0], ["E", Math.PI / 2], ["S", Math.PI], ["W", -Math.PI / 2],
+                  ["NE", Math.PI / 4], ["SE", 3 * Math.PI / 4], ["SW", -3 * Math.PI / 4], ["NW", -Math.PI / 4]];
+    for (let i = 0; i < CARD.length; i++) tick(CARD[i][1], CARD[i][0], "rgba(244,236,216,.6)", 0);
     const D = W.desert;
     const o = nearest(D.oases);
-    if (o) tick(Math.atan2(o.x - S.you.x, o.z - S.you.z), "WATER " + Math.round(o.d / 100) / 10 + "km", "#39d0a8", false);
+    if (o) tick(Math.atan2(o.x - S.you.x, o.z - S.you.z), "WATER " + km(o.d), "#39d0a8", 1);
     const p = nearest(S.outposts);
-    if (p) tick(Math.atan2(p.x - S.you.x, p.z - S.you.z), p.name + " " + Math.round(p.d / 100) / 10 + "km", "#ffb15a", false);
+    if (p) tick(Math.atan2(p.x - S.you.x, p.z - S.you.z), p.name + " " + km(p.d), "#ffb15a", 1);
     g.fillStyle = "#ffb15a";
-    g.beginPath(); g.moveTo(w / 2, 2); g.lineTo(w / 2 - 5, 9); g.lineTo(w / 2 + 5, 9); g.closePath(); g.fill();
+    g.beginPath(); g.moveTo(w / 2, 0); g.lineTo(w / 2 - 6, 7); g.lineTo(w / 2 + 6, 7); g.closePath(); g.fill();
     g.textAlign = "left";
   }
+  function km(d) { return d < 950 ? Math.round(d) + "m" : (Math.round(d / 100) / 10) + "km"; }
   function nearest(list) {
     let best = null, bd = 1e18;
     for (let i = 0; i < list.length; i++) {
@@ -866,7 +937,11 @@
 
     // ---- the world ------------------------------------------------------
     stepBands(dt);
-    D.follow(camera ? camera.position.x : S.you.x, camera ? camera.position.z : S.you.z);
+    /* THE CLIPMAP FOLLOWS THE MAN, NOT THE EYE. At strategic zoom the camera
+       is 500 m behind him, and centring the fine ring on the camera puts the
+       8 m ground behind the shot and the 32 m ground under the thing you are
+       actually looking at. Split the difference toward him. */
+    D.follow(lerp(S.you.x, camera.position.x, 0.28), lerp(S.you.z, camera.position.z, 0.28));
 
     // ---- draw -----------------------------------------------------------
     placeYou(dt, moved / Math.max(dt, 0.0001));
@@ -989,6 +1064,14 @@
        swallow it whole; keeping the eye a clear 3 m above whatever is
        under it costs one heightAt and fixes every case. */
     cy = Math.max(cy, D.heightAt(cx, cz) + 3.0);
+    /* THE NEAR PLANE IS THE FAR WATER'S PROBLEM. micro.boot ships near=0.35,
+       which is right for a page where you can walk into a wall. Here the
+       nearest thing to the eye is a man 16 m away and the FURTHEST is a
+       coastline 12 km away, and at near=0.35/far=16000 the depth buffer has
+       ~11 m of resolution out there — the sea and the sea bed traded pixels
+       in stripes across the whole horizon. near=2.2 is five times the
+       precision for nothing the player can ever see. */
+    if (camera.near !== 2.2) { camera.near = 2.2; camera.updateProjectionMatrix(); }
     camera.position.set(cx, cy, cz);
     // look slightly AHEAD of him, not at him: the horizon and the ground he
     // is riding into are the shot, his back is not

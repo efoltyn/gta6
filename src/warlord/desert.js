@@ -210,16 +210,35 @@
      the crest sits three-quarters of the way along and the lee side falls
      off steeply. A symmetric sine reads as fabric; this reads as sand. */
   function ergAt(x, z) {
-    const amp = 8 + 30 * vn(x, z, 2600, S(701));
-    const wave = 90 + 235 * vn(x, z, 3100, S(709));
+    /* SPACING IS 130-390 m, NOT 70-265, and the reason is aliasing as much as
+       geography. Real transverse dunes stand 100-500 m apart; more to the
+       point, the SLIP FACE is under a third of the spacing, so at 70 m
+       spacing the sharp lee edge is 18 m wide — narrower than the second LOD
+       ring's 20 m cell. The grid alternately caught and missed each crest and
+       every ridge on the horizon photographed as a hard triangular sawtooth.
+       At 130 m minimum the narrowest slip face is 42 m, two cells, and the
+       skyline is a skyline. */
+    const amp = 8 + 32 * vn(x, z, 2600, S(701));
+    const wave = 130 + 260 * vn(x, z, 3100, S(709));
     const ang = (vn(x, z, 4200, S(713)) - 0.5) * 1.7 + 0.7;
     let u = (x * Math.cos(ang) + z * Math.sin(ang)) / wave;
     u += (vn(x, z, 430, S(719)) - 0.5) * 0.95;      // crests meander, never rule-straight
     const t = u - Math.floor(u);
-    const p = t < 0.74 ? t / 0.74 : 1 - (t - 0.74) / 0.26;
+    const p = t < 0.68 ? t / 0.68 : 1 - (t - 0.68) / 0.32;
     const crest = p * p * (3 - 2 * p);
+    /* RIPPLES. From the air a 200 m dune is a smooth hill and reads as
+       grassland-with-no-grass; the thing that says SAND is the metre-scale
+       corrugation running across the back of it. One sine, no hash, angled
+       off the same wind — costs nothing and it is the single change that
+       made the ground stop looking like a bedsheet. */
+    /* 52 m, not 24, and 0.38 m, not 0.85: at 24 m the ripple is shorter than
+       the LOD cell from about 700 m out, and point-sampling it aliased into a
+       hard sawtooth along every dune crest on the horizon. Long enough that
+       the second LOD ring still resolves it, shallow enough that the rings
+       that cannot are wrong by less than half a metre. */
+    const rip = Math.sin((x * Math.cos(ang + 0.42) + z * Math.sin(ang + 0.42)) / 52) * 0.38;
     // the erg itself undulates under the dunes — a dune field is not a table
-    return 3.5 + crest * amp + (vn(x, z, 1500, S(731)) - 0.5) * 15;
+    return 3.5 + crest * amp + rip * (0.45 + crest * 0.55) + (vn(x, z, 1500, S(731)) - 0.5) * 15;
   }
 
   /* ROCK. mask is a NARROW smoothstep band (0.500→0.585) which is what
@@ -288,19 +307,27 @@
       if (P.w[2] > 0.001) y += P.w[2] * saltAt(x, z);
       if (P.w[3] > 0.001) y += P.w[3] * gravelAt(x, z);
       const cut = wadiAt(x, z);
-      if (cut > 0) y = Math.max(1.2, y - cut);
+      if (cut > 0) y = Math.max(2.4, y - cut);
     }
     /* THE BEACH. Below 150 m inland the shore profile takes over and the
        land walks down to the waterline at about 1:20. The first draft
        blended over 40 m and every coast on the island was a 20 m cliff
        into blue — from the air it read as a cut-out, not an island. */
     const t = sm(coast / 150);
-    return lerp(coast * 0.05, Math.max(1.0, y), t);
+    return lerp(coast * 0.05, Math.max(2.0, y), t);
   }
+  /* THE SHELF DROPS FAST, and that is a depth-buffer decision as much as a
+     geographical one. The first draft ran the bottom out at 1:22 for 300 m
+     and then down to -70 over another 900 m, which is what a real sandy
+     shelf does — and at 6 km, with near=2 and far=16000, the z-buffer cannot
+     separate a -13 m bottom from a 0 m sea surface. The far water rendered
+     as a COMB of sand and blue stripes. 12 m of visible surf zone, then
+     straight down: the beach the player walks is on the LAND side of the
+     waterline and loses nothing, and by 400 m out the bottom is 60 m under
+     the plane and nothing fights. */
   function seabed(d) {
-    // sand shelf first (you can see the bottom near the beach), then off
-    if (d < 300) return -d * 0.045;
-    return -13.5 - Math.min(1, (d - 300) / 900) * 56;
+    if (d < 60) return -d * 0.075;                      // the surf, where you can see the bottom
+    return -4.5 - Math.min(1, (d - 60) / 340) * 74;
   }
 
   function ensureInit() {
@@ -432,15 +459,23 @@
      is the term doing the most work — a face steep enough that sand cannot
      sit on it goes to rock everywhere on the island, which is what makes
      dunes look like dunes and mesas look like stone. */
-  const C_SAND_LO = [0.72, 0.57, 0.34], C_SAND_HI = [0.90, 0.79, 0.55];
-  const C_ROCK_LO = [0.42, 0.28, 0.20], C_ROCK_HI = [0.66, 0.49, 0.36];
-  const C_CAP = [0.58, 0.53, 0.45];
-  const C_SALT = [0.93, 0.92, 0.88], C_CRACK = [0.63, 0.60, 0.53];
-  const C_GRAVEL = [0.60, 0.54, 0.42];
-  const C_SILT = [0.47, 0.42, 0.30];
-  const C_WET = [0.55, 0.47, 0.35], C_BEACH = [0.88, 0.81, 0.62];
-  const C_GREEN = [0.24, 0.41, 0.17];
-  const C_SEABED = [0.30, 0.36, 0.32];
+  /* THESE ARE LINEAR ALBEDOS, and the first draft's were not — they were the
+     numbers you would type into a paint program (0.9, 0.79, 0.55 for sand).
+     r128 feeds vertex colours to the shader as LINEAR and converts once at
+     output, so an sRGB-looking value is roughly twice the reflectance it
+     looks like. Under a 1.1 sun plus a 0.6 hemisphere that put the ground
+     over 1.0 everywhere and the whole island photographed as white paper —
+     the first strategic screenshot is unusable and it is entirely this.
+     Dry sand really is about 0.40 linear; these are measured-ish albedos. */
+  const C_SAND_LO = [0.40, 0.30, 0.17], C_SAND_HI = [0.62, 0.52, 0.33];
+  const C_ROCK_LO = [0.16, 0.10, 0.07], C_ROCK_HI = [0.31, 0.20, 0.13];
+  const C_CAP = [0.28, 0.25, 0.21];
+  const C_SALT = [0.80, 0.79, 0.74], C_CRACK = [0.40, 0.37, 0.31];
+  const C_GRAVEL = [0.29, 0.25, 0.18];
+  const C_SILT = [0.20, 0.17, 0.11];
+  const C_WET = [0.22, 0.18, 0.13], C_BEACH = [0.62, 0.55, 0.38];
+  const C_GREEN = [0.09, 0.19, 0.05];
+  const C_SEABED = [0.10, 0.14, 0.11];
   const _c = [0, 0, 0];
   function mix3(a, b, t, out) {
     out[0] = a[0] + (b[0] - a[0]) * t;
@@ -505,10 +540,16 @@
      Seven clipmap levels. Every level is the SAME 64x64 grid; only the cell
      size differs, so one buffer layout serves all of them and a rebuild is
      a rewrite of position.y + colour, never an allocation. */
-  const RING = 32;              // quads from centre to edge, per level
+  const RING = 40;              // quads from centre to edge, per level
   const N = RING * 2;           // 64 quads across
   const VN = N + 1;             // 65 vertices across
-  const CELL0 = 8;              // metres per quad, finest level
+  /* 10 m x 40 quads = the finest ring reaches 400 m, and that number is the
+     one the pictures argued about: at 8 m x 32 the level 0/1 seam landed 256 m
+     out — right on the dune crest in front of you — and the resolution jump
+     read as a serrated edge along the skyline. 400 m puts the first seam past
+     the dune you are looking at, for 6 561 vertices a rebuild instead of
+     4 225 (2.9 ms, once every 10 m of riding). */
+  const CELL0 = 10;             // metres per quad, finest level
   const LEVELS = FLAG_FLATLOD ? 1 : 7;
 
   let root = null, levels = [], water = null, oasisWater = null, scatterRoot = null;
@@ -548,18 +589,27 @@
     geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
     geo.setIndex(idx.length > 65535 ? new THREE.Uint32BufferAttribute(idx, 1)
                                     : new THREE.Uint16BufferAttribute(idx, 1));
-    const mat = new THREE.MeshLambertMaterial({
-      vertexColors: true,
-      polygonOffset: true,
-      polygonOffsetFactor: (LEVELS - i) * 2,
-      polygonOffsetUnits: (LEVELS - i) * 4,
-    });
+    /* NO polygonOffset. Two drafts used it to keep the coarse ring behind the
+       fine one in the two-cell overlap band, and the second draft's
+       screenshot is why it is gone: polygon offset is SLOPE-SCALED, and a
+       coarse terrain triangle seen at a grazing angle six kilometres away
+       has an enormous depth slope, so a factor of 12 pushed the far half of
+       the island tens of metres behind the sea plane. The horizon rendered
+       as a comb of blue and sand stripes across the whole screen.
+
+       A WORLD-SPACE DROP instead: level i sits 0.45·i metres lower than the
+       one inside it. View-independent, so it cannot blow up at a grazing
+       angle; 2.7 m on the coarsest level, which is invisible at the eight
+       kilometres that level is ever seen from; and it slopes the far
+       coastline slightly UNDER the water, which is the right direction for
+       a shoreline nothing out there can resolve anyway. */
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = i < 2;          // shadows only where you can see them
     mesh.frustumCulled = false;          // it is centred on the camera; culling it is never right
     mesh.userData.terrain = true;
     mesh.renderOrder = -10 + i;
-    return { i: i, cell: cell, span: span, mesh: mesh, geo: geo, cx: NaN, cz: NaN, dirty: true };
+    return { i: i, cell: cell, span: span, bias: -0.45 * i, mesh: mesh, geo: geo, cx: NaN, cz: NaN, dirty: true };
   }
 
   function fillLevel(L, camX, camZ) {
@@ -587,7 +637,12 @@
       for (let k = 0; k < VN; k++) {
         const t = j * VN + k, o = t * 3;
         const y = heightBuf[t];
-        pos[o + 1] = y;
+        /* THE LEVEL BIAS FADES OUT AT THE WATERLINE. Flat -0.45·i sank the
+           wadi floors (which bottom out at ~2 m) below the sea plane on the
+           coarse rings and the island grew blue rivers. Scaled by height, it
+           is full strength up on the terrain where the levels overlap and
+           zero where a metre matters. */
+        pos[o + 1] = y + L.bias * (y > 9 ? 1 : y > 0 ? y / 9 : 0);
         const xl = heightBuf[t - (k > 0 ? 1 : 0)], xr = heightBuf[t + (k < N ? 1 : 0)];
         const zl = heightBuf[t - (j > 0 ? VN : 0)], zr = heightBuf[t + (j < N ? VN : 0)];
         const slope = Math.hypot((xr - xl) * inv, (zr - zl) * inv);
@@ -610,7 +665,7 @@
        island photographs as a hot sky over dead-flat blue without it, and
        one specular highlight is the whole difference between "water" and
        "a blue plane". */
-    const m = new THREE.MeshPhongMaterial({ color: 0x1d5c7e, shininess: 78, specular: 0x9ed6ee });
+    const m = new THREE.MeshPhongMaterial({ color: 0x123b52, shininess: 84, specular: 0x6fa8bd });
     const mesh = new THREE.Mesh(g, m);
     mesh.position.y = SEA_Y;
     mesh.receiveShadow = false;
@@ -621,7 +676,7 @@
   }
   function makeOasisWater() {
     const grp = new THREE.Group();
-    const mat = new THREE.MeshPhongMaterial({ color: 0x2f7a86, shininess: 90, specular: 0xbfe8f0 });
+    const mat = new THREE.MeshPhongMaterial({ color: 0x1c5560, shininess: 92, specular: 0x8fc4cc });
     for (let i = 0; i < oases.length; i++) {
       const o = oases[i];
       const g = new THREE.CircleGeometry(o.r * 0.62, 22);
@@ -663,10 +718,10 @@
     }
     const s = {
       root: grp,
-      rock: im(new THREE.IcosahedronGeometry(1, 0), 0x8a7a63, SC_CAP.rock, true),
-      brush: im(new THREE.ConeGeometry(0.7, 1.1, 5), 0x6a6238, SC_CAP.brush, false),
-      bone: im(new THREE.BoxGeometry(0.24, 0.24, 2.1), 0xd8cfb4, SC_CAP.bone, false),
-      wreck: im(new THREE.BoxGeometry(2.2, 1.4, 5.0), 0x6b4a3a, SC_CAP.wreck, true),
+      rock: im(new THREE.IcosahedronGeometry(1, 0), 0x453b2f, SC_CAP.rock, true),
+      brush: im(new THREE.ConeGeometry(0.7, 1.1, 5), 0x37331d, SC_CAP.brush, false),
+      bone: im(new THREE.BoxGeometry(0.24, 0.24, 2.1), 0x9c957f, SC_CAP.bone, false),
+      wreck: im(new THREE.BoxGeometry(2.2, 1.4, 5.0), 0x3a2a20, SC_CAP.wreck, true),
     };
     return s;
   }
@@ -709,7 +764,7 @@
           const roll = hash(x, z, 307);
           const yaw = hash(x, z, 401) * TAU;
           if (b === "rock" || b === "gravel" || roll < 0.55) {
-            const s = 0.5 + hash(x, z, 409) * (b === "rock" ? 3.4 : 1.5);
+            const s = 0.42 + hash(x, z, 409) * (b === "rock" ? 1.9 : 0.95);
             nR = put(scatter.rock, nR, x, y + s * 0.45, z, yaw, s, s * (0.6 + roll * 0.7), s);
           } else if (roll < 0.9) {
             const s = 0.6 + hash(x, z, 419) * 0.9;
@@ -735,10 +790,10 @@
     const cap = oases.length * per;
     const trunks = new THREE.InstancedMesh(
       new THREE.CylinderGeometry(0.22, 0.4, 7, 5),
-      new THREE.MeshLambertMaterial({ color: 0x6b5334 }), cap);
+      new THREE.MeshLambertMaterial({ color: 0x33270f }), cap);
     const fronds = new THREE.InstancedMesh(
       new THREE.ConeGeometry(3.1, 1.7, 6),
-      new THREE.MeshLambertMaterial({ color: 0x3d6f2c }), cap);
+      new THREE.MeshLambertMaterial({ color: 0x1c3b12 }), cap);
     trunks.castShadow = fronds.castShadow = true;
     let n = 0, f = 0;
     for (let i = 0; i < oases.length; i++) {

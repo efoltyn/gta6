@@ -144,6 +144,13 @@
     border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:10px 12px;
     font:inherit;font-size:14px;letter-spacing:.04em}
   .wl-net-f input:focus{outline:none;border-color:var(--hot)}
+  /* AT 320pt the 88px label column left the SERVER field too narrow to read
+     a ws:// url in. Under 380 the label goes above the field instead. */
+  @media (max-width:380px){
+    .wl-net-f{display:block;padding:10px 0}
+    .wl-net-f label{display:block;margin:0 0 6px}
+    .wl-net-f input{width:100%}
+  }
   .wl-net-code{display:block;background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.1);
     border-radius:10px;padding:10px 12px;margin:8px 0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
     font-size:12.5px;letter-spacing:0;color:#ffd7bd;overflow-x:auto;white-space:pre}

@@ -229,13 +229,18 @@
   .wl-la-pw b{font-size:30px;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
   .wl-la-d{font-size:15px;letter-spacing:.06em}
   .wl-la-d.up{color:#8fe0a2} .wl-la-d.dn{color:var(--blood)}
-  .wl-la-row{display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:center;
+  /* flex, not grid — same repair as outpost.js: a name that wraps must not
+     be able to push the button out of the row it belongs to. */
+  .wl-la-row{display:flex;gap:10px;align-items:center;
     padding:9px 0;border-bottom:1px solid rgba(255,255,255,.07)}
   .wl-la-row:last-child{border-bottom:0}
+  .wl-la-txt{flex:1;min-width:0}
   .wl-la-nm{font-size:14px;letter-spacing:.03em}
-  .wl-la-st{font-size:10.5px;letter-spacing:.05em;opacity:.5;font-variant-numeric:tabular-nums}
-  .wl-la-act{grid-column:2;grid-row:1/span 2;display:flex;gap:6px;align-items:center;flex-shrink:0}
-  .wl-la-act .wl-btn{padding:8px 11px;font-size:12px}
+  .wl-la-st{font-size:10.5px;letter-spacing:.05em;opacity:.5;font-variant-numeric:tabular-nums;margin-top:2px}
+  .wl-la-act{display:flex;gap:6px;align-items:center;flex-shrink:0}
+  .wl-la-act .wl-btn{padding:9px 12px;font-size:12px}
+  /* clears the fixed MEN/$/DAY strip — see outpost.js's copy of this note */
+  .wl-hudpad{padding-top:calc(env(safe-area-inset-top,0px) + 30px)}
   .wl-la-grp{width:100%;display:flex;justify-content:space-between;align-items:center;gap:10px;
     padding:12px 13px;margin:0 0 8px;border:1px solid rgba(255,255,255,.12);border-radius:12px;
     background:rgba(255,255,255,.03);cursor:pointer;text-align:left}
@@ -319,14 +324,14 @@
     const S = W.state, y = S.you;
     return '<div class="wl-lbl">YOURSELF</div><div class="wl-card">' +
       '<div class="wl-la-row">' +
-        '<div class="wl-la-nm">' + y.name + ' <span class="wl-dim wl-small">· ' + gunName(y.wid) + '</span></div>' +
+        '<div class="wl-la-txt"><div class="wl-la-nm">' + y.name + ' <span class="wl-dim wl-small">· ' + gunName(y.wid) + '</span></div>' +
         '<div class="wl-la-st">' + gunStat(y.wid) + '</div>' +
-        '<div class="wl-la-act"><button class="wl-btn" data-pick="you">CHANGE</button></div>' +
+        '</div><div class="wl-la-act"><button class="wl-btn" data-pick="you">CHANGE</button></div>' +
       '</div>' +
       '<div class="wl-la-row">' +
-        '<div class="wl-la-nm">' + W.armour(y.armour).label + '</div>' +
+        '<div class="wl-la-txt"><div class="wl-la-nm">' + W.armour(y.armour).label + '</div>' +
         '<div class="wl-la-st">SOAK ' + W.armour(y.armour).soak + '  ·  ' + Math.round(y.hp) + '/' + y.maxHp + ' HP  ·  ' + (y.kills || 0) + ' KILLS</div>' +
-        '<div class="wl-la-act"><button class="wl-btn" data-apick="you">ARMOUR</button></div>' +
+        '</div><div class="wl-la-act"><button class="wl-btn" data-apick="you">ARMOUR</button></div>' +
       '</div>' +
       (PICK === "you" ? pickerFor(y, "you") : "") +
       '</div>';
@@ -412,10 +417,10 @@
       for (let k = 0; k < men.length && k < ROSTER_CAP; k++) {
         const s = men[k];
         h += '<div class="wl-la-row">' +
-          '<div class="wl-la-nm">' + s.name + (s.wounded ? ' <span class="wl-la-w">WOUNDED</span>' : '') + '</div>' +
+          '<div class="wl-la-txt"><div class="wl-la-nm">' + s.name + (s.wounded ? ' <span class="wl-la-w">WOUNDED</span>' : '') + '</div>' +
           '<div class="wl-la-st">' + gunName(s.wid) + '  ·  ' + W.armour(s.armour).label +
             '  ·  ' + (s.kills || 0) + ' KILLS  ·  ' + (s.battles || 0) + ' BATTLES  ·  PW ' + Math.round(W.soldierPower(s)) + '</div>' +
-          '<div class="wl-la-act"><button class="wl-btn" data-pick="' + s.id + '">KIT</button></div>' +
+          '</div><div class="wl-la-act"><button class="wl-btn" data-pick="' + s.id + '">KIT</button></div>' +
           '</div>' +
           (PICK === String(s.id) ? pickerFor(s, String(s.id)) : "");
       }
@@ -428,18 +433,17 @@
   function draw() {
     if (!ctx || !ctx.screen) return;
     styleOnce();
-    const S = W.state;
+    // DAY / $ / wages are already in the fixed strip above this screen
     let h = '<h1 class="wl-h">THE <em>ARMOURY</em></h1>' +
-      '<p class="wl-sub">DAY ' + S.day + '  ·  <span class="wl-gold">$' + S.gold + '</span>  ·  ' +
-        '−$' + W.payroll() + '/DAY IN WAGES</p>';
+      '<p class="wl-sub">WHO CARRIES WHAT</p>';
     h += powerStrip();
     h += reportCard();
     h += '<div class="wl-lbl">DO IT IN BULK</div><div class="wl-card">' +
       '<div class="wl-btns" style="margin-top:0">' +
-        '<button class="wl-btn hot" id="laAuto">AUTO-ARM EVERYONE</button>' +
-        '<button class="wl-btn" id="laTop">ARM THE BEST 20</button>' +
-        '<button class="wl-btn" id="laArmour">ARMOUR THE FRONT</button>' +
-        '<button class="wl-btn bad" id="laStrip">STRIP THE LEVIES</button>' +
+        '<button class="wl-btn hot" id="laAuto">AUTO-ARM ALL</button>' +
+        '<button class="wl-btn" id="laTop">ARM BEST 20</button>' +
+        '<button class="wl-btn" id="laArmour">ARMOUR FRONT</button>' +
+        '<button class="wl-btn bad" id="laStrip">STRIP LEVIES</button>' +
       '</div>' +
       '<div class="wl-small wl-dim" style="margin-top:10px">' +
         'AUTO-ARM takes every gun back — the cart AND the ones your men are holding — and deals ' +
@@ -451,7 +455,7 @@
       '<button class="wl-btn hot" id="laBack">DONE</button>' +
       (W.outpost && W.outpost.current && W.outpost.current() ? '<button class="wl-btn" id="laShop">BACK TO THE STALL</button>' : '') +
       '</div>';
-    const node = ctx.screen(h);
+    const node = ctx.screen('<div class="wl-hudpad">' + h + '</div>');
     if (ctx.paintHud) ctx.paintHud();
     wire(node);
   }
@@ -503,7 +507,7 @@
     if (OPEN_TIER == null) {
       // open the tier you actually came here for: the best men you own
       const gs = groups();
-      OPEN_TIER = gs.length ? gs[0].tier : null;
+      OPEN_TIER = gs.length ? keyOf(gs[0]) : null;
     }
     W.setPhase("armoury");
     draw();
@@ -565,8 +569,10 @@
             W.newGame({ seed: parseInt(Q.get("seed") || "", 10) || 1337 });
           }
           demo();
-          if (Q.get("auto") === "1") autoArm();
           open();
+          // open() clears the last report on purpose; the ?auto=1 hook wants
+          // the report ON SCREEN, so it runs after and repaints.
+          if (Q.get("auto") === "1") { autoArm(); draw(); }
         }, 0);
       }
     },
