@@ -2404,8 +2404,13 @@
     /* THE ENGINE'S dt IS NOT WALL TIME HERE. Under SwiftShader this page runs
        at one or two frames a second, and every ramp in this file is written in
        seconds — so the real elapsed wall clock drives them, and the engine's
-       dt only drives the things that are genuinely per-frame. */
-    const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+       dt only drives the things that are genuinely per-frame.
+       …and "wall" means W.clock.now(), the game clock in core.js: identical to
+       performance.now() at 1x, warped by the speed setting above it. Weather
+       GATES TRAVEL (E.travelBlocked), so a sandstorm that did not accelerate
+       with the rest of the island would be an eight-minute wall at 8x. */
+    const now = (W.clock && W.clock.now) ? W.clock.now()
+      : (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
     const rawDt = lastWall ? Math.min(1, (now - lastWall) / 1000) : 0.016;
     lastWall = now;
     dt = Math.min(0.1, dt || rawDt || 0.016);

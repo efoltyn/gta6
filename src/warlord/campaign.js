@@ -394,7 +394,7 @@
     }
     camYaw = S.you.yaw;
     dest = null;
-    if (!lastWall) lastWall = performance.now();
+    if (!lastWall) lastWall = W.clock.now();
     showAll(true);
     W.setPhase("campaign");
     live = true;
@@ -1420,7 +1420,17 @@
      minute of frozen page. */
   function worldTick() {
     if (!built) return;
-    const now = performance.now();
+    /* THE WORLD ASKS THE CLOCK, NOT THE WALL. This line said
+       performance.now(), and that was correct for as long as game time and
+       wall time were the same thing. W.clock.now() is the same monotonic
+       millisecond count WARPED by the speed setting (core.js, THE CLOCK), so
+       at 1x nothing here changes by a single float and at 8x the island —
+       the day, the wages, every band on it — runs eight times over while the
+       player stands still. Everything below already substeps its own
+       catch-up, which is why the fast-forward needed no new integrator: a
+       0.25 s band step is a 0.25 s band step whether it came from a hidden
+       tab or from the slider. */
+    const now = W.clock.now();
     if (!lastWall) { lastWall = now; return; }
     let dt = (now - lastWall) / 1000;
     lastWall = now;
@@ -2537,6 +2547,9 @@
       calls: (CBZ.renderer && CBZ.renderer.info) ? CBZ.renderer.info.render.calls : null,
       you: { x: Math.round(S.you.x), z: Math.round(S.you.z), y: Math.round(W.desert.heightAt(S.you.x, S.you.z)) },
       hour: Math.round(S.hour * 10) / 10, day: S.day, camDist: Math.round(camDist),
+      // published so tools/warlord-speed.mjs can turn the day clock back into
+      // seconds and check it against the speed slider without re-typing 45
+      hourSecs: HOUR_SECS, timeScale: W.clock.scale(),
       ridden: Math.round(travelled),
       trail: breadcrumbs.length, dest: dest ? { x: Math.round(dest.x), z: Math.round(dest.z) } : null,
       simHost: C.simHost, peers: peerDraw.length, chasing: !!chase,

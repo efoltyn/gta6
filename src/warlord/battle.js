@@ -2364,14 +2364,32 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
        that takes three times as long on a slow phone is a different game on a
        slow phone. The sub-steps below keep the integration solid however long
        the frame took. */
-    const wall = performance.now();
-    dt = lastWall ? Math.min(0.25, (wall - lastWall) / 1000) : dt;
+    /* …and WALL TIME IS NOW W.clock.now(). Identical to performance.now() at
+       1x — same units, same monotonic shape — but warped by the game-speed
+       setting, so a fight and the island it is happening on cannot disagree
+       about what time it is. Without this the campaign day burned at 8x while
+       the men fought at 1x, which is not a slow battle, it is two worlds.
+
+       THE FIGHT HAS ITS OWN CEILING AND IT IS HONEST. 12 substeps of 0.055 s
+       is 0.66 s of battle per frame — about 40x at 60 fps and roughly 20x on
+       the frame rate three hundred men actually cost. Past that the battle
+       falls BEHIND the slider rather than taking a coarser step, because
+       0.055 s is the step this separation solve and this morale model were
+       measured against. The readout in games/warlord.html reports the
+       achieved rate, so a battle that cannot keep up says so.
+
+       THE CAPS ONLY MOVE WHEN THE SLIDER DOES. At 1x this is 0.25 s and six
+       substeps — the numbers that were measured here — to the float. The
+       wider ceiling is bought only when the player has asked for it. */
+    const tScale = Math.max(1, W.clock.scale());
+    const wall = W.clock.now();
+    dt = lastWall ? Math.min(0.25 * Math.min(2.8, tScale), (wall - lastWall) / 1000) : dt;
     lastWall = wall;
     if (injectDt > 0) { dt = injectDt; lastWall = 0; injectDt = 0; }
     fxBudget = 0;
 
     if (!over) {
-      const sub = Math.min(6, Math.max(1, Math.ceil(dt / 0.055)));
+      const sub = Math.min(tScale > 1 ? 12 : 6, Math.max(1, Math.ceil(dt / 0.055)));
       const sdt = Math.min(0.055, dt / sub);
       for (let s = 0; s < sub; s++) {
         simT += sdt;

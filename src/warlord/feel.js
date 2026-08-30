@@ -1153,6 +1153,13 @@
      frame function, not here. */
   F.hitStop = function (sec) {
     if (OFF) return false;
+    /* A FAST-FORWARD HAS NO ROOM FOR A BEAT. The hush is 90 ms of WALL time
+       and correctly so — it is a gap in an audio timeline, not a sim pause —
+       but at 8x those 90 ms are 0.7 s of world, and at 64x they are five and
+       a half. A charge every second then leaves the mix hushed permanently,
+       which is not "impact", it is a broken speaker. Above 2x the perceptual
+       hit-stop is simply not attempted. */
+    if (W.clock && W.clock.scale() > 2) return false;
     const s = clamp(sec == null ? 0.09 : sec, 0.02, 0.30);
     safe(function () { if (CBZ.audioHush) CBZ.audioHush(true, { fade: 0.015 }); });
     setTimeout(function () {
@@ -1367,6 +1374,26 @@
 
   function frame(dt) {
     if (OFF) return;
+    /* ONCE PER RENDERED FRAME, ON WALL SECONDS — the mixer is the one thing
+       on this page that must NOT scale with the game speed.
+
+       At 8x the loop hands every frame hook eight substeps (microboot's
+       tick(), see THE TIME SCALE there), so this ran eight times per drawn
+       frame and flushed eight times the voices. Worse, the budget below is a
+       token bucket — `tokens += dt * NEAR_HZ` — and the delay a voice is
+       scheduled with is REAL seconds on a real audio timeline, so feeding it
+       scaled time asks a speaker for eight times the gunfire per second. The
+       war is not eight times louder at 8x; there is simply more of it behind
+       the same 44.1 kHz.
+
+       micro.drawing is true on exactly one substep per frame and micro.frameDt
+       is that frame's real wall seconds. At 1x subCount is 1 and this is a
+       no-op. */
+    const M = CBZ.micro;
+    if (M && M.subCount > 1) {
+      if (!M.drawing) return;
+      if (M.frameDt > 0) dt = M.frameDt;
+    }
     dt = dt > 0 && dt < 0.5 ? dt : 1 / 60;
     simT += dt;
     readEar(dt);

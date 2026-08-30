@@ -770,6 +770,152 @@
     return clamp(p, 0, 0.93);
   };
 
+  /* ============================================================ THE CLOCK
+     ONE NUMBER SAYS HOW FAST THE WORLD RUNS, AND IT LIVES HERE.
+
+     OWNER: "a slider to speed up and slow down game speed going up to
+     insanely fast so you can basically not move and people come to you
+     without even hardcoding this."
+
+     The second half of that sentence is the hard half. Three separate files
+     were each keeping their OWN idea of what time it is, all read off
+     performance.now(): campaign.js's worldTick (the day, the wages, every
+     band walking), battle.js's frame (the fight), events.js's weather ramp.
+     A multiplier typed into any one of them is a world where the sun moves
+     at one rate and the men move at another. So the scale is not a
+     multiplier at all — it is a CLOCK, and every one of those files now asks
+     this clock what time it is instead of asking the wall.
+
+     WHY IT IS A WARPED WALL CLOCK AND NOT AN ACCUMULATOR. match.js's header
+     spends forty lines on this and it is right: rAF is throttled to ~1 Hz in
+     a hidden tab and stops outright on a backgrounded phone, and a 90-second
+     3D battle is 90 seconds the campaign frame is not running. An accumulator
+     falls behind and never catches up. So game time is
+
+         now() = banked + (wall_now - mark) * scale
+
+     — piecewise linear in wall time, monotonic across a scale change (the
+     old rate is BANKED before the new one starts), and with no history to
+     replay. A tab asleep for four minutes at 8x wakes up thirty-two game
+     minutes later, which is exactly the property the wall clock had.
+
+     WHAT SCALE IS *NOT* ALLOWED TO DO. It is not allowed to advance a hook by
+     a huge dt. A 64x frame handed to the world as one 1.07 s step is men
+     teleporting through terrain and through each other. games/warlord.html
+     splits the frame into SUBSTEPS of at most MAX_STEP and hands those to the
+     loop, so nothing in the world ever integrates a step bigger than one it
+     already survived at 1x. See src/core/microboot.js's tick().
+
+     THE CEILING IS DERIVED, NOT CHOSEN. MAX_STEP is 1/30 s — finer than every
+     integrator on this page already clamps itself to (microboot 0.1,
+     campaign.step 0.1, battle 0.055) so nothing is handed a step it was not
+     already built for. MAX_SUB is 32. Their product is 1.07 s of world per
+     rendered frame, and at 60 fps that is 64 game-seconds per wall second.
+     That is where 64x comes from: it is the fastest a 60 Hz frame can go
+     without ever taking a step coarser than 1/30 s.
+
+     THE HOLD. A live match is SEVEN warlords on one island and one shared
+     wall clock (match.js). One of them cannot unilaterally run time faster,
+     so match.js takes a hold and the scale is pinned at 1 for as long as it
+     lasts. The hold is here rather than in the UI because a disabled slider
+     is a suggestion; a clock that refuses is a rule. */
+  const SPEEDS = [0.25, 0.5, 1, 2, 4, 8, 16, 32, 64];
+  const wallMs = function () {
+    return (G.performance && G.performance.now) ? G.performance.now() : Date.now();
+  };
+  let clkWant = 1;            // what the player asked for
+  let clkScale = 1;           // what he is actually getting (a hold can pin it)
+  let clkBanked = 0;          // game ms accumulated before the last rate change
+  let clkMark = wallMs();     // wall ms at that rate change
+  const clkHolds = [];        // reasons the scale must stay at 1, by name
+  let clkAch = 1;             // measured game-seconds delivered per wall second
+
+  function clkBank() {
+    const w = wallMs();
+    clkBanked += (w - clkMark) * clkScale;
+    clkMark = w;
+  }
+  function clkApply() {
+    const want = clkHolds.length ? 1 : clkWant;
+    if (want === clkScale) return clkScale;
+    clkBank();
+    clkScale = want;
+    return clkScale;
+  }
+  function clkSay() {
+    W.emit("clock", { scale: clkScale, want: clkWant, held: clkHolds[0] || "" });
+    return clkScale;
+  }
+  function nearestSpeed(x) {
+    let best = SPEEDS[0], bd = Infinity;
+    for (let i = 0; i < SPEEDS.length; i++) {
+      const d = Math.abs(Math.log(SPEEDS[i]) - Math.log(x));
+      if (d < bd) { bd = d; best = SPEEDS[i]; }
+    }
+    return best;
+  }
+
+  W.clock = {
+    SPEEDS: SPEEDS,
+    MAX_STEP: 1 / 30,
+    MAX_SUB: 32,
+    /* THE WALL BUDGET. 22 ms is one 45 Hz frame: a fast-forward that costs
+       the page a drop from 60 to 45 fps is a fast-forward, and one that drops
+       it to 4 fps is a freeze wearing a slider. When the loop runs out of
+       budget it stops substepping and the world falls BEHIND the slider,
+       which achieved() then reports and the readout admits to. */
+    BUDGET_MS: 22,
+
+    /* GAME MILLISECONDS. Deliberately the same units and the same monotonic
+       shape as performance.now(), because every consumer of it is a line that
+       used to say performance.now(). */
+    now: function () { return clkBanked + (wallMs() - clkMark) * clkScale; },
+    wall: wallMs,
+
+    scale: function () { return clkScale; },
+    want: function () { return clkWant; },
+    index: function () { return SPEEDS.indexOf(nearestSpeed(clkWant)); },
+    label: function (x) {
+      const v = x == null ? clkScale : x;
+      return (v < 1 ? String(v) : String(Math.round(v))) + "×";
+    },
+    setScale: function (x) {
+      x = +x;
+      clkWant = nearestSpeed(x > 0 ? x : 1);
+      clkApply();
+      return clkSay();
+    },
+    setIndex: function (i) {
+      i = clamp(Math.round(+i || 0), 0, SPEEDS.length - 1);
+      return W.clock.setScale(SPEEDS[i]);
+    },
+    nudge: function (d) { return W.clock.setIndex(W.clock.index() + (d > 0 ? 1 : -1)); },
+
+    hold: function (why) {
+      why = String(why || "held");
+      if (clkHolds.indexOf(why) < 0) clkHolds.push(why);
+      clkApply();
+      return clkSay();
+    },
+    release: function (why) {
+      const i = clkHolds.indexOf(String(why || "held"));
+      if (i >= 0) clkHolds.splice(i, 1);
+      clkApply();
+      return clkSay();
+    },
+    heldFor: function () { return clkHolds[0] || ""; },
+
+    /* THE LOOP REPORTS WHAT IT ACTUALLY DELIVERED, so the readout can stop
+       claiming 64x on a machine that is managing 19. Smoothed, because a
+       per-frame ratio on a 60 Hz page is mostly noise. */
+    deliver: function (gameSec, wallSec) {
+      if (!(wallSec > 0.0002)) return clkAch;
+      clkAch += (gameSec / wallSec - clkAch) * 0.08;
+      return clkAch;
+    },
+    achieved: function () { return clkAch; },
+  };
+
   /* ============================================================ PHASE
      WHO OWNS THE SCREEN. Exactly one module at a time, and the transition is
      a function so that a module can never leave its own DOM up behind the
@@ -900,7 +1046,8 @@
   W.audit = function () {
     const want = ["desert", "campaign", "army", "battle", "outpost", "loadout"];
     const out = { ok: true, missing: [], present: [], army: S.army.length, bands: S.bands.length,
-                  outposts: S.outposts.length, phase: S.phase, gold: S.gold, day: S.day };
+                  outposts: S.outposts.length, phase: S.phase, gold: S.gold, day: S.day,
+                  timeScale: clkScale, timeHeld: clkHolds[0] || "" };
     for (let i = 0; i < want.length; i++) {
       if (MODULES[want[i]]) out.present.push(want[i]);
       else { out.missing.push(want[i]); out.ok = false; }
