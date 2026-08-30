@@ -69,13 +69,11 @@
       const sh = F.mix(P.roof, 0x14100c, 0.62), shD = F.shade(sh, 0.55);
 
       // ---- A. THE STONE SILL --------------------------------------
-      const pod = F.podium(ctx, { pal: P, col: P.trim, capCol: P.shadow,
-        over: cl(u * 0.05, 0.35, 0.95), top: cl(FH * 0.10, 0.22, F.STEP_RISE) });
+      const pod = F.podium(ctx, { pal: P, col: P.trim, capCol: P.shadow, over: cl(u * 0.05, 0.35, 0.95), top: cl(FH * 0.10, 0.22, F.STEP_RISE) });
 
       // ---- B. THE SVALGANG ----------------------------------------
-      const gal = F.veranda(ctx, { pal: P, sides: "all", storeys: 1,
-        depth: cl(u * 0.13, 0.95, 2.10), deckTop: Math.min(pod.top, F.STEP_RISE),
-        colTop: cl(FH * 1.02, 2.50, 3.40), col: timL, trimCol: timD });
+      const gal = F.veranda(ctx, { pal: P, sides: "all", storeys: 1, col: timL, trimCol: timD,
+        depth: cl(u * 0.13, 0.95, 2.10), deckTop: Math.min(pod.top, F.STEP_RISE), colTop: cl(FH * 1.02, 2.50, 3.40) });
 
       // ---- C. THE STAVE WALL --------------------------------------
       // Upright planks, hand-split, so no two are the same width or stand out
@@ -128,7 +126,7 @@
       };
       // the pent roof over the gallery — the skirt the whole stack sits on
       const gw = ctx.w / 2 + gal.depth, gd = ctx.d / 2 + gal.depth;
-      tier(gal.colTop, gw, gd, cl(u * 0.10, 0.75, 1.60), (ctx.w / 2) / gw, (ctx.d / 2) / gd, 9);
+      tier(gal.colTop, gw, gd, cl(u * 0.10, 0.75, 1.60), ctx.w / 2 / gw, ctx.d / 2 / gd, 9);
 
       /* AT LEAST THREE ROOFS, whatever the host, and they are two different
          things — which is the correction that made this stop reading as a
@@ -145,8 +143,7 @@
 
       // THE TOWER on the ridge. Turret size is capped by rTop as well as by
       // the plan, or a one-storey chapel grows a cathedral spire.
-      const NT = ctx.storeys >= 2 ? 3 : 2;
-      let tw = cl(Math.min(u * 0.24, rTop * 0.30), 0.80, 2.40);
+      const NT = ctx.storeys >= 2 ? 3 : 2;   let tw = cl(Math.min(u * 0.24, rTop * 0.30), 0.80, 2.40);
       for (let k = 1; k <= NT; k++) {
         const dh = tw * 0.95, last = k === NT;
         ctx.dbox(0, ty + dh / 2, 0, tw * 2, dh, tw * 2, tim);                 // the drum

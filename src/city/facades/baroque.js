@@ -80,13 +80,11 @@
 
       // an entablature, and a stepped pediment. Both are wanted four times.
       const entab = function (y, h, wid, dep) {
-        F.box(ctx, ff, 0, y + h * 0.18, wid, h * 0.36, dep, LT);
-        F.box(ctx, ff, 0, y + h * 0.55, wid - 0.18, h * 0.38, dep - 0.07, F.shade(LT, 0.90));
+        F.box(ctx, ff, 0, y + h * 0.18, wid, h * 0.36, dep, LT);   F.box(ctx, ff, 0, y + h * 0.55, wid - 0.18, h * 0.38, dep - 0.07, F.shade(LT, 0.90));
         F.box(ctx, ff, 0, y + h * 0.88, wid + 0.55, h * 0.30, dep + 0.34, LT);
       };
       const pediment = function (y, wid, h, dep) {
-        for (let k = 0; k < 7; k++) F.box(ctx, ff, 0, y + (k + 0.5) * (h / 7), wid * (1 - ((k + 0.5) / 7) * 0.94),
-          h / 7 + 0.04, dep, k % 2 ? F.shade(LT, 0.94) : LT);
+        for (let k = 0; k < 7; k++) F.box(ctx, ff, 0, y + (k + 0.5) * (h / 7), wid * (1 - ((k + 0.5) / 7) * 0.94), h / 7 + 0.04, dep, k % 2 ? F.shade(LT, 0.94) : LT);
       };
 
       // ---- A. THE NAVE BEHIND -------------------------------------
@@ -97,12 +95,10 @@
       F.parapetWalk(ctx, { pal: P, h: clamp(FH * 0.22, 0.4, 0.8), col: P.base, capCol: LT });
 
       // ---- B. THE FRONT, IN THREE LAYERS OF DEPTH -----------------
-      F.sBox(ctx, ff, 0, y2 / 2, span, y2, P0 * 0.7, P.base);                       // outer wall
-      F.sBox(ctx, ff, 0, y2 / 2, (tMid + PW) * 2, y2, P0 * 1.5, P.light);                 // the pavilion
+      F.sBox(ctx, ff, 0, y2 / 2, span, y2, P0 * 0.7, P.base);   F.sBox(ctx, ff, 0, y2 / 2, (tMid + PW) * 2, y2, P0 * 1.5, P.light);   // outer wall, then the pavilion
       for (const sg of [-1, 1]) for (const q of [[tOut, P0 * 1.0], [tMid, P0 * 1.7], [tIn, P0 * 2.6], [tIn + PW * 1.16, P0 * 2.3]]) {
         F.sRib(ctx, ff, sg * q[0], 0, y1, PW, q[1], LT);                                   // giant pilaster
-        F.box(ctx, ff, sg * q[0], y1 - 0.22, PW * 1.28, 0.30, q[1] + 0.12, LT);            // its capital
-        F.box(ctx, ff, sg * q[0], 0.26, PW * 1.20, 0.52, q[1] + 0.10, LT);                 // and its base
+        F.box(ctx, ff, sg * q[0], y1 - 0.22, PW * 1.28, 0.30, q[1] + 0.12, LT);   F.box(ctx, ff, sg * q[0], 0.26, PW * 1.20, 0.52, q[1] + 0.10, LT);   // capital, base
       }
       entab(y1, ent1, span + 0.3, P0 * 1.3);   entab(y1, ent1, (tMid + PW) * 2 + 0.4, P0 * 2.4);   // + the ressaut
 
@@ -114,19 +110,17 @@
         F.arch(ctx, ff, t, y0 + nh, nw, nw * 0.52, 0.14, np + 0.06, LT, "round");
         for (const s2 of [-1, 1]) F.rib(ctx, ff, t + s2 * (nw / 2 + 0.15), y0 - 0.06, y0 + nh + 0.06, 0.26, np + 0.10, LT);
         F.box(ctx, ff, t, y0 - 0.15, nw + 0.66, 0.20, np + 0.18, LT);                       // the shelf
-        F.box(ctx, ff, t, y0 + nh * 0.32, nw * 0.44, nh * 0.58, np - 0.02, P.trim);         // the figure
-        F.box(ctx, ff, t, y0 + nh * 0.68, nw * 0.30, nh * 0.16, np, P.trim);
+        F.box(ctx, ff, t, y0 + nh * 0.32, nw * 0.44, nh * 0.58, np - 0.02, P.trim);   F.box(ctx, ff, t, y0 + nh * 0.68, nw * 0.30, nh * 0.16, np, P.trim);   // the figure
       }
 
       // ---- D. THE DOOR, UNDER A BROKEN SEGMENTAL PEDIMENT ---------
       const dy = clamp(e.head + 0.6, 2.6, y1 - 1.6), dw = e.gap + 1.4, dp = P0 * 2.6 + 0.16;
+      const Wp = (dw + 2.1) * 0.5, Rp = Math.min(1.15, Wp * 0.38);
       F.box(ctx, ff, 0, dy * 0.5, dw + 0.3, dy, dp - 0.12, DK);
       for (const sg of [-1, 1]) F.sRib(ctx, ff, sg * (dw / 2 + 0.45), 0, dy + 0.1, 0.88, dp, LT);
       F.box(ctx, ff, 0, dy + 0.28, dw + 2.1, 0.46, dp + 0.14, LT);                          // the lintel
-      const Wp = (dw + 2.1) * 0.5, Rp = Math.min(1.15, Wp * 0.38);
       for (let k = 0; k < 6; k++) for (const sg of [-1, 1]) {
-        const u = 0.32 + ((k + 0.5) / 6) * 0.68;                                            // BROKEN: no crown
-        const yy = dy + 0.60 + Rp * Math.sqrt(Math.max(0, 1 - u * u));
+        const u = 0.32 + ((k + 0.5) / 6) * 0.68, yy = dy + 0.60 + Rp * Math.sqrt(Math.max(0, 1 - u * u));   // BROKEN: no crown
         F.box(ctx, ff, sg * Wp * u, yy, Wp * 0.16, 0.32, dp + 0.20, LT);
         F.box(ctx, ff, sg * Wp * u, yy + 0.24, Wp * 0.17, 0.18, dp + 0.28, F.shade(LT, 0.90));
       }
@@ -144,27 +138,24 @@
           F.box(ctx, ff, t, y2 + hh - 0.15, vw * 1.35, 0.30, P0 * 1.65, LT);
           if (hh > 0.95) F.box(ctx, ff, t, y2 + hh - 0.70, vw * 1.35, 0.20, P0 * 1.40, F.shade(LT, 0.84));
         }
-        const ex = sg * (wUp / 2 + vL * 0.93);                                              // the eye it curls into
-        for (let k = 0; k < 4; k++) F.box(ctx, ff, ex, y2 + 0.58, 1.10 - k * 0.26, 1.10 - k * 0.26, P0 * (1.3 + k * 0.32), k % 2 ? DK : LT);
+        // the eye it curls into, where the curve dies on the lower cornice
+        for (let k = 0; k < 4; k++) F.box(ctx, ff, sg * (wUp / 2 + vL * 0.93), y2 + 0.58, 1.10 - k * 0.26, 1.10 - k * 0.26, P0 * (1.3 + k * 0.32), k % 2 ? DK : LT);
         F.box(ctx, ff, sg * (wUp / 2 - 0.20), y2 + vH * 0.5, 0.42, vH, P0 * 1.9, LT);        // the stop against the screen
       }
 
       // ---- F. THE UPPER STOREY AND THE CROWN ----------------------
       F.box(ctx, ff, 0, y2 + hUp / 2, wUp, hUp, P0 * 1.0, P.base);
       for (const sg of [-1, 1]) for (const q of [[wUp * 0.44, P0 * 1.4], [wUp * 0.15, P0 * 2.0]]) {
-        F.rib(ctx, ff, sg * q[0], y2, y2 + hUp - 0.24, PW * 0.86, q[1], LT);
-        F.box(ctx, ff, sg * q[0], y2 + hUp - 0.20, PW * 1.10, 0.26, q[1] + 0.12, LT);
+        F.rib(ctx, ff, sg * q[0], y2, y2 + hUp - 0.24, PW * 0.86, q[1], LT);   F.box(ctx, ff, sg * q[0], y2 + hUp - 0.20, PW * 1.10, 0.26, q[1] + 0.12, LT);
       }
-      const gw = Math.min(wUp * 0.20, hUp * 0.42);                                           // the great window
+      const gw = Math.min(wUp * 0.20, hUp * 0.42);   // the great window over the door
       F.box(ctx, ff, 0, y2 + hUp * 0.44, gw, hUp * 0.50, 0.12, DK, P0 * 1.0 - 0.12);
       F.arch(ctx, ff, 0, y2 + hUp * 0.69, gw, gw * 0.5, 0.16, P0 * 1.6, LT, "round");
       entab(y2 + hUp, ent2, wUp + 0.3, P0 * 1.6);
       pediment(y2 + hUp + ent2, wUp + 0.6, pedH, P0 * 2.0);
       const fy = y2 + hUp + ent2 + pedH;                                                     // THE CROSS on the apex
-      F.box(ctx, ff, 0, fy + 0.20, 0.78, 0.40, P0 * 2.2, LT);
-      F.box(ctx, ff, 0, fy + 1.25, 0.26, 1.90, P0 * 2.0, LT);
-      F.box(ctx, ff, 0, fy + 1.55, 1.05, 0.26, P0 * 2.0, LT);
-      for (const sg of [-1, 1]) {                                                            // flame finials on the volutes
+      F.box(ctx, ff, 0, fy + 0.20, 0.78, 0.40, P0 * 2.2, LT);   F.box(ctx, ff, 0, fy + 1.25, 0.26, 1.90, P0 * 2.0, LT);   F.box(ctx, ff, 0, fy + 1.55, 1.05, 0.26, P0 * 2.0, LT);
+      for (const sg of [-1, 1]) {   // flame finials where each volute dies into the lower cornice
         F.box(ctx, ff, sg * (wUp / 2 + vL * 0.93), y2 + 2.00, 0.60, 1.10, P0 * 2.0, LT);   F.box(ctx, ff, sg * (wUp / 2 + vL * 0.93), y2 + 2.85, 0.28, 0.70, P0 * 1.8, LT);
       }
     },

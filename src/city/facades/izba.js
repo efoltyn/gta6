@@ -62,17 +62,15 @@
     maxStoreys: 2,
     build: function (ctx, F) {
       const FH = ctx.FH, rTop = ctx.rTop, u = Math.min(ctx.w, ctx.d);
-      const hw = ctx.w / 2, hd = ctx.d / 2, e = F.entrance(ctx);
-      const S = ctx.sbox || ctx.dbox;
+      const hw = ctx.w / 2, hd = ctx.d / 2, e = F.entrance(ctx), S = ctx.sbox || ctx.dbox;
       const P = F.palette(ctx, "timber", { pull: 0.90, grain: 0.34 });
       // The carving is PAINTED and the logs are not — that contrast is what
       // makes the nalichniki read at 30 m. Which paint is a position hash.
-      const carve = F.mix(P.light, 0xf3f0e6, 0.62);
+      const carve = F.mix(P.light, 0xf3f0e6, 0.52), sh = F.mix(P.roof, 0x2a2620, 0.35);
       const carveD = ctx.hash(0x1b21) < 0.5 ? F.mix(0x3f6d86, carve, 0.30) : F.mix(0x8e3a2e, carve, 0.30);
-      const sh = F.mix(P.roof, 0x2a2620, 0.35);
 
       // ---- A. THE PODKLET LINE ------------------------------------
-      const pk = cl(FH * 0.30, 0.68, 1.25);          // top of the undercroft
+      const pk = cl(FH * 0.36, 0.85, 1.50);          // top of the undercroft
 
       // ---- B. THE LOG COURSES -------------------------------------
       const ch = cl(FH * 0.115, 0.26, 0.42);         // one log's diameter
@@ -81,11 +79,9 @@
       for (let k = 0; k < N; k++) {
         const cy = k * ch + ch / 2;
         if (cy > rTop - 0.05) break;
-        const j = 0.90 + ctx.hash(0x1b00 + k) * 0.16;         // hewn, not milled
-        const t = ch * j, low = cy < pk;
-        const c = low ? F.shade(P.course(k), 0.56) : P.course(k);
-        const cL = F.shade(c, 1.18), cD = F.shade(c, 0.62);
-        const p = cl(ch * (low ? 1.20 : 0.98), 0.32, 0.52);   // proud of the wall
+        const low = cy < pk, t = ch * (0.90 + ctx.hash(0x1b00 + k) * 0.16);  // hewn, not milled
+        const c = low ? F.shade(P.course(k), 0.46) : P.course(k), cL = F.shade(c, 1.18), cD = F.shade(c, 0.62);
+        const p = cl(ch * (low ? 1.30 : 0.98), 0.32, 0.55);   // proud of the wall
         // SOLID only where a body can meet it. sbox refuses the rest anyway,
         // and asking it 200 times for boxes 6 m up is 200 wasted scans.
         const E = cy < 2.7 ? S : ctx.dbox;
@@ -104,16 +100,18 @@
           ctx.dbox(sg * (hw + p * 0.58), cy - t * 0.46, 0, p * 0.74, 0.07, ctx.d + oz * 2 + 0.02, cD);
         }
       }
-      const wp = cl(ch * 1.20, 0.32, 0.52) + lug + 0.16;   // everything stands off this
+      // JUST PAST THE LOG FACE, not past the corner lugs — `lug` is how far
+      // an END runs past the corner, not how far the wall stands out, and
+      // measuring off it leaves the nalichniki floating a metre in front.
+      const wp = cl(ch * 1.30, 0.34, 0.58) + 0.16;
       // THE OKLADNOY VENETS: the heavy sill beam the living floor lands on,
       // and the line that says the dark courses below it are a cellar.
-      F.ring(ctx, pk + 0.10, 0.26, cl(ch * 1.30, 0.40, 0.62), F.shade(P.base, 0.80), 0.5, 0);
+      F.ring(ctx, pk + 0.12, 0.30, wp + 0.10, F.shade(P.base, 0.74), 0.6, 0);
 
       // ---- C. THE ROOF --------------------------------------------
       // Ridge PERPENDICULAR to the door face, so the street gets the gable.
       const zAxis = F.face(ctx, ctx.doorSide).horiz;
-      const rov = cl(u * 0.075, 0.50, 1.30);
-      const hT = (zAxis ? ctx.w : ctx.d) / 2 + rov;
+      const rov = cl(u * 0.075, 0.50, 1.30), hT = (zAxis ? ctx.w : ctx.d) / 2 + rov;
       const roof = F.gableRoof(ctx, { pal: P, col: sh, axis: zAxis ? "z" : "x",
         over: rov, courses: 15, verge: false, rise: cl(hT * 0.98, FH * 0.90, u * 1.30) });
 
@@ -122,12 +120,10 @@
       // the polotentse hung at the apex. Emitted in world coordinates rather
       // than through F.box because the gable plane stands `over` past the
       // wall the face helpers measure from.
-      const gN = 15, gp = (zAxis ? hd : hw) + roof.over;
-      const gb = roof.halfT0 / gN + 0.34;                    // covers its own step
+      const gN = 15, gp = (zAxis ? hd : hw) + roof.over, gb = roof.halfT0 / gN + 0.26;
       for (const sg of [-1, 1]) {
         for (let i = 0; i < gN; i++) {
-          const v = (i + 0.5) / gN, ht = roof.halfT0 * (1 - v) - gb * 0.34;
-          const y = roof.y0 + roof.h * v;
+          const v = (i + 0.5) / gN, ht = roof.halfT0 * (1 - v) - gb * 0.34, y = roof.y0 + roof.h * v;
           for (const sq of [-1, 1]) {
             const bx = zAxis ? sq * ht : sg * gp, bz = zAxis ? sg * gp : sq * ht;
             ctx.dbox(bx, y, bz, zAxis ? gb : 0.36, roof.h / gN + 0.07, zAxis ? 0.36 : gb, carve);
@@ -146,8 +142,7 @@
         const n = F.bayCount(f, cl(u * 0.32, 2.1, 3.6), 2, 5);
         for (const b of F.bays(f, n, cl(f.span * 0.14, 0.9, 2.4))) {
           for (let k = 0; k < ctx.storeys; k++) {
-            const wh = cl(FH * 0.30, 0.70, 1.20), ww = cl(b.w * 0.36, 0.60, 1.15);
-            const sy = k * FH + Math.max(pk + 0.25, FH * 0.40);
+            const wh = cl(FH * 0.30, 0.70, 1.20), ww = cl(b.w * 0.36, 0.60, 1.15), sy = k * FH + Math.max(pk + 0.25, FH * 0.40);
             if (sy + wh > rTop - 0.2 || !F.clearsDoor(ctx, f, b.t, ww + 2.4)) continue;
             F.box(ctx, f, b.t, sy + wh / 2, ww, wh, wp - 0.12, P.glass, 0.02);
             for (const sg of [-1, 1]) {                      // the glazing bar and the side boards
@@ -156,16 +151,15 @@
             }
             F.box(ctx, f, b.t, sy + wh + 0.28, ww + 0.98, 0.32, wp + 0.05, carve);
             for (let q = 0; q < 3; q++)                      // the stepped carved head
-              F.box(ctx, f, b.t, sy + wh + 0.50 + q * 0.20, (ww + 0.86) * (1 - q * 0.26), 0.20,
-                wp + 0.05, q === 1 ? carveD : carve);
+              F.box(ctx, f, b.t, sy + wh + 0.50 + q * 0.20, (ww + 0.86) * (1 - q * 0.26), 0.20, wp + 0.05, q === 1 ? carveD : carve);
             F.box(ctx, f, b.t, sy - 0.28, ww + 0.82, 0.26, wp + 0.08, carve);   // the apron
           }
         }
       }
 
       // ---- F. THE KRYLTSO, AND THIS BUILDING'S OWN DOOR -----------
-      F.porch(ctx, { pal: P, roof: "gable", col: carve, trimCol: carveD, roofCol: sh,
-        depth: cl(u * 0.17, 1.15, 2.40), deckTop: Math.min(pk, F.STEP_RISE), posts: 2,
+      F.porch(ctx, { pal: P, roof: "gable", col: carve, trimCol: carveD, roofCol: sh, posts: 2,
+        depth: cl(u * 0.17, 1.15, 2.40), deckTop: Math.min(pk, F.STEP_RISE),
         width: cl(e.gap + u * 0.24, 3.0, 5.6), eave: cl(FH * 1.05, e.head + 0.4, rTop - 0.4) });
       // ownDoor is declared, so nothing else will draw a surround: heavy
       // plank jambs and a carved head board, standing proud of the logs.
