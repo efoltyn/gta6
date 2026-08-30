@@ -1,0 +1,445 @@
+<title>Five Commits, Six Tombstones</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+:root{
+  --ground:#e9eef0; --surface:#f9fbfb; --raised:#ffffff;
+  --ink:#131a1d; --ink-2:#3c4a50; --muted:#66757b;
+  --rule:#ccd7db; --rule-soft:#dfe7e9;
+  --old:#b8442a; --new:#1a5fd0;
+  --keep:#1a5fd0; --dead:#8a969b;
+  --shadow:0 1px 2px rgba(19,26,29,.05), 0 8px 24px -12px rgba(19,26,29,.18);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0e1316; --surface:#161d21; --raised:#1c2429;
+    --ink:#e3eaed; --ink-2:#b3c1c6; --muted:#8b9aa0;
+    --rule:#2b363b; --rule-soft:#222c31;
+    --old:#dd6a45; --new:#5b8cf0;
+    --keep:#5b8cf0; --dead:#6d7b81;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0e1316; --surface:#161d21; --raised:#1c2429;
+  --ink:#e3eaed; --ink-2:#b3c1c6; --muted:#8b9aa0;
+  --rule:#2b363b; --rule-soft:#222c31;
+  --old:#dd6a45; --new:#5b8cf0;
+  --keep:#5b8cf0; --dead:#6d7b81;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--ground); color:var(--ink);
+  font-family:"IBM Plex Serif",Georgia,serif; font-size:16.5px; line-height:1.62;
+  margin:0; padding:0 20px 96px;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:820px;margin:0 auto}
+.bleed{max-width:980px;margin-left:auto;margin-right:auto}
+
+h1,h2,h3,.eyebrow,.lab,th,.tag,.num{font-family:"IBM Plex Sans Condensed",'Helvetica Neue',Arial,sans-serif}
+code,kbd,.mono,td.n,.sha{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace}
+
+/* ---- masthead ---- */
+header{padding:64px 0 30px;border-bottom:2px solid var(--ink)}
+.kicker{
+  font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:600;
+  font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);
+  display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;
+}
+.kicker .dot{color:var(--rule)}
+h1{
+  font-size:clamp(38px,7.2vw,62px);line-height:1.01;font-weight:700;
+  letter-spacing:-.018em;margin:16px 0 0;text-wrap:balance;
+}
+.standfirst{
+  font-size:20px;line-height:1.5;color:var(--ink-2);margin:18px 0 0;max-width:60ch;
+  font-style:italic;
+}
+
+/* ---- verdict strip ---- */
+.verdicts{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1px;
+  background:var(--rule);border:1px solid var(--rule);margin:34px 0 0;
+}
+.v{background:var(--surface);padding:18px 20px}
+.v .lab{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.v .big{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:27px;line-height:1.12;margin-top:7px;letter-spacing:-.01em}
+.v .sub{font-size:14px;color:var(--ink-2);margin-top:5px;line-height:1.45}
+.v.yes .big{color:var(--new)} .v.no .big{color:var(--old)}
+
+section{padding-top:52px}
+.eyebrow{
+  font-size:11.5px;letter-spacing:.17em;text-transform:uppercase;color:var(--muted);
+  font-weight:600;display:flex;align-items:center;gap:11px;margin-bottom:9px;
+}
+.eyebrow::after{content:"";flex:1;height:1px;background:var(--rule)}
+h2{font-size:29px;line-height:1.16;font-weight:700;letter-spacing:-.012em;margin:0 0 14px;text-wrap:balance}
+h3{font-size:18px;font-weight:600;margin:30px 0 8px;letter-spacing:-.005em}
+p{margin:0 0 15px;max-width:66ch}
+p.wide{max-width:none}
+a{color:var(--new)}
+strong{font-weight:600}
+em.q{font-style:italic;color:var(--ink-2)}
+
+code{font-size:.87em;background:var(--rule-soft);padding:.1em .38em;border-radius:2px;color:var(--ink-2)}
+
+/* ---- commit ledger ---- */
+ol.ledger{list-style:none;margin:0;padding:0;counter-reset:c}
+ol.ledger li{
+  counter-increment:c;display:grid;grid-template-columns:34px 1fr;gap:16px;
+  padding:15px 0;border-top:1px solid var(--rule-soft);align-items:start;
+}
+ol.ledger li:first-child{border-top:1px solid var(--rule)}
+ol.ledger li::before{
+  content:counter(c);font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:500;
+  color:var(--muted);padding-top:4px;
+}
+.ct{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:600;font-size:17.5px;line-height:1.3}
+.cm{font-size:13.5px;color:var(--muted);margin-top:4px;display:flex;gap:12px;flex-wrap:wrap;align-items:baseline}
+.sha{font-size:12.5px;color:var(--new);font-weight:500}
+.cd{font-size:14.5px;color:var(--ink-2);margin-top:6px;line-height:1.5;max-width:64ch}
+
+/* ---- tables ---- */
+.tscroll{overflow-x:auto;margin:20px 0 0;border:1px solid var(--rule);background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:560px}
+th{
+  text-align:left;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);
+  font-weight:600;padding:11px 15px;border-bottom:1px solid var(--rule);white-space:nowrap;
+}
+td{padding:11px 15px;border-bottom:1px solid var(--rule-soft);vertical-align:top;line-height:1.5}
+tr:last-child td{border-bottom:none}
+td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-size:13.5px}
+td.name{font-family:"IBM Plex Mono",monospace;font-size:12.5px;line-height:1.45}
+
+.tag{
+  display:inline-block;font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  padding:3px 8px;border:1px solid currentColor;border-radius:2px;white-space:nowrap;
+}
+.tag.dead{color:var(--dead)}
+.tag.keep{color:var(--keep)}
+.tag.part{color:var(--old)}
+.tag.pass{color:var(--new);border:none;padding-left:0}
+
+/* ---- chart ---- */
+figure{margin:26px 0 0}
+.chart{background:var(--surface);border:1px solid var(--rule);padding:18px 14px 10px;box-shadow:var(--shadow)}
+.chart svg{display:block;width:100%;height:auto}
+.legend{display:flex;gap:22px;flex-wrap:wrap;padding:12px 6px 4px;font-size:13.5px;color:var(--ink-2);
+  font-family:"IBM Plex Sans Condensed",sans-serif}
+.legend span{display:flex;align-items:center;gap:8px}
+.sw{width:20px;height:3px;border-radius:2px;display:inline-block}
+figcaption{font-size:13.5px;color:var(--muted);margin-top:12px;line-height:1.5;max-width:72ch}
+
+.gtxt{fill:var(--muted);font-family:"IBM Plex Mono",monospace;font-size:11px}
+.gline{stroke:var(--rule-soft);stroke-width:1}
+.gaxis{stroke:var(--rule);stroke-width:1}
+.beat{stroke:var(--muted);stroke-width:1;stroke-dasharray:2 3;opacity:.65}
+.blab{fill:var(--ink-2);font-family:"IBM Plex Sans Condensed",sans-serif;font-size:11px;font-weight:600}
+
+/* ---- distribution bars ---- */
+.dist{margin:22px 0 0;border:1px solid var(--rule);background:var(--surface);padding:18px 20px}
+.drow{display:grid;grid-template-columns:96px 1fr 52px;gap:14px;align-items:center;padding:7px 0}
+.drow .dl{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink-2);white-space:nowrap}
+.bar{height:14px;background:var(--rule-soft);position:relative;overflow:hidden;border-radius:2px}
+.bar i{position:absolute;inset:0 auto 0 0;background:var(--new);border-radius:2px}
+.drow .dv{font-family:"IBM Plex Mono",monospace;font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink)}
+.dhead{display:grid;grid-template-columns:96px 1fr 52px;gap:14px;font-size:10.5px;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--muted);font-weight:600;font-family:"IBM Plex Sans Condensed",sans-serif;
+  padding-bottom:7px;border-bottom:1px solid var(--rule)}
+.dhead .r{text-align:right}
+
+/* ---- callout ---- */
+.call{
+  border-left:3px solid var(--new);background:var(--surface);
+  padding:18px 22px;margin:26px 0 0;box-shadow:var(--shadow);
+}
+.call.warn{border-left-color:var(--old)}
+.call h3{margin:0 0 7px;font-size:17px}
+.call p{margin:0 0 10px;font-size:15.5px}
+.call p:last-child{margin-bottom:0}
+
+ul.plain{margin:0;padding-left:20px}
+ul.plain li{margin-bottom:9px;max-width:64ch}
+
+footer{margin-top:64px;padding-top:22px;border-top:2px solid var(--ink);font-size:13.5px;color:var(--muted)}
+footer p{max-width:none;margin-bottom:7px}
+
+@media (max-width:640px){
+  body{font-size:16px;padding:0 16px 72px}
+  header{padding-top:44px}
+  .drow,.dhead{grid-template-columns:78px 1fr 46px;gap:10px}
+}
+@media (prefers-reduced-motion:no-preference){
+  .chart path.trace{stroke-dasharray:3000;stroke-dashoffset:3000;animation:draw 1.5s .2s ease-out forwards}
+  @keyframes draw{to{stroke-dashoffset:0}}
+}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="kicker">
+    <span>gta6 &middot; main</span><span class="dot">/</span>
+    <span>2026-08-29</span><span class="dot">/</span>
+    <span class="mono">2023a26 &rarr; c7dfb59</span>
+  </div>
+  <h1>Five Commits, Six Tombstones</h1>
+  <p class="standfirst">Everything uncommitted was one wave, seventeen hours cold. Everything unmerged was already dead &mdash; except one branch nobody has touched since August 20.</p>
+
+  <div class="verdicts">
+    <div class="v yes">
+      <div class="lab">The working tree</div>
+      <div class="big">Committed &amp; pushed</div>
+      <div class="sub">2,060 lines across 21 paths. Both gates green, determinism identical.</div>
+    </div>
+    <div class="v no">
+      <div class="lab">The six branches</div>
+      <div class="big">Do not merge</div>
+      <div class="sub">Five are tombstones. So is the 2,105-line stash.</div>
+    </div>
+    <div class="v">
+      <div class="lab">Waiting on you</div>
+      <div class="big">One cabinet</div>
+      <div class="sub">6,072 additive lines of tooling that touch zero game files.</div>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="eyebrow">What was sitting there</div>
+  <h2>One brief, six disasters, and two things that looked wrong</h2>
+  <p>The uncommitted tree was not a pile. It was a single wave answering a single line from you, dated the same day:</p>
+  <p style="border-left:3px solid var(--rule);padding-left:18px;color:var(--ink-2);font-style:italic;max-width:60ch">&ldquo;all the natural disasters are cookie cutter size &mdash; there&rsquo;s no BIG one&rdquo;</p>
+  <p>Commit <code>5b52635</code> had already landed the hurricane half of that. What was uncommitted is the rest of the roster reading the same idea off the same seeded stream &mdash; plus two separate complaints fixed in their own files, so they split cleanly into their own commits.</p>
+
+  <ol class="ledger">
+    <li>
+      <div>
+        <div class="ct">Cookie-cutter no more: every natural disaster rolls its own size</div>
+        <div class="cm"><span class="sha">5995e02</span><span>11 files</span></div>
+        <div class="cd">Tsunami, quake, storm, tornado, wildfire and volcano each roll a magnitude per occurrence. The round&rsquo;s intensity biases the roll, it never replaces it &mdash; so an early round can still draw a monster.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <div class="ct">The ash was a checkerboard, and it never went away</div>
+        <div class="cm"><span class="sha">436abe5</span><span>src/world/volcanofx.js</span></div>
+        <div class="cd">Three bugs painted that lattice: per-cell hashed noise at exactly grid frequency, patches still centred on their lattice points, and a size floor that drew a dark quad on <em>every</em> ground cell from the moment the field was built. Ash now erodes too &mdash; wind strips it, rain washes it 5&times; faster.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <div class="ct">The wave had an edge you could see</div>
+        <div class="cm"><span class="sha">0728173</span><span>src/world/water_spec.js</span></div>
+        <div class="cd">The wall carried full crest height at both end columns, so from along the shore there was a flat vertical cap where the wave simply stopped sideways. It tapers into the sea now.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <div class="ct">Artifacts: the shark gallery after the far coast, and the shake baseline</div>
+        <div class="cm"><span class="sha">a430bcf</span><span>8 files</span></div>
+        <div class="cd">Regenerated gallery shots plus the post-fix baseline that belongs beside <code>bfff09a</code>&rsquo;s report.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <div class="ct">The flash flood&rsquo;s hydrograph ran backwards</div>
+        <div class="cm"><span class="sha">c7dfb59</span><span>2 files</span><span style="color:var(--old)">found during this triage</span></div>
+        <div class="cd">Not part of the wave &mdash; a live bug on main, described below.</div>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<section>
+  <div class="eyebrow">Why it was safe to commit</div>
+  <h2>Checked, not assumed</h2>
+  <p>Nothing here had been edited for seventeen and a half hours, so no live session was mid-write on it. Everything else was verified rather than trusted:</p>
+
+  <div class="tscroll">
+  <table>
+    <thead><tr><th>Check</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>All 13 source files parse</td><td><span class="tag pass">PASS</span> <code>node --check</code> clean</td></tr>
+      <tr><td>Determinism &mdash; two clients, one seed</td><td><span class="tag pass">PASS</span> identical for 2400 / 2400 ticks</td></tr>
+      <tr><td>Runtime &mdash; the full roster</td><td><span class="tag pass">PASS</span> 11 disasters, 20,312 ticks</td></tr>
+      <tr><td>Debug leftovers in added lines</td><td><span class="tag pass">PASS</span> zero <code>console.log</code> / <code>debugger</code></td></tr>
+      <tr><td>Seeded RNG discipline</td><td><span class="tag pass">PASS</span> one <code>Math.random</code>, as the fallback arm of <code>seedStream</code></td></tr>
+      <tr><td>New helpers exist</td><td><span class="tag pass">PASS</span> <code>soundAt</code>, <code>weatherStrobe</code>, <code>camPos</code>, <code>rollMag</code> all pre-existing</td></tr>
+      <tr><td>New feature flags</td><td><span class="tag pass">PASS</span> none added &mdash; git is the undo</td></tr>
+      <tr><td>Back-compat with scripted events</td><td><span class="tag pass">PASS</span> <code>TSUNAMI_PEAK 5.4</code> still builds the same ~32&nbsp;m wall</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="call warn">
+    <h3>The one thing that looked like a regression</h3>
+    <p>Bot kills on the gate seed fell from <strong>301 to 200</strong>. That is either roll variance or a quiet nerf &mdash; and a nerf would be the exact opposite of what you asked for, so it was worth resolving before committing rather than after.</p>
+    <p>It is variance. Across three further seeds the totals are <strong>617 (new) against 664 (old)</strong> &mdash; about 7%, well inside the spread a per-occurrence roll produces. The reason the first seed looked so stark is below.</p>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">The quake, specifically</div>
+  <h2>The old game handed you an M7.4 every single time</h2>
+  <p>The legacy quake had one fixed destructiveness &mdash; <code>collapseFrac 0.3</code>. Solving the new magnitude model for that same value gives <strong>M7.4</strong>. That was every earthquake the game had ever produced, on every seed, in every round. It is a precise measurement of the thing you complained about.</p>
+  <p>The replacement rolls M4.0&ndash;M8.6, with a real damage threshold: below about M5.2 a quake damages nothing, which is true of actual earthquakes. The round&rsquo;s escalating intensity skews the draw:</p>
+
+  <div class="dist">
+    <div class="dhead"><span>Round</span><span>Share of quakes that are BIG (&ge;M7.4)</span><span class="r">Big</span></div>
+    <div class="drow"><span class="dl">intensity 0.2</span><span class="bar"><i style="width:35.6%"></i></span><span class="dv">16%</span></div>
+    <div class="drow"><span class="dl">intensity 0.6</span><span class="bar"><i style="width:46.7%"></i></span><span class="dv">21%</span></div>
+    <div class="drow"><span class="dl">intensity 1.0</span><span class="bar"><i style="width:64.4%"></i></span><span class="dv">29%</span></div>
+    <div class="drow"><span class="dl">intensity 1.4</span><span class="bar"><i style="width:100%"></i></span><span class="dv">45%</span></div>
+  </div>
+  <figcaption style="margin-top:11px">Derived by sampling the committed roll &mdash; <code>M = 4.0 + 4.6 &middot; u^skew</code> &mdash; 50,000 times per intensity. Early rounds now hand you a rumble you walk through 46% of the time; late rounds hand you a monster nearly half the time, and the top of the range (<code>collapseFrac 0.50</code>) is <em>more</em> destructive than anything the old code could produce.</figcaption>
+
+  <p style="margin-top:22px">The gate only ever samples an early round. That is the whole explanation for its quake going from 49 kills to 9.</p>
+</section>
+
+<section class="bleed">
+  <div class="eyebrow">The bug found on the way</div>
+  <h2>The flash flood&rsquo;s hydrograph ran backwards</h2>
+  <p class="wide" style="max-width:66ch">The comment in <code>disasters.js</code> has always claimed the water <em class="q">&ldquo;goes UP fast and out slowly, which is what makes the drain the part that strands you.&rdquo;</em> The numbers underneath it did the opposite: rise 0.42 of the window, stand 0.26, drain 0.32. The flood took <strong>longer to arrive than to leave</strong> &mdash; a bathtub filling and emptying, which cancelled the one thing the event exists to teach.</p>
+
+  <figure>
+    <div class="chart">
+      <svg viewBox="0 0 760 300" role="img" aria-label="Line chart comparing the old and corrected flash-flood surge curves over an 18 second event. The old curve peaks at 7.6 seconds and falls away quickly; the corrected curve peaks at 2.9 seconds and decays exponentially across the rest of the event.">
+        <!-- horizontal grid -->
+        <line class="gline" x1="64" y1="28" x2="736" y2="28"></line>
+        <line class="gline" x1="64" y1="132" x2="736" y2="132"></line>
+        <line class="gaxis" x1="64" y1="236" x2="736" y2="236"></line>
+        <text class="gtxt" x="56" y="32" text-anchor="end">1.0</text>
+        <text class="gtxt" x="56" y="136" text-anchor="end">0.5</text>
+        <text class="gtxt" x="56" y="240" text-anchor="end">0</text>
+
+        <!-- beat markers -->
+        <g>
+          <line class="beat" x1="131.2" y1="28" x2="131.2" y2="236"></line>
+          <line class="beat" x1="198.4" y1="28" x2="198.4" y2="236"></line>
+          <line class="beat" x1="228.3" y1="28" x2="228.3" y2="236"></line>
+          <line class="beat" x1="273.1" y1="28" x2="273.1" y2="236"></line>
+          <line class="beat" x1="474.7" y1="28" x2="474.7" y2="236"></line>
+          <text class="blab" x="131.2" y="22" text-anchor="middle">front</text>
+          <text class="blab" x="205" y="22" text-anchor="middle">knock</text>
+          <text class="blab" x="238" y="256" text-anchor="middle">lake</text>
+          <text class="blab" x="281" y="270" text-anchor="middle">car</text>
+          <text class="blab" x="474.7" y="22" text-anchor="middle">drain</text>
+        </g>
+
+        <path d="M64.0 236.0L67.1 235.7L70.2 234.6L73.3 232.9L76.4 230.4L79.6 227.3L82.7 223.5L85.8 218.9L88.9 213.7L92.0 207.8L95.1 201.2L98.2 193.9L101.3 185.8L104.4 177.1L107.6 167.7L110.7 157.6L113.8 146.8L116.9 135.3L120.0 123.5L123.1 112.3L126.2 101.8L129.3 92.0L132.4 82.9L135.6 74.5L138.7 66.8L141.8 59.8L144.9 53.5L148.0 47.9L151.1 43.0L154.2 38.8L157.3 35.2L160.4 32.4L163.6 30.3L166.7 28.8L169.8 28.1L172.9 28.3L176.0 28.8L179.1 29.4L182.2 30.0L185.3 30.6L188.4 31.1L191.6 31.7L194.7 32.3L197.8 32.9L200.9 33.5L204.0 34.0L207.1 34.6L210.2 35.2L213.3 35.8L216.4 36.3L219.6 36.9L222.7 37.5L225.8 38.1L228.9 38.7L232.0 39.2L235.1 39.8L238.2 40.4L241.3 43.8L244.4 47.7L247.6 51.5L250.7 55.2L253.8 58.8L256.9 62.4L260.0 65.9L263.1 69.4L266.2 72.7L269.3 76.1L272.4 79.3L275.6 82.5L278.7 85.6L281.8 88.7L284.9 91.7L288.0 94.6L291.1 97.5L294.2 100.4L297.3 103.1L300.4 105.9L303.6 108.6L306.7 111.2L309.8 113.8L312.9 116.3L316.0 118.8L319.1 121.2L322.2 123.6L325.3 125.9L328.4 128.2L331.6 130.4L334.7 132.6L337.8 134.8L340.9 136.9L344.0 139.0L347.1 141.1L350.2 143.1L353.3 145.0L356.4 146.9L359.6 148.8L362.7 150.7L365.8 152.5L368.9 154.3L372.0 156.0L375.1 157.7L378.2 159.4L381.3 161.1L384.4 162.7L387.6 164.3L390.7 165.8L393.8 167.3L396.9 168.8L400.0 170.3L403.1 171.7L406.2 173.2L409.3 174.5L412.4 175.9L415.6 177.2L418.7 178.5L421.8 179.8L424.9 181.1L428.0 182.3L431.1 183.5L434.2 184.7L437.3 185.9L440.4 187.0L443.6 188.1L446.7 189.2L449.8 190.3L452.9 191.3L456.0 192.4L459.1 193.4L462.2 194.4L465.3 195.4L468.4 196.3L471.6 197.3L474.7 198.2L477.8 199.1L480.9 200.0L484.0 200.8L487.1 201.7L490.2 202.5L493.3 203.4L496.4 204.2L499.6 204.9L502.7 205.7L505.8 206.5L508.9 207.2L512.0 208.0L515.1 208.7L518.2 209.4L521.3 210.1L524.4 210.7L527.6 211.4L530.7 212.0L533.8 212.7L536.9 213.3L540.0 213.9L543.1 214.5L546.2 215.1L549.3 215.7L552.4 216.3L555.6 216.8L558.7 217.4L561.8 217.9L564.9 218.4L568.0 218.9L571.1 219.4L574.2 219.9L577.3 220.4L580.4 220.9L583.6 221.4L586.7 221.8L589.8 222.3L592.9 222.7L596.0 223.1L599.1 223.6L602.2 224.0L605.3 224.4L608.4 224.8L611.6 225.2L614.7 225.6L617.8 225.9L620.9 226.3L624.0 226.7L627.1 227.0L630.2 227.4L633.3 227.7L636.4 228.1L639.6 228.4L642.7 228.7L645.8 229.0L648.9 229.3L652.0 229.7L655.1 230.0L658.2 230.2L661.3 230.5L664.4 230.8L667.6 231.1L670.7 231.4L673.8 231.6L676.9 231.9L680.0 232.1L683.1 232.4L686.2 232.6L689.3 232.9L692.4 233.1L695.6 233.4L698.7 233.6L701.8 233.8L704.9 234.0L708.0 234.2L711.1 234.5L714.2 234.7L717.3 234.9L720.4 235.1L723.6 235.3L726.7 235.4L729.8 235.6L732.9 235.8L736.0 236.0L736.0 236.0L64.0 236.0Z" fill="var(--new)" opacity="0.09"></path>
+        <path class="trace" d="M64.0 236.0L67.1 235.9L70.2 235.8L73.3 235.5L76.4 235.2L79.6 234.7L82.7 234.2L85.8 233.5L88.9 232.8L92.0 231.9L95.1 230.9L98.2 229.9L101.3 228.7L104.4 227.5L107.6 226.1L110.7 224.6L113.8 223.1L116.9 221.4L120.0 219.6L123.1 217.8L126.2 215.8L129.3 213.7L132.4 211.5L135.6 209.3L138.7 206.9L141.8 204.4L144.9 201.8L148.0 199.2L151.1 196.4L154.2 193.5L157.3 190.5L160.4 187.4L163.6 184.2L166.7 181.0L169.8 177.6L172.9 174.1L176.0 170.5L179.1 166.8L182.2 163.0L185.3 159.1L188.4 155.1L191.6 151.0L194.7 146.8L197.8 142.5L200.9 138.1L204.0 133.6L207.1 129.1L210.2 124.6L213.3 120.2L216.4 116.0L219.6 111.8L222.7 107.7L225.8 103.8L228.9 99.9L232.0 96.2L235.1 92.5L238.2 88.9L241.3 85.5L244.4 82.1L247.6 78.9L250.7 75.7L253.8 72.6L256.9 69.7L260.0 66.8L263.1 64.1L266.2 61.4L269.3 58.9L272.4 56.4L275.6 54.1L278.7 51.8L281.8 49.7L284.9 47.7L288.0 45.7L291.1 43.9L294.2 42.1L297.3 40.5L300.4 39.0L303.6 37.5L306.7 36.2L309.8 34.9L312.9 33.8L316.0 32.8L319.1 31.8L322.2 31.0L325.3 30.3L328.4 29.7L331.6 29.1L334.7 28.7L337.8 28.4L340.9 28.1L344.0 28.0L347.1 28.1L350.2 28.3L353.3 28.5L356.4 28.7L359.6 29.0L362.7 29.2L365.8 29.4L368.9 29.6L372.0 29.8L375.1 30.1L378.2 30.3L381.3 30.5L384.4 30.7L387.6 31.0L390.7 31.2L393.8 31.4L396.9 31.6L400.0 31.8L403.1 32.1L406.2 32.3L409.3 32.5L412.4 32.7L415.6 33.0L418.7 33.2L421.8 33.4L424.9 33.6L428.0 33.8L431.1 34.1L434.2 34.3L437.3 34.5L440.4 34.7L443.6 35.0L446.7 35.2L449.8 35.4L452.9 35.6L456.0 35.8L459.1 36.1L462.2 36.3L465.3 36.5L468.4 36.7L471.6 37.0L474.7 37.2L477.8 37.4L480.9 37.6L484.0 37.8L487.1 38.1L490.2 38.3L493.3 38.5L496.4 38.7L499.6 39.0L502.7 39.2L505.8 39.4L508.9 39.6L512.0 39.8L515.1 40.1L518.2 40.3L521.3 40.5L524.4 40.6L527.6 40.8L530.7 41.3L533.8 41.9L536.9 42.6L540.0 43.5L543.1 44.6L546.2 45.9L549.3 47.3L552.4 48.9L555.6 50.6L558.7 52.5L561.8 54.6L564.9 56.8L568.0 59.2L571.1 61.7L574.2 64.5L577.3 67.4L580.4 70.4L583.6 73.6L586.7 77.0L589.8 80.5L592.9 84.2L596.0 88.1L599.1 92.1L602.2 96.3L605.3 100.7L608.4 105.2L611.6 109.9L614.7 114.7L617.8 119.7L620.9 124.9L624.0 130.3L627.1 135.8L630.2 141.4L633.3 146.9L636.4 152.2L639.6 157.3L642.7 162.3L645.8 167.2L648.9 171.8L652.0 176.3L655.1 180.7L658.2 184.8L661.3 188.9L664.4 192.7L667.6 196.4L670.7 199.9L673.8 203.3L676.9 206.5L680.0 209.5L683.1 212.3L686.2 215.0L689.3 217.6L692.4 220.0L695.6 222.2L698.7 224.2L701.8 226.1L704.9 227.8L708.0 229.4L711.1 230.8L714.2 232.0L717.3 233.1L720.4 234.0L723.6 234.7L726.7 235.3L729.8 235.7L732.9 235.9L736.0 236.0" fill="none" stroke="var(--old)" stroke-width="2" stroke-dasharray="6 4" stroke-linejoin="round"></path>
+        <path class="trace" d="M64.0 236.0L67.1 235.7L70.2 234.6L73.3 232.9L76.4 230.4L79.6 227.3L82.7 223.5L85.8 218.9L88.9 213.7L92.0 207.8L95.1 201.2L98.2 193.9L101.3 185.8L104.4 177.1L107.6 167.7L110.7 157.6L113.8 146.8L116.9 135.3L120.0 123.5L123.1 112.3L126.2 101.8L129.3 92.0L132.4 82.9L135.6 74.5L138.7 66.8L141.8 59.8L144.9 53.5L148.0 47.9L151.1 43.0L154.2 38.8L157.3 35.2L160.4 32.4L163.6 30.3L166.7 28.8L169.8 28.1L172.9 28.3L176.0 28.8L179.1 29.4L182.2 30.0L185.3 30.6L188.4 31.1L191.6 31.7L194.7 32.3L197.8 32.9L200.9 33.5L204.0 34.0L207.1 34.6L210.2 35.2L213.3 35.8L216.4 36.3L219.6 36.9L222.7 37.5L225.8 38.1L228.9 38.7L232.0 39.2L235.1 39.8L238.2 40.4L241.3 43.8L244.4 47.7L247.6 51.5L250.7 55.2L253.8 58.8L256.9 62.4L260.0 65.9L263.1 69.4L266.2 72.7L269.3 76.1L272.4 79.3L275.6 82.5L278.7 85.6L281.8 88.7L284.9 91.7L288.0 94.6L291.1 97.5L294.2 100.4L297.3 103.1L300.4 105.9L303.6 108.6L306.7 111.2L309.8 113.8L312.9 116.3L316.0 118.8L319.1 121.2L322.2 123.6L325.3 125.9L328.4 128.2L331.6 130.4L334.7 132.6L337.8 134.8L340.9 136.9L344.0 139.0L347.1 141.1L350.2 143.1L353.3 145.0L356.4 146.9L359.6 148.8L362.7 150.7L365.8 152.5L368.9 154.3L372.0 156.0L375.1 157.7L378.2 159.4L381.3 161.1L384.4 162.7L387.6 164.3L390.7 165.8L393.8 167.3L396.9 168.8L400.0 170.3L403.1 171.7L406.2 173.2L409.3 174.5L412.4 175.9L415.6 177.2L418.7 178.5L421.8 179.8L424.9 181.1L428.0 182.3L431.1 183.5L434.2 184.7L437.3 185.9L440.4 187.0L443.6 188.1L446.7 189.2L449.8 190.3L452.9 191.3L456.0 192.4L459.1 193.4L462.2 194.4L465.3 195.4L468.4 196.3L471.6 197.3L474.7 198.2L477.8 199.1L480.9 200.0L484.0 200.8L487.1 201.7L490.2 202.5L493.3 203.4L496.4 204.2L499.6 204.9L502.7 205.7L505.8 206.5L508.9 207.2L512.0 208.0L515.1 208.7L518.2 209.4L521.3 210.1L524.4 210.7L527.6 211.4L530.7 212.0L533.8 212.7L536.9 213.3L540.0 213.9L543.1 214.5L546.2 215.1L549.3 215.7L552.4 216.3L555.6 216.8L558.7 217.4L561.8 217.9L564.9 218.4L568.0 218.9L571.1 219.4L574.2 219.9L577.3 220.4L580.4 220.9L583.6 221.4L586.7 221.8L589.8 222.3L592.9 222.7L596.0 223.1L599.1 223.6L602.2 224.0L605.3 224.4L608.4 224.8L611.6 225.2L614.7 225.6L617.8 225.9L620.9 226.3L624.0 226.7L627.1 227.0L630.2 227.4L633.3 227.7L636.4 228.1L639.6 228.4L642.7 228.7L645.8 229.0L648.9 229.3L652.0 229.7L655.1 230.0L658.2 230.2L661.3 230.5L664.4 230.8L667.6 231.1L670.7 231.4L673.8 231.6L676.9 231.9L680.0 232.1L683.1 232.4L686.2 232.6L689.3 232.9L692.4 233.1L695.6 233.4L698.7 233.6L701.8 233.8L704.9 234.0L708.0 234.2L711.1 234.5L714.2 234.7L717.3 234.9L720.4 235.1L723.6 235.3L726.7 235.4L729.8 235.6L732.9 235.8L736.0 236.0" fill="none" stroke="var(--new)" stroke-width="2.4" stroke-linejoin="round"></path>
+
+        <!-- peak markers -->
+        <circle cx="346.2" cy="28" r="4.5" fill="var(--old)" stroke="var(--surface)" stroke-width="2"></circle>
+        <circle cx="171.5" cy="28" r="4.5" fill="var(--new)" stroke="var(--surface)" stroke-width="2"></circle>
+        <text class="gtxt" x="356" y="24" fill="var(--old)">peak 7.6s</text>
+        <text class="gtxt" x="166" y="18" text-anchor="end" fill="var(--new)">peak 2.9s</text>
+
+        <!-- x axis -->
+        <g>
+          <text class="gtxt" x="64" y="254" text-anchor="middle">0</text>
+          <text class="gtxt" x="176" y="254" text-anchor="middle">3</text>
+          <text class="gtxt" x="288" y="254" text-anchor="middle">6</text>
+          <text class="gtxt" x="400" y="254" text-anchor="middle">9</text>
+          <text class="gtxt" x="512" y="254" text-anchor="middle">12</text>
+          <text class="gtxt" x="624" y="254" text-anchor="middle">15</text>
+          <text class="gtxt" x="736" y="254" text-anchor="middle">18</text>
+          <text class="gtxt" x="400" y="284" text-anchor="middle" style="letter-spacing:.1em">SECONDS INTO THE 18-SECOND EVENT</text>
+        </g>
+      </svg>
+      <div class="legend">
+        <span><i class="sw" style="background:var(--old)"></i> Old curve &mdash; rise 0.42 / stand 0.26 / drain 0.32</span>
+        <span><i class="sw" style="background:var(--new)"></i> Corrected &mdash; rise 0.16 / stand 0.10 / recession 0.74</span>
+      </div>
+    </div>
+    <figcaption>Fraction of peak surge over the event. A real flash flood is the most asymmetric curve in hydrology: minutes of rise, a sharp peak, then an exponential recession. The corrected limb is an actual <code>exp(&minus;3.1r)</code>, normalised by its own tail so it still reaches dry at the horn instead of stepping off a residue. Dotted verticals are the five storyboard beats, at their new times.</figcaption>
+  </figure>
+
+  <div class="call">
+    <h3>The preset had to move with it</h3>
+    <p><code>flashflood-stages.mjs</code> pins each beat to an absolute sim-second, so the correction silently invalidated all five. &ldquo;The lake at full depth&rdquo; at 12.4&nbsp;s is a puddle under the real curve, and &ldquo;two feet floats a car&rdquo; at 8.2&nbsp;s no longer clears the 0.6&nbsp;m threshold it needs to fire at all.</p>
+    <p>Retimed: front 3.4&rarr;1.8, knockdown 5.6&rarr;3.6, lake 12.4&rarr;4.4, car-adrift 8.2&rarr;5.6, drain 16.6&rarr;11.0. <code>atSecs</code> only ever steps forward, so lake now precedes car-adrift and that constraint is written into the file instead of being rediscovered.</p>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">The other half of the question</div>
+  <h2>Six branches and a stash, triaged</h2>
+  <p>&ldquo;Merge all to main&rdquo; would have been a mistake. Every ref was tested the same way &mdash; not by diffing lines, but by asking whether main&rsquo;s <em>current</em> code already does the job by some other implementation.</p>
+
+  <div class="tscroll">
+  <table>
+    <thead><tr><th>Ref</th><th>Verdict</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="name">prison-shank</td>
+        <td><span class="tag dead">Superseded</span></td>
+        <td>Already merged as <code>9e3f722</code> (#20), then extended. Main&rsquo;s <code>prisonshanks.js</code> is 452 lines to the branch&rsquo;s 219.</td>
+      </tr>
+      <tr>
+        <td class="name">claude/before-after-tool-arch-i72lov</td>
+        <td><span class="tag keep">Lost work</span></td>
+        <td>6,072 additive lines under <code>ba/</code>. <code>git diff main...ref -- src/ tools/ index.html</code> is <strong>empty</strong>.</td>
+      </tr>
+      <tr>
+        <td class="name">claude/jail-game-popups-m4mtxp</td>
+        <td><span class="tag dead">Superseded</span></td>
+        <td>Both bugs fixed on main by deletion &mdash; <code>intimidate.js:256</code> &ldquo;NO POPUP&rdquo;, <code>reinforcements.js:211</code> &ldquo;NO TOAST&rdquo;.</td>
+      </tr>
+      <tr>
+        <td class="name">claude/jail-game-ui-cleanup-miok2p</td>
+        <td><span class="tag dead">Superseded</span></td>
+        <td>All three deliverables exist via <code>socialRead()</code> and <code>CBZ.prisonSay</code>. Merging adds a redundant fourth router.</td>
+      </tr>
+      <tr>
+        <td class="name">claude/sinkhole-realism-game-nxqaxr</td>
+        <td><span class="tag dead">Superseded</span></td>
+        <td>Main&rsquo;s <code>groundshaft.js</code> is 1,709 lines to 782 and a strict API superset.</td>
+      </tr>
+      <tr>
+        <td class="name">claude/volcano-disaster-behavior-b6qsle</td>
+        <td><span class="tag part">2 of 3 dead</span></td>
+        <td>Volcano commits superseded. <code>99b8dc2</code> &ldquo;Water timing&rdquo; is live &mdash; its flash-flood half is now committed as <code>c7dfb59</code>.</td>
+      </tr>
+      <tr>
+        <td class="name">stash@{0} &ldquo;wip-other-sessions&rdquo;</td>
+        <td><span class="tag dead">Superseded</span></td>
+        <td>Looked alarming at 25 files / 2,105 insertions. <code>git diff stash@{0} main</code> over those files is <strong>+3,627 / &minus;336 in main&rsquo;s favour</strong>. A stale copy of work that shipped.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">Your call</div>
+  <h2>The cabinet, and one wave train</h2>
+  <p>Two things are genuinely missing from main, and neither should be swept in alongside a disaster wave.</p>
+
+  <h3>1. The <code>ba/</code> package &mdash; 6,072 lines, zero risk</h3>
+  <p>Main has a 335-line one-shot CLI. The branch turns it into a durable receipt archive, a browsable cabinet, an HTTP viewer, agent-parameterized runs, and an engine decoupled from this repo through <code>ba.config.mjs</code> so every existing preset keeps working unmodified. It touches no game file, so it cannot conflict with anything in flight &mdash; but it is big enough that it deserves its own look rather than a silent merge. <strong>Say the word and I&rsquo;ll bring it over on its own.</strong></p>
+
+  <h3>2. The survival tsunami is still one crest</h3>
+  <p>The <em>city</em> tsunami got a real wave train in <code>5995e02</code> &mdash; <code>waves</code>, <code>waveN</code>, relative peaks, and the big one usually not arriving first. The survival island&rsquo;s tsunami in <code>disasters.js</code> still runs <code>warn &rarr; sweep &rarr; flooded &rarr; drain</code>: zero hits for <code>wave2</code> or <code>drawback</code>. The unmerged branch has a drawback-and-second-surge phase machine for it. That one is a real feature, not a merge &mdash; worth building fresh against the code as it now stands.</p>
+</section>
+
+<section>
+  <div class="eyebrow">Loose ends</div>
+  <h2>Found, not fixed</h2>
+  <ul class="plain">
+    <li><strong>Seed 11111 fails the disaster gate on clean main.</strong> The hurricane runs away to ~5,100 active ticks and the check reports FAIL. Reproduced on a pristine <code>2023a26</code> worktree, so it predates all of this &mdash; but it means the gate has a seed it cannot pass.</li>
+    <li><strong>Wildfire, flash flood and sinkhole kill zero bots</strong> on every seed tested, before and after. Also pre-existing. Three of eleven disasters are currently harmless to the crowd.</li>
+    <li><strong>The <code>ba-head-gta6</code> worktree is contaminated.</strong> It reports 23 modified files including <code>renderer.js</code>, which main does not have dirty &mdash; every one of them is byte-identical to the live checkout. It is a &ldquo;before&rdquo; build that got written over. Nothing to recover; safe to delete.</li>
+    <li><strong>The <code>ba</code> capture for the hydrograph change was deferred, not skipped.</strong> Load average hit 19.3 while another session ran captures. This preset stages on real sim-seconds, and a frozen main thread cannot answer a poll &mdash; the shots would have been noise. The curve above is derived from the committed formulas instead, which for a timing change is the stronger evidence anyway.</li>
+  </ul>
+</section>
+
+<footer>
+  <p><strong>main is up to date.</strong> <span class="mono">2023a26 &rarr; c7dfb59</span>, five commits, pushed. Local and origin are level.</p>
+  <p>Published at <a href="https://claude.ai/code/artifact/7ce046d4-2d10-452c-9d7a-2ebe58af43f7">claude.ai/code/artifact/7ce046d4</a>.</p>
+  <p>A second session was writing <code>wildlife_tame.js</code>, <code>wounds.js</code> and <code>water_impact.js</code> throughout &mdash; every commit here was staged by explicit path, and none of that work was touched.</p>
+</footer>
+</div>
