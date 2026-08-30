@@ -931,7 +931,14 @@
     root.add(oasisWater);
     const palms = makePalms();
     if (palms) root.add(palms);
-    scCX = scCZ = NaN;
+    /* THE ISLAND DID NOT BUILD AT ALL ON e8f2040. Deleting the scatter system
+       took `let scCX, scCZ` with it and left this line, which reset the
+       scatter's camera-chunk cache. This file is "use strict", so assigning
+       to a name that no longer exists is a ReferenceError, not a global — it
+       threw here, BEFORE CBZ.scene.add(root), so the terrain was never added
+       to the scene and W.phase() sat on "boot" forever. Nothing in the game
+       ran. Found while trying to photograph the outpost rail: every headless
+       boot on origin/main timed out with the same line number. */
     CBZ.scene.add(root);
     built = true; visible = true;
 
