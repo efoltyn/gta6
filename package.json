@@ -2,7 +2,7 @@
   "name": "cell-block-z",
   "private": true,
   "version": "0.1.0",
-  "description": "Vite dev/build harness for the legacy IIFE game (O1 — MASTER-PLAN Part II OSS/Vite bridge). Legacy game files are untouched and keep working with a dumb static server; `npm run dev`/`npm run build` add a parallel module world via src/bootstrap.js.",
+  "description": "Vite dev/build harness for the legacy IIFE game (O1 \u2014 MASTER-PLAN Part II OSS/Vite bridge). Legacy game files are untouched and keep working with a dumb static server; `npm run dev`/`npm run build` add a parallel module world via src/bootstrap.js.",
   "engines": {
     "node": ">=22"
   },
@@ -74,6 +74,7 @@
     "test:racer": "node tools/racer-story-check.mjs",
     "visual:racer-opening": "node tools/before-after.mjs racer-opening",
     "ba": "node tools/before-after.mjs",
+    "warlord:check": "node tools/warlord-check.mjs",
     "visual:beach": "node tools/before-after.mjs beach-shores",
     "visual:beast-deaths": "node tools/before-after.mjs beast-deaths",
     "visual:soldier-deaths": "node tools/before-after.mjs soldier-deaths",
