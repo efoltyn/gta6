@@ -100,6 +100,7 @@
     fireKills: 0, lineKills: 0,
     gasFires: 0, gasFiresShared: 0, linesDown: 0, shocks: 0,
     coverAnchors: 0, coverSaves: 0, ducked: 0, kitTables: 0, kitPoles: 0,
+    knockdowns: 0, staggers: 0, aftershocks: 0, pgaPeak: 0,
   };
 
   /* THE DRAW, AND WHO OWNS IT. The header above says a runtime event does not
@@ -1086,6 +1087,209 @@
   }
 
   /* ============================================================
+     GROUND MOTION — THE WAVE TRAIN (magnitude in, felt quake out).
+
+     The old quake fed CBZ.shake a linear ramp that then decayed — a
+     machine's envelope, and the same envelope every time. A real quake is
+     a WAVE TRAIN, and the ORDER OF ARRIVALS is the experience:
+
+       P     the compressional wave arrives first: a sharp vertical BANG,
+             a second or two of "was that a truck?" — small, fast, high
+             frequency.
+       S     the shear waves arrive sLag seconds later: the violent lateral
+             rolling that does all the damage. A rise, sustained strong
+             motion for mainDur, then
+       coda  an exponential tail as the scattered energy rings out,
+             punctured by AFTERSHOCKS — each a miniature train of its own,
+             decaying in size and count over the round (Båth's law: the
+             biggest aftershock runs ~1.2 magnitudes under the mainshock).
+
+     MAGNITUDE IS THE ONLY INPUT, in real Richter units, and everything is
+     derived from it the way the ground actually scales — PGA, duration
+     (the big one: it roughly doubles per magnitude unit), frequency
+     content (big quakes ROLL at ~1 Hz, small ones BUZZ at ~5), aftershock
+     count, and whether liquefaction / surface rupture happen at all:
+
+       M4.2  PGA 0.03 g · ~4 s of 5 Hz rattle    · damages nothing
+       M6.0  PGA 0.18 g · ~15 s                  · you stagger, facades crack
+       M7.0  PGA 0.45 g · ~28 s                  · knocked down at the peak
+       M8.3  PGA 0.92 g · ~60 s of 0.9 Hz rolling you cannot stand through
+                          · liquefaction, surface rupture, tsunamigenic
+
+     The synthesizer owns FOOTING too: the live ground acceleration
+     staggers every actor through CBZ.body.hit and knocks them down through
+     CBZ.body.knockdown — the WORLD's reaction to the ground, not a screen
+     effect. A body holding onto a table (_quakeDuck) keeps its feet;
+     that is what the "hold on" third of the advice buys.
+
+     Camera: camera.js's CBZ.shake is a white-noise latch with a fast
+     real-time decay, so frequency content is carried in the ENVELOPE fed
+     to it — a slow |sin| carrier at f0 makes an M8 visibly ROLL where an
+     M4 buzzes. No camera code changed.
+     ============================================================ */
+  function lerpTable(M, tab) {
+    // tab = [[M, v], ...] ascending
+    if (M <= tab[0][0]) return tab[0][1];
+    for (let i = 1; i < tab.length; i++) {
+      if (M <= tab[i][0]) {
+        const u = (M - tab[i - 1][0]) / (tab[i][0] - tab[i - 1][0]);
+        return tab[i - 1][1] + (tab[i][1] - tab[i - 1][1]) * u;
+      }
+    }
+    return tab[tab.length - 1][1];
+  }
+  /* Everything a magnitude implies, in one record. Pure: same M, same
+     numbers, so the def, the synth and any tool all read one derivation. */
+  function magParams(M) {
+    M = Math.max(4, Math.min(8.6, M));
+    // PGA in g, off the felt-report anchors (M4 barely instrumental, M8 ~1 g
+    // near-field). This is the number footing and damage both key off.
+    const pgaG = lerpTable(M, [[4, 0.02], [5, 0.06], [6, 0.18], [7, 0.45], [8, 0.85], [8.6, 1.15]]);
+    const pga01 = Math.min(1, pgaG);
+    // camera-shake metres at the peak of the S phase (CBZ.shake units)
+    const ampPeak = 0.04 + Math.pow(pga01, 1.25) * 1.35;
+    // dominant frequency: source dimension grows with M, corner frequency
+    // falls — an M4 rattles the crockery at ~5.5 Hz, an M8.6 rolls at ~0.6
+    const f0 = 5.5 * Math.pow(0.62, M - 4);
+    // strong-motion duration ~doubles per magnitude unit. THE BIG ONE.
+    const mainDur = Math.min(70, 4 * Math.pow(1.9, M - 4));
+    const sLag = 1.2 + (M - 4) * 0.6;          // P→S gap: bigger rupture, farther fault
+    const pDur = 0.7 + (M - 4) * 0.22;
+    const riseT = Math.min(5, 1 + mainDur * 0.1);
+    const codaTau = 1.2 + (M - 4) * 1.9;
+    const nShocks = Math.max(0, Math.min(8, Math.round((M - 4.6) * 2.2)));
+    // damage scaling: below ~M5.2 a quake damages NOTHING — that is what
+    // makes a small one genuinely fun instead of a shorter disaster
+    const dmgK = M < 5.2 ? 0 : Math.min(1.6, (M - 5.2) / 2.0);
+    const collapseFrac = M < 5.6 ? 0 : Math.min(0.5, Math.pow((M - 5.6) / 3, 1.4) * 0.6);
+    const shockWindow = nShocks ? 4 + nShocks * 3 : 0;
+    const activeSecs = Math.round(Math.max(12, Math.min(110,
+      sLag + mainDur + Math.max(codaTau * 3, shockWindow) + 6)));
+    return {
+      M: M, pgaG: pgaG, pga01: pga01, ampPeak: ampPeak, f0: f0,
+      mainDur: mainDur, sLag: sLag, pDur: pDur, riseT: riseT,
+      codaTau: codaTau, nShocks: nShocks, dmgK: dmgK,
+      collapseFrac: collapseFrac, activeSecs: activeSecs,
+      liq: M >= 7.2, rupture: M >= 7.8, tsunamigenic: M >= 7.4,
+    };
+  }
+
+  // one-shot magnitude override for tools/storyboards (NOT a config flag:
+  // consumed by the next roll and gone)
+  let forcedMag = null;
+
+  const motion = {
+    on: false, t: 0, p: null, cx: 0, cz: 0, R: 120,
+    shocks: [], shockFired: 0, phase: "quiet", amp: 0, pgaNow: 0,
+  };
+  function motionStart(p, o) {
+    o = o || {};
+    motion.on = true; motion.t = 0; motion.p = p;
+    motion.cx = o.cx || 0; motion.cz = o.cz || 0; motion.R = o.R || 120;
+    motion.phase = "quiet"; motion.amp = 0; motion.pgaNow = 0; motion.shockFired = 0;
+    // the aftershock schedule, drawn now from the shared seeded stream so
+    // every client agrees when the ground moves again. Times are seconds
+    // into the tail (after mainshock end); sizes fall off Båth-style.
+    motion.shocks = [];
+    let at = 1.5 + rnd() * 3;
+    for (let i = 0; i < p.nShocks; i++) {
+      motion.shocks.push({
+        at: at,
+        k: 0.38 * Math.pow(0.78, i) * (0.8 + rnd() * 0.4),   // fraction of ampPeak
+        dur: 1.6 + p.mainDur * 0.04 + rnd() * 1.2,
+        fired: false,
+      });
+      at += 2.2 + rnd() * 4 + i * 0.8;
+    }
+    A.shocks++;
+  }
+  function motionStop() {
+    motion.on = false; motion.phase = "quiet"; motion.amp = 0; motion.pgaNow = 0; motion.p = null;
+  }
+  function motionTick(dt) {
+    if (!motion.on || !motion.p) return { amp: 0, pga01: 0, phase: "quiet", t: 0, shockFired: 0 };
+    const p = motion.p;
+    motion.t += dt;
+    const t = motion.t;
+    let env = 0, phase = "quiet", carF = p.f0;
+    // ---- P: the bang -----------------------------------------------------
+    const pT = 0.15;
+    if (t >= pT && t < pT + p.pDur) {
+      const u = (t - pT) / p.pDur;
+      // fast attack, exponential ring-down; a quarter of the S amplitude
+      env = p.ampPeak * 0.25 * Math.min(1, u * 12) * Math.exp(-u * 3.2);
+      carF = p.f0 * 4;                       // P is the high-frequency arrival
+      phase = "p";
+    } else if (t >= pT + p.pDur && t < p.sLag) {
+      env = p.ampPeak * 0.03;                // the uneasy quiet between arrivals
+      carF = p.f0 * 3;
+      phase = "p";
+    }
+    // ---- S: the damage ---------------------------------------------------
+    let shockFired = 0;
+    if (t >= p.sLag) {
+      const ts = t - p.sLag;
+      if (ts < p.mainDur) {
+        const rise = Math.min(1, ts / p.riseT);
+        // sustained strong motion breathes a little (two incommensurate sines)
+        const breathe = 0.86 + 0.09 * Math.sin(ts * 0.7) + 0.05 * Math.sin(ts * 1.9);
+        env = Math.max(env, p.ampPeak * rise * (2 - rise) * breathe);
+        phase = "s";
+      } else {
+        const tail = ts - p.mainDur;
+        env = Math.max(env, p.ampPeak * Math.exp(-tail / p.codaTau));
+        phase = tail < p.codaTau * 3 ? "coda" : "done";
+        for (let i = 0; i < motion.shocks.length; i++) {
+          const s = motion.shocks[i];
+          const d = tail - s.at;
+          if (d >= 0 && d < s.dur) {
+            if (!s.fired) { s.fired = true; motion.shockFired++; shockFired = s.k; A.aftershocks++; }
+            const a = p.ampPeak * s.k * Math.min(1, d * 6) * Math.exp(-d / (s.dur * 0.45));
+            if (a > env) { env = a; phase = "aftershock"; }
+          }
+        }
+      }
+    }
+    /* THE CARRIER. camera.js turns whatever we feed it into white noise, so
+       the frequency lives here: a |sin| at the quake's own dominant frequency
+       modulates the envelope. At 5 Hz that is a buzz; at 0.8 Hz the whole
+       view visibly rolls and slackens twice a second — the difference you
+       feel between a small quake and a great one. */
+    const carrier = 0.6 + 0.4 * Math.abs(Math.sin(6.2832 * carF * t));
+    motion.amp = env * carrier;
+    motion.pgaNow = p.ampPeak > 0 ? (env / p.ampPeak) * p.pga01 : 0;
+    motion.phase = phase;
+    if (motion.pgaNow > A.pgaPeak) A.pgaPeak = motion.pgaNow;
+    footingTick(dt, motion.pgaNow);
+    return { amp: motion.amp, pga01: motion.pgaNow, phase: phase, t: t, shockFired: shockFired };
+  }
+
+  /* FOOTING. The ground decides whether you keep yours. Live PGA (as a
+     fraction of 1 g) staggers, then flattens: above ~0.12 g people lurch,
+     above ~0.35 g they start going down, and near 1 g nobody stays up long
+     enough to run — which is the real reason you cannot flee an M8, taught
+     by the legs and not by a speed debuff. Holding onto a table exempts you. */
+  function footingTick(dt, pga) {
+    if (pga < 0.12 || !CBZ.body) return;
+    eachActorNear(motion.cx, motion.cz, motion.R * 2.5, function (a) {
+      if (!a || a.dead || !a.pos || a._quakeDuck) return;
+      if (CBZ.body.busy && CBZ.body.busy(a)) return;
+      a._qkFoot = (a._qkFoot || 0) - dt;
+      if (a._qkFoot > 0) return;
+      const ang = rnd() * 6.2832;
+      if (pga > 0.35 && rnd() < (pga - 0.3) * 1.8) {
+        CBZ.body.knockdown(a, { dir: { x: Math.cos(ang), z: Math.sin(ang) }, t: 0.8 + pga * 1.3, force: 3 + pga * 3 });
+        A.knockdowns++;
+        a._qkFoot = 1.1 + rnd() * 1.2;
+      } else {
+        CBZ.body.hit(a, { dir: { x: Math.cos(ang), z: Math.sin(ang) }, force: 1.2 + pga * 3.2 });
+        A.staggers++;
+        a._qkFoot = 0.5 + rnd() * 0.9;
+      }
+    });
+  }
+
+  /* ============================================================
      LIFECYCLE
      ============================================================ */
   /* begin() is per-EVENT, and it zeroes the per-event counters on purpose:
@@ -1098,10 +1302,12 @@
     A.fireKills = 0; A.lineKills = 0;
     A.gasFires = 0; A.gasFiresShared = 0; A.linesDown = 0;
     A.coverSaves = 0; A.ducked = 0;
+    A.knockdowns = 0; A.staggers = 0; A.aftershocks = 0; A.pgaPeak = 0;
     A.shocks++;
   }
   function end() {
     liveStructures = null;
+    motionStop();
     for (let i = localFires.length - 1; i >= 0; i--) { killFire(localFires[i]); }
     localFires.length = 0;
     clearLines();
@@ -1173,6 +1379,18 @@
       }
       return out;
     },
+    // the wave train (magnitude → felt ground motion + footing)
+    magParams: magParams, motionStart: motionStart, motionTick: motionTick,
+    motionStop: motionStop,
+    motionState: function () {
+      return { on: motion.on, t: motion.t, phase: motion.phase, amp: motion.amp,
+        pga01: motion.pgaNow, M: motion.p ? motion.p.M : 0,
+        mainDur: motion.p ? motion.p.mainDur : 0, shocksFired: motion.shockFired };
+    },
+    // one-shot magnitude override for tools/storyboards — consumed by the
+    // def's next roll, never stored, not a flag
+    forceMag: function (m) { forcedMag = Number.isFinite(m) ? m : null; },
+    takeForcedMag: function () { const m = forcedMag; forcedMag = null; return m; },
     // lifecycle + seams
     begin: begin, end: end, reset: reset, hooks: hooks,
     dressArena: dressArena,
@@ -1226,6 +1444,17 @@
       localFires: localFires.length,
       linesDown: A.linesDown,
       shocks: A.shocks,
+      // the wave train, live: what magnitude this quake IS and what the
+      // ground is doing right now — a quake that never moves pgaPeak off 0
+      // was a camera effect and cannot pass as this feature
+      mag: motion.p ? +motion.p.M.toFixed(1) : 0,
+      motionPhase: motion.phase,
+      motionAmp: +motion.amp.toFixed(3),
+      pgaNow: +motion.pgaNow.toFixed(3),
+      pgaPeak: +A.pgaPeak.toFixed(3),
+      knockdowns: A.knockdowns,
+      staggers: A.staggers,
+      aftershocksFired: A.aftershocks,
       cityQuake: !!CBZ.CONFIG.CITY_QUAKE,
       cityActive: city.on,
       // a second fire model would show up here as gasFires > gasFiresShared

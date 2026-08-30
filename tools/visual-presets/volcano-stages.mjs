@@ -155,6 +155,30 @@ const subjects = [
     strip: { frames: 3, stepSec: 2.6 },
     cam: { lava: true, scar: true, frame: 0.5, out: 24, alt: 12, behind: 2, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
 
+  { id: "ash-aftermath", label: "The morning after — ash is weather, not wallpaper", hud: false,
+    focus: "THE OWNER'S NAMED COMPLAINT: 'the ash left afterwards is like a CHECKERBOARD over the map'. Shot PLUMB DOWN over the downwind wedge ~6 s after the eruption ends. Before: a frozen lattice of same-pitch quads — every ground cell drawing a dark fleck even at zero coverage — that lies there untouched for the rest of the match. After: a continuous drifted field (jittered centres, spatially-correlated mottle, slope shedding) already thinning and streaking away on the wind. ashGridPeriodicity is the checkerboard as a number — luminance self-similarity at exactly the cell pitch; positive = periodic lattice. ashResidueDepth should FALL across the strip on the after side only.",
+    act: { day: true, force: "volcano", untilState: "active", pinWind: [0.6, 0.8], untilIdle: true, extraSecs: 6 },
+    strip: { frames: 3, stepSec: 2.2 },
+    ashMetric: true,
+    /* side: walk the tripod off the wind axis so the frame STRADDLES the
+       wedge boundary — the saturated blanket on one side, the partial-coverage
+       fringe on the other. The fringe is where the checkerboard lives (the
+       first plumb framing sat over pure blanket and measured nothing). */
+    cam: { ashfield: true, out: 0.55, side: 0.42, alt: 72, fov: 60, fallback: { x: 46, y: 80, z: 662, ax: 46, ay: 0, az: 664 } } },
+
+  { id: "small-one", label: "A SMALL one — a burp you could stand and watch", hud: false,
+    focus: "COOKIE-CUTTER NO MORE (owner: 'all the natural disasters are cookie cutter size'). Magnitude pinned to 0.07: a short steam-and-ash burp — a ~55 m column, two narrow lava tongues near the vent, a light dusting, NO pyroclastic collapse, NO lahar, bombs rare. The before build has no magnitude at all, so it stages the same one-size eruption as every other beat.",
+    act: { day: true, force: "volcano", untilState: "active", extraSecs: 6, pinWind: [0.7, -0.7], magPin: 0.07 },
+    cam: { volcano: true, dist: 135, alt: 20, aboveVent: 34, fov: 66 } },
+
+  { id: "the-big-one", label: "The BIG one — a column that blots the sun", hud: false,
+    focus: "Magnitude pinned to 1.0, staged at MIDDAY: a ~190 m column, a six-stem lava fan, fast wide pyroclastic collapses, heavy ash reaching the town, the sun visibly choked while the event still runs, and a longer active window. Before: the same fixed eruption as always, in full daylight.",
+    /* t+18: a column takes time to BUILD. At 11 s both sides were still mid-
+       climb and photographed the same height; at 18 s the before column is
+       finished (~108 m) and the after is well past it on its way to ~194. */
+    act: { day: true, force: "volcano", untilState: "active", extraSecs: 18, pinWind: [0.7, -0.7], magPin: 1.0 },
+    cam: { volcano: true, dist: 205, alt: 30, aboveVent: 105, fov: 62 } },
+
 ];
 
 async function stageVolcano(input) {
@@ -314,8 +338,19 @@ async function stageVolcano(input) {
       CBZ.weatherWind = () => window.__volcanoWindPin || orig();
     }
   }
+  /* MAGNITUDE PIN — after-side only by construction: the before build has no
+     per-eruption magnitude and never reads the global. Every volcano beat
+     pins; 0.42 reproduces the historical fixed eruption (10+24*0.42 ≈ 20 s
+     active, ~108 m column) so the matched control beats stay matched, and
+     the two size beats override it to photograph the ends of the range. */
+  if (act.force === "volcano") {
+    window.__volcanoMagPin = act.magPin != null ? act.magPin : 0.42;
+  }
   if (act.force) { CBZ.disasters.force(act.force); step(0.1); }
   if (act.untilState) stepUntilState(act.untilState, 30);
+  /* the aftermath beat's clock: run the eruption OUT, whatever active length
+     this build rolled for it, then let the deposit sit into the gap */
+  if (act.untilIdle) { let guard = 700; while (guard-- > 0 && CBZ.disasters.state() === "active") step(0.1); }
   if (act.extraSecs) step(act.extraSecs);
   /* NIGHT, RE-ASSERTED. Setting dayPhase(0.93) up top and then stepping
      30-40 simulated seconds rolled the 150 s day clock straight past
@@ -344,7 +379,28 @@ async function stageVolcano(input) {
   const ringHazard = () => hazards().find((h) => h && !h.line && h.fill === false);
   let aimed = null, aimNote = "tripod";
   const cam = subject.cam || {};
-  if (cam.volcano) {
+  if (cam.ashfield) {
+    /* PLUMB OVER THE WEDGE. The checkerboard is a ground pattern, and the one
+       honest way to photograph a ground pattern is straight down — where the
+       lattice pitch is uniform in screen pixels and can be MEASURED (the
+       ashGridPeriodicity metric below depends on this framing). Near-plumb:
+       the aim point is nudged 2 m so lookAt's default up-vector never
+       degenerates. */
+    try {
+      const arena = (CBZ.surv && CBZ.surv.arena) || null;
+      const hill = arena && arena.hills ? arena.hills[0] : { x: 0, z: 600 };
+      const Rw = (arena && (arena.radius || arena.R)) || 120;
+      const wp = window.__volcanoWindPin || { x: 0.6, z: 0.8 };
+      const wl = Math.hypot(wp.x, wp.z) || 1;
+      const out = cam.out != null ? cam.out : 0.5;
+      const sideK = cam.side || 0;
+      const cxp = hill.x + (wp.x / wl) * Rw * out + (-wp.z / wl) * Rw * sideK;
+      const czp = hill.z + (wp.z / wl) * Rw * out + (wp.x / wl) * Rw * sideK;
+      const gy = arena ? arena.groundHeightAt(cxp, czp) : 0;
+      aimed = { x: cxp, y: gy + (cam.alt || 72), z: czp, ax: cxp, ay: gy, az: czp + 2 };
+      aimNote = "plumb over the wedge";
+    } catch (_) {}
+  } else if (cam.volcano) {
     /* REFERENCE FRAMING: the cone is the subject, not a tiny prop behind the
        skyline. Stand just offshore and elect the first compass bearing with a
        clear ray to the crater, so the mountain fills the lower frame while
@@ -610,6 +666,77 @@ async function stageVolcano(input) {
   CBZ.renderer.render(CBZ.scene, camera);
   const render = (CBZ.renderer.info && CBZ.renderer.info.render) || {};
 
+  /* THE CHECKERBOARD AS A NUMBER. Same-task readback (drawImage right after
+     render needs no preserveDrawingBuffer): downsample the central square of
+     the frame, then compare mean |ΔL| at HALF the ash-cell pitch against
+     mean |ΔL| at the FULL pitch, along both screen axes. A periodic lattice
+     repeats at its own pitch, so D(pitch) < D(pitch/2) and the score goes
+     positive; a continuous drifted deposit scores ~0 or negative. Only the
+     plumb aftermath beat computes it — the pitch is only uniform plumb. */
+  let ashGrid = null, ashResidue = null, ashFlecks = null;
+  if (subject.ashMetric) {
+    try {
+      const A0 = CBZ.volcanoAudit ? CBZ.volcanoAudit() : null;
+      if (A0) ashResidue = Number((+A0.ashPeakDepth || 0).toFixed(3));
+      const srcC = CBZ.renderer.domElement;
+      const sideC = Math.min(srcC.width, srcC.height);
+      const N = 340;
+      const cnv = document.createElement("canvas"); cnv.width = N; cnv.height = N;
+      const c2 = cnv.getContext("2d");
+      c2.drawImage(srcC, (srcC.width - sideC) / 2, (srcC.height - sideC) / 2, sideC, sideC, 0, 0, N, N);
+      const img = c2.getImageData(0, 0, N, N).data;
+      const L = new Float32Array(N * N);
+      for (let i = 0; i < N * N; i++) L[i] = 0.299 * img[i * 4] + 0.587 * img[i * 4 + 1] + 0.114 * img[i * 4 + 2];
+      // the ash cell pitch in analysis pixels: cell count off the audit, the
+      // frame's world height off the plumb camera's own alt + fov
+      const arena = (CBZ.surv && CBZ.surv.arena) || null;
+      const Rw = (arena && (arena.radius || arena.R)) || 120;
+      // ashCells sums across every stacked field (older eruptions persist as
+      // scars) — divide by ashFields for ONE field's cell count first
+      const cellsPer = A0 && A0.ashCells > 8 ? A0.ashCells / Math.max(1, A0.ashFields || 1) : 0;
+      const NC = cellsPer > 8 ? Math.round(Math.sqrt(cellsPer * 4 / Math.PI)) : 72;
+      const cellWorld = (2 * Rw) / Math.max(6, NC);
+      const altV = (subject.cam && subject.cam.alt) || 72;
+      const worldH = 2 * altV * Math.tan(((camera.fov || 60) * Math.PI / 180) / 2);
+      const pitch = Math.max(4, Math.round(cellWorld * (N / worldH)));
+      const D = (k) => {
+        let s = 0, n = 0;
+        for (let y = 0; y < N; y++) for (let x = 0; x + k < N; x++) { s += Math.abs(L[y * N + x] - L[y * N + x + k]); n++; }
+        for (let y = 0; y + k < N; y++) for (let x = 0; x < N; x++) { s += Math.abs(L[y * N + x] - L[(y + k) * N + x]); n++; }
+        return s / Math.max(1, n);
+      };
+      const dHalf = D(Math.max(2, Math.round(pitch / 2))), dFull = D(pitch);
+      ashGrid = Number((100 * (dHalf - dFull) / Math.max(dHalf, 1e-3)).toFixed(1));
+      /* AND COUNT THE FLECKS — the checkerboard dots themselves: connected
+         grey components of 3..260 analysis-px. The town's own greys (roads,
+         roofs) render identically on both sides, so the between-side DELTA
+         is the ash's isolated-patch count. A frozen leopard field scores in
+         the hundreds; welded drifts and eroded streaks score far fewer. */
+      const isGrey = (i) => {
+        const r = img[i * 4], g = img[i * 4 + 1], b = img[i * 4 + 2];
+        const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+        return (mx - mn) < 26 && mx > 92 && mx < 235 && !(g > r + 14);
+      };
+      const lab = new Uint8Array(N * N);
+      const stack = [];
+      let comps = 0;
+      for (let p0 = 0; p0 < N * N; p0++) {
+        if (lab[p0] || !isGrey(p0)) continue;
+        let area = 0; lab[p0] = 1; stack.push(p0);
+        while (stack.length) {
+          const p = stack.pop(); area++;
+          const px2 = p % N;
+          if (px2 > 0 && !lab[p - 1] && isGrey(p - 1)) { lab[p - 1] = 1; stack.push(p - 1); }
+          if (px2 < N - 1 && !lab[p + 1] && isGrey(p + 1)) { lab[p + 1] = 1; stack.push(p + 1); }
+          if (p >= N && !lab[p - N] && isGrey(p - N)) { lab[p - N] = 1; stack.push(p - N); }
+          if (p < N * N - N && !lab[p + N] && isGrey(p + N)) { lab[p + N] = 1; stack.push(p + N); }
+        }
+        if (area >= 3 && area <= 260) comps++;
+      }
+      ashFlecks = comps;
+    } catch (_) {}
+  }
+
   const before = input.side === "before";
   const query = (name) => S.overlay.querySelector(`[data-${name}]`);
   query("side").textContent = before ? input.beforeLabel : input.afterLabel;
@@ -649,6 +776,9 @@ async function stageVolcano(input) {
     aliveNow: aliveNow,
     killedThisBeat: Math.max(0, aliveBefore - aliveNow),
   };
+  if (ashGrid != null) metrics.ashGridPeriodicity = ashGrid;
+  if (ashResidue != null) metrics.ashResidueDepth = ashResidue;
+  if (ashFlecks != null) metrics.ashFleckCount = ashFlecks;
   const carry = (obj, prefix) => {
     if (!obj) return;
     for (const key of Object.keys(obj)) {
@@ -673,9 +803,11 @@ export default {
   title: "The Stratovolcano",
   description: "Flag A/B on this checkout: cfg_VOLCANO_PLUME_V2=0 is the current geometric bead-column; after uses the RPG blast's real lumpy smoke mask and per-puff lifecycle to build a denser core, irregular cauliflower edge and shorter/broader landscape silhouette. All other eruption systems remain matched controls.",
   defaultBefore: "local",
-  beforeParams: { cfg_VOLCANO_PLUME_V2: 0 },
-  beforeLabel: "BEFORE · GEOMETRIC PLUME",
-  afterLabel: "AFTER · RPG-SMOKE PLUME",
+  /* beforeParams used to pin cfg_VOLCANO_PLUME_V2=0 — the 2026-08-26 plume
+     wave's flag A/B. That earn-back shipped; the preset is back to a plain
+     tree-vs-tree comparison (flagless waves: HEAD worktree as --before). */
+  beforeLabel: "BEFORE · THIS CHECKOUT @ HEAD",
+  afterLabel: "AFTER · ASH FIELD + MAGNITUDE",
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
@@ -709,6 +841,14 @@ export default {
        with the mechanic: roofs failing under load inside one event is the
        indoors-tension the 2026-08-16 removal threw out with the blanket. */
     vol_ashPeakDepth: { label: "Downwind ash deposited", unit: "m", better: "higher" },
+    /* THE OWNER'S NAMED COMPLAINT AS NUMBERS (aftermath beat only). Lattice
+       periodicity: luminance self-similarity at exactly the deposit's cell
+       pitch, plumb-down — positive means the ground repeats at grid pitch,
+       i.e. a checkerboard. Residue: ash still standing after the event ends —
+       it must thin away like snow, not lie there for the rest of the match. */
+    ashGridPeriodicity: { label: "Ash checkerboard (lattice periodicity)", better: "lower" },
+    ashFleckCount: { label: "Isolated grey flecks (checkerboard dots)", better: "lower" },
+    ashResidueDepth: { label: "Ash left after the event", unit: "m", better: "lower" },
     audit_ashRoofCollapses: { label: "Roofs lost to ash load", better: "higher" },
     sunIntensity: { label: "Sun at capture (ash blots it)", better: "lower" },
     audit_pyroRuns: { label: "Pyroclastic runs", better: "higher" },

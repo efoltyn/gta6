@@ -24,8 +24,18 @@
                     crosswind edge. On the before build the ground scorch was
                     literally deleted at burnout, so its aftermath is green.
 
-   FLAG A/B, same checkout: before = ?cfg_WILDFIRE_V2=0 (the exact legacy
-   fire, kept verbatim in systems/disasters.js), after = the default.
+   BEFORE/AFTER are the same default V2 fire, captured off the working tree
+   at two moments (ba's --reuse-before): the flag A/B against the legacy
+   cfg_WILDFIRE_V2=0 fire already shipped its proof in a previous wave, so
+   the before side no longer forces the flag off — a new wave compares its
+   own work, not the museum piece.
+
+   size-small / size-large photograph THE MAGNITUDE: every occurrence now
+   rolls its own size off the run seed (CBZ.wildfire.setMagnitude is the
+   storyboard pin for it — absent on builds without the roll, where both
+   frames show the same-size fire, which IS the before's tell). Both shots
+   hang the camera at the same fixed altitude so footprint difference is
+   the picture, not a zoom choice.
 
    CAMERAS ARE SOLVED, NOT TYPED (quake-stages' law): every beat asks the
    LIVE world — the actual burning trees, the actual weather wind, the actual
@@ -36,7 +46,11 @@
 const subjects = [
   { id: "ignition", label: "Ignition — the smoke column stands up",
     focus: "Warn phase. One tree is torching and its smoke is a COLUMN standing over it, bending downwind — the telegraph that replaced the banner. Before: three additive cones and no column (the 'smoke' is a particle cloud that follows the camera, so it is wherever you are, i.e. nowhere).",
-    act: { force: "wildfire", untilState: "warn", extraSecs: 3.6 },
+    // mag pinned to a representative 0.62 for the narrative beats: an
+    // unpinned roll could hand the after side a 0.1 brush fire and every
+    // matched pair would photograph the ROLL, not the change under test.
+    // The size pair at the end shows the range on purpose.
+    act: { mag: 0.62, force: "wildfire", untilState: "warn", extraSecs: 3.6 },
     cam: { aim: "seed", back: 17, up: 4, look: 9 } },
 
   { id: "front", requireFire: true, label: "The head fire runs",
@@ -73,6 +87,16 @@ const subjects = [
     focus: "Ground level, looking along the run: black ground, charred trunks with their canopies burned down to skeletons, thinning smoke. A burnt tree stays burnt and the ground stays black — the scar is the proof the fire was real.",
     act: { atSecs: 17.4, thenSecs: 5, extraSecs: 0.6 },
     cam: { aim: "scarline", back: 26, up: 3.2, look: 2.5 } },
+
+  { id: "size-small", label: "A small one — the brush fire",
+    focus: "Magnitude pinned to 0.05 and a fresh fire forced: a light-wind brush fire on one stand of trees — short plume, no spotting to speak of, a footprint you could walk around. Same altitude as the next frame, so the footprint IS the comparison. On a build without the magnitude roll this frame and the next show the same fire — the cookie-cutter tell itself.",
+    act: { regrow: true, mag: 0.05, force: "wildfire", atSecs: 8 },
+    cam: { aim: "extent", up: 170 } },
+
+  { id: "size-large", label: "A big one — the wind-driven crown fire",
+    focus: "Magnitude pinned to 0.95, same altitude, same seconds in: a 19 m/s wind-driven run — long flame line, embers spotting far ahead, a plume corridor most of the island long. The two frames differing is the fix; the burn being a downwind ellipse instead of a disc is the second fix in the same picture.",
+    act: { regrow: true, mag: 0.95, force: "wildfire", atSecs: 8 },
+    cam: { aim: "extent", up: 170 } },
 ];
 
 async function stageFire(input) {
@@ -141,6 +165,17 @@ async function stageFire(input) {
       return simSeed / 4294967296;
     };
     S = window.__fireSeq = { overlay, cam: null, t0: null, origin: null, simRandom };
+    // pristine snapshot of every flammable tree at boot, so the size beats
+    // can REGROW the island: after the main storyboard has burnt the fuel,
+    // a forced "size" fire would otherwise ignite one isolated leftover and
+    // die — both frames photographing a dud instead of a magnitude
+    try {
+      const tr0 = (CBZ.surv && CBZ.surv.arena && CBZ.surv.arena.flammable) || [];
+      S.pristine = tr0.map((t) => ({
+        f: t.foliage && t.foliage.material ? t.foliage.material.color.getHex() : null,
+        t: t.trunk && t.trunk.material ? t.trunk.material.color.getHex() : null,
+      }));
+    } catch (_) { S.pristine = null; }
     window.__cbzVisualCompare = {
       render() { try { CBZ.renderer.render(CBZ.scene, CBZ.camera); } catch (_) {} },
     };
@@ -217,6 +252,28 @@ async function stageFire(input) {
   const fireHappened = () =>
     (((CBZ.surv && CBZ.surv.arena && CBZ.surv.arena.flammable) || []).some((t) => t.burnt || t.burning > 0));
   if (subject.requireFire && CBZ.disasters.current() !== "WILDFIRE" && !fireHappened() && !act.force) armFire();
+  // regrow the island's fuel from the boot snapshot (stage-side, both builds)
+  if (act.regrow && S.pristine) {
+    const trR = (CBZ.surv && CBZ.surv.arena && CBZ.surv.arena.flammable) || [];
+    for (let i = 0; i < trR.length; i++) {
+      const t = trR[i], p0 = S.pristine[i]; if (!p0) continue;
+      t.burning = 0; t.burnt = false; t._wfHeat = 0; t._wfFuel = 0; t._wfCharred = false;
+      if (t.foliage) {
+        t.foliage.scale.set(1, 1, 1);
+        if (t.foliage.material && p0.f != null) {
+          t.foliage.material.color.setHex(p0.f);
+          if (t.foliage.material.emissive) { t.foliage.material.emissive.setHex(0x000000); t.foliage.material.emissiveIntensity = 1; }
+        }
+      }
+      if (t.trunk && t.trunk.material && p0.t != null) t.trunk.material.color.setHex(p0.t);
+    }
+  }
+  // pin the NEXT fire's magnitude (size-small / size-large). A build without
+  // the roll has no setMagnitude — the pin is a no-op there and both size
+  // frames photograph the same fire, which is exactly that build's tell.
+  if (act.mag != null) {
+    try { if (CBZ.wildfire && CBZ.wildfire.setMagnitude) CBZ.wildfire.setMagnitude(act.mag); } catch (_) {}
+  }
   if (act.force) {
     CBZ.disasters.force(act.force); step(0.1);
     if (act.force === "wildfire") { S.t0 = null; S.origin = null; }
@@ -419,6 +476,22 @@ async function stageFire(input) {
     try { if (best && CBZ.wildfire && CBZ.wildfire.puffStats) { const ps = CBZ.wildfire.puffStats(best.pos.x, best.pos.z); dbg = " · " + ps.near + " puffs around them"; } } catch (_) {}
     note = (best ? ((best.dead ? "a body" : "a person") + " in the plume corridor") : "corridor probe (nobody in it)") +
       (sNow ? " · smoke " + sNow.toFixed(2) : "") + dbg;
+  } else if (cam.aim === "extent") {
+    // the WHOLE burn from one fixed altitude, straight down, wind up-frame:
+    // the footprint difference between two magnitudes is the picture, so the
+    // height must NOT adapt to the burn (an auto-framing camera would zoom
+    // the tell away)
+    // frame the fire that is BURNING NOW — `touched` carries every tree the
+    // whole match has charred, and the small-fire frame must not inherit the
+    // main run's footprint
+    const ext = burning.length ? burning : touched;
+    const c2 = centroid(ext) || fireC;
+    let r = 10;
+    for (const t of ext) { const dd = Math.hypot(t.x - c2.x, t.z - c2.z); if (dd > r) r = dd; }
+    eye = { x: c2.x, y: gy(c2.x, c2.z) + (cam.up || 170), z: c2.z };
+    look = { x: c2.x + w.x * 0.01, y: 0, z: c2.z + w.z * 0.01 };
+    note = "whole burn from " + (cam.up || 170) + " m: radius " + Math.round(r) + " m, " +
+      burning.length + " torching / " + burnt.length + " burnt";
   } else if (cam.aim === "scar") {
     const c = centroid(burnt) || fireC;
     eye = { x: c.x, y: gy(c.x, c.z) + (cam.up || 72), z: c.z };
@@ -462,6 +535,13 @@ async function stageFire(input) {
   // detached evidence camera, so reproduce that same live smokeAt(camera)
   // response for the first-person caught beat or the remote lens lies about
   // visibility while the victim beside it is choking.
+  // the extent shots hang 170 m up: the event's own smoke-pall fog would fog
+  // the GROUND out of an aerial evidence frame, so push it past the shot the
+  // same way the victim beat pulls it in — each lens reproduces the response
+  // its subject calls for
+  if (cam.aim === "extent" && CBZ.scene.fog) {
+    CBZ.scene.fog.near = 900; CBZ.scene.fog.far = 6000;
+  }
   if (cam.aim === "victim" && CBZ.scene.fog && CBZ.wildfire && CBZ.wildfire.smokeAt) {
     const localSmoke = Math.min(1, CBZ.wildfire.smokeAt(eye.x, eye.z));
     if (localSmoke > 0.15) {
@@ -518,6 +598,15 @@ async function stageFire(input) {
     smokeDeaths: Number(wa.smokeDeaths || 0),
     deaths: deadBots,
     escapeAngleDeg: wa.escapeAngleDeg == null ? null : Number(wa.escapeAngleDeg),
+    magnitude: wa.mag == null ? null : Number((+wa.mag).toFixed(2)),
+    windMs: wa.wspdMs == null ? null : Number(wa.wspdMs),
+    // the two anti-circle numbers: how one-sided the run is about the wind,
+    // and how stretched the burnt set is along it. A fire spreading as a disc
+    // in a real wind scores ~50 % and ~1.0 — the biggest tell of all.
+    windBiasPct: (Number(wa.runDownwindM || 0) + Number(wa.runUpwindM || 0)) > 6
+      ? Math.round(100 * wa.runDownwindM / (wa.runDownwindM + wa.runUpwindM)) : null,
+    elongation: Number(wa.runCrossM || 0) > 4
+      ? Number((wa.runDownwindM / wa.runCrossM).toFixed(2)) : null,
     scarM2: Number(wa.scarM2 || 0),
     smokeAheadM: Number(wa.plumeLenM || 0),
     smokePuffsLive: Number(wa.smokePuffsLive || 0),
@@ -538,16 +627,15 @@ async function stageFire(input) {
 export default {
   id: "wildfire-stages",
   title: "The Wildfire",
-  description: "One seeded survival match per build, the director forced to the wildfire and stepped through the same simulated seconds. Before (?cfg_WILDFIRE_V2=0): camera-following ember specks, 13 m coin-flip spread, smoke that hurts nobody, scorch marks deleted at burnout, and 'safety' straight downwind. After: a wind/slope spread wave with a torching head fire, a smoke plume that runs ahead of the front and does the killing, ember spotting that starts fires past anyone fleeing downwind, a persistent black burn scar, and crosswind escape advice for the crowd. Every camera is solved off live world state — the actual burning trees, the actual wind, the actual people.",
-  beforeLabel: "BEFORE · V2 OFF",
+  description: "One seeded survival match per build, the director forced to the wildfire and stepped through the same simulated seconds — ignition telegraph, running head fire, the smoke that arrives first and does the killing, ember spotting past the fleeing crowd, the crosswind escape, and the black scar the event leaves. Both sides run the default fire; the pair at the end pins the per-occurrence MAGNITUDE to 0.05 and 0.95 from one fixed altitude — on a build where every fire is the same fire, those two frames are identical, which is the complaint photographing itself. Every camera is solved off live world state — the actual burning trees, the actual wind, the actual people.",
+  beforeLabel: "BEFORE · HEAD",
   afterLabel: "AFTER · LOCAL",
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
   defaultBefore: "local",
-  beforeParams: { cfg_WILDFIRE_V2: 0 },
   stageTimeoutMs: 480000,
-  metricsNote: "Counts come from CBZ.wildfireAudit() (live-measured on both paths; the legacy fire mutates the same tree records) plus the stage's own reads of the arena and the bots. fireRunM is the farthest burnt tree from where the fire started. escapeAngleDeg is the angle between the bots' flee vector 28 m downwind of the fire and the wind — 90° is the crosswind lesson, 0° is 'run straight downwind'. scarM2 is charred ground that persists after the event; the legacy path deletes its scorch at burnout so it reads 0.",
+  metricsNote: "Counts come from CBZ.wildfireAudit() (live-measured on both paths; the legacy fire mutates the same tree records) plus the stage's own reads of the arena and the bots. fireRunM is the farthest burnt tree from where the fire started. escapeAngleDeg is the angle between the bots' flee vector 28 m downwind of the fire and the wind — 90° is the crosswind lesson, 0° is 'run straight downwind'. scarM2 is charred ground that persists after the event; the legacy path deletes its scorch at burnout so it reads 0. windBiasPct/elongation are the anti-circle numbers: how far the burn ran downwind vs upwind of its origin, and downwind extent over crosswind extent — a disc in a real wind reads ~50 %/~1.0. magnitude/windMs are the per-occurrence size roll and its wind, null on builds without the roll.",
   metrics: {
     treesBurnt: { label: "Trees consumed", better: "higher" },
     fireRunM: { label: "Fire run from origin", unit: "m", better: "higher" },
@@ -559,6 +647,8 @@ export default {
     escapeAngleDeg: { label: "Escape angle vs wind", unit: "°", better: "higher" },
     scarM2: { label: "Ground left black", unit: "m²", better: "higher" },
     smokeAheadM: { label: "Plume reach ahead", unit: "m", better: "higher" },
+    windBiasPct: { label: "Run downwind-bias", unit: "%", better: "higher" },
+    elongation: { label: "Burn elongation (down/cross)", better: "higher" },
     tickAvgMs: { label: "Sim tick avg", unit: "ms", better: "lower" },
     tickMaxMs: { label: "Sim tick worst", unit: "ms", better: "lower" },
     drawCalls: { label: "Draw calls", better: "lower" },

@@ -43,8 +43,9 @@ const subjects = [
     cam: { aim: "sky" } },
 
   { id: "touchdown", requireTornado: true, label: "Touchdown — the condensation funnel",
-    focus: "The full column, seconds old. AFTER: it hangs from a dark rotating wall cloud, and its foot churns a dirt-coloured debris skirt where it eats the ground. BEFORE: a grey translucent cone standing in a clear sky.",
+    focus: "The full column, seconds old, then a film strip of the next seconds: the funnel's width PULSES, the column leans and snakes, the track wanders, the base churns a dirt skirt. A funnel that is the same width and lean in every frame is a prop rotating in place — the strip metrics below count exactly that.",
     act: { atSecs: 1.2 },
+    strip: { frames: 4, stepSec: 2.0 },
     cam: { aim: "funnel" } },
 
   { id: "shelter", requireTornado: true, label: "The shelter decision",
@@ -66,6 +67,14 @@ const subjects = [
     focus: "The funnel is gone. What is left is a LINE: torn-ground scars along the track, deposited wreckage beside it, thrown cars, leaning and collapsed buildings. Walk the path and read the storm's whole story. BEFORE: the tornado leaves literally nothing.",
     act: { atSecs: 17.2, thenSecs: 5 },
     cam: { aim: "path" } },
+
+  // LAST on purpose: this beat replaces the storyboard's tornado with a
+  // parked pair, so nothing after it may photograph the real track.
+  { id: "size-range", label: "The size range — a rope beside a wedge",
+    focus: "Two live vortices at the table's ends, parked side by side: a thin EF1 rope that would peel a roof, and a violent-class wedge wider than it is tall that does not even look like a funnel. BEFORE: every tornado at the same round was the same tornado — this frame is what the rolled magnitude buys.",
+    act: { sizePair: true },
+    cam: { aim: "pair" } },
+
 ];
 
 async function stageTornado(input) {
@@ -118,8 +127,70 @@ async function stageTornado(input) {
     document.body.appendChild(overlay);
 
     S = window.__tornadoSeq = { overlay, t0: null };
+    /* SILHOUETTE SAMPLING for the touchdown strip. The declared cone-tell
+       metrics are math over live mesh state, not pixels: each strip frame we
+       record the funnel rings' mean radial scale (breathing) and the top
+       ring's lateral offset (lean/writhe). A prop funnel scores 0 on both —
+       the HEAD build's rings are never rescaled or re-offset after build, so
+       "0 width pulse, 0 sway travel" is the literal measurement of the tell,
+       not a proxy. */
+    window.__twStrip = [];
+    const sampleFunnel = () => {
+      let g = null;
+      try { g = CBZ.scene.getObjectByName("tornado-funnel"); } catch (_) {}
+      if (!g) return;
+      const named = g.children.filter((c) => c.name === "tw-ring");
+      // HEAD builds have unnamed rings: fall back to open-cylinder children
+      const rings = named.length ? named
+        : g.children.filter((c) => c.geometry && c.geometry.type === "CylinderGeometry" && c.position.y < 900);
+      if (!rings.length) return;
+      let top = rings[0];
+      for (const r of rings) if (r.position.y > top.position.y) top = r;
+      // ONE mid-height ring, not a mean: the per-ring pulse phases are spread
+      // on purpose (that is the writhe), so a mean cancels itself to ~0 and
+      // under-reports a genuinely breathing column.
+      const sorted = rings.slice().sort((a, b) => a.position.y - b.position.y);
+      const mid = sorted[Math.floor(sorted.length / 2)];
+      window.__twStrip.push({ w: mid.scale.x, lx: top.position.x, lz: top.position.z });
+    };
+    const stripMetrics = () => {
+      const S2 = window.__twStrip || [];
+      if (S2.length < 2) return {};
+      const ws = S2.map((s) => s.w);
+      const mean = ws.reduce((a, b) => a + b, 0) / ws.length;
+      const sd = Math.sqrt(ws.reduce((a, b) => a + (b - mean) * (b - mean), 0) / ws.length);
+      let travel = 0;
+      for (let i = 1; i < S2.length; i++) travel += Math.hypot(S2[i].lx - S2[i - 1].lx, S2[i].lz - S2[i - 1].lz);
+      return {
+        funnelWidthPulsePct: +(100 * sd / Math.max(0.001, mean)).toFixed(1),
+        funnelSwayTravelM: +travel.toFixed(1),
+      };
+    };
     window.__cbzVisualCompare = {
       render() { try { CBZ.renderer.render(CBZ.scene, CBZ.camera); } catch (_) {} },
+      // film strips: advance the frozen sim by exactly secs and sample the
+      // live silhouette, so pictures and numbers describe the same frames
+      advance(secs) {
+        const n = Math.max(1, Math.round(secs * 60));
+        for (let i = 0; i < n; i++) { CBZ.hitstop = 0; CBZ.slowmo = 0; CBZ.stepSim(1 / 60); }
+        try { sampleFunnel(); } catch (_) {}
+        /* THE CAMERA-DURING-STEPSIM TRAP: the game's own camera system runs
+           inside stepSim and re-aims CBZ.camera at the player, so a strip
+           frame without this re-apply photographs whoever the player is
+           standing next to instead of the funnel. The staged shot saves its
+           solved camera; every strip frame re-imposes it. */
+        try {
+          const C = window.__twCam;
+          if (C) {
+            CBZ.camera.position.set(C.eye.x, C.eye.y, C.eye.z);
+            CBZ.camera.lookAt(C.look.x, C.look.y, C.look.z);
+            CBZ.camera.updateProjectionMatrix();
+            if (typeof CBZ.skySync === "function") CBZ.skySync();
+          }
+        } catch (_) {}
+        try { CBZ.renderer.render(CBZ.scene, CBZ.camera); } catch (_) {}
+      },
+      metrics() { try { return stripMetrics(); } catch (_) { return {}; } },
     };
   }
 
@@ -174,6 +245,22 @@ async function stageTornado(input) {
   }
   if (act.extraSecs) step(act.extraSecs);
   if (act.thenSecs) step(act.thenSecs);
+  if (subject.strip) window.__twStrip = [];
+  if (act.sizePair && CBZ.tornado && CBZ.tornado.spawn) {
+    // park the table's two ends side by side: magnitude 0.9 (a rope) and 4.4
+    // (a violent wedge), speed 0 so the frame is a clean size plate
+    try { CBZ.tornado.clear(); } catch (_) {}
+    const A0 = (CBZ.SURV && CBZ.SURV.arena) || { cx: 0, cz: 600, radius: 120 };
+    const AR0 = A0.radius || A0.r || 120;
+    CBZ.CONFIG.TORNADO_MAX = 2;
+    // rope on the far beach, wedge pulled to 3.8 and offset — a full-size
+    // wedge's debris skirt is wider than the island's half and simply
+    // swallowed the rope standing 140 m away (first capture proved it)
+    CBZ.tornado.spawn({ mag: 0.8, x: A0.cx - AR0 * 0.95, z: A0.cz + AR0 * 0.30, heading: 0, speed: 0, life: 90 });
+    CBZ.tornado.spawn({ mag: 3.8, x: A0.cx + AR0 * 0.70, z: A0.cz - AR0 * 0.20, heading: 0, speed: 0, life: 90 });
+    CBZ.CONFIG.TORNADO_MAX = 1;
+    step(3.5);                                   // let both finish touching down
+  }
 
   // ---- SOLVE THE CAMERA off live world state -----------------------------
   const A = (CBZ.SURV && CBZ.SURV.arena) || { cx: 0, cz: 600, radius: 120 };
@@ -181,7 +268,7 @@ async function stageTornado(input) {
   const arena = CBZ.surv && CBZ.surv.arena;
   const audit = (CBZ.tornado && CBZ.tornado.audit) ? CBZ.tornado.audit() : {};
   const fun = (CBZ.tornado && CBZ.tornado.active) ? CBZ.tornado.active()[0] : null;
-  const funH = fun ? Math.max(55, Math.min(260, fun.r * 2.4)) : 90;
+  const funH = fun ? (fun.h || Math.max(55, Math.min(260, fun.r * 2.4))) : 90;
   const frag = (arena && arena.fragile) || [];
   const cam = subject.cam || {};
   let eye = null, look = null, note = "";
@@ -215,7 +302,7 @@ async function stageTornado(input) {
     const back = Math.max(funH * 1.5, fun.r * 4.2);
     eye = groundClamp({ x: fun.x + d.x * back, y: funH * 0.5, z: fun.z + d.z * back });
     look = { x: fun.x, y: funH * 0.42, z: fun.z };
-    note = `funnel EF${fun.ef} at (${fun.x.toFixed(0)},${fun.z.toFixed(0)})`;
+    note = `funnel EF${fun.ef}${fun.mag != null ? " mag " + fun.mag : ""} r=${Math.round(fun.r)}m at (${fun.x.toFixed(0)},${fun.z.toFixed(0)})`;
   } else if (cam.aim === "door" && fun) {
     // the doorway the crowd is actually converging on: standing healthy
     // building, out of the damage path, most actors near its door
@@ -277,6 +364,16 @@ async function stageTornado(input) {
       look = { x: fun.x, y: 6, z: fun.z };
       note = "NO FLUNG CAR — funnel base instead";
     }
+  } else if (cam.aim === "pair") {
+    const list = (CBZ.tornado && CBZ.tornado.active) ? CBZ.tornado.active() : [];
+    if (list.length >= 2) {
+      const midX = (list[0].x + list[1].x) / 2, midZ = (list[0].z + list[1].z) / 2;
+      const span = Math.hypot(list[0].x - list[1].x, list[0].z - list[1].z);
+      const hMax = Math.max(list[0].h || 90, list[1].h || 90);
+      eye = groundClamp({ x: midX, y: hMax * 0.55, z: midZ + Math.max(span * 1.5, hMax * 1.7) });
+      look = { x: midX, y: hMax * 0.42, z: midZ };
+      note = `mag ${list[0].mag} (EF${list[0].ef}, r=${Math.round(list[0].r)}m) beside mag ${list[1].mag} (EF${list[1].ef}, r=${Math.round(list[1].r)}m)`;
+    }
   } else if (cam.aim === "path") {
     const p = audit.path;
     if (p) {
@@ -296,6 +393,7 @@ async function stageTornado(input) {
     note = note || "SUBJECT MISSING — island wide shot";
   }
 
+  window.__twCam = { eye: eye, look: look };       // strip frames re-impose this
   const camera = CBZ.camera;
   camera.aspect = input.width / input.height;
   camera.fov = 55; camera.near = 0.4; camera.far = 20000;
@@ -349,24 +447,35 @@ async function stageTornado(input) {
 export default {
   id: "tornado-stages",
   title: "The Tornado",
-  description: "One seeded survival match per build, the director forced to the tornado and stepped through the same simulated seconds. Before (?cfg_TORNADO_V2=0): a grey translucent cone in a clear sky that hurts actors and touches nothing else. After: a condensation funnel hanging from a rotating wall cloud with a dirt debris skirt, buildings ground through the shared structural ledger until they lean and collapse, parked cars lifted at the EF2 gust bar and thrown, a crowd that heads for doorways because interior rooms genuinely protect, and a permanent scarred, wreckage-strewn damage PATH across the island. Every camera is solved off the live world.",
-  beforeLabel: "BEFORE · V2 OFF",
-  afterLabel: "AFTER · V2 ON",
+  description: "One seeded survival match per build, the director forced to the tornado and stepped through the same simulated seconds. The cone tells are photographed AND counted: a film strip of the touchdown (width pulse, column sway, track wander — a prop scores 0 on all three), the debris skirt at the ground contact, the soft-rimmed storm base, and a final plate parking a thin EF1 rope beside a violent wedge — the size range one rolled magnitude buys where every run used to get the identical tornado. Every camera is solved off the live world.",
+  beforeLabel: "BEFORE · HEAD",
+  afterLabel: "AFTER",
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
   defaultBefore: "local",
-  beforeParams: { cfg_TORNADO_V2: 0 },
+  /* 2026-08-29: beforeParams no longer forces ?cfg_TORNADO_V2=0. The V2 wave
+     is merged at HEAD, so a flag-off before shows a two-waves-ago tornado and
+     overstates any new change. The honest baseline is now the flagless-wave
+     recipe: capture --only before off the clean checkout FIRST, then edit,
+     then --reuse-before. Sides differ by capture time, not by flags. */
   stageTimeoutMs: 480000,
-  metricsNote: "Counts come from CBZ.tornado.audit(), measured off live counters at the moment of the frame. All zeros on a build means the tornado only hurt the people standing in it: no building bite, no thrown car, no shelter rule, no path. shelterSaves counts bodies the interior-room rule spared from the kill core; pathMeters is ground the funnel actually covered.",
+  metricsNote: "Counts come from CBZ.tornado.audit(), measured off live counters at the moment of the frame. The damage counters are OCCURRENCE-SIZED: the magnitude is rolled per run, so a small tornado hitting less than the last build's is the size roll working, not a regression — they carry no better/worse direction. The directional rows are the cone tells (a static prop scores 0 width pulse and 0 sway travel) and perf.",
+  /* The damage counters were RATCHETS while the before was the V2-off build
+     that could not touch a building (0 → anything was the proof). Between two
+     magnitude-era builds their direction is the SIZE ROLL, not quality — a
+     small rolled tornado hitting less is the feature working — so they are
+     informational now. Direction lives on the tells (strip metrics) and perf. */
   metrics: {
-    buildingHits: { label: "Structural bites (ledger)", better: "higher" },
-    buildingCollapses: { label: "Buildings collapsed", better: "higher" },
-    carsFlung: { label: "Cars lifted + thrown", better: "higher" },
-    shelterSaves: { label: "Shelter saves", better: "higher" },
-    scarMarks: { label: "Path scars laid", better: "higher" },
-    debrisKept: { label: "Wreckage deposited", better: "higher" },
-    pathMeters: { label: "Track length", unit: "m", better: "higher" },
+    buildingHits: { label: "Structural bites (ledger)" },
+    buildingCollapses: { label: "Buildings collapsed" },
+    carsFlung: { label: "Cars lifted + thrown" },
+    shelterSaves: { label: "Shelter saves" },
+    scarMarks: { label: "Path scars laid" },
+    debrisKept: { label: "Wreckage deposited" },
+    pathMeters: { label: "Track length", unit: "m" },
+    funnelWidthPulsePct: { label: "Funnel width pulse (strip)", unit: "%", better: "higher" },
+    funnelSwayTravelM: { label: "Column sway travel (strip)", unit: "m", better: "higher" },
     tickAvgMs: { label: "Sim tick avg", unit: "ms", better: "lower" },
     tickMaxMs: { label: "Sim tick worst", unit: "ms", better: "lower" },
     drawCalls: { label: "Draw calls", better: "lower" },

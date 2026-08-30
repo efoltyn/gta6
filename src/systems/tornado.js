@@ -310,10 +310,45 @@
       g.fillStyle = lite ? "rgba(255,253,248," + a.toFixed(3) + ")" : "rgba(112,106,98," + (a * 0.9).toFixed(3) + ")";
       g.fillRect(x, y, 1 + (i % 3), h);
     }
+    // RAGGED ALPHA. A uniform-alpha canvas gives the cylinder a silhouette
+    // you can trace with a ruler — the single loudest "it's a prop" tell.
+    // Punching streaky holes through the fill means every grazing edge of the
+    // column breaks up into wisps instead of a hard line, for zero draw cost.
+    g.globalCompositeOperation = "destination-out";
+    for (let i = 0; i < 90; i++) {
+      const x = (i * 47) % 64;
+      const y = (i * 83) % 256;
+      g.fillStyle = "rgba(0,0,0," + (0.22 + ((i * 31) % 45) / 110).toFixed(3) + ")";
+      g.fillRect(x, y, 1 + (i % 2), 10 + ((i * 23) % 34));
+    }
+    g.globalCompositeOperation = "source-over";
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     funnelTexV2 = t;
     return t;
+  }
+
+  /* The storm-base deck used to be two flat CircleGeometry discs — a giant
+     hard-rimmed ceiling that read as ARCHITECTURE (the owner's exact
+     complaint about eyes that look like buildings). One radial-gradient
+     canvas gives the deck a centre that is solidly dark and an edge that
+     dissolves to nothing, so the sky ends in cloud, not in a rim. Built once
+     for the module, never disposed. */
+  let cloudDeckTex = null;
+  function cloudDeckTexture() {
+    if (cloudDeckTex) return cloudDeckTex;
+    const c = document.createElement("canvas");
+    c.width = c.height = 128;
+    const g = c.getContext("2d");
+    const grad = g.createRadialGradient(64, 64, 6, 64, 64, 64);
+    grad.addColorStop(0, "rgba(240,240,244,0.97)");
+    grad.addColorStop(0.5, "rgba(238,238,242,0.86)");
+    grad.addColorStop(0.78, "rgba(236,236,242,0.40)");
+    grad.addColorStop(1, "rgba(236,236,242,0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 128, 128);
+    cloudDeckTex = new THREE.CanvasTexture(c);
+    return cloudDeckTex;
   }
 
   let debrisGeo = null;
@@ -332,9 +367,20 @@
     grp.userData.dynamic = true;
     grp.name = "tornado-funnel";
 
-    const nRing = Math.max(3, Math.round(CBZ.qScale ? CBZ.qScale(4, 9) : 7));
-    const H = Math.max(55, Math.min(260, t.R * 2.4));
-    const rBase = t.R * 0.45, rTop = t.R * 1.5;
+    /* SHAPE IS MAGNITUDE. t.wedge (0 rope … 1 wedge, set from `mag` at
+       spawn) decides what KIND of thing hangs from the cloud:
+         rope   — a thin tall tube: base ~0.16R, ~4.6R high, concave trumpet
+                  taper, big sway. The EF1 that peels a roof and moves on.
+         wedge  — wider than it is tall: base ~0.9R, ~2R high, near-straight
+                  sides, half-buried in its own debris cloud. An EF4+ does
+                  not even look like a funnel — it looks like the storm came
+                  down to the ground.
+       Every proportion interpolates between the two. */
+    const wg = t.wedge || 0;
+    const nRing = Math.max(4, Math.round(CBZ.qScale ? CBZ.qScale(5, 10) : 8));
+    const H = Math.max(50, Math.min(300, t.R * (4.6 - 2.6 * wg)));
+    const rBase = t.R * (0.16 + 0.74 * wg), rTop = t.R * (1.05 + 0.55 * wg);
+    const taperPow = 0.60 + 0.35 * wg;
     const tex = funnelTexture();
     // Two materials: the dense inner column and a translucent outer veil that
     // scrolls at a different rate. Parallax for the price of one extra state.
@@ -355,12 +401,19 @@
     // fog:false on the V2 column (like the wall cloud): the active-phase fog
     // was washing the dark funnel to the fog colour, and a tornado is seen as
     // a dark silhouette against the bright storm light, not as haze in haze.
+    /* THE LINEAR-HEX TRAP (core/renderer.js runs outputEncoding=sRGB with
+       r128 colour management OFF, so material hex is treated as LINEAR and
+       gamma-lifted ~2.2 on the way out): 0x41444c — "dark slate" on paper —
+       reached the screen as pale mid-grey, which is why the "dark
+       condensation funnel" photographed as a glass curtain. These constants
+       are authored IN LINEAR so the SCREEN gets the dark column: 0x15171c
+       renders ≈ #52565e. */
     const matIn = new THREE.MeshBasicMaterial({
-      map: texIn, color: v2() ? 0x41444c : 0x6d6f74, transparent: true, opacity: opIn,
+      map: texIn, color: v2() ? 0x15171c : 0x6d6f74, transparent: true, opacity: opIn,
       side: THREE.DoubleSide, depthWrite: false, fog: !v2(),
     });
     const matOut = new THREE.MeshBasicMaterial({
-      map: texOut, color: v2() ? 0x7d8087 : 0x8e9096, transparent: true, opacity: opOut,
+      map: texOut, color: v2() ? 0x3b3d42 : 0x8e9096, transparent: true, opacity: opOut,
       side: THREE.DoubleSide, depthWrite: false,
     });
 
@@ -369,23 +422,42 @@
     for (let i = 0; i < nRing; i++) {
       const k0 = i / nRing, k1 = (i + 1) / nRing;
       const h = H / nRing;
-      const r0 = rBase + (rTop - rBase) * Math.pow(k0, 0.72);
-      const r1 = rBase + (rTop - rBase) * Math.pow(k1, 0.72);
+      const r0 = rBase + (rTop - rBase) * Math.pow(k0, taperPow);
+      const r1 = rBase + (rTop - rBase) * Math.pow(k1, taperPow);
       const geo = new THREE.CylinderGeometry(r1, r0, h, seg, 1, true);
-      const m = new THREE.Mesh(geo, i === nRing - 1 ? matOut : matIn);
-      // V2 leans less: with a dense column the big per-ring offsets read as
-      // BREAKS in the funnel rather than a bend
+      const m = new THREE.Mesh(geo, matIn);
+      m.name = "tw-ring";                            // probed by the ba preset
       const leanK = v2() ? 0.5 : 1;
-      m.position.set(Math.sin(i * 0.8) * t.R * 0.13 * leanK, h * (i + 0.5), Math.cos(i * 0.62) * t.R * 0.11 * leanK);
+      // the BASE offsets only — animateFunnel writhes the rings around these
+      // every frame; a funnel whose lean never changes is a prop on a lathe.
+      const bx = Math.sin(i * 0.8) * t.R * 0.13 * leanK;
+      const bz = Math.cos(i * 0.62) * t.R * 0.11 * leanK;
+      m.position.set(bx, h * (i + 0.5), bz);
       m.rotation.z = Math.sin(i * 0.8) * (v2() ? 0.04 : 0.07);
       m.castShadow = false; m.receiveShadow = false;
       m.renderOrder = 3;
       grp.add(m);
-      rings.push({ mesh: m, spin: 1.0 + i * 0.16 });
+      rings.push({ mesh: m, spin: 1.0 + i * 0.16, bx: bx, bz: bz });
     }
-    // the DEBRIS BALL at the base — the visual tell. One wide, short, very
-    // translucent shell of the outer material.
-    const skirtGeo = new THREE.CylinderGeometry(t.R * 1.15, t.R * 1.45, Math.max(6, t.R * 0.30), seg, 1, true);
+    /* THE VEIL — one full-height translucent shell around the whole column.
+       The old build put the veil material on the TOP ring only, so the rest
+       of the tube met the sky as a naked hard edge. A single enclosing shell
+       (loose enough to contain the writhe) haloes the silhouette everywhere
+       for one mesh and zero extra material states. */
+    const veil = new THREE.Mesh(
+      new THREE.CylinderGeometry(rTop * 1.30, rBase * 1.45 + t.R * 0.10, H, seg, 1, true), matOut);
+    veil.position.y = H * 0.5;
+    veil.castShadow = veil.receiveShadow = false;
+    veil.renderOrder = 3;
+    grp.add(veil);
+    // the DEBRIS SKIRT at the base — the churning dirt collar that sells the
+    // ground contact harder than the funnel itself does. TWO counter-rotating
+    // shells (a low wide bowl and a taller inner churn) whose height grows
+    // with the wedge factor: a big tornado is buried to the knees in its own
+    // debris cloud. Both are pinned to the GROUND's schedule in animateFunnel
+    // — the skirt spins up as the tube arrives and dies as the wind does.
+    const skirtH = Math.max(6, t.R * (0.30 + 0.55 * (t.wedge || 0)));
+    const skirtGeo = new THREE.CylinderGeometry(t.R * 1.15, t.R * 1.45, skirtH, seg, 1, true);
     // V2: the base skirt is DIRT-coloured. What churns at a funnel's foot is
     // the ground it is eating, not more grey cloud — the brown debris skirt is
     // the single most recognisable ground-contact tell in real footage.
@@ -395,15 +467,21 @@
       texSk.wrapS = texSk.wrapT = THREE.RepeatWrapping;
       texSk.needsUpdate = true; texSk.repeat.set(3, 1);
       matSkirt = new THREE.MeshBasicMaterial({
-        map: texSk, color: 0x6b5137, transparent: true, opacity: 0.6,
+        map: texSk, color: 0x331d0c, transparent: true, opacity: 0.6,   // linear-authored dirt (≈ #7b5f40 on screen)
         side: THREE.DoubleSide, depthWrite: false, fog: false,
       });
     }
     const skirt = new THREE.Mesh(skirtGeo, matSkirt || matOut);
-    skirt.position.y = Math.max(3, t.R * 0.15);
+    skirt.position.y = skirtH * 0.45;
     skirt.castShadow = skirt.receiveShadow = false;
     skirt.renderOrder = 3;
     grp.add(skirt);
+    const skirt2 = new THREE.Mesh(
+      new THREE.CylinderGeometry(t.R * 0.72, t.R * 1.02, skirtH * 1.5, seg, 1, true), matSkirt || matOut);
+    skirt2.position.y = skirtH * 0.7;
+    skirt2.castShadow = skirt2.receiveShadow = false;
+    skirt2.renderOrder = 3;
+    grp.add(skirt2);
 
     /* V2: THE WALL CLOUD. A real funnel is a condensation funnel descending
        from a rotating wall cloud under a storm base; a column that just ends
@@ -422,32 +500,34 @@
       // the exact opposite of a storm base. Unfogged, it stays the dark
       // silhouette a wall cloud actually is against the bright fog horizon.
       matCloud = new THREE.MeshBasicMaterial({
-        map: texCl, color: 0x33363d, transparent: true, opacity: 0.9,
+        map: texCl, color: 0x0e0f13, transparent: true, opacity: 0.9,   // linear-authored (≈ #40434c on screen)
         side: THREE.DoubleSide, depthWrite: false, fog: false,
       });
-      matDeck = new THREE.MeshBasicMaterial({
-        color: 0x272a31, transparent: true, opacity: 0.94,
-        side: THREE.DoubleSide, depthWrite: false, fog: false,
-      });
+      // the cloud is the STORM'S size, not the funnel's: a rope hangs from a
+      // broad storm base, so the cloud radii floor at 60 m — without this a
+      // small funnel wore a funnel-sized saucer, which read as a UFO
+      const rCl = Math.max(rTop, 60);
       const wall1 = new THREE.Mesh(
-        new THREE.CylinderGeometry(rTop * 2.1, rTop * 1.05, H * 0.16, seg, 1, true), matCloud);
+        new THREE.CylinderGeometry(rCl * 2.1, rCl * 1.05, H * 0.16, seg, 1, true), matCloud);
       wall1.position.y = H * 0.97;
       const wall2 = new THREE.Mesh(
-        new THREE.CylinderGeometry(rTop * 2.9, rTop * 2.0, H * 0.10, seg, 1, true), matCloud);
+        new THREE.CylinderGeometry(rCl * 2.9, rCl * 2.0, H * 0.10, seg, 1, true), matCloud);
       wall2.position.y = H * 1.05;
-      const deck = new THREE.Mesh(new THREE.CircleGeometry(rTop * 3.5, seg), matDeck);
-      deck.rotation.x = Math.PI / 2;                 // faces DOWN at the player
-      deck.position.y = H * 1.12;
-      // a wider, fainter second deck softens the hard circular rim the flat
-      // disc cuts against the sky — a two-step falloff instead of an edge
-      matDeck2 = new THREE.MeshBasicMaterial({
-        color: 0x2e313a, transparent: true, opacity: 0.5,
+      /* ONE soft-edged deck. The old pair of flat CircleGeometry discs cut a
+         hard circular rim against the sky — a ceiling with an edge is a
+         BUILDING, which is the owner's exact complaint. The radial-gradient
+         texture dissolves the deck to nothing at its rim (the dark comes from
+         the material colour; the texture carries shading + alpha), and the
+         radius is capped so a wedge's storm base doesn't pave the entire sky
+         of a frame it isn't even in. */
+      matDeck = new THREE.MeshBasicMaterial({
+        map: cloudDeckTexture(), color: 0x0b0c10, transparent: true, opacity: 0.95,   // linear-authored (≈ #383b44 on screen)
         side: THREE.DoubleSide, depthWrite: false, fog: false,
       });
-      const deck2 = new THREE.Mesh(new THREE.CircleGeometry(rTop * 5.4, seg), matDeck2);
-      deck2.rotation.x = Math.PI / 2;
-      deck2.position.y = H * 1.16;
-      cloud = [wall1, wall2, deck, deck2];
+      const deck = new THREE.Mesh(new THREE.CircleGeometry(Math.min(rCl * 5.0, 520), seg), matDeck);
+      deck.rotation.x = Math.PI / 2;                 // faces DOWN at the player
+      deck.position.y = H * 1.12;
+      cloud = [wall1, wall2, deck];
       for (const m of cloud) {
         m.castShadow = m.receiveShadow = false;
         m.renderOrder = 3;
@@ -478,7 +558,8 @@
 
     grp.position.set(t.x, floorAt(t.x, t.z), t.z);
     root.add(grp);
-    t.mesh = { grp: grp, rings: rings, skirt: skirt, debris: debris, matIn: matIn, matOut: matOut, H: H,
+    t.mesh = { grp: grp, rings: rings, skirt: skirt, skirt2: skirt2, veil: veil, debris: debris,
+      matIn: matIn, matOut: matOut, H: H,
       cloud: cloud, matCloud: matCloud, matDeck: matDeck, matDeck2: matDeck2, matSkirt: matSkirt };
   }
 
@@ -491,11 +572,13 @@
       // module geometry and CBZ.cmat's _shared material — never dispose those.
       for (const r of M.rings) if (r.mesh.geometry) r.mesh.geometry.dispose();
       if (M.skirt.geometry) M.skirt.geometry.dispose();
+      if (M.skirt2 && M.skirt2.geometry) M.skirt2.geometry.dispose();
+      if (M.veil && M.veil.geometry) M.veil.geometry.dispose();
       if (M.cloud) for (const c of M.cloud) if (c.geometry) c.geometry.dispose();
       if (M.matIn.map && M.matIn.map !== funnelTex) M.matIn.map.dispose();
       if (M.matOut.map && M.matOut.map !== funnelTex) M.matOut.map.dispose();
       if (M.matSkirt) { if (M.matSkirt.map && M.matSkirt.map !== funnelTex) M.matSkirt.map.dispose(); M.matSkirt.dispose(); }
-      if (M.matCloud) { if (M.matCloud.map && M.matCloud.map !== funnelTex) M.matCloud.map.dispose(); M.matCloud.dispose(); }
+      if (M.matCloud) { if (M.matCloud.map && M.matCloud.map !== funnelTex && M.matCloud.map !== cloudDeckTex) M.matCloud.map.dispose(); M.matCloud.dispose(); }
       if (M.matDeck) M.matDeck.dispose();
       if (M.matDeck2) M.matDeck2.dispose();
       M.matIn.dispose(); M.matOut.dispose();
@@ -513,8 +596,53 @@
     const base = (t.vmax / Math.max(1, t.R)) * 0.55;
     t.spin = (t.spin || 0) + base * dt;
     M.grp.rotation.y = t.spin;
-    for (let i = 0; i < M.rings.length; i++) M.rings[i].mesh.rotation.y += base * M.rings[i].spin * dt;
+
+    /* THE COLUMN IS ALIVE. Three life envelopes multiply into every ring:
+         birth — the condensation funnel DESCENDS out of the wall cloud over
+                 the first ~2.5 s, top rings condensing first; the debris
+                 skirt only spins up once the tube is near the ground.
+         pulse — per-ring radial breathing on two incommensurate sines, so
+                 the width is never the same two seconds running.
+         rope  — the last ~30% of life: the tube thins toward a rope, the
+                 sway triples, and the skirt dies BEFORE the funnel does
+                 (a roping-out tube with a churning base would be claiming
+                 wind that is no longer there).
+       Plus WRITHE: per-ring lateral sway that grows with height, so the
+       column leans and snakes instead of standing like a lathe part. */
+    const nR = M.rings.length;
+    const lifeFrac = t.life > 0 ? t.age / t.life : 0;
+    const birthK = Math.min(1, t.age / 2.5);
+    const ropeK = Math.max(0, Math.min(1, (lifeFrac - 0.70) / 0.30));
+    const swayBase = t.R * (0.06 + 0.10 * (1 - (t.wedge || 0)));
+    for (let i = 0; i < nR; i++) {
+      const r = M.rings[i], m = r.mesh;
+      m.rotation.y += base * r.spin * dt;
+      const hc = (i + 0.5) / nR;                    // 0 = ground … 1 = cloud
+      // the descending condensation front: a ring exists once the front
+      // (walking down from the cloud) has passed its height
+      const cond = Math.max(0, Math.min(1, (birthK * 1.35 - (1 - hc)) * 3));
+      const pulse = 1 + 0.11 * Math.sin(t.age * 1.35 + i * 0.62) + 0.06 * Math.sin(t.age * 3.1 + i * 1.17);
+      m.scale.x = m.scale.z =
+        Math.max(0.02, (0.18 + 0.82 * cond) * pulse * (1 - 0.62 * ropeK * (1 - hc * 0.4)));
+      const sway = swayBase * (0.35 + hc * 1.35) * (1 + 2.6 * ropeK);
+      m.position.x = r.bx * (1 - ropeK * 0.5) + Math.sin(t.age * 0.9 + i * 0.83) * sway
+        + Math.sin(t.age * 0.37 + i * 0.5) * sway * 0.6;
+      m.position.z = r.bz * (1 - ropeK * 0.5) + Math.cos(t.age * 0.73 + i * 0.61) * sway
+        + Math.cos(t.age * 0.29) * sway * 0.5;
+    }
+    if (M.veil) {
+      M.veil.rotation.y -= base * 0.4 * dt;
+      M.veil.scale.x = M.veil.scale.z =
+        Math.max(0.02, (0.3 + 0.7 * birthK) * (1 - 0.45 * ropeK) * (1 + 0.09 * Math.sin(t.age * 1.1 + 0.7)));
+    }
+    // the skirt lives on the GROUND's schedule, not the tube's
+    const skirtK = Math.max(0, Math.min(1, (birthK - 0.55) * 2.2)) * (1 - 0.8 * ropeK);
     M.skirt.rotation.y -= base * 0.7 * dt;
+    M.skirt.scale.x = M.skirt.scale.z = Math.max(0.001, skirtK * (1 + 0.16 * Math.sin(t.age * 1.9)));
+    if (M.skirt2) {
+      M.skirt2.rotation.y += base * 0.5 * dt;
+      M.skirt2.scale.x = M.skirt2.scale.z = Math.max(0.001, skirtK * (1 + 0.2 * Math.sin(t.age * 2.6 + 1.4)));
+    }
     // scrolling texture = the sense of material rushing UP the column
     const sc = 0.55 * dt * (t.vmax / 60);
     if (M.matIn.map) M.matIn.map.offset.y -= sc;
@@ -522,6 +650,8 @@
     // orbiting debris corkscrews up, wraps at the top
     for (let i = 0; i < M.debris.length; i++) {
       const d = M.debris[i];
+      d.mesh.visible = t.age > 1.2;                 // nothing orbits a funnel
+                                                    // that hasn't touched down
       d.ang += d.rate * dt * (t.vmax / 55);
       d.y += (t.wmax * 0.22) * dt;
       if (d.y > M.H) d.y = 3;
@@ -873,12 +1003,37 @@
     const cap = Math.max(1, Math.min(2, CBZ.CONFIG.TORNADO_MAX | 0));
     while (live.length >= cap) retire(live[0], true);
 
-    // `* 4` capped an unspecified tornado at EF3, so the EF4/EF5 rows — the
-    // entire reason the EF table goes that high, and the only two that can
-    // take a building all the way down — were unreachable unless a caller
-    // named them explicitly. `* 6` covers EF0-EF5.
-    const ef = Math.max(0, Math.min(5, opts.ef != null ? (opts.ef | 0) : Math.floor(rng() * 6)));
-    const row = EF[ef];
+    /* A MAGNITUDE, NOT A CLASS ROW. Every tornado used to be its EF row's
+       exact numbers — two EF2s were byte-identical clones, and the whole
+       population quantized to six molds. Now the vortex is built at a
+       CONTINUOUS point `mag` (0..5) on the EF table and its physical axes are
+       then jittered INDEPENDENTLY off the seeded stream (width and wind are
+       correlated in nature, never locked), so no two occurrences match. The
+       EF class is read BACK from the rolled gust (the NWS band edges): the
+       class is a rating of the tornado, not the mold it was cast from.
+         opts.mag   continuous 0..5 — the roster def and the weather director
+                    roll one, biased (not determined) by their intensity
+         opts.ef    legacy class request — honored as mag = ef ± 0.45, so an
+                    asked-for EF3 is always EF3-grade, never the same EF3
+         neither    a full seeded roll, weak common, monsters rare */
+    let mag;
+    if (opts.mag != null) mag = Math.max(0, Math.min(5, +opts.mag));
+    else if (opts.ef != null) mag = Math.max(0, Math.min(5, (opts.ef | 0) + (rng() - 0.5) * 0.9));
+    else mag = 5 * Math.pow(rng(), 1.5);
+    const iLo = Math.min(4, Math.floor(mag)), fRow = mag - iLo;
+    const rLo = EF[iLo], rHi = EF[iLo + 1];
+    const lerpRow = function (k) { return rLo[k] + (rHi[k] - rLo[k]) * fRow; };
+    const vmaxR = lerpRow("vmax") * (0.95 + rng() * 0.10);
+    const coreR = lerpRow("R")    * (0.75 + rng() * 0.55);
+    const fwdR  = lerpRow("fwd")  * (0.78 + rng() * 0.50);
+    let   lifeR = lerpRow("life") * (0.70 + rng() * 0.75);
+    // capLife (the survival roster's phase clock) is a WINDOW, not a value:
+    // the rolled lifetime maps into it, so a small tornado still ropes out
+    // mid-phase and the sky clears early, while a monster uses every second.
+    if (opts.capLife != null) lifeR = (+opts.capLife) * (0.55 + 0.45 * Math.min(1, lifeR / 94));
+    // the class, read back from the 3-second-gust band edges (m/s)
+    let ef = 0;
+    while (ef < 5 && vmaxR >= [38, 49.5, 60.5, 74, 89][ef]) ef++;
     let x = opts.x, z = opts.z;
     if (x == null || z == null) {
       // no site given: pick one off the seeded stream, biased to the built-up
@@ -891,16 +1046,19 @@
       } else { x = (rng() - 0.5) * 400; z = (rng() - 0.5) * 400; }
     }
     const heading = opts.heading != null ? opts.heading : rng() * 6.2832;
-    const fwd = opts.speed != null ? +opts.speed : row.fwd;
+    const fwd = opts.speed != null ? +opts.speed : fwdR;
     const t = {
       id: ++idSeq,
-      x: +x, z: +z, ef: ef,
-      R: row.R, vmax: row.vmax, wmax: row.vmax * LIFT_MUL,
-      outer: row.R * OUTER_MUL,
-      dmgR: row.R * DAMAGE_MUL,
+      x: +x, z: +z, ef: ef, mag: +mag.toFixed(2),
+      // rope (0) … wedge (1): the SHAPE of the funnel, derived from magnitude.
+      // buildFunnel and animateFunnel read it; nothing physical does.
+      wedge: Math.max(0, Math.min(1, (mag - 1.2) / 2.8)),
+      R: coreR, vmax: vmaxR, wmax: vmaxR * LIFT_MUL,
+      outer: coreR * OUTER_MUL,
+      dmgR: coreR * DAMAGE_MUL,
       heading: heading, fwd: fwd,
       fvx: Math.cos(heading) * fwd, fvz: Math.sin(heading) * fwd,
-      life: opts.life != null ? +opts.life : row.life,
+      life: opts.life != null ? +opts.life : lifeR,
       age: 0, spin: 0,
       // WHO IS TO BLAME — and the answer is NOBODY, by default.
       // city/structural.js reads `by` as the credited ATTACKER: a non-null
@@ -916,7 +1074,7 @@
       // the city, null with the flag off — either way every use is guarded.
       arena: opts.arena || null,
       x0: +x, z0: +z,                            // where the track began (audit/preset)
-      dps: DPS0 * Math.pow(row.vmax / 33, 3),
+      dps: DPS0 * Math.pow(vmaxR / 33, 3),
       // per-vortex timers (all throttles, never per-frame world queries)
       tStruct: 0, tCars: 0, tPeople: 0, tFx: 0, tSfx: 0, tShake: 0, tGlass: 0, tProp: 0, tEvent: 0, tArena: 0,
       // roof-seat cache: lot -> {y, t}. Bounded by the lot cap below and
@@ -937,7 +1095,9 @@
   };
 
   function snapshot(t) {
-    return { id: t.id, x: +t.x.toFixed(2), z: +t.z.toFixed(2), ef: t.ef, r: t.R, vmax: t.vmax, age: +t.age.toFixed(2) };
+    return { id: t.id, x: +t.x.toFixed(2), z: +t.z.toFixed(2), ef: t.ef, mag: t.mag,
+      r: +t.R.toFixed(1), vmax: +t.vmax.toFixed(1), h: t.mesh ? t.mesh.H : +(t.R * 2.4).toFixed(0),
+      age: +t.age.toFixed(2) };
   }
   T.active = function () { return live.map(snapshot); };
   T.count = function () { return live.length; };
@@ -988,15 +1148,23 @@
     // track and identical on every client regardless of frame rate.
     const w = CBZ.hash01 ? CBZ.hash01(t.x, t.z, 0x7043) : 0.5;
     t.heading += (w - 0.5) * 0.55 * dt;
-    t.fvx = Math.cos(t.heading) * t.fwd;
-    t.fvz = Math.sin(t.heading) * t.fwd;
+    // FORWARD SPEED BREATHES. A real funnel surges and stalls (chaser rule:
+    // "if it looks parked, it is coming at you or slowing to kill you") —
+    // constant ground speed is one of the prop tells. ±35%, keyed to nominal
+    // distance travelled so the pace pattern is the track's own, not the
+    // frame rate's.
+    t.trav = (t.trav || 0) + t.fwd * dt;
+    const surge = 1 + 0.35 * Math.sin(t.trav * 0.045 + t.id * 2.1) * Math.sin(t.trav * 0.011 + 1.3);
+    const fvNow = t.fwd * surge;
+    t.fvx = Math.cos(t.heading) * fvNow;
+    t.fvz = Math.sin(t.heading) * fvNow;
     t.x += t.fvx * dt;
     t.z += t.fvz * dt;
     if (t.bounds) {
       const dx = t.x - t.bounds.x, dz = t.z - t.bounds.z, d = Math.hypot(dx, dz);
       if (d > t.bounds.r) {
         t.heading = Math.atan2(t.bounds.z - t.z, t.bounds.x - t.x) + (w - 0.5) * 0.8;
-        t.fvx = Math.cos(t.heading) * t.fwd; t.fvz = Math.sin(t.heading) * t.fwd;
+        t.fvx = Math.cos(t.heading) * fvNow; t.fvz = Math.sin(t.heading) * fvNow;
       }
     } else if (CBZ.city && CBZ.city.arena && CBZ.city.arena.clampToCity) {
       // keep it over land: the same clamp traffic uses, so a funnel never
@@ -1007,7 +1175,7 @@
         if (Math.abs(p.x - t.x) > 0.01 || Math.abs(p.z - t.z) > 0.01) {
           t.x = p.x; t.z = p.z;
           t.heading += Math.PI * 0.55;
-          t.fvx = Math.cos(t.heading) * t.fwd; t.fvz = Math.sin(t.heading) * t.fwd;
+          t.fvx = Math.cos(t.heading) * fvNow; t.fvz = Math.sin(t.heading) * fvNow;
         }
       } catch (e) {}
     }
@@ -1689,11 +1857,15 @@
     lastDay = day;
     if (!CBZ.hash01) return;
     if (CBZ.hash01(day, 0, 0x7075a) >= DAY_CHANCE) return;
-    // Strength is the storm's own: a marginal supercell throws an EF1, a
-    // full-intensity one an EF4. EF5 stays reserved for a scripted event —
-    // the weather should never, unprompted, sweep the map clean.
-    const ef = Math.max(1, Math.min(4, 1 + Math.round((w.intensity - STORM_MIN) / (1 - STORM_MIN) * 3)));
-    try { T.spawn({ ef: ef, by: null, byPlayer: false }); } catch (e) {}
+    // Strength: the storm BIASES the roll, the day's second hash DECIDES.
+    // A marginal supercell can still (rarely) drop a violent tornado and a
+    // full-blown one can still only manage a rope — a ramp gave every storm
+    // of a given strength the identical twister. EF5 stays out of reach:
+    // the weather never, unprompted, sweeps the map clean.
+    const bias = (w.intensity - STORM_MIN) / (1 - STORM_MIN);
+    const roll = CBZ.hash01(day, 1, 0x7075b);
+    const mag = Math.max(0.6, Math.min(4.6, 0.8 + bias * 2.2 + (roll - 0.5) * 2.4));
+    try { T.spawn({ mag: mag, by: null, byPlayer: false }); } catch (e) {}
   }
 
   if (CBZ.onUpdate) CBZ.onUpdate(34.35, function (dt) {
@@ -1772,6 +1944,7 @@
       v2: v2(),
       live: live.length,
       ef: a ? a.ef : -1,
+      mag: a ? a.mag : null,
       x: a ? +a.x.toFixed(1) : null,
       z: a ? +a.z.toFixed(1) : null,
       age: a ? +a.age.toFixed(2) : 0,
@@ -1793,8 +1966,9 @@
       liftedCap: liftedCap(),
       vortices: live.map(function (t) {
         return {
-          id: t.id, ef: t.ef, x: +t.x.toFixed(1), z: +t.z.toFixed(1),
-          R: t.R, vmax: t.vmax, dps: +t.dps.toFixed(2),
+          id: t.id, ef: t.ef, mag: t.mag, wedge: +(t.wedge || 0).toFixed(2),
+          x: +t.x.toFixed(1), z: +t.z.toFixed(1),
+          R: +t.R.toFixed(1), vmax: +t.vmax.toFixed(1), dps: +t.dps.toFixed(2),
           age: +t.age.toFixed(1), life: t.life,
           lifted: t.lifted.length, roofs: t.roofs.size,
         };

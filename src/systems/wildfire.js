@@ -95,12 +95,14 @@
   const surv = () => CBZ.surv;
   const ground = (x, z) => (CBZ.surv && CBZ.surv.arena ? CBZ.surv.arena.groundHeightAt(x, z) : 0);
 
-  /* ---- tuning ---------------------------------------------------------- */
-  const REACH = 26;          // m — radiant/convective heating reach, tree to tree
-  const PLUME_BASE = 34;     // m — plume corridor length before the wind term
-  const SPOT_MIN = 15, SPOT_SPAN = 36;   // m — ember flight, downwind
+  /* ---- tuning ----------------------------------------------------------
+     The constants here are anchors: every occurrence rolls its own SIZE in
+     beginWarn (F.mag) and the live values — F.reach, F.wspd, spread gain,
+     spotting range/cadence, plume length, flame height, damage, duration —
+     all derive from that one roll. See THE SIZE IS ROLLED in beginWarn. */
+  const REACH = 26;          // m — heating-reach anchor; F.reach is the live rolled value
   const MAXFLAME = 48;       // simultaneous torching trees drawn
-  const MAXSMOKE = 1600, MAXEMBER = 320, MAXSCAR = 340;
+  const MAXSMOKE = 1600, MAXEMBER = 320, MAXSCAR = 520;
 
   /* ---- run state -------------------------------------------------------- */
   const F = {
@@ -108,6 +110,10 @@
     arena: null,
     t: 0,                    // module clock (s) for flicker
     wx: 1, wz: 0, wspd: 10,  // THE wind (the def feeds it to weatherDrive)
+    mag: 0.55,               // this occurrence's rolled magnitude (0 brush fire → 1 crown fire)
+    reach: REACH,            // live tree-to-tree heating reach for this occurrence
+    scarAge: 0,              // seconds since the fire died — the char greys toward ash
+    _forceMag: null,         // storyboard pin (CBZ.wildfire.setMagnitude)
     seed: null,              // the origin tree
     intensity: 0,
     spreadCd: 0, spotCd: 2.2, veer: 0,
@@ -139,6 +145,7 @@
      geometry remains behind WILDFIRE_RENDER_V3=false for matched A/B proof. */
   let FX = null;
   const dummy = new THREE.Object3D();
+  const SCAR_ASH = new THREE.Color(0x4a453a);   // what fresh char ages into
 
   function fogUniforms(extra) {
     return THREE.UniformsUtils.merge([THREE.UniformsLib.fog, extra]);
@@ -532,8 +539,20 @@
     };
   }
 
-  function igniteTree(t, why) {
+  function igniteTree(t, why, src) {
     if (t.burnt || t.burning) return;
+    // the fire CROSSED THE GROUND to get here: stitch char along the actual
+    // spread segment, so neighbouring burns knit into one connected black
+    // run instead of a polka-dot of discs with green between them
+    if (src) {
+      const segs = 1 + ((rnd() * 2) | 0);
+      for (let k = 1; k <= segs; k++) {
+        const u = k / (segs + 1);
+        addScar(src.x + (t.x - src.x) * u + (rnd() - 0.5) * 2.5,
+                src.z + (t.z - src.z) * u + (rnd() - 0.5) * 2.5,
+                1.8 + rnd() * 1.3);
+      }
+    }
     t._wfFuel = 5.5 + rnd() * 2.5;             // a torching crown holds for a while
     t.burning = t._wfFuel;                     // the SAME live field every other def reads
     t._wfHeat = 1;
@@ -584,7 +603,7 @@
      crosswind, that widens as it travels. Summed, clamped. This is what the
      choke damage, the bot threat and the player's fog all read — the drawn
      puffs are the same field's portrait, not a second model. */
-  function plumeLen() { return PLUME_BASE + F.wspd * 2.2; }
+  function plumeLen() { return (22 + 26 * F.mag) + F.wspd * 2.2; }   // ~31 m brush → ~90 m crown
   function smokeAt(x, z) {
     const B = F.burningList;
     if (!B.length) return 0;
@@ -626,7 +645,24 @@
     // this module's wind IS the wind the def hands to weatherDrive.
     const w = CBZ.weatherWind ? CBZ.weatherWind() : null;
     if (w && w.speed > 0.5) { F.wx = w.x; F.wz = w.z; } else { const a = rnd() * 6.28; F.wx = Math.cos(a); F.wz = Math.sin(a); }
-    F.wspd = 9 + 4 * F.intensity;
+    /* THE SIZE IS ROLLED, NOT ISSUED. Every occurrence draws its own
+       magnitude off the run seed: ~0 is a brush fire on one hillside you
+       can walk around; ~1 is a wind-driven crown fire that takes the whole
+       ridge and jumps the road. The round's escalating intensity BIASES the
+       draw — late rounds trend big, but a lucky small one stays possible
+       and an early monster does too — it never fixes it. Everything
+       downstream reads this one number: wind, heating reach, spread gain,
+       spotting, plume, flame height, damage, the def's activeSecs getter
+       and how hard the def paints the sky. */
+    const I = Math.max(0, Math.min(1.7, F.intensity));
+    F.mag = F._forceMag != null ? F._forceMag : Math.pow(rnd(), 1 / (0.55 + 0.62 * I));
+    F.wspd = 4 + 15 * F.mag;      // 4 m/s breeze → 19 m/s driving wind
+    F.reach = 19 + 15 * F.mag;    // 19 → 34 m tree-to-tree heating reach
+    F.scarAge = 0;
+    if (fxAlive()) {              // a NEW fire re-blackens the old ash
+      FX.scar.material.color.setHex(0x14100b);
+      FX.scar.material.opacity = 0.85;
+    }
     F.veer = (rnd() - 0.5) * 0.05;             // slow drift so the run bends a little
 
     /* THE SEED IS UPWIND. A random tree wastes the event half the time (a
@@ -654,14 +690,16 @@
     const s = F.seed;
     if (s) {
       const near = tr.filter((t) => t !== s && !t.burning && !t.burnt &&
-        Math.hypot(t.x - s.x, t.z - s.z) < REACH * 1.2);
+        Math.hypot(t.x - s.x, t.z - s.z) < F.reach * 1.2);
       near.sort((a, b) => {
         const da = Math.hypot(a.x - s.x, a.z - s.z), db = Math.hypot(b.x - s.x, b.z - s.z);
         const wa = ((a.x - s.x) * F.wx + (a.z - s.z) * F.wz) / (da || 1);
         const wb = ((b.x - s.x) * F.wx + (b.z - s.z) * F.wz) / (db || 1);
         return (db * (1 - wb * 0.7)) - (da * (1 - wa * 0.7));
       });
-      for (let i = 0; i < Math.min(2, near.length); i++) near[i]._wfHeat = Math.max(near[i]._wfHeat || 0, 0.8);
+      // a big fire starts with a FRONT, a small one with a tree
+      const kick = Math.min(1 + Math.round(2.5 * F.mag), near.length);
+      for (let i = 0; i < kick; i++) near[i]._wfHeat = Math.max(near[i]._wfHeat || 0, 0.8);
     }
     if (!tr.some((t) => t.burning) && tr.length) igniteTree(tr[(rnd() * tr.length) | 0], "seed");
   }
@@ -690,29 +728,33 @@
       const age = t._wfFuel - t.burning;
       const ph = Math.min(1, age / 1.1) * Math.min(1, Math.max(0, t.burning) / 1.6);   // ramp up, die down
       t._wfPh = ph;
-      // flame contact: severe, local — the def's own default cause applies
-      hurtActorsNear(t.x, t.z, 2.2 + 1.6 * ph, (16 + 18 * F.intensity) * ph * dt, "burned alive in the wildfire", true);
+      // damage lives in heatTick(): one actor pass, contact + radiant ramp
       // emit: a column off the crown + surface smoke + embers. A LONE torching
       // tree pours its whole budget into ONE standing column — that is the
       // warn-phase telegraph — while a broad front shares the pool out.
       const y = canopyY(t) + 1.2;
-      const rate = (6 + 20 / B.length) * ph * dt;
+      const rate = (6 + 20 / B.length) * ph * dt * (0.7 + 0.6 * F.mag);
       if (jit() < rate) spawnSmoke(t.x, y, t.z, false, true);
       // surface smoke is MOST of what a person in the corridor experiences,
       // so it gets most of the budget — two draws a frame, long lives
       if (jit() < rate * 1.6) spawnSmoke(t.x, ground(t.x, t.z) + 1.2, t.z, true, true);
       if (jit() < rate * 0.8) spawnSmoke(t.x + F.wx * 6, ground(t.x, t.z) + 1.6, t.z + F.wz * 6, true, false);
-      if (jit() < 9 * ph * dt) spawnEmber(t.x + (jit() - 0.5) * 2, y - 1 + jit() * 2, t.z + (jit() - 0.5) * 2,
+      if (jit() < 9 * ph * dt * (0.55 + 0.9 * F.mag)) spawnEmber(t.x + (jit() - 0.5) * 2, y - 1 + jit() * 2, t.z + (jit() - 0.5) * 2,
         (jit() - 0.5) * 2 + F.wx * F.wspd * 0.3, 2 + jit() * 3, (jit() - 0.5) * 2 + F.wz * F.wspd * 0.3, 0.7 + jit());
       if (t.burning <= 0) { charTree(t); B.splice(i, 1); i--; }
     }
+
+    // ---- the fire's heat on people: contact + radiant ramp ----------------
+    heatTick(dt);
 
     // ---- SPREAD: heat integration, elliptical about the wind, uphill-fast --
     F.spreadCd -= dt;
     if (F.spreadCd <= 0 && B.length) {
       const step = 0.35;
       F.spreadCd = step;
-      const gain = 1.8 * (0.8 + 0.5 * F.intensity);
+      // spread rate is the magnitude's, not the round's — intensity already
+      // biased the roll
+      const gain = 1.05 + 1.25 * F.mag;
       for (let i = 0; i < B.length; i++) {
         const b = B[i]; if (b._wfPh != null && b._wfPh < 0.25) continue;   // a just-lit tree isn't radiating yet
         const gy = ground(b.x, b.z);
@@ -720,12 +762,18 @@
           const o = tr[j]; if (o.burning || o.burnt) continue;
           const dx = o.x - b.x, dz = o.z - b.z;
           const d = Math.hypot(dx, dz);
-          if (d > REACH || d < 0.01) continue;
+          if (d > F.reach || d < 0.01) continue;
           const align = (dx * F.wx + dz * F.wz) / d;
           // head fire >> flanks >> heel: the head races, the flanks WORK —
           // a front that dies the moment its downwind lane is spent is a
           // fuse, not a fire
-          const wind = 0.5 + 1.5 * Math.pow(Math.max(0, align), 1.5) * (0.6 + F.wspd / 22);
+          // STEEP anisotropy, or a hot fire rounds off: with a high gain
+          // the ignition threshold saturates and flanks catch almost as
+          // fast as the head unless the flank/heel factors stay genuinely
+          // small. Head ~10x flank, flank ~1.5x heel — measured elongation
+          // (down/cross) is a declared preset metric now.
+          const wind = (align < 0 ? 0.30 + 0.10 * align : 0.30) +
+            2.1 * Math.pow(Math.max(0, align), 1.6) * (0.55 + F.wspd / 24);
           // uphill doubles per ~3 m rise at these tree spacings (the 10° rule, arena-scaled)
           // uphill doubles per ~3 m rise (the 10° rule, arena-scaled);
           // downhill only MODERATES — a fire cresting a ridge does not stop,
@@ -736,10 +784,10 @@
           // LINEAR falloff: the arena's trees stand 12-22 m apart, and a
           // quadratic here made every flank neighbour an 18-second reach —
           // the fire became a fuse that died the moment its head lane ended
-          const near = 1 - d / REACH;
+          const near = 1 - d / F.reach;
           o._wfHeat = (o._wfHeat || 0) + step * (warn ? gain * 0.3 : gain) * wind * slope * near * (0.85 + rnd() * 0.3);
           if (warn && o._wfHeat > 0.95) o._wfHeat = 0.95;   // drying, not catching — yet
-          if (o._wfHeat >= 1) igniteTree(o, "front");
+          if (o._wfHeat >= 1) igniteTree(o, "front", b);
           else if (o._wfHeat > 0.15 && o.foliage && o.foliage.material) {
             // the fuel DRIES on camera: green → ochre as the front closes in
             const u = Math.min(1, o._wfHeat);
@@ -753,11 +801,22 @@
     // ---- SPOTTING: lofted embers start fires ahead of the front ----------
     F.spotCd -= dt;
     if (F.spotCd <= 0 && B.length && !warn) {
-      F.spotCd = (B.length >= 6 ? 1.1 : 2.0) - 0.6 * F.intensity + rnd() * 0.8;
-      if (F.spots.length < 4) {
-        const src = B[(rnd() * B.length) | 0];
-        const D = SPOT_MIN + rnd() * SPOT_SPAN;
-        const cross = (rnd() - 0.5) * 14;
+      // cadence, simultaneity and range are all the magnitude's: a brush
+      // fire spits the odd 15 m ember, a crown fire keeps five in the air
+      // and reaches 80+ m past the front
+      F.spotCd = ((B.length >= 6 ? 1.1 : 2.0) + rnd() * 0.8) * (1.85 - 1.45 * F.mag);
+      if (F.spots.length < 1 + Math.round(4 * F.mag)) {
+        // embers loft off the HEAD's convection column, not a random tree
+        // mid-pack — a mid-pack launch lands its ember in ground the front
+        // has already eaten, and the mechanism silently vanishes on exactly
+        // the fires that should spot hardest
+        let src = B[0], sd = -1e9;
+        for (let i = 0; i < B.length; i++) {
+          const d0 = B[i].x * F.wx + B[i].z * F.wz;
+          if (d0 > sd) { sd = d0; src = B[i]; }
+        }
+        const D = (10 + 10 * F.mag) + rnd() * (12 + 55 * F.mag);
+        const cross = (rnd() - 0.5) * (8 + 12 * F.mag);
         let lx = src.x + F.wx * D - F.wz * cross;
         let lz = src.z + F.wz * D + F.wx * cross;
         // keep the landing on the island, not in the surf
@@ -779,7 +838,10 @@
         const dist = Math.hypot(lx - src.x, lz - src.z);
         F.spots.push({
           sx: src.x, sy: canopyY(src) + 1.5, sz: src.z, lx, lz, dist,
-          u: 0, T: 0.9 + dist / 26, arc: 4 + dist * 0.14,
+          // a crown fire's convection column throws embers FAST — at low
+          // transport speed the head fire simply outran its own spotting
+          // and the mechanism vanished exactly when it should star
+          u: 0, T: (0.9 + dist / 26) * (1.15 - 0.55 * F.mag), arc: 4 + dist * 0.14,
         });
         stats.spotLaunched++;
       }
@@ -795,7 +857,7 @@
       spawnEmber(x, y, z, (jit() - 0.5), 0.5, (jit() - 0.5), 0.35);
       if (p.u >= 1) {
         F.spots.splice(i, 1);
-        F.smoulders.push({ x: p.lx, z: p.lz, t: 0.9 + rnd() * 0.8, dist: p.dist });
+        F.smoulders.push({ x: p.lx, z: p.lz, t: (0.9 + rnd() * 0.8) * (1.2 - 0.6 * F.mag), dist: p.dist });
       }
     }
     for (let i = F.smoulders.length - 1; i >= 0; i--) {
@@ -806,7 +868,7 @@
       if (m.t > 0) continue;
       F.smoulders.splice(i, 1);
       // did it take? the fuel decides: an unburnt tree close enough catches
-      let best = null, bd = 8;
+      let best = null, bd = 10;
       for (let j = 0; j < tr.length; j++) {
         const t2 = tr[j]; if (t2.burning || t2.burnt) continue;
         const d = Math.hypot(t2.x - m.x, t2.z - m.z);
@@ -822,23 +884,43 @@
     chokeTick(dt);
   }
 
-  function hurtActorsNear(x, z, r, dmg, cause, flame) {
+  function hurtOne(a, dmg, cause, flame) {
     if (!surv() || dmg <= 0) return;
-    const r2 = r * r;
+    const deadBefore = a.isPlayer ? CBZ.player.dead : a.dead;
+    surv().hurt(a, dmg, { cause });
+    const deadAfter = a.isPlayer ? CBZ.player.dead : a.dead;
+    if (flame) stats.flameDamage += dmg; else stats.smokeDamage += dmg;
+    if (!deadBefore && deadAfter) { if (flame) stats.flameDeaths++; else stats.smokeDeaths++; }
+  }
+
+  /* ---- HEAT YOU FEEL BEFORE YOU TOUCH IT --------------------------------
+     Flame damage used to be an on/off contact bubble: nothing at 4 m, dead
+     at 2. A front RADIATES — damage now ramps with proximity out to a
+     magnitude-scaled reach, so closing on the flame line hurts more and
+     more before anything touches you, and standing between two torching
+     crowns is worse than skirting one. One actor pass replaces one pass
+     per burning tree. */
+  function heatTick(dt) {
+    if (!surv()) return;
+    const B = F.burningList; if (!B.length) return;
+    const R = 7 + 8 * F.mag;
     surv().forEachActor(function (a) {
-      const dx = a.pos.x - x, dz = a.pos.z - z;
-      if (dx * dx + dz * dz > r2) return;
-      const deadBefore = a.isPlayer ? CBZ.player.dead : a.dead;
-      surv().hurt(a, dmg, { cause });
-      const deadAfter = a.isPlayer ? CBZ.player.dead : a.dead;
-      if (flame) stats.flameDamage += dmg; else stats.smokeDamage += dmg;
-      if (!deadBefore && deadAfter) { if (flame) stats.flameDeaths++; else stats.smokeDeaths++; }
+      let heat = 0, contact = 0;
+      for (let i = 0; i < B.length; i++) {
+        const b = B[i];
+        const ph = b._wfPh != null ? b._wfPh : 1;
+        const d = Math.hypot(a.pos.x - b.x, a.pos.z - b.z);
+        if (d < 2.2 + 1.6 * ph) contact += ph;
+        else if (d < R) { const q = 1 - (d - 2.2) / (R - 2.2); heat += ph * q * q; }
+      }
+      if (contact > 0) hurtOne(a, (12 + 24 * F.mag) * Math.min(2, contact) * dt, "burned alive in the wildfire", true);
+      else if (heat > 0.1) hurtOne(a, (4.5 + 8 * F.mag) * Math.min(1.8, heat) * dt, "cooked by the wildfire's heat", true);
     });
   }
 
   function chokeTick(dt) {
     if (!surv() || !F.burningList.length) return;
-    const inten = 0.8 + 0.4 * F.intensity;
+    const inten = 0.55 + 0.85 * F.mag;
     surv().forEachActor(function (a) {
       const s = smokeAt(a.pos.x, a.pos.z);
       if (s < 0.25) return;
@@ -848,12 +930,7 @@
       // dithering inside does not, which is exactly the decision the event
       // is supposed to pose.
       const shel = sheltered(a) ? 0.35 : 1;
-      const dmg = 9 * Math.min(2, s) * shel * inten * dt;
-      const deadBefore = a.isPlayer ? CBZ.player.dead : a.dead;
-      surv().hurt(a, dmg, { cause: "suffocated in the wildfire smoke" });
-      stats.smokeDamage += dmg;
-      const deadAfter = a.isPlayer ? CBZ.player.dead : a.dead;
-      if (!deadBefore && deadAfter) stats.smokeDeaths++;
+      hurtOne(a, 9 * Math.min(2, s) * shel * inten * dt, "suffocated in the wildfire smoke", false);
     });
   }
   function sheltered(a) {
@@ -925,7 +1002,7 @@
         for (let k = 0; k < 3; k++) {
           const j = i * 3 + k, s0 = spec[k];
           const flicker = 0.9 + 0.1 * Math.sin(F.t * (9 + k * 1.7) + t.x * 0.31 + t.z * 0.17);
-          const size = s0.size * (0.55 + 0.45 * ph) * flicker;
+          const size = s0.size * (0.55 + 0.45 * ph) * flicker * (0.72 + 0.55 * F.mag);
           const a = ring + k * 2.0944;
           fp[j * 3] = t.x + Math.cos(a) * s0.rad * crownR + F.wx * s0.down;
           fp[j * 3 + 1] = crownBase + size * 0.43 + k * 0.18;
@@ -965,7 +1042,7 @@
     for (let i = 0; i < n; i++) {
       const t = B[i];
       const ph = t._wfPh != null ? t._wfPh : 1;
-      const pulse = (3.4 + 0.9 * Math.sin(F.t * 9 + t.x)) * (0.5 + 0.5 * ph);
+      const pulse = (3.4 + 0.9 * Math.sin(F.t * 9 + t.x)) * (0.5 + 0.5 * ph) * (0.8 + 0.4 * F.mag);
       dummy.position.set(t.x, ground(t.x, t.z) + 0.08, t.z);
       dummy.rotation.set(0, 0, 0);
       dummy.scale.set(pulse, 1, pulse);
@@ -1061,6 +1138,18 @@
 
     // after stop(): the plume thins out instead of blinking off
     if (!F.live && F.smokeLinger > 0) F.smokeLinger -= dt;
+
+    // THE SCAR AGES. Fresh char is wet-black; over the minutes after the
+    // fire dies it greys toward ash and thins, so the green underneath
+    // begins to show through — black through grey toward green, a season's
+    // recovery compressed to round time. A new fire re-blackens it
+    // (beginWarn resets the ramp).
+    if (!F.live && FX.scarUsed > 0 && F.scarAge < 160) {
+      F.scarAge += dt;
+      const u = Math.min(1, F.scarAge / 150);
+      FX.scar.material.color.setHex(0x14100b).lerp(SCAR_ASH, u);
+      FX.scar.material.opacity = 0.85 - 0.42 * u;
+    }
   }
 
   CBZ.onUpdate(27.7, function (dt) {
@@ -1162,7 +1251,7 @@
       if (tr[i].burnt) burnt++;
     }
     // how far the fire has RUN from its origin, and its wind-alignment
-    let runM = 0, runDownM = 0, runUpM = 0;
+    let runM = 0, runDownM = 0, runUpM = 0, runCrossM = 0;
     const s0 = F.seed;
     if (s0) {
       for (let i = 0; i < tr.length; i++) {
@@ -1174,6 +1263,8 @@
         const down = dx * F.wx + dz * F.wz;
         if (down > runDownM) runDownM = down;
         if (-down > runUpM) runUpM = -down;
+        const crossD = Math.abs(dz * F.wx - dx * F.wz);
+        if (crossD > runCrossM) runCrossM = crossD;
       }
     }
     // the escape the bots are actually told: probe 28 m downwind of the
@@ -1215,6 +1306,8 @@
       ignitions: stats.ignitions,
       spotLaunched: stats.spotLaunched, spotFires: stats.spotFires, spotMaxM: stats.spotMaxM,
       runM: Math.round(runM), runDownwindM: Math.round(runDownM), runUpwindM: Math.round(runUpM),
+      runCrossM: Math.round(runCrossM),
+      mag: +F.mag.toFixed(3), wspdMs: +F.wspd.toFixed(1), reachM: Math.round(F.reach),
       smokeDamage: Math.round(stats.smokeDamage), flameDamage: Math.round(stats.flameDamage),
       smokeDeaths: stats.smokeDeaths, flameDeaths: stats.flameDeaths,
       scarM2: Math.round(stats.scarM2),
@@ -1235,6 +1328,9 @@
     beginWarn, begin, tick, stop,
     threat, safeDir, smokeAt,
     wind() { return { x: F.wx, z: F.wz, speed: F.wspd }; },
+    magnitude() { return F.mag; },
+    // storyboard/debug pin for the NEXT occurrence's roll; null clears it
+    setMagnitude(v) { F._forceMag = v == null ? null : Math.max(0, Math.min(1, +v || 0)); },
     // diagnostic: are the DRAWN puffs where the analytic field claims smoke?
     puffStats(x, z) {
       let live = 0, surf = 0, near = 0, nd = 1e9, ny = 0;

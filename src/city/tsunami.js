@@ -68,10 +68,20 @@
    STANDS over the waterfront — and then the lip comes down all at once and
    the released bore charges the streets. TSU_SHOAL_V2, below, is that arc.
 
+   THE SIZE (2026-08-29) — owner: "all the natural disasters are cookie cutter
+   size." Every occurrence now rolls a MAGNITUDE off the run seed
+   (CBZ.seedStream("tsunami"), no new flag): run-up from ~0.6 m (a promenade
+   flood you can wade out of) to ~12 m (only height saves you), and the roll
+   moves the drawdown, the inland reach, the wave COUNT (big ones arrive as a
+   train of 2-3, the biggest usually not first, with a violent between-wave
+   ebb), the durations, the face and the undertow together. opts.peak/mag on
+   CBZ.cityTsunami() pin a size for probes and storyboards.
+
    Flags: TSUNAMI (whole file) · TSUNAMI_AUTO (does it ever fire on its own) ·
-   TSUNAMI_PEAK (metres at the crest) · TSUNAMI_PERIOD (mean seconds between) ·
-   TSU_FACE_V2 · TSU_DEBRIS · TSU_UNDERTOW · TSU_SHOAL_V2 · TSU_PACE_V2 (each
-   a one-line revert, and each read by BOTH tsunamis).
+   TSUNAMI_PEAK (metres at the crest — now only the explicit-override default,
+   a rolled magnitude replaces it per occurrence) · TSUNAMI_PERIOD (mean
+   seconds between) · TSU_FACE_V2 · TSU_DEBRIS · TSU_UNDERTOW · TSU_SHOAL_V2 ·
+   TSU_PACE_V2 (each a one-line revert, and each read by BOTH tsunamis).
 ============================================================ */
 (function () {
   "use strict";
@@ -338,38 +348,95 @@
   };
 
   // ---- the arc ------------------------------------------------------------
-  // Named beats with durations, read by a single stepper — the propuse.js arc
-  // shape. Nothing accumulates, so the event can be cancelled on any frame by
-  // dropping the state and zeroing the surge.
-  /* THE CLOCK (TSU_PACE_V2). The old script is the second column and it is a
-     minute and a quarter long: nineteen seconds of receding sea before the
-     water turns round, and a drain that outlasts everything else in the event
-     put together. Nothing about the arc was wrong — every beat below still
-     exists, in the same order, with the same shape — it was simply being read
-     at half speed, which is why a wave that is doing 30 m/s felt slow. Cut to
-     36 s: long enough for the drawdown to be a warning you can act on and for
-     the drain to strand what it carried, short enough that the whole thing is
-     one held breath instead of an errand. */
+  /* THE ARC IS BUILT PER EVENT NOW, because the event has a SIZE.
+
+     Owner: "all the natural disasters are cookie cutter size — there's no BIG
+     tsunami or a small one, they're all one size." They were: TSUNAMI_PEAK was
+     a constant, so every tsunami this game ever ran was the same 5.4 m wave
+     with the same five beats. And it was ONE wave, which no real tsunami is —
+     they arrive as a TRAIN, the drawdown between waves is as violent as the
+     flood, and it is often the second or third that is the big one.
+
+     So each occurrence now rolls a MAGNITUDE off the run seed (CBZ.seedStream
+     — the house idiom, NOT a new cfg flag; git is the undo) and builds its own
+     schedule of segments from it. A small one is a half-metre surge that
+     floods the promenade and is frightening but survivable on foot; a big one
+     is a 10 m+ inundation, two or three waves deep, that reaches hundreds of
+     metres inland and is only survivable by height. Magnitude moves the
+     run-up, the drawdown, the inland reach, the front speed, the number of
+     waves, the durations, the undertow and the face — never just a tint.
+
+     Segments carry their own FROM and TO level, so the whole level curve is
+     one walk: draw → lull → [surge → hold → ebb]×waves → drain. The `ebb` is
+     the between-wave drawdown: the sea pulls back out BELOW mean level — the
+     false all-clear that kills people who come down too early — and then the
+     next wave of the train comes in over it.
+
+     TSU_PACE_V2=0 still means what it always meant: the same arc at the old
+     half speed, and it is still the honest A/B for tools/before-after.mjs. */
   const FAST = function () { return CBZ.CONFIG.TSU_PACE_V2 !== false; };
-  const PHASES_FAST = [
-    ["draw", 7.5],    // the sea goes out — the warning
-    ["lull", 1.6],    // and holds there, low and wrong
-    ["surge", 6],     // it comes back
-    ["hold", 6.5],    // and stands
-    ["drain", 15],    // and leaves
-  ];
-  const PHASES_SLOW = [
-    ["draw", 16], ["lull", 3.5], ["surge", 11], ["hold", 13], ["drain", 34],
-  ];
-  function phases() { return FAST() ? PHASES_FAST : PHASES_SLOW; }
-  function total() {
-    const P = phases();
-    let a = 0;
-    for (let i = 0; i < P.length; i++) a += P[i][1];
-    return a;
+
+  /* THE ROLL. Skewed toward the survivable end (u², so the median event is a
+     ~3.5 m wave and the monster is rare), seeded per run so a probe and a
+     storyboard can reproduce a size, and overridable per call (opts.mag 0..1,
+     or opts.peak in metres) so nothing that already scripted the event moved. */
+  let _magRng = null;
+  function magRoll() {
+    if (!_magRng) _magRng = CBZ.seedStream ? CBZ.seedStream("tsunami") : Math.random;
+    return _magRng();
   }
 
-  let ev = null;          // { t, phase, peak, draw }
+  function buildArc(peak, draw, rel) {
+    const k = FAST() ? 1 : 2.1;                    // PACE_V2 off = the old clock
+    const seg = [];
+    // a bigger drawdown takes longer to empty the bay — and is a longer warning
+    seg.push({ n: "draw", d: (4.5 + Math.min(9, peak) * 0.5) * k, a: 0, b: draw, w: 0 });
+    seg.push({ n: "lull", d: (1.2 + peak * 0.07) * k, a: draw, b: draw, w: 0 });
+    let cur = draw;
+    for (let i = 0; i < rel.length; i++) {
+      const p = peak * rel[i];
+      seg.push({ n: "surge", d: (3.6 + p * 0.5) * k, a: cur, b: p, w: i + 1 });
+      seg.push({ n: "hold", d: (2.2 + p * 0.55) * k, a: p, b: p * 0.9, w: i + 1 });
+      if (i < rel.length - 1) {
+        // the false all-clear: the sea goes back OUT, below mean, fast
+        const ebbTo = Math.max(draw * 0.6, -2.2);
+        seg.push({ n: "ebb", d: (3.5 + p * 0.4) * k, a: p * 0.9, b: ebbTo, w: i + 1 });
+        cur = ebbTo;
+      }
+    }
+    seg.push({ n: "drain", d: (7 + peak * 0.8) * k, a: peak * rel[rel.length - 1] * 0.9, b: 0, w: rel.length });
+    return seg;
+  }
+  function arcTotal(e) { let a = 0; for (let i = 0; i < e.segs.length; i++) a += e.segs[i].d; return a; }
+  function arcSeg(e, t) {
+    let acc = 0;
+    for (let i = 0; i < e.segs.length; i++) {
+      const g = e.segs[i];
+      if (t < acc + g.d) return { g: g, u: (t - acc) / g.d };
+      acc += g.d;
+    }
+    return null;
+  }
+  function arcLevel(e, t) {
+    const s = arcSeg(e, t);
+    if (!s) return 0;
+    const g = s.g, u = s.u;
+    switch (g.n) {
+      // The drawdown is FAST going out — a receding tsunami empties a bay
+      // in well under a minute, and the speed of it is the tell.
+      case "draw":  return g.a + (g.b - g.a) * ease(Math.min(1, u * 1.9));
+      case "lull":  return g.b;
+      // Coming back is faster still, and it overshoots straight past mean
+      // sea level without pausing there. That non-stop is the wall.
+      case "surge": return g.a + (g.b - g.a) * ease(u);
+      case "hold":  return g.a + (g.b - g.a) * u;       // sags as it spreads
+      case "ebb":   return g.a + (g.b - g.a) * ease(Math.min(1, u * 1.5));
+      case "drain": return g.a * (1 - ease(u));
+    }
+    return 0;
+  }
+
+  let ev = null;          // { t, phase, peak, draw, mag, segs, ... }
   // Seeded to a FULL period, not 0. Starting at zero means the very first tick
   // of the very first session finds the timer already expired and fires a
   // tsunami in your first second of play — which is not "rare", it is "always".
@@ -379,40 +446,6 @@
   let panicCD = 0;
 
   function ease(u) { return u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2; }
-
-  // surge in metres for a given time into the event
-  function surgeAt(t, peak, draw) {
-    const P = phases();
-    let acc = 0;
-    for (let i = 0; i < P.length; i++) {
-      const name = P[i][0], dur = P[i][1];
-      if (t < acc + dur) {
-        const u = (t - acc) / dur;
-        switch (name) {
-          // The drawdown is FAST going out — a receding tsunami empties a bay
-          // in well under a minute, and the speed of it is the tell.
-          case "draw":  return draw * ease(Math.min(1, u * 1.9));
-          case "lull":  return draw;
-          // Coming back is faster still, and it overshoots straight past mean
-          // sea level without pausing there. That non-stop is the wall.
-          case "surge": return draw + (peak - draw) * ease(u);
-          case "hold":  return peak * (1 - 0.10 * u);      // sags a little as it spreads
-          case "drain": return peak * 0.90 * (1 - ease(u));
-        }
-      }
-      acc += dur;
-    }
-    return 0;
-  }
-  function phaseAt(t) {
-    const P = phases();
-    let acc = 0;
-    for (let i = 0; i < P.length; i++) {
-      if (t < acc + P[i][1]) return P[i][0];
-      acc += P[i][1];
-    }
-    return "";
-  }
 
   /* ---- WHO IS ON THE COAST ----------------------------------------------
      Both the trigger gate and the panic radius. `shoreAt` is not public, so
@@ -436,7 +469,12 @@
      standing on) and a scalar position walked by the SAME easing that drives
      the level, so the face and the water arrive together and can never
      disagree. The face rides it; nothing samples it for wetness.            */
-  const FRONT_FROM = -190, FRONT_TO = 130;
+  /* HOW FAR INLAND IS A SIZE. FRONT_TO used to be a constant 130 — every
+     tsunami, whatever it was doing to the level, walked its face the same
+     130 m into town. The reach is the magnitude's now: ~50 m for a promenade
+     flood, 200 m+ for the monster. FRONT_FROM stays fixed; deep water is deep
+     water. */
+  const FRONT_FROM = -190;
   /* THE FRONT DOES NOT WALK AT ONE SPEED (TSU_SHOAL_V2). c = √(g·d): a
      tsunami is fastest over deep water and spends that speed standing up as
      it shoals, so the front comes in hard, DECELERATES to a crawl as the wall
@@ -445,21 +483,21 @@
      bore takes the streets fast. The shape is still a pure function of the
      level fraction, so the wall can never be somewhere the water is not: the
      invariant survives, only the gearing between level and front changed.
-     LANDFALL_U is fs = -10 — exactly where turbidAt saturates and the
+     The landfall knee is fs = -10 — exactly where turbidAt saturates and the
      collapse in faceHeight() begins, so the stand, the soup and the spend all
-     hinge on the same spot. */
-  const LANDFALL_U = (-10 - FRONT_FROM) / (FRONT_TO - FRONT_FROM);
-  function frontShape(u) {
+     hinge on the same spot (ev.landU is that point on this event's own span). */
+  function frontShape(e, u) {
     if (CBZ.CONFIG.TSU_SHOAL_V2 === false) return u;
-    if (u <= LANDFALL_U) {
-      const w = u / LANDFALL_U;
+    const LU = e.landU;
+    if (u <= LU) {
+      const w = u / LU;
       /* ease OUT: the front loses speed as the water under it shallows. The
          exponent is how hard. At 2.0 the last twenty metres were a crawl the
          surge had to wait out — the shoaling read as a stall in the middle of
          the approach rather than as a wave standing up. TSU_PACE_V2 softens
          it to 1.55: still visibly decelerating into the wall, no longer
          parked there. */
-      return LANDFALL_U * (1 - Math.pow(1 - w, FAST() ? 1.55 : 2.0));
+      return LU * (1 - Math.pow(1 - w, FAST() ? 1.55 : 2.0));
     }
     /* THE RELEASE. w^0.72 has infinite slope at w=0, which on the old clock
        was a hard shove and on the new one is a teleport: the storyboard
@@ -469,10 +507,10 @@
        seawall far faster than it arrived at it — and spends the same total
        time crossing the town, because the shape is normalized by the level
        fraction either way. */
-    const w = (u - LANDFALL_U) / (1 - LANDFALL_U);
-    return LANDFALL_U + (1 - LANDFALL_U) * Math.pow(w, FAST() ? 0.82 : 0.72);
+    const w = (u - LU) / (1 - LU);
+    return LU + (1 - LU) * Math.pow(w, FAST() ? 0.82 : 0.72);
   }
-  function frontAt(u) { return FRONT_FROM + (FRONT_TO - FRONT_FROM) * frontShape(u); }
+  function frontAt(e, u) { return FRONT_FROM + (e.frontTo - FRONT_FROM) * frontShape(e, u); }
   // 0 in deep water, 1 once the bore is scouring the town: the sediment load,
   // the churn, the boil and the palette all hang off this one number.
   function turbidAt(fs) { return Math.max(0, Math.min(1, (fs + 105) / 95)); }
@@ -496,14 +534,19 @@
      TOWERS over the waterfront — several times the buildings it is about to
      take, not a nasty surf line — and the surge stays an honest few metres of
      flood behind it, because run-up depth and face height are different
-     numbers in every piece of tsunami footage there is. So the face's scale
-     comes off the same TSUNAMI_PEAK knob but with reference gearing: peak 5.4
-     builds a ~32 m wall at full shoal, standing over the seawall at the stall,
-     and every metre of it is spent crossing the town exactly as before. */
-  function faceHeight(peak, fs) {
+     numbers in every piece of tsunami footage there is.
+
+     THE GEARING IS NONLINEAR NOW, because the linear one had a floor: the
+     old `8 + peak*4.4` meant even a half-metre surge wore a ten-metre wall,
+     which is a costume, not a size. peak*(1.8 + 0.78*peak) holds the owner's
+     reference (peak 5.4 still builds the same ~32 m wall at full shoal) while
+     a 0.6 m promenade flood arrives as the ~2 m dirty bore it actually is,
+     and the monster caps at 56 m before it stops meaning anything. */
+  function faceBase(peak) { return Math.max(2.0, Math.min(56, peak * (1.8 + 0.78 * peak))); }
+  function faceHeight(e, fs) {
     const shoal = Math.max(0.42, Math.min(1, 0.42 + 0.58 * Math.exp(-Math.pow((fs + 26) / 96, 2))));
-    const inland = Math.max(0, Math.min(1, (fs + 10) / (FRONT_TO + 10)));
-    return (8 + peak * 4.4) * shoal * Math.max(0.1, Math.pow(1 - inland, 1.45));
+    const inland = Math.max(0, Math.min(1, (fs + 10) / (e.frontTo + 10)));
+    return faceBase(e.peak) * shoal * Math.max(0.1, Math.pow(1 - inland, 1.45));
   }
 
   function seaSurface() {
@@ -523,16 +566,38 @@
       const w = scanWaterDir(P.pos.x, P.pos.z);
       if (w) { dx = -w.x; dz = -w.z; }
     }
+    /* THE SIZE OF THIS ONE. opts.peak (metres) and opts.mag (0..1) exist for
+       probes and storyboards; a natural occurrence rolls. TSUNAMI_PEAK is no
+       longer every tsunami — it survives only as the explicit-override knob
+       it always claimed to be. */
+    const u0 = opts.mag != null ? Math.max(0, Math.min(1, +opts.mag)) : magRoll();
+    // ?cfg_TSUNAMI_PEAK=N moved off its default still pins every event — the
+    // knob keeps its word for anything that already relied on it
+    const cfgPeak = CBZ.CONFIG.TSUNAMI_PEAK !== 5.4 ? CBZ.CONFIG.TSUNAMI_PEAK : null;
+    const peak = opts.peak != null ? +opts.peak : (cfgPeak != null ? +cfgPeak : (0.6 + 11.4 * u0 * u0));
+    const cfgDraw = CBZ.CONFIG.TSUNAMI_DRAW !== -2.6 ? CBZ.CONFIG.TSUNAMI_DRAW : null;
+    const draw = opts.draw != null ? +opts.draw : (cfgDraw != null ? +cfgDraw : -Math.min(5.2, 0.6 + peak * 0.34));
+    const waves = opts.waves != null ? Math.max(1, opts.waves | 0)
+      : (peak < 2 ? 1 : peak < 6.5 ? 2 : 3);
+    /* THE TRAIN, and the big one is usually NOT the first. Relative peaks per
+       wave; the roll decides whether the train builds to its maximum (the
+       common, cruel case) or leads with it. */
+    let rel;
+    if (waves === 1) rel = [1];
+    else if (waves === 2) { const r = magRoll(); rel = r < 0.72 ? [0.5 + r * 0.3, 1] : [1, 0.55]; }
+    else { const r = magRoll(); rel = r < 0.55 ? [0.42, 0.7, 1] : [0.5, 1, 0.62]; }
     ev = {
       t: 0,
-      peak: opts.peak != null ? +opts.peak : CBZ.CONFIG.TSUNAMI_PEAK,
-      draw: opts.draw != null ? +opts.draw : CBZ.CONFIG.TSUNAMI_DRAW,
-      phase: "",
+      peak: peak, draw: draw, mag: u0, wavesN: waves, rel: rel,
+      segs: buildArc(peak, draw, rel),
+      frontTo: Math.min(240, 45 + 13 * peak),
+      phase: "", phaseU: 0, waveN: 0,
       cx: P && P.pos ? P.pos.x : 0, cz: P && P.pos ? P.pos.z : 0,
       dx: dx, dz: dz, frontS: FRONT_FROM, u: 0,
       face: null, debris: null, structCd: 0, takeCd: 0, undertowT: 0,
-      crashed: false, crashT: 0,
+      crashed: false, crashT: 0, crashWave: 0,
     };
+    ev.landU = (-10 - FRONT_FROM) / (ev.frontTo - FRONT_FROM);
     noted = "";
     return true;
   };
@@ -545,13 +610,19 @@
      different on every run. */
   CBZ.cityTsunamiState = function () {
     return ev ? {
-      phase: ev.phase, t: ev.t, total: total(),
+      phase: ev.phase, phaseU: ev.phaseU, t: ev.t, total: arcTotal(ev),
       surge: CBZ.waterSurge ? CBZ.waterSurge() : 0,
       frontS: ev.frontS, turbid: turbidAt(ev.frontS),
       u: ev.u, peak: ev.peak, draw: ev.draw,
+      // ---- the size of this occurrence ----
+      mag: ev.mag, waves: ev.wavesN, waveN: ev.waveN, rel: ev.rel.slice(),
+      frontTo: ev.frontTo, drainFrom: ev.segs[ev.segs.length - 1].a,
       cx: ev.cx, cz: ev.cz, dx: ev.dx, dz: ev.dz,
       crashed: !!ev.crashed, crashT: ev.crashed ? ev.crashT : -1,
-      faceH: faceHeight(ev.peak, ev.frontS), curl: curlAt(ev.frontS),
+      faceH: faceHeight(ev, ev.frontS) * (ev.rel[Math.max(0, (ev.waveN || 1) - 1)] || 1),
+      curl: curlAt(ev.frontS),
+      crestVar: ev.face && ev.face.crestVar != null ? ev.face.crestVar : null,
+      endTaper: ev.face && ev.face.endTaper != null ? ev.face.endTaper : null,
       fast: CBZ.CONFIG.TSU_PACE_V2 !== false,
       debris: ev.debris ? ev.debris.stats() : null,
     } : null;
@@ -580,25 +651,53 @@
     if (ev.face) return ev.face;
     const root = (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
     if (!root) return null;
-    ev.face = CBZ.tsuFaceBuild({ width: 520, height: 8 + ev.peak * 4.4 });
+    // a small tsunami is a NARROW front too — a half-metre bore does not
+    // arrive five hundred metres wide, and the built ends now taper into the
+    // sea (water_spec.js) so a finite width no longer means a visible edge
+    ev.face = CBZ.tsuFaceBuild({ width: Math.min(640, 240 + ev.peak * 36, bayWidth()), height: faceBase(ev.peak) });
     root.add(ev.face.group);
     return ev.face;
+  }
+  /* THE FACE FITS THE BAY. The old constant 520 m ribbon was wider than the
+     water it rode on: on a curved coast its flanks marched over lawns and
+     parking lots in the "inbound" storyboard frame — a wave standing on dry
+     land, which is the exact "somewhere the water is not" the level/front
+     invariant exists to forbid, arriving through the presentation layer.
+     Measure the water's contiguous lateral extent along the face line at
+     build time (the mask is live, so this respects the drawdown) and never
+     build a wall wider than the bay that carries it. Symmetric, because the
+     face is centred on the event's origin line. */
+  function bayWidth() {
+    if (!CBZ.cityWaterAt || !ev) return 640;
+    const px = -ev.dz, pz = ev.dx;
+    // sample well offshore so the drawdown's exposed flats don't read as land
+    const ox = ev.cx - ev.dx * 120, oz = ev.cz - ev.dz * 120;
+    let span = 0;
+    for (let d = 20; d <= 340; d += 20) {
+      if (!CBZ.cityWaterAt(ox + px * d, oz + pz * d) || !CBZ.cityWaterAt(ox - px * d, oz - pz * d)) break;
+      span = d;
+    }
+    return Math.max(120, span * 2 + 50);
   }
   function faceDrive(dt) {
     const f = ev.face; if (!f) return;
     const fs = ev.frontS;
-    const visible = ev.phase === "lull" || ev.phase === "surge" || (ev.phase === "hold" && fs < FRONT_TO - 4);
+    const visible = ev.phase === "lull" || ev.phase === "surge" || (ev.phase === "hold" && fs < ev.frontTo - 4);
     f.group.visible = visible;
     if (!visible) return;
     // the crash folds the overhang down and drops the lip: for the first two
     // seconds after the break the wall is a collapsing mass, not a curl
     const crashDip = ev.crashed ? (1 - 0.26 * Math.exp(-ev.crashT * 1.15)) : 1;
     const crashCurl = ev.crashed ? Math.max(0.3, 1 - ev.crashT * 1.1) : 1;
+    // each wave of the train wears ITS OWN height, not the event maximum —
+    // the train builds toward the big one instead of leading with its costume
+    const wr = ev.rel[Math.max(0, (ev.waveN || 1) - 1)] || 1;
     CBZ.tsuFaceUpdate(f, {
       t: (CBZ.waterClock ? CBZ.waterClock() : (CBZ.now || 0) * 0.001), dt: dt,
-      height: faceHeight(ev.peak, fs) * crashDip, turbid: turbidAt(fs), curl: curlAt(fs) * crashCurl,
+      height: faceHeight(ev, fs) * wr * crashDip, turbid: turbidAt(fs), curl: curlAt(fs) * crashCurl,
       foam: 0.55 + turbidAt(fs) * 0.5,
-      x: ev.cx + ev.dx * fs, y: seaSurface() - 1.1, z: ev.cz + ev.dz * fs,
+      // sink the foot in proportion: a 1.1 m sink under a 2 m bore was half the wave
+      x: ev.cx + ev.dx * fs, y: seaSurface() - Math.min(1.1, 0.15 + ev.peak * 0.15), z: ev.cz + ev.dz * fs,
       dirX: ev.dx, dirZ: ev.dz,
     });
   }
@@ -773,7 +872,7 @@
        fast stroke (2.15 m/s) — you cannot swim out of this, you can only be
        BEHIND something. Cover is the answer, and it is a physical one: a
        building between you and the sea halves it. */
-    const draining = !rising && ev && ev.phase === "drain" && CBZ.CONFIG.TSU_UNDERTOW !== false;
+    const draining = !rising && ev && (ev.phase === "drain" || ev.phase === "ebb") && CBZ.CONFIG.TSU_UNDERTOW !== false;
     let pull = SWEEP;
     if (draining) {
       let cover = 1;
@@ -783,7 +882,10 @@
       pull = SWEEP + UNDERTOW * cover;
       ev.undertowT += dt;
     }
-    const s = Math.min(1, d / 2.2) * pull * dt * (rising ? -1 : 1);
+    // the current is the size of the wave: a promenade flood tugs at your
+    // ankles and loses to a determined walk; the monster does not
+    const kMag = 0.55 + 0.45 * Math.min(1.6, (ev ? ev.peak : 5.4) / 5.4);
+    const s = Math.min(1, d / 2.2) * pull * kMag * dt * (rising ? -1 : 1);
     P.pos.x += water.x * s;
     P.pos.z += water.z * s;
     // knocked off your feet: the existing stun channel, not a new one
@@ -860,25 +962,35 @@
 
     const prev = CBZ.waterSurge ? CBZ.waterSurge() : 0;
     ev.t += dt;
-    if (ev.t >= total()) { CBZ.cityTsunamiStop(); return; }
-    const s = surgeAt(ev.t, ev.peak, ev.draw);
+    if (ev.t >= arcTotal(ev)) { CBZ.cityTsunamiStop(); return; }
+    const s = arcLevel(ev, ev.t);
     CBZ.waterSurgeSet(s);
-    ev.phase = phaseAt(ev.t);
+    const sg = arcSeg(ev, ev.t);
+    ev.phase = sg ? sg.g.n : "";
+    ev.phaseU = sg ? sg.u : 0;
+    ev.waveN = sg ? sg.g.w : 0;
     const rising = s > prev;
 
     /* ---- THE FRONT, THE FACE, THE SOUP -----------------------------------
        One fraction drives all three, and it is read back OFF the level rather
        than kept beside it, so the wall can never be somewhere the water is
-       not. */
+       not. With a TRAIN this is what makes the between-wave ebb honest for
+       free: the level falls, so the front pulls back out to sea, and the next
+       surge drives it in again — further, if the next wave is the big one. */
     const frac = Math.max(0, Math.min(1, (s - ev.draw) / Math.max(0.001, ev.peak - ev.draw)));
     ev.u = frac;
-    ev.frontS = frontAt(frac);
+    ev.frontS = frontAt(ev, frac);
     /* ---- THE CRASH -------------------------------------------------------
-       One beat, once: the stand ends, the lip comes down along the whole
+       One beat PER WAVE: the stand ends, the lip comes down along the whole
        front at once, and the bore is released. Presentation only — the level
        is already rising on its own curve — but it is the loudest thing the
        event does, and it happens exactly where the front's own gearing stalls
-       (LANDFALL_U), so the sound and the shape can never disagree. */
+       (ev.landU), so the sound and the shape can never disagree. A later wave
+       of the train re-arms it only once its own front has genuinely pulled
+       back out past the stand point. */
+    if (ev.crashed && ev.phase === "surge" && ev.waveN > ev.crashWave && ev.frontS < -34) {
+      ev.crashed = false;
+    }
     // THE HELD BREATH: the front is crawling its last metres to the wall
     // point — the world goes quiet, and stays quiet until the lip comes down
     if (CBZ.CONFIG.TSU_SHOAL_V2 !== false && CBZ.audioHush && !ev.crashed &&
@@ -887,37 +999,58 @@
     }
     if (!ev.crashed && CBZ.CONFIG.TSU_SHOAL_V2 !== false && ev.frontS >= -10 &&
         (ev.phase === "surge" || ev.phase === "hold")) {
-      ev.crashed = true; ev.crashT = 0;
+      ev.crashed = true; ev.crashT = 0; ev.crashWave = ev.waveN;
       // the silence releases fast, so the break lands into it
       if (CBZ.audioHush) CBZ.audioHush(false, { fade: 0.12 });
       const px = -ev.dz, pz = ev.dx;
       const fx = ev.cx + ev.dx * ev.frontS, fz = ev.cz + ev.dz * ev.frontS;
+      // the break is as loud as the wave is tall: a promenade surge slaps,
+      // only the real wall gets the full five-blast line and the hard shake
+      const wp = ev.peak * (ev.rel[Math.max(0, ev.waveN - 1)] || 1);
+      const bigR = Math.min(24, 8 + wp * 2.8);
       if (CBZ.fx && CBZ.fx.blast) for (let i = -2; i <= 2; i++) {
+        if (i !== 0 && wp < 2.2) continue;
         try {
           CBZ.fx.blast(fx + px * i * 34, fz + pz * i * 34,
-            { maxR: i === 0 ? 24 : 17, color: 0xd9f2ff, shake: i === 0 ? 1.15 : 0, life: 0.8 });
+            { maxR: i === 0 ? bigR : bigR * 0.7, color: 0xd9f2ff, shake: i === 0 ? Math.min(1.15, 0.3 + wp * 0.16) : 0, life: 0.8 });
         } catch (e) {}
       }
-      if (CBZ.shake) CBZ.shake(1.1);
+      if (CBZ.shake) CBZ.shake(Math.min(1.1, 0.3 + wp * 0.15));
     }
     if (ev.crashed) ev.crashT += dt;
+    /* ---- THE ROAR BEFORE THE WATER ---------------------------------------
+       The body's channel, not the eye's: an incoming bore is felt through the
+       ground before it is properly seen, so the camera trembles as the front
+       closes, scaled by how much wave there is. Small surge, small tremble. */
+    if (P && CBZ.shake && (ev.phase === "surge" || (ev.phase === "hold" && ev.crashed && ev.crashT < 2.5))) {
+      const ps = (P.pos.x - ev.cx) * ev.dx + (P.pos.z - ev.cz) * ev.dz;
+      const pd = Math.abs(ps - ev.frontS);
+      if (pd < 70) CBZ.shake(Math.min(0.5, (1 - pd / 70) * (0.1 + 0.055 * ev.peak)));
+    }
     const turbid = turbidAt(ev.frontS);
     // flow along the travel axis: shoved inland on the bore, standing on the
     // hold, and torn back out to sea on the drain
     const undertowOn = CBZ.CONFIG.TSU_UNDERTOW !== false;
-    const flow = ev.phase === "surge" ? 2.2 + 6.2 * frac
-      : ev.phase === "hold" ? 1.4
+    // the ebb is a drain with a deadline: everything the wave brought in is
+    // being sucked back out to meet the next wave of the train
+    const kFlow = 0.5 + 0.5 * Math.min(1.4, ev.peak / 5.4);   // the current is the size of the wave
+    const flow = ev.phase === "surge" ? (2.2 + 6.2 * frac) * kFlow
+      : ev.phase === "hold" ? 1.4 * kFlow
         : ev.phase === "drain" ? -(undertowOn ? 3.4 + 5.6 * Math.min(1, s / Math.max(0.4, ev.peak * 0.9)) : 1.2)
-          : (ev.phase === "draw" ? -1.4 : 0);
+          : ev.phase === "ebb" ? -(undertowOn ? 2.6 + 4.6 * Math.min(1, Math.max(0, s) / Math.max(0.4, ev.peak * 0.6)) : 1.2)
+            : (ev.phase === "draw" ? -1.4 : 0);
     if (CBZ.waterEventSet) CBZ.waterEventSet({
-      owner: "city-tsunami", kind: "tsunami", phase: ev.phase === "drain" ? "drain" : (s > 0.2 ? "flooded" : "warn"),
+      owner: "city-tsunami", kind: "tsunami",
+      phase: (ev.phase === "drain" || ev.phase === "ebb") ? "drain" : (s > 0.2 ? "flooded" : "warn"),
       cx: ev.cx, cz: ev.cz, dx: ev.dx, dz: ev.dz,
       frontS: ev.frontS, frontWet: -2, frontWidth: 24,
       level: seaSurface(), waveAmp: 1.1 + turbid * 0.8, chopAmp: 1.3 + turbid * 1.1,
       flow: flow, sediment: turbid,
     });
     if (CBZ.CONFIG.TSU_FACE_V2 !== false) { faceEnsure(); faceDrive(dt); }
-    if (CBZ.CONFIG.TSU_DEBRIS !== false && s > 0.5) {
+    // 0.35, not 0.5: a small tsunami's whole hold can sit under half a metre,
+    // and it still has to float the bins and the beach palms it reaches
+    if (CBZ.CONFIG.TSU_DEBRIS !== false && s > 0.35) {
       entrain(dt);
       sweepStructures(dt);
     }
@@ -951,7 +1084,9 @@
       // posting every frame would flush every other event in the world out of
       // it. Twice a second keeps the field alive and leaves the ring usable.
       panicCD -= dt;
-      if (w && s > 0.6 && panicCD <= 0) {
+      // the crowd runs from a knee-deep bore too: the gate is the event's own
+      // scale, or a small tsunami would never scatter anyone
+      if (w && s > Math.min(0.6, ev.peak * 0.5) && panicCD <= 0) {
         panicCD = 0.5;
         CBZ.cityPostEvent && CBZ.cityPostEvent({
           type: "explosion", pos: { x: P.pos.x + w.x * 40, y: 0, z: P.pos.z + w.z * 40 },
@@ -1006,6 +1141,15 @@
       shoalV2: CBZ.CONFIG.TSU_SHOAL_V2 !== false,
       crashed: !!(ev && ev.crashed),
       kitShared: !!(CBZ.tsuFaceBuild && CBZ.tsuDebrisField),
+      // ---- the size of this occurrence (magnitude wave, 2026-08-29) ----
+      mag: ev ? +(+ev.mag).toFixed(3) : null,
+      peakM: ev ? +ev.peak.toFixed(2) : null,
+      waves: ev ? ev.wavesN : null,
+      waveN: ev ? ev.waveN : null,
+      inlandReachM: ev ? +ev.frontTo.toFixed(0) : null,
+      arcSecs: ev ? +arcTotal(ev).toFixed(1) : null,
+      crestVar: ev && ev.face && ev.face.crestVar != null ? +ev.face.crestVar.toFixed(3) : null,
+      endTaper: ev && ev.face && ev.face.endTaper != null ? +ev.face.endTaper.toFixed(3) : null,
     };
   };
 })();

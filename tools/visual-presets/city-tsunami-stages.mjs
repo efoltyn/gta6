@@ -192,7 +192,12 @@ async function stageCityTsunami(input) {
     }
     for (let i = 0; i < 120; i++) { CBZ.hitstop = 0; CBZ.slowmo = 0; CBZ.stepSim(1 / 60); }
     if (!CBZ.cityTsunami) return { ok: false, err: "no CBZ.cityTsunami" };
-    if (!CBZ.cityTsunami()) return { ok: false, err: "cityTsunami() refused to fire" };
+    /* PINNED SIZE. The event rolls a per-occurrence MAGNITUDE now (city/
+       tsunami.js, seedStream("tsunami")); this storyboard's job is the beat-
+       by-beat arc, so it pins the canonical 5.4 m event both sides always ran
+       — the magnitude RANGE has its own preset (city-tsunami-sizes). On a
+       build older than the roll, opts.peak was already honoured. */
+    if (!CBZ.cityTsunami({ peak: 5.4 })) return { ok: false, err: "cityTsunami() refused to fire" };
     S.started = true;
   }
 
@@ -262,7 +267,10 @@ async function stageCityTsunami(input) {
     while (guard++ < 8000) {
       const s = st(); if (!s) break;
       if (s.phase !== "drain") { step(1 / 30); continue; }
-      if (s.surge <= s.peak * 0.9 * (1 - w.untilDrainFrac)) break;
+      // drainFrom is published by the train-aware build (the drain starts
+      // from the LAST wave's hold, not necessarily from peak*0.9)
+      const from = s.drainFrom != null ? s.drainFrom : s.peak * 0.9;
+      if (s.surge <= from * (1 - w.untilDrainFrac)) break;
       step(1 / 60);
     }
   }
@@ -318,6 +326,10 @@ async function stageCityTsunami(input) {
   M.strikes = Math.max(M.strikes, live.strikes || 0);
   M.kills = Math.max(M.kills, live.kills || 0);
   const deb = M;
+  // the face exists only while the wall is up — latch its crest evidence
+  if (s2 && s2.crestVar != null) S.crestVar = s2.crestVar;
+  if (s2 && s2.endTaper != null) S.endTaper = s2.endTaper;
+  if (s2 && s2.waves != null) S.waves = s2.waves;
   const before = input.side === "before";
   const query = (name) => S.overlay.querySelector(`[data-${name}]`);
   query("side").textContent = before ? input.beforeLabel : input.afterLabel;
@@ -362,6 +374,13 @@ async function stageCityTsunami(input) {
     tickMaxMs: Number(maxMs.toFixed(1)),
     ticksOver33: over33,
     drawCalls: Number(render.calls || 0),
+    /* THE CREST EVIDENCE (2026-08-29). crestVar is the relative std-dev of
+       crest height along the front — 0 is a ruler, which was the tell.
+       endTaper is the end columns' height over the mean — 1 is the old flat
+       end-cap standing full-height in open water. waves is the train. */
+    waves: Number(S.waves || 1),
+    crestVar: Number(((S.crestVar || 0)).toFixed(3)),
+    endTaper: S.endTaper != null ? Number(S.endTaper.toFixed(3)) : 1,
   };
 
   return { ok: true, phase: s2 ? s2.phase : "over", frontS: metrics.frontS, metrics };
@@ -390,6 +409,9 @@ export default {
     debrisEntrained: { label: "Debris entrained", better: "higher" },
     debrisStrikes: { label: "Debris strikes", better: "higher" },
     debrisKills: { label: "Debris kills", better: "higher" },
+    waves: { label: "Waves in the train", better: "higher" },
+    crestVar: { label: "Crest variance along front", better: "higher" },
+    endTaper: { label: "End-cap height / mean", better: "lower" },
     tickAvgMs: { label: "Sim tick avg", unit: "ms", better: "lower" },
     tickMaxMs: { label: "Sim tick worst", unit: "ms", better: "lower" },
     drawCalls: { label: "Draw calls", better: "lower" },
