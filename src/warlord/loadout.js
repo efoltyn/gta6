@@ -55,9 +55,16 @@
     const T = W.tier(s.tier);
     return T.acc * (T.hp / 100) * (s.wounded ? 0.62 : 1) * 10;
   }
-  function gunValue(wid) {
+  /* CORE'S OWN TERM, NOT A COPY OF IT. soldierPower multiplies base by
+     W.gunCombat(wid) (bare hands score 0.3, not "a cheap gun"), and this file
+     has to sort on the identical number or AUTO-ARM optimises something the
+     game does not score. The fallback exists only for a build where core is
+     older than gunCombat. */
+  function combatOf(wid) {
     const w = W.gun(wid);
-    return w ? Math.min(3.2, 0.5 + W.gunPrice(wid) / 210) : 0.35;   // core's own term
+    if (!w) return 0.3;
+    if (W.gunCombat) return W.gunCombat(wid);
+    return Math.min(3.2, 0.5 + W.gunPrice(wid) / 210);
   }
   function totalPower() { return W.yourPower(); }
 
@@ -69,7 +76,7 @@
   function holders() { return [W.state.you].concat(W.state.army); }
 
   /* ============================================================ AUTO-ARM
-     THIS IS NOT A HEURISTIC. Army power is Σ base_i × gunValue(σ(i)) — core's
+     THIS IS NOT A HEURISTIC. Army power is Σ base_i × combatOf(σ(i)) — core's
      soldierPower is exactly that product and nothing else. The rearrangement
      inequality says a sum of paired products is maximised when both sequences
      are sorted the same way, so pairing the best gun with the best man is the
@@ -114,7 +121,7 @@
     }
 
     // ---- guns, best value to the highest base power (armour now counted)
-    const guns = expand(S.baggage).sort(function (a, b) { return gunValue(b) - gunValue(a); });
+    const guns = expand(S.baggage).sort(function (a, b) { return combatOf(b) - combatOf(a); });
     const rankG = men.slice().sort(function (a, b) { return baseOfAny(b) - baseOfAny(a); });
     for (let i = 0; i < rankG.length; i++) {
       if (i >= guns.length) { if (rankG[i].wid === "fists") rep.fists++; continue; }
@@ -166,12 +173,12 @@
   function handOut(limit) {
     const S = W.state;
     const rep = { before: totalPower(), after: 0, guns: {}, armour: {}, fists: 0, men: 0, stripped: 0, mode: "top" };
-    const guns = expand(S.baggage).sort(function (a, b) { return gunValue(b) - gunValue(a); });
+    const guns = expand(S.baggage).sort(function (a, b) { return combatOf(b) - combatOf(a); });
     const men = holders().sort(function (a, b) { return baseOfAny(b) - baseOfAny(a); });
     let gi = 0;
     for (let i = 0; i < men.length && gi < guns.length; i++) {
       if (limit && rep.men >= limit) break;
-      if (gunValue(guns[gi]) <= gunValue(men[i].wid)) break;      // nothing better left in the cart
+      if (combatOf(guns[gi]) <= combatOf(men[i].wid)) break;      // nothing better left in the cart
       if (W.equip(men[i], guns[gi])) { note(rep.guns, guns[gi], men[i]); rep.men++; gi++; }
     }
     rep.after = totalPower();
@@ -354,10 +361,15 @@
      never "what is man 137 holding". The tier you care about is open; the
      rest are one tap away. */
   const ROSTER_CAP = 40;
+  /* army.js ALREADY GROUPS AN ARMY and its grouping is better than the one
+     this file started with: it stacks on tier + gun + armour, so the roster
+     reads "6 VETERANS · AK-47 · PLATE RIG" — which is exactly the question
+     the armoury is asking. Use it. The local fallback only exists for a page
+     where army.js failed to load, and it groups by tier alone. */
   function groups() {
     if (W.army && W.army.groups) {
       try {
-        const g = W.army.groups();
+        const g = W.army.groups(W.state.army);
         if (g && g.length) return g;
       } catch (e) {}
     }
@@ -369,10 +381,11 @@
     const out = [];
     for (let i = W.TIERS.length - 1; i >= 0; i--) {
       const T = W.TIERS[i];
-      if (by[T.id] && by[T.id].length) out.push({ tier: T.id, label: T.label, men: by[T.id] });
+      if (by[T.id] && by[T.id].length) out.push({ key: T.id, tier: T.id, label: T.label, men: by[T.id] });
     }
     return out;
   }
+  function keyOf(g) { return g.key || g.tier; }
 
   function rosterCard() {
     const gs = groups();
@@ -380,16 +393,22 @@
     if (!gs.length) return h + '<div class="wl-card"><div class="wl-small wl-dim">you ride alone. hire men at a recruit camp.</div></div>';
     for (let i = 0; i < gs.length; i++) {
       const g = gs[i];
-      const open = OPEN_TIER === g.tier;
+      const k = keyOf(g);
+      const open = OPEN_TIER === k;
       const armed = g.men.filter(function (s) { return s.wid && s.wid !== "fists"; }).length;
       const hurt = g.men.filter(function (s) { return s.wounded; }).length;
-      h += '<button class="wl-la-grp' + (open ? " on" : "") + '" data-tier="' + g.tier + '">' +
-        '<span>' + (g.label || W.tier(g.tier).label) + '</span>' +
-        '<span class="n">' + g.men.length + ' MEN · ' + armed + ' ARMED' + (hurt ? ' · ' + hurt + ' HURT' : '') +
-          ' · POWER ' + Math.round(W.power(g.men)) + (open ? '  ▾' : '  ▸') + '</span></button>';
+      // army.js's stacks already carry the gun and armour; the fallback's do not
+      const kit = g.wid != null
+        ? gunName(g.wid) + ' · ' + W.armour(g.armour).label
+        : armed + ' ARMED';
+      h += '<button class="wl-la-grp' + (open ? " on" : "") + '" data-tier="' + k + '">' +
+        '<span>' + g.men.length + ' × ' + (g.label || W.tier(g.tier).label) +
+          '<br><span class="n" style="letter-spacing:.1em">' + kit + '</span></span>' +
+        '<span class="n">' + (hurt ? hurt + ' HURT · ' : '') +
+          'POWER ' + Math.round(W.power(g.men)) + (open ? '  ▾' : '  ▸') + '</span></button>';
       if (!open) continue;
       h += '<div class="wl-card">';
-      const men = g.men.slice().sort(function (a, b) { return baseOf(b) * gunValue(b.wid) - baseOf(a) * gunValue(a.wid); });
+      const men = g.men.slice().sort(function (a, b) { return baseOf(b) * combatOf(b.wid) - baseOf(a) * combatOf(a.wid); });
       for (let k = 0; k < men.length && k < ROSTER_CAP; k++) {
         const s = men[k];
         h += '<div class="wl-la-row">' +

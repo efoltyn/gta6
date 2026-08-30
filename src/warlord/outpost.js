@@ -36,7 +36,6 @@
    FLAGS: ?stock=old   infinite flat-price stock (the first draft)
           ?outfit=old  the whole outfitting wave reverted (implies ?stock=old
                        and loadout.js's ?autoarm=old)
-          ?blastprice=old  leave core's explosive pricing bug in place
 ============================================================ */
 (function () {
   "use strict";
@@ -50,58 +49,25 @@
   const OLD_STOCK = OLD_WAVE || Q.get("stock") === "old";
   const clamp = W.clamp;
 
-  /* ============================================================ THE $18 ROCKET LAUNCHER
-     A BUG IN core.js, NOT A BALANCE CHOICE, and it had to be fixed before a
-     single price could be printed. weapon-data.js gives every explosive
-     `damage: 1`, because an RPG's damage is not in the round — it is in the
-     blast, and city/crashfx.js:1063 is where that number actually lives
-     (`85 * blastPower` at the epicentre, falling linearly to 0 at
-     blastRadius). core's W.gunPrice reads `damage` at face value, so it
-     priced the launcher at $18 — the CHEAPEST weapon in the game — and
-     W.gunRarity, which is derived from price, then made it the most COMMON
-     thing in the desert. Every crate a rack of RPGs, on day one, for pocket
-     change. Measured, before → after:
-
-         bazooka     $18 → $475   rarity 0.94 → 0.36
-         glauncher   $18 → $840   rarity 0.94 → 0.05
-
-     THE FIX DOES NOT RESTATE CORE'S PRICE CURVE. Duplicating that formula is
-     how two files start disagreeing about what a rifle is worth. Instead
-     core's own function is handed a VIEW of the weapon record in which the
-     blast is written where a bullet's numbers live — damage = the epicentre
-     figure above — and core computes the price it would always have computed
-     given an honest input. The `explosive` premium core already applies
-     stands in for the area, which is the job that premium exists to do.
-
-     ORCHESTRATOR: this belongs in core.js's gunPrice. It is installed from
-     here only because I do not own that file. Move it and delete this block.
-     Revert with ?blastprice=old. */
-  if (Q.get("blastprice") !== "old" && !W._blastPriceFix) {
-    W._blastPriceFix = true;
-    const coreGun = W.gun, corePrice = W.gunPrice;
-    let view = null;
-    // The view is live only for the duration of ONE synchronous corePrice
-    // call for ONE id, so no other caller can observe W.gun lying.
-    W.gun = function (id) { return (view && view.id === id) ? view : coreGun(id); };
-    W.gunPrice = function (id) {
-      const w = coreGun(id);
-      if (!w || !w.explosive) return corePrice(id);
-      view = { };
-      for (const k in w) view[k] = w[k];
-      view.damage = 85 * (w.blastPower || 1.4);     // city/crashfx.js:1063
-      try { return corePrice(id); } finally { view = null; }
-    };
-  }
+  /* THE EXPLOSIVE-PRICING BUG THIS FILE USED TO PATCH IS GONE. An earlier
+     core.js priced a rocket launcher at $18 off weapon-data's placeholder
+     `damage: 1`, and W.gunRarity then made it the commonest thing in the
+     desert; outpost.js carried a correction for it. core.js now prices
+     explosives off the blast itself, so the correction was deleted rather
+     than left in to rot into a second opinion about what a gun is worth. */
 
   /* ============================================================ THE KINDS
-     `breadth` is how much of the price list this kind will touch at all, and
-     `capital` is the money it has tied up in stock — the ONE number that
-     decides how many of a thing sits in the crate, because a depot holding
-     $1600 of guns can stack nine pistols or two launchers and not both. */
+     `capital` is the money this outpost has tied up in stock — the ONE number
+     that decides how many of a thing sits in the crate, because a depot
+     holding $700 of guns can stack ten pistols or one launcher and not both.
+     Retuned once, when core.js replaced its price curve: at the old flat
+     curve $1600 filled every shelf to the cap and "finite stock" was a lie
+     on the label. Measured against the current list, $700 gives a depot ten
+     sidearms, six AKs, five LMGs and at most one launcher. */
   const KINDS = W.OUTPOST_KINDS = {
     depot: {
       id: "depot", label: "ARMS DEPOT", tag: "GUNS · ARMOUR · WE BUY",
-      capital: 1600, breadth: 1.0, lines: 7, buys: 0.34, armour: ["vest", "plate"],
+      capital: 700, lines: 7, buys: 0.34, armour: ["vest", "plate"],
       blurb: "crates off a boat. what is here is what is here.",
     },
     camp: {
@@ -122,8 +88,8 @@
          between hauling forty looted pistols to a market and leaving them
          on the sand. Without it, loot below rifle grade has no exit and the
          aftermath screen is a list of things you throw away. */
-      capital: 2600, breadth: 1.0, lines: 6, buys: 0.55, markup: 3.0,
-      armour: ["plate", "heavy"], floor: 0.42,
+      capital: 1400, lines: 6, buys: 0.55, markup: 3.0,
+      armour: ["plate", "heavy"], top: true,
       blurb: "lamps, tarpaulin, and a man who does not ask where you got it.",
     },
   };
@@ -235,18 +201,25 @@
   /* ============================================================ THE CRATES
      Three derived numbers and no typed ones.
 
-     WHICH GUNS. A hash roll against W.gunRarity, so a depot's character is a
-     property of WHERE IT IS and never changes: the depot at Bir Kufra always
-     deals in AKs, and the player learns that the way you learn a shop.
+     WHICH GUNS. A hash roll against W.gunRarity^2.5, so a depot's character
+     is a property of WHERE IT IS and never changes: the depot at Bir Kufra
+     always deals in AKs, and the player learns that the way you learn a shop.
+     The EXPONENT is not decoration. W.gunRarity says how common a gun is in
+     the world; the chance that one particular seven-line crate list happens
+     to carry it is a rarer event than that, and 2.5 is the power that puts
+     the design's stated target on the board. Measured against the current
+     price list: sidearm 0.57, AK 0.49, LMG 0.45, RPG 0.18 — a launcher at a
+     depot one time in five and a half — grenade launcher 0.01, which is why
+     the night market exists.
 
      HOW MANY LINES. Capped, because a crate list is not a supermarket — and
      because thirteen rows of gun at 393pt is a screen you scroll instead of
      read. The cap is doing UI work as much as fiction work.
 
      HOW MANY OF EACH. The depot's capital divided by what the gun costs.
-     That single division is why a $180 pistol comes nine to a crate and an
-     $840 launcher comes in twos, with nothing typed and nothing to retune
-     when a weapon is added. */
+     That single division is why a $70 sidearm comes ten to a crate and a
+     $500 launcher comes alone, with nothing typed and nothing to retune when
+     a weapon is added. */
   function fillCrates(o) {
     const K = KINDS[o.kind];
     const guns = W.gunList();
@@ -266,14 +239,15 @@
     let lines = 0;
     for (let i = 0; i < order.length && lines < (K.lines || 7); i++) {
       const id = order[i].id;
-      const rarity = W.gunRarity(id);
       const roll = W.hash01(o.x, o.z, hashOf(id) + 7);
-      /* The night market is the exception that defines the rule: it ignores
-         rarity above a price FLOOR, which is precisely what makes it the
-         place you go for the thing you cannot find. */
-      const ok = K.floor != null
-        ? (W.gunPrice(id) >= 900 * K.floor || roll < rarity * 0.35)
-        : roll < rarity * (K.breadth || 1);
+      /* The night market is the exception that defines the rule: above the
+         top of the list it ignores rarity entirely, which is precisely what
+         makes it the place you go for the thing you cannot find. The
+         threshold is read off the price list itself (see topOf) rather than
+         typed, so it still means "the expensive end" after the next retune. */
+      const ok = K.top
+        ? (W.gunPrice(id) >= topOf() || roll < Math.pow(W.gunRarity(id), 2.5) * 0.4)
+        : roll < Math.pow(W.gunRarity(id), 2.5);
       if (!ok) continue;
       lines++;
       o.stock[id] = shelf(o, id);
@@ -287,7 +261,18 @@
   }
   function shelf(o, id) {
     return clamp(Math.round(o.capital / Math.max(20, W.gunPrice(id))
-      * (0.7 + W.hash01(o.x, o.z, hashOf(id) + 11) * 0.6)), 1, 24);
+      * (0.7 + W.hash01(o.x, o.z, hashOf(id) + 11) * 0.6)), 1, 16);
+  }
+  /* "THE EXPENSIVE END", read off the armoury rather than typed: 1.8× the
+     median list price. On the current list that is $126, which admits the
+     LMG, the RPG and the grenade launcher and nothing below them. Cached
+     because it is asked once per gun per depot at placement time. */
+  let TOP = 0;
+  function topOf() {
+    if (TOP) return TOP;
+    const ps = W.gunList().map(function (w) { return W.gunPrice(w.id); }).sort(function (a, b) { return a - b; });
+    if (!ps.length) return (TOP = 1e9);
+    return (TOP = ps[Math.floor(ps.length / 2)] * 1.8);
   }
   function hashOf(s) {
     let h = 0;

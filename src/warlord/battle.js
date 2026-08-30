@@ -1566,10 +1566,24 @@
     _v = V(); _v2 = V(); _muz = V();
     seedBattle((W.state.seed | 0) * 7919 + (W.state.day | 0) * 131 + (band.men.length | 0));
 
-    simT = 0; over = false; started = false; live = true;
+    simT = 0; over = false; started = false; live = true; lastWall = 0;
     men = []; corpses = []; sinking = []; dropGuns = []; addedCols = []; addedMeshes = [];
     _claim.length = 0; deadSolving = 0; hurtFlash = 0; touchFire = false;
     cmd.init = 0;
+
+    /* THE DEAD FELL LIKE PLANKS AND THE PAGE THOUGHT IT HAD FIXED THAT.
+       warlord.html declares `if (C.RAGDOLL_ANY_MODE == null) C.RAGDOLL_ANY_MODE
+       = true` inside start(), i.e. AFTER studio.need() has already loaded
+       city/ragdoll.js — which defaults the flag to false on the way in. So the
+       `== null` guard never fires and every corpse in this game took the canned
+       single-axis topple: MEASURED, `solving: 0` across a whole 78-second
+       battle with ten deaths in it. (battle.html declares its version BEFORE
+       need() for exactly this reason; the ordering is the entire difference.)
+
+       Set here, unconditionally, because this is the file that wants ragdoll
+       corpses and it runs at battle time — long after any load order can bite.
+       A ?cfg_ override still wins, so the flag stays revertible. */
+    if (!Q || Q.get("cfg_RAGDOLL_ANY_MODE") == null) CBZ.CONFIG.RAGDOLL_ANY_MODE = true;
 
     W.setPhase("battle", { band: band });
 
@@ -1584,8 +1598,12 @@
        and therefore this file returns. */
     if (scene.fog) {
       fogSave = { hex: scene.fog.color.getHex(), near: scene.fog.near, far: scene.fog.far };
+      /* 420/2900: the near edge has to sit BEYOND the far end of the
+         battlefield (170 m) or the enemy line photographs as haze — the first
+         capture at 190/1500 washed a firing line 168 m away into the sky. Far
+         enough out that the flat skirt still goes to nothing. */
       scene.fog.color.setHex(0xd8c49a);
-      scene.fog.near = 190; scene.fog.far = 1500;
+      scene.fog.near = 420; scene.fog.far = 2900;
     }
 
     SIDES.mine = makeSide("mine", -1, 0xffb347, 0);
@@ -1672,10 +1690,21 @@
     /* THE VIEWMODEL IS THE SAME GUN THE NPCs CARRY — actorweapons' own model,
        at actorweapons' own real-dimension scale, parented to the lens. There is
        no second "player gun" geometry in this game and there must not be, or
-       the rifle in your hands and the rifle you loot stop being one object. */
-    viewGun.position.set(0.19, -0.17, -0.42);
-    viewGun.rotation.set(0, Math.PI, 0);
-    viewGun.scale.multiplyScalar(1.15);
+       the rifle in your hands and the rifle you loot stop being one object.
+
+       AND THE HAND POSE HAS TO COME OFF IT. buildActorWeapon leaves the model
+       at rotation (+π/2, π, 0) and offset (0.02,0.02,0.03), which is a pose
+       relative to a FOREARM — actorweapons' own comment says so. Parented
+       straight to the lens that reads as a rifle lying sideways across the
+       screen: measured on the first capture, an AK filled the bottom-right
+       quarter of a 1180x700 frame. The appearance factories author their
+       muzzle down -Z (see fallbackWeapon's userData.muzzle), which is already
+       the camera's forward, so the right pose here is no rotation at all —
+       just down and to the right, and far enough back that a 0.88 m rifle
+       reads as a rifle at a 70-degree field of view. */
+    viewGun.position.set(0.17, -0.20, -0.62);
+    viewGun.rotation.set(0.03, 0.02, 0);
+    viewGun.scale.multiplyScalar(0.9);
     CBZ.camera.add(viewGun);
     if (!CBZ.camera.parent) scene.add(CBZ.camera);   // r128: children of a
     // detached camera are never traversed by the renderer
@@ -1698,14 +1727,25 @@
 
   /* ============================================================ FRAME */
   let comAt = -1, moraleAt = -1, cmdAt = -1, endAt = -1;
+  let lastWall = 0;
   function frame(dt) {
     if (!started || !live) return;
-    if (injectDt > 0) { dt = injectDt; injectDt = 0; }
-    dt = Math.min(0.1, dt);
+    /* THE SIM CLOCK IS WALL TIME, NOT RENDER TIME — battle.html's finding, and
+       it is not a nicety. microboot clamps the dt it hands a frame hook for
+       animation stability, so on a machine that is struggling the battle
+       quietly runs in slow motion: MEASURED here on the software rasteriser at
+       53 bodies, thirty real seconds bought eleven simulated ones. A fight
+       that takes three times as long on a slow phone is a different game on a
+       slow phone. The sub-steps below keep the integration solid however long
+       the frame took. */
+    const wall = performance.now();
+    dt = lastWall ? Math.min(0.25, (wall - lastWall) / 1000) : dt;
+    lastWall = wall;
+    if (injectDt > 0) { dt = injectDt; lastWall = 0; injectDt = 0; }
     fxBudget = 0;
 
     if (!over) {
-      const sub = Math.min(4, Math.max(1, Math.ceil(dt / 0.055)));
+      const sub = Math.min(6, Math.max(1, Math.ceil(dt / 0.055)));
       const sdt = Math.min(0.055, dt / sub);
       for (let s = 0; s < sub; s++) {
         simT += sdt;
@@ -1768,12 +1808,41 @@
          last levy first, because that is not what happens and because a player
          who has already won should not have to spend ninety seconds proving it.
        · you go down, or you press RETREAT. */
+  /* AN ARMY IS BROKEN WHEN NOBODY IS STILL FIGHTING, and the first draft of
+     this measured the wrong thing entirely.
+
+     It asked whether three quarters of the side was routing OR already off the
+     map — and routed men LEAVE the count as they die or reach the edge, so on
+     a measured 26 v 26 the enemy hit "18 alive, 18 of them routing, nobody
+     fighting" at t=45 and the flag stayed FALSE. The battle then ran another
+     thirty-three seconds while every one of those eighteen jogged to the
+     baseline and escaped, and the aftermath screen offered ZERO PRISONERS.
+     That is not a tuning miss; it deleted a mechanic. A broken army is one
+     with nothing left shooting, and the men standing on the field when that
+     happens are exactly the men you capture — which is also the tension the
+     four orders are for: end it fast and take prisoners, or let it run and
+     watch them get away. */
+  function broken(side, fled) {
+    if (MORALE_OFF() || side.men0.length <= 2) return false;
+    const fighting = side.alive - side.routing;
+    const gone = side.deadN + side.routing + fled;
+    return fighting <= Math.max(1, Math.floor(side.men0.length * 0.1)) &&
+           gone >= side.men0.length * 0.3;
+  }
   function checkEnd() {
     const M = SIDES.mine, T = SIDES.them;
-    const brokeM = !MORALE_OFF() && M.men0.length > 2 && (M.routing + report.fledOf.mine.length) >= M.men0.length * 0.75;
-    const brokeT = !MORALE_OFF() && T.men0.length > 2 && (T.routing + report.fledOf.them.length) >= T.men0.length * 0.75;
-    if (T.alive === 0 || brokeT) { endBattle("won", brokeT ? "THEY BREAK" : "THE FIELD IS YOURS"); return; }
-    if ((M.alive === 0 && !report.reserveOf.mine.length) || brokeM) { endBattle("lost", "YOUR ARMY BREAKS"); return; }
+    if (T.alive === 0 || broken(T, report.fledOf.them.length)) {
+      endBattle("won", T.alive ? "THEY BREAK" : "THE FIELD IS YOURS");
+      return;
+    }
+    /* A LONE WARLORD IS NOT A BROKEN ARMY. `alive` counts your MEN, not you,
+       so day one — one man and a pistol against six bandits, which is the
+       game's own opening pitch — used to register as an instant defeat before
+       the first shot. If you brought nobody, only YOUR death ends it. */
+    if (!M.men0.length) return;
+    if ((M.alive === 0 && !report.reserveOf.mine.length) || broken(M, report.fledOf.mine.length)) {
+      endBattle("lost", M.alive ? "YOUR ARMY BREAKS" : "YOUR ARMY IS GONE");
+    }
   }
 
   function endBattle(outcome, why) {
@@ -1980,7 +2049,7 @@
        page's frame through microboot's headless stepSim, so a screenshot is a
        statement about a MOMENT rather than about a frame rate; audit() is
        every number a preset might want to gate on. Drive-only. */
-    freeze: function () { if (micro && micro.stop) micro.stop(); return true; },
+    freeze: function () { if (micro && micro.stop) micro.stop(); lastWall = 0; return true; },
     advance: function (sec, step) {
       const h = Math.max(1 / 240, Math.min(0.05, step || 1 / 60));
       let leftS = Math.max(0, +sec || 0), n = 0;
