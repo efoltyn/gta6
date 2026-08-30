@@ -85,8 +85,14 @@ async function stageClean(input) {
          and asks biomeAt where each instance stands — so it measures the
          rendered world, not the rule that was supposed to build it. */
       census() {
-        const m = { onDune: 0, onSalt: 0, onShore: 0, onRock: 0, onGravel: 0, onWadi: 0, total: 0 };
-        const sc = D.root && D.root();
+        const m = { onDune: 0, onSalt: 0, onShore: 0, onRock: 0, onGravel: 0, onWadi: 0,
+                    onSand: 0, total: 0 };
+        /* THE NAMED GROUP, not the whole island root. The first version of
+           this census walked D.root() and counted the oasis palm trunks and
+           fronds as scatter — 780 of them, all standing on sand, all correct.
+           A number that says the opposite of the truth is worse than none. */
+        const rt = D.root && D.root();
+        const sc = rt && rt.getObjectByName ? (rt.getObjectByName("wlScatter") || rt) : rt;
         const v = new window.THREE.Vector3(), mat = new window.THREE.Matrix4();
         const root = sc;
         if (root) {
@@ -97,6 +103,13 @@ async function stageClean(input) {
               v.setFromMatrixPosition(mat);
               const b = D.biomeAt(v.x, v.z);
               m.total++;
+              /* THE HONEST TEST. biomeAt is the argmax province and the
+                 provinces blend, so a rock whose label says "gravel" can be
+                 standing on ground that is nine-tenths dune and drawn as
+                 dune. onSand counts by the BLEND WEIGHT instead, and it is
+                 the metric that actually has to reach zero — the label-only
+                 version of this rule left 45% of the scatter on sand. */
+              if (D.sandiness && D.sandiness(v.x, v.z) > 0.25) m.onSand++;
               if (b === "dune") m.onDune++;
               else if (b === "salt") m.onSalt++;
               else if (b === "shore") m.onShore++;
@@ -173,6 +186,7 @@ export default {
   method:
     "Two servers, two checkouts: origin/main on one port and this tree on the other, both booted with ?go=1&seed=1337&weather=off. The preset teleports the player to fixed world coordinates, sets the hour and the camera through the campaign's own API, and advances CBZ.stepSim for 34 frames so the seven clipmap levels and the scatter refill settle identically on both sides. The gravel subject SEARCHES for its ground on a seeded spiral rather than using a typed coordinate, so it photographs a real gravel plain on both columns even if the province fields are ever retuned.",
   metrics: {
+    onSand:   { label: "Objects standing on sand (by blend, not label)", unit: "instances", better: "lower" },
     onDune:   { label: "Objects lying on the dunes", unit: "instances", better: "lower" },
     onSalt:   { label: "Objects on the salt pan", unit: "instances", better: "lower" },
     onShore:  { label: "Objects on the beach", unit: "instances", better: "lower" },

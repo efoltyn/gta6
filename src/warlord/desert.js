@@ -429,6 +429,17 @@
   D.renderHeightAt = function (x, z) { return renderHeightAt(x, z); };
   D.biomeAt = biomeAt;
   D.coastAt = coastAt;
+  /* HOW MUCH SAND IS UNDER THIS POINT, 0..1. biomeAt answers with the ARGMAX
+     province, which is the right answer for "what is this place called" and
+     the wrong one for "may a rock lie here": the provinces BLEND, so a point
+     whose winner is `gravel` by a hair can still be nine-tenths dune — the
+     ground there looks, and is drawn as, sand. The scatter needs the blend
+     weight, not the label. */
+  D.sandiness = function (x, z) {
+    if (!inited) ensureInit();
+    const P = provinceAt(x, z, coastAt(x, z));
+    return P.w[0];
+  };
   D.slopeAt = function (x, z) { return slopeOf(heightAt, x, z); };
   D.onLand = function (x, z) { return coastAt(x, z) > 6 && heightAt(x, z) > 0.4; };
 
@@ -855,6 +866,10 @@
   function makeScatter() {
     if (FLAG_NOSCATTER || !THREE.InstancedMesh) return null;
     const grp = new THREE.Group();
+    // named so a census can separate the DRESSING from the oasis palms, which
+    // are instanced under the same root and are not scatter — the first count
+    // of "objects lying on sand" was 780 palm trunks and fronds
+    grp.name = "wlScatter";
     let K = null;
     if (W.props && typeof W.props.scatterKit === "function") {
       try { K = W.props.scatterKit(); } catch (e) { K = null; }
@@ -928,6 +943,16 @@
           // dune, salt, shore and oasis are bare ground — see SC_GROUND.
           const G = SC_GROUND[b];
           if (!G) continue;
+          /* AND THE LABEL IS NOT ENOUGH. Gating on biomeAt alone still left
+             45% of the scatter standing on sand, measured. Two ways through:
+             the provinces BLEND, so a point whose argmax is `gravel` by a hair
+             can be nine-tenths dune and is DRAWN as dune; and a wadi is a cut
+             through whatever it crosses, including the erg, so "wadi" over
+             sand is still sand. Both are answered by the same question — how
+             much dune is actually under this point — which is what sandiness()
+             returns. 0.15 is where the blend stops contributing anything you
+             can see in the surface. */
+          if (D.sandiness(x, z) > 0.15) continue;
           if (G.dens < 1 && hash(x, z, 503) > G.dens) continue;
           const roll = hash(x, z, 307);
           const yaw = hash(x, z, 401) * TAU;
