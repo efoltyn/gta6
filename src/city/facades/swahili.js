@@ -116,23 +116,7 @@
         for (let i = 0; i < n; i++) F.box(ctx, f, -f.span / 2 + (i + 0.5) * (f.span / n), rTop + ph * 0.46, sq, sq, pt * 1.15, P.shadow, -pt * 0.5);
       }
 
-      // ---- D. THE BARAZA — the street bench ------------------------------
-      const bY = 0.40, bD = clamp(unit * 0.090, 0.62, 1.15), bIn = ent.gap / 2 + 0.60, eH = clamp(FH * 0.34, 0.85, 1.25);
-      for (const sg of [-1, 1]) {
-        const t0 = sg * bIn, t1 = sg * (df.span / 2 - 0.30), len = Math.abs(t1 - t0);
-        if (len < 0.9) continue;   const tc = (t0 + t1) / 2;
-        F.sBox(ctx, df, tc, bY / 2, len, bY, bD, P.base, 0);                    // the seat mass
-        F.box(ctx, df, tc, bY - 0.06, len + 0.10, 0.13, bD + 0.07, P.light, 0); // its moulded cap
-        // the end pier that stops the run and carries the household's water jar
-        F.sBox(ctx, df, t1 - sg * 0.30, eH / 2, 0.60, eH, bD * 0.94, P.light, 0);
-        F.box(ctx, df, t1 - sg * 0.30, eH + 0.07, 0.72, 0.14, bD + 0.04, P.base, 0);
-        // SIT ON IT, STAND ON IT: solid below, walkable on top.
-        const a = df.out * df.halfN, b = df.out * (df.halfN + bD);
-        if (df.horiz) ctx.plat(Math.min(t0, t1), Math.max(t0, t1), Math.min(a, b), Math.max(a, b), bY);
-        else ctx.plat(Math.min(a, b), Math.max(a, b), Math.min(t0, t1), Math.max(t0, t1), bY);
-      }
-
-      // ---- E. THE DOOR ---------------------------------------------------
+      // ---- D. THE DOOR ---------------------------------------------------
       // Solved outward from the shell's real opening: the recess is left on
       // the wall plane so the kit's carve turns it into a hole round the live
       // leaf, and every carved thing stands proud of that.
@@ -165,6 +149,24 @@
       F.box(ctx, df, 0, ST + SW / 2, FW + SW * 3, SW, DP * 0.62, P.light, 0);
       F.steps(ctx, { pal: P, top: clamp(FH * 0.09, 0.18, 0.30), width: OW + 0.5,
         out: 0.02, col: P.light, capCol: P.base });
+      // ---- E. THE BARAZA — the street bench ------------------------------
+      // Drawn AFTER the doorcase and started outside it: a bench run that
+      // butts into the stone surround buries the jamb it is standing against.
+      const bY = 0.40, bD = clamp(unit * 0.090, 0.62, 1.15), bIn = FW / 2 + SW * 1.6, eH = clamp(FH * 0.34, 0.85, 1.25);
+      for (const sg of [-1, 1]) {
+        const t0 = sg * bIn, t1 = sg * (df.span / 2 - 0.30), len = Math.abs(t1 - t0);
+        if (len < 0.9) continue;   const tc = (t0 + t1) / 2;
+        F.sBox(ctx, df, tc, bY / 2, len, bY, bD, P.base, 0);                    // the seat mass
+        F.box(ctx, df, tc, bY - 0.06, len + 0.10, 0.13, bD + 0.07, P.light, 0); // its moulded cap
+        // the end pier that stops the run and carries the household's water jar
+        F.sBox(ctx, df, t1 - sg * 0.30, eH / 2, 0.60, eH, bD * 0.94, P.light, 0);
+        F.box(ctx, df, t1 - sg * 0.30, eH + 0.07, 0.72, 0.14, bD + 0.04, P.base, 0);
+        // SIT ON IT, STAND ON IT: solid below, walkable on top.
+        const a = df.out * df.halfN, b = df.out * (df.halfN + bD);
+        if (df.horiz) ctx.plat(Math.min(t0, t1), Math.max(t0, t1), Math.min(a, b), Math.max(a, b), bY);
+        else ctx.plat(Math.min(a, b), Math.max(a, b), Math.min(t0, t1), Math.max(t0, t1), bY);
+      }
+
     },
   });
 })();

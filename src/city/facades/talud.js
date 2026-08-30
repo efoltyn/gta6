@@ -72,7 +72,7 @@
       // giveaway that the ornament was drawn without knowing where the stair
       // was, and the flight has to be cut for the doorway at its foot.
       const e = F.entrance(ctx), sf = e.f, hw = e.gap / 2 + 1.0;
-      const sw = clamp(sf.span * 0.62, 4.0, 13.0);
+      const sw = clamp(sf.span * 0.42, 4.0, 10.0);
 
       // ---- A. THE REPEATING UNIT ----------------------------------
       const n = clamp(Math.round(rTop / clamp(FH * 1.15, 2.8, 4.2)), 3, 7);
@@ -115,13 +115,17 @@
       // for the door up the stair instead, which is the same bug as walling
       // the door off and harder to see.
       const run = p0 * 1.20, nS = Math.max(8, Math.ceil(rTop / 0.40)), r = rTop / nS;
-      const bw = sw / 2 - hw;
+      const bw = sw / 2 - hw;                              // one cheek of the portal
+      // how far up the flight the portal is cut: never below the real door head,
+      // never more than a third of a short building's rise or a house-scale
+      // temple is one doorway with a few treads stacked on top of it
+      const portal = clamp(rTop * 0.34, F.DOOR_H + 0.35, e.head + 0.2);
       for (let i = 0; i < nS; i++) {
         const u = (i + 1) / nS, cy = u * rTop - r / 2, dep = run / nS + 0.10;
         const outN = sf.halfN + run * (1 - u) + run / nS;
-        if (cy - r / 2 < e.head + 0.2 && bw > 0.6) {
-          for (const sg of [-1, 1]) F.obox(ctx, sf, sg * (hw + bw / 2), cy, bw, r, dep, outN, P.light, i < 2);
-        } else F.obox(ctx, sf, 0, cy, sw, r, dep, outN, i % 2 ? P.base : P.light, false);
+        if (cy - r / 2 < portal && bw > 0.6) {
+          for (const sg of [-1, 1]) F.obox(ctx, sf, sg * (hw + bw / 2), cy, bw, r, dep, outN, i % 2 ? P.shadow : P.light, i < 2);
+        } else F.obox(ctx, sf, 0, cy, sw, r, dep, outN, i % 2 ? P.shadow : P.light, false);
       }
       // THE ALFARDAS: heavy sloping cheeks, each capped with its own little
       // tablero, which is what stops the stair reading as a bare ramp

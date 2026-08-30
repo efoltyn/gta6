@@ -96,8 +96,8 @@
         ctx.dbox(cx, y, cz, (hx - c) * 2, bh, hz * 2, col);
         ctx.dbox(cx, y, cz, (hx - c * 0.5) * 2, bh, (hz - c * 0.5) * 2, k % 2 ? col : F.shade(col, 0.94));
         for (const f of F.faces(ctx)) {                   // the four lobes, each stepped so it reads round
-          const ln = (f.horiz ? ctx.w : ctx.d) * 0.50, lo = e * 1.05, nn = (f.horiz ? hz : hx);
-          for (const q of [[ln, lo * 0.55], [ln * 0.68, lo]]) {
+          const sp = f.horiz ? ctx.w : ctx.d, lo = e * 1.05, nn = (f.horiz ? hz : hx);
+          for (const q of [[sp * 0.56, lo * 0.55], [sp * 0.30, lo]]) {
             if (f.horiz) E(cx, y, cz + f.out * (nn + q[1] * 0.5), q[0], bh, q[1] * 1.7, col);
             else E(cx + f.out * (nn + q[1] * 0.5), y, cz, q[1] * 1.7, bh, q[0], col);
           }
@@ -107,21 +107,26 @@
       // ---- C. THE OPENINGS: holes left in the print, corbelled shut at the
       // top because a nozzle cannot lay a lintel. Two storeys apart — at 130 m
       // a per-storey window row is invisible and costs four thousand boxes.
+      // The five tangent SLOTS are keyed to the lobe steps, not to a bay
+      // count: an opening that straddled the edge of a bulge would be half
+      // buried in it, and how deep the hole is punched depends on which step
+      // of the lobe it lands on.
       const oh = FH * 1.15, step = FH * 2;
+      const slots = [[0, 1.0], [-0.215, 0.55], [0.215, 0.55], [-0.39, 0], [0.39, 0]];
       for (const f of F.faces(ctx)) {
-        const bays = F.bays(f, F.bayCount(f, 5.4, 2, 5), Math.max(1.4, f.span * 0.10));
+        const ow = clamp(f.span * 0.11, 1.5, 3.4);
         for (let y = FH * 1.25; y + oh + 1.2 < H; y += step) {
-          const pr = Math.max(extAt(y), extAt(y + oh)) + 0.12;
-          for (const b of bays) {
-            const ow = Math.min(b.w * 0.62, oh * 0.9);
-            if (!F.clearsDoor(ctx, f, b.t, ow + 1.2)) continue;
-            const lit = h(0x9f40 + f.s * 31 + ((y * 3) | 0) + b.i) < 0.34;
-            F.box(ctx, f, b.t, y + oh / 2, ow, oh, pr, lit ? F.mix(P.glass, 0xffd9a0, 0.55) : P.glass);
+          const e = Math.max(extAt(y), extAt(y + oh));
+          for (const sl of slots) {
+            const t = sl[0] * f.span, pr = e * (1 + 1.05 * sl[1]) + 0.12;
+            if (y < 4.6 && !F.clearsDoor(ctx, f, t, ow + 1.0)) continue;
+            const lit = h(0x9f40 + f.s * 31 + ((y * 3) | 0) + sl[0] * 10) < 0.34;
+            F.box(ctx, f, t, y + oh / 2, ow, oh, pr, lit ? F.mix(P.glass, 0xffd9a0, 0.55) : P.glass);
             for (let i = 0; i < 3; i++) {                 // the corbelled head
               const u = (i + 0.5) / 3;
-              F.box(ctx, f, b.t, y + oh + u * ow * 0.42, ow * Math.sqrt(1 - u * u), ow * 0.16, pr, dark);
+              F.box(ctx, f, t, y + oh + u * ow * 0.42, ow * Math.sqrt(1 - u * u), ow * 0.16, pr, dark);
             }
-            F.box(ctx, f, b.t, y - 0.10, ow * 0.94, 0.20, pr + 0.10, dark);   // the sill bead
+            F.box(ctx, f, t, y - 0.10, ow * 0.94, 0.20, pr + 0.10, dark);   // the sill bead
           }
         }
       }

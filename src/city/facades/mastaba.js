@@ -128,9 +128,9 @@
       // The towers OVERTOP the wall and carry their own roll-and-cavetto cap
       // above the main cornice: a pylon that stopped under it would read as a
       // pilaster, and the double flare is the whole silhouette of the front.
-      const pyH = H + clamp(FH * 0.55, 1.1, 2.6);
+      const pyH = H + clamp(H * 0.16, 0.9, 2.6);          // it overtops the wall
       const pp0 = clamp(unit * 0.11, 0.9, 2.2);          // proud of the batter
-      const mastH = pyH + clamp(FH * 1.9, 3.6, 7.0);
+      const mastH = pyH + cvH + clamp(H * 0.40, 2.4, 6.5);   // measured from the CAP it clears
       for (const sg of [-1, 1]) {
         for (let k = 0; k < 6; k++) {                    // the tower, battering as it rises
           const y = pyH * k / 6, pr = bat.projAt(Math.min(y + 0.1, H - 0.2)) + pp0 * (1 - (k / 6) * 0.38);
@@ -144,7 +144,7 @@
           const t = sg * tOff + j * tw * 0.23;
           F.rib(ctx, f0, t, pyH * 0.14, pyH * 0.94, tw * 0.17, pr0 + 0.05, F.shade(P.shadow, 0.85));
           F.rib(ctx, f0, t, pyH * 0.16, mastH, tw * 0.075, pr0 + 0.26, F.shade(P.shadow, 0.9));
-          F.box(ctx, f0, t + j * tw * 0.15, mastH - 0.95, tw * 0.24, 1.55, pr0 + 0.30, j < 0 ? RED : BLU);
+          F.box(ctx, f0, t + j * tw * 0.15, mastH - (mastH - pyH) * 0.20, tw * 0.24, (mastH - pyH) * 0.30, pr0 + 0.30, j < 0 ? RED : BLU);
         }
         F.box(ctx, f0, sg * tOff, pyH + rr * 0.9, tw + rr * 2, rr * 1.9, pr0 + rr * 1.0, P.light);
         for (let k = 0; k < 4; k++) {                    // the tower's own cavetto cap
@@ -154,17 +154,18 @@
         }
       }
       // ---- F. THE LINTEL AND THE WINGED DISC ----------------------
-      const dy = e.head + 1.35, dpr = bat.projAt(dy) + pp0 * 0.62;
       const wr = Math.max(0.9, tOff - tw / 2 - 0.45);    // the wings die before the towers
+      const ds = clamp((tOff - tw / 2) * 0.64, 0.75, 1.55);        // the disc, off the gate width
+      const dy = e.head + 0.55 + ds * 0.75, dpr = bat.projAt(dy) + pp0 * 0.62;
       F.box(ctx, f0, 0, e.head + 0.45, (tOff - tw / 2) * 2, 0.90, dpr, P.light);
-      F.box(ctx, f0, 0, dy, 1.55, 1.05, dpr + 0.12, P.trim);
-      F.box(ctx, f0, 0, dy, 1.05, 1.55, dpr + 0.12, P.trim);
-      F.box(ctx, f0, 0, dy, 1.30, 1.30, dpr + 0.20, RED);          // the sun disc
+      F.box(ctx, f0, 0, dy, ds * 1.20, ds * 0.80, dpr + 0.12, P.trim);
+      F.box(ctx, f0, 0, dy, ds * 0.80, ds * 1.20, dpr + 0.12, P.trim);
+      F.box(ctx, f0, 0, dy, ds, ds, dpr + 0.20, RED);              // the sun disc
       for (const sg of [-1, 1]) for (let k = 0; k < 5; k++) {               // the feathered wings
         const u = (k + 1) / 5;
-        F.box(ctx, f0, sg * (0.75 + u * wr * 0.80), dy - 0.10 * k, wr * 0.22, 0.80 * (1 - u * 0.55), dpr + 0.09, k % 2 ? BLU : P.light);
+        F.box(ctx, f0, sg * (ds * 0.58 + u * wr * 0.80), dy - ds * 0.08 * k, wr * 0.22, ds * 0.62 * (1 - u * 0.55), dpr + 0.09, k % 2 ? BLU : P.light);
       }
-      for (const sg of [-1, 1]) F.box(ctx, f0, sg * 0.52, dy - 1.05, 0.28, 0.85, dpr + 0.11, RED);   // uraeus pendants
+      for (const sg of [-1, 1]) F.box(ctx, f0, sg * ds * 0.40, dy - ds * 0.80, ds * 0.22, ds * 0.65, dpr + 0.11, RED);  // uraeus
     },
   });
 })();

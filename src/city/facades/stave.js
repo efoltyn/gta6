@@ -107,7 +107,7 @@
          move is pinned to ctx.w/ctx.d and cannot be handed a smaller
          footprint — which is exactly what a tier stack is made of. Worth
          promoting as an {hw,hd,cx,cz} option on hipRoof; not editing it. */
-      const tier = function (y0, hw, hd, h, tw, td, k) {
+      const tier = function (y0, hw, hd, h, tw, td, k, vg) {
         const n = Math.max(4, Math.round(h / cl(u * 0.036, 0.24, 0.44)));
         const fl = Math.min(eo * 1.5, hw * 0.34);
         ctx.dbox(0, y0 - 0.07, 0, (hw + fl) * 2, 0.22, (hd + fl) * 2, shD);      // dark soffit
@@ -120,6 +120,18 @@
             F.shade(sh, i % 2 ? j * 1.16 : j * 0.92));
           // the shingle lap, hand-split so the rows do not machine up
           if (i % 2 === 0) ctx.dbox(0, y0 + h * i / n + 0.05, 0, cw * 2 + 0.18, 0.08, cd * 2 + 0.18, shD);
+          // THE GABLE ENDS, boarded and raked. Left as the sawn edge of the
+          // shingle courses a gable reads as a hip; painted pale it reads as
+          // stucco, which no tarred Norwegian church has ever been.
+          if (vg) for (const sg of [-1, 1]) {
+            const cy = y0 + h * (i + 0.5) / n, e1 = vg === 1;
+            ctx.dbox(e1 ? sg * (cw + 0.12) : 0, cy, e1 ? 0 : sg * (cd + 0.12),
+              e1 ? 0.26 : cw * 2 + 0.34, h / n + 0.06, e1 ? cd * 2 + 0.34 : 0.26,
+              i % 2 ? tim : timD);
+            for (const sq of [-1, 1])                       // the raking board
+              ctx.dbox(e1 ? sg * (cw + 0.24) : sq * (cw + 0.03), cy,
+                e1 ? sq * (cd + 0.03) : sg * (cd + 0.24), 0.34, h / n + 0.07, 0.34, timL);
+          }
         }
         return y0 + h;
       };
@@ -138,8 +150,9 @@
       // THE NAVE ROOF is a GABLE: the width survives, the depth collapses to
       // a ridge. Tapering both axes equally is the pyramid this is not.
       const nav = cl((alongX ? hd0 : hw0) * 1.45, rTop * 0.55, rTop * 1.35);
-      let ty = tier(rTop, hw0, hd0, nav, alongX ? 0.90 : 0.06, alongX ? 0.06 : 0.90, 0);
-      const rdg = (alongX ? hw0 : hd0) * 0.90;       // half the ridge's length
+      let ty = tier(rTop, hw0, hd0, nav, alongX ? 0.99 : 0.06, alongX ? 0.06 : 0.99, 0,
+        alongX ? 1 : 2);
+      const rdg = (alongX ? hw0 : hd0) * 0.99;       // half the ridge's length
 
       // THE TOWER on the ridge. Turret size is capped by rTop as well as by
       // the plan, or a one-storey chapel grows a cathedral spire.

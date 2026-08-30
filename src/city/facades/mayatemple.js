@@ -106,10 +106,14 @@
       const run = p0 * 1.35;                               // ~70°: a ladder, on purpose
       const nS = Math.max(8, Math.ceil(rTop / 0.40)), r = rTop / nS;
       const bw = sw / 2 - hw;                              // one cheek of the portal
+      // how far up the flight the portal is cut: never below the real door head,
+      // never more than a third of a short building's rise or a house-scale
+      // temple is one doorway with a few treads stacked on top of it
+      const portal = clamp(rTop * 0.34, F.DOOR_H + 0.35, e.head + 0.2);
       for (let i = 0; i < nS; i++) {
         const u = (i + 1) / nS, cy = u * rTop - r / 2;
         const outN = sf.halfN + run * (1 - u) + run / nS, dep = run / nS + 0.10;
-        if (cy - r / 2 < e.head + 0.2 && bw > 0.6) {
+        if (cy - r / 2 < portal && bw > 0.6) {
           for (const sg of [-1, 1]) F.obox(ctx, sf, sg * (hw + bw / 2), cy, bw, r, dep, outN, P.light, i < 2);
         } else F.obox(ctx, sf, 0, cy, sw, r, dep, outN, i % 2 ? P.shadow : P.light, false);
       }
@@ -132,7 +136,9 @@
       // summit is the one colour on the building that is not this temple's
       ctx.dbox(0, rTop + ctx.pp * 0.5, 0, ctx.w - 0.1, Math.max(0.06, ctx.pp), ctx.d - 0.1, F.shade(P.base, 0.92));
       pl(R.cx - R.w / 2, R.cx + R.w / 2, R.cz - R.d / 2, R.cz + R.d / 2, deck);
-      const cw = ctx.w * 0.38, cd = ctx.d * 0.42, ch = clamp(FH * 1.45, 3.2, 5.6);
+      // the cella is capped against rTop as well as FH: on an 11 m host an
+      // FH-only rule gives a crown twice the height of the pyramid under it
+      const cw = ctx.w * 0.38, cd = ctx.d * 0.42, ch = clamp(Math.min(FH * 1.45, rTop * 0.42), 2.4, 5.6);
       // the shell's own roof parapet is a cold blue-grey lbox ring (buildings.js
       // builds it long before any facade runs and no flag turns it off), so it is
       // clad over here: the summit rim has to be this temple's stone, not the office's

@@ -117,13 +117,16 @@
       ctx.plat(f0.horiz ? -half : f0.out * f0.halfN, f0.horiz ? half : f0.out * (f0.halfN + dep),
         f0.horiz ? Math.min(f0.out * f0.halfN, f0.out * (f0.halfN + dep)) : -half,
         f0.horiz ? Math.max(f0.out * f0.halfN, f0.out * (f0.halfN + dep)) : half, dY);
+      // THE UPPER TIER only when there is room for a real one: a squat
+      // half-storey of posts behind the rail reads as a mistake, and a low
+      // house wants the balcony and its parapet alone.
       const uH = Math.min(FH * 0.95, H - dY - 0.8);
-      if (uH > 1.3) {
+      if (uH > 1.9) {
         for (const t of ts) taper(t, dY + 0.10, dY + uH - 0.48, 0.90);
         F.obox(ctx, f0, 0, dY + uH - 0.30, half * 2 + r1 * 3, 0.34, dep + 0.18, f0.halfN + dep + 0.18, TMB);
-        F.obox(ctx, f0, 0, dY + 0.60, half * 2, 0.80, 0.26, f0.halfN + dep + 0.30, RED);   // balustrade
-        F.obox(ctx, f0, 0, dY + 1.06, half * 2 + 0.34, 0.18, 0.42, f0.halfN + dep + 0.38, P.light);
       }
+      F.obox(ctx, f0, 0, dY + 0.60, half * 2, 0.80, 0.26, f0.halfN + dep + 0.30, RED);   // balustrade
+      F.obox(ctx, f0, 0, dY + 1.06, half * 2 + 0.34, 0.18, 0.42, f0.halfN + dep + 0.38, P.light);
 
       // ---- D. THE PARAPET AND THE HORNS OF CONSECRATION -----------
       const pw = F.parapetWalk(ctx, { pal: P, h: clamp(FH * 0.30, 0.5, 1.1), col: P.light, capCol: RED });
