@@ -139,7 +139,7 @@
       const R = F.roof(ctx);
       ctx.dbox(R.cx, H + ctx.pp * 0.5, R.cz, R.w, Math.max(0.06, ctx.pp), R.d, F.shade(P.base, 0.92));  // roof deck
       ctx.plat(R.cx - R.w / 2, R.cx + R.w / 2, R.cz - R.d / 2, R.cz + R.d / 2, H + ctx.pp);
-      const Hc = clamp(H * 0.28, FH * 3.4, FH * 11), legH = Hc * 0.74, capH = Hc - legH,
+      const Hc = clamp(H * 0.28, FH * 1.5, FH * 11), legH = Hc * 0.74, capH = Hc - legH,
         fw = R.w * 0.26, fd = R.d * 0.52;
       for (const sg of [-1, 1]) {
         const cx = R.cx + sg * (R.w / 2 - fw / 2);

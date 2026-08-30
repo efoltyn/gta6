@@ -39,10 +39,13 @@
    sahelian's spiked mass and zimbabwe's curved wall this one has to read as
    the small white block with the deep doorway.
 
-   SOLIDITY: door jambs, lintel, stone surround, baraza and its end piers are
-   the mass a player meets, so they go through sbox. Plaster panels, niches,
-   parapet and its holes are surface and stay free — sbox would refuse them
-   anyway, none of them stands 0.30 m proud of the wall.
+   SOLIDITY: door jambs, lintel, stone surround, the baraza and its end piers
+   are the mass a player meets, so they all go through sbox. sbox then keeps
+   the collider on the doorcase and the piers and REFUSES it on the seat
+   itself, which is right and is the reason the seat is capped where it is: a
+   0.40 m bench is a kerb you step onto, and the ctx.plat over it is what
+   makes that stepping work. Plaster panels, niches, parapet and its holes are
+   surface — none stands the 0.30 m proud that sbox asks for, and none should.
 ============================================================ */
 (function () {
   "use strict";

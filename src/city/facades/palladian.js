@@ -129,35 +129,49 @@
       // colonnettes carrying a little entablature. Centred on the piano nobile
       // of each flank, which is where a villa puts its best room.
       for (const f of sides) {
-        const sy = nob * FH + 0.95, sh = Math.min(FH * 0.66, H - sy - 1.0);
+        const sy = nob * FH + 0.55, sh = Math.min(FH * 0.64, H - sy - 1.30);
         const cw = clamp(f.span * 0.16, 1.0, 2.4), lw = cw * 0.52;
-        if (sh < 1.2 || f.span < 6) continue;
-        F.box(ctx, f, 0, sy + sh / 2, cw + lw * 2 + 1.5, sh + 1.2, 0.16, P.light, -0.02);      // the panel it sits in
-        F.box(ctx, f, 0, sy + sh * 0.55, cw, sh * 1.1, 0.10, DK, 0.06);
-        F.arch(ctx, f, f.s * 0 + 0, sy + sh * 1.10, cw, cw * 0.5, 0.16, 0.26, LT, "round");
+        const rise = Math.min(cw * 0.5, H - 0.80 - sy - sh);
+        if (sh < 1.0 || rise < 0.3 || f.span < 6) continue;
+        F.box(ctx, f, 0, sy + sh * 0.5 + 0.15, cw + lw * 2 + 1.6, sh + rise + 1.0, 0.16, P.light, -0.02);
+        F.box(ctx, f, 0, sy + sh * 0.5, cw, sh, 0.10, DK, 0.06);                                // the arched light
+        F.arch(ctx, f, 0, sy + sh, cw, rise, 0.16, 0.28, LT, "round");
         for (const sg of [-1, 1]) {
-          F.box(ctx, f, sg * (cw / 2 + 0.30 + lw / 2), sy + sh * 0.40, lw, sh * 0.80, 0.10, DK, 0.06);
-          F.rib(ctx, f, sg * (cw / 2 + 0.24), sy - 0.10, sy + sh * 0.85, 0.28, 0.30, LT);      // colonnette
-          F.rib(ctx, f, sg * (cw / 2 + 0.36 + lw), sy - 0.10, sy + sh * 0.85, 0.28, 0.30, LT);
-          F.box(ctx, f, sg * (cw / 2 + 0.30 + lw / 2), sy + sh * 0.86, lw + 0.9, 0.24, 0.34, LT);
+          F.box(ctx, f, sg * (cw / 2 + 0.30 + lw / 2), sy + sh * 0.38, lw, sh * 0.76, 0.10, DK, 0.06);
+          F.rib(ctx, f, sg * (cw / 2 + 0.24), sy - 0.10, sy + sh + 0.05, 0.28, 0.30, LT);       // colonnette
+          F.rib(ctx, f, sg * (cw / 2 + 0.36 + lw), sy - 0.10, sy + sh + 0.05, 0.28, 0.30, LT);
+          F.box(ctx, f, sg * (cw / 2 + 0.30 + lw / 2), sy + sh * 0.80, lw + 0.95, 0.24, 0.34, LT);
         }
-        F.box(ctx, f, 0, sy - 0.20, cw + lw * 2 + 1.4, 0.24, 0.36, LT);                        // the common sill
+        F.box(ctx, f, 0, sy - 0.20, cw + lw * 2 + 1.5, 0.24, 0.36, LT);                         // the common sill
       }
 
       // ---- E. THE TEMPLE FRONT -------------------------------------
       // Ionic, freestanding, standing on the podium and solved back from the
       // cornice. The colonnade widens its own centre intercolumniation until
       // the doorway fits, so no column ever has to be dropped in front of it.
-      const co = F.colonnade(ctx, { pal: P, face: ff, order: "ionic", base: pod,
-        clear: H - 0.15, entH: clamp(FH * 0.55, 0.75, 1.55), col: LT, trim: P.light });
-      const pw = Math.abs(co.t.length ? co.t[co.t.length - 1] : ff.span * 0.4) * 2 + co.r * 4;
-      const pedH = clamp(pw * 0.115, 0.8, 2.0), pdep = co.depth + 0.34;
-      for (let k = 0; k < 6; k++) {                                                            // the pediment
-        const u = (k + 0.5) / 6;
-        F.box(ctx, ff, 0, co.entTop + (k + 0.5) * (pedH / 6), (pw + 0.9) * (1 - u * 0.94),
-          pedH / 6 + 0.05, pdep, k % 2 ? F.shade(LT, 0.94) : LT);
+      /* THE PORTICO IS NARROWER THAN THE HOUSE. F.colonnade spreads its outer
+         columns to the face's own margins, which on a 15 m villa puts the
+         temple front across the entire elevation and leaves no wall beside it
+         — and a Palladian portico that touches both corners reads as a
+         warehouse canopy. Hand it a NARROWED view of the same face (same s,
+         same halfN, 64% of the span) and every number it solves comes out
+         over the centre instead. */
+      const pf = { s: ff.s, horiz: ff.horiz, out: ff.out, halfN: ff.halfN, span: ff.span * 0.64 };
+      const co = F.colonnade(ctx, { pal: P, face: pf, order: "ionic", base: pod,
+        clear: H + 0.95, entH: clamp(FH * 0.55, 0.75, 1.55), col: LT, trim: P.light });
+      const pw = Math.abs(co.t.length ? co.t[co.t.length - 1] : pf.span * 0.4) * 2 + co.r * 4;
+      const pedH = clamp(pw * 0.20, 1.0, 3.4), pdep = co.depth + 0.34, tw = clamp(pw * 0.10, 0.35, 0.85);
+      /* A RAKING CORNICE WITH A SHADOWED FIELD BEHIND IT, not a stack of solid
+         slabs: draw the triangle as solid courses and the tympanum you put
+         behind them is invisible, which is exactly how the first render came
+         out. The dark field is one course-wide box per step, set 0.3 m back. */
+      for (let k = 0; k < 7; k++) {
+        const hw = (pw + 0.9) * 0.5 * (1 - ((k + 0.5) / 7) * 0.94), cy = co.entTop + (k + 0.5) * (pedH / 7);
+        F.box(ctx, ff, 0, cy, hw * 2, pedH / 7 + 0.06, pdep - 0.30, DK);
+        for (const sg of [-1, 1]) F.box(ctx, ff, sg * hw, cy, tw, pedH / 7 + 0.06, pdep, LT);
       }
-      F.box(ctx, ff, 0, co.entTop + pedH * 0.32, pw * 0.70, pedH * 0.58, pdep - 0.20, DK);   // tympanum
+      F.box(ctx, ff, 0, co.entTop + 0.15, pw + 1.1, 0.30, pdep + 0.12, LT);                    // bed cornice
+      F.box(ctx, ff, 0, co.entTop + pedH + 0.14, tw * 1.3, 0.38, pdep + 0.04, LT);             // the apex
       // the portico floor, walkable, and one continuous flight down to the kerb
       const dOut = ff.halfN + co.depth + 0.35, pwk = pw + 0.6;
       F.obox(ctx, ff, 0, pod / 2, pwk, pod, co.depth + 0.35, dOut, F.shade(LT, 0.96), true);

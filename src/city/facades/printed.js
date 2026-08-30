@@ -73,12 +73,12 @@
       // print outside the shell box at every height, which is what stops a
       // grey vertical corner appearing through it.
       const ch = clamp(FH * 0.20, 0.38, 0.68);            // one bead
-      const e0 = clamp(unit * 0.11, 0.9, 3.4), sw = clamp(unit * 0.045, 0.40, 1.40);
+      const e0 = clamp(Math.min(unit * 0.11, H * 0.030), 0.5, 3.4), sw = clamp(Math.min(unit * 0.045, H * 0.012), 0.22, 1.40);
       const wa = clamp(unit * 0.010, 0.08, 0.26);         // how far each course wanders
       const ph = h(0x9f01) * 6.28, waves = 2 + ((h(0x9f02) * 3) | 0);
       const extAt = function (y) {
         const u = clamp(y / H, 0, 1);
-        return wa + clamp(unit * 0.05, 0.5, 1.4) + e0 * (1 - u) * (1 - u) + sw * (0.5 + 0.5 * Math.sin(u * Math.PI * waves + ph));
+        return wa + clamp(Math.min(unit * 0.05, H * 0.014), 0.28, 1.4) + e0 * (1 - u) * (1 - u) + sw * (0.5 + 0.5 * Math.sin(u * Math.PI * waves + ph));
       };
 
       // ---- B. THE COURSES. A cross of two boxes leaves a chamfer at all four
