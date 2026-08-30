@@ -167,7 +167,8 @@ const WARLORD = [
   "warlord/loadout.js",    // who carries what
   "warlord/events.js",     // everything else that can happen, and the endgame
   "warlord/feel.js",       // sound, impact, and the mixer that makes 300 rifles a war
-  "warlord/warnet.js",     // the same island with other warlords on it
+  "warlord/warnet.js",     // TRANSPORT: sockets, host election, snapshot/apply
+  "warlord/match.js",      // THE RULES OF THE MATCH: lobby, clock, diplomacy, victory
 ];
 /* THE ORDER HERE IS EXECUTION ORDER, NOT DEPENDENCY ORDER, and the difference
    matters. These files only DECLARE themselves — W.module() registers a name

@@ -67,7 +67,32 @@ campaign. They use `ctx.screen`/`ctx.closeScreen` and hand it straight back.
 | `loadout.js` | who carries what |
 | `events.js` | road events, loyalty/mutiny, weather, the endgame |
 | `feel.js` | sound, impact, and the mixer that makes 300 rifles a war |
-| `warnet.js` | multiplayer — one shared island, many warlords |
+| `warnet.js` | multiplayer TRANSPORT: sockets, host election, snapshot/apply |
+| `match.js` | the RULES OF THE MATCH: lobby, spawn, clock, diplomacy, victory |
+
+## The law of the shared clock
+
+The owner's brief is *"ultra simple mechanics, made for multiplayer — it's
+almost like openfront.io met Bannerlord once it's multiplayer."* One rule
+falls out of that and everything else in the design bends around it:
+
+**THE CAMPAIGN CLOCK NEVER PAUSES.** Not for a battle, not for an open menu,
+not for a disconnected player. Seven warlords ride the same island and the
+world does not stop for any of them.
+
+The consequence lands on the battle, and it is why `battle.js` owes two
+entry points with ONE model behind them:
+
+- `W.battle.start(...)` — the 3D fight, on a hard time budget
+- `W.battle.resolve(...)` — the same rosters, the same morale model, the same
+  result shape, resolved in one call with nothing rendered
+
+Two presentations of one battle model, never two models that can disagree.
+`resolve` is what runs when a player skips the fight, drops mid-battle, when
+AI fights AI, and whenever a live match cannot wait.
+
+Everything derivable is derived from the seed. The wire carries ownership and
+intent; it never carries the map.
 
 A module MUST tear down its own scene objects on `phase:leave:<its phase>`.
 Two modules rendering at once is the failure mode this exists to stop.
