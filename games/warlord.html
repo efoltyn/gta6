@@ -155,15 +155,27 @@ const ARMOURY = [
   "systems/wounds.js",
 ];
 const WARLORD = [
-  "warlord/core.js",
-  "warlord/desert.js",
-  "warlord/campaign.js",
-  "warlord/army.js",
-  "warlord/battle.js",
-  "warlord/outpost.js",
-  "warlord/loadout.js",
-  "warlord/warnet.js",
+  "warlord/core.js",       // the state. Everything below reads it; nothing below redefines it.
+  "warlord/props.js",      // the object library both layers draw from
+  "warlord/desert.js",     // the island
+  "warlord/mounts.js",     // horses, camels, technicals — campaign speed AND cavalry
+  "warlord/territory.js",  // who owns what, and the map that shows it
+  "warlord/campaign.js",   // riding it, and the parties that ride it too
+  "warlord/army.js",       // the roster, the encounter, the aftermath
+  "warlord/battle.js",     // the actual war
+  "warlord/outpost.js",    // depots and camps
+  "warlord/loadout.js",    // who carries what
+  "warlord/events.js",     // everything else that can happen, and the endgame
+  "warlord/feel.js",       // sound, impact, and the mixer that makes 300 rifles a war
+  "warlord/warnet.js",     // the same island with other warlords on it
 ];
+/* THE ORDER HERE IS EXECUTION ORDER, NOT DEPENDENCY ORDER, and the difference
+   matters. These files only DECLARE themselves — W.module() registers a name
+   and a boot function and does nothing else — so the real ordering happens in
+   bootModules(), which walks each module's own `needs` and topologically
+   sorts them. That is deliberate: a hand-maintained load order is a list that
+   rots the moment somebody adds a file, and this page has thirteen of them.
+   core.js is first because it is the only one that has to be. */
 
 const PLAN = CBZ.studio.plan(NEED);
 let TOTAL = PLAN.files.length + ARMOURY.length + WARLORD.length;

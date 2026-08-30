@@ -47,6 +47,28 @@ closeScreen, paintHud, menu}`.
 | `outpost` | outpost.js | trading |
 | `armoury` | loadout.js | assigning kit |
 
+`events.js` and `territory.js` take the screen without owning a phase — an
+event card and the strategic map are both things that happen *over* the
+campaign. They use `ctx.screen`/`ctx.closeScreen` and hand it straight back.
+
+## The modules
+
+| file | owns |
+|---|---|
+| `core.js` | the state, the men, the money, phases. No THREE in it. |
+| `props.js` | the object library: outposts, banners, wrecks, cover, camp |
+| `desert.js` | the island — analytic `heightAt`, biomes, chunked terrain |
+| `mounts.js` | horses/camels/technicals: campaign speed and cavalry |
+| `territory.js` | regions, ownership, the strategic map |
+| `campaign.js` | riding the island; roaming bands; encounter detection |
+| `army.js` | the encounter card, the roster, the aftermath |
+| `battle.js` | the real 3D war on `combat_iq` |
+| `outpost.js` | depots (finite gun crates) and camps (finite men) |
+| `loadout.js` | who carries what |
+| `events.js` | road events, loyalty/mutiny, weather, the endgame |
+| `feel.js` | sound, impact, and the mixer that makes 300 rifles a war |
+| `warnet.js` | multiplayer — one shared island, many warlords |
+
 A module MUST tear down its own scene objects on `phase:leave:<its phase>`.
 Two modules rendering at once is the failure mode this exists to stop.
 
