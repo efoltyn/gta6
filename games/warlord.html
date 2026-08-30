@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<link rel="icon" href="data:,">
+<title>Desert Warlord</title>
+<!-- ============================================================
+  DESERT WARLORD — start alone, end with an army.
+
+  This is Bannerlord with everything removed except the part that made it
+  work: you ride a huge map, you meet a party, and you decide whether to
+  fight it, buy it, or frighten it into joining you. Then you look at the
+  men you have and decide who gets the good rifle.
+
+  WHAT THIS PAGE IS: the shell and the router. Which phase owns the screen,
+  the load, the frame, and the one canvas everybody draws into. It contains
+  NO gameplay. The game is six files under src/warlord/:
+
+     core.js      the state, the men, the money, the phases   (no THREE in it)
+     desert.js    the island — 14 km of analytic sand
+     campaign.js  riding it, and the parties that ride it too
+     army.js      the roster, morale, prisoners, the aftermath
+     battle.js    the actual war — combat_iq, real guns, real corpses
+     outpost.js   depots that sell guns and camps that sell men
+     loadout.js   who carries what
+     warnet.js    the same island with other warlords on it
+
+  NOTHING VIOLENT HERE IS DRAWN BY THIS REPO'S NEW CODE. The men are
+  studio.cast. The guns are weapons/appearances. How they fight is
+  systems/combat_iq.js — the same brain games/battle.html runs. The dead
+  fall through city/ragdoll.js. This game is a NEW CAMPAIGN wrapped around
+  an engine that already knew how to have a battle.
+============================================================ -->
+<style>
+  :root{color-scheme:dark;
+    --sand:#d9b979; --sand-d:#8a6f3e; --ink:#f4ecd8; --bg:#120e09;
+    --hot:#ff8a3d; --blood:#c4453a; --steel:#7fa8c8; --gold:#ffd166}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;color:var(--ink);
+    font:600 15px/1.35 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  canvas{display:block}
+  button{font:inherit;color:inherit}
+
+  /* ---- boot ---- */
+  #boot{position:fixed;inset:0;z-index:90;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:16px;
+    background:radial-gradient(120% 90% at 50% 30%,#2a1d0e,#120e09 70%)}
+  #boot h1{margin:0;font-size:clamp(28px,9vw,60px);letter-spacing:-.02em;line-height:.92;text-align:center}
+  #boot h1 em{font-style:normal;color:var(--hot)}
+  #bootbarwrap{width:min(420px,72vw);height:4px;border-radius:3px;background:rgba(255,255,255,.1);overflow:hidden}
+  #bootbar{height:100%;width:0;background:var(--hot);transition:width .18s linear}
+  #bootst{font-size:11px;letter-spacing:.22em;opacity:.55}
+
+  /* ---- the one surface every screen paints into ---- */
+  #stage{position:fixed;inset:0;z-index:40;display:none;overflow:auto;
+    background:radial-gradient(130% 100% at 50% 0%,#241a0e,#120e09 74%);
+    padding:18px 14px 34px}
+  #stage.on{display:block}
+  #stage .in{max-width:860px;margin:0 auto}
+  .wl-h{margin:2px 0 4px;font-size:clamp(22px,6vw,40px);letter-spacing:-.01em;line-height:1}
+  .wl-h em{font-style:normal;color:var(--hot)}
+  .wl-sub{margin:0 0 16px;opacity:.5;letter-spacing:.2em;font-size:11px}
+  .wl-lbl{font-size:11px;letter-spacing:.22em;opacity:.55;margin:18px 0 8px}
+  .wl-card{border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:13px 14px;
+    background:rgba(255,255,255,.03);margin-bottom:10px}
+  .wl-row{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:7px 0;
+    border-bottom:1px solid rgba(255,255,255,.06)}
+  .wl-row:last-child{border-bottom:0}
+  .wl-btn{appearance:none;border:1px solid rgba(255,255,255,.16);border-radius:12px;
+    background:rgba(255,255,255,.05);padding:11px 15px;cursor:pointer;letter-spacing:.08em;
+    font-size:13px;transition:background .12s,border-color .12s}
+  .wl-btn:hover{background:rgba(255,255,255,.1)}
+  .wl-btn:active{transform:translateY(1px)}
+  .wl-btn.hot{border-color:var(--hot);background:rgba(255,138,61,.14);color:#ffd7bd}
+  .wl-btn.bad{border-color:var(--blood);background:rgba(196,69,58,.14)}
+  .wl-btn.ghost{opacity:.55}
+  .wl-btn[disabled]{opacity:.3;cursor:not-allowed}
+  .wl-btns{display:flex;flex-wrap:wrap;gap:9px;margin-top:12px}
+  .wl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+  .wl-gold{color:var(--gold)}
+  .wl-dim{opacity:.5}
+  .wl-small{font-size:11px;letter-spacing:.1em}
+
+  /* ---- the persistent strip: who you are, at all times ---- */
+  #hud{position:fixed;left:0;right:0;top:0;z-index:50;display:none;
+    padding:calc(env(safe-area-inset-top,0px) + 8px) 12px 8px;
+    background:linear-gradient(#0009,#0000);pointer-events:none}
+  #hud.on{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  #hud b{font-size:15px;letter-spacing:.06em}
+  #hud .chip{font-size:11px;letter-spacing:.16em;opacity:.75}
+
+  /* ---- toasts ---- */
+  #toasts{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 92px);
+    z-index:70;display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none}
+  .toast{background:rgba(18,14,9,.9);border:1px solid rgba(255,255,255,.14);border-radius:11px;
+    padding:8px 14px;font-size:13px;letter-spacing:.05em;animation:tin .2s ease-out}
+  .toast.bad{border-color:var(--blood);color:#ffc9c4}
+  .toast.good{border-color:#5aa86a;color:#c9ffd4}
+  @keyframes tin{from{opacity:0;transform:translateY(6px)}}
+
+  body.coarse .wl-btn{padding:14px 17px}
+</style>
+</head>
+<body>
+<div id="boot">
+  <h1>DESERT <em>WARLORD</em></h1>
+  <div id="bootbarwrap"><div id="bootbar"></div></div>
+  <div id="bootst">OPENING THE STUDIO</div>
+</div>
+<div id="hud"></div>
+<div id="stage"></div>
+<div id="toasts"></div>
+
+<script src="../src/core/studio.js?v=warlord1"></script>
+<script>
+"use strict";
+(function () {
+const el = function (id) { return document.getElementById(id); };
+const bootst = function (t) { const n = el("bootst"); if (n) n.textContent = t; };
+const CBZ = window.CBZ = window.CBZ || {};
+const Q = new URLSearchParams(location.search);
+
+/* ============================================================ LOAD
+   Three lists, in three shapes, for three reasons.
+
+   NEED is studio packs — the engine. `people` and `ragdoll` are what make a
+   man a man and a corpse a corpse; `fx`, `damage`, `sound`, `batch` are the
+   war. `caps` is the quality tier. This page does NOT load `beasts` or
+   `bestiary`: there are no animals in this game and forty files of bestiary
+   on a phone's first load is forty files nobody asked for.
+
+   ARMOURY is loaded verbatim from the same place games/battle.html loads it,
+   for exactly the same reason: the guns in this game are the repo's guns, and
+   a second copy of a rifle is how two files start disagreeing about what a
+   rifle does. Every one of these is engine source; this page adds nothing to
+   any of them.
+
+   WARLORD is the game — the only genuinely new code on the page. */
+const NEED = ["caps", "people", "ragdoll", "fx", "damage", "sound", "batch"];
+const ARMOURY = [
+  "weapons/weapon-data.js",
+  "weapons/weapon-scale.js",
+  "weapons/appearances/sidearm.js", "weapons/appearances/shotgun.js",
+  "weapons/appearances/carbine.js", "weapons/appearances/smg.js",
+  "weapons/appearances/revolver.js", "weapons/appearances/deagle.js",
+  "weapons/appearances/ak47.js", "weapons/appearances/uzi.js",
+  "weapons/appearances/sniper.js", "weapons/appearances/lmg.js",
+  "weapons/appearances/bazooka.js", "weapons/appearances/taser.js",
+  "weapons/appearances/glauncher.js",
+  "systems/actorweapons.js",
+  "systems/gunfx.js",
+  "systems/combat_iq.js",
+  "systems/wounds.js",
+];
+const WARLORD = [
+  "warlord/core.js",
+  "warlord/desert.js",
+  "warlord/campaign.js",
+  "warlord/army.js",
+  "warlord/battle.js",
+  "warlord/outpost.js",
+  "warlord/loadout.js",
+  "warlord/warnet.js",
+];
+
+const PLAN = CBZ.studio.plan(NEED);
+let TOTAL = PLAN.files.length + ARMOURY.length + WARLORD.length;
+let got = 0;
+function bar(label) {
+  const b = el("bootbar");
+  if (b) b.style.width = Math.round(got / Math.max(1, TOTAL) * 100) + "%";
+  if (label) bootst(label + "  " + got + "/" + TOTAL);
+}
+CBZ.studio.onProgress(function (p) {
+  got++;
+  bar(p.file.replace(/^.*\//, "").replace(/\.js$/, "").toUpperCase());
+});
+
+/* ORDERED EXECUTION, PARALLEL DOWNLOAD — battle.html's own trick, and it is
+   the difference between a 31-round-trip boot and a one-round-trip boot on a
+   hop-per-file host. `async=false` on an appended script is the spec's
+   "execute in order as soon as possible" list. Safe here because none of
+   these files calls addLandmass, so no file depends on being alone in flight.
+   An optional file that 404s must not take the page with it — a missing
+   warnet.js should cost you multiplayer, not the game. */
+function loadBatch(list, label, optional) {
+  return new Promise(function (resolve) {
+    let left = list.length;
+    if (!left) return resolve();
+    list.forEach(function (rel) {
+      const s = document.createElement("script");
+      s.src = CBZ.studio.root + rel;
+      s.async = false;
+      const tick = function () { got++; bar(label); if (--left === 0) resolve(); };
+      s.onload = tick;
+      s.onerror = function () {
+        console.warn("[warlord] failed:", rel);
+        if (!optional) console.error("[warlord] that file was required");
+        tick();
+      };
+      document.head.appendChild(s);
+    });
+  });
+}
+
+bootst("OPENING THE STUDIO");
+CBZ.studio.warm(ARMOURY.concat(WARLORD));
+CBZ.studio.prefetch(NEED);
+
+CBZ.studio.need(NEED)
+  .then(function () { bootst("OPENING THE ARMOURY"); return loadBatch(ARMOURY, "ARMOURY"); })
+  .then(function () { bootst("RAISING THE ISLAND"); return loadBatch(WARLORD, "WARLORD", true); })
+  .then(start);
+
+/* ============================================================ START */
+function start() {
+  const THREE = window.THREE;
+  const W = CBZ.warlord;
+  if (!W) { bootst("warlord/core.js did not load"); return; }
+
+  /* ---- the shims that let the shared combat brain run out here ----
+     Identical in kind to games/battle.html's three, and for the identical
+     reason: combat_iq, ordnance and the two ragdoll solvers ask the CITY for
+     services (colliders, the floor, a circle resolve) and the city is not on
+     a slice page. Route the NAME to microboot's equivalent; never fork the
+     file that asks. Which ground `floorAt` means depends on the phase, so it
+     asks the modules rather than closing over one. */
+  if (!CBZ.queryCollidersNear) {
+    CBZ.queryCollidersNear = function (x, z, r, out) { return CBZ.micro.queryColliders(x, z, r, out); };
+  }
+  if (CBZ.now == null) CBZ.now = performance.now();
+  if (!CBZ.floorAt) {
+    CBZ.floorAt = function (x, z) {
+      const B = W.battle;
+      if (B && B.live && B.live() && B.groundAt) return B.groundAt(x, z);
+      if (W.desert && W.desert.heightAt) return W.desert.heightAt(x, z);
+      return 0;
+    };
+  }
+  if (!CBZ.collide) {
+    CBZ.collide = function (p, r, yLo, yHi) {
+      return CBZ.micro.resolveCircle(p, r || 0.2, yLo == null ? p.y : yLo,
+        Math.max(0.1, (yHi == null ? p.y + 0.2 : yHi) - (yLo == null ? p.y : yLo)));
+    };
+  }
+  /* THE DEAD ARE THE POINT OF A WAR GAME, so the two corpse solvers get this
+     page's budgets rather than the city's. Same numbers battle.html measured:
+     the city's eight-body cap was chosen for a camera standing IN a fight,
+     and this camera flies over an army where a whole rank goes down at once. */
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  const C = CBZ.CONFIG;
+  if (C.RAGDOLL_ANY_MODE == null) C.RAGDOLL_ANY_MODE = true;
+  if (C.RAGDOLL_RANGE == null) C.RAGDOLL_RANGE = 170;
+  if (C.RAGDOLL_ACTIVE == null) C.RAGDOLL_ACTIVE = 28;
+  if (C.RAGDOLL_POOL == null) C.RAGDOLL_POOL = 110;
+  CBZ.ragdollDriven = true;
+
+  const COARSE = CBZ.studio.touchDevice;
+  if (COARSE) document.body.classList.add("coarse");
+
+  /* ---- one canvas, one loop, for the whole game ---- */
+  CBZ.micro.boot({ far: 16000 });
+  /* THE AIR IS THE PLACE. A desert read from 60 m up is mostly haze, so the
+     sky's own horizon colour becomes the fog colour (micro.sky derives it —
+     never type the fog colour twice) and the far plane is pushed out to
+     16 km because the island is 14 km across and its far shore has to be a
+     thing you can SEE from a dune, not a thing that fades in as you ride. */
+  CBZ.micro.sky({ top: 0x4478ad, bottom: 0xe6cda1, fogNear: 1400, fogFar: 11000, radius: 15000 });
+  CBZ.micro.lights({ skyColor: 0xcfe0f2, groundColor: 0xbf9a5e, sunColor: 0xfff1cf, sun: 1.12, shadowSpan: 260 });
+
+  const ctx = {
+    THREE: THREE, CBZ: CBZ, W: W,
+    scene: CBZ.scene, micro: CBZ.micro,
+    coarse: COARSE, Q: Q,
+    el: el, stage: el("stage"), hud: el("hud"),
+  };
+  CBZ.warlordCtx = ctx;
+
+  /* ---- the toast surface, wired once ---- */
+  W.on("toast", function (t) {
+    const box = el("toasts");
+    if (!box) return;
+    const n = document.createElement("div");
+    n.className = "toast " + (t.kind || "");
+    n.textContent = t.text;
+    box.appendChild(n);
+    setTimeout(function () { if (n.parentNode) n.parentNode.removeChild(n); }, 2600);
+  });
+
+  /* ---- the strip. It is on for everything that happens on the island and
+         off for the battle, which draws its own. ---- */
+  function paintHud() {
+    const h = el("hud");
+    if (!h) return;
+    const S = W.state;
+    const p = W.phase();
+    const show = p === "campaign" || p === "encounter" || p === "outpost" || p === "armoury";
+    h.classList.toggle("on", show);
+    if (!show) return;
+    h.innerHTML =
+      '<b>' + (S.army.length + 1) + ' MEN</b>' +
+      '<span class="chip wl-gold">$' + S.gold + '</span>' +
+      '<span class="chip">DAY ' + S.day + '</span>' +
+      '<span class="chip wl-dim">-$' + W.payroll() + '/DAY</span>' +
+      (S.prisoners.length ? '<span class="chip">' + S.prisoners.length + ' PRISONERS</span>' : '');
+  }
+  W.on("phase", paintHud);
+  W.on("army", paintHud);
+  W.on("gold", paintHud);
+  W.on("dawn", paintHud);
+  ctx.paintHud = paintHud;
+
+  /* ---- the stage helper every screen uses instead of touching innerHTML ---- */
+  ctx.screen = function (html) {
+    const s = el("stage");
+    s.classList.add("on");
+    s.innerHTML = '<div class="in">' + html + '</div>';
+    s.scrollTop = 0;
+    return s;
+  };
+  ctx.closeScreen = function () {
+    const s = el("stage");
+    s.classList.remove("on");
+    s.innerHTML = "";
+  };
+  /* A SCREEN THAT IS NOT THE CURRENT PHASE'S SCREEN MUST NOT BE UP. Every
+     module gets this for free rather than each of them remembering to tear
+     its own DOM down — forgetting once leaves a dead menu over a live game. */
+  W.on("phase", function (t) {
+    if (t.to === "campaign" || t.to === "battle") ctx.closeScreen();
+  });
+
+  /* ---- boot the modules, then hand the screen to the menu ---- */
+  const booted = W.bootModules(ctx);
+  console.log("[warlord] modules:", booted.join(", "));
+  if (Q.get("audit") === "1") console.log("[warlord] audit", W.audit());
+
+  const b = el("boot");
+  if (b) b.style.display = "none";
+  CBZ.micro.start();
+
+  /* ============================================================ MENU */
+  function menu() {
+    W.setPhase("menu");
+    const resume = W.hasSave();
+    ctx.screen(
+      '<h1 class="wl-h">DESERT <em>WARLORD</em></h1>' +
+      '<p class="wl-sub">ONE MAN · ONE PISTOL · FOURTEEN KILOMETRES OF SAND</p>' +
+      '<div class="wl-card"><div class="wl-small wl-dim">' +
+        'You start alone. Every man behind you is one you paid for, frightened into ' +
+        'surrender, or took off a battlefield. Nobody is given to you.' +
+      '</div></div>' +
+      '<div class="wl-btns">' +
+        '<button class="wl-btn hot" id="mNew">RIDE OUT</button>' +
+        (resume ? '<button class="wl-btn" id="mLoad">CONTINUE</button>' : '') +
+        '<button class="wl-btn" id="mNet">MULTIPLAYER</button>' +
+      '</div>'
+    );
+    el("mNew").onclick = function () {
+      W.newGame({ seed: parseInt(Q.get("seed") || "", 10) || undefined });
+      if (W.campaign && W.campaign.enter) W.campaign.enter();
+    };
+    const l = el("mLoad");
+    if (l) l.onclick = function () {
+      if (W.load() && W.campaign && W.campaign.enter) W.campaign.enter();
+      else W.toast("that save is from an older build", "bad");
+    };
+    el("mNet").onclick = function () {
+      if (W.warnet && W.warnet.lobby) W.warnet.lobby();
+      else W.toast("multiplayer did not load", "bad");
+    };
+  }
+  ctx.menu = menu;
+  W.on("mainmenu", menu);
+
+  /* ?go=1 skips the menu — every tool that photographs this page needs to be
+     ON the island, not looking at a title card. */
+  if (Q.get("go") === "1") {
+    W.newGame({ seed: parseInt(Q.get("seed") || "", 10) || 1337 });
+    if (W.campaign && W.campaign.enter) W.campaign.enter();
+  } else {
+    menu();
+  }
+
+  /* ---- the hook the before/after tool stages through ---- */
+  window.__warlordReady = true;
+}
+})();
+</script>
+</body>
+</html>
