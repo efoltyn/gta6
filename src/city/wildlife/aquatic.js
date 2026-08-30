@@ -400,6 +400,7 @@
   // copy of this arithmetic is exactly how the two descriptions drifted apart
   // in the first place. See weldedSleeve below.
   CBZ.aquaticWeldedSleeve = function (hullRings, o) { return weldedSleeve(hullRings, o); };
+  CBZ.aquaticWeldedRostrum = function (hullRings, o) { return weldedRostrum(hullRings, o); };
 
   /* ======================================================================
      THE HULL. Elliptical cross-sections with a SHAPED countershading line.
@@ -604,6 +605,95 @@
     }
     return out;
   }
+  /* ======================================================================
+     THE HEAD WELD — the same defect, at the other end of the animal.
+
+     Owner, 2026-08-30, with three photographs of a live great white: "the head
+     of the great white, like the tail, the former issue we had — the head
+     meets the body and the head is less wide in diameter than the body where
+     the geometry meets, and that should be fixed and streamlined like the tail
+     was."
+
+     He is right, and it is the same bug with the same cause. A shark's snout
+     forward of the jaw hinge is its own shell (it has to be: it LIFTS — see
+     addSnoutShell), and its rings were hand-typed exactly the way the tail
+     sleeve's were. Measured on the shipped great white by firing rays at the
+     built mesh, station by station from the nose back: the outline narrowed
+     into the joint, stepped OUT by 22 mm where the shell's rim emerged, and
+     changed slope in the same millimetre. That reads as a head plugged into a
+     body — a wall you can see in plan view — and no amount of retuning either
+     table fixes it, because there are two tables.
+
+     So the snout is generated the way the tailstock is: its rim is READ OFF
+     THE HULL at the weld station, and it leaves at the hull's own taper (times
+     SLOPE_K, for the same reason the sleeve does — an exactly matched slope
+     lays the two skins on each other through the buried overlap and they
+     z-fight). What a species still declares is only what is its own: where the
+     shell emerges, where the nose ends, and how blunt it is there.
+
+     THE ONE THING THE TAIL DOES NOT NEED: a rostrum swings. At full gape the
+     shell rotates up about the jaw hinge, so its rear rim cannot sit exactly
+     on the skin or the lift opens a crescent of daylight behind it. The first
+     ring is therefore BEHIND the weld and inside the head (buryK of the hull's
+     own circle), which is solid geometry to swing inside of.
+     ====================================================================== */
+  function weldedRostrum(hullRings, o) {
+    const weldX = o.x1, tipX = o.x0, L = Math.max(1e-4, tipX - weldX);
+    const w = ringAt(hullRings, weldX);                  // the hull's own circle
+    const probe = ringAt(hullRings, weldX - L * 0.25);   // ..and its taper behind it
+    function expo(hullR, tipR) {
+      const drop = w[hullR] - o[tipR];
+      if (!(drop > 1e-4)) return 1;
+      const slope = Math.max(0, (probe[hullR] - w[hullR]) / (L * 0.25));
+      return clamp(slope * SLOPE_K * L / drop, 0.55, 2.6);
+    }
+    const py = expo("ry", "tipRy"), pz = expo("rz", "tipRz");
+    const n = Math.max(3, o.n || 5);
+    const tipY = o.tipY == null ? w.y : o.tipY;
+    const out = [];
+    const bx = weldX - (o.bury == null ? L * 0.26 : o.bury);
+    const bw = ringAt(hullRings, bx), bk = o.buryK == null ? 0.88 : o.buryK;
+    out.push({ x: bx, y: bw.y, ry: bw.ry * bk, rz: bw.rz * bk });
+    for (let i = 0; i < n; i++) {
+      const t = 1 - i / (n - 1);            // 1 at the weld, 0 at the tip
+      const s = 1 - t;
+      out.push({
+        x: lerp(tipX, weldX, t),
+        // the snout RISES to the tip, which is the one thing about a shark's
+        // profile the ring radii cannot say. Smoothstepped so the crown line
+        // has no corner at the weld either.
+        y: w.y + (tipY - w.y) * (s * s * (3 - 2 * s)),
+        ry: o.tipRy + (w.ry - o.tipRy) * Math.pow(t, py),
+        rz: o.tipRz + (w.rz - o.tipRz) * Math.pow(t, pz),
+      });
+    }
+    return out;
+  }
+  // The countershading line has to cross the weld without a jog, so the
+  // snout's belly cuts are generated too: they leave at the hull's own value
+  // at the weld station and ramp to whatever the species wants at the nose.
+  function bellyAt(rings, cuts, x) {
+    if (!Array.isArray(cuts)) return cuts == null ? -0.16 : cuts;
+    let i = 0;
+    while (i < rings.length - 2 && rings[i + 1].x < x) i++;
+    const a = rings[i], b = rings[i + 1];
+    const t = b.x === a.x ? 0 : clamp((x - a.x) / (b.x - a.x), 0, 1);
+    return lerp(cuts[i], cuts[Math.min(cuts.length - 1, i + 1)], t);
+  }
+  function rostrumBelly(snoutRings, weldCut, tipCut) {
+    const x0 = snoutRings[1].x, x1 = snoutRings[snoutRings.length - 1].x;
+    return snoutRings.map(function (r) {
+      const t = clamp((r.x - x0) / Math.max(1e-4, x1 - x0), 0, 1);
+      return weldCut + (tipCut - weldCut) * (t * t * (3 - 2 * t));
+    });
+  }
+  /* Everything a species needs to say about its own snout, in one call: the
+     rings AND the belly line that has to cross the same seam. */
+  function rostrumOf(hullRings, hullBelly, o) {
+    const rings = weldedRostrum(hullRings, o);
+    return { rings: rings, belly: rostrumBelly(rings, bellyAt(hullRings, hullBelly, o.x1), o.tipCut) };
+  }
+
   // build it, name it (every sleeve in this file used to be anonymous, which
   // is why the tools that measure this joint have to find it by shape), and
   // hang it on the animal at the one position the weld was solved for.
@@ -1118,7 +1208,15 @@
         // denture ring with daylight behind it. At rest the tall part lives
         // inside the rostrum shell, invisible.
         const split = mouthSplitOn();
-        const kIn = up ? 0.75 : 1, kOut = (up ? 0.50 : 1) * (1 - front * 0.82);
+        /* THE LOWER RAIL IS A CREASE, NOT A SHELF. Coloured by part, the jaw
+           line came out as four stacked rails — gum, lip, tooth base, chin
+           deck — each catching its own highlight, which is what read as white
+           slabs bolted along the mouth. In every reference photograph the
+           lower jaw is skin, then a thin dark crease, then teeth. Halving the
+           lower band's outward reach is what turns the stack back into a
+           line; the tissue is still there, it just stops standing out of the
+           face. */
+        const kIn = up ? 0.75 : 1, kOut = (up ? 0.50 : 0.55) * (1 - front * 0.82);
         const kGum = up ? 0.80 : 1, kLipDn = up ? 0.21 : 0.45;
         const kLipUp = up ? (split ? 1.05 : 0.21) : 0.45;
         rows.push({
@@ -1267,14 +1365,23 @@
           if (i === 0) { rz *= 0.72; bot = lerp(rim - gap * 0.30, bot, 0.45); }
           bot += 0.006;      // a hair above the intact hull belly it duplicates
           const dep = Math.max(gap * 0.10, rim - bot);
+          /* AND THE DECK NARROWS INTO THE JAW. The mouth's floor was carried
+             at a flat 55% of the section's width all the way to the last
+             station, so the forward cap — a fan from that wide flat deck to a
+             single point — came out as a WHITE BOX stuck on the front of the
+             chin, with the dark deck showing as a panel in it. Every reference
+             photograph has a lower jaw that closes to a rounded blade. Taper
+             the deck over the front fifth and the cap becomes that blade. */
+          const nose = clamp((t - 0.78) / 0.22, 0, 1);
+          const deckZ = rz * 0.55 * (1 - 0.72 * nose * nose);
           const pts = [], v = [];
           for (let k = 0; k < ARCP; k++) {
             let p;
             if (k <= 6) {                        // rim +z, around the belly, rim -z
               const ph = (k / 6) * Math.PI;
               p = [lx, rim - dep * Math.pow(Math.sin(ph), 0.8), Math.cos(ph) * rz];
-            } else if (k === 7) p = [lx, rim - deckDrop, -rz * 0.55];
-            else p = [lx, rim - deckDrop, rz * 0.55];
+            } else if (k === 7) p = [lx, rim - deckDrop, -deckZ];
+            else p = [lx, rim - deckDrop, deckZ];
             pts.push(p); v.push(sh.v(p[0], p[1], p[2]));
           }
           st.push({ pts: pts, v: v, lx: lx, rim: rim, dep: dep });
@@ -1741,7 +1848,12 @@
       "|" + [mo.hingeX, mo.hingeY, mo.cornerRise].join(",");
     const geo = cachedGeom(key, function () {
       const sh = new Shell();
-      const N = 11, K = 10, M = K + 2;
+      /* 13 x 14, not 11 x 10. This shell IS the front of the animal's face and
+         it is the one surface a player gets close to; at ten stations around
+         the arc the countershading boundary could only step in 20-degree
+         jumps, which is what turned the white under the snout into a row of
+         hard pale slabs. */
+      const N = 13, K = 14, M = K + 2;
       const st = [];
       for (let i = 0; i < N; i++) {
         const t = i / (N - 1);
@@ -1774,8 +1886,13 @@
       }
       function skinGrp(am, i, k, u) {
         const s = Math.sin(am);
-        const jit = (h01(k * 7 + 1, 0, seed) - 0.5) * 0.14
-          + (h01(k * 7 + 1, i * 13 + 3, seed + 1) - 0.5) * 0.08;
+        /* THE RAGGED EDGE IS A HINT, NOT A SAW. At +/-0.11 in sin-space the
+           jitter was wider than the gap between two stations, so adjacent
+           quads flipped sides of the line and the boundary came out as
+           interlocking teeth of white and grey. Halved, it reads as the soft
+           irregular margin the photographs show. */
+        const jit = (h01(k * 7 + 1, 0, seed) - 0.5) * 0.07
+          + (h01(k * 7 + 1, i * 13 + 3, seed + 1) - 0.5) * 0.04;
         return s < cutOf(u) + jit ? 1 : 0;
       }
       for (let i = 0; i < N - 1; i++) {
@@ -1879,21 +1996,46 @@
     { x: -0.50, y: 0.850, ry: 0.500, rz: 0.375 },
     { x: 0.20, y: 0.850, ry: 0.600, rz: 0.455 },
     { x: 0.85, y: 0.860, ry: 0.615, rz: 0.485 },   // MAX GIRTH — the pectoral line
-    { x: 1.45, y: 0.885, ry: 0.545, rz: 0.455 },
-    { x: 1.95, y: 0.935, ry: 0.420, rz: 0.405 },   // wide, low head dome
-    { x: 2.16, y: 0.965, ry: 0.296, rz: 0.320 },   // buried under the rostrum shell
-  ];
-  const GW_SNOUT = [
-    { x: 1.70, y: 0.905, ry: 0.487, rz: 0.432 },   // tucks back inside the head
-    { x: 1.95, y: 0.935, ry: 0.420, rz: 0.405 },
-    { x: 2.33, y: 1.000, ry: 0.255, rz: 0.315 },
-    { x: 2.62, y: 1.035, ry: 0.125, rz: 0.195 },   // blunt, slightly upturned tip
+    /* THE CHEEK KEEPS THE BEAM. This ring used to give up 6% of the animal's
+       width before the head had even started, so the widest thing about a
+       great white seen head-on was its shoulders and the face was a ball
+       hanging off the front of them. In the reference photographs the beam
+       carries forward through the gills and lets go only at the cheek. */
+    { x: 1.45, y: 0.885, ry: 0.530, rz: 0.480 },
+    /* ..and from the weld forward the hull is BURIED INSIDE THE ROSTRUM (see
+       weldedRostrum). These two rings are never seen: they exist to carry the
+       mouth notch and to give the gill and pore fields a cross-section to sit
+       on, and they are kept comfortably inside the shell's own curve. */
+    { x: 1.95, y: 0.935, ry: 0.370, rz: 0.380 },
+    { x: 2.16, y: 0.965, ry: 0.260, rz: 0.280 },
   ];
   // The countershading LINE, per ring. It runs low across the cheek and kicks
   // hard UP behind the pectoral and over the gills — reference sheet §2. The
   // old single scalar made it a dead-level band all the way down the animal.
   const GW_BELLY = [-0.38, -0.34, -0.26, -0.10, 0.16, 0.00, -0.20, -0.28];
-  const GW_SNOUT_BELLY = [-0.14, -0.20, -0.36, -0.46];
+  /* THE SNOUT IS NOT A SECOND TABLE ANY MORE. Rings and countershading are
+     both solved off the hull at the weld: the species says only where the
+     shell emerges (x1), where the nose ends (x0), how blunt and how flat it is
+     there (tipRy/tipRz — a great white's rostrum is a FLATTENED cone, wider
+     than it is deep, which is why tipRz is the larger of the two), how far the
+     nose lifts (tipY) and where the white reaches (tipCut). */
+  /* THE WELD STATION IS THE HULL'S OWN LAST STATION, and it is not a matter
+     of taste: addSharkHull hands the whole head front to the jaw shells at
+     `hingeX + length*0.07` (1.683 here) and caps itself there. A shell whose
+     rim is solved anywhere FORWARD of that is solved against a hull that has
+     already stopped, which is exactly how the old snout table came to stand
+     22 mm proud of nothing. 1.66 puts the rim a hair inside the hull's last
+     ring, where there is still skin for it to match. */
+  const GW_ROSTRUM = rostrumOf(GW_RINGS, GW_BELLY, {
+    /* AND THE HEAD IS A WEDGE, NOT A BALL. tipRz is the LARGER of the two on
+       purpose: a great white's rostrum is flattened top to bottom, so the
+       shell's width has to give up less of itself per metre than its depth
+       does. The body behind it stays deeper than it is wide, which is the
+       contrast the head-on photograph is all about. */
+    x1: 1.66, x0: 2.62, tipRy: 0.090, tipRz: 0.250, tipY: 1.030, tipCut: -0.46, n: 5,
+  });
+  const GW_SNOUT = GW_ROSTRUM.rings;
+  const GW_SNOUT_BELLY = GW_ROSTRUM.belly;
 
   S({
     id: "great_white_shark", name: "Great White Shark", biome: "water",
@@ -1908,9 +2050,24 @@
       // ONE mouth definition drives three shells: the notch cut into the
       // hull, the notch cut into the rostrum, and the chin the lower jaw
       // actually is. They must share numbers or the closed head leaks.
-      const MOUTH = { hingeX: 1.62, hingeY: 0.716, length: 0.90, width: 0.66, gap: 0.30, cornerRise: 0.135, snoutShell: true };
+      /* THE MOUTH IS AS WIDE AS THE HEAD IS. 0.66 of width against a head
+         whose own half-width at the jaw is 0.449 left the jaw line inboard of
+         the cheek on both sides: head-on, a small mouth in a big face, and in
+         plan the chin was visibly narrower than the skull it hangs under.
+         In the reference photographs the corners of the mouth ARE the widest
+         part of the head. */
+      /* THE MOUTH IS AS WIDE AS THE HEAD CAN CARRY IT, AND NOT ONE
+         MILLIMETRE WIDER. The jaw line's corners sit at hw + railOut from the
+         axis; the head's own half-width where they land is 0.404. At 0.80 the
+         gum band came out past the cheek on both sides — from above, a pink
+         rail running outside the skull. 0.72 with a slimmer outer rail puts
+         the corners just inside the face, which is where a mouth goes. */
+      const MOUTH = { hingeX: 1.62, hingeY: 0.716, length: 0.90, width: 0.72, gap: 0.30, cornerRise: 0.135, snoutShell: true, railOut: 0.72 * 0.055 };
       addSharkHull(g, {
-        top: grey, belly: white, sides: 16, rings: GW_RINGS,
+        // 20, not 16, and only on the hero: head-on, the face is the one part
+        // of this animal a player is ever close enough to count the flats on,
+        // and at 16 the silhouette of the head reads as a drawn polygon.
+        top: grey, belly: white, sides: 20, rings: GW_RINGS,
         bellyCut: GW_BELLY, ragged: 0.075, seed: 21, profile: "torpedo-wedge",
         mouth: MOUTH, interior: m(0x3a1518),
       });
@@ -1922,7 +2079,9 @@
         maxOpen: 1.05, skin: 0xf1f4f4,
       }));
       const snout = addSharkRostrum(g, [grey, white, m(0x421a1e)], GW_SNOUT, {
-        pivotX: 1.95, pivotY: 0.950, sides: 16,
+        // MUST be the hull's own side count: the weld ring and the hull ring
+        // are then the same polygon, not two polygons on the same ellipse.
+        pivotX: 1.95, pivotY: 0.950, sides: 20,
         bellyCut: GW_SNOUT_BELLY, ragged: 0.055, seed: 22, tuck: 0.90,
         mouth: MOUTH,
       });
@@ -2022,16 +2181,21 @@
     { x: -0.35, y: 0.95, ry: 0.92, rz: 0.72 },
     { x: 0.60, y: 0.96, ry: 1.02, rz: 0.83 },     // max girth, forward of centre
     { x: 1.60, y: 0.99, ry: 0.95, rz: 0.80 },
-    { x: 2.50, y: 1.06, ry: 0.76, rz: 0.70 },
-    { x: 3.20, y: 1.16, ry: 0.55, rz: 0.60 },
-    { x: 3.52, y: 1.20, ry: 0.40, rz: 0.49 },
+    { x: 2.50, y: 1.06, ry: 0.74, rz: 0.68 },
+    // buried inside the rostrum from here forward (see weldedRostrum)
+    { x: 3.20, y: 1.16, ry: 0.52, rz: 0.55 },
+    { x: 3.52, y: 1.20, ry: 0.36, rz: 0.42 },
   ];
-  const MEG_SNOUT = [
-    { x: 2.90, y: 1.11, ry: 0.66, rz: 0.66 },
-    { x: 3.20, y: 1.16, ry: 0.55, rz: 0.60 },
-    { x: 3.68, y: 1.22, ry: 0.35, rz: 0.45 },
-    { x: 3.98, y: 1.24, ry: 0.19, rz: 0.31 },
-  ];
+  /* THE APEX FORM HAD THE WORST OF IT. Its snout table began at x = 2.90 and
+     the hull hands the head over at 2.41, so ringAt() was clamping: the shell
+     left the head as a 0.66 CYLINDER while the hull's own cap stood 0.71 wide
+     around it — a collar of body edge visible right round the base of the
+     face, and the largest single step measured on any shark here. */
+  const MEG_BELLY = [-0.40, -0.34, -0.24, -0.06, 0.18, 0.02, -0.18, -0.26];
+  const MEG_ROSTRUM = rostrumOf(MEG_RINGS, MEG_BELLY, {
+    x1: 2.38, x0: 3.98, tipRy: 0.16, tipRz: 0.42, tipY: 1.240, tipCut: -0.46, n: 5,
+  });
+  const MEG_SNOUT = MEG_ROSTRUM.rings;
   S({
     id: "megalodon", name: "Megalodon", biome: "water", rarity: "legendary",
     hp: 1200, fur: "Legendary Megalodon Tooth", furValue: 3000, respawn: false,
@@ -2055,7 +2219,7 @@
       }));
       const snout = addSharkRostrum(g, [dark, white, m(0x3c171d)], MEG_SNOUT, {
         pivotX: 3.20, pivotY: 1.160, sides: 16,
-        bellyCut: [-0.12, -0.20, -0.36, -0.46], ragged: 0.06, seed: 52, tuck: 0.90,
+        bellyCut: MEG_ROSTRUM.belly, ragged: 0.06, seed: 52, tuck: 0.90,
         mouth: MOUTH,
       });
       addSharkFaceDetails(g, T, m, {
@@ -2258,15 +2422,15 @@
     { x: -0.05, y: 0.88, ry: 0.580, rz: 0.470 },
     { x: 0.60, y: 0.89, ry: 0.600, rz: 0.500 },
     { x: 1.20, y: 0.92, ry: 0.520, rz: 0.460 },
-    { x: 1.66, y: 0.98, ry: 0.360, rz: 0.380 },
-    { x: 1.84, y: 1.00, ry: 0.270, rz: 0.318 },
+    // buried inside the rostrum from here forward (see weldedRostrum)
+    { x: 1.66, y: 0.98, ry: 0.345, rz: 0.360 },
+    { x: 1.84, y: 1.00, ry: 0.255, rz: 0.290 },
   ];
-  const BULL_SNOUT = [
-    { x: 1.44, y: 0.955, ry: 0.430, rz: 0.420 },
-    { x: 1.66, y: 0.980, ry: 0.360, rz: 0.380 },
-    { x: 1.96, y: 1.020, ry: 0.250, rz: 0.310 },
-    { x: 2.16, y: 1.025, ry: 0.150, rz: 0.225 },
-  ];
+  const BULL_BELLY = [-0.36, -0.30, -0.14, 0.14, -0.02, -0.22, -0.30];
+  const BULL_ROSTRUM = rostrumOf(BULL_RINGS, BULL_BELLY, {
+    x1: 1.39, x0: 2.16, tipRy: 0.145, tipRz: 0.225, tipY: 1.025, tipCut: -0.46, n: 5,
+  });
+  const BULL_SNOUT = BULL_ROSTRUM.rings;
   S({
     id: "bull_shark", name: "Bull Shark", biome: "water",
     rarity: "uncommon", hp: 110, fur: "Shark Fin", furValue: 190,
@@ -2290,7 +2454,7 @@
       }));
       const snout = addSharkRostrum(g, [grey, white, m(0x421a1e)], BULL_SNOUT, {
         pivotX: 1.66, pivotY: 0.980, sides: 14,
-        bellyCut: [-0.14, -0.20, -0.36, -0.46], ragged: 0.055, seed: 72, tuck: 0.90,
+        bellyCut: BULL_ROSTRUM.belly, ragged: 0.055, seed: 72, tuck: 0.90,
         mouth: MOUTH,
       });
       addSharkFaceDetails(g, T, m, {
