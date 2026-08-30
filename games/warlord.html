@@ -233,6 +233,10 @@ const ARMOURY = [
 ];
 const WARLORD = [
   "warlord/core.js",       // the state. Everything below reads it; nothing below redefines it.
+  "warlord/camo.js",       // procedural camo patterns — outfits.js consumes it
+  "warlord/outfits.js",    // every army's own painted uniform
+  "warlord/wardrobe.js",   // YOUR fit: army dress, the black suit, a general's coat
+  "warlord/sand.js",       // where a foot actually rests, and what it leaves behind
   "warlord/props.js",      // the object library both layers draw from
   "warlord/desert.js",     // the island
   "warlord/mounts.js",     // horses, camels, technicals — campaign speed AND cavalry

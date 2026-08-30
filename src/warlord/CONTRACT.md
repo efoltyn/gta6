@@ -57,6 +57,10 @@ campaign. They use `ctx.screen`/`ctx.closeScreen` and hand it straight back.
 |---|---|
 | `core.js` | the state, the men, the money, phases. No THREE in it. |
 | `props.js` | the object library: outposts, banners, wrecks, cover, camp |
+| `camo.js` | procedural camo pattern textures, cached and shared |
+| `outfits.js` | every faction's own painted uniform, visible by tier |
+| `wardrobe.js` | the player's own fit — army dress, the black suit, generals |
+| `sand.js` | where a foot actually rests, and the prints it leaves |
 | `desert.js` | the island — analytic `heightAt`, biomes, chunked terrain |
 | `mounts.js` | horses/camels/technicals: campaign speed and cavalry |
 | `territory.js` | regions, ownership, the strategic map |
