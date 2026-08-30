@@ -139,6 +139,39 @@
       // `ownDoor` tells the kit this grammar draws its own entrance, so the
       // automatic door surround is skipped rather than stacked on top of it.
       ownDoor: !!def.ownDoor,
+      /* WALL MODE — WHO OWNS THE WALL PLANE.
+
+         OWNER: "CHICAGO LOFT SHOWS WINDOWS I LOVE THAT BUT SOME MIGHT NOT
+         WANT TO SHOW THE WINDOWS."
+
+         Exactly right, and until now nobody had the choice. The shell builds
+         its whole wall — glazing band, sill, header, mullions, and the
+         furnished lit room behind it — BEFORE dressFacade() runs, so every
+         grammar in the kit inherits an office window wall whether or not its
+         culture has glass. That is fine for a Chicago loft, whose entire
+         argument is that you can see the structure and the rooms; it is
+         nonsense for a mudbrick ziggurat, a Maya temple or a Neolithic hut,
+         none of which have windows at all.
+
+           "keep"   (default) the shell glazes as it always has. Every one of
+                    the 31 grammars written before this flag existed gets this
+                    and is byte-identical to what it was.
+           "frame"  the shell punches SMALLER openings in a masonry rhythm
+                    instead of a continuous office band, so the facade can set
+                    piers, arches and reveals around real holes with a real
+                    room behind them. This is what brick.js already gets by
+                    name (buildings.js `punched`); the flag generalises it.
+           "own"    the shell emits SOLID WALL and no glazing at all. The
+                    facade draws whatever openings the culture actually has —
+                    or none. The door still gets built: a building the player
+                    cannot enter breaks interiors, pednav and the mission
+                    layer, and no facade is worth that.
+
+         CRITICAL for the host: in "own" mode the glass pane that is skipped
+         was ALSO the height-gated collider for that storey (buildings.js says
+         so where it builds it). The solid wall box that replaces it has to
+         carry the collider and LOS, or players fall out of upper floors. */
+      wall: (def.wall === "frame" || def.wall === "own") ? def.wall : "keep",
       // WHAT IS IT MADE OF. A key into city/collapse.js's MATERIALS table
       // ("masonry" | "brick" | "adobe" | "stone" | "concrete" | "steel" |
       // "glassbox" | "timber"). The grammar's AUTHOR knows this and nobody
@@ -149,10 +182,18 @@
       // which is the same reason `crownsRoof` and `minStoreys` live here.
       // Omitted → collapse.js infers from storeys/plan/masonry, which is a
       // defensible default and a worse answer than yours.
-      structure: def.structure || null });
+      structure: def.structure || null,
+      // WHEN. Free-form era key, used only by tools/facade-catalog.mjs to
+      // group the sheet. Never read by the game.
+      era: def.era || null });
   };
-  CBZ.facadeList = function () { return Array.from(REG.values()).map((f) => ({ id: f.id, label: f.label })); };
+  CBZ.facadeList = function () { return Array.from(REG.values()).map((f) => ({ id: f.id, label: f.label, era: f.era || null })); };
   CBZ.facadeDef = function (id) { return REG.get(id) || null; };
+  /* THE VOCABULARY IS EXPORTED so city/facade_moves.js can extend it from its
+     own file. F is handed to every build() as its second argument, so a move
+     added there is available to every grammar without touching this file or
+     any of the 31 that already exist. */
+  CBZ.facadeF = null;   // assigned at the bottom of section 2, once F is built
 
   // ============================================================
   //  2. F — THE SHARED VOCABULARY
@@ -395,6 +436,14 @@
 
   CBZ.FACADE_F = F;
 
+  // The vocabulary is complete. Publish it (see CBZ.facadeF above) so
+  // city/facade_moves.js can add compound MOVES to it from its own file —
+  // podium, cornice, colonnade, eave tier, batter, setback, dormer row — the
+  // things eight facades each rewrote out of F.box because there was nowhere
+  // to put them. A move added there reaches every grammar's build(F) without
+  // this file or any existing facade changing a line.
+  CBZ.facadeF = F;
+
   // ============================================================
   //  3. THE SEAM — what buildings.js calls
   // ============================================================
@@ -454,6 +503,19 @@
   CBZ.facadeCrownsRoof = function (dress, hash, storeys) {
     const r = resolve(dress, hash, storeys);
     return !!(r && r.def.crownsRoof);
+  };
+
+  /* WHO OWNS THE WALL PLANE? Asked BEFORE the shell glazes, for the same
+     reason facadeCrownsRoof is asked before the shell roofs: by the time
+     dressFacade() runs the window wall is already built, and a facade cannot
+     un-build it. See the `wall` note on registerFacade for what the three
+     answers mean and for the collider warning on "own".
+
+     Returns "keep" | "frame" | "own". Anything the kit cannot resolve is
+     "keep", so a building with no facade behaves exactly as it always has. */
+  CBZ.facadeWallMode = function (dress, hash, storeys) {
+    const r = resolve(dress, hash, storeys);
+    return (r && r.def.wall) || "keep";
   };
 
   CBZ.dressFacade = function (ctx) {
