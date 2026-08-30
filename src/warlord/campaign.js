@@ -1307,9 +1307,20 @@
       const s = W.tier(army[i].tier);
       const bob = Math.sin(t * 5.2 + i * 1.7) * 0.055;
       const yaw = S.you.yaw + (W.hash01(i, 1, 27) - 0.5) * 0.5;
-      const col = TIER_COLOUR[army[i].tier] || 0x9c8f6d;
+      /* THE COLUMN WEARS WHAT THE BATTLE WILL DRESS IT IN. These are two
+         InstancedMesh colours, not a rig, so they cannot carry a painted
+         uniform — but they must not CONTRADICT one either. outfits.marks()
+         answers off the same fit record battle.js hands to studio.cast, so
+         the man who is a green militiaman in your column is a green
+         militiaman when the fight starts. The tier palette below is the
+         fallback for a page without outfits.js. */
+      let col = TIER_COLOUR[army[i].tier] || 0x9c8f6d, headCol = 0xd9b48c;
+      if (W.outfits && W.outfits.marks) {
+        const mk = W.outfits.marks(army[i], null);
+        if (mk) { if (mk.body != null) col = mk.body; if (mk.head != null) headCol = mk.head; }
+      }
       n = inst(menBody, n, x, y + (0.65 + bob) * ms, z, yaw, ms, ms, ms, col);
-      inst(menHead, n - 1, x, y + (1.48 + bob) * ms, z, yaw, ms, ms, ms, 0xd9b48c);
+      inst(menHead, n - 1, x, y + (1.48 + bob) * ms, z, yaw, ms, ms, ms, headCol);
     }
     // ---- every band close enough to see -------------------------------
     let bn = 0;

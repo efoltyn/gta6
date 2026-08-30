@@ -392,8 +392,18 @@
     const T = W.tier(s.tier);
     const wid = s.wid || "sidearm";
     const w = CBZ.weaponById ? CBZ.weaponById(wid) : null;
-    const group = CBZ.studio.cast(CAST_OF[T.cq] || "civilian",
-      { color: side.colour, variant: i * 2 + side.vseed });
+    /* DRESSED BY HIS ARMY, not tinted by his team. outfits.js owns the 61
+       painted fits and knows which faction this man belongs to; feature-
+       detected so a page where outfits.js failed to load still fields men,
+       and ?outfits=old returns the flat tint byte for byte. Passing
+       side.band is what makes YOUR army read as yours: a null band means
+       "my men", and outfits.js dresses them in whatever faction each was
+       taken out of, with your own colour on their head. */
+    const group = (W.outfits && W.outfits.cast)
+      ? W.outfits.cast(s, side.band || null,
+          { role: CAST_OF[T.cq] || "civilian", variant: i * 2 + side.vseed })
+      : CBZ.studio.cast(CAST_OF[T.cq] || "civilian",
+          { color: side.colour, variant: i * 2 + side.vseed });
     if (!group) return null;
     const at = spawnAt(sideKey, i);
     group.position.set(at.x, MAP.groundAt(at.x, at.z), at.z);
@@ -2129,7 +2139,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     }
 
     SIDES.mine = makeSide("mine", -1, 0xffb347, 0);
-    SIDES.them = makeSide("them", 1, band.colour || 0xc4593a, 1);
+    SIDES.them = makeSide("them", 1, band.colour || 0xc4593a, 1, band);
     SIDES.mine.order = "hold";
     SIDES.them.order = "hold";
 
@@ -2209,9 +2219,14 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     if (e.target && e.target.closest && e.target.closest("#wb .ord,#wb .ret,#microTouch")) return;
     if (camMode !== "cmd" && micro.lock && !ctx.coarse) micro.lock();
   }
-  function makeSide(key, dir, colour, vseed) {
+  function makeSide(key, dir, colour, vseed, band) {
     return {
-      key: key, dir: dir, colour: colour, vseed: vseed, squads: [],
+      /* `band` is who these men ARE, and it is null on purpose for your side:
+         outfits.js reads null as "the warlord's own", and dresses each of
+         your men in the faction he was taken out of rather than a house
+         uniform — which is what makes a conscripted army look like a
+         conscripted army instead of a national one. */
+      key: key, dir: dir, colour: colour, vseed: vseed, band: band || null, squads: [],
       order: "hold", morale: 1, alive: 0, routing: 0, deadN: 0, brokeN: 0,
       kills: 0, shots: 0, hits: 0, power0: 1, powerNow: 1,
       comX: 0, comZ: 0, anchorX: 0, anchorZ: 0, moraleMalus: 0,

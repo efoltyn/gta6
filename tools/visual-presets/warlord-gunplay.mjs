@@ -176,7 +176,6 @@ async function stageWarlordGunplay(input) {
       hits: g.hits || 0,
       kills: g.kills || 0,
       accuracy: g.accuracy || 0,
-      ttk: g.ttk == null ? 0 : g.ttk,
       mag: g.mag == null ? 0 : g.mag,
       reserve: g.reserve == null ? 0 : g.reserve,
       cone: (g.reticle && g.reticle.conePx) || 0,
@@ -186,6 +185,14 @@ async function stageWarlordGunplay(input) {
       yourKills: (a.you && a.you.kills) || 0,
       battleT: a.simT || 0,
     };
+    /* TIME TO KILL IS OMITTED WHEN NOTHING DIED, rather than reported as zero.
+       A beat that killed nobody has no time-to-kill, and writing 0 into a
+       "lower is better" column makes "never killed anyone" the best possible
+       score — MEASURED: it painted six false regressions across the storyboard,
+       every one of them a beat where the FORK failed to kill and was rewarded
+       for it. visual-compare renders an absent metric as "—" and declines to
+       score it, which is the honest reading. */
+    if (g.ttk != null) S.last.ttk = g.ttk;
     return S.last;
   };
 
@@ -274,7 +281,7 @@ export default {
   method:
     "games/warlord.html boots with ?battle=1 (battle.js's own debug door) and ?frozen=1, so the fight begins with its clock stopped. battle.js's freeze()/advance(sec) run exactly that many seconds of the page's own frame through microboot's headless stepSim, which drives every clock in the fight — the sim, combat_iq's CBZ.now, the corpse solver, the recoil recovery, the reload timer — from one place. The warlord is placed and aimed through warlord/gunplay.js's drive seam (place / look / fire / aim / reload), which is the same four verbs the trigger, the AIM latch and the RELOAD button call, so nothing here reaches past the controls a person has. Cameras are the game's own first-person and over-the-shoulder seats, not a preset's private camera math.",
   metricsNote:
-    "rounds/hits/accuracy are counted at the two moments that exist on both builds: a round leaving the magazine and a round landing on a man, so the columns mean the same thing on either side of the flag. ACCURACY GOING DOWN IS THE FINDING, not a regression — the before side is a five-degree cone magnet that cannot miss inside its cone and cannot reach outside it, which is why it lands two rounds in three while standing still and never has to be aimed; the after side is a real spread cone with a climbing muzzle you pull down yourself, and its misses are the reason its hits are worth something. Every one of these counters is ZEROED at the start of each beat, so ttk is the time from that beat's first round leaving to that beat's last man going down, not the time since the storyboard began. `cone` is the reticle's live width in pixels — the honest bloom fpsmode draws from the same spread number it fires with, and structurally zero on a build whose crosshair is three fixed pixels. `reserve` is rounds left in the cart and reads zero before the change because the fork had no reserve at all: it reloaded out of nothing, forever. `engineFiles` counts how many of the three mounted engine files (fpsmode, gunhands, lockon) are actually answering — it is the ratchet on the whole claim.",
+    "rounds/hits/accuracy are counted at the two moments that exist on both builds: a round leaving the magazine and a round landing on a man, so the columns mean the same thing on either side of the flag. ACCURACY GOING DOWN IS THE FINDING, not a regression — the before side is a five-degree cone magnet that cannot miss inside its cone and cannot reach outside it, which is why it lands two rounds in three while standing still and never has to be aimed; the after side is a real spread cone with a climbing muzzle you pull down yourself, and its misses are the reason its hits are worth something. Every one of these counters is ZEROED at the start of each beat, so ttk is the time from that beat's first round leaving to that beat's last man going down, not the time since the storyboard began; a beat that killed nobody has no time-to-kill and reports none, rather than a zero that would score never-killed-anyone as the best possible result. THE TWO ttk ROWS THAT READ RED ARE THE SAME TRADE AS THE HIT RATE, and the row above each says so: the fork's magnet snaps to the nearest man and drops him about a tenth of a second sooner, and in the same beat it kills ONE while the engine kills three and five. Fastest first kill is not the same measurement as most men down. `cone` is the reticle's live width in pixels — the honest bloom fpsmode draws from the same spread number it fires with, and structurally zero on a build whose crosshair is three fixed pixels. `reserve` is rounds left in the cart and reads zero before the change because the fork had no reserve at all: it reloaded out of nothing, forever. `engineFiles` counts how many of the three mounted engine files (fpsmode, gunhands, lockon) are actually answering — it is the ratchet on the whole claim.",
   metrics: {
     rounds: { label: "Rounds fired", unit: "rounds" },
     hits: { label: "Rounds that landed", unit: "hits" },

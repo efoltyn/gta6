@@ -302,9 +302,44 @@
      dress, because a re-dress that leaves yesterday's medals on today's
      fatigues is the exact failure city/outfits.js's bandana clear exists to
      stop. */
+  /* WHY EVERY KIT COLOUR IS GAMMA-DECODED BEFORE IT REACHES A MATERIAL.
+
+     Authored 0xd9b64a gold rendered CREAM and an authored 0x8d2c33 deep red
+     sash rendered PINK. Both are in the first contact sheet, and the first
+     attempt at fixing them — scale the hex down by 0.42 — barely moved them,
+     which is the clue that this is not an exposure problem.
+
+     It is the missing half of a colour pipeline. microboot's renderer sets
+     outputEncoding = sRGB (this file's preview copies it, and so does the
+     game), but r128 has no ColorManagement: a material colour is taken as-is
+     and treated as LINEAR, and only the final frame is encoded to sRGB. So an
+     authored sRGB hex goes into the render one gamma step too bright and
+     comes out lifted — worked through for the sash, 0x8d2c33 lands on screen
+     at about rgb(148,92,97), which is exactly the pink in the plate.
+
+     Decoding the author's hex on the way in is what colour management would
+     do, so `lin()` does it: pow(c, 2.2). After it, an ornament renders at
+     roughly the hex it was written as, which is the only way a palette can be
+     reasoned about at all. `enc()` is the inverse and exists for the one
+     colour that arrives from the OTHER side of the pipeline — a hex read back
+     off a painted atlas is already a linear-space value that renders true, so
+     it is encoded first and then decoded, i.e. left alone.
+
+     The painted garments do not need this: clothes.js authored and shaded
+     those canvases against this same pipeline, which is why a black suit was
+     already black while a black coat panel beside it was slate. */
+  function lin(n) {
+    const f = function (v) { return Math.round(255 * Math.pow(v / 255, 2.2)); };
+    return (f((n >> 16) & 255) << 16) | (f((n >> 8) & 255) << 8) | f(n & 255);
+  }
+  function enc(n) {
+    const f = function (v) { return Math.round(255 * Math.pow(v / 255, 1 / 2.2)); };
+    return (f((n >> 16) & 255) << 16) | (f((n >> 8) & 255) << 8) | f(n & 255);
+  }
   function box(w, h, d, hex) {
     const g = CBZ.boxGeom ? CBZ.boxGeom(w, h, d) : new THREE.BoxGeometry(w, h, d);
-    const m = CBZ.cmat ? CBZ.cmat(hex) : new THREE.MeshLambertMaterial({ color: hex });
+    const c = lin(hex);
+    const m = CBZ.cmat ? CBZ.cmat(c) : new THREE.MeshLambertMaterial({ color: c });
     return new THREE.Mesh(g, m);
   }
   function clearKit(rig) {
@@ -541,14 +576,19 @@
                only have to be retyped when the coat changes, so `coat: true`
                DERIVES the skirt from whatever the garment actually painted
                (cityPaintedBodyHex reads the atlas back) and steps it down.
-               An explicit hex still wins, for a coat in a colour of its own. */
+               An explicit hex still wins, for a coat in a colour of its own.
+               HALF A STEP DARKER than the garment, not equal to it: the first
+               try matched the coat body exactly and the Marshal's oxblood
+               skirt came out MAUVE against a maroon coat. A skirt hanging
+               below the waist is shaded by the body above it, so darker is
+               both what the picture wants and what a coat actually does. */
         let coatHex = K.coat;
         if (coatHex === true) {
           let base = null;
           if (CBZ.cityPaintedBodyHex) {
             try { base = CBZ.cityPaintedBodyHex({ id: fit.paint, style: fit.style != null ? styleIndex(fit.style) : null, colors: fit.colors }, rig); } catch (e) {}
           }
-          coatHex = shade(base != null ? base : (fit.colors.torso || 0x1a1c22), -0.72);
+          coatHex = enc(shade(base != null ? base : (fit.colors.torso || 0x1a1c22), -0.55));
         }
         const jw = (P.jacketW || cb.w + 0.06), jd = (P.jacketD || cb.d + 0.12);
         const top = -cb.h / 2 - 0.10, skirtH = 0.34, tailH = 0.48;
@@ -687,8 +727,18 @@
     };
     if (fit.style != null) rec.style = styleIndex(fit.style);
     if (fit.camo) { rec.camo = fit.camo; if (fit.camoTint != null) rec.camoTint = fit.camoTint; }
+    /* WHAT THE ACCENT IS FOR, and the bug the first contact sheet caught.
+       outfits.js reads det.accent two ways: on a rag or a shemagh it IS the
+       cloth (you tied it on), and on a cap/beret/helmet it is the BAND round
+       issue kit. One default cannot serve both — the flat gold this used
+       painted every shemagh in the game bright yellow, which is in the
+       camo-line plate. So a wrap takes the fit's own head colour and a hat
+       takes the metal. */
+    const wrap = (K.head === "shemagh" || K.head === "rag");
     const det = {
-      accent: fit.accent != null ? fit.accent : (K.badgeColor != null ? K.badgeColor : 0xd9b64a),
+      accent: fit.accent != null ? fit.accent
+        : wrap ? (K.headColor != null ? K.headColor : (c.collar != null ? c.collar : c.torso))
+        : (K.badgeColor != null ? K.badgeColor : 0xd9b64a),
       boots: c.shoes,
       head: SIB_HEAD[K.head] ? K.head : "none",
       // WEAR IS A STATEMENT ABOUT THE FIT, not about the man — outfits.js

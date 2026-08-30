@@ -151,16 +151,36 @@
     // "will this separate from the ground for an eye", not colour science.
     return (((n >> 16) & 255) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114) / 255;
   }
-  /* THE SAND IS 0xd9b979 AND IT EATS EVERYTHING NEAR IT. The first draft of
-     the Desert Legion was authentic sand-khaki and photographed as an empty
-     dune with rifles in it: at 200 m through the haze a uniform inside about
-     0.14 luma of the ground has no edge left. So any cloth colour that lands
-     in the ground's band is pushed OFF it — down, always down, because a
-     lighter-than-sand army reads as glare and a darker one reads as men. The
-     hue is untouched; only the value moves. */
-  const SAND_LUM = lum(0xd9b979);            // ~0.75
-  const SAND_GUARD = 0.15;
-  function readable(hex) {
+  /* THE SAND EATS EVERYTHING NEAR IT. The first draft of the Desert Legion
+     was authentic sand-khaki and photographed as an empty dune with rifles in
+     it: a uniform inside about a seventh of the ground's luminance has no
+     edge left at range. So any cloth colour that lands in the ground's band
+     is pushed OFF it — down, always down for anything at or below the ground,
+     because a darker-than-sand army reads as men and a lighter one reads as
+     glare. The hue is untouched; only the value moves.
+
+     THE REFERENCE IS MEASURED, NOT TYPED, and it moved once already. The
+     first version compared against 0xd9b979, the number a person means by
+     "sand" — but what matters is what the ISLAND RENDERS, and that changed
+     under the page's exposure fix (games/warlord.html used to raise two suns
+     and two skies; another agent found and fixed it mid-wave). Photographed
+     off the live campaign at seed 1337 after the fix, the island's dune faces
+     come back at rgb(156,140,113). That is the number. It is compared against
+     AUTHORED cloth values rather than rendered ones, which is not sloppiness:
+     a vertical torso catches roughly two thirds of what a horizontal dune
+     does, so an authored hex lands about a seventh of a stop below its own
+     value on a body, and folding that into the guard is one constant instead
+     of a lighting model in a wardrobe file. */
+  const SAND_LUM = lum(0x9c8c71);            // measured off the live island, ~0.56
+  const SAND_GUARD = 0.12;
+  function readable(hex, isCamo) {
+    /* CAMOUFLAGE IS EXEMPT AND THAT IS THE WHOLE POINT OF IT. Pushing the
+       Desert Legion's cloth off the ground's value would be undoing camo.js's
+       entire job — it scores its own patterns for concealment against this
+       exact ground. A camouflaged army is SUPPOSED to be quiet; its read
+       comes off the oxblood, the webbing and the headgear instead, which is
+       what the glass-legion photograph is there to check. */
+    if (isCamo) return hex;
     const L = lum(hex);
     if (Math.abs(L - SAND_LUM) >= SAND_GUARD) return hex;
     /* DIRECTION IS NOT SYMMETRIC and the first pass got it wrong in a way the
@@ -1003,9 +1023,10 @@
     const s = ch.skinSlots;
     const wear = det.wear || 0;
     const c = rec.colors;
-    const torso = readable(weathered(c.torso != null ? c.torso : 0x8a939c, wear));
-    const arms = readable(weathered(c.arms != null ? c.arms : c.torso, wear));
-    const legs = readable(weathered(c.legs != null ? c.legs : torso, wear));
+    const cam = !!rec.camo;
+    const torso = readable(weathered(c.torso != null ? c.torso : 0x8a939c, wear), cam);
+    const arms = readable(weathered(c.arms != null ? c.arms : c.torso, wear), cam);
+    const legs = readable(weathered(c.legs != null ? c.legs : torso, wear), cam);
     const collar = c.collar != null ? weathered(c.collar, wear * 0.5) : torso;
     const shoes = det.boots != null ? det.boots : (c.shoes != null ? c.shoes : 0x2b241c);
 
@@ -1089,7 +1110,14 @@
      with the accent as a band, because an army that issues helmets does not
      issue them in the flag colour. */
   function headColour(rec, det) {
-    if (det.head === "rag" || det.head === "shemagh" || det.headAccent) {
+    /* A BERET IS A UNIT COLOUR. That is what a beret IS — no army on earth
+       issues one in the same drab as the trousers — and the metric caught the
+       consequence of not knowing it: the Free Company scored ZERO men flying
+       their own colour on the head, because its whole ladder is caps and
+       helmets in the uniform's own dark tone with a thin accent band. Half a
+       professional army in a steel-blue beret is both more correct and the
+       thing that makes the Company findable in the line-of-battle shot. */
+    if (det.head === "rag" || det.head === "shemagh" || det.head === "beret" || det.headAccent) {
       // a levy's cloth is faded and second-hand; from raider up it is the
       // real colour, because by then somebody handed it to him on purpose
       return det.rank <= 0 ? mix(det.accent, DUST, 0.42) : det.accent;
@@ -1145,14 +1173,14 @@
     const rec = forSoldier(soldier, band);
     const det = detail(soldier, band, rec);
     const c = rec.colors;
-    let body = readable(weathered(c.torso != null ? c.torso : 0x8a939c, det.wear));
+    let body = readable(weathered(c.torso != null ? c.torso : 0x8a939c, det.wear), !!rec.camo);
     /* A CAMOUFLAGED MAN AT STRATEGIC ZOOM IS HIS PATTERN'S MEAN COLOUR — not
        the base colour the record happens to name, which for desert3 is a
        full step lighter than the tile actually averages. camo.js measures it;
        ask it rather than eyeballing a second number. */
     if (rec.camo && W.camo && W.camo.mean) {
       const pat = camoPattern(rec, det);
-      try { if (pat) { const mn = W.camo.mean(pat); if (mn != null) body = readable(mn); } } catch (e) {}
+      try { if (pat) { const mn = W.camo.mean(pat); if (mn != null) body = mn; } } catch (e) {}
     }
     // the head instance is the HAT when he has one, and skin-ish when he does
     // not: at strategic zoom the head speck is the tier read.
@@ -1460,13 +1488,21 @@
       const ch = rigOf(men[i].group);
       if (ch && CBZ.animChar) { try { CBZ.animChar(ch, 0, 1 / 60); } catch (e) {} }
     }
-    if (CBZ.micro && CBZ.micro.sky) {
-      /* The battle's own air (battle.js sets fog 420/2900 at 0xd8c49a) so a
-         200 m read here is the 200 m read there. A studio with no haze in it
-         would prove nothing about a battlefield. */
-      CBZ.micro.sky({ top: 0x6f95bc, bottom: 0xe6cda1, fogNear: 420, fogFar: 2900, radius: 6000 });
-      if (CBZ.scene && CBZ.scene.fog) { CBZ.scene.fog.color.setHex(0xd8c49a); CBZ.scene.fog.near = 420; CBZ.scene.fog.far = 2900; }
-    }
+    /* THE GALLERY DOES NOT RAISE A SKY, and that is a correction, not an
+       omission. It used to call micro.sky() to get the battle's haze — and
+       micro.sky() UNCONDITIONALLY ADDS A DOME (microboot.js:221), which is
+       precisely the fault the page itself was just fixed for: boot() already
+       raises one, so calling sky() again nests a second inside it. Two agents
+       hand-darkened their palettes around that before anybody found it. A
+       debug scaffold has no business re-opening it.
+
+       What the range shots actually need is the BATTLE's fog distances rather
+       than the campaign's, and that is two numbers written into the fog the
+       page already owns. (Finding, while we are here: battle.js's fog is
+       420-2900, so at 200 m there is no haze in this game at all — range is
+       purely angular size, and the preset says so.) */
+    if (scene.fog && layout === "line") { scene.fog.near = 420; scene.fog.far = 2900; }
+
     /* NOTHING ELSE IN THE SCENE. A stray prop left over from another
        module's boot photographs as a green cylinder in the middle of a
        uniform census, and on an A/B it is indistinguishable from a change.
