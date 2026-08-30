@@ -1632,12 +1632,30 @@
   if (CBZ.isTouchDevice()) enable();
 
   // controls only show while actually playing; weapon buttons only while armed
-  const SHARK_SIM_HIDE = ["tfire", "tjump", "tview"];
+  //
+  // SHARK SIM keeps the TRIGGER and loses the rest. JUMP is still a duplicate
+  // (Space IS rise on a mount) and the eye button is still a settings choice
+  // (CBZ.sharkSimViewSet), but FIRE is a real verb down here: fireAction()
+  // routes it straight into CBZ.cityMountedAnimalAttack, which is the shark's
+  // own bite. See the .tshark note below.
+  const SHARK_SIM_HIDE = ["tjump", "tview"];
   CBZ.onAlways(98, function () {
     if (!built) return;
     const root = document.getElementById("touch");
     const show = enabled && CBZ.game.state === "playing";
     root.style.display = show ? "block" : "none";
+    /* SHARK SIM'S THUMB CORNER (owner, 2026-08-30: "bring back the attack
+       button from nat disaster into shark sim, put it UNDER dive and rise,
+       where it is on nat disaster already … make them bigger, better UX").
+
+       One body class carries the whole arrangement, because two files draw
+       into that corner and they must agree on the geometry: mobile.css sizes
+       #tfire off `body.tshark` and publishes --shark-btn/--shark-gap, and
+       touch_vehicle.js's aux rail reads those same vars to stack DIVE/RISE
+       directly above the trigger instead of on top of it. Toggled BEFORE the
+       !show return so leaving the mode — or the match simply ending — can
+       never strand the class on the body and shrink another mode's FIRE. */
+    document.body.classList.toggle("tshark", show && CBZ.game.mode === "sharksim");
     if (!show) {
       if (stick.id !== null) releaseStick();
       if (walk.on) cancelWalk();
@@ -1656,12 +1674,15 @@
     // If the player entered a road car while still holding the on-foot stick,
     // release it before another frame can leak its WASD into the car.
     if (carButtonsActive() && stick.id !== null) releaseStick();
-    // SHARK SIM: move is the whole game on the glass. The bite is automatic
-    // (modes/shark_sim.js pulls the mount's own trigger), RISE/DIVE are
-    // touch_vehicle's mount rail, and the view is a settings choice now
-    // (CBZ.sharkSimViewSet) — so FIRE, JUMP and the eye button are chrome
-    // with no verb behind them. Owner 2026-08-29: "just rise dive and the
-    // move pad". JUMP was even a duplicate: Space IS rise on a mount.
+    // SHARK SIM: the glass is the move pad plus ONE COLUMN of three roundels
+    // in the thumb corner — RISE (∧) and DIVE (∨) off touch_vehicle's mount
+    // rail, standing on ATTACK, which is this file's own #tfire kept exactly
+    // where nat disaster puts it. The auto-bite (modes/shark_sim.js pulls the
+    // mount's trigger whenever prey is in front of the mouth) stays; the
+    // button is the player's own pull on top of it, and the mount's cooldown
+    // means a mashed thumb can't out-bite the shark. JUMP and the eye button
+    // are still chrome with no verb behind them — Space IS rise on a mount,
+    // and the view is a settings choice (CBZ.sharkSimViewSet).
     const sharkSim = CBZ.game.mode === "sharksim";
     for (let i = 0; i < SHARK_SIM_HIDE.length; i++) {
       const sb = document.getElementById(SHARK_SIM_HIDE[i]);

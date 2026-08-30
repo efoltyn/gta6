@@ -201,14 +201,32 @@
   }
 
   // ---- DOM -------------------------------------------------------------------
-  function pill(id, label, cls) {
-    return '<button type="button" id="' + id + '" class="tvbtn ' + (cls || "") + '">' + label + "</button>";
+  function pill(id, label, cls, aria) {
+    // `aria` is only needed when the label is a GLYPH — a worded pill already
+    // says what it is, and duplicating the word into aria-label just makes a
+    // screen reader read it twice.
+    return '<button type="button" id="' + id + '" class="tvbtn ' + (cls || "") + '"' +
+      (aria ? ' aria-label="' + aria + '"' : "") + ">" + label + "</button>";
   }
-  // The aux rail's LOOK is entirely the existing .tvbtn / .tv-sm / .tv-big /
-  // .tv-go / .tv-warn vocabulary — nothing new is styled. Only its POSITION is
-  // new, and it is one rule: a second column standing in the dial's own
-  // footprint (the dial is 128 px tall at bottom:4, so bottom:142 clears it)
-  // growing upward, so the primary thumb column never gets a seventh button.
+  /* THE VERTICAL AXIS IS AN AXIS, NOT TWO WORDS. (owner, 2026-08-30: "change
+     dive/rise to <> but vertical, not horizontal ofc.")
+
+     ∧ over ∨ — one chevron each, drawn as SVG rather than a "^"/"v" character
+     so the two are mirror images at every size instead of two unrelated
+     glyphs from whatever font happened to load. A stacked pair of chevrons
+     states the axis by SHAPE, which is the whole point of a wordless control:
+     nothing to read, and it reads the same in every language. */
+  const CHEV = {
+    up: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.6 16.1 12 8.3l7.4 7.8"/></svg>',
+    down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.6 7.9 12 15.7l7.4-7.8"/></svg>',
+  };
+  // The aux rail's LOOK is the existing .tvbtn / .tv-sm / .tv-big / .tv-go /
+  // .tv-warn / .tv-cold vocabulary (mobile.css owns all six tints). Only its
+  // POSITION is new, and it is one rule: a second column standing in the
+  // dial's own footprint (the dial is 128 px tall at bottom:4, so bottom:142
+  // clears it) growing upward, so the primary thumb column never gets a
+  // seventh button. The two additions below are a glyph-pill svg rule (the
+  // DIVE/RISE chevrons) and the Shark Sim seat.
   function auxCss() {
     if (document.getElementById("tvAuxCss")) return;
     const s = document.createElement("style");
@@ -219,27 +237,52 @@
       "#tveh #tvAux .tvrow{display:flex;flex-direction:row;gap:8px;}" +
       "#tveh #tvAux .tvbtn{min-width:96px;}" +
       "#tveh #tvAux .tvrow .tvbtn{min-width:60px;padding:8px 10px;}" +
-      /* SHARK SIM (.tv-shark on #tveh, see layout()): FIRE and JUMP are off
-         the glass in this mode (systems/touch.js), so their corner thumb
-         spots are empty — and that corner is exactly where the owner wants
-         DIVE/RISE (2026-08-29: "they should be where the attack and jump
-         buttons were"). #tveh sits at right:14/bottom:18 (+safe area) and
-         #tbtns at right:16/bottom:22, so right:2/bottom:4 inside the layer
-         lands the rail on the on-foot cluster's own corner. Column-reverse
-         already puts DIVE (first) at the bottom where FIRE was, RISE above
-         it where JUMP was; the sizes are FIRE's 84 and JUMP's 72, round,
-         same 12px gap as #tbtns. */
-      "#tveh.tv-shark #tvAux{right:2px;bottom:4px;align-items:center;gap:12px;}" +
-      "#tveh.tv-shark #tvAux .tvbtn{width:84px;height:84px;min-width:84px;min-height:84px;" +
-      "border-radius:50%;padding:0;font-size:15px;}" +
-      "#tveh.tv-shark #tvAux #tvMRise{width:72px;height:72px;min-width:72px;min-height:72px;font-size:13px;}" +
-      "@media (max-width:820px){#tveh #tvAux{right:118px;bottom:120px;}" +
+      // A glyph pill (the DIVE/RISE chevrons) anywhere in the rail. #tveh's
+      // base sheet only ever styled svg inside .tv-fire, so without this an
+      // inline chevron would render as a black filled blob at whatever size
+      // the viewBox felt like.
+      "#tveh #tvAux .tvbtn svg{width:34px;height:34px;display:block;fill:none;" +
+      "stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;}" +
+      /* SHARK SIM (.tv-shark on #tveh, see layout()) — THE THREE-BUTTON
+         COLUMN. Owner, 2026-08-30: "bring back the attack button from nat
+         disaster into shark sim, put it UNDER dive and rise, where it is on
+         nat disaster already … make them bigger, better UX on touch."
+
+             ∧   RISE     #tvMRise   (this rail)
+             ∨   DIVE     #tvMDive   (this rail)
+             ⊕   ATTACK   #tfire     (systems/touch.js — nat disaster's OWN
+                                      trigger, un-hidden, in its own corner)
+
+         The rail used to SIT IN the trigger's corner, because the trigger
+         wasn't there: right:2/bottom:4 inside #tveh is exactly #tbtns'
+         right:16/bottom:22 once both safe-area insets are counted. Now that
+         ATTACK is back in that spot the rail lifts by the trigger's own
+         height plus one gap and stands on it.
+
+         Every number is a var published by mobile.css on `body.tshark`, so
+         the trigger's size and this rail's lift are ONE fact in ONE place —
+         a rail that lifts by a stale 84 while the button under it is 92 is
+         two buttons in one hole, and that is the exact bug the old
+         hard-coded pair would have grown. Same size for all three: equal
+         roundels right-align AND centre-align down the column, which a
+         mixed 84/72 pair never did. */
+      "#tveh.tv-shark #tvAux{right:2px;align-items:center;gap:var(--shark-gap,14px);" +
+      "bottom:calc(4px + var(--shark-btn,92px) + var(--shark-gap,14px));}" +
+      "#tveh.tv-shark #tvAux .tvbtn{width:var(--shark-btn,92px);height:var(--shark-btn,92px);" +
+      "min-width:var(--shark-btn,92px);min-height:var(--shark-btn,92px);border-radius:50%;padding:0;}" +
+      // The chevrons themselves: big (56% of a 92px roundel ≈ 51px of glyph),
+      // and thick enough to stay a shape rather than a hairline through the
+      // glare of a phone held over water.
+      "#tveh.tv-shark #tvAux .tvbtn svg{width:56%;height:56%;display:block;fill:none;" +
+      "stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;}" +
+      "@media (max-width:820px),(max-height:560px){#tveh #tvAux{right:118px;bottom:120px;}" +
       "#tveh #tvAux .tvbtn{min-width:86px;min-height:42px;font-size:13px;}" +
-      // ..and the small-screen sizes track .tbtn's own shrink (mobile.css
-      // takes .tbig to 70 and .tjump to 58 on phones)
-      "#tveh.tv-shark #tvAux{right:2px;bottom:4px;}" +
-      "#tveh.tv-shark #tvAux .tvbtn{width:70px;height:70px;min-width:70px;min-height:70px;font-size:13px;}" +
-      "#tveh.tv-shark #tvAux #tvMRise{width:58px;height:58px;min-width:58px;min-height:58px;font-size:11.5px;}}";
+      // The shark column does NOT re-declare its sizes for small screens:
+      // mobile.css shrinks the vars, both files follow, and the lift stays
+      // correct by construction. Only the seat is restated, because the
+      // generic rail above just moved it.
+      "#tveh.tv-shark #tvAux{right:2px;" +
+      "bottom:calc(4px + var(--shark-btn,76px) + var(--shark-gap,11px));}}";
     document.head.appendChild(s);
   }
   function build() {
@@ -506,9 +549,16 @@
       // RISE directly above it (the swim context's own pairing), DISMOUNT last
       // and small, because the one button you must not fat-finger while three
       // metres under is the one that gives the shark back.
+      //
+      // The pair is CHEVRONS, not words (CHEV, above): ∨ under ∧ is the axis
+      // drawn as the axis. The aria-labels carry the words for anyone who
+      // needs them read out. In Shark Sim this pair is a column of round
+      // 92px targets standing on ATTACK (see auxCss); on a tamed mount in
+      // the city they stay the wide .tv-big pills the rest of this rail uses,
+      // which only makes each one a bigger chevron.
       if (mountDive()) {
-        h += pill("tvMDive", "DIVE", "tv-big");
-        h += pill("tvMRise", "RISE", "tv-big tv-go");
+        h += pill("tvMDive", CHEV.down, "tv-big tv-cold", "Dive");
+        h += pill("tvMRise", CHEV.up, "tv-big tv-go", "Rise");
       }
       // In Shark Sim there is no rider to dismount — you ARE the shark, the
       // human is hidden, and shark_sim.js force-remounts every frame, so the
@@ -1088,6 +1138,17 @@
     V("armor-fire", { ctx: "armor", key: "LMB", hook: "cityArmorFire" }); W("armor-fire", "#tvFire");
     V("mount", { ctx: "foot", key: "I / panel", hook: "cityMountAnimal" }); W("mount", "world tap");
     V("dismount", { ctx: "mount", key: "E", hook: "cityDismount" }); W("dismount", "#tvDismount");
+    /* THE MOUNT'S OWN TWO VERBS — never declared until now, which is exactly
+       the hole this ledger was built to find: the vertical axis has had a
+       thumb since the aquatic mount shipped and the audit could not say so,
+       and the mounted BITE is #tfire's (touch.js fireAction consumes both
+       edges through cityMountedAnimalAttack before any gun sees them). Rows
+       for both, named by their real hooks, so Shark Sim's three-button
+       corner reports as three covered verbs instead of one. */
+    V("mount-vertical", { ctx: "mount", key: "Space/Ctrl", hook: "cityAquaticMountVertical" });
+    W("mount-vertical", "#tvMRise/#tvMDive (∧ / ∨)");
+    V("mount-bite", { ctx: "mount", key: "LMB", hook: "cityMountedAnimalAttack" });
+    W("mount-bite", "#tfire");
     // The RECENTER pill follows its own flag (default off since 2026-08-04,
     // owner's call) — declared as skipped rather than wired when it is not
     // drawn, so the ledger reports the glass as it actually is.
