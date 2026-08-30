@@ -185,13 +185,37 @@
        netpersist.js owns this in the city; that file is 456 lines of city
        character persistence, so this page provides the one function it
        exports that matters here rather than loading it. */
+    /* ONE TAB IS ONE WARLORD — sessionStorage, NOT localStorage, and this is
+       a fix, not a preference. localStorage is shared by every tab of a
+       browser profile, so two tabs of this game on one machine send the relay
+       the SAME pid, and server.js's reconnect dedupe does exactly what it was
+       written to do: it decides the second one is the first one coming back
+       and kills the first session. Measured on the two-client rig, verbatim:
+
+           [server] join #1 ALFA (1 online)
+           [server] reconnect: dropping stale session #1 ALFA (pid match)
+           [server] leave #1 ALFA (reconnect) (0 online)
+           [server] join #2 BRAVO (1 online)
+
+       ALFA's socket was dead before BRAVO finished joining, so ALFA pressed
+       START and began a one-warlord match on an island BRAVO could not see —
+       and nothing on either screen said a word about it. Two people on one
+       machine (the way anybody first tries this) could not be in the same
+       match at all, and neither could any headless test of it.
+
+       sessionStorage has precisely the semantics the dedupe wants: unique per
+       tab, and it SURVIVES A RELOAD of that tab, so refreshing still reclaims
+       your own session and still cleans up your ghost. The city's own
+       netpersist.js keeps the localStorage key because a city character is
+       meant to follow you across tabs; a warlord in a match is not. */
     if (!CBZ.netPid) {
       CBZ.netPid = function () {
+        const fresh = function () { return "w" + Math.random().toString(36).slice(2) + now().toString(36); };
         try {
-          let p = localStorage.getItem("cbz-pid");
-          if (!p) { p = "w" + Math.random().toString(36).slice(2) + now().toString(36); localStorage.setItem("cbz-pid", p); }
+          let p = sessionStorage.getItem("cbz-wl-pid");
+          if (!p) { p = fresh(); sessionStorage.setItem("cbz-wl-pid", p); }
           return p;
-        } catch (e) { return "w" + Math.random().toString(36).slice(2); }
+        } catch (e) { return (CBZ._wlPid = CBZ._wlPid || fresh()); }
       };
     }
     const root = (CBZ.studio && CBZ.studio.root) || "../src/";

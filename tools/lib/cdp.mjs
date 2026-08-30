@@ -94,6 +94,7 @@ export async function launch(opts = {}) {
   if (!page) throw new Error("chromium never opened a page");
 
   const sink = { errors: [], netErrors: [] };
+  const extraPages = [];
   const s = socket(page.webSocketDebuggerUrl, sink);
   await s.ready;
   await s.send("Runtime.enable");
@@ -122,8 +123,91 @@ export async function launch(opts = {}) {
     });
   }
 
+  /* A SECOND PAGE IN THE SAME BROWSER, against the same server.
+     Multiplayer is the reason this exists: a tool that can only open one page
+     can only ever test a game of one, and the whole class of bug the owner hit
+     ("multiplayer is broke") lives between two clients. A second Chrome would
+     work and costs another SwiftShader process and another devserver; a second
+     TAB costs a socket. Everything a page needs is per-target — Runtime, Page,
+     Log, and the two init scripts — so the wiring below is the same wiring the
+     first page got, applied to a target we created instead of one we found.
+
+     Each page carries its OWN error sink. Sharing one would report a guest's
+     throw as the host's, which is the single most confusing thing a two-client
+     test can tell you. */
+  async function attach(pageInfo, o2 = {}) {
+    const sink2 = { errors: [], netErrors: [] };
+    const s2 = socket(pageInfo.webSocketDebuggerUrl, sink2);
+    await s2.ready;
+    await s2.send("Runtime.enable");
+    await s2.send("Page.enable");
+    await s2.send("Log.enable");
+    await s2.send("Page.addScriptToEvaluateOnNewDocument", {
+      source: "try{performance.setResourceTimingBufferSize(5000)}catch(e){}",
+    });
+    const b2 = o2.rafBudget == null ? budget : o2.rafBudget;
+    if (b2 > 0) {
+      await s2.send("Page.addScriptToEvaluateOnNewDocument", {
+        source: `(() => { const n = window.requestAnimationFrame.bind(window); let left = ${b2};
+          window.requestAnimationFrame = (cb) => (left-- > 0 ? n(cb) : 0);
+          window.__stopRaf = () => { left = 0; }; })();`,
+      });
+    }
+    const pg = {
+      origin, page: pageInfo,
+      get errors() { return sink2.errors; },
+      get netErrors() { return sink2.netErrors; },
+      clearErrors() { sink2.errors.length = 0; sink2.netErrors.length = 0; },
+      send: s2.send,
+      async evl(expression, awaitPromise) {
+        const r = await s2.send("Runtime.evaluate", {
+          expression, returnByValue: true, awaitPromise: !!awaitPromise,
+        });
+        if (r.result && r.result.exceptionDetails) {
+          const d = r.result.exceptionDetails;
+          throw new Error((d.exception && d.exception.description) || d.text || "eval threw");
+        }
+        return r.result && r.result.result && r.result.result.value;
+      },
+      async wait(expr, ms = 60000, every = 150) {
+        const until = Date.now() + ms;
+        while (Date.now() < until) {
+          try { if (await pg.evl(`(()=>{try{return !!(${expr})}catch(e){return false}})()`)) return true; }
+          catch (_) {}
+          await sleep(every);
+        }
+        return false;
+      },
+      async open(rel, query) {
+        const url = origin + rel.replace(/^\//, "") + (query ? (rel.includes("?") ? "&" : "?") + query : "");
+        await s2.send("Page.navigate", { url });
+        return url;
+      },
+      async close() { try { s2.ws.close(); } catch (_) {} },
+    };
+    return pg;
+  }
+
   const rig = {
     origin, port, dbg, page,
+    /* newPage() — another tab, wired exactly like the first. Returns a page
+       object with the same evl/wait/open/errors surface as the rig itself. */
+    async newPage(o2 = {}) {
+      const t = await s.send("Target.createTarget", { url: "about:blank" });
+      const id = t.result && t.result.targetId;
+      let info = null;
+      for (let i = 0; i < 100 && !info; i++) {
+        try {
+          const ps = await (await fetch(`http://127.0.0.1:${dbg}/json/list`)).json();
+          info = ps.find((p) => p.id === id && p.webSocketDebuggerUrl);
+        } catch (_) {}
+        if (!info) await sleep(100);
+      }
+      if (!info) throw new Error("chromium never opened the second page");
+      const pg = await attach(info, o2);
+      extraPages.push(pg);
+      return pg;
+    },
     get errors() { return sink.errors; },
     get netErrors() { return sink.netErrors; },
     clearErrors() { sink.errors.length = 0; sink.netErrors.length = 0; },
@@ -155,6 +239,7 @@ export async function launch(opts = {}) {
       return url;
     },
     async close() {
+      for (const p of extraPages) { try { await p.close(); } catch (_) {} }
       try { s.ws.close(); } catch (_) {}
       try { process.kill(-chrome.pid); } catch (_) { try { chrome.kill(); } catch (_) {} }
       try { process.kill(-server.pid); } catch (_) { try { server.kill(); } catch (_) {} }
