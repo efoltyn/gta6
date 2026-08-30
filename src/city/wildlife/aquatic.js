@@ -1225,7 +1225,15 @@
            lower band's outward reach is what turns the stack back into a
            line; the tissue is still there, it just stops standing out of the
            face. */
-        const kIn = up ? 0.75 : 1, kOut = (up ? 0.50 : 0.55) * (1 - front * 0.82);
+        /* AND THE UPPER BAND DOES NOT STAND OFF THE FACE EITHER. Removing the
+           skirt took the bumper's HEIGHT away; this takes its THICKNESS. At
+           half of railOut the upper band was still a pale rail proud of the
+           snout, catching its own highlight above the tooth row — the same
+           "protruding lip that doesn't exist in reality", just thinner. On a
+           real great white the upper teeth come straight out of the gum under
+           the snout and there is nothing outboard of them. 0.10 leaves the
+           band as a seam, not a rail. The lower jaw keeps its lip: it has one. */
+        const kIn = up ? 0.75 : 1, kOut = (up ? 0.10 : 0.55) * (1 - front * 0.82);
         /* ---- THE LIP COVERS THE TEETH, WHICH IS WHY A CLOSED SHARK MOUTH IS
            A LINE ------------------------------------------------------------
            Owner, 2026-08-30, on the front of the great white's mouth: "there
@@ -1250,12 +1258,27 @@
            way up, and the tips of the upper teeth overhanging the gap between
            them. Made them equal once and the mouth vanished into the face —
            one blank white surface, which is a different wrong picture. */
-        /* 0.42, and this number is a trade the geometry cannot dodge: the
-           skirt is rigid and rides the upper jaw, so whatever it hides at rest
-           it also hides at full gape. Long enough to close the mouth into a
-           line, short enough that the crowns are still the thing you see when
-           it opens. */
-        const skirtK = up ? (o.lipSkirt == null ? 0.42 : o.lipSkirt)
+        /* ---- AND THE UPPER JAW HAS NO LIP AT ALL --------------------------
+           Owner, 2026-08-30, with three photographs on the table: "your bottom
+           mouth is good, the top mouth is weird, and there's this protruding
+           lip you have that doesn't exist in reality — and the teeth should be
+           scary and noticeable."
+
+           He is right and it was my own doing. Closing the front of the mouth
+           by hanging a skirt of skin down over the upper crowns did remove the
+           chunks, but it invented an anatomy: a white bumper along the top jaw
+           that no shark has. Look at what the photographs actually show — on a
+           CLOSED great white the upper teeth hang over the lower lip, bare,
+           and they are the most noticeable thing on the face. The lower jaw is
+           the one with a lip, and its skirt stays: in the same photographs the
+           lower crowns are tucked away behind it.
+
+           So the upper skirt is zero. What keeps the mouth from going back to
+           being a pile of pieces is the work that actually fixed it — the
+           buccal sack pulled behind the seal and inside the lips, and the gum
+           line above the tooth row, so the teeth stand against dark tissue
+           instead of white belly skin. */
+        const skirtK = up ? (o.lipSkirt == null ? 0 : o.lipSkirt)
           : (o.lipSkirtLower == null ? 0.26 : o.lipSkirtLower);
         /* AND IT DRAPES DEEPER AT THE CORNER, not shallower. The corner is
            where the part map found the last of the chunks: a column of buccal
@@ -1314,10 +1337,11 @@
             toward the corners, serrated, pink where enamel meets gum ------- */
     function toothField(up) {
       const rows = o.toothRows || [
-        // r = 0.965, not 1.00: the front row is pulled a hair inboard so the
-        // lip's outer face is genuinely OUTSIDE it and the crowns cannot poke
-        // through the skin they are supposed to be behind.
-        { n: rowTeeth, r: 0.95, size: 1.00, rake: 0.16 },
+        /* THE FRONT ROW IS ON THE ARC. It was pulled inboard to hide behind an
+           upper lip that no longer exists; on a real animal the working row IS
+           the edge of the jaw, which is why you can count the teeth in every
+           photograph ever taken of one. */
+        { n: rowTeeth, r: 1.00, size: 1.00, rake: 0.16 },
         { n: rowTeeth, r: 0.86, size: 0.70, rake: 0.62 },
         { n: Math.max(5, (rowTeeth * 0.55) | 0), r: 0.72, size: 0.44, rake: 1.02 },
       ];
@@ -1996,6 +2020,9 @@
         // the station's own seam angle instead: eight degrees of oral tissue,
         // and skin above it.
         const seamA = st[i] && st[i].ang ? st[i].ang[0] : -1.4;
+        // 0.14 rad and no wider: at 0.30 the margin stopped following the jaw
+        // line and came out as a maroon patch in the middle of the snout's
+        // white underside, which is a blotch, not a gum.
         if (am < seamA + 0.14 || am > Math.PI - seamA - 0.14) return 2;
         const s = Math.sin(am);
         /* THE RAGGED EDGE IS A HINT, NOT A SAW. At +/-0.11 in sin-space the
@@ -2197,7 +2224,11 @@
       // after the upper jaw has told it how far to lift this frame
       addSharkMouth(g, T, m, Object.assign({}, MOUTH, {
         rings: GW_RINGS,
-        toothHeight: 0.145, toothWidth: 0.118, rowTeeth: 19,
+        // BIGGER, AND MEANT TO BE SEEN. A great white's front teeth are a
+        // third of the height of its own gape in the reference photographs;
+        // at 0.145 against a 0.30 gap ours were a comb. Wider too, so the
+        // triangles read as triangles at the distance a player meets one.
+        toothHeight: 0.178, toothWidth: 0.132, rowTeeth: 19,
         maxOpen: 1.05, skin: 0xf1f4f4,
       }));
       const snout = addSharkRostrum(g, [grey, white, m(0x421a1e)], GW_SNOUT, {
