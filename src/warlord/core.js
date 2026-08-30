@@ -214,33 +214,95 @@
   W.gun = function (id) { return (CBZ.weaponById && CBZ.weaponById(id)) || null; };
   W.gunLabel = function (id) { const w = W.gun(id); return (w && (w.label || w.id)) || String(id).toUpperCase(); };
 
-  /* WHAT A GUN IS WORTH. dps × reach, bent so the curve is money-shaped:
-     a pistol is pocket change, a rifle is a real decision, a launcher is a
-     week of raiding. Explosives carry a hard premium because one of them
-     changes a battle and no amount of dps says that. */
+  /* WHAT A GUN IS WORTH, and the first draft of this got it catastrophically
+     wrong in a way worth writing down, because it is the exact trap this repo
+     bans under the name STAT FICTION.
+
+     The first version priced a gun off `damage × rate × range`. It produced a
+     BAZOOKA FOR $18 — the cheapest thing in the armoury, cheaper than a
+     revolver. The reason is that a rocket's `damage` field in weapon-data.js
+     is literally 1. That 1 is the impact poke; every rocket's actual lethality
+     is `blast: 13`, resolved by studio.boom through systems/ordnance.js and
+     never touching the `damage` number at all. A price function that reads one
+     field and calls the answer "derived" is a fiction with arithmetic on it.
+     tools/warlord-check.mjs exists because of this bug.
+
+     So the model is now what a gun ACTUALLY DELIVERS IN A FIGHT:
+
+       per shot   conventional: damage × pellets.
+                  explosive:    the men a blast of that radius catches. A
+                                battle line here runs about one man per 28 m²
+                                (measured off the spawn spacing battle.html
+                                uses), capped at six, because past six the
+                                catch is limited by where men actually stand
+                                and not by how big the bang is.
+       sustained  per-shot × magazine ÷ (time to empty it + reload). This is
+                  the term that says an LMG is a different object from a
+                  pistol, and no per-shot number ever will.
+       reach      how far away it does that.
+       lethality  the fraction of a man one trigger pull removes, capped at
+                  one — you cannot kill him twice. A gun that drops a man per
+                  pull earns a premium because its MISSES cost less: no
+                  follow-up, no second exposure. That premium is the only
+                  reason a sniper is not last on this list, and without it
+                  the sustained-fire term alone rates a 9mm above a .357,
+                  which no player will believe.
+
+     Then price is a POWER curve over that value rather than a compression of
+     it: the first draft's ^0.86 flattened a 62× spread into a 1.6× one, and
+     an armoury where every gun costs about the same is an armoury with no
+     decisions in it. */
+  function gunValue(id) {
+    const w = W.gun(id);
+    if (!w) return 120;
+    const delay = w.fireDelay || w.interval || 0.5;
+    const mag = w.magSize || w.mag || 10;
+    const reload = w.reloadTime || w.reload || 2;
+    const per = w.explosive
+      ? Math.min(6, Math.PI * Math.pow(w.blast || 10, 2) / 28) * 70
+      : (w.damage || 20) * (w.pellets || 1);
+    const sustained = per * mag / Math.max(0.2, mag * delay + reload);
+    const reach = Math.min(1.9, 0.55 + (w.range || 60) / 130);
+    const lethal = Math.min(1, per / 100);
+    return sustained * reach * (1 + 0.6 * lethal);
+  }
+  W.gunValue = gunValue;
+
   W.gunPrice = function (id) {
     const w = W.gun(id);
     if (!w) return 40;
-    const rate = 1 / Math.max(0.03, w.fireDelay || w.interval || 0.5);
-    const dmg = (w.damage || 20) * (w.pellets || 1);
-    const dps = dmg * Math.min(rate, 14);
-    const reach = Math.min(1.9, 0.55 + (w.range || 60) / 130);
-    let p = Math.pow(dps * reach, 0.86) * 1.35;
-    if (w.explosive) p *= 3.4;
-    if (w.id === "taser") p = 70;
-    return Math.max(18, Math.round(p / 5) * 5);
+    /* THE TASER IS NOT A WEAPON IN THIS GAME and the value model correctly
+       says so (5, dead last). It is priced by hand at what it is actually
+       for — taking a man alive — which is a CAMPAIGN fact the weapon record
+       has no way to know. The one hand-typed price in the file, and it is
+       labelled as such rather than hidden. */
+    if (w.id === "taser") return 70;
+    let p = Math.pow(gunValue(id) / 100, 1.25) * 22;
+    if (w.explosive) p *= 3.4;    // one of these changes a battle; no dps says that
+    return Math.max(15, Math.round(p / 5) * 5);
   };
   // a depot pays a third of list for your surplus — the spread IS the sink
   W.gunSell = function (id) { return Math.max(5, Math.round(W.gunPrice(id) * 0.34 / 5) * 5); };
   W.armourPrice = function (id) { return W.armour(id).price; };
   W.armourSell = function (id) { return Math.max(0, Math.round(W.armour(id).price * 0.34 / 5) * 5); };
 
+  /* WHAT A GUN IS WORTH IN A FIGHT is not what it is worth in money, and
+     conflating them was the second bug the checker found. Price is a money
+     curve — deliberately steep, so buying up is a real decision — and running
+     soldierPower off it made the gap between a pistol and an LMG read as 1.4×
+     when the fight itself is nearer 1.8×. Power reads the combat value
+     directly. Capped at 3, because a man with a rocket launcher is still one
+     man and can still be shot. */
+  W.gunCombat = function (id) { return clamp(gunValue(id) / 300, 0.25, 3.0); };
+
   /* RARITY drives what a depot has in the crates. Cheap guns are everywhere;
      a launcher shows up at one outpost in six. Derived from price so it, too,
-     never needs an edit. */
+     never needs an edit. The exponent is 0.45 rather than the first draft's
+     0.7 for a measurable reason: at 0.7 the rarest thing in the armoury still
+     scored 0.54 and every depot carried the same stock, which is a map not
+     worth crossing twice. */
   W.gunRarity = function (id) {
-    const p = W.gunPrice(id);
-    return clamp(1 - Math.pow(p / 900, 0.7), 0.04, 0.96);
+    return clamp(1 - Math.pow(W.gunPrice(id) / 2400, 0.45), 0.04, 0.96);
   };
 
   /* ============================================================ THE STATE
@@ -299,21 +361,35 @@
       W.log("dawn — paid $" + due + " in wages.");
     } else {
       /* UNPAID MEN LEAVE, and they leave from the BOTTOM: a veteran has
-         somewhere to be and a levy has a farm. Losing the cheap men first
-         is also the merciful failure mode — the army shrinks, it does not
-         evaporate. */
+         somewhere to be and a levy has a farm.
+
+         AND THE FIRST DRAFT OF THIS ATE THE ARMY. It walked the roster
+         subtracting three days' wage per departure until the shortfall was
+         covered, and on a 40-man force with ten veterans that is 32 men gone
+         in one night — every levy AND two veterans — from missing a single
+         payday. Measured by tools/warlord-check.mjs, which is why it is a
+         cap and not a vibe: ONE bad morning may cost at most 40% of the
+         roster. Miss again tomorrow and it takes another 40% of what is
+         left, so a warlord who cannot pay is still finished — it just takes
+         three days instead of one, and three days is long enough to sell a
+         rifle and fix it. Shed, do not evaporate.
+
+         A departing man is credited five days of his own wage: he is walking
+         off with his kit and a share of the cart, and that is what settles
+         his account. */
       const short = due - S.gold;
       S.gold = 0;
-      let walked = 0;
+      const cap = Math.max(1, Math.floor(S.army.length * 0.4));
       const order = S.army.slice().sort(function (a, b) { return W.tierIndex(a.tier) - W.tierIndex(b.tier); });
-      let owed = short;
-      while (owed > 0 && order.length) {
+      let owed = short, walked = 0;
+      while (owed > 0 && order.length && walked < cap) {
         const s = order.shift();
-        owed -= W.tier(s.tier).wage * 3;
+        owed -= W.tier(s.tier).wage * 5;
         W.removeSoldier(s.id);
         walked++;
       }
       if (walked) W.log("could not pay. " + walked + " men walked away in the night.", "bad");
+      else W.log("could not pay, and every man stayed. they will not stay twice.", "bad");
     }
     W.emit("dawn", S.day);
     W.emit("gold", S.gold);
@@ -351,7 +427,7 @@
   W.soldierPower = function (s) {
     const T = W.tier(s.tier);
     const w = W.gun(s.wid);
-    const gp = w ? Math.min(3.2, 0.5 + W.gunPrice(s.wid) / 210) : 0.35;
+    const gp = w ? W.gunCombat(s.wid) : 0.3;   // bare hands, not a cheap gun
     const ar = 1 + W.armour(s.armour).soak / 46;
     const wound = s.wounded ? 0.62 : 1;
     return T.acc * (T.hp / 100) * gp * ar * wound * 10;
@@ -364,7 +440,12 @@
   W.yourPower = function () {
     const you = S.you;
     const w = W.gun(you.wid);
-    const gp = w ? Math.min(3.2, 0.5 + W.gunPrice(you.wid) / 210) : 0.35;
+    const gp = w ? W.gunCombat(you.wid) : 0.3;
+    /* YOU ARE WORTH ABOUT TWELVE MEN, and that is a design statement rather
+       than a measurement: it has to be enough that a lone warlord can take a
+       six-man bandit crew on day one (or there is no first step), and small
+       enough that by fifty men you have stopped mattering personally and the
+       game has become about the army. */
     return W.power(S.army) + 14 * gp * (1 + W.armour(you.armour).soak / 46);
   };
 
@@ -438,18 +519,121 @@
   /* THE GUN A BAND CARRIES scales with the band, deliberately: a six-man
      bandit crew with rocket launchers is not a difficulty curve, it is a
      joke. Wealth = how far up the price list this band can reach. */
+  /* AND THE FIRST DRAFT OF THIS HANDED OUT GRENADE LAUNCHERS. It took the
+     price-sorted list, cut it at `wealth`, and rolled inside the cut — which
+     was survivable while the armoury spanned 16× and became a disaster the
+     moment the price model was fixed and it spanned 46×. A rich band's cut
+     now reaches the top of the list, so hundred-man legions fielded launchers,
+     nothing could beat them, and tools/warlord-check.mjs's headless campaigns
+     collapsed 83% of the time. That is one number in one function deciding
+     whether the whole game is winnable.
+
+     RARITY IS NOT WEALTH. A launcher is rare because there are barely any on
+     the island, not because nobody can afford one — that is exactly what
+     gunRarity already says, and the depots already obey it. So a band rolls
+     the same way a crate does: reachability sets the SHELF (what this band
+     could plausibly own) and rarity sets the ODDS on that shelf. A rich band
+     ends up with better rifles and, once in a long while, one rocket. */
+  /* WHAT A BAND WOULD ACTUALLY CARRY INTO A FIGHT. The rarity roll put a
+     TASER in one man in eight at every band size, because the taser is cheap
+     and therefore common — and common is the right answer for a crate at a
+     depot and the wrong one for a firing line. Nobody arms a warband with
+     tasers; you buy one when you want somebody alive. It is a tool, and the
+     campaign has to be able to say so. The filter is by role rather than by
+     id list so a non-lethal added later drops out of armies for free. */
+  W.battleGuns = function () {
+    return W.gunList().filter(function (w) {
+      return !(w.id === "taser" || w.nonlethal || w.slot === "utility");
+    });
+  };
+
   W.bandGunFor = function (wealth, r) {
-    const guns = W.gunList().slice().sort(function (a, b) { return W.gunPrice(a.id) - W.gunPrice(b.id); });
+    const guns = W.battleGuns().slice().sort(function (a, b) { return W.gunPrice(a.id) - W.gunPrice(b.id); });
     if (!guns.length) return "sidearm";
-    const top = clamp(Math.floor(guns.length * wealth), 1, guns.length);
-    const i = Math.floor(Math.pow(r == null ? RND() : r, 1.4) * top);
-    return guns[clamp(i, 0, top - 1)].id;
+    const rr = r == null ? RND() : r;
+    /* A BAND SHOPS AROUND A PRICE POINT, it does not shop below a ceiling.
+       The ceiling version (draft two) made every rich band uniform across the
+       whole armoury — a 300-man legion was as likely to be carrying a .357 as
+       an AK, which reads as a costume department rather than an army. A
+       Gaussian centred on what this band can afford gives the picture the
+       player needs at a glance: bandits with pistols, legions with rifles,
+       and a rocket somewhere in the line often enough to be frightening and
+       rarely enough to be news.
+
+       The centre stops at 0.72 of the list rather than 1.0 on purpose: the
+       top of this armoury is launchers, and a band whose CENTRE is a launcher
+       is not a difficulty curve. Rarity is applied at ^2.2 rather than raw
+       because the raw curve left a rocket at a quarter the odds of a rifle,
+       and one band in four carrying one is not rare. */
+    const centre = clamp(wealth, 0, 1) * 0.72;
+    const sigma = 0.3;
+    let total = 0;
+    const wts = guns.map(function (g, i) {
+      const pos = guns.length > 1 ? i / (guns.length - 1) : 0;
+      const d = pos - centre;
+      const w = Math.pow(W.gunRarity(g.id), 2.2) * Math.exp(-(d * d) / (2 * sigma * sigma));
+      total += w;
+      return w;
+    });
+    if (total <= 0) return guns[0].id;
+    let t = rr * total;
+    for (let i = 0; i < guns.length; i++) { t -= wts[i]; if (t <= 0) return guns[i].id; }
+    return guns[0].id;
+  };
+
+  /* HOW BIG IS A PARTY ON THIS ISLAND, and it is the single most important
+     number in the campaign — more important than any weapon stat, because it
+     decides whether a man alone on day one has anything at all he can fight.
+
+     THE FIRST DRAFT WAS `irange(3, 40)`, a flat roll with a median of 21.
+     Measured over two hundred headless campaigns in tools/warlord-check.mjs:
+     the greedy warlord SKIPPED 77% OF DAYS because nothing on the island was
+     his size, made nine gold a day, and 75% of runs collapsed. The island was
+     not too hard — it was too UNIFORM. A game that starts you alone needs a
+     floor of things a lone man beats, and a ceiling he can see and cannot
+     touch for a month.
+
+     So the roll is four named bands rather than one curve, because the four
+     names are the actual design and a curve would hide it:
+
+       CREW      2–9    looters, deserters, a family with rifles. Day one.
+       BAND     10–40   the working population of the island.
+       COMPANY  40–120  a real force. You need an army to take one.
+       ARMY    120–320  three or four exist. They are the endgame.
+
+     Published so campaign.js's spawner and this file's own default agree —
+     two different party-size distributions in one game is how the encounter
+     screen and the world map start disagreeing about how dangerous the map
+     is. `?bands=flat` restores the old roll for a measured comparison. */
+  W.BAND_CLASSES = [
+    { id: "crew",    w: 0.56, lo: 2,   hi: 9 },
+    { id: "band",    w: 0.27, lo: 10,  hi: 40 },
+    { id: "company", w: 0.13, lo: 40,  hi: 120 },
+    { id: "army",    w: 0.04, lo: 120, hi: 320 },
+  ];
+  W.rollBandSize = function (r) {
+    const rr = r == null ? RND() : r;
+    let t = rr;
+    for (let i = 0; i < W.BAND_CLASSES.length; i++) {
+      const c = W.BAND_CLASSES[i];
+      if (t < c.w || i === W.BAND_CLASSES.length - 1) {
+        return c.lo + Math.floor(RND() * (c.hi - c.lo + 1));
+      }
+      t -= c.w;
+    }
+    return 6;
+  };
+  W.bandClassOf = function (n) {
+    for (let i = W.BAND_CLASSES.length - 1; i >= 0; i--) {
+      if (n >= W.BAND_CLASSES[i].lo) return W.BAND_CLASSES[i].id;
+    }
+    return "crew";
   };
 
   W.makeBand = function (opts) {
     opts = opts || {};
     const F = W.faction(opts.faction || W.pick(FACTIONS).id);
-    const n = Math.max(1, opts.size == null ? W.irange(3, 40) : opts.size);
+    const n = Math.max(1, opts.size == null ? W.rollBandSize() : opts.size);
     /* WEALTH RIDES WITH SIZE, because a party that big got that big by
        winning, and a party that won has better guns. It is the only
        difficulty curve on the island and it needs no level number. */
@@ -477,6 +661,47 @@
   };
   W.bandSize = function (b) { return b.men.length; };
   W.bandPower = function (b) { return W.power(b.men); };
+
+  /* WHAT A BATTLEFIELD IS WORTH, and it is the answer to the question the
+     headless campaigns kept failing: where does the money come from?
+
+     The first economy model had loot = the band's purse, and measured over
+     120 days that is NINE GOLD A DAY against a levy costing 22 — an economy
+     with no economy in it. The purse was never the prize. THE GUNS ARE. A
+     beaten company of forty leaves forty rifles on the sand, and at a depot's
+     third-of-list buy price that is real money, or — better — it is forty
+     rifles you hand to your own levies instead of selling.
+
+     That is also why this returns the guns as an INVENTORY rather than a
+     number. A warlord who sells his loot and a warlord who arms his men with
+     it are playing differently, and the game only has that decision in it if
+     the loot arrives as objects. `salvage` is the fraction that survives the
+     fight: a rifle its owner was shot off is often a rifle with a hole in it,
+     and a hundred-percent recovery rate makes the first big win end the game. */
+  W.SALVAGE = 0.62;
+  W.spoils = function (fallen, salvage) {
+    const rate = salvage == null ? W.SALVAGE : salvage;
+    const guns = {}, armour = {};
+    let cash = 0;
+    for (let i = 0; i < fallen.length; i++) {
+      const m = fallen[i];
+      if (m.wid && m.wid !== "fists" && W.rnd() < rate) guns[m.wid] = (guns[m.wid] || 0) + 1;
+      if (m.armour && m.armour !== "none" && W.rnd() < rate * 0.8) armour[m.armour] = (armour[m.armour] || 0) + 1;
+      cash += W.irange(0, 6);            // whatever was in his pockets
+    }
+    return { guns: guns, armour: armour, cash: cash };
+  };
+  W.spoilsValue = function (sp) {
+    let v = sp.cash || 0;
+    Object.keys(sp.guns || {}).forEach(function (k) { v += W.gunSell(k) * sp.guns[k]; });
+    Object.keys(sp.armour || {}).forEach(function (k) { v += W.armourSell(k) * sp.armour[k]; });
+    return v;
+  };
+  W.takeSpoils = function (sp) {
+    Object.keys(sp.guns || {}).forEach(function (k) { W.stash(k, sp.guns[k]); });
+    Object.keys(sp.armour || {}).forEach(function (k) { W.stashArmour(k, sp.armour[k]); });
+    if (sp.cash) W.earn(sp.cash);
+  };
 
   /* THE ODDS the encounter screen prints. Power ratio bent through a soft
      curve, because a 2:1 advantage is not a 100% win and printing 100% is a
