@@ -90,44 +90,99 @@ const ONLY = opt.only ? String(opt.only).split(",").map((s) => s.trim()) : null;
 ============================================================ */
 const ORDER = [
   // ---- TOWERS (the registry's minStoreys set) --------------------------
-  { id: "intl", fam: "tower", note: "Seagram, 1958. Bronze mullions on an absolutely regular grid, a plaza, a lobby set back behind free-standing columns. No ornament anywhere — it survives on proportion alone.", city: "A corporate downtown. The three siblings are the variations Mies's imitators made: travertine spandrels, a black-steel version, a white-marble civic slab." },
-  { id: "ziggurat", fam: "tower", note: "The 1916 New York zoning envelope: mandatory setbacks stepping the tower back from the street as it rises, so the shape is a law made visible.", city: "Pre-war Manhattan. Siblings: the wedding-cake hotel, the setback courthouse, the stepped power-company HQ." },
-  { id: "pyramid", fam: "tower", note: "Transamerica. A tapered spire with the whole elevation converging on a point, wing buttresses at the shoulders.", city: "A skyline of tapers — obelisk, needle, stepped cone. Rare and expensive to over-use; one per district." },
-  { id: "sunburst", fam: "tower", note: "Chrysler's radiator crown: stacked arcs of decreasing radius, dormer eyes, a spire. The crown is the entire building's argument.", city: "The crown competition of 1930 — every tower in the district trying to out-terminate the last one. The richest sibling set in the kit." },
-  { id: "bundled", fam: "tower", note: "Sears/Willis. Nine square tubes in a 3x3 bundle that stop at different heights. Almost no surface treatment; pure massing.", city: "A structural-expression downtown: tube, bundle, diagonal, hat truss. Cold, enormous, recognisable at 20 km." },
-  { id: "megabrace", fam: "tower", note: "The braced tube — giant X-bracing crossing many storeys on the outside of the glass, structure as the only ornament.", city: "Siblings: the diagrid, the outrigger belt truss, the exposed mega-column. An engineer's city." },
-  { id: "faceted", fam: "tower", note: "Bank of China, 1990. The prism is CUT: quadrants rise to four different heights with long diagonals running across dozens of storeys.", city: "A crystal district. Siblings are the other cuts — the sheared top, the twisted shaft, the folded plate." },
-  { id: "neogothic", fam: "tower", note: "Woolworth, the Cathedral of Commerce: a Gothic cathedral stretched to 60 storeys, buttresses and pinnacles all the way up.", city: "The 1913 skyline where every tower borrowed a cathedral. Siblings: Tribune Tower's flying buttresses, a spired campanile, a Gothic crown on a stone shaft." },
-  { id: "postmodern", fam: "tower", note: "AT&T, 1984. A classical broken pediment on top of a skyscraper — deliberately absurd, deliberately memorable.", city: "The 1980s. Siblings: the Chippendale sibling, the pink granite arch, the temple-front bank. A city with a sense of humour." },
-  { id: "pencil", fam: "tower", note: "The supertall slim: a 1:12 shaft, open mechanical floors punched through it for wind, a razor top.", city: "Billionaires' Row. Siblings: the setback needle, the concrete-core stack, the paired-tower slot. A city of impossibly thin things." },
+  { id: "intl", era: "early20", fam: "tower", note: "Seagram, 1958. Bronze mullions on an absolutely regular grid, a plaza, a lobby set back behind free-standing columns. No ornament anywhere — it survives on proportion alone.", city: "A corporate downtown. The three siblings are the variations Mies's imitators made: travertine spandrels, a black-steel version, a white-marble civic slab." },
+  { id: "ziggurat", era: "early20", fam: "tower", note: "The 1916 New York zoning envelope: mandatory setbacks stepping the tower back from the street as it rises, so the shape is a law made visible.", city: "Pre-war Manhattan. Siblings: the wedding-cake hotel, the setback courthouse, the stepped power-company HQ." },
+  { id: "pyramid", era: "late20", fam: "tower", note: "Transamerica. A tapered spire with the whole elevation converging on a point, wing buttresses at the shoulders.", city: "A skyline of tapers — obelisk, needle, stepped cone. Rare and expensive to over-use; one per district." },
+  { id: "sunburst", era: "early20", fam: "tower", note: "Chrysler's radiator crown: stacked arcs of decreasing radius, dormer eyes, a spire. The crown is the entire building's argument.", city: "The crown competition of 1930 — every tower in the district trying to out-terminate the last one. The richest sibling set in the kit." },
+  { id: "bundled", era: "late20", fam: "tower", note: "Sears/Willis. Nine square tubes in a 3x3 bundle that stop at different heights. Almost no surface treatment; pure massing.", city: "A structural-expression downtown: tube, bundle, diagonal, hat truss. Cold, enormous, recognisable at 20 km." },
+  { id: "megabrace", era: "late20", fam: "tower", note: "The braced tube — giant X-bracing crossing many storeys on the outside of the glass, structure as the only ornament.", city: "Siblings: the diagrid, the outrigger belt truss, the exposed mega-column. An engineer's city." },
+  { id: "faceted", era: "late20", fam: "tower", note: "Bank of China, 1990. The prism is CUT: quadrants rise to four different heights with long diagonals running across dozens of storeys.", city: "A crystal district. Siblings are the other cuts — the sheared top, the twisted shaft, the folded plate." },
+  { id: "neogothic", era: "early20", fam: "tower", note: "Woolworth, the Cathedral of Commerce: a Gothic cathedral stretched to 60 storeys, buttresses and pinnacles all the way up.", city: "The 1913 skyline where every tower borrowed a cathedral. Siblings: Tribune Tower's flying buttresses, a spired campanile, a Gothic crown on a stone shaft." },
+  { id: "postmodern", era: "late20", fam: "tower", note: "AT&T, 1984. A classical broken pediment on top of a skyscraper — deliberately absurd, deliberately memorable.", city: "The 1980s. Siblings: the Chippendale sibling, the pink granite arch, the temple-front bank. A city with a sense of humour." },
+  { id: "pencil", era: "late20", fam: "tower", note: "The supertall slim: a 1:12 shaft, open mechanical floors punched through it for wind, a razor top.", city: "Billionaires' Row. Siblings: the setback needle, the concrete-core stack, the paired-tower slot. A city of impossibly thin things." },
 
   // ---- BLOCKS (the mid-rise grammars, on the standard office shell) ------
-  { id: "brick", fam: "block", note: "Chicago loft, c.1905. Load-bearing brick read as STRUCTURE: piers between the bays, segmental arches, a corbelled cornice, cast-iron storefront, fire escape down the flank.", city: "A warehouse district that became lofts. Siblings: the mill building, the printing house, the brick-and-timber garment block." },
-  { id: "stone", fam: "block", note: "Ashlar bank in three parts — rusticated base, plain shaft, attic over a heavy cornice — with a giant order solved backwards from the roofline.", city: "A financial quarter of stone institutions: the exchange, the courthouse, the trust company, the library." },
-  { id: "artdeco", fam: "block", note: "1930 setback commercial block. Fluted piers run base to crown with the spandrels pushed back behind them; nothing horizontal is allowed to cross a pier.", city: "A whole deco main street: theatre, department store, telephone exchange, hotel." },
-  { id: "brutalist", fam: "block", note: "Beton brut. Every opening a hole punched through a thick wall, hooded so it throws a hard shadow all day; board-formed plank lines; lifted on pilotis.", city: "A concrete civic campus — city hall, the library, the parking structure, the housing slab. Grim and coherent." },
-  { id: "hightech", fam: "block", note: "Inside-out, Lloyd's / Pompidou: the frame stands proud of the glass, the risers and stair are outside, and the roof plant is architecture.", city: "A services-on-the-outside quarter. Siblings: the exposed-truss shed, the tension-rod atrium, the gantry-served lab." },
-  { id: "gothic", fam: "block", note: "Gothic Revival civic front: buttresses stepping back as they rise, pinnacles breaking the roofline, tracery, a rose window over a deep portal. Everything ends in a point.", city: "An old-world cathedral town — the hall, the guild, the college quad, the parish church." },
-  { id: "mosque", fam: "block", note: "Dome on a buttressed drum, a minaret off one corner, horseshoe arcade, monumental pishtaq portal.", city: "An Islamic old city: the great mosque, the madrasa, the caravanserai, the covered bazaar. Big cultural payoff." },
-  { id: "pagoda", fam: "block", note: "Timber frame under deep tiered eaves with upturned corners on visible dougong brackets. The lowest eave projects the furthest.", city: "An East Asian temple quarter: gate, hall, drum tower, pagoda proper." },
-  { id: "adobe", fam: "block", note: "Earthen mass: battered walls thickening to the base, projecting vigas, stepped massing, small deep-set windows, a latilla porch. Irregularity IS the style.", city: "A pueblo/Saltlands town — mission church, trading post, stacked terraced dwellings." },
-  { id: "victorian", fam: "block", note: "Second Empire. Mansard roof with dormers punching through, projecting oriel bays, a deep bracketed cornice over a cast-iron storefront.", city: "A 19th-century downtown: the opera house, the hotel, the department store, the rooming block." },
+  { id: "brick", era: "industrial", fam: "block", note: "Chicago loft, c.1905. Load-bearing brick read as STRUCTURE: piers between the bays, segmental arches, a corbelled cornice, cast-iron storefront, fire escape down the flank.", city: "A warehouse district that became lofts. Siblings: the mill building, the printing house, the brick-and-timber garment block." },
+  { id: "stone", era: "industrial", fam: "block", note: "Ashlar bank in three parts — rusticated base, plain shaft, attic over a heavy cornice — with a giant order solved backwards from the roofline.", city: "A financial quarter of stone institutions: the exchange, the courthouse, the trust company, the library." },
+  { id: "artdeco", era: "early20", fam: "block", note: "1930 setback commercial block. Fluted piers run base to crown with the spandrels pushed back behind them; nothing horizontal is allowed to cross a pier.", city: "A whole deco main street: theatre, department store, telephone exchange, hotel." },
+  { id: "brutalist", era: "late20", fam: "block", note: "Beton brut. Every opening a hole punched through a thick wall, hooded so it throws a hard shadow all day; board-formed plank lines; lifted on pilotis.", city: "A concrete civic campus — city hall, the library, the parking structure, the housing slab. Grim and coherent." },
+  { id: "hightech", era: "late20", fam: "block", note: "Inside-out, Lloyd's / Pompidou: the frame stands proud of the glass, the risers and stair are outside, and the roof plant is architecture.", city: "A services-on-the-outside quarter. Siblings: the exposed-truss shed, the tension-rod atrium, the gantry-served lab." },
+  { id: "gothic", era: "medieval", fam: "block", note: "Gothic Revival civic front: buttresses stepping back as they rise, pinnacles breaking the roofline, tracery, a rose window over a deep portal. Everything ends in a point.", city: "An old-world cathedral town — the hall, the guild, the college quad, the parish church." },
+  { id: "mosque", era: "islamic", fam: "block", note: "Dome on a buttressed drum, a minaret off one corner, horseshoe arcade, monumental pishtaq portal.", city: "An Islamic old city: the great mosque, the madrasa, the caravanserai, the covered bazaar. Big cultural payoff." },
+  { id: "pagoda", era: "eastasia", fam: "block", note: "Timber frame under deep tiered eaves with upturned corners on visible dougong brackets. The lowest eave projects the furthest.", city: "An East Asian temple quarter: gate, hall, drum tower, pagoda proper." },
+  { id: "adobe", era: "americas", fam: "block", note: "Earthen mass: battered walls thickening to the base, projecting vigas, stepped massing, small deep-set windows, a latilla porch. Irregularity IS the style.", city: "A pueblo/Saltlands town — mission church, trading post, stacked terraced dwellings." },
+  { id: "victorian", era: "industrial", fam: "block", note: "Second Empire. Mansard roof with dormers punching through, projecting oriel bays, a deep bracketed cornice over a cast-iron storefront.", city: "A 19th-century downtown: the opera house, the hotel, the department store, the rooming block." },
 
   // ---- HOUSES (the maxStoreys set, on a two-storey house shell) ---------
-  { id: "queenanne", fam: "house", note: "The painted lady: asymmetric mass, a corner turret, a wraparound porch, three colours of shingle and spindlework everywhere.", city: "An 1890s residential hill. Siblings: Stick, Shingle, Eastlake. The most ornament per square metre in the kit." },
-  { id: "greekrev", fam: "house", note: "A temple bolted to a house: gable turned to the road, full-height colonnade in front of it, a real pediment with a shadowed tympanum, painted dead white.", city: "A courthouse-square town of white temple fronts — bank, academy, two churches, the big house on the hill." },
-  { id: "plantation", fam: "house", note: "Antebellum: a two-storey gallery running the full width on both floors, columns from ground to roof, hipped roof with dormers.", city: "A river road of galleried houses, an overseer's cottage, a raised creole townhouse." },
-  { id: "manor", fam: "house", note: "English manor: steep gables, half-timbering, tall grouped chimney stacks, leaded casements, a stone porch bay.", city: "A Tudor village — inn, church, market hall, timbered terrace." },
-  { id: "brickhouse", fam: "house", note: "Georgian/Colonial: solid brick laid symmetrically about a centre door, side-gabled roof, a chimney at each end. Its argument is DECORUM.", city: "A colonial town of manners — meeting house, tavern, the row houses, the governor's house." },
-  { id: "spanish", fam: "house", note: "Spanish Colonial: white stucco, a low-pitch clay barrel-tile roof, arcaded loggia, wrought iron, a bell-gable.", city: "A mission town: the mission itself, the hacienda, the plaza arcade, the courtyard house." },
-  { id: "machiya", fam: "house", note: "Japanese townhouse/minka: a low timber frame with pale plaster infill, a veranda deck along the street face, one enormous tiled roof with deep eaves.", city: "A machiya street — shop-house, teahouse, gate house, storehouse (kura)." },
-  { id: "romanvilla", fam: "house", note: "Roman villa: a low tile roof, a colonnaded peristyle, stuccoed masonry, a courtyard the building wraps.", city: "A Mediterranean antique quarter — villa, baths, forum stoa, insula." },
-  { id: "desertmod", fam: "house", note: "Palm Springs, 1962. A single thin roof blade with 2-6 m of overhang, steel posts, plate glass, a breeze-block screen. Architecture as the management of sun.", city: "A mid-century desert suburb: butterfly roof, folded plate, the post-and-beam, the screen-wall bungalow." },
-  { id: "techhouse", fam: "house", note: "Contemporary glass house: stacked cantilevered volumes, floor-to-ceiling glazing, a wood-slat screen, a flat roof with a parapet.", city: "A hillside of modern spec houses. The least characterful pick, and the most likely to read as generic." },
-  { id: "ranch", fam: "house", note: "Plain house. A long low box, shallow gable, picture window, an attached carport. Deliberately the boring one — it is what a street NEEDS between the loud ones.", city: "Post-war tract suburbia: ranch, split-level, cape, minimal traditional. Background architecture, and a city is mostly background." },
+  { id: "queenanne", era: "industrial", fam: "house", note: "The painted lady: asymmetric mass, a corner turret, a wraparound porch, three colours of shingle and spindlework everywhere.", city: "An 1890s residential hill. Siblings: Stick, Shingle, Eastlake. The most ornament per square metre in the kit." },
+  { id: "greekrev", era: "colonial", fam: "house", note: "A temple bolted to a house: gable turned to the road, full-height colonnade in front of it, a real pediment with a shadowed tympanum, painted dead white.", city: "A courthouse-square town of white temple fronts — bank, academy, two churches, the big house on the hill." },
+  { id: "plantation", era: "colonial", fam: "house", note: "Antebellum: a two-storey gallery running the full width on both floors, columns from ground to roof, hipped roof with dormers.", city: "A river road of galleried houses, an overseer's cottage, a raised creole townhouse." },
+  { id: "manor", era: "medieval", fam: "house", note: "English manor: steep gables, half-timbering, tall grouped chimney stacks, leaded casements, a stone porch bay.", city: "A Tudor village — inn, church, market hall, timbered terrace." },
+  { id: "brickhouse", era: "colonial", fam: "house", note: "Georgian/Colonial: solid brick laid symmetrically about a centre door, side-gabled roof, a chimney at each end. Its argument is DECORUM.", city: "A colonial town of manners — meeting house, tavern, the row houses, the governor's house." },
+  { id: "spanish", era: "colonial", fam: "house", note: "Spanish Colonial: white stucco, a low-pitch clay barrel-tile roof, arcaded loggia, wrought iron, a bell-gable.", city: "A mission town: the mission itself, the hacienda, the plaza arcade, the courtyard house." },
+  { id: "machiya", era: "eastasia", fam: "house", note: "Japanese townhouse/minka: a low timber frame with pale plaster infill, a veranda deck along the street face, one enormous tiled roof with deep eaves.", city: "A machiya street — shop-house, teahouse, gate house, storehouse (kura)." },
+  { id: "romanvilla", era: "classical", fam: "house", note: "Roman villa: a low tile roof, a colonnaded peristyle, stuccoed masonry, a courtyard the building wraps.", city: "A Mediterranean antique quarter — villa, baths, forum stoa, insula." },
+  { id: "desertmod", era: "contemporary", fam: "house", note: "Palm Springs, 1962. A single thin roof blade with 2-6 m of overhang, steel posts, plate glass, a breeze-block screen. Architecture as the management of sun.", city: "A mid-century desert suburb: butterfly roof, folded plate, the post-and-beam, the screen-wall bungalow." },
+  { id: "techhouse", era: "contemporary", fam: "house", note: "Contemporary glass house: stacked cantilevered volumes, floor-to-ceiling glazing, a wood-slat screen, a flat roof with a parapet.", city: "A hillside of modern spec houses. The least characterful pick, and the most likely to read as generic." },
+  { id: "ranch", era: "contemporary", fam: "house", note: "Plain house. A long low box, shallow gable, picture window, an attached carport. Deliberately the boring one — it is what a street NEEDS between the loud ones.", city: "Post-war tract suburbia: ranch, split-level, cape, minimal traditional. Background architecture, and a city is mostly background." },
+
+  // ---- THE ERA LADDER: grammars written for the historical sheet ---------
+  // These are the eight eras the kit had no answer for. They are the reason
+  // `wall` exists: almost none of them have glazing, and until the shell could
+  // be told to hand over the wall plane none of them could be written at all.
+  { id: "drystone", era: "neolithic", fam: "house", note: "Skara Brae / broch. Coursed unmortared rubble battering inward, a corbelled roof closing to a smoke hole, a creep entrance under one massive lintel. No windows.", city: "A Neolithic settlement — huts, a passage tomb, a stone circle, a souterrain. The oldest thing a city can be." },
+  { id: "longhouse", era: "neolithic", fam: "house", note: "The roof IS the building: enormous thatch sweeping nearly to the ground, crossed ridge poles, heavy gable posts, one door, no windows.", city: "A forest-clearing village of longhouses, a palisade, a granary on posts." },
+  { id: "wattle", era: "neolithic", fam: "house", note: "Conical thatch over daub walls showing the stake-and-weave beneath, a ring of posts, a two-post porch. Made to read round on a rectangular plan.", city: "An Iron Age roundhouse cluster inside a ditch and bank." },
+  { id: "urziggurat", era: "bronze", fam: "block", note: "Ur. Three receding battered terraces, a monumental triple stair, reeded pilaster-and-buttress rhythm on every face, a shrine on the summit. Not to be confused with the 1916 zoning tower that shares the word.", city: "A Mesopotamian temple-city: ziggurat, mudbrick courtyard houses, a walled precinct, a gate of glazed brick." },
+  { id: "mastaba", era: "bronze", fam: "block", note: "Egyptian. Walls battering inward, a torus roll up every corner, a cavetto cornice flaring at the top, a pylon gate with flagstaff niches.", city: "A Nile temple precinct — pylon, hypostyle hall, mastaba tombs, an avenue of sphinxes." },
+  { id: "minoan", era: "bronze", fam: "block", note: "Knossos. The downward-tapering column — wider at the top, the opposite of every other column in the kit — red and black banding, a colonnaded light-well, horns of consecration on the parapet.", city: "An Aegean palace town: the palace, storerooms, a theatral area, terraced houses down to a harbour." },
+  { id: "mayatemple", era: "americas", fam: "block", note: "Tikal. A far steeper stepped pyramid than a ziggurat, a small cella on the summit, and a roof comb standing above it taller than the cella itself. The comb is the silhouette.", city: "A Maya city — temple pyramids, a palace range, a ballcourt, stelae in a plaza." },
+  { id: "puuc", era: "americas", fam: "block", note: "Uxmal. A plain lower wall and, above a medial moulding, an encrusted upper frieze of stone mosaic: colonnettes, stepped fret, stacked long-nosed masks at the corners.", city: "A Puuc hill town: palace, nunnery quadrangle, arch gateway, chultun cisterns." },
+  { id: "talud", era: "americas", fam: "block", note: "Teotihuacan. A repeating unit stacked up the elevation — sloping talud, then a framed vertical tablero that oversails it. The projecting frame throws the shadow that makes the profile.", city: "The Avenue of the Dead: platforms, apartment compounds, a painted precinct." },
+  { id: "stave", era: "medieval", fam: "house", note: "Borgund. Steeply pitched shingled roofs stacked in diminishing tiers climbing to a point, dragon-head finials at the gables, an external gallery on posts, vertical stave planking.", city: "A Norse valley: stave church, longhouse farmstead, a stabbur on staddle stones, a boathouse." },
+  { id: "izba", era: "medieval", fam: "house", note: "Horizontal log courses with interlocked corners whose ends project past the wall at every course, a raised podklet, a carved bargeboard, nalichniki window surrounds.", city: "A Russian village — izby along one street, a wooden church, a bathhouse, a well crane." },
+  { id: "caravanserai", era: "islamic", fam: "block", note: "A fortified block with corner towers, a crenellated parapet and almost no openings, spending everything on one monumental iwan portal projecting above the parapet.", city: "A Silk Road halt: caravanserai, covered bazaar, madrasa, a domed cistern." },
+  { id: "shikhara", era: "southasia", fam: "block", note: "Khajuraho. A curvilinear tower of stacked receding courses that rises vertically then curves in, an amalaka disc and pot finial at the apex, a mandapa porch under its own stepped roof, a star-pointed plan.", city: "A Nagara temple town: shikhara, tank with ghats, a pillared hall, subsidiary shrines." },
+  { id: "prasat", era: "southasia", fam: "block", note: "Angkor. A quincunx — one central tower and four at the corners — each a stack of diminishing storeys with antefix horns at every tier, false doors on three sides, naga balustrades.", city: "A Khmer temple-city: prasat, gopura gates, a baray reservoir, a laterite causeway." },
+  { id: "stupa", era: "southasia", fam: "block", note: "Bagan. A bell on a stepped terrace under an hti — a spire of diminishing rings — with a pyatthat, the multi-tiered spired roof, over the entrance hall.", city: "A plain of pagodas: stupa, ordination hall, monastery, a pyatthat gate." },
+  { id: "sahelian", era: "africa", fam: "block", note: "Djenne. Engaged buttress piers running the full height and ending in cone finials, toron palm beams studding the whole elevation in a grid, battered mud walls, a parapet of pinnacles. No windows.", city: "A Sahelian city of earth: the great mosque, a merchant quarter, mud granaries, a Friday market square." },
+  { id: "zimbabwe", era: "africa", fam: "block", note: "The Great Enclosure. Coursed granite laid without mortar, battering and thickening enormously at the base, almost no openings, a chevron course near the top and a solid conical tower.", city: "A dry-stone capital: the enclosure, the hill complex, narrow parallel passages, a valley of daga huts." },
+  { id: "swahili", era: "africa", fam: "house", note: "Lamu. Coral rag under lime plaster, a flat terrace roof behind a low parapet, a deeply carved timber door in a frame far larger than it needs, zidaka niches, a baraza bench at the street.", city: "A Swahili stone town: merchant houses, a mosque, a customs house, alleys too narrow for carts." },
+  { id: "palazzo", era: "renaissance", fam: "block", note: "Strozzi. Three storeys getting smoother as they rise — rock-faced, then channelled, then near-ashlar — bifora windows, corner quoin chains, and an enormous cornice throwing a hard band of shade.", city: "A Florentine quarter: palazzi, a loggia, a baptistery, a bridge lined with shops." },
+  { id: "baroque", era: "renaissance", fam: "block", note: "Il Gesu. A two-storey front stitched by great volute scrolls, giant-order pilasters layered so the centre steps forward, statue niches, a broken segmental pediment. A wall that swells.", city: "A baroque capital: church fronts, a fountain square, a palace, an obelisk on an axis." },
+  { id: "palladian", era: "renaissance", fam: "house", note: "Villa Rotonda. A piano nobile over a rusticated basement, a full temple-front portico, flanking wings, a serliana window, a shallow dome. Raised and arched where Greek Revival is grounded and gabled.", city: "A Veneto landscape of villas, barchesse, a walled garden, a canal." },
+  { id: "arcology", era: "future", fam: "tower", note: "Planted terraces stepping back on every face, sky-bridges between masses, and a wind-scoop void punched clean through the upper mass — a hole in the building.", city: "A vertical district: linked arcologies, sky-farms, a ground plane given back to water." },
+  { id: "printed", era: "future", fam: "tower", note: "Printed in place. Continuous horizontal bead courses running unbroken around the building, each offset from the last so the wall swells and waists. No straight vertical edge anywhere.", city: "A printed settlement — lobed towers, extruded low blocks, a landscape with no right angles." },
+  { id: "masstimber", era: "future", fam: "tower", note: "CLT and glulam. A heavy timber grid standing outside the glass, warm against cool grey, and planted setback terraces where the structure steps in. Warm and orthogonal where high-tech is metal and industrial.", city: "A timber downtown: CLT towers, a market hall on glulam arches, planted decks." },
 ];
 
-const FAMLABEL = { tower: "TOWERS", block: "BLOCKS · mid-rise", house: "HOUSES" };
+const FAMLABEL = { tower: "tower", block: "mid-rise block", house: "house" };
+/* THE LADDER. The sheet used to group by SUBJECT SIZE, which was right when
+   the question was "which ten of these do I like": you cannot compare a
+   supertall and a bungalow, so they were kept apart. The question is now a
+   different one — "does this cover human building history" — and the only
+   order that answers it is chronological. `fam` still decides the subject a
+   grammar is photographed on; `era` decides where it lands in the book. */
+const ERAS = [
+  ["neolithic", "STONE AGE", "Before metal, before the wheel. Mass, thatch and stacked stone; the roof is usually the whole building and there are no windows at all."],
+  ["bronze", "BRONZE AGE", "The first monumental states. Mud brick and dressed stone piled into terraces, battered walls and gods on the summit."],
+  ["classical", "CLASSICAL ANTIQUITY", "The orders, the courtyard, the tile roof. The grammar the West would keep re-borrowing for two thousand years."],
+  ["americas", "INDIGENOUS AMERICAS", "Pyramid, platform and frieze — and earth architecture in the north. No arch, no glass, no iron, and none of it needed."],
+  ["medieval", "MEDIEVAL EUROPE", "Stone that gathers load into buttresses, and timber that stacks, laps and carves. Everything points."],
+  ["islamic", "ISLAMIC WORLD & SILK ROAD", "The portal is the building. Blank defensive walls spend all their ornament on one deep pointed recess."],
+  ["southasia", "SOUTH & SOUTHEAST ASIA", "Towers that curve, cluster and taper to a needle, built of stacked courses rather than framed bays."],
+  ["eastasia", "EAST ASIA", "Timber frames under enormous eaves. The wall carries nothing and the bracket set is the ornament."],
+  ["africa", "AFRICA", "Earth, unmortared granite and coral rag — three constructions with nothing in common but a continent."],
+  ["renaissance", "RENAISSANCE & BAROQUE", "The orders come back as a system, then start to bend. Rustication, giant orders, and finally a wall that swells."],
+  ["colonial", "COLONIAL & EARLY AMERICAN", "Old-world manners in new-world timber and brick. Symmetry, a centre door, and a temple front on a farmhouse."],
+  ["industrial", "INDUSTRIAL 19TH CENTURY", "Iron, plate glass and the load-bearing brick pier. Buildings that show you how they stand up."],
+  ["early20", "EARLY 20TH CENTURY", "The zoning envelope and the vertical pier. Towers learn to have crowns, then learn to stop."],
+  ["late20", "LATE 20TH CENTURY", "Structure as the only ornament, then structure as a joke. Concrete, exoskeletons, tubes and a broken pediment."],
+  ["contemporary", "CONTEMPORARY", "Glass, cantilever and the deep shading roof. Also the plain house, which is what a street is actually made of."],
+  ["future", "NEAR FUTURE", "Terraces you can farm, walls printed in one pass, and towers that grew rather than being smelted."],
+];
+const ERALABEL = {}, ERANOTE = {}, ERAIDX = {};
+ERAS.forEach(([k, label, note], i) => { ERALABEL[k] = label; ERANOTE[k] = note; ERAIDX[k] = i; });
 /* The three subjects. Within a family every plate is the same box, so the
    sheet compares grammars; across families it deliberately is not. */
 const SUBJ = {
@@ -736,10 +791,19 @@ async function main() {
   if (missing.length) console.error("!! registered but NOT in the sheet: " + missing.join(", "));
   if (stale.length) console.error("!! in the sheet but not registered: " + stale.join(", "));
 
-  const plan = ORDER.filter((o) => byId.has(o.id)).filter((o) => !ONLY || ONLY.includes(o.id));
+  /* NUMBER IN LADDER ORDER, not in the order the literal happens to be
+     written. A stable sort inside each era keeps a grammar's neighbours
+     stable when one is added to a different era later. */
+  const LADDER = ORDER.filter((x) => byId.has(x.id))
+    .map((o, i) => ({ o: o, i: i }))
+    .sort((a, b) => (ERAIDX[a.o.era] - ERAIDX[b.o.era]) || (a.i - b.i))
+    .map((x) => x.o);
+  const missingEra = LADDER.filter((o) => ERAIDX[o.era] == null).map((o) => o.id);
+  if (missingEra.length) console.error("!! no era for: " + missingEra.join(", "));
+  const plan = LADDER.filter((o) => !ONLY || ONLY.includes(o.id));
   const entries = [];
   let n = 0;
-  for (const o of ORDER.filter((x) => byId.has(x.id))) {
+  for (const o of LADDER) {
     n++;                                   // the number counts the WHOLE sheet
     if (!plan.includes(o)) continue;
     const subject = SUBJ_OVERRIDE[o.id] || SUBJ[o.fam];
@@ -795,11 +859,10 @@ async function main() {
 function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 
 function renderHtml(entries, regCount) {
-  const fams = ["tower", "block", "house"];
-  const index = fams.map((fam) => {
-    const set = entries.filter((e) => e.fam === fam);
+  const index = ERAS.map(([key, label]) => {
+    const set = entries.filter((e) => e.era === key);
     if (!set.length) return "";
-    return `<section class="idxgroup"><h3>${FAMLABEL[fam]}<span>${set.length}</span></h3><div class="grid">` +
+    return `<section class="idxgroup"><h3>${label}<span>${set.length}</span></h3><div class="grid">` +
       set.map((e) => `<figure class="thumb"><div class="imgwrap"><img src="${e.shots.hero}"><b>${e.n}</b></div>
         <figcaption><strong>${esc(e.label)}</strong><span>${esc(e.id)}</span></figcaption></figure>`).join("") +
       `</div></section>`;
@@ -822,7 +885,7 @@ function renderHtml(entries, regCount) {
       <header>
         <div class="num">${e.n}</div>
         <div class="ttl"><h2>${esc(e.label)}</h2>
-          <p class="kick">${FAMLABEL[e.fam]} &middot; <code>${esc(e.id)}</code> &middot; ${s.w}&times;${s.d} m, ${s.storeys} storeys${SUBJ_OVERRIDE[e.id] ? " (slim plan — this grammar's own)" : ""}</p></div>
+          <p class="kick">${esc(ERALABEL[e.era] || "—")} &middot; ${FAMLABEL[e.fam]} &middot; <code>${esc(e.id)}</code> &middot; ${s.w}&times;${s.d} m, ${s.storeys} storeys${SUBJ_OVERRIDE[e.id] ? " (slim plan — this grammar's own)" : ""}</p></div>
       </header>
       <div class="body">
         <div class="big"><img src="${e.shots.hero}"><span class="cap">Three-quarter — the honest single frame</span></div>
@@ -857,7 +920,7 @@ function renderHtml(entries, regCount) {
   .cover { display: flex; flex-direction: column; justify-content: center; min-height: 7.4in; padding: 0 0.3in; }
   .cover h1 { font-size: 54px; line-height: 1.02; letter-spacing: -0.03em; }
   .cover .sub { font-size: 19px; color: #55585e; margin-top: 14px; max-width: 7.6in; }
-  .cover .how { margin-top: 34px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; border-top: 2px solid #17181a; padding-top: 18px; }
+  .cover .how { margin-top: 30px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; border-top: 2px solid #17181a; padding-top: 18px; }
   .cover .how h4 { margin: 0 0 5px; font-size: 12px; letter-spacing: 0.10em; text-transform: uppercase; }
   .cover .how p { margin: 0; font-size: 12.5px; color: #45484e; }
   .cover .strip { margin-top: auto; padding-top: 26px; display: grid; grid-template-columns: repeat(9, 1fr); gap: 7px; }
@@ -915,10 +978,11 @@ function renderHtml(entries, regCount) {
     padding-top: 5px; font-size: 10px; color: #8a8d93; letter-spacing: 0.05em; text-transform: uppercase; }
 </style>
 <div class="page cover">
-  <h1>Thirty-one facades.<br>Pick ten.</h1>
-  <p class="sub">Every grammar the facade kit has, photographed on the same shell within its family, from three angles. Reply with the numbers you want and each one becomes a whole cultural city — the picked facade plus three more siblings in the same tradition.</p>
+  <h1>Every facade,<br>Stone Age to near future.</h1>
+  <p class="sub">Every grammar the kit has, in chronological order, photographed from three angles on the same shell within its size class. The eight eras the kit had no answer for were written for this sheet — and most of them were unbuildable until a facade could tell the shell to hand over the wall plane, because almost none of them have glazing.</p>
   <div class="how">
     <div><h4>Three-quarter</h4><p>The honest single frame: entrance face and one flank at once, so ornament applied only to the front cannot hide.</p></div>
+    <div><h4>Who owns the wall</h4><p>A grammar now declares it. <b>keep</b> — the shell glazes as always, and its real furnished rooms show through. <b>frame</b> — punched masonry openings to set piers and arches around. <b>own</b> — solid wall, no glazing, and the culture&rsquo;s own openings, or none at all.</p></div>
     <div><h4>From the pavement</h4><p>Where a player actually meets the building. Judges the door, the reach, and whether it still reads from underneath.</p></div>
     <div><h4>Rear three-quarter</h4><p>The cheat detector: a facade that spent everything on the door elevation looks fine in the other two frames and empty here. On tower plates this frame is the crown instead — a tower wraps all four faces by construction, and what it lives on is how it ends.</p></div>
   </div>
@@ -926,8 +990,8 @@ function renderHtml(entries, regCount) {
   <p class="foot">${regCount} registered, ${entries.length} plated &middot; one hard key light, shadows on, neutral pad, no city &middot; towers 34&times;28 m at 40 storeys, blocks 22&times;16 m at 4, houses 15&times;11 m at 2 &middot; generated by <code>tools/facade-catalog.mjs</code></p>
 </div>
 <div class="page idx">
-  <h1>The whole sheet</h1>
-  <p>Numbers come from a literal order in the tool, not from registry order — so <b>“I want 4, 9, 17 and 22”</b> still means the same four buildings next week. Full plate for each on the pages that follow.</p>
+  <h1>The ladder</h1>
+  <p>Ordered by era, oldest first; numbers run straight through the ladder, so <b>“I want 4, 9, 17 and 22”</b> means the same four buildings next week. Each grammar is photographed on the subject its size class uses — houses at 15&times;11 m, blocks at 22&times;16 m, towers at 34&times;28 m over 40 storeys — so a bungalow is never compared against a supertall. Full plate for each on the pages that follow.</p>
   ${index}
 </div>
 ${plates}`;

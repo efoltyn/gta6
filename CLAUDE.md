@@ -32,3 +32,35 @@ around it to stay consistent with it.
 Harness contract: **/Users/elifoltyn/harness/AGENTS.md** — read it first. It lists the
 tools available on this machine and the finish-line rule: a task that changes
 anything ends with an artifact on disk, not a prose summary.
+
+
+## never run the math gate
+
+`tools/math-gate.mjs` is banned. Owner, verbatim: "I never want the math gate
+fucking used again it's fucking horrible" and "THE GATES ARE HUGE FUCKING TIME
+WASTERS AND WAY TOO GENERAL AND SLOW AS FUCK".
+
+This applies to you and to every subagent you spawn. Do not run it, do not put
+it in a brief, do not suggest it, do not "just check quickly with it". The same
+goes for the other whole-tree gates when they are being used as a general
+proof that nothing broke — boot-health, smoke-play, determinism-check. They
+cost minutes and they answer a question nobody asked.
+
+WHAT TO DO INSTEAD. Verify the thing you actually changed, with the narrowest
+check that can fail for the right reason:
+
+  * `node --check <file>` on every file you touched. Free, always.
+  * A targeted render. For facades that is
+    `node tools/facade-preview.mjs <id> --subject house|block|tower` — about
+    20 seconds, boots the real page, builds through the real shell, and prints
+    SOLID / minted / triangle counts.
+  * A NUMERIC before-and-after when the claim is "nothing changed".
+    `artifacts/facade-catalog/catalog.json` holds committed per-facade
+    geometry counts; re-render and compare the numbers. That is how the
+    wall-mode change was proved not to move brick: 1452 deco boxes and 17,424
+    triangles, before and after, exactly.
+
+The rules the gate was enforcing still stand — determinism above all: a facade
+varies only through `ctx.hash(salt)`, never `Math.random` and never an rng
+stream draw. Enforce that by reading your own diff, which is faster than the
+gate and actually tells you where the problem is.
