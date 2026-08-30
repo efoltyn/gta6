@@ -111,6 +111,9 @@
      WATER_UW_SKY_SEAM — repaint core/sky.js's dome with the SUBMERGED fog
                        colour, so a hole in the geometry falls back to water
                        instead of sky. See the seam-law note by exitFog().
+     WATER_SIGHT_GAIN — 0..1 dial (default 1) on how much clearer this game's
+                       water is than the Jerlov table it is solved from. 0 is
+                       the pure physics. See THE CLARITY GAIN.
 ============================================================ */
 (function () {
   "use strict";
@@ -135,6 +138,10 @@
   // WATER_BREATH_HUD — the low-air edge vignette (reads city/swim.js's meter).
   // OFF (?cfg_WATER_BREATH_HUD=0) → no visual air warning at all.
   if (CFG.WATER_BREATH_HUD == null) CFG.WATER_BREATH_HUD = true;
+  // WATER_SIGHT_GAIN — 0..1 dial on the underwater CLARITY GAIN (see the
+  // block by the Jerlov table). 1 (default) = the sea this game wants,
+  // ~100 m level in clear water; 0 = pure Jerlov IB, ~33 m.
+  if (CFG.WATER_SIGHT_GAIN == null) CFG.WATER_SIGHT_GAIN = 1;
   // WATER_UW_SKY_SEAM — repaint core/sky.js's dome with the SUBMERGED fog
   // colour, so the background behind a hole in the geometry is water and not
   // sky. See "THE SEAM LAW IS ALSO A SUBMERGED LAW" below.
@@ -358,6 +365,58 @@
   const C_SEA = 0.127, KD_SEA = 0.042;    // Jerlov IB   — level ~36 m
   const C_SURF = 1.60, KD_SURF = 0.600;   // true surf   — level ~2.9 m
   const C_LAKE = 0.55, KD_LAKE = 0.220;   // inland lake — level ~8.3 m
+  /* ============================================================
+     THE CLARITY GAIN — the one number in this block that is a GAME DECISION
+     and says so. (2026-08-30.)
+
+     Owner, after the Duntley rework above shipped: "when I'm underwater I want
+     to be able to see way fucking farther straight ahead, rn I see like 5 feet
+     ahead of me."
+
+     MEASURED FIRST, because the last wave's whole point was that guessing is
+     how this file got a 16 m fog bank. In the shark sim, offshore, at noon,
+     the model above solves 33.4 m level / 52.3 m up / 17.5 m down, and that is
+     the number he is calling five feet. It is not a bug: 33 m IS Jerlov IB, it
+     IS "a really good day" on a reef, and the physics is right. It is simply
+     not the picture this game wants — a shark is a thing that crosses a
+     hundred metres of open water at speed, and a sighting range of a third of
+     that means the sea in front of you is always a wall you are about to hit.
+
+     So rather than quietly bending c, Kd, eps or the ramp — which is exactly
+     how the four separate depth terms this file just untangled got tangled in
+     the first place — the concession is ONE named multiplier on the CLARITY of
+     the medium, applied to c and Kd together. Together, because:
+       • dividing both leaves Kd/c untouched, and Kd/c is the entire shape of
+         the up/down asymmetry (see sightRange) — so the "the one that gets you
+         is the one from below" grammar survives the change exactly;
+       • dividing Kd alone would also brighten the deep, and the RAMP already
+         owns how dark deep water looks;
+       • dividing the solved range instead of the coefficients would leave the
+         shader's per-fragment path length disagreeing with the JS model, which
+         is the one thing tools/shark-sight-check.mjs exists to catch.
+
+     It is honestly a gain on the WATER, not on the eye: the sea in this game
+     is clearer than the sea outside it. At 3.0 the clear-sea numbers become
+     100 m level, 157 m up, 52 m down — which is the top of the physically
+     observed range for real ocean (the Weddell Sea Secchi record is ~80 m) and
+     the picture the owner asked for.
+
+     THE SURF AND THE LAKE GET A SMALLER GAIN ON PURPOSE. Those two exist to
+     say "you cannot see in here" — the wash is milk and a lake is soup — and
+     handing them a 3x would delete the only two places in the game where the
+     water itself is an obstacle. They get enough to stop being blindfolds
+     (2.9 -> 5.3 m in the wash, 8.3 -> 14 m in a lake) and no more.
+
+     WATER_SIGHT_GAIN IS A 0..1 DIAL ON THIS CONCESSION, not the multiplier
+     itself, so that 0 is exactly the pure Jerlov build to the metre (the
+     before/after preset's BEFORE column), 1 is the numbers above, and anything
+     between is a straight lerp of the gain. ?cfg_WATER_SIGHT_GAIN=0.5 is a
+     ~60 m sea. */
+  const GAIN_SEA = 3.0, GAIN_SURF = 1.8, GAIN_LAKE = 1.7;
+  function sightGain() {
+    const v = +CFG.WATER_SIGHT_GAIN;
+    return isFinite(v) ? clamp01(v) : 1;
+  }
   /* The surf band, by the seabed depth under the eye, and it is DELIBERATELY
      NARROW. Shallow is not the same as turbid — a Bahamas sand flat in 5 m of
      water is the clearest thing in this game, and ref 3 reads its bottom
@@ -1324,7 +1383,16 @@
     const stir = 1 - smoothstep(SURF_STIR, SURF_CLEAR, bedDepth);
     let c = C_SEA + (C_SURF - C_SEA) * stir;
     let kd = KD_SEA + (KD_SURF - KD_SEA) * stir;
-    if (inland > 0) { c += (C_LAKE - c) * inland; kd += (KD_LAKE - kd) * inland; }
+    let gain = GAIN_SEA + (GAIN_SURF - GAIN_SEA) * stir;
+    if (inland > 0) {
+      c += (C_LAKE - c) * inland; kd += (KD_LAKE - kd) * inland;
+      gain += (GAIN_LAKE - gain) * inland;
+    }
+    /* THE CLARITY GAIN (see the block by the Jerlov table). Blended on the
+       same two mixes as c and Kd so the wash stays the wash, and applied to
+       BOTH so Kd/c — the whole up/down asymmetry — comes out unchanged. */
+    gain = 1 + (gain - 1) * sightGain();
+    c /= gain; kd /= gain;
 
     // Adaptation luminance at the eye, and the threshold contrast that buys.
     const E = E_NIGHT + (E_NOON - E_NIGHT) * Math.pow(clamp01(sun01), E_SHAPE);

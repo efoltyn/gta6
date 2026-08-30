@@ -1,0 +1,36 @@
+[
+  {
+    "gain": false,
+    "level": 33.4,
+    "up": 52.3,
+    "down": 17.5,
+    "fogNear": 5,
+    "fogFar": 33.4,
+    "c": 0.127,
+    "kd": 0.042,
+    "depth": 16.9,
+    "seaBodies": 236,
+    "inSight": 0,
+    "sharksInSight": 0,
+    "tag": "before-gain0",
+    "columnM": 40.5,
+    "eyeM": 14.69
+  },
+  {
+    "gain": true,
+    "level": 100.1,
+    "up": 156.8,
+    "down": 52.4,
+    "fogNear": 15,
+    "fogFar": 100.1,
+    "c": 0.0423,
+    "kd": 0.014,
+    "depth": 16.5,
+    "seaBodies": 234,
+    "inSight": 2,
+    "sharksInSight": 0,
+    "tag": "after-gain1",
+    "columnM": 40.5,
+    "eyeM": 14.76
+  }
+]

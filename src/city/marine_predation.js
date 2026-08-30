@@ -1,11 +1,14 @@
 /* ============================================================
    city/marine_predation.js — THE SEA EATS ITSELF.
 
-   THREE OWNER ASKS, ONE BLOCK:
+   FOUR OWNER ASKS, ONE BLOCK:
      1. "bleeding in the water should attract sharks — not show up on HUD but
         just show in game"
      2. "how megalodon eating small ship looks"
      3. "how orcas attacking a megladon and enough orcas should beat a megladon"
+     4. "when you bleed in the shark sim, sharks should start coming at you
+        like real life" (2026-08-30) — ask 1 finished, because ask 1 only ever
+        built the BLOOD. §2b is what makes anything come to it.
 
    WHAT WAS ACTUALLY MISSING (measured before writing a line):
 
@@ -29,12 +32,16 @@
 
    THE SHAPE, AND WHY IT IS NOT AN ORCA-VS-MEGALODON SPECIAL CASE
    ---------------------------------------------------------------
-   §2 is a PREDATION GRAPH with no species name in it. Two relations fall out
-   of facts the bestiary already carries (scale, danger, bite, hp, herd):
+   §2 is a PREDATION GRAPH with no species name in it. Three relations fall out
+   of facts the bestiary already carries (scale, danger, bite, hp, herd) plus
+   one fact about the moment (is it bleeding):
 
-     PREY  a loner takes it alone  — smaller and less dangerous than me
-     MOB   only numbers take it    — up to MOB_MAX my size, dangerous in its
-                                     own right, and I am a POD animal
+     PREY    a loner takes it alone  — smaller and less dangerous than me
+     MOB     only numbers take it    — up to MOB_MAX my size, dangerous in its
+                                       own right, and I am a POD animal
+     FRENZY  it is BLEEDING          — teeth, and up to FRENZY_MAX my size.
+                                       Rank, species and appetite all ignored,
+                                       because that is what blood does. §2b.
 
    great white -> seal/tuna/dolphin, barracuda -> sardine, meg -> everything
    are PREY rows. orca -> megalodon and orca -> great white are MOB rows. Not
@@ -97,6 +104,7 @@
                                   (CFG.ORCA_POD = false still reverts it too)
      CBZ.CONFIG.MEG_SHIP_BITE     a big shark taking a small boat
      CBZ.CONFIG.WATER_CHUM_ALL    the chum producers of §7
+     CBZ.CONFIG.MARINE_FRENZY_BLOOD  §2b — blood opening the predation graph
 
    PUBLIC API — the graph
      CBZ.marineRelation(hunterSp, targetSp) -> 0 none | 1 prey | 2 mob
@@ -161,6 +169,16 @@
   const CHUM_HZ = 0.4;         // s between chum polls (2.5 Hz, matches chumNear)
   const CHUM_SLOTS = 6;        // handles we will hold (gore.js caps at 12 total)
   const CHUM_R = 260;          // u — no point trailing blood nobody can smell
+  /* ---- §2b. BLOOD, and what it does to the graph. See marineRelation. ---- */
+  const FRENZY_MAX = 3.0;      // a BLEEDING body may be up to this × my size
+  const FRENZY_BITE = 12;      // teeth big enough to take a piece out of one
+  const FRENZY_R = 340;        // u — how far blood carries. Longer than any senseR.
+  const BLEED_HP = 0.72;       // health fraction below which a body trails blood
+  const FRENZY_LEASH = 70;     // u — a frenzy that has stopped bleeding is dropped past this
+  const FRENZY_GRACE = 7;      // s a frenzy holds after the bleeding stops, wherever it is
+  const FRENZY_PRESS = 3.0;    // s between one frenzy hunter's committed passes
+  const FRENZY_PRESS_RAND = 2.6;
+  const FRENZY_PRESS_K = 1.15; // × its own circle radius: how close it presses from
 
   // ---- module-scope temps (never allocated per frame) ----------------------
   let _t0 = 0, _t1 = 0, _t2 = 0, _t3 = 0;
@@ -168,6 +186,8 @@
   const _v = THREE ? new THREE.Vector3() : null;
   const AUDIT = {
     shadowed: 0,        // frames a committed pod spent crossing water to its quarry
+    frenzies: 0,        // §2b target locks: blood opening the graph
+    presses: 0,         // §2b committed passes: a frenzy skipping the tease
     hunts: 0, rams: 0, rolls: 0, kills: 0, casualties: 0, brokeOff: 0,
     shipBites: 0, shipsSunk: 0, chumOpened: 0, chumLive: 0, hudWrites: 0, chunks: 0,
   };
@@ -196,6 +216,7 @@
       role: "commit", rollT: -1, rolling: null, held: false,
       opts: null, ram: null, shipTarget: null, shipScan: 0, shipT: 0,
       podN: 0, podT: 0, ramRun: 0,
+      pressT: 0, frenzyGrace: 0,
     });
   }
 
@@ -406,6 +427,150 @@
   }
   CBZ.marineRelation = marineRelation;
 
+  /* ============================================================
+     §2b. BLOOD IN THE WATER OPENS THE GRAPH — the third relation.
+
+     OWNER (2026-08-30): "when you bleed in the shark sim, sharks should start
+     coming at you like real life."
+
+     MEASURED FIRST. Staged in the shark sim: player's bull shark held at 35%
+     health, offshore, thirty seconds. The blood was already there — §7's poll
+     opens a chum trail on the ridden shark like any other wounded swimmer, and
+     gore.js paints the plume and the surface slick off it. Sharks drifted to
+     within 2 m of it. NOT ONE OF THEM EVER TARGETED IT. Zero, every sample.
+
+     WHY, AND IT IS §2 ITSELF. The graph above is a strict pecking order read
+     off scale and danger, and it has no idea what blood is:
+       • a rival of your OWN species is `hsp === tsp` and returns 0 on line one;
+       • from GREAT WHITE up the ladder nothing in the sea is both bigger and
+         more dangerous than you, so every shark row returns 0 and the orca pod
+         is the only thing left that can legally want you;
+       • the one row that did fire (great white -> bull shark) is PREY, so it
+         is gated on hunger, and a bleeding body scored barely above a healthy
+         mackerel that happened to be nearer — the `(1 + hurt)` term is a 2x
+         at most and distance is a 3x.
+     So the pecking order was answering a question blood does not ask.
+
+     THAT IS ALSO THE BIOLOGY. A pecking order is what predators do when
+     everyone is healthy; blood suspends it. Sharks feed on wounded conspecifics
+     — cannibalism inside a feeding aggregation is documented in white sharks,
+     bulls and tigers, and intrauterine cannibalism means some of them have done
+     it before they were born — and a bleeding animal draws EVERY set of teeth
+     in the neighbourhood regardless of who outranks whom. So:
+
+       FRENZY  it is bleeding into the water, I have real teeth, and it is at
+               most FRENZY_MAX my size. Same species allowed. Rank ignored.
+               Hunger ignored. Shared — a frenzy is a crowd by definition.
+
+     THREE THINGS THIS IS CAREFUL ABOUT:
+       • THE TRIGGER IS THE TRAIL, NOT A HEALTH BAR. `bleedSevOf` reads §7's
+         own slots, so a body only counts as bleeding when there is genuinely
+         chum in the water for it — which means the in-water test, the severity
+         and the lifetime are all already decided in one place and this section
+         cannot drift from it. A wounded animal on a beach draws nothing.
+       • TEETH, NOT APPETITE. FRENZY_BITE keeps this to animals that can take a
+         piece out of something big: the four sharks and the orca. A great
+         barracuda (bite 10) joining a shark frenzy would be the "ten barracuda
+         mob a great white" mistake §2 already documents, one door along.
+       • IT ENDS. A frenzy target that stops bleeding is dropped as soon as it
+         is past FRENZY_LEASH, so healing up genuinely calls them off — but the
+         ones already on you finish the pass they are in rather than freezing
+         mid-lunge.
+
+     ?cfg_MARINE_FRENZY_BLOOD=0 restores the strict pecking order — that is the
+     before/after preset's BEFORE column. */
+  function BLOODOPENS() { return ON() && CFG.MARINE_FRENZY_BLOOD !== false; }
+  /* IS THERE BLOOD IN THE WATER FOR THIS BODY, AND HOW MUCH.
+
+     §7's slots first — an open one means a live gore.js chum handle, which
+     means the in-water test already passed. Six slots, so that is a six-step
+     loop and never a scan.
+
+     AND THEN THE RULE ITSELF, BECAUSE THE SLOTS ARE A BUDGET AND NOT THE
+     TRUTH. Measured, and it took the frenzy apart from the inside: eight
+     sharks converged on a bleeding shark, started killing things around it,
+     and every animal they tore up opened a chum trail of its own — six slots,
+     twelve handles in gore.js, and the bleeder that started the whole event
+     was crowded out of the table by the meals. Its severity read 0, every
+     frenzy's grace clock ran down, and all eight let go WHILE IT WAS STILL
+     BLEEDING. A relation that expires because a handle was scarce is a
+     relation expiring for a reason nothing in the water could perceive.
+
+     So the fallback is the same test §7's poll applies before it ever asks for
+     a slot — below BLEED_HP of your health, in water, you are trailing — which
+     also makes that threshold one named constant instead of the two literals
+     it used to be. The slot still decides whether the trail is DRAWN; it no
+     longer decides whether it exists. */
+  function bleedSevOf(o) {
+    if (!o) return 0;
+    for (let i = 0; i < SLOTS.length; i++) {
+      const st = SLOTS[i];
+      if (st.ref === o && st.h) return st.sev;
+    }
+    if (o.dead) return 0;
+    const hpf = clamp((o.hp || 0) / maxHpOf(o), 0, 1);
+    if (hpf >= BLEED_HP) return 0;
+    const p = actorPos(o);
+    if (!p || !inWater(p.x, p.y || 0, p.z)) return 0;
+    return clamp((BLEED_HP - hpf) * 1.6 + 0.22, 0.2, 1);
+  }
+  CBZ.marineBleedingSev = bleedSevOf;
+  /* Teeth, and a body not absurdly bigger than mine. No danger comparison and
+     no same-species veto: those are the pecking order, and blood is what
+     suspends the pecking order. */
+  function frenzyOk(hsp, tsp) {
+    if (!hsp || !tsp || !hsp.aquatic || !tsp.aquatic) return false;
+    if (!((hsp.bite || 0) >= FRENZY_BITE)) return false;
+    return ((tsp.scale || 1) / (hsp.scale || 1)) <= FRENZY_MAX;
+  }
+  CBZ.marineFrenzyOk = function (a, t) {
+    return !!(a && t && a.species && t.species && frenzyOk(a.species, t.species));
+  };
+
+  /* A FRENZY IS NOT A STALK, AND THAT IS THE OTHER HALF OF §2b.
+
+     MEASURED, after the target selection above was working: eight sharks
+     locked onto a bleeding shark, four of them inside twenty metres, circling
+     for a hundred and forty game seconds — and ONE bite landed in the whole
+     run. Nothing was broken. systems/predator.js's grammar is a STALK, and a
+     stalk is deliberately mostly circling: `circle` is documented there as
+     "the single most important state in the file and shortening it is the one
+     change that would flatten the whole system", a fifth of approaches are
+     nothing at all by design, and every commit is followed by a mandatory
+     disengage and a cooldown. That is exactly right for one great white
+     deciding about one swimmer. It is exactly wrong for a feeding aggregation
+     on something already bleeding, which is the one situation where sharks
+     visibly stop assessing.
+
+     predator.js publishes the verb for this and says what it is for in as many
+     words: predatorCommit is "skip the tease — go NOW", for "an animal that is
+     already on top of the thing that hurt it ... where circling for four
+     seconds is not a tease, it is the animal declining to defend itself". A
+     shark that has crossed three hundred metres of open water to blood and is
+     now orbiting it is that animal.
+
+     SO THIS IS A CADENCE, NOT A SPAM. One committed pass per hunter every
+     ~3-6 s, and only from inside its own circle radius, so the FSM still owns
+     the approach, the rush, the strike and the withdrawal — nothing here moves
+     a body or deals a point of damage. Take this out and a frenzy goes back to
+     being a very well-attended stalk. */
+  function frenzyPress(a, target, dt, opts) {
+    if (typeof CBZ.predatorCommit !== "function") return false;
+    const m = mp(a);
+    m.pressT -= (dt || 0);
+    if (m.pressT > 0) return false;
+    const hp = actorPos(a), tp = actorPos(target);
+    if (!hp || !tp) return false;
+    _t0 = tp.x - hp.x; _t1 = tp.z - hp.z;
+    const r = (opts && opts.circleR > 0 ? opts.circleR : 24) * FRENZY_PRESS_K;
+    if (_t0 * _t0 + _t1 * _t1 > r * r) return false;
+    m.pressT = FRENZY_PRESS + Math.random() * FRENZY_PRESS_RAND;
+    let went = false;
+    try { went = !!CBZ.predatorCommit(a, target); } catch (e) { went = false; }
+    if (went) AUDIT.presses++;
+    return went;
+  }
+
   // The live answer for two actual animals — same function, their own sizes.
   function podNeeded(hunter, target) {
     if (!hunter || !target || !hunter.species || !target.species) return 12;
@@ -464,7 +629,30 @@
       const tp = actorPos(m.target), hp = actorPos(a);
       if (tp && hp) {
         _t0 = tp.x - hp.x; _t1 = tp.z - hp.z;
-        if (_t0 * _t0 + _t1 * _t1 < FIGHT_R2) return m.target;
+        const d2keep = _t0 * _t0 + _t1 * _t1;
+        /* A FRENZY IS THE ONE RELATION THAT CAN EXPIRE. The other two are
+           species facts and hold until the fight ends; this one is a state of
+           the quarry, so when the bleeding stops so does the reason. The leash
+           is what stops that reading as a shoal of sharks freezing mid-lunge
+           the frame the trail runs out — whoever is already on you finishes
+           the pass, and only the ones still crossing water give up. */
+        let letGo = false;
+        if (m.kind === 3) {
+          /* A FRENZY IS THE ONE RELATION THAT CAN EXPIRE — see §2b. Two clocks,
+             because one was not enough: DISTANCE alone left the four hunters
+             already orbiting a healed shark orbiting it for ever (measured),
+             since none of them was ever outside the leash to be released by
+             it. So the grace clock is the real release and the leash is only
+             what makes the far ones give up immediately: heal up and the ones
+             on top of you finish the pass they are in, then leave. */
+          if (bleedSevOf(m.target) > 0) m.frenzyGrace = FRENZY_GRACE;
+          else {
+            m.frenzyGrace -= (dt || 0);
+            if (m.frenzyGrace <= 0 || d2keep > FRENZY_LEASH * FRENZY_LEASH) letGo = true;
+          }
+        }
+        if (letGo) drop(a);
+        else if (d2keep < FIGHT_R2) return m.target;
       }
     }
     m.target = null; m.kind = 0;
@@ -481,17 +669,30 @@
     // a hunter reaches further for a MOB target than for a snack: an apex is
     // the thing a pod crosses water for.
     const senseR = (k && k.senseR > 0 ? k.senseR : 110) * 2.2;
+    // BLOOD CARRIES FURTHER THAN SIGHT. A frenzy candidate is scanned out to
+    // FRENZY_R whatever this animal's eyes are worth — that IS the difference
+    // between smelling something and seeing it — so the outer loop bound is
+    // the wider of the two and the per-row test picks which one applies.
+    const blood = BLOODOPENS();
+    const scanR = blood ? Math.max(senseR, FRENZY_R) : senseR;
     let best = null, bestKind = 0, bestScore = -1;
     for (let i = 0; i < list.length; i++) {
       const o = list[i];
       if (o === a || !alive(o)) continue;
-      const rel = marineRelation(hsp, o.species);
-      if (!rel) continue;
       const p = actorPos(o);
       if (!p) continue;
       _t0 = p.x - hp.x; _t1 = p.z - hp.z;
       const d2 = _t0 * _t0 + _t1 * _t1;
-      if (d2 > senseR * senseR) continue;
+      if (d2 > scanR * scanR) continue;
+      let rel = marineRelation(hsp, o.species);
+      /* §2b. The one row the pecking order cannot state. Checked AFTER the
+         cheap distance reject and only when the graph said no, so a healthy
+         sea never pays for it. */
+      let sev = 0;
+      if (blood && (sev = bleedSevOf(o)) > 0 && frenzyOk(hsp, o.species)) rel = 3;
+      else sev = 0;
+      if (!rel) continue;
+      if (rel !== 3 && d2 > senseR * senseR) continue;
       /* A FULL PREDATOR DOES NOT HUNT. `hungerOf` consumes a neighbour's
          CBZ.wildlifeHunger defensively (0..1, higher = hungrier) and degrades
          to "ordinarily interested" when that API is absent, so this file works
@@ -499,13 +700,25 @@
          hunger is about, whereas a pod mobbing an apex is opportunity and
          territory — a fed pod still runs a great white off. */
       if (rel === 1 && hunger < 0.15) continue;
-      // a MOB target is the event; prey is the background. A bleeding one is
-      // worth more than a healthy one (that is what the chum is FOR).
+      /* A MOB target is the event; prey is the background; BLOOD OUTRANKS
+         BOTH. The old weights were 3 and 1 with a (1 + hurt) term worth at
+         most 2x, which distance — a 3x across the scan radius — routinely
+         beat: measured, a bleeding shark at 120 m scored 0.75 against a
+         healthy mackerel at 30 m on 0.77, and lost. A frenzy weight of 9,
+         doubled again by severity, is what makes crossing open water toward
+         blood the obvious move instead of a coin flip. It is not a bias on
+         top of the physics — it IS what blood does to a shark.
+
+         And no hunger term on a frenzy (see the gate above, which only ever
+         reads rel 1): a fed shark still comes to blood. That is most of why
+         a bleeding diver is a different situation from a hungry sea. */
       const hurt = 1 - clamp((o.hp || 0) / maxHpOf(o), 0, 1);
-      const score = (rel === 2 ? 3 : 1) * (1 + hurt) * (rel === 1 ? 0.4 + hunger : 1)
+      const score = (rel === 3 ? 9 * (1 + sev) : (rel === 2 ? 3 : 1))
+        * (1 + hurt) * (rel === 1 ? 0.4 + hunger : 1)
         / (1 + Math.sqrt(d2) * 0.01);
       if (score <= bestScore) continue;
-      // never two loners on one snack; a MOB target is explicitly shared.
+      // never two loners on one snack; MOB and FRENZY targets are explicitly
+      // shared — a feeding aggregation is a crowd or it is nothing.
       if (rel === 1 && o._mpHuntedBy && o._mpHuntedBy !== a && !o._mpHuntedBy.dead) continue;
       bestScore = score; best = o; bestKind = rel;
     }
@@ -518,6 +731,7 @@
     if (bestKind === 1) best._mpHuntedBy = a;
     m.target = best; m.kind = bestKind;
     AUDIT.hunts++;
+    if (bestKind === 3) { AUDIT.frenzies++; m.frenzyGrace = FRENZY_GRACE; }
     return best;
   }
 
@@ -1474,11 +1688,11 @@
           }
           if (o.kind === "corpse") { bleedInWater(o.ref, 0.75); continue; }
           // alive: only a genuinely hurt one bleeds. Same threshold shape
-          // swim.js uses on the player — below 72% of your health you trail.
+          // swim.js uses on the player — below BLEED_HP of your health you trail.
           const q = o.ref;
           const mx = (+q.maxHp > 0) ? +q.maxHp : 100;
           const hpf = (q.hp == null) ? 1 : clamp(q.hp / mx, 0, 1);
-          if (hpf < 0.72) bleedInWater(q, clamp((0.72 - hpf) * 1.6 + 0.22, 0.2, 1));
+          if (hpf < BLEED_HP) bleedInWater(q, clamp((BLEED_HP - hpf) * 1.6 + 0.22, 0.2, 1));
         }
       } catch (e) {}
     }
@@ -1502,7 +1716,7 @@
           continue;
         }
         const hpf = clamp((a.hp || 0) / maxHpOf(a), 0, 1);
-        if (hpf < 0.72) bleedInWater(a, clamp((0.72 - hpf) * 1.6 + 0.22, 0.2, 1));
+        if (hpf < BLEED_HP) bleedInWater(a, clamp((BLEED_HP - hpf) * 1.6 + 0.22, 0.2, 1));
       }
     }
     AUDIT.chumLive = liveSlots();
@@ -1652,6 +1866,9 @@
       }
     }
 
+    // §2b. Blood presses. One published verb, no body moved here — see frenzyPress.
+    if (m.kind === 3 && BLOODOPENS()) frenzyPress(a, target, dt, opts);
+
     let st = "cruise";
     if (typeof CBZ.predatorHunt === "function") {
       try { st = CBZ.predatorHunt(a, target, dt, opts) || "cruise"; } catch (e) { st = "cruise"; }
@@ -1692,9 +1909,16 @@
        out of opts.move, at the FSM's own cruise speed. PREY hunts are
        untouched — a loner that loses interest in a snack SHOULD lose it.
 
+       AND A FRENZY SHADOWS TOO (§2b). Same seam, same reason, and if anything
+       a stronger one: the whole point of a blood trail is that it is followed
+       across water the animal cannot see through. A shark that smelled you at
+       300 m and then wandered off at 250 would be the pod's dissolve bug with
+       a different name — and the frenzy's own leash in pickTarget is what
+       ends it, not the FSM forgetting.
+
        ?cfg_MARINE_POD_SHADOW=0 restores the drift.
        ============================================================ */
-    if (st === "cruise" && m.kind === 2 && CFG.MARINE_POD_SHADOW !== false &&
+    if (st === "cruise" && (m.kind === 2 || m.kind === 3) && CFG.MARINE_POD_SHADOW !== false &&
         typeof opts.move === "function") {
       const tp2 = actorPos(target), hp2 = actorPos(a);
       if (tp2 && hp2) {
@@ -1876,6 +2100,7 @@
     return {
         hunts: AUDIT.hunts, rams: AUDIT.rams, rolls: AUDIT.rolls, shadowed: AUDIT.shadowed,
       kills: AUDIT.kills, casualties: AUDIT.casualties, brokeOff: AUDIT.brokeOff,
+      frenzies: AUDIT.frenzies, presses: AUDIT.presses,
       shipBites: AUDIT.shipBites, shipsSunk: AUDIT.shipsSunk,
       chumOpened: AUDIT.chumOpened, chumLive: liveSlots(),
       chumSources: (typeof CBZ.goreChumList === "function" && CBZ.goreChumList()) ? CBZ.goreChumList().length : 0,
@@ -1891,7 +2116,7 @@
   };
   CBZ.marineAuditReset = function () {
     AUDIT.hunts = AUDIT.rams = AUDIT.rolls = AUDIT.kills = AUDIT.casualties = AUDIT.brokeOff = 0;
-    AUDIT.shadowed = 0;
+    AUDIT.shadowed = AUDIT.frenzies = AUDIT.presses = 0;
     AUDIT.shipBites = AUDIT.shipsSunk = AUDIT.chumOpened = 0;
   };
 

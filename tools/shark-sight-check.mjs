@@ -348,8 +348,13 @@ try {
     if (!(hero.peak255 >= 12)) fail(`the complaint shot peaks at ${hero.peak255}/255 — still invisible`);
     if (!(hero.litPct >= 8)) fail(`the complaint shot lights only ${hero.litPct}% of the animal`);
   } else fail("the complaint shot never landed: " + (hero && hero.error));
-  // shark_sim.js's arrivalFloor(): max(45, min(72, longest sight line * 1.22))
-  const floor = Math.max(45, Math.min(72, (out.arrivalFloorM || 0) * 1.22));
+  /* THE MODE'S OWN ANSWER, not a copy of it. This used to re-type
+     shark_sim.js's clamp — max(45, min(72, sight * 1.22)) — and when the water
+     got clearer and the clamp moved with it, the tool failed a build that was
+     right. modes/shark_sim.js publishes arrivalFloor() now; the literal
+     survives only as the reading for a build from before it did. */
+  const floor = await rig.evl(`(()=>{ try { return +CBZ.sharkSimArrivalFloor().toFixed(2); } catch(e) { return null; } })()`)
+    ?? Math.max(45, Math.min(72, (out.arrivalFloorM || 0) * 1.22));
   out.spawnFloorM = +floor.toFixed(2);
   if (out.ladder.some((s) => s.submerged && s.up > floor + 0.01)) {
     fail(`a sight line (${Math.max(...out.ladder.map((s) => s.up))} m) runs past the arrival ring ` +

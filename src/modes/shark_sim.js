@@ -28,11 +28,14 @@
    What it ADDS is the game: the evolution ladder (bull shark →
    hammerhead → great white → MEGALODON), mass from kills, the pod as the
    threat curve (the player's shark is marked `huntable`, the one flag
-   marine_predation.js honours for exactly this file), the beach crowd as
-   the larder (survivorbot.js wanders the shore ring while
-   CBZ.sharkSimShoreRing is set, and respawns keep the buffet stocked so
-   survival's last-one-standing check stays dormant), and the win: as the
-   megalodon, eat the thing that eats sharks.
+   marine_predation.js honours for exactly this file) — and, once you are
+   cut, THE SEA ITSELF: marine_predation.js §2b makes a bleeding body a
+   target for every set of teeth in the water regardless of rank, and
+   rivalWant() below doubles the shark quota while you trail blood so there
+   is a crowd to come. The beach crowd is the larder (survivorbot.js wanders
+   the shore ring while CBZ.sharkSimShoreRing is set, and respawns keep the
+   buffet stocked so survival's last-one-standing check stays dormant). And
+   the win: as the megalodon, eat the thing that eats sharks.
 
    DOOR: the Shark Sim tile on the title card, or ?mode=sharksim — a
    registered mode like any other in-build game. (The old door, a ?shark=1
@@ -219,27 +222,65 @@
      group is always drawn whole from it — never clipped to the quota gap,
      which is how this sea used to end up with a "school" of 3 sardines and
      every dolphin pod the same size. */
+  /* THE COUNTS WENT UP WITH THE VISIBILITY (2026-08-30). These were tuned
+     against a 33 m sighting range; world/water_underwater.js's clarity gain
+     takes it to ~100 m, and the disc you can actually see is therefore NINE
+     TIMES the area it was. At the old wants that reads as the empty ocean the
+     whole "A SHARK SIM EATS ITS SEA" note above was written to fix — the same
+     bug, arrived at from the other end. Raised ~1.6x rather than 9x on
+     purpose: what a longer sight line should buy is schools in the middle
+     distance, not a wall of fish at arm's length. */
   const SEA_WANT = [
-    { id: "fish",       n: 45, g: [12, 30] },  // mackerel — the snack AND the bait ball
-    { id: "sardine",    n: 70, g: [20, 45] },  // the big ball, visibly outnumbering everything
-    { id: "barracuda",  n: 6,  g: [1, 2] },
-    { id: "dolphin",    n: 12, g: [4, 9] },
-    { id: "sea_turtle", n: 5,  g: [1, 2] },
+    { id: "fish",       n: 72,  g: [12, 30] },  // mackerel — the snack AND the bait ball
+    { id: "sardine",    n: 112, g: [20, 45] },  // the big ball, visibly outnumbering everything
+    { id: "barracuda",  n: 9,   g: [1, 2] },
+    { id: "dolphin",    n: 19,  g: [4, 9] },
+    { id: "sea_turtle", n: 8,   g: [1, 2] },
   ];
   /* THE RIVALS — other sharks, and how many of them depends on what you are.
      A bull shark's sea has bigger things in it than a great white's does; the
      ladder is what changes, not the ocean. */
+  const RIVALS = [
+    { bull_shark: 3, hammerhead_shark: 1, great_white_shark: 0 },
+    { bull_shark: 2, hammerhead_shark: 2, great_white_shark: 1 },
+    { bull_shark: 1, hammerhead_shark: 2, great_white_shark: 2 },
+    { bull_shark: 1, hammerhead_shark: 1, great_white_shark: 2 },
+  ];
+  /* AND BLOOD BRINGS COMPANY.
+
+     city/marine_predation.js §2b is what makes a bleeding shark a target for
+     every set of teeth in the water regardless of rank — but a sea stocked for
+     "meeting another shark should be an event" only ever has four or five sets
+     of teeth in it, and four sharks converging is not the thing the owner
+     asked for. So while you are trailing blood the RIVAL QUOTA roughly doubles
+     and the stocker's own slow clock is what fills it: they arrive outside the
+     sight line like everything else and swim in, which is the whole staging.
+
+     ONE SPAWNER, not two. This is a want, not a spawn — stockSea() below is
+     still the only thing in this file that puts a shark in the water, and the
+     moment the bleeding stops the want drops back and the extras are simply
+     never replaced as they wander off or get eaten. */
+  function bleeding() {
+    const S = sim.shark;
+    if (!S || S.dead || !S.maxHp) return 0;
+    if (CBZ.marineBleedingSev) {
+      try { const v = +CBZ.marineBleedingSev(S); if (v > 0) return v; } catch (e) {}
+    }
+    return 0;
+  }
   function rivalWant() {
-    const t = sim.tier;
-    if (t <= 0) return { bull_shark: 3, hammerhead_shark: 1, great_white_shark: 0 };
-    if (t === 1) return { bull_shark: 2, hammerhead_shark: 2, great_white_shark: 1 };
-    if (t === 2) return { bull_shark: 1, hammerhead_shark: 2, great_white_shark: 2 };
-    return { bull_shark: 1, hammerhead_shark: 1, great_white_shark: 2 };
+    const base = RIVALS[Math.max(0, Math.min(RIVALS.length - 1, sim.tier))];
+    const sev = bleeding();
+    if (sev <= 0) return base;
+    const out = {};
+    // +1 across the board, and the big rows scale with how badly you are cut.
+    for (const id in base) out[id] = base[id] + 1 + Math.round(sev * 2);
+    return out;
   }
   /* THE CEILING. Wildlife's own tick measures ~985 animals in 1.4 ms, so this
      is not a frame budget — it is a "how full should this ocean feel" knob,
      and the answer for a sea that is the entire playfield is FULL. */
-  const SEA_CAP = 170;                 // total live sea bodies before we stop adding
+  const SEA_CAP = 265;                 // total live sea bodies before we stop adding
   const seaTally = {};
   function seaCensus() {
     for (const k in seaTally) delete seaTally[k];
@@ -297,14 +338,29 @@
      returns the mode's own fog far (hundreds of metres), which is why the
      result is clamped rather than trusted: a surfaced shark is not supposed
      to move the fish spawner to the horizon. */
+  /* THE CAP MOVED WITH THE WATER (2026-08-30). It was 72 m, which was a
+     comfortable margin over the 52 m sight line this sea used to have. The
+     clarity gain in world/water_underwater.js takes the longest look-up line
+     to ~157 m, and a ceiling of 72 would have stood the whole spawner INSIDE
+     the sight line — i.e. every school in this game popping into existence in
+     plain view, which is the one thing this function exists to prevent.
+     210 clears it with the same ~30% margin the old pair had, and still lands
+     every arrival well inside the navigable annulus (the sea runs 700 m out
+     from the waterline, measured). */
   function arrivalFloor() {
     let r = 45;
     try {
       const ws = CBZ.waterSight;
       if (ws && CBZ.cityCameraSubmerged && CBZ.cityCameraSubmerged()) r = ws.maxRange() * 1.22;
     } catch (e) {}
-    return Math.max(45, Math.min(72, r));
+    return Math.max(45, Math.min(210, r));
   }
+  /* PUBLISHED so tools/shark-sight-check.mjs can ASSERT against the real
+     number instead of re-typing the clamp. It re-typed it, the clamp moved,
+     and the tool failed a build that was correct — which is the same "a tool
+     and a pixel must not disagree" law world/water_underwater.js's
+     CBZ.waterSight exists to keep, one file along. */
+  CBZ.sharkSimArrivalFloor = arrivalFloor;
 
   function spawnGroup(id, n, minD, maxD, pend) {
     const at = pend ? pend.at : seaPointNear(clearanceOf(id), minD, maxD);
@@ -339,7 +395,7 @@
        feeding run) and one a second after that — so the ocean is populated
        before the player has finished turning round, and the steady-state cost
        is one census and one small batch per second. */
-    let budget = t.$total < 60 ? 3 : 1;
+    let budget = t.$total < 95 ? 3 : 1;
     /* ..and a BODY ceiling under the group ceiling, because a body is a
        build(): three groups of sixteen is forty-eight meshes constructed in
        one frame, which is a visible hitch to buy a thing whose whole point is
