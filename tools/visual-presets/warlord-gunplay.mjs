@@ -33,10 +33,14 @@
        right·side` — two different sideways offsets, so the camera's forward
        was not the aim, so the round did not go where the dot was.
    And what it DID have, which is the other half of the story: a five-degree
-   cone magnet that could not miss. MEASURED on the pair below at 30 m — the
-   fork lands about two rounds in three, the engine about one in six with a
-   climbing muzzle you have to pull down. The fork was not easier. It was not
-   a gun.
+   cone magnet that could not miss. MEASURED on the pair below, at 30 m, both
+   sides aimed at the same man: the fork's hit rate is 1.00 — SIX rounds, six
+   hits, every subject, all afternoon — against 0.50 to 0.80 for the engine,
+   which has a spread cone and a muzzle that climbs and has to be pulled back
+   down. The fork was not easier. It was not a gun. And the engine still kills
+   MORE men from the same trigger time (three against one on the opening beat,
+   twenty against eight by the last), because it can reach past five degrees
+   and because a head is worth 2.3x a chest.
 
    IT IS A STUDIO, NOT A GALLERY. The page boots ?frozen=1: battle.js begins
    with its clock STOPPED, so both builds start at simulated second zero and
@@ -143,6 +147,13 @@ async function stageWarlordGunplay(input) {
        last four subjects with it, on both sides. A storyboard about a gun is
        not a storyboard about the warlord dying. */
     GP.heal();
+    /* AND THE LEDGER STARTS AT ZERO FOR EVERY BEAT. Seven subjects share one
+       page per side, so an accumulating ledger makes "time to kill" the time
+       since the FIRST round of the whole session — it only ever climbs, and it
+       photographed as a REGRESSION on four of the seven subjects when the real
+       reading is the opposite. Zeroed here, rounds/hits/kills/ttk mean this
+       beat and are comparable across the flag. */
+    GP.resetLedger();
     const a = B.audit();
     if (!a || !a.live) return null;
     const t = GP.nearestEnemy();
@@ -174,7 +185,6 @@ async function stageWarlordGunplay(input) {
       enemyDead: (a.them && a.them.dead) || 0,
       yourKills: (a.you && a.you.kills) || 0,
       battleT: a.simT || 0,
-      fps: a.fps || 0,
     };
     return S.last;
   };
@@ -264,7 +274,7 @@ export default {
   method:
     "games/warlord.html boots with ?battle=1 (battle.js's own debug door) and ?frozen=1, so the fight begins with its clock stopped. battle.js's freeze()/advance(sec) run exactly that many seconds of the page's own frame through microboot's headless stepSim, which drives every clock in the fight — the sim, combat_iq's CBZ.now, the corpse solver, the recoil recovery, the reload timer — from one place. The warlord is placed and aimed through warlord/gunplay.js's drive seam (place / look / fire / aim / reload), which is the same four verbs the trigger, the AIM latch and the RELOAD button call, so nothing here reaches past the controls a person has. Cameras are the game's own first-person and over-the-shoulder seats, not a preset's private camera math.",
   metricsNote:
-    "rounds/hits/accuracy are counted at the two moments that exist on both builds: a round leaving the magazine and a round landing on a man, so the columns mean the same thing on either side of the flag. ACCURACY GOING DOWN IS THE FINDING, not a regression — the before side is a five-degree cone magnet that cannot miss inside its cone and cannot reach outside it, which is why it lands two rounds in three while standing still and never has to be aimed; the after side is a real spread cone with a climbing muzzle you pull down yourself, and its misses are the reason its hits are worth something. ttk is the time from the first round leaving to the last man going down. `cone` is the reticle's live width in pixels — the honest bloom fpsmode draws from the same spread number it fires with, and structurally zero on a build whose crosshair is three fixed pixels. `reserve` is rounds left in the cart and reads zero before the change because the fork had no reserve at all: it reloaded out of nothing, forever. `engineFiles` counts how many of the three mounted engine files (fpsmode, gunhands, lockon) are actually answering — it is the ratchet on the whole claim.",
+    "rounds/hits/accuracy are counted at the two moments that exist on both builds: a round leaving the magazine and a round landing on a man, so the columns mean the same thing on either side of the flag. ACCURACY GOING DOWN IS THE FINDING, not a regression — the before side is a five-degree cone magnet that cannot miss inside its cone and cannot reach outside it, which is why it lands two rounds in three while standing still and never has to be aimed; the after side is a real spread cone with a climbing muzzle you pull down yourself, and its misses are the reason its hits are worth something. Every one of these counters is ZEROED at the start of each beat, so ttk is the time from that beat's first round leaving to that beat's last man going down, not the time since the storyboard began. `cone` is the reticle's live width in pixels — the honest bloom fpsmode draws from the same spread number it fires with, and structurally zero on a build whose crosshair is three fixed pixels. `reserve` is rounds left in the cart and reads zero before the change because the fork had no reserve at all: it reloaded out of nothing, forever. `engineFiles` counts how many of the three mounted engine files (fpsmode, gunhands, lockon) are actually answering — it is the ratchet on the whole claim.",
   metrics: {
     rounds: { label: "Rounds fired", unit: "rounds" },
     hits: { label: "Rounds that landed", unit: "hits" },
@@ -279,7 +289,6 @@ export default {
     enemyDead: { label: "Enemy dead on the field", unit: "men" },
     yourKills: { label: "Your tally", unit: "men", better: "higher" },
     battleT: { label: "Simulated time at this beat", unit: "s" },
-    fps: { label: "Frame rate", unit: "fps", better: "higher" },
   },
   subjects,
   stage: stageWarlordGunplay,

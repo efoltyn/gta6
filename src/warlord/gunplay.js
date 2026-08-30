@@ -802,8 +802,15 @@
          0.95 m offset put the warlord half off the left edge with his own
          muzzle flash out of frame. Scaled by aspect, he sits in the same
          corner of the picture whatever shape the picture is. */
-      const back = 4.6, up = 1.25;
-      const side = 0.95 * clamp((c.aspect || 1.7) / 1.7, 0.42, 1);
+      /* AND SO IS THE DISTANCE. A tall frame gives the body more of the
+         picture at the same range — measured at 393x852 he owned 44% of the
+         frame height against 35% on a laptop — so the lens steps back as the
+         frame narrows. Both offsets are fractions of the SAME shape, which is
+         why they scale together. */
+      const asp = c.aspect || 1.7;
+      const back = 4.6 * clamp(1.7 / asp, 1, 1.45);
+      const up = 1.25;
+      const side = 0.95 * clamp(asp / 1.7, 0.42, 1);
       const rx = -Math.cos(you.yaw), rz = Math.sin(you.yaw);
       let px = you.pos.x - dir.x * back + rx * side;
       let pz = you.pos.z - dir.z * back + rz * side;
@@ -878,7 +885,7 @@
       onDown: function () { if (CBZ.fpsReload) CBZ.fpsReload(); },
     }));
     touchBtns.push(micro.touch.addButton({
-      id: "wgpSwap", glyph: "⇄", size: 54, right: 24, bottom: 96,
+      id: "wgpSwap", glyph: "⇄", size: 54, right: 112, bottom: 96,
       onDown: function () { if (CBZ.fpsNextWeapon) CBZ.fpsNextWeapon(); },
     }));
     touchBtns.push(micro.touch.addButton({
@@ -1008,9 +1015,6 @@
       if (camMode === "third") CBZ.cam.pitch = -o.pitch;
       else if (CBZ.fps) CBZ.fps.fp = o.pitch;
     }
-    /* AIM AT A MAN, in world terms, which is what a preset actually wants to
-       say. Uses the same eye the shot does so what it points at is what the
-       round is pointed at. */
     /* AIM AT A POINT — and iterate, because in the shoulder seat the answer
        moves the question: the bearing is measured from the LENS, and changing
        the bearing moves the lens (it hangs off the aim direction). Three
@@ -1032,9 +1036,20 @@
     if (A && A.live() && !legacy) safe(function () { placeCamera(0.016); });
     return { yaw: CBZ.cam.yaw - Math.PI, pitch: camMode === "third" ? -CBZ.cam.pitch : (CBZ.fps ? CBZ.fps.fp : 0) };
   }
+  /* ZERO THE LEDGER. A storyboard is seven beats in ONE page, so a ledger that
+     only ever accumulates makes "time to kill" the time since the FIRST round
+     of the session — which climbs all afternoon and photographs as a
+     regression on every subject after the first. Called between beats so
+     rounds/hits/kills/ttk mean this beat and nothing else. Drive-only. */
+  function resetLedger() {
+    stats.shots = stats.hits = stats.kills = stats.damage = 0;
+    stats.firstShotT = stats.lastKillT = -1;
+    return true;
+  }
+
   /* THE STUDIO'S OWN NO-DEATH. A storyboard about a GUN cannot also be a
      storyboard about the warlord dying: he is staged thirty metres in front of
-     his own line facing twenty-six rifles, and the first run of
+     his own line facing a whole militia, and the first run of
      tools/visual-presets/warlord-gunplay.mjs lost him — and with him the
      battle, the teardown and the last four subjects on both sides. Drive-only;
      nothing in the game calls it. */
@@ -1126,6 +1141,7 @@
       safe(function () { CBZ.studio.drop(L.viewGun); });
     }
     if (L.btn && L.btn.parentNode) L.btn.parentNode.removeChild(L.btn);
+    if (L.cross && L.cross.parentNode) L.cross.parentNode.removeChild(L.cross);
     const css = document.getElementById("wgpOldCss");
     if (css && css.parentNode) css.parentNode.removeChild(css);
     L = null;
@@ -1367,6 +1383,7 @@
     nearestEnemy: nearestEnemy,
     place: place,
     heal: heal,
+    resetLedger: resetLedger,
   };
   function legacyFire(d) { if (L) L.touchFire = !!d; }
 

@@ -449,7 +449,6 @@
     const you = W.state.you;
     const s = SIDES.mine;
     const at = { x: MAP.cx + s.dir * (GAP() / 2 + 4), z: MAP.cz };
-    const w = CBZ.weaponById ? CBZ.weaponById(you.wid) : null;
     const rig = CBZ.studio.cast("officer", { color: 0xffb347, variant: 1 });
     if (rig) {
       rig.position.set(at.x, MAP.groundAt(at.x, at.z), at.z);
@@ -463,9 +462,11 @@
       target: V(), yaw: s.dir < 0 ? Math.PI / 2 : -Math.PI / 2, pitch: 0, speed: 0,
       hp: you.hp, maxHp: you.maxHp, soak: W.armour(you.armour).soak,
       armed: true, weapon: gunName(you.wid), wid: you.wid,
-      mag: w ? (w.magSize || w.mag || 17) : 17,
-      magSize: w ? (w.magSize || w.mag || 17) : 17,
-      reloadT: 0, cool: 0,
+      /* NO mag / magSize / reloadT / cool. Those four were the fork's ammo
+         model and they are the gun's business now: CBZ.fps holds the real
+         magazine, the real reserve and the real reload clock, off the same
+         weapon-data row. A dead field on the one record every other system
+         reads is how a second ammo model gets re-grown. */
       kills: 0, dead: false, rad: 0.45, eyeH: 1.62, losY: 1.4, aimY: 1.3, headY: 1.68,
       routed: false, fled: false, slot: "fire", tgt: null,
       // roleTier: a warlord is a trained man. `swat` is the top row and would
