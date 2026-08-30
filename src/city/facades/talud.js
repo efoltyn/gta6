@@ -132,8 +132,8 @@
       const aw = clamp(unit * 0.075, 0.55, 1.5);
       for (const sg of [-1, 1]) for (let i = 0; i < 8; i++) {
         const u = (i + 0.5) / 8, outN = sf.halfN + run * (1 - u) + run / 8;
-        F.obox(ctx, sf, sg * (sw / 2 + aw * 0.6), u * rTop + 0.70, aw, rTop / 8 + 1.4, run / 8 + 0.40, outN, P.base, i < 2);
-        F.obox(ctx, sf, sg * (sw / 2 + aw * 0.6), u * rTop + rTop / 16 + 1.30, aw + 0.24, 0.34, run / 8 + 0.58, outN, P.light);
+        F.obox(ctx, sf, sg * (sw / 2 + aw * 0.6), u * rTop + 0.42, aw, rTop / 8 + 0.90, run / 8 + 0.40, outN, P.base, i < 2);
+        F.obox(ctx, sf, sg * (sw / 2 + aw * 0.6), u * rTop + rTop / 16 + 0.80, aw + 0.24, 0.34, run / 8 + 0.58, outN, P.light);
       }
       const o0 = sf.out * sf.halfN, o1 = sf.out * (sf.halfN + run), tp = rTop + ctx.pp;
       for (const sg of [-1, 1]) {

@@ -60,6 +60,10 @@
       const FH = ctx.FH, H = ctx.rTop, unit = Math.min(ctx.w, ctx.d);
       const P = F.palette(ctx, "lime", { pull: 0.80, grain: 0.06 });
       const LT = F.mix(P.light, 0xfff8ec, 0.34), DK = F.shade(P.shadow, 0.70);
+      // lead, not terracotta: the lime palette's roof is a Mediterranean tile and
+      // a Veneto villa is grey pantile over a grey-lead dome. Get this wrong and
+      // the crown reads as a mosque.
+      const LEAD = F.mix(F.shade(P.base, 0.62), 0x8e969a, 0.55);
       const e = F.entrance(ctx), ff = e.f;
       const pod = F.STEP_RISE, yB = Math.min(FH * 0.92, H * 0.34);   // the rusticated basement
 
@@ -75,7 +79,7 @@
       F.podium(ctx, { pal: P, top: pod, over: clamp(unit * 0.055, 0.55, 1.4), capCol: LT });
       F.rustication(ctx, { pal: P, y0: pod, y1: yB, col: P.base, dark: DK,
         proj: clamp(unit * 0.020, 0.16, 0.34), courseH: clamp(FH / 5.2, 0.38, 0.72) });
-      F.band && F.ring(ctx, yB + 0.12, 0.24, clamp(unit * 0.020, 0.16, 0.34) + 0.16, LT, 0.4);
+      F.ring(ctx, yB + 0.12, 0.24, clamp(unit * 0.020, 0.16, 0.34) + 0.16, LT, 0.4);
 
       // ---- B. THE STUCCO WALL AND ITS WINDOWS ----------------------
       // Smooth render above the basement, laid in segments so the punched
@@ -147,13 +151,13 @@
       const co = F.colonnade(ctx, { pal: P, face: ff, order: "ionic", base: pod,
         clear: H - 0.15, entH: clamp(FH * 0.55, 0.75, 1.55), col: LT, trim: P.light });
       const pw = Math.abs(co.t.length ? co.t[co.t.length - 1] : ff.span * 0.4) * 2 + co.r * 4;
-      const pedH = clamp(pw * 0.145, 0.8, 2.4), pdep = co.depth + 0.34;
+      const pedH = clamp(pw * 0.115, 0.8, 2.0), pdep = co.depth + 0.34;
       for (let k = 0; k < 6; k++) {                                                            // the pediment
         const u = (k + 0.5) / 6;
         F.box(ctx, ff, 0, co.entTop + (k + 0.5) * (pedH / 6), (pw + 0.9) * (1 - u * 0.94),
           pedH / 6 + 0.05, pdep, k % 2 ? F.shade(LT, 0.94) : LT);
       }
-      F.box(ctx, ff, 0, co.entTop + pedH * 0.34, pw * 0.72, pedH * 0.60, pdep - 0.18, F.shade(P.shadow, 0.86));
+      F.box(ctx, ff, 0, co.entTop + pedH * 0.32, pw * 0.70, pedH * 0.58, pdep - 0.20, DK);   // tympanum
       // the portico floor, walkable, and one continuous flight down to the kerb
       const dOut = ff.halfN + co.depth + 0.35, pwk = pw + 0.6;
       F.obox(ctx, ff, 0, pod / 2, pwk, pod, co.depth + 0.35, dOut, F.shade(LT, 0.96), true);
@@ -166,9 +170,10 @@
       // ---- F. THE HIPPED ROOF AND THE DOME -------------------------
       F.cornice(ctx, { pal: P, y: H + 0.55, kind: "dentil", h: 0.42, col: LT,
         depth: clamp(unit * 0.05, 0.30, 0.85) });
-      const rf = F.hipRoof(ctx, { pal: P, y0: H + 0.95, h: clamp(unit * 0.19, 0.9, 2.4), ribs: true });
+      const rf = F.hipRoof(ctx, { pal: P, y0: H + 0.95, h: clamp(unit * 0.14, 0.8, 1.9), ribs: false, col: LEAD });
       F.domeOnDrum(ctx, { pal: P, y: rf.top - 0.35, r: clamp(unit * 0.26, 1.1, 4.2),
-        drumH: clamp(FH * 0.52, 1.0, 2.2), semis: false, turrets: false, col: LT, shellCol: P.roof });
+        drumH: clamp(FH * 0.52, 1.0, 2.2), semis: false, turrets: false,
+        col: LT, shellCol: LEAD, accent: F.shade(LT, 0.90), trim: LT });
     },
   });
 })();

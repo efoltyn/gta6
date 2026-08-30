@@ -132,8 +132,7 @@
       const pT = pAt(rTop), RT = rAt(pT), RF = F.roof(ctx);
       for (const f of F.faces(ctx)) F.band(ctx, f, rTop + 0.12, 0.58, pT * 0.90, P.course(nC + 1), (pT - RT) * 2, 0);
       corners(pT * 0.90, RT, rTop + 0.12, 0.58, P.course(nC + 1), false);
-      ctx.dbox(RF.cx, rTop + ctx.pp * 0.5, RF.cz, RF.w, Math.max(0.06, ctx.pp), RF.d, F.shade(P.base, 0.72));
-      ctx.plat(RF.cx - RF.w / 2, RF.cx + RF.w / 2, RF.cz - RF.d / 2, RF.cz + RF.d / 2, rTop + ctx.pp);
+      ctx.dbox(RF.cx, rTop + ctx.pp * 0.5, RF.cz, RF.w, Math.max(0.06, ctx.pp), RF.d, F.shade(P.base, 0.72));   ctx.plat(RF.cx - RF.w / 2, RF.cx + RF.w / 2, RF.cz - RF.d / 2, RF.cz + RF.d / 2, rTop + ctx.pp);
 
       // ---- D. THE CONICAL TOWER. Solid granite, no door, no window, no
       // stair: a granary at monumental scale, and the failure mode is a
@@ -164,6 +163,9 @@
       // ---- F. THE ENTRANCE. The wall stops, each end is turned into a drum,
       // and one granite lintel bridges them. No arch, no gate, no tower.
       const df = ent.f, pD = pAt(lint * 0.5), jr = clamp(pD * 0.85, 0.42, 1.05);
+      // the dark of a passage cut through 2 m of wall, left on the wall plane
+      // so the kit's carve turns it into the hole the real leaf stands in
+      F.box(ctx, df, 0, lint * 0.5, gapH * 2, lint, 0.12, F.shade(P.shadow, 0.55), 0.01);
       const jn = df.halfN + pD - jr * 0.55;
       for (const sg of [-1, 1]) {
         const jt = sg * (gapH + jr * 0.55);
