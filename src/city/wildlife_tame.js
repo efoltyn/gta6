@@ -105,6 +105,7 @@
   // Caller-owned scratch for CBZ.marineBreachShed (see the waterline section):
   // the trail runs every frame of an arc and must not allocate.
   const _rideShed = {};
+  const _rideWL = {};
 
   /* ---- HOW BIG IS THE BODY UNDER THE RIDER, RIGHT NOW --------------------
      Every `a.species.scale` in this file meant "how big is this animal" and
@@ -1975,6 +1976,24 @@
      whole rig) this remembers the scale the measurement was taken at and
      carries the ratio, which is exact for a body that only ever grows by
      uniform scale — which is precisely how wildlife_traits.js grows one. */
+  /* THE RATIO IS AGAINST THE *DRAWN* SCALE, NOT THE LOGICAL ONE, and that is a
+     correctness fix rather than a preference. marine_predation.js's bodyLen()
+     measures the world BOX of the rig — so its number already carries
+     group.scale — and it caches that measurement forever. liveScale() prefers
+     CBZ.wildlifeScale(), which is the LOGICAL size and jumps the instant the
+     shark evolves, while the ceremony animates group.scale up to it over the
+     next second. Measure during that second (which is exactly what the
+     waterline tracker made happen: it asks for a length on every frame, and one
+     of those frames is mid-ceremony) and the pair is permanently mismatched —
+     a small box divided by a big scale. MEASURED: a fully grown megalodon
+     reported 10.47 m instead of 22.67, which through bodyKg's L^2.8 is 10 t
+     instead of 87 t. The drawn scale is what the box was measured at, so it is
+     the only honest denominator. */
+  function drawnScale(a) {
+    const g = a && a.group;
+    if (g && g.scale && g.scale.x > 0) return g.scale.x;
+    return Math.max(0.05, liveScale(a));
+  }
   function bodyLenLive(a) {
     if (!a) return 4;
     let m = a._breachLen;
@@ -1984,9 +2003,9 @@
         try { L = +CBZ.marineBodyLen(a); } catch (e) { L = 0; }
       }
       if (!(L > 0) || !isFinite(L)) L = 4 * ((a.species && a.species.scale) || 1);
-      m = a._breachLen = { L: L, s: Math.max(0.05, liveScale(a)) };
+      m = a._breachLen = { L: L, s: Math.max(0.05, drawnScale(a)) };
     }
-    return m.L * (Math.max(0.05, liveScale(a)) / m.s);
+    return m.L * (Math.max(0.05, drawnScale(a)) / m.s);
   }
   /* HOW MANY KILOGRAMS OF ANIMAL. city/marine_predation.js:308 already owns the
      game's one marine mass law — `tonnesOf(a) = 0.014 * L^2.8` off that same
@@ -2005,6 +2024,54 @@
   }
   CBZ.marineBodyLenLive = bodyLenLive;
   CBZ.marineBodyKg = bodyKg;
+
+  /* WHERE THE ENDS ACTUALLY ARE. `len/2` either side of the origin is a guess,
+     and on these rigs it is a wrong one: the group origin sits wherever the
+     modeller put it, so half a length forward can overshoot the snout by most
+     of a metre. That error is invisible in a length and load-bearing in a
+     WATERLINE — it decides which frame the nose crosses. Measured the way
+     marine_predation.js's bodyLen() measures a length (rotation zeroed so the
+     local axes are the world's, box, rotation restored) and cached against the
+     DRAWN scale for the same reason bodyLenLive is.
+
+     LOCAL +X IS FORWARD, and that is derived rather than assumed: every animal
+     in this game is yawed by `root.rotation.y = -a.heading`
+     (city/wildlife_shark.js:888), and a Y-rotation of -h maps local (1,0,0) to
+     world (cos h, 0, sin h) — which is exactly the heading vector. */
+  function bodyEnds(a) {
+    if (!a) return { fwd: 2, aft: 2 };
+    let m = a._breachEnds;
+    const sc = Math.max(0.05, drawnScale(a));
+    if (!m) {
+      let fwd = 0, aft = 0;
+      const g = a.group;
+      if (g && window.THREE) {
+        const rx = g.rotation.x, ry = g.rotation.y, rz = g.rotation.z;
+        try {
+          g.rotation.set(0, 0, 0);
+          g.updateMatrixWorld(true);
+          const b = new THREE.Box3().setFromObject(g);
+          // the WORLD x of the origin (matrixWorld's translation), never
+          // g.position.x — that is a local coordinate, and setFromObject
+          // returns world bounds. They only agree while the parent is the
+          // scene sitting at zero, which is a fact about today's scene graph
+          // rather than a fact about this measurement.
+          const ox = g.matrixWorld.elements[12];
+          if (isFinite(b.max.x) && isFinite(b.min.x)) {
+            fwd = b.max.x - ox;
+            aft = ox - b.min.x;
+          }
+        } catch (e) { fwd = aft = 0; }
+        g.rotation.set(rx, ry, rz);
+        try { g.updateMatrixWorld(true); } catch (e) {}
+      }
+      if (!(fwd > 0) || !(aft > 0)) { const L = bodyLenLive(a); fwd = aft = L * 0.5; }
+      m = a._breachEnds = { fwd: fwd, aft: aft, s: sc };
+    }
+    const k = sc / m.s;
+    return { fwd: m.fwd * k, aft: m.aft * k };
+  }
+  CBZ.marineBodyEnds = bodyEnds;
 
   /* HOW MUCH AIR A BODY OF THIS SIZE GETS, and therefore how fast it has to
      leave the water. This is the solve aquaticRideDef already did for the
@@ -2037,20 +2104,20 @@
     const r0 = Math.max(0.5, len * 0.22);
     let made = 0;
     for (let i = 0; i < n; i++) {
-      const ang = (i / n) * 6.283185307 + Math.random() * 0.7;
-      const rr = r0 * (0.35 + Math.random() * 0.95);
+      const ang = (i / n) * 6.283185307 + fxRand() * 0.7;
+      const rr = r0 * (0.35 + fxRand() * 0.95);
       const ox = Math.cos(ang) * rr, oz = Math.sin(ang) * rr;
       // biased along the body's own line: the sheet peels off the flanks and
       // trails the animal rather than standing up as a symmetric fountain
-      const bx = fx * len * 0.16 * (Math.random() - 0.7);
-      const bz = fz * len * 0.16 * (Math.random() - 0.7);
+      const bx = fx * len * 0.16 * (fxRand() - 0.7);
+      const bz = fz * len * 0.16 * (fxRand() - 0.7);
       if (CBZ.waterEmit({
-        x: x + ox + bx, y: surf + 0.05 + Math.random() * 0.4, z: z + oz + bz,
-        vx: ox * (1.5 + Math.random() * 1.4) - fx * 1.2,
-        vy: up * (0.32 + Math.random() * 0.62),
-        vz: oz * (1.5 + Math.random() * 1.4) - fz * 1.2,
-        size: 0.12 + Math.min(0.5, len * 0.028) * (0.6 + Math.random()),
-        grow: -0.06, ttl: 0.55 + Math.random() * 0.85, alpha: 0.9,
+        x: x + ox + bx, y: surf + 0.05 + fxRand() * 0.4, z: z + oz + bz,
+        vx: ox * (1.5 + fxRand() * 1.4) - fx * 1.2,
+        vy: up * (0.32 + fxRand() * 0.62),
+        vz: oz * (1.5 + fxRand() * 1.4) - fz * 1.2,
+        size: 0.12 + Math.min(0.5, len * 0.028) * (0.6 + fxRand()),
+        grow: -0.06, ttl: 0.55 + fxRand() * 0.85, alpha: 0.9,
       })) made++;
     }
     return made;
@@ -2062,7 +2129,7 @@
      it answers a bull shark. Returns the kilograms it reported (0 if the point
      was not over water at all — a leap that lands on sand is a beaching, and
      the caller still owes it a thud). */
-  function breachCross(a, x, surf, z, speed, exit, len) {
+  function breachCross(a, x, surf, z, speed, exit, len, hx, hz) {
     const kg = bodyKg(a);
     const spd = Math.max(1.5, Math.abs(speed));
     // Past ~1.4 t the sea stops answering like a diver went in. `vehicle` is
@@ -2073,7 +2140,14 @@
     let fired = false;
     if (typeof CBZ.waterHit === "function") {
       try {
-        fired = !!CBZ.waterHit(x, surf, z, { kind: kind, mass: kg, speed: spd });
+        /* AND WHICH WAY IT WAS GOING. A shark does not fall into the sea, it
+           ARRIVES in it — world/water_impact.js leans the whole event
+           downrange off this, so the crown ploughs, the crest ahead of it is
+           an arc rather than a circle, and the scar drifts with the body
+           instead of being stamped where it first touched. */
+        fired = !!CBZ.waterHit(x, surf, z, {
+          kind: kind, mass: kg, speed: spd, vx: +hx || 0, vz: +hz || 0,
+        });
       } catch (e) { fired = false; }
     }
     if (!fired) {
@@ -2094,6 +2168,287 @@
     return kg;
   }
   CBZ.marineBreachCross = breachCross;
+
+  /* ============================================================
+     THE WATERLINE IS A LINE ALONG THE BODY, NOT A POINT AT THE ORIGIN.
+
+     Owner, 2026-08-29: "when i jump out of the water, sometimes the splash
+     animation is delayed which is really funny and fucking dumb."
+
+     He is right and it is not an animation. Every splash in a breach used to be
+     fired from a SCALAR TEST ON THE BODY ORIGIN: the ride launches when
+     `W.y >= effTop - 0.12` and lands when `W.y <= surf - max(0.18, draft*0.12)`,
+     and both handed breachCross the ORIGIN's x/z. The origin is the middle of
+     the animal. The thing a player watches cross the waterline is the NOSE, and
+     a long body coming down at fifty degrees puts its nose through the surface
+     half a body-length early — in space AND in time.
+
+     MEASURED on the live page (tools/splash-timing-check.mjs, seed 90210, the
+     ridden breach, deepest point of the drawn rig as the ruler):
+
+         hammerhead   4.8 m   entry splash  2 frames (0.07 s) late, 0.6 m away
+         great white  5.1 m   entry splash  5 frames (0.17 s) late, 1.2 m away
+         megalodon   22.7 m   entry splash 21 frames (0.70 s) LATE, 9.9 m away
+
+     That is the whole "sometimes": the error is proportional to the animal, so
+     it is invisible on the shark you start as and comedy on the one you become.
+
+     And a body crossing the surface is not an EVENT at all — it is a process
+     with a duration. A megalodon takes about six tenths of a second to pass
+     through the waterline, and for every one of those frames it is displacing
+     water. One pop at one instant can only ever be a firework; what a real
+     entry looks like is a curtain that TRAVELS down the body, nose to tail.
+
+     So this is the tracker: called every frame with the live body axis, it owns
+     four events and one continuous one.
+
+       nose down   the entry — breachCross AT THE NOSE, with the nose's own
+                   vertical speed (which is faster than the origin's whenever
+                   the body is pitched, and it is always pitched here)
+       nose up     the exit — the curtain dragged up out of the hole
+       crossing    THE ZIPPER: while the surface lies between nose and tail,
+                   spray is thrown from the moving intersection point, at a rate
+                   set by how fast that point is travelling and how thick the
+                   body is there
+       tail        the flick — the last of the animal through the hole, which is
+                   the beat that ends a real entry and the one thing that used
+                   to be missing entirely
+
+     State lives on the actor (`a._wl`) and the FIRST frame is only ever used to
+     latch the signs, never to fire: an animal that spawns at the surface, or a
+     tracker that starts mid-arc, must not splash for standing still.
+  ============================================================ */
+  /* PRESENTATION RANDOMNESS, OFF ITS OWN STREAM. Every splash primitive in
+     world/water_wake.js and world/water_impact.js draws its jitter from a
+     file-local mulberry32 rather than Math.random, so a particle can never
+     perturb the simulation's shared stream. This file was still reaching for
+     Math.random in its breach FX — one draw per breach, which nobody noticed —
+     and the curtain below asks for a dozen a frame, which would have been a
+     determinism bug with a stopwatch on it. Same fix as the neighbours. */
+  let _fxSeed = 0x9e3779b9;
+  function fxRand() {
+    _fxSeed = (_fxSeed + 0x6d2b79f5) | 0;
+    let t = _fxSeed;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  const WL_MIN_SPD = 0.9;         // m/s of crossing speed below which a body is
+                                  // just bobbing and the sea says nothing
+  function wlAxis(o, t, out) {
+    // t: -1 tail tip .. 0 origin .. +1 snout, along the body's own line through
+    // its live pitch, using the MEASURED distance to each end rather than half
+    // a length either side of an origin that is not in the middle.
+    const cp = Math.cos(o.pitch || 0), sp = Math.sin(o.pitch || 0);
+    const h = t >= 0 ? t * (o.fwd || 2) : t * (o.aft || 2);
+    out.x = o.x + Math.cos(o.heading || 0) * cp * h;
+    out.y = o.y + sp * h;
+    out.z = o.z + Math.sin(o.heading || 0) * cp * h;
+    return out;
+  }
+  const _wlNose = { x: 0, y: 0, z: 0 }, _wlTail = { x: 0, y: 0, z: 0 }, _wlCut = { x: 0, y: 0, z: 0 };
+
+  /* THE ZIPPER. Spray thrown from the point where the surface actually cuts the
+     body, perpendicular to the body's own line, for as long as the cut exists.
+     `girth` tapers to nothing at both ends (a nose and a tail displace almost
+     nothing; the shoulders displace everything), which is what makes the
+     curtain SWELL as the thick part of the animal goes through and die away as
+     the tail follows it. Sized against the pool's spare slots exactly like
+     breachSheet, so a breach can never starve the wakes and the rain. */
+  function wlCurtain(st, o, cut, s, speed, girth, dt) {
+    if (typeof CBZ.waterEmit !== "function") return 0;
+    const free = typeof CBZ.waterEmitFree === "function" ? CBZ.waterEmitFree() : 90;
+    if (!(free > 6)) return 0;
+    /* rate: metres of body going through the surface per second, times how fat
+       it is there. ABS, and that is not tidiness — `speed` is signed (negative
+       coming down) and the first cut fed the signed value straight into the
+       accumulator, so it ran BACKWARDS on every entry and floor() never reached
+       one. The curtain worked on the way out and was silent on the way in,
+       which is the half anybody was going to look at. */
+    const rate = Math.min(140, Math.abs(speed) * girth * 5.5);
+    st.cAcc = (st.cAcc || 0) + rate * dt;
+    let n = Math.floor(st.cAcc);
+    if (n <= 0) return 0;
+    st.cAcc -= n;
+    n = Math.min(n, Math.max(1, Math.round(free * 0.35)), 14);
+    // the body's own line, and the two directions square to it
+    const cp = Math.cos(o.pitch || 0);
+    const fx = Math.cos(o.heading || 0) * cp, fz = Math.sin(o.heading || 0) * cp;
+    const sxx = -Math.sin(o.heading || 0), szz = Math.cos(o.heading || 0);
+    const up = speed > 0 ? 1 : -1;                 // coming OUT throws up harder
+    let made = 0;
+    for (let i = 0; i < n; i++) {
+      const side = (fxRand() < 0.5 ? -1 : 1);
+      const off = girth * (0.35 + fxRand() * 0.9) * side;
+      const along = (fxRand() - 0.5) * girth * 0.8;
+      if (CBZ.waterEmit({
+        x: cut.x + sxx * off + fx * along,
+        y: cut.y + 0.04 + fxRand() * 0.22,
+        z: cut.z + szz * off + fz * along,
+        // out and up off the flank, and CARRIED by the body — the sheet trails
+        // the animal instead of standing still in the water it came from
+        vx: sxx * side * (1.1 + fxRand() * 2.1) + (o.vx || 0) * 0.22,
+        vy: (0.9 + fxRand() * 2.6) * (up > 0 ? 1.35 : 0.8) + Math.abs(speed) * 0.16,
+        vz: szz * side * (1.1 + fxRand() * 2.1) + (o.vz || 0) * 0.22,
+        size: 0.10 + Math.min(0.42, girth * 0.16) * (0.55 + fxRand()),
+        grow: -0.05, ttl: 0.45 + fxRand() * 0.8, alpha: 0.92,
+      })) made++;
+    }
+    // and the water it leaves lying on the surface, at the cut, riding the swell
+    if (st.cRing == null) st.cRing = 0;
+    st.cRing -= dt;
+    if (st.cRing <= 0) {
+      st.cRing = 0.07;
+      CBZ.waterEmit({
+        x: cut.x, y: 0, z: cut.z, ride: true,
+        size: Math.max(0.35, girth * 1.5), grow: girth * 0.9,
+        ttl: 0.7 + girth * 0.22, alpha: 0.42,
+      });
+    }
+    AQUATIC_AUDIT.crossDrops += made;
+    return made;
+  }
+
+  /* THE TAIL FLICK. Not a second breachCross — the sea has already been told
+     the animal's mass once per crossing and telling it twice would double every
+     splash. This is the visual coda: a compact burst where the tail goes
+     through, thrown the way the tail is moving. */
+  function wlFlick(o, p, speed, len) {
+    if (typeof CBZ.waterEmit !== "function") return;
+    const free = typeof CBZ.waterEmitFree === "function" ? CBZ.waterEmitFree() : 60;
+    const n = Math.max(3, Math.min(Math.round(free * 0.2), Math.round(4 + len * 0.9)));
+    for (let i = 0; i < n; i++) {
+      const a = fxRand() * 6.283185307;
+      const r = 0.2 + fxRand() * len * 0.09;
+      CBZ.waterEmit({
+        x: p.x + Math.cos(a) * r, y: p.y + 0.05, z: p.z + Math.sin(a) * r,
+        vx: Math.cos(a) * (1.2 + fxRand() * 2.2),
+        vy: 1.6 + fxRand() * 3.4 + Math.abs(speed) * 0.22,
+        vz: Math.sin(a) * (1.2 + fxRand() * 2.2),
+        size: 0.10 + fxRand() * (0.08 + len * 0.012), grow: -0.03,
+        ttl: 0.5 + fxRand() * 0.6, alpha: 0.9,
+      });
+    }
+    CBZ.waterEmit({
+      x: p.x, y: 0, z: p.z, ride: true, ring: true,
+      size: Math.max(0.4, len * 0.10), grow: Math.max(1.2, len * 0.16),
+      ttl: 0.9 + len * 0.02, alpha: 0.6,
+    });
+  }
+
+  /* THE TRACKER. `o` is a caller-owned scratch object — nothing here allocates
+     per frame — carrying { x, y, z, heading, pitch, len, vx, vy, vz, dt }.
+     Returns the state record so a caller can read what the sea was just told
+     (lastEntryKg / lastEntryT) instead of keeping a second copy of it. */
+  function waterlineTick(a, o) {
+    if (!a || !o) return null;
+    const dt = +o.dt || 0;
+    if (!(dt > 0)) return a._wl || null;
+    const len = Math.max(0.6, +o.len || 4);
+    o.len = len;
+    const ends = bodyEnds(a);
+    o.fwd = ends.fwd; o.aft = ends.aft;
+    let st = a._wl;
+    const nose = wlAxis(o, 1, _wlNose), tail = wlAxis(o, -1, _wlTail);
+    const sNose = seaY(nose.x, nose.z), sTail = seaY(tail.x, tail.z);
+    const nAbove = nose.y - sNose, tAbove = tail.y - sTail;
+    if (!st) {
+      // FIRST SIGHT LATCHES, IT DOES NOT FIRE. Otherwise every shark in the
+      // world splashes on the frame this tracker first sees it.
+      st = a._wl = {
+        n: nAbove > 0, t: tAbove > 0, ny: nose.y, ty: tail.y,
+        cAcc: 0, cRing: 0, lastEntryKg: 0, lastEntryT: -99, lastExitT: -99,
+      };
+      return st;
+    }
+    const now = (CBZ.now != null ? CBZ.now : 0) / 1000;
+    /* THE NOSE'S OWN VERTICAL SPEED, not the origin's — but CLAMPED to what the
+       animal is actually doing. The nose's height is `origin + sin(pitch)*L/2`,
+       so a POSE change moves it without the body moving at all: the launch
+       snaps the pitch from level to fifty degrees in one frame, which on a long
+       body teleports the analytic nose several metres and, differentiated,
+       reads as 144 m/s. MEASURED before this clamp: the megalodon told the sea
+       it had arrived at a hundred and forty-four metres a second. Nothing can
+       displace water faster than it is travelling, so the body's own velocity
+       is the ceiling (plus a little, because the ends of a pitching body
+       genuinely do move faster than its middle). */
+    const vBody = Math.hypot(+o.vy || 0, Math.hypot(+o.vx || 0, +o.vz || 0));
+    const vCap = vBody * 1.6 + 2.5;
+    const clampV = (v) => (v > vCap ? vCap : (v < -vCap ? -vCap : v));
+    const nSpd = clampV((nose.y - st.ny) / dt);
+    const tSpd = clampV((tail.y - st.ty) / dt);
+    st.ny = nose.y; st.ty = tail.y;
+
+    const nUp = nAbove > 0, tUp = tAbove > 0;
+
+    /* WHERE THE SURFACE CUTS THE BODY. Interpolated along the axis between the
+       two ends' heights, so it is the point at which water is actually being
+       displaced — and it is what BOTH the burst and the curtain are placed at,
+       because they are the same event at two time scales.
+
+       It is used in preference to the nose tip on purpose. The launch snaps the
+       pitch from level to fifty degrees in a single frame (the pose is derived
+       from the velocity vector, and the velocity vector is discontinuous at the
+       launch by definition), which TELEPORTS the nose of a twenty-five metre
+       megalodon nine metres forward and up. Following that with the splash puts
+       the sea's answer most of a body-length downrange of the animal. The cut
+       moves a fraction as far for the same snap, and it is the honest place
+       anyway: a rod through a plane displaces water where it meets the plane,
+       not at its tip. */
+    let cutS = 1;
+    {
+      // Solved in METRES along the body and then converted back, because the
+      // origin is not the middle: the height runs linearly with DISTANCE from
+      // the origin, not with the [-1,1] parameter, and on a rig whose snout is
+      // 3 m forward and whose tail is 2 m aft those are not the same line.
+      const den = tAbove - nAbove;
+      const f = Math.abs(den) > 1e-4 ? Math.max(0, Math.min(1, tAbove / den)) : (nUp ? 1 : 0);
+      const d = -ends.aft + (ends.fwd + ends.aft) * f;
+      cutS = d >= 0 ? (ends.fwd > 0 ? d / ends.fwd : 1) : (ends.aft > 0 ? d / ends.aft : -1);
+      cutS = Math.max(-1, Math.min(1, cutS));
+    }
+    const straddling = nUp !== tUp;
+    const cut = straddling ? wlAxis(o, cutS, _wlCut) : nose;
+    const cutSurf = straddling ? seaY(cut.x, cut.z) : sNose;
+    if (straddling) cut.y = cutSurf;
+
+    // ---- the nose crosses: this IS the splash, and this is WHERE it is ----
+    if (nUp !== st.n) {
+      st.n = nUp;
+      if (Math.abs(nSpd) >= WL_MIN_SPD) {
+        const kg = breachCross(a, cut.x, cutSurf, cut.z, nSpd, nUp, len,
+                               o.vx || 0, o.vz || 0);
+        if (nUp) st.lastExitT = now;
+        else { st.lastEntryKg = kg; st.lastEntryT = now; }
+      }
+    }
+    // ---- the tail follows it through: the flick ---------------------------
+    if (tUp !== st.t) {
+      st.t = tUp;
+      if (Math.abs(tSpd) >= WL_MIN_SPD * 1.4) wlFlick(o, tail, tSpd, len);
+    }
+
+    // ---- and for every frame in between, the zipper -----------------------
+    if (straddling) {
+      // girth where the cut is: a fish is fattest a third back from the nose
+      const girth = len * 0.115 * (1 - cutS * cutS * 0.62) * (cutS > 0 ? 0.92 : 1);
+      // how fast the CUT is travelling through the water — the honest rate at
+      // which water is being displaced, and it is the interpolation of the two
+      // ends' speeds, not the origin's
+      const spd = nSpd * ((cutS + 1) * 0.5) + tSpd * ((1 - cutS) * 0.5);
+      if (Math.abs(spd) >= WL_MIN_SPD * 0.5) {
+        wlCurtain(st, o, cut, cutS, spd, Math.max(0.18, girth), dt);
+      }
+    } else {
+      st.cAcc = 0;
+    }
+    return st;
+  }
+  CBZ.marineWaterline = waterlineTick;
+  // A body that teleports (a spawner, a bail-out, a mode change) must not be
+  // read as having crossed the surface at ten metres a second.
+  CBZ.marineWaterlineReset = function (a) { if (a) a._wl = null; };
 
   /* WATER COMES OFF A BODY THAT IS IN THE AIR, ALL THE WAY DOWN. A shark that
      leaves the sea dry is a model on a wire; the trail is the single cheapest
@@ -2131,18 +2486,18 @@
     for (let i = 0; i < n; i++) {
       // -0.5 at the nose .. +0.5 at the tail, biased aft (that is where the
       // water actually leaves a fish)
-      const u = (Math.random() * 0.55 + Math.random() * 0.55) - 0.42;
+      const u = (fxRand() * 0.55 + fxRand() * 0.55) - 0.42;
       const s = u * len;
-      const side = (Math.random() - 0.5) * len * 0.16;
+      const side = (fxRand() - 0.5) * len * 0.16;
       if (CBZ.waterEmit({
         x: (+o.x || 0) + ax * s + nx * side,
-        y: (+o.y || 0) + ay * s + (Math.random() - 0.45) * len * 0.07,
+        y: (+o.y || 0) + ay * s + (fxRand() - 0.45) * len * 0.07,
         z: (+o.z || 0) + az * s + nz * side,
-        vx: (+o.vx || 0) * 0.55 + nx * side * 2.2 + (Math.random() - 0.5) * 1.1,
-        vy: (+o.vy || 0) * 0.42 - 0.6 - Math.random() * 1.1,
-        vz: (+o.vz || 0) * 0.55 + nz * side * 2.2 + (Math.random() - 0.5) * 1.1,
-        size: 0.085 + Math.min(0.34, len * 0.019) * (0.5 + Math.random()),
-        grow: -0.07, ttl: 0.42 + Math.random() * 0.7, alpha: 0.82,
+        vx: (+o.vx || 0) * 0.55 + nx * side * 2.2 + (fxRand() - 0.5) * 1.1,
+        vy: (+o.vy || 0) * 0.42 - 0.6 - fxRand() * 1.1,
+        vz: (+o.vz || 0) * 0.55 + nz * side * 2.2 + (fxRand() - 0.5) * 1.1,
+        size: 0.085 + Math.min(0.34, len * 0.019) * (0.5 + fxRand()),
+        grow: -0.07, ttl: 0.42 + fxRand() * 0.7, alpha: 0.82,
       })) made++;
     }
     AQUATIC_AUDIT.trailDrops += made;
@@ -2324,18 +2679,24 @@
         AQUATIC_AUDIT.lastPitchDown = +(W.pitchDown || 0).toFixed(3);
         AQUATIC_AUDIT.lastRoll = +(W.rollPeak || 0).toFixed(3);
         AQUATIC_AUDIT.lastAlignErr = +(W.alignErr || 0).toFixed(4);
-        /* A SPLASH IS THE MASS THAT MADE IT, NOT A DIAL. The line here used to
-           be CBZ.waterSplashAt(..., 1.5 + scale*1.9 + fall*0.1), and every one
-           of those terms was thrown away: waterSplashAt clamps its strength to
-           2.5 and then reports the impact bus a SEVENTY-EIGHT KILOGRAM body at
-           a speed recovered from that clamped dial. A bull shark and a
-           sixteen-metre megalodon therefore made exactly the same splash and
-           exactly the same noise, and turning the number up did nothing at all.
-           One honest call instead: the animal's own kilograms and the vertical
-           speed it is genuinely carrying, and water_impact.js's momentum law
-           (sqrt(mass) * speed) does the rest — including the audio gain, so the
-           hand-forced sfx that used to double it here is gone with it. */
-        const entryKg = breachCross(a, P.pos.x, surf, P.pos.z, fall, false, bodyLenLive(a));
+        /* THE SPLASH IS NOT FIRED HERE ANY MORE, AND THAT IS THE FIX.
+
+           This test is about the ORIGIN — the middle of the animal — dropping
+           below the waterline, which for a twenty-two metre megalodon coming
+           down at fifty degrees happens 0.70 SECONDS and 9.9 METRES after the
+           nose actually went in (MEASURED, tools/splash-timing-check.mjs).
+           Firing the sea's answer from here is what the owner was watching:
+           "the splash animation is delayed which is really funny and fucking
+           dumb". It was not an animation and it was not delayed — it was fired
+           off the wrong point on the body.
+
+           waterlineTick() below owns every crossing now, at the NOSE, on the
+           frame it happens. All this block still needs from it is HOW BIG the
+           entry was, for the shake — and a leap that came down on sand never
+           had a crossing at all, which is what keeps the beach thud a thud. */
+        const wl = a._wl;
+        const nowS = (CBZ.now != null ? CBZ.now : 0) / 1000;
+        const entryKg = (wl && nowS - wl.lastEntryT < 0.6) ? wl.lastEntryKg : 0;
         // ...and a leap that comes down on the beach still lands: no water to
         // displace, so it is a thud, and the shake is the whole report.
         if (CBZ.shake) {
@@ -2446,10 +2807,13 @@
         W.airSpin = ((Math.floor(Math.abs(ride.head) * 997) & 1) ? 1 : -1);
         W.pitchUp = W.pitch; W.pitchDown = 0; W.rollPeak = 0; W.alignErr = 0;
         AQUATIC_AUDIT.breaches++;
-        // THE EXIT. The same waterline crossing as the landing with the sign
-        // flipped — a curtain of water dragged up out of the hole the body just
-        // left, sized by the same mass. It used to be the 78 kg diver too.
-        breachCross(a, P.pos.x, surf, P.pos.z, W.vy, true, bodyLenLive(a));
+        /* THE EXIT IS NOT FIRED HERE EITHER. The launch happens at the top of
+           the body's COLUMN, which for a megalodon is 3.4 m under the surface —
+           so a splash fired on this line went off in open water above an animal
+           that had not arrived yet, and by the time the nose broke through, the
+           sea had already finished answering. waterlineTick() fires it when the
+           nose is actually through, and then keeps throwing water for every
+           frame the body is still coming out. */
         if (CBZ.shake) CBZ.shake(0.42 + bodyScale * 0.12);
       }
     }
@@ -2478,6 +2842,19 @@
       W.roll += ((shortestAngle(ride.head - W.lastHead) / fdt) * -0.065 - W.roll) * Math.min(1, fdt * 4);
       W.roll = Math.max(-0.42, Math.min(0.42, W.roll)); W.lastHead = ride.head;
     }
+    /* THE SEA ANSWERS THE BODY, EVERY FRAME. Last thing in the update, so the
+       position and the pose it reads are the ones that will be DRAWN this
+       frame — a tracker fed a half-updated body would report a crossing that
+       never appears on screen. It owns the entry, the exit, the curtain that
+       travels down the body while it is passing through, and the tail flick;
+       nothing else in this file fires a splash any more. */
+    _rideWL.x = P.pos.x; _rideWL.y = W.y; _rideWL.z = P.pos.z;
+    _rideWL.heading = ride.head; _rideWL.pitch = W.pitch;
+    _rideWL.len = bodyLenLive(a);
+    _rideWL.vx = Math.cos(ride.head) * W.v; _rideWL.vz = Math.sin(ride.head) * W.v;
+    _rideWL.vy = W.vy; _rideWL.dt = fdt;
+    waterlineTick(a, _rideWL);
+
     // the camera root, not the drawn rider: the strike animation stays off it
     // (see "THE LENS DOES NOT RIDE THE BITE" at the 49.8 presentation pass)
     P.pos.y = W.y + aquaticSeatY(V, W.pitch);

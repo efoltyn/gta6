@@ -419,16 +419,35 @@ async function stageSharkBreach(input) {
          ONE borrowed real frame (the game's own chain is already dead, so
          lending rAF back for a single callback cannot restart it) and then wait
          the compositor out. */
+      /* HARNESS TRAP — A BACKGROUNDED TAB NEVER FIRES rAF, AND THIS AWAITED IT
+         FOREVER. Under SwiftShader the compositor takes over a second to
+         PRESENT a rendered canvas, and a canvas rendered outside an animation
+         frame may not be presented at all — hence borrowing one real frame back
+         (the game's own chain is already dead, so lending rAF for a single
+         callback cannot restart it). But `document.hidden` is not ours to
+         control: anything that takes focus while a run is in flight — another
+         Chrome window, a second capture tab — backgrounds this page, and a
+         backgrounded page's requestAnimationFrame is never called. MEASURED on
+         a stalled run: `rAF NEVER FIRED (visibility=hidden hidden=true)`, the
+         stage sat there until the 15-minute stage timeout, and every remaining
+         subject would have done the same. So the borrowed frame is RACED: if it
+         has not arrived in 1.5 s, render directly and carry on. A frame drawn
+         outside rAF is worth infinitely more than a frame that never comes. */
       async render() {
         if (CBZ.bootMeter && CBZ.bootMeter.hide) { try { CBZ.bootMeter.hide(); } catch (e) {} }
         if (!CBZ.renderer) return;
+        const draw = () => { try { CBZ.renderer.render(CBZ.scene, CBZ.camera); } catch (e) {} };
         const raf = D._rafOrig;
+        let drew = false;
         if (raf) {
-          await new Promise((res) => raf.call(window, () => {
-            CBZ.renderer.render(CBZ.scene, CBZ.camera);
-            res();
-          }));
-        } else CBZ.renderer.render(CBZ.scene, CBZ.camera);
+          await new Promise((res) => {
+            let done = false;
+            const finish = () => { if (!done) { done = true; res(); } };
+            raf.call(window, () => { draw(); drew = true; finish(); });
+            setTimeout(finish, 1500);
+          });
+        }
+        if (!drew) draw();                       // the tab was hidden: draw anyway
         await new Promise((r) => setTimeout(r, 1200));
       },
     };

@@ -51,7 +51,13 @@
    PUBLIC API
    ----------
      CBZ.waterHit(x, y, z, opts) -> bool
-        opts = { speed, mass, kind, quiet, by, src, power }
+        opts = { speed, mass, kind, quiet, by, src, power, vx, vz }
+        vx/vz: the HORIZONTAL velocity it arrived with (optional). A body that
+        was travelling ploughs — the crown shifts downrange, the leading crest
+        becomes an arc, the droplets ahead of it are thrown flat and fast, and
+        the foam scar drifts along the track instead of being stamped at the
+        touch point. Omit it and the event is symmetric, which is right for
+        anything that was simply falling.
         kind: "bullet" | "body" | "vehicle" | "debris" | "blast" | "drop"
         Returns FALSE immediately (doing nothing) when (x,z) is not over water
         or y is well clear of the LIVE surface — so callers may call it
@@ -361,11 +367,25 @@
   // s runs about 0.3 (a dropped bottle) to 6.5 (a megalodon coming down out of
   // a breach). Every number below is linear in s so the ordering is the
   // momentum curve's and nothing is special-cased for a big animal.
-  function fxCrown(x, sy, z, s, jet) {
+  // `hx, hz` are the horizontal velocity of the thing that went in. They are
+  // the difference between a stone DROPPED in the sea and a shark ARRIVING in
+  // it: a body carrying speed does not throw a symmetric ring, it ploughs, and
+  // the water goes downrange with it. Zero is the old symmetric behaviour and
+  // is what a falling object still gets.
+  function fxCrown(x, sy, z, s, jet, hx, hz) {
+    const hs = Math.hypot(hx || 0, hz || 0);
+    const bear = hs > 0.05 ? Math.atan2(hz || 0, hx || 0) : 0;
+    // how much of the event is thrown downrange rather than radially. Saturates
+    // — past about a body-length per second more speed does not tip it further,
+    // it just makes it bigger, which the momentum term already did.
+    const lean = hs > 0.05 ? clamp(hs / (7 + s * 2.2), 0, 0.85) : 0;
+    const bx = Math.cos(bear), bz = Math.sin(bear);
     // ---- the sheet -------------------------------------------------------
     if (s > 0.5 && CBZ.waterCrown) {
       CBZ.waterCrown({
-        x: x, z: z,
+        // shifted downrange: the hole a moving body makes is under its NOSE,
+        // not under the point it first touched
+        x: x + bx * (0.35 + 0.5 * s) * lean, z: z + bz * (0.35 + 0.5 * s) * lean,
         r: 0.22 + 0.45 * s,                 // 0.7 m for a diver, 3.0 m for a meg
         grow: 0.5 + 0.55 * s,
         h: 0.8 + 1.55 * s,                  // 2.3 m for a diver, 10.5 m for a meg
@@ -374,6 +394,24 @@
         // the first cut ran to 0.92 and photographed as a milk bucket.
         alpha: Math.min(0.72, 0.40 + s * 0.09),
       });
+      /* A SECOND SHEET, DOWNRANGE, A BEAT LATER. A body moving across the
+         surface tears a TROUGH, not a hole — the water closes behind it while
+         it is still opening in front. One cone can only ever be a stone going
+         in; two, offset along the track and a tenth of a second apart, is the
+         shape of something that arrived travelling. Only when there is real
+         speed and real mass to justify a second draw call. */
+      if (lean > 0.28 && s > 1.4) {
+        const d2 = (1.1 + s * 0.7) * lean;
+        later(0.085 + 0.02 * s, function () {
+          if (!CBZ.waterCrown) return;
+          CBZ.waterCrown({
+            x: x + bx * d2, z: z + bz * d2,
+            r: 0.18 + 0.30 * s, grow: 0.4 + 0.42 * s,
+            h: (0.6 + 1.05 * s) * 0.8, ttl: 0.45 + 0.09 * s,
+            alpha: Math.min(0.58, 0.32 + s * 0.07),
+          });
+        });
+      }
     }
     // ---- the grain -------------------------------------------------------
     const slots = free();
@@ -382,34 +420,74 @@
       const a = (i / nCrown) * Math.PI * 2 + fxRand() * 0.5;
       const r = 0.28 + fxRand() * 0.55 * s;
       const out = 1.6 + fxRand() * 2.2 * s;
+      // downrange droplets are thrown FASTER and FLATTER (they are being pushed
+      // by the body); the ones behind it are thrown up and left behind
+      const face = Math.cos(a) * bx + Math.sin(a) * bz;     // -1 behind .. +1 ahead
+      const push = hs * lean * (0.30 + 0.35 * Math.max(0, face));
       emit({
         x: x + Math.cos(a) * r * 0.55, y: sy + 0.06, z: z + Math.sin(a) * r * 0.55,
-        vx: Math.cos(a) * out, vy: 2.0 + fxRand() * 3.0 * s, vz: Math.sin(a) * out,
+        vx: Math.cos(a) * out + bx * push,
+        vy: (2.0 + fxRand() * 3.0 * s) * (1 - 0.30 * lean * Math.max(0, face)),
+        vz: Math.sin(a) * out + bz * push,
         size: 0.10 + fxRand() * (0.09 + 0.05 * s) * (0.6 + s * 0.22), grow: -0.02,
         ttl: 0.5 + fxRand() * (0.5 + s * 0.16), alpha: 0.95,
       });
     }
     if (jet > 0) {
-      // The rebound spike: a tight column of beads whose launch speed (hence
-      // apex height) tracks the impact. It is what comes back UP out of the
-      // cavity a moment after the sheet has gone out sideways.
+      /* THE REBOUND SPIKE, AND IT IS *LATE ON PURPOSE*. A cavity does not throw
+         its jet at the moment of impact — it opens, it is squeezed shut by the
+         water around it, and the collapse fires the spike back up out of the
+         hole. Firing it on the same frame as the sheet is what made a big entry
+         read as one flat bang instead of a two-beat event, and the delay scales
+         with the cavity: a diver ~0.14 s, twenty tonnes of shark ~0.35 s.
+
+         This is the one delay in the file that is supposed to be there, and it
+         is the opposite of the bug this pass fixed: it happens AFTER the sheet,
+         at a size the eye reads as an answer to it, rather than being the whole
+         splash arriving late. */
       const nJet = 3 + Math.round(Math.min(6, s * 1.3));
-      const v0 = (4.0 + s * 3.4) * jet;
-      for (let i = 0; i < nJet; i++) {
-        emit({
-          x: x + (fxRand() - 0.5) * 0.12 * s, y: sy + 0.05, z: z + (fxRand() - 0.5) * 0.12 * s,
-          vx: (fxRand() - 0.5) * 0.6, vy: v0 * (0.72 + fxRand() * 0.42), vz: (fxRand() - 0.5) * 0.6,
-          size: 0.13 + fxRand() * (0.10 + s * 0.06), grow: -0.03,
-          ttl: 0.65 + fxRand() * (0.55 + s * 0.12), alpha: 1,
-        });
-      }
+      const v0 = (4.6 + s * 3.8) * jet;
+      const jx = x + bx * (0.5 + 0.6 * s) * lean, jz = z + bz * (0.5 + 0.6 * s) * lean;
+      later(0.11 + Math.min(0.24, 0.055 * s), function () {
+        for (let i = 0; i < nJet; i++) {
+          emit({
+            x: jx + (fxRand() - 0.5) * 0.12 * s, y: sy + 0.05, z: jz + (fxRand() - 0.5) * 0.12 * s,
+            vx: (fxRand() - 0.5) * 0.6, vy: v0 * (0.72 + fxRand() * 0.42), vz: (fxRand() - 0.5) * 0.6,
+            size: 0.13 + fxRand() * (0.10 + s * 0.06), grow: -0.03,
+            ttl: 0.65 + fxRand() * (0.55 + s * 0.12), alpha: 1,
+          });
+        }
+        // the collapse itself: a tight ring snapping INWARD-looking at the hole
+        emit({ x: jx, y: sy + 0.03, z: jz, size: 0.30 * s + 0.2, grow: 1.1 * s + 0.5,
+               ttl: 0.7 + 0.1 * s, ring: true, ride: true, alpha: 0.7 });
+      });
     }
     // ---- the water left behind -------------------------------------------
     // A WASH (a filled patch of churned white, ride without ring) where the
-    // thing actually went in, and two RINGS travelling away from it. The wash
-    // is what stops a big entry leaving a clean hole in the sea.
-    emit({ x: x, y: sy + 0.03, z: z, size: 0.9 * s + 0.4, grow: 0.9 * s, ttl: 0.8 + 0.2 * s, ride: true, alpha: 0.45 });
-    emit({ x: x, y: sy + 0.03, z: z, size: 0.5 * s, grow: 2.4 * s, ttl: 1.1 + 0.14 * s, ring: true, ride: true, alpha: 0.85 });
+    // thing actually went in, and RINGS travelling away from it. The wash is
+    // what stops a big entry leaving a clean hole in the sea.
+    //
+    // THE SCAR OUTLIVES THE SPLASH. A tonne and a half of animal leaves white
+    // water on the sea for SECONDS after the noise has stopped — the old flat
+    // `0.8 + 0.2*s` meant a megalodon's entry was gone in 1.4 s and the sea
+    // was mirror-clean behind it, which is the tell that nothing had really
+    // happened there. It now runs with the cube root of the event, so a diver
+    // is unchanged and a big body leaves a mark you can still see when you
+    // turn round.
+    const scar = 0.8 + 1.5 * Math.cbrt(Math.max(0.2, s));
+    emit({ x: x, y: sy + 0.03, z: z, size: 0.9 * s + 0.4, grow: 0.9 * s, ttl: scar, ride: true, alpha: 0.45 });
+    // and it DRIFTS with whatever went in — a wake, not a stamp
+    if (lean > 0.2) {
+      emit({ x: x + bx * (0.8 + s) * lean, y: sy + 0.03, z: z + bz * (0.8 + s) * lean,
+             size: 0.6 * s + 0.3, grow: 0.7 * s, ttl: scar * 0.8, ride: true, alpha: 0.34 });
+    }
+    // THE LEADING CREST is an ARC, not a circle, when the thing was moving:
+    // water_wake.js's ring primitive already draws a feathered crest over a
+    // bearing (it is how the Kelvin bow wave is drawn) and a body arriving at
+    // speed throws exactly that ahead of itself.
+    emit({ x: x, y: sy + 0.03, z: z, size: 0.5 * s, grow: 2.4 * s, ttl: 1.1 + 0.14 * s,
+           ring: true, ride: true, alpha: 0.85,
+           bear: lean > 0.25 ? bear : 0, arc: lean > 0.25 ? 1.5 : 0 });
     emit({ x: x, y: sy + 0.03, z: z, size: 0.24 * s, grow: 1.3 * s, ttl: 0.85, ring: true, ride: true, alpha: 0.68 });
   }
 
@@ -648,11 +726,13 @@
       // caller knows it (every ordnance path does).
       fxBlast(x, Math.min(y, sy), z, sy, (+opts.power > 0 ? clamp(+opts.power, 0.15, 4) : strength), depth);
     } else if (kind === "debris") {
-      fxCrown(x, sy, z, strength, 0);                     // compact crown, no jet
+      fxCrown(x, sy, z, strength, 0, +opts.vx || 0, +opts.vz || 0);   // compact crown, no jet
     } else {
       // body / vehicle: crown + rebound jet + settling ring. A vehicle lands
       // flatter and wider than a diver, so its jet is damped a little.
-      fxCrown(x, sy, z, strength, kind === "vehicle" ? 0.75 : 1);
+      // opts.vx/vz (optional) is the horizontal velocity it arrived with, and
+      // it leans the whole event downrange — see fxCrown.
+      fxCrown(x, sy, z, strength, kind === "vehicle" ? 0.75 : 1, +opts.vx || 0, +opts.vz || 0);
     }
 
     if (!opts.quiet) playHit(x, sy, z, loud, kind);

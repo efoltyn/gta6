@@ -1430,18 +1430,6 @@
     }
     return 4 * liveSz(a);
   }
-  // ONE waterline crossing, momentum-true, through the shared primitive. The
-  // fallback is the legacy dial and is a fallback ONLY — it is the thing that
-  // reported every animal in this game as a 78 kg diver.
-  function waterCross(a, x, surf, z, speed, exit) {
-    if (typeof CBZ.marineBreachCross === "function") {
-      try { return +CBZ.marineBreachCross(a, x, surf, z, speed, exit, bodyLenOf(a)) || 0; } catch (e) {}
-    }
-    if (typeof CBZ.waterSplashAt === "function") {
-      try { CBZ.waterSplashAt(x, surf, z, 2.2); } catch (e) {}
-    }
-    return 0;
-  }
   // What is this animal hunting right now? systems/predator.js parks the live
   // quarry on the hunt scratch it already keeps per actor, and BOTH drivers
   // that can own a shark (this file's player hunt and marine_predation.js's
@@ -1555,7 +1543,13 @@
     BAUDIT.lastRoll = +(s.rollPeak || 0).toFixed(3);
     BAUDIT.lastAlignErr = +(s.alignErr || 0).toFixed(4);
     BAUDIT.lastLen = +bodyLenOf(a).toFixed(2);
-    const kg = waterCross(a, g.position.x, surf, g.position.z, fall, false);
+    /* WHAT THE SEA WAS TOLD — read, not fired. The entry splash belongs to
+       the frame the NOSE went through, which wlTick() below has already owned
+       (for a long body that is several frames and several metres before this
+       origin test trips). All this needs is the size of it, for the shake. */
+    const wl = a._wl;
+    const nowS = (CBZ.now != null ? CBZ.now : 0) / 1000;
+    const kg = (wl && nowS - wl.lastEntryT < 0.6) ? wl.lastEntryKg : 0;
     BAUDIT.lastKg = Math.round(kg);
     // IT PUNCHES UNDER. Landing exactly on the waterline and stopping is the
     // thing that makes a leap look weightless; the plunge target is carried and
@@ -1627,12 +1621,14 @@
     if (s.air === 1) {
       s.airVy = Math.min(s.airVmax, s.airVy + s.airA * dt);
       s.airY += s.airVy * dt;
-      // the curtain of water comes up with the head, a beat before the origin
-      // crosses — the body is already dragging the sea up by then
-      if (!s.exited && s.airY >= -draft * 0.35) {
-        s.exited = true;
-        waterCross(a, g.position.x, surf, g.position.z, s.airVy, true);
-      }
+      /* THE EXIT IS NOT FIRED FROM AN ORIGIN TEST ANY MORE. This used to be
+         a guess at when the head was through — "a beat before the origin
+         crosses" — and a guess is exactly what it was: one threshold on
+         `airY`, which is the ORIGIN's height, for every body from a 4 m
+         hammerhead to a 22 m megalodon. wlTick() below watches the real nose
+         against the real surface every frame and fires the crossing when it
+         actually happens, at the point where it happens. */
+      if (!s.exited && s.airY >= -draft * 0.35) s.exited = true;
       if (s.airY >= 0) {
         s.air = 2; s.airVy = s.airVmax; s.airT = 0;
         // the charge becomes height at the waterline (see swim()'s BREACH_CARRY):
@@ -1702,6 +1698,31 @@
 
      DISTANCE-GATED HARD: a shark half a kilometre away costs one species
      compare and one Math.hypot. */
+  /* THE WATERLINE TRACKER, wired to a wild body. city/wildlife_tame.js owns
+     the crossing model (it is the same physics for a ridden animal and a wild
+     one, and two copies would drift within a week); this is the adapter that
+     hands it THIS file's pose. The scratch is module-level, so a hundred
+     sharks allocate nothing. */
+  const _wlScratch = {};
+  function wlTick(a, s, dt) {
+    if (typeof CBZ.marineWaterline !== "function") return;
+    const g = a.group;
+    if (!g) return;
+    const hv = (s && s.hv) || 0;
+    _wlScratch.x = g.position.x; _wlScratch.y = g.position.y; _wlScratch.z = g.position.z;
+    _wlScratch.heading = a.heading || 0;
+    // the DRAWN pitch, off the transform — never the pitch some driver
+    // intended, for the same reason breachTick reads its own speed off the
+    // transform: three different files are allowed to steer this animal.
+    _wlScratch.pitch = g.rotation.z || 0;
+    _wlScratch.len = bodyLenOf(a);
+    _wlScratch.vx = Math.cos(a.heading || 0) * hv;
+    _wlScratch.vz = Math.sin(a.heading || 0) * hv;
+    _wlScratch.vy = (s && s.air) ? s.airVy : 0;
+    _wlScratch.dt = dt;
+    try { CBZ.marineWaterline(a, _wlScratch); } catch (e) {}
+  }
+
   function breachPass(dt) {
     if (!(dt > 0) || !ON()) return;
     const list = CBZ.cityWildlife;
@@ -1725,6 +1746,14 @@
         continue;
       }
       breachTick(a, s, dt, d);
+      /* AND THE SEA ANSWERS THE BODY. Every frame, for every shark close
+         enough for its water to be drawn — not only the ones mid-arc, because
+         the tracker's first sight of an animal only LATCHES the signs (it must
+         never splash for a body that was already where it is) and a tracker
+         switched on at the launch would therefore miss that launch. Same
+         reason it runs after breachTick: the pose it reads has to be the one
+         that will be drawn. */
+      if (d < TRAIL_R) wlTick(a, s, dt);
     }
   }
   if (CBZ.onUpdate) CBZ.onUpdate(47.22, breachPass);

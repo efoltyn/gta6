@@ -1403,6 +1403,49 @@
     return (1 - _probe.y) * 50;      // NDC +1 (top) -> 0%, -1 (bottom) -> 100%
   }
 
+  /* THE LENS GOING THROUGH THE FILM — not a body hitting the sea.
+
+     This used to be `CBZ.waterSplashAt(eye, 1.0)`, and waterSplashAt's contract
+     is `{ kind: "body", mass: 78 }` — a SEVENTY-EIGHT KILOGRAM DIVER, thrown a
+     full crown, a rebound jet and a settling ring, at the CAMERA's position, on
+     the frame the CAMERA crossed the waterline. Two things were wrong with it:
+
+       • it double-counted. A swimmer going in already fires its own body hit
+         from city/swim.js's enterWater on the frame the swimmer enters; this
+         fired a second, identical splash a few frames later when the eye
+         followed the head down.
+       • on a SHARK it was the owner's complaint. A chase camera trails the
+         animal, so the lens goes under whole frames after the body does —
+         MEASURED (tools/splash-timing-check.mjs, ridden megalodon): the
+         animal's entry crossing fired on frame 36 and this fired a second
+         full-size splash on frame 57. Twenty-one frames later. A splash with
+         nobody in it, going off in the wake.
+
+     What is physically here is a lens passing through a film of water: droplets
+     across the glass and a dimple, nothing more. The BODY's splash is owned by
+     whoever owns the body. */
+  function lensBreak() {
+    if (typeof CBZ.waterEmit !== "function") return;
+    const cam = CBZ.camera;
+    if (!cam) return;
+    const free = typeof CBZ.waterEmitFree === "function" ? CBZ.waterEmitFree() : 40;
+    const n = Math.max(4, Math.min(12, Math.round(free * 0.12)));
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * 6.283185307;
+      const r = 0.10 + Math.random() * 0.32;
+      CBZ.waterEmit({
+        x: _eye.x + Math.cos(a) * r, y: _eye.y + 0.05 + Math.random() * 0.18, z: _eye.z + Math.sin(a) * r,
+        vx: Math.cos(a) * (0.5 + Math.random() * 1.1),
+        vy: 0.9 + Math.random() * 2.0,
+        vz: Math.sin(a) * (0.5 + Math.random() * 1.1),
+        size: 0.06 + Math.random() * 0.07, grow: -0.02,
+        ttl: 0.28 + Math.random() * 0.3, alpha: 0.85,
+      });
+    }
+    CBZ.waterEmit({ x: _eye.x, y: 0, z: _eye.z, ride: true, ring: true,
+      size: 0.3, grow: 1.6, ttl: 0.55, alpha: 0.5 });
+  }
+
   // ============================================================
   //  MAIN PASS
   // ============================================================
@@ -1435,7 +1478,7 @@
       buildFx();
       enterFog(scene);
       if (fxRoot) fxRoot.visible = true;
-      if (CBZ.waterSplashAt) CBZ.waterSplashAt(_eye.x, _eye.y, _eye.z, 1.0);
+      lensBreak();
     } else if (!want && submerged) {
       submerged = false;
       exitFog(scene);
