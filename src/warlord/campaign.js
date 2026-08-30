@@ -181,9 +181,21 @@
   let marker = null, markerT = 0;
   let dest = null;                 // {x,z} or null
   let camYaw = 0, camDist = 46, camDistWant = 46;
-  let breadcrumbs = [];            // [{x,z}] newest last
+  /* THE TRAIL IS AN ARC-LENGTH PATH, NOT A LIST OF SLOTS. Every crumb carries
+     `s`, the distance along the path from the first crumb kept, so a follower
+     is placed by asking "where was he 37.4 m back" and getting an interpolated
+     point on the polyline. See sampleTrail. The first version indexed the
+     array — `breadcrumbs[len-1-floor(back/TRAIL_STEP)]` — and that is THE bug
+     the owner was looking at: a follower stood perfectly still for every frame
+     between two crumb pushes and then jumped a whole TRAIL_STEP forward in one
+     frame. Measured on a mounted ride at 30 fps that is sixty men each
+     teleporting 1.9 m about six times a second, with their legs walking
+     smoothly the whole time. */
+  let breadcrumbs = [];            // [{x,z,s}] newest last, s = metres along
   let crumbAcc = 0;
+  let trailLen = 0;                // arc length of the last crumb
   let travelled = 0;
+  let gapCur = 0;                  // damped column spacing, see drawMen
   let hudRoot = null, plateBox = null, compass = null, compassG = null, mapWrap = null;
   const outpostBoxes = [];         // the colliders raiseOutposts registered
   let fightTick = 0, spawnTick = 0;
@@ -390,7 +402,7 @@
       const p = coastPoint(a) || D.landPoint(W.rnd, {});
       S.you.x = p.x; S.you.z = p.z; S.you.yaw = Math.atan2(-p.x, -p.z);
       S.you.placed = true;
-      breadcrumbs.length = 0;
+      breadcrumbs.length = 0; trailLen = 0; crumbAcc = 0; gapCur = 0;
     }
     camYaw = S.you.yaw;
     dest = null;
@@ -479,7 +491,7 @@
       S.you.placed = false;
       outpostsRaised = false;
       clockH = null;
-      breadcrumbs.length = 0;
+      breadcrumbs.length = 0; trailLen = 0; crumbAcc = 0; gapCur = 0;
       dest = null;
     });
   }
@@ -1569,8 +1581,15 @@
     // ---- breadcrumbs: the shape of the column ---------------------------
     crumbAcc += moved;
     if (crumbAcc >= TRAIL_STEP || !breadcrumbs.length) {
+      /* THE CRUMB CARRIES ITS OWN ARC LENGTH, and it is the TRUE distance
+         ridden, not index × TRAIL_STEP. crumbAcc resets rather than
+         subtracting because the crumb is stamped at where the man IS, so the
+         spacing is whatever the frame delivered — 1.6 m on foot, 2.3 m on a
+         camel at 30 fps, thirty metres after a backgrounded tab catches up.
+         With s on the crumb none of that matters to the sampler. */
+      breadcrumbs.push({ x: S.you.x, z: S.you.z, s: trailLen + crumbAcc });
+      trailLen += crumbAcc;
       crumbAcc = 0;
-      breadcrumbs.push({ x: S.you.x, z: S.you.z });
       if (breadcrumbs.length > TRAIL_MAX) breadcrumbs.shift();
     }
 
@@ -1639,10 +1658,101 @@
      which of them the 48 rigs go to, and only then draw — rigs for the near
      ones, instances for everybody else. Nothing here allocates per frame. */
 
+  /* ============================================================ THE PATH
+     WHERE WAS HE `back` METRES AGO — the one question the column asks, and
+     the answer has to be CONTINUOUS in `back` or the men do not walk, they
+     tick. Linear interpolation between the two crumbs that bracket the arc
+     length, with the LIVE player position welded on as the head of the path
+     so the answer keeps moving between crumb pushes.
+
+     The cursor is not an optimisation for its own sake: drawMen asks for
+     ascending `back`, so one backwards walk of the array serves all sixty
+     followers instead of sixty binary searches. Reset it before the loop. */
+  /* THE BASE-2 RADICAL INVERSE. Used by the column's lanes and by a warband's
+     disc, for the same reason in both: consecutive indices land FAR APART, so
+     any prefix of the sequence is evenly spread instead of clumped. Two men
+     placed by two independent hashes know nothing about each other and end up
+     standing inside one another about as often as chance allows — which is a
+     real part of what makes a crowd read as slop rather than as men. */
+  function radInv2(i) {
+    let r = 0, d = 0.5;
+    for (i = i | 0; i > 0; i >>= 1) { if (i & 1) r += d; d *= 0.5; }
+    return r;
+  }
+
+  const _tp = { x: 0, z: 0, tx: 0, tz: 1 };
+  let trailCur = 0;
+  function trailHead() { return trailLen + crumbAcc; }
+  /* POSITION IS PIECEWISE LINEAR; THE TANGENT MUST NOT BE. Taking the
+     tangent straight off the segment a man happens to be standing on makes
+     his HEADING a step function of `back`: the frame he crosses a crumb his
+     facing flips to the next segment's bearing, and the crumbs are a
+     hand-steered ride so consecutive bearings differ by a few degrees. It
+     measured 165 deg/s of heading rate on a dead-straight ride against 119
+     for the terrain lean alone. So the tangent is defined AT each crumb as
+     the central difference of its neighbours and then interpolated across
+     the segment — the standard Catmull-Rom tangent, and it is C0 in `back`
+     where the raw segment direction is not. The point beyond the last crumb
+     is the player himself, which is what keeps the head of the column
+     pointing where he is actually going. */
+  function ptX(i) { return i >= breadcrumbs.length ? S.you.x : breadcrumbs[i < 0 ? 0 : i].x; }
+  function ptZ(i) { return i >= breadcrumbs.length ? S.you.z : breadcrumbs[i < 0 ? 0 : i].z; }
+  const _ta = [0, 0], _tb = [0, 0];
+  /* Math.sqrt(dx*dx+dz*dz) AND NOT Math.hypot, EVERYWHERE IN THIS PATH.
+     hypot has to guard against overflow and underflow and V8 pays for it: it
+     is several times the cost of the naive form on numbers that are always
+     tens of metres, and drawMen is on this path three times per drawn man per
+     frame. Measured on the column subject: 0.56 ms of drawMen became 0.48. */
+  function tanAt(i, out) {
+    const dx = ptX(i + 1) - ptX(i - 1), dz = ptZ(i + 1) - ptZ(i - 1);
+    const L = Math.sqrt(dx * dx + dz * dz);
+    if (L > 1e-4) { out[0] = dx / L; out[1] = dz / L; }
+    else { out[0] = Math.sin(S.you.yaw); out[1] = Math.cos(S.you.yaw); }
+  }
+  function blendTan(i, t) {
+    tanAt(i, _ta); tanAt(i + 1, _tb);
+    const bx = _ta[0] + (_tb[0] - _ta[0]) * t, bz = _ta[1] + (_tb[1] - _ta[1]) * t;
+    const L = Math.sqrt(bx * bx + bz * bz);
+    if (L > 1e-4) { _tp.tx = bx / L; _tp.tz = bz / L; }
+    else { _tp.tx = _ta[0]; _tp.tz = _ta[1]; }
+  }
+  function sampleTrail(back) {
+    const n = breadcrumbs.length;
+    if (!n) {
+      _tp.x = S.you.x; _tp.z = S.you.z;
+      _tp.tx = Math.sin(S.you.yaw); _tp.tz = Math.cos(S.you.yaw);
+      return _tp;
+    }
+    const last = breadcrumbs[n - 1];
+    const want = trailHead() - back;
+    // the head segment: last crumb → where he is standing right now
+    if (want >= last.s) {
+      const dx = S.you.x - last.x, dz = S.you.z - last.z;
+      const seg = Math.sqrt(dx * dx + dz * dz);
+      const t = seg > 1e-4 ? clamp((want - last.s) / seg, 0, 1) : 0;
+      _tp.x = last.x + dx * t; _tp.z = last.z + dz * t;
+      blendTan(n - 1, t);
+      return _tp;
+    }
+    if (trailCur > n - 2) trailCur = n - 2;
+    if (trailCur < 0) trailCur = 0;
+    while (trailCur > 0 && breadcrumbs[trailCur].s > want) trailCur--;
+    while (trailCur < n - 2 && breadcrumbs[trailCur + 1].s <= want) trailCur++;
+    const a = breadcrumbs[trailCur], b = breadcrumbs[trailCur + 1] || last;
+    const seg = b.s - a.s;
+    const t = seg > 1e-4 ? clamp((want - a.s) / seg, 0, 1) : 0;
+    _tp.x = a.x + (b.x - a.x) * t; _tp.z = a.z + (b.z - a.z) * t;
+    blendTan(trailCur, t);
+    return _tp;
+  }
+
   /* ---- one drawable man. Reused; menDrawN says how many are live ---- */
   const menDraw = [];
   let menDrawN = 0;
   const nearIdx = [];
+  const bandOrder = [];            // band indices, nearest first (see drawMen)
+  const bandDist = [];
+  function byBandDist(a, b) { return bandDist[a] - bandDist[b]; }
   const wantKey = Object.create(null);
   let youSpeed = 0;
   function pushMan(key, x, z, y, yaw, bob, ms, mk, s, band, spd) {
@@ -1804,6 +1914,110 @@
     return peerBands[pid] || (peerBands[pid] = { id: "peer:" + pid, faction: "warlord" });
   }
 
+  /* ============================================================ FORMATIONS
+     A PARTY'S MEN STAND IN THE SAME PLACES FROM ONE FRAME TO THE NEXT, and
+     until now they did not. The old line was
+
+         const a  = W.hash01(b.x + k, b.z, 41 + k) * TAU;
+         const rr = 1.6 + W.hash01(b.x, b.z + k, 51 + k) * (...);
+
+     — every man's angle and radius around his band hashed off the band's
+     CURRENT WORLD POSITION. W.hash01 rounds its inputs to eighths of a metre,
+     so a party walking at BAND_SPEED crosses a fresh hash bucket about
+     eighteen times a second and on every one of those the whole party
+     re-rolls: fourteen men, new angle, new radius, teleported up to six
+     metres, ~18 Hz, with their legs walking smoothly through it. That is the
+     shimmer the owner is looking at. There is no amount of animation polish
+     that survives a random shuffle at eighteen hertz.
+
+     The offsets are now hashed off the band's IDENTITY and the man's index,
+     which never change, and cached. What was two hash calls, a cos and a sin
+     per man per frame is now a table read.
+
+     THEY ALSO MARCH IN A COLUMN. A blob is what a party at rest is; a party
+     under way stretches along its heading and narrows across it, damped so
+     the shape flows when the band starts and stops rather than snapping. And
+     each man carries a slow two-axis sway of his own — that is a BREATHING
+     term, not a simulation, and it is what stops fourteen men reading as one
+     rigid constellation being dragged across the sand. */
+  const bandView = new WeakMap();
+  function strSeed(s) {
+    let h = 2166136261;
+    s = String(s);
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return (h >>> 0) % 9973;
+  }
+  /* HOW MANY OF A PARTY YOU CAN SEE, AND IT IS A DISTANCE QUESTION. The old
+     rule was `clamp(round(sqrt(size) * 1.5), 2, 14)` at every range, so a
+     two-hundred-man warband standing forty metres in front of you was FOURTEEN
+     men — which is most of "hordes look shit and unrealistic", and the banner
+     saying 200 over the top of it made it worse rather than better. Inside
+     140 m a party shows its roster up to sixty bodies (past sixty the cluster
+     stops reading as a count and the near band only has forty-eight rigs to
+     give anyway); by 700 m it is back on the old sqrt rule, where fourteen
+     specks and a banner is genuinely all the information there is.
+     The offsets are TABULATED for the full sixty regardless, so approaching a
+     party does not rebuild its formation — it just draws more of the same one. */
+  const FORM_CAP = 60;
+  function bandShow(size, d) {
+    const t = clamp((d - 140) / (700 - 140), 0, 1);
+    const near = Math.min(size, FORM_CAP);
+    const far = clamp(Math.round(Math.sqrt(size) * 1.5), 2, 14);
+    return Math.max(2, Math.min(near, Math.round(near + (far - near) * t)));
+  }
+  function bandForm(b, size, spd, dt) {
+    let v = bandView.get(b);
+    if (!v) { v = { seed: strSeed(b.id), n: -1, size: -1, march: 0, lat: [], fwd: [], w: [], p: [] }; bandView.set(b, v); }
+    const cap = Math.max(2, Math.min(size, FORM_CAP));
+    if (v.n !== cap || v.size !== size) {
+      v.n = cap; v.size = size;
+      /* A GOLDEN-ANGLE / VAN-DER-CORPUT DISC, not a pile of independent
+         random points. Two men are placed by two hashes that know nothing
+         about each other, so a hashed cluster always has pairs standing
+         inside each other and holes you could park a truck in — which is the
+         other half of "hordes look shit". The golden angle spreads the
+         bearings and the base-2 radical-inverse spreads the radii, and both
+         are LOW DISCREPANCY IN EVERY PREFIX: that is the property that makes
+         it safe to draw only the first `show` of the table and still get an
+         evenly covered crowd rather than a dense core with a bare rim.
+         A little hash jitter on top so it does not read as a spiral. */
+      const R = 3.8 + Math.sqrt(size) * 0.75;
+      for (let k = 0; k < cap; k++) {
+        const a = k * 2.39996323 + W.hash01(v.seed, k, 41) * 0.55;
+        const rr = 1.3 + R * Math.sqrt(radInv2(k + 1)) + (W.hash01(v.seed, k + 128, 51) - 0.5) * 0.8;
+        v.lat[k] = Math.cos(a) * rr;
+        v.fwd[k] = Math.sin(a) * rr;
+        v.w[k] = 0.55 + W.hash01(v.seed, k + 256, 61) * 0.7;   // sway rate, rad/s
+        v.p[k] = W.hash01(v.seed, k + 384, 71) * TAU;          // sway phase
+      }
+    }
+    const want = clamp(spd / BAND_SPEED, 0, 1);
+    v.march += (want - v.march) * Math.min(1, dt * 1.6);
+    return v;
+  }
+  /* Place man k of a formation in the world. Writes _fp. */
+  const _fp = { x: 0, z: 0, yaw: 0 };
+  function formPos(v, k, bx, bz, yaw, size, spread, t) {
+    const m = v.march;
+    const st = 1 + 0.95 * m;                 // stretch along the march
+    const sq = 1 - 0.40 * m;                 // narrow across it
+    const drop = -(0.9 + Math.sqrt(size) * 0.25) * m;   // the file trails the banner
+    const sway = 0.28 * (1 - 0.5 * m);
+    const jl = Math.sin(t * v.w[k] + v.p[k]) * sway;
+    const jf = Math.sin(t * v.w[k] * 0.83 + v.p[k] * 1.7) * sway;
+    const fx = Math.sin(yaw), fz = Math.cos(yaw);
+    const lo = (v.lat[k] * sq + jl) * spread;
+    const fo = (v.fwd[k] * st + drop + jf) * spread;
+    _fp.x = bx + fz * lo + fx * fo;
+    _fp.z = bz - fx * lo + fz * fo;
+    /* THE PER-MAN FACING OFFSET IS CONSTANT, not scaled by `march`. Scaling it
+       means every man's heading moves whenever the party's speed changes, and
+       a heading that drifts because somebody slowed down is a heading that is
+       lying about what the body is doing. */
+    _fp.yaw = yaw + (v.p[k] / TAU - 0.5) * 0.45;
+    return _fp;
+  }
+
   /* ---- the pool. 48 bodies, built one per frame, recycled forever ---- */
   const rigSlots = [];
   const rigByKey = Object.create(null);
@@ -1825,7 +2039,8 @@
     const ch = g.userData.charRig;
     const face = [];
     if (ch && ch.face) for (const k in ch.face) if (ch.face[k]) face.push(ch.face[k]);
-    const slot = { rig: g, char: ch, face: face, faceOn: true, key: null, fit: null, animF: rigsBuilt & 3 };
+    const slot = { rig: g, char: ch, face: face, faceOn: true, key: null, fit: null, animF: rigsBuilt & 3,
+                   spdKey: null, px: 0, pz: 0, spd: 0 };
     rigSlots.push(slot);
     rigsBuilt++;
     return slot;
@@ -1940,13 +2155,39 @@
       slot.faceOn = wantFace;
       for (let i = 0; i < slot.face.length; i++) slot.face[i].visible = wantFace;
     }
+    /* THE LEGS RUN AT THE SPEED THE BODY IS ACTUALLY MOVING AT, and that is
+       not the same number the caller hands down. animChar advances the gait by
+       DISTANCE (speed × dt ÷ stride), so feeding it a speed the body does not
+       have is foot slide by construction, and foot slide is the classic
+       "glitchy horde" tell. The column used to be fed the PLAYER's speed —
+       fine while he rides in a straight line, wrong the moment the spacing
+       damps, the trail bends, or he is mounted at 14 m/s while his men are
+       sampled off a path he rode at 6. Differentiating the rig's own position
+       makes the answer true for the column, the bands, the peers and anything
+       added later, for two subtractions.
+
+       Keyed to the SLOT, and reset when the slot changes hands: a pooled rig
+       recycled to a man forty metres away would otherwise read as a single
+       frame at 1200 m/s and spin his legs into a blur. */
+    if (slot.spdKey !== slot.key) { slot.spdKey = slot.key; slot.px = m.x; slot.pz = m.z; slot.spd = m.spd || 0; }
+    if (dt > 0) {
+      const rdx = m.x - slot.px, rdz = m.z - slot.pz;
+      const raw = Math.sqrt(rdx * rdx + rdz * rdz) / dt;
+      /* Damped, because the trail sampler is continuous but the ground under
+         it is not perfectly so and a one-frame spike would show as a hitched
+         step — but only just: at rate 9 the filter itself lagged real speed
+         changes enough to be the largest remaining term in the measured foot
+         slide. 16 settles inside four frames and still swallows a spike. */
+      slot.spd += (raw - slot.spd) * Math.min(1, dt * 16);
+    }
+    slot.px = m.x; slot.pz = m.z;
     if (CBZ.animChar && slot.char) {
       // battle.js's rate ladder, same reason: a gait resolved every fourth
       // frame at 95 m is indistinguishable from one resolved every frame.
       const every = m.d2 < ANIM_EVERY_1 * ANIM_EVERY_1 ? 1 : m.d2 < ANIM_EVERY_2 * ANIM_EVERY_2 ? 2 : 4;
       slot.animF = (slot.animF + 1) & 1023;
       if ((slot.animF % every) === 0) {
-        try { CBZ.animChar(slot.char, m.spd, dt * every); } catch (e) {}
+        try { CBZ.animChar(slot.char, slot.spd, dt * every); } catch (e) {}
       }
     }
   }
@@ -1979,7 +2220,12 @@
        the first thirty seconds of a game — which is exactly when the player
        is looking hardest at their new men. Spacing is the ideal, capped by
        what the trail can actually carry. */
-    const avail = Math.max(8, (breadcrumbs.length - 1) * TRAIL_STEP - 4);
+    /* THE ARC ACTUALLY KEPT, not the total ridden. TRAIL_MAX crumbs are held
+       and the rest are shifted off the front, so after a long ride the path
+       under the column is ~670 m however far he has come; measuring `avail`
+       off the total would run the tail man off the end of the polyline and
+       pile the back half of the column on the oldest crumb. */
+    const avail = Math.max(8, trailHead() - (breadcrumbs.length ? breadcrumbs[0].s : 0) - 4);
     /* AND THE COLUMN MUST FIT IN FRONT OF THE CAMERA. The camera sits behind
        him along the same axis the trail runs down, so a column longer than
        the camera is far back has its tail level with — or behind — the eye,
@@ -1997,21 +2243,49 @@
        Floor it at a body's length and let the tail run past the bottom edge
        when the camera is very close — a man walking out of frame behind you is
        what actually happens when you are stood among your own men. */
-    const gap = Math.max(1.15, Math.min(2.15 * spread, avail / Math.max(1, drawN),
-                         (camDist * 0.40) / Math.max(1, drawN)));
+    /* AND THE GAP ITSELF IS DAMPED. Every term above it steps: `avail` grows
+       by a whole crumb the frame a crumb is pushed, and camDist lerps through
+       a zoom. `back` is i × gap, so a 1.6 m step in `avail` moved the SIXTIETH
+       man 1.6 m in one frame even after the sampler was made continuous — the
+       column concertina'd every time the trail grew. Damped at rate 2.5 the
+       whole column breathes into a new spacing over about a second, which is
+       what men closing up actually looks like. */
+    const gapWant = Math.max(1.15, Math.min(2.15 * spread, avail / Math.max(1, drawN),
+                             (camDist * 0.40) / Math.max(1, drawN)));
+    gapCur = gapCur > 0 ? gapCur + (gapWant - gapCur) * Math.min(1, dt * 2.5) : gapWant;
+    const gap = gapCur;
+    trailCur = breadcrumbs.length - 2;
     for (let i = 0; i < drawN; i++) {
       const back = 4 + i * gap;                        // metres behind you
-      const idx = breadcrumbs.length - 1 - Math.floor(back / TRAIL_STEP);
-      const c = breadcrumbs[idx < 0 ? 0 : idx];
-      if (!c) break;
-      const j1 = (W.hash01(i * 31 + 7, 3, 21) - 0.5) * 7.0 * (1 + (spread - 1) * 0.7);
-      const j2 = (W.hash01(i * 17 + 5, 9, 23) - 0.5) * 3.0;
-      const x = c.x + j1, z = c.z + j2;
+      const c = sampleTrail(back);
+      /* THE OFFSET RIDES THE PATH FRAME, not the world axes. It used to be a
+         fixed ±3.5 m on world X and ±1.5 on world Z, which meant the column
+         was seven metres wide riding north and three metres wide riding east,
+         and a bend in the trail slid the whole formation sideways instead of
+         bending it. Off the local tangent it is a column: 2.2 m of lane and a
+         metre and a half of stagger down the line, whatever the heading. */
+      const nx = c.tz, nz = -c.tx;                     // path normal (left)
+      /* AND THE LANE IS LOW-DISCREPANCY IN i, not hashed. A hashed offset puts
+         man 12 and man 13 in the same lane about a fifth of the time, and two
+         men a metre apart down the trail in the same lane are one man with two
+         heads. The radical inverse guarantees consecutive followers are on
+         opposite sides of the track; the hash only jitters within the lane so
+         it does not read as a marching band. */
+      const lane = (radInv2(i + 1) - 0.5) + (W.hash01(i * 31 + 7, 3, 21) - 0.5) * 0.22;
+      const lat = lane * 4.4 * (1 + (spread - 1) * 0.7);
+      const lon = (W.hash01(i * 17 + 5, 9, 23) - 0.5) * 1.5;
+      const x = c.x + nx * lat + c.tx * lon, z = c.z + nz * lat + c.tz * lon;
       const dx = x - cam.x, dz = z - cam.z;
       const ms = manScale(Math.sqrt(dx * dx + dz * dz));
       const y = manGroundY(x, z, dx * dx + dz * dz);
       const bob = Math.sin(t * 5.2 + i * 1.7) * 0.055;
-      const yaw = S.you.yaw + (W.hash01(i, 1, 27) - 0.5) * 0.5;
+      /* AND HE FACES THE WAY THE TRAIL GOES, not the way YOU are facing. The
+         old line was `S.you.yaw + jitter` for all sixty: turn the head of the
+         column ninety degrees and every man on the island snapped ninety
+         degrees with him while still walking down the old path — a snake whose
+         whole body rotates at once. The tangent is per-man and it is what
+         makes the column read as bending through the wadi. */
+      const yaw = Math.atan2(c.tx, c.tz) + (W.hash01(i, 1, 27) - 0.5) * 0.5;
       /* THE COLUMN WEARS WHAT THE BATTLE WILL DRESS IT IN. A man near the
          camera is a real rig wearing his real fit; a man past the near band
          is two instance colours off the SAME record — outfits.marks() answers
@@ -2021,27 +2295,41 @@
       pushMan("a" + army[i].id, x, z, y, yaw, bob, ms, markOf(army[i], null), army[i], null, youSpeed);
       if (menDrawN >= MEN_CAP) break;
     }
+    /* NEAREST PARTY FIRST, and it is not cosmetic: MEN_CAP is a real budget
+       and it used to be spent in S.bands order, so a party a kilometre away
+       could take the last slots and the one you are standing in front of got
+       nothing. Sorting an array of at most a few dozen indices by camera
+       distance costs microseconds and makes the cap spend itself on what is
+       actually in the shot. */
+    bandOrder.length = 0;
+    for (let i = 0; i < S.bands.length; i++) {
+      const b = S.bands[i];
+      if (!b || b.x == null) continue;
+      const bqx = b.x - S.you.x, bqz = b.z - S.you.z;
+      const d = Math.sqrt(bqx * bqx + bqz * bqz);
+      if (d > BAND_DRAW) continue;
+      bandOrder.push(i);
+      bandDist[i] = d;
+    }
+    bandOrder.sort(byBandDist);
     // ---- every band close enough to see -------------------------------
     let bn = 0;
-    for (let i = 0; i < S.bands.length && menDrawN < MEN_CAP - 20; i++) {
+    for (let oi = 0; oi < bandOrder.length && menDrawN < MEN_CAP - 20; oi++) {
+      const i = bandOrder[oi];
       const b = S.bands[i];
-      const d = Math.hypot(b.x - S.you.x, b.z - S.you.z);
-      if (d > BAND_DRAW) continue;
+      const d = bandDist[i];
       const size = W.bandSize(b);
-      /* HOW MANY BODIES A PARTY SHOWS scales with sqrt(size) and stops at
-         14: past that the cluster stops reading as "more men" and starts
-         reading as "a bigger blob", and the BANNER is what carries the
-         count at any distance you would care about it from. */
-      const show = clamp(Math.round(Math.sqrt(size) * 1.5), 2, 14);
       const bdx = b.x - cam.x, bdz = b.z - cam.z;
-      const bms = manScale(Math.sqrt(bdx * bdx + bdz * bdz));
+      const bcd = Math.sqrt(bdx * bdx + bdz * bdz);
+      const show = bandShow(size, bcd);
+      const bms = manScale(bcd);
       const bspread = 1 + (bms - 1) * 0.5;
       // a camped or paused party stands still; stepBands publishes the number
       const bspd = b.spd == null ? 0 : b.spd;
+      const bv = bandForm(b, size, bspd, dt);
       for (let k = 0; k < show && menDrawN < MEN_CAP; k++) {
-        const a = W.hash01(b.x + k, b.z, 41 + k) * TAU;
-        const rr = (1.6 + W.hash01(b.x, b.z + k, 51 + k) * (2.2 + Math.sqrt(size) * 0.75)) * bspread;
-        const x = b.x + Math.cos(a + b.yaw) * rr, z = b.z + Math.sin(a + b.yaw) * rr;
+        const f = formPos(bv, k, b.x, b.z, b.yaw, size, bspread, t);
+        const x = f.x, z = f.z;
         const dx = x - cam.x, dz = z - cam.z, d2 = dx * dx + dz * dz;
         const y = manGroundY(x, z, d2);
         const bob = Math.sin(micro.elapsed * 4.6 + k * 2.1 + i) * 0.05;
@@ -2052,7 +2340,7 @@
            fourteen identical specks in the faction colour. The banner already
            carries "which army is that" at any range. */
         const s = (b.men && b.men[k]) || null;
-        pushMan("b" + b.id + ":" + k, x, z, y, b.yaw, bob, manScale(Math.sqrt(d2)),
+        pushMan("b" + b.id + ":" + k, x, z, y, f.yaw, bob, manScale(Math.sqrt(d2)),
                 s ? markOf(s, b) : flatMark(b.colour, 0xc79a63), s, b, bspd);
       }
       if (bn < 160) bn = party(bn, b.x, b.z, size, b.colour, b.yaw);
@@ -2072,19 +2360,32 @@
       peerDraw.push({ x: q.x, z: q.z, d: d, name: q.name || "WARLORD", size: q.size || 1, colour: q.colour == null ? 0xd8d0c0 : q.colour });
       if (d > BAND_DRAW || menDrawN >= MEN_CAP - 20) continue;
       const size = Math.max(1, q.size || 1);
-      const show = clamp(Math.round(Math.sqrt(size) * 1.5), 1, 14);
-      const yaw = q.yaw || 0;
       const pdx = q.x - cam.x, pdz = q.z - cam.z;
-      const pspread = 1 + (manScale(Math.sqrt(pdx * pdx + pdz * pdz)) - 1) * 0.5;
+      const pcd = Math.sqrt(pdx * pdx + pdz * pdz);
+      const show = bandShow(size, pcd);
+      const yaw = q.yaw || 0;
+      const pspread = 1 + (manScale(pcd) - 1) * 0.5;
       const pb = peerBand(pid);
+      /* A PEER'S SPEED IS MEASURED, NOT DECLARED. The wire carries {x,z} and
+         nothing else about how fast the other warlord is riding, and the old
+         code just told the gait "1.6 m/s" forever — a warlord galloping past
+         at eight metres a second walking at a stroll. Differentiate his own
+         position on the render-side band record (never on S.peers, which is
+         the wire's) and damp it, because snapshots arrive in lumps. */
+      if (pb.px != null && dt > 0) {
+        const raw = Math.hypot(q.x - pb.px, q.z - pb.pz) / dt;
+        pb.spd = (pb.spd == null ? raw : pb.spd + (raw - pb.spd) * Math.min(1, dt * 4));
+      }
+      pb.px = q.x; pb.pz = q.z;
+      const pspd = pb.spd || 0;
+      const pv = bandForm(pb, size, pspd, dt);
       for (let k = 0; k < show && menDrawN < MEN_CAP; k++) {
-        const a = W.hash01(q.x + k, q.z, 41 + k) * TAU;
-        const rr = (1.6 + W.hash01(q.x, q.z + k, 51 + k) * (2.2 + Math.sqrt(size) * 0.75)) * pspread;
-        const x = q.x + Math.cos(a + yaw) * rr, z = q.z + Math.sin(a + yaw) * rr;
+        const f = formPos(pv, k, q.x, q.z, yaw, size, pspread, t);
+        const x = f.x, z = f.z;
         const dx = x - cam.x, dz = z - cam.z, d2 = dx * dx + dz * dz;
         const s = peerMan(pid, k);
-        pushMan("p" + pid + ":" + k, x, z, manGroundY(x, z, d2), yaw, 0, manScale(Math.sqrt(d2)),
-                markOf(s, pb), s, pb, 1.6);
+        pushMan("p" + pid + ":" + k, x, z, manGroundY(x, z, d2), f.yaw, 0, manScale(Math.sqrt(d2)),
+                markOf(s, pb), s, pb, pspd);
       }
       if (bn < 160) bn = party(bn, q.x, q.z, size, q.colour, yaw);
     }
