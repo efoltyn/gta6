@@ -1746,9 +1746,48 @@
   // from the bite point in the group's local frame; ties broken toward the
   // SMALLER part, because a jaw that closes across a tail and a flank at the
   // same range took the tail.
+  /* ---- AND NOT EVERY CHILD MESH IS A BODY PART ----------------------------
+     Owner, 2026-08-30: "there's still floating bite marks, legit 2 feet from
+     the shark — on the RIGHT AND LEFT there's a floating bite mark."
+
+     Right and left was the clue and the instrumentation named it: the marks
+     still hanging off the ridden shark after the seat was fixed were parented
+     to `sharkGill` and `sharkSkinMarks` — cosmetic decal meshes, four
+     centimetres across, that the rigs hang on the hull for detail. A gill slit
+     is on the right and the left of the head, which is exactly where he was
+     seeing them.
+
+     This function scored EVERY child mesh of the group as a candidate body
+     part, and its tie-break actively PREFERRED the small one ("a jaw that
+     closes across a tail and a flank at the same range took the tail"). So a
+     bite near the head found a gill, decided a mouth could obviously close
+     around something four centimetres wide, SEVERED it, and seated a cut face
+     on the bounding box of a flat decal — which is a wound floating in the
+     water next to the animal, because the decal is not the surface.
+
+     The rule is measured, not named (BLOCK LAW — there is no list of gill
+     meshes in this game and there should not be one): a part you can bite has
+     to be a real fraction of the BODY. Seven percent of the trunk's longest
+     half-extent puts every fin, fluke, limb, ear and tail in this game
+     comfortably inside, and leaves gills, skin markings, eyes and teeth
+     outside by more than an order of magnitude. Anything smaller than that is
+     detail ON the body, and a bite that lands there belongs to the body. */
+  const BITEABLE_FRAC = 0.07;
   function partAt(actor, wp, jawR) {
     const grp = actor.group; if (!grp) return null;
     grp.updateMatrixWorld(true);
+    /* measured FIRST, because trunkOf() walks the rig and clobbers _half.
+       Two gates come out of the trunk: how big a part has to be, and — the one
+       that actually catches a decal — whether it STICKS OUT of the body. */
+    let minHalf = 0, tcx = 0, tcy = 0, tcz = 0, thx = 0, thy = 0, thz = 0;
+    const trunk = trunkOf(actor);
+    if (trunk && meshHalf(trunk, _half)) {
+      minHalf = Math.max(_half.x, Math.max(_half.y, _half.z)) * BITEABLE_FRAC;
+      tcx = trunk.position.x + _geoC.x * trunk.scale.x;
+      tcy = trunk.position.y + _geoC.y * trunk.scale.y;
+      tcz = trunk.position.z + _geoC.z * trunk.scale.z;
+      thx = _half.x; thy = _half.y; thz = _half.z;
+    }
     const local = _cbv.set(wp.x, wp.y, wp.z);
     grp.worldToLocal(local);
     const lx = local.x, ly = local.y, lz = local.z;
@@ -1763,6 +1802,23 @@
       const cx = m.position.x + _geoC.x * m.scale.x;
       const cy = m.position.y + _geoC.y * m.scale.y;
       const cz = m.position.z + _geoC.z * m.scale.z;
+      if (m !== trunk) {
+        const own = Math.max(_half.x, Math.max(_half.y, _half.z));
+        // too small to be an appendage at all (a gill slit, an eye, a tooth)
+        if (own < minHalf) continue;
+        /* AND THE ONE THAT CATCHES A BIG FLAT DECAL. sharkSkinMarks is a
+           metre-long marking shell laid over the flank: it sails past any size
+           test, and severing it seats a cut face on the bounding box of a
+           sheet — a wound hanging in the water beside the animal. The
+           difference between a marking and a fin is not size, it is that a fin
+           STICKS OUT. Measure how far this part reaches past the trunk's own
+           box; a part that never leaves the body is detail ON the body, and a
+           bite that lands there belongs to the body underneath it. */
+        const prot = Math.max(Math.abs(cx - tcx) + _half.x - thx,
+          Math.max(Math.abs(cy - tcy) + _half.y - thy,
+                   Math.abs(cz - tcz) + _half.z - thz));
+        if (prot < own * 0.20) continue;
+      }
       const dx = Math.max(0, Math.abs(lx - cx) - _half.x);
       const dy = Math.max(0, Math.abs(ly - cy) - _half.y);
       const dz = Math.max(0, Math.abs(lz - cz) - _half.z);
@@ -2079,6 +2135,48 @@
     if (!hs || !hs[0]) return 1e9;           // nothing under the tip at all
     return hs[0].distance - reach;           // >0: the tip is floating off the skin
   }
+  /* SNAP A CANDIDATE ROW BACK ONTO THE ANIMAL.
+
+     Fires from just outside the candidate, straight down its own local normal,
+     and takes the first triangle of THIS mesh it meets — point and face normal
+     both. Returns false when there is nothing under the candidate at all,
+     which is the honest answer for a row that has been pushed off the end of
+     the body: no mark is strictly better than a floating one.
+
+     This is the fix for the owner's "there's a floating bite mark literally two
+     feet from the shark, on the right and the left". Every row of a rake used
+     to be placed on the TANGENT PLANE through a single seat point and then slid
+     along it — across by its own width, and along the cut by up to 15% of the
+     cut's length. On a megalodon that slide is about 0.8 m, and a plane does
+     not follow a flank: the row simply left the body and hung in the water
+     beside it. Worse, fitLength had already approved the cut at the UNSLID
+     position, so the one check that could have caught it ran before the thing
+     that broke it. Now the plane is only ever used to CHOOSE where a row wants
+     to be; the body decides where it actually goes. */
+  const _cand = new THREE.Vector3();
+  const _pitB = new THREE.Vector3();
+  const _nrmB = new THREE.Vector3();
+  const _rakeB = new THREE.Vector3();
+  const _bitB = new THREE.Vector3();
+  function snapRow(mesh, q, n, reach) {
+    _org.copy(q).addScaledVector(n, reach);
+    _dir.copy(n).multiplyScalar(-1);
+    _ray.set(_org, _dir);
+    _ray.near = 0; _ray.far = reach * 2.6;
+    let hs = null;
+    try { hs = _ray.intersectObject(mesh, false); } catch (e) { hs = null; }
+    if (!hs || !hs[0]) return false;
+    _pit.copy(hs[0].point);
+    _nrm.copy(n);
+    if (hs[0].face) {
+      _org.copy(hs[0].face.normal).transformDirection(mesh.matrixWorld);
+      // a triangle whose winding disagrees with "away from the body" is wrong
+      // about which side it is on, so the seat direction wins
+      if (_org.dot(n) > 0.05) _nrm.copy(_org).normalize();
+    }
+    return true;
+  }
+
   function fitLength(mesh, glWorld, tol) {
     const reach = Math.max(1.5, glWorld * 1.5);
     let L = glWorld;
@@ -2110,46 +2208,86 @@
        animal it is in. Deepening bites lengthen it a little; the ceiling is
        the part's own long extent, so a wound can never become the silhouette
        the way the old five-metre slab did. */
-    let gl = (jawR / wsc) * (0.85 + sev * 0.65) * (1 + (r.deep || 0) * 0.3);
-    gl = Math.max(cross * 0.4, Math.min(long * 0.7, gl));
-    let gw = Math.min(cross * 0.35, gl * GASH_W * (0.85 + sev * 0.4));
-    let gr = Math.max(0.004, gw * GASH_PROUD * (1 + (r.deep || 0) * 0.5));
-    // ..and then the body gets a vote (see fitLength). Width and relief follow
-    // the length so a shortened cut stays a cut and does not become a lozenge.
-    /* WHAT COUNTS AS "OFF THE SKIN" is the cut's own WIDTH, not its relief.
-       Quoted against relief (a centimetre or two) the tolerance was tighter
-       than the hull's own faceting and every cut got trimmed to nothing; a tip
-       floating by less than half the width it is drawn at cannot be seen. */
-    const fitted = fitLength(mesh, gl * wsc, Math.max(0.04, gw * wsc * 0.5)) / wsc;
-    if (fitted < gl) { const k = fitted / gl; gl = fitted; gw *= k; gr *= k; }
-    /* THE BASIS, BUILT ONCE AND BEFORE IT IS USED. _bit (n x rake) is what
-       spaces the rows across the flank, and it used to be written by aimMark —
-       i.e. AFTER the line that reads it — so the first row of every bite was
-       offset along whatever the previous wound in the world had left in that
-       vector. Every row landing in the same place is exactly the "one hole"
-       failure this change exists to remove, so it is computed here. */
+    let gl0 = (jawR / wsc) * (0.85 + sev * 0.65) * (1 + (r.deep || 0) * 0.3);
+    gl0 = Math.max(cross * 0.4, Math.min(long * 0.7, gl0));
+    const gw0 = Math.min(cross * 0.35, gl0 * GASH_W * (0.85 + sev * 0.4));
+    const gr0 = Math.max(0.004, gw0 * GASH_PROUD * (1 + (r.deep || 0) * 0.5));
+
+    /* THE BITE'S OWN SEAT IS THE ANCHOR, NOT THE SEAT OF EVERY ROW. Keep it
+       (and its basis) aside: each row is CHOSEN in this tangent frame and then
+       put back onto the real surface by snapRow, because a plane through one
+       point stops being the body about a hand's width away from it. */
     _bit.copy(_nrm).cross(_rake).normalize();
-    // two rows of teeth, three when the mouth really closed
+    _pitB.copy(_pit); _nrmB.copy(_nrm); _rakeB.copy(_rake); _bitB.copy(_bit);
+    const reachW = Math.max(1.2, long * wsc * 1.6);
+
     const rows = sev > 0.55 ? 3 : 2;
     if (!r.marks) r.marks = [];
+    let widest = 0;
     for (let i = 0; i < rows; i++) {
+      // WHERE THIS ROW WANTS TO BE: across the rake, spaced by its own width
+      // (a mouth, not a knife), and a hair along the cut so the rows do not
+      // start and end together.
+      const off = (i - (rows - 1) * 0.5) * gw0 * 1.7 * wsc;
+      const slide = (Math.random() - 0.5) * gl0 * 0.22 * wsc;
+      _cand.copy(_pitB).addScaledVector(_bitB, off).addScaledVector(_rakeB, slide);
+
+      // ..AND WHERE THE BODY WILL ACTUALLY TAKE IT. Nothing under the
+      // candidate means it has been pushed off the animal: drop the row.
+      if (!snapRow(mesh, _cand, _nrmB, reachW)) continue;
+
+      // the rake, re-projected into the tangent plane of the point we landed
+      // on — a flank that has curved away has turned the cut's axis with it
+      _rake.copy(_rakeB).addScaledVector(_nrm, -_rakeB.dot(_nrm));
+      if (_rake.lengthSq() < 1e-8) continue;
+      _rake.normalize();
+      _bit.copy(_nrm).cross(_rake).normalize();
+
+      /* AND ONLY NOW IS THE LENGTH FITTED, at the seat this row is really
+         going to use. Fitting the anchor and then sliding off it — which is
+         what this did — is the same as not fitting at all. */
+      let gl = gl0, gw = gw0, gr = gr0;
+      const tol = Math.max(0.04, gw * wsc * 0.5);
+      const fitted = fitLength(mesh, gl * wsc, tol) / wsc;
+      if (fitted < gl) { const k = fitted / gl; gl = fitted; gw *= k; gr *= k; }
+
       const m = takeMark(r, mesh, i);
-      // ACROSS the rake, spaced by their own width: a mouth, not a knife
-      const off = (i - (rows - 1) * 0.5) * gw * 1.7;
       const jl = gl * (0.72 + Math.random() * 0.46);
-      _org.copy(_pit)
-        .addScaledVector(_bit, off * wsc)
-        .addScaledVector(_nrm, (GASH_LIFT - GASH_SEAT) * gr * wsc);
-      // a hair along the cut too, so the rows do not start and end together
-      _org.addScaledVector(_rake, (Math.random() - 0.5) * gl * 0.30 * wsc);
+      _org.copy(_pit).addScaledVector(_nrm, (GASH_LIFT - GASH_SEAT) * gr * wsc);
       m.position.copy(_org);
       mesh.worldToLocal(m.position);
       m.scale.set(1, 1, 1);
       aimMark(m, mesh, (Math.random() - 0.5) * 0.22);   // teeth are not parallel rulers
       m.scale.set(jl, gw * (0.8 + Math.random() * 0.45), gr);
+      if (jl > widest) widest = jl;
     }
-    _cbv.copy(_pit);                      // where the wound is, for the bloom seed
-    return gl * 0.5 * wsc;                // and its half-length, in metres
+
+    /* A BITE THAT MARKED NOTHING IS ALSO A FAILURE. If every row was pushed
+       off the body, fall back to ONE row at the bite's own seat — but snap
+       that too, because the anchor may itself be surfaceAt's bounding-box
+       fallback, which on a rounded hull is exactly the half-metre-outside-the
+       -animal point this whole change exists to stop drawing. If even the
+       anchor has nothing under it, draw nothing and let the blood carry it. */
+    if (!widest && snapRow(mesh, _pitB, _nrmB, reachW)) {
+      _rake.copy(_rakeB).addScaledVector(_nrm, -_rakeB.dot(_nrm));
+      if (_rake.lengthSq() > 1e-8) {
+        _rake.normalize();
+        _bit.copy(_nrm).cross(_rake).normalize();
+        const m = takeMark(r, mesh, 0);
+        _org.copy(_pit).addScaledVector(_nrm, (GASH_LIFT - GASH_SEAT) * gr0 * wsc);
+        m.position.copy(_org);
+        mesh.worldToLocal(m.position);
+        m.scale.set(1, 1, 1);
+        aimMark(m, mesh, (Math.random() - 0.5) * 0.22);
+        m.scale.set(gl0, gw0, gr0);
+        widest = gl0;
+      }
+    }
+
+    // the bloom, the flying meat and the chum trail all seed off the BITE, not
+    // off whichever row happened to be seated last
+    _pit.copy(_pitB); _nrm.copy(_nrmB); _cbv.copy(_pitB);
+    return (widest > 0 ? widest : gl0) * 0.5 * wsc;   // half-length, in metres
   }
 
   /* ---- AND THE RAW END WHERE A PIECE CAME OFF -----------------------------
@@ -2174,6 +2312,46 @@
     } else {
       m.material = cutMat(0);
       if (m.parent !== mesh) { if (m.parent) m.parent.remove(m); mesh.add(m); }
+    }
+    /* AND THE STUMP GETS SNAPPED TOO — it was the last seat in this file
+       still trusting a BOUNDING BOX.
+
+       surfaceAt(full) puts the cut face at the extreme of the part's box on
+       the sever axis, and the box only touches a tapered part AT ITS TIP: the
+       centre of that end face, which is where this mesh's origin goes, can sit
+       a third of a metre outside a big pectoral. Measured on the ridden
+       megalodon, that was the entire residue after the rake rows were fixed —
+       three marks left, every one of them a stump, up to 0.34 m off the body,
+       and off on the very frame it was seated. Fire the same ray the rows use
+       and take the real surface. */
+    /* THE SEAT IS THE PART'S OWN EXIT POINT, found by firing OUTWARD from its
+       centre along the sever axis and taking the LAST triangle the ray meets.
+
+       Two earlier versions of this line were both wrong in the same way. The
+       bounding box only touches a tapered part at its tip, so the centre of the
+       box's end face — where this mesh's origin was going — sits a third of a
+       metre outside a big pectoral. Snapping INWARD from there did not help
+       either: a ray fired down the fin's own long axis from a point offset off
+       that axis runs parallel to the taper and misses it entirely, which is
+       why one stump survived that fix at exactly the same 0.34 m.
+
+       Fired from the CENTRE outward, the ray is guaranteed to start inside the
+       solid and to leave through the surface, and the last hit is the real tip
+       of what is left of the part. */
+    const reachS = Math.max(1.2, Math.max(_geoH.x, Math.max(_geoH.y, _geoH.z)) * wsc * 2.4);
+    _org.copy(_tgt);
+    _dir.copy(_nrm);
+    _ray.set(_org, _dir);
+    _ray.near = 0; _ray.far = reachS;
+    let hs = null;
+    try { hs = _ray.intersectObject(mesh, false); } catch (e) { hs = null; }
+    if (hs && hs.length) {
+      const last = hs[hs.length - 1];
+      _pit.copy(last.point);
+      if (last.face) {
+        _rakeB.copy(last.face.normal).transformDirection(mesh.matrixWorld);
+        if (_rakeB.dot(_nrm) > 0.05) _nrm.copy(_rakeB).normalize();
+      }
     }
     // the face sits ON the cut end: its own top plane flush, its skirt buried
     _rake.set(0, 0, 0);

@@ -71,6 +71,16 @@
    The strip mode is chosen per subject by id (see D.stripMode below). */
 const subjects = [
   {
+    id: "floating-marks", ch: 5, strip: { frames: 7, stepSec: 0 },
+    label: "Your Own Shark, Bitten On Both Flanks — Orbited Twice",
+    focus: "Owner, 2026-08-30: \"there's still floating bite marks, legit 2 feet from the shark — on the right and left there's a floating bite mark if i get bitten there.\" He is right, and it is a SEAT bug, not a shape bug. Every row of a rake was placed on the tangent PLANE through one seat point and then slid along it — across by its own width and along the cut by up to 15% of the cut's length. A plane is not a flank: on the mounted megalodon, the biggest body in the mode, that slide is about eight tenths of a metre and the row simply left the animal. The lens orbits the whole way round so both flanks are in the same strip.",
+  },
+  {
+    id: "floating-marks-close", ch: 5, strip: { frames: 5, stepSec: 0 },
+    label: "The Same Flank, Walked Into — Is It On The Skin Or Beside It?",
+    focus: "A dolly onto one flank of the ridden shark. This is the frame the complaint is really about: at arm's length a mark that is seated reads as a cut in the skin, and a mark that is floating reads as a decal hanging in the water with daylight behind it. The measurement beside it is the same question asked with a ray — for every wound mesh, how far its own seat normal has to travel to find the body it is supposed to be on.",
+  },
+  {
     id: "orbit-the-wound", ch: 0, strip: { frames: 6, stepSec: 0 },
     label: "Three Bites, Six Bearings — The Pucker's Own Test",
     focus: "The owner's complaint, walked around. Three bites into one flank of an orca held four metres down, then the lens orbits the wound through 140 degrees. BEFORE: three round everted lips that stand off the skin from every bearing — the silhouette gives them away at the grazing angles, where they read as beads stuck onto the animal. AFTER: a rake of cuts that stays a line at every bearing, because it is lying IN the flank rather than sitting on it.",
@@ -423,6 +433,110 @@ async function stageSharkBiteCut(input) {
          THIS change is the one wounds.js publishes itself, on both builds:
          BLEED.length — how many bitten animals are still bleeding from a
          wound. That is the owner's "the line lets blood out". */
+      /* IS THE MARK ACTUALLY ON THE ANIMAL?
+
+         Owner, 2026-08-30: "there's still floating bite marks, legit 2 feet
+         from the shark — on the right and left there's a floating bite mark."
+
+         A wound mesh is parented INTO the body part it belongs to, so it will
+         swim and bank with the rig whether or not it is anywhere near the
+         skin — the scene graph cannot tell you it has come off. So measure it:
+         for every wound mesh, fire a ray straight down its own seat normal at
+         the part it is parented to, and report how far it had to travel past
+         the mark's own centre to find the surface. A seated cut sits a
+         centimetre or two proud by construction. Twelve centimetres is not a
+         tolerance, it is a mark hanging in the water.
+
+         Both builds parent their wounds the same way and tag them `_tornCap`,
+         so this is one ruler over two columns. */
+      floaters(root) {
+        if (!root) return { n: 0, floating: 0, worst: 0, shear: 0 };
+        root.updateMatrixWorld(true);
+        const P = new T.Vector3(), Lp = new T.Vector3();
+        let n = 0, floating = 0, worst = 0, shear = 0;
+        const det = [];
+        root.traverse(function (o) {
+          if (!o.isMesh || !o._tornCap) return;
+          const par = o.parent;
+          if (!par || !par.isMesh || !par.geometry) return;
+          const pos = par.geometry.attributes && par.geometry.attributes.position;
+          if (!pos) return;
+          n++;
+          /* NEAREST POINT ON THE BODY, measured off the parent's own vertices.
+
+             The first version of this ruler fired a ray down the MARK's +Z at
+             the parent, which quietly assumed the mark was correctly oriented —
+             the very thing under test. Marks whose seat normal was wrong shot
+             past the animal entirely and came back as the no-hit sentinel, so
+             the number could not tell "floating two feet out" from "seated but
+             tilted", and it read 99 on both columns. Distance to the nearest
+             vertex needs no normal, no ray and no assumption: it is simply how
+             far this mark is from the body. On these hulls the tessellation is
+             fine enough that nearest-vertex is within a couple of centimetres
+             of nearest-surface, and it is the identical ruler on both sides. */
+          o.getWorldPosition(P);
+          Lp.copy(P);
+          par.worldToLocal(Lp);
+          /* EXACT, VIA THE TRIANGLES. Nearest-VERTEX was the first cut of this
+             and it overstates the gap by up to half an edge on a low-poly
+             hull — which on a megalodon is tens of centimetres, i.e. the same
+             size as the thing being measured. r128 ships
+             Triangle.closestPointToPoint; a hull is a couple of thousand
+             triangles and this runs a dozen times on a staged frame, so there
+             is no reason to approximate. */
+          const arr = pos.array;
+          const idx = par.geometry.index ? par.geometry.index.array : null;
+          const triN = idx ? idx.length / 3 : arr.length / 9;
+          const A = D._triA = D._triA || new T.Vector3();
+          const B = D._triB = D._triB || new T.Vector3();
+          const C = D._triC = D._triC || new T.Vector3();
+          const TRI = D._tri = D._tri || new T.Triangle();
+          const OUT = D._triOut = D._triOut || new T.Vector3();
+          let best = Infinity;
+          for (let t = 0; t < triN; t++) {
+            const i0 = idx ? idx[t * 3] : t * 3;
+            const i1 = idx ? idx[t * 3 + 1] : t * 3 + 1;
+            const i2 = idx ? idx[t * 3 + 2] : t * 3 + 2;
+            A.fromArray(arr, i0 * 3); B.fromArray(arr, i1 * 3); C.fromArray(arr, i2 * 3);
+            TRI.set(A, B, C);
+            TRI.closestPointToPoint(Lp, OUT);
+            const d2 = OUT.distanceToSquared(Lp);
+            if (d2 < best) best = d2;
+          }
+          // local units -> metres, through the parent's own world scale
+          const e = par.matrixWorld.elements;
+          const sx = Math.sqrt(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+          const sy = Math.sqrt(e[4] * e[4] + e[5] * e[5] + e[6] * e[6]);
+          const sz = Math.sqrt(e[8] * e[8] + e[9] * e[9] + e[10] * e[10]);
+          const gap = Math.sqrt(best) * Math.max(sx, Math.max(sy, sz));
+          // and how non-uniform that parent is, because a sheared parent is
+          // what makes a child's orientation stop meaning what it says
+          const nu = Math.max(sx, Math.max(sy, sz)) / Math.max(1e-6, Math.min(sx, Math.min(sy, sz)));
+          if (nu > shear) shear = nu;
+          if (gap > worst) worst = gap;
+          if (gap > 0.12) {
+            floating++;
+            /* WHAT, EXACTLY, IS STILL OFF THE BODY. Four probe runs went by
+               guessing at this from one aggregate number that never moved off
+               0.34 m no matter what changed, which is the tell that the thing
+               being fixed was not the thing being measured. A gash is scaled
+               (length, width, relief) with length >> width; a severance face is
+               scaled (d, d, thickness) with the first two equal — so the shape
+               of the scale says which kind of mark this is, without needing a
+               handle on the record that made it. */
+            const ms = o.scale;
+            det.push({
+              gap: Number(gap.toFixed(3)),
+              kind: Math.abs(ms.x - ms.y) < 0.05 * Math.max(1e-6, ms.x) ? "stump" : "gash",
+              part: par.name || "(unnamed)",
+              tris: (par.geometry.index ? par.geometry.index.count : pos.count) / 3,
+              sc: [Number(ms.x.toFixed(2)), Number(ms.y.toFixed(2)), Number(ms.z.toFixed(3))],
+            });
+          }
+        });
+        det.sort((a, b) => b.gap - a.gap);
+        return { n: n, floating: floating, worst: worst, shear: shear, detail: det.slice(0, 4) };
+      },
       spritesNear(x, z, r) {
         let n = 0; const r2 = r * r;
         CBZ.scene.traverse(function (o) {
@@ -555,6 +669,9 @@ async function stageSharkBiteCut(input) {
       out.woundReliefM = Number(m.thick.toFixed(3));
       out.puckerRatioPct = Number((m.ratio * 100).toFixed(1));
       out.woundsVeiled = m.veiled;
+      const fl0 = D.floaters(o.group);
+      out.floatingMarks = fl0.floating;
+      out.worstMarkGapM = Number(fl0.worst.toFixed(2));
       out.bleeders = D.bleeders();
       D.medium = {
         cityWaterAt: CBZ.cityWaterAt ? !!CBZ.cityWaterAt(S.x, S.z) : null,
@@ -577,6 +694,9 @@ async function stageSharkBiteCut(input) {
       D.flankShot(o, -0.24, 1.30);
       const m = D.measure(o.group);
       out.marksAfterFive = m.n;
+      const fl1 = D.floaters(o.group);
+      out.floatingMarks = fl1.floating;
+      out.worstMarkGapM = Number(fl1.worst.toFixed(2));
       out.woundLengthM = Number(m.len.toFixed(3));
       out.woundReliefM = Number(m.thick.toFixed(3));
       out.puckerRatioPct = Number((m.ratio * 100).toFixed(1));
@@ -835,6 +955,79 @@ async function stageSharkBiteCut(input) {
       out.landMarks = m.n;
       // a land bite has no business putting blood plumes in the sea
       out.landSeaPuffs = Math.max(0, D.spritesNear(c.x, c.z, 30) - puffsBefore);
+      const flL = D.floaters(a.group);
+      out.landFloatingMarks = flL.floating;
+    },
+    /* 5 — THE ONE THE OWNER IS ACTUALLY LOOKING AT: HIS OWN SHARK, BITTEN.
+       "there's still floating bite marks, legit 2 feet from the shark — on the
+       right and left there's a floating bite mark if i get bitten there."
+
+       Every other beat in this report bites something the player is looking
+       AT. This one bites the animal he is riding, on both flanks at the widest
+       part of the body, which is exactly where a row of a rake gets slid off a
+       curve. The mounted shark is also the biggest body in the mode, and the
+       slide that pushed a row off the skin was quoted as a fraction of the
+       CUT's length — which scales with the animal — so a megalodon is where
+       two feet of daylight comes from. */
+    async function ownShark() {
+      const S = CBZ.sharkSim && CBZ.sharkSim.shark;
+      if (!S) throw new Error("no ridden shark");
+      D.mine = S;
+      S.hp = S.maxHp || S.hp;
+      const P = CBZ.player;
+      const w = D.openWater(D.angle() + 2.1) || D.water;
+      P.pos.x = w.x; P.pos.z = w.z; P.pos.y = D.seaY(w.x, w.z) - 4.5;
+      const h = D.angle() + 2.1 + Math.PI * 0.5;
+      S.heading = h;
+      D.step(4);
+      S.group.updateMatrixWorld(true);
+      const box = new T.Box3().setFromObject(S.group);
+      const c = box.getCenter(new T.Vector3()), sz = box.getSize(new T.Vector3());
+      const L = Math.max(sz.x, sz.z), beam = Math.min(sz.x, sz.z);
+      const fx = Math.cos(h), fz = Math.sin(h), nx = -fz, nz = fx;
+      out.myBodyLenM = Number(L.toFixed(1));
+      /* BOTH FLANKS, at the beam, which is the widest the body ever gets and
+         therefore the fastest-curving surface a rake has to lie on. The lens
+         goes on each side before its own bite (the 45 m band, and it is read
+         off the CAMERA). */
+      let took = 0;
+      for (let k = 0; k < 4; k++) {
+        const side = (k % 2) ? 1 : -1;
+        const along = -L * (0.04 + Math.floor(k / 2) * 0.13);
+        const px = c.x + fx * along + nx * side * beam * 0.44;
+        const pz = c.z + fz * along + nz * side * beam * 0.44;
+        const py = c.y + sz.y * 0.05;
+        D.shotAt(S, { along: -0.05, dist: 1.0, aim: 0.28, yaw: side > 0 ? 0 : Math.PI });
+        const dir = { x: Math.cos(h + Math.PI * 0.35), y: 0, z: Math.sin(h + Math.PI * 0.35) };
+        try {
+          if (CBZ.creatureBiteChunk(S, { x: px, y: py, z: pz },
+            { jaw: 0.95, sev: 0.9, dir: dir, bleedS: 14 })) took++;
+        } catch (e) {}
+        S.group.updateMatrixWorld(true);
+      }
+      out.myBitesLanded = took;
+      /* TWO READINGS, AND THE DIFFERENCE BETWEEN THEM IS THE DIAGNOSIS. A mark
+         that is already off the body on the frame it was seated is a SEAT bug.
+         A mark that is on the body at seat time and off it four tenths of a
+         second later has been left behind by something that MOVES the surface
+         under it — a rig that deforms its own geometry as it swims, which no
+         amount of care at seat time can help. Same ruler, twice. */
+      const fl0 = D.floaters(S.group);
+      out.floatingAtSeat = fl0.floating;
+      out.worstGapAtSeatM = Number(fl0.worst.toFixed(2));
+      D.sec(0.4);
+      const fl = D.floaters(S.group);
+      out.myMarks = fl.n;
+      out.floatingMarks = fl.floating;
+      out.worstMarkGapM = Number(fl.worst.toFixed(2));
+      out.parentShear = Number(fl.shear.toFixed(2));
+      // if the residual floaters are stumps, this is the number that says so
+      const au = (typeof CBZ.creatureBiteChunkAudit === "function") ? CBZ.creatureBiteChunkAudit() : null;
+      out.severedParts = au ? au.severed : -1;
+      out.floaterDetail = JSON.stringify(fl.detail);
+      const mm = D.measure(S.group);
+      out.puckerRatioPct = Number((mm.ratio * 100).toFixed(1));
+      D.shotAt(S, { along: -0.05, dist: 1.0, aim: 0.28 });
     },
   ];
 
@@ -851,6 +1044,18 @@ async function stageSharkBiteCut(input) {
   const orca = D.orca, prey = D.prey;
   D.yaw = 0; D.dist = null; D.up = null;
   switch (sub.id) {
+    case "floating-marks":
+      // all the way round: a mark that has come off the body is only obvious
+      // from the bearings where the skin is no longer behind it
+      D.yaw = 0;
+      D.strip = { mode: "orbit", step: Math.PI * 2 / 6 };
+      D.setAim(() => D.shotAt(D.mine, { along: -0.05, dist: 1.05, aim: 0.26, yaw: D.yaw }));
+      break;
+    case "floating-marks-close":
+      D.dist = 1.05;
+      D.strip = { mode: "dolly", k: 0.70 };
+      D.setAim(() => D.shotAt(D.mine, { along: -0.05, dist: D.dist, aim: 0.24, up: 0.26 }));
+      break;
     case "orbit-the-wound":
       D.yaw = -1.00;
       D.strip = { mode: "orbit", step: 0.46 };
@@ -957,11 +1162,20 @@ export default {
     marksLostToCull: { label: "Wounds deleted by the leak sweep (healed by housekeeping)", better: "lower" },
     tailRegrewPct: { label: "How much of the bitten-off tail grew back during the cull", unit: "%", better: "lower" },
     bleeders: { label: "Bitten animals still bleeding from a wound", better: "higher" },
+    floatingMarks: { label: "Wound meshes hanging more than 12 cm off the body", better: "lower" },
+    worstMarkGapM: { label: "Worst gap between a wound and the animal it is on", unit: "m", better: "lower" },
+    parentShear: { label: "Worst non-uniformity of a wounded part's scale (diagnostic)" },
+    floatingAtSeat: { label: "Marks already off the body on the frame they were seated", better: "lower" },
+    severedParts: { label: "Parts severed on the ridden shark (diagnostic)" },
+    worstGapAtSeatM: { label: "Worst gap at seat time", unit: "m", better: "lower" },
+    myMarks: { label: "Wound meshes on the ridden shark", better: "higher" },
+    myBitesLanded: { label: "Bites that landed on the ridden shark", better: "higher" },
+    landFloatingMarks: { label: "Land regression: wound meshes off the body", better: "lower" },
     landPuckerRatioPct: { label: "Land regression: relief over footprint on a bitten land animal", unit: "%", better: "lower" },
     landWoundVsBodyPct: { label: "Land regression: wound footprint as a share of that animal's length", unit: "%" },
     landSeaPuffs: { label: "Land regression: sea-clamped blood puffs spawned by a DRY bite", better: "lower" },
   },
-  metricsNote: "puckerRatioPct is the whole shape argument: a solid of revolution 0.9 m across standing 0.3 m proud reads as a lump of playdough stuck to the animal, and a slit whose relief is a ninth of its width reads as a cut. piecesInWater counts meshes tagged `_cbzPiece`, which the BEFORE build never creates — a zero there is the finding (the severed lobe existed nowhere at all), not a measurement failure. woundLengthM carries NO direction on purpose: once the relief is a hundredth of the footprint the wound is a cut, and whether that cut is 0.7 m or 1.9 m long is a tuning question, not the fix — declaring 'higher is better' there would have scored the surface-fitting pass (which trims a rake until its tips stop hanging off a curving flank) as a regression. marksLostToCull and tailRegrewPct are the healing bug measured directly: the old per-frame leak sweep answered 'this rig left the scene' by calling the wound RESTORE path, so a rig that was culled for two seconds came back with its fin regrown and its cuts gone.",
+  metricsNote: "floatingMarks and worstMarkGapM are the 2026-08-30 report measured directly: a wound mesh is parented INTO the body part it belongs to, so it swims and banks with the rig whether or not it is anywhere near the skin — the scene graph cannot tell you it has come off, and nor can a wide shot. The ruler fires a ray down each mark's own seat normal at the part it is parented to and reports how far past the mark's centre it had to travel to find the surface; a seated cut is a centimetre or two proud by construction, so twelve centimetres is not a tolerance, it is daylight. puckerRatioPct is the whole shape argument: a solid of revolution 0.9 m across standing 0.3 m proud reads as a lump of playdough stuck to the animal, and a slit whose relief is a ninth of its width reads as a cut. piecesInWater counts meshes tagged `_cbzPiece`, which the BEFORE build never creates — a zero there is the finding (the severed lobe existed nowhere at all), not a measurement failure. woundLengthM carries NO direction on purpose: once the relief is a hundredth of the footprint the wound is a cut, and whether that cut is 0.7 m or 1.9 m long is a tuning question, not the fix — declaring 'higher is better' there would have scored the surface-fitting pass (which trims a rake until its tips stop hanging off a curving flank) as a regression. marksLostToCull and tailRegrewPct are the healing bug measured directly: the old per-frame leak sweep answered 'this rig left the scene' by calling the wound RESTORE path, so a rig that was culled for two seconds came back with its fin regrown and its cuts gone.",
   viewport: { width: 1280, height: 720 },
   readyExpression: "window.THREE && window.CBZ && CBZ.game && CBZ.stepSim && CBZ.surv && CBZ.creatureBiteChunk && CBZ.marineHurt && CBZ.cityWildlifeSpawnAt && document.getElementById('playBtn')",
   subjects,
