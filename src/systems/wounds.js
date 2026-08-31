@@ -2177,6 +2177,84 @@
     return true;
   }
 
+  /* ---- WHERE THE SURFACE ACTUALLY IS, WITH NO WAY TO SILENTLY MISS -------
+     Three separate things want a real point on a real triangle: a rake row
+     (snapRow), a stump cap (seatStump), and any future seat. All three used a
+     bare Raycaster and all three had the same silent failure — no hit, keep
+     whatever was in _pit, which is the BOUNDING BOX extreme, which is the one
+     answer this file has spent two passes proving wrong.
+
+     THE RAY CAN MISS FOR THREE REASONS, and only one of them is "there is
+     nothing there".
+
+     1. SIDEDNESS. r128's Mesh.raycast honours material.side, so a FrontSide
+        mesh has no hittable triangle facing a ray that is LEAVING it. That is
+        exactly seatStump's ray: it starts at the part's centre, inside the
+        solid, and exits through a backface. snapRow fires the other way,
+        inward from outside, hits a frontface, and works — which is why the
+        rows got fixed and the stumps did not. The side is forced for the
+        duration of the cast and put back, so a shared material is unchanged.
+
+     2. THE CENTRE IS NOT INSIDE. A strongly curved part — a crescent fluke, a
+        swept pectoral — does not contain its own geometry centre, so a ray
+        fired from there along the sever axis can run alongside the taper and
+        leave without ever crossing it. Firing back the other way, from
+        outside, catches those.
+
+     3. THERE REALLY IS NOTHING. Only then does the answer become a search
+        instead of a cast: closestOnMesh walks the triangles and returns the
+        nearest point ON the surface. It cannot fail on a mesh that has
+        geometry, and it cannot return a point off the body, which is the
+        whole invariant. A hull here is a couple of thousand triangles and
+        this runs once per severance, not per frame. */
+  const _cpA = new THREE.Vector3(), _cpB = new THREE.Vector3(), _cpC = new THREE.Vector3();
+  const _cpQ = new THREE.Vector3(), _cpO = new THREE.Vector3();
+  const _cpHit = new THREE.Vector3(), _cpNrm = new THREE.Vector3();
+  const _cpTri = new THREE.Triangle();
+  function castOn(mesh, org, dir, far, wantLast) {
+    _ray.set(org, dir);
+    _ray.near = 0; _ray.far = far;
+    const mat = mesh.material, many = Array.isArray(mat);
+    const keep = many ? mat.map(function (x) { return x && x.side; }) : (mat ? mat.side : null);
+    try {
+      if (many) { for (let i = 0; i < mat.length; i++) if (mat[i]) mat[i].side = THREE.DoubleSide; }
+      else if (mat) mat.side = THREE.DoubleSide;
+      let hs = null;
+      try { hs = _ray.intersectObject(mesh, false); } catch (e) { hs = null; }
+      if (!hs || !hs.length) return null;
+      return wantLast ? hs[hs.length - 1] : hs[0];
+    } finally {
+      if (many) { for (let i = 0; i < mat.length; i++) if (mat[i]) mat[i].side = keep[i]; }
+      else if (mat) mat.side = keep;
+    }
+  }
+  function closestOnMesh(mesh, wp, outP, outN) {
+    const g = mesh.geometry, pos = g && g.attributes && g.attributes.position;
+    if (!pos) return false;
+    _cpQ.copy(wp); mesh.worldToLocal(_cpQ);
+    const arr = pos.array, idx = g.index ? g.index.array : null;
+    const triN = idx ? Math.floor(idx.length / 3) : Math.floor(arr.length / 9);
+    let best = Infinity, bi = -1;
+    for (let t = 0; t < triN; t++) {
+      const i0 = idx ? idx[t * 3] : t * 3, i1 = idx ? idx[t * 3 + 1] : t * 3 + 1, i2 = idx ? idx[t * 3 + 2] : t * 3 + 2;
+      _cpA.fromArray(arr, i0 * 3); _cpB.fromArray(arr, i1 * 3); _cpC.fromArray(arr, i2 * 3);
+      _cpTri.set(_cpA, _cpB, _cpC);
+      _cpTri.closestPointToPoint(_cpQ, _cpO);
+      const d2 = _cpO.distanceToSquared(_cpQ);
+      if (d2 < best) { best = d2; bi = t; outP.copy(_cpO); }
+    }
+    if (bi < 0) return false;
+    outP.applyMatrix4(mesh.matrixWorld);
+    if (outN) {
+      const i0 = idx ? idx[bi * 3] : bi * 3, i1 = idx ? idx[bi * 3 + 1] : bi * 3 + 1, i2 = idx ? idx[bi * 3 + 2] : bi * 3 + 2;
+      _cpA.fromArray(arr, i0 * 3); _cpB.fromArray(arr, i1 * 3); _cpC.fromArray(arr, i2 * 3);
+      _cpTri.set(_cpA, _cpB, _cpC);
+      _cpTri.getNormal(outN);
+      outN.transformDirection(mesh.matrixWorld).normalize();
+    }
+    return true;
+  }
+
   function fitLength(mesh, glWorld, tol) {
     const reach = Math.max(1.5, glWorld * 1.5);
     let L = glWorld;
@@ -2338,20 +2416,30 @@
        Fired from the CENTRE outward, the ray is guaranteed to start inside the
        solid and to leave through the surface, and the last hit is the real tip
        of what is left of the part. */
+    /* ..AND THE MISS IS NO LONGER SILENT. The cast is double-sided (a ray
+       leaving a FrontSide solid has no triangle to hit — see castOn), it is
+       fired back the other way when the centre turns out not to be inside a
+       curved part, and if BOTH come back empty the surface is searched for
+       instead of assumed. The box was the fallback, and the box is what put a
+       cut face 0.29 m off the animal on the frame it was seated. */
     const reachS = Math.max(1.2, Math.max(_geoH.x, Math.max(_geoH.y, _geoH.z)) * wsc * 2.4);
-    _org.copy(_tgt);
-    _dir.copy(_nrm);
-    _ray.set(_org, _dir);
-    _ray.near = 0; _ray.far = reachS;
-    let hs = null;
-    try { hs = _ray.intersectObject(mesh, false); } catch (e) { hs = null; }
-    if (hs && hs.length) {
-      const last = hs[hs.length - 1];
-      _pit.copy(last.point);
-      if (last.face) {
-        _rakeB.copy(last.face.normal).transformDirection(mesh.matrixWorld);
+    let hit = castOn(mesh, _tgt, _nrm, reachS, true);
+    if (!hit) {
+      _org.copy(_tgt).addScaledVector(_nrm, reachS);
+      _dir.copy(_nrm).multiplyScalar(-1);
+      hit = castOn(mesh, _org, _dir, reachS * 2, false);
+    }
+    if (hit) {
+      _pit.copy(hit.point);
+      if (hit.face) {
+        _rakeB.copy(hit.face.normal).transformDirection(mesh.matrixWorld);
         if (_rakeB.dot(_nrm) > 0.05) _nrm.copy(_rakeB).normalize();
       }
+    } else if (closestOnMesh(mesh, _pit, _cpHit, _cpNrm)) {
+      // _pit still holds surfaceAt's box extreme; the nearest real triangle to
+      // it IS the tip of what is left of a tapered part.
+      _pit.copy(_cpHit);
+      if (_cpNrm.dot(_nrm) > 0.05) _nrm.copy(_cpNrm);
     }
     // the face sits ON the cut end: its own top plane flush, its skirt buried
     _rake.set(0, 0, 0);

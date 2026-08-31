@@ -672,6 +672,7 @@ async function stageSharkBiteCut(input) {
       const fl0 = D.floaters(o.group);
       out.floatingMarks = fl0.floating;
       out.worstMarkGapM = Number(fl0.worst.toFixed(2));
+      out.floaterDetailFirst = JSON.stringify(fl0.detail);
       out.bleeders = D.bleeders();
       D.medium = {
         cityWaterAt: CBZ.cityWaterAt ? !!CBZ.cityWaterAt(S.x, S.z) : null,
@@ -697,6 +698,12 @@ async function stageSharkBiteCut(input) {
       const fl1 = D.floaters(o.group);
       out.floatingMarks = fl1.floating;
       out.worstMarkGapM = Number(fl1.worst.toFixed(2));
+      /* AND NAME IT. floaters() has always built this record; the orca scene
+         — the one that produces the headline number the owner's report is
+         about — threw it away, so four probe runs went by inferring which
+         mark was still out there from an aggregate that could not tell a
+         severance face from a gash. The ruler already knows. Carry it. */
+      out.floaterDetail = JSON.stringify(fl1.detail);
       out.woundLengthM = Number(m.len.toFixed(3));
       out.woundReliefM = Number(m.thick.toFixed(3));
       out.puckerRatioPct = Number((m.ratio * 100).toFixed(1));
@@ -1165,6 +1172,7 @@ export default {
     floatingMarks: { label: "Wound meshes hanging more than 12 cm off the body", better: "lower" },
     worstMarkGapM: { label: "Worst gap between a wound and the animal it is on", unit: "m", better: "lower" },
     parentShear: { label: "Worst non-uniformity of a wounded part's scale (diagnostic)" },
+    floaterDetailFirst: { label: "What was off the body at first blood (part/kind/gap, diagnostic)" },
     floatingAtSeat: { label: "Marks already off the body on the frame they were seated", better: "lower" },
     severedParts: { label: "Parts severed on the ridden shark (diagnostic)" },
     worstGapAtSeatM: { label: "Worst gap at seat time", unit: "m", better: "lower" },
@@ -1175,6 +1183,20 @@ export default {
     landWoundVsBodyPct: { label: "Land regression: wound footprint as a share of that animal's length", unit: "%" },
     landSeaPuffs: { label: "Land regression: sea-clamped blood puffs spawned by a DRY bite", better: "lower" },
   },
+  /* THE NOISE FLOOR OF THIS PRESET, MEASURED (2026-08-30). Run with the SAME
+     build served to both columns, this preset reports 2 "regressions": a ~1-2
+     swing in the mark/piece COUNTS (piecesInWater, marksAfterFive, tailMarks,
+     marksSurvivingCull) and up to 0.4pp on landPuckerRatioPct. Math.random is
+     seeded below, so this is not the draw order — it is the live sim: five
+     staged bites land on rigs that are swimming, and which triangle a mouth
+     meets a tenth of a second either side of a frame boundary changes a count
+     by one.
+
+     So a +/-1 count and a sub-half-point pucker move are NOT findings on this
+     preset, and --gate will flag them anyway. The metrics that are outside the
+     floor and mean what they say are the gaps: floatingMarks, worstMarkGapM,
+     floatingAtSeat, worstGapAtSeatM, woundReliefM, puckerRatioPct. Read those.
+     Re-measure the floor with a null run before believing a small delta. */
   metricsNote: "floatingMarks and worstMarkGapM are the 2026-08-30 report measured directly: a wound mesh is parented INTO the body part it belongs to, so it swims and banks with the rig whether or not it is anywhere near the skin — the scene graph cannot tell you it has come off, and nor can a wide shot. The ruler fires a ray down each mark's own seat normal at the part it is parented to and reports how far past the mark's centre it had to travel to find the surface; a seated cut is a centimetre or two proud by construction, so twelve centimetres is not a tolerance, it is daylight. puckerRatioPct is the whole shape argument: a solid of revolution 0.9 m across standing 0.3 m proud reads as a lump of playdough stuck to the animal, and a slit whose relief is a ninth of its width reads as a cut. piecesInWater counts meshes tagged `_cbzPiece`, which the BEFORE build never creates — a zero there is the finding (the severed lobe existed nowhere at all), not a measurement failure. woundLengthM carries NO direction on purpose: once the relief is a hundredth of the footprint the wound is a cut, and whether that cut is 0.7 m or 1.9 m long is a tuning question, not the fix — declaring 'higher is better' there would have scored the surface-fitting pass (which trims a rake until its tips stop hanging off a curving flank) as a regression. marksLostToCull and tailRegrewPct are the healing bug measured directly: the old per-frame leak sweep answered 'this rig left the scene' by calling the wound RESTORE path, so a rig that was culled for two seconds came back with its fin regrown and its cuts gone.",
   viewport: { width: 1280, height: 720 },
   readyExpression: "window.THREE && window.CBZ && CBZ.game && CBZ.stepSim && CBZ.surv && CBZ.creatureBiteChunk && CBZ.marineHurt && CBZ.cityWildlifeSpawnAt && document.getElementById('playBtn')",
