@@ -2052,6 +2052,16 @@
       sprintFovK += ((sprintingNow ? 1 : 0) - sprintFovK) * (1 - Math.exp(-6 * fdt));
       targetFov += 7 * sprintFovK;
     } else sprintFovK = 0;
+    /* A BIG BODY ON A SHORT BOOM WANTS A WIDER LENS, NOT A LONGER ONE.
+       city/wildlife_tame.js caps a ridden animal's chase boom at what the
+       water's own sighting range can actually carry, so on a megalodon in
+       murky water the eye sits closer than the framing law asked for. FOV is
+       the lever that buys that framing back for free — it fits more animal in
+       the frame without moving the eye one metre deeper into the fog. The
+       ride publishes the widened lens it needs (0 in clear water, and 0 when
+       it is not driving) and it can only ever OPEN the lens, never close it. */
+    const rideF = CBZ.cityRideFov && CBZ.cityRideFov(targetFov);
+    if (rideF > 0 && !chuteState && !tpADS) targetFov = Math.max(targetFov, rideF);
     // a LIVE SCOPE overrides the aimed lens with its own magnification while
     // you're holding aim on foot: the factory sniper's real scope (lockon.js,
     // fpsScopeFov — e.g. still engaged after a [V] toggle back to third person)

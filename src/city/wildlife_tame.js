@@ -3294,7 +3294,7 @@
      roughly one evolution ago. */
   const _hullBase = Object.create(null);
   const _hullBox = new THREE.Box3();
-  let _hullTick = 0;
+  let _hullAt = 0;
   function hullLength(a) {
     const g = a && a.group, sp = a && a.species;
     const id = (sp && (sp.id || sp.name)) || null;
@@ -3310,7 +3310,16 @@
        Re-sampling five times a second and keeping the smallest reading
        converges on the resting hull within about a second of the animal
        closing its mouth, and can never drift back out. */
-    const stale = base > 0 && (++_hullTick % 12 === 0);
+    /* RE-SAMPLE ON THE CLOCK, NOT ON THE CALL COUNT. This was
+       `++_hullTick % 12`, which only means "five times a second" if exactly
+       one caller asks once a frame at 60 Hz. The stand-off, the dive target
+       and now the lens all ask, so the count was really "every third frame" —
+       and a setFromObject over a shark's 30-odd meshes is not something to do
+       three times more often than intended because a new reader appeared.
+       Wall time says what the comment always claimed. */
+    const now = CBZ.now || 0;
+    const stale = base > 0 && now - _hullAt > 200;
+    if (stale || !(base > 0)) _hullAt = now;
     if ((!(base > 0) || stale) && g) {
       const rx = g.rotation.x, ry = g.rotation.y, rz = g.rotation.z;
       let L = 0;
@@ -3362,21 +3371,140 @@
      ?cfg_CAM_SHARK_FIT=0 restores the old constant, for the before column of
      the before/after tool. */
   const FIT_REF_LEN = 4.8, FIT_REF_DIST = 8.0, FIT_POW = 0.66, FIT_MAX = 24;
+
+  /* ---- THE CEILING IS THE WATER, AND THE WATER IS NOT A CONSTANT ---------
+     OWNER (2026-08-31): "when I get to be the megalodon it's so zoomed out
+     that I can't even see myself in most water."
+
+     FIT_MAX = 24 was written as "past this the fog is doing the framing", and
+     that reading was right. What was wrong is that it was spent as a NUMBER.
+     The 20/24/34 m tripod ladder it came off was photographed in one water on
+     one afternoon; this game solves its own sighting range from Duntley's law
+     every frame and publishes it (world/water_underwater.js, CBZ.waterSight),
+     and that range moves by a factor of eight between clear ocean and the
+     surf band, drops again at night, and is three times shorter looking DOWN
+     at a countershaded animal than looking up at one.
+
+     MEASURED on the live page, seed 90210, a 20.8 m ridden megalodon:
+
+       deep cruise (eye 59 m)    level range 29.9 m   boom 21.0 m   0.51 of range
+       surfaced    (eye 19 m)    level range 15.9 m   boom 21.0 m   0.93 of range
+
+     At 0.93 of the sighting range the body IS the threshold — Duntley's range
+     is where contrast falls to what the eye can just detect, not where a thing
+     looks solid. The apex form was being framed at the exact distance the sea
+     erases it, which is the complaint, arithmetically.
+
+     WHERE 0.65 COMES FROM. Apparent contrast falls as C0*exp(-c*d) and the
+     range R is where it reaches the threshold eps, so at distance d the body
+     is sitting at (C0/eps)^(1-d/R) times threshold. Wanting it at ~5x
+     threshold — solid, not a smudge — gives d = R*(1 - ln5/ln(C0/eps)), and
+     for this sea's numbers (C0 0.80, eps 0.0082) that is 0.65 R. It is a
+     derivation, not a taste.
+
+     The cap uses the LENS DIRECTION, never the lens position: u is read off
+     the camera's own rotation, which is player input. Solving it off the
+     measured eye->body vector would feed this frame's boom back into the next
+     frame's cap, which is the creep the dive lerp's own comment warns about.
+
+     And there is a FLOOR under the cap. In genuine surf milk no boom in the
+     world shows you your shark, and slamming the lens into the animal to
+     chase a two-metre sighting range is worse than the fog. It stops at the
+     larger of the anchor distance and 0.55 body lengths — enough that a
+     megalodon in soup shows you its whole head and shoulders instead of a
+     grey wall or a blue screen. */
+  const SEE_FRAC = 0.65;
+  const _capDir = new THREE.Vector3();
+  function sightCapFor(a) {
+    const ws = CBZ.waterSight, cam = CBZ.camera, g = a && a.group;
+    if (!ws || !cam || !g || !ws.rangeAt) return Infinity;
+    cam.getWorldDirection(_capDir);
+    // the body sits roughly down the barrel, so the lens's own up-component IS
+    // the direction Duntley's asymmetry is asked about
+    const r = +ws.rangeAt(_capDir.y);
+    return Number.isFinite(r) && r > 0 ? r * SEE_FRAC : Infinity;
+  }
+  function fitDistFor(a) {
+    const len = Math.max(0.5, hullLength(a));
+    return Math.max(4.5, Math.min(FIT_MAX, FIT_REF_DIST * Math.pow(len / FIT_REF_LEN, FIT_POW)));
+  }
+  /* ONE SOLVE PER FRAME. The stand-off, the dive target, the published
+     tooling seam and camera.js's lens all want the same number in the same
+     frame, and the sight cap behind it reads the live lens. Memoise on the
+     frame stamp so four readers cost one solve and all four agree. */
+  let _boomStamp = -1, _boomFor = null, _boomVal = 0;
   function boomFor(a) {
+    const stamp = CBZ._matrixOwnStamp || 0;
+    if (a === _boomFor && stamp === _boomStamp) return _boomVal;
+    const v = boomSolve(a);
+    _boomFor = a; _boomStamp = stamp; _boomVal = v;
+    return v;
+  }
+  function boomSolve(a) {
     if (CBZ.CONFIG && CBZ.CONFIG.CAM_SHARK_FIT === false) {
       return Math.max(4.5, Math.min(26, 4.2 + Math.max(0.35, liveScale(a)) * 3.2));
     }
+    const fit = fitDistFor(a);
     const len = Math.max(0.5, hullLength(a));
-    const d = FIT_REF_DIST * Math.pow(len / FIT_REF_LEN, FIT_POW);
-    return Math.max(4.5, Math.min(FIT_MAX, d));
+    const floor = Math.min(fit, Math.max(FIT_REF_DIST, len * 0.55));
+    return Math.max(floor, Math.min(fit, sightCapFor(a)));
   }
+
+  /* ---- WHAT THE WATER TOOK, THE LENS GIVES BACK -------------------------
+     Pulling the boom in to where the sea can still carry the image costs
+     framing, and the owner's LAST complaint about this camera was the
+     opposite one — a megalodon photographed as a wall of grey skin. Those two
+     only fight while distance is the single lever.
+
+     FOV is the second lever and it costs no visibility at all: widening the
+     lens fits more animal in the frame without moving the eye one metre
+     further into the fog. So when the water has shortened the boom, the lens
+     opens by exactly the amount that holds the angular framing the fit
+     distance was designed for — tan(fov/2) * d held constant — and stops at
+     78 degrees, past which a chase camera is a fisheye. In clear water the
+     cap never binds, this returns 0, and the lens is untouched. */
+  const RIDE_FOV_MAX = 78;
+  CBZ.cityRideFov = function (baseFov) {
+    const a = ride.mount;
+    if (!a || !ride.water || !aquaticMounted(a)) return 0;
+    if (CBZ.fps && CBZ.fps.active) return 0;
+    if (CBZ.CONFIG && CBZ.CONFIG.CAM_SHARK_FIT === false) return 0;
+    const fit = fitDistFor(a), have = boomFor(a);
+    if (!(have > 0.1) || have >= fit - 0.05) return 0;
+    /* THE REFERENCE LENS IS PASSED IN, NEVER READ BACK OFF THE CAMERA.
+       Solving this against `CBZ.camera.fov` is a ratchet: the widened lens
+       becomes next frame's baseline and widens again, and it walks to the cap
+       in about a second whatever the water is doing (MEASURED: 61 -> 75 in a
+       two-second cruise). camera.js hands over the lens it was ABOUT to use,
+       so the widening is a pure function of how much boom the water took. */
+    const base = baseFov > 20 && baseFov < 120 ? baseFov : 61;
+    const want = 2 * Math.atan(Math.tan((base * Math.PI / 180) / 2) * (fit / have)) * 180 / Math.PI;
+    return Math.min(RIDE_FOV_MAX, want);
+  };
   /* WHAT THE RIDE PUBLISHES ABOUT ITS OWN FRAMING. The before/after tool and
      anything else that wants to argue about the boom should read the numbers
      rather than re-deriving them off a species table. */
   CBZ.cityRideBoom = function (a) {
     const t = a || ride.mount;
     if (!t || !t.group) return null;
-    return { len: +hullLength(t).toFixed(2), dist: +boomFor(t).toFixed(2), scale: +liveScale(t).toFixed(3) };
+    const cap = sightCapFor(t);
+    const V = ride.visual, W = ride.water;
+    return {
+      len: +hullLength(t).toFixed(2), dist: +boomFor(t).toFixed(2), scale: +liveScale(t).toFixed(3),
+      // what the framing law wanted, what the water allowed, and what the lens
+      // gave back — so a tool can argue about the three separately
+      fit: +fitDistFor(t).toFixed(2),
+      seeCap: Number.isFinite(cap) ? +cap.toFixed(2) : null,
+      fov: +(CBZ.cityRideFov() || 0).toFixed(1),
+      // the animal's own back, and how deep it is — the number the dive rig's
+      // authority is now solved from
+      back: V && V.aquatic ? +((V.x || 0) * Math.sin((W && W.pitch) || 0) +
+        (V.y || 0) * Math.cos((W && W.pitch) || 0)).toFixed(2) : null,
+      backSub: V && V.aquatic && W && CBZ.player
+        ? +(seaY(CBZ.player.pos.x, CBZ.player.pos.z) - (W.y +
+            ((V.x || 0) * Math.sin(W.pitch || 0) + (V.y || 0) * Math.cos(W.pitch || 0)))).toFixed(2)
+        : null,
+    };
   };
 
   /* ---- THE STAND-OFF IS NOT PART OF THE DIVE TREATMENT --------------------
@@ -3399,6 +3527,7 @@
     const bx = P.pos.x - cam.position.x, by = W.y - cam.position.y, bz = P.pos.z - cam.position.z;
     const have = Math.sqrt(bx * bx + by * by + bz * bz);
     if (!(have < minD)) return;
+    const wasAbove = cam.position.y > seaY(cam.position.x, cam.position.z);
     const push = minD - have;
     cam.position.x -= dir.x * push;
     cam.position.y -= dir.y * push;
@@ -3417,6 +3546,15 @@
       if (Number.isFinite(gy)) flr = Math.max(flr, gy);
     }
     if (flr > -1e8 && cam.position.y < flr + 0.4) cam.position.y = flr + 0.4;
+    /* ...AND IT OWNS NOT DROWNING THE LENS EITHER. The push runs along the
+       view direction, so a player looking UP at their own shark is pushed
+       DOWN, and on a 21 m boom a few degrees of up-look is several metres of
+       water. The seabed guard above already says the push may not bury the
+       eye in the ground; this is the same rule at the other surface. It only
+       binds when the push is what crossed the line — an eye that was already
+       under stays under, so a dive is untouched. */
+    const camSurf = seaY(cam.position.x, cam.position.z);
+    if (wasAbove && cam.position.y < camSurf + 0.25) cam.position.y = camSurf + 0.25;
   }
 
   const _diveWant = new THREE.Vector3(), _diveDir = new THREE.Vector3();
@@ -3431,7 +3569,42 @@
     if (CBZ.cityCam && CBZ.cityCam.death) return;
     if (CBZ.fps && CBZ.fps.active) return;      // first person already rides the body
     const surf = seaY(P.pos.x, P.pos.z);
-    const sub = surf - W.y;                     // the BODY's submergence, not the rider's seat
+    /* ---- HOW DEEP IS THIS ANIMAL — ASK ITS BACK, NOT ITS ORIGIN ----------
+       OWNER (2026-08-31): "with the other sharks I can rise to the surface and
+       just swim on the surface and see the world from the surface. But with
+       megalodon it's zoomed out and I'm stuck under it, looking up at it."
+
+       This used to be `surf - W.y`: the submergence of the model ORIGIN, in
+       metres. Every shark in this game cruises the same way, with its back at
+       the waterline; the only thing that differs between them is how many
+       metres of animal hang below that back. So a ramp meant to ask "how deep
+       are you" was actually asking "how BIG are you", and the dead band it
+       fed — full authority by 2.65 m down — is a depth no megalodon can ever
+       be shallower than. wildlife.js gives it swimDepth 7.8, the ride's own
+       surface clamp is 0.432 of that, and MEASURED on the live page the body
+       tops out at 3.52 m with k pinned at 1.00 and 150% of margin to spare.
+
+       Pinned there, the dive rig never stood down, and its target is
+       `W.y - dir.y*boom` — the origin, pushed back along a lens aimed at a
+       pivot several metres higher. That is a feedback loop: the eye sinks
+       below the body, so the aim tilts up, so the boom drives the eye further
+       down. It settles with the lens 19.4 m UNDER the water (measured) while
+       the animal's back is in the air. Not a lid, not a clamp — a runaway,
+       and one only the biggest body in the game is heavy enough to start.
+
+       ride.visual.y is the saddle socket: the top of the longest torso mesh,
+       in world units, already measured off this body and already rebuilt when
+       it grows (wildlifeRideResize). Add the pitch term the seat uses and it
+       IS the animal's back. Asking THAT how deep it is reads 0 when the
+       dorsal breaks the surface, on a bull shark and a megalodon alike, so
+       the same 0.45/2.2 dead band finally means the same thing on both and
+       the surfaced apex form is handed back to the walking camera — which is
+       above the waterline, which is the whole ask. */
+    const V = ride.visual;
+    const back = V && V.aquatic
+      ? Math.max(0, (V.x || 0) * Math.sin(W.pitch || 0) + (V.y || 0) * Math.cos(W.pitch || 0))
+      : 0;
+    const sub = surf - (W.y + back);            // the animal's BACK, not its origin
     /* ---- THE LENS CROSSES THE SURFACE WITH THE BODY -----------------------
        Everything world/water_underwater.js draws — the fog ramp, the caustic
        ceiling, the god rays, the waterline band, the 820 Hz muffle — is decided

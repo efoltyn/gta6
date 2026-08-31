@@ -162,7 +162,13 @@ async function boot(seed, quiet) {
   log("booted, starting the run…");
   for (let i = 0, r = false; i < 500 && !r; i++) { try { r = !!(await c.evl("!!(window.CBZ&&CBZ.game&&CBZ.stepSim&&document.getElementById('playBtn'))")); } catch (_) {} if (!r) await sleep(150); }
   for (let i = 0, p = false; i < 400 && !p; i++) { p = await c.evl("(()=>{if(CBZ.game&&CBZ.game.state==='playing')return true;const b=document.getElementById('playBtn');if(b)b.click();return CBZ.game&&CBZ.game.state==='playing';})()"); if (!p) await sleep(200); }
-  for (let i = 0; i < 300; i++) { if (await c.evl("!!(CBZ.city&&CBZ.city.arena&&CBZ.city.arena.roads&&CBZ.city.arena.roads.length)")) break; await sleep(200); }
+  // World-built, whatever the mode is: the city lays roads, the island modes
+  // (survival/sharksim) build an arena instead and never lay one. Waiting on
+  // roads alone burnt a full 60 s timeout on every non-city boot.
+  for (let i = 0; i < 300; i++) {
+    if (await c.evl("!!((CBZ.city&&CBZ.city.arena&&CBZ.city.arena.roads&&CBZ.city.arena.roads.length)||(CBZ.surv&&CBZ.surv.arena))")) break;
+    await sleep(200);
+  }
   // A full-city SwiftShader frame can consume every renderer core and starve
   // the CDP query that this tool exists to run. Once the real title-screen
   // world has finished building, allow one final frame and freeze rAF; callers
@@ -229,7 +235,14 @@ if (!has("--isolated") && existsSync(LOCK)) {
     const c = client(L.ws);
     await c.ready;
     await c.send("Runtime.enable");
-    const alive = await c.evl("!!(window.CBZ&&CBZ.city&&CBZ.city.arena)");
+    /* MODE-AGNOSTIC LIVENESS. This used to ask for `CBZ.city.arena`, which is
+       a CITY-MODE fact standing in for "the page is still alive". A world that
+       had been switched to sharksim/survival/escape answered false, so every
+       later probe silently booted a THROWAWAY city world and answered questions
+       about the wrong game — the shared world was still running and still
+       correct, and the tool could not see it. Ask what the question actually
+       is: is the engine loaded and steppable. */
+    const alive = await c.evl("!!(window.CBZ&&CBZ.game&&CBZ.stepSim)");
     if (alive) attached = c; else try { c.ws.close(); } catch (_) {}
   } catch (_) { attached = null; }
 }

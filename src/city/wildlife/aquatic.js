@@ -723,6 +723,44 @@
     return { p: [p[0] + nn[0] * lift, p[1] + nn[1] * lift, p[2] + nn[2] * lift], n: nn };
   }
 
+  /* THE COUNTERSHADING BELONGS TO A STATION, NOT TO A SLOT.
+
+     hullShell reads a bellyCut ARRAY by ring ORDINAL — `sample(cut, i/(n-1))`
+     — which is the right convention as long as n is the number of rings the
+     author wrote the array against. addSharkHull then throws rings away (the
+     snout shell owns the head) and adds one or two of its own, so n is NOT
+     that number, and the authored profile gets squeezed forward onto a
+     shorter body: values written for stations buried inside the rostrum land
+     on the last real body bands.
+
+     The megalodon is the worst case in the file — 8 authored values onto 5
+     surviving rings, over the longest single band on any shark here — and the
+     value it ended up wearing across the head/body junction was -0.100 where
+     the author wrote +0.18: a 14 degree step in the countershading line, on
+     the lower flank, opening forward and downward.
+
+     BE HONEST ABOUT WHY THIS IS HERE. It is NOT the black patch the owner
+     reported — a raycast into the live rig named that as the throat tube, and
+     the ring below is what covers it. This is a second, quieter bug found in
+     the same file, and fixing it is not optional once the ring goes in: the
+     insert changes n, and an ordinal-indexed profile would then move the belly
+     line on every snout-shell shark as a side effect of a geometry fix. So
+     resolve the array HERE, against the ring table it was actually written
+     for, and hand hullShell one value per surviving ring. Then truncation and
+     insertion cannot move the paint at all. */
+  function bellyForRings(cut, orig, kept) {
+    if (!Array.isArray(cut) || cut.length < 2 || !orig || orig.length < 2) return cut;
+    const last = orig.length - 1;
+    return kept.map(function (r) {
+      // the same walk ringAt does, so a station reads the same way twice
+      let i = 0;
+      while (i < last - 1 && orig[i + 1].x < r.x) i++;
+      const a = orig[i], b = orig[i + 1];
+      const t = b.x === a.x ? 0 : clamp((r.x - a.x) / (b.x - a.x), 0, 1);
+      return sample(cut, (i + t) / last);
+    });
+  }
+
   function addSharkHull(g, o) {
     let rings = o.rings || [];
     if (rings.length < 2) return null;
@@ -730,6 +768,7 @@
     // is the mouth-interior dark those cut faces take. Flag off -> the old
     // closed hull, byte-identical.
     const mo = (o.mouth && mouthSplitOn()) ? o.mouth : null;
+    let cutFor = o.bellyCut;
     if (mo && mo.snoutShell) {
       /* §7b: WHEN THE SPECIES HAS A SNOUT SHELL, THE HULL HANDS OVER THE
          WHOLE HEAD FRONT. Everything forward of the jaw corner is the two
@@ -741,13 +780,50 @@
       const endX = mo.hingeX + mo.length * 0.07;
       const kept = rings.filter(function (r) { return r.x < endX; });
       if (kept.length >= 2 && kept.length < rings.length) {
+        /* ---- THE NOTCH IS ONLY AS SHARP AS THE RING SPACING --------------
+           OWNER (2026-08-31): "megalodon has this little black triangle-ish
+           area in their underbody near where their head meets their body ...
+           there shouldn't be black underneath, it should be white."
+
+           hullShell's mouth notch is a PER-VERTEX operation: forward of
+           `moFrom` any vertex below the jaw seam is lifted onto it, so the
+           hull carries no chin of its own and the chin mesh covers the region.
+           But a vertex only exists at a ring, and the lift is therefore
+           interpolated across the whole quad band from the last un-notched
+           ring to the first notched one.
+
+           On the megalodon that band is x = 1.60 -> 2.4106: the ring table has
+           nothing between them, so the belly is dragged up from y = 0.04 to
+           the seam at 0.72 as one straight 0.81-unit ramp under the head — and
+           the chin does not start until 2.1. In the 1.7-2.0 stretch the ramp
+           stands ABOVE the black throat tube, whose own containment is solved
+           against the UN-notched ring radii (86% of them) and so knows nothing
+           about it. MEASURED by raycast into the live rig, ventral centreline:
+           the first thing a ray from below hits at x = 1.9 is sharkThroat
+           group 1, colour 0x020101 — near-black, unlit — 0.043 units proud of
+           the skin that should be covering it. A black wedge under the jaw,
+           tapering as the ramp climbs. That is the report.
+
+           The fix is a station, not a clamp: pin an UN-NOTCHED ring at the
+           notch's own leading edge, so the body keeps its true profile right
+           up to where the mouth begins and the lift happens over the short
+           span the chin actually covers. Every snout-shell shark gets a
+           cleaner jaw line out of it; the megalodon, whose band is 3.5x the
+           great white's, gets its belly back. */
+        const moFrom = mo.hingeX + mo.length * 0.05 - (mo.xOff || 0);
+        const last = kept[kept.length - 1];
+        if (moFrom > last.x + 1e-3 && moFrom < endX - 1e-4) {
+          const rN = ringAt(rings, moFrom);
+          kept.push({ x: moFrom, y: rN.y, ry: rN.ry, rz: rN.rz });
+        }
         const rEnd = ringAt(rings, endX);
         kept.push({ x: endX, y: rEnd.y, ry: rEnd.ry, rz: rEnd.rz });
+        cutFor = bellyForRings(o.bellyCut, rings, kept);
         rings = kept;
       }
     }
     const hull = hullMesh([o.top, o.belly || o.top, o.interior || o.top], rings, {
-      sides: o.sides, bellyCut: o.bellyCut, ragged: o.ragged, seed: o.seed,
+      sides: o.sides, bellyCut: cutFor, ragged: o.ragged, seed: o.seed,
       mouth: mo,
     });
     hull.name = "sharkHull";
