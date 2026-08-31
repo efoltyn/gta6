@@ -186,8 +186,7 @@
   const NEVER_HIRE = { bandit: 1, warlord: 1 };
   function hirePrice(band) {
     if (NEVER_HIRE[band.faction]) return null;
-    const F = W.faction(band.faction);
-    const premium = 1.15 + F.hostile * 1.5;
+    const premium = 1.15 + W.bandHostile(band) * 1.5;
     let n = 0;
     for (let i = 0; i < band.men.length; i++) n += W.tier(band.men[i].tier).hire;
     return Math.max(10, Math.round(n * premium / 5) * 5);
@@ -533,10 +532,12 @@
      away from a big legion is safe and walking away from six bandits is not. */
   function leaveBand() {
     const band = curBand;
-    const F = W.faction(band.faction);
     const speed = clamp(1.35 - band.men.length / 60, 0.4, 1.3);
     const hunger = clamp(W.bandPower(band) / Math.max(1, W.yourPower()), 0.2, 2.2);
-    const chase = clamp((F.hostile * 0.42 + hunger * 0.2) * speed +
+    /* THE ARCHETYPE'S APPETITE. A salt caravan does not run you down; a
+       raiding crew of the same size does. W.bandHostile falls through to the
+       faction row for every party that never overrode it. */
+    const chase = clamp((W.bandHostile(band) * 0.42 + hunger * 0.2) * speed +
       (band.mood === "hunt" ? 0.25 : 0), 0, 0.92);
     if (W.chance(chase)) {
       W.log(band.name + " ran you down.", "bad");

@@ -1472,6 +1472,14 @@
           vx: (lcg() - 0.5) * 2.4, vy: 1.6 + lcg(), vz: (lcg() - 0.5) * 2.4,
           source: "warlord-death",
         });
+        /* AND THE PROP REMEMBERS WHOSE IT WAS. Two facts, both needed by the
+           pickup below and neither derivable from a mesh: what gun this is
+           (actorweapons stamps userData.weaponId, so that one is free) and
+           WHICH SOLDIER RECORD it came off. The aftermath builds your cart by
+           walking every dead man's `s.wid` — so a rifle taken off the sand
+           mid-fight has to be struck off its owner's row, or the same AK is
+           counted twice: once in your hands and once in the baggage. */
+        prop.userData.wlFrom = m.s || null;
         dropGuns.push(prop);
         if (dropGuns.length > 120) {
           const old = dropGuns.shift();
@@ -1873,6 +1881,154 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     return to === "fps" ? "FIRST PERSON" : to === "third" ? "OVER SHOULDER" : "COMMAND";
   }
 
+  /* ============================================================ THE FLOOR
+     TAKE THE GUN OFF THE SAND.
+
+     OWNER, verbatim: "when u kill in battle guns already drops nicely add e to
+     pickup or to switch guns each guy carries one and for touch a button to
+     switch guns mid battle to whatever is on the ground in front of you."
+
+     Everything this needs already existed and none of it was wired to
+     anything. killMan reparents the dead man's ACTUAL rifle into the scene and
+     hands it to CBZ.weaponPhysics, which bounces it off the ground and settles
+     it on its own lowest vertex; actorweapons stamps `userData.weaponId` on
+     every model it builds; and core.js's W.equip is already a SWAP that puts
+     the gun you were holding back in the cart in the same call. `dropGuns` sat
+     there push-only — a list of rifles nobody could touch. This is the reach.
+
+     THREE RULES, and they are the whole design:
+
+       · IT IS THE SAME GUN. Not a spawned pickup, not a loot roll — the mesh
+         you walk up to is the model that came out of that man's hands, and the
+         id you end up holding is the id he was carrying. That is why the
+         prompt can name it.
+
+       · IT COMES OFF HIS ROW. The aftermath cart is built by walking every
+         dead soldier's `s.wid` (see report.loot), so taking a rifle off the
+         sand strikes it from the man it belonged to. Without that line the
+         same AK is in your hands AND in your baggage after the battle, which
+         is a gun printer with extra steps.
+
+       · YOUR OWN GUN IS NEVER LOST. W.equip stashes what you were holding, so
+         a swap mid-firefight puts your old rifle in the cart rather than on
+         the ground. You cannot pick up a worse gun and lose a better one to a
+         corpse pile you will never find again.
+
+     AND PICKING UP THE GUN YOU ALREADY HOLD IS AMMUNITION, not a no-op:
+     W.equip returns early on a matching id, so the stash stands and the spare
+     in the cart is what gunplay's setReserves() reads as another gun's worth
+     of magazines. The prompt says AMMO instead of TAKE, because that is what
+     it is, and it is the reason a dry warlord standing over four bodies has
+     something to do.
+
+     ONE INPUT PATH FOR BOTH DEVICES. The key is polled off microboot's own
+     input (rising edge on KeyE) rather than listened for, because the touch
+     button synthesises KeyE into exactly that input map — so the phone button
+     and the keyboard land on the same line of code instead of two. The edge is
+     tracked here rather than through IN.pressed() on purpose: microboot runs
+     frame hooks once per SUBSTEP, and `pressed` stays true for every substep
+     of the frame it fired on — which is up to twelve rifles off one tap.
+
+     Flag: ?take=off reverts to the old push-only list. */
+  const PICK_R = 2.6;              // arm's reach plus a step. A rifle is 1.1 m
+                                   // long and settles across its own length.
+  const PICK_R2 = PICK_R * PICK_R;
+  const TAKE_OFF = function () { return Q && Q.get("take") === "off"; };
+  let pickHeld = false;            // last frame's KeyE, for the rising edge
+  let pickTgt = null;              // the mesh currently in reach
+  let pickLbl = "";                // what the prompt last said
+  let pickTook = 0;                // rifles taken off the sand this battle
+
+  /* WHICH GUN IS IN REACH. Nearest wins, and only a gun that has stopped
+     moving: a rifle still tumbling out of a man's hands is not a thing you
+     have picked up, and a point-blank kill would otherwise put the prop inside
+     the radius on the frame it spawns and swallow the whole toss. That is
+     systems/prisondrops.js's `d.rest` guard, arrived at the same way. */
+  function nearestDrop() {
+    if (!YOU || YOU.dead || over) return null;
+    const px = YOU.pos.x, py = YOU.pos.y, pz = YOU.pos.z;
+    let best = null, bd = PICK_R2;
+    for (let i = 0; i < dropGuns.length; i++) {
+      const g = dropGuns[i];
+      if (!g || !g.parent) continue;
+      const b = g.userData && g.userData.weaponBody;
+      if (b && !b.settled) continue;                 // still in the air
+      const dx = g.position.x - px, dz = g.position.z - pz;
+      const dy = g.position.y - py;
+      // a rifle on a roof you are standing under is not in reach
+      if (dy > 2.4 || dy < -2.4) continue;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < bd) { bd = d2; best = g; }
+    }
+    return best;
+  }
+
+  function pickLabelFor(g) {
+    const id = g && g.userData && g.userData.weaponId;
+    if (!id) return "";
+    const nm = W.gunLabel ? W.gunLabel(id) : gunName(id);
+    return (id === W.state.you.wid ? "AMMO · " : "TAKE ") + String(nm).toUpperCase();
+  }
+
+  /* TAKING IT. Six lines of bookkeeping and every one of them is somebody
+     else's rule being called rather than re-written here. */
+  function takeDrop(g) {
+    const id = g && g.userData && g.userData.weaponId;
+    if (!id) return false;
+    const gp = GP();
+    // a gun fpsmode has no row for is a gun the warlord cannot hold — better
+    // to leave it on the sand than to put an id in his hands that renders as
+    // nothing and fires nothing.
+    if (gp && gp.canHold && !gp.canHold(id)) return false;
+    const was = W.state.you.wid;
+    W.stash(id, 1);
+    W.equip(W.state.you, id);
+    /* HIS ROW LOSES THE RIFLE. See the header: the aftermath cart is built off
+       the dead men's own wid fields, and this gun is no longer on the body. */
+    const from = g.userData.wlFrom;
+    if (from && from.wid === id) from.wid = "fists";
+    if (CBZ.weaponPhysics && CBZ.weaponPhysics.release) safe(function () { CBZ.weaponPhysics.release(g); });
+    if (g.parent) g.parent.remove(g);
+    const at = dropGuns.indexOf(g);
+    if (at >= 0) dropGuns.splice(at, 1);
+    // the man in the roster carries what the man on the sand is carrying
+    YOU.wid = W.state.you.wid;
+    YOU.weapon = gunName(YOU.wid);
+    if (gp && gp.rearm) safe(function () { gp.rearm(id); });
+    pickTook++;
+    feed(id === was ? ("AMMO · " + gunName(id).toUpperCase())
+                    : (gunName(id).toUpperCase() + " OFF THE SAND"));
+    if (CBZ.sfx) safe(function () { CBZ.sfx("pickup"); });
+    pickTgt = null;
+    return true;
+  }
+
+  function stepPickup() {
+    if (TAKE_OFF() || !started || !live) return;
+    const IN = micro && micro.input;
+    const down = !!(IN && IN.isDown("KeyE"));
+    const edge = down && !pickHeld;
+    pickHeld = down;
+
+    /* THE COMMAND SEAT HAS NO HANDS. You are looking down at your army from
+       sixty metres up; the warlord's body is standing still wherever you left
+       it and a reach prompt there would be a button that acts at a distance. */
+    const g = camMode === "cmd" ? null : nearestDrop();
+    pickTgt = g;
+
+    const el = document.getElementById("wbPick");
+    const lbl = g ? pickLabelFor(g) : "";
+    if (el && lbl !== pickLbl) {
+      pickLbl = lbl;
+      el.innerHTML = lbl ? ('<b class="k">E</b>' + lbl) : "";
+      el.classList.toggle("on", !!lbl);
+    }
+    const gp = GP();
+    if (gp && gp.showPick) gp.showPick(!!g, lbl);
+
+    if (edge && g) takeDrop(g);
+  }
+
   /* ============================================================ THE HUD
      Four orders, a retreat, two morale bars and the two things a man in a
      firefight actually needs: how hurt he is and how many rounds are left.
@@ -1927,7 +2083,26 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
         "letter-spacing:.12em;opacity:0;transition:opacity .35s;text-shadow:0 2px 12px #000;white-space:nowrap}" +
       "#wb .note.on{opacity:.95}" +
       "#wb .cap{position:absolute;left:50%;top:calc(var(--wl-safe-t, env(safe-area-inset-top,0px)) + 44px);transform:translateX(-50%);" +
-        "font-size:10px;letter-spacing:.16em;opacity:.55;white-space:nowrap}";
+        "font-size:10px;letter-spacing:.16em;opacity:.55;white-space:nowrap}" +
+      /* THE REACH PROMPT. Centred and just under the reticle, which is
+         where a man looks when he is standing over the thing he wants —
+         not in a corner panel he would have to leave the fight to read.
+         The KEY CAP is a <b class="k">, the same class the order rail
+         uses for its digits, so the one `body.coarse` rule below takes
+         the letter off BOTH rails: on a phone the verb is the whole
+         prompt and the button beside it is the key. */
+      "#wb .pick{position:absolute;left:50%;top:calc(50% + 42px);transform:translateX(-50%);" +
+        "display:flex;align-items:center;gap:9px;padding:7px 14px;border-radius:999px;white-space:nowrap;" +
+        "font-size:12px;font-weight:800;letter-spacing:.14em;opacity:0;transition:opacity .12s;" +
+        "background:rgba(12,10,7,.66);border:1px solid rgba(255,255,255,.16);backdrop-filter:blur(6px)}" +
+      "#wb .pick.on{opacity:.96}" +
+      "#wb .pick .k{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;" +
+        "border-radius:5px;background:rgba(255,138,61,.34);border:1px solid #ff8a3d;font-size:11px;font-weight:800}" +
+      /* AND ON A PHONE IT IS NOT HERE AT ALL. gunplay.js's reach control is a
+         word pill that already says TAKE .50 DESERT EAGLE in the thumb column;
+         printing the same sentence again under the reticle is the second
+         readout, and the first capture had it landing on the AIM button. */
+      "body.coarse #wb .pick{display:none}";
     document.head.appendChild(css);
 
     const root = document.createElement("div");
@@ -1955,6 +2130,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
          syncOrderRail() below, and a lone warlord gets a camera toggle and a
          trigger, which is the entire control surface he actually has. */
       '<div class="ord" id="wbOrders"></div>' +
+      '<div class="pick" id="wbPick"></div>' +
       '<div class="hit" id="wbHit"></div>' +
       '<div class="note" id="wbNote"></div>';
     document.body.appendChild(root);
@@ -2116,6 +2292,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
 
     simT = 0; over = false; started = false; live = true; lastWall = 0;
     men = []; corpses = []; sinking = []; dropGuns = []; addedCols = []; addedMeshes = [];
+    pickHeld = false; pickTgt = null; pickLbl = ""; pickTook = 0;
     _claim.length = 0; deadSolving = 0; hurtFlash = 0;
     cmd.init = 0;
 
@@ -2449,6 +2626,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     }
     if (camMode === "cmd") stepCommand(dt);
     stepCamera(dt);
+    stepPickup();
     paintHud(dt);
 
     if (!over) {
@@ -2674,6 +2852,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     hud = null;
 
     men = []; corpses = []; sinking = []; dropGuns = []; addedCols = []; addedMeshes = [];
+    pickHeld = false; pickTgt = null; pickLbl = ""; pickTook = 0;
     grid.clear(); fine.clear(); _claim.length = 0;
     deadSolving = 0; YOU = null; youRig = null; MAP = null; band = null; report = null;
     CBZ.groundAt = null;
@@ -2777,6 +2956,47 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       if (R && CBZ.camera) safe(function () { R.render(scene, CBZ.camera); });
       return true;
     },
+
+    /* ---- THE FLOOR, for tools/warlord-take-check.mjs ---------------------
+       A tool cannot photograph the difference between a rifle you can pick up
+       and a rifle you cannot, so it has to be able to find one, stand on it,
+       and press the key. Three read-only verbs, and press() goes through
+       microboot's OWN input map rather than a synthetic DOM event — which is
+       not a convenience: it is the same map the phone's touch button writes
+       into, so one test covers the key and the button. */
+    floorGuns: function () {
+      const out = [];
+      for (let i = 0; i < dropGuns.length; i++) {
+        const g = dropGuns[i];
+        if (!g || !g.parent) continue;
+        out.push({ id: i, wid: (g.userData && g.userData.weaponId) || null,
+                   x: g.position.x, y: g.position.y, z: g.position.z,
+                   settled: !(g.userData && g.userData.weaponBody && !g.userData.weaponBody.settled) });
+      }
+      return out;
+    },
+    press: function (code, down) {
+      if (!micro || !micro.touch || !micro.touch.synth) return false;
+      micro.touch.synth(code, !!down);
+      return true;
+    },
+    /* WHAT THE AFTERMATH WOULD PUT IN THE CART, without ending the battle.
+       report.loot is built by walking every dead man's own wid — so a rifle
+       taken off the sand has to have been struck off its owner's row or the
+       same AK is counted twice. This is that ledger, countable mid-fight. */
+    spoilPeek: function () {
+      let dead = 0, armedDead = 0, strippedDead = 0;
+      const rows = [report.deadOf.mine, report.deadOf.them];
+      for (let k = 0; k < rows.length; k++) {
+        for (let i = 0; i < rows[k].length; i++) {
+          const s = rows[k][i];
+          dead++;
+          if (s.wid && s.wid !== "fists") armedDead++; else strippedDead++;
+        }
+      }
+      return { dead: dead, armedDead: armedDead, strippedDead: strippedDead,
+               taken: pickTook, onFloor: dropGuns.length };
+    },
     audit: function () {
       if (!live) return { live: false };
       const M = SIDES.mine, T = SIDES.them;
@@ -2796,6 +3016,12 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
                  terrainLos: MAP.terrainLos, cover: MAP.cover.length, gap: GAP(),
                  desert: !!MAP.fromDesert },
         bodies: men.length, corpses: corpses.length, solving: deadSolving,
+        /* THE FLOOR. `guns` is how many dropped rifles are lying on the sand,
+           `reach` whether one is inside the warlord's arm, `taken` how many he
+           has picked up this battle — the three numbers that say whether the
+           pickup is a mechanic or a decoration. */
+        floor: { guns: dropGuns.length, reach: !!pickTgt, taken: pickTook,
+                 on: !TAKE_OFF(), label: pickLbl },
         fps: micro.fps || 0,
         reuse: {
           iq: !!(CBZ.combatIQ && CBZ.combatIQ.shot), gunfx: !!CBZ.tracer,

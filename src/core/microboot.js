@@ -869,6 +869,12 @@
     // thumb zone with the game verbs, where they get hit by accident.
     if (o.top != null) { b.style.top = len(o.top); b.style.bottom = "auto"; }
     b.textContent = o.glyph || o.label || "";
+    /* THE ID GOES ON THE ELEMENT, not just on the handle. It was only ever
+       stored in the returned object, which means a stylesheet could not reach
+       one button and a tool could not ask whether it was on screen — and a
+       contextual control (a reach prompt, a mount button) is exactly the kind
+       whose visibility is the thing worth checking. */
+    if (o.id) b.id = o.id;
     touch.root.appendChild(b);
 
     const h = { el: b, lit: false, key: o.key, latch: !!o.latch, id: o.id || "" };

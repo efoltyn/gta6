@@ -888,6 +888,27 @@
       id: "wgpSwap", glyph: "⇄", size: 54, right: 112, bottom: 96,
       onDown: function () { if (CBZ.fpsNextWeapon) CBZ.fpsNextWeapon(); },
     }));
+    /* TAKE THE GUN OFF THE SAND, and it is a WORD, not an icon. Every other
+       control here is a verb the player already knows (fire, aim, reload,
+       swap) and an icon is enough; this one has to say WHICH GUN, because the
+       whole decision is whether the thing at your feet beats the thing in your
+       hands. microboot's own `word:true` pill is exactly that shape, and it
+       sizes itself to the label — so the button IS the prompt on a phone and
+       battle.js's #wbPick line is hidden there rather than printed twice.
+
+       IT IS THE ONLY CONTEXTUAL CONTROL IN THE CLUSTER: hidden until battle.js
+       says something is in reach (showPick below), so the thumb column does
+       not carry a button that does nothing for most of a fight. It sits ABOVE
+       the trigger rather than under SWAP because the first capture put it at
+       the bottom of the column, behind battle.js's order rail, where it was
+       half a circle nobody could hit.
+
+       AND IT CARRIES NO onDown. `key` makes microboot synthesise KeyE into its
+       own input map, which is the exact thing battle.js's stepPickup() polls —
+       so the phone and the keyboard are one code path rather than two. */
+    touchBtns.push(micro.touch.addButton({
+      id: "wgpPick", word: true, glyph: "TAKE", size: 44, right: 18, bottom: 306, key: "KeyE",
+    }));
     touchBtns.push(micro.touch.addButton({
       id: "wgpView", glyph: "▣", size: 48, right: 22, top: 74,
       onDown: function () { cycleCam(); },
@@ -900,8 +921,21 @@
       const b = touchBtns[i];
       if (!b || !b.el) continue;
       if (b.id === "wgpView") continue;              // the seat toggle is always reachable
+      // the reach button is CONTEXTUAL — the seat can only take it away, never
+      // hand it back. Its own condition is whether a rifle is at your feet.
+      if (b.id === "wgpPick") { b.set(show && pickOn, null, pickLbl || "TAKE"); continue; }
       b.set(show);
     }
+  }
+  /* WHAT battle.js SAYS THROUGH. It owns the reach test (it owns the dropped
+     rifles); this file owns the thumb column. One boolean crosses. */
+  let pickOn = false, pickLbl = "";
+  function showPick(on, label) {
+    on = !!on;
+    label = label || "";
+    if (on === pickOn && label === pickLbl) return;
+    pickOn = on; pickLbl = label;
+    syncTouchVisible();
   }
   function clearTouch() {
     for (let i = 0; i < touchBtns.length; i++) {
@@ -944,6 +978,7 @@
       }
     }
     alwaysFn = null; ledgerFn = null;
+    pickOn = false; pickLbl = "";
     clearTouch();
     if (CBZ.fpsSetActive) safe(function () { CBZ.fpsSetActive(false); });
     if (CBZ.fpsSetAim) CBZ.fpsSetAim(false);
@@ -981,6 +1016,7 @@
       armed: !!(CBZ.playerArmed && CBZ.playerArmed()),
       gun: CBZ.currentWeaponId || null,
       owned: ownedIds(),
+      reach: pickOn,                 // is a rifle at the warlord's feet right now
       mag: legacy && L ? L.mag : f.ammo,
       magSize: legacy && L ? L.magSize : f.mag,
       /* THE FORK HAS NO RESERVE AT ALL — it reloads out of thin air forever,
@@ -998,6 +1034,49 @@
       ttk: (stats.firstShotT >= 0 && stats.lastKillT >= 0)
         ? Math.round((stats.lastKillT - stats.firstShotT) * 100) / 100 : null,
     };
+  }
+
+  /* ============================================================ THE CART CHANGED
+     WHAT HAPPENS WHEN A GUN ARRIVES MID-FIGHT.
+
+     battle.js's stepPickup() takes a rifle off the sand and routes it through
+     core's W.equip, so by the time this is called `W.state.you.wid` is already
+     the new gun and the old one is already in the baggage. Nothing here owns
+     an inventory rule; this is the four lines fpsmode needs to notice.
+
+     AND IT DELIBERATELY DOES NOT CALL fpsResetWeapons. That refills EVERY
+     magazine in the catalog, which would make walking over a pistol a free
+     reload for the rifle you are holding. The only magazine topped up is the
+     one that just came off a body — because it did come off a body, loaded.
+
+     CBZ.hasWeapon already answers off W.state live (see the mount), so
+     fpsmode's availableIndices() picks the new gun up with nothing told to
+     it — which is why this is short. */
+  function canHold(id) {
+    if (!id) return false;
+    if (legacy) return true;                       // the fork holds a wid, not a row
+    const L2 = CBZ.FPS_WEAPONS;
+    if (!L2) return false;
+    for (let i = 0; i < L2.length; i++) if ((L2[i].id || L2[i].key) === id) return true;
+    return false;
+  }
+  function rearm(id) {
+    if (!on) return false;
+    if (legacy) { if (L) L.mag = L.magSize; return true; }
+    const f = CBZ.fps, L2 = CBZ.FPS_WEAPONS;
+    CBZ.weaponInventory = ownedIds();
+    if (f && f.rounds && L2) {
+      for (let i = 0; i < L2.length; i++) {
+        if ((L2[i].id || L2[i].key) !== id) continue;
+        f.rounds[i] = Math.max(f.rounds[i] || 0, L2[i].mag || 0);
+        break;
+      }
+    }
+    setReserves();
+    if (id && CBZ.fpsSelectWeaponId) safe(function () { CBZ.fpsSelectWeaponId(id); });
+    CBZ.currentWeaponId = W.state.you.wid;
+    if (CBZ.fpsResyncAmmo) safe(CBZ.fpsResyncAmmo);
+    return true;
   }
 
   /* ============================================================ DRIVE SEAM
@@ -1381,6 +1460,10 @@
     nextGun: nextGun,
     look: function (o) { return legacy ? legacyLook(o) : look(o); },
     nearestEnemy: nearestEnemy,
+    // the battlefield floor (battle.js owns the reach; this file owns the hands)
+    canHold: canHold,
+    rearm: rearm,
+    showPick: showPick,
     place: place,
     heal: heal,
     resetLedger: resetLedger,

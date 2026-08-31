@@ -420,16 +420,51 @@
     const landKm2 = Math.PI * (D.RADIUS / 1000) * (D.RADIUS / 1000) * 0.72;
     return Math.round(clamp(landKm2 / 2.6, 40, 70));
   }
-  function rollSize() {
-    // pow(u, 3.1) on 3..300: median ~22, one in fifty over 120
-    const u = W.rnd();
-    return Math.max(3, Math.round(3 + Math.pow(u, 3.1) * 297));
+  /* THE POWER LAW MOVED TO core.js (W.rollBigSize) AND DID NOT CHANGE. It was
+     written here under a comment saying "median ~22, one in fifty over 120",
+     and it was wrong by a factor of two in both directions: measured, the
+     median is 38 and 26% of parties are over 120 men. That one number is why
+     the island reads as nothing but massive armies — a dozen of the forty
+     parties are a hundred-plus strong and there is almost nothing on it a man
+     alone can take. The curve is LEFT EXACTLY AS IT WAS on the owner's
+     instruction ("don't deduct any from current"); the small parties are a
+     SECOND population added beside it (smallTarget below). It lives in core
+     now so tools/warlord-check.mjs's headless campaigns can draw from the same
+     pool the player rides through — they were measuring a different island. */
+
+  /* HOW MANY SMALL PARTIES RIDE ALONGSIDE THE BIG ONES. A second target, not
+     a share of the first: the forty parties bandTarget() asks for still spawn
+     off the power law above and are still as big as they ever were. These are
+     extra.
+
+     W.SMALL_PER_BIG (1.4) rather than a round number because the ratio is what
+     the map has to read as — Bannerlord's island is mostly small parties with a
+     few armies moving through it, and at 1:1 it is still a parade ground.
+     Fifty-six small parties on top of forty is ~96 in the world, which sits
+     under campaign.js's own 160-banner instance cap with room for the peers
+     and the event spawns, and costs almost nothing in bodies: a six-man party
+     draws six men where a two-hundred-man one draws sixty (see bandShow).
+
+     ?smalls=0 turns the whole population off (the island exactly as it was);
+     ?smalls=N sets the count. */
+  function smallTarget() {
+    const raw = QP.get("smalls");
+    if (raw === "0" || raw === "off") return 0;
+    const q = parseInt(raw || "", 10);
+    if (q > 0) return Math.min(180, q);
+    return Math.round(bandTarget() * W.SMALL_PER_BIG);
   }
   function spawnBand(opts) {
     opts = opts || {};
     const D = W.desert;
     const p = opts.at || D.landPoint(W.rnd, { maxSlope: 0.30 });
-    const b = W.makeBand({ size: opts.size == null ? rollSize() : opts.size, x: p.x, z: p.z });
+    /* SMALL PARTIES ARE A DIFFERENT CONSTRUCTOR, not a different roll. core's
+       W.makeSmallBand picks the archetype (LOOTERS, SALT CARAVAN, OASIS
+       PATROL…), which carries the name, the size band, the faction its colour
+       and its men's tiers come from, and how badly it wants a fight with you.
+       Everything else — guns, armour, purse, horses — falls out of head count
+       through makeBand's own wealth curve, unchanged. */
+    const b = W.rollIslandBand({ x: p.x, z: p.z, small: !!opts.small, kind: opts.kind, size: opts.size });
     b.y = D.heightAt(b.x, b.z);
     b.yaw = W.rnd() * TAU;
     /* THESE THREE FIELDS ARE ADDED HERE, not in core, on purpose: they are
@@ -475,8 +510,14 @@
     if (!S.outposts.length) { placeOutposts(); outpostsRaised = false; }
     if (!outpostsRaised) { raiseOutposts(); outpostsRaised = true; }
     if (!S.bands.length) {
-      const n = bandTarget();
+      const n = bandTarget(), sm = smallTarget();
       for (let i = 0; i < n; i++) spawnBand();
+      /* AND THE SMALL ONES, INTERLEAVED RATHER THAN APPENDED. landPoint is
+         driven by the seeded stream, so spawning all forty big parties and
+         then all fifty-six small ones puts every small party in the second
+         half of the point sequence — which on a 14 km island is a visible
+         bias, not a statistical nicety. */
+      for (let i = 0; i < sm; i++) spawnBand({ small: true });
       W.log(S.bands.length + " parties are somewhere out there.");
     }
     /* YOU START ON A BEACH. Not in the middle: the first thing the game has
@@ -3003,7 +3044,12 @@
         b.think = 1.1 + W.hash01(b.x, b.z, 3) * 0.9;
         if (!FLAG_NOBANDAI && dp < 1100 && b.cooldown <= 0) {
           const theirs = W.bandPower(b);
-          const hostile = W.faction(b.faction).hostile;
+          /* THE ARCHETYPE'S APPETITE, NOT THE FACTION'S. A SALT CARAVAN and a
+             RAIDING CREW can share a faction row (and therefore a colour and a
+             tier table) and still want completely different things from you.
+             W.bandHostile falls through to the faction for every party that
+             never overrode it, which is all of the big ones. */
+          const hostile = W.bandHostile(b);
           /* THE ONE DECISION A PARTY MAKES: can I take him. Power, not head
              count — core's soldierPower already knows that forty levies with
              pistols are weaker than fifteen veterans with rifles. `scared`
@@ -3077,12 +3123,27 @@
     spawnTick += dt;
     if (C.simHost && spawnTick > 9) {
       spawnTick = 0;
-      const want = bandTarget();
-      if (S.bands.length < want) {
+      /* TWO POPULATIONS, COUNTED SEPARATELY. One target for both would let the
+         small parties — which die far faster, because a five-man crew standing
+         near a legion is deleted by the first abstract fight it loses — be
+         "replaced" by another two-hundred-man army, and the island would drift
+         back to nothing but massive ones over an hour of play. The deficit is
+         per tier and the small tier is refilled first for the same reason. */
+      let nBig = 0, nSmall = 0;
+      for (let i = 0; i < S.bands.length; i++) (S.bands[i].kind ? nSmall++ : nBig++);
+      const wantBig = bandTarget(), wantSmall = smallTarget();
+      /* TWO A TICK RATHER THAN ONE. The old loop replaced one party per nine
+         seconds against a population of forty; the same rate against ninety-six
+         with a faster-churning bottom tier is a slow leak the player would
+         experience as the small parties quietly disappearing. */
+      for (let k = 0; k < 2; k++) {
+        const small = nSmall < wantSmall;
+        if (!small && nBig >= wantBig) break;
         for (let g = 0; g < 30; g++) {
           const p = W.desert.landPoint(W.rnd, { maxSlope: 0.30 });
           if (Math.hypot(p.x - S.you.x, p.z - S.you.z) < 2200) continue;
-          spawnBand({ at: p });
+          spawnBand({ at: p, small: small });
+          if (small) nSmall++; else nBig++;
           break;
         }
       }
@@ -3109,6 +3170,24 @@
     }
     if (!b || bd > 220) return;
     const pa = W.bandPower(a), pb = W.bandPower(b);
+    /* A LOOTER GANG DOES NOT FIGHT A LEGION, IT RUNS. Without this the island's
+       small parties evaporate: the resolver picks a random party every 4.5 s,
+       finds the nearest party of another faction inside 220 m and makes them
+       fight to a conclusion regardless of the odds, and a five-man crew loses
+       every one of those. It ran for a wipe on a matchup nobody in the world
+       would have taken. Six-to-one is the same "can I take him" question
+       stepBands already asks about YOU, answered the same way and with the
+       same memory (`scared`), so a beaten crew keeps its distance afterwards —
+       and the pursuit is a real one, because the weak side is now walking
+       away rather than standing in the same place waiting to be picked again. */
+    const gap = Math.max(pa, pb) / Math.max(0.001, Math.min(pa, pb));
+    if (gap > 6) {
+      const weak = pa < pb ? a : b;
+      weak.mood = "flee";
+      weak.scared = Math.min(2, (weak.scared || 0) + 1);
+      weak.goal = { x: weak.x + (weak.x - (weak === a ? b : a).x), z: weak.z + (weak.z - (weak === a ? b : a).z), why: "" };
+      return;
+    }
     const win = W.odds(pa, pb);
     const aWins = W.rnd() < win;
     const winner = aWins ? a : b, loser = aWins ? b : a;

@@ -57,6 +57,10 @@ const opt = (n, d) => { const i = argv.indexOf(n); return i >= 0 && argv[i + 1] 
 const RUNS = Math.max(20, Number(opt("--runs", 200)) || 200);
 const DAYS = Math.max(30, Number(opt("--days", 240)) || 240);
 const VERBOSE = argv.includes("--verbose");
+/* THE ISLAND WITHOUT ITS SMALL PARTIES, for measuring what they changed.
+   `--smallper 0` is the pre-2026-08-31 island exactly: forty power-law
+   parties and nothing under them. Any other number sets the ratio. */
+const SMALL_PER = argv.includes("--smallper") ? Number(opt("--smallper", "")) : null;
 
 /* THE ONLY SHIM. core.js and weapon-data.js both open with
    `window.CBZ = window.CBZ || {}`, which is the browser idiom and is the
@@ -68,6 +72,7 @@ globalThis.CBZ = {};
 require(path.join(ROOT, "src/weapons/weapon-data.js"));
 require(path.join(ROOT, "src/warlord/core.js"));
 const W = globalThis.CBZ.warlord;
+if (SMALL_PER != null && isFinite(SMALL_PER)) W.SMALL_PER_BIG = Math.max(0, SMALL_PER);
 
 const fails = [];
 const notes = [];
@@ -258,7 +263,11 @@ function checkSurrender() {
    The battle is resolved by the odds curve rather than by battle.js, and that
    is honest: this file is testing the CAMPAIGN's arithmetic, and battle.js's
    own outcome distribution is a different question that needs a browser. */
-function campaign(seed) {
+function campaign(seed, policy) {
+  /* THE ONE DECISION THIS WARLORD MAKES: how favoured does he have to be
+     before he takes the fight. It is a parameter because the assertion below
+     needs two different players, not two percentiles of one — see there. */
+  const FIGHT_AT = (policy && policy.fightAt) || 0.6;
   W.newGame({ seed: seed });
   const S = W.state;
   const trail = [];
@@ -300,7 +309,16 @@ function campaign(seed) {
       S.stats.recruited++;
     }
 
-    const band = W.makeBand({});
+    /* THE PARTY HE MEETS TODAY COMES OFF THE ISLAND'S OWN POOL.
+       This used to be `W.makeBand({})`, which falls through to
+       W.rollBandSize — the BAND_CLASSES table, 56% crews of 2-9 — a
+       distribution campaign.js has never once spawned. Three hundred headless
+       campaigns were therefore measuring an island nobody plays: the shipped
+       spawner rolls a power law with a median of 38 and a quarter of its
+       parties over 120 men, plus (since the small-party wave) a second
+       population of named archetypes at W.SMALL_PER_BIG to one. W.rollIslandBand
+       is that pool, and it is the same call campaign.js's spawnBand makes. */
+    const band = W.rollIslandBand({});
     const mine = W.yourPower(), theirs = W.bandPower(band);
     const p = W.odds(mine, theirs);
 
@@ -318,7 +336,7 @@ function campaign(seed) {
       continue;
     }
 
-    if (p > 0.6) {
+    if (p > FIGHT_AT) {
       S.stats.battles++;
       if (W.rnd() < p) {
         /* WON. Casualties scale with how close it was — a walkover costs a
@@ -386,8 +404,35 @@ function checkCampaign() {
   ok(broke > 0, "some campaigns genuinely collapse", broke + "/" + RUNS);
   ok(broke < RUNS * 0.6, "…but the dumbest reasonable play is not doomed",
      Math.round(broke / RUNS * 100) + "%");
-  ok(p90 > p10 * 2.5, "runs diverge — the decisions matter",
-     "p10 " + p10 + " vs p90 " + p90);
+  /* THIS USED TO BE `p90 > p10 * 2.5` AND IT DID NOT MEASURE WHAT IT SAID.
+     Every one of those runs is the SAME warlord making the same call on the
+     same rule; the only thing separating p10 from p90 is which seeds handed
+     him a good week. That is luck, not decisions, and it is why the number
+     moved when the sim was pointed at the island the game actually spawns
+     (W.rollIslandBand): a pool with small parties in it gives everybody
+     something to fight most days, so a 240-day campaign averages its luck out
+     and the spread narrows — which reads as a regression on a threshold that
+     was calibrated against a distribution nobody ever rode through.
+
+     So it asks the question it was always trying to ask, with two warlords
+     instead of one. The CAUTIOUS one only takes a fight he is 85% to win; the
+     BOLD one takes anything past even. Same island, same seeds, same
+     everything else. If a real difference in how you play does not show up in
+     the army you end with, then the odds curve is decoration and the ATTACK
+     button might as well be a "continue" button. The spread is still printed
+     because a game where luck does nothing is its own kind of broken. */
+  const bold = [], cautious = [];
+  for (let i = 0; i < RUNS; i++) {
+    bold.push(campaign(1000 + i * 7, { fightAt: 0.5 }).peak);
+    cautious.push(campaign(1000 + i * 7, { fightAt: 0.85 }).peak);
+  }
+  const mid = (a) => a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)];
+  const mBold = mid(bold), mCaut = mid(cautious);
+  notes.push("        the same seeds, played two ways:  bold (fight past even) median peak " +
+             mBold + "   cautious (only 85%+) median peak " + mCaut);
+  ok(Math.abs(mBold - mCaut) > Math.max(6, med * 0.15),
+     "how you play changes where you end up", "bold " + mBold + " vs cautious " + mCaut);
+  ok(p90 > p10 * 1.6, "and luck still swings a run", "p10 " + p10 + " vs p90 " + p90);
 
   /* THE CURVE HAS TO GO UP. An army that peaks on day four and grinds down
      for the rest of the run passes every threshold above and is still not a

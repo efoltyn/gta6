@@ -699,7 +699,131 @@
       mood: "roam",             // roam | hunt | flee | camp
       cooldown: 0,              // seconds before it will engage you again
       wealth: wealth,
+      /* WHAT KIND OF PARTY THIS IS, and whether it wants a fight with YOU.
+         Both are optional and both default to nothing, so every existing
+         caller is unchanged: `kind` is null for the parties the island has
+         always had and a SMALL_PARTIES id for the small ones campaign.js adds
+         on top, and `hostile` is null unless an archetype overrode it — a salt
+         caravan and a bandit crew cannot both read their appetite off the
+         faction row when they share one. Readers use W.bandHostile(b). */
+      kind: opts.kind || null,
+      hostile: opts.hostile == null ? null : opts.hostile,
     };
+  };
+  /* HOW BADLY DOES THIS PARTY WANT YOU. The faction's own number unless the
+     archetype said otherwise. One accessor, because the alternative is every
+     caller writing `b.hostile == null ? faction… : b.hostile` and one of them
+     eventually not. */
+  W.bandHostile = function (b) {
+    if (!b) return 0;
+    return b.hostile == null ? W.faction(b.faction).hostile : b.hostile;
+  };
+
+  /* ============================================================ THE SMALL ONES
+     OWNER: "bannerlord has more small armies too, this right now just has
+     massive armies — add more small armies, don't deduct any from current,
+     just add more small ones."
+
+     He is right and the measurement is worse than the complaint. campaign.js
+     rolls party size as `3 + u^3.1 * 297` under a comment claiming a median of
+     22 and "one in fifty over 120". The real curve: MEDIAN 38, and 26% of
+     parties over 120 men. On a forty-party island that is a dozen armies of a
+     hundred-plus and almost nothing you can fight on day one — the island is
+     all endgame. Meanwhile BAND_CLASSES above, which says 56% of parties
+     should be crews of 2-9, is documented, published "so campaign.js's spawner
+     and this file's own default agree", and never called by the campaign at
+     all. The design was written and then not wired up.
+
+     THE FIX ADDS, IT DOES NOT REBALANCE. The instruction was explicit, and it
+     is also the safer change: the existing curve keeps spawning the existing
+     forty parties, exactly as many hundred-man legions as before, and a SECOND
+     POPULATION of small ones spawns alongside it. Nothing gets smaller. The
+     island gets fuller, at the bottom, which is where it was empty.
+
+     AND THEY ARE NAMED. A party of five called SAND BANDITS is the same
+     nothing as a party of two hundred called SAND BANDITS; the whole reason
+     Bannerlord's map reads is that a looter gang, a caravan and a lord's
+     retinue are three different things before you open the card. So each small
+     party is an ARCHETYPE: its own name, its own size range, its own faction
+     (which is where its colour and its men's tiers come from — no new tier
+     tables) and its own appetite for a fight, because a salt caravan that
+     hunts you is not a caravan.
+
+     EVERYTHING ELSE COMES FREE FROM HEAD COUNT. makeBand derives wealth from
+     size, and wealth already decides guns, armour, purse and (through
+     mounts.js) horses — so a six-man party is automatically poor, badly armed,
+     unarmoured and on foot without one number typed here. That is the reason
+     this table has no gear column. */
+  W.SMALL_PARTIES = [
+    { id: "looters",   label: "LOOTERS",       faction: "bandit",  w: 0.24, lo: 2, hi: 6,  hostile: 1.00 },
+    { id: "raiders",   label: "RAIDING CREW",  faction: "bandit",  w: 0.17, lo: 5, hi: 16, hostile: 1.00 },
+    { id: "deserters", label: "DESERTERS",     faction: "company", w: 0.15, lo: 3, hi: 9,  hostile: 0.45 },
+    { id: "caravan",   label: "SALT CARAVAN",  faction: "militia", w: 0.15, lo: 4, hi: 11, hostile: 0.10 },
+    { id: "patrol",    label: "OASIS PATROL",  faction: "militia", w: 0.13, lo: 5, hi: 14, hostile: 0.50 },
+    { id: "outriders", label: "OUTRIDERS",     faction: "company", w: 0.10, lo: 6, hi: 18, hostile: 0.60 },
+    { id: "scouts",    label: "LEGION SCOUTS", faction: "legion",  w: 0.06, lo: 4, hi: 12, hostile: 0.70 },
+  ];
+  /* ============================================================ ONE POOL
+     WHAT IS ACTUALLY OUT THERE, published once because it was published twice
+     and the two copies disagreed for the life of the game.
+
+     BAND_CLASSES above says its own comment out loud — "Published so
+     campaign.js's spawner and this file's own default agree — two different
+     party-size distributions in one game is how the encounter screen and the
+     world map start disagreeing about how dangerous the map is." It then never
+     happened: campaign.js rolled `3 + u^3.1 * 297` and W.rollBandSize was
+     called by nothing but makeBand's own default, which the campaign never
+     took. So tools/warlord-check.mjs — three hundred headless campaigns, the
+     only thing in this repo that can say whether the economy works — has been
+     playing an island of 56% two-to-nine-man crews that does not exist.
+
+     This is the join. The campaign's real curve and the small archetypes live
+     here as one function, campaign.js's spawner calls it, and the headless
+     campaign draws its daily encounter from the SAME pool the player rides
+     through. BAND_CLASSES stays exactly where it is: it is what makeBand does
+     when nobody says a size, and events.js and wardrobe.js read its names. */
+  W.SMALL_PER_BIG = 1.4;      // small parties per power-law party. campaign.js's
+                              // smallTarget() and the headless sim both read it.
+  W.rollBigSize = function (r) {
+    const u = r == null ? RND() : r;
+    return Math.max(3, Math.round(3 + Math.pow(u, 3.1) * 297));
+  };
+  /* ONE PARTY OFF THE ISLAND. Pass `small` to force a tier (the campaign does,
+     because it keeps a separate head count of each); omit it and the tier is
+     rolled at the shipped ratio, which is what a tool measuring "what do you
+     meet out there" wants. */
+  W.rollIslandBand = function (opts) {
+    opts = opts || {};
+    const small = opts.small != null ? !!opts.small
+      : RND() < W.SMALL_PER_BIG / (1 + W.SMALL_PER_BIG);
+    if (small) return W.makeSmallBand(opts);
+    return W.makeBand({ size: opts.size == null ? W.rollBigSize() : opts.size,
+      x: opts.x || 0, z: opts.z || 0, id: opts.id });
+  };
+
+  W.smallParty = function (id) {
+    for (let i = 0; i < W.SMALL_PARTIES.length; i++) if (W.SMALL_PARTIES[i].id === id) return W.SMALL_PARTIES[i];
+    return W.SMALL_PARTIES[0];
+  };
+  W.rollSmallParty = function (r) {
+    let t = r == null ? RND() : r;
+    for (let i = 0; i < W.SMALL_PARTIES.length; i++) {
+      const c = W.SMALL_PARTIES[i];
+      if (t < c.w || i === W.SMALL_PARTIES.length - 1) return c;
+      t -= c.w;
+    }
+    return W.SMALL_PARTIES[0];
+  };
+  /* ONE CONSTRUCTOR FOR A SMALL PARTY, so the campaign spawner and any tool
+     that wants to measure the distribution build the identical thing. */
+  W.makeSmallBand = function (opts) {
+    opts = opts || {};
+    const A = opts.kind ? W.smallParty(opts.kind) : W.rollSmallParty();
+    const n = opts.size == null ? A.lo + Math.floor(RND() * (A.hi - A.lo + 1)) : opts.size;
+    return W.makeBand({
+      size: n, faction: A.faction, name: A.label, kind: A.id, hostile: A.hostile,
+      x: opts.x || 0, z: opts.z || 0, id: opts.id,
+    });
   };
   W.bandSize = function (b) { return b.men.length; };
   W.bandPower = function (b) { return W.power(b.men); };
@@ -761,8 +885,7 @@
     const theirs = W.bandPower(b);
     const ratio = myPower / Math.max(0.001, theirs);
     let p = clamp((ratio - 1.15) * 0.42, 0, 0.8);
-    const F = W.faction(b.faction);
-    p *= (1.25 - F.hostile * 0.55);
+    p *= (1.25 - W.bandHostile(b) * 0.55);
     let soft = 0;
     for (let i = 0; i < b.men.length; i++) soft += (3 - W.tierIndex(b.men[i].tier)) / 3;
     p *= 0.55 + 0.6 * (soft / Math.max(1, b.men.length));

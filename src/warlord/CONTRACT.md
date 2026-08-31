@@ -132,10 +132,22 @@ log stats flags
 **soldier** `{id,name,tier,wid,armour,hp,maxHp,kills,battles,wounded}` — only ever
 built by `W.makeSoldier(tierId, wid, opts)`.
 
-**band** `{id,faction,name,colour,x,z,men[],gold,goal,mood,cooldown,wealth}` —
+**band** `{id,faction,name,colour,x,z,men[],gold,goal,mood,cooldown,wealth,kind,hostile}` —
 only ever built by `W.makeBand({size,faction,x,z})`. `men` is a REAL roster of
 real soldiers, generated up front, because the battle puts those exact men on
 the sand and the surrender screen hands you those exact men.
+
+`kind` is null for a party off the power law and a `W.SMALL_PARTIES` archetype
+id (`looters`, `caravan`, `patrol`, …) for one of the small ones; `hostile` is
+null unless that archetype overrode the faction's appetite for a fight. Read it
+through **`W.bandHostile(b)`**, never off the faction row — a SALT CARAVAN and a
+RAIDING CREW can share a faction and want opposite things from you.
+
+**The island's party pool lives in ONE place**: `W.rollIslandBand({small,x,z})`.
+campaign.js's spawner calls it and so does `tools/warlord-check.mjs`, which is
+the point — the power law used to be typed inside campaign.js while core
+published a different distribution nobody called, so the headless economy check
+was measuring an island the game never spawned.
 
 ## Useful core calls
 
@@ -145,6 +157,8 @@ W.clamp(v,a,b) W.lerp(a,b,t)
 W.TIERS W.tier(id) W.tierIndex(id) W.ARMOUR W.armour(id)
 W.gunList() W.gun(id) W.gunLabel(id) W.gunPrice(id) W.gunSell(id) W.gunRarity(id)
 W.makeSoldier() W.makeBand() W.addSoldier(s) W.removeSoldier(id) W.armySize()
+W.rollIslandBand({small,x,z}) W.makeSmallBand() W.rollBigSize() W.bandHostile(b)
+W.SMALL_PARTIES W.SMALL_PER_BIG W.BAND_CLASSES W.rollBandSize()
 W.soldierPower(s) W.power(list) W.yourPower() W.bandPower(b) W.bandSize(b)
 W.odds(mine,theirs) W.surrenderChance(band, myPower)
 W.stash(wid,n) W.unstash(wid,n) W.stashArmour() W.unstashArmour()
