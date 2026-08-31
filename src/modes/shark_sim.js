@@ -21,9 +21,11 @@
      • the bite is the mount's own attack, pulled automatically whenever
        the mount's own target selection says something is in front
        (CBZ.cityAquaticBiteProbe);
-     • deaths go through the same buses as everything else: eaten
-       survivors through CBZ.surv.hurt → the killfeed, the player's own
-       death through killPlayer → spectate → the survival lose card.
+     • the meals go through the same buses as everything else: eaten
+       survivors through CBZ.surv.hurt → the killfeed. YOUR OWN death does
+       not — it is the shark that dies, not the man riding it, so it is
+       owned here (see DYING) and never touches survival's killPlayer,
+       its ragdoll, its placement or its battle-royale spectate.
 
    What it ADDS is the game: the evolution ladder (bull shark →
    hammerhead → great white → MEGALODON), mass from kills, the pod as the
@@ -791,28 +793,156 @@
   function apexResolve() {
     sim.winT = 0;
     sim.ended = true; sim.apex = true;
-    restoreRider();
     hideHud();                           // the win card owns the screen now
-    if (CBZ.surv && CBZ.surv.stats) CBZ.surv.stats.placement = 1;
     if (CBZ.winGame) CBZ.winGame("apex");
-    const sub = document.querySelector("#survwin .sub");
-    if (sub) sub.textContent = "APEX PREDATOR — you ate the thing that eats sharks";
+  }
+
+  /* ================= DYING ==================================================
+     OWNER, 2026-08-30: "when I die in shark sim it's like a person died lol —
+     clearly cus of nat disaster death."
+
+     He is describing exactly what the code did. The shark's death was routed
+     straight into survival's killPlayer(): the rider was made VISIBLE again on
+     the frame the shark died, and then a MAN was flung into the air in a
+     spinning ragdoll, sprayed arterial blood over the water, logged to the
+     killfeed as "You were eaten by the pod", handed a battle-royale placement
+     (#14 of 100) against the beach crowd, put into disaster spectate ("42
+     left") and finally shown ELIMINATED · Survived · Disasters. Every one of
+     those beats belongs to a different game. In this one the thing that dies
+     is a fish, the human on its back is a camera mount, and there is no field
+     of rivals to be placed against.
+
+     So the death is the SHARK'S now, end to end:
+       • the rider never comes back — he stays hidden through the death, the
+         replay and the card; teardown() (leaving the mode) owns the restore;
+       • no human ragdoll, no human gore, no human placement. The player is
+         never hurt at all: the rider shield STAYS UP through the whole beat,
+         where the old code deliberately dropped it to let the kill land;
+       • the body that died is what you watch die. The corpse gets wildlife.js's
+         own death tumble and sink (it always did — nobody ever saw it), and
+         the replay orbit is pointed at it by gluing the camera's anchor to the
+         carcass for the hold;
+       • one killfeed line, the sanctioned popup, naming what actually killed
+         you (marine_predation's own mark on the body, not a guess);
+       • then the shark run's own card — see sharkSimFillResult.
+     ?cfg_SHARK_DEATHCAM=0 skips the replay hold and cuts straight to it. */
+  const DEATH_HOLD = 3.4;                // seconds of corpse before the card
+
+  /* WHO KILLED YOU, asked of the body rather than assumed. marine_predation
+     marks its victim on the way in (_mpRoll.by while a pod is rolling it,
+     _mpHuntedBy for the one that committed), so the card can name the pod
+     without this file re-deriving the pod's own bookkeeping — and a shark that
+     somehow died to something else does not get told a lie about it. */
+  function killerLabel() {
+    const S = sim.shark;
+    const by = S && ((S._mpRoll && S._mpRoll.by) || S._mpHuntedBy);
+    const sp = by && !by.isPlayer && by.species;
+    if (!sp) return "the pod";
+    if (sp.id === "orca") return "the pod";
+    return "a " + String(sp.name || "predator").toLowerCase();
   }
 
   function onSharkDead() {
     if (sim.ended) return;
     sim.ended = true;
-    restoreRider();
-    hideHud();                           // ELIMINATED + spectate own the screen now
-    g.invuln = 0;                        // drop the rider shield so the kill lands
-    const S = sim.shark;
-    if (CBZ.surv && CBZ.surv.hurt) {
-      CBZ.surv.hurt(CBZ.surv.playerActor, 1e6, {
-        cause: "eaten by the pod",
-        fromX: S ? S.pos.x : CBZ.player.pos.x + 1, fromZ: S ? S.pos.z : CBZ.player.pos.z, fling: 4,
-      });
+    hideHud();                           // the death and its card own the screen
+    const S = sim.shark, P = CBZ.player;
+    sim.killer = killerLabel();
+    // THE HEALTH BAR IS THE SHARK (see step()), and the shark is dead — so it
+    // empties. step() floors the mirror at 1 while you are alive so nothing
+    // mistakes it for a death; this is the death, and a full green bar under a
+    // sinking carcass was the last thing on screen still saying you were fine.
+    if (P) P.hp = 0;
+    // ONE PHYSICAL BEAT, on the body that died. The sea breaks over it, the
+    // lens jolts once, time drops for half a second — the same grammar
+    // evolveBeat uses for the other end of the ladder.
+    if (S) {
+      const x = S.pos.x, z = S.pos.z;
+      if (CBZ.waterSplashAt) { try { CBZ.waterSplashAt(x, seaYAt(x, z), z, 3.4); } catch (e) {} }
+      if (CBZ.marineSurfaceHit) { try { CBZ.marineSurfaceHit(x, z, 3); } catch (e) {} }
     }
+    growClear();                         // no carcass frozen mid-swell for the replay
+    if (CBZ.shake) CBZ.shake(0.8);
+    if (CBZ.doSlowmo) CBZ.doSlowmo(0.5);
+    if (CBZ.sfx) { try { CBZ.sfx("ko"); } catch (e) {} }
+    // the killfeed keeps its one line — with the cause the feed's own city
+    // normaliser would have thrown away (survival's reportDeath does the same).
+    const cause = "killed by " + sim.killer;
+    if (CBZ.cityLogDeath) {
+      try { const e = CBZ.cityLogDeath("You", cause, { you: true }); if (e) { e.cause = cause; e.name = "You"; } } catch (e) {}
+    }
+    sim.death = { t: 0, dur: CFG.SHARK_DEATHCAM === false ? 0 : DEATH_HOLD };
+    // The replay is survival's orbit (systems/camera.js) — the one piece of
+    // that flow worth keeping, because it is just a camera. It frames
+    // player.pos, and deathTick keeps player.pos on the carcass.
+    if (CBZ.surv && sim.death.dur > 0) {
+      CBZ.surv.spectating = true;
+      CBZ.surv.deathCam = { t: 0, dur: sim.death.dur };
+    }
+    if (sim.death.dur <= 0) deathResolve();
   }
+
+  function deathTick(dt) {
+    const D = sim.death; if (!D) return;
+    D.t += dt;
+    const S = sim.shark, P = CBZ.player;
+    // the rider is still a passenger, even on a corpse: nothing may kill him
+    // while the carcass sinks, and the lens rides the body down with it.
+    if ((g.invuln || 0) < 2) g.invuln = 2;
+    if (S && P && !P.dead) {
+      const gp = S.group && S.group.position;
+      P.pos.x = gp ? gp.x : S.pos.x;
+      P.pos.z = gp ? gp.z : S.pos.z;
+      P.pos.y = gp ? gp.y : S.pos.y;
+      if (P._phys) { P._phys.air = false; P._phys.down = 0; P._phys.kx = P._phys.kz = 0; }
+    }
+    if (D.t >= D.dur) deathResolve();
+  }
+
+  function deathResolve() {
+    sim.death = null;
+    if (CBZ.clearSpectate) { try { CBZ.clearSpectate(); } catch (e) {} }
+    else if (CBZ.surv) { CBZ.surv.spectating = false; CBZ.surv.deathCam = null; }
+    if (CBZ.loseGame) CBZ.loseGame("shark-dead");
+  }
+
+  /* ---- THE CARD IS THIS GAME'S, NOT THE ISLAND'S -------------------------
+     Both end screens are shared DOM (#survwin / #survlose) and both shipped
+     survival's copy: "VICTORY ROYALE · #1 of 100 · Survived · Disasters" over
+     an apex-predator run, and "ELIMINATED · #14 of 100 · 0 Disasters" over a
+     dead shark. A placement against a hundred disaster survivors is not a
+     thing this game HAS — the beach crowd is food, it respawns, and being
+     "#14" of it is noise. So sharksim fills its own card through the same
+     seam gungame uses (systems/state.js dispatches on g.mode), with the three
+     numbers this run actually produced: how far up the ladder the body got,
+     how long it hunted, and how much it ate. Every other mode reclaims this
+     markup when IT fills, so nothing leaks between games. */
+  function speciesName() { return (LADDER[sim.tier] && LADDER[sim.tier].name) || LADDER[0].name; }
+  function setStat(vid, v, label) {
+    const e = document.getElementById(vid);
+    if (!e) return;
+    e.textContent = v;
+    const l = e.nextElementSibling;
+    if (l && label != null) l.textContent = label;
+  }
+  CBZ.sharkSimFillResult = function (win) {
+    const box = document.getElementById(win ? "survwin" : "survlose");
+    const logo = box && box.querySelector(".logo");
+    const sub = box && box.querySelector(".sub");
+    if (logo) logo.textContent = win ? "APEX PREDATOR" : "EATEN";
+    if (sub) {
+      sub.textContent = win
+        ? "You ate the thing that eats sharks"
+        : "The " + speciesName().toLowerCase() + " was killed by " + (sim.killer || "the pod");
+      delete sub.dataset.jailText;       // a jail loss must not think its copy is still up
+    }
+    // "#1 of 4" would read as a PLACEMENT, which is the exact thing this card
+    // exists to stop saying — it is a rung, so it reads as one.
+    setStat(win ? "swPlace" : "slPlace", (sim.tier + 1) + "/" + LADDER.length, "Form");
+    setStat(win ? "swTime" : "slTime", CBZ.fmtTime ? CBZ.fmtTime(g.elapsed) : "--", "Hunted");
+    setStat(win ? "swDis" : "slDis", String(sim.eaten || 0), "Eaten");
+    if (!win) { const b = document.getElementById("loseAgainBtn"); if (b) b.textContent = "Try Again"; }
+  };
 
   // ---- the rider is a passenger, not a picture ---------------------------
   function hideRider() {
@@ -1207,6 +1337,7 @@
     sim.shark = null;
     sim.tier = 0; sim.mass = 0; sim.eaten = 0;
     sim.ended = false; sim.apex = false;
+    sim.death = null; sim.killer = null;
     // stockT 0.4, not 3: the sea top-up rides this same clock now and a match
     // that opens on empty water is the bug this file was opened to fix.
     sim.biteT = 0; sim.podT = 2; sim.stockT = 0.4; sim.strandT = 0; sim.hudT = 0; sim.hintT = 5;
@@ -1265,6 +1396,10 @@
     if (cur && cur === sim.shark && CBZ.cityDismount) { try { CBZ.cityDismount(); } catch (e) {} }
     restoreRider();
     hideHud();
+    if (sim.death) {
+      sim.death = null;
+      if (CBZ.clearSpectate) { try { CBZ.clearSpectate(); } catch (e) {} }
+    }
     viewCardClose();                     // an unanswered chooser must not outlive the mode
     g.invuln = 0;                        // never leak the rider shield into another mode
     CBZ.sharkSimShoreRing = null;
@@ -1281,6 +1416,7 @@
     if (!S) return;
     if (sim.ended) {
       if (sim.winT > 0) { sim.winT -= dt; growTick(dt); if (sim.winT <= 0) apexResolve(); }
+      if (sim.death) deathTick(dt);
       hudTick(dt);
       return;
     }
@@ -1326,7 +1462,10 @@
     const st = g.state;
     if (st !== "playing") {
       if (sim.needsTeardown && st === "title") teardown();
-      else if (sim.on && (st === "won" || st === "lost")) { restoreRider(); hideHud(); sim.on = false; }
+      // NOT restoreRider(): a man standing on the win card's megalodon, or
+      // bobbing over his own shark's corpse, is the bug this mode's death was
+      // reported for. teardown() (leaving the mode) owns the restore.
+      else if (sim.on && (st === "won" || st === "lost")) { hideHud(); sim.on = false; }
       return;
     }
     if (!sim.on) setup();

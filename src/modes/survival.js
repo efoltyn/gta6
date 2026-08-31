@@ -424,7 +424,13 @@
 
     // spectating: keep the overlay's field count live; the moment a single
     // survivor remains the round is decided → the real results screen.
-    if (surv.spectating && g.state === "playing") {
+    // DISASTER ONLY. Shark Sim borrows surv.spectating for its death replay
+    // (the camera orbit in systems/camera.js reads that flag and nothing
+    // else), and it must not inherit the battle royale bolted to it: there is
+    // no field to count down there, the beach crowd is FOOD that respawns,
+    // and a restock lagging one frame would have handed a dead shark
+    // survival's "last one standing" results card.
+    if (surv.spectating && g.state === "playing" && g.mode === "survival") {
       surv.spectateT += dt;
       if (liveBots() <= 1) { finishRound(); return; }
       // the held-back ELIMINATED banner lands once the fling has played out

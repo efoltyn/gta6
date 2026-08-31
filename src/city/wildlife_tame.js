@@ -3261,6 +3261,164 @@
      direction, steering still steers. Rotation is never touched, so there is
      no fight with camera.lookAt and nothing to unwind when we stand down.
   ============================================================ */
+  /* ---- HOW BIG IS THE THING THE LENS IS FRAMING -------------------------
+     OWNER (2026-08-30): "for megalodon in shark sim the camera is way way
+     zoomed in, it needs to be smarter and zoom out when the shark gets
+     bigger."
+
+     He is right and the numbers say so. The old boom was `4.2 + scale * 3.2`,
+     which is linear in the SPECIES SCALE — a number that means nothing about
+     how long the animal actually is. Measured on the live page (seed 90210):
+
+       bull shark   scale 1.115  hull  4.8 m  boom  7.5 m  = 1.55 body lengths
+       megalodon    scale 3.208  hull 24.4 m  boom 14.5 m  = 0.59 body lengths
+
+     ...and a fully fed megalodon (K_MAX 1.86 on a 2.6 species scale) is 36 m
+     of animal inside a boom the old `Math.min(26, ...)` ceiling capped at 26,
+     with the ceiling itself doing the framing. So the bigger the shark got,
+     the TIGHTER it was framed, until the apex form the whole ladder climbs
+     toward was photographed as a wall of grey skin. The constant that was
+     supposed to make a megalodon "framed like a megalodon" was the thing
+     zooming in on it.
+
+     THE FIX IS TO FRAME OFF THE BODY, NOT OFF A SPECIES CONSTANT. hullLength()
+     measures the animal's own bounding box in MODEL UNITS, with the group's
+     scale divided back out and cached per species — so growth is a multiply,
+     and a shark that doubles under its rider moves the boom without anything
+     re-deriving a length.
+
+     WHY NOT CBZ.marineBodyLen: it memoises the length at the first scale it
+     ever saw and never looks again, which is fine for a bite reach solved
+     against one body and exactly wrong for a boom that has to grow. Asked for
+     the megalodon above it still answers 13.1 m — the number the animal had
+     roughly one evolution ago. */
+  const _hullBase = Object.create(null);
+  const _hullBox = new THREE.Box3();
+  let _hullTick = 0;
+  function hullLength(a) {
+    const g = a && a.group, sp = a && a.species;
+    const id = (sp && (sp.id || sp.name)) || null;
+    let base = id ? _hullBase[id] : 0;
+    /* THE MEASUREMENT IS A RUNNING MINIMUM, and that is not fussiness.
+       A group box catches whatever is parented into the body at that instant:
+       the jaw envelope swung wide on a bite, the tail hinged hard over, and —
+       the one that actually bites — a seized victim pinned to the jaw anchor,
+       which on a megalodon is a whole survivor hanging off the front. Every
+       one of those can only ever make the box LONGER than the animal, and the
+       first sample is cached forever, so a boom measured during a mouthful
+       would frame every megalodon after it from the wrong distance.
+       Re-sampling five times a second and keeping the smallest reading
+       converges on the resting hull within about a second of the animal
+       closing its mouth, and can never drift back out. */
+    const stale = base > 0 && (++_hullTick % 12 === 0);
+    if ((!(base > 0) || stale) && g) {
+      const rx = g.rotation.x, ry = g.rotation.y, rz = g.rotation.z;
+      let L = 0;
+      try {
+        g.rotation.set(0, 0, 0);
+        g.updateMatrixWorld(true);
+        _hullBox.setFromObject(g);
+        if (isFinite(_hullBox.max.x) && isFinite(_hullBox.min.x)) L = _hullBox.max.x - _hullBox.min.x;
+      } catch (e) { L = 0; }
+      g.rotation.set(rx, ry, rz);
+      try { g.updateMatrixWorld(true); } catch (e) {}
+      const s = Math.max(0.05, (g.scale && g.scale.x) || 1);
+      const sample = L > 0 ? L / s : 0;
+      if (sample > 0.5 && (!(base > 0) || sample < base)) { base = sample; if (id) _hullBase[id] = base; }
+    }
+    if (!(base > 0)) base = 4.8;                // the shipped bull hull measures ~4.8 model units
+    return base * Math.max(0.35, liveScale(a));
+  }
+
+  /* THE BOOM, AS A FUNCTION OF THE ANIMAL.
+
+     Anchored on the one framing nobody complained about — the starting bull
+     shark, 7.5 m of boom on 4.8 m of shark — and grown from there on a 0.60
+     power of the length ratio.
+
+     THE EXPONENT WAS PHOTOGRAPHED, NOT GUESSED. A ladder of tripods on the
+     apex form (14 / 20 / 24 / 28 / 34 m, same pose, same seed) says the
+     megalodon is whole in frame and still enormous at 20 m, half-eaten by the
+     water's own fog at 24, and GONE at 34 — this sea's underwater visibility
+     is the hard ceiling on any boom, and a camera that pulls past it hands the
+     player an empty blue screen instead of their own shark. Anchoring 8 m on
+     the 4.8 m bull and landing inside that 20–24 m window on a ~22 m
+     megalodon is an exponent of 0.66:
+
+       hull  4.8 m  ->  8.0 m boom  (1.67 lengths)   the bull, unchanged
+       hull 21.7 m  -> 21.7 m boom  (1.00 lengths)   the megalodon, whole
+       hull 36.0 m  -> 24.0 m boom  (ceiling)        a fully fed megalodon
+
+     A straight proportional boom (^1) would frame every shark identically and
+     throw away the one thing the ladder is FOR; the old formula was ~^0.45 in
+     length and framed the big ones inside their own hull. 0.60 keeps the apex
+     form visibly, uncomfortably bigger in frame than the bull — which is the
+     point of eating your way to it — while still fitting the whole animal.
+
+     The ceiling is 24 m for the same reason: past it the fog is doing the
+     framing. The very largest megalodons overflow the frame, and they have
+     earned it.
+
+     ?cfg_CAM_SHARK_FIT=0 restores the old constant, for the before column of
+     the before/after tool. */
+  const FIT_REF_LEN = 4.8, FIT_REF_DIST = 8.0, FIT_POW = 0.66, FIT_MAX = 24;
+  function boomFor(a) {
+    if (CBZ.CONFIG && CBZ.CONFIG.CAM_SHARK_FIT === false) {
+      return Math.max(4.5, Math.min(26, 4.2 + Math.max(0.35, liveScale(a)) * 3.2));
+    }
+    const len = Math.max(0.5, hullLength(a));
+    const d = FIT_REF_DIST * Math.pow(len / FIT_REF_LEN, FIT_POW);
+    return Math.max(4.5, Math.min(FIT_MAX, d));
+  }
+  /* WHAT THE RIDE PUBLISHES ABOUT ITS OWN FRAMING. The before/after tool and
+     anything else that wants to argue about the boom should read the numbers
+     rather than re-deriving them off a species table. */
+  CBZ.cityRideBoom = function (a) {
+    const t = a || ride.mount;
+    if (!t || !t.group) return null;
+    return { len: +hullLength(t).toFixed(2), dist: +boomFor(t).toFixed(2), scale: +liveScale(t).toFixed(3) };
+  };
+
+  /* ---- THE STAND-OFF IS NOT PART OF THE DIVE TREATMENT --------------------
+     Outside its dead band the dive pass used to hand the frame straight back
+     to systems/camera.js's 4.35 m walking boom — which is fine on a bull shark
+     and is INSIDE a megalodon. Two poses live outside that band and neither is
+     rare: a shallow cruise with the dorsal out, which is most of the shore
+     hunting in this game, and a breach, which is the one moment the whole
+     ladder is built to pay off. The apex form spent both of them with the lens
+     somewhere in its own back.
+
+     So the fit distance is enforced as a FLOOR at every depth, in the air
+     included: if camera.js has parked the lens closer to the body than the
+     animal's own length allows, push it straight back out along the view
+     direction. It only ever pushes AWAY and it never touches rotation, so
+     there is nothing for camera.js to fight and nothing to unwind — the same
+     reason the dive lerp composes instead of competing. */
+  function aquaticStandOff(a, P, W, cam, dir) {
+    const minD = boomFor(a) * 0.86;
+    const bx = P.pos.x - cam.position.x, by = W.y - cam.position.y, bz = P.pos.z - cam.position.z;
+    const have = Math.sqrt(bx * bx + by * by + bz * bz);
+    if (!(have < minD)) return;
+    const push = minD - have;
+    cam.position.x -= dir.x * push;
+    cam.position.y -= dir.y * push;
+    cam.position.z -= dir.z * push;
+    // The push runs AFTER camera.js's own collision sweep, so it owns not
+    // walking the lens into the ground it just skipped past. Seabed AND dry
+    // floor: a shallow stand-off near a beach is exactly where the two oracles
+    // disagree.
+    let flr = -1e9;
+    if (CBZ.citySeaBedYAt) {
+      const bed = +CBZ.citySeaBedYAt(cam.position.x, cam.position.z);
+      if (Number.isFinite(bed)) flr = Math.max(flr, bed);
+    }
+    if (CBZ.floorAt) {
+      const gy = +CBZ.floorAt(cam.position.x, cam.position.z);
+      if (Number.isFinite(gy)) flr = Math.max(flr, gy);
+    }
+    if (flr > -1e8 && cam.position.y < flr + 0.4) cam.position.y = flr + 0.4;
+  }
+
   const _diveWant = new THREE.Vector3(), _diveDir = new THREE.Vector3();
   function aquaticDiveCamera(dt) {
     if (!DIVE_ON()) return;
@@ -3291,6 +3449,11 @@
        is leaving, and the moment camera.js has the lens above the line this
        does nothing at all. It cannot fight the boom because it can only ever
        push the same way gravity is not. */
+    // The boom holds its stand-off before anything else decides anything —
+    // a breach is exactly where the walking boom is worst and where the old
+    // pass handed it the frame outright.
+    cam.getWorldDirection(_diveDir);
+    aquaticStandOff(a, P, W, cam, _diveDir);
     if (W.airborne) {
       const camSurf = seaY(cam.position.x, cam.position.z);
       const out = Math.max(0, W.y - surf);
@@ -3307,12 +3470,10 @@
     // lens still in the air and the whole treatment still switched off.
     const k = Math.min(1, (sub - 0.45) / 2.2);
     if (!(k > 0)) return;
-    cam.getWorldDirection(_diveDir);
-    const scale = Math.max(0.35, liveScale(a));
     // A CONSTANT distance, not the measured one: measuring our own previous
     // frame's result and feeding it back in is how a camera starts creeping.
-    // Sized to the hull so a megalodon is framed like a megalodon.
-    const dist = Math.max(4.5, Math.min(26, 4.2 + scale * 3.2));
+    // Sized to the HULL (see boomFor) so a megalodon is framed like one.
+    const dist = boomFor(a);
     _diveWant.set(
       P.pos.x - _diveDir.x * dist,
       W.y - _diveDir.y * dist,

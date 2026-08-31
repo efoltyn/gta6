@@ -28,8 +28,9 @@
         leaving the player mounted on the new body.
      5. IT WINS: as the megalodon, eating an orca ends the round "won" with
         the APEX PREDATOR card.
-     6. IT LOSES: on a fresh boot, the shark dying kills the player through
-        the survival death flow, and the rider comes back.
+     6. IT LOSES: on a fresh boot, the shark dying plays the death replay on
+        the CORPSE — the rider is never killed and never reappears — and
+        resolves to shark sim's own card, not survival's ELIMINATED.
 
    Screenshots land in artifacts/shark-sim/ (one frame rendered on demand —
    the RAF loop is not what advances this test). */
@@ -451,27 +452,53 @@ try {
       }
       if (!staged) fail("no orca available to stage the win");
       const s5 = await rig.evl(`({ state: CBZ.game.state, apex: !!CBZ.sharkSim.apex,
-        sub: (document.querySelector("#survwin .sub") || {}).textContent || "" })`);
+        logo: (document.querySelector("#survwin .logo") || {}).textContent || "",
+        sub: (document.querySelector("#survwin .sub") || {}).textContent || "",
+        placeL: (document.getElementById("swTotal") || {}).textContent || "" })`);
       report.stages.win = s5;
       if (!won) fail("eating the orca as megalodon did not win (state " + s5.state + ")");
-      else if (!/APEX/i.test(s5.sub)) fail("win card sub is not the apex line: " + s5.sub);
-      else pass('WON — "' + s5.sub + '"');
+      else if (!/APEX/i.test(s5.logo)) fail("win card is not the apex card: " + s5.logo);
+      else if (/of 100/.test(s5.placeL)) fail("win card still carries survival's field: " + s5.placeL);
+      else pass('WON — "' + s5.logo + " · " + s5.sub + '"');
       await shot("5-apex-win");
     }
 
     // ================= STAGE 6: THE DEATH =================================
+    // A SHARK DIES HERE, NOT A MAN. The old flow flung the rider's body out of
+    // the water in a ragdoll and showed survival's ELIMINATED · #14 of 100 ·
+    // Disasters card; this stage exists to keep that from coming back, so it
+    // asserts the two halves of the fix: the human is never killed and never
+    // reappears, and the card that lands is the shark run's own.
     say("— stage 6: the pod wins (fresh boot) —");
     rig.clearErrors();
     if (await bootIntoMatch("reboot")) {
       await rig.evl(`(() => { const S = CBZ.sharkSim.shark; S.hp = 0; S.dead = true; })()`);
-      const dead = await burstUntil(`CBZ.player.dead && CBZ.playerChar.group.visible === true`, 8);
-      const s6 = await rig.evl(`({ dead: CBZ.player.dead, cause: CBZ.surv._deathCause || "",
-        spect: !!CBZ.surv.spectating, state: CBZ.game.state, rider: CBZ.playerChar.group.visible })`);
+      // the replay beat first: dead shark, live (hidden) rider, camera orbiting
+      const beat = await burstUntil(`!!CBZ.sharkSim.death`, 4);
+      const s6a = await rig.evl(`({ beat: !!CBZ.sharkSim.death, pdead: CBZ.player.dead,
+        rider: CBZ.playerChar.group.visible, spect: !!CBZ.surv.spectating,
+        killer: CBZ.sharkSim.killer || "" })`);
+      if (!beat) fail("shark death did not start the death replay (" + JSON.stringify(s6a) + ")");
+      else if (s6a.pdead) fail("the RIDER was killed by the shark's death — that is the nat-disaster death flow");
+      else if (s6a.rider) fail("the rider became visible over his own shark's corpse");
+      else pass('shark died → death replay on the corpse, rider still hidden and alive (killer: "' + s6a.killer + '")');
+      await shot("6-the-body-that-died");
+      // ..then the card, which must be this game's and not the island's
+      const carded = await burstUntil(`CBZ.game.state === "lost"`, 8);
+      const s6 = await rig.evl(`(() => { const b = document.getElementById("survlose"); return {
+        state: CBZ.game.state, pdead: CBZ.player.dead, rider: CBZ.playerChar.group.visible,
+        spect: !!CBZ.surv.spectating,
+        logo: (b.querySelector(".logo") || {}).textContent || "",
+        sub: (b.querySelector(".sub") || {}).textContent || "",
+        place: (document.getElementById("slPlace") || {}).textContent || "",
+        placeL: (document.getElementById("slTotal") || {}).textContent || "",
+        disL: ((document.getElementById("slDis") || {}).nextElementSibling || {}).textContent || "" }; })()`);
       report.stages.death = s6;
-      if (!dead) fail("shark death did not kill the player / restore the rider (" + JSON.stringify(s6) + ")");
-      else pass('shark died → you died ("' + s6.cause + '"), rider restored, ' +
-        (s6.spect ? "spectating" : "state " + s6.state));
-      await burst(1.5);
+      if (!carded) fail("the death never resolved to a card (" + JSON.stringify(s6) + ")");
+      else if (s6.pdead) fail("the rider was killed on the way to the card");
+      else if (/ELIMINATED/i.test(s6.logo) || /of 100/.test(s6.placeL) || /Disaster/i.test(s6.disL))
+        fail("the shark death is still wearing survival's card: " + JSON.stringify(s6));
+      else pass('LOST — "' + s6.logo + " · " + s6.sub + '" (' + s6.place + " " + s6.placeL + ", " + s6.disL + ")");
       await shot("6-eaten-by-the-pod");
     }
   }
