@@ -809,6 +809,20 @@
     return out;
   }
 
+  // A landed mouthful has two related points. jawPoint() is the leading tooth
+  // contact used for hit tests and wounds; jawGripPoint() is the authored
+  // lower/deeper seat used while those teeth compress around the contacted
+  // surface. Keeping this next to jawPoint makes the visible mouth the only
+  // owner of both answers. Legacy mouths degrade to the contact point.
+  function jawGripPoint(actor) {
+    if (actor._jawGripL) return actor._jawGripL;
+    var g = actor.group, mouth = g && g.userData && g.userData.aquaticMouth;
+    var p = mouth && mouth.grip;
+    var out = p ? { x: p.x, y: p.y, z: p.z || 0 } : jawPoint(actor);
+    actor._jawGripL = out;
+    return out;
+  }
+
   // ==========================================================================
   //  WHERE THE TEETH ACTUALLY ARE — and whether they got there.
   // ==========================================================================
@@ -1614,6 +1628,7 @@
   CBZ.creatureStyleFor = creatureStyleFor;
   CBZ.creatureSeizeStyleFor = creatureSeizeStyleFor;
   CBZ.creatureJawPoint = jawPoint;      // group-LOCAL hold point, cached per actor
+  CBZ.creatureJawGripPoint = jawGripPoint; // lower/deeper in-mouth contact seat
   // The same point IN THE WORLD, and the contact test built on it. Exported
   // because a probe has to be able to photograph and measure "the teeth were
   // here when they closed" — that claim is the whole of the bite repair, and a

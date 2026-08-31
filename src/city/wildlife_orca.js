@@ -983,9 +983,12 @@
     const REST_CLOSE = 0, MAX_OPEN = 0.52;
     lower.rotation.z = REST_CLOSE;
     const contract = {
-      version: 4, shape: "articulated-body-envelope",
+      version: 5, shape: "articulated-body-envelope",
       hinge: { x: JAW_X, y: JAW_Y, z: 0 },
       bite: { x: JAW_X + 1.30, y: JAW_Y + 0.16, z: 0 },
+      // Contact starts at `bite`; compression carries that contacted surface a
+      // little deeper and down between the tooth rows at this authored socket.
+      grip: { x: JAW_X + 1.12, y: JAW_Y + 0.04, z: 0 },
       maxOpen: MAX_OPEN, travel: MAX_OPEN + REST_CLOSE, restClose: REST_CLOSE,
       protrude: 0, upperDrop: 0,                        // an orca protrudes nothing
       upperTeeth: 22, lowerTeeth: 22, toothRows: 1,

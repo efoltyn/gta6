@@ -107,7 +107,7 @@ const subjects = [
   },
 ];
 
-async function stageSharkFlesh(input) {
+export async function stageSharkFlesh(input) {
   const CBZ = window.CBZ, T = window.THREE, sub = input.subject;
   if (!CBZ || !T || !CBZ.stepSim || !CBZ.surv || !CBZ.goreSever) return { ok: false, missing: "engine" };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -244,7 +244,7 @@ async function stageSharkFlesh(input) {
         for (const a of CBZ.cityWildlife || []) {
           if (!a || a.dead || !a.species) continue;
           if (CBZ.sharkSim && a === CBZ.sharkSim.shark) continue;
-          if (a === D.orca) continue;
+          if (a === D.orca || a === D.keepAnimal) continue;
           a.pos.x += 900; a.hunger = 0;
           if (a._waterMove) { a._waterMove.x = a.pos.x; a._waterMove.z = a.pos.z; }
         }
@@ -292,6 +292,23 @@ async function stageSharkFlesh(input) {
         D.step(2);
         return b;
       },
+      stageAnimal(spot, speciesId) {
+        const list = CBZ.cityWildlife || [];
+        const a = list.find((x) => x && !x.dead && x.species && x.species.id === speciesId);
+        if (!a || !a.group) return null;
+        D.keepAnimal = a;
+        const sy = D.seaY(spot.x, spot.z);
+        a.dead = false; a.hp = Math.max(1000, a.hp || 0); a.maxHp = Math.max(1000, a.maxHp || 0);
+        a.grow = null; a.ridden = true; a.group.visible = true;
+        if (!a.group.parent && CBZ.scene) CBZ.scene.add(a.group);
+        a.group.traverse((o) => { o.matrixAutoUpdate = true; });
+        // Across the tooth rows, not nose-to-nose: this makes the contacted
+        // flank and its passage into the lower mouth readable from the side.
+        D.pin(a, spot.x, sy - 0.22, spot.z, spot.ang + Math.PI * 0.5);
+        D.clearCrowd(null);
+        D.step(2);
+        return a;
+      },
 
       /* HOW FAR AHEAD OF ITS OWN ORIGIN THIS MOUTH IS. Asked of the live rig
          rather than assumed, because Shark Sim's whole progression is the body
@@ -305,8 +322,27 @@ async function stageSharkFlesh(input) {
       halfSpan(v) {
         if (!v || !v.group) return 0.35;
         v.group.updateMatrixWorld(true);
-        const s = new T.Box3().setFromObject(v.group).getSize(new T.Vector3());
+        let body = v.group;
+        if (v.species && v.species.aquatic) {
+          v.group.traverse((o) => { if (body === v.group && o && o.isMesh && /hull$/i.test(o.name || "")) body = o; });
+        }
+        const s = new T.Box3().setFromObject(body).getSize(new T.Vector3());
         return Math.max(0.2, Math.hypot(s.x, s.z) * 0.5);
+      },
+      alignTargetToJawY(a, target) {
+        if (!a || !target || !target.group) return;
+        const j = D.jawPoint(a); if (!j) return;
+        target.group.updateMatrixWorld(true);
+        let body = target.group;
+        target.group.traverse((o) => { if (body === target.group && o && o.isMesh && /hull$/i.test(o.name || "")) body = o; });
+        const c = new T.Box3().setFromObject(body).getCenter(new T.Vector3());
+        const dy = j.y - c.y;
+        target.group.position.y += dy;
+        if (target.pos && target.pos !== target.group.position) target.pos.y += dy;
+        for (let i = 0; i < D.pinned.length; i++) {
+          if (D.pinned[i].a === target) { D.pinned[i].y += dy; break; }
+        }
+        target.group.updateMatrixWorld(true);
       },
       /* THE APPROACH, held every tick. Straight out of bite-angles.mjs, which
          solved this first: the ride's heading is NOT the animal's `heading`
@@ -337,7 +373,7 @@ async function stageSharkFlesh(input) {
          rather than guessed: selectBiteTarget is a distance AND a front test
          against a box clamp, and one hardcoded number that works on a bull
          shark misses on a megalodon. */
-      strike(victim) {
+      strike(victim, releaseOnHit) {
         const a = CBZ.sharkSim.shark, P = CBZ.player;
         if (!a || !victim || !victim.group) return false;
         const diag = { tries: [] };
@@ -361,17 +397,59 @@ async function stageSharkFlesh(input) {
           const R = base + k;
           const sx = victim.pos.x + ox * R, sz = victim.pos.z + oz * R;
           const sy = D.seaY(sx, sz) - 0.5;
+          // Contact proof gives the mounted controller its production lunge.
+          // The wound chapters keep their historical fixed tableau because
+          // they judge decals, not travel. Re-pinning the shark every approach
+          // frame here would erase the new surface-closing movement and make a
+          // true tooth gate impossible to reach.
+          if (releaseOnHit) D.holdShark(sx, sy, sz, h);
           for (let i = 0; i < 45; i++) {
-            D.holdShark(sx, sy, sz, h);
+            if (!releaseOnHit) D.holdShark(sx, sy, sz, h);
             D.hold();
+            // A small fish has no wader-height vertical envelope to forgive the
+            // harness's inability to write the mounted controller's private
+            // water-column root. While the approach is still staged, align its
+            // measured box centre to the live jaw. The pin is removed at the
+            // landed edge below; production owns every post-contact frame.
+            if (releaseOnHit && victim.species && victim.species.aquatic) D.alignTargetToJawY(a, victim);
+            // The target-local material point must come from the pose BEFORE
+            // damage/knockback/holding changes it. Snapshot that pose on every
+            // candidate contact step; only the landed one is retained.
+            victim.group.updateMatrixWorld(true);
+            const preM = victim.group.matrixWorld.clone();
+            const preBox = new T.Box3().setFromObject(victim.group);
+            let preHullM = null, preHullBox = null;
+            if (victim.species && victim.species.aquatic) {
+              let hull = null;
+              victim.group.traverse((o) => { if (!hull && o && o.isMesh && /hull$/i.test(o.name || "")) hull = o; });
+              if (hull && hull.geometry) {
+                if (!hull.geometry.boundingBox) hull.geometry.computeBoundingBox();
+                hull.updateMatrixWorld(true);
+                if (hull.geometry.boundingBox) {
+                  preHullM = hull.matrixWorld.clone();
+                  preHullBox = hull.geometry.boundingBox.clone();
+                }
+              }
+            }
+            const preSharkRot = a.group.rotation.clone();
+            const preSharkScale = a.group.scale.clone();
             if (CBZ.cityMountedAnimalAttack) { try { CBZ.cityMountedAnimalAttack(true); } catch (e) {} }
             CBZ.stepSim(1 / 30);
-            D.holdShark(sx, sy, sz, h);
-            D.hold();
+            const landed = D.hits() > before;
+            // Wound chapters deliberately restore the staged tableau. Contact
+            // proof must preserve the production hit frame; restamping here
+            // was itself an overwrite of the surface-stop we were judging.
+            if (!releaseOnHit) {
+              D.holdShark(sx, sy, sz, h);
+              D.hold();
+            } else if (!landed) {
+              D.hold();             // target only; the mounted lunge keeps its travel
+            }
             D.reshoot();          // see step(): the lens must be right for the NEXT tick's emitters
-            if (D.hits() > before) {
+            if (landed) {
               D.jaw = D.jawPoint(a);
               diag.hitAt = Number(R.toFixed(2));
+              diag.heading = h;
               /* WHERE THE LENS WAS AT THE MOMENT OF CONTACT. Every wound and
                  gore emitter in this game distance-gates on CBZ.camera, and a
                  refusal reads identically to "the feature is broken" — so the
@@ -384,12 +462,86 @@ async function stageSharkFlesh(input) {
               }
               diag.woundAudit = (typeof CBZ.woundDecalAudit === "function") ? CBZ.woundDecalAudit() : null;
               if (CBZ.cam) { CBZ.cam.yaw = Math.atan2(-Math.cos(h), -Math.sin(h)); CBZ.cam.pitch = 0.05; }
+              if (releaseOnHit) {
+                /* The ordinary flesh preset pins the subject because it is
+                   judging wounds. A contact preset must hand both bodies back
+                   to production the instant the hit lands, or the preset
+                   itself becomes the second transform writer and hides the
+                   exact overlap it is meant to expose. Remember the contacted
+                   target surface in target-local space before releasing it so
+                   both columns can measure that same material point later. */
+                // damageBiteTarget samples the new physical root with the
+                // previous frame's attack pitch; the late presentation pass
+                // applies this frame's pitch immediately afterwards. Rebuild
+                // that exact hit matrix so the comparator stores the same
+                // surface point the runtime stored, rather than one displaced
+                // by the pose update that followed it.
+                const jl = CBZ.creatureJawPoint(a);
+                const hitM = new T.Matrix4().compose(a.group.position,
+                  new T.Quaternion().setFromEuler(preSharkRot), preSharkScale);
+                const jp = new T.Vector3(jl.x, jl.y, jl.z || 0).applyMatrix4(hitM);
+                let cp;
+                if (preHullM && preHullBox) {
+                  const inv = new T.Matrix4().copy(preHullM).invert();
+                  const lp = jp.clone().applyMatrix4(inv);
+                  const lc = preHullBox.clampPoint(lp, new T.Vector3());
+                  if (preHullBox.containsPoint(lp)) {
+                    const fx = Math.cos(h), fz = Math.sin(h);
+                    const ld = new T.Vector3(jp.x + fx, jp.y, jp.z + fz)
+                      .applyMatrix4(inv).sub(lp).normalize();
+                    let tx = Infinity, tz = Infinity;
+                    if (Math.abs(ld.x) > 0.0001) tx = ld.x > 0
+                      ? (lp.x - preHullBox.min.x) / ld.x : (preHullBox.max.x - lp.x) / -ld.x;
+                    if (Math.abs(ld.z) > 0.0001) tz = ld.z > 0
+                      ? (lp.z - preHullBox.min.z) / ld.z : (preHullBox.max.z - lp.z) / -ld.z;
+                    lc.copy(lp).addScaledVector(ld, -Math.max(0, Math.min(tx, tz)));
+                  }
+                  cp = lc.applyMatrix4(preHullM);
+                } else {
+                  cp = preBox.clampPoint(jp, new T.Vector3());
+                }
+                if (!preHullM && preBox.containsPoint(jp)) {
+                  const fx = Math.cos(h), fz = Math.sin(h);
+                  let tx = Infinity, tz = Infinity;
+                  if (Math.abs(fx) > 0.0001) tx = fx > 0
+                    ? (jp.x - preBox.min.x) / fx : (preBox.max.x - jp.x) / -fx;
+                  if (Math.abs(fz) > 0.0001) tz = fz > 0
+                    ? (jp.z - preBox.min.z) / fz : (preBox.max.z - jp.z) / -fz;
+                  const dep = Math.max(0, Math.min(tx, tz));
+                  cp.copy(jp); cp.x -= fx * dep; cp.z -= fz * dep;
+                }
+                D.contactLocal = cp.applyMatrix4(new T.Matrix4().copy(preM).invert());
+                D.contactVictim = victim; D.contactHeading = h;
+                D.unpin(victim);
+              }
               return true;
             }
           }
           diag.tries.push(D.geomProbe(a, victim, R, h));
         }
         return false;
+      },
+      contactProbe() {
+        const a = CBZ.sharkSim && CBZ.sharkSim.shark;
+        const v = D.contactVictim;
+        if (!a || !a.group || !v || !v.group || !D.contactLocal) return null;
+        a.group.updateMatrixWorld(true); v.group.updateMatrixWorld(true);
+        const mouth = a.group.userData && a.group.userData.aquaticMouth;
+        if (!mouth || !mouth.bite) return null;
+        const fallbackGrip = { x: mouth.bite.x - 0.11, y: mouth.bite.y - 0.08, z: mouth.bite.z || 0 };
+        const gl = mouth.grip || fallbackGrip;
+        const seat = new T.Vector3(gl.x, gl.y, gl.z || 0).applyMatrix4(a.group.matrixWorld);
+        const jaw = new T.Vector3(mouth.bite.x, mouth.bite.y, mouth.bite.z || 0).applyMatrix4(a.group.matrixWorld);
+        const contact = D.contactLocal.clone().applyMatrix4(v.group.matrixWorld);
+        const center = new T.Box3().setFromObject(v.group).getCenter(new T.Vector3());
+        const h = D.contactHeading || 0, fx = Math.cos(h), fz = Math.sin(h);
+        return {
+          surfaceToSeatM: +contact.distanceTo(seat).toFixed(3),
+          surfaceBelowTeethM: +Math.max(0, jaw.y - contact.y).toFixed(3),
+          surfaceBehindTeethM: +Math.max(0, (jaw.x - contact.x) * fx + (jaw.z - contact.z) * fz).toFixed(3),
+          teethPastVictimCenterM: +Math.max(0, (jaw.x - center.x) * fx + (jaw.z - center.z) * fz).toFixed(3),
+          jaw: [jaw.x, jaw.y, jaw.z], seat: [seat.x, seat.y, seat.z], contact: [contact.x, contact.y, contact.z],
+        };
       },
       /* WHY A STANDOFF MISSED, in the game's own terms: where the mouth is,
          where the nearest point of the victim's box is from it, and the two
@@ -666,21 +818,61 @@ async function stageSharkFlesh(input) {
        least equipped to draw. */
     async function bite() {
       if (!await D.boot()) throw new Error("sharksim never armed");
+      D.keepAnimal = sub.targetSpecies
+        ? (CBZ.cityWildlife || []).find((x) => x && !x.dead && x.species && x.species.id === sub.targetSpecies)
+        : null;
       D.peace();
-      const spot = D.water(0.7, 1.15);
-      if (!spot) throw new Error("no thigh-deep water on this island");
+      const spot = sub.targetSpecies ? D.water(8.0, 18.0) : D.water(0.7, 1.15);
+      if (!spot) throw new Error(sub.targetSpecies ? "no clear mid-water bite lane on this island" : "no thigh-deep water on this island");
       D.spot = spot;
-      const v = D.stageVictim(spot);
-      if (!v) throw new Error("no survivor to bite");
+      const v = sub.targetSpecies ? D.stageAnimal(spot, sub.targetSpecies) : D.stageVictim(spot);
+      if (!v) throw new Error(sub.targetSpecies ? "no target animal to bite" : "no survivor to bite");
       D.victim = v;
+      const contactProof = !!sub.contactProof;
+      if (contactProof) {
+        // Isolate the collision read. The production damage call still lands,
+        // but an intact high-health body and silent gore emitters keep blood,
+        // severed parts and a death cloud from hiding which side of the tooth
+        // ring the contacted body occupies.
+        v.hp = Math.max(1000, v.hp || 0); v.maxHp = Math.max(1000, v.maxHp || 0);
+        for (const key of ["goreImpact", "goreKillCloud", "goreBloom", "marineBleed", "creatureBiteWound", "waterSplashAt"]) {
+          if (typeof CBZ[key] === "function") CBZ[key] = function () {};
+        }
+      }
       const sy = D.seaY(spot.x, spot.z);
       // the lens goes on the victim BEFORE the teeth do: every gore emitter in
       // this game distance-gates itself, and a detached tripod is what
       // dist2Cam reads.
       D.shoot(spot.x - Math.cos(spot.ang) * 3.4, sy + 1.25, spot.z - Math.sin(spot.ang) * 3.4 + 2.0,
         spot.x, sy + 0.45, spot.z);
-      out.biteLanded = D.strike(v) ? 1 : 0;
-      if (!out.biteLanded) throw new Error("no bite landed on the wader :: " + JSON.stringify(D.diag));
+      out.biteLanded = D.strike(v, contactProof) ? 1 : 0;
+      if (!out.biteLanded) throw new Error("no bite landed on the staged target :: " + JSON.stringify(D.diag));
+      if (contactProof) {
+        // Four real frames after first contact keeps the repaired bite inside
+        // its readable full-gape/hold phase. The strip then follows the old
+        // drive-through and the new compression/release over equal sim time.
+        D.step(4);
+        D.jaw = D.jawPoint(CBZ.sharkSim.shark);
+        const h = D.contactHeading || 0, side = h + Math.PI * 0.5;
+        const j = D.jaw;
+        D.shoot(j.x - Math.cos(h) * 0.7 + Math.cos(side) * 3.8, j.y + 0.42,
+          j.z - Math.sin(h) * 0.7 + Math.sin(side) * 3.8,
+          j.x + Math.cos(h) * 0.05, j.y - 0.10, j.z + Math.sin(h) * 0.05);
+        D.step(1); D.reshoot();
+        const p = D.contactProbe();
+        const au = (typeof CBZ.aquaticMountAudit === "function") ? CBZ.aquaticMountAudit() : null;
+        if (p) {
+          out.surfaceToSeatM = p.surfaceToSeatM;
+          out.surfaceBelowTeethM = p.surfaceBelowTeethM;
+          out.surfaceBehindTeethM = p.surfaceBehindTeethM;
+          out.teethPastVictimCenterM = p.teethPastVictimCenterM;
+        }
+        out.toothPenetrationAtHitM = au && au.bitePenetration != null ? au.bitePenetration : null;
+        out.surfaceStops = au && au.surfaceStops != null ? au.surfaceStops : 0;
+        out.heldFrames = au && au.biteSeatFrames != null ? au.biteSeatFrames : 0;
+        D.contact = p;
+        return;
+      }
       out.woundMarksAtContact = D.marks(v).n;
       D.sec(0.35);
       D.reshoot();

@@ -1864,7 +1864,7 @@
     const cavity = throat;
 
     const contract = {
-      version: 4,
+      version: 5,
       shape: "articulated-body-envelope",
       hinge: { x: hingeX, y: hingeY, z: 0 },
       // THE DAMAGE SOCKET follows the mouth DOWN. The upper jaw now drops and
@@ -1872,6 +1872,14 @@
       // above the open tooth ring — i.e. damage resolving in clear water just
       // over the teeth. Bias it to the centre of the open gape instead.
       bite: { x: hingeX + len * 0.96, y: hingeY - (o.upperDrop == null ? gap * 0.34 : o.upperDrop) * 0.6, z: 0 },
+      // THE THING BEING BITTEN SITS INSIDE THE MOUTH, not on the rostrum.
+      // `bite` remains the front-centre damage socket where the teeth first
+      // meet a surface. `grip` is a second authored point, one tooth-row deeper
+      // and lower, used only for the short contact hold while the jaws compress.
+      // Publishing both from the mouth builder keeps collision, damage and the
+      // visible jaw on one geometry contract instead of letting mounted-bite
+      // code invent a nearby point from species scale.
+      grip: { x: hingeX + len * 0.82, y: hingeY - (o.upperDrop == null ? gap * 0.34 : o.upperDrop) * 0.6 - gap * 0.28, z: 0 },
       maxOpen: o.maxOpen || 1.05,
       travel: (o.maxOpen || 1.05) + restClose,
       restClose: restClose,

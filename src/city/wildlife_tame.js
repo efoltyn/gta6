@@ -92,9 +92,11 @@
   if (CFG.SHARK_RIDE_TOUCH_VERT == null) CFG.SHARK_RIDE_TOUCH_VERT = true;
   if (CFG.SHARK_BREACH == null) CFG.SHARK_BREACH = true;
   if (CFG.MARINE_SIT_DEEPER == null) CFG.MARINE_SIT_DEEPER = true;
+  if (CFG.MARINE_BITE_SEAT == null) CFG.MARINE_BITE_SEAT = true;
   const DIVE_ON = () => CFG.SHARK_RIDE_DIVE !== false;
   const BREACH_ON = () => CFG.SHARK_BREACH !== false;
   const DEEPER_ON = () => CFG.MARINE_SIT_DEEPER !== false;
+  const BITE_SEAT_ON = () => CFG.MARINE_BITE_SEAT !== false;
   // The one gravity the airborne mount integrates under, shared with the launch
   // solve so "how much air" and "how fast do I leave" can never disagree.
   const BREACH_G = 17.5;
@@ -1137,6 +1139,9 @@
     mount: null, head: 0, phase: 0, lx: 0, lz: 0, visual: null, water: null,
     attackT: 0, attackDur: 0, attackCd: 0, attackHit: false, attackHitP: -1,
     target: null, targetKind: null, attackPitch: 0, attackRoll: 0,
+    // Short-lived surface anchor from first tooth contact through compression.
+    // This is separate from the above-weight death-roll clamp below.
+    gripTarget: null, gripKind: null, gripLocal: new THREE.Vector3(), gripFrames: 0,
     lensT: 0,                 // refractory on the bite's camera jolt (see damageBiteTarget)
     hurtT: 0, hurtAmp: 0, hurtAcc: 0,   // THE ONLY THING THAT SHAKES THE LENS — see rideDamageFelt
     engulf: null, engulfBy: null,   // the meal being drawn into the mouth, and by whom (THE MEAL GOES IN)
@@ -1152,11 +1157,23 @@
   const jawV = new THREE.Vector3();
   const biteV = new THREE.Vector3();
   const biteBox = new THREE.Box3();
+  const biteHullBox = new THREE.Box3();
+  const biteHullInvM = new THREE.Matrix4();
+  const biteHullLocalV = new THREE.Vector3();
+  const biteHullSurfaceV = new THREE.Vector3();
+  const biteHullDirV = new THREE.Vector3();
+  let biteHullActive = null;
   const biteNormal = new THREE.Vector3();
+  const gripWantV = new THREE.Vector3();
+  const gripContactV = new THREE.Vector3();
+  const gripDeltaV = new THREE.Vector3();
+  const gripInvM = new THREE.Matrix4();
   const AQUATIC_AUDIT = {
     mounts: 0, breaches: 0, reentries: 0, attacks: 0, hits: 0, shipBites: 0,
-    clamps: 0,
+    clamps: 0, surfaceStops: 0,
     lastSpecies: null, lastTarget: null,
+    lastContactGap: 0, lastBitePenetration: 0, lastCollider: "",
+    lastSeatError: 0, lastSeatBelowJaw: 0, lastSeatFrames: 0,
     // THE ARC, as numbers. Everything below is written by the breach itself and
     // read by tools/visual-presets/shark-breach.mjs, so the pictures and the
     // table describe the same jump.
@@ -1264,12 +1281,169 @@
     a.group.updateMatrixWorld(true);
     return jawV.set(p.x, p.y, p.z).applyMatrix4(a.group.matrixWorld);
   }
+  function jawGripWorld(a) {
+    const p = (CBZ.creatureJawGripPoint && CBZ.creatureJawGripPoint(a)) ||
+      (CBZ.creatureJawPoint && CBZ.creatureJawPoint(a)) || { x: 1, y: 0.7, z: 0 };
+    a.group.updateMatrixWorld(true);
+    return gripWantV.set(p.x, p.y, p.z).applyMatrix4(a.group.matrixWorld);
+  }
   function biteDistance(target, mouth) {
     if (!target || !target.group || !target.group.parent) return Infinity;
     target.group.updateMatrixWorld(true);
+    biteHullActive = null;
+    /* A FISH'S FIN IS NOT ITS BODY COLLIDER. setFromObject(group) includes
+       every decorative extremity: tuna finlets, a marlin bill, pectoral blades
+       and tail wisps. A mouth could therefore "touch" a metre of thin filament
+       while the edible trunk was still visibly outside the jaws. Authored
+       marine bodies already name their structural surface *Hull. Clamp in that
+       mesh's own local box, then transform the point back to world: a true OBB
+       narrow phase that follows heading/pitch and excludes every decoration.
+       Non-marine actors and ships keep their full body box. */
+    let hull = target._biteContactHull;
+    if (hull === undefined && target.species && target.species.aquatic) {
+      hull = null;
+      target.group.traverse(function (o) {
+        if (!hull && o && o.isMesh && /hull$/i.test(o.name || "")) hull = o;
+      });
+      target._biteContactHull = hull || null;
+    }
+    if (hull && hull.geometry) {
+      if (!hull.geometry.boundingBox) hull.geometry.computeBoundingBox();
+      if (hull.geometry.boundingBox) {
+        hull.updateMatrixWorld(true);
+        biteHullBox.copy(hull.geometry.boundingBox);
+        biteHullInvM.copy(hull.matrixWorld).invert();
+        biteHullLocalV.copy(mouth).applyMatrix4(biteHullInvM);
+        biteHullBox.clampPoint(biteHullLocalV, biteHullSurfaceV);
+        biteV.copy(biteHullSurfaceV).applyMatrix4(hull.matrixWorld);
+        biteHullActive = hull;
+        return biteV.distanceTo(mouth);
+      }
+    }
     biteBox.setFromObject(target.group);
     biteBox.clampPoint(mouth, biteV);
     return biteV.distanceTo(mouth);
+  }
+  function biteContains(mouth) {
+    if (!biteHullActive) return biteBox.containsPoint(mouth);
+    biteHullInvM.copy(biteHullActive.matrixWorld).invert();
+    biteHullLocalV.copy(mouth).applyMatrix4(biteHullInvM);
+    return biteHullBox.containsPoint(biteHullLocalV);
+  }
+  // Selection is intentionally generous; damage is not. This is the visible
+  // tooth envelope used by the mounted path after its wide target acquisition.
+  function biteContactReach(a) {
+    const r = (typeof CBZ.creatureJawRadius === "function")
+      ? CBZ.creatureJawRadius(a, "lunge") : Math.max(0.12, 0.10 + liveScale(a) * 0.16);
+    return Math.max(0.14, r * 0.92);
+  }
+  /* If the jaw centre is already inside the target AABB, measure how far it
+     entered through the face it approached and optionally write that entry
+     point back to `surface`. Box3.clampPoint returns the jaw itself once it is
+     inside, which is useful for distance but is NOT the contacted surface a
+     wound or a hold should remember. */
+  function bitePenetration(mouth, surface) {
+    const fx = Math.cos(ride.head), fz = Math.sin(ride.head);
+    if (biteHullActive) {
+      biteHullInvM.copy(biteHullActive.matrixWorld).invert();
+      biteHullLocalV.copy(mouth).applyMatrix4(biteHullInvM);
+      if (!biteHullBox.containsPoint(biteHullLocalV)) return 0;
+      // Transform a second point to carry the world approach direction into
+      // hull-local space without assuming uniform scale.
+      biteHullDirV.set(mouth.x + fx, mouth.y, mouth.z + fz)
+        .applyMatrix4(biteHullInvM).sub(biteHullLocalV).normalize();
+      let tx = Infinity, tz = Infinity;
+      if (Math.abs(biteHullDirV.x) > 0.0001) tx = biteHullDirV.x > 0
+        ? (biteHullLocalV.x - biteHullBox.min.x) / biteHullDirV.x
+        : (biteHullBox.max.x - biteHullLocalV.x) / -biteHullDirV.x;
+      if (Math.abs(biteHullDirV.z) > 0.0001) tz = biteHullDirV.z > 0
+        ? (biteHullLocalV.z - biteHullBox.min.z) / biteHullDirV.z
+        : (biteHullBox.max.z - biteHullLocalV.z) / -biteHullDirV.z;
+      const ld = Math.max(0, Math.min(tx, tz));
+      biteHullSurfaceV.copy(biteHullLocalV).addScaledVector(biteHullDirV, -ld)
+        .applyMatrix4(biteHullActive.matrixWorld);
+      if (surface) surface.copy(biteHullSurfaceV);
+      return biteHullSurfaceV.distanceTo(mouth);
+    }
+    if (!biteBox.containsPoint(mouth)) return 0;
+    let tx = Infinity, tz = Infinity;
+    if (Math.abs(fx) > 0.0001) tx = fx > 0
+      ? (mouth.x - biteBox.min.x) / fx : (biteBox.max.x - mouth.x) / -fx;
+    if (Math.abs(fz) > 0.0001) tz = fz > 0
+      ? (mouth.z - biteBox.min.z) / fz : (biteBox.max.z - mouth.z) / -fz;
+    const d = Math.max(0, Math.min(tx, tz));
+    if (surface) {
+      surface.copy(mouth);
+      surface.x -= fx * d; surface.z -= fz * d;
+    }
+    return d;
+  }
+  /* THE MOUNTED BODY STOPS AT THE BODY. The wild-predator path already caps
+     its lunge in creature_combat; the ride controller used to bypass that law
+     and advance the whole shark through its quarry on every remaining frame.
+     Stop when the authored tooth centre reaches the target surface, allowing
+     only a tooth-depth of purchase. Lateral misses keep moving so homing can
+     still bend the mouth onto them. */
+  function capBiteStep(a, target, stepLen) {
+    if (!BITE_SEAT_ON() || !(stepLen > 0) || !target || !target.group || !target.group.parent) return stepLen;
+    const mouth = jawWorld(a);
+    const dist = biteDistance(target, mouth);
+    if (!Number.isFinite(dist) || !inBiteFront(mouth, biteV)) return stepLen;
+    const fx = Math.cos(ride.head), fz = Math.sin(ride.head);
+    const dx = biteV.x - mouth.x, dz = biteV.z - mouth.z;
+    const forward = dx * fx + dz * fz;
+    const lateral = Math.abs(dx * -fz + dz * fx);
+    const contact = biteContactReach(a);
+    if (lateral > contact * 1.25 || forward < -contact) return stepLen;
+    const tooth = Math.max(0.025, Math.min(contact * 0.22, liveScale(a) * 0.045));
+    const allowed = biteContains(mouth) ? 0 : Math.max(0, forward + tooth);
+    if (allowed >= stepLen) return stepLen;
+    AQUATIC_AUDIT.surfaceStops++;
+    return allowed;
+  }
+  function endBiteGrip(a) {
+    const t = ride.gripTarget;
+    if (t && t._jawHeld === (a || ride.mount)) t._jawHeld = null;
+    ride.gripTarget = null; ride.gripKind = null; ride.gripFrames = 0;
+  }
+  function beginBiteGrip(a, target, kind) {
+    if (!BITE_SEAT_ON() || kind === "ship" || ride.clampT > 0 ||
+        !target || !target.group || !target.group.parent) return false;
+    if (target._jawHeld && target._jawHeld !== a) return false;
+    endBiteGrip(a); releaseEngulf();
+    target.group.updateMatrixWorld(true);
+    ride.gripLocal.set(_biteAt.x, _biteAt.y, _biteAt.z)
+      .applyMatrix4(gripInvM.copy(target.group.matrixWorld).invert());
+    ride.gripTarget = target; ride.gripKind = kind; ride.gripFrames = 0;
+    target._jawHeld = a;                         // one transform owner until release
+    AQUATIC_AUDIT.lastSeatError = 0;
+    AQUATIC_AUDIT.lastSeatFrames = 0;
+    return true;
+  }
+  function tickBiteGrip(a) {
+    const t = ride.gripTarget;
+    if (!t) return false;
+    if (!BITE_SEAT_ON() || t._jawHeld !== a || !t.group || !t.group.parent) {
+      endBiteGrip(a); return false;
+    }
+    const want = jawGripWorld(a);
+    t.group.updateMatrixWorld(true);
+    gripContactV.copy(ride.gripLocal).applyMatrix4(t.group.matrixWorld);
+    gripDeltaV.copy(want).sub(gripContactV);
+    const gp = t.group.position;
+    gp.add(gripDeltaV);
+    if (t.pos && t.pos !== gp) {
+      t.pos.x += gripDeltaV.x; t.pos.y += gripDeltaV.y; t.pos.z += gripDeltaV.z;
+    }
+    if (t._waterMove) { t._waterMove.x += gripDeltaV.x; t._waterMove.z += gripDeltaV.z; }
+    t.group.updateMatrixWorld(true);
+    gripContactV.copy(ride.gripLocal).applyMatrix4(t.group.matrixWorld);
+    ride.gripFrames++;
+    AQUATIC_AUDIT.lastSeatFrames = ride.gripFrames;
+    AQUATIC_AUDIT.lastSeatError = +gripContactV.distanceTo(want).toFixed(4);
+    const jawY = jawWorld(a).y;
+    AQUATIC_AUDIT.lastSeatBelowJaw = +Math.max(0, jawY - want.y).toFixed(4);
+    return true;
   }
   function inBiteFront(mouth, point) {
     const dx = point.x - mouth.x, dz = point.z - mouth.z;
@@ -1318,9 +1492,8 @@
     }
     return Math.max(0.12, Math.min(1.2, 0.10 + Math.max(0.35, liveScale(a)) * 0.16));
   }
-  function biteReach(a) {
-    return Math.max(0.35, jawRadiusOf(a) * 1.9);
-  }
+  /* (Contact itself is biteContactReach(), above: ONE owner for "did my teeth
+     arrive", never two.) */
   function selectBiteTarget(a, R) {
     const mouth = jawWorld(a);
     /* THE MOUTH HUNTS WIDER THAN IT CLOSES. Acquisition runs at 1.6x the
@@ -1446,15 +1619,16 @@
     const sp = a.species, scale = Math.max(0.35, liveScale(a));
     const mouth = jawWorld(a);
     const dist = biteDistance(target, mouth);
-    // Use the same envelope selection used. This especially matters for the
-    // megalodon's jaw below a surface hull: accepting a target at 6.5 m and
-    // then shrinking the strike to 5.1 m made the visible bite a fake miss.
-    /* A HULL IS NOT A FISH. Everything with a body gets the tooth-line test;
-       a boat's bounding box is its own hull, and the megalodon's jaw closes on
-       plating it cannot sink into, so the hull keeps a boarding tolerance of
-       one more mouth-width. Every living target is now bitten at the teeth. */
-    const reach = biteReach(a) * (kind === "ship" ? 3.2 : 1);
-    if (dist > reach || !inBiteFront(mouth, biteV)) return false;
+    // Acquisition may start a body-length out; DAMAGE waits for the authored
+    // tooth envelope. The former 3 m minimum reused biteReach here and could
+    // kill a person while the visible jaw was still metres away, after which
+    // the unbounded ride step drove the nose through the already-dead body.
+    if (dist > biteContactReach(a) || !inBiteFront(mouth, biteV)) return false;
+    const penetration = bitePenetration(mouth, null);
+    // Once inside, Box3.clampPoint returns the mouth itself. Recover the entry
+    // surface so wounds and the compression hold remember flesh, not empty
+    // space at the middle of an AABB.
+    if (penetration > 0) bitePenetration(mouth, biteV);
     /* ============================================================
        AND NOW THE GEOMETRY DECIDES WHAT IT WAS WORTH.
 
@@ -1589,6 +1763,12 @@
       target.v = Math.max(0, (target.v || 0) * 0.35);
       AQUATIC_AUDIT.shipBites++;
     } else return false;
+    AQUATIC_AUDIT.lastContactGap = +dist.toFixed(4);
+    AQUATIC_AUDIT.lastBitePenetration = +penetration.toFixed(4);
+    AQUATIC_AUDIT.lastCollider = biteHullActive ? "marine-hull-obb" : "full-body-box";
+    // Ships keep their structural physics owner. Bodies get one brief anchor
+    // from this exact contacted surface to the mouth's authored lower seat.
+    if (kind !== "ship" && ride.clampT <= 0) beginBiteGrip(a, target, kind);
     if (CBZ.waterSplashAt) CBZ.waterSplashAt(biteV.x, seaY(biteV.x, biteV.z), biteV.z, Math.min(3.8, 0.7 + scale));
     if (CBZ.sfx) { try { CBZ.sfx("hit", { volume: Math.min(1.2, 0.55 + scale * 0.18) }); } catch (e) {} }
     /* ---- ONE MOUTHFUL, ONE SMALL JOLT ----------------------------------
@@ -1842,6 +2022,7 @@
     const a = ride.mount, R = a && rideDef(a.species);
     if (!a || !R || !R.aquatic || !R.attack || ride.attackCd > 0 || ride.attackT > 0) return false;
     if (ride.clampT > 0) return false;                  // the finish is not interruptible
+    endBiteGrip(a); releaseEngulf();
     const pick = selectBiteTarget(a, R);
     ride.target = pick.target; ride.targetKind = pick.kind;
     releaseEngulf();
@@ -1862,6 +2043,12 @@
       ? CBZ.aquaticBiteDuration(a, pick.kind, pick.kind === "animal" ? pick.target : null)
       : (R.shipBite ? 0.72 : 0.56);
     ride.attackHit = false; ride.attackHitP = -1;
+    AQUATIC_AUDIT.lastContactGap = 0;
+    AQUATIC_AUDIT.lastBitePenetration = 0;
+    AQUATIC_AUDIT.lastCollider = "";
+    AQUATIC_AUDIT.lastSeatError = 0;
+    AQUATIC_AUDIT.lastSeatBelowJaw = 0;
+    AQUATIC_AUDIT.lastSeatFrames = 0;
     ride.attackCd = ride.attackDur + (pick.kind === "ship" ? 0.55 : 0.42);
     a._atkAnim = 0;
     if (ride.water) {
@@ -1960,6 +2147,12 @@
     // a corpse is KEPT — the mouth carries what it just killed through the
     // shut, which is the whole picture the owner said was missing
     if (!t.group || !t.group.parent || t.culled) { releaseEngulf(); return; }
+    /* THE APPROACH IS MINE, THE HOLD IS THE GRIP'S. Once a bite has landed and
+       beginBiteGrip has seated this body at the contact point, that owner
+       writes its position every frame — two writers converging on nearly the
+       same place is still two writers. The pull is for getting the meal INTO
+       the mouth; from contact on, the grip has it. */
+    if (ride.gripTarget) return;
     if (p < ENGULF_FROM) return;
     const mouth = jawWorld(a);              // jawV
     const d = biteDistance(t, mouth);       // writes biteV = the nearest point ON the meal
@@ -2045,6 +2238,11 @@
     let open = CBZ.biteCurve ? CBZ.biteCurve(p)
       : (p < 0.30 ? ease(p / 0.30) : (p > 0.70 ? 1 - ease((p - 0.70) / 0.30) : 1));
     if (CBZ.swimJaw) CBZ.swimJaw(a, open);
+    // Hold through the readable compression, then let the closed mouth release
+    // the body into its own physics for recovery.
+    const shutAt = CBZ.biteTimeline && Number.isFinite(CBZ.biteTimeline.shutAt)
+      ? CBZ.biteTimeline.shutAt : 0.82;
+    if (ride.gripTarget && p >= shutAt) endBiteGrip(a);
     if (p >= 1) {
       /* A WHIFF IS NOT A MEAL. The recovery beat after a bite that landed
          reads as swallowing; after one that missed it reads as a jammed jaw —
@@ -2052,7 +2250,7 @@
          the wider acquisition above means more strikes start at range. Keep a
          short beat so the jaw visibly resets, drop the rest of the cooldown. */
       if (!ride.attackHit) ride.attackCd = Math.min(ride.attackCd, 0.18);
-      releaseEngulf();
+      endBiteGrip(a); releaseEngulf();
       ride.attackT = 0; ride.target = null; ride.targetKind = null;
       ride.attackHitP = -1;
       ride.attackPitch = 0; ride.attackRoll = 0; a._atkAnim = -1;
@@ -2740,7 +2938,20 @@
        feet from shore" feel, and no clearance number could have fixed it.
        The navigator is demoted to a FENCE: it answers where the body may be,
        never where it is pointing. */
-      const stepLen = W.v * fdt;
+      let stepLen = W.v * fdt;
+      const contactTarget = ride.gripTarget ||
+        ((ride.attackT > 0 && ride.target && ride.target.group) ? ride.target : null);
+      if (contactTarget) {
+        const capped = capBiteStep(a, contactTarget, stepLen);
+        if (capped < stepLen) {
+          const k = stepLen > 0 ? capped / stepLen : 0;
+          stepLen = capped;
+          // The impact costs way instead of storing a full-speed spring that
+          // fires the shark through the body on the release frame.
+          W.v *= Math.max(0.18, k);
+          P.speed = W.v;
+        }
+      }
       let nx = P.pos.x + Math.cos(ride.head) * stepLen;
       let nz = P.pos.z + Math.sin(ride.head) * stepLen;
       // An airborne body lands where physics puts it (a breach that cannot
@@ -3232,7 +3443,7 @@
     if (CBZ.playerChar) CBZ.playerChar.riding = {
       width: ride.visual.width, moving: false, airborne: false, phase: 0
     };
-    releaseEngulf();
+    endBiteGrip(a); releaseEngulf();
     ride.attackT = ride.attackCd = 0; ride.attackHitP = -1; ride.target = null; ride.targetKind = null;
     const help = aquatic
       ? (ride.visual.breach ? " · hold sprint + rise near the surface to BREACH; E dismounts." :
@@ -3294,7 +3505,7 @@
     // BEFORE the mount reference goes: endClamp puts the Euler order back on
     // THIS body and unpins whatever it was holding.
     if (ride.clampT > 0) endClamp(a);
-    releaseEngulf();
+    endBiteGrip(a); releaseEngulf();
     ride.mount = null; a.ridden = false;
     ride.visual = null; ride.water = null;
     ride.attackT = ride.attackCd = 0; ride.attackHitP = -1; ride.target = null; ride.targetKind = null;
@@ -3469,6 +3680,10 @@
       if (playing) tickAquaticAttack(a, dt);
       a.group.rotation.x = W.roll + ride.attackRoll;
       a.group.rotation.z = W.pitch + ride.attackPitch;
+      // Last transform word after wildlife/survivor movement and after the
+      // current jaw/body pose: contacted flesh stays in the lower mouth during
+      // compression instead of being rewritten onto the rostrum by another AI.
+      if (playing) tickBiteGrip(a);
     }
     // Land keeps the physical player root at the animal's feet so ordinary
     // gravity/collision carry both. Water keeps its physical animal root in W.y
@@ -3547,6 +3762,13 @@
       attackTarget: ride.targetKind,
       attackTargetDistance: a && ride.target && ride.target.group
         ? +biteDistance(ride.target, jawWorld(a)).toFixed(2) : null,
+      biteSeatActive: !!ride.gripTarget,
+      biteContactGap: AQUATIC_AUDIT.lastContactGap || 0,
+      bitePenetration: AQUATIC_AUDIT.lastBitePenetration || 0,
+      biteCollider: AQUATIC_AUDIT.lastCollider || "",
+      biteSeatError: AQUATIC_AUDIT.lastSeatError || 0,
+      biteSeatBelowJaw: AQUATIC_AUDIT.lastSeatBelowJaw || 0,
+      biteSeatFrames: AQUATIC_AUDIT.lastSeatFrames || 0,
       // the breach, as numbers: how much air the last one got and for how long
       breachApex: AQUATIC_AUDIT.lastApex || 0, breachAirT: AQUATIC_AUDIT.lastAirT || 0,
       breachVel: a && rideDef(a.species) ? +(rideDef(a.species).breachVel || 0).toFixed(2) : 0,
@@ -3571,7 +3793,8 @@
       mounts: AQUATIC_AUDIT.mounts, breaches: AQUATIC_AUDIT.breaches,
       reentries: AQUATIC_AUDIT.reentries, attacks: AQUATIC_AUDIT.attacks,
       hits: AQUATIC_AUDIT.hits, shipBites: AQUATIC_AUDIT.shipBites,
-      clamps: AQUATIC_AUDIT.clamps, clampT: ride.clampT > 0 ? +ride.clampT.toFixed(2) : 0,
+      clamps: AQUATIC_AUDIT.clamps, surfaceStops: AQUATIC_AUDIT.surfaceStops,
+      clampT: ride.clampT > 0 ? +ride.clampT.toFixed(2) : 0,
       lastSpecies: AQUATIC_AUDIT.lastSpecies, lastTarget: AQUATIC_AUDIT.lastTarget,
     };
   };

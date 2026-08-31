@@ -100,7 +100,7 @@ try {
 
   const ready = await poll(`!!(window.CBZ && window.THREE && CBZ.WILDLIFE_SPECIES &&
     CBZ.WILDLIFE_SPECIES.orca && CBZ.orcaIdentity &&
-    CBZ.buildSwimRig && CBZ.swimJaw && CBZ.creatureJawPoint && CBZ.biteCurve &&
+    CBZ.buildSwimRig && CBZ.swimJaw && CBZ.creatureJawPoint && CBZ.creatureJawGripPoint && CBZ.biteCurve &&
     CBZ.biteTimeline && CBZ.aquaticBiteDuration)`, 45000, 250);
   if (!ready) throw new Error("predator-mouth APIs did not load");
 
@@ -204,15 +204,23 @@ try {
         if (d < hingeBodyGap) hingeBodyGap = d;
       }
       const localBite = CBZ.creatureJawPoint(actor);
+      const localGrip = CBZ.creatureJawGripPoint(actor);
       const biteContractError = Math.hypot(
         localBite.x - contract.bite.x,
         localBite.y - contract.bite.y,
         (localBite.z || 0) - (contract.bite.z || 0)
       );
+      const gripContractError = !contract.grip ? Infinity : Math.hypot(
+        localGrip.x - contract.grip.x,
+        localGrip.y - contract.grip.y,
+        (localGrip.z || 0) - (contract.grip.z || 0)
+      );
 
       CBZ.swimJaw(actor, 1); group.updateMatrixWorld(true);
       const hingeOpen = rig.jawGroup.getWorldPosition(new THREE.Vector3());
       const biteWorld = new THREE.Vector3(localBite.x, localBite.y, localBite.z || 0)
+        .applyMatrix4(group.matrixWorld);
+      const gripWorld = new THREE.Vector3(localGrip.x, localGrip.y, localGrip.z || 0)
         .applyMatrix4(group.matrixWorld);
       const toothRing = new THREE.Box3().setFromObject(rig.jawUpper)
         .union(new THREE.Box3().setFromObject(rig.jawGroup));
@@ -223,6 +231,7 @@ try {
         upperTravel: Math.hypot(rig.jawUpper.position.x - upperX0, rig.jawUpper.position.y - upperY0),
         cavityReveal: rig.jawCavity.scale.y / cavityScale0,
         biteRingGap: toothRing.distanceToPoint(biteWorld),
+        gripRingGap: toothRing.distanceToPoint(gripWorld),
         lipGap: verticalGap(upperLip, lowerLip),
         upperShellTravel: upperShell0 && upperShell
           ? upperShell0.distanceTo(worldCenter(upperShell)) : null,
@@ -234,7 +243,7 @@ try {
       const hingeReset = rig.jawGroup.getWorldPosition(new THREE.Vector3());
       const tl = CBZ.biteTimeline, biteDur = CBZ.aquaticBiteDuration(actor, null);
       return {
-        id, scale: sp.scale || 1, authored: contract.version >= 4,
+        id, scale: sp.scale || 1, authored: contract.version >= 5,
         envelope: {
           version: contract.version, shape: contract.shape,
           bodySplit: !!contract.bodySplit, articulated: !!contract.articulatedEnvelope,
@@ -266,7 +275,9 @@ try {
           atShut: round(CBZ.biteCurve(tl.shutAt)),
         },
         contact: { contractError: round(biteContractError), toothRingGap: round(open.biteRingGap),
-          point: [round(localBite.x), round(localBite.y), round(localBite.z || 0)] },
+          gripContractError: round(gripContractError), gripRingGap: round(open.gripRingGap),
+          point: [round(localBite.x), round(localBite.y), round(localBite.z || 0)],
+          grip: [round(localGrip.x), round(localGrip.y), round(localGrip.z || 0)] },
         reset: { lowerAngle: round(Math.abs(rig.jawGroup.rotation.z - rig.jawLowerRz)),
           upperTravel: round(Math.hypot(rig.jawUpper.position.x - upperX0, rig.jawUpper.position.y - upperY0)),
           cavityScale: round(rig.jawCavity.scale.y), expectedCavityScale: round(cavityScale0) },
@@ -283,12 +294,18 @@ try {
     if (!r.teeth || r.teeth.upper < 12 || r.teeth.lower < 12) failures.push(`${r.id}: incomplete front-and-side tooth ring`);
     if (!r.connected || r.connected.upper.components !== 1 || r.connected.lower.components !== 1) failures.push(`${r.id}: floating/disconnected mouth component`);
     if (!r.hinge || r.hinge.bodyGap > 0.01 || r.hinge.openDrift > 0.00001 || r.hinge.resetDrift > 0.00001) failures.push(`${r.id}: lower-jaw hinge detached or drifted`);
-    if (!r.motion || Math.abs(r.motion.lowerAngle - r.motion.expectedAngle) > 0.00001 || r.motion.cavityReveal < 3 || r.motion.lowerShellTravel <= 0.01 * r.scale) failures.push(`${r.id}: lower body-envelope gape contract failed`);
+    // The cavity is now fixed anatomical geometry: the jaws reveal it by
+    // moving their body envelopes, not by scaling a dark blob to 3x size.
+    if (!r.motion || Math.abs(r.motion.lowerAngle - r.motion.expectedAngle) > 0.00001 || r.motion.cavityReveal < 0.99 || r.motion.lowerShellTravel <= 0.01 * r.scale) failures.push(`${r.id}: lower body-envelope gape contract failed`);
     if (r.motion && r.envelope.upperShouldMove && (r.motion.upperTravel <= 0 || r.motion.upperShellTravel <= 0.01 * r.scale)) failures.push(`${r.id}: upper body envelope did not travel with the bite`);
     if (r.motion && !r.envelope.upperShouldMove && r.motion.upperShellTravel != null && r.motion.upperShellTravel > 0.00001) failures.push(`${r.id}: fixed upper body moved unexpectedly`);
     if (!r.motion || r.motion.restLipGap > 0.19 * r.scale || r.motion.openLipGap < r.motion.restLipGap + 0.08 * r.scale) failures.push(`${r.id}: rest mouth is open or full gape is unreadable`);
     if (!r.cadence || r.cadence.version < 2 || r.cadence.duration < 0.82 || r.cadence.duration > 1.10 || r.cadence.expansionS < 0.20 || r.cadence.holdS < 0.15 || r.cadence.compressionS < 0.20 || r.cadence.recoveryS < 0.14 || r.cadence.atOpen !== 0 || r.cadence.atFull !== 1 || r.cadence.atHold !== 1 || r.cadence.atShut !== 0) failures.push(`${r.id}: aquatic bite cadence is incomplete or too fast to read`);
-    if (!r.contact || r.contact.contractError > 0.00001 || r.contact.toothRingGap > 0.01) failures.push(`${r.id}: damage socket is outside visible tooth ring`);
+    if (!r.contact || r.contact.contractError > 0.00001 || r.contact.toothRingGap > 0.01 ||
+        r.contact.gripContractError > 0.00001 || r.contact.gripRingGap > 0.01 ||
+        r.contact.grip[0] >= r.contact.point[0] || r.contact.grip[1] >= r.contact.point[1]) {
+      failures.push(`${r.id}: contact and lower in-mouth grip are not both inside the visible tooth ring`);
+    }
     if (!r.reset || r.reset.lowerAngle > 0.00001 || r.reset.upperTravel > 0.00001 || Math.abs(r.reset.cavityScale - r.reset.expectedCavityScale) > 0.00001) failures.push(`${r.id}: mouth did not close back to authored rest`);
   }
   // This is a mouth contract, not a whole-page suite. Preserve and report

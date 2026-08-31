@@ -243,15 +243,31 @@ try {
   await evaluate(`(() => {
     const q = window.__seaMountContract, a = q.shark, prey = q.tuna;
     if (!prey.group.parent && CBZ.scene) CBZ.scene.add(prey.group);
+    prey.heading = prey.faceH = 0; CBZ.faceAnimalHeading(prey, 0);
+    prey.group.updateMatrixWorld(true);
     const jp = CBZ.creatureJawPoint(a), mouth = new THREE.Vector3(jp.x, jp.y, jp.z);
     a.group.updateMatrixWorld(true); mouth.applyMatrix4(a.group.matrixWorld);
-    const box = new THREE.Box3().setFromObject(prey.group), center = box.getCenter(new THREE.Vector3());
+    let hull = null;
+    prey.group.traverse(o => { if (!hull && o.isMesh && /hull$/i.test(o.name || "")) hull = o; });
+    const box = new THREE.Box3().setFromObject(hull || prey.group), center = box.getCenter(new THREE.Vector3());
     // The mounted bite accelerates to ~8.5 m/s and resolves contact inside the
     // shared 0.82–1.10 s aquatic cadence. Lead the live target by the measured
     // approach distance; placing it only 0.35 m from the resting socket let
     // the surge pass the tuna before the first legal contact sample.
+    // Align the structural fish hull, not fin tips: mounted contact now uses
+    // that same oriented hull narrow phase, so the test must not centre an
+    // ornamental filament and call the edible body aligned.
     prey.group.position.add(new THREE.Vector3(mouth.x + 2.65, mouth.y, mouth.z).sub(center));
     prey.group.updateMatrixWorld(true);
+    const hullBox = new THREE.Box3().setFromObject(hull || prey.group);
+    const hullCenter = hullBox.getCenter(new THREE.Vector3());
+    const hullNear = hullBox.clampPoint(mouth, new THREE.Vector3());
+    const probe = CBZ.cityAquaticBiteProbe();
+    q.sharkProbe = { kind: probe && probe.kind, d: probe && probe.d,
+      heading: a.heading, mountedHeading: CBZ.cityMountedHeading && CBZ.cityMountedHeading(),
+      mouth: mouth.toArray(), hullCenter: hullCenter.toArray(), hullNear: hullNear.toArray(),
+      hullGap: hullNear.distanceTo(mouth), preyPos: [prey.pos.x, prey.pos.y, prey.pos.z],
+      groupPos: prey.group.position.toArray() };
     const consumed = CBZ.cityMountedAnimalAttack(true);
     q.sharkAttackStart = CBZ.aquaticMountAudit();
     return consumed;
@@ -265,8 +281,13 @@ try {
     const q = window.__seaMountContract, audit = CBZ.aquaticMountAudit();
     const out = { hit: ${sharkHit ? "true" : "false"}, damage: q.sharkHp0 - q.tuna.hp,
       clenchedAfterContact: ${sharkClenched ? "true" : "false"}, target: audit.lastTarget,
-      attacks: audit.attacks, stillMounted: CBZ.cityMountedAnimal() === q.shark };
+      attacks: audit.attacks, stillMounted: CBZ.cityMountedAnimal() === q.shark,
+      contactGap: audit.biteContactGap, penetration: audit.bitePenetration,
+      collider: audit.biteCollider,
+      seatError: audit.biteSeatError, seatBelowJaw: audit.biteSeatBelowJaw,
+      seatFrames: audit.biteSeatFrames, surfaceStops: audit.surfaceStops };
     out.attackStart = q.sharkAttackStart;
+    out.probe = q.sharkProbe;
     CBZ.cityDismount(); return out;
   })()`);
   await sleep(100);
@@ -331,6 +352,10 @@ try {
   if (!dolphin.swimHandoff.swimming || !dolphin.swimHandoff.playerSwim || dolphin.swimHandoff.mounted || dolphin.swimHandoff.aquaticMount) failures.push("dismount did not hand ownership back to swimming");
   if (!shark.attackStart || shark.attackStart.attackDuration < 0.82 || shark.attackStart.attackDuration > 1.10 || shark.attackStart.attackCooldown - shark.attackStart.attackDuration < 0.40) failures.push("mounted great white bypassed the shared bite cadence or recovery beat");
   if (!sharkStart.mounted || !sharkStart.attackCap || !shark.hit || shark.damage <= 0 || !shark.clenchedAfterContact || shark.target !== "animal" || !shark.stillMounted) failures.push("mounted great white did not visibly clamp after biting a live target");
+  if (shark.collider !== "marine-hull-obb" || shark.contactGap > 0.30 || shark.penetration > 0.08 || shark.seatError > 0.02 ||
+      shark.seatBelowJaw < 0.04 || shark.seatFrames < 3 || shark.surfaceStops < 1) {
+    failures.push("mounted great white bypassed tooth-surface stop or did not hold the contacted prey surface in the lower mouth through compression");
+  }
   if (!megalodon.attackStart || megalodon.attackStart.attackDuration < 0.92 || megalodon.attackStart.attackDuration > 1.10 || megalodon.attackStart.attackCooldown - megalodon.attackStart.attackDuration < 0.53) failures.push("mounted megalodon bypassed the hull-bite cadence or recovery beat");
   if (!megStart.mounted || !megStart.shipBiteCap || !megStart.marine || !megalodon.hit || megalodon.engineHp > 0 || !megalodon.dead || megalodon.exploded || !megalodon.sinkingOwned || !megalodon.clenchedAfterContact || megalodon.target !== "ship" || !megalodon.stillMounted) failures.push("megalodon did not clamp and hand a ship to sinking physics without an explosion");
   const contractErrors = browserErrors.filter(e => !e.url || !/\/systems\/camera\.js(?:\?|$)/.test(e.url));

@@ -3605,7 +3605,7 @@
       // well is two writers on one transform, and the visible result is an
       // animal that calmly walks out of the jaws holding it. The body layer
       // still runs, so the prey keeps kicking while it is being shaken.
-      if (a._seizedBy) {
+      if (a._seizedBy || a._jawHeld) {
         if (LIVE()) { if (a.swim) animateSwim(a, dt); else if (!a.snake) gaitAnimate(a, dt); }
         continue;
       }
