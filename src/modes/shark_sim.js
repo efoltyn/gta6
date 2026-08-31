@@ -714,7 +714,7 @@
          the scale back. */
       S1._growLock = 1;
       S1._growP = null;
-      gsc.setScalar(sim.grow.from);
+      growWrite(sim.grow, sim.grow.from);
     }
     const y = seaYAt(x, z);
     if (CBZ.waterSplashAt) {
@@ -748,13 +748,23 @@
     const eff = G.a && +G.a._sizeEff;
     return (eff > 0 && isFinite(eff)) ? eff : G.to;
   }
+  /* THE GIRTH RIDES ON TOP OF THE CEREMONY. group.scale.y/z carry the fed/lean
+     swell (city/wildlife_traits.js, THE BODY CUE) and this beat owns the whole
+     vector while it runs, so it has to hand it back with the girth still in
+     it — a setScalar() here would leave the shark you just evolved suddenly
+     lean until its next mouthful moved the cue again. */
+  function growWrite(G, v) {
+    const gsc = G.a && G.a.group && G.a.group.scale; if (!gsc) return;
+    const gk = (CBZ.animalGirth ? CBZ.animalGirth(G.a) : 1) || 1;
+    gsc.set(v, v * gk, v * gk);
+  }
   function growTick(dt) {
     const G = sim.grow; if (!G) return;
     const gsc = G.a && G.a.group && G.a.group.scale;
     if (!gsc || G.a.dead || G.a !== sim.shark) {
       sim.grow = null;
       if (G.a) G.a._growLock = 0;
-      if (gsc) gsc.setScalar(growRest(G));
+      if (gsc) growWrite(G, growRest(G));
       return;
     }
     G.t += dt;
@@ -763,13 +773,12 @@
     // ease-out with a 6% overshoot that settles: mass arriving, not a lerp
     const k = 1 - Math.pow(1 - e, 3);
     const over = Math.sin(e * Math.PI) * 0.06;
-    gsc.setScalar(G.from + (to - G.from) * k + to * over);
-    if (e >= 1) { gsc.setScalar(to); sim.grow = null; G.a._growLock = 0; }
+    growWrite(G, G.from + (to - G.from) * k + to * over);
+    if (e >= 1) { growWrite(G, to); sim.grow = null; G.a._growLock = 0; }
   }
   function growClear() {
     const G = sim.grow; if (!G) return;
-    const gsc = G.a && G.a.group && G.a.group.scale;
-    if (gsc) gsc.setScalar(growRest(G));
+    if (G.a && G.a.group) growWrite(G, growRest(G));
     if (G.a) G.a._growLock = 0;
     sim.grow = null;
   }

@@ -385,10 +385,15 @@
     _e = Math.min(1, dt * 10);
     g.rotation.x += (0 - g.rotation.x) * _e;
     g.rotation.z += (0 - g.rotation.z) * _e;
-    if (g.scale.x !== bs) {
+    /* SETTLE TO THE BODY'S OWN SCALE, GIRTH INCLUDED. y/z carry a marine
+       animal's fed/lean swell (city/wildlife_traits.js, THE BODY CUE); the old
+       three-way settle to `bs` flattened it the first time anything attacked,
+       which is why that cue used to have to live on a child mesh. */
+    var bg = bs * ((CBZ.animalGirth ? CBZ.animalGirth(actor) : 1) || 1);
+    if (g.scale.x !== bs || g.scale.y !== bg) {
       g.scale.x += (bs - g.scale.x) * _e;
-      g.scale.y += (bs - g.scale.y) * _e;
-      g.scale.z += (bs - g.scale.z) * _e;
+      g.scale.y += (bg - g.scale.y) * _e;
+      g.scale.z += (bg - g.scale.z) * _e;
     }
     var head = findHead(g);
     if (head && head.userData._cbzRX !== undefined) {
@@ -750,8 +755,9 @@
     // the impact pop is a MULTIPLIER on the body's authored size, not a
     // replacement for it — see baseScale()
     var bsA = baseScale(actor, g);
-    if (pulse !== 1) { g.scale.x = g.scale.y = g.scale.z = bsA * pulse; }
-    else if (g.scale.x !== bsA) { g.scale.x = g.scale.y = g.scale.z = bsA; }
+    var gkA = (CBZ.animalGirth ? CBZ.animalGirth(actor) : 1) || 1;
+    if (pulse !== 1) { g.scale.x = bsA * pulse; g.scale.y = g.scale.z = bsA * pulse * gkA; }
+    else if (g.scale.x !== bsA) { g.scale.x = bsA; g.scale.y = g.scale.z = bsA * gkA; }
 
     // ---- THE BODY LAYER, the land sibling of the swimJaw call in 'lunge' -----
     // Everything above moves the GROUP. This moves the ANIMAL: predator_anim

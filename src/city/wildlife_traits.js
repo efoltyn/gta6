@@ -354,12 +354,14 @@
     if (!g || !g.scale || a.dead || a._growLock) { a._growP = null; return; }
     p.t += dt;
     const eff = +a._sizeEff > 0 ? a._sizeEff : ((a.species && a.species.scale) || 1);
-    if (p.t >= p.dur) { g.scale.setScalar(eff); a._growP = null; return; }
+    const gk = groupGirth(a);                    // ..and the girth rides on top
+    if (p.t >= p.dur) { g.scale.set(eff, eff * gk, eff * gk); a._growP = null; return; }
     const e = p.t / p.dur;
     // ease-out with a small settling overshoot — mass arriving, not a lerp.
     // Half the evolve beat's 6%, because this fires on every single meal.
     const k = p.from + (1 - p.from) * ease(e);
-    g.scale.setScalar(eff * (k + Math.sin(e * Math.PI) * 0.03));
+    const v = eff * (k + Math.sin(e * Math.PI) * 0.03);
+    g.scale.set(v, v * gk, v * gk);
   }
 
   /* ---- THE LEDGER SINK. Every mouthful in the game arrives here ----------
@@ -493,18 +495,38 @@
   // ============================================================
   //  THE BODY CUE — gaunt vs full-bellied, with no HUD anywhere.
   //
-  //  A modest NON-UNIFORM scale on the body/hull child only. Never on the
-  //  group: creature_combat.js caches actor._baseScale off group.scale.x and
-  //  then forces all three components back to it between swings, so a
-  //  non-uniform group scale would be silently flattened the first time
-  //  anything attacked — and the size multiplier, which IS uniform and IS on
-  //  the group, composes with this for free.
+  //  TWO SHAPES OF ANIMAL, and the difference is not cosmetic.
   //
-  //  DISCOVERY, not declaration (the law the gait rig and the swim rig already
-  //  follow): the authored shark hull carries the name "sharkHull"; everything
-  //  else offers its largest non-leg mesh, which for a quadruped is the torso
-  //  and for a fish is the body slab. Nothing found = no cue, and the size
-  //  multiplier still reads.
+  //  A LAND animal is a torso with limbs hung off it. Scaling the torso mesh
+  //  alone reads as a BELLY — the legs and the head stay where they were and
+  //  the middle fills out, which is exactly the cue.
+  //
+  //  A MARINE animal is a WELDED CHAIN. city/wildlife/aquatic.js solves the
+  //  rostrum's weld ring and the tail sleeve's front ring against the hull's
+  //  OWN rings so the three meshes share a rim to the millimetre — that weld
+  //  is the whole reason a shark's head is not a tube plugged into a body.
+  //  Fattening the middle link 12% and leaving the ends alone breaks it, and
+  //  the owner saw exactly that (2026-08-31): "when they eat things and get
+  //  bigger, only the body is getting bigger. The head and tail stay the same,
+  //  and that makes the body look stupidly big." Measured on a great white at
+  //  the fed end of this range: the hull's crown went 1.475 -> 1.652 and its
+  //  beam 0.485 -> 0.543 while sharkRostrum and tailSleeve did not move by a
+  //  thousandth. (Worse: hull.scale.y pivots on the GROUP's y=0, which is
+  //  under the belly, so the body also lifted off its own head.)
+  //
+  //  So in water the cue goes on the GROUP, where the head, the tail, the jaw
+  //  shells and every fin ride it together and every weld stays welded.
+  //
+  //  THE GROUP-SCALE CONTRACT — four writers, one rule:
+  //      group.scale.x   = the animal's TRUE size. Uniform, authoritative,
+  //                        nobody's to lose (every reader in the repo asks
+  //                        group.scale.x how big this animal is).
+  //      group.scale.y/z = x * girth(a), the fed/lean swell.
+  //  The writers are wildlife.js applyScale(), tickGrow() below,
+  //  creature_combat.js (restPose + the impact pulse) and shark_sim.js's
+  //  evolve beat. A writer that forgets the girth flattens the CUE for a
+  //  frame; it can never corrupt the size. Anything that is not one of those
+  //  four should be calling one of them.
   // ============================================================
   const BELLY = 0.24;            // full girth swing across the whole hunger range
   const BELLY_STEP = 0.04;
@@ -567,12 +589,44 @@
     const q = Math.round(want / BELLY_STEP);
     if (a._bellyQ === q) return;
     a._bellyQ = q;
+    const k = q * BELLY_STEP;
+    /* IN WATER THE WHOLE BODY SWELLS. One write, and it deliberately reads x
+       rather than _sizeEff: x is whatever the size writers last agreed the
+       animal is (resting scale, a meal pulse mid-flight, an evolve beat), so
+       the girth rides on top of every one of them without racing any. */
+    if (a.species && a.species.aquatic) {
+      a._girthK = k;
+      const g = a.group;
+      if (g && g.scale) { const s = g.scale.x > 0 ? g.scale.x : 1; g.scale.y = s * k; g.scale.z = s * k; }
+      /* THE SAME CACHES A SIZE CHANGE INVALIDATES, for the same reason
+         (wildlife.js sizeChanged()): the beam marine_predation.js measured off
+         this hull and the saddle wildlife_tame.js measured off this back are
+         both a body-width read, and a girth step just moved the body width. */
+      if (a._mp) a._mp.beam = 0;
+      if (a.ridden && typeof CBZ.wildlifeRideResize === "function") {
+        try { CBZ.wildlifeRideResize(a); } catch (e) {}
+      }
+      return;
+    }
     const m = findBody(a);
     if (!m) return;
-    const k = q * BELLY_STEP;
     m.scale.y = a._bodyBY * k;
     m.scale.z = a._bodyBZ * k;
   }
+
+  /* THE ONE READ of the group-borne girth, for the four writers of an animal's
+     group scale. 1 for anything whose cue lives on a mesh (land) or that has
+     not been fed a cue yet, so every writer can multiply unconditionally. */
+  function groupGirth(a) {
+    if (!a || !a.species || !a.species.aquatic) return 1;
+    const k = +a._girthK;
+    return (k > 0 && isFinite(k)) ? k : 1;
+  }
+  /* PUBLISHED ON CBZ because the other writers are not all in this file and
+     not all of them can assume it loaded: creature_combat.js also drives the
+     beast pit and games/battle.html, where wildlife_traits may be absent. Every
+     caller reads it as `CBZ.animalGirth ? CBZ.animalGirth(a) : 1`. */
+  CBZ.animalGirth = groupGirth;
 
   // ============================================================
   //  SIZE INTO THE SHARED PREDATOR KIT — without touching predator.js.
@@ -751,6 +805,7 @@
     K_MIN: K_MIN, K_MAX: K_MAX, BIG_MIN: BIG_MIN,
     hunger: hungerOf, drive: drive, tick: tickHunger, feed: feed,
     metabolism: metabolism, bodyCue: bodyCue, findBody: findBody,
+    girth: groupGirth,
     sizeKit: sizeKit, hungerKit: hungerKit,
     // growth
     MASS_ON: MASS_ON, WILD_ON: WILD_ON, growCap: growCap, growth: growthOf,

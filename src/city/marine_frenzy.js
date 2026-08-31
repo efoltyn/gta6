@@ -548,7 +548,14 @@
       const g = s.ref && s.ref.group;
       if (g && g.scale) {
         const k = clamp(0.55 + 0.45 * (s.food / s.food0), 0.5, 1);
-        try { g.scale.setScalar(((s.ref.species && s.ref.species.scale) || 1) * (s.ref._sizeMul || 1) * k); } catch (e) {}
+        /* OFF THE BODY IT ACTUALLY HAD. Re-deriving species.scale * _sizeMul
+           threw away everything the animal had EATEN (_growMul, city/
+           wildlife_traits.js), so the first bite out of a well-fed carcass
+           snapped it back to the size it was born at. _sizeEff is the resting
+           scale wildlife.js publishes and it already carries all three terms. */
+        const born = (+s.ref._sizeEff > 0) ? s.ref._sizeEff
+          : ((s.ref.species && s.ref.species.scale) || 1) * (s.ref._sizeMul || 1);
+        try { g.scale.setScalar(born * k); } catch (e) {}
       }
     }
     if (s.food <= s.food0 * COLLAPSE_AT) {

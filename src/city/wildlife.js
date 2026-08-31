@@ -698,7 +698,9 @@
     a._sizeEff = s;
     a._baseScale = s;
     a._hgInv = null;                     // metabolism follows the body it feeds
-    if (a.group) a.group.scale.setScalar(s);
+    /* x is the size; y/z carry the fed/lean girth (wildlife_traits.js owns the
+       number and documents the contract at THE BODY CUE). */
+    if (a.group) { const gk = TRAITS ? TRAITS.girth(a) : 1; a.group.scale.set(s, s * gk, s * gk); }
     if (Math.abs(s - was) > 1e-6) sizeChanged(a, was, s);
     return s;
   }
