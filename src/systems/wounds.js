@@ -987,7 +987,8 @@
       // animal that bit it. throughDir() already turns the caller's ray, or
       // failing that its fromX/fromZ (which every predator here passes, and
       // which IS attacker → bite point), into exactly that line.
-      if (key) { try { CBZ.goreSever(actor, key, { dir: opts.dir || throughDir(opts, wp) }); } catch (e) {} }
+      // ..and WHO took it (opts.by): a jawed biter keeps the limb in its mouth.
+      if (key) { try { CBZ.goreSever(actor, key, { dir: opts.dir || throughDir(opts, wp), by: opts.by || null }); } catch (e) {} }
     }
   };
 

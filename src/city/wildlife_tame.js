@@ -1718,7 +1718,7 @@
       if (pedDown) {
         CBZ.cityKillPed(target, {
           fromX: a.pos.x, fromZ: a.pos.z, force: 5 + scale * 2, fling: 2 + scale,
-          byPlayer: true, point: _biteAt, dir: _biteDir, jaw: jawR,
+          byPlayer: true, point: _biteAt, dir: _biteDir, jaw: jawR, by: a,
         }, "eaten by a " + String(sp.name || sp.id).toLowerCase());
       } else if (CBZ.body && CBZ.body.hit) {
         CBZ.body.hit(target, { fromX: a.pos.x, fromZ: a.pos.z, force: 4 + scale * 2, knockdown: 1.1 });
@@ -1741,7 +1741,7 @@
            centre), the mouth's own width, the line it closed along, and the
            medium — a swimmer's chest sits a metre above the swell, which is
            exactly how a wet kill used to test "air" and rain droplets. */
-        point: _biteAt, dir: _biteDir, jaw: jawR,
+        point: _biteAt, dir: _biteDir, jaw: jawR, by: a,
         medium: biteMedium(_biteAt.x, _biteAt.y, _biteAt.z),
         // THE MOUTH OWNS THE LENS FOR THIS MOUTHFUL. Without this the same
         // bite shook the camera twice — once below, once again out of

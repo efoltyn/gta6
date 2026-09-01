@@ -872,12 +872,23 @@
       o.snout.add(mesh);
     };
     if (o.eyeSize !== 0) {
-      const eyeGeom = cachedGeom("eye|" + (o.eyeSize || 0.075), function () {
-        return new T.SphereGeometry(o.eyeSize || 0.075, 8, 6);
-      });
+      /* TWO HALVES, SO IT CAN ROLL. The dark half faces the world; the pale
+         back of the eyeball faces the skull. addSharkMouth's applyGape turns
+         the inner roller about the head's vertical axis as the bite commits,
+         and the pale half comes round — the eye-roll of a great white at
+         contact. The flattening (0.85, 1, 0.6) lives on the OUTER holder so
+         the socket keeps its shape while the pattern turns inside it. */
+      const size = o.eyeSize || 0.075;
+      const pale = m(o.eyeBack || 0x8c8a84);
+      const halfPos = cachedGeom("eyehalf+|" + size, function () { return new T.SphereGeometry(size, 8, 6, 0, Math.PI); });
+      const halfNeg = cachedGeom("eyehalf-|" + size, function () { return new T.SphereGeometry(size, 8, 6, Math.PI, Math.PI); });
       [-1, 1].forEach(function (side) {
-        const eye = new T.Mesh(eyeGeom, dark);
+        const eye = new T.Group();
         eye.name = "sharkEye";
+        const roller = new T.Group();
+        const front = new T.Mesh(side > 0 ? halfPos : halfNeg, dark); front.name = "sharkEye";
+        const back = new T.Mesh(side > 0 ? halfNeg : halfPos, pale); back.name = "sharkEyeBack";
+        roller.add(front); roller.add(back); eye.add(roller);
         eye.position.set(o.eyeX, o.eyeY, side * o.eyeZ);
         eye.scale.set(0.85, 1, 0.6);
         // §7c: the eye lives on the head's UPPER HALF, so when that half is
@@ -886,6 +897,7 @@
         // stays on the body, exactly as before.
         if (o.snout && o.snout.userData && o.snout.userData._splitShell) snoutOf(eye);
         else g.add(eye);
+        if (g._aquaticMouth) (g._aquaticMouth.eyes = g._aquaticMouth.eyes || []).push({ roller: roller, side: side });
       });
     }
 
@@ -1250,7 +1262,14 @@
     // supports compared with suction feeders' conspicuous lip cartilages.
     const lipRecess = o.lipRecess == null ? len * 0.035 : o.lipRecess;
     const railIn = o.railIn || width * 0.11;
-    const railOut = o.railOut || width * 0.10;
+    /* 0.055, NOT 0.10 — THE MOUTH IS BOUNDED BY THE HEAD, for every shark.
+       The hero was corrected to width*0.055 by hand (35c54e2) after its gum
+       rail came out past the cheek; the bull shark and megalodon kept the old
+       default and stood their lower band 0.11 outboard of the chin that is
+       supposed to be the outside of the animal there — a rail of gum and lip
+       running OUTSIDE a shut mouth, which is the "black shit protruding out
+       the lips" the owner sees on those two. */
+    const railOut = o.railOut || width * 0.055;
     const toothH = o.toothHeight || gap * 0.48;
     const toothW = o.toothWidth || toothH * 0.86;
     const rowTeeth = o.rowTeeth || 17;
@@ -1258,9 +1277,32 @@
     const upperY = gap * 0.27, lowerY = -gap * 0.27;
     const cx = len * 0.18, rad = len * 0.82, hw = width * 0.5;
 
-    const gum = m(o.gum || 0x8e3b42), gumDark = m(o.gumDark || 0x5e2229);
-    const enamel = m(o.tooth || 0xf2ead6), root = m(o.toothRoot || 0xd6a9a4);
+    /* WET GUM, NOT BUBBLEGUM. 0x8e3b42 left the pipe as rgb(195,130,140) and
+       then took the sun — the lower jaw at full gape was a salmon plank, the
+       biggest thing in the mouth. Authored in linear so it LANDS dark: 0x6a1c22
+       -> about rgb(170,90,100) lit, the wet red-pink of real gingiva, and the
+       corners darker still. Same correction to the tooth root. */
+    const gum = m(o.gum || 0x6a1c22), gumDark = m(o.gumDark || 0x3b0f14);
+    const enamel = m(o.tooth || 0xefe6d0), root = m(o.toothRoot || 0xc48d88);
     const skin = m(o.skin || 0xdfe4e6);
+    /* THE PROTRUDED UPPER JAW IS ITS OWN TISSUE. When a great white commits,
+       the tooth-bearing upper jaw slides down and forward OUT of the snout,
+       and what shows between the snout's skin edge and the teeth is a band of
+       pale pink jaw tissue — not body-white skin. This is that band's colour;
+       the upper gum band's world-facing faces wear it (see faceGroup). */
+    /* ..and it is only FAINTLY pink, because the same faces are the front of
+       the CLOSED mouth too: at rest the front of this band shows under the
+       snout tip, and at 0x7a3f3a that read as a pink patch on a shut mouth
+       (the hammerhead's "protruding pinkish colour" in another coat). On the
+       animal the protruded jaw is white tissue with a pink cast; the red is
+       in the gum line, which the band's inner and bottom faces carry. */
+    /* ..SO THE COLOUR RIDES THE GAPE. One material cannot be white in a shut
+       mouth and pink in an open one — unless it is repainted as the jaw moves.
+       applyGape lerps it: the snout's own white at rest, wet pink at full
+       protrusion, which is also what the animal does (blood in the protruded
+       tissue). Cloned so the repaint never leaks into a shared cached material. */
+    const JAW_REST = new T.Color(0xd8c3bf), JAW_GAPE = new T.Color(0x7a3f3a);
+    const jawSkin = m(o.jawSkin || 0xd8c3bf).clone();
     /* AND ONE DOUBLE-SIDED COPY OF IT. The buccal sack's outer wrap is swept
        with ONE winding for both cheeks — they face opposite ways, so on one
        flank of every shark in this game that wrap was back-facing and culled,
@@ -1269,7 +1311,12 @@
        it hit (the probe in tools/visual-presets/shark-head-weld.mjs):
        sharkBuccalSack, on the side the winding loses. One material per animal,
        no vertices moved, both flanks fixed. */
-    const skinWrap = skin.clone(); skinWrap.side = T_.DoubleSide;
+    /* ..AND IT IS JAW TISSUE, NOT BELLY. The sack rides the protruding upper
+       jaw, so at full gape its wrapped cheeks and floor hang below the snout
+       with the teeth: painted body-white they were a rectangular white plank
+       under the nose (photographed 2026-09-01, the first protrusion build).
+       The protruded jaw of a real great white is pale PINK; so is this. */
+    const skinWrap = jawSkin.clone(); skinWrap.side = T_.DoubleSide;
 
     // The jaw line is not level. It rises toward the corners so the whole arc
     // follows the underside of the head — which is what actually seats the
@@ -1396,7 +1443,10 @@
       // inner/bottom faces; the world-facing upper lip is the same pale skin
       // as the rostrum around it.  This is what visually joins the dental row
       // to the moving crown instead of drawing a long pink bar under it.
-      const faceGroup = up ? [0, 0, 1, 1] : [0, 1, 1, 0];
+      // ..and the UPPER band's world-facing faces are the protruded jaw's own
+      // pale tissue (slot 3), because at gape they hang below the snout's skin
+      // and are the thing the teeth visibly grow out of.
+      const faceGroup = up ? [0, 0, 3, 3] : [0, 1, 1, 0];
       for (let i = 0; i < stations; i++) {
         const am = (rows[i].a + rows[i + 1].a) * 0.5;
         const corner = Math.abs(am) > A * 0.60;
@@ -1422,7 +1472,7 @@
       // photographs the protruded upper jaw is whitish-pink, and painting it
       // the dark dorsal colour is exactly what made it read as a bolted-on
       // grey object instead of the animal's own lip.
-      const mesh = meshOf(geo, [gum, skin, gumDark]);
+      const mesh = meshOf(geo, [gum, skin, gumDark, jawSkin]);
       mesh.name = name;
       parent.add(mesh);
       return mesh;
@@ -1430,17 +1480,42 @@
 
     /* ---- one merged tooth field per jaw: three rows, tapering and raking
             toward the corners, serrated, pink where enamel meets gum ------- */
+    /* THE TEETH WERE A WALL. Owner, 2026-09-01: "the top teeth seem to overlap
+       with the top of the mouth". Measured: the great white's front row was 19
+       teeth of 0.132 on an arc about 2.0 long — a pitch of 0.105 — so every
+       tooth overlapped its neighbours by a quarter and the row photographed as
+       one continuous white slab under the snout, which is exactly what a
+       "tooth" cannot look like. A real great white's functional row is broad
+       triangles that TOUCH AT THE BASE and no more; you can count them.
+       So the count comes down, and the width is CAPPED BY THE ARC: no tooth
+       may be wider than four fifths of the pitch it stands on, whatever the
+       species table says. The lower teeth are the narrower, more pointed
+       "fork" of the pair, as they are on the animal. */
+    function arcLen(a0, a1) {
+      let L = 0, prev = arcPt(a0);
+      for (let i = 1; i <= 24; i++) {
+        const p = arcPt(a0 + (a1 - a0) * i / 24);
+        L += Math.hypot(p[0] - prev[0], p[1] - prev[1]); prev = p;
+      }
+      return L;
+    }
     function toothField(up) {
+      const nFront = Math.max(9, Math.round(rowTeeth * 0.79));
+      const pitch = arcLen(-A * 0.94, A * 0.94) / Math.max(1, nFront - 1);
+      const wK = up ? 0.82 : 0.66, hK = up ? 1.06 : 0.90;
+      const tW = Math.min(toothW * wK, pitch * 0.80), tH = toothH * hK;
       const rows = o.toothRows || [
         /* THE FRONT ROW IS ON THE ARC. It was pulled inboard to hide behind an
            upper lip that no longer exists; on a real animal the working row IS
            the edge of the jaw, which is why you can count the teeth in every
-           photograph ever taken of one. */
-        { n: rowTeeth, r: 1.00, size: 1.00, rake: 0.16 },
-        { n: rowTeeth, r: 0.86, size: 0.70, rake: 0.62 },
-        { n: Math.max(5, (rowTeeth * 0.55) | 0), r: 0.72, size: 0.44, rake: 1.02 },
+           photograph ever taken of one. The replacement rows sit close behind
+           it and lie FLAT — folded back against the gum, the way they are in
+           the reference photographs — not standing up as a second comb. */
+        { n: nFront, r: 1.00, size: 1.00, rake: 0.22 },
+        { n: nFront, r: 0.90, size: 0.62, rake: 0.95 },
+        { n: Math.max(5, (nFront * 0.60) | 0), r: 0.80, size: 0.40, rake: 1.30 },
       ];
-      const key = "teeth|" + [up, len, width, toothH, toothW, A, cornerRise, JSON.stringify(rows)].join(",");
+      const key = "teeth|v2|" + [up, len, width, tH, tW, A, cornerRise, JSON.stringify(rows)].join(",");
       const geo = cachedGeom(key, function () {
         const sh = new Shell();
         const sgn = up ? -1 : 1;                     // which way the crowns point
@@ -1460,7 +1535,7 @@
             const wDir = norm3([-rad * Math.sin(a), 0, hw * Math.cos(a)]);
             const hDir = norm3([-nn[0] * Math.sin(rk), sgn * Math.cos(rk), -nn[1] * Math.sin(rk)]);
             emitTooth(sh, [px, baseY + riseAt(a), pz], wDir, hDir, {
-              w: toothW * sc, h: toothH * sc, thick: toothW * sc * 0.17,
+              w: tW * sc, h: tH * sc, thick: tW * sc * 0.14,
               serr: r === 0 ? 0.055 : 0, curve: 0.10 + corner * 0.28,
               rootFrac: 0.30,
             });
@@ -1503,7 +1578,7 @@
        painted interior-dark; the gum band and tooth row stand proud of it. */
     function chinMesh() {
       const rings = o.rings;
-      const key = "sharkchin|" + [hingeX, hingeY, len, width, gap, cornerRise, A].join(",") +
+      const key = "sharkchin|v2|" + [hingeX, hingeY, len, width, gap, cornerRise, A].join(",") +
         "|" + JSON.stringify(rings);
       const geo = cachedGeom(key, function () {
         const sh = new Shell();
@@ -1555,7 +1630,17 @@
              the deck over the front fifth and the cap becomes that blade. */
           const nose = clamp((t - 0.78) / 0.22, 0, 1);
           const deckZ = rz * 0.55 * (1 - 0.72 * nose * nose);
-          const pts = [], v = [];
+          /* THE LIP IS A HARD EDGE. Shell.v interns vertices by position, so
+             the rim vertex where the white outer wall meets the dark deck wall
+             was ONE vertex, and computeVertexNormals averaged the wall's
+             outward normal with the deck wall's INWARD one — leaving the whole
+             top row of the chin's skin shaded as if it faced up or across the
+             mouth. Under the game's Lambert that is a dark band the length of
+             the closed jaw line, on every split-body shark: the owner's
+             "black shit protruding out the lips" on the great white, bull and
+             megalodon. The deck walls now start a hair inboard of the rim, so
+             the skin keeps its own edge and the interior its own. */
+          const pts = [], v = [], inner = [];
           for (let k = 0; k < ARCP; k++) {
             let p;
             if (k <= 6) {                        // rim +z, around the belly, rim -z
@@ -1565,7 +1650,10 @@
             else p = [lx, rim - deckDrop, deckZ];
             pts.push(p); v.push(sh.v(p[0], p[1], p[2]));
           }
-          st.push({ pts: pts, v: v, lx: lx, rim: rim, dep: dep });
+          // the deck walls' own copies of the two rim points, 2 mm inboard
+          inner.push([lx, rim - 0.001, rz - 0.002], [lx, rim - 0.001, -rz + 0.002]);
+          inner.v = inner.map(function (q) { return sh.v(q[0], q[1], q[2]); });
+          st.push({ pts: pts, v: v, lx: lx, rim: rim, dep: dep, inner: inner });
         }
         for (let i = 0; i < N - 1; i++) {
           const A0 = st[i], A1 = st[i + 1];
@@ -1578,11 +1666,23 @@
               const mz = (A0.pts[k][2] + A0.pts[k2][2]) * 0.5;
               nrm = [0, my, mz];
               if (Math.abs(nrm[1]) + Math.abs(nrm[2]) < 1e-4) nrm = [0, -1, 0];
-            } else if (k === 7) { grp = 1; nrm = [0, 1, 0]; }          // the deck
-            else { grp = 1; nrm = [0, 0.35, k === 6 ? 1 : -1]; }       // deck walls
-            sh.quadN(grp, nrm,
-              [A0.pts[k], A0.pts[k2], A1.pts[k2], A1.pts[k]],
-              [A0.v[k], A0.v[k2], A1.v[k2], A1.v[k]]);
+              sh.quadN(grp, nrm,
+                [A0.pts[k], A0.pts[k2], A1.pts[k2], A1.pts[k]],
+                [A0.v[k], A0.v[k2], A1.v[k2], A1.v[k]]);
+            } else if (k === 7) {                // the deck
+              grp = 1; nrm = [0, 1, 0];
+              sh.quadN(grp, nrm,
+                [A0.pts[k], A0.pts[k2], A1.pts[k2], A1.pts[k]],
+                [A0.v[k], A0.v[k2], A1.v[k2], A1.v[k]]);
+            } else {                             // deck walls, off their OWN rim copies
+              grp = 1; nrm = [0, 0.35, k === 6 ? 1 : -1];
+              // k=6: rim(-z) -> deck(-z) uses inner[1]; k=8: deck(+z) -> rim(+z) uses inner[0]
+              const r0 = k === 6 ? A0.inner[1] : A0.inner[0], r1 = k === 6 ? A1.inner[1] : A1.inner[0];
+              const rv0 = k === 6 ? A0.inner.v[1] : A0.inner.v[0], rv1 = k === 6 ? A1.inner.v[1] : A1.inner.v[0];
+              const P = k === 6 ? [r0, A0.pts[k2], A1.pts[k2], r1] : [A0.pts[k], r0, r1, A1.pts[k]];
+              const V = k === 6 ? [rv0, A0.v[k2], A1.v[k2], rv1] : [A0.v[k], rv0, rv1, A1.v[k]];
+              sh.quadN(grp, nrm, P, V);
+            }
           }
         }
         // caps: the visible jaw tip forward, the buried root aft
@@ -1608,7 +1708,12 @@
       // the single biggest thing inside an open gape, and half of what the
       // owner was pointing at. It joins the buccal sack and the liner in the
       // unlit interior palette instead.
-      return meshOf(geo, [skin, unlit(o.chinDeck || 0x0b0304)]);
+      /* 0x1c0708, NOT 0x0b0304: through the front of a CLOSED mouth (where
+         the snout's underside sits above the jaw line) the deck and its walls
+         are what you see behind the teeth, and at near-black they read as a
+         hole in the animal — the owner's "black shit in the mouth" on the
+         megalodon and bull. The same unlit dark red the mouth roof wears. */
+      return meshOf(geo, [skin, unlit(o.chinDeck || 0x1c0708)]);
     }
 
     // the mandible: a slim seat under the lower gum — the pre-split clamp
@@ -1697,7 +1802,9 @@
     function frontLip(y, up, name, parent) {
       const key = "frontLipArc|v1|" +
         [y, up, gap, len, width, A, cornerRise, lipRecess].join(",");
-      const mesh = meshOf(cachedGeom(key, function () { return frontLipGeom(y, up); }), [skin, skin]);
+      // the upper seal is part of the protruded jaw and wears its tissue
+      const lipMat = up ? jawSkin : skin;
+      const mesh = meshOf(cachedGeom(key, function () { return frontLipGeom(y, up); }), [lipMat, lipMat]);
       mesh.name = name; parent.add(mesh); return mesh;
     }
     frontLip(upperY, true, "sharkUpperLip", dental);
@@ -1714,9 +1821,21 @@
     const hasUpperEnvelope = bodySplit && !!o.snoutShell;
     const protrude = o.envelopeProtrude == null ? (hasUpperEnvelope ? len * 0.22 : 0) : o.envelopeProtrude;
     const upperDrop = o.envelopeDrop == null ? (hasUpperEnvelope ? gap * 0.035 : 0) : o.envelopeDrop;
-    const dentalProtrude = o.dentalProtrude == null ? 0 : o.dentalProtrude;
-    const dentalDrop = o.dentalDrop == null ? 0 : o.dentalDrop;
-    const dentalRake = o.dentalRake == null ? 0 : o.dentalRake;
+    /* THE UPPER JAW PROTRUDES OUT OF THE SNOUT — reference sheet §1, finally
+       done to the tooth row and not only to the head. With these at zero the
+       gum band lived entirely INSIDE the rostrum shell and the palate plane
+       cut straight through the tooth field: at full gape the upper teeth grew
+       out of the snout's white skin edge with no gum between, a comb glued to
+       the underside of the nose ("the top teeth overlap with the top of the
+       mouth"). Now the tooth-bearing jaw drops a quarter of the gap and slides
+       forward as the mouth opens, so the pale jaw band and the dark gum line
+       come out from under the skin and the teeth stand in tissue. The band's
+       tall outer face (kLipUp) is the membrane that keeps the snout's skin
+       edge covered through the whole travel — checked: at full rake the
+       band's top is still 8 cm inside the shell on the hero. */
+    const dentalProtrude = o.dentalProtrude == null ? (hasUpperEnvelope ? len * 0.05 : 0) : o.dentalProtrude;
+    const dentalDrop = o.dentalDrop == null ? (hasUpperEnvelope ? gap * 0.26 : 0) : o.dentalDrop;
+    const dentalRake = o.dentalRake == null ? (hasUpperEnvelope ? 0.08 : 0) : o.dentalRake;
     const snoutLift = o.snoutLift == null ? (hasUpperEnvelope ? 0.16 : 0) : o.snoutLift;
 
     /* §6: THE INTERIOR IS TWO PIECES, AND EACH IS WELDED TO A BONE.
@@ -1776,7 +1895,7 @@
       return Math.min(topY, (r.y + r.ry * 0.55) - hingeY);
     }
 
-    const sack = meshOf(cachedGeom("buccalSack|v3|" + [hingeX, hingeY, len, width,
+    const sack = meshOf(cachedGeom("buccalSack|v4|" + [hingeX, hingeY, len, width,
       gap, cx, rad, A, cornerRise, upperY, lowerY,
       JSON.stringify(o.rings || null)].join(","), function () {
       /* THE SACK STOPS BEHIND THE SEAL. Its front wall used to stand exactly
@@ -1809,8 +1928,22 @@
           const ang = Math.atan2(z / hw, pl.u), rise = riseAt(clamp(ang, -A, A));
           const dome = (1 - sg * sg) * fx;
           tr.push([x, sackRoofAt(x, upperY + rise + gap * 0.62 * dome), z]);
-          br.push([x, Math.max(lowerY + rise - gap * 0.30 * dome,
-            sackFloorAt(lowerY + rise)), z]);
+          /* THE FLOOR IS SHALLOW AT THE FRONT. It used to sit on the chin's
+             deck from the first station, which is right where the sack is
+             buried in a CLOSED chin — but the sack rides the upper jaw, and
+             the moment that jaw protrudes the floor came out with it: a
+             skin-wrapped slab hanging a full gap below the upper teeth, with
+             the crowns half hidden against it. On the animal the tissue the
+             upper teeth stand in is about as deep as the teeth; below them is
+             open mouth down to the lower jaw. So the front of the floor hugs
+             the gum line and the sack deepens to the chin's deck only from a
+             third of the way back, where the cheeks really do run down to the
+             corner of the mouth. Nothing at rest changes: the closed chin
+             still covers all of it. */
+          const fb0 = clamp((ti - 0.12) / 0.42, 0, 1), fb = fb0 * fb0 * (3 - 2 * fb0);
+          const deepFloor = Math.max(lowerY + rise - gap * 0.30 * dome, sackFloorAt(lowerY + rise));
+          const gumFloor = upperY + rise - gumH * 1.2;
+          br.push([x, lerp(gumFloor, deepFloor, fb), z]);
         }
         top.push(tr); bot.push(br);
       }
@@ -1966,7 +2099,7 @@
       // rakes as it protrudes, so a socket pinned to the hinge height ends up
       // above the open tooth ring — i.e. damage resolving in clear water just
       // over the teeth. Bias it to the centre of the open gape instead.
-      bite: { x: hingeX + len * 0.96, y: hingeY - (o.upperDrop == null ? gap * 0.34 : o.upperDrop) * 0.6, z: 0 },
+      bite: { x: hingeX + len * 0.96, y: hingeY - (o.upperDrop == null ? gap * 0.34 : o.upperDrop) * 0.6 - dentalDrop * 0.5, z: 0 },
       // THE THING BEING BITTEN SITS INSIDE THE MOUTH, not on the rostrum.
       // `bite` remains the front-centre damage socket where the teeth first
       // meet a surface. `grip` is a second authored point, one tooth-row deeper
@@ -1974,7 +2107,7 @@
       // Publishing both from the mouth builder keeps collision, damage and the
       // visible jaw on one geometry contract instead of letting mounted-bite
       // code invent a nearby point from species scale.
-      grip: { x: hingeX + len * 0.82, y: hingeY - (o.upperDrop == null ? gap * 0.34 : o.upperDrop) * 0.6 - gap * 0.28, z: 0 },
+      grip: { x: hingeX + len * 0.82, y: hingeY - (o.upperDrop == null ? gap * 0.34 : o.upperDrop) * 0.6 - gap * 0.28 - dentalDrop * 0.5, z: 0 },
       maxOpen: o.maxOpen || 1.05,
       travel: (o.maxOpen || 1.05) + restClose,
       restClose: restClose,
@@ -2020,6 +2153,19 @@
       dental.position.x = oo * dentalProtrude;
       dental.position.y = -oo * dentalDrop;
       dental.rotation.z = -oo * dentalRake;
+      /* THE EYES ROLL BACK. A great white has no nictitating membrane; at the
+         moment of the bite it rotates the whole eyeball backward into the
+         socket so the pale sclera faces out — the white-eyed shark of every
+         breach photograph. addSharkFaceDetails registers each eye's roller
+         here; the roll rides the last third of the gape so a cruising animal
+         looks at you and a committed one has already gone blind. */
+      jawSkin.color.copy(JAW_REST).lerp(JAW_GAPE, oo);
+      skinWrap.color.copy(jawSkin.color);
+      const eyes = g._aquaticMouth && g._aquaticMouth.eyes;
+      if (eyes) {
+        const rk0 = clamp((oo - 0.55) / 0.35, 0, 1), rk = rk0 * rk0 * (3 - 2 * rk0);
+        for (let i = 0; i < eyes.length; i++) eyes[i].roller.rotation.y = -eyes[i].side * rk * Math.PI * 0.8;
+      }
       // NOTHING TO REVEAL. The roof rides `dental`, the floor rides `lower`
       // and the throat is fixed in the head, so the interior opens because the
       // jaws opened. The old scale-the-blob reveal is what put a lump in the
@@ -2094,7 +2240,14 @@
         // where the seam crosses this section; below the ring entirely at the
         // tip, where the snout is a full closed volume above the mouth line
         const a0 = Math.asin(clamp((seam - r.y) / Math.max(0.02, ry), -1, 1));
-        const pal = Math.max(seam + gap * 0.26, r.y - ry + gap * 0.05) - py;
+        /* THE PALATE SITS ABOVE THE GUM, NOT THROUGH THE TEETH. At seam +
+           0.26 gap this plane ran 8 cm BELOW the upper gum band's centre: the
+           band was buried in the snout and every upper tooth was cut off at
+           40% of its height, roots hidden, crowns sprouting from a lit grey
+           plane — the "top of the mouth" the owner saw the teeth overlapping.
+           The roof of a mouth is above the gum that hangs from it. Bounded by
+           the section's own crown so the nose stays a solid volume. */
+        const pal = Math.min(r.y + ry * 0.55, Math.max(seam + gap * 0.60, r.y - ry + gap * 0.05)) - py;
         const pts = [], v = [], ang = [];
         for (let k = 0; k < K; k++) {
           const a = a0 + (k / (K - 1)) * (Math.PI - 2 * a0);  // seam +z -> crown -> seam -z
@@ -2148,7 +2301,13 @@
             grp = skinGrp(am, i, k, u);
             nrm = [0, Math.sin(am), Math.cos(am)];
           } else {                                     // seam walls + palate: interior
-            grp = 2;
+            /* AND IT IS UNLIT. Slot 2 is the species' lit "interior" material
+               (0x421a1e on the hero), and lit dark hex comes out of this
+               renderer as milk-chocolate grey — the flat grey plane over the
+               upper teeth in every head-on frame. The roof of a mouth is in
+               shadow; slot 3 is the same unlit cavity palette the buccal sack
+               and throat already use, appended by addSnoutShell. */
+            grp = 3;
             nrm = k === K - 1 ? [0, -0.4, -1] : (k === K ? [0, -1, 0] : [0, -0.4, 1]);
           }
           sh.quadN(grp, nrm,
@@ -2167,13 +2326,14 @@
       const vb = sh.v(back[0], back[1], back[2]);
       for (let k = 0; k < M; k++) {
         const k2 = (k + 1) % M;
-        const tg = k < K - 1 ? skinGrp((F.ang[k] + F.ang[k2]) * 0.5, N - 1, k, 1) : 2;
+        const tg = k < K - 1 ? skinGrp((F.ang[k] + F.ang[k2]) * 0.5, N - 1, k, 1) : 3;
         sh.quadN(tg, [1, 0, 0], [F.pts[k], F.pts[k2], tip, tip], [F.v[k], F.v[k2], vt, vt]);
         sh.quadN(0, [-1, 0, 0], [B.pts[k], B.pts[k2], back, back], [B.v[k], B.v[k2], vb, vb]);
       }
       return sh.geom();
     });
-    const mesh = meshOf(geo, mats);
+    // slot 3 = the mouth roof, unlit (see the seam-wall note in the loft)
+    const mesh = meshOf(geo, mats.concat([unlit(mo.cavityRoof || 0x1c0708)]));
     mesh.name = "sharkRostrum";
     mesh.userData._splitShell = true;   // face details put the EYES on this one
     mesh.userData._rootOrigin = { x: px, y: py, z: 0 };
