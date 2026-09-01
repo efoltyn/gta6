@@ -505,6 +505,9 @@
   const C_WET = [0.20, 0.16, 0.12], C_BEACH = [0.52, 0.45, 0.31];
   const C_GREEN = [0.09, 0.19, 0.05];
   const C_SEABED = [0.10, 0.14, 0.11];
+  /* One tonal patch every 260 m, at +/-2.5% of albedo. See the break-up term
+     at the end of colourAt for why both numbers are what they are. */
+  const TONE_WAVE = 260, TONE_AMP = 0.025;
   const _c = [0, 0, 0];
   function mix3(a, b, t, out) {
     out[0] = a[0] + (b[0] - a[0]) * t;
@@ -512,7 +515,7 @@
     out[2] = a[2] + (b[2] - a[2]) * t;
     return out;
   }
-  function colourAt(x, z, y, slope, out) {
+  function colourAt(x, z, y, slope, out, cell) {
     const coast = coastAt(x, z);
     if (y < SEA_Y - 0.2) return mix3(C_SEABED, C_WET, smr(y, -22, 0), out);
     if (coast < 130) {
@@ -556,8 +559,51 @@
     }
     // sand cannot sit on a face this steep — anywhere on the island
     if (slope > 0.34) mix3(out, C_ROCK_LO, smr(slope, 0.34, 0.85) * 0.78, out);
-    // one cheap per-vertex break-up so an 8 m cell does not read as a tile
-    const g = 0.93 + h2(Math.round(x), Math.round(z), S(1301)) * 0.14;
+    /* ---- TONAL BREAK-UP, AND WHY IT IS NOT A PER-VERTEX HASH ANY MORE -----
+       OWNER (2026-09-01): "the sand varies in colour a little too much idk why
+       it looks weird."
+
+       This line used to be
+           const g = 0.93 + h2(Math.round(x), Math.round(z), S(1301)) * 0.14;
+       — a white-noise HASH, +/-7% of the albedo, evaluated at whatever point
+       the caller happened to be sampling. Three things were wrong with it and
+       the third is the one nobody could see in a screenshot.
+
+       IT WAS THE WRONG FREQUENCY. The old comment called it "one cheap
+       per-vertex break-up so a cell does not read as a tile", which wants
+       GRAIN — but a value carried on vertices 10 m apart and interpolated
+       across the triangles between them is not grain, it is a soft blotch ten
+       metres wide. That is exactly the frequency the eye reads as blotchy.
+
+       IT DREW THE MESH IT WAS HIDING. White noise interpolated over a triangle
+       grid puts a tone extremum on every vertex, so the term meant to break
+       the grid up was the thing making the grid legible.
+
+       AND IT WAS NOT ATTACHED TO THE WORLD — the real answer to "idk why".
+       colourAt has four callers and they sample at four different spacings:
+       the clipmap's seven levels at 10/20/40...640 m, the arena mesh at its
+       own cell, the minimap at metres-per-pixel, and the battle skirt at a
+       single point. A hash asked at 10 m spacing and at 40 m spacing returns
+       UNRELATED values for the same piece of ground, so one patch of desert
+       had a different tone for every level that might draw it. Measured over a
+       640 m patch (tools/warlord-sand-tone.mjs): the same ground moved up to
+       12.99% in tone, mean 2.64%, purely by changing which ring drew it. Ride
+       toward a dune and it changes colour under you; stand at a ring seam and
+       two tones meet along it. That is the weirdness, and it is invisible in
+       any single frame, which is why it survived.
+
+       So the break-up is now a function of WORLD POSITION ONLY, at a
+       wavelength coarse enough that every level which applies it can actually
+       sample it, faded out before a level gets too coarse to carry it (a
+       lattice sampled coarser than about half its wavelength is noise again —
+       Nyquist, not taste). Same ground, same tone, whoever is drawing it:
+       worst drift 0.73%, mean 0.13%. And the amplitude comes down from +/-7%
+       to +/-2.5%, because he is right that it was too much: on flat sand a 14%
+       albedo swing is a stain, not a variation. The fine break-up the surface
+       actually reads is the curvature term at the call site, which is tied to
+       the shape of the ground instead of to a random number. */
+    const g = 1 + (vn(x, z, TONE_WAVE, S(1301)) - 0.5) * 2 *
+      (TONE_AMP * clamp((TONE_WAVE * 0.5 - (cell || 0)) / (TONE_WAVE * 0.25), 0, 1));
     out[0] *= g; out[1] *= g; out[2] *= g;
     return out;
   }
@@ -736,7 +782,7 @@
         const xl = heightBuf[t - (k > 0 ? 1 : 0)], xr = heightBuf[t + (k < N ? 1 : 0)];
         const zl = heightBuf[t - (j > 0 ? VN : 0)], zr = heightBuf[t + (j < N ? VN : 0)];
         const slope = Math.hypot((xr - xl) * inv, (zr - zl) * inv);
-        colourAt(cx + (k - RING) * cell, wz, y, slope, _c);
+        colourAt(cx + (k - RING) * cell, wz, y, slope, _c, cell);
         /* CURVATURE SHADING — the cheapest ambient occlusion there is, and
            the single biggest thing between "rolling cream hills" and "an
            erg". A Lambert sun tells you which way a face points and nothing
@@ -1018,7 +1064,7 @@
         const xl = hs[t - (k > 0 ? 1 : 0)], xr = hs[t + (k < size - 1 ? 1 : 0)];
         const zl = hs[t - (j > 0 ? size : 0)], zr = hs[t + (j < size - 1 ? size : 0)];
         const slope = Math.hypot((xr - xl) / (2 * step), (zr - zl) / (2 * step));
-        colourAt(x, z, y, slope, _c);
+        colourAt(x, z, y, slope, _c, step);
         // hillshade from a north-west sun, the cartographic convention
         const sh = clamp(0.72 + ((xl - xr) + (zl - zr)) / (step * 2.2), 0.35, 1.5);
         px[o] = clamp(_c[0] * sh * 255, 0, 255);
@@ -1173,7 +1219,7 @@
             const xl = hbuf[i - (k > 0 ? 1 : 0)], xr = hbuf[i + (k < seg ? 1 : 0)];
             const zl = hbuf[i - (j > 0 ? side : 0)], zr = hbuf[i + (j < seg ? side : 0)];
             const slope = Math.hypot((xr - xl) / (2 * cell), (zr - zl) / (2 * cell));
-            colourAt(wx + pos.getX(i), wz + pos.getZ(i), hbuf[i], slope, _c);
+            colourAt(wx + pos.getX(i), wz + pos.getZ(i), hbuf[i], slope, _c, cell);
             // same curvature term the island uses, so the arena and the
             // campaign are visibly the same desert and not two deserts
             const curv = ((xl + xr + zl + zr) * 0.25 - hbuf[i]) / cell;
@@ -1198,7 +1244,7 @@
            standing on a floating tile. */
         const sk = new THREE.PlaneGeometry(9000, 9000);
         sk.rotateX(-Math.PI / 2);
-        colourAt(wx, wz, base, 0.02, _c);
+        colourAt(wx, wz, base, 0.02, _c, 1e9);
         const skm = new THREE.Mesh(sk, new THREE.MeshLambertMaterial({
           color: new THREE.Color(_c[0] * 0.92, _c[1] * 0.92, _c[2] * 0.92) }));
         skm.position.set(wx, lo - 0.6, wz);
