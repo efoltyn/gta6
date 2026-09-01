@@ -305,7 +305,9 @@
      just decrements its own magazine — so rounds fired are read off that
      magazine once a frame. Everything the preset measures (rounds fired, hits,
      time to kill) is counted here, at the one place that sees both ends. */
-  const stats = { shots: 0, hits: 0, kills: 0, damage: 0, firstShotT: -1, lastKillT: -1, t: 0 };
+  // `heads` is how many of your kills were head hits — recovered at the seam
+  // headFromKnock() explains, and the number a tool can gate that recovery on.
+  const stats = { shots: 0, hits: 0, kills: 0, heads: 0, damage: 0, firstShotT: -1, lastKillT: -1, t: 0 };
   let lastRounds = -1;
 
   function Q() { return (A && A.ctx && A.ctx.Q) || null; }
@@ -445,10 +447,68 @@
         if (a) { a.dead = true; a.hp = 0; }
         return;
       }
+      /* THE HEAD FLAG IS ONLY BELIEVED IF IT IS THIS FRAME'S. `_wlHead` is a
+         property on the actor and nothing clears it, so a man who SURVIVED a
+         headshot earlier (armour soak, or a taser) carried "true" for the rest
+         of the battle and was then credited as a headshot for whatever finally
+         killed him — head-height gore, a skull whip, slow-mo, all off a body
+         hit. And aiKill is reachable without a preceding knockback at all
+         (combat.js's melee, killstreaks, modecaps' explosions), which is
+         exactly when a stale stamp is read. The stamp carries the frame it was
+         written on, and a stamp from any other frame is not an answer. */
+      const fresh = a._wlHeadT === stats.t;
+      const head = fresh && !!a._wlHead;
       stats.kills++; stats.lastKillT = stats.t;
-      A.kill(a);
+      /* AND THE TALLY IS COUNTED HERE TOO, because this is the path an
+         ARMOURED lethal headshot takes and the knockback shim's counter never
+         sees it: fpsmode zeroes hp for a head hit, this file refunds that and
+         re-applies it through the soak, a plate leaves him alive, and the kill
+         then lands one line later through fpsmode's own `lethalHeadshot ||`
+         branch. No double count — A.kill declines an already-dead man and the
+         knockback shim only counts when it was the thing that emptied him. */
+      if (head) stats.heads++;
+      A.kill(a, head);                 // see headFromKnock() for where that came from
     };
     CBZ.aiKill._wlOwn = true;
+
+    /* ---- WHERE THE ROUND LANDED, recovered from the one number that crosses
+       the seam, because warlord/deaths.js needs it and fpsmode does not send
+       it.
+
+       THE GAP. systems/fpsmode.js has two hit resolvers. cityGunHit (:2350)
+       builds a full impulse record — `{fromX, fromZ, dir, force, cal, wkey,
+       dist, point, headshot}` — and hands it to cityKillPed, which is why a
+       city headshot knows it was one all the way down to the wound decal. The
+       NON-city gunHit (:2388), which is the one this page runs, builds that
+       record ONLY for a survivor (CBZ.body.hit at :2411) and calls
+       `CBZ.aiKill(a, {group}, {noKnock:true})` for a lethal round — no point,
+       no direction, no head flag. So the warlord's headshots were the only
+       shots in this game that could not tell they were headshots: no head-
+       height gore, no skull whip out of city/ragdoll.js (it decides that by
+       whether the kick point is within 0.6 m of the head mass point, so a
+       torso-height point makes a head hit unknowable), no "headshot" cue and
+       no slow-mo.
+
+       WHAT DOES CROSS. `CBZ.knockback(a, px, pz, w.knock * (hit.head ? 1.25 :
+       1))` — fpsmode.js:2417, unconditional, and it runs BEFORE aiKill on
+       every path. The head flag is literally multiplied into the argument, so
+       dividing it back out is exact rather than a guess: 1.25 is not a
+       tolerance, it is a factor fpsmode typed. Compared against 1.12 so a
+       float round-trip cannot flip it, and false when the weapon row is
+       missing (unknown beats wrong).
+
+       AND IT IS A SMELL, SAID OUT LOUD SO IT GETS FIXED RATHER THAN COPIED:
+       the right change is fpsmode's gunHit building the same `imp` record
+       cityGunHit already builds twenty lines above it and handing that to
+       aiKill. That is systems/fpsmode.js's line to change and it would delete
+       this function. Until then, this is the seam. */
+    function headFromKnock(k) {
+      const L = CBZ.FPS_WEAPONS;
+      const i = CBZ.fpsWeaponIndex ? CBZ.fpsWeaponIndex() : -1;
+      const w = (L && i >= 0) ? L[i] : null;
+      const base = w && w.knock > 0 ? w.knock : 0;
+      return base > 0 && (+k || 0) / base > 1.12;
+    }
 
     /* ---- THE HIT PATH, and it is the one genuinely awkward seam in this
        file, so it is stated in full.
@@ -474,6 +534,9 @@
         if (CBZ._wlPrevKnockback) return CBZ._wlPrevKnockback(a, fx, fz, k);
         return;
       }
+      // BEFORE the damage — A.hit below can kill him. Stamped with the frame,
+      // so the aiKill shim can tell this answer from a stale one.
+      a._wlHead = headFromKnock(k); a._wlHeadT = stats.t;
       const prev = (a._wlHp == null) ? a.hp : a._wlHp;
       const raw = prev - a.hp;
       if (raw > 0) {
@@ -484,11 +547,23 @@
            accident: this hook runs INSIDE fpsmode's gunHit, before its own
            `if (a.hp <= 0) CBZ.aiKill(...)` line, and A.hit below already ends
            in battle.js's killMan — so by the time fpsmode looks, the man is
-           dead and it correctly declines to kill him twice. aiKill stays wired
-           for the paths that reach it first (a headshot sets hp to 0 without
-           passing through the soak refund). */
-        if (a.hp <= 0 && !a.dead) { stats.kills++; stats.lastKillT = stats.t; }
-        A.hit(a, prev - a.hp);
+           dead and it correctly declines to kill him twice.
+
+           THE OLD PARENTHETICAL HERE WAS WRONG and it is worth correcting
+           rather than deleting, because it named a real case with the wrong
+           mechanism. It said "a headshot sets hp to 0 without passing through
+           the soak refund" — it does not; a lethal head hit zeroes hp at
+           fpsmode.js:2398, and this shim refunds and re-applies it like any
+           other round. The real case is what happens when the man is WEARING
+           A PLATE: the soak leaves him alive, this branch does not fire, and
+           fpsmode's own `if (lethalHeadshot || a.hp <= 0)` at :2434 kills him
+           through aiKill a line later. That is the path aiKill stays wired
+           for, and it is why the head tally is counted in both shims. */
+        if (a.hp <= 0 && !a.dead) {
+          stats.kills++; stats.lastKillT = stats.t;
+          if (a._wlHead) stats.heads++;
+        }
+        A.hit(a, prev - a.hp, a._wlHead);
       }
       a._wlHp = a.hp;
     };
@@ -990,7 +1065,7 @@
     if (CBZ._wlPrevHasWeapon !== undefined) { CBZ.hasWeapon = CBZ._wlPrevHasWeapon || undefined; CBZ._wlPrevHasWeapon = undefined; }
     enemies.length = 0;
     lastRounds = -1;
-    stats.shots = stats.hits = stats.kills = stats.damage = 0;
+    stats.shots = stats.hits = stats.kills = stats.heads = stats.damage = 0;
     stats.firstShotT = stats.lastKillT = -1; stats.t = 0;
     CBZ.losBlockers = [];
     legacyUnmount();
@@ -1028,7 +1103,7 @@
       lock: !!(CBZ.aimLockTarget && CBZ.aimLockTarget()),
       files: { fpsmode: !!CBZ.fpsFire, gunhands: !!CBZ.gunReloadPose, lockon: !!CBZ.lockonFireTarget },
       aim: { x: _dir.x, y: _dir.y, z: _dir.z },
-      shots: stats.shots, hits: stats.hits, kills: stats.kills,
+      shots: stats.shots, hits: stats.hits, kills: stats.kills, heads: stats.heads,
       damage: Math.round(stats.damage),
       accuracy: stats.shots ? Math.round(stats.hits / stats.shots * 100) / 100 : 0,
       ttk: (stats.firstShotT >= 0 && stats.lastKillT >= 0)
@@ -1121,7 +1196,7 @@
      regression on every subject after the first. Called between beats so
      rounds/hits/kills/ttk mean this beat and nothing else. Drive-only. */
   function resetLedger() {
-    stats.shots = stats.hits = stats.kills = stats.damage = 0;
+    stats.shots = stats.hits = stats.kills = stats.heads = stats.damage = 0;
     stats.firstShotT = stats.lastKillT = -1;
     return true;
   }

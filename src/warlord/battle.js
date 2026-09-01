@@ -30,7 +30,13 @@
      how they fight  CBZ.combatIQ.posture/shot/slot/suppress/cover
      rounds drawn    CBZ.tracer/muzzleFlash/bulletImpact  (systems/gunfx.js)
      wounds          CBZ.bodyWound            (systems/wounds.js)
-     the dead        CBZ.deathPose + CBZ.cityRagdoll      (city/ragdoll.js)
+     the dead        warlord/deaths.js  — which is itself CBZ.deathPose +
+                     CBZ.cityRagdoll (city/ragdoll.js) + CBZ.gore
+                     (systems/gore.js) + core/loop.js's hit-stop semantics,
+                     spent through a rank rather than through array order.
+                     See its header: this file used to lay a man down in
+                     three lines and the owner's word for the result was
+                     "instant".
      dropped rifles  CBZ.weaponPhysics.drop   (systems/actorweapons.js)
      the ground      W.desert.battlefieldAt() (warlord/desert.js)
      YOUR gun        systems/fpsmode.js       (via warlord/gunplay.js)
@@ -74,6 +80,15 @@
                    controller this file used to carry, kept whole so the new
                    one can be photographed against it. The A/B.
      ?gunplay=0    no player gunplay at all (watch the AI war)
+     ?deaths=old   warlord/deaths.js's revert: a man dies exactly the way this
+                   file used to kill him — deathPose on frame zero, a coin-flip
+                   direction, a one-axis plank at 2.4/s, no blood, no hit-stop
+                   and no rim. THE A/B for the death sequence. The old code is
+                   in deaths.js, not here, so the game has one death path.
+     ?blood=0      do not fetch the studio "blood" pack (systems/gore.js)
+     ?rim=old      no rim marks at all. The kill feed is DELETED, not hidden,
+                   so this is a bare revert of the picture — it is what the
+                   A/B needs to prove the rim is the thing carrying the news.
 ============================================================ */
 (function () {
   "use strict";
@@ -137,6 +152,7 @@
   let deadSolving = 0;
   let fxBudget = 0;
   let injectDt = 0;                 // the probe's clock — see __warlordBattle
+  let _shot = null;                 // the man the death studio last executed
   const SIDES = {};
   const V = function () { return new THREE.Vector3(); };
   let _v = null, _v2 = null, _muz = null;
@@ -431,7 +447,10 @@
       cool: 0.4 + lcg() * 1.2, reloadT: 0,
       tgt: null, losBadT: 0, slot: "hold",
       thinkAt: simT + lcg() * 0.3, lastThink: simT,
-      dead: false, dieT: 0, dieDir: 1, animF: (i % 4),
+      // `fall` is warlord/deaths.js's record of how this man is going down;
+      // null while he is alive. It replaced dieT/dieDir, which were a fold
+      // timer and a COIN FLIP for which way he tipped.
+      dead: false, fall: null, animF: (i % 4),
       lastShotT: -9, sq: Math.floor(i / 10), sqSlot: i % 10,
       kills: 0, rad: 0.45, eyeH: 1.52, losY: 1.35, aimY: 1.28, headY: 1.62,
       routed: false, fled: false,
@@ -731,6 +750,27 @@
         malus: s.moraleMalus || 0,
         routingFrac: s.routing / Math.max(1, s.alive),
       });
+      /* THE BUS, ON THE TICK THAT ALREADY DID THE ARITHMETIC. warlord/feel.js
+         has carried listeners for battle:morale and battle:rout since the day
+         it was written, under a comment saying battle.js emits neither and
+         that updateMorale() is polled through audit() until they exist. It
+         does not have to any more. Emitted only when the number MOVED past a
+         hundredth: a morale event every half second in both directions is a
+         listener being asked to filter, and the file that already holds the
+         previous value is the one that should do it. */
+      const prevMo = s._moEmit;
+      if (prevMo == null || Math.abs(prevMo - s.morale) >= 0.01) {
+        s._moEmit = s.morale;
+        if (W.emit) W.emit("battle:morale", { side: k, morale: s.morale, routing: s.routing });
+      }
+      /* AND ONCE, THE FRAME A SIDE COMES APART. brokenSide() is checkEnd()'s
+         own rule, so the shout and the ending cannot disagree about when an
+         army broke. Latched, or a routing army shouts twice a second for the
+         rest of the fight. */
+      if (!s._routEmit && brokenSide(s, report.fledOf[k].length)) {
+        s._routEmit = true;
+        if (W.emit) W.emit("battle:rout", { side: k });
+      }
     });
   }
   function stepRout(m) {
@@ -740,7 +780,14 @@
       if (m.side.morale < nerve) {
         m.routed = true;
         m.side.brokeN = (m.side.brokeN || 0) + 1;
-        if (m.team === "mine" && hud) feed(m.s.name.toUpperCase() + " BREAKS");
+        /* "HAKIM BREAKS" was the same mistake as "HAKIM DOWN": a name you have
+           not learned, and no answer to the only question that matters, which
+           is which part of your line is coming apart. An AMBER tick on the rim
+           at his bearing — thinner than a death's red one, because a man
+           running is not a man dead and the two must not read alike. This also
+           fires battle:break, which warlord/feel.js has had a listener for
+           since the day it was written and has never once received. */
+        const D = DTH(); if (D) D.broke(m);
       }
     } else if (m.side.morale > nerve + 0.14) {
       // RALLY, with hysteresis: an army that steadies gets its men back, and
@@ -1111,13 +1158,25 @@
       /* THE MEN THE TICK KILLED STILL HAVE TO FALL. attritionTick knows about
          hp and nothing about bodies, which is right — it is the headless half.
          So the bodies it emptied are laid down here, through the same
-         manDeathPhysics every 3D death runs, or the last second and a half
-         before the aftermath screen is a rank of standing corpses. */
+         deaths.js every 3D death runs, or the last second and a half before
+         the aftermath screen is a rank of standing corpses. They arrive with
+         no impact record, which deaths.js handles honestly: nobody shot him,
+         so the fall direction falls back to the seeded random. */
+      /* AND THE GUARD IS `!u.fall && !u.retired`, WHICH IS NOT WHAT `!u.dieT`
+         WAS. dieT was set once and never cleared, so it latched forever;
+         `fall` is CLEARED by D.forget() when the corpse budget retires a body,
+         and retired men stay in men[] (only `corpses` is spliced). Without
+         !u.retired a retired corpse re-enters here on the next pass and is
+         killed a second time: a second rim tick, a second battle:kill, and a
+         second copy in `corpses`. And the `u.fall ||` below is the degrade
+         path — deaths.js absent, or a man with no rig — because an unmarked
+         man is pushed into corpses on all 120 iterations of this loop. */
+      const Dt = DTH();
       for (let i = 0; i < men.length; i++) {
         const u = men[i];
-        if (u.dead && !u.isYou && !u.dieT && !u.ragdoll) {
-          if (u.char && CBZ.deathPose) safe(function () { CBZ.deathPose(u.char, u.i * 3.7 + 1.3, lcg()); });
-          manDeathPhysics(u, null);
+        if (u.dead && !u.isYou && !u.retired && !u.fall && !u.ragdoll) {
+          if (Dt) Dt.fell(u, null);
+          u.fall = u.fall || { done: true };
           corpses.push(u);
         }
       }
@@ -1158,10 +1217,11 @@
        formed up two minutes ago. Without this, HOLD after a CHARGE drags the
        whole army backwards to the start line, which reads as a bug. */
     s.anchorX = s.comX; s.anchorZ = s.comZ;
-    if (sideKey !== "them") {
-      feed("ORDER: " + ORDER_LABEL[o]);
-      paintOrders();
-    }
+    /* NO "ORDER: FLANK" LINE. paintOrders() lights the button you just pressed
+       and #wbOrd already carries the label — the feed line was the same fact,
+       written a third time, in a box competing with the casualties. The button
+       IS the picture. */
+    if (sideKey !== "them") paintOrders();
   }
   /* THE OTHER SIDE HAS A COMMANDER TOO, and he is four lines because he is
      answering the same four-button question. Re-asked on a slow tick so the
@@ -1457,10 +1517,16 @@
     }
     m.side.deadN++;
     if (m.s) report.deadOf[m.team].push(m.s);
-    if (m.char && CBZ.deathPose) safe(function () { CBZ.deathPose(m.char, m.i * 3.7 + 1.3, lcg()); });
-    m.dieT = 0.0001;
-    m.dieDir = lcg() < 0.5 ? -1 : 1;
-    manDeathPhysics(m, imp);
+    /* HOW HE FALLS IS warlord/deaths.js's, ALL OF IT. This block used to be
+       three lines — deathPose on frame zero, a coin-flip direction, and a
+       one-axis plank — and the owner's report is exactly that: "death in
+       warlord is instant". deaths.js's header carries the full diagnosis (the
+       blood pack was never on this page, the hit-stop names belong to a frame
+       loop this page does not run, and the pose landed before the fall). What
+       is left here is what a BATTLE owns: that he died, who gets the credit,
+       and that his rifle is now on the sand. */
+    const D = DTH();
+    if (D) D.fell(m, imp);
     // the rifle leaves his hands and lands like hardware — and it is the same
     // gun the aftermath will put in your cart
     const prop = m._weaponProp;
@@ -1490,28 +1556,12 @@
     m.armed = false;
     corpses.push(m);
     if (corpses.length > CORPSE_MAX) retireOldestCorpse();
-    if (m.team === "mine" && m.s) feed(m.s.name.toUpperCase() + " DOWN");
-  }
-
-  const _kdir = { x: 0, y: 0, z: 0 }, _kpt = { x: 0, y: 0, z: 0 };
-  function manDeathPhysics(m, imp) {
-    if (!m.group || !m.char) { m.dieT = 0.0001; return; }
-    let dx = 0, dz = 0;
-    const by = imp && imp.by;
-    if (by && by.pos) { dx = m.pos.x - by.pos.x; dz = m.pos.z - by.pos.z; }
-    const dl = Math.hypot(dx, dz);
-    if (dl > 0.01) { dx /= dl; dz /= dl; }
-    else { const a = lcg() * Math.PI * 2; dx = Math.cos(a); dz = Math.sin(a); }
-    _kdir.x = dx; _kdir.y = 0; _kdir.z = dz;
-    _kpt.x = m.pos.x - dx * 0.28; _kpt.y = m.pos.y + 1.28; _kpt.z = m.pos.z - dz * 0.28;
-    const w = (by && by.wid) ? CBZ.weaponById(by.wid) : null;
-    let energy = 7;
-    if (w) energy = w.pellets ? 15 : Math.max(5, Math.min(13, (w.damage || 20) * 0.35));
-    if (CBZ.cityRagdoll) {
-      const got = safe(function () { return CBZ.cityRagdoll(m, _kpt, _kdir, energy); });
-      if (got) { m.ragdoll = true; m.dieT = 0; deadSolving++; return; }
-    }
-    m.dieT = 0.0001;
+    /* THE NAME IS NOT PRINTED ANY MORE. `feed(name + " DOWN")` said a word for
+       a thing that should be a picture, and the word was the wrong one: you
+       have not learned Hakim's name yet — the aftermath screen is where a name
+       has time to be read — and the sentence never carried the one fact you
+       would act on, which is WHERE your line is dying. deaths.js puts a red
+       tick on the screen rim at his bearing instead. */
   }
   const SINK_NEAR2 = 45 * 45;
   function retireOldestCorpse() {
@@ -1521,6 +1571,7 @@
     const old = corpses.splice(pick, 1)[0];
     if (!old || !old.group) return;
     if (CBZ.ragdollDrop) safe(function () { CBZ.ragdollDrop(old); });
+    const D = DTH(); if (D) D.forget(old);   // stop stepping a fall we are sinking
     if (old.ragdoll) { old.ragdoll = false; deadSolving = Math.max(0, deadSolving - 1); }
     old.retired = true;
     sinking.push({ g: old.group, t: 0 });
@@ -1540,11 +1591,13 @@
     if (m.fled) return;
     if (m.dead) {
       if (m.ragdoll) return;          // the solver owns the transform
-      if (m.dieT > 0 && m.dieT < 1) {
-        m.dieT = Math.min(1, m.dieT + sdt * 2.4);
-        const k = 1 - (1 - m.dieT) * (1 - m.dieT);
-        m.group.rotation.x = m.dieDir * k * (Math.PI / 2 - 0.07);
-      }
+      /* THE FALL RUNS ON SIM TIME, which is why it is here and not on a frame
+         hook: a battle at 8x has to bury its dead at 8x, and the studio's
+         frozen clock has to advance them exactly as far as advance() asked
+         for. deaths.js's four beats, ~6 float writes and one quaternion
+         multiply per corpse per sub-step, and it stops writing the frame a
+         corpse settles. */
+      const D = DTH(); if (D) D.stepFall(m, sdt);
       return;
     }
     if (simT >= m.thinkAt) think(m, simT);
@@ -1757,14 +1810,26 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
          `dmg - soak` written over there is exactly how two files start
          disagreeing about what a plate does. */
       soak: function (m, dmg) { return hurtOne(m, dmg); },
-      hit: function (m, dealt) {
+      /* AND THE ROUND SAYS WHERE IT LANDED. `head` rides through to killMan so
+         warlord/deaths.js can spend the head treatment on it: the gore burst
+         at 1.62 m instead of 1.15, the ragdoll kick seated at head height
+         (which is the only way city/ragdoll.js can know to whip the skull —
+         it decides that by whether the hit point is within 0.6 m of the head
+         mass point), the "headshot" cue instead of the "hit" one, and
+         doSlowmo(0.18). Before this, YOUR headshots were the only shots in the
+         game that could not tell they were headshots: fpsmode's non-city
+         gunHit builds no impulse record for a lethal round, so the flag died
+         at the seam. gunplay.js's knockback shim recovers it. */
+      hit: function (m, dealt, head) {
         if (!m || m.dead || over) return;
         if (CBZ.combatIQ && CBZ.combatIQ.suppress) CBZ.combatIQ.suppress(m, 0.9);
         if (!m.tgt || m.tgt.dead) m.tgt = YOU;
         SIDES.mine.hits++;
-        if (m.hp <= 0) killMan(m, { by: YOU });
+        if (m.hp <= 0) killMan(m, { by: YOU, headshot: !!head });
       },
-      kill: function (m) { if (m && !m.dead && !over) killMan(m, { by: YOU }); },
+      kill: function (m, head) {
+        if (m && !m.dead && !over) killMan(m, { by: YOU, headshot: !!head });
+      },
       shot: function (n) { SIDES.mine.shots += (n || 1); },
       hitCount: function () { SIDES.mine.hits++; },
       // the legacy controller's own damage call — one funnel, still
@@ -1801,6 +1866,33 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     return gunplayReady;
   }
   let gunplayDone = false;
+
+  /* ---- warlord/deaths.js — THE DEATH SEQUENCE ---------------------------
+     Loaded the same way gunplay.js is, and for the same two reasons: this
+     page's NEED list is games/warlord.html's and battle.js cannot edit it, and
+     a campaign that never reaches a fight should not pay for the fight's
+     files. deaths.js owns the whole death path (the beats, the tier budget,
+     the blood, the hit-stop clock and the rim) — including the OLD one, under
+     ?deaths=old, so this file carries exactly one way for a man to die.
+
+     Every call site below is `const D = DTH(); if (D) …`. If the file never
+     arrives the battle still runs: nobody falls over, which is a visible
+     failure rather than a silent one, and the console says why. */
+  let deathsReady = null;
+  function loadDeaths() {
+    if (deathsReady) return deathsReady;
+    deathsReady = new Promise(function (resolve) {
+      if (W.deaths) return resolve(true);
+      const src = (CBZ.studio && CBZ.studio.root ? CBZ.studio.root : "../src/") + "warlord/deaths.js";
+      const el = document.createElement("script");
+      el.src = src; el.async = false;
+      el.onload = function () { resolve(true); };
+      el.onerror = function () { console.warn("[warlord/battle] deaths.js did not load"); resolve(false); };
+      document.head.appendChild(el);
+    });
+    return deathsReady;
+  }
+  function DTH() { return W.deaths || null; }
 
   /* ============================================================ CAMERA */
   function camDist2(p) {
@@ -1980,7 +2072,6 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     // to leave it on the sand than to put an id in his hands that renders as
     // nothing and fires nothing.
     if (gp && gp.canHold && !gp.canHold(id)) return false;
-    const was = W.state.you.wid;
     W.stash(id, 1);
     W.equip(W.state.you, id);
     /* HIS ROW LOSES THE RIFLE. See the header: the aftermath cart is built off
@@ -1996,8 +2087,12 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     YOU.weapon = gunName(YOU.wid);
     if (gp && gp.rearm) safe(function () { gp.rearm(id); });
     pickTook++;
-    feed(id === was ? ("AMMO · " + gunName(id).toUpperCase())
-                    : (gunName(id).toUpperCase() + " OFF THE SAND"));
+    /* NO "AK-47 OFF THE SAND" LINE EITHER, for the reason the panel above
+       already stopped printing the magazine: systems/fpsmode.js's #ammo
+       readout writes the weapon's NAME over its rounds and changes the frame
+       gp.rearm() lands, so the sentence was the same fact eight inches away
+       in a different font. The gun in your hands changing model IS the
+       picture; the click is the confirmation. */
     if (CBZ.sfx) safe(function () { CBZ.sfx("pickup"); });
     pickTgt = null;
     return true;
@@ -2072,9 +2167,6 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       "#wb .hp{width:132px;height:5px;border-radius:3px;background:rgba(255,255,255,.16);margin:6px 0 6px;overflow:hidden}" +
       "#wb .hp s{display:block;height:100%;background:#5aa86a}" +
       "#wb .ammo{font-variant-numeric:tabular-nums;letter-spacing:.14em;font-size:12px;opacity:.85}" +
-      "#wb .feed{position:absolute;right:calc(var(--wl-safe-r, env(safe-area-inset-right,0px)) + 14px);top:calc(var(--wl-safe-t, env(safe-area-inset-top,0px)) + 58px);" +
-        "text-align:right;font-size:11px;letter-spacing:.12em;opacity:.8}" +
-      "#wb .feed p{margin:0 0 3px}" +
       "#wb .ret{position:absolute;right:calc(var(--wl-safe-r, env(safe-area-inset-right,0px)) + 14px);bottom:calc(var(--wl-safe-b, env(safe-area-inset-bottom,0px)) + 74px);pointer-events:auto}" +
       "#wb .ret button{appearance:none;border:1px solid #c4453a;background:rgba(12,10,7,.66);color:#ffc9c4;" +
         "border-radius:12px;padding:10px 13px;font:700 11px/1 inherit;letter-spacing:.14em;cursor:pointer}" +
@@ -2116,7 +2208,6 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
         '<span class="cnt" id="wbThem" style="color:#e08a6a">0</span>' +
       '</div>' +
       '<div class="cap" id="wbCap"></div>' +
-      '<div class="feed" id="wbFeed"></div>' +
       '<div class="me"><div id="wbName">WARLORD</div><div class="hp"><s id="wbHp"></s></div>' +
         '<div class="ammo" id="wbAmmo"></div></div>' +
       '<div class="ret"><button id="wbRetreat">RETREAT</button></div>' +
@@ -2200,15 +2291,14 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     const el = document.getElementById("wbOrd");
     if (el) el.textContent = ORDER_LABEL[o];
   }
-  function feed(line) {
-    const f = document.getElementById("wbFeed");
-    if (!f) return;
-    const p = document.createElement("p");
-    p.textContent = line;
-    f.insertBefore(p, f.firstChild);
-    while (f.childNodes.length > 5) f.removeChild(f.lastChild);
-    setTimeout(function () { if (p.parentNode) p.parentNode.removeChild(p); }, 5000);
-  }
+  /* THE KILL FEED IS GONE, ELEMENT AND ALL. It carried four kinds of line and
+     every one of them was a word standing in for something already on screen:
+     "X DOWN" and "X BREAKS" (now a red / amber tick on the rim at the man's
+     bearing — see warlord/deaths.js), "ORDER: FLANK" (the button you pressed
+     is lit and #wbOrd says so), and "AK-47 OFF THE SAND" (fpsmode's own #ammo
+     readout writes the weapon's name over its rounds). Deleting the box rather
+     than emptying it, because a five-line text panel that only ever prints
+     redundancies is a place the next redundancy goes. */
   let noteT = 0;
   function note(txt) {
     const n = document.getElementById("wbNote");
@@ -2276,11 +2366,16 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
   function start(opts) {
     if (live) return;
     opts = opts || {};
-    /* THE FIGHT WAITS FOR THE GUN. One await, only ever on the first battle of
-       a session — a battle that begins before fpsmode has arrived is a battle
-       the player spends silently falling back to the fork. */
+    /* THE FIGHT WAITS FOR THE GUN — AND FOR THE DEATHS. One await, only ever
+       on the first battle of a session. A battle that begins before fpsmode
+       has arrived is a battle the player spends silently falling back to the
+       fork; a battle that begins before deaths.js has arrived is a battle
+       whose first casualties never fall over, which is worse, because it
+       looks like the bug rather than like a missing file. Both are one
+       promise, resolved in parallel. */
     if (!gunplayDone) {
-      loadGunplay().then(function () { gunplayDone = true; start(opts); });
+      Promise.all([loadGunplay(), loadDeaths()])
+        .then(function () { gunplayDone = true; start(opts); });
       return;
     }
     startOpts = opts;
@@ -2294,7 +2389,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     men = []; corpses = []; sinking = []; dropGuns = []; addedCols = []; addedMeshes = [];
     pickHeld = false; pickTgt = null; pickLbl = ""; pickTook = 0;
     _claim.length = 0; deadSolving = 0; hurtFlash = 0;
-    cmd.init = 0;
+    cmd.init = 0; _shot = null;
 
     /* THE DEAD FELL LIKE PLANKS AND THE PAGE THOUGHT IT HAD FIXED THAT.
        warlord.html declares `if (C.RAGDOLL_ANY_MODE == null) C.RAGDOLL_ANY_MODE
@@ -2309,6 +2404,28 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
        corpses and it runs at battle time — long after any load order can bite.
        A ?cfg_ override still wins, so the flag stays revertible. */
     if (!Q || Q.get("cfg_RAGDOLL_ANY_MODE") == null) CBZ.CONFIG.RAGDOLL_ANY_MODE = true;
+
+    /* ARM THE DEATH PATH. Five doors and nothing else — deaths.js must not be
+       able to reach into the battle and change anything this file did not open
+       on purpose. `decisive` is brokenSide(), the SAME rule checkEnd() runs, so
+       "the death that decides the battle" cannot mean two different things
+       depending on which file is asking. `rand` is the seeded lcg, so a seeded
+       battle still dies the same way twice — which is what the A/B needs. */
+    if (W.deaths) {
+      W.deaths.arm({
+        rand: lcg,
+        you: function () { return YOU; },
+        camDist2: camDist2,
+        ground: function (x, z) { return MAP ? MAP.groundAt(x, z) : 0; },
+        decisive: function (m) {
+          const s = m.side;
+          if (!s) return false;
+          if (s.alive <= 1) return true;                       // the last man on his side
+          return brokenSide(s, report.fledOf[m.team].length);  // the death that crosses it
+        },
+        solving: function (d) { deadSolving = Math.max(0, deadSolving + d); },
+      });
+    }
 
     W.setPhase("battle", { band: band });
 
@@ -2562,6 +2679,19 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     const wall = W.clock.now();
     dt = lastWall ? Math.min(0.25 * Math.min(2.8, tScale), (wall - lastWall) / 1000) : dt;
     lastWall = wall;
+    /* ONE LINE, TWO JOBS, AND THEY ARE THE SAME JOB. warpDt() is the only
+       place in the game that sees a WHOLE frame of deaths, so it (a) spends
+       last frame's kills in RANK order rather than in men[] order — see
+       deaths.js's header for why array order was a raffle — and (b) advances
+       the hit-stop / slow-mo clock and hands back the dt this frame should
+       actually step. CBZ.doHitstop and CBZ.doSlowmo are declared in
+       core/loop.js, which is the CITY's frame loop and is not on this page, so
+       systems/fpsmode.js has been calling both into `undefined` on every
+       landed round since the day gunplay.js mounted it. deaths.js declares
+       them with loop.js's own semantics and this is where they are spent.
+       ABOVE the injectDt override on purpose: a frozen studio clock still
+       gets its drain and never gets its dt warped. */
+    const _D = DTH(); if (_D) dt = _D.warpDt(dt);
     if (injectDt > 0) { dt = injectDt; lastWall = 0; injectDt = 0; }
     fxBudget = 0;
 
@@ -2854,7 +2984,8 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     men = []; corpses = []; sinking = []; dropGuns = []; addedCols = []; addedMeshes = [];
     pickHeld = false; pickTgt = null; pickLbl = ""; pickTook = 0;
     grid.clear(); fine.clear(); _claim.length = 0;
-    deadSolving = 0; YOU = null; youRig = null; MAP = null; band = null; report = null;
+    deadSolving = 0; _shot = null; YOU = null; youRig = null; MAP = null; band = null; report = null;
+    if (W.deaths) W.deaths.disarm();   // the rim comes down, the hit-stop clock resets
     CBZ.groundAt = null;
   }
 
@@ -2879,6 +3010,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       THREE = c.THREE;
       keys();
       loadGunplay().then(function () { gunplayDone = true; });
+      loadDeaths();
       /* THE TEARDOWN LISTENER IS REGISTERED ONCE, AT BOOT — not in start().
          W.on() has no dedupe, so registering it per battle stacks a listener
          per fight: three encounters in and the bus is calling teardown three
@@ -3016,6 +3148,12 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
                  terrainLos: MAP.terrainLos, cover: MAP.cover.length, gap: GAP(),
                  desert: !!MAP.fromDesert },
         bodies: men.length, corpses: corpses.length, solving: deadSolving,
+        /* HOW THE DEAD WERE SPENT. warlord/deaths.js's ledger: how many men
+           fell, what tier each landed in, how many got blood and a body, and
+           `denied` — how many WANTED a body and lost the rank. That last one
+           is the only honest measure of whether the budget is a budget: zero
+           at 300 v 300 means it is not doing anything. */
+        deaths: (W.deaths && W.deaths.audit) ? W.deaths.audit() : null,
         /* THE FLOOR. `guns` is how many dropped rifles are lying on the sand,
            `reach` whether one is inside the warlord's arm, `taken` how many he
            has picked up this battle — the three numbers that say whether the
@@ -3028,6 +3166,100 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
           rig: !!CBZ.makeCharacter, guns: !!(CBZ.weaponAppearance && CBZ.weaponAppearance.ak47),
           ragdoll: !!CBZ.cityRagdoll, gunPhysics: !!CBZ.weaponPhysics,
         },
+      };
+    },
+    /* ---- THE DEATH STUDIO, for tools/visual-presets/warlord-death.mjs -----
+       A death is the one event in this game that a storyboard cannot stage by
+       waiting for it. It lasts under a second, it happens to a man the tool
+       has no name for, and on the frame it happens the lens is looking
+       somewhere else. So execute() names a man by WHERE HE IS STANDING, seats
+       the camera on him, and pulls the trigger, in one call — which is what
+       makes an A/B controlled: both builds kill the same man at the same
+       simulated second from the same seat, and every pixel of difference
+       after that is the flag.
+
+       He is killed with `by: YOU`, which is true (the tool is standing in for
+       the trigger) and which is also the tier-2 case in deaths.js — the death
+       that is ABOUT you. That is deliberate: the budget's top tier is the one
+       worth photographing, and the volley subject photographs the rest.
+
+       DRIVE-ONLY. Nothing in the game calls this. */
+    execute: function (o) {
+      if (!live || over || !YOU) return null;
+      o = o || {};
+      const team = o.team || "them";
+      const fx = o.x != null ? o.x : YOU.pos.x, fz = o.z != null ? o.z : YOU.pos.z;
+      let best = null, bd = 1e9;
+      for (let i = 0; i < men.length; i++) {
+        const m = men[i];
+        if (m.dead || m.fled || m.isYou || m.team !== team) continue;
+        const d = Math.hypot(m.pos.x - fx, m.pos.z - fz);
+        if (d < bd) { bd = d; best = m; }
+      }
+      if (!best) return null;
+      /* THE SEAT IS 3/4 OFF THE SHOT LINE. A man falling straight away from
+         the lens is a man getting shorter — the whole subject of these
+         pictures is WHICH WAY he goes down, and a fall directly along the
+         view axis is the one angle that cannot show it. */
+      const sh = Math.atan2(best.pos.x - YOU.pos.x, best.pos.z - YOU.pos.z);
+      /* setCam, NOT `camMode = "cmd"`. THIS COST AN AFTERNOON AND IT IS THE
+         SAME TRAP look() sits in: this file's camMode and warlord/gunplay.js's
+         camMode are two variables, and gunplay re-places the lens from ITS one
+         at onAlways(51.5) EVERY FRAME. Writing only this file's leaves gunplay
+         still in first person, so the seat this call chose survived exactly
+         until the next advance() — and then the camera snapped back to the
+         warlord's eyes, 139 m away. MEASURED, and the symptom was not "the
+         camera moved": it was systems/gore.js drawing nothing, because its
+         70 m gate is measured from wherever the camera actually is. setCam
+         tells both. */
+      /* `cam: false` KILLS HIM WITHOUT MOVING THE LENS. Not every death is
+         photographed as a close-up: the screen-rim casualty mark that replaced
+         the kill feed is only legible in a WIDE frame, beside the men it is
+         reporting on, and pointing the camera at the man defeats the point of
+         a mark that tells you where he is. */
+      if (o.cam !== false) {
+        setCam("cmd");
+        cmd.init = 1; cmd.auto = false;
+        cmd.x = best.pos.x; cmd.z = best.pos.z;
+        cmd.dist = o.dist == null ? 9 : o.dist;
+        cmd.yaw = sh + (o.off == null ? 1.15 : o.off);
+        cmd.pitch = o.pitch == null ? 0.12 : o.pitch;
+        stepCamera(0.016);
+      }
+      _shot = { m: best, t0: simT,
+                sx: Math.sin(sh), sz: Math.cos(sh),         // the round's own heading
+                x: best.pos.x, y: best.pos.y, z: best.pos.z };
+      killMan(best, { by: YOU, headshot: !!o.head });
+      return { i: best.i, x: _shot.x, y: _shot.y, z: _shot.z,
+               range: Math.round(bd * 10) / 10, cam: { x: cmd.x, z: cmd.z, yaw: cmd.yaw, dist: cmd.dist } };
+    },
+    /* WHAT IS HAPPENING TO HIM RIGHT NOW, in numbers a picture can be checked
+       against. Everything here is read off the rig's actual world transform
+       rather than off the bookkeeping that produced it, so a fall that is
+       recorded but not DRAWN reads as zero. */
+    shotAudit: function () {
+      if (!_shot || !_shot.m || !_shot.m.group) return null;
+      const m = _shot.m, g = m.group;
+      /* HIS OWN UP AXIS, IN THE WORLD. A standing man's is (0,1,0); a man flat
+         on the sand has it horizontal. So the angle off vertical IS how far
+         over he is, in degrees, and the horizontal part of it is the compass
+         bearing his head travelled — which is the thing the old coin flip got
+         wrong. `alongShot` is the cosine between that bearing and the round's:
+         +1 is a man knocked down by the bullet that killed him, 0 is
+         sideways, -1 is a man who fell INTO the shot. */
+      _v.set(0, 1, 0).applyQuaternion(g.quaternion);
+      const hl = Math.hypot(_v.x, _v.z);
+      const along = hl < 0.02 ? 0 : (_v.x / hl) * _shot.sx + (_v.z / hl) * _shot.sz;
+      const f = m.fall || null;
+      return {
+        t: Math.round((simT - _shot.t0) * 1000) / 1000,
+        tiltDeg: Math.round(Math.acos(clamp(_v.y, -1, 1)) * 180 / Math.PI * 10) / 10,
+        alongShot: Math.round(along * 100) / 100,
+        /* POSED is the whole show-don't-tell claim in one bit: was he already
+           snapped into his final dead sprawl on the frame the round arrived?
+           The old path answered YES on frame zero, every time. */
+        posed: !!(f && f.posed), ragdoll: !!m.ragdoll, settled: !!(f && f.done),
+        y: Math.round(g.position.y * 1000) / 1000,
       };
     },
     // where the bodies are, so a camera can be pointed at the fight

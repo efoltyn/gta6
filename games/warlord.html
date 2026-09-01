@@ -53,8 +53,13 @@
     --wl-safe-b: env(safe-area-inset-bottom, 0px);
     --wl-safe-l: env(safe-area-inset-left, 0px);
     --wl-safe-r: env(safe-area-inset-right, 0px);
-    /* how tall the bottom furniture currently is. match.js measures its own
-       strip into this; 0 when there is no match. */
+    /* DEAD, AND KEPT ON PURPOSE FOR ONE RELEASE. This was the height of
+       match.js's bottom countdown strip, measured and republished on every
+       paint. The match layer is gone (see match.js's tombstone) so nothing
+       writes it and it stays 0 — which is the correct layout. It is left
+       declared because #stage still reads it, and a var that resolves to
+       nothing is cheaper than hunting every reader on the day the strip
+       died. Delete the var and its readers together, or not at all. */
     --wl-footer: 0px;
     /* how tall the MEN/$/DAY strip currently is, measured and republished by
        paintHud on every repaint — it grows a row when events.js adds chips */
@@ -691,13 +696,14 @@ const WARLORD = [
   "warlord/campaign.js",   // riding it, and the parties that ride it too
   "warlord/army.js",       // the roster, the encounter, the aftermath
   "warlord/gunplay.js",    // the engine's own shooting, mounted — not a fork
+  "warlord/deaths.js",     // how a man falls — the four beats, and who gets the camera
   "warlord/battle.js",     // the actual war
   "warlord/outpost.js",    // depots and camps
   "warlord/loadout.js",    // who carries what
   "warlord/events.js",     // everything else that can happen, and the endgame
   "warlord/feel.js",       // sound, impact, and the mixer that makes 300 rifles a war
   "warlord/warnet.js",     // TRANSPORT: sockets, host election, snapshot/apply
-  "warlord/match.js",      // THE RULES OF THE MATCH: lobby, clock, diplomacy, victory
+  "warlord/match.js",      // the rival warlords: who they are, their columns, the handshake
 ];
 /* THE ORDER HERE IS EXECUTION ORDER, NOT DEPENDENCY ORDER, and the difference
    matters. These files only DECLARE themselves — W.module() registers a name
@@ -973,8 +979,6 @@ function start() {
          match takes the hold in begin() and drops it in end(); if a match is
          neither live nor over the hold is stale, so it is re-derived here
          rather than trusted. */
-      if (C.heldFor() === "MATCH" && W.match && W.match.live &&
-          !W.match.live() && !(W.matchState && W.matchState.over)) C.release("MATCH");
       const held = C.heldFor();
       const s = C.scale();
       slider.disabled = !!held;
