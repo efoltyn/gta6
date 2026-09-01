@@ -1855,11 +1855,27 @@
 
   function startAct(a, s, act, dur) {
     s.act = act; s.actT = dur; s.blown = false; s.splashed = false; s.lobbed = false;
+    s.liftPrev = null;                  // ballistic() differentiates lift; never across acts
     if (act === "spyhop") AUDIT.spyhops++;
     else if (act === "breach") AUDIT.breaches++;
     else if (act === "taillob") AUDIT.tailLobs++;
   }
   function endAct(s) { s.act = ""; s.blown = false; s.splashed = false; s.lobbed = false; s.roll = 0; }
+
+  /* THE NOSE POINTS WHERE THE BODY IS GOING. wildlife_shark.js solves its
+     breach arc this way (atan2 of the vertical rate against the horizontal
+     one) and audits itself on the result; an orca leaving the water is the
+     same problem, so it gets the same answer instead of a hand-drawn cosine
+     that was signed backwards. `s.lift` is the height the act has chosen, so
+     its own rate of change IS the vertical velocity — no extra state, and the
+     pose cannot disagree with the motion because it is made out of it. */
+  function ballistic(s, dt, cap) {
+    const vy = dt > 0 ? (s.lift - (s.liftPrev == null ? s.lift : s.liftPrev)) / dt : 0;
+    s.liftPrev = s.lift;
+    const want = Math.atan2(vy, Math.max(1.6, Math.abs(s.spd || 0)));
+    const lim = cap == null ? 1.25 : cap;
+    s.pitch = Math.max(-lim, Math.min(lim, want));
+  }
 
   /* THE LIFT IS A DEPTH TARGET, NOT A POSITION WRITE, and that distinction is
      load-bearing. An earlier shape of this added the act's lift to
@@ -1869,7 +1885,61 @@
      animal sank through its own act. Setting `s.diveWant` negative (i.e. "the
      body belongs ABOVE the surface") means exactly one system owns y and there
      is no loop to damp. `s.airborne` is what tells depth() to let go of the
-     submersion clamp for the duration. */
+     submersion clamp for the duration.
+
+     ---- A POSE HAS TO BE PAID FOR IN DEPTH ---------------------------------
+     OWNER, 2026-09-01: "Orca does this thing occasionally where it looks like
+     its head is balancing on water and its tail is in the air ... it's a weird
+     look for a second and violates physics."
+
+     He is describing a spy-hop, and the reason it looked like that is that the
+     height and the attitude were two unrelated hand-drawn curves. The act
+     picked a LIFT ("the body belongs 5.5 m up") and, separately, a PITCH, and
+     nothing ever asked whether the two agreed about where the sea was. They
+     did not, twice over:
+
+       1. THE SIGN WAS BACKWARDS. `group.rotation.z` on a nose-toward-+X body
+          is model-local pitch and POSITIVE IS NOSE UP — wildlife.js:1376,
+          predator.js:1705 and creature_combat.js:471 all say so, and it is
+          measurable on the live page (at rotation.z +0.03 the nose reads 18 cm
+          ABOVE the tail; at -0.05, 35 cm below). All five acts wrote NEGATIVE
+          for the thing they labelled nose-up. A spy-hop was 72 degrees of
+          nose-DOWN held for two seconds.
+       2. NOTHING TIED THE HEIGHT TO THE ANGLE. With the origin 5.5 m over the
+          sea and the body at -72 degrees, the head sat 0.7 m above the water
+          and the flukes nine metres up. Head on the water, tail in the air —
+          the report, arrived at by arithmetic.
+
+     So the acts do not choose a height any more. An ATTITUDE act names the
+     angle and WHICH END OF THE ANIMAL is supposed to be out of the water, and
+     `seatFor` solves the only depth that puts it there — everything else is
+     under, by construction. A BALLISTIC act (a breach, a porpoise) is the
+     opposite case: it does choose a height, because it is genuinely leaving
+     the water, and its pitch is then DERIVED from how that height is changing,
+     the way wildlife_shark.js has always solved its breach arc. Nose-up going
+     up, nose-down coming down, with no author in the loop to get it backwards.
+
+     One consequence worth stating: an act can no longer put the body's centre
+     in the air unless it is ballistic, so `s.airborne` is now only ever true
+     for the two acts that have earned it. */
+  const NOSE_X = HX1, TAIL_X = HX0;      // model units, origin -> each end
+
+  /* THE ONLY DEPTH THAT PUTS `end` `out` METRES ABOVE THE SEA at this pitch.
+     A point at model-local x rides at `x·sin(pitch)` about the origin (positive
+     pitch is nose up, and the nose is at +X), so both ends use the SAME signed
+     expression — the tail comes out because TAIL_X is negative, not because the
+     formula treats it differently. Returns a DEPTH (positive = below the
+     surface), which is the sign s.diveWant carries.
+
+       spy-hop  72 deg nose-up:  nose +3.88 m over the origin -> dive 2.63 m,
+                                 rostrum 1.25 m out, the rest of the whale under.
+       lobtail  31 deg nose-down: tail +1.54 m over the origin -> dive 0.49 m,
+                                 flukes 1.05 m out, the rostrum 2.5 m under. */
+  function seatFor(a, pitch, end, out) {
+    const sc = scaleOf(a);
+    const x = end === "tail" ? TAIL_X * sc : end === "nose" ? NOSE_X * sc : 0;
+    return x * Math.sin(pitch || 0) - (out || 0);
+  }
   function actTick(a, s, dt, dist) {
     if (!ACTS()) { if (s.act) endAct(s); s.airborne = false; return false; }
     s.cool -= dt;
@@ -1891,10 +1961,10 @@
       // ordinary fast transit. A porpoise is a low arc that skims — the back
       // and the flank break out, the body does not fly.
       s.lift = Math.max(0, Math.sin(s.porpPh)) * draft * (SITLOW() ? 0.75 : 1.5);
-      s.pitch = -Math.cos(s.porpPh) * 0.38;
       s.airborne = s.lift > draft * 0.5;
       s.porp = true;
       s.diveWant = -s.lift;
+      ballistic(s, dt, 0.38);            // nose follows the arc, not an author
       return true;
     }
     s.porp = false;
@@ -1908,7 +1978,11 @@
     }
     if (!s.act) {
       s.idleT -= dt;
-      if (s.cool <= 0 && personNear(a, dist) && dist < SPY_R && !s.calf) {
+      /* QUIET means somebody else is steering this animal at something (see
+         the surface-layer note in the pose pass). It still breathes — the
+         blow above this is not gated — but it does not start a show. */
+      if (s.quiet) { /* no new display act while another driver owns the hunt */ }
+      else if (s.cool <= 0 && personNear(a, dist) && dist < SPY_R && !s.calf) {
         // SPY-HOP: it rises vertically and LOOKS at you. Its own eye, above the
         // water, pointed at the boat — the moment in the owner's reference.
         startAct(a, s, "spyhop", 4.6); s.cool = ACT_COOL;
@@ -1950,9 +2024,16 @@
          stays false for a blow now, which is what re-arms that clamp — the act
          no longer asks for the exemption a breach legitimately needs. */
       const rise = Math.sin(clamp(k, 0, 1) * Math.PI);
+      /* A BREATH IS A BACK BREAKING THE SURFACE, so that is what it asks for:
+         the blowhole clears and nothing else does. The tiny pitch is the roll
+         of the body through the breath, and it is now the right way up. */
+      s.pitch = Math.sin(k * Math.PI * 2) * 0.10;
+      /* THE HEIGHT HERE IS NOT CHANGED. A previous wave measured this act at
+         4.07 m of dorsal in the air and aimed it at a shallow DEPTH instead;
+         that number is settled and the owner signed it off. Only the sign of
+         the ten-centimetre pitch was wrong, so only the sign is touched. */
       if (SITLOW()) s.lift = -draft * (1.25 - 1.05 * rise);   // ⇒ diveWant = a depth
       else s.lift = rise * (draft * 0.85);
-      s.pitch = -Math.sin(k * Math.PI * 2) * 0.10;
       if (!s.blown && k > 0.42) { s.blown = true; fireSpout(a, s); }
       if (s.actT <= 0) endAct(s);
     } else if (s.act === "spyhop") {
@@ -1962,8 +2043,15 @@
          is a pose, not a behaviour. */
       const T0 = 4.6, e = clamp((T0 - s.actT) / T0, 0, 1);
       const up = e < 0.30 ? e / 0.30 : (e > 0.74 ? 1 - (e - 0.74) / 0.26 : 1);
-      s.lift = up * draft * 2.1;
-      s.pitch = -up * 1.26;                          // ~72 degrees nose-up
+      /* HEAD OUT, EVERYTHING ELSE UNDER. 72 degrees of nose-UP (positive — see
+         the header) and the one depth that puts the rostrum a metre and a bit
+         into the air. The body's centre ends up ~2.7 m DOWN, which is what a
+         spy-hopping whale actually is: a vertical animal with its face out of
+         the water, not a whale hovering over the sea. */
+      s.pitch = up * 1.26;                           // ~72 degrees nose-up
+      s.diveWant = seatFor(a, s.pitch, "nose", up * 1.25);
+      s.lift = -s.diveWant;
+      s.airborne = false;
       const P = CBZ.player;
       if (P && P.pos && up > 0.5) {
         // AN ORCA SPY-HOPS IN ORDER TO SEE. One that does not turn its head to
@@ -1976,8 +2064,9 @@
       const T0 = 2.9, e = clamp((T0 - s.actT) / T0, 0, 1);
       const f = clamp(e / 0.72, 0, 1);
       s.lift = Math.sin(f * Math.PI) * draft * 4.2;
-      s.pitch = -Math.cos(f * Math.PI) * 0.85;
+      s.diveWant = -s.lift;
       s.roll = Math.sin(e * 4.2) * 0.30;
+      ballistic(s, dt, 0.95);            // nose up on the way out, down on the way in
       if (!s.splashed && e > 0.80) {
         s.splashed = true;
         if (CBZ.waterSplashAt) {
@@ -1988,8 +2077,17 @@
     } else if (s.act === "taillob") {
       const T0 = 3.1, e = clamp((T0 - s.actT) / T0, 0, 1);
       const ph = Math.sin(clamp(e, 0, 1) * Math.PI * 3);
-      s.pitch = ph * 0.55;                          // flukes up, then slammed down
-      s.lift = Math.max(0, Math.sin(e * Math.PI)) * draft * 0.45;
+      /* A LOBTAIL IS A HEAD GOING UNDER, not a body coming up. The animal
+         pitches nose-DOWN (negative) and levers the tailstock and flukes out
+         of the water to slam them back down; the depth is solved so the
+         flukes clear by about a metre and the rostrum is two and a half
+         metres under, which is where it belongs. The old code did the
+         opposite on both counts — it pitched nose-down AND raised the whole
+         body, so the head sat on the water with the tail in the air. */
+      s.pitch = -Math.abs(ph) * 0.55;
+      s.diveWant = seatFor(a, s.pitch, "tail", Math.abs(ph) * 1.35);
+      s.lift = -s.diveWant;
+      s.airborne = false;
       if (!s.lobbed && ph < -0.9) {
         s.lobbed = true;
         if (CBZ.waterSplashAt) {
@@ -2020,6 +2118,10 @@
     if (s.act || s.porp || Math.abs(s.pitch) > 0.001 || Math.abs(s.roll) > 0.001) {
       g.rotation.z = s.pitch;
       g.rotation.x += s.roll;
+      // ..and claim the attitude for one frame, so wildlife_rig's animateSwim
+      // yields instead of flattening it (see the baton note in that file —
+      // this pass does NOT reliably run after wildlife.js's tick).
+      a._poseOwn = true;
     }
   }
 
@@ -2234,7 +2336,13 @@
     const g = a.group;
     const surf = surfaceAt(g.position.x, g.position.z, t);
     // an ACT is a fast, deliberate move; ordinary depth is a slow drift
-    s.dive += (s.diveWant - s.dive) * Math.min(1, dt * (s.airborne || s.act ? 4.5 : 1.1));
+    /* AN ATTITUDE ACT IS TRACKED, NOT DRIFTED TOWARD. 4.5 is a ~0.22 s time
+       constant, and a lobtail swings its whole arc in half a second — so the
+       body lagged its own pose and the flukes only ever grazed the surface
+       instead of clearing it. A ballistic arc keeps the softer number; it is
+       already a smooth curve and does not need chasing. */
+    const seatK = s.act && !s.airborne ? 9 : (s.airborne || s.act ? 4.5 : 1.1);
+    s.dive += (s.diveWant - s.dive) * Math.min(1, dt * seatK);
     let y = surf - s.dive;
     const draft = a.swimDepth || 2.6;
     // THE SUBMERSION CLAMP IS LIFTED FOR AN ACT. A breach whose body may not
@@ -2247,7 +2355,7 @@
       const lo = CBZ.cityAquaticBedRestY(g.position.x, g.position.z, draft, lift, t, surf);
       if (y < lo) y = lo;
     }
-    g.position.y += (y - g.position.y) * Math.min(1, dt * (s.airborne || s.act ? 7 : 3.2));
+    g.position.y += (y - g.position.y) * Math.min(1, dt * (s.act && !s.airborne ? 13 : (s.airborne || s.act ? 7 : 3.2)));
   }
 
   // ============================================================
@@ -2982,9 +3090,57 @@
           } else if (!a._mpRoll && !a._seizedBy && !CBZ.cityWildlife) {
             try { ticked = orcaBrain(a, dt, P); } catch (_e2) { ticked = false; }
           }
+          /* ---- THE SURFACE LAYER GETS ITS OWN FRAME ----------------------
+             THIS BRANCH USED TO BE WHERE EVERY ORCA BEHAVIOUR IN THIS FILE
+             WENT TO DIE, on every populated map, silently.
+
+             The brain chain is city/marine_predation.js -> this file ->
+             wildlife_shark.js, and marineStep OWNS the actor (returns true,
+             never delegating) on any frame it has a target — which, on an
+             island with fish and swimmers in the water, is every frame. So
+             orcaBrain was never called, `st.tick` never advanced, and this
+             branch then wiped act/lift/pitch/roll each frame as a guard
+             against a frozen pose. Measured on a live island, seed 90210:
+             sharkBrain called 90 times for orcas over 30 frames, orcaBrain
+             called ZERO, and the audit counters read blows 0, spy-hops 0,
+             breaches 0, tail-lobs 0, porpoises 0 for the whole run. The blow,
+             the spy-hop, the breach, the lobtail and the porpoise — the
+             entire authored repertoire of this file — was dead code wherever
+             marine_predation is loaded, which is everywhere that matters.
+
+             The guard was right that a half-played act must not FREEZE. It
+             was wrong that the only way to avoid that is to cancel it. So the
+             act layer runs here instead, and the split is the honest one:
+
+               BREATHING AND PORPOISING ARE NOT DECISIONS. An orca that is
+               hunting still has to breathe, and porpoising is a consequence
+               of travelling fast (this file says so itself). Those run
+               whoever owns the movement.
+               THE DISPLAY ACTS ARE. A spy-hop, a breach or a lobtail over a
+               committed rush would read as the animal forgetting what it was
+               doing — the exact failure orcaBrain's own priority ladder
+               exists to prevent — so they only start on a frame where nothing
+               else has claimed the animal.
+
+             y is still owned by one system: depth() runs here too, off the
+             same s.diveWant the acts set, so the pose and the height cannot
+             come from two different frames. */
           if (!ticked && st.tick !== FRAME) {
-            if (st.act) endAct(st);
-            st.lift = 0; st.pitch = 0; st.roll = 0; st.airborne = false; st.porp = false;
+            const held = a._mpRoll || a._seizedBy;
+            const m = a._mp;
+            const engaged = !!(m && (m.rolling || m.target || m.shipTarget));
+            if (held) {
+              if (st.act) endAct(st);
+              st.lift = 0; st.pitch = 0; st.roll = 0; st.airborne = false; st.porp = false;
+            } else {
+              st.quiet = engaged;              // read by actTick: no new display acts
+              let ran = false;
+              try { ran = actTick(a, st, dt, d); } catch (_e3) { ran = false; }
+              st.quiet = false;
+              if (ran) { try { depth(a, st, dt, clock()); } catch (_e4) {} }
+              else { st.lift = 0; st.airborne = false; }
+              st.tick = FRAME;
+            }
           }
         }
         applyPose(a, st);

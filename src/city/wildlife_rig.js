@@ -654,6 +654,36 @@
         }
       }
     }
+    /* ---- WHOEVER POSED THIS BODY LAST FRAME KEEPS IT ----------------------
+       THE ORDER THIS FILE ASSUMES IS NOT THE ORDER THAT RUNS. Three marine
+       files (wildlife_orca.js at 47.2, wildlife_shark.js at 47.22,
+       marine_frenzy.js at 47.2) each say in a comment that they run AFTER
+       wildlife.js's tick at 47.1, so the pose they write survives this
+       function. They do not. `CBZ.onUpdate` (config.js) only PUSHES onto
+       CBZ.updaters and core/loop.js sorts that list exactly ONCE, at load —
+       so any hook registered later never takes its priority position, and
+       wildlife.js registers its 47.1 lazily, inside the `wired` guard at
+       world-build time. It therefore runs LAST, after every marine pass.
+
+       Caught with a write trap on one orca's Euler, one frame, seed 90210:
+
+         applyPose  (wildlife_orca.js:2119)  rotation.z <- 0.700
+         animateSwim(wildlife_rig.js:670)    rotation.z <- 0.032   ... and won
+
+       So a spy-hop computed a correct 40-degree nose-up attitude and this
+       line flattened it to two degrees, every frame, and the same thing was
+       quietly clipping the shark's breach arc from 0.95 rad to this function's
+       own ±0.5 clamp.
+
+       Re-sorting the updater list would fix it at the root, and it should be
+       done — but that reorders every late-registered system in the game at
+       once, with nothing measuring the rest of them, so it is not a change to
+       make from inside a wildlife pose function. The baton below is order-
+       INDEPENDENT instead: a poser stamps the actor when it writes an
+       attitude, and this function yields for exactly that one frame and clears
+       the stamp. Run before the poser, this writes and is then overwritten
+       (the documented intent). Run after it, this yields. Either way the pose
+       wins, and an animal nobody is posing keeps its swim pitch. */
     // BODY: bank into the turn (rotation.x rolls a +X-forward body) and pitch
     // with vertical speed (rotation.z) — a diving shark noses down. Yielded
     // whenever a flinch or a creature_combat strike owns the transform.
@@ -664,10 +694,17 @@
       const wantRoll = Math.max(-0.45, Math.min(0.45, turn * 0.25));
       const wantPitch = Math.max(-0.5, Math.min(0.5, vy * 0.11));
       const e = Math.min(1, dt * 3.2);
+      /* The rig keeps EASING even while it is yielding, so the frame a pose
+         ends the swim attitude is already where the body actually is and there
+         is no snap back to a stale angle. Only the two writes are yielded. */
       rig.roll += (wantRoll - rig.roll) * e;
       rig.pitch += (wantPitch - rig.pitch) * e;
-      grp.rotation.x = rig.roll;
-      grp.rotation.z = rig.pitch + (rig.vert ? bodySwing : 0);
+      const posed = !!a._poseOwn;
+      a._poseOwn = false;
+      if (!posed) {
+        grp.rotation.x = rig.roll;
+        grp.rotation.z = rig.pitch + (rig.vert ? bodySwing : 0);
+      }
       // The lateral swimmers' trunk swing lands on the YAW, which the mover
       // rewrites from `heading` every frame — so remember exactly what we left
       // behind: unchanged means nobody else wrote and our old offset has to

@@ -1599,6 +1599,7 @@
         s.airRoll += (0 - s.airRoll) * e;
         g.rotation.z = s.airPitch;
         g.rotation.x += s.airRoll;
+        a._poseOwn = true;              // see the baton note in wildlife_rig.js
       }
       if (a._seizedBy || a._mpRoll || a.hp <= 0 || s.bail > 0) return;
       if (s.breachCd > 0) return;
@@ -1663,8 +1664,14 @@
     // line settles both: the body draws, and proxy()'s own "only while the real
     // one is not drawn" test folds the stand-in away by itself.
     g.visible = true;
-    g.rotation.z = s.airPitch;      // ABSOLUTE — animateSwim assigns this outright
-    g.rotation.x += s.airRoll;      // ADDITIVE — the orca's applyPose law
+    /* ABSOLUTE on pitch, ADDITIVE on roll (the orca's applyPose law) — plus
+       the ownership baton, because "animateSwim assigns this outright" was only
+       half the story: it also runs AFTER this pass on a built world, so the
+       arc's pitch was being clipped to that function's own +/-0.5 rad every
+       frame. wildlife_rig.js carries the measurement. */
+    g.rotation.z = s.airPitch;
+    g.rotation.x += s.airRoll;
+    a._poseOwn = true;
 
     // ---- and it sheds water all the way down --------------------------------
     if (s.airY > -draft * 0.2 && dist < TRAIL_R && typeof CBZ.marineBreachShed === "function") {
