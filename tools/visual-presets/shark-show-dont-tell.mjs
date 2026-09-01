@@ -451,8 +451,11 @@ async function stageShowDontTell(input) {
 
     /* 3 — THE ABOVE-WEIGHT KILL. A GREAT WHITE, not the megalodon: an orca is
        measurably longer than a great white, which is the owner's exact case
-       ("a shark kills an orca bigger than it") — and it is not the apex win,
-       so no victory card can cover the finish on either side. */
+       ("a shark kills an orca bigger than it"). (It used to matter that this
+       was a great white and not the megalodon, because a megalodon's orca kill
+       fired a victory card that covered the finish. That card is gone — no
+       kill ends this game now — so the choice of body is only about the
+       above-weight point it makes.) */
     async function bigkill() {
       const sim = CBZ.sharkSim, S = sim.shark;
       D.peace(); D.offshore(52); S.hp = S.maxHp; D.sec(0.5);

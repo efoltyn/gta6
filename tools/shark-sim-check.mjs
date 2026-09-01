@@ -4,7 +4,7 @@
    Boots index.html?mode=sharksim exactly like the Shark Sim tile does,
    then plays the whole game the way a player would — pilot with the
    move keys, let the automatic bite feed, climb every rung of the ladder,
-   win as the megalodon — asserting each stage against the live engine.
+   eat an orca as the megalodon — asserting each stage against the live engine.
 
    DRIVEN BY CBZ.stepSim, NOT BY FRAMES. Under SwiftShader this page paints
    ~2 fps, which starves every real-time assertion (and is exactly the
@@ -13,7 +13,7 @@
    explicit 30 Hz stepSim bursts, so a wait is a number of GAME seconds and
    the tool is as fast as the CPU, not the rasterizer.
 
-     node tools/shark-sim-check.mjs            # full ladder + win + death run
+     node tools/shark-sim-check.mjs            # full ladder + orca + death run
      node tools/shark-sim-check.mjs --quick    # boot + mount + pilot + one meal
      node tools/shark-sim-check.mjs --json
 
@@ -26,8 +26,11 @@
         attack input, and mass is credited.
      4. IT EVOLVES: bull → hammerhead → great white → megalodon, each swap
         leaving the player mounted on the new body.
-     5. IT WINS: as the megalodon, eating an orca ends the round "won" with
-        the APEX PREDATOR card.
+     5. IT DOES NOT END: as the megalodon, eating an orca is a MEAL, not a
+        victory — the round stays "playing", no card comes up, the mass is
+        credited and the pod restocks. (This game used to hand you a VICTORY
+        screen for the one kill the whole climb aims at, which is the reward
+        for winning being ejected from the water. Guarding the removal.)
      6. IT LOSES: on a fresh boot, the shark dying plays the death replay on
         the CORPSE — the rider is never killed and never reappears — and
         resolves to shark sim's own card, not survival's ELIMINATED.
@@ -425,10 +428,9 @@ try {
       await shot((1 + rung.tier) + "-" + rung.id.replace(/_/g, "-"));
     }
 
-    // ================= STAGE 5: THE WIN ===================================
-    say("— stage 5: eat an orca, win —");
+    // ============ STAGE 5: THE ORCA IS A MEAL, NOT AN ENDING ==============
+    say("— stage 5: eat an orca, keep swimming —");
     const tier = await rig.evl("CBZ.sharkSim.tier");
-    let won = false;
     if (tier === 3) {
       const STAGE_ORCA = `(() => {
         const S = CBZ.sharkSim.shark;
@@ -445,22 +447,36 @@ try {
         if (o._waterMove) { o._waterMove.x = o.pos.x; o._waterMove.z = o.pos.z; }
         return true;
       })()`;
-      let staged = false;
-      for (let round = 0; round < 4 && !won; round++) {
+      let staged = false, ate = false;
+      for (let round = 0; round < 4 && !ate; round++) {
         staged = await rig.evl(STAGE_ORCA) || staged;
-        won = await burstUntil(`CBZ.game.state === "won" && CBZ.sharkSim.apex`, 4);
+        ate = await burstUntil(`(CBZ.sharkSim.orcas || 0) > 0`, 4);
       }
-      if (!staged) fail("no orca available to stage the win");
-      const s5 = await rig.evl(`({ state: CBZ.game.state, apex: !!CBZ.sharkSim.apex,
-        logo: (document.querySelector("#survwin .logo") || {}).textContent || "",
-        sub: (document.querySelector("#survwin .sub") || {}).textContent || "",
-        placeL: (document.getElementById("swTotal") || {}).textContent || "" })`);
-      report.stages.win = s5;
-      if (!won) fail("eating the orca as megalodon did not win (state " + s5.state + ")");
-      else if (!/APEX/i.test(s5.logo)) fail("win card is not the apex card: " + s5.logo);
-      else if (/of 100/.test(s5.placeL)) fail("win card still carries survival's field: " + s5.placeL);
-      else pass('WON — "' + s5.logo + " · " + s5.sub + '"');
-      await shot("5-apex-win");
+      // ..and then keep playing. If anything still ends the run on that kill,
+      // these extra seconds are where it shows up.
+      await burst(6);
+      const s5 = await rig.evl(`({ state: CBZ.game.state, orcas: CBZ.sharkSim.orcas || 0,
+        ended: !!CBZ.sharkSim.ended, on: !!CBZ.sharkSim.on, mass: CBZ.sharkSim.mass,
+        winShown: !document.getElementById("survwin").classList.contains("hidden"),
+        loseShown: !document.getElementById("survlose").classList.contains("hidden"),
+        apexProp: "apex" in CBZ.sharkSim,
+        pod: CBZ.cityWildlife.filter(a => !a.dead && a.species && a.species.id === "orca").length })`);
+      report.stages.orca = s5;
+      if (!staged) fail("no orca available to stage the kill");
+      if (!ate) fail("the megalodon never ate the staged orca");
+      else if (s5.state !== "playing") fail("eating an orca ended the run — state " + s5.state);
+      else if (s5.ended) fail("eating an orca set sim.ended (the run stopped driving)");
+      else if (s5.winShown) fail("a victory card came up for eating an orca");
+      else if (s5.loseShown) fail("a loss card came up for eating an orca");
+      else if (s5.apexProp) fail("sim.apex is back — the win state was reintroduced");
+      else pass("ate " + s5.orcas + " orca, still playing (mass " + s5.mass + ")");
+      // THE POD RESTOCKS: the endgame is hunting it, so the sea must not run dry.
+      if (s5.pod < 1) {
+        const back = await burstUntil(`CBZ.cityWildlife.filter(a => !a.dead && a.species && a.species.id === "orca").length >= 3`, 20);
+        if (!back) fail("the pod never restocked after the megalodon ate one");
+        else pass("the pod restocked to 3");
+      } else pass("pod still in the water (" + s5.pod + ")");
+      await shot("5-orca-eaten-still-playing");
     }
 
     // ================= STAGE 6: THE DEATH =================================

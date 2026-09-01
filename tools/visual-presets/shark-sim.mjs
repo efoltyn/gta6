@@ -15,8 +15,10 @@
    in both games. The crowd that wandered the interior now lines the surf.
    The wader nobody threatened is now food. The hammerhead / great white /
    megalodon that swam free as wildlife are now bodies YOU wear. The pod
-   that cruised blue water now hunts you. And the same two end cards —
-   VICTORY and ELIMINATED — now say APEX PREDATOR and EATEN BY THE POD. */
+   that cruised blue water now hunts you. And where survival ENDS — its win
+   card, its elimination — shark sim keeps swimming: eating an orca as the
+   megalodon is a meal, not a victory screen, and the only card in this game
+   is the one that comes up when your shark finally dies. */
 
 const subjects = [
   {
@@ -52,16 +54,16 @@ const subjects = [
   {
     id: "megalodon", ch: 6,
     label: "The Apex Form — Megalodon In The Surf",
-    focus: "BEFORE: the island's one wild megalodon, deep water only. AFTER: you are it, riding the seabed into water shallower than its own body — dorsal out — with one objective left on the pill: eat an orca.",
+    focus: "BEFORE: the island's one wild megalodon, deep water only. AFTER: you are it, riding the seabed into water shallower than its own body — dorsal out — and the ladder finished: there is no rung left and no objective, only the sea and the pod in it.",
   },
   {
-    id: "apex-win", ch: 7,
-    label: "The Win Card — Last One Standing vs Apex Predator",
-    focus: "The same victory screen, re-purposed. BEFORE: survival's own win — outlast the field. AFTER: the megalodon eats an orca and the card reads APEX PREDATOR, with the kill in the feed.",
+    id: "orca-kill", ch: 7,
+    label: "The Kill That Ends The Game vs The Kill That Doesn't",
+    focus: "BEFORE: survival's win card — outlast the field and the island stops. AFTER: the megalodon eats an orca, the biggest mouthful in the water, and NOTHING stops: no card, no scoreboard, the pod restocks and you are still swimming. (This beat used to be shark sim's victory screen; the reward for reaching the top of the food chain was being taken out of the sea.)",
   },
   {
     id: "eaten-by-the-pod", ch: 8,
-    label: "The Death — Eliminated vs Eaten",
+    label: "The Only Ending — Eliminated vs Eaten",
     focus: "The same elimination flow, re-aimed. BEFORE: a disaster kills you and the spectate banner drops. AFTER: the pod finishes your shark, the rider's body comes back for the ragdoll, and the feed reads EATEN BY THE POD.",
   },
 ];
@@ -431,13 +433,14 @@ async function stageSharkSim(input) {
       if (!D.feedToTier(3)) throw new Error("never evolved to megalodon");
       D.shallow(2); D.sec(1.2);                              // ride the bed, dorsal out
       D.bodyShot(CBZ.sharkSim.shark);
-      D.banner("YOU ARE THE MEGALODON", "Now eat an orca.");
+      D.banner("YOU ARE THE MEGALODON", "Nothing outranks you.");
       out.eaten = CBZ.sharkSim.eaten;
     },
-    async function apexWin() {
+    async function orcaKill() {
+      D.clearBanner();
       const sim = CBZ.sharkSim, S = sim.shark;
-      let won = false;
-      for (let round = 0; round < 4 && !won; round++) {
+      let ate = false;
+      for (let round = 0; round < 4 && !ate; round++) {
         let o = D.findWild("orca") || (CBZ.cityWildlifeSpawnAt && CBZ.cityWildlifeSpawnAt("orca", S.pos.x + 40, S.pos.z));
         if (!o) break;
         const h = S.heading || 0, jaw = D.jawAhead();
@@ -446,14 +449,21 @@ async function stageSharkSim(input) {
         o.pos.z = S.pos.z + Math.sin(h) * (jaw + 1.5);
         o.pos.y = S.pos.y;
         if (o._waterMove) { o._waterMove.x = o.pos.x; o._waterMove.z = o.pos.z; }
-        for (let s = 0; s < 120 && !won; s++) { D.step(1); won = CBZ.game.state === "won" && sim.apex; }
+        for (let s = 0; s < 120 && !ate; s++) { D.step(1); ate = (sim.orcas || 0) > 0; }
       }
-      if (!won) throw new Error("apex win never fired");
-      out.eaten = sim.eaten;
+      if (!ate) throw new Error("the megalodon never ate an orca");
+      // THE SHOT IS THE GAME CARRYING ON. Keep swimming past the kill, then
+      // photograph the live water — if a card ever comes back, this is where
+      // it lands on top of the frame instead of the sea.
+      D.sec(2.2);
+      if (CBZ.game.state !== "playing") throw new Error("eating an orca ended the run: " + CBZ.game.state);
+      D.bodyShot(sim.shark);
+      out.eaten = sim.eaten; out.orcas = sim.orcas;
     },
     async function eaten() {
-      if (!await D.replay()) throw new Error("play-again never re-armed");
-      D.clearBanner();                                       // the fresh match re-flashed the spawn banner
+      // NO REPLAY NEEDED ANY MORE: chapter 7 leaves the match live, so the
+      // death is simply the next thing that happens to the same shark.
+      D.clearBanner();
       const S = CBZ.sharkSim.shark;
       S.hp = 0; S.dead = true;
       D.sec(2.6);                                            // deathcam beat, then ELIMINATED lands
@@ -507,7 +517,7 @@ async function stageSharkSim(input) {
       out.podNearestM = D.podNearest();
     },
     async function megalodon() { D.wildShot("megalodon"); },
-    async function apexWin() {
+    async function orcaKill() {
       for (const b of CBZ.bots) if (!b.dead) CBZ.surv.killBot(b, null, "swept out to sea");
       for (let s = 0; s < 90 && CBZ.game.state !== "won"; s++) D.step(1);
       if (CBZ.game.state !== "won") throw new Error("survival win never fired");
@@ -552,7 +562,7 @@ async function stageSharkSim(input) {
 export default {
   id: "shark-sim",
   title: "Shark Sim — The Island Before, The Food Chain After",
-  description: "Nine beats of the disaster island, photographed in both of its games. BEFORE (?mode=survival): plain Natural Disaster Survival — the crowd inland, the sharks as wildlife, the standard win and death cards. AFTER (?mode=sharksim, the Shark Sim tile): Shark Sim — you ARE the shark; the crowd lines the surf, the automatic bite feeds, the ladder climbs bull → hammerhead → great white → MEGALODON, the pod hunts you, and the same two end cards read APEX PREDATOR and EATEN BY THE POD. Every capture is the live game's own screen, HUD and killfeed included, advanced with CBZ.stepSim.",
+  description: "Nine beats of the disaster island, photographed in both of its games. BEFORE (?mode=survival): plain Natural Disaster Survival — the crowd inland, the sharks as wildlife, the standard win and death cards. AFTER (?mode=sharksim, the Shark Sim tile): Shark Sim — you ARE the shark; the crowd lines the surf, the automatic bite feeds, the ladder climbs bull → hammerhead → great white → MEGALODON, the pod hunts you, and eating an orca does NOT end the game — the only card in this mode is EATEN, when the pod finally gets you. Every capture is the live game's own screen, HUD and killfeed included, advanced with CBZ.stepSim.",
   beforeLabel: "BEFORE · ?mode=survival (Natural Disaster Survival)",
   afterLabel: "AFTER · ?mode=sharksim (SHARK SIM)",
   pairNote: "Same checkout · same island · same seed · the game's own camera and HUD",

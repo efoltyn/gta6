@@ -98,12 +98,12 @@
   const sim = {
     on: false,          // a match is live and the player has a shark
     needsTeardown: false, // mount/rider/ring state is out; teardown() owes a restore
-    ended: false,       // this match resolved (died or won) — stop driving
-    apex: false,        // won as the megalodon
+    ended: false,       // the shark died — the only way this match resolves
     match: 0,
     shark: null,
     tier: 0, mass: 0, eaten: 0,
-    biteT: 0, hudT: 0, podT: 0, stockT: 0, strandT: 0, hintT: 0, winT: 0,
+    orcas: 0,           // orcas eaten: the run's only trophy, read back on the death card
+    biteT: 0, hudT: 0, podT: 0, stockT: 0, strandT: 0, hintT: 0,
     waterline: 0,       // mean radius where the sea meets this island's sand
   };
   CBZ.sharkSim = sim;
@@ -580,7 +580,11 @@
       const d = Math.hypot(a.pos.x - P.pos.x, a.pos.z - P.pos.z);
       if (d < 160 && sim.tier < 3) a.hunger = Math.max(a.hunger || 0, 0.9);
     });
-    const wantPod = sim.tier < 3 ? 3 : 1;   // the megalodon still needs ONE orca to exist — it's the win
+    /* A FULL POD, ALWAYS. This used to fall to ONE orca at megalodon, because
+       one orca was all the old win condition needed to exist. There is no win
+       any more: the pod is what the endgame IS — the only prey left worth
+       chasing once the ladder is done — so the sea keeps three of them. */
+    const wantPod = 3;
     if (alive < wantPod && CBZ.cityWildlifeSpawnAt) {
       const ang = Math.random() * 6.283;
       for (let i = alive; i < wantPod; i++) {
@@ -629,7 +633,7 @@
     }
     const S = sim.shark;
     if (S && S.maxHp) S.hp = Math.min(S.maxHp, S.hp + S.maxHp * (0.05 + Math.min(0.25, gain * 0.012)));
-    if (kind === "animal" && target.species && target.species.id === "orca" && sim.tier >= 3) { apexWin(); return; }
+    if (kind === "animal" && target.species && target.species.id === "orca") orcaBeat(target);
     const next = LADDER[sim.tier + 1];
     if (next && sim.mass >= next.need) evolve();
     else hudNow();
@@ -668,7 +672,7 @@
       if (CBZ.shake) CBZ.shake(0.55);
       if (CBZ.sfx) { try { CBZ.sfx("win", { volume: 0.5 }); } catch (e) {} }
       flash("YOU ARE THE " + next.name,
-        sim.tier >= 3 ? "Now eat an orca." : "Next: " + LADDER[sim.tier + 1].name);
+        sim.tier >= 3 ? "Nothing outranks you." : "Next: " + LADDER[sim.tier + 1].name);
     }
     hudNow();
   }
@@ -783,27 +787,44 @@
     sim.grow = null;
   }
 
-  /* THE WIN CARD DOES NOT CUT THE FINISH OFF. Killing an orca as the
-     megalodon starts wildlife_tame's clamp/death-roll ceremony, and the old
-     code put the victory screen up on the same frame — so the one shot this
-     whole game builds toward was covered by a card before it happened. Hold
-     the win until the jaws let go (plus a beat), then resolve exactly as
-     before. sim.ended is still set immediately, so nothing else can start. */
-  function apexWin() {
-    if (sim.ended) return;
-    const hold = CBZ.cityAquaticClampT ? CBZ.cityAquaticClampT() : 0;
-    if (hold > 0 && SDT()) {
-      sim.ended = true; sim.apex = true;
-      sim.winT = hold + 0.7;
-      return;
+  /* ---- KILLING AN ORCA IS NOT AN ENDING ---------------------------------
+     OWNER, 2026-09-01: "That's fucking stupid. Game should not end."
+
+     He is right, and it was the worst possible place to put a stop. This game
+     spends four rungs teaching you that eating is how you get bigger, hands
+     you the megalodon, and then — the first time you use it on the one animal
+     the whole climb was aimed at — took the water away and put up a scoreboard.
+     The reward for reaching the top of the food chain was being ejected from
+     the game. There is no VICTORY here any more, and no #survwin: the ladder
+     ends at the megalodon and then the sea just keeps going, with the pod
+     restocking, until something finally kills you. Death is the only end.
+
+     What is left of that moment is the moment itself. An orca is the biggest
+     mouthful in the water, so it gets the same physical grammar every other
+     big beat in this file uses — the sea breaks over it, the lens jolts once,
+     time drops for a beat — and then you are still swimming. The count is
+     kept because it is the only trophy this run has: the death card reads it
+     back to you. */
+  function orcaBeat(target) {
+    sim.orcas = (sim.orcas || 0) + 1;
+    const x = (target && target.pos && target.pos.x) || 0;
+    const z = (target && target.pos && target.pos.z) || 0;
+    const y = seaYAt(x, z);
+    if (CBZ.waterSplashAt) {
+      try {
+        CBZ.waterSplashAt(x, y, z, 4.2);
+        for (let i = 0; i < 4; i++) {
+          const ang = (i / 4) * 6.283 + 0.7;
+          CBZ.waterSplashAt(x + Math.cos(ang) * 3.0, y, z + Math.sin(ang) * 3.0, 2.2);
+        }
+      } catch (e) {}
     }
-    apexResolve();
-  }
-  function apexResolve() {
-    sim.winT = 0;
-    sim.ended = true; sim.apex = true;
-    hideHud();                           // the win card owns the screen now
-    if (CBZ.winGame) CBZ.winGame("apex");
+    if (CBZ.marineSurfaceHit) { try { CBZ.marineSurfaceHit(x, z, 3.6); } catch (e) {} }
+    if (CBZ.shake) CBZ.shake(0.3);
+    if (CBZ.doSlowmo) CBZ.doSlowmo(0.38);
+    if (CBZ.sfx) { try { CBZ.sfx("win", { volume: 0.45 }); } catch (e) {} }
+    // the words are the deleted design's, same as every other flash in here
+    if (!SDT()) flash("APEX PREDATOR", sim.orcas > 1 ? sim.orcas + " orcas" : "You ate the thing that eats sharks");
   }
 
   /* ================= DYING ==================================================
@@ -915,17 +936,24 @@
     if (CBZ.loseGame) CBZ.loseGame("shark-dead");
   }
 
-  /* ---- THE CARD IS THIS GAME'S, NOT THE ISLAND'S -------------------------
-     Both end screens are shared DOM (#survwin / #survlose) and both shipped
-     survival's copy: "VICTORY ROYALE · #1 of 100 · Survived · Disasters" over
-     an apex-predator run, and "ELIMINATED · #14 of 100 · 0 Disasters" over a
-     dead shark. A placement against a hundred disaster survivors is not a
-     thing this game HAS — the beach crowd is food, it respawns, and being
-     "#14" of it is noise. So sharksim fills its own card through the same
-     seam gungame uses (systems/state.js dispatches on g.mode), with the three
-     numbers this run actually produced: how far up the ladder the body got,
-     how long it hunted, and how much it ate. Every other mode reclaims this
-     markup when IT fills, so nothing leaks between games. */
+  /* ---- THE ONLY CARD IS THE DEATH CARD -----------------------------------
+     There is exactly ONE way this game ends now: the shark dies. The victory
+     screen it used to put up for eating an orca is gone (see orcaBeat) — with
+     it went the "APEX PREDATOR" fill, the win half of this function and the
+     sharksim branch in state.js's winGame, because nothing in this mode can
+     reach it any more.
+
+     What is left is the loss card, and it still is not the island's. #survlose
+     shipped survival's copy — "ELIMINATED · #14 of 100 · 0 Disasters" over a
+     dead shark — and a placement against a hundred disaster survivors is not a
+     thing this game HAS: the beach crowd is food, it respawns, and being "#14"
+     of it is noise. So sharksim fills its own card through the same seam
+     gungame uses (systems/state.js dispatches on g.mode), with the numbers
+     this run actually produced: how far up the ladder the body got, how long
+     it hunted, how much it ate — and, if it ever caught one, the orcas, which
+     is the only trophy the run has now that killing one no longer stops it.
+     Every other mode reclaims this markup when IT fills, so nothing leaks
+     between games. */
   function speciesName() { return (LADDER[sim.tier] && LADDER[sim.tier].name) || LADDER[0].name; }
   function setStat(vid, v, label) {
     const e = document.getElementById(vid);
@@ -934,23 +962,24 @@
     const l = e.nextElementSibling;
     if (l && label != null) l.textContent = label;
   }
-  CBZ.sharkSimFillResult = function (win) {
-    const box = document.getElementById(win ? "survwin" : "survlose");
+  CBZ.sharkSimFillResult = function () {
+    const box = document.getElementById("survlose");
     const logo = box && box.querySelector(".logo");
     const sub = box && box.querySelector(".sub");
-    if (logo) logo.textContent = win ? "APEX PREDATOR" : "EATEN";
+    if (logo) logo.textContent = "EATEN";
     if (sub) {
-      sub.textContent = win
-        ? "You ate the thing that eats sharks"
-        : "The " + speciesName().toLowerCase() + " was killed by " + (sim.killer || "the pod");
+      const n = sim.orcas || 0;
+      sub.textContent = "The " + speciesName().toLowerCase() + " "
+        + (n ? "ate " + n + (n > 1 ? " orcas" : " orca") + " and was killed by " : "was killed by ")
+        + (sim.killer || "the pod");
       delete sub.dataset.jailText;       // a jail loss must not think its copy is still up
     }
-    // "#1 of 4" would read as a PLACEMENT, which is the exact thing this card
-    // exists to stop saying — it is a rung, so it reads as one.
-    setStat(win ? "swPlace" : "slPlace", (sim.tier + 1) + "/" + LADDER.length, "Form");
-    setStat(win ? "swTime" : "slTime", CBZ.fmtTime ? CBZ.fmtTime(g.elapsed) : "--", "Hunted");
-    setStat(win ? "swDis" : "slDis", String(sim.eaten || 0), "Eaten");
-    if (!win) { const b = document.getElementById("loseAgainBtn"); if (b) b.textContent = "Try Again"; }
+    // "#14 of 100" would read as a PLACEMENT, which is the exact thing this
+    // card exists to stop saying — it is a rung, so it reads as one.
+    setStat("slPlace", (sim.tier + 1) + "/" + LADDER.length, "Form");
+    setStat("slTime", CBZ.fmtTime ? CBZ.fmtTime(g.elapsed) : "--", "Hunted");
+    setStat("slDis", String(sim.eaten || 0), "Eaten");
+    const b = document.getElementById("loseAgainBtn"); if (b) b.textContent = "Try Again";
   };
 
   // ---- the rider is a passenger, not a picture ---------------------------
@@ -1199,9 +1228,9 @@
     hudBar.style.background = "linear-gradient(90deg,#39c06a,#9fe870)";
     const next = LADDER[sim.tier + 1];
     if (!next) {
-      // MEGALODON. There is no next form, so there is no meter — it fades out
-      // and stays out. What is left to do (find an orca) is a thing to find,
-      // not a thing to fill.
+      // MEGALODON. There is no next form and no win, so there is no meter — it
+      // fades out and stays out. What is left is the sea and the pod in it,
+      // which is a thing to hunt, not a thing to fill.
       hud.style.opacity = "0";
       hudSpent = true;
       return;
@@ -1226,7 +1255,9 @@
         : "eat " + Math.max(0, next.need - sim.mass) + " more → " + next.name;
     } else {
       hudBar.style.width = "100%";
-      hudLine2.textContent = show ? "→ ORCA" : "eat an orca";
+      hudLine2.textContent = show ? "→ POD"
+        : sim.orcas ? sim.orcas + (sim.orcas > 1 ? " orcas" : " orca") + " eaten"
+        : "nothing outranks you — hunt the pod";
     }
     hudLine2.style.color = "#bcd0e2";
     if (show) return;
@@ -1344,14 +1375,14 @@
     sim.match++;
     despawn(sim.shark);                     // last match's body never lingers
     sim.shark = null;
-    sim.tier = 0; sim.mass = 0; sim.eaten = 0;
-    sim.ended = false; sim.apex = false;
+    sim.tier = 0; sim.mass = 0; sim.eaten = 0; sim.orcas = 0;
+    sim.ended = false;
     sim.death = null; sim.killer = null;
     // stockT 0.4, not 3: the sea top-up rides this same clock now and a match
     // that opens on empty water is the bug this file was opened to fix.
     sim.biteT = 0; sim.podT = 2; sim.stockT = 0.4; sim.strandT = 0; sim.hudT = 0; sim.hintT = 5;
     sim.seaIx = 0; sim.rivalT = 0; sim.seaAdds = 0;
-    sim._podClose = false; sim.winT = 0;
+    sim._podClose = false;
     podRestore(); growClear();
     sim.podScanT = 0; sim.podWakeT = 0; sim.grow = null;
     sim.waterline = measureWaterline();
@@ -1424,7 +1455,6 @@
     sim.stepN = (sim.stepN || 0) + 1;          // heartbeat for tools/shark-sim-check.mjs
     if (!S) return;
     if (sim.ended) {
-      if (sim.winT > 0) { sim.winT -= dt; growTick(dt); if (sim.winT <= 0) apexResolve(); }
       if (sim.death) deathTick(dt);
       hudTick(dt);
       return;
@@ -1497,7 +1527,7 @@
   CBZ.registerMode("sharksim", {
     id: "sharksim",
     label: "Shark Sim",
-    objective: "YOU ARE THE SHARK. Swim with your move keys (sprint to lunge) — the bite is automatic when prey is in front of your mouth. Eat fish and the people off the beach, grow through HAMMERHEAD and GREAT WHITE, and stay away from the orca pod until you are the MEGALODON. Then eat an orca.",
+    objective: "YOU ARE THE SHARK. Swim with your move keys (sprint to lunge) — the bite is automatic when prey is in front of your mouth. Eat fish and the people off the beach, grow through HAMMERHEAD and GREAT WHITE, and stay away from the orca pod until you are the MEGALODON — then nothing in the water outranks you, and you hunt the pod until something finally kills you.",
     build() {
       const m = CBZ.modes.survival;
       if (m && m.build) { try { m.build(); } catch (e) { console.error("[sharksim build]", e); } }

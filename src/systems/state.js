@@ -297,8 +297,9 @@
     // (ladder standings, not disaster placement).
     if (g.mode === "gungame") { if (CBZ.gungameFillResult) CBZ.gungameFillResult(false); return; }
     // SHARK SIM: a dead shark has no battle-royale placement and survived no
-    // disasters — modes/shark_sim.js fills the ladder run's own numbers.
-    if (g.mode === "sharksim" && CBZ.sharkSimFillResult) { CBZ.sharkSimFillResult(false); return; }
+    // disasters — modes/shark_sim.js fills the ladder run's own numbers. It is
+    // also the ONLY card that mode has: shark sim cannot be won (see winGame).
+    if (g.mode === "sharksim" && CBZ.sharkSimFillResult) { CBZ.sharkSimFillResult(); return; }
     fillSurvResult(false);
     styleLossCard(false);
   }
@@ -307,11 +308,14 @@
   function winGame(reason, actor) {
     if (g.state === "won") return;
     setState("won"); CBZ.sfx("win");
-    // sharksim shares the island's win card but not its COPY: "VICTORY ROYALE
-    // · #1 of 100 · Disasters" over an apex-predator run is the disaster
-    // game's scoreboard on another game's screen (modes/shark_sim.js fills
-    // it), and only DISASTER wins land in the persistent disaster record.
-    if (g.mode === "sharksim" && CBZ.sharkSimFillResult) { CBZ.sharkSimFillResult(true); return; }
+    // SHARK SIM CANNOT BE WON, so it is not handled here. It used to end the
+    // run with a victory card the moment the megalodon ate an orca — taking
+    // the sea away as the reward for reaching the top of the food chain. The
+    // ladder ends at the megalodon and the game just keeps going now; the only
+    // resolution is the shark dying (loseGame above). Nothing in that mode
+    // reaches winGame: survival's own last-one-standing check is gated to
+    // g.mode === "survival" precisely so a restocked beach can never hand the
+    // shark an unearned win (modes/survival.js).
     if (g.mode === "survival") { fillSurvResult(true); if (CBZ.recordSurvWin) CBZ.recordSurvWin(); return; }
     // GUN GAME: the player landed the final rung's kill — the shared win card
     // shows the ladder result (gungame.js owns the fill).
