@@ -11,16 +11,17 @@
    and a file that owned both the transport AND the rules would be the one
    place every future rule change had to go through. So the split is:
 
-       match.js   the MATCH. lobby, N players, spawn placement, the
-                  real-time tick, diplomacy state, victory condition.
+       match.js   THE OTHER WARLORDS. who is on the island, their columns,
+                  and the alliance handshake. (Module name: `warlords`.)
        warnet.js  THIS FILE. getting bytes between machines, and knowing
                   who is on the other end. No rules live here.
 
-   Everything below the API is transport. The one piece of gameplay left is
-   a FALLBACK encounter (fight / ally / trade when two warlords meet) that
-   runs ONLY when match.js is absent, so that multiplayer is not dead on the
-   page while match.js is being written. `W.match` existing switches it off
-   in one branch — see FALLBACK, at the bottom.
+   AND NOW THERE IS NOTHING ELSE. This file used to carry a 390-line FALLBACK
+   block — a peer meet card, a duel, a trade and a second alliance system —
+   "so multiplayer is not dead on the page while match.js is being written".
+   It was gated on match.js being absent and had therefore not run in months.
+   It is deleted; the tombstone at the bottom says why, and why leaving it
+   would have been worse than deleting it.
 
    ── WHAT IS REUSED, AND WHY ────────────────────────────────────────────
    Everything. src/net/net.js is this repo's multiplayer client — connect,
@@ -55,11 +56,11 @@
    ever has to say where they have WALKED to.
 
    ── THE NO-PAUSE RULE, and the battle decision it forces ───────────────
-   THE SHARED CLOCK NEVER STOPS FOR ANYBODY. Not for a battle, not for a
-   trade screen, not for a player who alt-tabbed. That is the openfront
-   property the owner asked for and it is the constraint everything else
-   here bends around: seven people are riding this island in real time and
-   none of them may be made to wait on an eighth.
+   THE SHARED WORLD NEVER STOPS FOR ANYBODY. Not for a battle, not for a
+   trade screen, not for a player who alt-tabbed. (The twenty-minute MATCH
+   CLOCK this used to be written against is gone — see match.js's tombstone.
+   The rule survives it: the day still turns, columns still walk, and nobody
+   on the island waits on anybody else's screen.)
 
    A Bannerlord battle takes minutes, so the two are in direct conflict, and
    there were two ways out:
@@ -128,7 +129,6 @@
   function now() { return Date.now(); }
   function net() { return CBZ.net; }
   function isHost() { const N = net(); return !!(N && N.isHost && N.isHost()); }
-  function hasMatch() { return !!(W.match && W.match.lobby); }
 
   /* ============================================================ THE BUS
      ONE relay verb for the whole game. A sub-verb inside it costs four bytes
@@ -229,7 +229,7 @@
           LOBBYERR = msg + "  Nothing is answering at " + (opts.url || defaultUrl()) +
             ". Start the relay with `node server/server.js` and open the game from that server.";
           if (opts.onError) opts.onError(LOBBYERR);
-          else if (!hasMatch()) connectCard();
+          else connectCard();
         },
       });
       if (opts.onReady) sub("world", opts.onReady);
@@ -237,7 +237,7 @@
     }).catch(function () {
       LOBBYERR = "src/net/net.js did not load — multiplayer is unavailable. Single player is unaffected.";
       if (opts.onError) opts.onError(LOBBYERR);
-      else if (!hasMatch()) connectCard();
+      else connectCard();
     });
   }
 
@@ -317,7 +317,6 @@
       if (m.x2) for (const k in m.x2) p[k] = m.x2[k];      // match.js's own fields
       ping("peer", p);
       W.emit("warnet:peer", p);
-      if (!hasMatch()) maybeMeet(p);
     });
 
     /* THE MATCH TICK. t:"world" is the lane server.js refuses from anybody
@@ -343,7 +342,6 @@
       fire(m.v, m.d, m.id);
     });
 
-    if (!hasMatch()) wireFallback();
   }
 
   function identify(to) {
@@ -372,14 +370,12 @@
     /* THE DEFAULT IS ONLY A DEFAULT. match.js owns spawn placement and the
        shape of a session, so if it is on the page it decides what "start on
        this island" means and this file does nothing but hand it the seed. */
-    if (!hasMatch()) {
-      W.newGame({ seed: w.seed, mode: "net", name: MYNAME });
-      W.state.day = w.day; W.state.hour = w.hour;
-    }
+    W.newGame({ seed: w.seed, mode: "net", name: MYNAME });
+    W.state.day = w.day; W.state.hour = w.hour;
     ping("world", w, mine);
     W.emit("warnet:on", { seed: w.seed, host: mine });
     W.log("riding a shared island. seed " + w.seed + ".");
-    if (!hasMatch()) warRoom();
+    warRoom();
   }
 
   /* ============================================================ THE PUMP
@@ -473,9 +469,7 @@
     .wl-net-f label{display:block;margin:0 0 6px}
     .wl-net-f input{width:100%}
   }
-  .wl-net-code{display:block;background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.1);
-    border-radius:10px;padding:10px 12px;margin:8px 0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    font-size:12.5px;letter-spacing:0;color:#ffd7bd;overflow-x:auto;white-space:pre}
+  /* .wl-net-code went with the shell commands it styled. */
   .wl-net-p{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;
     padding:10px 0;border-bottom:1px solid rgba(255,255,255,.07)}
   .wl-net-p:last-child{border-bottom:0}
@@ -485,8 +479,9 @@
   .wl-net-tag{font-size:10px;letter-spacing:.16em;opacity:.7}
   .wl-net-tag.ally{color:#8fe0a2}
   .wl-net-err{color:#ffc9c4;font-size:12px;letter-spacing:.05em;line-height:1.5}
-  .wl-net-note{font-size:11.5px;letter-spacing:.06em;opacity:.62;line-height:1.6}
-  .wl-net-note b{color:var(--hot);font-weight:600}`;
+  /* .wl-net-note styled the two explanatory paragraphs this file used to
+     print at the person opening a socket. Both are deleted (SHOW DONT TELL);
+     the rule goes with them rather than sitting here waiting to be filled. */`;
   function styleOnce() {
     if (G.document && !G.document.getElementById("wl-net-css")) {
       const s = G.document.createElement("style");
@@ -495,20 +490,15 @@
     }
   }
 
-  /* match.js OWNS THE LOBBY the moment it exists; this file never competes
-     with it for the screen. Two routes get us there and both have to work:
-     match.js may let this delegate, or it may replace W.warnet.lobby with its
-     own and keep this one as W.warnet.peerLobby (which is what it actually
-     does, because it owns one file and may not edit this one). The identity
-     check is what keeps the second route from being an infinite loop — when
-     match.js has already taken the entry point, the function it would
-     delegate to IS this one, so it falls through to the connect card
-     instead. */
-  function lobby() {
-    const installed = W.warnet && W.warnet.lobby;
-    if (hasMatch() && W.match.lobby !== installed && W.match.lobby !== lobby) return W.match.lobby();
-    connectCard();
-  }
+  /* THERE IS NO LOBBY ANY MORE. match.js used to own one — eight slots, a
+     colour picker, an AI count, a START button — and this function existed
+     only to hand the shell's MULTIPLAYER button over to it, with a
+     three-branch identity check to keep the handoff from becoming an
+     infinite loop. The lobby went with the match layer (see match.js's
+     tombstone): warlord mode is a campaign you can share, not a session you
+     assemble, so the button opens the one thing that is actually needed,
+     which is the address of the island. */
+  function lobby() { connectCard(); }
 
   function connectCard() {
     if (!ctx || !ctx.screen) return;
@@ -519,34 +509,31 @@
     try { nm = localStorage.getItem("cbz-warlord-name") || ""; } catch (e) {}
     nm = nm || "WARLORD " + (1 + Math.floor(Math.random() * 89));
     const seed = Q.get("seed") || String(1000 + Math.floor(Math.random() * 8999));
+    /* THREE FIELDS AND A VERB. What used to be here was 690 characters of
+       the interface explaining itself: a paragraph on how seeds work ("the
+       map is never sent — the whole world is that one number"), a "NO
+       SERVER?" section with two shell commands and a sentence about
+       cloudflared tunnels, and a subtitle about a clock that no longer
+       exists. The owner: "SHOW DONT TELL for warlord … just too much talking
+       of the ui."
+
+       None of it was information the person at this screen could act on: if
+       they have a server they paste it, and if they do not, a paragraph in a
+       game about running `node server/server.js` is documentation printed in
+       the wrong place. It is in server/README and in this repo's own docs.
+       An error, on the other hand, IS actionable and stays. */
     ctx.screen(
       '<h1 class="wl-h">ONE ISLAND, <em>MANY WARLORDS</em></h1>' +
-      '<p class="wl-sub">SHARED CAMPAIGN · THE CLOCK NEVER STOPS</p>' +
       (LOBBYERR ? '<div class="wl-card"><div class="wl-net-err">' + esc(LOBBYERR) + '</div></div>' : "") +
       '<div class="wl-card">' +
         '<div class="wl-net-f"><label>YOUR NAME</label><input id="nName" maxlength="18" value="' + esc(nm) + '"></div>' +
         '<div class="wl-net-f"><label>SERVER</label><input id="nUrl" value="' + esc(url) + '"></div>' +
         '<div class="wl-net-f"><label>SEED</label><input id="nSeed" value="' + esc(seed) + '"></div>' +
       '</div>' +
-      '<div class="wl-card"><div class="wl-net-note">' +
-        'The first warlord into an empty server sets the island; everybody else rides the one ' +
-        'that is already there. <b>The map is never sent</b> — the whole world is that one number, ' +
-        'and every machine builds the same 14 km of sand from it.' +
-      '</div></div>' +
       '<div class="wl-btns">' +
-        '<button class="wl-btn hot" id="nGo">RIDE OUT TOGETHER</button>' +
+        '<button class="wl-btn hot" id="nGo">RIDE OUT</button>' +
         '<button class="wl-btn" id="nBack">BACK</button>' +
-      '</div>' +
-      '<div class="wl-lbl">NO SERVER?</div>' +
-      '<div class="wl-card"><div class="wl-net-note">' +
-        'The server is in this repo and needs nothing installed:' +
-        '<code class="wl-net-code">node server/server.js</code>' +
-        'It serves the game <i>and</i> the socket on port 8000, so open ' +
-        '<b>http://localhost:8000/games/warlord.html</b> and the SERVER box above already points at it. ' +
-        'To play with people who are not on your wifi, put a tunnel in front of it:' +
-        '<code class="wl-net-code">cloudflared tunnel --url http://localhost:8000</code>' +
-        'and hand out the https link it prints — that link IS your island.' +
-      '</div></div>'
+      '</div>'
     );
     const go = ctx.el("nGo");
     if (go) go.onclick = function () {
@@ -563,14 +550,14 @@
 
   function waiting(msg) {
     if (!ctx || !ctx.screen) return;
-    ctx.screen('<h1 class="wl-h">' + esc(msg) + '</h1><p class="wl-sub">WAITING FOR THE ISLAND</p>' +
+    ctx.screen('<h1 class="wl-h">' + esc(msg) + '</h1>' +
       '<div class="wl-btns"><button class="wl-btn" id="nCancel">CANCEL</button></div>');
     const c = ctx.el("nCancel");
     if (c) c.onclick = function () { disconnect(); connectCard(); };
   }
 
   function warRoom() {
-    if (!ctx || !ctx.screen || hasMatch()) return;
+    if (!ctx || !ctx.screen) return;
     styleOnce();
     const S = W.state;
     const list = peerList();
@@ -588,7 +575,9 @@
         p.size + ' men  ·  power ' + Math.round(p.pw || 0) + '</span></span>' +
         '<span class="wl-net-tag' + (p.ally ? " ally" : "") + '">' + (p.ally ? "ALLY" : "RIVAL") + '</span></div>';
     }
-    if (!list.length) h += '<div class="wl-net-note" style="padding-top:8px">nobody else yet. ride out — they appear on the map the moment they join.</div>';
+    /* An empty peer list used to carry a sentence explaining that peers
+       appear on the map when they join. The list being empty already says
+       it. */
     h += '</div>';
     h += '<div class="wl-btns">' +
       '<button class="wl-btn hot" id="nRide">RIDE OUT</button>' +
@@ -605,392 +594,37 @@
   }
 
   /* ============================================================================
-     ============================  F A L L B A C K  ============================
-     EVERYTHING BELOW HERE IS GAMEPLAY AND DOES NOT BELONG IN A TRANSPORT FILE.
-     It exists so that multiplayer is playable before match.js lands, and it is
-     switched off entirely — not merely hidden — the moment W.match exists.
-     When match.js owns the encounter, delete this block.
+     TOMBSTONE — THE FALLBACK BLOCK, deleted 2026-09-01. ~390 lines.
+
+     What was here: a whole second game. A proximity MEET card when two peers
+     rode within 150 m, a peer-vs-peer DUEL (challenge / accept / a pure
+     two-packet resolve() both sides ran), a TRADE screen that moved guns and
+     gold between baggage trains, and a peer ALLY offer with its own
+     accept/refuse pair and its own ALLIES table.
+
+     Its own header said why it was here and when it should go: "It exists so
+     that multiplayer is playable before match.js lands, and it is switched
+     off entirely — not merely hidden — the moment W.match exists. When
+     match.js owns the encounter, delete this block."
+
+     Two facts made deleting it correct rather than merely allowed:
+
+       1. IT HAD ALREADY BEEN DEAD FOR MONTHS. Every entry point was gated on
+          `!hasMatch()`, and hasMatch() tested for `W.match.lobby`, which
+          match.js has exported the whole time. Not one line of it could run.
+
+       2. IT WAS ABOUT TO WAKE UP. This pass deletes match.js's lobby. That
+          flips hasMatch() to false and would have brought 390 lines of
+          never-run code online at once — including a SECOND alliance system
+          with its own accept/deny, next to the one the owner actually asked
+          for. Two alliance tables, two ALLY buttons, one island.
+
+     Alliances now live in exactly one place: src/warlord/match.js, module
+     `warlords`, verbs wla / wlay / wlan / wlab, and they are the same four
+     verbs whether the other side is an AI or a human. If peer duelling and
+     peer trading come back they come back there, on that transport, not as a
+     private copy inside the wire.
      ========================================================================= */
-  let MEET = null, DUEL = null, TRADE = null, OFFER = null;
-  const ALLIES = {}, COOL = {};
-  const MEET_RANGE = 150;
-
-  function closeFallback() { MEET = null; DUEL = null; TRADE = null; OFFER = null; }
-
-  function wireFallback() {
-    on("duel", function (d, from) { onChallenge(d, from); });
-    on("duelno", function (d, from) {
-      if (!DUEL || DUEL.peer.id !== from) return;
-      const nm = DUEL.peer.name; DUEL = null;
-      W.toast(nm + " broke away", "bad"); backToRide();
-    });
-    on("duelok", function (d, from) {
-      if (!DUEL || DUEL.peer.id !== from || DUEL.role !== "a") return;
-      runDuel(DUEL.seed, DUEL.mine, { pw: d.pw, size: d.n }, true, DUEL.peer);
-    });
-    on("spoils", function (d, from) { takeSpoils(d, from); });
-    on("ally", function (d, from) { onAllyOffer(from); });
-    on("allyok", function (d, from) {
-      ALLIES[from] = true;
-      const p = W.state.peers[from]; if (p) p.ally = true;
-      W.toast((p ? p.name : "they") + " accepted your alliance", "good");
-      if (MEET && MEET.id === from) drawMeet();
-    });
-    on("allyno", function (d, from) {
-      const p = W.state.peers[from];
-      W.toast((p ? p.name : "they") + " refused", "bad");
-      if (MEET && MEET.id === from) drawMeet();
-    });
-    /* TRADE: OFFER → ACCEPT → DONE. The proposer gives up his guns when the
-       accept arrives and only then tells the other side to pay, so if the link
-       dies mid-exchange the ACCEPTER has lost nothing — the failure mode to
-       prefer when one of the two people is the one who opened the trade. */
-    on("trade", function (d, from) { onTradeOffer(d, from); });
-    on("tradeok", function (d, from) {
-      if (!TRADE || TRADE.peer.id !== from || TRADE.role !== "a") return;
-      const t = TRADE;
-      for (const wid in t.guns) W.unstash(wid, t.guns[wid]);
-      W.earn(t.gold);
-      send("tradedone", { guns: t.guns, gold: t.gold }, from);
-      W.log("traded " + gunsLabel(t.guns) + " to " + t.peer.name + " for $" + t.gold + ".", "good");
-      W.toast("deal done", "good");
-      TRADE = null; backToRide();
-    });
-    on("tradeno", function () {
-      if (!TRADE) return;
-      W.toast(TRADE.peer.name + " refused the deal", "bad");
-      TRADE = null; drawMeet();
-    });
-    on("tradedone", function (d) {
-      if (!W.pay(d.gold)) { W.toast("you could not cover the deal", "bad"); return; }
-      for (const wid in d.guns || {}) W.stash(wid, d.guns[wid]);
-      W.log("bought " + gunsLabel(d.guns) + " for $" + d.gold + ".", "good");
-      W.toast("crates loaded", "good");
-      TRADE = null; backToRide();
-    });
-    sub("leave", function (id, name) {
-      /* A PLAYER WHO VANISHES MID-ENCOUNTER must not leave a card up with a
-         button nobody will ever answer. Nothing has been applied at this point
-         in any of the three exchanges, so cancelling costs neither side. */
-      if (MEET && MEET.id === id) { closeFallback(); backToRide(); W.toast((name || "they") + " rode out of the world", "bad"); }
-    });
-  }
-
-  function maybeMeet(p) {
-    if (!ACTIVE || MEET || OLD_PEERS) return;
-    if (W.phase() !== "campaign") return;
-    if ((COOL[p.id] || 0) > now()) return;
-    const S = W.state;
-    const dx = p.x - S.you.x, dz = p.z - S.you.z;
-    if (dx * dx + dz * dz > MEET_RANGE * MEET_RANGE) return;
-    // army.js owns the `encounter` phase; if it has a card up we wait for the
-    // next update rather than fight it for the screen.
-    if (W.army && W.army.busy && W.army.busy()) return;
-    MEET = p;
-    W.setPhase("encounter", { kind: "pvp", peer: p });
-    drawMeet();
-    W.emit("warnet:meet", p);
-  }
-
-  function drawMeet() {
-    if (!MEET || !ctx || !ctx.screen) return;
-    styleOnce();
-    const p = MEET;
-    const mine = W.yourPower();
-    const odds = W.odds(mine, p.pw || 1);
-    let h = '<h1 class="wl-h">' + esc(p.name) + '</h1>' +
-      '<p class="wl-sub">ANOTHER WARLORD · ' + (p.ally ? "YOUR ALLY" : "NO TREATY") + '</p>' +
-      '<div class="wl-card">' +
-        '<div class="wl-row"><span>THEIRS</span><span>' + p.size + ' MEN  ·  POWER ' + Math.round(p.pw || 0) + '</span></div>' +
-        '<div class="wl-row"><span>YOURS</span><span>' + W.armySize() + ' MEN  ·  POWER ' + Math.round(mine) + '</span></div>' +
-        '<div class="wl-row"><span>IF YOU CHARGE</span><span class="' + (odds > 0.5 ? "wl-gold" : "") + '">' + Math.round(odds * 100) + '% TO WIN</span></div>' +
-      '</div>';
-    if (DUEL) {
-      h += '<div class="wl-card"><div class="wl-net-note">' +
-        (DUEL.role === "a" ? "You have called them out. Waiting for an answer…" : "They are charging you.") +
-        '</div></div>';
-      h += DUEL.role === "b"
-        ? '<div class="wl-btns"><button class="wl-btn bad" id="mAccept">MEET THEM</button>' +
-          '<button class="wl-btn" id="mFlee">BREAK AWAY</button></div>'
-        : '<div class="wl-btns"><button class="wl-btn" id="mCancel">CALL IT OFF</button></div>';
-    } else if (TRADE && TRADE.role === "b") {
-      h += '<div class="wl-card"><div class="wl-lbl" style="margin-top:0">THEY OFFER</div>' +
-        '<div class="wl-row"><span>' + esc(gunsLabel(TRADE.guns)) + '</span><span class="wl-gold">FOR $' + TRADE.gold + '</span></div>' +
-        '</div><div class="wl-btns">' +
-        '<button class="wl-btn hot" id="mTakeDeal"' + (W.state.gold < TRADE.gold ? " disabled" : "") + '>PAY $' + TRADE.gold + '</button>' +
-        '<button class="wl-btn" id="mNoDeal">NO DEAL</button></div>';
-    } else if (TRADE && TRADE.role === "a") {
-      h += '<div class="wl-card"><div class="wl-net-note">Offer sent. Waiting…</div></div>';
-    } else {
-      h += '<div class="wl-btns">' +
-        (p.ally ? "" : '<button class="wl-btn bad" id="mAttack">ATTACK</button>') +
-        (p.ally ? "" : '<button class="wl-btn" id="mAlly">ALLY</button>') +
-        '<button class="wl-btn" id="mTrade">TRADE</button>' +
-        '<button class="wl-btn hot" id="mLeave">RIDE ON</button></div>';
-    }
-    const node = ctx.screen(h);
-    node.onclick = function (e) {
-      const t = e.target && e.target.closest ? e.target.closest("button") : null;
-      if (!t) return;
-      switch (t.id) {
-        case "mAttack": challenge(p); break;
-        case "mAlly": send("ally", null, p.id); W.toast("offer sent", ""); break;
-        case "mTrade": OFFER = OFFER || { guns: {}, gold: 0 }; drawTrade(p); break;
-        case "mLeave": leaveMeet(); break;
-        case "mAccept": acceptChallenge(); break;
-        case "mFlee": send("duelno", null, p.id); DUEL = null; leaveMeet(); break;
-        case "mCancel": send("duelno", null, p.id); DUEL = null; drawMeet(); break;
-        case "mTakeDeal": send("tradeok", null, p.id); TRADE = null; W.toast("waiting on the crates…", ""); drawMeet(); break;
-        case "mNoDeal": send("tradeno", null, p.id); TRADE = null; drawMeet(); break;
-      }
-    };
-  }
-
-  function leaveMeet() {
-    if (MEET) COOL[MEET.id] = now() + 30000;
-    closeFallback();
-    backToRide();
-  }
-  function backToRide() {
-    if (W.campaign && W.campaign.enter) W.campaign.enter();
-    else if (W.phase() !== "menu") W.setPhase("campaign");
-  }
-
-  function myCard() { return { pw: Math.round(W.yourPower() * 100) / 100, size: W.armySize() }; }
-
-  function challenge(p) {
-    const mine = myCard();
-    /* THE SEED IS THE CONTRACT. Both machines resolve the same battle from
-       this one integer plus the two power numbers, and nothing else crosses
-       the wire — no per-tick state, nothing to desync, and no reason for the
-       other five players on the island to wait for any of it. */
-    const seed = (Math.random() * 0x7fffffff) | 0;
-    DUEL = { peer: p, seed: seed, mine: mine, role: "a", t: now() };
-    send("duel", { seed: seed, pw: mine.pw, n: mine.size, nm: MYNAME }, p.id);
-    drawMeet();
-    /* A CHALLENGE NOBODY ANSWERS must not lock the screen — the clock does not
-       stop for a player who closed his tab. Seven seconds and it is a refusal. */
-    setTimeout(function () {
-      if (DUEL && DUEL.role === "a" && DUEL.seed === seed) {
-        DUEL = null; MEET = null;
-        W.toast("no answer — they rode off", "bad"); backToRide();
-      }
-    }, 7000);
-  }
-
-  function onChallenge(d, from) {
-    const p = W.state.peers[from] || (W.state.peers[from] = { id: from, name: d.nm, colour: colourFor(from) });
-    p.pw = d.pw; p.size = d.n; p.name = p.name || d.nm; p.t = now();
-    MEET = p;
-    DUEL = { peer: p, seed: d.seed | 0, theirs: { pw: d.pw, size: d.n }, mine: myCard(), role: "b" };
-    if (W.phase() !== "encounter") W.setPhase("encounter", { kind: "pvp", peer: p });
-    drawMeet();
-  }
-
-  function acceptChallenge() {
-    if (!DUEL || DUEL.role !== "b") return;
-    const mine = DUEL.mine;
-    send("duelok", { pw: mine.pw, n: mine.size }, DUEL.peer.id);
-    runDuel(DUEL.seed, DUEL.theirs, mine, false, DUEL.peer);
-  }
-
-  /* ONE PURE FUNCTION, RUN TWICE. Same seed, same two numbers, same draws in
-     the same order — so both screens print the same battle without a single
-     further packet. `a` is always the challenger on both machines, which is
-     why the caller passes them in that order rather than "me and them". */
-  function resolve(seed, a, b) {
-    const rnd = W.rngFrom(seed | 0);
-    const p = W.odds(a.pw, b.pw);
-    const aWins = rnd() < p;
-    const win = aWins ? a : b, lose = aWins ? b : a;
-    const edge = clamp(win.pw / Math.max(0.001, lose.pw), 1, 6);
-    /* CASUALTIES COME OFF THE EDGE, not off the roll. A warlord who wins at
-       1.05:1 walks away with almost nothing left, and that is the only thing
-       stopping "attack everyone, always" from being the correct play — the
-       same brake wages are on the campaign. */
-    const loserLoss = clamp(0.36 + 0.09 * edge + rnd() * 0.18, 0.3, 0.95);
-    const winnerLoss = clamp(0.34 / edge + rnd() * 0.09, 0.03, 0.5);
-    return { aWins: aWins, aLoss: aWins ? winnerLoss : loserLoss, bLoss: aWins ? loserLoss : winnerLoss };
-  }
-
-  function runDuel(seed, a, b, iAmA, peer) {
-    const res = resolve(seed, a, b);
-    const iWon = (iAmA === res.aWins);
-    const myLoss = iAmA ? res.aLoss : res.bLoss;
-    const S = W.state;
-
-    /* EACH CLIENT KILLS ITS OWN MEN. The shared model says WHAT FRACTION
-       died; which men those are is a question only the machine holding the
-       roster can answer, and it is the one thing it is unambiguously
-       authoritative over. The weakest fall first — they are standing in front. */
-    const order = S.army.slice().sort(function (x, y) { return W.soldierPower(x) - W.soldierPower(y); });
-    const kill = Math.min(order.length, Math.round(myLoss * order.length));
-    const dropped = {};
-    for (let i = 0; i < kill; i++) {
-      const s = order[i];
-      if (s.wid && s.wid !== "fists") dropped[s.wid] = (dropped[s.wid] || 0) + 1;
-      W.removeSoldier(s.id, false);        // his gun is on the field, not in your cart
-    }
-    const left = S.army.slice();
-    for (let i = 0; i < left.length; i++) if (W.chance(0.3)) left[i].wounded = true;
-    W.promoteSurvivors(left);
-    S.stats.battles++;
-    if (iWon) S.stats.won++;
-    S.stats.lost += kill;
-    S.fame += iWon ? Math.round((iAmA ? b.size : a.size) * 0.8) : 0;
-
-    if (!iWon) {
-      /* THE LOSER HANDS OVER THE SPOILS, because the loser is the only one who
-         knows what he had. A quarter of the purse, the guns off his dead, and
-         the men who threw theirs down. */
-      const gold = Math.round(S.gold * 0.25);
-      W.pay(gold);
-      const men = [];
-      const weak = S.army.slice().sort(function (x, y) { return W.soldierPower(x) - W.soldierPower(y); });
-      for (let i = 0; i < Math.min(3, weak.length); i++) men.push(W.removeSoldier(weak[i].id, false));
-      const guns = {};
-      let n = 0;
-      for (const wid in dropped) { guns[wid] = Math.ceil(dropped[wid] * 0.5); n += guns[wid]; if (n > 12) break; }
-      send("spoils", { gold: gold, guns: guns, men: men.filter(Boolean) }, peer.id);
-    }
-
-    W.log((iWon ? "beat " : "lost to ") + peer.name + " — " + kill + " of your men died.", iWon ? "good" : "bad");
-    showResult(iWon, kill, peer, myLoss);
-    W.emit("warnet:duel", { won: iWon, peer: peer, killed: kill });
-    DUEL = null;
-    if (MEET) COOL[MEET.id] = now() + 45000;
-  }
-
-  function takeSpoils(d, from) {
-    const p = W.state.peers[from];
-    let men = 0;
-    for (const wid in d.guns || {}) W.stash(wid, d.guns[wid]);
-    if (d.men && d.men.length) {
-      for (let i = 0; i < d.men.length; i++) {
-        const s = d.men[i];
-        if (!s || !s.tier) continue;
-        /* Rebuilt through core's constructor rather than trusted as-is: a
-           roster arriving off the wire is the one place a malformed soldier
-           could get into your army, and makeSoldier is the only shape the
-           battle knows how to read. */
-        W.state.prisoners.push(W.makeSoldier(s.tier, s.wid, { name: s.name, armour: s.armour, kills: s.kills, battles: s.battles, wounded: true }));
-        men++;
-      }
-    }
-    if (d.gold) W.earn(d.gold);
-    W.log("took $" + (d.gold || 0) + ", " + men + " prisoners and their guns from " + (p ? p.name : "a beaten warlord") + ".", "good");
-    W.toast("spoils taken", "good");
-  }
-
-  function showResult(won, killed, peer, loss) {
-    if (!ctx || !ctx.screen) return;
-    const S = W.state;
-    ctx.screen(
-      '<h1 class="wl-h">' + (won ? "THEY <em>BROKE</em>" : "YOU ARE <em>BEATEN</em>") + '</h1>' +
-      '<p class="wl-sub">AGAINST ' + esc(peer.name) + '</p>' +
-      '<div class="wl-card">' +
-        '<div class="wl-row"><span>YOUR DEAD</span><span>' + killed + ' MEN  ·  ' + Math.round(loss * 100) + '%</span></div>' +
-        '<div class="wl-row"><span>STILL STANDING</span><span>' + W.armySize() + ' MEN</span></div>' +
-        '<div class="wl-row"><span>PURSE</span><span class="wl-gold">$' + S.gold + '</span></div>' +
-        (S.prisoners.length ? '<div class="wl-row"><span>PRISONERS</span><span>' + S.prisoners.length + '</span></div>' : '') +
-      '</div>' +
-      '<div class="wl-card"><div class="wl-net-note">Both of you watched the same battle — one seed, one model, ' +
-        'no argument about who died, and nobody else on the island waited for it.</div></div>' +
-      '<div class="wl-btns">' +
-        '<button class="wl-btn hot" id="rGo">RIDE ON</button>' +
-        '<button class="wl-btn" id="rArm">ARMOURY</button></div>'
-    );
-    const g = ctx.el("rGo"), a = ctx.el("rArm");
-    if (g) g.onclick = function () { MEET = null; backToRide(); };
-    if (a) a.onclick = function () { MEET = null; if (W.loadout) W.loadout.open(); };
-  }
-
-  function onAllyOffer(from) {
-    const p = W.state.peers[from];
-    if (!p || !ctx || !ctx.screen) return;
-    if (!MEET) { MEET = p; W.setPhase("encounter", { kind: "pvp", peer: p }); }
-    styleOnce();
-    ctx.screen(
-      '<h1 class="wl-h">' + esc(p.name) + ' <em>OFFERS PEACE</em></h1>' +
-      '<p class="wl-sub">' + p.size + ' MEN · POWER ' + Math.round(p.pw || 0) + '</p>' +
-      '<div class="wl-card"><div class="wl-net-note">An alliance is a promise not to charge each other. ' +
-        'It holds exactly as long as both of you want it to.</div></div>' +
-      '<div class="wl-btns">' +
-        '<button class="wl-btn hot" id="aYes">TAKE HIS HAND</button>' +
-        '<button class="wl-btn bad" id="aNo">REFUSE</button></div>'
-    );
-    ctx.el("aYes").onclick = function () {
-      ALLIES[p.id] = true; p.ally = true;
-      send("allyok", null, p.id);
-      W.toast("allied with " + p.name, "good");
-      drawMeet();
-    };
-    ctx.el("aNo").onclick = function () { send("allyno", null, p.id); drawMeet(); };
-  }
-
-  function drawTrade(p) {
-    if (!ctx || !ctx.screen) return;
-    const S = W.state;
-    const ids = Object.keys(S.baggage).sort(function (a, b) { return W.gunPrice(b) - W.gunPrice(a); });
-    let worth = 0;
-    for (const k in OFFER.guns) worth += W.gunPrice(k) * OFFER.guns[k];
-    let h = '<h1 class="wl-h">DEAL WITH <em>' + esc(p.name) + '</em></h1>' +
-      '<p class="wl-sub">OUT OF YOUR BAGGAGE TRAIN</p><div class="wl-card">';
-    if (!ids.length) h += '<div class="wl-net-note">you have nothing loose to sell.</div>';
-    for (let i = 0; i < ids.length; i++) {
-      const id = ids[i], sel = OFFER.guns[id] || 0;
-      h += '<div class="wl-row"><span>' + W.gunLabel(id) + ' <span class="wl-dim wl-small">×' + S.baggage[id] + '  ·  LIST $' + W.gunPrice(id) + '</span></span>' +
-        '<span><button class="wl-btn" data-less="' + id + '">−</button> ' + sel +
-        ' <button class="wl-btn" data-more="' + id + '">+</button></span></div>';
-    }
-    h += '</div><div class="wl-lbl">YOUR PRICE</div><div class="wl-card">' +
-      '<div class="wl-row"><span class="wl-gold" style="font-size:22px">$' + OFFER.gold + '</span>' +
-      '<span><button class="wl-btn" data-gold="-100">−100</button> <button class="wl-btn" data-gold="-25">−25</button> ' +
-      '<button class="wl-btn" data-gold="25">+25</button> <button class="wl-btn" data-gold="100">+100</button></span></div>' +
-      '<div class="wl-row"><span class="wl-small wl-dim">LIST VALUE OF WHAT YOU OFFER</span><span class="wl-small wl-dim">$' + worth + '</span></div>' +
-      '</div><div class="wl-btns">' +
-        '<button class="wl-btn hot" id="tSend"' + (worth ? "" : " disabled") + '>SEND THE OFFER</button>' +
-        '<button class="wl-btn" id="tBack">BACK</button></div>';
-    const node = ctx.screen(h);
-    node.onclick = function (e) {
-      const t = e.target && e.target.closest ? e.target.closest("button") : null;
-      if (!t) return;
-      if (t.hasAttribute("data-more")) {
-        const id = t.getAttribute("data-more");
-        if ((OFFER.guns[id] || 0) < S.baggage[id]) OFFER.guns[id] = (OFFER.guns[id] || 0) + 1;
-        drawTrade(p); return;
-      }
-      if (t.hasAttribute("data-less")) {
-        const id = t.getAttribute("data-less");
-        OFFER.guns[id] = Math.max(0, (OFFER.guns[id] || 0) - 1);
-        if (!OFFER.guns[id]) delete OFFER.guns[id];
-        drawTrade(p); return;
-      }
-      if (t.hasAttribute("data-gold")) {
-        OFFER.gold = Math.max(0, OFFER.gold + parseInt(t.getAttribute("data-gold"), 10));
-        drawTrade(p); return;
-      }
-      if (t.id === "tSend") {
-        TRADE = { peer: p, guns: OFFER.guns, gold: OFFER.gold, role: "a" };
-        send("trade", { guns: OFFER.guns, gold: OFFER.gold }, p.id);
-        OFFER = null; drawMeet(); return;
-      }
-      if (t.id === "tBack") { OFFER = null; drawMeet(); return; }
-    };
-  }
-  function onTradeOffer(d, from) {
-    const p = W.state.peers[from];
-    if (!p) return;
-    if (!MEET) { MEET = p; W.setPhase("encounter", { kind: "pvp", peer: p }); }
-    TRADE = { peer: p, guns: d.guns || {}, gold: d.gold | 0, role: "b" };
-    drawMeet();
-    W.emit("warnet:trade", TRADE);
-  }
-  function gunsLabel(guns) {
-    const out = [];
-    for (const k in guns || {}) out.push(W.gunLabel(k) + " ×" + guns[k]);
-    return out.join(", ") || "nothing";
-  }
 
   /* ============================================================ MODULE
      THE TRANSPORT API. match.js sits on exactly this and nothing else.
@@ -1051,12 +685,5 @@
     setWorld: setWorld,
     onWorld: function (fn) { return sub("world", fn); },        // (world, iDeclaredIt)
 
-    // ---- the shared battle model. match.js may own the RULES; this is the
-    //      pure function both clients must agree on, exported so it can.
-    resolve: resolve,
-
-    // ---- fallback only; false the moment match.js exists ----
-    fallback: function () { return !hasMatch(); },
-    encounterOpen: function () { return !!MEET; },
   });
 })();

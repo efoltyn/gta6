@@ -366,33 +366,41 @@ async function ruleD(rig) {
     } else ok(`${wantTxt}: readout "${u.readout}", slider ${u.value}/${u.index}, HUD carries it`);
   }
 
-  /* THE MATCH IS THE HONEST REFUSAL, and it is the half of this feature most
-     likely to rot: someone raises the ceiling, forgets the hold, and seven
-     warlords silently desync. */
+  /* THE HOLD USED TO BE TESTED THROUGH A LIVE MATCH, and it cannot be any
+     more: the match layer was deleted 2026-09-01 (src/warlord/match.js's
+     tombstone says why) and with it the only thing in the game that took a
+     clock hold called "MATCH". Deleting the assertion outright would have
+     been the dishonest fix — the MECHANISM it was really guarding is
+     core.js's clock hold, which is still there, still the thing that stops a
+     future feature being fast-forwarded past, and still the half of this
+     feature most likely to rot.
+
+     So the assertion is repointed at the mechanism instead of at its one
+     vanished caller: take a hold by hand, check the clock actually refuses,
+     check the control says WHY, and release it. That is exactly what the
+     match test proved, minus the match. If some future feature wants to pin
+     the clock again it inherits a gate that already works. */
   await rig.evl(`CBZ.warlord.clock.setScale(16)`);
-  const started = await rig.evl(`(() => {
-    const W = CBZ.warlord;
-    if (!W.match || !W.match.demo) return false;
-    W.match.demo({ n: 4 });
-    return true;
-  })()`);
-  if (!started) {
-    fail("D", "match.js would not open a demo match — the clock hold is untested");
-  } else {
-    await sleep(700);
+  await rig.evl(`CBZ.warlord.clock.hold("BATTLE")`);
+  await sleep(700);
+  {
     const u = await rig.evl(`window.__wlSpeed.ui()`);
-    if (u.scale !== 1) fail("D", `a live match did not pin the clock: it is at ${u.scale}x`);
-    else if (!u.disabled) fail("D", "a live match left the slider enabled");
-    else if (u.held !== "MATCH") fail("D", `the clock is held for "${u.held}", not the match`);
-    else if (!/MATCH/.test(u.tag)) fail("D", `the control does not say why it is pinned: tag "${u.tag}"`);
-    else ok(`a live match pins the clock at 1x and the control says "${u.tag}"`);
+    if (u.scale !== 1) fail("D", `a held clock did not pin at 1x: it is at ${u.scale}x`);
+    else if (!u.disabled) fail("D", "a held clock left the slider enabled");
+    else if (u.held !== "BATTLE") fail("D", `the clock is held for "${u.held}", not the holder that took it`);
+    else if (!/BATTLE/.test(u.tag)) fail("D", `the control does not say why it is pinned: tag "${u.tag}"`);
+    else ok(`a held clock pins at 1x and the control says "${u.tag}"`);
     // and it must not be a one-way door
     const after = await rig.evl(`(() => {
       CBZ.warlord.clock.setScale(32);
       return { scale: CBZ.warlord.clock.scale(), want: CBZ.warlord.clock.want() };
     })()`);
     if (after.scale !== 1) fail("D", `the hold was overridable from script: setScale(32) gave ${after.scale}x`);
-    else ok("setScale is refused while the match holds the clock, not merely greyed out");
+    else ok("setScale is refused while something holds the clock, not merely greyed out");
+    await rig.evl(`CBZ.warlord.clock.release("BATTLE")`);
+    const back = await rig.evl(`CBZ.warlord.clock.heldFor()`);
+    if (back) fail("D", `the hold did not release: still held for "${back}"`);
+    else ok("the hold releases and the slider is the player's again");
   }
 }
 

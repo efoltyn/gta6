@@ -21,6 +21,13 @@
 
    EVENTS: armoury:open armoury:close armoury:auto armoury:equip
 
+   2026-09-01 — THE SCREEN LOST 139 CHARACTERS AND 297 px. The owner: "a ton
+   of the word slop needs to be removed … too much talking of the ui." This
+   file's share of that was a subtitle glossing its own heading, a caption
+   explaining its own biggest button, and a report card that ended by telling
+   the player where to go shopping. Search NO SUBTITLE, THE CAPTION UNDER THE
+   BIG BUTTON, WHAT IT DID, and THE ARMED COUNT IS A BAR.
+
    FLAGS: ?autoarm=old  hand the cart out in roster order (the first draft)
           ?outfit=old   the whole outfitting wave reverted
 ============================================================ */
@@ -245,7 +252,10 @@
   .wl-la-act{display:flex;gap:6px;align-items:center;flex-shrink:0}
   .wl-la-act .wl-btn{padding:9px 12px;font-size:12px}
   /* clears the fixed MEN/$/DAY strip; --wl-hud is measured by
-     outpost.js's clearHud(), which is the one place that measurement lives */
+     outpost.js's clearHud(), which is the one place that measurement lives.
+     THIS SCREEN NO LONGER USES IT — #stage's own top padding already clears
+     the strip — but wardrobe.js does, and this is where the class is
+     defined, so the rule stays until that file stops asking for it. */
   .wl-hudpad{padding-top:var(--wl-hud,44px)}
   .wl-la-grp{width:100%;display:flex;justify-content:space-between;align-items:center;gap:10px;
     padding:12px 13px;margin:0 0 8px;border:1px solid rgba(255,255,255,.12);border-radius:12px;
@@ -260,11 +270,40 @@
   .wl-la-rep i{font-style:normal;color:var(--hot)}
   .wl-la-rep .dim{opacity:.5}
   .wl-la-w{color:var(--blood);font-size:10px;letter-spacing:.14em}
-  .wl-la-big{display:block;width:100%;padding:20px 16px;font-size:17px;letter-spacing:.1em;margin:16px 0 0}
-  .wl-la-cap{display:block;margin:8px 0 0;text-align:center;text-transform:lowercase;letter-spacing:.06em}
+  /* 20px of padding was a 76px slab; 15px is still by far the biggest
+     control on the screen and gives 12px back to the roster under it. */
+  .wl-la-big{display:block;width:100%;padding:15px 16px;font-size:16px;letter-spacing:.1em;margin:14px 0 0}
   .wl-la-minor{justify-content:center}
   .wl-la-minor .wl-btn{padding:9px 12px;font-size:11.5px;opacity:.72}
-  @media (max-width:420px){ .wl-la-pw b{font-size:26px} .wl-la-nm{font-size:13px} }`;
+  /* THREE MINOR VERBS ON ONE ROW, AT ANY WIDTH. At 11.5 px they wrapped to
+     two rows on a 375 px phone — 90 px for three buttons nobody presses until
+     they already know what AUTO-ARM does. flex:1 with a 0 basis makes them
+     share the row instead of asking for their content width; min-height keeps
+     them at the fits gate's 28 px floor. */
+  .wl-la-minor{flex-wrap:nowrap}
+  .wl-la-minor .wl-btn{flex:1 1 0;min-width:0;min-height:32px;padding:8px 4px;
+    font-size:10.5px;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  @media (max-width:420px){ .wl-la-pw b{font-size:26px} .wl-la-nm{font-size:13px} }
+  /* A PHONE IN LANDSCAPE IS 393 px TALL. games/warlord.html's .wl-cols rule
+     unstacks this screen into three columns there, which took it from 964 px
+     to 417 — and 417 is still 24 px past the fold, because the tallest single
+     block in it cannot be fragmented: AUTO-ARM EVERYONE is one 76 px slab.
+     It stays the biggest control on the screen at 11 px of padding; it just
+     stops being the reason the screen does not fit. Measured 417 -> 388. */
+  @media (max-height:470px){
+    .wl-la-big{padding:11px 14px;font-size:14px;margin:10px 0 0}
+    /* three minor verbs in a 260 px column wrapped to THREE rows — 113 px,
+       the second-tallest unbreakable block on the screen and the reason the
+       tallest column would not come down. At 10 px they sit two-up. */
+    /* 8px, not 6: at 6 the button measured 27 px on its short side and
+       tools/warlord-fits.mjs's 28 px floor caught it — which is the floor
+       working exactly as intended. A screen that fits by shrinking a control
+       below a thumb has not been fixed. */
+    .wl-la-minor .wl-btn{padding:8px 8px;font-size:10px;letter-spacing:.04em;min-height:30px}
+    .wl-la-pw b{font-size:22px}
+    .wl-la-row{padding:6px 0}
+    .wl-la-act .wl-btn{padding:7px 9px;font-size:11px}
+  }`;
   function styleOnce() {
     if (G.document && !G.document.getElementById("wl-la-css")) {
       const s = G.document.createElement("style");
@@ -285,16 +324,34 @@
     return Object.keys(S.baggage).sort(function (a, b) { return W.gunPrice(b) - W.gunPrice(a); });
   }
 
+  /* THE ARMED COUNT IS A BAR, NOT A CLAUSE. "35 MEN · 24 ARMED · 9 GUNS IN
+     THE CART" made the reader do the division; the bar does it for him, and
+     the empty part of it IS the answer to "should I be buying guns" — which
+     is the sentence that used to be printed under the report card in words.
+     "FROM 812" after the delta also went: the delta and the current number
+     are on the same line, so the third number is arithmetic the screen was
+     doing out loud. */
   function powerStrip() {
     const now = totalPower();
     const d = LAST ? Math.round(LAST.after - LAST.before) : 0;
-    return '<div class="wl-card"><div class="wl-lbl" style="margin:0 0 4px">ARMY STRENGTH</div>' +
+    const men = W.state.army.length + 1;
+    const armed = armedCount();
+    const cart = cartRows().reduce(function (n, id) { return n + W.state.baggage[id]; }, 0);
+    /* THE HEADING RIDES ON THE NUMBER'S OWN LINE. It was a 15 px label plus a
+       4 px margin above a 30 px number — 19 px of vertical space to name a
+       figure that is the biggest thing on the screen. Inline it costs
+       nothing, and the baseline alignment already reads as a caption. */
+    return '<div class="wl-card">' +
       '<div class="wl-la-pw"><b>' + Math.round(now) + '</b>' +
-      (LAST && d !== 0 ? '<span class="wl-la-d ' + (d > 0 ? "up" : "dn") + '">' + (d > 0 ? "+" : "") + d +
-        ' <span class="wl-dim wl-small">FROM ' + Math.round(LAST.before) + '</span></span>' : '') +
-      '<span class="wl-dim wl-small">' + (W.state.army.length + 1) + ' MEN  ·  ' + armedCount() + ' ARMED  ·  ' +
-        cartRows().reduce(function (n, id) { return n + W.state.baggage[id]; }, 0) + ' GUNS IN THE CART</span>' +
-      '</div></div>';
+      '<span class="wl-lbl" style="margin:0">ARMY STRENGTH</span>' +
+      (LAST && d !== 0 ? '<span class="wl-la-d ' + (d > 0 ? "up" : "dn") + '">' + (d > 0 ? "+" : "") + d + '</span>' : '') +
+      '</div>' +
+      '<div class="wl-stack" style="height:14px;margin:7px 0 4px">' +
+        '<i style="width:' + (armed / Math.max(1, men) * 100).toFixed(1) + '%;background:var(--hot)"></i>' +
+      '</div>' +
+      '<div class="wl-legend"><span>' + armed + '/' + men + ' ARMED</span>' +
+        '<span>' + cart + ' IN THE CART</span></div>' +
+      '</div>';
   }
   function armedCount() {
     let n = W.state.you.wid && W.state.you.wid !== "fists" ? 1 : 0;
@@ -302,6 +359,22 @@
     return n;
   }
 
+  /* WHAT IT DID, IN ROWS, WITH THE COMMENTARY CUT.
+
+     This card printed up to four English sentences about the button you had
+     just pressed: "took 12 guns back into the cart and dealt the whole army
+     from one pile.", "nothing in the cart was an upgrade on anybody.", and —
+     the plainest fourth-wall line in the game — "9 men have nothing but their
+     hands — buy guns at a depot.", which is the interface telling the player
+     where to shop. All three are gone. The first is what the button he just
+     pressed is NAMED; the second is said by the strength readout above not
+     moving; the third is the armed bar in powerStrip() sitting at 68% full,
+     which is a picture of exactly the same fact.
+
+     What is left is the only thing the player cannot see anywhere else: which
+     gun went to which kind of man. Capped at four rows, because past that
+     nobody is reading it and the screen has to fit. */
+  const REPORT_CAP = 4;
   function reportCard() {
     if (!LAST) return "";
     const r = LAST;
@@ -309,23 +382,21 @@
     // player's side — it was labelled STRIPPED by falling off the end of this
     // ternary, which the before/after pair caught.
     const TITLE = { auto: "AUTO-ARM", old: "AUTO-ARM", top: "HANDED OUT", armour: "ARMOUR", strip: "STRIPPED" };
-    let h = '<div class="wl-card"><div class="wl-lbl" style="margin:0 0 6px">' +
-      (TITLE[r.mode] || "DONE") + ' — WHAT IT DID</div><div class="wl-la-rep">';
-    if (r.stripped) h += '<span class="dim">took ' + r.stripped + ' guns back into the cart and dealt the whole army from one pile.</span><br>';
+    const rows = [];
     const gids = Object.keys(r.guns).sort(function (a, b) { return W.gunPrice(b) - W.gunPrice(a); });
     for (let i = 0; i < gids.length; i++) {
-      const row = r.guns[gids[i]];
-      h += '<i>' + W.gunLabel(gids[i]) + ' ×' + row.n + '</i> → ' + tierBreak(row.tiers) + '<br>';
+      rows.push('<i>' + W.gunLabel(gids[i]) + ' ×' + r.guns[gids[i]].n + '</i> → ' + tierBreak(r.guns[gids[i]].tiers));
     }
     const aids = Object.keys(r.armour);
     for (let i = 0; i < aids.length; i++) {
-      const row = r.armour[aids[i]];
-      h += '<i>' + W.armour(aids[i]).label + ' ×' + row.n + '</i> → ' + tierBreak(row.tiers) + '<br>';
+      rows.push('<i>' + W.armour(aids[i]).label + ' ×' + r.armour[aids[i]].n + '</i> → ' + tierBreak(r.armour[aids[i]].tiers));
     }
-    if (!gids.length && !aids.length) h += '<span class="dim">nothing in the cart was an upgrade on anybody.</span><br>';
-    if (r.fists) h += '<span class="dim">' + r.fists + ' men have nothing but their hands — buy guns at a depot.</span><br>';
-    h += '</div></div>';
-    return h;
+    if (!rows.length) return "";
+    let h = '<div class="wl-card"><div class="wl-lbl" style="margin:0 0 6px">' +
+      (TITLE[r.mode] || "DONE") + '</div><div class="wl-la-rep">';
+    for (let i = 0; i < rows.length && i < REPORT_CAP; i++) h += rows[i] + '<br>';
+    if (rows.length > REPORT_CAP) h += '<span class="dim">+' + (rows.length - REPORT_CAP) + '</span>';
+    return h + '</div></div>';
   }
   function tierBreak(tiers) {
     const out = [];
@@ -333,18 +404,21 @@
     return out.join(", ");
   }
 
+  /* ONE ROW, NOT TWO. Your gun and your armour were separate rows with
+     separate stat lines — 130 px, and the armour row's line printed SOAK, HP
+     and KILLS, none of which is a thing you change from here. It is one row
+     now: the man, what he is holding, what he is wearing, and the two buttons
+     that swap either. The picker opens under it exactly as before. */
   function youCard() {
     const S = W.state, y = S.you;
     return '<div class="wl-lbl">YOURSELF</div><div class="wl-card">' +
       '<div class="wl-la-row">' +
-        '<div class="wl-la-txt"><div class="wl-la-nm">' + y.name + ' <span class="wl-dim wl-small">· ' + gunName(y.wid) + '</span></div>' +
-        '<div class="wl-la-st">' + gunStat(y.wid) + '</div>' +
-        '</div><div class="wl-la-act"><button class="wl-btn" data-pick="you">CHANGE</button></div>' +
-      '</div>' +
-      '<div class="wl-la-row">' +
-        '<div class="wl-la-txt"><div class="wl-la-nm">' + W.armour(y.armour).label + '</div>' +
-        '<div class="wl-la-st">SOAK ' + W.armour(y.armour).soak + '  ·  ' + Math.round(y.hp) + '/' + y.maxHp + ' HP  ·  ' + (y.kills || 0) + ' KILLS</div>' +
-        '</div><div class="wl-la-act"><button class="wl-btn" data-apick="you">ARMOUR</button></div>' +
+        '<div class="wl-la-txt"><div class="wl-la-nm">' + y.name + '</div>' +
+        '<div class="wl-la-st">' + gunName(y.wid) + '  ·  ' + W.armour(y.armour).label + '</div>' +
+        '</div><div class="wl-la-act">' +
+          '<button class="wl-btn" data-pick="you">GUN</button>' +
+          '<button class="wl-btn" data-apick="you">ARMOUR</button>' +
+        '</div>' +
       '</div>' +
       (PICK === "you" ? pickerFor(y, "you") : "") +
       '</div>';
@@ -353,9 +427,13 @@
   /* ---- the picker: the cart, grouped, one tap per choice ---- */
   function pickerFor(s, key) {
     const S = W.state;
-    let h = '<div class="wl-la-pick"><div class="wl-small wl-dim">FROM THE BAGGAGE TRAIN</div><div class="wl-btns">';
+    /* NO "FROM THE BAGGAGE TRAIN" HEADING. Every button under it reads
+       "AK-47 ×6"; a heading naming the container they came out of is the
+       panel describing itself. The armour half keeps its one-word label only
+       because the two rows of buttons are otherwise indistinguishable. */
+    let h = '<div class="wl-la-pick"><div class="wl-btns">';
     const ids = cartRows();
-    if (!ids.length) h += '<span class="wl-small wl-dim">the cart is empty.</span>';
+    if (!ids.length) h += '<span class="wl-small wl-dim">EMPTY</span>';
     for (let i = 0; i < ids.length; i++) {
       h += '<button class="wl-btn" data-give="' + key + '" data-wid="' + ids[i] + '">' +
         W.gunLabel(ids[i]) + ' <span class="wl-dim">×' + S.baggage[ids[i]] + '</span></button>';
@@ -368,7 +446,7 @@
         W.armour(aids[i]).label + ' <span class="wl-dim">×' + S.armourBag[aids[i]] + '</span></button>';
     }
     if (s.armour && s.armour !== "none") h += '<button class="wl-btn bad" data-agive="' + key + '" data-aid="none">TAKE IT OFF</button>';
-    if (!aids.length && s.armour === "none") h += '<span class="wl-small wl-dim">no armour in the cart.</span>';
+    if (!aids.length && s.armour === "none") h += '<span class="wl-small wl-dim">EMPTY</span>';
     h += '</div></div>';
     return h;
   }
@@ -407,7 +485,10 @@
 
   function rosterCard() {
     const gs = groups();
-    if (!gs.length) return '<div class="wl-lbl">YOUR MEN</div><div class="wl-card"><div class="wl-small wl-dim">you ride alone. hire men at a recruit camp.</div></div>';
+    // "you ride alone. hire men at a recruit camp." was a tutorial line under
+    // a heading that already said YOUR MEN over an empty box. The empty box
+    // is the fact; where to fix it is the recruit camp's job to advertise.
+    if (!gs.length) return '<div class="wl-lbl">YOUR MEN</div><div class="wl-card"><div class="wl-small wl-dim">NOBODY</div></div>';
     let h = '<button class="wl-la-grp' + (SHOW_ROSTER ? " on" : "") + '" id="laRoster" style="margin-top:18px">' +
       '<span>EVERY MAN</span><span class="n">' + W.state.army.length + ' IN ' + gs.length +
       ' STACKS' + (SHOW_ROSTER ? '  ▾' : '  ▸') + '</span></button>';
@@ -440,7 +521,7 @@
           '</div>' +
           (PICK === String(s.id) ? pickerFor(s, String(s.id)) : "");
       }
-      if (men.length > ROSTER_CAP) h += '<div class="wl-small wl-dim" style="padding-top:8px">…and ' + (men.length - ROSTER_CAP) + ' more. use the bulk buttons.</div>';
+      if (men.length > ROSTER_CAP) h += '<div class="wl-small wl-dim" style="padding-top:8px">+' + (men.length - ROSTER_CAP) + '</div>';
       h += '</div>';
     }
     return h;
@@ -450,15 +531,21 @@
     if (!ctx || !ctx.screen) return;
     styleOnce();
     // DAY / $ / wages are already in the fixed strip above this screen
-    let h = '<h1 class="wl-h">THE <em>ARMOURY</em></h1>' +
-      '<p class="wl-sub">WHO CARRIES WHAT</p>';
+    /* NO SUBTITLE. "WHO CARRIES WHAT" under a heading reading THE ARMOURY is
+       the definition of the word above it — 42 px of screen to gloss a noun
+       the player chose from a menu. */
+    let h = '<h1 class="wl-h">THE <em>ARMOURY</em></h1>';
     h += powerStrip();
     h += reportCard();
     /* ONE BUTTON, THE SIZE OF THE DECISION. The other three are the same
        size as each other and smaller than it, because they are the ones a
        player reaches for after they already know what AUTO-ARM does. */
+    /* THE CAPTION UNDER THE BIG BUTTON IS DELETED. "the cart and their hands,
+       best gun to best man" is an explanatory subtitle under a control
+       labelled AUTO-ARM EVERYONE, which is the owner's own example of the
+       thing to cut, and it is what the report card above the button shows
+       the moment you press it once. */
     h += '<button class="wl-btn hot wl-la-big" id="laAuto">AUTO-ARM EVERYONE</button>' +
-      '<div class="wl-small wl-dim wl-la-cap">the cart and their hands, best gun to best man</div>' +
       '<div class="wl-btns wl-la-minor">' +
         '<button class="wl-btn" id="laTop">ARM BEST 20</button>' +
         '<button class="wl-btn" id="laArmour">ARMOUR FRONT</button>' +
@@ -470,7 +557,12 @@
       '<button class="wl-btn hot" id="laBack">DONE</button>' +
       (W.outpost && W.outpost.current && W.outpost.current() ? '<button class="wl-btn" id="laShop">BACK TO THE STALL</button>' : '') +
       '</div>';
-    const node = ctx.screen('<div class="wl-hudpad">' + h + '</div>');
+    /* NO .wl-hudpad. It added 44 px on top of #stage's own
+       `padding-top: safe-t + 46px`, which already clears the fixed MEN/$/DAY
+       strip — measured on an iPhone SE the strip is 55 px tall and the stage
+       pads 66, so the extra 44 was 44 px of nothing at the top of the one
+       screen in this game with the most to fit. */
+    const node = ctx.screen('<div class="wl-cols">' + h + '</div>');
     if (ctx.paintHud) ctx.paintHud();
     if (W.outpost && W.outpost.clearHud) W.outpost.clearHud();
     wire(node);
@@ -504,13 +596,13 @@
       }
       if (t.hasAttribute("data-give")) {
         const s = manById(t.getAttribute("data-give"));
-        if (s && !W.equip(s, t.getAttribute("data-wid"))) W.toast("not in the cart", "bad");
+        if (s && !W.equip(s, t.getAttribute("data-wid"))) W.toast("NOT IN THE CART", "bad");
         else W.emit("armoury:equip", s);
         LAST = null; draw(); return;
       }
       if (t.hasAttribute("data-agive")) {
         const s = manById(t.getAttribute("data-agive"));
-        if (s && !W.equipArmour(s, t.getAttribute("data-aid"))) W.toast("not in the cart", "bad");
+        if (s && !W.equipArmour(s, t.getAttribute("data-aid"))) W.toast("NOT IN THE CART", "bad");
         else W.emit("armoury:equip", s);
         LAST = null; draw(); return;
       }

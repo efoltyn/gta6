@@ -40,8 +40,13 @@
    rolled at runtime, every client would compute a different map and the
    geometry would have to go on the wire every join. Because they are
    derived, THE ONLY THING THAT IS EVER SENT IS OWNERSHIP — snapshot() is one
-   character per region plus a small owner table. A 22-region island is under
-   300 bytes, which is small enough to send on a tick.
+   character per region plus a small owner table. That was "under 300 bytes"
+   at 22 regions and six owners; at the 40 regions and twenty owners this
+   island now carries (match.js puts fourteen named warlords on it) it is
+   1 225 bytes, measured by tools/visual-presets/warlord-map.mjs on seed 1337.
+   Most of the growth is the owner TABLE — twenty full warlord names — not the
+   ownership string. Still small enough to send on a tick, and the claim is
+   re-measured here rather than left to rot.
 
    REAL TIME, NEVER PAUSED. The map assumes ownership is changing while it is
    being looked at. It runs its own frame loop, updates the ownership layer
@@ -165,6 +170,37 @@
   }
   T.ownerColour = ownerColour;
   T.ownerLabel = ownerLabel;
+
+  /* WHO A PARTY BELONGS TO, and it is NOT always `b.faction`.
+
+     Rival warlords (src/warlord/match.js) are owners on this map with their
+     own colours and their own holdings, and their columns are ordinary
+     W.makeBand parties riding the island. Those bands keep `faction:
+     "warlord"` — core's real faction row — because that is what gives them
+     the right uniform in outfits.js, the right tier table, and the right
+     title on army.js's encounter card; W.faction() falls through to SAND
+     BANDITS for any id it does not know, so stamping the warlord's own id
+     into `faction` dressed his retinue as bandits and titled the card wrong.
+
+     The MAN rides in `b.warlordId`. Every place in this file that asks "whose
+     party is that" asks through here, and there is exactly one such place per
+     question — the alternative is four call sites and one of them eventually
+     not updated, which is how a warlord's own column ended up besieging his
+     own frontier in the first draft. */
+  function bandOwner(b) { return b ? (b.warlordId || b.faction) : null; }
+  T.bandOwner = bandOwner;
+
+  /* THE NO-ATTACK RULE lives in match.js, which owns the standing. This is
+     the one question this file asks it, and it is asked through a guard
+     because territory.js has to raise an island on a page where match.js
+     failed to boot. */
+  function truce(a, b) {
+    if (!a || !b || a === b) return false;
+    const A = W.warlords;
+    if (!A || !A.allied) return false;
+    try { return !!A.allied(a, b); } catch (e) { return false; }
+  }
+  T.truce = truce;
   function hex(c) { return "#" + ("000000" + ((c | 0) >>> 0).toString(16)).slice(-6); }
   function rgba(c, a) {
     const n = c | 0;
@@ -270,7 +306,33 @@
      rather than a random scatter because rejection sampling with W.rnd()
      would make the anchor set depend on how many times anything ELSE rolled
      the dice first — and that is not a seed-derived map, it is a lucky one. */
-  const TARGET_REGIONS = 22;      // about twenty labels is what a phone map holds
+  /* HOW MANY HOLDINGS THE ISLAND IS CUT INTO — 22 until 2026-09-01, and the
+     comment on it read "about twenty labels is what a phone map holds".
+
+     That was a claim about LABELS deciding a claim about the WORLD, and it
+     turned out to be the binding constraint on how many warlords could exist.
+     Every owner on this island starts on a holding nobody else has: the five
+     factions and you take six of them before anything else is placed, so 22
+     regions left sixteen free, and the owner's "way not dense enough, add way
+     way more total armies" is unanswerable on sixteen. Fourteen rivals on
+     sixteen free holdings is an island with nothing left to take on day one.
+
+     40 leaves 34 free: fourteen warlord homes and twenty still nobody's,
+     which is the same "mostly empty island on day one" picture the old count
+     gave and roughly twice the ground to fight over.
+
+     WHAT IT COSTS, measured on this box at the shipped 320-cell raster:
+     rasterise() is O(cells x anchors) and goes from ~2.2M to ~4.1M distance
+     tests. See tools/warlord-boot.mjs timings in the wave report — the island
+     still raises inside the same boot budget, and everything downstream
+     (chains, borders, labels) is per-region work that was already linear.
+
+     AND THE LABEL WORRY WAS ALREADY SOLVED. draw() has an anti-collision
+     pass that reports what it wanted against what it could fit (lastLabels),
+     so a crowded map drops names rather than overprinting them. The number
+     that was protecting the phone was protecting it from a problem the
+     renderer handles. */
+  const TARGET_REGIONS = 40;
   function buildAnchors(D) {
     const anchors = [];
     const O = D.oases || [];
@@ -697,7 +759,26 @@
     const t = tState();
     if (!reset && Object.keys(t.own).length) return;
     if (reset) { t.own = {}; t.gar = {}; t.gp = {}; t.taken = {}; t.press = {}; }
-    const F = W.FACTIONS || [];
+    /* THE GENERIC "RIVAL WARLORD" FACTION DOES NOT GET A HOME ANY MORE, as
+       long as named ones exist. core.js ships five factions and the fifth is
+       `warlord / RIVAL WARLORD` — a stand-in from before there were any. Now
+       that match.js puts fourteen NAMED warlords on the island with their own
+       colours and their own columns, an owner captioned "RIVAL WARLORD"
+       sitting between KARIM ABADI THE JACKAL and DESERT LEGION is the same
+       concept twice on one map.
+
+       The row itself stays exactly where it is: it is still the faction a
+       warlord's column carries for its LOOK (uniform, tier table, encounter
+       title), which is the whole reason bandOwner() exists above. It just
+       stops being a landlord. With ?warlords=0 there are no named ones and it
+       keeps its holding, so the island without this feature is unchanged. */
+    /* W.WARLORD_N is set by match.js at SCRIPT LOAD, not at boot, because
+       this function runs inside generate() — which fires the first time
+       anything asks the map a question, before any module has booted. Asking
+       W.warlords.ids() here returned 0 every time and the stand-in faction
+       kept its holding on every island. */
+    const named = W.WARLORD_N | 0;
+    const F = (W.FACTIONS || []).filter(function (f) { return !(named && f.id === "warlord"); });
     const placed = [];
     for (let i = 0; i < F.length; i++) {
       let best = -1, bs = -1;
@@ -884,7 +965,7 @@
     if (!r) return null;
     const holder = T.owner(r.id);
     if (holder === "you") return null;
-    if (holder && holder !== (b ? b.faction : null)) return null;
+    if (holder && holder !== bandOwner(b)) return null;
     T.claim(r.id, "you");
     W.toast(r.name + " IS YOURS", "good");
     return r;
@@ -973,7 +1054,7 @@
       const L = map[look[k]];
       if (!L) continue;
       for (let i = 0; i < L.length; i++) {
-        if (L[i].faction !== ownerId) continue;
+        if (bandOwner(L[i]) !== ownerId) continue;
         /* A COLUMN THAT IS WALKING SOMEWHERE IS NOT A SIEGE. core already
            tracks what a band is DOING, and the map already draws a hunting
            band brighter than a roaming one, so the pressure it applies is
@@ -1002,7 +1083,7 @@
   function strengthOf(ownerId) {
     let n = groundStrength(ownerId);
     const B = S().bands || [];
-    for (let i = 0; i < B.length; i++) if (B[i].faction === ownerId) n += W.bandPower(B[i]) * 0.5;
+    for (let i = 0; i < B.length; i++) if (bandOwner(B[i]) === ownerId) n += W.bandPower(B[i]) * 0.5;
     if (ownerId === "you") n += W.yourPower();
     return n;
   }
@@ -1068,6 +1149,17 @@
     for (let i = 0; i < r.neighbours.length; i++) {
       const nOwn = t.own[r.neighbours[i]] || null;
       if (!nOwn || nOwn === own) continue;
+      /* AN ALLY DOES NOT PUSH. This is the map half of the no-attack rule and
+         it is the reason an alliance is worth making: his colour stops
+         pressing yours, so the frontier you shook hands over goes quiet and
+         you can spend the men somewhere else. The sand half is in match.js —
+         his columns' `hostile` drops to 0 and they stop hunting you.
+
+         It is applied at the TALLY, not at the roll, on purpose: an ally
+         still holds his ground and still presses everybody ELSE, so the front
+         he shares with a third party keeps moving. Only the border between
+         the two of you is still. */
+      if (truce(nOwn, own)) continue;
       tally[nOwn] = (tally[nOwn] || 0) + (r.border[r.neighbours[i]] || 1);
     }
     const keys = Object.keys(tally);
@@ -1621,7 +1713,7 @@
       const px = sx(b.x, w), py = sy(b.z, h);
       if (px < -30 || py < -30 || px > w + 30 || py > h + 30) continue;
       const r = 2.4 + Math.pow(Math.max(1, W.bandPower(b)), 0.34) * 1.35;
-      g.fillStyle = rgba(b.colour || ownerColour(b.faction), b.mood === "hunt" ? 0.98 : 0.82);
+      g.fillStyle = rgba(b.colour || ownerColour(bandOwner(b)), b.mood === "hunt" ? 0.98 : 0.82);
       g.beginPath(); g.arc(px, py, r, 0, TAU); g.fill();
       g.strokeStyle = "rgba(10,7,4,.75)"; g.lineWidth = 1.2; g.stroke();
     }
@@ -1837,7 +1929,20 @@
     const box = document.getElementById("wlTerrCardIn");
     if (!box) return;
     if (!selected) {
-      box.innerHTML = '<div id="wlTerrHint">TAP A HOLDING · DRAG TO PAN · PINCH OR SCROLL TO ZOOM</div>';
+      /* NOTHING SELECTED USED TO SAY "TAP A HOLDING · DRAG TO PAN · PINCH OR
+         SCROLL TO ZOOM" — twelve words of the interface talking about itself,
+         on the one screen in the game where the world is the subject. The
+         owner's note was "SHOW DONT TELL for warlord … just too much talking
+         of the ui". A map you can drag is a map people drag.
+
+         So the empty state states the board instead: how many holdings there
+         are, how many nobody holds, and how many men are standing on them.
+         Every one of those is a reason to tap something. */
+      const t0 = tState();
+      let free = 0;
+      for (let i = 0; i < REG.length; i++) if (!t0.own[REG[i].id]) free++;
+      box.innerHTML = '<div id="wlTerrHint">' + REG.length + ' HOLDINGS · ' + free +
+        ' UNCLAIMED · ' + T.held("you").length + ' YOURS</div>';
       return;
     }
     const r = selected;
@@ -1858,8 +1963,54 @@
         risk = '<div class="who" style="color:rgba(244,236,216,.45)">' + ownerLabel(p.owner) + ' IS TAKING THIS</div>';
       }
     }
+    /* ============ THE ALLIANCE, WHERE IT BELONGS ============
+       The old alliance UI was two rows on a full-screen SCOREBOARD ("THE
+       BOARD") that has been deleted this pass. Diplomacy is now on the map,
+       on the holding of the man you are dealing with, because that is where
+       you already are when you decide you would rather not fight him.
+
+       WHAT IS PRINTED HERE IS FACTS AND VERBS. No line explains what an
+       alliance is or what the buttons do. HE OFFERS HIS HAND / ALLIED SINCE
+       DAY 6 / A RIDER IS OUT are three states of the world; ACCEPT, REFUSE,
+       OFFER and BREAK are four things you can do about it.
+
+       An offer sent from here does NOT resolve here — the answer lands at the
+       next dawn (match.js, ANSWER_DAYS), which is what makes it an offer you
+       can be refused on rather than a toggle. */
+    const A = W.warlords;
+    let dip = "", dipBtns = "";
+    const rival = (A && A.warlord && o) ? A.warlord(o) : null;
+    if (rival) {
+      const cols = A.columns(o).length;
+      const since = A.alliedSince("you", o);
+      const w8 = A.waiting("you", o);
+      if (since) {
+        dip = '<div class="who" style="color:#8fe0a2">ALLIED SINCE DAY ' + since + '</div>';
+        dipBtns = '<button class="wl-btn bad" id="wlTerrBreak">BREAK</button>';
+      } else if (w8 && w8.to === "you") {
+        dip = '<div class="who" style="color:#8fe0a2">HE OFFERS HIS HAND</div>';
+        dipBtns = '<button class="wl-btn hot" id="wlTerrYes">ACCEPT</button>' +
+                  '<button class="wl-btn bad" id="wlTerrNo">REFUSE</button>';
+      } else if (w8) {
+        dip = '<div class="who" style="color:rgba(244,236,216,.45)">A RIDER IS OUT</div>';
+      } else if (A.grudge(o)) {
+        /* THE PRICE OF A BETRAYAL, PRINTED ON HIS GROUND. Not "you have -1
+           reputation": the man whose hand you let go has turned every column
+           he owns onto you, and this is the map saying so. There is no OFFER
+           button under it — he is not going to take your hand again. */
+        dip = '<div class="who" style="color:#ffc9c4">HE HUNTS YOU</div>';
+      } else {
+        dipBtns = '<button class="wl-btn" id="wlTerrOffer">OFFER ALLIANCE</button>';
+      }
+      const hn = T.held(o).length;
+      dip += '<div class="facts" style="margin-bottom:0"><span>' + hn +
+        (hn === 1 ? ' HOLDING' : ' HOLDINGS') + '</span><span>' + cols +
+        (cols === 1 ? ' COLUMN' : ' COLUMNS') + '</span></div>';
+    }
+
     let btns = '<div class="wl-btns">';
     btns += '<button class="wl-btn' + (o === "you" ? '' : ' hot') + '" id="wlTerrRide">RIDE HERE</button>';
+    btns += dipBtns;
     if (o === "you") {
       if (inIt) {
         btns += '<button class="wl-btn" id="wlTerrGarM"' + (gsz ? "" : " disabled") + '>&minus;10 MEN</button>';
@@ -1872,6 +2023,7 @@
     box.innerHTML =
       '<h3>' + r.name + '</h3>' +
       '<div class="who" style="color:' + hex(ownerColour(o)) + '">' + ownerLabel(o) + '</div>' +
+      dip +
       risk +
       '<div class="facts">' +
         '<span>+<b>$' + T.regionIncome(r) + '</b>/DAY</span>' +
@@ -1891,7 +2043,23 @@
     if (gm) gm.onclick = function () { moveGarrison(r, -10); };
     const gp = document.getElementById("wlTerrGarP");
     if (gp) gp.onclick = function () { moveGarrison(r, +10); };
+
+    /* THE FOUR DIPLOMATIC VERBS. Each one repaints rather than closing the
+       map: an answer is a change to the board and you should be looking at
+       the board when it lands. */
+    const bOff = document.getElementById("wlTerrOffer");
+    if (bOff) bOff.onclick = function () { A.offer("you", o); paintCard(); touch(); };
+    const bYes = document.getElementById("wlTerrYes");
+    if (bYes) bYes.onclick = function () { A.accept(o, "you"); paintCard(); paintShare(); touch(); };
+    const bNo = document.getElementById("wlTerrNo");
+    if (bNo) bNo.onclick = function () { A.refuse(o, "you"); paintCard(); touch(); };
+    const bBrk = document.getElementById("wlTerrBreak");
+    if (bBrk) bBrk.onclick = function () { A.breakAlly("you", o); paintCard(); touch(); };
   }
+  /* match.js repaints through this when an answer arrives while the map is
+     open — a handshake that closes behind the card you are reading is the
+     bug this exists to stop. */
+  T.repaintCard = function () { if (open) { paintCard(); paintShare(); touch(); } };
 
   /* GARRISONING IS THE ONE VERB THIS SCREEN HAS, and it moves REAL soldiers:
      core's own objects out of W.state.army and into the holding, with their
@@ -2116,7 +2284,14 @@
     ensure();
     const t = tState();
     ensureOwnState(true);
-    const F = W.FACTIONS || [];
+    /* THE RIVALS ARE PART OF THE PICTURE NOW. Before this pass the staged
+       island had six owners on it (five factions and you) because that is all
+       there were; the population the owner asked for is fourteen warlords
+       with ground and columns, so the demo has to place them or every
+       photograph is of the island as it was. */
+    if (W.warlords && W.warlords.rehome) { try { W.warlords.rehome(); } catch (e) {} }
+    const F = (W.FACTIONS || []).map(function (f) { return f.id; })
+      .concat((W.warlords && W.warlords.ids) ? W.warlords.ids() : []);
     if (stage !== "day1") {
       /* Hashed, not rolled, so the three photographs are of the same island
          at three moments rather than three different islands. */
@@ -2127,10 +2302,10 @@
         const h = W.hash01(r.x, r.z, mid ? 8801 : 8802);
         if (mid) {
           if (h < 0.17) t.own[r.id] = "you";
-          else if (h < 0.74) t.own[r.id] = F[Math.floor(h * 997) % F.length].id;
+          else if (h < 0.74) t.own[r.id] = F[Math.floor(h * 997) % F.length];
         } else {
           if (h < 0.58) t.own[r.id] = "you";
-          else if (h < 0.92) t.own[r.id] = F[Math.floor(h * 997) % F.length].id;
+          else if (h < 0.92) t.own[r.id] = F[Math.floor(h * 997) % F.length];
         }
       }
       const mine = T.held("you");

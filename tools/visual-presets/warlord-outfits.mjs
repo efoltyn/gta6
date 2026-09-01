@@ -54,15 +54,26 @@ const FACTIONS = [
   { id: "warlord", label: "Rival Warlord",
     focus: "HIS COLOURS, DELIBERATELY. A violet sash across the chest, going gold at soldier, and lieutenants in actual tailoring. The sash is the cheapest tier read in the game; the black suit is the highest-contrast object either army owns." },
   { id: "you",     label: "Your Warband",
-    focus: "THE ARMY YOU TOOK OFF OTHER PEOPLE. Every man wears the faction you beat him out of, hashed off his own id so he keeps it forever — with your amber on his head and nothing else of yours. Only veterans wear anything you issued. It should look like a mob with one colour in common, because that is what it is." },
+    /* REWRITTEN 2026-09-01, because this preset is now photographing a
+       different thing. The old sentence — "the army you took off other
+       people", every man in the faction you beat him out of — was the
+       behaviour the owner asked to end ("all my soldiers should wear the same
+       painted uniform difference is in armour"), and the gallery's portrait
+       row for `you` is now the ARMOUR ladder rather than the tier ladder. A
+       focus paragraph describing a picture that is no longer taken is worse
+       than none: the reader trusts it and stops looking. */
+    focus: "ONE ARMY IN ONE ISSUED UNIFORM, and the difference between two of these men is what he is WEARING OVER IT. Left to right the row is core.js's own armour ladder — no armour, flak vest, plate carrier, heavy rig — on four otherwise identical soldiers in the same amber-sashed desert canvas. Watch three things step together: the torso block gets wider and deeper, the kit gets more pieces (pouches, then side plates and shoulder pads that ride the arms, then a throat guard and a groin flap), and the head goes cloth → issued cap → helmet. The full before/after for this lives in warlord-issue.mjs, which serves a pristine worktree of HEAD as its baseline." },
 ];
 
 const subjects = [];
 for (const f of FACTIONS) {
   subjects.push({
-    id: f.id + "-portrait", label: f.label + " · levy to veteran",
+    id: f.id + "-portrait",
     kind: "portrait", faction: f.id,
-    focus: f.focus + "  ||  FOUR MEN, LEFT TO RIGHT: levy, raider, soldier, veteran.",
+    label: f.label + (f.id === "you" ? " · the armour ladder" : " · levy to veteran"),
+    focus: f.focus + (f.id === "you"
+      ? "  ||  FOUR MEN, LEFT TO RIGHT: no armour, flak vest, plate carrier, heavy rig."
+      : "  ||  FOUR MEN, LEFT TO RIGHT: levy, raider, soldier, veteran."),
   });
 }
 for (const fid of ["bandit", "militia", "company", "legion", "warlord"]) {
@@ -323,12 +334,21 @@ export default {
   method:
     "Both sides are this checkout served by the same local server. The before side adds ?outfits=old, the wardrobe's one-line revert, which leaves W.outfits.cast() falling through to CBZ.studio.cast(role, { color: side.colour }) — exactly what battle.js did before this wave. The scaffold is the module's own ?gallery=outfits pad, which is deliberately built in BOTH modes so the reverted side has the same men on the same sand under the same battle fog (0xd8c49a, 420-2900). rAF is frozen and every man is posed once with animChar(t=0), so nothing moves between the two captures. Cameras are derived from the subject and reused from the baseline stage.",
   metricsNote:
-    "Sampled off the LIVE rigs via W.outfits.sample(), which reads a clothes.js atlas through CBZ.cityPaintedBodyHex, a camo material through W.camo.mean, and a flat material through its own colour — reading material.color alone would score every painted uniform as white. distinctFits is how many different records are on screen (the reverted side can only ever be 1). torsoSpread and tierGap are mean weighted-RGB distances, the same 2/4/3 weighting camo.js scores concealment with. sandDelta is the mean luminance gap between a man's cloth and the island's own 0xd9b979 sand, x100 — the number that says whether an army vanishes into the ground. factionGap REGRESSES and it is left pointing the way it does on purpose: the reverted side is five flat saturated hues, which is the theoretical maximum for a mean-colour distance and carries no information whatever, so no realistic desert palette can beat it on that measure. What replaced it is factionMark — every man flying his own army's accent where the silhouette is highest — plus the structure the pictures show. The right response to that red mark is to open line-60 and count the blocks, which is why the pairs exist.",
+    "Sampled off the LIVE rigs via W.outfits.sample(), which reads a clothes.js atlas through CBZ.cityPaintedBodyHex, a camo material through W.camo.mean, and a flat material through its own colour — reading material.color alone would score every painted uniform as white. distinctFits is how many different records are on screen (the reverted side can only ever be 1). torsoSpread and tierGap are mean weighted-RGB distances, the same 2/4/3 weighting camo.js scores concealment with. sandDelta is the mean luminance gap between a man's cloth and the island's own 0xd9b979 sand, x100 — the number that says whether an army vanishes into the ground. factionGap is REPORTED AND NOT SCORED, and that is the point: the reverted side is five flat saturated hues, which is the theoretical maximum for a mean-colour distance and carries no information whatever, so no realistic desert palette can beat it on that measure. It carried a `higher is better` declaration for months and therefore printed a red regression on every single run — a metric whose own note says its direction is nonsense must not have a direction. What carries the claim instead is factionMark — every man flying his own army's accent where the silhouette is highest — plus the structure the pictures show. The right response to that red mark is to open line-60 and count the blocks, which is why the pairs exist.",
   metrics: {
     distinctFits: { label: "Distinct uniforms on screen", unit: "fits", better: "higher" },
     torsoSpread: { label: "Man-to-man cloth spread", unit: "ΔRGB", better: "higher" },
     tierGap: { label: "Adjacent-tier separation", unit: "ΔRGB", better: "higher" },
-    factionGap: { label: "Army-to-army separation", unit: "ΔRGB", better: "higher" },
+    /* NO DIRECTION, AND THAT IS A CORRECTION RATHER THAN A DODGE. This metric
+       was declared better:"higher" while the metricsNote directly below it
+       argued, at length and correctly, that no realistic desert palette can
+       ever beat five flat saturated hues on a mean-colour distance — so the
+       gate has been printing a red REGRESSION on a number the preset itself
+       says is meaningless in that direction, on every run since it was
+       written. A metric whose own documentation says its direction is
+       nonsense should not have a direction: it is reported, it is not scored,
+       and factionMark is the one that carries the claim. */
+    factionGap: { label: "Army-to-army separation", unit: "ΔRGB" },
     sandDelta: { label: "Cloth vs sand luminance gap", unit: "×100", better: "higher" },
     headwear: { label: "Men wearing headgear", unit: "men", better: "higher" },
     webbing: { label: "Men carrying webbing", unit: "men", better: "higher" },

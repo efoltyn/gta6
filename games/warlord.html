@@ -55,7 +55,10 @@
     --wl-safe-r: env(safe-area-inset-right, 0px);
     /* how tall the bottom furniture currently is. match.js measures its own
        strip into this; 0 when there is no match. */
-    --wl-footer: 0px}
+    --wl-footer: 0px;
+    /* how tall the MEN/$/DAY strip currently is, measured and republished by
+       paintHud on every repaint — it grows a row when events.js adds chips */
+    --wl-hud: 46px}
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;color:var(--ink);
     font:600 15px/1.35 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
@@ -110,9 +113,18 @@
      (ALLY / BREAK on the match board, RIDE HERE on the map) went under the
      home indicator AND under the match strip — measured, on five of seven
      device frames. The padding is the furniture, stated. */
+  /* THE TOP INSET IS THE STRIP'S MEASURED HEIGHT, NOT 46. It was a typed 46,
+     which is right for the strip's one-line form ("25 MEN $900 DAY 1") and
+     wrong the moment events.js appends its own chips and #hud wraps to two
+     rows: photographed on an iPhone at 393 pt, "SAND BANDITS" was printed
+     straight through "0/4 WARLORDS". #hud is pointer-events:none over a
+     gradient, so nothing was unclickable and no gate could see it — it just
+     looked broken. paintHud() publishes --wl-hud after every repaint (it is
+     the only code that knows how tall the strip actually came out), and 46 px
+     stays as the fallback for the first paint. */
   #stage{position:fixed;inset:0;z-index:var(--z-stage);display:none;overflow:auto;
     background:radial-gradient(130% 100% at 50% 0%,#241a0e,#120e09 74%);
-    padding:calc(var(--wl-safe-t) + 46px) calc(var(--wl-safe-r) + 14px)
+    padding:calc(var(--wl-safe-t) + var(--wl-hud, 46px) + 6px) calc(var(--wl-safe-r) + 14px)
             calc(var(--wl-safe-b) + var(--wl-footer) + 34px) calc(var(--wl-safe-l) + 14px)}
   #stage.on{display:block}
   #stage .in{max-width:860px;margin:0 auto}
@@ -257,9 +269,22 @@
      instead: same tables, same numbers, but capped in height, scrolling
      inside itself, translucent, and — the whole point — sitting in a strip
      that does not cover the world or eat a click meant for the ground. */
+  /* NO max-height ON THIS BOX, AND THAT DELETION IS THE FIX FOR THE MOST
+     COMMON SCROLL IN THE GAME. It used to be `max-height:min(42vh,340px)`
+     (34vh under 420px), which is a guess laid on top of a column that is
+     ALREADY bounded: #verbs runs from a fixed top to a fixed bottom, .vin is
+     max-height:100% of it, and the head and the verb row are flex:0 0 auto —
+     so what is left over is exactly what the body may have, and flex works
+     that out with no number from me. The guess was simply smaller than the
+     leftover: measured on an iPhone SE, a depot's crate list is 249 px of
+     content, the leftover column is 335 px, and the cap handed it 227 and
+     made the player scroll 73 px of a list that fit. Two of the four rail
+     screens tools/warlord-fits.mjs flagged under rule 5 were this one line.
+     -webkit-overflow-scrolling stays: the body still scrolls when a genuinely
+     long roster is in it, it is just no longer told to be short first. */
   #verbs .vbody{margin:0 0 8px;padding:10px 12px;border-radius:12px;
     background:rgba(18,14,9,.86);border:1px solid rgba(255,255,255,.12);
-    flex:0 1 auto;min-height:0;max-height:min(42vh,340px);
+    flex:0 1 auto;min-height:0;
     overflow:auto;-webkit-overflow-scrolling:touch}
   #verbs .vbody.hid{display:none}
   #verbs .vbody .wl-row{padding:5px 0}
@@ -270,7 +295,6 @@
   #verbs .vtoggle{appearance:none;border:0;background:none;color:var(--ink);
     opacity:.55;font-size:11px;letter-spacing:.18em;cursor:pointer;
     min-height:30px;padding:2px 8px;margin-left:auto}
-  @media (max-width:420px){#verbs .vbody{max-height:34vh}}
 
   #verbs .vhead b{font-size:16px;letter-spacing:.06em}
   #verbs .vhead .vsub{font-size:11px;letter-spacing:.14em;opacity:.62}
@@ -330,6 +354,17 @@
     #verbs .vrow{grid-template-columns:repeat(3,1fr)}
     #verbs .vrow .vbtn:last-child:nth-child(odd){grid-column:auto}
     #verbs .vhead{padding:6px 10px;margin-bottom:6px}
+    /* AND THE BODY GOES TWO-UP, for the same reason the full screens do at
+       this shape: an 852x393 phone has width to spare and no height at all.
+       Measured, the encounter readout is 188 px of content and the column
+       left over after the header and two rows of verbs is 102 — so at one
+       column the odds bar was 86 px past the fold in the one orientation
+       where a player is most likely to be holding the phone in both hands.
+       Two columns puts the same readout in ~96. break-inside:avoid keeps a
+       bar and its own legend from being cut down the gutter. */
+    #verbs .vbody{column-count:2;column-gap:14px;padding:8px 10px}
+    #verbs .vbody > *{break-inside:avoid}
+    #verbs .vbtn{padding:9px 8px}
   }
 
 
@@ -361,6 +396,130 @@
   .wl-chip b{font-variant-numeric:tabular-nums}
   .wl-chip.arm{border-color:rgba(127,168,200,.45);color:#cfe2f0}
 
+  /* ---- A UNIT CHIP: ONE STACK OF MEN, TINTED BY WHAT THEY ARE ----
+     The roster behind INSPECT and the loot line in the aftermath were both
+     full-width `.wl-row`s — one row per stack, 34 px each, border under every
+     one. A 210-man band groups into ~30 stacks, which is 1 020 px of table on
+     a 667 px phone and was the single largest scroll in the game (measured:
+     2 053 px of content in a 667 px box).
+
+     A stack is three short facts and they do not need a row each. As a chip
+     that wraps, the same thirty stacks are ~14 rows of 22 px instead of 30
+     rows of 34, and the tier — the fact that actually decides whether you
+     fight — is carried by the left edge's COLOUR rather than by its name
+     being spelled out again on every line. The blue dot is armour. */
+  .wl-units{display:flex;flex-wrap:wrap;gap:5px}
+  .wl-unit{display:flex;align-items:baseline;gap:5px;border:1px solid rgba(255,255,255,.12);
+    border-left:3px solid var(--c,#8d8267);border-radius:7px;padding:3px 7px;
+    font-size:10px;letter-spacing:.06em;background:rgba(255,255,255,.03)}
+  .wl-unit b{font-variant-numeric:tabular-nums;font-size:12px}
+  .wl-unit i{font-style:normal;opacity:.55}
+  .wl-unit u{width:6px;height:6px;border-radius:2px;background:var(--steel);
+    display:inline-block;text-decoration:none}
+
+  /* ---- A NAME, AND NOTHING ELSE ----
+     The aftermath printed every dead man as a `.wl-row` carrying his tier,
+     his gun and his kill count. Nine dead was 300 px of table. The point of
+     naming the dead is the NAME — core.js gives every man one for exactly
+     this screen — and the rest is a stat block on a corpse. Wrapped, a
+     nine-man casualty list is two lines. */
+  .wl-names{display:flex;flex-wrap:wrap;gap:3px 10px;font-size:12px;letter-spacing:.02em;line-height:1.5}
+  .wl-names span{white-space:nowrap}
+  .wl-names .dead{color:var(--blood)}
+  .wl-names .gold{color:var(--gold)}
+  .wl-names .hurt{color:#ffc9c4;opacity:.72}
+  .wl-names em{font-style:normal;opacity:.45;font-size:10px;letter-spacing:.12em}
+
+  /* ---- THE AFTERMATH IS THE DENSEST SCREEN IN THE GAME ----
+     It carries two casualty bars, the dead by name, the promotions, the take
+     and every prisoner decision, and it has to do it in 667 px. The shell's
+     default rhythm (18 px above every label, 40 px buttons) is right for a
+     screen with four things on it and costs ~140 px on this one, which is the
+     difference between fitting an iPhone SE and not. Scoped to .wl-aft so
+     nothing else in the game gets tighter by accident. */
+  .wl-aft .wl-h{margin:0 0 2px}
+  .wl-aft .wl-sub{margin:0 0 9px}
+  .wl-aft .wl-lbl{margin:11px 0 5px}
+  .wl-aft .wl-stack{margin:2px 0 4px}
+  .wl-aft .wl-chips{gap:5px}
+  .wl-aft .wl-chip{padding:3px 8px;font-size:10px}
+  .wl-aft .wl-legend{font-size:10px;gap:3px 10px}
+  .wl-aft .wl-names{line-height:1.4}
+  .wl-aft .wl-btns{gap:6px;margin-top:8px}
+  .wl-aft .wl-btns .wl-btn{padding:8px 10px;font-size:11px;letter-spacing:.05em}
+  .wl-aft .wl-btns.out{margin-top:14px}
+  .wl-aft .wl-btns.out .wl-btn{padding:12px 18px;font-size:13px}
+  /* the label IS the toggle — a separate ONE BY ONE button cost a whole 49 px
+     row to say what an arrow on the heading says for nothing */
+  .wl-aft .lblbtn{appearance:none;border:0;background:none;color:inherit;cursor:pointer;
+    padding:0;font:inherit;display:flex;width:100%;justify-content:space-between;
+    align-items:center;min-height:30px}
+  .wl-aft .prow{display:flex;gap:8px;align-items:center;justify-content:space-between;
+    padding:5px 0;border-bottom:1px solid rgba(255,255,255,.06)}
+  .wl-aft .prow:last-child{border-bottom:0}
+  .wl-aft .prow .who{font-size:12px;letter-spacing:.03em;min-width:0;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wl-aft .prow .acts{display:flex;gap:5px;flex:0 0 auto}
+  .wl-aft .prow .acts .wl-btn{padding:7px 8px;font-size:10px;letter-spacing:.06em}
+
+  /* ---- A PHONE IN LANDSCAPE IS 393 px TALL ----
+     Which is 330 px of usable screen once #stage has cleared the notch and
+     the home bar, and there is no amount of copy-cutting that puts an
+     aftermath — two casualty bars, the dead by name, the take, and every
+     prisoner decision — into 330 px of a ONE-COLUMN page. It was 185 px past
+     the fold there while fitting every portrait frame with room to spare.
+
+     The screen is not short of ROOM in that frame, it is short of HEIGHT: it
+     has 852 px of width and is using 860 of them for a 640 px column. So on a
+     short, wide viewport the page becomes two columns and the same content is
+     half as tall. CSS columns rather than a grid because these screens are
+     flat lists of siblings built by four different files — a grid would need
+     every one of them to declare a cell, and the next screen somebody writes
+     would silently not get one.
+
+     break-inside:avoid on every direct child is what stops a card, a button
+     row or a casualty bar being cut in half down the column gutter; without
+     it the first draft split THE DEAD across the fold, which is worse than
+     scrolling. Opted into by wrapper class, not applied to #stage .in
+     wholesale, because territory.js's map is a canvas in there and a canvas
+     in a column box is a resize bug waiting to happen. */
+  @media (max-height:560px) and (min-width:700px){
+    .wl-aft, .wl-ev, .wl-ch, .wl-cols{column-count:2;column-gap:22px}
+    .wl-aft > *, .wl-ev > *, .wl-ch > *, .wl-cols > *{break-inside:avoid}
+    .wl-aft .wl-h, .wl-ev .wl-h, .wl-ch .wl-h, .wl-cols .wl-h{column-span:all}
+    /* A FLEX BOX CANNOT FRAGMENT, and that is why the first draft of this
+       rule only half worked. `.wl-units` (thirty stack chips) and `.wl-names`
+       (the dead) are flex containers, so the column algorithm treats each as
+       ONE unbreakable block: the roster went from 2 053 px to 543 px and then
+       stopped, with a 300 px slab of chips sitting in column one and column
+       two empty under a short list. As a block box with inline-flex children
+       they fragment like text and the columns fill evenly — measured 543 ->
+       231 px on an 852x393 phone. Only at this shape; everywhere else the
+       flex wrap is the better layout. */
+    .wl-units, .wl-names{display:block}
+    .wl-unit{display:inline-flex;margin:0 4px 4px 0;vertical-align:top}
+    .wl-names span{margin-right:9px}
+    .wl-cols > .wl-units, .wl-aft > .wl-names{break-inside:auto}
+  }
+  /* AND THREE COLUMNS ON A FULL-WIDTH PHONE IN LANDSCAPE. 852 px of width
+     against 393 px of height is the most extreme aspect this game is ever
+     held at, and two columns still left the armoury 41 px and the roster
+     150 px past the fold. Three is ~260 px a column, which is wider than the
+     phone is in portrait — nothing here is being squeezed, it is being
+     unstacked. */
+  @media (max-height:470px) and (min-width:820px){
+    .wl-aft, .wl-ev, .wl-ch, .wl-cols{column-count:3;column-gap:16px}
+    /* THE HEADING SPANS ALL THREE COLUMNS, so it is the one block on the page
+       whose height is NOT divided by three — 40 px of a 292 px box for a
+       title. clamp(22px,6vw,40px) reads 40 px here because the viewport is
+       852 px WIDE; 6vw is the wrong unit in the one orientation where width
+       is not the scarce thing. */
+    .wl-aft .wl-h, .wl-ev .wl-h, .wl-ch .wl-h, .wl-cols .wl-h{font-size:21px;margin:0 0 5px}
+    .wl-aft .wl-sub, .wl-ev .wl-sub, .wl-ch .wl-sub, .wl-cols .wl-sub{margin-bottom:8px}
+    /* and a card in a 260 px column does not need 14 px of side padding */
+    .wl-aft .wl-card, .wl-ev .wl-card, .wl-ch .wl-card, .wl-cols .wl-card{padding:9px 11px;margin-bottom:8px}
+  }
+
   /* THE FURNITURE THAT BELONGS TO THE CAMPAIGN, hidden while a screen owns
      the interface — see ctx.screen(). Listed by id rather than by a class on
      each element because these are built by four different modules and a
@@ -369,6 +528,24 @@
   body.wl-screen #wlWardBtn,
   body.wl-screen #wlSpeed,
   body.wl-screen #verbs{display:none !important}
+  /* AND THE RIGHT-HAND FURNITURE GOES WHEN THE RAIL IS A RIGHT-HAND COLUMN.
+     Above 900 px (and on any short viewport wide enough) the verb rail stops
+     being a bottom strip and becomes a column pinned to the right edge —
+     which is exactly where campaign.js puts its MAP button (+52) and its zoom
+     pair (+100). tools/warlord-fits.mjs's hit test caught all three coming
+     back as #vBody / #vToggle on an 852x393 phone: they were drawn, they were
+     inside the viewport, and a thumb landing on any of them pressed the rail.
+
+     A control drawn underneath another control is worse than an absent one,
+     because the player aims at it. #stage already takes the whole interface
+     for the same reason (body.wl-screen, above); a right-hand rail takes the
+     right edge. On a portrait phone the rail is a bottom strip, shares no
+     column with them, and nothing here applies. */
+  @media (min-width:900px), (min-width:600px) and (max-height:520px){
+    body.wl-rail #wlMapBtn,
+    body.wl-rail #wlIn,
+    body.wl-rail #wlOut{display:none !important}
+  }
   /* #wlSpeed is in that list and #hud carries the truth instead: the speed
      chip in the strip is the ONE thing that follows you into the armoury,
      because at 8x a screen is not a stop — it is eight times the wages. The
@@ -715,6 +892,23 @@ function start() {
          purpose: a readout that is always there is furniture, and a readout
          that appears only when something is true is information. */
       (C.scale() !== 1 ? '<span class="chip" style="color:var(--hot)">' + C.label() + '</span>' : '');
+    /* PUBLISH THE STRIP'S REAL HEIGHT, ON THE NEXT FRAME AND NOT NOW.
+       #stage needs to clear this thing and used to guess 46 px, which is the
+       one-line form; events.js wraps this very function and APPENDS its own
+       chips (loyalty, the four warlords) immediately after it returns, which
+       wraps the strip to two rows. Measuring synchronously here reads the
+       height before that append and publishes 46 forever — which is exactly
+       what the phone screenshot showed: "SAND BANDITS" printed through
+       "0/4 WARLORDS". A rAF puts the read after every same-task appender,
+       whoever they turn out to be, without this file having to know about
+       them. The measured value is the content BELOW the safe-area inset,
+       because the screens pad for that inset themselves. */
+    requestAnimationFrame(function () {
+      const hh = Math.max(0, h.offsetHeight -
+        (parseFloat(getComputedStyle(document.documentElement)
+          .getPropertyValue("--wl-safe-t")) || 0));
+      if (hh > 0) document.documentElement.style.setProperty("--wl-hud", Math.round(hh) + "px");
+    });
   }
   W.on("phase", paintHud);
   W.on("army", paintHud);
@@ -939,6 +1133,8 @@ function start() {
     html += '</div></div>';
     box.innerHTML = html;
     box.classList.add("on");
+    // see body.wl-rail in the stylesheet: a right-hand rail owns the right edge
+    document.body.classList.add("wl-rail");
 
     const fire = function (i) {
       const o = opts[i];
@@ -975,6 +1171,7 @@ function start() {
   ctx.closeVerbs = function () {
     const box = el("verbs");
     if (box) { box.classList.remove("on"); box.innerHTML = ""; }
+    document.body.classList.remove("wl-rail");
     if (verbKeyHandler) { window.removeEventListener("keydown", verbKeyHandler); verbKeyHandler = null; }
   };
   ctx.verbsOpen = function () { const b = el("verbs"); return !!(b && b.classList.contains("on")); };
@@ -1003,11 +1200,15 @@ function start() {
     const resume = W.hasSave();
     ctx.screen(
       '<h1 class="wl-h">DESERT <em>WARLORD</em></h1>' +
+      /* THE SUBTITLE IS THE WHOLE PITCH AND THE CARD UNDER IT SAID IT AGAIN
+         IN THREE SENTENCES. "ONE MAN · ONE PISTOL · FOURTEEN KILOMETRES OF
+         SAND" already states that you begin alone with a pistol; the card
+         then explained that you start alone, that every man is paid for or
+         frightened into it, and that nobody is given to you — which is this
+         game's central mechanic described to somebody who has not played it
+         yet, i.e. a manual page on a title screen. Deleted, 137 characters.
+         The mechanic teaches itself in the first ten minutes. */
       '<p class="wl-sub">ONE MAN · ONE PISTOL · FOURTEEN KILOMETRES OF SAND</p>' +
-      '<div class="wl-card"><div class="wl-small wl-dim">' +
-        'You start alone. Every man behind you is one you paid for, frightened into ' +
-        'surrender, or took off a battlefield. Nobody is given to you.' +
-      '</div></div>' +
       '<div class="wl-btns">' +
         '<button class="wl-btn hot" id="mNew" data-boot-entry>RIDE OUT</button>' +
         (resume ? '<button class="wl-btn" id="mLoad">CONTINUE</button>' : '') +

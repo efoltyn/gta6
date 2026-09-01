@@ -86,7 +86,7 @@ export default {
     { id: "generals", label: "Generals", act: "generals",
       focus: "The earned end of the ladder — peaked cap, shoulder boards with pips, gold cuff rings, a sash, eight ribbons, a greatcoat and a cape. These open at 120 standing, which is core's own BAND_CLASSES row for an army." },
     { id: "the-ladder", label: "One family, levy to general", act: "the-ladder",
-      focus: "Desert fatigues, the assault carrier, the officer's field dress, the general's coat, the marshal. This is also what YOUR men wear: fitForSoldier maps a veteran onto the officer rung of whatever family you are wearing." },
+      focus: "Desert fatigues, the assault carrier, the officer's field dress, the general's coat, the marshal. These are what YOU wear. Your MEN no longer step through it — the owner asked for one issued uniform on all of them with the armour as the only difference (see warlord-issue.mjs), so W.wardrobe.dressSoldier now delegates straight to W.outfits.dress and the rank ladder in this plate is the one coat on the field that is not the issue uniform: yours." },
     { id: "picker", label: "The picker", act: "picker",
       focus: "A grid of looks you tap — one tap wears it, the live 3D at the top shows you in it, and a locked rung shows the number of men it costs. Before: the wardrobe refuses to open, so this is the armoury, the only screen that ever let you change anything." },
   ],

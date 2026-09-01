@@ -102,7 +102,14 @@ export default {
     mapFillPct: { label: "Screen the map surface covers", unit: "%", better: "higher" },
     labelsDrawn: { label: "Place names placed without a collision", unit: "names", better: "higher" },
     tapTargets: { label: "Things on the map you can tap and act on", unit: "targets", better: "higher" },
-    wireBytes: { label: "Bytes of map state a client has to be sent", unit: "B", better: "lower" },
+    /* NO DIRECTION ON THIS ONE, AND THAT IS A CORRECTION. It was declared
+       better:"lower" against a BEFORE side that structurally reports 0 —
+       ?terr=off has no ownership state to send — so `--gate` read "the
+       feature does not exist" as the winning column and failed the run for
+       every subject. The note below already said this row "reads as a tie
+       rather than a win"; the declaration did not say it. A metric whose
+       before side cannot participate is a READING, not a race. */
+    wireBytes: { label: "Bytes of map state a client has to be sent", unit: "B" },
   },
   metricsNote:
     "Measured live in the page at each frame. mapFillPct is the map surface's border box against the viewport — " +

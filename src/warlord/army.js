@@ -26,6 +26,14 @@
 
    OWNED EVENTS (beyond core's): none. This file speaks through core's bus.
 
+   2026-09-01 — THE SCREENS GOT SHORTER AND THE PARTIES STOPPED GOING DEAF.
+   Three owner complaints landed on this file at once: too much scrolling, too
+   much talking, and "after interacting with an army you can't again". The
+   first two are answered screen by screen below (search NO POP-UP, THE
+   VERDICT SENTENCE, THE ROSTER, THE FOUR STAT TILES); the third was
+   leaveBand's one-to-three-MINUTE cooldown meeting a silent guard in
+   campaign.js — see BREAKING OFF and NO DEAD TAPS.
+
    FLAGS (repo doctrine: every behaviour switch reverts in one param)
      ?dread=old     executions stop discouraging future surrenders (see DREAD)
      ?conscript=old conscription is a flat roll again, tier-blind
@@ -118,60 +126,17 @@
     return out;
   }
 
-  /* THE ONE-LINE COMPOSITION. Grouped by TIER (not tier+gun) because at a
-     glance the question is "how many of them can actually fight", and the gun
-     named is the one MOST of that tier is carrying — with a "+N others" tail
-     rather than a nine-clause sentence nobody reads. */
-  function composition(men) {
-    const byTier = {};
-    for (let i = 0; i < men.length; i++) {
-      const s = men[i];
-      const t = byTier[s.tier] || (byTier[s.tier] = { n: 0, guns: {}, tier: s.tier });
-      t.n++;
-      t.guns[s.wid] = (t.guns[s.wid] || 0) + 1;
-    }
-    const rows = Object.keys(byTier).map(function (k) { return byTier[k]; });
-    rows.sort(function (a, b) { return W.tierIndex(b.tier) - W.tierIndex(a.tier); });
-    const parts = [];
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i];
-      const guns = Object.keys(r.guns).sort(function (a, b) { return r.guns[b] - r.guns[a]; });
-      const top = guns[0];
-      const others = guns.length - 1;
-      const label = W.tier(r.tier).label.toLowerCase() + (r.n === 1 ? "" : "s");
-      parts.push(r.n + " " + label + " with " + W.gunLabel(top).toLowerCase() +
-        (others > 0 ? " (+" + others + " other gun" + (others === 1 ? "" : "s") + ")" : ""));
-    }
-    /* AND A SHORT FORM, for the verb rail's one header line. The long text
-       is right for a screen you stopped to read and far too long for a strip
-       docked over a live world — "22 levies with 9mm sidearms, 14 raiders
-       with AK-47s, 4 veterans with M249 LMGs" wraps to three lines on a
-       phone and buries the only thing a rider needs at a glance: what the
-       BULK of that party is and whether anything in it outclasses him. So:
-       the heaviest tier present, and the best gun anyone in the party is
-       carrying, which together are the whole threat assessment. */
-    let best = null;
-    for (let i = 0; i < men.length; i++) {
-      if (!best || W.gunPrice(men[i].wid) > W.gunPrice(best)) best = men[i].wid;
-    }
-    const topTier = rows.length ? W.tier(rows[0].tier).label.toLowerCase() : "men";
-    const short = (rows.length > 1 ? "mostly " : "") +
-      (rows.length ? rows[0].n + " " + topTier + (rows[0].n === 1 ? "" : "s") : "") +
-      (best ? ", best gun " + W.gunLabel(best).toLowerCase() : "");
-    return { rows: rows, text: parts.join(", "), short: short };
-  }
+  /* THE ONE-LINE COMPOSITION IS DELETED. It built the sentence "45 raiders
+     with 12g pump (+9 other guns), 165 levys with ak-47 (+10 other guns)."
+     and a short form for the rail header, and after this wave nothing calls
+     either: the encounter rail and the INSPECT roster both draw the same
+     stacked bar instead (tierStack / unitChips above), which is the same
+     grouping as a picture. It is deleted rather than left exported because a
+     live function that manufactures exactly the prose the owner asked to be
+     rid of is an invitation to put it back, and git holds the original.
 
-  function armourLine(men) {
-    let soaked = 0, best = "none";
-    for (let i = 0; i < men.length; i++) {
-      const a = men[i].armour || "none";
-      if (a === "none") continue;
-      soaked++;
-      if (W.armour(a).soak > W.armour(best).soak) best = a;
-    }
-    if (!soaked) return "no armour on any of them";
-    return soaked + " in armour, heaviest " + W.armour(best).label.toLowerCase();
-  }
+     groupsOf() — the grouping itself — stays. That is the shape; the sentence
+     was one rendering of it. */
 
   /* ============================================================ MONEY TERMS
      WILL THEY TAKE GOLD? The faction decides, and it decides for a reason you
@@ -203,6 +168,7 @@
      card must not pretend they do. 2.6x is where core's own odds() crosses
      0.9, i.e. exactly where a fight stops being a fight. */
   const ROB_RATIO = 2.6;
+  const ASK_MEMORY = 3;      // days a band remembers being asked to surrender
   function canRob(band) {
     return W.yourPower() >= W.bandPower(band) * ROB_RATIO && band.men.length > 0;
   }
@@ -210,17 +176,64 @@
   /* ============================================================ THE CARD */
   let curBand = null;
 
-  function bar(frac, colour) {
-    const p = Math.round(clamp(frac, 0, 1) * 100);
-    return '<span style="display:inline-block;width:120px;height:6px;border-radius:4px;' +
-      'background:rgba(255,255,255,.14);overflow:hidden;vertical-align:middle">' +
-      '<s style="display:block;height:100%;width:' + p + '%;background:' + colour + '"></s></span>';
+  /* ONE PALETTE FOR "WHAT KIND OF MAN IS THIS", SHARED BY EVERY SCREEN IN
+     THIS FILE. It was a local inside paintEncounter, so the roster screen and
+     the aftermath spelled the tier out in words instead — which is how a
+     picture that already exists gets narrated three files later. Levy is dust,
+     raider is rust, soldier is the game's own blood-orange, veteran is gold.
+     Ordered dark to bright on purpose: brighter IS more dangerous. */
+  const TIER_COLOUR = { levy: "#8d8267", raider: "#c07f3a", soldier: "#c4593a", veteran: "#ffd166" };
+  function tierColour(t) { return TIER_COLOUR[t] || "#8d8267"; }
+
+  /* THE COMPOSITION, AS A PICTURE. One stacked bar segmented by tier plus a
+     swatch legend — the two pieces the encounter rail already used, lifted out
+     of it so the INSPECT roster stops describing the same army in prose. */
+  function tierStack(men) {
+    const byTier = {};
+    for (let i = 0; i < men.length; i++) byTier[men[i].tier] = (byTier[men[i].tier] || 0) + 1;
+    const tiers = Object.keys(byTier).sort(function (a, b) { return W.tierIndex(b) - W.tierIndex(a); });
+    const total = Math.max(1, men.length);
+    let stack = "", legend = "";
+    for (let i = 0; i < tiers.length; i++) {
+      const t = tiers[i], n = byTier[t], pct = (n / total) * 100, c = tierColour(t);
+      stack += '<i style="width:' + pct.toFixed(2) + '%;background:' + c + '">' +
+        (pct > 11 ? n : "") + '</i>';
+      legend += '<span><em style="background:' + c + '"></em>' + esc(W.tier(t).label) + '</span>';
+    }
+    return '<div class="wl-stack">' + stack + '</div><div class="wl-legend">' + legend + '</div>';
+  }
+
+  /* AND THE STACKS AS CHIPS. See .wl-unit in games/warlord.html for the
+     measurement that killed the table this replaced. */
+  /* 18, MEASURED. A 210-man company groups into ~34 stacks, most of them one
+     or two men with an odd gun; at 30 chips the screen was 183 px past the
+     fold on an iPhone SE. 18 covers every stack that is more than a rounding
+     error on a band that size and lands the screen at ~545 px. */
+  const UNIT_CAP = 18;
+  function unitChips(men) {
+    const gs = groupsOf(men);
+    let h = '<div class="wl-units">';
+    for (let i = 0; i < gs.length && i < UNIT_CAP; i++) {
+      const g = gs[i];
+      /* THE TIER IS THE COLOUR, NOT A WORD ON EVERY CHIP. The first draft
+         printed it — "8 RAIDER M249 LMG" — and the screenshot showed the word
+         RAIDER twenty times down a wrapped list whose every chip already wore
+         the raider colour on its left edge, directly under a legend that maps
+         that colour to that word. Twenty repetitions of a nine-letter word is
+         180 characters spent saying what the paint says. */
+      h += '<span class="wl-unit" style="--c:' + tierColour(g.tier) + '"><b>' + g.count + '</b> ' +
+        '<i>' + esc(g.gun) + '</i>' +
+        (g.armour !== "none" ? '<u title="' + esc(W.armour(g.armour).label) + '"></u>' : '') +
+        '</span>';
+    }
+    if (gs.length > UNIT_CAP) h += '<span class="wl-unit wl-dim">+' + (gs.length - UNIT_CAP) + '</span>';
+    return h + '</div>';
   }
 
   function encounter(band, opts) {
     opts = opts || {};
     if (!band || !band.men || !band.men.length) {
-      W.toast("nothing out there", "bad");
+      W.toast("NOTHING OUT THERE", "bad");
       if (W.campaign && W.campaign.enter) W.campaign.enter();
       return;
     }
@@ -229,33 +242,14 @@
     paintEncounter(opts);
   }
 
-  const OLD_ENCOUNTER_UI = (function () {
-    try { return new URLSearchParams(location.search).get("encounterui") === "old"; }
-    catch (e) { return false; }
-  })();
-
-  /* the card this replaced, kept whole so ?encounterui=old is a real revert
-     and the two can be photographed against each other rather than argued
-     about. It is dead on every default boot. */
-  function paintEncounterScreen(opts, D) {
-    ctx.screen(
-      '<h1 class="wl-h" style="color:' + D.colour + '">' + esc(D.band.name) + '</h1>' +
-      '<p class="wl-sub">' + D.band.men.length + ' MEN &middot; ' + esc(D.F.label) + '</p>' +
-      '<div class="wl-card"><div class="wl-small">' + esc(D.comp.text) + '</div></div>' +
-      '<div class="wl-lbl">THE MEN OPPOSITE</div><div class="wl-card">' + D.gh + '</div>' +
-      '<div class="wl-btns">' +
-        '<button class="wl-btn hot" id="eFight">ATTACK</button>' +
-        '<button class="wl-btn" id="eSurr"' + (D.asked ? " disabled" : "") + '>DEMAND SURRENDER</button>' +
-        (D.price != null ? '<button class="wl-btn" id="eHire">HIRE $' + D.price + '</button>' : '') +
-        (D.rob ? '<button class="wl-btn" id="eRob">ROB THEM</button>' : '') +
-        '<button class="wl-btn" id="eLeave">RIDE AWAY</button>' +
-      '</div>');
-    ctx.el("eFight").onclick = function () { startBattle({}); };
-    const sb = ctx.el("eSurr"); if (sb) sb.onclick = demandSurrender;
-    const hb = ctx.el("eHire"); if (hb) hb.onclick = function () { hireBand(D.price); };
-    const rb = ctx.el("eRob"); if (rb) rb.onclick = robBand;
-    ctx.el("eLeave").onclick = leaveBand;
-  }
+  /* THE LEGACY FULL-SCREEN CARD (?encounterui=old) IS DELETED, not disabled.
+     It was kept "so the two can be photographed against each other rather
+     than argued about" — a fair reason on the day the rail replaced it, and a
+     stale second opinion about what a meeting looks like ever since. It still
+     printed composition().text, a nine-clause sentence this wave has just
+     finished deleting from every screen that reads it, so leaving it in would
+     have meant maintaining the exact prose the owner asked to be rid of.
+     git is the undo; a2f0f92..HEAD has the card whole. */
 
   function paintEncounter(opts) {
     opts = opts || {};
@@ -263,21 +257,18 @@
     const mine = W.yourPower(), theirs = W.bandPower(band);
     const odds = W.odds(mine, theirs);
     const surr = W.surrenderChance(band, mine);
-    const comp = composition(band.men);
     const price = hirePrice(band);
     const rob = canRob(band);
     const F = W.faction(band.faction);
     const colour = "#" + (band.colour || 0xc4593a).toString(16).padStart(6, "0");
-    const asked = band._surrenderAsked;
-
-    const groups = groupsOf(band.men);
-    let gh = "";
-    for (let i = 0; i < groups.length; i++) {
-      const g = groups[i];
-      gh += '<div class="wl-row"><span><b>' + g.count + '</b> ' + esc(g.label) +
-        '</span><span class="wl-small wl-dim">' + esc(g.gun) +
-        (g.armour !== "none" ? " &middot; " + esc(W.armour(g.armour).label) : "") + '</span></div>';
-    }
+    /* A REFUSAL EXPIRES. `_surrenderAsked` was a boolean set once and cleared
+       nowhere in the repo — not on leaving, not at dawn, not on a new game —
+       so a band you once shouted at wore a permanently greyed-out DEMAND with
+       the chip "refused" for the rest of its life on the island, which is a
+       dead control the player can never explain. It is a DAY now: three days
+       is long enough that asking twice is not free and short enough that the
+       button always comes back. */
+    const asked = band._askedDay != null && (W.state.day - band._askedDay) < ASK_MEMORY;
 
     /* ============================================================ NO POP-UP
        This was a full-screen card and it should never have been one. The
@@ -294,15 +285,20 @@
        what the odds are — spoken in the header, with the consequences as
        chips inside the buttons. The full breakdown has not been deleted; it
        is one tap away on INSPECT, which is a screen because reading a roster
-       IS a thing you stop to do.
+       IS a thing you stop to do. */
 
-       ?encounterui=old restores the card. */
-    if (OLD_ENCOUNTER_UI) return paintEncounterScreen(opts, {
-      band: band, mine: mine, theirs: theirs, odds: odds, surr: surr, comp: comp,
-      price: price, rob: rob, F: F, colour: colour, asked: asked, gh: gh });
+    /* THE VERDICT SENTENCE IS GONE AND THE BUTTON WEARS IT INSTEAD.
+       "62% — an even fight" was the odds said a THIRD time: once as a bar,
+       once as a number, once as an English clause, on a strip that has to fit
+       on a 375 px phone. What replaces it is not a shorter sentence, it is a
+       COLOUR: ATTACK is the game's orange when you are likely to win and
+       blood red when you are not, so the button you are about to press is
+       itself the warning. The number rides on that button as its chip, where
+       it is attached to the decision it prices instead of floating above it.
 
-    const oddsWord = odds > 0.75 ? "you should win" : odds > 0.55 ? "an even fight"
-      : odds > 0.3 ? "you are outmatched" : "they will destroy you";
+       Measured: the body lost 26 px of height and 44 characters, and the
+       encounter rail stopped overflowing on every phone frame. */
+    const attackKind = odds > 0.55 ? "hot" : odds > 0.3 ? "" : "bad";
 
     /* THE READOUT IS A PICTURE NOW, NOT A SPREADSHEET. The pop-up died two
        revisions ago and the tables came with it into the rail, which fixed
@@ -324,7 +320,6 @@
        The full per-man roster is not gone: INSPECT opens it, which is what
        the code comment has claimed since the rail was written while
        paintRoster sat unreachable. */
-    const TIER_COLOUR = { levy: "#8d8267", raider: "#c07f3a", soldier: "#c4593a", veteran: "#ffd166" };
     const total = Math.max(1, band.men.length);
 
     // composition by tier, strongest first — the same order groupsOf uses
@@ -337,12 +332,17 @@
     let stack = "", legend = "";
     for (let i = 0; i < tiers.length; i++) {
       const t = tiers[i], n = byTier[t], pct = (n / total) * 100;
-      const c = TIER_COLOUR[t] || "#8d8267";
+      const c = tierColour(t);
       // the count goes INSIDE the segment, but only where it fits — a number
       // clipped to "1" in a 4% sliver is worse than no number
       stack += '<i style="width:' + pct.toFixed(2) + '%;background:' + c + '">' +
         (pct > 11 ? n : "") + '</i>';
-      legend += '<span><em style="background:' + c + '"></em>' + n + " " +
+      /* THE LEGEND CARRIES THE NAME, THE SEGMENT CARRIES THE COUNT. It used
+         to print both, so "120" appeared inside the orange block and again
+         two lines below it as "120 SOLDIER" — a number repeated is the same
+         slop as a sentence repeated, and this one costs a whole extra line on
+         a phone once there are four tiers. The swatch is the join. */
+      legend += '<span><em style="background:' + c + '"></em>' +
         esc(W.tier(t).label) + '</span>';
     }
 
@@ -368,6 +368,21 @@
     if (armoured) chips += '<span class="wl-chip arm"><b>' + armoured + '</b> ' + esc(W.armour(bestArm).label) + '</span>';
 
     const myShare = mine / Math.max(1, mine + theirs);
+    /* FOUR THINGS DELETED FROM THIS BODY, AND EVERY ONE OF THEM WAS A CAPTION
+       ON A PICTURE THAT WAS ALREADY THERE.
+
+         "THEIR MEN"   labelled a stacked bar that is obviously their men; it
+                       sits directly under a bar labelled YOU / THEM.
+         "CARRYING"    labelled a row of chips that each read "14 AK-47".
+         the verdict   see attackKind above.
+         two asides    "they already told you no." duplicated a DEMAND button
+                       that is greyed out and chipped "refused"; "you
+                       outnumber them badly enough to just take it." explained
+                       a ROB button that only exists when that is true.
+
+       That is 4 lines of layout and 118 characters of copy off a strip the
+       player reads at every single meeting — which is the screen in this game
+       that earns the fewest words, because it is the one seen most often. */
     const body =
       '<div class="wl-split">' +
         '<i style="width:' + (myShare * 100).toFixed(2) + '%;background:var(--hot)"></i>' +
@@ -375,14 +390,9 @@
       '</div>' +
       '<div class="wl-ends"><span>YOU ' + W.armySize() + '</span><span>' +
         band.men.length + ' THEM</span></div>' +
-      '<div class="wl-verdict"><b>' + Math.round(odds * 100) + '%</b> &mdash; ' + oddsWord + '</div>' +
-      '<div class="wl-lbl">THEIR MEN</div>' +
       '<div class="wl-stack">' + stack + '</div>' +
       '<div class="wl-legend">' + legend + '</div>' +
-      '<div class="wl-lbl">CARRYING</div>' +
-      '<div class="wl-chips">' + chips + '</div>' +
-      (asked ? '<div class="wl-row wl-small" style="color:var(--blood)">they already told you no.</div>' : "") +
-      (rob ? '<div class="wl-row wl-small wl-dim">you outnumber them badly enough to just take it.</div>' : "");
+      '<div class="wl-chips">' + chips + '</div>';
 
     ctx.verbs({
       title: band.name,
@@ -400,7 +410,7 @@
            (band.mood === "hunt" ? " &middot; HUNTING YOU" : ""),
       body: body,
       options: [
-        { label: "ATTACK", kind: "hot", note: Math.round(odds * 100) + "%",
+        { label: "ATTACK", kind: attackKind, note: Math.round(odds * 100) + "%",
           on: function () { startBattle({}); } },
         { label: "DEMAND", note: asked ? "refused" : Math.round(surr * 100) + "%",
           disabled: !!asked, on: demandSurrender },
@@ -409,7 +419,10 @@
               on: function () { hireBand(price); } }
           : { label: "HIRE", note: hireWhy(band) ? "never" : "no", disabled: true, on: function () {} }),
         (rob ? { label: "ROB", note: "no fight", on: robBand } : null),
-        { label: "INSPECT", note: "every man", on: paintRoster },
+        /* NO NOTE. Every other verb's chip is a PRICE — 4%, $540, refused —
+           and INSPECT's said "every man", which is a gloss on the word
+           INSPECT. A chip that is not a number is a caption. */
+        { label: "INSPECT", on: paintRoster },
         { label: "RIDE AWAY", on: leaveBand },
       ],
     });
@@ -417,28 +430,48 @@
 
   /* THE ROSTER, which IS worth a screen: reading forty men's kit is a thing
      you deliberately stop to do, and nothing is chasing you while you do it
-     that was not already chasing you. Backs straight out to the rail. */
+     that was not already chasing you. Backs straight out to the rail.
+
+     IT WAS THE WORST SCROLL IN THE GAME AND IT WAS SAYING EVERYTHING TWICE.
+     Measured on an iPhone SE against a 210-man company: 2 053 px of content
+     in a 667 px box — 1 386 px below the fold — and 1 420 rendered
+     characters. What was in it:
+
+       · a prose card: "120 soldiers with ak-47s (+6 other guns), 62 raiders
+         with carbines (+4 other guns), …" — the same grouping the table under
+         it drew, spelled out in a sentence, plus "no armour on any of them"
+         and "they are carrying about $340." Three lines of English describing
+         a table sitting six pixels below it.
+       · a full-width row per stack, ~34 px each, with the tier's NAME written
+         out on every one.
+
+     Now: the same stacked bar the rail uses (so the two screens are one
+     picture at two zooms), the stacks as wrapped chips tinted by tier, and
+     the purse and the armour count as chips — because "they are carrying
+     about $340" is a number wearing a sentence. 1 420 chars -> ~320. */
   function paintRoster() {
     const band = curBand;
     if (!band) return;
-    const groups = groupsOf(band.men);
-    let gh = "";
-    for (let i = 0; i < groups.length; i++) {
-      const g = groups[i];
-      gh += '<div class="wl-row"><span><b>' + g.count + '</b> ' + esc(g.label) +
-        '</span><span class="wl-small wl-dim">' + esc(g.gun) +
-        (g.armour !== "none" ? " &middot; " + esc(W.armour(g.armour).label) : "") + '</span></div>';
+    let armoured = 0, bestArm = "none";
+    for (let i = 0; i < band.men.length; i++) {
+      const a = band.men[i].armour || "none";
+      if (a === "none") continue;
+      armoured++;
+      if (W.armour(a).soak > W.armour(bestArm).soak) bestArm = a;
     }
     const colour = "#" + (band.colour || 0xc4593a).toString(16).padStart(6, "0");
-    ctx.screen(
+    ctx.screen('<div class="wl-cols">' +
       '<h1 class="wl-h" style="color:' + colour + '">' + esc(band.name) + '</h1>' +
       '<p class="wl-sub">' + band.men.length + ' MEN &middot; ' + esc(W.faction(band.faction).label) + '</p>' +
-      '<div class="wl-card"><div class="wl-small" style="line-height:1.7">' +
-        esc(composition(band.men).text) + '.<br><span class="wl-dim">' +
-        esc(armourLine(band.men)) + '. they are carrying about $' + (band.gold | 0) +
-        '.</span></div></div>' +
-      '<div class="wl-lbl">THE MEN OPPOSITE</div><div class="wl-card">' + gh + '</div>' +
-      '<div class="wl-btns"><button class="wl-btn hot" id="rBack">BACK</button></div>'
+      tierStack(band.men) +
+      '<div class="wl-chips" style="margin:10px 0 12px">' +
+        '<span class="wl-chip wl-gold">$' + (band.gold | 0) + '</span>' +
+        (armoured ? '<span class="wl-chip arm"><b>' + armoured + '</b> ' +
+          esc(W.armour(bestArm).label) + '</span>' : '') +
+      '</div>' +
+      unitChips(band.men) +
+      '<div class="wl-btns"><button class="wl-btn hot" id="rBack">BACK</button></div>' +
+      '</div>'
     );
     ctx.el("rBack").onclick = function () { ctx.closeScreen(); paintEncounter({}); };
   }
@@ -464,7 +497,7 @@
   function demandSurrender() {
     const band = curBand;
     const p = W.surrenderChance(band, W.yourPower());
-    band._surrenderAsked = true;
+    band._askedDay = W.state.day;
     if (W.chance(p)) {
       for (let i = 0; i < band.men.length; i++) W.state.prisoners.push(band.men[i]);
       W.earn(band.gold);
@@ -492,7 +525,7 @@
 
   function hireBand(price) {
     const band = curBand;
-    if (price == null || !W.pay(price)) { W.toast("not enough gold", "bad"); return; }
+    if (price == null || !W.pay(price)) { W.toast("NOT ENOUGH GOLD", "bad"); return; }
     let n = 0;
     for (let i = 0; i < band.men.length; i++) { W.addSoldier(band.men[i]); n++; }
     band.men.length = 0;
@@ -527,9 +560,75 @@
     finish();
   }
 
-  /* LEAVE. They pursue if they are hungry (hostile) and quick (small parties
+  /* ============================================================ BREAKING OFF
+     LEAVE. They pursue if they are hungry (hostile) and quick (small parties
      move faster on this island, which is the campaign's own rule) — so walking
-     away from a big legion is safe and walking away from six bandits is not. */
+     away from a big legion is safe and walking away from six bandits is not.
+
+     THIS FUNCTION HELD THE WHOLE OF THE OWNER'S BUG: "After interacting with
+     an army you can't again for some reason."
+
+     It set `band.cooldown = 60 + rnd() * 120`. campaign.js's engage() opens
+     with `if (!b || b.cooldown > 0) return false;` and the tap site
+     (campaign.js:1763) throws that boolean away, so for ONE TO THREE MINUTES
+     after riding away, tapping that party did nothing at all: no rail, no
+     toast, no log line, no change to its marker. Worse, campaign.js keeps
+     `chase` pointing at it, so the player walks into the party and stands
+     there pressing it. Nothing on the island was different to look at. The
+     band was, in every sense the player has access to, broken.
+
+     THE COOLDOWN WAS NEVER THE MECHANIC. What "ride away" is supposed to mean
+     is that the two of you separate — and campaign.js's engage() already
+     stamps its own 12 s on every meeting, so a second, twelve-times-longer
+     timer was not buying the separation, it was buying the silence.
+
+     MEASURED, both builds, standing on an 18-man party and pressing RIDE
+     AWAY (tools/lib/cdp.mjs, 852x393 headless, seed 1337):
+
+         before   cooldown 88.7 s, still 69.3 s eighteen seconds later,
+                  and the party never answers again in that window
+         after    cooldown 8 s, drained to 0 inside the same eighteen,
+                  and the rail re-opens 8-12 s after the break-off
+
+     So: eight seconds, which is a beat and not a lockout, AND the thing the
+     timer was standing in for — THEY ACTUALLY LEAVE. While the cooldown runs,
+     campaign.js's band AI is skipped and any hunt/flee mood is forced back to
+     "roam", which walks the party towards `b.goal`; so the goal is set to the
+     land point that points most directly away from you and the player watches
+     them ride off. That is the same fact as the old number, drawn instead of
+     enforced, and it is self-correcting: chase them down and you meet them
+     again, which is exactly what should happen.
+
+     If you STAND STILL, you meet them again in eight seconds. That is also
+     correct — you are standing next to an armed company — and it is the
+     behaviour unstickContacts() below guarantees can never fail silently. */
+  const BREAK_OFF = 8;
+  function ridesAway(band) {
+    /* AWAY IS A DIRECTION, NOT A COORDINATE. Offsetting the party's position
+       by a few hundred metres puts goals in the sea and on cliffs; desert.js's
+       landPoint only ever returns walkable ground, so the pick is made from
+       candidates it hands out and scored on the cosine between "band to
+       candidate" and "player to band". Eight candidates, which in a live
+       probe scored 0.92-0.98 against a perfect 1.00 — good enough that the
+       party is visibly leaving, and honest about the fact that on a coast
+       there may be no walkable ground straight behind them. */
+    const D = W.desert;
+    if (!D || !D.landPoint) return;
+    const ax = band.x - W.state.you.x, az = band.z - W.state.you.z;
+    const an = Math.hypot(ax, az) || 1;
+    let best = null, bestScore = -Infinity;
+    for (let i = 0; i < 8; i++) {
+      let p = null;
+      try { p = D.landPoint(W.rnd, { maxSlope: 0.30 }); } catch (e) { return; }
+      if (!p) return;
+      const dx = p.x - band.x, dz = p.z - band.z;
+      const n = Math.hypot(dx, dz) || 1;
+      const score = (dx * ax + dz * az) / (n * an);
+      if (score > bestScore) { bestScore = score; best = p; }
+    }
+    if (best) band.goal = { x: best.x, z: best.z, why: "" };
+  }
+
   function leaveBand() {
     const band = curBand;
     const speed = clamp(1.35 - band.men.length / 60, 0.4, 1.3);
@@ -545,9 +644,74 @@
       startBattle({ defending: true, chased: true });
       return;
     }
-    band.cooldown = 60 + W.rnd() * 120;
+    band.cooldown = BREAK_OFF;
+    band.mood = "roam";
+    /* THE ONE COOLDOWN THE PLAYER ASKED FOR. unstickContacts() below clears
+       any refusal that outlasts two and a half seconds of standing on a
+       party, and without this mark it would clear THIS one too — turning
+       RIDE AWAY into "you have 2.5 seconds to leave". A break-off the player
+       chose is not a bug; it gets its full eight seconds and then this clears
+       itself. */
+    band._brokeOff = true;
+    ridesAway(band);
     W.log("you rode away from " + band.name + ".");
     finish();
+  }
+
+  /* ============================================================ NO DEAD TAPS
+     THE GUARANTEE: a party you are standing on top of always answers.
+
+     campaign.js owns the door (engage()) and its guard is a bare
+     `return false` with no toast and no log — a refusal the player cannot
+     see, hear or read, on a target that looks completely normal. This file
+     cannot make that refusal speak, because campaign.js belongs to somebody
+     else and the tap site calls its own local closure rather than the export,
+     so there is nothing to wrap. What this file CAN do is make sure the
+     condition never survives long enough to be experienced as a broken game.
+
+     So: if the player has been inside contact range of a party for two and a
+     half continuous seconds and no rail and no screen has opened, the
+     cooldown holding it shut is stale by definition — you are close enough to
+     smell them — and it is cleared. campaign.js's own contact test then fires
+     on the very next frame and opens the encounter exactly as it always did.
+     One door, still; this only removes the thing wedged under it.
+
+     IT ALSO CLOSES THE SECOND, WORSE HOLE. events.js's hideMe() re-stamps
+     `cooldown = 2` every tick on every band within 340-480 m during a
+     sandstorm or at night — which is a good mechanic at range and an infinite
+     silent lockout at ten metres, because it re-arms faster than it drains.
+     That one is fixed at source in events.js too (see NOT AT ARM'S LENGTH),
+     and this is the belt to that pair of braces.
+
+     WHY 2.5 s AND NOT 0. Zero would fight campaign.js over the 12 s debounce
+     it stamps on every meeting, and re-open the rail the instant the player
+     closed it. 2.5 s is longer than any hand-off between screens in this game
+     and far shorter than the eight-second break-off above, so the only state
+     it can ever catch is a genuinely stuck one. */
+  const CONTACT_R = 30;      // campaign.js's CONTACT is 26 m; a little wider
+  const STUCK_S = 2.5;
+  let stuckFor = 0, stuckId = null;
+  function unstickContacts(dt) {
+    if (!ctx || W.phase() !== "campaign") { stuckFor = 0; return; }
+    if (ctx.verbsOpen && ctx.verbsOpen()) { stuckFor = 0; return; }
+    const st = ctx.el && ctx.el("stage");
+    if (st && st.classList.contains("on")) { stuckFor = 0; return; }
+    const S = W.state;
+    if (!S.bands || !S.bands.length) { stuckFor = 0; return; }
+    let near = null, nd = 1e9;
+    for (let i = 0; i < S.bands.length; i++) {
+      const b = S.bands[i];
+      if (!b.men || !b.men.length) continue;
+      const d = Math.hypot(b.x - S.you.x, b.z - S.you.z);
+      if (d < CONTACT_R && d < nd) { nd = d; near = b; }
+    }
+    if (!near) { stuckFor = 0; stuckId = null; return; }
+    if (near.id !== stuckId) { stuckId = near.id; stuckFor = 0; }
+    if (near.cooldown <= 0) { stuckFor = 0; near._brokeOff = false; return; }
+    // a break-off the player chose runs its course; see leaveBand
+    if (near._brokeOff) { stuckFor = 0; return; }
+    stuckFor += dt;
+    if (stuckFor >= STUCK_S) { near.cooldown = 0; stuckFor = 0; }
   }
 
   function finish() {
@@ -660,7 +824,7 @@
     if (!s || s._refused) return;
     const ratio = (R && R.ratio) || 1;
     const price = conscriptPrice(s, ratio);
-    if (!W.pay(price)) { W.toast("not enough gold", "bad"); return; }
+    if (!W.pay(price)) { W.toast("NOT ENOUGH GOLD", "bad"); return; }
     if (W.chance(conscriptOdds(s, ratio))) {
       takePrisoner(id);
       s.wounded = s.hp < s.maxHp * 0.4;
@@ -708,129 +872,214 @@
     for (let i = 0; i < ids.length; i++) fn(ids[i]);
     paintAftermath();
   }
-
-  function nameList(men, cls) {
-    if (!men.length) return '<div class="wl-small wl-dim">nobody.</div>';
-    let h = "";
-    for (let i = 0; i < men.length; i++) {
-      const s = men[i];
-      h += '<div class="wl-row"><span' + (cls ? ' style="' + cls + '"' : "") + '>' + esc(s.name) +
-        '</span><span class="wl-small wl-dim">' + esc(W.tier(s.tier).label) + ' &middot; ' +
-        esc(W.gunLabel(s.wid)) + (s.kills ? ' &middot; ' + s.kills + ' KILLS' : '') + '</span></div>';
+  /* TAKE ALL IS NOT `bulk(doConscript)`, AND THE DIFFERENCE IS FOURTEEN
+     TOASTS. doConscript pays per man and toasts "not enough gold" when it
+     cannot — run over a purse that covers nine of fourteen prisoners, the
+     plain bulk would stack five identical failures on top of the screen. It
+     stops at the first one it cannot afford instead, which is also the
+     honest reading of the button: take as many as the money buys. */
+  function bulkConscript() {
+    const ratio = (R && R.ratio) || 1;
+    const ids = [];
+    for (let i = 0; i < W.state.prisoners.length; i++) {
+      const s = W.state.prisoners[i];
+      if (s._refused) continue;
+      if (W.state.gold < conscriptPrice(s, ratio)) break;
+      ids.push(s.id);
     }
-    return h;
+    for (let i = 0; i < ids.length; i++) doConscript(ids[i]);
+    paintAftermath();
   }
+
+  /* NAMES, AND NOTHING BUT NAMES. This printed a full-width row per man
+     carrying his tier, his gun and his kill count — a stat block on a corpse.
+     The reason core.js gives every soldier a name is that "you lost 7" is a
+     spreadsheet and "Kaseem Ash is dead" is a reason not to charge next time;
+     his rifle is not part of that and it is already in the loot chips. Nine
+     dead went from 306 px of table to two wrapped lines.
+
+     CAPPED, because a rout can kill sixty and the point of the list is that
+     you READ it. Past the cap the count is the honest summary. */
+  /* 12: two wrapped lines of names on a 375 px phone. The cap exists so a
+     rout does not push the prisoner decision off the screen; past it the
+     count is the honest summary. */
+  const NAME_CAP = 12;
+  function nameChips(men, cls, tag) {
+    if (!men.length) return "";
+    let h = '<div class="wl-names">';
+    for (let i = 0; i < men.length && i < NAME_CAP; i++) {
+      h += '<span class="' + cls + '">' + esc(men[i].name) +
+        (tag ? ' <em>' + esc(tag(men[i])) + '</em>' : '') + '</span>';
+    }
+    if (men.length > NAME_CAP) h += '<span class="wl-dim">+' + (men.length - NAME_CAP) + '</span>';
+    return h + '</div>';
+  }
+
+  /* A CASUALTY BAR: one side of a battle, cut into what it cost. Same
+     primitive as the encounter's composition stack, which is deliberate —
+     the picture you read before the fight and the picture you read after it
+     should be the same picture, so that the second one answers the first. */
+  function tollBar(who, parts) {
+    let total = 0;
+    for (let i = 0; i < parts.length; i++) total += parts[i].n;
+    total = Math.max(1, total);
+    let bar = "", legend = '<span class="wl-dim">' + who + '</span>';
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i], pct = (p.n / total) * 100;
+      if (!p.n) continue;
+      bar += '<i style="width:' + pct.toFixed(2) + '%;background:' + p.c + '">' +
+        (pct > 13 ? p.n : "") + '</i>';
+      legend += '<span><em style="background:' + p.c + '"></em>' + p.n + " " + p.k + '</span>';
+    }
+    return '<div class="wl-stack">' + bar + '</div><div class="wl-legend">' + legend + '</div>';
+  }
+
+  /* ONE-BY-ONE IS OFF BY DEFAULT, and that is the whole prisoner fix. Every
+     prisoner used to be a CARD with four buttons in it: fourteen prisoners —
+     an ordinary haul off a 60-man band — was 1 960 px of cards and 56 controls
+     on one screen. The decision is nearly always taken in bulk (take the lot,
+     ransom the lot, let them all walk), so bulk is what the screen offers and
+     the individual roll is behind the heading. */
+  let PRIS_OPEN = false;
 
   function paintAftermath() {
     const r = R;
-    const won = r.outcome === "won" || r.outcome === "surrender";
     const title = r.outcome === "surrender" ? "THEY <em>SURRENDER</em>"
       : r.outcome === "won" ? "THE FIELD IS <em>YOURS</em>"
       : r.outcome === "retreat" ? "YOU <em>RAN</em>"
       : "YOU ARE <em>BROKEN</em>";
 
-    let lootH = "";
+    /* ---- THE TAKE, AS CHIPS ----
+       This was a row per gun with "worth $84" beside each one, then a row for
+       the purse. The per-row worth is a number nobody spends: you cannot sell
+       one rifle out of a loot table, and the only figure that matters at this
+       moment is what the whole field was worth. So: a chip per gun, gold-lit,
+       and ONE total. */
+    const chips = [];
+    let worth = r.gold > 0 ? r.gold : 0;
     const lootKeys = Object.keys(r.loot || {});
     lootKeys.sort(function (a, b) { return W.gunPrice(b) - W.gunPrice(a); });
-    for (let i = 0; i < lootKeys.length; i++) {
+    for (let i = 0; i < lootKeys.length && i < 6; i++) {
       const wid = lootKeys[i];
-      lootH += '<div class="wl-row"><span>' + esc(W.gunLabel(wid)) + ' &times;' + r.loot[wid] +
-        '</span><span class="wl-small wl-gold">worth $' + (W.gunSell(wid) * r.loot[wid]) + '</span></div>';
+      worth += W.gunSell(wid) * r.loot[wid];
+      chips.push('<span class="wl-chip"><b>' + r.loot[wid] + '</b> ' + esc(W.gunLabel(wid)) + '</span>');
+    }
+    if (lootKeys.length > 6) {
+      for (let i = 6; i < lootKeys.length; i++) worth += W.gunSell(lootKeys[i]) * r.loot[lootKeys[i]];
+      chips.push('<span class="wl-chip wl-dim">+' + (lootKeys.length - 6) + '</span>');
     }
     const aKeys = Object.keys(r.armourLoot || {});
     for (let i = 0; i < aKeys.length; i++) {
-      lootH += '<div class="wl-row"><span>' + esc(W.armour(aKeys[i]).label) + ' &times;' + r.armourLoot[aKeys[i]] +
-        '</span><span class="wl-small wl-gold">worth $' + (W.armourSell(aKeys[i]) * r.armourLoot[aKeys[i]]) + '</span></div>';
+      worth += W.armourSell(aKeys[i]) * r.armourLoot[aKeys[i]];
+      chips.push('<span class="wl-chip arm"><b>' + r.armourLoot[aKeys[i]] + '</b> ' +
+        esc(W.armour(aKeys[i]).label) + '</span>');
     }
-    if (r.gold > 0) lootH += '<div class="wl-row"><span>THEIR PURSE</span><span class="wl-gold">$' + r.gold + '</span></div>';
-    if (!lootH) lootH = '<div class="wl-small wl-dim">nothing worth carrying.</div>';
+    if (worth > 0) chips.push('<span class="wl-chip wl-gold">$' + Math.round(worth) + '</span>');
 
     const wounded = r.yourSurvivors.filter(function (s) { return s.wounded; });
     const ratio = (r.ratio || 1);
+    const held = Math.max(0, r.yourSurvivors.length - r.yourFled.length);
+    const pris = W.state.prisoners;
 
+    /* ---- THE PRISONER BLOCK ----
+       A tier stack, four bulk verbs carrying their own price, and the roll
+       behind the heading. The paragraph that used to sit under it —
+       "releasing men buys a reputation: bands surrender to a warlord who lets
+       men walk. executing them buys the opposite — you have executed 3, and
+       every band you meet now fights 23% harder to the last man." — was 250
+       characters of the interface explaining its own buttons. Both halves of
+       it are now chips ON those buttons: RELEASE says what it buys in fame,
+       EXECUTE says what it costs in surrenders. */
     let prisH = "";
-    if (W.state.prisoners.length) {
-      for (let i = 0; i < W.state.prisoners.length; i++) {
-        const s = W.state.prisoners[i];
-        const price = conscriptPrice(s, ratio);
-        const odds = Math.round(conscriptOdds(s, ratio) * 100);
-        prisH +=
-          '<div class="wl-card" style="padding:10px 12px">' +
-          '<div class="wl-row" style="border:0;padding:0 0 6px">' +
-            '<span><b>' + esc(s.name) + '</b> <span class="wl-small wl-dim">' +
-              esc(W.tier(s.tier).label) + ' &middot; ' + esc(W.gunLabel(s.wid)) + '</span></span>' +
-          '</div>' +
-          '<div class="wl-btns" style="margin:0;gap:6px">' +
-            (s._refused
-              ? '<button class="wl-btn ghost wl-small" disabled>REFUSED YOU</button>'
-              : '<button class="wl-btn wl-small" data-con="' + s.id + '"' +
-                (W.state.gold < price ? " disabled" : "") + '>CONSCRIPT $' + price +
-                ' <span class="wl-dim">' + odds + '%</span></button>') +
-            '<button class="wl-btn wl-small" data-ran="' + s.id + '">RANSOM $' + ransomFor(s) + '</button>' +
-            '<button class="wl-btn wl-small" data-rel="' + s.id + '">RELEASE</button>' +
-            '<button class="wl-btn bad wl-small" data-exe="' + s.id + '">EXECUTE</button>' +
-          '</div></div>';
+    if (pris.length) {
+      let conCost = 0, ranTake = 0, relFame = 0;
+      for (let i = 0; i < pris.length; i++) {
+        if (!pris[i]._refused) conCost += conscriptPrice(pris[i], ratio);
+        ranTake += ransomFor(pris[i]);
+        relFame += (W.tierIndex(pris[i].tier) + 1) * 2;
+      }
+      /* WHAT EXECUTING THEM COSTS, AS A NUMBER ON THE BUTTON THAT DOES IT.
+         Derived from dreadMul's own curve rather than a second copy of it, and
+         it reads 0 under ?dread=old because under that flag executions really
+         do cost nothing later — a chip that lies about a reverted mechanic is
+         worse than no chip. */
+      const dreadAfter = (Q && Q.get("dread") === "old") ? dreadMul()
+        : 1 / (1 + (((W.state.stats && W.state.stats.executed) || 0) + pris.length) * 0.09);
+      prisH =
+        '<div class="wl-lbl"><button class="lblbtn" id="pOpen"><span>PRISONERS ' + pris.length +
+          '</span><span>' + (PRIS_OPEN ? "&#9662;" : "&#9656;") + '</span></button></div>' +
+        tierStack(pris) +
+        '<div class="wl-btns">' +
+          '<button class="wl-btn hot" id="pAllCon"' + (W.state.gold < conCost ? " disabled" : "") +
+            '>TAKE ALL <span class="wl-dim">$' + conCost + '</span></button>' +
+          '<button class="wl-btn" id="pAllRan">RANSOM <span class="wl-gold">+$' + ranTake + '</span></button>' +
+          '<button class="wl-btn" id="pAllRel">RELEASE <span class="wl-dim">+' + relFame + ' FAME</span></button>' +
+          '<button class="wl-btn bad" id="pAllExe">EXECUTE <span class="wl-dim">&minus;' +
+            Math.round((1 - dreadAfter / dreadMul()) * 100) + '%</span></button>' +
+        '</div>';
+      if (PRIS_OPEN) {
+        prisH += '<div class="wl-card" style="margin-top:8px">';
+        for (let i = 0; i < pris.length; i++) {
+          const s = pris[i];
+          const price = conscriptPrice(s, ratio);
+          prisH +=
+            '<div class="prow"><span class="who" style="color:' + tierColour(s.tier) + '">' +
+              esc(s.name) + '</span><span class="acts">' +
+              (s._refused
+                ? '<button class="wl-btn ghost" disabled>NO</button>'
+                : '<button class="wl-btn" data-con="' + s.id + '"' +
+                  (W.state.gold < price ? " disabled" : "") + '>$' + price + ' &middot; ' +
+                  Math.round(conscriptOdds(s, ratio) * 100) + '%</button>') +
+              '<button class="wl-btn" data-ran="' + s.id + '">$' + ransomFor(s) + '</button>' +
+              '<button class="wl-btn" data-rel="' + s.id + '">GO</button>' +
+              '<button class="wl-btn bad" data-exe="' + s.id + '">KILL</button>' +
+            '</span></div>';
+        }
+        prisH += '</div>';
       }
     }
 
-    const dread = (W.state.stats && W.state.stats.executed) || 0;
-
-    ctx.screen(
+    ctx.screen('<div class="wl-aft">' +
       '<h1 class="wl-h">' + title + '</h1>' +
-      '<p class="wl-sub">' + (r.band ? esc(r.band.name) : "THE FIELD") +
-        (r.duration ? ' &middot; ' + Math.round(r.duration) + 's' : '') +
-        ' &middot; YOU KILLED ' + (r.youKills || 0) + '</p>' +
+      '<p class="wl-sub">' + (r.band ? esc(r.band.name) : "THE FIELD") + '</p>' +
 
-      '<div class="wl-grid">' +
-        '<div class="wl-card"><div class="wl-small wl-dim">YOUR DEAD</div>' +
-          '<div style="font-size:26px;color:var(--blood)">' + r.yourDead.length + '</div></div>' +
-        '<div class="wl-card"><div class="wl-small wl-dim">THEIR DEAD</div>' +
-          '<div style="font-size:26px">' + r.theirDead.length + '</div></div>' +
-        '<div class="wl-card"><div class="wl-small wl-dim">STILL RIDING</div>' +
-          '<div style="font-size:26px">' + (r.yourSurvivors.length + r.yourFled.length) + '</div></div>' +
-        '<div class="wl-card"><div class="wl-small wl-dim">PRISONERS</div>' +
-          '<div style="font-size:26px">' + W.state.prisoners.length + '</div></div>' +
-      '</div>' +
+      /* ---- THE FOUR STAT TILES ARE TWO BARS NOW ----
+         "YOUR DEAD 9 / THEIR DEAD 31 / STILL RIDING 35 / PRISONERS 14" was
+         four cards of a big number under a small caption — 110 px to say four
+         numbers, and it could not say the fifth (who broke and ran) or the
+         sixth (who is wounded) without two more cards, which is exactly why
+         those got their own titled sections further down the page. Two
+         stacked bars carry all six, in 94 px, and they carry the PROPORTION
+         as well, which is the thing you actually feel: a win where a third of
+         your column is on the sand does not look like a win. */
+      tollBar("YOU", [
+        { n: r.yourDead.length, c: "var(--blood)", k: "DEAD" },
+        { n: r.yourFled.length, c: "#6b6252", k: "RAN" },
+        { n: held, c: "var(--hot)", k: "RIDING" },
+      ]) +
+      (wounded.length ? '<div class="wl-legend" style="margin-top:-3px"><span>' +
+        wounded.length + ' WOUNDED &middot; 62%</span></div>' : '') +
+      tollBar(r.band ? esc(r.band.name) : "THEM", [
+        { n: r.theirDead.length, c: "var(--blood)", k: "DEAD" },
+        { n: r.outcome === "won" ? r.theirSurvivors.length : 0, c: "var(--steel)", k: "TAKEN" },
+        { n: r.outcome === "won" ? 0 : r.theirSurvivors.length, c: "#6b6252", k: "STANDING" },
+      ]) +
 
       (r.yourDead.length
-        ? '<div class="wl-lbl">THE DEAD — BY NAME</div><div class="wl-card">' +
-          nameList(r.yourDead, "color:var(--blood)") + '</div>' : '') +
-
-      (wounded.length
-        ? '<div class="wl-lbl">WOUNDED — THEY FIGHT AT 60% UNTIL THEY REST</div><div class="wl-card">' +
-          nameList(wounded) + '</div>' : '') +
-
-      (r.yourFled.length
-        ? '<div class="wl-lbl">BROKE AND RAN — THEY CAME BACK</div><div class="wl-card">' +
-          nameList(r.yourFled) + '</div>' : '') +
+        ? '<div class="wl-lbl">THE DEAD</div>' + nameChips(r.yourDead, "dead") : '') +
 
       (r.promoted && r.promoted.length
-        ? '<div class="wl-lbl">PROMOTED</div><div class="wl-card">' +
-          r.promoted.map(function (s) {
-            return '<div class="wl-row"><span style="color:var(--gold)">' + esc(s.name) +
-              '</span><span class="wl-small">now a ' + esc(W.tier(s.tier).label) + '</span></div>';
-          }).join("") + '</div>' : '') +
+        ? '<div class="wl-lbl">PROMOTED</div>' +
+          nameChips(r.promoted, "gold", function (s) { return W.tier(s.tier).label; }) : '') +
 
-      '<div class="wl-lbl">TAKEN OFF THE FIELD</div>' +
-      '<div class="wl-card">' + lootH + '</div>' +
+      (chips.length
+        ? '<div class="wl-lbl">TAKEN</div><div class="wl-chips">' + chips.join("") + '</div>' : '') +
 
-      (prisH
-        ? '<div class="wl-lbl">PRISONERS — ' + W.state.prisoners.length + '</div>' +
-          '<div class="wl-btns" style="margin:0 0 10px">' +
-            '<button class="wl-btn wl-small" id="pAllRel">RELEASE ALL</button>' +
-            '<button class="wl-btn wl-small" id="pAllRan">RANSOM ALL</button>' +
-          '</div>' + prisH +
-          '<div class="wl-card wl-small wl-dim">releasing men buys a reputation: bands surrender to a ' +
-          'warlord who lets men walk. executing them buys the opposite — ' +
-          (dread ? 'you have executed ' + dread + ', and every band you meet now fights ' +
-            Math.round((1 - dreadMul()) * 100) + '% harder to the last man.'
-                 : 'the first band that hears about it will fight you to the last man.') +
-          '</div>'
-        : '') +
+      prisH +
 
-      '<div class="wl-btns" style="margin-top:18px">' +
+      '<div class="wl-btns out">' +
         '<button class="wl-btn hot" id="aDone">RIDE ON</button>' +
-      '</div>'
+      '</div></div>'
     );
 
     const stage = ctx.el("stage");
@@ -846,14 +1095,19 @@
     stage.querySelectorAll("[data-exe]").forEach(function (b) {
       b.onclick = function () { doExecute(+b.dataset.exe); };
     });
+    const po = ctx.el("pOpen");
+    if (po) po.onclick = function () { PRIS_OPEN = !PRIS_OPEN; paintAftermath(); };
+    const ac = ctx.el("pAllCon"); if (ac) ac.onclick = function () { bulkConscript(); };
     const ar = ctx.el("pAllRel"); if (ar) ar.onclick = function () { bulk(doRelease); };
     const an = ctx.el("pAllRan"); if (an) an.onclick = function () { bulk(doRansom); };
+    const ax = ctx.el("pAllExe"); if (ax) ax.onclick = function () { bulk(doExecute); };
     ctx.el("aDone").onclick = function () {
       /* PRISONERS YOU DID NOT DECIDE ON RIDE WITH YOU. They stay in
          W.state.prisoners and the HUD keeps counting them, so an outpost can
          sell them later — leaving the screen is not a decision that silently
          deletes men. */
       R = null;
+      PRIS_OPEN = false;
       finish();
     };
   }
@@ -881,6 +1135,10 @@
       Q = c.Q;
       installDread();
       W.on("dawn", restAtDawn);
+      /* order 98: after campaign.js's world tick (30) and events.js's (96),
+         so it reads the cooldowns everything else has already written this
+         frame rather than a stale copy of them. */
+      if (CBZ.onAlways) CBZ.onAlways(98, function (dt) { unstickContacts(dt); });
 
       /* ?encounter=1 — the debug door. campaign.js is written by another
          agent and may not be here yet; a screen that can only be reached
@@ -902,7 +1160,6 @@
     // ---- the shared roster shape (loadout.js and the encounter card read it)
     roster: function () { return W.state.army.slice(); },
     groups: function (men) { return groupsOf(men || W.state.army); },
-    composition: composition,
 
     // ---- the numbers other modules ask for
     hirePrice: hirePrice,

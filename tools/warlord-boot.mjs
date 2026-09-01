@@ -61,7 +61,7 @@ const URL = opt("--url", null);
 const MODULES = [
   "camo", "outfits", "wardrobe", "sand", "props", "desert", "mounts",
   "territory", "campaign", "army", "gunplay", "battle", "outpost", "loadout",
-  "events", "feel", "warnet", "match",
+  "events", "feel", "warnet", "warlords",
 ];
 
 const run = async () => {

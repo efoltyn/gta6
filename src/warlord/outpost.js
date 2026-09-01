@@ -39,6 +39,13 @@
    already are. See THE PANEL and open() below. Nothing sets W.state.phase to
    "outpost" from here; the enum in core.js keeps the name for save files.
 
+   2026-09-01 — THE RAIL STOPPED SAYING ITS OWN NAME THREE TIMES. Three of
+   the four kinds carried a `tag` (the rail's subtitle) that repeated the
+   title — "ARMS DEPOT / GUNS & ARMOUR" — and each panel then repeated it a
+   third time in its own heading. All three are gone; the night market's tag
+   stays because "NO QUESTIONS" is a fact its name does not carry. See KINDS
+   and panelBuy.
+
    EVENTS: outpost:place outpost:open outpost:close outpost:buy
            outpost:sell outpost:hire outpost:rest outpost:restock
 
@@ -90,16 +97,22 @@
      owns is stock and prices; those are true whatever is standing on the
      sand, and they are now all it says. */
   const KINDS = W.OUTPOST_KINDS = {
+    /* `tag` IS THE RAIL'S SUBTITLE AND THREE OF THE FOUR WERE THE TITLE AGAIN.
+       "ARMS DEPOT / GUNS & ARMOUR", "RECRUIT CAMP / MEN FOR HIRE", "WELL /
+       WATER" — the header line said the same thing twice on a strip that has
+       to fit a 375 px phone, and the panel under it then said it a third time
+       in its own heading. Only the night market's tag carries a fact the name
+       does not, so only the night market keeps one. Empty tag = no subtitle. */
     depot: {
-      id: "depot", label: "ARMS DEPOT", tag: "GUNS &amp; ARMOUR", accent: "#ff8a3d",
+      id: "depot", label: "ARMS DEPOT", tag: "", accent: "#ff8a3d",
       capital: 700, lines: 7, buys: 0.34, armour: ["vest", "plate"],
     },
     camp: {
-      id: "camp", label: "RECRUIT CAMP", tag: "MEN FOR HIRE", accent: "#ffd166",
+      id: "camp", label: "RECRUIT CAMP", tag: "", accent: "#ffd166",
       capital: 320,
     },
     well: {
-      id: "well", label: "WELL", tag: "WATER", accent: "#6fb7d8",
+      id: "well", label: "WELL", tag: "", accent: "#6fb7d8",
     },
     market: {
       id: "market", label: "NIGHT MARKET", tag: "NO QUESTIONS", accent: "#c78bff",
@@ -604,8 +617,13 @@
     const S = W.state;
     const ids = Object.keys(o.stock).sort(function (a, b) { return W.gunPrice(b) - W.gunPrice(a); });
     const aids = Object.keys(o.armourStock).sort(function (a, b) { return W.armour(b).soak - W.armour(a).soak; });
-    let h = '<div class="wl-op-lbl">IN THE CRATE</div><div class="wl-op-list">';
-    if (!ids.length && !aids.length) h += '<div class="wl-op-none">picked clean.</div>';
+    /* NO "IN THE CRATE" HEADING. It sat directly under a rail header reading
+       ARMS DEPOT with a BUY verb lit beneath it, and it cost 26 px of the
+       ~176 px this panel gets during a live match — which is most of the
+       overflow tools/warlord-fits.mjs measured on this screen. The rows are
+       the crate. */
+    let h = '<div class="wl-op-list">';
+    if (!ids.length && !aids.length) h += '<div class="wl-op-none">PICKED CLEAN</div>';
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i], n = o.stock[id], p = buyPrice(o, id);
       h += row({
@@ -639,9 +657,13 @@
     for (let i = 0; i < aids.length; i++) most = Math.max(most, S.armourBag[aids[i]]);
     /* The rate is a fact about THIS place and the reason a market is worth
        riding to, so it rides on the heading where it costs nothing. */
-    let h = '<div class="wl-op-lbl">YOUR CART &middot; THEY PAY ' +
+    /* THE SELL HEADING KEEPS ITS RATE AND LOSES "YOUR CART". SELL is lit in
+       the verb row above it and the rows are your own kit; the ¢ on the
+       dollar is the only fact here that is about THIS place, and it is the
+       reason to ride to a night market. */
+    let h = '<div class="wl-op-lbl">THEY PAY ' +
       Math.round((K.buys || 0.34) * 100) + '&cent;</div><div class="wl-op-list">';
-    if (!ids.length && !aids.length) h += '<div class="wl-op-none">the cart is empty.</div>';
+    if (!ids.length && !aids.length) h += '<div class="wl-op-none">EMPTY</div>';
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i], n = S.baggage[id], p = sellPrice(o, id);
       h += row({
@@ -666,7 +688,8 @@
   /* ---- the recruit camp ---- */
   function panelCamp(o) {
     const S = W.state, top = tierTop();
-    let h = '<div class="wl-op-lbl">MEN FOR HIRE</div><div class="wl-op-list">';
+    // heading dropped with the others: the rail header says RECRUIT CAMP
+    let h = '<div class="wl-op-list">';
     let any = false;
     for (let i = 0; i < W.TIERS.length; i++) {
       const T = W.TIERS[i], cap = capPool(o, T.id);
@@ -682,7 +705,7 @@
         moreLabel: "&times;5",
       });
     }
-    if (!any) h += '<div class="wl-op-none">nobody left. they walk in by morning.</div>';
+    if (!any) h += '<div class="wl-op-none">NOBODY LEFT</div>';
     return h + '</div>';
   }
 
@@ -702,7 +725,9 @@
     if (S.you.hp < S.you.maxHp) hurt++;
     const total = Math.max(1, S.army.length + 1);
     const fit = Math.max(0, total - hurt);
-    if (!hurt) return '<div class="wl-op-none">nobody is hurt. drink and ride on.</div>';
+    // "drink and ride on." was the panel telling the player to press the
+    // button next to it; REST is already chipped "nobody hurt" and disabled.
+    if (!hurt) return '<div class="wl-op-none">NOBODY HURT</div>';
     return '<div class="wl-op-lbl">THE HURT</div>' +
       '<div class="wl-stack">' +
         '<i style="width:' + pc(fit, total) + '%;background:#6fb7d8">' + (fit / total > 0.11 ? fit : "") + '</i>' +
@@ -765,8 +790,10 @@
       W.stash(id, 1);
       got++;
     }
-    if (!got) { W.toast("cannot afford it", "bad"); return 0; }
-    W.toast(got + " × " + W.gunLabel(id) + " into the baggage", "good");
+    if (!got) { W.toast("NOT ENOUGH GOLD", "bad"); return 0; }
+    // "into the baggage" — the cart row under the crate list is what shows
+    // where it went, and it updates in the same frame.
+    W.toast(got + " × " + W.gunLabel(id), "good");
     W.emit("outpost:buy", { o: o, id: id, n: got, spent: got * p });
     return got;
   }
@@ -780,7 +807,7 @@
       got++;
     }
     if (got) {
-      W.toast("sold " + got + " × " + W.gunLabel(id) + " for $" + (got * p), "good");
+      W.toast("+$" + (got * p), "good");
       W.emit("outpost:sell", { o: o, id: id, n: got, got: got * p });
     }
     return got;
@@ -800,7 +827,7 @@
       W.addSoldier(W.makeSoldier(tierId, i >= 2 ? "sidearm" : "fists"));
       got++;
     }
-    if (!got) { W.toast("cannot afford him", "bad"); return 0; }
+    if (!got) { W.toast("NOT ENOUGH GOLD", "bad"); return 0; }
     W.state.stats.recruited += got;
     W.log("hired " + got + " " + W.tier(tierId).label.toLowerCase() + (got > 1 ? "s" : "") + " at " + o.name + " for $" + (got * p) + ".");
     W.toast(got + " " + W.tier(tierId).label + " joined", "good");
@@ -811,7 +838,7 @@
     const S = W.state;
     const c = restCost();
     if (!c.n) return false;
-    if (!W.pay(c.gold)) { W.toast("not enough for water and shade", "bad"); return false; }
+    if (!W.pay(c.gold)) { W.toast("NOT ENOUGH GOLD", "bad"); return false; }
     for (let i = 0; i < S.army.length; i++) {
       S.army[i].wounded = false;
       S.army[i].hp = S.army[i].maxHp;
@@ -841,7 +868,7 @@
         if ((o.armourStock[id] || 0) > 0 && W.pay(p)) {
           o.armourStock[id]--; W.stashArmour(id, 1);
           W.toast(W.armour(id).label + " into the baggage", "good");
-        } else W.toast("cannot afford it", "bad");
+        } else W.toast("NOT ENOUGH GOLD", "bad");
         repaint(o); return;
       }
       /* AND IT HAS TO COME BACK HERE. The old rail handed loadout.js no way

@@ -93,12 +93,15 @@
    joke you unlock at 120 men is a joke nobody ever sees.
 
    ------------------------------------------------------------------
-   YOUR OFFICERS TOO. Every fit names a `family` and a `role`
-   (line/nco/officer/general). `W.wardrobe.fitForSoldier(s)` maps a soldier's
-   tier onto the same family you are wearing — veterans get the officer
-   version, soldiers the NCO version, levies and raiders the line version —
-   so battle.js/outfits.js can dress your roster and the whole army reads as
-   one force instead of forty strangers. That is the hook they call.
+   YOUR ARMY TOO — AND ALL OF IT IN ONE FIT. Every fit names a `family` and a
+   `role` (line/nco/officer/general). `W.wardrobe.fitForSoldier(s)` returns
+   the LINE fit of the family you are wearing, for every man, at every tier:
+   what you issued. It used to grade that by tier (officer / NCO / line) and
+   the owner named that as the bug — "all my soldiers should wear the same
+   painted uniform difference is in armour" — so the tier grade is gone and
+   the ARMOUR is the difference (warlord/outfits.js armourKit()). Rank did not
+   disappear with it: YOU are the man in the coat, and one coat in a field of
+   one uniform reads harder than three grades of the same shirt.
 
    FLAGS
      ?wardrobe=old   full revert: no fit applied, no cast wrap, no chip.
@@ -1230,22 +1233,61 @@
       try { applyNow(rig, currentId()); } catch (e) {}
     }
   }
-  /* YOUR OFFICERS TOO. battle.js dresses a roster; this is the one call it
-     needs so your veterans read as YOUR veterans. A levy in your colours and
-     a veteran in your colours must not be the same picture. */
+  /* YOUR ARMY WEARS WHAT YOU ISSUED IT — full stop, no rank ladder.
+
+     OWNER, 2026-09-01: "ALSO all my soldiers should wear the same painted
+     uniform difference is in armour."
+
+     This function used to map a soldier's TIER onto the family you are
+     wearing: veterans got the officer coat, soldiers the NCO version, levies
+     the line shirt. That is three uniforms inside one army, and it is exactly
+     what he asked to stop — the comment it replaces literally said "a levy in
+     your colours and a veteran in your colours must not be the same picture",
+     which was the wrong instinct. They must. An army you can pick out of a
+     battle at a glance is worth more than a rank you can read at conversation
+     range, and the rank ladder is not deleted anyway: it moved to where it
+     belongs. YOU wear it, out of this picker, and yours is then the ONE coat
+     on the field that is not the issue uniform — a better read of rank than
+     three grades of the same shirt ever was.
+
+     The man-to-man difference inside your army is his ARMOUR, drawn as real
+     geometry by warlord/outfits.js's armourKit(): nothing, a flak vest with
+     pouches, a plate carrier with pads and side plates, a heavy rig with a
+     throat guard and a groin flap. That is the thing the player actually
+     bought, and it is now the thing he can see.
+
+     `s` stays in the signature on purpose: the call sites pass a soldier, and
+     the day a fit legitimately depends on one again (a medic's whites, say)
+     this is the seam it goes through. */
   function fitForSoldier(s) {
     const me = FIT[currentId()];
     const fam = FAMILY[me.family] || FAMILY.desert || {};
-    const t = (s && s.tier) || "levy";
-    if (t === "veteran") return fam.officer || DEFAULT_FIT;
-    if (t === "soldier") return fam.nco || fam.line || DEFAULT_FIT;
-    return fam.line || DEFAULT_FIT;
+    return fam.line || fam.nco || DEFAULT_FIT;
   }
+  /* ONE ANSWER TO "WHAT IS THIS MAN WEARING", AND IT IS NOT THIS FILE'S.
+     warlord/outfits.js owns the body of every soldier on the island — it is
+     the file that knows the issue uniform, the armour geometry and the
+     headwear line — so a second, slightly different answer living here is
+     exactly the drift that turns into a bug you find in a screenshot six
+     weeks later. This delegates. `fitForSoldier` stays because a caller may
+     legitimately want the wardrobe ID your army is issued (the picker's own
+     ladder plate reads it); it is the wrong thing to PAINT a man with. */
   function dressSoldier(x, s) {
     if (OFF) return false;
     const rig = rigOf(x);
     if (!rig) return false;
     ready();
+    /* THE MODE CHECK IS NOT DEFENSIVE PADDING. outfits.js's dress() returns
+       the {rec, det} it computed whether or not apply() actually painted
+       anything, and under `?outfits=old` apply() is a no-op that returns
+       false — so a bare truthiness test on dress() would report success and
+       swallow the fallback, leaving a man in the casting table's olive. One
+       sibling's revert flag must not take the wardrobe with it; that rule is
+       already written at applyNow() and this is the same rule. */
+    const on = !(W.outfits && typeof W.outfits.mode === "function" && W.outfits.mode() === "off");
+    if (on && W.outfits && typeof W.outfits.dress === "function") {
+      try { if (W.outfits.dress(rig, s, { mine: 1, faction: "you" })) return true; } catch (e) {}
+    }
     return applyNow(rig, fitForSoldier(s));
   }
   function wrapCast() {

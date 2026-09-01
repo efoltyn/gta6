@@ -77,6 +77,13 @@
        may read it to refuse a new destination; if it never does, the storm
        card's MAKE CAMP choice is still the whole decision.
 
+   2026-09-01 — THE CARDS GOT SHORTER AND THE STORM STOPPED DEAFENING
+   PARTIES. Two owner complaints landed here: the copy (see THE CARD, and the
+   deleted loyalty-formula paragraph in openLoyalty) and, indirectly, "after
+   interacting with an army you can't again" — hideMe() was re-stamping a
+   cooldown on every band within 340 m EVERY TICK, which at ten metres is an
+   indefinite silent lockout. See NOT AT ARM'S LENGTH.
+
    FLAGS (repo doctrine: every behaviour switch reverts in one param)
      ?events=off     no road events at all. The pre-wave loop, byte for byte.
      ?loyalty=off    loyalty never moves and nobody ever mutinies
@@ -544,6 +551,24 @@
      re-decides hunt/flee off the power ratio about every 1.5 s and will happily
      put a strong band back on hunt. That is correct — a sandstorm should hide
      you, not delete somebody's intentions. */
+  /* NOT AT ARM'S LENGTH, AND THIS WAS A SILENT SOFTLOCK.
+
+     The rule above is right at range and was catastrophic at zero. The stamp
+     is `cooldown = 2` and it was re-applied EVERY TICK to every band inside
+     340-480 m — so it re-armed far faster than campaign.js drains it, and a
+     party standing ten metres from your horse in a sandstorm could never be
+     engaged, for as long as the storm lasted, with nothing on screen saying
+     why. That is the owner's "you can't interact with an army again" bug in
+     its worst form: not one to three minutes, but indefinite.
+
+     It is also simply wrong about the world. Cover hides you from somebody
+     who has to FIND you; it does not hide you from a man you could hand a
+     canteen to. So the rule now starts at NEAR metres and does nothing
+     inside it. 55 m is a little over twice campaign.js's own 26 m contact
+     radius, so there is a real band of sand where a storm is still buying you
+     a way past a column, and no band at all where a party you are standing in
+     the middle of pretends not to see you. */
+  const HIDE_NEAR = 55;
   function hideMe(dt) {
     if (FLAG_NOWEATHER) return;
     const v = ev();
@@ -553,7 +578,7 @@
     for (let i = 0; i < S.bands.length; i++) {
       const b = S.bands[i];
       const d = Math.hypot(b.x - S.you.x, b.z - S.you.z);
-      if (d > r) continue;
+      if (d > r || d < HIDE_NEAR) continue;
       if (b.cooldown < 2) b.cooldown = 2;
       if (b.mood === "hunt" && cover > 0.7) b.mood = "roam";
     }
@@ -561,10 +586,35 @@
 
   /* ============================================================ THE CARD
      ULTRA-SIMPLE CONTROLS IS THE WHOLE GAME'S HARD REQUIREMENT, so an event is
-     a headline, four lines of prose and two or three big buttons. Never a
-     form, never a slider, never a number you type. The button carries its own
-     price on a second line, because "what does this cost me" is the only
-     question the player is actually asking. */
+     a headline, two lines of prose and two or three big buttons. Never a form,
+     never a slider, never a number you type. The button carries its own price
+     on a second line, because "what does this cost me" is the only question
+     the player is actually asking.
+
+     TWO LINES, NOT FOUR — 2026-09-01, and the rule that got it there. Every
+     body in the library had a third sentence and the third sentence was
+     always one of two things:
+
+       · THE CARD READING ITS OWN MENU. The sandstorm said "You can put the
+         men down behind the trucks and let it pass, which costs you the day,
+         or you can ride into it and keep the day" — directly above two
+         buttons reading SIT IT OUT and RIDE INTO IT with those exact costs
+         chipped on them. The old soldier's card ended "he says the second one
+         is the better deal for you and he is right", which is the interface
+         recommending a button. The duel printed "You would win this about 61
+         times in a hundred" over a button chipped "61%".
+       · A CONSEQUENCE THAT IS A METER. "they will not be loyal", "the rest
+         remember you", "your men know what they just did" — all of them are
+         loyMove() calls, and loyMove is a bar this file already draws.
+
+     THE HINT IS A PRICE TAG, NOT A SENTENCE. Same pass: every
+     `hint: gold >= p ? "-$" + p + " · …" : "you do not have $" + p` collapsed
+     to the price alone. A button you cannot afford is already disabled and
+     already dimmed, and the gold you have is in the strip at the top of the
+     screen — three ways of saying it, one of which was a full clause that
+     changed the card's height depending on your purse. And nine choices
+     carried `hint: "nothing changes"`, which is a caption on the absence of a
+     consequence: RIDE ON does not need to be told it is RIDE ON. */
   let CARD = null;
 
   function css() {
@@ -799,12 +849,11 @@
       return {
         title: 'MEN WITH NO <em>FLAG</em>',
         sub: place().toUpperCase(),
-        body: n + ' men are sitting in the shade of a wrecked truck with their boots off. ' +
-              'They deserted from something — they will not say what — and they will march for you ' +
-              'for nothing but food and a share. They are levies. They deserted once.',
+        body: n + ' men in the shade of a wrecked truck with their boots off. They deserted ' +
+              'from something and will not say what. They will march for food and a share.',
         choices: [
           { key: "take", label: "TAKE THEM ALL", cls: "hot",
-            hint: "+" + men(n) + " · +$" + wage + "/day in wages · they will not be loyal",
+            hint: "+" + men(n) + " · +$" + wage + "/DAY IN WAGES",
             run: function () {
               for (let i = 0; i < n; i++) join("levy", guns[i], 0.22);
               W.log("took in " + n + " deserters at " + place() + ".", "");
@@ -813,15 +862,14 @@
               reconcile();
             } },
           { key: "pick", label: "TAKE THE BEST THREE", show: n >= 6,
-            hint: "+3 men · they cost the same as any levy · the rest remember you",
+            hint: "+3 MEN",
             run: function () {
               for (let i = 0; i < 3; i++) join("levy", guns[i], 0.45);
               W.log("took three of the deserters and left the rest.", "");
               loyMove(1, "you were choosy");
               reconcile();
             } },
-          { key: "no", label: "RIDE ON", cls: "ghost", hint: "nothing changes",
-            run: function () { W.log("rode past the deserters.", ""); } },
+          { key: "no", label: "RIDE ON", cls: "ghost",             run: function () { W.log("rode past the deserters.", ""); } },
         ],
       };
     },
@@ -839,12 +887,11 @@
       return {
         title: 'A <em>CARAVAN</em> AT THE EDGE OF THE PAN',
         sub: "SALT CROSSING",
-        body: 'Nine trucks and a man in a good coat. He wants your guns walking beside him across ' +
-              'the pan — ' + days + ' days out of your way, and he pays on arrival. ' +
-              'Wages do not stop because you are being useful.',
+        body: 'Nine trucks and a man in a good coat. He wants your guns beside him across the ' +
+              'pan — ' + days + ' days out of your way, paid on arrival.',
         choices: [
           { key: "escort", label: "TAKE THE CONTRACT", cls: "hot",
-            hint: "+$" + fee + " on arrival · " + days + " days pass · -$" + (W.payroll() * days) + " in wages first",
+            hint: "+$" + fee + " · " + days + " DAYS · -$" + (W.payroll() * days) + " IN WAGES",
             run: function () {
               for (let i = 0; i < days; i++) W.dawn();
               if (S.army.length || S.gold >= 0) { W.earn(fee); W.log("escorted a caravan across the pan. +$" + fee + ".", "good"); }
@@ -852,7 +899,7 @@
               loyMove(2, "paid work is still work");
             } },
           { key: "rob", label: "TAKE THE TRUCKS INSTEAD", cls: "bad",
-            hint: "+$" + Math.round(fee * 1.7) + " now · fame down · the island hears about it",
+            hint: "+$" + Math.round(fee * 1.7) + " · FAME DOWN",
             run: function () {
               W.earn(Math.round(fee * 1.7));
               S.fame = Math.max(0, S.fame - 6);
@@ -860,8 +907,7 @@
               W.log("took a caravan on the salt pan. They will remember the colour of the banner.", "bad");
               loyMove(-6, "banditry");
             } },
-          { key: "no", label: "WE ARE NOT GUARDS", cls: "ghost", hint: "nothing changes",
-            run: function () {} },
+          { key: "no", label: "WE ARE NOT GUARDS", cls: "ghost",             run: function () {} },
         ],
       };
     },
@@ -878,12 +924,12 @@
       return {
         title: 'THE <em>WELL</em> AT ADH-DHIB',
         sub: "A VILLAGE WITH A PROBLEM",
-        body: 'Mud walls, forty families, one well. A bandit crew has been taking a third of ' +
-              'everything since the spring. The headman will give you ' + pay + ' of his young men — ' +
-              'real volunteers, not pressed — if the crew stops coming. There are about ' + raiders + ' of them.',
+        body: 'Mud walls, forty families, one well. A bandit crew has taken a third of everything ' +
+              'since the spring. The headman offers ' + pay + ' of his young men if it stops. ' +
+              'About ' + raiders + ' of them.',
         choices: [
           { key: "take", label: "TAKE THE JOB", cls: "hot",
-            hint: "hunt " + raiders + " bandits · +" + men(pay) + " when it is done",
+            hint: raiders + " BANDITS · +" + men(pay) + " AFTER",
             run: function () {
               const b = spawnBandNear({ size: raiders, faction: "bandit", name: "ADH-DHIB RAIDERS", hunt: false, r: 1400 });
               ev().contracts.push({ bandId: b.id, kind: "village", men: pay, from: "ADH-DHIB", day: S.day });
@@ -891,14 +937,14 @@
               W.toast("CONTRACT: ADH-DHIB RAIDERS", "");
             } },
           { key: "tax", label: "TAX THEM INSTEAD", cls: "bad",
-            hint: "+$" + (pay * 22) + " now · the village hates you · fame down",
+            hint: "+$" + (pay * 22) + " · FAME DOWN",
             run: function () {
               W.earn(pay * 22);
               S.fame = Math.max(0, S.fame - 4);
               W.log("taxed Adh-Dhib. The bandits will be back on Tuesday.", "bad");
               loyMove(-3, "your men have villages too");
             } },
-          { key: "no", label: "RIDE ON", cls: "ghost", hint: "nothing changes", run: function () {} },
+          { key: "no", label: "RIDE ON", cls: "ghost", run: function () {} },
         ],
       };
     },
@@ -921,13 +967,12 @@
       return {
         title: 'SOMETHING <em>BURIED</em>',
         sub: place().toUpperCase(),
-        body: 'A tarp under two inches of sand, weighted with rocks that were carried here. ' +
-              n + ' guns: ' + esc(list) + '. The tyre tracks beside it are three days old ' +
-              'and they are pointed at us. Whoever buried this is coming back for it, and there are ' +
-              'about ' + owners + ' of them.',
+        body: 'A tarp under two inches of sand, weighted with rocks carried here. ' + n +
+              ' guns: ' + esc(list) + '. The tyre tracks beside it are three days old and pointed ' +
+              'at us — about ' + owners + ' of them.',
         choices: [
           { key: "take", label: "TAKE IT AND GO", cls: "hot",
-            hint: "+" + n + " guns (worth ~$" + worth + ") · they will come looking",
+            hint: "+" + n + " GUNS · ~$" + worth,
             run: function () {
               for (let i = 0; i < guns.length; i++) W.stash(guns[i], 1);
               spawnBandNear({ size: owners, faction: "company", name: "THE OWNERS", hunt: true, r: 1100, cooldown: 30 });
@@ -935,7 +980,7 @@
               W.toast("+" + n + " GUNS", "good");
             } },
           { key: "wait", label: "SIT ON IT AND WAIT FOR THEM", show: size() >= 8,
-            hint: "they walk into you instead of the other way round",
+            hint: "+" + n + " GUNS · THEY COME TO YOU",
             run: function () {
               for (let i = 0; i < guns.length; i++) W.stash(guns[i], 1);
               const b = spawnBandNear({ size: Math.round(owners * 0.8), faction: "company", name: "THE OWNERS", r: 90, cooldown: 0 });
@@ -943,8 +988,7 @@
               W.log("took the cache and set up over it.", "");
               loyMove(2, "a warlord who picks the ground");
             } },
-          { key: "no", label: "LEAVE IT BURIED", cls: "ghost", hint: "nothing changes",
-            run: function () { W.log("covered the cache back up and rode on.", ""); } },
+          { key: "no", label: "LEAVE IT BURIED", cls: "ghost",             run: function () { W.log("covered the cache back up and rode on.", ""); } },
         ],
       };
     },
@@ -962,12 +1006,11 @@
       return {
         title: 'A <em>WARLORD</em> WITH A HOLE IN HIM',
         sub: "WHAT IS LEFT OF HIS COLUMN",
-        body: 'He is sitting against a wheel with his hand pressed into his side and ' + n +
-              ' men standing around him who have not decided anything yet. He says: let me ride ' +
-              'out of here alive and they are yours. He is not lying, and he is not going to forget.',
+        body: 'He is against a wheel with his hand pressed into his side and ' + n + ' men around ' +
+              'him who have not decided anything yet. Let him ride out alive and they are yours.',
         choices: [
           { key: "let", label: "LET HIM GO. TAKE HIS MEN.", cls: "hot",
-            hint: "+" + men(n) + " · they served him first · he will be back",
+            hint: "+" + men(n) + " · HE COMES BACK",
             run: function () {
               for (let i = 0; i < n; i++) {
                 join(tiers[Math.floor(W.rnd() * tiers.length)], gunFor(wealth), 0.34);
@@ -981,7 +1024,7 @@
               ev().contracts.push({ kind: "revenge", day: S.day + W.irange(6, 14), size: Math.round(n * 1.4) });
             } },
           { key: "kill", label: "PUT HIM DOWN", cls: "bad",
-            hint: "+fame · his men scatter · every band you meet fights harder",
+            hint: "+9 FAME · THEY FIGHT HARDER",
             run: function () {
               S.fame += 9;
               S.stats.executed += 2;
@@ -990,7 +1033,7 @@
               W.toast("THE ISLAND HEARD THAT", "bad");
             } },
           { key: "ride", label: "RIDE ON AND LEAVE HIM TO IT", cls: "ghost",
-            hint: "nothing changes, and he lives anyway",
+            hint: "HE LIVES ANYWAY",
             run: function () { W.log("left a wounded warlord where he sat.", ""); } },
         ],
       };
@@ -1015,12 +1058,11 @@
       return {
         title: 'HE WANTS A <em>THIRD</em> OF THE ARMY',
         sub: (lead ? W.tier(lead.tier).label + " " + name : "A VETERAN").toUpperCase(),
-        body: esc(name) + ' has been sitting with the same twenty men every night for a week. ' +
-              'This morning he says it plainly: give him ' + n + ' men and he will go south and ' +
-              'not trouble you. They are already packed.',
+        body: esc(name) + ' has sat with the same twenty men every night for a week. This ' +
+              'morning: give him ' + n + ' men and he goes south. They are already packed.',
         choices: [
           { key: "let", label: "LET THEM WALK", cls: "",
-            hint: "-" + men(n) + " · the rest stop worrying · they keep their guns",
+            hint: "-" + men(n),
             run: function () {
               for (let i = 0; i < cut.length; i++) W.removeSoldier(cut[i].id, false);
               W.log(esc(name) + " took " + n + " men south. Nobody stopped him.", "bad");
@@ -1029,8 +1071,7 @@
               reconcile();
             } },
           { key: "pay", label: "BUY HIM BACK", cls: "hot", enabled: S.gold >= bribe,
-            hint: S.gold >= bribe ? "-$" + bribe + " · everybody stays · loyalty up"
-                                  : "you do not have $" + bribe,
+            hint: "-$" + bribe + " · LOYALTY UP",
             run: function () {
               if (!W.pay(bribe)) return;
               for (let i = 0; i < cut.length; i++) {
@@ -1042,7 +1083,7 @@
               ev().unrest = 0;
             } },
           { key: "kill", label: "SHOOT HIM IN FRONT OF THEM", cls: "bad",
-            hint: "he stays dead · they stay · loyalty falls hard",
+            hint: "LOYALTY DOWN HARD",
             run: function () {
               if (lead) { W.removeSoldier(lead.id, true); bury(lead, "executed by you"); }
               S.stats.executed += 1;
@@ -1071,11 +1112,11 @@
         title: 'THE <em>WELL</em> IS SAND',
         sub: place().toUpperCase(),
         body: 'The cistern marked on every map on this island has four inches of wet sand in it. ' +
-              'A nomad with eleven camels is standing next to it with full skins and a price. ' +
-              (hurt ? 'You are carrying ' + hurt + ' wounded. They go first.' : 'Nobody is hurt yet.'),
+              'A nomad with eleven camels is standing beside it with full skins and a price.' +
+              (hurt ? ' Your ' + hurt + ' wounded drink first.' : ''),
         choices: [
           { key: "buy", label: "PAY THE NOMAD", cls: "hot", enabled: S.gold >= price,
-            hint: S.gold >= price ? "-$" + price + " · everybody drinks" : "you do not have $" + price,
+            hint: "-$" + price + " · EVERYBODY DRINKS",
             run: function () {
               if (!W.pay(price)) return;
               W.log("paid $" + price + " for water at a dry cistern.", "");
@@ -1086,14 +1127,14 @@
               if (healed) W.toast(healed + " WOUNDED BACK ON THEIR FEET", "good");
             } },
           { key: "take", label: "TAKE THE SKINS", cls: "bad", show: size() >= 6,
-            hint: "free · fame down · your men know what they just did",
+            hint: "FREE · FAME DOWN · LOYALTY DOWN",
             run: function () {
               S.fame = Math.max(0, S.fame - 3);
               W.log("took a nomad's water at gunpoint.", "bad");
               loyMove(-7, "you robbed a man with camels");
             } },
           { key: "push", label: "PUSH ON DRY", cls: "",
-            hint: "free · about " + men(risk) + " will not make the next well",
+            hint: "FREE · -" + men(risk) + " ON THE WAY",
             run: function () {
               const dead = [];
               const order = S.army.slice().sort(function (a, b) { return (b.wounded ? 1 : 0) - (a.wounded ? 1 : 0); });
@@ -1121,12 +1162,12 @@
       return {
         title: 'A BROWN <em>WALL</em>',
         sub: "SANDSTORM",
-        body: 'It is not weather, it is a landscape moving. Half an hour out, maybe less. ' +
-              'You can put the men down behind the trucks and let it pass, which costs you the day, ' +
-              'or you can ride into it and keep the day, and pay for it in other ways.',
+        /* the third sentence described the two buttons underneath it — the
+           interface reading its own menu aloud. The buttons say it. */
+        body: 'It is not weather, it is a landscape moving. Half an hour out, maybe less.',
         choices: [
           { key: "camp", label: "MAKE CAMP AND LET IT PASS", cls: "hot",
-            hint: "one day gone · -$" + W.payroll() + " in wages · nobody is lost",
+            hint: "ONE DAY · -$" + W.payroll() + " IN WAGES",
             run: function () {
               ev().camped = S.day;
               W.dawn();
@@ -1134,7 +1175,7 @@
               loyMove(+3, "you did not march them into it");
             } },
           { key: "push", label: "RIDE INTO IT", cls: "bad",
-            hint: "keep the day · lose about " + men(loss) + " and " + guns(gunsLost) + " · nobody can see you either",
+            hint: "KEEP THE DAY · -" + men(loss) + " · -" + guns(gunsLost),
             run: function () {
               const cut = faction(0.5).slice(0, loss);
               for (let i = 0; i < cut.length; i++) { bury(cut[i], "lost in a sandstorm"); W.removeSoldier(cut[i].id, false); }
@@ -1162,11 +1203,11 @@
         title: 'A COLUMN ON A <em>CHAIN</em>',
         sub: "SLAVERS, HEADING EAST",
         body: n + ' men walking in a line with their wrists wired together and ' + guards +
-              ' men with rifles walking beside them. The chief wants to sell. He is aware ' +
-              'that you outnumber him and he is being very polite about it.',
+              ' men with rifles beside them. The chief wants to sell, and he is being very ' +
+              'polite about it.',
         choices: [
           { key: "free", label: "CUT THEM LOOSE", cls: "hot",
-            hint: "fight " + guards + " guards · +" + men(n) + " who chose you · fame up",
+            hint: guards + " GUARDS · +" + men(n) + " · FAME UP",
             run: function () {
               for (let i = 0; i < n; i++) join(W.chance(0.75) ? "levy" : "raider", gunFor(0.18), 0.68);
               S.fame += Math.round(n * 0.5);
@@ -1177,8 +1218,7 @@
               reconcile();
             } },
           { key: "buy", label: "BUY THEM", cls: "", enabled: S.gold >= price,
-            hint: S.gold >= price ? "-$" + price + " · +" + men(n) + " · they know what you are"
-                                  : "you do not have $" + price,
+            hint: "-$" + price + " · +" + men(n),
             run: function () {
               if (!W.pay(price)) return;
               for (let i = 0; i < n; i++) join("levy", gunFor(0.15), 0.4);
@@ -1186,8 +1226,7 @@
               loyMove(-2, "you paid a slaver");
               reconcile();
             } },
-          { key: "no", label: "RIDE ON", cls: "ghost", hint: "nothing changes",
-            run: function () { loyMove(-3, "you rode past the chain"); } },
+          { key: "no", label: "RIDE ON", cls: "ghost",             run: function () { loyMove(-3, "you rode past the chain"); } },
         ],
       };
     },
@@ -1209,12 +1248,10 @@
         title: 'A MAN WITH A <em>CRATE</em>',
         sub: "GUN RUNNER",
         body: 'One truck, one crate, one nervous man. ' + n + '× ' + esc(W.gunLabel(id)) +
-              ', still in grease. He wants $' + ask + ' for the lot, which is under list, ' +
-              'because he would like to be somewhere else by dark.',
+              ', still in grease, and he would like to be somewhere else by dark.',
         choices: [
           { key: "buy", label: "BUY THE CRATE", cls: "hot", enabled: S.gold >= ask,
-            hint: S.gold >= ask ? "-$" + ask + " · +" + n + "× " + W.gunLabel(id) + " (list $" + list + ")"
-                                : "you do not have $" + ask,
+            hint: "-$" + ask + " · +" + n + "× " + W.gunLabel(id) + " · LIST $" + list,
             run: function () {
               if (!W.pay(ask)) return;
               W.stash(id, n);
@@ -1222,7 +1259,7 @@
               W.toast("+" + n + "× " + W.gunLabel(id), "good");
             } },
           { key: "rob", label: "TAKE THE CRATE", cls: "bad", show: size() >= 5,
-            hint: "free · +$" + Math.round(list * 0.2) + " out of his pockets · fame down",
+            hint: "FREE · +$" + Math.round(list * 0.2) + " · FAME DOWN",
             run: function () {
               W.stash(id, n);
               W.earn(Math.round(list * 0.2));
@@ -1230,7 +1267,7 @@
               W.log("robbed a gun runner on the " + biome() + ".", "bad");
               loyMove(-4, "you robbed a trader");
             } },
-          { key: "no", label: "RIDE ON", cls: "ghost", hint: "nothing changes", run: function () {} },
+          { key: "no", label: "RIDE ON", cls: "ghost", run: function () {} },
         ],
       };
     },
@@ -1246,14 +1283,13 @@
       return {
         title: 'AN OLD <em>SOLDIER</em>',
         sub: "ALONE, WITH A GOOD RIFLE",
+        /* "and he says the second one is the better deal for you and he is
+           right" was the card telling the player which button to press. */
         body: 'He has a fire, a ' + esc(W.gunLabel(wid)) + ' cleaned to a shine, and thirty years ' +
-              'of somebody else\'s wars behind him. He will come. He wants $' + price +
-              ' up front, or a straight share and no money at all — and he says the second one ' +
-              'is the better deal for you and he is right.',
+              'of somebody else\'s wars behind him. He will come — for money up front, or for a share.',
         choices: [
           { key: "pay", label: "PAY HIM", cls: "hot", enabled: S.gold >= price,
-            hint: S.gold >= price ? "-$" + price + " · +1 VETERAN with a " + W.gunLabel(wid)
-                                  : "you do not have $" + price,
+            hint: "-$" + price + " · +1 VETERAN · " + W.gunLabel(wid),
             run: function () {
               if (!W.pay(price)) return;
               const s = join("veteran", wid, BASE_HIRED, { battles: 8 });
@@ -1262,14 +1298,14 @@
               reconcile();
             } },
           { key: "share", label: "OFFER HIM A SHARE", cls: "",
-            hint: "free · +1 VETERAN · he is the most loyal man you have",
+            hint: "FREE · +1 VETERAN · LOYAL",
             run: function () {
               const s = join("veteran", wid, 0.95, { battles: 8 });
               W.log(s.name + " came for a share and nothing else.", "good");
               loyMove(+4, "a veteran chose you in front of everyone");
               reconcile();
             } },
-          { key: "no", label: "LEAVE HIM HIS FIRE", cls: "ghost", hint: "nothing changes", run: function () {} },
+          { key: "no", label: "LEAVE HIM HIS FIRE", cls: "ghost", run: function () {} },
         ],
       };
     },
@@ -1289,11 +1325,10 @@
         title: 'HE WANTS YOUR <em>PRISONERS</em>',
         sub: n + " MEN IN THE WIRE",
         body: 'A quiet man with four trucks and a ledger. He will take all ' + n +
-              ' off your hands at $' + worth + ' and he does not want to discuss what for. ' +
-              'They are eating your food and they are not fighting for you.',
+              ' off your hands at $' + worth + ' and does not want to discuss what for.',
         choices: [
           { key: "sell", label: "SELL THEM ALL", cls: "bad",
-            hint: "+$" + worth + " · the wire is empty · your men watch them go",
+            hint: "+$" + worth + " · LOYALTY DOWN",
             run: function () {
               W.earn(worth);
               S.stats.executed += Math.ceil(n / 3);   // core's dread counter: this is that kind of act
@@ -1303,7 +1338,7 @@
               W.emit("army", S.army.length);
             } },
           { key: "free", label: "TURN THEM ALL LOOSE INSTEAD", cls: "hot",
-            hint: "+fame · the island learns you let men walk · bands surrender more readily",
+            hint: "+FAME · THEY SURRENDER MORE READILY",
             run: function () {
               S.fame += Math.round(2 + n * 0.6);
               S.prisoners.length = 0;
@@ -1311,7 +1346,7 @@
               loyMove(+7, "mercy in front of witnesses");
               W.emit("army", S.army.length);
             } },
-          { key: "no", label: "THEY STAY IN THE WIRE", cls: "ghost", hint: "nothing changes", run: function () {} },
+          { key: "no", label: "THEY STAY IN THE WIRE", cls: "ghost", run: function () {} },
         ],
       };
     },
@@ -1332,21 +1367,21 @@
               ' and the man saying it is not the one holding the machine gun.',
         choices: [
           { key: "pay", label: "PAY THE TOLL", cls: "", enabled: S.gold >= toll,
-            hint: S.gold >= toll ? "-$" + toll + " · straight through" : "you do not have $" + toll,
+            hint: "-$" + toll + " · STRAIGHT THROUGH",
             run: function () {
               if (!W.pay(toll)) return;
               W.log("paid $" + toll + " at the narrows.", "");
               loyMove(-2, "your men do not like paying bandits");
             } },
           { key: "fight", label: "GO THROUGH THEM", cls: "hot",
-            hint: "fight " + n + " men now",
+            hint: n + " MEN, NOW",
             run: function () {
               const b = spawnBandNear({ size: n, faction: "bandit", name: "THE TOLLMEN", r: 60, cooldown: 0 });
               b.mood = "hunt"; b.goal = { x: S.you.x, z: S.you.z };
               W.toast("THEY ARE COMING DOWN OFF THE ROCK", "bad");
             } },
           { key: "around", label: "GO AROUND", cls: "ghost",
-            hint: "half a day · -$" + Math.round(W.payroll() / 2) + " in wages",
+            hint: "HALF A DAY · -$" + Math.round(W.payroll() / 2),
             run: function () {
               S.hour += 8;
               if (S.hour >= 24) { S.hour -= 24; W.dawn(); }
@@ -1376,7 +1411,7 @@
                        ' once. He did not, but you let him say it.' : ''),
         choices: [
           { key: "dig", label: "DIG", cls: "hot",
-            hint: "+" + n + " guns · an hour or two",
+            hint: "+" + n + " GUNS · AN HOUR OR TWO",
             run: function () {
               for (let i = 0; i < guns.length; i++) W.stash(guns[i], 1);
               S.hour += 2;
@@ -1385,7 +1420,7 @@
               W.log("dug " + n + " working rifles out of an old field.", "");
             } },
           { key: "bury", label: "BURY WHAT IS LEFT OF THEM", cls: "",
-            hint: "no guns · half a day · your men will remember it",
+            hint: "NO GUNS · HALF A DAY · LOYALTY UP",
             run: function () {
               S.hour += 9;
               if (S.hour >= 24) { S.hour -= 24; W.dawn(); }
@@ -1414,11 +1449,12 @@
         body: 'Their biggest man walks out ahead of the line, puts his rifle in the sand and ' +
               'shouts across two hundred metres of nothing that if you beat him his ' + n +
               ' men are yours, and if he beats you they take what you are carrying. ' +
-              'Your men are already forming a circle. You would win this about ' +
-              Math.round(p * 100) + ' times in a hundred.',
+              /* "You would win this about 61 times in a hundred" was the odds
+                 printed in English immediately above a button chipped "61%". */
+              'Your men are already forming a circle.',
         choices: [
           { key: "fight", label: "WALK OUT", cls: "hot",
-            hint: Math.round(p * 100) + "% · win: +" + men(n) + " · lose: badly hurt, and they take a third of the cart",
+            hint: Math.round(p * 100) + "% · WIN +" + men(n) + " · LOSE A THIRD OF THE CART",
             run: function () {
               if (W.chance(p)) {
                 for (let i = 0; i < n; i++) join(W.chance(0.6) ? "raider" : "soldier", gunFor(wealth), 0.5);
@@ -1438,7 +1474,7 @@
               reconcile();
             } },
           { key: "line", label: "SEND THE LINE INSTEAD", cls: "",
-            hint: "fight all " + n + " properly · fame down for refusing",
+            hint: n + " MEN · FAME DOWN",
             run: function () {
               const b = spawnBandNear({ size: n, faction: "company", name: "THE CHALLENGERS", r: 70, cooldown: 0 });
               b.mood = "hunt"; b.goal = { x: S.you.x, z: S.you.z };
@@ -1470,8 +1506,7 @@
               'exactly how much you need them.',
         choices: [
           { key: "buy", label: "BUY THE MEDICINE", cls: "hot", enabled: S.gold >= price,
-            hint: S.gold >= price ? "-$" + price + " · " + hurt.length + " men back on their feet"
-                                  : "you do not have $" + price,
+            hint: "-$" + price + " · " + hurt.length + " BACK ON THEIR FEET",
             run: function () {
               if (!W.pay(price)) return;
               for (let i = 0; i < hurt.length; i++) { hurt[i].wounded = false; hurt[i].hp = hurt[i].maxHp; }
@@ -1479,7 +1514,7 @@
               loyMove(+8, "you spent money on the hurt");
             } },
           { key: "leave", label: "LEAVE THEM AT THE NEXT WELL", cls: "",
-            hint: "-" + men(hurt.length) + " · no wages for them · loyalty falls",
+            hint: "-" + men(hurt.length) + " · LOYALTY DOWN",
             run: function () {
               for (let i = 0; i < hurt.length; i++) { bury(hurt[i], "left behind sick"); W.removeSoldier(hurt[i].id, true); }
               W.log("left " + hurt.length + " sick men at a well.", "bad");
@@ -1487,7 +1522,7 @@
               reconcile();
             } },
           { key: "ride", label: "CARRY THEM AND RIDE", cls: "",
-            hint: "free · about half of them die anyway",
+            hint: "FREE · HALF OF THEM DIE",
             run: function () {
               let d = 0;
               for (let i = 0; i < hurt.length; i++) if (W.chance(0.45)) { bury(hurt[i], "fever"); W.removeSoldier(hurt[i].id, true); d++; }
@@ -1511,12 +1546,11 @@
       return {
         title: 'HE HAS BEEN <em>WATCHING</em> YOU',
         sub: "A SERGEANT FROM SOMEBODY ELSE'S COLUMN",
-        body: 'He rode in alone with his hands up. He says his warlord has not paid anyone in ' +
-              'nine days and he can bring ' + n + ' men across tonight if there is money in it. ' +
-              'He knows your name, which is either flattering or a problem.',
+        body: 'He rode in alone with his hands up. His warlord has not paid anyone in nine days ' +
+              'and he can bring ' + n + ' men across tonight if there is money in it.',
         choices: [
           { key: "pay", label: "PAY HIM", cls: "hot", enabled: S.gold >= price,
-            hint: S.gold >= price ? "-$" + price + " · +" + men(n) + " tonight" : "you do not have $" + price,
+            hint: "-$" + price + " · +" + men(n),
             run: function () {
               if (!W.pay(price)) return;
               for (let i = 0; i < n; i++) join(W.chance(0.5) ? "raider" : "soldier", gunFor(0.45), 0.5);
@@ -1525,14 +1559,14 @@
               reconcile();
             } },
           { key: "trap", label: "IT IS A TRAP. TAKE HIM PRISONER.", cls: "bad",
-            hint: "+1 prisoner · you will never know",
+            hint: "+1 PRISONER",
             run: function () {
               S.prisoners.push(W.makeSoldier("soldier", gunFor(0.5)));
               W.log("put the defector in the wire instead.", "");
               loyMove(-3, "a man came to you and you chained him");
               W.emit("army", S.army.length);
             } },
-          { key: "no", label: "SEND HIM BACK", cls: "ghost", hint: "nothing changes", run: function () {} },
+          { key: "no", label: "SEND HIM BACK", cls: "ghost", run: function () {} },
         ],
       };
     },
@@ -1564,8 +1598,7 @@
               'where you like. Refuse and he comes with everything he has.',
         choices: [
           { key: "pay", label: "PAY THE TRIBUTE", cls: "", enabled: S.gold >= tribute,
-            hint: S.gold >= tribute ? "-$" + tribute + " · he leaves you alone for a while"
-                                    : "you do not have $" + tribute,
+            hint: "-$" + tribute + " · HE LEAVES YOU ALONE",
             run: function () {
               if (!W.pay(tribute)) return;
               b.cooldown = 600; b.mood = "roam";
@@ -1574,7 +1607,7 @@
               S.fame = Math.max(0, S.fame - 8);
             } },
           { key: "defy", label: "SEND HIM BACK ON FOOT", cls: "hot",
-            hint: "+fame · " + esc(b.name) + " starts hunting you",
+            hint: "+FAME · " + esc(b.name) + " HUNTS YOU",
             run: function () {
               b.mood = "hunt"; b.goal = { x: S.you.x, z: S.you.z }; b.cooldown = 0;
               S.fame += 12;
@@ -1604,7 +1637,7 @@
               'This is the last night this is a conversation.',
         choices: [
           { key: "pay", label: "PAY A BONUS TO EVERY MAN", cls: "hot", enabled: S.gold >= bonus,
-            hint: S.gold >= bonus ? "-$" + bonus + " · loyalty up hard" : "you do not have $" + bonus,
+            hint: "-$" + bonus + " · LOYALTY UP HARD",
             run: function () {
               if (!W.pay(bonus)) return;
               W.log("paid $" + bonus + " out to the whole column in one night.", "good");
@@ -1612,7 +1645,7 @@
               ev().unrest = 0;
             } },
           { key: "kill", label: "TAKE " + (lead ? lead.name.toUpperCase() : "HIM") + " OUT OF THE CAMP", cls: "bad",
-            hint: "the faction loses its head · loyalty falls further · it might hold",
+            hint: "LOYALTY DOWN · IT MIGHT HOLD",
             run: function () {
               if (lead) { bury(lead, "executed by you"); W.removeSoldier(lead.id, true); }
               S.stats.executed += 1;
@@ -1622,7 +1655,7 @@
               reconcile();
             } },
           { key: "let", label: "OPEN THE GATE", cls: "",
-            hint: "-" + men(cut.length) + " · the ones who stay are yours",
+            hint: "-" + men(cut.length),
             run: function () {
               for (let i = 0; i < cut.length; i++) W.removeSoldier(cut[i].id, false);
               W.log(cut.length + " men walked out of camp at first light. Nobody stopped them.", "bad");
@@ -1645,8 +1678,7 @@
         title: 'THE WELL AT <em>' + esc(c.from || "ADH-DHIB") + '</em>',
         sub: "THEY HEARD BEFORE YOU ARRIVED",
         body: 'The headman is standing in the gate with ' + n + ' young men behind him who have ' +
-              'already packed. They are volunteers, which in this country means they will still ' +
-              'be behind you in a month.',
+              'already packed. Volunteers, every one.',
         choices: [
           { key: "take", label: "TAKE THEM", cls: "hot", hint: "+" + men(n) + " · volunteers",
             run: function () {
@@ -1658,7 +1690,7 @@
               reconcile();
             } },
           { key: "gold", label: "TAKE COIN INSTEAD", cls: "",
-            hint: "+$" + (n * 30) + " · they keep their sons",
+            hint: "+$" + (n * 30),
             run: function () { W.earn(n * 30); S.fame += 3; W.log("took coin from " + (c.from || "the village") + " instead of sons.", ""); loyMove(+2, ""); } },
         ],
       };
@@ -1777,10 +1809,10 @@
       sub: cut.length + " AGAINST " + (S.army.length + 1),
       body: 'They came for the trucks first and then for you. ' + cut.length + ' men are on the ' +
             'other side of the fire with the rifles you gave them, and ' + S.army.length +
-            ' are on this one. There is no third option and there is nowhere to ride.',
+            ' are on this one.',
       choices: [
         { key: "fight", label: "PUT IT DOWN", cls: "bad",
-          hint: cut.length + " men · your own · lose this and it is over",
+          hint: cut.length + " MEN · YOUR OWN",
           run: function () {
             if (W.battle && W.battle.start) safe(function () { W.battle.start({ band: b, defending: true, mutiny: true }); });
             else { endRun("mutiny", "Your own men killed you in the dark."); }
@@ -2013,7 +2045,7 @@
       const f = shown[i];
       names += '<span class="wl-name">' + esc(f.name) + ' <b>' + esc(W.tier(f.tier).label) + ' · D' + f.day + '</b></span>';
     }
-    if (!shown.length) names = '<span class="wl-dim">Nobody who followed you died. That is its own kind of run.</span>';
+    if (!shown.length) names = '<span class="wl-dim">NOBODY</span>';
 
     let four = "";
     const L = fourList();
@@ -2046,7 +2078,7 @@
       '<div class="wl-card">' + names + '</div>' +
       '<div class="wl-btns">' +
         '<button class="wl-btn hot" id="ovNew">RIDE OUT AGAIN</button>' +
-        '<button class="wl-btn" id="ovLog">READ THE CHRONICLE</button>' +
+        '<button class="wl-btn" id="ovLog">THE CHRONICLE</button>' +
       '</div></div>'
     );
     const nb = ctx.el("ovNew");
@@ -2072,7 +2104,7 @@
       if (r.day !== day) { day = r.day; body += '<div class="day">DAY ' + day + '</div>'; }
       body += '<div class="ln ' + esc(r.kind || "") + '">' + esc(r.text) + '</div>';
     }
-    if (!body) body = '<div class="wl-dim">Nothing has happened yet.</div>';
+    if (!body) body = '<div class="wl-dim">NOTHING YET</div>';
     const st = S.stats || {};
     takeScreen(
       '<div class="wl-ch">' +
@@ -2112,7 +2144,7 @@
         (bd < 0.22 ? "WOULD LEAVE TONIGHT" : bd < 0.4 ? "LISTENING" : bd < 0.62 ? "STAYING FOR NOW" : "YOURS") +
         '</span></div>';
     }
-    if (!rows) rows = '<div class="wl-dim">There is nobody behind you to have an opinion.</div>';
+    if (!rows) rows = '<div class="wl-dim">NOBODY</div>';
     const pressed = S.army.filter(function (s) { return (v.base[s.id] || BASE_UNKNOWN) <= BASE_PRESSED + 0.02; }).length;
     takeScreen(
       '<div class="wl-ev">' +
@@ -2125,14 +2157,19 @@
         statCard("PRESSED MEN", pressed + " of " + S.army.length) +
         statCard("EXECUTIONS", (S.stats && S.stats.executed) || 0) +
       '</div>' +
-      '<div class="wl-card wl-small wl-dim" style="line-height:1.6">' +
-        'Loyalty drifts every dawn toward the CEILING, and the ceiling is who these men are. ' +
-        'A man you paid for starts near 82. A man you took off a battlefield starts near 26 and ' +
-        'climbs about six a fight — a pressed levy who has survived six fights for you is yours. ' +
-        'Every execution poisons the whole column and poisons the pressed men worst. ' +
-        'Under 20 they start deciding, and they will tell you first.' +
-      '</div>' +
-      '<div class="wl-lbl">THE ONES WHO ARE THINKING ABOUT IT</div>' +
+      /* THE MANUAL PAGE IS DELETED — 372 characters explaining the loyalty
+         formula to the player, in a card sitting directly underneath the
+         three tiles that MEASURE it. "Loyalty drifts every dawn toward the
+         CEILING" is the CEILING tile. "A man you took off a battlefield
+         starts near 26" is the PRESSED MEN tile. "Every execution poisons the
+         whole column" is the EXECUTIONS tile, and it is also the chip on the
+         aftermath's EXECUTE button, which now prints the exact percentage.
+         "Under 20 they start deciding, and they will tell you first" is the
+         meter turning red and the mutiny card arriving. Every clause of it
+         was already on the screen as a number or a colour; the paragraph was
+         the game explaining its own systems to somebody reading a status
+         screen, which is a wiki, not a world. */
+      '<div class="wl-lbl">THINKING ABOUT IT</div>' +
       '<div class="wl-card">' + rows + '</div>' +
       '<div class="wl-btns">' +
         '<button class="wl-btn hot" id="loBack">BACK</button>' +
@@ -2177,11 +2214,15 @@
       '<div class="wl-ch">' +
       '<h1 class="wl-h">THE <em>FOUR</em></h1>' +
       '<p class="wl-sub">' + done + " OF " + total + ' BROKEN' + (v.last ? " · THE LAST WAR" : "") + '</p>' +
+      /* THE SECOND LINE ONLY SURVIVES WHEN IT IS NEWS. "Four names hold this
+         island. Break all four and there is nobody left who can tell you no."
+         is the win condition explained under a progress bar reading "1 OF 4
+         BROKEN" — the bar is the sentence. The LAST WAR line stays, because
+         that is not a rule, it is a thing that has just happened to you. */
       '<div class="wl-card">' + meter(total ? done / total : 0, done === total ? "good" : "") +
-        '<div class="wl-small wl-dim" style="margin-top:7px">' +
-        (v.last ? 'Three are down. The survivor has taken in everything that is left of them and he is coming to you. There is one fight left in this run.'
-                : 'Four names hold this island. Break all four and there is nobody left who can tell you no. Break three and the fourth stops waiting.') +
-        '</div></div>' +
+        (v.last ? '<div class="wl-small wl-dim" style="margin-top:7px">Three are down. ' +
+          'The survivor has taken in what is left of them and he is coming.</div>' : '') +
+        '</div>' +
       '<div class="wl-four">' + cards + '</div>' +
       '<div class="wl-btns">' +
         '<button class="wl-btn hot" id="waBack">BACK</button>' +

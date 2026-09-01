@@ -126,9 +126,17 @@ async function stageDock(input) {
   if (!W.phase() || W.phase() === "boot") return { ok: false, missing: "boot never finished" };
   if (W.phase() !== "campaign") { W.setPhase("campaign"); await sleep(200); }
 
-  /* THE MATCH FIRST, THEN THE BAND. match.demo() calls W.newGame(), which
-     wipes the roster and the band list — staging them the other way round
-     photographs an empty rail and calls it an encounter. */
+  /* THE MATCH STRIP IS GONE — the whole match layer was deleted 2026-09-01
+     (src/warlord/match.js's tombstone says why), and with it `W.match.demo`
+     and `#wl-match`. The two subjects below that asked for `match: true` were
+     photographing the AFTER side's fix for a strip that no longer exists.
+
+     THE BEFORE SIDE IS A DEPLOYED BUILD and still has the strip, so this
+     preset is now an A/B of two different games on those subjects. That is a
+     record, not a bug: `match` is kept as a subject field and honoured on
+     whichever side actually has the feature, and the assertion below no
+     longer FAILS the after side for the absence of something that was
+     deliberately removed. */
   if (sub.match && W.match && W.match.demo && !W.match.live()) {
     W.match.demo({ n: 6 });
     await sleep(300);
@@ -154,13 +162,15 @@ async function stageDock(input) {
      match" with no match strip on screen is a picture that argues for
      something it does not show, and the first run of this preset produced
      exactly that on both columns. Fail the subject instead. */
-  if (sub.match && !document.querySelector("#wl-match.on")) {
-    return { ok: false, missing: "the match strip never came up" };
-  }
+  /* WAS a hard failure when the strip did not come up. It cannot come up on
+     a build that no longer has one, and a gate that fails for a deletion is a
+     gate that argues against the deletion. Reported instead of thrown. */
+  const strip = !!document.querySelector("#wl-match.on");
+
   if (!document.querySelector("#verbs.on")) {
     return { ok: false, missing: "the rail never opened" };
   }
-  return { ok: true, open: true };
+  return { ok: true, open: true, matchStrip: strip };
 }
 
 export default {

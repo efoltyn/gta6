@@ -17,6 +17,11 @@
    unanswerable in the exact mode the game is built for, and every screenshot
    of it looked fine because the buttons were THERE, just covered.
 
+   (`#wl-match` no longer exists: the match layer was deleted 2026-09-01. The
+   history stays because this tool's REASON for existing is that story, and
+   the same collision can be re-created by the next fixed bottom layer
+   somebody adds. The screens that reproduced it are repointed below.)
+
    Nothing in this repo could have caught that. tools/button-gate.mjs reads
    the source and counts words in a label — it cannot know two fixed layers
    collide. A `ba` preset photographs a frame — a human has to notice. So this
@@ -34,18 +39,50 @@
                                     present, visible, and not a button.
        4. NOT ON TOP OF ANOTHER CONTROL — two controls overlapping means one
                                     of them is eating the other's taps.
+     5. THE SCREEN FITS            — nothing the player has to read is below
+                                    the fold. Added 2026-09-01.
+
+   RULE 5, AND WHY IT IS NOT A CONTROL TEST. The owner, looking at the game:
+
+       "And I have to do way too much scrolling, I should almost never have
+        to scroll in reality a ton of the word slop needs to be removed."
+
+   Every rule above this one asks about a BUTTON. All four passed on all
+   seven frames while the aftermath screen was 2 700 px tall on an iPhone SE
+   — because the buttons at the bottom of it were inside a live scroller, and
+   the tool's own comment (below, still true) says a control inside a live
+   scroller is reachable by scrolling to it, so its resting position proves
+   nothing. That exemption is correct for a control and it is exactly the
+   hole a screen full of prose falls through: the layout was measured, the
+   CONTENT never was.
+
+   So rule 5 measures the scrollers themselves. For each surface this game
+   puts content into — #stage (a full screen) and #verbs .vbody (the rail's
+   readout) — scrollHeight must not exceed clientHeight. A screen that
+   overflows FAILS, and the number printed is the overflow in px, which is
+   the amount of content that has to be cut. Shrinking the type to 9 px would
+   pass it; that is what the CHARS column is for.
+
+   THE CHARS COLUMN IS THE OTHER HALF, and it does not fail anything. It is
+   this repo's hudTextChars convention (tools/visual-presets/jail-scene.mjs
+   and disaster-sequence.mjs both measure it): the rendered, whitespace-
+   stripped text the player has to read on that screen right now. It is
+   printed on every run so that "cut the words" is a number somebody can
+   watch fall, rather than an opinion two agents can disagree about.
 
    Frames: the standard family, portrait and landscape, because landscape on a
    phone is 390 px TALL and that is where a bottom rail with a body panel runs
-   out of screen. Screens: the campaign, the encounter rail, the same rail
-   with a live match strip under it (the actual bug), an outpost, the map, the
-   armoury and the battle HUD.
+   out of screen. Screens: the campaign, the encounter rail, the ALLIANCE rail
+   (which is where the reported bug's successor lives — the match strip that
+   caused it was deleted 2026-09-01), an outpost, the map, the map's diplomacy
+   card, the armoury and the battle HUD.
 
      node tools/warlord-fits.mjs              # the gate
      node tools/warlord-fits.mjs --verbose    # print every control measured
      node tools/warlord-fits.mjs --frames laptop,iphone-16:landscape
 
-   Exit 0 clean, 1 on any control that is off-screen, covered or too small.
+   Exit 0 clean, 1 on any control that is off-screen, covered or too small,
+   or any screen whose content runs below the fold.
 ============================================================ */
 import { launch, sleep } from "./lib/cdp.mjs";
 
@@ -80,10 +117,11 @@ const SCREENS = [
   { id: "campaign", why: "riding — the HUD, the compass, the map button",
     set: `(async () => { return CBZ.warlord.phase() === "campaign"; })()` },
 
-  /* SECOND, AND BEFORE ANY MATCH IS OPENED. `encounter-in-match` below starts
-     a demo match, and a live match PINS the clock at 1x by design (match.js —
-     seven warlords share one wall clock), so this screen has to reach 64x
-     before that happens. It leaves the island fast-forwarding behind every
+  /* SECOND, AND EARLY. Nothing pins the clock any more — the match layer that
+     used to hold it at 1x is deleted — but this screen still runs before the
+     rails because it leaves the island at 64x, and a screen measured while
+     parties ride into you is a screen that changed under the ruler. It leaves
+     the island fast-forwarding behind every
      screen after it, which is harmless for a layout measurement and is also
      free extra coverage of the pill at speed — the parties are calmed here so
      nothing rides in and takes the phase mid-measurement. */
@@ -116,17 +154,38 @@ const SCREENS = [
       return !!document.querySelector("#verbs.on .vbtn, #stage.on button");
     })()` },
 
-  { id: "encounter-in-match", why: "THE REPORTED BUG — the same rail with the match strip live",
+  /* WAS `encounter-in-match`: the encounter rail with the match strip live
+     under it, which is the bug this whole tool was written for. THE MATCH
+     STRIP IS GONE — the match layer was deleted 2026-09-01 (see
+     src/warlord/match.js's tombstone), so `#wl-match` no longer exists and
+     that collision cannot recur. The screen is REPOINTED rather than dropped,
+     because the thing it was really checking — a rail of verbs at the bottom
+     of a phone, answerable — is now carrying the game's one real decision.
+
+     ALLIANCE OFFER. A rival warlord's rider arrives and you answer ACCEPT or
+     REFUSE on the verb rail, with his facts in the body panel above it. On a
+     390 px-tall landscape phone that is a head, a body and two buttons in the
+     bottom dock, which is exactly the shape that ran out of screen before. */
+  { id: "alliance-offer", why: "a warlord's offer: ACCEPT / REFUSE on the rail",
     set: `(async () => {
-      const W = CBZ.warlord;
-      if (!W.match || !W.match.demo) return false;
-      W.match.demo({ n: 6 });
+      const W = CBZ.warlord, A = W.warlords;
+      if (!A || !A.list().length) return false;
+      W.setPhase("campaign");
+      /* TEAR THE PREVIOUS RAIL DOWN FIRST. The screens share one boot and
+         the encounter screen runs immediately before this one; present()
+         refuses to
+         stomp a rail that is already up (that is the rule — an offer is never
+         more urgent than the fight you are in), so without this the frame
+         measured was still the ENCOUNTER's rail wearing this subject's name.
+         The tell was two subjects reporting byte-identical char counts. */
+      if (CBZ.warlordCtx && CBZ.warlordCtx.closeVerbs) CBZ.warlordCtx.closeVerbs();
+      const w = A.list()[0];
+      /* Straight into the state rather than waiting for a dawn to roll one:
+         this is a LAYOUT gate, and the diplomatic rules are gated elsewhere. */
+      W.warlordState.wait[["you", w.id].sort().join("|")] = { from: w.id, to: "you", day: W.state.day };
+      A.present();
       await new Promise(r => setTimeout(r, 200));
-      const b = W.makeBand({ size: 210, faction: "merc", x: W.state.you.x + 30, z: W.state.you.z + 30 });
-      W.state.bands.push(b);
-      W.army.encounter(b);
-      await new Promise(r => setTimeout(r, 120));
-      return !!document.querySelector("#verbs.on .vbtn") && !!document.querySelector("#wl-match.on");
+      return !!document.querySelector("#verbs.on .vbtn");
     })()` },
 
   { id: "outpost", why: "the trading rail: BUY / SELL / RECRUIT / ARM MEN / RIDE ON",
@@ -159,14 +218,114 @@ const SCREENS = [
       return !!document.querySelector("#stage.on button");
     })()` },
 
-  { id: "match-board", why: "the openfront board: every warlord, every offer",
+
+  /* ---- THE THREE SCREENS THIS TOOL COULD NOT SEE ------------------------
+     Added with rule 5, and they are the reason rule 5 exists. Every screen
+     above is either a rail (bounded by construction) or a board whose
+     content is a fixed number of rows. These three are the ones whose
+     height is a function of WHAT HAPPENED — how many men died, how many
+     prisoners you are standing over, how much prose a card felt like
+     printing — and they are therefore the only ones that can be 2 700 px
+     tall. They run last because two of them mutate the roster.
+
+     They are also, not coincidentally, the three screens the owner was
+     scrolling.
+
+     THEY RUN BEFORE THE MAP SCREENS AND THAT ORDER IS LOAD-BEARING. The
+     first run of this block sat them after the (now deleted) match board and
+     all three reported the board's own 21 controls and 919 chars: the board
+     repainted itself into #stage on its own clock, so it took the screen back
+     from every ctx.screen() that followed it. The tell was three different
+     screens reporting byte-identical numbers. A `set` expression that ends in
+     `#stage.on button` cannot notice that, because any full screen satisfies
+     it — which is a real limitation of the "did it open" test, still true of
+     territory.js's map, and the reason this is a comment rather than a fix. */
+
+  { id: "inspect", why: "the encounter's full roster — INSPECT, one tap off the rail",
     set: `(async () => {
       const W = CBZ.warlord;
-      if (!W.match || !W.match.board) return false;
-      if (!W.match.live()) W.match.demo({ n: 6 });
-      W.match.board();
-      await new Promise(r => setTimeout(r, 200));
+      const b = W.makeBand({ size: 210, faction: "merc", x: W.state.you.x + 30, z: W.state.you.z + 30 });
+      W.state.bands.push(b);
+      W.army.encounter(b);
+      await new Promise(r => setTimeout(r, 120));
+      /* the rail's INSPECT verb, pressed the way a thumb presses it — by
+         label, because the index moves with HIRE and ROB */
+      const btn = Array.prototype.slice.call(document.querySelectorAll("#verbs .vbtn"))
+        .filter(function (n) { return /INSPECT/.test(n.textContent); })[0];
+      if (!btn) return false;
+      btn.click();
+      await new Promise(r => setTimeout(r, 180));
       return !!document.querySelector("#stage.on button");
+    })()` },
+
+  /* THE AFTERMATH, AT THE SIZE A REAL BATTLE MAKES IT. 40 of yours against
+     60 of theirs, nine of yours dead by name, four broken and run, thirty-one
+     of theirs dead and fourteen standing over as prisoners — every one of
+     which used to be a card with four buttons on it. The report is the same
+     plain object battle.js hands over, so this exercises the shipped path and
+     not a mock of it. */
+  { id: "aftermath", why: "the payoff screen — the dead, the loot and the prisoners",
+    set: `(async () => {
+      const W = CBZ.warlord;
+      if (!W.army || !W.army.aftermath) return false;
+      if (W.territory && W.territory.isOpen && W.territory.isOpen()) W.territory.toggle();
+      for (let i = W.state.army.length; i < 40; i++) {
+        W.addSoldier(W.makeSoldier(i % 7 === 0 ? "veteran" : i % 3 === 0 ? "soldier" : "levy", i % 2 ? "carbine" : "ak47"));
+      }
+      W.state.gold = 900;
+      W.state.prisoners.length = 0;
+      const band = W.makeBand({ size: 60, faction: "bandit", x: W.state.you.x + 40, z: W.state.you.z });
+      const mine = W.state.army.slice();
+      const dead = mine.slice(0, 9);
+      const live = mine.slice(9);
+      const fled = mine.slice(9, 13);
+      const theirDead = band.men.slice(0, 31);
+      const theirLive = band.men.slice(31, 45);
+      const loot = {}, armourLoot = {};
+      for (let i = 0; i < theirDead.length; i++) {
+        const s = theirDead[i];
+        if (s.wid) loot[s.wid] = (loot[s.wid] || 0) + 1;
+        if (s.armour && s.armour !== "none") armourLoot[s.armour] = (armourLoot[s.armour] || 0) + 1;
+      }
+      W.army.aftermath({
+        band: band, outcome: "won", duration: 84, ratio: 1.4, youKills: 6, gold: 420,
+        yourDead: dead, yourSurvivors: live, yourFled: fled,
+        theirDead: theirDead, theirSurvivors: theirLive,
+        loot: loot, armourLoot: armourLoot,
+      });
+      await new Promise(r => setTimeout(r, 220));
+      return !!document.querySelector("#stage.on button");
+    })()` },
+
+  /* AN EVENT CARD, and the wordiest one in the library on purpose. It is the
+     screen the player answers most often that is made of nothing but prose. */
+  { id: "event-card", why: "an events.js card — a headline, a body and the choices",
+    set: `(async () => {
+      const W = CBZ.warlord;
+      if (!W.events || !W.events.fire) return false;
+      if (W.phase() !== "campaign" && W.campaign && W.campaign.enter) W.campaign.enter();
+      await new Promise(r => setTimeout(r, 200));
+      if (W.events.cardOpen && W.events.cardOpen()) W.events.close();
+      W.events.fire("rival");
+      await new Promise(r => setTimeout(r, 220));
+      return !!document.querySelector("#stage.on button");
+    })()` },
+
+  /* WAS `match-board`: the full-screen scoreboard, deleted with the rest of
+     the match layer. Its successor is the map card — diplomacy moved onto the
+     holding of the man you are dealing with — and the card is a harder layout
+     case than the board ever was, because it is a FIXED bottom sheet that has
+     to clear the home indicator while carrying up to four buttons. */
+  { id: "map-diplomacy", why: "a rival's holding on the map: RIDE HERE / OFFER ALLIANCE",
+    set: `(async () => {
+      const W = CBZ.warlord, T = W.territory, A = W.warlords;
+      if (!T || !A || !A.list().length) return false;
+      const w = A.list().find(x => T.held(x.id).length) || A.list()[0];
+      if (!T.isOpen()) T.toggle();
+      await new Promise(r => setTimeout(r, 200));
+      T.focus(w.home);
+      await new Promise(r => setTimeout(r, 350));
+      return !!document.querySelector("#wlTerrCardIn button");
     })()` },
 ];
 
@@ -263,7 +422,7 @@ const MEASURE = (safeT, safeB, safeL, safeR, minHit) => `(() => {
   }
   // and the fixed PANELS themselves must not run off the edge either
   const panels = [];
-  ["hud", "verbs", "stage", "wl-match", "wb"].forEach(function (id) {
+  ["hud", "verbs", "stage", "wb"].forEach(function (id) {
     const p = document.getElementById(id);
     if (!p) return;
     const cs = getComputedStyle(p);
@@ -292,10 +451,65 @@ const MEASURE = (safeT, safeB, safeL, safeR, minHit) => `(() => {
       }
     }
   });
-  return { controls: out, panels: panels, vw: vw, vh: vh };
+  /* ---- RULE 5: THE SCREEN FITS -------------------------------------------
+     The two surfaces this game puts CONTENT into, measured as content and
+     not as a bounding box. #stage is a full screen (the aftermath, the
+     armoury, an event card, the map); #vBody is the readout inside the verb
+     rail. Both are declared overflow:auto, so both are perfectly happy to
+     be four screens tall and neither reports a layout error when it is.
+
+     scrollHeight - clientHeight IS the overflow, and it is the only number
+     here that says how much has to be CUT. Reported per surface with the
+     surface's own height beside it, so a fail reads "2 706 in a 590 px box"
+     rather than an abstract px count.
+
+     TOLERANCE 8 px, and it is rounding rather than mercy: sub-pixel line
+     boxes and a border-box padding round up independently in Chrome, and a
+     surface whose content ends exactly at its edge reports 1-3 px of
+     overflow about half the time. 8 is under one line of 11 px type, so
+     nothing a player could read hides inside it. */
+  const scrolls = [];
+  ["stage", "vBody"].forEach(function (id) {
+    const n = document.getElementById(id);
+    if (!n) return;
+    const cs = getComputedStyle(n);
+    if (cs.display === "none") return;
+    const r = n.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) return;
+    scrolls.push({
+      id: id,
+      over: Math.max(0, n.scrollHeight - n.clientHeight),
+      box: n.clientHeight,
+      content: n.scrollHeight,
+    });
+  });
+
+  /* ---- THE CHARS COLUMN ---------------------------------------------------
+     hudTextChars, the repo's own show-don't-tell metric, scoped to the
+     surface that is actually asking to be read: the screen if one is up,
+     the rail if not, plus the persistent strip either way because the player
+     reads that on every screen. innerText, not textContent — it is the
+     RENDERED text, so a display:none branch and a collapsed roster do not
+     count against a screen that is not showing them. Whitespace stripped so
+     that reformatting the markup cannot move the number. */
+  let chars = 0;
+  const surf = [];
+  const st = document.getElementById("stage");
+  if (st && getComputedStyle(st).display !== "none") surf.push(st);
+  const vb = document.getElementById("verbs");
+  if (vb && getComputedStyle(vb).display !== "none") surf.push(vb);
+  const hd = document.getElementById("hud");
+  if (hd && getComputedStyle(hd).display !== "none") surf.push(hd);
+  for (let i = 0; i < surf.length; i++) {
+    chars += (surf[i].innerText || "").replace(/\s+/g, "").length;
+  }
+
+  return { controls: out, panels: panels, scrolls: scrolls, chars: chars, vw: vw, vh: vh };
 })()`;
 
 const MIN_HIT = 28;
+/* see RULE 5 in the header for why this is 8 and not 0 */
+const SCROLL_TOL = 8;
 
 function frameSpec(token) {
   const [name, orient] = token.split(":");
@@ -325,6 +539,7 @@ const run = async () => {
 
   const rig = await launch({ rafBudget: 0 });
   const fails = [];
+  const charCensus = [];
   let measured = 0;
 
   try {
@@ -371,8 +586,19 @@ const run = async () => {
             : "overlaps " + c.clash;
           fails.push({ frame: F.id, screen: S.id, what: `"${c.name}" ${why}` });
         }
-        const mark = bad.length || m.panels.length ? "FAIL" : "ok  ";
-        console.log(`  ${mark} ${S.id.padEnd(20)} ${m.controls.length} controls` +
+        /* RULE 5. A surface whose content is taller than the surface is a
+           screen the player has to scroll, which is the thing being fixed. */
+        const spill = (m.scrolls || []).filter((c) => c.over > SCROLL_TOL);
+        for (const c of spill) {
+          fails.push({ frame: F.id, screen: S.id,
+            what: `#${c.id} does not fit — ${c.content}px of content in a ${c.box}px box, ${c.over}px below the fold` });
+        }
+        charCensus.push({ frame: F.id, screen: S.id, chars: m.chars,
+          over: spill.reduce((n, c) => Math.max(n, c.over), 0) });
+        const mark = bad.length || m.panels.length || spill.length ? "FAIL" : "ok  ";
+        console.log(`  ${mark} ${S.id.padEnd(20)} ${String(m.controls.length).padStart(2)} controls  ` +
+          `${String(m.chars).padStart(5)} chars` +
+          (spill.length ? `  +${spill.map((c) => c.over).join("/")}px BELOW THE FOLD` : "") +
           (bad.length ? `  ${bad.length} bad` : ""));
         if (VERBOSE) {
           for (const c of m.controls) {
@@ -387,13 +613,26 @@ const run = async () => {
     await rig.close();
   }
 
+  /* THE COPY CENSUS, ON THE SMALLEST FRAME ONLY. One column of numbers is
+     the point; seven copies of it is a wall. The smallest frame is the one
+     where a character costs the most, so it is the one worth a table. */
+  const small = charCensus.filter((r) => r.frame === frames[0]);
+  if (small.length) {
+    console.log(`\nUI COPY on ${frames[0]} — rendered characters the player has to read`);
+    for (const r of small) {
+      console.log(`  ${r.screen.padEnd(20)} ${String(r.chars).padStart(5)} chars` +
+        (r.over ? `   ${r.over}px below the fold` : "   fits"));
+    }
+    console.log(`  ${"TOTAL".padEnd(20)} ${String(small.reduce((n, r) => n + r.chars, 0)).padStart(5)} chars`);
+  }
+
   console.log(`\n${measured} controls measured across ${frames.length} frames`);
   if (fails.length) {
-    console.log(`\nWARLORD FITS: FAIL — ${fails.length} control${fails.length === 1 ? "" : "s"} a player cannot press\n`);
+    console.log(`\nWARLORD FITS: FAIL — ${fails.length} thing${fails.length === 1 ? "" : "s"} a player cannot press or cannot see\n`);
     for (const f of fails) console.log(`  ${f.frame.padEnd(22)} ${f.screen.padEnd(20)} ${f.what}`);
     process.exit(1);
   }
-  console.log("\nWARLORD FITS OK — every control is on screen, uncovered and hittable.");
+  console.log("\nWARLORD FITS OK — every control is on screen, uncovered and hittable, and every screen fits.");
 };
 
 run().catch((e) => { console.error(e); process.exit(1); });

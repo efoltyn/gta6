@@ -924,6 +924,8 @@
      opts: { color }  team/faction colour, overrides the torso and cap
            { variant } integer; picks skin and hair deterministically
            { scale }   metres tall override, default the shipped 1.82 m
+           { build }   "m" | "f" — entities/character.js's body profile
+           { hairStyle } a key in character.js's HAIR_STYLES table
      Returns null when the `people` pack is not loaded, so a caller can fall
      back rather than crash — the same degrade rule the rest of the file uses. */
   CBZ.studio.cast = function (role, opts) {
@@ -941,6 +943,24 @@
       hair: HAIRS[((v * 3 + 1) % HAIRS.length + HAIRS.length) % HAIRS.length],
     };
     if (pal.cap != null) body.cap = opts.color != null ? opts.color : pal.cap;
+    /* CASTING IS ALSO A CASTING DECISION, not only a paint job.
+       entities/character.js has always taken `build` ("m" | "f", default "m")
+       and `hairStyle` (a key in its own HAIR_STYLES table) — but studio.cast
+       forwarded NEITHER, so every page that casts through this door got the
+       adult male profile with `short` hair and had no way to say otherwise
+       short of calling CBZ.makeCharacter itself and re-implementing the whole
+       role table. Desert Warlord needs exactly that door: it is a game with no
+       women in it (owner) and its men should not be wearing the engine's
+       default nape-length shell.
+
+       Forwarded ONLY when asked for, so this is a no-op for every existing
+       caller — grepped: 26 studio.cast call sites in this repo on 2026-09-01
+       and not one of them passes `build` or `hairStyle`. Gang city and the
+       prison keep the exact bodies they had, byte for byte, and an unknown
+       style id falls through character.js's own `HAIR_STYLES[c.hairStyle]`
+       guard back to the default rather than throwing. */
+    if (opts.build) body.build = opts.build;
+    if (opts.hairStyle) body.hairStyle = opts.hairStyle;
     let ch = null;
     try { ch = CBZ.makeCharacter(body); } catch (e) { return null; }
     const g = (ch && ch.isObject3D) ? ch : (ch && ch.group);

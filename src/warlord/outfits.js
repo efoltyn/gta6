@@ -25,6 +25,30 @@
    helmeted, carrying webbing and wearing the accent twice.
 
    ---------------------------------------------------------------
+   ...EXCEPT IN YOUR OWN ARMY, WHERE THE AXIS IS ARMOUR (owner, 2026-09-01:
+   "ALSO all my soldiers should wear the same painted uniform difference is in
+   armour"). Your warband is the one force on the island that is ISSUED, so it
+   wears ONE record — `yo_issue`, an amber sash on desert canvas — on every
+   man at every tier, and the only thing that differs between two of your
+   soldiers is the kit he is wearing over it: nothing, a flak vest, a plate
+   carrier, a heavy rig, straight off core.js's W.ARMOUR ladder. That is the
+   one difference between your men that the player actually bought, and it is
+   now the one difference he can see. Full argument at KIT.you, the geometry
+   at armourKit(), the audit at audit().
+
+   AND THE HEADGEAR SITS ABOVE THE EYES (owner: "headbands are too low on
+   heads rn they everlap eyes"). Four of the five hats were drawn straight
+   across the face because every number was a hand-tuned fraction of the head
+   CUBE and the face is not centred in the cube. Everything is now anchored to
+   the rig's own measured brow line. Numbers, before and after, at THE FACE
+   LINE.
+
+   AND THERE ARE NO WOMEN HERE (owner: "women should not be in the game no
+   woman hair"). cast() passes entities/character.js's own `build` and
+   `hairStyle` casting options — see the note there for why that is a casting
+   decision and not a deletion, and why gang city and the prison are untouched.
+
+   ---------------------------------------------------------------
    WHAT WAS TAKEN FROM city/outfits.js AND WHY (the owner asked for the
    suits, and the rest of that catalogue is 2492 lines of colour work nobody
    should retype).
@@ -111,7 +135,12 @@
    never structure, and no record in this file depends on it existing.
 
    ---------------------------------------------------------------
-   FLAGS (repo doctrine: every behaviour change reverts from the URL)
+   FLAGS. No new ones this wave, deliberately: the issue uniform, the head
+   line and the male-only casting are DESIGN DECISIONS, and a flag on a design
+   decision is a second army nobody ever photographs. git is the undo, and the
+   before/after lives in tools/visual-presets/warlord-headline.mjs and
+   warlord-issue.mjs, which serve a pristine HEAD worktree as their BEFORE.
+
      ?outfits=old    this module does nothing. battle.js/campaign.js fall
                      back to the flat team tint, byte for byte.
      ?outfits=flat   uniforms, but no painted atlas and no camo map. The
@@ -395,19 +424,45 @@
       wear: 0.25,
       head: { levy: ["none", "rag"], raider: ["rag", "shemagh"], soldier: ["beret", "cap"], veteran: ["beret", "helmet"] },
     },
-    /* YOUR WARBAND IS THE SIXTH ARMY AND IT IS THE ONLY ONE THAT LOOKS LIKE
-       ITS OWN HISTORY. You do not issue uniforms; you take men. So one of
-       yours wears whatever he was wearing when you beat him — his ORIGIN
-       faction's fit, hashed off his id and stable forever — with one thing
-       added: your amber on his head. That is a mechanic you can see. An army
-       of forty is forty different men with one colour in common, and it looks
-       progressively more like an army as veterans accumulate. */
+    /* YOUR WARBAND IS THE SIXTH ARMY AND IT IS THE ONLY ONE THAT IS ISSUED.
+
+       OWNER, 2026-09-01, verbatim: "ALSO all my soldiers should wear the same
+       painted uniform difference is in armour."
+
+       WHAT THIS REPLACES, and why he is right. The first version of this file
+       made your army "everyone you ever beat": each of your men wore his
+       ORIGIN faction's fit, hashed off his id, with your amber on his head.
+       It is a nice sentence and it photographs as a mob. Forty men in forty
+       uniforms is forty strangers — you cannot see your own line at a glance,
+       you cannot tell your flank from theirs at 200 m, and worst of all the
+       ONE thing the player spends money on across a whole campaign — the
+       armour ladder in core.js's W.ARMOUR (none / vest / plate / heavy) —
+       was invisible on the body. He was buying a number.
+
+       So: ONE issued uniform on every man of yours (the `yo_issue` record
+       below), and the ONLY thing that differs between two of your soldiers is
+       what he is WEARING OVER it. That is not a simplification — it moves the
+       whole man-to-man variation budget onto the one axis that carries
+       information. A levy in a shirt, a raider in a flak vest and a veteran in
+       a plate rig are three different SILHOUETTES, and the difference is a
+       thing you paid for.
+
+       ONE ARMY, ONE UNIFORM: every per-man roll is off for `you` — no boot
+       hash, no wear hash, no headgear hash. See detail(). The other five
+       armies keep every one of them; the enemy is supposed to look like five
+       different problems. */
     you: {
-      reads: "everyone you ever beat, wearing your amber and nothing else of yours",
-      boots: [0x2b241c, 0x1f1a14],
-      wear: 0.6,
-      headAccent: true,        // your amber is the ONLY thing your army shares
-      head: { levy: ["rag", "none"], raider: ["rag", "shemagh"], soldier: ["shemagh", "cap"], veteran: ["helmet", "shemagh"] },
+      reads: "one issued uniform on every man; the only difference between two of them is his armour",
+      boots: [0x241f18],       // ONE boot. An issued army does not roll for boots.
+      wear: 0.45,              // one campaign's worth of sun, the same on all of them
+      headAccent: true,        // your amber, and it is the only colour they share
+      /* HEADGEAR IS ISSUED WITH THE ARMOUR, not with the rank. A man with no
+         armour has cloth on his head because cloth is what he came with; a
+         man in a vest has been kitted, so he has the issued cap; a man in a
+         plate rig has the lid that comes with it. That single rule makes the
+         armour ladder readable at the top of the silhouette, which is the
+         only part of a man with clean sky behind it at range. */
+      armourHead: { none: "shemagh", vest: "cap", plate: "helmet", heavy: "helmet" },
     },
   };
 
@@ -604,15 +659,40 @@
       colors: C("suit"), note: "SUIT_STYLES[10], Burgundy 3-Piece — the waistcoat reads at portrait range and the shape reads at 200 m." },
 
     // ================= YOUR WARBAND (the sixth army) ================
-    // Only the top of your ladder is yours; everything below it is borrowed
-    // from whoever you took the man off (see forSoldier). These three are
-    // what a man looks like once he has been with you long enough.
-    { f: "you", t: "veteran", id: "yo_own", name: "Warlord's Own", belt: 1, badge: 1,
+    /* THE ISSUE UNIFORM. One record, worn by every man in your army, at every
+       tier, forever (forSoldier). The three records under it are still in the
+       catalogue and are still worn — by YOU, out of the wardrobe picker — but
+       nothing assigns them to a soldier any more; they carry `player: 1` so
+       audit() can say so out loud.
+
+       WHY THE `gang` PAINTER. It is city/clothes.js's colour-keyed
+       `gang|torso|collar` family (clothes.js:2444), so a fourth army wearing
+       it costs one more atlas and can never collide with the Rival Warlord's
+       three (THE ATLAS-KEY TRAP at the top of this table). And what it draws
+       is the single best thing in that file for this job: a diagonal SASH
+       across the chest, a band continuing round the back, a band on each
+       sleeve and a stripe down the leg — all in the accent. Put your amber in
+       the accent slot and every man of yours carries four amber marks that
+       read from any angle, on a dark desert canvas that does not vanish into
+       the dune. "His colours, deliberately, on every man" is the Rival
+       Warlord's own sentence; the difference is that yours is ISSUED, so it
+       is on the levy too.
+
+       The `heavy` step is in W.ARMOUR and is fielded by wealthy bands, so it
+       is in the ladder here even though your own quartermaster rarely stocks
+       it — a row that exists in the data and not on the body is how the last
+       version of this file ended up invisible. */
+    { f: "you", t: "issue", id: "yo_issue", name: "Warband Issue", paint: "gang", gang: "yo_issue",
+      belt: 1, badge: 1,
+      colors: { legs: 0x2f2a22, torso: 0x594d36, arms: 0x594d36, collar: 0xffb347, shoes: 0x241f18 },
+      note: "the one uniform your army wears. Amber sash, amber sleeve bands, amber leg stripe on desert canvas; the man-to-man difference is his armour and nothing else." },
+
+    { f: "you", t: "veteran", id: "yo_own", name: "Warlord's Own", belt: 1, badge: 1, player: 1,
       colors: { legs: 0x1c1814, torso: 0x241e19, arms: 0x241e19, collar: 0xffb347, shoes: 0x120f0c },
       note: "amber on the yoke and the head. The first genuinely YOURS kit, and it only ever appears on men who have survived three fights." },
-    { f: "you", t: "veteran", id: "yo_plate", name: "Household Carrier", camo: "wadishadow", camoTint: 0xd8c39a, belt: 1, badge: 1,
+    { f: "you", t: "veteran", id: "yo_plate", name: "Household Carrier", camo: "wadishadow", camoTint: 0xd8c39a, belt: 1, badge: 1, player: 1,
       colors: { legs: 0x2b2620, torso: 0x453b30, arms: 0x453b30, collar: 0xffb347, shoes: 0x16120e } },
-    { f: "you", t: "soldier", id: "yo_line", name: "Amber Band", belt: 1,
+    { f: "you", t: "soldier", id: "yo_line", name: "Amber Band", belt: 1, player: 1,
       colors: { legs: 0x3d352c, torso: 0x6b5c48, arms: 0x6b5c48, collar: 0xffb347, shoes: 0x2b241c },
       note: "a soldier of yours is issued canvas; a veteran of yours is issued black. The two used to be one brown apart and photographed as the same man twice." },
   ];
@@ -651,22 +731,40 @@
     if (band.mine || band.you) return "you";
     return band.faction || "bandit";
   }
-  /* A MAN IN YOUR ARMY IS STILL WEARING THE ARMY HE CAME FROM. Hashed off his
-     id, so the same man is the same ex-legionary forever — through a save,
-     through a network hop, through the aftermath list. Only a veteran (he has
-     been with you long enough for you to have kitted him) gets one of YOUR
-     records, and even then only two thirds of the time. */
-  const ORIGINS = ["bandit", "militia", "company", "legion", "warlord"];
+  /* ---- THE ARMOUR LADDER, READ OFF core.js ----------------------------
+     W.ARMOUR is the table (none / vest / plate / heavy) and W.armour(id) is
+     its lookup; both belong to core.js and neither is retyped here. The STEP
+     is that table's own index, so a fifth row added there is a fifth step
+     here with nothing to change — the alternative, a `{none:0, vest:1, ...}`
+     map in this file, is the kind of second copy that silently disagrees six
+     weeks later. */
+  function armourOf(s) {
+    const id = (s && s.armour) || "none";
+    return (W.armour ? (W.armour(id) || {}).id : id) || "none";
+  }
+  function armourStep(id) {
+    const T = W.ARMOUR;
+    if (T) for (let i = 0; i < T.length; i++) if (T[i].id === id) return i;
+    return 0;
+  }
+
+  /* YOUR MEN WEAR WHAT YOU ISSUED THEM. One record, every man, every tier —
+     see the long note on KIT.you. The old code is worth stating because the
+     shape of the bug is reusable: it hashed each of your men into one of five
+     ENEMY factions' fit tables and dressed him in that, which meant your own
+     army had the widest cloth spread of any force on the island. The revert
+     is `git`; there is no flag, because a flag on a design decision is a
+     second army nobody photographs. */
   function forSoldier(s, band) {
     index();
     if (!s) return FITS[0];
     const id = s.id | 0;
-    let fid = factionOf(band);
-    const tier = s.tier || "levy";
+    const fid = factionOf(band);
     if (fid === "you") {
-      const own = INDEX["you|" + tier];
-      if (!own || !own.length || h(id, 91) > 0.66) fid = ORIGINS[Math.floor(h(id, 17) * 5) % 5];
+      const issue = INDEX["you|issue"];
+      if (issue && issue.length) return issue[0];
     }
+    const tier = s.tier || "levy";
     let list = INDEX[fid + "|" + tier];
     if (!list || !list.length) list = INDEX[fid + "|soldier"] || INDEX["bandit|levy"];
     const rec = list[Math.floor(h(id, 23) * list.length) % list.length];
@@ -682,8 +780,30 @@
     const fid = factionOf(band);
     const K = KIT[fid] || KIT.bandit;
     const tier = (s && s.tier) || "levy";
+    /* ---- YOUR ARMY: EVERY PER-MAN ROLL IS OFF ---------------------------
+       "the same painted uniform, difference is in armour" is only true if
+       nothing ELSE varies. So no boot hash, no wear hash, no headgear hash —
+       one boot, one weathering, and a hat that is a pure function of what he
+       is wearing on his chest. `rank` stops meaning "how many fights has he
+       survived" and starts meaning "which rung of the armour ladder", which
+       is what drives the badge and the belt pouches below: a plate rig comes
+       with pouches, a shirt does not, and neither is a promotion. */
+    if (fid === "you") {
+      const arm = armourOf(s);
+      return {
+        faction: fid,
+        accent: YOUR_COLOUR, rankHex: YOUR_COLOUR, headAccent: true,
+        boots: K.boots[0],
+        head: (K.armourHead && K.armourHead[arm]) || "shemagh",
+        wear: K.wear,
+        armour: arm,
+        rank: armourStep(arm),
+        tier: tier,
+      };
+    }
     const heads = (K.head[tier] || ["none", "rag"]);
     return {
+      armour: "none",         // the other five armies wear their kit PAINTED, see armourKit()
       faction: fid,
       accent: fid === "you" ? YOUR_COLOUR : (rec.accent != null ? rec.accent : accentOf(fid)),
       rankHex: fid === "you" ? YOUR_COLOUR : rankColourOf(fid),
@@ -868,6 +988,121 @@
      a voxel man with clean sky behind it is his head. A shoulder patch is
      gone by 80 m; a pale wrap on a dark man is still there at 300. */
   const HEAD_TYPES = ["none", "rag", "shemagh", "cap", "beret", "helmet"];
+  /* THE ONLY TWO HAIRCUTS IN THIS ARMY. entities/character.js's HAIR_STYLES
+     table is the source (buzz / short / crop / bob / long / pony / bun /
+     pigtail); these are its two shortest, and the long/bob/pony/pigtail rows
+     — the ones its own comments call the female cue — are simply never named
+     here. See the long note at cast() for why this is a casting option rather
+     than a deletion: those styles still belong to gang city and the prison. */
+  const MALE_HAIR = ["buzz", "crop"];
+
+  /* ============================================================ THE FACE LINE
+     OWNER, 2026-09-01: "headbands are too low on heads rn they everlap eyes".
+
+     He is right, and it was never a matter of taste — it was arithmetic
+     nobody had done. Every number in headwear() below was a hand-tuned
+     fraction of the head CUBE (`H * 0.74`, `H * 0.44`), and the head cube is
+     not where the face is. entities/character.js:908 parents the eyes, brow
+     and mouth to a `face` group scaled headSize/0.60 and hangs THAT off the
+     neck — the same frame headwear is added to — so the face lands where the
+     face group says, not where a fraction of the skull says.
+
+     MEASURED off live rigs (probe, 2026-09-01, all four tiers of the bandit
+     portrait, identical to four decimal places), in units of H = headSize:
+
+        head box bottom  0.000 H          head box top   1.000 H
+        mouth top        0.317 H
+        eye BOTTOM       0.433 H
+        eye centre       0.567 H
+        eye TOP          0.700 H
+        brow bottom      0.717 H
+        brow TOP         0.817 H
+        hair crown top   1.100 H          (the `short` shell, style-dependent)
+
+     What the shipped numbers did against that measurement:
+
+        rag band       y 0.740 H  h 0.200 H  -> floor 0.640 H : 0.060 H INTO the eyes
+        shemagh crown  y 0.720 H  h 0.500 H  -> floor 0.470 H : through both eyes
+        beret lip      y 0.740 H  h 0.090 H  -> floor 0.695 H : clipping the eye tops
+        helmet lip     y 0.440 H  h 0.100 H  -> floor 0.390 H : a blindfold
+        helmet dome    y 0.720 H  h 0.660 H  -> floor 0.390 H : a blindfold
+        cap crown/brim/band                  -> floor 0.883 H : CLEAR
+
+     Four of the five hats were drawn across the man's eyes. The fifth — the
+     cap — was the only one whose numbers had been DERIVED from anything
+     (character.js's own built-in cap, copied here on purpose), which is the
+     whole lesson of this block.
+
+     THE RULE, and there is exactly one: NOTHING WORN ON A HEAD MAY REACH
+     BELOW THE BROW LINE. The brow rather than the eye, because a hat rests on
+     the brow ridge — that is the anatomy of every hat — and a band whose
+     floor is the eye TOP is still a band lying across the eyebrows. The
+     shemagh's face cloth is the single exception and it is anchored the other
+     way: its TOP is the eye BOTTOM, because a face veil covers the mouth and
+     nose and stops under the eyes.
+
+     Every number below is now read off the rig being dressed, so a small
+     head, a child's head, or a head character.js re-proportions next month
+     lands right by construction instead of by re-tuning five fractions.
+
+     THE CLEARANCE IS THE ENGINE'S OWN. CBZ.CHAR_YOKE_CLEAR
+     (entities/character.js:161, 0.01 authored = 7 mm at HUMAN_SCALE 0.70) is
+     the number city/clothes.js's jacket shell and city/armor.js's vest
+     already measure against; a hat floor sitting exactly ON the brow's top
+     face is a z-fight, and typing a second clearance here is precisely the
+     bug character.js's own comment publishes that constant to prevent. */
+  function clearOf() {
+    if (CBZ.CONFIG && CBZ.CONFIG.CHAR_YOKE_CLEAR === false) return 0;
+    return (CBZ.CHAR_YOKE_CLEAR != null) ? CBZ.CHAR_YOKE_CLEAR : 0.01;
+  }
+  /* The fallback fractions ARE the measured numbers above, so a rig with no
+     face group (the harness's stubs, or any future rig that stops building
+     one) is dressed to the same line rather than to a second opinion. */
+  const FACE_F = { mouthTop: 0.31667, eyeBot: 0.43333, eyeTop: 0.70000, browTop: 0.81667 };
+  function boxH(m) { const p = m && m.geometry && m.geometry.parameters; return (p && p.height) || 0; }
+  function faceLine(ch, H) {
+    const f = ch && ch.face;
+    const e = f && f.eyeL, par = e && e.parent;
+    if (!e || !par) {
+      return { eyeBot: H * FACE_F.eyeBot, eyeTop: H * FACE_F.eyeTop,
+               browTop: H * FACE_F.browTop, mouthTop: H * FACE_F.mouthTop };
+    }
+    // the face group is SCALED (headSize/0.60) and OFFSET on the neck; both
+    // have to come across or a child's hat lands on an adult's brow line.
+    const k = par.scale && par.scale.y ? par.scale.y : 1;
+    const y0 = par.position ? par.position.y : 0;
+    const top = function (m) { return y0 + (m.position.y + boxH(m) / 2) * k; };
+    const bot = function (m) { return y0 + (m.position.y - boxH(m) / 2) * k; };
+    return {
+      eyeBot: bot(e), eyeTop: top(e),
+      browTop: f.brow ? top(f.brow) : H * FACE_F.browTop,
+      mouthTop: f.mouth ? top(f.mouth) : H * FACE_F.mouthTop,
+    };
+  }
+  /* HOW HIGH A HAT HAS TO REACH, and it is not the skull. A cloth wrap laid
+     on a haired head must cover the HAIR or the merged shell pokes through
+     the crown — so the wrap's ceiling is the hair mesh's own bounding box,
+     measured, not the head cube. A rig built with c.cap has no hair mesh at
+     all (character.js:986's `if (c.cap) {...} else {hair}`), and then the
+     skull IS the ceiling. */
+  function skullTop(ch, H) {
+    const hm = ch && ch.skinSlots && ch.skinSlots.hair && ch.skinSlots.hair[0];
+    const g = hm && hm.geometry;
+    if (g) {
+      if (!g.boundingBox && g.computeBoundingBox) { try { g.computeBoundingBox(); } catch (e) {} }
+      if (g.boundingBox && isFinite(g.boundingBox.max.y)) return Math.max(H, g.boundingBox.max.y);
+    }
+    return H;
+  }
+  function skullWidth(ch, H) {
+    const hm = ch && ch.skinSlots && ch.skinSlots.hair && ch.skinSlots.hair[0];
+    const g = hm && hm.geometry;
+    if (g && g.boundingBox && isFinite(g.boundingBox.max.x)) {
+      return Math.max(H, g.boundingBox.max.x - g.boundingBox.min.x);
+    }
+    return H;
+  }
+
   function headSizeOf(ch) {
     if (ch && ch.profile && ch.profile.headSize > 0) return ch.profile.headSize;
     const hd = ch && ch.skinSlots && ch.skinSlots.head && ch.skinSlots.head[0];
@@ -892,43 +1127,148 @@
     if (g) { host.remove(g); ch._wlHead = null; g = null; }
     if (type === "none") { paintSlot(ch.skinSlots && ch.skinSlots.hair, null, true); return null; }
     const H = headSizeOf(ch), k = H / 0.6;
+    const F = faceLine(ch, H);
+    const CL = clearOf();
+    /* THE ONE LINE. Everything a man wears on his head starts here. */
+    const FLOOR = F.browTop + CL;
+    /* THE CEILING FOR HARD KIT is character.js's own cap crown — top face at
+       headSize + 0.18k (crown centre H + 0.07k, height 0.22k, character.js:977).
+       Citing it rather than inventing a second "how tall is a hat" means an
+       attached helmet and a built-in cap are the same object as far as the
+       silhouette is concerned, and if that cap is ever retuned this follows. */
+    const CROWN = H + 0.18 * k;
+    const WRAP_TOP = skullTop(ch, H) + CL;          // cloth has to cover the hair
+    const WRAP_W = Math.max(H * 1.06, skullWidth(ch, H) + CL * 2);
     g = new THREE.Group();
     g.name = "warlord-headwear";
     if (type === "rag") {
-      // a band tied round the forehead with a knot tail — the cheapest read,
-      // and the only one a levy gets.
-      const b = box(H * 1.06, H * 0.2, H * 1.06, hex); b.position.y = H * 0.74; g.add(b);
-      const tail = box(H * 0.16, H * 0.3, H * 0.1, hex); tail.position.set(H * 0.26, H * 0.6, -H * 0.55); tail.rotation.z = 0.35; g.add(tail);
+      /* A FOREHEAD BAND: floor on the brow line, ceiling one clearance over
+         the skull's own crown so it laps the top of the forehead instead of
+         floating as a ring. Height falls out of the two (0.183 H on the adult
+         male, ~7.7 mm real at HUMAN_SCALE) — it is not typed. The hair is
+         left VISIBLE above and behind it, which is what a headband is. */
+      const bh = Math.max(CL * 2, (H + CL) - FLOOR);
+      const b = box(WRAP_W, bh, WRAP_W, hex); b.position.y = FLOOR + bh / 2; g.add(b);
+      /* the knot tail hangs from the band's BACK — behind the head, where
+         there is no face to hit — and it is anchored to the band rather than
+         to a fraction of the skull so it cannot drift off it again. */
+      const th = H * 0.34;
+      const tail = box(H * 0.16, th, H * 0.1, hex);
+      tail.position.set(H * 0.26, FLOOR + bh * 0.5 - th * 0.42, -H * 0.55);
+      tail.rotation.z = 0.35; g.add(tail);
     } else if (type === "shemagh") {
-      // wrap + a drape down the back and over the shoulders. The desert's own
-      // silhouette, and the widest one in the ladder.
-      const crown = box(H * 1.1, H * 0.5, H * 1.1, hex); crown.position.y = H * 0.72; g.add(crown);
-      const drape = box(H * 1.16, H * 0.62, H * 0.24, hex); drape.position.set(0, H * 0.26, -H * 0.52); g.add(drape);
-      // the pulled-up face cloth is a detail, not the silhouette: only the
-      // men who get an accent band get it, which keeps the mesh count down
-      // and reads as "he covered up" rather than "everybody covered up".
-      if (band != null) { const face = box(H * 0.72, H * 0.26, H * 0.12, tone(hex, -0.18)); face.position.set(0, H * 0.3, H * 0.52); g.add(face); }
-      if (band != null) { const cord = box(H * 1.12, H * 0.07, H * 1.12, band); cord.position.y = H * 0.94; g.add(cord); }
+      /* THE WRAP: brow to over the hair, wide enough to swallow the hair
+         shell. The desert's own silhouette and the widest in the ladder. */
+      const ch2 = Math.max(CL * 2, WRAP_TOP - FLOOR);
+      const crown = box(WRAP_W * 1.04, ch2, WRAP_W * 1.04, hex);
+      crown.position.y = FLOOR + ch2 / 2; g.add(crown);
+      /* THE DRAPE hangs off the BACK of that crown and its top is the crown's
+         own floor (lapped by one clearance so no seam can open between them),
+         not a fraction of the head — which is what left a bare gap at the
+         nape once the crown moved up to the brow line. */
+      const dh = H * 0.62;
+      const drape = box(WRAP_W * 1.1, dh, H * 0.24, hex);
+      // top face one clearance INSIDE the crown's floor: lapped, never seamed
+      drape.position.set(0, (FLOOR + CL) - dh / 2, -H * 0.52); g.add(drape);
+      /* THE FACE CLOTH is the one piece anchored from ABOVE: its top face is
+         the eye BOTTOM less a clearance, because a veil covers nose and mouth
+         and stops UNDER the eyes. Only the men who get an accent band get it,
+         which keeps the mesh count down and reads as "he covered up" rather
+         than "everybody covered up". */
+      if (band != null) {
+        const fh = H * 0.26;
+        const face = box(H * 0.72, fh, H * 0.12, tone(hex, -0.18));
+        face.position.set(0, (F.eyeBot - CL) - fh / 2, H * 0.52); g.add(face);
+      }
+      /* THE CHEEK PANELS, and they are the reason a keffiyeh stops looking
+         like a small cap once its crown is lifted onto the brow line. Cloth
+         hangs beside the jaw — that is the whole silhouette of the thing —
+         and it may hang PAST the eye because it is OUTBOARD of it: the eye
+         box's outer edge is at 0.35 H and these panels' inner faces are at
+         0.42 H, so nothing of them is ever in front of an eye. Beside the
+         face is not over the face, and conflating the two is what would make
+         this rule turn every desert wrap into a beanie. */
+      const kh = H * 0.5;
+      for (const sgn of [-1, 1]) {
+        const cheek = box(H * 0.14, kh, H * 0.78, hex);
+        cheek.position.set(sgn * (WRAP_W * 0.5 - H * 0.06), (FLOOR + CL) - kh / 2, -H * 0.06);
+        g.add(cheek);
+      }
+      // the agal cord rides the lower third of the crown, on the crown, never
+      // on the brow.
+      if (band != null) {
+        const cordH = H * 0.07;
+        const cord = box(WRAP_W * 1.06, cordH, WRAP_W * 1.06, band);
+        cord.position.y = FLOOR + ch2 * 0.34; g.add(cord);
+      }
     } else if (type === "cap") {
-      // character.js's own cap numbers (0.66/0.22 crown, 0.66/0.1/0.3 brim,
-      // y = headSize + 0.07k) so an attached cap and a built-in cap are the
-      // same hat. If those ever change, this follows by construction.
-      const crown = box(0.66 * k, 0.22 * k, 0.66 * k, hex); crown.position.y = H + 0.07 * k; g.add(crown);
-      const brim = box(0.66 * k, 0.1 * k, 0.3 * k, hex); brim.position.set(0, H - 0.02 * k, 0.42 * k); g.add(brim);
-      if (band != null) { const bnd = box(0.68 * k, 0.07 * k, 0.68 * k, band); bnd.position.y = H - 0.01 * k; g.add(bnd); }
+      /* character.js's own cap numbers (0.66/0.22 crown, 0.66/0.1/0.3 brim,
+         y = headSize + 0.07k) so an attached cap and a built-in cap are the
+         same hat. If those ever change, this follows by construction.
+
+         MEASURED CLEAR: brim floor lands at 0.883 H against a brow top of
+         0.817 H, so the cap was the one item in this ladder that never
+         touched the face. It is clamped anyway rather than trusted — the
+         clamp is a no-op today and stops the next edit to character.js from
+         silently reopening the bug the rest of this block exists to fix. */
+      const lift = function (m, h2) {
+        const floor = m.position.y - h2 / 2;
+        if (floor < FLOOR) m.position.y += FLOOR - floor;
+      };
+      const crown = box(0.66 * k, 0.22 * k, 0.66 * k, hex);
+      crown.position.y = H + 0.07 * k; lift(crown, 0.22 * k); g.add(crown);
+      const brim = box(0.66 * k, 0.1 * k, 0.3 * k, hex);
+      brim.position.set(0, H - 0.02 * k, 0.42 * k); lift(brim, 0.1 * k); g.add(brim);
+      if (band != null) {
+        const bnd = box(0.68 * k, 0.07 * k, 0.68 * k, band);
+        bnd.position.y = H - 0.01 * k; lift(bnd, 0.07 * k); g.add(bnd);
+      }
     } else if (type === "beret") {
-      const crown = box(H * 1.02, H * 0.24, H * 1.02, hex); crown.position.y = H * 0.86; crown.rotation.z = 0.12; g.add(crown);
-      const lip = box(H * 1.1, H * 0.09, H * 1.1, tone(hex, -0.25)); lip.position.y = H * 0.74; g.add(lip);
-      if (band != null) { const flash = box(H * 0.2, H * 0.16, H * 0.06, band); flash.position.set(-H * 0.34, H * 0.88, H * 0.36); g.add(flash); }
+      /* THE LIP IS THE BAND A BERET IS PULLED DOWN ONTO, so the lip owns the
+         floor and the crown sits on the lip. The old pair had the lip
+         straddling the eye tops (floor 0.695 H) and the crown 0.077 H below
+         the brow. */
+      const lipH = H * 0.09;
+      const lip = box(H * 1.1, lipH, H * 1.1, tone(hex, -0.25));
+      lip.position.y = FLOOR + lipH / 2; g.add(lip);
+      const cH = Math.max(CL * 2, CROWN - (FLOOR + lipH) + CL);
+      const crown = box(H * 1.02, cH, H * 1.02, hex);
+      crown.position.y = FLOOR + lipH - CL + cH / 2;
+      crown.rotation.z = 0.12; g.add(crown);
+      if (band != null) {
+        const flash = box(H * 0.2, H * 0.16, H * 0.06, band);
+        flash.position.set(-H * 0.34, crown.position.y, H * 0.36); g.add(flash);
+      }
     } else if (type === "helmet") {
-      const dome = box(H * 1.14, H * 0.66, H * 1.14, hex); dome.position.y = H * 0.72; g.add(dome);
-      const lip = box(H * 1.2, H * 0.1, H * 1.2, tone(hex, -0.3)); lip.position.y = H * 0.44; g.add(lip);
-      if (band != null) { const flash = box(H * 0.24, H * 0.12, H * 0.06, band); flash.position.set(H * 0.32, H * 0.72, H * 0.58); g.add(flash); }
+      /* THE RIM OWNS THE FLOOR and the dome stands on it. The shipped pair
+         both had their floors at 0.390 H — 0.31 H below the top of the eye,
+         which is a blindfold with a chinstrap. */
+      const rimH = H * 0.1;
+      const rim = box(H * 1.2, rimH, H * 1.2, tone(hex, -0.3));
+      rim.position.y = FLOOR + rimH / 2; g.add(rim);
+      const dH = Math.max(CL * 2, CROWN - FLOOR);
+      const dome = box(H * 1.14, dH, H * 1.14, hex);
+      dome.position.y = FLOOR + dH / 2; g.add(dome);
+      /* THE NAPE SKIRT is what the single dome box used to buy by hanging
+         over the eyes: a helmet covers the back of the skull to below the
+         ear. Put it BEHIND the head, where there is no face to reach, and the
+         front stays on the brow line. It is also the cheapest thing in this
+         file that makes a helmeted silhouette unmistakable from the side. */
+      const sH = H * 0.34;
+      const skirt = box(H * 1.1, sH, H * 0.22, tone(hex, -0.12));
+      skirt.position.set(0, FLOOR + rimH - sH / 2, -H * 0.52); g.add(skirt);
+      if (band != null) {
+        const flash = box(H * 0.24, H * 0.12, H * 0.06, band);
+        flash.position.set(H * 0.32, FLOOR + dH * 0.5, H * 0.58); g.add(flash);
+      }
     }
     g.userData.wl = type + "|" + hex + "|" + band;
+    g.userData.floor = FLOOR;                 // what the audit and the presets read
     host.add(g);
     ch._wlHead = g;
-    // hair under a full wrap or a helmet is a mohawk poking through a hat
+    // hair under a full wrap or a helmet is a mohawk poking through a hat.
+    // A RAG NO LONGER COVERS: it is a band on the forehead now, and hiding
+    // the hair under one made a bandana read as a bald man in a ribbon.
     const covers = (type === "shemagh" || type === "helmet" || type === "cap");
     paintSlot(ch.skinSlots && ch.skinSlots.hair, null, !covers);
     return g;
@@ -979,6 +1319,233 @@
       }
     }
     return b;
+  }
+
+  /* ============================================================ ARMOUR
+     THE THING THE PLAYER PAYS FOR, MADE VISIBLE.
+
+     OWNER: "all my soldiers should wear the same painted uniform difference
+     is in armour." The uniform half of that is one record (yo_issue); this is
+     the other half, and it has to be GEOMETRY rather than another colour.
+     Two men in the same uniform whose only difference is a darker chest are
+     two men in the same uniform. Two men where one is visibly WIDER at the
+     shoulders and squarer in the chest are a levy and a veteran, at 200 m,
+     through haze, with no HUD.
+
+     WHY THIS IS NOT city/armor.js. That file exists, it is good, and it draws
+     exactly these pieces — a fitted vest, a plate carrier with shoulder pads,
+     side plates and a groin flap, a tactical helmet — with a clearance solver
+     against whatever garment the rig is already wearing. It is also a STAT
+     system: it owns a damage pool (`_armor`), a loot economy, a wrap on
+     CBZ.cityDeathReset, a wrap on CBZ.cityLootCorpse, a per-frame CBZ.onUpdate
+     hook and a seed pass over CBZ.player, and it reads CBZ.game. None of that
+     has meaning on a page whose people are warband rosters and whose armour
+     pool is core.js's own `soak`. So the same judgement this file already
+     makes about city/outfits.js applies: take the SHAPE, not the module — and
+     ask for its one pure published function by NAME (CBZ.cityArmorFit, the
+     clearance solver) so that a page which DOES have it gets the identical
+     fit instead of a second opinion.
+
+     THE STANDOFF IS A REAL MEASUREMENT, not a look. A soft flak vest stands
+     about 15 mm off the chest, a rifle-plate carrier about 35 mm, and a heavy
+     rig with hard side and shoulder plates about 55 mm (published carrier
+     thicknesses; ceramic plates alone are 20-25 mm before the cummerbund).
+     Those are REAL metres, and this rig is authored 2.60 units tall and drawn
+     at CBZ.HUMAN_SCALE (0.70) to stand 1.82 m — so a metre of the world is
+     1/0.70 authored units, and the standoff is divided by it rather than
+     eyeballed. That single division is why the vest and the plate read as
+     different objects instead of as two settings of one slider. */
+  const ARMOUR_STANDOFF_M = { vest: 0.015, plate: 0.035, heavy: 0.055 };
+  /* Which pieces each rung wears. The rungs are core.js's W.ARMOUR ids; a
+     rung this table does not know falls back to the vest, so a fifth row
+     added to core still puts something on the body. */
+  const ARMOUR_SHAPE = {
+    /* POUCHES BELONG TO THE VEST AND NOT TO THE PLATE, and that is a read
+       decision with a real thing behind it. A flak vest IS a pouch rig — the
+       soft panel is thin (15 mm; it is armour you can fold) and everything
+       that makes it look like armour is bolted to the front of it. A plate
+       carrier's mass is the plate: a hard slab, side plates on the
+       cummerbund, pads on the shoulders. Measured off the first pass: with
+       both rungs drawn as "a slab, thicker", the vest step was +2.7 % of
+       torso width and +4.2 % of depth — technically correct and invisible.
+       Giving each rung the shape it actually has, rather than two settings of
+       one thickness slider, is what makes the middle of the ladder exist. */
+    vest:  { carrier: 1, pouches: 3, pads: 0, sides: 0, collar: 0, skirt: 0 },
+    plate: { carrier: 1, pouches: 0, pads: 1, sides: 1, collar: 0, skirt: 0 },
+    heavy: { carrier: 1, pouches: 0, pads: 1, sides: 1, collar: 1, skirt: 1 },
+  };
+  function humanScale() { return (CBZ.HUMAN_SCALE > 0) ? CBZ.HUMAN_SCALE : 0.70; }
+
+  /* THE ARMOUR'S OWN COLOUR is derived from the uniform it is worn over, not
+     typed: kit issued with a uniform is made in the uniform's own family, and
+     a hard plate is darker and flatter than the cloth under it. Deriving it
+     also means the day somebody re-tints the issue uniform the armour follows
+     instead of drifting into a colour nobody chose. */
+  function armourHex(rec, det) {
+    const c = (rec && rec.colors) || {};
+    /* OFF THE TUNIC, NOT OFF THE TROUSERS. The first pass derived this from
+       colors.legs, and on the issue uniform the trousers are 0x2f2a22 —
+       already almost black — so a "one step darker" carrier came out at
+       0x272319 and the whole armoured half of the army photographed as men in
+       black boxes with the uniform invisible under them. The tunic is the
+       garment the carrier is worn OVER and it is the family the kit was
+       issued in, so it is the right parent; a plate rig is then harder and
+       darker than a soft vest by one step per rung of core's own ladder. */
+    const base = c.torso != null ? c.torso : (c.legs != null ? c.legs : 0x3a352c);
+    return tone(base, -0.16 - 0.09 * Math.max(0, det.rank - 1));
+  }
+
+  function armourKit(ch, det, rec) {
+    if (!ch || !THREE) return null;
+    const id = (det && det.armour) || "none";
+    let g = ch._wlArmour;
+    const hex = armourHex(rec, det);
+    const key = id + "|" + hex;
+    if (g && g.userData.wl === key) { g.visible = id !== "none"; return g; }
+    const chest = ch.skinSlots && ch.skinSlots.torso && ch.skinSlots.torso[0];
+    if (g) {
+      if (g.parent) g.parent.remove(g);
+      ch._wlArmour = null; g = null;
+      // the pads live on the arms, not on the chest — strip those too
+      const arms = (ch.skinSlots && ch.skinSlots.arms) || [];
+      for (let i = 0; i < arms.length; i++) {
+        const a = arms[i], p = a && a.userData && a.userData._wlPad;
+        if (p && p.parent) { p.parent.remove(p); a.userData._wlPad = null; }
+      }
+    }
+    if (id === "none" || !chest || !chest.add) return null;
+    const shape = ARMOUR_SHAPE[id] || ARMOUR_SHAPE.vest;
+    const stand = (ARMOUR_STANDOFF_M[id] != null ? ARMOUR_STANDOFF_M[id] : ARMOUR_STANDOFF_M.vest) / humanScale();
+    const CL = clearOf();
+
+    /* SIZED OFF THE CHEST BOX, the same rule webbing() and clothes.js's
+       jacket shell use: read the mesh's own BoxGeometry parameters so this
+       lands on a smaller body, and mount ON the chest so it animates with the
+       torso for free and costs no update hook. Where a page has the engine's
+       own solver, its numbers win. */
+    const par = (chest.geometry && chest.geometry.parameters) || {};
+    const cw = par.width || 0.92, chH = par.height || 0.95, cd = par.depth || 0.5;
+    let w = cw + (stand + CL) * 2, d = cd + (stand + CL) * 2;
+    if (CBZ.cityArmorFit) {
+      try {
+        const fit = CBZ.cityArmorFit(ch);
+        // its vest dims are [w, h, d] solved against the DRESSED rig (a
+        // painted jacket shell is wider than the bare chest); take the wider
+        // of the two so a carrier can never sink inside a coat.
+        if (fit && fit.vest) { w = Math.max(w, fit.vest[0] + stand); d = Math.max(d, fit.vest[2] + stand); }
+      } catch (e) {}
+    }
+
+    g = new THREE.Group();
+    g.name = "warlord-armour";
+    /* THE CARRIER covers the ribs and stops short of the waist — a plate ends
+       at the navel, which is what makes it read as a slab worn OVER a shirt
+       rather than as a fatter man. Height and offset come off the chest box. */
+    const carH = chH * 0.68;
+    const car = box(w, carH, d, hex);
+    car.position.y = chH * 0.5 - carH * 0.5 - chH * 0.10;
+    g.add(car);
+    /* THE PLATE BAND: one raised course across the chest, proud of the
+       carrier by another standoff. This is the piece that separates a vest
+       from a rig at range — city/armor.js reaches for the same trick for the
+       same reason ("a SWAT reads heavier than a beat-cop vest"). */
+    if (det.rank >= 2) {
+      const bandH = carH * 0.34;
+      const bnd = box(w + CL * 2, bandH, d + CL * 2, tone(hex, -0.14));
+      bnd.position.y = car.position.y + carH * 0.16;
+      g.add(bnd);
+    }
+    if (shape.pouches) {
+      // a row of utility pouches across the belly, each one proud of the
+      // carrier's own front face by another standoff so none of them can
+      // share a plane with it.
+      const n = shape.pouches, pw = w / (n + 1.6), ph = carH * 0.3;
+      for (let i = 0; i < n; i++) {
+        const pch = box(pw, ph, stand * 2 + CL, tone(hex, -0.22));
+        pch.position.set((i - (n - 1) / 2) * (pw * 1.16), car.position.y - carH * 0.26, d * 0.5);
+        g.add(pch);
+      }
+    }
+    if (shape.sides) {
+      // cummerbund side plates: inner face BURIED inside the chest, outer face
+      // proud of the carrier, so neither can share a plane with anything.
+      const sw = stand * 1.6 + CL;
+      for (const sgn of [-1, 1]) {
+        const sp = box(sw, carH * 0.62, d * 0.86, tone(hex, -0.08));
+        sp.position.set(sgn * (w * 0.5 - CL), car.position.y - carH * 0.10, 0);
+        g.add(sp);
+      }
+    }
+    if (shape.collar) {
+      // throat guard: a standing collar above the carrier. It is the piece
+      // that makes a heavy rig taller as well as wider.
+      const colH = chH * 0.16;
+      const col = box(w * 0.62, colH, d * 0.9, tone(hex, -0.2));
+      col.position.y = car.position.y + carH * 0.5 + colH * 0.5 - CL;
+      g.add(col);
+    }
+    if (shape.skirt) {
+      // groin flap, hanging off the front of the carrier's bottom edge
+      const skH = chH * 0.3;
+      const sk = box(w * 0.42, skH, d * 0.3, tone(hex, -0.1));
+      sk.position.set(0, car.position.y - carH * 0.5 - skH * 0.5 + CL, d * 0.34);
+      g.add(sk);
+    }
+    /* THE SASH IS WORN OVER THE CARRIER, and this is the fix for the fault
+       the first contact sheet showed immediately: the issue uniform's whole
+       identity is a diagonal amber sash painted across the chest, and a
+       carrier covers exactly the chest — so the moment a man of yours put
+       armour on, the thing that made him yours disappeared and he was a dark
+       box with a small amber tab. Three of four rungs of the ladder had no
+       uniform read left at all.
+
+       So the sash goes back on, on top, as one slab at the painter's own
+       angle. It is real — a sash IS worn over kit, that is what a sash is for
+       — it costs one cached box, and it means an armoured block on the far
+       dune is still recognisably yours. The rotation matches PAINT.gang's
+       drawn sash (city/clothes.js:918, a band running from the left shoulder
+       down to the right hip), so the painted one and the geometric one are
+       the same garment rather than two ideas about one. */
+    /* LENGTH IS SOLVED, NOT CHOSEN. w * 1.18 was the first guess and it made
+       the sash the WIDEST thing on the man — which quietly broke the
+       silhouette metric, because the sash scales with the carrier and would
+       then have produced a four-step "ladder" out of the sash alone. At this
+       angle a band of length L reaches x = L/2·cos(a) + h/2·sin(a), so 1.02
+       spans the carrier's own front face and stops inside it: the armour
+       ladder stays the only thing that changes a man's width. */
+    const sashH = carH * 0.2;
+    const sash = box(w * 1.02, sashH, CL * 2 + stand,
+                     det.accent != null ? det.accent : YOUR_COLOUR);
+    sash.position.set(0, car.position.y + carH * 0.06, d * 0.5);
+    sash.rotation.z = -0.42;
+    g.add(sash);
+
+    g.userData.wl = key;
+    chest.add(g);
+    ch._wlArmour = g;
+
+    /* SHOULDER PADS GO ON THE ARMS, not on the chest, and that is the whole
+       reason they are worth drawing: mounted on skinSlots.arms they SWING
+       with the shoulder, so a running man's pauldrons move and the widened
+       silhouette survives the gait instead of shearing through the sleeve at
+       the top of the stride. The upper-arm mesh is centred at -upperH/2 in
+       its own limb group (character.js:77), so its own local top face is at
+       +height/2 and the pad caps it there. */
+    if (shape.pads) {
+      const arms = (ch.skinSlots && ch.skinSlots.arms) || [];
+      for (let i = 0; i < arms.length; i++) {
+        const a = arms[i];
+        if (!a || !a.add) continue;
+        const ap = (a.geometry && a.geometry.parameters) || {};
+        const aw = ap.width || 0.30, ah = ap.height || 0.46, ad = ap.depth || 0.30;
+        const padH = ah * 0.34;
+        const pad = box(aw + (stand + CL) * 2, padH, ad + (stand + CL) * 2, tone(hex, -0.04));
+        pad.position.y = ah * 0.5 - padH * 0.5;
+        a.add(pad);
+        a.userData._wlPad = pad;
+      }
+    }
+    return g;
   }
 
   /* ============================================================ apply
@@ -1097,6 +1664,18 @@
        value pixel in this file — it sits at the top of the silhouette, which
        is the last part of a man with clean sky behind it at range. */
     headwear(ch, det.head, headHex, det.rank >= 1 ? (det.rankHex != null ? det.rankHex : det.accent) : null);
+    /* ---- 5. the armour, LAST, because it goes over everything else.
+       Only your own army wears it as geometry, and that is a decision rather
+       than an omission: the Free Company's veteran already wears a plate
+       carrier PAINTED into its clothes.js atlas (`swat_unmarked` — pouches,
+       radio, cummerbund and knee pads, drawn at the cost of a flat box), and
+       bolting a second geometric carrier over a painted one is the "two
+       carriers on one chest is a shelf" fault warlord/wardrobe.js already
+       names. Your men wear the ONE uniform, which has no painted carrier in
+       it, so the geometry is the only thing on the chest and the ladder is
+       unambiguous. det.armour is "none" for every other faction (detail()),
+       so this is a single early return for 5/6 of the island. */
+    armourKit(ch, det, rec);
 
     relinearSkin(ch);
     ch._wlFit = rec.id;
@@ -1156,6 +1735,35 @@
       color: MODE === "off" ? (opts.color != null ? opts.color : det.accent) : (rec.colors.torso != null ? rec.colors.torso : det.accent),
       variant: opts.variant | 0,
       scale: opts.scale,
+      /* ---- NO WOMEN ON THIS ISLAND ---------------------------------------
+         OWNER, 2026-09-01: "women should not be in the game no woman hair".
+
+         WHAT WAS ACTUALLY WRONG, because the first read of this was "there
+         are none, he must mean something else". There are no female BODIES in
+         Desert Warlord — CBZ.studio.cast never passed a `build`, so every man
+         came out of entities/character.js's ADULT_M profile. What it also
+         never passed was a hair style, so every bare-headed man in the game
+         wore character.js's default for an adult male: `short`, whose merged
+         shell hangs from y 0.867 H down the back of the skull to 0.300 H —
+         level with the MOUTH — and down the temples to 0.417 H, just under
+         the eye. Measured off the live rig, 2026-09-01. That is nape-length
+         hair on every levy, and it is what he is looking at.
+
+         The fix is a CASTING decision, not a deletion: `build` and
+         `hairStyle` are options entities/character.js has always taken and
+         core/studio.js simply never forwarded (two lines added there, this
+         wave). Gang city and the prison pass neither and are untouched — the
+         engine's defaults are exactly what they were.
+
+         `buzz` and `crop` are character.js's own two shortest styles and both
+         are already used for males there (crop IS its boy's cut). Hashed off
+         the man's id so he keeps the same head forever — through a save, a
+         network hop and the aftermath list — the same rule every other roll
+         in this file follows. Roles cast WITH a cap (soldier/officer/guard/…)
+         build no hair mesh at all, so this only ever reaches the bare-headed
+         classes, which are exactly the ones that showed the fault. */
+      build: "m",
+      hairStyle: MALE_HAIR[Math.floor(h((soldier && soldier.id) | 0, 83) * MALE_HAIR.length) % MALE_HAIR.length],
     });
     if (!g) return null;
     if (MODE !== "off") apply(g, { rec: rec, det: det });
@@ -1256,8 +1864,49 @@
     }
     const cells = {};
     for (const k in INDEX) cells[k] = INDEX[k].length;
+
+    /* ---- THE THREE RULES THIS WAVE ADDED, CHECKED RATHER THAN TRUSTED ----
+       Each of them is a sentence somebody could quietly break with one line
+       in a table, which is exactly the class of thing audit() is for. */
+    const issues = [];
+
+    // 1. ONE ISSUED UNIFORM. Every fit assignable to a soldier of yours has
+    //    to be the same record, whatever his tier or his id.
+    const issue = INDEX["you|issue"] || [];
+    if (issue.length !== 1) issues.push("your warband has " + issue.length + " issue uniforms, not 1");
+    const worn = {};
+    for (let i = 0; i < 240; i++) {
+      const s2 = { id: i * 7 + 3, tier: ["levy", "raider", "soldier", "veteran"][i % 4],
+                   armour: ["none", "vest", "plate", "heavy"][(i >> 2) % 4] };
+      worn[forSoldier(s2, { mine: 1 }).id] = 1;
+    }
+    const wornIds = Object.keys(worn);
+    if (wornIds.length !== 1) issues.push("240 of your men wore " + wornIds.length + " different fits: " + wornIds.join(","));
+
+    // 2. NOTHING ON A HEAD REACHES THE EYES. Solved arithmetically against
+    //    the shipped adult-male face rather than by dressing a rig, so this
+    //    runs headless: the floor of every hat is browTop + clearance by
+    //    construction, and the check is that the constructor still says so.
+    const H0 = 0.6, F0 = { eyeTop: H0 * FACE_F.eyeTop, browTop: H0 * FACE_F.browTop };
+    const floor0 = F0.browTop + clearOf();
+    if (floor0 <= F0.eyeTop) issues.push("the hat floor " + floor0.toFixed(3) + " is not above the eye top " + F0.eyeTop.toFixed(3));
+
+    // 3. NO WOMAN HAIR. The style pool this file casts from must contain none
+    //    of the styles character.js uses as its female/child cue.
+    const FEMALE_CUE = ["long", "bob", "pony", "bun", "pigtail"];
+    for (let i = 0; i < MALE_HAIR.length; i++) {
+      if (FEMALE_CUE.indexOf(MALE_HAIR[i]) >= 0) issues.push("MALE_HAIR names " + MALE_HAIR[i]);
+    }
+
     return {
-      ok: dup.length === 0, fits: FITS.length, duplicatePainters: dup, cells: cells,
+      ok: dup.length === 0 && issues.length === 0,
+      fits: FITS.length, duplicatePainters: dup, cells: cells,
+      issues: issues,
+      issueUniform: issue.length ? issue[0].id : null,
+      playerOnlyFits: FITS.filter(function (f) { return f.player; }).map(function (f) { return f.id; }),
+      armourRungs: (W.ARMOUR || []).map(function (r) { return r.id; }),
+      hairStyles: MALE_HAIR.slice(),
+      eyeTop: FACE_F.eyeTop, browTop: FACE_F.browTop, hatFloor: floor0 / H0,
       painter: !!CBZ.cityApplyClothes,
       camo: !!(W.camo && typeof W.camo.material === "function"),
       camoStats: (W.camo && W.camo.stats) ? W.camo.stats() : null,
@@ -1344,6 +1993,16 @@
     }
     return null;
   }
+  /* The armour's piece count, INCLUDING the shoulder pads — they are mounted
+     on the arms so they can swing, so a naive children.length on the chest
+     group under-reports a plate rig by two and makes the ladder look flatter
+     than it is. */
+  function armourMeshCount(ch) {
+    let n = (ch._wlArmour && ch._wlArmour.visible) ? ch._wlArmour.children.length : 0;
+    const arms = (ch.skinSlots && ch.skinSlots.arms) || [];
+    for (let i = 0; i < arms.length; i++) if (arms[i] && arms[i].userData && arms[i].userData._wlPad) n++;
+    return n;
+  }
   function sample(target) {
     const ch = rigOf(target);
     if (!ch || !ch.skinSlots) return null;
@@ -1353,11 +2012,103 @@
     if (hw && hw.visible && hw.children[0] && hw.children[0].material && hw.children[0].material.color) {
       head = fromLinear(hw.children[0].material.color.getHex());
     } else head = readHex(s.head, ch);
+    /* ---- THE EYE LINE, REPORTED IN THE UNITS THE BUG WAS STATED IN.
+       Everything a hat does is a comparison between two numbers on the same
+       head, so both are handed out as fractions of headSize: a gate that
+       reads `faceClear` has the owner's complaint as a signed number instead
+       of as an opinion about a screenshot. Positive = there is skin between
+       the top of the eye and the bottom of the hat. Negative = the hat is on
+       his eyes, which is the whole report. */
+    const H = headSizeOf(ch);
+    const F = faceLine(ch, H);
+    let hatFloor = null;
+    if (hw && hw.visible) {
+      /* ONLY THE PIECES THAT CAN REACH THE FACE ARE MEASURED, and getting
+         this wrong is how the first version of this metric reported every
+         shemagh at -0.47: it was measuring the DRAPE, a panel hanging down
+         the back of the neck at z -0.52 H where there is no face. Two exact
+         exclusions, both geometric rather than by name:
+           · anything whose front face never reaches the head's own front
+             plane cannot occlude anything on it (the drape, the helmet's
+             nape skirt, the rag's knot tail);
+           · anything entirely OUTBOARD of the eye — a cheek panel beside the
+             jaw — is beside the face, not over it, and a keffiyeh hangs there
+             on purpose;
+           · and the face veil is anchored from the eye BOTTOM by design (it
+             is a mouth covering) so it is not measured against the brow. */
+      const eyeOutX = H * 0.35;               // outer edge of the eye box, measured
+      hatFloor = Infinity;
+      for (let i = 0; i < hw.children.length; i++) {
+        const m = hw.children[i];
+        const gp = (m.geometry && m.geometry.parameters) || {};
+        const front = m.position.z + (gp.depth || 0) / 2;
+        if (front < H * 0.5 - clearOf()) continue;                     // behind the face
+        if (Math.abs(m.position.x) - (gp.width || 0) / 2 >= eyeOutX) continue;  // beside it
+        if (m.position.y + (gp.height || 0) / 2 <= F.eyeBot) continue; // the veil
+        hatFloor = Math.min(hatFloor, m.position.y - (gp.height || 0) / 2);
+      }
+      if (!isFinite(hatFloor)) hatFloor = null;
+    }
+    /* THE SILHOUETTE, measured rather than asserted: the armour ladder's whole
+       claim is that a vest and a plate rig are different SHAPES, and a shape
+       is a bounding box. Taken off the built group so pads, side plates and a
+       helmet are all inside it. */
+    let spanX = null, spanY = null;
+    if (THREE && THREE.Box3 && target && target.isObject3D) {
+      try {
+        target.updateMatrixWorld(true);
+        const bb = new THREE.Box3().setFromObject(target);
+        if (isFinite(bb.min.x)) { spanX = bb.max.x - bb.min.x; spanY = bb.max.y - bb.min.y; }
+      } catch (e) {}
+    }
+    /* THE TORSO BLOCK'S OWN SIZE. spanX/spanY are the whole man and are
+       dominated by his arms and his hat, which is the right number for "is
+       that a different shape at 200 m" and the wrong one for "did the vest
+       arrive": a flak vest is 21 mm of standoff on a chest that is already
+       narrower than the arm span. So the chest mesh is measured on its own,
+       with its children (the webbing and the armour ride it), in its own
+       local frame so a gait cannot move it. */
+    let torsoBox = null;
+    const chestM = s.torso && s.torso[0];
+    if (THREE && THREE.Box3 && chestM) {
+      try {
+        const bb = new THREE.Box3();
+        const v = new THREE.Vector3();
+        const walk = function (o, ox, oy, oz) {
+          const gp = (o.geometry && o.geometry.parameters) || null;
+          const px = ox + (o === chestM ? 0 : o.position.x);
+          const py = oy + (o === chestM ? 0 : o.position.y);
+          const pz = oz + (o === chestM ? 0 : o.position.z);
+          if (gp && gp.width && o.visible !== false) {
+            bb.expandByPoint(v.set(px - gp.width / 2, py - gp.height / 2, pz - gp.depth / 2));
+            bb.expandByPoint(v.set(px + gp.width / 2, py + gp.height / 2, pz + gp.depth / 2));
+          }
+          for (let i = 0; i < o.children.length; i++) {
+            if (o.children[i].visible !== false) walk(o.children[i], px, py, pz);
+          }
+        };
+        walk(chestM, 0, 0, 0);
+        if (isFinite(bb.min.x)) torsoBox = bb;
+      } catch (e) {}
+    }
+    const hairMesh = ch.skinSlots && ch.skinSlots.hair && ch.skinSlots.hair[0];
     return {
       fit: ch._wlFit || null,
       torso: readHex(s.torso, ch), legs: readHex(s.legs, ch),
       shoes: readHex(s.shoes, ch), head: head,
       hat: !!(hw && hw.visible), belt: !!(ch._wlBelt && ch._wlBelt.visible),
+      hatType: (ch._wlDet && ch._wlDet.head) || "none",
+      armour: (ch._wlDet && ch._wlDet.armour) || "none",
+      armourMeshes: armourMeshCount(ch),
+      torsoX: torsoBox ? +(torsoBox.max.x - torsoBox.min.x).toFixed(4) : null,
+      torsoZ: torsoBox ? +(torsoBox.max.z - torsoBox.min.z).toFixed(4) : null,
+      headSize: H,
+      eyeTop: F.eyeTop / H, browTop: F.browTop / H,
+      hatFloor: hatFloor == null ? null : hatFloor / H,
+      faceClear: hatFloor == null ? null : (hatFloor - F.eyeTop) / H,
+      spanX: spanX, spanY: spanY,
+      hair: (hairMesh && hairMesh.userData && hairMesh.userData.hairStyle) || null,
+      hairVisible: !!(hairMesh && hairMesh.visible),
     };
   }
 
@@ -1406,7 +2157,7 @@
     const tiers = opts.tiers || ["levy", "raider", "soldier", "veteran"];
     const men = [];
     let uid = (opts.seed || 4000) | 0;
-    function put(fid, tier, variantHint, x, z, yaw) {
+    function put(fid, tier, variantHint, x, z, yaw, armour) {
       const band = fid === "you" ? null : { faction: fid, colour: accentOf(fid) };
       /* A SYNTHETIC MAN, BUILT BY core.js's OWN CONSTRUCTOR. The id is walked
          rather than random so a cell shows its variants instead of the same
@@ -1415,7 +2166,8 @@
       let s = null, tries = 0;
       const want = INDEX[fid + "|" + tier];
       do {
-        s = W.makeSoldier ? W.makeSoldier(tier, "carbine", { id: uid++ }) : { id: uid++, tier: tier };
+        s = W.makeSoldier ? W.makeSoldier(tier, "carbine", { id: uid++, armour: armour || "none" })
+                          : { id: uid++, tier: tier, armour: armour || "none" };
         if (variantHint == null || !want || !want.length) break;
         if (forSoldier(s, band) === want[variantHint % want.length]) break;
       } while (++tries < 64);
@@ -1425,14 +2177,38 @@
       g.rotation.y = yaw == null ? 0 : yaw;
       root.add(g);
       const rec = forSoldier(s, band);
-      men.push({ group: g, soldier: s, faction: fid, tier: tier, fit: rec.id, name: rec.name });
+      men.push({ group: g, soldier: s, faction: fid, tier: tier, armour: s.armour || "none",
+                 fit: rec.id, name: rec.name });
       return g;
+    }
+
+    /* THE ARMOUR LADDER IS AN AXIS OF THE GALLERY NOW, because for your own
+       army it is the ONLY axis — tier stopped changing the cloth the day the
+       issue uniform landed, so a four-tier portrait of your warband is four
+       photographs of one man unless the armour steps with it. The rungs come
+       off core.js's own W.ARMOUR rather than being typed, so a fifth row
+       there appears here with nothing to change. */
+    function armourRungs() {
+      const T = W.ARMOUR;
+      if (T && T.length) return T.map(function (r) { return r.id; });
+      return ["none"];
     }
 
     if (layout === "portrait") {
       const fid = opts.faction || "bandit";
       const gap = opts.spacing || 1.75;
-      for (let t = 0; t < tiers.length; t++) put(fid, tiers[t], opts.variant == null ? 0 : opts.variant, (t - (tiers.length - 1) / 2) * gap, 0, 0);
+      /* `armours` turns the row into the armour ladder at one tier. Defaulted
+         ON for your warband and off for everyone else: the enemy's read is
+         still its tier ladder, yours is what you bought. */
+      const arm = opts.armours || (fid === "you" && opts.armours !== false ? armourRungs() : null);
+      if (arm && arm.length) {
+        const tier = opts.tier || "soldier";
+        for (let i = 0; i < arm.length; i++) {
+          put(fid, tier, null, (i - (arm.length - 1) / 2) * gap, 0, 0, arm[i]);
+        }
+      } else {
+        for (let t = 0; t < tiers.length; t++) put(fid, tiers[t], opts.variant == null ? 0 : opts.variant, (t - (tiers.length - 1) / 2) * gap, 0, 0);
+      }
     } else if (layout === "census") {
       /* THE WHOLE CELL, in rows of six. The first census laid tiers down the
          Z axis and it photographed as four men and eight specks — the far
