@@ -268,8 +268,13 @@
   #verbs .vhead{display:flex;gap:10px;align-items:baseline;flex-wrap:nowrap;flex:0 0 auto;
     margin:0 0 8px;padding:8px 12px;border-radius:12px;
     background:rgba(18,14,9,.82);border:1px solid rgba(255,255,255,.12)}
-  #verbs .vhead b{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #verbs .vhead .vsub{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* THE TITLE DOES NOT SHRINK FIRST. It was flex 0 1 auto against a sub of
+     1 1 auto, so in the right-hand rail "RAIDING CREW · 12 MEN · SAND BANDITS"
+     rendered as "RAIDING C… 12 MEN · SAND BAN…" — the one word that says WHO
+     was the word cut. The name keeps its width (to 72% of the line) and the
+     sub is the part that gives. */
+  #verbs .vhead b{flex:0 0 auto;max-width:72%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #verbs .vhead .vsub{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* THE READOUT. The content that used to be a full-screen card lives here
      instead: same tables, same numbers, but capped in height, scrolling
      inside itself, translucent, and — the whole point — sitting in a strip

@@ -1050,7 +1050,7 @@
     });
   }
   function stepRout(m) {
-    if (MORALE_OFF() || m.isYou) return false;
+    if (MORALE_OFF() || m.isYou || (m.side && m.side.noRout)) return false;
     const nerve = nerveOf(m);
     if (!m.routed) {
       if (m.side.morale < nerve) {
@@ -1478,8 +1478,20 @@
      ?orders=old pins everybody to HOLD, which is exactly battle.html's
      behaviour (posture(), band, bearing, tokens, nothing else) and is the
      revert for the command layer. */
-  const ORDERS = ["charge", "hold", "flank", "fallback"];
-  const ORDER_LABEL = { charge: "CHARGE", hold: "HOLD", flank: "FLANK", fallback: "FALL BACK" };
+  /* SIX NOW, AND THE TWO NEW ONES ARE THE TWO WAYS A COMMANDER ACTUALLY
+     POINTS. "Four buttons" above covered go / stay / go around / get out; what
+     it did not cover was WHERE — every order was measured off the enemy's
+     centre of mass or off wherever the line happened to be when you pressed
+     it. FOLLOW ME makes the line form on YOU: you walk, it comes, and the
+     fight happens where the warlord is standing, which is the whole
+     Bannerlord-in-first-person premise of this game. MOVE is a place on the
+     sand — a tap in the command seat — and the army goes there and holds it.
+     Neither is a new AI: out of contact the section marches to the point, in
+     contact think() hands straight back to combat_iq exactly as HOLD does,
+     with the leash on the point instead of on the old anchor. The enemy
+     commander does not use either; he has no thumb. */
+  const ORDERS = ["charge", "hold", "flank", "fallback", "follow", "move"];
+  const ORDER_LABEL = { charge: "CHARGE", hold: "HOLD", flank: "FLANK", fallback: "FALL BACK", follow: "FOLLOW ME", move: "MOVE" };
   function orderOf(side) {
     return (Q && Q.get("orders") === "old") ? "hold" : side.order;
   }
@@ -1488,6 +1500,7 @@
     if (!s || ORDERS.indexOf(o) < 0) return;
     if (s.order === o) return;
     s.order = o;
+    if (sideKey !== "them" && moveMark && o !== "move") moveMark.visible = false;
     /* AN ORDER RESETS THE ANCHOR IT IS MEASURED FROM. HOLD means "hold HERE",
        and here is wherever the line is when the order lands — not where it
        formed up two minutes ago. Without this, HOLD after a CHARGE drags the
@@ -1810,7 +1823,25 @@
     /* WHILE IT IS DEPLOYED THE FRAME FOLLOWS THE MEN. Without this a section
        that fights forward for a minute and then loses contact snaps back to
        wherever the frame was left, dragging ten men across the sand. */
-    if (!u.formed) { u.x = cx / n; u.z = cz / n; }
+    if (!u.formed) {
+      /* MINUS THE MEAN SLOT, OR THE SECTION CRAB-WALKS. The men stand at
+         slot offsets from the frame; re-centring the frame on their centroid
+         and then re-seating them at their slots translates the whole section
+         by the mean offset — nothing for a full symmetric line, ten metres a
+         time for a lone man in a wedge's point slot. MEASURED in the duel:
+         their champion, contact flickering at the edge of his reach, drifted
+         66 m sideways down a dune in thirty seconds and never got inside his
+         own range. Same as a section down to three survivors on one flank. */
+      const cs0 = Math.cos(u.yaw), sn0 = Math.sin(u.yaw);
+      let ox = 0, oz = 0;
+      for (let i = 0; i < M.length; i++) {
+        const m = M[i];
+        if (m.dead || m.fled) continue;
+        const s = slotOf(u.form, m.sqSlot);
+        ox += sn0 * s.u - cs0 * s.v; oz += cs0 * s.u + sn0 * s.v;
+      }
+      u.x = cx / n - ox / n; u.z = cz / n - oz / n;
+    }
     const broke = !MORALE_OFF() && u.side.morale < u.nerve;
     const contact = simT < (u.fireT || -1) ||
                     enemyNear(u.key, u.x, u.z, u.reach + CONTACT_PAD);
@@ -1861,6 +1892,15 @@
     const foe = SIDES[u.key === "mine" ? "them" : "mine"];
     const ord = orderOf(s);
     if (ord === "fallback") { _sg.x = s.anchorX + s.dir * 60; _sg.z = s.anchorZ; return _sg; }
+    if (ord === "move") { _sg.x = s.anchorX; _sg.z = s.anchorZ; return _sg; }
+    if (ord === "follow" && YOU && !YOU.dead) {
+      /* the sections form a line ON the warlord: first section at his left
+         shoulder, second at his right, third further left, and so on — each
+         one a section's width out, so two sections never share ground */
+      const lane = ((u.sq & 1) ? 1 : -1) * Math.ceil((u.sq + 1) / 2) * SQUAD_N * FILE_W * 0.55;
+      _sg.x = YOU.pos.x + s.dir * 7; _sg.z = YOU.pos.z + lane;
+      return _sg;
+    }
     if (ord === "flank") {
       /* THE WING IS THE SECTION'S, NOT THE MAN'S. flankAnchor() hangs the
          choice off m.i, so the old code could send half a section left and
@@ -1997,6 +2037,8 @@
     if (!tgt) {
       if (ord === "flank") { const a = flankAnchor(m); marchGoal(m, a.x, a.z); }
       else if (ord === "fallback") marchGoal(m, m.side.anchorX + m.side.dir * 60, m.side.anchorZ);
+      else if (ord === "follow") { const f = followPoint(m); marchGoal(m, f.x, f.z); }
+      else if (ord === "move") marchGoal(m, m.side.anchorX, m.side.anchorZ);
       else marchGoal(m, foe.comX, foe.comZ);
       return;
     }
@@ -2014,6 +2056,18 @@
     } else m.losBadT = 0;
 
     const d = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
+
+    /* ---- FOLLOW / MOVE, IN CONTACT: THE RALLY. A man with a target who is
+       far from where the order put him RELOCATES first and fights from there —
+       otherwise "follow me" moved only the men who happened to have nobody to
+       shoot at, and the first storyboard had the warlord thirty metres off his
+       own line's flank with the line still fighting where it stood. The leash
+       below is for the man who has arrived; this is for the man who has not. */
+    if (ord === "follow" || ord === "move") {
+      const f = ord === "follow" ? followPoint(m) : { x: m.side.anchorX, z: m.side.anchorZ };
+      const off = Math.hypot(f.x - m.pos.x, f.z - m.pos.z);
+      if (off > (ord === "follow" ? 18 : 26)) { marchGoal(m, f.x, f.z); return; }
+    }
 
     /* ---- FALL BACK: fighting backwards. He keeps his mark and keeps firing;
        he simply refuses to be where he is. A retreat that stops shooting is a
@@ -2063,20 +2117,40 @@
        angle-workers are sent to the nearest real cover instead (combat_iq's
        own cover search, not a second one), and only if there is none do they
        keep the angle. This is the "cover preference" the order changes. */
-    if (ord === "hold" && slot === "flank" && CBZ.combatIQ && CBZ.combatIQ.cover) {
+    /* HOLD, MOVE and FOLLOW fight the same way in contact: it is where the
+       leash is tied that differs. */
+    const holdish = ord === "hold" || ord === "move" || ord === "follow";
+    if (holdish && slot === "flank" && CBZ.combatIQ && CBZ.combatIQ.cover) {
       const cv = CBZ.combatIQ.cover(m, tgt.pos.x, tgt.pos.z);
       if (cv) { m.target.set(cv.x, 0, cv.z); m.slot = "cover"; }
     }
     /* AND HOLD MEANS HOLD *HERE*. A leash on the anchor the order was given
        at: without it a held line drifts forward one band at a time as men
        re-acquire nearer marks, and after a minute HOLD and CHARGE look the
-       same on screen. 26 m is a band's worth of give. */
-    if (ord === "hold") {
-      const ax = m.side.anchorX, az = m.side.anchorZ;
+       same on screen. 26 m is a band's worth of give. FOLLOW's anchor is the
+       warlord himself and its leash is shorter — a line that is "with you"
+       and forty metres ahead of you is not with you. */
+    if (holdish) {
+      const onYou = ord === "follow" && YOU && !YOU.dead;
+      const ax = onYou ? YOU.pos.x : m.side.anchorX;
+      const leash = onYou ? 14 : 26;
       const fwd = (m.target.x - ax) * -m.side.dir;
-      if (fwd > 26) m.target.x = ax - m.side.dir * 26;
+      if (fwd > leash) m.target.x = ax - m.side.dir * leash;
     }
     spreadGoal(m);
+  }
+  /* WHERE A MAN STANDS WHEN THE ORDER IS "FOLLOW ME": a rank just behind the
+     warlord, fanned out across his front so the line forms on him rather
+     than a queue behind him. Deterministic in m.i, so nobody swaps lanes. */
+  const _fp = { x: 0, z: 0 };
+  function followPoint(m) {
+    const s = m.side;
+    const you = YOU && !YOU.dead ? YOU.pos : { x: s.anchorX, z: s.anchorZ };
+    const k = m.i % 24;
+    const lat = ((k & 1) ? 1 : -1) * (1 + (k >> 1)) * FILE_W;
+    _fp.x = you.x + s.dir * (4 + ((m.i / 24) | 0) * RANK_D);
+    _fp.z = you.z + lat;
+    return _fp;
   }
 
   /* ============================================================ FIRE
@@ -2439,8 +2513,19 @@
       return;
     }
     const w = CBZ.weaponById(m.wid);
+    /* sdt, NOT 0. combat_iq's reaction beat (_iqReact) only drains inside
+       aimTick, and aimTick only sees a dt from posture() — the HOLD path — or
+       from this call. battle.html passes 0 here and gets away with it because
+       every one of its men goes through posture() every think. Ours do not:
+       CHARGE, FLANK, FALL BACK, FOLLOW and MOVE all return before posture(),
+       so a man on any of those orders who picked up a NEW target had a
+       reaction timer nobody was counting down, and shot() answered
+       "not yet" forever. MEASURED in the duel: their champion walked 170 m
+       under CHARGE to within one metre of the warlord, sees=true, slot=push,
+       and fired zero rounds in sixty seconds. A charge that cannot shoot is
+       the quiet charge the scale check kept measuring. */
     const r = CBZ.combatIQ && CBZ.combatIQ.shot
-      ? CBZ.combatIQ.shot(m, tgt, dist, 0, w ? w.damage : 14) : null;
+      ? CBZ.combatIQ.shot(m, tgt, dist, sdt, w ? w.damage : 14) : null;
     if (!r) { m.cool = 0.5; return; }
     m.cool = r.cd;
     if (!r.fire) return;
@@ -2864,8 +2949,12 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       "#wb .mo{width:min(19vw,120px);height:7px;border-radius:4px;background:rgba(255,255,255,.15);overflow:hidden}" +
       "#wb .mo s{display:block;height:100%;transition:width .25s}" +
       "#wb .mid{font-size:10px;letter-spacing:.2em;opacity:.65;text-align:center;min-width:74px}" +
+      /* width:max-content — an absolutely positioned box at left:50% shrink-fits
+         into the HALF of the screen to its right, so five orders plus the seat
+         toggle wrapped onto two rows at 1180 px with 500 px of empty screen
+         either side. max-width still caps it at the viewport. */
       "#wb .ord{position:absolute;left:50%;bottom:calc(var(--wl-safe-b, env(safe-area-inset-bottom,0px)) + 10px);transform:translateX(-50%);" +
-        "display:flex;gap:7px;pointer-events:auto;flex-wrap:wrap;justify-content:center;max-width:96vw}" +
+        "display:flex;gap:7px;pointer-events:auto;flex-wrap:wrap;justify-content:center;width:max-content;max-width:96vw}" +
       "#wb .ord button{appearance:none;border:1px solid rgba(255,255,255,.2);background:rgba(12,10,7,.66);" +
         "color:inherit;border-radius:12px;padding:11px 14px;font:800 12px/1 inherit;letter-spacing:.1em;cursor:pointer;" +
         "backdrop-filter:blur(6px)}" +
@@ -2984,7 +3073,11 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
         h += '<button data-o="charge">' + n(1, "CHARGE") + '</button>' +
              '<button data-o="hold" class="' + ((SIDES.mine && SIDES.mine.order === "hold") ? "on" : "") + '">' + n(2, "HOLD") + '</button>' +
              '<button data-o="flank">' + n(3, "FLANK") + '</button>' +
-             '<button data-o="fallback">' + n(4, "FALL BACK") + '</button>';
+             '<button data-o="fallback">' + n(4, "FALL BACK") + '</button>' +
+             /* the fifth verb. "FOLLOW", not "FOLLOW ME": with the camera
+                toggle beside them six worded buttons wrapped onto two rows at
+                1180 px, and on glass five have to share one 393 pt row. */
+             '<button data-o="follow">' + n(5, "FOLLOW") + '</button>';
       }
       /* THE SEAT TOGGLE IS A BUTTON ONCE. gunplay.js draws a view icon in the
          thumb cluster on a coarse pointer, and a second worded one in the
@@ -3229,16 +3322,26 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
 
     // ---- the rosters. THE CAP, and it is stated on screen.
     const cap = Math.max(1, parseInt((Q && Q.get("men")) || "", 10) || MEN_CAP_DEFAULT());
-    const mine = W.state.army.slice(0, cap);
+    /* SOLO: you walk out alone. events.js's duel — their champion against
+       the warlord, with both lines watching — fields none of your men; they
+       are the reserve, untouched, and come home whatever happens. checkEnd
+       already knows what an empty men0 means (only your death or theirs). */
+    const solo = !!opts.solo;
+    const mine = solo ? [] : W.state.army.slice(0, cap);
     const theirs = band.men.slice(0, cap);
-    capped.mine = W.state.army.length - mine.length;
+    capped.mine = solo ? 0 : W.state.army.length - mine.length;
     capped.them = band.men.length - theirs.length;
 
     report = {
-      band: band, outcome: null, duration: 0, youKills: 0,
+      band: band, outcome: null, duration: 0, youKills: 0, solo: solo, duel: !!opts.duel,
       deadOf: { mine: [], them: [] }, fledOf: { mine: [], them: [] },
-      reserveOf: { mine: W.state.army.slice(mine.length), them: band.men.slice(theirs.length) },
+      reserveOf: { mine: solo ? W.state.army.slice() : W.state.army.slice(mine.length), them: band.men.slice(theirs.length) },
     };
+    /* A DUEL HAS NO ROUT. One man at a third of his health is "an army that
+       has lost two thirds of its power" to the morale model, and he would
+       turn and run for the map edge on the first hit — which ends the fight
+       as THEY BREAK with nobody dead. He stands. So do you. */
+    if (opts.duel) { SIDES.them.noRout = true; SIDES.mine.noRout = true; }
 
     /* HOW MANY MEN THIS SIDE IS DRAWING UP, told to the side BEFORE the first
        body is built, because frontage() cannot shape a line it does not know
@@ -3287,7 +3390,9 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       ? (capped.mine + capped.them) + " MEN HELD WITH THE BAGGAGE — FIELD CAP " + cap + " A SIDE (?men=N)"
       : "";
     setText("wbCap", capNote);
-    note(W.armySize() + " V " + band.men.length + "  ·  " + (band.name || "").toUpperCase());
+    note(opts.duel
+      ? "YOU  V  " + ((band.men[0] && band.men[0].name) || "HIM").toUpperCase() + "  ·  ONE ON ONE"
+      : W.armySize() + " V " + band.men.length + "  ·  " + (band.name || "").toUpperCase());
 
     started = true;
     frameFn = micro.onFrame(frame);
@@ -3302,11 +3407,81 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     if (Q && Q.get("frozen") === "1" && micro.stop) micro.stop();
     // a person who clicks the world wants to be IN it
     document.addEventListener("pointerdown", onWorldPointer);
+    document.addEventListener("pointerup", onWorldRelease);
   }
   function onWorldPointer(e) {
     if (!live || over) return;
     if (e.target && e.target.closest && e.target.closest("#wb .ord,#wb .ret,#microTouch")) return;
     if (camMode !== "cmd" && micro.lock && !ctx.coarse) micro.lock();
+    // the command seat: a press that does not move is a point on the sand
+    if (camMode === "cmd") press = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
+  }
+  /* A TAP IN THE COMMAND SEAT IS AN ORDER. campaign.js's own rule for the
+     ride ("a press that does not move is a destination; a press that moves
+     is the camera. 8 px / 380 ms, mouse and thumb") — the same gate here, so
+     panning the seat never moves the army and a tap always does. */
+  let press = null;
+  function onWorldRelease(e) {
+    const p = press;
+    press = null;
+    if (!p || !live || over || camMode !== "cmd") return;
+    if (e.pointerId != null && p.id != null && e.pointerId !== p.id) return;
+    if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > 8 || performance.now() - p.t > 380) return;
+    if (e.target && e.target.closest && e.target.closest("#wb .ord,#wb .ret,#microTouch,#verbs,#stage")) return;
+    const g = groundPick(e.clientX, e.clientY);
+    if (g) moveTo(g.x, g.z);
+  }
+  /* where on the field the pointer is: march the ray until it is under the
+     battlefield's own height field */
+  function groundPick(sx, sy) {
+    const cam = CBZ.camera;
+    if (!cam || !MAP) return null;
+    const w = window.innerWidth, h = window.innerHeight;
+    _v.set((sx / w) * 2 - 1, -(sy / h) * 2 + 1, 0.5).unproject(cam);
+    const ox = cam.position.x, oy = cam.position.y, oz = cam.position.z;
+    let dx = _v.x - ox, dy = _v.y - oy, dz = _v.z - oz;
+    const L = Math.hypot(dx, dy, dz) || 1;
+    dx /= L; dy /= L; dz /= L;
+    let t = 1, hit = -1;
+    for (let i = 0; i < 700 && t < 900; i++) {
+      if (oy + dy * t <= MAP.groundAt(ox + dx * t, oz + dz * t)) { hit = t; break; }
+      t += Math.max(0.6, t * 0.03);
+    }
+    if (hit < 0) return null;
+    let lo = Math.max(0, hit - Math.max(0.6, hit * 0.03)), hi = hit;
+    for (let i = 0; i < 18; i++) {
+      const m = (lo + hi) * 0.5;
+      if (oy + dy * m <= MAP.groundAt(ox + dx * m, oz + dz * m)) hi = m; else lo = m;
+    }
+    const x = ox + dx * hi, z = oz + dz * hi;
+    if (Math.hypot(x - MAP.cx, z - MAP.cz) > FIELD_R * 0.98) return null;   // off the field
+    return { x: x, z: z };
+  }
+  /* MOVE: the line goes THERE and holds it. The ring on the sand is the only
+     furniture the order has — it stands until another order replaces it. */
+  let moveMark = null;
+  function moveTo(x, z) {
+    const s = SIDES.mine;
+    if (!s) return null;
+    s.order = "move";
+    s.anchorX = x; s.anchorZ = z;
+    if (!moveMark && THREE) {
+      moveMark = new THREE.Mesh(new THREE.RingGeometry(1.7, 2.4, 28),
+        new THREE.MeshBasicMaterial({ color: 0xffb347, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide }));
+      moveMark.rotation.x = -Math.PI / 2;
+      moveMark.renderOrder = 5;
+      scene.add(moveMark);
+    }
+    if (moveMark) { moveMark.visible = true; moveMark.position.set(x, MAP.groundAt(x, z) + 0.18, z); }
+    paintOrders();
+    return { x: x, z: z };
+  }
+  function dropMoveMark() {
+    if (!moveMark) return;
+    if (moveMark.parent) moveMark.parent.remove(moveMark);
+    if (moveMark.geometry) moveMark.geometry.dispose();
+    if (moveMark.material) moveMark.material.dispose();
+    moveMark = null;
   }
   function makeSide(key, dir, colour, vseed, band) {
     return {
@@ -3794,6 +3969,8 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     const r = buildReport(men, report, outcome, simT);
     if (outcome === "lost") W.state.you.hp = Math.max(1, Math.round(W.state.you.maxHp * 0.25));
     else W.state.you.hp = Math.max(1, Math.round(YOU.hp));
+    // the outcome, on the bus, for whoever was waiting on it (events.js's duel)
+    if (W.emit) safe(function () { W.emit("battle:end", r); });
 
     // hand the screen over after a beat, so the last frame of the battle is a
     // frame of the battle and not a menu
@@ -3814,6 +3991,9 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     live = false; over = true; started = false;
     if (frameFn) { micro.offFrame(frameFn); frameFn = null; }
     document.removeEventListener("pointerdown", onWorldPointer);
+    document.removeEventListener("pointerup", onWorldRelease);
+    press = null;
+    dropMoveMark();
     if (micro.unlock) safe(function () { micro.unlock(); });
 
     for (let i = 0; i < men.length; i++) {
@@ -3883,6 +4063,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       else if (e.code === "Digit2") setOrder("hold", "mine");
       else if (e.code === "Digit3") setOrder("flank", "mine");
       else if (e.code === "Digit4") setOrder("fallback", "mine");
+      else if (e.code === "Digit5") setOrder("follow", "mine");
       else if (e.code === "KeyC") cycleCam();
     });
   }
@@ -3930,10 +4111,15 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
             for (let i = 0; i < mineBand.men.length; i++) W.addSoldier(mineBand.men[i]);
           }
           W.state.you.wid = Q.get("gun") || "ak47";
-          const b = W.makeBand({ size: them, faction: Q.get("faction") || "bandit" });
+          /* ?duel=1 — the solo fight, for the storyboard: one veteran, no
+             army fielded, nobody routs. The same door events.js's WALK OUT
+             goes through. */
+          const duel = Q.get("duel") === "1";
+          const b = W.makeBand({ size: duel ? 1 : them, faction: Q.get("faction") || "bandit" });
+          if (duel) { b.name = "THEIR CHAMPION"; b.men[0] = W.makeSoldier("veteran", Q.get("hisgun") || "ak47", { battles: 14 }); }
           b.x = W.state.you.x + 40; b.z = W.state.you.z;
           W.state.bands.push(b);
-          start({ band: b });
+          start(duel ? { band: b, solo: true, duel: true } : { band: b });
         }, 60);
       }
     },
@@ -3949,6 +4135,37 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     live: function () { return live; },
     groundAt: function (x, z) { return MAP ? MAP.groundAt(x, z) : 0; },
     order: function (o) { setOrder(o, "mine"); },
+    // the command seat's tap, callable: MOVE the line to a point on the field
+    moveTo: function (x, z) { return live ? moveTo(x, z) : null; },
+    // the sections, as numbers: where each frame is and what it is doing
+    squads: function () {
+      return units.map(function (u) {
+        const g = u.live && u.formed ? squadGoal(u) : null;
+        return { key: u.key, sq: u.sq, x: Math.round(u.x), z: Math.round(u.z), yaw: Math.round(u.yaw * 100) / 100,
+                 formed: !!u.formed, live: u.live, reach: Math.round(u.reach), form: u.form, spd: u.spd,
+                 gx: g ? Math.round(g.x) : null, gz: g ? Math.round(g.z) : null, err: Math.round(u.err * 10) / 10 };
+      });
+    },
+    // the warlord's own record (pos is live) — for a tool that has to stand
+    // him somewhere specific before asking what his line does about it
+    you: function () { return live ? YOU : null; },
+    /* every body on the field, as plain numbers — for a tool asking WHY a man
+       is or is not shooting (target, sight, slot, magazine), which audit()'s
+       side totals cannot answer */
+    men: function () {
+      const out = [];
+      for (let i = 0; i < men.length; i++) {
+        const m = men[i];
+        out.push({ i: m.i, you: !!m.isYou, team: m.team, x: Math.round(m.pos.x * 10) / 10, z: Math.round(m.pos.z * 10) / 10,
+                   hp: Math.round(m.hp), dead: !!m.dead, fled: !!m.fled, routed: !!m.routed, formed: !!m.formed,
+                   slot: m.slot, sees: !!m.sees, tgt: m.tgt ? (m.tgt.isYou ? "you" : m.tgt.i) : null,
+                   losBadT: Math.round((m.losBadT || 0) * 10) / 10, mag: m.mag, reloadT: Math.round((m.reloadT || 0) * 10) / 10,
+                   cool: Math.round((m.cool || 0) * 100) / 100, wid: m.wid, armed: !!m.armed,
+                   tx: Math.round(m.target.x), tz: Math.round(m.target.z), detourT: Math.round((m.detourT || 0) * 10) / 10,
+                   stuckT: Math.round((m.stuckT || 0) * 10) / 10, speed: Math.round((m.speed || 0) * 10) / 10 });
+      }
+      return out;
+    },
     camera: setCam,
     retreat: function () { endBattle("retreat", "YOU BREAK OFF"); },
 
@@ -4047,7 +4264,24 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
                 dead: T.deadN, broke: T.brokeN || 0, fled: report.fledOf.them.length,
                 kills: T.kills, shots: T.shots, hits: T.hits, started: T.men0.length },
         you: { hp: Math.round(YOU.hp), kills: YOU.kills, dead: YOU.dead,
-               x: Math.round(YOU.pos.x), z: Math.round(YOU.pos.z) },
+               x: Math.round(YOU.pos.x), z: Math.round(YOU.pos.z),
+               /* the men within 40 m of the warlord — a thirty-man line on
+                  him is sixty metres wide, so 25 m counted only the centre of
+                  a line that had in fact formed on him. The number FOLLOW ME
+                  exists to move; on a build without the order it is whatever
+                  the line happens to be doing */
+               escort: (function () {
+                 let n = 0;
+                 for (let i = 0; i < men.length; i++) {
+                   const m = men[i];
+                   if (m.isYou || m.team !== "mine" || m.dead || m.fled) continue;
+                   if (Math.hypot(m.pos.x - YOU.pos.x, m.pos.z - YOU.pos.z) < 40) n++;
+                 }
+                 return n;
+               })() },
+        solo: !!(report && report.solo), duel: !!(report && report.duel),
+        moveMark: !!(moveMark && moveMark.visible),
+        anchor: { x: Math.round(SIDES.mine.anchorX), z: Math.round(SIDES.mine.anchorZ) },
         field: { cx: Math.round(MAP.cx), cz: Math.round(MAP.cz), relief: MAP.relief,
                  terrainLos: MAP.terrainLos, cover: MAP.cover.length, gap: GAP(),
                  desert: !!MAP.fromDesert },

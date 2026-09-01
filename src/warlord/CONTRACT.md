@@ -104,6 +104,17 @@ entry points with ONE model behind them:
 - `W.battle.resolve(...)` — the same rosters, the same morale model, the same
   result shape, resolved in one call with nothing rendered
 
+`start({band, solo:true, duel:true})` is the one-on-one: none of your men are
+fielded (they are the reserve and come home untouched) and neither side routs.
+Every battle ends with `battle:end` (the report) on the bus before the aftermath
+takes the screen — events.js's duel waits on it.
+
+Orders are `charge hold flank fallback follow move`. FOLLOW forms the line on
+the warlord and keeps it there; MOVE is a point on the field (`W.battle.moveTo`,
+or a tap in the command seat) the line goes to and holds. Neither is a second
+AI: out of contact the section marches to the point, in contact think() hands
+back to combat_iq exactly as HOLD does.
+
 Two presentations of one battle model, never two models that can disagree.
 `resolve` is what runs when a player skips the fight, drops mid-battle, when
 AI fights AI, and whenever a live match cannot wait.
@@ -143,6 +154,26 @@ null unless that archetype overrode the faction's appetite for a fight. Read it
 through **`W.bandHostile(b)`**, never off the faction row — a SALT CARAVAN and a
 RAIDING CREW can share a faction and want opposite things from you.
 
+**`held`** — set on a band by whoever is standing in front of it (army.js while
+its encounter rail is up; events.js while a card's party is cast on the road or
+walking in). campaign.js reads it and only reads it: a held party does not
+think, walk, tick its cooldown, get picked for the off-screen war, or get
+cleared by the unstick belt. Whoever sets it clears it. `cast` (a card id),
+`joining`, `transient` (riding off the map) and `await` (waiting on a battle's
+outcome) are events.js's own marks on top of that; `W.events.clearStage()`
+strikes all of them.
+
+**A card about people is a meeting with people.** events.js's road cards that
+open with a man or a party in front of you (`deserters`, `caravan`, `rival`,
+`column`, `runner`, `oldman`, `buyer`, `toll`, `duel`, `defector`, `summons`)
+declare `cast()` and are CAST before they fire: the party is built by core,
+pushed onto `S.bands` ahead of the player and held, and the card comes up as a
+verb rail (ctx.verbs, the same strip the encounter uses) when the player
+reaches it — a rider walks in instead. Every choice acts on that party through
+five verbs: `absorb` (they fall in), `letGo` (they stay on the island), `rideOff`
+(they leave, and leave the map out of sight), `attack` (a battle with them, now),
+`arriveMen` (men promised from elsewhere come over a rise). Never a sixth.
+
 **The island's party pool lives in ONE place**: `W.rollIslandBand({small,x,z})`.
 campaign.js's spawner calls it and so does `tools/warlord-check.mjs`, which is
 the point — the power law used to be typed inside campaign.js while core
@@ -171,7 +202,7 @@ W.save() W.load() W.newGame({seed,mode})
 
 ## Owned events
 
-`toast log gold army baggage dawn phase newgame loaded mainmenu`
+`toast log gold army baggage dawn phase newgame loaded mainmenu battle:end`
 plus each module's own — declare new ones in a comment at the top of your file.
 
 ## The house style (CLAUDE.md is law here)

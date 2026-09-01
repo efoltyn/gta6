@@ -178,6 +178,11 @@
   const BAND_DRAW = 1500;       // past this a party is fewer than two pixels;
                                 // the world map is where you see them instead
   const NAMEPLATE_R = 340;
+  /* banners inside BAND_DRAW. 160 was sized for a 96-party island; at 444+
+     parties the 161st-nearest inside 1.5 km was drawn as men with no flag,
+     and "which army is that" — the banner's whole job — silently stopped
+     being answered in crowded country. */
+  const BANNER_CAP = 420;
   const TRAIL_STEP = 1.6;       // breadcrumb spacing, metres
   const TRAIL_MAX = 420;        // breadcrumbs kept = 670 m of column
 
@@ -1075,8 +1080,8 @@
     const poleG = new THREE.CylinderGeometry(0.13, 0.13, 1, 5);
     const flagG = whiteColors(new THREE.BoxGeometry(1, 0.62, 0.12));
     flagG.translate(0.5, 0, 0);
-    pole = new THREE.InstancedMesh(poleG, new THREE.MeshLambertMaterial({ color: 0x3b3128 }), 160);
-    banner = new THREE.InstancedMesh(flagG, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), 160);
+    pole = new THREE.InstancedMesh(poleG, new THREE.MeshLambertMaterial({ color: 0x3b3128 }), BANNER_CAP);
+    banner = new THREE.InstancedMesh(flagG, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), BANNER_CAP);
     pole.frustumCulled = banner.frustumCulled = false;
     pole.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     banner.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -1698,6 +1703,22 @@
     if (o) tick(Math.atan2(o.x - S.you.x, o.z - S.you.z), "WATER " + km(o.d), "#39d0a8", 1);
     const p = nearest(S.outposts);
     if (p) tick(Math.atan2(p.x - S.you.x, p.z - S.you.z), p.name + " " + km(p.d), "#ffb15a", 1);
+    /* AND THE PEOPLE. The ribbon told you where water and a market were and
+       never where a party was — so a band hunting you from 900 m out was
+       invisible until it crossed nameplate range, and the men events.js had
+       just put on the road ahead were a surprise at 38 m. Two ticks: the
+       nearest party COMING FOR YOU in blood, and the nearest one waiting on
+       the road (held / cast) in the banner's own gold. */
+    let hunt = null, hd = 900, road = null, rd = 900;
+    for (let i = 0; i < S.bands.length; i++) {
+      const b = S.bands[i];
+      if (!b || !b.men || !b.men.length) continue;
+      const d = Math.hypot(b.x - S.you.x, b.z - S.you.z);
+      if (b.mood === "hunt" && !b.held && d < hd) { hd = d; hunt = b; }
+      if ((b.cast || b.held) && d < rd) { rd = d; road = b; }
+    }
+    if (hunt) tick(Math.atan2(hunt.x - S.you.x, hunt.z - S.you.z), W.bandSize(hunt) + " " + hunt.name + " " + km(hd), "#ff6b5a", 1);
+    if (road && road !== hunt) tick(Math.atan2(road.x - S.you.x, road.z - S.you.z), W.bandSize(road) + " " + road.name + " " + km(rd), "#ffd27a", 1);
     g.fillStyle = "#ffb15a";
     g.beginPath(); g.moveTo(w / 2, 0); g.lineTo(w / 2 - 6, 7); g.lineTo(w / 2 + 6, 7); g.closePath(); g.fill();
     g.textAlign = "left";
@@ -1860,6 +1881,9 @@
          three minutes) and the party visibly walks away, so this is a rare
          case — but a rare silent no is exactly the kind a player reads as a
          broken game. */
+      // a party events.js has on the road for a card: ride to it, the card is
+      // the meeting — engage() would only be refused by its hold
+      if (tgt.cast || tgt.held) { W.toast("riding at " + W.bandSize(tgt) + " " + tgt.name); return; }
       if (d < CONTACT * 1.6) {
         if (!engage(tgt)) {
           chase = null; dest = null;
@@ -2918,7 +2942,7 @@
         pushMan("b" + b.id + ":" + k, x, z, y, f.yaw, bob, manScale(Math.sqrt(d2)),
                 s ? markOf(s, b) : flatMark(b.colour, 0xc79a63), s, b, bspd);
       }
-      if (bn < 160) bn = party(bn, b.x, b.z, size, b.colour, b.yaw);
+      if (bn < BANNER_CAP) bn = party(bn, b.x, b.z, size, b.colour, b.yaw);
     }
     /* OTHER WARLORDS ARE PARTIES, not a special case. They come off
        W.state.peers — the contract's own home for them — and go through the
@@ -2962,7 +2986,7 @@
         pushMan("p" + pid + ":" + k, x, z, manGroundY(x, z, d2), f.yaw, 0, manScale(Math.sqrt(d2)),
                 markOf(s, pb), s, pb, pspd);
       }
-      if (bn < 160) bn = party(bn, q.x, q.z, size, q.colour, yaw);
+      if (bn < BANNER_CAP) bn = party(bn, q.x, q.z, size, q.colour, yaw);
     }
 
     /* ---- and the people standing at the outposts --------------------
@@ -3222,6 +3246,12 @@
       // the split pass: skip the half this call is not for, before any work
       if (pass === 1 && far) continue;
       if (pass === 2 && !far) continue;
+      /* HELD. Somebody is standing in front of this party — the encounter
+         rail is up on it, or events.js has cast it on the road for a card —
+         and a party you are talking to does not walk off, think, or run its
+         cooldown down and re-open its own rail mid-sentence. army.js and
+         events.js set the flag and clear it; this file only reads it. */
+      if (b.held) { b.spd = 0; b.acc = 0; b.y = D.heightAt(b.x, b.z); continue; }
       if (b.cooldown > 0) b.cooldown -= wdt;
       /* THE GATE, asked before the guest branch as well: a guest renders the
          host's parties and its only job here is to keep the DRAWN ones' heights
@@ -3412,10 +3442,18 @@
     if (n < 2) return;
     const i = Math.floor(W.rnd() * n);
     const a = S.bands[i];
+    /* NOT A PARTY SOMEBODY IS TALKING TO. This resolver ran while the
+       encounter rail was up — the rail no longer owns a phase, so the world
+       keeps turning behind it, which is right — and it could halve or DELETE
+       the band whose card the player was reading: "210 MEN" on the strip, no
+       men and no banner on the sand. Held, joining and leaving parties are
+       all somebody else's moment; the off-screen war leaves them alone. */
+    if (a.held || a.joining || a.transient) return;
     let b = null, bd = 1e18;
     for (let k = 0; k < n; k++) {
       if (k === i) continue;
       const o = S.bands[k];
+      if (o.held || o.joining || o.transient) continue;
       /* WHO IS THIS PARTY'S ENEMY IS AN OWNERSHIP QUESTION, NOT A FACTION ONE.
          Every rival warlord's column carries faction "warlord" deliberately —
          that is what titles the encounter card RIVAL WARLORD instead of SAND
@@ -3545,7 +3583,8 @@
       if (d < OUTPOST_R * 6) nearOutpost = o;
       if (d < OUTPOST_R && !o.cool) {
         o.cool = 1;
-        W.setPhase("outpost", { outpost: o });
+        // no W.setPhase("outpost") — CONTRACT.md retired the phase; the rail
+        // docks over the campaign and the island stays up behind it
         if (W.outpost && W.outpost.open) { try { W.outpost.open(o); } catch (e) { console.error("[warlord] outpost", e); } }
         else W.toast(o.name + " " + o.label + " (outpost.js not loaded)", "bad");
         return;
@@ -3567,8 +3606,9 @@
       const d = Math.hypot(b.x - S.you.x, b.z - S.you.z);
       if (d > NAMEPLATE_R) continue;
       list.push({ x: b.x, y: W.desert.heightAt(b.x, b.z) + 9, z: b.z, d: d,
-        text: W.bandSize(b) + " " + b.name, sub: b.mood === "hunt" ? "COMING FOR YOU" :
-          b.mood === "flee" ? "RUNNING" : Math.round(d) + "m", cls: b.mood });
+        text: W.bandSize(b) + " " + b.name, sub: b.cast ? "ON THE ROAD · " + Math.round(d) + "m" :
+          b.mood === "hunt" ? "COMING FOR YOU" :
+          b.mood === "flee" ? "RUNNING" : Math.round(d) + "m", cls: b.cast ? "cast" : b.mood });
     }
     for (let i = 0; i < peerDraw.length && list.length < 8; i++) {
       const q = peerDraw[i];
@@ -3602,6 +3642,9 @@
 
   /* ============================================================ API */
   C.dest = function (x, z) { dest = { x: x, z: z }; chase = null; markAt(x, z); return dest; };
+  // where he is riding to, if anywhere — events.js puts a card's people on
+  // the road AHEAD, and ahead is the destination when there is one
+  C.destination = function () { return dest ? { x: dest.x, z: dest.z } : null; };
   C.engage = engage;
   /* the camera's strategic-ness, for territory.js and anything else that has
      to agree with this view. t is 0 over-the-shoulder .. 1 fully pulled back. */

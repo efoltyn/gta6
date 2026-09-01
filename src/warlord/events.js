@@ -685,6 +685,8 @@
       ".wl-ev{max-width:640px;margin:0 auto}",
       ".wl-ev .tag{font-size:10px;letter-spacing:.28em;opacity:.45;margin-bottom:6px}",
       ".wl-ev .body{opacity:.9;line-height:1.5;font-weight:500;margin:6px 0 2px}",
+      /* the same card body, docked in the verb rail with the party behind it */
+      ".wl-evrail{opacity:.92;line-height:1.45;font-weight:500;font-size:13px;max-width:560px}",
       ".wl-pick{display:block;width:100%;text-align:left;margin:9px 0 0;padding:13px 15px}",
       ".wl-pick i{display:block;font-style:normal;font-size:11px;letter-spacing:.1em;opacity:.55;margin-top:5px;font-weight:500}",
       ".wl-meter{height:7px;border-radius:5px;background:rgba(255,255,255,.09);overflow:hidden;margin:7px 0 2px}",
@@ -769,6 +771,8 @@
        he is in the middle of deciding where to ride. */
     const map = document.getElementById("wlMap");
     if (map && getComputedStyle(map).display !== "none") return false;
+    // and not over somebody else's rail — the encounter, an outpost's verbs
+    if (ctx.verbsOpen && ctx.verbsOpen()) return false;
     return true;
   }
 
@@ -779,7 +783,53 @@
     if (W.campaign && W.campaign.dest) safe(function () { W.campaign.dest(S.you.x, S.you.z); });
   }
 
+  /* A CARD WITH PEOPLE BEHIND IT IS A RAIL. See THE CAST: the screen is an
+     opaque panel, and a decision about men you can no longer see is the popup
+     the owner reported. Same choices, same handlers, same events:card /
+     events:choice on the bus — only the surface differs, and it is the page's
+     own ctx.verbs, which halts nothing this file does not already halt and
+     closes itself before a handler runs. */
+  function showRail(card) {
+    css();
+    CARD = card;
+    card.rail = true;
+    railT = 0;
+    halt();
+    lensAt(card.band);
+    const choices = (card.choices || []).filter(function (c) { return c && (c.show == null || c.show); });
+    const opts = [];
+    for (let i = 0; i < choices.length; i++) {
+      (function (c) {
+        opts.push({
+          label: esc(c.label), note: c.hint ? esc(c.hint) : "",
+          kind: c.cls === "hot" ? "hot" : c.cls === "bad" ? "bad" : "",
+          disabled: c.enabled === false,
+          on: function () {
+            W.emit("events:choice", { id: card.id, choice: c.key || c.label });
+            CARD = null;
+            safe(function () { if (c.run) c.run(); });
+            safe(function () { settleCast(card); });
+            safe(paintChips);
+            if (ctx.paintHud) ctx.paintHud();
+          },
+        });
+      })(choices[i]);
+    }
+    /* the rail's head is one line; the tag ("ON THE ROAD") is the short
+       half, and a long headline drops even that rather than truncate itself */
+    const headline = plainText(card.title);
+    ctx.verbs({
+      title: esc(headline),
+      sub: headline.length > 20 ? "" : esc(card.tag || card.sub || ""),
+      body: '<div class="wl-evrail">' + card.body + '</div>',
+      options: opts,
+    });
+    W.emit("events:card", { id: card.id });
+    return CARD;
+  }
+
   function showCard(card) {
+    if (card.band && ctx && ctx.verbs) return showRail(card);
     css();
     CARD = card;
     halt();
@@ -814,8 +864,13 @@
   }
 
   function closeCard() {
+    const was = CARD;
     CARD = null;
-    giveBackScreen();
+    if (was && was.rail) {
+      if (ctx && ctx.closeVerbs) ctx.closeVerbs();
+      safe(function () { settleCast(was); });
+      if (ctx && ctx.paintHud) ctx.paintHud();
+    } else giveBackScreen();
     paintChips();
   }
   E.cardOpen = function () { return !!CARD; };
@@ -1024,19 +1079,29 @@
      So the hold is a LIST with an explicit release, not a side effect of
      walking. */
   let held = [];
+  /* `b.held` IS THE FLAG THE REST OF THE ISLAND READS. campaign.js's stepBands
+     skips a held party entirely (no AI, no walk, no cooldown tick), its
+     off-screen war (resolveOneBandFight) will not pick one, and army.js's
+     unstick belt will not clear its cooldown — so a party this file is
+     standing in front of you cannot be marched off, deleted, or have the
+     encounter rail opened on it by anybody else. The cooldown/pause stamps
+     stay as the belt to that brace, for a campaign.js that predates the flag. */
   function holdBand(b) {
     if (held.indexOf(b) < 0) held.push(b);
+    b.held = true;
     b.cooldown = Math.max(b.cooldown || 0, 3);
     b.pause = Math.max(b.pause || 0, 3);
   }
   function releaseBand(b) {
     const i = held.indexOf(b);
     if (i >= 0) held.splice(i, 1);
+    b.held = false;
   }
   function stepHeld() {
     for (let i = held.length - 1; i >= 0; i--) {
       const b = held[i];
       if (S.bands.indexOf(b) < 0) { held.splice(i, 1); continue; }
+      b.held = true;
       b.cooldown = Math.max(b.cooldown || 0, 3);
       b.pause = Math.max(b.pause || 0, 3);
     }
@@ -1085,7 +1150,13 @@
     marches = [];
     for (let i = 0; i < m.length; i++) safe(m[i].done);
     trails.length = 0;
-    held.length = 0;
+    /* a party waiting on the OUTCOME of the battle you are walking into (the
+       challengers watching a duel) keeps its hold through it; everybody else
+       is let go, flag and all */
+    const keep = [];
+    for (let i = 0; i < held.length; i++) { if (held[i].await) keep.push(held[i]); else held[i].held = false; }
+    held = keep;
+    dropCast();
     flushBeats();
     darkenStage();
   }
@@ -1233,9 +1304,502 @@
   function sweepJoiners() {
     for (let i = S.bands.length - 1; i >= 0; i--) {
       const b = S.bands[i];
-      if (b && b.joining) safe(function () { fallIn(b); });
+      if (!b) continue;
+      if (b.joining) { safe(function () { fallIn(b); }); continue; }
+      /* a cast or a leaving party saved mid-moment comes back as the ordinary
+         party it is — the hold and the walk-off were this session's, not the
+         island's */
+      if (b.transient) { S.bands.splice(i, 1); continue; }
+      if (b.cast || b.held || b.await) { b.cast = null; b.held = false; b.await = 0; b.cooldown = 20; }
     }
   }
+
+  /* ============================================================ THE CAST
+     A CARD ABOUT PEOPLE IS A MEETING WITH PEOPLE, AND THE PEOPLE COME FIRST.
+
+     THE REPORT (owner, 2026-09-01): "I will get a popup saying there's a guy
+     or a group of guys, but often that person isn't actually on the map."
+
+     He was describing this library. Twelve of the twenty-one cards open with a
+     man or a party standing in front of you — MEN WITH NO FLAG in the shade of
+     a wrecked truck, A MAN WITH A CRATE, AN OLD SOLDIER at his fire, A TOLL AT
+     THE NARROWS with a truck across the gap, A WARLORD WITH A HOLE IN HIM and
+     his column, a rider under a white rag — and not one of them put anybody on
+     the sand before the card went up. The card was a full-screen panel (the
+     #stage, an opaque gradient) over an island with nobody new on it, and the
+     people it described existed only as the count in its headline. The three
+     cards that DID spawn a party (toll, duel, column) spawned it as a
+     CONSEQUENCE of a choice — the men you were told were sitting on both sides
+     of the narrows were instantiated after you chose to go through them. That
+     is the exact bug CONTRACT.md quotes from outpost.js ("BARREN DESERT AND MAN
+     WITH A CRATE POPUP WITH NO MAN THERE"), fixed there and in army.js and
+     never here, the file that generates most of the popups in the game.
+
+     THE SHAPE OF THE FIX, and it is one rule: a people-card CASTS before it
+     fires. When the road roll picks one, the party it is about is built by
+     core (real soldiers, real guns, the same makeBand every band on the island
+     comes out of), pushed onto S.bands so campaign.js draws it and raises its
+     banner and names it on the nameplate, and put down on the road AHEAD of
+     you — on land, in sight, a few hundred metres out — held there. Nothing
+     else happens. You ride on, you see a party on the road, the nameplate says
+     DESERTERS 140m, and when you reach them the card comes up as a VERB RAIL
+     docked at the bottom of the screen (the page's own ctx.verbs, the same
+     strip the encounter uses) with the men standing behind it. A rider comes
+     TO you — he starts further out and walks in, and the card is his arrival.
+
+     Every choice then acts on THAT party. TAKE THEM ALL walks the deserters
+     you are looking at into your column (the same men, the same rifles the
+     rail counted). RIDE ON leaves them where they sit and they become a real
+     small party on the island. GO THROUGH THEM is a battle against the men
+     standing at the narrows. WALK OUT is a real one-on-one on the sand
+     against their champion (battle.js's `solo` fight — see the duel card).
+     PUT HIM DOWN starts a fight with his column. There is no longer a way for
+     this file to tell you about a man it has not put on the map.
+
+     WHAT HAPPENS IF YOU DO NOT GO. A cast party is a real party; if you ride
+     the other way it is released after a while and lives on as whatever it
+     was — deserters in the shade of a truck, a toll crew at the narrows — and
+     the road roll resumes. A card that is never reached is simply a party you
+     rode past, which is what riding past people is.
+
+     WHY A RAIL AND NOT THE SCREEN. #stage is an opaque panel; the whole point
+     of casting is that the party is behind the decision, and a decision you
+     cannot see the subject of is the popup again with extra steps. The rail
+     is the game's own answer to that (games/warlord.html: "you cannot be
+     mid-popup and get attacked, and there are no popups in reality"), and it
+     already halts the ride, binds 1-5, and closes itself before a handler
+     runs. Cards that are not about people present (the storm, bad water, a
+     cache, old bones, the schism, the mutiny's own screen) stay on the stage:
+     nothing behind them is the subject.
+
+     NUMBERS. CARD_REACH is 38 m: outside campaign.js's 26 m CONTACT (so the
+     encounter rail never races this one) and inside nameplate range, close
+     enough that the front rank fills the lower third of an over-the-shoulder
+     frame. CAST_AHEAD is 150 m: past the 140 m where campaign.js draws a
+     party at full strength (bandShow), so they are visible as men rather than
+     a smudge for the whole approach, and about ten seconds of riding. A rider
+     starts at CAST_RIDER, 240 m, which at BAND_SPEED is forty seconds — long
+     enough to be seen coming, short enough not to be a wait. */
+  const CARD_REACH = 38;
+  const CAST_AHEAD = 150;
+  const CAST_RIDER = 240;
+  const CAST_DROP_M = 1400;      // ride this far off and the meeting is released
+  const CAST_DROP_S = 300;       // or this long
+  let CAST = null;               // {L, bands, t, arg} — a party on the road, card not yet up
+  let leaving = [];              // transient parties riding off the map: [{b, t}]
+  let railT = 0;
+  let summonsFrom = null;        // which of the four sent the rider being cast
+
+  /* where the road goes: the destination you tapped, else the way you face */
+  function heading() {
+    const C = W.campaign;
+    let d = null;
+    if (C && C.destination) safe(function () { d = C.destination(); });
+    if (d && d.x != null) {
+      const dx = d.x - S.you.x, dz = d.z - S.you.z;
+      if (Math.hypot(dx, dz) > 30) return Math.atan2(dx, dz);
+    }
+    return S.you.yaw || 0;
+  }
+  /* A POINT ON THE ROAD AHEAD. A fan of bearings around the heading, three
+     distances, and the first candidate that is on land, not up a wall, and
+     (when asked) in plain sight from where you are standing — the inverse of
+     hiddenPoint's test, because a party you were told about should be a party
+     you can see. Falls back to any land point in the fan. */
+  function roadPoint(dist, wantVisible) {
+    const D = W.desert;
+    if (!D || !D.onLand) return null;
+    const h = heading();
+    const bear = [0, 0.22, -0.22, 0.45, -0.45, 0.8, -0.8, 1.2, -1.2, 1.8, -1.8, 2.6, -2.6];
+    const scale = [1, 0.82, 1.2, 0.66];
+    const y0 = D.heightAt(S.you.x, S.you.z);
+    let any = null;
+    for (let si = 0; si < scale.length; si++) {
+      for (let bi = 0; bi < bear.length; bi++) {
+        const a = h + bear[bi], r = dist * scale[si];
+        const x = S.you.x + Math.sin(a) * r, z = S.you.z + Math.cos(a) * r;
+        if (!D.onLand(x, z)) continue;
+        const y = D.heightAt(x, z);
+        if (Math.abs(y - y0) / Math.max(1, r) > 0.22) continue;             // not up a mesa face
+        // a flat enough patch to stand a party on
+        const sl = Math.abs(D.heightAt(x + 6, z) - y) + Math.abs(D.heightAt(x, z + 6) - y);
+        if (sl > 4.2) continue;
+        if (!any) any = { x: x, z: z };
+        if (!wantVisible || !blocked(S.you.x, S.you.z, x, z)) return { x: x, z: z };
+      }
+    }
+    return any;
+  }
+  /* a second party stands relative to the first, in the road's own frame:
+     `along` metres further down the road (away from you), `side` to its left */
+  function offsetFrom(p, along, side) {
+    const D = W.desert;
+    const fx = p.x - S.you.x, fz = p.z - S.you.z;
+    const n = Math.hypot(fx, fz) || 1;
+    const ux = fx / n, uz = fz / n;
+    const x = p.x + ux * along + uz * side, z = p.z + uz * along - ux * side;
+    if (D && D.onLand && !D.onLand(x, z)) return { x: p.x, z: p.z };
+    return { x: x, z: z };
+  }
+
+  function buildCast(sp) {
+    const b = W.makeBand({ size: Math.max(1, sp.size || 1), faction: sp.faction, name: sp.name,
+                           kind: sp.kind || null, hostile: sp.hostile == null ? null : sp.hostile, x: 0, z: 0 });
+    if (sp.men) { let list = null; safe(function () { list = sp.men(b); }); if (list && list.length) b.men = list; }
+    if (sp.gold != null) b.gold = sp.gold;
+    b.castBorn = 1;          // a party this file conjured, for clearStage — outlives `cast`
+    return b;
+  }
+
+  /* PUT THE CARD'S PEOPLE ON THE ROAD. Returns the cast record or null (no
+     desert, fast-forward, the ground refused every candidate). `near` is the
+     debug door and the screenshot tool: the party is put down inside
+     CARD_REACH so the card is up NOW with the men behind it. */
+  function castCard(L, o) {
+    o = o || {};
+    if (!L.cast || !canStage() || CAST) return null;
+    let spec = null;
+    safe(function () { spec = L.cast(); });
+    if (!spec) return null;
+    const list = Array.isArray(spec) ? spec : [spec];
+    const bands = [];
+    let anchor = null;
+    for (let i = 0; i < list.length; i++) {
+      const sp = list[i];
+      let p = null;
+      /* a rider walks in from CAST_RIDER — unless the door asked for the card
+         NOW, in which case he has already arrived: the debug door's first
+         run fired "he rode in alone" with the man 223 m out on the road */
+      const rider = sp.mode === "approach" && !o.near;
+      if (i === 0) {
+        p = roadPoint(rider ? CAST_RIDER : (o.near ? CARD_REACH * 0.78 : (sp.ahead || CAST_AHEAD)), !rider);
+        anchor = p;
+      } else if (anchor) p = offsetFrom(anchor, sp.along || 0, sp.side || 0);
+      if (!p) { for (let k = 0; k < bands.length; k++) removeBand(bands[k]); return null; }
+      const b = buildCast(sp);
+      b.x = p.x; b.z = p.z;
+      stampCampaignFields(b);
+      b.yaw = Math.atan2(S.you.x - b.x, S.you.z - b.z);      // facing you
+      b.cast = L.id;
+      b.cooldown = 30;
+      b.mood = sp.mode === "camp" ? "camp" : "roam";
+      holdBand(b);
+      S.bands.push(b);
+      if (sp.fire) fireAt(b.x + Math.sin(b.yaw) * 2.2, b.z + Math.cos(b.yaw) * 2.2, 900);
+      if (sp.wreck) wreckAt(sp.wreck, b.x - Math.cos(b.yaw) * 5, b.z + Math.sin(b.yaw) * 5, b.yaw + 1.1, 900);
+      if (sp.crates) cratesAt(b.x + Math.cos(b.yaw) * 2.4, b.z - Math.sin(b.yaw) * 2.4, 900);
+      if (rider) {
+        march(b, { chase: true, arrive: CONTACT_M * 0.85, budget: 120,
+                   done: function () { if (CAST && CAST.L === L && W.phase() === "campaign") fireCast(); } });
+        trailBehind(b, (Math.hypot(b.x - S.you.x, b.z - S.you.z) / BAND_SPEED) * 1.4);
+      }
+      bands.push(b);
+    }
+    CAST = { L: L, bands: bands, t: 0, spec: list, rider: !!(list[0].mode === "approach" && !o.near),
+             arg: Object.assign({}, o.arg || {}, { band: bands[0], bands: bands, cast: list[0] }) };
+    return CAST;
+  }
+  function castOnMap(c) {
+    return !!(c && c.bands.length && S.bands.indexOf(c.bands[0]) >= 0 && c.bands[0].men.length);
+  }
+  /* the card, now that you are standing in front of its people */
+  function fireCast() {
+    const c = CAST;
+    if (!c) return false;
+    if (!castOnMap(c)) { dropCast(); return false; }
+    if (!canOpen()) return false;            // a screen is up; asked again next tick
+    CAST = null;
+    halt();
+    lensAt(c.bands[0]);
+    if (!fire(c.L, c.arg)) { for (let i = 0; i < c.bands.length; i++) letGo(c.bands[i], {}); return false; }
+    return true;
+  }
+  /* released, not deleted: the men you never reached stay what they were */
+  function dropCast() {
+    const c = CAST;
+    CAST = null;
+    if (!c) return;
+    for (let i = 0; i < c.bands.length; i++) if (S.bands.indexOf(c.bands[i]) >= 0) letGo(c.bands[i], { camp: c.spec[0].mode === "camp" });
+  }
+  function stepCast(dt) {
+    if (!CAST) return;
+    const c = CAST;
+    c.t += dt;
+    if (!castOnMap(c)) { dropCast(); return; }
+    const b = c.bands[0];
+    const d = Math.hypot(b.x - S.you.x, b.z - S.you.z);
+    if (!c.rider && d < CARD_REACH) { fireCast(); return; }
+    if (d > CAST_DROP_M || c.t > CAST_DROP_S) dropCast();
+  }
+  /* THE LENS TURNS TO THEM. campaign.js's camera orbits you and keeps the yaw
+     the player last dragged, so a party met from the side or behind was a
+     rail about men off the edge of the frame. Bearing plus a pull-back sized
+     so the party fills the shot, through the two levers campaign publishes
+     (a want, not a seizure — the player can still drag). */
+  function lensAt(b) {
+    const C = W.campaign;
+    if (!C || !b) return;
+    const d = Math.hypot(b.x - S.you.x, b.z - S.you.z);
+    if (C.camYaw) safe(function () { C.camYaw(Math.atan2(b.x - S.you.x, b.z - S.you.z)); });
+    /* 30 m out is a 32 m pull-back, not 44: the first storyboard had the
+       party as specks under a rail — the campaign lens is high, and every
+       metre of pull-back is a metre of altitude. */
+    if (C.camDist) safe(function () { C.camDist(clamp(d * 0.9 + 5, 20, 40)); });
+  }
+
+  /* ---- WHAT A CHOICE DOES TO THE PEOPLE IN FRONT OF YOU. Five verbs, and
+     every card's every choice is one of them, so a card cannot invent a sixth
+     way for a party to stop existing. */
+  /* A WALK IS CANCELLED BY WHATEVER HAPPENS TO THE WALKER. The rider's walk-in
+     is a march with `chase`; if the card is answered before he arrives (the
+     debug door fires it at once) and the answer is "ride off", the old march
+     kept dragging him TOWARD you and re-holding him every tick — photographed
+     on the first rider smoke as a man riding away at 168 m, then 113 m. Every
+     verb below drops his march first. */
+  function unmarch(b) {
+    for (let i = marches.length - 1; i >= 0; i--) if (marches[i].b === b) marches.splice(i, 1);
+  }
+  function removeBand(b) {
+    unmarch(b);
+    releaseBand(b);
+    const i = S.bands.indexOf(b);
+    if (i >= 0) S.bands.splice(i, 1);
+  }
+  /* they walk over and fall in — the men you were looking at, not a fresh
+     roll. `base` is the loyalty provenance join() would have stamped. HELD
+     for the walk, not released: between this call and the first stepMarch,
+     campaign.js's AI got one pass at an unheld eight-man party standing next
+     to a thirty-four-man army and sent it to "flee" — its nameplate read
+     RUNNING on men walking toward you. */
+  function absorb(b, base) {
+    if (!b || S.bands.indexOf(b) < 0) return 0;
+    unmarch(b);
+    holdBand(b);
+    b.cast = null; b.hostile = 0; b.mood = "roam"; b.joining = 1;
+    for (let i = 0; i < b.men.length; i++) ev().base[b.men[i].id] = base == null ? 0.5 : base;
+    const n = b.men.length;
+    const meet = (widthOf(n) + widthOf(Math.max(1, S.army.length))) / 2;
+    march(b, { chase: true, arrive: meet, budget: 45, done: function () { fallIn(b); } });
+    return n;
+  }
+  /* some of them come over; the rest stay where they are */
+  function absorbSome(b, list, base) {
+    if (!b || !list.length) return 0;
+    const keep = [];
+    for (let i = 0; i < b.men.length; i++) if (list.indexOf(b.men[i]) < 0) keep.push(b.men[i]);
+    b.men = keep;
+    const b2 = W.makeBand({ size: 1, faction: b.faction, x: b.x, z: b.z });
+    b2.men = list.slice();
+    b2.name = "COMING OVER"; b2.gold = 0; b2.colour = b.colour;
+    stampCampaignFields(b2);
+    S.bands.push(b2);
+    const n = absorb(b2, base);
+    if (!b.men.length) removeBand(b);
+    return n;
+  }
+  /* they stay on the island as the party they are. `camp` keeps them sitting
+     where you met them; otherwise campaign's own AI gives them somewhere to
+     walk. The cooldown is the same beat army.js's break-off uses, so riding
+     straight back into them is a meeting again, not a second card. */
+  function letGo(b, o) {
+    o = o || {};
+    if (!b || S.bands.indexOf(b) < 0) return;
+    unmarch(b);
+    releaseBand(b);
+    b.cast = null;
+    b.cooldown = o.cooldown == null ? 20 : o.cooldown;
+    if (o.hostile != null) b.hostile = o.hostile;
+    if (o.camp) { b.mood = "camp"; b.pause = o.pause == null ? 600 : o.pause; }
+    else { b.mood = "roam"; b.pause = 0; b.goal = null; }
+  }
+  /* they leave. A rider, a trader who has sold, a buyer with your prisoners
+     in his trucks: a real party walking off along the road, and off the map
+     once it is out of sight — nobody wants a one-man GUN RUNNER band roaming
+     the island for the rest of the run. */
+  function rideOff(b, o) {
+    o = o || {};
+    if (!b || S.bands.indexOf(b) < 0) return;
+    unmarch(b);
+    releaseBand(b);
+    b.cast = null; b.transient = 1; b.hostile = 0; b.cooldown = 600;
+    b.mood = "roam"; b.pause = 0;
+    const D = W.desert;
+    const ax = b.x - S.you.x, az = b.z - S.you.z;
+    const an = Math.hypot(ax, az) || 1;
+    let best = null, bs = -Infinity;
+    for (let i = 0; i < 8 && D && D.landPoint; i++) {
+      let p = null;
+      safe(function () { p = D.landPoint(W.rnd, { near: { x: b.x, z: b.z }, nearR: 1400 }); });
+      if (!p) continue;
+      const dx = p.x - b.x, dz = p.z - b.z, n = Math.hypot(dx, dz) || 1;
+      const sc = (dx * ax + dz * az) / (n * an) + n / 3000;
+      if (sc > bs) { bs = sc; best = p; }
+    }
+    b.goal = best ? { x: best.x, z: best.z, why: "" } : { x: b.x + (ax / an) * 800, z: b.z + (az / an) * 800, why: "" };
+    if (o.flee) b.mood = "flee";
+    leaving.push({ b: b, t: 0 });
+  }
+  function stepLeaving(dt) {
+    for (let i = leaving.length - 1; i >= 0; i--) {
+      const r = leaving[i], b = r.b;
+      r.t += dt;
+      if (S.bands.indexOf(b) < 0) { leaving.splice(i, 1); continue; }
+      const d = Math.hypot(b.x - S.you.x, b.z - S.you.z);
+      if (d > 700 || r.t > 240) { leaving.splice(i, 1); removeBand(b); }
+    }
+  }
+  /* they go for you, now. A real battle against the men standing there — no
+     hidden spawn, no walk-in, because they are already in front of you. */
+  function attack(b, o) {
+    if (!b || S.bands.indexOf(b) < 0) return false;
+    unmarch(b);
+    releaseBand(b);
+    b.cast = null; b.mood = "hunt"; b.hostile = 1; b.cooldown = 0;
+    b.goal = { x: S.you.x, z: S.you.z, why: "" };
+    if (W.battle && W.battle.start) { safe(function () { W.battle.start(Object.assign({ band: b }, o || {})); }); return true; }
+    return false;
+  }
+  /* the men a card promised from somewhere else — a sergeant's column coming
+     across tonight — arrive from out of sight rather than out of thin air */
+  function arriveMen(list, base) {
+    if (!list.length) return;
+    if (!canStage()) { for (let i = 0; i < list.length; i++) { ev().base[list[i].id] = base; W.addSoldier(list[i]); } reconcile(); return; }
+    const p = hiddenPoint(320) || roadPoint(200, false);
+    if (!p) { for (let i = 0; i < list.length; i++) { ev().base[list[i].id] = base; W.addSoldier(list[i]); } reconcile(); return; }
+    const b = W.makeBand({ size: 1, faction: "militia", x: p.x, z: p.z });
+    b.men = list.slice(); b.name = "COMING OVER"; b.gold = 0;
+    stampCampaignFields(b);
+    S.bands.push(b);
+    trailBehind(b, (Math.hypot(b.x - S.you.x, b.z - S.you.z) / BAND_SPEED) * 1.4);
+    absorb(b, base);
+  }
+  /* whatever a choice did not dispose of is released — a card cannot leave a
+     party held forever by forgetting one branch */
+  function settleCast(card) {
+    const bs = card.bands || (card.band ? [card.band] : []);
+    for (let i = 0; i < bs.length; i++) {
+      const b = bs[i];
+      if (S.bands.indexOf(b) < 0) continue;
+      if (b.joining || b.transient || !b.held) continue;
+      let marching = false;
+      for (let k = 0; k < marches.length; k++) if (marches[k].b === b) marching = true;
+      if (marching || b.await) continue;
+      letGo(b, {});
+    }
+  }
+  function wreckAt(kind, x, z, yaw, life) {
+    const P = W.props, r = root3();
+    if (!P || !P.wreck || !r) return null;
+    let g = null;
+    safe(function () { g = P.wreck(kind, { seed: Math.round(x * 7 + z * 13) }); });
+    if (!g) return null;
+    g.position.set(x, groundAt(x, z), z);
+    g.rotation.y = yaw || 0;
+    r.add(g);
+    lit.push({ g: g, t: life });
+    return g;
+  }
+  function cratesAt(x, z, life) {
+    const P = W.props, r = root3();
+    if (!P || !P.crates || !r) return null;
+    let g = null;
+    safe(function () { g = P.crates({ seed: Math.round(x * 3 + z * 5), n: 3, spread: 1.3 }); });
+    if (!g) return null;
+    g.position.set(x, groundAt(x, z), z);
+    r.add(g);
+    lit.push({ g: g, t: life });
+    return g;
+  }
+  function powerOf(s) { let p = 0; safe(function () { p = W.soldierPower(s); }); return p; }
+  function strongest(men, n) {
+    return men.slice().sort(function (a, b) { return powerOf(b) - powerOf(a); }).slice(0, n);
+  }
+  function plainText(html) { return String(html || "").replace(/<[^>]*>/g, ""); }
+
+  function bandById(id) {
+    for (let i = 0; i < S.bands.length; i++) if (S.bands[i].id === id) return S.bands[i];
+    return null;
+  }
+  /* what the duel was for. Won: his men come over, the same men who watched.
+     Lost: you crawled back at a quarter health (battle.js set that), they take
+     a third of the cart and leave. Nobody left to decide: the line goes home. */
+  function resolveDuel() {
+    const d = ev().duel;
+    if (!d || !d.outcome) return;
+    ev().duel = null;
+    const line = bandById(d.line), champ = bandById(d.champ);
+    if (line) { line.await = 0; releaseBand(line); }
+    if (champ && champ.men.length) rideOff(champ);
+    if (d.outcome === "won") {
+      const n = line ? line.men.length : d.n;
+      if (line) absorb(line, 0.5);
+      S.fame += Math.round(6 + n * 0.4);
+      W.log("killed their champion in front of both armies. " + n + " men came over.", "good");
+      loyMove(+14, "they watched you do it yourself");
+    } else {
+      const bag = Object.keys(S.baggage);
+      for (let i = 0; i < Math.ceil(bag.length / 3); i++) W.unstash(bag[i], S.baggage[bag[i]]);
+      S.fame = Math.max(0, S.fame - 8);
+      W.log("lost a duel. They took a third of the cart and let you crawl back.", "bad");
+      loyMove(-11, "they watched that too");
+      if (line) rideOff(line);
+    }
+    reconcile();
+  }
+
+  /* THE ROAD ROLL'S OWN PATH, CALLABLE: put a card's people on the road ahead
+     at the natural distance and wait for the player to reach them — what
+     maybeFire does when it draws a people-card, without the draw. For a tool
+     that wants to photograph the approach rather than the meeting. */
+  /* strike everything this file has on the road — cast parties, leavers,
+     lit props — so a storyboard can photograph each card on clean sand */
+  E.clearStage = function () {
+    dropCast();
+    for (let i = S.bands.length - 1; i >= 0; i--) {
+      const b = S.bands[i];
+      if (b && (b.cast || b.castBorn || b.transient || b.await || b.joining)) removeBand(b);
+    }
+    leaving.length = 0;
+    darkenStage();
+    return true;
+  };
+  E.stageCast = function (id) {
+    if (FLAG_NOEVENTS) return null;
+    const L = libById(id);
+    if (!L || !L.cast) return null;
+    dropCast();
+    const c = castCard(L);
+    if (!c) return null;
+    return { id: L.id, bands: c.bands.map(function (b) { return { name: b.name, men: b.men.length, x: b.x, z: b.z,
+             d: Math.round(Math.hypot(b.x - S.you.x, b.z - S.you.z)) }; }) };
+  };
+  /* WHAT IS ON THE ROAD, for tools/visual-presets/warlord-real.mjs and anybody
+     else who needs to check that a card's people exist. Positions are read
+     off S.bands and the camera, not off intentions. */
+  E.cast = function () {
+    const out = { pending: CAST ? CAST.L.id : null, rail: !!(CARD && CARD.rail), screen: !!(CARD && !CARD.rail),
+                  card: CARD ? CARD.id : null, castBands: 0, castMen: 0, castDist: 0, inFrame: 0,
+                  held: held.length, leaving: leaving.length, transient: 0 };
+    for (let i = 0; i < S.bands.length; i++) if (S.bands[i].transient) out.transient++;
+    const bs = (CARD && (CARD.bands || (CARD.band ? [CARD.band] : null))) || (CAST && CAST.bands) || null;
+    if (!bs) return out;
+    let bd = 1e9;
+    for (let i = 0; i < bs.length; i++) {
+      const b = bs[i];
+      if (S.bands.indexOf(b) < 0 || !b.men.length) continue;
+      out.castBands++; out.castMen += b.men.length;
+      const d = Math.hypot(b.x - S.you.x, b.z - S.you.z);
+      if (d < bd) bd = d;
+    }
+    if (out.castBands) out.castDist = Math.round(bd * 10) / 10;
+    const b0 = bs[0];
+    const cam = CBZ.camera, THREE = ctx && ctx.THREE;
+    if (b0 && cam && THREE && S.bands.indexOf(b0) >= 0) {
+      const v = new THREE.Vector3(b0.x, groundAt(b0.x, b0.z) + 1.4, b0.z).project(cam);
+      out.inFrame = (v.z < 1 && Math.abs(v.x) < 1 && Math.abs(v.y) < 1) ? 1 : 0;
+    }
+    return out;
+  };
 
   /* WHAT THIS BAND WOULD BE CARRYING. Never a hand-picked gun id: core's own
      bandGunFor decides, off the wealth the fiction implies, so an event's men
@@ -1320,21 +1884,34 @@
   add({
     id: "deserters", tag: "ON THE ROAD",
     weight: function () { return size() >= 3 && size() < 220 ? 1.15 : 0; },
-    build: function () {
+    /* THE MEN COME FIRST (see THE CAST). Real deserters — core's own
+       archetype, company colours, levies with the cheap guns the card always
+       priced — sitting by a wrecked truck on the road ahead. The card is what
+       happens when you reach them. */
+    cast: function () {
       const n = W.irange(3, Math.max(4, Math.min(22, Math.round(size() * 0.35) + 3)));
+      return { name: "DESERTERS", faction: "company", kind: "deserters", hostile: 0.45, size: n,
+               mode: "camp", wreck: "truck", gold: 0,
+               men: function () { const out = []; for (let i = 0; i < n; i++) out.push(W.makeSoldier("levy", gunFor(0.2))); return out; } };
+    },
+    build: function (arg) {
+      const b = arg && arg.band;
+      const n = b ? b.men.length : W.irange(3, Math.max(4, Math.min(22, Math.round(size() * 0.35) + 3)));
       const wage = n * W.tier("levy").wage;
       const guns = [];
-      for (let i = 0; i < n; i++) guns.push(gunFor(0.2));
+      for (let i = 0; i < n; i++) guns.push(b ? b.men[i].wid : gunFor(0.2));
       return {
         title: 'MEN WITH NO <em>FLAG</em>',
         sub: place().toUpperCase(),
         body: n + ' men in the shade of a wrecked truck with their boots off. They deserted ' +
               'from something and will not say what. They will march for food and a share.',
+        band: b, bands: arg && arg.bands,
         choices: [
           { key: "take", label: "TAKE THEM ALL", cls: "hot",
             hint: "+" + men(n) + " · +$" + wage + "/DAY IN WAGES",
             run: function () {
-              for (let i = 0; i < n; i++) join("levy", guns[i], 0.22);
+              if (b) absorb(b, 0.22);
+              else for (let i = 0; i < n; i++) join("levy", guns[i], 0.22);
               W.log("took in " + n + " deserters at " + place() + ".", "");
               if (FLAG_NOSHOW) W.toast("+" + men(n), "good");
               loyMove(-4, "the army does not trust deserters");
@@ -1343,12 +1920,14 @@
           { key: "pick", label: "TAKE THE BEST THREE", show: n >= 6,
             hint: "+3 MEN",
             run: function () {
-              for (let i = 0; i < 3; i++) join("levy", guns[i], 0.45);
+              if (b) { absorbSome(b, strongest(b.men, 3), 0.45); letGo(b, { camp: true }); }
+              else for (let i = 0; i < 3; i++) join("levy", guns[i], 0.45);
               W.log("took three of the deserters and left the rest.", "");
               loyMove(1, "you were choosy");
               reconcile();
             } },
-          { key: "no", label: "RIDE ON", cls: "ghost",             run: function () { W.log("rode past the deserters.", ""); } },
+          { key: "no", label: "RIDE ON", cls: "ghost",
+            run: function () { if (b) letGo(b, { camp: true }); W.log("rode past the deserters.", ""); } },
         ],
       };
     },
@@ -1358,7 +1937,14 @@
   add({
     id: "caravan", tag: "A CONTRACT",
     weight: function () { return size() >= 5 ? 1.0 : 0; },
-    build: function () {
+    /* a real SALT CARAVAN — core's own archetype, so it is the same party you
+       meet on the road without a card — parked on the road ahead */
+    cast: function () {
+      return { name: "SALT CARAVAN", faction: "militia", kind: "caravan", hostile: 0.1,
+               size: W.irange(6, 10), mode: "camp", wreck: "caravan" };
+    },
+    build: function (arg) {
+      const b = arg && arg.band;
       // the fee is priced off what it actually costs you: two days of wages
       // plus a margin that scales with how big an escort they are buying
       const days = W.irange(2, 3);
@@ -1368,6 +1954,7 @@
         sub: "SALT CROSSING",
         body: 'Nine trucks and a man in a good coat. He wants your guns beside him across the ' +
               'pan — ' + days + ' days out of your way, paid on arrival.',
+        band: b, bands: arg && arg.bands,
         choices: [
           { key: "escort", label: "TAKE THE CONTRACT", cls: "hot",
             hint: "+$" + fee + " · " + days + " DAYS · -$" + (W.payroll() * days) + " IN WAGES",
@@ -1376,17 +1963,19 @@
               if (S.army.length || S.gold >= 0) { W.earn(fee); W.log("escorted a caravan across the pan. +$" + fee + ".", "good"); }
               S.fame += 2;
               loyMove(2, "paid work is still work");
+              if (b) rideOff(b);              // delivered: they go on across the pan
             } },
           { key: "rob", label: "TAKE THE TRUCKS INSTEAD", cls: "bad",
             hint: "+$" + Math.round(fee * 1.7) + " · FAME DOWN",
             run: function () {
               W.earn(Math.round(fee * 1.7));
+              if (b) { W.earn(b.gold | 0); b.gold = 0; rideOff(b, { flee: true }); }
               S.fame = Math.max(0, S.fame - 6);
               S.stats.executed += 1;   // core's dread counter: this is that kind of act
               W.log("took a caravan on the salt pan. They will remember the colour of the banner.", "bad");
               loyMove(-6, "banditry");
             } },
-          { key: "no", label: "WE ARE NOT GUARDS", cls: "ghost",             run: function () {} },
+          { key: "no", label: "WE ARE NOT GUARDS", cls: "ghost", run: function () { if (b) letGo(b, {}); } },
         ],
       };
     },
@@ -1478,8 +2067,23 @@
   add({
     id: "rival", tag: "A MAN ON THE GROUND",
     weight: function () { return size() >= 25 && S.fame >= 12 ? 1.25 : 0; },
-    build: function () {
+    /* the wounded warlord is men[0] of a real column — a veteran at a third
+       of his health — and the men around him are the ones the card offers */
+    cast: function () {
       const n = Math.max(8, Math.round(size() * W.range(0.35, 0.75)));
+      const tiers = ["raider", "soldier", "soldier", "veteran"];
+      const wealth = clamp(0.4 + n / 160, 0.35, 0.95);
+      return { name: "A BEATEN COLUMN", faction: "warlord", hostile: 0.3, size: n + 1, mode: "camp", wreck: "truck",
+               men: function () {
+                 const out = [W.makeSoldier("veteran", gunFor(wealth), { battles: 20 })];
+                 out[0].wounded = true; out[0].hp = Math.max(1, Math.round(out[0].maxHp * 0.3));
+                 for (let i = 0; i < n; i++) out.push(W.makeSoldier(tiers[Math.floor(W.rnd() * tiers.length)], gunFor(wealth)));
+                 return out;
+               } };
+    },
+    build: function (arg) {
+      const b = arg && arg.band;
+      const n = b ? Math.max(1, b.men.length - 1) : Math.max(8, Math.round(size() * W.range(0.35, 0.75)));
       const tiers = ["raider", "soldier", "soldier", "veteran"];
       const wealth = clamp(0.4 + n / 160, 0.35, 0.95);
       return {
@@ -1487,13 +2091,13 @@
         sub: "WHAT IS LEFT OF HIS COLUMN",
         body: 'He is against a wheel with his hand pressed into his side and ' + n + ' men around ' +
               'him who have not decided anything yet. Let him ride out alive and they are yours.',
+        band: b, bands: arg && arg.bands,
         choices: [
           { key: "let", label: "LET HIM GO. TAKE HIS MEN.", cls: "hot",
             hint: "+" + men(n) + " · HE COMES BACK",
             run: function () {
-              for (let i = 0; i < n; i++) {
-                join(tiers[Math.floor(W.rnd() * tiers.length)], gunFor(wealth), 0.34);
-              }
+              if (b) { absorbSome(b, b.men.slice(1), 0.34); rideOff(b); }   // his men cross; he rides out alone
+              else for (let i = 0; i < n; i++) join(tiers[Math.floor(W.rnd() * tiers.length)], gunFor(wealth), 0.34);
               S.fame += Math.round(n * 0.3);
               W.log("let a rival warlord ride out. His " + n + " men came with us.", "good");
               if (FLAG_NOSHOW) W.toast("+" + men(n), "good");
@@ -1503,17 +2107,20 @@
               ev().contracts.push({ kind: "revenge", day: S.day + W.irange(6, 14), size: Math.round(n * 1.4) });
             } },
           { key: "kill", label: "PUT HIM DOWN", cls: "bad",
-            hint: "+9 FAME · THEY FIGHT HARDER",
+            hint: "+9 FAME · HIS MEN COME AT YOU",
             run: function () {
               S.fame += 9;
               S.stats.executed += 2;
               W.log("killed a wounded warlord in front of his own column.", "bad");
               loyMove(-8, "they watched you do it");
-              W.toast("THE ISLAND HEARD THAT", "bad");
+              /* "THEY FIGHT HARDER" used to be a hint with nothing behind it.
+                 They are standing right there; they fight NOW. */
+              if (b) { b.men.splice(0, 1); puff(b.x, b.z, 1); churn(b.x, b.z, b.men.length, b.yaw || 0); attack(b, { chased: true }); }
+              else W.toast("THE ISLAND HEARD THAT", "bad");
             } },
           { key: "ride", label: "RIDE ON AND LEAVE HIM TO IT", cls: "ghost",
             hint: "HE LIVES ANYWAY",
-            run: function () { W.log("left a wounded warlord where he sat.", ""); } },
+            run: function () { if (b) letGo(b, { camp: true }); W.log("left a wounded warlord where he sat.", ""); } },
         ],
       };
     },
@@ -1674,9 +2281,24 @@
   add({
     id: "column", tag: "ON THE ROAD",
     weight: function () { return size() >= 8 ? 0.85 : 0; },
-    build: function () {
+    /* TWO PARTIES: the guards with rifles, and nine metres behind them the
+       chain — unarmed men, fists only, a party that cannot fight, which is
+       what a chain gang is. "cut them loose" is a battle with the FIRST party
+       standing there and the second one falling in. */
+    cast: function () {
       const n = W.irange(6, Math.max(8, Math.min(30, Math.round(size() * 0.5))));
       const guards = Math.max(3, Math.round(n * 0.3));
+      return [
+        { name: "THE SLAVERS", faction: "bandit", kind: "raiders", hostile: 1, size: guards, mode: "camp" },
+        { name: "THE CHAIN", faction: "militia", hostile: 0, size: n, mode: "camp", along: 9, gold: 0,
+          men: function () { const out = []; for (let i = 0; i < n; i++) out.push(W.makeSoldier(W.chance(0.75) ? "levy" : "raider", "fists")); return out; } },
+      ];
+    },
+    build: function (arg) {
+      const slavers = arg && arg.bands ? arg.bands[0] : null;
+      const chain = arg && arg.bands ? arg.bands[1] : null;
+      const n = chain ? chain.men.length : W.irange(6, Math.max(8, Math.min(30, Math.round(size() * 0.5))));
+      const guards = slavers ? slavers.men.length : Math.max(3, Math.round(n * 0.3));
       const price = n * 26;
       return {
         title: 'A COLUMN ON A <em>CHAIN</em>',
@@ -1684,28 +2306,39 @@
         body: n + ' men walking in a line with their wrists wired together and ' + guards +
               ' men with rifles beside them. The chief wants to sell, and he is being very ' +
               'polite about it.',
+        band: slavers, bands: arg && arg.bands,
         choices: [
           { key: "free", label: "CUT THEM LOOSE", cls: "hot",
             hint: guards + " GUARDS · +" + men(n) + " · FAME UP",
             run: function () {
-              for (let i = 0; i < n; i++) join(W.chance(0.75) ? "levy" : "raider", gunFor(0.18), 0.68);
+              if (chain) { for (let i = 0; i < chain.men.length; i++) chain.men[i].wid = gunFor(0.18); absorb(chain, 0.68); }
+              else for (let i = 0; i < n; i++) join(W.chance(0.75) ? "levy" : "raider", gunFor(0.18), 0.68);
               S.fame += Math.round(n * 0.5);
               W.log("cut a slave column loose. " + n + " men picked up rifles and stayed.", "good");
               if (FLAG_NOSHOW) W.toast("+" + men(n), "good");
               loyMove(+8, "the army liked that");
-              spawnBandNear({ size: guards, faction: "bandit", name: "THE SLAVERS", hunt: true, r: 320, cooldown: 2 });
+              if (slavers) attack(slavers);
+              else spawnBandNear({ size: guards, faction: "bandit", name: "THE SLAVERS", hunt: true, r: 320, cooldown: 2 });
               reconcile();
             } },
           { key: "buy", label: "BUY THEM", cls: "", enabled: S.gold >= price,
             hint: "-$" + price + " · +" + men(n),
             run: function () {
               if (!W.pay(price)) return;
-              for (let i = 0; i < n; i++) join("levy", gunFor(0.15), 0.4);
+              if (chain) { for (let i = 0; i < chain.men.length; i++) chain.men[i].wid = gunFor(0.15); absorb(chain, 0.4); }
+              else for (let i = 0; i < n; i++) join("levy", gunFor(0.15), 0.4);
+              if (slavers) { slavers.gold += price; rideOff(slavers); }
               W.log("bought " + n + " men off a slaver for $" + price + ".", "");
               loyMove(-2, "you paid a slaver");
               reconcile();
             } },
-          { key: "no", label: "RIDE ON", cls: "ghost",             run: function () { loyMove(-3, "you rode past the chain"); } },
+          { key: "no", label: "RIDE ON", cls: "ghost",
+            run: function () {
+              // the column moves on east, the chain behind the rifles
+              if (slavers) rideOff(slavers);
+              if (chain) { rideOff(chain); if (slavers && slavers.goal) chain.goal = { x: slavers.goal.x, z: slavers.goal.z, why: "" }; }
+              loyMove(-3, "you rode past the chain");
+            } },
         ],
       };
     },
@@ -1715,7 +2348,15 @@
   add({
     id: "runner", tag: "A TRADER",
     weight: function () { return 1.0; },
-    build: function () {
+    /* THE MAN WITH THE CRATE, WITH A CRATE, WITH A MAN. This is the card the
+       owner quoted ("a man with a crate popup with no man there") and it was
+       still true here: two men and a stack of crates now stand on the road. */
+    cast: function () {
+      return { name: "GUN RUNNER", faction: "militia", hostile: 0, size: 2, mode: "camp", crates: true,
+               men: function () { return [W.makeSoldier("raider", gunFor(0.5)), W.makeSoldier("levy", "sidearm")]; } };
+    },
+    build: function (arg) {
+      const b = arg && arg.band;
       // he is carrying something above what a band this size would normally
       // field — that is why the card exists at all
       const wealth = clamp(0.55 + S.fame / 300, 0.5, 0.98);
@@ -1728,6 +2369,7 @@
         sub: "GUN RUNNER",
         body: 'One truck, one crate, one nervous man. ' + n + '× ' + esc(W.gunLabel(id)) +
               ', still in grease, and he would like to be somewhere else by dark.',
+        band: b, bands: arg && arg.bands,
         choices: [
           { key: "buy", label: "BUY THE CRATE", cls: "hot", enabled: S.gold >= ask,
             hint: "-$" + ask + " · +" + n + "× " + W.gunLabel(id) + " · LIST $" + list,
@@ -1736,6 +2378,7 @@
               W.stash(id, n);
               W.log("bought " + n + "× " + W.gunLabel(id) + " off a runner for $" + ask + ".", "good");
               W.toast("+" + n + "× " + W.gunLabel(id), "good");
+              if (b) { b.gold += ask; rideOff(b); }
             } },
           { key: "rob", label: "TAKE THE CRATE", cls: "bad", show: size() >= 5,
             hint: "FREE · +$" + Math.round(list * 0.2) + " · FAME DOWN",
@@ -1745,8 +2388,9 @@
               S.fame = Math.max(0, S.fame - 5);
               W.log("robbed a gun runner on the " + biome() + ".", "bad");
               loyMove(-4, "you robbed a trader");
+              if (b) rideOff(b, { flee: true });
             } },
-          { key: "no", label: "RIDE ON", cls: "ghost", run: function () {} },
+          { key: "no", label: "RIDE ON", cls: "ghost", run: function () { if (b) rideOff(b); } },
         ],
       };
     },
@@ -1756,9 +2400,17 @@
   add({
     id: "oldman", tag: "A FIRE OFF THE ROAD",
     weight: function () { return size() >= 4 ? 0.8 : 0.4; },
-    build: function () {
-      const price = W.tier("veteran").hire * 2;
+    /* one veteran, his good rifle, and the fire the card has always mentioned
+       — props.js's own fire, lit beside him */
+    cast: function () {
       const wid = gunFor(0.8);
+      return { name: "AN OLD SOLDIER", faction: "legion", hostile: 0, size: 1, mode: "camp", fire: true, gold: 0,
+               men: function () { return [W.makeSoldier("veteran", wid, { battles: 8 })]; } };
+    },
+    build: function (arg) {
+      const b = arg && arg.band;
+      const price = W.tier("veteran").hire * 2;
+      const wid = b ? b.men[0].wid : gunFor(0.8);
       return {
         title: 'AN OLD <em>SOLDIER</em>',
         sub: "ALONE, WITH A GOOD RIFLE",
@@ -1766,12 +2418,14 @@
            right" was the card telling the player which button to press. */
         body: 'He has a fire, a ' + esc(W.gunLabel(wid)) + ' cleaned to a shine, and thirty years ' +
               'of somebody else\'s wars behind him. He will come — for money up front, or for a share.',
+        band: b, bands: arg && arg.bands,
         choices: [
           { key: "pay", label: "PAY HIM", cls: "hot", enabled: S.gold >= price,
             hint: "-$" + price + " · +1 VETERAN · " + W.gunLabel(wid),
             run: function () {
               if (!W.pay(price)) return;
-              const s = join("veteran", wid, BASE_HIRED, { battles: 8 });
+              const s = b ? b.men[0] : join("veteran", wid, BASE_HIRED, { battles: 8 });
+              if (b) absorb(b, BASE_HIRED);
               W.log("hired " + s.name + ", veteran, for $" + price + ".", "good");
               W.toast("+1 VETERAN", "good");
               reconcile();
@@ -1779,12 +2433,13 @@
           { key: "share", label: "OFFER HIM A SHARE", cls: "",
             hint: "FREE · +1 VETERAN · LOYAL",
             run: function () {
-              const s = join("veteran", wid, 0.95, { battles: 8 });
+              const s = b ? b.men[0] : join("veteran", wid, 0.95, { battles: 8 });
+              if (b) absorb(b, 0.95);
               W.log(s.name + " came for a share and nothing else.", "good");
               loyMove(+4, "a veteran chose you in front of everyone");
               reconcile();
             } },
-          { key: "no", label: "LEAVE HIM HIS FIRE", cls: "ghost", run: function () {} },
+          { key: "no", label: "LEAVE HIM HIS FIRE", cls: "ghost", run: function () { if (b) letGo(b, { camp: true, pause: 3000 }); } },
         ],
       };
     },
@@ -1794,7 +2449,13 @@
   add({
     id: "buyer", tag: "A BUYER",
     weight: function () { return S.prisoners.length >= 4 ? 1.5 : 0; },
-    build: function () {
+    /* the buyer and his drivers, on the road. Sold prisoners walk off in HIS
+       column; freed ones become a real party of unarmed men on the island. */
+    cast: function () {
+      return { name: "A BUYER", faction: "company", hostile: 0, size: 4, mode: "camp" };
+    },
+    build: function (arg) {
+      const b = arg && arg.band;
       const n = S.prisoners.length;
       // he pays roughly what a camp charges to hire a man of that tier, halved
       let worth = 0;
@@ -1805,13 +2466,16 @@
         sub: n + " MEN IN THE WIRE",
         body: 'A quiet man with four trucks and a ledger. He will take all ' + n +
               ' off your hands at $' + worth + ' and does not want to discuss what for.',
+        band: b, bands: arg && arg.bands,
         choices: [
           { key: "sell", label: "SELL THEM ALL", cls: "bad",
             hint: "+$" + worth + " · LOYALTY DOWN",
             run: function () {
               W.earn(worth);
               S.stats.executed += Math.ceil(n / 3);   // core's dread counter: this is that kind of act
+              const taken = S.prisoners.slice();
               S.prisoners.length = 0;
+              if (b) { for (let i = 0; i < taken.length; i++) { taken[i].wid = "fists"; b.men.push(taken[i]); } rideOff(b); }
               W.log("sold " + n + " prisoners for $" + worth + ".", "bad");
               loyMove(-9, "you sold men");
               W.emit("army", S.army.length);
@@ -1820,12 +2484,24 @@
             hint: "+FAME · THEY SURRENDER MORE READILY",
             run: function () {
               S.fame += Math.round(2 + n * 0.6);
+              const freed = S.prisoners.slice();
               S.prisoners.length = 0;
+              if (b && freed.length && canStage()) {
+                const p = offsetFrom({ x: b.x, z: b.z }, -4, 8);
+                const f = W.makeBand({ size: 1, faction: "militia", x: p.x, z: p.z });
+                for (let i = 0; i < freed.length; i++) freed[i].wid = "fists";
+                f.men = freed; f.name = "FREED MEN"; f.gold = 0; f.hostile = 0;
+                stampCampaignFields(f);
+                S.bands.push(f);
+                churn(p.x, p.z, freed.length, 0); puff(p.x, p.z, 0.8);
+                letGo(f, { cooldown: 60 });
+                rideOff(b);
+              }
               W.log("turned " + n + " prisoners loose in front of a slaver.", "good");
               loyMove(+7, "mercy in front of witnesses");
               W.emit("army", S.army.length);
             } },
-          { key: "no", label: "THEY STAY IN THE WIRE", cls: "ghost", run: function () {} },
+          { key: "no", label: "THEY STAY IN THE WIRE", cls: "ghost", run: function () { if (b) rideOff(b); } },
         ],
       };
     },
@@ -1835,8 +2511,16 @@
   add({
     id: "toll", tag: "THE CROSSING",
     weight: function () { const b = biome(); return (b === "wadi" || b === "rock") ? 1.3 : 0.5; },
-    build: function () {
+    /* the toll crew are on the road with their truck across it BEFORE you
+       decide anything — "go through them" is a battle with the men you can
+       see, not a warband conjured after the click */
+    cast: function () {
       const n = Math.max(4, Math.round(size() * W.range(0.25, 0.6)));
+      return { name: "THE TOLLMEN", faction: "bandit", kind: "raiders", hostile: 1, size: n, mode: "camp", wreck: "truck" };
+    },
+    build: function (arg) {
+      const b = arg && arg.band;
+      const n = b ? b.men.length : Math.max(4, Math.round(size() * W.range(0.25, 0.6)));
       const toll = Math.round(size() * 5 + 40);
       return {
         title: 'A <em>TOLL</em> AT THE NARROWS',
@@ -1844,19 +2528,23 @@
         body: 'The only way through the rock for six kilometres, and ' + n + ' men are sitting on ' +
               'both sides of it with a truck across the gap. The price is $' + toll +
               ' and the man saying it is not the one holding the machine gun.',
+        band: b, bands: arg && arg.bands,
         choices: [
           { key: "pay", label: "PAY THE TOLL", cls: "", enabled: S.gold >= toll,
             hint: "-$" + toll + " · STRAIGHT THROUGH",
             run: function () {
               if (!W.pay(toll)) return;
+              // paid: they keep their narrows and leave you alone for the day
+              if (b) { b.gold += toll; letGo(b, { camp: true, cooldown: 900 }); }
               W.log("paid $" + toll + " at the narrows.", "");
               loyMove(-2, "your men do not like paying bandits");
             } },
           { key: "fight", label: "GO THROUGH THEM", cls: "hot",
             hint: n + " MEN, NOW",
             run: function () {
-              const b = spawnBandNear({ size: n, faction: "bandit", name: "THE TOLLMEN", r: 60, cooldown: 0, hidden: true });
-              b.mood = "hunt"; b.goal = { x: S.you.x, z: S.you.z };
+              if (b) { attack(b); return; }
+              const b2 = spawnBandNear({ size: n, faction: "bandit", name: "THE TOLLMEN", r: 60, cooldown: 0, hidden: true });
+              b2.mood = "hunt"; b2.goal = { x: S.you.x, z: S.you.z };
               /* the toast said "THEY ARE COMING DOWN OFF THE ROCK" over a
                  warband that had just been placed 60 m away in plain sight.
                  They come down off the rock now — and the sentence is kept
@@ -1867,6 +2555,7 @@
           { key: "around", label: "GO AROUND", cls: "ghost",
             hint: "HALF A DAY · -$" + Math.round(W.payroll() / 2),
             run: function () {
+              if (b) letGo(b, { camp: true, cooldown: 120 });
               S.hour += 8;
               if (S.hour >= 24) { S.hour -= 24; W.dawn(); }
               W.log("went around the narrows the long way.", "");
@@ -1920,26 +2609,60 @@
   add({
     id: "duel", tag: "A CHALLENGE",
     weight: function () { return size() >= 10 && size() < 140 ? 0.8 : 0; },
-    build: function () {
+    /* THE DUEL IS A FIGHT NOW, NOT A COIN. The old WALK OUT rolled W.chance(p)
+       and typed the result — in a game whose entire trigger is
+       systems/fpsmode.js, the one fight that is explicitly YOU against ONE MAN
+       was the one fight you did not get to shoot. Two parties on the road:
+       the line, and their champion eighteen metres out in front of it. WALK
+       OUT starts battle.js's `solo` fight — your army stays with the baggage,
+       nobody routs, and the aftermath is his name on the ground or yours. The
+       line waits (`await`) for the outcome and comes over or rides off. */
+    cast: function () {
       const n = W.irange(8, Math.max(10, Math.round(size() * 0.8)));
+      const wealth = clamp(0.3 + n / 150, 0.25, 0.8);
+      return [
+        { name: "THE CHALLENGERS", faction: "company", hostile: 0.7, size: n, mode: "camp", ahead: 90 },
+        { name: "THEIR CHAMPION", faction: "company", hostile: 0.7, size: 1, mode: "camp", along: -18, gold: 0,
+          men: function () { return [W.makeSoldier("veteran", gunFor(wealth), { battles: 14 })]; } },
+      ];
+    },
+    build: function (arg) {
+      const line = arg && arg.bands ? arg.bands[0] : null;
+      const champ = arg && arg.bands ? arg.bands[1] : null;
+      const n = line ? line.men.length : W.irange(8, Math.max(10, Math.round(size() * 0.8)));
       const wealth = clamp(0.3 + n / 150, 0.25, 0.8);
       // the odds are core's odds — you against one man, with your kit
       const mine = W.yourPower() - W.power(S.army);
-      const his = W.soldierPower(W.makeSoldier("veteran", gunFor(wealth)));
+      const his = W.soldierPower(champ ? champ.men[0] : W.makeSoldier("veteran", gunFor(wealth)));
       const p = W.odds(mine, his * 2.2);
+      const lose = function () {
+        S.you.hp = Math.max(1, Math.round(S.you.maxHp * 0.25));
+        const bag = Object.keys(S.baggage);
+        for (let i = 0; i < Math.ceil(bag.length / 3); i++) W.unstash(bag[i], S.baggage[bag[i]]);
+        S.fame = Math.max(0, S.fame - 8);
+        W.log("lost a duel. They took a third of the cart and let you crawl back.", "bad");
+        loyMove(-11, "they watched that too");
+      };
       return {
         title: 'HE WANTS <em>YOU</em>, NOT YOUR ARMY',
         sub: n + " MEN WATCHING",
         body: 'Their biggest man walks out ahead of the line, puts his rifle in the sand and ' +
-              'shouts across two hundred metres of nothing that if you beat him his ' + n +
+              'shouts across the gap that if you beat him his ' + n +
               ' men are yours, and if he beats you they take what you are carrying. ' +
               /* "You would win this about 61 times in a hundred" was the odds
                  printed in English immediately above a button chipped "61%". */
               'Your men are already forming a circle.',
+        band: champ || line, bands: arg && arg.bands,
         choices: [
           { key: "fight", label: "WALK OUT", cls: "hot",
             hint: Math.round(p * 100) + "% · WIN +" + men(n) + " · LOSE A THIRD OF THE CART",
             run: function () {
+              if (champ && line && W.battle && W.battle.start) {
+                line.await = 1;                                      // the line watches; strikeSet keeps its hold
+                ev().duel = { line: line.id, champ: champ.id, n: n, wealth: wealth };
+                attack(champ, { solo: true, duel: true });
+                return;
+              }
               if (W.chance(p)) {
                 for (let i = 0; i < n; i++) join(W.chance(0.6) ? "raider" : "soldier", gunFor(wealth), 0.5);
                 S.fame += Math.round(6 + n * 0.4);
@@ -1947,26 +2670,27 @@
                 W.log("killed their champion in front of both armies. " + n + " men came over.", "good");
                 if (FLAG_NOSHOW) W.toast("+" + men(n), "good");
                 loyMove(+14, "they watched you do it yourself");
-              } else {
-                S.you.hp = Math.max(1, Math.round(S.you.maxHp * 0.25));
-                const bag = Object.keys(S.baggage);
-                for (let i = 0; i < Math.ceil(bag.length / 3); i++) W.unstash(bag[i], S.baggage[bag[i]]);
-                S.fame = Math.max(0, S.fame - 8);
-                W.log("lost a duel. They took a third of the cart and let you crawl back.", "bad");
-                loyMove(-11, "they watched that too");
-              }
+              } else lose();
               reconcile();
             } },
           { key: "line", label: "SEND THE LINE INSTEAD", cls: "",
             hint: n + " MEN · FAME DOWN",
             run: function () {
-              const b = spawnBandNear({ size: n, faction: "company", name: "THE CHALLENGERS", r: 70, cooldown: 0, hidden: true });
-              b.mood = "hunt"; b.goal = { x: S.you.x, z: S.you.z };
+              if (line) {
+                if (champ) { line.men.unshift(champ.men[0]); removeBand(champ); }
+                attack(line);
+              } else {
+                const b = spawnBandNear({ size: n, faction: "company", name: "THE CHALLENGERS", r: 70, cooldown: 0, hidden: true });
+                b.mood = "hunt"; b.goal = { x: S.you.x, z: S.you.z };
+              }
               S.fame = Math.max(0, S.fame - 3);
               loyMove(-4, "you would not walk out");
             } },
           { key: "no", label: "RIDE AWAY", cls: "ghost", hint: "fame down · loyalty down",
-            run: function () { S.fame = Math.max(0, S.fame - 5); loyMove(-7, "you rode away from a challenge"); } },
+            run: function () {
+              if (line) { if (champ) { line.men.unshift(champ.men[0]); removeBand(champ); } letGo(line, { camp: true }); }
+              S.fame = Math.max(0, S.fame - 5); loyMove(-7, "you rode away from a challenge");
+            } },
         ],
       };
     },
@@ -2024,7 +2748,14 @@
   add({
     id: "defector", tag: "A RIDER COMES IN",
     weight: function () { return S.fame >= 20 && size() >= 12 ? 0.9 : 0; },
-    build: function () {
+    /* a rider COMES IN: one man, starting well out, walking to you with a dust
+       line behind him. The card is his arrival. */
+    cast: function () {
+      return { name: "A RIDER", faction: "warlord", hostile: 0, size: 1, mode: "approach", gold: 0,
+               men: function () { return [W.makeSoldier("soldier", gunFor(0.5), { battles: 5 })]; } };
+    },
+    build: function (arg) {
+      const b = arg && arg.band;
       const n = W.irange(4, Math.max(6, Math.round(size() * 0.3)));
       const price = Math.round(n * W.tier("raider").hire * 0.55);
       return {
@@ -2032,12 +2763,16 @@
         sub: "A SERGEANT FROM SOMEBODY ELSE'S COLUMN",
         body: 'He rode in alone with his hands up. His warlord has not paid anyone in nine days ' +
               'and he can bring ' + n + ' men across tonight if there is money in it.',
+        band: b, bands: arg && arg.bands,
         choices: [
           { key: "pay", label: "PAY HIM", cls: "hot", enabled: S.gold >= price,
             hint: "-$" + price + " · +" + men(n),
             run: function () {
               if (!W.pay(price)) return;
-              for (let i = 0; i < n; i++) join(W.chance(0.5) ? "raider" : "soldier", gunFor(0.45), 0.5);
+              const list = [];
+              for (let i = 0; i < n; i++) list.push(W.makeSoldier(W.chance(0.5) ? "raider" : "soldier", gunFor(0.45)));
+              if (b) { b.gold += price; rideOff(b); arriveMen(list, 0.5); }   // he rides back for them; they come over the rise
+              else for (let i = 0; i < n; i++) join(list[i].tier, list[i].wid, 0.5);
               W.log("bought " + n + " men out of another warlord's column for $" + price + ".", "good");
               if (FLAG_NOSHOW) W.toast("+" + men(n), "good");
               reconcile();
@@ -2045,12 +2780,13 @@
           { key: "trap", label: "IT IS A TRAP. TAKE HIM PRISONER.", cls: "bad",
             hint: "+1 PRISONER",
             run: function () {
-              S.prisoners.push(W.makeSoldier("soldier", gunFor(0.5)));
+              if (b) { S.prisoners.push(b.men[0]); removeBand(b); }
+              else S.prisoners.push(W.makeSoldier("soldier", gunFor(0.5)));
               W.log("put the defector in the wire instead.", "");
               loyMove(-3, "a man came to you and you chained him");
               W.emit("army", S.army.length);
             } },
-          { key: "no", label: "SEND HIM BACK", cls: "ghost", run: function () {} },
+          { key: "no", label: "SEND HIM BACK", cls: "ghost", run: function () { if (b) rideOff(b); } },
         ],
       };
     },
@@ -2065,14 +2801,28 @@
       const alive = fourAlive();
       return (alive.length && size() >= 30 && S.fame >= 30) ? 1.4 : 0;
     },
-    build: function () {
+    /* his rider, in his colours, walking in under the rag. The warlord is
+       chosen here so the man and the card agree about whose he is. */
+    cast: function () {
+      if (!ev().four) raiseTheFour();
+      const alive = fourAlive();
+      if (!alive.length) return null;
+      const f = alive[Math.floor(W.rnd() * alive.length)];
+      summonsFrom = f;
+      return { name: String(f.rec.name).toUpperCase() + "'S RIDER", faction: "warlord", hostile: 0, size: 1,
+               mode: "approach", gold: 0,
+               men: function () { return [W.makeSoldier("soldier", gunFor(0.6), { battles: 6 })]; } };
+    },
+    build: function (arg) {
+      const rider = arg && arg.band;
       /* raised on demand, because ?event=summons has to work on a page where
          the player has not ridden far enough to meet anybody. The weight above
          already refuses to fire this naturally without a live warlord. */
       if (!ev().four) raiseTheFour();
       const alive = fourAlive();
       if (!alive.length) return null;
-      const f = alive[Math.floor(W.rnd() * alive.length)];
+      let f = (rider && summonsFrom && alive.indexOf(summonsFrom) >= 0) ? summonsFrom : alive[Math.floor(W.rnd() * alive.length)];
+      summonsFrom = null;
       const name = f.rec.name;
       /* HE ANSWERS WITH EVERY COLUMN HE HAS. The old card picked one band and
          turned that one band around, which is what "he comes with everything
@@ -2086,6 +2836,7 @@
         body: 'The rider does not dismount. He says his warlord has been counting your column and ' +
               'has decided you are worth talking to once. Pay $' + tribute + ' a season and ride ' +
               'where you like. Refuse and he comes with everything he has.',
+        band: rider, bands: arg && arg.bands,
         choices: [
           { key: "pay", label: "PAY THE TRIBUTE", cls: "", enabled: S.gold >= tribute,
             hint: "-$" + tribute + " · HE LEAVES YOU ALONE",
@@ -2095,6 +2846,7 @@
               W.log("paid tribute to " + name + ".", "bad");
               loyMove(-10, "you paid another warlord");
               S.fame = Math.max(0, S.fame - 8);
+              if (rider) { rider.gold += tribute; rideOff(rider); }
             } },
           { key: "defy", label: "SEND HIM BACK ON FOOT", cls: "hot",
             hint: "+FAME · " + esc(name) + " HUNTS YOU",
@@ -2111,6 +2863,7 @@
               W.log("sent " + name + "'s rider back on foot.", "good");
               loyMove(+11, "they have been waiting for you to say that");
               W.toast(name.toUpperCase() + " IS COMING", "bad");
+              if (rider) rideOff(rider);                 // on foot, as promised
             } },
         ],
       };
@@ -2246,14 +2999,24 @@
     // way past is a revert flag that proves nothing.
     if (FLAG_NOEVENTS) return false;
     if (CARD) closeCard();
+    const L = typeof id === "string" ? libById(id) : id;
+    /* THE DOOR CASTS TOO — inside reach, so the men are standing behind the
+       rail on the frame it opens. A screenshot of a people-card without its
+       people would be a picture of the bug this exists to remove. */
+    if (L && L.cast && canStage()) {
+      dropCast();
+      if (castCard(L, { near: true, arg: arg })) return fireCast();
+    }
     return fire(id, arg);
   };
 
   E.maybeFire = function () {
-    if (FLAG_NOEVENTS || !canOpen()) return false;
+    if (FLAG_NOEVENTS || !canOpen() || CAST) return false;
     if (ev().over) return false;
     const L = pickEvent();
     if (!L) return false;
+    // a people-card puts its people on the road and waits for you to reach them
+    if (L.cast && canStage()) return !!castCard(L);
     return fire(L);
   };
 
@@ -3088,8 +3851,19 @@
     stepProps(rawDt);
     stepMarch(rawDt);
     stepTrails(rawDt);
+    stepCast(rawDt);
+    stepLeaving(rawDt);
     slow -= dt;
     if (slow <= 0) { slow = 0.25; hideMe(0.25); paintChipsThrottled(); }
+    /* A RAIL CLOSED BY SOMEBODY ELSE. warlord.html tears the verb rail down on
+       a phase change and army.js can replace it; if that happens with one of
+       our cards on it, CARD would otherwise stay set forever and the road
+       would go quiet for the rest of the run. Half a second of grace covers
+       the frame the rail is still being built on. */
+    if (CARD && CARD.rail) {
+      railT += rawDt;
+      if (railT > 0.5 && !(ctx.verbsOpen && ctx.verbsOpen())) closeCard();
+    }
 
     const x = S.you.x, z = S.you.z;
     if (!hadPos) { lastX = x; lastZ = z; hadPos = true; return; }
@@ -3097,7 +3871,7 @@
     lastX = x; lastZ = z;
     if (d > 400) return;              // a teleport (battle exit, load) is not travel
     since += d;
-    if (E.driven || FLAG_NOEVENTS || CARD) return;
+    if (E.driven || FLAG_NOEVENTS || CARD || CAST) return;
     if (since < next) return;
     since = 0;
     next = W.range(1100, 2600);
@@ -3131,7 +3905,7 @@
     // driver so the internal ticker stops double-counting.
     E.driven = true;
     since += Math.max(0, metres || 0);
-    if (since >= next && !CARD) { since = 0; next = W.range(1100, 2600); E.maybeFire(); }
+    if (since >= next && !CARD && !CAST) { since = 0; next = W.range(1100, 2600); E.maybeFire(); }
   };
   E.travelBlocked = function () {
     const v = ev();
@@ -3217,6 +3991,14 @@
 
     W.on("dawn", function () { safe(onDawn); });
     W.on("phase:aftermath", function (r) { safe(function () { onAftermath(r); }); });
+    /* THE DUEL'S OUTCOME. battle.js says how the solo fight ended; the line
+       that was watching pays up or rides off the moment the island is back. */
+    W.on("battle:end", function (r) {
+      const d = ev().duel;
+      if (!d || !r || !r.band || r.band.id !== d.champ) return;
+      d.outcome = r.outcome;
+    });
+    W.on("phase:campaign", function () { setTimeout(function () { safe(resolveDuel); }, 700); });
     W.on("newgame", function () {
       if (S.flags) delete S.flags.ev;
       ev();
@@ -3227,6 +4009,7 @@
          run that no longer exists. */
       if (batchT) { clearTimeout(batchT); batchT = 0; }
       batch.length = 0; beats.length = 0; marches.length = 0; trails.length = 0; held.length = 0;
+      CAST = null; leaving.length = 0;
       safe(darkenStage);
     });
     /* A SAVE CAN LAND MID-WALK. S.bands is serialised, so a joining party is

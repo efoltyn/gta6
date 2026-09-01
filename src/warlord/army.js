@@ -268,6 +268,14 @@
       return;
     }
     curBand = band;
+    /* HELD WHILE THE RAIL IS UP. The world keeps turning behind the rail —
+       that is the whole argument for the rail — and it turned on THIS band
+       too: campaign.js's off-screen war could halve it or delete it off
+       S.bands while its card still read "210 MEN", and its own AI could walk
+       it away from you mid-decision. `held` is the one flag campaign.js reads
+       for "leave this party alone" (events.js sets it on a cast party for the
+       same reason); every verb below clears it before it does anything. */
+    band.held = true;
     /* THE MEETING DOES NOT OWN THE SCREEN, SO IT MUST NOT OWN THE PHASE.
        This line used to be `W.setPhase("encounter", {band})`, and campaign.js
        sets the same phase one line before it calls in here. core fires
@@ -295,7 +303,27 @@
     }
     W.emit("encounter:open", { band: band });
     if (!showOld && W.feel && W.feel.ui) W.feel.ui("open", { volume: 0.8 });
+    /* AND THE LENS TURNS TO THEM. The campaign camera keeps whatever yaw the
+       player last dragged, so a party met from the flank or from behind put
+       the rail up over an empty dune with the men off the edge of the frame —
+       "there's a guy but he isn't on the map". Same two levers the tableaux
+       use; a want, not a seizure. */
+    if (!showOld) {
+      const dd = Math.hypot(band.x - W.state.you.x, band.z - W.state.you.z);
+      lensOn(band.x, band.z, clamp(dd * 0.9 + 5, 20, 40));
+    }
     paintEncounter(opts);
+  }
+  function unhold() { if (curBand) curBand.held = false; }
+  /* the band can have been used up by the time a verb is pressed (a tableau
+     ran, the player read the roster for a minute); say so instead of fielding
+     a party that is no longer on the island */
+  function gone() {
+    const b = curBand;
+    if (b && W.state.bands && W.state.bands.indexOf(b) >= 0 && b.men && b.men.length) return false;
+    W.toast("THEY ARE GONE", "bad");
+    finish();
+    return true;
   }
 
   /* THE LEGACY FULL-SCREEN CARD (?encounterui=old) IS DELETED, not disabled.
@@ -533,6 +561,8 @@
   }
 
   function startBattle(opts) {
+    if (gone()) return;
+    unhold();
     const band = curBand;
     if (!W.battle || !W.battle.start) {
       W.toast("battle.js did not load", "bad");
@@ -551,6 +581,8 @@
        · and the fight you have now starts with you SURPRISED — battle.js opens
          the range shorter and docks your side's morale for it. */
   function demandSurrender() {
+    if (gone()) return;
+    unhold();
     const band = curBand;
     const p = W.surrenderChance(band, W.yourPower());
     band._askedDay = W.state.day;
@@ -598,6 +630,8 @@
   }
 
   function hireBand(price) {
+    if (gone()) return;
+    unhold();
     const band = curBand;
     if (price == null || !W.pay(price)) { W.toast("NOT ENOUGH GOLD", "bad"); return; }
     /* MEN CHANGING SIDES, HELD BACK UNTIL THEY HAVE ACTUALLY CROSSED. The
@@ -636,6 +670,8 @@
      men, so it rides off (ridesAway, this file's own break-off) instead of
      laying down and becoming prisoners. */
   function robBand() {
+    if (gone()) return;
+    unhold();
     const band = curBand;
     const apply = function () {
       const gold = band.gold | 0;
@@ -723,6 +759,8 @@
   }
 
   function leaveBand() {
+    if (gone()) return;
+    unhold();
     const band = curBand;
     const speed = clamp(1.35 - band.men.length / 60, 0.4, 1.3);
     const hunger = clamp(W.bandPower(band) / Math.max(1, W.yourPower()), 0.2, 2.2);
@@ -797,6 +835,11 @@
     for (let i = 0; i < S.bands.length; i++) {
       const b = S.bands[i];
       if (!b.men || !b.men.length) continue;
+      /* NOT A PARTY IN SOMEBODY ELSE'S MOMENT. Joiners walking in from 26 m
+         and a party events.js has held on the road are inside CONTACT_R for
+         longer than STUCK_S by design; clearing their cooldown here opened
+         ATTACK / DEMAND / HIRE on your own men (events.js photographed it). */
+      if (b.joining || b.held) continue;
       const d = Math.hypot(b.x - S.you.x, b.z - S.you.z);
       if (d < CONTACT_R && d < nd) { nd = d; near = b; }
     }
@@ -815,7 +858,7 @@
        music bed off exactly that phase — so the pair of events is what it
        needs to hang the bed on instead. Emitted whether or not anything is
        listening; core's bus costs one array read for a name with no rows. */
-    if (curBand) W.emit("encounter:close", { band: curBand });
+    if (curBand) { curBand.held = false; W.emit("encounter:close", { band: curBand }); }
     curBand = null;
     if (W.campaign && W.campaign.enter) W.campaign.enter();
     else W.setPhase("campaign");
