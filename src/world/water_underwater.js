@@ -1320,6 +1320,54 @@
      carries the DOWNWARD penalty, which is where the C0 asymmetry nearly all
      lives (looking down at a countershaded animal over the deep is the one
      direction where camouflage actually works). */
+  /* ============================================================
+     THE PLAYABILITY LAYER — AND IT IS A DEPARTURE, LABELLED AS ONE.
+
+     OWNER (2026-09-01): "underwater my shark can't see a shark 20 feet ahead
+     that's dumb I want to see farther."
+
+     Everything above this block is physics with citations attached, and it is
+     RIGHT: clear tropical water really does close at ~38 m, and a countershaded
+     animal seen from above really is worth about C0 = 0.2. The trouble is that
+     this is a game about hunting other animals, and three of those correct
+     numbers multiply into a sea where the thing you are hunting does not exist
+     until it is inside your jaw. Measured on the live page before this change:
+
+       daylight, looking level          33.4 m      fine
+       daylight, looking DOWN at a shark 17.5 m     the pose the game is played in
+       full dark, looking level         ~17 m
+       full dark, looking DOWN          ~4.7 m      <- twenty feet. the complaint.
+       the surf band, any light          ~2.9 m     <- and this is the shore, where
+                                                       most of the hunting happens
+
+     So the physical constants are left exactly as they are, with their papers
+     still true next to them, and the three that erase the game are overridden
+     HERE where the departure is visible and named. Changing EPS_MAX in place
+     would have quietly turned Blackwell's citation into a lie.
+
+       C0_DOWN 0.20 -> 0.55. The single biggest term, and the most defensible
+       to move: 0.2 is an IDEALLY countershaded body against unlit gloom, and
+       these animals are lit by the scene, moving, and edged with fins that
+       break their own silhouette. Duntley's own bracket for a real target is
+       wide; 0.55 sits inside it and stops the sea from swallowing the prey.
+
+       EPS_MAX 0.45 -> 0.055. The scotopic branch is allowed to raise the
+       threshold contrast 55x, which is what turns night into four metres. A
+       dark sea should be DIM, not blind — you are a shark, and the game is
+       still playable at 3am. 0.055 is ~7x the daylight threshold, so night is
+       still markedly shorter-sighted, just not a blindfold.
+
+       GAIN 1.35 on the solved range, flat. The owner asked to see farther in
+       general, not only at night, and this is the honest way to say "the
+       simulation is calibrated for a human diver deciding whether a thing is
+       THERE, and a player needs to decide what it is DOING."
+
+     And a FLOOR, because no lighting or water type should be allowed to put
+     the range inside the animal. 10 m is still by far the murkiest water in
+     the game (against 45 m of open sea) and it keeps the surf readable as
+     milk without making the shore unplayable. */
+  const PLAY_C0_DOWN = 0.55, PLAY_EPS_MAX = 0.055, PLAY_GAIN = 1.35, PLAY_FLOOR = 10;
+
   function sightRange(eyeDepth, bedDepth, inland, sun01, out) {
     const stir = 1 - smoothstep(SURF_STIR, SURF_CLEAR, bedDepth);
     let c = C_SEA + (C_SURF - C_SEA) * stir;
@@ -1330,12 +1378,12 @@
     const E = E_NIGHT + (E_NOON - E_NIGHT) * Math.pow(clamp01(sun01), E_SHAPE);
     const L = Math.max(1e-7, R_INF * E * Math.exp(-kd * Math.max(0, eyeDepth)) / Math.PI);
     const eps = L >= EPS_KNEE ? EPS_DAY
-      : Math.min(EPS_MAX, Math.max(EPS_DAY,
+      : Math.min(PLAY_EPS_MAX, Math.max(EPS_DAY,
           EPS_SEE * (EPS_SCOTO_A * Math.pow(L, -0.25) - EPS_SCOTO_B)));
 
     // ln(C0/eps) at the three anchors — the numerator of R at each.
     const aUp = Math.log(C0_UP / eps), aLv = Math.log(C0_LEVEL / eps);
-    const aDn = Math.log(Math.max(1.02, C0_DOWN / eps));   // never let it go negative
+    const aDn = Math.log(Math.max(1.02, PLAY_C0_DOWN / eps));   // never let it go negative
     const k = kd / c;
     // R(+1)/R(0) and R(-1)/R(0), from the full law.
     const up = (aUp / aLv) / Math.max(0.35, 1 - k);
@@ -1346,7 +1394,7 @@
 
     out.c = c; out.kd = kd; out.eps = eps; out.lum = L;
     out.aniso = aniso; out.sil = sil;
-    out.r0 = aLv / c;
+    out.r0 = Math.max(PLAY_FLOOR, (aLv / c) * PLAY_GAIN);
     return out;
   }
   const _sight = { c: C_SEA, kd: KD_SEA, eps: EPS_DAY, lum: 700, aniso: 0.36, sil: 0.40, r0: 36 };

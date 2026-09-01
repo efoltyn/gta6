@@ -1432,8 +1432,34 @@
   }
 
   // ---- HUD ----
-  const cross = document.getElementById("crosshair");
-  const ammoEl = document.getElementById("ammo");
+  /* THE RETICLE NODE IS RESOLVED FRESH, NOT CACHED FOR THE PAGE'S LIFETIME.
+
+     OWNER (2026-09-01): "warlord during a battle should have a crosshair ...
+     failing at the req lol."
+
+     These were `const el = document.getElementById(...)` evaluated ONCE, at
+     module load, which is true exactly as long as nobody ever replaces the
+     element. warlord/gunplay.js does: it builds #wgpHud (containing its own
+     #crosshair and #ammo) on mount and REMOVES the whole wrapper on unmount,
+     so every battle after the first hands the page a brand-new node while
+     this file goes on styling the detached one. display:"block" lands on an
+     orphan, `_crossShown` is updated to say it worked, and the player gets no
+     reticle for the rest of the session. #ammo and #hitMarker (inserted
+     relative to #crosshair) go the same way.
+
+     A detached node still answers every property you ask it, which is why this
+     failed silently for the whole battle rather than throwing once. `isConnected`
+     is the cheap question that catches it: one property read per frame in the
+     common case, and a re-query only after somebody swapped the DOM out. */
+  let _crossEl = null, _ammoEl = null;
+  function crossEl() {
+    if (!_crossEl || !_crossEl.isConnected) _crossEl = document.getElementById("crosshair");
+    return _crossEl;
+  }
+  function ammoHudEl() {
+    if (!_ammoEl || !_ammoEl.isConnected) _ammoEl = document.getElementById("ammo");
+    return _ammoEl;
+  }
   const stripEl = document.getElementById("weaponStrip");
   // One reticle element serves both camera modes. Keep the cached visibility
   // beside the element so setActive() can invalidate/update it when V toggles
@@ -1495,6 +1521,7 @@
           "translate(-50%,-50%) translate(" + dx.toFixed(1) + "px," + dy.toFixed(1) + "px) rotate(" + (angles[i]) + "deg)";
       }
     }
+    const cross = crossEl();
     if (cross && cross.parentNode) cross.parentNode.insertBefore(wrap, cross.nextSibling);
     else document.body.appendChild(wrap);
     return { wrap, ticks, placeTicks };
@@ -1510,6 +1537,7 @@
     hitMarkerKill = !!kill;
     hitMarkerDur = kill ? 0.42 : 0.18;
     hitMarkerT = hitMarkerDur;
+    const cross = crossEl();
     if (cross) {
       hitMarker.wrap.style.left = cross.style.left || "50%";
       hitMarker.wrap.style.top = cross.style.top || "50%";
@@ -1539,6 +1567,7 @@
   });
 
   function setAmmoHud() {
+    const ammoEl = ammoHudEl();
     if (!ammoEl) return;
     syncAmmo();
     // city/life mode shows ammo whenever you're holding a gun (third-person too),
@@ -3516,12 +3545,17 @@
     // land AFTER this frame's onAlways(52), so without it a [V] pressed mid-ride
     // flashed one frame of fists before the next frame took them away.
     vm.visible = on && !aquaticRide();
+    const cross = crossEl();
     if (cross) {
       // Leaving FP used to write display:none even though shoulderActive()
       // became true in the same call. The per-frame change-only cache still
       // remembered `true`, so it never restored the element in third person.
       // Resolve the final shared owner now and keep the cache honest.
-      const show = (fps.active || shoulderActive()) && CBZ.game.state === "playing";
+      // ...and not on an animal — same owner as the per-frame pass and the
+      // viewmodel above it. Without it, toggling the eye view mid-ride flashes
+      // a reticle for the frame before onAlways(52) catches up.
+      const show = (fps.active || shoulderActive()) && !aquaticRide() &&
+        CBZ.game.state === "playing";
       cross.style.display = show ? "block" : "none";
       _crossShown = show;
     }
@@ -3842,7 +3876,25 @@
     // fist/gun while it is active, then restore it automatically on landing.
     if (ddT < 0) vm.visible = !!(fps.active && !chutePresentation && !aquaticRide());
     const aiming = fps.active || shoulderActive();
-    const crossShow = aiming && !chutePresentation && CBZ.game.state === "playing";
+    /* A SHARK HAS NO GUNSIGHT.
+
+       OWNER (2026-09-01): "first person shark game should not have a crosshair
+       ... failing at the req lol."
+
+       The line above this one already knows: `vm.visible` drops the first-person
+       hands on an aquatic mount, because you are the animal and animals have no
+       hands. The reticle was the one piece of the gun HUD that never got the
+       memo — it was gated on fpsmode being ACTIVE, full stop, with no reference
+       to `armed()` or `aquaticRide()`. The ammo readout hides itself for free
+       (it asks `armed()`, which is false on a shark); the crosshair asked
+       nothing, so riding a shark in the eye view put a firearm reticle in the
+       middle of the screen and left it there.
+
+       Same predicate as the hands, for the same reason, so the two cannot
+       disagree about whether you are currently a person. */
+    const crossShow = aiming && !chutePresentation && !aquaticRide() &&
+      CBZ.game.state === "playing";
+    const cross = crossEl();
     if (cross && crossShow !== _crossShown) { cross.style.display = crossShow ? "block" : "none"; _crossShown = crossShow; }
 
     if (shotCD > 0) shotCD = Math.max(0, shotCD - dt);
@@ -4304,6 +4356,7 @@
     // welded to the barrel through a whole mag-dump.
     if (triggerHeld && w.auto) shoot();
 
+    // `cross` is already resolved at the top of this same pass
     if (cross) {
       const aim = aimedActor(armed() ? w.range : MELEE);
       // reticle breathes with the live cone: tight at rest, blooms with recoil,

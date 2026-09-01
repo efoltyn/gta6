@@ -725,6 +725,50 @@
 
   const raycaster = new THREE.Raycaster();
   const _ro = new THREE.Vector3(), _rd = new THREE.Vector3();
+  /* ---- THE CAMERA TRAILS THE BODY, ON A SWIMMING ANIMAL ONLY -------------
+     OWNER (2026-09-01): "shark cam should follow movement?"
+
+     Yes, and for the same reason every driving camera in the genre does it: a
+     shark is STEERED, not walked. Its body turns continuously, and a camera
+     that holds a world-fixed bearing means the player spends the whole match
+     dragging the view back behind an animal that will not stop turning. On
+     foot the opposite is true — you want to walk one way and look another —
+     which is why this is gated on an aquatic mount and nothing else.
+
+     WHOSE HAND IS ON THE YAW. Three separate files write `cam.yaw` from player
+     input (this file's mousemove, systems/touch.js, systems/gamepad.js), and
+     teaching all three to report in would be three places to forget. Instead
+     this remembers the value it last wrote and treats any DIFFERENCE as a hand
+     — the same foreign-write probe world/water_underwater.js uses to notice
+     someone else editing its fog. Look anywhere and the follow stands down
+     instantly; let go and it eases back over about a second.
+
+     It only ever writes cam.yaw, never the boom or the pitch, so it composes
+     with the ride's stand-off instead of fighting it, and pitch stays entirely
+     the player's — looking up at the surface while cruising is a thing you
+     should be able to hold. */
+  const AQ_FOLLOW_DELAY = 0.65;     // s of no look input before it re-centres
+  const AQ_FOLLOW_RATE = 1.7;       // exp rate; ~1.2 s to settle
+  let aqFollowLast = null, aqFollowIdle = 0;
+  function aquaticFollowYaw(fdt) {
+    const a = CBZ.cityMountedAnimal && CBZ.cityMountedAnimal();
+    const on = a && a.species && a.species.aquatic && !a.dead &&
+      !(CBZ.fps && CBZ.fps.active) && CBZ.game && CBZ.game.state === "playing" &&
+      !(CBZ.cineCam && CBZ.cineCam.active) && !(CBZ.cityCam && CBZ.cityCam.death);
+    if (!on) { aqFollowLast = null; aqFollowIdle = 0; return; }
+    if (aqFollowLast != null && Math.abs(cam.yaw - aqFollowLast) > 1e-6) aqFollowIdle = 0;
+    else aqFollowIdle += fdt;
+    if (aqFollowIdle < AQ_FOLLOW_DELAY) { aqFollowLast = cam.yaw; return; }
+    // the yaw that looks ALONG a world heading: movement is (-sin, -cos)·yaw
+    const h = a.heading || 0;
+    const want = Math.atan2(-Math.cos(h), -Math.sin(h));
+    let d = want - cam.yaw;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    cam.yaw += d * (1 - Math.exp(-AQ_FOLLOW_RATE * fdt));
+    aqFollowLast = cam.yaw;
+  }
+
   // lazy-follow yaw for the city RDR2 cam — trails cam.yaw with exp smoothing
   // (input itself is untouched; only the rig's framing lags)
   let smYaw = 0, smYawOn = false;
@@ -1604,6 +1648,7 @@
     // smYaw integrates on feel-dt so its trail settles in REAL time (at 5 FPS
     // the world-dt version chased at ~25% speed = the "view drags behind my
     // mouse" lag). Off → identical to today (smYaw frames both, world-dt chase).
+    aquaticFollowYaw(fdt);            // before anything reads the yaw
     let yaw = cam.yaw, yawView = cam.yaw;
     if (TP) {
       let campaignTP = false;
