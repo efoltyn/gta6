@@ -15,16 +15,29 @@
    AFTER it is the sea.
 
    BOTH SIDES ARE THE SAME MODE AND THE SAME SEED — the only difference is the
-   CODE the two servers are serving, so `--before` must point at a checkout of
-   the old build:
+   CODE each server is serving. A self A/B cannot photograph this: what changed
+   is a screen that no longer exists, and no flag brings it back (which is the
+   point of deleting it rather than gating it). So the before column is a
+   COMMIT, stood up by launchSides() at the bottom of this file:
 
-     git worktree add --detach /tmp/ba-before HEAD
-     (node -e "…serve /tmp/ba-before on 8799…" &)
-     ba shark-orca-no-card --before http://127.0.0.1:8799/index.html
+     ba shark-orca-no-card
 
-   There is no defaultBefore. A self A/B cannot photograph this: the thing that
-   changed is a screen that no longer exists, and no flag brings it back —
-   which is the point of deleting it rather than gating it. */
+   is the whole command. */
+
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* THE BASELINE IS PINNED BY SHA, NOT BY HEAD~1. This repo has several agents
+   pushing to main; "the commit before mine" stops being HEAD~1 the moment
+   somebody else lands anything, and a before column quietly serving the wrong
+   build looks exactly like a clean pair. BA_ORCA_BASE overrides it. */
+const BASE_SHA = process.env.BA_ORCA_BASE || "f645dc9";
 
 async function stageOrcaKill(input) {
   const CBZ = window.CBZ, T = window.THREE, sub = input.subject;
@@ -309,6 +322,46 @@ export default {
      startRunPresented falls through to the synchronous startRun. */
   beforeParams: { mode: "sharksim", seed: "90210", cfg_BOOT_METER: "0" },
   afterParams: { mode: "sharksim", seed: "90210", cfg_BOOT_METER: "0" },
+  /* ---- THE BEFORE COLUMN IS A COMMIT --------------------------------------
+     The worktree is REMOVED AND RE-ADDED every run: a reused one is a previous
+     run's leftovers plus whatever wrote into it since, and that is the worst
+     failure this tool has — it looks like a clean pair and is comparing
+     nothing. (Learned by megalodon-sight.mjs, which this follows.) */
+  async launchSides(ctx) {
+    const root = (ctx && ctx.repoRoot) || ROOT;
+    const wt = path.join(os.tmpdir(), "ba-shark-orca-no-card-base");
+    const git = (args) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
+    try { git(["worktree", "remove", "--force", wt]); } catch (e) {}
+    try { git(["worktree", "prune"]); } catch (e) {}
+    git(["worktree", "add", "--detach", "--force", wt, BASE_SHA]);
+
+    const serverPath = path.join(wt, "tools", "devserver.py");
+    if (!existsSync(serverPath)) throw new Error("baseline worktree has no tools/devserver.py at " + serverPath);
+    // a port nothing else in this repo's tooling claims (probe.mjs takes 9200+,
+    // ba's own static server 8700+, megalodon-sight 8931)
+    const port = 8933;
+    const srv = spawn("python3", [serverPath], {
+      cwd: wt, env: Object.assign({}, process.env, { PORT: String(port) }),
+      stdio: "ignore", detached: true,
+    });
+    const origin = `http://127.0.0.1:${port}/`;
+    let up = false;
+    for (let i = 0; i < 100 && !up; i++) {
+      try { up = (await fetch(origin, { method: "HEAD" })).ok; } catch (e) { /* not yet */ }
+      if (!up) await sleepMs(150);
+    }
+    if (!up) throw new Error("baseline server never answered at " + origin);
+    if (ctx && ctx.log) ctx.log(`[shark-orca-no-card] BEFORE = ${BASE_SHA} at ${wt} on ${origin}`);
+
+    return {
+      before: origin,
+      label: `${BASE_SHA} (the orca kill still ends the game) vs working tree`,
+      async close() {
+        try { process.kill(-srv.pid, "SIGTERM"); } catch (e) { try { srv.kill(); } catch (e2) {} }
+        try { git(["worktree", "remove", "--force", wt]); } catch (e) {}
+      },
+    };
+  },
   subjects: [
     {
       id: "megalodon", ch: 0,
