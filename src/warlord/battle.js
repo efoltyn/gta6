@@ -74,7 +74,25 @@
      ?orders=old   the four order buttons do nothing; everyone holds. The
                    revert for the command layer.
      ?tlos=0       the dunes stop blocking sight lines
-     ?men=N        per-side fielding cap (default 300 — see MEN_CAP)
+     ?men=N        per-side fielding cap (default 750 on a desktop, 300 on a
+                   touch device — both measured, see MEN_CAP)
+     ?squads=old   the SQUAD layer is off: every man thinks, paths, separates
+                   and plants his own boots every frame, exactly as this file
+                   used to. The revert for the formation/relevance rewrite and
+                   the honest "before" column for
+                   tools/warlord-scale-check.mjs --ab.
+                   IT DOES NOT REVERT THE SPAWN FRONTAGE OR freeSpot, and that
+                   is deliberate: those two are bugs, not behaviour (a side of
+                   500 formed a 155 m deep queue ten men wide, so four fifths
+                   of an army was out of the fight — MEASURED, 601 bodies at
+                   t=45 s fired 91 rounds against 464 from 301 bodies). An A/B
+                   where the two columns are fighting differently shaped
+                   battles measures nothing.
+     ?field=old    the battlefield height field is off — every ground query
+                   and every metre of every sight line goes straight to
+                   desert.js's heightAt again. Separate from ?squads=old on
+                   purpose: it is the one change that could move a man's feet,
+                   so it has to be revertible on its own.
      ?battle=1     debug: drop straight into a test battle at boot
      ?gunplay=old  warlord/gunplay.js's legacy path — the hand-rolled player
                    controller this file used to carry, kept whole so the new
@@ -108,14 +126,140 @@
      and SURVIVE — they are still on the roster afterwards, which is the only
      honest way to cap a real army. ?men=N overrides it in both directions.
 
-     300 is battle.html's own measured neighbourhood (its saved
-     `cbz-npcwar-max` is per side at 30 fps on the machine that ran it) and it
-     is the number the brief asks to hold: 300 v 300 must run. */
-  const MEN_CAP_DEFAULT = 300;
+     300 WAS FOLKLORE AND IT IS NOW MEASURED. The old comment said "300 is
+     battle.html's own measured neighbourhood (its saved `cbz-npcwar-max` is
+     per side at 30 fps on the machine that ran it)" — a different page, a
+     different simulation, an unnamed machine, an unstated moment in the fight,
+     and nothing in this repo had ever re-measured it against THIS battle.
+     tools/warlord-scale-check.mjs does, and its header explains why the answer
+     has to be reported as CPU time rather than as a frame rate: the headless
+     rig rasterises in software, so its draw cost is a fact about a missing GPU
+     driver and its JavaScript cost is a fact about the game.
+
+     MEASURED, seed 1337, at t=45 s (the beat where both lines are actually
+     shooting), on a Mac under heavy contention — four other agents, load
+     average ~120, so every number here is pessimistic:
+
+         bodies    sim ms    matrix ms    CPU total
+            121      1.00         0.90         1.90
+            301      3.70         2.60         6.30
+            601      7.50         5.70        13.20
+           1001     12.70         8.80        21.50
+           1601     20.50        14.20        34.70
+
+     That is 13 us of CPU per body per frame and it is very nearly linear, so
+     the knee is an interpolation and not a cliff: 1 540 bodies fit a 30 fps
+     CPU frame and 770 fit a 60 fps one. Per side, halved: 770 and 384.
+
+     AND IT IS A DEVICE QUESTION, WHICH ONE CONSTANT CANNOT BE. The old comment
+     was right that "a legion of 900 has to be survivable on a phone" and wrong
+     to answer it with a single number for every machine the game runs on. A
+     phone keeps 300 — battle.html's inherited figure, which is at least a
+     30 fps number from a real device — and anything with a mouse gets the
+     measured one. ctx.coarse is the shell's own touch/desktop flag, already
+     used here to choose the opening camera.
+
+     750, not 770: the measurement is a median under contention and the cap
+     wants to sit under its own knee rather than on it.
+
+     NOTE FOR WHOEVER RAISES THIS NEXT. On the enemy side the cap is no longer
+     what binds — core.js's W.rollBigSize tops out at 300 men, so no party on
+     the island can field more than that however high this goes. What the raise
+     actually buys is YOUR army: a warlord who has conscripted 700 men now
+     brings 700 of them instead of leaving 400 with the baggage. */
+  const MEN_CAP_COARSE = 300;
+  const MEN_CAP_DESKTOP = 750;
+  function MEN_CAP_DEFAULT() { return (ctx && ctx.coarse) ? MEN_CAP_COARSE : MEN_CAP_DESKTOP; }
   const FIELD_R = 170;             // the battlefield is ~340 m across
   const CORPSE_MAX = 260;          // see the header: a smaller field, a nearer camera
   const SIGHT = 175;
   const GRID_CELL = 14;
+
+  /* ============================================================ THE PROFILER
+     BECAUSE "IT FEELS SLOW AT THREE HUNDRED" IS NOT A MEASUREMENT, and every
+     optimisation this file has ever had was aimed by reading the code rather
+     than by timing it. tools/warlord-scale-check.mjs turns this on, runs
+     seventy frames and prints the per-phase millisecond split, so the next
+     person to make this faster starts from the profile instead of from a
+     hunch. (The first profile taken this way said the sight lines cost more
+     than everything else in the sim put together, which nobody had guessed.)
+
+     OFF IT IS ONE BRANCH. pNow() returns 0 and pAdd() returns immediately, so
+     the shipping game pays a predictable-not-taken test per phase per frame —
+     eight of them — and nothing else. The COUNTERS are what make it useful:
+     a timer tells you sight lines are expensive, a counter tells you a man
+     tests line of sight nine times a second and that is the actual bug. */
+  const PROF = { on: false, frames: 0, t: Object.create(null), n: Object.create(null) };
+  function pNow() { return PROF.on ? performance.now() : 0; }
+  function pAdd(k, t0) { if (PROF.on) PROF.t[k] = (PROF.t[k] || 0) + (performance.now() - t0); }
+  function pHit(k, c) { if (PROF.on) PROF.n[k] = (PROF.n[k] || 0) + (c === undefined ? 1 : c); }
+
+  /* ============================================================ THE FIELD
+     ONE CACHED HEIGHT LOOKUP, AND IT IS THE LARGEST SINGLE COST IN THE FIGHT.
+
+     MAP.groundAt is desert.js's heightAt: coast warp, province blend, three
+     dune octaves, wadis, mesas, oasis mix — about fifty hashes per call, and
+     desert.js's own comment calls it "the hot path in the file". It is exactly
+     the right function for "what shape is this island". It is a terrible one
+     to put in an inner loop, and this file had it in two:
+
+       · every man's feet, every substep (through sand.plant's `ground`).
+       · every metre of every sight line. terrainBlocked marches ceil(d/3)
+         samples, so a 100 m sight line is 33 heightAt calls, and a man tests
+         line of sight on every think AND again on every trigger pull.
+
+     MEASURED with the counters above at 300 v 300, and the honest number is
+     smaller than the guess that motivated it: 32 sight-line tests a frame at
+     ~20 samples each is about 39 000 heightAt calls a second, and swapping
+     them onto the field takes the whole man-stepping phase from 3.30 ms to
+     2.94 ms — a tenth of the frame, not a third. heightAt is around half a
+     microsecond, not the two this was written expecting. The change stays
+     because the OTHER half of it is not a speed argument at all (see below)
+     and because a tenth of the frame at no cost is still a tenth of the
+     frame — but the profiler is what said so, and the guess was wrong.
+
+     A BATTLE IS 340 m ACROSS AND THE GROUND DOES NOT MOVE. So sample it once
+     and read it back bilinearly. The spacing is not a tuning choice: 2.69 m is
+     what desert.js's raise() draws the battlefield mesh at (span radius*2+90
+     over 160 segments), and a bilinear read of the lattice a mesh is built
+     from IS that mesh's surface, to the triangle diagonal. So this is not an
+     approximation of the battlefield — it is the battlefield, and the men now
+     stand on the ground you can SEE rather than on the analytic surface the
+     mesh was sampled from. Those two differ by up to a third of a metre on a
+     dune face, which is a boot through the sand at close range.
+
+     THE MARGIN IS DERIVED, NOT PICKED. A routed man runs to FIELD_R * 0.95
+     before he leaves, spawnAt places the deepest rank at gap/2 + rank depth,
+     and the flank anchor swings 46-66 m off the enemy centre of mass. FIELD_R
+     + 90 covers all three with room; anything outside falls through to
+     heightAt and simply pays the old price, so being wrong about the extent
+     costs speed and never correctness. */
+  const FIELD_STEP = (FIELD_R * 2 + 90) / 160;   // desert.js raise()'s own vertex spacing
+  const FIELD_MARGIN = 90;
+  let fld = null, fldN = 0, fldX0 = 0, fldZ0 = 0, fldSrc = null;
+  function buildField(cx, cz, srcAt) {
+    fldSrc = srcAt;
+    if (Q && Q.get("field") === "old") { fld = null; return srcAt; }
+    const half = FIELD_R + FIELD_MARGIN;
+    fldN = Math.ceil((half * 2) / FIELD_STEP) + 1;
+    fldX0 = cx - half; fldZ0 = cz - half;
+    fld = new Float32Array(fldN * fldN);
+    for (let j = 0; j < fldN; j++) {
+      const z = fldZ0 + j * FIELD_STEP;
+      const row = j * fldN;
+      for (let i = 0; i < fldN; i++) fld[row + i] = srcAt(fldX0 + i * FIELD_STEP, z);
+    }
+    return fieldAt;
+  }
+  function fieldAt(x, z) {
+    const gx = (x - fldX0) / FIELD_STEP, gz = (z - fldZ0) / FIELD_STEP;
+    const i = gx | 0, j = gz | 0;
+    if (i < 0 || j < 0 || i >= fldN - 1 || j >= fldN - 1) return fldSrc(x, z);
+    const fx = gx - i, fz = gz - j, k = j * fldN + i;
+    const a = fld[k], b = fld[k + 1], c = fld[k + fldN], d = fld[k + fldN + 1];
+    const lo = a + (b - a) * fx;
+    return lo + (c + (d - c) * fx - lo) * fz;
+  }
 
   /* THE STRING BOTH CONSUMERS READ. actorweapons.js resolves the appearance
      model off a weapon id, and combat_iq.js classifies the competence column
@@ -226,6 +370,14 @@
       }
       relief = Math.round((hi - lo) * 10) / 10;
     }
+
+    /* AND FROM HERE ON THE GROUND IS THE CACHED FIELD. Swapped in AFTER the
+       relief measurement above and BEFORE anything else in the file gets a
+       reference, so relief is still measured off the analytic surface (the
+       number battle.html prints, unchanged) and every query after it — feet,
+       sight lines, cover seating, the rock meshes, CBZ.groundAt, the player's
+       floor — reads the lattice the mesh is drawn from. See THE FIELD. */
+    groundAt = buildField(cx, cz, groundAt);
 
     // the cover boxes become real colliders — for the bullets, the bodies and
     // combat_iq's cover search alike
@@ -366,18 +518,44 @@
   // battle.html's spiral, kept whole: the first free point is genuinely the
   // nearest one and it is deterministic, so two men never start inside a rock
   // or inside each other.
-  const _claim = [];
+  /* THE CLAIM LIST WAS O(N²) AND AT 500 A SIDE IT WAS THE SLOWEST THING IN THE
+     GAME. Every candidate point was tested against EVERY point already taken,
+     and the spiral tries up to forty candidates per man: at man 2400 that is
+     96 000 distance tests for one soldier and roughly 230 million for the
+     army. Deploying 500 v 500 spent over a minute in this function alone,
+     which is why nobody had ever seen a battle that size — it looked like a
+     hang, not like a cost.
+
+     A HASH ON THE SAME 1.15 m THE TEST IS ABOUT. Two men conflict inside
+     R*2 = 1.15 m, so a bucket that wide means the only claims that can
+     possibly conflict are in this cell or the eight around it. Nine bucket
+     reads instead of N, and the ANSWER IS IDENTICAL — this is not an
+     approximation with a tolerance, it is the same predicate with the
+     impossible candidates skipped. */
+  const CLAIM_CELL = 1.15;         // = R * 2, the conflict distance itself
+  const _claim = new Map();
+  function claimKey(cx, cz) { return cx * 73856093 ^ cz * 19349663; }
   function freeSpot(x, z) {
     const R = 0.575;
     const crowded = function (px, pz) {
-      for (let i = 0; i < _claim.length; i++) {
-        const c = _claim[i];
-        const dx = px - c.x, dz = pz - c.z;
-        if (dx * dx + dz * dz < (R * 2) * (R * 2)) return true;
+      const cx = Math.floor(px / CLAIM_CELL), cz = Math.floor(pz / CLAIM_CELL);
+      for (let ax = -1; ax <= 1; ax++) for (let az = -1; az <= 1; az++) {
+        const a = _claim.get(claimKey(cx + ax, cz + az));
+        if (!a) continue;
+        for (let i = 0; i < a.length; i += 2) {
+          const dx = px - a[i], dz = pz - a[i + 1];
+          if (dx * dx + dz * dz < (R * 2) * (R * 2)) return true;
+        }
       }
       return false;
     };
-    const take = function (px, pz) { _claim.push({ x: px, z: pz }); return { x: px, z: pz }; };
+    const take = function (px, pz) {
+      const k = claimKey(Math.floor(px / CLAIM_CELL), Math.floor(pz / CLAIM_CELL));
+      let a = _claim.get(k);
+      if (!a) { a = []; _claim.set(k, a); }
+      a.push(px, pz);
+      return { x: px, z: pz };
+    };
     if (!blockedAt(x, z) && !crowded(x, z)) return take(x, z);
     for (let k = 1; k < 40; k++) {
       const a = k * 2.399963229728653, d = k * 1.35;
@@ -386,16 +564,51 @@
     }
     return take(x, z);
   }
+  /* HOW AN ARMY IS DRAWN UP, AND THE OLD ANSWER DOES NOT SCALE PAST ABOUT
+     FIFTY MEN.
+
+     It was `col = i/10, row = i%10`: ten men abreast, and every extra ten men
+     added another rank BEHIND. That is a firing line for a skirmish and a
+     queue for an army. MEASURED at 500 a side: 50 ranks at 3.1 m is a column
+     155 metres deep and 34 metres wide, so the front two ranks fought and the
+     other 480 men walked. The scale check saw it plainly — 601 bodies fired 91
+     rounds in 45 seconds where 301 bodies fired 464. More men made the battle
+     QUIETER.
+
+     THE FRONTAGE IS DERIVED FROM THE GROUND, not from a head count. The
+     battlefield is 2 * FIELD_R across and a man needs FILE_W of lateral room,
+     so there are at most FILE_MAX files on it, full stop. Under that ceiling
+     the shape is ranks ≈ sqrt(N / 6): the 6 is the aspect a formed body of men
+     actually has (six times wider than deep — a line, not a block), and it is
+     the only number here that is a choice rather than a measurement. It gives
+     26 men two ranks of 13, 300 men seven ranks of 43 (103 m of frontage on a
+     340 m field), 900 men twelve ranks of 75, and 1500 men the file ceiling
+     with twelve ranks behind it. Every one of those is a formation somebody
+     could point at and name, and in every one of them the whole army is in
+     the fight within one advance. */
+  const FILE_W = 2.4;              // lateral room per man: SEP is 0.9, a rifle is 1.1
+  const RANK_D = 2.9;              // depth per rank — a stride and a half
+  const FILE_MAX = Math.floor((FIELD_R * 2 * 0.92) / FILE_W);   // 130 files on this field
+  function frontage(n) {
+    let ranks = Math.max(1, Math.round(Math.sqrt(n / 6)));
+    let files = Math.ceil(n / ranks);
+    if (files > FILE_MAX) { files = FILE_MAX; ranks = Math.ceil(n / files); }
+    return { ranks: ranks, files: files };
+  }
   function spawnAt(sideKey, i) {
     const s = SIDES[sideKey];
     const gap = GAP();
-    const col = (i / 10) | 0, row = i % 10;
+    const F = s.front || (s.front = frontage(Math.max(1, s.plan || 1)));
+    const rank = (i / F.files) | 0, file = i % F.files;
     /* AMBUSHED MEN DO NOT FORM RANKS. A surprised army spawns scattered, which
        is not decoration: a rank is a firing LINE and a scatter is not, so the
        first thirty seconds of a surprised fight are genuinely worse. */
     const jitter = (startOpts && startOpts.surprised && sideKey === "mine") ? 14 : 1.8;
-    const x = MAP.cx + s.dir * (gap / 2 + 8 + col * 3.1) + (lcg() - 0.5) * jitter;
-    const z = MAP.cz + (row - 4.5) * 3.4 + (col % 2) * 1.7 + (lcg() - 0.5) * jitter;
+    const x = MAP.cx + s.dir * (gap / 2 + 8 + rank * RANK_D) + (lcg() - 0.5) * jitter;
+    // the odd ranks stand in the gaps of the even ones — a checker, so the
+    // second rank can see between the first rather than into its backs
+    const z = MAP.cz + (file - (F.files - 1) / 2) * FILE_W + (rank & 1) * (FILE_W / 2) +
+              (lcg() - 0.5) * jitter;
     return freeSpot(x, z);
   }
 
@@ -454,6 +667,13 @@
       lastShotT: -9, sq: Math.floor(i / 10), sqSlot: i % 10,
       kills: 0, rad: 0.45, eyeH: 1.52, losY: 1.35, aimY: 1.28, headY: 1.62,
       routed: false, fled: false,
+      /* IS THIS MAN CURRENTLY A FORMATION SLOT RATHER THAN AN INDIVIDUAL.
+         stepSquad owns this flag; frame() skips stepMan for anyone carrying
+         it. Nothing else in the file reads it, so a man handed back is
+         indistinguishable from a man who was never in a squad. */
+      formed: false,
+      // where seatMan last put his rig — see THE BOOTS
+      seatX: null, seatZ: null, seatYaw: null,
     };
     m.target.set(at.x, 0, at.z);
     /* THE TIER TAGS combat_iq's roleTier() ALREADY READS. core's TIERS[].cq
@@ -466,7 +686,10 @@
     // a wounded man fights at 60%: core's own number, applied where it lands
     if (m.wounded) m.hp = Math.max(1, Math.round(m.hp * 0.6));
     if (CBZ.syncActorWeapon) safe(function () { CBZ.syncActorWeapon(m); });
-    (side.squads[m.sq] = side.squads[m.sq] || []).push(m);
+    /* AND HE JOINS A SECTION. `m.sq` was already here and was already
+       (i / 10) | 0; what is new is that side.squads[m.sq] is now a UNIT rather
+       than a bare array of ten men. See THE SQUAD. */
+    joinSquad(side, m);
     return m;
   }
 
@@ -519,17 +742,46 @@
   const grid = new Map();
   let gridAt = -1;
   function gridKey(cx, cz) { return cx * 73856093 ^ cz * 19349663; }
+  /* THE BUCKETS ARE EMPTIED, NOT THROWN AWAY. Both of this file's spatial
+     hashes used to `clear()` the Map and allocate a fresh array for every
+     occupied cell on every rebuild — the fine one runs up to three times per
+     substep, so at 1 800 men that is on the order of five thousand array
+     allocations a frame, every frame, all of them immediately garbage. The
+     cells are the same cells; only their contents change. Keeping the arrays
+     and truncating them makes the steady state allocation-free, and the Map
+     itself is bounded by the battlefield (a 480 m field at 2.4 m cells is at
+     most 40 000 keys, and only the ones men have actually stood in are ever
+     created). purgeCells() drops the empties on a slow timer so a battle that
+     sweeps across the whole field does not keep every cell it ever touched. */
+  function bucket(map, k) {
+    let a = map.get(k);
+    if (!a) { a = []; map.set(k, a); }
+    return a;
+  }
+  function clearArr(a) { a.length = 0; }
+  function emptyAll(map) { map.forEach(clearArr); }
+  let purgeAt = -1;
+  const _drop = [];
+  function purgeOne(map) {
+    _drop.length = 0;
+    map.forEach(function (a, k) { if (!a.length) _drop.push(k); });
+    for (let i = 0; i < _drop.length; i++) map.delete(_drop[i]);
+  }
+  function purgeCells() {
+    if (simT - purgeAt < 5) return;
+    purgeAt = simT;
+    purgeOne(grid);
+    purgeOne(fine);
+  }
   function rebuildGrid() {
-    grid.clear();
+    emptyAll(grid);
     for (let i = 0; i < men.length; i++) {
       const m = men[i];
       if (m.dead || m.fled) continue;
-      const k = gridKey(Math.floor(m.pos.x / GRID_CELL), Math.floor(m.pos.z / GRID_CELL));
-      let a = grid.get(k);
-      if (!a) { a = []; grid.set(k, a); }
-      a.push(m);
+      bucket(grid, gridKey(Math.floor(m.pos.x / GRID_CELL), Math.floor(m.pos.z / GRID_CELL))).push(m);
     }
     gridAt = simT;
+    purgeCells();
   }
   const _cand = [];
   function pickTarget(m, range) {
@@ -574,18 +826,17 @@
   const FAN = [[1, 0], [1, 1], [0, 1], [-1, 1]];
   let sepFixed = 0;
   function rebuildFine() {
-    fine.clear();
+    emptyAll(fine);
     for (let i = 0; i < men.length; i++) {
       const m = men[i];
       if (m.dead || m.fled) continue;
-      const k = gridKey(Math.floor(m.pos.x / FINE), Math.floor(m.pos.z / FINE));
-      let a = fine.get(k);
-      if (!a) { a = []; fine.set(k, a); }
-      a.push(m);
+      bucket(fine, gridKey(Math.floor(m.pos.x / FINE), Math.floor(m.pos.z / FINE))).push(m);
     }
   }
   function push2(m, o, k) {
     if (o.dead || o === m || o.fled) return;
+    // two men in the same formation are two metres apart by construction
+    if (m.formed && o.formed) return;
     const dx = o.pos.x - m.pos.x, dz = o.pos.z - m.pos.z;
     const d2 = dx * dx + dz * dz;
     if (d2 > SEP * SEP) return;
@@ -595,17 +846,31 @@
       ux = Math.cos(a); uz = Math.sin(a); d = 1e-4;
     } else { ux = dx / d; uz = dz / d; }
     const push = (SEP - d) * 0.5 * (d < SEP * 0.69 ? 1 : k);
-    if (!m.isYou) { m.pos.x -= ux * push; m.pos.z -= uz * push; }
-    if (!o.isYou) { o.pos.x += ux * push; o.pos.z += uz * push; }
+    if (!m.isYou && !m.formed) { m.pos.x -= ux * push; m.pos.z -= uz * push; }
+    if (!o.isYou && !o.formed) { o.pos.x += ux * push; o.pos.z += uz * push; }
     sepFixed++;
     m.resT = 0; o.resT = 0;
   }
+  /* A FORMATION IS NOT A CROWD, AND THE SOLVER IS WHERE THAT BECOMES TRUE.
+     A man standing in a squad slot is where his section put him: his
+     neighbours are FILE_W apart by construction, so testing him against them
+     can only ever find nothing, and letting the solver PUSH him would undo the
+     formation one nudge at a time — which is exactly what used to happen and
+     why a formed advance turned into a clump inside twenty metres. So formed
+     men are skipped as the DRIVER and are never moved, but they stay in the
+     grid as neighbours: a routing man running back through a reserve section
+     is pushed around it rather than through it.
+
+     The men actually fighting are the only ones the solver spends time on,
+     which at 900 a side is a small fraction of the roster while the armies are
+     closing and the whole roster once the lines meet — exactly the shape this
+     cost should have had all along. */
   function separatePass(k) {
     sepFixed = 0;
     fine.forEach(function (a) {
       for (let i = 0; i < a.length; i++) {
         const m = a[i];
-        if (m.dead) continue;
+        if (m.dead || m.formed) continue;
         for (let j = i + 1; j < a.length; j++) push2(m, a[j], k);
         const cx = Math.floor(m.pos.x / FINE), cz = Math.floor(m.pos.z / FINE);
         for (let f = 0; f < 4; f++) {
@@ -635,19 +900,30 @@
   }
 
   /* ============================================================ SIGHT */
+  /* A SIGHT LINE IS SAMPLED AT THE GROUND'S OWN RESOLUTION AND NOT FINER.
+     The old march was every 3 m, which was a guess. The ground under it is now
+     a lattice at FIELD_STEP (2.69 m) read bilinearly, and a bilinear read is
+     LINEAR along any straight segment inside one cell — so a sample taken
+     between two lattice crossings can only ever return a value already implied
+     by its neighbours. Marching finer than the lattice is arithmetic that
+     cannot change the answer. Under ?field=old the source is the analytic
+     surface again and the same step is simply the old one to within 10%. */
   function terrainBlocked(ax, ay, az, bx, by, bz) {
     const dx = bx - ax, dz = bz - az;
     const d = Math.hypot(dx, dz);
     if (d < 8) return false;
-    const dy = by - ay, n = Math.ceil(d / 3);
+    const gAt = MAP.groundAt;
+    const dy = by - ay, n = Math.ceil(d / FIELD_STEP);
+    pHit("terrainSamples", n);
     for (let i = 1; i < n; i++) {
       const t = i / n, at = t * d;
       if (at < 2 || d - at < 2) continue;
-      if (MAP.groundAt(ax + dx * t, az + dz * t) > ay + dy * t + 0.35) return true;
+      if (gAt(ax + dx * t, az + dz * t) > ay + dy * t + 0.35) return true;
     }
     return false;
   }
   function eyeLos(m, o) {
+    pHit("eyeLos");
     const ay = m.pos.y + m.eyeH, by = o.pos.y + o.losY;
     if (micro.segmentBlocked(m.pos.x, ay, m.pos.z, o.pos.x, by, o.pos.z)) return false;
     return !(MAP.terrainLos && terrainBlocked(m.pos.x, ay, m.pos.z, o.pos.x, by, o.pos.z));
@@ -1045,7 +1321,7 @@
     const b = opts.band || W.makeBand({ size: 12 });
     seedBattle((W.state.seed | 0) * 7919 + (W.state.day | 0) * 131 + (b.men.length | 0) +
       (opts.salt | 0));
-    const cap = Math.max(1, parseInt((Q && Q.get("men")) || "", 10) || MEN_CAP_DEFAULT);
+    const cap = Math.max(1, parseInt((Q && Q.get("men")) || "", 10) || MEN_CAP_DEFAULT());
     const mineR = (opts.army || W.state.army).slice(0, cap);
     const themR = b.men.slice(0, cap);
 
@@ -1237,7 +1513,9 @@
 
   /* ============================================================ THINK */
   function marchGoal(m, gx, gz) {
-    const sq = m.side.squads[m.sq];
+    // side.squads[] holds UNITS now, not arrays of men — see THE SQUAD.
+    const u = m.unit;
+    const sq = u ? u.men : null;
     let lead = null;
     if (sq) for (let i = 0; i < sq.length; i++) if (!sq[i].dead && !sq[i].fled && !sq[i].routed) { lead = sq[i]; break; }
     if (lead && lead !== m) {
@@ -1276,6 +1554,421 @@
     const wide = ax + m._wing * 1.15;
     const r = 46 + (m.i % 5) * 5;
     return { x: foe.comX + Math.sin(wide) * r, z: foe.comZ + Math.cos(wide) * r };
+  }
+
+  /* ============================================================ THE SQUAD
+     A UNIT OUT OF CONTACT IS ONE AGENT, NOT TEN — AND THAT IS THE DEEPER
+     BEHAVIOUR, NOT A SHORTCUT AROUND IT.
+
+     THE OWNER'S CONSTRAINT, verbatim: "consider why and how to cheapen while
+     improving and deepening logic not by simplifying". So this is not a LOD.
+     Nobody gets dumber, nobody gets fewer thoughts per second, and no man is
+     ever removed from the sim. What changes is WHAT IS BEING SIMULATED.
+
+     THE OLD FILE HAD NO UNITS. `m.sq` and `side.squads[]` existed and were
+     used for exactly one thing — marchGoal's follow-the-leader column — and
+     everything else in the battle was ten individuals who happened to share a
+     number. So a section crossing 140 metres of empty sand cost ten pathing
+     integrations, ten grid target searches, ten sight lines, ten collider
+     probes, ten sand.plant seats and ten entries in the separation solver, to
+     produce ten men walking in a clump. That is not simulation, it is the same
+     answer computed ten times, and it is the whole reason the field cap was
+     300.
+
+     WHAT IT COSTS NOW, out of contact: ONE goal, ONE march, ONE collider probe
+     against a squad-sized disc, ONE contact test, and then ten rigid slot
+     writes. Nine tenths of the work is gone and something the game did not
+     have arrived with it:
+
+       · A SQUAD HOLDS ITS SHAPE. Ten men in a clump is what a crowd separation
+         solver produces; ten men in a LINE, in FILE, or in a WEDGE is a
+         formation, and it is now the thing you actually see crossing the sand.
+       · THE SHAPE IS THE ORDER. HOLD forms line abreast, CHARGE forms a wedge
+         (the point takes the fire), FLANK forms column (narrow, fast, moving
+         past a front rather than into it), FALL BACK forms line facing back.
+         The four order buttons now change the SILHOUETTE of your army, which
+         is the one thing they never did.
+       · A SQUAD STEERS AS A SQUAD. The obstacle probe is one disc the width of
+         the section, so a section goes AROUND a rock instead of splitting
+         around it and re-merging — which is what the old per-man
+         resolveCircle produced and what made a formed advance dissolve into a
+         crowd within twenty metres.
+       · IT DEPLOYS AT ITS OWN WEAPON'S RANGE. Not a global constant: the reach
+         is the longest gun in the section, read off combat_iq's own profile()
+         ladder. A veteran section with rifles opens out at 125 m; a levy
+         section with pistols stays in file until 55 m, because at 60 m a pistol
+         section has nothing to say. That is a tactic the game did not contain,
+         and it comes out of the same table that decides every trigger pull.
+       · AND IT COMES APART WHEN ITS ARMY DOES. A squad whose side's morale has
+         fallen under the nerve of its weakest man deploys immediately, so the
+         men rout as individuals. Formation is a thing an army in order has.
+
+     WHEN IT DEPLOYS EVERY MAN IS EXACTLY THE MAN HE WAS. stepMan, think(),
+     combat_iq's posture, cover, shot ladder, morale — untouched. There is no
+     second brain and no simplified enemy. ?squads=old turns the layer off and
+     the fight is the old one, man for man, which is what --ab photographs. */
+  /* ============================================================ THE BOOTS
+     ONE PLACE THAT SEATS A BODY, AND TWO RELEVANCE RULES ON IT.
+
+     WHAT THIS USED TO DO. Every man, every substep, called W.sand.plant —
+     which runs sand.js's stand() (a multi-sample of the drawn surface plus its
+     normal), slerps him onto that normal, writes his position AND his
+     quaternion, and then feeds S.walk to stamp his footprints. Every man.
+     Every substep. Including the man who has been lying in the same patch of
+     cover for forty seconds firing at a crest.
+
+     RULE ONE: A MAN WHO DID NOT MOVE IS ALREADY SEATED. This is not an
+     approximation with a tolerance — the ground does not move, so re-solving a
+     stationary man's seat returns the number he already has. And it is worth
+     far more than the sand call it skips: `m.pos` IS `group.position`, so
+     writing it marks the whole rig's matrix subtree dirty and three.js re-walks
+     every one of its ~60 nodes on the next render. A firefight is mostly men
+     holding still; those men now cost nothing in the sim AND nothing in the
+     matrix walk.
+
+     RULE TWO: THE FOOTPRINTS ARE A BUDGET, NOT A DISTANCE. sand.js's print
+     pool is a 2 200-slot ring buffer (PRINT_CAP) and a walking man stamps
+     about six prints a second. Above ~110 men stamping at once the buffer
+     recycles inside twenty seconds and the trail you are meant to read off the
+     ridge is gone before you turn round — so past that point the prints are
+     not merely expensive, they are actively worse. The radius is therefore
+     driven by a controller against that budget rather than typed: it shrinks
+     while more than PRINT_BUDGET men are inside it and grows while fewer are,
+     which lands on the right radius by itself at 20 men, at 300 and at 1 800.
+     Men outside it are still seated and still leaned — they simply do not
+     stamp, which is invisible, because their prints were being deleted a
+     second later anyway.
+
+     (AND A BUG THAT IS NOT MINE TO FIX: sand.js's S.walk keeps its walkers in
+     a Map and does `if (walkers.size > 420) walkers.clear()` when a new one
+     arrives. Past 420 distinct walkers that clears the whole table on nearly
+     every call, so at 500 a side NOBODY leaves a print — the accumulator is
+     wiped before it reaches one stride. The budget above keeps the caller
+     under that ceiling as a side effect; the ceiling itself wants raising or
+     replacing with an LRU. See the report.) */
+  const PRINT_BUDGET = 110;
+  let printR = 90, printN = 0, plantR2 = 8100;
+  function tickPlantBudget() {
+    // one proportional step per substep. 0.94/1.03 is a slow controller on
+    // purpose: a radius that snaps makes trails appear and vanish in bands.
+    printR = clamp(printR * (printN > PRINT_BUDGET ? 0.94 : 1.03), 10, 260);
+    plantR2 = printR * printR;
+    printN = 0;
+  }
+  /* HOW FAR A MAN HAS TO HAVE MOVED BEFORE RE-SEATING HIM IS WORTH IT, and
+     "at all" is the wrong answer. The separation solver nudges nearly every
+     man by a fraction of a millimetre every substep, so an exact-equality test
+     re-seated 280 of 301 men every frame and bought almost nothing — MEASURED,
+     that was the first version of this. The threshold that means something is
+     A THIRD OF A PIXEL: below that the seat, the lean and the print are
+     identical on screen, and the only thing the work buys is a dirty matrix
+     subtree for the renderer to re-walk.
+
+     ONE PIXEL is the threshold, and the first draft used a third of one and
+     bought almost nothing — MEASURED, 548 of 583 men still re-seated every
+     frame, because a man walking at 4.6 m/s covers 7.7 cm in a frame and a
+     third of a pixel at 100 m is 1.3 cm. One pixel is the honest line: the
+     seat is a POSITION (plus a lean), his x and z are written by the sim
+     directly into the rig either way, and the y and the lean lag by at most
+     the slope times a sub-pixel displacement. It is also exactly the trade the
+     gait ladder below already makes at the same distances, so the two now
+     agree instead of one of them being three times fussier than the other for
+     no stated reason.
+
+     One pixel at distance d, on a 75-degree lens over ~900 rows, is
+     d * (1.31 / 900) ≈ d * 0.00146 metres. Compared in squares against the
+     man's own camera distance so there is no square root in it, and floored at
+     a millimetre so a man standing on the lens is still exact. */
+  const SEAT_PX = 0.00146 * 0.00146;
+  function seatMan(m, sdt) {
+    const px = m.pos.x, pz = m.pos.z;
+    const cp = CBZ.camera.position;
+    const cdx = px - cp.x, cdz = pz - cp.z;
+    const cd2 = cdx * cdx + cdz * cdz;
+    if (m.seatX !== null) {
+      const mx = px - m.seatX, mz = pz - m.seatZ;
+      const dy = m.yaw - m.seatYaw;
+      if (mx * mx + mz * mz < Math.max(1e-6, cd2 * SEAT_PX) && dy * dy < 1e-6) return;
+    }
+    m.seatX = px; m.seatZ = pz; m.seatYaw = m.yaw;
+    const _p = pNow();
+    pHit("seat");
+    if (W.sand && W.sand.plant) {
+      const near = cd2 < plantR2;
+      if (near) printN++;
+      W.sand.plant(m.group, px, pz, m.yaw,
+                   { id: m.i, dt: near ? sdt : null, speed: m.speed, ground: MAP.groundAt });
+    } else {
+      m.pos.y = MAP.groundAt(px, pz);
+      m.group.rotation.y = m.yaw;
+    }
+    pAdd("plant", _p);
+  }
+
+  const SQUAD_N = 10;              // makeMan's own m.sq = (i / 10) | 0
+  const REACH_CAP = 125;           // stepMan's own fireMax ceiling, named once
+  /* THE MARGIN ON THE DEPLOY RADIUS IS A CLOSING DISTANCE, NOT A FUDGE. The
+     contact test runs on the squad's think tick (SQ_THINK below); in that
+     window a charging enemy covers up to 7.6 m/s * the interval, and the
+     squad's own front rank stands up to half its depth ahead of the frame the
+     test is taken from. Both are added so a squad can never be shot at while
+     it still believes it is out of contact. */
+  const SQ_THINK = 0.4;
+  const CONTACT_PAD = 7.6 * SQ_THINK + SQUAD_N * FILE_W * 0.5;
+  let units = [];
+  let squadsOn = true;
+
+  function joinSquad(side, m) {
+    let u = side.squads[m.sq];
+    if (!u) {
+      u = side.squads[m.sq] = {
+        side: side, key: side.key, sq: m.sq, men: [],
+        live: 0, x: 0, z: 0, yaw: 0, spd: 0,
+        formed: false, thinkAt: -1, reach: 40, nerve: 0, wing: 0,
+        form: "column", err: 99, seated: false,
+      };
+      units.push(u);
+    }
+    u.men.push(m);
+    m.unit = u;
+    /* THE SECTION'S REACH IS ITS LONGEST GUN. combat_iq's profile() answers
+       `hi` — the top of this man's role×weapon effective band — and stepMan
+       turns that into a fire gate as min(125, hi * 2.6 + 8). Same expression,
+       same table, evaluated once per man at muster instead of once per trigger
+       pull, so the squad cannot possibly deploy later than its best shot could
+       have opened fire. */
+    const p = CBZ.combatIQ && CBZ.combatIQ.profile
+      ? safe(function () { return CBZ.combatIQ.profile(m); }) : null;
+    const r = p ? Math.min(REACH_CAP, p.hi * 2.6 + 8) : 60;
+    if (r > u.reach) u.reach = r;
+    // and its nerve is its WEAKEST man's — the first one to break takes the
+    // formation with him, which is what a formation coming apart looks like
+    const nv = nerveOf(m);
+    if (nv > u.nerve) u.nerve = nv;
+    return u;
+  }
+
+  /* IS THERE ANYBODY IN FRONT OF US. The coarse target grid, asked once per
+     squad per think instead of once per man per think, and it answers a
+     boolean so it stops at the first man it finds rather than sorting
+     candidates. */
+  function enemyNear(team, x, z, r) {
+    const cx = Math.floor(x / GRID_CELL), cz = Math.floor(z / GRID_CELL);
+    const maxR = Math.ceil(r / GRID_CELL), r2 = r * r;
+    for (let ring = 0; ring <= maxR; ring++) {
+      for (let dx = -ring; dx <= ring; dx++) for (let dz = -ring; dz <= ring; dz++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== ring) continue;
+        const a = grid.get(gridKey(cx + dx, cz + dz));
+        if (!a) continue;
+        for (let i = 0; i < a.length; i++) {
+          const o = a[i];
+          if (o.team === team || o.dead || o.fled) continue;
+          const ddx = o.pos.x - x, ddz = o.pos.z - z;
+          if (ddx * ddx + ddz * ddz < r2) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /* WHERE A MAN STANDS IN HIS SECTION, in the squad's own frame: +u forward
+     (the way it is facing), +v to its left. Four shapes, one per order, and
+     the numbers are the same FILE_W / RANK_D the army is drawn up on, so a
+     section's spacing matches the line it came out of. */
+  const _slot = { u: 0, v: 0 };
+  function slotOf(form, k) {
+    const c = (SQUAD_N - 1) / 2;                 // 4.5
+    if (form === "line") { _slot.u = (k & 1) ? -0.7 : 0; _slot.v = (k - c) * FILE_W; }
+    else if (form === "wedge") {
+      // the point is slot 0's own file; every step out is a step back, so the
+      // man at the tip is the man who takes the fire
+      const off = k - c;
+      _slot.u = -Math.abs(off) * 1.35; _slot.v = off * FILE_W * 0.95;
+    } else if (form === "back") {                 // fall back: line, facing out
+      _slot.u = (k & 1) ? 0.7 : 0; _slot.v = (k - c) * FILE_W;
+    } else {                                      // column / file
+      _slot.u = -((k >> 1) * RANK_D); _slot.v = ((k & 1) ? 1 : -1) * FILE_W * 0.55;
+    }
+    return _slot;
+  }
+  function formFor(order) {
+    return order === "charge" ? "wedge" : order === "flank" ? "column"
+         : order === "fallback" ? "back" : "line";
+  }
+
+  function squadThink(u) {
+    u.thinkAt = simT + SQ_THINK * (0.85 + (u.sq % 5) * 0.06);   // staggered
+    const M = u.men;
+    let n = 0, cx = 0, cz = 0;
+    for (let i = 0; i < M.length; i++) {
+      const m = M[i];
+      if (m.dead || m.fled) continue;
+      n++; cx += m.pos.x; cz += m.pos.z;
+    }
+    u.live = n;
+    if (!n) { setFormed(u, false); return; }
+    /* WHILE IT IS DEPLOYED THE FRAME FOLLOWS THE MEN. Without this a section
+       that fights forward for a minute and then loses contact snaps back to
+       wherever the frame was left, dragging ten men across the sand. */
+    if (!u.formed) { u.x = cx / n; u.z = cz / n; }
+    const broke = !MORALE_OFF() && u.side.morale < u.nerve;
+    const contact = simT < (u.fireT || -1) ||
+                    enemyNear(u.key, u.x, u.z, u.reach + CONTACT_PAD);
+    pHit("squadThink");
+    setFormed(u, !contact && !broke);
+    u.form = formFor(orderOf(u.side));
+  }
+
+  function setFormed(u, on) {
+    if (u.formed === on) return;
+    u.formed = on;
+    const M = u.men;
+    for (let i = 0; i < M.length; i++) {
+      const m = M[i];
+      m.formed = on && !m.dead && !m.fled;
+      if (on) {
+        /* AND HE DROPS HIS MARK WHEN HE FORMS UP. Without this, a man who had
+           a target when contact was lost keeps it, `sees` stays true, and the
+           render-side aim pass turns his whole rig toward it — AFTER stepSquad
+           has set him to the section heading, because the pose pass runs after
+           the sim in frame(). The drawn frame then showed a formation whose
+           men were each facing a different way: a line of ten soldiers
+           marching sideways. He is out of contact, so he has no mark; when the
+           section deploys he acquires one on his next think like anybody
+           else. */
+        m.tgt = null; m.sees = false; m.losBadT = 0;
+      } else {
+        /* HANDING A MAN BACK. His think clock is re-armed a beat out so ten
+           men leaving formation on the same frame do not all think on it, and
+           his goal is where he is standing — anything else teleports his
+           intent to wherever the frame last was. */
+        m.thinkAt = simT + lcg() * 0.18;
+        m.lastThink = simT;
+        m.target.set(m.pos.x, 0, m.pos.z);
+        m.slot = "march";
+      }
+    }
+    if (on) u.err = 99;             // it has to walk back into its slots first
+  }
+
+  /* THE SQUAD'S OWN GOAL — the same four answers think() gives a man, asked
+     once for ten. There is no fifth behaviour here and there must never be:
+     if this and think() ever disagree about what CHARGE means, the army does
+     one thing at 130 m and a different one at 120. */
+  const _sg = { x: 0, z: 0 };
+  function squadGoal(u) {
+    const s = u.side;
+    const foe = SIDES[u.key === "mine" ? "them" : "mine"];
+    const ord = orderOf(s);
+    if (ord === "fallback") { _sg.x = s.anchorX + s.dir * 60; _sg.z = s.anchorZ; return _sg; }
+    if (ord === "flank") {
+      /* THE WING IS THE SECTION'S, NOT THE MAN'S. flankAnchor() hangs the
+         choice off m.i, so the old code could send half a section left and
+         half right — ten men splitting down the middle of their own squad.
+         One wing per unit is what makes a flank read as a wing. */
+      const ax = Math.atan2(foe.comX - s.comX, foe.comZ - s.comZ);
+      if (!u.wing) u.wing = ((u.sq + s.wingBias) & 1) ? 1 : -1;
+      const wide = ax + u.wing * 1.15;
+      const r = 46 + (u.sq % 5) * 5;
+      _sg.x = foe.comX + Math.sin(wide) * r; _sg.z = foe.comZ + Math.cos(wide) * r;
+      return _sg;
+    }
+    _sg.x = foe.comX; _sg.z = foe.comZ;
+    return _sg;
+  }
+
+  function formedCount() {
+    let n = 0;
+    for (let i = 0; i < men.length; i++) if (men[i].formed) n++;
+    return n;
+  }
+  function engagedUnits() {
+    let n = 0;
+    for (let i = 0; i < units.length; i++) if (units[i].live && !units[i].formed) n++;
+    return n;
+  }
+
+  const _sqPos = { x: 0, y: 0, z: 0 };
+  function stepSquad(u, sdt) {
+    if (simT >= u.thinkAt) squadThink(u);
+    if (!u.formed || !u.live) return;
+
+    // ---- one goal, one march, for the whole section --------------------
+    const g = squadGoal(u);
+    const dx = g.x - u.x, dz = g.z - u.z;
+    const d = Math.hypot(dx, dz);
+    const ord = orderOf(u.side);
+    /* THE MARCHING SPEED IS stepMan's OWN LADDER for the slot this formation
+       is in, so a section under CHARGE crosses the sand at exactly the speed
+       ten charging men crossed it at. Not a second movement model. */
+    let spd = ord === "fallback" ? 5.2 : 6.2;
+    if (d < 2) spd = 0;
+    if (spd > 0) {
+      const nx = dx / d, nz = dz / d;
+      const step = spd * sdt;
+      _sqPos.x = u.x + nx * step; _sqPos.z = u.z + nz * step;
+      _sqPos.y = MAP.groundAt(_sqPos.x, _sqPos.z);
+      /* ONE COLLIDER PROBE FOR THE SECTION, and the radius is NOT the section's
+         width — that was the first version and it is wrong in a way worth
+         recording. resolveCircle pushes a disc out of a box, so a twenty-metre
+         disc clipping a two-metre rock gets shoved eleven metres sideways in
+         one substep: the whole section teleports around a boulder it was going
+         to walk past. The probe is the LEADING FILE's own footprint (a man plus
+         a file's worth of give), so the section steers the way a section does —
+         the man at the head of it goes round the rock and everyone follows the
+         frame — and a man at the far end of a wide line may brush a rock. That
+         is the honest trade and it is the smaller error: the old code's answer
+         was that the section split in half around every obstacle and never
+         re-formed. */
+      micro.resolveCircle(_sqPos, 0.45 + FILE_W * 0.9, _sqPos.y, 1.8);
+      u.x = _sqPos.x; u.z = _sqPos.z;
+      const wantYaw = Math.atan2(nx, nz);
+      /* THE FIRST HEADING IS SNAPPED, EVERY ONE AFTER IT IS TURNED. A unit is
+         created with yaw 0 (facing +Z) and a battle is fought along X, so
+         without this every section on the field spends its first half second
+         swinging ninety degrees while its men rally into a line that is
+         rotating under them — which photographs, on frame one of any capture,
+         as an army standing sideways. */
+      if (!u.turned) { u.yaw = wantYaw; u.turned = 1; }
+      let dy = wantYaw - u.yaw;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      u.yaw += dy * Math.min(1, sdt * 3.2);      // a formation turns slower than a man
+    }
+    u.spd = spd;
+
+    // ---- and the men are their slots -----------------------------------
+    const cs = Math.cos(u.yaw), sn = Math.sin(u.yaw);
+    const M = u.men;
+    /* CLOSING ON THE SLOT RATHER THAN SNAPPING INTO IT. A section that has
+       just broken contact is a scatter, and teleporting ten men into a line is
+       the single most obviously fake thing this could do. They walk in at
+       their own pace; the squad only counts as SEATED once the worst man is
+       inside a stride of his place, and until then this is a RALLY — which is
+       a real behaviour the game did not have and got for free. */
+    let worst = 0;
+    const rally = Math.max(spd, 4.2) * sdt;
+    for (let i = 0; i < M.length; i++) {
+      const m = M[i];
+      if (m.dead || m.fled) { m.formed = false; continue; }
+      m.formed = true;
+      const s = slotOf(u.form, m.sqSlot);
+      // squad frame -> world: +u is the heading, +v is 90 degrees to its left
+      const wx = u.x + sn * s.u - cs * s.v;
+      const wz = u.z + cs * s.u + sn * s.v;
+      const ex = wx - m.pos.x, ez = wz - m.pos.z;
+      const e = Math.hypot(ex, ez);
+      if (e > worst) worst = e;
+      let nx = wx, nz = wz;
+      if (e > rally) { nx = m.pos.x + (ex / e) * rally; nz = m.pos.z + (ez / e) * rally; }
+      m.speed = e > rally ? Math.max(spd, 4.2) : spd;
+      m.yaw = u.yaw;
+      m.slot = spd > 0 ? "march" : "hold";
+      m.pos.x = nx; m.pos.z = nz;
+      seatMan(m, sdt);
+    }
+    u.err = worst;
+    u.seated = worst < 1.2;
   }
 
   function think(m, now) {
@@ -1491,6 +2184,25 @@
     const after = hurtOne(m, scaled);      // ONE soak formula — see hurtOne
     if (CBZ.combatIQ && CBZ.combatIQ.suppress && !m.isYou) CBZ.combatIQ.suppress(m, 0.9);
     if (imp && imp.by && imp.by.team && imp.by.team !== m.team && (!m.tgt || m.tgt.dead)) m.tgt = imp.by;
+    /* A SECTION UNDER FIRE IS IN CONTACT, WHATEVER ITS OWN REACH SAYS. The
+       deploy test asks "is there an enemy inside MY longest gun", which is the
+       right question for opening fire and the wrong one for being shot at: a
+       levy section with pistols reaches 55 m and a marksman on the ridge
+       reaches 125, so the section could take rounds for two ticks while still
+       marching in file. One round landing anywhere in the unit breaks it out,
+       immediately, on the frame the round lands. */
+    if (m.unit) {
+      /* AND IT STAYS DEPLOYED FOR A WHILE. Without the timestamp the section
+         re-forms on its very next think (0.4 s later) because the man who shot
+         it is outside its own reach, and then breaks out again on the next
+         round that lands — a marksman on a ridge makes a whole company flicker
+         between column and firing line twice a second. Three seconds is the
+         same order as combat_iq's own suppression decay, which is the other
+         system in this game that answers "how long does being shot at stay
+         true for". */
+      m.unit.fireT = simT + 3;
+      if (m.unit.formed) setFormed(m.unit, false);
+    }
     if (m.isYou) {
       CBZ.shake && CBZ.shake(Math.min(1.2, after / 30));
       hurtFlash = 1;
@@ -1500,6 +2212,14 @@
 
   function killMan(m, imp) {
     m.dead = true; m.hp = 0;
+    /* AND HE IS OUT OF THE FORMATION THE INSTANT HE IS HIT. frame() skips
+       stepMan for a man carrying `formed`, and stepMan is what runs the fall
+       and the ragdoll hand-off — so a man shot while standing in a section
+       stayed bolt upright until his squad next thought. Cleared here rather
+       than in stepSquad because the death is what ended his membership, and a
+       state that is only correct on the next tick of something else is the
+       kind of bug that photographs as "sometimes they die standing up". */
+    m.formed = false;
     const by = imp && imp.by;
     if (by && by.team && by.team !== m.team) {
       by.kills = (by.kills || 0) + 1;
@@ -1648,17 +2368,13 @@
       if (m.resT <= 0) { m.resT = 0.25; micro.resolveCircle(m.pos, m.rad, m.pos.y, 1.8); }
     }
     m.speed = spd;
-    /* WHERE HIS BOOTS MEET THE SAND. sand.plant seats him on the drawn
-       surface and leans him into the slope; it also stamps the print, which
-       is what turns a charge across a dune into a road you can see from the
-       ridge. MAP.groundAt stays the fallback and stays the truth the sim
-       uses for everything else — plant is a RENDERING answer. */
-    if (W.sand && W.sand.plant) {
-      W.sand.plant(m.group, m.pos.x, m.pos.z, m.yaw,
-                   { id: m.i, dt: sdt, speed: spd, ground: MAP.groundAt });
-    } else {
-      m.pos.y = MAP.groundAt(m.pos.x, m.pos.z);
-    }
+    /* WHERE HIS BOOTS MEET THE SAND — see THE BOOTS. sand.plant seats him on
+       the drawn surface and leans him into the slope; it also stamps the
+       print, which is what turns a charge across a dune into a road you can
+       see from the ridge. MAP.groundAt stays the truth the sim uses for
+       everything else — plant is a RENDERING answer, and seatMan is the
+       relevance rule on it. */
+    seatMan(m, sdt);
 
     // OFF THE EDGE OF THE WORLD. A routed man who reaches his own baseline has
     // left the battle: he lives, he is not a prisoner, and he is not a body
@@ -1955,6 +2671,13 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     const gp = GP();
     if (gp && gp.on()) gp.camera(mode);
     if (mode === "cmd" && live && MAP && YOU) safe(function () { stepCamera(0.016); });
+    /* AND EVERYBODY IN THE NEW FRAME IS RE-POSED. posePass skips men outside
+       the lens's own cone, so the men behind the seat you just LEFT are
+       carrying whatever pose they had when they were last on screen. In play
+       that is one frame. In a still — and setCam exists partly for the stills
+       — it is the whole picture. `force` also ignores the distance ladder for
+       this one pass, so the far half of the field is posed too. */
+    if (live && MAP) safe(function () { posePass(0, true); });
     /* THE BUTTON NAMES WHERE IT TAKES YOU, in both places that write it.
        syncOrderRail below has always labelled it as the DESTINATION ("THIRD
        PERSON" while you are in first) and this line labelled it as the CURRENT
@@ -2388,8 +3111,21 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     simT = 0; over = false; started = false; live = true; lastWall = 0;
     men = []; corpses = []; sinking = []; dropGuns = []; addedCols = []; addedMeshes = [];
     pickHeld = false; pickTgt = null; pickLbl = ""; pickTook = 0;
-    _claim.length = 0; deadSolving = 0; hurtFlash = 0;
-    cmd.init = 0; _shot = null;
+    /* _claim IS A MAP, not the array it was: the spatial-hash rewrite of
+       freeSpot (see its declaration) replaced an O(N^2) scan that cost 230
+       MILLION distance tests to deploy 500 v 500 and read on screen as a hang.
+       `.clear()` rather than `.length = 0` — the two waves that met here were
+       resetting two different data structures. */
+    _claim.clear(); deadSolving = 0; hurtFlash = 0;
+    _shot = null;                     // the death studio's last execution
+    units = [];
+    /* ?squads=old — the formation/relevance layer off. Read once, here, rather
+       than per frame: a query flag that is re-parsed inside the hot loop is a
+       string compare per man per substep, which is exactly the kind of cost
+       this rewrite exists to remove. */
+    squadsOn = !(Q && Q.get("squads") === "old");
+    printR = 90; plantR2 = printR * printR; printN = 0;
+    cmd.init = 0;
 
     /* THE DEAD FELL LIKE PLANKS AND THE PAGE THOUGHT IT HAD FIXED THAT.
        warlord.html declares `if (C.RAGDOLL_ANY_MODE == null) C.RAGDOLL_ANY_MODE
@@ -2492,7 +3228,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     SIDES.them.order = "hold";
 
     // ---- the rosters. THE CAP, and it is stated on screen.
-    const cap = Math.max(1, parseInt((Q && Q.get("men")) || "", 10) || MEN_CAP_DEFAULT);
+    const cap = Math.max(1, parseInt((Q && Q.get("men")) || "", 10) || MEN_CAP_DEFAULT());
     const mine = W.state.army.slice(0, cap);
     const theirs = band.men.slice(0, cap);
     capped.mine = W.state.army.length - mine.length;
@@ -2504,6 +3240,11 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       reserveOf: { mine: W.state.army.slice(mine.length), them: band.men.slice(theirs.length) },
     };
 
+    /* HOW MANY MEN THIS SIDE IS DRAWING UP, told to the side BEFORE the first
+       body is built, because frontage() cannot shape a line it does not know
+       the length of and spawnAt is called once per man from inside makeMan. */
+    SIDES.mine.plan = mine.length;
+    SIDES.them.plan = theirs.length;
     for (let i = 0; i < mine.length; i++) { const m = makeMan("mine", mine[i], i); if (m) men.push(m); }
     for (let i = 0; i < theirs.length; i++) { const m = makeMan("them", theirs[i], i); if (m) men.push(m); }
 
@@ -2646,6 +3387,41 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     if (scene.fog) scene.fog.color.setHex(0xc8ad7e);
   }
 
+  /* THE POSE CONE — see the render-side loop for why it exists. A cone that
+     CONTAINS the view frustum, expressed as "the cosine of the angle off the
+     lens axis past which a man cannot be on screen". Read off the live camera
+     every frame because the fov changes (aiming down sights narrows it, the
+     command seat is a different lens) and a cached one would cull men out of
+     the shot the first time somebody zoomed.
+
+     THE MARGIN IS 0.20 rad and it is the one number here that is a judgement.
+     It has to cover: half a man's width at the near edge, the camera moving
+     between this hook and the draw, and any post-effect that widens the frame.
+     0.2 rad is about 11 degrees — roughly a tenth of a typical horizontal
+     frame — which is generous, and generous is the correct direction to be
+     wrong in: too wide costs a few poses nobody sees, too narrow is a man
+     standing still at the edge of the screen. */
+  const POSE_MARGIN = 0.20;
+  const POSE_HUG2 = (0.55 / Math.tan(POSE_MARGIN)) * (0.55 / Math.tan(POSE_MARGIN));
+  const _cone = { x: 0, y: 0, z: -1, cos: -1 };
+  let _coneV = null;
+  function poseCone() {
+    const cam = CBZ.camera;
+    if (!cam) { _cone.cos = -1; return _cone; }
+    if (!_coneV) _coneV = new THREE.Vector3();
+    cam.getWorldDirection(_coneV);
+    _cone.x = _coneV.x; _cone.y = _coneV.y; _cone.z = _coneV.z;
+    /* THE CORNER RAY. A perspective camera's widest direction is toward a
+       corner of the frame, at atan(hypot(tan(v/2), tan(v/2)*aspect)) off the
+       axis; anything inside the frustum is inside that cone. An orthographic
+       or a broken camera falls through to "cull nothing". */
+    const fov = cam.fov, asp = cam.aspect;
+    if (!(fov > 0) || !(asp > 0)) { _cone.cos = -1; return _cone; }
+    const tv = Math.tan((fov * Math.PI / 180) / 2);
+    _cone.cos = Math.cos(Math.min(Math.PI, Math.atan(Math.hypot(tv, tv * asp)) + POSE_MARGIN));
+    return _cone;
+  }
+
   let lastWall = 0;
   function frame(dt) {
     if (!started || !live) return;
@@ -2695,17 +3471,28 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     if (injectDt > 0) { dt = injectDt; lastWall = 0; injectDt = 0; }
     fxBudget = 0;
 
+    if (PROF.on) PROF.frames++;
     if (!over) {
       const sub = Math.min(tScale > 1 ? 12 : 6, Math.max(1, Math.ceil(dt / 0.055)));
       const sdt = Math.min(0.055, dt / sub);
       for (let s = 0; s < sub; s++) {
         simT += sdt;
         CBZ.now += sdt * 1000;             // combat_iq's clocks follow this one
+        tickPlantBudget();
+        let _p = pNow();
         if (simT - gridAt > 0.35) rebuildGrid();
+        pAdd("grid", _p);
+        _p = pNow();
         if (simT - comAt > 0.6) { updateCOM(); comAt = simT; }
         if (simT - moraleAt > 0.5) { updateMorale(); moraleAt = simT; }
         if (simT - cmdAt > 6) { enemyCommand(); cmdAt = simT; }
-        for (let i = 0; i < men.length; i++) stepMan(men[i], sdt);
+        pAdd("morale", _p);
+        _p = pNow();
+        if (squadsOn) for (let i = 0; i < units.length; i++) stepSquad(units[i], sdt);
+        pAdd("squads", _p);
+        _p = pNow();
+        for (let i = 0; i < men.length; i++) { const m = men[i]; if (!m.formed) stepMan(m, sdt); }
+        pAdd("men", _p);
         /* THE WARLORD IS NOT STEPPED HERE. gunplay.js drives him from
            CBZ.onAlways(51.5) — immediately before systems/fpsmode.js's own
            onAlways(52) — because fpsmode's viewmodel, its reticle projection
@@ -2713,16 +3500,64 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
            the lens must already be where this frame's input put it. Driven
            from here instead (a frame hook, which microboot runs AFTER every
            always-hook) every burst photographed the previous frame's aim. */
+        _p = pNow();
         if (deadSolving > 0 && CBZ.ragdollStep) CBZ.ragdollStep(sdt);
+        pAdd("ragdoll", _p);
+        _p = pNow();
         rebuildFine();
         separateSolve(Math.min(0.9, sdt * 26));
+        pAdd("separate", _p);
       }
     }
 
     if (sinking.length) stepSinking(dt);
 
     // ---- render-side: gait, aim pose, camera
+    posePass(dt, false);
+    const _pc = pNow();
+    if (camMode === "cmd") stepCommand(dt);
+    stepCamera(dt);
+    stepPickup();
+    paintHud(dt);
+    pAdd("hud", _pc);
+    frameTail(dt);
+  }
+
+  function posePass(dt, force) {
+    const _pp = pNow();
     const camP = CBZ.camera.position;
+    /* NOBODY IS POSED BEHIND THE CAMERA, AND THAT WAS HALF THE POSE BUDGET.
+       MEASURED at 150 v 150 (301 bodies): this loop was 1.76 ms of a 3.8 ms
+       simulated frame — the single most expensive thing in the file, more than
+       the fighting — and it ran animChar and actorAimAt over every man on the
+       field including the whole half of it standing behind the warlord's head.
+       A rig that is not on screen has no pose worth computing; that is not a
+       level of detail, it is arithmetic nobody can see the result of.
+
+       THE CONE IS THE LENS'S OWN, NOT A TYPED ANGLE. The half-angle is the
+       camera's CORNER ray — atan(hypot(tan(vfov/2), tan(vfov/2)*aspect)) —
+       plus a margin, so the test is conservative by construction: a man inside
+       the frustum can never be outside this cone whatever the aspect ratio, in
+       portrait, on a phone, or in the command seat looking straight down.
+
+       AND A SKIPPED MAN IS NOT A FROZEN MAN. Every man accumulates animT and
+       aimT while he is off screen and they are handed to animChar and
+       actorAimAt as their dt when he comes back — which is what animChar's own
+       `dt * every` LOD was already doing for distance, generalised. So he
+       walks and turns in at the pose he would have had rather than snapping to
+       it.
+
+       AND A CAMERA CUT RE-POSES EVERYONE. This runs as its own function, not
+       inline in frame(), because setCam() and look() move the lens AFTER the
+       frame's pose pass has already run: the men who were behind the old
+       camera are in front of the new one, carrying whatever pose they last had
+       on screen. In play that is one frame and nobody sees it. In a still —
+       which is the entire output of tools/visual-presets/warlord-scale.mjs,
+       and which frames every shot with look() and then draws — it is the whole
+       picture. So both seats re-pose before they hand the lens back, with
+       force, which ignores the distance ladder for that one pass. */
+    const cone = poseCone();
+    const cfx = cone.x, cfy = cone.y, cfz = cone.z, cCos = cone.cos;
     for (let i = 0; i < men.length; i++) {
       const m = men[i];
       if (m.fled || m.retired) continue;
@@ -2734,19 +3569,68 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
          against it, and his rifle photographed pointing well above his own
          sights. gunplay.js's comment carries the measurement. */
       if (m.isYou) continue;
-      const d2 = (m.pos.x - camP.x) * (m.pos.x - camP.x) + (m.pos.z - camP.z) * (m.pos.z - camP.z);
+      const vx = m.pos.x - camP.x, vy = m.pos.y - camP.y, vz = m.pos.z - camP.z;
+      const d2 = vx * vx + vz * vz;
+      /* TWO CLOCKS, NOT ONE, and the first draft used one and was wrong. The
+         gait and the aim are skipped by different rules — the gait by the
+         distance LOD below, the aim by the 190 m gate — so a single "time
+         since I was posed" accumulator gets consumed by whichever ran first
+         and hands the other a dt that has already been spent. Two counters,
+         each reset by its own consumer. */
+      m.animT = (m.animT || 0) + dt;
+      m.aimT = (m.aimT || 0) + dt;
+      /* THE ONLY MEN EXEMPT FROM THE CONE ARE THE ONES CLOSE ENOUGH TO BE IN
+         the peripheral third of a wide lens or to cast a shadow into shot.
+         POSE_HUG is derived rather than picked: a man is ~1.1 m across, so the
+         range at which the cone margin already covers his whole body is where
+         his half-width subtends less than the margin — 0.55 / tan(0.2 rad). */
+      if (d2 > POSE_HUG2) {
+        const inv = 1 / Math.sqrt(d2 + vy * vy);
+        if ((vx * cfx + vy * cfy + vz * cfz) * inv < cCos) continue;
+      }
+      pHit("posed");
       m.animF = ((m.animF || 0) + 1) & 1023;
-      const every = d2 < 70 * 70 ? 1 : d2 < 150 * 150 ? 2 : 4;
+      /* THE GAIT LADDER, AND IT NOW HAS A FOURTH RUNG BECAUSE THE FIRST THREE
+         WERE WRITTEN FOR A HUNDRED MEN. animChar is the most expensive single
+         thing in this file — MEASURED at 300 v 300, 2.60 ms of a 8.5 ms
+         simulated frame across ~390 calls, which is 6.7 us a man — and the old
+         ladder (1 / 2 / 4 at 70 m and 150 m) had every man on a 340 m field
+         inside its coarsest rung.
+
+         THE RUNGS ARE PIXELS, not distances. A leg is about 0.15 m across; on
+         this lens (75 deg over ~900 rows) one pixel subtends 1.5e-3 rad, so a
+         leg stops being a resolvable object past 0.15 / 1.5e-3 = ~90 m, and a
+         whole man is under six pixels tall past ~180 m. Under 30 m limbs are
+         the subject and he is posed every frame; to 90 m they are still
+         countable; past 180 m the man is a silhouette with a bob and eight
+         gait solves a second is more than the shape can show. The accumulated
+         dt goes with it, so the stride covers the same ground either way — the
+         only thing that changes is how often it is resampled. */
+      const every = force ? 1 : d2 < 30 * 30 ? 1 : d2 < 90 * 90 ? 2 : d2 < 180 * 180 ? 4 : 8;
       if ((m.animF % every) === 0 && CBZ.animChar && m.char) {
         // A MAN IN COVER GETS SMALL — the rig's own flag, which nothing on
         // battle.html set until it was noticed that combat_iq could send a man
         // to real cover and he would stand up straight behind it.
         m.char.crouch = m.slot === "cover" || m.slot === "peek";
-        safe(function () { CBZ.animChar(m.char, m.speed, dt * every); });
+        const adt = m.animT; m.animT = 0;
+        const _pa = pNow();
+        safe(function () { CBZ.animChar(m.char, m.speed, adt); });
+        pAdd("gait", _pa); pHit("gait");
       }
+      /* THE AIM TAKES THE SAME DISTANCE LADDER THE GAIT ALREADY TOOK, and it
+         is strange that it never did: `every` was applied to animChar and
+         actorAimAt ran flat out for every engaged man inside 190 m, which is
+         nearly the whole field. An aim pose is a damped turn toward a mark —
+         at 150 m, four frames of it is 66 ms of lag on a motion that takes
+         most of a second, and the man is eight pixels tall. Same ladder, same
+         accumulated dt, so the turn covers the same ground in the same time
+         however often it is asked. */
       const engaged = m.tgt && !m.tgt.dead && m.sees && !m.routed;
-      if (engaged && d2 < 190 * 190 && CBZ.actorAimAt) {
-        CBZ.actorAimAt(m, m.tgt, dt);
+      if (engaged && d2 < 190 * 190 && (m.animF % every) === 0 && CBZ.actorAimAt) {
+        const _pb = pNow();
+        CBZ.actorAimAt(m, m.tgt, m.aimT);
+        pAdd("aim", _pb); pHit("aim");
+        m.aimT = 0;
         m.yaw = m.group.rotation.y;
       }
       if (m._weaponProp) {
@@ -2754,11 +3638,10 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
         if (m._weaponProp.visible !== show) m._weaponProp.visible = show;
       }
     }
-    if (camMode === "cmd") stepCommand(dt);
-    stepCamera(dt);
-    stepPickup();
-    paintHud(dt);
+    pAdd("pose", _pp);
+  }
 
+  function frameTail(dt) {
     if (!over) {
       endAt -= dt;
       if (endAt <= 0) { endAt = 0.4; checkEnd(); }
@@ -2983,7 +3866,10 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
 
     men = []; corpses = []; sinking = []; dropGuns = []; addedCols = []; addedMeshes = [];
     pickHeld = false; pickTgt = null; pickLbl = ""; pickTook = 0;
-    grid.clear(); fine.clear(); _claim.length = 0;
+    grid.clear(); fine.clear(); _claim.clear();
+    // the sections go with the men, and so does the height field — both hold
+    // references to a battlefield that no longer exists
+    units = []; fld = null; fldSrc = null;
     deadSolving = 0; _shot = null; YOU = null; youRig = null; MAP = null; band = null; report = null;
     if (W.deaths) W.deaths.disarm();   // the rim comes down, the hit-stop clock resets
     CBZ.groundAt = null;
@@ -3083,6 +3969,24 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       }
       return { frames: n, simT: Math.round(simT * 100) / 100 };
     },
+    /* profile(true) arms the per-phase timers and zeroes them; profile()
+       returns MILLISECONDS PER FRAME per phase (not totals — a total is a
+       number about how long the tool ran) plus the counters, and leaves the
+       timers armed so a second read is a second window. profile(false) disarms.
+       tools/warlord-scale-check.mjs --prof is the consumer. */
+    profile: function (on) {
+      if (on === true || on === false) {
+        PROF.on = on;
+        PROF.frames = 0; PROF.t = Object.create(null); PROF.n = Object.create(null);
+        return on;
+      }
+      const f = Math.max(1, PROF.frames);
+      const out = { frames: PROF.frames };
+      for (const k in PROF.t) out[k] = Math.round((PROF.t[k] / f) * 1000) / 1000;
+      for (const k in PROF.n) out["#" + k] = Math.round((PROF.n[k] / f) * 100) / 100;
+      PROF.frames = 0; PROF.t = Object.create(null); PROF.n = Object.create(null);
+      return out;
+    },
     render: function () {
       const R = CBZ.renderer || (micro && micro.renderer);
       if (R && CBZ.camera) safe(function () { R.render(scene, CBZ.camera); });
@@ -3154,6 +4058,13 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
            is the only honest measure of whether the budget is a budget: zero
            at 300 v 300 means it is not doing anything. */
         deaths: (W.deaths && W.deaths.audit) ? W.deaths.audit() : null,
+        /* THE FORMATION LAYER, COUNTABLE. `formed` is how many men are
+           currently a slot in a section rather than an individual — the whole
+           saving in one number — and `units`/`engaged` say how much of the
+           army is actually in contact, which is the number that tells you
+           whether a big battle is a battle or a queue. */
+        squads: { on: squadsOn, units: units.length, formed: formedCount(),
+                  engaged: engagedUnits(), printR: Math.round(printR) },
         /* THE FLOOR. `guns` is how many dropped rifles are lying on the sand,
            `reach` whether one is inside the warlord's arm, `taken` how many he
            has picked up this battle — the three numbers that say whether the
@@ -3277,6 +4188,8 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       if (o.pitch != null) cmd.pitch = o.pitch;
       if (o.yaw != null) cmd.yaw = o.yaw;
       stepCamera(0.016);
+      // see setCam: the lens has moved, so re-pose whoever is now in front of it
+      safe(function () { posePass(0, true); });
       return { x: cmd.x, z: cmd.z, dist: cmd.dist, yaw: cmd.yaw, pitch: cmd.pitch };
     },
   });

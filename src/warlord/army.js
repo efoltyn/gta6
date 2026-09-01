@@ -34,9 +34,18 @@
    leaveBand's one-to-three-MINUTE cooldown meeting a silent guard in
    campaign.js — see BREAKING OFF and NO DEAD TAPS.
 
+   2026-09-01 — SHOW DON'T TELL. Four mechanics in this file were an array
+   mutation and a string: executing prisoners, a band surrendering, a band
+   joining you, and a prisoner refusing to turn. They happen on the sand now.
+   See THE SAND IS THE SCREEN, which also names the reason none of them could
+   have been shown before it: the meeting rail took the PHASE, and taking the
+   phase switched the island off behind it.
+
    FLAGS (repo doctrine: every behaviour switch reverts in one param)
      ?dread=old     executions stop discouraging future surrenders (see DREAD)
      ?conscript=old conscription is a flat roll again, tier-blind
+     ?show=old      no tableaux: every act above is the mutation and the toast
+                    again, and the meeting keeps the phase (see THE SAND)
      ?encounter=1   debug: put a generated band's card up at boot
 ============================================================ */
 (function () {
@@ -188,17 +197,38 @@
   /* THE COMPOSITION, AS A PICTURE. One stacked bar segmented by tier plus a
      swatch legend — the two pieces the encounter rail already used, lifted out
      of it so the INSPECT roster stops describing the same army in prose. */
+  /* A MAN WHO WILL NOT TURN IS HATCHED, FOREVER. `_refused` is permanent
+     per-man state and it used to be rendered as a 2 600 ms toast — the player
+     was told once, briefly, about a fact that outlives the run, and then had
+     no way to see it again. The bar is already on the screen and already
+     grouped by tier; the refusers become their own hatched block inside their
+     own tier's colour, so the picture answers "how many of these will never
+     ride with me" without one character of new copy. Diagonal, because a
+     hatch reads as struck out and a tint reads as "far away". */
+  const HATCH = "repeating-linear-gradient(-45deg,rgba(0,0,0,.62) 0 3px,transparent 3px 7px)";
   function tierStack(men) {
     const byTier = {};
-    for (let i = 0; i < men.length; i++) byTier[men[i].tier] = (byTier[men[i].tier] || 0) + 1;
-    const tiers = Object.keys(byTier).sort(function (a, b) { return W.tierIndex(b) - W.tierIndex(a); });
+    for (let i = 0; i < men.length; i++) {
+      const k = men[i].tier + (!showOld && men[i]._refused ? "|no" : "");
+      byTier[k] = (byTier[k] || 0) + 1;
+    }
+    /* Refusers sit immediately after their own tier, so the hatch is next to
+       the block it is a share of rather than collected at one end. */
+    const keys = Object.keys(byTier).sort(function (a, b) {
+      const ta = a.split("|")[0], tb = b.split("|")[0];
+      return (W.tierIndex(tb) - W.tierIndex(ta)) || (a.length - b.length);
+    });
     const total = Math.max(1, men.length);
-    let stack = "", legend = "";
-    for (let i = 0; i < tiers.length; i++) {
-      const t = tiers[i], n = byTier[t], pct = (n / total) * 100, c = tierColour(t);
-      stack += '<i style="width:' + pct.toFixed(2) + '%;background:' + c + '">' +
-        (pct > 11 ? n : "") + '</i>';
-      legend += '<span><em style="background:' + c + '"></em>' + esc(W.tier(t).label) + '</span>';
+    let stack = "", legend = "", seen = {};
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i], t = k.split("|")[0], no = k.indexOf("|no") > 0;
+      const n = byTier[k], pct = (n / total) * 100, c = tierColour(t);
+      stack += '<i style="width:' + pct.toFixed(2) + '%;background:' + c +
+        (no ? ';background-image:' + HATCH : '') + '">' + (pct > 11 ? n : "") + '</i>';
+      if (!seen[t]) {
+        seen[t] = 1;
+        legend += '<span><em style="background:' + c + '"></em>' + esc(W.tier(t).label) + '</span>';
+      }
     }
     return '<div class="wl-stack">' + stack + '</div><div class="wl-legend">' + legend + '</div>';
   }
@@ -238,7 +268,33 @@
       return;
     }
     curBand = band;
-    W.setPhase("encounter", { band: band });
+    /* THE MEETING DOES NOT OWN THE SCREEN, SO IT MUST NOT OWN THE PHASE.
+       This line used to be `W.setPhase("encounter", {band})`, and campaign.js
+       sets the same phase one line before it calls in here. core fires
+       phase:leave:campaign, campaign.js answers it with `live = false;
+       showAll(false)`, and the island — you, your column, the band you are
+       standing in front of, the terrain — is switched off. The whole argument
+       for this rail is that the world keeps running behind it; it was running
+       behind a blank sky.
+
+       outpost.js hit this exact chain and fixed it exactly here (see its own
+       "BARREN DESERT AND MAN WITH A CRATE POPUP WITH NO MAN THERE"). Hand the
+       phase back, whatever it is. There is no frame between campaign.js's set
+       and this unset — it is one call stack — so nothing flickers, and the
+       redundant setPhase at campaign.js:3233 can now be deleted.
+
+       feel.js keyed its "a card opened" cue and its encounter music bed off
+       the phase; the cue is called explicitly here for the same reason
+       outpost.js calls it ("the phase used to do this"), and the event below
+       is the name feel.js can hang the bed on. */
+    if (showOld) {
+      W.setPhase("encounter", { band: band });      // ?show=old — the dark world
+    } else if (W.phase() !== "campaign") {
+      if ((W.phase() === "menu" || W.phase() === "boot") && W.campaign && W.campaign.enter) W.campaign.enter();
+      else W.setPhase("campaign");
+    }
+    W.emit("encounter:open", { band: band });
+    if (!showOld && W.feel && W.feel.ui) W.feel.ui("open", { volume: 0.8 });
     paintEncounter(opts);
   }
 
@@ -499,21 +555,39 @@
     const p = W.surrenderChance(band, W.yourPower());
     band._askedDay = W.state.day;
     if (W.chance(p)) {
-      for (let i = 0; i < band.men.length; i++) W.state.prisoners.push(band.men[i]);
-      W.earn(band.gold);
-      band.gold = 0;
-      band.men.length = 0;
-      W.state.fame += Math.round(2 + W.state.prisoners.length * 0.5);
-      W.log(band.name + " laid down their guns without a shot.", "good");
-      W.toast("THEY SURRENDER", "good");
-      W.state.stats.battles++;
-      W.state.stats.won++;
-      aftermath({
-        band: band, outcome: "surrender", duration: 0,
-        yourDead: [], yourSurvivors: W.state.army.slice(), yourFled: [],
-        theirDead: [], theirSurvivors: W.state.prisoners.slice(),
-        loot: {}, armourLoot: {}, gold: 0, youKills: 0, alreadyBanked: true,
-      });
+      /* THE MUTATION, HELD BACK UNTIL THE PICTURE IS OVER. `band.men.length =
+         0` is what campaign.js draws off, so doing it now is sixty men
+         vanishing in one frame — which is the bug. They stay on the sand for
+         three seconds, lay their arms down, and walk in; THEN they are
+         prisoners. Under ?show=old apply() runs immediately and this is the
+         shipped line-for-line behaviour. */
+      const apply = function () {
+        for (let i = 0; i < band.men.length; i++) W.state.prisoners.push(band.men[i]);
+        W.earn(band.gold);
+        band.gold = 0;
+        band.men.length = 0;
+        /* AND THE EMPTY BAND LEAVES THE MAP. bank() splices a wiped band out
+           of W.state.bands after a battle; this path passes alreadyBanked and
+           so never did, which left a nought-man party sitting on the island
+           for the rest of the run with a banner over it. */
+        if (W.state.bands) {
+          const bi = W.state.bands.indexOf(band);
+          if (bi >= 0) W.state.bands.splice(bi, 1);
+        }
+        W.state.fame += Math.round(2 + W.state.prisoners.length * 0.5);
+        W.log(band.name + " laid down their guns without a shot.", "good");
+        W.toast("THEY SURRENDER", "good");
+        W.state.stats.battles++;
+        W.state.stats.won++;
+        aftermath({
+          band: band, outcome: "surrender", duration: 0,
+          yourDead: [], yourSurvivors: W.state.army.slice(), yourFled: [],
+          theirDead: [], theirSurvivors: W.state.prisoners.slice(),
+          loot: {}, armourLoot: {}, gold: 0, youKills: 0, alreadyBanked: true,
+        });
+      };
+      if (stageable()) showSurrender(band, apply);
+      else { takeTheirArms(band); apply(); }
     } else {
       band.mood = "hunt";
       band.cooldown = 0;
@@ -526,13 +600,26 @@
   function hireBand(price) {
     const band = curBand;
     if (price == null || !W.pay(price)) { W.toast("NOT ENOUGH GOLD", "bad"); return; }
-    let n = 0;
-    for (let i = 0; i < band.men.length; i++) { W.addSoldier(band.men[i]); n++; }
-    band.men.length = 0;
-    W.state.stats.recruited += n;
-    W.log("paid $" + price + ". " + n + " men ride with you now.", "good");
-    W.toast(n + " MEN JOIN YOU", "good");
-    finish();
+    /* MEN CHANGING SIDES, HELD BACK UNTIL THEY HAVE ACTUALLY CROSSED. The
+       moment addSoldier runs they leave the band campaign.js is drawing and
+       appear in the column it draws behind you — so applying it now is sixty
+       men teleporting past you. showJoin walks the band onto you first, using
+       campaign.js's own goal-walk, and this runs when they arrive. */
+    const apply = function () {
+      let n = 0;
+      for (let i = 0; i < band.men.length; i++) { W.addSoldier(band.men[i]); n++; }
+      band.men.length = 0;
+      if (W.state.bands) {
+        const bi = W.state.bands.indexOf(band);
+        if (bi >= 0) W.state.bands.splice(bi, 1);
+      }
+      W.state.stats.recruited += n;
+      W.log("paid $" + price + ". " + n + " men ride with you now.", "good");
+      W.toast(n + " MEN JOIN YOU", "good");
+      finish();
+    };
+    if (stageable()) showJoin(band, apply);
+    else apply();
   }
 
   /* ROBBERY takes the GUNS, and that is the point: the gold is a number and
@@ -540,24 +627,30 @@
      thing that made it dangerous, so the next time you meet it the encounter
      card says something different — which is what makes robbing a decision
      with a future instead of a free purse. */
+  /* AND ROBBERY IS THE SAME PICTURE AS A SURRENDER, because mechanically it is
+     the same act under a different threat: their arms end up on the sand and
+     in your stash. It was not on the complaint list, but leaving it as a toast
+     while DEMAND next to it puts real rifles on real ground would mean two
+     spellings of one event in one rail — which is the drift this file's header
+     warns about. The difference is what happens after: a robbed band KEEPS its
+     men, so it rides off (ridesAway, this file's own break-off) instead of
+     laying down and becoming prisoners. */
   function robBand() {
     const band = curBand;
-    let guns = 0;
-    for (let i = 0; i < band.men.length; i++) {
-      const s = band.men[i];
-      if (s.wid && s.wid !== "sidearm") { W.stash(s.wid, 1); guns++; s.wid = "sidearm"; }
-      if (s.armour && s.armour !== "none") { W.stashArmour(s.armour, 1); s.armour = "none"; }
-    }
-    const gold = band.gold | 0;
-    W.earn(gold);
-    band.gold = 0;
-    band.mood = "hunt";
-    band.cooldown = 0;
-    band.wealth = Math.max(0.12, band.wealth * 0.5);
-    W.state.fame = Math.max(0, W.state.fame - 1);
-    W.log("robbed " + band.name + " at gunpoint — $" + gold + " and " + guns + " guns.", "good");
-    W.toast("TAKEN: $" + gold + " AND " + guns + " GUNS", "good");
-    finish();
+    const apply = function () {
+      const gold = band.gold | 0;
+      W.earn(gold);
+      band.gold = 0;
+      band.mood = "hunt";
+      band.cooldown = 0;
+      band.wealth = Math.max(0.12, band.wealth * 0.5);
+      W.state.fame = Math.max(0, W.state.fame - 1);
+      W.log("robbed " + band.name + " at gunpoint — $" + gold + ".", "good");
+      W.toast("TAKEN: $" + gold, "good");
+      finish();
+    };
+    if (!stageable()) { takeTheirArms(band); apply(); return; }
+    showStripped(band, { rob: true }, apply);
   }
 
   /* ============================================================ BREAKING OFF
@@ -693,6 +786,8 @@
   let stuckFor = 0, stuckId = null;
   function unstickContacts(dt) {
     if (!ctx || W.phase() !== "campaign") { stuckFor = 0; return; }
+    // a tableau holds a band's cooldown open ON PURPOSE; see THE SAND
+    if (tab) { stuckFor = 0; return; }
     if (ctx.verbsOpen && ctx.verbsOpen()) { stuckFor = 0; return; }
     const st = ctx.el && ctx.el("stage");
     if (st && st.classList.contains("on")) { stuckFor = 0; return; }
@@ -715,9 +810,708 @@
   }
 
   function finish() {
+    /* BOTH ENDS OF THE MEETING HAVE A NAME NOW. encounter() stopped claiming
+       the "encounter" PHASE (see THE SAND IS THE SCREEN), and feel.js keys its
+       music bed off exactly that phase — so the pair of events is what it
+       needs to hang the bed on instead. Emitted whether or not anything is
+       listening; core's bus costs one array read for a name with no rows. */
+    if (curBand) W.emit("encounter:close", { band: curBand });
     curBand = null;
     if (W.campaign && W.campaign.enter) W.campaign.enter();
     else W.setPhase("campaign");
+  }
+
+  /* ============================================================ THE SAND IS THE SCREEN
+     SHOW DON'T TELL, FOR THE FOUR THINGS THIS FILE DOES THAT WERE NOT SHOWN.
+
+     THE REPORT (owner): "SHOW DONT TELL for warlord ... death isn't shown ...
+     completely violates show don't tell as does a ton of the app."
+
+     deaths.js answered the first half: a man dying is a sequence on the sand
+     now, in four beats, with blood and time. This is the rest of it, and the
+     failure mode is identical every time — THE MOST DRAMATIC THING IN THE
+     GAME WAS AN ARRAY MUTATION AND A STRING:
+
+       executing prisoners   takePrisoner(id) in a loop and nothing else. The
+                             whole dread mechanic hangs off this act — events.js's
+                             loyMove says outright "they watched you do it" —
+                             and there was no THEY and no DO. bulk() ran the
+                             entire prisoner list through it in ONE FRAME.
+       a band surrendering   `band.men.length = 0` + toast("THEY SURRENDER").
+                             This file's own comment calls it "the single best
+                             outcome in the game". Sixty men vanished.
+       a band joining you    addSoldier() in a loop + toast("N MEN JOIN YOU").
+       a prisoner refusing    a 2 600 ms toast about a fact that lasts forever,
+                             and then no way to see it again.
+
+     ------------------------------------------------- AND THE WORLD WAS OFF
+     campaign.js's engage() calls W.setPhase("encounter"). core fires
+     phase:leave:campaign. campaign.js:604 answers that with `live = false;
+     showAll(false)` — its own root hidden, W.desert.hide(), the controls
+     hidden. So the screen this game shows most often, the meeting rail, whose
+     entire design argument is "the world keeps running behind it, you can
+     watch the party coming over the dune", was a strip of text over an empty
+     sky dome. THE BAND YOU WERE DECIDING WHETHER TO FIGHT WAS NOT ON SCREEN.
+
+     outpost.js found exactly this bug from exactly this cause and fixed it in
+     two lines (its own quote: "RN WE HAVE BARREN DESERT AND MAN WITH A CRATE
+     POPUP WITH NO MAN THERE"). A PHASE IS A CLAIM THAT ONE MODULE OWNS THE
+     SCREEN, and a docked rail does not own the screen — it owns a strip at the
+     bottom of one that still belongs to the campaign. encounter() below hands
+     the phase straight back, the same way, and every tableau here is only
+     possible because of it.
+
+     ------------------------------------------------------------ THE TABLEAU
+     One engine, four scripts. A tableau is: hold the clock at 1x (core's own
+     hold, so the speed pill says WHY it is disabled), take the screen down,
+     make sure the island is up, point the lens, and run a list of beats on the
+     always-chain's dt. It is not a cutscene — the world keeps running behind
+     it exactly as it does behind the rail, because this game's one rule is
+     that the clock never stops.
+
+       EXECUTE      the prisoners stand in a rank on the sand in front of you,
+                    and one volley puts all of them down. ONE volley for forty
+                    men: bulk stays bulk, and the act costs the player 3.4 s
+                    once rather than 3.4 s forty times.
+       SURRENDER    their arms go on the sand in real stacks (props.js's own
+                    armStack, built from their own gun id) and the party walks
+                    in. feel.js's break shout — built, wired, and never once
+                    fired in a real game — is what sixty men giving up sounds
+                    like.
+       HIRE         they ride over to you and fall in. Nothing is drawn for
+                    this at all: campaign.js already draws that band and
+                    already walks a band to a goal with a gait; it is given the
+                    goal and it walks.
+       TAKE ALL     the prisoners who took the money WALK ACROSS to your line
+                    and the ones who refused stand where they are. That is
+                    "men changing sides" and "he refuses" in the same picture,
+                    which is what a toast can never be.
+
+     WHY THIS FILE DRAWS THE RANK ITSELF, and it is the one duplication in
+     here. campaign.js draws every man on the island, and I would rather have
+     used it — the surrender and the hire above do exactly that. But its
+     instances are composed as `compose(pos, Euler(0,yaw,0), scale)` inside a
+     private draw loop: they are PLUMB, always, and there is no seam through
+     which a man can be handed a fall. Prisoners are not on that loop at all
+     (nothing draws a prisoner today), so nothing is drawn twice. The geometry
+     is cut from CBZ.charProfile() and CBZ.HUMAN_SCALE — the same two sources
+     campaign.js's impostor is cut from — so the two cannot drift in
+     proportion, and the colours come from W.outfits.marks(), the same public
+     painter, so a man executed on the sand wears what he wore standing.
+
+     ------------------------------------------------------------ THE FLAG
+       ?show=old   every tableau off. Executing, surrendering, hiring and
+                   conscripting are the array mutation and the toast again,
+                   byte for byte, and the meeting rail keeps the phase (which
+                   is what switched the island off). That is the A/B.
+  */
+
+  let showOld = false;
+  let THREE = null, scene = null;
+  let tab = null;                    // the tableau running right now, or null
+
+  function stageable() {
+    return !showOld && !tab && !!(ctx && THREE && scene && W.campaign &&
+      W.desert && W.desert.heightAt && W.sand && W.state && W.state.you);
+  }
+  /* THE LENS. The campaign camera orbits YOU, so "look at that" is a bearing
+     plus a pull-back — the same two numbers campaign.js publishes for exactly
+     this. It is a WANT, not a write: camDist lerps and the player can still
+     drag the view. A tableau points the camera; it does not seize it. */
+  function lensOn(x, z, dist) {
+    const C = W.campaign, S = W.state;
+    if (!C) return;
+    if (C.camYaw) C.camYaw(Math.atan2(x - S.you.x, z - S.you.z));
+    if (C.camDist) C.camDist(dist);
+  }
+
+  function begin(o) {
+    tab = { id: o.id, t: 0, dur: o.dur, beats: o.beats || [], n: 0,
+            step: o.step || null, done: o.done || null };
+    /* 1x FOR THE DURATION. core.js's own hold, the one match.js used: it pins
+       the scale, disables the slider and names the holder in the pill. A beat
+       has no meaning at 64x — and the band walks below are driven by
+       campaign.js's own sim, which would teleport them. */
+    if (W.clock && W.clock.hold) W.clock.hold("SHOWING");
+    if (ctx.closeScreen) ctx.closeScreen();
+    if (ctx.closeVerbs) ctx.closeVerbs();
+    if (W.phase() !== "campaign") {
+      if (W.campaign.enter) W.campaign.enter(); else W.setPhase("campaign");
+    }
+    stepTab(0);                      // beat 0 is NOW, not one frame from now
+  }
+
+  /* THE DRIVE SEAM, and nothing in the game calls it. A tableau takes its time
+     from the always-chain, which a capture cannot pin: the page's own rAF is
+     still turning while a tool waits between polls, so "photograph the frame
+     0.30 s after the volley" is otherwise "photograph whatever the load
+     average left". freeze() cuts the chain and advance() becomes the only
+     clock. Same shape as battle.js's execute()/shotAudit() seam, and for the
+     same reason — a beat has to be CHOSEN, not sampled. */
+  let frozen = false, driving = false;
+  function tick(dt) { if (frozen && !driving) return; stepTab(dt); }
+
+  function stepTab(dt) {
+    if (!tab) return;
+    tab.t += dt;
+    while (tab.n < tab.beats.length && tab.t >= tab.beats[tab.n].at) {
+      const b = tab.beats[tab.n++];
+      try { b.on(); } catch (e) { console.warn("[warlord/army] beat " + tab.id, e); }
+    }
+    if (tab.step) { try { tab.step(tab.t, dt); } catch (e) { console.warn("[warlord/army] " + tab.id, e); } }
+    if (tab.t < tab.dur) return;
+    const d = tab.done;
+    tab = null;
+    dropRank();
+    dropArms();
+    if (W.clock && W.clock.release) W.clock.release("SHOWING");
+    try { if (d) d(); } catch (e) { console.warn("[warlord/army] done", e); }
+  }
+
+  /* ============================================================ THE RANK
+     This file's own men, for the one job campaign.js's cannot do: fall over.
+
+     THE FALL IS deaths.js'S, to the constant, and that is deliberate — a man
+     folding on the sand in front of your line and a man folding in a battle
+     are the same event and must not be two different lengths of time:
+       FLAT    PI/2 - 0.07, battle.js's topple ceiling. The rig pivots at its
+               FEET; past vertical the torso swings down and behind and sinks
+               under the sand (systems/grapple.js:411's own warning).
+       FOLD_K  7 per second, grapple.js's damping rate for a DEAD body.
+       ROLL    0.6 rad of shoulder roll, grapple.js's own amplitude. A man
+               shot dead astern has no sideways component to his fall and is
+               exactly the man who otherwise reads as a plank.
+       DIP     the hips drop by thigh*(1-cos 40deg) as the knees give, off
+               city/ragdoll.js's own mass-point table (hip 0.95, knee 0.475).
+     RANK_CAP is campaign.js's FORM_CAP: past sixty bodies a cluster stops
+     reading as a count, and the count is on the screen you just left. */
+  const RANK_CAP = 60;
+  const FLAT = Math.PI / 2 - 0.07;
+  const FOLD_K = 7;
+  const ROLL = 0.6;
+  const DIP = (0.95 - 0.475) * (1 - Math.cos(40 * Math.PI / 180));
+  /* The shipped adult male, kept byte for byte from campaign.js's own fallback
+     so a page without the people pack fields the same man-shaped speck here as
+     it does out on the island. CBZ.charProfile() wins whenever it exists. */
+  const PROFILE = {
+    legUp: 0.48, legLo: 0.47, legW: 0.34, hipX: 0.23, shoeH: 0.20,
+    armUp: 0.46, armLo: 0.46, armW: 0.30, armX: 0.62,
+    pelvisW: 0.84, pelvisH: 0.20, pelvisD: 0.48,
+    torsoW: 0.92, torsoH: 0.95, torsoD: 0.50,
+    collarW: 0.94, collarH: 0.18, collarD: 0.52, headSize: 0.60,
+  };
+  let rank = null;
+
+  /* ONE BUFFER PER MESH, tinted per box. Same trick and same reason as
+     campaign.js's impostor: a nine-box man drawn as nine InstancedMeshes is
+     nine draw calls for one silhouette, and the tints (dark boots, shadowed
+     sleeves) are what put a waist back into a merged shape. */
+  function mergeBoxes(parts, scale) {
+    let total = 0;
+    const built = [];
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      const g = new THREE.BoxGeometry(p.w, p.h, p.d).toNonIndexed();
+      g.translate(p.x || 0, p.y, p.z || 0);
+      total += g.attributes.position.count;
+      built.push({ g: g, t: p.tint == null ? 1 : p.tint });
+    }
+    const pos = new Float32Array(total * 3), nor = new Float32Array(total * 3),
+          col = new Float32Array(total * 3);
+    let o = 0;
+    for (let i = 0; i < built.length; i++) {
+      const g = built[i].g, t = built[i].t, c = g.attributes.position.count;
+      pos.set(g.attributes.position.array, o * 3);
+      nor.set(g.attributes.normal.array, o * 3);
+      for (let k = 0; k < c; k++) { col[(o + k) * 3] = t; col[(o + k) * 3 + 1] = t; col[(o + k) * 3 + 2] = t; }
+      o += c;
+      g.dispose();
+    }
+    const out = new THREE.BufferGeometry();
+    out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    out.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+    out.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    if (scale !== 1) out.scale(scale, scale, scale);
+    out.computeBoundingSphere();
+    return out;
+  }
+
+  function buildRank() {
+    if (rank) return rank;
+    let P = null;
+    try { P = CBZ.charProfile ? CBZ.charProfile() : null; } catch (e) { P = null; }
+    if (!P || !P.torsoH) P = PROFILE;
+    const HS = (CBZ.HUMAN_SCALE > 0) ? CBZ.HUMAN_SCALE : 0.70;
+    const hipY = P.legUp + P.legLo;
+    const neckY = hipY - 0.005 + P.torsoH - 0.015;
+    const shoulderY = neckY - 0.04;
+    const armL = P.armUp + P.armLo;
+    const legH = hipY - P.shoeH;
+    const bodyG = mergeBoxes([
+      { w: P.legW * 1.02, h: P.shoeH, d: P.legW * 1.45, x: -P.hipX, y: P.shoeH / 2, z: 0.05, tint: 0.34 },
+      { w: P.legW * 1.02, h: P.shoeH, d: P.legW * 1.45, x: P.hipX, y: P.shoeH / 2, z: 0.05, tint: 0.34 },
+      { w: P.legW, h: legH, d: P.legW, x: -P.hipX, y: P.shoeH + legH / 2, tint: 0.66 },
+      { w: P.legW, h: legH, d: P.legW, x: P.hipX, y: P.shoeH + legH / 2, tint: 0.66 },
+      { w: P.pelvisW, h: P.pelvisH, d: P.pelvisD, y: hipY + 0.03, tint: 0.78 },
+      { w: P.torsoW, h: P.torsoH, d: P.torsoD, y: hipY - 0.005 + P.torsoH / 2, tint: 1 },
+      { w: P.collarW, h: P.collarH, d: P.collarD, y: shoulderY, tint: 1 },
+      { w: P.armW, h: armL, d: P.armW, x: -P.armX, y: shoulderY - armL / 2, tint: 0.88 },
+      { w: P.armW, h: armL, d: P.armW, x: P.armX, y: shoulderY - armL / 2, tint: 0.88 },
+    ], HS);
+    const headG = mergeBoxes([
+      { w: P.headSize, h: P.headSize, d: P.headSize, y: neckY + P.headSize * 0.5, tint: 1 },
+    ], HS);
+    /* r128 NEEDS BOTH HALVES OF THE COLOUR PATH and the buffer has to be
+       allocated by hand — campaign.js paid for both of these in a screenshot
+       of an army rendered in solid black. vertexColors:true makes USE_COLOR
+       real (the geometry carries its own white/tint attribute), instanceColor
+       multiplies over it, and setColorAt sizes a NEW instanceColor off
+       `count`, which is zero here on frame one. */
+    const mk = function (g) {
+      const m = new THREE.InstancedMesh(g,
+        new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), RANK_CAP);
+      m.castShadow = true;
+      m.frustumCulled = false;
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(RANK_CAP * 3), 3);
+      m.instanceColor.setUsage(THREE.DynamicDrawUsage);
+      m.count = 0;
+      m.renderOrder = 2;
+      scene.add(m);
+      return m;
+    };
+    rank = { body: mk(bodyG), head: mk(headG), men: [],
+             d: new THREE.Object3D(), col: new THREE.Color(),
+             qy: new THREE.Quaternion(), qx: new THREE.Quaternion(), qz: new THREE.Quaternion(),
+             AX: new THREE.Vector3(1, 0, 0), AY: new THREE.Vector3(0, 1, 0), AZ: new THREE.Vector3(0, 0, 1) };
+    return rank;
+  }
+
+  function groundY(x, z) {
+    if (W.sand && W.sand.groundY) { const y = W.sand.groundY(x, z); if (isFinite(y)) return y; }
+    return W.desert.heightAt(x, z);
+  }
+
+  /* STAND THEM UP. A RANK, not campaign.js's golden-angle disc: men lined up
+     to be shot, or to be bought, stand in ranks, and the shape is the point of
+     the picture. Rows recede AWAY from the player so the front rank is nearest
+     the lens; everybody faces him, because that is who they are talking to. */
+  function setRank(men, cx, cz, band) {
+    const R2 = buildRank();
+    const S = W.state;
+    const n = Math.min(men.length, RANK_CAP);
+    const per = Math.max(4, Math.min(13, Math.ceil(Math.sqrt(n * 2.2))));
+    const ax = cx - S.you.x, az = cz - S.you.z;
+    const al = Math.hypot(ax, az) || 1;
+    const fx = ax / al, fz = az / al;             // you -> them, i.e. "back"
+    const rx = fz, rz = -fx;                      // across the rank
+    R2.men.length = 0;
+    for (let i = 0; i < n; i++) {
+      const s = men[i];
+      const col = (i % per), row = (i / per) | 0;
+      const jit = W.hash01(i * 13 + 3, 5, 29) - 0.5;
+      const lat = (col - (per - 1) / 2) * 1.42 + jit * 0.28;
+      const lon = row * 1.55 + (W.hash01(i * 7 + 11, 2, 31) - 0.5) * 0.3;
+      const x = cx + rx * lat + fx * lon, z = cz + rz * lat + fz * lon;
+      let mk = null;
+      try { mk = W.outfits && W.outfits.marks ? W.outfits.marks(s, band || null) : null; } catch (e) { mk = null; }
+      R2.men.push({
+        s: s, x: x, z: z, y: groundY(x, z), yaw: Math.atan2(-fx, -fz),
+        ph: W.hash01(i * 17 + 5, 9, 23) * 6.28, dy: 0,
+        body: mk ? mk.body : tierColour(s.tier),
+        head: mk ? mk.head : 0x9a7d5c,
+        fall: null, walk: null, gone: false,
+      });
+    }
+    return R2.men.length;
+  }
+
+  function dropRank() {
+    if (!rank) return;
+    rank.men.length = 0;
+    rank.body.count = rank.head.count = 0;
+  }
+
+  /* THE FRAME. Every man is one compose() — position, (yaw then the fold, in
+     HIS frame), scale. The fold is post-multiplied for the same reason
+     deaths.js post-multiplies it: a fall written in world axes is a fall that
+     ignores which way the man was facing. */
+  function drawRank(t, dt) {
+    if (!rank || !rank.men.length) return;
+    const men = rank.men, d = rank.d;
+    let n = 0;
+    for (let i = 0; i < men.length; i++) {
+      const m = men[i];
+      if (m.gone) continue;
+      stepMan(m, t, dt);
+      d.position.set(m.x, m.y + m.dy, m.z);
+      rank.qy.setFromAxisAngle(rank.AY, m.yaw);
+      d.quaternion.copy(rank.qy);
+      if (m.fall) {
+        rank.qx.setFromAxisAngle(rank.AX, m.fall.rx);
+        rank.qz.setFromAxisAngle(rank.AZ, m.fall.rz);
+        d.quaternion.multiply(rank.qx).multiply(rank.qz);
+      }
+      d.scale.setScalar(1);
+      d.updateMatrix();
+      rank.body.setMatrixAt(n, d.matrix);
+      rank.head.setMatrixAt(n, d.matrix);
+      rank.col.setHex(m.body); rank.body.setColorAt(n, rank.col);
+      rank.col.setHex(m.head); rank.head.setColorAt(n, rank.col);
+      n++;
+    }
+    rank.body.count = rank.head.count = n;
+    rank.body.instanceMatrix.needsUpdate = rank.head.instanceMatrix.needsUpdate = true;
+    if (rank.body.instanceColor) rank.body.instanceColor.needsUpdate = true;
+    if (rank.head.instanceColor) rank.head.instanceColor.needsUpdate = true;
+  }
+
+  function stepMan(m, t, dt) {
+    if (m.fall) {
+      const f = m.fall;
+      f.t += dt;
+      if (f.t < f.struck) {
+        /* STRUCK. He is hit and still on his feet, and he takes the round
+           backwards — city/ragdoll.js prices its own lurch at energy/6 m/s and
+           this is that step, easing out. Without this beat a man is not shot,
+           he is switched off, which is the whole of deaths.js's report. */
+        const k = 1 - f.t / f.struck;
+        m.x += f.dx * 1.1 * k * dt; m.z += f.dz * 1.1 * k * dt;
+        m.y = groundY(m.x, m.z);
+        m.dy = 0;
+        return;
+      }
+      const a = 1 - Math.exp(-FOLD_K * dt);
+      f.rx += (f.tx - f.rx) * a;
+      f.rz += (f.tz - f.rz) * a;
+      const prog = clamp(Math.abs(f.rx) / FLAT, 0, 1);
+      m.dy = -DIP * Math.sin(prog * Math.PI);
+      return;
+    }
+    if (m.walk) {
+      const w = m.walk;
+      w.t += dt;
+      const k = clamp((w.t - w.delay) / w.dur, 0, 1);
+      const e = k * k * (3 - 2 * k);
+      m.x = w.x0 + (w.x1 - w.x0) * e;
+      m.z = w.z0 + (w.z1 - w.z0) * e;
+      m.y = groundY(m.x, m.z);
+      if (k > 0 && k < 1) {
+        m.yaw = Math.atan2(w.x1 - w.x0, w.z1 - w.z0);
+        m.dy = Math.abs(Math.sin(w.t * 8 + m.ph)) * 0.045;
+        if (W.sand && W.sand.puff && ((w.t * 8 + m.ph) % 6.28) < dt * 8)
+          W.sand.puff(m.x, m.y, m.z, { amt: 0.22 });
+      } else if (k >= 1) { m.dy = 0; if (w.hide) m.gone = true; }
+      return;
+    }
+    // standing: he breathes, because forty statues is not forty men
+    m.dy = Math.sin(t * 1.5 + m.ph) * 0.022;
+  }
+
+  /* ============================================================ THE VOLLEY
+     ONE volley for any number of men, and that is the whole answer to "bulk
+     actions must stay bulk". Forty prisoners is not forty executions; it is a
+     firing party and a line, and it costs the player the same 3.4 seconds
+     whether the line is four men or forty.
+
+     THE LENS IS FOR WHAT IS DONE TO YOU — the law this repo has paid for
+     twice (deaths.js's header, and the shark that shook the camera once per
+     mouthful). So gore.js's own lens tail is OFF for every man (opts.lens is
+     the parameter it ships for exactly this) and there is ONE shake, for the
+     volley, not one per corpse. */
+  function fireVolley() {
+    if (!rank || !rank.men.length) return;
+    const men = rank.men, S = W.state;
+    const wid = modalGun(S.army) || "ak47";
+    /* THE GUNS ARE YOUR OWN LINE'S, and the sound is feel.js's mixer rather
+       than CBZ.sfx direct, because a volley is the exact case its near-budget
+       exists to arbitrate. Ten rounds, 22 ms apart: a volley is ragged. */
+    const shots = Math.min(10, Math.max(3, men.length));
+    for (let i = 0; i < shots; i++) {
+      const o = { dist: 7 + i * 0.5, delay: i * 0.022, volume: 0.92 };
+      if (W.feel && W.feel.shot) W.feel.shot({ name: "shoot_" + wid, dist: o.dist, mine: true, opts: o });
+      else if (CBZ.sfx) { try { CBZ.sfx("shoot_" + wid, o); } catch (e) {} }
+    }
+    if (W.feel && W.feel.ui) W.feel.ui("execute");
+    if (CBZ.shake) CBZ.shake(0.40);
+    W.emit("battle:volley", { n: men.length, why: "execution" });
+
+    /* NEAREST FIRST FOR THE BLOOD, spent against gore.js's own 70 m gate —
+       the same rank deaths.js uses, for the same reason: the budget must be
+       spent on what is in the shot, never in array order. */
+    const cam = CBZ.camera;
+    const ord = [];
+    for (let i = 0; i < men.length; i++) {
+      const m = men[i];
+      const dx = cam ? m.x - cam.position.x : 0, dz = cam ? m.z - cam.position.z : 0;
+      ord.push({ i: i, d2: dx * dx + dz * dz });
+    }
+    ord.sort(function (a, b) { return a.d2 - b.d2; });
+    let bled = 0;
+    for (let k = 0; k < ord.length; k++) {
+      const m = men[ord[k].i];
+      /* AWAY FROM THE FIRING PARTY. The line is behind the lens and he is
+         facing it, so the round travels from you to him and he goes down
+         backwards — which is the single sign relationship deaths.js's whole
+         fix is about (the old battle code rolled a coin). */
+      const dx = Math.sin(m.yaw + Math.PI), dz = Math.cos(m.yaw + Math.PI);
+      m.fall = {
+        t: 0,
+        struck: 0.09 + W.hash01(ord[k].i * 3 + 1, 4, 37) * 0.13,
+        rx: 0, rz: 0, tx: -FLAT,
+        tz: (W.hash01(ord[k].i * 5 + 2, 6, 41) - 0.5) * 2 * ROLL,
+        dx: dx, dz: dz,
+      };
+      if (W.sand && W.sand.puff) W.sand.puff(m.x, m.y, m.z, { amt: 0.7, gx: dx, gz: dz });
+      if (bled < 6 && CBZ.gore && ord[k].d2 < 70 * 70) {
+        bled++;
+        goreN++;
+        try {
+          CBZ.gore(m.x, m.y + 1.15, m.z, {
+            medium: "air", dir: { x: dx, z: dz }, amount: 1,
+            cloth: m.body, lens: false,
+          });
+        } catch (e) { /* the blood pack is optional; the fall is not */ }
+      }
+    }
+  }
+
+  /* WHAT YOUR OWN LINE IS CARRYING. Not a typed gun id: the firing party is
+     your men, and audio.js's bank is keyed "shoot_" + the weapon id, which is
+     weapon-data's own naming. */
+  function modalGun(men) {
+    const by = Object.create(null);
+    let best = null, bn = 0;
+    for (let i = 0; i < men.length; i++) {
+      const w = men[i].wid;
+      if (!w) continue;
+      by[w] = (by[w] || 0) + 1;
+      if (by[w] > bn) { bn = by[w]; best = w; }
+    }
+    return best;
+  }
+
+  /* ============================================================ THE ARMS
+     A SURRENDER IS GUNS ON THE SAND. props.js already builds a stack of three
+     rifles standing against each other, out of the real weapon model for the
+     real id — P.armStack, which nothing in the game had ever called with a
+     reason. One stack per nine men, capped at five, because the picture is
+     "they are stacked", not an inventory.
+
+     POOLED, NEVER DISPOSED. Every geometry and material inside a props.js
+     group comes out of that file's own caches and is shared with the outposts;
+     disposing one would take a well or a depot with it. So a stack is built
+     once per gun id and handed back to a pool on teardown. */
+  const armsPool = Object.create(null);
+  let armsOut = [];
+  function layDownArms(band) {
+    if (!W.props || !W.props.armStack || !W.sand || !W.sand.plant) return 0;
+    const S = W.state;
+    const id = modalGun(band.men) || "ak47";
+    const n = clamp(Math.round(band.men.length / 9), 1, 5);
+    const ax = S.you.x - band.x, az = S.you.z - band.z;
+    const al = Math.hypot(ax, az) || 1;
+    const ux = ax / al, uz = az / al;                 // them -> you
+    const px = uz, pz = -ux;                          // across
+    let made = 0;
+    for (let i = 0; i < n; i++) {
+      const pool = armsPool[id] || (armsPool[id] = []);
+      let g = pool.pop();
+      if (!g) { try { g = W.props.armStack({ id: id, seed: 11 + i }); } catch (e) { g = null; } }
+      if (!g) break;
+      g.userData.armsId = id;
+      const lat = (i - (n - 1) / 2) * 2.6;
+      const fwd = 3.0 + (i % 2) * 0.8;
+      const x = band.x + ux * fwd + px * lat, z = band.z + uz * fwd + pz * lat;
+      W.sand.plant(g, x, z, Math.atan2(ux, uz) + i * 0.6);
+      scene.add(g);
+      armsOut.push(g);
+      if (W.sand.puff) W.sand.puff(x, groundY(x, z), z, { amt: 0.55 });
+      made++;
+    }
+    return made;
+  }
+  function dropArms() {
+    for (let i = 0; i < armsOut.length; i++) {
+      const g = armsOut[i];
+      if (g.parent) g.parent.remove(g);
+      const id = g.userData.armsId || "ak47";
+      (armsPool[id] || (armsPool[id] = [])).push(g);
+    }
+    armsOut.length = 0;
+  }
+
+  /* THE BLOOD PACK, asked for by NAME through the loader the page already
+     uses — deaths.js's own seam (systems/gore.js lives in the studio pack
+     "blood", which games/warlord.html's need() list does not ask for). Asked
+     when a prisoner decision goes up rather than at boot, for the page's own
+     stated reason: a campaign that never takes a prisoner should not pay for
+     the file. It resolves long before anybody presses EXECUTE. */
+  let bloodAsked = false, goreN = 0;
+  function askBlood() {
+    if (bloodAsked || showOld || CBZ.gore) return;
+    bloodAsked = true;
+    if (!(CBZ.studio && CBZ.studio.need)) return;
+    CBZ.studio.need("blood").then(function () {},
+      function (e) { console.warn("[warlord/army] blood pack:", e && e.message); });
+  }
+
+  /* ============================================================ THE SCRIPTS */
+
+  /* EXECUTION. The rank goes up in front of you, a beat passes — long enough
+     that they are men standing on sand and not a number — and then one volley.
+     `apply` is called at the volley, not at the end: the record dies when the
+     round arrives, exactly as deaths.js's fell() does, or the sim disagrees
+     with itself for three seconds. */
+  function showExecution(men, apply, done) {
+    const S = W.state;
+    const yaw = (W.campaign && W.campaign.camYaw) ? W.campaign.camYaw() : S.you.yaw;
+    /* HOW FAR IN FRONT, AND HOW FAR BACK, BOTH MEASURED OFF THE ONE THING
+       THIS CAMERA CANNOT DO: it orbits YOU and it will not come closer than
+       campaign.js's own 16 m floor. So the distance from the eye to the rank
+       is (camDist + back), and the first cut of this put the rank 13 m out
+       with the camera 28 back — 41 m, at which a 1.8 m man is 33 px on a
+       700 px frame and the most morally weighted act in the game photographed
+       as a smudge. Nine metres and the floor is 25, which is the closest this
+       lens can legally get to anything, and it is where a man reads as a man. */
+    const back = 9 + Math.min(3, men.length * 0.04);
+    const cx = S.you.x + Math.sin(yaw) * back, cz = S.you.z + Math.cos(yaw) * back;
+    setRank(men, cx, cz, R && R.band);
+    lensOn(cx, cz, clamp(16 + men.length * 0.06, 16, 22));
+    begin({
+      id: "execute", dur: 3.4,
+      beats: [
+        { at: 1.05, on: function () { fireVolley(); apply(); } },
+      ],
+      step: drawRank,
+      done: done,
+    });
+  }
+
+  /* SURRENDER. Their arms go on the sand and the party walks in — campaign.js
+     draws that band and campaign.js walks a band to a goal, with the gait and
+     the formation stretching into a file, so nothing here draws a man. The
+     shout is feel.js's breakSound, built for battle:break and never once
+     fired by a real game: it is what a line deciding not to die sounds like. */
+  function showSurrender(band, apply) { showStripped(band, {}, apply); }
+  function showStripped(band, o, apply) {
+    const S = W.state;
+    band.cooldown = Math.max(band.cooldown, 8);   // engage() stays shut over it
+    band.mood = "roam";
+    /* AS CLOSE AS THE ORBIT ALLOWS. It was hypot + 15, which put the eye
+       BEHIND the player by more than the party was in front of him — 63 m to
+       the subject on a meeting that happens at 24. Half the gap, floored at
+       campaign.js's own 16 m minimum: the player sits in the bottom of the
+       frame and the party he is talking to fills the middle of it. */
+    lensOn(band.x, band.z, clamp(Math.hypot(band.x - S.you.x, band.z - S.you.z) * 0.55, 16, 34));
+    begin({
+      id: o.rob ? "rob" : "surrender", dur: 3.0,
+      beats: [
+        { at: 0.0, on: function () {
+            if (o.rob) { if (W.feel && W.feel.ui) W.feel.ui("demand"); }
+            else W.emit("battle:break", { side: "them" });
+          } },
+        { at: 0.30, on: function () {
+            takeTheirArms(band);
+            layDownArms(band);
+            /* A SURRENDERED PARTY COMES IN; A ROBBED ONE GETS OUT. Both are
+               one written goal — campaign.js walks them, with the gait and the
+               formation stretching into a file, and this file draws nothing. */
+            if (o.rob) ridesAway(band);
+            else band.goal = { x: S.you.x + (band.x - S.you.x) * 0.42,
+                               z: S.you.z + (band.z - S.you.z) * 0.42, why: "" };
+          } },
+      ],
+      done: apply,
+    });
+  }
+
+  /* AND THE PICTURE IS THE MECHANIC, NOT A DECORATION. A stack of rifles on
+     the sand in front of a party that keeps its rifles would be a tell that
+     contradicts a show. So the guns and the armour go into YOUR stash, which
+     is the same two lines robBand() already runs — one rule in this file for
+     "a band gives up its arms", not two. It is a real change: DEMAND used to
+     hand you the men with their kit still on them, and now the kit routes
+     through your armoury and the prisoners are unarmed, which is what
+     surrendering means and what makes DEMAND materially different from HIRE. */
+  function takeTheirArms(band) {
+    let guns = 0;
+    for (let i = 0; i < band.men.length; i++) {
+      const s = band.men[i];
+      if (s.wid && s.wid !== "sidearm") { W.stash(s.wid, 1); guns++; s.wid = "sidearm"; }
+      if (s.armour && s.armour !== "none") { W.stashArmour(s.armour, 1); s.armour = "none"; }
+    }
+    return guns;
+  }
+
+  /* HIRE. They ride over and fall in. The ONLY thing this writes is a goal —
+     campaign.js's stepBands does the walk at its own speed, over its own
+     terrain probe, and publishes b.spd so the men's gaits are real. The
+     tableau ends when they ARRIVE (measured off the distance, not off a typed
+     duration) or at the cap, whichever is first. */
+  function showJoin(band, apply) {
+    const S = W.state;
+    band.cooldown = Math.max(band.cooldown, 8);
+    band.mood = "roam";
+    band.goal = { x: S.you.x, z: S.you.z, why: "" };
+    lensOn(band.x, band.z, clamp(Math.hypot(band.x - S.you.x, band.z - S.you.z) * 0.55, 16, 34));
+    begin({
+      id: "join", dur: 4.4,
+      beats: [{ at: 0.0, on: function () { if (W.feel && W.feel.ui) W.feel.ui("hire"); } }],
+      step: function (t) {
+        if (!tab) return;
+        const d = Math.hypot(band.x - S.you.x, band.z - S.you.z);
+        if (t > 0.6 && d < 9) tab.dur = Math.min(tab.dur, t + 0.45);
+      },
+      done: apply,
+    });
+  }
+
+  /* TAKE ALL. The men who took the money walk across to your line; the men who
+     refused stand exactly where they were. That is both halves of the
+     mechanic in ONE picture — and the refusal, which used to be a 2 600 ms
+     toast about a permanent fact, is now a man still standing on the other
+     side when the walk is over, and a hatched block on the prisoner bar for
+     the rest of the game. */
+  function showTurn(takers, refusers, apply, done) {
+    const S = W.state;
+    const yaw = (W.campaign && W.campaign.camYaw) ? W.campaign.camYaw() : S.you.yaw;
+    const all = takers.concat(refusers);
+    const back = 10;      // see showExecution: the eye cannot come closer than 16
+    const cx = S.you.x + Math.sin(yaw) * back, cz = S.you.z + Math.cos(yaw) * back;
+    setRank(all, cx, cz, R && R.band);
+    lensOn(cx, cz, clamp(16 + all.length * 0.06, 16, 22));
+    const take = {};
+    for (let i = 0; i < takers.length; i++) take[takers[i].id] = 1;
+    begin({
+      id: "turn", dur: 3.2,
+      beats: [
+        { at: 0.75, on: function () {
+            if (W.feel && W.feel.ui) W.feel.ui("hire");
+            const men = rank.men;
+            let k = 0;
+            for (let i = 0; i < men.length; i++) {
+              const m = men[i];
+              if (!take[m.s.id]) continue;
+              /* WHERE YOUR LINE IS: behind you, which is where campaign.js
+                 draws your column (it rides the breadcrumb trail). So they
+                 walk past you and fall in, and the hand-over to the column at
+                 the end of the walk is a metre, not a teleport. */
+              const lat = ((k % 6) - 2.5) * 1.3;
+              const lon = -4.5 - ((k / 6) | 0) * 1.6;
+              m.walk = {
+                t: 0, delay: (k % 6) * 0.06, dur: 1.7,
+                x0: m.x, z0: m.z, hide: false,
+                x1: S.you.x + Math.sin(yaw) * lon + Math.cos(yaw) * lat,
+                z1: S.you.z + Math.cos(yaw) * lon - Math.sin(yaw) * lat,
+              };
+              k++;
+            }
+          } },
+      ],
+      step: drawRank,
+      done: function () { apply(); if (done) done(); },
+    });
   }
 
   /* ============================================================ AFTERMATH
@@ -817,29 +1611,56 @@
     return null;
   }
 
+  /* THE ROLL AND THE MOVE ARE TWO CALLS NOW, because the bulk path has to
+     know who turned BEFORE the men walk across, and the men only leave
+     W.state.prisoners when they arrive. */
+  function conscriptRoll(s, ratio) {
+    if (!s || s._refused) return null;
+    if (!W.pay(conscriptPrice(s, ratio))) return null;      // caller says why
+    if (W.chance(conscriptOdds(s, ratio))) return true;
+    /* A REFUSAL IS PERMANENT FOR THIS MAN, and that is the cost of trying.
+       Without it the button is a slot machine you pull until it pays, which
+       makes a veteran's resistance decorative.
+
+       IT USED TO BE A 2 600 ms TOAST — "HE REFUSES" — about a fact that lasts
+       for the rest of the game, and after it faded there was nothing on any
+       screen that said so. It is a PICTURE now, in two places that both
+       outlast it: he is the man still standing on the other side when the
+       rest walk across (showTurn), and his block on the prisoner bar is
+       hatched from here until the day he is sold (tierStack). */
+    s._refused = true;
+    W.log(s.name + " spat the money back at you.", "bad");
+    if (showOld) W.toast("HE REFUSES", "bad");     // ?show=old — the shipped toast
+    return false;
+  }
+  function conscriptJoin(s) {
+    if (!takePrisoner(s.id)) return false;
+    s.wounded = s.hp < s.maxHp * 0.4;
+    s.hp = s.maxHp;
+    W.addSoldier(s);
+    W.state.stats.conscripted++;
+    W.log(s.name + " took the gold and the gun.", "good");
+    return true;
+  }
+
   function doConscript(id) {
     const list = W.state.prisoners;
     let s = null;
     for (let i = 0; i < list.length; i++) if (list[i].id === id) s = list[i];
     if (!s || s._refused) return;
     const ratio = (R && R.ratio) || 1;
-    const price = conscriptPrice(s, ratio);
-    if (!W.pay(price)) { W.toast("NOT ENOUGH GOLD", "bad"); return; }
-    if (W.chance(conscriptOdds(s, ratio))) {
-      takePrisoner(id);
-      s.wounded = s.hp < s.maxHp * 0.4;
-      s.hp = s.maxHp;
-      W.addSoldier(s);
-      W.state.stats.conscripted++;
-      W.log(s.name + " took the gold and the gun.", "good");
+    if (W.state.gold < conscriptPrice(s, ratio)) { W.toast("NOT ENOUGH GOLD", "bad"); return; }
+    /* ONE MAN OFF THE OPEN LIST DOES NOT GET A TABLEAU, and that is a
+       deliberate asymmetry rather than an omission. The bulk verb is the one
+       the screen offers and the one that was a silent forty-man mutation; the
+       per-man roll lives behind a disclosure triangle and is pressed in runs
+       of ten. Three seconds of world per press would make the list unusable,
+       and both outcomes are already visible on the screen it stays on — the
+       prisoner bar loses a block, the strip's MEN count goes up, feel.js's
+       "army" listener sounds the join, and a refusal hatches his block. */
+    if (conscriptRoll(s, ratio)) {
+      conscriptJoin(s);
       W.toast(s.name.toUpperCase() + " JOINS YOU", "good");
-    } else {
-      /* A REFUSAL IS PERMANENT FOR THIS MAN, and that is the cost of trying.
-         Without it the button is a slot machine you pull until it pays, which
-         makes a veteran's resistance decorative. */
-      s._refused = true;
-      W.log(s.name + " spat the money back at you.", "bad");
-      W.toast("HE REFUSES", "bad");
     }
     paintAftermath();
   }
@@ -859,13 +1680,49 @@
     W.log("let " + s.name + " walk. +" + f + " fame.", "good");
     paintAftermath();
   }
-  function doExecute(id) {
-    const s = takePrisoner(id);
-    if (!s) return;
+  /* THE RECORD DIES. Everything about the picture is elsewhere; this is the
+     book-keeping, and it is called from inside the volley so that the man
+     leaves the roster on the frame the round arrives (deaths.js's own rule —
+     a death cannot wait, or the sim disagrees with itself). */
+  function killRecord(s) {
+    if (!takePrisoner(s.id)) return false;
     W.state.stats.executed++;
     W.state.fame = Math.max(0, W.state.fame - (W.tierIndex(s.tier) + 1) * 3);
-    W.log("executed " + s.name + ".", "bad");
-    paintAftermath();
+    return true;
+  }
+  function doExecute(id) {
+    const list = W.state.prisoners;
+    let s = null;
+    for (let i = 0; i < list.length; i++) if (list[i].id === id) s = list[i];
+    if (!s) return;
+    const back = function () { if (R) { W.setPhase("aftermath", R); paintAftermath(); } };
+    if (!stageable()) { killRecord(s); W.log("executed " + s.name + ".", "bad"); paintAftermath(); return; }
+    if (W.feel && W.feel.ui) W.feel.ui("demand");
+    showExecution([s], function () {
+      killRecord(s);
+      W.log("executed " + s.name + ".", "bad");
+    }, back);
+  }
+  /* EXECUTE ALL IS ONE VOLLEY, NOT FORTY EXECUTIONS. "Bulk actions must stay
+     bulk" and the shape that satisfies both halves of it is a firing party:
+     the whole list stands in a rank, one volley puts all of them down, and it
+     costs the player the same three and a half seconds whether the rank is
+     four men or forty. The old bulk() ran the list through doExecute in ONE
+     FRAME with no feedback at all, and it also wrote forty lines into the log
+     to say so; that is one line now. */
+  function executeAll() {
+    const men = W.state.prisoners.slice();
+    if (!men.length) return;
+    const kill = function () {
+      let n = 0;
+      for (let i = 0; i < men.length; i++) if (killRecord(men[i])) n++;
+      W.log("shot " + n + " prisoner" + (n === 1 ? "" : "s") + ".", "bad");
+    };
+    if (!stageable()) { kill(); paintAftermath(); return; }
+    if (W.feel && W.feel.ui) W.feel.ui("demand");
+    showExecution(men, kill, function () {
+      if (R) { W.setPhase("aftermath", R); paintAftermath(); }
+    });
   }
   function bulk(fn) {
     const ids = W.state.prisoners.map(function (s) { return s.id; });
@@ -880,15 +1737,37 @@
      honest reading of the button: take as many as the money buys. */
   function bulkConscript() {
     const ratio = (R && R.ratio) || 1;
-    const ids = [];
+    const tried = [];
     for (let i = 0; i < W.state.prisoners.length; i++) {
       const s = W.state.prisoners[i];
       if (s._refused) continue;
       if (W.state.gold < conscriptPrice(s, ratio)) break;
-      ids.push(s.id);
+      tried.push(s);
     }
-    for (let i = 0; i < ids.length; i++) doConscript(ids[i]);
-    paintAftermath();
+    if (!tried.length) { paintAftermath(); return; }
+    /* ROLL FIRST, WALK SECOND. Who turned has to be known before anybody
+       moves — that is what makes the picture a fact rather than an animation
+       — but they may not leave W.state.prisoners until they have crossed, or
+       campaign.js starts drawing them in your column while they are still
+       standing over there. */
+    const takers = [], refusers = [];
+    for (let i = 0; i < tried.length; i++) {
+      const got = conscriptRoll(tried[i], ratio);
+      (got ? takers : refusers).push(tried[i]);
+    }
+    /* THE MEN WHO WOULD NOT EVEN BE ASKED still stand in the rank. A prisoner
+       who already refused once, or who costs more than the purse holds, is
+       part of "who is left over there" and leaving him out would make the
+       picture claim the decision was cleaner than it was. */
+    for (let i = 0; i < W.state.prisoners.length; i++) {
+      const s = W.state.prisoners[i];
+      if (tried.indexOf(s) < 0) refusers.push(s);
+    }
+    const join = function () { for (let i = 0; i < takers.length; i++) conscriptJoin(takers[i]); };
+    if (!stageable() || !takers.length) { join(); paintAftermath(); return; }
+    showTurn(takers, refusers, join, function () {
+      if (R) { W.setPhase("aftermath", R); paintAftermath(); }
+    });
   }
 
   /* NAMES, AND NOTHING BUT NAMES. This printed a full-width row per man
@@ -955,18 +1834,25 @@
        one rifle out of a loot table, and the only figure that matters at this
        moment is what the whole field was worth. So: a chip per gun, gold-lit,
        and ONE total. */
+    /* FOUR, WHICH IS THE ENCOUNTER CARD'S OWN NUMBER FOR THIS EXACT PICTURE
+       ("chips, biggest first, capped at four with a +N"). It was six here, and
+       six wraps to three rows of chips on a 375 px phone — 101 px measured —
+       which was a third of the overflow this screen was running below the
+       fold. Nothing is lost from the only figure anybody spends: `worth` still
+       counts every gun in the tail. */
+    const LOOT_CAP = 4;
     const chips = [];
     let worth = r.gold > 0 ? r.gold : 0;
     const lootKeys = Object.keys(r.loot || {});
     lootKeys.sort(function (a, b) { return W.gunPrice(b) - W.gunPrice(a); });
-    for (let i = 0; i < lootKeys.length && i < 6; i++) {
+    for (let i = 0; i < lootKeys.length && i < LOOT_CAP; i++) {
       const wid = lootKeys[i];
       worth += W.gunSell(wid) * r.loot[wid];
       chips.push('<span class="wl-chip"><b>' + r.loot[wid] + '</b> ' + esc(W.gunLabel(wid)) + '</span>');
     }
-    if (lootKeys.length > 6) {
-      for (let i = 6; i < lootKeys.length; i++) worth += W.gunSell(lootKeys[i]) * r.loot[lootKeys[i]];
-      chips.push('<span class="wl-chip wl-dim">+' + (lootKeys.length - 6) + '</span>');
+    if (lootKeys.length > LOOT_CAP) {
+      for (let i = LOOT_CAP; i < lootKeys.length; i++) worth += W.gunSell(lootKeys[i]) * r.loot[lootKeys[i]];
+      chips.push('<span class="wl-chip wl-dim">+' + (lootKeys.length - LOOT_CAP) + '</span>');
     }
     const aKeys = Object.keys(r.armourLoot || {});
     for (let i = 0; i < aKeys.length; i++) {
@@ -992,6 +1878,7 @@
        EXECUTE says what it costs in surrenders. */
     let prisH = "";
     if (pris.length) {
+      askBlood();   // see THE BLOOD PACK: asked when the decision goes up
       let conCost = 0, ranTake = 0, relFame = 0;
       for (let i = 0; i < pris.length; i++) {
         if (!pris[i]._refused) conCost += conscriptPrice(pris[i], ratio);
@@ -1040,8 +1927,13 @@
     }
 
     ctx.screen('<div class="wl-aft">' +
-      '<h1 class="wl-h">' + title + '</h1>' +
-      '<p class="wl-sub">' + (r.band ? esc(r.band.name) : "THE FIELD") + '</p>' +
+      /* AND THE SUB-HEADING IS DELETED BECAUSE IT WAS THE NAME SAID TWICE.
+         It printed the band's name in a 15 px line with a 9 px margin under
+         it — and the second toll bar four lines below already opens with that
+         same name as its legend, because a casualty bar has to say whose
+         casualties it is. Two lines of the same six words on a screen that
+         was running 62 px below the fold on an iPhone SE. */
+      '<h1 class="wl-h" style="margin-bottom:10px">' + title + '</h1>' +
 
       /* ---- THE FOUR STAT TILES ARE TWO BARS NOW ----
          "YOUR DEAD 9 / THEIR DEAD 31 / STILL RIDING 35 / PRISONERS 14" was
@@ -1072,8 +1964,13 @@
         ? '<div class="wl-lbl">PROMOTED</div>' +
           nameChips(r.promoted, "gold", function (s) { return W.tier(s.tier).label; }) : '') +
 
-      (chips.length
-        ? '<div class="wl-lbl">TAKEN</div><div class="wl-chips">' + chips.join("") + '</div>' : '') +
+      /* "TAKEN" IS DELETED, and it is the fifth caption on this screen to go
+         for the same reason the other four did: it labelled a row of chips
+         that each read "5 M249 LMG" next to a gold chip that reads "$420".
+         The encounter card lost "CARRYING" over exactly this argument. A
+         heading costs 31 px on a 375 px phone (15 of type plus 16 of margin)
+         and this screen was running below the fold. */
+      (chips.length ? '<div class="wl-chips" style="margin-top:12px">' + chips.join("") + '</div>' : '') +
 
       prisH +
 
@@ -1100,7 +1997,7 @@
     const ac = ctx.el("pAllCon"); if (ac) ac.onclick = function () { bulkConscript(); };
     const ar = ctx.el("pAllRel"); if (ar) ar.onclick = function () { bulk(doRelease); };
     const an = ctx.el("pAllRan"); if (an) an.onclick = function () { bulk(doRansom); };
-    const ax = ctx.el("pAllExe"); if (ax) ax.onclick = function () { bulk(doExecute); };
+    const ax = ctx.el("pAllExe"); if (ax) ax.onclick = function () { executeAll(); };
     ctx.el("aDone").onclick = function () {
       /* PRISONERS YOU DID NOT DECIDE ON RIDE WITH YOU. They stay in
          W.state.prisoners and the HUD keeps counting them, so an outpost can
@@ -1133,12 +2030,19 @@
     boot: function (c) {
       ctx = c;
       Q = c.Q;
+      THREE = c.THREE || G.THREE || null;
+      scene = c.scene || CBZ.scene || null;
+      showOld = !!(Q && (Q.get("show") === "old" || Q.get("show") === "0"));
       installDread();
       W.on("dawn", restAtDawn);
+      /* A TABLEAU MUST NOT SURVIVE THE THING IT IS ABOUT. A battle starting
+         under a running one would leave a rank of instanced men standing in
+         the middle of it and the clock held at 1x forever. */
+      W.on("phase:battle", function () { if (tab) { tab.dur = 0; stepTab(0); } });
       /* order 98: after campaign.js's world tick (30) and events.js's (96),
          so it reads the cooldowns everything else has already written this
          frame rather than a stale copy of them. */
-      if (CBZ.onAlways) CBZ.onAlways(98, function (dt) { unstickContacts(dt); });
+      if (CBZ.onAlways) CBZ.onAlways(98, function (dt) { tick(dt); unstickContacts(dt); });
 
       /* ?encounter=1 — the debug door. campaign.js is written by another
          agent and may not be here yet; a screen that can only be reached
@@ -1160,6 +2064,48 @@
     // ---- the shared roster shape (loadout.js and the encounter card read it)
     roster: function () { return W.state.army.slice(); },
     groups: function (men) { return groupsOf(men || W.state.army); },
+
+    // ---- drive-only, for the ba preset. See THE DRIVE SEAM.
+    showFreeze: function (on) { frozen = on !== false; return frozen; },
+    showAdvance: function (sec) {
+      driving = true;
+      let left = Math.max(0, +sec || 0);
+      /* 1/60 s slices: the fold is damped at 7/s and the struck beat is a
+         tenth of a second, so a single big step straddles both. */
+      while (left > 1e-5 && tab) { const d = Math.min(1 / 60, left); stepTab(d); left -= d; }
+      driving = false;
+      return tab ? tab.t : -1;
+    },
+
+    /* ---- WHAT IS ON THE SAND RIGHT NOW, for tools/visual-presets/warlord-show.mjs.
+       Every number is a COUNT OF BODIES, not a count of intentions: `standing`
+       and `fallen` are read off the rank this file is actually drawing, so a
+       tableau that is recorded and not rendered reads as zero — which is the
+       exact failure this whole wave is about. */
+    showAudit: function () {
+      let standing = 0, fallen = 0, walking = 0;
+      if (rank) {
+        for (let i = 0; i < rank.men.length; i++) {
+          const m = rank.men[i];
+          if (m.gone) continue;
+          if (m.fall) fallen++; else if (m.walk && m.walk.t > m.walk.delay) walking++; else standing++;
+        }
+      }
+      return {
+        on: !showOld, live: !!tab, id: tab ? tab.id : "",
+        t: tab ? Math.round(tab.t * 100) / 100 : 0,
+        drawn: rank ? rank.body.count : 0,
+        standing: standing, fallen: fallen, walking: walking,
+        arms: armsOut.length,
+        prisoners: W.state.prisoners.length,
+        refused: W.state.prisoners.filter(function (s) { return s._refused; }).length,
+        executed: (W.state.stats && W.state.stats.executed) || 0,
+        army: W.state.army.length,
+        blood: !!CBZ.gore, bloodEvents: goreN,
+        phase: W.phase(), held: W.clock ? W.clock.heldFor() : "",
+        worldLit: !!(W.campaign && W.campaign.live && W.campaign.live()),
+      };
+    },
 
     // ---- the numbers other modules ask for
     hirePrice: hirePrice,

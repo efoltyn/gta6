@@ -303,16 +303,32 @@
     o = o || {};
     const r = o.r != null ? o.r : STANCE;
     const D = W.desert;
-    if (FLAG_OLD || !D || !D.heightAt) {
+    /* A CALLER MAY HAND US THE SURFACE IT IS ACTUALLY DRAWING. battle.js has
+       passed `{ ground: MAP.groundAt }` into plant() since the day it was
+       written and it was DEAD — stand() always went through drawnAt, which is
+       the clipmap's 10 m lattice. During a battle the ground you can see is
+       desert.js raise()'s own 2.69 m mesh, so every soldier in every battle
+       was seated on a surface that is not the one being rendered under him.
+       On a dune face those disagree by enough to float a boot.
+
+       Honoured here rather than at the five call sites, because `stand` is
+       where the four probes that build the normal are taken and they all have
+       to come off the SAME surface or the normal is a blend of two. */
+    /* The five probes come off ONE surface — the caller's if it gave us one,
+       the clipmap otherwise. Sampling the centre from one and the rim from
+       another would build a normal out of two different grounds. */
+    const g = o.ground || null;
+    if (FLAG_OLD || (!g && (!D || !D.heightAt))) {
       const y0 = heightAt(x, z);
       _st.y = _st.plumbY = y0; _st.nx = _st.nz = _st.gx = _st.gz = 0; _st.ny = 1;
       _st.slope = 0; _st.biome = "dune"; _st.firm = 1; _st.sink = 0;
       _st.bury = 0; _st.float = 0;
       return _st;
     }
-    const h0 = drawnAt(x, z);
-    const hE = drawnAt(x + r, z), hW = drawnAt(x - r, z);
-    const hN = drawnAt(x, z + r), hS = drawnAt(x, z - r);
+    const at = g || drawnAt;
+    const h0 = at(x, z);
+    const hE = at(x + r, z), hW = at(x - r, z);
+    const hN = at(x, z + r), hS = at(x, z - r);
     const gx = (hE - hW) / (2 * r), gz = (hN - hS) / (2 * r);
     /* Curvature residual: how far the patch's rim stands above its own
        tangent plane. Positive in a hollow, negative on a crest, and only the
@@ -1085,12 +1101,35 @@
      bicycle. */
   const walkers = new Map();
   const STRIDE = 0.78;
+  /* Two full armies at battle.js's desktop cap (750 a side) plus the column,
+     the outpost folk and the horses. Derived from that cap rather than typed,
+     so raising the cap again does not silently re-break the footprints. */
+  const WALKER_CAP = 1800;
+  function evictWalkers() {
+    const rows = Array.from(walkers.entries());
+    rows.sort(function (a, b) { return a[1].seen - b[1].seen; });
+    const drop = Math.max(1, Math.round(rows.length * 0.1));
+    for (let i = 0; i < drop; i++) walkers.delete(rows[i][0]);
+  }
   S.walk = function (key, x, z, o) {
     if (FLAG_OLD || FLAG_NOPRINTS) return 0;
     o = o || {};
     let wk = walkers.get(key);
     if (!wk) {
-      if (walkers.size > 420) walkers.clear();   // a battle ends; so do its men
+      /* THIS USED TO BE `if (walkers.size > 420) walkers.clear()`, AND PAST
+         420 MEN IT MEANT NOBODY LEFT A FOOTPRINT AT ALL. The cap is hit on
+         the arrival of a NEW walker, so at 500 a side the table was wiped on
+         very nearly every call: every man's stride accumulator went back to
+         zero before it could reach STRIDE, and a battle big enough to churn
+         the sand was the one battle that left it clean. Measured after the
+         scale wave raised the cap to 750 a side.
+
+         An LRU instead, because the intent was only ever to bound the table.
+         `seen` is already stamped on every walker for exactly this and was
+         never read; the oldest tenth goes, which costs one sort on the rare
+         frame a battle crosses the cap and never costs a live man his stride.
+         The cap is per-side-cap * 2 + slack for the campaign's own folk. */
+      if (walkers.size >= WALKER_CAP) evictWalkers();
       wk = { x: x, z: z, acc: 0, foot: 0, seen: clock };
       walkers.set(key, wk);
       return 0;
@@ -1164,7 +1203,13 @@
        centimetre worse than the before. The cast rig measures 1.08 m
        across, so 0.5 m is the half-width a caller gets unless it knows
        better. */
-    const st = stand(x, z, { r: o.r == null ? 0.5 : o.r });
+    /* AND o.ground IS FORWARDED, which is why it was dead: battle.js has
+       passed `{ ground: MAP.groundAt }` into plant() since it was written and
+       this line rebuilt the options object with only `r` in it, so the
+       battlefield's own height field never reached stand(). Every soldier in
+       every battle was seated on the clipmap instead of on the mesh being
+       drawn under him. */
+    const st = stand(x, z, { r: o.r == null ? 0.5 : o.r, ground: o.ground });
     const ANKLE = 0.36;                      // tan(20 deg): what an ankle gives
     /* 0.85, AND THE NUMBER MOVED ONCE FOR A REASON WORTH RECORDING. It was
        0.75, chosen from a picture taken while the body was still seated on

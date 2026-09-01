@@ -85,6 +85,10 @@
      ?terrwar=off    regions and income, but the factions never move
      ?terrmap=old    campaign.js's flat map back on the MAP button
      ?terranim=off   claims snap instead of spreading (the pre-animation look)
+     ?shown=off      THE SHOW-DON'T-TELL WAVE'S REVERT, shared with
+                     warlord/events.js. A province taken while the map is shut
+                     goes back to what it was: a toast, a log line and a
+                     headline, with the spread animation played to nobody.
      ?regions=coarse 160-cell raster instead of 320 (slow devices)
      ?map=1          open the map straight from boot with a plausible spread.
                      ?map=1&stage=day1|mid|late
@@ -103,6 +107,11 @@
   const FLAG_NOWAR = QP.get("terrwar") === "off";
   const FLAG_OLDMAP = QP.get("terrmap") === "old";
   const FLAG_NOANIM = QP.get("terranim") === "off";
+  /* ?shown=off — ONE FLAG FOR THE WHOLE WAVE, and it is the same word in
+     warlord/events.js. The two files fix the same failure (a dramatic thing
+     that happens as an array write and a sentence) and a reviewer comparing
+     before and after wants ONE switch, not one per file. */
+  const FLAG_NOSHOW = FLAG_NOANIM || QP.get("shown") === "off";
 
   const T = W.territory = W.territory || {};
   const TAU = Math.PI * 2;
@@ -930,6 +939,7 @@
       if (lost && from === "you") W.log(lost + " men of your garrison were lost with it.", "bad");
     }
     startClaimAnim(r, from, to, opts.fromRegion || null);
+    queueShow(r, from, to, opts.fromRegion || null);
     bump();
     news(ownerLabel(to) + (from ? " TOOK " : " CLAIMED ") + r.name, to);
     W.emit("territory:claim", { region: r, from: from, to: to });
@@ -967,7 +977,12 @@
     if (holder === "you") return null;
     if (holder && holder !== bandOwner(b)) return null;
     T.claim(r.id, "you");
-    W.toast(r.name + " IS YOURS", "good");
+    /* NO TOAST. claim() has queued the map to open on this province and spread
+       your colour across it the first free frame — a picture that carries the
+       name, the shape, the size and which border it came over. "X IS YOURS"
+       carried the name only, and it carried it on top of a log line that had
+       just said the same thing. Under ?shown=off the toast comes back. */
+    if (FLAG_NOSHOW) W.toast(r.name + " IS YOURS", "good");
     return r;
   };
 
@@ -1488,6 +1503,96 @@
     return true;
   }
 
+  /* ============================================================ THE MOMENT
+     YOU EARN IT
+
+     THE BUG, and it is one line: startClaimAnim's first act is
+     `if (FLAG_NOANIM || !open) { paint it and return }`. `open` means THE 2D
+     MAP SCREEN IS UP. You take a province by winning a fight ON THE ISLAND —
+     map shut, every time — so the one animation this file owns for that
+     moment has never once played at the moment it is about. What the player
+     got instead was the same fact three times in words: W.toast("X IS YOURS"),
+     W.log("you took X from the Legion"), and news() writing a headline onto a
+     map he is not looking at.
+
+     So the claim is REMEMBERED and played back the first frame the screen is
+     free: the map opens already looking at the province, the ground is put
+     back to the colour it was, and the wave crosses it from the frontier you
+     came over. Then it closes itself, because a screen that opens on its own
+     has to leave on its own — unless you touched it, in which case you are
+     reading the island and it is yours until you close it.
+
+     ONLY YOUR BORDER. Two AI factions swapping a province in the salt is not
+     a moment, it is weather; queueing those would open the map on a stranger's
+     war four times a dawn. from/to must include "you".
+
+     THE HOLD IS THE WAVE AGAIN. CLAIM_MS to take it and CLAIM_MS to look at
+     what you took — derived from the animation's own length rather than
+     picked, so retuning the spread retunes the pause with it. */
+  let pendingShow = null;
+  let autoAt = 0, autoTouch = 0, shownCount = 0;
+
+  function queueShow(r, from, to, fromRegionId) {
+    if (FLAG_NOSHOW || open) return;
+    if (to !== "you" && from !== "you") return;
+    pendingShow = { id: r.id, from: from, to: to, from2: fromRegionId || null };
+  }
+
+  /* IT RETRIES, AND THAT IS NOT DEFENSIVE PROGRAMMING. The first version
+     fired once, 420 ms after the phase came back to `campaign`, and it worked
+     about half the time on a headless page: army.js's aftermath list is still
+     in #stage on some frames at that moment and the map correctly refuses to
+     stamp over it. A moment that shows up half the time is worse than one
+     that never does, because nobody can tell which build they are looking at.
+     So a refusal keeps the claim on the hook and asks again — bounded, and
+     giving up rather than queueing for ever, because a player who went
+     straight into an outpost has moved on and does not want the map. */
+  let showTries = 0;
+  function tryShow() {
+    if (!pendingShow) { showTries = 0; return; }
+    if (playPendingShow()) { showTries = 0; return; }
+    if (!pendingShow || ++showTries > 8) { showTries = 0; pendingShow = null; return; }
+    setTimeout(function () { try { tryShow(); } catch (e) {} }, 700);
+  }
+
+  function playPendingShow() {
+    const p = pendingShow;
+    if (!p || FLAG_NOSHOW || open) { pendingShow = null; return false; }
+    const c = T.ctx;
+    if (!c || !c.screen) return false;
+    if (W.phase() !== "campaign") return false;
+    /* NOT OVER SOMEBODY ELSE'S SCREEN. army.js's aftermath list, events.js's
+       card and outpost.js all live in #stage, and the claim lands INSIDE the
+       aftermath — stamping the map over a casualty list is the two-modules-
+       drawing bug the contract exists to stop. It waits for a free frame. */
+    const st = document.getElementById("stage");
+    if (st && st.classList.contains("on")) return false;
+    const r = T.byId(p.id);
+    if (!r || !cellsOf.length || !cellsOf[r.idx]) { pendingShow = null; return false; }
+    pendingShow = null;
+    if (!T.focus(p.id)) return false;
+    /* PUT THE COLOUR BACK BEFORE ARMING THE WAVE. open_() runs tintFull(),
+       which paints every region in its CURRENT owner's colour — including the
+       one that just flipped. A spread armed after that crosses ground already
+       painted the answer, i.e. it is invisible. Repaint it as it was, then
+       take it. */
+    if (p.from) paintCells(cellsOf[r.idx], ownerColour(p.from)); else clearCells(cellsOf[r.idx]);
+    tintPushed = false;
+    startClaimAnim(r, p.from, p.to, p.from2);
+    shownCount++;
+    touch();
+    autoAt = now();
+    autoTouch = lastInteract;
+    return true;
+  }
+
+  /* did it open itself, and has the player left it alone since? */
+  function autoCloseDue() {
+    if (!autoAt || !open) return false;
+    if (lastInteract > autoTouch + 1) { autoAt = 0; return false; }   // he is reading it
+    return now() - autoAt > CLAIM_MS * 2;
+  }
+
   const TOP_INSET = 108, BOT_INSET = 152;   // the header strip and the card
   function fitView(w, h) {
     const D = W.desert;
@@ -1829,7 +1934,8 @@
        not stop — but an idle map with nothing animating does not need 60 Hz
        either, and on a phone that was the difference between a warm handset
        and a cool one. Full rate while something is moving, 20 Hz when not. */
-    schedule(anims.length || (now() - lastInteract < 900) || (now() - newsAt < 3400));
+    if (autoCloseDue()) { autoAt = 0; close(); return; }
+    schedule(anims.length || autoAt || (now() - lastInteract < 900) || (now() - newsAt < 3400));
   }
   function schedule(busy) {
     if (!open || raf || slow) return;
@@ -2334,7 +2440,13 @@
       byOwner: byOwner, yourIncome: inc, war: WAR_ON && !FLAG_NOWAR,
       snapshotBytes: JSON.stringify(T.snapshot()).length,
       names: REG.map(function (r) { return r.name; }),
-      flags: { off: FLAG_OFF, nowar: FLAG_NOWAR, oldmap: FLAG_OLDMAP, noanim: FLAG_NOANIM },
+      flags: { off: FLAG_OFF, nowar: FLAG_NOWAR, oldmap: FLAG_OLDMAP, noanim: FLAG_NOANIM, noshow: FLAG_NOSHOW },
+      /* THE CLAIM ANIMATION, MEASURED WHERE IT MATTERS: `spreading` is how
+         many regions have a live wave crossing them THIS FRAME. Before this
+         pass it was structurally 0 at the moment you take ground, because the
+         only thing that arms a wave is a claim landing while the map screen
+         is already up and you take ground with the map shut. */
+      spreading: anims.length, autoShown: shownCount, pending: pendingShow ? 1 : 0,
     };
   };
 
@@ -2413,6 +2525,17 @@
        once they want to — calling it twice is a no-op, because the second
        call finds the region already yours. */
     W.on("phase:aftermath", function (r) { try { T.onBattleWon(r); } catch (e) {} });
+    /* AND THEN SHOW IT. The claim happens inside the aftermath, with army.js's
+       casualty list on the screen; the moment the player hands that screen
+       back and the island is under him again, the map opens on the province he
+       just took and spreads his colour over it. Deferred a tick because the
+       shell closes #stage on its own way into campaign and this has to test
+       the state AFTER that, not before it. */
+    W.on("phase", function (t) {
+      if (!t || t.to !== "campaign") return;
+      showTries = 0;
+      setTimeout(function () { try { tryShow(); } catch (e) {} }, 420);
+    });
 
     if (ctx.Q && ctx.Q.get("audit") === "1") {
       setTimeout(function () { try { console.log("[warlord/territory]", T.audit()); } catch (e) {} }, 0);

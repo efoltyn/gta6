@@ -1227,14 +1227,25 @@
   }
 
   const MUS = { state: "", pulse: 0 };
+  // are we standing in front of a party right now — see updateMusic
+  let meeting = false;
   function updateMusic(dt) {
     if (!MUSIC_ON || OFF || !unlocked) return;
     if (!mus) mus = musicRig();
     if (!mus || !ctx) return;
     const t = ctx.currentTime;
     const p = phaseNow;
+    /* THE MEETING IS NO LONGER A PHASE, AND THE BED HAS TO FOLLOW IT.
+       army.js used to claim the "encounter" phase to put its card up, which
+       made core fire phase:leave:campaign, which made campaign.js turn the
+       world off — so the party you were deciding whether to fight was a strip
+       of text over an empty sky dome. army.js now hands the phase straight
+       back and announces the meeting with encounter:open / encounter:close
+       instead (outpost.js's precedent). So the tritone hangs off THAT, not off
+       a phase string that stopped arriving. `meeting` is set by those two
+       events below; the phase test stays for ?show=old. */
     const want = p === "battle" ? "battle"
-               : p === "encounter" ? "encounter"
+               : (meeting || p === "encounter") ? "encounter"
                : p === "aftermath" ? "aftermath"
                : p === "campaign" ? "riding" : "off";
     if (want !== MUS.state) {
@@ -1434,7 +1445,16 @@
       if (phaseNow === "battle") { F.ui("order", { volume: 1.2 }); shout({ dur: 1.1, f0: 400, f1: 760, gain: 0.13 }); }
       if (phaseNow === "aftermath") { MOR.brokeMine = MOR.brokeThem = false; MOR.mine = MOR.them = 1; }
       if (phaseNow === "encounter") F.ui("open", { volume: 0.8 });
+      if (phaseNow !== "encounter" && phaseNow !== "campaign") meeting = false;
     });
+
+    /* THE MEETING, AS EVENTS RATHER THAN AS A PHASE. army.js emits these when
+       the rail goes up and comes down; it plays its own open cue (again,
+       outpost.js's precedent), so this only moves the bed. Leaving the island
+       for a battle, a screen or the aftermath clears it above, because a rail
+       that was replaced rather than dismissed emits no close. */
+    on("encounter:open", function () { meeting = true; });
+    on("encounter:close", function () { meeting = false; });
 
     on("toast", function (t) { F.ui(t && t.kind === "bad" ? "bad" : t && t.kind === "good" ? "good" : "open", { volume: 0.7 }); });
     on("dawn", function () { F.ui("dawn"); });

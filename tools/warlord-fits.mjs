@@ -548,7 +548,16 @@ const run = async () => {
       await rig.send("Emulation.setDeviceMetricsOverride", {
         width: F.w, height: F.h, deviceScaleFactor: F.dsf, mobile: F.mobile,
       });
-      await rig.open("games/warlord.html", "go=1&seed=1337&weather=off&sound=off");
+      /* ?endgame=off, AND IT IS A STAGING FIX RATHER THAN A DODGE. This tool
+         drives the clock hard to reach each screen, and once the island
+         carried 678 parties the four rival warlords could all fall on DAY ONE
+         — so events.js's victory() ended the run and replaced the screen the
+         gate was about to measure. The `aftermath` row failed at 1098 px in a
+         915 px box while measuring events.js's endgame summary instead: the
+         phase read "over" and #stage held a .wl-ch. A layout gate must
+         measure the screen it asked for, so the one card that can arrive
+         uninvited is pinned off. events.js has owned this flag all along. */
+      await rig.open("games/warlord.html", "go=1&seed=1337&weather=off&sound=off&endgame=off");
       const up = await rig.wait(`window.CBZ && CBZ.warlord && CBZ.warlord.phase && CBZ.warlord.phase() === "campaign"`, 90000);
       if (!up) { fails.push({ frame: F.id, screen: "boot", what: "never reached the campaign" }); continue; }
       /* THE SAFE AREA, ASSERTED INTO THE PAGE. Chrome's device emulation has

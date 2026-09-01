@@ -102,6 +102,11 @@
      ?clock=off      freeze the day cycle at noon
      ?bandai=off     bands walk their goals and never react to you
      ?guest=1        boot as a sim GUEST: render bands, never roll them
+     ?far=old        every party on the island is integrated every frame
+                     again, however far away it is. The revert for the
+                     distance-stepped world clock (see THE FAR CLOCK) and the
+                     "before" column for tools/warlord-scale-check.mjs
+                     --island.
 
    Events raised here: `campaign:ready` `campaign:dest` `campaign:band`
    `campaign:peer` — you tapped another warlord's column
@@ -134,6 +139,7 @@
      A/B for the people, and the thing the owner was actually looking at:
      "a man with a crate popup with no man there". */
   const FLAG_NOFOLK = QP.get("folk") === "off";
+  const FLAG_FAR_OLD = QP.get("far") === "old";
 
   const C = W.campaign = W.campaign || {};
   /* ONE PEER ROLLS THE DICE. Default true so single player is unchanged;
@@ -413,12 +419,45 @@
      two minutes meets somebody and sparse enough that you are not being
      mobbed. Sizes follow a power law — three men is common, three hundred is
      a thing you tell stories about. */
+  /* HOW MANY BIG PARTIES. The old answer was "one per 2.6 km² of land, clamped
+     to 40..70", and the clamp did all the work: this island is 101 km², so the
+     density gave 39 and the floor pinned it to FORTY, every time, on every
+     seed. A density that never binds is not a density, it is a constant with a
+     comment on it.
+
+     THE OWNER'S ASK: "Multiplayer is way not dense enough add way way more
+     total armies." So the density is now real and it is set from a MEASURED
+     budget rather than from taste — see tools/warlord-scale-check.mjs
+     --island, which sweeps ?bands=N against the campaign frame, the save
+     payload and the party census.
+
+     ONE PER 0.9 km². On 101 km² of land that is 113 big parties, and 0.9 km²
+     is a square just under a kilometre on a side — which is the point: at
+     BAND_DRAW (1.5 km) you can now see more than one army at once, which you
+     essentially never could at one per 2.6 km². The clamp is still there and
+     still exists to stop a tiny or enormous island from being absurd, but it
+     is now wide enough that the density is what decides.
+
+     WHY NOT MORE: the binding ceiling is not the frame. It is the SAVE — see
+     smallTarget's note. */
+  /* ONE PER 0.55 km2, NOT 0.9, AND THE CHANGE PAID FOR ITSELF. The scale wave
+     bought its density from the SMALL tier (5 small per big) because smalls
+     are cheap, and the headless economy measured what that cost: at 5:1 five
+     of every six parties you meet is a crew you cannot lose to, the bold and
+     the cautious warlord end up in the same place, and the run stops being a
+     game (core.js's W.SMALL_PER_BIG carries the table). The mix went back to
+     1.4 and the density moved HERE, where it costs save bytes instead of the
+     risk gradient: 184 big + 258 small = 442 parties, ~14 500 men, about
+     2.4 MB of the 5 MB quota — four and a half times the island this wave
+     started on, with the gradient intact and headroom for a campaign to grow
+     an army, prisoners and a baggage train into. */
+  const BIG_PER_KM2 = 1 / 0.55;
   function bandTarget() {
     const q = parseInt(QP.get("bands") || "", 10);
-    if (q > 0) return Math.min(140, q);
+    if (q > 0) return Math.min(1200, q);
     const D = W.desert;
     const landKm2 = Math.PI * (D.RADIUS / 1000) * (D.RADIUS / 1000) * 0.72;
-    return Math.round(clamp(landKm2 / 2.6, 40, 70));
+    return Math.round(clamp(landKm2 * BIG_PER_KM2, 60, 260));
   }
   /* THE POWER LAW MOVED TO core.js (W.rollBigSize) AND DID NOT CHANGE. It was
      written here under a comment saying "median ~22, one in fifty over 120",
@@ -447,11 +486,59 @@
 
      ?smalls=0 turns the whole population off (the island exactly as it was);
      ?smalls=N sets the count. */
+  /* AND THE SMALL ONES ARE WHERE "WAY MORE ARMIES" ACTUALLY COMES FROM.
+
+     W.SMALL_PER_BIG is 1.4 and lives in core.js, which this file may read and
+     the headless campaign in tools/warlord-check.mjs also reads — so it is not
+     a number to change from here. It is also not the number this decides any
+     more, and that is deliberate rather than a fork: 1.4 was chosen when there
+     were forty big parties, as a RATIO, and a ratio hung off the big-party
+     count means every extra army on the island drags a fixed tail of crews
+     behind it. The two populations answer different questions. How many armies
+     are on this island is a question about the island. How many two-man looter
+     crews are on it is a question about how alive the empty ground between
+     them feels, and the answer to that is "far more than one and a half per
+     army".
+
+     THE CEILING IS THE SAVE, NOT THE FRAME, and it is worth writing down
+     because nothing in this repo would have found it:
+
+       W.save() is JSON.stringify(the whole of W.state) into localStorage, and
+       every soldier in every party on the island is in there. localStorage is
+       5 MB and W.save() catches the quota error and returns false, which
+       nothing checks — so an island that is too populous does not run slowly,
+       it stops saving and never says so.
+
+     MEASURED with tools/warlord-scale-check.mjs --island (see the report in
+     that file's header): a BIG party averages 67 men off core's power law and
+     a small one averages 8, so the souls in the world — and therefore the
+     save — are dominated by the big ones. That is what makes the small tier
+     the cheap way to fill the map: five hundred extra small parties cost about
+     what sixty extra big ones do, and they are the ones a lone warlord on day
+     one can actually fight.
+
+     FIVE SMALL PARTIES PER BIG ONE. MEASURED on seed 1337: 113 big and 563
+     small, 676 parties in the world against the 96 that were there before —
+     seven times the armies — 11 047 souls, a 1.87 MB save (37% of the quota,
+     against ~0.6 MB before) and a 0.50 ms campaign frame, which is cheaper
+     than the old ninety-six were (see THE FAR CLOCK). The sweep past it is
+     what fixes the ceiling: 1 770 parties is a 5.02 MB save, i.e. exactly at
+     the quota, so the island is full at about 300 big parties and 113 leaves
+     the headroom a campaign needs to grow prisoners, baggage and an army
+     into.
+
+     ?smalls=0 turns the whole population off (the island exactly as it was
+     before the small tier existed); ?smalls=N sets the count. */
+  /* THE RATIO IS core.js's, NOT A SECOND COPY OF IT. The scale wave typed a
+     local `const SMALL_PER_BIG = 5` here because it could not edit core.js,
+     which re-forked the one number the previous wave had just unified — and a
+     second copy is how the headless economy check goes back to measuring an
+     island nobody rides. Read it, do not restate it. */
   function smallTarget() {
     const raw = QP.get("smalls");
     if (raw === "0" || raw === "off") return 0;
     const q = parseInt(raw || "", 10);
-    if (q > 0) return Math.min(180, q);
+    if (q > 0) return Math.min(2000, q);
     return Math.round(bandTarget() * W.SMALL_PER_BIG);
   }
   function spawnBand(opts) {
@@ -1760,8 +1847,25 @@
       dest = { x: tgt.x, z: tgt.z };
       W.emit("campaign:dest", dest);
       const d = Math.hypot(tgt.x - S.you.x, tgt.z - S.you.z);
-      if (d < CONTACT * 1.6) engage(tgt);
-      else W.toast("riding at " + W.bandSize(tgt) + " " + tgt.name);
+      /* A REFUSED TAP USED TO DO NOTHING AT ALL, AND THEN FOLLOW THEM FOREVER.
+         engage() answers false when a band is still on its break-off clock,
+         and this line threw that boolean away — so tapping a party you had
+         just ridden away from was indistinguishable from tapping dead ground,
+         for as long as the clock ran. Worse, `chase` was already set two lines
+         above and NOTHING releases it while it is set, so the refusal also
+         glued the player to a party that would not talk to him.
+
+         Both halves are the same rule: if he cannot have the encounter, say
+         so and let go of him. army.js's break-off is 8 s now (it was up to
+         three minutes) and the party visibly walks away, so this is a rare
+         case — but a rare silent no is exactly the kind a player reads as a
+         broken game. */
+      if (d < CONTACT * 1.6) {
+        if (!engage(tgt)) {
+          chase = null; dest = null;
+          W.toast(tgt.name + " breaks off", "bad");
+        }
+      } else W.toast("riding at " + W.bandSize(tgt) + " " + tgt.name);
       return;
     }
     chase = null;
@@ -1916,14 +2020,45 @@
        one wake-up. */
     const myPower = W.yourPower();
     if (dt <= 0.3) {
-      stepBands(dt, myPower);
+      stepBands(dt, myPower, 0);
     } else {
+      /* THE CATCH-UP SUBSTEPS ARE FOR THE PARTIES YOU CAN SEE, AND THAT IS
+         WHERE THE FAST-FORWARD WENT.
+
+         At 16x this loop runs up to CATCHUP_MAX times per frame, and every one
+         of those calls walked EVERY party on the island — 32 passes over 677
+         parties is 21 664 iterations a frame to decide, 640 times out of 677,
+         "this one is far away, not yet". The substeps exist for one reason,
+         stated in the comment above: a party must not integrate 700 m in one
+         step and walk through a mesa on the way. A party already on the far
+         clock cannot do that — its whole design is that it moves in FAR_JUMP
+         chunks — so it has no business being asked 32 times.
+
+         So the pass is split. NEAR (drawn, inside BAND_DRAW) parties take the
+         substeps, because they are the ones whose motion is on screen and
+         whose collisions matter. FAR parties are visited ONCE per frame with
+         the whole elapsed dt and their own accumulator does the rest. Same
+         world, same routes, same arrival times.
+
+         MEASURED before the split, with 677 parties on the island: 16x
+         delivered about 5.9x on a machine at load 117 where 96 parties
+         delivered 15.6x. This is the one real cost the bigger island had, and
+         it was not in the frame — it was in the fast-forward.
+
+         AND THE OFF-SCREEN WAR TICKS ONCE A FRAME, NOT ONCE A SUBSTEP. The
+         band-vs-band resolver and the refill live at the end of stepBands, and
+         under the old code they were reached 32 times a frame at 16x — each
+         one an O(parties) scan. They are not integrators; they are events on a
+         game-time clock. They belong in the once-per-frame pass, and their
+         accumulators carry the whole dt so their rate in GAME time is
+         untouched. (mode 2 = the far pass, which is also the events pass.) */
       let left = dt, steps = 0;
       while (left > 0.0001 && steps < CATCHUP_MAX) {
         const h = Math.min(0.25, left);
-        stepBands(h, myPower);
+        stepBands(h, myPower, 1);       // 1 = near parties only
         left -= h; steps++;
       }
+      stepBands(dt, myPower, 2);        // 2 = far parties, and the world events
     }
   }
 
@@ -3025,18 +3160,82 @@
     return b;
   }
 
-  function stepBands(dt, myPower) {
+  /* ============================================================ THE FAR CLOCK
+     A PARTY YOU CANNOT SEE DOES NOT NEED SIXTY POSITION UPDATES A SECOND, AND
+     THAT IS WHY THE ISLAND COULD ONLY HOLD NINETY-SIX ARMIES.
+
+     Every party on the map was integrated every frame, and the integration is
+     not cheap: the movement step alone asks desert.js for a height at the
+     party's feet, a height at the point it wants to step to, and D.onLand
+     there (which is a coastAt plus another heightAt), then one more heightAt
+     to seat it. desert.js's own comment calls heightAt "the hot path in the
+     file" — roughly fifty hashes a call. So one party costs about five of
+     those per frame, and the whole island's population multiplies it.
+
+     THE STEP IS NOT MADE COARSER. A far party still walks the same route at
+     the same speed and arrives at the same time; it is integrated in 0.6 s
+     chunks instead of 0.016 s ones, and the accumulator hands the whole
+     elapsed time over so no motion is lost. Everything the step reads —
+     the slope gate, the land test, the goal arrival — scales with its own dt
+     and was already written to be substepped, because the catch-up path in
+     worldTick has been feeding this function 0.25 s steps since the speed
+     slider landed. This is that same path, chosen by distance instead of by
+     how long the tab was hidden.
+
+     WHY 0.6 s AND WHY ONLY OUTSIDE BAND_DRAW. Inside BAND_DRAW the party is
+     DRAWN, and a drawn party moving in hops reads as lag — that is exactly
+     the mistake worldTick's own comment records ("1.5 m hops four times a
+     second, which reads as lag, not as walking"), so nothing visible is ever
+     stepped coarsely. Outside it the only requirement is that the party not
+     JUMP a piece of terrain the slope gate was supposed to stop it at, so the
+     interval is a distance budget: FAR_JUMP metres divided by the fastest a
+     party can walk. Five metres on a thirteen-kilometre island is under half
+     a party's own frontage, and the party is at least 1.5 km away.
+
+     MEASURED with tools/warlord-scale-check.mjs --island, 676 parties on the
+     island, same seed, same machine, back to back: the campaign frame is
+     1.50 ms with ?far=old and 0.50 ms without it. Three times cheaper at seven
+     times the population — which is the whole reason the population could
+     move. At 3 580 parties (?bands=600) it is still 0.60 ms, so past this
+     point the frame is simply not the ceiling any more; the SAVE is, and
+     smallTarget() says so. */
+  const FAR_JUMP = 5;                       // metres a hidden party may cover in one step
+  const FAR_STRIDE = FAR_JUMP / HUNT_SPEED; // = 0.60 s
+  /* `wdt` IS THE WALL STEP AND `dt` IS THIS PARTY'S STEP, and they are two
+     different numbers now. Naming them apart rather than reassigning the
+     parameter is not style: the parameter is read on every iteration of the
+     loop, so a far party that overwrote it would hand its own 0.6 s to every
+     party after it in the array — a bug that would look like the island
+     randomly running at ten times speed depending on where you stood. */
+  /* `pass` — 0 is every party (the normal frame, one call, nothing skipped),
+     1 is the NEAR parties only and 2 is the FAR ones plus the world events.
+     Only worldTick's catch-up path uses 1 and 2; see it for why. */
+  function stepBands(wdt, myPower, pass) {
     const D = W.desert;
     if (myPower == null) myPower = W.yourPower();
+    const yx = S.you.x, yz = S.you.z;
     for (let i = 0; i < S.bands.length; i++) {
       const b = ensureBandFields(S.bands[i]);
-      if (b.cooldown > 0) b.cooldown -= dt;
+      const dxp = yx - b.x, dzp = yz - b.z;
+      const dp = Math.hypot(dxp, dzp);
+      const far = !FLAG_FAR_OLD && dp > BAND_DRAW;
+      // the split pass: skip the half this call is not for, before any work
+      if (pass === 1 && far) continue;
+      if (pass === 2 && !far) continue;
+      if (b.cooldown > 0) b.cooldown -= wdt;
+      /* THE GATE, asked before the guest branch as well: a guest renders the
+         host's parties and its only job here is to keep the DRAWN ones' heights
+         honest, which is the same question. */
+      let dt = wdt;
+      if (far) {
+        b.acc = (b.acc || 0) + wdt;
+        if (b.acc < FAR_STRIDE) continue;
+        dt = b.acc; b.acc = 0;
+      } else if (b.acc) b.acc = 0;
       /* A GUEST NEVER MOVES A BAND. It renders the host's, keeps their
          cooldowns ticking (that is local courtesy, not authority) and stops.
          Every line below this one is an act of authorship. */
       if (!C.simHost) { b.y = D.heightAt(b.x, b.z); continue; }
-      const dxp = S.you.x - b.x, dzp = S.you.z - b.z;
-      const dp = Math.hypot(dxp, dzp);
 
       // ---- think, staggered so sixty parties never think on one frame ---
       b.think -= dt;
@@ -3113,14 +3312,38 @@
       b.y = D.heightAt(b.x, b.z);
     }
 
-    // ---- they fight EACH OTHER, off screen, resolved abstractly ---------
-    fightTick += dt;
-    if (C.simHost && fightTick > 4.5) {
+    /* ---- THE WORLD EVENTS RUN ONCE PER FRAME, NEVER PER SUBSTEP ---------
+       Both of the blocks below are O(parties) and neither is an integrator, so
+       a catch-up frame that calls this function thirty-two times must not run
+       them thirty-two times over. Pass 1 is the near-party integration pass
+       and skips them; pass 0 (a normal frame) and pass 2 (the once-per-frame
+       far pass) carry the whole elapsed dt, so their rate in GAME time is
+       exactly what it was. */
+    if (pass === 1) return;
+
+    /* ---- they fight EACH OTHER, off screen, resolved abstractly ---------
+       THE RATE IS PER PARTY, NOT PER SECOND, and a fixed interval was hiding
+       that. resolveOneBandFight() picks ONE random party per tick, so the rate
+       any GIVEN party gets into a fight is 2/n per tick — which means the
+       moment the island went from 96 parties to 677 the same 4.5 s tick made
+       every party's history run seven times slower. The island would have had
+       more armies on it and less happening to them, which is the opposite of
+       what the population is for.
+
+       FIGHT_EVERY is that per-party interval, and it is the OLD BEHAVIOUR's
+       own number read back out of it: 96 parties at one resolve per 4.5 s is a
+       given party fighting about every 216 s. Holding that constant reproduces
+       today's island exactly at 96 and keeps it alive at 677.
+
+       wdt, not dt: `dt` is the per-party step and does not exist out here. */
+    const FIGHT_EVERY = 216;
+    fightTick += wdt;
+    if (C.simHost && fightTick > FIGHT_EVERY * 2 / Math.max(2, S.bands.length)) {
       fightTick = 0;
       resolveOneBandFight();
     }
     // ---- the island never empties ---------------------------------------
-    spawnTick += dt;
+    spawnTick += wdt;
     if (C.simHost && spawnTick > 9) {
       spawnTick = 0;
       /* TWO POPULATIONS, COUNTED SEPARATELY. One target for both would let the
@@ -3132,11 +3355,27 @@
       let nBig = 0, nSmall = 0;
       for (let i = 0; i < S.bands.length; i++) (S.bands[i].kind ? nSmall++ : nBig++);
       const wantBig = bandTarget(), wantSmall = smallTarget();
-      /* TWO A TICK RATHER THAN ONE. The old loop replaced one party per nine
-         seconds against a population of forty; the same rate against ninety-six
-         with a faster-churning bottom tier is a slow leak the player would
-         experience as the small parties quietly disappearing. */
-      for (let k = 0; k < 2; k++) {
+      /* THE REFILL RATE FOLLOWS THE DEFICIT, because a fixed one does not
+         scale and this population is seven times what it was.
+
+         It was one party per nine seconds, then two. Against forty parties
+         that is a replacement every four and a half minutes for something that
+         dies every few minutes — fine. Against six hundred and seventy-eight,
+         with a bottom tier that churns fast (a five-man crew is deleted by the
+         first abstract fight it loses), two a tick is a leak the player
+         experiences as the island slowly emptying over an hour, which is the
+         precise opposite of what this whole change is for.
+
+         A TENTH OF THE DEFICIT PER TICK is a first-order lag: whatever the
+         shortfall is, it closes with a time constant of about ninety seconds
+         however big the world is, and it never spawns a crowd in one frame.
+         The ceiling of 12 is there because spawnBand rejection-samples a land
+         point and each attempt is real work — beyond a dozen the tick itself
+         becomes a frame spike, and the deficit will still be there in nine
+         seconds. */
+      const deficit = Math.max(0, wantSmall - nSmall) + Math.max(0, wantBig - nBig);
+      const batch = Math.max(1, Math.min(12, Math.ceil(deficit * 0.1)));
+      for (let k = 0; k < batch; k++) {
         const small = nSmall < wantSmall;
         if (!small && nBig >= wantBig) break;
         for (let g = 0; g < 30; g++) {
@@ -3155,6 +3394,19 @@
      loser is destroyed or halved, the winner takes losses proportional to
      how close it was, and one line goes in the log. You find out the island
      has a history by reading it, which is exactly how Bannerlord does it. */
+  /* Two parties are on the same side when the same warlord owns both, or —
+     for the ownerless bandits, militia and caravans — when they share a
+     faction. bandOwner() is territory.js's, added when the rival warlords
+     became real people rather than three slots on a scoreboard. */
+  function sameSide(a, b) {
+    const T = W.territory;
+    if (T && T.bandOwner) {
+      const oa = T.bandOwner(a), ob = T.bandOwner(b);
+      if (oa || ob) return oa === ob;
+    }
+    return a.faction === b.faction;
+  }
+
   function resolveOneBandFight() {
     const n = S.bands.length;
     if (n < 2) return;
@@ -3164,7 +3416,15 @@
     for (let k = 0; k < n; k++) {
       if (k === i) continue;
       const o = S.bands[k];
-      if (o.faction === a.faction) continue;
+      /* WHO IS THIS PARTY'S ENEMY IS AN OWNERSHIP QUESTION, NOT A FACTION ONE.
+         Every rival warlord's column carries faction "warlord" deliberately —
+         that is what titles the encounter card RIVAL WARLORD instead of SAND
+         BANDITS and dresses them out of the right outfits.js record — so a
+         faction test made fourteen different warlords one army, and their
+         columns walked through each other instead of fighting. territory.js
+         knows who actually owns a column; ask it, and fall back to faction for
+         the neutral parties that have no owner. */
+      if (sameSide(a, o)) continue;
       const d = Math.hypot(o.x - a.x, o.z - a.z);
       if (d < bd) { bd = d; b = o; }
     }
@@ -3200,13 +3460,35 @@
     if (cost > 0) winner.men.splice(0, Math.min(cost, winner.men.length - 1));
     winner.gold += Math.round(loser.gold * 0.6);
     loser.gold = Math.round(loser.gold * 0.4);
-    if (!loser.men.length) {
+    const wiped = !loser.men.length;
+    if (wiped) {
       const at = S.bands.indexOf(loser);
       if (at >= 0) S.bands.splice(at, 1);
-      W.log(winner.name + " wiped out a party of " + loser.faction + "s near " + placeName(winner.x, winner.z) + ".");
     } else {
       loser.mood = "flee"; loser.scared = Math.min(2, loser.scared + 1);
-      W.log(winner.name + " beat " + lost + " men off a " + loser.faction + " party near " + placeName(winner.x, winner.z) + ".");
+    }
+    /* WHAT MAKES THE LOG, and it is now a filter rather than everything.
+
+       Every resolve wrote a line. At 96 parties that was one line every four
+       and a half seconds and it read as a world with news in it; at 677, with
+       the per-party rate held (see FIGHT_EVERY), it is a line and a half a
+       SECOND and the feed becomes a wall nobody reads — which does not just
+       look bad, it deletes the feature, because the one line that mattered is
+       now buried under forty that did not.
+
+       So the same test a person would apply: could I plausibly have heard
+       about this. Either it happened near enough that a rider would carry it —
+       NEWS_R is one in-game hour of riding — or it was big enough to be news
+       anywhere, which is a party of NEWS_BIG or more being wiped off the map.
+       Everything else still HAPPENS; it just is not announced, exactly like
+       every skirmish in a real war that nobody wrote down. */
+    const NEWS_R = 3000;      // ~one hour's ride at BAND_SPEED
+    const NEWS_BIG = 20;
+    const near = Math.hypot(winner.x - S.you.x, winner.z - S.you.z) < NEWS_R;
+    if (near || (wiped && lost >= NEWS_BIG)) {
+      W.log(wiped
+        ? winner.name + " wiped out a party of " + loser.faction + "s near " + placeName(winner.x, winner.z) + "."
+        : winner.name + " beat " + lost + " men off a " + loser.faction + " party near " + placeName(winner.x, winner.z) + ".");
     }
   }
 
@@ -3230,7 +3512,16 @@
     b.cooldown = 12;
     chase = null; dest = null;
     W.emit("campaign:band", b);
-    W.setPhase("encounter", { band: b });
+    /* THIS LINE USED TO BE `W.setPhase("encounter", {band})` AND IT TURNED THE
+       ISLAND OFF. core fires phase:leave:campaign on the way out, which this
+       file answers at enter()'s sibling with `live = false; showAll(false)` —
+       so the party you were standing in front of, deciding whether to fight,
+       was hidden the instant its card came up. The meeting rail was a strip of
+       text over an empty sky dome. outpost.js had already hit and fixed the
+       identical chain ("BARREN DESERT AND MAN WITH A CRATE POPUP WITH NO MAN
+       THERE"); army.js now does the same, keeps the phase on `campaign` and
+       announces the meeting with encounter:open / encounter:close instead.
+       It sets the phase itself under ?show=old, so nothing here needs to. */
     // army.js owns the card. It may not exist yet — this file must not be
     // the reason the page dies when a sibling module is missing.
     if (W.army && W.army.encounter) { try { W.army.encounter(b); } catch (e) { console.error("[warlord] encounter", e); } }
@@ -3392,8 +3683,29 @@
       ridden: Math.round(travelled),
       trail: breadcrumbs.length, dest: dest ? { x: Math.round(dest.x), z: Math.round(dest.z) } : null,
       simHost: C.simHost, peers: peerDraw.length, chasing: !!chase,
+      /* THE POPULATION, COUNTABLE — the numbers bandTarget() is derived from
+         and the ones tools/warlord-scale-check.mjs --island gates on. `far` is
+         how many parties are outside BAND_DRAW and therefore on the far clock
+         (see THE FAR CLOCK); `souls` is every soldier object in the world,
+         which is the thing the save has to fit in localStorage and is the real
+         ceiling on how many armies this island can hold. */
+      world: worldCensus(),
     };
   };
+  function worldCensus() {
+    let far = 0, souls = 0, big = 0, small = 0, biggest = 0;
+    const yx = S.you.x, yz = S.you.z;
+    for (let i = 0; i < S.bands.length; i++) {
+      const b = S.bands[i];
+      const n = (b.men && b.men.length) || 0;
+      souls += n;
+      if (n > biggest) biggest = n;
+      if (b.kind) small++; else big++;
+      if (Math.hypot(b.x - yx, b.z - yz) > BAND_DRAW) far++;
+    }
+    return { parties: S.bands.length, big: big, small: small, far: far,
+             souls: souls, biggest: biggest, farStride: FLAG_FAR_OLD ? 0 : FAR_STRIDE };
+  }
 
   C.needs = ["desert"];
   C.boot = function (c) {

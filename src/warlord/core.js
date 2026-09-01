@@ -782,8 +782,34 @@
      campaign draws its daily encounter from the SAME pool the player rides
      through. BAND_CLASSES stays exactly where it is: it is what makeBand does
      when nobody says a size, and events.js and wardrobe.js read its names. */
-  W.SMALL_PER_BIG = 1.4;      // small parties per power-law party. campaign.js's
-                              // smallTarget() and the headless sim both read it.
+  /* SMALL PARTIES PER POWER-LAW PARTY. campaign.js's smallTarget() and the
+     headless sim in tools/warlord-check.mjs both read it, which is the entire
+     point of it being here — the last time these two disagreed, three hundred
+     headless campaigns were green on an island the game never spawned.
+
+     IT WENT TO 5 WITH THE SCALE WAVE AND CAME BACK, AND THE MEASUREMENT IS
+     THE WHOLE ARGUMENT FOR KEEPING IT HERE. 5:1 is the cheap way to fill a
+     map — a power-law party averages 67 men and a small one 8, so 678 parties
+     cost a third of what 300 big ones would — and it FLATTENED THE GAME. The
+     headless campaign, same 200 seeds, a bold warlord (fight past even)
+     against a cautious one (only 85%+):
+
+       small:big   bold peak   cautious peak   gap   p10..p90
+         1.4          96            79          17    66..135
+         2.5          92            82          10    69..120
+         5            87            83           4    69..113
+
+     At five small parties to one big, five out of six things you meet are a
+     crew you cannot lose to, so how you play stops mattering and luck stops
+     swinging — the island is dense and it is flat. That is a real loss of the
+     risk gradient, not a gate artifact: it is equally true for a person.
+
+     So the MIX stays at 1.4 and the DENSITY is bought from the big tier
+     instead (campaign.js's BIG_PER_KM2), which costs save bytes rather than
+     the gradient. The ceiling there is not the frame — the far clock runs
+     3586 parties at 0.6 ms — it is the SAVE: W.state is JSON.stringify'd into
+     a 5 MB localStorage quota, and the payload scales with MEN, not parties. */
+  W.SMALL_PER_BIG = 1.4;
   W.rollBigSize = function (r) {
     const u = r == null ? RND() : r;
     return Math.max(3, Math.round(3 + Math.pow(u, 3.1) * 297));

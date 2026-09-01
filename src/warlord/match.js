@@ -511,14 +511,16 @@
      rules have to be able to re-run it on every column he owns the instant a
      handshake closes or breaks. */
   function dressColumn(b, w) {
-    /* `warlordId`, NOT `warlord`. events.js's endgame already writes
-       `band.warlord = true` on the four names it picks for the final act, so
-       a string in that field would have made those four read as columns
-       belonging to a warlord called "true" — which is exactly what the first
-       run of this measured: 4 phantom columns in the audit. Nothing reads
-       events.js's flag, so it is harmless; the collision was mine to avoid.
-       (See the wave report: those two "rival warlord" populations should
-       probably be ONE, and events.js is not this pass's file.) */
+    /* `warlordId`, NOT `warlord`, AND THE COLLISION IT AVOIDED IS NOW GONE.
+       events.js's endgame used to write `band.warlord = true` on the four
+       names it picked for the final act — a SECOND rival-warlord population
+       living beside this one — and a string in that field would have made
+       those four read as columns belonging to a warlord called "true", which
+       is exactly what the first run of this measured: 4 phantom columns in
+       the audit. events.js no longer writes that flag; its endgame picks from
+       W.warlords.list(), so there is one population of rival warlords on this
+       island and these are they. The field name stays `warlordId` because it
+       is the honest one: it holds an id, not a boolean. */
     b.warlordId = w.id;
     b.faction = "warlord";
     b.colour = w.colour;

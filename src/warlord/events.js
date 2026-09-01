@@ -92,6 +92,42 @@
      ?event=<id>     DEBUG: fire that card on demand. `?event=list` prints the
                      library to the console. Never be blocked on a random roll.
      ?four=N         how many warlords hold the island (default 4)
+     ?shown=off      THE SHOW-DON'T-TELL REVERT, and it is the same word in
+                     warlord/territory.js. Everything below happens as it used
+                     to: nobody walks in or out, no fire is lit, an ambush
+                     lands wherever the sand allowed and a sentence is typed
+                     about it. The state changes are identical either way —
+                     this flag reverts the PICTURE and nothing else.
+
+   2026-09-01 — SHOW DON'T TELL, THE SECOND PASS (owner: "death isn't shown …
+   as does a ton of the app"). warlord/deaths.js fixed the death; this is the
+   same failure everywhere else in this file, and it had one shape: a dramatic
+   mechanic was an array mutation plus a string.
+     · THE MUTINY was the worst of it. N men vanished out of the drawn column,
+       and the band they became was built at {x: S.you.x, z: S.you.z} — inside
+       you, geometrically — AND WAS NEVER PUSHED ONTO S.bands AT ALL, so it was
+       not on the map, had no banner, and could not be seen from any camera on
+       any frame. A card then described a fire and two sides that did not
+       exist. They walk out now, across ground, to their own side of a fire
+       this file lights, and campaign.js's own party() raises their banner over
+       them the moment they are on S.bands — which is the whole "raise their
+       banner" for free.
+     · EVERY RECRUITMENT was W.toast("+" + men(n)) — the column riding behind
+       you is the premise of campaign.js, and joiners were told three times
+       (HUD, toast, log) and shown none. They arrive now: join() batches the
+       men of one decision into a real party standing one CONTACT radius out,
+       it walks in at the island's own band speed, and it folds into the
+       roster when its road meets yours.
+     · AN AMBUSH MATERIALISED 60 m FROM THE CAMERA and the game typed a
+       sentence about it. spawnBandNear({hidden:true}) now puts them where the
+       ground hides them from your eye and lays a dust road ahead of them, so
+       the first thing you get is dust and the second is men over a rise.
+   The eight toasts those three used to fire are gone from the game and kept
+   behind ?shown=off — a thing that is shown does not also need to be narrated,
+   and the A/B has to be able to measure the sentence it replaced rather than
+   measure a deletion. Same reason warlord/deaths.js keeps the old plank
+   behind ?deaths=old instead of leaving it behind in battle.js: one path in
+   the game, one switch between the two answers.
 ============================================================ */
 (function () {
   "use strict";
@@ -116,6 +152,9 @@
   const FLAG_NOWEATHER = FLAG_NOEVENTS || QP.get("weather") === "off";
   const FLAG_NOEND = FLAG_NOEVENTS || QP.get("endgame") === "off";
   const FOUR_N = Math.max(1, Math.min(8, parseInt(QP.get("four") || "", 10) || 4));
+  /* ONE FLAG FOR THE WHOLE SHOW-DON'T-TELL PASS, and warlord/territory.js
+     reads the same word. Two files fixing one failure want one switch. */
+  const FLAG_NOSHOW = FLAG_NOEVENTS || QP.get("shown") === "off";
 
   const E = W.events = W.events || {};
   const clamp = W.clamp;
@@ -256,15 +295,36 @@
   });
 
   function loyalty() { return Math.round(ev().loy); }
+  /* WHY YOUR ARMY CHANGED ITS MIND. Every caller in this file already hands
+     one in — "they watched you do it yourself", "you paid another warlord",
+     "the heat took the hurt" — thirty-odd authored lines, and every one of
+     them was put into an event nobody listens to and thrown away. The number
+     moved on a chip and the reason evaporated, which is the show-don't-tell
+     failure the other way round: the CONSEQUENCE was visible and the CAUSE
+     was not. So the reason is kept and rides on the chip that moved.
+
+     AND A CROSSING IS AN EVENT. The threshold is not a taste number: the
+     MOODS table above already divides 0..100 into six named states, so "did
+     this matter" is answered by "does your army have a different name for
+     itself now" rather than by a magnitude somebody picked. A crossing gets
+     a cue and a pulse on the chip in the direction it went; a drift does not,
+     because a warlord who is warned every time a number ticks stops reading
+     the warnings. */
   function loyMove(delta, why) {
     if (FLAG_NOLOYALTY) return;
     const v = ev();
     const was = v.loy;
+    const wasMood = mood().label;
     v.loy = clamp(v.loy + delta, 0, 100);
-    if (Math.abs(v.loy - was) >= 0.5) {
-      W.emit("events:loyalty", { loy: v.loy, delta: v.loy - was, why: why || "" });
-      paintChips();
+    if (Math.abs(v.loy - was) < 0.5) return;
+    if (why) { v.why = why; v.whyDay = S.day; }
+    const nowMood = mood().label;
+    if (nowMood !== wasMood && !FLAG_NOSHOW) {
+      v.pulse = v.loy > was ? 1 : -1;
+      if (W.feel && W.feel.ui) safe(function () { W.feel.ui(v.loy > was ? "good" : "bad"); });
     }
+    W.emit("events:loyalty", { loy: v.loy, delta: v.loy - was, why: why || "" });
+    paintChips();
   }
 
   const MOODS = [
@@ -673,6 +733,13 @@
       ".wl-four .w{border:1px solid rgba(255,255,255,.12);border-radius:13px;padding:11px 12px;background:rgba(255,255,255,.03)}",
       ".wl-four .w.dead{opacity:.42;border-color:rgba(196,69,58,.4)}",
       ".wl-four .w b{display:block;font-size:14px;letter-spacing:.04em;margin-bottom:3px}",
+      /* THE ARMY CHANGED ITS MIND ABOUT YOU. One second, once, on the chip
+         that carries the number — the same "point at the thing that moved"
+         deaths.js's rim tick is. No new element and no new text. */
+      "@keyframes wlEvUp{0%{transform:translateY(4px);color:#9fe6ac}60%{color:#9fe6ac}100%{transform:none}}",
+      "@keyframes wlEvDn{0%{transform:translateY(-4px);color:#ff8f86}60%{color:#ff8f86}100%{transform:none}}",
+      "#hud .chip.wl-up{animation:wlEvUp 1s ease-out 1}",
+      "#hud .chip.wl-dn{animation:wlEvDn 1s ease-out 1}",
       "@media (max-width:430px){.wl-h{font-size:24px}.wl-ev .body{font-size:14px}.wl-stat b{font-size:16px}}",
     ].join("\n");
     document.head.appendChild(s);
@@ -774,13 +841,400 @@
               shore: "the shore", sea: "the shallows" })[b] || "the sand";
   }
 
+  /* ============================================================ THE STAGE
+     WHERE THINGS ARE SHOWN INSTEAD OF SAID.
+
+     Nothing in here draws anything. Every picture below is made out of parts
+     the island already owns, and the whole point of the section is that no
+     second version of any of them was built:
+
+       a party of men     S.bands + campaign.js's own draw. Push a band onto
+                          S.bands and campaign draws its men at the right LOD
+                          and raises a banner over it whose height is log2 of
+                          the head count (campaign.js:2901 party()). That is
+                          the mutineers' banner and the joiners' banner, free.
+       a road             W.sand.churn(x, z, {men, yaw}) — sand.js's own
+                          trampled band-width track, its comment: "this is the
+                          road you see from a ridge". Nothing on this island
+                          laid one for a PARTY before this file did; sand.js
+                          lays them for the player's own column only.
+       dust               W.sand.puff(x, y, z, {amt})
+       a fire             W.props.fire({...}) — props.js:752, self-animating,
+                          and its smoke is the part that reads at range
+                          (props.js:747: "at a kilometre the tents are two
+                          pixels and the smoke is forty").
+
+     THE NUMBERS. Three of them are campaign.js's own constants, restated here
+     with their line numbers because they are `const`s inside its IIFE with no
+     reader. If they change there, these are the lines to change.
+
+       BAND_SPEED  6.2 m/s   campaign.js:157. Every party on this island walks
+                             at it. Men leaving your column and men joining it
+                             are parties, so they walk at it too — a second
+                             walking speed would be a second answer to a
+                             question that already has one.
+       CONTACT_M   26 m      campaign.js:170. The radius at which the game
+                             already decides a party is AT you. Men who have
+                             just agreed to join were standing just outside it,
+                             which is both where the card said they were and a
+                             four-second walk rather than a chore.
+       HEAD_M      1.75 m    a standing man's head, off city/ragdoll.js:118-127
+                             (hips at 0.95 for this exact rig). Ground has to
+                             rise this far above the sight line to actually
+                             hide a man, which is what "they came over a ridge"
+                             has to mean if it is to mean anything.
+       FIRE_R      0.9 m     props.js:757 — fire()'s own default ring radius.
+
+     AND ONE THING THAT IS NOT A NUMBER: A BAND'S cooldown. campaign.js:3229
+     refuses engage() while it is above zero and campaign.js:3033 ticks it down
+     every frame, so every party this file stages is RE-STAMPED every frame it
+     is held (see holdBand). Without that, a band standing nine metres away is
+     army.js's ENCOUNTER card opening on your own mutineers.
+
+     AND IT ALL SWITCHES OFF ABOVE 2x. warlord/feel.js:1160's rule, quoted by
+     deaths.js: "a fast-forward has no room for a beat". Three seconds of men
+     walking out is twenty-four seconds of world at 8x, so above 2x every
+     staged moment resolves on the frame it is asked for, exactly as it used
+     to. Same for a page with no desert and no props: the picture is optional,
+     the state change never is. */
+  const BAND_SPEED = 6.2;
+  const CONTACT_M = 26;
+  const HEAD_M = 1.75;
+  const FIRE_R = 0.9;
+
+  function fastForward() { return !!(W.clock && W.clock.scale && W.clock.scale() > 2); }
+  let staging = false;         // the ?event= debug stager is not a moment
+  function canStage() {
+    if (FLAG_NOSHOW || staging || !ctx) return false;
+    if (W.phase() !== "campaign") return false;
+    if (fastForward()) return false;
+    const D = W.desert;
+    return !!(D && D.heightAt && D.onLand && W.makeBand && W.sand);
+  }
+
+  function groundAt(x, z) {
+    if (W.sand && W.sand.groundY) { const y = W.sand.groundY(x, z); if (isFinite(y)) return y; }
+    const D = W.desert;
+    return (D && D.heightAt) ? D.heightAt(x, z) : 0;
+  }
+  function widthOf(n) { return (W.sand && W.sand.bandWidth) ? W.sand.bandWidth(Math.max(1, n)) : 3; }
+  function churn(x, z, n, yaw) {
+    if (W.sand && W.sand.churn) safe(function () { W.sand.churn(x, z, { men: Math.max(1, n), yaw: yaw }); });
+  }
+  function puff(x, z, amt) {
+    if (W.sand && W.sand.puff) safe(function () { W.sand.puff(x, groundAt(x, z), z, { amt: amt }); });
+  }
+
+  /* ---- BEATS. There is no scheduler in this repo (feel.js has no after(),
+     core has no queue) and the four places that already stage a sequence all
+     use setTimeout. A wall-clock timer is wrong here for campaign.js's own
+     reason: this game's clock is a SPEED SLIDER, so a beat measured in wall
+     seconds is a different beat at 1x and at 2x. These run on the same dt the
+     rest of this file runs on, and they are all flushed the instant the phase
+     leaves the island — a promise this file made and then dropped on the way
+     into a battle would be worse than no picture at all. */
+  let beats = [];
+  function after(sec, fn) {
+    if (!(sec > 0)) { safe(fn); return; }
+    beats.push({ t: sec, fn: fn });
+  }
+  function stepBeats(dt) {
+    if (!beats.length) return;
+    const due = [];
+    for (let i = beats.length - 1; i >= 0; i--) {
+      beats[i].t -= dt;
+      if (beats[i].t <= 0) { due.push(beats[i].fn); beats.splice(i, 1); }
+    }
+    for (let i = due.length - 1; i >= 0; i--) safe(due[i]);
+  }
+  function flushBeats() { const b = beats; beats = []; for (let i = 0; i < b.length; i++) safe(b[i].fn); }
+
+  /* ---- PROPS THIS FILE LIGHTS. Added to one group of our own so a teardown
+     is one traversal, and NOT through P.place(): place() registers rotated
+     AABB colliders into the collision grid and rebuilds it, which is right for
+     an outpost that stands for a campaign and pure churn for a campfire that
+     stands for forty seconds. props.js's own tickAll drops a fire from its
+     live list the frame it loses its parent, so removing it is the whole
+     disposal. */
+  let stageRoot = null;
+  let lit = [];
+  function root3() {
+    if (stageRoot && stageRoot.parent) return stageRoot;
+    const THREE = ctx && ctx.THREE;
+    const scene = (ctx && ctx.scene) || CBZ.scene;
+    if (!THREE || !scene) return null;
+    stageRoot = new THREE.Group();
+    stageRoot.name = "wlEventStage";
+    scene.add(stageRoot);
+    return stageRoot;
+  }
+  function fireAt(x, z, life) {
+    const P = W.props;
+    const r = root3();
+    if (!P || !P.fire || !r) return null;
+    let g = null;
+    safe(function () { g = P.fire({ seed: Math.round(x * 13 + z * 7), r: FIRE_R }); });
+    if (!g) return null;
+    g.position.set(x, groundAt(x, z), z);
+    r.add(g);
+    lit.push({ g: g, t: life });
+    return g;
+  }
+  function stepProps(dt) {
+    for (let i = lit.length - 1; i >= 0; i--) {
+      lit[i].t -= dt;
+      if (lit[i].t > 0) continue;
+      const g = lit[i].g;
+      lit.splice(i, 1);
+      if (g.parent) g.parent.remove(g);
+      if (W.props && W.props.forget) safe(function () { W.props.forget(g); });
+    }
+  }
+  function darkenStage() {
+    for (let i = 0; i < lit.length; i++) {
+      const g = lit[i].g;
+      if (g.parent) g.parent.remove(g);
+      if (W.props && W.props.forget) safe(function () { W.props.forget(g); });
+    }
+    lit.length = 0;
+  }
+
+  /* ---- A PARTY WALKING SOMEWHERE. It is driven here rather than left to
+     campaign.js's stepBands for one reason: a joiner has to CHASE you and a
+     mutineer has to stop on an exact mark, and stepBands answers neither. So
+     its AI is stood down (pause > 0 makes its own speed zero, campaign.js:
+     3075) and the position is written straight, at campaign's own speed. */
+  let marches = [];
+  function march(b, o) {
+    o = o || {};
+    marches.push({ b: b, tx: o.x, tz: o.z, chase: !!o.chase,
+                   arrive: o.arrive == null ? 1 : o.arrive,
+                   t: o.budget == null ? 20 : o.budget,
+                   laid: 0, done: o.done || null });
+  }
+  /* A STAGED PARTY IS NOT AN ENCOUNTER, AND THE MARCH ENDING IS NOT THE END
+     OF THAT. The first build stamped the cooldown from inside stepMarch, which
+     is right while they are walking and stops the moment they stop — and the
+     mutineers stop nine metres from you, well inside campaign.js:170's 26 m
+     CONTACT. Three seconds later stepBands had ticked the cooldown to zero,
+     checkContacts found them, and army.js's ENCOUNTER card came up over the
+     mutiny: ATTACK / DEMAND / HIRE / INSPECT, on your own men, with the mutiny
+     card still queued behind it. It also changed phase, which struck the set
+     and put the fire out. Photographed, in the first ba run of this pass.
+     So the hold is a LIST with an explicit release, not a side effect of
+     walking. */
+  let held = [];
+  function holdBand(b) {
+    if (held.indexOf(b) < 0) held.push(b);
+    b.cooldown = Math.max(b.cooldown || 0, 3);
+    b.pause = Math.max(b.pause || 0, 3);
+  }
+  function releaseBand(b) {
+    const i = held.indexOf(b);
+    if (i >= 0) held.splice(i, 1);
+  }
+  function stepHeld() {
+    for (let i = held.length - 1; i >= 0; i--) {
+      const b = held[i];
+      if (S.bands.indexOf(b) < 0) { held.splice(i, 1); continue; }
+      b.cooldown = Math.max(b.cooldown || 0, 3);
+      b.pause = Math.max(b.pause || 0, 3);
+    }
+  }
+  function stepMarch(dt) {
+    for (let i = marches.length - 1; i >= 0; i--) {
+      const m = marches[i];
+      const b = m.b;
+      holdBand(b);
+      const tx = m.chase ? S.you.x : m.tx;
+      const tz = m.chase ? S.you.z : m.tz;
+      const dx = tx - b.x, dz = tz - b.z;
+      const d = Math.hypot(dx, dz);
+      m.t -= dt;
+      if (d > m.arrive) {
+        const k = Math.min(1, (BAND_SPEED * dt) / Math.max(0.001, d));
+        b.x += dx * k; b.z += dz * k;
+        b.yaw = Math.atan2(dx, dz);
+        const D = W.desert;
+        if (D && D.heightAt) b.y = D.heightAt(b.x, b.z);
+        /* ONE TILE PER BAND-WIDTH OF TRAVEL. sand.js tiles a churn into
+           <= 4.6 m quads itself; laying one every frame writes the same quad
+           forty times a second and burns the ring buffer in two seconds. */
+        m.laid += BAND_SPEED * dt;
+        const w = widthOf(b.men.length);
+        if (m.laid >= w) { m.laid = 0; churn(b.x, b.z, b.men.length, b.yaw); puff(b.x, b.z, 0.45); }
+      }
+      if (d <= m.arrive || m.t <= 0) { marches.splice(i, 1); safe(m.done); }
+    }
+  }
+
+  /* ---- A DUST ROAD BEHIND A BAND THIS FILE SPAWNED. campaign.js walks the
+     island's hundred-odd parties and lays nothing behind any of them, and
+     laying one behind all of them is a hundred churns a second — not this
+     file's call to make. So only the parties this file conjures get a road,
+     which is exactly the ones the player is owed a warning about. */
+  let trails = [];
+  function trailBehind(b, secs) { trails.push({ b: b, x: b.x, z: b.z, t: secs }); }
+  /* THE SET COMES DOWN THE MOMENT THE ISLAND DOES. Every march is completed
+     where it stands (the men fall in, the mutineers reach their mark), every
+     beat fires, every fire is put out. A picture this file started and then
+     dropped on the way into a battle would leave men owed to a roster that
+     never got them — the one failure worse than no picture. */
+  function strikeSet() {
+    const m = marches;
+    marches = [];
+    for (let i = 0; i < m.length; i++) safe(m[i].done);
+    trails.length = 0;
+    held.length = 0;
+    flushBeats();
+    darkenStage();
+  }
+  function stepTrails(dt) {
+    for (let i = trails.length - 1; i >= 0; i--) {
+      const r = trails[i];
+      r.t -= dt;
+      const b = r.b;
+      if (r.t <= 0 || S.bands.indexOf(b) < 0) { trails.splice(i, 1); continue; }
+      const d = Math.hypot(b.x - r.x, b.z - r.z);
+      if (d < widthOf(b.men.length)) continue;
+      churn(b.x, b.z, b.men.length, b.yaw || 0);
+      puff(b.x, b.z, 0.55);
+      r.x = b.x; r.z = b.z;
+    }
+  }
+
+  /* ---- CAN YOU SEE THAT POINT FROM WHERE YOU ARE STANDING. A straight line
+     between two men's heads, one probe per 40 m of it; if the ground anywhere
+     along it stands above the line, the ridge hides him. This is the entire
+     mechanism behind "they came over a rise", and it is the difference between
+     a warband that appears and a warband that arrives. */
+  function blocked(ax, az, bx, bz) {
+    const D = W.desert;
+    if (!D || !D.heightAt) return false;
+    const ay = D.heightAt(ax, az) + HEAD_M, by = D.heightAt(bx, bz) + HEAD_M;
+    const d = Math.hypot(bx - ax, bz - az);
+    const n = Math.max(6, Math.min(40, Math.round(d / 40)));
+    for (let i = 1; i < n; i++) {
+      const t = i / n;
+      if (D.heightAt(ax + (bx - ax) * t, az + (bz - az) * t) > ay + (by - ay) * t) return true;
+    }
+    return false;
+  }
+  /* the nearest point in the annulus that the ground hides — nearest because
+     a band you cannot see and cannot reach for two minutes is not a threat,
+     it is homework. Falls back to the FARTHEST candidate, which is the other
+     honest way to be out of sight on a hazy island. */
+  function hiddenPoint(maxR) {
+    const D = W.desert;
+    if (!D || !D.landPoint) return null;
+    const lo = CONTACT_M * 2;
+    let best = null, bd = 1e18, far = null, fd = -1;
+    /* TWENTY CANDIDATES. Fourteen found a ridge about half the time on the
+       dune sea at seed 1337 and fell through to the distance fallback the
+       other half; the cost of a rejected candidate is one landPoint and about
+       eight heightAt calls, and this runs once, when a card is answered. */
+    for (let i = 0; i < 20; i++) {
+      const q = D.landPoint(W.rnd, { near: { x: S.you.x, z: S.you.z }, nearR: maxR });
+      if (!q) continue;
+      const d = Math.hypot(q.x - S.you.x, q.z - S.you.z);
+      if (d < lo) continue;
+      if (d > fd) { fd = d; far = q; }
+      if (d < bd && blocked(S.you.x, S.you.z, q.x, q.z)) { bd = d; best = q; }
+    }
+    return best || far;
+  }
+
   /* a man built by this file stamps his own provenance before he joins, so
      reconcile() never has to guess about him. */
   function join(tierId, wid, base, opts) {
     const s = W.makeSoldier(tierId, wid, opts);
     ev().base[s.id] = base;
-    W.addSoldier(s);
+    /* THEY ARRIVE. Six cards in this library used to answer "twelve men just
+       joined you" with W.toast("+12 men") — the third telling of a fact the
+       HUD and the log had already printed, about the one thing campaign.js
+       exists to draw. The men are BATCHED rather than added, because a card's
+       run() calls this in a loop and twelve separate one-man parties walking
+       in is a queue, not a decision; the timeout is 0, i.e. the end of the
+       click that caused them, so every join inside one answer is one party.
+       Every future card gets this without knowing about it, which is the
+       reason it lives in join() and not at six call sites. */
+    if (!canStage()) { W.addSoldier(s); return s; }
+    batch.push(s);
+    if (!batchT) batchT = setTimeout(function () { batchT = 0; safe(sendBatch); }, 0);
     return s;
+  }
+
+  let batch = [], batchT = 0;
+  function addAll(list) {
+    for (let i = 0; i < list.length; i++) W.addSoldier(list[i]);
+    reconcile();
+    safe(paintChips);
+  }
+  function sendBatch() {
+    const list = batch;
+    batch = [];
+    if (!list.length) return;
+    if (!canStage()) { addAll(list); return; }
+    /* WHERE THEY WERE STANDING. In front of you, one contact radius plus their
+       own road's width out — the distance at which the game already considers
+       a party to be somewhere else, so this is the nearest they could have
+       been while still being "over there". A fan of bearings around your own
+       heading because the first candidate can be sea or a mesa wall, and men
+       who joined you must not be standing in the water. */
+    const you = S.you;
+    const D = W.desert;
+    const want = CONTACT_M + widthOf(list.length);
+    let p = null;
+    for (let i = 0; i < 7 && !p; i++) {
+      const a = (you.yaw || 0) + (i % 2 ? 1 : -1) * 0.42 * Math.ceil(i / 2);
+      const q = { x: you.x + Math.sin(a) * want, z: you.z + Math.cos(a) * want };
+      if (D.onLand(q.x, q.z)) p = q;
+    }
+    if (!p) { addAll(list); return; }
+    const b = W.makeBand({ size: 1, faction: "militia", x: p.x, z: p.z });
+    b.men = list.slice();
+    b.name = "COMING OVER";
+    b.gold = 0;
+    b.mood = "roam";
+    b.hostile = 0;
+    /* THE MARK THAT SURVIVES A SAVE. S.bands is serialised; a party half way
+       through joining when the game is saved would come back as a stray
+       friendly band and twelve men who never arrived. sweepJoiners() folds
+       any band carrying this flag straight into the roster on load. */
+    b.joining = 1;
+    stampCampaignFields(b);
+    holdBand(b);
+    S.bands.push(b);
+    /* they have arrived when their road meets yours — the two half-widths
+       sand.js would draw for the two parties, touching. */
+    const meet = (widthOf(list.length) + widthOf(S.army.length)) / 2;
+    march(b, { chase: true, arrive: meet,
+               /* three contact radii at the island's own walking speed. Longer
+                  than the walk needs and short enough that a player who turns
+                  and rides is not waiting on it: the men fall in wherever he
+                  got to. */
+               budget: (CONTACT_M * 3) / BAND_SPEED,
+               done: function () { fallIn(b); } });
+  }
+  function fallIn(b) {
+    releaseBand(b);
+    const i = S.bands.indexOf(b);
+    if (i >= 0) S.bands.splice(i, 1);
+    const list = b.men || [];
+    b.men = [];
+    b.joining = 0;
+    if (!list.length) return;
+    /* their road running into yours, at your feet. This is the only frame in
+       which the two columns are one, and it is what the toast was for. */
+    churn(S.you.x, S.you.z, list.length, S.you.yaw || 0);
+    puff(S.you.x, S.you.z, 0.8);
+    addAll(list);
+  }
+  function sweepJoiners() {
+    for (let i = S.bands.length - 1; i >= 0; i--) {
+      const b = S.bands[i];
+      if (b && b.joining) safe(function () { fallIn(b); });
+    }
   }
 
   /* WHAT THIS BAND WOULD BE CARRYING. Never a hand-picked gun id: core's own
@@ -807,11 +1261,28 @@
     return b;
   }
 
+  let lastSpawn = null;
   function spawnBandNear(opts) {
     opts = opts || {};
     const D = W.desert;
     let p = { x: S.you.x + W.range(-900, 900), z: S.you.z + W.range(-900, 900) };
-    if (D && D.landPoint) {
+    /* THEY COME FROM SOMEWHERE. Three cards used to answer "go through them"
+       by putting a warband on a land point 60-90 m away — a distance chosen so
+       you would SEE them, which is precisely why you saw them appear. Nothing
+       arrives on this island; things are instantiated on it, and then a
+       sentence is typed about the thing that just happened silently in front
+       of the camera.
+
+       ?shown=off puts the old roll back, byte for byte. */
+    const wantHidden = opts.hidden && !FLAG_NOSHOW && D && D.landPoint;
+    if (wantHidden) {
+      /* 260 m rather than the old 60: far enough that a ridge can stand
+         between you, near enough that they are on you inside half a minute at
+         campaign.js's own HUNT_SPEED. A hidden spawn that takes two minutes to
+         walk in is not tension, it is a wait. */
+      const q = hiddenPoint(opts.r && opts.r > CONTACT_M * 4 ? opts.r : 260);
+      if (q) p = q;
+    } else if (D && D.landPoint) {
       const q = D.landPoint(W.rnd, { near: { x: S.you.x, z: S.you.z }, nearR: opts.r || 900 });
       if (q) p = q;
     }
@@ -822,6 +1293,14 @@
     if (opts.mood) b.mood = opts.mood;
     if (opts.hunt) { b.mood = "hunt"; b.goal = { x: S.you.x, z: S.you.z }; }
     b.cooldown = opts.cooldown == null ? 6 : opts.cooldown;
+    /* AND THE DUST GETS THERE FIRST. A road laid behind them for as long as
+       the walk can take at the island's own band speed, so what you actually
+       see is a dust column on a horizon and then men over a rise — which is
+       the sentence the toast used to type, drawn instead. */
+    const spawnD = Math.hypot(b.x - S.you.x, b.z - S.you.z);
+    lastSpawn = { d: spawnD, hidden: !!wantHidden,
+                  blocked: blocked(S.you.x, S.you.z, b.x, b.z) };
+    if (wantHidden) trailBehind(b, (spawnD / BAND_SPEED) * 1.6);
     return b;
   }
 
@@ -857,7 +1336,7 @@
             run: function () {
               for (let i = 0; i < n; i++) join("levy", guns[i], 0.22);
               W.log("took in " + n + " deserters at " + place() + ".", "");
-              W.toast("+" + men(n), "good");
+              if (FLAG_NOSHOW) W.toast("+" + men(n), "good");
               loyMove(-4, "the army does not trust deserters");
               reconcile();
             } },
@@ -975,7 +1454,7 @@
             hint: "+" + n + " GUNS · ~$" + worth,
             run: function () {
               for (let i = 0; i < guns.length; i++) W.stash(guns[i], 1);
-              spawnBandNear({ size: owners, faction: "company", name: "THE OWNERS", hunt: true, r: 1100, cooldown: 30 });
+              spawnBandNear({ size: owners, faction: "company", name: "THE OWNERS", hunt: true, r: 1100, cooldown: 30, hidden: true });
               W.log("dug up a cache of " + n + " guns. Someone is coming for them.", "");
               W.toast("+" + n + " GUNS", "good");
             } },
@@ -983,7 +1462,7 @@
             hint: "+" + n + " GUNS · THEY COME TO YOU",
             run: function () {
               for (let i = 0; i < guns.length; i++) W.stash(guns[i], 1);
-              const b = spawnBandNear({ size: Math.round(owners * 0.8), faction: "company", name: "THE OWNERS", r: 90, cooldown: 0 });
+              const b = spawnBandNear({ size: Math.round(owners * 0.8), faction: "company", name: "THE OWNERS", r: 90, cooldown: 0, hidden: true });
               b.mood = "hunt"; b.goal = { x: S.you.x, z: S.you.z };
               W.log("took the cache and set up over it.", "");
               loyMove(2, "a warlord who picks the ground");
@@ -1017,7 +1496,7 @@
               }
               S.fame += Math.round(n * 0.3);
               W.log("let a rival warlord ride out. His " + n + " men came with us.", "good");
-              W.toast("+" + men(n), "good");
+              if (FLAG_NOSHOW) W.toast("+" + men(n), "good");
               loyMove(-5, "his men are not your men yet");
               reconcile();
               // he rebuilds. That is the price, and it is a real band on the map.
@@ -1212,7 +1691,7 @@
               for (let i = 0; i < n; i++) join(W.chance(0.75) ? "levy" : "raider", gunFor(0.18), 0.68);
               S.fame += Math.round(n * 0.5);
               W.log("cut a slave column loose. " + n + " men picked up rifles and stayed.", "good");
-              W.toast("+" + men(n), "good");
+              if (FLAG_NOSHOW) W.toast("+" + men(n), "good");
               loyMove(+8, "the army liked that");
               spawnBandNear({ size: guards, faction: "bandit", name: "THE SLAVERS", hunt: true, r: 320, cooldown: 2 });
               reconcile();
@@ -1376,9 +1855,14 @@
           { key: "fight", label: "GO THROUGH THEM", cls: "hot",
             hint: n + " MEN, NOW",
             run: function () {
-              const b = spawnBandNear({ size: n, faction: "bandit", name: "THE TOLLMEN", r: 60, cooldown: 0 });
+              const b = spawnBandNear({ size: n, faction: "bandit", name: "THE TOLLMEN", r: 60, cooldown: 0, hidden: true });
               b.mood = "hunt"; b.goal = { x: S.you.x, z: S.you.z };
-              W.toast("THEY ARE COMING DOWN OFF THE ROCK", "bad");
+              /* the toast said "THEY ARE COMING DOWN OFF THE ROCK" over a
+                 warband that had just been placed 60 m away in plain sight.
+                 They come down off the rock now — and the sentence is kept
+                 behind the revert flag rather than deleted, so the A/B is
+                 measuring the change and not measuring a deletion. */
+              if (FLAG_NOSHOW) W.toast("THEY ARE COMING DOWN OFF THE ROCK", "bad");
             } },
           { key: "around", label: "GO AROUND", cls: "ghost",
             hint: "HALF A DAY · -$" + Math.round(W.payroll() / 2),
@@ -1461,7 +1945,7 @@
                 S.fame += Math.round(6 + n * 0.4);
                 S.you.kills++;
                 W.log("killed their champion in front of both armies. " + n + " men came over.", "good");
-                W.toast("+" + men(n), "good");
+                if (FLAG_NOSHOW) W.toast("+" + men(n), "good");
                 loyMove(+14, "they watched you do it yourself");
               } else {
                 S.you.hp = Math.max(1, Math.round(S.you.maxHp * 0.25));
@@ -1476,7 +1960,7 @@
           { key: "line", label: "SEND THE LINE INSTEAD", cls: "",
             hint: n + " MEN · FAME DOWN",
             run: function () {
-              const b = spawnBandNear({ size: n, faction: "company", name: "THE CHALLENGERS", r: 70, cooldown: 0 });
+              const b = spawnBandNear({ size: n, faction: "company", name: "THE CHALLENGERS", r: 70, cooldown: 0, hidden: true });
               b.mood = "hunt"; b.goal = { x: S.you.x, z: S.you.z };
               S.fame = Math.max(0, S.fame - 3);
               loyMove(-4, "you would not walk out");
@@ -1555,7 +2039,7 @@
               if (!W.pay(price)) return;
               for (let i = 0; i < n; i++) join(W.chance(0.5) ? "raider" : "soldier", gunFor(0.45), 0.5);
               W.log("bought " + n + " men out of another warlord's column for $" + price + ".", "good");
-              W.toast("+" + men(n), "good");
+              if (FLAG_NOSHOW) W.toast("+" + men(n), "good");
               reconcile();
             } },
           { key: "trap", label: "IT IS A TRAP. TAKE HIM PRISONER.", cls: "bad",
@@ -1588,11 +2072,17 @@
       if (!ev().four) raiseTheFour();
       const alive = fourAlive();
       if (!alive.length) return null;
-      const b = alive[Math.floor(W.rnd() * alive.length)];
+      const f = alive[Math.floor(W.rnd() * alive.length)];
+      const name = f.rec.name;
+      /* HE ANSWERS WITH EVERY COLUMN HE HAS. The old card picked one band and
+         turned that one band around, which is what "he comes with everything
+         he has" meant when a warlord WAS one band. He is a man with holdings
+         and columns now, so the answer reaches all of them. */
+      const cols = (WL() && WL().columns) ? WL().columns(f.rec.wid) : [];
       const tribute = Math.round(W.payroll() * 6 + size() * 9);
       return {
-        title: esc(b.name) + ' SENDS A <em>RIDER</em>',
-        sub: W.bandSize(b) + " MEN UNDER HIS BANNER",
+        title: esc(name) + ' SENDS A <em>RIDER</em>',
+        sub: f.men + " MEN UNDER HIS BANNER",
         body: 'The rider does not dismount. He says his warlord has been counting your column and ' +
               'has decided you are worth talking to once. Pay $' + tribute + ' a season and ride ' +
               'where you like. Refuse and he comes with everything he has.',
@@ -1601,19 +2091,26 @@
             hint: "-$" + tribute + " · HE LEAVES YOU ALONE",
             run: function () {
               if (!W.pay(tribute)) return;
-              b.cooldown = 600; b.mood = "roam";
-              W.log("paid tribute to " + b.name + ".", "bad");
+              for (let i = 0; i < cols.length; i++) { cols[i].cooldown = 600; cols[i].mood = "roam"; cols[i].hostile = 0; }
+              W.log("paid tribute to " + name + ".", "bad");
               loyMove(-10, "you paid another warlord");
               S.fame = Math.max(0, S.fame - 8);
             } },
           { key: "defy", label: "SEND HIM BACK ON FOOT", cls: "hot",
-            hint: "+FAME · " + esc(b.name) + " HUNTS YOU",
+            hint: "+FAME · " + esc(name) + " HUNTS YOU",
             run: function () {
-              b.mood = "hunt"; b.goal = { x: S.you.x, z: S.you.z }; b.cooldown = 0;
+              for (let i = 0; i < cols.length; i++) {
+                const c = cols[i];
+                c.mood = "hunt"; c.goal = { x: S.you.x, z: S.you.z }; c.cooldown = 0; c.hostile = 1;
+                /* the road in front of them. His nearest column is often a
+                   kilometre out, which is exactly the range at which a dust
+                   line on the sand is the only thing that can carry this. */
+                trailBehind(c, (Math.hypot(c.x - S.you.x, c.z - S.you.z) / BAND_SPEED) * 1.2);
+              }
               S.fame += 12;
-              W.log("sent " + b.name + "'s rider back on foot.", "good");
+              W.log("sent " + name + "'s rider back on foot.", "good");
               loyMove(+11, "they have been waiting for you to say that");
-              W.toast(b.name.toUpperCase() + " IS COMING", "bad");
+              W.toast(name.toUpperCase() + " IS COMING", "bad");
             } },
         ],
       };
@@ -1684,7 +2181,7 @@
             run: function () {
               for (let i = 0; i < n; i++) join("levy", gunFor(0.2), 0.78);
               S.fame += 6;
-              W.toast("+" + men(n), "good");
+              if (FLAG_NOSHOW) W.toast("+" + men(n), "good");
               W.log("collected " + n + " volunteers from " + (c.from || "the village") + ".", "good");
               loyMove(+6, "you kept a promise where people could see");
               reconcile();
@@ -1781,6 +2278,63 @@
     return clamp((20 - l) / 55 + v.unrest * 0.07, 0, 0.85);
   }
 
+  /* THE PICTURE OF A MUTINY, and what was wrong with the old one.
+
+     The old code took the men off the roster — so they vanished out of the
+     drawn column between two frames — and built their band at
+     {x: S.you.x, z: S.you.z}, which is INSIDE YOU, geometrically. It then
+     never pushed that band onto S.bands at all, so it was not drawn, had no
+     banner, cast no shadow and was not on the map. There was no frame of this
+     game on which a mutiny existed. What existed was a card describing a fire
+     and two sides, neither of which was anywhere.
+
+     So: they walk out. Their side of the camp is measured off the two parties'
+     own trampled road widths (sand.js's bandWidth, the number it would use to
+     draw them) with one man's width of clear ground and a fire's radius
+     between — the fire is BETWEEN THEM AND YOU because that is what the card
+     always said and it was never true. Pushing the band onto S.bands is what
+     raises their banner: campaign.js:2901 puts a pole and a flag over every
+     party on the island, scaled by log2 of its head count. */
+  function stageMutiny(b, n) {
+    if (!canStage()) return 0;
+    /* THE RIDE STOPS. showCard() halts the column when a card goes up, and the
+       card is now three seconds behind the walk — so without this the player
+       rides on through his own mutiny and the whole thing happens two hundred
+       metres behind him. Measured on the first ba run: the mutineers were
+       200 m away by the time their card appeared. Same one call showCard
+       makes; campaign.js owns the destination and is asked, not reached into. */
+    halt();
+    const you = S.you;
+    const yaw = you.yaw || 0;
+    const fx = Math.sin(yaw), fz = Math.cos(yaw);
+    const halfYou = widthOf(Math.max(1, S.army.length)) / 2;
+    const halfThem = widthOf(n) / 2;
+    const lane = widthOf(1);                 // one man's width of empty ground
+    const gap = halfYou + lane + FIRE_R;     // the fire
+    const sep = gap + FIRE_R + lane + halfThem;
+    const D = W.desert;
+    /* IN FRONT OF YOU IF THE GROUND ALLOWS IT, behind you if it does not. A
+       camp splitting into the sea is worse than a camp splitting the wrong
+       way, and on a 14 km island with a coast this happens. */
+    let dir = 1;
+    if (D.onLand && !D.onLand(you.x + fx * sep, you.z + fz * sep)) dir = -1;
+    const tx = you.x + fx * sep * dir, tz = you.z + fz * sep * dir;
+    if (D.onLand && !D.onLand(tx, tz)) return 0;
+    b.x = you.x + fx * dir * halfYou;        // they start at your elbow, in camp
+    b.z = you.z + fz * dir * halfYou;
+    stampCampaignFields(b);
+    holdBand(b);
+    S.bands.push(b);
+    fireAt(you.x + fx * dir * gap, you.z + fz * dir * gap, 60);
+    const walk = sep / BAND_SPEED;
+    march(b, { x: tx, z: tz, arrive: 0.6, budget: walk * 3,
+               done: function () { churn(tx, tz, n, yaw); puff(tx, tz, 1); } });
+    /* THE HOLD IS THE WALK AGAIN — as long standing across the fire as it took
+       to walk out of the camp. Same rule territory.js's claim uses, for the
+       same reason: a beat's pause should be derived from the beat. */
+    return walk * 2;
+  }
+
   function mutiny() {
     const v = ev();
     const cut = faction(clamp(0.35 + (20 - v.loy) / 60, 0.3, 0.72));
@@ -1803,22 +2357,40 @@
     W.emit("events:mutiny", { men: cut.length, band: b });
     closeCard();
     css();
-    showCard({
+    const card = {
       id: "mutiny", tag: "IT IS TONIGHT",
       title: '<em>MUTINY</em>',
       sub: cut.length + " AGAINST " + (S.army.length + 1),
-      body: 'They came for the trucks first and then for you. ' + cut.length + ' men are on the ' +
-            'other side of the fire with the rifles you gave them, and ' + S.army.length +
-            ' are on this one.',
+      /* THE BODY IS ONE LINE NOW. It used to describe the fire, the rifles and
+         which side of the fire each half of the army was standing on — all
+         three of which are now on the screen behind the card, drawn, in the
+         seconds before it goes up. What is left is the only thing the picture
+         cannot say. */
+      body: FLAG_NOSHOW
+        ? ('They came for the trucks first and then for you. ' + cut.length + ' men are on the ' +
+           'other side of the fire with the rifles you gave them, and ' + S.army.length +
+           ' are on this one.')
+        : 'Lose this one and there is nobody left to carry you off.',
       choices: [
         { key: "fight", label: "PUT IT DOWN", cls: "bad",
           hint: cut.length + " MEN · YOUR OWN",
           run: function () {
+            /* the band goes to battle.js, so it stops being a party on the
+               island the same frame — a mutineer band left on S.bands would be
+               drawn standing in the camp for the whole fight and still be
+               there afterwards. */
+            releaseBand(b);
+            const i = S.bands.indexOf(b);
+            if (i >= 0) S.bands.splice(i, 1);
+            darkenStage();
             if (W.battle && W.battle.start) safe(function () { W.battle.start({ band: b, defending: true, mutiny: true }); });
             else { endRun("mutiny", "Your own men killed you in the dark."); }
           } },
       ],
-    });
+    };
+    const wait = stageMutiny(b, cut.length);
+    if (wait > 0) after(wait, function () { showCard(card); });
+    else showCard(card);
     return true;
   }
   E.mutiny = mutiny;
@@ -1838,96 +2410,128 @@
      THE ARC has a shape rather than a count. Break three and the fourth stops
      roaming: he absorbs what is left of the others and comes for you with
      everything, and that fight is the end of the run either way. */
-  const WARLORD_NAMES = [
-    { name: "AZRAQ THE COLD", faction: "legion",  note: "keeps his men in ranks and his prisoners in wire." },
-    { name: "MOTHER SALT", faction: "company",    note: "took the pan by outliving everyone who wanted it." },
-    { name: "THE JACKAL OF THE WADI", faction: "bandit", note: "has never held ground and has never lost." },
-    { name: "KHALIS IRON-HAND", faction: "warlord", note: "was a warlord's prisoner. Then he was not." },
-    { name: "THE WIDOW OF SIX WELLS", faction: "militia", note: "sells water and buys men." },
-    { name: "OBAN RED", faction: "warlord",       note: "burned his own camp rather than leave it." },
-    { name: "THE COUNTER", faction: "legion",     note: "knows the size of every column on this island." },
-    { name: "SAIF THE PATIENT", faction: "company", note: "has been waiting for you specifically." },
-  ];
+  /* THE ISLAND ALREADY HAS ITS WARLORDS, AND IT USED TO HAVE TWO SETS.
 
+     This file invented four: a hand-typed table of names and epithets, each
+     promoted onto some big band already on the map, stamped `band.warlord =
+     true`. warlord/match.js — built in the same wave as this rewrite — raises
+     FOURTEEN named warlords off the seed, gives each one holdings in
+     territory.js, columns on the sand, alliances, grudges and a colour, and
+     tags his parties `band.warlordId`. match.js:511 names the collision in its
+     own comment and measured it: those four read as columns belonging to a
+     warlord called "true", four phantom entries in its audit. Nothing read
+     this file's flag, so it was harmless — and two populations called "rival
+     warlord" on one island is exactly the drift CLAUDE.md is about, so the
+     invented four are gone and the endgame targets the real ones.
+
+     WHAT IS LOST: eight authored epithets and eight authored one-line notes.
+     What replaces the note is not prose, it is the fact — how much of the
+     island he holds, and whether he is your ally or a man you betrayed. That
+     is shorter, it is true, and it changes while you play.
+
+     WHAT IS GAINED: breaking a warlord now means what match.js means by it
+     (he holds nothing and rides nothing, match.js's own retire()), his columns
+     are the columns you have been fighting all campaign, and the "last war"
+     absorption lands on a man who actually has ground. */
+  function WL() { return (W.warlords && W.warlords.list) ? W.warlords : null; }
+
+  function menOf(wid) {
+    const M = WL();
+    if (!M || !M.columns) return 0;
+    const cols = M.columns(wid);
+    let n = 0;
+    for (let i = 0; i < cols.length; i++) n += cols[i].men.length;
+    return n;
+  }
+  function noteOf(w) {
+    const T = W.territory;
+    const held = (T && T.held) ? T.held(w.id).length : 0;
+    const M = WL();
+    let tail = "";
+    if (M && M.grudge && M.grudge(w.id)) tail = " · GRUDGE";
+    else if (M && M.allied && M.allied("you", w.id)) tail = " · ALLIED";
+    return held + (held === 1 ? " PROVINCE" : " PROVINCES") + tail;
+  }
+
+  /* {rec, w, band, men, dist} — `band` is his NEAREST column, which is the one
+     the odds and the distance on the war screen are about. */
   function fourList() {
     const v = ev();
     if (!v.four) return [];
+    const M = WL();
     const out = [];
     for (let i = 0; i < v.four.length; i++) {
       const rec = v.four[i];
-      let band = null;
-      for (let j = 0; j < S.bands.length; j++) if (S.bands[j].id === rec.id) { band = S.bands[j]; break; }
-      out.push({ rec: rec, band: band });
+      const w = (M && M.warlord) ? M.warlord(rec.wid) : null;
+      const cols = (M && M.columns) ? M.columns(rec.wid) : [];
+      let band = null, bd = 1e18, n = 0, pow = 0;
+      for (let j = 0; j < cols.length; j++) {
+        const c = cols[j];
+        n += c.men.length;
+        pow += W.bandPower(c);
+        const d = Math.hypot(c.x - S.you.x, c.z - S.you.z);
+        if (d < bd) { bd = d; band = c; }
+      }
+      out.push({ rec: rec, w: w, band: band, men: n, power: pow,
+                 dist: band ? bd : null });
     }
     return out;
   }
   function fourAlive() {
     const out = [];
     const L = fourList();
-    for (let i = 0; i < L.length; i++) if (L[i].band && L[i].band.men.length) out.push(L[i].band);
+    for (let i = 0; i < L.length; i++) if (!L[i].rec.dead && L[i].w && L[i].w.alive) out.push(L[i]);
     return out;
   }
   E.four = fourList;
 
-  /* raise them once, the first time the player is actually on the island. A
-     band promoted into a warlord is preferred over a fresh one so the map's
-     own population is used rather than doubled. */
+  /* raise them once, the first time the player is actually on the island. The
+     targets are the biggest names match.js has out there — ranked by ground
+     first and columns second, because ground is what a warlord IS in this game
+     and a column is what he can spare today. If match.js has not raised its
+     roster yet this returns without setting v.four and the dawn hook tries
+     again, which is what the old code did too. */
   function raiseTheFour() {
     if (FLAG_NOEND) return;
     const v = ev();
     if (v.four) return;
+    const M = WL();
+    if (!M) return;
+    const T = W.territory;
+    const live = M.list().filter(function (w) { return w && w.alive && !w.peer; });
+    if (!live.length) return;
+    live.sort(function (a, b) {
+      const ha = (T && T.held) ? T.held(a.id).length : 0;
+      const hb = (T && T.held) ? T.held(b.id).length : 0;
+      if (hb !== ha) return hb - ha;
+      return menOf(b.id) - menOf(a.id);
+    });
     v.four = [];
-    const used = {};
-    const big = S.bands.slice().sort(function (a, b) { return b.men.length - a.men.length; });
-    for (let i = 0; i < FOUR_N; i++) {
-      const spec = WARLORD_NAMES[i % WARLORD_NAMES.length];
-      let band = null;
-      for (let j = 0; j < big.length; j++) {
-        const b = big[j];
-        if (used[b.id] || b.men.length < W.BAND_CLASSES[3].lo) continue;
-        used[b.id] = 1; band = b; break;
-      }
-      if (!band) {
-        const D = W.desert;
-        // put them far apart and far from you: the first one you meet should
-        // be a thing you rode to, not a thing that walked into you on day two
-        const ang = (i / FOUR_N) * Math.PI * 2 + W.rnd() * 0.6;
-        const R = (D && D.RADIUS ? D.RADIUS : 6500) * 0.62;
-        let p = { x: Math.cos(ang) * R, z: Math.sin(ang) * R };
-        if (D && D.landPoint) {
-          const q = D.landPoint(W.rnd, { minR: R * 0.7, maxR: R * 1.15 });
-          if (q) p = q;
-        }
-        band = W.makeBand({ size: W.irange(W.BAND_CLASSES[3].lo, W.BAND_CLASSES[3].hi), faction: spec.faction, x: p.x, z: p.z });
-        S.bands.push(band);
-      }
-      band.name = spec.name;
-      band.warlord = true;
-      band.note = spec.note;
-      band.mood = "camp";
-      v.four.push({ id: band.id, name: spec.name, note: spec.note, size0: band.men.length, dead: 0 });
+    for (let i = 0; i < Math.min(FOUR_N, live.length); i++) {
+      const w = live[i];
+      v.four.push({ wid: w.id, name: w.name, size0: Math.max(1, menOf(w.id)), dead: 0 });
     }
-    W.log("four names hold this island. Nobody else matters.", "");
+    W.log(v.four.length + " names hold this island. Nobody else matters.", "");
   }
 
-  /* did one fall? Checked after every aftermath and every dawn, because a
-     warlord can also be ground down by somebody else's war while you ride. */
   function checkFour() {
     if (FLAG_NOEND) return;
     const v = ev();
     if (!v.four) return;
     let alive = 0, fellNow = null;
-    for (let i = 0; i < v.four.length; i++) {
-      const rec = v.four[i];
+    const L = fourList();
+    for (let i = 0; i < L.length; i++) {
+      const rec = L[i].rec;
       if (rec.dead) continue;
-      let band = null;
-      for (let j = 0; j < S.bands.length; j++) if (S.bands[j].id === rec.id) { band = S.bands[j]; break; }
-      // "broken" is 15% of what he started with — an army that small is not a
-      // warlord any more, and chasing the last nine men across a 14 km island
-      // is not a boss fight, it is admin
-      if (!band || band.men.length <= Math.max(4, rec.size0 * 0.15)) {
+      /* BROKEN MEANS WHAT match.js MEANS BY IT. Its retire() clears `alive`
+         the dawn a warlord holds no ground and rides no column, and that is
+         the real death of a warlord in this game — one system's answer, not a
+         second one. The 15% floor stays on top of it because a man with nine
+         men left and one province is not a boss fight, he is admin, and
+         chasing him across fourteen kilometres is not the end of a campaign. */
+      const w = L[i].w;
+      if (!w || !w.alive || L[i].men <= Math.max(4, rec.size0 * 0.15)) {
         rec.dead = S.day;
-        if (band) { const bi = S.bands.indexOf(band); if (bi >= 0) S.bands.splice(bi, 1); }
         v.fell.push({ name: rec.name, day: S.day, size: rec.size0 });
         fellNow = rec;
         W.emit("events:warlord", { name: rec.name, fallen: true });
@@ -1942,19 +2546,20 @@
     if (alive === 0 && v.four.length) { victory(); return; }
     /* THE LAST WAR. Three down and the survivor stops being a party on a map:
        he takes in what is left of everyone else's columns and comes for you.
-       The absorption is real men built by core, at his own wealth, so the
-       final fight is genuinely the biggest thing on the island. */
+       The absorption is real men built by core, at his own wealth, and it
+       lands on his NEAREST column, which is the one you will meet. */
     if (alive === 1 && !v.last) {
-      const b = fourAlive()[0];
+      const f = fourAlive()[0];
+      const b = f && f.band;
       if (b) {
-        v.last = b.id;
-        const take = Math.round(b.men.length * 0.45);
+        v.last = f.rec.wid;
+        const take = Math.round(Math.max(1, f.men) * 0.45);
         for (let i = 0; i < take; i++) {
           const F = W.faction(b.faction);
           const tid = F.tiers[Math.floor(W.rnd() * F.tiers.length)];
           b.men.push(W.makeSoldier(tid, W.bandGunFor(b.wealth)));
         }
-        b.name = b.name + " — THE LAST";
+        b.name = f.rec.name + " — THE LAST";
         b.mood = "hunt";
         b.goal = { x: S.you.x, z: S.you.z };
         b.cooldown = 0;
@@ -2050,10 +2655,10 @@
     let four = "";
     const L = fourList();
     for (let i = 0; i < L.length; i++) {
-      const rec = L[i].rec, band = L[i].band;
+      const rec = L[i].rec;
       four += '<div class="w' + (rec.dead ? " dead" : "") + '"><b>' + esc(rec.name) + '</b>' +
         '<div class="wl-small wl-dim">' + (rec.dead ? "BROKEN — DAY " + rec.dead
-          : band ? W.bandSize(band) + " MEN, STILL OUT THERE" : "GONE") + '</div></div>';
+          : L[i].men ? L[i].men + " MEN, STILL OUT THERE" : "GONE") + '</div></div>';
     }
 
     takeScreen(
@@ -2194,19 +2799,21 @@
     let cards = "";
     const mine = W.yourPower();
     for (let i = 0; i < L.length; i++) {
-      const rec = L[i].rec, band = L[i].band;
+      const f = L[i], rec = f.rec;
+      /* the whole man, not his nearest column: he is beaten when everything
+         he has out there is beaten, so the odds are against all of it. */
+      const odds = f.power > 0 ? W.odds(mine, f.power) : 1;
       let line;
       if (rec.dead) line = "BROKEN ON DAY " + rec.dead;
-      else if (!band) line = "GONE — somebody else got there";
+      else if (!f.men) line = "NOTHING IN THE FIELD";
       else {
-        const d = Math.round(Math.hypot(band.x - S.you.x, band.z - S.you.z));
-        const o = Math.round(W.odds(mine, W.bandPower(band)) * 100);
-        line = W.bandSize(band) + " MEN · " + (d > 999 ? (d / 1000).toFixed(1) + " km" : d + " m") + " · YOU WIN " + o + "%";
+        const d = Math.round(f.dist);
+        line = f.men + " MEN · " + (d > 999 ? (d / 1000).toFixed(1) + " km" : d + " m") + " · YOU WIN " + Math.round(odds * 100) + "%";
       }
       cards += '<div class="w' + (rec.dead ? " dead" : "") + '"><b>' + esc(rec.name) + '</b>' +
-        '<div class="wl-small wl-dim" style="margin-bottom:5px">' + esc(rec.note || "") + '</div>' +
+        '<div class="wl-small wl-dim" style="margin-bottom:5px">' + esc(f.w ? noteOf(f.w) : "") + '</div>' +
         '<div class="wl-small">' + esc(line) + '</div>' +
-        (band && !rec.dead ? meter(W.odds(mine, W.bandPower(band)), W.odds(mine, W.bandPower(band)) > 0.5 ? "good" : "bad") : "") +
+        (f.men && !rec.dead ? meter(odds, odds > 0.5 ? "good" : "bad") : "") +
         '</div>';
     }
     const done = v.fell.length, total = L.length;
@@ -2253,10 +2860,17 @@
     const m = mood();
     const l = loyalty();
     const c1 = document.createElement("span");
-    c1.className = "chip act wl-evchip" + (l < 30 ? " " : "");
+    /* THE PULSE IS SPENT ON THE FIRST REPAINT AFTER THE CROSSING and then
+       cleared, so it fires once per crossing rather than on every one of the
+       four repaints a dawn triggers. */
+    const pulse = v.pulse; v.pulse = 0;
+    c1.className = "chip act wl-evchip" + (pulse > 0 ? " wl-up" : pulse < 0 ? " wl-dn" : "");
     c1.style.color = l < 20 ? "#ff8f86" : l < 46 ? "#ffd166" : "";
     c1.textContent = "LOYAL " + l + (v.unrest ? " !" : "");
-    c1.title = m.note;
+    /* the authored reason, on the thing that moved. Not printed into the
+       strip: the strip is already the tightest screen in this game and a
+       clause in it would be the fourth telling. */
+    c1.title = (v.why && v.whyDay === S.day) ? v.why : m.note;
     c1.onclick = function () { if (canOpen() || W.phase() === "campaign") openLoyalty(); };
     h.appendChild(c1);
 
@@ -2344,9 +2958,11 @@
       const c = v.contracts[i];
       if (c.kind === "revenge" && S.day >= c.day) {
         v.contracts.splice(i, 1);
-        const b = spawnBandNear({ size: c.size, faction: "warlord", name: "THE MAN YOU LET GO", hunt: true, r: 2200, cooldown: 20 });
+        const b = spawnBandNear({ size: c.size, faction: "warlord", name: "THE MAN YOU LET GO", hunt: true, r: 2200, cooldown: 20, hidden: true });
         W.log("the warlord you let live has a column again. " + W.bandSize(b) + " men, and he knows your banner.", "bad");
-        W.toast("HE CAME BACK", "bad");
+        /* the toast is the log line again, two seconds earlier. The column
+           itself is coming, with its road in front of it. */
+        if (FLAG_NOSHOW) W.toast("HE CAME BACK", "bad");
       }
     }
 
@@ -2458,6 +3074,20 @@
     driveWeather(dt, rawDt);
 
     if (W.phase() !== "campaign") { hadPos = false; return; }
+    /* ON rawDt, NOT dt, AND THIS ONE COST A PROBE TO FIND. The engine's dt
+       here is a FRAME, and under a software rasteriser this page runs at one
+       or two frames a second — with `dt` clamped to 0.1 the mutineers walked
+       0.4 m in four and a half seconds and the card behind them never came up.
+       Every ramp in this section is written in SECONDS OF A MOMENT, which is
+       the same thing driveWeather above needs and gets the same answer:
+       W.clock.now(), i.e. game time, warped by the speed slider so a beat
+       accelerates with the island instead of becoming an eight-minute wall.
+       Campaign frames only — a walk-out does not continue inside a battle. */
+    stepHeld();
+    stepBeats(rawDt);
+    stepProps(rawDt);
+    stepMarch(rawDt);
+    stepTrails(rawDt);
     slow -= dt;
     if (slow <= 0) { slow = 0.25; hideMe(0.25); paintChipsThrottled(); }
 
@@ -2519,13 +3149,40 @@
   };
   E.visibility = visibility;
   E.list = function () { return LIB.map(function (L) { return L.id; }); };
+  /* WHAT IS ACTUALLY ON THE SAND RIGHT NOW. Every number here is read off the
+     world rather than off this file's intentions: the mutineers' distance is
+     measured between two positions, the joiners are counted out of S.bands,
+     and the roads are sand.js's own tile count. `mutinyDist` is the headline —
+     it was structurally ZERO before this pass, because the band was built at
+     the player's own coordinates and never put on the map at all. */
+  E.shown = function () {
+    let mut = null, joining = 0, joiners = 0;
+    for (let i = 0; i < S.bands.length; i++) {
+      const b = S.bands[i];
+      if (b.mutiny) mut = b;
+      if (b.joining) { joining++; joiners += b.men.length; }
+    }
+    let churnTiles = 0, dust = 0;
+    if (W.sand && W.sand.audit) safe(function () { const a = W.sand.audit(); churnTiles = a.churn || 0; dust = a.dust || 0; });
+    return {
+      mutinyOnMap: mut ? 1 : 0,
+      mutinyDist: mut ? Math.round(Math.hypot(mut.x - S.you.x, mut.z - S.you.z) * 10) / 10 : 0,
+      mutinyMen: mut ? mut.men.length : 0,
+      fires: lit.length, marching: marches.length, trails: trails.length,
+      joiningParties: joining, joiningMen: joiners,
+      spawnDist: lastSpawn ? Math.round(lastSpawn.d) : 0,
+      spawnHidden: lastSpawn && lastSpawn.blocked ? 1 : 0,
+      churnTiles: churnTiles, dust: dust,
+      beats: beats.length, army: S.army.length,
+    };
+  };
   E.audit = function () {
     const v = ev();
     return {
       loyalty: loyalty(), mood: mood().label, ceiling: Math.round(avgBond() * 100),
       unrest: v.unrest, weather: v.wea, vis: Math.round(visibility()),
       night: isNight(), events: LIB.length, fired: v.seen,
-      four: fourList().map(function (f) { return f.rec.name + (f.rec.dead ? " (dead)" : f.band ? " " + f.band.men.length : " ?"); }),
+      four: fourList().map(function (f) { return f.rec.name + (f.rec.dead ? " (dead)" : " " + f.men); }),
       fallen: v.fallen.length, over: v.over ? v.over.kind : null, peak: v.peak,
     };
   };
@@ -2552,6 +3209,7 @@
       if (t && (t.to === "campaign" || t.to === "battle")) {
         try { document.body.classList.remove("wl-card-up"); } catch (e) {}
       }
+      if (t && t.from === "campaign" && t.to !== "campaign") safe(strikeSet);
       safe(paintChips);
     });
     W.on("army", function () { reconcile(); safe(paintChips); });
@@ -2564,7 +3222,17 @@
       ev();
       hadPos = false; since = 0; next = 1400;
       fogSaved = null;
+      /* a new island keeps none of the old one's staging — and the pending
+         batch is DROPPED rather than added, because those men belonged to a
+         run that no longer exists. */
+      if (batchT) { clearTimeout(batchT); batchT = 0; }
+      batch.length = 0; beats.length = 0; marches.length = 0; trails.length = 0; held.length = 0;
+      safe(darkenStage);
     });
+    /* A SAVE CAN LAND MID-WALK. S.bands is serialised, so a joining party is
+       still there when the game comes back and its men are still not on the
+       roster. They fall in on load. */
+    W.on("loaded", function () { safe(sweepJoiners); });
     W.on("campaign:ready", function () { safe(raiseTheFour); safe(rollWeather); safe(paintChips); });
     W.on("phase:campaign", function () { setTimeout(function () { safe(pending); }, 600); });
     // if campaign never emits its ready event, the first dawn still raises them
@@ -2593,6 +3261,11 @@
       const stageN = c.Q.get("stage") == null ? 34 : (parseInt(c.Q.get("stage"), 10) || 0);
       const stage = function () {
         if (!stageN || S.army.length >= stageN) return;
+        /* THIRTY-FOUR MEN DO NOT WALK IN. This is the screenshot door filling
+           a roster so the state-reading cards have something to read; staging
+           it as an arrival would put a 34-man party in front of the camera on
+           every preset frame. `staging` makes join() take the plain path. */
+        staging = true;
         for (let i = S.army.length; i < stageN; i++) {
           // half hired, half pressed — an army with a real mix of provenance,
           // which is the only kind the loyalty screen has anything to say about
@@ -2614,9 +3287,19 @@
         W.log("broke a company on the salt pan. 31 dead, 9 taken.", "good");
         W.log("could not pay. 4 men walked away in the night.", "bad");
         reconcile();
+        staging = false;
         if (ctx.paintHud) ctx.paintHud();
       };
+      /* ONCE. Both hooks below can land — campaign:ready AND the first
+         phase:campaign — and the second one re-fired the same card 300 ms
+         after the first, which REPLACED the card the player (or a screenshot
+         tool) had just answered. Measured: a click that took twelve deserters
+         was followed by the deserters card standing back up with the men
+         already taken. E.fire's own `if (CARD) closeCard()` made it silent. */
+      let opened = false;
       const open = function () {
+        if (opened) return;
+        opened = true;
         setTimeout(function () {
           safe(raiseTheFour);
           safe(stage);

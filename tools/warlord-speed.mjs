@@ -50,6 +50,17 @@ const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(n); return i >= 0 && argv[i + 1] != null ? argv[i + 1] : d; };
 const VERBOSE = argv.includes("--verbose");
 const ONLY = (opt("--only", "") || "").toUpperCase().split(",").filter(Boolean);
+/* --params "a=1&b=2" — extra query on the page this gate boots.
+
+   HARNESS TRAP: this gate had no way to change the URL, and the day-clock
+   rules below are exactly the ones that fail first when the machine is loaded
+   or when the world got bigger — so when it went red there was no way to ask
+   "is it the change or is it the island?" without editing the file. It is one
+   line, and the alternative was a hand-run Chrome that leaves no trace. Used
+   as `--params "bands=40&smalls=56"` (the island as it was) or
+   `--params "far=old"` (campaign.js's distance-stepped world clock off). */
+const PARAMS = opt("--params", "");
+const QS = "go=1&seed=1337&weather=off&sound=off" + (PARAMS ? "&" + PARAMS : "");
 const want = (r) => !ONLY.length || ONLY.includes(r);
 
 /* An hour of game time is 45 real seconds — campaign.js's HOUR_SECS, derived
@@ -83,6 +94,18 @@ const HELPERS = `(() => {
       return (a && a.hourSecs) || ${HOUR_SECS_FALLBACK};
     },
     calm() { for (let i = 0; i < S.bands.length; i++) S.bands[i].cooldown = 1e9; },
+    /* THE CHEAP PROBE, AND IT EXISTS BECAUSE THE INSTRUMENT BECAME THE ERROR.
+       sample() below walks every party and asks desert.js for onLand and
+       heightAt at each one, then ships the whole array over CDP. At 96 parties
+       that is a few milliseconds. At 677 it is a second or more of blocked
+       main thread per call — and runFor() polls with it in a loop, so at 16x
+       one poll was worth up to thirty game seconds and the run overshot its
+       target fivefold. The overshoot then failed RULE C's "game hours elapsed"
+       against a world that was behaving perfectly.
+       Three numbers, no loop, no serialisation. Poll with this; take the full
+       sample only at the two ends, where it is the measurement rather than the
+       clock. */
+    tick() { return { hours: S.day * 24 + S.hour, game: W.clock.now(), wall: performance.now() }; },
     /* THE SAMPLE. One object, every number a rule can want, taken in one
        evaluation so no two facts in it are from different moments. */
     sample() {
@@ -320,24 +343,37 @@ async function ruleC(rig) {
    same instant in two worlds, and the only variable left is how long the wall
    clock took to get there. */
 async function runFor(rig, scale, gameSec) {
-  await rig.open("games/warlord.html", "go=1&seed=1337&weather=off&sound=off");
+  await rig.open("games/warlord.html", QS);
   if (!await rig.wait(BOOT, 120000)) throw new Error("never reached the campaign");
   await rig.evl(HELPERS);
   await rig.evl(`window.__wlSpeed.calm()`);
   await sleep(2500);                             // the build stall, spent
   await rig.evl(`(() => { window.__wlSpeed.calm(); CBZ.warlord.clock.setScale(${scale}); return true; })()`);
+  /* THE SETTLE, AND RULE A ALREADY LEARNED THIS LESSON — see its own comment.
+     The first worldTick after a scale change catches up whatever wall time has
+     passed since the last one, warped by the NEW scale, and that is a
+     legitimate jump in the world that is not the rate being measured. RULE A
+     spends 1.4 s on it and this function spent none, so at 16x on a page
+     running at 13 fps the jump landed INSIDE the measurement window and the
+     run overshot its thirty game seconds by six times — which then failed
+     "game hours elapsed" against a world that was behaving perfectly. Same
+     stall, same 1.4 s, same reason. */
+  await sleep(1400);
+  await rig.evl(`window.__wlSpeed.calm()`);
   const a = await rig.evl(`window.__wlSpeed.sample()`);
   const hourSecs = await rig.evl(`window.__wlSpeed.hourSecs()`);
   const untilHours = a.hours + gameSec / hourSecs;
   const wall0 = Date.now();
-  let b = a;
-  for (let i = 0; i < 6000; i++) {
+  /* POLL CHEAP, SAMPLE ONCE. See __wlSpeed.tick: the full sample is what was
+     overshooting the target, not the world. */
+  for (let i = 0; i < 20000; i++) {
     await rig.evl(`window.__wlSpeed.calm()`);
-    b = await rig.evl(`window.__wlSpeed.sample()`);
-    if (b.hours >= untilHours) break;
-    await sleep(scale >= 8 ? 40 : 220);
+    const t = await rig.evl(`window.__wlSpeed.tick()`);
+    if (t.hours >= untilHours) break;
+    await sleep(scale >= 8 ? 20 : 220);
     if (Date.now() - wall0 > 200000) break;
   }
+  const b = await rig.evl(`window.__wlSpeed.sample()`);
   const t = bandTravel(a, b);
   return {
     hours: b.hours - a.hours, day: b.day,
@@ -410,7 +446,7 @@ const run = async () => {
   const rig = await launch({ rafBudget: 0 });
   try {
     if (want("A") || want("B") || want("D")) {
-      await rig.open("games/warlord.html", "go=1&seed=1337&weather=off&sound=off");
+      await rig.open("games/warlord.html", QS);
       if (!await rig.wait(BOOT, 120000)) {
         fail("boot", "the island never came up");
       } else {
