@@ -63,7 +63,12 @@ const beats = [
     label: "The open-sea face",
     focus: "The bore still in deep water: long, low and FAST — c = √(g·d), so out here it has all its speed and not yet all its height. Blue-green and translucent, spray tearing off the lip. Watch frontV: this must be the fastest the wave moves before the crash.",
     wait: { state: "active", phase: "sweep", untilShoal: 0.55 },
-    shot: { mode: "front", back: -118, side: 126, alt: 46, aimAhead: -6, aimY: 14 },
+    /* 2026-09-01: 46 m up and 118 m ahead the tripod looked DOWN onto the
+       crest, so the frame was the white cap and never the face — the one
+       thing this beat exists to show (the translucent, back-lit blue-green
+       body). Lower and closer, the lens sits at the height of the wall's
+       mid-face and the curl is a wall, not a rug. */
+    shot: { mode: "front", back: -70, side: 96, alt: 16, aimAhead: -2, aimY: 9 },
   },
   {
     id: "peak",
@@ -210,6 +215,20 @@ async function stageTsunami(input) {
     // swim.js owns the breath meter and will happily drown the storyboard;
     // restoring hp every tick is what keeps the run alive through it
     CBZ.player.hp = 100; CBZ.player.dead = false;
+    /* THE UNDERWATER-FOG TRAP (2026-09-01). world/water_underwater.js grades
+       the medium off CBZ.camera's world position, and during stepSim the
+       game's own camera follows the PLAYER — who, once the flood arrives, is
+       under it. It then swaps scene.fog for a 34 m teal one and every later
+       render, this preset's detached tripod included, came back as a milky
+       cyan soup: the landfall, crossing, inundation and undertow beats of the
+       old reports were photographs of the dive tint, not of the wave. The
+       player is parked in the air over the island centre every tick, so the
+       game camera never submerges and the fog stays the sky's. */
+    const A0 = CBZ.surv && CBZ.surv.arena;
+    if (A0 && CBZ.player.pos) {
+      CBZ.player.pos.x = A0.center.x; CBZ.player.pos.z = A0.center.z; CBZ.player.pos.y = 140;
+      if (CBZ.player.vel) { CBZ.player.vel.x = 0; CBZ.player.vel.y = 0; CBZ.player.vel.z = 0; }
+    }
   };
   let ticks = 0, totalMs = 0, maxMs = 0, over33 = 0;
   const step = (secs) => {
@@ -407,10 +426,15 @@ export default {
   id: "tsunami-stages",
   title: "The Tsunami: Drawdown, Stand, Crash, Undertow",
   description: "One seeded survival tsunami per build, polled to the same PHYSICAL beats — the drawdown that is the only warning, the fast open-sea curl, the PEAK where shoaling has traded all that speed for height and the wall STANDS over the beach at a crawl, the CRASH where the lip comes down and releases the bore, the Miyako landfall on the debris churn, the inundation with roofs as islands, the undertow tearing back out, and the wreckage it leaves. Every tripod is placed relative to the live wave front, so the shots line up even though the bearing is random per run.",
+  /* 2026-09-01: the pacing A/B (cfg_TSU_PACE_V2=0 on the before side) is
+     retired — that wave shipped and the flag is legacy-true. The preset now
+     photographs a CODE change: pass `--before http://127.0.0.1:PORT/` pointing
+     at a served `git worktree add <scratch>/before HEAD --detach` and the
+     working tree is the after. `defaultBefore: "local"` is kept only so a
+     no-arg run still boots (both columns identical = the noise floor). */
   defaultBefore: "local",
-  beforeParams: { cfg_TSU_PACE_V2: 0 },
-  beforeLabel: "BEFORE · SLOW CLOCK (TSU_PACE_V2=0)",
-  afterLabel: "AFTER · NORMAL SPEED",
+  beforeLabel: "BEFORE · HEAD",
+  afterLabel: "AFTER · WORKING TREE",
   viewport: { width: 1180, height: 700 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },

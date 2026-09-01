@@ -2083,6 +2083,30 @@
     U.uDwFrontS = { value: -1e9 };                        // signed front position along dir
     U.uDwFrontRun = { value: 110 };                       // m the churn decays over, behind
     U.uDwMud = { value: new THREE.Color(opts.mudColor == null ? 0x171208 : opts.mudColor) };
+    /* ---- THE FLOW, AND WHY THE SHEET NEEDED TO KNOW ABOUT IT -------------
+       A flood is not a rough sea; it is a RIVER with no banks, and the one
+       thing that says so on screen is that everything on it — every ripple,
+       every foam streak, every plume of silt — is travelling the same way at
+       the same speed. Without a flow vector the surface could only be
+       isotropic noise, which is what made the old streak term a wash: it was
+       "some white", not "white being dragged somewhere".
+
+       uDwFlow is a unit direction in world XZ and uDwFlowSpd its speed in m/s
+       (both published by the tsunami: inland while it sweeps and stands,
+       SEAWARD on the drain, which is what makes the undertow visible from a
+       helicopter). uDwStand is 0 for a live bore and 1 for water that has
+       been standing — the two ends of the foam's life, streaks torn off a
+       moving front at one end and a slow scum network at the other. */
+    U.uDwFlow = { value: new THREE.Vector2(1, 0) };
+    U.uDwFlowSpd = { value: 0 };
+    U.uDwStand = { value: 0 };
+    /* The lighter end of the sediment ramp — silt held near the surface, which
+       is what makes a real inundation MOTTLED instead of one flat brown. And
+       the foam colour the soup is allowed to make: whitewater churned out of
+       a suspension is tan, never paper-white, and painting it white is most of
+       what made the flooded town read as snow. */
+    U.uDwSilt = { value: new THREE.Color(opts.siltColor == null ? 0x1f1810 : opts.siltColor) };
+    U.uDwFoam = { value: new THREE.Color(opts.dirtyFoamColor == null ? 0x8e8271 : opts.dirtyFoamColor) };
 
     const vs = [
       "uniform float uSeaTime;",
@@ -2126,19 +2150,73 @@
       "uniform float uDwFrontS;",
       "uniform float uDwFrontRun;",
       "uniform vec3 uDwMud;",
+      "uniform vec3 uDwSilt;",
+      "uniform vec3 uDwFoam;",
+      "uniform vec2 uDwFlow;",
+      "uniform float uDwFlowSpd;",
+      "uniform float uDwStand;",
       "varying vec3 vDwWorld;",
       "varying vec3 vDwNormal;",
       "varying float vDwHeight;",
       "varying float vDwDist;",
       "#include <fog_pars_fragment>",
+      /* ---- ACTUAL NOISE, AND WHY THE OLD SURFACE WAS A WHITE SHEET --------
+         Every broken-up term in this shader used to be broken up by
+         `n = (a.b + b.b) * 0.5` — the BLUE channel of the shared ripple tile.
+         That tile is a NORMAL MAP: blue is 1/sqrt(nx*nx+1+nz*nz), and the
+         ripples in it are shallow, so blue never leaves [0.92, 1.0] and `n`
+         is a CONSTANT 0.93 to within four per cent. Everything "broken by
+         noise" was therefore not broken at all. The streak term —
+         smoothstep(0.58, 0.95, tile.b), i.e. smoothstep of a number that is
+         always ~0.96 — evaluated to 1.0 across the entire 130 m behind the
+         front and mixed 62% pure white over it. That is the flat snow-white
+         plain in the landfall shot, and no amount of retuning a threshold was
+         going to fix a signal with no variance in it.
+
+         So the turbid block gets a real value-noise field. Two octaves, four
+         hashes each, evaluated only where uDwSediment > 0 — which is nowhere
+         at all for the calm sea, the flash flood and every other consumer. */
+      "float dwHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }",
+      "float dwNoise(vec2 p) {",
+      "  vec2 i = floor(p), f = fract(p);",
+      "  vec2 u = f * f * (3.0 - 2.0 * f);",
+      "  float a0 = dwHash(i), b0 = dwHash(i + vec2(1.0, 0.0));",
+      "  float c0 = dwHash(i + vec2(0.0, 1.0)), d0 = dwHash(i + vec2(1.0, 1.0));",
+      "  return mix(mix(a0, b0, u.x), mix(c0, d0, u.x), u.y);",
+      "}",
+      "float dwFbm(vec2 p) {",
+      "  vec2 r = vec2(p.x * 0.862 + p.y * 0.507, p.y * 0.862 - p.x * 0.507);",
+      "  return dwNoise(p) * 0.62 + dwNoise(r * 2.31 + 17.7) * 0.38;",
+      "}",
       "void main() {",
       // Two octave normal flow: the useful part of the reference's FBM, but
       // sampled from the one shared tile and distance-damped to avoid sparkle.
-      "  vec2 q0 = vDwWorld.xz * 0.042 + vec2(uSeaTime * 0.030, -uSeaTime * 0.021);",
-      "  vec2 q1 = vec2(vDwWorld.z, -vDwWorld.x) * 0.079 + vec2(-uSeaTime * 0.022, uSeaTime * 0.027);",
+      /* AND IT FLOWS. The detail coordinates are dragged along the flow
+         vector, so the small-scale texture of a flood visibly MOVES the way
+         the flood does — inland under the bore, seaward on the drain. Scaled
+         by uDwSediment, so a clean sea samples the identical coordinate it
+         always did. */
+      "  vec2 dwP = vDwWorld.xz - uDwFlow * (uDwFlowSpd * uSeaTime * uDwSediment);",
+      /* AND THE TILE HAS TO STOP BEING A TILE. uSeaNormal is six integer-
+         frequency sines on a 256px wrap: on open blue water nobody sees it,
+         but a glossy mud sheet reflects the sky off exactly that relief and
+         the 24 m lattice prints a visible CHECKERBOARD across the flooded
+         town. One domain warp — two noise samples nudging the lookup by up to
+         12 m — turns the lattice into an irregular field for the cost of eight
+         hashes, and it is inside a uniform branch, so the calm sea, the flash
+         flood and every other consumer pay nothing and sample the identical
+         coordinate they always did. */
+      "  if (uDwSediment > 0.002) {",
+      "    dwP += (vec2(dwNoise(dwP * 0.019), dwNoise(dwP * 0.019 + 53.0)) - 0.5) * 11.0;",
+      "  }",
+      "  vec2 q0 = dwP * 0.042 + vec2(uSeaTime * 0.030, -uSeaTime * 0.021);",
+      "  vec2 q1 = vec2(dwP.y, -dwP.x) * 0.079 + vec2(-uSeaTime * 0.022, uSeaTime * 0.027);",
       "  vec3 a = texture2D(uSeaNormal, q0).rgb * 2.0 - 1.0;",
       "  vec3 b = texture2D(uSeaNormal, q1).rgb * 2.0 - 1.0;",
-      "  float detail = mix(0.46, 0.12, smoothstep(45.0, 520.0, vDwDist));",
+      // Dirty water is ROUGHER than clean water — it is boiling. Turbidity
+      // deepens the micro-relief, which is what breaks the sky sheen into
+      // moving facets and gives the sun something to glint off.
+      "  float detail = mix(0.46, 0.12, smoothstep(45.0, 520.0, vDwDist)) * (1.0 - 0.34 * uDwSediment);",
       "  vec3 micro = normalize(vec3((a.r + b.r) * 0.33, 1.0, (a.g + b.g) * 0.33));",
       "  vec3 N = normalize(vDwNormal + micro * detail - vec3(0.0, detail, 0.0));",
       "  if (!gl_FrontFacing) N = -N;",
@@ -2159,6 +2237,18 @@
       "  vec3 R = reflect(-V, N);",
       "  float skyT = smoothstep(-0.12, 0.72, R.y);",
       "  vec3 sky = mix(vec3(0.48, 0.65, 0.72), vec3(0.16, 0.36, 0.58), skyT);",
+      /* THE SKY A FLOOD REFLECTS IS THE SKY OVER THE FLOOD. The analytic
+         gradient above is a fair-weather blue and a disaster day is not one;
+         a mud sheet that mirrors clear blue looks like painted ground with a
+         blue wash on it. fogColor is the exact value modes/survival.js is
+         painting the dome with this frame, so taking the turbid sheen from it
+         makes the water agree with the sky by construction — including every
+         later change to the tsunami's env block. */
+      "  #ifdef USE_FOG",
+      "    vec3 dwSkyC = mix(fogColor * 1.12, fogColor * 0.60, skyT);",
+      "  #else",
+      "    vec3 dwSkyC = sky;",
+      "  #endif",
       "  vec3 outColor = mix(body, sky, fres * 0.72);",
       "  vec3 H = normalize(L + V);",
       "  float glitter = pow(max(dot(N, H), 0.0), 34.0) * (0.18 + fres * 1.35);",
@@ -2166,34 +2256,83 @@
       // Restrained crest foam. Detail noise breaks it into patches; height and
       // analytic tilt keep it at the tipping apex instead of painting flanks.
       "  float n = (a.b + b.b) * 0.5;",
-      // ---- THE TURBID FRONT. Everything below is multiplied by uDwSediment,
-      //      which is 0 for every non-tsunami consumer, so this whole block
-      //      compiles to "no change" on the calm sea and the flash flood.
+      /* ---- THE TURBID FRONT -----------------------------------------------
+         Everything inside the branch below is gated on uDwSediment, which is 0
+         for every non-tsunami consumer, so the calm sea and the flash flood
+         run not one instruction of it.
+
+         What it has to be, from the Tohoku helicopter footage: the inundation
+         is DARK gray-brown, OPAQUE and GLOSSY. It reflects the overcast as a
+         bright sheen at grazing angles and carries hard sun glints; it is
+         mottled with plumes of silt that drift with the current; and the white
+         on it is not a wash but STRUCTURE — a boiling roll a few metres deep
+         riding the leading edge, torn streaks lying along the flow behind it,
+         and, where the water has stood a while, a sparse network of scum lines
+         and rafts covering a tenth of the surface. The previous version had
+         one of those five (a dark body) and painted the other four as a flat
+         62% white over 130 m, which is why the flooded town read as snow.
+
+         Three things make the difference and all three are one idea — the
+         flood is a river: a real noise field (dwFbm) so the foam has
+         variance, a flow VECTOR so that variance is anisotropic and moving,
+         and a fresnel so the body is a liquid rather than a colour. */
       "  float fdS = dot(vDwWorld.xz - uDwFrontC, uDwFrontDir) - uDwFrontS;",
       "  float behind = clamp(-fdS / max(1.0, uDwFrontRun), 0.0, 1.0);",
-      // Dirty everywhere the bore has already been, filthiest at the edge. The
-      // floor is HIGH on purpose: an inundation does not clear behind the
-      // front, it stands there brown for hours, and the first pass's 0.52
-      // floor let the flooded town go back to reading as a clean lagoon.
-      "  float sed = uDwSediment * mix(1.0, 0.88, smoothstep(0.0, 1.0, behind)) * (1.0 - smoothstep(-1.0, 7.0, fdS));",
-      "  sed *= 0.72 + 0.46 * n;",
-      "  vec3 mud = uDwMud * (0.55 + ndl * 0.55);",
-      "  outColor = mix(outColor, mud, clamp(sed, 0.0, 0.94));",
-      // BOILING FOAM ON THE LEADING EDGE: a narrow band riding the front,
-      // broken up by the detail noise so it churns instead of ruling a line.
-      "  float boil = uDwSediment * exp(-abs(fdS) / 13.0) * (0.35 + 0.85 * n);",
-      "  outColor = mix(outColor, uFoamColor * 0.93, clamp(boil, 0.0, 0.90));",
-      // WHITEWATER STREAKS TRAILING BEHIND: the tile sampled stretched 6x along
-      // the travel axis and scrolled with it, so the wake reads as long torn
-      // ribbons pointing back at the sea rather than as generic surface noise.
-      "  vec2 axisXZ = vec2(-uDwFrontDir.y, uDwFrontDir.x);",
-      "  vec2 sq = vec2(dot(vDwWorld.xz - uDwFrontC, uDwFrontDir) * 0.019 - uSeaTime * 0.16,",
-      "                 dot(vDwWorld.xz, axisXZ) * 0.115);",
-      "  float streak = texture2D(uSeaNormal, sq).b;",
-      "  streak = smoothstep(0.58, 0.95, streak) * uDwSediment * (1.0 - behind) * (1.0 - smoothstep(-2.0, 4.0, fdS));",
-      "  outColor = mix(outColor, uFoamColor, clamp(streak * 0.62, 0.0, 0.62));",
+      "  float dwWet = 1.0 - smoothstep(-1.0, 7.0, fdS);",
+      "  float turb = uDwSediment * dwWet;",
+      "  float sed = 0.0, boil = 0.0, whitew = 0.0;",
+      "  if (turb > 0.002) {",
+      "    float bd = max(0.0, -fdS);",                      // metres behind the front
+      "    vec2 fl = uDwFlow;",
+      "    vec2 ax = vec2(-fl.y, fl.x);",
+      "    vec2 adv = vDwWorld.xz - fl * (uDwFlowSpd * uSeaTime);",
+      "    float sAl = dot(adv, fl);",                       // along the flow, advected
+      "    float sAc = dot(adv, ax);",                       // across it
+      // Water that has stood is old water: 1 in the flooded/drain phases, and
+      // reached anyway far enough behind a live front.
+      "    float stand = max(uDwStand, smoothstep(0.30, 1.0, behind));",
+      // THE BODY. Silt plumes are two low-frequency fields drifting with the
+      // current, so the sheet is mottled and the mottling MOVES.
+      "    float plume = clamp(dwFbm(vec2(sAl, sAc) * 0.0068) * 0.72 +",
+      "                        dwNoise(vec2(sAl * 0.0021, sAc * 0.0029) + 11.0) * 0.46, 0.0, 1.0);",
+      "    sed = turb * mix(1.0, 0.92, behind);",
+      "    vec3 mudBody = mix(uDwMud * 0.62, uDwSilt, smoothstep(0.18, 0.92, plume));",
+      "    mudBody *= 0.52 + ndl * 0.44;",
+      // ...AND IT IS GLOSSY. Schlick against the live sky, plus a tight sun
+      // lobe. This is the whole difference between a flood and painted ground:
+      // matte olive was never a wrong colour, it was a missing reflection.
+      "    vec3 Nf = normalize(mix(vDwNormal, N, 0.20));",
+      "    float mf = 0.02 + 0.98 * pow(1.0 - clamp(dot(Nf, V), 0.0, 1.0), 5.0);",
+      "    vec3 turbCol = mix(mudBody, dwSkyC, clamp(mf * 0.80, 0.0, 0.62));",
+      "    turbCol += uSunColor * pow(max(dot(N, H), 0.0), 110.0) * (0.45 + 2.4 * mf);",
+      "    outColor = mix(outColor, turbCol, clamp(sed * 1.28, 0.0, 0.985));",
+      // Whitewater churned out of a suspension is TAN. The dirtier the load,
+      // the further from paper-white the foam is allowed to get.
+      "    vec3 dfoam = mix(uFoamColor, uDwFoam, uDwSediment * 0.88);",
+      // 1. THE ROLL AT THE EDGE. A few metres deep, e-folded behind the front
+      //    and torn into tongues by noise running along the front line, so the
+      //    leading edge is ragged and churning instead of a ruled band.
+      "    float tongue = dwFbm(vec2(sAc * 0.052 + 4.0, uSeaTime * 0.28));",
+      "    boil = clamp(turb * exp(-bd / (2.0 + 5.4 * tongue)) * (0.50 + 0.80 * tongue), 0.0, 0.92);",
+      // 2. STREAKS BEHIND IT. 13:1 anisotropy along the flow and scrolling
+      //    with it, decaying over ~48 m so they read as whitewater being LEFT
+      //    BEHIND by a front rather than as a field of white.
+      "    float streak = smoothstep(0.60, 0.95, dwFbm(vec2(sAl * 0.023, sAc * 0.30)));",
+      "    streak *= exp(-bd / 48.0) * (1.0 - stand * 0.70);",
+      // 3. STANDING FLOOD. A ridged noise gives thin scum LINES; a coarse
+      //    threshold gives the occasional raft. Together a few per cent of the
+      //    surface, which is what a real inundation carries.
+      "    float sc = dwFbm(vec2(sAl * 0.026 + 21.0, sAc * 0.205));",
+      "    float lines = smoothstep(0.92, 1.0, 1.0 - abs(sc * 2.0 - 1.0)) * smoothstep(0.26, 0.72, plume);",
+      "    float raft = smoothstep(0.72, 0.95, dwFbm(vec2(sAl * 0.048, sAc * 0.086) + 31.0));",
+      "    whitew = clamp((streak * 0.38 + (lines * 0.32 + raft * 0.24) * stand) * turb, 0.0, 0.52);",
+      "    outColor = mix(outColor, dfoam, whitew);",
+      "    outColor = mix(outColor, mix(dfoam, uFoamColor, 0.30), boil);",
+      "  }",
       "  float tip = pow(clamp(vDwNormal.y, 0.0, 1.0), 18.0);",
-      "  float foam = smoothstep(0.48, 0.90, vDwHeight + (n - 0.5) * 0.38) * tip * uDisasterFoam;",
+      // The clean sea's crest foam stands down inside the soup — the front's
+      // own foam system owns that water, and running both painted it twice.
+      "  float foam = smoothstep(0.48, 0.90, vDwHeight + (n - 0.5) * 0.38) * tip * uDisasterFoam * (1.0 - turb * 0.96);",
       "  outColor = mix(outColor, uFoamColor, clamp(foam, 0.0, 0.88));",
       // SEA_TRANSLUCENT. The island's sea is the one you actually swim a shark
       // under, so it gets the same view-angle clarity the city ocean does. Any
@@ -2263,7 +2402,16 @@
       // glitter, which is what stops the window being a plain card.
       "    outColor = mix(dwMirror, mix(outColor, sky, 0.86), dwWin);",
       "  }",
-      "  float dwSolid = clamp(max(max(foam, boil), clamp(sed, 0.0, 1.0)), 0.0, 1.0);",
+      /* A SUSPENSION IS OPAQUE, AND THAT WAS THE LAST BIG TELL. dwSolid is
+         what closes cbzSeaAlpha, and feeding it the raw sediment left the
+         flood 5-11% clear — enough, over a bright plaza or a road, to see the
+         LANE MARKINGS through two metres of tsunami. Magnified, the "checker-
+         board" on the flooded town was the town's own pavement grid showing
+         through, and the olive cast on the standing water was grass. Half a
+         metre of Tohoku mud hid a car; the term saturates well before the load
+         does. uDisasterOpacity still multiplies afterwards, so a receding
+         tsunami fades exactly as it always has. */
+      "  float dwSolid = clamp(max(max(foam, boil), max(whitew, min(1.0, sed * 1.9))), 0.0, 1.0);",
       "  gl_FragColor = vec4(outColor, uDisasterOpacity * cbzSeaAlpha(V, vDwDist, dwUnder, dwSolid));",
       "  #include <tonemapping_fragment>",
       "  #include <encodings_fragment>",
@@ -2339,6 +2487,25 @@
         const dx = +state.frontDir[0] || 0, dz = +state.frontDir[1] || 0;
         const l = Math.hypot(dx, dz) || 1;
         u.uDwFrontDir.value.set(dx / l, dz / l);
+        // A caller that has a front but no opinion about the flow is flowing
+        // the way the front is going, which is true of every bore.
+        if (!state.flowDir && u.uDwFlow) u.uDwFlow.value.set(dx / l, dz / l);
+      }
+      if (state.flowDir && u.uDwFlow) {
+        const fx = +state.flowDir[0] || 0, fz = +state.flowDir[1] || 0;
+        const fl = Math.hypot(fx, fz) || 1;
+        u.uDwFlow.value.set(fx / fl, fz / fl);
+      }
+      /* CAPPED, and not for physics. The undertow really does run past 9 m/s,
+         but the detail tile is a ~24 m pattern: advecting it that fast smears
+         it into a grey blur, so the SEEN speed saturates where the eye stops
+         reading translation and starts reading motion blur. The direction is
+         never capped, which is the half that carries the undertow. */
+      if (Number.isFinite(state.flowSpeed) && u.uDwFlowSpd) {
+        u.uDwFlowSpd.value = Math.max(0, Math.min(4.5, +state.flowSpeed));
+      }
+      if (Number.isFinite(state.stand) && u.uDwStand) {
+        u.uDwStand.value = Math.max(0, Math.min(1, +state.stand));
       }
       if (Number.isFinite(state.frontS)) u.uDwFrontS.value = +state.frontS;
       if (Number.isFinite(state.frontRun)) u.uDwFrontRun.value = Math.max(1, +state.frontRun);
@@ -2388,18 +2555,61 @@
      their say. (The emissive and specular are faded out with turbidity for the
      same reason — a blue emissive term is why the first pass had a teal wave
      that the palette insisted was black.) */
+  /* 2026-09-01: THE MUD COLUMN'S BOTTOM HALF IS LIFTED ~50%. The old values
+     were tuned against a MeshPhongMaterial carrying a blue emissive term and
+     a broad specular lobe, both of which were doing a lot of unacknowledged
+     lifting; the face material has neither (it earns its brightness from the
+     sun and the sky instead), and with them gone the foot of the landfall
+     wall rendered as pure BLACK — a hole in the frame, not a wave. The clean
+     column is untouched: it was never the one being propped up. */
   const TSU_ROWCOL = [
-    [[0.03, 0.12, 0.20], [0.030, 0.026, 0.020]],
-    [[0.05, 0.18, 0.30], [0.048, 0.041, 0.031]],
-    [[0.08, 0.28, 0.42], [0.078, 0.067, 0.050]],
-    [[0.12, 0.40, 0.55], [0.115, 0.099, 0.075]],
-    [[0.22, 0.55, 0.68], [0.170, 0.150, 0.118]],
-    [[0.42, 0.72, 0.82], [0.250, 0.230, 0.195]],
-    [[0.60, 0.83, 0.90], [0.360, 0.340, 0.305]],
-    [[0.72, 0.90, 0.95], [0.500, 0.485, 0.455]],
-    [[0.55, 0.80, 0.88], [0.340, 0.328, 0.305]],
+    [[0.03, 0.12, 0.20], [0.052, 0.045, 0.034]],
+    [[0.05, 0.18, 0.30], [0.076, 0.065, 0.049]],
+    [[0.08, 0.28, 0.42], [0.115, 0.099, 0.074]],
+    [[0.12, 0.40, 0.55], [0.163, 0.140, 0.106]],
+    [[0.22, 0.55, 0.68], [0.226, 0.199, 0.157]],
+    [[0.42, 0.72, 0.82], [0.310, 0.285, 0.242]],
+    [[0.60, 0.83, 0.90], [0.410, 0.387, 0.347]],
+    [[0.72, 0.90, 0.95], [0.530, 0.514, 0.482]],
+    [[0.55, 0.80, 0.88], [0.375, 0.362, 0.337]],
   ];
-  const TSU_COLS = 30;
+  /* THE GRID IS NOW DENSE ENOUGH TO BE A SURFACE. 9 knots x 30 columns is a
+     low-poly SLOPE: you can count the facets in every screenshot, and the
+     silhouette of the curl is a polyline. The knots above are still the
+     authored shape — they are just resampled through a Catmull-Rom spline
+     onto 16 rows, and the columns tripled, so the curl reads as a curve and
+     the crest has somewhere to put its lobes. 16 x 97 = 1552 vertices, and
+     the per-frame loop below does its trig per COLUMN (angle-addition), not
+     per vertex, so the denser mesh costs less arithmetic than the old one. */
+  const TSU_COLS = 96;
+  const TSU_ROWS = 16;
+
+  function cmr(p0, p1, p2, p3, t) {
+    const t2 = t * t, t3 = t2 * t;
+    return 0.5 * ((2 * p1) + (-p0 + p2) * t
+      + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
+      + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+  }
+  // f 0..1 up the face -> [forward z, height fraction], splined through the knots
+  function tsuProfileAt(f) {
+    const K = TSU_PROFILE, n = K.length;
+    const sPos = Math.max(0, Math.min(n - 1.0001, f * (n - 1)));
+    const i = Math.floor(sPos), u = sPos - i;
+    const a = K[Math.max(0, i - 1)], b = K[i], c = K[Math.min(n - 1, i + 1)], d = K[Math.min(n - 1, i + 2)];
+    return [cmr(a[0], b[0], c[0], d[0], u), cmr(a[1], b[1], c[1], d[1], u)];
+  }
+  // the two palettes, sampled at the same fraction (linear — a colour ramp
+  // does not want the spline's overshoot, which reads as a bright band)
+  function tsuRowColAt(f, out) {
+    const K = TSU_ROWCOL, n = K.length;
+    const sPos = Math.max(0, Math.min(n - 1.0001, f * (n - 1)));
+    const i = Math.floor(sPos), u = sPos - i, j = Math.min(n - 1, i + 1);
+    for (let k = 0; k < 3; k++) {
+      out[k] = K[i][0][k] + (K[j][0][k] - K[i][0][k]) * u;
+      out[3 + k] = K[i][1][k] + (K[j][1][k] - K[i][1][k]) * u;
+    }
+    return out;
+  }
 
   /* ============================================================
      THE WHITECAP — WHAT A BREAKING CREST IS ACTUALLY MADE OF.
@@ -2490,28 +2700,6 @@
     F.a.push(s.ph, s.ampX, s.ampY, s.ampZ, s.rate);
   }
 
-  /* A vertical tear of aerated water down the face. Fades to nothing at BOTH
-     ends: the old streaks were flat PlaneGeometry cards, and a card additive-
-     blended against the sea reads as a white POLE standing on the wave. */
-  function pushTear(F, s) {
-    const q = F.p.length / 3;
-    for (let r = 0; r < 5; r++) {
-      const t = r / 4;
-      const b = s.bright * Math.pow(Math.sin(Math.PI * t), 0.7);
-      const wide = s.wid * (0.45 + 0.55 * Math.sin(Math.PI * t));
-      for (let e = 0; e < 2; e++) {
-        const u = e ? 1 : -1;
-        F.p.push(s.x + u * wide + s.slant * t, s.y - s.len * t, s.z + s.rake * t);
-        F.c.push(b, b, b);
-      }
-    }
-    for (let r = 0; r < 4; r++) {
-      const a0 = q + r * 2;
-      F.i.push(a0, a0 + 2, a0 + 1, a0 + 1, a0 + 2, a0 + 3);
-    }
-    F.a.push(s.ph, s.ampX, s.ampY, s.ampZ, s.rate);
-  }
-
   function foamLayerBuild(F, opts) {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(F.p, 3));
@@ -2564,6 +2752,294 @@
     at.needsUpdate = true;
   }
 
+  /* ============================================================
+     THE FACE MATERIAL — WHERE THE WATER ACTUALLY HAPPENS.
+
+     The wall used to be a vertex-coloured MeshPhongMaterial, and no amount of
+     geometry was ever going to fix what that is: a matte, faceted HILL with a
+     white cap painted on it. A breaking bore has no smooth surface anywhere on
+     it. Its face is SHEETS — aerated water pouring down a dark body in
+     vertical streaks, the streaks tearing into a boiling white cap at the lip
+     and a scour of whitewater at the foot, all of it visibly moving DOWNWARD
+     while the whole front drifts sideways.
+
+     None of that is geometry. It is a fragment program, and it needs four
+     things a Phong material cannot give:
+
+       TEXTURE   a hash fbm sampled in FACE SPACE (metres along the front,
+                 fraction up the face) with the v axis SCROLLING and the noise
+                 stretched several times further along v than along u. Stretch
+                 is the whole trick: isotropic noise on a wave face is a rash,
+                 anisotropic noise is water running down it.
+       FRESNEL   water is a mirror at grazing angles. Without it the face is
+                 a painted wall no matter what colour it is painted.
+       BACKLIGHT the open-sea look. A breaker's lip is THIN, and the sun
+                 coming through it from behind is the turquoise every photo of
+                 a plunging wave is actually about. This is the one term that
+                 separates "blue slope" from "wave".
+       MUD       and all three of the above must switch OFF with turbid. A
+                 debris soup has no gloss, no transmission and no hue — the
+                 landfall wall is opaque, matte and warm-dark, with tan foam.
+
+     THE LINEAR-HEX TRAP applies to every constant below: these are LINEAR
+     values that go through ACESFilmic + sRGB on the way out, so they land
+     much lighter and cooler than they read here. Judge them from a
+     screenshot, never from the number. (Same warning the TSU_ROWCOL table
+     carries, and for the same reason.)
+     ============================================================ */
+  function tsuWallMaterial() {
+    const uni = THREE.UniformsUtils.clone(THREE.UniformsLib.fog);
+    uni.uTime = { value: 0 };
+    uni.uTurbid = { value: 0 };
+    uni.uCurl = { value: 0.5 };
+    uni.uH = { value: 34 };
+    uni.uFoam = { value: 0.7 };
+    uni.uOpacity = { value: 0.92 };
+    uni.uSunDir = { value: new THREE.Vector3(0.42, 0.79, -0.09) };
+    uni.uSunCol = { value: new THREE.Color(1.0, 0.96, 0.88) };
+    uni.uSkyCol = { value: new THREE.Color(0.62, 0.72, 0.86) };
+    uni.uGndCol = { value: new THREE.Color(0.22, 0.24, 0.18) };
+
+    const VERT = [
+      "attribute vec2 aFace;",
+      "varying vec2 vFace;",
+      "varying vec3 vWPos;",
+      "varying vec3 vNrm;",
+      "varying vec3 vBody;",
+      "#include <fog_pars_vertex>",
+      "void main() {",
+      "  vFace = aFace;",
+      "  vBody = color;",
+      "  vec4 wp = modelMatrix * vec4( position, 1.0 );",
+      "  vWPos = wp.xyz;",
+      "  vNrm = normalize( mat3( modelMatrix ) * normal );",
+      "  vec4 mvPosition = viewMatrix * wp;",
+      "  gl_Position = projectionMatrix * mvPosition;",
+      "  #include <fog_vertex>",
+      "}",
+    ].join("\n");
+
+    const FRAG = [
+      "uniform float uTime;",
+      "uniform float uTurbid;",
+      "uniform float uCurl;",
+      "uniform float uH;",
+      "uniform float uFoam;",
+      "uniform float uOpacity;",
+      "uniform vec3 uSunDir;",
+      "uniform vec3 uSunCol;",
+      "uniform vec3 uSkyCol;",
+      "uniform vec3 uGndCol;",
+      "varying vec2 vFace;",
+      "varying vec3 vWPos;",
+      "varying vec3 vNrm;",
+      "varying vec3 vBody;",
+      "#include <fog_pars_fragment>",
+      // no textures exist in this game's water kit, so the noise is hashed.
+      "float h21( vec2 p ) {",
+      "  vec3 q = fract( vec3( p.xyx ) * 0.1031 );",
+      "  q += dot( q, q.yzx + 33.33 );",
+      "  return fract( ( q.x + q.y ) * q.z );",
+      "}",
+      "float vn( vec2 p ) {",
+      "  vec2 i = floor( p ), f = fract( p );",
+      "  f = f * f * ( 3.0 - 2.0 * f );",
+      "  float a = h21( i );",
+      "  float b = h21( i + vec2( 1.0, 0.0 ) );",
+      "  float c = h21( i + vec2( 0.0, 1.0 ) );",
+      "  float d = h21( i + vec2( 1.0, 1.0 ) );",
+      "  return mix( mix( a, b, f.x ), mix( c, d, f.x ), f.y );",
+      "}",
+      /* Four octaves, and the top two are faded out by `fine` with camera
+         distance — a metre-scale octave sampled across a wave that is nine
+         pixels tall is pure aliasing, and it crawls. */
+      "float fbm( vec2 p, float fine ) {",
+      "  float s = 0.0, w = 0.0, a = 0.5;",
+      "  s += a * vn( p ); w += a; a *= 0.52; p *= 2.03;",
+      "  s += a * vn( p ); w += a; a *= 0.52; p *= 2.07;",
+      "  s += a * fine * vn( p ); w += a * fine; a *= 0.52; p *= 2.11;",
+      "  s += a * fine * vn( p ); w += a * fine;",
+      "  return s / max( w, 0.0001 );",
+      "}",
+      "void main() {",
+      "  vec3 toCam = cameraPosition - vWPos;",
+      "  float dist = length( toCam );",
+      "  vec3 V = toCam / max( dist, 0.001 );",
+      "  float fine = 1.0 - smoothstep( 150.0, 560.0, dist );",
+      "  float v = clamp( vFace.y, 0.0, 1.0 );",
+      "  float u = vFace.x;",
+      /* THE FACE POURS. v is a FRACTION of the face, so a constant metres-per-
+         second has to be divided by the live height or a 6 m bore's texture
+         runs six times faster than a 36 m one's. */
+      "  float fall = uTime * ( 2.6 / max( 6.0, uH ) );",
+      /* ANISOTROPY IS THE WHOLE READ, and it has to be measured in METRES,
+         not in the two axes' raw numbers: u is metres along the front and v is
+         a FRACTION of a face that might be 6 m tall or 36. At uH = 14 a
+         v-scale of 1.15 is an 12 m feature and a u-scale of 0.68 is a 1.5 m
+         one — eight to one, which is a sheet running down the face. The first
+         cut had 3.3 m by 5 m, which is 1.5 : 1, which is marbling. */
+      /* AND THEY MUST MEANDER. Sampling straight down v gives streaks that
+         are exactly parallel and exactly vertical — a picket fence painted on
+         the wave, which is what the second pass actually rendered. One slow
+         domain warp in u (itself drifting) makes them converge, braid and
+         lean, and costs one more fbm at the coarsest setting. */
+      "  float warp = fbm( vec2( u * 0.14, ( v + fall * 0.35 ) * 1.7 ), fine * 0.4 ) - 0.5;",
+      "  vec2 qf = vec2( u * 0.68 + warp * 3.4 + uTime * 0.018, ( v + fall ) * 1.85 );",
+      "  vec2 qc = vec2( u * 0.115 - uTime * 0.008, ( v + fall * 0.45 ) * 0.60 );",
+      "  vec2 qd = vec2( u * 2.10 + uTime * 0.05, ( v + fall * 1.7 ) * 3.3 );",
+      "  float n = fbm( qf, fine );",
+      "  float nc = fbm( qc, fine * 0.6 );",
+      "  float nd = fine > 0.02 ? fbm( qd, fine ) : 0.5;",
+      /* THE CAP IS NOT THE FACE. Up at the lip the surface is nearly
+         HORIZONTAL, so the face-space stretch that makes sheets on the front
+         makes corduroy on the top. The cap gets its own near-isotropic field,
+         scrolling forward with the break. */
+      "  float nf = fbm( vec2( u * 0.40 + uTime * 0.03, ( v + fall * 0.8 ) * 7.5 ), fine );",
+      // (a) aerated water running down the face: strongest in the upper half
+      /* THE SCOURED BORE IS THE CHAOTIC ONE. Every threshold below opens up
+         with the sediment instead of closing: a bore that has torn up a
+         shelf and a town is 40-60% churning whitewater over a dark body, not
+         a clean dark face with a white line drawn on top of it. Miyako is the
+         most turbulent frame of the whole event, and the first cut had it as
+         the calmest one. */
+      "  float upper = smoothstep( 0.05, mix( 0.52, 0.24, uTurbid ), v );",
+      /* TWO SCALES, because a wave face has two: metre-wide TEARS of aerated
+         water, and the broad SHEETS several metres across that they run
+         inside. One scale alone is a comb. */
+      "  float sLo = mix( 0.50, 0.38, uTurbid ), sHi = mix( 0.92, 0.72, uTurbid );",
+      "  float streak = smoothstep( sLo, sHi, n * 0.74 + nc * 0.38 + ( nd - 0.5 ) * 0.36 * fine );",
+      "  float sheet = smoothstep( mix( 0.52, 0.42, uTurbid ), mix( 0.88, 0.72, uTurbid ), nc * 0.72 + n * 0.28 );",
+      "  float aer = max( streak, sheet * mix( 0.72, 0.95, uTurbid ) ) * upper * ( 0.45 + 0.55 * nc );",
+      // (b) the cap. Its lower edge is EATEN by the noise; solid at the lip.
+      /* THE LOWER EDGE OF THE CAP IS THE WHOLE SILHOUETTE. Sampled at a
+         CONSTANT v it is a pure function of distance along the front, which
+         is a torn line with tongues of white water reaching metres down the
+         face — and metres is the right amount: a 4% wobble on a boundary is
+         a straight line with a texture on it. */
+      "  float capJag = fbm( vec2( u * 0.42 - uTime * 0.025, 3.7 ), fine * 0.5 );",
+      "  capJag = capJag * 0.66 + ( nf * 0.5 + nc * 0.5 ) * 0.34;",
+      "  float capEdge = 0.925 - ( 0.19 + 0.46 * uTurbid ) * capJag - 0.035 * uCurl;",
+      "  float cap = smoothstep( capEdge, capEdge + 0.085, v );",
+      /* A CAP THAT IS SOLID IS A PAINTED LID. Below the very lip the white
+         water is a MESH of tongues with body colour showing through it, so
+         the band is eaten by the fine field everywhere except the top 5%. */
+      "  cap *= mix( 1.0, smoothstep( 0.26, 0.70, nf * 0.62 + nc * 0.38 ), 1.0 - smoothstep( 0.88, 0.97, v ) );",
+      "  cap = max( cap, smoothstep( 0.955, 0.998, v ) );",
+      // (c) the boil at the foot — nothing to scour in deep water
+      /* THE DARK WATER HAS TO COME BACK THROUGH. Raising the coverage on its
+         own turns the soup into a tan CLIFF — coverage without gaps is the
+         white-curtain failure wearing mud. So the same fields that spread the
+         foam also carve channels out of it: where they run low the whitewater
+         is punched away entirely and the dark body underneath is what you
+         see. Contrast is the mechanism; the average value is not. */
+      "  float gap = 1.0 - smoothstep( 0.24, 0.58, n * 0.62 + nc * 0.38 );",
+      "  float footN = smoothstep( 0.30, 0.74, nc * 0.55 + n * 0.55 );",
+      "  float boil = ( 1.0 - smoothstep( 0.015, 0.14 + 0.40 * uTurbid, v ) ) * ( 0.42 + 0.58 * uTurbid ) * ( 0.3 + 0.7 * footN );",
+      /* THE STREAKS ARE LINES ON A BODY, NOT A WASH OVER IT. Letting the
+         aeration term reach full foam coverage milked the whole upper face to
+         a flat pale curtain and buried the colour the open-sea beat exists to
+         show. It contributes at most half. */
+      "  float foam = clamp( max( cap, max( aer * mix( 0.52, 0.84, uTurbid ), boil ) ) * ( 0.62 + 0.46 * uFoam ), 0.0, 1.0 );",
+      // (d) a bump normal off the same field, so the lit surface ripples
+      "  float gx = ( fbm( qf + vec2( 0.30, 0.0 ), fine ) - n ) + ( nd - fbm( qd + vec2( 0.30, 0.0 ), fine ) ) * 0.55 * fine;",
+      "  float gy = ( fbm( qf + vec2( 0.0, 0.55 ), fine ) - n ) + ( nd - fbm( qd + vec2( 0.0, 0.55 ), fine ) ) * 0.35 * fine;",
+      "  vec3 nrm = normalize( vNrm );",
+      "  if ( dot( nrm, V ) < 0.0 ) nrm = -nrm;",
+      "  vec3 T = cross( vec3( 0.0, 1.0, 0.0 ), nrm );",
+      "  float tl = length( T );",
+      "  T = tl > 0.08 ? T / tl : vec3( 1.0, 0.0, 0.0 );",
+      "  vec3 B = cross( nrm, T );",
+      "  float bump = ( 0.5 + 0.5 * fine ) * ( 0.85 + 0.6 * uTurbid );",
+      "  vec3 N = normalize( nrm + ( T * gx * 3.4 + B * gy * 1.7 ) * bump );",
+      // ---- lighting. Legacy (non-physical) Lambert, to match everything else
+      "  float ndl = max( dot( N, uSunDir ), 0.0 );",
+      "  vec3 hemiL = mix( uGndCol, uSkyCol, 0.5 + 0.5 * N.y );",
+      /* the body is not one colour either: the coarse field darkens the
+         troughs and lifts the sheets, which is most of what makes a dark
+         turbid wall read as MOVING rather than as a slab of paint. */
+      /* AND THE GAPS GET DARKER AS THE FOAM SPREADS. A bore reads as a bore
+         because dark water shows THROUGH the whitewater in streaks; raising
+         the coverage without deepening the gaps is how iteration 3 got a
+         white curtain. Contrast is the mechanism, average brightness is not. */
+      "  vec3 body = vBody * ( 0.60 + 0.86 * nc + 0.24 * ( n - 0.5 ) )",
+      "           * ( 1.0 - uTurbid * 0.62 * gap );",
+      "  vec3 lit = body * ( hemiL + uSunCol * ndl );",
+      /* FOAM IS MATTER, NOT A HIGHLIGHT. It takes its own diffuse, it never
+         takes the gloss, and once the water is a soup it is TAN — clean white
+         lace on gray-black mud is two unrelated objects in one frame. */
+      "  float mud = uTurbid * uTurbid;",
+      "  vec3 foamCol = mix( vec3( 0.86, 0.93, 0.98 ), vec3( 0.50, 0.435, 0.335 ), mud );",
+      "  foamCol *= 0.60 + 0.56 * ( nf * 0.52 + nc * 0.30 + nd * 0.18 );",
+      "  vec3 foamLit = foamCol * ( hemiL * 0.9 + uSunCol * ( 0.34 + 0.66 * ndl ) );",
+      "  foam *= 1.0 - 0.66 * gap * uTurbid;",
+      "  vec3 col = mix( lit, foamLit, foam );",
+      // ---- the glassy terms. All of them die with the sediment.
+      "  float glass = 1.0 - smoothstep( 0.22, 0.98, uTurbid );",
+      "  float clear = 1.0 - foam * 0.72;",
+      "  vec3 Hv = normalize( uSunDir + V );",
+      "  float ndh = max( dot( N, Hv ), 0.0 );",
+      /* TWO LOBES. The sharp one is the glint off a facet that happens to be
+         aimed at the sun; the broad one is the sheen every wet surface has,
+         and it is the term whose absence turned the mud wall into a black
+         slab when the Phong material went away. The broad one survives the
+         sediment (wet mud is still wet); the glint does not. */
+      "  float spec = pow( ndh, 130.0 ) * ( 0.35 + 2.20 * glass );",
+      "  spec += pow( ndh, 9.0 ) * ( 0.17 + 0.20 * glass );",
+      "  col += uSunCol * spec * clear;",
+      "  float fres = pow( 1.0 - clamp( dot( N, V ), 0.0, 1.0 ), 5.0 );",
+      "  col += uSkyCol * ( 0.02 + 1.15 * fres ) * ( 0.40 + 0.60 * glass ) * clear;",
+      /* THE BACKLIT LIP. When the sun is on the far side of the face the thin
+         water under the overhang transmits, and what comes through is not
+         "brighter blue" — it is a saturated turquoise that the body colour
+         never contains. `thin` is high only near the lip, which is where the
+         sheet actually is thin. */
+      /* THE SUN IN THIS WORLD IS NEARLY OVERHEAD (lights.js puts it at
+         48,90,-10), so a literal "camera opposite the sun" test never fires
+         and the first cut's backlight was dead code. What actually happens on
+         a plunging lip is that the sheet OVERHANGS: its outer face is turned
+         toward the viewer, which means its other side is turned toward the
+         sky, and the light goes straight through it. So the test is the
+         sheet's BACK, not the camera's back — and it fires exactly where the
+         water is thin, which is the whole point. */
+      "  float thru = max( dot( -N, uSunDir ), 0.0 );",
+      "  thru = max( thru, pow( max( dot( V, -uSunDir ), 0.0 ), 3.0 ) * 0.8 );",
+      /* and the general case: the top of a standing wave is a SHEET a metre
+         or two thick with the sky behind it, so it transmits whatever is up
+         there whichever way its local normal happens to be pointing. */
+      "  thru = max( thru, smoothstep( 0.52, 0.95, v ) * max( uSunDir.y, 0.0 ) * 0.62 );",
+      "  float thin = smoothstep( 0.18, 0.90, v ) * ( 0.40 + 0.60 * uCurl );",
+      "  vec3 sss = vec3( 0.13, 0.78, 0.58 );",
+      "  col += sss * uSunCol * thru * thin * glass * 3.4 * clear;",
+      "  col += sss * uSkyCol * thin * glass * 0.75 * clear;",
+      /* AND THE FOOT DISSOLVES INTO THE SEA IT IS RUNNING ON. A wall whose
+         bottom row is fully opaque draws a hard straight line where it meets
+         the water — the single strongest "this is a curtain hung in front of
+         the ocean" tell in the magnified frames. The last metre of the face
+         fades out and takes a wash of white with it. */
+      "  float footFade = smoothstep( 0.0, 0.055, v );",
+      "  float alpha = clamp( uOpacity + foam * 0.55 + uTurbid * 0.07, 0.0, 1.0 ) * footFade;",
+      "  gl_FragColor = vec4( col, alpha );",
+      "  #include <tonemapping_fragment>",
+      "  #include <encodings_fragment>",
+      "  #include <fog_fragment>",
+      "}",
+    ].join("\n");
+
+    const mat = new THREE.ShaderMaterial({
+      name: "CBZ Bore Face",
+      uniforms: uni,
+      vertexShader: VERT,
+      fragmentShader: FRAG,
+      vertexColors: true,          // declares + binds the `color` attribute
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      fog: true,
+    });
+    mat.userData.uni = uni;
+    return mat;
+  }
+
   CBZ.tsuFaceBuild = function (opts) {
     opts = opts || {};
     const H = Number.isFinite(opts.height) ? +opts.height : 34;
@@ -2571,7 +3047,7 @@
     const zs = H / 34;
     const rnd = typeof opts.rnd === "function" ? opts.rnd : Math.random;
     const grp = new THREE.Group();
-    const ROWS = TSU_PROFILE.length, COLS = TSU_COLS;
+    const ROWS = TSU_ROWS, COLS = TSU_COLS;
     const geoms = [], mats = [];
 
     /* Per-column jitter so the front churns instead of reading as a ruler —
@@ -2593,16 +3069,39 @@
           throw makes sections of the crest LEAD and LAG by metres, so the
           wave stops arriving everywhere at the same instant. It rides zJit,
           which the wall applies toward the crest and the foam welds read
-          directly — the foot stays on the waterline the level owns. */
+          directly — the foot stays on the waterline the level owns.
+
+       At 96 columns the white-noise term is finer than the eye reads as
+       "height variation" and becomes RAGGEDNESS instead, which is what it
+       should have been all along, so a third beat frequency carries the
+       metre-scale run-to-run difference the old 30-column noise used to. */
+    /* 4. AND THE WHITE NOISE IS INTERPOLATED, NOT DEALT PER COLUMN. At 30
+          columns an independent draw per column was 10 m raggedness. At 96 it
+          is 3.3 m — one draw per mesh strip — and computeVertexNormals turns
+          that into a different shading normal on every strip: the magnified
+          open-sea frame came back as CORDUROY, a fan of vertical bars at
+          exactly the column pitch, which no amount of fragment work can hide
+          because it is in the geometry's normals. The draws are therefore
+          taken every third column and smoothstepped between, which restores
+          the old ~10 m scale on a mesh three times finer. */
     const zJit = [], hJit = [];
-    const phA = rnd() * 6.283, phB = rnd() * 6.283, phC = rnd() * 6.283;
+    const phA = rnd() * 6.283, phB = rnd() * 6.283, phC = rnd() * 6.283, phD = rnd() * 6.283;
+    const KSTEP = 3, KN = Math.ceil(COLS / KSTEP) + 2;
+    const knH = [], knZ = [];
+    for (let k = 0; k < KN; k++) { knH.push(0.92 + rnd() * 0.16); knZ.push((rnd() - 0.5) * 3.4); }
+    const knot = function (arr, c) {
+      const f = c / KSTEP, i = Math.min(KN - 2, Math.floor(f)), a = f - i;
+      const w = a * a * (3 - 2 * a);
+      return arr[i] + (arr[i + 1] - arr[i]) * w;
+    };
     for (let c = 0; c <= COLS; c++) {
       const u = c / COLS;
       const edge = Math.min(1, Math.min(u, 1 - u) / 0.14);
       const taper = 0.08 + 0.92 * edge * edge * (3 - 2 * edge);
-      const lf = 1 + 0.15 * Math.sin(u * 9.7 + phA) + 0.11 * Math.sin(u * 23 + phB);
-      zJit.push((rnd() - 0.5) * 4.5 + Math.sin(u * 6.9 + phC) * 3.4);
-      hJit.push((0.9 + rnd() * 0.2) * lf * taper);
+      const lf = 1 + 0.15 * Math.sin(u * 9.7 + phA) + 0.11 * Math.sin(u * 23 + phB)
+        + 0.06 * Math.sin(u * 57 + phD);
+      zJit.push(knot(knZ, c) + Math.sin(u * 6.9 + phC) * 3.4 + Math.sin(u * 31 + phD) * 0.9);
+      hJit.push(knot(knH, c) * lf * taper);
     }
     // evidence for the storyboard: how un-ruler the crest actually is
     let hMean = 0; for (let c = 0; c <= COLS; c++) hMean += hJit[c];
@@ -2612,22 +3111,28 @@
     const endTaper = Math.min(hJit[0], hJit[COLS]) / Math.max(0.001, hMean);
     const n = ROWS * (COLS + 1);
     const pos = new Float32Array(n * 3);
+    const face = new Float32Array(n * 2);      // u = metres along the front, v = 0..1 up
     const col = new Float32Array(n * 3);
     const colClean = new Float32Array(n * 3);
     const colMud = new Float32Array(n * 3);
-    let vi = 0;
+    const rc = [0, 0, 0, 0, 0, 0];
+    let vi = 0, fi = 0;
     for (let r = 0; r < ROWS; r++) {
-      const rc = TSU_ROWCOL[r], up = r / (ROWS - 1);
+      const up = r / (ROWS - 1);
+      const pr = tsuProfileAt(up);
+      tsuRowColAt(up, rc);
       for (let c = 0; c <= COLS; c++) {
-        pos[vi] = (c / COLS - 0.5) * W;
-        pos[vi + 1] = TSU_PROFILE[r][1] * H * hJit[c];
-        pos[vi + 2] = TSU_PROFILE[r][0] * zs + zJit[c] * up;
+        const x = (c / COLS - 0.5) * W;
+        pos[vi] = x;
+        pos[vi + 1] = pr[1] * H * hJit[c];
+        pos[vi + 2] = pr[0] * zs + zJit[c] * up;
+        face[fi] = x; face[fi + 1] = up;
         // a little per-column value noise so neither palette reads as a decal
-        const v = hJit[c];                       // 0.9 .. 1.1 about unity
-        colClean[vi] = rc[0][0] * v; colClean[vi + 1] = rc[0][1] * v; colClean[vi + 2] = rc[0][2] * v;
-        colMud[vi] = rc[1][0] * v; colMud[vi + 1] = rc[1][1] * v; colMud[vi + 2] = rc[1][2] * v;
+        const v = hJit[c];                       // ~0.9 .. 1.1 about unity
+        colClean[vi] = rc[0] * v; colClean[vi + 1] = rc[1] * v; colClean[vi + 2] = rc[2] * v;
+        colMud[vi] = rc[3] * v; colMud[vi + 1] = rc[4] * v; colMud[vi + 2] = rc[5] * v;
         col[vi] = colClean[vi]; col[vi + 1] = colClean[vi + 1]; col[vi + 2] = colClean[vi + 2];
-        vi += 3;
+        vi += 3; fi += 2;
       }
     }
     const idx = [];
@@ -2638,13 +3143,12 @@
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    geo.setAttribute("aFace", new THREE.BufferAttribute(face, 2));
     geo.setIndex(idx);
     geo.computeVertexNormals();
     geoms.push(geo);
-    const wallMat = new THREE.MeshPhongMaterial({
-      vertexColors: true, transparent: true, opacity: 0.94, side: THREE.DoubleSide, depthWrite: false,
-      shininess: 72, specular: 0x9fd9eb, emissive: 0x061b25, emissiveIntensity: 0.18,
-    });
+    const wallMat = tsuWallMaterial();
+    wallMat.uniforms.uH.value = H;
     mats.push(wallMat);
     const wall = new THREE.Mesh(geo, wallMat);
     wall.renderOrder = 3;
@@ -2700,12 +3204,21 @@
       if (lipH(x) < 0.3) continue;
       const back = rnd() < 0.3;
       if (back) {
+        /* 2026-09-01: WIDER, BLUNTER, DIMMER. These lie behind the lip and
+           their whole job is to give the band a thickness you can look across
+           from an elevated camera. Magnified, the sharp taper turned each one
+           into a white ARROW sitting on the shader's cap — a pointed shape is
+           a shape, and a shape on foam is a card. Blunt them (taper 0.25-0.5)
+           and — the correction to the correction — keep them BRIGHTER than
+           the cap, never dimmer: a normal-blended vertex under the white it
+           is lying on is a gray card, which is exactly what the dimmed pass
+           rendered. The layer's OPACITY is what makes them subtle. */
         pushShred(crestF, {
           x: x, y: H * (0.862 + rnd() * 0.098) * lipH(x), z: (0.9 + rnd() * 2.6) * zs + lipZ(x) * 0.86,
-          wid: 0.8 + rnd() * 1.6, taper: 0.6 + rnd() * 0.4,
+          wid: 1.4 + rnd() * 2.8, taper: 0.25 + rnd() * 0.25,
           reach: (0.3 + rnd() * 1.4) * zs, drop: (0.4 + rnd() * 1.3) * zs,
           yaw: (rnd() - 0.5) * 2.1, roll: (rnd() - 0.5) * 0.42,
-          bright: 0.78 + rnd() * 0.18, fade: 0.05 + rnd() * 0.12,
+          bright: 0.90 + rnd() * 0.10, fade: 0.05 + rnd() * 0.12,
           ph: rnd() * 6.283, ampX: 0.14 + rnd() * 0.26, ampY: 0.2 + rnd() * 0.4,
           ampZ: 0.16 + rnd() * 0.34, rate: 1.5 + rnd() * 1.5,
         });
@@ -2717,16 +3230,16 @@
            mass shreds are therefore SMALL and their job is the OUTLINE: they
            break the boundary between cap and sky, and they thicken the band
            where two or three of them overlap. Anything bigger is repainting
-           a white wall white and charging a silhouette for it. */
-        pushShred(crestF, {
-          x: x, y: H * (0.93 + rnd() * 0.05) * lipH(x), z: (3.3 + rnd() * 1.4) * zs + lipZ(x),
-          wid: 0.35 + rnd() * 0.9, taper: 0.78 + rnd() * 0.22,
-          reach: (0.4 + rnd() * 1.2) * zs, drop: (0.5 + rnd() * 1.6) * zs,
-          yaw: (rnd() - 0.5) * 1.6, roll: (rnd() - 0.5) * 0.5,
-          bright: 0.88 + rnd() * 0.12, fade: 0.04 + rnd() * 0.12,
-          ph: rnd() * 6.283, ampX: 0.2 + rnd() * 0.4, ampY: 0.35 + rnd() * 0.75,
-          ampZ: 0.25 + rnd() * 0.55, rate: 2.0 + rnd() * 2.2,
-        });
+           a white wall white and charging a silhouette for it.
+
+           2026-09-01: DELETED. The face material now paints the cap itself,
+           with a lower edge torn into tongues by noise at every scale, and a
+           white shred laid on top of a white cap contributes exactly one
+           thing: its own straight edges. Magnified, the open-sea frame showed
+           them for what they always were — a row of white ARROWS pinned along
+           the crest. The shoulder shreds (the `back` branch above, which lie
+           BEHIND the lip and give the band depth) and the torn fringe below
+           stay; the slab on the lip does not. */
         /* THE TORN EDGE IS FIZZ, NOT FLAGS. One metre-wide shred per lip is
            big enough to be seen as an OBJECT — a row of little white pennants
            standing above the crest, which is the paper-plate failure wearing a
@@ -2738,12 +3251,12 @@
           if (rnd() > 0.82) continue;
           pushShred(tornF, {
             x: x + (rnd() - 0.5) * 2.6,
-            y: H * (0.962 + Math.pow(rnd(), 1.6) * 0.062) * lipH(x),
+            y: H * (0.995 + Math.pow(rnd(), 1.6) * 0.075) * lipH(x),
             z: (2.9 + rnd() * 2.4) * zs + lipZ(x),
             wid: 0.22 + rnd() * 0.62, taper: 0.88 + rnd() * 0.12,
             reach: (0.5 + rnd() * 1.9) * zs, drop: (0.7 + rnd() * 2.4) * zs,
             yaw: (rnd() - 0.5) * 2.4, roll: (rnd() - 0.5) * 1.2,
-            bright: 0.4 + rnd() * 0.5, fade: 0.85 + rnd() * 0.15,
+            bright: 0.26 + rnd() * 0.34, fade: 0.85 + rnd() * 0.15,
             ph: rnd() * 6.283, ampX: 0.3 + rnd() * 0.6, ampY: 0.5 + rnd() * 0.9,
             ampZ: 0.35 + rnd() * 0.7, rate: 2.4 + rnd() * 2.6,
           });
@@ -2793,7 +3306,7 @@
       const x = (c / boilCnt - 0.5) * W + (rnd() - 0.5) * (W / boilCnt) * 1.8;
       pushShred(boilF, {
         x: x, y: (0.4 + rnd() * 2.4) * (H / 34), z: (5.6 + rnd() * 4.4) * zs,
-        wid: 2.6 + rnd() * 5.0, taper: 0.5 + rnd() * 0.45,
+        wid: 2.6 + rnd() * 5.0, taper: 0.22 + rnd() * 0.30,
         reach: (2.0 + rnd() * 5.5) * zs, drop: 0.2 + rnd() * 0.5,
         yaw: (rnd() - 0.5) * 1.5, roll: (rnd() - 0.5) * 0.2,
         bright: 0.7 + rnd() * 0.3, fade: 0.12 + rnd() * 0.24,
@@ -2802,29 +3315,13 @@
       });
     }
 
-    /* ---- FACE STREAKS: vertical tears of aerated water down the face -----
-       ONE merged geometry instead of eleven meshes, and each tear now fades
-       to nothing at both ends. The old ones were flat PlaneGeometry cards,
-       and an additive card standing on a wave reads as a white POLE — which
-       is exactly what the before shots have planted across the face. */
-    const tearF = foamLayerNew(10);
-    for (let i = 0; i < 14; i++) {
-      // Below the lip, always: a tear that starts at the crest reads as a
-      // white mast standing ABOVE the wave's silhouette, which is how the old
-      // cards drew attention to themselves in the first place. And they are
-      // faint — aerated water on a face is a hint of texture, not a stripe.
-      const tx = (rnd() - 0.5) * W * 0.94;
-      if (lipH(tx) < 0.3) continue;              // no face left to streak here
-      pushTear(tearF, {
-        x: tx, y: H * (0.6 + rnd() * 0.18) * lipH(tx), z: (1.3 + rnd() * 1.2) * zs + lipZ(tx) * 0.7,
-        wid: 0.28 + rnd() * 0.5, len: H * (0.1 + rnd() * 0.18),
-        slant: (rnd() - 0.5) * 4.2, rake: (rnd() - 0.5) * 1.6 * zs,
-        bright: 0.24 + rnd() * 0.3,
-        ph: rnd() * 6.283, ampX: 0.1 + rnd() * 0.3, ampY: 0.25 + rnd() * 0.6,
-        ampZ: 0.1 + rnd() * 0.3, rate: 1.2 + rnd() * 1.4,
-      });
-    }
-
+    /* THE FACE STREAKS ARE GONE, AND THAT IS THE POINT. Fourteen additive
+       tear-strips were a geometry answer to a SHADING problem: aerated water
+       running down a wave face is a continuous field, not fourteen objects,
+       and at any distance the objects read as sticks lying on the wall. The
+       face material now paints the streaks per fragment, scrolling, at every
+       scale, for one texture fetch of nothing. `streaks` stays on the handle
+       as an empty array because the legacy (flag-off) wave path reads it. */
     const crestL = foamLayerBuild(crestF, { color: 0xffffff, opacity: 0.8, order: 5 });
     const tornL = foamLayerBuild(tornF, { color: 0xf4fbff, opacity: 0.5, order: 6, additive: true });
     const sprayL = foamLayerBuild(sprayF, { color: 0xeaf6ff, opacity: 0.4, order: 6, additive: true });
@@ -2832,13 +3329,12 @@
     // Not additive: dirty foam over a dark sky must still read as WHITE MATTER,
     // and additive white over a bright horizon just blows out to nothing.
     const boilL = foamLayerBuild(boilF, { color: 0xf1f4f2, opacity: 0.0, order: 5 });
-    const tearL = foamLayerBuild(tearF, { color: 0xdff1fb, opacity: 0.2, order: 4, additive: true });
-    const layers = [crestL, tornL, sprayL, footL, boilL, tearL];
+    const layers = [crestL, tornL, sprayL, footL, boilL];
     for (let i = 0; i < layers.length; i++) {
       geoms.push(layers[i].geo); mats.push(layers[i].mat); grp.add(layers[i].mesh);
     }
     const crest = crestL.mesh, foot = footL.mesh, boil = boilL.mesh;
-    const streaks = [tearL.mesh];
+    const streaks = [];
 
     /* ---- THE WAKE -------------------------------------------------------
        Torn whitewater lying on the surface BEHIND the front and streaming
@@ -2882,18 +3378,24 @@
       // the old flat end-cap, ~0.08 = the crest dies into the sea)
       crestVar: crestVar, endTaper: endTaper,
       colClean: colClean, colMud: colMud, mudMix: -1,
+      // per-column trig scratch for the update loop's angle-addition, and the
+      // three phases the crest lobes ride (see tsuFaceUpdate)
+      trig: new Float32Array((COLS + 1) * 8),
+      lobPh: [rnd() * 6.283, rnd() * 6.283, rnd() * 6.283],
       crestL: crestL, tornL: tornL, sprayL: sprayL, footL: footL, boilL: boilL,
-      tearL: tearL, wakeL: wakeL,
+      tearL: null, wakeL: wakeL,
       foams: [crest, foot], boil: boil, streaks: streaks, wake: [],
       geoms: geoms, mats: mats,
     };
   };
 
-  /* Per-frame. Moves the face's 279 vertices in overlapping directional
+  /* Per-frame. Moves the face's 1552 vertices in overlapping directional
      phases and rebuilds the analytic normals; scales the whole profile with
-     the wave's live height; advances the overhang with `curl`; and cross-fades
-     the two palettes with `turbid`. The physical front is untouched — only the
-     visible water churns, so collision can never drift from presentation. */
+     the wave's live height; advances the overhang and the crest lobes with
+     `curl`; cross-fades the two body palettes with `turbid`; and hands the
+     face material the live sun and hemisphere the rest of the world is lit
+     by. The physical front is untouched — only the visible water churns, so
+     collision can never drift from presentation. */
   CBZ.tsuFaceUpdate = function (h, s) {
     if (!h || !h.wall) return false;
     s = s || {};
@@ -2909,39 +3411,126 @@
     // churn amplitude grows with the sediment load — clean open-sea swell is
     // smooth, a debris soup is not
     const chAmp = 1 + turbid * 1.35;
+
+    /* THE TRIG IS PER COLUMN, NOT PER VERTEX. Every phase in this loop is
+       (something in x) + (something in r), so sin(A+B) = sinA·cosB + cosA·sinB
+       turns 1552 sines into 97 of them and a flat run of multiplies. That is
+       what pays for tripling the grid: the dense mesh is CHEAPER to animate
+       than the nine-row one was.
+
+       Columns 0..cols also carry the CREST LOBES — two slow beats and one
+       fast one, drifting in time, applied only to the top of the face. A sine
+       wobble along the lip is a wobble; three incommensurate ones with a
+       forward throw are tumbling fingers, which is what a breaking crest has
+       instead of an edge. */
+    const tr = h.trig, LP = h.lobPh;
+    for (let c = 0; c <= cols; c++) {
+      const x = base[(c * 3)];
+      const A0 = t * 1.55 + x * 0.052;
+      const A1 = t * -2.10 + x * 0.091;
+      const A2 = A0 * 0.77;
+      const k = c * 8;
+      tr[k] = Math.sin(A0); tr[k + 1] = Math.cos(A0);
+      tr[k + 2] = Math.sin(A1); tr[k + 3] = Math.cos(A1);
+      tr[k + 4] = Math.sin(A2); tr[k + 5] = Math.cos(A2);
+      /* FINGERS, NOT A WOBBLE. Four beats give a crest that undulates; a
+         breaking lip is undulation PLUS isolated masses thrown up and out of
+         it. The cubed half-sine is that: it is zero across most of the front
+         and a sharp positive spike where a chunk is tumbling, and its weight
+         rides the sediment because the frame that needs it most is landfall —
+         the beat where `curl` has already collapsed to nearly nothing. */
+      const lobe = Math.sin(x * 0.041 + t * 0.85 + LP[0]) * 0.56
+        + Math.sin(x * 0.108 - t * 1.37 + LP[1]) * 0.30
+        + Math.sin(x * 0.283 + t * 2.31 + LP[2]) * 0.19
+        + Math.sin(x * 0.71 - t * 3.4 + LP[0] * 2.1) * 0.11;
+      const spike = Math.max(0, Math.sin(x * 0.34 + t * 2.9 + LP[1] * 1.7));
+      const spike2 = Math.max(0, Math.sin(x * 0.155 - t * 1.9 + LP[2] * 2.3));
+      tr[k + 6] = lobe;
+      tr[k + 7] = spike * spike * spike * 0.72 + spike2 * spike2 * 0.5;
+    }
+    /* THE LIP TEARS HARDEST WHEN IT IS BROKEN, and `curl` is at its smallest
+       exactly then (disasters.js folds the overhang away at the crash), so a
+       lobe amplitude driven by curl alone switched the raggedness off for the
+       one frame the owner points at. Sediment drives it too. */
+    const lobeY = H * 0.055 * (0.35 + 0.80 * curl + 0.95 * turbid);
+    const lobeZ = (2.4 * curl + 3.2 * turbid) * hs;
+    const fingY = H * 0.10 * (0.25 + 1.05 * turbid + 0.35 * curl);
+    const fingZ = (1.2 + 3.4 * turbid) * hs;
+    const lobeFrom = 0.79 - 0.13 * turbid;
     for (let r = 0; r < rows; r++) {
       const up = r / Math.max(1, rows - 1);
-      for (let c = 0; c <= cols; c++) {
-        const q = (r * (cols + 1) + c) * 3, x = base[q];
-        const ph0 = t * 1.55 + x * 0.052 + r * 0.61;
-        const ph1 = t * -2.10 + x * 0.091 - r * 0.37;
-        p[q] = x + Math.sin(ph1) * up * 0.34 * chAmp;
-        p[q + 1] = base[q + 1] * hs + (Math.sin(ph0) * (0.16 + up * 0.72) + Math.sin(ph1) * up * 0.22) * chAmp;
+      const B0 = r * 0.61, B1 = -r * 0.37, B2 = B0 * 0.77;
+      const sB0 = Math.sin(B0), cB0 = Math.cos(B0);
+      const sB1 = Math.sin(B1), cB1 = Math.cos(B1);
+      const sB2 = Math.sin(B2), cB2 = Math.cos(B2);
+      const ax = up * 0.34 * chAmp;
+      const ay0 = (0.16 + up * 0.72) * chAmp, ay1 = up * 0.22 * chAmp;
+      const az = (0.08 + up * 0.78) * chAmp;
+      const curlZ = up * up * curl * 6.2 * hs;
+      // the lobes live on the top of the face and nowhere else — and the
+      // band deepens with the sediment along with everything else up there
+      const lwr = up > lobeFrom ? (up - lobeFrom) / (1 - lobeFrom) : 0;
+      const lw = lwr * lwr;
+      let q = (r * (cols + 1)) * 3, k = 0;
+      for (let c = 0; c <= cols; c++, q += 3, k += 8) {
+        const s0 = tr[k] * cB0 + tr[k + 1] * sB0;
+        const s1 = tr[k + 2] * cB1 + tr[k + 3] * sB1;
+        const s2 = tr[k + 4] * cB2 + tr[k + 5] * sB2;
+        const lb = tr[k + 6] * lw, fg = tr[k + 7] * lw;
+        p[q] = base[q] + s1 * ax;
+        p[q + 1] = base[q + 1] * hs + s0 * ay0 + s1 * ay1 + lb * lobeY + fg * fingY;
         // OVERHANG: the lip throws further forward the harder the wave curls,
-        // and it curls hardest just before it feels the bottom.
-        p[q + 2] = base[q + 2] * hs + Math.sin(ph0 * 0.77) * (0.08 + up * 0.78) * chAmp
-          + up * up * curl * 6.2 * hs;
+        // and it curls hardest just before it feels the bottom. The tumbling
+        // chunks are thrown forward whether it is curling or collapsing.
+        p[q + 2] = base[q + 2] * hs + s2 * az + curlZ + lb * lobeZ + fg * fingZ;
       }
     }
     a.needsUpdate = true;
     h.wall.geometry.computeVertexNormals();
     h.wall.geometry.attributes.normal.needsUpdate = true;
 
+    /* ---- THE FACE MATERIAL'S LIVE STATE --------------------------------
+       The shader owns the surface now, so what used to be four MeshPhong
+       property pokes is four uniforms — and the light it shades with is the
+       scene's ACTUAL light, read off core/lights.js's rig every frame rather
+       than guessed at build time. A wave lit by a fixed noon sun inside a
+       world running a day cycle is the tell that it is a decal. */
+    const u = h.wall.material.uniforms;
+    u.uTime.value = t;
+    u.uTurbid.value = turbid;
+    u.uCurl.value = Math.min(1, curl / 1.2);
+    u.uH.value = H;
+    u.uFoam.value = foamGain;
+    u.uOpacity.value = 0.86 + turbid * 0.13;
+    const sun = CBZ.sun, hemi = CBZ.hemi;
+    if (sun) {
+      const sm = sun.matrixWorld.elements;
+      const tg = sun.target && sun.target.matrixWorld ? sun.target.matrixWorld.elements : null;
+      let dx = sm[12] - (tg ? tg[12] : 0), dy = sm[13] - (tg ? tg[13] : 0), dz = sm[14] - (tg ? tg[14] : 0);
+      const L = Math.hypot(dx, dy, dz) || 1;
+      u.uSunDir.value.set(dx / L, dy / L, dz / L);
+      const si = sun.intensity;
+      u.uSunCol.value.setRGB(sun.color.r * si, sun.color.g * si, sun.color.b * si);
+    }
+    if (hemi) {
+      const hi = hemi.intensity;
+      u.uSkyCol.value.setRGB(hemi.color.r * hi, hemi.color.g * hi, hemi.color.b * hi);
+      u.uGndCol.value.setRGB(hemi.groundColor.r * hi, hemi.groundColor.g * hi, hemi.groundColor.b * hi);
+    }
+
     // palette cross-fade, only when it has actually moved (a full rewrite of
-    // 279 colours every frame for nothing is the kind of cost that adds up)
+    // every body colour every frame for nothing is a cost that adds up)
     if (Math.abs(turbid - h.mudMix) > 0.012) {
       h.mudMix = turbid;
       const ca = h.wall.geometry.attributes.color, cp = ca.array;
-      for (let i = 0; i < cp.length; i++) cp[i] = h.colClean[i] + (h.colMud[i] - h.colClean[i]) * turbid;
+      /* THE MUD ARRIVES LATE. A linear cross-fade puts the standing wave at
+         the peak beat 60% of the way to Miyako's gray-brown, which is why
+         that frame kept reading as a pale gray-green CLIFF: it had already
+         spent most of its colour before it broke. ^1.45 keeps the green in
+         the water until the bore is actually scouring a town. */
+      const mudF = Math.pow(turbid, 1.45);
+      for (let i = 0; i < cp.length; i++) cp[i] = h.colClean[i] + (h.colMud[i] - h.colClean[i]) * mudF;
       ca.needsUpdate = true;
-      // and the water goes from translucent green glass to opaque mud: the
-      // glassy terms (specular sheen, the blue subsurface emissive) are what
-      // MAKE it read as water, so a debris soup has to lose all of them
-      const m = h.wall.material;
-      m.opacity = 0.90 + turbid * 0.09;
-      m.shininess = 72 - turbid * 62;
-      m.specular.setRGB(0.62 - turbid * 0.56, 0.85 - turbid * 0.78, 0.92 - turbid * 0.85);
-      m.emissiveIntensity = 0.18 * (1 - turbid);
     }
 
     /* ---- THE WHITECAP ----------------------------------------------------
@@ -2962,7 +3551,6 @@
       foamLayerAnim(h.crestL, t, lipZ, dt);
       foamLayerAnim(h.tornL, t, lipZ, dt);
       foamLayerAnim(h.sprayL, t, lipZ * 0.9, dt);
-      foamLayerAnim(h.tearL, t, lipZ * 0.3, dt);
       foamLayerAnim(h.footL, t, 0, dt);
       if (turbid > 0.14) foamLayerAnim(h.boilL, t, 0, dt);
       if (turbid > 0.05) foamLayerAnim(h.wakeL, t, 0, dt);
@@ -2983,7 +3571,7 @@
       const mud = turbid * turbid;
       const cm = h.crestL.mat;
       cm.color.setRGB(1 - mud * 0.34, 1 - mud * 0.4, 1 - mud * 0.47);
-      cm.opacity = Math.min(0.95, (0.72 + mud * 0.14) * gain * pulse);
+      cm.opacity = Math.min(0.95, (0.40 + mud * 0.16) * gain * pulse);
       const tm = h.tornL.mat;
       tm.color.setRGB(0.96 - mud * 0.34, 0.98 - mud * 0.42, 1 - mud * 0.52);
       tm.opacity = Math.min(0.62, (0.22 + curl * 0.12) * gain * pulse);
@@ -2999,12 +3587,6 @@
       h.crestL.mesh.scale.set(1, hs, hs);
       h.sprayL.mesh.scale.set(1, hs, hs);
       h.footL.mesh.scale.set(1, hs, hs);
-      h.tearL.mesh.scale.set(1, hs, hs);
-      // aerated water shows on a blue-green face; on a mud wall there is very
-      // little air left to catch the light, and a bright white streak on
-      // Miyako's black soup reads as a stick lying on the wave
-      h.tearL.mat.color.setRGB(0.87 - mud * 0.3, 0.94 - mud * 0.38, 0.98 - mud * 0.46);
-      h.tearL.mat.opacity = (0.085 + 0.045 * Math.sin(t * 2.0)) * (1 - turbid * 0.72);
       if (h.wakeL) {
         // whitewater the bore has already left behind it, and it carries the
         // same sediment the front does — clean water leaves no wake to see

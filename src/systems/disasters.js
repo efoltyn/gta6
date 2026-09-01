@@ -947,6 +947,13 @@
               W.frontDir = [ctx.st.wx, ctx.st.wz];
               W.frontS = frontLive ? ctx.st.frontS : ctx.R * 2;
               W.frontRun = 130;
+              /* ...and the flow with it, or the sheet keeps whatever the last
+                 event left in these (they live on the one shared wave record).
+                 A silty sea off a flooded coast is STANDING brown water, not a
+                 bore: it drifts, so the streaks stand down and the scum stays. */
+              W.flowDir = [ctx.st.wx, ctx.st.wz];
+              W.flowSpeed = 0.5;
+              W.stand = 1;
             }
           }
         }
@@ -973,7 +980,7 @@
         const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
         // the sea settles back down — and the sediment goes with it (one
         // match's soup must never tint the next event's clean water)
-        if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; W.sediment = 0; }
+        if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; W.sediment = 0; W.flowSpeed = 0; W.stand = 0; }
         if (CBZ.waterEventClear) CBZ.waterEventClear("survival-flood");
       },
       threat(x, z, ctx) {
@@ -2260,6 +2267,19 @@
       W.frontDir = [st.dx, st.dz];
       W.frontS = st.frontS;
       W.frontRun = 130;
+      /* THE FLOW GOES TO THE SURFACE TOO. The shader cannot draw a river
+         without a direction: every ripple, silt plume and foam streak on the
+         flood is dragged along this vector, so the water reads as GOING
+         somewhere. It is the front's own heading while the wave sweeps and
+         while the flood stands, and it REVERSES on the drain — which is the
+         only way an undertow is visible from outside the water. `stand` is the
+         other end of the same idea: 0 while a live bore is tearing streaks off
+         itself, 1 for water that has been sitting long enough to grow a scum
+         network instead. */
+      const seaward = Number.isFinite(flow) && flow < 0;
+      W.flowDir = seaward ? [-st.dx, -st.dz] : [st.dx, st.dz];
+      W.flowSpeed = 0.6 + Math.abs(Number.isFinite(flow) ? flow : 0) * 0.9;
+      W.stand = st.phase === "sweep" ? 0 : (st.phase === "flooded" ? 1 : 0.8);
     }
     if (CBZ.waterEventSet) CBZ.waterEventSet({
       owner: "survival-tsunami", kind: "tsunami", phase: st.phase,
@@ -2571,7 +2591,7 @@
     const st = ctx.st;
     st.phase = "flooded"; st.floodT = 0;
     st.frontV = 0;                 // the front is gone; a stale sweep speed is a lie
-    st.waveAmp = 1.38; st.chopAmp = 1.72; st.foamGain = 0.62;
+    st.waveAmp = 1.06; st.chopAmp = 0.98; st.foamGain = 0.62;
     if (st.wave) st.wave.visible = false;
     if (st.spray) st.spray.setActive(0);
     surgeSet(st.floodSurge);
@@ -2719,9 +2739,18 @@
          values below are chosen for what leaves the renderer, not for what
          they look like in the source: overcast, desaturated, and dark enough
          that gray-black water can read as gray-black water. */
-      ctx.env.fog = 0x1c2b34; ctx.env.fogNear = 70; ctx.env.fogFar = 520;
-      ctx.env.sunInt = 0.50; ctx.env.sunColor = 0xc9d2d6;
-      ctx.env.hemiInt = 0.72; ctx.env.hemiColor = 0x707f88;
+      /* ...AND IT IS A WARM ONE. 0x1c2b34 was a cold slate: correct for a
+         winter storm, wrong for the day the sea comes in, and it was fighting
+         the water — a gray-brown flood under a blue-gray sky reads as two
+         unrelated materials, because the sheen the sheet reflects IS this
+         colour. Warmed and very slightly desaturated (a haze of atomised
+         seawater and pulverised town), with the sun knocked back and the
+         hemisphere dropped and dirtied so nothing is lit from a clean sky.
+         Deliberately small: the buildings have to stay readable, and murk is
+         not the same feeling as dread. */
+      ctx.env.fog = 0x2b2724; ctx.env.fogNear = 65; ctx.env.fogFar = 500;
+      ctx.env.sunInt = 0.47; ctx.env.sunColor = 0xd6cec2;
+      ctx.env.hemiInt = 0.70; ctx.env.hemiColor = 0x7a736c;
       if (st.phase === "sweep") {
         if (CBZ.CONFIG.TSU_SHOAL_V2 !== false && st.speedK) {
           /* ---- SLOWEST AT ITS TALLEST, THEN THE CRASH ---------------------
@@ -2890,7 +2919,10 @@
         st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : st.floodSurge;
         st.sediment = 0.95;
         tsuPublish(ctx, 1.6);
-        ctx.env.fog = 0x21323b; ctx.env.fogNear = 60; ctx.env.fogFar = 440; ctx.env.sunInt = 0.56; ctx.env.hemiInt = 0.78; ctx.env.hemiColor = 0x7a8992;
+        // the standing flood: the haze thickens a little and warms a little
+        // more (the town is in the water now), but the light comes back up —
+        // this is the beat the player has to read roofs and routes across.
+        ctx.env.fog = 0x322d28; ctx.env.fogNear = 58; ctx.env.fogFar = 440; ctx.env.sunInt = 0.54; ctx.env.hemiInt = 0.76; ctx.env.hemiColor = 0x857d74;
         floodActors(dt, ctx, 1.6, "drowned in the flood", st.dx, st.dz);
         tsuCarHandoff(ctx);
         tsuFlotsam(dt, ctx, 1.6);
@@ -2904,7 +2936,7 @@
         st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : 0;
         const drainK = Math.max(0, Math.min(1, next / Math.max(0.1, st.floodSurge)));
         st.drainK = drainK;      // 1 = still fully inundated, 0 = the sea is back
-        st.waveAmp = 0.86 + 0.52 * drainK; st.chopAmp = 0.72 + 1.0 * drainK; st.foamGain = 0.34 + 0.28 * drainK;
+        st.waveAmp = 0.86 + 0.30 * drainK; st.chopAmp = 0.60 + 0.42 * drainK; st.foamGain = 0.34 + 0.28 * drainK;
         // the water that leaves is the dirtiest water there has been — it is
         // carrying the town out with it
         st.sediment = Math.min(1, 0.55 + 0.45 * drainK);
@@ -2939,7 +2971,7 @@
       if (CBZ.audioHush) CBZ.audioHush(false);
       const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
       // the sediment goes with it — one match's soup must never tint the next
-      if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; W.opacity = 1; W.sediment = 0; }
+      if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; W.opacity = 1; W.sediment = 0; W.flowSpeed = 0; W.stand = 0; }
       const o = ctx.arena && ctx.arena.ocean;
       if (o && CBZ.waterDriveDisasterSurface) CBZ.waterDriveDisasterSurface(o, { amp: 0.86, chop: 0.72, foam: 0.34, opacity: 1, sediment: 0 });
       if (o) o.position.y = ctx.arena.oceanY != null ? ctx.arena.oceanY : -0.8;
