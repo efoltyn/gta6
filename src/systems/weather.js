@@ -128,6 +128,14 @@
   const RELEASE = 3.5;          // seconds to bleed a lapsed drive back to ambient
   const drv = { rain: 0, snow: 0, wind: 0, wx: 1, wz: 0, fog: 0, fogColor: -1, lightning: 0, pool: 0, cover: -1 };
   let drvHold = 0;              // seconds of assertion left
+  /* ASH KEEPS ITS OWN CLOCK. The deposit outlives the sky by design — the
+     eruption's fog has to bleed back in three and a half seconds while the
+     blanket on the ground lies there and erodes over minutes — so the ash
+     hold is INDEPENDENT of drvHold. An ash-only assertion (the aftermath
+     scar tick) must not keep drvHold alive, or the eruption's brown fog
+     would be frozen over a finished eruption forever. */
+  const ash = { x: 0, z: 0, wx: 1, wz: 0, amount: 0, reach: 60, lobe: 3, spread: 0.06 };
+  let ashHold = 0;
   let snowMix = 0;              // 0 = rain look, 1 = snow look (eased)
 
   CBZ.weatherDrive = function (spec, holdSecs) {
@@ -152,14 +160,41 @@
     if (Number.isFinite(spec.fog)) drv.fog = Math.max(0, Math.min(1, +spec.fog));
     if (spec.fogColor != null) drv.fogColor = +spec.fogColor;
     if (Number.isFinite(spec.lightning)) drv.lightning = Math.max(0, Math.min(1, +spec.lightning));
-    drvHold = Math.max(drvHold, holdSecs > 0 ? +holdSecs : 0.5);
+    /* `ash`: ashfall LYING ON THE GROUND, as a wedge rather than a scalar —
+       the fall has a source, a bearing and an outside, and a caller that
+       handed over one number could only ever paint the whole map. amount is
+       NOT clamped to 1: it is peak deposit / blanket depth, and a big
+       eruption lays several times the blanket depth on its axis. The shader
+       clamps per fragment, so the >1 headroom is exactly the area of ground
+       that reads as fully blanketed — and that area SHRINKING is how the
+       aftermath thins. */
+    if (spec.ash) {
+      const A = spec.ash;
+      if (Number.isFinite(A.srcX)) ash.x = +A.srcX;
+      if (Number.isFinite(A.srcZ)) ash.z = +A.srcZ;
+      const am = Math.hypot(+A.windX || 0, +A.windZ || 0);
+      if (am > 1e-4) { ash.wx = (+A.windX) / am; ash.wz = (+A.windZ) / am; }
+      if (Number.isFinite(A.amount)) ash.amount = Math.max(0, Math.min(6, +A.amount));
+      if (A.reach > 0) ash.reach = +A.reach;
+      if (A.lobe > 0) ash.lobe = +A.lobe;
+      if (Number.isFinite(A.spread)) ash.spread = Math.max(0, Math.min(1, +A.spread));
+      ashHold = Math.max(ashHold, holdSecs > 0 ? +holdSecs : 0.5);
+    }
+    // An ash-ONLY spec leaves the atmospheric hold alone (see the note on
+    // ashHold above). Anything else — including an empty spec, which is what
+    // every pre-ash caller effectively was — keeps the old behaviour exactly.
+    const atmos = Number.isFinite(spec.rain) || Number.isFinite(spec.snow) ||
+      Number.isFinite(spec.pool) || Number.isFinite(spec.cover) ||
+      Number.isFinite(spec.wind) || spec.windDir != null ||
+      Number.isFinite(spec.fog) || spec.fogColor != null || Number.isFinite(spec.lightning);
+    if (atmos || !spec.ash) drvHold = Math.max(drvHold, holdSecs > 0 ? +holdSecs : 0.5);
     return true;
   };
   // RELEASE IS NOT A SNAP. Dropping the hold lets the tick below bleed every
   // driven field to zero over RELEASE seconds — a disaster ending has to let
   // the rain thin out and the light come back, because that easing IS the
   // all-clear now that nothing prints one.
-  CBZ.weatherRelease = function () { drvHold = 0; };
+  CBZ.weatherRelease = function () { drvHold = 0; ashHold = 0; };
   // THE one wind vector. Anything that needs "which way is the wind blowing"
   // reads this — never a private bearing.
   const _windOut = { x: 1, z: 0, speed: 0 };
@@ -494,6 +529,7 @@
   const SNOW_DRIVE = 0.055;    // a driven blizzard whitens on its own timescale
   let pool = 0, poolAmb = 0, poolPeak = 0;
   let cover = 0, coverPeak = 0;
+  let ashPeakSeen = 0;         // the most veil this session ever carried
   let wetLook = 0;             // eased "how wet does the world look"
 
   function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
@@ -583,6 +619,7 @@
   CBZ.weatherGroundReset = function () {
     pool = poolAmb = 0; cover = 0; wetLook = 0;
     floodHold = 0; uFlood.value.set(0, 0, 0, 0);
+    ashHold = 0; ash.amount = 0; uAshK.value.set(0, 60, 3, 0.06);
     if (CBZ.groundWaterSet) CBZ.groundWaterSet(0);
     if (CBZ.groundWaterFrontSet) CBZ.groundWaterFrontSet(null);
   };
@@ -622,6 +659,29 @@
      HOLD-DECAYED like weatherDrive: the caller asserts it every frame, and a
      def that dies mid-event cannot leave the world muddy. */
   const uFlood = { value: new THREE.Vector4(0, 0, 0, 0) };
+  /* ---- ASHFALL ON THE GROUND (2026-09-01) --------------------------------
+     OWNER'S COMPLAINT, photographed: the volcano's deposit was a LEOPARD
+     PRINT — hundreds of near-identical grey amoebas at partial coverage
+     sitting on bright green grass. A quad field is the right primitive for a
+     DRIFT and the wrong one for a VEIL, and ashfall is a veil first: the
+     whole downwind sector goes uniformly grey (the ground's own colour
+     desaturated and dimmed) long before anything is deep enough to have a
+     shape. So the veil lives HERE, in the coat, where it costs a handful of
+     fragment ops on the surfaces weather already lands on, and world/
+     volcanofx.js's quads are demoted to the drifts they were always good at.
+
+       uCbzAshP  x,z = the vent; z,w = the unit wind bearing
+       uCbzAshK  x = amount (peak deposit / blanket depth, may exceed 1),
+                 y = downwind reach (m), z = lobe exponent, w = spread
+
+     The fragment recomputes the SAME wedge world/volcanofx.js's ledger
+     integrates — k = (spread + (1-spread)*max(dot,0)^lobe) / (1 + (d/reach)^2)
+     — so the picture and the damage agree about where the ash is by
+     construction, not by two tables that have to be kept in step. Its own
+     hold (ashHold) is separate from drvHold because the AFTERMATH keeps
+     asserting the veil for minutes after the sky has finished releasing. */
+  const uAshP = { value: new THREE.Vector4(0, 0, 1, 0) };
+  const uAshK = { value: new THREE.Vector4(0, 60, 3, 0.06) };
   const floodTgt = { mud: 0, crest: 0, band: 0, flow: 0 };
   let floodHold = 0;
   CBZ.weatherFloodLook = function (o) {
@@ -705,7 +765,50 @@
     "    gl_FragColor.rgb = mix(gl_FragColor.rgb, cbzWater, cbzW);\n" +
     "  }\n" +
     "}\n" +
-    "if (uCbzSnowK > 0.001) gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.93, 0.95, 0.99), clamp(uCbzSnowK * cbzUp, 0.0, 1.0));\n";
+    "if (uCbzSnowK > 0.001) gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.93, 0.95, 0.99), clamp(uCbzSnowK * cbzUp, 0.0, 1.0));\n" +
+    /* ---- THE ASH VEIL. Last, because ash lands on top of whatever the
+       weather already did to the surface. Zero-gated on the amount, so a
+       build that never erupts renders exactly as before. */
+    "if (uCbzAshK.x > 0.001) {\n" +
+    "  vec2 cbzAv = vCbzWP.xz - uCbzAshP.xy;\n" +
+    "  float cbzAd = max(length(cbzAv), 0.001);\n" +
+    // the downwind lobe, same maths as the ledger's: a hard cosine wedge on
+    // the wind bearing plus a small isotropic dusting near the vent, divided
+    // by an inverse-square carry. Upwind (dot <= 0) keeps its own colour,
+    // which is the entire reason ashfall reads as a HAZARD WITH AN OUTSIDE.
+    "  float cbzAlb = pow(max(dot(cbzAv / cbzAd, uCbzAshP.zw), 0.0), uCbzAshK.z);\n" +
+    "  float cbzAr = cbzAd / max(1.0, uCbzAshK.y);\n" +
+    "  float cbzAk = (uCbzAshK.w + (1.0 - uCbzAshK.w) * cbzAlb) / (1.0 + cbzAr * cbzAr);\n" +
+    "  float cbzAg = clamp(uCbzAshK.x * cbzAk, 0.0, 1.0) * cbzUp;\n" +
+    "  if (cbzAg > 0.002) {\n" +
+    // BROAD drifts and lees — tens of metres of wavelength. Deliberately NOT
+    // at any grid pitch: the thing this whole term replaces was noise at
+    // exactly the deposit's cell pitch, which is the strongest checkerboard
+    // signal a field can emit.
+    "    float cbzAm = 0.90 + 0.20 * sin(vCbzWP.x * 0.0431 + vCbzWP.z * 0.0247)\n" +
+    "                              * sin(vCbzWP.z * 0.0193 - vCbzWP.x * 0.0117);\n" +
+    "    float cbzAlm = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));\n" +
+    // A FILM IS THE GROUND SEEN THROUGH DUST: desaturated toward its own
+    // luminance and a touch dimmer. The grass is still grass at this stage;
+    // it has just stopped being green.
+    "    vec3 cbzAdust = mix(gl_FragColor.rgb, vec3(cbzAlm) * vec3(0.88, 0.92, 0.98),\n" +
+    "                        clamp(cbzAg * 2.4, 0.0, 1.0));\n" +
+    /* THE BLANKET IS AN ALBEDO SWAP, NOT A PAINT BUCKET. A fixed grey (the
+       snow term's trick) works for a blizzard because a blizzard does not
+       touch the sun; an eruption drives sunInt down 78%, and a constant
+       0.20 grey painted over that would GLOW. So the deposit's brightness
+       is derived from the fragment's OWN lit luminance — compressed hard
+       (pow 0.55) so a lawn, a beach and an asphalt road eighteen times
+       darker all land within a factor of five of each other, which is what
+       "uniformly grey" actually looks like, and lands at zero at midnight.
+       Blue-shifted on purpose: the eruption's sun is 0xd9714a and a neutral
+       grey under it comes out pink — volcanofx.js's own lesson. */
+    "    vec3 cbzAcol = pow(max(cbzAlm, 0.0), 0.55) * 0.30 * cbzAm * vec3(0.92, 0.99, 1.13);\n" +
+    // never a full 1.0: the last few percent of the underlying material is
+    // what keeps a buried road distinguishable from a buried lawn
+    "    gl_FragColor.rgb = mix(cbzAdust, cbzAcol, min(0.94, cbzAg * cbzAg * (3.0 - 2.0 * cbzAg)));\n" +
+    "  }\n" +
+    "}\n";
 
   // EVERY COATED MATERIAL IS A SHADER RECOMPILE, and a storm that recompiles a
   // thousand of them on the frame it starts is a freeze. So the sweep is
@@ -748,6 +851,8 @@
       sh.uniforms.uCbzFront = uFront;
       sh.uniforms.uCbzSky = uSky;
       sh.uniforms.uCbzFlood = uFlood;
+      sh.uniforms.uCbzAshP = uAshP;
+      sh.uniforms.uCbzAshK = uAshK;
       sh.vertexShader = "varying vec3 vCbzWP;\nvarying float vCbzUp;\n" + vs.replace(
         "#include <fog_vertex>",
         "vCbzWP = (modelMatrix * vec4(transformed, 1.0)).xyz;\n" +
@@ -759,6 +864,7 @@
         "#include <fog_vertex>");
       sh.fragmentShader = "uniform float uCbzSnowK;\nuniform float uCbzWetK;\n" +
         "uniform vec4 uCbzPool;\nuniform vec4 uCbzFront;\nuniform vec4 uCbzSky;\nuniform vec4 uCbzFlood;\n" +
+        "uniform vec4 uCbzAshP;\nuniform vec4 uCbzAshK;\n" +
         "varying vec3 vCbzWP;\nvarying float vCbzUp;\n" + fs.replace(anchor, COAT_FS + anchor);
     };
     mat.customProgramCacheKey = function () { return "cbzCoat|" + prevSrc; };
@@ -826,13 +932,19 @@
     fv.z += ((floodHold > 0 ? floodTgt.band : 0) - fv.z) * fk;
     fv.w += ((floodHold > 0 ? floodTgt.flow : 0) - fv.w) * fk;
     if (fv.x < 0.004 && floodHold <= 0) fv.set(0, 0, 0, 0);
-    if (!coatScanned && (wetLook > 0.004 || cover > 0.004 || pool > 0.004)) coatScan();
+    // ...ash included: a volcano is the one event that puts something on the
+    // ground without a drop of rain, and without this line the coat was never
+    // scanned at all in an eruption-only session.
+    if (!coatScanned && (wetLook > 0.004 || cover > 0.004 || pool > 0.004 || ash.amount > 0.004)) coatScan();
     // patched a FEW at a time: a material recompiles on needsUpdate, and
     // recompiling four hundred of them on one frame is a visible stall.
     for (let n = 0; n < 3 && coatQueue.length; n++) coatMat(coatQueue.pop());
 
     uWet.value = wetLook;
     uSnow.value = cover;
+    if (ash.amount > ashPeakSeen) ashPeakSeen = ash.amount;
+    uAshP.value.set(ash.x, ash.z, ash.wx, ash.wz);
+    uAshK.value.set(ash.amount, Math.max(1, ash.reach), Math.max(0.2, ash.lobe), ash.spread);
     // The pond level is only honest near ONE point, and in the game that
     // point is the camera (it rides the player). A photography harness that
     // parks its own camera somewhere else may nominate the point instead —
@@ -1065,7 +1177,11 @@
     // GROUND is dry too — otherwise a storm would leave the streets flooded
     // for the rest of the session.
     const groundLive = pool > 0.0005 || cover > 0.0005 || wetLook > 0.0005 ||
-      drv.pool > 0.0005 || drv.cover >= 0 || coatQueue.length > 0;
+      drv.pool > 0.0005 || drv.cover >= 0 || coatQueue.length > 0 ||
+      // the ash blanket is ground state too: skipping the tick while it is
+      // still standing would freeze the veil on the island for the rest of
+      // the match instead of letting it erode.
+      ashHold > 0 || ash.amount > 0.0005;
     // DARK-PATH EARLY-OUT: with the ambient storm off and nothing driving,
     // the whole tick is skipped — the throttled indoor test used to scan
     // CBZ.platforms and raycast 5×/sec for a cloud that could never appear.
@@ -1109,6 +1225,14 @@
       if (drv.pool < 0.004) drv.pool = 0;
       if (drv.cover >= 0) drv.cover = -1;
       if (drv.rain < 0.004 && drv.snow < 0.004) { drv.rain = drv.snow = 0; drv.fogColor = -1; }
+    }
+    // THE ASH RELEASES ON ITS OWN CLOCK (see ashHold). While the aftermath
+    // scar tick keeps asserting it, this never runs; when the driver dies
+    // mid-event the blanket bleeds off instead of being painted on forever.
+    if (ashHold > 0) ashHold -= dt;
+    else if (ash.amount > 0) {
+      ash.amount -= ash.amount * Math.min(1, dt / RELEASE);
+      if (ash.amount < 0.004) ash.amount = 0;
     }
     const drvI = Math.max(drv.rain, drv.snow);
     intensity = Math.max(ambient, drvI);
@@ -1262,6 +1386,8 @@
     get groundWater() { return pool; },
     get snowCover() { return cover; },
     get wetness() { return wetLook; },
+    // how blanketed the downwind axis is, 0..6 (1 = the blanket depth)
+    get ashVeil() { return ash.amount; },
   };
 
   // Evidence for the ratchet: is the shared weather actually carrying the load
@@ -1286,6 +1412,12 @@
       groundWaterPeak: +poolPeak.toFixed(3),
       snowCover: +cover.toFixed(3),
       snowCoverPeak: +coverPeak.toFixed(3),
+      // THE ASH VEIL AS EVIDENCE: a nonzero amount with a live reach is the
+      // proof the deposit is being drawn by the shared coat and not by five
+      // thousand quads. `ashVeilPeak` survives the event's own release.
+      ashVeil: +ash.amount.toFixed(3),
+      ashVeilPeak: +ashPeakSeen.toFixed(3),
+      ashReach: Math.round(ash.reach),
       wetness: +wetLook.toFixed(3),
       coatedMaterials: coated.length,
       coatPending: coatQueue.length,

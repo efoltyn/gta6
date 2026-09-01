@@ -113,7 +113,7 @@
     <!-- The clear-waypoint affordance is a BUTTON, not a key legend: an iPad has
          no Space bar, so the only documented way to drop a waypoint did not
          exist there at all. fullmap.js relabels it "Clear waypoint" on touch. -->
-    <div class="fullmap-foot"><span id="fullMapReadout">No waypoint set</span><button id="fullMapClear" type="button" class="fullmap-clear">[Space] clear waypoint</button></div>
+    <div class="fullmap-foot"><span id="fullMapReadout">No waypoint set</span><div class="fullmap-actions"><button id="fullMapLaunch" type="button" class="fullmap-launch" hidden>Launch Patriot</button><button id="fullMapClear" type="button" class="fullmap-clear">[Space] clear waypoint</button></div></div>
   </div>
 </div>
 <div id="waypointGuide" class="panel">
@@ -427,7 +427,6 @@
 </script>
 <!-- 0. namespace + constants -->
 <script src="src/config.js?v=sharkmode1"></script>
-<script src="src/core/seed.js"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
@@ -956,6 +955,13 @@
 <script src="src/city/wildlife.js?v=indiv1"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
+<!-- THE ANGLE LAW loads first because it is the one thing all three biters
+     ask (the shared strike frame, the mounted bite, the pod's flank pass) and
+     it must exist before any of them can consult it. It is pure geometry with
+     no build step and no dependency of its own — every neighbour it consumes
+     (predatorKit, marineGape, marineHurt) is asked for at CALL time, so its
+     position here is about readability, not load order. -->
+<script src="src/systems/bite_angles.js?v=biteangles1"></script>
 <!-- IRONJAW ARENA. arena_venue.js is the BUILDING (raked bowl, concourse,
      vomitories, roof truss, light rig, jumbotron, instanced crowd);
      arena_fights.js is the FIGHT SURFACES + sim. Both only run at world build,
@@ -1026,6 +1032,23 @@
      Reverts: ?cfg_COMPANION_BOARDING_V1=0 (the arcs) ·
      ?cfg_FOLLOWER_ORDERS_V1=0 (the verbs) · ?cfg_CAR_DOOR_ARC=0 (just the
      player's own car door beat, leaving companions boarding). -->
+<!-- THE OTHER SEAT (owner: "a button should move me to passenger ... and then
+     if I go to the door I can even jump out"). [G] / the SEAT pill slides the
+     player across to the shotgun seat of a car or back from a boat's helm: the
+     shipped seat solve mirrored to −seatX, and the driving loop reading its
+     keys out of a frozen empty object so the machine coasts to a stop with
+     nobody at the controls. Opening the door above walking pace is a real jump
+     — the shared CBZ.body.fling launch, road rash scaled by speed, and the car
+     carrying on driverless down vehicles.js's own wreck-coast path. Also makes
+     boarding.js's "run it to the warehouse" a ride instead of a kerb.
+     Must load AFTER vehicles.js (the seat solve + the exit it mirrors) and
+     boarding.js (seats, and the door leaf it poses).
+     Reverts: ?cfg_PASSENGER_SEAT_V1=0 (the whole seat + button) ·
+     ?cfg_VEHICLE_BAIL=0 (just the jump — the old stop-dead step-out returns) ·
+     ?cfg_PAX_CHAUFFEUR=0 (riding while a companion drives). PAX_AIRCRAFT is
+     declared and OFF: a passenger deck in a machine the player is flying is
+     playeraircraft.js/bailout.js's wave, and the button says so. -->
+<script src="src/city/passengerseat.js?v=pax1"></script>
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
@@ -1035,7 +1058,19 @@
      RUBBLE). nukefx + aircraftimpact register FX/consumers by name.
      MUST precede strategic.js, which now routes its B-2/nuke through the bus. -->
 <script src="src/systems/impactbus.js?v=nukefield2"></script>
-<script src="src/city/structural.js?v=nukefield1"></script>
+<!-- THE COLLAPSE ENGINE. The ONE answer to "what does a building look like
+     while it is being destroyed", shared by the city ledger (structural.js),
+     the disaster island (systems/disasters.js) and anything else that
+     condemns a structure. Derives what the building is MADE OF from the
+     facade grammar it is wearing (city/facade_kit.js's `structure:` field)
+     and picks a collapse grammar to match — pancake / topple / shear / fold /
+     crumble — then disintegrates it into real debris instead of scaling a
+     grey box down. Also owns the progressive damage skin on buildings that
+     are still standing. Reverts: ?cfg_COLLAPSE_V2=0 (both callers fall back
+     to the collapse they had) · ?cfg_COLLAPSE_FRAGMENTS=0 (motion without
+     debris) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
+<script src="src/city/collapse.js?v=collapse1"></script>
+<script src="src/city/structural.js?v=collapse1"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
      severe weather, deterministic per in-game day. The survival-mode duplicate
@@ -1144,6 +1179,12 @@
      exactly two shown answers (BOARD/HIJACK card grammar); punch and walking
      away are the two unshown exits. Loads after interactions/interact/
      street_talk/interactions_rich; contracts.js + phone.js read lazily. -->
+<!-- THE STORE RACKET — rob-or-extort at every counter, protection as the
+     conquerable territory layer, owner memory, and the NPC crews playing the
+     same game. Loads after interactions/interact (registers its verbs), after
+     shops (cityTill is the only money source) and after gangs/turf (it steers
+     crews and feeds zone control). Flag: RACKET_V1. -->
+<script src="src/city/racket.js?v=racket1"></script>
 <script src="src/city/stuntjumps.js?v=ballistic2z"></script>
 <!-- MARINA + BOATYARD: finger berths, Med-moor quay, fuel dock, travel-lift
      well, IALA Region B buoyage, and a dealer with three demo hulls floating
@@ -1546,6 +1587,15 @@
      marina hard stand. Loads after piracy.js (marineAutopilot, pirateProvoke)
      and before water_helm; every cross-read is feature-detected.
      Revert with ?cfg_CAPTAIN_V1=0. -->
+<!-- BOAT WALK — the jump key at the wheel stands you up onto your own deck
+     (CBZ.boatStandUp, called by water_helm's Space edge and the touch GET UP
+     pill), and a "take the helm" walk-up card at every hull's helm station
+     (water_hulls spec.helm — the same point view.js's wheel view sits at), so
+     stepping back to the wheel re-takes her on ANY hull, including bridges
+     five metres off the hull centre the generic vehicle card can't reach.
+     Every cross-read (mpGroundAt, interactions, cityEnter/ExitVehicle,
+     marineHulls) is feature-detected. Revert with ?cfg_BOAT_WALK=0. -->
+<script src="src/city/boatwalk.js?v=boatwalk1"></script>
 
 <!-- SEATS OF POWER — the standalone complexes that do NOT fit inside a city
      block: the capitol, the executive mansion, the agency headquarters, the

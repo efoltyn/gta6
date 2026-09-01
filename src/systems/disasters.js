@@ -1558,7 +1558,12 @@
         narrate("hint", "THE VOLCANO IS WAKING, get off the mountain!", 3);
         sound("rumble"); if (CBZ.shake) CBZ.shake(0.3 + 0.4 * M);
         const h = ctx.arena.hills[0];
-        ctx.st.preGlow = disc(h.x, h.z, 0xff5210, 0.0, h.peak + 0.3);
+        /* 0.3, NOT h.peak + 0.3: disc() already stands its mesh on floor(x, z),
+           and the floor under the vent IS the peak. Passing the peak again
+           parked the crater glow 26 m above the summit — a tan coin hanging in
+           the sky over every warning (and, leaked through force(), over every
+           storyboard eruption since the disc was written). */
+        ctx.st.preGlow = disc(h.x, h.z, 0xff5210, 0.0, 0.3);
         ctx.st.preGlow.material.blending = THREE.AdditiveBlending;
         ctx.st.preGlow.scale.set(4, 4, 1);
         const wa = rnd() * 6.28; ctx.st.wx = Math.cos(wa); ctx.st.wz = Math.sin(wa);
@@ -3096,6 +3101,47 @@
   const ASH_DOT_DEPTH = 0.006;   // shreds unsheltered lungs
   const ASH_VISUAL_FULL = 0.16;  // continuous grey blanket on screen
   const ASH_ROOF_FAIL = 0.055;   // the roof starts failing under the load
+  /* ONE WEDGE, READ THREE TIMES. The deposit ledger (world/volcanofx.js),
+     the ground veil (systems/weather.js's surface coat) and the aftermath
+     erosion all have to agree about WHERE the ash is, and the only way two
+     of them can disagree is if two of them own a copy of the numbers. So the
+     shape is built once, into a reused object (this runs every frame — a
+     fresh literal per frame is 60 allocations a second for nothing), and
+     everyone downstream reads the same fields. */
+  const _ashW = {
+    srcX: 0, srcZ: 0, windX: 1, windZ: 0,
+    reach: 60, spread: 0.05, lobe: 3.2, rate: 0, amount: 0,
+  };
+  function ashWedge(ctx, M) {
+    const V3 = CBZ.CONFIG.VOLCANO_V3 !== false;
+    const h = ctx.arena.hills[0];
+    _ashW.srcX = h.x; _ashW.srcZ = h.z;
+    _ashW.windX = ctx.st.erWindX != null ? ctx.st.erWindX : 1;
+    _ashW.windZ = ctx.st.erWindZ != null ? ctx.st.erWindZ : 0;
+    /* magnitude owns the fall: a burp lays a dusting you watch settle,
+       the big one buries the downwind town and takes its roofs */
+    _ashW.rate = 0.003 + 0.043 * M;
+    _ashW.reach = ctx.R * (0.3 + 0.45 * M);
+    /* V3: A WEDGE, NOT A BLANKET. spread 0.16 put a sixth of the axis rate
+       on every cell — the whole island greyed at once, which is precisely
+       the "covers everything in a dumb way" that got the entire ash ledger
+       switched off on 2026-08-16. At 0.05/lobe 3.2 the fall is a sector:
+       the downwind town greys, chokes and loses roofs while the upwind beach
+       stays green — a hazard with an outside, which is what makes it a
+       hazard at all. A big eruption's wedge is wider and softer-edged; a
+       burp's is a tight sector on the cone's own shoulder. */
+    _ashW.spread = V3 ? 0.03 + 0.04 * M : 0.16;
+    _ashW.lobe = V3 ? 3.6 - 1.4 * M : 2.2;
+    /* THE VEIL'S AMOUNT IS THE LEDGER'S OWN PEAK, in units of the blanket
+       depth — so the grey on the ground and the number that chokes people
+       and fails roofs can never drift apart. Deliberately NOT clamped to 1
+       here: >1 is the headroom that says how much GROUND is fully
+       blanketed, and that area shrinking as the deposit erodes is what
+       makes the aftermath thin instead of switching off. */
+    const AL = ctx.st.erAshLoad;
+    _ashW.amount = AL ? Math.min(6, AL.peakDepth / ASH_VISUAL_FULL) : 0;
+    return _ashW;
+  }
   let pyroRuns = 0, laharRuns = 0, ashRoofCollapses = 0, lavaLegacy = 0, whiteouts = 0;
   /* THE BODY COUNT, because the owner's "kills way too many people" deserves
      a number that a later edit cannot quietly undo. `volcanoDeaths` is the
@@ -3234,7 +3280,6 @@
     const h = ctx.arena.hills[0];
     const V = vfx();
     const V3 = CBZ.CONFIG.VOLCANO_V3 !== false;
-    const plumeV2 = V3 && CBZ.CONFIG.VOLCANO_PLUME_V2 !== false;
     // the per-occurrence size — already rolled in warn(); the earthquake's
     // surprise eruption has no warn phase, so it rolls here instead
     const M = rollMag(ctx);
@@ -3242,33 +3287,38 @@
     narrate("banner", "VOLCANIC ERUPTION");
     narrate("hint", "THE MOUNTAIN ERUPTS, stay off the lava!", 3);
     if (CBZ.shake) CBZ.shake(0.9); sound("explosion"); sound("rumble");
-    // a fountain of glowing lava bursting UP out of the summit vent
-    ctx.st.erFountain = CBZ.fx.particleCloud({
-      mode: "rise", color: 0xff6a1a,
-      // V2's smoke owns the mass. The Points cloud goes back to being the
-      // fast spatter accent instead of a tall tube of evenly sized glitter.
-      count: plumeV2 ? Math.round(70 + 130 * M) : 260, radius: plumeV2 ? 3.5 + 3.5 * M : 7,
-      top: plumeV2 ? 9 + 15 * M : 22, size: plumeV2 ? 0.2 : 0.3,
-      opacity: plumeV2 ? 0.72 : 0.85, vMin: 8 + 6 * M, vMax: 14 + 12 * M, drift: 3,
-    }); ctx.st.erFountain.setActive(plumeV2 ? 0.55 + 0.35 * M : 0.95);
-    /* a towering dark ash column above the fountain. V2 gets the SPRITE
-       column (volcanofx ashColumn — a pillar with a silhouette, built like
-       the pyroclastic current's mass); the flag revert keeps the old dotted
-       Points cloud verbatim. */
+    /* THE FOUNTAIN IS BALLISTIC. What stood here was a Points cloud rising
+       at a constant speed — orange confetti, and the only thing filling the
+       twenty metres between the crater and the column. world/volcanofx.js's
+       V.fountain throws incandescent clots on real parabolas out of the vent
+       mouth and lets them fall back onto the cone. The Points cloud survives
+       only as the VOLCANO_V2-off fallback, where there is no volcanofx. */
+    ctx.st.erFountain = (V && V.fountain)
+      ? V.fountain({
+        x: h.x, z: h.z, y: h.peak + 1,
+        r: 1.6 + 2.4 * M, mag: M,
+        groundAt: gAt(ctx), parent: root(),
+      })
+      : CBZ.fx.particleCloud({
+        mode: "rise", color: 0xff6a1a,
+        count: 260, radius: 7, top: 22, size: 0.3,
+        opacity: 0.85, vMin: 8 + 6 * M, vMax: 14 + 12 * M, drift: 3,
+      });
+    ctx.st.erFountain.setActive(0.6 + 0.4 * M);
+    /* the towering dark convective column, standing ON the crater — one
+       path now, the sprite plume in world/volcanofx.js. V3 only decides
+       whether it is exempt from the eruption's own fog wall. */
     if (V && V.ashColumn) {
-      /* V3 makes the column fog-exempt so the landmark does not dissolve in
-         its own weather. PLUME_V2 then changes the shape and population; the
-         flag-off dimensions below preserve the former ~180 m needle. */
       ctx.st.erColumn = V.ashColumn({
-        x: h.x, z: h.z, y: h.peak + 3,
-        /* The former 180 m needle was seven mountain-heights tall. The
-           references are broad convecting plumes whose visible column is
-           roughly three to five cone-heights; V2 widens the mass and brings
-           its top back into that landscape scale. Flag-off is byte-identical. */
+        // one metre over the lip: the plume's foot has to be INSIDE the
+        // vent apron's glow, or the column reads as floating
+        x: h.x, z: h.z, y: h.peak + 1,
         /* MAGNITUDE OWNS THE SILHOUETTE: ~56 m for the burp, ~194 m for the
-           big one (M 0.42 reproduces the former ~108 m landscape plume). */
-        height: plumeV2 ? 46 + 148 * M : (V3 ? 90 + 130 * M : 40 + 30 * M),
-        r: plumeV2 ? 6.5 + 10.5 * M : (V3 ? 8 + 8 * M : 5 + 4.5 * M),
+           big one. The references are broad convecting plumes whose visible
+           column is roughly three to five cone-heights, and the radius is
+           the VENT's — volcanofx widens it by entrainment as it climbs. */
+        height: 46 + 148 * M,
+        r: 6.5 + 10.5 * M,
         fogless: V3,
         parent: root(),
       });
@@ -3276,24 +3326,11 @@
     } else {
       ctx.st.erSmoke = CBZ.fx.particleCloud({ mode: "rise", color: 0x2a2420, count: 200, radius: 15, top: 52, size: 0.62, opacity: 0.4, vMin: 5, vMax: 10, drift: 9 }); ctx.st.erSmoke.setActive(0.6);
     }
-    /* THE COLUMN STANDS ON LIGHT. In the reference night photograph the ash
-       pillar is dark — but its BASE is rose-orange, lit from below by the
-       vent it is standing on. A second short rising cloud in ember colours
-       under the dark one is that underside; without it the column reads as
-       a grey smudge that merely starts near the mountain. */
-    /* V2 carries the RPG-style hot-to-soot handoff inside the column's own
-       puffs. Keeping this second point cloud underneath would restore the
-       floating-dot silhouette the repair removes. The flag-off path stays
-       exactly as it was for the comparator. */
-    if (CBZ.CONFIG.VOLCANO_PLUME_V2 === false) {
-      /* Local visual RNG: V2 can remove this cloud without rerolling the wind,
-         lava fan and bomb stream that are meant to stay matched controls. */
-      let smokeSeed = (((h.x * 73856093) | 0) ^ ((h.z * 19349663) | 0) ^ 0x5a17c9e3) >>> 0;
-      const smokeRandom = function () { smokeSeed = (smokeSeed * 1664525 + 1013904223) >>> 0; return smokeSeed / 4294967296; };
-      ctx.st.erSmokeLit = CBZ.fx.particleCloud({ mode: "rise", color: 0xd06a35, count: 110, radius: 8, top: 15, size: 0.5, opacity: 0.32, vMin: 4, vMax: 8, drift: 3, random: smokeRandom }); ctx.st.erSmokeLit.setActive(0.75);
-    } else {
-      ctx.st.erSmokeLit = null;
-    }
+    /* THE COLUMN STANDS ON LIGHT — but that light is now baked into the
+       column's own puffs (volcanofx bakes a vent underlight into every puff
+       within ~28 m of the crater, scaled by night), not painted by a second
+       rising Points cloud underneath it. The extra cloud was the floating-dot
+       silhouette this pass exists to remove. */
     /* NO ash raining over the island any more — OWNER, 2026-08-16: "the ash
        everywhere is just so dumb, idc if it's realistic". The 300 grey motes
        that fell here went the same way as the ground blanket. */
@@ -3310,7 +3347,7 @@
       });
       ctx.st.erCrater = null;
     } else {
-      ctx.st.erCrater = disc(h.x, h.z, 0xff5210, 0.9, h.peak + 0.3); ctx.st.erCrater.material.blending = THREE.AdditiveBlending; ctx.st.erCrater.scale.set(5, 5, 1);
+      ctx.st.erCrater = disc(h.x, h.z, 0xff5210, 0.9, 0.3); ctx.st.erCrater.material.blending = THREE.AdditiveBlending; ctx.st.erCrater.scale.set(5, 5, 1);   // 0.3: disc() adds the floor (see warn())
     }
 
     // THE WIND IS THE WEATHER'S WIND — the warn phase already set a bearing
@@ -3363,7 +3400,11 @@
         // never straight down the pyroclastic lane — the two hazards want
         // separate faces of the cone so the mountain reads as having sides
         const a = ctx.st.pyroBear + 1.0 + (i / n) * 5.2 + (CBZ.hash01 ? CBZ.hash01(h.x + i, h.z, 91) : 0.5) * 0.34;
-        const p = vent(h, a, 2.2);
+        /* 6.4 m: the summit is a CRATER now (world/disaster_arena.js's
+           stratovolcano — bowl radius 6.2 m). A flow born 2.2 m from the
+           centre started on the bowl floor and had to climb out; it is born
+           on the rim and spills down the flank, which is what a flow does. */
+        const p = vent(h, a, 6.4);
         ctx.st.erLava.push(V.lavaFlow({
           x: p.x, z: p.z, groundAt: gAt(ctx), parent: root(), bearing: a,
           len: h.r * (1.05 + 0.6 * M) + 24 * M,
@@ -3476,16 +3517,22 @@
     ctx.st.erFountain.update(dt, h.x, h.peak, h.z);
     if (ctx.st.erSmoke) ctx.st.erSmoke.update(dt, h.x + (ctx.st.erWindX || 0) * 14, h.peak + 6, h.z + (ctx.st.erWindZ || 0) * 14);
     // the sprite pillar leans with the same wind the ash falls on
-    if (ctx.st.erColumn) ctx.st.erColumn.update(dt, ctx.st.erWindX || 0, ctx.st.erWindZ || 0);
-    // the lit underside rides just over the fountain, beneath the dark column
-    if (ctx.st.erSmokeLit) ctx.st.erSmokeLit.update(dt, h.x + (ctx.st.erWindX || 0) * 5, h.peak + 1.5, h.z + (ctx.st.erWindZ || 0) * 5);
+    // ...and it is told the hour, because a night column is a SILHOUETTE
+    // with a burning foot, not the pale smudge it used to photograph as
+    if (ctx.st.erColumn) ctx.st.erColumn.update(dt, ctx.st.erWindX || 0, ctx.st.erWindZ || 0, { night: 1 - dk });
     if (ctx.st.erVent) ctx.st.erVent.update(dt);
     if (ctx.st.erCrater) ctx.st.erCrater.material.opacity = 0.7 + 0.25 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.012));
     // the eruption is still weather — a dimmed sun and a downwind haze — but
     // a light one now the ash is gone: 0.55 fog was the island-wide grey-out
     // the ash thickens the air it is falling through (V3: ashK rides the
     // deposit; pre-V3 ashK is 0 and this is the old constant 0.3)
-    weather({ rain: 0, wind: 5 + 4 * M, windDir: { x: ctx.st.erWindX || 1, z: ctx.st.erWindZ || 0 }, fog: 0.14 + 0.24 * M + 0.2 * ashK, fogColor: 0x2e211c });
+    /* THE DEPOSIT IS WEATHER ON THE GROUND, not five thousand quads. The
+       downwind sector greys through systems/weather.js's shared surface coat
+       — the same seam the blizzard whitens through — so the ground goes
+       uniformly grey the way a real ashfall does, and world/volcanofx.js's
+       quad field is left doing the one thing quads are good for: DRIFTS. */
+    const AW = ashWedge(ctx, M);
+    weather({ rain: 0, wind: 5 + 4 * M, windDir: { x: ctx.st.erWindX || 1, z: ctx.st.erWindZ || 0 }, fog: 0.14 + 0.24 * M + 0.2 * ashK, fogColor: 0x2e211c, ash: AW });
     if (rnd() < dt * (0.8 + 1.6 * M)) sound("rumble");
     /* THE GROUND NEVER STOPS TALKING. A continuous tremor, scaled by the
        size of the event and slowly breathing — the body's channel, not the
@@ -3612,33 +3659,16 @@
     /* ---------------- ASH AS A LOAD ---------------- */
     const AL = ctx.st.erAshLoad;
     if (AL) {
-      AL.update(dt, {
-        /* Metres of ash per second on the plume axis. Calibrated against the
-           ladder above so ONE 20 s eruption walks the whole arc: the ground
-           downwind is dusted within a second or two (the choke starts), the
-           blanket is continuous downwind near the end, and the downwind roofs
-           cross ASH_ROOF_FAIL at about two thirds — so "indoors saves you from
-           the ash until the roof goes" is something that HAPPENS inside one
-           event instead of a rule on paper. Upwind stays green, which is what
-           makes the wedge readable at all. */
-        /* magnitude owns the fall: a burp lays a dusting you watch settle,
-           the big one buries the downwind town and takes its roofs */
-        rate: 0.003 + 0.043 * M,
-        reach: ctx.R * (0.3 + 0.45 * M),
-        windX: ctx.st.erWindX, windZ: ctx.st.erWindZ,
-        /* V3: A WEDGE, NOT A BLANKET. spread 0.16 put a sixth of the axis
-           rate on every cell — the whole island greyed at once, which is
-           precisely the "covers everything in a dumb way" that got the
-           entire ash ledger switched off on 2026-08-16. At 0.05/lobe 3.2
-           the fall is a sector: the downwind town greys, chokes and loses
-           roofs while the upwind beach stays green — a hazard with an
-           outside, which is what makes it a hazard at all. */
-        srcX: h.x, srcZ: h.z,
-        // a big eruption's wedge is wider and softer-edged; a burp's is a
-        // tight sector on the cone's own shoulder
-        spread: CBZ.CONFIG.VOLCANO_V3 !== false ? 0.03 + 0.04 * M : 0.16,
-        lobe: CBZ.CONFIG.VOLCANO_V3 !== false ? 3.6 - 1.4 * M : 2.2,
-      });
+      /* Metres of ash per second on the plume axis. Calibrated against the
+         ladder above so ONE 20 s eruption walks the whole arc: the ground
+         downwind is dusted within a second or two (the choke starts), the
+         blanket is continuous downwind near the end, and the downwind roofs
+         cross ASH_ROOF_FAIL at about two thirds — so "indoors saves you from
+         the ash until the roof goes" is something that HAPPENS inside one
+         event instead of a rule on paper. Upwind stays green, which is what
+         makes the wedge readable at all. The shape itself is ashWedge()'s —
+         the SAME object the ground veil above was just driven with. */
+      AL.update(dt, ashWedge(ctx, M));
       // ROOFS FAIL UNDER THE LOAD, through the ONE ledger. Wet ash is ~1000
       // kg/m3: a quarter-metre on a flat roof is a quarter of a tonne per
       // square metre, and light-frame roofs go at about that. Checked at 2 Hz
@@ -3841,7 +3871,6 @@
     if (ctx.st.erFountain) ctx.st.erFountain.dispose();
     if (ctx.st.erSmoke) ctx.st.erSmoke.dispose();
     if (ctx.st.erColumn) { ctx.st.erColumn.dispose(); ctx.st.erColumn = null; }
-    if (ctx.st.erSmokeLit) { ctx.st.erSmokeLit.dispose(); ctx.st.erSmokeLit = null; }
     if (ctx.st.erVent) { ctx.st.erVent.dispose(); ctx.st.erVent = null; }
     if (ctx.st.erCrater) rmMesh(ctx.st.erCrater);
     (ctx.st.erStreams || []).forEach((s) => rmMesh(s.mesh));
@@ -3890,6 +3919,9 @@
   /* The scars are the one thing here that survives its own disaster, so they
      need their own teardown. 28.06 sits immediately after the mode-exit hook
      that puts the sea and the weather back. */
+  // reused per frame: the aftermath re-asserts the ash veil every tick and a
+  // fresh literal each time is allocation for nothing
+  const _ashScar = { srcX: 0, srcZ: 0, windX: 1, windZ: 0, amount: 0, reach: 60, lobe: 3, spread: 0.05 };
   CBZ.onAlways(28.06, function (dt) {
     const inSurv = CBZ.game.mode === "survival" && !!(CBZ.surv && CBZ.surv.arena);
     if (volScars.length) {
@@ -3912,6 +3944,25 @@
                 scarSpec = { windX: w.x, windZ: w.z, rain: rn };
               }
               sc.update(dt, scarSpec);
+              /* AND THE GROUND STAYS GREY UNTIL THE LEDGER SAYS OTHERWISE.
+                 The veil is a DRIVEN weather term, and every driven term
+                 bleeds out over RELEASE (3.5 s) the moment nobody asserts
+                 it — which would wipe the island clean three and a half
+                 seconds after an eruption ends, while the ledger still
+                 holds a third of a metre of ash. So the scar keeps
+                 asserting the same wedge it was fed, with the amount now
+                 following its OWN decaying peak: the grey thins exactly as
+                 the deposit erodes, and disappears when the deposit does.
+                 Ash-only, so the eruption's brown fog still releases on
+                 schedule (see ashHold in systems/weather.js). */
+              const W = sc.wedge;
+              if (W && CBZ.weatherDrive) {
+                _ashScar.srcX = W.srcX; _ashScar.srcZ = W.srcZ;
+                _ashScar.windX = W.ux; _ashScar.windZ = W.uz;
+                _ashScar.reach = W.reach; _ashScar.lobe = W.lobe; _ashScar.spread = W.spread;
+                _ashScar.amount = Math.min(6, sc.peakDepth / ASH_VISUAL_FULL);
+                CBZ.weatherDrive({ ash: _ashScar }, 0.6);
+              }
             } else sc.update(dt, null);
           } catch (e) {}
         }
@@ -5666,7 +5717,12 @@
     force(id) {
       const i = order.indexOf(id);   // this run's shuffled arc
       if (i < 0) return false;
-      if (dir.cur && dir.cur.end && dir.state === "active") { try { dir.cur.end(makeCtx(0)); } catch (e) {} }
+      /* A WARNING HAS MESHES TOO. Ending only an ACTIVE def left every warn-
+         phase artefact of the interrupted one in the world — the volcano's
+         crater glow disc, its telegraph lane — because warn() built them and
+         only end() removes them. Every def's end() already tolerates a run
+         that never reached start() (endEruption returns on !erupting). */
+      if (dir.cur && dir.cur.end && (dir.state === "active" || dir.state === "warn")) { try { dir.cur.end(makeCtx(0)); } catch (e) {} }
       dir.idx = i; dir.state = "idle"; dir.t = 0.01; dir.cur = null;
       return true;
     },

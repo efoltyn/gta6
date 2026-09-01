@@ -54,9 +54,13 @@
    build did not do, and each got its own repair at its own site:
 
      LACE     the close-up is not bright plates on darkness, it is a DARK
-              crust with a bright connected crack network through it.
-              lidField is now a ridge transform: filaments at the field's
-              zero-crossings, plates between them.
+              crust with a bright connected crack network through it. It is
+              drawn as a TILED TEXTURE on the melt (laceTex): a ridge
+              transform of three sines, filaments on the zero-crossings,
+              plates between them, sampled per fragment and advected by
+              sliding the uvs downstream. It lived in the vertex colours
+              until 2026-09-01, where the station grid averaged it away —
+              see the long note at laceTex().
      THE FAN  a flow FORKS. lavaFlow({branches:n}) arms fork points that
               spawn narrower child flows when the front reaches them, so
               a run ends in a fan of noses instead of one ruled ribbon.
@@ -136,18 +140,6 @@
                 walks toward darkness-at-noon instead of holding a fixed tint.
      False is the one-line revert to the 2026-08-16 build. */
   if (CBZ.CONFIG.VOLCANO_V3 == null) CBZ.CONFIG.VOLCANO_V3 = true;
-  /* VOLCANO_PLUME_V2 (2026-08-26): smoke is a VOLUME, not a stack of coins.
-     The first sprite column fixed the old point-cloud haze, but thirty fully
-     opaque, similarly sized billboards still photographed as a vertical bead
-     chain. V2 keeps the one canonical emitter and borrows the RPG blast's
-     actual lumpy smoke mask when crashfx is present. Every puff owns the same
-     grow / drift / fade lifecycle as an RPG puff, while overlapping core,
-     shoulder and edge populations build one continuous convecting mass.
-
-     Default follows V3 so ?cfg_VOLCANO_V3=0 remains the complete pre-sky
-     revert it promised. ?cfg_VOLCANO_PLUME_V2=0 isolates the exact geometric
-     column for matched before/after work without touching lava, ash or light. */
-  if (CBZ.CONFIG.VOLCANO_PLUME_V2 == null) CBZ.CONFIG.VOLCANO_PLUME_V2 = CBZ.CONFIG.VOLCANO_V3 !== false;
   /* ASH IS BACK ON, because what was OFF was never the ledger — it was the
      BLANKET. The 2026-08-16 owner note ("the ash covering the map is not
      needed... the ash covers everything in a dumb way, idc if it's
@@ -168,15 +160,14 @@
 
   const V = {};
   // live census for CBZ.volcanoAudit() — measured, never counted in source
-  const census = { lava: 0, pyro: 0, lahar: 0, ash: 0, lights: 0, tris: 0, branches: 0, vent: 0 };
-  const LIVE = { lava: [], pyro: [], lahar: [], ash: [], vent: [], column: [] };
+  const census = { lava: 0, pyro: 0, lahar: 0, ash: 0, lights: 0, tris: 0, branches: 0, vent: 0, fountain: 0 };
+  const LIVE = { lava: [], pyro: [], lahar: [], ash: [], vent: [], column: [], fountain: [] };
 
   function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt | 0) : 0.5; }
   function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
   function q(lo, hi) { return CBZ.qScale ? CBZ.qScale(lo, hi) : hi; }
   function qi(lo, hi) { return Math.max(1, Math.round(q(lo, hi))); }
   const _c1 = new THREE.Color(), _c2 = new THREE.Color(), _c3 = new THREE.Color();
-  const _c4 = new THREE.Color();
 
   // hex ramp: three stops, t in 0..1
   function ramp3(t, a, b, c, out) {
@@ -422,7 +413,13 @@
      it had before. Nine columns and a station every ~2.2 m give roughly seven
      samples per plate, which is the point at which the plates exist. */
   const LAVA_COLS = 9;              // columns across a broad flow
-  const LAVA_U = [-1, -0.78, -0.55, -0.3, 0, 0.3, 0.55, 0.78, 1];
+  /* THE SECOND COLUMN SITS ON THE LEVEE, not halfway down the skirt. The
+     crust's crown now rolls to the ground at |u| = 1 with a levee ridge bumped
+     up at 0.87 (see ring()) — and a ridge nothing samples is not drawn, it is
+     just a linear ramp between the vertices either side of it. Moving 0.78 to
+     0.87 costs nothing and is the difference between a channel with banks and
+     a sheet with a bevel. */
+  const LAVA_U = [-1, -0.87, -0.55, -0.3, 0, 0.3, 0.55, 0.87, 1];
   /* A THREAD DOES NOT NEED NINE COLUMNS. Once the flows narrowed to match the
      reference photograph, nine columns over two metres of width was a vertex
      every twenty centimetres — detail no camera can resolve, on nine times as
@@ -432,18 +429,45 @@
   const LAVA_COLS_N = 5;
   const LAVA_U_N = [-1, -0.55, 0, 0.55, 1];
   const MELT_INSET = 0.82;          // the lit crust shows outboard of this
-  // lit crust: dark basalt at the levee, scorched red-brown inboard. Not
-  // BLACK — a crust photographs as very dark grey-brown, and pure black in
-  // a dim orange scene is a hole in the picture.
-  const CRUST_A = 0x2a2320, CRUST_B = 0x412c22, CRUST_C = 0x74371a;
-  // the unlit lid over the melt, and the melt itself (1150 C to dull red)
-  const _LID_D = new THREE.Color(0x241d19), _LID_W = new THREE.Color(0x502513);
-  // Authored DEEP on purpose — the same lesson the ash palette already
-  // teaches from the other direction: these go through the renderer's output
-  // encoding, which lifts a swatch-true orange to pale gold on screen. Deep
-  // saturated stops land as the bible photo's vivid orange-red; the throat's
-  // white-yellow belongs to ventGlow, not to this ramp.
-  const MELT_A = 0x6d1201, MELT_B = 0xc73e03, MELT_C = 0xff9226;
+  /* ============ THE PALETTE IS AUTHORED IN *LINEAR* LIGHT ==============
+     2026-09-01: the shipped flow photographed as a smooth PALE GOLD PLASTIC
+     RAMP — no dark crust anywhere, no lace, ruler-straight banks. Half of
+     that was one number nobody had ever computed: WHAT THESE HEXES ACTUALLY
+     BECOME ON SCREEN. r128's Color.setHex does no colour conversion, so a
+     vertex colour is a LINEAR value; core/renderer.js then runs ACES +
+     the RENDER_GRADE_V1 contrast/sat/lift grade at exposure 1.16 and encodes
+     to sRGB. That chain LIFTS enormously. Measured, stop by stop:
+
+         authored      on screen            what it read as
+         0xff9226  ->  rgb(252,222,141)     pale gold          (was MELT_C)
+         0xc73e03  ->  rgb(254,169,0)       bright orange      (was MELT_B)
+         0x241d19  ->  rgb(123,105,95)      MID GREY           (was the lid!)
+         0x2a2320  ->  rgb(135,119,113)     mid grey           (was CRUST_A)
+
+     A "dark basalt" authored as 0x241d19 arrives as mid grey; every crust
+     stop in the file was a light stop wearing a dark hex. So the whole
+     palette is re-authored against the measured transform instead of against
+     the swatch, and every stop below carries the screen colour it MEASURES
+     to. If the tone map or the exposure ever moves, these move with it —
+     re-measure, do not eyeball. (Deriving them is ~30 lines: linear -> ACES
+     -> the grade in installToneMap() -> sRGB encode.)
+     ===================================================================== */
+  // LIT crust (Phong, so multiply by irradiance — the eruption sun is
+  // 0.5 x 0xd9714a and the hemi 0x9c7461, ~(0.62,0.40,0.30) on an up-face).
+  // A: the levee lip, genuine black basalt.  B: the levee body.  C: the
+  // scorched inboard rock that only shows at the nose and the melt's banks.
+  //   A -> rgb(38,22,22)   B -> rgb(61,36,30)   C -> rgb(126,54,28)  (lit)
+  const CRUST_A = 0x0e0a06, CRUST_B = 0x181310, CRUST_C = 0x3e2013;
+  // the UNLIT lid over the melt: dark rock (D) warming to ember-heated rock
+  // beside a crack (W).   D -> rgb(32,26,25)    W -> rgb(111,47,27)
+  const _LID_D = new THREE.Color(0x070503), _LID_W = new THREE.Color(0x200b05);
+  /* THE MELT RAMP, and it is a TEMPERATURE ramp now, not a brightness ramp:
+       A  the dull red of a cooling toe / a dying seam   rgb(143,23,2)
+       B  the open channel while it is moving            rgb(219,64,0)
+       C  the incandescent lace and the vent apron       rgb(255,180,66)
+     C is as far as this ramp goes on purpose: the white-yellow throat is
+     ventGlow's, and a melt that reaches white is the pale-gold slab again. */
+  const MELT_A = 0x300701, MELT_B = 0x6a1004, MELT_C = 0xd8480f;
 
   /* THE LID, as a smooth field that TRAVELS.
 
@@ -469,24 +493,128 @@
      lattice so no filament runs straight for long — the "zig-zaggy"
      complaint was cured upstream in the walk, and it must not sneak back in
      through the pattern. */
-  /* One constant ties the field's along-flow scale to the advection phase, so
-     "the pattern travels downstream at the surface velocity" stays TRUE
-     instead of being two numbers that have to be kept in step by hand. */
-  const LID_K = 0.55;
-  function lidField(s, u, ph) {
-    const a = s * LID_K - ph;
-    // the warp: bends filaments, and advects with them so the lace is not
-    // a fixed lattice the melt slides beneath
-    const w = Math.sin(a * 0.21 + u * 1.6) + 0.55 * Math.sin(a * 0.47 - u * 2.7 + 2.1);
-    const f =
-      0.55 * Math.sin(a + u * 3.1 + 1.1 * w) +
-      0.30 * Math.sin(a * 1.43 - u * 5.2 + 1.7 + 0.7 * w) +
-      0.15 * Math.sin(a * 0.71 + u * 8.6 + 4.1);
-    /* RIDGE: 1 on the zero-crossing curves, 0 on the plate interiors. The
-       3.2 sets filament width against plate size — lower and the lace fattens
-       back toward bands, higher and it thins to pinstripes the grid cannot
-       hold (stations are ~2.3 m apart; a filament has to survive sampling). */
-    return clamp(1 - Math.abs(f) * 3.2, 0, 1);
+
+  /* ============ THE LACE IS A TEXTURE, NOT A VERTEX COLOUR ==============
+     Everything above computes a beautiful anastomosing network and the
+     rasteriser was throwing most of it away. Do the arithmetic: the flows
+     these beats photograph are ~17 m long by ~9 m wide, they are drawn on a
+     station every ~2.4 m by nine columns, and a filament is 3-4 m across.
+     That is barely one vertex per filament, and Gouraud interpolation across
+     a 1.1 m x 2.4 m quad is a low-pass filter — measured on the shipped
+     numbers, a field that is 15% dark plate at full resolution comes out 2%
+     dark once it has been through the vertex grid. The lace could not be
+     seen because it was being averaged out before it was drawn.
+
+     Making the grid fine enough is the wrong answer (four times the vertices,
+     rewritten at 30 Hz, to draw something that does not move relative to the
+     rock). The right one is to stop asking the geometry to carry it: the lace
+     goes into ONE tiled texture, sampled per FRAGMENT, and the mesh carries
+     only the smooth things — how hot this stretch is, how far across the
+     channel this vertex sits. Vertex colours and the map MULTIPLY in r128's
+     MeshBasicMaterial, so the texel is authored as a RATIO against MELT_C:
+     1.0 on a filament, and walking down through the channel stop to the dark
+     lid in the plate interiors. A cooler stretch of flow has a cooler vertex
+     colour and the same texel then paints a cooler network — which is what a
+     real flow does, and it costs nothing.
+
+     It is also FASTER than what it replaces: ring() no longer evaluates five
+     sines a vertex a frame, and pays two uv floats instead.
+
+     TILES IN Y, and it has to: uv.y is (metres down the flow - metres the
+     lid has advected) / LACE_L, which runs off both ends. So every along-flow
+     frequency here is an integer number of cycles per LACE_L. Across, uv.x is
+     0.5 + metres/LACE_W and LACE_W is wide enough (20 m) that the widest
+     flood never reaches an edge — a pattern that repeated across the ribbon
+     would be a lattice, which is the one thing the bible forbids.
+     ===================================================================== */
+  const LACE_W = 20, LACE_L = 24;       // metres the texture spans
+  let _laceTex = null;
+  function laceTex() {
+    if (_laceTex) return _laceTex;
+    /* 512, not 256: at 256 the texture carries 10.7 px per metre, and a
+       player being chased by this thing gets a lot closer than the 20-60 m
+       the storyboard frames it at — the crack edges went soft under
+       magnification. 21 px/m holds up to about four metres away, and the
+       whole thing is built ONCE, lazily, on the first eruption (~30 ms with
+       the ramp precomputed below; per-pixel Color.lerp made it three times
+       that). */
+    const S = 512, cv = document.createElement("canvas");
+    cv.width = cv.height = S;
+    const g = cv.getContext("2d");
+    const img = g.createImageData(S, S);
+    const D = img.data;
+    // the ramp the texel walks, as ratios against MELT_C (the vertex colour's
+    // top stop) — so texel x vColour reproduces the ramp exactly at the vent
+    const top = new THREE.Color(MELT_C);
+    const stops = [new THREE.Color(_LID_D), new THREE.Color(_LID_W), new THREE.Color(MELT_B), top];
+    const KY = 6.2831853 / LACE_L, KX = 6.2831853 / LACE_W;
+    /* the ramp as a 256-entry lookup, so the pixel loop is four sines and
+       three array reads instead of four sines and a Color allocation dance.
+       The two breakpoints are read off the field's own measured distribution
+       (p25 = 0.11, p50 = 0.44, p75 = 0.74), so they are AREA FRACTIONS, not
+       guesses: ~33% dark plate, ~28% warm rock beside a crack, ~39%
+       incandescent — and only the top few per cent reaches MELT_C. */
+    const LUT = new Uint8Array(256 * 3);
+    for (let q = 0; q < 256; q++) {
+      const t = q / 255;
+      const seg3 = t < 0.22 ? 0 : (t < 0.55 ? 1 : 2);
+      const k3 = seg3 === 0 ? t / 0.22 : (seg3 === 1 ? (t - 0.22) / 0.33 : (t - 0.55) / 0.45);
+      _c3.copy(stops[seg3]).lerp(stops[seg3 + 1], clamp(k3, 0, 1));
+      LUT[q * 3] = Math.round(255 * clamp(_c3.r / top.r, 0, 1));
+      LUT[q * 3 + 1] = Math.round(255 * clamp(_c3.g / top.g, 0, 1));
+      LUT[q * 3 + 2] = Math.round(255 * clamp(_c3.b / top.b, 0, 1));
+    }
+    for (let py = 0; py < S; py++) {
+      const sm = (py / S) * LACE_L;              // metres along
+      for (let pxi = 0; pxi < S; pxi++) {
+        const vm = (pxi / S - 0.5) * LACE_W;     // metres across
+        const a = sm * KY, b = vm * KX;
+        /* Four sines, along-flow periods 8 / 4.8 / 12 / 3.4 m and across-flow
+           8 / 11 / 4.7 / 3.7 m: plates four to seven metres, filaments one to
+           two. The first cut ran everything at 3-5 m and photographed as
+           STATIC — a plate has to be several times a filament's width or the
+           eye reads noise instead of rock. The coefficients are CYCLES PER
+           LACE_L, which is what makes the tile seamless in y: measured, the
+           two edges agree to 0.00000. */
+        /* AND THE WARP IS MOST OF THE WORK. With the phase warp at 1.1 the
+           first print of this came out as a LATTICE of near-identical black
+           ovals — a leopard skin, which is geometry wearing a texture. A
+           three-term warp bending the phase by up to ~2.5 rad, applied to
+           three of the four terms, is what turns the grid into a branching
+           network with islands of every size, and the fourth high-frequency
+           term roughens the filament edges so they are not drawn with a pen. */
+        const w = Math.sin(a * 1 + b * 0.9) + 0.62 * Math.sin(a * 2 - b * 1.6 + 2.1)
+                + 0.35 * Math.sin(a * 3 + b * 2.9 + 0.6);
+        const f =
+          0.50 * Math.sin(a * 3 + b * 2.5 + 1.9 * w) +
+          0.30 * Math.sin(a * 5 - b * 1.8 + 1.7 + 1.3 * w) +
+          0.14 * Math.sin(a * 2 + b * 4.3 + 4.1 + 0.8 * w) +
+          0.10 * Math.sin(a * 7 - b * 5.4 + 0.7);
+        /* RIDGE: 1 on the zero-crossing curves, 0 deep inside a plate. The
+           zero-crossings of a smooth signed field are guaranteed-CONNECTED
+           wandering curves, which is the whole reason the lace anastomoses
+           instead of speckling. */
+        const q = (clamp(1 - Math.abs(f) * 1.6, 0, 1) * 255) | 0;
+        const o = (py * S + pxi) * 4, q3 = q * 3;
+        D[o] = LUT[q3]; D[o + 1] = LUT[q3 + 1]; D[o + 2] = LUT[q3 + 2]; D[o + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+    const tx = new THREE.CanvasTexture(cv);
+    // LINEAR encoding on purpose: this is a MULTIPLIER, not a colour, and
+    // r128's mapTexelToLinear would gamma-decode it if we said sRGB.
+    tx.wrapS = tx.wrapT = THREE.RepeatWrapping;
+    tx.minFilter = THREE.LinearMipmapLinearFilter;
+    tx.magFilter = THREE.LinearFilter;
+    tx.generateMipmaps = true;
+    // the flow is nearly always seen at a grazing angle down a cone, which is
+    // exactly the case trilinear filtering blurs into mush
+    const rn = CBZ.renderer;
+    if (rn && rn.capabilities && rn.capabilities.getMaxAnisotropy) {
+      tx.anisotropy = Math.min(4, rn.capabilities.getMaxAnisotropy());
+    }
+    _laceTex = tx;
+    return _laceTex;
   }
 
   V.lavaFlow = function (o) {
@@ -501,11 +629,14 @@
     const len = o.len > 0 ? +o.len : 40;
     const speed = o.speed > 0 ? +o.speed : 5;
     const salt = o.salt != null ? (o.salt | 0) : 4711;
-    /* Station spacing is set by the LID, not by the width. LID_K maps metres
-       to field phase, so ~5 samples a plate wants seg near 2.3; tying it to
-       the flow's width instead put a narrow thread on a 0.8 m grid and paid
-       for thirty-five stations to draw two metres of rock. */
-    const seg = clamp(width * 0.4, 2.3, 2.9);
+    /* Station spacing used to be set by the LID — enough samples per plate
+       to draw the crack network. The lace is a texture now, sampled per
+       fragment, so the grid only has to carry SMOOTH things: the bed under
+       each vertex, the width's lobes, and the temperature envelope. 2.3-2.8 m
+       is what those want. (Tying it to the flow's width instead, as the very
+       first cut did, put a narrow thread on a 0.8 m grid and paid for
+       thirty-five stations to draw two metres of rock.) */
+    const seg = clamp(width * 0.38, 2.3, 2.8);
     /* A STATION EVERY seg METRES IS A DECISION EVERY seg METRES. Halving the
        wander and the turn rate (against fallLine's 0.45/0.16 defaults) is the
        other half of the anti-zig-zag fix: lava has momentum and a metre of
@@ -564,7 +695,14 @@
       const p = path.pts[i], u = i / (N - 1);
       // a flow LEAVES the vent narrow and FANS OUT as the ground flattens —
       // and along the way it necks and bellies on the two slow waves
-      const lobe = 1 + 0.24 * Math.sin(i * 0.52 + wPh1) + 0.13 * Math.sin(i * 1.27 + wPh2);
+      /* IN METRES, AND TWICE AS DEEP. Keyed on the station INDEX these waves
+         changed wavelength every time `seg` moved, and at +-0.37 the outline
+         was a straight strip with a wobble on it: the eye reads a margin as
+         ruled unless the width actually HALVES somewhere. +-0.51 over a 24 m
+         and a 10 m wave necks the flow to about half and spills it to about
+         one and a half, which is the bible photograph's belly-and-neck. */
+      const sm = i * seg;
+      const lobe = 1 + 0.34 * Math.sin(sm * 0.26 + wPh1) + 0.17 * Math.sin(sm * 0.62 + wPh2);
       wProf[i] = (0.5 + 0.72 * Math.pow(u, 0.7)) * lobe * (0.9 + 0.2 * h01(p.x, p.z, salt + 11));
       // temperature falls downstream — this is the whole colour story.
       // Gentled from 0.72: the toe of an ACTIVE flow is still ~1000 C rock
@@ -600,15 +738,28 @@
       nX[i] = nx / nl; nZ[i] = nz / nl;
       const hw = halfW * wProf[i];
       for (let c = 0; c < COLS; c++) {
-        const u = UU[c], k = i * COLS + c;
+        const u = UU[c], au = Math.abs(u), k = i * COLS + c;
         const x = p.x + nX[i] * u * hw, z = p.z + nZ[i] * u * hw;
-        cGY[k] = Math.max(groundAt(x, z), p.y);
+        /* THE PONDING FLOOR IS FOR THE CHANNEL, NOT FOR THE LEVEE.
+           `max(ground, centreline)` is what makes the sheet POND across a
+           hollow instead of draping into it — right in the middle, wrong at
+           the margin. Traversing a steep cone obliquely, one bank's ground is
+           metres below the centreline, so the outer column was held up at the
+           centreline's height and the flow hung off the hillside as a
+           floating blade with a black underside (the night close-up caught it
+           exactly). The floor now RELAXES to the real ground as |u| -> 1: the
+           channel still ponds, and the levee lands on the rock it is running
+           over. This is the other half of un-ruling the margin — a rolled-over
+           lip that reaches the ground has no cast shadow to draw a line with. */
+        const g = groundAt(x, z);
+        cGY[k] = g + (Math.max(g, p.y) - g) * (1 - au * au);
         // the same wandering-channel offset ring() draws with — the centre
         // columns carry the full meander, the banks stay pinned
-        const mu = u * MELT_INSET + meander[i] * (1 - Math.abs(u));
+        const mu = u * MELT_INSET + meander[i] * (1 - au), amu = Math.abs(mu);
         const mx = p.x + nX[i] * mu * hw;
         const mz = p.z + nZ[i] * mu * hw;
-        mGY[k] = Math.max(groundAt(mx, mz), p.y);
+        const mg = groundAt(mx, mz);
+        mGY[k] = mg + (Math.max(mg, p.y) - mg) * (1 - amu * amu * amu);
         grain[k] = h01(x, z, salt + 5);
       }
     }
@@ -647,6 +798,7 @@
     // ---- MELT: opaque, UNLIT (= incandescent), same grid, inset footprint ----
     const kPos = new Float32Array(N * COLS * 3);
     const kCol = new Float32Array(N * COLS * 3);
+    const kUv = new Float32Array(N * COLS * 2);   // where this vertex is in the lace
     const kIdx = new Uint16Array(Math.max(1, (N - 1) * (COLS - 1) * 6));
     ii = 0;
     for (let i = 0; i < N - 1; i++) {
@@ -659,9 +811,14 @@
     const chGeo = new THREE.BufferGeometry();
     chGeo.setAttribute("position", new THREE.BufferAttribute(kPos, 3));
     chGeo.setAttribute("color", new THREE.BufferAttribute(kCol, 3));
+    chGeo.setAttribute("uv", new THREE.BufferAttribute(kUv, 2));
     chGeo.setIndex(new THREE.BufferAttribute(kIdx, 1));
+    /* map x vertexColors, both plain r128 multiplies: the vertex colour is
+       the smooth envelope (how hot this stretch of river is, how far across
+       the channel this vertex sits) and the map is the lace. Still opaque,
+       still unlit — incandescent rock does not answer to the sun. */
     const chMat = new THREE.MeshBasicMaterial({
-      vertexColors: true, side: THREE.DoubleSide, fog: true,
+      vertexColors: true, side: THREE.DoubleSide, fog: true, map: laceTex(),
       polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6,
     });
     const chan = new THREE.Mesh(chGeo, chMat);
@@ -724,6 +881,12 @@
        it is pushing; the melt behind it is not. ~2.4x is the ratio that reads
        as "a river with a lid on it" rather than as a conveyor belt. */
     const skinV = speed * 2.4;
+    /* EVERY FLOW WEARS THE SAME TEXTURE, so without this every stem on the
+       cone would wear the same crack network in the same place — five copies
+       of one photograph. A hashed metre offset down the lace slides each
+       flow to its own stretch of the field. Deterministic, like everything
+       else about a flow's shape. */
+    const laceOff = h01(o.x, o.z, salt + 301) * LACE_L * 7;
 
     // one ring of COLS vertices, at a given centre / normal / width
     function ring(i, cx, cy0, cz, nx, nz, hw, thick, hot, s, ph, bedC, bedM) {
@@ -733,9 +896,25 @@
         /* FLAT-TOPPED, STEEP-SIDED. A quadratic crown is a half-cylinder, and
            a half-cylinder with a bright middle is a fluorescent tube; an 'a'a
            flow is a broad flat raft riding between two steep levees. The cubic
-           keeps the top honest and puts all the fall-off in the last fifth. */
-        const crown = 0.25 + 0.75 * (1 - Math.pow(au, 3.2));
-        const gr = 0.84 + 0.30 * grain[k];
+           keeps the top honest and puts all the fall-off in the last fifth.
+
+           AND THE MARGIN IS NOT A CLIFF. The old crown floored at 0.25, so
+           the outermost column stood a fifth of the flow's thickness proud of
+           the hillside and the sheet simply STOPPED there: a hard step, drawn
+           as a ruled line between lava and grass at every distance. It now
+           reaches zero at |u| = 1 — the rock rolls over and lands ON the
+           ground it is running across — with a levee RIDGE bumped up at
+           |u| ~ 0.86, which is where a real channel piles the rubble it
+           shoulders aside. The ridge stands proud of the melt (which tops out
+           at 0.75 of thickness at its own inset edge), so the channel is
+           something you look INTO instead of a stripe painted on a slab. */
+        const bump = Math.max(0, 1 - Math.pow((au - 0.87) * 7, 2));
+        const crown = Math.max(0, 1 - Math.pow(au, 3.6)) + 0.50 * bump;
+        /* the lip is the coldest, most broken rock on the flow, and darkening
+           it is the other half of un-ruling the margin: a levee that fades
+           into the hillside has no edge to be straight. */
+        const edgeK = 0.5 + 0.5 * (1 - Math.pow(au, 5));
+        const gr = (0.84 + 0.30 * grain[k]) * edgeK;
         /* the melt's grain must never exceed 1: a bright stop multiplied past
            its own hex clips channel-by-channel and desaturates toward white —
            this, plus the encoding lift, was most of the "pale gold laser" */
@@ -752,72 +931,58 @@
         const mu = u * MELT_INSET + meander[i] * (1 - au), amu = Math.abs(mu);
         kPos[off] = cx + nx * mu * hw;
         kPos[off + 2] = cz + nz * mu * hw;
-        kPos[off + 1] = (bedM ? bedM[k] : cy0) + 0.05 + thick * (0.25 + 0.75 * (1 - Math.pow(amu, 3.2))) + 0.04;
-        /* HOW MUCH MELT IS SHOWING HERE, and it is the whole look:
+        // the channel FLOOR is flat — it is a raft of liquid rock lying
+        // between two levees, so its cross-section is a shallow dish, not a
+        // crown. The crust's ridge above does the standing-proud.
+        kPos[off + 1] = (bedM ? bedM[k] : cy0) + 0.05 + thick * (0.45 + 0.55 * (1 - Math.pow(amu, 3.2))) + 0.04;
+        /* WHAT THE VERTEX CARRIES NOW IS THE ENVELOPE, and only the
+           envelope — every high-frequency thing moved into the lace texture
+           above, because the vertex grid provably cannot hold it.
+
              across  melt lives inside the levees, and its reach narrows as
                      the levees grow inward downstream
              open    the lid thickens with distance from the vent
-             lace    the travelling crack network — the term that MOVES
-             flood   the vent apron: the first stretch has no lid at all */
-        const across = 1 - Math.pow(amu, 2.6 + 2.1 * u01);
-        // gentled with the 2026-08-19 rebalance below: the toe of a fed flow
-        // still MOVES, so it stays red — only stopping earns the black
+             flood   the vent apron: the first metres have no lid at all
+             hot     the station's own temperature, which is the whole story
+                     from white-hot rim to dull-red toe to black scar
+
+           All four are smooth over metres, which is exactly what linear
+           interpolation between stations is good at. */
+        const across = 1 - Math.pow(amu, 3.4 + 2.1 * u01);
         const open = 0.98 - 0.22 * u01;
-        /* THE LACE IS THE LOOK (the owner's reference close-up, 2026-08-15):
-           a dark crusted surface with thin CONNECTED filaments of melt
-           cracked through it, wrapping irregular black islands. lidField now
-           arrives here already ridge-transformed — 1 on the filament, 0 in
-           the plate — so no midpoint stretch is applied on top: stretching a
-           ridge only fattens it back into the smooth bright bands this
-           replaces, which was the whole "glowing road" failure. */
-        const lace = lidField(s, u, ph);
-        /* THE VENT FLOODS — BUT THE FLOOD IS STILL THREADED. In the wide
-           reference photograph the upper flank is one incandescent apron;
-           in the close-up even the flooded stretch keeps thin dark stringers
-           through it. A flood that simply forces melt=1 painted a solid
-           white band down the first quarter of every flow — a laser, which
-           is geometry again (the peek shots proved it). So the flood keeps
-           a floor of lace modulation: bright apron, dark threads surviving
-           inside it. `hot` keeps the handover from popping as a station
-           cools. */
-        const flood = clamp((0.21 - u01) * 4.5, 0, 1) * (0.5 + 0.5 * hot) * (0.6 + 0.4 * lace);
-        /* THE MELT IS THE DEFAULT WHILE THE RIVER RUNS. OWNER, 2026-08-19:
-           "isn't it usually red, and it has that red and bright [brilliance]
-           ... and then it should turn black. Right now it literally flows
-           down black — black stuff doesn't move. Black is when it's in one
-           place." He is right, and it re-balances the 2026-08-15 lace: a FED
-           channel's surface is mostly incandescent, so the moving flow now
-           reads predominantly red-orange with the lace surviving as brighter
-           veins through it, and thin dark skin shows only as sparse RAFTS
-           where the field runs deepest. The full black crust belongs to lava
-           that has STOPPED — which is exactly what the quench paints: hot
-           collapses and this same formula lands on dark rock whose last
-           ember seams fade in the deepest lace. Moving = red; parked =
-           black. */
-        let melt = clamp((0.62 + 0.5 * lace) * across * open * (0.35 + 0.75 * hot) - 0.12, 0, 1);
-        // the rafts: thin chilled plates riding the bright river — dim while
-        // the river is hot (skin, not rock), deepening to black as it stops
-        const raft = clamp((0.18 - lace) * 5, 0, 1);
-        melt *= 1 - raft * (0.3 + 0.42 * (1 - hot));
-        melt = Math.max(melt, flood * across);
-        melt = melt * melt * (3 - 2 * melt);   // smoothstep: veins get EDGES
-        /* 0.24+0.56, down from 0.32+0.8: with the melt now covering most of
-           the river, the old drive parked the whole body at the ramp's gold
-           top — the "red and bright" the owner asked for lives a step down,
-           with the body on the red-orange stop and only the veins and the
-           vent flood reaching the bright end. */
-        ramp3(clamp(melt * (0.24 + 0.56 * hot), 0, 1), MELT_A, MELT_B, MELT_C, _c3);
-        /* the lid itself is not black — it is dark rock still holding heat,
-           warmest right beside a filament (a crack heats its own rim).
-           QUADRATIC in hot, and biased harder into the lace: the 2026-08-16
-           slow-cooling repair keeps `hot` high for the whole eruption, and a
-           lid warmth LINEAR in hot then painted every plate warm gold — the
-           dark-crust-vs-bright-lace contrast that IS the bible photo fell
-           over. hot*hot keeps the plates dark rock while the filaments and
-           their rims stay incandescent for just as long. */
-        _c4.copy(_LID_D).lerp(_LID_W, clamp(hot * hot * (0.22 + 0.78 * lace), 0, 1));
-        _c4.lerp(_c3, melt);
-        kCol[off] = _c4.r * grM; kCol[off + 1] = _c4.g * grM; kCol[off + 2] = _c4.b * grM;
+        /* THE APRON IS A FIXED NUMBER OF METRES OFF THE RIM, not a fraction
+           of the flow's EVENTUAL length. `u01` is s / (full len), and a flow
+           creeping at 1.4 m/s has covered ~17 m of its 70 m by the time any
+           of these beats photographs it — so "the first 19% of len" was the
+           first 13 m of a 17 m flow, and every lava shot in the storyboard
+           was a picture of the vent apron with the rest of the look hiding
+           behind it. Six metres of flood, measured, is the apron. */
+        const flood = clamp((1 - s / 6) * 1.3, 0, 1) * (0.5 + 0.5 * hot);
+        /* hot^1.6, not hot: the ramp's top stop is 1150 C rock and the
+           eruption keeps `hot` high for its whole run (the 2026-08-16
+           slow-cooling repair), so anything linear parked the entire river on
+           the bright stop — which is the pale-gold slab, one layer up from
+           the palette that was also wrong. The power curve puts the body of a
+           fed flow on the red-orange stop and reserves the bright end for the
+           apron and the freshest rock. */
+        let env = across * open * Math.pow(hot, 1.6);
+        env = Math.max(env, flood * across);
+        ramp3(clamp(env, 0, 1), MELT_A, MELT_B, MELT_C, _c3);
+        /* AND THE RAMP'S BOTTOM STOP IS NOT BLACK — MELT_A is a dull red,
+           which is right for a dying seam and wrong for dead rock. A quench
+           drives `hot` to ~0.05 and env with it, so this last multiply is
+           what actually lands the settled scar on black instead of on maroon.
+           (Measured on the shipped build before it existed: rgb(72,24,19).) */
+        _c3.multiplyScalar(Math.min(1, env * 4.5));
+        kCol[off] = _c3.r * grM; kCol[off + 1] = _c3.g * grM; kCol[off + 2] = _c3.b * grM;
+        /* THE LACE'S OWN COORDINATES. uv.x is metres across the flow, uv.y is
+           metres down it MINUS the metres the lid has advected — which is the
+           whole animation: the crack network travels downstream at the
+           surface velocity and the geometry never moves. `ph` arrives here in
+           METRES (it used to be radians of the old sine field). */
+        const uo = k * 2;
+        kUv[uo] = 0.5 + (mu * hw) / LACE_W;
+        kUv[uo + 1] = (s - ph) / LACE_L;
       }
     }
 
@@ -849,7 +1014,7 @@
     }
 
     function writeStations(from, to) {
-      const ph = phT * skinV * LID_K;
+      const ph = phT * skinV + laceOff;   // METRES the lid has travelled
       for (let i = from; i <= to && i < N; i++) {
         const p = path.pts[i], st = stationThick(i);
         // the second quench factor lands the settled flow at ~4% hot: black
@@ -885,16 +1050,20 @@
       // a flow front is a blunt snout, not a point: it bulges as it is fed
       const hw = halfW * wProf[i] * (0.34 + 0.66 * frac);
       for (let c = 0; c < COLS; c++) {
-        const u = UU[c], k = i * COLS + c;
+        const u = UU[c], au = Math.abs(u), k = i * COLS + c;
         _noseC[c] = cGY[k]; _noseM[c] = mGY[k];
-        cGY[k] = Math.max(groundAt(_v.x + nx * u * hw, _v.z + nz * u * hw), _v.y);
+        // same relaxed ponding floor as the solved-once bed above, or the
+        // nose would be the one ring still hanging off the hillside
+        const g = groundAt(_v.x + nx * u * hw, _v.z + nz * u * hw);
+        cGY[k] = g + (Math.max(g, _v.y) - g) * (1 - au * au);
         // the nose's melt bed rides the same wandering channel as ring()
-        const mun = u * MELT_INSET + meander[i] * (1 - Math.abs(u));
-        mGY[k] = Math.max(groundAt(_v.x + nx * mun * hw, _v.z + nz * mun * hw), _v.y);
+        const mun = u * MELT_INSET + meander[i] * (1 - au), amun = Math.abs(mun);
+        const mg = groundAt(_v.x + nx * mun * hw, _v.z + nz * mun * hw);
+        mGY[k] = mg + (Math.max(mg, _v.y) - mg) * (1 - amun * amun * amun);
       }
       const st = stationThick(i);
       ring(i, _v.x, _v.y, _v.z, nx, nz, hw, st.t * (0.55 + 0.45 * frac),
-        hot0[i] * (1 - 0.58 * st.cool) * (1 - 0.9 * st.qk), adv, phT * skinV * LID_K, cGY, mGY);
+        hot0[i] * (1 - 0.58 * st.cool) * (1 - 0.9 * st.qk), adv, phT * skinV + laceOff, cGY, mGY);
       // put the station's own bed back — the nose borrowed those slots
       for (let c = 0; c < COLS; c++) {
         const k = i * COLS + c;
@@ -978,6 +1147,9 @@
         crustGeo.attributes.color.needsUpdate = true;
         chGeo.attributes.position.needsUpdate = true;
         chGeo.attributes.color.needsUpdate = true;
+        // the uvs ARE the animation: the lace slides downstream through a
+        // mesh that never moves relative to the rock
+        chGeo.attributes.uv.needsUpdate = true;
         crustGeo.setDrawRange(0, Math.max(0, st) * (COLS - 1) * 6);
         chGeo.setDrawRange(0, Math.max(0, st) * (COLS - 1) * 6);
         /* NO computeVertexNormals(). r128 FACT, checked in the shipped build:
@@ -1067,37 +1239,118 @@
   };
 
   /* ============================================================
-     ASH COLUMN — the pillar over the vent.
+     ASH COLUMN — the pillar over the vent, and the fountain under it.
 
      The wide reference photograph's second subject after the lava: a FAT,
-     coherent, dark convective column standing kilometres over the crater,
-     bulging into a cauliflower head, leaning slightly downwind. The old
-     column was a THREE.Points cloud — a few hundred dots that photograph
-     as static in front of the sky, not as a thing with a silhouette.
+     coherent, dark convective column standing over the crater, bulging into
+     a cauliflower head, leaning downwind. It is built from overlapping
+     camera-facing sprites wearing a lumpy cauliflower alpha, each with a
+     LIFECYCLE — born at the vent, climbing while it expands, decelerating
+     into the head, spreading there, recycled inside the crowd dense enough
+     to mask it. Nothing oscillates; all motion is travel.
 
-     Same construction as the pyroclastic current, because it is the same
-     physics upside down: overlapping camera-facing sprites wearing the
-     shared cauliflower alpha, sizes growing with height (a plume expands
-     as it entrains air), bending downwind with height squared (drag
-     integrates). Dark tiers only — the photograph's pillar is soot against
-     sky; the V2 puffs cool from a brief rose-lit throat into neutral soot.
+     2026-09-01, THREE MEASURED FAULTS, from photographs of the shipped page:
 
-     OWNER, 2026-08-16: "when smoke comes out of the volcano it looks like
-     flat bouncing circle ish things — look at the rpg explosion and how it
-     has shape." Both halves diagnosed the same build: every puff was a
-     PERMANENT FIXTURE parked at its own height and wobbled around that seat
-     by three sinusoids — position oscillation, which the eye reads exactly
-     as billboards bouncing. The RPG's smoke reads as a volume because every
-     puff has a LIFECYCLE: born small, growing as it rises, dying into the
-     plume. So the column is now an EMITTER. A puff is born just over the
-     vent, climbs the axis while it expands, decelerates into the head,
-     spreads sideways there (that crowd IS the cauliflower bulge), and is
-     recycled back to the vent inside the one part of the mass dense enough
-     to mask it. Nothing oscillates; all motion is travel. V2 follows the RPG
-     pool's decisive detail: each puff owns its material state, so rotations,
-     opacity and cooling never advance in lockstep. Every owned material is
-     disposed with the column; the shared RPG/fallback texture is not.
+     1. IT WAS A PENCIL. `axisR = r0 * (0.22 + 0.76*hh + ...)` put the stem
+        radius at 0.22*r0 — 2.4 m — under a 72 m mountain, so the column
+        photographed as a 5-10 m string of legible round puffs. A convective
+        plume does the opposite: it leaves a mouth the size of the VENT and
+        ENTRAINS ambient air as it climbs, widening ~0.2 m per metre of
+        rise. Radius now starts at r0 and grows with the climb, and every
+        puff is sized off the LOCAL radius, so the overlap depth (4-6 cards
+        through any ray) holds whether the plume is 20 m or 90 m across.
+        Density comes from bigger sprites, not more of them.
+
+     2. IT FLOATED. A puff's opacity ran up over u < 0.085, and 0.085 of
+        this rise curve is 13 m — so the column's base hung three storeys
+        above the crater with nothing but sparse fountain sparks in the gap.
+        Birth is now inside the first ~2 m, where the vent apron and the
+        fountain cover the pop.
+
+     3. IT WAS PALE. THE LINEAR-HEX TRAP: a material colour in this r128
+        build is LINEAR, and every pixel then walks ACES + the film grade +
+        the sRGB encode on its way to the screen (core/renderer.js). The
+        edge tier 0x292824 — near-black in a hex picker — leaves that
+        pipeline at rgb(196), which is why the night column photographed
+        LIGHTER THAN THE NIGHT SKY. Colours here are authored in SCREEN
+        bytes and inverted back through the shipped transform (screenHex),
+        so "soot" is soot on the glass.
+
+     The light on the soot is baked per puff per frame from three terms: a
+     height ramp (dark brown-grey throat, mid-grey body, lighter crown), a
+     SUN-SIDE lift taken from the puff's bearing against the real sun
+     direction (core/lights.js's sun vs its target), and the VENT UNDERLIGHT
+     — the ~28 m of column standing on the crater goes rose-orange from
+     below, scaled by night. That last one is the Fuego photograph in one
+     line: a black pillar with a burning foot.
      ============================================================ */
+
+  /* ---- SCREEN BYTES -> LINEAR MATERIAL HEX ----------------------------
+     Inverts core/renderer.js's output transform (exposure, ACES, the
+     lift/gamma/gain grade, sRGB) so a colour can be authored as what it
+     should LOOK like. Bisection, memoised, a handful of calls at build. */
+  let _gradeRead = false, _TONE = true, _GRADE = true, _EXP = 1.16;
+  const GRADE_GAIN = [1.025, 1.005, 0.982], GRADE_LIFT = [0.0015, 0.0032, 0.0072];
+  function toScreen(lin, ch) {
+    let c = lin;
+    if (_TONE) {
+      c = c * _EXP / 0.6;
+      // three r128's RRTAndODTFit, per channel: the ACES matrices are close
+      // enough to identity for the near-neutrals this is used to solve for
+      c = (c * (c + 0.0245786) - 0.000090537) / (c * (0.983729 * c + 0.432951) + 0.238081);
+      c = clamp(c, 0, 1);
+      if (_GRADE) {
+        c = Math.pow(Math.max(c / 0.18, 0), 1.075) * 0.18;
+        c = c * GRADE_GAIN[ch] + GRADE_LIFT[ch];
+      }
+      c = clamp(c, 0, 1);
+    }
+    return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+  }
+  const _screenCache = {};
+  function screenHex(r, g, b) {
+    if (!_gradeRead) {
+      _gradeRead = true;
+      _TONE = CBZ.toneMappingOn !== false;
+      _GRADE = CBZ.CONFIG.RENDER_GRADE_V1 !== false;
+      // gfx.js rides exposure on the day clock (~0.94 day .. ~1.18 night);
+      // solve at the middle — the residual is a few per cent of brightness
+      _EXP = (+CBZ.renderExposureBase || 1.16) * 1.05;
+    }
+    const key = (r << 16) | (g << 8) | b;
+    if (_screenCache[key] != null) return _screenCache[key];
+    const want = [r / 255, g / 255, b / 255];
+    let out = 0;
+    for (let ch = 0; ch < 3; ch++) {
+      let lo = 0, hi = 1;
+      for (let i = 0; i < 24; i++) {
+        const mid = (lo + hi) * 0.5;
+        if (toScreen(mid, ch) < want[ch]) lo = mid; else hi = mid;
+      }
+      out = (out << 8) | clamp(Math.round((lo + hi) * 0.5 * 255), 0, 255);
+    }
+    _screenCache[key] = out;
+    return out;
+  }
+  V.screenHex = screenHex;   // the volcano's one colour authority; tools read it
+
+  /* Where the sun actually is, as a horizontal bearing. core/lights.js
+     builds its own direction the same way (sun.position - sunTarget), which
+     is the only correct read: daynight.js sets the position and lights.js
+     then slides the whole rig onto the camera focus. */
+  const _sunXZ = { x: 0.6, z: -0.8 };
+  function sunBearing() {
+    const s = CBZ.sun;
+    if (s && s.position) {
+      let dx = s.position.x, dz = s.position.z;
+      const tg = CBZ.sunTarget;
+      if (tg && tg.position) { dx -= tg.position.x; dz -= tg.position.z; }
+      const L = Math.sqrt(dx * dx + dz * dz);
+      if (L > 1e-4) { _sunXZ.x = dx / L; _sunXZ.z = dz / L; }
+    }
+    return _sunXZ;
+  }
+
   V.ashColumn = function (o) {
     o = o || {};
     const parent = o.parent || CBZ.scene;
@@ -1105,226 +1358,161 @@
     const baseY = o.y != null ? +o.y : 0;
     const height = o.height > 0 ? +o.height : 55;
     const r0 = o.r > 0 ? +o.r : 7;
-    const organic = CBZ.CONFIG.VOLCANO_PLUME_V2 !== false;
     const mats = [];
-    // one step below where they should read: the eruption's warm fog and the
-    // output encoding both lift these on the way to the screen (same lesson
-    // as the melt ramp and the ash palette)
-    const COL_TIERS = [0x1a1713, 0x211d17, 0x28231c, 0x2f2921];
-    /* `fogless`: the V3 column is the eruption's LANDMARK, and a 180 m pillar
+    /* `fogless`: the column is the eruption's LANDMARK, and a 180 m pillar
        whose head sits 250+ m from any camera on a 240 m island was being
        dissolved by the eruption's own 380 m fog wall — the most dramatic
        silhouette in nature, fading out precisely because it was tall enough
        to matter. Soot against sky owes the air nothing (city/nukefx.js's
        lobes made the same call), so the caller may exempt it. */
     const useFog = o.fogless ? false : true;
-    if (!organic) {
-      for (let i = 0; i < COL_TIERS.length; i++) {
-        mats.push(new THREE.SpriteMaterial({
-          map: puffTex(i % 3), color: COL_TIERS[i],
-          transparent: true, opacity: 1, depthWrite: false, fog: useFog,
-          blending: THREE.NormalBlending, rotation: i * 1.7,
-        }));
-      }
-    }
     /* EXACTLY THE RPG'S MASK when that shared owner is loaded. The standalone
        disaster slice intentionally omits the city blast module, so the
-       volcano's own cauliflower cutout is the degrade-safe fallback. No copy,
-       no second texture upload and, critically, no geometric smoke mesh. */
+       volcano's own cauliflower cutout is the SHIPPED look and gets the
+       same care. No copy, no second texture upload, no smoke mesh. */
     let blastSmoke = null;
-    if (organic && CBZ.cityBlastPuffAssets) {
+    if (CBZ.cityBlastPuffAssets) {
       try { const A = CBZ.cityBlastPuffAssets(); blastSmoke = A && A.smoke; } catch (e) {}
     }
-    // The old path is kept byte-for-byte behind the flag. The denser path uses
-    // smaller interlocking puffs: density replaces the old handful of huge
-    // discs, just as the RPG fireball builds a continuous shape from overlap.
-    const legacyN = qi(18, 30);
-    const N = organic ? qi(80, 156) : legacyN;
+    // Screen-authored soot. Base is a dirty brown (fresh ash in its own
+    // shadow), the body neutral, the crown a shade lighter where it is out
+    // in the open; NIGHT is a silhouette and SUN is the lit face of the
+    // head; VENT is the crater's own light thrown up onto the column's foot.
+    const CH_BASE = screenHex(30, 25, 21);
+    const CH_BODY = screenHex(48, 45, 43);
+    const CH_CROWN = screenHex(68, 65, 61);
+    const C_NIGHT = new THREE.Color(screenHex(12, 12, 15));
+    const C_SUN = new THREE.Color(screenHex(172, 164, 149));
+    const C_VENT = new THREE.Color(screenHex(214, 96, 38));
+    // how far up the crater's own glow reaches — the Fuego photograph's
+    // burning foot is roughly two vent diameters of lit column
+    const VENT_REACH = 18 + 0.95 * r0;
+    const N = qi(80, 156);
     const grp = new THREE.Group();
     grp.frustumCulled = false;
     parent.add(grp);
     /* u = life/RISE: 0 birth at the vent, 1 arrival at the head, then a
-       bounded cauliflower hold before recycle. V2 births across the full
-       seven-second cycle: it grows honestly from an empty vent, then reaches
-       a steady state where every lifecycle age is represented and no recycle
-       can open a missing-age hole through the middle. */
-    const LEGACY_RISE = 6;
-    const RISE = organic ? 5 : LEGACY_RISE;
-    const END = organic ? 1.4 : 1.35;
-    // A local seeded stream makes the richer silhouette stable without
-    // stealing random calls from bomb, lava and hazard gameplay downstream.
+       bounded cauliflower hold before recycle. Births fill the whole cycle
+       at a constant cadence: the plume grows honestly from an empty vent,
+       then reaches a steady state where every lifecycle age is represented
+       and no recycle can open a missing-age hole through the middle. */
+    const RISE = 5, END = 1.4;
+    // A local seeded stream makes the silhouette stable without stealing
+    // random calls from bomb, lava and hazard gameplay downstream.
     let seed = (((x * 73856093) | 0) ^ ((z * 19349663) | 0) ^ 0x61a5c3d7) >>> 0;
     const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-    /* The current/old constructor consumes four global randoms per puff. Burn
-       the same four on the V2 path, then keep all new visual richness local,
-       so the A/B does not quietly reroll the lava fan or volcanic bombs. */
-    if (organic) for (let i = 0; i < legacyN * 4; i++) Math.random();
-    const legacyLives = organic ? new Float32Array(legacyN) : null;
-    if (legacyLives) for (let i = 0; i < legacyN; i++) legacyLives[i] = -(i / legacyN) * LEGACY_RISE * 1.35;
     const puffs = [];
     for (let i = 0; i < N; i++) {
-      let m = null;
-      if (organic) {
-        /* RPG parity means per-puff material state. Shared materials made every
-           old billboard rotate and fade in lockstep; crashfx gives each puff
-           its own rotation, opacity and temperature, which is why its cloud
-           never resolves into a repeated card pattern. */
-        const role = i % 10 < 3 ? 0 : (i % 10 < 8 ? 1 : 2); // core / body / edge
-        const cold = role === 0 ? 0x050606 : (role === 1 ? 0x10110f : 0x292824);
-        const mat = new THREE.SpriteMaterial({
-          map: blastSmoke || puffTex(i % 3), color: cold,
-          transparent: true, opacity: 0, depthWrite: false, depthTest: true,
-          fog: useFog, blending: THREE.NormalBlending, rotation: rnd() * 6.2832,
-        });
-        mats.push(mat);
-        m = new THREE.Sprite(mat);
-      } else {
-        m = new THREE.Sprite(mats[0]);
-      }
+      /* Per-puff material state. Shared materials made every billboard
+         rotate and fade in lockstep, which is what let the eye resolve a
+         repeated card pattern; here rotation, opacity and the baked light
+         are all owned, so nothing advances together. */
+      const mat = new THREE.SpriteMaterial({
+        map: blastSmoke || puffTex(i % 3), color: CH_BODY,
+        transparent: true, opacity: 0, depthWrite: false, depthTest: true,
+        fog: useFog, blending: THREE.NormalBlending, rotation: rnd() * 6.2832,
+      });
+      mats.push(mat);
+      const m = new THREE.Sprite(mat);
       m.renderOrder = 7;
       m.visible = false;
       grp.add(m);
-      if (!organic) {
-        puffs.push({
-          m: m, tier: 0,
-          life: -(i / N) * RISE * 1.35,
-          ang: Math.random() * 6.28,
-          rr: 0.2 + Math.random() * 0.8,
-          ph: Math.random() * 6.28,
-          sz: 0.8 + Math.random() * 0.5,
-        });
-      } else {
-        const role = i % 10 < 3 ? 0 : (i % 10 < 8 ? 1 : 2);
-        const rr = role === 0 ? 0.05 + rnd() * 0.34 : (role === 1 ? 0.18 + rnd() * 0.58 : 0.62 + rnd() * 0.44);
-        puffs.push({
-          m: m, role: role,
-          /* Births fill the whole cycle at a constant cadence. Before one
-             cycle has elapsed the plume honestly grows upward; afterwards
-             every lifecycle age is represented at once, so recycle cannot
-             open a missing-age hole halfway up the column. */
-          life: -(i / N) * RISE * END,
-          ang: rnd() * 6.2832,
-          rr: rr,
-          ph: rnd() * 6.2832,
-          sz: (role === 0 ? 0.76 : (role === 1 ? 0.64 : 0.52)) + rnd() * (role === 2 ? 0.28 : 0.34),
-          aspect: 0.72 + rnd() * 0.58,
-          spin: (rnd() - 0.5) * (role === 2 ? 0.24 : 0.15),
-          wind: 0.76 + rnd() * 0.38,
-          maxOp: role === 0 ? 0.68 : (role === 1 ? 0.5 : 0.22),
-        });
-      }
+      const role = i % 10 < 3 ? 0 : (i % 10 < 8 ? 1 : 2);   // core / body / edge
+      // sqrt keeps the population area-uniform across the disc instead of
+      // piling every puff onto the axis; the edge tier is allowed past 1 so
+      // the silhouette has a ragged coastline
+      const rr = role === 0 ? 0.44 * Math.sqrt(rnd())
+        : (role === 1 ? 0.26 + 0.56 * Math.sqrt(rnd()) : 0.66 + 0.46 * rnd());
+      puffs.push({
+        m: m, role: role,
+        life: -(i / N) * RISE * END,
+        ang: rnd() * 6.2832,
+        rr: rr,
+        ph: rnd() * 6.2832,
+        sz: (role === 0 ? 1.06 : (role === 1 ? 0.98 : 0.82)) * (0.78 + 0.44 * rnd()),
+        aspect: 0.74 + rnd() * 0.54,
+        spin: (rnd() - 0.5) * (role === 2 ? 0.24 : 0.15),
+        wind: 0.76 + rnd() * 0.38,
+        maxOp: role === 0 ? 0.56 : (role === 1 ? 0.46 : 0.28),
+      });
     }
     let t = 0, dead = false;
     const handle = {
-      kind: "column", group: grp, puffCount: N, organic: organic,
+      kind: "column", group: grp, puffCount: N,
       usesBlastSmoke: !!blastSmoke,
-      update(dt, wx, wz) {
+      /* opts.night (0 day .. 1 night) is the caller's day clock — tickEruption
+         already computes it and it is the difference between a black
+         silhouette and a grey smudge. Absent, the sky's own sun height
+         answers, so a column raised by anything else still knows the hour. */
+      update(dt, wx, wz, opts) {
         if (dead) return handle;
         t += dt;
         const bx = wx || 0, bz = wz || 0;
-        if (organic) {
-          /* Preserve the OLD updater's global-random cadence too. Its only
-             calls happen when one of the thirty legacy puffs recycles. This
-             virtual clock keeps all non-visual eruption outcomes aligned. */
-          for (let i = 0; i < legacyLives.length; i++) {
-            legacyLives[i] += dt;
-            if (legacyLives[i] / LEGACY_RISE < 1.35) continue;
-            legacyLives[i] = 0;
-            Math.random(); Math.random(); Math.random();
-          }
-          for (let i = 0; i < puffs.length; i++) {
-            const P = puffs[i];
-            P.life += dt;
-            if (P.life < 0) { P.m.visible = false; continue; }
-            let u = P.life / RISE;
-            if (u >= END) {
-              P.life = 0; u = 0;
-              P.ang = rnd() * 6.2832;
-              P.ph = rnd() * 6.2832;
-              P.wind = 0.76 + rnd() * 0.38;
-            }
-            const climb = Math.min(1, u);
-            // Buoyant ash leaves the throat fast, then crowds at neutral
-            // buoyancy. That crowd—not one giant disc—is the cauliflower head.
-            const hh = 1 - Math.pow(1 - climb, 1.42);
-            const hold = Math.max(0, u - 1);
-            const head = clamp(hold / (END - 1), 0, 1);
-            const axisR = r0 * (0.22 + 0.76 * hh + 1.45 * head);
-            const lean = height * 0.27 * hh * hh * P.wind;
-            // A slow helical roll belongs to convection; there is no sinusoid
-            // added to world position, so no puff bounces around a fixed seat.
-            const drift = P.ang + hh * 0.72 + t * (0.018 + P.spin * 0.08);
-            const radial = axisR * P.rr * (1 + head * (P.role === 2 ? 0.55 : 0.24));
-            const capLift = head * height * (0.025 + 0.055 * Math.sin(P.ph));
-            P.m.position.set(
-              x + Math.cos(drift) * radial + bx * lean,
-              baseY + hh * height + capLift,
-              z + Math.sin(drift) * radial + bz * lean
-            );
-            // Many smaller, non-uniform cards interlock. The old 1.5*rad
-            // scale made each individual puff the size of a building and let
-            // the eye count it; this keeps the mass dense without readable
-            // circles, then broadens only once the head actually forms.
-            const born = clamp(u / 0.085, 0, 1);
-            const dying = u < 1.18 ? 1 : clamp((END - u) / (END - 1.18), 0, 1);
-            const sc = r0 * (0.54 + 1.22 * hh + 0.68 * head) * P.sz;
-            P.m.scale.set(sc * P.aspect, sc * (1.1 - (P.aspect - 0.72) * 0.28), 1);
-            P.m.material.opacity = P.maxOp * born * dying;
-            P.m.material.rotation += P.spin * dt;
-            // RPG smoke glows briefly where it hands off from fire, then
-            // cools to neutral soot. Edge puffs catch more sky than the core.
-            const heat = clamp(1 - u * 7.5, 0, 1);
-            const cold = P.role === 0 ? 0x050606 : (P.role === 1 ? 0x10110f : 0x292824);
-            P.m.material.color.setHex(cold);
-            if (heat > 0) { _c4.setHex(P.role === 2 ? 0x713019 : 0x3f1b10); P.m.material.color.lerp(_c4, heat * 0.7); }
-            P.m.visible = P.m.material.opacity > 0.015 && sc > 0.05;
-          }
-          return handle;
-        }
-        // the slow boil, at zero position cost: the shared materials turn at
-        // their own rates, shuffled across the roster (the pyro's trick)
-        for (let i = 0; i < mats.length; i++) mats[i].rotation = i * 1.7 + t * (0.05 + i * 0.02);
+        const night = (opts && opts.night != null) ? clamp(+opts.night, 0, 1)
+          : clamp(1 - (0.5 + 2.2 * (CBZ.sunHeight != null ? CBZ.sunHeight : 0.5)), 0, 1);
+        const day = 1 - night;
+        const sd = sunBearing();
         for (let i = 0; i < puffs.length; i++) {
           const P = puffs[i];
           P.life += dt;
           if (P.life < 0) { P.m.visible = false; continue; }
           let u = P.life / RISE;
-          if (u >= 1.35) {
-            // recycled inside the crowded head, the one place dense enough
-            // to mask a departure; reseeded so the column never loops
+          if (u >= END) {
             P.life = 0; u = 0;
-            P.ang = Math.random() * 6.28;
-            P.rr = 0.2 + Math.random() * 0.8;
-            P.ph = Math.random() * 6.28;
+            P.ang = rnd() * 6.2832;
+            P.ph = rnd() * 6.2832;
+            P.wind = 0.76 + rnd() * 0.38;
           }
           const climb = Math.min(1, u);
-          // fast off the vent, decelerating into the head — a plume climbing
-          // toward neutral buoyancy — then the head HOLDS and spreads.
-          // 0.8: enough curve to crowd the head, not so much that the stem
-          // empties (puff density goes as 1/climb-rate)
-          const hh = Math.pow(climb, 0.8);
-          const hold = Math.max(0, u - 1);
-          const rad = r0 * (0.5 + 1.9 * hh) * (1 + hold * 1.3);
-          // downwind lean integrates with height — drag works on the WHOLE climb
-          const lean = height * 0.3 * hh * hh;
-          const drift = P.ang + t * 0.16;     // the whole mass slowly turns
+          // Buoyant ash leaves the throat fast and crowds at neutral
+          // buoyancy. That crowd — not one giant disc — is the head.
+          const hh = 1 - Math.pow(1 - climb, 1.3);
+          const head = clamp((u - 1) / (END - 1), 0, 1);
+          /* ENTRAINMENT IS THE SHAPE: a mouth the size of the vent, growing
+             ~0.2 m of radius per metre climbed, then a broad turbulent cap. */
+          const axisR = (r0 + 0.2 * hh * height) * (1 + 0.85 * head);
+          const lean = height * 0.27 * hh * hh * P.wind;
+          // A slow helical roll belongs to convection; nothing is added to
+          // world position as a sinusoid, so no puff bounces on a fixed seat.
+          const drift = P.ang + hh * 0.72 + t * (0.018 + P.spin * 0.08);
+          const radial = axisR * P.rr * (1 + head * (P.role === 2 ? 0.34 : 0.12));
+          const capLift = head * height * (0.03 + 0.05 * Math.sin(P.ph));
+          const py = baseY + hh * height + capLift;
           P.m.position.set(
-            x + Math.cos(drift) * rad * P.rr * 0.62 + bx * lean,
-            baseY + (hh + hold * 0.12) * height,
-            z + Math.sin(drift) * rad * P.rr * 0.62 + bz * lean
+            x + Math.cos(drift) * radial + bx * lean,
+            py,
+            z + Math.sin(drift) * radial + bz * lean
           );
-          /* BORN SMALL, GROWS AS IT ENTRAINS AIR — the lifecycle is the
-             shape. Scale doubles as the fade: a puff pops in tiny inside the
-             dense base (behind the fountain and the lit underside cloud) and
-             has been swallowed by the head crowd before it recycles. */
-          const grow = Math.min(1, u * 5) * (0.68 + 0.32 * climb) * (1 + hold * 0.45);
-          const sc = rad * P.sz * 1.5 * grow * (1 + 0.05 * Math.sin(t * 0.8 + P.ph));
-          P.m.scale.set(sc, sc * 0.94, 1);
-          P.m.visible = sc > 0.05;
-          // the tier IS the lighting (see the pyro note): re-seated as the
-          // puff climbs out of the column's own shadow into the lit crown
-          const tier = Math.min(COL_TIERS.length - 1, (hh * 3.2) | 0);
-          if (tier !== P.tier) { P.tier = tier; P.m.material = mats[tier]; }
+          // sized off the LOCAL radius: overlap depth is scale-free, so the
+          // burp and the big one are both masses rather than strings
+          const sc = axisR * (0.52 + 0.44 * P.sz) * (1 + 0.16 * head);
+          P.m.scale.set(sc * P.aspect, sc * (1.12 - (P.aspect - 0.74) * 0.3), 1);
+          // BORN AT THE CRATER — full inside ~2 % of the rise (about 2 m),
+          // behind the vent apron and the fountain
+          const born = clamp(u / 0.016, 0, 1);
+          const dying = u < 1.2 ? 1 : clamp((END - u) / (END - 1.2), 0, 1);
+          P.m.material.opacity = P.maxOp * born * dying;
+          P.m.material.rotation += P.spin * dt;
+          // ---- the light on the soot, baked per puff ----
+          const col = P.m.material.color;
+          ramp3(hh, CH_BASE, CH_BODY, CH_CROWN, col);
+          if (night > 0) col.lerp(C_NIGHT, night * 0.88);
+          /* THE SUN SIDE. A convecting head is a solid, and the half of it
+             facing the sun is markedly lighter — that one cue is most of
+             what makes a plume read as a volume in daylight. */
+          if (day > 0.02) {
+            const sunSide = (Math.cos(drift) * sd.x + Math.sin(drift) * sd.z) * P.rr;
+            if (sunSide > 0) col.lerp(C_SUN, sunSide * day * (0.10 + 0.46 * hh));
+          }
+          /* AND THE VENT LIGHTS THE FOOT. Fuego by night: the pillar is
+             black except for the stretch standing on the crater, which is
+             rose-orange from below. */
+          const dy = py - baseY;
+          if (dy < VENT_REACH) {
+            const gk = 1 - dy / VENT_REACH;
+            col.lerp(C_VENT, gk * gk * (0.2 + 0.68 * night));
+          }
+          P.m.visible = P.m.material.opacity > 0.012 && sc > 0.05;
         }
         return handle;
       },
@@ -1338,6 +1526,143 @@
       },
     };
     LIVE.column.push(handle);
+    return handle;
+  };
+
+  /* ============================================================
+     THE LAVA FOUNTAIN — clots on arcs, not orange confetti.
+
+     What stood here was `CBZ.fx.particleCloud({mode:"rise"})`: a few
+     hundred identical 0.2 m Points drifting upward at a constant speed.
+     Photographed, that is glitter — and it was the ONLY thing between the
+     crater and the column, so the most violent 20 m of the whole eruption
+     read as static.
+
+     A Strombolian fountain is ballistic. Clots of molten rock leave the
+     vent at 20-40 m/s in a narrow cone, follow real parabolas, and fall
+     back onto the cone; they leave white-yellow, cool through orange to a
+     dull red on the way down, and the big ones go highest and last
+     longest. So: real gravity (CBZ.TUNE.gravity), a launch cone, one
+     additive glow sprite per clot, and recycle on landing — a clot that
+     drops below the ground under itself is relaunched from the mouth.
+
+     Cost is one draw call per clot (r128 draws every Sprite on its own,
+     whatever the material), so the population rides the quality budget.
+     ============================================================ */
+  V.fountain = function (o) {
+    o = o || {};
+    const parent = o.parent || CBZ.scene;
+    const x = +o.x || 0, z = +o.z || 0;
+    const baseY = o.y != null ? +o.y : 0;
+    const groundAt = typeof o.groundAt === "function" ? o.groundAt : flatGround;
+    const mag = clamp(o.mag != null ? +o.mag : 0.5, 0, 1);
+    const mouth = o.r > 0 ? +o.r : (1.6 + 2.4 * mag);
+    const G = (CBZ.TUNE && CBZ.TUNE.gravity > 0) ? CBZ.TUNE.gravity : 20;
+    // muzzle speed: a burp throws 18 m/s, the big one 38 — apex 7 m and 33 m
+    const V0 = 18 + 20 * mag;
+    /* THE CONE HAS TO BE WIDE ENOUGH TO SEE THROUGH. At 10-15 degrees every
+       clot lands on top of its neighbour and the additive stack photographs
+       as one orange cauliflower on the summit — a fireball, not a fountain.
+       Real Strombolian jets fan 20-30 degrees; that is also the angle at
+       which the individual parabolas separate on screen. */
+    const CONE = (15 + 12 * mag) * Math.PI / 180;
+    const N = qi(56, 132);
+    // incandescence, authored as screen bytes and inverted (see screenHex)
+    const F_HOT = new THREE.Color(screenHex(255, 246, 214));
+    const F_MID = new THREE.Color(screenHex(255, 140, 38));
+    const F_OLD = new THREE.Color(screenHex(152, 30, 8));
+    const grp = new THREE.Group();
+    grp.frustumCulled = false;
+    parent.add(grp);
+    let seed = (((x * 73856093) | 0) ^ ((z * 19349663) | 0) ^ 0x1d3f77b1) >>> 0;
+    const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    const mats = [], clots = [];
+    function launch(P) {
+      const a = rnd() * 6.2832, rr = Math.sqrt(rnd()) * mouth;
+      P.x = x + Math.cos(a) * rr; P.y = baseY; P.z = z + Math.sin(a) * rr;
+      // tilt off vertical inside the cone, thrown roughly outward from the
+      // axis so the fan opens the way a jet does instead of crossing itself
+      const tilt = CONE * (0.2 + 0.8 * rnd());
+      const az = a + (rnd() - 0.5) * 1.5;
+      const sp = V0 * (0.48 + 0.64 * rnd());
+      const st = Math.sin(tilt);
+      P.vx = Math.cos(az) * st * sp;
+      P.vy = Math.cos(tilt) * sp;
+      P.vz = Math.sin(az) * st * sp;
+      P.age = 0;
+      P.gy = null;
+      // the clots thrown hardest are the big bombs
+      P.sz = 0.5 + 1.05 * (0.35 * rnd() + 0.65 * clamp((sp / V0 - 0.48) / 0.64, 0, 1));
+      P.tf = Math.max(0.35, 2 * P.vy / G);
+    }
+    for (let i = 0; i < N; i++) {
+      const mat = new THREE.SpriteMaterial({
+        map: glowTex(), color: 0xffffff, transparent: true, opacity: 0,
+        depthWrite: false, depthTest: true, fog: false,
+        blending: THREE.AdditiveBlending,
+      });
+      mats.push(mat);
+      const m = new THREE.Sprite(mat);
+      m.renderOrder = 8;
+      m.visible = false;
+      grp.add(m);
+      const P = { m: m, mat: mat, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: 0, tf: 1, sz: 1, gy: null, wait: (i / N) * 1.2 };
+      launch(P);
+      clots.push(P);
+    }
+    let dead = false, active = 1;
+    const handle = {
+      kind: "fountain", group: grp, clotCount: N,
+      setActive(k) { active = clamp(k == null ? 1 : +k, 0, 1); return handle; },
+      update(dt) {
+        if (dead) return handle;
+        if (!(dt > 0)) return handle;
+        if (dt > 0.2) dt = 0.2;
+        const live = Math.max(1, Math.round(N * (0.25 + 0.75 * active)));
+        for (let i = 0; i < clots.length; i++) {
+          const P = clots[i];
+          if (i >= live) { P.m.visible = false; continue; }
+          if (P.wait > 0) { P.wait -= dt; P.m.visible = false; continue; }
+          P.age += dt;
+          P.vy -= G * dt;
+          P.x += P.vx * dt; P.y += P.vy * dt; P.z += P.vz * dt;
+          /* THE GROUND IS ONLY ASKED ONCE PER FLIGHT. A height-field probe
+             per clot per frame is a hundred lookups a tick for an answer
+             that does not move; the sample is taken the moment a falling
+             clot passes the vent lip and kept until it lands. */
+          if (P.vy < 0 && P.y < baseY) {
+            if (P.gy == null) { try { P.gy = +groundAt(P.x, P.z) || 0; } catch (e) { P.gy = baseY - 30; } }
+            if (P.y <= P.gy) { launch(P); P.m.visible = false; continue; }
+          }
+          const k = clamp(P.age / P.tf, 0, 1);
+          // white-yellow -> orange -> dull red, and dimming the whole way
+          const col = P.mat.color;
+          if (k < 0.42) col.copy(F_HOT).lerp(F_MID, k / 0.42);
+          else col.copy(F_MID).lerp(F_OLD, (k - 0.42) / 0.58);
+          P.mat.opacity = 0.82 * (1 - 0.6 * k) * clamp(P.age / 0.06, 0, 1);
+          /* A CLOT IS MOVING. Stretching the card along the flight — most of
+             which is vertical — is the whole difference between a bead and a
+             tracer, and it costs one scale component. It relaxes to a round
+             lump at the apex, where the clot really has stopped. */
+          const s = P.sz * (1 + 0.3 * k);
+          const stretch = 1 + 0.55 * clamp(Math.abs(P.vy) / V0, 0, 1);
+          P.m.position.set(P.x, P.y, P.z);
+          P.m.scale.set(s / Math.sqrt(stretch), s * stretch, 1);
+          P.m.visible = true;
+        }
+        return handle;
+      },
+      dispose() {
+        if (dead) return;
+        dead = true;
+        for (let i = 0; i < clots.length; i++) grp.remove(clots[i].m);
+        parent.remove(grp);
+        for (let i = 0; i < mats.length; i++) mats[i].dispose();
+        const k = LIVE.fountain.indexOf(handle); if (k >= 0) LIVE.fountain.splice(k, 1);
+      },
+    };
+    census.fountain++;
+    LIVE.fountain.push(handle);
     return handle;
   };
 
@@ -1962,6 +2287,14 @@
     const salt = o.salt != null ? (o.salt | 0) : 6151;
     // how much ash makes the ground READ as covered (a few cm)
     const FULL = o.full > 0 ? +o.full : 0.05;
+    /* WHERE A DRIFT STARTS. In units of FULL, against the cell's own mottle
+       and slope-shed factors, so the threshold picks out the lees and
+       hollows the smooth noise field already favours rather than cutting a
+       circle out of the wedge. 0.90 -> nothing is drawn until the ground
+       under it already reads as blanketed by the veil (the veil saturates at
+       exactly depth == FULL), and the span to full drift is another 1.4
+       blanket depths on top. */
+    const DRIFT_ON = 0.90, DRIFT_SPAN = 1.4;
 
     /* SMOOTH MOTTLE, NOT PER-CELL DICE. The 2026-08-23 build hashed an
        independent `gain` per cell — which is NOISE AT EXACTLY GRID FREQUENCY,
@@ -2091,6 +2424,12 @@
     // the last wind the field was given — the erosion pass combs streaks
     // along it (writeCell's angW). Radians, world XZ bearing.
     let windAng = 0;
+    /* THE LAST SUPPLY WEDGE. The aftermath has to keep painting the SAME
+       downwind sector on the ground long after the plume stopped feeding
+       this field (systems/weather.js's ash veil is a driven term and bleeds
+       out in 3.5 s if nobody asserts it) — and the only place that knows the
+       shape is the tick that was fed it. Null until the first supply. */
+    let lastWedge = null;
     /* ---- THE DEPOSIT LIES ON THE GROUND — AND THE PROBES ARE AMORTISED. --
        OWNER, 2026-08-13: "ash is the worst, theres random cubes and floating
        flat gray squares all around". The cure was corner-accurate draping:
@@ -2138,7 +2477,29 @@
         }
         return;
       }
-      const cov = clamp((C.depth / FULL) * (C.roof ? 1 : (C.gain || 1) * (C.shed || 1)), 0, 1);
+      /* ---- QUADS ARE DRIFTS NOW, NOT THE DEPOSIT ----------------------
+         OWNER, 2026-09-01, photographed: "a LEOPARD PRINT — hundreds of
+         near-identical grey amoeba blobs on bright green grass". Every fix
+         before this one dressed the blobs — jittered centres, smooth mottle,
+         wide size spread, wind-combed streaks — and every one of them was
+         treating a coverage problem as a shape problem. A quad field CANNOT
+         express a veil: at partial coverage it is by construction a scatter
+         of separate patches, and a real ashfall's first hour is a continuous
+         film that dims and desaturates everything downwind without having a
+         shape at all. That film is now the ground's own shader (the ash term
+         in systems/weather.js's surface coat, driven off THIS ledger's peak
+         through the same wedge maths), and these quads do the one job they
+         were always right for: the DRIFTS that stand proud of it where the
+         deposit is genuinely deep.
+
+         So a ground cell draws nothing until it holds most of a blanket
+         depth, and above that the patch is already near cell-width — it
+         goes straight to welding with its neighbours instead of spending
+         the interesting range as an isolated fleck. Roofs are untouched:
+         their quad IS the roof-load picture the structural ledger prices,
+         and it has to appear with the first centimetre. */
+      const raw = (C.depth / FULL) * (C.roof ? 1 : (C.gain || 1) * (C.shed || 1));
+      const cov = C.roof ? clamp(raw, 0, 1) : clamp((raw - DRIFT_ON) / DRIFT_SPAN, 0, 1);
       /* NO ASH, NO PATCH. The old floor (`grow = 0.28 + ...`) drew a >=1 m
          dark quad on EVERY ground cell from the moment the field was built —
          a permanent lattice of grey flecks over the whole island, upwind
@@ -2158,7 +2519,7 @@
       /* At full coverage the patch is WIDER than its cell so neighbours weld.
          The alpha cutout eats ~20% of the quad, so the geometry has to
          overshoot for the deposit to close up. */
-      const grow = 0.28 + 0.72 * cov;
+      const grow = C.roof ? 0.28 + 0.72 * cov : 0.62 + 0.42 * cov;
       /* THE WIND WORKS THE DEPOSIT INTO STREAKS. A cell that is ERODING
          (depth below the most it ever held) stretches along the wind and
          narrows across it, and its hashed rotation walks over to the wind
@@ -2211,8 +2572,25 @@
          thread down is finally the photograph's. */
       // blue-shifted on purpose: these are multiplied by a warm sun, and an
       // albedo picked to look grey in a swatch comes out pink on the ground
-      _c3.setHex(0x191b1d).lerp(_c1.setHex(0x33363a), Math.min(1, cov * 1.15));
-      _c3.lerp(_c1.setHex(0x212325), deep * 0.7);
+      if (C.roof) {
+        // ROOFS KEEP THE OLD RAMP. A roof quad is the load gauge — it has to
+        // read as "something is piling up here" from the first centimetre,
+        // dark against a pale roof, and it is not standing on a veil.
+        _c3.setHex(0x191b1d).lerp(_c1.setHex(0x33363a), Math.min(1, cov * 1.15));
+        _c3.lerp(_c1.setHex(0x212325), deep * 0.7);
+      } else {
+        /* A DRIFT STARTS AS THE VEIL AND ENDS PALER THAN IT. The bottom stop
+           is the ash term's own colour in systems/weather.js, so a patch
+           coming into existence at cov 0 is invisible against the ground it
+           is standing on — no popping outline, no fleck — and it walks up to
+           a pale deposit as it deepens, which is the only thing that makes a
+           drift read as raised rather than as a stain. Blue-shifted for the
+           same reason every other stop in this file is: the eruption's sun
+           is 0xd9714a and a neutral grey under it comes out pink. */
+        _c3.setHex(0x33363a).lerp(_c1.setHex(0x585d66), cov);
+        // ...and back down a stop when it goes deep and damp
+        _c3.lerp(_c1.setHex(0x3d4149), deep * 0.5);
+      }
       for (let k = 0; k < 4; k++) {
         col[v + k * 3] = _c3.r * grain;
         col[v + k * 3 + 1] = _c3.g * grain;
@@ -2224,6 +2602,9 @@
 
     const handle = {
       kind: "ash", mesh: mesh, cell: cell,
+      // {srcX,srcZ,ux,uz,reach,lobe,spread} of the last fall this field was
+      // fed — how the aftermath keeps the ground veil on the right sector
+      get wedge() { return lastWedge; },
       get peakDepth() { return peak; },
       get cellCount() { return cells.length; },
       /* spec: { rate (m/s at the plume axis), windX, windZ, srcX, srcZ,
@@ -2265,6 +2646,10 @@
           // how far downwind the fall carries — the caller's magnitude sets
           // it (a burp dusts the cone, the big one reaches the town)
           const reach = spec.reach > 0 ? +spec.reach : R * 0.55;
+          lastWedge = lastWedge || {};
+          lastWedge.srcX = sx; lastWedge.srcZ = sz;
+          lastWedge.ux = ux; lastWedge.uz = uz;
+          lastWedge.reach = reach; lastWedge.lobe = lobeP; lastWedge.spread = spread;
           for (let n = 0; n < cells.length; n++) {
             const C = cells[n];
             const dx = C.x - sx, dz = C.z - sz;
@@ -2397,13 +2782,14 @@
       const g = LIVE.pyro[i].group;
       if (g) pyroBlobs += g.children.length;
     }
-    let columnPuffs = 0, organicColumns = 0, blastSmokeColumns = 0;
+    let columnPuffs = 0, blastSmokeColumns = 0;
     for (let i = 0; i < LIVE.column.length; i++) {
       const c = LIVE.column[i];
       columnPuffs += c.puffCount || (c.group ? c.group.children.length : 0);
-      if (c.organic) organicColumns++;
       if (c.usesBlastSmoke) blastSmokeColumns++;
     }
+    let fountainClots = 0;
+    for (let i = 0; i < LIVE.fountain.length; i++) fountainClots += LIVE.fountain[i].clotCount || 0;
     let ashPeak = 0, ashCells = 0;
     for (let i = 0; i < LIVE.ash.length; i++) {
       ashPeak = Math.max(ashPeak, LIVE.ash[i].peakDepth);
@@ -2434,8 +2820,11 @@
       ventGlows: LIVE.vent.length,
       ashColumns: LIVE.column.length,
       columnPuffs: columnPuffs,
-      organicColumns: organicColumns,
       blastSmokeColumns: blastSmokeColumns,
+      // the ballistic lava fountain (V.fountain) — clots, not Points
+      fountains: LIVE.fountain.length,
+      fountainClots: fountainClots,
+      builtFountain: census.fountain,
       pyroLive: LIVE.pyro.length, pyroBlobs: pyroBlobs,
       laharLive: LIVE.lahar.length,
       ashFields: LIVE.ash.length, ashCells: ashCells,

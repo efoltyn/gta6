@@ -68,18 +68,23 @@
    thing this preset's header promises it will not do. A beat that cannot
    stage its own subject is not a beat. */
 const subjects = [
+  { id: "volcano-idle", label: "The volcano at rest — a mountain that could erupt", hud: false,
+    focus: "No disaster running, midday, wide from offshore. Before: the refuge mountain is a white nine-sided pyramid with a snow cone glued on. After: a stratovolcano with a crater — dark scoria summit, gullied concave flanks, snow above the snowline, grass skirt — the same footprint and peak the flood refuge needs.",
+    act: { day: true, settleSecs: 2 },
+    cam: { volcano: true, dist: 150, alt: 22, aboveVent: 12, fov: 60 } },
+
   { id: "warn-lane", label: "Warning — the lane announces itself", hud: false,
-    focus: "CONTROL. The warn telegraph is untouched by V3: crater glow, rock trickling down the corridor the flow will take, the crowd clearing it. The two sides must be near-identical — drift here is a regression.",
+    focus: "THE MOUNTAIN, in daylight, before it blows. Before: a white nine-sided pyramid with a snow cone on top — a linear cone, one colour, under a bright sun. After: a stratovolcano — concave flanks with radial gullies, dark scoria at the summit, a real crater bowl inside the rim, snow only above the snowline. Rockfall down the lane and the crowd clearing it are the same on both sides. The tan coin hanging in the sky on the before side is the crater pre-glow: disc() stands a mesh on the floor and was handed the peak height AGAIN, so it floated 26 m over the summit.",
     act: { force: "volcano", untilState: "warn", extraSecs: 4.2 },
     cam: { lane: true, ahead: 60, side: 26, alt: 26, fallback: { x: 108, y: 46, z: 672, ax: 0, ay: 20, az: 600 } } },
 
   { id: "column-young", label: "The young plume — smoke is born at the vent", hud: false,
-    focus: "At t+2.4 s the plume must grow continuously out of the hot throat. Before: separated opaque coins. After: small hot RPG-style billows overlap into a dark core, cool to soot and travel upward—no fixed seats and no bouncing.",
+    focus: "t+2.4 s. The column must be born AT the crater: before, every puff was invisible until 13 m up (opacity ramped in after the puff had already climbed), so the plume hung over a gap of orange confetti. After: a Strombolian fountain of incandescent clots on ballistic arcs fills that gap, and the soot rises out of the fountain.",
     act: { force: "volcano", untilState: "active", extraSecs: 2.4, pinWind: [0.7, -0.7] },
     cam: { volcano: true, dist: 62, alt: 10, aboveVent: 38, fov: 72 } },
 
   { id: "column", label: "The mature eruption column — the silhouette", hud: false,
-    focus: "The matched wide read at t+8 s. Before is the current seven-cone-height bead chain. After must be a shorter, broader, continuous soot volume with a turbulent cauliflower crown and the same pinned wind lean.",
+    focus: "The matched wide read at t+8 s. Before: a 5-10 m wide string of round grey-green puffs over a 72 m wide mountain — a chimney, not an eruption. After: base as wide as the vent, widening by entrainment into a broad turbulent head, dark soot with a sun-lit crown, standing on a fountain — the landscape proportion of the reference photographs.",
     /* force: this beat used to inherit whatever disaster the director
        happened to be on — run alone (`--subjects column`) it photographed a
        LIGHTNING STORM and reported ok:true, the exact order-dependence the
@@ -89,30 +94,30 @@ const subjects = [
     act: { force: "volcano", untilState: "active", extraSecs: 8, pinWind: [0.7, -0.7] },
     /* Wide enough to hold the old oversized head and the new landscape-scale
        plume in one locked frame. */
-    cam: { volcano: true, dist: 172, alt: 25, aboveVent: 70, fov: 64 } },
+    cam: { volcano: true, dist: 200, alt: 25, aboveVent: 88, fov: 66 } },
 
   { id: "column-close", label: "The smoke at reading distance — no cards", hud: false,
-    focus: "Close enough to judge the mask and overlap. The silhouette needs ragged multi-scale edges, darker self-shadowed core, lighter thinning fringes and independent puff rotation/fade—the exact cues that make the RPG smoke convincing.",
+    focus: "Close enough to judge the mass. Before: individual round puffs legible up the whole stem, a floating base, grey-green pigment. After: overlap deep enough that no single puff reads, dark brown-grey at the base lit from below, and the fountain under it.",
     act: { force: "volcano", untilState: "active", extraSecs: 8, pinWind: [0.7, -0.7] },
     cam: { volcano: true, dist: 54, alt: 9, aboveVent: 46, fov: 74 } },
 
   { id: "eruption-night", label: "Night eruption — fire under ash", hud: false,
-    focus: "The first reference regime: a dark cone, connected incandescent lava, a white-orange throat, and a charcoal plume whose base catches the eruption glow without turning the whole cloud brown.",
+    focus: "The first reference regime (Fuego by night): a black cone, a fan of incandescent lava, a white-orange throat, a fountain of fire, and a charcoal plume whose BASE catches the vent glow while the rest is black against the sky. Before: the plume was PALE grey at night — lighter than the sky — and the fountain was dots.",
     act: { night: true, force: "volcano", untilState: "active", extraSecs: 9, pinWind: [0.7, -0.7] },
     cam: { volcano: true, dist: 58, alt: 9, aboveVent: 43, fov: 74 } },
 
   { id: "lava-day", label: "Lava close-up — opaque crust", hud: false,
-    focus: "CONTROL — THE BIBLE SHOT (owner's Etna close-up, 2026-08-15): a DARK crusted surface with a bright connected LACE of melt cracked through it. V3 does not touch the lava; the two sides must match. vol_lavaTransparent must read 0 on both.",
+    focus: "THE BIBLE SHOT (owner's Etna close-up, 2026-08-15): a DARK crusted surface with a bright connected LACE of melt cracked through it. Before: a smooth pale-gold plastic ramp with ruler edges, pale levees and no lace at all, on a tan hillside dotted with grey ash blobs. After: dark levees, a red-orange channel, a bright lace, a margin that bellies — on a dark volcanic flank under a uniform ash veil. vol_lavaTransparent must read 0 on both.",
     act: { force: "volcano", untilState: "active", extraSecs: 12 },
-    cam: { lava: true, frame: 0.55, out: 22, alt: 11, behind: 3, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
+    cam: { lava: true, frame: 0.55, out: 30, alt: 20, behind: 3, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
 
   { id: "lava-front", label: "The advancing nose — does it FLOW?", hud: false,
-    focus: "CONTROL. The leading edge at close range: it noses forward continuously, the lace travels downstream, the run forks (vol_lavaBranches). Identical machinery on both sides.",
+    focus: "The leading edge at close range: it noses forward continuously, the lace travels downstream, the run forks (vol_lavaBranches). The machinery is the same on both sides; what changes is that the crust is dark and the melt is fire instead of gold.",
     /* behind 6 (was -5): stand UP-flow of the nose, above it, looking down
        the descent. Down-flow of a nose on a cone means below its own ridge
        line, and the peek run photographed the ridge instead of the rock. */
     act: { force: "volcano", untilState: "active", extraSecs: 9 },
-    cam: { lava: true, frame: 1, out: 13, alt: 9, behind: 6, fallback: { x: 22, y: 9, z: 620, ax: 4, ay: 3, az: 604 } } },
+    cam: { lava: true, frame: 1, out: 20, alt: 16, behind: 6, fallback: { x: 22, y: 9, z: 620, ax: 4, ay: 3, az: 604 } } },
 
   { id: "pyroclastic", label: "Pyroclastic flow — mid-descent", hud: false,
     focus: "CONTROL — THE KILLER. A ground-hugging avalanche of 600 C rock and gas boiling down the fall line at 6x sprinting speed. V3 leaves the current alone; the only after-side difference in frame should be the taller column and the greyer downwind air behind it.",
@@ -130,12 +135,12 @@ const subjects = [
     cam: { lahar: true, ahead: 34, side: 22, alt: 24, fallback: { x: 62, y: 20, z: 660, ax: 0, ay: 6, az: 612 } } },
 
   { id: "ash-wedge", label: "The wedge — ash with an outside", hud: false,
-    focus: "THE FLAG'S EARN-BACK. VOLCANO_ASH_LOAD went default-off on 2026-08-16 because spread 0.16 greyed the WHOLE island at once — a screen filter, not a place. V3 refits the fall as a downwind wedge (spread 0.05, lobe^3.2): mid-eruption the downwind ground is visibly greying while the upwind side keeps its colour. Before-side: no ash anywhere — and no roof loads, no choke, no indoors tension either.",
+    focus: "ASHFALL AS A VEIL. Before: a leopard print — hundreds of identical grey alpha-cutout blobs on bright green grass (the deposit quads at partial coverage). After: everything downwind goes uniformly grey through the surface coat (the same seam the blizzard whitens with), thin veil first, deepening along the wind; the quads survive only as drifts where the deposit is deep. Upwind keeps its colour on both sides — that is the wedge.",
     act: { day: true, force: "volcano", untilState: "active", extraSecs: 10, pinWind: [0.6, 0.8] },
     cam: { wedge: true, along: 0.72, side: 0.5, alt: 34, fallback: { x: 46, y: 26, z: 662, ax: 0, ay: 8, az: 600 } } },
 
   { id: "dark-noon", label: "Darkness at noon — the ash blots the sun", hud: false,
-    focus: "Late in the event, staged at MIDDAY, shot wide from upwind. After: the deposit is deep downwind, the sun is choked to a fraction (metrics record sunIntensity), the fog wall has closed in with a visible cause, roofs are failing under the load through the one structural ledger (audit_ashRoofCollapses). Before: bright noon over a clean island for the whole event.",
+    focus: "Late in the event, staged at MIDDAY, shot wide from upwind. The deposit is deep downwind, the sun is choked (sunIntensity), roofs fail under the load (audit_ashRoofCollapses) — on both sides. After: the downwind island is a grey veil instead of grey spots, and the mountain under the column is black.",
     act: { day: true, force: "volcano", untilState: "active", extraSecs: 17.5, pinWind: [0.6, 0.8] },
     cam: { wedge: true, upwind: true, along: 0.55, side: 0.15, alt: 42, lookY: 40, fallback: { x: -120, y: 44, z: 540, ax: 30, ay: 40, az: 620 } } },
 
@@ -147,7 +152,7 @@ const subjects = [
        survival night reads on the sky, the fog, the lit buildings and the
        lava's own light — never on the grass. The flank election frames the
        flow itself, which is where the night regime actually shows. */
-    cam: { lava: true, frame: 0.55, out: 22, alt: 11, behind: 3, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
+    cam: { lava: true, frame: 0.55, out: 30, alt: 20, behind: 3, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
 
   { id: "cooled", label: "When the eruption ends — the flow dies where it stands", hud: false,
     focus: "CONTROL. The supply stops, so the river stalls and chills BLACK in place: crusted dark rock, ember seams fading, kept on the cone as a scar. Identical quench on both sides; the strip should dim the same way in both rows.",
@@ -167,17 +172,17 @@ const subjects = [
     cam: { ashfield: true, out: 0.55, side: 0.42, alt: 72, fov: 60, fallback: { x: 46, y: 80, z: 662, ax: 46, ay: 0, az: 664 } } },
 
   { id: "small-one", label: "A SMALL one — a burp you could stand and watch", hud: false,
-    focus: "COOKIE-CUTTER NO MORE (owner: 'all the natural disasters are cookie cutter size'). Magnitude pinned to 0.07: a short steam-and-ash burp — a ~55 m column, two narrow lava tongues near the vent, a light dusting, NO pyroclastic collapse, NO lahar, bombs rare. The before build has no magnitude at all, so it stages the same one-size eruption as every other beat.",
+    focus: "Magnitude pinned to 0.07: a short steam-and-ash burp — a ~55 m column, two narrow lava tongues near the vent, a light dusting, no pyroclastic collapse, no lahar. After: even the burp stands on its crater and its little fountain instead of floating.",
     act: { day: true, force: "volcano", untilState: "active", extraSecs: 6, pinWind: [0.7, -0.7], magPin: 0.07 },
     cam: { volcano: true, dist: 135, alt: 20, aboveVent: 34, fov: 66 } },
 
   { id: "the-big-one", label: "The BIG one — a column that blots the sun", hud: false,
-    focus: "Magnitude pinned to 1.0, staged at MIDDAY: a ~190 m column, a six-stem lava fan, fast wide pyroclastic collapses, heavy ash reaching the town, the sun visibly choked while the event still runs, and a longer active window. Before: the same fixed eruption as always, in full daylight.",
+    focus: "Magnitude pinned to 1.0 at MIDDAY: the ~190 m column. Before: a taller pencil of puffs. After: a broad convecting mass with a spreading head over a fountain, ash reaching the town as a veil, the sun visibly choked.",
     /* t+18: a column takes time to BUILD. At 11 s both sides were still mid-
        climb and photographed the same height; at 18 s the before column is
        finished (~108 m) and the after is well past it on its way to ~194. */
     act: { day: true, force: "volcano", untilState: "active", extraSecs: 18, pinWind: [0.7, -0.7], magPin: 1.0 },
-    cam: { volcano: true, dist: 205, alt: 30, aboveVent: 105, fov: 62 } },
+    cam: { volcano: true, dist: 265, alt: 30, aboveVent: 130, fov: 66 } },
 
 ];
 
@@ -364,6 +369,7 @@ async function stageVolcano(input) {
   if (act.force === "volcano") {
     window.__volcanoMagPin = act.magPin != null ? act.magPin : 0.42;
   }
+  if (act.settleSecs) step(act.settleSecs);
   if (act.force) { CBZ.disasters.force(act.force); step(0.1); }
   if (act.untilState) stepUntilState(act.untilState, 30);
   /* the aftermath beat's clock: run the eruption OUT, whatever active length
@@ -869,15 +875,23 @@ async function stageVolcano(input) {
 export default {
   id: "volcano-stages",
   title: "The Stratovolcano",
-  description: "Flag A/B on this checkout: cfg_VOLCANO_PLUME_V2=0 is the current geometric bead-column; after uses the RPG blast's real lumpy smoke mask and per-puff lifecycle to build a denser core, irregular cauliflower edge and shorter/broader landscape silhouette. All other eruption systems remain matched controls.",
+  description: "Tree-vs-tree on the shipped disaster.html: HEAD (a white pyramid, gold plastic lava, a pencil of smoke floating over confetti, leopard-print ash) against the stratovolcano wave (a dark gullied cone with a crater, dark crust with an incandescent lace, a broad soot column standing on a fountain of fire, ashfall as a downwind veil). Same seeded eruptions, same pinned wind and magnitude on both sides.",
   defaultBefore: "local",
   /* beforeParams used to pin cfg_VOLCANO_PLUME_V2=0 — the 2026-08-26 plume
      wave's flag A/B. That earn-back shipped; the preset is back to a plain
      tree-vs-tree comparison (flagless waves: HEAD worktree as --before). */
-  beforeLabel: "BEFORE · THIS CHECKOUT @ HEAD",
-  afterLabel: "AFTER · ASH FIELD + MAGNITUDE",
+  beforeLabel: "BEFORE · HEAD b0566c8",
+  afterLabel: "AFTER · THE STRATOVOLCANO WAVE",
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
+  /* THE SHIPPED PAGE, NOT THE HUB. index.html builds the gang city before the
+     survival island, and the island sits INSIDE the city's coordinates — so
+     every volcano report since 2026-08-29 photographed skyscrapers standing on
+     the island (the "29 pages of skyline" trap above was only the worst case).
+     disaster.html is the App Store page: it opens on the island and never
+     builds the city. Regenerate it with `node tools/build-disaster-page.mjs`
+     before shooting — it is generated from index.html and goes stale. */
+  page: "disaster.html",
   urlParams: { seed: 90210 },
   stageTimeoutMs: 480000,
   metricsNote: "vol_* comes from CBZ.volcanoAudit() (world/volcanofx.js) and audit_* from CBZ.disasterAudit(). lavaTransparent counts LIVE lava materials that are transparent or additively blended — the thing the owner could see through. Only the rows named below are printed; the full audit dump stays in metadata.json for debugging.",
@@ -900,7 +914,8 @@ export default {
     vol_ventGlows: { label: "Incandescent vent aprons", better: "higher" },
     vol_ashColumns: { label: "Sprite ash columns", better: "higher" },
     vol_columnPuffs: { label: "Overlapping plume puffs", better: "higher" },
-    vol_organicColumns: { label: "Organic lifecycle columns", better: "higher" },
+    vol_fountains: { label: "Lava fountains (ballistic clots)", better: "higher" },
+    vol_fountainClots: { label: "Fountain clots in flight", better: "higher" },
     vol_blastSmokeColumns: { label: "Columns sharing RPG smoke mask", better: "higher" },
     vol_pyroLive: { label: "Pyroclastic flows live", better: "higher" },
     /* V3 brings the ash LEDGER back as a downwind wedge (see the flag note

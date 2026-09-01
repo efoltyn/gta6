@@ -366,6 +366,68 @@
       { x: cx + 48, z: cz + 40, r: 22, peak: 11 },
       { x: cx + 40, z: cz - 48, r: 16, peak: 7 },
     ];
+    /* ---- THE VOLCANO IS THE MOUNTAIN, NOT A CONE WITH LAVA ON IT --------
+       hills[0] is the island's refuge AND the thing that erupts, and it was
+       a nine-sided ConeGeometry with a linear height field, a grass skirt
+       and a snow cap. Photographed in daylight it was a WHITE PYRAMID; under
+       the eruption's warm sun it went peach. Nothing about it said volcano.
+
+       What replaces it is one function — volcanoHeightAt — that the mesh and
+       CBZ.floorAt BOTH read, so the walkable field is the drawn surface to
+       the millimetre. Three things make it a stratovolcano instead of a cone:
+
+         CONCAVE FLANKS. peak * t^1.3, steep off the rim (about 45 deg) and
+         easing into the skirt. A cone is t^1: one slope everywhere, which is
+         the silhouette of a party hat and of nothing in geology.
+
+         A CRATER. A bowl of radius 6.2 m and 2.85 m deep INSIDE the rim, so
+         the rim — not the centre — is the summit and hills[0].peak still
+         means what every reader in systems/disasters.js thinks it means.
+         The eruption's vent apron (volcanofx ventGlow, r 3.8-8.4, draped on
+         groundAt) now sits in a bowl instead of balancing on a point, and
+         the lava's fall lines start inside it and pour over the rim.
+
+         BARRANCOS. The radial gullies every ash cone wears, +-1.15 m at
+         mid-flank and fading to nothing at both the rim and the base, so
+         nothing here is a cliff and the skirt still meets the island plate
+         flush. They are two out-of-phase harmonics (12 and 7) with a slow
+         radial drift: irregular spacing, no ruler. lavaFlow's fall line
+         hunts the lowest of seven probes, so it finds these and comes down
+         the mountain in channels — which is what a barranco is for.
+
+       Deterministic: the only randomness is CBZ.hash01 off the mountain's
+       own fixed centre, so the island stays byte-identical per seed. */
+    const VOL = hills[0];
+    VOL.volcano = true;
+    const VOL_RIM = 6.2;                    // crater rim radius (m)
+    const VOL_BOWL = 2.85;                  // crater floor, metres below the rim
+    const VOL_FLANK = VOL.r - VOL_RIM;      // horizontal run, rim -> base
+    const VOL_GULLY = 1.15;                 // barranco amplitude (m)
+    const VOL_P1 = (CBZ.hash01 ? CBZ.hash01(VOL.x, VOL.z, 0x5601) : 0.31) * 6.2831853;
+    const VOL_P2 = (CBZ.hash01 ? CBZ.hash01(VOL.x, VOL.z, 0x5602) : 0.77) * 6.2831853;
+    // the gully term alone, so the mesh can shade ridges and channels apart
+    function volcanoGully(d) {
+      if (d <= VOL_RIM || d >= VOL.r) return 0;
+      const u = (d - VOL_RIM) / VOL_FLANK;      // 0 at the rim, 1 at the base
+      return 4 * u * (1 - u);                   // envelope: nil at both ends
+    }
+    function volcanoLobe(d, ang) {
+      const drift = 0.32 * Math.sin(d * 0.085);
+      return 0.62 * Math.sin(12 * ang + VOL_P1 + drift)
+           + 0.38 * Math.sin(7 * ang + VOL_P2 - drift * 1.7);
+    }
+    function volcanoHeightAt(d, ang) {
+      if (d >= VOL.r) return 0;
+      if (d <= VOL_RIM) {
+        // the crater: flat-ish floor, steep inner wall, rim at exactly peak
+        const u = d / VOL_RIM;
+        return VOL.peak - VOL_BOWL * (1 - Math.pow(u, 2.2));
+      }
+      const t = (VOL.r - d) / VOL_FLANK;        // 1 at the rim, 0 at the base
+      const h = VOL.peak * Math.pow(t, 1.3)
+        + VOL_GULLY * volcanoGully(d) * volcanoLobe(d, ang);
+      return h > 0 ? h : 0;
+    }
     /* ---- SURV_SEABED — THE ISLAND GETS A BOTTOM ---------------------------
        This function used to `return h` — 0 everywhere outside the four cones,
        out to infinity — and CBZ.floorAt (modes/survival.js) is wired straight
@@ -606,8 +668,14 @@
       let h = 0;
       for (let i = 0; i < hills.length; i++) {
         const hl = hills[i];
-        const d = Math.hypot(x - hl.x, z - hl.z);
-        if (d < hl.r) { const t = 1 - d / hl.r; const hh = hl.peak * t; if (hh > h) h = hh; }
+        const dx = x - hl.x, dz = z - hl.z;
+        const d = Math.hypot(dx, dz);
+        if (d >= hl.r) continue;
+        // the volcano is a profile with a crater and gullies; the three
+        // outlying hills are still plain linear cones
+        const hh = hl.volcano ? volcanoHeightAt(d, Math.atan2(dz, dx))
+          : hl.peak * (1 - d / hl.r);
+        if (hh > h) h = hh;
       }
       if (h > 0 || CBZ.CONFIG.SURV_SEABED === false) return h;
       return seabedAt(x, z);
@@ -1167,26 +1235,135 @@
        three green hills sat in the middle of it. `userData.coat` is that file's
        author opt-in — the twin of its `noCoat` opt-out — and it says the one
        thing a size test cannot work out on its own: this is the ground. */
-    hills.forEach((hl, i) => {
-      // central refuge = rocky grey-brown peak; smaller ones = grassy hills
-      const cone = new THREE.Mesh(new THREE.ConeGeometry(hl.r, hl.peak, i === 0 ? 9 : 6),
-        mat(i === 0 ? 0x8a8175 : 0x7faa5e));
+    hills.forEach((hl) => {
+      if (hl.volcano) return;     // the mountain builds itself, below
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(hl.r, hl.peak, 6), mat(0x7faa5e));
       cone.position.set(hl.x, hl.peak / 2, hl.z);
       cone.castShadow = true; cone.receiveShadow = true;
       cone.userData.coat = true;
       root.add(cone);
-      if (i === 0) {
-        // a grassy skirt around the rocky base so it rises out of the island
-        const skirt = new THREE.Mesh(new THREE.ConeGeometry(hl.r * 1.04, hl.peak * 0.4, 9), mat(0x6fa552));
-        skirt.position.set(hl.x, hl.peak * 0.2, hl.z); skirt.receiveShadow = true;
-        skirt.userData.coat = true; root.add(skirt);
-        // snow cap on the refuge peak — already white, and coating white with
-        // white is a wasted material patch, so this one stays out of the scan.
-        const cap = new THREE.Mesh(new THREE.ConeGeometry(hl.r * 0.32, hl.peak * 0.3, 9), mat(0xf2f6ff));
-        cap.position.set(hl.x, hl.peak * 0.86, hl.z); cap.castShadow = true;
-        cap.userData.noCoat = true; root.add(cap);
-      }
     });
+
+    /* ---- THE VOLCANO MESH — the height field, drawn --------------------
+       One polar grid, 64 sectors by 30 rings, and EVERY vertex is placed by
+       volcanoHeightAt. There is no second opinion about where the mountain
+       is: what you see is the surface you walk on, crater and gullies
+       included. Rings are packed tight inside the crater (7 of them across
+       6.2 m) because that is the part with shape in it.
+
+       Colour is per-vertex, not per-mesh — that is the whole reason the old
+       grass-skirt and snow-cap cones existed, and they go away with it.
+       AUTHORED DARK ON PURPOSE: this pipeline treats a material colour as
+       LINEAR, then ACES-tone-maps and grades it (core/renderer.js), so a hex
+       lands on screen far brighter than it reads in the editor — the old
+       0x8a8175 photographed at rgb(238,234,227), i.e. WHITE. Basaltic
+       scoria at the rim, brown scree down the flank, and the island plate's
+       own 0x53a84e at the base so the cone grows out of the island instead
+       of being parked on it.
+
+       The last ring is pushed out past the footprint and DOWN below y=0: it
+       is buried under the island plate, and it is there so the base edge
+       cannot show a seam or z-fight with the plate it lands on. */
+    (function buildVolcano() {
+      const SEC = 64, CR = 7, FR = 22;
+      const RINGS = CR + FR + 1;                 // last one is the buried skirt
+      const ringR = new Float32Array(RINGS + 1);
+      for (let k = 1; k <= CR; k++) ringR[k] = VOL_RIM * (k / CR);
+      for (let k = 1; k <= FR; k++) ringR[CR + k] = VOL_RIM + VOL_FLANK * Math.pow(k / FR, 0.94);
+      ringR[RINGS] = VOL.r + 0.9;
+
+      const VC = 1 + RINGS * SEC;
+      const pos = new Float32Array(VC * 3);
+      const col = new Float32Array(VC * 3);
+
+      // rim scoria -> scree -> ash soil -> scrub -> the island's own green
+      const RAMP = [
+        [0.00, 0x171310], [0.13, 0x1e1815], [0.33, 0x2d241b],
+        [0.58, 0x3e3020], [0.80, 0x3f5c2c], [1.00, 0x53a84e],
+      ];
+      const CRATER_C = 0x100d0b, SNOW_C = 0xe8eef6;
+      /* THE SNOW IS A BAND, NOT A HAT. First pass put the line at 0.74 peak
+         and blended to 0.9 white, and the photograph came back with the same
+         white cone the old snow-cap mesh drew — the one thing this rebuild
+         exists to kill. High (0.80), ragged (+-1.5 m of hashed line) and
+         thin (0.62 max), it reads as old snow caught below a dark crown. */
+      const SNOW_Y = VOL.peak * 0.80;
+      const _a = new THREE.Color(), _b = new THREE.Color(), _s = new THREE.Color(SNOW_C);
+      const h01 = CBZ.hash01 || function () { return 0.5; };
+      function cl01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+      function smooth(e0, e1, v) { const t = cl01((v - e0) / (e1 - e0)); return t * t * (3 - 2 * t); }
+
+      function paint(d, ang, y, o) {
+        if (d <= VOL_RIM) {
+          // the crater: dark all the way, and darkest at the floor. An active
+          // vent holds no snow — that is the point of the bowl being here.
+          o.setHex(CRATER_C).lerp(_b.setHex(RAMP[0][1]), cl01(d / VOL_RIM));
+        } else {
+          const u = cl01((d - VOL_RIM) / VOL_FLANK);
+          let i = 0;
+          while (i < RAMP.length - 2 && u > RAMP[i + 1][0]) i++;
+          const f = cl01((u - RAMP[i][0]) / (RAMP[i + 1][0] - RAMP[i][0]));
+          o.setHex(RAMP[i][1]).lerp(_b.setHex(RAMP[i + 1][1]), f);
+          // ridges catch the light, gullies sit in their own shadow
+          const g = volcanoLobe(d, ang) * volcanoGully(d);
+          const k = 1 + 0.16 * g + (h01(Math.cos(ang) * d, Math.sin(ang) * d, 0x5604) - 0.5) * 0.12;
+          o.multiplyScalar(k > 0.55 ? k : 0.55);
+          /* SNOW, ABOVE A RAGGED LINE, OUTSIDE THE RIM ONLY. The line itself
+             is hashed by angle so it is a coastline and not a compass circle,
+             and a narrow collar of fresh ejecta keeps the crest itself dark. */
+          const jit = h01(Math.cos(ang) * 12, Math.sin(ang) * 12, 0x5605);
+          const sf = smooth(SNOW_Y + (jit - 0.5) * 3.0, SNOW_Y + 2.2, y)
+            * smooth(6.8, 8.0, d);
+          if (sf > 0) o.lerp(_s, sf * 0.62);
+        }
+      }
+
+      pos[1] = volcanoHeightAt(0, 0);
+      paint(0, 0, pos[1], _a);
+      col[0] = _a.r; col[1] = _a.g; col[2] = _a.b;
+      for (let k = 1; k <= RINGS; k++) {
+        const d = ringR[k], skirt = k === RINGS;
+        for (let s = 0; s < SEC; s++) {
+          const ang = (s / SEC) * Math.PI * 2;
+          const o = (1 + (k - 1) * SEC + s) * 3;
+          const y = skirt ? -0.55 : volcanoHeightAt(d, ang);
+          pos[o] = Math.cos(ang) * d; pos[o + 1] = y; pos[o + 2] = Math.sin(ang) * d;
+          paint(skirt ? VOL.r : d, ang, y, _a);
+          col[o] = _a.r; col[o + 1] = _a.g; col[o + 2] = _a.b;
+        }
+      }
+
+      const idx = new Uint16Array((SEC + (RINGS - 1) * SEC * 2) * 3);
+      let n = 0;
+      const vi = function (k, s) { return 1 + (k - 1) * SEC + (s % SEC); };
+      for (let s = 0; s < SEC; s++) {           // the fan over the crater floor
+        idx[n++] = 0; idx[n++] = vi(1, s + 1); idx[n++] = vi(1, s);
+      }
+      for (let k = 1; k < RINGS; k++) {
+        for (let s = 0; s < SEC; s++) {
+          const a = vi(k, s), b = vi(k, s + 1), c = vi(k + 1, s + 1), e = vi(k + 1, s);
+          idx[n++] = a; idx[n++] = c; idx[n++] = e;
+          idx[n++] = a; idx[n++] = b; idx[n++] = c;
+        }
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      geo.setIndex(new THREE.BufferAttribute(idx, 1));
+      geo.computeVertexNormals();
+      /* MeshLambertMaterial does NOT support flatShading in r128 (see the
+         same note in world/volcanofx.js) — and a smooth-shaded ash cone is a
+         balloon. Phong with no specular IS Lambert, and it facets. */
+      const volMat = new THREE.MeshPhongMaterial({
+        vertexColors: true, flatShading: true, shininess: 0, specular: 0x000000,
+      });
+      const mtn = new THREE.Mesh(geo, volMat);
+      mtn.position.set(VOL.x, 0, VOL.z);
+      mtn.castShadow = true; mtn.receiveShadow = true;
+      mtn.userData.coat = true;       // blizzards still lay snow on the ground
+      root.add(mtn);
+    })();
 
     // ============================================================
     // ENTERABLE BUILDINGS
