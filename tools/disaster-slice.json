@@ -4332,6 +4332,7 @@
   "src/games/police.js",
   "src/games/jail.js",
   "src/systems/newlife.js",
+  "src/world/hull_loft.js",
   "src/world/water_hulls.js",
   "src/world/water_helm.js",
   "src/world/water_underwater.js",

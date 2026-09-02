@@ -97,8 +97,12 @@ try {
 
   const result = JSON.parse(await evaluate(`JSON.stringify((() => {
     const expected = {
+      kayak: ["kayak-well"],
+      jetski: ["jetski-saddle"],
+      pirate_skiff: ["skiff-deck"],
       dinghy: ["dinghy-helm"],
       boat: ["speedboat-cockpit"],
+      console: ["console-helm"],
       skiff: ["skiff-helm"],
       cruiser: ["cruiser-cockpit", "cruiser-saloon", "cruiser-flybridge"],
       yacht: ["yacht34-saloon", "yacht34-skylounge", "yacht34-wheelhouse", "yacht34-garage", "yacht34-sundeck"],
@@ -153,8 +157,13 @@ try {
       boats.push({ key, rooms: rooms.length, fixtures, anchors, gaps, meshes,
         bounds: [size.x, size.y, size.z].map((n) => Math.round(n * 100) / 100) });
     }
+    // The census is derived from the expected map above rather than typed as
+    // a literal: a hardcoded total is a second place to remember to edit, and
+    // the only thing it ever caught was somebody forgetting to edit it.
+    // (No backticks in here: this whole block is inside a template literal.)
     const roomTotal = boats.reduce((sum, boat) => sum + boat.rooms, 0);
-    if (roomTotal !== 37) failures.push("room census is " + roomTotal + ", expected 37");
+    const roomWant = Object.values(expected).reduce((sum, list) => sum + list.length, 0);
+    if (roomTotal !== roomWant) failures.push("room census is " + roomTotal + ", expected " + roomWant);
     return { keys, boats, roomTotal, failures };
   })())`));
 

@@ -2706,121 +2706,29 @@
     return root;
   }
 
-  // --- speedboat (Fable art pass): the old draft was one constant-width slab
-  //     with a glass triangle — no bow taper in PLAN, so it read as a barge.
-  //     A prism only tapers in profile (z,y); plan taper is faked the way real
-  //     low-poly boats do it: the hull is THREE width-stepped segments
-  //     (stern→mid→bow) whose profiles overlap, capped by a narrow raked stem
-  //     wedge — five prisms total and the silhouette finally points. Layout is
-  //     a proper runabout: full-beam stern with a bench + sun pad over the
-  //     engine well, console amidships behind a three-panel wraparound screen,
-  //     bowrider nose with a chrome rail, deep-V spray strakes at the chine. ---
+  // --- speedboat: THE GEOMETRY MOVED. It used to be five width-stepped
+  //     prisms and a rotated box for a "deep-V keel" right here, and the
+  //     marine registry carried `build: null` for key "boat" so that
+  //     CBZ.marineHulls.build("boat") bounced back into this file. That split
+  //     is why the runabout was the one hull in the fleet nobody could audit.
+  //     world/water_hulls.js buildSpeedboat() owns it now — a lofted deep-V
+  //     with a hard chine, spray rails, a real three-pane wraparound screen
+  //     and a sterndrive — and this is the delegate.
+  //
+  //     RESOLVED AT CALL TIME, never at parse: index.html parses this file at
+  //     :1262 and water_hulls.js at :2158, so CBZ.marineHulls does not exist
+  //     while this IIFE runs. It always exists by the time a car is built.
   function makeBoat() {
-    const root = new THREE.Group();
-    const hull = roleMat("boat-hull", "paint", 0xeceff2);
-    const stripe = roleMat("boat-stripe", "paint", 0x1574d6);
-    const deck = sharedMat("boat-deck", 0xb4885c, { emissive: 0x2b1a0d, ei: 0.20 }); // teak-ish deck
-    const pad = sharedMat("boat-pad", 0xd8dde4, { emissive: 0x363b42, ei: 0.30 });    // white vinyl
-    const glass = glassMat();
-    const dark = sharedMat("boat-dark", 0x101317);
-    const chrome = chromeMat();
-    const screen = sharedMat("boat-screen", 0x183b50, { emissive: 0x0d5f7a, ei: 0.72 });
-    const w = 2.1, len = 6.2;
-    const baseY = 0.22;
-    const H = 0.58;                                              // freeboard
-    // HULL in three width steps — the plan-view taper. Segment seams hide
-    // under the rubbing strake (chrome line) below.
-    // stern block: full beam, transom to amidships
-    addPrism(root, w, [[-len * 0.5, 0.0], [-len * 0.5, H], [len * 0.06, H], [len * 0.10, 0.0]], baseY, hull);
-    // mid block: slightly pinched, carries the sheer forward
-    addPrism(root, w * 0.86, [[len * 0.02, 0.0], [len * 0.02, H], [len * 0.30, H + 0.03], [len * 0.34, 0.0]], baseY, hull);
-    // bow block: strongly pinched, sheer still rising
-    addPrism(root, w * 0.60, [[len * 0.28, 0.0], [len * 0.28, H + 0.03], [len * 0.44, H + 0.07], [len * 0.46, 0.02]], baseY, hull);
-    // stem wedge: the pointed nose itself, narrow + raked back to the deck
-    addPrism(root, w * 0.26, [[len * 0.42, 0.0], [len * 0.42, H + 0.07], [len * 0.52, H + 0.08], [len * 0.50, 0.12]], baseY, hull);
-    // deep-V keel line: a shallow angled slab under the centerline so the
-    // boat reads as sitting ON a V, not a flat pan (visible in turns/wake)
-    const keel = addBox(root, 0.42, 0.16, len * 0.82, 0, baseY - 0.04, len * 0.02, hull);
-    keel.rotation.z = Math.PI / 4;
-    // spray strakes at the chine — thin chrome rubbing strakes hide the seams
-    [1, -1].forEach(function (side) {
-      const strake = addBox(root, 0.04, 0.05, len * 0.78, side * (w * 0.5 - 0.02), baseY + H * 0.55, len * 0.0, chrome);
-      strake.rotation.y = side * 0.045;                          // follow the taper in
-    });
-    // hull stripe along the sheer (the classic gelcoat accent)
-    [1, -1].forEach(function (side) {
-      const st = addBox(root, 0.025, 0.12, len * 0.62, side * (w * 0.5 - 0.045), baseY + H * 0.78, -len * 0.04, stripe);
-      st.rotation.y = side * 0.045;
-    });
-    // DECK: teak cockpit sole aft, vinyl sun pad over the engine well at the
-    // transom, and a raised bow deck the rail rings.
-    addBox(root, w * 0.78, 0.05, len * 0.34, 0, baseY + H - 0.02, -len * 0.10, deck);      // cockpit sole
-    addBox(root, w * 0.72, 0.12, len * 0.16, 0, baseY + H + 0.05, -len * 0.40, pad);       // stern sun pad
-    addBox(root, w * 0.52, 0.06, len * 0.20, 0, baseY + H + 0.05, len * 0.36, pad);        // bow pad
-    // stern bench + two bucket seats at the console
-    addBox(root, w * 0.66, 0.26, 0.30, 0, baseY + H + 0.10, -len * 0.26, pad);             // bench back
-    [0.48, -0.48].forEach(function (x) {
-      addBox(root, 0.46, 0.14, 0.46, x, baseY + H + 0.04, -len * 0.02, pad);               // seat base
-      addBox(root, 0.46, 0.34, 0.10, x, baseY + H + 0.22, -len * 0.02 - 0.20, pad);        // seat back
-    });
-    // CONSOLE amidships: dash pod + wheel + three-panel wraparound windscreen
-    addPrism(root, w * 0.56, [[len * 0.06, 0.0], [len * 0.06, 0.30], [len * 0.16, 0.34], [len * 0.20, 0.0]], baseY + H, dark);
-    const wheel = addBox(root, 0.26, 0.26, 0.04, 0.30, baseY + H + 0.34, len * 0.05, dark);
-    wheel.rotation.x = -0.5;
-    const nav = addBox(root, 0.30, 0.18, 0.035, -0.24, baseY + H + 0.34, len * 0.055, screen);
-    nav.rotation.x = -0.36;
-    addBox(root, 0.055, 0.24, 0.055, -0.54, baseY + H + 0.22, -len * 0.015, chrome);  // throttle
-    addBox(root, 0.20, 0.035, 0.20, 0, baseY + H + 0.09, -len * 0.14, dark);           // cockpit drain / hatch
-    const centerGlass = addBox(root, w * 0.58, 0.34, 0.03, 0, baseY + H + 0.44, len * 0.20, glass);
-    centerGlass.rotation.x = -0.42;                              // raked back
-    [1, -1].forEach(function (side) {
-      const wing = addBox(root, 0.34, 0.30, 0.03, side * (w * 0.30), baseY + H + 0.40, len * 0.16, glass);
-      wing.rotation.x = -0.42;
-      wing.rotation.y = side * 0.55;                             // wrap around the console
-    });
-    // chrome bow rail: two side runs meeting at the stem + a nav-light stub
-    [1, -1].forEach(function (side) {
-      const rail = addBox(root, 0.035, 0.035, len * 0.30, side * (w * 0.24), baseY + H + 0.20, len * 0.34, chrome);
-      rail.rotation.y = side * 0.16;                             // converge toward the point
-      addBox(root, 0.035, 0.14, 0.035, side * (w * 0.28), baseY + H + 0.12, len * 0.26, chrome);  // stanchion
-    });
-    addBox(root, 0.05, 0.09, 0.05, 0, baseY + H + 0.16, len * 0.50, chrome);               // stem light
-    // cleats at the stern quarters (the detail that says "boat", costs 2 boxes)
-    [1, -1].forEach(function (side) {
-      addBox(root, 0.16, 0.04, 0.05, side * (w * 0.36), baseY + H + 0.03, -len * 0.46, chrome);
-      addBox(root, 0.14, 0.04, 0.05, side * (w * 0.22), baseY + H + 0.10, len * 0.30, chrome);   // bow cleats
-    });
-    // nav lights on the bow gunwales: port red (+x, facing the bow) /
-    // starboard green — colours/emissives tuned to stay OUTSIDE all three
-    // detector contracts (red emissive r<0.78; green emissive b<0.6; green
-    // BODY colour keeps b-r<0.045 so it can't read as glass).
-    addBox(root, 0.05, 0.045, 0.07, w * 0.255, baseY + H + 0.05, len * 0.31, sharedMat("boat-port", 0x8e1c24, { emissive: 0xb02030, ei: 0.8 }));
-    addBox(root, 0.05, 0.045, 0.07, -w * 0.255, baseY + H + 0.05, len * 0.31, sharedMat("boat-stbd", 0x28642c, { emissive: 0x1f9e4b, ei: 0.8 }));
-    // chrome header rail capping the centre windscreen panel (same rake)
-    const wsFrame = addBox(root, w * 0.60, 0.035, 0.035, 0, baseY + H + 0.60, len * 0.189, chrome);
-    wsFrame.rotation.x = -0.42;
-    // OUTBOARD: cowled head (painted, like the real premium rigs), midsection
-    // leg into the water, anti-vent plate, animated 3-blade screw
-    addBox(root, 0.40, 0.34, 0.44, 0, baseY + H + 0.06, -len * 0.5 - 0.16, stripe);        // cowl
-    addBox(root, 0.34, 0.10, 0.38, 0, baseY + H - 0.08, -len * 0.5 - 0.16, dark);          // cowl base
-    addBox(root, 0.14, 0.52, 0.20, 0, baseY + 0.18, -len * 0.5 - 0.16, dark);              // leg
-    addBox(root, 0.30, 0.03, 0.30, 0, baseY + 0.10, -len * 0.5 - 0.16, dark);              // anti-vent plate
-    const prop = new THREE.Group();
-    prop.position.set(0, baseY + 0.02, -len * 0.5 - 0.30);
-    for (let i = 0; i < 3; i++) {
-      const b = new THREE.Mesh(boxGeo(0.05, 0.44, 0.14), chrome);
-      b.rotation.z = (i / 3) * Math.PI * 2;
-      prop.add(b);
+    const MH = CBZ.marineHulls;
+    if (MH && MH.buildable && MH.buildable("boat")) {
+      const g = MH.build("boat");
+      if (g) return g;
     }
-    prop.name = "boat_prop";
-    root.add(prop);
-    root.userData.boatProp = prop;
-    root.userData.vehicleDims = { width: w, length: len, height: 1.35, wheelbase: len * 0.6 };
-    root.userData.marineLivery = true;
-    root.userData.marineRooms = [{ id: "speedboat-cockpit", label: "Open runabout cockpit" }];
-    root.userData.marineFixtureCount = 11;
-    root.userData.marineRigAudit = { anchors: 0, segments: 0, gaps: 0 };
-    return root;
+    // No registry at all (water_hulls.js dropped from the build): an empty
+    // group is the honest failure. A road car standing in for a boat, or a
+    // second copy of the hull maintained here, are both worse.
+    console.warn("[playercars] marine registry absent: no hull for style \"boat\"");
+    return new THREE.Group();
   }
 
   // Recolour the body PAINT of a freshly-cloned visual to `color`, leaving every

@@ -1169,17 +1169,27 @@
   // no armour, a plastic drum of fuel and a boarding pole. It is fast and it is
   // nothing else. The yacht it chases is 34 m and does 16 kn, and THAT is the
   // encounter: something small and quick that you cannot outrun in a big boat.
-  const SKIFF_KEY = "skiff";
-  function registerSkiff() {
-    if (C.PIRACY_SKIFF_HULL === false) return false;
-    const MH = CBZ.marineHulls;
-    if (!MH || !MH.register || MH.get(SKIFF_KEY)) return false;
-    MH.register(SKIFF_KEY, {
-      label: "Open Skiff", marque: "—", model: "Open Skiff",
+  // KEY. It used to be "skiff", which collided head-on with city/yachts.js's
+  // Coastline Skiff 18 — whichever file parsed first won the name, and since
+  // yachts.js parses at index.html:1603 and this at :2048, the pirates were
+  // sailing a fishing boat and this file's own registration silently bailed.
+  // Two different boats, two different keys.
+  const SKIFF_KEY = "pirate_skiff";
+  // ONE record, two doors. water_hulls.js parses at index.html:2158 and this
+  // file at :2048, so at parse time there is no register() to call — but there
+  // IS the deferred queue water_hulls.js drains for exactly this case. Taking
+  // that door makes the panga a registry row at BOOT, like every other hull:
+  // priced, berthable, buyable, and photographable by a studio preset that
+  // never enters the city. The frame-loop retry below stays as the late-load
+  // path and now simply latches on the row already being there.
+  function skiffRow() {
+    return {
+      key: SKIFF_KEY,
+      label: "Open Panga", marque: "—", model: "Open Panga",
       price: 3200,
       build: buildSkiff,
       hull: {
-        loa: 7.6, beam: 2.2, draft: 0.45, massT: 1.3,
+        loa: 7.6, beam: 2.2, draft: 0.45, massT: 1.3, freeboard: 0.72,
         topKts: 26, cruiseKts: 18, planeKts: 9, canPlane: true,
         accel0: 3.9, humpFrac: 0.50,
         steerKind: "thrust", steerLock: 0.60, steerRate: 7.0,
@@ -1189,20 +1199,157 @@
         heelSign: -1, heelGain: 0.026, maxHeel: 0.24,
         rideAbove: 0.06, waveGain: 1.0, slamV: 3.0,
         deckY: 0.30, boardY: 0.42, sternOffset: 3.6,
+        // standing at the tillers on the aft thwart
+        helm: { x: 0, y: 1.62, z: -2.55 },
         wakeScale: 0.75, audio: "bike",
+        // Six men in an open 7.6 m boat with 0.72 m of freeboard amidships and
+        // almost none aft. She is fast and she is nothing else.
+        stab: {
+          gm: 0.50, phiV: 1.05, freeboard: 0.72, swampT: 8, crew: 6,
+          seats: [
+            { x: 0, y: 0.62, z: -2.55, yaw: 0 },
+            { x: 0.52, y: 0.60, z: -1.40, yaw: 0 }, { x: -0.52, y: 0.60, z: -1.40, yaw: 0 },
+            { x: 0.52, y: 0.60, z: -0.10, yaw: 0 }, { x: -0.52, y: 0.60, z: -0.10, yaw: 0 },
+            { x: 0, y: 0.66, z: 1.30, yaw: 0 },
+          ],
+        },
       },
       feel: { accel: 1.15, top: 0.7, turn: 1.35, drift: 1.45, roll: 0.85 },
-    });
+    };
+  }
+  function registerSkiff() {
+    if (C.PIRACY_SKIFF_HULL === false) return false;
+    const MH = CBZ.marineHulls;
+    if (!MH || !MH.register || MH.get(SKIFF_KEY)) return false;
+    MH.register(SKIFF_KEY, skiffRow());
     if (MH.pushEconomy) { try { MH.pushEconomy(); } catch (e) {} }
     return true;
   }
+  (function queueSkiff() {
+    if (C.PIRACY_SKIFF_HULL === false) return;
+    if (CBZ.marineHulls && CBZ.marineHulls.register) return;   // loaded late: registerSkiff() owns it
+    if (!Array.isArray(CBZ.marineHullPending)) CBZ.marineHullPending = [];
+    if (CBZ.marineHullPending.some(function (e) { return e && e.key === SKIFF_KEY; })) return;
+    CBZ.marineHullPending.push(skiffRow());
+  })();
 
-  // Drawn through the FLEET'S OWN KIT (water_hulls.js published it precisely so
-  // a new hull is a row and not file #567 of raw material construction). The
-  // dinghy is the base — it IS an open tender — and the pirate kit is four
-  // boxes on top: a second outboard, a lashed fuel drum, a boarding pole and a
-  // strake of bare timber where the gelcoat has gone.
+  // A PANGA, DRAWN AS A HULL. This used to be marineHulls.build("dinghy")
+  // scaled 1.08/1.02/1.69 with six boxes bolted on: a 4.5 m RIB stretched 69%
+  // down its length and told everyone it was 7.6 m. Every proportion on it was
+  // a lie and the tube collar gave the game away.
+  //
+  // A Somali attack skiff is a specific hull and it is nothing like a tender:
+  // long, narrow, a very fine entry, a HIGH flared bow that keeps the spray
+  // out at 26 knots, and almost no freeboard aft where the two outboards hang.
+  // world/hull_loft.js draws exactly that from those lines. If the loft is
+  // missing, we fall back to the old scaled dinghy rather than leave the
+  // pirates with no boat.
   function buildSkiff() {
+    const MH = CBZ.marineHulls;
+    const K = MH && MH.kit;
+    if (!MH || !K) return null;
+    const T = K.THREE;
+    const HL = (K.loft && K.loft()) || CBZ.hullLoft || null;
+    if (!HL || !K.loftHull) return buildSkiffLegacy();
+
+    const b = new T.Group(), M = K.M;
+    const L = 7.6, W = 2.2, hw = W * 0.5, FB = 0.72;
+    const shell = K.sharedMat("pir-shell", 0x9aacb4, { emissive: 0x1a2126, ei: 0.18, double: true });
+    const liner = K.sharedMat("pir-liner", 0x76858c, { emissive: 0x141a1e, ei: 0.16, double: true });
+    const grimy = K.roleMat("pir-timber", "plastic", 0x6b5334);
+    const drumMat = K.roleMat("pir-drum", "plastic", 0x2f6f45);
+    const steel = K.roleMat("pir-steel", "metal", 0x59616b);
+    const tarpMat = K.sharedMat("pir-tarp", 0x4a5b46, { emissive: 0x0f150e, ei: 0.16, double: true });
+    const dark = M.dark(), chrome = M.chrome();
+    K.declareRoom(b, "skiff-deck", "Open boat");
+
+    const st = HL.stationsFromLines({
+      loa: L, beam: W, draft: 0.45, freeboard: FB,
+      sheerBow: 0.95, sheerStern: 0.00,          // HIGH flared bow, nothing aft
+      deadrise: 12, deadriseBow: 34,
+      flareBow: 26, tumblehome: 0,
+      transomRake: 6,
+      midBody0: 0.16, midBody1: 0.60, transomBeamFrac: 0.90,
+      entryPow: 2.0,                             // a panga is a needle forward
+      rockerAft: 1.0, tKeel: 0.36, n: 17,
+    });
+    K.loftHull(b, st, shell, { rings: 9, chine: "auto", transom: "flat" });
+    const out = HL.outline(st);
+    const sheerAt = (z) => out.sheerYAt(z);
+    const hbAt = (z) => out.halfBeamAt(z);
+    const keelAt = (z) => out.keelYAt(z);
+
+    // sole + frames: this boat is worked from inside and you can see all of it
+    K.addBox(b, W * 0.72, 0.035, L * 0.58, 0, 0.02, -0.60, liner);
+    [1, -1].forEach(function (side) {
+      [-2.6, -1.5, -0.4, 0.7, 1.8].forEach(function (z) {
+        K.addBox(b, 0.035, sheerAt(z) - keelAt(z) - 0.10, 0.06,
+          side * (hbAt(z) - 0.04), (sheerAt(z) + keelAt(z)) * 0.5, z, liner);
+      });
+      // gunwale capping laid ON the sheer, and a rubbing strake under it
+      const run = [];
+      for (let i = 0; i <= 9; i++) {
+        const z = -L * 0.48 + (L * 0.96) * (i / 9);
+        run.push([side * (hbAt(z) + 0.015), sheerAt(z) - 0.05, z]);
+      }
+      const rub = HL.strip(run, 0.038, dark, { segments: 54, radial: 5 });
+      if (rub) { rub.castShadow = false; b.add(rub); }
+      const cap = HL.strip(run.map(function (p) { return [p[0] * 0.985, sheerAt(p[2]) + 0.012, p[2]]; }), 0.030, liner, { segments: 54, radial: 5 });
+      if (cap) { cap.castShadow = false; b.add(cap); }
+    });
+    // THWARTS — six men sit on planks, not on a deck.
+    [1.30, -0.10, -1.40, -2.55].forEach(function (z) {
+      const w = hbAt(z) * 2 - 0.10;
+      K.markFixture(b, K.addBox(b, w, 0.05, 0.32, 0, sheerAt(z) - 0.18, z, grimy), "thwart");
+    });
+    // TWIN OUTBOARDS, the fleet's shared part. Two 60s on a panga's transom is
+    // the whole boat: it is what makes something 7.6 m long outrun a yacht.
+    const props = [];
+    [0.40, -0.40].forEach(function (x) {
+      // y is the anti-ventilation plate: level with the bottom at the transom.
+      const ob = K.outboard(b, x, keelAt(-L * 0.5) + 0.04, -L * 0.5 - 0.20, 60);
+      props.push(ob.propAt);
+    });
+    b.add(K.propGroup(0.62, props));
+    [0.40, -0.40].forEach(function (x) {           // tiller arms forward to the aft thwart
+      const t = K.addCyl(b, 0.020, 0.66, x, sheerAt(-2.7) + 0.06, -2.90, dark, 8);
+      t.rotation.x = Math.PI / 2 - 0.12;
+    });
+    // FUEL DRUMS amidships — the only reason a boat this size has any range.
+    [-0.55, 0.35].forEach(function (z) {
+      K.addCyl(b, 0.28, 0.86, -0.48, 0.48, z, drumMat, 12);
+      K.addCyl(b, 0.29, 0.05, -0.48, 0.88, z, steel, 12);
+      K.addCyl(b, 0.29, 0.05, -0.48, 0.12, z, steel, 12);
+    });
+    // THE BOARDING POLE lying on the port gunwale. STRAIGHT: a 4.6 m timber
+    // pole does not follow the sheer, it rests on the two points it touches —
+    // running it through the loft's sheer curve drew a handrail arcing over
+    // the bow, which is a thing no skiff has ever had.
+    const poleY = sheerAt(-1.0) + 0.06;
+    const pole = HL.strip([[0.80, poleY, -2.60], [0.74, poleY + 0.16, 1.95]], 0.035, grimy, { segments: 8, radial: 5 });
+    if (pole) { pole.castShadow = false; b.add(pole); K.markFixture(b, pole, "boarding-pole"); }
+    K.addBox(b, 0.05, 0.20, 0.05, 0.74, poleY + 0.24, 1.92, steel);        // the hook
+    // TIMBER PATCH where the glass went, screwed on over a scar
+    const patch = K.addBox(b, 0.05, 0.30, 2.0, -(hbAt(-0.8) + 0.02), sheerAt(-0.8) - 0.34, -0.8, grimy);
+    patch.rotation.x = 0.02;
+    // TARP over the bow, lashed down over whatever is under it
+    const tarp = K.addBox(b, hbAt(2.1) * 1.85, 0.04, 1.9, 0, sheerAt(2.1) - 0.10, 2.15, tarpMat);
+    tarp.rotation.x = -0.10;
+    K.markFixture(b, tarp, "tarp");
+    [1, -1].forEach(function (side) {
+      K.addBox(b, 0.025, 0.16, 0.025, side * (hbAt(1.4) - 0.06), sheerAt(1.4) - 0.16, 1.35, dark);
+    });
+    K.addBox(b, 0.16, 0.045, 0.05, 0, sheerAt(3.4) + 0.02, 3.35, chrome);      // bow cleat
+    K.addBox(b, 0.05, 0.05, 0.09, 0, sheerAt(3.7) - 0.20, L * 0.49, steel);    // towing eye
+    K.navLights(b, hw, FB + 0.10, L * 0.36, -L * 0.46, null);
+    b.userData.marineFixtureCount += 3;
+    return K.finish(b, { width: W, length: L, height: 1.9, wheelbase: L * 0.55 });
+  }
+
+  // The pre-loft boat, kept ONLY as the degrade path if world/hull_loft.js is
+  // absent. It is a scaled dinghy and it always was; the pirates having a
+  // wrong-looking boat beats the pirates having no boat.
+  function buildSkiffLegacy() {
     const MH = CBZ.marineHulls;
     const K = MH && MH.kit;
     if (!MH || !K) return null;
@@ -1210,31 +1357,23 @@
     try { root = MH.build("dinghy"); } catch (e) { root = null; }
     if (!root) return null;
     const T = K.THREE;
-    // Stretch the tender into a 7.6 m open boat rather than draw a second hull:
-    // one scale on the merged group, so the draw-call budget is the dinghy's.
     root.scale.set(1.08, 1.02, 1.69);
     const kit = new T.Group();
     kit.name = "skiff_kit";
     const grimy = K.roleMat("pir-timber", "plastic", 0x6b5334);
     const drum = K.roleMat("pir-drum", "plastic", 0x2f6f45);
     const steel = K.roleMat("pir-steel", "metal", 0x59616b);
-    // second outboard, outboard of the first, canted the way a lashed-on
-    // spare always is
     K.addBox(kit, 0.34, 0.62, 0.44, 0.42, 0.34, -3.45, steel);
     K.addBox(kit, 0.16, 0.5, 0.16, 0.42, -0.05, -3.6, steel);
-    // fuel drums amidships — the whole reason the boat has any range at all
-    // (addCyl's signature is (root, r, h, x, y, z, mat) — one radius, not two)
     K.addCyl(kit, 0.28, 0.86, -0.5, 0.42, -0.4, drum);
     K.addCyl(kit, 0.28, 0.86, -0.5, 0.42, 0.55, drum);
-    // the boarding pole, lying along the port gunwale
     K.addBox(kit, 0.07, 0.07, 4.6, 0.78, 0.5, 0.6, grimy);
-    // bare timber patch where the paint has gone
     K.addBox(kit, 0.06, 0.28, 2.1, -0.88, 0.24, 0.2, grimy);
     try { K.mergeByMaterial(kit); } catch (e) {}
     // A WRAPPER, AND IT IS NOT COSMETIC. marineHulls.build() clones with
-    // clone(true), which copies userData BY REFERENCE (its own comment says so)
-    // — so writing vehicleDims onto the dinghy clone would silently retag every
-    // Calanque Tender in the world as 7.6 m. The skiff gets its own root.
+    // clone(true), which copies userData BY REFERENCE (its own comment says
+    // so) — so writing vehicleDims onto the dinghy clone would silently retag
+    // every Calanque Tender in the world as 7.6 m.
     const hull = new T.Group();
     hull.add(root);
     hull.add(kit);
@@ -1261,8 +1400,8 @@
       car = CBZ.cityRegisterVehicle(grp, {
         body: "boat", style: SKIFF_KEY, persist: true, heading: heading || 0,
         color: 0x8a9aa6,
-        model: { name: "Open Skiff", value: 3200, rarity: 0.02, body: "boat", detailStyle: SKIFF_KEY },
-        dims: { width: 2.2, length: 7.6, height: 1.5, wheelbase: 4.0 },
+        model: { name: "Open Panga", value: 3200, rarity: 0.02, body: "boat", detailStyle: SKIFF_KEY },
+        dims: { width: 2.2, length: 7.6, height: 1.9, wheelbase: 4.2 },
       });
     } catch (e) { car = null; }
     if (!car) { if (grp.parent) grp.parent.remove(grp); return null; }

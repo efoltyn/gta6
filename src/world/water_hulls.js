@@ -360,6 +360,9 @@
     root.userData.marineRooms = (body.userData.marineRooms || []).slice();
     root.userData.marineFixtureCount = body.userData.marineFixtureCount || 0;
     root.userData.marineRigAudit = Object.assign({ anchors: 0, segments: 0, gaps: 0 }, body.userData.marineRigAudit || {});
+    // The lofted-shell census, so a consumer can ask "is this hull a surface
+    // or a pile of boxes" without walking the geometry itself.
+    if (body.userData.marineHullAudit) root.userData.marineHullAudit = Object.assign({}, body.userData.marineHullAudit);
     const prop = body.getObjectByName("boat_prop");
     if (prop) root.userData.boatProp = prop;
     return root;
@@ -399,6 +402,77 @@
   // m/s (16.0 kn), so it lives PERMANENTLY on the near side of the hump,
   // paying ~60% of its thrust in wave-making at full power and never planing.
   // No special case anywhere — just its own length and its own spec sheet.
+  // ---- THE STABILITY BLOCK -------------------------------------------------
+  // world/water_stability.js integrates a real roll ODE and it needs four
+  // numbers per hull that nobody was writing down: metacentric height (how
+  // stiff she is), the angle of vanishing stability (past which she stays
+  // over), how many seconds of green water over the sheer fills her, and how
+  // many people she carries. They belong HERE, beside LOA and draft, because
+  // they are spec-sheet facts about the hull, not physics-engine tuning.
+  //
+  // A row may author `hull.stab`. Everything it leaves out comes from this
+  // table by key, and a key nobody listed is interpolated off LOA — so a hull
+  // added tomorrow still capsizes like something its own size instead of
+  // reading zeros.
+  const STAB = {
+    kayak: { gm: 0.05, phiV: 0.70, swampT: 2, crew: 1 },
+    jetski: { gm: 0.25, phiV: 1.00, swampT: 4, crew: 2 },
+    skiff: { gm: 0.35, phiV: 0.95, swampT: 5, crew: 3 },
+    dinghy: { gm: 0.60, phiV: 1.15, swampT: 20, crew: 4 },
+    boat: { gm: 0.90, phiV: 1.25, swampT: 14, crew: 5 },
+    console: { gm: 0.90, phiV: 1.20, swampT: 18, crew: 4 },
+    pirate_skiff: { gm: 0.50, phiV: 1.05, swampT: 8, crew: 6 },
+    sloop: { gm: 0.80, phiV: 2.10, swampT: 40, crew: 4 },   // ballast keel: she comes back
+    sportfish: { gm: 1.20, phiV: 1.40, swampT: 50, crew: 6 },
+    cruiser: { gm: 1.40, phiV: 1.45, swampT: 60, crew: 8 },
+    trawler: { gm: 1.00, phiV: 1.30, swampT: 90, crew: 6 },
+    yacht: { gm: 2.40, phiV: 1.90, swampT: 999, crew: 14 },
+    yacht46: { gm: 3.00, phiV: 2.00, swampT: 999, crew: 16 },
+    yacht88: { gm: 3.00, phiV: 2.00, swampT: 999, crew: 26 },
+    yacht156: { gm: 3.00, phiV: 2.00, swampT: 999, crew: 42 },
+  };
+  // A hull's freeboard is the sheer above the waterline amidships. Authored
+  // where the builder knows it; otherwise this curve, which was fitted to the
+  // fleet's own drawn sheer heights (RIB 0.49, cruiser 1.16, yacht 2.26).
+  function freeboardFor(h) {
+    if (h.stab && isFinite(h.stab.freeboard)) return h.stab.freeboard;
+    if (isFinite(h.freeboard)) return h.freeboard;
+    return Math.max(0.24, Math.min(4.2, 0.16 * Math.pow(h.loa, 0.75)));
+  }
+  // Seats a row did not author. One at the helm, the rest in pairs working
+  // aft down the centre of the boat. y is the PELVIS, which is a seated eye
+  // (deckY + 1.24 on a planing hull) less the 0.80 m from hip to eye.
+  function deriveSeats(h, spec, crew) {
+    const sole = isFinite(h.deckY) ? h.deckY : 0;
+    const y = sole + 0.44;
+    const helm = spec.helm || { x: 0, y: y + 0.80, z: spec.loa * 0.13 };
+    const seats = [{ x: helm.x, y: y, z: helm.z, yaw: 0 }];
+    const halfX = Math.max(0.28, spec.beam * 0.22);
+    const back = spec.loa * 0.40;
+    for (let i = 1; i < crew; i++) {
+      const rank = Math.floor((i - 1) / 2) + 1;
+      const side = (i % 2) ? 1 : -1;
+      const z = Math.max(-back, helm.z - 0.95 - (rank - 1) * 0.85);
+      // pairs to port and starboard, and a lone last man on the centreline
+      const lone = (i === crew - 1) && (crew % 2 === 0);
+      seats.push({ x: lone ? 0 : side * halfX, y: y, z: z, yaw: 0 });
+    }
+    return seats;
+  }
+  function deriveStab(key, h, spec) {
+    const a = h.stab || {};
+    const t = STAB[key] || null;
+    const loa = spec.loa;
+    const gm = a.gm != null ? a.gm : (t ? t.gm : Math.max(0.05, Math.min(3.2, 0.10 + 0.062 * loa)));
+    const phiV = a.phiV != null ? a.phiV : (t ? t.phiV : Math.max(0.70, Math.min(2.0, 0.85 + 0.032 * loa)));
+    const swampT = a.swampT != null ? a.swampT : (t ? t.swampT : Math.max(2, Math.min(999, 2 + 3.2 * loa)));
+    const crew = Math.max(1, Math.round(a.crew != null ? a.crew : (t ? t.crew : 1 + 0.38 * loa)));
+    const seats = (Array.isArray(a.seats) && a.seats.length) ? a.seats.map(function (s) {
+      return { x: +s.x || 0, y: +s.y || 0, z: +s.z || 0, yaw: +s.yaw || 0 };
+    }) : deriveSeats(h, spec, crew);
+    return { gm: gm, phiV: phiV, freeboard: freeboardFor(h), swampT: swampT, crew: crew, seats: seats };
+  }
+
   function deriveSpec(key, h) {
     const loa = h.loa, Lwl = loa * 0.92;
     const topMs = h.topKts * KN;
@@ -422,7 +496,7 @@
     const dragL = rest * linShare / topMs;
     const dragQ = rest * (1 - linShare) / (topMs * topMs * (1 - 0.55 * planeTop));
 
-    return {
+    const spec = {
       key: key,
       loa: loa, Lwl: Lwl, beam: h.beam, draft: h.draft, massT: h.massT,
       topMs: topMs, cruiseMs: (h.cruiseKts != null ? h.cruiseKts : h.topKts * 0.8) * KN,
@@ -483,7 +557,14 @@
       wakeScale: h.wakeScale != null ? h.wakeScale : 1,
       audio: h.audio || "truck",
       topKts: h.topKts, cruiseKts: h.cruiseKts, planeKts: h.planeKts,
+      // Paddled/pedalled craft have no engine at all. Consumers that assume
+      // one (the boatyard catalog, engine audio, the wake) read this instead
+      // of inferring "boat therefore motor".
+      engine: h.engine !== false,
     };
+    // stab last: it reads the helm station and the beam this object just fixed.
+    spec.stab = deriveStab(key, h, spec);
+    return spec;
   }
 
   // ============================================================
@@ -612,6 +693,10 @@
     buildable: buildable,
     build: build,
     spec: function (key) { const r = get(key); return r ? r.spec : null; },
+    // The stability block, by key. Every registered hull has one — authored
+    // where a row knows its own numbers, table/LOA-derived otherwise — so a
+    // caller never has to carry "if the hull has no stab" defaults of its own.
+    stab: function (key) { const r = get(key); return r && r.spec ? r.spec.stab : null; },
     feel: function (key) { const r = get(key); return r ? r.feel : null; },
     label: function (key) { const r = get(key); return r ? r.label : null; },
     styleFor: styleFor,
@@ -657,6 +742,22 @@
     // tripping a headlight detector; this keeps that caution while still
     // reading as a lit lamp at night.
     navWhite: () => sharedMat("mh-white", 0xdfe8ee, { emissive: 0x9fb4c0, ei: 0.55 }),
+    // LOFTED SHELLS get their own material each, and that is on purpose:
+    // mergeByMaterial() only batches meshes that share one, so a unique
+    // material keeps the hull surface a single addressable mesh that
+    // boat-fleet.mjs can audit. `double` is not decoration either — an OPEN
+    // boat is seen from inside, and a FrontSide hull is a hull you can see
+    // the sea through from the helm.
+    kayakHull: () => sharedMat("mh-kayak", 0xf2761b, { emissive: 0x3a1a04, ei: 0.22 }),
+    kayakDeck: () => sharedMat("mh-kayakdk", 0xf9a13c, { emissive: 0x3d2408, ei: 0.20 }),
+    pwcHull: () => sharedMat("mh-pwc", 0xf4f7fa, { emissive: 0x3a4148, ei: 0.20 }),
+    pwcTrim: () => sharedMat("mh-pwctrim", 0x1a3f8c, { emissive: 0x081733, ei: 0.26 }),
+    pwcAccent: () => sharedMat("mh-pwcacc", 0xd8352c, { emissive: 0x3a0b08, ei: 0.24 }),
+    alu: () => sharedMat("mh-alu", 0xb9c2c9, { emissive: 0x22272c, ei: 0.20, double: true }),
+    pangaHull: () => sharedMat("mh-panga", 0x9fb0b8, { emissive: 0x1b2126, ei: 0.18, double: true }),
+    ribHull: () => sharedMat("mh-rib", 0xeef2f6, { emissive: 0x363c42, ei: 0.20, double: true }),
+    sbHull: () => sharedMat("mh-speedboat", 0xeceff2, { emissive: 0x343a40, ei: 0.20, double: true }),
+    ccHull: () => sharedMat("mh-console", 0xf3f6f8, { emissive: 0x383e44, ei: 0.20, double: true }),
   };
 
   // A three-blade screw group named "boat_prop" so
@@ -689,6 +790,320 @@
     addBox(root, s, s * 0.9, s, 0, y, zStern, M.navWhite());
     if (mastY != null) addBox(root, s, s * 1.2, s, 0, mastY, zBow * 0.35, M.navWhite());
   }
+
+  // ---- THE LOFT BRIDGE -----------------------------------------------------
+  // world/hull_loft.js parses immediately before this file and owns the ONE
+  // primitive that draws a hull as a surface instead of a stack of prisms.
+  // Read lazily and feature-detected at CALL time so a build that drops
+  // hull_loft.js still boots (it just gets no lofted hulls).
+  function LOFT() { return CBZ.hullLoft || null; }
+  // The hull SHELL: one lofted mesh, its own material, its own draw call.
+  // Named so tools/visual-presets/boat-fleet.mjs can find the surface it is
+  // auditing rather than guessing which merged bucket is the hull.
+  function loftHull(root, stations, material, o) {
+    const L = LOFT();
+    if (!L) return null;
+    const m = L.mesh(stations, material, o);
+    if (!m) return null;
+    m.name = "hull_surface";
+    m.castShadow = false;
+    m.userData.hullSurface = true;
+    // NEVER merged. mergeByMaterial() batches by material id, so the moment a
+    // fitting shares the hull's paint the shell stops being an addressable
+    // mesh and its `faceted` audit starts measuring boxes bolted to it.
+    m.userData.noMerge = true;
+    root.add(m);
+    const a = L.audit(m.geometry);
+    const au = root.userData.marineHullAudit || (root.userData.marineHullAudit = { tris: 0, faceted: 0, surfaces: 0 });
+    au.tris += a.tris;
+    au.faceted = (au.faceted * au.surfaces + a.faceted) / (au.surfaces + 1);
+    au.surfaces++;
+    return m;
+  }
+
+  // ---- FITTINGS ON A LOFTED SKIN -------------------------------------------
+  // outline() answers "where is the SHEER". Everything below the sheer — a
+  // boot stripe, a rubbing strake, a hull window, a bow-thruster tunnel, a
+  // spray rail — needs "where is the skin at THIS height", and guessing that
+  // is how a window ends up floating 8 cm off a hull that got narrower toward
+  // the bow. These read it off the same stations the shell was lofted from, so
+  // a fitting cannot disagree with the surface it is bolted to.
+  function nz(v) { return (typeof v === "number" && isFinite(v)) ? v : 0; }
+  function stationX(st, y) {
+    const p = st.pts;
+    if (y <= p[0][0]) return Math.abs(p[0][1]);
+    for (let i = 0; i < p.length - 1; i++) {
+      const a = p[i], c = p[i + 1];
+      if (y <= c[0]) {
+        const d = c[0] - a[0];
+        const f = Math.abs(d) > 1e-6 ? (y - a[0]) / d : 0;
+        return Math.abs(a[1]) + (Math.abs(c[1]) - Math.abs(a[1])) * f;
+      }
+    }
+    return Math.abs(p[p.length - 1][1]);
+  }
+  // Half-width of the lofted skin at (z, y). Clamps to the ends of a section.
+  function hullSectionX(stations, z, y) {
+    if (!Array.isArray(stations) || !stations.length) return 0;
+    const N = stations.length;
+    if (N === 1 || z <= stations[0].z) return stationX(stations[0], y);
+    if (z >= stations[N - 1].z) return stationX(stations[N - 1], y);
+    for (let i = 0; i < N - 1; i++) {
+      if (z <= stations[i + 1].z) {
+        const dz = stations[i + 1].z - stations[i].z;
+        const f = Math.abs(dz) > 1e-6 ? (z - stations[i].z) / dz : 0;
+        return stationX(stations[i], y) * (1 - f) + stationX(stations[i + 1], y) * f;
+      }
+    }
+    return stationX(stations[N - 1], y);
+  }
+  // A run of points ON the skin, z0 -> z1. `y` is a height or a function of z;
+  // `outset` pushes the run proud of the plating (a strake stands off, a boot
+  // stripe is painted flush). Feed it to CBZ.hullLoft.strip().
+  function skinRun(stations, side, z0, z1, y, outset, step) {
+    const pts = [];
+    const n = Math.max(2, Math.round(Math.abs(z1 - z0) / Math.max(0.05, step || 0.6)));
+    for (let i = 0; i <= n; i++) {
+      const z = z0 + (z1 - z0) * (i / n);
+      const yy = (typeof y === "function") ? y(z) : y;
+      pts.push([side * (hullSectionX(stations, z, yy) + (outset || 0)), yy, z]);
+    }
+    return pts;
+  }
+  // The CHINE — or, on a round hull, the turn of the bilge: the point each
+  // station itself calls the corner. A spray rail goes here and nowhere else.
+  function chineRun(stations, side, outset, dy) {
+    const pts = [];
+    for (const st of stations) {
+      const i = (typeof st.chine === "number") ? st.chine : 0;
+      const p = st.pts[Math.min(Math.max(0, i), st.pts.length - 1)];
+      const x = Math.abs(p[1]);
+      if (x < 1e-3) continue;
+      pts.push([side * (x + (outset || 0)), p[0] + (dy || 0), st.z + nz(p[2])]);
+    }
+    return pts;
+  }
+  function skinNormal(stations, side, z, y) {
+    const d = 0.28;
+    const Xz = (hullSectionX(stations, z + d, y) - hullSectionX(stations, z - d, y)) / (2 * d);
+    const Xy = (hullSectionX(stations, z, y + d) - hullSectionX(stations, z, y - d)) / (2 * d);
+    const v = new THREE.Vector3(side, -Xy, -Xz);
+    return v.lengthSq() > 1e-9 ? v.normalize() : new THREE.Vector3(side, 0, 0);
+  }
+  // Face a mesh's local +X along the skin normal while its local +Z keeps
+  // running fore-and-aft. setFromUnitVectors on its own is DEGENERATE on the
+  // port side — a 180-degree turn has no preferred axis — and stands the panel
+  // on end, which is how you get a hull window mounted vertically.
+  function orientToSkin(m, n) {
+    const X = n.clone().normalize();
+    const Z = new THREE.Vector3(0, 0, 1);
+    Z.addScaledVector(X, -Z.dot(X));
+    if (Z.lengthSq() < 1e-8) { Z.set(0, 1, 0); Z.addScaledVector(X, -X.y); }
+    Z.normalize();
+    const Y = new THREE.Vector3().crossVectors(Z, X).normalize();
+    m.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, Y, Z));
+  }
+  // A flat fitting ON the topsides: a hull window, a dark inset panel, a name
+  // board. `len` runs fore/aft, `h` is vertical, the face is the skin normal.
+  function hullPanel(root, stations, side, z, y, len, h, material, o) {
+    o = o || {};
+    const x = hullSectionX(stations, z, y) + (o.outset == null ? 0.012 : o.outset);
+    const m = addBox(root, o.thick || 0.05, h, len, side * x, y, z, material);
+    orientToSkin(m, skinNormal(stations, side, z, y));
+    return m;
+  }
+  // A round fitting ON the topsides: a bow-thruster tunnel, a porthole, an
+  // anchor pocket. Its axis is the skin normal, which a bare cylinder cannot
+  // be given without composing two rotations by hand and getting one wrong.
+  const _axisZ = new THREE.Vector3(0, 0, 1);
+  function hullDisc(root, stations, side, z, y, r, material, o) {
+    o = o || {};
+    const x = hullSectionX(stations, z, y) + (o.outset == null ? 0.01 : o.outset);
+    const m = new THREE.Mesh(cylGeo(r, r, o.thick || 0.06, o.seg || 14), material);
+    m.position.set(side * x, y, z);
+    m.castShadow = false;
+    // A cylinder's axis is its local +Y, so the skin basis is composed with a
+    // quarter turn that sends +Y to +X FIRST. Parenting it inside a rotated
+    // Group would work too and would cost a draw call per porthole, because
+    // mergeByMaterial() only ever batches a group's direct mesh children.
+    orientToSkin(m, skinNormal(stations, side, z, y));
+    m.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(_axisZ, -Math.PI / 2));
+    root.add(m);
+    return m;
+  }
+  // A quad-grid SURFACE from rows of points: a bulwark, a side deck that
+  // follows the deck edge, a whaleback, a coaming. Every one of those is a
+  // ribbon in the real world and a row of stepped boxes in this game, and the
+  // stepping is the artefact. rows[i][k] = [x, y, z]; all rows the same length.
+  function sheet(root, rows, material, o) {
+    o = o || {};
+    if (!Array.isArray(rows) || rows.length < 2) return null;
+    const cols = rows[0].length;
+    if (cols < 2) return null;
+    for (const r of rows) if (!r || r.length !== cols) return null;
+    const pos = [], uv = [], idx = [];
+    for (let i = 0; i < rows.length; i++) {
+      for (let k = 0; k < cols; k++) {
+        const p = rows[i][k];
+        pos.push(p[0], p[1], p[2]);
+        uv.push(k / (cols - 1), i / (rows.length - 1));
+      }
+    }
+    for (let i = 0; i < rows.length - 1; i++) {
+      for (let k = 0; k < cols - 1; k++) {
+        const A = i * cols + k, B = A + 1, C = A + cols, D = C + 1;
+        if (o.flip) idx.push(A, B, C, B, D, C);
+        else idx.push(A, C, B, B, C, D);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setIndex(idx);
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    geo.computeVertexNormals();
+    geo.computeBoundingSphere();
+    const m = new THREE.Mesh(geo, material);
+    m.castShadow = false;
+    root.add(m);
+    return m;
+  }
+  function ribbon(root, lower, upper, material, o) { return sheet(root, [lower, upper], material, o); }
+  // A BULWARK: the outboard plate, the inboard liner and the capping, all
+  // following the sheer. Two ribbons wound opposite ways is what makes it
+  // solid from the deck AND from the water without a double-sided material.
+  function bulwark(root, out, side, z0, z1, h, thick, outMat, inMat, capMat, step) {
+    const lowO = [], upO = [], lowI = [], upI = [];
+    const n = Math.max(3, Math.round(Math.abs(z1 - z0) / Math.max(0.2, step || 0.8)));
+    for (let i = 0; i <= n; i++) {
+      const z = z0 + (z1 - z0) * (i / n);
+      const y = out.sheerYAt(z), hb = out.halfBeamAt(z);
+      const xo = side * Math.max(0.05, hb - 0.02), xi = side * Math.max(0.04, hb - 0.02 - thick);
+      lowO.push([xo, y - 0.06, z]); upO.push([xo, y + h, z]);
+      lowI.push([xi, y - 0.06, z]); upI.push([xi, y + h, z]);
+    }
+    ribbon(root, lowO, upO, outMat, { flip: side < 0 });
+    ribbon(root, lowI, upI, inMat || outMat, { flip: side > 0 });
+    ribbon(root, upI, upO, capMat || outMat, { flip: side < 0 });
+    return { top: upO };
+  }
+  // A rail that FOLLOWS the sheer. addRail() draws a straight run at one
+  // height: right on a flat sheer, floating at both ends of a real one.
+  function sheerRail(root, out, side, z0, z1, dy, material, o) {
+    o = o || {};
+    const L = LOFT();
+    const h = o.height == null ? 0.92 : o.height;
+    const inset = o.inset == null ? 0.10 : o.inset;
+    const n = Math.max(2, Math.round(Math.abs(z1 - z0) / (o.spacing || 1.7)));
+    const top = [], mid = [];
+    for (let i = 0; i <= n; i++) {
+      const z = z0 + (z1 - z0) * (i / n);
+      const x = side * Math.max(0.05, out.halfBeamAt(z) - inset);
+      const y = out.sheerYAt(z) + (dy || 0);
+      addBox(root, 0.05, h, 0.05, x, y + h * 0.5, z, material);
+      top.push([x, y + h, z]);
+      mid.push([x, y + h * 0.52, z]);
+    }
+    if (L) {
+      [[top, 0.028], [mid, 0.022]].forEach(function (r) {
+        const s = L.strip(r[0], r[1], material, { segments: Math.max(8, n * 4), radial: 5 });
+        if (s) { s.castShadow = false; root.add(s); }
+      });
+    }
+    return top;
+  }
+  // A RAKED STEM, expressed the way the loft already expresses a raked
+  // transom: a per-point z offset on the forward stations. Positive `rake`
+  // leans the top of the stem AFT — the reverse/plumb-negative stem every
+  // modern sport cruiser wears; negative leans it forward.
+  function rakeStem(stations, rake, reach) {
+    const N = stations.length;
+    if (N < 2 || !(Math.abs(rake) > 1e-4)) return stations;
+    const z1 = stations[N - 1].z, z0 = stations[0].z;
+    const span = Math.max(0.001, Math.abs(z1 - z0) * (reach == null ? 0.28 : reach));
+    const t = Math.tan(rake);
+    for (const st of stations) {
+      const f = clampN((st.z - (z1 - span)) / span, 0, 1);
+      if (f <= 0) continue;
+      const yk = st.pts[0][0];
+      for (const p of st.pts) p[2] = nz(p[2]) - (p[0] - yk) * t * f * f;
+    }
+    return stations;
+  }
+  // ROUND FORWARD, HARD-CHINED AFT — every semi-displacement hull ever drawn.
+  // stationsFromLines() takes ONE bilge exponent for the whole boat, so this
+  // re-solves each station's bilge curve with its own exponent, blended along
+  // the length. The point COUNT and the chine index are untouched, so the
+  // loft's quad grid survives; only the shape of the turn changes.
+  function warpBilge(stations, nAft, nFwd, t0, t1) {
+    const N = stations.length;
+    for (let i = 0; i < N; i++) {
+      const st = stations[i], p = st.pts;
+      if (typeof st.chine !== "number" || st.chine < 2) continue;
+      const t = N > 1 ? i / (N - 1) : 0;
+      const u = clampN((t - t0) / Math.max(1e-3, t1 - t0), 0, 1);
+      const nb = Math.max(1.2, nAft + (nFwd - nAft) * (u * u * (3 - 2 * u)));
+      const c = st.chine, ym = p[c][0], xm = Math.abs(p[c][1]), yk = p[0][0];
+      if (!(xm > 1e-4) || !(ym - yk > 1e-4)) continue;
+      for (let k = 0; k <= c; k++) {
+        const fr = k / c;
+        p[k][1] = xm * fr;
+        p[k][0] = ym - (ym - yk) * Math.pow(Math.max(0, 1 - Math.pow(fr, nb)), 1 / nb);
+      }
+    }
+    return stations;
+  }
+
+  // ---- THE OUTBOARD --------------------------------------------------------
+  // Every open boat in the fleet had its own four-boxes-on-the-transom motor,
+  // and every one of them was a different shape. An outboard is a real object:
+  // a cowl, a mid-section, a gearcase with a torpedo bullet, an anti-
+  // ventilation plate, a skeg and a tilt bracket bolted to the transom. This
+  // is that object once, sized off horsepower.
+  //
+  // It deliberately does NOT add the screw: propGroup() names its group
+  // "boat_prop" and cityUpdatePlayerCarVisual resolves that name ONCE, so a
+  // twin-engine boat must build ONE prop group with two offsets. outboard()
+  // therefore returns where its screw goes and the caller collects them.
+  // `y` IS THE ANTI-VENTILATION PLATE, and that is the whole point of the
+  // signature: on a real boat that plate sits level with the hull's bottom at
+  // the transom, and the shaft length is chosen to put it there. Pass the
+  // hull's KEEL height at the stern (outline().keelYAt) and the motor mounts
+  // itself correctly on any transom instead of being nudged until it looks
+  // right — which is how the fleet ended up with props spinning in mid-air
+  // half a metre above the water.
+  function outboard(root, x, y, z, hp) {
+    // TWO SCALES, and conflating them is what buried the last motor inside the
+    // transom: an outboard's POWERHEAD grows with horsepower, but its SHAFT
+    // does not — 15", 20" and 25" are the only lengths there are, and a 40 hp
+    // and a 300 hp on the same transom put their cavitation plates in exactly
+    // the same place. So girth scales with hp^(1/3) and the leg is a constant
+    // 0.72 m from the plate up to the mounting bracket.
+    const s = clampN(Math.pow(Math.max(2, hp || 90) / 90, 1 / 3), 0.6, 1.5);
+    const SHAFT = 0.72;
+    const cowl = M.dark(), leg = M.grey(), plate = M.chrome();
+    const g = new THREE.Group();
+    g.position.set(x || 0, y || 0, z || 0);
+    // gearcase: a torpedo with a skeg, not a slab
+    const bullet = addCyl(g, 0.072 * s, 0.50 * s, 0, -0.12 * s, -0.06 * s, leg, 10);
+    bullet.rotation.x = Math.PI / 2;
+    addBox(g, 0.11 * s, 0.24 * s, 0.30 * s, 0, 0.02 * s, -0.02 * s, leg);
+    addBox(g, 0.28 * s, 0.022 * s, 0.32 * s, 0, 0, -0.06 * s, plate);            // anti-vent plate
+    addBox(g, 0.042 * s, 0.19 * s, 0.20 * s, 0, -0.25 * s, 0.02 * s, leg);       // skeg
+    // the leg: a fixed-length column from the plate up to the transom bracket
+    addBox(g, 0.15 * s, SHAFT - 0.08, 0.22 * s, 0, 0.06 + (SHAFT - 0.08) * 0.5, -0.02 * s, leg);
+    addBox(g, 0.30 * s, 0.34, 0.10, 0, SHAFT - 0.04, 0.15 * s, plate);           // transom bracket
+    addCyl(g, 0.035, 0.30 * s, 0, SHAFT - 0.04, 0.15 * s, plate, 8).rotation.z = Math.PI / 2;
+    // powerhead
+    addBox(g, 0.42 * s, 0.09, 0.56 * s, 0, SHAFT + 0.10, -0.06 * s, leg);        // lower pan
+    addBox(g, 0.40 * s, 0.42 * s, 0.54 * s, 0, SHAFT + 0.16 + 0.21 * s, -0.06 * s, cowl);
+    root.add(g);
+    return {
+      group: g, scale: s,
+      propAt: [x || 0, (y || 0) - 0.12 * s, (z || 0) - 0.34 * s],
+      top: (y || 0) + SHAFT + 0.16 + 0.42 * s,
+    };
+  }
+  function clampN(v, a, b) { return v < a ? a : (v > b ? b : v); }
 
   // ============================================================
   //  3b. THE KIT — the drawing surface every OTHER hull author uses
@@ -723,8 +1138,25 @@
     addRail: addRail, addStairs: addStairs, stairDecks: stairDecks,
     mergeByMaterial: mergeByMaterial, finish: finish,
     M: M, propGroup: propGroup, navLights: navLights,
+    // THE LOFT. Every hull author reaches the surface primitive through here
+    // (or through window.CBZ.hullLoft directly — same object, read lazily).
+    loft: LOFT, loftHull: loftHull, outboard: outboard,
+    // FITTINGS ON THE SKIN. A hull author who lofts a shell and then bolts
+    // boxes on at guessed offsets has drawn half a boat; these are how the
+    // other half stays attached to it.
+    hullSectionX: hullSectionX, skinRun: skinRun, chineRun: chineRun,
+    hullPanel: hullPanel, hullDisc: hullDisc,
+    sheet: sheet, ribbon: ribbon, bulwark: bulwark, sheerRail: sheerRail,
+    rakeStem: rakeStem, warpBilge: warpBilge,
   };
   CBZ.marineHulls.kit = KIT;
+  // The named parts a hull author reuses verbatim. Same surface as KIT, split
+  // out because "give me the outboard" should not require knowing that the
+  // whole drawing kit exists.
+  CBZ.marineHulls.parts = {
+    outboard: outboard, propGroup: propGroup, navLights: navLights,
+    loftHull: loftHull, loft: LOFT,
+  };
 
   // ---- THE DEFERRED REGISTRATION QUEUE -------------------------------------
   // Same load-order fact, the other way round: a file that parses BEFORE this
@@ -747,67 +1179,844 @@
     return n;
   }
 
-  // ---- DINGHY — Calanque Tender 15 (4.5m RIB) ------------------------------
-  // Rigid-hull inflatable: GRP deep-V pan, a hypalon tube collar running the
-  // full length and wrapping the transom, a jockey console, a single outboard.
-  // Planes almost instantly and turns inside 1-2 boat lengths.
+  // ---- KAYAK — Sandbar 14 (4.2 m sit-on-top sea kayak) ---------------------
+  // The smallest hull in the game and the one that proves the primitive: a
+  // kayak is ALL surface. Round bilge, no chine anywhere, a cambered deck
+  // welded to the sheer, a rockered keel and ends that sweep up out of the
+  // water. There is nothing on it a box could have drawn.
+  //
+  // It is PADDLED. No engine, no prop, rudder-style steering — the registry
+  // carries craft, not just motorboats.
+  function buildKayak() {
+    const b = new THREE.Group();
+    const L = 4.2, W = 0.72, FB = 0.28;
+    const hull = M.kayakHull(), deck = M.kayakDeck(), dark = M.dark();
+    const grey = M.grey(), pad = M.pad(), chrome = M.chrome();
+    declareRoom(b, "kayak-well", "Seat well");
+    const HL = LOFT();
+    const lines = {
+      loa: L, beam: W, draft: 0.12, freeboard: FB,
+      sheerBow: 0.20, sheerStern: 0.14,          // upswept ends
+      roundBilge: true, bilgeN: 2.6, tumblehome: 18, flareBow: 0,
+      transomRake: 0, maxBeamHeight: 0.62,
+      midBody0: 0.30, midBody1: 0.62, transomBeamFrac: 0.62,
+      entryPow: 1.35, rockerAft: 0.42, tKeel: 0.46, n: 21,
+    };
+    const CK = { z0: -0.34, z1: 0.62, halfW: 0.185 };
+    let out = null;
+    if (HL) {
+      const st = HL.stationsFromLines(lines);
+      loftHull(b, st, hull, { rings: 11, transom: "none", deck: true, deckCamber: 0.045, deckCols: 9, cockpit: CK });
+      out = HL.outline(st);
+    }
+    const sheerAt = (z) => (out ? out.sheerYAt(z) : FB);
+    const hbAt = (z) => (out ? out.halfBeamAt(z) : W * 0.5);
+
+    // THE SEAT WELL. A sit-on-top's well is a moulded tray a hand's width
+    // below the deck, not a hole into the hull — so the hole in the deck gets
+    // a floor, or you would be looking at the inside of the bottom.
+    const wy = sheerAt(0.1) - 0.085;
+    addBox(b, CK.halfW * 2 - 0.02, 0.035, CK.z1 - CK.z0 - 0.04, 0, wy, (CK.z0 + CK.z1) * 0.5, deck);
+    [1, -1].forEach(function (side) {
+      addBox(b, 0.03, 0.11, CK.z1 - CK.z0 - 0.04, side * (CK.halfW - 0.012), wy + 0.06, (CK.z0 + CK.z1) * 0.5, deck);
+    });
+    addBox(b, CK.halfW * 2 - 0.02, 0.11, 0.03, 0, wy + 0.06, CK.z0 + 0.02, deck);
+    addBox(b, CK.halfW * 2 - 0.02, 0.11, 0.03, 0, wy + 0.06, CK.z1 - 0.02, deck);
+    // seat pad + backrest, thigh braces, moulded footwells
+    addBox(b, 0.30, 0.05, 0.36, 0, wy + 0.05, -0.02, pad);
+    const back = addBox(b, 0.30, 0.28, 0.05, 0, wy + 0.20, -0.26, pad);
+    back.rotation.x = 0.22;
+    markFixture(b, back, "seat-back");
+    [1, -1].forEach(function (side) {
+      addBox(b, 0.05, 0.07, 0.22, side * 0.16, wy + 0.10, 0.24, deck);   // thigh brace
+      addBox(b, 0.11, 0.03, 0.13, side * 0.10, wy + 0.02, 0.50, grey);   // footwell pad
+    });
+    // SCUPPERS — the holes that make it a sit-on-top. Dark discs, not holes:
+    // a real hole would be a 3 cm tube through a 1 cm shell nobody can see.
+    [-0.20, 0.18, 0.44].forEach(function (z) {
+      [1, -1].forEach(function (side) {
+        const d = addCyl(b, 0.026, 0.012, side * 0.10, sheerAt(z) - 0.004, z, dark, 8);
+        d.userData.marineFixture = "scupper";
+      });
+    });
+    // HATCHES fore and aft: a rim and a lid, both round.
+    [[1.36, 0.115], [-1.05, 0.095]].forEach(function (h) {
+      const z = h[0], r = h[1], y = sheerAt(z);
+      addCyl(b, r + 0.018, 0.014, 0, y + 0.005, z, deck, 14);
+      addCyl(b, r, 0.020, 0, y + 0.016, z, dark, 14);
+      markFixture(b, addCyl(b, 0.020, 0.030, 0, y + 0.030, z + r * 0.55, grey, 8), "hatch-catch");
+    });
+    // DECK LINES. Bungee cross-lacing on the foredeck and a perimeter line
+    // aft, run through real pad-eyes and drawn with the loft's own strip().
+    if (HL) {
+      const lace = [];
+      for (let i = 0; i < 5; i++) {
+        const z = 0.86 + i * 0.20, s = i % 2 ? -1 : 1;
+        lace.push([s * (hbAt(z) - 0.055), sheerAt(z) + 0.012, z]);
+      }
+      const l1 = HL.strip(lace, 0.008, dark, { segments: 40, radial: 5 });
+      if (l1) { l1.castShadow = false; b.add(l1); }
+      [1, -1].forEach(function (side) {
+        const run = [];
+        for (let i = 0; i <= 6; i++) {
+          const z = -1.55 + i * 0.32;
+          run.push([side * (hbAt(z) - 0.030), sheerAt(z) + 0.010, z]);
+        }
+        const l2 = HL.strip(run, 0.007, grey, { segments: 42, radial: 5 });
+        if (l2) { l2.castShadow = false; b.add(l2); }
+      });
+      // carry toggles at both ends
+      [L * 0.47, -L * 0.47].forEach(function (z) {
+        const t = HL.strip([[0, sheerAt(z) + 0.02, z], [0, sheerAt(z) - 0.02, z + (z > 0 ? 0.10 : -0.10)]], 0.010, dark, { segments: 6, radial: 5 });
+        if (t) { t.castShadow = false; b.add(t); }
+      });
+    }
+    // THE PADDLE, laid across the well the way it is actually carried: one
+    // shaft athwartships, two feathered blades over the water either side.
+    const paddle = new THREE.Group();
+    paddle.position.set(0, sheerAt(0.72) + 0.055, 0.72);
+    const shaft = addCyl(paddle, 0.017, 1.30, 0, 0, 0, dark, 8);
+    shaft.rotation.z = Math.PI / 2;
+    [1, -1].forEach(function (side) {
+      const blade = addBox(paddle, 0.15, 0.015, 0.42, side * 0.78, -0.005, 0, M.pwcAccent());
+      blade.rotation.z = side * 0.10;
+      blade.rotation.y = side * 0.42;                       // feathered
+      addBox(paddle, 0.045, 0.014, 0.14, side * 0.60, -0.002, 0, dark);
+    });
+    markFixture(b, paddle, "paddle");
+    b.add(paddle);
+    addBox(b, 0.05, 0.03, 0.05, 0, sheerAt(-1.86) + 0.02, -1.86, chrome);   // stern grab
+    navLights(b, W * 0.5, FB + 0.02, L * 0.40, -L * 0.44, null);
+    b.userData.marineFixtureCount += 2;                                      // seat + well
+    return finish(b, { width: W, length: L, height: 0.46, wheelbase: L * 0.6 });
+  }
+
+  // ---- JETSKI — Vareo GT (3.3 m personal watercraft) -----------------------
+  // A PWC IS MOULDINGS ALL THE WAY UP. The first pass got the hull right and
+  // then bolted BOXES to it — a flat-topped box saddle, a box dash, a box
+  // step — and it read as a small boat with crates on it. There is not a flat
+  // top or a square corner anywhere on a real ski: the hood is a sculpted
+  // volume that rises out of the bow and swells into the handlebar pod, the
+  // saddle is a rounded ridge tapering to the rear between two footwell
+  // troughs, and the sponsons blend into the deck.
+  //
+  // So EVERY shape above the sheer is its own loft. pod() is that idea: a
+  // closed round-bilge body whose TOP LINE is authored as a function of
+  // station, and whose flat underside is deliberately BURIED in the deck —
+  // because a moulding is not a thing that sits on a boat, it is a thing the
+  // boat's own surface swells into.
+  function buildJetski() {
+    const b = new THREE.Group();
+    const L = 3.3, W = 1.2, FB = 0.30, HW = W * 0.5;
+    const hull = M.pwcHull(), trim = M.pwcTrim(), acc = M.pwcAccent();
+    const dark = M.dark(), grey = M.grey(), chrome = M.chrome();
+    const glass = M.glass(), screen = M.screen();
+    const seat = sharedMat("mh-pwcseat", 0x191c20, { emissive: 0x0a0c0e, ei: 0.16 });
+    declareRoom(b, "jetski-saddle", "Saddle");
+    const HL = LOFT();
+    // The lower hull. Its deck is the FOOTWELL FLOOR — a gentle crown and
+    // nothing more, because on a ski every bit of height above it belongs to
+    // a moulding, not to the deck.
+    const CAMBER = 0.13;
+    const lines = {
+      loa: L, beam: W, draft: 0.30, freeboard: FB,
+      sheerBow: 0.22, sheerStern: 0.02,
+      deadrise: 21, deadriseBow: 46, flareBow: 6, tumblehome: 13,
+      transomRake: 4, chineBeamFrac: 1,          // the SPONSON is the widest point
+      midBody0: 0.20, midBody1: 0.62, transomBeamFrac: 0.90,
+      entryPow: 1.5, rockerAft: 1, tKeel: 0.30, n: 17,
+    };
+    let out = null;
+    if (HL) {
+      const st = HL.stationsFromLines(lines);
+      loftHull(b, st, hull, { rings: 9, chine: "auto", transom: "flat", deck: true, deckCamber: CAMBER, deckCols: 9 });
+      out = HL.outline(st);
+    }
+    const sheerAt = (z) => (out ? out.sheerYAt(z) : FB);
+    const hbAt = (z) => (out ? out.halfBeamAt(z) : HW);
+    const deckAt = (z) => sheerAt(z) + CAMBER;            // the footwell floor
+
+    // ---- pod(): one moulded volume ---------------------------------------
+    // THREE authored lines, and all three matter:
+    //   top(t)    the crown, so a moulding FOLLOWS the deck it grows out of
+    //             instead of being a slab parked at one height
+    //   bottom(t) the underside, likewise — a hood buried at a constant depth
+    //             stands a foot proud of a deck that has risen underneath it
+    //   plan(t)   the half-breadth, read off the HULL. A moulding wider than
+    //             the hull it sits on is the one thing that made the previous
+    //             attempt look like a blue wall with a boat behind it.
+    function pod(o, material) {
+      if (!HL) return null;
+      const st = HL.stationsFromLines({
+        loa: o.len, beam: o.plan ? 2 : o.wide, freeboard: 0.1,
+        draft: o.bottom ? 1 : o.deep,
+        planHalfBeam: o.plan,
+        roundBilge: true, bilgeN: o.bilge == null ? 2.6 : o.bilge,
+        maxBeamHeight: o.shoulder == null ? 0.60 : o.shoulder,
+        tumblehome: o.tumble == null ? 8 : o.tumble, flareBow: 0, transomRake: 0,
+        midBody0: o.mid0 == null ? 0.06 : o.mid0,
+        midBody1: o.mid1 == null ? 0.50 : o.mid1,
+        transomBeamFrac: o.tail == null ? 0.86 : o.tail,
+        entryPow: o.entry == null ? 1.5 : o.entry,
+        keelProfile: o.bottom ? function (t) { return -o.bottom(t); }
+                              : function () { return 1; },   // flat and BURIED
+        sheerProfile: o.top,
+        n: o.n == null ? 13 : o.n,
+      });
+      const m = HL.mesh(st, material, {
+        rings: o.rings == null ? 9 : o.rings, transom: "flat",
+        deck: true, deckCamber: o.camber == null ? 0.05 : o.camber, deckCols: 7,
+        stemRound: o.nose || 0, castShadow: false,
+      });
+      if (!m) return null;
+      m.castShadow = false;
+      m.position.set(o.x || 0, o.y || 0, o.z || 0);
+      if (o.yaw) m.rotation.y = o.yaw;
+      if (o.roll) m.rotation.z = o.roll;
+      b.add(m);
+      return { mesh: m, out: HL.outline(st), x: o.x || 0, y: o.y || 0, z: o.z || 0 };
+    }
+
+    // ---- THE HOOD: bow tip -> handlebar pod ------------------------------
+    // Widest and tallest at its AFT end (where your hands go), tapering to a
+    // rounded point at the stem. Its crown is the deck plus a swell that dies
+    // out forward — that curve IS the shape people recognise as a ski.
+    const HZ0 = 0.30, HZ1 = 1.62, HC = (HZ0 + HZ1) * 0.5;
+    const hoodTopAt = function (t) {
+      const wz = HZ0 + (HZ1 - HZ0) * t;
+      return deckAt(wz) + 0.05 + 0.20 * Math.pow(1 - t, 1.15);
+    };
+    const hoodZ = function (t) { return HZ0 + (HZ1 - HZ0) * t; };
+    const hood = pod({
+      len: HZ1 - HZ0, z: HC, y: 0, top: hoodTopAt,
+      bottom: function (t) { return deckAt(hoodZ(t)) - 0.09; },
+      plan: function (t) { return Math.min(hbAt(hoodZ(t)) * 0.86, 0.30); },
+      nose: 0.04, camber: 0.11, tumble: 6, shoulder: 0.58, n: 13,
+    }, trim);
+    // the graphic flash, laid ON the hood's own shoulder line
+    if (hood && HL) {
+      [1, -1].forEach(function (side) {
+        const run = [];
+        for (let i = 0; i <= 6; i++) {
+          const wz = 0.44 + i * 0.175, lz = wz - hood.z;
+          run.push([side * hood.out.halfBeamAt(lz) * 0.94, hood.out.sheerYAt(lz) + hood.y - 0.015, wz]);
+        }
+        const f = HL.strip(run, 0.022, acc, { segments: 20, radial: 4 });
+        if (f) { f.castShadow = false; b.add(f); }
+      });
+    }
+
+    // ---- THE SADDLE: a rounded ridge that tapers to the rear -------------
+    // Built BACKWARDS and turned round, because stationsFromLines always
+    // tapers toward its own bow: the pod's bow becomes the ski's stern, which
+    // is the end a seat actually tapers to. Its transom butts the hood.
+    const SZ0 = 0.45, SZ1 = -1.35, SC = (SZ0 + SZ1) * 0.5;
+    const saddleTopAt = function (t) {
+      const wz = SZ0 + (SZ1 - SZ0) * t;
+      return deckAt(wz) + 0.30 + 0.06 * Math.pow(t, 1.4);   // steps up for the pillion
+    };
+    const saddleZ = function (t) { return SZ0 + (SZ1 - SZ0) * t; };
+    const saddleW = function (t, k, cap) {
+      return Math.min(hbAt(saddleZ(t)) * k, cap) * (1 - Math.pow(t, 2.6) * 0.92);
+    };
+    pod({                                                      // the seat base skirt
+      len: Math.abs(SZ1 - SZ0) + 0.08, z: SC, y: 0, yaw: Math.PI,
+      top: function (t) { return saddleTopAt(t) - 0.20; },
+      bottom: function (t) { return deckAt(saddleZ(t)) - 0.06; },
+      plan: function (t) { return saddleW(t, 0.82, 0.255); },
+      nose: 0.04, camber: 0.03, tumble: 2, shoulder: 0.5, n: 11, rings: 5,
+    }, trim);
+    const saddle = pod({
+      len: Math.abs(SZ1 - SZ0), z: SC, y: 0, yaw: Math.PI, top: saddleTopAt,
+      bottom: function (t) { return deckAt(saddleZ(t)) + 0.02; },
+      plan: function (t) { return saddleW(t, 0.72, 0.235); },
+      nose: 0.035, camber: 0.09, tumble: 5, shoulder: 0.55, n: 13,
+    }, seat);
+    if (saddle) markFixture(b, saddle.mesh, "saddle");
+
+    // ---- THE FOOTWELL TROUGHS -------------------------------------------
+    // The floor is the deck, the inboard wall is the saddle skirt, and this
+    // rounded lip along the sheer is the outboard one. Three surfaces, no box.
+    if (HL) {
+      [1, -1].forEach(function (side) {
+        const run = [];
+        for (let i = 0; i <= 7; i++) {
+          const z = -1.32 + i * 0.27;
+          run.push([side * (hbAt(z) - 0.020), deckAt(z) - 0.010, z]);
+        }
+        const lip = HL.strip(run, 0.026, hull, { segments: 26, radial: 5 });
+        if (lip) { lip.castShadow = false; b.add(lip); }
+      });
+    }
+
+    // ---- SPONSONS: rounded blades that blend into the chine --------------
+    [1, -1].forEach(function (side) {
+      const sp = pod({
+        len: 0.84, wide: 0.15, deep: 0.10, n: 7, rings: 5, nose: 0.02,
+        x: side * (hbAt(-0.95) + 0.010), y: 0.02, z: -0.95, roll: side * 0.34,
+        top: function () { return 0.075; }, camber: 0.02,
+        mid0: 0.10, mid1: 0.55, tail: 0.70, entry: 1.3, tumble: 0, shoulder: 0.5,
+      }, acc);
+      if (sp) markFixture(b, sp.mesh, "sponson");
+    });
+
+    // ---- TWO-TONE TOPSIDES ----------------------------------------------
+    // A broad coloured band under the sheer with a thin accent over it: the
+    // shape only reads if the light has something to break across.
+    if (HL) {
+      [1, -1].forEach(function (side) {
+        const band = [];
+        for (let i = 0; i <= 8; i++) {
+          const z = -1.55 + i * 0.40;
+          band.push([side * (hbAt(z) + 0.010), sheerAt(z) - 0.105 - i * 0.012, z]);
+        }
+        const g1 = HL.strip(band, 0.052, trim, { segments: 28, radial: 5 });
+        if (g1) { g1.castShadow = false; b.add(g1); }
+      });
+    }
+
+    // ---- HANDLEBAR POD, BARS, MIRRORS ------------------------------------
+    // The pod is a small dome growing out of the top of the hood; the mirrors
+    // are discs on short stalks. Nothing here is a slab.
+    const podY = hoodTopAt(0.06) - 0.10;
+    const dash = pod({
+      len: 0.38, wide: 0.32, deep: 0.10, n: 7, rings: 6, nose: 0.03,
+      x: 0, y: podY, z: HZ0 + 0.06, top: function () { return 0.16; }, camber: 0.05,
+      mid0: 0.10, mid1: 0.55, tail: 0.80, entry: 1.4, tumble: 6, shoulder: 0.55,
+    }, dark);
+    if (dash) markFixture(b, dash.mesh, "dash");
+    addScreen(b, 0, podY + 0.12, HZ0 + 0.205, 0.15, 0.065, 0, screen);
+    const barY = podY + 0.20, barZ = HZ0 - 0.08;
+    const bar = addCyl(b, 0.018, 0.56, 0, barY, barZ, dark, 10);
+    bar.rotation.z = Math.PI / 2;
+    markFixture(b, bar, "handlebar");
+    [1, -1].forEach(function (side) {
+      addCyl(b, 0.024, 0.13, side * 0.22, barY, barZ, seat, 10).rotation.z = Math.PI / 2;
+      addTubeBetween(b, [side * 0.185, barY + 0.01, barZ], [side * 0.225, barY + 0.11, barZ - 0.03], 0.010, grey, 6);
+      const mir = addCyl(b, 0.048, 0.014, side * 0.228, barY + 0.135, barZ - 0.035, glass, 12);
+      mir.rotation.x = Math.PI / 2 - 0.35;
+      mir.rotation.z = side * 0.5;
+      markFixture(b, mir, "mirror");
+    });
+
+    // ---- THE REAR PLATFORM ----------------------------------------------
+    // A rounded pad, not a plank: you climb onto it out of the water.
+    pod({
+      len: 0.40, wide: 0.46, deep: 0.06, n: 7, rings: 5, nose: 0.05,
+      x: 0, y: deckAt(-1.50) - 0.020, z: -1.50,
+      top: function () { return 0.030; }, camber: 0.012,
+      mid0: 0.05, mid1: 0.70, tail: 0.96, entry: 1.2, tumble: 0, shoulder: 0.5,
+    }, seat);
+    markFixture(b, addCyl(b, 0.016, 0.26, 0, deckAt(-1.34) + 0.055, -1.34, chrome, 8), "boarding-handle").rotation.z = Math.PI / 2;
+    // JET PUMP. A ski has no propeller — that is the point of it — so this
+    // hull deliberately never calls propGroup().
+    const nozzle = addCyl(b, 0.085, 0.24, 0, -0.05, -L * 0.5 - 0.06, grey, 14);
+    nozzle.rotation.x = Math.PI / 2;
+    addCyl(b, 0.062, 0.12, 0, -0.05, -L * 0.5 - 0.20, dark, 14).rotation.x = Math.PI / 2;
+    addCyl(b, 0.075, 0.06, 0, -0.05, -L * 0.5 - 0.27, dark, 14).rotation.x = Math.PI / 2;   // steering vane
+    // front hatch and tow eye
+    addCyl(b, 0.095, 0.016, 0, hoodTopAt(0.52) - 0.008, HZ0 + (HZ1 - HZ0) * 0.52, dark, 16);
+    addBox(b, 0.05, 0.05, 0.07, 0, 0.16, L * 0.5 - 0.04, chrome);
+    navLights(b, HW, FB + 0.14, L * 0.36, -L * 0.44, null);
+    b.userData.marineFixtureCount += 3;
+    return finish(b, { width: W, length: L, height: 1.05, wheelbase: L * 0.6 });
+  }
+
+  // ---- THE STERNDRIVE ------------------------------------------------------
+  // An outboard carries its engine on the transom; a STERNDRIVE leaves the
+  // engine inboard under the sun pad and puts only the leg outside. So it has
+  // no cowl at all — a transom shield, a short upper housing, the gearcase
+  // torpedo with its anti-ventilation plate and skeg, and the trim rams that
+  // tilt it. Drawing an outboard here (which is what the runabout did) is the
+  // difference between a 6 m bowrider and a fishing skiff.
+  // `y` is the anti-ventilation plate, same contract as outboard().
+  function sterndrive(root, x, y, z, hp) {
+    const s = clampN(Math.pow(Math.max(40, hp || 260) / 260, 1 / 3), 0.7, 1.6);
+    const leg = M.grey(), plate = M.chrome(), dark = M.dark();
+    const g = new THREE.Group();
+    g.position.set(x || 0, y || 0, z || 0);
+    // transom shield: the plate the whole drive hangs off, bolted to the hull
+    addBox(g, 0.46 * s, 0.60 * s, 0.10, 0, 0.30 * s, 0.12 * s, plate);
+    addBox(g, 0.30 * s, 0.46 * s, 0.26 * s, 0, 0.30 * s, -0.02 * s, leg);   // upper housing
+    addBox(g, 0.17 * s, 0.34 * s, 0.24 * s, 0, 0.05 * s, -0.02 * s, leg);   // vertical leg
+    addBox(g, 0.44 * s, 0.024 * s, 0.40 * s, 0, 0, -0.06 * s, plate);       // anti-vent plate
+    const bullet = addCyl(g, 0.085 * s, 0.56 * s, 0, -0.13 * s, -0.06 * s, leg, 10);
+    bullet.rotation.x = Math.PI / 2;
+    addBox(g, 0.05 * s, 0.22 * s, 0.22 * s, 0, -0.27 * s, 0.02 * s, leg);   // skeg
+    // trim rams: two short chrome cylinders from the shield to the housing
+    [1, -1].forEach(function (side) {
+      const ram = addCyl(g, 0.028 * s, 0.30 * s, side * 0.20 * s, 0.34 * s, 0.05 * s, plate, 8);
+      ram.rotation.x = Math.PI / 2 - 0.5;
+    });
+    addBox(g, 0.30 * s, 0.10 * s, 0.06, 0, 0.62 * s, 0.10 * s, dark);       // bellows boot
+    root.add(g);
+    return {
+      group: g, scale: s,
+      propAt: [x || 0, (y || 0) - 0.13 * s, (z || 0) - 0.40 * s],
+      top: (y || 0) + 0.68 * s,
+    };
+  }
+
+  // ---- THE RIB COLLAR ------------------------------------------------------
+  // A rigid inflatable's tube is ONE object: it starts at the port transom,
+  // runs the length of the gunwale, wraps round the stem and comes back to
+  // starboard. The old build drew it as four straight cylinders, which is why
+  // it crossed the topsides wherever the sheer rose — a straight cylinder
+  // cannot follow a curve. Swept along the sheer the loft reports, it cannot
+  // do anything else. Returns the collar's own half-beam function so the
+  // fittings (grab lines, cleats, nav lights) land ON the tube.
+  function ribCollar(root, out, r, material, o) {
+    const HL = LOFT();
+    if (!HL || !out) return null;
+    o = o || {};
+    const lift = num2(o.lift, 0.06), inset = num2(o.inset, r - 0.02);
+    const z0 = out.z0 + num2(o.aftTrim, 0.10);
+    const xAt = function (z) { return Math.max(0, out.halfBeamAt(z) - inset); };
+    const yAt = function (z) { return out.sheerYAt(z) + lift; };
+    // where the two runs meet on the centreline: the bow cone is not a
+    // separate part, it is the same tube with its half-beam gone to zero.
+    let zNose = out.z1;
+    for (let z = out.z1; z > z0; z -= 0.01) { if (xAt(z) > 0.012) { zNose = z; break; } }
+    const port = [];
+    const steps = 14;
+    for (let i = 0; i <= steps; i++) {
+      const z = z0 + (zNose - z0) * (i / steps);
+      port.push([xAt(z), yAt(z), z]);
+    }
+    const apexZ = Math.min(out.z1 - 0.02, zNose + r * 0.75);
+    const path = port.concat([[0, yAt(apexZ), apexZ]],
+      port.slice().reverse().map(function (p) { return [-p[0], p[1], p[2]]; }));
+    const tube = HL.strip(path, r, material, { segments: 120, radial: 9 });
+    if (tube) { tube.castShadow = false; tube.name = "rib_collar"; root.add(tube); }
+    // The aft ends are CONES, which is what closes a real tube, and they are
+    // the reason a RIB's stern looks like a RIB's stern.
+    [1, -1].forEach(function (side) {
+      const cone = new THREE.Mesh(cylGeo(0.05, r, 0.34, 10), material);
+      cone.position.set(side * xAt(z0), yAt(z0), z0 - 0.17);
+      cone.rotation.x = -Math.PI / 2;
+      cone.castShadow = false;
+      root.add(cone);
+    });
+    return { tube: tube, xAt: xAt, yAt: yAt, r: r, zNose: zNose, z0: z0 };
+  }
+  function num2(v, d) { return (typeof v === "number" && isFinite(v)) ? v : d; }
+
+  // ---- DINGHY — Calanque Tender 15 (4.5 m RIB) -----------------------------
+  // Rigid-hull inflatable. The pan is a lofted deep-V with a hard chine (20°
+  // of deadrise at the transom warping to a fine entry) and the collar is one
+  // swept tube along the sheer — because on a RIB the collar IS the
+  // silhouette. It was three stepped prisms and four straight cylinders.
+  //
+  // THE BEAM: on a RIB the rigid pan carries the full beam at the chine and
+  // the tubes are bonded inboard with their outer faces flush, which is why
+  // the overall beam and the hull beam are the same 2.0 m while the INSIDE
+  // beam is only 1.06 m. Drawing a narrow pan with the tubes hung outboard of
+  // it is the mistake that makes a RIB read as a rowboat wearing a life ring.
   function buildDinghy() {
     const b = new THREE.Group();
-    const len = 4.5, w = 2.0, hw = w * 0.5;
-    const hull = M.hull(), tube = M.tube(), dark = M.dark(), grey = M.grey();
+    const L = 4.5, W = 2.0, hw = W * 0.5, FB = 0.32, TR = 0.24;
+    const hull = M.ribHull(), tube = M.tube(), dark = M.dark(), grey = M.grey();
     const chrome = M.chrome(), pad = M.pad(), teak = M.teakDk(), screen = M.screen();
+    const glass = M.glass();
     declareRoom(b, "dinghy-helm", "Open helm");
-    // GRP pan: waterline at y=0, keel 0.34 below, sheer 0.30 above.
-    addPrism(b, w * 0.86, [[-len * 0.5, -0.30], [-len * 0.5, 0.30], [len * 0.18, 0.30], [len * 0.24, -0.30]], 0, hull);
-    addPrism(b, w * 0.62, [[len * 0.16, -0.26], [len * 0.16, 0.32], [len * 0.42, 0.36], [len * 0.44, -0.14]], 0, hull);
-    addPrism(b, w * 0.26, [[len * 0.40, -0.12], [len * 0.40, 0.36], [len * 0.50, 0.38], [len * 0.49, 0.06]], 0, hull);
-    // deep-V keel: a rotated slab under the centreline
-    const keel = addBox(b, 0.30, 0.18, len * 0.74, 0, -0.30, len * 0.04, hull);
-    keel.rotation.z = Math.PI / 4;
-    // TUBE COLLAR: two long cylinders along the sheer + a transom wrap. This is
-    // the whole silhouette of a RIB — nothing else reads as "inflatable".
-    [1, -1].forEach(function (side) {
-      const t = addCyl(b, 0.26, len * 0.86, side * (hw - 0.20), 0.24, len * 0.02, tube, 8);
-      t.rotation.x = Math.PI / 2;
-      t.rotation.z = side * 0.05;
-      // tapered nose cone forward
-      const c = new THREE.Mesh(cylGeo(0.10, 0.26, len * 0.20, 8), tube);
-      c.position.set(side * (hw - 0.30), 0.26, len * 0.42);
-      c.rotation.x = Math.PI / 2;
-      c.rotation.y = side * 0.20;
-      c.castShadow = false;
-      b.add(c);
-      // rubbing strake along the tube
-      addBox(b, 0.05, 0.05, len * 0.80, side * (hw - 0.02), 0.24, 0, grey);
+    const HL = LOFT();
+    const lines = {
+      loa: L, beam: W, draft: 0.34, freeboard: FB,
+      sheerBow: 0.26, sheerStern: 0.03,
+      deadrise: 20, deadriseBow: 46,          // deep-V aft, warping to a fine entry
+      flareBow: 10, tumblehome: 7,            // the gunwale tucks in aft, under the tube
+      transomRake: 8,
+      midBody0: 0.16, midBody1: 0.68, transomBeamFrac: 0.94,
+      entryPow: 1.5, rockerAft: 1.0, tKeel: 0.34, n: 15,
+    };
+    let out = null;
+    if (HL) {
+      const st = HL.stationsFromLines(lines);
+      loftHull(b, st, hull, { rings: 9, chine: "auto", transom: "flat" });
+      out = HL.outline(st);
+    }
+    const sheerAt = (z) => (out ? out.sheerYAt(z) : FB);
+    const hbAt = (z) => (out ? out.halfBeamAt(z) : hw);
+    const keelAt = (z) => (out ? out.keelYAt(z) : -0.34);
+    const collar = ribCollar(b, out, TR, tube, { lift: 0.06, inset: TR - 0.02, aftTrim: 0.10 });
+    const tubeX = collar ? collar.xAt : hbAt;
+    const tubeY = collar ? collar.yAt : sheerAt;
+
+    // THE SOLE. Self-bailing means the floor is ABOVE the waterline and the
+    // water that comes over the tube runs aft and out through the transom
+    // scuppers. Draw the floor where it drains from, not at y = 0.
+    // Its width is the INSIDE beam (the tubes' inner faces), not the hull's.
+    const SOLE = 0.10, INSIDE = (hbAt(0) - TR * 2 + 0.02) * 2;
+    addBox(b, INSIDE, 0.05, 2.40, 0, SOLE, -0.35, teak);
+    for (let i = 0; i < 5; i++) {                                   // deck slats
+      addBox(b, INSIDE - 0.06, 0.012, 0.05, 0, SOLE + 0.032, -1.35 + i * 0.52, dark);
+    }
+    [1, -1].forEach(function (side) {                               // transom scuppers
+      const sc = addCyl(b, 0.035, 0.05, side * 0.30, SOLE - 0.01, -L * 0.5 + 0.10, dark, 8);
+      sc.rotation.x = Math.PI / 2;
     });
-    const tr = addCyl(b, 0.26, w * 0.80, 0, 0.24, -len * 0.5 + 0.02, tube, 8);
-    tr.rotation.z = Math.PI / 2;
-    // deck sole (self-bailing, slatted) + the small console + jockey seat
-    addBox(b, w * 0.70, 0.06, len * 0.70, 0, 0.06, -len * 0.02, teak);
-    addPrism(b, 0.52, [[-0.24, 0], [-0.20, 0.62], [0.16, 0.66], [0.22, 0]], 0.09, dark);   // console
-    const scr = addBox(b, 0.46, 0.26, 0.03, 0, 0.86, 0.20, M.glass());
+    // stringers under the sole, so it is a floor on frames rather than a slab
+    [1, -1].forEach(function (side) {
+      addBox(b, 0.05, 0.10, 2.30, side * 0.42, SOLE - 0.07, -0.35, hull);
+    });
+
+    // THE CONSOLE + JOCKEY SEAT. A 4.5 m RIB is driven standing at a small
+    // moulded pod with a straddle seat right behind it.
+    const cz = 0.34;
+    addPrism(b, 0.52, [[cz - 0.26, 0], [cz - 0.22, 0.68], [cz + 0.18, 0.72], [cz + 0.24, 0]], SOLE, dark);
+    const scr = addBox(b, 0.46, 0.26, 0.03, 0, SOLE + 0.90, cz + 0.20, glass);
     scr.rotation.x = -0.35;
-    addBox(b, 0.20, 0.20, 0.03, 0.13, 0.70, 0.02, dark);                                    // wheel
-    addBox(b, 0.44, 0.14, 0.52, 0, 0.44, -0.62, pad);                                       // jockey seat
-    addBox(b, 0.44, 0.34, 0.10, 0, 0.68, -0.90, pad);
-    addScreen(b, -0.13, 0.70, 0.015, 0.17, 0.12, 0, screen);                                  // chart / sounder
-    addFixtureBox(b, "throttle", 0.06, 0.24, 0.06, -0.30, 0.62, -0.05, chrome);
     markFixture(b, scr, "windscreen");
-    b.userData.marineFixtureCount += 2;                                                        // wheel + jockey seat
-    // grab rail on the console + bow towing eye + cleats
-    addBox(b, 0.50, 0.04, 0.04, 0, 0.74, 0.28, chrome);
-    addBox(b, 0.06, 0.06, 0.12, 0, 0.16, len * 0.49, chrome);
-    [1, -1].forEach(function (side) {
-      addBox(b, 0.13, 0.04, 0.05, side * (hw - 0.30), 0.30, -len * 0.44, chrome);
+    markFixture(b, addBox(b, 0.24, 0.24, 0.035, -0.12, SOLE + 0.70, cz + 0.10, dark), "wheel");
+    addScreen(b, 0.14, SOLE + 0.70, cz + 0.115, 0.17, 0.12, 0, screen);
+    addFixtureBox(b, "throttle", 0.06, 0.24, 0.06, 0.30, SOLE + 0.62, cz - 0.05, chrome);
+    addBox(b, 0.50, 0.04, 0.04, 0, SOLE + 0.78, cz + 0.28, chrome);          // console grab rail
+    const jockey = addBox(b, 0.44, 0.16, 0.58, 0, SOLE + 0.42, -0.42, pad);   // straddle seat
+    markFixture(b, jockey, "jockey-seat");
+    addBox(b, 0.44, 0.34, 0.10, 0, SOLE + 0.66, -0.74, pad);                  // backrest
+    addBox(b, 0.20, 0.36, 0.34, 0, SOLE + 0.20, -0.42, hull);                 // seat pedestal
+    addFixtureBox(b, "fuel-locker", 0.46, 0.24, 0.40, 0, SOLE + 0.14, -1.32, hull);
+
+    // GRAB LINES along the tubes, run through real pad-eyes — a RIB's rope is
+    // the thing you actually hold, and it is laid ON the tube the loft drew.
+    if (HL && collar) {
+      [1, -1].forEach(function (side) {
+        const run = [], eyes = [];
+        for (let i = 0; i <= 7; i++) {
+          const z = -L * 0.44 + (L * 0.80) * (i / 7);
+          const x = side * (tubeX(z) + TR * 0.80), y = tubeY(z) + TR * 0.42;
+          run.push([x, y, z]);
+          if (i % 2 === 1) eyes.push([x, y, z]);
+        }
+        const rope = HL.strip(run, 0.011, dark, { segments: 44, radial: 5 });
+        if (rope) { rope.castShadow = false; b.add(rope); }
+        for (const e of eyes) addBox(b, 0.05, 0.05, 0.05, e[0] * 0.94, e[1], e[2], grey);
+      });
+    }
+    // TOWING EYE on the stem, cleats ON TOP OF THE TUBE (which is the only
+    // thing at gunwale height on a RIB — a cleat at the hull's own sheer would
+    // be buried inside the collar).
+    markFixture(b, addBox(b, 0.07, 0.07, 0.13, 0, keelAt(2.07) + 0.24, 2.18, chrome), "tow-eye");
+    [-1.90, 1.20].forEach(function (z) {
+      [1, -1].forEach(function (side) {
+        markFixture(b, addBox(b, 0.15, 0.05, 0.06, side * tubeX(z), tubeY(z) + TR + 0.02, z, chrome), "cleat");
+      });
     });
-    // OUTBOARD on the transom: cowl, leg, anti-vent plate, screw.
-    addBox(b, 0.34, 0.30, 0.38, 0, 0.44, -len * 0.5 - 0.16, M.stripe());
-    addBox(b, 0.28, 0.09, 0.32, 0, 0.26, -len * 0.5 - 0.16, dark);
-    addBox(b, 0.12, 0.46, 0.17, 0, -0.02, -len * 0.5 - 0.16, dark);
-    addBox(b, 0.26, 0.03, 0.26, 0, -0.14, -len * 0.5 - 0.16, dark);
-    b.add(propGroup(0.7, [[0, -0.22, -len * 0.5 - 0.28]]));
-    navLights(b, hw, 0.34, len * 0.36, -len * 0.46, null);
-    return finish(b, { width: w, length: len, height: 1.05, wheelbase: len * 0.6 });
+
+    // THE OUTBOARD — the fleet's shared part. `y` is the anti-ventilation
+    // plate and on a real boat that plate is level with the bottom AT THE
+    // TRANSOM, so it is read off the keel line rather than guessed.
+    const props = [];
+    const ob = outboard(b, 0, keelAt(-L * 0.5) + 0.03, -L * 0.5 - 0.16, 60);
+    props.push(ob.propAt);
+    if (props.length) b.add(propGroup(0.7, props));
+    // The lamps sit on the TUBE's outer shoulder near the bow, because that is
+    // the widest thing at eye height on a boat with a collar.
+    const nz = 1.30;
+    navLights(b, (tubeX(nz) + TR * 0.72) / 0.97, tubeY(nz) + TR * 0.72, nz, -L * 0.46, null);
+    return finish(b, { width: W, length: L, height: 1.05, wheelbase: L * 0.6 });
+  }
+
+  // ---- BOAT — Bellamar Speedboat (6.2 m bowrider runabout) ------------------
+  // THIS GEOMETRY USED TO LIVE IN city/playercars.js makeBoat(): five
+  // width-stepped prisms with a rotated box for a "deep-V keel" and flat glass
+  // panels rotated until they looked close. It was the last hull in the fleet
+  // outside the registry and the only one whose art nobody could audit,
+  // because build() for key "boat" bounced back into playercars. Now it is a
+  // lofted deep-V with a hard chine and playercars.js's makeBoat() is a
+  // four-line delegate to this.
+  function buildSpeedboat() {
+    const b = new THREE.Group();
+    const L = 6.2, W = 2.1, hw = W * 0.5, FB = 0.62;
+    const hull = M.sbHull(), dark = M.dark(), grey = M.grey(), chrome = M.chrome();
+    const pad = M.pad(), teak = M.teakDk(), glass = M.glass(), screen = M.screen();
+    const stripe = M.stripe();
+    declareRoom(b, "speedboat-cockpit", "Open runabout cockpit");
+    const HL = LOFT();
+    const CK = { z0: -2.30, z1: 1.16, halfW: 0.74 };
+    const lines = {
+      loa: L, beam: W, draft: 0.40, freeboard: FB,
+      sheerBow: 0.30, sheerStern: 0.02,
+      deadrise: 18, deadriseBow: 44,          // the warped deep-V of a runabout
+      flareBow: 16, tumblehome: 0,            // FLARE forward: it throws spray down
+      transomRake: 13,                        // a raked transom and a raked stem
+      midBody0: 0.17, midBody1: 0.64, transomBeamFrac: 0.93,
+      entryPow: 1.55, rockerAft: 1.0, tKeel: 0.32, n: 17,
+    };
+    let out = null, ST = null;
+    if (HL) {
+      ST = HL.stationsFromLines(lines);
+      loftHull(b, ST, hull, {
+        rings: 9, chine: "auto", transom: "flat",
+        deck: true, deckCamber: 0.05, deckCols: 9, cockpit: CK,
+      });
+      out = HL.outline(ST);
+    }
+    const sheerAt = (z) => (out ? out.sheerYAt(z) : FB);
+    const hbAt = (z) => (out ? out.halfBeamAt(z) : hw);
+    const keelAt = (z) => (out ? out.keelYAt(z) : -0.40);
+
+    // SPRAY RAILS on the bottom panel and the gelcoat stripe on the topsides.
+    // EVERY ONE OF THESE IS READ OFF THE SKIN (skinRun -> hullSectionX), and
+    // the first render of this hull is why: laid at a FRACTION OF THE MAX
+    // HALF-BEAM they floated in mid-air, because on a deep-V the widest point
+    // of the section is the chine, more than half way up — so a rail "at 30%
+    // of the depth" was drawn at nearly twice the width the hull has down
+    // there. It read as two black whiskers sticking out of the bow.
+    if (HL && ST) {
+      [1, -1].forEach(function (side) {
+        [0.26, 0.44].forEach(function (up, k) {
+          const yOf = (z) => keelAt(z) + (sheerAt(z) - keelAt(z)) * up;
+          const rail = HL.strip(skinRun(ST, side, -L * 0.44, L * 0.44, yOf, 0.012, 0.34),
+            0.026 - k * 0.006, hull, { segments: 46, radial: 5 });
+          if (rail) { rail.castShadow = false; b.add(rail); }
+        });
+        const line = HL.strip(skinRun(ST, side, -L * 0.42, L * 0.44, (z) => sheerAt(z) - 0.13, 0.012, 0.34),
+          0.032, stripe, { segments: 46, radial: 4 });
+        if (line) { line.castShadow = false; b.add(line); }
+        // a chrome rubbing strake ON the chine — chineRun reads the corner the
+        // stations themselves name, so it cannot wander off it.
+        const rub = HL.strip(chineRun(ST, side, 0.014, 0.0), 0.020, chrome, { segments: 44, radial: 5 });
+        if (rub) { rub.castShadow = false; b.add(rub); }
+      });
+    }
+
+    // COCKPIT SOLE, above the waterline, with a bow pad on the foredeck and a
+    // sun pad over the engine box aft — a bowrider's whole layout.
+    const SOLE = 0.24;
+    // The moulded DECK the loft already drew is the bow deck and the aft engine
+    // hatch; everything below just fills the well the cockpit hole opened.
+    const deckY = (z) => sheerAt(z) + 0.05;
+    addBox(b, CK.halfW * 2 - 0.06, 0.06, CK.z1 - CK.z0 - 0.10, 0, SOLE, (CK.z0 + CK.z1) * 0.5, teak);
+    addBox(b, CK.halfW * 2 - 0.04, deckY(CK.z1) - SOLE, 0.12, 0, (deckY(CK.z1) + SOLE) * 0.5, CK.z1 - 0.05, hull);
+    addBox(b, W * 0.62, 0.16, 0.80, 0, deckY(-2.62) + 0.09, -2.62, pad);              // stern sun pad
+    addBox(b, W * 0.58, 0.32, 0.62, 0, SOLE + 0.24, -1.98, hull);                     // engine box
+    addBox(b, W * 0.58, 0.14, 0.42, 0, SOLE + 0.47, -1.86, pad);                      // stern bench
+    addBox(b, W * 0.58, 0.34, 0.12, 0, SOLE + 0.68, -2.12, pad);                      // its back
+    addBox(b, W * 0.44, 0.06, 0.86, 0, deckY(1.55) + 0.04, 1.55, pad);                // bow sun pad
+    // two buckets at the console, helm to starboard (-x; navLights puts port
+    // red at +x, and this fleet keeps that sign convention everywhere)
+    [-0.42, 0.42].forEach(function (x) {
+      addBox(b, 0.44, 0.14, 0.46, x, SOLE + 0.40, -0.18, pad);
+      addBox(b, 0.44, 0.36, 0.11, x, SOLE + 0.62, -0.41, pad);
+      addBox(b, 0.16, 0.32, 0.16, x, SOLE + 0.17, -0.18, grey);
+    });
+    // CONSOLE + a wraparound windscreen made of THREE REAL PANES: a centre
+    // pane over the dash and a wing each side raked and swept back to the
+    // gunwale, with a chrome header capping the centre.
+    addPrism(b, W * 0.62, [[0.24, 0], [0.28, 0.44], [0.72, 0.50], [0.80, 0]], SOLE, dark);
+    markFixture(b, addBox(b, 0.26, 0.26, 0.04, -0.34, SOLE + 0.60, 0.44, dark), "wheel");
+    addScreen(b, 0.22, SOLE + 0.58, 0.46, 0.30, 0.18, 0, screen);
+    addFixtureBox(b, "throttle", 0.06, 0.26, 0.06, 0.02, SOLE + 0.54, 0.28, chrome);
+    const wsY = SOLE + 0.62, wsZ = 0.78;
+    const mid = addBox(b, W * 0.56, 0.34, 0.03, 0, wsY + 0.14, wsZ, glass);
+    mid.rotation.x = -0.42;
+    markFixture(b, mid, "windscreen");
+    [1, -1].forEach(function (side) {
+      const wing = addBox(b, 0.36, 0.30, 0.03, side * (W * 0.30), wsY + 0.10, wsZ - 0.08, glass);
+      wing.rotation.x = -0.42;
+      wing.rotation.y = side * 0.55;
+    });
+    const cap = addBox(b, W * 0.58, 0.035, 0.035, 0, wsY + 0.30, wsZ - 0.065, chrome);
+    cap.rotation.x = -0.42;
+
+    // THE BOW RAIL, laid on the sheer the loft reports rather than at a
+    // guessed offset — the whole reason outline() exists.
+    if (HL) {
+      const rail = [];
+      for (let i = 0; i <= 6; i++) {
+        const z = 1.05 + (2.72 - 1.05) * (i / 6);
+        // clamped OFF the centreline: at the stem the half-beam is 1 cm and an
+        // unclamped inset walks the rail through the boat and out the far side.
+        rail.push([Math.max(0.05, hbAt(z) - 0.09), sheerAt(z) + 0.22, z]);
+      }
+      const nose = [[0, sheerAt(2.95) + 0.20, 2.98]];
+      const path = rail.concat(nose, rail.slice().reverse().map(function (p) { return [-p[0], p[1], p[2]]; }));
+      const r = HL.strip(path, 0.019, chrome, { segments: 60, radial: 6 });
+      if (r) { r.castShadow = false; b.add(r); }
+      for (const p of rail) {
+        [1, -1].forEach(function (side) {
+          addBox(b, 0.03, 0.22, 0.03, side * p[0], p[1] - 0.11, p[2], chrome);
+        });
+      }
+    }
+    // SWIM PLATFORM, integrated into the transom the way a sterndrive boat
+    // has it: a moulded step each side of the drive with a boarding handle.
+    [1, -1].forEach(function (side) {
+      addBox(b, 0.52, 0.07, 0.56, side * 0.56, 0.14, -L * 0.5 - 0.20, teak);
+      addBox(b, 0.52, 0.20, 0.06, side * 0.56, 0.25, -L * 0.5 - 0.46, hull);
+      markFixture(b, addBox(b, 0.05, 0.05, 0.22, side * 0.56, 0.40, -L * 0.5 - 0.10, chrome), "boarding-handle");
+      markFixture(b, addBox(b, 0.16, 0.05, 0.06, side * (hbAt(-L * 0.44) - 0.12), sheerAt(-L * 0.44) + 0.04, -L * 0.44, chrome), "cleat");
+      markFixture(b, addBox(b, 0.14, 0.05, 0.06, side * (hbAt(1.55) - 0.12), sheerAt(1.55) + 0.06, 1.55, chrome), "cleat");
+    });
+    // THE STERNDRIVE. The engine is inboard under that sun pad, so what hangs
+    // on the transom is a leg, not an outboard with a cowl on it.
+    const dr = sterndrive(b, 0, keelAt(-L * 0.5) + 0.02, -L * 0.5 - 0.06, 300);
+    b.add(propGroup(0.8, [dr.propAt]));
+    const nz = L * 0.30;
+    navLights(b, (hbAt(nz) + 0.01) / 0.97, sheerAt(nz) + 0.06, nz, -L * 0.46, null);
+    return finish(b, { width: W, length: L, height: 1.35, wheelbase: L * 0.6 });
+  }
+
+  // ---- CONSOLE — Baymaster 25 (7.5 m centre console) -----------------------
+  // The boat the sea is actually full of, and the fleet did not have one: a
+  // deep-V centre console with a T-top, twin outboards, rod holders down both
+  // gunwales, a bow casting deck and a livewell. It is also the hull the shark
+  // rules need in the middle of the ladder — big enough that a great white
+  // cannot swallow it and small enough that a megalodon can.
+  function buildConsole() {
+    const b = new THREE.Group();
+    const L = 7.5, W = 2.6, hw = W * 0.5, FB = 0.72;
+    const hull = M.ccHull(), dark = M.dark(), grey = M.grey(), chrome = M.chrome();
+    const pad = M.pad(), teak = M.teakDk(), glass = M.glass(), screen = M.screen();
+    const liner = M.liner();
+    declareRoom(b, "console-helm", "Centre console");
+    const HL = LOFT();
+    const CK = { z0: -3.35, z1: 1.55, halfW: 0.95 };
+    const lines = {
+      loa: L, beam: W, draft: 0.42, freeboard: FB,
+      sheerBow: 0.42, sheerStern: 0.02,
+      deadrise: 22, deadriseBow: 50,          // a real offshore V, warping hard forward
+      flareBow: 18, tumblehome: 0,
+      transomRake: 9,
+      midBody0: 0.16, midBody1: 0.66, transomBeamFrac: 0.92,
+      entryPow: 1.7, rockerAft: 1.0, tKeel: 0.34, n: 17,
+    };
+    let out = null, ST = null;
+    if (HL) {
+      ST = HL.stationsFromLines(lines);
+      loftHull(b, ST, hull, {
+        rings: 9, chine: "auto", transom: "flat",
+        deck: true, deckCamber: 0.06, deckCols: 9, cockpit: CK,
+      });
+      out = HL.outline(ST);
+    }
+    const sheerAt = (z) => (out ? out.sheerYAt(z) : FB);
+    const hbAt = (z) => (out ? out.halfBeamAt(z) : hw);
+    const keelAt = (z) => (out ? out.keelYAt(z) : -0.42);
+
+    // spray rails on the bottom panel, a strake on the chine and the black
+    // rubbing band under the gunwale — all three read off the skin.
+    if (HL && ST) {
+      [1, -1].forEach(function (side) {
+        [0.24, 0.42].forEach(function (up, k) {
+          const yOf = (z) => keelAt(z) + (sheerAt(z) - keelAt(z)) * up;
+          const rail = HL.strip(skinRun(ST, side, -L * 0.45, L * 0.45, yOf, 0.014, 0.36),
+            0.030 - k * 0.007, hull, { segments: 48, radial: 5 });
+          if (rail) { rail.castShadow = false; b.add(rail); }
+        });
+        const ch = HL.strip(chineRun(ST, side, 0.016, 0.0), 0.024, hull, { segments: 46, radial: 5 });
+        if (ch) { ch.castShadow = false; b.add(ch); }
+        const r = HL.strip(skinRun(ST, side, -L * 0.46, L * 0.45, (z) => sheerAt(z) - 0.05, 0.016, 0.36),
+          0.038, dark, { segments: 48, radial: 5 });
+        if (r) { r.castShadow = false; b.add(r); }
+      });
+    }
+    // COCKPIT SOLE + BOW CASTING DECK. A centre console is a walk-around: a
+    // low self-bailing sole aft and a raised casting platform forward with a
+    // step up to it and stowage underneath.
+    // THE CASTING DECK IS THE LOFT'S OWN DECK LID. Forward of the cockpit hole
+    // the moulded deck already runs the full beam at sheer height, so a
+    // "raised platform" box laid on top of it would be a second floor 6 cm
+    // above the first — and it would overhang the sheer wherever the hull
+    // narrows faster than the box does. What is missing is the bulkhead that
+    // makes it a step, and the step itself.
+    const SOLE = 0.26, deckY = (z) => sheerAt(z) + 0.06;
+    const CAST = deckY(1.90);
+    addBox(b, CK.halfW * 2 - 0.06, 0.06, CK.z1 - CK.z0 - 0.10, 0, SOLE, (CK.z0 + CK.z1) * 0.5, teak);
+    addBox(b, CK.halfW * 2 - 0.04, deckY(CK.z1) - SOLE, 0.12, 0, (deckY(CK.z1) + SOLE) * 0.5, CK.z1 - 0.05, liner);
+    addBox(b, 0.96, 0.06, 0.36, 0, (deckY(CK.z1) + SOLE) * 0.5 + 0.04, CK.z1 - 0.34, teak);   // the step up
+    addBox(b, hbAt(1.90) * 1.70, 0.03, 1.10, 0, CAST + 0.045, 1.90, teak);                    // non-skid
+    addFixtureBox(b, "anchor-locker", 0.44, 0.05, 0.42, 0, deckY(2.55) + 0.035, 2.55, liner);
+    // THE CONSOLE + LEANING POST. A centre console is exactly that: a box on
+    // the centreline you stand behind, and a padded post you lean against.
+    const cz = -0.15;
+    addPrism(b, 0.78, [[cz - 0.42, 0], [cz - 0.38, 1.02], [cz + 0.34, 1.08], [cz + 0.42, 0]], SOLE, liner);
+    addBox(b, 0.72, 0.10, 0.62, 0, SOLE + 1.10, cz, dark);                        // dash top
+    markFixture(b, addBox(b, 0.30, 0.30, 0.05, -0.20, SOLE + 0.92, cz + 0.36, dark), "wheel");
+    addScreen(b, 0.18, SOLE + 0.94, cz + 0.375, 0.34, 0.22, 0, screen);
+    addFixtureBox(b, "throttle", 0.07, 0.30, 0.07, 0.30, SOLE + 0.86, cz + 0.10, chrome);
+    const wsc = addBox(b, 0.66, 0.28, 0.03, 0, SOLE + 1.24, cz + 0.24, glass);
+    wsc.rotation.x = -0.38;
+    markFixture(b, wsc, "windscreen");
+    addFixtureBox(b, "console-door", 0.40, 0.66, 0.04, 0, SOLE + 0.42, cz - 0.44, dark);
+    // leaning post: a padded backrest on a frame with a cooler slid under it
+    addBox(b, 0.82, 0.14, 0.34, 0, SOLE + 0.78, cz - 0.86, pad);
+    addBox(b, 0.82, 0.42, 0.12, 0, SOLE + 1.02, cz - 1.02, pad);
+    [1, -1].forEach(function (side) {
+      addBox(b, 0.07, 0.76, 0.07, side * 0.34, SOLE + 0.38, cz - 0.86, grey);
+    });
+    addFixtureBox(b, "cooler", 0.68, 0.42, 0.50, 0, SOLE + 0.21, cz - 0.86, M.pwcHull());
+    addFixtureBox(b, "livewell", 0.86, 0.52, 0.46, 0, SOLE + 0.26, -2.62, liner);
+    addFixtureBox(b, "transom-door", 0.46, 0.56, 0.05, 0.62, SOLE + 0.28, -3.30, liner);
+
+    // THE T-TOP: four raked tubes off the sole, a hardtop with an overhang,
+    // and a rocket launcher of rod holders across its aft edge.
+    const TOP = SOLE + 2.06;
+    if (HL) {
+      [[0.40, cz + 0.46], [-0.40, cz + 0.46], [0.40, cz - 0.72], [-0.40, cz - 0.72]].forEach(function (p) {
+        const legPath = [
+          [p[0], SOLE + 0.02, p[1]],
+          [p[0] * 1.06, SOLE + 1.00, p[1] + (p[1] > cz ? 0.06 : -0.06)],
+          [p[0] * 1.02, TOP - 0.03, p[1] + (p[1] > cz ? 0.10 : -0.10)],
+        ];
+        const leg = HL.strip(legPath, 0.032, grey, { segments: 14, radial: 7 });
+        if (leg) { leg.castShadow = false; b.add(leg); }
+      });
+    }
+    const hard = addBox(b, 1.44, 0.09, 1.90, 0, TOP, cz - 0.10, liner);
+    markFixture(b, hard, "hardtop");
+    addBox(b, 1.30, 0.05, 1.76, 0, TOP - 0.075, cz - 0.10, dark);                 // its underside
+    [-0.46, -0.16, 0.16, 0.46].forEach(function (x) {                             // rocket launcher
+      const rh = addCyl(b, 0.026, 0.34, x, TOP + 0.15, cz - 0.98, chrome, 8);
+      rh.rotation.x = 0.42;
+      markFixture(b, rh, "rod-holder");
+    });
+    [1, -1].forEach(function (side) {                                             // spreader lights
+      addBox(b, 0.10, 0.05, 0.08, side * 0.62, TOP - 0.04, cz + 0.82, M.navWhite());
+    });
+    // ROD HOLDERS bored through the gunwale capping, angled outboard — solved
+    // from the capping down to where the tube actually lands inside the boat.
+    [1, -1].forEach(function (side) {
+      [-2.40, -1.85, -1.30, 0.40].forEach(function (z) {
+        addTubeBetween(b,
+          [side * (hbAt(z) - 0.09), sheerAt(z) + 0.05, z],
+          [side * (hbAt(z) - 0.20), sheerAt(z) - 0.34, z - 0.10], 0.028, dark, 8);
+      });
+      // grab rail on the console side and a cleat at each quarter
+      markFixture(b, addBox(b, 0.16, 0.05, 0.06, side * (hbAt(-L * 0.44) - 0.12), sheerAt(-L * 0.44) + 0.04, -L * 0.44, chrome), "cleat");
+      markFixture(b, addBox(b, 0.15, 0.05, 0.06, side * (hbAt(0.6) - 0.10), sheerAt(0.6) + 0.04, 0.6, chrome), "cleat");
+    });
+    // BOW RAIL on the sheer, meeting at the stem.
+    if (HL) {
+      const rail = [];
+      for (let i = 0; i <= 6; i++) {
+        const z = 1.35 + (3.30 - 1.35) * (i / 6);
+        // clamped OFF the centreline for the same reason the speedboat's is.
+        rail.push([Math.max(0.06, hbAt(z) - 0.10), sheerAt(z) + 0.28, z]);
+      }
+      const path = rail.concat([[0, sheerAt(3.55) + 0.24, 3.58]],
+        rail.slice().reverse().map(function (p) { return [-p[0], p[1], p[2]]; }));
+      const r = HL.strip(path, 0.022, chrome, { segments: 64, radial: 6 });
+      if (r) { r.castShadow = false; b.add(r); }
+      for (const p of rail) {
+        [1, -1].forEach(function (side) {
+          addBox(b, 0.035, 0.28, 0.035, side * p[0], p[1] - 0.14, p[2], chrome);
+        });
+      }
+      markFixture(b, addBox(b, 0.20, 0.10, 0.26, 0, deckY(2.95) + 0.09, 2.95, chrome), "windlass");
+    }
+    // TWIN OUTBOARDS on a bracket. 150 hp each, and their plates are read off
+    // the keel line at the transom rather than nudged until they looked right.
+    const props = [];
+    [0.42, -0.42].forEach(function (x) {
+      const ob = outboard(b, x, keelAt(-L * 0.5) + 0.03, -L * 0.5 - 0.18, 150);
+      props.push(ob.propAt);
+    });
+    b.add(propGroup(0.85, props));
+    const nz = L * 0.32;
+    navLights(b, (hbAt(nz) + 0.01) / 0.97, sheerAt(nz) + 0.08, nz, -L * 0.46, TOP + 0.30);
+    return finish(b, { width: W, length: L, height: TOP + 0.5, wheelbase: L * 0.6 });
   }
 
   // ---- CRUISER — Bellamar Corsa 46 (14m sport cruiser) ---------------------
@@ -824,19 +2033,79 @@
     declareRoom(b, "cruiser-cockpit", "Aft cockpit");
     declareRoom(b, "cruiser-saloon", "Main saloon and lower helm");
     declareRoom(b, "cruiser-flybridge", "Flybridge");
-    // HULL in width steps: full-beam transom, carried beam amidships, fine bow.
-    addPrism(b, w, [[-7.0, KEEL], [-7.0, SHEER], [-0.2, SHEER], [0.4, KEEL * 0.9]], 0, hull);
-    addPrism(b, w * 0.90, [[-0.6, KEEL * 0.92], [-0.6, SHEER], [3.6, SHEER + 0.10], [4.0, KEEL * 0.62]], 0, hull);
-    addPrism(b, w * 0.62, [[3.4, KEEL * 0.66], [3.4, SHEER + 0.10], [6.0, SHEER + 0.26], [6.2, KEEL * 0.22]], 0, hull);
-    addPrism(b, w * 0.24, [[5.8, KEEL * 0.26], [5.8, SHEER + 0.26], [7.0, SHEER + 0.30], [6.9, 0.10]], 0, hull);
-    // boot stripe at the waterline + a dark topside band along the sheer
-    [1, -1].forEach(function (side) {
-      addBox(b, 0.04, 0.16, 12.2, side * (hw - 0.02), 0.02, -0.3, boot);
-      addBox(b, 0.04, 0.30, 11.4, side * (hw - 0.04), SHEER - 0.34, -0.6, topside);
-    });
-    // SWIM PLATFORM at the transom, essentially at water level — the boarding
-    // point from the water or a tender.
-    addBox(b, 3.0, 0.14, 1.0, 0, 0.24, -7.5, teak);
+    // ---- THE HULL: ONE LOFTED SHELL -----------------------------------------
+    // Was four width-stepped prisms — vertical sides, a flat bottom and a plan
+    // that changed in three visible jumps. A 14 m sport cruiser is a planing
+    // deep-V: a hard chine that is the widest point of every section and
+    // exits the water forward, deadrise warping from 18 degrees at the transom
+    // to 52 at the entry, a flared bow, and a REVERSE-RAKED stem (the top of
+    // the stem aft of the forefoot — the one line that dates a modern hull).
+    const HL = LOFT();
+    let st = null, out = null;
+    if (HL) {
+      st = HL.stationsFromLines({
+        loa: len, beam: w, draft: -KEEL, freeboard: SHEER,
+        sheerBow: 0.55, sheerStern: 0.06,
+        deadrise: 18, deadriseBow: 52, flareBow: 16, tumblehome: 0,
+        transomRake: 6, midBody0: 0.15, midBody1: 0.70, transomBeamFrac: 0.97,
+        // entryPow is a TAPER RATE, not a "fineness" dial: above 1 the plan
+        // collapses the instant the midbody ends and the forebody becomes a
+        // needle with a 3 m foredeck balanced on it. 1.15 reproduces the beam
+        // the stepped prisms actually carried at 84% of the length (1.05 m
+        // half-beam) while still coming to a real point at the stem.
+        entryPow: 1.15, rockerAft: 0.94, tKeel: 0.42, n: 19,
+        // THE CHINE, authored. Solved from the deadrise it folds: the plan
+        // narrows forward faster than the flare pushes the corner out, so the
+        // corner CLIMBED to 0.83 above the waterline at z 2.8 and then dived
+        // back to -0.09 by z 5.4 — a crease that ran uphill and then downhill
+        // on a planing hull, which is the one thing a chine never does. It
+        // is deepest aft, exits the water at about 70% of the length, and
+        // sweeps up to the stem from there.
+        chineY: function (t) { return 0.34 - 1.55 * Math.pow(Math.max(0, t - 0.34), 1.35); },
+      });
+      rakeStem(st, 15 * Math.PI / 180, 0.26);
+      // The deck lid IS the deck: the cockpit sole, side decks and foredeck
+      // all land on the sheer, so the shell closes at the sheer with a crown
+      // instead of leaving the hull an open trough seen from the flybridge.
+      loftHull(b, st, hull, {
+        rings: 11, chine: "auto", transom: "flat",
+        deck: true, deckCamber: 0.10, deckCols: 9,
+      });
+      out = HL.outline(st);
+    }
+    const sheerAt = (z) => (out ? out.sheerYAt(z) : SHEER);
+    const hbAt = (z) => (out ? out.halfBeamAt(z) : hw);
+    const keelAt = (z) => (out ? out.keelYAt(z) : KEEL);
+    if (HL && st) {
+      [1, -1].forEach(function (side) {
+        // BOOT STRIPE at the waterline and a dark topside band under the
+        // sheer, both laid ON the skin — a straight box could only be right
+        // amidships, which is why the old one hung off the bow.
+        const bs = HL.strip(skinRun(st, side, -6.7, 6.2, 0.04, 0.012, 0.55), 0.075, boot, { segments: 56, radial: 5 });
+        if (bs) { bs.castShadow = false; b.add(bs); }
+        const band = HL.strip(skinRun(st, side, -6.7, 6.0, (z) => sheerAt(z) - 0.34, 0.010, 0.55), 0.14, topside, { segments: 56, radial: 5 });
+        if (band) { band.castShadow = false; b.add(band); }
+        // SPRAY RAIL on the chine itself — the corner the loft reports, not a
+        // height somebody guessed. This is the strake that throws the sheet of
+        // water down and outboard and keeps the topsides dry.
+        const rail = HL.strip(chineRun(st, side, 0.035, 0.01).filter((p) => p[2] > -6.6), 0.055, hull, { segments: 48, radial: 4 });
+        if (rail) { rail.castShadow = false; b.add(rail); }
+        // HULL WINDOWS: dark panels INSET into the topsides, each one turned to
+        // the surface normal at its own station, so they lie on the hull the
+        // way glass in a moulding does instead of hovering beside it.
+        [[-0.5, 2.4], [2.6, 1.5]].forEach(function (win) {
+          const z = win[0], y = sheerAt(z) - 0.62;
+          hullPanel(b, st, side, z, y, win[1] + 0.16, 0.44, topside, { thick: 0.05, outset: 0.016 });
+          hullPanel(b, st, side, z, y, win[1], 0.30, glass, { thick: 0.05, outset: 0.004 });
+        });
+      });
+    }
+    // INTEGRATED SWIM PLATFORM: it is the moulding the transom ends in, so its
+    // width is the hull's own width at the transom, not a number.
+    const platW = Math.max(2.2, hbAt(-6.95) * 1.72);
+    addBox(b, platW, 0.14, 1.0, 0, 0.24, -7.5, teak);
+    // the fillet that ties it to the raked transom instead of leaving a step
+    addBox(b, platW * 0.94, 0.42, 0.28, 0, 0.42, -7.02, hull);
     addBox(b, 0.34, 0.60, 0.14, 1.20, -0.05, -7.4, chrome);                 // ladder into the water
     addBox(b, 0.34, 0.60, 0.14, 1.20, -0.55, -7.4, chrome);
     // TRANSOM STEPS, platform -> cockpit. Without these the swim platform is a
@@ -854,10 +2123,23 @@
     addCabinShell(b, { width: 2.80, z0: -2.20, z1: 2.85, y0: SHEER, y1: SUP,
       doorW: 1.05, body: hull, liner: liner, glass: glass });
     [1, -1].forEach(function (side) {
-      // side deck sole + bulwark + rail
-      addBox(b, 0.70, 0.10, 7.2, side * 1.75, SHEER + 0.15, 1.4, teak);
-      addBox(b, 0.10, 0.55, 7.2, side * 2.08, SHEER + 0.42, 1.4, hull);
-      addRail(b, side * 2.05, -2.0, 6.0, SHEER + 0.20, chrome, 1.8);
+      // SIDE DECK: a ribbon between the deck edge and the saloon side, so it
+      // follows the sheer up toward the bow and narrows with the hull instead
+      // of being a 7.2 m box that stands proud of the topsides forward.
+      const inner = [], outer = [];
+      for (let i = 0; i <= 12; i++) {
+        const z = -2.2 + (8.4 * i) / 12;
+        const y = sheerAt(z) + 0.05;
+        outer.push([side * Math.max(0.30, hbAt(z) - 0.10), y, z]);
+        inner.push([side * Math.max(0.20, Math.min(1.40, hbAt(z) - 0.78)), y, z]);
+      }
+      sheet(b, [inner, outer], teak, { flip: side > 0 });
+      // BULWARK + capping along the same deck edge, as a wall rather than a
+      // straight slab: the toe rail a person's foot actually meets.
+      bulwark(b, out || { sheerYAt: () => SHEER, halfBeamAt: () => hw },
+        side, -2.2, 6.1, 0.52, 0.09, hull, liner, chrome, 0.7);
+      sheerRail(b, out || { sheerYAt: () => SHEER, halfBeamAt: () => hw },
+        side, -2.0, 6.0, 0.52, chrome, { spacing: 1.7, inset: 0.16, height: 0.80 });
     });
     // A real saloon inside the shell: warm sole and headliner, a clear central
     // aisle from the sliding door, lounge/dinette, compact galley and a lower
@@ -874,10 +2156,20 @@
     addScreen(b, 0.10, SHEER + 1.03, 1.91, 0.48, 0.27, 0, screen);
     addSeat(b, 0.62, SHEER + 0.08, 1.25, 0, pad, chrome);
     addFixtureBox(b, "saloon-light", 0.75, 0.04, 0.28, 0, SUP - 0.25, 0.0, warm);
-    // FOREDECK + sunpad + windlass
-    addBox(b, 3.0, 0.10, 3.0, 0, SHEER + 0.25, 4.7, teak);
-    addBox(b, 2.2, 0.16, 1.9, 0, SHEER + 0.38, 4.4, pad);
-    addBox(b, 0.40, 0.24, 0.40, 0, SHEER + 0.42, 6.1, chrome);
+    // FOREDECK: the deck BETWEEN the coachroof and the stem, so it is the
+    // shape of the deck edge there — narrowing, rising with the sheer — not a
+    // 3 x 3 m slab that hung a metre outboard of a hull this fine forward.
+    (function () {
+      const fwd = [], mid = [], cl = [];
+      for (let i = 0; i <= 10; i++) {
+        const z = 3.1 + (3.5 * i) / 10;
+        const y = sheerAt(z) + 0.04, x = Math.max(0.05, hbAt(z) - 0.08);
+        fwd.push([x, y, z]); mid.push([0, y + 0.03, z]); cl.push([-x, y, z]);
+      }
+      sheet(b, [fwd, mid, cl], teak, {});
+    })();
+    addBox(b, 1.9, 0.16, 1.7, 0, sheerAt(4.4) + 0.16, 4.4, pad);            // sunpad
+    addBox(b, 0.40, 0.24, 0.40, 0, sheerAt(6.1) + 0.20, 6.1, chrome);       // windlass
     // EXTERNAL LADDER to the flybridge, on the starboard side aft of the saloon
     addStairs(b, 1.55, 0.75, -2.05, 1, SHEER + 0.15, 3.75, 6, chrome);
     // FLYBRIDGE: sole, helm console, twin seats, radar arch.
@@ -902,8 +2194,12 @@
     addCyl(b, 0.30, 0.10, 0, 5.42, -1.6, M.grey(), 10);                     // radome
     b.userData.marineFixtureCount += 8;                                      // cockpit + flybridge authored fittings
     // twin sterndrives under the transom
-    b.add(propGroup(1.5, [[0.85, -0.95, -7.15], [-0.85, -0.95, -7.15]]));
-    navLights(b, hw, SHEER + 0.55, 5.6, -6.9, 5.42);
+    // sterndrives hung off the transom at the KEEL the loft drew, not at a
+    // depth typed in beside a prism that no longer exists
+    b.add(propGroup(1.5, [[0.85, keelAt(-6.9) + 0.10, -7.15], [-0.85, keelAt(-6.9) + 0.10, -7.15]]));
+    // nav lights on the DECK EDGE where they belong: the hull is 1.0 m wide at
+    // z 5.6, so the old hw (2.1) put both lamps in mid-air off the bow.
+    navLights(b, hbAt(5.6), sheerAt(5.6) + 0.10, 5.6, -6.9, 5.42);
     return finish(b, { width: w, length: len, height: 5.6, wheelbase: len * 0.6 });
   }
 
@@ -937,19 +2233,75 @@
     declareRoom(b, "yacht34-garage", "Tender garage");
     declareRoom(b, "yacht34-sundeck", "Sun deck");
 
-    // ---- HULL: full-beam transom, carried beam, fine flared bow. Freeboard
-    // tapers to near water level at the transom (research §F).
-    addPrism(b, Y.BEAM, [[-17.0, Y.KEEL], [-17.0, 0.95], [-13.0, FB], [-11.0, Y.KEEL * 0.96]], 0, hull);
-    addPrism(b, Y.BEAM, [[-12.0, Y.KEEL * 0.98], [-12.0, FB], [4.0, FB], [5.0, Y.KEEL * 0.86]], 0, hull);
-    addPrism(b, Y.BEAM * 0.86, [[3.5, Y.KEEL * 0.88], [3.5, FB], [11.0, FB + 0.30], [11.8, Y.KEEL * 0.50]], 0, hull);
-    addPrism(b, Y.BEAM * 0.52, [[10.5, Y.KEEL * 0.54], [10.5, FB + 0.28], [15.4, FB + 0.62], [15.8, Y.KEEL * 0.16]], 0, hull);
-    addPrism(b, Y.BEAM * 0.18, [[15.0, Y.KEEL * 0.18], [15.0, FB + 0.60], [17.0, FB + 0.70], [16.8, 0.20]], 0, hull);
-    // boot stripe + dark topside band + a bulbous forefoot
-    [1, -1].forEach(function (side) {
-      addBox(b, 0.06, 0.26, 30.0, side * (hw - 0.02), 0.06, -0.6, boot);
-      addBox(b, 0.06, 0.50, 27.0, side * (hw - 0.05), FB - 0.60, -1.5, topside);
-    });
-    addCyl(b, 0.55, 2.2, 0, Y.KEEL * 0.72, 14.6, hull, 8).rotation.x = Math.PI / 2;
+    // ---- THE HULL: ONE LOFTED SHELL -----------------------------------------
+    // Was FIVE width-stepped prisms — three visible plan jumps and a vertical
+    // side. A 34 m semi-displacement motor yacht is round-bilged forward
+    // (which is why she is quiet at 13 knots) and hard-chined aft (which is
+    // why she can be pushed to 16), carries a pronounced sheer, and closes on
+    // a broad low transom. warpBilge() is what makes ONE loft do both ends:
+    // stationsFromLines takes a single bilge exponent, so the aft sections get
+    // their turn re-solved almost square while the forebody stays round.
+    const HL = LOFT();
+    let st = null, out = null;
+    if (HL) {
+      st = HL.stationsFromLines({
+        loa: L, beam: Y.BEAM, draft: -Y.KEEL, freeboard: FB,
+        sheerBow: 0.80, sheerStern: 0,
+        roundBilge: true, bilgeN: 2.2, maxBeamHeight: 0.72,
+        flareBow: 22, tumblehome: 4, transomRake: 4,
+        tKeel: 0.42, rockerAft: 0.97, n: 21,
+        // THE PLAN. The default taper is a power of the REMAINING length, so
+        // it starts shedding beam the instant the midbody ends and the
+        // forebody becomes a spike. A ship holds her beam and then loses it
+        // fast at the very end — the `1 - u^1.75` curve yachts.js proved.
+        // It must reach EXACTLY zero at the stem. A plan that floors at 0.02
+        // leaves the bow station 7.6 cm wide, which is wider than the loft's
+        // collapse threshold — so the two halves never meet and the ship ends
+        // in an open rectangular hole you can see the inside of the hull
+        // through. THE STEM IS WHERE THE HULL CLOSES.
+        planHalfBeam: function (t) {
+          if (t < 0.16) return 0.94 + 0.06 * Math.pow(t / 0.16, 0.75);
+          if (t <= 0.62) return 1;
+          const u = clampN((t - 0.62) / 0.38, 0, 1);
+          return Math.max(0, 1 - Math.pow(u, 1.75));
+        },
+      });
+      warpBilge(st, 5.0, 1.9, 0.26, 0.60);
+      loftHull(b, st, hull, { rings: 13, transom: "flat" });
+      out = HL.outline(st);
+    }
+    const sheerAt = (z) => (out ? out.sheerYAt(z) : FB);
+    const hbAt = (z) => (out ? out.halfBeamAt(z) : hw);
+    const keelAt = (z) => (out ? out.keelYAt(z) : Y.KEEL);
+    if (HL && st) {
+      [1, -1].forEach(function (side) {
+        // Boot stripe, topside band and the AFT CHINE STRAKE, all read off the
+        // skin so they stay on it as the hull narrows.
+        const bs = HL.strip(skinRun(st, side, -16.6, 15.4, 0.10, 0.02, 1.1), 0.14, boot, { segments: 70, radial: 5 });
+        if (bs) { bs.castShadow = false; b.add(bs); }
+        const band = HL.strip(skinRun(st, side, -16.6, 14.6, (z) => sheerAt(z) - 0.62, 0.02, 1.1), 0.22, topside, { segments: 70, radial: 5 });
+        if (band) { band.castShadow = false; b.add(band); }
+        const chine = HL.strip(chineRun(st, side, 0.05, 0).filter((p) => p[2] < 3.0), 0.10, hull, { segments: 40, radial: 4 });
+        if (chine) { chine.castShadow = false; b.add(chine); }
+        // BOW THRUSTER TUNNEL — a real ship has one and you can see it: a dark
+        // disc a third of the way down the stem, one each side of the same
+        // athwartships tube.
+        hullDisc(b, st, side, 13.2, keelAt(13.2) * 0.52, 0.46, dark, { thick: 0.10, seg: 16 });
+        // ANCHOR POCKET: the recess the hook sits in, and the pipe above it.
+        // Proud by 8 mm, not sunk: a panel pushed INTO the skin grazes it and
+        // z-fights, which reads as a dithered black rectangle bolted to the bow.
+        hullPanel(b, st, side, 15.1, FB - 0.35, 0.90, 0.62, dark, { thick: 0.05, outset: 0.008 });
+        // HULL PORTLIGHTS: the lower-deck cabin row, on the skin, each turned
+        // to the surface normal at its own station.
+        [-7.6, -5.4, -3.2, -1.0, 1.2, 3.4, 5.6].forEach(function (z) {
+          hullDisc(b, st, side, z, FB - 1.35, 0.20, glass, { thick: 0.07, seg: 12, outset: 0.005 });
+        });
+      });
+    }
+    // BULBOUS BOW, seated on the forefoot the loft actually drew.
+    const bulbZ = 15.2;
+    addCyl(b, 0.55, 2.4, 0, keelAt(bulbZ) - 0.30, bulbZ, hull, 10).rotation.x = Math.PI / 2;
+    addCyl(b, 0.40, 0.40, 0, keelAt(bulbZ) - 0.30, bulbZ + 1.15, hull, 10).rotation.x = Math.PI / 2;
 
     // ---- SWIM PLATFORM / TRANSOM (water level) — THE boarding point.
     addBox(b, 5.2, 0.18, 1.6, 0, Y.PLAT, -17.4, teak);
@@ -965,6 +2317,15 @@
     // the animated boatProp selected by finish().
     const storedTender = buildDinghy();
     storedTender.name = "yacht34_stowed_tender";
+    // The tender is a REGISTRY BUILD, so it arrives carrying its own
+    // `hull_surface` mesh and its own hullSurface flag. Anything that asks
+    // "which mesh is this vessel's shell" then finds the RIB's 3.9 m loft
+    // inside a 34 m yacht and reports the yacht's beam as 3.9 m out. Same
+    // reason its prop is renamed two lines down.
+    storedTender.traverse(function (o) {
+      if (o.name === "hull_surface") o.name = "yacht34_stowed_hull";
+      if (o.userData && o.userData.hullSurface) delete o.userData.hullSurface;
+    });
     storedTender.position.set(0, Y.GAR + 0.30, -15.20);
     storedTender.rotation.y = Math.PI / 2;
     storedTender.scale.setScalar(0.86);
@@ -1001,10 +2362,22 @@
     addCabinShell(b, { width: 5.20, z0: -8.60, z1: 9.40, y0: Y.MAIN, y1: Y.SUP1,
       doorW: 1.65, body: hull, liner: liner, glass: glass });
     [1, -1].forEach(function (side) {
-      // SIDE DECKS both sides, full length, railed.
-      addBox(b, 0.90, 0.12, 20.0, side * 3.05, Y.MAIN + 0.14, 0.4, teak);
-      addBox(b, 0.14, 0.75, 20.0, side * 3.48, Y.MAIN + 0.50, 0.4, hull);      // bulwark
-      addRail(b, side * 3.42, -9.4, 10.4, Y.MAIN + 0.20, chrome, 2.0);
+      // SIDE DECKS both sides, railed — as a ribbon on the deck EDGE. The
+      // 20 m box they used to be ran at a constant 3.50 m half-width through a
+      // bow that is 2.78 m wide at z 10, so the last four metres of each side
+      // deck hung in the air outboard of the ship.
+      const inner = [], outer = [];
+      for (let i = 0; i <= 16; i++) {
+        const z = -9.6 + (16.0 * i) / 16;
+        const y = sheerAt(z) + 0.08;
+        outer.push([side * Math.max(0.4, hbAt(z) - 0.16), y, z]);
+        inner.push([side * Math.max(0.3, Math.min(2.60, hbAt(z) - 1.02)), y, z]);
+      }
+      sheet(b, [inner, outer], teak, { flip: side > 0 });
+      bulwark(b, out || { sheerYAt: () => FB, halfBeamAt: () => hw },
+        side, -9.6, 12.4, 0.78, 0.14, hull, liner, chrome, 1.1);
+      sheerRail(b, out || { sheerYAt: () => FB, halfBeamAt: () => hw },
+        side, -9.4, 11.6, 0.78, chrome, { spacing: 2.0, inset: 0.24, height: 0.85 });
     });
     // Main saloon: the shell now contains a deliberate room with an open
     // centre aisle. The long lounge, dining zone and galley each occupy a side
@@ -1024,11 +2397,22 @@
     [-5.0, 0.0, 5.0].forEach(function (z) {
       addFixtureBox(b, "ceiling-light", 0.95, 0.04, 0.28, 0, Y.SUP1 - 0.25, z, warm);
     });
-    // ---- FOREDECK: windlass, anchor locker, forward sunpad.
-    addBox(b, 5.0, 0.14, 4.4, 0, Y.MAIN + 0.30, 12.6, teak);
-    addBox(b, 3.6, 0.20, 2.6, 0, Y.MAIN + 0.46, 12.0, pad);
-    addBox(b, 0.70, 0.36, 0.70, 0, Y.MAIN + 0.55, 14.9, chrome);     // windlass
-    addBox(b, 0.30, 0.50, 0.70, 0, Y.MAIN + 0.30, 16.2, chrome);     // anchor in the pocket
+    // ---- FOREDECK: windlass, anchor locker, forward sunpad. The deck is the
+    // shape of the DECK EDGE — it narrows to the stem and climbs with the
+    // sheer, which a 5 x 4.4 m slab at one height cannot do on a bow that
+    // loses 2 m of half-beam over its own length.
+    (function () {
+      const p = [], m = [], s = [];
+      for (let i = 0; i <= 12; i++) {
+        const z = 9.6 + (7.0 * i) / 12;
+        const y = sheerAt(z) + 0.08, x = Math.max(0.06, hbAt(z) - 0.16);
+        p.push([x, y, z]); m.push([0, y + 0.05, z]); s.push([-x, y, z]);
+      }
+      sheet(b, [p, m, s], teak, {});
+    })();
+    addBox(b, 2.9, 0.20, 2.6, 0, sheerAt(12.0) + 0.22, 12.0, pad);   // forward sunpad
+    addBox(b, 0.70, 0.36, 0.70, 0, sheerAt(14.9) + 0.28, 14.9, chrome);  // windlass
+    addBox(b, 0.30, 0.50, 0.70, 0, sheerAt(16.2) - 0.15, 16.2, chrome);  // anchor in the pocket
 
     // ---- ONE CENTRAL STAIRCASE, main -> upper, on the centreline aft of the
     // saloon. The visual boxes and the walkable decks are generated from the
@@ -1095,7 +2479,9 @@
 
     // twin shafts + screws well under the counter
     b.add(propGroup(2.6, [[1.55, Y.KEEL * 0.72, -15.6], [-1.55, Y.KEEL * 0.72, -15.6]]));
-    navLights(b, hw, Y.MAIN + 0.85, 13.8, -16.6, Y.SUN + 3.30);
+    // lamps on the DECK EDGE at z 13.8, where the hull is 1.5 m wide — not at
+    // the maximum half-beam, which floated them 2.3 m off the bow.
+    navLights(b, hbAt(13.8), sheerAt(13.8) + 0.20, 13.8, -16.6, Y.SUN + 3.30);
     return finish(b, { width: Y.BEAM, length: Y.LEN, height: 11.4, wheelbase: Y.LEN * 0.6 });
   }
 
@@ -1105,10 +2491,12 @@
     const decks = [
       { x: 0, z: -7.5, w: 3.0, d: 1.0, top: 0.24 + 0.07 },        // swim platform
       { x: 0, z: -4.4, w: 3.6, d: 4.4, top: SHEER + 0.05 },       // cockpit sole
-      { x: 1.75, z: 1.4, w: 0.70, d: 7.2, top: SHEER + 0.20 },    // side deck port
-      { x: -1.75, z: 1.4, w: 0.70, d: 7.2, top: SHEER + 0.20 },   // side deck stbd
+      // the side decks are a ribbon on the sheer now, so their sole is the
+      // sheer + 0.06 rather than a hand-typed SHEER + 0.20
+      { x: 1.70, z: 1.4, w: 0.66, d: 7.2, top: SHEER + 0.09 },    // side deck port
+      { x: -1.70, z: 1.4, w: 0.66, d: 7.2, top: SHEER + 0.09 },   // side deck stbd
       { x: 0, z: 0.2, w: 2.58, d: 4.72, top: SHEER + 0.12 },      // enterable saloon sole
-      { x: 0, z: 4.7, w: 3.0, d: 3.0, top: SHEER + 0.30 },        // foredeck
+      { x: 0, z: 4.6, w: 2.0, d: 2.8, top: SHEER + 0.29 },        // foredeck
       { x: 0, z: 0.5, w: 3.0, d: 4.2, top: 3.81 },                // flybridge
     ];
     stairDecks(decks, 1.20, 0.70, -7.0, 1, 0.31, 1.35, 3);        // transom -> cockpit
@@ -1123,8 +2511,8 @@
         { x: 0.92, z: -2.18, w: 0.84, d: 0.10, y0: SHEER + 0.12, y1: 3.60 },
         { x: -0.92, z: -2.18, w: 0.84, d: 0.10, y0: SHEER + 0.12, y1: 3.60 },
         { x: 0, z: 2.82, w: 2.70, d: 0.10, y0: SHEER + 0.12, y1: 3.60 },
-        { x: 2.08, z: 1.4, w: 0.10, d: 7.2, y0: SHEER + 0.15, y1: SHEER + 1.15 },
-        { x: -2.08, z: 1.4, w: 0.10, d: 7.2, y0: SHEER + 0.15, y1: SHEER + 1.15 },
+        { x: 2.03, z: 1.4, w: 0.10, d: 7.2, y0: SHEER + 0.09, y1: SHEER + 1.10 },
+        { x: -2.03, z: 1.4, w: 0.10, d: 7.2, y0: SHEER + 0.09, y1: SHEER + 1.10 },
         { x: 1.48, z: 0.45, w: 0.08, d: 3.9, y0: 3.81, y1: 4.75 },  // flybridge rails
         { x: -1.48, z: 0.45, w: 0.08, d: 3.9, y0: 3.81, y1: 4.75 },
       ],
@@ -1138,10 +2526,13 @@
       { x: 0, z: -15.4, w: 4.6, d: 2.4, top: Y.GAR + 0.07 },        // tender garage
       { x: 0, z: -13.4, w: 6.8, d: 4.6, top: Y.MAIN + 0.07 },       // beach club
       { x: 0, z: -10.0, w: 6.4, d: 3.0, top: Y.MAIN + 0.07 },       // dining cockpit
-      { x: 3.05, z: 0.4, w: 0.90, d: 20.0, top: Y.MAIN + 0.20 },    // side deck port
-      { x: -3.05, z: 0.4, w: 0.90, d: 20.0, top: Y.MAIN + 0.20 },   // side deck stbd
+      // the side decks follow the deck edge now: 16 m of run, inside the
+      // half-beam at BOTH ends (they used to be 20 m boxes at a constant 3.50
+      // through a bow 2.78 m wide)
+      { x: 3.02, z: -1.6, w: 0.86, d: 16.0, top: Y.MAIN + 0.14 },   // side deck port
+      { x: -3.02, z: -1.6, w: 0.86, d: 16.0, top: Y.MAIN + 0.14 },  // side deck stbd
       { x: 0, z: 0.35, w: 4.96, d: 17.0, top: Y.MAIN + 0.12 },      // enterable main saloon
-      { x: 0, z: 12.6, w: 5.0, d: 4.4, top: Y.MAIN + 0.37 },        // foredeck
+      { x: 0, z: 11.6, w: 3.6, d: 3.6, top: Y.MAIN + 0.42 },        // foredeck
       { x: 0, z: 0.2, w: 5.6, d: 17.6, top: Y.UPPER + 0.08 },       // upper deck
       { x: 2.65, z: 1.0, w: 0.80, d: 12.0, top: Y.UPPER + 0.22 },   // upper side deck
       { x: -2.65, z: 1.0, w: 0.80, d: 12.0, top: Y.UPPER + 0.22 },
@@ -1167,8 +2558,8 @@
         { x: 1.55, z: -6.56, w: 1.45, d: 0.12, y0: Y.UPPER + 0.12, y1: Y.SUP2 },
         { x: -1.55, z: -6.56, w: 1.45, d: 0.12, y0: Y.UPPER + 0.12, y1: Y.SUP2 },
         { x: 0, z: 7.38, w: 4.50, d: 0.12, y0: Y.UPPER + 0.12, y1: Y.SUP2 },
-        { x: 3.48, z: 0.4, w: 0.14, d: 20.0, y0: Y.MAIN + 0.20, y1: Y.MAIN + 1.30 },
-        { x: -3.48, z: 0.4, w: 0.14, d: 20.0, y0: Y.MAIN + 0.20, y1: Y.MAIN + 1.30 },
+        { x: 3.52, z: -1.6, w: 0.14, d: 16.0, y0: Y.MAIN + 0.14, y1: Y.MAIN + 1.30 },
+        { x: -3.52, z: -1.6, w: 0.14, d: 16.0, y0: Y.MAIN + 0.14, y1: Y.MAIN + 1.30 },
         { x: 3.00, z: 1.0, w: 0.10, d: 12.0, y0: Y.UPPER + 0.22, y1: Y.UPPER + 1.20 },
         { x: -3.00, z: 1.0, w: 0.10, d: 12.0, y0: Y.UPPER + 0.22, y1: Y.UPPER + 1.20 },
         { x: 2.30, z: -0.6, w: 0.10, d: 10.0, y0: Y.SUN + 0.08, y1: Y.SUN + 1.05 },
@@ -1185,6 +2576,68 @@
   // ============================================================
   //  4. REGISTRATION
   // ============================================================
+  // kayak — 4.2 m sit-on-top. PADDLED: no engine, no prop, no audio. It is
+  // here because the sea should have things on it small enough to be eaten
+  // whole, and because a hull with no motor proves the registry carries
+  // CRAFT rather than just motorboats.
+  register("kayak", {
+    label: "Sandbar 14", marque: "Sandbar", model: "Sandbar 14",
+    price: 900, build: buildKayak,
+    hull: {
+      loa: 4.2, beam: 0.72, draft: 0.12, massT: 0.03, freeboard: 0.28,
+      topKts: 5, cruiseKts: 3.2, planeKts: 0, canPlane: false,
+      engine: false,
+      // A paddler makes ~60 W of useful thrust against 30 kg of boat and 80 kg
+      // of body: quick off the mark for a second and then that is all there is.
+      accel0: 0.55, humpFrac: 0.30,
+      // A kayak turns on a stroke and a hip, not on thrust vectoring.
+      steerKind: "rudder", steerLock: 0.75, steerRate: 6.0,
+      yawRate: 1.90, yawAccel: 6.5, yawDamp: 3.4, pivotAft: 0.35,
+      swayL: 3.4, swayQ: 0.60,
+      trimRestDeg: 0.4, trimHumpDeg: 1.0, trimPlaneDeg: 0.4,
+      heelSign: 1, heelGain: 0.090, maxHeel: 0.40,     // tippy, and it should feel it
+      rideAbove: 0.02, waveGain: 1.25, slamV: 1.6,     // every ripple moves it
+      deckY: 0.24, boardY: 0.26, sternOffset: 2.10,
+      helm: { x: 0, y: 1.02, z: 0.10 },                // a seated paddler's eye
+      wakeScale: 0.18, audio: "none",
+      stab: {
+        gm: 0.05, phiV: 0.70, freeboard: 0.28, swampT: 2, crew: 1,
+        seats: [{ x: 0, y: 0.20, z: 0.05, yaw: 0 }],
+      },
+    },
+    feel: { accel: 0.30, top: 0.12, turn: 1.9, drift: 1.8, roll: 1.4 },
+  });
+
+  // jetski — 3.3 m PWC. Nothing else in the fleet accelerates like this, and
+  // nothing else in the fleet has no propeller.
+  register("jetski", {
+    label: "Vareo GT", marque: "Vareo", model: "Vareo GT",
+    price: 14000, build: buildJetski,
+    hull: {
+      loa: 3.3, beam: 1.2, draft: 0.30, massT: 0.38, freeboard: 0.30,
+      topKts: 55, cruiseKts: 38, planeKts: 6, canPlane: true,
+      // 380 kg on a 160 hp pump: on the plane in under two seconds, and its
+      // hump (Fn 0.5 = 2.7 m/s) is behind it before you finish squeezing.
+      accel0: 6.2, humpFrac: 0.30,
+      // A JET has no rudder: no throttle, no steering. steerKind "thrust" is
+      // exactly that contract in water_helm.js.
+      steerKind: "thrust", steerLock: 0.80, steerRate: 11.0,
+      yawRate: 3.10, yawAccel: 12.0, yawDamp: 3.6, pivotAft: 0.90,
+      swayL: 3.0, swayQ: 0.52,
+      trimRestDeg: 2.0, trimHumpDeg: 9.0, trimPlaneDeg: 4.2,
+      heelSign: -1, heelGain: 0.055, maxHeel: 0.42,    // leans hard into a turn
+      rideAbove: 0.03, waveGain: 1.15, slamV: 2.2,
+      deckY: 0.42, boardY: 0.26, sternOffset: 1.65,
+      helm: { x: 0, y: 1.34, z: 0.16 },                // seated at the bars
+      wakeScale: 0.55, audio: "bike",
+      stab: {
+        gm: 0.25, phiV: 1.00, freeboard: 0.30, swampT: 4, crew: 2,
+        seats: [{ x: 0, y: 0.78, z: 0.12, yaw: 0 }, { x: 0, y: 0.84, z: -0.84, yaw: 0 }],
+      },
+    },
+    feel: { accel: 1.9, top: 1.25, turn: 2.1, drift: 1.7, roll: 1.1 },
+  });
+
   // dinghy — RIB tender. Planes almost instantly, turns in 1-2 boat lengths.
   register("dinghy", {
     label: "Calanque Tender 15", marque: "Calanque", model: "Calanque Tender 15",
@@ -1202,19 +2655,34 @@
       trimRestDeg: 2.0, trimHumpDeg: 8.0, trimPlaneDeg: 3.4,
       heelSign: -1, heelGain: 0.030, maxHeel: 0.26,     // planing: heels INTO the turn
       rideAbove: 0.04, waveGain: 1.0, slamV: 2.8,       // thrown around by everything
-      deckY: 0.12, boardY: 0.24, sternOffset: 2.25,
+      deckY: 0.15, boardY: 0.30, sternOffset: 2.25,
+      // driven STANDING at the little console, one hand on the grab rail
+      helm: { x: 0, y: 1.62, z: 0.30 },
       wakeScale: 0.6, audio: "bike",                    // small outboard buzz
+      // A RIB's freeboard is the TOP OF THE TUBE, not the sheer: the collar is
+      // what green water has to get over, and it is 0.24 m of it above a
+      // gunwale that is already 0.38 up at the bow. She is also self-bailing,
+      // which is the whole reason swampT is 20 s on a boat this small.
+      stab: {
+        gm: 0.60, phiV: 1.15, freeboard: 0.55, swampT: 20, crew: 4,
+        seats: [
+          { x: 0, y: 0.58, z: -0.42, yaw: 0 },          // the jockey seat: the helm
+          { x: 0.60, y: 0.64, z: -1.25, yaw: 0 },       // two aft, sitting on the tubes
+          { x: -0.60, y: 0.64, z: -1.25, yaw: 0 },
+          { x: 0, y: 0.56, z: 0.95, yaw: 0 },           // one forward of the console
+        ],
+      },
     },
     feel: { accel: 1.25, top: 0.80, turn: 1.5, drift: 1.5, roll: 0.9 },
   });
 
-  // boat — THE EXISTING 6.2m runabout. NO `build`: playercars.js's makeBoat()
-  // stays the authority on its geometry (it had a deliberate art pass and this
-  // registration must not regress a single vertex). What it gains here is a
-  // real physics spec, a price and a place in the registry.
+  // boat — the 6.2 m runabout. Its geometry USED to live in playercars.js
+  // makeBoat() and this row carried `build: null` so the registry bounced back
+  // there. That split is gone: buildSpeedboat() above owns the art like every
+  // other hull in the fleet, and makeBoat() is now a delegate to this row.
   register("boat", {
     label: "Speedboat", marque: "Bellamar", model: "Speedboat",
-    price: 15000, build: null,
+    price: 15000, build: buildSpeedboat,
     hull: {
       loa: 6.2, beam: 2.1, draft: 0.5, massT: 1.6,
       topKts: 45, cruiseKts: 30, planeKts: 12, canPlane: true,
@@ -1227,14 +2695,66 @@
       swayL: 2.0, swayQ: 0.32,
       trimRestDeg: 2.5, trimHumpDeg: 7.0, trimPlaneDeg: 3.0,
       heelSign: -1, heelGain: 0.022, maxHeel: 0.22,
-      // rideAbove 0.36 is vehicles.js's WATER_Y (-0.12) minus SEA_Y (-0.48) —
-      // the EXACT height this hull floats at today. Do not "correct" it; the
-      // runabout's art is modelled with its keel above the group origin.
-      rideAbove: 0.36, waveGain: 1.0, slamV: 3.5,
-      deckY: 0.80, boardY: 0.80, sternOffset: 3.10,
-      wakeScale: 1.0, audio: "sports",                  // big V6 outboard
+      // rideAbove WAS 0.36 because the old playercars art was modelled with
+      // its keel 0.36 above the group origin and the number was the offset
+      // that cancelled it. The lofted hull uses the fleet convention —
+      // waterline at local y = 0 — so this is now the same small ride-high
+      // every other planing hull in the registry carries.
+      rideAbove: 0.05, waveGain: 1.0, slamV: 3.5,
+      deckY: 0.24, boardY: 0.14, sternOffset: 3.10,     // sole 0.24, swim step 0.14
+      // seated at the console, helm to STARBOARD (-x; navLights puts port red
+      // at +x and the whole fleet keeps that sign)
+      helm: { x: -0.42, y: 1.48, z: -0.18 },
+      wakeScale: 1.0, audio: "sports",                  // big V8 sterndrive
+      stab: {
+        gm: 0.90, phiV: 1.25, freeboard: 0.62, swampT: 14, crew: 5,
+        seats: [
+          { x: -0.42, y: 0.70, z: -0.18, yaw: 0 },      // helm bucket
+          { x: 0.42, y: 0.70, z: -0.18, yaw: 0 },       // companion bucket
+          { x: 0.52, y: 0.62, z: -1.70, yaw: 0 },       // the stern bench, three up
+          { x: 0, y: 0.62, z: -1.70, yaw: 0 },
+          { x: -0.52, y: 0.62, z: -1.70, yaw: 0 },
+        ],
+      },
     },
     feel: { accel: 1.0, top: 1.1, turn: 1.0, drift: 1.4, roll: 0.6 },
+  });
+
+  // console — Baymaster 25. The middle of the ladder, and the boat the sea is
+  // actually full of: a 7.5 m centre console on twin 150s. It is also the hull
+  // the shark rules need between the RIB and the sport cruiser — too big for a
+  // great white to swallow, exactly the right size for a megalodon.
+  register("console", {
+    label: "Baymaster 25", marque: "Baymaster", model: "Baymaster 25",
+    price: 68000, build: buildConsole,
+    hull: {
+      loa: 7.5, beam: 2.6, draft: 0.55, massT: 2.2,
+      topKts: 42, cruiseKts: 28, planeKts: 11, canPlane: true,
+      // 2.2 t on twin 150s: onto the plane in about four seconds, and the
+      // hump (Fn 0.5 = 3.8 m/s) is gone almost as soon as she trims out.
+      accel0: 3.4, humpFrac: 0.55,
+      steerKind: "thrust", steerLock: 0.56, steerRate: 6.4,
+      // 21.6/1.35 = 16 m radius = 2.1 boat lengths.
+      yawRate: 1.35, yawAccel: 3.4, yawDamp: 2.2, pivotAft: 1.95,
+      swayL: 2.1, swayQ: 0.34,
+      trimRestDeg: 2.4, trimHumpDeg: 7.4, trimPlaneDeg: 3.2,
+      heelSign: -1, heelGain: 0.022, maxHeel: 0.22,
+      rideAbove: 0.05, waveGain: 0.90, slamV: 3.6,
+      deckY: 0.26, boardY: 0.26, sternOffset: 3.75,
+      // driven STANDING against the leaning post behind the console
+      helm: { x: 0, y: 1.86, z: 0.20 },
+      wakeScale: 1.1, audio: "sports",
+      stab: {
+        gm: 0.90, phiV: 1.20, freeboard: 0.72, swampT: 18, crew: 4,
+        seats: [
+          { x: 0, y: 1.05, z: -1.01, yaw: 0 },          // the leaning post: the helm
+          { x: 0.62, y: 0.73, z: -2.10, yaw: 0 },       // two working the gunwales aft
+          { x: -0.62, y: 0.73, z: -2.10, yaw: 0 },
+          { x: 0, y: 0.89, z: 1.95, yaw: 0 },           // one on the casting deck
+        ],
+      },
+    },
+    feel: { accel: 0.95, top: 1.0, turn: 1.1, drift: 1.35, roll: 0.7 },
   });
 
   // cruiser — sport cruiser. The turn takes a beat to develop.
