@@ -62,6 +62,22 @@ const rig = await launch({ rafBudget: 0 });
 /* advance GAME time: n seconds of 30 Hz sim ticks in one evaluation */
 const burst = (sec) => rig.evl(
   `(() => { for (let i = 0, n = ${Math.max(1, Math.round(sec * 30))}; i < n; i++) CBZ.stepSim(1/30); return true; })()`);
+/* The same, with the LENS HELD SEAWARD every tick. The mount steers relative
+   to the camera and the aquatic camera swings to follow the mount
+   (systems/camera.js AQ_FOLLOW), so a hands-off "W" is a feedback loop whose
+   final bearing depends on whatever nudged the shark that run — a bite-assist
+   tug toward a swimmer, a hit-stop. Measured 2026-09-02: eight identical
+   boots ended a 3.5 s sprint at headings spread across the whole circle, and
+   several drove the shark straight up the beach. A player holding the stick
+   keeps the lens where they put it; this does the same, re-aiming outward
+   from the island centre each tick so the pilot stages assert steering, not
+   the camera's drift. */
+const burstSeaward = (sec) => rig.evl(
+  `(() => { const A = CBZ.surv.arena, P = CBZ.player;
+     for (let i = 0, n = ${Math.max(1, Math.round(sec * 30))}; i < n; i++) {
+       if (CBZ.cam && A && P) { const dx = P.pos.x - A.center.x, dz = P.pos.z - A.center.z; CBZ.cam.yaw = Math.atan2(-dx, -dz); }
+       CBZ.stepSim(1/30);
+     } return true; })()`);
 /* burst game time until an expression goes true (checked once per game second) */
 async function burstUntil(expr, maxSec) {
   for (let t = 0; t < maxSec; t++) {
@@ -170,6 +186,13 @@ async function bootIntoMatch(label) {
   const armed = await burstUntil(`CBZ.sharkSim && CBZ.sharkSim.on && CBZ.sharkSim.shark &&
     CBZ.cityMountedAnimal && CBZ.cityMountedAnimal() === CBZ.sharkSim.shark`, 20);
   if (!armed) { fail(label + ": sim never claimed + mounted a shark"); return false; }
+  /* Let the match-start frame finish. When the sim arms during the boot's own
+     rAF frames the first poll above lands at elapsed ~0.1 s, inside the frame
+     where survival's placement re-shows the castaway and before shark_sim's
+     step() has hidden him again — a one-frame read that says "rider visible"
+     about a state no player ever sees. Measured 2026-09-02: every such failure
+     reported elapsed 0.1; after any burst the rider is hidden. */
+  await burst(0.5);
   return true;
 }
 
@@ -232,10 +255,10 @@ try {
   })()`);
   const p0 = await rig.evl(`({ x: CBZ.player.pos.x, z: CBZ.player.pos.z })`);
   await rig.evl(`(CBZ.keys.w = true, CBZ.keys.shift = true)`);
-  await burst(3.5);
+  await burstSeaward(3.5);
   const p1 = await rig.evl(`({ x: CBZ.player.pos.x, z: CBZ.player.pos.z, v: CBZ.player.speed })`);
   await rig.evl(`(CBZ.keys.a = true)`);
-  await burst(1.6);
+  await burstSeaward(1.6);
   const p2 = await rig.evl(`({ x: CBZ.player.pos.x, z: CBZ.player.pos.z })`);
   await rig.evl(`(CBZ.keys.w = false, CBZ.keys.a = false, CBZ.keys.shift = false)`);
   await burst(0.8);
@@ -271,7 +294,7 @@ try {
   const legs = [];
   for (let i = 0; i < 5; i++) {
     const a = await rig.evl(`({ x: CBZ.player.pos.x, z: CBZ.player.pos.z })`);
-    await burst(15);
+    await burstSeaward(15);
     const b = await rig.evl(`({ x: CBZ.player.pos.x, z: CBZ.player.pos.z, r: ${radiusOf} })`);
     legs.push({ m: +Math.hypot(b.x - a.x, b.z - a.z).toFixed(1), r: +b.r.toFixed(0) });
     await rig.evl(PEACE);   // hunters re-converge over a 75 s swim; this stage asserts the sea, not the pod
@@ -342,7 +365,7 @@ try {
     return 1;
   })()`);
   await rig.evl(`(CBZ.keys.w = true, CBZ.keys.shift = true)`);
-  await burst(14);
+  await burstSeaward(14);
   await rig.evl(`(CBZ.keys.w = false, CBZ.keys.shift = false)`);
   const beach = await rig.evl(`(() => {
     const A = CBZ.surv.arena, P = CBZ.player;
