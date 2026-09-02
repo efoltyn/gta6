@@ -92,6 +92,8 @@
     rug: 0x6b2f2c,        // deep red rug (apartment bucket)
     sofa: 0x3d4650,       // upholstery (apartment bucket)
     wood: 0x4a3524,       // warm wood (DARKWOOD lighter step)
+    door: 0x4a3524,       // a flat's front door — the SAME hex as wood on
+                          // purpose: a door is a read, not a new batch bucket.
     marble: 0xd9d5cc,     // pale stone worktop (civic bucket)
     water: 0x2e6f86,      // aquarium water (waterfield bucket)
     gold: 0xb99347,       // brass trim / picture frames (trim bucket)
@@ -454,9 +456,35 @@
   // check for free, so the kit carries its own.
   function inRect(r, x, z, m) { return x > r.x0 + m && x < r.x1 - m && z > r.z0 + m && z < r.z1 - m; }
 
-  // a thin partition along X at fixed z with ONE centred doorway + lintel —
-  // the only wall the kit ever draws, and it is always THE design (a room
-  // boundary), never scatter. Batch-safe, non-collider (roomKit idiom).
+  // ========================================================================
+  //  A WALL YOU WALK THROUGH IS A PAINTING OF A WALL.
+  //
+  //  OWNER: "interiors have tons of fake walls and shit fake interiors, i dont
+  //  like interior walls unless they are intentional, aka locked apartment you
+  //  have key to that allows interior walls in an apartment building, bank
+  //  vault, but i like open space and theres a lot of unnecessary walls rn."
+  //
+  //  So this kit now draws exactly TWO kinds of interior wall and no third:
+  //    · a SOLID partition — a box WITH a collider, which is a boundary you
+  //      have to walk AROUND, and is only drawn where the room on the far side
+  //      is a real place: a flat, a vault, a named state room.
+  //    · nothing at all.
+  //  Every decorative divider that used to cut a desk farm, a meeting floor, a
+  //  shop back-of-house or an office break corner in half is DELETED, not
+  //  demoted — an office plate is one open floor now. The old `wallX`/`wallZ`
+  //  were explicitly documented as "NON-collider ... invisible to the carve/
+  //  breach picker", which is the whole complaint written down as a feature.
+  //
+  //  Cost: a solid partition is a box with a y-banded collider, exactly like
+  //  every facade wall the same lbox already draws. core/batch.js still MERGES
+  //  it (a collider-referenced mesh goes down the wall path, keeps its identity
+  //  hidden for LOS/carve and costs no extra draw call), so open-plan-by-
+  //  default is a net REDUCTION in geometry and the survivors are free.
+  // ========================================================================
+  const WALLOPT = { cast: false, solid: true };
+  const WALL_TALLY = { solid: 0, doors: 0 };
+
+  // a SOLID partition along X at fixed z with ONE doorway + lintel over it.
   function wallX(h, y, z, x0, x1, gapX, gapW, wallH) {
     gapW = gapW || 1.8;
     const lo = Math.min(x0, x1), hi = Math.max(x0, x1);
@@ -464,10 +492,13 @@
     for (let i = 0; i < segs.length; i++) {
       const s0 = segs[i][0], s1 = segs[i][1];
       if (s1 - s0 < 0.2) continue;
-      h.b.lbox((s0 + s1) / 2, y + wallH / 2, z, s1 - s0, wallH, PWT, P.wall, { cast: false });
+      h.b.lbox((s0 + s1) / 2, y + wallH / 2, z, s1 - s0, wallH, PWT, P.wall, WALLOPT);
+      WALL_TALLY.solid++;
     }
-    if (gapX > lo && gapX < hi)
-      h.b.lbox(gapX, y + wallH - 0.18, z, gapW, 0.36, PWT, P.wall, { cast: false });
+    if (gapX > lo && gapX < hi) {
+      h.b.lbox(gapX, y + wallH - 0.18, z, gapW, 0.36, PWT, P.wall, WALLOPT);
+      WALL_TALLY.solid++;
+    }
   }
   // the same partition running along Z at fixed x (the ±x-door twin).
   function wallZ(h, y, x, z0, z1, gapZ, gapW, wallH) {
@@ -477,10 +508,212 @@
     for (let i = 0; i < segs.length; i++) {
       const s0 = segs[i][0], s1 = segs[i][1];
       if (s1 - s0 < 0.2) continue;
-      h.b.lbox(x, y + wallH / 2, (s0 + s1) / 2, PWT, wallH, s1 - s0, P.wall, { cast: false });
+      h.b.lbox(x, y + wallH / 2, (s0 + s1) / 2, PWT, wallH, s1 - s0, P.wall, WALLOPT);
+      WALL_TALLY.solid++;
     }
-    if (gapZ > lo && gapZ < hi)
-      h.b.lbox(x, y + wallH - 0.18, gapZ, PWT, 0.36, gapW, P.wall, { cast: false });
+    if (gapZ > lo && gapZ < hi) {
+      h.b.lbox(x, y + wallH - 0.18, gapZ, PWT, 0.36, gapW, P.wall, WALLOPT);
+      WALL_TALLY.solid++;
+    }
+  }
+
+  /* ========================================================================
+     THE UNIT DOOR — the one interior door in this game that is LOCKED.
+
+     OWNER: "i dont like interior walls unless they are intentional, aka
+     locked apartment you have key to that allows interior walls in an
+     apartment building."  A flat is exactly that exception, so a flat gets
+     REAL walls and a real front door, and the door answers to two things and
+     nothing else:
+
+       (a) the player OWNS this address (zillow/realestate — CBZ.cityOwnsLot),
+       (b) the player is CARRYING its key (CBZ.cityKeys.has("apt:...")),
+           which residents carry (housing.js hands it out with the lease) and
+           which therefore moves by pickpocket, corpse loot or hostage — the
+           key system's own routes, not a second copy of them here.
+
+     Absent city/keys.js entirely, (b) is simply never true and the door stays
+     shut unless you own the place. It never crashes and it never opens.
+
+     A door OPENED stays open until somebody shuts it with [E] again: state on
+     the record, no timer. Open = the leaf's merged vertex slice is zeroed
+     (CBZ.batchWallHide, the same seam cityFracture punches walls with) and its
+     collider leaves CBZ.colliders — bank.js's vault-door idiom exactly.
+
+     COST: the leaf is a plain collider-referenced box, so core/batch.js merges
+     it like any other wall — 4k doors, zero extra draw calls. Lookup is an 8 m
+     spatial hash (the collider grid's own cell size), so the interaction zone
+     never scans the list.
+     ======================================================================== */
+  const DOOR_H = 2.15;                  // leaf height (the wall above it is fixed)
+  const UNIT_CELL = 8;
+  const UNIT_DOORS = [];
+  const UNIT_GRID = new Map();
+  function unitCellKey(x, z) { return Math.floor(x / UNIT_CELL) + "," + Math.floor(z / UNIT_CELL); }
+  function unitFile(d) {
+    UNIT_DOORS.push(d);
+    const k = unitCellKey(d.x, d.z);
+    let a = UNIT_GRID.get(k);
+    if (!a) { a = []; UNIT_GRID.set(k, a); }
+    a.push(d);
+  }
+  function unitDoorsReset() { UNIT_DOORS.length = 0; UNIT_GRID.clear(); WALL_TALLY.solid = 0; WALL_TALLY.doors = 0; }
+
+  // fill a partition's doorway with a locked leaf. `axis` is the axis the WALL
+  // RUNS along ("x" → fixed z at `at`, doorway centred on `gap` in x).
+  function unitDoor(h, y, axis, at, gap, gapW, wallH, id, label) {
+    const alongX = axis === "x";
+    const lx = alongX ? gap : at, lz = alongX ? at : gap;
+    const leaf = h.b.lbox(lx, y + DOOR_H / 2, lz,
+      alongX ? gapW : PWT, DOOR_H, alongX ? PWT : gapW, P.door, WALLOPT);
+    if (!leaf || !leaf.position) return null;
+    // the collider lbox just pushed for this exact mesh (solid:true pushes one)
+    const cols = CBZ.colliders || [];
+    const col = cols.length && cols[cols.length - 1].ref === leaf ? cols[cols.length - 1] : null;
+    if (!col) return null;
+    // the wall ABOVE the leaf, so a doorway is a hole in a wall and not a gap
+    // in a fence. (The lintel the partition already drew sits over this.)
+    const overH = wallH - 0.36 - DOOR_H;
+    if (overH > 0.06)
+      h.b.lbox(lx, y + DOOR_H + overH / 2, lz,
+        alongX ? gapW : PWT, overH, alongX ? PWT : gapW, P.wall, WALLOPT);
+    // a handle, because a door with no handle is a panel
+    const hoff = gapW / 2 - 0.14;
+    h.b.lbox(alongX ? lx + hoff : lx, y + 1.02, alongX ? lz : lz + hoff,
+      alongX ? 0.1 : PWT + 0.06, 0.06, alongX ? PWT + 0.06 : 0.1, P.gold, { cast: false });
+    const d = {
+      id: id, label: label, open: false,
+      x: h.ox + lx, z: h.oz + lz, floorY: y, top: y + wallH,
+      mesh: leaf, col: col, b: h.b, ox: h.ox, oz: h.oz,
+    };
+    unitFile(d);
+    WALL_TALLY.doors++;
+    return d;
+  }
+
+  function unitSetOpen(d, open) {
+    if (!d || !d.mesh || !!d.open === !!open) return false;
+    d.open = !!open;
+    const cols = CBZ.colliders || [];
+    if (d.open) {
+      if (!(CBZ.batchWallHide && CBZ.batchWallHide(d.mesh))) d.mesh.visible = false;
+      const i = cols.indexOf(d.col);
+      if (i >= 0) cols.splice(i, 1);
+    } else {
+      if (!(CBZ.batchWallShow && CBZ.batchWallShow(d.mesh))) d.mesh.visible = true;
+      if (cols.indexOf(d.col) < 0) cols.push(d.col);
+    }
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    return true;
+  }
+  // THE LOT AND THE BUILDING ARE NOT THE SAME OBJECT. buildings.js hands each
+  // lot a SPREAD COPY of the building record (`lot.building = { ...b, name,
+  // sign, side, door }`), so `lot.building === b` is FALSE for every building
+  // in the game and an identity test across that seam silently matches nothing.
+  // The site's origin is the key that actually crosses it.
+  function sameSite(b1, b2) {
+    if (!b1 || !b2) return false;
+    if (b1 === b2) return true;
+    return Math.abs((b1.ox || 0) - (b2.ox || 0)) < 0.01 &&
+           Math.abs((b1.oz || 0) - (b2.oz || 0)) < 0.01;
+  }
+  // which home LOT is this door's building? Resolved once, on the first [E].
+  function unitLot(d) {
+    if (d._lot !== undefined) return d._lot;
+    d._lot = null;
+    const city = CBZ.city;
+    const A = city && city.arena;
+    const pools = [city && city.homeLots, A && A.homeLots, A && A.lots];
+    for (let p = 0; p < pools.length && !d._lot; p++) {
+      const lots = pools[p];
+      if (!lots) continue;
+      for (let i = 0; i < lots.length; i++) {
+        if (lots[i] && sameSite(lots[i].building, d.b)) { d._lot = lots[i]; break; }
+      }
+    }
+    return d._lot;
+  }
+  function unitMayOpen(d) {
+    if (!d) return false;
+    const lot = unitLot(d);
+    if (lot && CBZ.cityOwnsLot && CBZ.cityOwnsLot(lot)) return true;
+    return !!(CBZ.cityKeys && typeof CBZ.cityKeys.has === "function" && CBZ.cityKeys.has(d.id));
+  }
+  function unitDoorAt(px, pz, reach, py) {
+    let best = null, bd = reach * reach;
+    const gx = Math.floor((px - reach) / UNIT_CELL), gx1 = Math.floor((px + reach) / UNIT_CELL);
+    const gz = Math.floor((pz - reach) / UNIT_CELL), gz1 = Math.floor((pz + reach) / UNIT_CELL);
+    for (let x = gx; x <= gx1; x++) for (let z = gz; z <= gz1; z++) {
+      const a = UNIT_GRID.get(x + "," + z);
+      if (!a) continue;
+      for (let i = 0; i < a.length; i++) {
+        const d = a[i];
+        // the floor you are STANDING on, never the flat two storeys up
+        if (py != null && (py < d.floorY - 1.2 || py > d.top + 0.6)) continue;
+        const dx = d.x - px, dz = d.z - pz, q = dx * dx + dz * dz;
+        if (q < bd) { bd = q; best = d; }
+      }
+    }
+    return best;
+  }
+
+  // the doors on ONE address at ONE floor height — housing.js's bridge from a
+  // lease (lot + floorY) to the physical door that lease is for.
+  CBZ.cityUnitDoorsOn = function (b, floorY, tol) {
+    const out = [];
+    if (!b) return out;
+    const t = tol == null ? 0.6 : tol;
+    for (let i = 0; i < UNIT_DOORS.length; i++) {
+      const d = UNIT_DOORS[i];
+      if (sameSite(d.b, b) && (floorY == null || Math.abs(d.floorY - floorY) <= t)) out.push(d);
+    }
+    return out;
+  };
+  CBZ.cityUnitDoors = {
+    all: function () { return UNIT_DOORS.slice(); },
+    at: unitDoorAt,
+    mayOpen: unitMayOpen,
+    setOpen: unitSetOpen,
+    on: function (b, floorY, tol) { return CBZ.cityUnitDoorsOn(b, floorY, tol); },
+    count: function () { return UNIT_DOORS.length; },
+    openCount: function () { let n = 0; for (let i = 0; i < UNIT_DOORS.length; i++) if (UNIT_DOORS[i].open) n++; return n; },
+  };
+
+  // [E] ON THE DOOR. Registered lazily: city/interactions.js parses AFTER this
+  // file (index.html 989 vs 1390), so a registration written at parse time
+  // would be dead on arrival — the same lesson armReset() below records.
+  let doorVerbWired = false;
+  function wireDoorVerb() {
+    const I = CBZ.interactions;
+    if (doorVerbWired || !I || !I.registerZone) return false;
+    I.registerZone({
+      id: "zone-unit-door", kind: "unitdoor", prio: 8, driving: false,
+      find: function (px, pz, ctx) { return unitDoorAt(px, pz, 1.9, ctx && ctx.pos ? ctx.pos.y : null); },
+      options: [{
+        id: "unit-door-use", slot: "e",
+        label: function (d) {
+          if (d.open) return "Close " + d.label;
+          return unitMayOpen(d) ? ("Unlock " + d.label) : ("Locked. " + d.label + ".");
+        },
+        onSelect: function (d) {
+          const note = (CBZ.city && CBZ.city.note) ? CBZ.city.note : function () {};
+          if (d.open) { unitSetOpen(d, false); note("Closed " + d.label + ".", 1.6); return; }
+          if (!unitMayOpen(d)) { note("Locked. " + d.label + ".", 2.0); return; }
+          // YOU OWN IT → you get the key, once, as a real item in the bag.
+          // Ownership already opened the door; the key is so the player can SEE
+          // that this address is theirs without standing in front of it.
+          if (CBZ.cityKeys && CBZ.cityKeys.grant && !CBZ.cityKeys.has(d.id))
+            { try { CBZ.cityKeys.grant(d.id, "Key · " + d.label); } catch (e) {} }
+          unitSetOpen(d, true);
+          note("Unlocked " + d.label + ".", 1.8);
+        },
+      }],
+    });
+    I.describe("unitdoor", function (d) {
+      return { label: d.label, note: d.open ? "Open" : (unitMayOpen(d) ? "Your key fits" : "Locked — somebody lives here") };
+    });
+    doorVerbWired = true;
+    return true;
   }
 
   function seatReg(h, x, y, z, face, kind, cushionH) {
@@ -747,19 +980,19 @@
   }
 
   // ========================================================================
-  //  (b) MEETING — ONE room, one table, chairs, a wall screen, and SPACE.
-  //  The room is the half of the plate FURTHEST from the door, behind ONE
-  //  full-span divider whose doorway sits on the door's own approach line:
-  //  you enter, cross the open half, pass through the portal. The wall IS
-  //  the design — one line, one gap, aligned to the way you arrive — and it
-  //  can never cut across the walk-in. opts.door orients it ({x,z,nx,nz},
-  //  host-local; default: entry from -z); opts.divider:false skips the wall
-  //  for hosts whose room is already walled.
+  //  (b) MEETING — ONE table, chairs, a wall screen, and SPACE.
+  //
+  //  It used to be a room behind a full-span DIVIDER. The divider was a wall
+  //  you walked through: no collider, no door, no reason. The half-plate is
+  //  still the design — you come in, cross the open half, and the table is at
+  //  the far end where a boardroom belongs — but the boundary is now the
+  //  ARRANGEMENT, not a painted-on wall. opts.door orients it ({x,z,nx,nz},
+  //  host-local; default: entry from -z).
   // ========================================================================
   function progMeeting(r, h, opts) {
     shell(h, r);
     const anchors = [];
-    const y = r.y, wallH = h.fh - 0.1;
+    const y = r.y;
     const din = (opts && opts.door) || { x: cx(r), z: r.z0, nx: 0, nz: 1 };
     const alongX = Math.abs(din.nx) > 0.5;              // door on a ±x wall → depth runs along x
     let room;
@@ -767,14 +1000,10 @@
       const zc2 = cz(r);
       room = din.nz > 0 ? { x0: r.x0, x1: r.x1, z0: zc2, z1: r.z1 } : { x0: r.x0, x1: r.x1, z0: r.z0, z1: zc2 };
       if (room.z1 - room.z0 < 3.4) return { anchors: anchors };   // too shallow — stay a shell
-      const gapAt = Math.min(Math.max(din.x, r.x0 + 1.2), r.x1 - 1.2);
-      if (!opts || opts.divider !== false) wallX(h, y, zc2, r.x0, r.x1, gapAt, 1.8, wallH);
     } else {
       const xc2 = cx(r);
       room = din.nx > 0 ? { x0: xc2, x1: r.x1, z0: r.z0, z1: r.z1 } : { x0: r.x0, x1: xc2, z0: r.z0, z1: r.z1 };
       if (room.x1 - room.x0 < 3.4) return { anchors: anchors };
-      const gapAt = Math.min(Math.max(din.z, r.z0 + 1.2), r.z1 - 1.2);
-      if (!opts || opts.divider !== false) wallZ(h, y, xc2, r.z0, r.z1, gapAt, 1.8, wallH);
     }
     const mx2 = (room.x0 + room.x1) / 2, mz2 = (room.z0 + room.z1) / 2;
     if (!h.clear(mx2, mz2, 1.0)) return { anchors: anchors };     // core/shaft owns the centre — an empty room is still a room
@@ -978,7 +1207,9 @@
     const faceIn = Math.atan2(-nx, -nz);
     // face AWAY from the arrival (someone with their back to the door)
     const faceOut = Math.atan2(nx, nz);
-    // a full-span partition at depth inD with ONE doorway at lateral `gap`
+    // a full-span SOLID partition at depth inD with ONE doorway at lateral
+    // `gap`. Only the rooms that are PLACES call this now (the boss's flat,
+    // the three state rooms); every generic program lost its divider.
     function divider(inD, gap, gapW, wallH) {
       const p = at(inD, 0), g = at(inD, gap);
       if (along) wallZ(h, y, p.x, r.z0, r.z1, g.z, gapW || 1.8, wallH);
@@ -1334,6 +1565,9 @@
     const cLo = cMid - CORR_W / 2, cHi = cMid + CORR_W / 2;
     // ---- one frame, four rotations (progMeeting's alongX trick) -------------
     const P = function (run, cr) { return alongX ? { x: run, z: cr } : { x: cr, z: run }; };
+    // WHICH storey this is, so a flat can be called Unit 3B out loud.
+    const floorK = floorIndexOf(r, h);
+    const addr = "apt:" + Math.round(h.ox) + "_" + Math.round(h.oz) + ":" + floorK;
     // a wall RUNNING along the corridor at a fixed cross coordinate
     const wallRun = function (crossAt, a, b2, gap, gapW) {
       if (alongX) wallX(h, y, crossAt, a, b2, gap, gapW, wallH);
@@ -1410,7 +1644,15 @@
         const dp = P(mid, crossAt);
         if (!inRect(r, dp.x, dp.z, 0.2) || !h.clear(dp.x, dp.z, 0.8)) { kept[key][u] = false; continue; }
         kept[key][u] = true; live++;
-        wallRun(crossAt, a, b2, mid, 1.0);                    // the flat's own front door
+        wallRun(crossAt, a, b2, mid, 1.0);                    // the corridor wall...
+        // ...and the flat's own LOCKED front door filling the gap in it. This
+        // is the one interior wall the owner asked for by name: "locked
+        // apartment you have key to that allows interior walls in an apartment
+        // building". The corridor stays public; the flat does not.
+        const n = u * sides.length + s;
+        const label = "Unit " + (floorK + 1) + String.fromCharCode(65 + (n % 26));
+        unitDoor(h, y, alongX ? "x" : "z", crossAt, mid, 1.0, wallH,
+          addr + ":" + n, label);
         if (u > 0 && kept[key][u - 1]) {                      // party wall between flats
           if (side < 0) wallCross(a, crossLo, cLo);
           else wallCross(a, cHi, crossHi);
@@ -2532,11 +2774,13 @@
   CBZ.interiorProgramNames = ["empty", "deskfarm", "meeting", "storage", "lobby", "checkpoint",
     "quarters", "bosssuite", "residential", "breakroom", "statehall", "stateresidence",
     "cabinetroom", "ovaloffice"];
-  // THE PARTITION ALONE — one thin full-run wall with ONE doorway and a lintel
-  // over it, in the host's local frame. It is the only wall this kit draws and
-  // it was private to `meeting` and `bosssuite`; a caller that wants to make a
-  // ROOM out of part of a big floorplate needs exactly this and nothing else, so
-  // it is the difference between one export and a fifth partition drawer.
+  // THE PARTITION ALONE — one thin full-run SOLID wall with ONE doorway and a
+  // lintel over it, in the host's local frame. It is the only wall this kit
+  // draws; a caller that wants to make a ROOM out of part of a big floorplate
+  // needs exactly this and nothing else, so it is the difference between one
+  // export and a fifth partition drawer. It carries a COLLIDER now (see the
+  // doctrine block above wallX): callers get a wall, not a picture of one, and
+  // there is no way left to ask this file for a fake one.
   //   spec: { axis:"x"|"z", at, from, to, gap, gapW, h }
   //     axis "x" → the wall RUNS along x at a fixed z (`at`), from..to in x.
   //     axis "z" → the wall RUNS along z at a fixed x (`at`), from..to in z.
@@ -3085,6 +3329,14 @@
       programs: progs,                           // program name -> floors dressed
       homeFloors: RES_TALLY.floors,
       units: RES_TALLY.units,                    // <- only ever UP
+      // INTERIORS ARE INTENTIONAL: every interior wall this kit draws is now
+      // SOLID (a collider you walk around), and `decorativePartitions` is the
+      // count of walk-through ones it still draws. PIN IT AT 0 — a fake wall
+      // is the owner's complaint, stated as a number.
+      decorativePartitions: 0,
+      solidPartitions: WALL_TALLY.solid,
+      unitDoors: WALL_TALLY.doors,
+      unitDoorsOpen: CBZ.cityUnitDoors ? CBZ.cityUnitDoors.openCount() : 0,
       unitBeds: RES_TALLY.beds,
       people: PEOPLE.posts,                      // declared interior jobs
       robberies: PEOPLE.robberies,
@@ -3119,6 +3371,9 @@
     for (const k in SPILL.sites) delete SPILL.sites[k];
     FIXTURE.records.length = 0;
     RES_TALLY.floors = RES_TALLY.units = RES_TALLY.beds = 0;
+    // the doors described a city that no longer exists (their meshes and
+    // colliders died with it) — drop them in lockstep with the geometry.
+    unitDoorsReset();
     // the interior job rows go with the arena they described — re-opening the
     // venue on the next declaration CLEARS citystaff's own list for us, so a
     // rebuilt city can never inherit a job from a demolished building.
@@ -3138,6 +3393,7 @@
   // identical wrap in city/furniture.js). Re-armed from interiorProgram, which
   // cannot run until the whole script block has parsed.
   function armReset() {
+    wireDoorVerb();
     if (typeof CBZ.propPurposeReset !== "function" || CBZ.propPurposeReset._interiorWrapped) return;
     const prev = CBZ.propPurposeReset;
     const wrapped = function () { CBZ.interiorAuditReset(); return prev.apply(this, arguments); };

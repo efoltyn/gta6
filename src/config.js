@@ -1276,7 +1276,8 @@
   // to be."). Every generated office interior is ONE thing, per building,
   // identical on every floor: an intentionally EMPTY lit shell (most), the
   // DESK-FARM (ordered rows of identical desks/terminals with real seated
-  // peds typing at them), ONE meeting room behind one aligned divider, or
+  // peds typing at them), ONE open meeting floor (the divider that used to
+  // stand across it was a wall with no collider and is gone), or
   // uniform archive racks — the archetype kit in city/interior_programs.js
   // (reusable by any structure builder via CBZ.interiorProgram). Apartment
   // towers stop rotating their flat plan per storey (one plan per building)

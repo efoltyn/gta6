@@ -4785,18 +4785,30 @@
 
   // ---- REUSABLE INTERIOR ROOM-KIT ----------------------------------------
   // WHY: lots are huge (usable ~27-29u square, FH=4.6) but the old furnishers
-  // dropped a sparse scatter into ONE undivided box — every interior read bare
-  // and unintentional. roomKit() is the shared layer that turns a plate into
-  // PROGRAMMED ROOMS: thin partition walls (with real doorways) + a furniture-set
-  // vocabulary. Everything is draw-call-cheap: partitions/furniture are all
-  // cast:false, NON-collider, NON-los, no userData, ONE shared wall colour (PCOL)
-  // → core/batch.js folds them into its colour buckets (≈0 extra draw calls), and
-  // because they carry no y1 collider they're invisible to the carve/breach picker.
-  // Every placement is gated through clearFloorPoint so the door aisle / stair
-  // strip / elevator shaftRects stay walkable. baseY lifts the whole kit onto an
-  // upper floor (the furnishPenthouse/furnishHome precedent).
+  // dropped a sparse scatter into ONE undivided box. roomKit() is the shared
+  // layer that turns a plate into PROGRAMMED ROOMS: partition walls (with real
+  // doorways) + a furniture-set vocabulary.
+  //
+  // A WALL YOU WALK THROUGH IS A PAINTING OF A WALL (owner: "interiors have
+  // tons of fake walls ... i dont like interior walls unless they are
+  // intentional"). These partitions used to be NON-collider on purpose, which
+  // meant every "room" in the game was a decal. They are SOLID now — and the
+  // only callers left are the ones whose rooms are real: a HOME's bedroom
+  // wing and the single-flat apartment fallback. The office bullpen's meeting
+  // strip, its break corner and the penthouse's master suite were all fake
+  // walls around furniture that reads fine on an open plate, and they are
+  // deleted rather than made solid: open space is the default now.
+  //
+  // Still draw-call-cheap: cast:false, no userData, ONE shared wall colour
+  // (PCOL) → core/batch.js merges a collider-referenced wall down its WALL
+  // path (identity kept, hidden, zero extra draw calls) exactly as it does the
+  // building's own facade. Every placement is gated through clearFloorPoint so
+  // the door aisle / stair strip / elevator shaftRects stay walkable. baseY
+  // lifts the whole kit onto an upper floor (the furnishPenthouse/furnishHome
+  // precedent).
   const PWT = 0.16;          // thin partition thickness (one place, shared by pool floor too)
   const PCOL = 0xb9bcc4;     // one shared partition colour bucket
+  const KITWALL = { cast: false, solid: true };   // a partition is a WALL, not a decal
 
   // ---- THE SHELL IS THE LAW ------------------------------------------------
   // OWNER: "INTERIORS SHOULD NOT SPILL ONTO THE STREET AS MANY LIKE MERIDIAN
@@ -4833,9 +4845,9 @@
       b.lbox(x, Y + y, z, w, h, d, c, { emissive: c, ei: ei || 0.5, cast: false });
       return true;
     }
-    // a full-height thin partition running along X at fixed z (x0..x1), split into
-    // ≤2 spans around a doorway centred at gapX (width gapW) with a lintel over it.
-    // NON-collider/NON-los so it batch-folds + the carve/breach picker ignores it.
+    // a full-height SOLID partition running along X at fixed z (x0..x1), split
+    // into ≤2 spans around a doorway centred at gapX (width gapW) with a lintel
+    // over it. Collider-backed: you walk around it or through the doorway.
     function wallX(z, x0, x1, gapX, gapW) {
       gapW = gapW || 1.6;
       const lo = Math.min(x0, x1), hi = Math.max(x0, x1);
@@ -4843,12 +4855,12 @@
       const segs = gapX != null && gapX > lo && gapX < hi ? [[lo, g0], [g1, hi]] : [[lo, hi]];
       for (let i = 0; i < segs.length; i++) {
         const s0 = segs[i][0], s1 = segs[i][1]; if (s1 - s0 < 0.2) continue;
-        b.lbox((s0 + s1) / 2, Y + WALLH / 2, z, s1 - s0, WALLH, PWT, PCOL, { cast: false });
+        b.lbox((s0 + s1) / 2, Y + WALLH / 2, z, s1 - s0, WALLH, PWT, PCOL, KITWALL);
       }
       if (gapX != null && gapX > lo && gapX < hi)   // lintel over the doorway so it reads as a portal
-        b.lbox(gapX, Y + WALLH - 0.18, z, gapW, 0.36, PWT, PCOL, { cast: false });
+        b.lbox(gapX, Y + WALLH - 0.18, z, gapW, 0.36, PWT, PCOL, KITWALL);
     }
-    // a full-height thin partition running along Z at fixed x (z0..z1), doorway at gapZ.
+    // a full-height SOLID partition running along Z at fixed x (z0..z1), doorway at gapZ.
     function wallZ(x, z0, z1, gapZ, gapW) {
       gapW = gapW || 1.6;
       const lo = Math.min(z0, z1), hi = Math.max(z0, z1);
@@ -4856,10 +4868,10 @@
       const segs = gapZ != null && gapZ > lo && gapZ < hi ? [[lo, g0], [g1, hi]] : [[lo, hi]];
       for (let i = 0; i < segs.length; i++) {
         const s0 = segs[i][0], s1 = segs[i][1]; if (s1 - s0 < 0.2) continue;
-        b.lbox(x, Y + WALLH / 2, (s0 + s1) / 2, PWT, WALLH, s1 - s0, PCOL, { cast: false });
+        b.lbox(x, Y + WALLH / 2, (s0 + s1) / 2, PWT, WALLH, s1 - s0, PCOL, KITWALL);
       }
       if (gapZ != null && gapZ > lo && gapZ < hi)
-        b.lbox(x, Y + WALLH - 0.18, gapZ, PWT, 0.36, gapW, PCOL, { cast: false });
+        b.lbox(x, Y + WALLH - 0.18, gapZ, PWT, 0.36, gapW, PCOL, KITWALL);
     }
     // PROPS_PURPOSE anchors — seats/beds the kit's furniture sets place
     // register sit/sleep spots for city/propuse.js (world = building-local +
@@ -5348,13 +5360,21 @@
     }
     baseClutter();
 
-    // ---- UNIVERSAL BACK-OF-HOUSE PARTITION (every non-showroom trade) ----------
+    // ---- UNIVERSAL BACK-OF-HOUSE WALL (every non-showroom trade) --------------
     // WHY: a shop is a SALES FLOOR (front) backed by a STOCKROOM the customer
-    // never sees — the old single-box interior had no such read. A thin full-height
-    // partition runs across the room behind the counter (at backDepth from the door
-    // wall), with a ≥1.6u doorway gap so the clerk can reach the back. The back
-    // band holds a small back OFFICE (setBackroom). Showroom trades
-    // (carlot/chop/realtor) keep their open display floor — they return early below.
+    // never sees. A full-height wall runs across the room behind the counter (at
+    // backDepth from the door wall), with a ≥1.6u doorway gap so the clerk can
+    // reach the back. The back band holds a small back OFFICE (setBackroom).
+    //
+    // THIS ONE IS INTENTIONAL, SO IT IS SOLID. It used to be a collider-less
+    // decal you strolled through to reach the safe, which is the owner's whole
+    // complaint; the answer to "a room the customer never sees" is a wall, not
+    // a picture of one. Every other sub-room this file used to fake on a shop
+    // floor (fitting booths, an enclosed kitchen, exam bays, a locker room, two
+    // back-office cells) is deleted — see the strongroom block below.
+    //
+    // Showroom trades (carlot/chop/realtor) keep their open display floor —
+    // they return early below.
     // (firestation joins the showroom exclusions: its ground floor IS the
     //  apparatus bay — an engine has to be able to roll straight out of it.)
     const backWalled = kind !== "carlot" && kind !== "chop" && kind !== "realtor" && kind !== "firestation"
@@ -5371,11 +5391,11 @@
         const lx = inx * (-halfIn + backDepth) + tx * latC;
         const lz = inz * (-halfIn + backDepth) + tz * latC;
         const bw = along ? PWT : len, bd = along ? len : PWT;
-        b.lbox(lx, WALLH / 2, lz, bw, WALLH, bd, PCOL, { cast: false });
+        b.lbox(lx, WALLH / 2, lz, bw, WALLH, bd, PCOL, KITWALL);
       }
       // lintel over the doorway
       const llx = inx * (-halfIn + backDepth), llz = inz * (-halfIn + backDepth);
-      b.lbox(llx, WALLH - 0.18, llz, along ? PWT : gapW, 0.36, along ? gapW : PWT, PCOL, { cast: false });
+      b.lbox(llx, WALLH - 0.18, llz, along ? PWT : gapW, 0.36, along ? gapW : PWT, PCOL, KITWALL);
       // BACK-OFFICE fill behind the wall (setBackroom: one desk + one shelf). The
       // back band runs from the partition (backDepth) to the back wall, across the
       // tangent — convert those IN-frame corners to a building-local axis rect.
@@ -6011,22 +6031,31 @@
       }
     }
 
-    // ---- PER-KIND PARTITION ACCENTS (read on top of the back-of-house wall) ----
-    // Small enclosed sub-rooms that make each trade read as itself. All cast:false
-    // / batch-folded; every wall span carries a doorway gap and every piece is
-    // clearFloorPoint-gated. A thin partition box along the tangent at `inDepth`.
+    // ---- THE STRONGROOM, AND NOTHING ELSE --------------------------------
+    // A shop floor used to be diced up by six trades' worth of fake sub-rooms:
+    // fitting booths, an enclosed kitchen, hospital exam bays, a gym locker
+    // room, a realtor's back office, a bank manager's glass cell. Every one of
+    // them was a full-height (4.55 m) wall with NO collider — you walked
+    // through the changing room to reach the till.
+    //
+    // OWNER: "i dont like interior walls unless they are intentional, aka ...
+    // bank vault, but i like open space and theres a lot of unnecessary walls
+    // rn." So they are gone. What survives is the ONE room on a shop floor
+    // that has to be a room — the bank's strongroom, whose whole point is that
+    // you cannot walk into it — and it is SOLID: a collider-backed wall the
+    // heist has to go through, not around.
     function partAlong(inDepth, lat0, lat1, c) {
       const latC = (lat0 + lat1) / 2, len = Math.abs(lat1 - lat0);
       if (len < 0.2) return;
       const lx = inx * (-halfIn + inDepth) + tx * latC, lz = inz * (-halfIn + inDepth) + tz * latC;
-      b.lbox(lx, (FHl - 0.05) / 2, lz, along ? PWT : len, FHl - 0.05, along ? len : PWT, c || PCOL, { cast: false });
+      b.lbox(lx, (FHl - 0.05) / 2, lz, along ? PWT : len, FHl - 0.05, along ? len : PWT, c || PCOL, KITWALL);
     }
-    // a thin partition perpendicular (running INWARD) at a fixed tangent `lat`.
+    // the same wall perpendicular (running INWARD) at a fixed tangent `lat`.
     function partIn(d0, d1, lat, c) {
       const dC = (d0 + d1) / 2, len = Math.abs(d1 - d0);
       if (len < 0.2) return;
       const lx = inx * (-halfIn + dC) + tx * lat, lz = inz * (-halfIn + dC) + tz * lat;
-      b.lbox(lx, (FHl - 0.05) / 2, lz, along ? len : PWT, FHl - 0.05, along ? PWT : len, c || PCOL, { cast: false });
+      b.lbox(lx, (FHl - 0.05) / 2, lz, along ? len : PWT, FHl - 0.05, along ? PWT : len, c || PCOL, KITWALL);
     }
     if ((2 * halfTan) >= 8 && (2 * halfIn) >= 13) {
       if (kind === "clothing") {
@@ -6035,19 +6064,18 @@
         for (let i = 0; i < 3; i++) {
           const d = 5.0 + i * 2.2;
           if (d > 2 * halfIn - 6.0) break;
-          partIn(d - 0.9, d + 0.9, lat - 0.9);                       // booth back-divider
           const p = pt(d, lat, 0.8);
           if (p) decor(p, 1.1, along ? 1.6 : 0.1, 2.2, along ? 0.1 : 1.6, 0x4a4250);  // curtain front
         }
       } else if (kind === "food" || kind === "bar") {
-        // an ENCLOSED KITCHEN behind the counter: a walled cell with a pass window
-        const kd = 2 * halfIn - 5.0;
-        partAlong(kd, -(halfTan - 0.6), -1.0);                       // kitchen front wall (one side of a pass gap)
-        partAlong(kd, 1.0, halfTan - 0.6);
+        // an OPEN KITCHEN behind the counter. The two walls that used to cell it
+        // in were walk-through, and the counter is already the barrier that
+        // says "staff only" — you can see the cook now, which is better.
         const kp = pt(2 * halfIn - 3.0, halfTan - 1.6, 0.8);
         if (kp) decor(kp, 0.55, along ? 0.9 : 2.0, 1.0, along ? 2.0 : 0.9, 0x6a7078);  // a steel prep counter inside
       } else if (kind === "bank") {
-        // a walled VAULT room in the back corner + a manager office beside it.
+        // the walled STRONGROOM in the back corner — the one shop sub-room that
+        // survives the open-plan pass, and the one the owner named out loud.
         // SPACE DOCTRINE: the vault room's read is bank.js's REAL steel vault
         // (the heist drill point) standing inside these walls — the old floating
         // deco door slab that doubled it mid-room is cut.
@@ -6064,13 +6092,10 @@
         const vd0 = 2 * halfIn - 6.0, vlat = halfTan - 2.0;
         partAlong(vd0, vlat - 2.2, halfTan - wIn);                   // vault front wall (no gap — the steel vault is the read)
         partIn(vd0, 2 * halfIn - wIn, vlat - 2.2);                   // vault -side wall
-        // manager office on the opposite side: a glass-front cell holding ONE
-        // desk with a lit screen, one chair, and SPACE (owner doctrine — a
-        // separate room is an office with one desk, not a cram). Cell widened
-        // 2.0→3.0u so the desk breathes; the glass front keeps a door gap.
-        const oLat = -(halfTan - 3.0);                               // office inner wall
-        partIn(5.0, 9.0, oLat);
-        partAlong(9.0, -(halfTan - 0.6), -(halfTan - 1.8), GLASS);   // glass front (the 1.2u gap beside it = the way in)
+        // the manager's desk on the opposite side. It used to sit in a
+        // "glass-front cell" made of two walk-through partitions; a desk
+        // against the side wall of an open banking hall reads the same and is
+        // honest about what you can and cannot walk into (the strongroom).
         const od = pt(6.6, -(halfTan - 1.05), 0.8);
         if (od) {
           decor(od, 0.4, 0.8, 0.8, 1.6, 0x6b4a2a);                   // the ONE desk (long side on the wall)
@@ -6083,30 +6108,28 @@
           }
         }
       } else if (kind === "hospital") {
-        // partitioned EXAM ROOMS along one side wall (2-3 curtained bays)
+        // CURTAINED exam bays along one side wall — a row of beds down an open
+        // ward, which is what a curtain is for. The corridor wall and the three
+        // bay dividers that used to enclose them were full-height and
+        // walk-through: three fake rooms on every hospital lot in the world.
         const lat = halfTan - 1.8;
-        partIn(5.0, 2 * halfIn - 4.0, lat - 1.6);                    // corridor wall fronting the exam bays
         for (let i = 0; i < 3; i++) {
           const d = 6.0 + i * 3.2; if (d > 2 * halfIn - 5.0) break;
-          partAlong(d, lat - 1.6, lat + 1.4);                       // exam-room dividers
           const bp = pt(d - 1.4, lat, 0.8);
           if (bp) decor(bp, 0.45, along ? 0.7 : 1.8, 0.5, along ? 1.8 : 0.7, 0xe6e8ee);  // exam bed
         }
       } else if (kind === "gym") {
-        // a LOCKER-ROOM partition walling off the back corner (lockers inside)
-        const ld = 2 * halfIn - 6.0;
-        partAlong(ld, -(halfTan - 0.6), -1.2);                      // locker-room front wall + doorway gap
-        partIn(ld, 2 * halfIn - 0.5, -1.2);
+        // a bank of LOCKERS against the back wall. The two partitions that used
+        // to wall the corner off were walk-through; the lockers themselves are
+        // the read, and now the whole floor is one room you can cross.
         for (let i = 0; i < 4; i++) {
           const lat = -(halfTan - 1.4) + i * 1.0;
           const lp2 = pt(2 * halfIn - 2.5, lat, 0.8);
           if (lp2) decor(lp2, 1.1, along ? 0.5 : 0.9, 2.2, along ? 0.9 : 0.5, 0x49566b);  // lockers
         }
       } else if (kind === "realtor") {
-        // realtor keeps its open display floor — just a small BACK OFFICE cell.
-        const od = 2 * halfIn - 5.0;
-        partAlong(od, -(halfTan - 0.6), -1.2);                      // back-office front wall + doorway
-        partIn(od, 2 * halfIn - 0.5, -1.2);
+        // realtor keeps its open display floor, and now that is ALL it is — the
+        // two-wall "back office cell" was a pair of paintings of walls.
         const op = pt(2 * halfIn - 2.8, -(halfTan - 1.8), 0.8);
         if (op) decor(op, 0.5, along ? 0.9 : 1.6, 1.0, along ? 1.6 : 0.9, 0x6b4a2a);  // manager desk
       }
@@ -6701,12 +6724,15 @@
       });
     }
 
-    // ---- PARTITIONED SHELL around the bullpen (large plates only) -------------
-    // WHY: a real office isn't an open slab of desks — it has a reception you
-    // arrive into, enclosed meeting rooms along the back glass, and a break room
-    // tucked in a corner. We carve those rooms FIRST and SHRINK the bullpen grid
-    // bounds so the desks never overlap them. Partitions batch-fold (≈0 draw
-    // calls) and the desk station() / anchor math is untouched (byte-compatible).
+    // ---- ZONED (not walled) SHELL around the bullpen (large plates only) -----
+    // WHY: a real office has a reception you arrive into, a meeting end and a
+    // break corner. It used to have PARTITIONS around them — walls with no
+    // collider, i.e. paintings of walls, which is exactly the owner's complaint
+    // ("i dont like interior walls unless they are intentional ... i like open
+    // space"). The rooms are still ZONES: the desk grid still stops short of the
+    // meeting strip and the break corner, so the furniture reads as three
+    // distinct areas of one open floor. The walls are gone, not made solid — an
+    // office floor is not an apartment and not a vault.
     const k = roomKit(b, baseY);
     let bullZ1 = k.zHi;                          // back limit of the desk grid (shrinks if rooms claim the back)
     let bullX1 = k.xHi;                          // +x limit of the desk grid (shrinks if a break room claims a corner)
@@ -6719,22 +6745,16 @@
       const mzDepth = 4.2;
       const mz0 = k.zHi - mzDepth;
       bullZ1 = mz0 - 0.6;                        // desks stop short of the meeting strip
-      // a partition along X separating the bullpen from the back meeting strip,
-      // with a doorway in the middle so the rooms stay reachable.
-      k.wallX(mz0, k.xLo, k.xHi, (k.xLo + k.xHi) / 2, 1.7);
       const mw = (k.xHi - k.xLo);
       const nMeet = mw >= 18 ? 2 : 1;
       for (let m = 0; m < nMeet; m++) {
         const mx0 = k.xLo + m * (mw / nMeet), mx1 = k.xLo + (m + 1) * (mw / nMeet);
-        if (m > 0) k.wallZ(mx0, mz0, k.zHi, (mz0 + k.zHi) / 2, 1.6);   // divider between the two rooms
         setMeeting(k, { x0: mx0 + 0.3, x1: mx1 - 0.3, z0: mz0 + 0.3, z1: k.zHi - 0.3 });
       }
-      // a BREAK ROOM in the back +x corner (enclosed by 2 partitions)
+      // a BREAK corner in the back +x of the plate (the desks yield the space)
       const brW = 4.2, brD = 4.0;
       const brX0 = k.xHi - brW, brZ1 = bullZ1, brZ0 = brZ1 - brD;
       if (brZ0 > k.zLo + 3.5) {
-        k.wallZ(brX0, brZ0, brZ1, (brZ0 + brZ1) / 2, 1.6);            // -x wall of the break room
-        k.wallX(brZ0, brX0, k.xHi, (brX0 + k.xHi) / 2, 1.6);          // -z wall of the break room
         setBreak(k, { x0: brX0 + 0.3, x1: k.xHi - 0.3, z0: brZ0 + 0.3, z1: brZ1 - 0.3 });
         bullX1 = brX0 - 0.6;                     // desks stop short of the break corner... (only in the back rows)
       }
@@ -6949,21 +6969,12 @@
     for (const sx of [-1, 1]) for (const sz of [-1, 0, 1]) zone(bx2 + sx * 0.9, 0.18, bz2 + sz * 1.5, 0.16, 0.36, 0.16, 0x14171c);  // table legs/pockets
     zoneGlow(bx2, FHl - 0.4, bz2, 1.4, 0.1, 0.5, 0xffe6c0, 0.5);                  // low pendant over the table
 
-    // ---- SUITE PARTITIONS: enclose the master bedroom + walk-in + ensuite as a
-    // real private suite (light touch — 2 partition walls with doorways). The
-    // bedroom plinth + walk-in nook already sit in the back -x corner; we wall the
-    // suite off from the great-room so it reads as a sealed master, not an open
-    // alcove. Batch-folds (cast:false / no collider) so the carve picker ignores
-    // it; clearFloorPoint-gated so the elevator/door landing stays walkable.
-    {
-      const kp = roomKit(b, baseY);
-      const suiteX1 = Math.min(kp.xLo + 6.6, kp.xHi);   // suite spans the -x corner out ~6.6u
-      const suiteZ1 = Math.min(kp.zLo + 6.4, kp.zHi);   // ...and ~6.4u deep from the back
-      // a VERTICAL wall (along Z) closing the suite's +x edge, doorway mid-span
-      kp.wallZ(suiteX1, kp.zLo, suiteZ1, (kp.zLo + suiteZ1) / 2, 1.8);
-      // a HORIZONTAL wall (along X) closing the suite's +z edge, doorway near -x
-      kp.wallX(suiteZ1, kp.xLo, suiteX1, kp.xLo + 2.0, 1.8);
-    }
+    // NO SUITE PARTITIONS. Two walls used to close the master bedroom off from
+    // the great-room, and both were walk-through — a sealed master you could
+    // stroll into sideways. A penthouse's whole read IS the open plate with the
+    // city on four sides, so the walls are deleted rather than made solid; the
+    // bedroom plinth and walk-in nook in the back -x corner say "suite" on
+    // their own, which is what they were doing all along.
   }
 
   // ---- THE INDOOR POOL FLOOR (mansion natatorium) ---------------------------

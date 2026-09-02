@@ -299,6 +299,42 @@
     return pick;
   }
 
+  /* ---- THE KEY TO YOUR OWN FRONT DOOR ------------------------------------
+     A flat's door is LOCKED now (city/interior_programs.js builds it, solid,
+     with an [E] that asks CBZ.cityKeys). A lock nobody holds a key to is a
+     wall with a message on it, so the lease hands one over: the tenant walks
+     around carrying the key to the door they live behind, which means it can
+     be pickpocketed off them, taken off their corpse, or demanded at gunpoint
+     — keys.js already owns all three routes, and this file adds none of them.
+
+     housing.js mints DATA units (1-2 a floor); the kit builds the corridor of
+     REAL doors on the same slab of the same building. Bridge them by address:
+     same building, same floorY, and a stable hash of the unit id picks which
+     door on that landing is theirs, so a ped keeps the same door every run.
+     Degrade-safe on every seam — no keys module, no doors built, no bridge. */
+  function doorForUnit(unit) {
+    if (!unit || typeof CBZ.cityUnitDoorsOn !== "function") return null;
+    const b = unit.building || (unit.lot && unit.lot.building);
+    if (!b) return null;
+    if (unit._door) return unit._door;
+    const doors = CBZ.cityUnitDoorsOn(b, unit.floorY);
+    if (!doors || !doors.length) return null;
+    let hsh = 0; const id = String(unit.id);
+    for (let i = 0; i < id.length; i++) hsh = (hsh * 31 + id.charCodeAt(i)) | 0;
+    unit._door = doors[Math.abs(hsh) % doors.length];
+    return unit._door;
+  }
+  function grantUnitKey(ped, unit) {
+    const K = CBZ.cityKeys;
+    if (!K || typeof K.givePed !== "function" || !ped || ped.isPlayer) return null;
+    const d = doorForUnit(unit);
+    if (!d) return null;
+    if (K.pedHas && K.pedHas(ped, d.id)) return d;
+    try { K.givePed(ped, d.id, "Key · " + d.label); } catch (e) { return null; }
+    return d;
+  }
+  CBZ.cityUnitDoorForLease = doorForUnit;
+
   // stamp a lease onto a ped: claim the unit, set the persistent anchors the
   // consumers read (ped._unit + ped._digs), and bump the building's _tenants
   // tally (additive — never touches home.owned/listed). Returns the home LOT.
@@ -321,6 +357,7 @@
     if (unit.floorY != null) ped._homeFloorY = unit.floorY;
     const hm = unit.lot && unit.lot.building && unit.lot.building.home;
     if (hm) hm._tenants = (hm._tenants | 0) + 1;
+    grantUnitKey(ped, unit);            // he lives here; he carries the key
     return unit.lot;
   }
 
@@ -418,6 +455,7 @@
     // already-counted roof. Keeps the "one rent bill per unit" model honest.
     ped._household = unit.id;
     partnerPed._household = unit.id;
+    grantUnitKey(ped, unit);            // a household-mate lives behind the same door
     return true;
   }
 
