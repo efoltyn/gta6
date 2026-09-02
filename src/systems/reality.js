@@ -130,12 +130,18 @@
 
     var buckets = new Map();
     var large = new Uint8Array(n), largeCount = 0;
+    // The large boxes as a LIST, not just a flag per box: visit() used to find
+    // them by scanning every later index on every iteration — an n² pass over
+    // the whole collider table hiding inside a build that is already 15 s.
+    // (load-profile 2026-09-01: `visit` was the single hottest JS function of
+    // the world build, 1.06 s self time.)
+    var largeList = [];
     for (i = 0; i < n; i++) {
       var r = i * 6;
       var cells = (ranges[r + 1] - ranges[r] + 1) *
                   (ranges[r + 3] - ranges[r + 2] + 1) *
                   (ranges[r + 5] - ranges[r + 4] + 1);
-      if (cells > maxCells) { large[i] = 1; largeCount++; continue; }
+      if (cells > maxCells) { large[i] = 1; largeCount++; largeList.push(i); continue; }
       for (var gx = ranges[r]; gx <= ranges[r + 1]; gx++) {
         for (var gy = ranges[r + 2]; gy <= ranges[r + 3]; gy++) {
           for (var gz = ranges[r + 4]; gz <= ranges[r + 5]; gz++) {
@@ -155,17 +161,20 @@
 
     function visit(fn) {
       var seen = new Int32Array(n), candidates = 0, hits = 0;
-      for (var ii = 0; ii < n; ii++) {
-        var stamp = ii + 1, rr = ii * 6;
-        function offer(jj) {
-          if (jj <= ii || seen[jj] === stamp) return;
-          seen[jj] = stamp;
-          candidates++;
-          if (near(boxes[ii], boxes[jj])) {
-            hits++;
-            fn(ii, jj, boxes[ii], boxes[jj]);
-          }
+      var ii = 0, stamp = 0;
+      // one closure for the whole pass (it used to be re-created per box)
+      function offer(jj) {
+        if (jj <= ii || seen[jj] === stamp) return;
+        seen[jj] = stamp;
+        candidates++;
+        if (near(boxes[ii], boxes[jj])) {
+          hits++;
+          fn(ii, jj, boxes[ii], boxes[jj]);
         }
+      }
+      for (ii = 0; ii < n; ii++) {
+        stamp = ii + 1;
+        var rr = ii * 6;
         if (!large[ii]) {
           for (var xg = ranges[rr]; xg <= ranges[rr + 1]; xg++) {
             for (var yg = ranges[rr + 2]; yg <= ranges[rr + 3]; yg++) {
@@ -176,7 +185,8 @@
               }
             }
           }
-          for (var li = ii + 1; li < n; li++) if (large[li]) offer(li);
+          // large boxes touch everything: pair with each one exactly once
+          for (var li = 0; li < largeList.length; li++) offer(largeList[li]);
         } else {
           for (var all = ii + 1; all < n; all++) offer(all);
         }

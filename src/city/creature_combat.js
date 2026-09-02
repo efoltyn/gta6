@@ -1294,10 +1294,6 @@
       }
       _bo.jaw = mark; _bo.sev = sev;
       _bo.sever = biteMaySever(style, jaw, sev, o && o.kill);
-      // WHO BIT. A limb a shark takes off goes INTO the shark (gore.js holds it
-      // in the jaws and swallows it) instead of flying out of the mouth along
-      // the bite line and sinking. Cleared per call below the bus.
-      _bo.by = attacker;
       /* THE LINE THE FLESH LEAVES ALONG. wounds.js hands opts.dir straight to
          CBZ.goreSever, so a severed limb is thrown along the jaw's own line
          rather than dropping where it stood. Given by the caller when it knows
@@ -1311,12 +1307,11 @@
       _bo.dir = _bd2;
       CBZ.bodyBite(target, _bp, _bo);
     } catch (e) {}
-    _bo.by = null;                       // the scratch must not pin an actor
   }
   // module-scope scratch for biteWound (allocation-free hot path)
   var _bp = { x: 0, y: 0, z: 0 };
   var _bd2 = { x: 0, y: 0, z: 0 };
-  var _bo = { jaw: 0.22, sev: 0.7, sever: false, fromX: 0, fromZ: 0, dir: null, by: null };
+  var _bo = { jaw: 0.22, sev: 0.7, sever: false, fromX: 0, fromZ: 0, dir: null };
 
   function endAttack(actor) {
     // remove any residual lunge offset so repeated attacks don't drift

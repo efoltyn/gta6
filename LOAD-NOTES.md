@@ -348,3 +348,94 @@ way: world build 25.9 s (branch) vs 25.6 s (main) — inside this file's own
 documented 20.9–31.7 s run spread, so treat the function-level number as the
 claim and the end-to-end delta as unmeasured. The owed list above is
 unchanged: #1 (slice the build) is still the headline.
+
+---
+
+## The reload at 99% (2026-09-01) — the tab was too heavy to live, not too slow
+
+Owner: *"takes way too long to load and also often gets to 98 or 99 percent and
+then the site reloads automatically"* — and from the phone, *"a problem
+repeatedly occurred"*.
+
+**Nothing in the game reloads the page during boot.** Every `location.reload()`
+is a button (GAME OVER, START A NEW LIFE, the build toggle). 98–99% on the
+meter is the last step, `boot:frames` — the first render, where the whole
+world is uploaded to the GPU. The reload is the BROWSER: iOS and Safari kill a
+WebContent process that hits the memory ceiling and reload the page; on a
+phone that loops into "a problem repeatedly occurred". So the bug was a
+weight, and the instrument had to be taught to weigh (`load-profile.mjs`
+WEIGHT now prints geometry bytes, unique materials and GL programs;
+`--profile` prints self time by FUNCTION, and `--profile-out` keeps the raw
+`.cpuprofile`).
+
+**What it weighed** (same tool, same rig, seed 90210, HEAD `63d4ad6` vs this
+tree):
+
+| | before | after |
+|---|---|---|
+| geometry attribute bytes, whole scene | **1,308 MB** (355 visible + 953 far-culled) | **563 MB** (217 + 346) |
+| JS heap after build | 508 MB | 456 MB |
+| unique geometries / materials / programs | 17,569 / 13,208 / 136 | 17,193 / 13,156 / 137 |
+| `startRun` freeze | 14.7 s | 12.2 s |
+
+(A probe's "visible vs hidden" split is farcull's state at that instant — two
+probes of one build said 1,165 MB and 358 MB "visible". Quote the TOTAL.)
+
+**Where the 1.3 GB was.** `core/batch.js`'s V2 merge: it de-indexed every
+source (`toNonIndexed` — a box became 36 vertices instead of 24, a 16×12
+sphere 1,152 instead of 221), stored normals and colours as float32, and
+emitted a uv for materials that by its own filter have no map — 44 bytes per
+vertex, on a world that turned out to have ~16 million of them once merged.
+One 112 m tile (`T-19,-3`, a mini-city: 35,866 meshes) was 1.3 M vertices and
+55 MB on its own. The merged copy now keeps the source indices in one
+Uint16/Uint32 buffer, stores Int8-normalized normals and Uint8-normalized
+colours, has no uv, and bakes the world matrix while copying instead of
+cloning every source first (`bakeMergeV2`). 18 bytes per vertex. The slice
+ledgers behind `batchWallHide`/`batchHideGroup` still mean vertex offset +
+count, so carving and demolition are untouched. `CBZ.batchCensus` names the
+fattest buckets and source meshes after every build.
+
+What is NOT the weight, for the record: the ~100k hidden wall originals the
+batch pass keeps for LOS and colliders share 3,069 box geometries — 2.5 MB.
+Their cost is the Mesh objects. 89,419 of the scene's 135k meshes are ped
+cloth-band boxes (`userData.clothDims`), which is where the JS heap lives.
+
+**The build, by function.** Two hot spots were not the world at all:
+`reality.js`'s support broadphase `visit` rescanned every later collider for
+the "large" boxes on every iteration — an n² loop over 123k boxes, 1.06 s of
+self time (now a precomputed list); and three's `Object3D.remove` — indexOf +
+splice on a building group's children array, 100k times, 0.46 s (now one
+filter per parent after the merge loop). The per-candidate
+`updateWorldMatrix(true, false)` became one `updateMatrixWorld(true)` on the
+root. Both are gone from the top-25 table.
+
+**Two more things landed on the phone at the same instant.** `initAudio()`
+runs on the PLAY press and used to fetch AND decode all ~77 bank files during
+the build — decoded PCM is ~384 KB per second, `disaster_siren` alone 76 s =
+29 MB — so ~100 MB of audio arrived exactly as the geometry peaked. Every cue
+already lazy-loads on a cache miss; the preload is now a warm-up that waits
+for the boot meter to let go and runs three files at a time, skips the two
+long sirens, and on iOS does nothing at all.
+
+**`defer` on all 569 script tags — tried, measured, NOT shipped.** The theory
+was an earlier title paint. `load-profile.mjs` now prints `first contentful
+paint`; four interleaved boot-only runs (after/before/after/before, load
+average 5-6) gave 3.1 / 4.7 / 4.9 / 3.9 s — pure noise. Classic scripts at the
+end of `<body>` already let the title card paint before the first one runs,
+so `defer` had nothing to move. The edit is one `sed` if anyone wants to
+retry on a quiet machine (the inline pre-config block and the two indented
+tags in the entities block are the only gotchas); at this noise floor it is a
+risk with no measured reward.
+
+**Still owed for an iPhone** (an iOS WebContent process gets roughly 1–1.4 GB;
+this tree is ~560 MB geometry + ~460 MB heap + GPU copies of what is on
+screen): the 16 M merged vertices are CONTENT (mini-cities, vegetation) and
+only a level-of-detail decision shrinks them; the 89k ped cloth meshes; 13k
+unique materials; and #1 on the list above is still #1 — slice the 12–30 s
+synchronous build. Int16 tile-relative positions (−95 MB) were built on paper
+and rejected: 5 mm quantization on road paint is a z-fight.
+
+Visual A/B: `ba --preset city-load-weight` (four framings, bytes/materials/
+heap/mean-luminance beside each; the before is a detached HEAD worktree
+served on :8811). This wave: 1,310 → 565 MB in all four frames, mean luminance within 0.6 of a level.
+`~/harness/out/gta6/city-load-weight-2026-09-02T01-48-54-882Z/report.pdf`.

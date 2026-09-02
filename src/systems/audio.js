@@ -540,6 +540,41 @@
     return files;
   }
   function preloadAll() { allFiles().forEach(load); }
+  /* WARM, DON'T FLOOD. initAudio() runs on the PLAY press — the same instant
+     the 15-30 s synchronous world build starts. preloadAll() used to fire all
+     ~77 fetch+decodeAudioData calls right there, so every decoded buffer (PCM
+     is ~384 KB per second of audio; disaster_siren alone is 76 s = 29 MB)
+     landed in process memory exactly when the world's geometry was peaking,
+     and on a phone that was the last straw at "99%". Every cue already
+     lazy-loads on a cache miss (playPart / setAudioLoop), so the preload is
+     a convenience, not a dependency: run it AFTER the boot meter has let go,
+     a few files at a time, and leave the long tracks to load on first use. */
+  const WARM_SKIP = /disaster_siren|police_siren/;
+  const WARM_LANES = 3;
+  // iOS (owner, 2026-09-01: "a problem repeatedly occurred" on the phone) is
+  // the device that dies at the memory ceiling, and ~100 decoded cues are
+  // 40-70 MB of it. On an iPhone/iPad nothing is warmed: every cue decodes
+  // on its first play and stays cached from then on.
+  const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent || "") ||
+    (navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1);
+  let warmQueued = false;
+  function warmAudioCache() {
+    if (warmQueued || IOS) return;
+    warmQueued = true;
+    const files = allFiles().filter(function (f) { return !WARM_SKIP.test(f) && !buffers.has(f); });
+    let i = 0;
+    function next() {
+      if (!ctx) return;
+      const g = CBZ.game;
+      // the world is still building / the meter is still up: come back later
+      if ((g && g.state !== "playing") || (CBZ.bootMeter && CBZ.bootMeter.active())) { setTimeout(next, 400); return; }
+      if (i >= files.length) return;
+      const f = files[i++];
+      load(f).then(function () { setTimeout(next, 40); }, function () { setTimeout(next, 40); });
+    }
+    for (let lane = 0; lane < WARM_LANES; lane++) setTimeout(next, 600 + lane * 120);
+  }
+  CBZ.audioPreloadAll = preloadAll;   // tools that want every buffer resident right now
   // The optional gun/car recordings: one quiet attempt each, no retries, no
   // failure bookkeeping — absence is an expected state, synthesis covers it.
   function loadSamples() {
@@ -579,7 +614,7 @@
     pressureFilter.connect(pressureGain); pressureGain.connect(master);
     sfxBus = ctx.createGain(); sfxBus.gain.value = 0.84; sfxBus.connect(pressureFilter);
     loopBus = ctx.createGain(); loopBus.gain.value = 0.72; loopBus.connect(pressureFilter);
-    preloadAll();
+    warmAudioCache();
     loadSamples();
     updateWorldLoops();
   }

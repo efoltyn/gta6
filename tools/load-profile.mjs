@@ -23,7 +23,8 @@
      node tools/load-profile.mjs                      # index.html, full run
      node tools/load-profile.mjs --builders           # + per-builder ms
      node tools/load-profile.mjs --cpu 4              # throttle CPU 4x (phone-ish)
-     node tools/load-profile.mjs --profile            # + V8 CPU profile of the build
+     node tools/load-profile.mjs --profile            # + V8 CPU profile of the build (by file AND by function)
+     node tools/load-profile.mjs --profile --profile-out build.cpuprofile   # keep the raw profile too
      node tools/load-profile.mjs --url /games/casino.html --no-build
      node tools/load-profile.mjs --cfg CITY_BOOT_SCREEN=0     # A/B a build flag
 
@@ -210,6 +211,15 @@ const line = (k, v) => console.log("  " + String(k).padEnd(34) + v);
 console.log(`\nLOAD PROFILE — ${url}${CPU > 1 ? `  (CPU throttled ${CPU}x)` : ""}`);
 console.log("\n1. BOOT (page open → title screen)");
 line("time to load event", (loaded == null ? "never" : loaded + " ms"));
+// FIRST PAINT is the number `defer` moves: with 569 render-blocking classic
+// tags the title card could not paint until every script had run; deferred,
+// the HTML paints first and the scripts run behind it. The load event is the
+// same either way, so it cannot see the difference — this line can.
+try {
+  const paint = JSON.parse(await evl("JSON.stringify((performance.getEntriesByType('paint')||[]).map(e=>[e.name,Math.round(e.startTime)]))"));
+  const fcp = (paint.find((e) => e[0] === "first-contentful-paint") || [])[1];
+  line("first contentful paint", fcp == null ? "none recorded" : fcp + " ms");
+} catch (_) {}
 line("bootComplete reached", booted ? "yes" : "NO — main.js never ran");
 line("requests", bootReqs);
 line("bytes on the wire", fmtMB(netAtBoot.bytes));
@@ -217,7 +227,7 @@ line("V8 ScriptDuration (parse+run)", (bootMetrics.ScriptDuration || 0).toFixed(
 line("JS heap", ((bootMetrics.JSHeapUsedSize || 0) / 1048576).toFixed(1) + " MB");
 
 // --------------------------------------------------------------- 2. BUILD
-let buildMs = null, builderRows = null, cpuTop = null;
+let buildMs = null, builderRows = null, cpuTop = null, cpuFns = null;
 if (DO_BUILD && booted) {
   if (DO_BUILDERS) {
     // Wrapping costs a little time itself; the table is for RANKING builders,
@@ -235,6 +245,12 @@ if (DO_BUILD && booted) {
   if (DO_PROFILE) {
     const { profile } = await send("Profiler.stop");
     cpuTop = summarizeProfile(profile);
+    cpuFns = summarizeProfileFns(profile);
+    // --profile-out FILE: keep the raw .cpuprofile (open it in DevTools >
+    // Performance > Load profile, or feed it to a script) — the two tables
+    // below are a summary, and a summary is where the next question dies.
+    const outPath = opt("--profile-out", null);
+    if (outPath) { const { writeFile } = await import("node:fs/promises"); await writeFile(outPath, JSON.stringify(profile)); }
   }
   if (DO_BUILDERS) builderRows = JSON.parse(await evl("JSON.stringify(window.__lp||[])"));
 
@@ -257,6 +273,34 @@ if (DO_BUILD && booted) {
     }
     console.log("     (SwiftShader: getProgramParameter/bufferData are GPU-driver lines, inflated here)");
   }
+  if (cpuFns) {
+    console.log("\n   CPU profile of the build — self time by FUNCTION (top 25, JS only):");
+    for (const r of cpuFns.slice(0, 25)) {
+      console.log("     " + String(r.ms).padStart(8) + " ms  " + String(r.pct + "%").padStart(6) + "  " + r.what);
+    }
+  }
+}
+
+// Same samples, keyed by function instead of file — names the loop, not the
+// module. Native frames (GC, GPU driver) are dropped so the JS work is
+// readable; the by-file table above still shows the native share.
+function summarizeProfileFns(profile) {
+  const byId = new Map(profile.nodes.map((n) => [n.id, n]));
+  const hits = new Map();
+  for (const id of profile.samples) hits.set(id, (hits.get(id) || 0) + 1);
+  const total = profile.samples.length || 1;
+  const perSample = ((profile.endTime - profile.startTime) / 1000) / total;
+  const byFn = new Map();
+  for (const [id, n] of hits) {
+    const node = byId.get(id);
+    if (!node || !node.callFrame.url) continue;
+    const cf = node.callFrame;
+    const f = cf.url.replace(/^https?:\/\/[^/]+\//, "").replace(/\?.*$/, "");
+    const key = (cf.functionName || "(anonymous)") + "  " + f + ":" + (cf.lineNumber + 1);
+    byFn.set(key, (byFn.get(key) || 0) + n);
+  }
+  return [...byFn.entries()].sort((a, b) => b[1] - a[1])
+    .map(([what, n]) => ({ what, ms: Math.round(n * perSample), pct: +((n / total) * 100).toFixed(1) }));
 }
 
 function summarizeProfile(profile) {
@@ -292,9 +336,17 @@ if (DO_BUILD && booted) {
 // -------------------------------------------------------------- 4. WEIGHT
 if (booted) {
   const w = JSON.parse(await evl(`JSON.stringify((()=>{
-    let objs=0; if(CBZ.scene) CBZ.scene.traverse(()=>objs++);
+    let objs=0, meshes=0, hidden=0, visMB=0, hidMB=0; const geos=new Set(), mats=new Set();
+    const visUp=(o)=>{while(o){if(!o.visible)return false;o=o.parent;}return true;};
+    const gb=(g)=>{let b=0;for(const k in g.attributes)b+=g.attributes[k].array.byteLength;if(g.index)b+=g.index.array.byteLength;return b;};
+    if(CBZ.scene) CBZ.scene.traverse((o)=>{objs++; if(!(o.isMesh||o.isPoints||o.isLine))return; meshes++;
+      const v=visUp(o); if(!v)hidden++;
+      if(o.material){ if(Array.isArray(o.material))o.material.forEach(m=>mats.add(m)); else mats.add(o.material); }
+      const g=o.geometry; if(!g||geos.has(g))return; geos.add(g); const b=gb(g); if(v)visMB+=b; else hidMB+=b; });
     const r=CBZ.renderer&&CBZ.renderer.info;
-    return {objs, tris:r?r.render.triangles:0, geo:r?r.memory.geometries:0, tex:r?r.memory.textures:0,
+    return {objs, meshes, hidden, geosUnique:geos.size, mats:mats.size, visMB:+(visMB/1048576).toFixed(0), hidMB:+(hidMB/1048576).toFixed(0),
+            programs:r&&r.programs?r.programs.length:0,
+            tris:r?r.render.triangles:0, geo:r?r.memory.geometries:0, tex:r?r.memory.textures:0,
             colliders:(CBZ.colliders||[]).length};})())`));
   const after = tallyNetwork();
   const playUrls = after.urls.slice(bootReqs);
@@ -302,6 +354,12 @@ if (booted) {
   console.log("\n4. WEIGHT");
   line("scene objects (Object3D)", w.objs.toLocaleString());
   line("triangles / geometries / textures", `${w.tris.toLocaleString()} / ${w.geo} / ${w.tex}`);
+  // THE NUMBER THAT KILLS A PHONE: every visible geometry's attribute bytes sit
+  // in the JS process AND get uploaded to the GPU as soon as it enters the
+  // frustum. 2026-09-01 baseline: 1,165 MB visible — the tab died at "99%".
+  line("meshes (hidden originals)", `${w.meshes.toLocaleString()} (${w.hidden.toLocaleString()} hidden)`);
+  line("geometry bytes visible / hidden", `${w.visMB} MB / ${w.hidMB} MB across ${w.geosUnique.toLocaleString()} unique geometries`);
+  line("unique materials / GL programs", `${w.mats.toLocaleString()} / ${w.programs}`);
   line("colliders", w.colliders.toLocaleString());
   line("JS heap", ((m2.JSHeapUsedSize || 0) / 1048576).toFixed(1) + " MB");
   line("total requests / bytes", `${after.count} / ${fmtMB(after.bytes)}`);

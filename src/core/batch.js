@@ -262,39 +262,132 @@
   // that mesh's material colour, so one white shared material renders every
   // source colour identically (lambert/basic multiply colour and vColor).
   // `tints` is parallel to `geos`: the source material colour per geometry.
-  function mergeGeometriesV2(geos, tints) {
-    let nPos = 0;
-    for (const g of geos) nPos += g.attributes.position.count;
+  /* THE MERGE THAT DOES NOT TRIPLE THE WORLD.
+     Measured 2026-09-01 (tools/load-profile.mjs WEIGHT, then a per-geometry
+     probe): the merged "batch-inert" buckets held 215 MB of vertex data — one
+     112 m tile was 1.3 MILLION vertices / 55 MB — and the whole visible scene
+     358 MB, every byte of which sits in the JS process AND is uploaded to the
+     GPU as the player turns. That is the load that killed the tab at "99%".
+     Three reasons the old mergeGeometriesV2 was that fat, each fixed here:
+       1. it de-indexed every source (toNonIndexed): a box became 36 verts
+          instead of 24, a 16x12 sphere 1,152 instead of 221 — the merged copy
+          keeps the source indices, offset into one Uint16/Uint32 index buffer.
+       2. it stored normals and colours as float32 (12 B each): normals are
+          Int8 normalized (3 B), colours Uint8 normalized (3 B). Lambert
+          normalizes the normal in the vertex shader; 8 bits of tint is what
+          the screen shows anyway. 44 B/vertex -> 18 B/vertex.
+       3. it emitted a uv attribute for materials that, by mergeableKeyV2's own
+          rule, have no map. Gone.
+     Also: no clone()/applyMatrix4() temporaries per source mesh — the world
+     bake is done while copying, so the build makes ONE allocation per bucket
+     instead of three per mesh (less GC inside the 15-30 s freeze).
+     Contract kept: vertices are concatenated in mesh order, so the per-wall /
+     per-group slice ledgers (vertex offset + count, used by batchWallHide and
+     batchHideGroup to zero a slice's positions) mean exactly what they did. */
+  const _nm3 = new THREE.Matrix3();
+  function q8(v) { v = Math.round(v * 255); return v < 0 ? 0 : v > 255 ? 255 : v; }
+  function bakeMergeV2(meshes) {
+    let nPos = 0, nIdx = 0;
+    const counts = new Array(meshes.length);
+    for (let i = 0; i < meshes.length; i++) {
+      const g = meshes[i].geometry, pc = g.attributes.position.count;
+      counts[i] = pc; nPos += pc; nIdx += g.index ? g.index.count : pc;
+    }
     const pos = new Float32Array(nPos * 3);
-    const nrm = new Float32Array(nPos * 3);
-    const uv = new Float32Array(nPos * 2);
-    const col = new Float32Array(nPos * 3);
-    let op = 0, ou = 0;
-    for (let gi = 0; gi < geos.length; gi++) {
-      const g = geos[gi];
-      const p = g.attributes.position.array;
-      pos.set(p, op);
-      const n = g.attributes.normal ? g.attributes.normal.array : null;
-      if (n) nrm.set(n, op);
-      const t = g.attributes.uv ? g.attributes.uv.array : null;
-      if (t) uv.set(t, ou);
-      const tint = tints[gi];
+    const nrm = new Int8Array(nPos * 3);
+    const col = new Uint8Array(nPos * 3);
+    const idx = nPos > 65535 ? new Uint32Array(nIdx) : new Uint16Array(nIdx);
+    let vo = 0, io = 0;
+    for (let mi = 0; mi < meshes.length; mi++) {
+      const m = meshes[mi], g = m.geometry;
+      const e = m.matrixWorld.elements;      // fresh: run() updated the whole subtree once
+      const ne = _nm3.getNormalMatrix(m.matrixWorld).elements;
+      const pa = g.attributes.position, p = pa.array, pc = pa.count;
+      const na = g.attributes.normal, n = na ? na.array : null;
+      const ca = g.attributes.color, c = ca ? ca.array : null;
+      // a source colour attribute may itself be 8-bit normalized
+      const cs = ca && ca.normalized && !(c instanceof Float32Array) && !(c instanceof Float64Array) ? 1 / 255 : 1;
+      const tint = m.material && m.material.color;
       const tr = tint ? tint.r : 1, tg = tint ? tint.g : 1, tb = tint ? tint.b : 1;
-      const c = g.attributes.color ? g.attributes.color.array : null;
-      for (let i = op, s = 0, e = op + p.length; i < e; i += 3, s += 3) {
-        col[i] = (c ? c[s] : 1) * tr;
-        col[i + 1] = (c ? c[s + 1] : 1) * tg;
-        col[i + 2] = (c ? c[s + 2] : 1) * tb;
+      // A rotation-only normal matrix keeps unit normals unit: skip the sqrt.
+      // (Uniform scale gives a normal matrix that is rotation × 1/s — also
+      // handled: we test the column length, not the matrix shape.)
+      const cl = ne[0] * ne[0] + ne[1] * ne[1] + ne[2] * ne[2];
+      const ortho = Math.abs(cl - 1) < 1e-4 &&
+        Math.abs(ne[3] * ne[3] + ne[4] * ne[4] + ne[5] * ne[5] - 1) < 1e-4 &&
+        Math.abs(ne[6] * ne[6] + ne[7] * ne[7] + ne[8] * ne[8] - 1) < 1e-4;
+      const o0 = vo * 3, o1 = (vo + pc) * 3;
+      // positions: affine transform, unrolled
+      for (let sIdx = 0, o = o0; o < o1; sIdx += 3, o += 3) {
+        const x = p[sIdx], y = p[sIdx + 1], z = p[sIdx + 2];
+        pos[o]     = e[0] * x + e[4] * y + e[8] * z + e[12];
+        pos[o + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+        pos[o + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
       }
-      op += p.length;
-      ou += g.attributes.position.count * 2;
+      // normals: Int8 normalized. (v*127 + 0.5)|0 rounds half away from zero
+      // for v>=0 and toward zero for v<0 — within 1 LSB of Math.round, no call.
+      if (n) {
+        for (let sIdx = 0, o = o0; o < o1; sIdx += 3, o += 3) {
+          const nx0 = n[sIdx], ny0 = n[sIdx + 1], nz0 = n[sIdx + 2];
+          let nx = ne[0] * nx0 + ne[3] * ny0 + ne[6] * nz0;
+          let ny = ne[1] * nx0 + ne[4] * ny0 + ne[7] * nz0;
+          let nz = ne[2] * nx0 + ne[5] * ny0 + ne[8] * nz0;
+          if (!ortho) { const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1; nx /= l; ny /= l; nz /= l; }
+          nrm[o] = (nx * 127 + (nx < 0 ? -0.5 : 0.5)) | 0;
+          nrm[o + 1] = (ny * 127 + (ny < 0 ? -0.5 : 0.5)) | 0;
+          nrm[o + 2] = (nz * 127 + (nz < 0 ? -0.5 : 0.5)) | 0;
+        }
+      } else {
+        for (let o = o0; o < o1; o += 3) { nrm[o] = 0; nrm[o + 1] = 127; nrm[o + 2] = 0; }
+      }
+      // colours: Uint8 normalized. Most sources have no colour attribute, so
+      // the tint is one constant per mesh — three bytes, filled.
+      if (c) {
+        for (let sIdx = 0, o = o0; o < o1; sIdx += 3, o += 3) {
+          let r = c[sIdx] * cs * tr * 255 + 0.5, gg = c[sIdx + 1] * cs * tg * 255 + 0.5, b = c[sIdx + 2] * cs * tb * 255 + 0.5;
+          col[o] = r < 0 ? 0 : r > 255 ? 255 : r | 0;
+          col[o + 1] = gg < 0 ? 0 : gg > 255 ? 255 : gg | 0;
+          col[o + 2] = b < 0 ? 0 : b > 255 ? 255 : b | 0;
+        }
+      } else {
+        const r8 = q8(tr), g8 = q8(tg), b8 = q8(tb);
+        for (let o = o0; o < o1; o += 3) { col[o] = r8; col[o + 1] = g8; col[o + 2] = b8; }
+      }
+      if (g.index) {
+        const ia = g.index.array;
+        for (let k = 0; k < ia.length; k++) idx[io + k] = ia[k] + vo;
+        io += ia.length;
+      } else {
+        for (let k = 0; k < pc; k++) idx[io + k] = vo + k;
+        io += pc;
+      }
+      vo += pc;
     }
     const out = new THREE.BufferGeometry();
     out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    out.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
-    out.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
-    out.setAttribute("color", new THREE.BufferAttribute(col, 3));
-    return out;
+    out.setAttribute("normal", new THREE.BufferAttribute(nrm, 3, true));
+    out.setAttribute("color", new THREE.BufferAttribute(col, 3, true));
+    out.setIndex(new THREE.BufferAttribute(idx, 1));
+    return { geometry: out, counts };
+  }
+
+  // ---- WHAT IS IN THE FAT BUCKETS -----------------------------------------
+  // Always-on, cheap (a few pushes per bucket): the 12 biggest merged buckets
+  // and the 40 biggest single source meshes, by vertex count, with names —
+  // so "why is one tile 1.3 M vertices" is a table (CBZ.batchCensus) and not
+  // an afternoon. Read it with tools/probe.mjs 'CBZ.batchCensus'.
+  const CENSUS_SRC_MIN = 2000;
+  function census(bkey, meshes, counts, total) {
+    const C = CBZ.batchCensus || (CBZ.batchCensus = { buckets: [], sources: [] });
+    C.buckets.push({ key: bkey, meshes: meshes.length, verts: total });
+    C.buckets.sort((a, b) => b.verts - a.verts); if (C.buckets.length > 12) C.buckets.length = 12;
+    for (let i = 0; i < meshes.length; i++) {
+      if (counts[i] < CENSUS_SRC_MIN) continue;
+      const m = meshes[i], g = m.geometry;
+      let top = m; while (top.parent && top.parent.parent && top.parent.parent.type !== "Scene") top = top.parent;
+      C.sources.push({ verts: counts[i], indexed: !!g.index, geo: g.type, name: m.name || "", parent: (m.parent && m.parent.name) || "", top: top.name || top.type, bucket: bkey });
+    }
+    if (C.sources.length > 200) { C.sources.sort((a, b) => b.verts - a.verts); C.sources.length = 40; }
   }
 
   // ---- PER-WALL slice ledger (V2 carveable-wall support) -------------------
@@ -434,7 +527,6 @@
         // per-TILE buckets: each tile mesh gets a tight bounding sphere, so
         // frustum culling and core/farcull can reject the far ones (the old
         // city-wide colour buckets spanned the map and never culled).
-        m.updateWorldMatrix(true, false);
         const e = m.matrixWorld.elements;
         key = "T" + Math.floor(e[12] / TILE) + "," + Math.floor(e[14] / TILE) + "|" + key;
       }
@@ -453,22 +545,38 @@
       const kids = o.children ? o.children.slice() : [];
       for (const c of kids) walk(c);
     }
+    // ONE matrixWorld refresh for the whole subtree. Nothing moves during this
+    // pass, and the per-mesh updateWorldMatrix(true, false) calls below each
+    // re-multiplied the mesh's whole ancestor chain — 100k+ meshes × depth 4.
+    target.updateMatrixWorld(true);
     if (recurse) { for (const c of target.children.slice()) walk(c); }
     else { for (const m of target.children.slice()) consider(m); }
 
     let mergedMeshes = 0, removed = 0, wallMerged = 0, wallHidden = 0;
+    // Merged-away meshes are detached in ONE filter per parent after the loop.
+    // Object3D.remove() is indexOf + splice on the parent's children array,
+    // and a building group holds hundreds of props — 100k removes was 0.46 s
+    // of the build (load-profile 2026-09-01, `remove` in three.r128).
+    const doomed = new Set();
     buckets.forEach((b, bkey) => {
       const meshes = b.meshes;
       if (meshes.length < 2) return;              // nothing to gain
-      const tints = v2 ? [] : null;
-      const geos = meshes.map((m) => {
-        m.updateWorldMatrix(true, false);
-        const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
-        g.applyMatrix4(m.matrixWorld);            // bake into world space (transforms normals too)
-        if (v2) tints.push(m.material && m.material.color ? m.material.color : null);
-        return g;
-      });
-      const merged = v2 ? mergeGeometriesV2(geos, tints) : mergeGeometries(geos);
+      let merged, counts;
+      if (v2) {
+        const r = bakeMergeV2(meshes);
+        merged = r.geometry; counts = r.counts;
+        census(bkey, meshes, counts, r.geometry.attributes.position.count);
+      } else {
+        const geos = meshes.map((m) => {
+          m.updateWorldMatrix(true, false);
+          const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+          g.applyMatrix4(m.matrixWorld);            // bake into world space (transforms normals too)
+          return g;
+        });
+        merged = mergeGeometries(geos);
+        counts = geos.map((g) => g.attributes.position.count);
+        geos.forEach((g) => g.dispose && g.dispose());
+      }
       const proto = meshes[0];
       // v2: shared white vertexColors material per lighting class (the source
       // colour was baked into the verts) — the material half of the key sits
@@ -488,7 +596,7 @@
         // stop them drawing. Do NOT remove from the graph or dispose geometry.
         let off = 0;
         for (let i = 0; i < meshes.length; i++) {
-          const m = meshes[i], cnt = geos[i].attributes.position.count;
+          const m = meshes[i], cnt = counts[i];
           // v2: remember each wall's slice so carveHole can hide JUST it later
           if (v2) wallSlices.set(m, { mesh, start: off, count: cnt, _stash: null });
           off += cnt;
@@ -504,8 +612,8 @@
         // merged buffer (consecutive meshes from one group coalesce into one
         // range — walk order is depth-first per building, so slices are contiguous).
         let off = 0, runTop = null, runStart = 0;
-        for (let i = 0; i < geos.length; i++) {
-          const cnt = geos[i].attributes.position.count;
+        for (let i = 0; i < counts.length; i++) {
+          const cnt = counts[i];
           const top = b.tops[i];
           if (top !== runTop) {
             if (runTop && off > runStart) addRange(runTop, { mesh, start: runStart, count: off - runStart });
@@ -514,12 +622,21 @@
           off += cnt;
         }
         if (runTop && off > runStart) addRange(runTop, { mesh, start: runStart, count: off - runStart });
-        meshes.forEach((m) => { if (m.parent) m.parent.remove(m); m.geometry.dispose && m.geometry.dispose(); removed++; });
+        for (let i = 0; i < meshes.length; i++) { const m = meshes[i]; if (m.parent) doomed.add(m); m.geometry.dispose && m.geometry.dispose(); removed++; }
         mergedMeshes++;
       }
-      geos.forEach((g) => g.dispose && g.dispose());
     });
 
+    if (doomed.size) {
+      const parents = new Set();
+      doomed.forEach((m) => parents.add(m.parent));
+      parents.forEach((p) => {
+        p.children = p.children.filter((c) => !doomed.has(c));
+      });
+      // what Object3D.remove() does per child, minus the splice
+      doomed.forEach((m) => { m.parent = null; m.dispatchEvent({ type: "removed" }); });
+    }
+    if (CBZ.batchCensus) { const S = CBZ.batchCensus.sources; S.sort((a, b) => b.verts - a.verts); if (S.length > 40) S.length = 40; }
     // the shadow map was baked from the pre-merge scene; force one refresh
     if (CBZ.requestShadowUpdate) CBZ.requestShadowUpdate(true);
     else if (CBZ.renderer) CBZ.renderer.shadowMap.needsUpdate = true;

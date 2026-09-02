@@ -405,9 +405,6 @@
       if (imp) {
         if (imp.jaw != null) opts.jaw = imp.jaw;
         if (imp.medium) opts.medium = imp.medium;
-        // imp.by → the animal whose mouth this was: gore.js puts the limb the
-        // death tears off INTO that mouth instead of throwing it.
-        if (imp.by) opts.by = imp.by;
         // imp.lens === false: the kill site already shook the camera for this
         // event and gore.js must not shake it again (see gore.js's `lens`).
         if (imp.lens != null) opts.lens = imp.lens;
