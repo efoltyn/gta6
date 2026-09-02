@@ -194,7 +194,7 @@
     return a._mp || (a._mp = {
       len: 0, gape: 0, jitter: 0, scanT: 0, target: null, kind: 0,
       role: "commit", rollT: -1, rolling: null, held: false,
-      opts: null, ram: null, shipTarget: null, shipScan: 0, shipT: 0,
+      opts: null, ram: null, shipTarget: null, shipScan: 0, shipT: 0, tipCd: 0,
       podN: 0, podT: 0, ramRun: 0,
     });
   }
@@ -1171,6 +1171,9 @@
     return true;
   }
   CBZ.marineBiteableHull = biteableHull;
+  /* Displacement, published so world/sea_craft.js's heeling moment and this
+     file's own bite gate read ONE number for "how much animal is this". */
+  CBZ.marineTonnes = tonnesOf;
 
   /* DID THE TEETH REACH THE HULL. creature_combat solved this for flesh —
      jawReaches() asks where the animal's OWN teeth are at the frame they close
@@ -1209,6 +1212,32 @@
     if (!spec) return false;
     if (!jawInHull(a, car, spec)) return false;
     const m = mp(a);
+    /* A SEA CRAFT IS NOT A CAR (world/sea_craft.js). It has no vehicles.js
+       damage bus, no crumple owner and no ped list — it owns all three itself,
+       so the whole sequence below is replaced by two calls into that file and
+       the shared ram. Everything a cityCars boat gets is still exactly what a
+       cityCars boat gets. */
+    if (car._seaCraft && CBZ.seaCraft) {
+      let J = null;
+      try { J = CBZ.creatureJawWorld(a); } catch (e) { J = null; }
+      const cp = car.pos || car.group.position;
+      const px = J ? J.x : cp.x, pz = J ? J.z : cp.z;
+      const hd0 = (a.heading != null) ? a.heading : -a.group.rotation.y;
+      if (typeof CBZ.sharkCanEngulfHull === "function" && CBZ.sharkCanEngulfHull(a, car)) {
+        CBZ.seaCraft.engulf(car, a);
+      } else {
+        _shipPt.x = px; _shipPt.y = J ? J.y : 0; _shipPt.z = pz;
+        _shipN.x = -Math.cos(hd0); _shipN.y = 0; _shipN.z = -Math.sin(hd0);
+        CBZ.seaCraft.hurt(car, Math.max(45, Math.round(dpsOf(a) * 2.2 * Math.pow(sizeOf(a), 1.6))),
+          { bite: true, point: _shipPt, normal: _shipN, by: a });
+        if (typeof CBZ.sharkRamHull === "function") CBZ.sharkRamHull(a, car, { from: "ram", x: px, z: pz });
+      }
+      car._mpBites = (car._mpBites || 0) + 1;
+      m.shipT = 1.4;
+      AUDIT.shipBites++;
+      if (car.dead) AUDIT.shipsSunk++;
+      return true;
+    }
     const p = car.pos || car.group.position;
     let J = null;
     try { J = CBZ.creatureJawWorld(a); } catch (e) { J = null; }
@@ -1255,7 +1284,17 @@
     car.vx = (car.vx || 0) + nx * lift;
     car.vz = (car.vz || 0) + nz * lift;
     car.v = Math.max(0, (car.v || 0) * 0.3);
-    if (car.group) car.group.rotation.z += (Math.random() < 0.5 ? -1 : 1) * (0.12 + Math.random() * 0.12);
+    /* THE ROLL IS A REAL HEEL NOW. This used to be a coin flip written
+       straight into rotation.z — a cosmetic wobble that no hull could ever be
+       tipped over by, on the one event in the game that obviously should tip
+       one. world/sea_craft.js owns the moment (shark tonnage x closing speed x
+       half the beam) and world/water_stability.js integrates it, so a bitten
+       skiff can actually go over and a bitten trawler visibly cannot. */
+    if (typeof CBZ.sharkRamHull === "function") {
+      try { CBZ.sharkRamHull(a, car, { from: "ram", x: bx, z: bz }); } catch (e) {}
+    } else if (car.group) {
+      car.group.rotation.z += (Math.random() < 0.5 ? -1 : 1) * (0.12 + Math.random() * 0.12);
+    }
     surfaceHit(bx, bz, 3.2);
     if (CBZ.shake) { try { CBZ.shake(Math.min(0.9, 0.3 + sizeOf(a) * 0.2)); } catch (e) {} }
     if (CBZ.sfx) { try { CBZ.sfx("hit"); } catch (e) {} }
@@ -1280,6 +1319,10 @@
   const _shipPt = { x: 0, y: 0, z: 0 };
   const _shipN = { x: 0, y: 0, z: 0 };
 
+  /* Published for world/sea_craft.js, which owns the same beat for a craft
+     that has no cityPeds in it: a cityCars boat's people are still thrown by
+     THIS function and there is no second copy of it. */
+  CBZ.marineThrowOccupants = function (car, bx, bz, nx, nz) { throwOccupants(car, bx, bz, nx, nz); };
   function throwOccupants(car, bx, bz, nx, nz) {
     const peds = CBZ.cityPeds;
     if (!peds) return;
@@ -1319,21 +1362,32 @@
   // enough, and this animal is big enough to be interested at all.
   function pickHull(a) {
     if (!SHIPS()) return null;
-    const cars = CBZ.cityCars;
     const hp = actorPos(a);
-    if (!cars || !hp) return null;
+    if (!hp) return null;
     const R = bodyLen(a) * 8;
     let best = null, bd = R * R;
-    for (let i = 0; i < cars.length; i++) {
-      const c = cars[i];
-      if (!c || c.dead || !c.pos) continue;
-      const p = c.pos;
-      _t0 = p.x - hp.x; _t1 = p.z - hp.z;
-      const d2 = _t0 * _t0 + _t1 * _t1;
-      if (d2 > bd) continue;
-      if (!biteableHull(a, c)) continue;
-      bd = d2; best = c;
-    }
+    const scan = function (list) {
+      if (!list) return;
+      for (let i = 0; i < list.length; i++) {
+        const c = list[i];
+        if (!c || c.dead || !c.pos) continue;
+        const p = c.pos;
+        _t0 = p.x - hp.x; _t1 = p.z - hp.z;
+        const d2 = _t0 * _t0 + _t1 * _t1;
+        if (d2 > bd) continue;
+        // A hull it can EAT WHOLE counts even when the jaws cannot span the
+        // beam-to-beam gate — swallowing a kayak does not require closing
+        // across it (world/sea_craft.js owns that rule for both callers).
+        const ok = biteableHull(a, c) ||
+          (c._seaCraft && typeof CBZ.sharkCanEngulfHull === "function" && CBZ.sharkCanEngulfHull(a, c));
+        if (!ok) continue;
+        bd = d2; best = c;
+      }
+    };
+    scan(CBZ.cityCars);
+    // ..and the craft that live outside vehicles.js entirely (the shark sim's
+    // whole fleet is these).
+    if (CBZ.seaCraft) scan(CBZ.seaCraft.list());
     return best;
   }
 
@@ -1571,13 +1625,19 @@
     // ---- A BOAT IS A BIGGER EVENT THAN A FISH -------------------------------
     if (SHIPS()) {
       m.shipT -= dt;
-      if (!m.shipTarget || m.shipTarget.dead || !biteableHull(a, m.shipTarget)) {
+      const keep = m.shipTarget && !m.shipTarget.dead &&
+        (biteableHull(a, m.shipTarget) ||
+         (m.shipTarget._seaCraft && typeof CBZ.sharkCanEngulfHull === "function" && CBZ.sharkCanEngulfHull(a, m.shipTarget)));
+      if (!keep) {
+        m.shipTarget = null;
         m.shipScan = (m.shipScan || 0) - dt;
         if (m.shipScan <= 0) { m.shipScan = 1.1; m.shipTarget = pickHull(a); }
       }
       if (m.shipTarget && !m.shipTarget.dead) {
         if (stepShip(a, m.shipTarget, dt)) { show(a, pd2); return true; }
       }
+      // ..and the boat it CANNOT bite, with people on it. See stepTip.
+      if (stepTip(a, dt)) { show(a, pd2); return true; }
     }
 
     // ---- ordinary marine predation -----------------------------------------
@@ -1740,6 +1800,58 @@
   function show(a, pd2) {
     if (!a.group) return;
     a.group.visible = pd2 < SEE_R * SEE_R;
+  }
+
+  /* ---- THE BOAT IT CANNOT EAT, WITH PEOPLE ON IT -------------------------
+     A shark that cannot get its jaws across the beam has, until now, treated a
+     crewed boat as scenery — which is exactly backwards from what actually
+     happens: the food is ON the boat, and the way an animal that size gets at
+     it is to come up under the hull and put the people in the water. That is
+     one behaviour, and it is deliberately RARE (a 25 s cooldown per animal,
+     and only inside two boat-lengths) because a sea where every shark rams
+     every boat is a cartoon.
+
+     It is a TIP, never a bite: CBZ.sharkRamHull owns the moment and
+     water_stability.js decides whether she goes over. */
+  const TIP_CD = 25;
+  function stepTip(a, dt) {
+    if (typeof CBZ.sharkRamHull !== "function" || !CBZ.seaCraft) return false;
+    const m = mp(a);
+    m.tipCd = (m.tipCd || 0) - dt;
+    if (m.tipCd > 0) return false;
+    const hp = actorPos(a);
+    if (!hp) return false;
+    const L = bodyLen(a);
+    const list = CBZ.seaCraft.list();
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (!c || c.dead || c._capsized || !c.pos || !c.crew || !c.crew.length) continue;
+      const s = c._hullSpec;
+      if (!s || !(s.loa > 0)) continue;
+      if (L < s.loa * 0.5) continue;                    // too small to move her
+      _t0 = c.pos.x - hp.x; _t1 = c.pos.z - hp.z;
+      const d2 = _t0 * _t0 + _t1 * _t1;
+      const R = s.loa * 2;
+      if (d2 > R * R) continue;
+      const d = Math.sqrt(d2);
+      const opts = optsFor(a);
+      const k = kitOf(a);
+      const rush = (k && k.rushSpeed > 0) ? k.rushSpeed : 14;
+      const sh = a._shark;
+      if (d > s.beam * 0.6 + L * 0.35) {
+        if (sh) sh.diveWant = (a.swimDepth || 2.5) * 2.4;       // deep, and up under her
+        if (typeof opts.move === "function") {
+          try { opts.move(a, Math.atan2(_t1, _t0), rush, dt); } catch (e) {}
+        }
+        return true;
+      }
+      if (sh) sh.diveWant = (a.swimDepth || 2.5) * 0.2;         // the surface break
+      CBZ.sharkRamHull(a, c, { from: "under", x: c.pos.x, z: c.pos.z, speed: rush });
+      m.tipCd = TIP_CD;
+      AUDIT.shipBites++;
+      return true;
+    }
+    return false;
   }
 
   // ---- the ship sequence, as its own small state machine -------------------

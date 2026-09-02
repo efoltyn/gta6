@@ -761,6 +761,12 @@
       const dist2 = dx * dx + dz * dz;
       if (b.tag) b.tag.visible = false;                  // identity stays in interaction UI, not over the head
       if (CBZ.body && CBZ.body.busy(b)) continue;       // thrown / knocked down / held → body owns it
+      /* ABOARD A BOAT. world/sea_craft.js owns this body's position and pose
+         while it is sitting in a hull — a wander leg here walks it off the
+         deck and a swim leg drops it over the side, both of which this file
+         did to every crewman on its first frame. The craft releases the flag
+         when the man goes in the water (or is eaten). */
+      if (b._aboard) continue;
       const near = dist2 < ANIM_DIST2;
       /* HOW OFTEN A BOT THINKS IS A SIM DECISION. HOW OFTEN IT ANIMATES IS NOT.
 
@@ -798,7 +804,9 @@
       const b = CBZ.bots[i];
       // a body mid-vault is owned by the traversal spline: the clamp below
       // would shove it back off the car it is crossing.
-      if (!b.dead && !b._traversal && !(CBZ.body && CBZ.body.busy(b))) sepList.push(b);
+      // ..and a seated crewman is not a pedestrian: the separation pass would
+      // shove him out of his own seat and then clamp him onto the seabed.
+      if (!b.dead && !b._aboard && !b._traversal && !(CBZ.body && CBZ.body.busy(b))) sepList.push(b);
     }
     /* A RIDER HAS NO BODY. While the player is mounted, CBZ.player.pos is a
        SEAT the mount republishes every tick — there is no person standing in

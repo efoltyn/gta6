@@ -1407,7 +1407,7 @@
     ride.gripTarget = null; ride.gripKind = null; ride.gripFrames = 0;
   }
   function beginBiteGrip(a, target, kind) {
-    if (!BITE_SEAT_ON() || kind === "ship" || ride.clampT > 0 ||
+    if (!BITE_SEAT_ON() || kind === "ship" || kind === "ram" || ride.clampT > 0 ||
         !target || !target.group || !target.group.parent) return false;
     if (target._jawHeld && target._jawHeld !== a) return false;
     endBiteGrip(a); releaseEngulf();
@@ -1522,6 +1522,25 @@
     if (R.shipBite) {
       const cars = CBZ.cityCars || [];
       for (let i = 0; i < cars.length; i++) if (marineCar(cars[i])) considerBiteTarget(cars[i], "ship", mouth, best.d, best);
+    }
+    /* SEA CRAFT (world/sea_craft.js) — and NO shipBite GATE. `shipBite` is a
+       megalodon-only ride flag, which was the right answer while "a boat" meant
+       a 6 m cityCars runabout and the only verb was a structural bite. It is
+       the wrong answer for a sea kayak: a bull shark cannot bite one, but it
+       can absolutely put it over, and a great white eats a paddler off one.
+       So the SIZES decide (sea_craft.js §4) and this scan only asks which of
+       the three verbs is available — eat it, bite a piece off it, or hit it. */
+    if (CBZ.seaCraft) {
+      const list = CBZ.seaCraft.list();
+      const fast = ride.water && (ride.water.v || 0) > (R.cruise || 8) * 0.6;
+      for (let i = 0; i < list.length; i++) {
+        const c = list[i];
+        if (!c || c.dead || c._sinking) continue;
+        const eat = (typeof CBZ.sharkCanEngulfHull === "function" && CBZ.sharkCanEngulfHull(a, c)) ||
+                    (typeof CBZ.sharkCanBiteHull === "function" && CBZ.sharkCanBiteHull(a, c));
+        if (eat) considerBiteTarget(c, "ship", mouth, best.d, best);
+        else if (fast) considerBiteTarget(c, "ram", mouth, best.d, best);
+      }
     }
     return best;
   }
@@ -1751,16 +1770,38 @@
       });
       humanBiteBlood(target, !!target.dead, biteSev);
     } else if (kind === "ship") {
-      if (!CBZ.cityDamageCar) return false;
       const shipDamage = Math.max(145, Math.round(damage * 2.5));
       biteNormal.set(-Math.cos(ride.head), 0, -Math.sin(ride.head));
-      CBZ.cityDamageCar(target, shipDamage, {
-        byPlayer: true, bite: true, crumple: true, point: biteV, normal: biteNormal,
-      });
+      if (target._seaCraft && CBZ.seaCraft) {
+        // A CRAFT IS EATEN OR HOLED, and either way it is ROCKED. sea_craft.js
+        // owns the damage model (its own hp, its own chunk off its own hull,
+        // its own people); vehicles.js has never heard of this record.
+        if (typeof CBZ.sharkCanEngulfHull === "function" && CBZ.sharkCanEngulfHull(a, target)) {
+          CBZ.seaCraft.engulf(target, a);
+        } else {
+          CBZ.seaCraft.hurt(target, shipDamage, { bite: true, point: biteV, normal: biteNormal, by: a });
+          if (typeof CBZ.sharkRamHull === "function") CBZ.sharkRamHull(a, target, { from: "ram", x: biteV.x, z: biteV.z });
+        }
+      } else {
+        if (!CBZ.cityDamageCar) return false;
+        CBZ.cityDamageCar(target, shipDamage, {
+          byPlayer: true, bite: true, crumple: true, point: biteV, normal: biteNormal,
+        });
+        // ..and a cityCars boat is rocked by the same moment now, instead of
+        // absorbing a megalodon like a jetty.
+        if (typeof CBZ.sharkRamHull === "function") CBZ.sharkRamHull(a, target, { from: "ram", x: biteV.x, z: biteV.z });
+      }
       target._megalodonBites = (target._megalodonBites || 0) + 1;
       target.vx = (target.vx || 0) + Math.cos(ride.head) * (2.5 + scale);
       target.vz = (target.vz || 0) + Math.sin(ride.head) * (2.5 + scale);
       target.v = Math.max(0, (target.v || 0) * 0.35);
+      AQUATIC_AUDIT.shipBites++;
+    } else if (kind === "ram") {
+      /* THE SHOULDER-CHECK. No bite lands — the swing plays out and the hull
+         takes the moment. This is what a shark too small to bite a boat does
+         to one, and it is the ONLY thing it does to one. */
+      if (typeof CBZ.sharkRamHull !== "function") return false;
+      CBZ.sharkRamHull(a, target, { from: "ram", x: biteV.x, z: biteV.z, speed: ride.water ? ride.water.v : 0 });
       AQUATIC_AUDIT.shipBites++;
     } else return false;
     AQUATIC_AUDIT.lastContactGap = +dist.toFixed(4);
@@ -1768,7 +1809,7 @@
     AQUATIC_AUDIT.lastCollider = biteHullActive ? "marine-hull-obb" : "full-body-box";
     // Ships keep their structural physics owner. Bodies get one brief anchor
     // from this exact contacted surface to the mouth's authored lower seat.
-    if (kind !== "ship" && ride.clampT <= 0) beginBiteGrip(a, target, kind);
+    if (kind !== "ship" && kind !== "ram" && ride.clampT <= 0) beginBiteGrip(a, target, kind);
     if (CBZ.waterSplashAt) CBZ.waterSplashAt(biteV.x, seaY(biteV.x, biteV.z), biteV.z, Math.min(3.8, 0.7 + scale));
     if (CBZ.sfx) { try { CBZ.sfx("hit", { volume: Math.min(1.2, 0.55 + scale * 0.18) }); } catch (e) {} }
     /* ---- ONE MOUTHFUL, ONE SMALL JOLT ----------------------------------
@@ -1813,7 +1854,12 @@
     AQUATIC_AUDIT.lastTarget = kind;
     // the shark sim's meal ledger: told about every LANDED mounted bite,
     // after the damage has fully resolved (so target.dead is honest here)
-    if (CBZ.sharkSimBite) { try { CBZ.sharkSimBite(kind, target, a); } catch (e) {} }
+    /* A CRAFT BILLS ITS OWN MEAL: world/sea_craft.js credits the hull's own
+       tonnage plus its crew the moment the boat goes down the throat, and a
+       hull merely HOLED or SUNK is not a meal at all. A ram is never one. */
+    if (CBZ.sharkSimBite && kind !== "ram" && !(target && target._seaCraft)) {
+      try { CBZ.sharkSimBite(kind, target, a); } catch (e) {}
+    }
     return true;
   }
 
@@ -2121,12 +2167,24 @@
   const ENGULF_TO = 0.86;       // ..and where the jaws have shut on it
   const engV = new THREE.Vector3();
   function mealLen(t, kind) {
+    // A CRAFT'S LENGTH IS ITS LOA, off the hull registry — the one number the
+    // engulf rule in world/sea_craft.js is written against.
+    if (t && t._seaCraft && t._hullSpec) return +t._hullSpec.loa || 6;
     if (kind !== "animal") return 1.8;                     // a person, near enough
     return CBZ.marineBodyLen ? CBZ.marineBodyLen(t) : Math.max(0.35, liveScale(t)) * 6;
   }
   function engulfable(a, t, kind) {
     if (CBZ.CONFIG.BITE_ENGULF === false) return false;
-    if (!t || !t.group || !t.group.parent || kind === "ship") return false;
+    if (!t || !t.group || !t.group.parent) return false;
+    if (kind === "ram") return false;
+    /* A HULL USED TO BE EXEMPT FROM THE MOUTH FULL STOP. That was correct
+       while every boat was a 6 m runabout and "engulf" meant a fish; it is
+       wrong for a 4 m kayak in front of a megalodon. world/sea_craft.js owns
+       the rule (loa <= 0.62 * body length AND the gape spans the beam) and
+       the pull below is the same pull a fish gets. */
+    if (kind === "ship") {
+      return !!(t._seaCraft && typeof CBZ.sharkCanEngulfHull === "function" && CBZ.sharkCanEngulfHull(a, t));
+    }
     if (t._jawHeld || t._seizedBy) return false;
     const la = CBZ.marineBodyLen ? CBZ.marineBodyLen(a) : Math.max(0.35, liveScale(a)) * 6;
     const lt = mealLen(t, kind);

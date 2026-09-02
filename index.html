@@ -2155,6 +2155,12 @@
      with a yaw-ACCELERATION cap, which is what makes the yacht take seconds
      to answer the helm rather than merely being slow. Both before core/loop.js
      — it sorts CBZ.updaters once at parse time. -->
+<!-- A HULL IS A LOFTED SURFACE, not a stack of boxes. CBZ.hullLoft turns a
+     sheer/chine/keel line set into one welded smooth-shaded BufferGeometry
+     with hard edges only where a real hull has them. Pure geometry, no CBZ
+     reads but THREE — but it MUST parse before water_hulls.js, whose builders
+     call it at build() time. -->
+<script src="src/world/hull_loft.js?v=loft1"></script>
 <script src="src/world/water_hulls.js?v=seawave1"></script>
 <script src="src/world/water_helm.js?v=boats1"></script>
 
@@ -2164,12 +2170,24 @@
      No dependency on each other — any order among these three works. -->
 <script src="src/world/water_underwater.js?v=uwlook2"></script>
 <script src="src/world/water_buoyancy.js?v=waterv2"></script>
+<!-- Roll and capsize. A shark can now put a boat on its beam ends and roll it
+     over, and a hull that goes over stays over — inverted, keel up, its people
+     in the water — then floods and sinks or drifts. Registers at order 38.4,
+     one tick BEFORE the buoyancy pass above, which composes its phi into the
+     ride. Parse order among these does not matter (every cross-read is
+     feature-detected at call time). -->
+<script src="src/world/water_stability.js?v=capsize1"></script>
 <script src="src/world/water_wake.js?v=waterv2"></script>
 <!-- The float block (CBZ.waterFloat / waterSubmergenceAt / waterRideAt — cars
      sink and wallow, corpses float face-down) and the impact bus
      (CBZ.waterHit — one call made ~58 existing bullet/explosion sites
      water-aware by wrapping, with zero edits to their files). -->
 <script src="src/world/water_float.js?v=waterv2"></script>
+<!-- SMALL CRAFT WITHOUT vehicles.js (CBZ.seaCraft): boats in the shark sim
+     and any other mode that has water but no road fleet, plus the shark-vs-boat
+     rules (engulf / bite / tip). After water_hulls + water_float, both of which
+     it spends. -->
+<script src="src/world/sea_craft.js?v=seacraft1"></script>
 <script src="src/world/water_impact.js?v=waterv2"></script>
 <!-- ONE WATER ORACLE, BOTH WORLDS. Wraps CBZ.cityWaterAt / citySeaHeightAt /
      citySeaBedDepthAt / citySeaBedYAt so they answer with the survival island's

@@ -409,6 +409,113 @@
     stockSea();
   }
 
+  /* ---- THE FLEET ---------------------------------------------------------
+     A sea with people in it has boats on it. This mode builds nothing physical
+     (see the header) and vehicles.js is city-only, so the craft come from
+     world/sea_craft.js — real registered hulls with real crews, on the same
+     water the crowd wades in.
+
+     WHY THESE SIX ROWS AND THESE DISTANCES: they are the ladder made visible
+     from the sand. The kayaks and the PWC are in the swimming band where a
+     bull shark starts, and a bull shark can only TIP them — which is the first
+     thing this game teaches you that is not "bite the thing in front of you".
+     The anchored skiffs at 60-120 m are the first hull a great white can take
+     a piece out of. The console, the sloop and the cruiser are further out
+     than a small shark has any business being, and they are exactly what a
+     megalodon eats. Nobody is told any of that; the sizes say it.
+
+     Placement is deterministic (CBZ.hash01 + the match number, never
+     Math.random) and depth-checked against the island's own bathymetry, so a
+     boat can never be spawned sitting on a sandbar. */
+  const FLEET = [
+    { key: "kayak",   n: 2, r0: 25,  r1: 60,  crew: 1, anchored: false },
+    { key: "jetski",  n: 1, r0: 25,  r1: 60,  crew: 1, anchored: false },
+    { key: "skiff",   n: 2, r0: 60,  r1: 120, crew: 2, anchored: true },
+    { key: "console", n: 1, r0: 150, r1: 250, crew: 3, anchored: false, cruise: true },
+    { key: "sloop",   n: 1, r0: 200, r1: 300, crew: 2, anchored: true },
+    { key: "cruiser", n: 1, r0: 250, r1: 400, crew: 6, anchored: false, cruise: true },
+  ];
+  const fleet = [];              // {row, rec, respawnT} — one slot per hull the sea owes
+  let fleetSeq = 0;
+
+  function depthAt(x, z) {
+    if (typeof CBZ.cityWaterDepthAt === "function") {
+      try { return +CBZ.cityWaterDepthAt(x, z) || 0; } catch (e) {}
+    }
+    return depthMean(x, z);
+  }
+  /* A POINT THIS HULL FLOATS AT. Twelve deterministic bearings, first one that
+     clears the draft wins; null is a refusal to spawn rather than a boat on
+     the beach. */
+  function craftPoint(ix, row, spec, salt) {
+    const A = arena(); if (!A) return null;
+    const WL = sim.waterline;
+    const need = ((spec && spec.draft) || 0.5) + 0.6;
+    for (let k = 0; k < 12; k++) {
+      const a = h01(ix * 5.31 + k * 1.77 + 41, sim.match * 7 + salt) * 6.283;
+      const r = WL + row.r0 + h01(ix * 3.13 + k * 2.9 + 77, sim.match * 11 + salt) * (row.r1 - row.r0);
+      const x = A.center.x + Math.cos(a) * r, z = A.center.z + Math.sin(a) * r;
+      if (depthAt(x, z) > need) return { x: x, z: z, ang: a, r: r };
+    }
+    return null;
+  }
+  // A hull under way orbits the island at its own radius: always over the same
+  // water it was proved on, and always crossing the player's front.
+  function orbitRoute(A, r, ang0) {
+    const out = [];
+    for (let i = 0; i < 6; i++) {
+      const a = ang0 + (i / 6) * 6.283;
+      out.push({ x: A.center.x + Math.cos(a) * r, z: A.center.z + Math.sin(a) * r });
+    }
+    return out;
+  }
+  function spawnCraftFor(slot, salt) {
+    const A = arena(); if (!A || !CBZ.seaCraft) return null;
+    const R = CBZ.marineHulls;
+    const spec = (R && R.spec) ? (R.spec(slot.row.key) || R.spec("dinghy")) : null;
+    const p = craftPoint(slot.ix, slot.row, spec, salt);
+    if (!p) return null;
+    const heading = p.ang + Math.PI / 2;
+    const rec = CBZ.seaCraft.spawn(slot.row.key, p.x, p.z, heading, {
+      crew: slot.row.crew,
+      anchored: !!slot.row.anchored,
+      route: slot.row.cruise ? orbitRoute(A, p.r, p.ang) : null,
+    });
+    return rec;
+  }
+  function spawnFleet() {
+    if (!CBZ.seaCraft) return;
+    fleet.length = 0; fleetSeq = 0;
+    for (let i = 0; i < FLEET.length; i++) {
+      const row = FLEET[i];
+      for (let k = 0; k < row.n; k++) {
+        const slot = { row: row, ix: fleetSeq++, rec: null, respawnT: 0 };
+        slot.rec = spawnCraftFor(slot, 0);
+        if (!slot.rec) slot.respawnT = 4;     // no water on any bearing yet: try again shortly
+        fleet.push(slot);
+      }
+    }
+  }
+  /* RESTOCK, exactly like the beach crowd: a boat that was eaten, tipped-and-
+     swamped or sunk is replaced 20-40 s later on a NEW bearing, so the sea
+     never quietly empties out under a player who is good at this. */
+  function fleetTick(dt) {
+    if (!CBZ.seaCraft) return;
+    const live = CBZ.seaCraft.list();
+    for (let i = 0; i < fleet.length; i++) {
+      const s = fleet[i];
+      if (s.rec && (s.rec.dead || live.indexOf(s.rec) < 0)) {
+        s.rec = null;
+        s.respawnT = 20 + h01(i * 9.7 + 5, sim.match * 3 + s.ix) * 20;
+      }
+      if (s.rec) continue;
+      s.respawnT -= dt;
+      if (s.respawnT > 0) continue;
+      s.rec = spawnCraftFor(s, ++fleetSeq);
+      if (!s.rec) s.respawnT = 6;
+    }
+  }
+
   // ---- the shark ---------------------------------------------------------
   function claim(a) {
     a.tamed = true;         // the mount system's key
@@ -1387,6 +1494,9 @@
     sim.podScanT = 0; sim.podWakeT = 0; sim.grow = null;
     sim.waterline = measureWaterline();
     relocateBots();
+    // the boats go out with the crowd: same water, same match, same seed
+    if (CBZ.seaCraft) { try { CBZ.seaCraft.reset(); } catch (e) {} }
+    spawnFleet();
     // heal a boot race: PLAY clicked before wildlife.js parsed leaves the
     // island unstocked (survival.reset now heals this too; belt and braces
     // because this mode is UNPLAYABLE without a sea)
@@ -1443,6 +1553,9 @@
     viewCardClose();                     // an unanswered chooser must not outlive the mode
     g.invuln = 0;                        // never leak the rider shield into another mode
     CBZ.sharkSimShoreRing = null;
+    // the fleet does not outlive the match — and neither do the people on it
+    if (CBZ.seaCraft) { try { CBZ.seaCraft.reset(); } catch (e) {} }
+    fleet.length = 0;
     podRestore();                        // every orca we raised goes back to its own draft
     growClear();                         // and no shark is left frozen mid-swell
     if (sim.shark) { sim.shark.huntable = false; }   // whatever survives goes back to being a pet
@@ -1486,6 +1599,7 @@
     }
     podPressure(dt);
     podShow(dt);
+    fleetTick(dt);
     growTick(dt);
     restock(dt);
     hudTick(dt);

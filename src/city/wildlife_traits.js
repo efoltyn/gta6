@@ -316,6 +316,16 @@
   function massOf(target, kind) {
     if (kind === "survivor" || kind === "ped" || kind === "cop") return 5;
     if (!target) return 1;
+    /* A BOAT IS A MEAL TOO (world/sea_craft.js). Its tonnage is a fact the
+       hull registry already carries, and the people aboard are worth what
+       people are worth anywhere else in this function — so a kayak with a
+       paddler in it is about one person and a speedboat is two. */
+    if (kind === "craft") {
+      const s = target._hullSpec || (CBZ.marineHulls && CBZ.marineHulls.specFor ? CBZ.marineHulls.specFor(target) : null);
+      const t = (s && +s.massT > 0) ? +s.massT : 1;
+      const crew = (target.crew && target.crew.length) || 0;
+      return Math.max(1, Math.round(t * 4 + crew * 5));
+    }
     if (target === CBZ.player || target.isPlayer) return 5;
     const hp = (+target.maxHp) || (target.species && +target.species.hp) || 20;
     return Math.max(1, Math.round(hp / 25));
