@@ -1134,7 +1134,7 @@
   if (CBZ.CONFIG.BANK_TELLERS_V1 == null) CBZ.CONFIG.BANK_TELLERS_V1 = true;
 
   const VAULTS = [];
-  const VTALLY = { built: 0, breached: 0, blasted: 0, insider: 0, bags: 0, bagged: 0, refused: 0 };
+  const VTALLY = { built: 0, breached: 0, blasted: 0, insider: 0, keyed: 0, bags: 0, bagged: 0, refused: 0 };
   // armour pools, in the same units city/armored.js feeds its hull: one C4
   // charge (power 1.4) couples ~308, an RPG ~1.4, a grenade ~1.0. So a branch
   // strongroom is three charges, a casino count room four, and the city's cash
@@ -1570,15 +1570,25 @@
      `wasOpen: false` is deliberate and is the documented trap: this door was
      never open before this wave, so flipping LOYALTY_LOCKS off must leave it
      SHUT (and therefore still bomb-able), not hand out the reserve. */
+  /* THE SECOND WAY IN, AND IT IS THE ONE THE OWNER ASKED FOR FIRST: a physical
+     key, on a physical person. city/keys.js owns how it changes hands (dip,
+     corpse, gunpoint, hostage); this door only ever asks two questions — do I
+     have it, and if not, who does. `keyed` always beats the insider, because a
+     man with the key in his pocket does not need anybody's hands up. */
+  function keyHeld(v) { return !!(CBZ.cityKeys && CBZ.cityKeys.has && CBZ.cityKeys.has(v.id)); }
+  function keyKeeper(v) { return (CBZ.cityKeys && CBZ.cityKeys.holderOf) ? CBZ.cityKeys.holderOf(v.id) : null; }
   function vaultLock(v) {
     const dur = insiderAt(v);
+    const key = keyHeld(v);
     if (CBZ.cityLock) {
       const L = CBZ.cityLock({ id: v.id, label: v.tier === "reserve" ? "The cash centre" : "The vault",
-                               verb: "vault", have: !!dur, wasOpen: false });
-      L.insider = dur;
+                               verb: "vault", have: !!dur || key, wasOpen: false });
+      L.insider = dur; L.keyed = key;
+      if (key) L.route = "key";
       return L;
     }
-    return { open: !!dur, line: dur ? "" : "The vault is locked.", route: dur ? "key" : null, insider: dur };
+    return { open: !!dur || key, line: (dur || key) ? "" : "The vault is locked.",
+             route: (dur || key) ? "key" : null, insider: dur, keyed: key };
   }
 
   // WHAT IS IN THERE right now, straight off the ONE ledger — never a number
@@ -1596,10 +1606,16 @@
      kind of event, it is the loudest instance of one the game already models. */
   function vaultBreach(v, how, by) {
     if (!v || v.open) return false;
-    v.open = true; v.opening = 1; v.breached = (how !== "insider");
+    // A KEY IS NOT A BREACH. Opening your own door, or a door whose keeper
+    // you robbed, leaves the steel intact — `breached` is what the police, the
+    // insurer and the audit read, and a quiet key turn is none of their
+    // business until somebody notices the money is gone.
+    v.open = true; v.opening = 1; v.breached = (how !== "insider" && how !== "key");
     v.hp = 0;
     VTALLY.breached++;
-    if (how === "insider") VTALLY.insider++; else VTALLY.blasted++;
+    if (how === "key") { VTALLY.keyed++; VTALLY.insider++; }
+    else if (how === "insider") VTALLY.insider++;
+    else VTALLY.blasted++;
     // the leaf is free — drop the collider on the very frame it starts to move,
     // so the swing can never trap the player inside its own arc.
     if (v.col && CBZ.colliders) {
@@ -1610,13 +1626,25 @@
     // THE MONEY LEAVES THE LEDGER AND LANDS ON THE FLOOR. take() is the ONE
     // transfer; cashBags.payout() is the ONE physicalisation. This file mints
     // nothing and pays the player nothing.
+    /* UNLOCKING IS NOT WITHDRAWING. The take-and-scatter below is the shape of
+       a ROBBERY: the balance leaves the ledger and lands on the floor for
+       somebody to carry out. Turning your own key in your own strongroom is
+       not that — it is opening a door — and without this gate a player who
+       bought a vault, filled it and came back next session would find every
+       duffel he owned dumped across the floor the moment he walked in, because
+       the shelves are a declared till source like any other. A blast still
+       empties it, from either side: that IS the robbery. */
     const TL = CBZ.cityTill;
+    const justOpening = (v.kind === "player" && how === "key");
     let moved = 0;
-    if (TL && TL.take && v.till && v.till.src) {
+    if (justOpening) {
+      big("YOUR VAULT IS OPEN");
+    } else if (TL && TL.take && v.till && v.till.src) {
       try { moved = TL.take(v.till.src, { point: v.till.point || "vault", by: "player", rob: true }).taken || 0; }
       catch (e) { moved = 0; }
     }
-    if (moved > 0 && CBZ.cashBags && CBZ.cashBags.payout) {
+    if (justOpening) { /* the shelves keep what is on them */ }
+    else if (moved > 0 && CBZ.cashBags && CBZ.cashBags.payout) {
       const r = CBZ.cashBags.payout(v.rx, v.y, v.rz, moved, {
         src: v.id, srcName: v.name, spread: Math.min(1.9, v.rw * 0.28),
         cap: v.tier === "reserve" ? 18 : 10,
@@ -1633,17 +1661,30 @@
       big("VAULT OPEN, and it's empty. Somebody got here first.");
       note("They banked it. Come back when the branch has taken money in again.", 3);
     }
-    // CONSEQUENCE. A blown vault door is the loudest thing that happens in a
-    // bank; an insider-opened one is quieter but still a robbery in progress.
-    const loud = how !== "insider";
-    if (CBZ.cityAlarm && CBZ.city) CBZ.cityAlarm(v.x, v.z, loud ? 55 : 30, loud ? 2.2 : 1.3, CBZ.city.playerActor);
-    if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(v.x, v.z, loud ? 1.8 : 1.0);
-    if (CBZ.cityPanic && CBZ.city) CBZ.cityPanic(v.x, v.z, loud ? 2.2 : 1.2, CBZ.city.playerActor);
-    if (CBZ.cityCrime) {
-      try { CBZ.cityCrime(loud ? 260 : 180, { instant: true, x: v.x, z: v.z, type: "armed-robbery" }); } catch (e) {}
+    /* CONSEQUENCE. A blown vault door is the loudest thing that happens in a
+       bank; an insider-opened one is quieter but still a robbery in progress.
+
+       EXCEPT IN YOUR OWN. city/propertyvault.js builds this same room into a
+       property the player bought, and every line below assumes the door being
+       opened belongs to somebody else — so walking into a strongroom you paid
+       $320,000 for used to raise the alarm, panic the street, file an armed
+       robbery and hand you THREE STARS. Opening a door you own is not a crime,
+       and neither is somebody else blowing it: `cityCrime` and `cityAlarm`'s
+       playerActor both mean "the player did this to the world", which is the
+       wrong sentence in both directions here. The steel, the ledger transfer
+       and the duffels on the floor are identical; only the police are not. */
+    const mine = v.kind === "player";
+    const loud = how !== "insider" && how !== "key";
+    if (!mine) {
+      if (CBZ.cityAlarm && CBZ.city) CBZ.cityAlarm(v.x, v.z, loud ? 55 : 30, loud ? 2.2 : 1.3, CBZ.city.playerActor);
+      if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(v.x, v.z, loud ? 1.8 : 1.0);
+      if (CBZ.cityPanic && CBZ.city) CBZ.cityPanic(v.x, v.z, loud ? 2.2 : 1.2, CBZ.city.playerActor);
+      if (CBZ.cityCrime) {
+        try { CBZ.cityCrime(loud ? 260 : 180, { instant: true, x: v.x, z: v.z, type: "armed-robbery" }); } catch (e) {}
+      }
+      if (CBZ.cityForceStars) { try { CBZ.cityForceStars(v.tier === "reserve" ? 4 : 3); } catch (e) {} }
+      if (CBZ.cityOccupyAlarm && v.lot && v.lot._occupancy) { try { CBZ.cityOccupyAlarm(v.lot, by || CBZ.player, 0); } catch (e) {} }
     }
-    if (CBZ.cityForceStars) { try { CBZ.cityForceStars(v.tier === "reserve" ? 4 : 3); } catch (e) {} }
-    if (CBZ.cityOccupyAlarm && v.lot && v.lot._occupancy) { try { CBZ.cityOccupyAlarm(v.lot, by || CBZ.player, 0); } catch (e) {} }
     if (CBZ.sfx) CBZ.sfx(loud ? "explosion" : "coin");
     if (CBZ.shake) CBZ.shake(loud ? 0.55 : 0.15);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -1718,7 +1759,7 @@
   CBZ.cityVaultLabel = function (v) {
     if (!v) return "";
     const L = vaultLock(v);
-    if (L.open) return L.insider ? "Make them open it" : "Open the vault";
+    if (L.open) return L.keyed ? "Unlock the vault" : L.insider ? "Make them open it" : "Open the vault";
     return "Try the vault";
   };
   // what the door is waiting for, plus the reason to want it. Spoken on the
@@ -1728,7 +1769,17 @@
     const L = vaultLock(v);
     const holds = vaultHolds(v);
     const behind = holds && holds.amount > 0 ? " $" + Math.round(holds.amount).toLocaleString() + " is behind it." : "";
+    // THE DOOR TELLS THE TRUTH ABOUT ITS KEY. Naming the man who carries it is
+    // the gradient (doctrine LAW 1): it turns a wall into a person you can
+    // follow, dip, hold up or shoot. When nobody is carrying it any more, say
+    // THAT — the honest answer is "bring explosives", not silence.
+    if (L.keyed) return "You have the key." + behind;
     if (L.open) return "";
+    const keeper = keyKeeper(v);
+    if (keeper) return "The " + (keeper.job || "manager") + " has the key." + behind;
+    // No live keeper and no key in your pocket: it is on a body somewhere, or
+    // it was never minted in this world. Either way the door has nothing
+    // truthful to add, so it falls back to what it always said.
     return (L.line || "The vault is locked.") + behind;
   };
   CBZ.cityVaultCanOpen = function (v) { return !!(v && !v.open && vaultLock(v).open); };
@@ -1736,6 +1787,14 @@
     if (!v || v.open) return false;
     const L = vaultLock(v);
     if (!L.open) { note(CBZ.cityVaultWants(v) || "The vault is locked.", 3); return false; }
+    /* THE QUIET SWING. A key turn raises nobody: no panic field, no "he works
+       the timelock", no `breached` flag. It is the same physical open the
+       insider route performs — one door, one animation, one set of duffels on
+       the floor — and the only difference is that nobody in the hall knows yet. */
+    if (L.keyed) {
+      note("Your key turns the boltwork. It swings.", 2.0);
+      return vaultBreach(v, "key", CBZ.player);
+    }
     if (L.insider) {
       note("He works the timelock. It swings.", 2.0);
       // the man who opened it under a gun is a witness, and the room knows.
@@ -1871,7 +1930,7 @@
       if (VAULTS[i]._breachReg) CBZ.unregisterBreachTarget(VAULTS[i]._breachReg);
     }
     VAULTS.length = 0; DRAWERS.length = 0;
-    VTALLY.built = VTALLY.breached = VTALLY.blasted = VTALLY.insider = 0;
+    VTALLY.built = VTALLY.breached = VTALLY.blasted = VTALLY.insider = VTALLY.keyed = 0;
     VTALLY.bags = VTALLY.bagged = VTALLY.refused = 0;
     if (CBZ.cityStaffVenue) CBZ.cityStaffVenue("bank", { stations: 0, note: "a teller per window, a manager, a vault guard" });
     const TL = CBZ.cityTill;
@@ -1934,7 +1993,17 @@
             archetype: "professional", x: mx, z: mz,
             face: Math.atan2(-v.inx, -v.inz), pose: "table",
             opts: { wealth: 0.72, outfit: 0x1c2028, aggr: 0.14 },
-            after: function (ped) { ped._vaultStaff = v.id; },
+            /* HE IS THE KEY. Not a quest flag, not a dialogue branch — a real
+               inventory row on a real man standing at a real desk, which is
+               why every existing way to take something off a person (the dip,
+               the corpse, the gun in his back, the hostage grab) opens that
+               door without this file knowing any of them exist. */
+            after: (function (id, nm) {
+              return function (ped) {
+                ped._vaultStaff = id;
+                if (CBZ.cityKeys && CBZ.cityKeys.givePed) CBZ.cityKeys.givePed(ped, id, "Vault Key · " + nm);
+              };
+            })(v.id, lot.building.name || "Meridian Trust"),
           });
           stations++;
           // and the man standing at the door itself. The reserve gets two.
@@ -2020,6 +2089,7 @@
       rooms: VAULTS.length, byTier: byTier, open: open, shut: shut,
       refused: VTALLY.refused, built: VTALLY.built,
       breached: VTALLY.breached, blasted: VTALLY.blasted, insider: VTALLY.insider,
+      openedByKey: VTALLY.keyed,
       bagsSpawned: VTALLY.bags, valueBagged: VTALLY.bagged,
       bagsLive: CB ? CB.count() : 0,
       holds: Math.round(holds), biggest: Math.round(hi), reserveHolds: Math.round(reserveHolds),

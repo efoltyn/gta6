@@ -485,6 +485,19 @@
     const P = CBZ.player;
     if (!on() || !P || !P.pos) return null;
     const x = P.pos.x, z = P.pos.z;
+    /* YOUR OWN VAULT WINS. city/propertyvault.js builds the SAME strongroom the
+       bank has into a property you bought; standing behind that steel with a
+       duffel on your shoulder is the strongest claim on the bag there is, so
+       it is asked first and the Freeport/floor-safe ladder is unchanged
+       underneath it. Feature-detected: no file, no branch. */
+    const PV = CBZ.cityPropVault;
+    if (PV && PV.at) {
+      const v = PV.at(x, z);
+      if (v) {
+        const st = PV.stored(v.propId);
+        return { kind: st.bags >= st.cap ? "vaultfull" : "vault", vault: v };
+      }
+    }
     const W = wh();
     if (W) {
       if (!owned()) {
@@ -506,6 +519,11 @@
     if (!t) return null;
     const b = CBZ.cashBags && CBZ.cashBags.carried();
     const amt = b ? money(b.amount) : "the bag";
+    if (t.kind === "vault") {
+      const st = CBZ.cityPropVault.stored(t.vault.propId);
+      return "Into your vault · " + amt + "  (" + st.bags + "/" + st.cap + ")";
+    }
+    if (t.kind === "vaultfull") return "Your vault is full — wire some out first";
     if (t.kind === "escrow") return "Put " + amt + " down as money on the yard (" + money(remaining()) + " to go)";
     if (t.kind === "shelf") return "Stow " + amt + " on the rack";
     if (t.kind === "dock") return "Set " + amt + " down on the dock";
@@ -526,9 +544,11 @@
     if (t.kind === "full") { note("Every rack slot is full. Wire some of it out and come back.", 2.6); return false; }
     if (t.kind === "homefull") { note("The floor safe only takes " + HOME_CAP + " bags. The yard takes the rest.", 2.6); return false; }
     if (t.kind === "dock") { CBg.drop(); note("On the dock. Carry it inside to bank it.", 2.0); return true; }
+    if (t.kind === "vaultfull") { note("Every shelf is taken. Wire some of it out and come back.", 2.6); return false; }
     const dyed = !!bag.dyed;
     const amt = CBg.take(bag) | 0;        // the bag leaves the world, for a value
     if (amt <= 0) return false;
+    if (t.kind === "vault") return CBZ.cityPropVault.put(t.vault.propId, amt, dyed);
     if (t.kind === "escrow") return payEscrow(amt, dyed);
     if (t.kind === "home") return putHome(t.home, amt, dyed);
     return putShelf(amt, dyed);

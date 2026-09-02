@@ -322,6 +322,20 @@
   // pocket slice dwarfs a junkie's), and on a lucky dip palm ONE of their valuables
   // (a watch/ring) into your inventory to fence. A pickpocketed billionaire = jackpot.
   function pickpocket(p) {
+    /* THE KEY COMES OFF FIRST. A dip that finds a vault key and hands you $14
+       instead is the whole feature going missing, so city/keys.js gets the
+       pocket before the cash roll does — and a successful lift IS the dip
+       (you don't also get the wallet on the same reach). */
+    if (CBZ.cityKeys && CBZ.cityKeys.pedKeys && CBZ.cityKeys.pedKeys(p).length) {
+      if (Math.random() < 0.7) {
+        if (CBZ.cityKeys.lift(p, "pickpocket") > 0) { CBZ.city.addRespect(1); return; }
+      } else {
+        p.alarmed = 6; CBZ.cityAlarm(p.pos.x, p.pos.z, 12, 0.6, CBZ.city.playerActor);
+        CBZ.cityCrime && CBZ.cityCrime(30, { x: p.pos.x, z: p.pos.z, type: "theft" });
+        CBZ.city.note(p.name + " caught your hand on his keys!", 1.8);
+        return;
+      }
+    }
     if (p.robbed) { CBZ.city.note(p.name + " has nothing left.", 1.4); return; }
     if (Math.random() < 0.7) {
       // a slice of what they're actually carrying (15-40%), with a small floor so
@@ -978,6 +992,50 @@
     // a two-handed heave — over a fence, into a boot, down to somebody below.
     label: "Throw the bag", onSelect: function () { CBZ.cashBags.throw(); },
   });
+  /* THE BACK OF THE TRUCK. Owner: "you bring a van and open the back of it …
+     and put the money in it … and drive to your warehouse."
+
+     It has to live on the SHOULDER layer. That layer is a zero-distance source
+     at prio 41, so the moment a duffel is on your back it owns the whole panel
+     — which means the van's own "Lower the tailgate" verb (prio 6) is
+     unreachable exactly when you need it. One adaptive row fixes both halves:
+     shut door → open it; open door → the bag goes in and is strapped to the
+     deck by city/vehicle_hold.js, the same latch that chains a tank down. */
+  function holdAtHand() {
+    if (!CBZ.vehicleHoldNear) return null;
+    const P = CBZ.player; if (!P || !P.pos) return null;
+    return CBZ.vehicleHoldNear(P.pos.x, P.pos.y, P.pos.z, 5.0);
+  }
+  I.register("cashbagheld", {
+    id: "cashbag-load", slot: "k", prio: 100,
+    canShow: function () { return !!holdAtHand(); },
+    label: function () {
+      const h = holdAtHand();
+      if (!h) return "";
+      const what = (h.label || "hold").toLowerCase();
+      if (h._hold && h._hold.phase === "opening") return "Opening the back…";
+      if (h._hold && h._hold.phase === "closing") return "Closing the back…";
+      return h.open ? "Load the bag into the " + what : "Open the back";
+    },
+    enabled: function () {
+      const h = holdAtHand();
+      const H = h && h._hold;
+      return !!H && H.phase !== "opening" && H.phase !== "closing";
+    },
+    onSelect: function (bag) {
+      const h = holdAtHand(); if (!h) return;
+      if (!h.open) { h.openRamp(); return; }
+      const amt = bag ? (bag.amount | 0) : 0;
+      const b = CBZ.cashBags && CBZ.cashBags.stow ? CBZ.cashBags.stow() : null;
+      if (!b) return;
+      if (CBZ.vehicleHoldPut && CBZ.vehicleHoldPut(h, b)) {
+        CBZ.city.note("$" + amt.toLocaleString() + " strapped into the " + (h.label || "hold").toLowerCase() + ".", 2);
+        if (CBZ.sfx) { try { CBZ.sfx("thud"); } catch (e) {} }
+      } else {
+        CBZ.city.note("It wouldn't go in. Set it down and push it in.", 2);
+      }
+    },
+  });
   I.describe("cashbagheld", function (b) {
     return { label: "On your shoulder", note: "$" + (b.amount | 0).toLocaleString() + " · no sprint, no gun" };
   });
@@ -1009,6 +1067,15 @@
   I.registerZone({
     id: "zone-cashstash", kind: "cashstash", prio: 9, driving: false,
     find: function (px, pz) {
+      /* YOUR OWN STRONGROOM is a cash stash like the racks and the floor safe,
+         so it rides the SAME zone rather than a fourth one. city/propertyvault
+         .js answers "am I standing behind my own steel"; everything below is
+         unchanged. */
+      const PV = CBZ.cityPropVault;
+      if (PV && PV.at) {
+        const v = PV.at(px, pz);
+        if (v) { const st = PV.site(v.propId); return { vault: v, x: st ? st.x : px, z: st ? st.z : pz }; }
+      }
       const CS = CBZ.cashStore;
       if (!CS) return null;
       if (CS.owned() && CS.inside(px, pz)) {
@@ -1022,38 +1089,48 @@
     options: [
       { id: "cashstash-pull", slot: "e",
         label: function (t) {
-          const s = t.home ? CBZ.cashStore.homeStored(t.home.id) : CBZ.cashStore.stored();
+          const s = stashOf(t);
           return s.bags ? "Take a bag off the shelf" : "Nothing stored here";
         },
-        canShow: function (t) {
-          const s = t.home ? CBZ.cashStore.homeStored(t.home.id) : CBZ.cashStore.stored();
-          return s.bags > 0;
+        canShow: function (t) { return stashOf(t).bags > 0; },
+        onSelect: function (t) {
+          if (t.vault) CBZ.cityPropVault.pull(t.vault.propId);
+          else if (t.home) CBZ.cashStore.homePull(t.home);
+          else CBZ.cashStore.pullBag();
         },
-        onSelect: function (t) { if (t.home) CBZ.cashStore.homePull(t.home); else CBZ.cashStore.pullBag(); },
       },
       { id: "cashstash-wire", slot: "i",
         label: function (t) {
-          const s = t.home ? CBZ.cashStore.homeStored(t.home.id) : CBZ.cashStore.stored();
+          const s = stashOf(t);
           const net = s.value - Math.round(s.stained * CBZ.cashStore.STAINED_FEE);
           return "Wire it to your account. $" + net.toLocaleString("en-US") + (s.stained ? " after the fence" : "");
         },
-        canShow: function (t) {
-          const s = t.home ? CBZ.cashStore.homeStored(t.home.id) : CBZ.cashStore.stored();
-          return s.value > 0;
+        canShow: function (t) { return stashOf(t).value > 0; },
+        onSelect: function (t) {
+          if (t.vault) CBZ.cityPropVault.bank(t.vault.propId);
+          else if (t.home) CBZ.cashStore.homeBank(t.home);
+          else CBZ.cashStore.bankIt();
         },
-        onSelect: function (t) { if (t.home) CBZ.cashStore.homeBank(t.home); else CBZ.cashStore.bankIt(); },
       },
     ],
   });
+  // ONE reader for the three places a duffel can live, so a label and the verb
+  // under it can never disagree about how many bags are on the shelf.
+  function stashOf(t) {
+    if (t && t.vault) return CBZ.cityPropVault.stored(t.vault.propId);
+    if (t && t.home) return CBZ.cashStore.homeStored(t.home.id);
+    return CBZ.cashStore.stored();
+  }
   I.describe("cashstash", function (t) {
     const CS = CBZ.cashStore;
-    const s = t.home ? CS.homeStored(t.home.id) : CS.stored();
+    const s = stashOf(t);
     const owed = CS.crewDebt();
+    const vaultName = t.vault ? (CBZ.cityPropVault.tierOf(t.vault.rec).name + " · yours") : null;
     return {
-      label: t.home ? (t.home.name + " · floor safe") : "The Freeport racks",
+      label: vaultName || (t.home ? (t.home.name + " · floor safe") : "The Freeport racks"),
       note: s.bags + "/" + s.cap + " bags · $" + s.value.toLocaleString("en-US")
         + (s.stained ? " · $" + s.stained.toLocaleString("en-US") + " stained" : "")
-        + (owed && !t.home ? " · crew owed $" + owed.toLocaleString("en-US") : ""),
+        + (owed && !t.home && !t.vault ? " · crew owed $" + owed.toLocaleString("en-US") : ""),
     };
   });
 

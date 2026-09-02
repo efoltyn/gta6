@@ -491,6 +491,35 @@
         if (owedCrew) html += "<div style='font-size:11px;color:#d98a84'>Crew owed " + money(owedCrew) + " — they take it off the rack as you stock it.</div>";
         if (st.value > 0) actions.push({ label: "Wire the racks out", fn: function () { CBZ.cashStore.bankIt(); render(); } });
       }
+      /* BUY YOUR OWN VAULT FOR IT. The add-on the owner asked for, and it is
+         an add-on in the same sense zillow.js's deck hangar is: a second
+         purchase against a property you already hold, priced on its own, that
+         changes what the place can DO. The steel itself is city/bank.js's
+         CBZ.cityVaultRoom — the identical room the branch has — so the thing
+         you buy is not a stat, it is a building somebody can blow open. */
+      const PV = CBZ.cityPropVault;
+      if (PV) {
+        const cur = PV.list().filter(function (r) { return r.propId === prop.id; })[0] || null;
+        html += "<div style='font-size:12px;color:#9fd6ff;margin-top:8px;margin-bottom:3px'>YOUR VAULT</div>";
+        if (cur) {
+          const st = cur.stored;
+          html += "<div style='font-size:12px;color:#ffd166'>" + PV.tierOf({ tier: cur.tier }).name + " · " +
+            st.bags + "/" + st.cap + " bags · " + money(st.value) +
+            (cur.built ? "" : " · not standing yet") + "</div>";
+          html += "<div style='font-size:11px;color:#8a93a3;margin-bottom:4px'>The bags go on the shelves behind the door — walk in and stow them.</div>";
+        } else {
+          html += "<div style='font-size:11px;color:#8a93a3;margin-bottom:4px'>Nothing here but land. A strongroom is where duffels stop being loot.</div>";
+        }
+        for (const t of PV.TIERS) {
+          if (cur && cur.tier === t.id) continue;
+          const owe = cur ? Math.max(0, t.cost - PV.TIERS.filter(function (q) { return q.id === cur.tier; })[0].cost) : t.cost;
+          if (cur && owe <= 0) continue;                       // never sell a downgrade
+          actions.push({
+            label: (cur ? "Upgrade to " : "Build a ") + t.name + " · " + money(owe) + "  [" + t.cap + " bags]",
+            fn: function () { PV.buy(prop.id, t.id); render(); },
+          });
+        }
+      }
       if (prop.kind === "warehouse" || prop.kind === "compound") {
         html += "<div style='font-size:12px;color:#cdb8ff;margin-top:8px;margin-bottom:3px'>AMMO LOCKER · cap " + ammoCapTotal() + "/weapon</div>";
         for (const c of AMMO_CRATES) {

@@ -762,6 +762,71 @@
     for (let i = 0; i < holds.length; i++) if (releaseFrom(holds[i], thing)) return true;
     return false;
   };
+  /* ---- THE LOADING DOCK SEAM -----------------------------------------------
+     "Which truck is at my elbow, and put this in the back of it."
+
+     The tick below already CATCHES freight that falls into a bay, which is the
+     right behaviour for a bag somebody heaved over the tailgate and the only
+     reason duffels work in a cargo plane at all. It is the wrong behaviour to
+     BUILD a verb on: it depends on where inventory.js happened to rest the bag
+     on the terrain under the deck, so "load the bag" would sometimes be "set
+     the bag down beside the van". These two exports make the deliberate act
+     deliberate — find the hold, put the thing on the deck, strap it — and the
+     catch stays what it is, a repair.
+
+     Both are frame-shaped the same way as the ramp verb's own source, so a
+     caller and the interact panel can never disagree about which truck. */
+  CBZ.vehicleHoldNear = function (x, y, z, reach) {
+    if (!on() || !holds.length) return null;
+    const r = reach == null ? 4.5 : reach;
+    let best = null, bd = Infinity;
+    for (let i = 0; i < holds.length; i++) {
+      const H = holds[i];
+      if (!H.rig || !H.grp || !H.grp.parent) continue;
+      let d;
+      if (H.ramp) {
+        const w = H.rig.worldOf(H.ramp.x, H.floor.top, H.ramp.sillZ, _lo);
+        d = Math.hypot(w.x - x, w.z - z);
+      } else {
+        const w = H.rig.worldOf(H.floor.x, H.floor.top, H.floor.z, _lo);
+        d = Math.hypot(w.x - x, w.z - z);
+      }
+      // standing IN the room counts as being at its door
+      if (containsLocal(H, x, (y == null ? 0 : y) + 0.9, z, 0)) d = Math.min(d, 1.0);
+      if (d < bd && d < r) { bd = d; best = H; }
+    }
+    return best ? best.handle : null;
+  };
+  CBZ.vehicleHoldPut = function (target, obj) {
+    if (!on() || !obj) return false;
+    const h = (target && target._hold) ? target : CBZ.vehicleHoldOf(target);
+    const H = h && h._hold;
+    if (!H || !H.rig || !H.grp) return false;
+    const grp = cargoGroup(obj);
+    if (!grp) return false;
+    // A ROW ON THE DECK, not a pile in one spot: the nth load steps across the
+    // bay and then back along it, so two duffels are two duffels on camera.
+    const F = H.floor;
+    const n = H.cargo.length;
+    const pitch = 0.82;
+    const cols = Math.max(1, Math.floor(Math.max(0.1, F.w - 0.5) / pitch));
+    const lx = F.x + (((n % cols) - (cols - 1) / 2) * pitch);
+    const lz = F.z - F.d / 2 + 0.7 + Math.floor(n / cols) * pitch;
+    const w = H.rig.worldOf(lx, F.top + 0.14, lz, {});
+    const root = (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
+    if (grp.parent !== root && root) { grp.parent && grp.parent.remove(grp); root.add(grp); }
+    if (obj.isObject3D) grp.position.set(w.x, w.y, w.z);
+    else {
+      obj.x = w.x; obj.y = w.y; obj.z = w.z;
+      obj.air = false; obj.carried = false;
+      if (obj.vx != null) { obj.vx = 0; obj.vy = 0; obj.vz = 0; }
+      grp.position.set(w.x, w.y, w.z);
+      if (grp.scale && grp.userData && grp.userData._bagScale) grp.scale.setScalar(grp.userData._bagScale);
+    }
+    grp.updateMatrixWorld(true);
+    return !!latchCargo(H, obj);
+  };
+
   // A census provider, the CBZ.heliFleet pattern: a fleet owner pushes ONE
   // function and every hold in the world can strap its machines down. The
   // truck/van wave adds its car registry with a single line and is finished.

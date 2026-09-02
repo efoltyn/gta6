@@ -1981,6 +1981,12 @@
     carried: function () { return _carried; },
     drop: function () { return bagRelease(false, false); },
     throw: function () { return bagRelease(true, false); },
+    /* HAND IT TO SOMETHING ELSE. Same release, no "Set down $X" note and no
+       floor snap worth trusting — the caller is about to reposition it (into a
+       truck bed, onto a shelf) and owns the sentence. This is the seam the
+       load-into-the-van verb rides; without it that verb had to drop the bag
+       on the tarmac first and then lie about it. */
+    stow: function () { return bagRelease(false, true); },
     take: bagTake,
     deposit: bagDeposit,
     dye: bagDye,

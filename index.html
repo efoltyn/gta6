@@ -987,6 +987,11 @@
 <script src="src/world/water_spec.js?v=shallow1"></script>
 <script src="src/city/world.js?v=nodash1"></script>
 <script src="src/city/interior_programs.js?v=nodash1"></script>
+<!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
+     inventory item; an NPC's keys live on the NPC and every existing way to
+     take something off a person moves them. MUST load before city/buildings.js
+     and city/interact.js, both of which ask CBZ.cityKeys at parse-adjacent time. -->
+<script src="src/city/keys.js?v=keys1"></script>
 <!-- Masonry + civic building grammar: the BLD_* flags, the civic trade table and
      the shared masonry / portico / roof-clutter geometry. MUST load BEFORE
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
@@ -2086,6 +2091,12 @@
      ledger it writes through) and inventory.js (CBZ.cashBags). Revert with
      ?cfg_CASH_STORE_V1=0. -->
 <script src="src/city/cashstore.js?v=nodash1"></script>
+<!-- A VAULT YOU BOUGHT, ON LAND YOU BOUGHT (city/propertyvault.js). The SAME
+     CBZ.cityVaultRoom the bank uses, built into a property you own, paid for at
+     the [G] desk, keyed through city/keys.js and banked through CBZ.cityTill.
+     Loads after storage.js (ownership), bank.js (the room) and cashstore.js
+     (the bag verbs it hooks). -->
+<script src="src/city/propertyvault.js?v=pvault1"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
      feature-detected/lazy — this tag itself is tiny (no wasm, no Worker
