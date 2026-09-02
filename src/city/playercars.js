@@ -328,39 +328,108 @@
   // wheels and a tucked waist between them (real automotive character line),
   // while staying 100% backward compatible: points with no 3rd element behave
   // exactly as before (scale 1 = the old constant-width prism).
-  function prismGeo(width, profile) {
-    const key = width + "|" + profile.map((p) => p.join(",")).join("|");
+  // ---- the hull's WIDTH as a function of (z, y) ----------------------------
+  // A profile carries its width scale per POINT; the flank between points is
+  // whatever the triangulation makes of it. Anything that has to sit flush on
+  // that flank at an arbitrary point — a door aperture's rim, the door skin
+  // that fills it — needs one agreed answer, so this is it: the bottom edge's
+  // scale interpolated along z, blended toward the top edge's scale with
+  // height. Points on the profile itself get exactly their own scale back.
+  function hullWidthFn(profile, half) {
+    const ws = (p) => (p.length > 2 && p[2] != null ? p[2] : 1);
+    let yTop = 0;
+    for (let i = 0; i < profile.length; i++) yTop = Math.max(yTop, profile[i][1]);
+    const split = yTop * 0.5;
+    const bottom = [], top = [];
+    for (let i = 0; i < profile.length; i++) (profile[i][1] < split ? bottom : top).push([profile[i][0], ws(profile[i])]);
+    bottom.sort((a, b) => a[0] - b[0]); top.sort((a, b) => a[0] - b[0]);
+    function interp(list, z) {
+      if (!list.length) return 1;
+      if (z <= list[0][0]) return list[0][1];
+      for (let i = 0; i + 1 < list.length; i++) {
+        if (z <= list[i + 1][0]) {
+          const span = list[i + 1][0] - list[i][0];
+          const u = span > 1e-6 ? (z - list[i][0]) / span : 0;
+          return list[i][1] + (list[i + 1][1] - list[i][1]) * u;
+        }
+      }
+      return list[list.length - 1][1];
+    }
+    return function (z, y) {
+      const u = yTop > 1e-6 ? Math.max(0, Math.min(1, y / yTop)) : 0;
+      return half * (interp(bottom, z) * (1 - u) + interp(top, z) * u);
+    };
+  }
+
+  // Triangulate a (z,y) polygon with holes. Answers an index list over the
+  // COMBINED vertex list [contour..., hole0..., hole1...] with every triangle
+  // wound CLOCKWISE in (z,y) — which faces +x under the [x, y, z] mapping the
+  // callers use, so a `side < 0` swap gives each flank an outward face.
+  // Ear-clipping, not a fan: a fan assumes the polygon is star-shaped from one
+  // corner, and a flank with fender bumps and door holes is nothing of the
+  // kind. Earcut's output orientation follows its input and can flip per ear,
+  // so the winding is normalised by signed area afterwards.
+  function flankTris(contour, holes) {
+    const cV = contour.map((p) => new THREE.Vector2(p[0], p[1]));
+    const hV = (holes || []).map((h) => h.map((p) => new THREE.Vector2(p[0], p[1])));
+    const tris = THREE.ShapeUtils.triangulateShape(cV, hV);
+    const verts = cV.slice();
+    for (let h = 0; h < hV.length; h++) for (let k = 0; k < hV[h].length; k++) verts.push(hV[h][k]);
+    for (let t = 0; t < tris.length; t++) {
+      const A = verts[tris[t][0]], B = verts[tris[t][1]], C = verts[tris[t][2]];
+      const area = (B.x - A.x) * (C.y - A.y) - (B.y - A.y) * (C.x - A.x);
+      if (area > 0) { const tmp = tris[t][1]; tris[t][1] = tris[t][2]; tris[t][2] = tmp; }
+    }
+    return { tris: tris, verts: verts };
+  }
+  // one quad (a,b,c,d), wound so its face normal points toward `toward`
+  function quadToward(pos, a, b, c, d, toward) {
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const dot = nx * (toward[0] - a[0]) + ny * (toward[1] - a[1]) + nz * (toward[2] - a[2]);
+    if (dot >= 0) pos.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2], a[0], a[1], a[2], c[0], c[1], c[2], d[0], d[1], d[2]);
+    else pos.push(a[0], a[1], a[2], c[0], c[1], c[2], b[0], b[1], b[2], a[0], a[1], a[2], d[0], d[1], d[2], c[0], c[1], c[2]);
+  }
+
+  // profile points are [z, y] OR [z, y, wScale] — an optional per-point WIDTH
+  // SCALE (relative to the `width` arg) so the extrusion can bulge/tuck in X as
+  // it runs along its length instead of staying a constant-width slab. This is
+  // what turns a flat-flanked box into a body with fender bulges over the
+  // wheels and a tucked waist between them (real automotive character line),
+  // while staying 100% backward compatible: points with no 3rd element behave
+  // exactly as before (scale 1 = the old constant-width prism).
+  //
+  // opts.holes     polygons ([[z,y],...]) cut through BOTH flanks — the door
+  //                apertures. A car with doors is HOLLOW where its doors are.
+  // opts.jamb      how far inboard (m) each aperture's rim walls run, so the
+  //                cut has a painted edge and not a paper-thin one.
+  // opts.jambFloor profile-local y the aperture's bottom rim drops to on its
+  //                inner edge — the rocker's inner face, down to the floor pan.
+  // Without holes the geometry is byte-identical to the plain prism.
+  function prismGeo(width, profile, opts) {
+    const holes = (opts && opts.holes && opts.holes.length) ? opts.holes : null;
+    const jamb = holes && opts.jamb ? opts.jamb : 0;
+    const jambFloor = holes && opts.jambFloor != null ? opts.jambFloor : null;
+    const key = width + "|" + profile.map((p) => p.join(",")).join("|") +
+      (holes ? "#" + holes.map((h) => h.map((p) => p.join(",")).join(";")).join("|") + "#" + jamb + "," + jambFloor : "");
     let geo = prisms.get(key);
     if (geo) return geo;
     const pos = [];
     const half = width / 2;
     function hw(i) { const p = profile[i]; return half * (p.length > 2 && p[2] != null ? p[2] : 1); }
     function tri(a, b, c) { pos.push(...a, ...b, ...c); }
-    // Flank (end-cap) faces: triangulate the profile's (z,y) outline with THREE's
-    // ear-clipping (ShapeUtils.triangulateShape) instead of a naive fan from
-    // vertex 0. A fan silently assumes the whole polygon is star-shaped from
-    // that ONE corner — true for a plain hexagon, but false the moment the
-    // "floor" edge gets a fender-arch bump (hullRing): the fan folds a couple
-    // of its triangles back across the shape into a stray floating flap.
-    // Ear-clipping triangulates any simple polygon correctly, bump or no bump.
-    const contour = profile.map((p) => new THREE.Vector2(p[0], p[1]));
-    const tris = THREE.ShapeUtils.triangulateShape(contour, []);
-    // NORMALIZE WINDING: earcut's output orientation follows the input contour
-    // and can flip per-ear around near-degenerate corners — half the flank
-    // rendered inside-out (see-through car sides, orbit-diagnosed). Force every
-    // triangle CW in (z,y): under the direct [side*hw, y, z] mapping below,
-    // CW-in-(z,y) faces +x, so the `side<0` swap gives each flank an outward face.
-    for (let t = 0; t < tris.length; t++) {
-      const A = contour[tris[t][0]], B = contour[tris[t][1]], C = contour[tris[t][2]];
-      const area = (B.x - A.x) * (C.y - A.y) - (B.y - A.y) * (C.x - A.x);
-      if (area > 0) { const tmp = tris[t][1]; tris[t][1] = tris[t][2]; tris[t][2] = tmp; }
-    }
+    const hwAt = hullWidthFn(profile, half);
+    // Flank (end-cap) faces: the profile's (z,y) outline, minus the holes.
+    const F = flankTris(profile, holes);
+    const tris = F.tris, verts = F.verts;
+    const xOf = (i) => (i < profile.length ? hw(i) : hwAt(verts[i].x, verts[i].y));
     for (let side = -1; side <= 1; side += 2) {
       for (let t = 0; t < tris.length; t++) {
         const ia = tris[t][0], ib = tris[t][1], ic = tris[t][2];
-        const a = [side * hw(ia), profile[ia][1], profile[ia][0]];
-        const b = [side * hw(ib), profile[ib][1], profile[ib][0]];
-        const c = [side * hw(ic), profile[ic][1], profile[ic][0]];
+        const a = [side * xOf(ia), verts[ia].y, verts[ia].x];
+        const b = [side * xOf(ib), verts[ib].y, verts[ib].x];
+        const c = [side * xOf(ic), verts[ic].y, verts[ic].x];
         if (side < 0) tri(a, c, b); else tri(a, b, c);
       }
     }
@@ -376,12 +445,262 @@
       // (isolated-hull orbit shots + a DoubleSide A/B proved it).
       tri(a, c, b); tri(a, d, c);
     }
+    // THE APERTURE HAS A RIM. A hole in a shell is a paper edge — from any
+    // angle but dead-on you would look straight through the flank's thickness
+    // into culled backfaces. Each hole edge gets a wall running `jamb` inboard
+    // (facing INTO the hole, which is the only way you ever see it) and the
+    // bottom edge drops from there to the floor pan, so looking down through
+    // an open door you land on a sill and a floor, not on daylight.
+    if (holes) {
+      for (let h = 0; h < holes.length; h++) {
+        const poly = holes[h];
+        let cz = 0, cy = 0, yMin = Infinity;
+        for (let i = 0; i < poly.length; i++) { cz += poly[i][0]; cy += poly[i][1]; yMin = Math.min(yMin, poly[i][1]); }
+        cz /= poly.length; cy /= poly.length;
+        for (let side = -1; side <= 1; side += 2) {
+          const centre = [side * (hwAt(cz, cy) - jamb * 0.5), cy, cz];
+          for (let i = 0; i < poly.length; i++) {
+            const j = (i + 1) % poly.length;
+            const zi = poly[i][0], yi = poly[i][1], zj = poly[j][0], yj = poly[j][1];
+            const oi = hwAt(zi, yi), oj = hwAt(zj, yj);
+            const a = [side * oi, yi, zi], b = [side * oj, yj, zj];
+            const c = [side * (oj - jamb), yj, zj], d = [side * (oi - jamb), yi, zi];
+            quadToward(pos, a, b, c, d, centre);
+            if (jambFloor != null && Math.abs(yi - yMin) < 1e-6 && Math.abs(yj - yMin) < 1e-6 && jambFloor < yi) {
+              const e = [side * (oi - jamb), jambFloor, zi], f = [side * (oj - jamb), jambFloor, zj];
+              quadToward(pos, d, c, f, e, [side * (oi + 1), (yi + jambFloor) * 0.5, (zi + zj) * 0.5]);
+            }
+          }
+        }
+      }
+    }
     geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
     geo.computeVertexNormals();
     geo._shared = true;
     prisms.set(key, geo);
     return geo;
+  }
+
+  // A PANEL CUT FROM A FLANK: the (z,y) polygon with optional holes, its outer
+  // face lying ON the surface xAt(z,y) of flank `side` (±1), its inner face
+  // `thick` inboard, and a rim all the way round the outline and every hole.
+  // A door skin, a window frame, a pane and a door card are all this shape.
+  // Built in the car's own frame; the caller translates it onto its hinge.
+  function patchGeo(side, contour, holes, xAt, thick) {
+    const pos = [];
+    const F = flankTris(contour, holes);
+    const tris = F.tris, verts = F.verts;
+    function tri(a, b, c) { pos.push(...a, ...b, ...c); }
+    for (let t = 0; t < tris.length; t++) {
+      const v = [verts[tris[t][0]], verts[tris[t][1]], verts[tris[t][2]]];
+      const o = v.map((p) => [side * xAt(p.x, p.y), p.y, p.x]);
+      const n = v.map((p) => [side * (xAt(p.x, p.y) - thick), p.y, p.x]);
+      if (side < 0) { tri(o[0], o[2], o[1]); tri(n[0], n[1], n[2]); }
+      else { tri(o[0], o[1], o[2]); tri(n[0], n[2], n[1]); }
+    }
+    const rings = [contour].concat(holes || []);
+    for (let r = 0; r < rings.length; r++) {
+      const poly = rings[r];
+      let cz = 0, cy = 0;
+      for (let i = 0; i < poly.length; i++) { cz += poly[i][0]; cy += poly[i][1]; }
+      cz /= poly.length; cy /= poly.length;
+      for (let i = 0; i < poly.length; i++) {
+        const j = (i + 1) % poly.length;
+        const zi = poly[i][0], yi = poly[i][1], zj = poly[j][0], yj = poly[j][1];
+        const oi = xAt(zi, yi), oj = xAt(zj, yj);
+        const a = [side * oi, yi, zi], b = [side * oj, yj, zj];
+        const c = [side * (oj - thick), yj, zj], d = [side * (oi - thick), yi, zi];
+        const mz = (zi + zj) * 0.5, my = (yi + yj) * 0.5;
+        // the outline's rim faces away from the panel; a hole's rim faces into the hole
+        const toward = r === 0
+          ? [side * (oi - thick * 0.5), my + (my - cy), mz + (mz - cz)]
+          : [side * (oi - thick * 0.5), cy, cz];
+        quadToward(pos, a, b, c, d, toward);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.computeVertexNormals();
+    return geo;
+  }
+  // grow a convex (z,y) polygon by `d` on every edge
+  function offsetPoly(poly, d) {
+    let cz = 0, cy = 0;
+    for (let i = 0; i < poly.length; i++) { cz += poly[i][0]; cy += poly[i][1]; }
+    cz /= poly.length; cy /= poly.length;
+    const lines = [];
+    for (let i = 0; i < poly.length; i++) {
+      const j = (i + 1) % poly.length;
+      const dz = poly[j][0] - poly[i][0], dy = poly[j][1] - poly[i][1];
+      const L = Math.hypot(dz, dy) || 1;
+      let nz = -dy / L, ny = dz / L;
+      const mz = (poly[i][0] + poly[j][0]) * 0.5, my = (poly[i][1] + poly[j][1]) * 0.5;
+      if (nz * (mz - cz) + ny * (my - cy) < 0) { nz = -nz; ny = -ny; }
+      lines.push({ pz: poly[i][0] + nz * d, py: poly[i][1] + ny * d, dz: dz, dy: dy });
+    }
+    const out = [];
+    for (let i = 0; i < poly.length; i++) {
+      const p = lines[(i + poly.length - 1) % poly.length], q = lines[i];
+      const det = p.dz * q.dy - p.dy * q.dz;
+      if (Math.abs(det) < 1e-9) { out.push([q.pz, q.py]); continue; }
+      const t = ((q.pz - p.pz) * q.dy - (q.py - p.py) * q.dz) / det;
+      out.push([p.pz + p.dz * t, p.py + p.dy * t]);
+    }
+    return out;
+  }
+  // several non-indexed geometries → one (positions + normals), for the
+  // three-mesh door below
+  function concatGeos(list) {
+    const flat = list.map((g) => (g.index ? g.toNonIndexed() : g));
+    let n = 0;
+    for (let i = 0; i < flat.length; i++) n += flat[i].attributes.position.count;
+    const pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3);
+    let k = 0;
+    for (let i = 0; i < flat.length; i++) {
+      const g = flat[i];
+      if (!g.attributes.normal) g.computeVertexNormals();
+      pos.set(g.attributes.position.array, k);
+      nrm.set(g.attributes.normal.array, k);
+      k += g.attributes.position.array.length;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+    geo.computeBoundingSphere();
+    return geo;
+  }
+
+  /* ============================================================
+     DOORS THAT ARE DOORS — a car is HOLLOW where its doors are.
+
+     OWNER: "when door opens and shit car really isn't hollow, it's not
+     geometrically realistic, and it just doesn't look real enough."
+
+     WHAT WAS ACTUALLY WRONG. The car had no door. It had a door SEAM (two
+     thin boxes and a chrome handle glued to a solid hull) and, when somebody
+     boarded, city/boarding.js conjured a 5 cm slab with a glass pane on it
+     and swung that out — over a flank that was still there. So an open door
+     showed you the same painted wall the shut one did, the slab had no edge,
+     no card, no frame and no hinge, the handle stayed behind on the body, and
+     the side window stayed put in the glass tub while its "door" swung away
+     without it. Every one of those is the same fault: the door was drawn as
+     a decal, and a decal cannot open.
+
+     WHAT THIS DOES. The doors are laid out FIRST, and the hull and the glass
+     tub are then cut AROUND them (prismGeo holes, with jamb walls), so the
+     body is genuinely open where a door is. Each door is a three-mesh group
+     hinged on its leading edge:
+       paint   the skin (cut from the same flank surface, so it sits flush in
+               its own aperture with a 4 mm shut line) + the window frame
+       dark    the door card, an armrest, a pull, two hinges, the handle
+       glass   the pane, in the frame — the window LEAVES with the door
+     The group's userData.carDoor is a plain JSON spec (id/side/row/z-span/
+     hinge) so a clone carries it. city/vehicles.js bakes the shut doors into
+     three merged meshes per car and only swaps the live groups in while one
+     is open (CBZ.carDoorPose), so traffic pays +3 draw calls, not +12.
+     boarding.js, passengerseat.js and crashdeform.js all pose THIS door.
+
+     What is deliberately not here: the van, cybertruck and semi. Their sides
+     are slabs and sculpts, not the hullRing prism, and the van's back is
+     already a real door (vehicle_hold). They keep the cabin's built-in door
+     cards and boarding's fallback leaf.
+  ============================================================ */
+  const DOOR_SHUT_LINE = 0.004;
+  // where the doors go, from the cabin's own corners: front door from just
+  // behind the B-pillar to the A-pillar base, rear door from the C-pillar base
+  // to just ahead of the B-pillar; a coupe gets one long door per side. The
+  // 0.232·len clamp keeps every leading/trailing edge clear of the wheel arches.
+  function layoutDoors(len, cab, coupe) {
+    const rB = cab[0], rT = cab[1], fT = cab[2], fB = cab[3];
+    const bpZ = (fT[0] + rT[0]) * 0.5;
+    const lead = Math.min(fB[0] - 0.02, len * 0.232);
+    const trail = Math.max(rB[0] + 0.05, -len * 0.232);
+    const out = [];
+    if (coupe) out.push({ row: 0, z0: Math.max(trail, bpZ - (fB[0] - rB[0]) * 0.24), z1: lead });
+    else {
+      out.push({ row: 0, z0: bpZ + 0.045, z1: lead });
+      out.push({ row: 1, z0: trail, z1: bpZ - 0.045 });
+    }
+    return out.filter((d) => d.z1 - d.z0 > 0.45);
+  }
+  /* buildCarDoors(root, D) → { hullHoles, tubHoles, spans }
+       D.half/hullProfile/baseH/bodyY   the hull prism the doors are cut from
+       D.sillTop                        hull-local y of the aperture's bottom
+       D.cab/cabW/peakY/cabBaseY        the glass tub the windows are cut from
+       D.plan                           layoutDoors()
+       D.paint/D.dark/D.glass           materials
+     Adds one hinged group per door to `root`; the caller feeds the holes to
+     the two addPrism calls and the spans to dressCabin. */
+  function buildCarDoors(root, D) {
+    const hwHull = hullWidthFn(D.hullProfile, D.half);
+    const xTub = hullWidthFn(D.cab, D.cabW * 0.5);     // the very law the tub is built by
+    const cab = D.cab, peakY = D.peakY;
+    const rB = cab[0], rT = cab[1], fT = cab[2], fB = cab[3];
+    const bpZ = (fT[0] + rT[0]) * 0.5;
+    const y0 = D.sillTop, y1 = D.baseH - 0.04;
+    const yb = 0.035, yt = Math.max(yb + 0.08, peakY - 0.045);
+    const out = { hullHoles: [], tubHoles: [], spans: [] };
+    for (let k = 0; k < D.plan.length; k++) {
+      const d = D.plan[k];
+      // the window: inset from the pillar it follows (A-rake or C-rake) and
+      // stopping 3 cm short of the B-pillar bar, never ahead of its own hinge
+      const aLead = (y) => Math.min(fB[0] + (fT[0] - fB[0]) * (y / peakY) - 0.06, d.z1 - 0.012);
+      const cTrail = (y) => Math.max(rB[0] + (rT[0] - rB[0]) * (y / peakY) + 0.06, d.z0 + 0.012);
+      const win = d.row === 0
+        ? [[aLead(yb), yb], [aLead(yt), yt], [bpZ + 0.03, yt], [bpZ + 0.03, yb]]
+        : [[bpZ - 0.03, yb], [bpZ - 0.03, yt], [cTrail(yt), yt], [cTrail(yb), yb]];
+      out.hullHoles.push([[d.z0, y0], [d.z0, y1], [d.z1, y1], [d.z1, y0]]);
+      out.tubHoles.push(win);
+      out.spans.push([d.z0, d.z1]);
+      [1, -1].forEach(function (side) { buildDoor(root, D, d, side, win, hwHull, xTub, y0, y1); });
+    }
+    return out;
+  }
+  function buildDoor(root, D, d, side, win, hwHull, xTub, y0, y1) {
+    const s = DOOR_SHUT_LINE, bodyY = D.bodyY, cabBaseY = D.cabBaseY;
+    const z0 = d.z0, z1 = d.z1, len = z1 - z0, zc = (z0 + z1) * 0.5, ym = (y0 + y1) * 0.5;
+    const id = (d.row ? "R" : "F") + (side > 0 ? "L" : "R");
+    const hx = side * hwHull(z1, ym);                  // the hinge line, on the skin's leading edge
+    const paintGeos = [], darkGeos = [];
+    const skin = patchGeo(side, [[z0 + s, y0 + s], [z0 + s, y1 - s], [z1 - s, y1 - s], [z1 - s, y0 + s]], null, hwHull, 0.06);
+    skin.translate(0, bodyY, 0); paintGeos.push(skin);
+    const frame = patchGeo(side, offsetPoly(win, 0.04), [win], (z, y) => xTub(z, y) + 0.008, 0.032);
+    frame.translate(0, cabBaseY, 0); paintGeos.push(frame);
+    const pane = patchGeo(side, win, null, (z, y) => xTub(z, y) - 0.004, 0.006);
+    pane.translate(0, cabBaseY, 0);
+    const card = patchGeo(side, [[z0 + 0.03, y0 + 0.03], [z0 + 0.03, y1 - 0.03], [z1 - 0.03, y1 - 0.03], [z1 - 0.03, y0 + 0.03]],
+      null, (z, y) => hwHull(z, y) - 0.06, 0.06);
+    card.translate(0, bodyY, 0); darkGeos.push(card);
+    const inner = hwHull(zc, ym) - 0.12;               // the card's inner face
+    const box = (w, h, dd, x, y, z) => { const g = new THREE.BoxGeometry(w, h, dd); g.translate(x, y, z); return g; };
+    darkGeos.push(box(0.05, 0.07, len * 0.42, side * (inner - 0.025), bodyY + y1 - 0.13, zc - 0.04));   // armrest
+    darkGeos.push(box(0.04, 0.03, 0.14, side * (inner - 0.02), bodyY + y1 - 0.24, zc + 0.14));           // pull
+    darkGeos.push(box(0.05, 0.08, 0.04, side * (hwHull(z1, ym) - 0.05), bodyY + y0 + 0.14, z1 - 0.02)); // hinges
+    darkGeos.push(box(0.05, 0.08, 0.04, side * (hwHull(z1, ym) - 0.05), bodyY + y1 - 0.14, z1 - 0.02));
+    darkGeos.push(box(0.026, 0.032, 0.12, side * (hwHull(z0 + 0.16, y1 - 0.09) + 0.013), bodyY + y1 - 0.09, z0 + 0.16)); // handle
+    const g = new THREE.Group();
+    g.name = "door_" + id;
+    g.position.set(hx, 0, z1);
+    const mk = (geos, mat) => {
+      const geo = concatGeos(geos);
+      geo.translate(-hx, 0, -z1);
+      geo._shared = true;
+      const m = new THREE.Mesh(geo, mat);
+      m.castShadow = false;
+      m.userData.noSeal = true;
+      g.add(m);
+      return m;
+    };
+    mk(paintGeos, D.paint);
+    mk(darkGeos, D.dark);
+    mk([pane], D.glass);
+    g.userData.carDoor = {
+      id: id, side: side, row: d.row, z0: z0, z1: z1, len: len,
+      hx: hx, hz: z1, y0: bodyY + y0, belt: bodyY + y1, y1: cabBaseY + D.peakY,
+    };
+    root.add(g);
+    return g;
   }
 
   function wheelGeo(radius, width) {
@@ -576,8 +895,8 @@
     return mesh;
   }
 
-  function addPrism(root, width, profile, y, material) {
-    const mesh = new THREE.Mesh(prismGeo(width, profile), material);
+  function addPrism(root, width, profile, y, material, opts) {
+    const mesh = new THREE.Mesh(prismGeo(width, profile, opts), material);
     mesh.position.y = y || 0;
     mesh.castShadow = false;
     root.add(mesh);
@@ -670,15 +989,12 @@
     [1, -1].forEach(function (side) {
       // mirror on the greenhouse beltline (cabin base ~bodyTop), just below the glass
       addBox(root, 0.18, 0.12, 0.28, side * (w * 0.53), bodyTop + peakY * 0.28, len * 0.15, trim);
-      // door-seam pillars on the upper flank of the tall hull
-      [-len * 0.14, len * 0.12].forEach(function (z) {
-        addBox(root, 0.025, baseH * 0.6, 0.028, side * (w * 0.505), bodyY + baseH * 0.62, z, trim);
-        // chrome door-handle inset at the beltline just ahead of each seam
-        addBox(root, 0.028, 0.032, 0.11, side * (w * 0.505), bodyY + baseH * 0.80, z - 0.11, chrome);
-      });
-      // wheel-arch brows over each axle (top of arch ~ mid-hull)
+      // (the door seams and handles that used to be painted here are REAL
+      // now — the shut line and the handle ride the door, see buildCarDoors)
+      // wheel-arch brows over each axle (top of arch ~ mid-hull). 0.16·len,
+      // down from 0.20, so they stop clear of the door apertures at 0.232·len.
       [len * 0.32, -len * 0.32].forEach(function (z) {
-        addBox(root, 0.06, 0.09, len * 0.2, side * (w * 0.505), bodyY + baseH * 0.42, z, trim);
+        addBox(root, 0.06, 0.09, len * 0.16, side * (w * 0.505), bodyY + baseH * 0.42, z, trim);
       });
     });
     addBox(root, w * 0.28, 0.13, 0.025, 0, bodyY + baseH * 0.32, -len * 0.5 - 0.075, plate);
@@ -876,7 +1192,8 @@
        o.beltY   beltline: where the glass starts
        o.roofY   headliner height
        o.floorY  cabin floor pan top
-       o.rows    1 or 2 seat rows (optional; derived from cabin length)     */
+       o.rows    1 or 2 seat rows (optional; derived from cabin length)
+       o.doorSpans [[z0,z1],...] the real doors (buildCarDoors) — no card there */
   function dressCabin(root, o) {
     if (CFG.CAR_CABIN_V2 === false) return null;
     const M = cabinMat(), L = cabinLiteMat(), SCRN = clusterMat();
@@ -937,9 +1254,27 @@
 
     // ---- THE BOX. Sealed on five sides; the sixth is the glass. -----------
     addBox(root, cabW * 0.96, 0.06, cl, 0, floorY - 0.03, cz, M);              // floor pan
+    // DOOR CARDS. A body with real doors (o.doorSpans, buildCarDoors) carries
+    // its cards ON the doors, so the tub only walls the strips between them —
+    // the footwell side, the B-pillar, the rear quarter. Anything else here
+    // would stand in the aperture. A body without doors gets the whole flank.
+    const spans = o.doorSpans && o.doorSpans.length ? o.doorSpans.slice().sort((a, b) => a[0] - b[0]) : null;
     [1, -1].forEach(function (s) {
-      const dc = addBox(root, 0.06, wallH, cl * 0.96, s * (halfW - 0.05), floorY + wallH * 0.5, cz, M);
-      dc.userData.noSeal = true;                                              // exact door-card thickness
+      const segs = [];
+      if (!spans) segs.push([zR + cl * 0.02, zF - cl * 0.02]);
+      else {
+        let z = zR + 0.02;
+        for (let i = 0; i < spans.length; i++) {
+          if (spans[i][0] - z > 0.04) segs.push([z, spans[i][0]]);
+          z = Math.max(z, spans[i][1]);
+        }
+        if (zF - 0.02 - z > 0.04) segs.push([z, zF - 0.02]);
+      }
+      segs.forEach(function (sg) {
+        const dc = addBox(root, 0.06, wallH, sg[1] - sg[0], s * (halfW - 0.05), floorY + wallH * 0.5, (sg[0] + sg[1]) * 0.5, M);
+        dc.userData.noSeal = true;                                            // exact door-card thickness
+      });
+      if (spans) return;                                                      // pull + armrest ride the door
       addBox(root, 0.05, 0.05, 0.20, s * (halfW - 0.11), beltY - 0.13, cz + cl * 0.14, M);   // door pull
       addBox(root, 0.05, 0.10, cl * 0.5, s * (halfW - 0.10), beltY - 0.05, cz, M);           // armrest / beltline pad
     });
@@ -1155,7 +1490,24 @@
     // (hullRing, driven by this style's STYLE_FLARE knobs).
     const archZ = len * 0.32;             // matches addWheels' wz = length*0.32
     const bodyProfile = hullRing(len, baseH, deckRear, deckFront, archZ, flare);
-    addPrism(root, w, bodyProfile, bodyY, paint);
+    const cabW = w * 0.94;                              // greenhouse nearly full-width:
+    // the old 0.86 left a wide bare shelf each side of the glass that read as
+    // detached floating decks from 3/4 views (probe-diagnosed); real cars
+    // start the tumblehome at the beltline edge, so the tub base hugs it
+    const cabBaseY = bodyTop - peakY * 0.08;
+    // THE DOORS COME FIRST, because the hull and the glass tub are cut around
+    // them (see buildCarDoors). Two-door bodies get one long door per side.
+    const coupe = /^(ferrari|enzo|aventador|veyron|porsche|muscle|lowrider)$/.test(style);
+    const doors = buildCarDoors(root, {
+      half: w * 0.5, hullProfile: bodyProfile, baseH: baseH, bodyY: bodyY,
+      // the aperture's sill sits just above the rocker trim (a 0.14 m band at
+      // wheelR + 0.08, below) and never below the floor pan
+      sillTop: Math.max(baseH * 0.18 + 0.04, wheelR + 0.155 - bodyY),
+      cab: cabin, cabW: cabW, peakY: peakY, cabBaseY: cabBaseY,
+      plan: layoutDoors(len, cabin, coupe),
+      paint: paint, glass: dark, dark: cabinMat(),
+    });
+    addPrism(root, w, bodyProfile, bodyY, paint, { holes: doors.hullHoles, jamb: 0.10, jambFloor: baseH * 0.18 - 0.02 });
 
     // ---- GREENHOUSE: the cabin IS GLASS. A tinted trapezoidal prism (raked
     // ends via the profile, tumblehome via roofTuck width-scale) with a painted
@@ -1164,12 +1516,9 @@
     // wrong way (orbit-sheet diagnosed: windshields lay forward over the hood
     // like open flaps). A glass tub needs zero rake math, always reads as a
     // real glasshouse from any angle, and is fewer meshes.
-    const cabW = w * 0.94;                              // greenhouse nearly full-width:
-    // the old 0.86 left a wide bare shelf each side of the glass that read as
-    // detached floating decks from 3/4 views (probe-diagnosed); real cars
-    // start the tumblehome at the beltline edge, so the tub base hugs it
-    const cabBaseY = bodyTop - peakY * 0.08;
-    addPrism(root, cabW, cabin, cabBaseY, dark);        // the glass tub
+    // the glass tub — with the door windows cut out of its flanks: those
+    // panes are on the doors now, and leave with them
+    addPrism(root, cabW, cabin, cabBaseY, dark, { holes: doors.tubHoles });
     // CABIN INTERIOR (CAR_CABIN_V2): a sealed, dressed room behind the real
     // glass — see dressCabin's header. The pre-V2 five loose slabs are the
     // `else` arm below and remain the exact one-line revert.
@@ -1177,7 +1526,7 @@
       cabW: cabW, zR: cabin[0][0], zF: cabin[3][0],
       zTR: cabin[1][0], zTF: cabin[2][0], roofW: cabW * flare.roofTuck,
       beltY: cabBaseY, roofY: cabBaseY + peakY,
-      floorY: bodyY + baseH * 0.18,
+      floorY: bodyY + baseH * 0.18, doorSpans: doors.spans,
     })) {
       // pre-V2 dressing. The material is minted HERE, inside the fallback,
       // not above the dressCabin call — see the "interior-v2" note by the
@@ -1213,7 +1562,13 @@
     const roofLen = Math.max(0.2, fT[0] - rT[0]);
     // roof cap: slightly proud of the glass top so the paint edge reads as the
     // roof skin + header rails from every angle.
-    addBox(root, roofW + 0.02, 0.05, roofLen + 0.06, 0, cabBaseY + peakY + 0.012, (fT[0] + rT[0]) * 0.5, paint);
+    // noSeal, MEASURED: vehicles.js's sealSeams treats any wide flat panel
+    // as a deck slab and skirts it 0.45 m DOWN into the body. On a roof cap
+    // that is a body-coloured block hanging through the entire greenhouse,
+    // 5 cm inside the side glass — a ray through the window met paint at
+    // x=0.80 on a 0.90 half-width tub. The whole dressed cabin was behind it.
+    const cap = addBox(root, roofW + 0.02, 0.05, roofLen + 0.06, 0, cabBaseY + peakY + 0.012, (fT[0] + rT[0]) * 0.5, paint);
+    cap.userData.noSeal = true;
     // pillars: painted bars along the glass edges so the roof visually
     // connects to the body instead of hovering on a dark band. A/C pillars
     // lie in the rake plane (one rotation.x each); B-pillars are vertical.
@@ -1304,7 +1659,8 @@
       const roof = sharedMat("low-roof", 0xf2f3f6);
       // chrome rocker trim down both sides + a painted hardtop roof cap
       addBox(root, w + 0.06, 0.07, len * 0.92, 0, wheelR + 0.05, 0, chrome);
-      addBox(root, roofW + 0.04, 0.06, roofLen * 0.96, 0, cabBaseY + peakY + 0.035, (fT[0] + rT[0]) * 0.5, roof);
+      const hardtop = addBox(root, roofW + 0.04, 0.06, roofLen * 0.96, 0, cabBaseY + peakY + 0.035, (fT[0] + rT[0]) * 0.5, roof);
+      hardtop.userData.noSeal = true;                                          // same skirt trap as the roof cap
     }
     if (style === "hatch") {
       const black = sharedMat("hatch-black", 0x14171c);
@@ -1465,7 +1821,8 @@
     const archZ = len * 0.32;
     const suvProfile = hullRing(len, baseH, -len * 0.47, len * 0.40, archZ,
       { shoulderF: 0.90, shoulderR: 0.92, archY: 0.36, bulge: 1.04, tuck: 0.97, noseTuck: 0.90, tailTuck: 0.95 });
-    addPrism(root, w, suvProfile, bodyY, paint);
+    // (the hull prism is added below, once the cabin corners exist to cut its
+    // door apertures from — see buildCarDoors)
     addBox(root, w + 0.06, 0.22, len * 0.96, 0, bodyY + 0.12, 0, trim);   // wide fender flares
     // upright BODY-COLORED greenhouse (paint), base sunk ~8% into the hull deck.
     // Taller than the old 0.42*baseH: a 3-box SUV reads "boxy" mainly through a
@@ -1479,7 +1836,16 @@
     // read as a small hut with fins on a limo body (orbit-diagnosed).
     const cabWs = w * 0.94, roofTuck = 0.88;
     const suvCab = [[cabCx - cb, 0, 1.0], [cabCx - ct, peakY, roofTuck], [cabCx + ct, peakY, roofTuck], [cabCx + cb, 0, 1.0]];
-    addPrism(root, cabWs, suvCab, cabBaseY, dark);
+    // four real doors, and the hull + tub cut around them (makeRoadCar's law)
+    const suvDoors = buildCarDoors(root, {
+      half: w * 0.5, hullProfile: suvProfile, baseH: baseH, bodyY: bodyY,
+      sillTop: Math.max(baseH * 0.18 + 0.04, 0.24),      // above the 0.22 m fender-flare band
+      cab: suvCab, cabW: cabWs, peakY: peakY, cabBaseY: cabBaseY,
+      plan: layoutDoors(len, suvCab, false),
+      paint: paint, glass: dark, dark: cabinMat(),
+    });
+    addPrism(root, w, suvProfile, bodyY, paint, { holes: suvDoors.hullHoles, jamb: 0.10, jambFloor: baseH * 0.18 - 0.02 });
+    addPrism(root, cabWs, suvCab, cabBaseY, dark, { holes: suvDoors.tubHoles });
     const rB = suvCab[0], rT = suvCab[1], fT = suvCab[2], fB = suvCab[3];
     const roofWs = cabWs * roofTuck;
     const sideMidZ = (rT[0] + fT[0]) * 0.5;
@@ -1490,11 +1856,12 @@
     if (!dressCabin(root, {
       cabW: cabWs, zR: rB[0], zF: fB[0], zTR: rT[0], zTF: fT[0], roofW: roofWs,
       beltY: cabBaseY, roofY: cabBaseY + peakY,
-      floorY: bodyY + baseH * 0.18, rows: 2,
+      floorY: bodyY + baseH * 0.18, rows: 2, doorSpans: suvDoors.spans,
     })) {
       addBox(root, cabWs * 0.88, peakY * 0.45, cb + ct, 0, cabBaseY + peakY * 0.24, cabCx, sharedMat("interior", 0x2a2f36));
     }
-    addBox(root, roofWs + 0.02, 0.08, sideLen + 0.08, 0, cabBaseY + peakY + 0.028, sideMidZ, paint);   // roof skin
+    const roofSkin = addBox(root, roofWs + 0.02, 0.08, sideLen + 0.08, 0, cabBaseY + peakY + 0.028, sideMidZ, paint);   // roof skin
+    roofSkin.userData.noSeal = true;                                          // the sealSeams skirt trap — see makeRoadCar's roof cap
     addBox(root, 0.07, 0.08, sideLen, w * 0.36, cabBaseY + peakY + 0.11, sideMidZ, rail);  // roof rails
     addBox(root, 0.07, 0.08, sideLen, -w * 0.36, cabBaseY + peakY + 0.11, sideMidZ, rail);
     [-0.28, 0.28].forEach(function (fz) {                                                  // rack crossbars between the rails
@@ -1527,11 +1894,7 @@
     }
     [1, -1].forEach(function (side) {
       addBox(root, 0.16, 0.12, 0.24, side * (w * 0.55), bodyTop + 0.10, fB[0] - 0.05, trim);  // door mirrors at the A-pillar base
-      // door seam insets + chrome handles at the beltline (front/rear door split)
-      [-len * 0.135, len * 0.115].forEach(function (z) {
-        addBox(root, 0.02, baseH * 0.5, 0.03, side * (w * 0.502), bodyY + baseH * 0.58, z, trim);
-        addBox(root, 0.028, 0.032, 0.11, side * (w * 0.502), bodyY + baseH * 0.80, z - 0.12, chromeMat());
-      });
+      // (door seams + handles are on the real doors — buildCarDoors)
     });
     // tailgate ladder (overlander cue): two rails + three rungs, in the gap
     // between the rear spare (|x| < ~0.49) and the Bison vertical tails (~0.76+)
@@ -2506,6 +2869,15 @@
     const c = new THREE.Color(color);
     const swapped = new Map();
     root.traverse(function (o) {
+      // A SHUT DOOR IS NOT IN THE TREE. vehicles.js parks the live door groups
+      // off the graph while their baked shut copy draws (bakeShutDoors), so a
+      // respray has to reach into the rig or the first door you open comes
+      // out in the showroom colour.
+      const rig = o._cbzDoorRig;
+      if (rig && rig.doors) for (let i = 0; i < rig.doors.length; i++) if (!rig.doors[i].parent) rig.doors[i].traverse(paintOne);
+      paintOne(o);
+    });
+    function paintOne(o) {
       const m = o.material;
       if (!m || Array.isArray(m) || !m._bodyPaint) return;
       if (m._playerCarOwned) {                 // ours already — repaint, don't mint
@@ -2526,7 +2898,7 @@
         swapped.set(m.id, nm);
       }
       o.material = nm;
-    });
+    }
   }
   // THE ONE REPAINT VERB. Published so no other file re-implements the
   // `_bodyPaint` traversal (race_livery.js had a byte-copy of it, and that copy

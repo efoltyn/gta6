@@ -220,6 +220,16 @@
       push("rearL", +1, 1, rearZ, 0.96);
       push("rearR", -1, 1, rearZ, 0.96);
     }
+    // A REAL DOOR SAYS WHERE ITS APERTURE IS. The seat-derived door point above
+    // is a guess (front doors "just ahead of the seat"); a body that carries
+    // real doors publishes their z-spans, and you stand at the middle of the
+    // opening — behind the leaf, which swings forward — not beside the seat.
+    for (let i = 0; i < out.length; i++) {
+      const sp = realDoorFor(veh, out[i]);
+      if (!sp) continue;
+      const zc = (sp.z0 + sp.z1) * 0.5;
+      out[i].doorZ = zc; out[i].outZ = zc + 0.02; out[i].doorId = sp.id;
+    }
     return out;
   }
 
@@ -357,15 +367,38 @@
   }
 
   // ============================================================
-  //  THE DOOR LEAF — a car ships with a door SEAM and no door.
-  //  Paint below the beltline, glass above it, hinged at the leading edge.
+  //  THE DOOR. A road car or SUV now HAS one (playercars.js buildCarDoors:
+  //  a hinged skin + card + framed pane in a real aperture, posed through
+  //  CBZ.carDoorPose) and that is what this file swings. The leaf below is
+  //  the FALLBACK for bodies that still ship a seam and no door — the van,
+  //  the cybertruck, the box rig: paint below the beltline, glass above it,
+  //  hinged at the leading edge.
   // ============================================================
-  const _leaves = [];          // every door leaf this file has ever built
+  const _leaves = [];          // every door (real record or fallback leaf) this file has posed
+  /* Which real door a seat goes through: its own row's door on its side, or
+     — a coupe — the front door on its side. null = no real door, use the leaf. */
+  function realDoorFor(veh, seat) {
+    const list = CBZ.carDoors ? CBZ.carDoors(veh) : null;
+    if (!list || !list.length) return null;
+    const lr = seat.side > 0 ? "L" : "R";
+    const want = (seat.row ? "R" : "F") + lr;
+    for (let i = 0; i < list.length; i++) if (list[i].id === want) return list[i];
+    if (seat.row) for (let i = 0; i < list.length; i++) if (list[i].id === "F" + lr) return list[i];
+    return null;
+  }
   function leafFor(veh, seat) {
-    if (!seat || !seat.hinge) return null;
+    if (!seat) return null;
     const f = frameOf(veh); if (!f) return null;
     const bag = f.userData._cbzDoorLeaves || (f.userData._cbzDoorLeaves = Object.create(null));
     if (bag[seat.id]) return bag[seat.id];
+    const spec = realDoorFor(veh, seat);
+    if (spec) {
+      const rec = { real: true, veh: veh, id: spec.id, t: 0 };
+      bag[seat.id] = rec;
+      _leaves.push({ g: rec, seat: seat });
+      return rec;
+    }
+    if (!seat.hinge) return null;
     const H = seat.hinge;
     const cmat = CBZ.cmat || CBZ.mat;
     const mat = CBZ.mat || CBZ.cmat;
@@ -436,6 +469,13 @@
      falls out of which flank the seat is on rather than being typed twice. */
   function poseLeaf(g, seat, t) {
     if (!g) return;
+    t = Math.max(0, Math.min(1, t));
+    if (g.real) {
+      g.t = t;
+      CBZ.carDoorPose(g.veh, g.id, t);
+      if (t > 0.002 && _posed.indexOf(g) < 0) _posed.push(g);   // claimed this frame
+      return;
+    }
     g.visible = t > 0.002;
     g.rotation.y = -seat.side * 1.02 * Math.max(0, Math.min(1, t));
     if (g.visible && _posed.indexOf(g) < 0) _posed.push(g);   // claimed this frame
@@ -679,6 +719,13 @@
   function sweepLeaves() {
     for (let i = 0; i < _leaves.length; i++) {
       const rec = _leaves[i];
+      if (rec.g.real) {
+        const grp = rec.g.veh && rec.g.veh.group;
+        if (!grp || !grp.parent) { _leaves.splice(i--, 1); continue; }
+        if (_posed.indexOf(rec.g) >= 0) continue;
+        if (rec.g.t > 0) { rec.g.t = 0; CBZ.carDoorPose(rec.g.veh, rec.g.id, 0); }
+        continue;
+      }
       if (!rec.g.parent) { _leaves.splice(i--, 1); continue; }
       if (_posed.indexOf(rec.g) >= 0) continue;
       if (rec.g.visible) { rec.g.visible = false; rec.g.rotation.y = 0; }

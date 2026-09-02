@@ -587,6 +587,103 @@
     grp.userData.drawMeshes = grp.children.reduce((n, o) => n + (isMesh(o) ? 1 : 0), 0);
   }
 
+  /* ---- THE DOORS: shut ones are baked, open ones are live -----------------
+     playercars.js builds every door as a hinged three-mesh group with a JSON
+     spec in userData.carDoor (see buildCarDoors). Left in the tree that is 12
+     extra draw calls and 16 extra matrix walks per traffic car, for doors that
+     are shut 99.9% of the time. So: after the body merge, the doors are baked
+     in their shut pose into ≤3 merged meshes per car and the live groups are
+     PARKED OFF THE GRAPH (kept on visual._cbzDoorRig, not in userData — a
+     THREE object in userData would break the JSON clone). CBZ.carDoorPose is
+     the one verb: the first door that opens hides the bake and hangs all four
+     live groups; the last one shutting puts the bake back. Nothing is ever
+     rebuilt, so a door costs nothing until somebody goes through it. */
+  const DOOR_ARC = 1.15;   // rad, fully open — a real front door stops at ~65°
+  function bakeShutDoors(visual) {
+    const doors = [];
+    for (const o of visual.children.slice()) if (o.userData && o.userData.carDoor) doors.push(o);
+    if (!doors.length) return;
+    const buckets = new Map();
+    for (const g of doors) {
+      g.rotation.set(0, 0, 0);
+      g.updateMatrix();
+      for (const m of g.children) {
+        if (!m.geometry || !m.material || !m.geometry.attributes || !m.geometry.attributes.position) continue;
+        m.updateMatrix();
+        const geo = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+        geo.applyMatrix4(m.matrix);
+        geo.applyMatrix4(g.matrix);
+        const key = m.material.id + "|" + (m.renderOrder | 0);
+        (buckets.get(key) || buckets.set(key, { proto: m, geos: [] }).get(key)).geos.push(geo);
+      }
+      visual.remove(g);
+      g._cbzOpenT = 0;
+    }
+    const shut = [];
+    buckets.forEach((b) => {
+      let merged;
+      try { merged = new THREE.Mesh(mergeGeometryCopies(b.geos), b.proto.material); }
+      catch (e) { return; }
+      b.geos.forEach((geo) => geo.dispose && geo.dispose());
+      merged.castShadow = false;
+      merged.receiveShadow = b.proto.receiveShadow;
+      merged.renderOrder = b.proto.renderOrder;
+      if (b.proto.userData && b.proto.userData.carGlass) merged.userData.carGlass = true;
+      merged.userData.doorsShut = true;
+      merged.matrixAutoUpdate = false;
+      visual.add(merged);
+      shut.push(merged);
+    });
+    visual._cbzDoorRig = { doors: doors, shut: shut, split: false };
+  }
+  function doorRigOf(car) {
+    if (!car) return null;
+    if (car._cbzDoorRig) return car._cbzDoorRig;
+    const grp = car.group || car;
+    if (!grp || !grp.userData) return null;
+    const vis = grp.userData.carVisual || grp;
+    return vis._cbzDoorRig || null;
+  }
+  /* The door specs of a car (plain JSON: id FL/FR/RL/RR, side ±1 = ±x, row,
+     z0/z1, hinge), or null for a body with no real doors. */
+  CBZ.carDoors = function (car) {
+    const rig = doorRigOf(car);
+    if (!rig) return null;
+    return rig.doors.map((g) => g.userData.carDoor);
+  };
+  /* Pose one door: t 0 = shut, 1 = fully open. Re-assert every frame you want
+     it open, exactly as boarding.js's leaf contract says. Returns false when
+     the car has no such door, so callers can fall back. */
+  CBZ.carDoorPose = function (car, id, t) {
+    const rig = doorRigOf(car);
+    if (!rig) return false;
+    const vis = rig.shut.length ? rig.shut[0].parent : null;
+    let g = null;
+    for (let i = 0; i < rig.doors.length; i++) if (rig.doors[i].userData.carDoor.id === id) { g = rig.doors[i]; break; }
+    if (!g || !vis) return false;
+    t = Math.max(0, Math.min(1, +t || 0));
+    g._cbzOpenT = t;
+    g.rotation.y = -g.userData.carDoor.side * DOOR_ARC * t;
+    let any = false;
+    for (let i = 0; i < rig.doors.length; i++) if (rig.doors[i]._cbzOpenT > 0.002) { any = true; break; }
+    if (any && !rig.split) {
+      rig.split = true;
+      for (let i = 0; i < rig.shut.length; i++) rig.shut[i].visible = false;
+      for (let i = 0; i < rig.doors.length; i++) { rig.doors[i].visible = true; vis.add(rig.doors[i]); }
+    } else if (!any && rig.split) {
+      rig.split = false;
+      for (let i = 0; i < rig.shut.length; i++) rig.shut[i].visible = true;
+      for (let i = 0; i < rig.doors.length; i++) vis.remove(rig.doors[i]);
+    }
+    return true;
+  };
+  CBZ.carDoorOpenT = function (car, id) {
+    const rig = doorRigOf(car);
+    if (!rig) return null;
+    for (let i = 0; i < rig.doors.length; i++) if (rig.doors[i].userData.carDoor.id === id) return rig.doors[i]._cbzOpenT || 0;
+    return null;
+  };
+
   // ---- HOLE-PROOFING (USER-FILMED BUG: "some cars have weird holes in them").
   //      Systematic, not per-model — runs on every visual BEFORE batching:
   //      • deck slabs (hood/trunk breaks, tonneau, roof caps) ride the body
@@ -1703,6 +1800,7 @@
       addInteriorShell(visual, dims, null);
     }
     if (mergeStaticCarParts) mergeStaticCarParts(visual, keep);
+    bakeShutDoors(visual);
     grp.userData.carVisual = visual;
     grp.userData.carStyle = style;
     grp.userData.bodyKind = bt;

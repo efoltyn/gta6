@@ -238,7 +238,15 @@
   }
 
   function removeFlap(f) {
-    if (f && f.pivot && f.pivot.parent) f.pivot.parent.remove(f.pivot);
+    if (!f) return;
+    if (f.real) { try { CBZ.carDoorPose(f.root, f.id, 0); } catch (e) {} return; }
+    if (f.pivot && f.pivot.parent) f.pivot.parent.remove(f.pivot);
+  }
+  // the hung door's angle (rad off shut): the real door through its own verb,
+  // the legacy flap through its pivot (which spans +z, hence the PI)
+  function setDoorSag(f, ang) {
+    if (f.real) { try { CBZ.carDoorPose(f.root, f.id, ang / 1.15); } catch (e) {} return; }
+    f.pivot.rotation.y = Math.PI - f.side * ang;
   }
   // dropOnly: the car is being torn down anyway — just forget it, touch nothing
   function release(e, dropOnly) {
@@ -503,6 +511,21 @@
   }
   function spawnDoor(e, root, d, side) {
     if (e.door || !ensureFlapGeo()) return;
+    /* A CAR WITH REAL DOORS SAGS ITS REAL DOOR. playercars.js builds hinged
+       doors into every road car and SUV now, so a side impact swings the
+       struck flank's front door open on its own hinge — skin, card, window
+       and all — instead of bolting a painted slab beside a shut one. The
+       flap below stays for the bodies that have no door to sag. */
+    const specs = CBZ.carDoors ? CBZ.carDoors(root) : null;
+    if (specs) {
+      let spec = null;
+      for (let i = 0; i < specs.length; i++) if (specs[i].side === side && (!spec || specs[i].row < spec.row)) spec = specs[i];
+      if (spec) {
+        e.door = { real: true, root: root, id: spec.id, side: side, ph: rng() * 6.28 };
+        setDoorSag(e.door, 0.55);
+        return;
+      }
+    }
     const paint = paintMatOf(root);
     const f = spawnFlap(root, paint, side * d.width * 0.5, d.height * 0.36, d.length * 0.12,
       0.055, d.height * 0.38, d.length * 0.24);
@@ -1118,7 +1141,7 @@
       attr.needsUpdate = true;
     }
     if (e.hood) e.hood.pivot.rotation.x = e.hood.base * keep;
-    if (e.door) e.door.pivot.rotation.y = Math.PI - e.door.side * 0.55 * keep;
+    if (e.door) setDoorSag(e.door, 0.55 * keep);
     if (e.bump) e.bump.pivot.rotation.z *= keep;
     if (e.wheelPop && e.wheelPop.w) {
       const wp = e.wheelPop, w = wp.w;
@@ -1166,7 +1189,7 @@
       if (!e.hood && !e.door && !e.bump) continue;
       const sp = Math.abs(car.v || 0);
       if (e.hood) e.hood.pivot.rotation.x = e.hood.base + Math.sin(wob * 21 + e.hood.ph) * Math.min(0.13, sp * 0.012);
-      if (e.door) e.door.pivot.rotation.y = Math.PI - e.door.side * (0.55 + Math.sin(wob * 5.5 + e.door.ph) * Math.min(0.2, 0.04 + sp * 0.014));
+      if (e.door) setDoorSag(e.door, 0.55 + Math.sin(wob * 5.5 + e.door.ph) * Math.min(0.2, 0.04 + sp * 0.014));
       if (e.bump && sp > 4 && cam) {
         e.bump.sparkT -= dt;
         if (e.bump.sparkT <= 0) {
