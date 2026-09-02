@@ -146,7 +146,7 @@
 
   // is this a store where buying clothing/jewelry should auto-EQUIP it (build
   // drip)? Boutique/clothing + jewelry + barber accessories all dress you up.
-  function isBoutique(kind) { return kind === "clothing" || kind === "boutique" || kind === "jewelry" || kind === "barber"; }
+  function isBoutique(kind) { return kind === "clothing" || kind === "boutique" || kind === "jewelry" || kind === "barber" || kind === "eyewear"; }
   // the letter that toggles the CLOSET sub-view, chosen so it never collides
   // with this shop's restyle letters (a..styles.length) or a service key. Most
   // boutiques get [G]; the barber (whose haircuts run a..g) falls back to [K].
@@ -263,7 +263,18 @@
     // melee). One price source for both paths: cityEcon.buyPrice. Feature-
     // detected: no gunstore.js → this menu sells everything, as before.
     const wallLive = kind === "guns" && CBZ.cityGunWallLive && CBZ.cityGunWallLive(lot);
-    listItems = (wallLive ? stock.filter((n) => !(econ.ITEMS[n] && econ.ITEMS[n].gun)) : stock).slice(0, 9);
+    // THE SHELVES (city/storegoods.js): every generic store stands its OWN
+    // stock on its OWN shelves as the real item models, bought eye-to-object
+    // with [E] where it sits. cityGoodsLive returns the names actually standing
+    // on this lot's shelves, and the counter stops listing exactly those — the
+    // clerk keeps the services (heal, refuel, deposit, haircut…), the sell
+    // window and the till. Feature-detected: no storegoods.js and this menu
+    // sells everything, as before.
+    const shelved = (!wallLive && CBZ.cityGoodsLive) ? CBZ.cityGoodsLive(lot) : null;
+    const goodsLive = !!(shelved && shelved.length);
+    let onOffer = wallLive ? stock.filter((n) => !(econ.ITEMS[n] && econ.ITEMS[n].gun)) : stock;
+    if (goodsLive) onOffer = onOffer.filter((n) => shelved.indexOf(n) < 0);
+    listItems = onOffer.slice(0, 9);
     let html = "<div style='font-size:20px;font-weight:700;margin-bottom:2px'>" + name + "</div>";
     const disc = shopDiscount(qty);
     // HEADER: cash/bank + your CURRENT DRIP (the club gate). In a boutique we
@@ -283,7 +294,11 @@
       dripBadge + "</div>";
     html += "<div class='shopRow shopLeave' data-k='escape'>LEAVE</div>";
 
-    // the walk-in routing line: the WALL sells the guns, the counter the rest.
+    // the walk-in routing line: the SHELVES sell the goods, the counter the rest.
+    if (goodsLive) {
+      html += "<div style='font-size:12px;color:#9fb0c6;margin:2px 0 6px'>The stock is <b style='color:#ffd166'>on the shelves</b> \u00b7 " +
+        "walk up to a piece and press <b style='color:#ffd166'>E</b> to buy it off the shelf.</div>";
+    }
     if (wallLive) {
       html += "<div style='font-size:12px;color:#9fb0c6;margin:2px 0 6px'>The pieces are <b style='color:#ffd166'>on the wall</b> · " +
         "walk up to one and press <b style='color:#ffd166'>E</b> to take it off the rack. The counter's got the ammo.</div>";
@@ -555,26 +570,29 @@
     render();
   }
 
-  // ---- buying (now supports a quantity multiplier + the shop discount) ------
-  function buy(i) {
-    const it = listItems[i]; if (!it) return;
+  // ---- buying -------------------------------------------------------------
+  //  ONE ACQUIRE PATH. The clerk's counter menu and the SHELF (city/storegoods.js
+  //  stands the store's real stock on the real shelves) charge the same price,
+  //  take the same money and put the goods in the same bag — because they call
+  //  the same function. `free` is the shoplift branch: the goods land exactly
+  //  where a bought unit would, no money moves.
+  function acquire(lot, it, n, each, free) {
     const econ = CBZ.cityEcon, meta = econ.ITEMS[it];
-    // weapons/armor are single-buy (you can't carry a stack of the same gun
-    // meaningfully); everything else respects the qty multiplier.
-    const single = !!(meta.gun || meta.melee || meta.armor);
-    const n = single ? 1 : qty;
-    const each = unitPrice(it, n);
+    if (!meta || !CBZ.city) return false;
+    const kind = (lot && lot.kind) || "";
     const total = each * n;
-    if (!CBZ.city.spend(total)) {
-      CBZ.city.note("Can't afford " + (n > 1 ? n + "× " : "") + it + " (" + fmt$(total) + ")", 1.6);
-      return;
+    if (!free) {
+      if (!CBZ.city.spend(total)) {
+        CBZ.city.note("Can't afford " + (n > 1 ? n + "× " : "") + it + " (" + fmt$(total) + ")", 1.6);
+        return false;
+      }
+      // E7: Ironclad Arms books half of every player gun-store purchase as
+      // real revenue (sim/corporations.js's creditRevenue) — a guns lot the
+      // company doesn't even need to have claimed as an outlet.
+      if (kind === "guns" && CBZ.corps && CBZ.corps.creditRevenue) CBZ.corps.creditRevenue("ironclad", total * 0.5);
+      if (CBZ.sfx) CBZ.sfx("coin");
     }
-    // E7: Ironclad Arms books half of every player gun-store purchase as
-    // real revenue (sim/corporations.js's creditRevenue) — a guns lot the
-    // company doesn't even need to have claimed as an outlet.
-    if (openLot.kind === "guns" && CBZ.corps && CBZ.corps.creditRevenue) CBZ.corps.creditRevenue("ironclad", total * 0.5);
-    if (CBZ.sfx) CBZ.sfx("coin");
-    if (openLot.kind === "food" && meta.heal) {
+    if (kind === "food" && meta.heal) {
       // YOU BUY FOOD, THEN YOU EAT IT. This used to write g.hunger directly —
       // a second hunger writer beside city/hunger.js — and swallow the whole
       // order in one frame, so buying 3 burgers left you with 0 burgers. Now
@@ -595,13 +613,41 @@
       // counter auto-EQUIPS the piece into its slot so it's WORN immediately and
       // counts toward your drip (the club gate). The drip preview becomes real.
       econ.add(it, n);
-      if (isBoutique(openLot.kind)) equip(it);
-      else CBZ.city.note("Bought " + (n > 1 ? n + "× " : "") + it, 1.4);
+      if (isBoutique(kind)) equip(it);
+      else CBZ.city.note((free ? "Pocketed " : "Bought ") + (n > 1 ? n + "× " : "") + it, 1.4);
     }
-    else { econ.add(it, n); CBZ.city.note("Bought " + (n > 1 ? n + "× " : "") + it, 1.4); }
-    render();
+    else { econ.add(it, n); CBZ.city.note((free ? "Pocketed " : "Bought ") + (n > 1 ? n + "× " : "") + it, 1.4); }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return true;
   }
+
+  // the counter menu's row press: qty multiplier + haggle discount, then the
+  // shared acquire above.
+  function buy(i) {
+    const it = listItems[i]; if (!it) return;
+    const meta = CBZ.cityEcon.ITEMS[it]; if (!meta) return;
+    // weapons/armor are single-buy (you can't carry a stack of the same gun
+    // meaningfully); everything else respects the qty multiplier.
+    const single = !!(meta.gun || meta.melee || meta.armor);
+    const n = single ? 1 : qty;
+    acquire(openLot, it, n, unitPrice(it, n), false);
+    render();
+  }
+
+  /* THE SHELF'S DOOR INTO THIS FILE. When you lift the store's own stock off
+     its own shelf, the money and the goods move through exactly the path the
+     clerk's menu uses: the same cityEcon.buyPrice, the same CBZ.city.spend, the
+     same inventory, the same equip-on-buy for a wearable. opts.free is the
+     shoplift take. Returns true only if it actually happened — a failed spend
+     returns false and the shelf keeps the item. */
+  CBZ.cityShopAcquire = function (lot, name, n, opts) {
+    const meta = CBZ.cityEcon && CBZ.cityEcon.ITEMS[name];
+    if (!meta || !CBZ.city) return false;
+    const single = !!(meta.gun || meta.melee || meta.armor);
+    const cnt = single ? 1 : Math.max(1, n | 0);
+    const free = !!(opts && opts.free);
+    return acquire(lot || openLot, name, cnt, free ? 0 : CBZ.cityEcon.buyPrice(name), free);
+  };
 
   // Put a wearable you OWN onto your body via the shared outfit model
   // (CBZ.cityEquip → fills its slot, replacing whatever's there). Surfaces the

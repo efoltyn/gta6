@@ -93,6 +93,14 @@
     // from a pair of shades or an EARRING from a ring — and that last one shipped
     // as a real bug: the player wore nothing and a ped wore a stray ring glint.
     Sunglasses:    { value: 140,  tag: "wearable", slot: "glasses", drip: 2, blingLook: "shades" },
+    // THE EYEWEAR WALL (the "SHADES" storefront, buildings.js SHOPS). One shop
+    // kind needs more than two frames on its shelves or it is a shop selling
+    // one thing twice — so the glasses slot gets a real ladder, each rung a
+    // DISTINCT look bling.js actually mounts on the face (city/bling.js
+    // _looks), not the same lens at three prices.
+    "Retro Frames":  { value: 95,   tag: "wearable", slot: "glasses", drip: 2, blingLook: "shadesRetro" },
+    "Sport Wraps":   { value: 210,  tag: "wearable", slot: "glasses", drip: 3, blingLook: "shadesSport" },
+    Aviators:        { value: 290,  tag: "wearable", slot: "glasses", drip: 4, blingLook: "shadesAviator" },
     Earrings:      { value: 320,  tag: "wearable", slot: "chain",   drip: 3, blingLook: "earrings" },
     //   DESIGNER — mid drip (a full designer fit clears CLUB_DRIP, not VIP):
     "Bomber Jacket": { value: 650,  tag: "wearable", slot: "outer",   drip: 6 },
@@ -337,6 +345,9 @@
     electronics: ["Phone", "Laptop", "Burner Phone"],
     gym:         ["Energy Drink", "Medkit"],
     barber:      ["Sunglasses", "Earrings", "Snapback", "Beanie", "Fedora", "Designer Shades"],
+    // SHADES — the sunglass store. Everything it sells is a real pair of
+    // glasses that goes on your face (slot "glasses"), cheapest first.
+    eyewear:     ["Retro Frames", "Sunglasses", "Sport Wraps", "Aviators", "Designer Shades"],
     security:    ["Body Armor", "Ammo Box", "Pistol"],
     bank:        [],
     hospital:    ["Medkit", "Body Armor"],

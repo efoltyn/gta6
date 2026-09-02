@@ -103,6 +103,7 @@
           { name: "SENTINEL SECURITY", storeys: 3, color: 0x4a5260, shopKind: "security", opts: { retail: true, facade: "office" }, lotKind: "shop", w: 2 },
           { name: "TICKER ELECTRONICS", storeys: 2, color: 0x40566a, shopKind: "electronics", opts: RET, lotKind: "shop", w: 2 },
           { name: "EXCHANGE FITNESS", storeys: 2, color: 0x4a5a52, shopKind: "gym", opts: RET, lotKind: "shop", w: 1 },
+          { name: "MERIDIAN OPTICS", storeys: 1, color: 0x3a4450, shopKind: "eyewear", opts: RET, lotKind: "shop", w: 1 },
           { name: "THE BOARDROOM BAR", storeys: 2, color: 0x5a4636, shopKind: "bar", opts: RET, lotKind: "shop", w: 1 },
         ],
         residential: [
@@ -136,6 +137,7 @@
           { name: "AFTERGLOW NIGHTCLUB", storeys: 2, color: 0x8a2a8a, shopKind: "bar", opts: RET, lotKind: "shop", w: 2 },
           { name: "QUICK CASH PAWN", storeys: 1, color: 0x5a3a6a, shopKind: "pawn", opts: RET, lotKind: "shop", w: 2 },
           { name: "DIAMOND LOUNGE", storeys: 2, color: 0x7a3a5a, shopKind: "jewelry", opts: RET, lotKind: "shop", w: 1 },
+          { name: "AFTER DARK SHADES", storeys: 1, color: 0x4a2a5a, shopKind: "eyewear", opts: RET, lotKind: "shop", w: 1 },
           { name: "THE LUCKY BAR", storeys: 1, color: 0x6a3a4a, shopKind: "bar", opts: RET, lotKind: "shop", w: 2 },
         ],
         residential: [

@@ -213,6 +213,16 @@
     else if (kind === "lens") gm = CBZ.boxGeom(0.20, 0.17, 0.05);     // one shade lens (two of these cover the eyes)
     else if (kind === "bridge") gm = CBZ.boxGeom(0.09, 0.055, 0.05);  // nose bridge joining the lenses
     else if (kind === "temple") gm = CBZ.boxGeom(0.035, 0.045, 0.30); // arm running back over the ear
+    // EYEWEAR, BEYOND THE ONE FRAME. A sunglass store selling five pairs of
+    // the same box is the "fake shit" the whole goods pass exists to kill, so
+    // the glasses slot gets three more SHAPES rather than three more prices:
+    else if (kind === "lensDrop") gm = CBZ.boxGeom(0.19, 0.20, 0.05);   // aviator teardrop: taller than wide
+    else if (kind === "lensWrap") gm = CBZ.boxGeom(0.50, 0.13, 0.06);   // sport: ONE wrap shield across both eyes
+    else if (kind === "lensRound") gm = CBZ.boxGeom(0.17, 0.17, 0.05);  // retro: small round-ish lens
+    else if (kind === "rimThick") gm = CBZ.boxGeom(0.21, 0.21, 0.035);  // retro's chunky acetate rim behind the lens
+    else if (kind === "templeThick") gm = CBZ.boxGeom(0.048, 0.055, 0.30);  // heavy acetate arm
+    else if (kind === "templeWire") gm = CBZ.boxGeom(0.022, 0.022, 0.31);   // thin wire arm (aviator)
+    else if (kind === "browBar") gm = CBZ.boxGeom(0.34, 0.028, 0.04);   // the aviator's straight brow bar
     // ---- V2 PARTS ---------------------------------------------------------
     // chain strands: three weights of the same 0.30 run (fine necklace / curb
     // chain / fat iced links), each ONE merged geometry.
@@ -315,6 +325,11 @@
       lensDark: CBZ.cmat(0x0a0d12, { emissive: 0x1b2535, ei: 0.30 }),  // basic sunglasses lens: near-black, faint cool sheen
       lensMirror: CBZ.cmat(0x0e1422, { emissive: 0x37588a, ei: 0.50 }),// designer lens: darker, brighter mirrored cool tint
       frameDark: CBZ.cmat(0x111317, { emissive: 0x000000, ei: 0.0 }),  // black plastic frame
+      lensGreen: CBZ.cmat(0x121c16, { emissive: 0x2c5a3a, ei: 0.34 }),  // aviator's G-15 green glass
+      lensAmber: CBZ.cmat(0x2a1c0e, { emissive: 0x6b4418, ei: 0.34 }),  // retro's warm amber tint
+      lensSport: CBZ.cmat(0x0d1a22, { emissive: 0x2f7a8a, ei: 0.55 }),  // sport wrap's cyan flash coat
+      frameTort: CBZ.cmat(0x4a2c16, { emissive: 0x1c1008, ei: 0.15 }),  // tortoiseshell acetate
+      frameSport: CBZ.cmat(0x1a1f26, { emissive: 0x0a0d11, ei: 0.10 }), // matte sport frame
       // V2 finishes. cmat is a Lambert with an emissive tint (and returns a PBR
       // twin by itself on the high tier) — a metal here wants a DARKER body and
       // a warmer/cooler self-glow than the flat V1 pair, because contrast
@@ -431,6 +446,35 @@
         { kind: "bridge", mat: M.frameDark, x: 0.0, y: 0.345, z: 0.34 },
         { kind: "temple", mat: M.frameDark, x: -0.27, y: 0.345, z: 0.17 },
         { kind: "temple", mat: M.frameDark, x: 0.27, y: 0.345, z: 0.17 },
+      ],
+      // AVIATORS — wire frame, straight brow bar, green teardrop glass. The
+      // shape people actually mean when they say "sunglasses".
+      shadesAviator: [
+        { kind: "lensDrop", mat: M.lensGreen, x: -0.145, y: 0.335, z: 0.34 },
+        { kind: "lensDrop", mat: M.lensGreen, x: 0.145, y: 0.335, z: 0.34 },
+        { kind: "browBar", mat: M.gold, x: 0.0, y: 0.425, z: 0.34 },
+        { kind: "bridge", mat: M.gold, x: 0.0, y: 0.365, z: 0.34 },
+        { kind: "templeWire", mat: M.gold, x: -0.27, y: 0.40, z: 0.17 },
+        { kind: "templeWire", mat: M.gold, x: 0.27, y: 0.40, z: 0.17 },
+      ],
+      // SPORT WRAPS — one shield across both eyes, no bridge to see, matte
+      // arms. The read is a single curved band, not two round windows.
+      shadesSport: [
+        { kind: "lensWrap", mat: M.lensSport, x: 0.0, y: 0.345, z: 0.335 },
+        { kind: "temple", mat: M.frameSport, x: -0.27, y: 0.345, z: 0.17 },
+        { kind: "temple", mat: M.frameSport, x: 0.27, y: 0.345, z: 0.17 },
+      ],
+      // RETRO FRAMES — fat tortoiseshell acetate rims with amber glass sunk
+      // inside them, heavy arms. The cheap rung, and it looks like a different
+      // decade rather than a cheaper version of the same pair.
+      shadesRetro: [
+        { kind: "rimThick", mat: M.frameTort, x: -0.145, y: 0.345, z: 0.325 },
+        { kind: "rimThick", mat: M.frameTort, x: 0.145, y: 0.345, z: 0.325 },
+        { kind: "lensRound", mat: M.lensAmber, x: -0.145, y: 0.345, z: 0.345 },
+        { kind: "lensRound", mat: M.lensAmber, x: 0.145, y: 0.345, z: 0.345 },
+        { kind: "bridge", mat: M.frameTort, x: 0.0, y: 0.345, z: 0.335 },
+        { kind: "templeThick", mat: M.frameTort, x: -0.275, y: 0.345, z: 0.17 },
+        { kind: "templeThick", mat: M.frameTort, x: 0.275, y: 0.345, z: 0.17 },
       ],
       // designer shades — same frame, mirrored lens + gold hardware (the pricier read)
       shadesDesigner: [
@@ -569,6 +613,7 @@
     earrings: "ears", earringsIce: "ears",
     tiara: "crown", grill: "mouth",
     shades: "eyes", shadesDesigner: "eyes",
+    shadesAviator: "eyes", shadesSport: "eyes", shadesRetro: "eyes",
   };
   // With BLING_V2 off the V1 table has no unicorns, no ears and no tiara — a
   // look key that does not exist there degrades to its nearest V1 sibling

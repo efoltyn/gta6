@@ -282,44 +282,91 @@
     return spec.price;
   }
 
-  // a small armored-mannequin row past the ammo crates (counter's far + tangent
-  // end). Each kit that actually EXISTS in CBZ.ARMOR_KITS gets a torso block +
-  // (for the helmet) a head dome + a price tag; missing kits are skipped so the
-  // store degrades gracefully if armor.js never loaded.
+  /* ---- THE ARMOURY IS REAL ----------------------------------------------
+     OWNER: "armoury having real armour on mannequins ... i dont want a store
+     with a bunch of fake shit."
+
+     WHAT WAS HERE. A 0.55x0.78x0.32 BOX on a stick, tinted 0x2c3340, and for
+     the helmet a hemisphere on a post. Not the vest. Not even a body. Every
+     cop and every SWAT in this city wears a REAL vest — armor.js mounts a
+     fitted shell, a raised plate band, shoulder pads, cummerbund side plates
+     and a groin flap over a measured torso, and a real tactical lid with a
+     brim, rails, a visor and a rear counterweight — and the shop that SELLS
+     that armour displayed a rectangle.
+
+     WHAT IS HERE NOW. A real character rig (CBZ.makeCharacter — the body every
+     person in the game is built from), coloured matte studio-cream so the FORM
+     never competes with the goods, standing on a plinth; and armor.js's own
+     CBZ.cityArmorDressPed puts the ACTUAL kit on it. The vest on the mannequin
+     is the vest you walk out wearing, mounted by the one function that mounts
+     it, fitted by the same armorFit measurement — so it cannot drift from what
+     the player gets, ever. Missing armor.js or missing rig builder → the row is
+     skipped entirely rather than faked. */
+  const FORM_SKIN = 0xd8d2c6, FORM_DARK = 0x2c2f36;
+  function armorMannequin(group, x, z, faceY, kitId) {
+    if (!CBZ.makeCharacter || !CBZ.cityArmorDressPed) return null;
+    let rig = null;
+    try {
+      rig = CBZ.makeCharacter({
+        legs: FORM_SKIN, torso: FORM_SKIN, collar: FORM_SKIN, arms: FORM_SKIN,
+        skin: FORM_SKIN, hair: FORM_SKIN, shoes: FORM_DARK, cap: 0,
+      });
+    } catch (e) { rig = null; }
+    if (!rig || !rig.group) return null;
+    rig.group.position.set(x, 0, z);
+    rig.group.rotation.y = faceY;
+    // a display form is a RIG under the city root: tag it so the static passes
+    // (batch merge / matrix freeze) never fold a body into the shell.
+    rig.group.userData.dynamic = true;
+    group.add(rig.group);
+    try { CBZ.cityArmorDressPed({ char: rig }, [kitId]); } catch (e) { /* undressed form still stands */ }
+    return rig;
+  }
+
+  // the armoury row past the ammo crates (counter's - tangent end). One
+  // mannequin per kit that actually EXISTS in CBZ.ARMOR_KITS, wearing it.
   function buildArmorRack(group, m, C, longLen) {
     const kits = CBZ.ARMOR_KITS;
     if (!kits) return;                                       // armor.js absent — no rack, no crash
     const sells = ARMOR_FOR_SALE.filter((sp) => armorKit(sp.kit));
     if (!sells.length) return;
-    // mannequins sit at the - tangent end (ammo/explosives took the + end)
-    const baseOff = -(longLen / 2 + 0.7);
-    const vestMat = m.armorVest || (m.armorVest = (function () {
-      const mm = new THREE.MeshLambertMaterial({ color: 0x2c3340 }); mm._shared = true; return mm;
+    // mannequins sit at the - tangent end (ammo/explosives took the + end),
+    // facing the customer side of the counter.
+    const baseOff = -(longLen / 2 + 0.95);
+    let inx = S.cx - C.x, inz = S.cz - C.z;
+    const il = Math.hypot(inx, inz) || 1; inx /= il; inz /= il;
+    const faceY = Math.atan2(inx, inz);
+    const plinth = m.plinth || (m.plinth = (function () {
+      const mm = new THREE.MeshLambertMaterial({ color: 0x1c1f24 }); mm._shared = true; return mm;
     })());
     sells.forEach((sp, i) => {
-      const off = baseOff - i * 0.9;
-      const x = C.x + C.tx * off, z = C.z + C.tz * off;
-      const isHelmet = (armorKit(sp.kit) || {}).slot === "helmet" || sp.kit === "helmet";
-      // a stubby torso plate; the helmet kit gets a dome on a short post instead
-      if (isHelmet) {
-        const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.9, 0.12), m.board);
-        post.position.set(x, 0.45, z); post.castShadow = false; group.add(post);
-        const dome = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 8, 0, Math.PI * 2, 0, Math.PI / 1.7), vestMat);
-        dome.position.set(x, 1.02, z); dome.castShadow = false; group.add(dome);
-      } else {
-        const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.78, 0.32), vestMat);
-        torso.position.set(x, 0.95, z); torso.castShadow = false; group.add(torso);
-        const stand = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.55, 0.1), m.board);
-        stand.position.set(x, 0.3, z); stand.castShadow = false; group.add(stand);
-      }
-      const slot = { name: sp.label, armor: true, kit: sp.kit, price: sp.price,
-                     sold: false, x: x, y: isHelmet ? 1.02 : 0.95, z: z, reach: CASE_REACH, dot: CASE_DOT };
+      const off = baseOff - i * 1.15;
+      const x = C.x + C.tx * off + inx * 0.35, z = C.z + C.tz * off + inz * 0.35;
+      const base = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.10, 0.62), plinth);
+      base.position.set(x, 0.05, z); base.castShadow = false; group.add(base);
+      const rig = armorMannequin(group, x, z, faceY, sp.kit);
+      if (rig && rig.group) rig.group.position.y = 0.10;      // stand ON the plinth
+      const isHelmet = (armorKit(sp.kit) || {}).slot === "head" || sp.kit === "helmet";
+      const slot = { name: sp.label, armor: true, kit: sp.kit, price: sp.price, rig: rig,
+                     sold: false, x: x, y: isHelmet ? 1.75 : 1.40, z: z, reach: CASE_REACH, dot: CASE_DOT };
       const price = armorPrice(sp);
       slot.tag = tagSprite(sp.label + " · " + fmt$(price), sp.color, 1.9, 0.44);
-      if (slot.tag) { slot.tag.position.set(x, (isHelmet ? 1.5 : 1.55), z); group.add(slot.tag); }
+      if (slot.tag) { slot.tag.position.set(x, (isHelmet ? 2.15 : 2.05), z); group.add(slot.tag); }
       S.slots.push(slot);
     });
   }
+  // headless / harness handle: what the armoury row is actually WEARING.
+  CBZ.cityGunstoreArmoury = function () {
+    const out = [];
+    for (const s of S.slots) {
+      if (!s.armor) continue;
+      let worn = 0;
+      if (s.rig && s.rig.body) s.rig.body.traverse(function (o) { if (o.userData && o.userData.armorKind) worn++; });
+      if (s.rig && s.rig.neck) s.rig.neck.traverse(function (o) { if (o.userData && o.userData.armorKind) worn++; });
+      out.push({ name: s.name, kit: s.kit, rig: !!s.rig, armorParts: worn, x: s.x, y: s.y, z: s.z });
+    }
+    return out;
+  };
 
   // ---- SOLD gap / restock ----------------------------------------------------
   function setSold(s, on) {

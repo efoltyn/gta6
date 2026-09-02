@@ -3130,6 +3130,10 @@
     { kind: "security", name: "Sentinel Security", sign: 0x49566b, storeys: 1 },
     { kind: "hospital", name: "City Hospital",   sign: 0xe8e8ee, storeys: 2, hospital: true },
     { kind: "barber",   name: "Fresh Cuts",      sign: 0x6bb6ff, storeys: 1, retail: true },
+    // SHADES — the sunglass store. Its whole stock is the glasses slot
+    // (economy.js SHOP_STOCK.eyewear), every pair a real frame that goes on
+    // your face, standing on the shelves as its own model.
+    { kind: "eyewear",  name: "Shades Optical",  sign: 0x2f3a4a, storeys: 1, retail: true },
     { kind: "electronics", name: "Volt Electronics", sign: 0x39d0c0, storeys: 1, retail: true },
     { kind: "carlot",   name: "Premium Autos",   sign: 0xe88a3c, storeys: 1, carlot: true, retail: true },
     { kind: "realtor",  name: "Keystone Realty", sign: 0x4fd0a0, storeys: 1, realtor: true },
@@ -7598,7 +7602,7 @@
     // shuffle the shop list, then float the gameplay-critical trades to the
     // front so they ALWAYS get placed; the rest fill in only sometimes, leaving
     // plenty of lots free to become residences (the property ladder).
-    const ESSENTIAL = new Set(["guns", "drugs", "bank", "hospital", "food", "pawn", "realtor", "chop", "carlot", "jewelry", "clothing", "gym", "casino", "raceway", "arena", "transit", "cityhall"]);
+    const ESSENTIAL = new Set(["guns", "drugs", "bank", "hospital", "food", "pawn", "realtor", "chop", "carlot", "jewelry", "clothing", "gym", "casino", "raceway", "arena", "transit", "cityhall", "eyewear"]);
     let shopQueue = SHOPS.slice();
     for (let i = shopQueue.length - 1; i > 0; i--) { const j = (rng() * (i + 1)) | 0; const t = shopQueue[i]; shopQueue[i] = shopQueue[j]; shopQueue[j] = t; }
     shopQueue = shopQueue.filter((s) => ESSENTIAL.has(s.kind)).concat(shopQueue.filter((s) => !ESSENTIAL.has(s.kind)));
@@ -7621,11 +7625,11 @@
     // groceries and gyms to residential. Pure argmax over the queue (no new
     // rng draws), so the deterministic stream is untouched.
     const AFFINITY = {
-      core:        { bank: 4, jewelry: 4, casino: 4, cityhall: 4, transit: 3, clothing: 3, arena: 3, realtor: 2, food: 1, gym: 1, hospital: 2, drugs: 0.2, chop: 0.2, guns: 0.4, pawn: 0.4 },
-      commercial:  { food: 3, clothing: 3, gym: 3, realtor: 3, carlot: 3, hospital: 3, bank: 2, transit: 2, casino: 1, pawn: 1, jewelry: 1, arena: 2, drugs: 0.4 },
-      industrial:  { chop: 4, guns: 3, carlot: 3, gas: 3, pawn: 2, transit: 2, food: 1, drugs: 1.5, bank: 0.3, jewelry: 0.2, casino: 0.3, clothing: 0.4 },
-      projects:    { drugs: 4, pawn: 3, guns: 3, chop: 2, food: 2, gas: 1.5, gym: 1, bank: 0.3, jewelry: 0.15, casino: 0.5, clothing: 0.5, realtor: 0.4 },
-      residential: { food: 3, gym: 2, realtor: 2, hospital: 2, clothing: 1.5, transit: 1.5, bank: 1, drugs: 0.5, chop: 0.3, guns: 0.5, casino: 0.4 },
+      core:        { bank: 4, jewelry: 4, casino: 4, cityhall: 4, transit: 3, clothing: 3, arena: 3, eyewear: 3, realtor: 2, food: 1, gym: 1, hospital: 2, drugs: 0.2, chop: 0.2, guns: 0.4, pawn: 0.4 },
+      commercial:  { food: 3, clothing: 3, gym: 3, realtor: 3, carlot: 3, hospital: 3, eyewear: 2.5, bank: 2, transit: 2, casino: 1, pawn: 1, jewelry: 1, arena: 2, drugs: 0.4 },
+      industrial:  { chop: 4, guns: 3, carlot: 3, gas: 3, pawn: 2, transit: 2, food: 1, drugs: 1.5, bank: 0.3, jewelry: 0.2, casino: 0.3, clothing: 0.4, eyewear: 0.3 },
+      projects:    { drugs: 4, pawn: 3, guns: 3, chop: 2, food: 2, gas: 1.5, gym: 1, bank: 0.3, jewelry: 0.15, casino: 0.5, clothing: 0.5, realtor: 0.4, eyewear: 0.4 },
+      residential: { food: 3, gym: 2, realtor: 2, hospital: 2, clothing: 1.5, transit: 1.5, bank: 1, eyewear: 1, drugs: 0.5, chop: 0.3, guns: 0.5, casino: 0.4 },
     };
     function shopAffinity(kind, dk) {
       const row = AFFINITY[dk];
@@ -9069,6 +9073,25 @@
       for (let i = 0; i < lots.length; i++) { const lot = lots[i]; if (!lot || !lot.building || !lot.building.shoplift || flagship(lot)) continue; const d = Math.hypot(px - lot.cx, pz - lot.cz); if (d < bd) { bd = d; bestLot = lot; } }
       if (!bestLot) return [];
       return bestLot.building.shoplift.map(function (sh) { return { x: sh.x, z: sh.z, kind: sh.kind, n0: sh.n0, taken: sh.taken, left: remaining(sh) }; });
+    };
+    // ---- THE TWO PIECES A REAL-GOODS SHELF NEEDS FROM THIS SYSTEM ----------
+    // city/storegoods.js stands the store's actual stock on the same shelves
+    // this runtime recorded, so the goods it hands you are real items rather
+    // than a flavour word and a few dollars. What it must NOT do is re-type the
+    // clerk's eyes or the theft charge — that is the whole reason a lifted item
+    // costs anything. Both are published here, from the ONE implementation.
+    //   clerkSees(lot,x,z) — is the posted clerk watching this spot right now?
+    //   theft(lot,x,z)     — you were MADE: the same reported charge + the same
+    //                        clerk/ped panic the flavour-word grab fires.
+    // Returns true when it busted you (the caller must then take nothing).
+    CBZ.cityShopClerkSees = function (lot, x, z) { return !!(lot && clerkSees(lot, x, z)); };
+    CBZ.cityShopTheftSeen = function (lot, x, z) {
+      if (!lot || !clerkSees(lot, x, z)) return false;
+      note("" + clerkName(lot) + " saw you, put it back!", 2);
+      if (CBZ.cityCrime) CBZ.cityCrime(65, { type: "theft", x: x, z: z, instant: true });
+      const v = lot.building && lot.building.vendor;
+      if (CBZ.cityPanic && v && v.pos) CBZ.cityPanic(v.pos.x, v.pos.z, 1.4, CBZ.city && CBZ.city.playerActor);
+      return true;
     };
   })();
 })();

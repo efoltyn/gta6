@@ -1485,6 +1485,12 @@
 <script src="src/city/bank.js?v=nodash1"></script>
 <script src="src/city/pawnshop.js?v=nodash1"></script>
 <script src="src/city/clothingstore.js?v=nodash1"></script>
+<!-- THE SHELVES SELL THE GOODS (city/storegoods.js): every generic store stands
+     its own real stock on its own shelves as the real item models, and the
+     painted blocks furnishShop used to put there are stripped before the batch
+     merge. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
+     models), interactions.js (the verbs) and worldmap.js (addLandmass). -->
+<script src="src/city/storegoods.js?v=realgoods1"></script>
 <script src="src/city/realtyoffice.js?v=nodash1"></script>
 <script src="src/city/family.js?v=nodash1"></script>
 <script src="src/city/swim.js?v=sharkmode1"></script>
