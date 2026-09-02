@@ -1366,14 +1366,9 @@
        to matter. Soot against sky owes the air nothing (city/nukefx.js's
        lobes made the same call), so the caller may exempt it. */
     const useFog = o.fogless ? false : true;
-    /* EXACTLY THE RPG'S MASK when that shared owner is loaded. The standalone
-       disaster slice intentionally omits the city blast module, so the
-       volcano's own cauliflower cutout is the SHIPPED look and gets the
-       same care. No copy, no second texture upload, no smoke mesh. */
-    let blastSmoke = null;
-    if (CBZ.cityBlastPuffAssets) {
-      try { const A = CBZ.cityBlastPuffAssets(); blastSmoke = A && A.smoke; } catch (e) {}
-    }
+    /* The volcano's OWN mask, always — puffTex is lit from above (see it),
+       which the RPG's shared smoke mask is not; borrowing that mask was
+       what made the column's crown read as pale coins. */
     // Screen-authored soot. Base is a dirty brown (fresh ash in its own
     // shadow), the body neutral, the crown a shade lighter where it is out
     // in the open; NIGHT is a silhouette and SUN is the lit face of the
@@ -1408,9 +1403,10 @@
          repeated card pattern; here rotation, opacity and the baked light
          are all owned, so nothing advances together. */
       const mat = new THREE.SpriteMaterial({
-        map: blastSmoke || puffTex(i % 3), color: CH_BODY,
+        map: puffTex(i % 3), color: CH_BODY,
         transparent: true, opacity: 0, depthWrite: false, depthTest: true,
-        fog: useFog, blending: THREE.NormalBlending, rotation: rnd() * 6.2832,
+        // near upright: the mask carries its own light, and it has to stay on top
+        fog: useFog, blending: THREE.NormalBlending, rotation: (rnd() - 0.5) * 0.5,
       });
       mats.push(mat);
       const m = new THREE.Sprite(mat);
@@ -1431,7 +1427,7 @@
         ph: rnd() * 6.2832,
         sz: (role === 0 ? 1.06 : (role === 1 ? 0.98 : 0.82)) * (0.78 + 0.44 * rnd()),
         aspect: 0.74 + rnd() * 0.54,
-        spin: (rnd() - 0.5) * (role === 2 ? 0.24 : 0.15),
+        spin: (rnd() - 0.5) * 0.05,   // a slow rock, never a turn (the lit mask)
         wind: 0.76 + rnd() * 0.38,
         maxOp: role === 0 ? 0.56 : (role === 1 ? 0.46 : 0.28),
       });
@@ -1439,7 +1435,6 @@
     let t = 0, dead = false;
     const handle = {
       kind: "column", group: grp, puffCount: N,
-      usesBlastSmoke: !!blastSmoke,
       /* opts.night (0 day .. 1 night) is the caller's day clock — tickEruption
          already computes it and it is the difference between a black
          silhouette and a grey smudge. Absent, the sky's own sun height
@@ -1842,17 +1837,46 @@
      black, the shoulders are mid, the crown catches the eruption. It costs
      nothing at runtime (the tier is fixed per puff at build) and it is the
      single thing that turns a scatter of discs back into a mass. */
-  const PYRO_ASH = [
-    0x1a1715, 0x211d1a,   // 0-1  base, in the cloud's own shadow
-    0x39322b, 0x433b32,   // 2-3  shoulders
-    0x6a5f51, 0x7d7161,   // 4-5  crown, catching the light
-  ];
+  /* Authored on SCREEN (screenHex, the linear-hex trap): the old swatch hexes
+     0x6a5f51/0x7d7161 for the crown left the renderer as near-white, which is
+     the "light coloured smoke" that read flattest of all. A density current
+     is pulverised dark rock; even its lit crown is a mid grey-brown. */
+  let _PYRO_ASH = null;
+  function pyroAsh() {
+    if (_PYRO_ASH) return _PYRO_ASH;
+    _PYRO_ASH = [
+      screenHex(30, 26, 23), screenHex(36, 32, 29),    // 0-1  base, in the cloud's own shadow
+      screenHex(62, 56, 50), screenHex(72, 65, 58),    // 2-3  shoulders
+      screenHex(104, 96, 86), screenHex(122, 113, 101), // 4-5  crown, catching the light
+    ];
+    return _PYRO_ASH;
+  }
   const PYRO_BODY = 6;              // body materials; the rest are the fringe
   const _puffTex = [];
-  /* THE PUFF. A single soft radial gradient is a ball, not a cloud — the
-     silhouette has to be irregular at more than one scale before the eye
-     stops reading a sphere. One core lobe, a ring of mediums and a scatter
-     of smalls, all drawn white so the sprite's own colour tints them. */
+  /* THE PUFF — AND WHY IT IS LIT.
+
+     OWNER, 2026-09-01: "there's still a 2D-ness of the smoke, especially the
+     light coloured smoke, while the RPG explosion is 3D looking." Compared
+     side by side (city/crashfx.js), the RPG's smoke differs in exactly two
+     ways from what stood here: its mask is built from SEMI-TRANSPARENT lobes
+     (alpha 0.45-0.8, so one sprite has density variation inside it), and it
+     is dark with fire glowing through it. This mask was solid white lobes at
+     alpha 1 — a flat cutout — tinted one colour per sprite. Where the tint
+     was dark that read as a silhouette, which is fine; where the tint was
+     LIGHT (the sun-lit crown, the pyroclastic cloud) a flat pale disc against
+     the sky is the single worst case for a billboard: paper.
+
+     So the light is baked into the texture. Every lobe is shaded as a lump
+     lit from above (bright crown, dark underside — a radial gradient whose
+     centre sits up and left of the lobe), and the whole puff carries a
+     top-to-bottom ramp on top of that. The sprite's colour multiplies it, so
+     a pale tint gives a pale lump with a dark belly instead of a pale coin.
+     The one rule that comes with it: the sprite must stay near UPRIGHT —
+     a rotated lit texture puts the light wherever the rotation says, so the
+     column and the current keep their rotation inside a few tenths of a
+     radian (see both callers). Lobes are 0.72-0.95 alpha so the mass keeps
+     the RPG's internal density variation while still going opaque where
+     puffs overlap three deep. */
   function puffTex(k) {
     if (_puffTex[k]) return _puffTex[k];
     const S = 128, cv = document.createElement("canvas");
@@ -1860,27 +1884,42 @@
     const g = cv.getContext("2d");
     let seed = (0x2f6e2b1d + k * 0x9e3779b9) >>> 0;
     const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    // a lump lit from above-left: the gradient's centre is offset toward the
+    // light, bright there, falling to a dark rim on the far side
     const lobe = function (lx, ly, r, a0) {
-      const rg = g.createRadialGradient(lx, ly, 0, lx, ly, r);
+      const rg = g.createRadialGradient(lx - r * 0.34, ly - r * 0.38, r * 0.05, lx, ly, r);
       rg.addColorStop(0, "rgba(255,255,255," + a0 + ")");
-      rg.addColorStop(0.58, "rgba(255,255,255," + (a0 * 0.8).toFixed(3) + ")");
-      rg.addColorStop(1, "rgba(255,255,255,0)");
+      rg.addColorStop(0.42, "rgba(196,196,196," + (a0 * 0.92).toFixed(3) + ")");
+      rg.addColorStop(0.78, "rgba(112,112,112," + (a0 * 0.62).toFixed(3) + ")");
+      rg.addColorStop(1, "rgba(80,80,80,0)");
       g.fillStyle = rg;
       g.beginPath(); g.arc(lx, ly, r, 0, 6.2832); g.fill();
     };
     // the core is deliberately fat: a puff whose alpha dies at a third of its
     // quad leaves visible gaps between neighbours, and gaps are what made the
     // first pass read as separate balls of cotton instead of one mass
-    lobe(S * 0.5, S * 0.52, S * 0.36, 1);
+    lobe(S * 0.5, S * 0.54, S * 0.36, 0.95);
     const n = 8 + (k % 3);
     for (let i = 0; i < n; i++) {
       const a = (i / n) * 6.2832 + rnd() * 0.9, d = S * (0.17 + rnd() * 0.12);
-      lobe(S * 0.5 + Math.cos(a) * d, S * 0.52 + Math.sin(a) * d, S * (0.15 + rnd() * 0.12), 1);
+      lobe(S * 0.5 + Math.cos(a) * d, S * 0.54 + Math.sin(a) * d, S * (0.15 + rnd() * 0.12), 0.72 + rnd() * 0.23);
     }
     for (let i = 0; i < 11; i++) {
       const a = rnd() * 6.2832, d = S * (0.27 + rnd() * 0.13);
-      lobe(S * 0.5 + Math.cos(a) * d, S * 0.52 + Math.sin(a) * d, S * (0.06 + rnd() * 0.08), 0.8);
+      lobe(S * 0.5 + Math.cos(a) * d, S * 0.54 + Math.sin(a) * d, S * (0.06 + rnd() * 0.08), 0.6 + rnd() * 0.25);
     }
+    // the whole puff is in its own shadow underneath: a top-to-bottom ramp
+    // over the lobes, so the mass reads as one lit body and not a bag of
+    // separately lit marbles
+    const img = g.getImageData(0, 0, S, S), d = img.data;
+    for (let y = 0; y < S; y++) {
+      const ramp = 1.0 - 0.5 * Math.pow(y / (S - 1), 1.4);
+      for (let x = 0; x < S; x++) {
+        const o = (y * S + x) * 4;
+        d[o] *= ramp; d[o + 1] *= ramp; d[o + 2] *= ramp;
+      }
+    }
+    g.putImageData(img, 0, 0);
     _puffTex[k] = new THREE.CanvasTexture(cv);
     return _puffTex[k];
   }
@@ -1890,9 +1929,9 @@
     _pyroMats = [];
     for (let i = 0; i < PYRO_BODY; i++) {
       _pyroMats.push(new THREE.SpriteMaterial({
-        map: puffTex(i % 3), color: PYRO_ASH[i],
+        map: puffTex(i % 3), color: pyroAsh()[i],
         transparent: true, opacity: 1, depthWrite: false, fog: true,
-        blending: THREE.NormalBlending, rotation: i * 1.03,
+        blending: THREE.NormalBlending, rotation: 0,
       }));
     }
     // the fringe is a GLOW under the front, not a fire in it — additive and
@@ -1976,7 +2015,10 @@
            turning at eight rates, shuffled across a hundred puffs, is
            indistinguishable and costs eight uniform writes. Assigned, not
            accumulated, so a second live flow cannot double the rate. */
-        for (let i = 0; i < mats.length; i++) mats[i].rotation = i * 1.03 + t * (0.05 + i * 0.016);
+        /* ROCKING, NOT SPINNING: the mask is lit from above now, so a full
+           turn would put the light underneath. Eight materials rocking a
+           few tenths of a radian at eight rates keeps the churn. */
+        for (let i = 0; i < mats.length; i++) mats[i].rotation = 0.32 * Math.sin(t * (0.35 + i * 0.09) + i * 1.7);
         for (let i = 0; i < blobs.length; i++) {
           const B = blobs[i];
           const s = front - B.lag;
@@ -2782,11 +2824,10 @@
       const g = LIVE.pyro[i].group;
       if (g) pyroBlobs += g.children.length;
     }
-    let columnPuffs = 0, blastSmokeColumns = 0;
+    let columnPuffs = 0;
     for (let i = 0; i < LIVE.column.length; i++) {
       const c = LIVE.column[i];
       columnPuffs += c.puffCount || (c.group ? c.group.children.length : 0);
-      if (c.usesBlastSmoke) blastSmokeColumns++;
     }
     let fountainClots = 0;
     for (let i = 0; i < LIVE.fountain.length; i++) fountainClots += LIVE.fountain[i].clotCount || 0;
@@ -2820,7 +2861,6 @@
       ventGlows: LIVE.vent.length,
       ashColumns: LIVE.column.length,
       columnPuffs: columnPuffs,
-      blastSmokeColumns: blastSmokeColumns,
       // the ballistic lava fountain (V.fountain) — clots, not Points
       fountains: LIVE.fountain.length,
       fountainClots: fountainClots,

@@ -916,7 +916,6 @@ export default {
     vol_columnPuffs: { label: "Overlapping plume puffs", better: "higher" },
     vol_fountains: { label: "Lava fountains (ballistic clots)", better: "higher" },
     vol_fountainClots: { label: "Fountain clots in flight", better: "higher" },
-    vol_blastSmokeColumns: { label: "Columns sharing RPG smoke mask", better: "higher" },
     vol_pyroLive: { label: "Pyroclastic flows live", better: "higher" },
     /* V3 brings the ash LEDGER back as a downwind wedge (see the flag note
        in world/volcanofx.js), so depth is a feature again — on the axis,
