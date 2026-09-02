@@ -230,7 +230,14 @@
       // term it always was.
       const trimAdd = HS ? 0 : plane * 0.085;
       const lean = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, (car._pitch || 0) - trimAdd));
-      const roll = Math.max(-MAX_ROLL, Math.min(MAX_ROLL, car._roll || 0));
+      // MAX_ROLL clamps the DRIVER'S HEEL only. world/water_stability.js's phi
+      // is a real attitude — a boat rolled onto her beam ends by a shark, or
+      // floating inverted at pi — and clamping it to 0.30 rad is exactly the
+      // "a freak gradient can never flip a boat" rule this line was written
+      // for, applied to the one case where flipping is the point. Added on
+      // top, never replacing the heel.
+      let roll = Math.max(-MAX_ROLL, Math.min(MAX_ROLL, car._roll || 0));
+      if (car._stab && CBZ.hullStabRoll) roll += CBZ.hullStabRoll(car);
       _e.set(lean, 0, roll, "XYZ");
       _qLean.setFromEuler(_e);
       car.group.quaternion.copy(_q).multiply(_qLean);
@@ -239,7 +246,15 @@
       // authored keel-above-origin offset; a hull modelled with its designed
       // waterline AT the origin declares its own much smaller value.
       const rideAbove = HS && HS.rideAbove != null ? HS.rideAbove : RIDE_ABOVE_MEAN;
-      const rideY = mean + rideAbove * settle + (car._airY || 0);
+      // A swamped hull sits LOW, a turtled one sits lower still (its keel is
+      // what shows), and a body surfacing under it throws it UP. All three
+      // come out of world/water_stability.js as two numbers.
+      let stabY = 0;
+      if (car._stab) {
+        if (CBZ.hullStabDrop) stabY -= CBZ.hullStabDrop(car);
+        stabY += car._stabLift || 0;
+      }
+      const rideY = mean + rideAbove * settle + (car._airY || 0) + stabY;
       car._waveHeave = rideY - car.group.position.y;   // read by the wake FX
       car.group.position.y = rideY;
       car._waveY = rideY;

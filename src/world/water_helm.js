@@ -245,6 +245,21 @@
     // A hull launched off a stunt ramp finishes its ballistic arc on the road
     // path (that integrator owns _airY/_airVy) — do not fight it for the frame.
     if (car._airborne) return false;
+    // A HULL THAT HAS GONE OVER, OR FILLED, IS NOT DRIVABLE. Own the frame and
+    // do nothing: returning false here would hand a turtled boat to the road
+    // path, which would seat it on the terrain and let you steer it upside
+    // down. world/water_stability.js already put the crew (and the player)
+    // over the side when it went; all that is left is to stop the throttle.
+    const _stab = car._stab;
+    if (_stab && (_stab.capsized || _stab.flooded)) {
+      car._steerInput = 0;
+      const bleed = Math.max(0, 1 - Math.min(dt || 0, 0.05) * 2.2);
+      car.v = (car.v || 0) * bleed;
+      car.vx = (car.vx || 0) * bleed;
+      car.vz = (car.vz || 0) * bleed;
+      car._planing = 0;
+      return true;
+    }
     if (!CBZ.isMarineHull || !CBZ.isMarineHull(car)) return false;
     const S = CBZ.marineHulls && CBZ.marineHulls.specFor
       ? CBZ.marineHulls.specFor(car) : null;
@@ -578,7 +593,11 @@
     // No gearbox: a boat's revs track speed and throttle directly, which is
     // why the fake 5-speed the road loop feeds carAudio always sounded wrong
     // in a hull. Voice per class — a 4.5m outboard is not a pair of diesels.
-    if (car.player && CBZ.carAudio) {
+    // A paddled hull (spec.engine === false: the kayak) has no voice at all —
+    // without this guard `S.audio || "truck"` gave a kayak a sedan engine.
+    if (car.player && CBZ.carAudio && S.engine === false) {
+      CBZ.carAudio.stop();                      // idempotent: a no-op once the voice is gone
+    } else if (car.player && CBZ.carAudio) {
       const sN = Math.min(1, spd / Math.max(1, S.topMs));
       let rev = 0.10 + sN * 0.78;
       if (throttle > 0 && sN < 0.15) rev = Math.max(rev, 0.55);   // opening up at the dock
