@@ -51,6 +51,20 @@ Publish that clock as a metric (`eventT` in both tsunami presets) and the
 Measurements page reads directly as "the same beat, N seconds sooner".
 `tsunami-stages` and `city-tsunami-stages` are the worked examples.
 
+## Pinning the clock — the day keeps running while you settle
+
+`CBZ.dayPhase(t)` sets the hour, and every tick after it moves the hour on:
+the city day is 150 s, so a 150-tick settle at 1/60 walks the clock 25
+game-minutes past the beat you pinned. `time-of-day-city` first photographed
+its 18:30 plate at 19:00 — captioned civil dusk, measured astronomical night —
+because the settle that lets the lamp pool, the exposure lerp and the sky
+repaint converge is also a settle of the sun. Pin the phase again after every
+settle and once more right before the render (a 2-tick settle is 20 game-
+seconds, which nothing sees). The escape day is 720 s and drifts a fifth as
+far, which is exactly the kind of difference that makes a prison plate look
+right while the city plate lies. `tools/lib/timeofday-stage.mjs` is the
+worked example.
+
 ## Film strips — motion photographed as stills
 
 A still cannot show "he stopped to shoot"; a row of frames can. A subject may

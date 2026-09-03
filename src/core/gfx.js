@@ -425,6 +425,61 @@
   let expo = 1;
   const _focus = { x: 0, y: 4, z: 0 };
 
+  /* ---- THE ENVIRONMENT TERM FOLLOWS THE SKY (NIGHT_TRUE_DARK) -----------
+     CBZ.ENV is a PMREM of a DAY sky, baked once, and every Standard material
+     in the scene reads it at full strength around the clock — which is why
+     a midnight street with the sun at 0.016 and the hemisphere at 0.014
+     still rendered its asphalt at 137/255 while the Lambert player standing
+     on it was black (time-of-day-city, street-midnight). The env map is the
+     sky, so it is scaled by how bright the sky is: full while the sun is up,
+     carried by the afterglow through civil dusk, and gone once astronomical
+     night has taken the sky itself. The base intensity a material was
+     authored with is remembered on the material and only ever multiplied,
+     so noon is byte-identical and carfx's per-paint recipes still hold. The
+     walk is throttled: on a >2% move of the factor, plus a 2 s heartbeat so
+     a car spawned at 3 a.m. does not carry a daylight sky until dawn. */
+  let _envK = -1, _envAcc = 0;
+  const _envSeen = new Set();
+  function envScale(m) {
+    if (!m || m.envMapIntensity == null || _envSeen.has(m)) return;
+    _envSeen.add(m);
+    if (m._roadWet) return;   // world/materials.js writes these every frame, reading envSkyFactor()
+    if (m._cbzEnvBase == null) m._cbzEnvBase = m.envMapIntensity;
+    m.envMapIntensity = m._cbzEnvBase * _envK;
+  }
+  function envWalk(root) {
+    if (!root || !root.traverse) return;
+    root.traverse(function (o) {
+      const m = o.material;
+      if (!m) return;
+      if (Array.isArray(m)) { for (let i = 0; i < m.length; i++) envScale(m[i]); }
+      else envScale(m);
+    });
+  }
+  function envFollowSky(dt) {
+    const day = clamp01(CBZ.dayness != null ? CBZ.dayness : 1);
+    const dusk = clamp01(CBZ.duskness || 0);
+    const depth = clamp01(CBZ.nightDepth || 0);
+    const skyK = clamp01(day * 2.2 + dusk * 0.45);
+    const want = (0.05 + 0.95 * skyK) * (1 - depth) + 0.015 * depth;
+    _envAcc += dt || 0.016;
+    if (Math.abs(want - _envK) < 0.02 && _envAcc < 2) return;
+    _envK = want; _envAcc = 0;
+    _envSeen.clear();
+    envWalk(CBZ.scene);
+    if (CBZ.prisonRoot && CBZ.prisonRoot.parent !== CBZ.scene) envWalk(CBZ.prisonRoot);
+    // the parked Lambert/Standard twins too, so a tier flip mid-night cannot
+    // swap in a material still carrying the daylight term
+    const lists = [pbrClients, CBZ.pbrTwins || []];
+    for (let L = 0; L < lists.length; L++) {
+      const arr = lists[L];
+      for (let i = 0; i < arr.length; i++) envScale(arr[i]);
+    }
+    _envSeen.clear();
+  }
+  // 1 whenever the term is not being driven (flag off, or not yet computed)
+  CBZ.envSkyFactor = function () { return CBZ.CONFIG.NIGHT_TRUE_DARK && _envK >= 0 ? _envK : 1; };
+
   CBZ.onAlways(94.5, function (dt) {
     const rig = CBZ.lightRig;
     const g = CBZ.game;
@@ -463,6 +518,9 @@
       rig.setShadowFrustum(t.shadowHalf, t.shadowHalf * 2.6 + 40);
     }
 
+    // ---- the baked sky's environment term rides the clock (see above)
+    if (CBZ.CONFIG.NIGHT_TRUE_DARK) envFollowSky(dt);
+
     // ---- eye adaptation. Slow, bounded, and purely presentational.
     if (CBZ.setExposure && CBZ.CONFIG.GFX_AUTO_EXPOSURE) {
       const day = clamp01(CBZ.dayness != null ? CBZ.dayness : 1);
@@ -473,7 +531,15 @@
       const cityDark = g && g.mode === "city" && CBZ.CONFIG.CITY_STREET_REALISM_V1 !== false;
       const signedSun = Number(CBZ.sunHeight);
       const deepNight = Number.isFinite(signedSun) ? Math.max(0, Math.min(1, -signedSun)) : (1 - day);
-      const eye = cityDark ? (0.94 - 0.26 * deepNight) : (1.18 - 0.24 * day);
+      // NIGHT_TRUE_DARK: one curve for every mode. Both old branches met at
+      // 0.94 at noon anyway; what differed was the night, where the non-city
+      // lens opened to 1.18 — an "eye adaptation" that turned a dark rig
+      // back into a blue day. Now the lens closes a touch with the dark
+      // (real pupils open, but the rig is already the pupil), and nothing
+      // reopens it: the fixtures are the only way to see after dark.
+      const eye = CBZ.CONFIG.NIGHT_TRUE_DARK
+        ? (0.94 - 0.10 * (CBZ.nightDepth || 0))
+        : cityDark ? (0.94 - 0.26 * deepNight) : (1.18 - 0.24 * day);
       const want = (t.exposure != null ? t.exposure : 1) * eye;
       const rate = dt ? Math.min(1, dt * 0.9) : 1;
       expo += (want - expo) * rate;

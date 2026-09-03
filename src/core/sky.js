@@ -156,6 +156,18 @@
       ringNear: new THREE.Color(0x0a0e16), // near-black; windows carry it
       ringFar: new THREE.Color(0x121a2b),
     },
+    /* TRUE DARK (core/lights.js NIGHT_TRUE_DARK). The dome is a tone-mapped
+       MeshBasicMaterial: every texel above goes through ACES at exposure/0.6
+       before it reaches the screen, which turns the "night" row into a
+       mid-blue day sky — measured (75,112,160) at midnight. These are the
+       values that come OUT of that curve as a deep navy, a few steps above
+       black, so the sky stays the brightest thing in a frame with no lamp
+       in it — which is what a real night looks like from the ground. */
+    dark: {
+      top: new THREE.Color(0x000102),
+      zen: new THREE.Color(0x010203),
+      mid: new THREE.Color(0x020408),
+    },
     /* THE STORM DECK. Authored, not derived — for the same reason every
        other row here is authored: a deck derived from the disaster's fog
        colour (0x3a4150) is just that slate everywhere, and a real overcast
@@ -928,7 +940,7 @@
      That's the whole seam fix: horizon stop == scene.fog.color, always. */
   let forcePaint = true, lastPaintAt = -1e9;
   const lastFog = new THREE.Color(-1, -1, -1), lastTint = new THREE.Color(-1, -1, -1);
-  let lastKDay = -1, lastGlowK = -1, lastGlowU = -1, lastPhotoK = -1;
+  let lastKDay = -1, lastGlowK = -1, lastGlowU = -1, lastPhotoK = -1, lastDepth = -1;
   let lastSpaceK = -1, lastHazeK = -1, lastStormK = -1, lastStormU = -1e9;
   const _white = new THREE.Color(1, 1, 1);
   /* WRITING THE TINT HAS TO BE IDEMPOTENT. Normally daynight (@2) resets the
@@ -999,6 +1011,14 @@
     _top.copy(PAL.night.top).lerp(PAL.day.top, kDay).lerp(PAL.dusk.top, duskness * 0.6);
     _zen.copy(PAL.night.zen).lerp(PAL.day.zen, kDay).lerp(PAL.dusk.zen, duskness * 0.6);
     _mid.copy(PAL.night.mid).lerp(PAL.day.mid, kDay).lerp(PAL.dusk.mid, duskness * 0.85);
+    // past astronomical dusk the dome goes to the true-dark row on the same
+    // curve the light rig follows (0 at sunset, 1 with the sun 18° under)
+    const depth = fin(CBZ.nightDepth, 0);
+    if (depth > 0) {
+      _top.lerp(PAL.dark.top, depth);
+      _zen.lerp(PAL.dark.zen, depth);
+      _mid.lerp(PAL.dark.mid, depth);
+    }
     // the deck: authored, dimmed into the night with the rest of the sky, then
     // nudged toward the live fog so the disaster's own mood carries into it
     const stLum = 0.12 + 0.88 * kDay;
@@ -1119,6 +1139,7 @@
     // <10Hz, wasteful at 60); fog/palette drift over seconds, not frames
     const du = Math.abs(frame.glowU - lastGlowU);
     const palMoved = Math.abs(kDay - lastKDay) > 0.02 ||
+      Math.abs(depth - lastDepth) > 0.02 ||
       Math.abs(frame.glowK - lastGlowK) > 0.02 ||
       (frame.glowK > 0.02 && Math.min(du, 1 - du) > 0.01) ||
       Math.abs(frame.photoK - lastPhotoK) > 0.03 ||
@@ -1133,7 +1154,7 @@
     if (forcePaint || (CBZ.now - lastPaintAt > 100 && (moved(fog, lastFog) || moved(tint, lastTint) || palMoved))) {
       paintSky(fog, tint);
       lastFog.copy(fog); lastTint.copy(tint);
-      lastKDay = kDay; lastGlowK = frame.glowK; lastGlowU = frame.glowU; lastPhotoK = frame.photoK;
+      lastKDay = kDay; lastDepth = depth; lastGlowK = frame.glowK; lastGlowU = frame.glowU; lastPhotoK = frame.photoK;
       lastSpaceK = frame.spaceK; lastHazeK = frame.hazeK;
       lastStormK = frame.stormK; lastStormU = frame.stormU;
       lastPaintAt = CBZ.now; forcePaint = false;

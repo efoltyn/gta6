@@ -689,8 +689,12 @@
         const ns = m._roadNormalScale * (1 - wetK * 0.72);
         m.normalScale.set(ns, ns);
       }
-      // A wet surface reflects the sky far harder than a dry one.
-      if ("envMapIntensity" in m) m.envMapIntensity = 0.9 + wetK * 1.5;
+      // A wet surface reflects the sky far harder than a dry one — and it
+      // reflects the sky THERE IS: core/gfx.js publishes how bright the baked
+      // day-sky environment should be right now (1 by day, ~0 in true
+      // night), and this per-frame write has to carry it or the road is the
+      // one surface in the city still lit by a noon sky at 1 a.m.
+      if ("envMapIntensity" in m) m.envMapIntensity = (0.9 + wetK * 1.5) * (CBZ.envSkyFactor ? CBZ.envSkyFactor() : 1);
       if (!m.envMap && CBZ.ENV) { m.envMap = CBZ.ENV; m.needsUpdate = true; } // backfill if carfx's env built later
     }
   });

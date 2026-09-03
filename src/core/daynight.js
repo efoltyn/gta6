@@ -100,7 +100,12 @@
   // Neutral blue-grey aerial perspective. The former saturated baby-blue fog
   // turned every fully fogged dry surface and distant mountain into what looked
   // like a second flat water material from aircraft.
-  const FOG = { day: 0xb6c4c8, dusk: 0xf09a68, night: 0x16243f };
+  // NIGHT_TRUE_DARK: the old night fog (0x16243f) is a LINEAR value that
+  // still goes through ACES at exposure/0.6 — on screen it was a pale
+  // (97,134,179) horizon at midnight, brighter than most of the daytime
+  // ground. `dark` is what comes out of that curve as a deep navy a few
+  // steps above black, matched to sky.js's PAL.dark row so the seam holds.
+  const FOG = { day: 0xb6c4c8, dusk: 0xf09a68, night: 0x16243f, dark: 0x020305 };
 
   const _a = new THREE.Color(), _b = new THREE.Color();
   function mixHex(h1, h2, k, out) { _a.setHex(h1); _b.setHex(h2); return out.copy(_a).lerp(_b, k); }
@@ -126,7 +131,20 @@
     // sun arcs across the sky; height drives "how day" it is
     const ang = t * Math.PI * 2;
     CBZ.sunAngle = ang; // core/sky.js places the sun/moon discs from this
-    sun.position.set(Math.cos(ang) * 80, Math.sin(ang) * 95, -10);
+    const up = Math.sin(ang);                 // -1 night .. 1 noon
+    // how far into REAL night we are (0 at sunset, 1 at astronomical dark) —
+    // published before the rig call because daylight() reads it back, and
+    // before the fog blend below, which follows the same curve.
+    const depth = rig && rig.nightDepth ? rig.nightDepth(up) : 0;
+    CBZ.sunHeight = up; // signed (-1 deep night .. 1 noon) — sky.js palettes
+    CBZ.nightDepth = depth;
+    // THE MOON IS THE ANTI-SUN. Once the sun is under, the key light used to
+    // keep following it — lighting the world from below the ground. With
+    // true dark on, the (faint) key comes from where the moon disc is: the
+    // sun's angle mirrored through the horizon. Decided here, before the
+    // shadow recenter below adds the player offset to whichever it is.
+    const keySign = (depth > 0 && up < 0) ? -1 : 1;
+    sun.position.set(Math.cos(ang) * 80 * keySign, Math.sin(ang) * 95 * keySign, -10);
     if (sunTarget) sunTarget.position.set(0, 0, 18);
 
     // Re-center the frustum on the player (texel-snapped) instead of the
@@ -158,7 +176,6 @@
       _snapX = ox; _snapZ = oz; _snapWidth = width;
     }
 
-    const up = Math.sin(ang);                 // -1 night .. 1 noon
     const dayness = Math.max(0, up);          // 0 at/under horizon
     const duskness = Math.max(0, 1 - Math.abs(up) * 3); // glow near horizon
 
@@ -179,6 +196,7 @@
     // ---- fog colour (the sky seam's source of truth — see sky.js @99) ----
     mixHex(FOG.night, FOG.day, dayness, fogC);
     if (duskness > 0) { _b.setHex(FOG.dusk); fogC.lerp(_b, duskness * 0.6); }
+    if (depth > 0) { _b.setHex(FOG.dark); fogC.lerp(_b, depth); }
     // Aerial perspective is BLUER than the light that made it (Rayleigh
     // scattering is what fog IS). Pushing the daytime haze a few percent
     // toward the hemisphere's sky colour is what stops distant geometry
@@ -204,7 +222,6 @@
     CBZ.dayness = dayness;
     CBZ.duskness = duskness;
     CBZ.nightAmount = nightAmt;
-    CBZ.sunHeight = up; // signed (-1 deep night .. 1 noon) — sky.js palettes
     for (const sl of CBZ.searchlights) {
       // A KNOCKED-OUT LIGHT STAYS OUT. entities/searchlight.js drops a
       // sabotaged beam to 0.15/0.02/0.04 in its own updater — and core/loop.js

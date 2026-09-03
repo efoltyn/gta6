@@ -216,9 +216,18 @@
     // flat plane helper (decor, no collider). Optional `paintM` supplies a
     // SHARED material (road-paint decals reuse one polygonOffset singleton
     // instead of minting a material per stripe); color/basic are ignored then.
+    // PAINT IS LIT. A flat marking used to be MeshBasicMaterial — unlit, so a
+    // lane line glowed at full white on a black road at midnight. Under
+    // NIGHT_TRUE_DARK (core/lights.js) it is Lambert like the asphalt under
+    // it: by day the same white, by night lit only by lamps and headlights.
+    const PAINT_LIT = !!(CBZ.CONFIG && CBZ.CONFIG.NIGHT_TRUE_DARK);
+    function flatMat(color, extra) {
+      const o = Object.assign({ color }, extra || {});
+      return PAINT_LIT ? new THREE.MeshLambertMaterial(o) : new THREE.MeshBasicMaterial(o);
+    }
     function plane(x, z, w, d, color, y, basic, paintM) {
       const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d),
-        paintM || (basic ? new THREE.MeshBasicMaterial({ color }) : new THREE.MeshLambertMaterial({ color })));
+        paintM || (basic ? flatMat(color) : new THREE.MeshLambertMaterial({ color })));
       m.rotation.x = -Math.PI / 2; m.position.set(x, y == null ? 0.02 : y, z);
       m.receiveShadow = !basic; root.add(m);
       return m;
@@ -393,8 +402,7 @@
     // so the markings sit near-coplanar (tiny y ladder kept only to order the
     // markings among THEMSELVES) instead of visibly hovering above the road.
     function paintMat(color) {
-      return new THREE.MeshBasicMaterial({ color: color,
-        polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+      return flatMat(color, { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     }
     function paintMesh(rects, color, y) {
       if (!rects.length) return;
@@ -932,7 +940,7 @@
           // the asphalt like paint; lambert stays plain (curbs/manholes are
           // raised/shadowed geometry, not paint).
           m = basic
-            ? new THREE.MeshBasicMaterial({ color, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
+            ? flatMat(color, { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
             : new THREE.MeshLambertMaterial({ color });
           M.set(color + "|" + (basic ? 1 : 0), m);
         }

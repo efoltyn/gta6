@@ -58,6 +58,19 @@
   // The query-string parser runs before this file, so ?cfg_...=0 retains the
   // former path for same-checkout A/B evidence.
   if (CBZ.CONFIG.CITY_STREET_REALISM_V1 == null) CBZ.CONFIG.CITY_STREET_REALISM_V1 = true;
+  // NIGHT_TRUE_DARK — the night is actually dark, everywhere. The night
+  // keyframe below (sun 0.20 / hemi 0.34) was tuned for a "blue night" look
+  // that stays fully legible with no light source at all, which is a film
+  // convention, not a fact: a real night with no fixture nearby is BLACK, and
+  // it gets there ~1h20 after sunset (astronomical dusk, sun 18° under), not
+  // at midnight. With this on, `nightDepth` (0 at sunset → 1 at -18°) fades
+  // the whole rig to a faint moon key + a near-zero sky term, every mode,
+  // through the one function they all already call, and gfx.js stops the
+  // eye-adaptation lift that used to reopen the lens after dark. Lamps,
+  // neon, torches, floods and headlights are what light the night now.
+  // ?cfg_NIGHT_TRUE_DARK=0 is the byte-identical old night for A/B evidence
+  // (tools/visual-presets/time-of-day-*.mjs photograph exactly that switch).
+  if (CBZ.CONFIG.NIGHT_TRUE_DARK == null) CBZ.CONFIG.NIGHT_TRUE_DARK = true;
 
   /* ---------------- the rig ------------------------------------------- */
 
@@ -116,8 +129,28 @@
     day:   { sun: 0xfff4e0, si: 1.18, hi: 0.72, bi: 0.34, sky: 0xdcecff, gnd: 0x8b8a72 },
     dusk:  { sun: 0xff8a3a, si: 0.78, hi: 0.54, bi: 0.30, sky: 0xffcaa0, gnd: 0x6d5a4c },
     night: { sun: 0x6f86c0, si: 0.20, hi: 0.34, bi: 0.10, sky: 0x2c3c62, gnd: 0x161c2c },
+    // TRUE DARK (NIGHT_TRUE_DARK): where the rig lands once the sun is 18°
+    // under. These are the numbers that put a mid-albedo surface UNDER the
+    // night sky's own brightness through the ACES curve at exposure ~0.85 —
+    // a silhouette against the sky, nothing more — which is what a street
+    // with no lamp looks like at 1 a.m. The moon key keeps a faint cool
+    // direction so shapes still separate; the bounce is gone (nothing to bounce).
+    dark:  { si: 0.016, hi: 0.014, bi: 0.0 },
   };
   CBZ.lightKeys = KEY;
+
+  /* nightDepth(sunHeight) — 0 while the sun is on or above the horizon, 1
+     once it is 18° under (sin = -0.31, astronomical night), smooth between.
+     Civil dusk (-6°) lands near 0.15, nautical (-12°) near 0.5: the sky
+     still lights the street for a while after sunset, then it does not.
+     Published every frame as CBZ.nightDepth by daynight.js; this is the one
+     definition, so a mode wanting "is it properly dark yet" reads that. */
+  function nightDepth(up) {
+    if (!CBZ.CONFIG.NIGHT_TRUE_DARK) return 0;
+    const x = -(+up) / 0.31;
+    const t = x < 0 ? 0 : x > 1 ? 1 : x;
+    return t * t * (3 - 2 * t);
+  }
 
   const _c1 = new THREE.Color(), _c2 = new THREE.Color(), _c3 = new THREE.Color();
   const _sunDir = new THREE.Vector3();
@@ -187,7 +220,23 @@
     // bounce: the ground throwing the sun back up. Tinted by the hemisphere's
     // ground colour (which IS the local ground) warmed toward the sun colour,
     // because bounced light carries the colour of what it bounced off.
-    const bi = N.bi + (D.bi - N.bi) * k;
+    let bi = N.bi + (D.bi - N.bi) * k;
+
+    // TRUE DARK: past astronomical dusk the sky stops lighting the ground.
+    // Applied here, inside the one function every writer routes through, so
+    // the city, the prison yard, the gun-game arena and a bare terrain all
+    // reach the same black through the same curve. The hemisphere colours
+    // are left where the night keyframe put them — at 0.014 they only decide
+    // the hue of what little there is.
+    const depth = nightDepth(CBZ.sunHeight != null ? CBZ.sunHeight : 0);
+    if (depth > 0) {
+      const DK = KEY.dark;
+      si += (DK.si - si) * depth;
+      hi += (DK.hi - hi) * depth;
+      bi += (DK.bi - bi) * depth;
+      sun.intensity = si;
+      hemi.intensity = hi;
+    }
     bounce.color.copy(hemi.groundColor).lerp(sc, 0.45);
     bounce.intensity = CBZ.CONFIG.GFX_BOUNCE_LIGHT ? bi * (tier().bounce != null ? tier().bounce : 1) : 0;
     return sc;
@@ -226,7 +275,10 @@
     const k = CBZ.dayness != null ? CBZ.dayness : 1;
     const d = CBZ.duskness || 0;
     daylight(k, d, CBZ.sunTint || (CBZ.sunTint = new THREE.Color()));
-    if (CBZ.CONFIG.CITY_STREET_REALISM_V1 !== false) {
+    if (CBZ.CONFIG.CITY_STREET_REALISM_V1 !== false && !CBZ.CONFIG.NIGHT_TRUE_DARK) {
+      // The city-only night grade from before NIGHT_TRUE_DARK. The shared
+      // curve in daylight() now takes every mode further than this did, so
+      // this branch only survives for the ?cfg_NIGHT_TRUE_DARK=0 baseline.
       // Preserve the noon keyframe exactly. As the sun falls, remove the flat
       // global fill that made midnight asphalt as legible as daytime; street
       // fixtures in props.js now carry that readability locally instead.
@@ -247,6 +299,7 @@
     sun: sun, hemi: hemi, bounce: bounce, target: sunTarget,
     keys: KEY,
     daylight: daylight,
+    nightDepth: nightDepth,
     aimSun: aimSun,
     aimBounce: aimBounce,
     cityFrame: cityFrame,
