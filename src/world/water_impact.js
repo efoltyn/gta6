@@ -143,6 +143,10 @@
   function off() {
     return CFG.WATER_IMPACT === false || CFG.WATER_V2 === false;
   }
+  function entryOn() {
+    return CFG.WATER_ENTRY_PHYSICS !== false &&
+      (!CBZ.waterEntryPhysicsOn || CBZ.waterEntryPhysicsOn());
+  }
   function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
   /* ---- THE FX RANDOM STREAM — NOT Math.random ---------------------------
@@ -372,13 +376,24 @@
   // it: a body carrying speed does not throw a symmetric ring, it ploughs, and
   // the water goes downrange with it. Zero is the old symmetric behaviour and
   // is what a falling object still gets.
-  function fxCrown(x, sy, z, s, jet, hx, hz) {
+  function fxCrown(x, sy, z, s, jet, hx, hz, profile) {
+    const entry = entryOn() && profile && typeof profile === "object" ? profile : null;
+    const area = entry ? clamp(+entry.area || 0, 0.04, 1) : 0.58;
+    const quality = entry ? clamp(+entry.quality || 0, 0, 1) : 0;
+    /* The strength says HOW MUCH water was accelerated; projected area says
+       WHAT SHAPE that water leaves in.  A spear entry is a narrow cut with a
+       long cavity.  A misaligned flank is a broad, high slamming sheet.  Those
+       are independent axes — a huge clean shark can still move more total water
+       than a small bad diver without inheriting the bad diver's silhouette. */
+    const width = entry ? (0.42 + area * 0.98) : 1;
+    const rise = entry ? (0.62 + area * 0.88) : 1;
     const hs = Math.hypot(hx || 0, hz || 0);
     const bear = hs > 0.05 ? Math.atan2(hz || 0, hx || 0) : 0;
     // how much of the event is thrown downrange rather than radially. Saturates
     // — past about a body-length per second more speed does not tip it further,
     // it just makes it bigger, which the momentum term already did.
-    const lean = hs > 0.05 ? clamp(hs / (7 + s * 2.2), 0, 0.85) : 0;
+    const lean0 = hs > 0.05 ? clamp(hs / (7 + s * 2.2), 0, 0.85) : 0;
+    const lean = entry ? clamp(lean0 * (0.72 + area * 0.62), 0, 0.9) : lean0;
     const bx = Math.cos(bear), bz = Math.sin(bear);
     // ---- the sheet -------------------------------------------------------
     if (s > 0.5 && CBZ.waterCrown) {
@@ -386,9 +401,9 @@
         // shifted downrange: the hole a moving body makes is under its NOSE,
         // not under the point it first touched
         x: x + bx * (0.35 + 0.5 * s) * lean, z: z + bz * (0.35 + 0.5 * s) * lean,
-        r: 0.22 + 0.45 * s,                 // 0.7 m for a diver, 3.0 m for a meg
-        grow: 0.5 + 0.55 * s,
-        h: 0.8 + 1.55 * s,                  // 2.3 m for a diver, 10.5 m for a meg
+        r: (0.22 + 0.45 * s) * width,        // narrow cut -> broad flank sheet
+        grow: (0.5 + 0.55 * s) * width,
+        h: (0.8 + 1.55 * s) * rise,
         ttl: 0.5 + 0.10 * s,
         // DELIBERATELY TRANSLUCENT. A sheet of thrown water is mostly air;
         // the first cut ran to 0.92 and photographed as a milk bucket.
@@ -400,14 +415,14 @@
          in; two, offset along the track and a tenth of a second apart, is the
          shape of something that arrived travelling. Only when there is real
          speed and real mass to justify a second draw call. */
-      if (lean > 0.28 && s > 1.4) {
+      if (lean > 0.28 && s > 1.4 && (!entry || area > 0.34)) {
         const d2 = (1.1 + s * 0.7) * lean;
         later(0.085 + 0.02 * s, function () {
           if (!CBZ.waterCrown) return;
           CBZ.waterCrown({
             x: x + bx * d2, z: z + bz * d2,
-            r: 0.18 + 0.30 * s, grow: 0.4 + 0.42 * s,
-            h: (0.6 + 1.05 * s) * 0.8, ttl: 0.45 + 0.09 * s,
+            r: (0.18 + 0.30 * s) * width, grow: (0.4 + 0.42 * s) * width,
+            h: (0.6 + 1.05 * s) * 0.8 * rise, ttl: 0.45 + 0.09 * s,
             alpha: Math.min(0.58, 0.32 + s * 0.07),
           });
         });
@@ -415,11 +430,12 @@
     }
     // ---- the grain -------------------------------------------------------
     const slots = free();
-    const nCrown = Math.max(5, Math.min(Math.round(8 + s * 13), Math.round(slots * 0.5)));
+    const grain = entry ? (0.58 + area * 0.74) : 1;
+    const nCrown = Math.max(5, Math.min(Math.round((8 + s * 13) * grain), Math.round(slots * 0.5)));
     for (let i = 0; i < nCrown; i++) {
       const a = (i / nCrown) * Math.PI * 2 + fxRand() * 0.5;
-      const r = 0.28 + fxRand() * 0.55 * s;
-      const out = 1.6 + fxRand() * 2.2 * s;
+      const r = (0.28 + fxRand() * 0.55 * s) * width;
+      const out = (1.6 + fxRand() * 2.2 * s) * width;
       // downrange droplets are thrown FASTER and FLATTER (they are being pushed
       // by the body); the ones behind it are thrown up and left behind
       const face = Math.cos(a) * bx + Math.sin(a) * bz;     // -1 behind .. +1 ahead
@@ -427,7 +443,7 @@
       emit({
         x: x + Math.cos(a) * r * 0.55, y: sy + 0.06, z: z + Math.sin(a) * r * 0.55,
         vx: Math.cos(a) * out + bx * push,
-        vy: (2.0 + fxRand() * 3.0 * s) * (1 - 0.30 * lean * Math.max(0, face)),
+        vy: (2.0 + fxRand() * 3.0 * s) * rise * (1 - 0.30 * lean * Math.max(0, face)),
         vz: Math.sin(a) * out + bz * push,
         size: 0.10 + fxRand() * (0.09 + 0.05 * s) * (0.6 + s * 0.22), grow: -0.02,
         ttl: 0.5 + fxRand() * (0.5 + s * 0.16), alpha: 0.95,
@@ -474,21 +490,43 @@
     // happened there. It now runs with the cube root of the event, so a diver
     // is unchanged and a big body leaves a mark you can still see when you
     // turn round.
-    const scar = 0.8 + 1.5 * Math.cbrt(Math.max(0.2, s));
-    emit({ x: x, y: sy + 0.03, z: z, size: 0.9 * s + 0.4, grow: 0.9 * s, ttl: scar, ride: true, alpha: 0.45 });
+    const scar = 0.8 + 1.5 * Math.cbrt(Math.max(0.2, s)) + (entry ? quality * 0.65 : 0);
+    emit({ x: x, y: sy + 0.03, z: z, size: (0.9 * s + 0.4) * width,
+           grow: 0.9 * s * width, ttl: scar, ride: true, alpha: 0.45 });
     // and it DRIFTS with whatever went in — a wake, not a stamp
     if (lean > 0.2) {
       emit({ x: x + bx * (0.8 + s) * lean, y: sy + 0.03, z: z + bz * (0.8 + s) * lean,
-             size: 0.6 * s + 0.3, grow: 0.7 * s, ttl: scar * 0.8, ride: true, alpha: 0.34 });
+             size: (0.6 * s + 0.3) * width, grow: 0.7 * s * width,
+             ttl: scar * 0.8, ride: true, alpha: 0.34 });
     }
     // THE LEADING CREST is an ARC, not a circle, when the thing was moving:
     // water_wake.js's ring primitive already draws a feathered crest over a
     // bearing (it is how the Kelvin bow wave is drawn) and a body arriving at
     // speed throws exactly that ahead of itself.
-    emit({ x: x, y: sy + 0.03, z: z, size: 0.5 * s, grow: 2.4 * s, ttl: 1.1 + 0.14 * s,
+    emit({ x: x, y: sy + 0.03, z: z, size: 0.5 * s * width, grow: 2.4 * s * width, ttl: 1.1 + 0.14 * s,
            ring: true, ride: true, alpha: 0.85,
            bear: lean > 0.25 ? bear : 0, arc: lean > 0.25 ? 1.5 : 0 });
-    emit({ x: x, y: sy + 0.03, z: z, size: 0.24 * s, grow: 1.3 * s, ttl: 0.85, ring: true, ride: true, alpha: 0.68 });
+    emit({ x: x, y: sy + 0.03, z: z, size: 0.24 * s * width,
+           grow: 1.3 * s * width, ttl: 0.85, ring: true, ride: true, alpha: 0.68 });
+
+    /* A clean entry hides energy BELOW the surface instead of deleting it.  The
+       narrow atmospheric cavity pinches off, pauses, then returns as seething
+       aerated water — the signature competitive divers call a rip entry.  These
+       are surface-riding foam patches after the sheet, not a second crown. */
+    if (entry && quality > 0.52) {
+      const delay = 0.42 + Math.min(0.45, s * 0.055);
+      later(delay, function () {
+        const n = Math.max(4, Math.min(14, Math.round(4 + s * 1.5)));
+        const rr = Math.max(0.28, (+entry.span || 2) * (0.035 + 0.055 * quality));
+        for (let i = 0; i < n; i++) {
+          const a = fxRand() * Math.PI * 2, r = rr * Math.sqrt(fxRand());
+          emit({ x: x + Math.cos(a) * r, y: sy + 0.025, z: z + Math.sin(a) * r,
+            size: 0.12 + fxRand() * 0.22 * Math.min(2, s),
+            grow: 0.26 + fxRand() * 0.42, ttl: 0.65 + fxRand() * 0.85,
+            ride: true, alpha: 0.34 + fxRand() * 0.24 });
+        }
+      });
+    }
   }
 
   // ============================================================
@@ -680,6 +718,7 @@
   //  7. THE BLOCK — CBZ.waterHit
   // ============================================================
   const stats = { bullet: 0, body: 0, vehicle: 0, debris: 0, blast: 0, drop: 0 };
+  let lastEntryProfile = null;
   let frameBullets = 0;             // per-frame bullet-splash cap (minigun into the bay)
   const hasKind = function (k) { return Object.prototype.hasOwnProperty.call(KINDS, k); };
 
@@ -706,7 +745,16 @@
     // to displace ~100x the water a bullet does, and that is what the eye reads.
     const mass = (+opts.mass > 0) ? +opts.mass : K.mass;
     const speed = (+opts.speed > 0) ? +opts.speed : K.speed;
-    const mom = Math.sqrt(mass) * speed;
+    const entry = entryOn() && opts.entry && typeof opts.entry === "object" ? opts.entry : null;
+    /* Source mass is not automatically added mass.  A ninety-tonne shark
+       spearing through its nose does not accelerate ninety tonnes of water on
+       the first frame; the same body landing across its flank can.  `coupling`
+       is the waterline owner's projected-area/add-mass solve.  Defaults to one,
+       so every non-marine caller preserves its historical calibration. */
+    const coupling = entry
+      ? clamp(Number.isFinite(+opts.coupling) ? +opts.coupling : (+entry.coupling || 1), 0.025, 1.4)
+      : 1;
+    const mom = Math.sqrt(mass) * speed * coupling;
     const strength = clamp(Math.pow(mom / MOM_REF, MOM_EXP), K.min, K.max);
     // ONE scalar, TWO consumers: the same momentum drives the VFX size above
     // and the audio gain/pitch below.
@@ -714,6 +762,33 @@
     const depth = Math.max(0, -above);
 
     stats[kind]++;
+
+    if (entry) {
+      lastEntryProfile = {
+        quality: +clamp(+entry.quality || 0, 0, 1).toFixed(3),
+        area: +clamp(+entry.area || 0, 0, 1).toFixed(3),
+        coupling: +coupling.toFixed(3), mass: Math.round(mass),
+        speed: +speed.toFixed(2), momentum: +mom.toFixed(2),
+        strength: +strength.toFixed(3), phase: entry.phase || "body",
+      };
+    }
+
+    /* The impact changes THE SURFACE before any card or droplet is drawn over
+       it.  Generic body/vehicle/debris entries get the neutral shape; a marine
+       entry supplies its measured projected area and body span. */
+    if (entryOn() && typeof CBZ.waterSurfaceImpulse === "function" &&
+        (kind === "body" || kind === "vehicle" || kind === "debris")) {
+      const area = entry ? clamp(+entry.area || 0, 0.04, 1) : 0.58;
+      const span = entry ? Math.max(0.8, +entry.span || 2) : Math.max(1, strength * 1.2);
+      try {
+        CBZ.waterSurfaceImpulse(x, z, {
+          amplitude: clamp(0.025 + strength * (0.055 + area * 0.085), 0.035, 1.25),
+          radius: clamp(span * (0.055 + area * 0.19), 0.28, 8.5),
+          speed: clamp(2.2 + strength * (0.65 + area * 0.55), 1.5, 13),
+          life: clamp(1.15 + strength * 0.34 + span * 0.025, 1.1, 4.8),
+        });
+      } catch (e) {}
+    }
 
     // ---- the calibrated vocabulary ---------------------------------------
     if (kind === "bullet") {
@@ -726,13 +801,15 @@
       // caller knows it (every ordnance path does).
       fxBlast(x, Math.min(y, sy), z, sy, (+opts.power > 0 ? clamp(+opts.power, 0.15, 4) : strength), depth);
     } else if (kind === "debris") {
-      fxCrown(x, sy, z, strength, 0, +opts.vx || 0, +opts.vz || 0);   // compact crown, no jet
+      fxCrown(x, sy, z, strength, 0, +opts.vx || 0, +opts.vz || 0, entry);   // compact crown, no jet
     } else {
       // body / vehicle: crown + rebound jet + settling ring. A vehicle lands
       // flatter and wider than a diver, so its jet is damped a little.
       // opts.vx/vz (optional) is the horizontal velocity it arrived with, and
       // it leans the whole event downrange — see fxCrown.
-      fxCrown(x, sy, z, strength, kind === "vehicle" ? 0.75 : 1, +opts.vx || 0, +opts.vz || 0);
+      const jet = (kind === "vehicle" ? 0.75 : 1) *
+        (entry ? (0.42 + clamp(+entry.area || 0, 0, 1) * 0.82) : 1);
+      fxCrown(x, sy, z, strength, jet, +opts.vx || 0, +opts.vz || 0, entry);
     }
 
     if (!opts.quiet) playHit(x, sy, z, loud, kind);
@@ -1140,6 +1217,7 @@
       debris: stats.debris, blast: stats.blast, drop: stats.drop,
       pending: pending.length, listeners: listeners.length,
       grenades: grenades.length,
+      lastEntry: lastEntryProfile ? Object.assign({}, lastEntryProfile) : null,
     };
   };
 

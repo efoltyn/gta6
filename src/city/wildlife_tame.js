@@ -93,10 +93,13 @@
   if (CFG.SHARK_BREACH == null) CFG.SHARK_BREACH = true;
   if (CFG.MARINE_SIT_DEEPER == null) CFG.MARINE_SIT_DEEPER = true;
   if (CFG.MARINE_BITE_SEAT == null) CFG.MARINE_BITE_SEAT = true;
+  if (CFG.WATER_ENTRY_PHYSICS == null) CFG.WATER_ENTRY_PHYSICS = true;
   const DIVE_ON = () => CFG.SHARK_RIDE_DIVE !== false;
   const BREACH_ON = () => CFG.SHARK_BREACH !== false;
   const DEEPER_ON = () => CFG.MARINE_SIT_DEEPER !== false;
   const BITE_SEAT_ON = () => CFG.MARINE_BITE_SEAT !== false;
+  const ENTRY_ON = () => CFG.WATER_ENTRY_PHYSICS !== false &&
+    (!CBZ.waterEntryPhysicsOn || CBZ.waterEntryPhysicsOn());
   // The one gravity the airborne mount integrates under, shared with the launch
   // solve so "how much air" and "how fast do I leave" can never disagree.
   const BREACH_G = 17.5;
@@ -1179,7 +1182,10 @@
     // table describe the same jump.
     lastApex: 0, lastAirT: 0, lastPitchUp: 0, lastPitchDown: 0, lastRoll: 0,
     lastAlignErr: 0, lastEntryKg: 0, lastEntrySpd: 0,
-    lastEntryKind: "", trailDrops: 0, crossDrops: 0,
+    lastEntryKind: "", lastEntryQuality: 0, lastEntryArea: 0,
+    lastEntryCoupling: 0, lastEntryImpulse: 0, lastEntryRetained: 0,
+    entryNoseCuts: 0, entryShoulderHits: 0,
+    trailDrops: 0, crossDrops: 0,
   };
 
   function aquaticMounted(a) { return !!(a && a.species && a.species.aquatic && ride.water); }
@@ -1737,7 +1743,7 @@
       if (pedDown) {
         CBZ.cityKillPed(target, {
           fromX: a.pos.x, fromZ: a.pos.z, force: 5 + scale * 2, fling: 2 + scale,
-          byPlayer: true, point: _biteAt, dir: _biteDir, jaw: jawR,
+          byPlayer: true, point: _biteAt, dir: _biteDir, jaw: jawR, by: a,
         }, "eaten by a " + String(sp.name || sp.id).toLowerCase());
       } else if (CBZ.body && CBZ.body.hit) {
         CBZ.body.hit(target, { fromX: a.pos.x, fromZ: a.pos.z, force: 4 + scale * 2, knockdown: 1.1 });
@@ -1760,7 +1766,7 @@
            centre), the mouth's own width, the line it closed along, and the
            medium — a swimmer's chest sits a metre above the swell, which is
            exactly how a wet kill used to test "air" and rain droplets. */
-        point: _biteAt, dir: _biteDir, jaw: jawR,
+        point: _biteAt, dir: _biteDir, jaw: jawR, by: a,
         medium: biteMedium(_biteAt.x, _biteAt.y, _biteAt.z),
         // THE MOUTH OWNS THE LENS FOR THIS MOUTHFUL. Without this the same
         // bite shook the camera twice — once below, once again out of
@@ -2538,7 +2544,7 @@
      it answers a bull shark. Returns the kilograms it reported (0 if the point
      was not over water at all — a leap that lands on sand is a beaching, and
      the caller still owes it a thud). */
-  function breachCross(a, x, surf, z, speed, exit, len, hx, hz) {
+  function breachCross(a, x, surf, z, speed, exit, len, hx, hz, profile) {
     const kg = bodyKg(a);
     const spd = Math.max(1.5, Math.abs(speed));
     // Past ~1.4 t the sea stops answering like a diver went in. `vehicle` is
@@ -2554,9 +2560,19 @@
            downrange off this, so the crown ploughs, the crest ahead of it is
            an arc rather than a circle, and the scar drifts with the body
            instead of being stamped where it first touched. */
-        fired = !!CBZ.waterHit(x, surf, z, {
+        const opts = {
           kind: kind, mass: kg, speed: spd, vx: +hx || 0, vz: +hz || 0,
-        });
+          src: a || null,
+        };
+        if (!exit && ENTRY_ON() && profile) {
+          opts.coupling = profile.coupling;
+          opts.entry = {
+            quality: profile.quality, area: profile.area,
+            span: len > 0 ? len : bodyLenLive(a),
+            phase: profile.phase || "shoulders",
+          };
+        }
+        fired = !!CBZ.waterHit(x, surf, z, opts);
       } catch (e) { fired = false; }
     }
     if (!fired) {
@@ -2569,11 +2585,23 @@
     }
     const L = len > 0 ? len : bodyLenLive(a);
     const heading = a && a.heading != null ? a.heading : 0;
-    const drops = breachSheet(x, surf, z, kg, L,
+    // The V2 entry already has a section-by-section curtain. Replaying the old
+    // whole-body breachSheet on top of it would put the canned pop straight
+    // back. Exit still needs the sheet, and the A/B-off path is byte-for-byte
+    // the previous behaviour.
+    const drops = (!exit && ENTRY_ON() && profile) ? 0 : breachSheet(x, surf, z, kg, L,
       exit ? spd * 0.55 : spd * 0.34, Math.cos(heading), Math.sin(heading));
     AQUATIC_AUDIT.crossDrops += drops;
     AQUATIC_AUDIT.lastEntryKind = kind;
-    if (!exit) { AQUATIC_AUDIT.lastEntryKg = Math.round(kg); AQUATIC_AUDIT.lastEntrySpd = +spd.toFixed(2); }
+    if (!exit) {
+      AQUATIC_AUDIT.lastEntryKg = Math.round(kg);
+      AQUATIC_AUDIT.lastEntrySpd = +spd.toFixed(2);
+      if (profile) {
+        AQUATIC_AUDIT.lastEntryQuality = +(+profile.quality || 0).toFixed(3);
+        AQUATIC_AUDIT.lastEntryArea = +(+profile.area || 0).toFixed(3);
+        AQUATIC_AUDIT.lastEntryCoupling = +(+profile.coupling || 0).toFixed(3);
+      }
+    }
     return kg;
   }
   CBZ.marineBreachCross = breachCross;
@@ -2656,7 +2684,100 @@
     out.z = o.z + Math.sin(o.heading || 0) * cp * h;
     return out;
   }
+
+  /* THE ENTRY CONDITION, MEASURED FROM TWO VECTORS.
+
+     Water-entry work is governed by the rate at which added water mass grows:
+
+         F ~= V^2 d(m_added)/dz
+
+     (Pandey et al., Science Advances 8, eabo5888; the same von Karman shape
+     term used for diving birds and human entries).  That is why kilograms and
+     speed are not enough. A pointed body aligned with its trajectory grows its
+     wetted radius slowly; yaw it, flatten it, or slap the pectoral planform onto
+     the surface and the projected section grows nearly at once.
+
+     `quality` 1 is a steep, velocity-aligned nose entry; 0 is a flank/slap.
+     `area` is the broadside-normalised projected section that the impact bus
+     uses to shape the sheet. `coupling` is the bounded added-mass fraction that
+     sizes both the visible answer and the equal/opposite body reaction.
+
+     Pure and public so the focused browser contract and the before/after tool
+     can ask the SAME law about clean and bad entries without retyping it. */
+  function marineEntryProfile(o, out) {
+    out = out || {};
+    o = o || {};
+    const vx = +o.vx || 0, vy = +o.vy || 0, vz = +o.vz || 0;
+    const speed = Math.max(0.001, Math.hypot(vx, vy, vz));
+    const cp = Math.cos(+o.pitch || 0), sp = Math.sin(+o.pitch || 0);
+    const ax = Math.cos(+o.heading || 0) * cp;
+    const ay = sp;
+    const az = Math.sin(+o.heading || 0) * cp;
+    const signed = (ax * vx + ay * vy + az * vz) / speed;
+    const align = Math.max(0, Math.min(1, Math.abs(signed)));
+    const steep = Math.sqrt(Math.max(0, Math.min(1,
+      Math.abs(ay) * Math.abs(vy) / speed)));
+    const finSlap = Math.pow(Math.sin(+o.roll || 0), 2);
+    let quality = Math.pow(align, 1.7) * (0.18 + 0.82 * Math.pow(steep, 0.8)) *
+      (1 - finSlap * 0.62);
+    if (signed < 0) quality *= 0.68;       // tail-first is slender, not spear-clean
+    quality = Math.max(0, Math.min(1, quality));
+    const area = Math.max(0.065, Math.min(1,
+      0.065 + 0.935 * Math.pow(1 - quality, 1.15)));
+    const coupling = Math.max(0.045, Math.min(1.18,
+      0.045 + 1.05 * Math.pow(area, 1.35)));
+    const L = Math.max(0.6, +o.len || 4);
+    const girth = Math.max(0.18, L * 0.115);
+    const frontal = Math.PI * Math.pow(girth * 0.52, 2);
+    const broadside = Math.max(frontal, L * girth * 0.48);
+    out.speed = speed; out.normalSpeed = Math.abs(vy);
+    out.alignment = align; out.verticality = steep; out.finSlap = finSlap;
+    out.quality = quality; out.area = area; out.coupling = coupling;
+    out.projectedM2 = frontal + (broadside - frontal) * area;
+    out.addedRatio = 0.045 + area * 0.72;
+    return out;
+  }
+  CBZ.marineEntryProfile = marineEntryProfile;
+
+  /* FIRST CONTACT IS A CUT, NOT THE WHOLE ANIMAL. A few tight beads and a tiny
+     depression mark the nose crossing immediately. The shoulders, where the
+     wetted section and added-mass derivative peak, own the crown later. */
+  function wlNoseCut(o, p, profile, len) {
+    if (!ENTRY_ON()) return 0;
+    let made = 0;
+    const free = typeof CBZ.waterEmitFree === "function" ? CBZ.waterEmitFree() : 50;
+    if (typeof CBZ.waterEmit === "function" && free > 3) {
+      const n = Math.max(3, Math.min(10, Math.round(3 + Math.cbrt(Math.max(1, len)) * 2)));
+      const h = +o.heading || 0, sx = -Math.sin(h), sz = Math.cos(h);
+      for (let i = 0; i < n; i++) {
+        const side = fxRand() < 0.5 ? -1 : 1;
+        const out = (0.25 + fxRand() * 0.8) * (0.35 + profile.area * 0.8);
+        if (CBZ.waterEmit({
+          x: p.x + sx * side * fxRand() * 0.16, y: p.y + 0.025,
+          z: p.z + sz * side * fxRand() * 0.16,
+          vx: sx * side * out + (+o.vx || 0) * 0.08,
+          vy: 0.8 + fxRand() * (1.2 + profile.area * 2.2),
+          vz: sz * side * out + (+o.vz || 0) * 0.08,
+          size: 0.07 + fxRand() * 0.09, grow: -0.035,
+          ttl: 0.32 + fxRand() * 0.35, alpha: 0.82,
+        })) made++;
+      }
+      CBZ.waterEmit({ x: p.x, y: p.y, z: p.z, size: 0.16 + len * 0.008,
+        grow: 0.7 + profile.area, ttl: 0.55, ring: true, ride: true, alpha: 0.54 });
+    }
+    if (typeof CBZ.waterSurfaceImpulse === "function") {
+      try { CBZ.waterSurfaceImpulse(p.x, p.z, {
+        amplitude: 0.025 + Math.min(0.16, profile.speed * profile.coupling * 0.012),
+        radius: Math.max(0.2, len * (0.015 + profile.area * 0.018)),
+        speed: 2.0 + profile.speed * 0.16, life: 1.0 + len * 0.018,
+      }); } catch (e) {}
+    }
+    AQUATIC_AUDIT.entryNoseCuts++;
+    AQUATIC_AUDIT.crossDrops += made;
+    return made;
+  }
   const _wlNose = { x: 0, y: 0, z: 0 }, _wlTail = { x: 0, y: 0, z: 0 }, _wlCut = { x: 0, y: 0, z: 0 };
+  const _wlEntryProfile = {};
 
   /* THE ZIPPER. Spray thrown from the point where the surface actually cuts the
      body, perpendicular to the body's own line, for as long as the cut exists.
@@ -2665,7 +2786,7 @@
      curtain SWELL as the thick part of the animal goes through and die away as
      the tail follows it. Sized against the pool's spare slots exactly like
      breachSheet, so a breach can never starve the wakes and the rain. */
-  function wlCurtain(st, o, cut, s, speed, girth, dt) {
+  function wlCurtain(st, o, cut, s, speed, girth, dt, profile) {
     if (typeof CBZ.waterEmit !== "function") return 0;
     const free = typeof CBZ.waterEmitFree === "function" ? CBZ.waterEmitFree() : 90;
     if (!(free > 6)) return 0;
@@ -2675,7 +2796,9 @@
        accumulator, so it ran BACKWARDS on every entry and floor() never reached
        one. The curtain worked on the way out and was silent on the way in,
        which is the half anybody was going to look at. */
-    const rate = Math.min(140, Math.abs(speed) * girth * 5.5);
+    const area = profile ? Math.max(0.06, Math.min(1, +profile.area || 0)) : 0.58;
+    const sheet = profile ? (0.48 + area * 1.12) : 1;
+    const rate = Math.min(140, Math.abs(speed) * girth * 5.5 * sheet);
     st.cAcc = (st.cAcc || 0) + rate * dt;
     let n = Math.floor(st.cAcc);
     if (n <= 0) return 0;
@@ -2689,7 +2812,7 @@
     let made = 0;
     for (let i = 0; i < n; i++) {
       const side = (fxRand() < 0.5 ? -1 : 1);
-      const off = girth * (0.35 + fxRand() * 0.9) * side;
+      const off = girth * (0.28 + fxRand() * (0.48 + area * 0.72)) * side;
       const along = (fxRand() - 0.5) * girth * 0.8;
       if (CBZ.waterEmit({
         x: cut.x + sxx * off + fx * along,
@@ -2697,10 +2820,10 @@
         z: cut.z + szz * off + fz * along,
         // out and up off the flank, and CARRIED by the body — the sheet trails
         // the animal instead of standing still in the water it came from
-        vx: sxx * side * (1.1 + fxRand() * 2.1) + (o.vx || 0) * 0.22,
-        vy: (0.9 + fxRand() * 2.6) * (up > 0 ? 1.35 : 0.8) + Math.abs(speed) * 0.16,
-        vz: szz * side * (1.1 + fxRand() * 2.1) + (o.vz || 0) * 0.22,
-        size: 0.10 + Math.min(0.42, girth * 0.16) * (0.55 + fxRand()),
+        vx: sxx * side * (0.8 + fxRand() * (1.1 + area * 2.0)) + (o.vx || 0) * 0.22,
+        vy: (0.75 + fxRand() * (1.35 + area * 2.2)) * (up > 0 ? 1.35 : 0.8) + Math.abs(speed) * (0.08 + area * 0.13),
+        vz: szz * side * (0.8 + fxRand() * (1.1 + area * 2.0)) + (o.vz || 0) * 0.22,
+        size: 0.08 + Math.min(0.48, girth * (0.09 + area * 0.11)) * (0.55 + fxRand()),
         grow: -0.05, ttl: 0.45 + fxRand() * 0.8, alpha: 0.92,
       })) made++;
     }
@@ -2711,7 +2834,8 @@
       st.cRing = 0.07;
       CBZ.waterEmit({
         x: cut.x, y: 0, z: cut.z, ride: true,
-        size: Math.max(0.35, girth * 1.5), grow: girth * 0.9,
+        size: Math.max(0.28, girth * (0.75 + area * 1.2)),
+        grow: girth * (0.45 + area * 0.78),
         ttl: 0.7 + girth * 0.22, alpha: 0.42,
       });
     }
@@ -2746,6 +2870,31 @@
     });
   }
 
+  function wlEntryReaction(a, st, o, dVolume, profile) {
+    if (!ENTRY_ON() || !(dVolume > 0) || !profile) return 1;
+    /* Momentum sharing with the increment of added water mass.  Written as the
+       inelastic two-mass solve v' = v / (1 + dm/m): stable at any frame rate,
+       bounded, and exactly equal to one when no new hull volume crosses. */
+    const ratio = dVolume * Math.max(0.02, +profile.addedRatio || 0.1);
+    const keep = 1 / (1 + ratio);
+    const m = o.motion;
+    if (m) {
+      if (Number.isFinite(m.v)) m.v *= keep;
+      if (Number.isFinite(m.hv)) m.hv *= keep;
+      if (Number.isFinite(m.vy)) m.vy *= keep;
+      if (Number.isFinite(m.airVy)) m.airVy *= keep;
+    }
+    if (typeof o.react === "function") {
+      try { o.react(keep, ratio, profile); } catch (e) {}
+    }
+    const kg = bodyKg(a);
+    st.entryRetained = (st.entryRetained == null ? 1 : st.entryRetained) * keep;
+    st.entryImpulse = (st.entryImpulse || 0) + kg * profile.speed * (1 - keep);
+    AQUATIC_AUDIT.lastEntryImpulse = +st.entryImpulse.toFixed(1);
+    AQUATIC_AUDIT.lastEntryRetained = +st.entryRetained.toFixed(3);
+    return keep;
+  }
+
   /* THE TRACKER. `o` is a caller-owned scratch object — nothing here allocates
      per frame — carrying { x, y, z, heading, pitch, len, vx, vy, vz, dt }.
      Returns the state record so a caller can read what the sea was just told
@@ -2768,6 +2917,7 @@
       st = a._wl = {
         n: nAbove > 0, t: tAbove > 0, ny: nose.y, ty: tail.y,
         cAcc: 0, cRing: 0, lastEntryKg: 0, lastEntryT: -99, lastExitT: -99,
+        entry: null, entryImpulse: 0, entryRetained: 1,
       };
       return st;
     }
@@ -2826,16 +2976,47 @@
     if (nUp !== st.n) {
       st.n = nUp;
       if (Math.abs(nSpd) >= WL_MIN_SPD) {
-        const kg = breachCross(a, cut.x, cutSurf, cut.z, nSpd, nUp, len,
-                               o.vx || 0, o.vz || 0);
-        if (nUp) st.lastExitT = now;
-        else { st.lastEntryKg = kg; st.lastEntryT = now; }
+        if (!nUp && ENTRY_ON()) {
+          const p = marineEntryProfile(o, _wlEntryProfile);
+          st.entry = {
+            quality: p.quality, area: p.area, coupling: p.coupling,
+            projectedM2: p.projectedM2, addedRatio: p.addedRatio,
+            speed: p.speed, normalSpeed: p.normalSpeed,
+            wetVolume: 0, hit: false, phase: "shoulders",
+          };
+          st.entryImpulse = 0; st.entryRetained = 1;
+          st.lastEntryKg = bodyKg(a); st.lastEntryT = now;
+          AQUATIC_AUDIT.lastEntryKg = Math.round(st.lastEntryKg);
+          AQUATIC_AUDIT.lastEntrySpd = +p.speed.toFixed(2);
+          AQUATIC_AUDIT.lastEntryQuality = +p.quality.toFixed(3);
+          AQUATIC_AUDIT.lastEntryArea = +p.area.toFixed(3);
+          AQUATIC_AUDIT.lastEntryCoupling = +p.coupling.toFixed(3);
+          wlNoseCut(o, cut, p, len);
+        } else {
+          const kg = breachCross(a, cut.x, cutSurf, cut.z, nSpd, nUp, len,
+                                 o.vx || 0, o.vz || 0);
+          if (nUp) st.lastExitT = now;
+          else { st.lastEntryKg = kg; st.lastEntryT = now; }
+        }
       }
     }
     // ---- the tail follows it through: the flick ---------------------------
     if (tUp !== st.t) {
       st.t = tUp;
       if (Math.abs(tSpd) >= WL_MIN_SPD * 1.4) wlFlick(o, tail, tSpd, len);
+      if (!tUp && st.entry) {
+        // A near-horizontal or very fast body can take nose and shoulders
+        // through between fixed steps. It still gets ONE load event, here at the
+        // last honest cut, never silently loses the splash.
+        if (!st.entry.hit) {
+          breachCross(a, tail.x, sTail, tail.z, Math.abs(tSpd), false, len,
+            o.vx || 0, o.vz || 0, st.entry);
+          st.entry.hit = true; AQUATIC_AUDIT.entryShoulderHits++;
+        }
+        AQUATIC_AUDIT.lastEntryImpulse = +st.entryImpulse.toFixed(1);
+        AQUATIC_AUDIT.lastEntryRetained = +st.entryRetained.toFixed(3);
+        st.entry = null;
+      }
     }
 
     // ---- and for every frame in between, the zipper -----------------------
@@ -2846,8 +3027,41 @@
       // which water is being displaced, and it is the interpolation of the two
       // ends' speeds, not the origin's
       const spd = nSpd * ((cutS + 1) * 0.5) + tSpd * ((1 - cutS) * 0.5);
+      let profile = null;
+      if (!nUp && tUp && st.entry && ENTRY_ON()) {
+        profile = marineEntryProfile(o, _wlEntryProfile);
+        // Volume CDF for a tapered body: derivative is zero at nose/tail and
+        // peaks through the shoulder/trunk, just as the girth envelope does.
+        const wet = Math.max(0, Math.min(1, (1 - cutS) * 0.5));
+        const vol = wet * wet * (3 - 2 * wet);
+        const dVol = Math.max(0, vol - (+st.entry.wetVolume || 0));
+        st.entry.wetVolume = Math.max(+st.entry.wetVolume || 0, vol);
+        if (dVol > 0) {
+          const w0 = Math.max(0.0001, (+st.entry.weight || 0));
+          const w1 = w0 + dVol;
+          // Lock neither the takeoff nor the first pixel: each newly wetted
+          // section contributes its actual pose, weighted by displaced volume.
+          st.entry.quality = (st.entry.quality * w0 + profile.quality * dVol) / w1;
+          st.entry.area = (st.entry.area * w0 + profile.area * dVol) / w1;
+          st.entry.coupling = (st.entry.coupling * w0 + profile.coupling * dVol) / w1;
+          st.entry.projectedM2 = (st.entry.projectedM2 * w0 + profile.projectedM2 * dVol) / w1;
+          st.entry.addedRatio = profile.addedRatio;
+          st.entry.speed = profile.speed; st.entry.weight = w1;
+          wlEntryReaction(a, st, o, dVol, profile);
+        }
+        /* The crown occurs when the widening shoulder reaches the plane, not at
+           nose contact.  This threshold is geometric (cut position), and the
+           continuous curtain before/after it makes the event a process rather
+           than an authored delay. */
+        if (!st.entry.hit && wet >= 0.18) {
+          st.entry.phase = "shoulders";
+          breachCross(a, cut.x, cutSurf, cut.z, Math.abs(spd), false, len,
+            o.vx || 0, o.vz || 0, st.entry);
+          st.entry.hit = true; AQUATIC_AUDIT.entryShoulderHits++;
+        }
+      }
       if (Math.abs(spd) >= WL_MIN_SPD * 0.5) {
-        wlCurtain(st, o, cut, cutS, spd, Math.max(0.18, girth), dt);
+        wlCurtain(st, o, cut, cutS, spd, Math.max(0.18, girth), dt, profile);
       }
     } else {
       st.cAcc = 0;
@@ -2934,13 +3148,30 @@
       if (keys.a) { mx -= cy; mz += sy; }
     }
     const len = Math.hypot(mx, mz);
+    let steerRate = 0;
     if (len > 0.001) {
       mx /= len; mz /= len;
       const wantH = Math.atan2(mz, mx);
       const maxTurn = (R.turn || 2.2) * fdt;
       let d = shortestAngle(wantH - ride.head);
       if (d > maxTurn) d = maxTurn; else if (d < -maxTurn) d = -maxTurn;
-      ride.head += d;
+      if (W.airborne && ENTRY_ON()) {
+        /* A tail can reorient a body in air; it cannot turn the flight path as
+           if it were still pushing water. Input therefore applies bounded
+           angular momentum to the BODY while W.airHead keeps the trajectory it
+           left with. This separation is what lets a bad entry really be bad. */
+        W.airYawV = Math.max(-0.85, Math.min(0.85,
+          (+W.airYawV || 0) + shortestAngle(wantH - ride.head) * 0.48 * fdt));
+      } else {
+        ride.head += d;
+        steerRate = d / fdt;
+      }
+    }
+    if (W.airborne && ENTRY_ON()) {
+      W.airYawV = (+W.airYawV || 0) * Math.exp(-0.16 * fdt);
+      ride.head += W.airYawV * fdt;
+    } else if (!W.airborne) {
+      W.lastSteerRate = steerRate;
     }
     /* BITE HOMING. While a bite is in flight at a live target, the body
        borrows steering authority toward it — clamped and brief (a bite lasts
@@ -2952,7 +3183,7 @@
        The player's steering above still writes first — this only bends it. */
     const biteTgt = (ride.attackT > 0 && ride.target && !ride.target.dead && ride.target.pos)
       ? ride.target : null;
-    if (biteTgt) {
+    if (biteTgt && !(W.airborne && ENTRY_ON())) {
       const wantB = Math.atan2(biteTgt.pos.z - P.pos.z, biteTgt.pos.x - P.pos.x);
       const seek = Math.max(R.turn || 2.2, 2.2) * 1.7 * fdt;
       let db = shortestAngle(wantB - ride.head);
@@ -2988,6 +3219,14 @@
     W.groundT = aground ? (W.groundT || 0) + fdt : 0;
     if (aground) W.v = Math.min(W.v, 1.15 + bodyScale * 0.45);
 
+    let travelHead = ride.head;
+    if (ENTRY_ON() && W.airborne && Number.isFinite(W.airHead)) {
+      travelHead = W.airHead;
+    } else if (ENTRY_ON() && W.entryDrift > 0 && Number.isFinite(W.airHead)) {
+      W.entryDrift = Math.max(0, W.entryDrift - fdt);
+      W.airHead += shortestAngle(ride.head - W.airHead) * Math.min(1, fdt * 1.35);
+      travelHead = W.airHead;
+    }
     if (W.v > 0.001) {
       /* THE PLAYER OWNS THE WHEEL. This used to be one line —
        `ride.head = nav.heading` — which handed the animal's entire heading to
@@ -3010,8 +3249,8 @@
           P.speed = W.v;
         }
       }
-      let nx = P.pos.x + Math.cos(ride.head) * stepLen;
-      let nz = P.pos.z + Math.sin(ride.head) * stepLen;
+      let nx = P.pos.x + Math.cos(travelHead) * stepLen;
+      let nz = P.pos.z + Math.sin(travelHead) * stepLen;
       // An airborne body lands where physics puts it (a breach that cannot
       // cross the block line is not a breach), and a beached one must be free
       // to work itself back out over ground it is already lying on.
@@ -3058,7 +3297,18 @@
          still carrying some of it into the water, which is what puts the flank
          into the entry splash. */
       const u = Math.max(0, Math.min(1, W.airT / Math.max(0.25, W.airTotal || 1)));
-      W.roll = (W.airSpin || 1) * BREACH_ROLL * Math.sin(u * 2.67);
+      if (ENTRY_ON()) {
+        /* Angular momentum, not a playback curve. A straight launch carries
+           almost no roll and returns spear-clean; a shark turning as it leaves
+           keeps that rotation, exposes its flank/pectoral planform, and pays for
+           it at the surface. Air input can trim the body through airYawV above,
+           but nothing here invents a matching lateral force on the trajectory. */
+        W.airRollV = (+W.airRollV || 0) - (+W.airYawV || 0) * 0.16 * fdt;
+        W.airRollV *= Math.exp(-0.12 * fdt);
+        W.roll = Math.max(-1.28, Math.min(1.28, (+W.roll || 0) + W.airRollV * fdt));
+      } else {
+        W.roll = (W.airSpin || 1) * BREACH_ROLL * Math.sin(u * 2.67);
+      }
       if (W.pitch > (W.pitchUp || 0)) W.pitchUp = W.pitch;
       if (W.pitch < (W.pitchDown || 0)) W.pitchDown = W.pitch;
       if (Math.abs(W.roll) > (W.rollPeak || 0)) W.rollPeak = Math.abs(W.roll);
@@ -3067,7 +3317,11 @@
       // an arc whose pose is animated instead of derived is a lie the pictures
       // cannot show you.
       const trueA = Math.atan2(W.vy, Math.max(0.001, W.v));
-      const err = Math.abs(W.pitch - trueA);
+      const yawErr = ENTRY_ON() && Number.isFinite(W.airHead)
+        ? Math.abs(shortestAngle(ride.head - W.airHead)) : 0;
+      const alignDot = Math.max(-1, Math.min(1,
+        Math.cos(W.pitch - trueA) * Math.cos(yawErr)));
+      const err = Math.acos(alignDot);
       if (err > (W.alignErr || 0)) W.alignErr = err;
       /* SHEDDING. Water comes off a body in the air all the way down. Emitted
          from points along the live body AXIS (through the live pitch), so the
@@ -3088,12 +3342,19 @@
       if (W.vy < 0 && (W.y <= surf - Math.max(0.18, (a.swimDepth || 1) * 0.12) || W.y <= landBed)) {
         W.airborne = false;
         W.y = Math.max(landBed, surf - Math.max(0.22, (a.swimDepth || 1) * 0.18));
-        // Re-entry keeps a real fraction of the fall as plunge momentum: a
-        // megalodon coming down off six metres should CARRY, not stop dead on
-        // the waterline the way the old flat 22% bleed made it.
+        // V2 has already shared momentum with every newly wetted hull slice.
+        // Do not overwrite that solve with another authored percentage at the
+        // origin crossing: a clean entry must carry deep and a flank impact
+        // must arrive here already braked by the water it actually moved.
         const fall = Math.abs(W.vy);
-        W.vy = -Math.min(3.8 + bodyScale * 2.4, Math.max(1.8, fall * 0.34));
-        W.v *= 0.78; W.breachCd = 1.15;
+        if (ENTRY_ON()) {
+          W.vy = Math.min(-0.35, W.vy);
+          W.entryDrift = 0.9;
+        } else {
+          W.vy = -Math.min(3.8 + bodyScale * 2.4, Math.max(1.8, fall * 0.34));
+          W.v *= 0.78;
+        }
+        W.breachCd = 1.15;
         AQUATIC_AUDIT.reentries++;
         AQUATIC_AUDIT.lastApex = +(W.airPeak || 0).toFixed(2);
         AQUATIC_AUDIT.lastAirT = +(W.airT || 0).toFixed(2);
@@ -3144,9 +3405,37 @@
           vAct = true;
         }
       }
-      const va = vAct ? 12 : 5.5;
-      W.vy += Math.max(-va * fdt, Math.min(va * fdt, wantVy - W.vy));
-      if (!vAct) W.vy *= Math.exp(-2.8 * fdt);
+      if (ENTRY_ON()) {
+        if (vAct) {
+          /* The control asks for acceleration toward a swim velocity; it does
+             not assign that velocity. A quick tap therefore leaves momentum
+             which water drag and lift have to answer instead of ending on the
+             release frame like a keyframed elevator. */
+          const va = 8.5 + Math.min(5, Math.abs(wantVy - W.vy) * 0.65);
+          W.vy += Math.max(-va * fdt, Math.min(va * fdt,
+            (wantVy - W.vy) * 2.1 * fdt));
+        } else {
+          /* Natural recovery after a shallow dive. Cetaceans carry lung
+             buoyancy; sharks are slightly negative at rest but at swimming
+             speed their body/pectoral lift supplies the same gentle upward
+             tendency. It is deliberately weak: a deep dive remains a dive, a
+             released tap bends smoothly back toward the surface. */
+          const sid = (a.species && a.species.id) || "";
+          const cetacean = /dolphin|orca|whale/.test(sid);
+          const swimK = Math.max(0, Math.min(1.25, W.v / Math.max(1, R.cruise || 6)));
+          const liftA = cetacean ? (0.58 + swimK * 0.24) : (0.12 + swimK * 0.42);
+          W.vy += liftA * fdt;
+          W.vy *= Math.exp(-(0.36 + Math.min(0.65, Math.abs(W.vy) * 0.045)) * fdt);
+        }
+        // Section drag grows quadratically but is softened by body scale: a
+        // megalodon does not stop in the same metre as a five-metre shark.
+        W.vy -= W.vy * Math.abs(W.vy) * (0.055 / Math.max(0.8, bodyScale)) * fdt;
+        W.vy = Math.max(-(R.dive || 4) * 1.35, Math.min((R.rise || 4) * 1.2, W.vy));
+      } else {
+        const va = vAct ? 12 : 5.5;
+        W.vy += Math.max(-va * fdt, Math.min(va * fdt, wantVy - W.vy));
+        if (!vAct) W.vy *= Math.exp(-2.8 * fdt);
+      }
       W.y += W.vy * fdt;
       // THE BED IS THE GROUND, asked of the bathymetry oracle — not "the
       // surface minus a column we made up". In a foot of swash that puts the
@@ -3168,8 +3457,14 @@
       // bed, dorsal out of the water.
       const effTop = Math.max(topY, bedY);
       if (W.y < bedY) { W.y = bedY; if (W.vy < 0) W.vy = 0; }
-      if (W.y > effTop) { W.y = effTop; if (W.vy > 0) W.vy *= 0.42; }
-      W.pitch += (Math.max(-0.62, Math.min(0.72, W.vy * 0.115)) - W.pitch) * Math.min(1, fdt * 4.2);
+      if (W.y > effTop) {
+        W.y = effTop;
+        if (W.vy > 0) W.vy = ENTRY_ON() ? 0 : W.vy * 0.42;
+      }
+      const swimPitch = ENTRY_ON()
+        ? Math.atan2(W.vy, Math.max(0.8, W.v))
+        : W.vy * 0.115;
+      W.pitch += (Math.max(-0.62, Math.min(0.72, swimPitch)) - W.pitch) * Math.min(1, fdt * (ENTRY_ON() ? 3.2 : 4.2));
       /* THE LAUNCH. Sprint + rise, held until the body is at the top of its
          column — you cannot breach from twenty metres down, and you cannot
          breach standing still.
@@ -3223,10 +3518,19 @@
         // total hang time, solved once so the roll can be phased against the
         // whole arc instead of against a clock that does not know when it ends
         W.airTotal = (2 * W.vy) / BREACH_G;
-        // WHICH WAY IT COMES OVER. Deterministic (the same body at the same
-        // heading always rolls the same way) and effectively arbitrary, so a
-        // sequence of breaches does not read as a machine.
-        W.airSpin = ((Math.floor(Math.abs(ride.head) * 997) & 1) ? 1 : -1);
+        if (ENTRY_ON()) {
+          // Translation keeps the launch bearing. The body's actual turn/bank
+          // rate becomes angular momentum, so straight preparation earns a
+          // clean entry and a last-second carve has a physical consequence.
+          const tr = Math.max(-2.2, Math.min(2.2, +W.lastSteerRate || 0));
+          W.airHead = ride.head;
+          W.airYawV = tr * 0.22;
+          W.airRollV = -tr * 0.42;
+          W.entryDrift = 0;
+        } else {
+          // Legacy A/B: deterministic decorative flank roll.
+          W.airSpin = ((Math.floor(Math.abs(ride.head) * 997) & 1) ? 1 : -1);
+        }
         W.pitchUp = W.pitch; W.pitchDown = 0; W.rollPeak = 0; W.alignErr = 0;
         AQUATIC_AUDIT.breaches++;
         /* THE EXIT IS NOT FIRED HERE EITHER. The launch happens at the top of
@@ -3271,11 +3575,12 @@
        travels down the body while it is passing through, and the tail flick;
        nothing else in this file fires a splash any more. */
     _rideWL.x = P.pos.x; _rideWL.y = W.y; _rideWL.z = P.pos.z;
-    _rideWL.heading = ride.head; _rideWL.pitch = W.pitch;
+    _rideWL.heading = ride.head; _rideWL.pitch = W.pitch; _rideWL.roll = W.roll;
     _rideWL.len = bodyLenLive(a);
-    _rideWL.vx = Math.cos(ride.head) * W.v; _rideWL.vz = Math.sin(ride.head) * W.v;
-    _rideWL.vy = W.vy; _rideWL.dt = fdt;
+    _rideWL.vx = Math.cos(travelHead) * W.v; _rideWL.vz = Math.sin(travelHead) * W.v;
+    _rideWL.vy = W.vy; _rideWL.dt = fdt; _rideWL.motion = W;
     waterlineTick(a, _rideWL);
+    P.speed = W.v;
 
     // the camera root, not the drawn rider: the strike animation stays off it
     // (see "THE LENS DOES NOT RIDE THE BITE" at the 49.8 presentation pass)
@@ -3818,7 +4123,8 @@
     ride.water = aquatic ? {
       y: a.group.position.y,
       v: 0, vy: 0, pitch: a.group.rotation.z || 0, roll: a.group.rotation.x || 0,
-      airborne: false, breachCd: 0, lastHead: ride.head,
+      airborne: false, breachCd: 0, lastHead: ride.head, lastSteerRate: 0,
+      airHead: ride.head, airYawV: 0, airRollV: 0, entryDrift: 0,
       nav: { x: a.pos.x, z: a.pos.z, heading: ride.head, blocked: false, shore: -999 },
     } : null;
     if (aquatic) {
@@ -4178,6 +4484,13 @@
       breachEntryKg: AQUATIC_AUDIT.lastEntryKg || 0,
       breachEntrySpd: AQUATIC_AUDIT.lastEntrySpd || 0,
       breachEntryKind: AQUATIC_AUDIT.lastEntryKind || "",
+      breachEntryQuality: AQUATIC_AUDIT.lastEntryQuality || 0,
+      breachEntryArea: AQUATIC_AUDIT.lastEntryArea || 0,
+      breachEntryCoupling: AQUATIC_AUDIT.lastEntryCoupling || 0,
+      breachEntryImpulse: AQUATIC_AUDIT.lastEntryImpulse || 0,
+      breachEntryRetained: AQUATIC_AUDIT.lastEntryRetained || 0,
+      breachEntryNoseCuts: AQUATIC_AUDIT.entryNoseCuts || 0,
+      breachEntryShoulderHits: AQUATIC_AUDIT.entryShoulderHits || 0,
       breachTrailDrops: AQUATIC_AUDIT.trailDrops || 0,
       breachCrossDrops: AQUATIC_AUDIT.crossDrops || 0,
       bodyKg: a ? Math.round(bodyKg(a)) : 0,

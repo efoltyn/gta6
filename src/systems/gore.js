@@ -2161,6 +2161,120 @@
   // "head" = the whole neck group so the face/hair/cap fly WITH the skull
   function partOf(ch, key) { return key === "head" ? ch.neck : (ch.parts ? ch.parts[key] : null); }
 
+  /* ---- THE MOUTHFUL ----------------------------------------------------
+     Owner, 2026-09-01: "how limbs come apart — I hate fake shit." What was
+     fake: a shark closed its jaws on a swimmer's leg, the leg came off, and
+     the leg FLEW OUT OF THE MOUTH along the bite line and sank — the animal
+     that took it never had it. A limb bitten off is in the mouth that bit it.
+     So when the sever arrives with `by` (creature_combat's biteWound and the
+     kill sites name the biter) and that biter has an authored aquatic mouth,
+     the real cloned limb is seated at the mouth's own `grip` socket, ridden
+     for a beat while the jaws close on it, then drawn back into the throat
+     and gone — swallowed. The joint it left bleeds exactly as before; the
+     mouth bleeds too, because there is a piece of a person in it. */
+  const mouthfuls = [];
+  const _mfV = new THREE.Vector3();
+  function mouthOf(a) {
+    const g = a && a.group, mo = g && g._aquaticMouth;
+    return (mo && mo.contract && mo.contract.grip && g.parent) ? mo : null;
+  }
+  function stripSockets(fly) {
+    const stripQ = [];
+    fly.traverse((o) => { if (o !== fly && o.userData && o.userData.isSocket) stripQ.push(o); });
+    for (let i = 0; i < stripQ.length; i++) { if (stripQ[i].parent) stripQ[i].parent.remove(stripQ[i]); }
+  }
+  function holdInMouth(part, by, mo, key, wet) {
+    if (mouthfuls.length >= 6) return false;
+    const fly = part.clone();
+    stripSockets(fly);
+    fly.visible = true;
+    fly.userData.isMouthful = true;               // for the tools: this child of a shark is a meal
+    if (CBZ.pedInstanceReveal) CBZ.pedInstanceReveal(fly);
+    part.matrixWorld.decompose(fly.position, fly.quaternion, fly.scale);
+    scene().add(fly);
+    const g = by.group;
+    g.updateWorldMatrix(true, false);
+    g.attach(fly);                                     // world pose kept; now rides the animal
+    const c = mo.contract;
+    // root-space (pre-scale) sockets: the grip is where a held thing sits, the
+    // throat is half a jaw behind the hinge, inside the buccal sack's bore
+    const jawLen = Math.max(0.3, (c.bite.x - c.hinge.x));
+    const lift = key === "head" ? 0.10 : 0.05;
+    mouthfuls.push({
+      m: fly, by: by, mo: mo, key: key, t: 0, wet: !!wet, bledT: 0,
+      draw: 0.22, hold: 0.22 + 0.85 + Math.random() * 0.5, swallow: 0.6,
+      from: fly.position.clone(),
+      seat: new THREE.Vector3(c.grip.x, c.grip.y + lift, 0),
+      throat: new THREE.Vector3(c.hinge.x - jawLen * 0.55, c.hinge.y + 0.02, 0),
+      q0: fly.quaternion.clone(), s0: fly.scale.clone(),
+      spin: (Math.random() - 0.5) * 1.6,
+    });
+    return true;
+  }
+  function updateMouthfuls(dt) {
+    for (let i = mouthfuls.length - 1; i >= 0; i--) {
+      const f = mouthfuls[i], m = f.m;
+      const g = f.by && f.by.group;
+      if (!m.parent || !g || !g.parent || (f.by.culled) || !g.visible) {
+        if (m.parent) m.parent.remove(m);            // shared rig materials: never dispose
+        mouthfuls.splice(i, 1); continue;
+      }
+      f.t += dt;
+      const end = f.hold + f.swallow;
+      if (f.t < f.draw) {
+        // drawn onto the tooth line
+        const k = f.t / f.draw, e = k * k * (3 - 2 * k);
+        m.position.lerpVectors(f.from, f.seat, e);
+      } else if (f.t < f.hold) {
+        // held: the jaws are closing on it; it jerks with the bite thrash
+        const j = Math.sin(f.t * 31) * 0.012;
+        m.position.set(f.seat.x + j, f.seat.y + Math.abs(j) * 0.5, f.seat.z + j * 0.6);
+        m.rotation.x += f.spin * dt;
+      } else if (f.t < end) {
+        // swallowed: back into the throat and down to nothing
+        const k = (f.t - f.hold) / f.swallow, e = k * k;
+        m.position.lerpVectors(f.seat, f.throat, e);
+        const sc = 1 - e * 0.92;
+        m.scale.set(f.s0.x * sc, f.s0.y * sc, f.s0.z * sc);
+      } else {
+        m.parent.remove(m); mouthfuls.splice(i, 1); continue;
+      }
+      // it bleeds where it is: blooms in the water, drops in the air
+      f.bledT -= dt;
+      if (f.bledT <= 0 && f.t < f.hold + f.swallow * 0.5) {
+        f.bledT = 0.16;
+        m.getWorldPosition(_mfV);
+        const wet = waterOn() && woundInWater(_mfV.x, _mfV.y, _mfV.z);
+        if (wet) { if (CBZ.goreBloom) CBZ.goreBloom(_mfV.x, _mfV.y, _mfV.z, { amount: 0.30 }); }
+        else {
+          for (let k = 0; k < 2; k++) {
+            spawnBit(_mfV.x, _mfV.y - 0.05, _mfV.z, (Math.random() - 0.5) * 0.8, -0.2 - Math.random(),
+              (Math.random() - 0.5) * 0.8, DROP_R(0.7), Math.random() < 0.5 ? BLOOD_BRT : BLOOD, "blood");
+          }
+        }
+      }
+    }
+  }
+  /* WHICH LIMB THE TEETH WERE ON. The death path used to pull a limb out of a
+     hat: bitten on the leg, an ARM came off. The kill site knows where the
+     mouth closed; the nearest joint to that point is the one that goes. */
+  function nearestLimb(ch, p, pool) {
+    if (!ch || !p || p.x == null) return null;
+    let best = null, bd = 1e9;
+    for (let i = 0; i < pool.length; i++) {
+      const part = partOf(ch, pool[i]); if (!part) continue;
+      part.updateWorldMatrix(true, false);
+      part.getWorldPosition(_mfV);
+      // the joint is at the part's root; a limb's mass centre is half a part below it
+      const d = Math.hypot(_mfV.x - p.x, (_mfV.y - 0.25) - p.y, _mfV.z - p.z);
+      if (d < bd) { bd = d; best = pool[i]; }
+    }
+    return best;
+  }
+  CBZ.goreMouthfulAudit = function () {
+    return { held: mouthfuls.length, keys: mouthfuls.map(function (f) { return f.key; }) };
+  };
+
   function severBody(actor, key, opts) {
     opts = opts || {};
     if (!CBZ.scene || !STUMPS[key]) return false;
@@ -2259,6 +2373,19 @@
     // walking on a missing limb. -1 = left leg gone, +1 = right. Cleared on the
     // restore-on-reuse audit below so a recycled rig starts whole.
     if (key === "ll" || key === "rl") { ch.legGone = key === "ll" ? -1 : 1; ch.legHurt = null; }
+    // ---- INTO THE MOUTH THAT TOOK IT (see THE MOUTHFUL above) --------------
+    const jaws = !opts.noFly && !opts.boom ? mouthOf(opts.by) : null;
+    if (jaws && holdInMouth(part, opts.by, jaws, key, wetHere)) {
+      // the joint vents in its own medium exactly as the flying path does
+      const prevWet0 = wetEvent; wetEvent = wetHere;
+      const _pm = part.matrixWorld.elements;
+      for (let i = 0; i < 4; i++) {
+        spawnBit(_pm[12], _pm[13], _pm[14], (Math.random() - 0.5) * 3, 3 + Math.random() * 3,
+          (Math.random() - 0.5) * 3, DROP_R(0.9), BLOOD_BRT, "blood");
+      }
+      wetEvent = prevWet0;
+      return true;
+    }
     // ---- FLYING PART: a clone of the REAL meshes — same proportions, same
     // clothing/skin materials (shared refs, never disposed) — launched from
     // the part's exact world transform. Never a generic red cube.
@@ -2566,8 +2693,15 @@
         // of the proximity roll, so "2" quietly meant "2 or 3 or 4".
         const want = Math.min(4, Math.round(opts.limbs));
         const pool = SEV_LIMBS.slice();
+        // A BITE TAKES THE LIMB IT CLOSED ON, and the biter keeps it (THE
+        // MOUTHFUL). Every other cause still draws from the pool at random.
+        const biter = bitten ? (opts.by || (ctx.imp && ctx.imp.by) || null) : null;
+        const bp = bitten && ctx.imp && ctx.imp.point && ctx.imp.point.x != null ? ctx.imp.point : null;
         for (let i = 0; i < want && pool.length; i++) {
-          severBody(ctx.ped, pool.splice((Math.random() * pool.length) | 0, 1)[0], { dir: sevDir, boom: !!boom });
+          let k = bp ? nearestLimb(actorChar(ctx.ped), bp, pool) : null;
+          if (!k) k = pool[(Math.random() * pool.length) | 0];
+          pool.splice(pool.indexOf(k), 1);
+          severBody(ctx.ped, k, { dir: sevDir, boom: !!boom, by: biter });
         }
       } else
       // NOTE: the local `head` flag also trips on amount>=1.3 (a heat heuristic
@@ -2922,6 +3056,7 @@
     // assign swap still missing a leg depends on this test being made on the
     // frame the body crosses SEV_RECYCLE2. At SEV_CAP = 24 records it is free.
     if (severed.length) severAudit();
+    if (mouthfuls.length) updateMouthfuls(dt);
 
     // The debris law drives the realistic fade/settle/cull path; with it off,
     // jail/survival fall back to the original gib physics (read once per frame).

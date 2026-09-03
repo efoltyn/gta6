@@ -1722,11 +1722,12 @@
     // intended, for the same reason breachTick reads its own speed off the
     // transform: three different files are allowed to steer this animal.
     _wlScratch.pitch = g.rotation.z || 0;
+    _wlScratch.roll = (s && s.air) ? (+s.airRoll || 0) : (g.rotation.x || 0);
     _wlScratch.len = bodyLenOf(a);
     _wlScratch.vx = Math.cos(a.heading || 0) * hv;
     _wlScratch.vz = Math.sin(a.heading || 0) * hv;
     _wlScratch.vy = (s && s.air) ? s.airVy : 0;
-    _wlScratch.dt = dt;
+    _wlScratch.dt = dt; _wlScratch.motion = s || null;
     try { CBZ.marineWaterline(a, _wlScratch); } catch (e) {}
   }
 

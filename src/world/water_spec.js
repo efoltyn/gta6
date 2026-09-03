@@ -127,6 +127,25 @@
   // surface. OFF → no particles at all (the engine had none before).
   if (CFG.WATER_WAKE_FX == null) CFG.WATER_WAKE_FX = true;
 
+  /* WATER_ENTRY_PHYSICS — LOCAL FREE-SURFACE RESPONSE.
+
+     A crown and a ring drawn over an otherwise untouched sine-wave sea read as
+     exactly what they are: an effect played on top of the water.  A real entry
+     first accelerates an added mass of water, opens a short-lived cavity, and
+     sends a pressure wave away from that cavity.  This flag lets the shared
+     entry bus feed a small bounded impulse field into THE SAME height query the
+     renderer, wildlife and boats already use.  There is still one sea, not a
+     splash mesh pretending to be a second one.
+
+     `?cfg_WATER_ENTRY_PHYSICS=0` is the exact A/B seam used by the shark-entry
+     visual preset.  With it off all slots stay zero, so the generated shader
+     contributes exactly 0 and the CPU query is the pre-pass sine field. */
+  if (CFG.WATER_ENTRY_PHYSICS == null) CFG.WATER_ENTRY_PHYSICS = true;
+  function entryPhysicsOn() {
+    return CFG.WATER_ENTRY_PHYSICS !== false && CFG.WATER_V2 !== false;
+  }
+  CBZ.waterEntryPhysicsOn = entryPhysicsOn;
+
   // WATER_DEEP_SWELL: swell amplitude scales with how far offshore the water
   // is. Deep water gets a real 1.1m ocean swell; every coast and every inland
   // lake keeps EXACTLY today's 0.42m pond roll. OFF → one uniform amplitude
@@ -806,6 +825,104 @@
     return _surge;
   };
 
+  /* ---- LOCAL ENTRY IMPULSES ----------------------------------------------
+
+     Six events are enough: a splash lives for at most a few seconds and the
+     pool always replaces the weakest/oldest live one when a busier scene asks
+     for a seventh.  Each slot is two vec4s shared BY REFERENCE with every sea
+     material:
+
+       impulse: x, z, start-time, amplitude (m)
+       shape:   initial radius, radial speed, lifetime, serial
+
+     The closed-form sample is deliberately a CAVITY plus ONE travelling crest,
+     not an undamped sine dropped into the ocean.  The cavity collapses quickly;
+     the crest runs out and fades.  CPU and GPU evaluate the same equations, so
+     the shark cannot cross a dent the eye cannot see and a boat cannot float on
+     a ring that exists only in the shader. */
+  const MAX_SURFACE_IMPULSES = 6;
+  const surfaceImpulses = [], surfaceImpulseShapes = [];
+  for (let i = 0; i < MAX_SURFACE_IMPULSES; i++) {
+    surfaceImpulses.push(new THREE.Vector4(0, 0, -1e6, 0));
+    surfaceImpulseShapes.push(new THREE.Vector4(1, 1, 1, 0));
+  }
+  let surfaceImpulseSerial = 0;
+  let lastSurfaceImpulse = null;
+  const _surfaceImpulseSample = { h: 0, x: 0, z: 0 };
+
+  function sampleSurfaceImpulses(x, z, t, out) {
+    out = out || _surfaceImpulseSample;
+    out.h = 0; out.x = 0; out.z = 0;
+    if (!entryPhysicsOn()) return out;
+    for (let i = 0; i < MAX_SURFACE_IMPULSES; i++) {
+      const q = surfaceImpulses[i], sh = surfaceImpulseShapes[i];
+      const age = t - q.z, life = sh.z;
+      if (!(q.w > 0) || age < 0 || age >= life) continue;
+      const dx = x - q.x, dz = z - q.y;
+      const r2 = dx * dx + dz * dz, r = Math.sqrt(r2);
+      const rad = Math.max(0.12, sh.x * (1 + age * 0.18));
+      const invRad2 = 1 / (rad * rad);
+      const coreE = Math.exp(-2.6 * r2 * invRad2);
+      const core = -q.w * coreE * Math.exp(-age * 2.35);
+      const dCore = core * (-5.2 * r * invRad2);
+
+      const front = sh.x * 0.62 + sh.y * age;
+      const sigma = Math.max(0.16, sh.x * 0.34 + sh.y * age * 0.055);
+      const u = (r - front) / sigma;
+      const crest = q.w * 0.34 * Math.exp(-1.8 * u * u) * Math.exp(-age / life);
+      const dCrest = crest * (-3.6 * u / sigma);
+      const h = core + crest, dHdr = dCore + dCrest;
+      out.h += h;
+      if (r > 1e-5) {
+        const k = dHdr / r;
+        out.x += dx * k; out.z += dz * k;
+      }
+    }
+    return out;
+  }
+
+  CBZ.waterSurfaceImpulse = function (x, z, spec) {
+    if (!entryPhysicsOn()) return false;
+    x = +x; z = +z; spec = spec || {};
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return false;
+    const t = CBZ.waterClock();
+    const amp = Math.max(0.015, Math.min(1.35, +spec.amplitude || 0.12));
+    const radius = Math.max(0.18, Math.min(9, +spec.radius || 0.8));
+    const speed = Math.max(0.6, Math.min(16, +spec.speed || 4));
+    const life = Math.max(0.45, Math.min(5.5, +spec.life || 2.2));
+    let slot = -1, weakest = 1e9;
+    for (let i = 0; i < MAX_SURFACE_IMPULSES; i++) {
+      const q = surfaceImpulses[i], sh = surfaceImpulseShapes[i];
+      const age = t - q.z;
+      if (!(q.w > 0) || age >= sh.z) { slot = i; break; }
+      const score = q.w * Math.max(0, 1 - age / Math.max(0.01, sh.z));
+      if (score < weakest) { weakest = score; slot = i; }
+    }
+    const serial = ++surfaceImpulseSerial;
+    surfaceImpulses[slot].set(x, z, t, amp);
+    surfaceImpulseShapes[slot].set(radius, speed, life, serial);
+    lastSurfaceImpulse = { x: x, z: z, amplitude: amp, radius: radius,
+      speed: speed, life: life, serial: serial };
+    return true;
+  };
+  CBZ.waterSurfaceImpulseClear = function () {
+    for (let i = 0; i < MAX_SURFACE_IMPULSES; i++) {
+      surfaceImpulses[i].set(0, 0, -1e6, 0);
+      surfaceImpulseShapes[i].set(1, 1, 1, 0);
+    }
+    lastSurfaceImpulse = null;
+  };
+  CBZ.waterSurfaceImpulseAudit = function () {
+    const t = CBZ.waterClock();
+    let active = 0;
+    for (let i = 0; i < MAX_SURFACE_IMPULSES; i++) {
+      if (surfaceImpulses[i].w > 0 && t - surfaceImpulses[i].z >= 0 &&
+          t - surfaceImpulses[i].z < surfaceImpulseShapes[i].z) active++;
+    }
+    return { active: active, capacity: MAX_SURFACE_IMPULSES,
+      last: lastSurfaceImpulse ? Object.assign({}, lastSurfaceImpulse) : null };
+  };
+
   // Instantaneous surface Y at (x,z). `t` defaults to the shared clock;
   // `ampScale` defaults to the same distance+inland+depth scale the shader
   // uses, so a boat's hull sits exactly where the rendered crest is.
@@ -825,7 +942,8 @@
       const v = Math.sin(x * s[0] + z * s[1] + t * s[2]) * s[3];
       if (s[4]) hc += v; else hs += v;
     }
-    return y0 + hs * amp + hc * chp;
+    const imp = sampleSurfaceImpulses(x, z, t, _surfaceImpulseSample);
+    return y0 + hs * amp + hc * chp + imp.h;
   };
 
   // Surface slope (dY/dx, dY/dz) — the same analytic derivative the vertex
@@ -843,8 +961,9 @@
       if (s[4]) { dxc += c * s[0]; dzc += c * s[1]; }
       else { dxs += c * s[0]; dzs += c * s[1]; }
     }
-    out.x = dxs * amp + dxc * chp;
-    out.z = dzs * amp + dzc * chp;
+    const imp = sampleSurfaceImpulses(x, z, t, _surfaceImpulseSample);
+    out.x = dxs * amp + dxc * chp + imp.x;
+    out.z = dzs * amp + dzc * chp + imp.z;
     return out;
   };
 
@@ -928,6 +1047,11 @@
     // Vector4s in place, so a world built after the material still reaches the
     // GPU without anything re-fetching the uniform block.
     u.uLandBoxes = { value: landVecs };
+    // Local entries use the same Vector4 arrays in every material.  The impact
+    // bus mutates the vectors in place, so no renderer-specific registration or
+    // per-frame copy can let the mirror and shader seas drift apart.
+    u.uWaterImpulses = { value: surfaceImpulses };
+    u.uWaterImpulseShapes = { value: surfaceImpulseShapes };
     u.uDeepGain = { value: 1.0 };
     u.uChopGain = { value: 1.0 };
     // x = run-up range (m), y = leading-edge brightness gain, z = enabled
@@ -1157,6 +1281,42 @@
     "}",
   ].join("\n");
 
+  /* CPU twin: sampleSurfaceImpulses().  Returns (height, dH/dx, dH/dz), so the
+     local cavity changes both silhouette and analytic normal.  A constant-size
+     loop is WebGL1-safe; inactive slots carry amplitude zero and are multiplied
+     away without dynamic array indexing or a vertex texture fetch. */
+  const IMPULSE_FN = [
+    "vec3 cbzEntryImpulse(vec2 p, float nowT) {",
+    "  vec3 outV = vec3(0.0);",
+    "  for (int i = 0; i < " + MAX_SURFACE_IMPULSES + "; i++) {",
+    "    vec4 q = uWaterImpulses[i];",
+    "    vec4 sh = uWaterImpulseShapes[i];",
+    "    float age = nowT - q.z;",
+    "    float live = step(0.0, age) * (1.0 - step(sh.z, age)) * step(0.0001, q.w);",
+    "    float aT = clamp(age, 0.0, max(0.01, sh.z));",
+    "    vec2 dp = p - q.xy;",
+    "    float r2 = dot(dp, dp);",
+    "    float r = sqrt(max(0.0, r2));",
+    "    float rad = max(0.12, sh.x * (1.0 + aT * 0.18));",
+    "    float invRad2 = 1.0 / (rad * rad);",
+    "    float core = -q.w * exp(-2.6 * r2 * invRad2) * exp(-aT * 2.35);",
+    "    float dCore = core * (-5.2 * r * invRad2);",
+    "    float front = sh.x * 0.62 + sh.y * aT;",
+    "    float sigma = max(0.16, sh.x * 0.34 + sh.y * aT * 0.055);",
+    "    float u = (r - front) / sigma;",
+    "    float crest = q.w * 0.34 * exp(-1.8 * u * u) * exp(-aT / max(0.01, sh.z));",
+    "    float dCrest = crest * (-3.6 * u / sigma);",
+    "    float dHdr = (dCore + dCrest) * live;",
+    "    outV.x += (core + crest) * live;",
+    "    if (r > 0.00001) {",
+    "      outV.y += dp.x * dHdr / r;",
+    "      outV.z += dp.y * dHdr / r;",
+    "    }",
+    "  }",
+    "  return outV;",
+    "}",
+  ].join("\n");
+
   // Vertex stage needs no samplers (a sampler declared in the vertex program
   // can cost a vertex texture unit, and WebGL1 is allowed to expose zero) —
   // which is exactly why the depth term above is a uniform circle set rather
@@ -1170,12 +1330,15 @@
       "uniform float uChopGain;",
       "uniform vec4 uInlandBodies[" + MAX_INLAND + "];",
       "uniform vec4 uLandBoxes[" + MAX_LAND + "];",
+      "uniform vec4 uWaterImpulses[" + MAX_SURFACE_IMPULSES + "];",
+      "uniform vec4 uWaterImpulseShapes[" + MAX_SURFACE_IMPULSES + "];",
       // Cosine of the surface tilt (== wNormal.y). Written by waterVertexBody()
       // and read by cbzWhitecap() in the fragment stage, so foam can sit on the
       // TIP of a crest without changing any shared function's signature.
       "varying float vCbzSteep;",
       INLAND_FN,
       DEEP_FN,
+      IMPULSE_FN,
       // Distance + inland + DEPTH amplitude scale.
       //   .x = scale for the long swell rows   (mirrors CBZ.waterAmpAt)
       //   .y = scale for the short chop rows   (mirrors CBZ.waterChopAmpAt)
@@ -2016,6 +2179,8 @@
     L.push("float wFade = mix(1.0, " + gnum(FADE_FLOOR) + ", smoothstep(" + gnum(FADE_NEAR) + ", " + gnum(FADE_FAR) + ", wDist));");
     L.push("vec3 wAmp3 = cbzWaveAmp3(wXZ, wDist);");
     L.push(CBZ.waterWaveGLSL("wXZ", "uSeaTime", "wAmp3.x", "wHeight", "wDhx", "wDhz", "wAmp3.y"));
+    L.push("vec3 wEntryImp = cbzEntryImpulse(wXZ, uSeaTime);");
+    L.push("wHeight += wEntryImp.x; wDhx += wEntryImp.y; wDhz += wEntryImp.z;");
     // Normalised crest height (+-1 at the theoretical peak) so every threshold
     // downstream — whitecaps, surf gain, spray — is expressed in one unit and
     // keeps working if the amplitude table is retuned. wAmp3.z divides the
