@@ -708,8 +708,13 @@
     // crushing the snow's high albedo; dusk lands in between exactly as the
     // lit ground does. Flag off -> 1 (byte-identical old brightness).
     const day = CBZ.dayness != null ? +CBZ.dayness : 1;
+    // NIGHT_TRUE_DARK (core/lights.js): the 0.40 floor mirrored a night rig
+    // that no longer exists. Past astronomical dusk the lit ground goes to
+    // ~0.015 of noon, so the tint follows it down on the same curve — or
+    // every tinted texture would float as a grey slab over black Lambert.
+    const depth = (CBZ.CONFIG && CBZ.CONFIG.NIGHT_TRUE_DARK && CBZ.nightDepth) ? Math.max(0, Math.min(1, +CBZ.nightDepth)) : 0;
     _dayU.value = CFG.TERRAIN_DAY_TINT === false
-      ? 1 : (0.40 + 0.60 * Math.max(0, Math.min(1, day)));
+      ? 1 : (0.40 + 0.60 * Math.max(0, Math.min(1, day))) * (1 - 0.96 * depth);
   }
   CBZ.terrainDayTint = function (mat) {
     if (!mat) return mat;

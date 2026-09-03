@@ -1850,7 +1850,9 @@
         color: 0x282a30, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
       });
       fillM._shared = true;
-      const paintM = new THREE.MeshBasicMaterial({
+      // lit paint under NIGHT_TRUE_DARK (core/lights.js) — see city/world.js
+      const PaintMat = (CBZ.CONFIG && CBZ.CONFIG.NIGHT_TRUE_DARK) ? THREE.MeshLambertMaterial : THREE.MeshBasicMaterial;
+      const paintM = new PaintMat({
         color: 0xeef1f5, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6,
       });
       paintM._shared = true;

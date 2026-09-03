@@ -375,7 +375,10 @@
       }
       const dg = new THREE.BufferGeometry();
       dg.setAttribute("position", new THREE.BufferAttribute(new Float32Array(dashPos), 3));
-      const dash = new THREE.Mesh(dg, new THREE.MeshBasicMaterial({
+      // lit paint under NIGHT_TRUE_DARK (core/lights.js): a basic decal glows
+      // at full yellow on a black road at midnight; Lambert takes the lamps
+      const DashMat = (CBZ.CONFIG && CBZ.CONFIG.NIGHT_TRUE_DARK) ? THREE.MeshLambertMaterial : THREE.MeshBasicMaterial;
+      const dash = new THREE.Mesh(dg, new DashMat({
         color: 0xf2d14a, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
       dash.matrixAutoUpdate = false; dash.renderOrder = 1;
       dash.userData.roadPaint = true;   // batch-exempt: keeps its decal material + culls as one full span

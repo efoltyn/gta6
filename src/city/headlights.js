@@ -70,7 +70,7 @@
     const day = CBZ.dayness == null ? 1 : CBZ.dayness;
     const dusk = CBZ.duskness || 0;
     const dark = clamp01(1 - (day * 2.2 + dusk * 0.25));
-    spot.intensity = dark * 3.2;
+    spot.intensity = dark * 4.6;
     spot.visible = dark > 0.02;
   });
 
