@@ -256,6 +256,16 @@
     if (!TERRAIN_ON()) return 0;
     const y = +CBZ.floorAt(x, z);
     let b = Number.isFinite(y) ? y : 0;
+    // Mainland floorAt() is the broad land plane (0), while the asphalt the
+    // player sees is a thin 4.0/6.5 cm render stack. Seat the local-y=0 tyre
+    // bottoms on world.js's canonical rendered support instead. This stays in
+    // the existing suspension query—no second transform writer, no cosmetic
+    // wheel offset, and ramps/moving decks below can still raise the result.
+    const A = CBZ.city && CBZ.city.arena;
+    if (g.mode === "city" && (!CBZ.CONFIG || CBZ.CONFIG.CITY_STREET_REALISM_V1 !== false) && A && A.vehicleSurfaceY) {
+      const surface = +A.vehicleSurfaceY(x, z);
+      if (Number.isFinite(surface)) b = Math.max(b, surface);
+    }
     if (fromY != null && CBZ.mpGroundAt) {
       try {
         const t = CBZ.mpGroundAt(x, z, fromY, b);

@@ -18,10 +18,9 @@
 
    THE THREE-WRITER PROBLEM (and how it is resolved):
    core/daynight.js (@2), modes/survival.js (@93) and city/mode.js (@94)
-   all used to write CBZ.sun.intensity / CBZ.hemi.intensity / sun.position
-   directly, each clobbering the last, each with its own hard-coded 1.05
-   and 0.95 literals. Adding a fourth writer for tone-mapped exposure
-   would have been unmaintainable, so instead:
+   once wrote CBZ.sun.intensity / CBZ.hemi.intensity / sun.position
+   directly, each clobbering the last, each with its own hard-coded literals.
+   They now route through this shared owner:
 
      * CBZ.lightRig.daylight(dayness, duskness, sunColor) is now THE
        function that sets sun + hemi + bounce from the day clock. It is
@@ -29,13 +28,9 @@
        calls. A mode that wants the same look with a different focus
        point calls it too — see CBZ.lightRig.cityFrame() below, which is
        the exact one-line replacement for city/mode.js's inline block.
-     * CBZ.lightRig.finalize() (driven by core/gfx.js at order 94.5,
-       i.e. AFTER every mode override) converts the LOGICAL intensities
-       any writer left behind into PHYSICAL ones for the currently
-       installed tone map, and re-aims/re-tints the bounce light from
-       whatever the final sun state turned out to be. So a mode that
-       still writes sun.intensity by hand (city/mode.js today) is
-       corrected rather than fought.
+     * core/gfx.js runs at order 94.5, AFTER every mode override, and calls
+       cityFrame() again before applying the tone-map gain. The final city
+       state therefore comes from the same owner as the earlier mode pass.
 
    SHADOWS: one 2048 PCFSoft ortho cascade, texel-snapped onto the
    player by daynight.js. The frustum HALF-SIZE is now owned here
@@ -57,6 +52,12 @@
   // GFX_SKY_AMBIENT — drive hemisphere sky/ground COLOURS from the day cycle
   // (instead of the fixed 0xeaf4ff / 0x6f7a55 pair). Off = old constant tint.
   if (CBZ.CONFIG.GFX_SKY_AMBIENT == null) CBZ.CONFIG.GFX_SKY_AMBIENT = true;
+  // CITY_STREET_REALISM_V1 — one reversible vertical slice: cars sit on the
+  // visible street surface, city night preserves real darkness, and the fixed
+  // lamp pool supplies the localized light that replaces that ambient fill.
+  // The query-string parser runs before this file, so ?cfg_...=0 retains the
+  // former path for same-checkout A/B evidence.
+  if (CBZ.CONFIG.CITY_STREET_REALISM_V1 == null) CBZ.CONFIG.CITY_STREET_REALISM_V1 = true;
 
   /* ---------------- the rig ------------------------------------------- */
 
@@ -217,19 +218,26 @@
     sunTarget.position.set(fx, fy, fz);
   }
 
-  /* cityFrame(focus) — the ENTIRE per-frame light override city/mode.js
-     needs, in one call. It reproduces mode.js's behaviour exactly (re-aim the
-     sun onto the player, ride CBZ.dayness for intensity/colour, widen the
-     shadow box for the city) while routing through the shared keyframes and
-     the tier-driven shadow frustum, so the tone-map gain and the bounce fill
-     apply in city mode too instead of being clobbered.
-     ONE-LINE CHANGE for city/mode.js: replace the body of its @94 sun/hemi/
-     shadow block with `CBZ.lightRig.cityFrame(focus);`.                     */
+  /* cityFrame(focus) — the ENTIRE per-frame city light override in one call:
+     re-aim the sun onto the player, ride the shared day keyframes, apply the
+     city-only night grade, and use the tier-owned shadow frustum.            */
   function cityFrame(focus) {
     if (!focus) return;
     const k = CBZ.dayness != null ? CBZ.dayness : 1;
     const d = CBZ.duskness || 0;
     daylight(k, d, CBZ.sunTint || (CBZ.sunTint = new THREE.Color()));
+    if (CBZ.CONFIG.CITY_STREET_REALISM_V1 !== false) {
+      // Preserve the noon keyframe exactly. As the sun falls, remove the flat
+      // global fill that made midnight asphalt as legible as daytime; street
+      // fixtures in props.js now carry that readability locally instead.
+      const signedSun = Number(CBZ.sunHeight);
+      const deep = Number.isFinite(signedSun)
+        ? Math.max(0, Math.min(1, -signedSun))
+        : (1 - k) * (1 - k);
+      sun.intensity *= 1 - 0.78 * deep;
+      hemi.intensity *= 1 - 0.72 * deep;
+      bounce.intensity *= 1 - 0.76 * deep;
+    }
     aimSun(focus.x, 4, focus.z, 70, 146, -50);
     setShadowFrustum(tier().shadowHalf || 190, (tier().shadowHalf || 190) * 2.6 + 40);
     aimBounce(focus.x, 6, focus.z);

@@ -430,17 +430,12 @@
     const g = CBZ.game;
     const t = tier();
 
-    // ---- city mode: re-apply the shared rig ON TOP of city/mode.js's @94
-    //      override. mode.js still owns the sun's POSITION (it aims the light
-    //      at the player across a two-island map) and the fog range; the rig
-    //      owns intensity, colour, the hemisphere tint and the bounce fill,
-    //      which mode.js's hard-coded 0.16/1.05/0.38/0.95 literals would
-    //      otherwise pin to the pre-tone-map values. Restricted to city mode
-    //      so weather.js's lightning bump (@90) still survives everywhere
-    //      else — in city mode mode.js already clobbered it before we ran.
-    if (rig && rig.daylight && g && g.mode === "city") {
-      rig.daylight(CBZ.dayness != null ? CBZ.dayness : 1, CBZ.duskness || 0,
-        CBZ.sunTint || (CBZ.sunTint = new THREE.Color()));
+    // ---- city mode: one canonical writer. Re-apply cityFrame after every
+    //      mode override so its city-only night grade cannot be clobbered, and
+    //      so position/intensity/bounce/shadow focus all come from one owner.
+    if (rig && rig.cityFrame && g && g.mode === "city") {
+      const P = CBZ.player && CBZ.player.pos;
+      rig.cityFrame(P || _focus);
     }
 
     // ---- tone-map compensation. The keyframes in core/lights.js are authored
@@ -471,8 +466,15 @@
     // ---- eye adaptation. Slow, bounded, and purely presentational.
     if (CBZ.setExposure && CBZ.CONFIG.GFX_AUTO_EXPOSURE) {
       const day = clamp01(CBZ.dayness != null ? CBZ.dayness : 1);
-      // open up ~18% after dark, stop down ~6% at high noon
-      const want = (t.exposure != null ? t.exposure : 1) * (1.18 - 0.24 * day);
+      // Gang City used to open the lens by 18% at the same moment its global
+      // ambient stayed high, flattening midnight into a blue daytime plate.
+      // Hold exposure near the noon calibration there; authored lamps/neon,
+      // not a global camera lift, now reveal the street after dark.
+      const cityDark = g && g.mode === "city" && CBZ.CONFIG.CITY_STREET_REALISM_V1 !== false;
+      const signedSun = Number(CBZ.sunHeight);
+      const deepNight = Number.isFinite(signedSun) ? Math.max(0, Math.min(1, -signedSun)) : (1 - day);
+      const eye = cityDark ? (0.94 - 0.26 * deepNight) : (1.18 - 0.24 * day);
+      const want = (t.exposure != null ? t.exposure : 1) * eye;
       const rate = dt ? Math.min(1, dt * 0.9) : 1;
       expo += (want - expo) * rate;
       CBZ.setExposure(expo);

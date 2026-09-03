@@ -1184,6 +1184,27 @@
     ? sharedMat("interior-seat", 0x40454e, { emissive: 0x20242c, ei: 0.85 })
     : cabinLiteMat();
 
+  /* CAR_CABIN_V4 — high-fidelity interior detailing:
+     (1) Dashboard metallic accent trim dividing upper and lower dash tiers.
+     (2) Climate control air vents (HVAC slatted vents on left, center, right).
+     (3) Active illuminated digital cluster: speedo and tachometer arcs, speed readout.
+     (4) Center infotainment display: active navigation route guidance, hazard flasher.
+     (5) Driver footwell pedal box (brake and accelerator with arms) + dead pedal footrest.
+     (6) Center console gear selector shifter, twin cup holders, and upholstered armrest pad.
+     (7) Engineered twin chrome headrest posts connecting seat backs to headrests.
+     (8) Seatbelt buckle receptacles with red release accents.
+     (9) Outboard seat base adjustment controls and cushion contour inserts.
+     (10) Steering wheel center emblem ring, spoke control button pods, column stalks.
+     (11) Overhead dome console with reading lights, mirror windshield mount and face.
+     (12) Door sill scuff plates on door apertures.
+     Flip false (?cfg_CAR_CABIN_V4=0) for a byte-for-byte V3 revert. */
+  if (CFG.CAR_CABIN_V4 == null) CFG.CAR_CABIN_V4 = true;
+  const cabinV4 = () => CFG.CAR_CABIN_V4 !== false;
+  const cabinTrimMat = () => sharedMat("interior-trim", 0x7c8490, { emissive: 0x222830, ei: 0.55 });
+  const clusterCyanMat = () => sharedMat("interior-screen-cyan", 0x0a2436, { emissive: 0x3cd8f8, ei: 1.0 });
+  const clusterRedMat = () => sharedMat("interior-screen-red", 0x330c0c, { emissive: 0xfd3f3f, ei: 0.95 });
+  const clusterAmberMat = () => sharedMat("interior-screen-amber", 0x382208, { emissive: 0xffaa24, ei: 0.95 });
+
   /* dressCabin(root, o) -> cabinInfo (also written to root.userData.cabinInfo)
        o.cabW    cabin base width (the glass tub's base width)
        o.zR/zF   cabin base rear/front z
@@ -1197,6 +1218,8 @@
   function dressCabin(root, o) {
     if (CFG.CAR_CABIN_V2 === false) return null;
     const M = cabinMat(), L = cabinLiteMat(), SCRN = clusterMat();
+    const TRIM = cabinTrimMat(), CYAN = clusterCyanMat(), RED = clusterRedMat(), AMBER = clusterAmberMat();
+    const v4 = cabinV4();
     const cabW = o.cabW, halfW = cabW * 0.5;
     const zR = Math.min(o.zR, o.zF), zF = Math.max(o.zR, o.zF);
     const cl = Math.max(0.60, zF - zR), cz = (zR + zF) * 0.5;
@@ -1313,7 +1336,41 @@
       // an empty one. Its base sits on the sill and its crown stands a hand
       // above, which puts it either side of the driver's head rather than
       // under it.
-      if (hr) addBox(root, 0.25, 0.22, 0.13, x, cushionY + bh + 0.10, z - 0.27, S);
+      if (hr) {
+        addBox(root, 0.25, 0.22, 0.13, x, cushionY + bh + 0.10, z - 0.27, S);
+        if (v4) {
+          // twin chrome headrest posts connecting back to headrest
+          [-0.065, 0.065].forEach(function (px) {
+            const post = addBox(root, 0.018, 0.09, 0.018, x + px, cushionY + bh + 0.04, z - 0.255, TRIM);
+            post.rotation.x = -0.12;
+            post.userData.noSeal = true;
+          });
+        }
+      }
+      if (v4) {
+        // Seatbelt buckle receptacle on inboard side
+        const inX = x - Math.sign(x) * 0.25;
+        const bStalk = addBox(root, 0.022, 0.09, 0.025, inX, cushionY + 0.03, z - 0.10, M);
+        bStalk.rotation.z = -Math.sign(x) * 0.14;
+        bStalk.userData.noSeal = true;
+        const bHead = addBox(root, 0.034, 0.042, 0.034, inX, cushionY + 0.08, z - 0.10, M);
+        bHead.rotation.z = -Math.sign(x) * 0.14;
+        bHead.userData.noSeal = true;
+        const bBtn = addBox(root, 0.022, 0.012, 0.022, inX, cushionY + 0.103, z - 0.10, RED);
+        bBtn.rotation.z = -Math.sign(x) * 0.14;
+        bBtn.userData.noSeal = true;
+
+        // Seat outer adjustment controls
+        const outX = x + Math.sign(x) * 0.24;
+        const sCtrl = addBox(root, 0.02, 0.04, 0.14, outX, cushionY - 0.04, z - 0.02, M);
+        sCtrl.userData.noSeal = true;
+        const sLev = addBox(root, 0.026, 0.016, 0.06, outX + Math.sign(x) * 0.005, cushionY - 0.03, z - 0.02, TRIM);
+        sLev.userData.noSeal = true;
+
+        // Seat cushion contour insert
+        const sIns = addBox(root, 0.32, 0.018, 0.38, x, cushionY + 0.005, z, M);
+        sIns.userData.noSeal = true;
+      }
     }
     seat(seatX, seatZ, backH, true);
     seat(-seatX, seatZ, backH, true);
@@ -1325,6 +1382,22 @@
       [seatX, -seatX].forEach(function (x) {
         addBox(root, 0.22, 0.14, 0.11, x, cushionY + rbh + 0.07, rearZ - 0.25, S);
       });
+      if (v4) {
+        [seatX, -seatX].forEach(function (rx) {
+          [-0.055, 0.055].forEach(function (px) {
+            const rpost = addBox(root, 0.016, 0.07, 0.016, rx + px, cushionY + rbh + 0.035, rearZ - 0.235, TRIM);
+            rpost.rotation.x = -0.16;
+            rpost.userData.noSeal = true;
+          });
+          const rbk = addBox(root, 0.03, 0.05, 0.03, rx * 0.45, cushionY + 0.02, rearZ - 0.11, M);
+          rbk.userData.noSeal = true;
+          const rbtn = addBox(root, 0.02, 0.01, 0.02, rx * 0.45, cushionY + 0.048, rearZ - 0.11, RED);
+          rbtn.userData.noSeal = true;
+        });
+        const rArm = addBox(root, 0.24, rbh * 0.72, 0.016, 0, cushionY + rbh * 0.45, rearZ - 0.165, M);
+        rArm.rotation.x = -0.16;
+        rArm.userData.noSeal = true;
+      }
       // parcel shelf behind the bench, so the backlight has something under
       // it. DARK (V3): a real shelf is near-black, and the pale version was
       // the single surface that made the whole tail read as a filled solid —
@@ -1335,6 +1408,29 @@
     // centre console + transmission tunnel between the front seats
     addBox(root, Math.max(0.16, cabW * 0.14), Math.max(0.14, cushionY + 0.10 - floorY),
       cl * 0.40, 0, floorY + (cushionY + 0.10 - floorY) * 0.5, seatZ - 0.06, M);
+    if (v4) {
+      // upholstered armrest pad
+      const armW = Math.max(0.14, cabW * 0.12);
+      const armLen = cl * 0.18;
+      const armPad = addBox(root, armW, 0.035, armLen, 0, cushionY + 0.115, seatZ - cl * 0.08, S);
+      armPad.userData.noSeal = true;
+
+      // gear shifter assembly
+      const shGate = addBox(root, 0.10, 0.014, 0.14, 0, cushionY + 0.105, seatZ + 0.09, TRIM);
+      shGate.userData.noSeal = true;
+      const shStalk = addBox(root, 0.02, 0.055, 0.02, 0, cushionY + 0.13, seatZ + 0.09, TRIM);
+      shStalk.userData.noSeal = true;
+      const shKnob = addBox(root, 0.044, 0.034, 0.054, 0, cushionY + 0.16, seatZ + 0.09, M);
+      shKnob.userData.noSeal = true;
+
+      // twin cup holders
+      [-0.04, 0.035].forEach(function (czOff) {
+        const cRing = addBox(root, 0.072, 0.014, 0.072, 0, cushionY + 0.104, seatZ - 0.01 + czOff, TRIM);
+        cRing.userData.noSeal = true;
+        const cWell = addBox(root, 0.058, 0.016, 0.058, 0, cushionY + 0.105, seatZ - 0.01 + czOff, M);
+        cWell.userData.noSeal = true;
+      });
+    }
 
     // ---- DASH. A slab, a MATTE top roll, a binnacle hood over the cluster,
     //      two screens. The roll is deliberately the darkest thing in the
@@ -1360,6 +1456,68 @@
     cs.userData.noSeal = true;
     cs.userData.carScreen = SCREEN_GAP;
 
+    if (v4) {
+      // Horizontal satin accent trim strip across full dashboard width
+      const dashTrim = addBox(root, cabW * 0.93, 0.024, 0.02, 0, dashTopY - 0.08, dashZ - 0.175, TRIM);
+      dashTrim.userData.noSeal = true;
+
+      // Air vents (HVAC)
+      // Driver outer vent
+      const vL = addBox(root, 0.07, 0.05, 0.025, cabW * 0.40, dashTopY - 0.04, dashZ - 0.155, TRIM);
+      vL.userData.noSeal = true;
+      addBox(root, 0.056, 0.036, 0.028, cabW * 0.40, dashTopY - 0.04, dashZ - 0.155, M).userData.noSeal = true;
+      // Passenger outer vent
+      const vR = addBox(root, 0.07, 0.05, 0.025, -cabW * 0.40, dashTopY - 0.04, dashZ - 0.155, TRIM);
+      vR.userData.noSeal = true;
+      addBox(root, 0.056, 0.036, 0.028, -cabW * 0.40, dashTopY - 0.04, dashZ - 0.155, M).userData.noSeal = true;
+      // Twin center air vents
+      [-0.14, 0.14].forEach(function (vx) {
+        const cv = addBox(root, 0.065, 0.042, 0.022, vx, dashTopY - 0.045, dashZ - 0.165, TRIM);
+        cv.userData.noSeal = true;
+        addBox(root, 0.052, 0.030, 0.024, vx, dashTopY - 0.045, dashZ - 0.165, M).userData.noSeal = true;
+      });
+
+      // Passenger glovebox seam & release handle
+      const gbSeam = addBox(root, 0.38, 0.012, 0.015, -seatX, dashTopY - 0.12, dashZ - 0.165, M);
+      gbSeam.userData.noSeal = true;
+      const gbHandle = addBox(root, 0.06, 0.018, 0.022, -seatX - 0.08, dashTopY - 0.11, dashZ - 0.175, TRIM);
+      gbHandle.userData.noSeal = true;
+
+      // Active illuminated instrument cluster graphics
+      const scrnZ = bezelFrontZ - SCREEN_GAP - 0.032;
+      const spdRing = addRing(root, 0.032, 0.005, seatX + 0.09, dashTopY - 0.015, scrnZ, CYAN);
+      spdRing.userData.noSeal = true;
+      const tchRing = addRing(root, 0.032, 0.005, seatX - 0.09, dashTopY - 0.015, scrnZ, CYAN);
+      tchRing.userData.noSeal = true;
+      const spdReadout = addBox(root, 0.045, 0.016, 0.006, seatX, dashTopY - 0.015, scrnZ, CYAN);
+      spdReadout.userData.noSeal = true;
+      const tchNeedle = addBox(root, 0.018, 0.004, 0.006, seatX - 0.075, dashTopY - 0.008, scrnZ - 0.001, RED);
+      tchNeedle.userData.noSeal = true;
+
+      // Infotainment screen UI graphics
+      const csZ = dashZ - 0.17 - SCREEN_GAP;
+      const navLine = addBox(root, 0.18, 0.012, 0.006, 0, dashTopY + 0.07, csZ - 0.033, CYAN);
+      navLine.rotation.x = 0.10; navLine.userData.noSeal = true;
+      const mapCard = addBox(root, 0.14, 0.065, 0.006, -0.05, dashTopY + 0.02, csZ - 0.031, AMBER);
+      mapCard.rotation.x = 0.10; mapCard.userData.noSeal = true;
+      const climInd = addBox(root, 0.09, 0.012, 0.006, 0.07, dashTopY - 0.03, csZ - 0.031, CYAN);
+      climInd.rotation.x = 0.10; climInd.userData.noSeal = true;
+      const hazardBtn = addBox(root, 0.032, 0.025, 0.012, 0, dashTopY - 0.065, dashZ - 0.175, RED);
+      hazardBtn.userData.noSeal = true;
+
+      // Footwell pedals (driver at +seatX)
+      const brkPedal = addBox(root, 0.065, 0.075, 0.02, seatX - 0.04, floorY + 0.11, zF - 0.09, TRIM);
+      brkPedal.rotation.x = 0.22; brkPedal.userData.noSeal = true;
+      const brkArm = addBox(root, 0.018, 0.10, 0.03, seatX - 0.04, floorY + 0.17, zF - 0.07, M);
+      brkArm.rotation.x = 0.22; brkArm.userData.noSeal = true;
+      const gasPedal = addBox(root, 0.042, 0.11, 0.018, seatX + 0.065, floorY + 0.095, zF - 0.09, TRIM);
+      gasPedal.rotation.x = 0.22; gasPedal.userData.noSeal = true;
+      const gasArm = addBox(root, 0.016, 0.10, 0.03, seatX + 0.065, floorY + 0.16, zF - 0.07, M);
+      gasArm.rotation.x = 0.22; gasArm.userData.noSeal = true;
+      const deadPedal = addBox(root, 0.055, 0.14, 0.02, seatX + 0.16, floorY + 0.09, zF - 0.11, M);
+      deadPedal.rotation.x = 0.25; deadPedal.userData.noSeal = true;
+    }
+
     // ---- THE WHEEL. A real rim, a hub and three spokes, raked back at the
     //      top the way a column puts it — the single most recognisable object
     //      in a car interior, and the thing hands can be seen holding.
@@ -1377,6 +1535,30 @@
       sp.userData.noSeal = true;
     });
 
+    if (v4) {
+      // Center horn emblem & badge
+      const hornEmblem = addRing(root, 0.025, 0.006, seatX, wheelY, wheelZ - 0.028, TRIM);
+      hornEmblem.rotation.x = 0.42; hornEmblem.userData.noSeal = true;
+      const hornCap = addBox(root, 0.05, 0.05, 0.015, seatX, wheelY, wheelZ - 0.026, M);
+      hornCap.rotation.x = 0.42; hornCap.userData.noSeal = true;
+
+      // Spoke button pods
+      [-0.08, 0.08].forEach(function (bx) {
+        const pod = addBox(root, 0.032, 0.038, 0.018, seatX + bx, wheelY + 0.01, wheelZ - 0.015, M);
+        pod.rotation.x = 0.42; pod.userData.noSeal = true;
+        const btn = addBox(root, 0.020, 0.022, 0.006, seatX + bx, wheelY + 0.01, wheelZ - 0.025, TRIM);
+        btn.rotation.x = 0.42; btn.userData.noSeal = true;
+      });
+
+      // Steering column stalks
+      const stalkL = addBox(root, 0.11, 0.016, 0.016, seatX + 0.10, wheelY - 0.02, wheelZ + 0.07, M);
+      stalkL.rotation.z = 0.20; stalkL.userData.noSeal = true;
+      addBox(root, 0.025, 0.022, 0.022, seatX + 0.155, wheelY - 0.01, wheelZ + 0.07, TRIM).userData.noSeal = true;
+      const stalkR = addBox(root, 0.11, 0.016, 0.016, seatX - 0.10, wheelY - 0.02, wheelZ + 0.07, M);
+      stalkR.rotation.z = -0.20; stalkR.userData.noSeal = true;
+      addBox(root, 0.025, 0.022, 0.022, seatX - 0.155, wheelY - 0.01, wheelZ + 0.07, TRIM).userData.noSeal = true;
+    }
+
     // ---- header furniture: mirror + two visors. Small, and the difference
     //      between "a box with windows" and "a car you are sitting in".
     const mir = addBox(root, 0.26, 0.075, 0.045, 0, roofY - 0.10, zTF - 0.02, M);
@@ -1386,6 +1568,28 @@
       vz.rotation.x = -0.5;
       vz.userData.noSeal = true;
     });
+
+    if (v4) {
+      // Mirror mount stalk & reflective glass face
+      const mirStem = addBox(root, 0.03, 0.06, 0.05, 0, roofY - 0.06, zTF + 0.01, M);
+      mirStem.userData.noSeal = true;
+      const mirFace = addBox(root, 0.24, 0.062, 0.008, 0, roofY - 0.10, zTF - 0.045, TRIM);
+      mirFace.userData.noSeal = true;
+
+      // Overhead dome light console
+      const domeConsole = addBox(root, 0.18, 0.02, 0.13, 0, roofY - 0.038, zTF - 0.06, M);
+      domeConsole.userData.noSeal = true;
+      [-0.05, 0.05].forEach(function (lx) {
+        const domeLens = addBox(root, 0.038, 0.006, 0.045, lx, roofY - 0.046, zTF - 0.06, L);
+        domeLens.userData.noSeal = true;
+      });
+
+      // Door sill scuff plates on door openings
+      [1, -1].forEach(function (s) {
+        const sillPlate = addBox(root, 0.065, 0.012, Math.min(1.10, cl * 0.65), s * (halfW - 0.08), floorY + 0.008, cz + 0.05, TRIM);
+        sillPlate.userData.noSeal = true;
+      });
+    }
 
     const info = {
       // legacy four (city/vehicles.js occSeatAnchor has read these for ages)

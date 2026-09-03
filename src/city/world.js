@@ -816,7 +816,7 @@
     //  This returns the top of whatever is actually drawn at (x,z). On real
     //  terrain (Mount Mercy) none of these slabs exist, so the walkable floor
     //  is the answer and the old behaviour stands.
-    const GY_ROAD = 0.065, GY_WALK = 0.08, GY_LOT = 0.10;
+    const GY_AVE = 0.040, GY_ROAD = 0.065, GY_WALK = 0.08, GY_LOT = 0.10;
     function groundDecalYAt(x, z) {
       const real = Math.max(0, CBZ.cityGroundHeightAt ? (+CBZ.cityGroundHeightAt(x, z) || 0) : 0);
       if (real > 0.2) return real;                                  // raised terrain: no slabs
@@ -828,6 +828,37 @@
       if (dx > BLK / 2 || dz > BLK / 2) return GY_ROAD;              // carriageway
       const lotHalf = (BLK - 4) / 2;                                 // the lot/yard pad
       return (dx <= lotHalf && dz <= lotHalf) ? GY_LOT : GY_WALK;    // pad, else sidewalk band
+    }
+
+    // ---- WHERE A VEHICLE'S TYRES SIT (the rendered support surface) ----
+    // floorAt() deliberately describes the broad walkable land and is 0 on
+    // the mainland. Cars used that number too, even though their tyre bottoms
+    // are authored at local y=0 and the visible streets sit 4.0/6.5 cm above
+    // it. The result was exact, measurable tyre penetration on every road.
+    //
+    // This is NOT groundDecalYAt renamed: decals want the highest drawable
+    // stack and can tolerate a generic road answer. Suspension needs the
+    // actual supporting layer — 4 cm on an avenue, 6.5 cm on a cross-street,
+    // with the higher cross-street winning at an intersection — then the real
+    // registered terrain/deck height wins wherever it is higher. Keeping this
+    // answer on the arena makes world.js the sole owner of both the geometry
+    // heights and their physical support; vehicles.js only consumes it.
+    function vehicleSurfaceYAt(x, z) {
+      const real = Math.max(0, CBZ.cityGroundHeightAt ? (+CBZ.cityGroundHeightAt(x, z) || 0) : 0);
+      if (x < minX || x > maxX || z < minZ || z > maxZ) return real;
+      let dxLine = Infinity, dzLine = Infinity;
+      for (let i = 0; i < xLines.length; i++) dxLine = Math.min(dxLine, Math.abs(x - xLines[i]));
+      for (let i = 0; i < zLines.length; i++) dzLine = Math.min(dzLine, Math.abs(z - zLines[i]));
+      const onAvenue = dxLine <= ROAD / 2 + 0.001;
+      const onCross = dzLine <= ROAD / 2 + 0.001;
+      if (onCross) return Math.max(real, GY_ROAD);
+      if (onAvenue) return Math.max(real, GY_AVE);
+      // A car that mounts the kerb should ride the slab it visibly climbed,
+      // not sink back to the broad land plane inside a block.
+      const dx = Math.abs((((x - xLines[0]) % step) + step) % step - step / 2);
+      const dz = Math.abs((((z - zLines[0]) % step) + step) % step - step / 2);
+      const lotHalf = (BLK - 4) / 2;
+      return Math.max(real, (dx <= lotHalf && dz <= lotHalf) ? GY_LOT : GY_WALK);
     }
 
     city = {
@@ -851,6 +882,9 @@
       // top of the DRAWN ground stack — what a ground decal seats on. See the
       // note on groundDecalYAt above; never feed this to physics or footing.
       groundDecalY: groundDecalYAt,
+      // Exact rendered support for wheel/suspension probes. Unlike the broad
+      // walking floor, this follows the thin road/sidewalk/lot surface stack.
+      vehicleSurfaceY: vehicleSurfaceYAt,
       // land-value field (PROCGEN.md roadmap #3): distance-to-centre falloff +
       // waterfront proximity bonus + low-freq deterministic noise, ~[0,1].
       // Sampled by buildings.js (height gradient, abandoned-lot gate) — cheap

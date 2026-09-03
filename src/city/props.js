@@ -3438,7 +3438,8 @@
     if (!city._lightPool && THREE.PointLight && CBZ.onAlways) {
       const pool = [];
       for (let i = 0; i < POOL_SIZE; i++) {
-        const pl = new THREE.PointLight(0xffe0a0, 0, 16, 2);
+        const roadRealism = !CBZ.CONFIG || CBZ.CONFIG.CITY_STREET_REALISM_V1 !== false;
+        const pl = new THREE.PointLight(0xffe0a0, 0, roadRealism ? 18 : 16, 2);
         pl.castShadow = false;
         pl.visible = false;
         root.add(pl);
@@ -3494,7 +3495,11 @@
             slot.light.intensity = 0.55;
           } else {
             slot.light.color.setHex(0xffe0a0);
-            slot.light.intensity = 0.85 * nightK;
+            // The old 0.85/16 m light was technically on but disappeared into
+            // the city's bright ambient night. Keep the bounded eight-light
+            // pool; give each selected cobra head enough reach to paint its
+            // own patch of road after the global fill is removed.
+            slot.light.intensity = (CBZ.CONFIG.CITY_STREET_REALISM_V1 !== false ? 3.6 : 0.85) * nightK;
           }
           slot.light.visible = slot.light.intensity > 0.01;
         }
