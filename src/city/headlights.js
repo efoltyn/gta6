@@ -50,7 +50,7 @@
     if (attached === car) return;
     if (attached && attached.group) { attached.group.remove(spot); attached.group.remove(target); }
     attached = car;
-    if (!car) return;
+    if (!car) { if (spot) { spot.intensity = 0; spot.visible = false; } return; }
     ensure();
     const nz = noseZ(car);
     spot.position.set(0, 0.78, nz);
