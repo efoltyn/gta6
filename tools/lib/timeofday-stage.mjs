@@ -193,12 +193,12 @@ export async function stageTimeOfDay(input) {
         cam: { x: 0, y: yardY + 1.7, z: 56, ax: -12, ay: yardY + 1.2, az: 20, fov: 62 },
         stand: { x: 0, z: 55 },
       };
-      // the cell wing's outer wall — barred windows: lit at evening, dead at
-      // lights-out except the night strips
-      const wx = CB.x1 + 44, wz = (CB.z0 + CB.z1) * 0.5;
+      // the cell wing's yard-side face, from inside the yard — barred windows
+      // lit through the evening, dead at lights-out except the night strips
+      const wx = (CB.x0 + CB.x1) * 0.5 + 14, wz = CB.z1 + 20;
       places.wing = {
-        cam: { x: wx, y: floorAt(wx, wz) + 11, z: wz + 34, ax: CB.x1 - 4, ay: 4, az: wz, fov: 52 },
-        stand: { x: wx - 6, z: wz + 14 },
+        cam: { x: wx, y: floorAt(wx, wz) + 3.5, z: wz, ax: (CB.x0 + CB.x1) * 0.5, ay: 5, az: CB.z1 - 12, fov: 55 },
+        stand: { x: wx - 4, z: wz },
       };
     }
 
@@ -236,10 +236,11 @@ export async function stageTimeOfDay(input) {
   }
   // let the light drivers (lamp pool, fixtures, ad boards, exposure lerp, sky
   // repaint throttle) all settle on the new hour before the tripod goes down.
-  // THE CLOCK KEEPS RUNNING WHILE THEY DO: the city day is 150 s, so 150
-  // ticks at 1/60 is 25 game-minutes — enough to walk an 18:30 plate into
-  // astronomical night. The phase is pinned again after every settle.
-  tick(150);
+  // THE CLOCK KEEPS RUNNING WHILE THEY DO: the city day is 150 s, so 70
+  // ticks at 1/60 is 11 game-minutes — enough to walk an 18:30 plate well
+  // into dusk. The phase is pinned again after every settle. (70 + 24 + 2
+  // ticks: a city tick is heavy, and the drivers converge in under 40.)
+  tick(70);
   try { CBZ.dayPhase(phase); } catch (_) {}
   hidePlayerPresentation();
 
@@ -258,7 +259,7 @@ export async function stageTimeOfDay(input) {
   if (typeof CBZ.skySync === "function") CBZ.skySync();
   // the pooled lights bind by CAMERA distance on a throttled updater: give it
   // an interval with the tripod in place, then put the tripod back
-  tick(40);
+  tick(24);
   try { CBZ.dayPhase(phase); } catch (_) {}
   hidePlayerPresentation();
   aim();
@@ -269,6 +270,19 @@ export async function stageTimeOfDay(input) {
   // dialogue subtitles and toasts are created AFTER boot, so the strip is
   // re-hidden on every plate, not once
   hideHud(S.overlay);
+  // an actor who has wandered onto the tripod is a face, not a lighting
+  // plate: anyone within 7 m of the camera sits this frame out (both sides
+  // apply the same rule, so a stochastic walk cannot fill one side only)
+  for (const grp of S.hidden || []) grp.visible = true;
+  S.hidden = [];
+  for (const pool of [CBZ.cityPeds, CBZ.cityCops, CBZ.npcs, CBZ.guards]) {
+    for (const actor of pool || []) {
+      const grp = actor && (actor.group || (actor.char && actor.char.group));
+      if (!grp || !grp.position || !grp.visible) continue;
+      const ddx = grp.position.x - cam.x, ddz = grp.position.z - cam.z;
+      if (ddx * ddx + ddz * ddz < 49) { grp.visible = false; S.hidden.push(grp); }
+    }
+  }
 
   // ---- the census -----------------------------------------------------
   CBZ.renderer.render(CBZ.scene, camera);
