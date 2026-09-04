@@ -1,5 +1,12 @@
 # APP-STORE-PLAN — seven games, one engine, one account, no spam flag
 
+> **Wave 2.** Owner's call 2026-09-04: these are browser games, so the web
+> portals go first — see `GO-TO-MARKET.md` (ship order NPC War → Natural
+> Disaster → Cell Block Z, `full`/`portal` build profiles, the web build tool).
+> This doc is the native wrapper for the games the portal numbers pick. The
+> dossier in §1 and the plumbing in §3 are reused by the web builds; the
+> cross-cutting blockers now live in `GO-TO-MARKET.md` §2.
+
 Rewritten 2026-09-04 from a code-level dossier of every game in the repo. The
 August plan (four apps, NPC War first) is superseded: two games landed since
 (Shark Sim, Desert Warlord), a seventh turned out to be a full game
@@ -162,6 +169,10 @@ Estimated: the generator/minimizer/bundler generalisation is 1–2 sessions;
 each additional shell after the first is ~an hour plus its oracle run.
 
 ## 4. Launch order and why
+
+> Superseded for the web by `GO-TO-MARKET.md` §4 (NPC War → Disaster → Cell
+> Block Z). The table below is the App Store order once those builds exist;
+> the spacing rules still stand.
 
 | Wk | Ship | Why this slot |
 |---|---|---|
