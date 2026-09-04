@@ -44,23 +44,26 @@
       null; CBZ.lockonState() → {active,state,progress,candidates,locked};
       CBZ.lockonActive(); CBZ.lockonLastLaunch() → launch-event feedback.
 
-   2) REAL SNIPER SCOPE (CBZ.CONFIG.SNIPER_REAL_SCOPE, default ON)
-      The factory sniper's scope was a prop: the tube renders (optics.js) but
-      RMB gave the same ~14° ADS nudge every pistol gets. Now the sniper truly
-      scopes: RMB (which already means "aim") rides into a REAL optic —
-      camera.fov eased to SCOPE_FOV (fpsmode's existing single-owner FOV block
-      reads CBZ.fpsScopeFov(), so there is no second writer to race), look
-      sensitivity scaled DOWN by the same fov ratio (CBZ.fpsLookSensMul, read
-      by camera.js yaw + fpsmode pitch), a full-screen blacked-ring overlay
-      with a fine mil crosshair, and a slight idle sway applied to the ACTUAL
-      aim (cam.yaw / fps.fp) so the round flies where the swaying reticle
-      points — scoped fire IS the zoomed camera ray. Third person snaps to
-      first person while scoped (scopeview.js's own magnified-optic pattern)
-      and restores on release. A gunsmith-bought optic (city/gunmods.js +
-      scopeview.js) takes precedence: if one is fitted this system stands
-      down entirely so the two overlays can never fight.
+   2) THE SIGHT ON THE GUN (CBZ.CONFIG.SNIPER_REAL_SCOPE, default ON)
+      This used to be "the sniper, and only the sniper, gets a scope" — the
+      weapon was named in an `if`, its FOV was the constant 16, its sway was a
+      fixed 0.0015 rad, and its mil ticks measured nothing. Every other gun in
+      the game aimed by punching the lens in by a flat 25 degrees with no optic
+      in front of the eye at all.
+      Now every weapon carries a SIGHT ROW (weapon-data.js `optic` ->
+      CBZ.WEAPON_OPTICS) and this file draws whichever picture that row asks
+      for: a real occluded eyepiece with mil ticks SOLVED from the optic's own
+      field of view for anything magnified, a floating aiming dot for a 1x
+      reflex sight, and nothing at all for irons (the gun's own front post is
+      the sight). FOV comes from the tangent law on the row's true
+      magnification, look sensitivity from the same ratio, and the sway is the
+      SHOOTER'S — real milliradians off the stance he is in (fpsmode's
+      SWAY_STANCE), applied to the actual aim, with Shift (or
+      CBZ.fpsHoldBreath) buying four seconds of held breath and then charging
+      three for it. A gunsmith-bought optic (city/gunmods.js + scopeview.js)
+      still takes precedence: if one is fitted this system stands down.
       Touch-layer API: CBZ.fpsCanScope() / CBZ.fpsScope(down) hold-style /
-      CBZ.fpsScopeToggle() — both styles implemented.
+      CBZ.fpsScopeToggle() / CBZ.fpsHoldBreath(down).
 
    ENGINE CONTRACT: plain IIFE on window.CBZ, THREE r128, no build step.
    Every cross-module read is feature-detected + resolved at call time.
@@ -865,20 +868,83 @@
   };
 
   /* ==========================================================================
-     2) REAL SNIPER SCOPE
+     2) THE SIGHT ON THE GUN
+
+     WHAT WAS HERE, and it is the whole of what the owner meant by "scopes and
+     shooting mechanics is dumb":
+
+       function scopeWeapon() {
+         const w = CBZ.currentGun && CBZ.currentGun();
+         return (w && (w.key === "sniper" || w.scoped === true)) ? w : null;
+       }
+
+     ONE weapon in the game had an optic. It was named in an `if`. Its FOV was
+     the constant 16 and its comment claimed that was "~4.7x true optical zoom",
+     which is 75/16 — a ratio of ANGLES, not a magnification; the honest figure
+     for a 16-degree lens seen from a 75-degree one is tan(37.5)/tan(8) = 5.46x.
+     Its sway was a fixed 0.0015 rad whatever the shooter was doing with their
+     body. Its mil ticks were at 4, 8 and 12 vmin — decorative marks that
+     measured nothing, on the one weapon that needed real ones. And every OTHER
+     gun in the game aimed by punching the lens in by a flat 25 degrees with
+     nothing in front of the eye at all.
+
+     WHAT IS HERE NOW. ONE optic, parameterised by the row bolted to the weapon
+     (weapon-data.js's `optic` field -> CBZ.WEAPON_OPTICS):
+
+       mag >= 3   a real occluded eyepiece: the tube, the exit pupil, eye
+                  relief that swims with the sway, a duplex reticle, and mil
+                  ticks whose SPACING IS SOLVED from this optic's actual field
+                  of view, so a mark is a milliradian and holdover works.
+       dot        no tube — a floating aiming dot at the centre, which is what
+                  a 1x reflex sight is. Both eyes open, full field.
+       iron       nothing at all. The weapon's own front post is the sight,
+                  and fpsmode's sighted viewmodel pose already puts it there.
+
+     THE THINGS THAT MAKE IT A SIGHT AND NOT A ZOOM:
+
+       SWAY IS THE BODY'S. CBZ.playerSwayRad (fpsmode) answers in REAL radians
+       from the stance the shooter is in — 4 mrad standing, 2 crouched, 1 prone
+       or on a bipod. It is applied to the ACTUAL aim, so the round goes where
+       the swimming reticle points. It is NOT multiplied by magnification: at
+       10x a 4 mrad wander already fills the eyepiece, because that is what an
+       optic does to a wobble. Multiplying again would count it twice.
+
+       BREATH HOLD. Shift (or CBZ.fpsHoldBreath from a thumb) steadies the
+       wobble to 0.2x for four seconds. Then your body takes it back: the sway
+       goes to 2.2x for three seconds and no second hold is available until it
+       has recovered. That is the whole trade a marksman actually makes, and it
+       is what turns a long shot into a decision about WHEN.
+
+       SENSITIVITY IS THE TANGENT RATIO, 1/mag, not the FOV ratio — a mouse
+       flick covers the same world angle through any glass.
+
+     The gunsmith optic (city/gunmods.js + scopeview.js) still outranks all of
+     this: canScope() defers entirely when one is fitted, so there is never a
+     second FOV writer or a second overlay.
   ========================================================================== */
 
-  const SCOPE_FOV = 16;                    // hip 75 → ~4.7× true optical zoom
   const SCOPE_HIP = 75;                    // fpsmode's fixed FP hip baseline
   let manualScope = false;                 // touch hold/toggle state
   let scopedNow = false;
   let scopeForcedFP = false;
   let swayT = 0, swayYawApplied = 0, swayPitchApplied = 0;
   let driftY = 0, driftP = 0, driftTgtY = 0, driftTgtP = 0, driftClock = 0;
+  let opticNow = null, builtFor = "";
+  // breath: `hold` counts DOWN while held, `debt` counts down while paying it back
+  const BREATH_HOLD = 4.0, BREATH_DEBT = 3.0, BREATH_STEADY = 0.2, BREATH_PUNISH = 2.2;
+  let breathKey = false, breathT = BREATH_HOLD, breathDebt = 0;
 
+  function opticOf(w) {
+    if (!w) return null;
+    return (CBZ.weaponOptic ? CBZ.weaponOptic(w) : null);
+  }
+  // the weapon whose sight this system draws: any weapon with a SIGHT PICTURE
+  // (tube or dot). Irons are drawn by the gun model, not by an overlay.
   function scopeWeapon() {
     const w = CBZ.currentGun && CBZ.currentGun();
-    return (w && (w.key === "sniper" || w.scoped === true)) ? w : null;
+    if (!w) return null;
+    const o = opticOf(w);
+    return (o && (o.tube || o.dot)) ? w : null;
   }
   function canScope() {
     if (CBZ.CONFIG.SNIPER_REAL_SCOPE === false) return false;
@@ -886,11 +952,26 @@
     if (!g || g.state !== "playing") return false;
     const P = CBZ.player;
     if (!P || P.dead || P.driving || P._swim) return false;
-    if (!scopeWeapon()) return false;
+    const sw = scopeWeapon();
+    if (!sw) return false;
+    /* A TUBE FORCES FIRST PERSON (scopeEngage does it, the way scopeview.js
+       does for a bought high-mag optic). A DOT MUST NOT — yanking a
+       third-person player into first person every time they touch the aim
+       button is not a sight, it is a camera bug. But a floating aiming dot
+       drawn at screen centre while the lens hangs over the shoulder marks a
+       point the round does not go to, so the dot only draws where it is
+       honest: down the barrel. Irons never reach here at all. */
+    const o = opticOf(sw);
+    if (o && o.dot && !o.tube && !(CBZ.fpsActive && CBZ.fpsActive())) return false;
     // a bought gunsmith optic owns the scope experience (scopeview.js) —
     // stand down entirely so two overlays/FOV writers can never fight.
     if (CBZ.gunModsScopeOf && CBZ.currentWeaponId && CBZ.gunModsScopeOf(CBZ.currentWeaponId)) return false;
     return true;
+  }
+  function scopeFovNow() {
+    const w = CBZ.currentGun && CBZ.currentGun();
+    if (!w || !CBZ.weaponAdsFov) return 16;
+    return CBZ.weaponAdsFov(w, SCOPE_HIP);
   }
 
   // resolve the scoped state NOW (shared by the per-frame tick AND the touch
@@ -920,12 +1001,31 @@
     resolveScope();
     return manualScope;
   };
+  /* BREATH, FOR A THUMB. The same latch the keyboard's Shift drives. A phone
+     has no spare finger to hold a key while the trigger thumb is busy, so this
+     is a press-once latch on the touch side and a hold on the desktop side —
+     touch.js's own 2026-08-04 rule. */
+  CBZ.fpsHoldBreath = function (down) { breathKey = !!down; return breathKey; };
+  CBZ.fpsBreathState = function () {
+    return { holding: breathKey && breathT > 0 && breathDebt <= 0,
+             left: Math.round(breathT * 100) / 100, debt: Math.round(breathDebt * 100) / 100 };
+  };
   // fpsmode's single-owner FP FOV block reads this (takes precedence over the
   // plain ADS drop; a gunsmith optic never reaches here — canScope defers).
-  CBZ.fpsScopeFov = function () { return scopedNow ? SCOPE_FOV : null; };
-  // camera.js (yaw) + fpsmode (pitch) scale the mouse by this — proportional
-  // to the zoom so a scoped flick covers the same WORLD angle feel.
-  CBZ.fpsLookSensMul = function () { return scopedNow ? SCOPE_FOV / SCOPE_HIP : 1; };
+  CBZ.fpsScopeFov = function () { return scopedNow ? scopeFovNow() : null; };
+  /* camera.js (yaw) + fpsmode (pitch) scale the mouse by this. It answers for
+     EVERY sighted weapon now, not just the scoped ones: bringing a red dot up
+     narrows the lens too, and leaving the sensitivity alone through that made
+     a dot feel twitchier than the hip it came from. The tangent ratio is the
+     monitor-match figure — 1/mag for a real optic, and the honest equivalent
+     for an iron-sight lean-in. */
+  CBZ.fpsLookSensMul = function () {
+    if (scopedNow) return Math.tan(scopeFovNow() * Math.PI / 360) / Math.tan(SCOPE_HIP * Math.PI / 360);
+    if (CBZ.isADS && CBZ.isADS() && CBZ.weaponAdsSensMul) {
+      return CBZ.weaponAdsSensMul(CBZ.currentGun && CBZ.currentGun(), SCOPE_HIP);
+    }
+    return 1;
+  };
 
   // gamepad fine-aim: gamepad.js already slows the right stick when a
   // magnified optic is live (CBZ.cityScopeHigh). Wrap it so OUR scope reads
@@ -933,84 +1033,145 @@
   const prevScopeHigh = CBZ.cityScopeHigh;
   CBZ.cityScopeHigh = function () {
     if (prevScopeHigh) { try { if (prevScopeHigh()) return true; } catch (e) {} }
-    return scopedNow;
+    return scopedNow && !!(opticNow && opticNow.tube);
   };
 
-  // ---- scope overlay (one DOM tree, display-toggled) ----
+  // ---- the sight picture (one DOM tree, rebuilt only when the optic changes)
   let scopeEl = null;
-  function buildScope() {
-    if (scopeEl || typeof document === "undefined" || !document.body) return;
-    scopeEl = document.createElement("div");
-    scopeEl.id = "realScope";
-    scopeEl.style.cssText = "position:fixed;inset:0;z-index:45;display:none;pointer-events:none;overflow:hidden";
-    scopeEl.innerHTML =
+
+  /* MIL TICKS THAT ARE ACTUALLY MILS. The overlay covers the whole viewport,
+     and 100vh of viewport spans the camera's vertical field of view — so one
+     milliradian is (0.1 / fovRadians) vh, exactly, and nothing about the tube's
+     drawn diameter enters into it. The only choice left is the INTERVAL: pick
+     the coarsest round number of mils whose spacing still reads (>= 2.4vh), so
+     a 10x optic marks every 5 mils and a 3.4x every 20, and in both cases a
+     mark is a real angle you can hold over with. The old marks were at fixed
+     vmin offsets on every scope, which measured nothing. */
+  function milPlan(fovDeg) {
+    const fovRad = fovDeg * Math.PI / 180;
+    const vhPerMil = 0.1 / fovRad;                    // 100vh spans fovRad
+    const steps = [1, 2, 5, 10, 20, 50];
+    let step = steps[steps.length - 1];
+    for (let i = 0; i < steps.length; i++) {
+      if (vhPerMil * steps[i] >= 2.4) { step = steps[i]; break; }
+    }
+    return { step: step, vh: vhPerMil * step, vhPerMil: vhPerMil };
+  }
+  CBZ.fpsScopeMilPlan = function () { return milPlan(scopeFovNow()); };
+
+  function buildScope(o) {
+    if (typeof document === "undefined" || !document.body) return;
+    const sig = (o && o.id) || "none";
+    if (scopeEl && builtFor === sig) return;
+    if (!scopeEl) {
+      scopeEl = document.createElement("div");
+      scopeEl.id = "realScope";
+      scopeEl.style.cssText = "position:fixed;inset:0;z-index:45;display:none;pointer-events:none;overflow:hidden";
+      document.body.appendChild(scopeEl);
+    }
+    builtFor = sig;
+    scopeEl.innerHTML = o && o.tube ? tubeHtml(o) : dotHtml(o);
+  }
+
+  /* THE FLOATING DOT — a 1x reflex sight. No tube, no vignette, no black
+     surround: an Aimpoint does not occlude anything, which is exactly why
+     people buy them. What it gives you is a bright aiming point that does not
+     need the front post lined up, so the sight is legible against sand and
+     against sky, which is the one thing a 1px crosshair on this game's
+     desert was not. */
+  function dotHtml() {
+    return "<div id='scDot' style='position:absolute;left:50%;top:50%;width:7px;height:7px;transform:translate(-50%,-50%);" +
+      "border-radius:50%;background:rgba(255,58,44,.95);box-shadow:0 0 6px 2px rgba(255,60,40,.55),0 0 14px 5px rgba(255,40,20,.22);will-change:transform'></div>" +
+      // a faint glass ring: the housing you are looking through, no more
+      "<div style='position:absolute;left:50%;top:50%;width:46vmin;height:46vmin;transform:translate(-50%,-50%);border-radius:50%;" +
+      "border:1px solid rgba(160,190,210,.10);box-shadow:0 0 40px rgba(0,0,0,.28) inset'></div>";
+  }
+
+  function tubeHtml(o) {
+    const plan = milPlan(scopeFovNow());
+    // ticks out to the edge of the drawn tube (33vmin radius ~ 33vh on a
+    // landscape frame); cap the count so a low-power optic is not a ladder.
+    const marks = [];
+    for (let n = 1; n <= 6; n++) {
+      const d = plan.vh * n;
+      if (d > 26) break;
+      marks.push(d);
+    }
+    const tick = function (d) {
+      const long = (d === plan.vh * 2) ? 11 : 7;     // every second mark is longer
+      return "<div style='position:absolute;left:50%;top:calc(50% + " + d + "vh);width:" + long + "px;height:1.5px;background:rgba(8,12,14,.9);transform:translate(-50%,-50%)'></div>" +
+        "<div style='position:absolute;left:50%;top:calc(50% - " + d + "vh);width:" + long + "px;height:1.5px;background:rgba(8,12,14,.9);transform:translate(-50%,-50%)'></div>" +
+        "<div style='position:absolute;top:50%;left:calc(50% + " + d + "vh);height:" + long + "px;width:1.5px;background:rgba(8,12,14,.9);transform:translate(-50%,-50%)'></div>" +
+        "<div style='position:absolute;top:50%;left:calc(50% - " + d + "vh);height:" + long + "px;width:1.5px;background:rgba(8,12,14,.9);transform:translate(-50%,-50%)'></div>";
+    };
+    return (
       // ---- THE IMAGE TUBE -------------------------------------------------
       // A real optic is not a black mask with a hole in it. Three things sell
-      // it and none of them were here: the EXIT PUPIL (a bright rim where the
-      // image ends), EYE RELIEF (the dark crescent that swims in from the edge
-      // when your eye is off-axis — driven below by the same sway that already
-      // moves the aim), and GLASS that actually tints. The glass tint is the
-      // game's own curtain-wall blue, because that is the glass that reads
-      // right everywhere else.
+      // it: the EXIT PUPIL (a bright rim where the image ends), EYE RELIEF
+      // (the dark crescent that swims in from the edge when your eye is off
+      // axis — driven below by the same sway that moves the aim), and GLASS
+      // that actually tints.
       "<div id='scGlass' style='position:absolute;inset:0;background:radial-gradient(circle at 50% 50%," +
         "rgba(191,233,247,.07) 0,rgba(120,170,200,.035) 18vmin,rgba(20,30,40,.02) 28vmin," +
         "rgba(0,0,0,0) 32.6vmin,rgba(2,2,3,.995) 33.4vmin)'></div>" +
-      // exit-pupil rim: the thin bright ring the eyepiece throws at the edge
       "<div style='position:absolute;left:50%;top:50%;width:65.6vmin;height:65.6vmin;transform:translate(-50%,-50%);" +
         "border-radius:50%;box-shadow:0 0 0 1px rgba(150,190,220,.30) inset,0 0 14px 2px rgba(120,165,200,.10) inset'></div>" +
-      // in-glass vignette so the image sits DOWN a tube rather than on a sticker
       "<div style='position:absolute;inset:0;background:radial-gradient(circle at 50% 50%," +
         "rgba(0,0,0,0) 0,rgba(0,0,0,0) 22vmin,rgba(0,0,0,.34) 31vmin,rgba(0,0,0,0) 33vmin)'></div>" +
-      // EYE RELIEF SHADOW — offset per frame from the live sway. This is the
-      // single strongest "I am behind an optic" cue there is.
       "<div id='scShadow' style='position:absolute;left:50%;top:50%;width:67vmin;height:67vmin;" +
         "transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;" +
         "background:radial-gradient(circle at 50% 50%,rgba(0,0,0,0) 56%,rgba(0,0,0,.55) 78%,rgba(0,0,0,.92) 100%);" +
         "opacity:.55;will-change:transform'></div>" +
-      // bezel
       "<div style='position:absolute;left:50%;top:50%;width:66.4vmin;height:66.4vmin;transform:translate(-50%,-50%);" +
         "border-radius:50%;border:3px solid rgba(8,9,11,.95);box-shadow:0 0 0 1.5px rgba(70,80,92,.45) inset,0 0 46px rgba(0,0,0,.7) inset'></div>" +
       // ---- DUPLEX RETICLE -------------------------------------------------
-      // Real hunting/marksman optics are DUPLEX: heavy posts from the edge that
-      // taper to a fine centre. Your eye is dragged to the middle by the step,
-      // and the thin part never covers the target. The old single 1px cross was
-      // uniform, which is both harder to find and thicker than it needs to be
-      // where it matters. Posts stop short of centre; the fine cross bridges.
+      // Heavy posts from the edge that taper to a fine centre: your eye is
+      // dragged to the middle by the step, and the thin part never covers the
+      // target.
       [["left:50%;top:calc(50% - 33vmin);width:2.4px;height:19vmin;transform:translateX(-50%)"],
        ["left:50%;top:calc(50% + 14vmin);width:2.4px;height:19vmin;transform:translateX(-50%)"],
        ["top:50%;left:calc(50% - 33vmin);height:2.4px;width:19vmin;transform:translateY(-50%)"],
        ["top:50%;left:calc(50% + 14vmin);height:2.4px;width:19vmin;transform:translateY(-50%)"]]
         .map(function (p) { return "<div style='position:absolute;" + p[0] + ";background:rgba(6,9,11,.95)'></div>"; }).join("") +
-      // the fine centre cross
       "<div style='position:absolute;left:50%;top:calc(50% - 14vmin);width:1px;height:28vmin;background:rgba(8,12,14,.86);transform:translateX(-.5px)'></div>" +
       "<div style='position:absolute;top:50%;left:calc(50% - 14vmin);height:1px;width:28vmin;background:rgba(8,12,14,.86);transform:translateY(-.5px)'></div>" +
-      // mil ticks down each axis (holdover marks)
-      [4, 8, 12].map(function (d) {
-        return "<div style='position:absolute;left:50%;top:calc(50% + " + d + "vmin);width:7px;height:1.5px;background:rgba(8,12,14,.9);transform:translate(-50%,-50%)'></div>" +
-          "<div style='position:absolute;left:50%;top:calc(50% - " + d + "vmin);width:7px;height:1.5px;background:rgba(8,12,14,.9);transform:translate(-50%,-50%)'></div>" +
-          "<div style='position:absolute;top:50%;left:calc(50% + " + d + "vmin);height:7px;width:1.5px;background:rgba(8,12,14,.9);transform:translate(-50%,-50%)'></div>" +
-          "<div style='position:absolute;top:50%;left:calc(50% - " + d + "vmin);height:7px;width:1.5px;background:rgba(8,12,14,.9);transform:translate(-50%,-50%)'></div>";
-      }).join("") +
-      // centre dot
-      "<div style='position:absolute;left:50%;top:50%;width:2.5px;height:2.5px;border-radius:50%;background:rgba(200,30,24,.92);transform:translate(-50%,-50%)'></div>";
-    document.body.appendChild(scopeEl);
+      marks.map(tick).join("") +
+      // the magnification and the tick value, small, at the bottom of the
+      // glass — a scope tells you what it is, and holdover is unreadable
+      // without knowing what a mark is worth
+      "<div style='position:absolute;left:50%;top:calc(50% + 27vmin);transform:translate(-50%,-50%);" +
+        "font:700 11px/1 ui-monospace,monospace;letter-spacing:1.5px;color:rgba(12,16,18,.9);" +
+        // a pale halo: the legend has to read on bright sand AND in shadow, and
+        // a reticle-black glyph on a sunlit dune is invisible
+        "text-shadow:0 0 3px rgba(235,240,245,.85),0 0 6px rgba(235,240,245,.55)'>" +
+        (o.label || "") + "  ·  " + plan.step + " MIL</div>" +
+      "<div style='position:absolute;left:50%;top:50%;width:2.5px;height:2.5px;border-radius:50%;background:rgba(200,30,24,.92);transform:translate(-50%,-50%)'></div>" +
+      // BREATH BAR — the one piece of state a shooter cannot see on their own
+      // body. Bottom of the glass, four characters wide, no words.
+      "<div id='scBreath' style='position:absolute;left:50%;top:calc(50% + 30vmin);transform:translate(-50%,-50%);" +
+        "width:56px;height:3px;background:rgba(10,14,16,.28);border-radius:2px;overflow:hidden'>" +
+        "<div id='scBreathFill' style='height:100%;width:100%;background:rgba(30,40,44,.8)'></div></div>"
+    );
   }
 
   function crossEl() { return document.getElementById("crosshair"); }
 
   function scopeEngage() {
     scopedNow = true;
+    opticNow = opticOf(CBZ.currentGun && CBZ.currentGun());
     swayT = 0; swayYawApplied = 0; swayPitchApplied = 0;
     driftY = driftP = driftTgtY = driftTgtP = 0; driftClock = 0;
-    buildScope();
+    buildScope(opticNow);
     if (scopeEl) scopeEl.style.display = "block";
-    // magnified image needs the clean down-the-barrel view: snap to FP like
-    // scopeview.js does for bought high-mag optics; restore on release.
-    if (CBZ.fpsActive && !CBZ.fpsActive() && CBZ.fpsSetActive) {
+    /* A MAGNIFIED IMAGE NEEDS THE DOWN-THE-BARREL VIEW; A DOT DOES NOT. The
+       old code snapped to first person for the sniper, which was right for a
+       tube. Forcing it for a red dot would yank a third-person player into
+       first person every time they touched the aim button. */
+    if (opticNow && opticNow.tube && CBZ.fpsActive && !CBZ.fpsActive() && CBZ.fpsSetActive) {
       const P = CBZ.player;
       if (P && !P.driving && !P.dead) { CBZ.fpsSetActive(true); scopeForcedFP = true; }
     }
-    sfx("rack", { pitch: 1.25, volume: 0.24 });
+    if (opticNow && opticNow.tube) sfx("rack", { pitch: 1.25, volume: 0.24 });
   }
   function scopeRelease() {
     scopedNow = false;
@@ -1037,21 +1198,48 @@
   CBZ.onAlways(51.5, function (dt) {
     if (manualScope && !canScope()) manualScope = false;   // weapon switched / context lost
     resolveScope();
-    if (!scopedNow) return;
+    // BREATH RECOVERS EVEN WHEN THE GUN IS DOWN — a lung is not a magazine.
+    if (!scopedNow) {
+      if (breathDebt > 0) breathDebt = Math.max(0, breathDebt - dt);
+      else if (breathT < BREATH_HOLD) breathT = Math.min(BREATH_HOLD, breathT + dt * 0.8);
+      return;
+    }
 
-    // ---- idle sway: a slow figure-8 + a tiny random wander, applied to the
-    // REAL aim (cam.yaw / fps.fp) so the fired round follows the swaying
-    // reticle. Runtime-only FX — Math.random is allowed here.
+    /* ---- BREATH. Shift, or a thumb latch. Holding steadies the wobble hard
+       for four seconds; then the body takes it back for three, worse than it
+       started, and you cannot hold again until it has. The steady is applied
+       to the amplitude below, so the round really does go where the steadier
+       reticle points. */
+    const shift = !!(CBZ.keys && (CBZ.keys.shift || CBZ.keys["shift"]));
+    const wantHold = (breathKey || shift) && breathDebt <= 0 && breathT > 0;
+    let breathK = 1;
+    if (wantHold) {
+      breathT = Math.max(0, breathT - dt);
+      breathK = BREATH_STEADY;
+      if (breathT <= 0) breathDebt = BREATH_DEBT;          // out of air
+    } else if (breathDebt > 0) {
+      breathDebt = Math.max(0, breathDebt - dt);
+      breathK = BREATH_PUNISH;
+      if (breathDebt <= 0) breathT = BREATH_HOLD;          // recovered
+    } else if (breathT < BREATH_HOLD) {
+      breathT = Math.min(BREATH_HOLD, breathT + dt * 0.8);
+    }
+
+    /* ---- SWAY. A slow figure-8 plus a small random wander, at the amplitude
+       the SHOOTER'S BODY actually holds (fpsmode's SWAY_STANCE: 4 mrad
+       standing, 2 crouched, 1 prone or bipod), applied to the REAL aim
+       (cam.yaw / fps.fp) so the fired round follows the swaying reticle.
+       Runtime-only FX — Math.random is allowed here. */
     swayT += dt;
     driftClock -= dt;
+    const AMP = (CBZ.playerSwayRad ? CBZ.playerSwayRad() : 0.0040) * breathK;
     if (driftClock <= 0) {
       driftClock = 1.4 + Math.random() * 1.2;
-      driftTgtY = (Math.random() - 0.5) * 0.0016;
-      driftTgtP = (Math.random() - 0.5) * 0.0012;
+      driftTgtY = (Math.random() - 0.5) * AMP * 1.05;
+      driftTgtP = (Math.random() - 0.5) * AMP * 0.8;
     }
     driftY += (driftTgtY - driftY) * Math.min(1, dt * 1.2);
     driftP += (driftTgtP - driftP) * Math.min(1, dt * 1.2);
-    const AMP = 0.0015;   // radians — a breath, not a wobble
     const wantYaw = Math.sin(swayT * 0.9) * AMP + Math.sin(swayT * 2.17 + 1.3) * AMP * 0.35 + driftY;
     const wantPitch = Math.cos(swayT * 1.23) * AMP * 0.8 + Math.sin(swayT * 2.9) * AMP * 0.3 + driftP;
     if (CBZ.cam) { CBZ.cam.yaw += wantYaw - swayYawApplied; swayYawApplied = wantYaw; }
@@ -1059,22 +1247,45 @@
       CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp + (wantPitch - swayPitchApplied)));
       swayPitchApplied = wantPitch;
     }
-    // EYE RELIEF — swim the scope shadow against the sway. Your head is not
-    // welded to the eyepiece: as the rifle breathes, your eye drifts off the
-    // exit pupil and the dark crescent creeps in from whichever side you have
-    // moved away from. Magnified ~90x off the raw sway radians because the
-    // shadow is the AMPLIFIED read of a tiny head movement — that ratio is
-    // what makes a 0.0015-radian breath visible as an optical effect at all.
-    if (scopeEl) {
+    if (!scopeEl) return;
+    if (opticNow && opticNow.tube) {
+      /* EYE RELIEF — swim the scope shadow against the sway. Your head is not
+         welded to the eyepiece. The shadow is the AMPLIFIED read of a tiny
+         head movement, so the gain is what makes a few milliradians visible as
+         an optical effect at all — and it scales with MAGNIFICATION, because
+         a high-power optic has less eye box and punishes the same head
+         movement harder. */
       const sh = scopeEl.querySelector("#scShadow");
       if (sh) {
-        const ox = -wantYaw * 90, oy = wantPitch * 90;
+        const gain = 24 * Math.max(1, (opticNow.mag || 1));
+        const ox = -wantYaw * gain, oy = wantPitch * gain;
         sh.style.transform = "translate(calc(-50% + " + ox.toFixed(2) + "vmin), calc(-50% + " + oy.toFixed(2) + "vmin))";
       }
+      const bf = scopeEl.querySelector("#scBreathFill");
+      if (bf) {
+        const f = breathDebt > 0 ? 0 : breathT / BREATH_HOLD;
+        bf.style.width = (f * 100).toFixed(0) + "%";
+        bf.style.background = breathDebt > 0 ? "rgba(170,40,30,.85)" : "rgba(30,40,44,.8)";
+      }
+      // the optic's own reticle replaces the HUD crosshair while scoped
+      const cx = crossEl();
+      if (cx && cx.style.display !== "none") cx.style.display = "none";
+    } else {
+      /* THE DOT FLOATS. A reflex sight is parallax-free — the dot sits where
+         the round goes wherever your eye is — but it is NOT welded to screen
+         centre, because the aim it marks is swaying. Moving it by the same
+         radians the aim moved, converted to screen through the live lens, is
+         what makes a dot honest instead of decorative. */
+      const d = scopeEl.querySelector("#scDot");
+      if (d && CBZ.camera) {
+        const fov = (CBZ.camera.fov || 75) * Math.PI / 180;
+        const px = window.innerHeight / (2 * Math.tan(fov / 2));
+        d.style.transform = "translate(calc(-50% + " + (-wantYaw * px).toFixed(1) + "px), calc(-50% + " +
+          (wantPitch * px).toFixed(1) + "px))";
+      }
+      const cx = crossEl();
+      if (cx && cx.style.display !== "none") cx.style.display = "none";
     }
-    // the optic's own reticle replaces the HUD crosshair while scoped
-    const cx = crossEl();
-    if (cx && cx.style.display !== "none") cx.style.display = "none";
   });
 
   // lock-on state machine + squares — AFTER the frame's final camera (camera
