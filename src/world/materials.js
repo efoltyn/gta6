@@ -120,10 +120,15 @@
       color: color,
       emissive: em,
       emissiveIntensity: ei,
-      roughness: 0.86,
-      metalness: 0.03,
+      roughness: 0.88,
+      metalness: 0.0,
       envMap: CBZ.ENV || null,
-      envMapIntensity: 0.55,
+      // Owned by core/gfx.js: scaled by the day clock every frame (a daytime
+      // gradient must not light a midnight prop) and zero when the tier has
+      // no environment. Roughness is re-derived per fragment from the colour
+      // by the gfx material model, so a red awning and a grey plinth stop
+      // sharing one matte finish.
+      envMapIntensity: 0,
     });
     std._shared = true;
     std._cbzPbr = true;
@@ -131,6 +136,7 @@
     lam._cbzTwin = std;
     lam._cbzPbr = false;
     pbrTwins.push(std);
+    if (CBZ.gfxDressPbr) CBZ.gfxDressPbr(std);
     return std;
   }
 
@@ -672,6 +678,7 @@
     _roadC.copy(_dryC).lerp(_wetC, wetK);
     const rough = DRY_ROUGH + (WET_ROUGH - DRY_ROUGH) * wetK;
     const metal = DRY_METAL + (WET_METAL - DRY_METAL) * wetK;
+    const dayK = CBZ.dayness != null ? Math.max(0, Math.min(1, CBZ.dayness)) : 1;
     for (let i = 0; i < roadMats.length; i++) {
       const m = roadMats[i];
       // multiply the material's OWN base tint by the shared dry/wet ratio
@@ -689,8 +696,10 @@
         const ns = m._roadNormalScale * (1 - wetK * 0.72);
         m.normalScale.set(ns, ns);
       }
-      // A wet surface reflects the sky far harder than a dry one.
-      if ("envMapIntensity" in m) m.envMapIntensity = 0.9 + wetK * 1.5;
+      // A wet surface reflects the sky far harder than a dry one — but the
+      // env IS a daytime sky, so it dims with the sun or midnight asphalt
+      // would glow with reflected noon.
+      if ("envMapIntensity" in m) m.envMapIntensity = (0.9 + wetK * 1.5) * (0.12 + 0.88 * dayK);
       if (!m.envMap && CBZ.ENV) { m.envMap = CBZ.ENV; m.needsUpdate = true; } // backfill if carfx's env built later
     }
   });

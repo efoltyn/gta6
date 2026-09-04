@@ -53,8 +53,12 @@
     { lightGain: 1.00, exposure: 1.00, bounce: 0.00, shadowHalf: 190, env: false, normals: false, pbr: false, aniso: 1 }, // 0 — no shadow pass at all
     { lightGain: 1.00, exposure: 0.98, bounce: 0.55, shadowHalf: 170, env: false, normals: true,  pbr: false, aniso: 2 }, // 1
     { lightGain: 1.00, exposure: 1.00, bounce: 0.85, shadowHalf: 150, env: true,  normals: true,  pbr: false, aniso: 4 }, // 2
-    { lightGain: 1.00, exposure: 1.02, bounce: 1.00, shadowHalf: 125, env: true,  normals: true,  pbr: true,  aniso: 8 }, // 3
-    { lightGain: 1.00, exposure: 1.04, bounce: 1.00, shadowHalf: 110, env: true,  normals: true,  pbr: true,  aniso: 8 }, // 4
+    // exposure stays 1.00 on the PBR tiers: the old +2/+4% "punch" stacked on
+    // the promoted materials' extra ambient and washed High/Best out to flat
+    // cardboard (core/gfx.js, THE CARDBOARD BUG). Contrast comes from the
+    // material model now, not from opening the lens.
+    { lightGain: 1.00, exposure: 1.00, bounce: 1.00, shadowHalf: 125, env: true,  normals: true,  pbr: true,  aniso: 8 }, // 3
+    { lightGain: 1.00, exposure: 1.00, bounce: 1.00, shadowHalf: 110, env: true,  normals: true,  pbr: true,  aniso: 8 }, // 4
   ];
 
   const QUALITY = [

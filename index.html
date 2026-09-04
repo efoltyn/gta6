@@ -535,7 +535,7 @@
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
 <script src="src/world/textures_surface.js?v=surf1"></script>
-<script src="src/world/materials.js?v=pbr1"></script>
+<script src="src/world/materials.js?v=pbr2"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
      ashlar (drafted-margin blocks) CanvasTextures + the fixed 6-colourway
      palette. After materials.js — it consumes CBZ.cmat. -->
@@ -1078,7 +1078,7 @@
      placement + per-biome town generator (loaded before biome/island builders). -->
 <script src="src/city/assets.js?v=nodash1"></script>
 <script src="src/city/placement.js?v=sims2"></script>
-<script src="src/city/official_assets.js?v=official5"></script>
+<script src="src/city/official_assets.js?v=official6"></script>
 <!-- 4d-3b. F4 — the player-building ENABLING ENGINE (additive, zero call
      sites change yet): a 16m chunk registry, then spawnPiece/despawnPiece/
      findSupport built on top of it + the CBZ.assets/physics.js contracts
@@ -2144,7 +2144,7 @@
 <script src="src/systems/newlife.js?v=newlife1"></script>
 
 <!-- 5. quality + loop + boot -->
-<script src="src/core/quality.js?v=scale8"></script>
+<script src="src/core/quality.js?v=scale9"></script>
 
 <!-- REAL BOATS. Four hulls with real numbers replace one mesh wearing three
      name aliases: a 4.5m RIB, the 6.2m runabout (mesh untouched — zero art
@@ -2225,7 +2225,11 @@
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder
      and registers its own window-load handler SECOND, so the static merge has
      finished before it promotes materials. -->
-<script src="src/core/gfx.js?v=gfx1"></script>
+<script src="src/core/gfx.js?v=nocard1"></script>
+<!-- Live sky environment: PMREM of the actual sky dome, re-baked as the sky
+     repaints, into one persistent target (CBZ.ENV / scene.environment never
+     change identity again). After gfx.js (reads CBZ.gfxTier) and sky.js. -->
+<script src="src/core/envsky.js?v=skyenv1"></script>
 <script src="src/city/localinst.js?v=li2"></script>
 <script src="src/core/profile.js"></script>
 <script src="src/core/fxwarm.js?v=racerstory1"></script>

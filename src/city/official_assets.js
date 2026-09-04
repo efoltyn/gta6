@@ -114,12 +114,18 @@
 
   // Use the supplied HDR as physically based reflection LIGHTING only. Keeping
   // it out of scene.background avoids a second photographic sky/cloud layer.
+  // A photograph of a SUNRISE is the wrong reflection at noon and at
+  // midnight. core/envsky.js now bakes the live sky dome into the
+  // environment every time it repaints, so this HDR is only the fallback for
+  // a build with that feature flagged off (?cfg_GFX_SKY_ENV=0).
   let envStarted = false;
   function startEnvironment() {
     if (envStarted || !THREE.RGBELoader || !CBZ.renderer || !CBZ.scene) return;
+    if (CBZ.CONFIG && CBZ.CONFIG.GFX_SKY_ENV !== false && CBZ.skyEnvBake) { envStarted = true; state.environment = "live-sky"; return; }
     envStarted = true; state.environment = "loading";
     new THREE.RGBELoader().load("assets/official/sky/blouberg_sunrise_2_1k.hdr", function (tex) {
       try {
+        if (CBZ.skyEnvActive) { tex.dispose(); state.environment = "live-sky"; return; }
         const pmrem = new THREE.PMREMGenerator(CBZ.renderer);
         const rt = pmrem.fromEquirectangular(tex);
         CBZ.scene.environment = rt.texture;

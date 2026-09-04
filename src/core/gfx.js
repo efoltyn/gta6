@@ -9,43 +9,75 @@
       file runs at @94.5 — after ALL of them — and re-applies the ONE
       shared rig (CBZ.lightRig.daylight) in city mode, aims the ground
       bounce fill from whatever sun position finally survived, and pins
-      the shadow frustum to the quality tier. So the old writers are
-      CORRECTED rather than fought, and city/mode.js needs no edit to
-      benefit (though a one-liner makes it tidy — see lights.js).
+      the shadow frustum to the quality tier.
 
    2. TONE-MAP-AWARE EXPOSURE. A filmic curve without a matching
-      exposure is just a dimmer. Exposure now rides the day clock as a
-      gentle eye adaptation: opened up at night so the city reads as
-      lit-by-neon rather than black, stopped down at noon so highlights
-      have somewhere to roll off into.
+      exposure is just a dimmer. Exposure rides the day clock as a
+      gentle eye adaptation.
 
    3. WORLD PBR PROMOTION — and the draw-call trap it has to dodge.
       core/batch.js merges the entire static city shell into a handful
       of meshes that share a handful of white vertex-colour
-      MeshLambertMaterials. Lambert cannot do roughness, cannot do
-      metalness, cannot take a normal map and, in r128, cannot see an
-      environment map at all — which is why the world reads as
-      construction paper. We promote the BATCHER'S OWN OUTPUT materials
-      to MeshStandardMaterial *after* the merge has happened. That is
-      the whole trick: the merge set, the vertex buffers and the draw
-      call count are bit-for-bit unchanged, and the number of materials
-      we touch is single digits, but every merged surface in the world
-      gains energy-conserving shading plus real environment light.
+      MeshLambertMaterials. We promote the BATCHER'S OWN OUTPUT
+      materials to MeshStandardMaterial *after* the merge has happened:
+      the merge set, the vertex buffers and the draw call count are
+      bit-for-bit unchanged, the number of materials touched is single
+      digits, and every merged surface gains energy-conserving shading.
 
-   4. IN-MATERIAL DETAIL + CONTACT AO. The promoted materials carry an
-      onBeforeCompile that adds (a) a world-space projected micro normal
-      map — merged geometry's UVs are per-box and useless for tiling, so
-      the detail is projected from WORLD position onto the dominant axis,
-      which is exact for an axis-aligned box city and costs one texture
-      fetch — and (b) an ambient-occlusion approximation that darkens
-      only the INDIRECT terms near the ground and on down-facing
-      surfaces. That contact darkening at the base of every wall is the
-      single strongest "this object is really standing there" cue
-      available without a real AO pass.
+   4. THE MATERIAL MODEL (the part that used to make the city look like
+      cardboard on High/Best — see "THE CARDBOARD BUG" below).
 
-   5. ENVIRONMENT REACH. CBZ.ENV (world/carfx.js's PMREM) was scoped to
-      vehicles. Everything Standard in the world now gets it, and any
-      other module can opt a material in with CBZ.gfxRegisterPbr(mat).
+   5. ENVIRONMENT REACH. CBZ.ENV (world/carfx.js's PMREM) is attached to
+      every promoted material and every cmat twin, and its intensity is
+      driven from the day clock here.
+
+   ------------------------------------------------------------------
+   THE CARDBOARD BUG (High/Best only; Fast/Balanced never promote).
+   Measured 2026-09-04 with tools/cityhost.mjs, same camera, tiers 0/2/4:
+   on Best every building lost its shadow-side contrast — both faces of a
+   white block went near-white, dark window insets turned warm grey-brown,
+   and the base of every wall carried a smudged dark band. Four causes, all
+   in the promotion path, all fixed here:
+
+     a) DOUBLE AMBIENT. MeshStandardMaterial's envMap feeds BOTH indirect
+        specular AND indirect diffuse. The PMREM gradient was attached at
+        intensity 0.5 on top of the hemisphere light that already IS the
+        sky ambient, so every promoted surface received ~40% extra flat
+        fill light, tinted by the gradient's grey-brown horizon band. That
+        is exactly a matte cardboard box under a softbox. The env's
+        diffuse share is now scaled down in-shader (cbzEnvDiffuse) so the
+        environment does what it is for — reflections — and the hemisphere
+        stays the one sky-ambient owner. Exposure at tiers 3/4 was also
+        bumped +2/+4% "for punch"; that compounded the wash. Gone.
+
+     b) ENV NEVER FOLLOWED THE CLOCK. The gradient is a daytime sky and it
+        was applied at full strength at midnight. envMapIntensity now rides
+        CBZ.dayness every frame (finalizer below).
+
+     c) ONE SUBSTANCE. Every promoted fragment had roughness 0.88 — paint,
+        plaster, bitumen, dark trim, all one dull matte. Real materials
+        differ mostly in how light LEAVES them. Roughness is now derived
+        per fragment from the albedo the batcher baked into vertex colour:
+        saturated colours read as paint and get a broad sheen, pale
+        neutrals as render/cladding, near-blacks as dark glossy trim,
+        horizontals stay gritty. Plus a slow world-space tone breakup so no
+        wall is a perfectly uniform sheet.
+
+     d) GRAIN INSTEAD OF DETAIL. One "concrete" micro normal map was
+        projected onto EVERY surface at one scale and 0.55 strength —
+        the same 2 cm pores on a roof, a kerb, a painted sign and a wall
+        50 m away. Uniform fine grain is what paper looks like. The
+        micro-normal now differs by orientation (floors bumpier than
+        walls), fades out with view distance so it never becomes shimmer,
+        and the surface interest at mid range comes from grime at the
+        base of walls and the tone breakup instead.
+
+   Also fixed: r128 keys the shader program cache on
+   material.customProgramCacheKey(), which defaults to
+   onBeforeCompile.toString() — re-installing an identical-looking hook
+   with different flags therefore never recompiled, so a tier/flag change
+   silently kept the old program. Every promoted material now carries an
+   explicit cache key built from the live feature set.
 
    Everything here is behind a CBZ.CONFIG flag and gated by the quality
    tier table in core/quality.js (CBZ.gfxTier). Tier 0 receives NONE of
@@ -59,26 +91,47 @@
   CBZ.CONFIG = CBZ.CONFIG || {};
 
   // GFX_WORLD_PBR — promote the batcher's merged output materials to
-  // MeshStandardMaterial (+ env light). Flip false (or ?cfg_GFX_WORLD_PBR=0)
-  // and the merged world stays exactly the Lambert it is today.
+  // MeshStandardMaterial. Flip false (or ?cfg_GFX_WORLD_PBR=0) and the
+  // merged world stays exactly the Lambert it is on lower tiers.
   if (CBZ.CONFIG.GFX_WORLD_PBR == null) CBZ.CONFIG.GFX_WORLD_PBR = true;
-  // GFX_WORLD_DETAIL — world-space projected micro normal map on promoted
-  // materials. Costs one texture fetch per fragment on merged geometry.
+  // GFX_WORLD_DETAIL — world-projected micro normal + tone breakup on
+  // promoted materials (two texture fetches per fragment on merged geometry).
   if (CBZ.CONFIG.GFX_WORLD_DETAIL == null) CBZ.CONFIG.GFX_WORLD_DETAIL = true;
-  // GFX_CONTACT_AO — indirect-only ambient occlusion approximation (ground
-  // contact + down-facing crevice darkening) on promoted materials.
+  // GFX_CONTACT_AO — indirect-only ambient occlusion approximation.
   if (CBZ.CONFIG.GFX_CONTACT_AO == null) CBZ.CONFIG.GFX_CONTACT_AO = true;
-  // GFX_ENV_WORLD — extend CBZ.ENV past vehicles to every Standard material.
+  // GFX_ENV_WORLD — environment reflections on promoted + twin materials.
+  // NOTE: r128 falls back to scene.environment for ANY Standard material
+  // without its own envMap, so "off" is enforced through envMapIntensity=0,
+  // never by nulling envMap.
   if (CBZ.CONFIG.GFX_ENV_WORLD == null) CBZ.CONFIG.GFX_ENV_WORLD = true;
   // GFX_AUTO_EXPOSURE — day/night eye adaptation on toneMappingExposure.
   if (CBZ.CONFIG.GFX_AUTO_EXPOSURE == null) CBZ.CONFIG.GFX_AUTO_EXPOSURE = true;
-  // GFX_TIGHT_SHADOWS — let the quality tier own the city shadow frustum
-  // half-size (see the GFX table in core/quality.js). Off = whatever the
-  // mode override set (city/mode.js's hard-coded 190).
+  // GFX_TIGHT_SHADOWS — let the quality tier own the city shadow frustum.
   if (CBZ.CONFIG.GFX_TIGHT_SHADOWS == null) CBZ.CONFIG.GFX_TIGHT_SHADOWS = true;
-  // Detail-normal projection scale, in tiles per world metre, and strength.
+  // GFX_MATERIAL_MODEL — albedo-derived roughness + grime + tone breakup.
+  // Off = one flat roughness everywhere (the cardboard look, for A/B).
+  if (CBZ.CONFIG.GFX_MATERIAL_MODEL == null) CBZ.CONFIG.GFX_MATERIAL_MODEL = true;
+
+  // ---- tunables (all live: a change + CBZ.setQualityLevel() re-applies) ----
+  // Micro-normal: tiles per world metre, strength on walls / floors, and the
+  // view distance (m) at which each has fully faded to flat.
   if (CBZ.CONFIG.GFX_DETAIL_SCALE == null) CBZ.CONFIG.GFX_DETAIL_SCALE = 0.42;
-  if (CBZ.CONFIG.GFX_DETAIL_STRENGTH == null) CBZ.CONFIG.GFX_DETAIL_STRENGTH = 0.55;
+  if (CBZ.CONFIG.GFX_WALL_BUMP == null) CBZ.CONFIG.GFX_WALL_BUMP = 0.16;
+  if (CBZ.CONFIG.GFX_FLOOR_BUMP == null) CBZ.CONFIG.GFX_FLOOR_BUMP = 0.42;
+  if (CBZ.CONFIG.GFX_WALL_BUMP_FADE == null) CBZ.CONFIG.GFX_WALL_BUMP_FADE = 26;
+  if (CBZ.CONFIG.GFX_FLOOR_BUMP_FADE == null) CBZ.CONFIG.GFX_FLOOR_BUMP_FADE = 70;
+  // Tone breakup: one tile per this many metres, and its albedo amplitude.
+  if (CBZ.CONFIG.GFX_MACRO_METRES == null) CBZ.CONFIG.GFX_MACRO_METRES = 9;
+  if (CBZ.CONFIG.GFX_MACRO_AMOUNT == null) CBZ.CONFIG.GFX_MACRO_AMOUNT = 0.07;
+  // Grime: max albedo darkening at the foot of a wall, and its height (m).
+  if (CBZ.CONFIG.GFX_GRIME == null) CBZ.CONFIG.GFX_GRIME = 0.16;
+  if (CBZ.CONFIG.GFX_GRIME_HEIGHT == null) CBZ.CONFIG.GFX_GRIME_HEIGHT = 1.5;
+  // Share of the environment map's DIFFUSE term that survives (1 = stock
+  // three.js double-ambient). Specular reflections are never scaled by this.
+  if (CBZ.CONFIG.GFX_ENV_DIFFUSE == null) CBZ.CONFIG.GFX_ENV_DIFFUSE = 0.22;
+  // Base envMapIntensity for the merged world and for cmat twins, at noon.
+  if (CBZ.CONFIG.GFX_ENV_WORLD_INTENSITY == null) CBZ.CONFIG.GFX_ENV_WORLD_INTENSITY = 0.60;
+  if (CBZ.CONFIG.GFX_ENV_TWIN_INTENSITY == null) CBZ.CONFIG.GFX_ENV_TWIN_INTENSITY = 0.45;
 
   function tier() { return CBZ.gfxTier || {}; }
   function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
@@ -116,7 +169,6 @@
     return n;
   }
 
-  // Public: re-sync the whole scene's shared materials to the live tier.
   CBZ.gfxSyncMaterials = function (force) {
     const want = force != null ? !!force : wantTwins();
     swapTree(CBZ.scene, want);
@@ -125,116 +177,218 @@
   };
 
   /* =================================================================
-     B. MERGED-WORLD PBR PROMOTION  (the draw-call-safe half)
+     B. THE MATERIAL MODEL — one onBeforeCompile, two flavours
      ================================================================= */
 
-  // srcLambert -> promoted Standard. One entry per batcher output class, so
-  // the ENTIRE merged city typically costs 2-4 promoted materials.
-  const promoted = new Map();
-  // Every merged mesh we touched, so a tier drop can put it straight back.
-  const promotedMeshes = [];
-
-  let detailTex = null;
-  function getDetailTex() {
-    if (detailTex !== null) return detailTex;
-    if (!CBZ.CONFIG.GFX_WORLD_DETAIL || !tier().normals || !CBZ.surfaceMaps) { detailTex = false; return false; }
-    // repeat:1 — we sample this texture with our OWN world-projected UVs, so
-    // three's uv-transform (texture.repeat/offset) never applies to it.
+  // The surface library hands back the SAME texture instances for the same
+  // (name, repeat) — so this is one upload shared by every promoted material.
+  //   normal → micro bumps (sampled with our own world-projected UVs)
+  //   map    → the low-frequency "stain" field, reused as tone breakup noise
+  let detailMaps = null;
+  function getDetailMaps() {
+    if (detailMaps !== null) return detailMaps;
+    if (!CBZ.CONFIG.GFX_WORLD_DETAIL || !tier().normals || !CBZ.surfaceMaps) { detailMaps = false; return false; }
     const maps = CBZ.surfaceMaps("concrete", { repeat: 1 });
-    detailTex = (maps && maps.normalMap) || false;
-    return detailTex;
+    detailMaps = (maps && maps.normalMap && maps.map) ? { normal: maps.normalMap, macro: maps.map } : false;
+    return detailMaps;
   }
 
-  function installShader(mat) {
-    const tex = getDetailTex();
-    const wantDetail = !!tex;
-    const wantAO = !!(CBZ.CONFIG.GFX_CONTACT_AO);
-    if (!wantDetail && !wantAO) return mat;
+  // Feature signature: what the shader will contain. Doubles as the program
+  // cache key so a change here (tier, flag) is a real recompile.
+  function shaderFeatures(world) {
+    const maps = world ? getDetailMaps() : false;
+    return {
+      world: !!world,
+      detail: !!maps,
+      ao: !!(world && CBZ.CONFIG.GFX_CONTACT_AO),
+      model: !!CBZ.CONFIG.GFX_MATERIAL_MODEL,
+      maps: maps || null,
+    };
+  }
+  function featureKey(F) {
+    return "cbzgfx|w" + (F.world ? 1 : 0) + "d" + (F.detail ? 1 : 0) + "a" + (F.ao ? 1 : 0) + "m" + (F.model ? 1 : 0);
+  }
+
+  /* installShader(mat, world)
+       world=true  — a batcher output (merged, world-baked, vertex-coloured):
+                     gets the projected micro-normal, tone breakup, grime and
+                     contact AO on top of the material model.
+       world=false — a cmat twin (an un-merged shared prop material): gets the
+                     material model + env-diffuse budget only.                */
+  function installShader(mat, world) {
+    const F = shaderFeatures(world);
+    const key = featureKey(F);
+    mat._cbzGfxKey = key;
+    mat.customProgramCacheKey = function () { return key; };
 
     mat.onBeforeCompile = function (sh) {
-      sh.uniforms.cbzDetail = { value: tex || null };
-      sh.uniforms.cbzDetailScale = { value: +CBZ.CONFIG.GFX_DETAIL_SCALE || 0.42 };
-      sh.uniforms.cbzDetailStrength = { value: +CBZ.CONFIG.GFX_DETAIL_STRENGTH || 0.55 };
-      sh.uniforms.cbzAoHeight = { value: 2.6 };
-      sh.uniforms.cbzAoStrength = { value: 0.34 };
-
-      // ---- vertex: publish world position + world normal ------------------
-      // Merged meshes are plain, un-instanced, un-skinned children of the city
-      // root, so modelMatrix is the whole story here (unlike the global fog
-      // patch in core/renderer.js, which must survive instancing and therefore
-      // reconstructs world space from mvPosition instead).
-      // EVERY anchor is verified before anything downstream is emitted: a
-      // fragment shader that READS a varying its vertex partner never WROTE
-      // is the one failure mode here that is not visibly obvious, so if any
-      // chunk name ever moves we bail out and ship the plain promoted material
-      // instead of a subtly wrong one.
       const vSrc = sh.vertexShader, fSrc = sh.fragmentShader;
-      if (vSrc.indexOf("#include <common>") < 0 ||
-          vSrc.indexOf("#include <project_vertex>") < 0 ||
-          fSrc.indexOf("#include <common>") < 0) return;
+      // EVERY anchor is verified before anything is emitted: a fragment that
+      // reads a varying its vertex partner never wrote is the one failure
+      // mode here that is not visibly obvious. Any miss → ship the plain
+      // promoted material rather than a subtly wrong one.
+      const need = ["#include <common>", "#include <color_fragment>", "#include <roughnessmap_fragment>",
+        "#include <normal_fragment_maps>", "#include <lights_fragment_maps>", "#include <aomap_fragment>"];
+      for (let i = 0; i < need.length; i++) if (fSrc.indexOf(need[i]) < 0) return;
+      if (F.world && (vSrc.indexOf("#include <common>") < 0 || vSrc.indexOf("#include <project_vertex>") < 0)) return;
 
-      sh.vertexShader = vSrc
-        .replace("#include <common>",
-          "#include <common>\nvarying vec3 cbzWPos;\nvarying vec3 cbzWNrm;")
-        .replace("#include <project_vertex>",
-          "#include <project_vertex>\n" +
-          "  cbzWPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n" +
-          // `normal` (the raw attribute) rather than `objectNormal`: both are
-          // in scope here, but the attribute is declared by three's own vertex
-          // prefix on every non-raw shader, so this survives any future
-          // re-ordering of the normal chunks.
-          "  cbzWNrm = normalize( mat3( modelMatrix ) * normal );");
+      const U = sh.uniforms;
+      U.cbzEnvDiffuse = { value: clamp01(+CBZ.CONFIG.GFX_ENV_DIFFUSE) };
+      if (F.world) {
+        U.cbzDetail = { value: F.maps ? F.maps.normal : null };
+        U.cbzMacro = { value: F.maps ? F.maps.macro : null };
+        U.cbzDetailScale = { value: +CBZ.CONFIG.GFX_DETAIL_SCALE || 0.42 };
+        U.cbzMacroScale = { value: 1 / Math.max(1, +CBZ.CONFIG.GFX_MACRO_METRES || 9) };
+        U.cbzMacroAmt = { value: +CBZ.CONFIG.GFX_MACRO_AMOUNT || 0 };
+        U.cbzBump = { value: new THREE.Vector2(+CBZ.CONFIG.GFX_WALL_BUMP || 0, +CBZ.CONFIG.GFX_FLOOR_BUMP || 0) };
+        U.cbzBumpFade = { value: new THREE.Vector2(+CBZ.CONFIG.GFX_WALL_BUMP_FADE || 26, +CBZ.CONFIG.GFX_FLOOR_BUMP_FADE || 70) };
+        U.cbzGrime = { value: new THREE.Vector2(+CBZ.CONFIG.GFX_GRIME || 0, +CBZ.CONFIG.GFX_GRIME_HEIGHT || 1.5) };
+        U.cbzAo = { value: new THREE.Vector2(0.34, 2.4) };   // strength, height (m)
+      }
 
-      sh.fragmentShader = fSrc.replace("#include <common>",
+      // ---- vertex: publish world position + world normal (world only) ----
+      // Merged meshes are plain, un-instanced, un-skinned children of the city
+      // root, so modelMatrix is the whole story here.
+      if (F.world) {
+        sh.vertexShader = vSrc
+          .replace("#include <common>", "#include <common>\nvarying vec3 cbzWPos;\nvarying vec3 cbzWNrm;")
+          .replace("#include <project_vertex>",
+            "#include <project_vertex>\n" +
+            "  cbzWPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n" +
+            "  cbzWNrm = normalize( mat3( modelMatrix ) * normal );");
+      }
+
+      // ---- fragment ----------------------------------------------------
+      let fs = fSrc.replace("#include <common>",
         "#include <common>\n" +
-        "varying vec3 cbzWPos;\nvarying vec3 cbzWNrm;\n" +
-        "uniform sampler2D cbzDetail;\nuniform float cbzDetailScale;\n" +
-        "uniform float cbzDetailStrength;\nuniform float cbzAoHeight;\nuniform float cbzAoStrength;");
+        "uniform float cbzEnvDiffuse;\n" +
+        (F.world ?
+          "varying vec3 cbzWPos;\nvarying vec3 cbzWNrm;\n" +
+          "uniform sampler2D cbzDetail;\nuniform sampler2D cbzMacro;\n" +
+          "uniform float cbzDetailScale;\nuniform float cbzMacroScale;\nuniform float cbzMacroAmt;\n" +
+          "uniform vec2 cbzBump;\nuniform vec2 cbzBumpFade;\nuniform vec2 cbzGrime;\nuniform vec2 cbzAo;\n"
+          : ""));
 
-      if (wantDetail && sh.fragmentShader.indexOf("#include <normal_fragment_maps>") >= 0) {
-        // DOMINANT-AXIS world projection. A full triplanar blend would cost
-        // three fetches; this city is built out of axis-aligned boxes, so the
-        // dominant axis is not an approximation for ~99% of its surface area
-        // and one fetch buys the same result.
-        sh.fragmentShader = sh.fragmentShader.replace("#include <normal_fragment_maps>",
+      // 1) after the vertex colour lands in diffuseColor: orientation, the
+      //    tone-breakup field, and grime. Declared at main() scope so the
+      //    later hooks can read them.
+      let colorHook = "#include <color_fragment>\n" +
+        "  float cbzMac = 0.0;\n" +
+        "  bool cbzUp = false;\n";
+      if (F.world) {
+        colorHook +=
+          "  vec3 cbzA = abs( cbzWNrm );\n" +
+          "  cbzUp = ( cbzA.y >= cbzA.x && cbzA.y >= cbzA.z );\n" +
+          "  bool cbzSideX = ( !cbzUp && cbzA.x >= cbzA.z );\n" +
+          // DOMINANT-AXIS world projection: this city is axis-aligned boxes,
+          // so one fetch buys what a triplanar blend would.
+          "  vec2 cbzUV = cbzUp ? cbzWPos.xz : ( cbzSideX ? cbzWPos.zy : cbzWPos.xy );\n" +
+          "  float cbzDist = length( vViewPosition );\n";
+        if (F.detail) {
+          // concrete's colour field: 0.40..0.62, mean ~0.51 → ±~0.6 signed
+          colorHook +=
+            "  cbzMac = clamp( ( texture2D( cbzMacro, cbzUV * cbzMacroScale ).g - 0.51 ) * 6.0, -1.0, 1.0 );\n";
+        }
+        if (F.model) {
+          colorHook +=
+            "  diffuseColor.rgb *= 1.0 + cbzMac * cbzMacroAmt;\n" +
+            // Grime: walls only, strongest at the pavement line, broken up by
+            // the same field so it is a tide mark, not a gradient. Slightly
+            // warm-dark, the way city dirt is.
+            "  if ( !cbzUp ) {\n" +
+            "    float cbzG = ( 1.0 - smoothstep( 0.0, cbzGrime.y, cbzWPos.y ) ) * ( 0.65 + 0.35 * cbzMac ) * cbzGrime.x;\n" +
+            "    diffuseColor.rgb *= 1.0 - cbzG * vec3( 0.86, 1.0, 1.08 );\n" +
+            "  }\n";
+        }
+      }
+      fs = fs.replace("#include <color_fragment>", colorHook);
+
+      // 2) roughness from what the surface IS (its albedo), not one constant.
+      if (F.model) {
+        fs = fs.replace("#include <roughnessmap_fragment>",
+          "#include <roughnessmap_fragment>\n" +
+          "  {\n" +
+          "    float cbzMx = max( diffuseColor.r, max( diffuseColor.g, diffuseColor.b ) );\n" +
+          "    float cbzMn = min( diffuseColor.r, min( diffuseColor.g, diffuseColor.b ) );\n" +
+          "    float cbzSat = ( cbzMx - cbzMn ) / max( cbzMx, 0.02 );\n" +
+          "    float cbzLum = dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );\n" +
+          "    float cbzR = 0.88;\n" +                                                   // masonry, concrete, bitumen
+          "    cbzR = mix( cbzR, 0.58, smoothstep( 0.10, 0.45, cbzSat ) );\n" +           // paint, signage, awnings
+          "    cbzR = mix( cbzR, 0.74, smoothstep( 0.55, 0.85, cbzLum ) * ( 1.0 - smoothstep( 0.05, 0.25, cbzSat ) ) );\n" + // pale render / cladding
+          "    cbzR = mix( cbzR, 0.66, 1.0 - smoothstep( 0.03, 0.12, cbzLum ) );\n" +   // near-black trim / dark glass
+          "    if ( cbzUp ) cbzR = max( cbzR, 0.82 );\n" +                              // pavements + roofs stay gritty
+          "    roughnessFactor = clamp( cbzR + cbzMac * 0.06, 0.35, 1.0 );\n" +
+          "  }");
+      }
+
+      // 3) micro-normal: orientation-aware strength, faded by view distance.
+      if (F.world && F.detail) {
+        fs = fs.replace("#include <normal_fragment_maps>",
           "#include <normal_fragment_maps>\n" +
           "  {\n" +
-          "    vec3 cbzA = abs( cbzWNrm );\n" +
-          "    bool cbzUp = ( cbzA.y >= cbzA.x && cbzA.y >= cbzA.z );\n" +
-          "    bool cbzSideX = ( !cbzUp && cbzA.x >= cbzA.z );\n" +
-          // ONE fetch, and it sits outside every branch so the implicit
-          // derivative used for mip selection is never taken inside divergent
-          // control flow. Only the UV choice is a ternary.
-          "    vec2 cbzUV = cbzUp ? cbzWPos.xz : ( cbzSideX ? cbzWPos.zy : cbzWPos.xy );\n" +
+          "    float cbzFadeD = cbzUp ? cbzBumpFade.y : cbzBumpFade.x;\n" +
+          "    float cbzStr = ( cbzUp ? cbzBump.y : cbzBump.x ) * ( 1.0 - smoothstep( cbzFadeD * 0.45, cbzFadeD, cbzDist ) );\n" +
+          // ONE fetch, outside every branch, so the implicit derivative used
+          // for mip selection is never taken inside divergent control flow.
           "    vec3 cbzN = texture2D( cbzDetail, cbzUV * cbzDetailScale ).xyz * 2.0 - 1.0;\n" +
-          // map the tangent-space wobble back onto the two world axes the
-          // chosen projection used (the third axis is the face normal itself)
           "    vec3 cbzOff = cbzUp ? vec3( cbzN.x, 0.0, cbzN.y )\n" +
           "                : ( cbzSideX ? vec3( 0.0, cbzN.y, cbzN.x ) : vec3( cbzN.x, cbzN.y, 0.0 ) );\n" +
-          "    vec3 cbzPert = normalize( cbzWNrm + cbzOff * cbzDetailStrength );\n" +
-          // perturb in WORLD space, then rotate the delta into view space so
-          // it composes correctly with three's own view-space shading normal
+          "    vec3 cbzPert = normalize( cbzWNrm + cbzOff * cbzStr );\n" +
+          // perturb in WORLD space, rotate the delta into view space so it
+          // composes with three's own view-space shading normal
           "    normal = normalize( normal + mat3( viewMatrix ) * ( cbzPert - cbzWNrm ) );\n" +
           "  }");
       }
 
-      if (wantAO && sh.fragmentShader.indexOf("#include <aomap_fragment>") >= 0) {
-        // Occlude ONLY the indirect terms — that is what ambient occlusion
-        // physically is. Darkening diffuse outright would have dimmed sunlit
-        // pavement too and produced exactly the muddy world we are avoiding.
-        sh.fragmentShader = sh.fragmentShader.replace("#include <aomap_fragment>",
+      // 4) THE ENERGY BUDGET. The hemisphere light is the sky ambient; the
+      //    environment map is for reflections. Scale its diffuse share.
+      fs = fs.replace("#include <lights_fragment_maps>",
+        "#include <lights_fragment_maps>\n" +
+        "  #if defined( USE_ENVMAP ) && defined( STANDARD ) && defined( ENVMAP_TYPE_CUBE_UV )\n" +
+        "    iblIrradiance *= cbzEnvDiffuse;\n" +
+        "  #endif");
+
+      // 5) contact AO — indirect terms only (that is what occlusion is).
+      //    Walls darken toward the pavement line; undersides darken; a
+      //    horizontal surface has no "wall above it" to know about, so it
+      //    is never height-darkened (the old code dimmed every plaza).
+      if (F.ao) {
+        fs = fs.replace("#include <aomap_fragment>",
           "#include <aomap_fragment>\n" +
           "  {\n" +
-          "    float cbzGround = mix( 1.0 - cbzAoStrength, 1.0, saturate( cbzWPos.y / cbzAoHeight ) );\n" +
-          "    float cbzFace = mix( 1.0 - cbzAoStrength * 0.55, 1.0, saturate( cbzWNrm.y * 0.5 + 0.75 ) );\n" +
-          "    float cbzAo = cbzGround * cbzFace;\n" +
-          "    reflectedLight.indirectDiffuse *= cbzAo;\n" +
-          "    reflectedLight.indirectSpecular *= cbzAo;\n" +
+          "    float cbzGround = cbzUp ? 1.0 : mix( 1.0 - cbzAo.x, 1.0, saturate( cbzWPos.y / cbzAo.y ) );\n" +
+          "    float cbzFace = mix( 1.0 - cbzAo.x * 0.55, 1.0, saturate( cbzWNrm.y * 0.5 + 0.75 ) );\n" +
+          "    float cbzAoK = cbzGround * cbzFace;\n" +
+          "    reflectedLight.indirectDiffuse *= cbzAoK;\n" +
+          "    reflectedLight.indirectSpecular *= cbzAoK;\n" +
           "  }");
       }
+
+      sh.fragmentShader = fs;
     };
     return mat;
   }
+
+  // Public: dress any MeshStandardMaterial in the material model + env
+  // budget (no world projection). world/materials.js calls this for cmat
+  // twins; anything else with a Standard material may too.
+  CBZ.gfxDressPbr = function (mat) {
+    if (!mat || !mat.isMeshStandardMaterial) return mat;
+    installShader(mat, false);
+    mat._cbzDressed = true;
+    mat.needsUpdate = true;
+    registerPbr(mat);
+    return mat;
+  };
+
+  /* =================================================================
+     C. MERGED-WORLD PBR PROMOTION  (the draw-call-safe half)
+     ================================================================= */
+
+  // srcLambert -> promoted Standard. One entry per batcher output class, so
+  // the ENTIRE merged city typically costs 2-6 promoted materials.
+  const promoted = new Map();
+  const promotedMeshes = [];
 
   function promoteMat(src) {
     let out = promoted.get(src);
@@ -246,17 +400,17 @@
       fog: src.fog,
       transparent: !!src.transparent,
       opacity: src.opacity != null ? src.opacity : 1,
-      // A city is overwhelmingly rough dielectric. The point of the promotion
-      // is the environment term and the specular falloff, not gloss.
+      // Baseline for a rough dielectric; the shader re-derives roughness per
+      // fragment from the albedo when GFX_MATERIAL_MODEL is on.
       roughness: 0.88,
-      metalness: 0.03,
-      envMap: envOn() ? envTex() : null,
-      envMapIntensity: 0.50,
+      metalness: 0.0,
+      envMap: envTex(),
+      envMapIntensity: 0,          // driven every frame by the finalizer
     });
     out._shared = true;
     out._cbzPbr = true;
     out._cbzPromoted = true;
-    installShader(out);
+    installShader(out, true);
     promoted.set(src, out);
     registerPbr(out);
     return out;
@@ -267,8 +421,7 @@
   }
 
   // Promote (or demote) every merged mesh under `root`. batch.js names its
-  // output "batch-wall" / "batch-inert" — that name IS the contract here, and
-  // it is checked rather than assumed so a non-merged mesh can never be caught.
+  // output "batch-wall" / "batch-inert" — that name IS the contract here.
   function promoteMerged(root, on) {
     if (!root || !root.traverse) return 0;
     let n = 0;
@@ -281,7 +434,7 @@
         const src = known ? o.userData._cbzMergeSrc : o.material;
         o.userData._cbzMergeSrc = src;
         o.material = promoteMat(src);
-        if (!known) promotedMeshes.push(o);   // never double-register on re-promote
+        if (!known) promotedMeshes.push(o);
         n++;
       } else if (o.material._cbzPromoted && o.userData._cbzMergeSrc) {
         o.material = o.userData._cbzMergeSrc;
@@ -293,7 +446,6 @@
 
   function refreshPromotion() {
     const on = worldPbrOn();
-    // meshes we already know about
     for (let i = 0; i < promotedMeshes.length; i++) {
       const o = promotedMeshes[i];
       const src = o.userData && o.userData._cbzMergeSrc;
@@ -301,7 +453,6 @@
       if (on && !o.material._cbzPromoted) o.material = promoteMat(src);
       else if (!on && o.material._cbzPromoted) o.material = src;
     }
-    // and any root that has been batched since
     if (on) {
       if (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) promoteMerged(CBZ.city.arena.root, true);
       if (CBZ.prisonRoot) promoteMerged(CBZ.prisonRoot, true);
@@ -313,8 +464,7 @@
      Present the batcher with a pure-Lambert world (so mergeableKeyV2's
      "Standard/Phong keep their look" rejection can never fire on a material
      that used to merge), then promote the merge OUTPUT and restore the
-     Standard twins on the meshes that survived un-merged. Net effect on the
-     merge set and on the draw-call count: exactly zero. */
+     Standard twins on the meshes that survived un-merged. */
   const _origBatchUnder = CBZ.batchStaticUnder;
   if (typeof _origBatchUnder === "function") {
     CBZ.batchStaticUnder = function (root) {
@@ -329,9 +479,6 @@
     };
   }
 
-  // batch.js's own window-load pass holds a direct reference to its internal
-  // runOnce, so it cannot be wrapped — we simply register AFTER it (listeners
-  // fire in registration order) and do the promotion/arming pass there.
   function afterLoadBatch() {
     CBZ.gfxPbrArmed = true;            // cmat may hand out Standard twins now
     promoteMerged(CBZ.scene, worldPbrOn());
@@ -340,22 +487,16 @@
     envBackfill();
     if (CBZ.requestShadowUpdate) CBZ.requestShadowUpdate(true);
   }
-  // (registered at the very bottom of this file — afterLoadBatch reaches state
-  //  declared further down, and the "already complete" branch would otherwise
-  //  run it before those declarations were initialised.)
 
   /* =================================================================
-     C. ENVIRONMENT REACH
+     D. ENVIRONMENT REACH + BUDGET
      ================================================================= */
 
   const pbrClients = [];
 
-  // WHICH environment. There are two producers and they must not fight:
-  //   * world/carfx.js bakes CBZ.ENV (a PMREM of a 4-stop canvas gradient) as
-  //     soon as a renderer exists — always available, deterministic, no assets.
-  //   * city/official_assets.js MAY later load a real HDR and publish it as
-  //     scene.environment. That is strictly better lighting, so if it turns
-  //     up we adopt it and never overwrite it.
+  // WHICH environment: world/carfx.js bakes CBZ.ENV (a PMREM of a gradient)
+  // as soon as a renderer exists; city/official_assets.js MAY later publish a
+  // real HDR as scene.environment, which is strictly better and wins.
   function envTex() {
     if (CBZ.scene && CBZ.scene.environment) return CBZ.scene.environment;
     return CBZ.ENV || null;
@@ -365,24 +506,16 @@
   function registerPbr(mat) {
     if (!mat || pbrClients.indexOf(mat) >= 0) return mat;
     pbrClients.push(mat);
-    const e = envOn() ? envTex() : null;
+    const e = envTex();
     if (e && "envMap" in mat && !mat.envMap) { mat.envMap = e; mat.needsUpdate = true; }
     return mat;
   }
-  // Public: any module with a MeshStandardMaterial can opt into the shared
-  // environment + tier management with one call.
   CBZ.gfxRegisterPbr = registerPbr;
 
   let lastEnv = undefined;
   function envBackfill() {
-    const on = envOn();
-    // Only ever claim scene.environment when nobody else has: carfx already
-    // writes it when it is null, and the HDR loader's write is authoritative.
-    if (on && CBZ.scene && CBZ.scene.environment == null && CBZ.ENV) CBZ.scene.environment = CBZ.ENV;
-    // Tier gating cannot be done by clearing scene.environment (that would
-    // stomp the HDR loader), so the tier gate lives entirely in the per-
-    // material envMap + envMapIntensity we control.
-    const want = on ? envTex() : null;
+    if (CBZ.scene && CBZ.scene.environment == null && CBZ.ENV) CBZ.scene.environment = CBZ.ENV;
+    const want = envTex();
     if (want === lastEnv) return !!want;
     lastEnv = want;
     const lists = [pbrClients, CBZ.pbrTwins || []];
@@ -396,30 +529,55 @@
     }
     return !!want;
   }
-  // CBZ.ENV is built lazily by world/carfx.js once a renderer exists, and the
-  // optional HDR arrives later still — so this stays registered and simply
-  // early-outs on an identity compare once the texture stops changing.
   CBZ.onAlways(1.3, function () { envBackfill(); });
 
+  // The env is a daytime sky. Its reflections must follow the clock, and the
+  // tier/flag gate is enforced HERE (intensity), because r128 would fall back
+  // to scene.environment the moment envMap were nulled.
+  function envDaylight() {
+    const day = clamp01(CBZ.dayness != null ? CBZ.dayness : 1);
+    return 0.10 + 0.90 * day;
+  }
+  function applyEnvIntensity() {
+    const on = envOn();
+    const k = on ? envDaylight() : 0;
+    const iw = k * (+CBZ.CONFIG.GFX_ENV_WORLD_INTENSITY || 0);
+    const it = k * (+CBZ.CONFIG.GFX_ENV_TWIN_INTENSITY || 0);
+    for (const m of promoted.values()) m.envMapIntensity = iw;
+    const tw = CBZ.pbrTwins || [];
+    for (let i = 0; i < tw.length; i++) {
+      const m = tw[i];
+      // pbrMat() callers (glass, chrome) own their own intensity; only the
+      // cmat twins (flagged by materials.js) ride the budget.
+      if (m && m._cbzTwin) m.envMapIntensity = it;
+    }
+  }
+
   /* =================================================================
-     D. TIER APPLICATION
+     E. TIER APPLICATION
      ================================================================= */
 
   function applyTier() {
     const t = tier();
     if (CBZ.setExposure) CBZ.setExposure(t.exposure != null ? t.exposure : 1);
-    detailTex = null;                    // re-evaluate against the new tier
-    for (const m of promoted.values()) { installShader(m); m.needsUpdate = true; }
+    detailMaps = null;                   // re-evaluate against the new tier
+    for (const m of promoted.values()) { installShader(m, true); m.needsUpdate = true; }
+    const tw = CBZ.pbrTwins || [];
+    for (let i = 0; i < tw.length; i++) {
+      const m = tw[i];
+      if (m && m._cbzDressed) { installShader(m, false); m.needsUpdate = true; }
+    }
     refreshPromotion();
     CBZ.gfxSyncMaterials();
-    lastEnv = undefined;                 // force the env gate to re-evaluate
+    lastEnv = undefined;
     envBackfill();
+    applyEnvIntensity();
     if (CBZ.requestShadowUpdate) CBZ.requestShadowUpdate(true);
   }
   if (CBZ.onQualityChange) CBZ.onQualityChange(applyTier);
 
   /* =================================================================
-     E. THE @94.5 FINALIZER — last word on the light rig
+     F. THE @94.5 FINALIZER — last word on the light rig
      ================================================================= */
 
   let expo = 1;
@@ -430,17 +588,15 @@
     const g = CBZ.game;
     const t = tier();
 
-    // ---- city mode: one canonical writer. Re-apply cityFrame after every
-    //      mode override so its city-only night grade cannot be clobbered, and
-    //      so position/intensity/bounce/shadow focus all come from one owner.
+    // ---- city mode: one canonical writer, re-applied after every mode
+    //      override so its night grade cannot be clobbered.
     if (rig && rig.cityFrame && g && g.mode === "city") {
       const P = CBZ.player && CBZ.player.pos;
       rig.cityFrame(P || _focus);
     }
 
-    // ---- tone-map compensation. The keyframes in core/lights.js are authored
-    //      for the filmic curve; if the tone map is switched OFF the same
-    //      numbers blow out, so scale back down.
+    // ---- tone-map compensation: the keyframes in core/lights.js are
+    //      authored for the filmic curve; with it OFF the same numbers blow out.
     const gain = (CBZ.toneMappingOn ? (t.lightGain != null ? t.lightGain : 1) : 0.88);
     if (gain !== 1 && CBZ.sun) {
       CBZ.sun.intensity *= gain;
@@ -455,21 +611,19 @@
       rig.aimBounce(_focus.x, 6, _focus.z);
     }
 
-    // ---- shadow frustum: the quality tier owns the half-size now. Applied
-    //      every frame but idempotent (setShadowFrustum early-outs when
-    //      nothing changed), which is also what re-tightens the box after
-    //      city/mode.js's one-shot widen to 190 on its first city frame.
+    // ---- shadow frustum: the quality tier owns the half-size.
     if (CBZ.CONFIG.GFX_TIGHT_SHADOWS && rig && rig.setShadowFrustum && g && g.mode === "city" && t.shadowHalf) {
       rig.setShadowFrustum(t.shadowHalf, t.shadowHalf * 2.6 + 40);
     }
 
+    // ---- environment reflections follow the sun.
+    applyEnvIntensity();
+
     // ---- eye adaptation. Slow, bounded, and purely presentational.
     if (CBZ.setExposure && CBZ.CONFIG.GFX_AUTO_EXPOSURE) {
       const day = clamp01(CBZ.dayness != null ? CBZ.dayness : 1);
-      // Gang City used to open the lens by 18% at the same moment its global
-      // ambient stayed high, flattening midnight into a blue daytime plate.
-      // Hold exposure near the noon calibration there; authored lamps/neon,
-      // not a global camera lift, now reveal the street after dark.
+      // Gang City holds exposure near the noon calibration and lets authored
+      // lamps/neon reveal the street after dark, rather than a global lift.
       const cityDark = g && g.mode === "city" && CBZ.CONFIG.CITY_STREET_REALISM_V1 !== false;
       const signedSun = Number(CBZ.sunHeight);
       const deepNight = Number.isFinite(signedSun) ? Math.max(0, Math.min(1, -signedSun)) : (1 - day);
@@ -484,9 +638,11 @@
   });
 
   /* =================================================================
-     F. debug surface (numbers only — no HUD, per HUD doctrine)
+     G. debug surface (numbers only — no HUD, per HUD doctrine)
      ================================================================= */
   CBZ.gfxStats = function () {
+    let envI = 0;
+    for (const m of promoted.values()) { envI = m.envMapIntensity; break; }
     return {
       toneMapping: !!CBZ.toneMappingOn,
       exposure: CBZ.renderer ? CBZ.renderer.toneMappingExposure : 0,
@@ -496,12 +652,14 @@
       promotedMeshes: promotedMeshes.length,
       pbrTwins: (CBZ.pbrTwins || []).length,
       envReady: !!CBZ.ENV,
+      envIntensity: envI,
+      shaderKey: promoted.size ? promoted.values().next().value._cbzGfxKey : "",
       shadowHalf: CBZ.lightRig ? CBZ.lightRig.shadowHalf() : 0,
       shadowTexel: CBZ.shadowFrustumInfo ? CBZ.shadowFrustumInfo().texel : 0,
     };
   };
 
-  /* ---- post-load arming (see section B) --------------------------------
+  /* ---- post-load arming (see section C) --------------------------------
      core/batch.js registers its own window-load handler at parse time and we
      parse after it, so registering here puts us second in the queue: the
      merge has finished by the time afterLoadBatch runs. */
