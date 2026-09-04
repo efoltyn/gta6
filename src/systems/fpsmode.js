@@ -4105,7 +4105,14 @@
       (CBZ.playerChar && CBZ.playerChar.skydiving));
     // bailout.js owns a dedicated two-hand/riser viewmodel. Hide the generic
     // fist/gun while it is active, then restore it automatically on landing.
-    if (ddT < 0) vm.visible = !!(fps.active && !chutePresentation && !aquaticRide());
+    /* AND NOT WHILE THE EYE IS BEHIND AN EYEPIECE. A magnified optic is a
+       sight you look THROUGH: at the M3A's 8.8 degrees the corner-carry rifle
+       is blown up into a wall of receiver across the bottom half of the glass,
+       which is exactly what the first storyboard of the new scope photographed.
+       A red dot is a sight you look OVER, so the gun stays in frame there —
+       fpsScopeTube(), not fpsScoped(), is the question. */
+    const tubeUp = !!(CBZ.fpsScopeTube && CBZ.fpsScopeTube());
+    if (ddT < 0) vm.visible = !!(fps.active && !chutePresentation && !aquaticRide() && !tubeUp);
     const aiming = fps.active || shoulderActive();
     /* A SHARK HAS NO GUNSIGHT.
 

@@ -986,6 +986,13 @@
   // ---- touch-layer API (mobile agent wires these to a button) ----
   CBZ.fpsCanScope = canScope;
   CBZ.fpsScoped = function () { return scopedNow; };
+  /* IS THE EYE BEHIND A TUBE. Different question from fpsScoped(), which is
+     true for a red dot too — and the answer decides whether the first-person
+     VIEWMODEL is drawn at all. A dot is a sight you look over, so the gun stays
+     in frame; an eyepiece is a sight you look THROUGH, and at 8.8 degrees the
+     corner-carry rifle is magnified into a wall of receiver across the bottom
+     half of the glass. fpsmode reads this. */
+  CBZ.fpsScopeTube = function () { return scopedNow && !!(opticNow && opticNow.tube); };
   // hold-style: press = scope down, release = scope up. Also drives ADS so the
   // spread/recoil benefits and gun pose match the scoped read.
   CBZ.fpsScope = function (down) {
