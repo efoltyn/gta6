@@ -1243,10 +1243,17 @@ function start() {
 
   /* ?go=1 skips the menu — every tool that photographs this page needs to be
      ON the island, not looking at a title card. */
+  /* ?seed IS HONOURED BY EVERY DOOR, NOT ONLY ?go. battle.js's ?battle=1
+     debug door drops into a fight on whatever state exists, and without
+     this line that state was seed 1 — every storyboard that wrote
+     `seed: 1337` beside `battle=1` was photographing a different island
+     from the one it named (measured: ?battle=1&seed=1337 → state.seed 1). */
+  const seedQ = parseInt(Q.get("seed") || "", 10) || 1337;
   if (Q.get("go") === "1") {
-    W.newGame({ seed: parseInt(Q.get("seed") || "", 10) || 1337 });
+    W.newGame({ seed: seedQ });
     if (W.campaign && W.campaign.enter) W.campaign.enter();
   } else {
+    if (Q.get("battle") === "1") W.newGame({ seed: seedQ });
     menu();
   }
 
