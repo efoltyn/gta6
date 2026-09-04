@@ -78,7 +78,7 @@ const subjects = [
 
   { id: "he-will-not-turn", label: "A man who will not turn, an hour later",
     focus:
-      "PERMANENT STATE NEEDS A PERMANENT PICTURE. `_refused` lasts for the rest of the run — it is what stops the " +
+      "PERMANENT STATE NEEDS A PERMANENT PICTURE. `_willing === false` lasts until he is decided about — it is what stops the " +
       "conscript button being a slot machine you pull until it pays — and it was rendered as a 2 600 ms toast that " +
       "said HE REFUSES once and then left no trace on any screen in the game. AFTER: the refusers are their own " +
       "HATCHED block inside their own tier's colour on the prisoner bar that was already there, so the screen " +
@@ -158,7 +158,7 @@ async function stageWarlordPrisoners(input) {
       armsOnSand: a.arms | 0,
       bloodEvents: a.bloodEvents | 0,
       prisoners: a.prisoners | 0,
-      refused: a.refused | 0,
+      refused: a.unwilling | 0,
       executed: a.executed | 0,
       army: a.army | 0,
       /* ONLY WHERE BOTH SIDES ARE LOOKING AT THE SAME KIND OF SURFACE. On a
@@ -278,8 +278,13 @@ async function stageWarlordPrisoners(input) {
     try { W.army.showAdvance(5); } catch (_) {}          // run the surrender out
     await until(() => W.phase() === "aftermath", 30000, 100);
     await wait(400);
-    const b = document.getElementById("pAllCon");
-    if (!b) return { ok: false, err: "no TAKE ALL button (prisoners: " + W.state.prisoners.length + ")" };
+    /* PRESS EVERY MAN, which is where TAKE ALL went. The aftermath's four
+       priced bulk verbs became three unpriced ones on 2026-09-04 (army.js, THE
+       PRISONERS): every man now decides WILLING or UNWILLING before you decide
+       anything, so "all of them cross" is PRESS EVERY MAN and this subject is
+       still exactly the picture it always was — the men walking over. */
+    const b = document.getElementById("pPress") || document.getElementById("pWilling");
+    if (!b) return { ok: false, err: "no PRESS verb (prisoners: " + W.state.prisoners.length + ")" };
     b.click();
     try { W.army.showAdvance(1.9); } catch (_) {}
     await wait(900);
@@ -311,8 +316,11 @@ async function stageWarlordPrisoners(input) {
       loot: {}, armourLoot: {}, alreadyBanked: true,
     });
     await wait(350);
-    const b = document.getElementById("pAllExe");
-    if (!b) return { ok: false, err: "no EXECUTE button" };
+    /* SHOOT THE UNWILLING, which is where EXECUTE went. The rank is the men
+       who said no rather than every prisoner, so the staged band above is
+       topped up big enough that the roll leaves a rank worth photographing. */
+    const b = document.getElementById("pShoot");
+    if (!b) return { ok: false, err: "no SHOOT THE UNWILLING verb" };
     b.click();
     try { W.army.showAdvance(0.9); } catch (_) {}
     await wait(800);

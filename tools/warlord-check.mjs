@@ -251,6 +251,33 @@ function checkSurrender() {
   const after = W.surrenderChance(weak, W.bandPower(weak) * 2);
   W.state.fame = 0;
   ok(after > before, "a reputation does work for you", n2(before) + " → " + n2(after));
+
+  /* WHERE ASKING STOPS BEING A QUESTION. army.js's scale rule — bigger eats
+     smaller, no card — reads W.surrenderSure() rather than typing a threshold,
+     and the claim it makes is that above that ratio the ramp has ALREADY
+     stopped moving. If somebody retunes the curve and that stops being true,
+     the agar rule silently starts firing on fights that still had a decision
+     in them. This is that claim, asserted. */
+  const sure = W.surrenderSure();
+  ok(sure > 2 && sure < 6, "the scale rule's threshold is a real ratio", n2(sure) + "×");
+  const atSure = W.surrenderChance(weak, W.bandPower(weak) * sure);
+  const past = W.surrenderChance(weak, W.bandPower(weak) * sure * 3);
+  ok(Math.abs(past - atSure) < 1e-9,
+     "above it the roll has stopped moving — every ratio past it is the same number",
+     n2(atSure) + " at " + n2(sure) + "× vs " + n2(past) + " at " + n2(sure * 3) + "×");
+  const below = W.surrenderChance(weak, W.bandPower(weak) * (sure * 0.6));
+  ok(below < atSure, "…and below it, it is still a decision", n2(below) + " → " + n2(atSure));
+
+  /* THE LEVY IS A LOOKUP, NOT A LITERAL. territory.js raises garrisons with
+     W.cheapestGun() and converts everybody else's garrison strength through a
+     levy built with the SAME gun; a cheapestGun that answered something not in
+     the armoury would make your real garrison and a rival's abstract one two
+     different men holding the same ground. */
+  const cheap = W.cheapestGun();
+  const priced = W.battleGuns().map((g) => W.gunPrice(g.id)).sort((a, b) => a - b);
+  ok(!!W.gun(cheap), "the levy's gun is a real weapon", cheap);
+  ok(W.gunPrice(cheap) === priced[0], "…and it is the cheapest thing that is a weapon",
+     "$" + W.gunPrice(cheap) + " vs $" + priced[0]);
 }
 
 /* ============================================================ 5. THE CAMPAIGN
@@ -462,7 +489,13 @@ function checkWages() {
   ok(after > 0, "…the army sheds, it does not evaporate", after + " left");
   ok(vetsAfter === vetsBefore, "the levies walk first — a veteran has somewhere to be",
      vetsAfter + "/" + vetsBefore + " veterans kept");
-  ok(before - after <= Math.ceil(before * 0.4), "one bad morning costs at most 40% of the roster",
+  /* W.SHED_CAP, not a 0.4 typed here. It is published now because army.js's
+     scale rule spends the same number when a column is ridden down by
+     something four times its size — "how much of a column can come apart in
+     one event" is one rule, and a check that hard-codes it stops testing the
+     rule the moment somebody retunes it. */
+  ok(before - after <= Math.ceil(before * W.SHED_CAP),
+     "one bad morning costs at most " + Math.round(W.SHED_CAP * 100) + "% of the roster",
      (before - after) + " of " + before + " walked");
 
   /* A GUN A DESERTER TAKES WITH HIM IS A GUN THE PLAYER PAID FOR AND CANNOT

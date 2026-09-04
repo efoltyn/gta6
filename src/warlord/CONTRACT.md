@@ -6,8 +6,68 @@ face of that state.
 
 ## The loop, in one line
 
-ride the island → meet somebody → fight / hire / demand surrender → count the
-dead, take their guns, take their men → spend it at an outpost → ride.
+ride the island → take ground → the ground raises men → meet somebody → fight /
+hire / demand → decide what to do with the men who surrendered → spend it at an
+outpost → ride.
+
+## The two rules the whole game hangs off
+
+The owner's brief has never changed: *"ultra simple mechanics, made for
+multiplayer — openfront.io met Bannerlord"*, and as of 2026-09-04 *"think about
+openfront.io mixed with agar.io … the big thing is battle logic improving"*.
+Two rules fall out of that and everything else bends around them.
+
+**VICTORY IS LAND.** The run is won when you hold **80% of the island's
+provinces** — `T.winTarget()`, which is `ceil(regions * 0.8)` and is therefore
+32 of 40 today and follows `TARGET_REGIONS` for free. It is on the strip and on
+the map from the first frame ("7 OF 40 · YOURS AT 32"). Losing is unchanged:
+you fall with nobody left to carry you, your own men kill you, or you run out
+of everything (events.js, THE END).
+
+*What this replaced, and why it is written down:* events.js's **THE FOUR** —
+four named warlords picked once at boot, broken when their men fell under 15%
+of a `size0` baseline. match.js could not raise a single column (see its
+`COLUMN_CEILING` tombstone), so every warlord had zero men, so every one of them
+was already "broken", and **the first aftermath of the first skirmish printed
+THE ISLAND IS YOURS on day one**. Nobody rebuild it.
+
+**GROWTH IS LAND.** Every dawn, every province raises a levy into its garrison
+toward `supportOf(r)` — the men that ground feeds — filling over `SETTLE_DAWNS`
+(6), the same six dawns `defenceOf` takes to stop treating a capture as
+brittle. Yours are real `W.makeSoldier` levies with `W.cheapestGun()`;
+everybody else's is a strength (`gp`). A garrison is **not on your payroll** —
+the ground feeds it — and the moment you march a man out of it he starts
+costing core's wage. The player marches them with **RAISE THE LEVY**; a rival's
+columns are topped up from his own garrisons (match.js `topUpColumns`), never
+conjured.
+
+## Taking ground — three doors
+
+1. **Beat the force that holds it.** `T.onBattleWon` — win a battle standing on
+   a province against a band belonging to its owner (or on unclaimed ground).
+2. **Stand on the unclaimed.** One campaign hour in an unowned province with a
+   column of at least ten men (core's own `BAND_CLASSES` floor for a BAND) and
+   it is yours. Leaving resets it. A chip counts it down. Rivals do the same
+   with two dawns instead of one hour (match.js `takeEmptyGround`).
+3. **STORM it.** A province somebody holds with no column standing on it: the
+   rail offers STORM, and it is a real `W.battle.start` against the garrison —
+   `T.garrisonRoster(r)` turns `defenceOf`'s own two terms into men, so a
+   strength-only garrison becomes levies and you fight what the map card
+   priced. Win and it is yours; lose and what is left holds it.
+
+## The scale rule (agar.io)
+
+Above `W.surrenderSure()` — `SURRENDER.floor + cap/slope`, 3.05×, the ratio at
+which core's own surrender ramp has stopped moving — a meeting has no decision
+in it and **no card comes up**:
+
+- you are 3.05× a **hostile** party → it surrenders on sight, prisoners,
+  aftermath.
+- a party is 3.05× you **and it was hunting you** → your column scatters. You
+  lose `W.SHED_CAP * (1 - odds)` of the roster, levies first, and you keep the
+  warlord. Walk up to it yourself and you still get the rail.
+
+Never against a `peer` band: a human is not absorbed by a function call.
 
 ## Boot
 
@@ -85,7 +145,7 @@ rail — it hides the band the card is about.
 | `events.js` | road events, loyalty/mutiny, weather, the endgame |
 | `feel.js` | sound, impact, and the mixer that makes 300 rifles a war |
 | `warnet.js` | multiplayer TRANSPORT: sockets, host election, snapshot/apply |
-| `match.js` | the RULES OF THE MATCH: lobby, spawn, clock, diplomacy, victory |
+| `match.js` | the rival warlords: who they are, their columns, the alliances, the leaderboard |
 
 ## The law of the shared clock
 
@@ -163,6 +223,30 @@ cleared by the unstick belt. Whoever sets it clears it. `cast` (a card id),
 outcome) are events.js's own marks on top of that; `W.events.clearStage()`
 strikes all of them.
 
+## The prisoner screen — THEY decide, then YOU decide
+
+Every captured man rolls WILLING or UNWILLING **once**, when the screen goes up
+(`willChance`: his tier, the fights he has survived past the promotion he
+already has, the power ratio the battle was fought at, your fame, and fear).
+The card says it in one line and offers **at most three verbs, in this order**:
+
+| verb | what happens | what it costs |
+|---|---|---|
+| TAKE THE WILLING | they join; the rest walk | nothing — and the walkers buy fame, which is what makes the next band fold |
+| PRESS EVERY MAN | all of them march | the unwilling carry events.js's pressed provenance: a per-dawn desertion chance and a permanent drag on the loyalty ceiling |
+| SHOOT THE UNWILLING | the willing ride, the rest are shot in one volley | `stats.executed`, and events.js's `settle()` pays the ceiling drop now |
+
+There is **no price on any of them** and no ransom, no release, and no "reject
+conscription". Loot (guns and armour into baggage) is automatic and stated as
+chips on the same card. `stats.recruited` is men who chose you, `conscripted` is
+men who did not — the end screen's PRESSED tile reads the second one.
+
+**FEAR, NOT DREAD.** army.js wraps `W.surrenderChance` and every execution now
+multiplies it **up** (1 + n×0.09): parties fold to a warlord who shoots men. The
+cost is his own column's opinion of him (events.js's `bondOf` already poisons
+every bond per execution). It used to point the other way, which made executing
+men three costs and no benefit.
+
 **A card about people is a meeting with people.** events.js's road cards that
 open with a man or a party in front of you (`deserters`, `caravan`, `rival`,
 `column`, `runner`, `oldman`, `buyer`, `toll`, `duel`, `defector`, `summons`)
@@ -192,6 +276,7 @@ W.rollIslandBand({small,x,z}) W.makeSmallBand() W.rollBigSize() W.bandHostile(b)
 W.SMALL_PARTIES W.SMALL_PER_BIG W.BAND_CLASSES W.rollBandSize()
 W.soldierPower(s) W.power(list) W.yourPower() W.bandPower(b) W.bandSize(b)
 W.odds(mine,theirs) W.surrenderChance(band, myPower)
+W.SURRENDER {floor,slope,cap} W.surrenderSure() W.SHED_CAP W.cheapestGun()
 W.stash(wid,n) W.unstash(wid,n) W.stashArmour() W.unstashArmour()
 W.equip(soldier,wid) W.equipArmour(soldier,id)
 W.payroll() W.pay(n) W.earn(n) W.dawn()
@@ -203,6 +288,8 @@ W.save() W.load() W.newGame({seed,mode})
 ## Owned events
 
 `toast log gold army baggage dawn phase newgame loaded mainmenu battle:end`
+plus `territory:claim` (every ownership change, any cause) and `warlords:out`
+(a rival holds nothing and rides nothing — the ONLY definition of broken)
 plus each module's own — declare new ones in a comment at the top of your file.
 
 ## The house style (CLAUDE.md is law here)
