@@ -60,10 +60,10 @@
       data: {
         name, pool: null, offer: null,
         talk: warden
-          ? ["Plotting something, are we? I'm always watching.",
-             "This is MY block. Step out of line and you'll regret it.",
-             "The gun room stays locked. My key, my rules."]
-          : ["Keep moving, inmate.", "Nothing to see here.", "Back to your block."],
+          ? ["Plotting something? Everybody in here is plotting something. That's why I'm still the one with the keys.",
+             "Every man on this block is a number in my count, and my count always comes out even.",
+             "The gun room stays locked. My key. My rules. My prison."]
+          : ["Keep moving.", "You've got somewhere to be, inmate. Be there.", "Back to your block. Don't make me count you twice."],
       },
     };
     g.group.position.copy(g.start);
@@ -111,9 +111,9 @@
     g.data.pool = "goods";
     g.data.offer = CBZ.econ.pickOffer("goods");
     g.data.name += " (bent)";
-    g.data.talk = ["You didn't see me, I didn't see you.",
-                   "You need it brought in, I'm the one who brings it.",
-                   "My shelf's open when my shift's quiet."];
+    g.data.talk = ["You didn't see me. I didn't see you. Best conversation we'll ever have.",
+                   "Need it brought in? I bring it in. Same truck as the food.",
+                   "My shelf's open when the shift's quiet. Ask at the wrong hour and we've never met."];
   });
 
   function nameOf(g) {
@@ -232,13 +232,15 @@
       : kind === "snitchIntel" ? snitchIntelCost(g, extra.snitch)
       : CBZ.econ.payoffCost(g);          // the till's price, never a second sum
     const finalCost = extra.cost || (kind === "witnessBlackmail" ? Math.max(4, Math.ceil((extra.amount || 14) / 6) + Math.ceil(((CBZ.game && CBZ.game.detection) || 0) / 14) + 3 + racketPriceMod(0.7)) : cost);
+    // SPOKEN (updateGuard, when he reaches you) and printed on his card. First
+    // person, because a man walking up to you does not narrate himself.
     const msg = kind === "witnessBlackmail"
-      ? `${nameOf(g)} heard ${extra.source || "a snitch"} talking and wants ${finalCost} cigs to bury it.`
+      ? `${extra.source || "Somebody"} came to me with your name. ${finalCost} and it stays with me.`
       : kind === "racketOffer"
-      ? `${nameOf(g)} wants ${finalCost} cigs to ignore your stash and side work.`
+      ? `I know what you're carrying. ${finalCost} a shift and I keep not knowing.`
       : kind === "snitchIntel"
-      ? `${nameOf(g)} can sell you the snitch's name for ${finalCost} cigs.`
-      : `${nameOf(g)} can bury your wanted level for ${cost} cigs.`;
+      ? `Somebody's been talking about you. I can tell you who. ${finalCost}.`
+      : `There's paper on you. ${cost} and it goes in the wrong drawer.`;
     g.approach = {
       kind,
       cost: finalCost,
@@ -288,8 +290,8 @@
       g.approachCD = 3 + CBZ.econ.rng() * 3;
       if (near && CBZ.prisonSay && g.standingOffer.walks === 1) {
         CBZ.prisonSay(g, a.kind === "snitchIntel"
-          ? "The name keeps. You know my post."
-          : "The paperwork can wait on you. Not forever.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+          ? "The name keeps. So do I. You know my post."
+          : "The paper can sit in the drawer a while. Drawers get emptied.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
       }
       return;
     }
@@ -314,7 +316,7 @@
     const seen = g._saidClosers || (g._saidClosers = {});
     if (near && CBZ.prisonSay && !seen[a.kind]) {
       seen[a.kind] = 1;
-      CBZ.prisonSay(g, a.kind === "racketOffer" ? "The tab doesn't close because you walked." : "We're done talking.",
+      CBZ.prisonSay(g, a.kind === "racketOffer" ? "Walking doesn't close a tab. It just moves who's collecting." : "We're done talking. Enjoy your yard.",
         { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
     }
   }
@@ -424,9 +426,9 @@
        rather than a description of the mechanic. Out of earshot you get the
        sweep with no explanation, which is correct: you were not there. */
   const RADIO = [
-    "Post four, got a sighting for you. Sending it now.",
-    "Yeah, he's yours. Same spot I called in.",
-    "Control, I've got eyes. Passing it up the line.",
+    "Post four, I've got a sighting for you. Sending it now.",
+    "Yeah, he's yours. Same spot I called in. No, I never talked to him.",
+    "Control, post three. I've got eyes on him. Passing it up.",
   ];
   function racketBark(g) {
     const game = CBZ.game || {};
@@ -543,12 +545,12 @@
       const terms = deepKind(a) && CBZ.econ.phoneTerms ? CBZ.econ.phoneTerms() : "";
       const tail = terms ? " " + terms : "";
       return { ok: true, msg: a.kind === "witnessBlackmail"
-        ? `${a.source || "Somebody"} gave me a trail. Pay and it never reaches the log.${tail}`
+        ? `${a.source || "Somebody"} gave me your name and a place. It's in my pocket, not the log. Yet.${tail}`
         : a.kind === "racketOffer"
-        ? `Pay the cut and your contraband stays invisible.${tail}`
+        ? `Everything you're carrying, I already know about. My cut keeps it that way.${tail}`
         : a.kind === "snitchIntel"
-        ? `Pay, and I point you at the mouth feeding the log. What you do about it is yours.${tail}`
-        : `${a.cost}, and the paperwork gets lost.` };
+        ? `Somebody's been feeding the log about you. I know who. What you do with the name is your business.${tail}`
+        : `There's paper on you. Paper gets lost. ${a.cost} is what losing it costs.` };
     }
     if (action === "pay") {
       /* NOBODY SELLS A CAREER FOR TOBACCO (PRISON_PHONE_BRIDGE).
@@ -569,7 +571,7 @@
         // A REFUSAL NAMES THE THING AND THE NUMBER, and never opens on a bare
         // numeral — these three said "12. Come back with it or don't come
         // back", which is a price tag with a full stop after it.
-        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `That name costs ${a.cost}. Come back with it or don't come back.` };
+        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `The name is ${a.cost}. You're not holding ${a.cost}. Come back when you are.` };
         CBZ.econ.addCigs(-a.cost);
         CBZ.econ.consumePhoneTime && CBZ.econ.consumePhoneTime();
         const snitch = (a.snitch && !a.snitch.dead && !a.snitch.escaped) ? a.snitch : findSnitchLead();
@@ -598,16 +600,16 @@
           addRacketStanding(1);
           CBZ.sfx && CBZ.sfx("coin");
           clearGuardApproach(g);
-          return { ok: true, msg: paidPrefix() + `It was ${nameOf(snitch)}. Do what you like with that. I never said it.` };
+          return { ok: true, msg: paidPrefix() + `${nameOf(snitch)}. Came to me twice. Do what you want with that. You never heard it from a uniform.` };
         }
         if (CBZ.addHeat) CBZ.addHeat(-3);
         addRacketStanding(1);
         CBZ.sfx && CBZ.sfx("coin");
         clearGuardApproach(g);
-        return { ok: true, msg: paidPrefix() + "Trail's cold. I'll keep the fee for the trouble." };
+        return { ok: true, msg: paidPrefix() + "Whoever it was has gone quiet. Trail's cold. I'm keeping the fee. Call it a retainer." };
       }
       if (a.kind === "witnessBlackmail") {
-        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `Burying a statement costs ${a.cost}. Come back with it or don't come back.` };
+        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `A statement doesn't bury itself. ${a.cost}. You're short, and the shift ends at some point.` };
         CBZ.econ.addCigs(-a.cost);
         CBZ.econ.consumePhoneTime && CBZ.econ.consumePhoneTime();
         g.bribed = Math.max(g.bribed || 0, 22);
@@ -629,10 +631,10 @@
         addRacketStanding(3);
         CBZ.sfx && CBZ.sfx("coin");
         clearGuardApproach(g);
-        return { ok: true, msg: paidPrefix() + "That statement never got typed up. Nobody remembers taking it." };
+        return { ok: true, msg: paidPrefix() + "That statement never got typed. Nobody remembers taking it, and the man who gave it will learn not to remember either." };
       }
       if (a.kind === "racketOffer") {
-        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `The cut is ${a.cost}. Come back with it or don't come back.` };
+        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `The cut is ${a.cost}. Not a suggestion, not a starting point. Find it.` };
         CBZ.econ.addCigs(-a.cost);
         CBZ.econ.consumePhoneTime && CBZ.econ.consumePhoneTime();
         g.bribed = Math.max(g.bribed || 0, 24);
@@ -653,7 +655,7 @@
         addRacketStanding(6);
         CBZ.sfx && CBZ.sfx("coin");
         clearGuardApproach(g);
-        return { ok: true, msg: paidPrefix() + "You're under my wing for a while. Don't make me regret the arithmetic." };
+        return { ok: true, msg: paidPrefix() + "You're under my wing for a while. Don't make me do the arithmetic on whether you were worth it." };
       }
       // the price on the card, not a second one computed at the till — see the
       // note on econ.payoff()'s opts.cost. HAGGLE writes a.cost; this is what
@@ -663,7 +665,7 @@
       return res;
     }
     if (action === "haggle") {
-      if (a.haggled || a.cost <= 3) return { ok: false, msg: "The price is the price." };
+      if (a.haggled || a.cost <= 3) return { ok: false, msg: "The price is the price. I'm not a market stall." };
       a.haggled = true;
       const heat = (CBZ.game && CBZ.game.detection) || 0;
       const chance = Math.max(0.18, Math.min(0.72, (g.corrupt ? 0.45 : 0.24) - heat * 0.002 + ((CBZ.game.cigs || 0) < a.cost ? 0.12 : 0)));
@@ -671,13 +673,13 @@
         a.cost = Math.max(3, a.cost - 2 - Math.floor(CBZ.econ.rng() * 3));
         a.t = Math.max(a.t || 0, 7);
         addRacketStanding(-1);
-        return { ok: true, msg: `Fine. ${a.cost}, and we never had this conversation.` };
+        return { ok: true, msg: `Fine. ${a.cost}. And we never had this conversation, because I'd lose my pension over it.` };
       }
       a.cost += 2;
       if (a.kind === "racketOffer") CBZ.econ.addRacketDebt(1);
       addRacketStanding(-2);
       if (CBZ.addHeat) CBZ.addHeat(4);
-      return { ok: false, msg: `Now it's ${a.cost}. Haggle again and see what happens.` };
+      return { ok: false, msg: `Now it's ${a.cost}. You want to try me a third time, I've got a radio.` };
     }
     if (action === "threaten") {
       const armed = (CBZ.playerArmed && CBZ.playerArmed()) || (CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Shiv"));
@@ -692,7 +694,7 @@
         }
         if (CBZ.addHeat) CBZ.addHeat(8);
         addRacketStanding(-5);
-        return { ok: true, msg: snitch && snitch.data ? `${nameOf(g)} spits out ${nameOf(snitch)}'s name, then backs off.` : `${nameOf(g)} backs off for now, but the heat ticks up.` };
+        return { ok: true, msg: snitch && snitch.data ? `${nameOf(snitch)}. It was ${nameOf(snitch)}. Now get away from me before somebody sees this.` : `Alright. Alright. I'm walking. But I'm writing this down when I get to the desk.` };
       }
       clearGuardApproach(g);
       g.bribed = 0;
@@ -709,11 +711,11 @@
       }
       if (CBZ.addHeat) CBZ.addHeat(g.corrupt ? 12 : 28);
       nudgeCleanGuard(g);
-      return { ok: false, msg: "Wrong answer. Control, this is post one." };
+      return { ok: false, msg: "Wrong answer. Control, this is post one. I've got one for you." };
     }
     if (action === "refuse") {
       expireGuardApproach(g, "refuse");
-      return { ok: false, msg: "Suit yourself. I've got a long memory and a short shift." };
+      return { ok: false, msg: "Suit yourself. Long memory, short shift. I'll be here tomorrow. Will you?" };
     }
     return { ok: false, msg: "" };
   }
@@ -963,7 +965,7 @@
       };
       n.approachCD = Math.min(n.approachCD || 2, 0.9 + rng() * 2.0);
       if (CBZ.npcEmote) CBZ.npcEmote(n, "?");
-      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "Boss, I saw him going the other way. Towards the south gate.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "Him? Went the other way, boss. South gate, I think. I wasn't really looking.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
       return;
     }
 
@@ -1016,7 +1018,7 @@
       n.approachCD = Math.min(n.approachCD || 2.5, 1.0 + rng() * 2.4);
       n.playerGrudge = Math.min(14, grudge + 1);
       if (CBZ.npcEmote) CBZ.npcEmote(n, "!");
-      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "Boss. Boss! He's right there.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "Boss. Boss. Right there. Don't look at me, look at him.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
       return;
     }
 
@@ -1032,11 +1034,11 @@
   // future content (campaign warden hooks can read real states) plus the
   // CBZ.jailGuardStates() debug helper. Barks ride the transitions.
   const BARKS = {
-    hunt: ["STOP RIGHT THERE!", "We got a runner!", "Don't make me chase you!", "You're mine, inmate!"],
-    huntWarden: ["You dare run from ME?", "MY block. MY rules. Take him down!"],
-    investigate: ["I heard something over there…", "Eyes open. Something moved.", "Hold up. Checking that out."],
+    hunt: ["STOP! Last time I say it nice!", "Runner on the yard! RUNNER!", "You run, you go in the hole. You know that. STOP!", "I've got him! He's mine!"],
+    huntWarden: ["You run from ME? In MY prison?", "Take him down. I want him in segregation before the count."],
+    investigate: ["Something moved.", "Hold it. Somebody's over there.", "I heard that. Don't think I didn't."],
     // hands over his head, your gun on him — he talks like a man buying time
-    heldup: ["Easy. Easy now.", "Alright. Take it easy.", "Don't do anything stupid, son."],
+    heldup: ["Easy. Easy. Nobody has to get hurt here.", "Alright. You've got it. Whatever it is, you've got it.", "Think about tomorrow, son. There's still a tomorrow in this."],
   };
   let barkCD = 0;   // global spacing so barks never spam the hint line
 

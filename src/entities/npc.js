@@ -382,10 +382,10 @@
     skin: { legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a, skin: 0xe8c39a, hair: 0xdedede, stripes: 0xc85c00, shoes: 0x2b2b2b },
     data: {
       name: "the Old Timer", pool: "goods", offer: econ.pickOffer("goods"),
-      tip: "Psst, guards go blind in the searchlight glare. Use it.",
-      talk: ["Been here 30 years, kid. I've got everything.",
-             "Cigs talk. Everything else walks.",
-             "Ramen's worth more than gold in here now, believe it."],
+      tip: "The searchlight's got a blind spot right under the lamp. Screws look where it shines, never where it doesn't.",
+      talk: ["Thirty-one years. Four wardens have walked through that gate. I'm still here. They're not.",
+             "Cigs aren't money, kid. Cigs are time. That's why they're worth more in here than out there.",
+             "Everything in this yard is for sale except the wall. Give me another thirty years on the wall."],
     },
   });
 
@@ -397,10 +397,10 @@
     skin: { legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a, skin: 0x6b4a32, cap: 0x222222, stripes: 0xc85c00, shoes: 0x111111 },
     data: {
       name: "the Dealer", pool: "drugs", offer: econ.pickOffer("drugs"),
-      tip: "You didn't get it from me, yeah?",
-      talk: ["I got the good stuff. Pills, powder, hooch.",
-             "Keep it quiet and we both stay golden.",
-             "Cigs up front. No tabs."],
+      tip: "Anybody asks, you found it in a mattress.",
+      talk: ["Pills for the days, hooch for the nights. I don't ask which one you're having.",
+             "Smokes up front. I ran a tab once. He's in the infirmary. I'm not.",
+             "The screws know what I sell. They don't know who to. Let's keep them stupid."],
     },
   });
 
@@ -411,7 +411,9 @@
       tagText: "Shifty Inmate", tagColor: "#ff7a7a",
       skin: { legs: 0x3a3f47, torso: 0x3a3f47, collar: 0x2a2e34, arms: 0x3a3f47, skin: 0xe7b58c, hair: 0x2a2018, shoes: 0x111111 },
       data: { name: "a thief", pool: "fenced", offer: econ.pickOffer("fenced"),
-        talk: ["Nice cigs. Be a shame if they vanished.", "Wanna buy? Fell off a truck, swear."] },
+        talk: ["Nice cigs. Be a shame if they walked off on you.",
+               "Fell off a truck. Truck fell off a cliff. Nobody's asking.",
+               "You count your pockets? Good habit. Start today."] },
     })
   );
 
@@ -422,7 +424,9 @@
       tagText: "Inmate", tagColor: "#cfe9ff",
       skin: { legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a, skin: i ? 0x8a5a3a : 0xf0c39a, hair: 0x4a3526, stripes: 0xc85c00, shoes: 0x2b2b2b },
       data: { name: "an inmate", pool: "goods", offer: econ.pickOffer("goods"),
-        talk: ["Yard time's the only time.", "Keep your head down out there.", "Heard the warden's got a key to the gun room."] },
+        talk: ["Yard's one hour. Everything that matters in here happens in that hour.",
+               "Head down, hands empty, walk like you're going somewhere.",
+               "The Warden's got the only key to the gun room. Keeps it on him. I'd bet my teeth."] },
     })
   );
 
@@ -430,17 +434,17 @@
   // respect, debt, lookout cover, and retaliation feel like a block system.
   [
     { name: "Red Hook", tag: "Reds · shotcaller", gang: 0, crewRole: "shotcaller", pos: [-24, 28], region: [-30, -17, 22, 37], skin: 0xb84a36, speed: 2.0, personality: { greed: 0.42, nerve: 0.78, loyalty: 0.86, snitch: 0.18 },
-      talk: ["Reds remember who pays and who bleeds.", "Respect opens doors. Debt closes fists."] },
+      talk: ["Reds don't recruit. We notice. You're being noticed.", "Every man in this yard pays somebody. The smart ones pick who."] },
     { name: "Mack", tag: "Reds · collector", gang: 0, crewRole: "collector", pos: [-19, 34], region: [-28, -12, 24, 43], skin: 0xc85c00, speed: 2.35, personality: { greed: 0.78, nerve: 0.64, loyalty: 0.62, snitch: 0.24 },
-      talk: ["Tabs are not suggestions.", "You walk loud, you pay loud."] },
+      talk: ["A tab isn't a request. It's a date. I've never missed a date.", "You walk loud, you pay loud. That's not a threat, it's arithmetic."] },
     { name: "Peep", tag: "Reds · lookout", gang: 0, crewRole: "lookout", pos: [-13, 23], region: [-24, -8, 18, 34], skin: 0xff7a1a, speed: 2.55, personality: { greed: 0.32, nerve: 0.48, loyalty: 0.78, snitch: 0.36 },
-      talk: ["I see guards before guards see me.", "Move when the sweep looks away."] },
+      talk: ["I count screws the way other men count days. Six on the yard, two on the tower. One's late.", "When the sweep swings left, you go right. I'll whistle."] },
     { name: "Blue Ace", tag: "Blues · shotcaller", gang: 1, crewRole: "shotcaller", pos: [22, 17], region: [15, 30, 10, 27], skin: 0x3b7bff, speed: 2.05, personality: { greed: 0.48, nerve: 0.76, loyalty: 0.82, snitch: 0.22 },
-      talk: ["Blues trade clean, fight dirty.", "Crew work buys crew cover."] },
+      talk: ["Reds sell fear. Blues sell service. Guess which one's still standing next year.", "Work for us and you're covered. Work against us and you're a lesson."] },
     { name: "Dice", tag: "Blues · runner", gang: 1, crewRole: "runner", pos: [16, 25], region: [9, 27, 15, 34], skin: 0x2f65d9, speed: 2.75, personality: { greed: 0.68, nerve: 0.52, loyalty: 0.58, snitch: 0.28 },
-      talk: ["I can move anything small enough to hide.", "Cigs turn rumors into routes."] },
+      talk: ["If it fits in a sock I can get it across the yard. Don't ask what's been in the sock.", "Every rumour in here started as a cigarette changing hands."] },
     { name: "Stone", tag: "Blues · enforcer", gang: 1, crewRole: "enforcer", pos: [27, 13], region: [18, 32, 6, 24], skin: 0x254a9f, speed: 2.25, personality: { greed: 0.35, nerve: 0.86, loyalty: 0.74, snitch: 0.14 },
-      talk: ["Some people need a wall in front of them.", "Disrespect travels. So do I."] },
+      talk: ["I don't talk. Ace talks. I'm what happens after.", "Disrespect travels. So do I."] },
   ].forEach((m) => makeNpc({
     pos: m.pos, region: m.region, role: m.crewRole === "runner" ? "thief" : "inmate", speed: m.speed,
     gang: m.gang, crewRole: m.crewRole, personality: m.personality,
@@ -480,97 +484,99 @@
     // ===== showcase legends in the original north yard =====
     { name: "Tiny", tag: "Tiny", color: "#cfe9ff", pos: [-7, 18], box: [-14, 2, 10, 30], role: "inmate", neutral: true, speed: 1.6,
       behavior: "defensive", ratings: { fighting: 96, toughness: 99, speed: 28, cunning: 30 }, skin: jump(0xb5825a, 0x1a120c, { collar: 0xff9747 }),
-      talk: ["I don't start nothin'. I just finish it.", "Leave me be and we're fine, friend."] },
+      talk: ["I don't start it. Not once. Not ever.", "Men keep testing that. Doc's got a bed with my name on the chart and I've never slept in it."] },
     { name: "Mad Dog Mickey", tag: "Mad Dog", color: "#ff9a7a", pos: [4, 30], box: [-12, 14, 22, 44], role: "inmate", neutral: true, speed: 2.7,
       behavior: "predator", ratings: { fighting: 34, toughness: 36, speed: 64, cunning: 22 }, skin: jump(0xd8a177, 0x2a2018),
-      talk: ["You wanna go?! HUH?!", "I'll take ALL of yas!"] },
+      talk: ["You looking at me? Everybody's always looking at me.", "I'll take the whole yard. One at a time. Starting whenever. Starting now, maybe."] },
     { name: "the Professor", tag: "the Professor", color: "#b9e6ff", pos: [-9, 40], box: [-16, -2, 32, 48], role: "inmate", neutral: true, speed: 1.5,
       behavior: "pacifist", ratings: { fighting: 16, toughness: 28, speed: 40, cunning: 97, stealth: 72 }, skin: jump(0xe8c39a, 0xb9b1a6),
-      talk: ["Violence is a failure of imagination.", "I can get you anything but a fistfight."] },
+      talk: ["Violence is a failure of imagination. Most men in here failed it long before they arrived.",
+             "The thing that opens the armoury is a rectangle of plastic. Consider what that says about walls.",
+             "I can get you anything but a fistfight. Ask me for something interesting."] },
 
     // ===== extra north-yard background convicts (gang fodder) =====
     { name: "Vince", tag: "Inmate", color: "#cfe9ff", pos: [10, 36], box: [2, 16, 28, 46], role: "inmate", speed: 2.0,
-      behavior: "hothead", skin: jump(0x8a5a3a, 0x4a3526), talk: ["Yard's mine when I say so.", "Don't crowd me."] },
+      behavior: "hothead", skin: jump(0x8a5a3a, 0x4a3526), talk: ["Yard's mine when I say it's mine.", "Don't crowd me. Last man who crowded me is counting ceiling tiles in the infirmary."] },
     { name: "Lou", tag: "Inmate", color: "#cfe9ff", pos: [-13, 14], box: [-18, -6, 8, 26], role: "inmate", speed: 1.9,
-      behavior: "opportunist", skin: jump(0xf0c39a, 0x2a2018), talk: ["Pick a winner, back a winner.", "I only fight what's already losin'."] },
+      behavior: "opportunist", skin: jump(0xf0c39a, 0x2a2018), talk: ["I don't pick fights. I pick winners. Then I stand next to them.", "Tell me when you're losing. I'll be on the other side by then."] },
     { name: "Hector", tag: "Inmate", color: "#cfe9ff", pos: [12, 44], box: [4, 18, 36, 48], role: "inmate", speed: 2.1,
-      behavior: "defensive", skin: jump(0x7a4a2e, 0x1a120c), talk: ["Keep walkin'.", "I mind mine. You mind yours."] },
+      behavior: "defensive", skin: jump(0x7a4a2e, 0x1a120c), talk: ["Keep walking.", "I mind mine. In here that's a full-time job."] },
 
     // ===== WORKSHOP (south-west) — welders & grinders =====
     { name: "Rivet", tag: "Workshop", color: "#ffcf8a", pos: [-33, 68], box: [-41, -24, 60, 78], role: "inmate", neutral: true, speed: 1.7,
       behavior: "defensive", ratings: { fighting: 72, toughness: 84, speed: 34 }, skin: jump(0xc08a5a, 0x2a2018, { collar: 0x6b4a2a }),
-      talk: ["Mind the sparks.", "I bend steel, not the truth."] },
+      talk: ["Mind the sparks. And mind what you say near the grinder. It hears everything.", "I bend steel all day. Bars are steel. I've done the maths. I just haven't done the time."] },
     { name: "Sparks", tag: "Workshop", color: "#ffcf8a", pos: [-28, 74], box: [-40, -22, 62, 80], role: "inmate", neutral: true, speed: 2.3,
       behavior: "hothead", ratings: { fighting: 46, toughness: 44, speed: 58 }, skin: jump(0xe8c39a, 0xa33b1f),
-      talk: ["Watch it, watch it!", "You lookin' at my bench?"] },
+      talk: ["You looking at my bench? Nobody looks at my bench.", "They count the blades every shift. They don't count the filings."] },
     { name: "Bolt", tag: "Workshop", color: "#ffcf8a", pos: [-36, 74], box: [-42, -26, 64, 80], role: "inmate", neutral: true, speed: 1.9,
       behavior: "protector", ratings: { fighting: 64, toughness: 70, speed: 44 }, skin: jump(0x7a4a2e, 0x101820),
-      talk: ["Nobody gets jumped on my floor.", "We look out for our crew down here."] },
+      talk: ["Nobody gets jumped on my floor. Ask Wringer how I know that.", "Down here we look after our own. Up top, you're on your own."] },
 
     // ===== CHAPEL (south-east) — the quiet wing =====
     { name: "Brother Amos", tag: "Chapel", outfit: "chapel", color: "#e7d8ff", pos: [33, 68], box: [25, 41, 60, 78], role: "inmate", neutral: true, speed: 1.3,
       behavior: "pacifist", ratings: { fighting: 22, toughness: 40, cunning: 86, stealth: 60 }, skin: jump(0xd8a177, 0xdedede, { torso: 0x4a4f57, legs: 0x4a4f57, arms: 0x4a4f57, stripes: 0 }),
-      talk: ["Peace, brother. Always peace.", "Even in here, grace finds a way."] },
+      talk: ["Peace, brother. It's the one thing in here they can't confiscate.", "I've buried three men out of this yard. I'd rather not learn your name that way."] },
     { name: "Deacon", tag: "Chapel", color: "#e7d8ff", pos: [37, 73], box: [28, 42, 62, 80], role: "inmate", neutral: true, speed: 1.7,
       behavior: "defensive", ratings: { fighting: 66, toughness: 72 }, skin: jump(0x8a5a3a, 0x2a2018),
-      talk: ["I keep the peace in the pews.", "Turn the other cheek, once."] },
+      talk: ["I keep the peace in the pews. Past that door it's God's problem.", "Turn the other cheek. Once. Scripture's quiet about what comes after."] },
     { name: "Solomon", tag: "Chapel", color: "#e7d8ff", pos: [30, 76], box: [25, 40, 66, 80], role: "inmate", neutral: true, speed: 1.4,
       behavior: "pacifist", ratings: { fighting: 30, toughness: 50, cunning: 70 }, skin: jump(0xe8c39a, 0x4a3526),
-      talk: ["Let it go, son.", "Not here. Not in here."] },
+      talk: ["Let it go, son. Whatever it is, it weighs more than you do.", "Not in here. Take it to the yard where it belongs."] },
 
     // ===== INFIRMARY (east) — the doc + the sick =====
     { name: "Doc Mercer", tag: "Infirmary · meds", outfit: "orderly", color: "#9fe6c0", pos: [33, 96], box: [26, 41, 88, 104], role: "merchant", neutral: true, speed: 1.4,
       behavior: "pacifist", ratings: { fighting: 28, toughness: 46, cunning: 90, stealth: 55 }, skin: jump(0xe8c39a, 0xcfcfcf, { torso: 0xeef2f5, arms: 0xeef2f5, legs: 0xeef2f5, collar: 0xeef2f5, stripes: 0 }),
-      data: { name: "Doc Mercer", pool: "goods", tip: "Bad cut? I've patched worse for less.",
-        talk: ["I keep folks breathing in here.", "Painkillers for cigs. Don't tell the Warden."] } },
+      data: { name: "Doc Mercer", pool: "goods", tip: "Bad cut? I've stitched worse for less.",
+        talk: ["I keep people breathing. Some days that's the whole shift.", "Painkillers for cigs. The Warden signs for the aspirin. I sign for the rest."] } },
     { name: "Patient Zero", tag: "Infirmary", color: "#9fe6c0", pos: [29, 100], box: [25, 40, 90, 104], role: "inmate", neutral: true, speed: 1.5,
       behavior: "unpredictable", ratings: { fighting: 22, toughness: 26, speed: 30 }, skin: jump(0xd0b08a, 0x6a6a6a),
-      talk: ["...is it cold in here?", "They said I'd be out by spring. Which spring?"] },
+      talk: ["Is it cold in here? It's cold in here.", "They said spring. They never said which one."] },
     { name: "Orderly Pratt", tag: "Infirmary", outfit: "orderly", color: "#9fe6c0", pos: [37, 100], box: [28, 42, 90, 104], role: "inmate", neutral: true, speed: 1.9,
       behavior: "defensive", ratings: { fighting: 56, toughness: 64 }, skin: jump(0xc08a5a, 0x2a2018, { torso: 0xeef2f5, arms: 0xeef2f5 }),
-      talk: ["No rough stuff near the beds.", "I'll sedate the next one who swings."] },
+      talk: ["No rough stuff near the beds. I've got a syringe and no patience.", "Next man who swings in here wakes up Thursday."] },
 
     // ===== LAUNDRY (west) — steam, carts & sticky fingers =====
     { name: "Suds", tag: "Laundry", color: "#bfeaff", pos: [-33, 96], box: [-41, -26, 88, 104], role: "thief", neutral: true, speed: 2.6,
       behavior: "opportunist", ratings: { fighting: 48, speed: 72, stealth: 80, cunning: 64 }, skin: jump(0xe8c39a, 0x2a2018),
-      data: { name: "Suds", pool: "fenced", talk: ["Pockets lighter than your laundry, huh?", "Everything comes out in the wash."] } },
+      data: { name: "Suds", pool: "fenced", talk: ["Everything comes out in the wash. Keys, cigs, the odd tooth.", "Pockets lighter than your laundry? Shame. Wasn't me."] } },
     { name: "Wringer", tag: "Laundry", color: "#bfeaff", pos: [-37, 100], box: [-42, -27, 90, 104], role: "inmate", neutral: true, speed: 2.0,
       behavior: "bully", ratings: { fighting: 76, toughness: 66, speed: 50 }, skin: jump(0x7a4a2e, 0x101820),
-      talk: ["Little guys do my folding.", "You got a problem? Didn't think so."] },
+      talk: ["Little guys do my folding. You look like a folder.", "Got a problem? No? Didn't think so."] },
 
     // ===== LOWER EXERCISE YARD (center-south) — the real fighters =====
     { name: "Iron Mike", tag: "Yard Apex", color: "#ff7979", pos: [0, 92], box: [-14, 14, 80, 110], role: "inmate", neutral: true, speed: 2.2,
       behavior: "predator", ratings: { fighting: 93, toughness: 90, speed: 60, cunning: 55 }, skin: jump(0x6b4a32, 0x0a0a0a, { collar: 0x222222 }),
-      talk: ["Everybody bleeds. Step up.", "This whole yard's mine to take."] },
+      talk: ["Everybody bleeds. I've made a study of it.", "This yard's mine. The one up top's mine too. It just hasn't been told."] },
     { name: "Knuckles", tag: "Brawler", color: "#ffc07a", pos: [-8, 100], box: [-18, 8, 86, 116], role: "inmate", neutral: true, speed: 2.4,
       behavior: "hothead", ratings: { fighting: 88, toughness: 72, speed: 66 }, skin: jump(0xd8a177, 0x3a1f12),
-      talk: ["Put 'em up! Let's GO!", "I been waitin' all day for this."] },
+      talk: ["Been waiting all day for somebody to say something. Say something.", "Put 'em up. I'll wait. I'm good at waiting."] },
     { name: "Glass Jaw", tag: "Brawler", color: "#ffc07a", pos: [8, 100], box: [-6, 18, 86, 116], role: "inmate", neutral: true, speed: 2.3,
       behavior: "bully", ratings: { fighting: 82, toughness: 28, speed: 58 }, skin: jump(0xe8c39a, 0x4a3526),
-      talk: ["I hit like a truck, just don't hit back.", "Easy pickings, easy pickings."] },
+      talk: ["I hit like a truck. Ask anyone I've hit.", "Rule down here is nobody hits back. That's the rule. Nobody's told you the rule?"] },
     { name: "The Wall", tag: "Immovable", color: "#cfe9ff", pos: [-12, 110], box: [-20, 2, 100, 120], role: "inmate", neutral: true, speed: 1.3,
       behavior: "defensive", ratings: { fighting: 52, toughness: 98, speed: 22 }, skin: jump(0x8a5a3a, 0x1a120c),
       talk: ["You'll tire before I move.", "Go around."] },
     { name: "Sprinter", tag: "Trackster", color: "#a6ffd0", pos: [10, 112], box: [-16, 16, 100, 122], role: "inmate", neutral: true, speed: 3.4,
       behavior: "pacifist", ratings: { fighting: 38, toughness: 40, speed: 98, stealth: 78 }, skin: jump(0xc08a5a, 0x2a2018),
-      talk: ["Can't hit what you can't catch!", "I run laps, not my mouth."] },
+      talk: ["Can't hit what you can't catch.", "I run laps, not my mouth. Forty a day. The tower's counted every one."] },
     { name: "Boss Hask", tag: "South Yard Boss", color: "#ffd451", pos: [0, 116], box: [-16, 16, 106, 124], role: "inmate", neutral: true, speed: 1.8,
       behavior: "protector", ratings: { fighting: 85, toughness: 84, speed: 48, cunning: 78 }, skin: jump(0x6b4a32, 0x101820, { collar: 0x3a2a1a }),
-      talk: ["Down here, you answer to me.", "I keep my people standing. Remember that."] },
+      talk: ["Down here you answer to me, and I answer to nobody. That's why it's quiet.", "I keep my people standing. That's the whole job. Look around and see who's still standing."] },
 
     // ===== a few athletes jogging the lower track =====
     { name: "Jab", tag: "Trackster", color: "#a6ffd0", pos: [-4, 84], box: [-14, 14, 76, 100], role: "inmate", neutral: true, speed: 2.6,
-      behavior: "unpredictable", ratings: { fighting: 58, speed: 80 }, skin: jump(0xe8c39a, 0x2a2018), talk: ["Lap forty. Who's counting.", "Footwork, baby."] },
+      behavior: "unpredictable", ratings: { fighting: 58, speed: 80 }, skin: jump(0xe8c39a, 0x2a2018), talk: ["Lap forty. Fifty. Who's counting.", "Footwork. Fighting, running, walking past a screw. All footwork."] },
     { name: "Cardio", tag: "Trackster", color: "#a6ffd0", pos: [5, 86], box: [-12, 16, 78, 102], role: "inmate", neutral: true, speed: 2.8,
-      behavior: "pacifist", ratings: { fighting: 30, speed: 88 }, skin: jump(0xc08a5a, 0x4a3526), talk: ["No time to scrap, on a streak here.", "Keep movin'."] },
+      behavior: "pacifist", ratings: { fighting: 30, speed: 88 }, skin: jump(0xc08a5a, 0x4a3526), talk: ["Can't stop. On a streak.", "Keep moving. Standing still is how they count you."] },
 
     // ===== sally-port loiterers near the new gate =====
     { name: "Lifer", tag: "Sally Port", color: "#d8d8d8", pos: [-10, 122], box: [-20, -2, 116, 126], role: "inmate", neutral: true, speed: 1.5,
       behavior: "defensive", ratings: { fighting: 78, toughness: 80, cunning: 70 }, skin: jump(0xb5825a, 0xb9b1a6),
-      talk: ["Forty years. The gate stopped meaning anything.", "Run if you want. I'll watch."] },
+      talk: ["Forty years. The gate stopped meaning anything around year twelve.", "Run if you want. I'll watch. I always watch."] },
     { name: "Twitch", tag: "Sally Port", color: "#d8d8d8", pos: [12, 122], box: [2, 20, 116, 126], role: "thief", neutral: true, speed: 2.9,
       behavior: "opportunist", ratings: { fighting: 40, speed: 84, stealth: 86 }, skin: jump(0xe8c39a, 0x2a2018),
-      data: { name: "Twitch", pool: "fenced", talk: ["So close to out, so much to lift.", "Nervous? Me? Nah. Nah nah nah."] } },
+      data: { name: "Twitch", pool: "fenced", talk: ["This close to the gate everybody watches the gate. Nobody watches their pockets.", "Nervous? Me? Nah. Nah nah nah. Why, do I look nervous?"] } },
   ];
 
   ROSTER.forEach((m) => makeNpc({
@@ -582,7 +588,7 @@
       name: m.name,
       pool: m.role === "thief" ? "fenced" : "goods",
       offer: econ.pickOffer(m.role === "thief" ? "fenced" : "goods"),
-      talk: m.talk || ["...", "Yeah?"],
+      talk: m.talk || ["Yeah?", "I'm not the one to ask."],
     },
   }));
 
@@ -630,7 +636,7 @@
         speed: 1.5 + rr() * 1.6, forceNeutral: rr() < 0.72, behavior: BEH[(rr() * BEH.length) | 0],
         tagText: "Inmate", tagColor: "#cfe9ff",
         skin: jump(SKIN[(rr() * SKIN.length) | 0], HAIR[(rr() * HAIR.length) | 0]),
-        data: { name: "an inmate", pool: "goods", talk: ["Yard time's all we got.", "Keep walkin'.", "Mind your business."] },
+        data: { name: "an inmate", pool: "goods", talk: ["Yard's all we get. Don't waste mine.", "Keep walking.", "I didn't see anything. I never see anything. That's how I'm still here.", "Count's coming. Be where they expect you."] },
       });
     }
   })(CROWD);

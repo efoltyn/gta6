@@ -51,13 +51,14 @@
     return h;
   }
   const CHAIN_TALK = [
-    "Smokes buy you a nap. A keycard buys you the gun room.",
-    "There's a rack of guns behind that red door. All that's between you and it is a card.",
-    "Forget the crates. Find the card that opens the armory. That's the only door that changes anything.",
-    "Screw walks around with the only key to the cage inside. Think about that.",
+    "Smokes buy you a nap. A keycard buys you the gun room. Decide which one you're in here for.",
+    "There's a rack of rifles behind that red door. All that's between you and it is a bit of plastic on a screw's belt.",
+    "Forget the crates. Find the card that opens the armoury. That's the only door in here that changes anything.",
+    "One screw walks around with the only key to the cage inside the gun room. One man. Think about that.",
+    "Every man who ever walked out of here went through the red door first. The ones who didn't are still here.",
   ];
   function chainLine(actor) {
-    if (actor.kind === "warden") return "The gun room stays locked. My key, my rules.";
+    if (actor.kind === "warden") return "The gun room stays locked. My key. My rules. My prison.";
     const nm = (actor.data && actor.data.name) || "someone";
     return CHAIN_TALK[nameHash(nm) % CHAIN_TALK.length];
   }
@@ -87,18 +88,18 @@
        (onTalk below). Same magnitudes — a favour still costs less than a
        Gun-Room Key and more than a bribe — so nothing in the price list moves. */
     if (roll < 0.40) {
-      return { type: "beat", target: victim, text: `Rough up ${victim} for me.`, reward: 12 };
+      return { type: "beat", target: victim, text: `${victim} needs putting on the floor. Not killed. On the floor, where everyone can see. Do that for me.`, reward: 12 };
     } else if (roll < 0.68) {
       const need = 1 + Math.floor(econ.rng() * 2);
-      return { type: "steal", need, start: g.stealsDone || 0, text: `Pull off ${need} clean heist${need > 1 ? "s" : ""}.`, reward: 15 };
+      return { type: "steal", need, start: g.stealsDone || 0, text: need > 1 ? `Pull off ${need} clean lifts. Clean means nobody's hand goes up.` : `Pull off one clean lift. Clean means nobody's hand goes up.`, reward: 15 };
     } else if (roll < 0.90 && armoryFavorLive()) {
       // THE STAR. Not "fetch me N of something" — the one errand in the block
       // that ends with you holding a gun, which is a change of CATEGORY and
       // the only reward CLAUDE.md's gun-room grammar counts.
-      return { type: "armory", text: "Get past the gun-room gate and come back with a piece.", reward: 22 };
+      return { type: "armory", text: "Get past the gun-room gate and come back with a piece. Then I'll know what you are.", reward: 22 };
     }
     const need = 6 + Math.floor(econ.rng() * 8);
-    return { type: "gift", need, text: `Bring me ${need} cigs as tribute.`, reward: 0 };
+    return { type: "gift", need, text: `Bring me ${need} cigs. Call it tribute. Call it whatever helps you carry them.`, reward: 0 };
   }
 
   function questDone(actor) {
@@ -142,10 +143,10 @@
     actor.rep = (actor.rep || 0) + 34;
     actor.quest = null;
     CBZ.sfx("key");
-    if (actor.rep >= FRIEND) return "You're alright. Come find me. I'll get you out of here.";
-    if (q.type === "armory") return "You actually did it. There's people in here who'll want to know that.";
-    if (q.type === "gift") return "That'll do. You're good for it, I'll say that much.";
-    return "Nice work. I don't forget who does what I ask.";
+    if (actor.rep >= FRIEND) return "You're alright. You're actually alright. Come find me when you're ready. I know a way out that isn't over the wall.";
+    if (q.type === "armory") return "You actually did it. Walked into the gun room and walked out. There's people in here who'll want to know your name now.";
+    if (q.type === "gift") return "That'll do. You're good for it. I don't say that about many.";
+    return "Nice work. I don't forget who does what I ask. I don't forget who doesn't, either.";
   }
 
   // the [1] Talk handler
@@ -162,7 +163,7 @@
     // befriended enough? they spring you — alternative victory.
     if (actor.rep >= FRIEND) {
       CBZ.winGame("befriend", actor);
-      return { ok: true, msg: "Side gate. Walk, don't run, and don't look back at me." };
+      return { ok: true, msg: "Side gate. It's open for ninety seconds. Walk, don't run, and don't look back at me. I was never here." };
     }
 
     // active quest: report progress or complete it
@@ -228,7 +229,7 @@
     }
     if (econ.rng() < offerOdds) {
       actor.quest = assignQuest(actor);
-      return { ok: true, msg: `Do me a favour. ${actor.quest.text}` };
+      return { ok: true, msg: `Do something for me. ${actor.quest.text}` };
     }
 
     /* A FRIEND SHARES, AND HE SHARES HIS OWN. Ground cigarettes are gone from
@@ -245,7 +246,7 @@
         econ.addCigs(give);
         if (CBZ.pickupNote) CBZ.pickupNote("Cigarettes", { count: give });
         CBZ.sfx("loot");
-        return { ok: true, msg: "Take these. You'll need them more than me." };
+        return { ok: true, msg: "Take these. You'll need them more than me. Don't make a thing of it." };
       }
     }
 

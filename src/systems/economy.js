@@ -580,10 +580,11 @@
   const VOICE = {
     // a screw standing a count is doing arithmetic with his eyes
     guardBusy: ["Not during the count. Move.",
-                "I'm counting bodies. Yours is one of them.",
-                "Stand on your number and shut up."],
-    wardenBusy: ["The count is running. Whatever it is, it waits.",
-                 "Not while my officers are counting."],
+                "I'm counting bodies. Yours is one of them. Stand still and be a number.",
+                "Stand on your number and shut up.",
+                "If the count comes out wrong I'm doing it again, and I'll be looking at you."],
+    wardenBusy: ["The count is running. Whatever it is, it waits. Everything waits for the count.",
+                 "Not while my officers are counting. Nothing in this prison happens while they count."],
     guardShort: ["That's not enough and you know it.",
                  "Come back when your hand's fuller.",
                  "You're short. I'm not."],
@@ -642,20 +643,23 @@
     inmateCaughtNight: ["Quiet. The man's on the tier. And get off me.",
                         "You want the whole wing awake? Off."],
     inmateSour: ["I've got nothing to say to you.",
-                 "Walk. Before I make it a thing."],
-    inmateWarm: ["Anything you need, you ask.",
-                 "You've been straight with me. That counts.",
-                 "You're alright. Most in here aren't."],
+                 "Walk. Before I make it a thing.",
+                 "You've got a short memory. I don't."],
+    inmateWarm: ["Anything you need, you ask. I mean that.",
+                 "You've been straight with me. In here that's rarer than a key.",
+                 "You're alright. Most in here aren't. I've had thirty years to check."],
     // night in a cellblock is a whisper, and whispers are where the truth is
-    nightTalk: ["Keep it down. Sound carries on the tier at night.",
-                "Nights are the only hours in here that belong to us.",
-                "Lights out is when you learn who's really awake.",
-                "The man hates the dark as much as we do. Remember that."],
-    yardTalk: ["Yard's the only market in here. Everything moves out here.",
-               "You want business done, you do it in daylight, in the open.",
-               "Nobody looks twice at two men talking in a yard."],
-    noStock: ["Nothing on me worth your smokes.",
-              "Sold out. Come back when the yard's open."],
+    nightTalk: ["Keep it down. Sound carries on the tier at night. Everything carries.",
+                "Nights are the only hours in here that belong to us. Don't waste them sleeping.",
+                "Lights out is when you find out who's really awake. And who's listening.",
+                "The screws hate the dark as much as we do. Remember that when you need it.",
+                "Somebody's always crying somewhere on the tier. Learn not to hear it. Then learn to."],
+    yardTalk: ["Yard's the only market in here. Everything moves out here, and everybody sees it move.",
+               "You want business done, you do it in daylight, in the open. Nobody gets stabbed in the open.",
+               "Nobody looks twice at two men talking in a yard. That's why we're talking in a yard.",
+               "One hour. Then the door. Say what you came to say."],
+    noStock: ["Nothing on me worth your smokes. Come back after the truck.",
+              "Sold out. Come back when the yard's open and I've had a word with the laundry."],
     notNow: ["Not now. Wrong hour for it.",
              "Ask me at yard time like a normal person."],
   };
@@ -942,7 +946,7 @@
           if (CBZ.addRacketStanding) CBZ.addRacketStanding(2);
           noteRead("badge", 6, who, 13);
           CBZ.sfx("coin");
-          return { ok: true, msg: `${nm(known)} talks to the office. — That, I can use. Go on, I'm watching the wall.` };
+          return { ok: true, msg: `${nm(known)}. Talking to the office. That I can use. Go on, I'm watching the wall for a while.` };
         }
         if (bought(actor)) {
           // A RELATIONSHIP FAVOUR. Free at the point of use, and it draws the
@@ -999,7 +1003,7 @@
       if (CBZ.pickupNote) CBZ.pickupNote(it, { rare: isRare(it) });
       return { ok: true, msg: "Here. Don't say I never gave you anything." };
     }
-    return { ok: true, msg: actor.data.tip || "Thanks, friend." };
+    return { ok: true, msg: actor.data.tip || "Appreciated. I'll remember who's generous in here." };
   }
 
   /* ---------- PAYOFF: corrupt authority can clean up heat ----------
@@ -1838,7 +1842,7 @@
     };
   };
 
-  CBZ.econ = { talk, trade, bribe, payoff, snitch, snitchOffer, steal, beat, insult, thiefTick, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, payoffCost, bribeCost, rollLoadout, rollDrops, lootActor, resetLoadouts, mintLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, SERVICES, isService, rng, reseed,
+  CBZ.econ = { talk, trade, bribe, payoff, snitch, snitchOffer, steal, beat, insult, thiefTick, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, whyLine, payoffCost, bribeCost, rollLoadout, rollDrops, lootActor, resetLoadouts, mintLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, SERVICES, isService, rng, reseed,
     // the phone bridge — ask these, never re-derive the rule or the words
     hasPhoneAccess, phoneGate, phoneTerms, grantPhoneTime, consumePhoneTime, phoneBridge, outsidePaidPrefix, PHONE_TIME_SECS,
     // the one writer on g.racketDebt (also CBZ.addRacketDebt)

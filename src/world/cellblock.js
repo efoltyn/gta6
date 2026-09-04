@@ -1575,11 +1575,11 @@
   const SKIN = [0xf0c39a, 0xe8b58c, 0xc08a5a, 0x8a5a3a, 0x6b4a32, 0xd8a177, 0xb5825a];
   const HAIR = [0x2a2018, 0x4a3526, 0x101820, 0xb9b1a6, 0x7a4a2e, 0x222222, 0xdedede];
   const TALK = [
-    ["Bunk's mine. Floor's yours.", "Lights out at nine. Don't be loud."],
-    ["I been in this cell longer than that paint.", "Count comes twice. Be in here for it."],
-    ["You hear the pipes at night? That's the whole block talking.", "Keep your door open, keep your friends closer."],
-    ["Third time in this same box. Feels like home now.", "Don't touch my shelf."],
-    ["They move you when they feel like it. Not before.", "Sleep light."],
+    ["Top bunk's mine. Floor's yours till you earn the bottom.", "Lights out at nine. After that, whatever you're doing, do it quiet."],
+    ["I've been in this cell longer than the paint. Longer than two of the screws.", "Count comes twice a day. Be on your number or they come find you, and they don't come nice."],
+    ["Hear the pipes at night? That's the whole block talking. Learn to listen and you'll never need a newspaper.", "Keep your door open in the day. A closed door in here means you've got something."],
+    ["Third time in this same box. I've stopped calling it a sentence.", "Don't touch my shelf. Everything on it has a story and you're not in any of them."],
+    ["They move you when they feel like it. Not before, not after, not because you asked.", "Sleep light. Not because of me. Because of everyone else."],
   ];
   function jump(skin, hair) {
     return { legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a,

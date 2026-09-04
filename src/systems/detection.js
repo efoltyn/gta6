@@ -63,13 +63,13 @@
   // Spoken in the world (prisonSay: 16 m, ranked, silent when he is down) —
   // the window is audible, never printed on the HUD.
   const SPOT_LINES = {
-    "the armory": ["You! Out of the gun room! Now!", "Inmate in the armory! Stand where you are!"],
-    "the staff lounge": ["This floor is staff. Turn around!", "You do not walk here, inmate. Move!"],
-    "the exit corridor": ["Stop! You are a long way past your block!", "He's in the corridor! Stop him!"],
+    "the armory": ["You! Out of the gun room! NOW!", "Inmate in the armoury! Hands where I can see them, don't move!"],
+    "the staff lounge": ["This floor is staff. Turn around. Turn around!", "You do not walk here, inmate. You don't even look here. Move!"],
+    "the exit corridor": ["Stop! You're a long way past your block, son!", "He's in the corridor! He's going for the gate! Stop him!"],
   };
   const CALL_LINES = [
-    "Control, inmate where he should not be. All units.",
-    "Control, post calling it in. Get bodies over here.",
+    "Control, I've got an inmate where he shouldn't be. All units, all units.",
+    "Control, post calling it in. Get bodies over here now.",
   ];
 
   // the wanted meter only exists while it has a reading — see the long note at

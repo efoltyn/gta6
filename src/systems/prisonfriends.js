@@ -380,8 +380,8 @@
     CBZ.sfx && CBZ.sfx("coin");
     const n = count();
     const msg = n >= 3
-      ? `From here I'm with you. That's ${n} of us now.`
-      : "From here I'm with you. Anyone comes at you, they come at me.";
+      ? `From here I'm with you. That's ${n} of us now. That's a crew, whether you wanted one or not.`
+      : "From here I'm with you. Anyone comes at you, they come at me. That's the whole deal.";
     return { ok: true, msg: msg };
   }
 
@@ -588,7 +588,7 @@
           a.pfFriend = false;
           a.pfSaved = false;
           a.pfTrades = 0;
-          if (CBZ.prisonSay) CBZ.prisonSay(a, "We're done. Don't come near me.");
+          if (CBZ.prisonSay) CBZ.prisonSay(a, "We're done. I stood with you and this is what I get. Don't come near me.");
           syncCrew();                 // the slot he just vacated is open now
           continue;
         }
@@ -614,10 +614,10 @@
         a.pfPitchT = OFFER_LINE_GAP;
         const why = reasonFor(a);
         const line = why === "you saved him"
-          ? "You didn't have to step in back there. I don't forget that."
+          ? "You didn't have to step in back there. Nobody steps in, in here. I don't forget that."
           : why === "a regular"
-            ? "You keep coming back to me. Say the word and I'm yours."
-            : "You've run every errand I gave you. Ask me for anything.";
+            ? "You keep coming back to me. Most don't. Say the word and I'm with you."
+            : "You've run every errand I gave you and never asked why. Ask me for anything.";
         if (CBZ.prisonSay) CBZ.prisonSay(a, line, { secs: 3.2 });
         else if (CBZ.citySay) CBZ.citySay(a, line, null, 3.2);
       }
