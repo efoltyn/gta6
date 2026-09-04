@@ -4526,9 +4526,10 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
        in-game caller. tools/warlord-cover-check.mjs needs to pin the ENEMY on
        HOLD while it charges at them — otherwise enemyCommand() reads the
        charge as weakness, orders its own, and the test is measuring two
-       charges. `lock` stands enemyCommand down for the rest of the battle. */
+       charges. `lock:true` stands enemyCommand down; `lock:false` hands the
+       enemy commander his own army back. */
     order: function (o, side, opts) {
-      if (side === "them" && opts && opts.lock) enemyLocked = true;
+      if (side === "them" && opts && "lock" in opts) enemyLocked = !!opts.lock;
       setOrder(o, side === "them" ? "them" : "mine");
     },
     // the command seat's tap, callable: MOVE the line to a point on the field

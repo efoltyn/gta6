@@ -55,11 +55,11 @@ const subjects = [
 
   { id: "hull-down", label: "Hull down, and not a rock in sight",
     focus: "THE GROUND IS THE COVER. There is nothing on this field — biome dune, zero cover props, and that is the change: desert.js used to scatter eight boulders here and battle.js thirty-four more, because combat_iq's cover search can only see BOXES and a battlefield with no boxes made every man stand upright in the open. battle.js's hullDown() searches the terrain instead, for the position where a CROUCHED man (eye 1.0 m) is hidden from the threat by the ground and a STANDING one (1.6 m) is not — the reverse slope. What to look for: men low behind a crest with the far slope empty above them, and men beside them up on the lip firing, because a fold is worked and not occupied. This beat is at t=26 and BEFORE the flank and the charge on purpose. Two reasons, both measured: a charging man clears his fold and stands up (which is the whole cost of a charge, so photographing hull-down men after the CHARGE order photographs zero of them), and at t=16 — where this beat sat on its first run — most of the line is still a FORMED SECTION marching to contact, and a section is driven by stepSquad rather than by think(), so nobody has asked for a fold yet. The fight has to have started. The old note read: a charging man clears his fold and stands up, which is the whole cost of a charge, so photographing hull-down men after the CHARGE order photographs zero of them. The counter to read is coverProps, which must be 0, and menHullDown, which must not be. This row is IDENTICAL on both columns by construction — morale has nothing to do with terrain — and a difference here means the flag is touching something it should not.",
-    at: 26, order: "hold", cam: { mode: "hull" } },
+    at: 26, order: "hold", enemyHold: true, cam: { mode: "hull" } },
 
   { id: "through-the-glass", label: "Ten power, and the mil ticks are real",
     focus: "THE SIGHT ON THE GUN. Every weapon in this game used to aim by narrowing the lens 25 degrees, and exactly one — the bolt sniper, named in an `if` — got an optic, at a hard-coded 16-degree FOV whose comment called it '4.7x' (that is 75/16, a ratio of angles; the honest magnification of a 16-degree lens seen from a 75-degree one is 5.46). The M24 in his hands now wears the sight the real M24 wears, a Leupold Ultra M3A 10x42: the field of view is the tangent law on ten power (8.8 degrees), the look sensitivity is 1/10, the sway is the shooter's own body at 4 milliradians standing, and the tick spacing is SOLVED from this optic's field of view so a mark is a real milliradian and holdover works. Look for the tube, the eye-relief crescent swimming against the sway, and the legend under the reticle naming the optic and what a tick is worth.",
-    at: 29, order: "hold", cam: { mode: "scope" } },
+    at: 29, order: "hold", enemyHold: true, cam: { mode: "scope" } },
 
   { id: "flank-wing", label: "FLANK — the wing swings wide",
     focus: "THE FIRST REAL DECISION. FLANK sends men who are out of contact to an anchor 90 degrees off the fight axis, on the side of the enemy mass with fewer of them in it, and hands them straight back to combat_iq the moment they arrive — so the gunfight on the wing is still the engine's, and only the WALK is the order's. The wing has to read as a wing: a limb reaching around the enemy mass, not a second frontal rank.",
@@ -127,6 +127,8 @@ async function stageWarlordBattle(input) {
     S.last = {
       battleT: a.simT,
       coverProps: a.field.cover,
+      foldedGround: a.field.folded ? 1 : 0,
+      foldProbesHit: a.field.hull ? a.field.hull.found : 0,
       coreRelief: a.field.coreRelief,
       menHullDown: hullMen,
       menCrouched: hullDown,
@@ -177,6 +179,15 @@ async function stageWarlordBattle(input) {
 
   /* ---- A BATTLE BEAT ---- */
   if (subject.order) B.order(subject.order);
+  /* PIN THE OTHER COMMANDER, OR THE SUBJECT IS NOT THE SUBJECT. A beat about
+     men holding a reverse slope needs both lines HOLDING: enemyCommand() reads
+     a 52-v-24 advantage as an invitation and orders CHARGE, and a charging man
+     clears his fold by design — MEASURED, zero men in a fold on ground with
+     46 m of core relief, because the enemy half of the field was running and
+     my half was being overrun. Cleared again on the next beat, so the flank,
+     the charge and the rout are the enemy commander's own decisions. */
+  if (subject.enemyHold) B.order("hold", "them", { lock: true });
+  else B.order(B.audit().enemyOrder || "hold", "them", { lock: false });
   const want = Math.max(0, (subject.at || 0) - S.t);
   if (want > 0) { B.advance(want); S.t += want; }
 
@@ -284,9 +295,12 @@ export default {
   /* bx/bz PIN THE GROUND. buildGround centres the battlefield on the
      warlord's campaign position, so without these the storyboard fights
      wherever the island happened to put him — and the hull-down subject needs
-     FOLDED ground. (1600, 2400) is a dune field, zero cover props, whose
-     reference fan is 78/120 hull-down ground: the best-covered dune country on
-     this island.
+     FOLDED ground. (-4000, 2800) is a dune field with zero cover props, 46 m
+     of relief in its CORE and 67/120 of the reference fan hull-down. The core
+     number is the one that matters and it is why this is not (1600, 2400),
+     which scores higher on the fan and has only 15 m of core relief: MEASURED,
+     a battle there put ZERO men in a fold, because the fan is sampled at the
+     field centre with a threat 120 m off and a real fight moves.
 
      HARNESS TRAP: `seed: 1337` below IS NOT APPLIED. games/warlord.html only
      starts a new game from ?seed when ?go=1 is also present; with ?battle=1
@@ -299,7 +313,7 @@ export default {
      tools/warlord-cover-check.mjs picks, and it took a whole storyboard run to
      find that out. Fix the seam or leave the trap named; do not re-guess. */
   urlParams: { battle: 1, frozen: 1, mine: 24, them: 52, seed: 1337, gun: "ak47",
-    bx: 1600, bz: 2400, faction: "militia", myfaction: "legion" },
+    bx: -4000, bz: 2800, faction: "militia", myfaction: "legion" },
   readyExpression: "!!(window.CBZ && window.CBZ.warlord)",
   // the first subject pays the whole studio boot under a software rasteriser
   stageTimeoutMs: 600000,
@@ -311,6 +325,8 @@ export default {
   metrics: {
     battleT: { label: "Simulated time at this beat", unit: "s" },
     coverProps: { label: "Cover props on the field", unit: "objects", better: "lower" },
+    foldedGround: { label: "Ground folded enough to hide behind", unit: "0/1", better: "higher" },
+    foldProbesHit: { label: "Terrain probes that found a fold", unit: "probes", better: "higher" },
     coreRelief: { label: "Relief of the ground they fight on", unit: "m" },
     menHullDown: { label: "Men holding a reverse-slope position", unit: "men", better: "higher" },
     menCrouched: { label: "Men down behind the lip this frame", unit: "men", better: "higher" },
