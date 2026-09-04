@@ -263,12 +263,26 @@
     const cb = CBZ.cellblock;
     return (cb && cb.v2 && cb.cells) ? cb.cells : null;
   }
-  function playerInDoorway(c) {
-    const p = CBZ.player && CBZ.player.pos;
-    const col = c.doorCol;
-    if (!p || !col) return false;
-    const R = 0.62;
+  function inDoorway(p, col, R) {
     return p.x > col.minX - R && p.x < col.maxX + R && p.z > col.minZ - R && p.z < col.maxZ + R;
+  }
+  /* NEVER CLOSE A DOOR ON A BODY — any body. The player's refusal has been
+     here since the first draft; the residents needed none while the leash
+     kept them off their own thresholds. Now they walk through those leaves
+     all day, and a collider spliced in around an inmate mid-doorway is a man
+     shoved through a wall by systems/actorcollide.js on the next frame. */
+  function playerInDoorway(c) {
+    const col = c.doorCol;
+    if (!col) return false;
+    const p = CBZ.player && CBZ.player.pos;
+    if (p && inDoorway(p, col, 0.62)) return true;
+    const list = CBZ.npcs || [];
+    for (let i = 0; i < list.length; i++) {
+      const n = list[i];
+      if (!n || n.dead || n.escaped || n._crowd || !n.group) continue;
+      if (inDoorway(n.group.position, col, 0.6)) return true;
+    }
+    return false;
   }
   let wantLocked = false, doorRetry = 0;
 
@@ -603,9 +617,21 @@
      every one of them a convict out of the same factory in the same orange.
      Asked of the factory now (entities/npc.js:26 stamps `kind`), with the old
      role test kept as an OR so nothing that counted before drops out. */
+  /* ...AND THE WING'S RESIDENTS ARE HOUSED TOO, NOW (2026-09-04). The
+     `_cellIdx == null` exclusion above was right while the cell leash pinned
+     its men into their cells at every hour; it no longer does — a resident
+     with an OPEN leaf walks the tier like anybody else (world/cellblock.js,
+     "THE DOOR DECIDES") — so at the evening count he is a man in the aisle
+     who has to be walked home like the rest. cellblock.held() is the one
+     question that still excludes: a man behind a SHUT leaf is the leash's,
+     and a second mover on his Vector3 is the vibration this comment has
+     always warned about. */
   function housed(n) {
-    return n && !n._crowd && !n.dead && !n.escaped && n.group && n._cellIdx == null &&
-      (v2() ? (n.kind === "inmate" || n.role === "inmate") : n.role === "inmate");
+    if (!n || n._crowd || n.dead || n.escaped || !n.group) return false;
+    if (!(v2() ? (n.kind === "inmate" || n.role === "inmate") : n.role === "inmate")) return false;
+    const cb = CBZ.cellblock;
+    if (n._cellIdx != null && cb && cb.held) return !cb.held(n);
+    return n._cellIdx == null;
   }
   /* A deterministic patch of open wing floor, clear of the x = 0 patrol spine.
      THE FALLBACK ONLY: a man is sent to the place he actually sleeps whenever

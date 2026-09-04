@@ -486,7 +486,14 @@
     } else {
       const fStain = rasterField(N, o.patch, 3, salt + 5);
       const fPore = rasterField(N, o.grain, 2, salt + 17);
-      const fCrack = rasterField(N, 3, 2, salt + 37);
+      /* THE "CRACK" IS A CONTOUR LINE. It is drawn where a 3-cell noise field
+         crosses 0.5, and the level set of a smooth field is a smooth closed
+         curve — so on a 6.3 m tile every crack is a metre-wide ring or arc,
+         which the owner read, correctly, as "weird things on the floor I
+         don't understand". `crack` is the field's base frequency: 0 turns the
+         pass off (the cell house floor asks for that); the default stays 3
+         for the yard slabs until they are looked at on their own. */
+      const fCrack = o.crack > 0 ? rasterField(N, o.crack, 2, salt + 37) : null;
       const panels = Math.max(1, o.joint | 0);
       const pw = N / panels;
       const core = Math.max(1, N / 380), soft = core + 3.5;
@@ -498,7 +505,7 @@
           const s = fStain[i];
           const r = B.r + (A.r - B.r) * s, g = B.g + (A.g - B.g) * s, b = B.b + (A.b - B.b) * s;
           let l = 1 + (fPore[i] - 0.5) * 0.08;
-          l -= pow40(1 - Math.abs(fCrack[i] * 2 - 1)) * 0.30;
+          if (fCrack) l -= pow40(1 - Math.abs(fCrack[i] * 2 - 1)) * 0.30;
           // EXPANSION JOINT: distance in pixels to the nearest panel gridline.
           // Squared falloff = a dark hairline with a soft grime halo, which is
           // what a swept sealant joint actually looks like. Joints land on
@@ -539,9 +546,10 @@
       patch: opts.patch != null ? (opts.patch | 0) : def.patch,
       grain: opts.grain != null ? (opts.grain | 0) : def.grain,
       joint: opts.joint != null ? (opts.joint | 0) : def.joint,
+      crack: opts.crack != null ? (opts.crack | 0) : 3,
     };
     if (o.b == null) o.b = o.a;
-    const key = k + "|" + o.a + "|" + o.b + "|" + o.size + "|" + o.wear + "|" + o.patch + "|" + o.grain + "|" + o.joint;
+    const key = k + "|" + o.a + "|" + o.b + "|" + o.size + "|" + o.wear + "|" + o.patch + "|" + o.grain + "|" + o.joint + "|" + o.crack;
     let canvas = groundCanvases.get(key);
     if (!canvas) { canvas = bakeGround(k, o); groundCanvases.set(key, canvas); }
     groundTexCalls++;

@@ -1216,6 +1216,21 @@
     else { c.oa = -c.half + POCKET; c.ob = c.oa + DOOR_W; }
     const dc = facePoint(c, (c.oa + c.ob) / 2, 0);
     c.doorX = dc.x; c.doorZ = dc.z;
+    /* WHERE THE RESIDENT WANDERS FOLLOWS THE DOOR. `room` is the cell's own
+       floor and is his box while the leaf is SHUT; `aisle` is the lane outside
+       his door — the cross-aisle for row A, a gallery for B/C, the centre hall
+       for D/E — and is his box while it is OPEN. Both are entities/npc.js
+       `region` rects ([minX,maxX,minZ,maxZ]) and both are shared by reference,
+       so nothing may mutate them in place (assign() below used to). The lanes
+       are the wing's own free space as systems/prisonschedule.js measured it:
+       galleries x 8.8..11.1, hall x -3.3..3.3, cross-aisle z -37.4..-35.5.
+       Wander targets are still sampled against live colliders, so a generous
+       edge costs a rejected sample, never a body in a wall. */
+    c.room = [c.x - c.hx + 0.85, c.x + c.hx - 0.85, c.z - c.hz + 0.85, c.z + c.hz - 0.85];
+    if (c.dz !== 0) c.aisle = [-11, 11, NFACE + 0.6, NFACE + 2.5];
+    else if (Math.abs(c.faceX) > 8) c.aisle = c.dx > 0 ? [c.faceX + 0.6, c.faceX + 2.9, -37.4, -9.8]
+      : [c.faceX - 2.9, c.faceX - 0.6, -37.4, -9.8];
+    else c.aisle = [-3.3, 3.3, -37.4, -9.8];
     cells.push(c);
     if (c.player) playerCell = c;
     buildCell(c);
@@ -1746,7 +1761,9 @@
       try {
         n = CBZ.spawnJailNpc({
           pos: [seat.x, seat.z],
-          region: [c.x - c.hx + 0.85, c.x + c.hx - 0.85, c.z - c.hz + 0.85, c.z + c.hz - 0.85],
+          // every leaf stands open at build, so he is born with the run of the
+          // aisle; wanderBox() hands him the room the moment his door shuts
+          region: c.aisle,
           role: "inmate", speed: 1.3 + hh * 0.7, forceNeutral: true,
           behavior: pick(BEH, c.x, c.z, 6002),
           tagText: "Inmate", tagColor: "#cfe9ff",
@@ -1787,6 +1804,102 @@
     if (was && c) stepClearOfBunk(c, n);
   }
 
+  /* ==========================================================
+     THE DOOR DECIDES. (OWNER, 2026-09-04: "npc will run at the open cell
+     door and can't escape the cell, it's dumb coding. when cell door is
+     open they should be able to run thru — they are tied to their spot and
+     they run at the open cell door glitchily like they're running in place.")
+
+     He was describing this file exactly. The leash below clamped every
+     resident into his cell's box EVERY FRAME and never once asked whether
+     the leaf was shut — and every leaf in this wing stands OPEN from 05:00
+     to 21:00. So a man whose brain wanted the hall (a grudge, a friend, a
+     fight, the player standing four metres away) was aimed through his open
+     door by entities/ai.js at order 22, stepped into it by the mover, and
+     shoved back by the order-22.6 pass — a body on a treadmill in its own
+     doorway, walk cycle playing, going nowhere. Measured (tools/visual-
+     presets/prison-cell-free.mjs): a hunted resident ending six seconds
+     0.62 m INSIDE his open door with the player in plain sight.
+
+     Now the leash HOLDS a man only while his own leaf is shut and he is
+     behind it. With the door open he is an inmate of the wing: his wander
+     box is the aisle outside his door, systems/navgrid.js walks him through
+     the leaf like anybody else, and systems/prisonschedule.js musters him
+     home at the evening count exactly as it does the yard's men — his own
+     rack, through his own door, via the route it already authors. The cell
+     keeps one claim on a free man: a resident whose trait is his bunk sits
+     on it until something gives him a reason to get up, and then he is
+     gone rather than pinned.
+     ========================================================== */
+  function inBox(b, p, pad) {
+    return p.x >= b.x0 - pad && p.x <= b.x1 + pad && p.z >= b.z0 - pad && p.z <= b.z1 + pad;
+  }
+  function cellBox(c) { return { x0: c.x - c.hx, x1: c.x + c.hx, z0: c.z - c.hz, z1: c.z + c.hz }; }
+  // "is the cell holding this man right now" — shut leaf, and he is behind it.
+  // A man locked OUT of his cell is not held: he is a straggler for the
+  // schedule and prisonrest to deal with, the same as any other inmate.
+  function held(n) {
+    if (!n || n === "player" || n._cellIdx == null || n._cellIdx < 0 || !n.group) return false;
+    const c = cells[n._cellIdx];
+    if (!c || c.owner !== n || !c.locked) return false;
+    return inBox(cellBox(c), n.group.position, 0.4);
+  }
+  // nothing in the brain wants him anywhere: the only state a man lounges in
+  function calm(n) {
+    return !(n.ko > 0) && !n.intimidMode && !(n.huntPlayer > 0) && !n.approach && !n.rage
+      && (!n.aiState || n.aiState === "wander");
+  }
+  /* His wander box follows the door — the room while it is shut, the aisle
+     while it is open. NOT while systems/prisonschedule.js has him mustered:
+     it saves `region` into `_dayRegion` and restores it after the count, and
+     would restore whatever this wrote over its own 2.2 m patch. */
+  function wanderBox(c, n, hold) {
+    if (n._muster || n._dayRegion) return;
+    const want = hold ? c.room : c.aisle;
+    if (n.region !== want) n.region = want;
+  }
+  /* SIT ON YOUR OWN BUNK. Walks him to the seat when he is off it (the old
+     code teleported a man back onto the mattress the frame a fight ended)
+     and pins him only inside the settle radius; `pre` decides, the post-mover
+     pass only re-pins a body that was pushed since. */
+  function lounge(c, n, dt, pre) {
+    const s = postIn(c, "bunk");
+    const p = n.group.position;
+    /* THE SEAT IS INSIDE THE FRAME. bunkSpot puts his hips on the mattress
+       edge, and the frame is a solid collider (PRISON_REAL_PROPS) — a body
+       WALKED at that point is shoved back out by systems/actorcollide.js
+       every frame and never arrives (measured: tools/prison-nav-check.mjs
+       went 0 → 5 grinders the first time this walked him). So he walks to
+       the ENTRY point a body's radius clear of the frame, and the last
+       half-metre onto the mattress is the sit itself, as it always was. */
+    const lat = c.dz !== 0 ? 1 : c.dx;
+    const ax = s.x + lat * (BODY_R + 0.08), az = s.z;
+    if (Math.hypot(p.x - ax, p.z - az) > 0.5) {
+      if (!pre) return;
+      if (n.char && n.char.sitting) unseat(n, c);
+      n.target.set(ax, 0, az); n.pause = 0;
+      return;
+    }
+    p.x = s.x; p.z = s.z;
+    if (!pre) return;
+    n.target.set(s.x, 0, s.z);
+    n.pause = Math.max(n.pause || 0, 0.6);
+    // FACE OUT OF THE BED for the edge/brace perch; the "back" style
+    // publishes its own yaw (down the mattress, against the pillow wall).
+    const face = s.face == null ? Math.atan2(c.dx, c.dz) : s.face;
+    n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, face, 1 - Math.pow(0.02, dt));
+    if (n.char && CBZ.setCharPose) {
+      // `kind` is not decoration: entities/character.js's SEAT_POSTURE
+      // reads it — edge is the ducked bunk perch, back/brace are the two
+      // relaxed reads of the same mattress. `ceiling` is the upper deck's
+      // underside so the pose ducks this particular body under it.
+      const style = n._bunkStyle || (n._bunkStyle = bunkStyle(c));
+      n.char.seatRef = n.char.seatRef || { cushion: c.bunk.top, floorBelow: 0,
+        ceiling: c.bunk.deckY || 0, kind: SEAT_KIND[style] || "bunk" };
+      CBZ.setCharPose(n.char, "sit");
+    }
+  }
+
   /* One pass of the cell leash over every occupied cell. `pre` runs before the
      mover and owns the DECISIONS (the post, the pause, the facing); the post-
      mover pass only re-clamps a body that was pushed since. */
@@ -1802,10 +1915,24 @@
       // two systems arguing over one Vector3 — the exact way a body vibrates
       // in place that prisonschedule.js's herd() already warns about.
       if (n._propLie || n._propBed || (CBZ.propArcActive && CBZ.propArcActive(n))) continue;
+      const hold = held(n);
+      if (pre) wanderBox(c, n, hold);
+      if (!hold) {
+        // THE DOOR IS OPEN (or he is already through it): no box, no post.
+        // entities/ai.js owns him. The one thing the cell still asks is the
+        // bunk trait, and only of a calm man who is actually in the room.
+        if (n._cellPose !== "bunk" || !c.bunk || !calm(n) || !inBox(cellBox(c), n.group.position, 0)) {
+          if (pre) unseat(n, c);
+          continue;
+        }
+        if (n.char && !seatFits(n.char, c.bunk.headroom)) { n._cellPose = "bars"; unseat(n, c); continue; }
+        lounge(c, n, dt, pre);
+        continue;
+      }
       // A REAL BRAIN STATE OUTRANKS THE POST — the same precedence poses.js
       // documents: hands-up, a KO or a hunt owns the rig, and the held pose
       // must LET GO rather than freeze a seated body mid-fight. The box still
-      // holds: a fight inside a cell is a fight inside THAT cell.
+      // holds: a fight inside a LOCKED cell is a fight inside THAT cell.
       const owned = n.ko > 0 || n.intimidMode || n.huntPlayer > 0
         || n.aiState === "fight" || n.aiState === "flee";
       const pose = owned ? "pace" : n._cellPose;
@@ -1821,27 +1948,10 @@
       clampInto(b, p);
       if (n.target) clampInto(b, n.target);
       if (owned) { if (pre) unseat(n, c); continue; }
-      const s = postIn(c, pose);
       if (pose === "bunk") {
-        p.x = s.x; p.z = s.z;
-        if (!pre) continue;
-        n.target.set(s.x, 0, s.z);
-        n.pause = Math.max(n.pause || 0, 0.6);
-        // FACE OUT OF THE BED for the edge/brace perch; the "back" style
-        // publishes its own yaw (down the mattress, against the pillow wall).
-        const face = s.face == null ? Math.atan2(c.dx, c.dz) : s.face;
-        n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, face, 1 - Math.pow(0.02, dt));
-        if (n.char && CBZ.setCharPose) {
-          // `kind` is not decoration: entities/character.js's SEAT_POSTURE
-          // reads it — edge is the ducked bunk perch, back/brace are the two
-          // relaxed reads of the same mattress. `ceiling` is the upper deck's
-          // underside so the pose ducks this particular body under it.
-          const style = n._bunkStyle || (n._bunkStyle = bunkStyle(c));
-          n.char.seatRef = n.char.seatRef || { cushion: c.bunk.top, floorBelow: 0,
-            ceiling: c.bunk.deckY || 0, kind: SEAT_KIND[style] || "bunk" };
-          CBZ.setCharPose(n.char, "sit");
-        }
+        lounge(c, n, dt, pre);
       } else if (pose === "bars" && pre) {
+        const s = postIn(c, pose);
         n.target.set(s.x, 0, s.z);
         // THE SETTLE RADIUS IS THE MOVER'S. entities/npc.js stops walking at
         // 0.4 m of the target; a post that only counts as reached at a
@@ -1855,6 +1965,49 @@
       }
     }
   }
+
+  /* THE LAST WORD BEFORE THE MOVER. entities/npc.js's brain writes `target`
+     at order 22 — AFTER the pre-pass and BEFORE the step — so a hunt, a flee
+     or a friend in the hall aimed a HELD man through his own bars every
+     frame, the mover stepped him into the leaf and the post-pass took the
+     step back: the same treadmill, at a door that is genuinely shut. npc.js
+     calls this right before it moves anybody; a held man's target is clamped
+     into his box here, so the navigator is handed a point he can reach and he
+     walks to the bars and STOPS there, facing whatever he wanted. */
+  CBZ.npcConfine = function (n) {
+    if (!n || !n.target || !n.group) return false;
+    if (held(n)) {
+      const c = cells[n._cellIdx];
+      clampInto(paceBox(c, !!(n.char && n.char.sitting)), n.target);
+      return true;
+    }
+    /* A FREE MAN CROSSES A CELL LINE THROUGH ITS LEAF. The brain aims at a
+       friend, a foe or a bed as a point, and a point inside a cell is reached
+       through a 1.6 m opening in a 3.8 m box. systems/navgrid.js copes with
+       the aisles but a goal pressed against a bunk frame comes back PARTIAL
+       — "the reachable cell nearest the goal", which from the next cell over
+       is the partition between them — and that was three men grinding at
+       walls the first hour this wing let them out (tools/prison-nav-check).
+       So the target is staged: out of the cell he is in through its own
+       door, and into the cell he wants through that one's door. Both legs
+       land in open aisle, where the navigator is already right. */
+    if (n._propLie || n._propBed || (CBZ.propArcActive && CBZ.propArcActive(n))) return false;
+    const p = n.group.position, t = n.target;
+    const from = cellAt(p.x, p.z, -0.25), to = cellAt(t.x, t.z, -0.25);
+    if (from === to) return false;
+    if (from) {                                    // leave through my own door
+      const m = facePoint(from, (from.oa + from.ob) / 2, 1.3);
+      t.x = m.x; t.z = m.z;
+      return true;
+    }
+    if (to) {                                      // enter through that one's door
+      const mouth = facePoint(to, (to.oa + to.ob) / 2, 1.3);
+      if (Math.hypot(p.x - mouth.x, p.z - mouth.z) > 0.7) { t.x = mouth.x; t.z = mouth.z; }
+      else { const inn = facePoint(to, (to.oa + to.ob) / 2, -0.9); t.x = inn.x; t.z = inn.z; }
+      return true;
+    }
+    return false;
+  };
 
   // pass one: BEFORE entities/npc.js's order-22 mover, so the step it takes is
   // a step toward somewhere this file will let him stand.
@@ -1962,7 +2115,8 @@
     if (npc !== "player") {
       npc._cellIdx = c.i;
       if (!npc._cellPose) npc._cellPose = cellPose(c);
-      if (npc.region) { npc.region[0] = c.x - c.hx + 0.85; npc.region[1] = c.x + c.hx - 0.85; npc.region[2] = c.z - c.hz + 0.85; npc.region[3] = c.z + c.hz - 0.85; }
+      // by reference, never mutated: `room` and `aisle` are the cell's own
+      npc.region = c.locked ? c.room : c.aisle;
       if (npc.group) npc.group.position.set(c.x, npc.group.position.y || 0, c.z);
     }
     return true;
@@ -1987,6 +2141,9 @@
     resetDoors: resetDoors,
     playerSpawn: playerSpawn,
     bunkStyle: bunkStyle,
+    // "is the cell holding this man right now" — shut leaf, and he is behind
+    // it. systems/prisonschedule.js musters everybody this says no to.
+    held: held,
     // geometry other systems may want without re-deriving it
     height: CH, doorWidth: DOOR_W,
     /* THE HALL PUBLISHES ITS OWN HALF-WIDTH. tools/prison-polish-check.mjs
@@ -2156,7 +2313,9 @@
         const sp = bunkSpot(c, bunkStyle(c)), p = n.group.position;
         if (Math.hypot(p.x - sp.x, p.z - sp.z) > 0.3) seatDrift++;
       }
-      if (n && n !== "player" && n.target && !n.dead && !n.escaped && !(n.ko > 0)
+      // …and only of a man the cell is actually HOLDING: with his leaf open
+      // his target is the wing's business, not this box's.
+      if (n && n !== "player" && n.target && !n.dead && !n.escaped && !(n.ko > 0) && held(n)
           && !n._propLie && !n._propBed && !(CBZ.propArcActive && CBZ.propArcActive(n))
           && n.aiState !== "fight" && n.aiState !== "flee" && !n.intimidMode && !(n.huntPlayer > 0)) {
         const bx = paceBox(c, n._cellPose === "bunk"), t = n.target;

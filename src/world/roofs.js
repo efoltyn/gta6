@@ -99,8 +99,18 @@
     const top = cfg.top != null ? cfg.top : 6;
     // THE SLAB. Not solid, blocks LOS — see the header for why that is the
     // whole contract and not a shortcut.
+    /* `cast` is opt-in per room, and the wing opts in (2026-09-04, owner:
+       "there's weird things on the floor rn I don't understand"). What he
+       was looking at was the SUN — through this slab — painting the shadows
+       of the compound's towers, plant and wall tops onto the floor of a
+       building that has a roof: rings and bands of shadow walking across
+       the tier from nothing anyone could see. A cell already sits in the
+       shade of its own casting slab, so a casting deck simply extends that
+       to the hall, which is what a roof does. The header's frustum worry
+       is real for the south block only: the sun's ortho box is 110-190 m
+       (core/quality.js) around (0,0,18) and the wing sits wholly inside it. */
     const slab = addBox(cx, top + T / 2, cz, w, T, d,
-      cfg.deck != null ? cfg.deck : C_DECK, { solid: false, cast: false, blockLOS: true });
+      cfg.deck != null ? cfg.deck : C_DECK, { solid: false, cast: !!cfg.cast, blockLOS: true });
     // The underside is what you are standing under, and a roof deck colour
     // read from below is the wrong colour. One thin plate, 4 cm proud.
     addBox(cx, top - 0.02, cz, w - 0.1, 0.06, d - 0.1,
@@ -150,7 +160,7 @@
   const ROOMS = [
     // the cell wing: 1.0 m walls, so the slab oversails 0.5 to close the top
     { id: "wing", r: { x0: CB.x0, x1: CB.x1, z0: CB.z0, z1: CB.z1, h: WH }, over: 0.5, lights: 0,
-      deck: 0x515a66 },
+      deck: 0x515a66, cast: true },
     { id: "cafeteria", r: rect("cafeteria", -29, -19, 6, 22, 6), lights: 4 },
     { id: "lounge",    r: rect("lounge", 19, 29, 30, 44, 6), lights: 3 },
     // the gun room never registered a shell (world/gunroom.js draws its own
@@ -203,7 +213,7 @@
     const top = R.h;
     if (!room.roofed) prisonRoof({
       id: room.id, x0: R.x0, x1: R.x1, z0: R.z0, z1: R.z1, top: top,
-      over: room.over, deck: room.deck,
+      over: room.over, deck: room.deck, cast: room.cast,
       // a 8x8 hut wants no rooftop plant; everything else does
       plant: (R.x1 - R.x0) * (R.z1 - R.z0) > 90,
     });

@@ -168,7 +168,17 @@
   const GA = "#5b636c", GB = "#535b64";
   slab((OUT.x0 + S.x0) / 2, (N.z0 + OUT.z1) / 2, S.x0 - OUT.x0, OUT.z1 - N.z0, GA, GB, "concrete");   // west wing
   slab((S.x1 + OUT.x1) / 2, (N.z0 + OUT.z1) / 2, OUT.x1 - S.x1, OUT.z1 - N.z0, GA, GB, "concrete");   // east wing
-  slab(OCX, (OUT.z0 + N.z0) / 2, OW, N.z0 - OUT.z0, GA, GB, "concrete");                              // north ground
+  /* THE NORTH GROUND STOPS AT THE CELL HOUSE. This slab used to run the full
+     width from the outer wire to the yard's north edge — straight UNDER the
+     cell block, 1 mm above the block's own floor (world/ground.js, top at
+     y 0.01) — so what you saw inside the wing was this yard hardstanding,
+     bleeding through the building, and the wing's floor was never once
+     visible. Three pieces now: everything north of the block, and a strip
+     either side of it. The block's footprint is CBZ.WORLD.cellBlock. */
+  const CBK = CBZ.WORLD.cellBlock || { x0: -16, x1: 16, z0: -44, z1: -8 };
+  slab(OCX, (OUT.z0 + CBK.z0) / 2, OW, CBK.z0 - OUT.z0, GA, GB, "concrete");                          // north of the block
+  slab((OUT.x0 + CBK.x0) / 2, (CBK.z0 + N.z0) / 2, CBK.x0 - OUT.x0, N.z0 - CBK.z0, GA, GB, "concrete"); // west of it
+  slab((CBK.x1 + OUT.x1) / 2, (CBK.z0 + N.z0) / 2, OUT.x1 - CBK.x1, N.z0 - CBK.z0, GA, GB, "concrete"); // east of it
 
   /* ---- corner towers. world/towers.js rings the OLD wall and keeps doing
        exactly that; these four stand on the new corners so the enlarged

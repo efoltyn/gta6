@@ -343,6 +343,11 @@
        already clear. It has to be called HERE and not from its own updater:
        the curfew branch twenty lines up writes `target` itself, so anything
        decided before this point is overwritten by the time we integrate. */
+    // A man behind a SHUT cell leaf has his target clamped into his cell
+    // first (world/cellblock.js npcConfine): the brain above may want the
+    // hall, the navigator must be handed a point he can reach, or he runs on
+    // the spot at the bars for as long as the brain wants out.
+    if (CBZ.npcConfine) CBZ.npcConfine(n);
     if (CBZ.prisonNav) CBZ.prisonNav.step(n, dt);
 
     if (n.pause > 0) { n.pause -= dt; if (near) animChar(n.char, 0, dt); }

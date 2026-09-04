@@ -123,13 +123,20 @@
     }
   }
 
-  // cell-block concrete floor
-  // DELIBERATELY UNTOUCHED. It is not a checker, and world/cellblock.js is
-  // being rewritten in this same wave — the floor under it stays exactly what
-  // that work expects. (It is still the compound's last legacy ground map, so
-  // CBZ.prisonGroundAudit().legacy counts it: that is the debt, honestly.)
-  const ctex = concreteTex("#6e7682", "#3b424c");
-  ctex.repeat.set(8, 9);
+  // cell-block concrete floor — the tier's own slab.
+  // This was the compound's LAST legacy ground map (a 128 px speck canvas
+  // tiled every 4 m, blue-grey, no joints), left alone while the wing was
+  // rewritten around it. The wing is done; the floor now gets the same
+  // institutional verb as every other poured surface in the compound —
+  // a 6.3 m panel with real expansion joints, pore speckle and staining —
+  // in a neutral, slightly warm concrete instead of the old blue. The tones
+  // are the wing's own partition greys (world/cellblock.js C_PART_D 0x767f8a
+  // shaded down), so the floor reads as the same pour as the walls standing
+  // on it rather than a different material laid under them.
+  const ctex = V2
+    ? CBZ.prisonGroundTex("concrete", { a: "#676d75", b: "#5c626a", wear: 0.10, crack: 0 })
+    : concreteTex("#6e7682", "#3b424c");
+  if (V2) ctex.repeat.set(Math.round(32 / 6.3), Math.round(36 / 6.3)); else ctex.repeat.set(8, 9);
   const cell = new THREE.Mesh(
     new THREE.BoxGeometry(32, 0.1, 36),
     new THREE.MeshLambertMaterial({ map: ctex })

@@ -5391,6 +5391,13 @@
       }
       case "escape": {
         const ez = (CBZ.WORLD && CBZ.WORLD.exit.z) || 52;
+        // A RUN NEEDS A WAY OUT. A man inside the cell house with the block
+        // gate racked shut has nowhere to run to, and this state used to run
+        // him at the leaf anyway — for the rest of the night (measured
+        // 2026-09-04, tools/prison-nav-check.mjs: 8 s pressed into the gate at
+        // (0,-8) once the wing's residents were let off their leash). He
+        // thinks better of it and goes back to his business.
+        if (blockGateShut(n)) { n.aiState = "wander"; n.aiTimer = 2 + rng() * 3; break; }
         n.target.set((rng() - 0.5) * 6, 0, ez + 2);
         if (n.group.position.z > ez - 2) {
           n.escaped = true; n.group.visible = false;
@@ -5417,7 +5424,7 @@
           }
           const pal = findPal(n);
           if (pal && rng() < 0.45) { n.aiState = "socialize"; n.social = pal; break; }
-          if (rng() < 0.015) { n.aiState = "escape"; break; }
+          if (rng() < 0.015 && !blockGateShut(n)) { n.aiState = "escape"; break; }
           if (n.gang >= 0 && (rng() < 0.52 || !isOnTurf(n.gang, n.group.position))) pickTurfTarget(n);
           else CBZ.npcPickTarget(n);
         }
@@ -5425,6 +5432,15 @@
       }
     }
     return n.baseSpeed;
+  }
+
+  // "is this man locked inside the cell house" — in the block, and world/
+  // door.js's leaf across the throat is shut. The only exit is that leaf.
+  function blockGateShut(n) {
+    const S = CBZ.prisonSchedule, d = CBZ.door;
+    if (!S || !S.inBlock || !d || d.open || d.blown) return false;
+    const p = n.group.position;
+    return S.inBlock(p.x, p.z, 0.5);
   }
 
   // called by systems/state.js on restart: revive everyone, re-elect leaders
