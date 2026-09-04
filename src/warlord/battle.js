@@ -1198,6 +1198,15 @@
         const u = units[i];
         if (u.team !== k || u.dead || u.fled || u.isYou) continue;
         s.alive++;
+        /* POWER FIRST, AND A ROUTED MAN STILL HAS IT. This line used to sit
+           below the `continue`, so a man who broke stopped counting toward his
+           own side's strength — and morale is 1 - powerNow/power0, so one man
+           routing lowered the morale that made him rout. A death spiral with
+           no death in it: the FIRST man to break took the next four with him.
+           updateMorale() on the 3D side has never had this bug, because
+           standing() there filters on !dead && !fled and says nothing about
+           routed. Two paths, one rule, and this was the divergence. */
+        if (u.s) s.powerNow += W.soldierPower(u.s);
         if (u.routed) { s.routing++; continue; }
         standing.push(u);
         const p = profOf(u);
@@ -1206,10 +1215,22 @@
           (u.wounded ? 0.6 : 1);
         s.out += rounds;
         s.roundDmg += rounds * per;
-        if (u.s) s.powerNow += W.soldierPower(u.s);
       }
       s.standing = standing;
+      s.nStanding = standing.length;
       s.perRound = s.out > 0 ? s.roundDmg / s.out : 0;
+      /* AND THE WARLORD COUNTS ON BOTH SIDES OF THE FRACTION — updateMorale()'s
+         own comment, and its own fix, which the headless path never got.
+         power0 for `mine` is W.power(roster) + 14 (he is worth about a dozen
+         men and the encounter card says so), so a powerNow built from the
+         ROSTER ALONE starts every resolved battle with `lost` already at
+         14/power0 and carries a phantom casualty to the end. MEASURED on a
+         20-levy line: a permanent 0.26 of `lost`, which is 0.42 of morale, and
+         on any roster poorer than sidearms it put the whole line under the
+         civ nerve of 0.62 on TICK ONE — every man routed at t=1 and
+         brokenSide() ended the fight at t=2 with nobody dead. That is the
+         "resolve() ends on tick 2" report, and it is this one line. */
+      if (k === "mine" && ctxR.you && !ctxR.you.dead && !ctxR.youSafe) s.powerNow += 14;
     }
     /* THE WARLORD SHOOTS TOO, AND HIS ROUNDS ARE ROUNDS — not a bonus on
        everybody else's.
@@ -1229,14 +1250,54 @@
        applies to a player trigger pull. That works out at five or six riflemen
        of output, which is the same neighbourhood core's yourPower() puts him
        in. */
+    /* AND HIS RATE IS DERIVED, NOT TYPED. The line here used to read
+
+           const rounds = 2.0 * ENGAGE * 3;
+
+       under a comment saying "three times an engaged rifleman's". It is not:
+       an engaged rifleman's rate in this very function is
+       (hit10 / secPerRound) * ENGAGE, which for a levy with a pistol is 0.0116
+       rounds a second. 2.0 * ENGAGE * 3 is 0.27 — twenty-three times a
+       rifleman, so the warlord out-shot his entire twenty-man army and a
+       20 v 20 was really a 43 v 20. MEASURED: an EVEN levy fight resolved as a
+       win 86% of the time with 0-1 friendly casualties against 7-8 enemy.
+
+       What he is worth is not a number this file gets to invent — core states
+       it, in the same currency the encounter card uses: W.yourPower() against
+       a soldier's W.soldierPower(). So his damage stream is that many men's
+       worth of the output the side is ALREADY producing, and his round count
+       is that damage divided by what one of his rounds does.
+
+       AND IT IS ITS OWN STREAM, NOT AN ADDITION TO THE MEAN. The old code
+       pushed his rounds into s.out and his damage into s.roundDmg and then
+       re-derived perRound — which is the mean damage of a round, dealt to
+       EVERY round the army fires. A player carrying a shotgun therefore made
+       every levy's pistol round hit like a shotgun, and a player carrying a
+       pistol nerfed his whole line's rifles. He fires his own rounds now, at
+       his own damage, into the same pool. */
     const you = ctxR.you;
-    if (you && !you.dead) {
+    const mineS = sides.mine;
+    mineS.youOut = 0; mineS.youPer = 0;
+    if (you && !you.dead && !ctxR.youSafe && mineS.nStanding > 0 && mineS.out > 0) {
       const w = CBZ.weaponById ? CBZ.weaponById(you.wid) : null;
+      // 0.55 is the same factor the 3D path applies to a player trigger pull
       const per = ((w && w.damage) || 24) * ((w && w.pellets) || 1) * 0.55;
-      const rounds = 2.0 * ENGAGE * 3;
-      sides.mine.out += rounds;
-      sides.mine.roundDmg += rounds * per;
-      sides.mine.perRound = sides.mine.out > 0 ? sides.mine.roundDmg / sides.mine.out : 0;
+      /* HIS OWN WORTH, NOT HIS FORCE'S. W.yourPower() is
+         `W.power(S.army) + 14 * gunCombat * armour` — the strength of the
+         WHOLE COLUMN, which is what the encounter card compares against a
+         band. Reading it as "what is the warlord worth" makes him worth his
+         own army plus himself: MEASURED, an even 20 v 20 resolved as a 100%
+         win with ZERO friendly casualties, and it got worse the bigger your
+         army was, which is the tell. Subtracting the roster leaves exactly
+         core's own second term — his gun and his plate — without re-typing the
+         expression here, so a change to core moves this with it. */
+      const manPower = Math.max(0.001, (mineS.powerNow - 14) / mineS.nStanding);
+      const solo = Math.max(1, (W.yourPower ? W.yourPower() : 14) -
+        W.power((W.state && W.state.army) || []));
+      const worthMen = Math.max(1, solo / manPower);
+      const manOut = mineS.roundDmg / mineS.nStanding;      // HP/s from one man
+      mineS.youPer = per;
+      mineS.youOut = (worthMen * manOut) / Math.max(1, per);
     }
 
     // ---- deal it, one round at a time, through the same soak
@@ -1250,6 +1311,12 @@
       acc[k] = (acc[k] || 0) + s.out * dt;
       let n = Math.floor(acc[k]);
       acc[k] -= n;
+      /* the warlord's own rounds, on their own accumulator and at their own
+         damage — see the derivation above. He only ever exists on `mine`. */
+      acc.you = (acc.you || 0) + (k === "mine" ? (s.youOut || 0) * dt : 0);
+      let nYou = Math.floor(acc.you);
+      acc.you -= nYou;
+      n += nYou;
       /* AND THE WARLORD IS IN THE POOL. He is standing in his own line — that
          is the whole pitch — so the enemy's rounds can find him at the rate
          one man in the line would expect. */
@@ -1260,7 +1327,11 @@
         const tgt = pick >= pool.length ? ctxR.you : pool[pick];
         if (!tgt || tgt.dead) continue;
         // the player does not eat the army-on-army multiplier — hurtMan's rule
-        hurtOne(tgt, tgt === ctxR.you ? s.perRound / ARMY_MUL : s.perRound);
+        // his rounds are dealt first and carry HIS damage; the rest carry the
+        // line's mean. The player still never eats the army multiplier.
+        const dmg = (nYou-- > 0) ? s.youPer
+          : (tgt === ctxR.you ? s.perRound / ARMY_MUL : s.perRound);
+        hurtOne(tgt, dmg);
         if (tgt.hp <= 0) {
           tgt.dead = true; tgt.hp = 0;
           if (tgt === ctxR.you) { ctxR.youDown = true; continue; }
@@ -1279,9 +1350,12 @@
       s.morale = MORALE_OFF() ? 1 : moraleFrom({
         lost: 1 - s.powerNow / Math.max(0.001, s.power0),
         theirLost: 1 - foe.powerNow / Math.max(0.001, foe.power0),
-        leader: k === "mine",
+        leader: k === "mine" && !ctxR.youSafe,
         leaderDown: !!ctxR.youDown,
-        leaderNear: true,             // headless: a warlord who fights is IN it
+        // headless: a warlord who fights is IN it — but an AI-on-AI battle has
+        // no warlord at all, and giving `mine` his +0.16 anyway is why two
+        // identical bands resolved with one of them mysteriously steadier.
+        leaderNear: !ctxR.youSafe,
         malus: s.moraleMalus || 0,
         routingFrac: s.routing / Math.max(1, s.alive),
       });
