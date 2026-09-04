@@ -29,11 +29,27 @@
                  smg; carbine/AK/LMG land here for a believable mid-curve.
    minDamage still acts as the curve's floor in every shape.
 
-   SNIPER DROP (b): dropStart/range alone don't model a slow bullet falling
-   over a long flight — sniperDrop{} below feeds fpsmode's per-shot travel
-   estimate (NOT a literal projectile — bullets stay hitscan per the owner's
-   call — just a small "where would this round actually have arrived"
-   correction at range, the bullet-equivalent of the RPG's true flight time).
+   REAL BULLETS (`v0` / `dragK`, 2026-09-04): the sniper used to carry a
+   `sniperDrop` table — a cosmetic downward BEND of a hitscan ray plus a fake
+   "flight time" delay on the hit marker. It was the only weapon that pretended
+   to have ballistics, every number in it was invented, and the bend was applied
+   to a ray that had already arrived. It is gone. Every rifle-class weapon here
+   now declares its REAL muzzle velocity (`v0`, m/s, sourced per row) and a
+   retardation constant (`dragK`, 1/s of exponential velocity decay, solved from
+   that cartridge's published retained velocity at 300 m), and fpsmode.js flies
+   an actual projectile along them under 9.81 m/s^2. A 300 m shot with the
+   M118LR above needs about 0.9 m of holdover, which is what the scope's mil
+   ticks are FOR. Pistols, SMGs and the shotgun still declare v0 (the tracer's
+   pace) but stay HITSCAN: their whole engagement band is inside 90 m, where a
+   9 mm drops under 12 cm and nobody can see it — see fpsmode's PROJECTILES
+   block for the exact rule.
+
+   OPTICS (`optic`): the id of a row in CBZ.WEAPON_OPTICS below. Before this
+   field existed there was exactly ONE optic in the game — systems/lockon.js
+   hard-coded "the bolt sniper, and only the bolt sniper, gets a scope" — and
+   every other gun in the game got the identical 25-degree FOV punch whether it
+   was a Glock or an M249. Magnification, ADS time, the sight picture and the
+   AI's engagement band all read this row now.
 
    HOW A GUN IS HELD (`bipod` / `hold`) — OWNER, 2026-08-03: "fix how character
    holds guns, especially those like light machine gun that have a bipod."
@@ -82,6 +98,9 @@
       sfx: "shoot_pistol", tracer: 0.018, auto: false,
       real: { len: 0.204, ref: "Glock 17. 204mm OAL (us.glock.com)" },
       hold: { heavy: 0.08, support: 0, stance: "pistol" },
+      optic: "iron",
+      v0: 360, dragK: 0.60,   // 9x19 124gr from a 114mm Glock 17 barrel: ~360 m/s (Federal/Speer factory data)
+      settle: 0.06,
     },
     {
       id: "shotgun", key: "shotgun", label: "12G PUMP", short: "12G", slot: "long",
@@ -96,6 +115,9 @@
       auto: false,
       real: { len: 0.978, ref: "Remington 870, 18.5in barrel. 38.5in OAL (thegunzone)" },
       hold: { heavy: 0.38, support: 0.28, stance: "long" },
+      optic: "iron",
+      v0: 400, dragK: 2.40,   // 12ga 00 buck: 1300 fps = 396 m/s (Federal). Round balls shed velocity brutally.
+      settle: 0.24,
     },
     {
       id: "carbine", key: "carbine", label: "M4 CARBINE", short: "556", slot: "rifle",
@@ -109,6 +131,9 @@
       sfx: "shoot_carbine", tracer: 0.012, auto: true,
       real: { len: 0.838, ref: "Colt M4, stock extended. 33in/838mm OAL (Wikipedia)" },
       hold: { heavy: 0.26, support: 0.27, stance: "long" },
+      optic: "dot",
+      v0: 905, dragK: 0.57,   // 5.56 M855 from a 14.5in M4: 2970 fps = 905 m/s (TM 9-1005-319). dragK solved from the published 300m retained ~750 m/s.
+      settle: 0.09, spray: [0, 0, 0.06, 0.14, 0.24, 0.30, 0.24, 0.10, -0.08, -0.22, -0.30, -0.24, -0.10, 0.08, 0.22],
     },
     {
       id: "smg", key: "smg", label: "COMPACT SMG", short: "SMG", slot: "auto",
@@ -122,6 +147,9 @@
       sfx: "shoot_smg", tracer: 0.010, auto: true,
       real: { len: 0.680, ref: "H&K MP5A2, fixed stock. 680mm OAL (Wikipedia)" },
       hold: { heavy: 0.20, support: 0.19, stance: "compact" },
+      optic: "dot",
+      v0: 400, dragK: 0.60,   // 9x19 from the MP5's 225mm barrel: ~400 m/s (H&K data sheet)
+      settle: 0.06, spray: [0, 0.10, -0.12, 0.16, -0.18, 0.20, -0.22, 0.18, -0.14, 0.22, -0.20, 0.16, -0.18, 0.14, -0.10],
     },
     {
       id: "revolver", key: "revolver", label: ".357 MAGNUM", short: "357", slot: "pistol",
@@ -135,6 +163,9 @@
       sfx: "shoot_deagle", tracer: 0.02, auto: false,   // big-bore voice (real .45 recording)
       real: { len: 0.292, ref: "Colt Python, 6in barrel. 11.5in OAL (colt.com/Wikipedia)" },
       hold: { heavy: 0.24, support: 0, stance: "pistol" },
+      optic: "iron",
+      v0: 442, dragK: 0.55,   // .357 Magnum 158gr from a 6in Python: 1450 fps = 442 m/s (Remington)
+      settle: 0.16,
     },
     {
       id: "deagle", key: "deagle", label: ".50 DESERT EAGLE", short: "50AE", slot: "pistol",
@@ -148,6 +179,9 @@
       sfx: "shoot_deagle", tracer: 0.022, auto: false,  // big-bore voice (real .45 recording)
       real: { len: 0.273, ref: "Desert Eagle Mk XIX, 6in barrel. 10.75in OAL (magnumresearch)" },
       hold: { heavy: 0.34, support: 0, stance: "pistol" },
+      optic: "iron",
+      v0: 472, dragK: 0.55,   // .50 AE 300gr: 1550 fps = 472 m/s (Magnum Research)
+      settle: 0.19,
     },
     {
       // The status rifle: out-damages the carbine per round but handles LAZY —
@@ -164,6 +198,9 @@
       sfx: "shoot_ak47", tracer: 0.013, auto: true,   // dedicated layered voice (audio.js) owns the pitch/weight
       real: { len: 0.880, ref: "AK-47, fixed stock. 880mm OAL (Wikipedia)" },
       hold: { heavy: 0.54, support: 0.31, stance: "long" },
+      optic: "iron",
+      v0: 715, dragK: 0.62,   // 7.62x39 M43: 715 m/s (AK-47 spec, Wikipedia)
+      settle: 0.13, spray: [0, 0.05, 0.18, 0.34, 0.48, 0.55, 0.42, 0.10, -0.28, -0.52, -0.60, -0.45, -0.15, 0.20, 0.45],
     },
     {
       id: "uzi", key: "uzi", label: "MICRO UZI", short: "UZI", slot: "auto",
@@ -177,6 +214,9 @@
       sfx: "shoot_smg", tracer: 0.009, auto: true,
       real: { len: 0.267, ref: "IMI Micro Uzi, stock folded. 267mm OAL (dockeryarmory)" },
       hold: { heavy: 0.12, support: 0.10, stance: "compact" },
+      optic: "iron",
+      v0: 350, dragK: 0.62,   // 9x19 from the Micro Uzi's 134mm barrel: ~350 m/s (IMI)
+      settle: 0.05, spray: [0, 0.22, -0.26, 0.30, -0.34, 0.28, -0.30, 0.36, -0.24, 0.32, -0.36, 0.26, -0.28, 0.34, -0.30],
     },
     {
       id: "sniper", key: "sniper", label: "BOLT SNIPER", short: "SNIP", slot: "rifle",
@@ -188,16 +228,11 @@
       recenter: 0.3, rampMax: 1.0, yawWeave: 0.15,
       shake: 0.66, heat: 70, knock: 3.0, flash: 0.6,
       sfx: "shoot_sniper", tracer: 0.02, auto: false,   // dedicated long-boom voice (Mosin recording)
-      // BALLISTIC DROP (b): past `start`, the tracer/impact is nudged DOWN
-      // (world units) proportional to (dist-start), capped at `maxDrop` — a
-      // slow heavy round sagging over a long flight. `flightPerM` is seconds
-      // of perceived travel time per metre past `start` (drives a short hit-
-      // resolution DELAY so a far shot doesn't land in the same instant it's
-      // fired — the "real flight" feel — without making the round an actual
-      // simulated projectile other systems would need to track).
-      sniperDrop: { start: 90, perM: 0.0095, maxDrop: 1.6, flightPerM: 0.0011 },
       real: { len: 1.092, ref: "M24 SWS (Rem 700). 43in/1092mm OAL (Wikipedia)" },
       hold: { heavy: 0.6, support: 0.36, stance: "long" }, // long heavy barrel, support hand well forward
+      optic: "m3a",
+      v0: 786, dragK: 0.44,   // 7.62x51 M118LR 175gr from a 24in M24: 2580 fps = 786 m/s (US Army). dragK solved from the published 300m retained ~660 m/s.
+      settle: 0.34,
     },
     {
       id: "lmg", key: "lmg", label: "M249 LMG", short: "LMG", slot: "auto",
@@ -214,6 +249,9 @@
       bipod: true,
       real: { len: 1.035, ref: "FN M249 SAW, std barrel. 40.75in OAL (fnamerica.com)" },
       hold: { heavy: 1.0, support: 0.46, stance: "heavy" }, // 7.5 kg belt-fed — the heaviest carry in the game
+      optic: "mgo",
+      v0: 915, dragK: 0.57,   // 5.56 M855 from the M249's 465mm barrel: 915 m/s (FN America)
+      settle: 0.15, spray: [0, 0.08, 0.20, 0.36, 0.46, 0.44, 0.30, 0.06, -0.22, -0.40, -0.48, -0.42, -0.24, 0.02, 0.26],
     },
     {
       id: "bazooka", key: "bazooka", label: "RPG / ROCKET LAUNCHER", short: "RPG", slot: "long",
@@ -257,6 +295,7 @@
       // The tube rides the SHOULDER, so the support hand stays close to the
       // body: heavy, but with almost none of the LMG's forward reach.
       hold: { heavy: 0.8, support: 0.10, stance: "shoulder" },
+      optic: "iron",
     },
     {
       id: "taser", key: "taser", label: "X26 TASER", short: "TASER", slot: "utility",
@@ -270,6 +309,7 @@
       sfx: "shoot_taser", tracer: 0.006, auto: false, nonlethal: true,
       real: { len: 0.185, ref: "Taser X26 with cartridge. 7.3in OAL (X26E spec sheet)" },
       hold: { heavy: 0.04, support: 0, stance: "pistol" },
+      optic: "none",
     },
     {
       /* SHANK — the first MELEE weapon in this table, and the reason `melee`
@@ -321,6 +361,7 @@
       // wrapped grip runs 20-30cm end to end; 0.26 sits mid-band.
       real: { len: 0.26, ref: "improvised stock shiv, blade + wrapped grip ≈ 26cm" },
       hold: { heavy: 0, support: 0, stance: "pistol" },
+      optic: "none",
     },
     {
       // GRENADE LAUNCHER (owner ask): the RPG's beautiful explosion, less
@@ -354,8 +395,101 @@
       projSpeed: 42, projGravity: 24,
       real: { len: 0.778, ref: "Milkor MGL/M32, stock extended. 778mm OAL (Wikipedia)" },
       hold: { heavy: 0.58, support: 0.29, stance: "long" },
+      optic: "iron",
     },
   ];
+
+  /* ============================================================ OPTICS
+     ONE SIGHT MODEL, PARAMETERISED — not five sights.
+
+     WHAT WAS THERE. systems/lockon.js asked one question, `w.key === "sniper"
+     || w.scoped === true`, and answered it with a hard-coded FOV of 16 and a
+     hard-coded DOM tube. Every other gun in the game — a Glock, an MP5, an
+     M249 — got the identical ADS_FOV_DROP of 25 degrees off the hip lens, with
+     no optic in front of the eye at all. So "aiming" meant the same thing on
+     all fourteen weapons, and the sniper's scope was the only one that was a
+     different verb.
+
+     WHAT A ROW IS. `mag` is the TRUE optical magnification of the sight that is
+     actually bolted to that weapon in the real world (sourced per row). The ADS
+     field of view is derived from it with the TANGENT law, never by dividing:
+
+         fovAds = 2 * atan( tan(fovHip / 2) / mag )
+
+     That correction matters and it was already wrong: lockon.js's comment said
+     "hip 75 -> ~4.7x true optical zoom" for its FOV of 16, which is 75/16. The
+     honest magnification of a 16-degree lens seen from a 75-degree one is
+     tan(37.5)/tan(8) = 5.46x. A linear ratio is not a zoom.
+
+     `mag: 1` optics (irons, and a reflex sight, which really is 1x — an
+     Aimpoint does not magnify anything) get no optical zoom at all. What they
+     get is `lean`: a small fixed FOV narrowing that stands for the shooter
+     bringing the weapon up and putting their eye behind it. That is a VIEWPORT
+     convention, not physics, and it is labelled as one so nobody later "fixes"
+     it into a fake magnification.
+
+     `ads` is seconds from hip to sighted — a pistol comes up fast, a 7 kg
+     belt-fed gun with a magnified optic does not. `swayMul` scales the body's
+     own hold wobble (systems/fpsmode.js SWAY_STANCE, in real milliradians): a
+     pistol at arm's length is worse than the same body behind a shouldered
+     rifle. The wobble is NOT multiplied by `mag` — through a 10x optic a
+     4-mrad hold already LOOKS ten times bigger, because that is what an optic
+     does. Multiplying it again would be counting the magnification twice.
+
+     `tube` decides which sight picture is drawn: a real occluded eyepiece with
+     mil ticks (lockon.js) for a magnified optic, a floating dot for a reflex,
+     nothing at all for irons — the weapon's own front post is the sight. */
+  CBZ.WEAPON_OPTICS = {
+    // no sight at all: a taser, a shank. Aiming does nothing optical.
+    none: { id: "none", label: "", mag: 1, lean: 0, ads: 0.14, swayMul: 1.0, tube: false, dot: false },
+    // irons. `lean` 12 deg: enough that shouldering the weapon reads on screen,
+    // far short of the 25 deg every gun used to get.
+    iron: { id: "iron", label: "IRON", mag: 1, lean: 12, ads: 0.20, swayMul: 1.15, tube: false, dot: false },
+    // a reflex/red-dot sight. Aimpoint CompM4, Trijicon MRO, EOTech EXPS3 are
+    // all 1x — the dot is projected at infinity, there is no magnification.
+    // `lean` is a touch deeper than irons because the head comes further up
+    // behind a mounted sight, and the dot itself is the accuracy gain.
+    dot: { id: "dot", label: "RED DOT", mag: 1, lean: 17, ads: 0.24, swayMul: 1.0, tube: false, dot: true },
+    // Trijicon M145 Machine Gun Optic — the 3.4x24 sight the US Army issues ON
+    // the M249. Not a made-up "4x for LMGs".
+    mgo: { id: "mgo", label: "3.4x MGO", mag: 3.4, ads: 0.44, swayMul: 0.95, tube: true, dot: false, ticksMil: 1 },
+    // Trijicon ACOG TA31, 4x32 — the marksman optic. No weapon row carries it
+    // today; it is here because a 4x is the rung between the dot and the
+    // sniper's glass and the next rifle to want one should not invent it.
+    acog: { id: "acog", label: "4x ACOG", mag: 4.0, ads: 0.40, swayMul: 0.95, tube: true, dot: false, ticksMil: 1 },
+    // Leupold Ultra M3A 10x42 — the optic actually issued on the M24 SWS this
+    // weapon row already cites for its length. The brief said "8x"; the real
+    // sight on the real rifle is 10x and costs nothing to be honest about.
+    m3a: { id: "m3a", label: "10x M3A", mag: 10.0, ads: 0.55, swayMul: 0.9, tube: true, dot: false, ticksMil: 1 },
+  };
+  // the optic row for a weapon record (or a weapon id). Never null: an
+  // un-tagged weapon reads as irons, which is what an un-tagged gun has.
+  CBZ.weaponOptic = function (w) {
+    if (typeof w === "string") w = weaponById(w);
+    const t = CBZ.WEAPON_OPTICS;
+    if (!w) return t.iron;
+    return t[w.optic] || t.iron;
+  };
+  /* THE ADS FIELD OF VIEW FOR A WEAPON, in degrees, off whatever hip lens the
+     caller is running. ONE owner of this arithmetic: fpsmode's FOV block,
+     lockon's tube and the warlord's shoulder camera all call this rather than
+     each carrying its own drop. */
+  CBZ.weaponAdsFov = function (w, hipFov) {
+    const o = CBZ.weaponOptic(w);
+    const hip = hipFov > 1 ? hipFov : 75;
+    if (o.mag > 1.02) {
+      const t = Math.tan(hip * Math.PI / 360) / o.mag;
+      return Math.atan(t) * 360 / Math.PI;
+    }
+    return Math.max(20, hip - (o.lean || 0));
+  };
+  // the look-sensitivity multiplier that keeps a mouse flick covering the same
+  // WORLD angle at any magnification: the tangent ratio, not the FOV ratio.
+  CBZ.weaponAdsSensMul = function (w, hipFov) {
+    const hip = hipFov > 1 ? hipFov : 75;
+    const fov = CBZ.weaponAdsFov(w, hip);
+    return Math.tan(fov * Math.PI / 360) / Math.tan(hip * Math.PI / 360);
+  };
 
   // ---- SHARED DAMAGE-FALLOFF EVALUATOR (e) ----------------------------------
   // ONE function every shooter (fpsmode.js gunHit/cityGunHit; usable by any
