@@ -615,6 +615,60 @@
   // ADS multiplier: holding RMB (CBZ.isADS) softens recoil ~0.55x. Applies in
   // ALL modes (strict feel improvement); RMB is already wired (aimHeld).
   function adsRecoilMul() { return aimHeld ? 0.55 : 1; }
+
+  /* ============================================================ STANCE
+     THE BODY IS PART OF THE WEAPON, and until now the gun did not know it was
+     attached to one. systems/physics.js has owned a real three-state stance
+     machine for months — press C/Ctrl to crouch, press again mid-sprint to
+     slide, double-press to go prone — and it publishes `player.crouch` /
+     `player.prone` on the record this file reads every frame. The ONLY thing
+     in this file that ever asked was bipodActive(), for one weapon. So going
+     prone with a rifle changed your silhouette, your eye height and your
+     walking speed and did not change a single round's flight.
+
+     Three scalars, read by every accuracy path below, and one shared reader so
+     lockon.js's optic sway and the warlord's AI ask the same question:
+
+       SWAY_STANCE   the body's own hold wobble, in RADIANS. These are real
+                     marksmanship figures, not feel numbers: an unsupported
+                     standing hold on a service rifle wanders about 4 mrad
+                     (~13.7 MOA, roughly a 1.2 m circle at 300 m), kneeling
+                     /crouched about 2, and prone or bipod-supported about 1.
+                     Through a magnified optic that wobble LOOKS mag times
+                     bigger, which is the whole reason a 10x scope is hard to
+                     hold — so nothing multiplies it by mag a second time.
+       STANCE_SPREAD the cone multiplier. A braced body puts rounds closer
+                     together; that is the same physical fact as the sway.
+       STANCE_RECOIL how much of the kick the body eats. Prone is the deepest
+                     brace there is short of a bipod (which still outranks it).
+
+     Movement speed and eye height are NOT set here: physics.js already owns
+     both in the city, and warlord/gunplay.js owns both on the desert page.
+     One stance, two bodies, no third copy of what crouching means. */
+  const SWAY_STANCE = { stand: 0.0040, crouch: 0.0022, prone: 0.0010 };
+  const STANCE_SPREAD = { stand: 1.0, crouch: 0.72, prone: 0.52 };
+  const STANCE_RECOIL = { stand: 1.0, crouch: 0.80, prone: 0.58 };
+  function stanceOf() {
+    const p = CBZ.player;
+    if (!p) return "stand";
+    if (p.prone) return "prone";
+    if (p.crouch) return "crouch";
+    return "stand";
+  }
+  // PUBLIC, because three other files need the same answer and none of them
+  // should re-derive it off two booleans: lockon.js scales optic sway by it,
+  // warlord/gunplay.js drives it, and a probe prints it.
+  CBZ.playerStance = stanceOf;
+  // the body's hold wobble right now, in radians — stance x the sight picture
+  // the equipped weapon presents (a pistol at arm's length is worse than the
+  // same body behind a shouldered carbine). A deployed bipod is the floor.
+  CBZ.playerSwayRad = function (w) {
+    w = w || (armed() ? weapon() : null);
+    let base = SWAY_STANCE[stanceOf()] || SWAY_STANCE.stand;
+    if (bipodActive(w)) base = Math.min(base, SWAY_STANCE.prone) * 0.6;
+    const o = CBZ.weaponOptic ? CBZ.weaponOptic(w) : null;
+    return base * ((o && o.swayMul) || 1);
+  };
   // The M249's authored legs are a real support, not decoration.  Crouch,
   // shoulder the gun, and stop on a solid surface to load the receiver into the
   // bipod: recoil, yaw and cone tighten hard.  Moving/airborne/swimming breaks
@@ -658,9 +712,16 @@
   // FPS ADS zoom: fpsmode owns the FPS camera (runs after systems/camera.js), so
   // the slight zoom-on-RMB lives here. We track the HIP fov (whatever camera.js
   // set this frame, captured only while NOT aiming so it never ratchets) and ease
-  // toward hip-ADS_FOV_DROP when RMB is held. ~14° tighter = a red-dot punch-in.
+  // toward the equipped optic's own ADS field of view when RMB is held.
   let fpsHipFov = 0;          // last-known hip fov (refreshed every non-ADS frame)
-  const ADS_FOV_DROP = 25;   // real ADS punch-in: hip ~75 → ADS ~50
+  /* ADS_FOV_DROP IS GONE, and it is worth naming what it was: ONE constant,
+     25 degrees, applied to every weapon in the game. A .50 Desert Eagle, an
+     MP5 and an M249 all "aimed" by narrowing the lens by exactly the same
+     amount, and the bolt sniper was special-cased somewhere else entirely
+     (systems/lockon.js). The ADS lens is now derived from the SIGHT THAT IS
+     ON THE GUN — CBZ.weaponAdsFov, one tangent-law owner in weapon-data.js —
+     so irons lean in 12 degrees, a red dot 17, and the M24's 10x M3A takes the
+     lens to 8.8 degrees because that is what ten power actually is. */
   const PUNCH_DUR = 0.26;
   let shotCD = 0, dryCD = 0, triggerHeld = false, reloadWeapon = 0;
   // reusable per-shot sfx options (no per-shot allocation at auto-fire rates):
@@ -1111,8 +1172,11 @@
         } else {
           flight = physics;   // ballistic: arrival is dist/speed by construction
         }
-      } else if (w.sniperDrop && dist > w.sniperDrop.start) {
-        flight = physics = (dist - w.sniperDrop.start) * (w.sniperDrop.flightPerM || 0) * 1000;
+      } else if (ballisticRound(w)) {
+        // a FLOWN bullet: time of flight is the integral of its own decaying
+        // velocity, so physics and flight are the same number by construction
+        // and the overhead row is zero. Nothing artificial is left in it.
+        flight = physics = bulletFlightTime(w, dist) * 1000;
       }
       const visMs = F / 2 + (CBZ.CONFIG.FX_BLAST_FIRSTFRAME === false && w.explosive ? F : 0);
       out[w.id] = {
@@ -1144,22 +1208,6 @@
     return out;
   };
 
-  // ---- tiny deferred-call queue (sniper travel-time feedback) ---------------
-  // GENERIC, NOT just for the sniper: a short list of {t, fn} pairs ticked
-  // every frame in the same onAlways(52,...) loop as everything else here.
-  // Used ONLY for the sniper's "travel time" (b): damage/game-state still
-  // resolves THIS frame (hit-scan, deterministic, doesn't risk the per-pellet
-  // branch logic below — see resolveShotSniper's header comment), but the
-  // PLAYER-FACING feedback (tracer draw, hit-thwack sfx/marker) is held back
-  // by the round's real flight time so a 200m headshot doesn't feel instant.
-  const deferred = [];
-  function deferCall(delay, fn) { if (delay > 0.001) deferred.push({ t: delay, fn }); else fn(); }
-  function updateDeferred(dt) {
-    for (let i = deferred.length - 1; i >= 0; i--) {
-      deferred[i].t -= dt;
-      if (deferred[i].t <= 0) { const fn = deferred[i].fn; deferred.splice(i, 1); fn(); }
-    }
-  }
 
   // ---- impact puff pool ----
   function radialTexture(stops) {
@@ -2081,10 +2129,15 @@
     return { corpse: best, dist: bestDist, head: bestHead, point: origin.clone().addScaledVector(dir, bestDist) };
   }
 
-  function resolveShot(w, dir, rayOrigin) {
+  /* `reach` (optional) is how far THIS trace looks, in metres. It exists
+     because a flown bullet resolves one frame-length SEGMENT at a time — the
+     weapon's whole `range` is the wrong question for a 15 m step — and it
+     defaults to w.range, so every hitscan caller is byte-identical. */
+  function resolveShot(w, dir, rayOrigin, reach) {
     eye.copy(rayOrigin || CBZ.camera.position);
-    const wall = wallDistance(eye, dir, w.range);
-    let maxT = wall ? Math.max(0.1, wall.distance - 0.04) : w.range;
+    const far = reach > 0 ? reach : w.range;
+    const wall = wallDistance(eye, dir, far);
+    let maxT = wall ? Math.max(0.1, wall.distance - 0.04) : far;
     // CARS are hard cover AND targets: the nearest car along the ray clamps the
     // search so a ped ducked behind a sedan is safe — the panel eats the round.
     const carHit = findCarHit(eye, dir, maxT);
@@ -2125,48 +2178,11 @@
       actor: null,
       wall: !!wall,
       wallHit: wall || null,   // raw raycast hit (face/object) — rockets stamp the struck face
-      dist: wall ? wall.distance : w.range,
-      point: wall ? wall.point.clone() : eye.clone().addScaledVector(dir, w.range),
+      dist: wall ? wall.distance : far,
+      point: wall ? wall.point.clone() : eye.clone().addScaledVector(dir, far),
     };
   }
 
-  // ---- SNIPER BULLET DROP / TRAVEL TIME (b) ----------------------------------
-  // Bullets stay hitscan for every weapon (the owner's call — see the file
-  // header's rocket section for the one weapon that gets a real projectile).
-  // The sniper alone gets a believable LONG-RANGE correction instead of the
-  // same flat linear falloff every other gun uses: past w.sniperDrop.start,
-  // the shot direction is bent DOWN by a small angle so the round lands lower
-  // than dead-center-of-reticle at extreme range (a real slow heavy bullet
-  // sags over a long flight), and resolution is delayed by a short, scaled
-  // "time of flight" so a 200m shot doesn't register as instant. Two-stage:
-  // resolve once with the TRUE aim to learn the real distance, then (only if
-  // past `start`) bend by an angle sized to that distance and re-resolve —
-  // so the bend amount always matches how far the round actually travels,
-  // not a guess. Returns the hit (possibly the original, undropped one) plus
-  // the flight delay (seconds, 0 for non-snipers / under `start`).
-  function resolveShotSniper(w, dir, rayOrigin) {
-    const drop = w.sniperDrop;
-    if (!drop) return { hit: resolveShot(w, dir, rayOrigin), delay: 0 };
-    const probe = resolveShot(w, dir, rayOrigin);
-    const dist = probe.dist != null ? probe.dist : w.range;
-    if (dist <= drop.start) return { hit: probe, delay: 0 };
-    const over = Math.min(dist - drop.start, (w.range - drop.start) || dist);
-    const dropAmt = Math.min(drop.maxDrop || 1.6, over * (drop.perM || 0.01));
-    // bend the AIM down by the small angle whose tangent over `dist` yields
-    // dropAmt world-units of sag at that range — small-angle, single basis
-    // rebuild (buildBasis already ran inside spreadDir's caller; redo it here
-    // since `dir` may have been perturbed by spread since). Uses `hitPoint`
-    // (an otherwise-unused module scratch Vector3) — NOT tmp2, which IS the
-    // live `origin` reference for this shot (muzzleWorld(tmp2) aliases it; a
-    // shared scratch write here would silently relocate the muzzle origin).
-    buildBasis(dir);
-    const ang = Math.atan2(dropAmt, Math.max(1, dist));
-    hitPoint.copy(dir).addScaledVector(aimUp, -ang).normalize();   // aimUp is "up" from buildBasis; bend DOWN
-    const dropped = resolveShot(w, hitPoint, rayOrigin);
-    dir.copy(hitPoint);   // caller's shotDir must reflect the bent path (tracer, glass-shatter ray, etc. all read it after this call)
-    const flight = Math.min(0.55, dist * (drop.flightPerM || 0));   // capped — a delay, not a simulated arc
-    return { hit: dropped, delay: flight };
-  }
 
   // ---- BULLET PENETRATION + RICOCHET (d) -------------------------------------
   // Every raycast used to stop dead at the first solid hit. Two small, RARE,
@@ -2556,6 +2572,404 @@
     if (r && r.msg) { if (CBZ.jailTell) CBZ.jailTell.hint(r.msg, 2.4); else if (CBZ.flashHint) CBZ.flashHint(r.msg, 2.4); }
   }
 
+  /* ============================================================ ONE ROUND, LANDED
+     EVERY consequence of a bullet arriving somewhere: the glass it went
+     through, the flesh, the corpse, the crowd, the aircraft, the car, the wall
+     — plus penetration and ricochet. This used to be the INSIDE of shoot()'s
+     per-pellet loop, which is exactly why it could only ever describe a
+     hitscan round: to be a projectile a bullet has to be able to arrive on a
+     LATER frame than the trigger pull, and none of this could be reached from
+     there. It is otherwise unchanged, line for line.
+
+     `acc` is the trigger pull's tally (head / down / hitSomething / the two
+     thud distances) — a shotgun fires nine of these and gets ONE hit marker,
+     and a flown rifle round carries its own so the marker arrives with it. */
+  function newLand(a) {
+    a = a || {};
+    a.head = false; a.down = false; a.hitSomething = false;
+    a.wallThud = -1; a.carThud = -1;
+    return a;
+  }
+  function roundFeedback(w, cal, acc) {
+    // Impact thud by caliber: a 7.62 lands a deeper, louder concrete smack.
+    // Once per trigger pull (or once per flown round), never over the flesh foley.
+    if (acc.wallThud >= 0 && !acc.hitSomething) surfaceThud("hit", cal, acc.wallThud);
+    // HIT MARKER: one flash per round that connected. Kills paint it red.
+    // (no "HEADSHOT"/"TARGET DOWN" text — the marker, gore and foley own the kill)
+    if (acc.hitSomething) flashHitMarker(acc.down, acc.head);
+    if (acc.head) { CBZ.sfx && CBZ.sfx("headshot"); }
+    else if (acc.hitSomething) { CBZ.sfx && CBZ.sfx("hit"); }
+  }
+  /* `segReach` is set ONLY by a flown bullet: the length of the SEGMENT this
+     round covered on this frame. It exists because updateBullets rewrites
+     hit.dist to the true travelled distance (the damage falloff, the impact
+     LOD and the bullet-hole ladder all mean "how far has this round flown"),
+     and the glass ray below means something completely different — how far
+     along THIS segment to look for a pane. Left conflated, a 300 m sniper
+     round shattered every window within 300 m of where it landed. */
+  function landRound(w, hit, shotDir, origin, cal, acc, segReach) {
+      // city: a window in this pellet's path shatters (glass never blocks the
+      // shot). EVERY round breaks the pane it actually passes through, out to
+      // wherever the bullet really travels (reach = the hit distance, already
+      // bounded by the wall/actor it strikes and the weapon's range). A 9mm
+      // round through a far window breaks it just like a rifle slug does — the
+      // old caliber clamp (GLASS_PISTOL_REACH) made only rifles break far glass.
+      // FIX 5 — GLASS-BEHIND-WALL POCK SUPPRESSION. cityShatterRay publishes the
+      // muzzle-ray distance at which it just broke a pane (CBZ.cityLastShatterDist,
+      // -1 if nothing broke). When THIS round broke a pane and the solid wall the
+      // raycast returned sits at (or just behind) that pane, the wall hit is really
+      // a wall BEHIND a now-open window — stamping a pock there double-marks a fresh
+      // break (the filmed bug: a fresh window break also pocks the wall behind it).
+      // We compare WORLD impact points because cityShatterRay measures from the
+      // muzzle `origin` while resolveShot measures `hit.dist` from the camera `eye`
+      // — different frames; the pane's world point is origin+shotDir*lastShatterDist.
+      let glassPockSuppress = false;
+      if (CBZ.game.mode === "city" && CBZ.cityShatterRay) {
+        // POINT-BLANK FIX (owner: "shoot a window close-up → it shoots through
+        // it"). The muzzle `origin` sits ~0.6-0.9m FORWARD of the eye, so pressing
+        // the barrel to a pane puts the muzzle PAST the glass. cityShatterRay only
+        // breaks a pane the ray CROSSES going forward, so a pane entirely behind
+        // the muzzle is never tested and survives the shot. Start the glass ray at
+        // the EYE instead — always on the near side of whatever the player is up
+        // against — and extend the reach by the same pull-back so the far endpoint
+        // is unchanged. FP: the camera IS the eye, so back up exactly to it (a pane
+        // BEHIND the eye then lands at negative t and is correctly ignored). TP
+        // (shoulder cam — the lens hangs metres back, so it is NOT the eye): a
+        // bounded pull-back behind the muzzle reaches the near side without reaching
+        // a pane behind the player. Backing up ALONG -shotDir keeps the ray colinear
+        // with the shot (no parallax onto a neighbouring pane).
+        // a flown round starts its glass ray where it actually was; only a
+        // muzzle shot needs the pull-back to the eye (see above).
+        let gback = segReach != null ? 0.05 : 1.0;
+        if (segReach == null && fps.active && CBZ.camera) gback = Math.min(6.5, origin.distanceTo(CBZ.camera.position));
+        const gox = origin.x - shotDir.x * gback, goy = origin.y - shotDir.y * gback, goz = origin.z - shotDir.z * gback;
+        const reach = (segReach != null ? segReach + 0.5 : (hit.dist != null ? hit.dist + 0.5 : w.range)) + gback;
+        CBZ.cityShatterRay(gox, goy, goz, shotDir.x, shotDir.y, shotDir.z, reach,
+          true, { directPlayer: true });
+        const sd = CBZ.cityLastShatterDist;
+        if (sd != null && sd >= 0 && hit.wall && hit.point) {
+          // pane world impact along the (eye-anchored) glass ray
+          const gpx = gox + shotDir.x * sd, gpy = goy + shotDir.y * sd, gpz = goz + shotDir.z * sd;
+          const ddx = hit.point.x - gpx, ddy = hit.point.y - gpy, ddz = hit.point.z - gpz;
+          // wall sits within the pane's offset + a wall depth (≈0.62) past it (or
+          // essentially coincident) → it's the wall behind the just-broken glass.
+          if (ddx * ddx + ddy * ddy + ddz * ddz < 0.95 * 0.95) glassPockSuppress = true;
+        }
+      }
+      if (hit.actor) {
+        acc.hitSomething = true;
+        const r = gunHit(hit, w, shotDir);
+        acc.head = acc.head || r.head;
+        acc.down = acc.down || r.down;
+        // taserfx owns the contact glow/arcs; the generic round impact is a
+        // large white bullet spark that visually erases the two probe contacts.
+        if (w.key !== "taser") spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
+        // One small flesh response per round/pellet. The death path already emits
+        // its single full gore event; calling that here as well used to create a
+        // pool-sized explosion for every pellet in a shotgun blast.
+        if (!w.nonlethal && !hit.actor.animal && CBZ.gore && CBZ.gore.spray) {
+          const wet = w.pellets ? 0.34 : (r.head ? 0.95 : 0.58) * Math.max(0.7, cal);
+          CBZ.gore.spray(hit.point, wet, shotDir);
+        }
+        // the body CARRIES the hit: a dark entry wound stamped on the struck
+        // part + blood soaking into the clothing (systems/wounds.js). Per
+        // pellet — a shotgun blast scatters wounds (wounds.js caps the burst).
+        // `dir` is what lets wounds.js work out where the round came OUT.
+        // shotDir is the normalised ray this shot was fired along and was
+        // already in scope — it just was not handed over, so the player's own
+        // shots produced entry marks only while SWAT fire (the one caller that
+        // did pass a direction) got exits.
+        if (CBZ.bodyWound && !w.nonlethal && !hit.actor.animal && (!r.down || hit.actor.kind === "cop")) CBZ.bodyWound(hit.actor, hit.point, { head: hit.head, cal, dir: shotDir });
+      } else if (hit.corpse) {
+        // DOWNED BODY (city-only): keep shooting it — it accumulates holes AND
+        // jerks. cityCorpseHit (ragdoll.js) wakes the verlet slot on-hit only,
+        // banks the impulse so it reacts, and STAMPS the wound itself — so we do
+        // NOT call bodyWound here (that would double-stamp). Force scales with
+        // caliber on the same scale cityRagdoll uses (~6 pistol .. ~14 shotgun).
+        acc.hitSomething = true;
+        const force = (w.pellets ? 5.2 : 4.4) * (0.65 + 0.42 * cal) * (w.knock || 1);
+        if (CBZ.cityCorpseHit) CBZ.cityCorpseHit(hit.corpse, hit.point, shotDir, force);
+        else if (CBZ.bodyWound && !w.nonlethal) CBZ.bodyWound(hit.corpse, hit.point, { head: hit.head, cal, dir: shotDir });
+        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
+        if (!w.nonlethal && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, w.pellets ? 0.28 : 0.42 * cal, shotDir);
+        // Only a muzzle-close shotgun headshot can sever even post-mortem
+        // (gore.js's decap read), guarded so one head only severs once. Live kills
+        // route this through cityKillPed's killCtx; a corpse has no kill ctx, so we
+        // drive the public sever directly. Non-heavy guns never reach here.
+        if (CBZ.game.mode === "city" && hit.head && !w.nonlethal && !hit.corpse._decapped
+            && CBZ.goreSever && w.key === "shotgun" && hit.dist <= 5.5) {
+          if (CBZ.goreSever(hit.corpse, "head", { dir: shotDir })) hit.corpse._decapped = true;
+        }
+      } else if (hit.crowd != null) {
+        // shot an ambient crowd member (the far NPCs that used to be unkillable)
+        acc.hitSomething = true;
+        if (!w.nonlethal && CBZ.cityCrowdKill) { CBZ.cityCrowdKill(hit.crowd, { head: hit.head, fromX: origin.x, fromZ: origin.z }); acc.down = true; }
+        acc.head = acc.head || hit.head;
+        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
+        if (!w.nonlethal && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, hit.head ? 0.9 : 0.55, shotDir);
+      } else if (hit.aircraft) {
+        // bullets chip the gunship — sparks off the hull, damage routed to the heli
+        acc.hitSomething = true;
+        if (CBZ.cityAircraftDamage) CBZ.cityAircraftDamage(w.damage, origin.x, origin.z);
+        spawnImpact(hit.point, false, true);
+        if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: -shotDir.x, y: 0.4, z: -shotDir.z }, { kind: "spark", power: 1.3 });
+      } else if (hit.lightAir) {
+        // plain gunfire on Air-1 / the ambient GA fleet: route the round into the
+        // module's own hp pool (police.js / airtraffic.js) via the callback the ray
+        // test attached — a small per-bullet chip, so it takes a burst. Same spark +
+        // decal feedback as the gunship; the module owns the wounded-smoke + down arc.
+        acc.hitSomething = true;
+        if (hit.lightAir.hitBullet) hit.lightAir.hitBullet(w.damage, origin.x, origin.z, hit.lightAir.rec);
+        spawnImpact(hit.point, false, true);
+        if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: -shotDir.x, y: 0.4, z: -shotDir.z }, { kind: "spark", power: 1.3 });
+      } else if (hit.civilAircraft) {
+        // The parked gate plane itself takes the round. Damage, boarding and
+        // later flight all share this record, so a wreck can never be hijacked.
+        acc.hitSomething = true;
+        if (CBZ.cityDamageCivilAircraft) CBZ.cityDamageCivilAircraft(hit.civilAircraft, w.damage, hit.point, { byPlayer: true });
+        spawnImpact(hit.point, false, true);
+        if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: -shotDir.x, y: 0.35, z: -shotDir.z }, { kind: "spark", power: Math.max(1, cal) });
+      } else if (hit.car) {
+        // CALIBER vs SHEET METAL: real engine damage (rifle rounds punch panels
+        // ~2x harder than a 9mm; heavy rounds also dent), a panel shudder, paint
+        // chips in THIS car's coat, and a persistent hole that RIDES the panel.
+        const car = hit.car;
+        if (CBZ.cityDamageCar) CBZ.cityDamageCar(car, (w.pellets ? 1.7 : 4.2) * cal, { byPlayer: true, crumple: cal >= 1.0, point: hit.point, normal: hit.normal, cal: cal });
+        spawnImpact(hit.point, false, cal >= 1.3);
+        if (CBZ.bulletImpact) {
+          CBZ.bulletImpact(hit.point, hit.normal, { kind: "spark", power: cal });
+          if (hit.dist < 45) CBZ.bulletImpact(hit.point, hit.normal, { kind: "chip", power: cal * 0.8, color: car.color });
+        }
+        if (CBZ.bulletHole && car.group) CBZ.bulletHole(hit.point, hit.normal, { size: 0.12 + cal * 0.1, parent: car.group, dist: hit.dist });
+        carShudder(car, cal);
+        if (acc.carThud < 0) acc.carThud = hit.dist;
+      } else if (hit.wall && glassPockSuppress) {
+        // FIX 5: the "wall" the ray returned is the solid wall BEHIND a pane this
+        // round just shattered — the bullet really flew through the fresh hole, so
+        // we stamp NO mark on the wall behind the glass (no pock, no spark/dust, no
+        // thud). The glass break + its shards/SFX already came from cityShatterRay
+        // above. Once the pane is open, follow-up rounds get hit.wall === false
+        // (cityShotHole skips the open frame) and fly past normally.
+      } else if (hit.wall) {
+        // B5: a confirmed losBlockers hit whose struck object carries
+        // userData.pieceId (systems/pieces.js stamps this on every piece
+        // mesh it builds) is a player-built piece taking a bullet — chip it
+        // for the weapon's base damage (structdamage.js applies the wood-
+        // tier bullet mult, ~0.35, so ~30 rifle rounds fell a 250hp wall).
+        // Only wall/doorframe-shaped pieces register as losBlockers today
+        // (systems/building.js's blockLOS flags), so this is the whole
+        // hit-testable set this wave; other bullet paths (car/actor/corpse/
+        // crowd/aircraft above) have no piece concept to hook.
+        const wallObj = hit.wallHit && hit.wallHit.object;
+        const pieceId = wallObj && wallObj.userData && wallObj.userData.pieceId;
+        if (pieceId != null && CBZ.structDamage) CBZ.structDamage.hit(pieceId, w.damage, "bullet");
+        spawnImpact(hit.point, false, cal >= 1.3);
+        // surface normal of the struck wall (faces back toward the shooter):
+        // walls in this game are near-vertical, so reflect the shot dir onto the
+        // horizontal plane for a believable ricochet cone + a persistent hole.
+        const nx = -shotDir.x, nz = -shotDir.z;
+        const nl = Math.hypot(nx, nz) || 1;
+        const wnx = nx / nl, wnz = nz / nl;
+        if (CBZ.bulletImpact) {
+          CBZ.bulletImpact(hit.point, { x: wnx, y: 0.18, z: wnz }, { kind: "spark", power: cal });
+          // heavy rounds CHEW concrete: a second dust kick + the odd chunk
+          // knocked clean off the face (LOD: only worth drawing inside ~45u)
+          if (cal >= 1.2 && hit.dist < 45) {
+            CBZ.bulletImpact(hit.point, { x: wnx, y: 0.3, z: wnz }, { kind: "dust", power: cal - 0.3 });
+            if (CBZ.cityChunk && rng() < (cal - 1.1) * 0.45) CBZ.cityChunk(hit.point.x, hit.point.y, hit.point.z, { count: 1, force: 1.6 });
+          }
+        }
+        // persistent pock — static walls remember the hit in world space;
+        // moving doors carry the same mark with the panel when they open.
+        if (CBZ.bulletHole) CBZ.bulletHole(hit.point, { x: wnx, y: 0, z: wnz }, {
+          size: 0.15 + cal * 0.13, dist: hit.dist,
+          parent: wallWoundParent(hit.wallHit),
+        });
+        else if (CBZ.cityBulletHole) CBZ.cityBulletHole(hit.point.x, hit.point.y, hit.point.z, wnx, 0, wnz);
+        // rifle-class rounds CHEW: sustained heavy fire on one wall cell quietly
+        // grinds open a murder hole (city/fracture.js counts per 1.2u cell)
+        if ((CBZ.modeHas ? CBZ.modeHas("breach") : CBZ.game.mode === "city") &&
+            cal >= 1.2 && !w.pellets && CBZ.cityFracture && CBZ.cityFracture.chewWall)
+          CBZ.cityFracture.chewWall(hit.point.x, hit.point.y, hit.point.z);
+        if (acc.wallThud < 0) acc.wallThud = hit.dist;
+        // (d) PENETRATION / RICOCHET — purely additive flavor on top of the
+        // normal wall mark above; rare + telegraphed (see the function header).
+        tryPenetrateOrRicochet(w, hit, shotDir, cal, wnx, wnz);
+      }
+  }
+
+  /* ============================================================ PROJECTILES
+     THE ROUND LEAVES THE BARREL AND THEN IT HAS TO GET THERE.
+
+     WHAT WAS WRONG. Every bullet in this game was a Raycaster call in the same
+     frame as the trigger pull, and the ONE weapon that pretended otherwise —
+     the sniper — did it by bending a hitscan ray downward by an invented angle
+     and delaying the HIT MARKER by an invented number of milliseconds. So a
+     400 m shot arrived instantly, drop was a cosmetic nudge nobody could aim
+     around, and the scope's mil ticks marked nothing.
+
+     WHAT IS TRUE NOW. A rifle-class round is a real body: it leaves the muzzle
+     at the cartridge's published velocity, loses speed to drag at a rate
+     solved from that cartridge's published retained velocity at 300 m, and
+     falls at 9.81 m/s^2 the whole way. Each frame it resolves the SEGMENT it
+     covered (one raycast, through the same resolveShot every hitscan round
+     uses, so cover, cars, glass and actors all behave identically) and lands
+     through landRound() above the instant it touches something.
+
+     WHICH WEAPONS. The test is the CARTRIDGE, not a list of names:
+     v0 >= 600 m/s is the rifle line — carbine, AK, M249, the M24. Below it sit
+     the pistols, the SMGs and the shotgun, and they stay hitscan on purpose:
+     their engagement bands top out around 90 m, where a 9 mm at 360 m/s has
+     dropped 3.7 cm, which is under half a torso width and invisible. Flying
+     them would cost a raycast a frame each to model something no player can
+     see. Pellet weapons are excluded outright (nine flying bodies per trigger
+     pull for a gun whose whole character is the cone).
+
+     ?cfg_WEAPON_BALLISTICS=0 puts every weapon back on hitscan — the one
+     subsystem-level revert this pass ships. */
+  const GRAV = 9.81;
+  function ballisticRound(w) {
+    return !!(w && w.v0 >= 600 && !w.pellets && !w.melee && !w.explosive &&
+      CBZ.CONFIG.WEAPON_BALLISTICS !== false);
+  }
+  /* Time of flight to `dist`, integrated the same way the live bullet is
+     stepped: v(t) = v0 * exp(-dragK * t), so distance is the integral of that
+     and the inverse has a closed form. Used by the latency audit and by any
+     tool asking "how long is this round in the air". */
+  function bulletFlightTime(w, dist) {
+    const v0 = w.v0 || 0, k = w.dragK || 0;
+    if (v0 <= 0) return 0;
+    if (k <= 1e-4) return dist / v0;
+    const reach = v0 / k;                     // asymptotic maximum travel
+    if (dist >= reach * 0.999) return 12;     // never gets there
+    return -Math.log(1 - dist / reach) / k;
+  }
+  CBZ.bulletFlightTime = bulletFlightTime;
+  /* THE DROP, in metres, of a level shot at `dist`. Not used by the sim (the
+     live bullet just falls); published because a probe has to be able to state
+     the holdover the mil ticks are for, and re-deriving it in the tool is how
+     a tool ends up measuring its own arithmetic. */
+  CBZ.bulletDrop = function (w, dist) {
+    if (!ballisticRound(w)) return 0;
+    const t = bulletFlightTime(w, dist);
+    return 0.5 * GRAV * t * t;
+  };
+
+  const BULLET_MAX = 24;
+  const bullets = [];
+  for (let i = 0; i < BULLET_MAX; i++) {
+    bullets.push({ live: false, w: null, cal: 1, t: 0, dist: 0, max: 0,
+                   x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, acc: newLand() });
+  }
+  let bulletIdx = 0;
+  /* ONE integration step. At 900 m/s a frame is ~15 m of travel and the
+     gravity sag WITHIN that step is 1.4 mm, so the frame-length segment
+     between two of these is a straight enough line to raycast and sub-stepping
+     buys nothing. Drag is exponential velocity decay at the cartridge's own
+     dragK; gravity is 9.81 and applies to the vertical channel only. */
+  function stepBullet(b, dt) {
+    const k = b.w.dragK || 0;
+    const decay = k > 0 ? Math.exp(-k * dt) : 1;
+    b.vx *= decay; b.vz *= decay;
+    b.vy = b.vy * decay - GRAV * dt;
+    b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
+  }
+  const _bPrev = new THREE.Vector3(), _bNow = new THREE.Vector3(), _bDir = new THREE.Vector3();
+  function launchBullet(w, origin, dir, cal) {
+    const b = bullets[bulletIdx];
+    bulletIdx = (bulletIdx + 1) % bullets.length;
+    b.live = true; b.w = w; b.cal = cal; b.t = 0; b.dist = 0;
+    b.max = w.range;
+    b.x = origin.x; b.y = origin.y; b.z = origin.z;
+    const v = w.v0 || 800;
+    b.vx = dir.x * v; b.vy = dir.y * v; b.vz = dir.z * v;
+    newLand(b.acc);
+    return b;
+  }
+  function updateBullets(dt) {
+    if (dt <= 0) return;
+    for (let i = 0; i < bullets.length; i++) {
+      const b = bullets[i];
+      if (!b.live) continue;
+      const w = b.w;
+      _bPrev.set(b.x, b.y, b.z);
+      stepBullet(b, dt);
+      _bNow.set(b.x, b.y, b.z);
+      b.t += dt;
+      const seg = _bNow.distanceTo(_bPrev);
+      b.dist += seg;
+      if (seg > 1e-4) {
+        _bDir.copy(_bNow).sub(_bPrev).multiplyScalar(1 / seg);
+        const hit = resolveShot(w, _bDir, _bPrev, Math.min(seg, Math.max(0.2, b.max - (b.dist - seg))));
+        // resolveShot always answers; a "wall:false, actor:null" answer at the
+        // end of the segment is empty air and the round keeps flying.
+        const struck = hit && (hit.actor || hit.wall || hit.car || hit.corpse ||
+          hit.crowd != null || hit.aircraft || hit.civilAircraft || hit.lightAir);
+        // the visible round IS the tracer: one short streak per frame along the
+        // segment it actually covered, so the streak travels instead of drawing
+        // the whole flight path in the frame the trigger was pulled.
+        fireTracer(_bPrev, struck && hit.point ? hit.point : _bNow, w.tracer, 0.055);
+        if (struck) {
+          /* hit.dist IS MEASURED FROM THE SEGMENT, and everything downstream
+             means "how far has this round flown": the damage falloff curve,
+             the 45 m impact-detail LOD, the bullet-hole size ladder. Left
+             alone, a 300 m sniper round would report the 13 m it covered in
+             the last frame and land at point-blank damage. Rewritten to the
+             true travelled distance before landRound ever sees it. */
+          const segT = hit.dist || 0;
+          hit.dist = (b.dist - seg) + segT;
+          landRound(w, hit, _bDir, _bPrev, b.cal, b.acc, segT);
+          roundFeedback(w, b.cal, b.acc);
+          b.live = false;
+          continue;
+        }
+        /* GLASS ON A SEGMENT THAT HIT NOTHING. landRound owns the pane a
+           round breaks on the way to what it struck; a bullet that crosses a
+           window mid-flight and carries on has no landRound call to do it, so
+           the pane would survive a rifle round passing through it. Same ray,
+           city only, once per segment. */
+        if (CBZ.game.mode === "city" && CBZ.cityShatterRay) {
+          CBZ.cityShatterRay(_bPrev.x, _bPrev.y, _bPrev.z, _bDir.x, _bDir.y, _bDir.z, seg,
+            true, { directPlayer: true });
+        }
+      }
+      if (b.dist >= b.max || b.t > 4) b.live = false;   // out of range / lost
+    }
+  }
+  /* WHAT A LEVEL SHOT DOES AT RANGE — DRIVE-ONLY, for
+     tools/warlord-cover-check.mjs. It runs the SAME stepBullet the live round
+     runs, on a scratch body, with no world in the way: fire dead level from
+     the origin and report how far the round has fallen by the time it has
+     covered `dist`. It exists because the alternative is a tool re-deriving
+     the drop in node, which measures the tool's arithmetic and not the game's.
+     A hitscan weapon answers 0, which is the truthful answer for one. */
+  CBZ.fpsBallisticProbe = function (id, dist) {
+    const w = CBZ.weaponById ? CBZ.weaponById(id) : null;
+    if (!w) return null;
+    const out = { id: id, ballistic: ballisticRound(w), v0: w.v0 || 0, dist: dist,
+                  drop: 0, tof: 0, vEnd: w.v0 || 0 };
+    if (!out.ballistic) return out;
+    const b = { w: w, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: -(w.v0 || 800) };
+    const h = 1 / 480;
+    let flown = 0, t = 0;
+    while (flown < dist && t < 6) {
+      const x0 = b.x, y0 = b.y, z0 = b.z;
+      stepBullet(b, h);
+      flown += Math.hypot(b.x - x0, b.y - y0, b.z - z0);
+      t += h;
+    }
+    out.drop = Math.round(-b.y * 1000) / 1000;
+    out.tof = Math.round(t * 1000) / 1000;
+    out.vEnd = Math.round(Math.hypot(b.vx, b.vy, b.vz));
+    return out;
+  };
+  CBZ.fpsBulletsInFlight = function () {
+    let n = 0;
+    for (let i = 0; i < bullets.length; i++) if (bullets[i].live) n++;
+    return n;
+  };
+
+  const _shotAcc = newLand();
   function shoot() {
     if (!(fps.active || shoulderActive()) || CBZ.game.state !== "playing" || CBZ.player.dead || (CBZ.player.stun || 0) > 0 || CBZ.player.driving || CBZ.player._swim) return;
     if (!armed()) {
@@ -2625,12 +3039,23 @@
     // machine publishes the hook — feature-detected so this file stands alone).
     // One choke point: supportK feeds the cosmetic recoil, side kick, bloom
     // pump AND the real pitch/yaw view kicks below.
-    const supportK = bipodActive(w) ? 0.34 : (CBZ.playerProneSteady ? CBZ.playerProneSteady(w) : 1);
+    /* THE BRACE LADDER. A deployed bipod is the floor; below it, the stance
+       the body is actually in. physics.js's playerProneSteady was an LMG-only
+       special case bolted on top of a stance the gun otherwise ignored — it
+       still composes, so the M249 keeps its extra prone reward, but every
+       other weapon in the game now gets paid for going down too. */
+    const supportK = bipodActive(w)
+      ? 0.34
+      : (STANCE_RECOIL[stanceOf()] || 1) * (CBZ.playerProneSteady ? CBZ.playerProneSteady(w) : 1);
     // cosmetic accumulators (viewmodel kick + reticle bloom) — unchanged feel,
     // just softened under ADS so holding RMB visibly settles the gun.
     recoil = Math.min(w.maxRecoil, recoil + w.recoil * RK * adsK * supportK * modRec);
     recoilSide += (rng() * 2 - 1) * w.sideKick * RK * adsK * supportK * modRec;
-    recoilHold = 0.06;   // brief hold before recovery kicks in (snappy kick → settle)
+    /* SETTLE TIME IS PER WEAPON. 0.06 s for everything meant a Desert Eagle
+       and an Uzi returned to centre on the same clock. `w.settle` is how long
+       the muzzle stays up before the spring starts pulling it back — short on
+       a light fast gun, long on a bolt gun you have to work anyway. */
+    recoilHold = w.settle > 0 ? w.settle : 0.06;
     // each shot pumps bloom; auto fire stacks fast, single shots barely at all.
     // capped so even mag-dumps stay usable. moving adds extra below in the loop.
     bloom = Math.min(w.spread * 2.6, bloom + w.spread * (w.auto ? 0.9 : 0.45) * adsK * supportK);
@@ -2643,7 +3068,17 @@
       const basePitch = w.climb * RK;
       const jitter = 0.92 + rng() * 0.16;                       // <=8% noise
       const pitchKick = basePitch * ramp * firstShot * jitter * adsK * supportK * modRec;
-      const pat = YAW_PATTERN[shotsInBurst % YAW_PATTERN.length];
+      /* THE PATTERN IS THE WEAPON'S OWN. YAW_PATTERN was ONE fifteen-entry
+         table shared by every automatic weapon in the game, scaled by a single
+         per-gun `yawWeave` amplitude — so an AK-47 and an MP5 climbed and
+         weaved through the identical shape at different sizes, and there was
+         nothing to LEARN about a particular gun. A row's `spray` (weapon-data)
+         is that gun's own horizontal signature; the shared table is the
+         fallback for anything that has not declared one, so nothing regresses.
+         Vertical climb stays w.climb x the ramp: the shape a rifle draws is
+         mostly up, and the horizontal is what tells two rifles apart. */
+      const sprayTab = (w.spray && w.spray.length) ? w.spray : YAW_PATTERN;
+      const pat = sprayTab[shotsInBurst % sprayTab.length];
       const yawKick = (pat * (w.yawWeave || 0.6) + (rng() * 2 - 1) * 0.15) * basePitch * ramp * adsK * supportK * modRec;
       kickView(pitchKick, yawKick);
       shotsInBurst++;
@@ -3082,6 +3517,12 @@
     // single biggest accuracy change, à la CoD. Applies in all modes (strict
     // improvement); hip cone unchanged when RMB isn't held.
     const adsSpreadK = aimHeld ? 0.4 : 1;
+    /* STANCE. A crouched shooter groups tighter than a standing one and a
+       prone one tighter again — see the STANCE block above for where these
+       come from. This is the ONE place the cone learns the body exists.
+       bipodActive() still outranks it (0.32 below), because a gun resting on
+       its own legs is a better brace than any human position. */
+    const stanceSpreadK = STANCE_SPREAD[stanceOf()] || 1;
     // SUPPRESSION (c): a round that just buzzed the player rattles their aim
     // for a few seconds (gunfx.js tracks it off the SAME near-miss test that
     // already drives the "you're being shot at" muzzle-flash/bolt juice — no
@@ -3090,245 +3531,35 @@
     // modSpr = the equipped scope/grip's spread multiplier (gun-mods branch).
     const suppressK = CBZ.suppressionAccuracyMul ? CBZ.suppressionAccuracyMul(CBZ.player) : 1;
     const cone = (w.spread * (1 + recoil * 0.18) + bloom + moveBloom) * adsSpreadK *
-      (supported ? 0.32 : 1) * suppressK * modSpr;
+      stanceSpreadK * (supported ? 0.32 : 1) * suppressK * modSpr;
     const cal = caliber(w);   // round weight, threaded into every surface impact below
-    let head = false, down = false, hitSomething = false;
-    let wallThudDist = -1, carThudDist = -1;   // one thud per trigger pull, not per pellet
-    let feedbackDelay = 0;   // (b) sniper travel-time: hoisted out of the loop so the post-loop hit-marker/sfx can wait for it too (sniper is always single-pellet, so there's exactly one value to carry)
+    /* PROJECTILE OR RAY — see the PROJECTILES block. A ballistic round is
+       launched here and lands on a later frame; everything else resolves in
+       this one, exactly as it always did. */
+    const ballistic = ballisticRound(w);
+    const acc = newLand(_shotAcc);
     for (let i = 0; i < pellets; i++) {
       spreadDir(fwd, cone, shotDir);
-      // (b) SNIPER DROP/TRAVEL-TIME: every other weapon resolves exactly as
-      // before (resolveShotSniper no-ops to plain resolveShot when the
-      // weapon carries no sniperDrop table). For the sniper at long range,
-      // shotDir is bent down in-place to the real drop-compensated path
-      // BEFORE resolveShot runs, so every system below (glass shatter ray,
-      // wall pock, gore, etc.) reads the SAME dropped trajectory — there's
-      // only one resolved path per shot, not a cosmetic one and a real one.
-      const sniperShot = resolveShotSniper(w, shotDir, origin);
-      const hit = sniperShot.hit;
-      feedbackDelay = sniperShot.delay;
+      if (ballistic) { launchBullet(w, origin, shotDir, cal); continue; }
+      const hit = resolveShot(w, shotDir, origin);
       const end = hit.point || eye.clone().addScaledVector(shotDir, w.range);
-      // Damage/world-state above (gunHit, glass, wall pocks...) still resolve
-      // THIS frame — only the player-FACING feedback (tracer beam + the
-      // worst-of-the-burst hit marker/hit-sfx further down) waits for the
-      // round's real flight time, so a 200m headshot doesn't feel instant
-      // without touching the deterministic hit-resolution timing at all.
       if (i < 5 || pellets === 1) {
         if (w.key === "taser" && CBZ.taserFx && CBZ.taserFx.fire) {
           // Twin physical probe wires + body arc replace the firearm tracer.
           CBZ.taserFx.fire(origin, end, { target: hit.actor || null });
-        } else if (sniperShot.delay > 0) deferCall(sniperShot.delay, function () { fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055); });
-        else fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055);
+        } else fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055);
       }
-      // city: a window in this pellet's path shatters (glass never blocks the
-      // shot). EVERY round breaks the pane it actually passes through, out to
-      // wherever the bullet really travels (reach = the hit distance, already
-      // bounded by the wall/actor it strikes and the weapon's range). A 9mm
-      // round through a far window breaks it just like a rifle slug does — the
-      // old caliber clamp (GLASS_PISTOL_REACH) made only rifles break far glass.
-      // FIX 5 — GLASS-BEHIND-WALL POCK SUPPRESSION. cityShatterRay publishes the
-      // muzzle-ray distance at which it just broke a pane (CBZ.cityLastShatterDist,
-      // -1 if nothing broke). When THIS round broke a pane and the solid wall the
-      // raycast returned sits at (or just behind) that pane, the wall hit is really
-      // a wall BEHIND a now-open window — stamping a pock there double-marks a fresh
-      // break (the filmed bug: a fresh window break also pocks the wall behind it).
-      // We compare WORLD impact points because cityShatterRay measures from the
-      // muzzle `origin` while resolveShot measures `hit.dist` from the camera `eye`
-      // — different frames; the pane's world point is origin+shotDir*lastShatterDist.
-      let glassPockSuppress = false;
-      if (CBZ.game.mode === "city" && CBZ.cityShatterRay) {
-        // POINT-BLANK FIX (owner: "shoot a window close-up → it shoots through
-        // it"). The muzzle `origin` sits ~0.6-0.9m FORWARD of the eye, so pressing
-        // the barrel to a pane puts the muzzle PAST the glass. cityShatterRay only
-        // breaks a pane the ray CROSSES going forward, so a pane entirely behind
-        // the muzzle is never tested and survives the shot. Start the glass ray at
-        // the EYE instead — always on the near side of whatever the player is up
-        // against — and extend the reach by the same pull-back so the far endpoint
-        // is unchanged. FP: the camera IS the eye, so back up exactly to it (a pane
-        // BEHIND the eye then lands at negative t and is correctly ignored). TP
-        // (shoulder cam — the lens hangs metres back, so it is NOT the eye): a
-        // bounded pull-back behind the muzzle reaches the near side without reaching
-        // a pane behind the player. Backing up ALONG -shotDir keeps the ray colinear
-        // with the shot (no parallax onto a neighbouring pane).
-        let gback = 1.0;
-        if (fps.active && CBZ.camera) gback = Math.min(6.5, origin.distanceTo(CBZ.camera.position));
-        const gox = origin.x - shotDir.x * gback, goy = origin.y - shotDir.y * gback, goz = origin.z - shotDir.z * gback;
-        const reach = (hit.dist != null ? hit.dist + 0.5 : w.range) + gback;
-        CBZ.cityShatterRay(gox, goy, goz, shotDir.x, shotDir.y, shotDir.z, reach,
-          true, { directPlayer: true });
-        const sd = CBZ.cityLastShatterDist;
-        if (sd != null && sd >= 0 && hit.wall && hit.point) {
-          // pane world impact along the (eye-anchored) glass ray
-          const gpx = gox + shotDir.x * sd, gpy = goy + shotDir.y * sd, gpz = goz + shotDir.z * sd;
-          const ddx = hit.point.x - gpx, ddy = hit.point.y - gpy, ddz = hit.point.z - gpz;
-          // wall sits within the pane's offset + a wall depth (≈0.62) past it (or
-          // essentially coincident) → it's the wall behind the just-broken glass.
-          if (ddx * ddx + ddy * ddy + ddz * ddz < 0.95 * 0.95) glassPockSuppress = true;
-        }
-      }
-      if (hit.actor) {
-        hitSomething = true;
-        const r = gunHit(hit, w, shotDir);
-        head = head || r.head;
-        down = down || r.down;
-        // taserfx owns the contact glow/arcs; the generic round impact is a
-        // large white bullet spark that visually erases the two probe contacts.
-        if (w.key !== "taser") spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
-        // One small flesh response per round/pellet. The death path already emits
-        // its single full gore event; calling that here as well used to create a
-        // pool-sized explosion for every pellet in a shotgun blast.
-        if (!w.nonlethal && !hit.actor.animal && CBZ.gore && CBZ.gore.spray) {
-          const wet = w.pellets ? 0.34 : (r.head ? 0.95 : 0.58) * Math.max(0.7, cal);
-          CBZ.gore.spray(hit.point, wet, shotDir);
-        }
-        // the body CARRIES the hit: a dark entry wound stamped on the struck
-        // part + blood soaking into the clothing (systems/wounds.js). Per
-        // pellet — a shotgun blast scatters wounds (wounds.js caps the burst).
-        // `dir` is what lets wounds.js work out where the round came OUT.
-        // shotDir is the normalised ray this shot was fired along and was
-        // already in scope — it just was not handed over, so the player's own
-        // shots produced entry marks only while SWAT fire (the one caller that
-        // did pass a direction) got exits.
-        if (CBZ.bodyWound && !w.nonlethal && !hit.actor.animal && (!r.down || hit.actor.kind === "cop")) CBZ.bodyWound(hit.actor, hit.point, { head: hit.head, cal, dir: shotDir });
-      } else if (hit.corpse) {
-        // DOWNED BODY (city-only): keep shooting it — it accumulates holes AND
-        // jerks. cityCorpseHit (ragdoll.js) wakes the verlet slot on-hit only,
-        // banks the impulse so it reacts, and STAMPS the wound itself — so we do
-        // NOT call bodyWound here (that would double-stamp). Force scales with
-        // caliber on the same scale cityRagdoll uses (~6 pistol .. ~14 shotgun).
-        hitSomething = true;
-        const force = (w.pellets ? 5.2 : 4.4) * (0.65 + 0.42 * cal) * (w.knock || 1);
-        if (CBZ.cityCorpseHit) CBZ.cityCorpseHit(hit.corpse, hit.point, shotDir, force);
-        else if (CBZ.bodyWound && !w.nonlethal) CBZ.bodyWound(hit.corpse, hit.point, { head: hit.head, cal, dir: shotDir });
-        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
-        if (!w.nonlethal && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, w.pellets ? 0.28 : 0.42 * cal, shotDir);
-        // Only a muzzle-close shotgun headshot can sever even post-mortem
-        // (gore.js's decap read), guarded so one head only severs once. Live kills
-        // route this through cityKillPed's killCtx; a corpse has no kill ctx, so we
-        // drive the public sever directly. Non-heavy guns never reach here.
-        if (CBZ.game.mode === "city" && hit.head && !w.nonlethal && !hit.corpse._decapped
-            && CBZ.goreSever && w.key === "shotgun" && hit.dist <= 5.5) {
-          if (CBZ.goreSever(hit.corpse, "head", { dir: shotDir })) hit.corpse._decapped = true;
-        }
-      } else if (hit.crowd != null) {
-        // shot an ambient crowd member (the far NPCs that used to be unkillable)
-        hitSomething = true;
-        if (!w.nonlethal && CBZ.cityCrowdKill) { CBZ.cityCrowdKill(hit.crowd, { head: hit.head, fromX: origin.x, fromZ: origin.z }); down = true; }
-        head = head || hit.head;
-        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
-        if (!w.nonlethal && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, hit.head ? 0.9 : 0.55, shotDir);
-      } else if (hit.aircraft) {
-        // bullets chip the gunship — sparks off the hull, damage routed to the heli
-        hitSomething = true;
-        if (CBZ.cityAircraftDamage) CBZ.cityAircraftDamage(w.damage, origin.x, origin.z);
-        spawnImpact(hit.point, false, true);
-        if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: -shotDir.x, y: 0.4, z: -shotDir.z }, { kind: "spark", power: 1.3 });
-      } else if (hit.lightAir) {
-        // plain gunfire on Air-1 / the ambient GA fleet: route the round into the
-        // module's own hp pool (police.js / airtraffic.js) via the callback the ray
-        // test attached — a small per-bullet chip, so it takes a burst. Same spark +
-        // decal feedback as the gunship; the module owns the wounded-smoke + down arc.
-        hitSomething = true;
-        if (hit.lightAir.hitBullet) hit.lightAir.hitBullet(w.damage, origin.x, origin.z, hit.lightAir.rec);
-        spawnImpact(hit.point, false, true);
-        if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: -shotDir.x, y: 0.4, z: -shotDir.z }, { kind: "spark", power: 1.3 });
-      } else if (hit.civilAircraft) {
-        // The parked gate plane itself takes the round. Damage, boarding and
-        // later flight all share this record, so a wreck can never be hijacked.
-        hitSomething = true;
-        if (CBZ.cityDamageCivilAircraft) CBZ.cityDamageCivilAircraft(hit.civilAircraft, w.damage, hit.point, { byPlayer: true });
-        spawnImpact(hit.point, false, true);
-        if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: -shotDir.x, y: 0.35, z: -shotDir.z }, { kind: "spark", power: Math.max(1, cal) });
-      } else if (hit.car) {
-        // CALIBER vs SHEET METAL: real engine damage (rifle rounds punch panels
-        // ~2x harder than a 9mm; heavy rounds also dent), a panel shudder, paint
-        // chips in THIS car's coat, and a persistent hole that RIDES the panel.
-        const car = hit.car;
-        if (CBZ.cityDamageCar) CBZ.cityDamageCar(car, (w.pellets ? 1.7 : 4.2) * cal, { byPlayer: true, crumple: cal >= 1.0, point: hit.point, normal: hit.normal, cal: cal });
-        spawnImpact(hit.point, false, cal >= 1.3);
-        if (CBZ.bulletImpact) {
-          CBZ.bulletImpact(hit.point, hit.normal, { kind: "spark", power: cal });
-          if (hit.dist < 45) CBZ.bulletImpact(hit.point, hit.normal, { kind: "chip", power: cal * 0.8, color: car.color });
-        }
-        if (CBZ.bulletHole && car.group) CBZ.bulletHole(hit.point, hit.normal, { size: 0.12 + cal * 0.1, parent: car.group, dist: hit.dist });
-        carShudder(car, cal);
-        if (carThudDist < 0) carThudDist = hit.dist;
-      } else if (hit.wall && glassPockSuppress) {
-        // FIX 5: the "wall" the ray returned is the solid wall BEHIND a pane this
-        // round just shattered — the bullet really flew through the fresh hole, so
-        // we stamp NO mark on the wall behind the glass (no pock, no spark/dust, no
-        // thud). The glass break + its shards/SFX already came from cityShatterRay
-        // above. Once the pane is open, follow-up rounds get hit.wall === false
-        // (cityShotHole skips the open frame) and fly past normally.
-      } else if (hit.wall) {
-        // B5: a confirmed losBlockers hit whose struck object carries
-        // userData.pieceId (systems/pieces.js stamps this on every piece
-        // mesh it builds) is a player-built piece taking a bullet — chip it
-        // for the weapon's base damage (structdamage.js applies the wood-
-        // tier bullet mult, ~0.35, so ~30 rifle rounds fell a 250hp wall).
-        // Only wall/doorframe-shaped pieces register as losBlockers today
-        // (systems/building.js's blockLOS flags), so this is the whole
-        // hit-testable set this wave; other bullet paths (car/actor/corpse/
-        // crowd/aircraft above) have no piece concept to hook.
-        const wallObj = hit.wallHit && hit.wallHit.object;
-        const pieceId = wallObj && wallObj.userData && wallObj.userData.pieceId;
-        if (pieceId != null && CBZ.structDamage) CBZ.structDamage.hit(pieceId, w.damage, "bullet");
-        spawnImpact(hit.point, false, cal >= 1.3);
-        // surface normal of the struck wall (faces back toward the shooter):
-        // walls in this game are near-vertical, so reflect the shot dir onto the
-        // horizontal plane for a believable ricochet cone + a persistent hole.
-        const nx = -shotDir.x, nz = -shotDir.z;
-        const nl = Math.hypot(nx, nz) || 1;
-        const wnx = nx / nl, wnz = nz / nl;
-        if (CBZ.bulletImpact) {
-          CBZ.bulletImpact(hit.point, { x: wnx, y: 0.18, z: wnz }, { kind: "spark", power: cal });
-          // heavy rounds CHEW concrete: a second dust kick + the odd chunk
-          // knocked clean off the face (LOD: only worth drawing inside ~45u)
-          if (cal >= 1.2 && hit.dist < 45) {
-            CBZ.bulletImpact(hit.point, { x: wnx, y: 0.3, z: wnz }, { kind: "dust", power: cal - 0.3 });
-            if (CBZ.cityChunk && rng() < (cal - 1.1) * 0.45) CBZ.cityChunk(hit.point.x, hit.point.y, hit.point.z, { count: 1, force: 1.6 });
-          }
-        }
-        // persistent pock — static walls remember the hit in world space;
-        // moving doors carry the same mark with the panel when they open.
-        if (CBZ.bulletHole) CBZ.bulletHole(hit.point, { x: wnx, y: 0, z: wnz }, {
-          size: 0.15 + cal * 0.13, dist: hit.dist,
-          parent: wallWoundParent(hit.wallHit),
-        });
-        else if (CBZ.cityBulletHole) CBZ.cityBulletHole(hit.point.x, hit.point.y, hit.point.z, wnx, 0, wnz);
-        // rifle-class rounds CHEW: sustained heavy fire on one wall cell quietly
-        // grinds open a murder hole (city/fracture.js counts per 1.2u cell)
-        if ((CBZ.modeHas ? CBZ.modeHas("breach") : CBZ.game.mode === "city") &&
-            cal >= 1.2 && !w.pellets && CBZ.cityFracture && CBZ.cityFracture.chewWall)
-          CBZ.cityFracture.chewWall(hit.point.x, hit.point.y, hit.point.z);
-        if (wallThudDist < 0) wallThudDist = hit.dist;
-        // (d) PENETRATION / RICOCHET — purely additive flavor on top of the
-        // normal wall mark above; rare + telegraphed (see the function header).
-        tryPenetrateOrRicochet(w, hit, shotDir, cal, wnx, wnz);
-      }
+      landRound(w, hit, shotDir, origin, cal, acc);
     }
-    // Impact thud by caliber: a 7.62 lands a deeper, louder concrete smack.
-    // Once per trigger pull, and never over the flesh-hit foley below.
-    if (wallThudDist >= 0 && !hitSomething) surfaceThud("hit", cal, wallThudDist);
-    // HIT MARKER: one flash per trigger pull that connected. Kills paint it red.
-    // (b) sniper travel-time: the marker/sfx wait for feedbackDelay too (same
-    // "round's still in the air" feel as the deferred tracer above) — game
-    // STATE (damage, kills, crime) already happened this frame; only the
-    // confirmation the PLAYER sees/hears is held back to match the flight.
-    if (feedbackDelay > 0) {
-      if (hitSomething) deferCall(feedbackDelay, function () { flashHitMarker(down, head); });
-      if (head) deferCall(feedbackDelay, function () { CBZ.sfx && CBZ.sfx("headshot"); });
-      else if (hitSomething) deferCall(feedbackDelay, function () { CBZ.sfx && CBZ.sfx("hit"); });
-    } else {
-      if (hitSomething) flashHitMarker(down, head);
-      // (no "HEADSHOT"/"TARGET DOWN" text — the red hit marker, gore and foley own the kill)
-      if (head) { CBZ.sfx && CBZ.sfx("headshot"); }
-      else if (hitSomething) { CBZ.sfx && CBZ.sfx("hit"); }
-    }
+    /* A FLOWN ROUND HAS NOT ARRIVED YET, so there is nothing to confirm: the
+       marker, the thud and the flesh-hit foley all travel WITH the bullet and
+       fire from updateBullets the frame it actually lands. acc is empty for a
+       ballistic shot, so this is a no-op rather than a branch. */
+    roundFeedback(w, cal, acc);
     // discharging a firearm in the city is a witnessed crime (city wanted system)
     if (CBZ.game.mode === "city" && CBZ.cityCrime) {
-      CBZ.cityCrime(w.nonlethal ? 20 : (hitSomething ? 100 : 55), { x: CBZ.player.pos.x, z: CBZ.player.pos.z, type: "shots-fired" });
-      CBZ.cityEvent && CBZ.cityEvent("bullet-impact", { weapon: w.key, panic: w.nonlethal ? 1 : 3, damage: hitSomething ? 0 : 0.3 }, { silent: true, noWanted: true });
+      CBZ.cityCrime(w.nonlethal ? 20 : (acc.hitSomething ? 100 : 55), { x: CBZ.player.pos.x, z: CBZ.player.pos.z, type: "shots-fired" });
+      CBZ.cityEvent && CBZ.cityEvent("bullet-impact", { weapon: w.key, panic: w.nonlethal ? 1 : 3, damage: acc.hitSomething ? 0 : 0.3 }, { silent: true, noWanted: true });
       CBZ.cityAlarm && CBZ.cityAlarm(CBZ.player.pos.x, CBZ.player.pos.z, 24, 1.2, CBZ.city.playerActor);
     }
   }
@@ -3923,7 +4154,7 @@
     }
     updateRockets(dt);   // (b) in-flight RPG projectiles: fly the arc, detonate on arrival
     updateRocketSmoke(dt);
-    updateDeferred(dt);  // (b) sniper travel-time feedback queue
+    updateBullets(dt);   // rounds in flight: step, raycast the segment, land
     for (let i = 0; i < impacts.length; i++) {
       const p = impacts[i];
       if (p.life > 0) {
@@ -4064,7 +4295,7 @@
       // SINGLE-OWNER GATE (city FPS-FOV flicker fix): in the CITY, the first-person
       // lens is OWNED by systems/camera.js's cc.fp branch (onAlways 50) — it eases
       // camera.fov toward an ADS-aware target with its OWN SmoothDamp state. This
-      // block ALSO ran every city frame easing toward fpsHipFov-ADS_FOV_DROP with a
+      // block ALSO ran every city frame easing toward the ADS fov with a
       // SEPARATE easing; two writers racing toward the (same) target with different
       // smoothing states produced the in/out ADS FLICKER while RMB was held. So in
       // city we SKIP this entirely and let camera.js solely drive the FOV. Outside
@@ -4083,15 +4314,26 @@
         // ADS punch-in — re-capturing that half-zoomed value as the new "hip" made
         // every right-click zoom in further and never zoom back out. A fixed hip
         // means RMB eases to hip−DROP and release eases cleanly back to hip.
-        if (fpsHipFov === 0) fpsHipFov = 75;   // FP hip → ADS lands ~50 (hip − ADS_FOV_DROP)
+        if (fpsHipFov === 0) fpsHipFov = 75;   // FP hip; the ADS target is the weapon's own optic (below)
         // a mounted scope (city/gunmods.js) overrides the ADS target with a much
         // tighter lens — a red-dot barely nudges it, a sniper scope slams it to ~12°.
         // The factory sniper's REAL scope (systems/lockon.js) reads first; it
         // returns null whenever a gunsmith optic is fitted, so exactly one wins.
         const scopeF = (CBZ.fpsScopeFov && CBZ.fpsScopeFov()) || (CBZ.cityScopeFov && CBZ.cityScopeFov());
-        const wantFov = scopeF ? scopeF : (ads ? fpsHipFov - ADS_FOV_DROP : fpsHipFov);
+        const aw = armed() ? weapon() : null;
+        const wantFov = scopeF ? scopeF
+          : (ads && CBZ.weaponAdsFov ? CBZ.weaponAdsFov(aw, fpsHipFov) : (ads ? fpsHipFov - 25 : fpsHipFov));
+        /* AND THE SPEED OF THE PUNCH-IN IS THE OPTIC'S OWN. A Glock comes up
+           in 0.20 s and a 7 kg belt-fed gun with a magnified sight does not;
+           the old single `dt * 12` meant every weapon in the game shouldered
+           at the same rate, which is the same flatness the FOV had. Coming
+           OUT is always fast — dropping a gun off the eye is not the same
+           motion as bringing it up. */
+        const oRow = CBZ.weaponOptic ? CBZ.weaponOptic(aw) : null;
+        const adsSec = Math.max(0.06, (oRow && oRow.ads) || 0.22);
+        const easeK = ads ? (1 / adsSec) : 9;
         if (Math.abs(CBZ.camera.fov - wantFov) > 0.05) {
-          CBZ.camera.fov += (wantFov - CBZ.camera.fov) * Math.min(1, dt * 12);
+          CBZ.camera.fov += (wantFov - CBZ.camera.fov) * Math.min(1, dt * easeK * 2.2);
           CBZ.camera.updateProjectionMatrix();
         }
       }
