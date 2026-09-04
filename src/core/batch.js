@@ -548,7 +548,20 @@
     // ONE matrixWorld refresh for the whole subtree. Nothing moves during this
     // pass, and the per-mesh updateWorldMatrix(true, false) calls below each
     // re-multiplied the mesh's whole ancestor chain — 100k+ meshes × depth 4.
-    target.updateMatrixWorld(true);
+    //
+    // …AND IT MUST NOT GO THROUGH updateMatrixWorld. core/matrixskip.js
+    // patches that method to RETURN EARLY for a hidden node, and at window
+    // load the prison root is hidden behind the title screen — so every inert
+    // mesh in the compound reached this bake with an identity matrixWorld and
+    // was welded into the merged buffer AT THE ORIGIN. Measured 2026-09-04
+    // (tools/visual-presets/prison-cell-free.mjs and a load-time hook): 6,612
+    // of the prison's 7,084 meshes untransformed at bake, 3,245 boxes of
+    // wall-top trim, walkway kerb, lamp cage, court paint and tower roof in
+    // one heap at (0,0,0) — the 60-76 m red trims poking up the cell house's
+    // spine were the owner's "weird red line in the middle". updateWorldMatrix
+    // is the unpatched path (matrixskip.js says so) and composes the whole
+    // subtree whether or not anybody can see it yet.
+    target.updateWorldMatrix(true, true);
     if (recurse) { for (const c of target.children.slice()) walk(c); }
     else { for (const m of target.children.slice()) consider(m); }
 
