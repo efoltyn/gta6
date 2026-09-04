@@ -178,7 +178,13 @@ const run = async () => {
     /* the willing WALK ACROSS — showTurn is a three-and-a-half-second tableau
        on the sand, and the men do not leave W.state.prisoners until they have
        arrived, which is the whole point of it. */
-    await new Promise((r) => setTimeout(r, 6000));
+    /* WAIT ON THE CONDITION, NOT ON A TIMER. A fixed 6 s sleep measured the
+       Mac's load rather than the tableau: on a machine running three other
+       headless Chromes the same walk took ~8 s and this step failed with the
+       men mid-stride (HARNESS TRAP: a probe that sleeps a number is a probe
+       that fails when the machine is busy). 30 s is the ceiling past which
+       the walk is genuinely stuck. */
+    await rig.wait(`CBZ.warlord.state.prisoners.length === 0`, 30000);
     const e3 = await rig.evl(`(() => { const W = CBZ.warlord;
       return { army: W.state.army.length, pris: W.state.prisoners.length,
                rec: W.state.stats.recruited }; })()`);
