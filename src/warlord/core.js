@@ -378,6 +378,20 @@
     flags: {},
   };
 
+  /* HOW MUCH OF A COLUMN CAN COME APART IN ONE NIGHT. Written down here as a
+     published number rather than as a literal inside dawn(), because it is
+     the answer to a question two different systems ask: "he could not pay
+     them" (below) and "they walked into something four times their size and
+     scattered" (army.js's SCATTER). Both are a column shedding men in one
+     event, and the game's answer to that has to be one number or the second
+     one is a balance opinion typed by whoever wrote it last.
+
+     0.4, and the argument for it is in dawn(): a column that can lose
+     everything in a single bad morning is a column the player cannot steer,
+     and one that can lose nothing is not carrying a risk. Shed, do not
+     evaporate — twice, now. */
+  W.SHED_CAP = 0.4;
+
   /* ============================================================ MONEY
      WAGES ARE THE BRAKE. Without them "recruit everybody, always" is the
      only strategy and the game is over on day three. A man costs his tier's
@@ -421,7 +435,7 @@
          his account. */
       const short = due - S.gold;
       S.gold = 0;
-      const cap = Math.max(1, Math.floor(S.army.length * 0.4));
+      const cap = Math.max(1, Math.floor(S.army.length * W.SHED_CAP));
       const order = S.army.slice().sort(function (a, b) { return W.tierIndex(a.tier) - W.tierIndex(b.tier); });
       let owed = short, walked = 0;
       while (owed > 0 && order.length && walked < cap) {
@@ -587,6 +601,23 @@
     return W.gunList().filter(function (w) {
       return !(w.id === "taser" || w.nonlethal || w.slot === "utility");
     });
+  };
+
+  /* WHAT A FARMHAND IS HANDED. A province raising its levy does not go
+     shopping — it opens the crate at the bottom of the pile — so the gun is
+     the cheapest thing in the armoury that is actually a weapon, looked up
+     rather than typed so a new cheap gun in weapon-data.js becomes the levy's
+     gun without an edit here. territory.js and match.js both raise levies and
+     they must raise the same man. */
+  let CHEAPEST = null;
+  W.cheapestGun = function () {
+    if (CHEAPEST) return CHEAPEST;
+    const guns = W.battleGuns();
+    if (!guns.length) return "sidearm";
+    let best = guns[0];
+    for (let i = 1; i < guns.length; i++) if (W.gunPrice(guns[i].id) < W.gunPrice(best.id)) best = guns[i];
+    CHEAPEST = best.id;
+    return CHEAPEST;
   };
 
   W.bandGunFor = function (wealth, r) {
@@ -907,10 +938,27 @@
      bloodied, and cheap troops — all three push toward yes. A legion of
      veterans at full strength never surrenders to anybody, which is what
      makes taking one apart worth doing. */
+  /* THE THREE NUMBERS THE ROLL IS MADE OF, PUBLISHED, because the shape of
+     this curve is a rule about the whole game and not a private detail.
+
+       floor  the advantage below which nobody even considers it
+       slope  how fast talking replaces shooting as the advantage grows
+       cap    the most the ADVANTAGE alone can ever buy
+
+     Everything above `floor + cap/slope` is the same number with a die in
+     front of it — the ramp has already hit its ceiling — so that ratio is the
+     honest answer to "when does asking stop being a question", and army.js
+     reads it through surrenderSure() rather than typing a threshold of its
+     own. That is the agar.io rule in this game: past this much size, the
+     smaller party does not get a card, it gets absorbed. */
+  W.SURRENDER = { floor: 1.15, slope: 0.42, cap: 0.80 };
+  W.surrenderSure = function () {
+    return W.SURRENDER.floor + W.SURRENDER.cap / W.SURRENDER.slope;   // 3.05×
+  };
   W.surrenderChance = function (b, myPower) {
     const theirs = W.bandPower(b);
     const ratio = myPower / Math.max(0.001, theirs);
-    let p = clamp((ratio - 1.15) * 0.42, 0, 0.8);
+    let p = clamp((ratio - W.SURRENDER.floor) * W.SURRENDER.slope, 0, W.SURRENDER.cap);
     p *= (1.25 - W.bandHostile(b) * 0.55);
     let soft = 0;
     for (let i = 0; i < b.men.length; i++) soft += (3 - W.tierIndex(b.men[i].tier)) / 3;
