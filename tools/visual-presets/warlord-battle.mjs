@@ -326,7 +326,12 @@ export default {
     battleT: { label: "Simulated time at this beat", unit: "s" },
     coverProps: { label: "Cover props on the field", unit: "objects", better: "lower" },
     foldedGround: { label: "Ground folded enough to hide behind", unit: "0/1", better: "higher" },
-    foldProbesHit: { label: "Terrain probes that found a fold", unit: "probes", better: "higher" },
+    /* NO `better` — this is a LIFETIME counter and the two columns do not
+       live the same length. With morale on, the army breaks and the fight ends
+       at t=28.8; with it off the same fight grinds to 42.5, so the before side
+       accumulates more probes by simply existing longer, and the diff scored
+       five phantom regressions on a row that is pure diagnostics. */
+    foldProbesHit: { label: "Terrain probes that found a fold", unit: "probes" },
     coreRelief: { label: "Relief of the ground they fight on", unit: "m" },
     menHullDown: { label: "Men holding a reverse-slope position", unit: "men", better: "higher" },
     menCrouched: { label: "Men down behind the lip this frame", unit: "men", better: "higher" },
