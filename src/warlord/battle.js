@@ -321,13 +321,15 @@
      Meshes are only built for boxes when desert.js declined to raise anything,
      so we never draw a second copy of a rock it already put there. */
   function buildGround(cx, cz) {
-    /* ?ground=own refuses desert.js and fights on this file's own sand. It is
-       the revert for "the encounter happens on the real island", and it is
-       also the only way to tell whose ground is flat when a battlefield
-       photographs as a wash of tan — which is exactly the question the first
-       capture raised. */
-    const bf = (W.desert && typeof W.desert.battlefieldAt === "function" &&
-                !(Q && Q.get("ground") === "own"))
+    /* THE FIGHT HAPPENS ON THE ISLAND. ?ground=own used to refuse desert.js
+       and fall back to three sine trains typed in this file — a second desert
+       that only ever ran on a slice page, kept as "the revert". desert.js is
+       loaded before this module boots (CONTRACT.md's `needs`) and has been for
+       months, so the flag's only real job was to answer "whose ground is
+       flat", and battlefieldAt now reports its own measured relief. The flag
+       is gone; the emergency fallback below stays, because a fight on NO
+       ground is worse than a fight on approximate ground. */
+    const bf = (W.desert && typeof W.desert.battlefieldAt === "function")
       ? safe(function () { return W.desert.battlefieldAt(cx, cz, FIELD_R); }) : null;
 
     let groundAt = null, relief = 0, cover = [], raised = false, clearFn = null;
@@ -355,7 +357,10 @@
                Math.sin(b * 0.0172 + p2) * 3.1 +
                Math.sin((a + b * 0.7) * 0.0087 + p3) * 5.4;
       };
-      cover = fallbackCover(cx, cz, groundAt);
+      /* AND NO SCATTER. This used to call fallbackCover(), which threw 34
+         boxes onto the sand so that combat_iq's box-only cover search would
+         find SOMETHING. hullDown() searches the ground itself now, and the
+         ground here has 16-22 m of relief in it — the folds are the cover. */
     }
 
     // MEASURED, not declared: the same number battle.html prints, off the same
@@ -370,6 +375,28 @@
       }
       relief = Math.round((hi - lo) * 10) / 10;
     }
+    /* AND A SECOND RELIEF, BECAUSE THE FIRST ONE LIES ABOUT THE FIGHT.
+       `relief` is peak-to-peak over the WHOLE 340 m disc, rim included, and
+       that is the wrong question for "is there cover here". MEASURED on seed
+       1337 at (-2400,-4400): relief 26.0 m, terrainLos armed — and the middle
+       150 m of that field, which is exactly where two lines 160 m apart meet,
+       is a dead-flat pan at 2.4 m. It is a basin with high walls. Every one of
+       496 reverse-slope probes came back empty and the answer was correct;
+       the field was flat where it mattered and steep where nobody stood.
+
+       coreRelief is the same measure over the inner half — the ground the
+       start lines and the whole engagement sit on. Across the island's 345
+       dune fields the two disagree constantly, and it is coreRelief the fold
+       search is gated on. */
+    let cLo = 1e9, cHi = -1e9;
+    const CORE_R = Math.round(FIELD_R * 0.53);
+    for (let sx = -CORE_R; sx <= CORE_R; sx += 6) {
+      for (let sz = -CORE_R; sz <= CORE_R; sz += 6) {
+        const y = groundAt(cx + sx, cz + sz);
+        if (y < cLo) cLo = y; if (y > cHi) cHi = y;
+      }
+    }
+    const coreRelief = Math.round((cHi - cLo) * 10) / 10;
 
     /* AND FROM HERE ON THE GROUND IS THE CACHED FIELD. Swapped in AFTER the
        relief measurement above and BEFORE anything else in the file gets a
@@ -392,7 +419,10 @@
     if (!raised) groundMesh(cx, cz, groundAt);
 
     return {
-      cx: cx, cz: cz, groundAt: groundAt, relief: relief, cover: cover,
+      cx: cx, cz: cz, groundAt: groundAt, relief: relief, coreRelief: coreRelief, cover: cover,
+      // the biome this fight is in — the one thing that decides whether there
+      // is anything on the field at all (desert.js COVER_BY_BIOME)
+      biome: (bf && bf.biome) || null,
       // WHOSE GROUND THIS IS. The audit used to report "is battlefieldAt
       // available", which is a different question and answered true even under
       // ?ground=own — so the one flag that exists to tell the two grounds apart
@@ -403,34 +433,18 @@
       // through twenty metres of crest. Only armed where the ground genuinely
       // has shape in it; ?tlos=0 makes the sand transparent again.
       terrainLos: relief > 6 && (!Q || Q.get("tlos") !== "0"),
+      /* WHETHER THERE IS A FOLD TO GET BEHIND, which is a different question
+         from whether the ground can block a shot. 3 m: a standing eye is
+         1.6 m and a crouched one 1.0, so under about two metres of relief in
+         the fighting ground there is no arrangement of terrain that hides one
+         and not the other, and hullDown() would burn a hundred and sixty
+         terrain probes per man to prove it. */
+      folded: coreRelief > 3 && relief > 6 && (!Q || Q.get("tlos") !== "0"),
       clear: clearFn,
     };
   }
   function safe(fn) { try { return fn(); } catch (e) { console.warn("[warlord/battle]", e); return null; } }
 
-  /* SCATTER, deterministic and off the spawn lanes. A battlefield with nothing
-     on it is a shooting gallery: combat_iq's cover search finds nothing, every
-     man stands in the open, and the fight is decided entirely by arithmetic.
-     Rocks are what make the same two armies fight differently twice. */
-  function fallbackCover(cx, cz, groundAt) {
-    const out = [];
-    for (let i = 0; i < 34; i++) {
-      const a = W.hash01(i, 1, 7) * Math.PI * 2;
-      const r = 18 + Math.sqrt(W.hash01(i, 2, 13)) * (FIELD_R - 26);
-      const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
-      // keep the two start lines clear: a boulder inside a forming rank spawns
-      // men inside geometry, which battle.html's freeSpot spiral exists to fix
-      if (Math.abs(x - cx) > GAP() * 0.5 - 8 && Math.abs(x - cx) < GAP() * 0.5 + 14) continue;
-      const tall = W.hash01(i, 3, 17) < 0.55;
-      out.push({
-        x: x, z: z,
-        w: 1.8 + W.hash01(i, 4, 19) * 3.6,
-        h: tall ? 1.9 + W.hash01(i, 5, 23) * 0.9 : 1.05 + W.hash01(i, 5, 23) * 0.3,
-        d: 1.6 + W.hash01(i, 6, 31) * 3.2,
-      });
-    }
-    return out;
-  }
   function rockMesh(c, groundAt) {
     const m = new THREE.Mesh(
       CBZ.boxGeom ? CBZ.boxGeom(c.w, c.h, c.d) : new THREE.BoxGeometry(c.w, c.h, c.d),
@@ -666,6 +680,11 @@
       dead: false, fall: null, animF: (i % 4),
       lastShotT: -9, sq: Math.floor(i / 10), sqSlot: i % 10,
       kills: 0, rad: 0.45, eyeH: 1.52, losY: 1.35, aimY: 1.28, headY: 1.62,
+      // the STANDING originals, so setStance() can restore them exactly
+      eyeH0: 1.52, losY0: 1.35, aimY0: 1.28, headY0: 1.62,
+      stance: "stand",
+      // the hull-down position he has committed to, and the pop-up clock
+      hull: null, hullT: 0, popT: 0,
       routed: false, fled: false,
       /* IS THIS MAN CURRENTLY A FORMATION SLOT RATHER THAN AN INDIVIDUAL.
          stepSquad owns this flag; frame() skips stepMan for anyone carrying
@@ -922,6 +941,225 @@
     }
     return false;
   }
+  /* ============================================================ HULL DOWN
+     THE DUNE IS THE COVER. This is the whole of what the owner asked for:
+     "desert is great but fake rocks fuck, there is already cover from the
+     natural steepness of the desert dunes."
+
+     WHY THERE WERE ROCKS AT ALL. systems/combat_iq.js's cover() is the only
+     cover search in this engine, and it can only see BOXES — it scans
+     queryCollidersNear for a solid thing at least 0.85 m tall and puts the man
+     on the far side of it. A dune is not a box. So on open ground the search
+     came back empty, every man stood upright in the open, and desert.js
+     answered by scattering boulders across biomes that have none. The fake
+     rocks were a workaround for a search that could not see the ground.
+
+     WHAT A REVERSE-SLOPE POSITION ACTUALLY IS. A soldier on the back side of a
+     crest, close enough to the top that standing up puts his head and his
+     rifle over it, and low enough that crouching puts the whole of him behind
+     it. Two probes at two heights, on the same sight line, is the entire test:
+
+       CROUCHED (eye 1.0 m)  the ground must BLOCK the threat's view of him.
+       STANDING (eye 1.6 m)  the ground must NOT block it — otherwise he is
+                             not in cover, he is in a hole with no shot out.
+
+     Both probes go through terrainBlocked(), the same sampler eyeLos() already
+     uses, so a position is hull-down by exactly the rule that decides whether
+     a round connects. Nothing new can disagree with it.
+
+     THE SEARCH is a ring fan around the man: four radii from 4 to 15 m and
+     twelve bearings, biased toward the ones that do not walk him at the enemy.
+     Candidates must be walkable (blockedAt) and on the field. Scoring is walk
+     distance plus a penalty for closing on the threat — the same shape
+     combat_iq.cover() scores with, for the same reason.
+
+     HYSTERESIS. A man keeps the fold he chose unless a much better one turns
+     up (combat_iq.cover()'s "-4" sticky rule, same idea): re-probing every
+     think and taking the current best made a line shuffle sideways forever.
+     The probe is throttled per man on a de-synced clock so 300 men do not all
+     search the terrain on the same frame.
+
+     COST. Each candidate is two terrainBlocked calls, each of which samples
+     the height lattice every FIELD_STEP (2.69 m) along the line — about 12
+     samples at 30 m. 48 candidates is ~1150 lattice reads, which is why it is
+     throttled to roughly once every two seconds per man and why it early-outs
+     on the first probe (a candidate that is not HIDDEN never pays for the
+     second). MEASURED at 60 v 60 it costs under 0.2 ms a frame. */
+  /* THE SEARCH IS A MARCH, NOT A GRID, and the first draft was a grid: four
+     fixed radii on twelve bearings, 48 candidates, each tested for "crouched
+     hidden AND standing exposed". It found a position ONCE IN 429 PROBES —
+     measured, by tools/warlord-cover-check.mjs, which is why that tool exists.
+
+     THE ARITHMETIC SAYS WHY. The two probes differ by 0.6 m of eye height at
+     the man's end of a sight line 40 to 160 m long, so at the crest — which is
+     somewhere in the middle of that line — the two rays are perhaps 0.3 m
+     apart. A hull-down position is exactly the band of ground where the crest
+     falls INSIDE that 0.3 m window. On a dune of 200 m wavelength and 0.15
+     slope that band is about four metres wide, and a grid of four radii spaced
+     3.5 m apart lands in a 4 m band roughly at random. The position was always
+     there; the search was throwing darts at it.
+
+     SO THE SEARCH FINDS THE LIP INSTEAD OF GUESSING AT IT. Per bearing:
+     march outward until the CROUCHED ray first goes blocked (that step is
+     cheap and fails fast in the open), bisect the last interval to land on the
+     lip within ~15 cm, then step just behind it and ask the standing question
+     there. That is one boundary solve per bearing rather than a scatter, and
+     it lands in the band by construction. */
+  /* 26 m, NOT 16. A dune here has a wavelength in the hundreds of metres, so
+     the walk from the open to the back of the nearest crest is tens of metres,
+     not a stride. MEASURED by sweeping the island: over a 9-bearing fan out to
+     40 m, 159 of 345 dune fields hold a real reverse-slope position, and the
+     ones inside 16 m are a minority of those. 26 m is about five seconds of
+     walking, which is what a man will spend to stop being shot at. */
+  const HULL_BEARINGS = [0, 0.55, -0.55, 1.15, -1.15, 1.8, -1.8, 2.5, -2.5];
+  const HULL_R0 = 3, HULL_R1 = 26, HULL_STEP = 1.6;
+  const HULL_CROUCH_EYE = 1.0;      // a crouched man's eye, metres above his boots
+  const HULL_STAND_EYE = 1.6;       // and a standing one's
+  const HULL_BEHIND = 0.7;          // how far behind the lip to stand
+  let _hullQ = 0, _hullHit = 0;
+  /* PUBLIC because tools/warlord-cover-check.mjs asks the question the AI asks,
+     rather than re-deriving the terrain rule in node and grading the game
+     against a second implementation of it. */
+  function hullDown(x, z, tx, tz, r) {
+    if (!MAP || !MAP.folded) return null;       // flat ground has no reverse slope
+    _hullQ++;
+    const gA = MAP.groundAt;
+    const ty = gA(tx, tz) + HULL_STAND_EYE;     // the threat is a standing rifleman
+    const away = Math.atan2(x - tx, z - tz);    // bearing from the threat to the man
+    const rr = r > 0 ? r : 1;
+    const dThreat = Math.hypot(x - tx, z - tz);
+    let best = null, bs = 1e9;
+    for (let ai = 0; ai < HULL_BEARINGS.length; ai++) {
+      const ang = away + HULL_BEARINGS[ai];
+      const sa = Math.sin(ang), ca = Math.cos(ang);
+      // ---- hidden(rad): is a CROUCHED man at this radius behind the ground?
+      const hidden = function (rad) {
+        const px = x + sa * rad, pz = z + ca * rad;
+        return terrainBlocked(tx, ty, tz, px, gA(px, pz) + HULL_CROUCH_EYE, pz);
+      };
+      // march out to the first blocked step
+      let lo = -1, hi = -1;
+      for (let rad = HULL_R0 * rr; rad <= HULL_R1 * rr; rad += HULL_STEP * rr) {
+        if (hidden(rad)) { hi = rad; break; }
+        lo = rad;
+      }
+      if (hi < 0) continue;                     // this bearing never gets behind anything
+      if (lo < 0) lo = Math.max(0.5, hi - HULL_STEP * rr);
+      // bisect onto the lip (4 halvings of a 1.3 m step ≈ 8 cm)
+      for (let k = 0; k < 4; k++) {
+        const mid = (lo + hi) * 0.5;
+        if (hidden(mid)) hi = mid; else lo = mid;
+      }
+      // stand just behind it, and ask the standing question there
+      for (let back = 0; back < 3; back++) {
+        const rad = hi + HULL_BEHIND * (back ? back * 0.5 : 1);
+        if (rad > (HULL_R1 + 2) * rr) break;
+        const px = x + sa * rad, pz = z + ca * rad;
+        if (Math.abs(px - MAP.cx) > FIELD_R * 0.94 || Math.abs(pz - MAP.cz) > FIELD_R * 0.94) break;
+        if (blockedAt(px, pz)) continue;        // a walk that ends inside a rock is not a position
+        const gy = gA(px, pz);
+        if (!terrainBlocked(tx, ty, tz, px, gy + HULL_CROUCH_EYE, pz)) continue;
+        // STANDING must NOT be blocked. A fold that hides him standing is a
+        // hole with no shot out of it, and men in holes lose battles.
+        if (terrainBlocked(tx, ty, tz, px, gy + HULL_STAND_EYE, pz)) continue;
+        const walk = Math.hypot(px - x, pz - z);
+        // never take a fold that walks him at the gun (cover()'s own rule)
+        const closing = Math.max(0, dThreat - Math.hypot(px - tx, pz - tz));
+        const score = walk + closing * 1.4 + Math.abs(HULL_BEARINGS[ai]) * 1.1;
+        if (score < bs) { bs = score; best = { x: px, z: pz, d: walk }; }
+        break;
+      }
+    }
+    if (best) _hullHit++;
+    return best;
+  }
+  /* The per-man wrapper: throttle, hysteresis, and "am I still standing in
+     it". Everything above is a pure function of the ground so a tool can call
+     it directly; this is the part that belongs to a person. */
+  function hullFor(m, tgt, force) {
+    if (!MAP.folded) return null;
+    if (!force && m.hullT > simT) return m.hull;
+    /* 2.6-3.5 s, phased off the man's index so a line does not probe together.
+       A search is ~7 bearings x up to 15 marched crouch probes, each ~15 reads
+       of the height lattice — call it 1.5k reads. At 300 men that is 130
+       searches a second if they all probe at once, which is why the phase
+       matters more than the period. */
+    /* AND A MAN WITH NOWHERE TO GO KEEPS LOOKING. One period for everybody
+       meant a man whose first probe came back empty stood in the open for
+       three seconds before asking again, while a man already tucked behind a
+       lip re-derived a position he was not going to leave. MEASURED: 57% of
+       held men had found a fold; asking again in half the time when the answer
+       was NO — and the ground under him has moved, because he has — lifts it
+       without costing a single probe on a man who is already covered. */
+    m.hullT = simT + (m.hull ? 2.6 : 1.2) + (m.i % 9) * 0.1;
+    const found = hullDown(m.pos.x, m.pos.z, tgt.pos.x, tgt.pos.z, 1);
+    if (!found) { m.hull = null; return null; }
+    /* STICKY. The fold he is already using outbids a marginally nearer one by
+       3 m of walk — without it a held line re-picked every two seconds and
+       shuffled sideways all fight. */
+    if (m.hull) {
+      const keep = Math.hypot(m.hull.x - m.pos.x, m.hull.z - m.pos.z);
+      if (keep < found.d + 3) return m.hull;
+    }
+    m.hull = found;
+    return found;
+  }
+  /* IN IT, AND WORKING IT. A man who has ARRIVED at his fold alternates: down
+     behind the lip where the ground genuinely hides him (setStance drops his
+     losY, so an enemy's eyeLos to him fails and he cannot be targeted or hit),
+     then up over it to shoot. The cycle is a real one — about a second and a
+     half down, a second and a bit up — and it is what a firing line on a
+     reverse slope looks like from the other side: men appearing and going.
+
+     Returns true while he is UP, which is the only time the trigger below
+     lets him fire. */
+  function workHull(m, sdt) {
+    /* 3.2 m, NOT the 1.6 the first draft used. Two things move a man off the
+       exact point the search returned: spreadGoal() pushes his goal up to
+       2.6 m sideways to keep the line from stacking, and stepMan stops him
+       within 1.1 m of that goal. At 1.6 m he never counted as arrived, never
+       crouched, and the whole fold did nothing — MEASURED as zero men in
+       crouch on a field where 40 of them had found one. A fold is a stretch of
+       ground, not a coordinate. */
+    const d = Math.hypot(m.hull.x - m.pos.x, m.hull.z - m.pos.z);
+    if (d > 3.2) { setStance(m, "stand"); return false; }   // still walking to it
+    m.popT -= sdt;
+    if (m.popT <= 0) {
+      const up = m.stance === "crouch";
+      // de-synced per man so a line does not pop as one body
+      m.popT = up ? (1.0 + (m.i % 7) * 0.12) : (1.4 + (m.i % 5) * 0.18);
+      setStance(m, up ? "stand" : "crouch");
+    }
+    return m.stance === "stand";
+  }
+
+  /* ============================================================ STANCE
+     A MAN IS A DIFFERENT SHAPE WHEN HE IS DOWN, and until now nobody in this
+     battle was ever down. posePass has been setting `m.char.crouch` for men in
+     cover since the file was written — so a man in cover LOOKED small and was
+     shot at exactly as if he were standing, because eyeH / losY / aimY / headY
+     were constants stamped once in makeMan.
+
+     These four numbers ARE the man as far as the fight is concerned: eyeH is
+     where he sees from, losY is what an enemy has to see to shoot him, aimY
+     and headY are where a round arrives. Dropping them by the real ratio of a
+     crouched man's eye to a standing one's (about 1.0 m against 1.6 m, which
+     is where the hull-down search below puts its two probes) is what makes
+     going down actually hide you behind a dune lip.
+
+     One function, called whenever the stance changes, so the four can never
+     drift apart. `stand` restores makeMan's own numbers exactly. */
+  const STANCE_K = { stand: 1, crouch: 0.645 };
+  function setStance(m, st) {
+    if (m.stance === st) return;
+    m.stance = st;
+    const k = STANCE_K[st] || 1;
+    m.eyeH = m.eyeH0 * k;
+    m.losY = m.losY0 * k;
+    m.aimY = m.aimY0 * k;
+    m.headY = m.headY0 * k;
+  }
+
   function eyeLos(m, o) {
     pHit("eyeLos");
     const ay = m.pos.y + m.eyeH, by = o.pos.y + o.losY;
@@ -1198,6 +1436,15 @@
         const u = units[i];
         if (u.team !== k || u.dead || u.fled || u.isYou) continue;
         s.alive++;
+        /* POWER FIRST, AND A ROUTED MAN STILL HAS IT. This line used to sit
+           below the `continue`, so a man who broke stopped counting toward his
+           own side's strength — and morale is 1 - powerNow/power0, so one man
+           routing lowered the morale that made him rout. A death spiral with
+           no death in it: the FIRST man to break took the next four with him.
+           updateMorale() on the 3D side has never had this bug, because
+           standing() there filters on !dead && !fled and says nothing about
+           routed. Two paths, one rule, and this was the divergence. */
+        if (u.s) s.powerNow += W.soldierPower(u.s);
         if (u.routed) { s.routing++; continue; }
         standing.push(u);
         const p = profOf(u);
@@ -1206,10 +1453,22 @@
           (u.wounded ? 0.6 : 1);
         s.out += rounds;
         s.roundDmg += rounds * per;
-        if (u.s) s.powerNow += W.soldierPower(u.s);
       }
       s.standing = standing;
+      s.nStanding = standing.length;
       s.perRound = s.out > 0 ? s.roundDmg / s.out : 0;
+      /* AND THE WARLORD COUNTS ON BOTH SIDES OF THE FRACTION — updateMorale()'s
+         own comment, and its own fix, which the headless path never got.
+         power0 for `mine` is W.power(roster) + 14 (he is worth about a dozen
+         men and the encounter card says so), so a powerNow built from the
+         ROSTER ALONE starts every resolved battle with `lost` already at
+         14/power0 and carries a phantom casualty to the end. MEASURED on a
+         20-levy line: a permanent 0.26 of `lost`, which is 0.42 of morale, and
+         on any roster poorer than sidearms it put the whole line under the
+         civ nerve of 0.62 on TICK ONE — every man routed at t=1 and
+         brokenSide() ended the fight at t=2 with nobody dead. That is the
+         "resolve() ends on tick 2" report, and it is this one line. */
+      if (k === "mine" && ctxR.you && !ctxR.you.dead && !ctxR.youSafe) s.powerNow += 14;
     }
     /* THE WARLORD SHOOTS TOO, AND HIS ROUNDS ARE ROUNDS — not a bonus on
        everybody else's.
@@ -1229,14 +1488,54 @@
        applies to a player trigger pull. That works out at five or six riflemen
        of output, which is the same neighbourhood core's yourPower() puts him
        in. */
+    /* AND HIS RATE IS DERIVED, NOT TYPED. The line here used to read
+
+           const rounds = 2.0 * ENGAGE * 3;
+
+       under a comment saying "three times an engaged rifleman's". It is not:
+       an engaged rifleman's rate in this very function is
+       (hit10 / secPerRound) * ENGAGE, which for a levy with a pistol is 0.0116
+       rounds a second. 2.0 * ENGAGE * 3 is 0.27 — twenty-three times a
+       rifleman, so the warlord out-shot his entire twenty-man army and a
+       20 v 20 was really a 43 v 20. MEASURED: an EVEN levy fight resolved as a
+       win 86% of the time with 0-1 friendly casualties against 7-8 enemy.
+
+       What he is worth is not a number this file gets to invent — core states
+       it, in the same currency the encounter card uses: W.yourPower() against
+       a soldier's W.soldierPower(). So his damage stream is that many men's
+       worth of the output the side is ALREADY producing, and his round count
+       is that damage divided by what one of his rounds does.
+
+       AND IT IS ITS OWN STREAM, NOT AN ADDITION TO THE MEAN. The old code
+       pushed his rounds into s.out and his damage into s.roundDmg and then
+       re-derived perRound — which is the mean damage of a round, dealt to
+       EVERY round the army fires. A player carrying a shotgun therefore made
+       every levy's pistol round hit like a shotgun, and a player carrying a
+       pistol nerfed his whole line's rifles. He fires his own rounds now, at
+       his own damage, into the same pool. */
     const you = ctxR.you;
-    if (you && !you.dead) {
+    const mineS = sides.mine;
+    mineS.youOut = 0; mineS.youPer = 0;
+    if (you && !you.dead && !ctxR.youSafe && mineS.nStanding > 0 && mineS.out > 0) {
       const w = CBZ.weaponById ? CBZ.weaponById(you.wid) : null;
+      // 0.55 is the same factor the 3D path applies to a player trigger pull
       const per = ((w && w.damage) || 24) * ((w && w.pellets) || 1) * 0.55;
-      const rounds = 2.0 * ENGAGE * 3;
-      sides.mine.out += rounds;
-      sides.mine.roundDmg += rounds * per;
-      sides.mine.perRound = sides.mine.out > 0 ? sides.mine.roundDmg / sides.mine.out : 0;
+      /* HIS OWN WORTH, NOT HIS FORCE'S. W.yourPower() is
+         `W.power(S.army) + 14 * gunCombat * armour` — the strength of the
+         WHOLE COLUMN, which is what the encounter card compares against a
+         band. Reading it as "what is the warlord worth" makes him worth his
+         own army plus himself: MEASURED, an even 20 v 20 resolved as a 100%
+         win with ZERO friendly casualties, and it got worse the bigger your
+         army was, which is the tell. Subtracting the roster leaves exactly
+         core's own second term — his gun and his plate — without re-typing the
+         expression here, so a change to core moves this with it. */
+      const manPower = Math.max(0.001, (mineS.powerNow - 14) / mineS.nStanding);
+      const solo = Math.max(1, (W.yourPower ? W.yourPower() : 14) -
+        W.power((W.state && W.state.army) || []));
+      const worthMen = Math.max(1, solo / manPower);
+      const manOut = mineS.roundDmg / mineS.nStanding;      // HP/s from one man
+      mineS.youPer = per;
+      mineS.youOut = (worthMen * manOut) / Math.max(1, per);
     }
 
     // ---- deal it, one round at a time, through the same soak
@@ -1250,6 +1549,12 @@
       acc[k] = (acc[k] || 0) + s.out * dt;
       let n = Math.floor(acc[k]);
       acc[k] -= n;
+      /* the warlord's own rounds, on their own accumulator and at their own
+         damage — see the derivation above. He only ever exists on `mine`. */
+      acc.you = (acc.you || 0) + (k === "mine" ? (s.youOut || 0) * dt : 0);
+      let nYou = Math.floor(acc.you);
+      acc.you -= nYou;
+      n += nYou;
       /* AND THE WARLORD IS IN THE POOL. He is standing in his own line — that
          is the whole pitch — so the enemy's rounds can find him at the rate
          one man in the line would expect. */
@@ -1260,7 +1565,11 @@
         const tgt = pick >= pool.length ? ctxR.you : pool[pick];
         if (!tgt || tgt.dead) continue;
         // the player does not eat the army-on-army multiplier — hurtMan's rule
-        hurtOne(tgt, tgt === ctxR.you ? s.perRound / ARMY_MUL : s.perRound);
+        // his rounds are dealt first and carry HIS damage; the rest carry the
+        // line's mean. The player still never eats the army multiplier.
+        const dmg = (nYou-- > 0) ? s.youPer
+          : (tgt === ctxR.you ? s.perRound / ARMY_MUL : s.perRound);
+        hurtOne(tgt, dmg);
         if (tgt.hp <= 0) {
           tgt.dead = true; tgt.hp = 0;
           if (tgt === ctxR.you) { ctxR.youDown = true; continue; }
@@ -1279,9 +1588,12 @@
       s.morale = MORALE_OFF() ? 1 : moraleFrom({
         lost: 1 - s.powerNow / Math.max(0.001, s.power0),
         theirLost: 1 - foe.powerNow / Math.max(0.001, foe.power0),
-        leader: k === "mine",
+        leader: k === "mine" && !ctxR.youSafe,
         leaderDown: !!ctxR.youDown,
-        leaderNear: true,             // headless: a warlord who fights is IN it
+        // headless: a warlord who fights is IN it — but an AI-on-AI battle has
+        // no warlord at all, and giving `mine` his +0.16 anyway is why two
+        // identical bands resolved with one of them mysteriously steadier.
+        leaderNear: !ctxR.youSafe,
         malus: s.moraleMalus || 0,
         routingFrac: s.routing / Math.max(1, s.alive),
       });
@@ -1515,7 +1827,9 @@
   /* THE OTHER SIDE HAS A COMMANDER TOO, and he is four lines because he is
      answering the same four-button question. Re-asked on a slow tick so the
      enemy line does not twitch. */
+  let enemyLocked = false;      // drive-only; see W.battle.order
   function enemyCommand() {
+    if (enemyLocked) return;
     const s = SIDES.them, foe = SIDES.mine;
     let o = "hold";
     if (s.morale < 0.45) o = "fallback";
@@ -2016,6 +2330,13 @@
     m.lastThink = now;
     m.thinkAt = now + 0.14 + Math.min(0.42, men.length / 2600) + lcg() * 0.06;
 
+    /* STANDING UP IS AN ORDER TOO. Any think that does not end in a fold
+       clears the fold and the crouch — otherwise a man told to CHARGE walked
+       across the open at 1 m of eye height, invisible to the enemy and unable
+       to see them, which is a bug that would have read as "the charge just
+       works now". Cleared first, re-set by the hold branch at the bottom. */
+    if (m.hull && !m.routed) { m.hull = null; m.popT = 0; setStance(m, "stand"); }
+
     if (stepRout(m)) {
       /* A ROUTING MAN RUNS FOR HIS OWN EDGE AND DOES NOT SHOOT. He is not
          retreating in good order — that is FALL BACK, which is an order and
@@ -2123,6 +2444,21 @@
     if (holdish && slot === "flank" && CBZ.combatIQ && CBZ.combatIQ.cover) {
       const cv = CBZ.combatIQ.cover(m, tgt.pos.x, tgt.pos.z);
       if (cv) { m.target.set(cv.x, 0, cv.z); m.slot = "cover"; }
+    }
+    /* AND WHERE THERE IS NO BOX, THERE IS GROUND. combat_iq.cover() answers
+       null on open sand by construction — it only understands colliders — and
+       that null is exactly what the fake rocks existed to prevent. hullDown()
+       is asked second, never first: a real slab in rock country is still
+       better cover than a fold, and the search that finds it is cheaper.
+
+       This runs for EVERY held man who is not already working a box, not only
+       the ones posture() sent looking, because a reverse-slope position is
+       what a line under fire on open dunes actually does. A man already in his
+       fold keeps working it (workHull in stepMan) instead of re-deciding. */
+    if (holdish && m.slot !== "cover" && MAP.folded) {
+      const hd = hullFor(m, tgt, false);
+      if (hd) { m.target.set(hd.x, 0, hd.z); m.slot = "hull"; }
+      else if (m.hull) { m.hull = null; setStance(m, "stand"); }
     }
     /* AND HOLD MEANS HOLD *HERE*. A leash on the anchor the order was given
        at: without it a held line drifts forward one band at a time as men
@@ -2460,6 +2796,13 @@
       return;
     }
 
+    /* WORKING THE FOLD. Down behind the lip, up to shoot, down again. While
+       he is down setStance has dropped his losY below the crest, so the enemy
+       line's eyeLos to him fails: he is not "harder to hit", he is not there.
+       `m.up` is what the trigger reads. */
+    m.up = true;
+    if (m.hull && m.slot === "hull" && !m.routed) m.up = workHull(m, sdt);
+
     const tgt = m.tgt;
     const engaged = tgt && !tgt.dead && m.sees;
     if (!engaged && spd > 0.1) {
@@ -2480,7 +2823,17 @@
     if (!tgt || tgt.dead || tgt.fled || m.reloadT > 0) return;
     const dist = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
     const p = CBZ.combatIQ && CBZ.combatIQ.profile ? CBZ.combatIQ.profile(m) : null;
-    const fireMax = p ? Math.min(125, p.hi * 2.6 + 8) : 60;
+    /* THE SIGHT ON HIS RIFLE SETS HOW FAR HE FIGHTS. combat_iq's WEAP columns
+       were authored off weapon NAMES at a time when nothing in this engine had
+       an optic, so `hi` describes a man over iron sights — see IQ.sight, which
+       is a pure read and changes nobody's numbers by existing. reachMul is the
+       square root of the ratio of aiming errors (a 2 mm front post at 60 cm
+       subtends 3.3 mrad; a 10x mil-dot reticle 0.3), so the man you hand the
+       sniper to is the man who can still shoot at 300 m and the man with the
+       AK is not. REACH_CAP was a flat 125 for everybody. */
+    const sg = (CBZ.combatIQ && CBZ.combatIQ.sight) ? CBZ.combatIQ.sight(m) : null;
+    const rMul = sg ? sg.reachMul : 1;
+    const fireMax = p ? Math.min(REACH_CAP * rMul, p.hi * rMul * 2.6 + 8) : 60;
     if (!m.sees || dist > fireMax) return;
     /* A FLANKING MAN SHOOTS. battle.html's trigger gate excludes the "flank"
        slot and it is right to: there, "flank" is combat_iq's word for "you do
@@ -2494,8 +2847,15 @@
        third before/after pair, ordering FLANK at t=28 in an even 34 v 34 lost
        the battle by t=39, and the same fight held on HOLD. A flank that cannot
        shoot is not a flank, it is a parade. */
+    /* A MAN BEHIND A CREST IS NOT SHOOTING THROUGH IT. "hull" joins the list
+       of slots that shoot — that is the whole point of a reverse-slope
+       position — but only on the beat he is UP. Down, he holds his fire; the
+       terrain would eat the round anyway (eyeLos below re-checks it against
+       his dropped eye height), and firing from a position that hides you is
+       the incoherence this replaces. */
+    if (m.slot === "hull" && !m.up) return;
     if (m.slot !== "fire" && m.slot !== "peek" && m.slot !== "push" &&
-        m.slot !== "sidestep" && m.slot !== "fallback" &&
+        m.slot !== "sidestep" && m.slot !== "fallback" && m.slot !== "hull" &&
         m.slot !== "flank" && dist > 12) return;
     if (m.cool > 0) return;
     m.sees = eyeLos(m, tgt);
@@ -2529,6 +2889,17 @@
     if (!r) { m.cool = 0.5; return; }
     m.cool = r.cd;
     if (!r.fire) return;
+    /* AND THE SAME SIGHT PAYS THE HIT BACK. combat_iq.shot() already rolled
+       hitChance with the class's own linear range falloff; the optic refunds
+       the part of that falloff the glass removes. Applied HERE rather than
+       inside combat_iq for one reason: that file is shared by every armed body
+       in the city and this is a warlord balance decision. `hit` is a
+       probability — battle.js rolls it itself in fireShot — so scaling it is a
+       read-and-adjust, not a second dice. */
+    if (rMul > 1 && p && dist > 10) {
+      const refund = p.falloff * (dist - 10) * (1 - 1 / rMul);
+      r.hit = Math.max(0.04, Math.min(0.92, r.hit + refund));
+    }
     fireShot(m, tgt, r);
     if (m.mag <= 0) {
       m.reloadT = (w && (w.reloadTime || w.reload)) || 1.6;
@@ -3786,7 +4157,11 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
         // A MAN IN COVER GETS SMALL — the rig's own flag, which nothing on
         // battle.html set until it was noticed that combat_iq could send a man
         // to real cover and he would stand up straight behind it.
-        m.char.crouch = m.slot === "cover" || m.slot === "peek";
+        // THE POSE FOLLOWS THE STANCE, NOT THE SLOT. It used to read the slot
+        // alone, which meant a man could be crouched on screen and standing in
+        // the sim (and, once folds existed, hull-down in the sim and standing
+        // on screen — the worse half of the same bug).
+        m.char.crouch = m.stance === "crouch" || m.slot === "cover" || m.slot === "peek";
         const adt = m.animT; m.animT = 0;
         const _pa = pNow();
         safe(function () { CBZ.animChar(m.char, m.speed, adt); });
@@ -3987,6 +4362,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
      the shared things it borrowed (the fog, the shadow map, the camera's
      child, CBZ.groundAt) are put back the way they were found. */
   function teardown() {
+    enemyLocked = false;
     if (!live) return;
     live = false; over = true; started = false;
     if (frameFn) { micro.offFrame(frameFn); frameFn = null; }
@@ -4098,6 +4474,14 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
         setTimeout(function () {
           const mine = parseInt(Q.get("mine") || "", 10) || 26;
           const them = parseInt(Q.get("them") || "", 10) || 26;
+          /* ?bx / ?bz — FIGHT HERE. buildGround centres the field on the
+             warlord's campaign position, so a storyboard that needs a
+             particular piece of ground (a folded dune, for the hull-down
+             still) has no way to ask for one: by the time a stage function
+             runs, the battlefield is already built. Two numbers, read here,
+             where the debug door already is. */
+          const bx = parseFloat(Q.get("bx") || ""), bz = parseFloat(Q.get("bz") || "");
+          if (isFinite(bx) && isFinite(bz)) { W.state.you.x = bx; W.state.you.z = bz; }
           /* BOTH ROSTERS COME OUT OF THE SAME CONSTRUCTOR. The first draft
              hand-rolled the player's army with makeSoldier and no armour at
              all, while the enemy came from makeBand — which puts about one man
@@ -4134,7 +4518,20 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     limit: BATTLE_MAX,
     live: function () { return live; },
     groundAt: function (x, z) { return MAP ? MAP.groundAt(x, z) : 0; },
-    order: function (o) { setOrder(o, "mine"); },
+    /* THE REVERSE-SLOPE SEARCH, PUBLIC. tools/warlord-cover-check.mjs asks the
+       same question the AI asks rather than re-implementing the terrain rule
+       in node and grading the game against a second copy of it. */
+    hullDown: function (x, z, tx, tz, r) { return live ? hullDown(x, z, tx, tz, r) : null; },
+    /* `side` is DRIVE-ONLY and defaults to your own army, which is every
+       in-game caller. tools/warlord-cover-check.mjs needs to pin the ENEMY on
+       HOLD while it charges at them — otherwise enemyCommand() reads the
+       charge as weakness, orders its own, and the test is measuring two
+       charges. `lock:true` stands enemyCommand down; `lock:false` hands the
+       enemy commander his own army back. */
+    order: function (o, side, opts) {
+      if (side === "them" && opts && "lock" in opts) enemyLocked = !!opts.lock;
+      setOrder(o, side === "them" ? "them" : "mine");
+    },
     // the command seat's tap, callable: MOVE the line to a point on the field
     moveTo: function (x, z) { return live ? moveTo(x, z) : null; },
     // the sections, as numbers: where each frame is and what it is doing
@@ -4161,6 +4558,8 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
                    slot: m.slot, sees: !!m.sees, tgt: m.tgt ? (m.tgt.isYou ? "you" : m.tgt.i) : null,
                    losBadT: Math.round((m.losBadT || 0) * 10) / 10, mag: m.mag, reloadT: Math.round((m.reloadT || 0) * 10) / 10,
                    cool: Math.round((m.cool || 0) * 100) / 100, wid: m.wid, armed: !!m.armed,
+                   stance: m.stance || "stand", up: m.up !== false,
+                   hull: m.hull ? 1 : 0, eyeH: Math.round((m.eyeH || 0) * 100) / 100,
                    tx: Math.round(m.target.x), tz: Math.round(m.target.z), detourT: Math.round((m.detourT || 0) * 10) / 10,
                    stuckT: Math.round((m.stuckT || 0) * 10) / 10, speed: Math.round((m.speed || 0) * 10) / 10 });
       }
@@ -4283,8 +4682,34 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
         moveMark: !!(moveMark && moveMark.visible),
         anchor: { x: Math.round(SIDES.mine.anchorX), z: Math.round(SIDES.mine.anchorZ) },
         field: { cx: Math.round(MAP.cx), cz: Math.round(MAP.cz), relief: MAP.relief,
+                 coreRelief: MAP.coreRelief, folded: !!MAP.folded,
                  terrainLos: MAP.terrainLos, cover: MAP.cover.length, gap: GAP(),
-                 desert: !!MAP.fromDesert },
+                 desert: !!MAP.fromDesert,
+                 /* WHAT IS ACTUALLY STANDING ON THIS FIELD. `cover` has always
+                    been a count, which cannot answer "are there fake rocks on
+                    the dunes" — the question the 2026-09-04 pass exists to
+                    settle. The biome and the kind tally can. */
+                 biome: MAP.biome || null,
+                 coverKinds: (function () {
+                   const t = {};
+                   for (let i = 0; i < MAP.cover.length; i++) {
+                     const k = MAP.cover[i].kind || "boulder";
+                     t[k] = (t[k] || 0) + 1;
+                   }
+                   return t;
+                 })(),
+                 /* AND HOW THE GROUND IS DOING THE JOB INSTEAD: how many
+                    living men are in a fold right now, and how many of those
+                    are down behind the lip on this frame. */
+                 hull: (function () {
+                   let n = 0, down = 0;
+                   for (let i = 0; i < men.length; i++) {
+                     const m = men[i];
+                     if (m.dead || m.fled || m.isYou) continue;
+                     if (m.hull) { n++; if (m.stance === "crouch") down++; }
+                   }
+                   return { men: n, down: down, probes: _hullQ, found: _hullHit };
+                 })() },
         bodies: men.length, corpses: corpses.length, solving: deadSolving,
         /* HOW THE DEAD WERE SPENT. warlord/deaths.js's ledger: how many men
            fell, what tier each landed in, how many got blood and a body, and

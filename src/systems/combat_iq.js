@@ -333,6 +333,73 @@
   const IQ = CBZ.combatIQ;
   IQ.ROLE = ROLE; IQ.WEAP = WEAP; IQ.TIER_DPS = TIER_DPS; IQ.DPS_CAP = DPS_CAP;
   IQ.profile = function (a) { return C.NPC_IQ_TIERS === false ? null : profile(a); };
+
+  /* ============================================================ THE SIGHT
+     A NEW QUERY, AND ONLY A NEW QUERY. Nothing above changes: every existing
+     caller of profile() / shot() / posture() gets the byte-identical numbers
+     it got before. This file is shared by every armed body in the city and a
+     balance change here is a change to the whole street.
+
+     WHAT IT ANSWERS. The WEAP table's `lo`/`hi`/`falloff` columns were authored
+     off actor.weapon STRINGS — "ak", "rifle", "sniper" — at a time when no
+     weapon in this engine had a sight on it. So they describe a man shooting
+     over IRON SIGHTS, and the one row that implies glass (sniper) does it by
+     name rather than by hardware. Now that weapon-data.js states which optic is
+     bolted to which weapon, "the man you hand the sniper to is the man who
+     kills at 300 m" is answerable without re-typing the ladder.
+
+     THE NUMBER THAT MATTERS IS AIMING ERROR, in radians, and it is a real
+     physical quantity: the angular size of the thing you are aligning. An M4
+     front post is about 2 mm wide at a 60 cm sight radius, so it subtends
+     3.3 mrad — at 300 m that post covers a metre of ground and the target is
+     BEHIND it. A 2 MOA red dot is 0.58 mrad and a magnified reticle finer
+     still; past that, what is left is the shooter's own hold. That is the
+     whole reason irons stop working at distance and glass does not, and it is
+     one table:
+
+       reach     = 0.5 m of torso / err  — the range at which the SIGHT alone
+                   covers the target. 152 m over irons, 500 m behind a dot.
+       reachMul  = sqrt(err_iron / err)  — how much further this sight carries,
+                   relative to the irons the WEAP row assumes.
+
+     THE SQUARE ROOT IS A FIT AND IS LABELLED AS ONE. WEAP.falloff is a LINEAR
+     term (hit chance loses `falloff` per metre past 10), and a linear model
+     cannot be scaled by a ratio derived from an inverse-square-ish quantity
+     without going somewhere silly: the raw 6.6x an M3A has over an M4's post
+     puts a sniper's zero-hit range past a kilometre, on a battlefield 340 m
+     across. sqrt lands the M24 at ~520 m, which is inside the field and inside
+     the weapon's own listed 240 m range. Consumers apply it themselves —
+     warlord/battle.js divides p.falloff by it and multiplies p.hi — so this
+     query stays a pure read and cannot move anybody's balance by existing. */
+  const AIM_ERR = {
+    none: 0.0060,      // pointing a weapon with no sight line at all
+    iron: 0.0033,      // 2 mm front post at a 600 mm sight radius (M4/AK class)
+    dot:  0.0010,      // 2 MOA dot (0.58 mrad) plus the wobble of finding it
+    mgo:  0.00060,     // Trijicon M145 3.4x, chevron
+    acog: 0.00050,     // Trijicon TA31 4x, chevron
+    m3a:  0.00030,     // Leupold Ultra M3A 10x, mil-dot
+  };
+  const TORSO_W = 0.5;                 // metres across a man's chest
+  IQ.sight = function (a) {
+    let opt = null;
+    const row = (a && a.wid && CBZ.weaponById) ? CBZ.weaponById(a.wid) : null;
+    if (row && CBZ.weaponOptic) opt = CBZ.weaponOptic(row);
+    if (!opt) {
+      // no weapon row (a city body carrying a NAME, not an id): the class's
+      // own assumption. Everything is irons except the sniper, which is a
+      // sniper because of what is on top of it.
+      const cls = weaponClass(a);
+      opt = { id: cls === "sniper" ? "m3a" : (cls === "none" ? "none" : "iron"), mag: cls === "sniper" ? 10 : 1 };
+    }
+    const err = AIM_ERR[opt.id] != null ? AIM_ERR[opt.id] : AIM_ERR.iron;
+    return {
+      optic: opt.id,
+      mag: opt.mag || 1,
+      err: err,
+      reach: TORSO_W / err,
+      reachMul: Math.sqrt(AIM_ERR.iron / err),
+    };
+  };
   IQ.tierOf = roleTier;
   IQ.weaponClass = weaponClass;
 

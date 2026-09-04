@@ -139,7 +139,7 @@ rail — it hides the band the card is about.
 | `territory.js` | regions, ownership, the strategic map |
 | `campaign.js` | riding the island; roaming bands; encounter detection |
 | `army.js` | the encounter card, the roster, the aftermath |
-| `battle.js` | the real 3D war on `combat_iq` |
+| `battle.js` | the real 3D war on `combat_iq`, and the ground it is fought on |
 | `outpost.js` | depots (finite gun crates) and camps (finite men) |
 | `loadout.js` | who carries what |
 | `events.js` | road events, loyalty/mutiny, weather, the endgame |
@@ -164,6 +164,21 @@ entry points with ONE model behind them:
 - `W.battle.resolve(...)` — the same rosters, the same morale model, the same
   result shape, resolved in one call with nothing rendered
 
+**And "the same morale model" is a promise that has to be checked, because for
+months it was false.** `resolve()` had never had a caller and diverged from the
+rendered fight in three places: its `powerNow` skipped ROUTED men (so the first
+man to break lowered the morale that broke the next four), it skipped the
+warlord's +14 that `power0` includes (so your side began every resolved battle
+with a phantom casualty — on a poor roster that put the whole line under the
+civ nerve of 0.62 on tick ONE and ended the fight on tick TWO with nobody
+dead), and the warlord fired `2.0 * ENGAGE * 3` rounds a second under a comment
+claiming "three times an engaged rifleman's" when an engaged rifleman in that
+same function fires 0.0116 — twenty-three times, folded into the side's MEAN
+damage per round so his shotgun made every levy's pistol hit like one.
+`tools/warlord-cover-check.mjs` gate F is what keeps it honest: casualties on
+both sides, a duration longer than a couple of ticks, and a win rate on an even
+fight within a quarter of what `W.odds()` promised the player.
+
 `start({band, solo:true, duel:true})` is the one-on-one: none of your men are
 fielded (they are the reserve and come home untouched) and neither side routs.
 Every battle ends with `battle:end` (the report) on the bus before the aftermath
@@ -174,6 +189,61 @@ the warlord and keeps it there; MOVE is a point on the field (`W.battle.moveTo`,
 or a tap in the command seat) the line goes to and holds. Neither is a second
 AI: out of contact the section marches to the point, in contact think() hands
 back to combat_iq exactly as HOLD does.
+
+## THE GROUND IS THE COVER
+
+There are no scattered rocks on an open battlefield any more, and the reason
+they were there is worth keeping written down: `systems/combat_iq.js`'s cover
+search can only see BOXES — it scans `queryCollidersNear` for a solid thing at
+least 0.85 m tall and puts the man on the far side of it — and a dune is not a
+collider. So an open field made every man stand upright, and desert.js answered
+by hashing boulders onto biomes that have none. The owner's word for that was
+"fake rocks fuck, there is already cover from the natural steepness of the
+desert dunes."
+
+`hullDown(x, z, threatX, threatZ, r)` (battle.js, public as
+`W.battle.hullDown`) searches the terrain for the REVERSE-SLOPE position: the
+ground where a CROUCHED man (eye 1.0 m) is hidden from the threat and a
+STANDING one (1.6 m) is not. Both probes go through the same `terrainBlocked()`
+that decides whether a round connects, so a fold cannot disagree with a bullet.
+think() asks for one on any hold-ish order where `combat_iq.cover()` found no
+box; a man who has arrived WORKS it — down behind the lip, up to shoot, down —
+and while he is down `setStance()` has lowered his `losY` so the enemy's
+`eyeLos` to him genuinely fails. He is not harder to hit, he is not there.
+
+`COVER_BY_BIOME` (desert.js) is down to the two rows that are really objects:
+`rock` keeps its outcrop slabs and `oasis` its palms. dune, gravel, wadi,
+shore and salt fight on the ground they have.
+
+**A field has TWO reliefs and they disagree.** `relief` is peak-to-peak over
+the whole 340 m disc and arms `terrainLos`; `coreRelief` is the same measure
+over the inner half, and it is what `folded` (and therefore the fold search) is
+gated on. Measured on seed 1337: a field at (-2400,-4400) reports 26 m of
+relief and its middle 150 m — where two lines 160 m apart actually meet — is a
+flat pan. It is a basin with high walls. Across the island's 345 dune fields,
+100 hold a real reverse-slope position at the centre.
+
+## STANCE
+
+A man is `stand` or `crouch`, and the stance owns four numbers that used to be
+constants stamped once in makeMan: `eyeH` (what he sees from), `losY` (what an
+enemy must see to shoot him), `aimY` and `headY` (where a round arrives).
+`setStance()` is the only writer, so they cannot drift apart. The player has
+the same three-state stance the city has had for months — `stand / crouch /
+prone`, C or Ctrl on a keyboard, a word button on a phone — driven from
+gunplay.js, which writes the same `CBZ.player.crouch/prone` `physics.js` writes
+in the city so `fpsmode.js` reads one answer in both games.
+
+## THE WEAPON HAS A SIGHT ON IT
+
+Every row in `weapons/weapon-data.js` declares an `optic` (a key into
+`CBZ.WEAPON_OPTICS`) and, for rifle-class cartridges, a real `v0` and `dragK`.
+`CBZ.weaponAdsFov(w, hipFov)` is the ONE owner of the ADS lens — the tangent
+law on the optic's true magnification, never a division — and `combat_iq`'s new
+pure query `IQ.sight(a)` turns the same row into an engagement reach, which is
+what makes the man you hand the sniper to the man who kills at 300 m.
+battle.js applies it; combat_iq's own numbers are untouched, because that file
+is shared with every armed body in the city.
 
 Two presentations of one battle model, never two models that can disagree.
 `resolve` is what runs when a player skips the fight, drops mid-battle, when

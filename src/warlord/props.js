@@ -16,8 +16,8 @@
      W.props.banner(colour, opts)  one hero flag, cloth that moves
      W.props.bannerField(opts)     sixty of them in three draw calls
      W.props.wreck(kind, opts)     truck | plane | tank | caravan | bones
-     W.props.cover(kind, opts)     sandbag | gabion | barricade | ruin |
-                                   boulder | slab | bank | palm | crate
+     W.props.cover(kind, opts)     boulder | slab | bank | palm — every kind a
+                                   battlefield can actually ask for
      W.props.coverField(list)      a whole battlefield's cover, batched
      W.props.house(opts)           a mud-brick dwelling — city/villagekit.js's
                                    hut, repainted for this page's colour space
@@ -1376,7 +1376,26 @@
      worth in a handful of draw calls, which is what battle.js should call:
      it hands out ~34 cover boxes today and draws each as its own rotated
      box mesh — 34 draw calls of grey cube. */
-  const COVER_KINDS = ["boulder", "slab", "bank", "sandbag", "gabion", "barricade", "ruin", "crate", "palm"];
+  /* NINE KINDS WENT IN AND FOUR CAME OUT, and the deletion is the point.
+     `cover(kind)` has exactly one caller that matters — coverField(), which is
+     handed desert.js's battlefieldAt().cover — and after the 2026-09-04 pass
+     that removed the scattered boxes from every open biome, the only kinds a
+     battlefield can now ASK for are "slab" (a rock-country outcrop) and "palm"
+     (an oasis tree). "boulder" stays because it is the default fallthrough for
+     an un-named kind and it is what coverField instances; "bank" stays as the
+     one hand-built terrain-shaped piece a future biome could want.
+
+     sandbag / gabion / barricade / ruin / crate are GONE from this switch.
+     They were never reachable: COVER_BY_BIOME never named one, so the only
+     thing that ever built them was the gallery row below, photographing five
+     pieces of cover no fight in this game could contain. The BUILDERS behind
+     three of them are alive and busy — P.sandbags, P.gabion and P.crates are
+     what outposts, camps, markets and depots are made of — so what is deleted
+     here is the routing, not the geometry — ruin() in particular still draws
+     the half-fallen mud-brick wall at the well and in the market, so only its
+     cover ROUTE is gone. barricade() had no other caller at all and is deleted
+     outright. */
+  const COVER_KINDS = ["boulder", "slab", "bank", "palm"];
   P.coverKinds = COVER_KINDS.slice();
 
   P.cover = function (kind, opts) {
@@ -1392,12 +1411,7 @@
     }
     const r = stream(opts.seed == null ? Math.round(w * 97 + h * 31 + d * 7) : opts.seed);
     switch (kind) {
-      case "sandbag":   return P.sandbags({ len: w, h: h, curve: opts.curve || w * 0.12, seed: opts.seed });
-      case "gabion":    return P.gabion({ len: w, h: h, d: d, seed: opts.seed });
-      case "crate":     return P.crates({ n: Math.max(3, Math.round(w * 2)), spread: w * 0.45, seed: opts.seed });
       case "palm":      return P.palm({ h: h, seed: opts.seed });
-      case "barricade": return barricade(w, h, d, r);
-      case "ruin":      return ruin(w, h, d, r);
       case "bank":      return bank(w, h, d, r);
       case "slab":      return boulder(w, h, d, r, true);
       default:          return boulder(w, h, d, r, false);
@@ -1458,29 +1472,7 @@
     return g;
   }
 
-  // a timber barricade: two X-frames and three planks. Cover you can see
-  // through, which is a different tactical object from a sandbag wall.
-  function barricade(w, h, d, r) {
-    const g = new THREE.Group();
-    for (let s = -1; s <= 1; s += 2) {
-      const x = s * (w / 2 - 0.25);
-      const a = box(g, 0.14, h * 1.35, 0.14, M("wood"), x, h / 2, 0, 0, 0, 0.55);
-      const b = box(g, 0.14, h * 1.35, 0.14, M("wood"), x, h / 2, 0, 0, 0, -0.55);
-      a.receiveShadow = b.receiveShadow = true;
-    }
-    for (let i = 0; i < 3; i++) {
-      box(g, w, 0.2, 0.16, M("woodDark"), 0, 0.3 + i * (h - 0.4) / 2, r.range(-0.05, 0.05),
-        0, 0, r.range(-0.03, 0.03));
-    }
-    // sandbags piled at the foot — this is what makes it real cover rather
-    // than three planks combat_iq can see a man through
-    const bags = P.sandbags({ len: w * 0.8, h: 0.78, seed: r.f() * 1e6 | 0 });
-    bags.position.z = -0.35;
-    g.add(bags);
-    g.userData.colliders = [];
-    col(g.userData.colliders, 0, h / 2, 0, w, h, Math.max(0.8, d * 0.6), "barricade");
-    return g;
-  }
+
 
   // a ruined mud-brick wall — three stumps of different heights with a
   // collapsed gap and rubble. The gap matters: it is a firing port, and it
@@ -1521,7 +1513,7 @@
      list: [{x,y,z,w,h,d,yaw,kind}] in the caller's local frame — exactly the
      shape desert.js's battlefieldAt().cover already hands out. Boulders and
      slabs, which are the bulk, go into per-variant InstancedMeshes; the
-     built kinds (sandbag, ruin, barricade) build individually and are then
+     built kinds (bank, palm) build individually and are then
      merged by core/batch.js. Returns {group, colliders} where colliders is
      already in the same local frame, so battle.js registers them itself
      rather than this file guessing which frame it is in. */

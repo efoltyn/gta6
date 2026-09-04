@@ -340,6 +340,7 @@
     CBZ.player.pos = A.you.pos;
     CBZ.player.dead = false; CBZ.player.driving = false; CBZ.player._swim = false;
     CBZ.player.stun = 0; CBZ.player.grounded = true; CBZ.player.speed = 0;
+    stance = "stand"; stanceKeyWas = false;
     CBZ.player.crouch = false; CBZ.player.prone = false;
     /* THE PLAYER'S BODY IS THE REAL RIG, sockets and all — and this is what
        makes third person aim true. fpsmode hangs its carried gun in the rig's
@@ -675,6 +676,72 @@
     return o;
   }
 
+  /* ============================================================ THE STANCE
+     THE CITY HAS HAD ONE FOR MONTHS AND THIS PAGE DID NOT. systems/physics.js
+     owns a real three-state stance machine — C/Ctrl to crouch, a press
+     mid-sprint to slide, a double press to go prone — and it writes
+     `player.crouch` / `player.prone`, which systems/fpsmode.js now reads for
+     spread, recoil and optic sway. physics.js is a CITY file and is not
+     mounted here; mount()'s shim wrote `crouch: false, prone: false` once and
+     nothing ever wrote them again. So on the desert page the gun could ask
+     what stance the warlord was in and the answer was permanently "standing",
+     while his own men were about to start going hull-down behind dune lips.
+
+     This is the same two booleans, driven the same way, in the ONE file that
+     owns this page's player input. It is not a second stance machine: it does
+     not slide, it does not own a body height for collision, and everything
+     downstream (accuracy, sway, the third-person pose) is fpsmode's and
+     character.js's exactly as it is in the city.
+
+     PRONE IS IN. entities/character.js draws a real prone pose for any rig
+     (pronePose, the LMG firing position with the elbows planted), so there is
+     a pose to go to — the brief's condition for having the stance at all.
+
+     Desktop: C or Ctrl cycles stand -> crouch -> prone -> stand. A press is an
+     EDGE, not a hold, because a hold-to-crouch fights the trigger finger on a
+     page where Shift already means hold-breath.
+     Touch: one button in the existing micro.touch grammar (see buildTouch),
+     which drives this same call. */
+  const STANCES = ["stand", "crouch", "prone"];
+  let stance = "stand", stanceKeyWas = false;
+  function setStance(next) {
+    stance = STANCES.indexOf(next) >= 0 ? next : "stand";
+    const P = CBZ.player;
+    if (P) { P.crouch = stance !== "stand"; P.prone = stance === "prone"; }
+    if (A && A.you) {
+      /* HIS EYE COMES DOWN, and it is the same number battle.js drops an AI
+         man's to (STANCE_K 0.645 of a 1.62 m standing eye). The camera reads
+         you.eyeH every frame in placeCamera, so crouching behind a dune lip
+         genuinely puts the crest between the lens and the far slope — the
+         player gets the cover his men get, out of the same arithmetic. */
+      A.you.eyeH = stance === "prone" ? 0.42 : stance === "crouch" ? 1.05 : 1.62;
+      /* AND SO DOES WHAT AN ENEMY HAS TO SEE. losY / aimY / headY are the
+         warlord's silhouette as far as the fight is concerned — battle.js's
+         eyeLos() tests the enemy's eye against losY, and fireShot() puts the
+         round at aimY or headY. Left at their standing values, crouching
+         behind a dune lip moved the CAMERA down and changed nothing about
+         whether he could be seen or shot: the player would have been the one
+         man on the field the stance did not protect. Same ratio battle.js's
+         STANCE_K uses on his men (0.645 of standing), prone lower again. */
+      const k = stance === "prone" ? 0.30 : stance === "crouch" ? 0.645 : 1;
+      A.you.losY = 1.40 * k;
+      A.you.aimY = 1.30 * k;
+      A.you.headY = 1.68 * k;
+      if (A.you.char) {
+        A.you.char.crouch = stance === "crouch";
+        A.you.char.pronePose = stance === "prone";
+      }
+    }
+    if (stanceBtn && stanceBtn.set) safe(function () { stanceBtn.set(true, null, stanceLabel()); });
+    return stance;
+  }
+  function stanceLabel() { return stance === "prone" ? "PRONE" : stance === "crouch" ? "CROUCH" : "STAND"; }
+  function cycleStance() { return setStance(STANCES[(STANCES.indexOf(stance) + 1) % STANCES.length]); }
+  /* HOW MUCH OF HIS WALK THE STANCE COSTS. physics.js's own ratios: a crouch
+     walk is T.crouchSpeed against T.walkSpeed and a prone crawl is
+     PRONE_SPEED of the walk. Same shape, this page's speeds. */
+  const STANCE_SPEED = { stand: 1, crouch: 0.52, prone: 0.20 };
+
   function isBattleMan(a) { return !!(a && A && a.side && a.team && a.pos); }
 
   /* The enemy list fpsmode scans. Rebuilt on a 5 Hz tick rather than every
@@ -737,8 +804,16 @@
     // is core's own number and stays.
     let mx = IN ? IN.axis("KeyA", "KeyD") : 0, mz = IN ? IN.axis("KeyS", "KeyW") : 0;
     if (T && T.active && T.stick.mag > 0.05) { mx = T.stick.x; mz = -T.stick.y; }
-    const sprint = (IN && IN.isDown("ShiftLeft")) || (T && T.stick.rim);
-    const base = (sprint ? 7.4 : 4.8) * (1 - W.armour(W.state.you.armour).slow);
+    /* SHIFT IS TWO VERBS AND THEY NEVER COLLIDE. Standing, it sprints;
+       behind an optic it holds your breath (systems/lockon.js reads
+       CBZ.keys.shift), and a man sprinting is not a man aiming — the ADS state
+       decides which one you meant. Crouched or prone it can only be the
+       breath, because there is no sprint from the deck. */
+    const aiming = !!(CBZ.isADS && CBZ.isADS());
+    const sprint = stance === "stand" && !aiming &&
+      ((IN && IN.isDown("ShiftLeft")) || (T && T.stick.rim));
+    const base = (sprint ? 7.4 : 4.8) * (STANCE_SPEED[stance] || 1) *
+      (1 - W.armour(W.state.you.armour).slow);
     const len = Math.hypot(mx, mz);
     if (len > 0.01) {
       const s = base / Math.max(1, len);
@@ -760,6 +835,13 @@
       CBZ.keys.q = IN.isDown("KeyQ");
       CBZ.keys.r = IN.isDown("KeyR");
       CBZ.keys.shift = IN.isDown("ShiftLeft");
+
+      /* STANCE, ON THE KEY THE CITY ALREADY USES. physics.js reads
+         keys["control"] || keys["c"]; microboot's input map is by CODE, so the
+         same two keys are ControlLeft and KeyC. Rising edge only. */
+      const sk = IN.isDown("KeyC") || IN.isDown("ControlLeft");
+      if (sk && !stanceKeyWas) cycleStance();
+      stanceKeyWas = sk;
 
       // SPACE is a trigger too (the fork's binding, kept: it is what a laptop
       // trackpad has)
@@ -849,8 +931,17 @@
        not mounted), so it is taken with camera.js's own armed-chase number and
        the same fourteen-degree ADS punch. */
     if (camMode === "third") {
+      /* THE SHOULDER LENS READS THE SIGHT ON THE GUN. `66 - 14` was the same
+         flat punch-in fpsmode used to apply to every weapon in the game, and
+         it is the same thing the owner meant by "scopes are dumb": aiming a
+         Desert Eagle and aiming an M24 changed the picture by an identical
+         fourteen degrees. weaponAdsFov derives it from the optic's real
+         magnification off THIS seat's own 66-degree chase hip. */
       const scopeF = (CBZ.fpsScopeFov && CBZ.fpsScopeFov()) || 0;
-      const wantFov = scopeF || ((CBZ.isADS && CBZ.isADS()) ? 66 - 14 : 66);
+      const adsNow = !!(CBZ.isADS && CBZ.isADS());
+      const wantFov = scopeF || (adsNow && CBZ.weaponAdsFov
+        ? CBZ.weaponAdsFov(CBZ.currentGun && CBZ.currentGun(), 66)
+        : (adsNow ? 52 : 66));
       if (Math.abs(c.fov - wantFov) > 0.05) {
         c.fov += (wantFov - c.fov) * Math.min(1, (dt || 0.016) * 12);
         c.updateProjectionMatrix();
@@ -984,6 +1075,26 @@
     touchBtns.push(micro.touch.addButton({
       id: "wgpPick", word: true, glyph: "TAKE", size: 44, right: 18, bottom: 306, key: "KeyE",
     }));
+    /* THE STANCE BUTTON. A WORD, like TAKE, and for the same reason: an icon
+       cannot say WHICH of three states you are about to be in, and the whole
+       value of the stance is knowing whether you are currently hidden. It
+       sits in the left column under the aim/reload stack rather than the
+       right, because it is a thing you press with the LOOK thumb between
+       bursts, not with the trigger thumb. */
+    stanceBtn = micro.touch.addButton({
+      id: "wgpStance", word: true, glyph: stanceLabel(), size: 44, right: 112, bottom: 306,
+      onDown: function () { cycleStance(); },
+    });
+    touchBtns.push(stanceBtn);
+    /* AND THE BREATH, on the same latch grammar the aim button uses: the right
+       thumb cannot hold a key and pull a trigger, so anything you would hold
+       WITH the trigger is a press-once latch (touch.js's own 2026-08-04 rule).
+       Only useful behind glass, so it is hidden with the rest of the cluster
+       in the command seat and is a no-op on a gun with no optic. */
+    touchBtns.push(micro.touch.addButton({
+      id: "wgpBreath", glyph: "◐", size: 48, right: 18, bottom: 380, latch: true,
+      onDown: function (h) { if (CBZ.fpsHoldBreath) CBZ.fpsHoldBreath(h.lit); },
+    }));
     touchBtns.push(micro.touch.addButton({
       id: "wgpView", glyph: "▣", size: 48, right: 22, top: 74,
       onDown: function () { cycleCam(); },
@@ -999,12 +1110,13 @@
       // the reach button is CONTEXTUAL — the seat can only take it away, never
       // hand it back. Its own condition is whether a rifle is at your feet.
       if (b.id === "wgpPick") { b.set(show && pickOn, null, pickLbl || "TAKE"); continue; }
+      if (b.id === "wgpStance") { b.set(show, null, stanceLabel()); continue; }
       b.set(show);
     }
   }
   /* WHAT battle.js SAYS THROUGH. It owns the reach test (it owns the dropped
      rifles); this file owns the thumb column. One boolean crosses. */
-  let pickOn = false, pickLbl = "";
+  let pickOn = false, pickLbl = "", stanceBtn = null;
   function showPick(on, label) {
     on = !!on;
     label = label || "";
@@ -1057,7 +1169,10 @@
     clearTouch();
     if (CBZ.fpsSetActive) safe(function () { CBZ.fpsSetActive(false); });
     if (CBZ.fpsSetAim) CBZ.fpsSetAim(false);
+    if (CBZ.fpsHoldBreath) CBZ.fpsHoldBreath(false);
     if (CBZ.fpsFire) safe(function () { CBZ.fpsFire(false); });
+    stance = "stand"; stanceKeyWas = false; stanceBtn = null;
+    if (CBZ.player) { CBZ.player.crouch = false; CBZ.player.prone = false; }
     // the lens goes back the way it was found — the campaign rides at micro's own
     if (CBZ.camera && baseFov) { CBZ.camera.fov = baseFov; CBZ.camera.updateProjectionMatrix(); }
     if (CBZ._wlPrevAiKill !== undefined) { CBZ.aiKill = CBZ._wlPrevAiKill || undefined; CBZ._wlPrevAiKill = undefined; }
@@ -1088,6 +1203,15 @@
       mounted: on, engine: on && !legacy, legacy: legacy, loaded: loaded,
       cam: camMode, active: !!(CBZ.fpsActive && CBZ.fpsActive()),
       ads: !!(CBZ.isADS && CBZ.isADS()),
+      stance: stance,
+      eyeH: A && A.you ? A.you.eyeH : null,
+      fov: CBZ.camera ? Math.round(CBZ.camera.fov * 100) / 100 : null,
+      optic: (CBZ.weaponOptic && CBZ.currentGun && CBZ.currentGun())
+        ? CBZ.weaponOptic(CBZ.currentGun()).id : null,
+      sway: CBZ.playerSwayRad ? Math.round(CBZ.playerSwayRad() * 1e6) / 1e6 : null,
+      scoped: !!(CBZ.fpsScoped && CBZ.fpsScoped()),
+      breath: CBZ.fpsBreathState ? CBZ.fpsBreathState() : null,
+      inFlight: CBZ.fpsBulletsInFlight ? CBZ.fpsBulletsInFlight() : 0,
       armed: !!(CBZ.playerArmed && CBZ.playerArmed()),
       gun: CBZ.currentWeaponId || null,
       owned: ownedIds(),
@@ -1149,7 +1273,14 @@
     }
     setReserves();
     if (id && CBZ.fpsSelectWeaponId) safe(function () { CBZ.fpsSelectWeaponId(id); });
-    CBZ.currentWeaponId = W.state.you.wid;
+    /* THE GUN IN HIS HANDS IS THE GUN THAT WAS ASKED FOR. This line used to
+       read `CBZ.currentWeaponId = W.state.you.wid` unconditionally, which is
+       harmless on the ONE path that existed — stepPickup() writes you.wid
+       through W.equip before calling here, so the two agree — and a lie on
+       every other: rearm("sniper") selected the sniper and then announced the
+       AK. Anything reading currentWeaponId (the gunsmith optic lookup, the
+       HUD, a probe) was told the wrong weapon. */
+    CBZ.currentWeaponId = id || W.state.you.wid;
     if (CBZ.fpsResyncAmmo) safe(CBZ.fpsResyncAmmo);
     return true;
   }
@@ -1531,6 +1662,8 @@
     fire: function (d) { return legacy ? legacyFire(d) : fire(d); },
     pull: function () { return legacy ? legacyFire(true) : pull(); },
     aim: aim,
+    stance: function (v) { return v ? setStance(v) : stance; },
+    breath: function (d) { return CBZ.fpsHoldBreath ? CBZ.fpsHoldBreath(!!d) : false; },
     reload: function () { return legacy ? legacyReload() : reload(); },
     nextGun: nextGun,
     look: function (o) { return legacy ? legacyLook(o) : look(o); },
