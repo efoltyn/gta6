@@ -235,8 +235,12 @@
      ========================================================== */
   if (ON && LIT && PD && typeof PD.strip === "function") {
     let n = 0;
-    for (const z of [-40.5, -34, -27.5, -21, -14.5]) { PD.strip(0, 8.05, z, 4.0, "z", { kind: "block", r: 8 }); n++; }
-    for (const x of [-13.2, 13.2]) { PD.strip(x, 8.05, -26, 3.4, "z", { kind: "block", r: 7 }); n++; }
+    // 7.88, not 8.05: the wing's lid carries four lattice trusses now
+    // (world/cellblock.js, bottom chord 7.95-8.15) and a fitting hangs UNDER
+    // its structure. At 8.05 these sat inside the chords; at their old
+    // height against a bare lid they hung 0.85 m below it in mid-air.
+    for (const z of [-40.5, -34, -27.5, -21, -14.5]) { PD.strip(0, 7.88, z, 4.0, "z", { kind: "block", r: 8 }); n++; }
+    for (const x of [-13.2, 13.2]) { PD.strip(x, 7.88, -26, 3.4, "z", { kind: "block", r: 7 }); n++; }
     // …and they are the WING's fittings, so the audit counts them as the
     // wing's. Without this the hall reads `unlit` while seven strips burn
     // in it, which is the ratchet lying about the one room it cares most about.

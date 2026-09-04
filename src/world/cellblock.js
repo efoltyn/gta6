@@ -1,7 +1,8 @@
 /* ============================================================
-   world/cellblock.js — THE CELL WING. Not set dressing: a real five-row
-   cell house with 25 individual cells, sliding barred doors on real
-   colliders, and inmates living inside them.
+   world/cellblock.js — THE CELL WING. Not set dressing: a real two-tier
+   cell house — 28 cells in three rows on two storeys, a railed gallery and
+   two stairs — with sliding barred doors on real colliders and inmates
+   living inside them.
 
    OWNER (verbatim): "player cell should be an actual cell and there
    should be many others in cell, county jail from gang city is DUMB AF
@@ -128,11 +129,79 @@
    REVERT: CBZ.CONFIG.PRISON_CELLS_V2 = false (or ?cfg_PRISON_CELLS_V2=0)
    restores the original 59-line dressing byte for byte, and CBZ.cellblock
    degrades to a null-safe stub whose playerSpawn() falls back to CBZ.SPAWN.
+
+   ------------------------------------------------------------------
+   THE TIER (2026-09-04). OWNER, with a photograph of a real cell house —
+   cells stacked two high along the long walls, a steel gallery with a rail
+   in front of the upper row, an open stair at the end of it, one big
+   concrete floor, pendant lamps on stems off a trussed roof: "LOOK HOW THIS
+   JAIL LOOKS. Our cells are not laid out in a realistic way and our cell
+   room has floating shit like the desk the keycard is on and some lights.
+   The jail room just needs improvement overall."
+
+   WHAT WAS WRONG, MEASURED (tools/visual-presets/prison-tier.mjs, HEAD):
+     · 24 cells on ONE storey under a 9 m lid. Rows D and E (the 2026-08-15
+       bed fix) stood as two 21 m concrete blocks in the middle of the hall,
+       3.6 m tall with 5.4 m of air over them — a hangar with sheds in it, the
+       exact opposite of the photograph, where the middle is the one thing
+       that is EMPTY and the cells are what is stacked.
+     · Seven cage lamps hung at y 8.2 with nothing between their caps and the
+       lid at 9.0: fittings in mid-air. The roofs.js strips at 8.05, likewise.
+     · The duty desk really was floating — its legs and drawers were baked at
+       the world origin by core/batch.js (the hidden-root matrix trap, fixed
+       in that file the same day). Not this file's bug; it is in this preset
+       so the fix is photographed.
+
+   WHAT IS HERE NOW. Rows D and E are gone. The bed capacity they carried
+   goes UP instead: a second storey of cells over rows A, B and C, drawn by
+   the SAME builders through one file-wide `LIFT` (see addBox below) so an
+   upper cell is a ground cell with 3.9 added to every y — same bunk, same
+   toilet, same grille, same sliding leaf on a banded collider. A 1.35 m
+   steel gallery cantilevers off the cell fronts at FY with a rail, the two
+   side galleries meet the north one at the corners, and an open stair rises
+   along the south wall at each end onto the gallery — real CBZ.platforms
+   ramp/landing records, so the player climbs it with the physics he already
+   has. The lid gets four lattice trusses and every lamp hangs off a chord.
+
+   THE TOP TIER IS A LOCKDOWN TIER, AND THAT IS A STATED LIMIT, NOT A CHOICE
+   ABOUT PRISONS. systems/navgrid.js is ONE grid at ground height (it skips
+   colliders above HEAD, which is right for the men it was built for). A
+   free upper resident would be pathed straight through the gallery rail
+   toward the hall, pinned on it by actorcollide, and spend the day walking
+   into a rail — the treadmill "THE DOOR DECIDES" below just removed. So an
+   upper leaf never unlocks: setDoor refuses, the interaction says why, the
+   residents up there live behind their bars (they are `held`, so the
+   schedule never musters them and prisonrest gives each his own rack), and
+   freeCell never offers a transfer a cell it cannot walk to. Lift it by
+   giving the navigator a second layer, not by unlocking the doors.
+
+   Every pinned coordinate in the header above still holds — the ground rows
+   are byte-for-byte the same tables — and tools/prison-beds-check.mjs still
+   asserts them from a live run.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  const { addBox, COL, DIM } = CBZ;
+  const { COL, DIM } = CBZ;
+  /* ONE LIFT FOR THE WHOLE FILE. Every helper below places geometry against
+     a floor at y = 0 — bunk tops, toilet bands, door colliders, lamp heights,
+     all typed for the ground. The upper tier is the same cells drawn FY
+     higher, so rather than thread a floor height through forty signatures
+     the file's own addBox adds `LIFT` to y (and to a solid's y0/y1 band) and
+     the tier builder sets it for the duration of one cell. Zero on the
+     ground floor: byte-identical to bare CBZ.addBox. */
+  const addBox0 = CBZ.addBox;
+  let LIFT = 0;
+  function addBox(x, y, z, w, hgt, d, color, opts) {
+    if (LIFT && opts && (opts.y0 != null || opts.y1 != null)) {
+      const o = {};
+      for (const k in opts) o[k] = opts[k];
+      if (o.y0 != null) o.y0 += LIFT;
+      if (o.y1 != null) o.y1 += LIFT;
+      opts = o;
+    }
+    return addBox0(x, y + LIFT, z, w, hgt, d, color, opts);
+  }
   const { WALL, TRIM } = COL;
   const WH = DIM.WH;
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
@@ -299,24 +368,19 @@
   const BACK_IN = 0.32;                 // how far a back-wall fitting's CENTRE sits
                                         // off the wall plane, so the unit lands flush
 
-  /* ---- ROWS D AND E, the centre hall's own pair (PRISON_CELL_ROWS_V3).
-     Depth is SD, the side rows' depth, so a D cell and a B cell are the same
-     room and share one bunk builder, one fit-out and one leash. The only
-     thing they do not share is the shell: these are the first cells in the
-     wing with no exterior wall behind them, so the row draws its OWN back —
-     IBT of concrete whose centre plane is IBACK, which is also where the
-     gallery in front of the outer cells ends. Every number is derived from
-     IFACE, so the hall's width is one figure and not four:
-
-        gallery   11.7 - 8.20 = 3.50 m   (outer cell fronts -> D/E backs)
-        D / E     8.20 -> 4.10           (0.30 back wall + 3.80 cell)
-        hall      4.10 -> -4.10 = 8.20 m (cell fronts both sides, spine in it)
-                                                     23.40 m, the full aisle */
-  const IFACE = 4.10;                   // inner rows' door plane, onto the centre hall
-  const IBT = 0.30;                     // inner row back-wall thickness
-  const IBACK = IFACE + SD + IBT / 2;   // 8.05 : that back wall's CENTRE plane
-  if (CFG.PRISON_CELL_ROWS_V3 == null) CFG.PRISON_CELL_ROWS_V3 = true;
-  const ROWS3 = CFG.PRISON_CELL_ROWS_V3 !== false;
+  /* ---- THE TIER. The upper storey's floor is the ground cells' own roof
+     slab (CH + RT), so nothing is typed twice: raise CH and the tier rises.
+     The gallery is a steel deck GW wide cantilevered off the cell fronts, the
+     rail RAIL_H over it; the stairs are STAIR_W wide against the south wall.
+     The hall between the two galleries is what the photograph has in the
+     middle: nothing.                                                      */
+  const FY = CH + RT;                   //  3.90 : upper tier floor
+  const GW = 1.35;                      // gallery deck, out from the cell fronts
+  const GDECK = 0.14;                   // gallery deck thickness
+  const RAIL_H = 1.05;                  // rail over the deck
+  const STAIR_W = 1.20;
+  const STAIR_X0 = 4.0;                 // |x| where each flight leaves the floor (door gap is |x| < 3)
+  const SZ0 = -9.95, SZ1 = -8.75;       // the flights' z band, along the south wall
 
   // palette
   const C_PART = 0x8f98a3;   // cell partition concrete
@@ -470,7 +534,8 @@
   // OUR work and never blame world/door.js or the yard for a blocked lane.
   const mine = [];
   function solid(minX, minZ, maxX, maxZ, y0, y1) {
-    const c = { minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ, y0: y0 == null ? 0 : y0, y1: y1 == null ? CH : y1 };
+    const c = { minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ,
+      y0: (y0 == null ? 0 : y0) + LIFT, y1: (y1 == null ? CH : y1) + LIFT };
     (CBZ.colliders || (CBZ.colliders = [])).push(c);
     mine.push(c);
     return c;
@@ -558,32 +623,8 @@
      as checking the floor, and this one was not on that list. It is now:
      the gate below asserts no cell contains the duty post. The west side has
      no such tenant, so B-5 stands and the wing sleeps 64. */
-  if (ROWS3) {
-    WEST_ROW.push({ kind: "cell", a: -14.00, b: -10.20, tag: "B-5" },
-      { kind: "wall", a: -10.20, b: -9.86 });
-  }
-
-  /* THE INNER ROWS' SEGMENT TABLE, read north->south and used TWICE — once
-     mirrored — because D and E are the same row on either side of the hall.
-     The span is the EAST row's own, to the centimetre, so a D cell lines up
-     rung for rung with a C cell across the gallery instead of sitting in a
-     sawtooth against it:
-       -34.84 +0.34 = -34.50 +3.80 = -30.70 +0.34 = -30.36 +3.80 = -26.56
-       +0.34 = -26.22 +3.80 = -22.42 +0.34 = -22.08 +3.80 = -18.28 +0.34
-       = -17.94 +3.80 = -14.14 +0.34 = -13.80   (exact, 21.04) */
-  const INNER_ROW = [
-    { kind: "wall", a: -34.84, b: -34.50 },
-    { kind: "cell", a: -34.50, b: -30.70, n: 1 },
-    { kind: "wall", a: -30.70, b: -30.36 },
-    { kind: "cell", a: -30.36, b: -26.56, n: 2 },
-    { kind: "wall", a: -26.56, b: -26.22 },
-    { kind: "cell", a: -26.22, b: -22.42, n: 3 },
-    { kind: "wall", a: -22.42, b: -22.08 },
-    { kind: "cell", a: -22.08, b: -18.28, n: 4 },
-    { kind: "wall", a: -18.28, b: -17.94 },
-    { kind: "cell", a: -17.94, b: -14.14, n: 5 },
-    { kind: "wall", a: -14.14, b: -13.80 },
-  ];
+  WEST_ROW.push({ kind: "cell", a: -14.00, b: -10.20, tag: "B-5" },
+    { kind: "wall", a: -10.20, b: -9.86 });
 
   const cells = [];
   let playerCell = null;
@@ -597,7 +638,7 @@
   // mutates it in place (the bug crashdeform/strategic.js already paid for).
   function pushBox(list, x, y, z, w, hgt, d) {
     const g = new THREE.BoxGeometry(w, hgt, d);
-    g.translate(x, y, z);
+    g.translate(x, y + LIFT, z);
     list.push(g);
   }
   function mergedMesh(list, color, dynamic) {
@@ -711,7 +752,7 @@
       minZ = c.faceZ - COL_T / 2; maxZ = c.faceZ + COL_T / 2;
     }
     if (perm) return solid(minX, minZ, maxX, maxZ, 0, CH);
-    const col = { minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ, y0: 0, y1: CH };
+    const col = { minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ, y0: LIFT, y1: CH + LIFT };
     mine.push(col);
     return col;
   }
@@ -937,12 +978,15 @@
        how far the frame reaches into the room from the bunk's centre-line: the
        leash, the seat spot and the fight scatter all need the footprint, and
        all three used to carry their own 0.62 copy of it. */
+    // WORLD heights: an upper-tier rack publishes its tops FY higher, so every
+    // consumer (propuse anchors, the seat solve, the leash) reads the mattress
+    // where it is drawn. The clearances are differences and do not move.
     return {
-      x: x, z: z, top: LOW_TOP, topBunk: dbl ? UP_TOP : null, along: along,
-      deckY: dbl ? DECK_Y : null,
+      x: x, z: z, top: LOW_TOP + LIFT, topBunk: dbl ? UP_TOP + LIFT : null, along: along,
+      deckY: dbl ? DECK_Y + LIFT : null, floor: LIFT,
       headroom: dbl ? DECK_Y - LOW_TOP : CH - LOW_TOP,
       headroomTop: dbl ? CH - UP_TOP : null,
-      latOut: LAT / 2, lonOut: LON / 2, railTop: dbl ? RAIL_TOP : null,
+      latOut: LAT / 2, lonOut: LON / 2, railTop: dbl ? RAIL_TOP + LIFT : null,
     };
   }
 
@@ -1112,9 +1156,9 @@
     // subtracted from the two tops rather than written down as 1.18 — the pitch
     // moved with the rack, and a hardcoded copy of it would have registered
     // every top-bunk sleeper against a floor that no longer exists.
-    useBed(c.bunk.x, c.bunk.z, "z", c.bunk.top, 2.60, c, "bed", 0);
+    useBed(c.bunk.x, c.bunk.z, "z", c.bunk.top, 2.60, c, "bed", LIFT);
     if (c.bunk.topBunk)
-      useBed(c.bunk.x, c.bunk.z, "z", c.bunk.topBunk, 2.60, c, "bedTop", c.bunk.topBunk - c.bunk.top);
+      useBed(c.bunk.x, c.bunk.z, "z", c.bunk.topBunk, 2.60, c, "bedTop", LIFT + c.bunk.topBunk - c.bunk.top);
 
     // TOILET + SINK at the back corner opposite the bunk, its back to masonry.
     const tx = north ? c.x + (c.hx - 0.55) : backX;
@@ -1128,7 +1172,9 @@
     // IT IS THE FIRST THING IN THIS PRISON YOU CAN SHOVE. 7 kg of moulded
     // plastic on a concrete floor: walk into it and it slides, and its collider
     // and its sit anchor go with it (systems/pushprops.js).
-    if (north) {
+    // …and never upstairs: systems/pushprops.js slides a stool on the ground
+    // plane, and a shovable on a floor it cannot see is a stool through a slab.
+    if (north && !LIFT) {
       const st = addBox(c.x + 1.15, 0.22, c.z + 1.00, 0.44, 0.44, 0.44, 0x6b6152, { cast: false });
       useSeat(c.x + 1.15, c.z + 1.00, Math.atan2(-1.15, -1.00), 0.44);
       if (CBZ.pushProp) CBZ.pushProp({
@@ -1207,6 +1253,9 @@
       half: opts.dx !== 0 ? opts.hz : opts.hx,
       locked: false, owner: null,
       doorCol: null, bars: null, slide: 0, slideT: 0,
+      // which storey, and where its floor is. Every y this cell publishes
+      // (leaf, bed anchors, the resident's own feet) is measured from `fy`.
+      tier: opts.tier ? 1 : 0, fy: opts.tier ? FY : 0,
     };
     // Which side the leaf pockets into. Alternated so the wing reads like a
     // real tier and not a wallpaper repeat — but the PLAYER's cell is pinned
@@ -1231,9 +1280,12 @@
     else if (Math.abs(c.faceX) > 8) c.aisle = c.dx > 0 ? [c.faceX + 0.6, c.faceX + 2.9, -37.4, -9.8]
       : [c.faceX - 2.9, c.faceX - 0.6, -37.4, -9.8];
     else c.aisle = [-3.3, 3.3, -37.4, -9.8];
+    // an upper resident's "aisle" is his room: the tier is locked (header)
+    if (c.tier) c.aisle = c.room;
     cells.push(c);
     if (c.player) playerCell = c;
-    buildCell(c);
+    LIFT = c.fy;
+    try { buildCell(c); } finally { LIFT = 0; }
     return c;
   }
 
@@ -1272,29 +1324,181 @@
     else utilityAlcove(EX, cz, SD, len, -1);
   }
 
-  // ---- ROWS D + E: the centre hall's own pair, doors onto the hall --------
-  // Same depth, same cell record, same builder as the side rows — `addCell`
-  // and `fitOutCell` already read the row from `dx`, so a D cell needs no
-  // branch anywhere downstream. `side` is -1 west of the hall, +1 east; the
-  // door normal is -side, which is what points a leaf INTO the hall.
-  if (ROWS3) for (const side of [-1, 1]) {
-    const face = side * IFACE;                    // this row's door plane
-    const cx = side * (IFACE + SD / 2);           // its cells' centre line
-    const row = side < 0 ? "D" : "E";
-    for (const seg of INNER_ROW) {
-      const len = seg.b - seg.a, cz = (seg.a + seg.b) / 2;
-      if (seg.kind === "wall") sbox(cx, CH / 2, cz, SD, CH, len, C_PART, { solid: true, blockLOS: true });
-      else addCell({ tag: row + "-" + seg.n },
-        { x: cx, z: cz, hx: SD / 2, hz: len / 2, dx: -side, dz: 0, faceX: face, faceZ: cz });
-    }
-    // THE ROW'S OWN BACK. Every other cell in this wing backs onto the shell;
-    // these back onto a gallery, so the concrete has to be drawn. ONE slab and
-    // one collider for the whole run — it is a wall, not a partition, and
-    // splitting it per cell would buy nothing but colliders. sbox, so
-    // CBZ.cellblockAudit() judges it with the rest of our work.
-    const z0 = INNER_ROW[0].a, z1 = INNER_ROW[INNER_ROW.length - 1].b;
-    sbox(side * IBACK, CH / 2, (z0 + z1) / 2, IBT, CH, z1 - z0, C_PART_D, { solid: true, blockLOS: true });
+  /* ==========================================================
+     5b. THE TIER — the same three rows, one storey up, and the steel that
+         lets a body get there. Read the header's "THE TIER" first.
+     ========================================================== */
+  // the slab that IS the tier's floor over a bay that has no cell (and so no
+  // per-cell roof): alcoves, the officer's post, the four corners. C_ROOF so
+  // it reads as the same pour as the cells' own lids beside it.
+  function tierSlab(x0, x1, z0, z1) {
+    addBox((x0 + x1) / 2, CH + RT / 2, (z0 + z1) / 2, x1 - x0, RT, z1 - z0, C_ROOF, { cast: false, blockLOS: true });
   }
+  // a partition on the tier: the ground partition under it already carries a
+  // full-height collider (sbox with no band), so this is the concrete only.
+  function tierWall(x, z, w, d) {
+    addBox(x, FY + CH / 2, z, w, CH, d, C_PART, { cast: false, blockLOS: true });
+  }
+  // a bay on the tier with no cell in it: a closed utility room — concrete
+  // front, a louvred steel panel, its own lid. Nothing in it, on purpose.
+  function tierBlank(cx, cz, w, d, dx, dz) {
+    const fx = cx + dx * (d / 2 - 0.10), fz = cz + dz * (d / 2 - 0.10);
+    addBox(fx, FY + CH / 2, fz, dx ? 0.20 : w, CH, dz ? 0.20 : w, C_PART_D, { cast: false, blockLOS: true,
+      solid: true, y0: FY, y1: FY + CH });
+    for (let i = 0; i < 5; i++)
+      addBox(fx + dx * 0.11, FY + 1.30 + i * 0.16, fz + dz * 0.11, dx ? 0.03 : w * 0.5, 0.06, dz ? 0.03 : w * 0.5, C_STEEL_D, { cast: false });
+    addBox(cx, FY + CH + RT / 2, cz, dx ? d + WT : w + WT, RT, dx ? w + WT : d + WT, C_ROOF, { cast: false, blockLOS: true });
+  }
+
+  // ---- the cells, from the same tables ---------------------------------
+  for (const seg of NORTH_ROW) {
+    const w = seg.b - seg.a, cx = (seg.a + seg.b) / 2;
+    if (seg.kind === "cell") {
+      addCell({ tag: "2A-" + seg.tag.split("-")[1] },
+        { x: cx, z: NZ, hx: w / 2, hz: NHZ, dx: 0, dz: 1, faceX: cx, faceZ: NFACE, tier: 1 });
+    } else {
+      tierSlab(seg.a - WT / 2, seg.b + WT / 2, IZN - 0.5, NFACE + WT / 2);
+      if (seg.kind === "wall") tierWall(cx, NZ, w, ND);
+      else if (seg.kind !== "post") tierBlank(cx, NZ, w, ND, 0, 1);
+      // over the post: the tier's open landing, nothing but floor and rail
+    }
+  }
+  for (const seg of WEST_ROW) {
+    const len = seg.b - seg.a, cz = (seg.a + seg.b) / 2;
+    if (seg.kind === "cell") {
+      addCell({ tag: "2B-" + seg.tag.split("-")[1] },
+        { x: WX, z: cz, hx: WHX, hz: len / 2, dx: 1, dz: 0, faceX: WFACE, faceZ: cz, tier: 1 });
+    } else {
+      tierSlab(IX0 - 0.5, WFACE + WT / 2, seg.a - WT / 2, seg.b + WT / 2);
+      if (seg.kind === "wall") tierWall(WX, cz, SD, len);
+      else tierBlank(WX, cz, len, SD, 1, 0);
+    }
+  }
+  for (const seg of EAST_ROW) {
+    const len = seg.b - seg.a, cz = (seg.a + seg.b) / 2;
+    if (seg.kind === "cell") {
+      addCell({ tag: "2C-" + seg.tag.split("-")[1] },
+        { x: EX, z: cz, hx: EHX, hz: len / 2, dx: -1, dz: 0, faceX: EFACE, faceZ: cz, tier: 1 });
+    } else {
+      tierSlab(EFACE - WT / 2, IX1 + 0.5, seg.a - WT / 2, seg.b + WT / 2);
+      if (seg.kind === "wall") tierWall(EX, cz, SD, len);
+      else tierBlank(EX, cz, len, SD, -1, 0);
+    }
+  }
+  // the four corners the rows leave open at ground level get a floor on the
+  // tier: the two cross-aisle ends up north, the stair landings down south.
+  const WEND = WEST_ROW[WEST_ROW.length - 1].b, EEND = EAST_ROW[EAST_ROW.length - 1].b;
+  tierSlab(IX0 - 0.5, WFACE, NFACE, WEST_ROW[0].a);
+  tierSlab(EFACE, IX1 + 0.5, NFACE, EAST_ROW[0].a);
+  tierSlab(IX0 - 0.5, WFACE, WEND, -8.0);
+  tierSlab(EFACE, IX1 + 0.5, EEND, -8.0);
+
+  // ---- the gallery: a steel deck GW out from every cell front, its rail,
+  //      and the brackets it hangs on. Colliders: the RAIL only, banded
+  //      [FY, FY+RAIL_H] — a rail 3.9 m up is nothing to a man on the
+  //      ground, to his navigator, or to the lane audits below. ------------
+  const gal = [];                       // merged dark steel: rails, brackets, treads
+  const dk = [];                        // the deck plates, a lighter grey
+  function deckRun(x0, x1, z0, z1) {
+    pushBox(dk, (x0 + x1) / 2, FY - GDECK / 2, (z0 + z1) / 2, x1 - x0, GDECK, z1 - z0);
+  }
+  // rail along one edge. `ax` = the axis the rail runs along; (ox,oz) the edge.
+  function railRun(ax, a0, a1, ox, oz) {
+    const len = a1 - a0, mid = (a0 + a1) / 2;
+    const box = (t, y, along, h, across) => {
+      if (ax === "z") pushBox(gal, ox, y, t, across, h, along);
+      else pushBox(gal, t, y, oz, along, h, across);
+    };
+    box(mid, FY + RAIL_H, len, 0.06, 0.06);          // top rail
+    box(mid, FY + RAIL_H * 0.55, len, 0.05, 0.05);   // mid rail
+    box(mid, FY + 0.07, len, 0.14, 0.04);            // kick plate
+    const N = Math.max(1, Math.round(len / 1.9));
+    for (let i = 0; i <= N; i++) box(a0 + (len * i) / N, FY + RAIL_H / 2, 0.06, RAIL_H, 0.06);
+    // the collider, on the same edge, the rail's own height
+    if (ax === "z") solid(ox - 0.08, a0, ox + 0.08, a1, FY, FY + RAIL_H);
+    else solid(a0, oz - 0.08, a1, oz + 0.08, FY, FY + RAIL_H);
+  }
+  // steel angle brackets under the deck, one per cell partition
+  function bracket(x, z, dx, dz) {
+    for (let i = 0; i < 2; i++) {
+      const t = 0.35 + i * 0.55;
+      pushBox(gal, x + dx * t, FY - GDECK - 0.10, z + dz * t, dx ? 0.12 : 0.12, 0.12, dz ? 0.12 : 0.12);
+    }
+    pushBox(gal, x + dx * 0.55, FY - GDECK - 0.24, z + dz * 0.55, dx ? 1.05 : 0.12, 0.10, dz ? 1.05 : 0.12);
+  }
+  // north gallery (in front of row A and across the post), then the sides
+  const NG1 = NFACE + GW;
+  deckRun(WFACE, EFACE, NFACE, NG1);
+  deckRun(WFACE, WFACE + GW, NG1, SZ1);
+  deckRun(EFACE - GW, EFACE, NG1, SZ1);
+  railRun("x", WFACE + GW, EFACE - GW, 0, NG1);
+  railRun("z", NG1, SZ0, WFACE + GW, 0);
+  railRun("z", NG1, SZ0, EFACE - GW, 0);
+  for (const seg of NORTH_ROW) if (seg.kind === "wall") bracket((seg.a + seg.b) / 2, NFACE, 0, 1);
+  for (const seg of WEST_ROW) if (seg.kind === "wall") bracket(WFACE, (seg.a + seg.b) / 2, 1, 0);
+  for (const seg of EAST_ROW) if (seg.kind === "wall") bracket(EFACE, (seg.a + seg.b) / 2, -1, 0);
+
+  // ---- the stairs: one open flight per side along the south wall, from
+  //      |x| = STAIR_X0 on the floor up to the gallery's end. A ramp record
+  //      for the physics (systems/physics.js groundAt interpolates it), the
+  //      treads and stringers for the eye, a handrail on the open side, and a
+  //      band under the low end so nobody walks into the underside. -------
+  function stair(side) {
+    const xB = side * STAIR_X0, xT = side * (Math.abs(WFACE) - GW);   // bottom, top
+    const run = Math.abs(xT - xB);
+    const N = Math.round(FY / 0.19);                                // risers
+    const tread = run / N, rise = FY / N;
+    for (let i = 1; i <= N; i++) {
+      const x = xB + side * (tread * (i - 0.5)), y = rise * i;
+      pushBox(gal, x, y - 0.03, (SZ0 + SZ1) / 2, tread + 0.02, 0.06, STAIR_W);   // tread
+      pushBox(gal, x - side * (tread * 0.5 - 0.02), y - rise / 2 - 0.03, (SZ0 + SZ1) / 2, 0.04, rise, STAIR_W); // riser
+    }
+    // stringers: two sloped plates, drawn as rotated meshes (addBox has no yaw)
+    for (const z of [SZ0 + 0.05, SZ1 - 0.05]) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(run, FY) + 0.3, 0.32, 0.06), CBZ.cmat(C_DARK));
+      m.position.set((xB + xT) / 2, FY / 2 - 0.10, z);
+      m.rotation.z = side * Math.atan2(FY, run);
+      m.castShadow = false; m.receiveShadow = true;
+      root.add(m);
+    }
+    // handrail on the open (north) side: posts, and a rail that climbs with them
+    const NP = 5;
+    for (let i = 0; i <= NP; i++) {
+      const t = i / NP, x = xB + side * run * t, y = FY * t;
+      pushBox(gal, x, y + 0.5, SZ0 + 0.05, 0.05, 1.0, 0.05);
+    }
+    const hr = new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(run, FY), 0.05, 0.05), CBZ.cmat(C_DARK));
+    hr.position.set((xB + xT) / 2, FY / 2 + 1.0, SZ0 + 0.05);
+    hr.rotation.z = side * Math.atan2(FY, run);
+    hr.castShadow = false; root.add(hr);
+    // colliders: the handrail as a stepped band, and the underside
+    for (let i = 0; i < NP; i++) {
+      const xa = xB + side * run * (i / NP), xb = xB + side * run * ((i + 1) / NP);
+      const y = FY * (i / NP);
+      solid(Math.min(xa, xb), SZ0 - 0.03, Math.max(xa, xb), SZ0 + 0.13, y, y + FY / NP + 1.0);
+    }
+    // the low end: headroom under a tread is less than a body until the flight
+    // has climbed ~1.9 m, so that stretch is a wall to the floor
+    const xLow = xB + side * run * (1.9 / FY);
+    solid(Math.min(xB, xLow), SZ0, Math.max(xB, xLow), SZ1, 0, 1.9);
+    // the physics: a ramp from the floor at xB to FY at xT
+    (CBZ.platforms || (CBZ.platforms = [])).push({
+      minX: Math.min(xB, xT), maxX: Math.max(xB, xT), minZ: SZ0, maxZ: SZ1, top: FY,
+      ramp: { axis: "x", x0: xB, x1: xT, y0: 0, y1: FY },
+    });
+  }
+  stair(-1); stair(1);
+  mergedMesh(gal, C_DARK, false);
+  mergedMesh(dk, 0x5d656f, false);
+
+  // ---- what a body stands on up there: the walkway and every upper floor.
+  //      A record per band; groundAt only offers it within a step of the
+  //      body's own height, so a man in a ground cell never sees it. -------
+  (CBZ.platforms || (CBZ.platforms = [])).push(
+    { minX: IX0, maxX: WFACE + GW, minZ: NFACE, maxZ: SZ1, top: FY },
+    { minX: EFACE - GW, maxX: IX1, minZ: NFACE, maxZ: SZ1, top: FY },
+    { minX: IX0, maxX: IX1, minZ: IZN, maxZ: NG1, top: FY });
+  if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
 
   /* ==========================================================
      6. THE ALCOVES — the three breaks in the cell line, each of them a
@@ -1398,8 +1602,13 @@
     addBox(cx, 1.05, cz - d / 2 + 2.25, 0.6, 0.7, 0.1, C_DARK, { cast: false });       // back
     if (HONEST) useSeat(cx, chZ, Math.PI, 0.45);
     // WING SIGN — the block announces itself over the post.
-    addBox(cx, 3.6, cz + d / 2 - 0.1, 5.0, 0.7, 0.14, 0x11151b, { cast: false });
-    addBox(cx, 3.6, cz + d / 2 - 0.2, 4.4, 0.34, 0.06, 0xe8b64c, { emissive: 0x6a4f10, ei: 0.6, cast: false });
+    // …under the tier's floor slab (3.6-3.9), not through it
+    // The lit plate goes on the SOUTH face, the side the hall sees. It used
+    // to sit 0.1 north of the board — behind it — and read fine only because
+    // the board itself was one of the boxes the batcher had baked at the
+    // origin; the day the board came back the sign went dark.
+    addBox(cx, 3.15, cz + d / 2 - 0.1, 5.0, 0.7, 0.14, 0x11151b, { cast: false });
+    addBox(cx, 3.15, cz + d / 2 + 0.005, 4.4, 0.34, 0.06, 0xe8b64c, { emissive: 0x6a4f10, ei: 0.6, cast: false });
   }
   // The break the ventilation grate lives in (ventilation.js:41, z = -31) — a
   // recess, never a cell, so that escape route can never be locked away.
@@ -1424,7 +1633,7 @@
 
      Two bolted day tables and eight stools used to stand here. They were never
      placed on purpose: they were authored at |x| = 6.6 back when that was open
-     floor, and when ROWS3 pushed row E out over 6.6 they were SHUFFLED inward
+     floor, and when row E (since demolished for the tier) went out over 6.6 they were SHUFFLED inward
      to |x| = 2.6 to keep them off the new cells — i.e. into the CENTRE HALL,
      the one strip of this building that is a corridor between two facing tiers
      of cell fronts. A mess table in the middle of a tier walkway is not a day
@@ -1456,24 +1665,50 @@
   // CBZ.ceilingLamp is a PUBLISHED handle: systems/interactions.js's breaker
   // sabotage and systems/state.js's reset both write its material directly.
   // Keep the original at (0, 8.2, -30) exactly and mirror it onto the rest.
+  /* THE ROOF IS A STRUCTURE, AND THE LAMPS HANG OFF IT. Four lattice
+     trusses span the hall under the lid, one at each lamp line; a cage lamp
+     is a stem off the bottom chord with the cage on the end of it, which is
+     what a pendant is. Before this the cage sat at 8.2 with 25 cm of air
+     between its cap and the 9.0 lid — the owner's "some lights" floating.
+     `TRUSS_Z` is the one list both read, so a lamp is on a chord by
+     construction, and cellblockAudit().floatingFixtures counts any cage whose
+     stem does not reach one. */
+  const TRUSS_Z = [-37.5, -30, -22.5, -15];
+  const CHORD_LO = 8.05, CHORD_HI = 8.90;     // bottom / top chord centres
+  const LAMP_Y = 7.55;                        // the cage, hung 0.4 m under the chord
+  const cages = [];
+  (function trusses() {
+    const g = [];
+    for (const z of TRUSS_Z) {
+      pushBox(g, 0, CHORD_LO, z, 32, 0.20, 0.16);
+      pushBox(g, 0, CHORD_HI, z, 32, 0.20, 0.16);
+      for (let x = -15; x <= 15.01; x += 2.5) pushBox(g, x, (CHORD_LO + CHORD_HI) / 2, z, 0.10, CHORD_HI - CHORD_LO - 0.2, 0.10);
+    }
+    // purlins the long way, tying the trusses together under the lid
+    for (const x of [-12, -6, 0, 6, 12]) pushBox(g, x, CHORD_HI, -26, 0.12, 0.16, 36);
+    mergedMesh(g, 0x4a525c, false);
+  })();
   function cageLamp(x, z) {
-    addBox(x, 8.6, z, 0.5, 0.3, 0.5, C_DARK, { cast: false });
-    const l = addBox(x, 8.2, z, 0.7, 0.2, 0.7, 0xffe9a8, { emissive: 0xffcf66, ei: 0.9, cast: false });
-    for (let i = -1; i <= 1; i += 2) addBox(x + i * 0.36, 8.2, z, 0.06, 0.26, 0.62, C_DARK, { cast: false });
+    const zc = TRUSS_Z.reduce((a, b) => (Math.abs(b - z) < Math.abs(a - z) ? b : a), TRUSS_Z[0]);
+    const onChord = Math.abs(zc - z) < 0.2;
+    const stemTop = onChord ? CHORD_LO - 0.10 : WH - 0.05;
+    const capTop = LAMP_Y + 0.10 + 0.30;
+    addBox(x, (capTop + stemTop) / 2, z, 0.06, stemTop - capTop, 0.06, C_DARK, { cast: false });   // stem
+    addBox(x, LAMP_Y + 0.25, z, 0.5, 0.3, 0.5, C_DARK, { cast: false });                           // cap
+    const l = addBox(x, LAMP_Y, z, 0.7, 0.2, 0.7, 0xffe9a8, { emissive: 0xffcf66, ei: 0.9, cast: false });
+    for (let i = -1; i <= 1; i += 2) addBox(x + i * 0.36, LAMP_Y, z, 0.06, 0.26, 0.62, C_DARK, { cast: false });
+    cages.push({ x: x, z: z, hung: onChord });
     return l;
   }
   const ceilingLamp = cageLamp(0, -30);
   CBZ.ceilingLamp = ceilingLamp;
-  // The hall lamps sit on the spine; (0,-30) above is the published handle and
-  // never moves. The two |x| = 7.5 lamps are inside row E now, so with the
-  // rows built the light goes where the light is needed — over the two 3.5 m
-  // GALLERIES, at their centre line |x| = 9.9, one at each end of the run. A
-  // gallery with cell fronts down one side and unlit concrete down the other
-  // is where a wing goes dark, and interactions.js's breaker still owns all
-  // of them through the mirror below.
+  // the published handle stays on the spine at (0, -30); the rest of the hall
+  // line hangs off the other three trusses, and each gallery gets a pair over
+  // the walkway's edge — a deck with cell fronts down one side and dark
+  // concrete down the other is where a wing goes dark. interactions.js's
+  // breaker owns all of them through the mirror below.
   lamps.push(cageLamp(0, -37.5), cageLamp(0, -22.5), cageLamp(0, -15));
-  if (ROWS3) lamps.push(cageLamp(-9.9, -19), cageLamp(9.9, -19), cageLamp(-9.9, -30), cageLamp(9.9, -30));
-  else lamps.push(cageLamp(-7.5, -33), cageLamp(7.5, -33));
+  lamps.push(cageLamp(-9.6, -22.5), cageLamp(9.6, -22.5), cageLamp(-9.6, -30), cageLamp(9.6, -30));
 
   /* ==========================================================
      8. THE DOOR — jail.js's setDoor, ported. The collider and the visual
@@ -1500,6 +1735,7 @@
   function setDoor(which, locked) {
     const c = typeof which === "number" ? cells[which] : which;
     if (!c || !c.doorCol) return false;
+    if (!locked && c.tier) return false;          // the lockdown tier (header)
     if (!locked && handLatched(c)) return false;
     const arr = CBZ.colliders || (CBZ.colliders = []);
     const i = arr.indexOf(c.doorCol);
@@ -1548,14 +1784,14 @@
     (function (c) {
       if (!c.doorCol || !c.bars || !c.leafClosed) return;
       (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
-        id: "prison-cell-" + c.i, label: c.player ? "your cell door" : "the cell door",
+        id: "prison-cell-" + c.i, label: c.player ? "your cell door" : (c.tier ? "the cell door (tier lockdown)" : "the cell door"),
         autoR: 6.0,
-        at: function () { return { x: c.leafClosed.x, y: 1.4, z: c.leafClosed.z }; },
+        at: function () { return { x: c.leafClosed.x, y: 1.4 + c.fy, z: c.leafClosed.z }; },
         pick: function () { return [c.bars]; },
         col: function () { return c.doorCol; },
         isOpen: function () { return !c.locked; },
-        permanent: function () { return false; },
-        canUse: function () { return true; },
+        permanent: function () { return !!c.tier; },
+        canUse: function () { return !c.tier; },
         // OPENING IT AGAIN IS ALSO DELIBERATE, so it drops its own latch
         // before asking — otherwise the guard above would refuse the very
         // man it exists to protect.
@@ -1574,6 +1810,8 @@
     const c = cells[i];
     c.locked = false; c.slide = 1; c.slideT = 1;
     placeLeaf(c);
+    // …except the tier, which is shut from the first frame and stays shut
+    if (c.tier) { setDoor(c, true); c.slide = 0; placeLeaf(c); }
   }
 
   /* ==========================================================
@@ -1611,8 +1849,12 @@
   // 1 in 8, floor 2: 13 cells -> 2 (byte-identical to what it always was),
   // 25 -> 3. It is also the wing's only slack in the bed arithmetic — each
   // vacant cell is two racks the cell house does not consume itself.
-  const EMPTY_WANTED = Math.max(2, Math.round(cells.length / 8));
-  const order = cells.filter(function (c) { return !c.player; })
+  // …and only on the GROUND: an empty cell exists to be moved into, and the
+  // tier is somewhere nobody can be walked to (header). A full top tier is
+  // also simply what the photograph shows.
+  const groundCells = cells.filter(function (c) { return !c.tier; });
+  const EMPTY_WANTED = Math.max(2, Math.round(groundCells.length / 8));
+  const order = groundCells.filter(function (c) { return !c.player; })
     .map(function (c) { return { c: c, h: h01(c.x, c.z, 4211) }; })
     .sort(function (a, b) { return a.h - b.h; });
   for (let i = 0; i < order.length; i++) order[i].c.vacant = i < EMPTY_WANTED;
@@ -1779,6 +2021,7 @@
         try { n.data.offer = CBZ.econ.pickOffer("goods"); } catch (e) {}
       }
       n._cellIdx = c.i; n._cellPose = pose;
+      if (c.fy && n.group) n.group.position.y = c.fy;   // born on his own floor
       c.owner = n;
     }
   }
@@ -1894,7 +2137,7 @@
       // relaxed reads of the same mattress. `ceiling` is the upper deck's
       // underside so the pose ducks this particular body under it.
       const style = n._bunkStyle || (n._bunkStyle = bunkStyle(c));
-      n.char.seatRef = n.char.seatRef || { cushion: c.bunk.top, floorBelow: 0,
+      n.char.seatRef = n.char.seatRef || { cushion: c.bunk.top, floorBelow: c.fy,
         ceiling: c.bunk.deckY || 0, kind: SEAT_KIND[style] || "bunk" };
       CBZ.setCharPose(n.char, "sit");
     }
@@ -1946,6 +2189,10 @@
       const b = paceBox(c, pose === "bunk");
       const p = n.group.position;
       clampInto(b, p);
+      // an upper resident's feet are on the tier. Nothing else in the game
+      // writes an inmate's y (ai.js's restart reset zeroes it), so the cell
+      // that holds him is what puts him back on his own floor.
+      if (c.fy) p.y = c.fy;
       if (n.target) clampInto(b, n.target);
       if (owned) { if (pre) unseat(n, c); continue; }
       if (pose === "bunk") {
@@ -2081,10 +2328,14 @@
      11. THE CONTRACT. systems/capture.js and systems/lockdown.js drive
          the wing through this and nothing else.
      ========================================================== */
-  function cellAt(x, z, pad) {
+  // `y` is optional: without it the GROUND cell at (x,z) answers, which is
+  // what every existing caller (capture, lockdown, the schedule) means. With
+  // it, the storey whose floor band holds y.
+  function cellAt(x, z, pad, y) {
     pad = pad || 0;
     for (let i = 0; i < cells.length; i++) {
       const c = cells[i];
+      if (y != null ? (y < c.fy - 0.5 || y > c.fy + CH) : c.tier) continue;
       if (x >= c.x - c.hx - pad && x <= c.x + c.hx + pad && z >= c.z - c.hz - pad && z <= c.z + c.hz + pad) return c;
     }
     return null;
@@ -2100,7 +2351,7 @@
     let best = null, bd = Infinity;
     for (let i = 0; i < cells.length; i++) {
       const c = cells[i];
-      if (c.player || (c.owner && c.owner !== "player")) continue;
+      if (c.player || c.tier || (c.owner && c.owner !== "player")) continue;
       const d = x == null ? c.i : (c.x - x) * (c.x - x) + (c.z - z) * (c.z - z);
       if (d < bd) { bd = d; best = c; }
     }
@@ -2117,7 +2368,7 @@
       if (!npc._cellPose) npc._cellPose = cellPose(c);
       // by reference, never mutated: `room` and `aisle` are the cell's own
       npc.region = c.locked ? c.room : c.aisle;
-      if (npc.group) npc.group.position.set(c.x, npc.group.position.y || 0, c.z);
+      if (npc.group) npc.group.position.set(c.x, c.fy || npc.group.position.y || 0, c.z);
     }
     return true;
   }
@@ -2146,15 +2397,14 @@
     held: held,
     // geometry other systems may want without re-deriving it
     height: CH, doorWidth: DOOR_W,
-    /* THE HALL PUBLISHES ITS OWN HALF-WIDTH. tools/prison-polish-check.mjs
-       sweeps the centre hall for walkability and used to hardcode +-6, which
-       was the wing when the middle was 23 m of nothing; rows D and E moved the
-       cell fronts to IFACE and the sweep started walking into their back walls
-       and reporting the block impassable. A route test may not retype the
-       route's width — it reads it here, minus the 0.38 body radius and a
-       little, so the samples stay inside the clear lane by construction. */
-    hallHalf: ROWS3 ? IFACE - 0.5 : 6,
+    /* THE HALL PUBLISHES ITS OWN HALF-WIDTH: the clear floor between the two
+       gallery edges (the cell fronts less the deck cantilevered off them),
+       minus a little. A route test may not retype the route's width — it
+       reads it here so its samples stay inside the lane by construction. */
+    hallHalf: Math.abs(WFACE) - GW - 0.5,
     bounds: { minX: IX0, maxX: IX1, minZ: IZN, maxZ: -7.5 },
+    // the tier, for anything that wants to know there is one
+    tiers: 2, tierFloor: FY, galleryWidth: GW,
   };
 
   /* IS THE MAN ON HIS BUNK ACTUALLY ON IT — measured, not eyeballed.
@@ -2194,7 +2444,7 @@
      The named playable cast is the population to house. Treating a 26-bed
      cell wing as permission to scatter sixteen permanent floor mats through
      its dayroom made the arithmetic pass and the venue fail. The compound has
-     two authored housing units: these twenty-five double cells and the
+     two authored housing units: these twenty-eight double cells and the
      south-block open-bay dorm. Both call the same bunk builder above; both
      publish the records they actually draw; every population/rest consumer
      reads their sum.
@@ -2276,9 +2526,12 @@
     for (let i = 0; i < mine.length; i++) {
       const c = mine[i];
       if (all.indexOf(c) < 0) continue;                           // an open door is not a wall
+      if (c.y0 != null && c.y0 >= 1.8) continue;                  // a gallery rail is not in a lane
       if (c.minX < 3.2 && c.maxX > -3.2 && c.minZ < -6.5 && c.maxZ > -9.5) gap++;
       if (c.minX < R && c.maxX > -R && c.minZ < -12 && c.maxZ > -40) spine++;
     }
+    let floating = 0;
+    for (let i = 0; i < cages.length; i++) if (!cages[i].hung) floating++;
     let occupied = 0, empty = 0, locked = 0;
     /* seatDrift (SIT_PHYS_V1) — bunk-posed residents NOT at their bunk spot.
        The leash pins a "bunk" man to bunkSpot every frame at order 22.6;
@@ -2325,7 +2578,8 @@
     const pc = playerCell;
     const margin = pc ? Math.min(pc.hx - Math.abs(s.x - pc.x), pc.hz - Math.abs(s.z - pc.z)) : 0;
     return {
-      v2: true, rows3: ROWS3, cells: cells.length, rows: rows,
+      v2: true, cells: cells.length, rows: rows, tiers: 2,
+      floatingFixtures: floating,                            // MUST be 0
       occupied: occupied, empty: empty, locked: locked, vacantWanted: EMPTY_WANTED,
       castDealt: cast,
       spawnInPlayerCell: !!(pc && margin > 0),
