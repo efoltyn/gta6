@@ -42,7 +42,7 @@ const subjects = [
   {
     id: "mark-repeat-lift",
     label: "The man you keep robbing",
-    focus: "CBZ.econ.steal() on the same inmate until a lift fails (the owner's repro). Before: a white disc with a '!' floats over his head. After: no icon — his hand clamps over his pocket, his body turns side-on and he takes a step off you.",
+    focus: "CBZ.econ.steal() on the same inmate until he goes to tell (the owner's repro). Before: a white disc with a '!' floats over his head. After: no icon — the first catch, his hand clamps over his pocket and his body turns side-on; the second, he squares up and comes at you.",
     beat: "lift",
   },
 ];
@@ -246,7 +246,7 @@ async function stageStealMark(input) {
   const who = (actor.data && actor.data.name) || actor.name || actor.kind || "actor";
   q("state").textContent = `${who} · ${standoff.toFixed(1)} m` +
     (subject.beat === "lift" ? ` · ${attempts} lifts, ${lifts} clean, ${caught ? "CAUGHT" : "never caught"}` : "") +
-    ` · state ${actor.aiState || "-"} · grudge ${(actor.playerGrudge || 0).toFixed(1)} · icons over head ${sprites}`;
+    ` · state ${actor.aiState || "-"}${(actor.huntPlayer || 0) > 0 ? " · COMING AT YOU" : ""} · grudge ${(actor.playerGrudge || 0).toFixed(1)} · icons over head ${sprites}`;
   q("state").style.cssText = "position:absolute;top:104px;left:27px;color:#c0cfda;font-size:11px;font-weight:700;letter-spacing:.08em";
   q("source").textContent = new URL(input.sourceUrl).host + new URL(input.sourceUrl).pathname + new URL(input.sourceUrl).search;
   q("source").style.cssText = "position:absolute;bottom:10px;left:27px;color:#9cb0bf;font:10px ui-monospace,SFMono-Regular,Menlo,monospace";
@@ -257,7 +257,7 @@ async function stageStealMark(input) {
   return {
     ok: true,
     actor: who, aiState: actor.aiState || null, attempts, lifts, caught, lines,
-    body: { stareAvert: !!actor.stareAvert, stareAt: actor.stareAt ? ((actor.stareAt.data && actor.stareAt.data.name) || actor.stareAt.kind || "other") : "player", neckY: ch.neck ? ch.neck.rotation.y : null, reported: actor.reportedPlayerT, alert: actor.alert, armed: !!actor.armed, holstered: actor._holstered, pocketGuardT: actor.pocketGuardT, stareT: actor.stareT, hunt: actor.hunt, flashlightOn: !!actor.flashlightOn, hasLow: !!(ch.low && ch.low.la), hasLa: !!(ch.parts && ch.parts.la) },
+    body: { huntPlayer: actor.huntPlayer, fightStance: !!(ch.fightStance), stareAvert: !!actor.stareAvert, stareAt: actor.stareAt ? ((actor.stareAt.data && actor.stareAt.data.name) || actor.stareAt.kind || "other") : "player", neckY: ch.neck ? ch.neck.rotation.y : null, reported: actor.reportedPlayerT, alert: actor.alert, armed: !!actor.armed, holstered: actor._holstered, pocketGuardT: actor.pocketGuardT, stareT: actor.stareT, hunt: actor.hunt, flashlightOn: !!actor.flashlightOn, hasLow: !!(ch.low && ch.low.la), hasLa: !!(ch.parts && ch.parts.la) },
     camera: { x: cam.x, y: cam.y, z: cam.z, ax: cam.ax, ay: cam.ay, az: cam.az, fov: cam.fov || 40 },
     // only the rows that mean something on this beat: an arm angle on a man
     // mid-stride is a walk cycle, not a tell, and printing it as a regression
@@ -267,7 +267,7 @@ async function stageStealMark(input) {
     // pocket clamp measures as a few degrees either way. The guard beat, whose
     // before is a straight idle arm, is where the clamp is measured.
     metrics: subject.beat === "lift"
-      ? { iconsOverHead: sprites, bodyYawDeg }
+      ? { iconsOverHead: sprites, bodyYawDeg, squaredUp: ch.fightStance ? 1 : 0 }
       : subject.beat === "guard"
         ? { iconsOverHead: sprites, neckYawDeg, armDeg, elbowDeg }
         : { iconsOverHead: sprites, neckYawDeg },
@@ -291,6 +291,7 @@ export default {
     iconsOverHead: { label: "Icons floating over his head", better: "lower" },
     neckYawDeg: { label: "Head turned (deg)", unit: "deg", better: "higher" },
     bodyYawDeg: { label: "Body turned side-on (deg)", unit: "deg", better: "higher" },
+    squaredUp: { label: "Squared up to hit you (second catch)", better: "higher" },
     armDeg: { label: "Left arm pitch (deg)", unit: "deg", better: "higher" },
     elbowDeg: { label: "Left elbow bend (deg)", unit: "deg", better: "higher" },
     standoffM: { label: "Distance from you at capture", unit: "m", better: "higher" },

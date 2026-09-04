@@ -21,15 +21,15 @@
    through systems/reactions.js:
 
      the mark you keep robbing   hand clamped over the pocket, body turned
-                                 that side off you, eyes on your hands, and
-                                 a step back when you come inside reach
-                                 (CBZ.npcGuardPockets / CBZ.npcStepBack)
+                                 that side off you, eyes on your hands
+                                 (CBZ.npcGuardPockets; the failed lift itself
+                                 adds one step back, and the SECOND catch is
+                                 a fist — economy.js caughtBody)
      a screw getting suspicious  he watches you (CBZ.npcStare); past half
                                  alert his free hand rests on his belt
      a man who told on you       he will not hold your eye — head turned off
                                  you with a sidelong glance every couple of
-                                 seconds, and he backs off when you close
-                                 (CBZ.npcAvert / CBZ.npcStepBack)
+                                 seconds (CBZ.npcAvert)
      a man worth a stop (cop)    the same shifty avert
      a man with an offer         he looks at you for the whole walk-up
                                  (unchanged from the previous wave)
@@ -69,7 +69,11 @@
 
   const NOTICE = 7.0, NOTICE2 = NOTICE * NOTICE;   // a man clocks you from here
   const REACH = 3.2;                               // inside this the mark covers his pocket
-  const CLOSE = 2.8;                               // inside this a man who wants none of you steps off
+  // (No proximity step-back. The first cut had a robbed man and a snitch slide
+  // half a metre off you every 1.4 s while you stood there — the knockback
+  // channel moves the ground under a man without moving his legs, which is
+  // fine for the recoil of a caught hand and reads as a moonwalk on repeat.
+  // The one step back now belongs to the failed lift, economy.js caughtBody.)
   const POCKETS = "you going through my pockets";  // economy.js's grudgeWhy for a lift
 
   function tick(dt) {
@@ -96,7 +100,6 @@
       // the mark you keep robbing (economy.js set his grudgeWhy on the lift)
       if (a.grudgeWhy === POCKETS && (a.playerGrudge || 0) >= 1.5 && d < REACH) {
         if (CBZ.npcGuardPockets) CBZ.npcGuardPockets(a, 0.5);
-        if (d < CLOSE && CBZ.npcStepBack) CBZ.npcStepBack(a);
         continue;
       }
       // a screw getting suspicious
@@ -111,7 +114,6 @@
       const shifty = a.aiState === "snitch" || (a.reportedPlayerT || 0) > 0 || (cop && a.copMarked > 0);
       if (shifty) {
         if (CBZ.npcAvert) CBZ.npcAvert(a, 0.6);
-        if (d < CLOSE && CBZ.npcStepBack) CBZ.npcStepBack(a);
         continue;
       }
       // a man with an offer looks at you for the whole walk-up

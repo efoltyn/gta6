@@ -216,7 +216,7 @@
         headAmp: 0, headKind: "cross", headLf: 1, headLs: 0, hsX: 0, hsY: 0, hsZ: 0,  // HEAD SNAP (CBZ.reactPunch)
         stK: 0, stOff: 0,                          // STARE (CBZ.npcStare) — eased neck yaw + last frame's offset
         avSide: 0, avSeed: (R.size % 7) * 0.37,    // AVERT: which way he turns off you (fixed per bout) + glance phase
-        pkK: 0,                                    // POCKET GUARD weight (CBZ.npcGuardPockets), hard-assigned pose
+        pkK: 0, px: null, pz: null,                // POCKET GUARD weight (CBZ.npcGuardPockets) + last ground position (walking gate)
         aimK: 0, aimY: 0, aimP: 0, aimA: 0, hyOff: 0,
         swingT: 0, swingArm: 1, dazeK: 0, guardK: 0,
         // seed the detectors from the CURRENT values so an actor first seen
@@ -576,7 +576,19 @@
              nothing is left to back out. The body turns that side off you
              the same way. */
           if ((a.pocketGuardT || 0) > 0) a.pocketGuardT -= dt;
-          const pkWant = (a.pocketGuardT || 0) > 0 && !a.dead && !(a.ko > 0) && !(a.koT > 0) &&
+          // A WALKING MAN DOES NOT HOLD HIS POCKET (owner: "it gets glitchy" —
+          // the first cut locked the arm and twisted the torso side-on while
+          // the gait swung the legs). Ground speed from the group position,
+          // minus the knockback slide so a step back does not read as a walk.
+          const gp = a.group.position, kph = a._phys;
+          const mvx = r.px == null ? 0 : (gp.x - r.px) / Math.max(dt, 1e-3) - (kph ? kph.kx || 0 : 0);
+          const mvz = r.pz == null ? 0 : (gp.z - r.pz) / Math.max(dt, 1e-3) - (kph ? kph.kz || 0 : 0);
+          r.px = gp.x; r.pz = gp.z;
+          const walking = mvx * mvx + mvz * mvz > 0.35 * 0.35;
+          // and a man coming at you squares up instead (ai.js's huntPlayer /
+          // fight own the arms through fightStance)
+          const squaring = (a.huntPlayer || 0) > 0 || a.aiState === "fight" || !!(a.char && a.char.fightStance);
+          const pkWant = (a.pocketGuardT || 0) > 0 && !walking && !squaring && !a.dead && !(a.ko > 0) && !(a.koT > 0) &&
             !a.surrender && !(a.char.handsUp || a.char.surrender) && !(a.armed && !a._holstered) ? 1 : 0;   // a drawn weapon owns the arms
           if (pkWant || r.pkK > 0.001) {
             r.pkK = damp(r.pkK, pkWant, pkWant ? 12 : 5, dt);

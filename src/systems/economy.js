@@ -1318,6 +1318,25 @@
      inside reach of a man whose grudgeWhy is his pockets. */
   function caughtBody(actor) {
     if (CBZ.npcStepBack) CBZ.npcStepBack(actor);
+    /* THE SECOND CATCH IS A FIST. (OWNER: "what about punching in the face.")
+       The first time he feels your hand he covers his pocket. Catch him going
+       back in and a man whose temperament retaliates comes at you — the real
+       assault (ai.js huntPlayer: squares up inside 3.4 m, throws the rig's
+       own punch, lands it through CBZ.hurtPlayer). Guards have the radio,
+       merchants and dealers have a till to stand behind; everyone else rolls
+       his own `retaliate`. playerGrudge is +2 per catch, so >= 4 is the
+       second one. */
+    const guardish = actor.kind === "guard" || actor.kind === "warden";
+    const B = CBZ.BEHAVIORS && CBZ.BEHAVIORS[actor.behavior];
+    const retaliate = B ? (B.retaliate != null ? B.retaliate : 0.8) : 0.8;
+    if (!guardish && actor.role !== "merchant" && actor.role !== "dealer" &&
+        (actor.playerGrudge || 0) >= 4 && actor.huntPlayer != null &&
+        rng() < 0.3 + retaliate * 0.65) {
+      actor.huntPlayer = Math.max(actor.huntPlayer || 0, 3.5);
+      actor.pocketGuardT = 0;                       // fists, not pockets
+      if (CBZ.npcStare) CBZ.npcStare(actor, 1.2);
+      return;
+    }
     if (CBZ.npcGuardPockets) CBZ.npcGuardPockets(actor, 4);
     else if (CBZ.npcStare) CBZ.npcStare(actor, 1.7);
   }
