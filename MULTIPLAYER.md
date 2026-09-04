@@ -1,5 +1,169 @@
-# Cell Block Z — Host Your Own RP Server
+# Multiplayer — two ways in
 
+There are two transports and they speak the SAME protocol. Which one you want
+depends on whether anybody involved is willing to run a program.
+
+| | **ROOMS** (default) | **A RELAY** (`server/server.js`) |
+|---|---|---|
+| what you run | nothing | one node process |
+| what a friend needs | a four-character code | a link |
+| where the room lives | the host's browser tab | your machine |
+| dies when | the host closes the tab | you stop the process |
+| persistence | none (a tab has no disk) | characters + world, on disk |
+| needs the internet | yes, to find each other | only if you tunnel it |
+| works on the deployed link | **yes** | no |
+
+Rooms are first because the game is deployed as static files
+(https://efoltyn.github.io/gta6/) and the relay cannot run there. Until
+2026-09-04 rooms did not exist, the deployed MULTIPLAYER button opened a
+WebSocket to `wss://efoltyn.github.io/ws` — an address that has never existed
+— and the error told the player to run `node server/server.js`. Nobody had
+ever played this game's multiplayer from the link it ships behind.
+
+---
+
+## Rooms: a code, and nothing to install
+
+**Desert Warlord** (`games/warlord.html`):
+
+1. MULTIPLAYER → **HOST A ROOM**. A four-character code comes up.
+2. Read it out, or **SEND THE LINK** (`navigator.share` on a phone; the
+   clipboard on a desktop). The link is `games/warlord.html?room=CODE` and
+   opening it joins — no menu, no re-typing the code.
+3. People appear in the roster as they arrive. **RIDE OUT** puts you on the
+   island; the campaign clock never waits for anybody, so anyone can ride out
+   whenever they like and the others catch them up.
+
+**JOIN A ROOM** is the four characters. Codes are drawn from a 32-character
+alphabet with `I`, `1`, `O` and `0` left out, because a code exists to be read
+aloud.
+
+### What a warlord match is
+
+Every human in the room is a **warlord seat on one island**. There is no lobby
+to assemble, no slots to fill and no start button that waits on everybody:
+
+- **One seed.** The host's seed is the island, and the island is 14 km of
+  analytic sand generated from that one integer, so the whole shared world
+  costs four bytes. The map is never on the wire. The rival-warlord roster,
+  the outposts and every neutral warband are derived from it too and are
+  byte-identical on both ends (`warlord-net-check` asserts that).
+- **Your own beach.** Each player walks in from the sea on his own bearing —
+  campaign.js's coast rule, golden-angled by relay id. Before this, a shared
+  seed placed every player on the same grain of sand, facing the same way,
+  inside each other's encounter radius.
+- **The clock never pauses.** Not for a battle, not for an open menu, not for
+  somebody who put their phone in a pocket. Ride out when you like.
+- **Peers are parties.** Another human is a band on your map in his own
+  colour, with his name and his real strength, drawn by the same renderer as
+  every AI column.
+- **Alliances are a real handshake** (`src/warlord/match.js`) — offer, and it
+  can be refused; break it, and it costs. The same four verbs whether the
+  other side is an AI or a human.
+- **A fight between two humans is decided in one exchange.** The challenger
+  runs battle.js's own resolver over both real rosters and sends back who
+  died, by id; each side then loses its own men through the same aftermath a
+  solo fight ends in. Nobody else on the island waits a tick. (See the known
+  issue at the bottom of this section.)
+
+**Known issue, and it is not the wire:** `W.battle.resolve()` — the headless
+battle CONTRACT.md has promised since the file was written — had never been
+called by anything until the human fight above became its first caller, and it
+is broken: it ends every fight on tick 2 with the player's whole line routed
+and zero casualties on either side. The same 20-v-20 under `?morale=old`
+(morale off) runs 103 ticks for 3 dead against 20, so the bug is in the
+headless morale path (`src/warlord/battle.js:1275-1307`). Until that is fixed
+a human-vs-human fight is decided correctly and identically on both ends, and
+nobody dies. `tools/warlord-net-check.mjs` prints this as a note rather than
+passing quietly.
+
+### How it works
+
+The room owner's browser opens a PeerJS peer under the well-known id
+`cbz-<CODE>`; every guest opens a WebRTC DataConnection to it. Inside that tab,
+`src/net/rooms.js` runs **server/server.js's room logic, verbatim** — the same
+hello/welcome handshake, name dedupe, pid reconnect dedupe, join/leave
+broadcast, oldest-in host election, `t:"state"` stamping, the `t:"world"`
+sim-host authority check, the `ev e:"to"` point-to-point relay behind the same
+RESERVED_EV guard, the same backpressure shed, and the same chat commands. The
+owner is player #1 through a loopback connection object, so the relay never
+learns that one of its players is itself.
+
+`src/net/net.js` gained one seam: a `room:CODE` / `room:CODE:host` url installs
+a socket-shaped object from rooms.js in place of a `WebSocket`. Everything
+downstream — `handle()`, the player table, host migration, the city's whole
+netcode — is untouched and cannot tell the difference, so the city gets rooms
+for free the day it wants them.
+
+**What a room cannot do:** persist. There is no disk in a tab, so `feat` is
+`["to"]` (no `"persist"`) and the `wsave`/`csave`/`wload`/`cload` verbs are
+dropped where server.js would write them to a file. **And the room dies with
+the tab** — the relay IS that tab. The lobby says so in one line rather than
+letting somebody find out.
+
+### Signalling, and what it costs
+
+PeerJS's public broker (`0.peerjs.com`, no account) is used only to exchange
+the two SDP blobs that open the DataChannel. After that the traffic is
+peer-to-peer and the broker is out of the path: a live room survives the broker
+going down, it just cannot admit new players.
+
+### NAT, and when you need TURN
+
+The default ICE config is PeerJS's, which is Google's public STUN. That covers
+the ordinary cases:
+
+| both ends | works on STUN alone |
+|---|---|
+| home wifi ↔ home wifi | yes |
+| home wifi ↔ 4G/5G phone | yes, almost always |
+| one end behind a corporate/university firewall | often not |
+| **both** ends behind symmetric NAT or CGNAT | **no** |
+| either end on a network that blocks UDP outright | no |
+
+Symmetric NAT on both ends is the case that genuinely cannot be punched
+through: each side sees a different external port per destination, so neither
+can predict the other's. That needs a TURN relay, and TURN costs money to run,
+so none is bundled. The seam is there when you have one:
+
+```html
+<!-- in the page, before src/net/rooms.js is loaded -->
+<meta name="cbz-ice" content='[
+  {"urls":"stun:stun.l.google.com:19302"},
+  {"urls":"turn:turn.example.com:3478","username":"u","credential":"p"}
+]'>
+```
+
+or, from any script that runs first:
+
+```js
+window.CBZ = window.CBZ || {};
+CBZ.iceServers = [{ urls: "turn:turn.example.com:3478", username: "u", credential: "p" }];
+```
+
+`rooms.js` reads `CBZ.iceServers` first, then the meta tag, then falls back to
+PeerJS's default. Handing it a list REPLACES the default STUN entirely, which
+is what you want when you are paying for TURN. `server/server.js` already ships
+the same knob for the city's proximity voice (`iceServers` in `server.json`).
+
+### Checks
+
+```
+node tools/test-rooms.mjs         # the room protocol in plain node, no browser
+node tools/warlord-net-check.mjs  # two headless Chromes, one island, 10 assertions
+node tools/warlord-net-check.mjs --relay   # the same 10 over server/server.js
+```
+
+`test-rooms.mjs` needs no network at all: `makeRelay()` is pure, so the whole
+protocol runs against fake connection objects. That matters, because
+`warlord-net-check.mjs` needs the public broker and a machine that cannot reach
+it should still be able to tell whether the room logic is right.
+
+---
+
+# A relay: host your own RP server
+
+This is the other transport, and it is the one the CITY (`index.html`) uses.
 GTA-RP-style multiplayer, FiveM-style: anyone can run a server, set its name,
 rules and roles, and hand out ONE link. Opening the link loads the game *and*
 joins the server — no install, no account, no app. Play with friends among the
@@ -140,6 +304,14 @@ ready to embed in a community page.
 ## Architecture (for hackers)
 
 ```
+src/net/rooms.js    THE OTHER TRANSPORT: server.js's room logic inside a
+                    browser tab, over PeerJS DataConnections. makeRelay() is
+                    pure (fake conns in tools/test-rooms.mjs); open() is the
+                    socket-shaped object net.js installs for a room: url
+src/warlord/warnet.js  warlord's wire + lobby: host/join a room, the share
+                    link, the per-seat spawn, and the human-vs-human fight
+assets/vendor/peerjs.min.js  PeerJS 1.5.4 UMD (MIT), loaded lazily and only
+                    when somebody actually opens or joins a room
 server/server.js    zero-dep Node: serves game files + WebSocket relay /ws,
                     room state, host election, chat/commands, /api/info,
                     world persistence (server/worlds/*.json, debounced atomic

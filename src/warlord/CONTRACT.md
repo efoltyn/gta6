@@ -84,7 +84,7 @@ rail — it hides the band the card is about.
 | `loadout.js` | who carries what |
 | `events.js` | road events, loyalty/mutiny, weather, the endgame |
 | `feel.js` | sound, impact, and the mixer that makes 300 rifles a war |
-| `warnet.js` | multiplayer TRANSPORT: sockets, host election, snapshot/apply |
+| `warnet.js` | multiplayer TRANSPORT: **rooms** (a four-character code, no server), the lobby, host election, snapshot/apply, the human-vs-human fight exchange |
 | `match.js` | the RULES OF THE MATCH: lobby, spawn, clock, diplomacy, victory |
 
 ## The law of the shared clock
@@ -121,6 +121,21 @@ AI fights AI, and whenever a live match cannot wait.
 
 Everything derivable is derived from the seed. The wire carries ownership and
 intent; it never carries the map.
+
+## Multiplayer, in four lines
+
+A MATCH is one seed and a room code. Every human is a warlord seat on the same
+island, spawned on his own bearing round the coast (warnet's `seatSpawn` —
+campaign.js's beach rule, golden-angled by relay id, because a shared seed
+otherwise puts every player on the same grain of sand). The room lives in the
+host's browser tab: `src/net/rooms.js` runs `server/server.js`'s room protocol
+over WebRTC DataConnections, so there is no server to run and no account to
+make. `server/server.js` still works and is better when you have one — it is
+the advanced line in the lobby, not the only path. See `MULTIPLAYER.md`.
+
+Checks: `node tools/test-rooms.mjs` (the room protocol, plain node, no
+browser) · `node tools/warlord-net-check.mjs` (two headless Chromes, one
+island, ten assertions; `--relay` runs the same ten over a node relay).
 
 A module MUST tear down its own scene objects on `phase:leave:<its phase>`.
 Two modules rendering at once is the failure mode this exists to stop.
