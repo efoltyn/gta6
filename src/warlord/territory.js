@@ -16,9 +16,12 @@
                     geography and from the seed ALONE
      · OWNERSHIP    who holds each one: you, one of core's five factions, or
                     any warlord match.js/warnet.js registers
-     · THE ECONOMY  what a holding pays at dawn and what its garrison costs —
-                    the thing that makes core's wage brake survivable at
-                    scale and turns the mid-game from raiding into ruling
+     · THE ECONOMY  what a holding pays at dawn AND THE MEN IT RAISES. Every
+                    province you hold puts levies into its own garrison every
+                    dawn, toward supportOf(r), and RAISE THE LEVY marches them
+                    into your column. Hold ground → men come. That is the
+                    other half of openfront and it is the answer to the owner's
+                    "I just want much more complete army growth logic".
      · THE WAR      the factions taking ground off each other, abstractly but
                     VISIBLY, so the island is a world and not a set of
                     encounters arranged around the player
@@ -69,6 +72,9 @@
      claim(id, owner, opts) claimAt(x,z,owner,opts) setOwners(map, opts)
      garrison(id) garrisonSize(id) garrisonPower(id) setGarrisonPower(id,n)
      regionIncome(r) income(owner) strengthOf(owner) defenceOf(r) pressureOn(r)
+     supportOf(r) leviesOf(r) levyPower() settledOf(r) raiseLevies()
+     garrisonRoster(r) raiseLevy(r) stormable(r) storm(r) ground() standing()
+     winShare() winTarget() share(owner) paintChip()
      snapshot() apply(snap) autoWar(bool) dawn()
      open() close() toggle() isOpen() focus(regionId)
      demo(stage) audit()
@@ -899,13 +905,95 @@
     if (n > 0) t.gp[id] = n; else delete t.gp[id];
     bump();
   };
-  function garrisonPayroll(id) {
-    const men = garrison(id);
-    if (!men) return 0;
-    let n = 0;
-    for (let i = 0; i < men.length; i++) n += W.tier(men[i].tier).wage;
-    return n;
+  /* ============================================================ THE LEVY
+     GROWTH IS LAND, and before this pass it was not.
+
+     The only way an army got bigger in this game was a battle: you beat
+     somebody, you pressed his survivors, you rode on. Holding ground bought
+     you a gold number and a colour on a map, and the owner's verdict on that
+     was "it's just a much too simple game logic … I just want warlord game to
+     be much more complete battle and army growth logic". OpenFront's whole
+     engine is the other half of it — you hold ground, the ground makes
+     troops, the troops take more ground — and this file was already carrying
+     the number that says how many: supportOf(r), "the men this ground feeds",
+     which existed and fed nothing but an income line.
+
+     So every dawn every holding raises its own levy toward that number.
+
+     THE RATE IS THE SETTLE RATE, and it is one constant used twice on
+     purpose. defenceOf already says a province is brittle for its first days
+     and fully itself after six — that IS how long it takes a holding to
+     become somebody's — so the levy it raises fills over exactly the same six
+     dawns. Take a province and it is worth nothing for a week; hold it and it
+     hands you an army. One number, two sentences, and retuning either retunes
+     the other instead of letting them drift.
+
+     YOURS ARE REAL MEN. core's own W.makeSoldier, levy tier, the cheapest gun
+     in the armoury (W.cheapestGun) — the same constructor every other man in
+     the game comes through, so you can ride in, put them in your column, and
+     they promote, desert, mutiny and die like anybody else. Everybody else's
+     garrison is a STRENGTH, because a rival's roster is thirty names nothing
+     draws; garrisonPower/garrisonSize have always answered both shapes and
+     STORM (below) turns a number back into men when somebody has to fight it. */
+  const SETTLE_DAWNS = 6;
+  function settledOf(r) {
+    const t = tState();
+    return clamp((S().day - (t.taken[r.id] || 0)) / SETTLE_DAWNS, 0, 1);
   }
+
+  function raiseLevies() {
+    const t = tState();
+    const wid = W.cheapestGun ? W.cheapestGun() : "sidearm";
+    let mine = 0, mineNew = 0, others = 0;
+    for (let i = 0; i < REG.length; i++) {
+      const r = REG[i];
+      const own = t.own[r.id] || null;
+      if (!own) continue;
+      const cap = supportOf(r);
+      if (!(cap > 0)) continue;
+      const step = Math.max(1, Math.round(cap / SETTLE_DAWNS));
+      if (own === "you") {
+        const list = t.gar[r.id] || (t.gar[r.id] = []);
+        const want = Math.min(Math.round(cap), list.length + step);
+        while (list.length < want) { list.push(W.makeSoldier("levy", wid)); mineNew++; }
+        /* A REAL ROSTER OUTRANKS A NUMBER — garrisonPower says so — so a
+           holding that was somebody else's yesterday drops its inherited
+           strength the moment your own men stand in it. */
+        if (list.length) delete t.gp[r.id];
+        mine += list.length;
+      } else {
+        const capP = cap * levyPower();
+        const now = t.gp[r.id] || 0;
+        if (now < capP) t.gp[r.id] = Math.min(capP, now + step * levyPower());
+        others += t.gp[r.id] || 0;
+      }
+    }
+    if (mineNew) bump();
+    return { yours: mine, raised: mineNew, theirs: Math.round(others) };
+  }
+  T.raiseLevies = raiseLevies;
+  T.settledOf = settledOf;
+  T.levyPower = levyPower;
+  T.supportOf = supportOf;
+
+  /* WHO ACTUALLY STANDS ON THIS GROUND, as men rather than as a number. It is
+     defenceOf's own two terms — the garrison plus the levies the ground turns
+     out — read back as a roster, so what STORM puts on the sand is exactly
+     what the map card said you would be fighting. Real garrison men first,
+     because those are somebody's actual soldiers with actual names; the rest
+     are the farmhands the province raises when a column rides at it. */
+  function garrisonRoster(r) {
+    const t = tState();
+    const real = (t.gar[r.id] || []).slice();
+    const strength = (t.gp[r.id] || 0) / levyPower();
+    const ground = supportOf(r) * 0.9;
+    const n = Math.max(1, Math.round((real.length + strength + ground) * (0.55 + 0.45 * settledOf(r))));
+    const men = real.slice(0, n);
+    const wid = W.cheapestGun ? W.cheapestGun() : "sidearm";
+    while (men.length < n) men.push(W.makeSoldier("levy", wid));
+    return men;
+  }
+  T.garrisonRoster = garrisonRoster;
 
   /* ============================================================ CLAIMING
      ONE DOOR. Every ownership change in the game goes through here — the
@@ -1011,7 +1099,15 @@
   let LEVY_POWER = 0;
   function levyPower() {
     if (!LEVY_POWER) {
-      try { LEVY_POWER = W.soldierPower(W.makeSoldier("levy", "sidearm")); } catch (e) { LEVY_POWER = 0.65; }
+      /* THE SAME MAN THE LEVY ACTUALLY RAISES. It used to say "sidearm" here
+         while raiseLevies handed the man W.cheapestGun() — and that is a
+         quiet unfairness rather than a rounding error: YOUR garrison is a real
+         roster whose power is summed man by man off the gun he is holding,
+         while everybody else's is a strength converted through this number.
+         Two different levies means your province defends with something other
+         than what the map says is standing in it. */
+      try { LEVY_POWER = W.soldierPower(W.makeSoldier("levy", W.cheapestGun ? W.cheapestGun() : "sidearm")); }
+      catch (e) { LEVY_POWER = 0.65; }
       if (!(LEVY_POWER > 0)) LEVY_POWER = 0.65;
     }
     return LEVY_POWER;
@@ -1080,8 +1176,35 @@
            was besieging whatever it happened to walk past, which put a
            three-hundred-man column's full weight on four different holdings
            over four days as it crossed them. */
+        /* A ROAMING PARTY IS WORTH NOTHING HERE NOW, AND IT USED TO BE WORTH
+           A THIRD OF A SIEGE. That 0.35 was written on a ninety-six-party
+           island and it did not survive the scale wave taking the island to
+           458. MEASURED on seed 1337, three dawns in, on the richest holding
+           a player can take: 31 parties inside this region or one step from
+           it, EVERY ONE OF THEM ROAMING, 3 408 points of OASIS MILITIA among
+           them — 596 of pressure against a defence of 206, odds 85%, and the
+           province gone on the next roll. Six provinces with 274 levies in
+           them went 6 → 0 in eight dawns. Land could not be held, which means
+           the whole "hold 80% of the island" win condition was unreachable and
+           "growth is land" was a treadmill.
+
+           The fix is the sentence directly above this one, applied instead of
+           discounted: a party that is WALKING SOMEWHERE IS NOT A SIEGE. It has
+           somewhere else to be — core wrote its goal down — and on an island
+           where every square kilometre has somebody crossing it, "everybody
+           who happens to be passing" is not pressure, it is weather.
+
+           What is left is the two moods that ARE a commitment to this ground:
+           a party CAMPED on it (sitting there, which is what occupying looks
+           like from the outside) and one HUNTING (moving to fight, at half,
+           because what it is hunting is usually you and not the province).
+           The war still moves — groundStrength drives it, which is levies and
+           garrisons pushing across a frontier, which is exactly openfront's
+           model — and a real army parked on your border still shows up in it,
+           which is the thing the player can SEE and act on. */
         const m = L[i].mood;
-        const commit = m === "hunt" ? 1 : m === "camp" ? 0.7 : m === "flee" ? 0 : 0.35;
+        const commit = m === "camp" ? 1 : m === "hunt" ? 0.5 : 0;
+        if (!commit) continue;
         n += W.bandPower(L[i]) * 0.5 * commit;
       }
     }
@@ -1116,53 +1239,46 @@
     const own = t.own[r.id] || null;
     if (!own) return levies(r) * 0.35;                     // nobody's — thin local levies
     let d = T.garrisonPower(r.id) + levies(r) * 0.9;
-    const settled = clamp((S().day - (t.taken[r.id] || 0)) / 6, 0, 1);
-    d *= 0.55 + 0.45 * settled;
+    /* SETTLE_DAWNS, not a 6 typed here — the same six dawns the levy takes to
+       fill (see THE LEVY). A province is worth nothing for a week and then it
+       is worth an army, and those are one sentence, not two. */
+    d *= 0.55 + 0.45 * settledOf(r);
     if (own === "you" && Math.hypot(S().you.x - r.x, S().you.z - r.z) < 1400) d += W.yourPower();
     return d;
   }
   T.defenceOf = defenceOf;
 
-  /* HOW MUCH FRONTIER IS THIS WARLORD HOLDING. The third thing the headless
-     run caught, and the ugliest: with the units fixed and the armies pinned
-     to where they stand, RIVAL WARLORD still ate nineteen of twenty-two
-     regions in twenty-five dawns. A snowball, and the reason is that his
-     ground strength grew with every province while the cost of holding the
-     ones he already had stayed zero.
+  /* WHO IS PUSHING AT THIS PROVINCE, AND WITH WHAT.
 
-     A levy defends the ground he lives on; he does not march. So an empire's
-     field strength at any ONE frontier is its total divided across ALL the
-     frontier it is standing on, weighted by how much of it is here. A
-     compact realm with one contested border brings everything; a sprawling
-     one with fifteen brings a fifteenth. That is the whole anti-runaway
-     brake, it is one honest sentence about levies rather than a fudge
-     factor, and it is the reason a big empire is worth attacking. */
-  let frontCache = null, frontCacheAt = -1;
-  function frontierContact(ownerId) {
-    const tNow = now();
-    if (!frontCache || tNow - frontCacheAt > 500) { frontCache = {}; frontCacheAt = tNow; }
-    const key = ownerId || "-";
-    if (frontCache[key] != null) return frontCache[key];
-    const t = tState();
-    let n = 0;
-    for (let i = 0; i < REG.length; i++) {
-      const r = REG[i];
-      if ((t.own[r.id] || null) !== (ownerId || null)) continue;
-      for (let k = 0; k < r.neighbours.length; k++) {
-        if ((t.own[r.neighbours[k]] || null) === (ownerId || null)) continue;
-        n += r.border[r.neighbours[k]] || 1;
-      }
-    }
-    frontCache[key] = n;
-    return n;
-  }
+     THE OLD MODEL, AND WHY IT SNOWBALLED. An owner's force here was his WHOLE
+     realm's ground strength times this frontier's share of all the frontier he
+     was standing on. The brake was real and the sentence behind it was honest
+     — a sprawling empire brings a fifteenth of itself to each border — but the
+     shape of it is a runaway with a delay on it: as a realm grows, its
+     INTERIOR borders stop being frontier at all, so the divisor shrinks while
+     the numerator keeps growing. Measured on seed 1337 over thirty dawns with
+     the roaming-party noise removed: FREE COMPANY held all forty provinces and
+     every other owner on the island held none.
 
+     THE MODEL NOW IS OPENFRONT'S AND IT NEEDS NO BRAKE, because there is
+     nothing to brake: AN ATTACK COMES OUT OF THE PROVINCES THAT TOUCH THIS
+     ONE. Not out of a realm. A levy defends the ground he lives on and does
+     not march — this file has said so since it was written — so what crosses
+     this border is what is standing on the other side of it: half the
+     neighbour's levy (half of them stay home) plus whatever is garrisoned
+     there, plus any army actually camped on or hunting across this ground.
+
+     Two provinces pushing at one is genuinely twice one, which is what makes a
+     salient dangerous and a straight front stable; forty provinces pushing at
+     one is impossible, which is what makes an empire worth attacking. The
+     frontierContact divisor is deleted with the model it was propping up. */
   function pressureOn(r) {
     const t = tState();
     const own = t.own[r.id] || null;
     const tally = {};
     for (let i = 0; i < r.neighbours.length; i++) {
-      const nOwn = t.own[r.neighbours[i]] || null;
+      const nid = r.neighbours[i];
+      const nOwn = t.own[nid] || null;
       if (!nOwn || nOwn === own) continue;
       /* AN ALLY DOES NOT PUSH. This is the map half of the no-attack rule and
          it is the reason an alliance is worth making: his colour stops
@@ -1175,25 +1291,41 @@
          he shares with a third party keeps moving. Only the border between
          the two of you is still. */
       if (truce(nOwn, own)) continue;
-      tally[nOwn] = (tally[nOwn] || 0) + (r.border[r.neighbours[i]] || 1);
+      const nb = T.byId(nid);
+      if (!nb) continue;
+      const rec = tally[nOwn] || (tally[nOwn] = { force: 0, from: nid, contact: 0 });
+      /* HALF THE LEVY MARCHES AND ALL THE GARRISON DOES. The garrison is the
+         men a warlord deliberately put there — it is his to spend — and the
+         levy is farmhands who will cross their own border and not much
+         further. A province that just changed hands brings less of both,
+         which is the same settle curve defenceOf reads. */
+      const bring = (levies(nb) * 0.5 + T.garrisonPower(nb.id)) * (0.55 + 0.45 * settledOf(nb));
+      rec.force += bring;
+      const c = r.border[nid] || 1;
+      /* THE WIDER THE BORDER THE MORE OF IT ARRIVES. Contact length was
+         already measured per pair (edges()) and was already the thing
+         frontierOf sorts on; it belongs here too — a province you touch along
+         forty cells is not the same threat as one you touch along three. */
+      rec.contact += c;
+      if (c > (r.border[rec.from] || 0)) rec.from = nid;
     }
     const keys = Object.keys(tally);
     let best = null, bs = 0, from = null;
     for (let i = 0; i < keys.length; i++) {
-      /* WHAT HE CAN ACTUALLY BRING HERE: his levies, times this frontier's
-         share of every frontier he is holding, plus whatever of his army is
-         standing in or next to this region. The floor of 0.06 is there so an
-         enormous empire still presses SOMEWHERE rather than dissolving into
-         a uniform nothing; the cap of 1 is arithmetic. */
-      const share = clamp(tally[keys[i]] / Math.max(1, frontierContact(keys[i])), 0.06, 1);
-      const s = groundStrength(keys[i]) * share + nearForce(keys[i], r);
-      if (s > bs) { bs = s; best = keys[i]; }
+      const rec = tally[keys[i]];
+      const wide = clamp(rec.contact / Math.max(1, totalBorder(r)), 0.15, 1);
+      const s = rec.force * wide + nearForce(keys[i], r);
+      if (s > bs) { bs = s; best = keys[i]; from = rec.from; }
     }
     if (!best) return null;
-    for (let i = 0; i < r.neighbours.length; i++) {
-      if ((t.own[r.neighbours[i]] || null) === best) { from = r.neighbours[i]; break; }
-    }
     return { owner: best, force: bs, from: from };
+  }
+  /* how many cells of this province's edge are shared with anybody at all —
+     the denominator the contact share above is a fraction of. */
+  function totalBorder(r) {
+    let n = 0;
+    for (let i = 0; i < r.neighbours.length; i++) n += r.border[r.neighbours[i]] || 1;
+    return n;
   }
   T.pressureOn = pressureOn;
 
@@ -1247,17 +1379,40 @@
        regions for twenty-five days against overwhelming pressure and never
        saw a thing. What happens to YOUR holdings is the game; what happens
        between two AIs is scenery, and scenery does not get to queue ahead. */
+    /* AND YOUR FRONTIER LOSES AT MOST ONE PROVINCE A MORNING, which is new and
+       is the second half of a fix the first half of which is above.
+
+       "Your ground is resolved first and WITHOUT A CAP" was written when you
+       held four provinces and the win condition was four warlords: the danger
+       then was the player's frontier being permanently shielded by two AIs
+       shoving each other, so the cap came off. The win condition is LAND now —
+       thirty-two of forty — and with the cap off, a headless run measured six
+       fresh holdings going 6 → 6 → 2 → 1 → 1 → 0 in five dawns. Four provinces
+       in one morning.
+
+       That is not difficulty, it is the WARNING being worthless. The whole
+       point of `press` is that you get a dawn's notice and can ride there; you
+       cannot ride to four places, so a four-province morning is exactly the
+       "be punished at random" this file's own comment says it exists to
+       prevent. One a dawn, worst odds first, and the warnings for the rest
+       still go in the log — so a front you are losing costs you a province a
+       day and gives you every one of those days to do something about it.
+
+       It is still uncapped RELATIVE TO THE AI in the sense that matters: yours
+       is resolved before theirs and never queued behind their churn. */
+    mine.sort(function (a, b) { return b.odds - a.odds; });
+    let lost = 0;
     for (let i = 0; i < mine.length; i++) {
       const c = mine[i];
       /* YOUR GROUND GETS ONE WARNING. Without it a player who was in a battle
          when the front moved simply finds a province gone with no way to have
          known, and "conquer everything and idle" is replaced by "be punished
          at random". */
-      if ((t.press[c.r.id] || 0) < 2) {
+      if ((t.press[c.r.id] || 0) < 2 || lost) {
         if (c.odds > 0.5) W.log(ownerLabel(c.p.owner) + " is massing on " + c.r.name + ".", "bad");
         continue;
       }
-      roll(c);
+      if (roll(c)) lost++;
     }
     /* AND THE FACTIONS GET THREE. The cap is not decoration: uncapped, a
        strong faction flipped nine regions in one dawn, the log became
@@ -1267,38 +1422,350 @@
     const cap = Math.max(2, Math.round(REG.length / 8));
     theirs.sort(function (a, b) { return b.odds - a.odds; });
     let n = 0;
-    for (let i = 0; i < theirs.length && n < cap; i++) if (roll(theirs[i])) n++;
+    for (let i = 0; i < theirs.length && n < cap; i++) {
+      /* THE ABSTRACT WAR NEVER HANDS YOU A PROVINCE. pressureOn happily
+         answers "you" — the map card wants that, it is how a holding says
+         YOU CAN TAKE THIS — but a roll that turns somebody else's ground
+         orange while the player stands still is the game playing itself.
+         MEASURED before this line existed: six provinces became twenty-three
+         in ten dawns with the player parked and doing nothing, which is
+         two thirds of a win condition awarded for waiting.
+
+         YOU TAKE GROUND THROUGH THE THREE DOORS AND ONLY THROUGH THEM: beat
+         the force that holds it (onBattleWon), stand on the unclaimed
+         (standTick), or STORM the undefended. All three are things you did.
+         The war is what happens to everybody else. */
+      if (theirs[i].p.owner === "you") continue;
+      if (roll(theirs[i])) n++;
+    }
     return flips;
   }
 
-  /* ============================================================ DAWN */
+  /* ============================================================ DAWN
+     THE GARRISON IS NOT ON YOUR PAYROLL, and taking it off was a real fix
+     rather than a generosity. The old dawn billed you a wage for every man
+     standing in a holding and paid you that holding's income — and both
+     numbers are supportOf(r) times a levy's wage, so a province with its levy
+     raised paid you EXACTLY NOTHING. Land was a colour on a map with a
+     rounding error attached. The honest model is the one supportOf has always
+     stated in its own name: the ground feeds those men. They eat what they
+     grow, they hand you the surplus, and the moment you pull one of them into
+     your column he starts costing you core's wage like anybody else. That is
+     the whole trade RAISE THE LEVY is: free at home, expensive on the road. */
   function dawn() {
     if (FLAG_OFF) return;
     if (!ensure()) return;
+    /* THE LEVY BEFORE THE WAR. A holding that raised men this morning gets to
+       defend with them this morning; the other order means a province is
+       always one dawn behind the pressure on it. */
+    const lev = raiseLevies();
     const mine = T.held("you");
-    let income = 0, paid = 0, men = 0;
+    let income = 0, men = 0;
     for (let i = 0; i < mine.length; i++) {
       income += T.regionIncome(mine[i]);
-      paid += garrisonPayroll(mine[i].id);
       men += T.garrisonSize(mine[i].id);
     }
-    const net = income - paid;
     if (mine.length) {
-      if (net >= 0) W.earn(net);
-      else {
-        const s = S();
-        s.gold = Math.max(0, s.gold + net);
-        W.emit("gold", s.gold);
-      }
-      W.log("the island paid $" + income + (paid ? " — $" + paid + " to " + men + " men in garrison" : "") +
-            " from " + mine.length + " holding" + (mine.length === 1 ? "" : "s") + ".",
-            net >= 0 ? "good" : "bad");
+      W.earn(income);
+      W.log("the island paid $" + income + " from " + mine.length + " holding" +
+            (mine.length === 1 ? "" : "s") + (lev.raised ? " — " + lev.raised + " levies raised, " +
+            men + " men under arms on your ground" : "") + ".", "good");
     }
     let flips = [];
     if (WAR_ON && !FLAG_NOWAR) flips = warDawn();
-    W.emit("territory:dawn", { income: income, paid: paid, flips: flips.length });
+    paintChip();
+    W.emit("territory:dawn", { income: income, levies: lev.raised, garrison: men, flips: flips.length });
   }
   T.dawn = dawn;
+
+  /* ============================================================ VICTORY IS LAND
+     OPENFRONT'S RULE, VERBATIM: you have won when you hold most of the map.
+
+     What it replaced was events.js's THE FOUR — break four named warlords and
+     the island is yours — and that rule died of the bug in its own head. It
+     asked "is this warlord broken" of a warlord who had never had a column
+     raised (match.js's COLUMN_CEILING refused every one), so on day one, after
+     one skirmish with two dead, all four were "broken" and the run was WON.
+     The owner met it as a screenshot: "After one battle I get this ending the
+     game which is dumb in warlord."
+
+     A land rule cannot do that. It is not a proxy for conquest, it IS
+     conquest, it is on the screen the whole time as a fraction, and it cannot
+     be satisfied by an accident because every one of those thirty-two
+     provinces had to be taken off somebody.
+
+     0.8 rather than 1.0 for openfront's own reason: the last four provinces of
+     a map are a chore, not a game — a man with three quarters of an island has
+     already won and making him ride to every corner to hear it said is the
+     part of a strategy game people quit during. It is a SHARE, so the number
+     on the chip (32) is derived from however many holdings the island cut
+     itself into and follows TARGET_REGIONS without an edit. */
+  const WIN_SHARE = 0.8;
+  T.winShare = function () { return WIN_SHARE; };
+  T.winTarget = function () { ensure(); return Math.max(1, Math.ceil(REG.length * WIN_SHARE)); };
+  T.share = function (ownerId) {
+    ensure();
+    const n = T.held(ownerId == null ? "you" : ownerId).length;
+    const need = T.winTarget();
+    return { held: n, of: REG.length, need: need, won: n >= need };
+  };
+
+  /* ============================================================ TAKING GROUND
+     THERE WERE THREE WAYS TO GET A PROVINCE AND TWO OF THEM WERE NOT DOORS.
+
+     Before this pass the ONLY way the player could take ground was
+     onBattleWon: beat a band that belongs to the faction that owns the ground
+     you are standing on. That is a good rule and it is one rule, and it makes
+     most of the island unreachable — an unclaimed province (twenty-two of
+     forty on day one) has no band to beat, and a province garrisoned by
+     somebody whose columns are two ridges away has no band to beat either.
+     You could ride across half the map and never be OFFERED a way to own it.
+     openfront has two doors here and this now has the same two.
+
+     ── THE UNCLAIMED: STAND ON IT ────────────────────────────────────────
+     Nobody holds it, so nobody has to be beaten; you have to be THERE, with
+     enough men that being there means something, for long enough that it was
+     a decision. One campaign hour and ten men. The hour is the campaign's own
+     clock (S.hour advances on real seconds whether or not you move), the ten
+     is core's own smallest real party — W.BAND_CLASSES calls 2-9 a CREW and
+     10 the bottom of a BAND, so "a column, not a crew" is the game's own
+     phrase for it rather than a number I liked. Ride off and it resets: this
+     is occupation, not a timer you start.
+
+     ── THE HELD-BUT-UNDEFENDED: STORM IT ─────────────────────────────────
+     Somebody's colour, nobody's column. The garrison is what defends it and
+     the garrison is what you fight — a real battle, real men on the sand,
+     through W.battle.start like every other fight in this game. A strength-
+     only garrison (a rival's `gp`, a number on a wire) becomes men through
+     garrisonRoster above, which reads defenceOf's own two terms, so the fight
+     you get is exactly the fight the map card priced.
+
+     If one of the owner's columns IS standing there, this door is shut and
+     the encounter rail is the door — you do not get to walk past an army to
+     fight the farmhands behind it. */
+  const CLAIM_HOURS = 1;
+  function claimMen() {
+    /* A COLUMN, NOT A CREW. core's own band classes draw the line at ten. */
+    const C = W.BAND_CLASSES || [];
+    for (let i = 0; i < C.length; i++) if (C[i].id === "band") return C[i].lo;
+    return 10;
+  }
+  let standId = null, standAt = 0;
+  function clockHours() { return (S().day | 0) * 24 + (S().hour || 0); }
+
+  function standTick() {
+    if (FLAG_OFF || !REG.length) return;
+    if (W.phase() !== "campaign") { standId = null; return; }
+    const you = S().you;
+    const r = T.at(you.x, you.z);
+    const h = clockHours();
+    if (!r || T.owner(r.id) || W.armySize() < claimMen()) { standId = null; return; }
+    if (standId !== r.id) { standId = r.id; standAt = h; return; }
+    if (h - standAt < CLAIM_HOURS) return;
+    standId = null;
+    T.claim(r.id, "you");
+  }
+  /* WHAT THE CHIP COUNTS DOWN. Published rather than drawn from inside the
+     tick, because the campaign strip, the map card and a headless probe all
+     want the same answer and only one of them is a pixel. */
+  T.standing = function () {
+    if (!standId) return null;
+    const r = T.byId(standId);
+    if (!r) return null;
+    return { region: r.id, name: r.name, left: Math.max(0, CLAIM_HOURS - (clockHours() - standAt)),
+             need: claimMen() };
+  };
+
+  /* IS THERE A COLUMN ON THIS GROUND. bandsByRegion is already the cache the
+     war reads; asking the same question through the same map is what keeps
+     "there is an army here" meaning one thing on the map and on the sand. */
+  function columnOn(r, ownerId) {
+    const map = bandsByRegion();
+    const L = map[r.idx];
+    if (!L) return null;
+    for (let i = 0; i < L.length; i++) {
+      if (bandOwner(L[i]) !== ownerId) continue;
+      if (L[i].men && L[i].men.length) return L[i];
+    }
+    return null;
+  }
+  function stormable(r) {
+    if (!r) return false;
+    const o = T.owner(r.id);
+    if (!o || o === "you") return false;
+    if (truce(o, "you")) return false;                 // you do not storm an ally
+    return !columnOn(r, o);
+  }
+  T.stormable = stormable;
+
+  /* THE GARRISON, AS A PARTY, FOR EXACTLY ONE FIGHT. It is pushed onto
+     S.bands because every other thing that fights in this game is a band on
+     that array — the battle reads it, the aftermath banks it, campaign.js
+     draws it standing on its own ground — and it is `held` so the island's
+     own AI never walks it off the province it is defending or picks it for
+     the off-screen war. stormAftermath takes it away again whatever happens. */
+  function storm(r) {
+    const o = T.owner(r.id);
+    if (!stormable(r)) return false;
+    if (!W.battle || !W.battle.start) { W.toast("battle.js did not load", "bad"); return false; }
+    const A = (W.warlords && W.warlords.warlord) ? W.warlords.warlord(o) : null;
+    const men = garrisonRoster(r);
+    const b = W.makeBand({ size: 1, faction: A ? "warlord" : o, name: r.name + " GARRISON" });
+    b.men = men;
+    b.gold = 0;
+    if (A) { b.warlordId = A.id; b.colour = A.colour; b.name = r.name + " GARRISON"; }
+    /* WHERE YOU ARE STANDING, not the region's centre of mass. onBattleWon
+       looks the province up off the BAND's position, and a band parked on the
+       label point of a coastal holding can sit in the sea. */
+    const you = S().you;
+    b.x = you.x + Math.cos(you.yaw || 0) * 24;
+    b.z = you.z + Math.sin(you.yaw || 0) * 24;
+    b.y = 0;
+    b.yaw = (you.yaw || 0) + Math.PI;
+    b.held = true;
+    b.hostile = 1;
+    b.mood = "camp";
+    b._garrison = r.id;
+    (S().bands || []).push(b);
+    W.log("rode onto " + r.name + " and its garrison stood to.", "");
+    W.battle.start({ band: b, storm: true });
+    return true;
+  }
+  T.storm = storm;
+
+  function stormAftermath(rep) {
+    const b = rep && rep.band;
+    if (!b || !b._garrison) return;
+    const t = tState();
+    const r = T.byId(b._garrison);
+    b.held = false;
+    const B = S().bands || [];
+    const i = B.indexOf(b);
+    if (i >= 0) B.splice(i, 1);
+    if (!r) return;
+    if (T.owner(r.id) === "you") return;      // onBattleWon has already claimed it
+    /* YOU DID NOT TAKE IT, so what is still standing is what still holds it —
+       written back as strength, because the men who are left are the province's
+       again and not a party on the island. */
+    const left = (b.men || []).length;
+    delete t.gar[r.id];
+    if (left > 0) t.gp[r.id] = left * levyPower(); else delete t.gp[r.id];
+    bump();
+  }
+
+  /* ============================================================ THE GROUND RAIL
+     WHAT YOU CAN DO WITH THE PROVINCE YOU ARE STANDING IN, on the same dock
+     every other meeting in this game uses (games/warlord.html's ctx.verbs).
+     Not a screen: the clock never stops, so a decision about ground is taken
+     with the island still running behind it exactly like a decision about a
+     band. The map card carries the same two verbs for the case where you are
+     looking at the island rather than standing on it — one implementation,
+     two doors, because the alternative is two implementations that disagree
+     about whether a garrison can march. */
+  function garrisonMen(id) { const g = garrison(id); return g ? g.length : 0; }
+
+  function raiseLevy(r) {
+    const n = garrisonMen(r.id);
+    if (!n) { W.toast("NOBODY IS GARRISONED HERE", "bad"); return 0; }
+    moveGarrison(r, -n);
+    return n;
+  }
+  T.raiseLevy = raiseLevy;
+
+  function groundRail() {
+    const c = T.ctx;
+    if (FLAG_OFF || !c || !c.verbs) return false;
+    if (W.phase() !== "campaign") return false;
+    if (c.verbsOpen && c.verbsOpen()) return false;
+    const st = document.getElementById("stage");
+    if (st && st.classList.contains("on")) return false;
+    const you = S().you;
+    const r = T.at(you.x, you.z);
+    if (!r) return false;
+    const o = T.owner(r.id);
+    const opts = [];
+    let sub = ownerLabel(o) + " · +$" + T.regionIncome(r) + "/DAY";
+
+    if (o === "you") {
+      const n = garrisonMen(r.id);
+      opts.push({ label: "RAISE THE LEVY", kind: "hot", note: n ? n + " MEN" : "none",
+        disabled: !n,
+        on: function () { const got = raiseLevy(r); if (got) W.toast(got + " MEN FALL IN", "good"); } });
+      sub = "YOURS · " + n + " IN GARRISON · +$" + T.regionIncome(r) + "/DAY";
+    } else if (o) {
+      const held = columnOn(r, o);
+      if (held) {
+        sub = ownerLabel(o) + " · " + W.bandSize(held) + " MEN ON IT";
+      } else {
+        const d = defenceOf(r);
+        const odds = W.odds(W.yourPower(), d);
+        opts.push({ label: "STORM", kind: odds > 0.55 ? "hot" : odds > 0.3 ? "" : "bad",
+          note: Math.round(odds * 100) + "%",
+          on: function () { storm(r); } });
+        sub = ownerLabel(o) + " · " + T.garrisonSize(r.id) + " IN GARRISON";
+      }
+    } else {
+      const s = T.standing();
+      sub = W.armySize() < claimMen()
+        ? "UNCLAIMED · " + claimMen() + " MEN TO TAKE IT"
+        : "UNCLAIMED · YOURS IN " + Math.max(1, Math.ceil((s ? s.left : CLAIM_HOURS) * 60)) + " MIN";
+    }
+    opts.push({ label: "THE ISLAND", on: function () { T.focus(r.id); } });
+    opts.push({ label: "RIDE ON", on: function () {} });
+    c.verbs({ title: r.name, sub: sub, options: opts });
+    return true;
+  }
+  T.ground = groundRail;
+
+  /* ============================================================ THE STRIP
+     THE ONE NUMBER THE WHOLE RUN IS ABOUT, in the persistent HUD. events.js
+     wraps ctx.paintHud for its loyalty chip and this does the same for the
+     same reason: campaign.js and outpost.js both call paintHud directly, so a
+     chip that only listens to the bus vanishes the moment they do.
+
+     "7 OF 40 · YOURS AT 32" is the win condition, the progress bar and the
+     goal in eleven characters, and it is on screen from the first frame.
+     Under it, the ground you are standing on — which is also the tap that
+     opens the rail above, because a chip naming a province is the most
+     obvious place in the game to press when you want to do something to it. */
+  function paintChip() {
+    const c = T.ctx;
+    if (FLAG_OFF || !c) return;
+    const h = (c.el ? c.el("hud") : document.getElementById("hud"));
+    if (!h || !h.classList.contains("on")) return;
+    const old = h.querySelectorAll(".wl-tchip");
+    for (let i = 0; i < old.length; i++) old[i].parentNode.removeChild(old[i]);
+    if (!REG.length) return;
+    const s = T.share("you");
+    const c1 = document.createElement("span");
+    c1.className = "chip act wl-tchip";
+    c1.textContent = s.held + " OF " + s.of + " · YOURS AT " + s.need;
+    if (s.won) c1.style.color = "#8fe0a2";
+    c1.onclick = function () { if (W.phase() === "campaign") T.toggle(); };
+    h.appendChild(c1);
+
+    const r = T.at(S().you.x, S().you.z);
+    if (!r) return;
+    const o = T.owner(r.id);
+    const st = T.standing();
+    const c2 = document.createElement("span");
+    c2.className = "chip act wl-tchip";
+    if (st) {
+      c2.textContent = r.name + " · " + Math.max(1, Math.ceil(st.left * 60)) + " MIN";
+      c2.style.color = "#ff8a3d";
+    } else if (o === "you") {
+      const n = garrisonMen(r.id);
+      c2.textContent = r.name + (n ? " · " + n + " LEVY" : "");
+    } else if (o) {
+      c2.textContent = r.name + " · " + ownerLabel(o);
+      c2.style.color = hex(ownerColour(o));
+    } else {
+      c2.textContent = r.name + " · UNCLAIMED";
+    }
+    c2.onclick = function () { groundRail(); };
+    h.appendChild(c2);
+  }
+  T.paintChip = paintChip;
 
   /* ============================================================ SNAPSHOT
      THE ONLY THING THAT EVER GOES ON THE WIRE. The regions are a function of
@@ -2020,10 +2487,13 @@
     box.innerHTML = html;
     const hold = document.getElementById("wlTerrHold");
     if (hold) {
-      const mine = T.held("you");
-      // short on purpose: on a 393 pt phone the long form ellipsised away
-      // the income, which is the one number on this strip worth reading
-      hold.textContent = mine.length + "/" + REG.length + " · +$" + T.income("you") + "/DAY";
+      /* THE WIN CONDITION IS ON THE STRIP, not in a rulebook. It used to read
+         "7/40 · +$412/DAY" — a fraction with no denominator that means
+         anything, next to a number you already see in the top strip. What a
+         player standing at 7 needs to know is how far 32 is. */
+      const s = T.share("you");
+      hold.textContent = s.held + " OF " + s.of + " · YOURS AT " + s.need;
+      hold.style.color = s.won ? "#8fe0a2" : "";
     }
   }
 
@@ -2119,11 +2589,23 @@
     btns += dipBtns;
     if (o === "you") {
       if (inIt) {
+        /* RAISE THE LEVY IS THE WHOLE GARRISON AND ±10 IS THE FINE TUNE. The
+           common act is "I rode home, give me my men" — one press — and the
+           ±10 stays for the case the screen was built for, which is leaving a
+           holding exactly as many men as it takes to keep it. */
+        btns += '<button class="wl-btn hot" id="wlTerrLevy"' + (gsz ? "" : " disabled") + '>RAISE THE LEVY</button>';
         btns += '<button class="wl-btn" id="wlTerrGarM"' + (gsz ? "" : " disabled") + '>&minus;10 MEN</button>';
         btns += '<button class="wl-btn" id="wlTerrGarP"' + (st.army.length ? "" : " disabled") + '>+10 MEN</button>';
       } else {
         btns += '<span class="wl-small wl-dim" style="align-self:center">RIDE THERE TO GARRISON IT</span>';
       }
+    } else if (o && inIt && stormable(r)) {
+      /* STORM IS ONLY OFFERED WHERE YOU ARE STANDING. A button that starts a
+         battle fourteen kilometres away is a teleport, and the one thing this
+         map is not allowed to become is a place you play the game from. */
+      const so = W.odds(W.yourPower(), defenceOf(r));
+      btns += '<button class="wl-btn ' + (so > 0.55 ? 'hot' : 'bad') + '" id="wlTerrStorm">STORM &middot; ' +
+        Math.round(so * 100) + '%</button>';
     }
     btns += '</div>';
     box.innerHTML =
@@ -2145,6 +2627,10 @@
       W.toast("RIDING FOR " + r.name);
       close();
     };
+    const lv = document.getElementById("wlTerrLevy");
+    if (lv) lv.onclick = function () { const n = raiseLevy(r); if (n) W.toast(n + " MEN FALL IN", "good"); };
+    const sb = document.getElementById("wlTerrStorm");
+    if (sb) sb.onclick = function () { close(); storm(r); };
     const gm = document.getElementById("wlTerrGarM");
     if (gm) gm.onclick = function () { moveGarrison(r, -10); };
     const gp = document.getElementById("wlTerrGarP");
@@ -2193,7 +2679,8 @@
     delete t.gp[r.id];
     if (W.save) W.save();
     bump();
-    paintCard(); paintShare(); touch();
+    paintCard(); paintShare(); paintChip(); touch();
+    if (T.ctx && T.ctx.paintHud) { try { T.ctx.paintHud(); } catch (e) {} }
   }
 
   function sizeCanvas() {
@@ -2438,6 +2925,15 @@
       islandMen: Math.round(ISLAND_MEN), perArableKm2: Math.round(MEN_PER_ARABLE_KM2),
       levyPower: Math.round(levyPower() * 100) / 100,
       byOwner: byOwner, yourIncome: inc, war: WAR_ON && !FLAG_NOWAR,
+      /* THE WIN RULE, MEASURED. `need` is derived off REG.length, so a probe
+         asserting "80% of the island wins the run" never has to type 32. */
+      share: T.share("you"), standing: T.standing(),
+      yourGarrison: (function () {
+        const mine = T.held("you");
+        let n = 0;
+        for (let i = 0; i < mine.length; i++) n += T.garrisonSize(mine[i].id);
+        return n;
+      })(),
       snapshotBytes: JSON.stringify(T.snapshot()).length,
       names: REG.map(function (r) { return r.name; }),
       flags: { off: FLAG_OFF, nowar: FLAG_NOWAR, oldmap: FLAG_OLDMAP, noanim: FLAG_NOANIM, noshow: FLAG_NOSHOW },
@@ -2525,6 +3021,32 @@
        once they want to — calling it twice is a no-op, because the second
        call finds the region already yours. */
     W.on("phase:aftermath", function (r) { try { T.onBattleWon(r); } catch (e) {} });
+    /* AND THEN THE GARRISON STOPS BEING A PARTY. Registered after the claim so
+       it runs after it: onBattleWon needs the band still holding its province's
+       colours to know whose ground it was. */
+    W.on("phase:aftermath", function (r) { try { stormAftermath(r); } catch (e) {} });
+
+    /* THE STRIP. Wrapping ctx.paintHud rather than only listening on the bus,
+       for events.js's own reason: campaign.js and outpost.js call paintHud
+       directly and a chip that lives on the bus disappears when they do. */
+    const origHud = ctx.paintHud;
+    if (typeof origHud === "function") {
+      ctx.paintHud = function () { origHud(); try { paintChip(); } catch (e) {} };
+    }
+    W.on("territory:claim", function () { try { paintChip(); } catch (e) {} });
+
+    /* STANDING ON UNCLAIMED GROUND IS AN ACT, so it needs a clock. Four times
+       a second is far finer than a campaign hour and costs one T.at() — a
+       raster lookup, which is two divides and an array read. */
+    if (CBZ.onAlways) {
+      let acc = 0;
+      CBZ.onAlways(97, function (dt) {
+        acc += dt || 0;
+        if (acc < 0.25) return;
+        acc = 0;
+        try { standTick(); } catch (e) {}
+      });
+    }
     /* AND THEN SHOW IT. The claim happens inside the aftermath, with army.js's
        casualty list on the screen; the moment the player hands that screen
        back and the island is under him again, the map opens on the province he
