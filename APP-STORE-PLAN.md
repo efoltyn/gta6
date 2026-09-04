@@ -10,7 +10,7 @@
 Rewritten 2026-09-04 from a code-level dossier of every game in the repo. The
 August plan (four apps, NPC War first) is superseded: two games landed since
 (Shark Sim, Desert Warlord), a seventh turned out to be a full game
-(Bomb Survivor), and the App Store Connect account has **zero** records for any
+(Bomb Survivor — owner cut it 2026-09-04, it does not ship), and the App Store Connect account has **zero** records for any
 of them yet (it holds three unrelated apps: Flatliner!, Take Fleet Rider, Take
 Fleet Driver). Nothing from this repo has ever been archived or uploaded from
 this Mac: `dist-ios/`, `apps/disaster-ios/ios/` and `ios/App/App/public` do not
@@ -63,7 +63,7 @@ that does not run on a phone yet.
 | **Natural Disaster Survival** | `disaster.html` (generated) | 98 of 575 tags, 3.6 MB JS + 25 MB assets | complete, no keyboard-only verb | 100-player BR vs 11 hazards; last alive; runs/wins/best persisted | **18+** (trauma gore; GO-IOS already commits to it) | Furthest: own Capacitor root, icon/splash, privacy manifest, measured slice, `check:ios` oracle. **Never executed on this Mac; `disaster.html` is STALE (drops `water_stability.js`, `sea_craft.js`).** |
 | **NPC War** (battle sim) | `games/battle.html` | studio packs + 15-file armoury; local three.js; system fonts | orbit/pinch + on-screen PAUSE/¼-8×/AUTO CAM (shipped 2026-08-09, plan said it was missing); no touch camera *pan* | spectator: setup → battle → ledger; 10 maps, presets, FIND MY MAX | **13+** (blood pack off for man-vs-man; nuke) | Nothing built. `test:battle` oracle exists. |
 | **Desert Warlord** | `games/warlord.html` | ~57 files (studio + armoury + 20 `src/warlord/*`), 42.5k own LOC, no fonts, no fetch | full FPS thumb cluster + map pinch + verb rail; keyboard-only: battle orders 1–5, M/Q/E on campaign, speed nudge | hours-long campaign, hold 80% of provinces; single-slot save | **18+** (prisoner executions) | Nothing built. 10 `warlord-*` oracles. MULTIPLAYER button reaches `0.peerjs.com` + Google STUN; headless `battle.resolve()` kills nobody. |
-| **Bomb Survivor** | `games/bomb-survivor.html` | studio, 14 packs | (unverified) | 6v6 asymmetric: fly the B-2 over downtown; two 3-min halves | 13+/16+ (bombing runners; civilians −250) | Nothing built. Ship **inside NPC War** as its second mode, not as an eighth submission. |
+| **Bomb Survivor** | `games/bomb-survivor.html` | studio, 14 packs | (unverified) | 6v6 asymmetric: fly the B-2 over downtown; two 3-min halves | 13+/16+ (bombing runners; civilians −250) | **Cut by the owner 2026-09-04 ("NPC War is the game"). Does not ship anywhere; stays on the hub page.** |
 | **Cell Block Z** (prison + Gun Game) | none — `index.html` mode `escape`; prison is built at *parse time* so every index boot builds it | needs its own slice (no `prison-check` minimizer oracle yet); ~15k mode LOC | complete (door taps, verb pills, touch title grid); no pause button; rob pill sometimes suppressed | escape any tier = win; 3 captures = tier up; Gun Game 9-rung ladder | **18+** (shanks, gore, drugs as items) | Nothing built. `build-disaster-page.mjs` hardcodes `survival`. 9 `prison-*` oracles. |
 | **Shark Sim** | none — `index.html` mode `sharksim`, delegates build to survival's island | survival's slice + ~12k marine LOC | complete: stick + DIVE/RISE; bite automatic; zero keyboard-only verbs | grow bull shark → hammerhead → great white → **megalodon**; orca pod is the only ending; nothing persists but the camera choice | **18+** (limb severing is the designed fantasy, `creature_combat.js:1209-1240`) | Nothing built. `check:sharksim` + 4 shark tests boot `index.html` only. |
 | **Gang Life** | `index.html` mode `city` | all 569 tags, 58 MB copy-through | full ledger, but phone/inventory/map/City Power/Zillow/switch-character are keyboard-only on the title legend; pointer-lock-gated paths are false forever on iOS | open world, permadeath ON, 12 origins, heists to BANK JOB | **18+** and gambling is *frequent* (every casino lot, sportsbook, races) | Committed Xcode shell, never built. **Blocked on memory**: 456 MB heap + 563 MB geometry vs ~1–1.4 GB iOS budget; owner's phone already jetsammed at 99%; 12–30 s synchronous `startRun` freeze; the three perf levers sit on an unmerged branch, default OFF. |
@@ -120,7 +120,7 @@ The disaster app already has the right shape. Copy it, don't invent a second.
 ```
 apps/
   disaster-ios/      com.efoltyn.naturaldisastersurvival   (exists)
-  npcwar-ios/        com.efoltyn.npcwar        (battle.html + bomb-survivor.html)
+  npcwar-ios/        com.efoltyn.npcwar        (battle.html)
   warlord-ios/       com.efoltyn.desertwarlord
   cellblockz-ios/    com.efoltyn.cellblockz    (escape + gungame)
   shark-ios/         com.efoltyn.sharksim      (name TBD, see card)
@@ -177,7 +177,7 @@ each additional shell after the first is ~an hour plus its oracle run.
 | Wk | Ship | Why this slot |
 |---|---|---|
 | **1** | **Natural Disaster Survival** | The owner's favourite *and* the most finished pipeline. Running it end-to-end (build → device → TestFlight → review) is less work than building NPC War's from scratch, and every later app inherits what the review teaches. Its 18+ rating is the same answer five of the seven will give, so learn it here. |
-| **2** | **NPC War** (with Bomb Survivor as mode 2) | Different genre, different chrome, 13+/16+: the account now shows range, the opposite of a 4.3 pattern. First studio-page bundle proves that path for Warlord. |
+| **2** | **NPC War** | Different genre, different chrome, 13+/16+: the account now shows range, the opposite of a 4.3 pattern. First studio-page bundle proves that path for Warlord. |
 | **3** | **Desert Warlord** | Second studio page (an hour once NPC War's bundler works), own palette and title, campaign genre nothing else on the account has. |
 | **4** | **Cell Block Z** | The strongest `index.html` game with the oldest test suite; needs the prison slice oracle (§3.2), which is the biggest piece of new tooling. |
 | **5** | **Shark Sim** | ≥14 days after Disaster because it is Disaster's island from underwater. Screenshots: underwater and the megalodon only, never the beach from above. |
@@ -208,9 +208,7 @@ Never blind-resubmit a 4.3: appeal with the concrete gameplay differences in
   Collected.
 
 ### NPC War — `apps/npcwar-ios/` (new)
-- Do: studio-page bundler (§3.3); a two-button landing page inside `www/`
-  (NPC WAR / BOMB SURVIVOR) — both pages are in the binary, so 4.7 does not
-  apply; add a **two-finger camera pan** (the only verb still mouse/WASD
+- Do: studio-page bundler (§3.3); add a **two-finger camera pan** (the only verb still mouse/WASD
   only); `npm run test:battle` against the bundle; device memory at 200 v 200
   (no unit cap by design — corpse retirement at 420, shadows off above 170
   bodies, render-scale floor 0.6 already exist).

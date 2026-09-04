@@ -70,7 +70,7 @@ first engineering task and they are small.
 Two shapes of game, one output shape: a self-contained folder that runs from
 `file://`, from an iframe, and from a zip, with zero external requests.
 
-- **Studio pages** (`games/battle.html`, `bomb-survivor.html`,
+- **Studio pages** (`games/battle.html`,
   `warlord.html`): they load files at runtime through `src/core/studio.js`
   pack arrays, so a static manifest lies. Build it **by recording**: boot the
   page headless (the `tools/battle-check.mjs` rig already drives every map),
@@ -93,7 +93,7 @@ Two shapes of game, one output shape: a self-contained folder that runs from
 
 ## 4. Ship order and per-game cards
 
-### 1 — NPC War (`games/battle.html` + Bomb Survivor as mode 2)
+### 1 — NPC War (`games/battle.html`)
 
 Why first: 13+ by default, a genre the portals already sell (battle
 simulators are a top web category), own chrome, own menu, **no links out,
@@ -107,8 +107,9 @@ the nuke (stylised), keep every matchup. That is PEGI 12.
 
 "Land directly in gameplay": the setup screen *is* the game, but give the
 first visit a default matchup already loaded and one big FIGHT button above
-the fold; SETUP stays a tap away. Then a two-button landing (`NPC WAR` /
-`BOMB SURVIVOR`) is the folder's `index.html`.
+the fold; SETUP stays a tap away. `battle.html` becomes the folder's `index.html`.
+Bomb Survivor (`games/bomb-survivor.html`) does not ship — owner's call
+2026-09-04: "NPC War is the game." It stays on the hub page only.
 
 Steps: build tool (§3) → `dist-web/npcwar/` passes `test:battle` from the
 folder → measure ms-to-playable → own site (clean URL, one landing page) →
@@ -203,7 +204,7 @@ Because own-link players pay 100 % on Poki and the portals send people to
 
 | Week | Do |
 |---|---|
-| 1 | §2 blockers · web build tool · NPC War `full` + `portal` folders · own site landing · itch + Newgrounds · CrazyGames Basic |
+| 1 | §2 blockers · web build tool · NPC War `full` + `portal` folders (NPC War alone, no Bomb Survivor) · own site landing · itch + Newgrounds · CrazyGames Basic |
 | 2 | Poki submission for NPC War · Disaster: regen page, re-measure slice, build, record ms-to-playable · itch + Newgrounds + CrazyGames Basic |
 | 3 | Disaster Poki (if < 10 s) or progressive loading · Cell Block Z prison oracle + slice |
 | 4 | Cell Block Z `full` on own site + itch + Newgrounds · CrazyGames Full Launch SDK for whichever of the first two got invited |
