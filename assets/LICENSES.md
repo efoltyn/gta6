@@ -66,3 +66,14 @@ mild envelope flattening), encoded to mono AAC 96 kbps.
 
 Fredoka is by Milena Brandão and Hafontia. The OFL permits bundling the font
 inside an application and redistributing it with the software.
+
+## Vendored library (`assets/vendor/`) — 2026-09-04, multiplayer without a server
+
+| File | Source | Notes | License |
+|------|--------|-------|---------|
+| `vendor/peerjs.min.js` | PeerJS 1.5.4 UMD build, from `https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js` (92 KB) | WebRTC DataConnections + the public signalling broker. Loaded lazily by `src/net/rooms.js` only when somebody opens or joins a ROOM, so single player and the node-relay path never fetch it. Vendored rather than CDN-linked because the game ships as static files (GitHub Pages, and a Capacitor app with no network at boot) and a third-party script tag is a third-party outage. | MIT |
+
+PeerJS is copyright (c) 2015 Michelle Bu and Eric Zhang, MIT licensed
+(https://github.com/peers/peerjs/blob/master/LICENSE). The MIT licence permits
+redistribution provided the copyright notice travels with it — the minified
+file carries no header, so this table is that notice.
