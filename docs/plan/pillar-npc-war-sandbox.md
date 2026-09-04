@@ -12,9 +12,12 @@
 > to go full open dunes open water only but the simplicity is better, we will
 > consider."
 >
-> STATUS: direction only. Nothing deleted, nothing built. The owner said "we
-> will consider", so this page records the decision space and what is true
-> today, so the wave that acts on it starts from facts.
+> Same day, second message: "it should all be together shouldn't it lol
+> obviously what am i thinking, its multiplayer, sandbox and single player, 3
+> modes already fucking built."
+>
+> STATUS: direction. Nothing deleted, nothing built yet. Section 6 is the
+> merge plan the owner's second message asks for.
 
 ## 1. The thesis, in one line
 
@@ -140,3 +143,99 @@ battle improvements back so the spectator page is the best copy again.
 ## 5. What this page does NOT authorise
 
 No deletion of venues. No new engine. The owner said "we will consider".
+
+## 6. THE THREE MODES ARE ONE GAME (owner, 2026-09-04, second message)
+
+The owner's realisation: NPC War the spectator sim, Desert Warlord the
+campaign, and Warlord's multiplayer are one battle game with three doors, and
+all three are already built. They are just built in two places.
+
+### Measured overlap, 2026-09-04
+
+| | games/battle.html (WATCH) | src/warlord/battle.js (FIGHT) |
+|---|---|---|
+| lines | 5,556 | 4,858 |
+| top-level functions | 144 | 122 |
+| function names in both | 29 | 29 |
+
+The 29 shared names ARE the battle: `makeMan stepMan think pickTarget fireShot
+hurtMan killMan separatePass separateSolve freeSpot rebuildGrid marchGoal
+spreadGoal eyeLos terrainBlocked stepCamera cycleCam retireOldestCorpse ...`.
+Everything a man does on the sand exists twice, copied, and has drifted.
+
+What each copy has that the other does not:
+
+- **WATCH only:** the war room (10 grounds, bestiary roster, 14 matchups, FIND
+  MY MAX), the whole sea (swell, seabed, reef, fleet, aquatic depth, the
+  underwater camera), beasts and the beast matchups, the air war, the nuke,
+  the quality ratchet (`__battle.quality()/audit()`, tools/battle-check.mjs).
+- **FIGHT only:** YOU (`makeYou`, `seatMan`), morale and routs (`updateMorale
+  moraleFrom brokenSide stepRout`), squads and orders (`joinSquad squadThink
+  setOrder setStance setFormed frontage flankAnchor`), hull-down cover on the
+  dune (`hullDown hullFor workHull`), optics per weapon and real rounds
+  (`loadGunplay gunplayApi`), the ranked death spend (`loadDeaths`), pickups
+  (`stepPickup takeDrop nearestDrop`), `resolve()` for the campaign's
+  off-screen fights, the aftermath report.
+- **ROOMS:** src/warlord/warnet.js is the wire only ("no rules live here"),
+  on top of src/net/net.js and server/server.js, which already carry sim-host
+  election and the `state / world / ev` shapes. match.js is "the other
+  warlords", not a match layer (the board was deleted on the owner's verdict).
+  Multiplayer is the campaign's, not the sim's; the sim has no net at all.
+
+Below both copies the engine is already shared and is not the problem:
+studio.cast, combat_iq, actorweapons, gunfx, wounds, deathPose, ragdoll, gore.
+The fork is exactly the layer between combat_iq and the page: the men's step,
+the targeting, the separation, the camera, the corpses.
+
+### The shape
+
+One engine, three doors, one page.
+
+    src/battle/         the war, once. Extracted from BOTH copies, keeping
+                        the better of each: WATCH's sea, beasts, air, quality
+                        ratchet; FIGHT's morale, squads, orders, hull-down,
+                        optics, real rounds, pickups, death spend.
+                        Every FIGHT-only feature is a switch the door sets,
+                        not a fork: morale OFF for WATCH (armies fight to the
+                        last man because a spectator wants to see the end),
+                        ON for FIGHT and ROOMS. `resolve()` stays: the
+                        campaign fights its off-screen battles with the same
+                        model.
+    WATCH  door         the war room: who, how many, holding what, where.
+                        Roster from the bestiary AND the machines (section 4).
+    FIGHT  door         the campaign: your army, your rifle, the island.
+    ROOMS  door         a warlord room over the wire, the same battle, other
+                        people's columns.
+
+The grounds question (section 3) then answers itself: WATCH has dunes and
+water on the card; FIGHT's ground is the piece of island the encounter
+happened on, which is already a dune; ROOMS fights where the room says. The
+seven raised venues fold behind "somewhere real" in WATCH only.
+
+### What it changes outside the code
+
+APP-STORE-PLAN.md ships NPC War (app 2) and Desert Warlord (app 3) as separate
+submissions. Together they are one app with three modes, which is a better
+App Store story (one battle game with a sandbox, a campaign and multiplayer)
+and one fewer 4.3 exposure. The plan's order becomes Disaster, then THE
+BATTLE GAME, then Cell Block Z. Bomb Survivor still rides inside it as the
+owner already decided.
+
+### The wave, when the owner says go
+
+1. Extract `src/battle/men.js` (the 29 shared names, from the FIGHT copy where
+   it is newer, with WATCH's sea/beast branches carried in). Both pages call
+   it. Oracles: tools/battle-check.mjs green on WATCH, the 10 warlord-* oracles
+   green on FIGHT, before any feature moves.
+2. Move FIGHT's morale/squads/orders/hull-down/optics/rounds/pickups/deaths
+   into `src/battle/` behind door switches. WATCH gets optics and hull-down
+   for free (morale stays off there).
+3. One page with three doors. games/battle.html becomes the shell; the
+   warlord shell's campaign screens move under the FIGHT door; warnet under
+   ROOMS. games/warlord.html becomes a redirect for one release, then goes.
+4. Then section 4: the card, the machines as a weapon row, the big numbers,
+   the shareable URL.
+
+Builders by territory (fable orchestrates, opus builds): men.js extraction;
+FIGHT features into engine; the shell with three doors. Three builders, one
+merge, one battle-check + warlord oracle gate at the end.
