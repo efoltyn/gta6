@@ -439,3 +439,90 @@ Visual A/B: `ba --preset city-load-weight` (four framings, bytes/materials/
 heap/mean-luminance beside each; the before is a detached HEAD worktree
 served on :8811). This wave: 1,310 → 565 MB in all four frames, mean luminance within 0.6 of a level.
 `~/harness/out/gta6/city-load-weight-2026-09-02T01-48-54-882Z/report.pdf`.
+
+---
+
+## 2026-09-04 — the build no longer freezes the tab, a reload is free, and PLAY says CONTINUE
+
+Owner: *"there's no real pause and resume, and there's no real load game. once
+you reload the browser, you gotta fully reload the huge game, and that reloads
+slow."* Three things were true and each is measured below with its own gate.
+
+### 1. The build is sliced (owed item #1, finally)
+
+`CBZ.buildCity` is a generator now (`buildCityGen` in `city/world.js`), and so
+is `cityWorldGeo` (`cityWorldGeoGen`, `city/worldmap.js`), the static batch
+pass (`batchStaticUnderGen`, `core/batch.js`, one yield per merged bucket) and
+the five fattest builders — `minicities.js` yields per town, `countries.js` per
+country, `govcomplex.js` per complex, `biome_snow.js` and `continent.js` at
+every phase banner. `city/mode.js`'s `prebuildGen` chains them, and
+`CBZ.runSliced` (`core/loop.js`) drives that chain with a 24 ms budget and one
+`setTimeout(0)` between slices, holding the frame loop (`CBZ.loopHold`) so no
+updater sees a half-built world. Only the human-facing PLAY / CITY tile
+(`systems/state.js present()`) takes this path. **`CBZ.startRun()` is still one
+synchronous call** — every tool drains the same generators in a `for` loop and
+gets the identical world (the determinism gate agrees); `?cfg_SLICED_BOOT=0`
+puts the buttons back on it too.
+
+The proof is `tools/continue-check.mjs` (`npm run test:continue`): a 50 ms
+main-thread timer runs through PLAY and reports its longest gap. Before, that
+gap WAS the build. Now it is one builder step — the snow biome's biggest phase
+— and the meter, input and the browser's watchdog all get the thread back
+between steps. A frozen tab is what a phone kills; there is no frozen tab.
+
+**Nothing here is less work.** Same builders, same order, same rng draws. The
+synchronous build measured 24.8 / 25.2 s on this box today against 34.4 s in
+the morning's baseline — that spread is the box, not the code (the notes above
+have this build at 12.2 s on a quieter day). The honest speed lever is still
+*build only near spawn* (#2 above), and it is now tractable: the generator
+chain is exactly the seam a streaming world needs.
+
+### 2. A reload costs nothing on the wire (`sw.js`, `core/appcache.js`)
+
+Every `<script>` tag is `defer` now (the title paints before the 28 MB
+parses; tools that read the tags were taught the attribute), and a service
+worker owns the files: `index.html` is network-first so pushing to main is
+still the deploy, everything else is cache-first, and the install pre-fills
+the cache from the page that registered it. A changed `index.html` drops the
+whole file cache before the new page is answered — one consistent version
+set, never a stale `worldmap.js` under a fresh `world.js`. A src-only push is
+caught by a background sweep that swaps the changed files in together and
+shows "a new version is ready — tap to reload". Not registered on
+localhost/127.0.0.1 (the tools), `?nosw=1` unregisters.
+
+`tools/appcache-check.mjs` (`npm run test:appcache`) maps `cbz.test` onto the
+dev server and counts, from the worker's own tally, cache hits vs network
+misses per navigation: 2nd visit 586 hits / 6 misses, page open → bootComplete
+**4.5 s → 2.4 s** on a server that sends `no-store` (the worst case — Pages'
+ten-minute max-age already helps inside that window). A deploy is verified to
+refetch every script (595 misses, 1 hit) and the visit after it is back on the
+cache (594 hits).
+
+### 3. Pause is real; CONTINUE is real
+
+- **Pause** (`CBZ.pauseGame` / `CBZ.resumeGame`, `systems/state.js`): Esc
+  (locked or not), the touch HUD's ❚❚ button, gamepad START, or the tab going
+  hidden. The day clock (`core/daynight.js`) and the weather
+  (`systems/weather.js`) hold; the update chain was already off. Esc on the
+  card resumes (Settings is the button, not Esc). Pausing in the city commits
+  the ledger. **Save & Quit** commits and returns to the title with the world
+  kept built.
+- **Continue** (`city/worldstate.js` `w.session`, restored by
+  `CBZ.cityWorldRestoreSession` at the end of `city/mode.js reset()`): on top
+  of `lastPos` (origins.js had that), the calendar day, time of day, wanted
+  level + heat, hunger, health, look direction and camera mode ride the 5 s
+  autosave, every pause, and `pagehide`. PLAY reads **CONTINUE · Day N · $cash**
+  when a character exists. `continue-check` moves the player 60 m, sets day 3
+  at dusk with 2★, commits, RELOADS THE PAGE, presses CONTINUE and asserts the
+  moment came back (0.00 m off).
+
+### Deleted (99 files)
+
+`src/vendor/three-r164/` (718 KB, the r164 spike nothing loaded),
+`src/compat/three-legacy.js`, `OBJLoader.js` / `MTLLoader.js` (no reader),
+`core/interfaces.js` (a contracts index that executed nothing), `archive/`
+(3.1 MB of prison-v1 shadow copies), the grass demo and its integration.
+`tools/load-profile.mjs --builders` now names each builder by file and times a
+generator builder through its resumptions; `--profile` gained `--interval`
+(the 500 µs default produced a payload the tool never finished receiving on
+this box, twice — by-function numbers are still owed).

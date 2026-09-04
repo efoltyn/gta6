@@ -432,25 +432,7 @@
     };
   };
 
-  // =========================================================================
-  //  cityWorldGeo WRAPPER — the KEYSTONE. Town builders (biome/minicity/country
-  //  landmass builders) run DURING cityWorldGeo, but the arena they must push
-  //  their lots/shops/roads onto (so vendors/Zillow/minimap/traffic see them)
-  //  is the LIVE under-construction city object cityWorldGeo receives — which
-  //  isn't assigned to CBZ.city.arena until buildCity RETURNS. Stash it here as
-  //  CBZ._settlementArena (buildTown's A-resolution reads it) BEFORE builders
-  //  run, and reset the settlement registry. Gated on SETTLEMENTS_V2: with the
-  //  flag off, _settlementArena stays null and town lots don't reach the arena
-  //  — i.e. the exact pre-V2 baseline (arena.lots/roads == mainland only).
-  // =========================================================================
-  if (CBZ.cityWorldGeo && !CBZ.cityWorldGeo._settlementsWrapped) {
-    const _orig = CBZ.cityWorldGeo;
-    const wrapped = function (city) {
-      CBZ.settlements = [];
-      CBZ._settlementArena = (CBZ.CONFIG.SETTLEMENTS_V2 !== false) ? city : null;
-      return _orig.apply(this, arguments);
-    };
-    wrapped._settlementsWrapped = true;
-    CBZ.cityWorldGeo = wrapped;
-  }
+  // The settlement prelude (CBZ.settlements = [], CBZ._settlementArena = the
+  // live under-construction city) lives INSIDE city/worldmap.js's
+  // cityWorldGeoGen now, so the sliced and the synchronous build both get it.
 })();

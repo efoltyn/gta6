@@ -1171,6 +1171,7 @@
   // adjust hemi AFTER daynight has written its baseline this frame.
   CBZ.onAlways(90, function (dt) {
     if (!dt || dt <= 0) return;
+    if (CBZ.game && CBZ.game.state === "paused") return;   // a real pause holds the sky still
 
     // WEATHER OUTLIVES ITSELF NOW: puddles have to drain and snow has to melt
     // long after the last drop fell, so the dark path may only close when the

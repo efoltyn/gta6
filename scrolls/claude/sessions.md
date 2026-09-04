@@ -4988,3 +4988,15 @@ the audit's own counter and again from outside, against measured speed.
 `orphanRides` is pinned at 0. `--revert` (`?cfg_PASSENGER_SEAT_V1=0`) asserts
 the old world comes back: the seat verb refuses, holding W drives the car, and
 stepping out at speed parks it on the spot.
+
+## 2026-09-04 — sliced boot, service worker, pause, continue (`claude/gang-city-performance-nxf632`)
+
+The city build is a generator chain (`world.js` → `worldmap.js` → the five fat
+builders → `batch.js`) driven by `CBZ.runSliced` on the presented PLAY, so the
+tab never freezes; `CBZ.startRun()` stays synchronous for every tool. `sw.js`
+makes a reload free on the wire with one-version-set invalidation keyed on
+`index.html`; every script tag is `defer`. Real pause (Esc / touch ❚❚ / START /
+tab hidden; the sun and weather stop; Save & Quit) and real CONTINUE (session
+block on the city ledger — day, time, stars, hunger, health, look). Gates:
+`tools/continue-check.mjs`, `tools/appcache-check.mjs`, boot-meter-check,
+determinism. Full teardown in `LOAD-NOTES.md` (2026-09-04 entry).

@@ -893,7 +893,7 @@
   };
 
   // ============================================================
-  CBZ.addLandmass(function (city) {
+  CBZ.addLandmass(function* (city) {
     const root = city.root;
     if (!root) return;
     // WHERE THE CAUSEWAY STOPS, decided against the world that actually exists
@@ -970,6 +970,7 @@
       group.add(s);
     }
 
+    yield;
     // ---- PINECREST resort town (T8) ---------------------------------------
     // A real alpine RESORT VILLAGE grown from the reusable generator using the
     // snow-tied recipe (citytemplates.js: lodge/outfitter/clinic/gear-pawn/spa).
@@ -1031,6 +1032,7 @@
     CBZ.greaterSnowMountainCount = GREAT_MAJOR.length;
     CBZ.greaterSnowLobeCount = GREAT_LOBES.length;
 
+    yield;
     // ---- one continuous SNOW / ROCK heightfield --------------------------
     (function ground() {
       if (CFGS.SNOW_TERRAIN_V2 === false) {
@@ -1279,6 +1281,7 @@
       }
     })();
 
+    yield;
     // ---- the GREATER RANGE: 10 scaled families / 50 rounded summits -------
     (function greaterRangeGround() {
       if (CFGS.SNOW_TERRAIN_V2 === false) return;
@@ -1501,6 +1504,7 @@
       }
     })();
 
+    yield;
     // ---- THE RANGE: tall snow-capped PEAKS ringing the valley edges ------
     // Each peak = a rock cone + a snow-cap cone on top; base gets a collider
     // square so the player walks AROUND them. They sit on the rim, leaving a
@@ -1801,6 +1805,7 @@
 
     // Frozen-lake colour/crack bands are baked into the single snow terrain.
 
+    yield;
     // ---- instanced SNOWY PINES (one draw call: trunk + canopy each) ------
     // TREES_V2 (config.js): the old pine was PHYSICALLY IMPOSSIBLE at the
     // margins — trunk geo centred and placed so its base sat at EXACTLY the
@@ -1961,6 +1966,7 @@
       root.add(trunkIM); root.add(canopyIM); root.add(capIM);
     })();
 
+    yield;
     // ---- instanced ROCKY OUTCROPS + SNOWDRIFTS ---------------------------
     (function rocksAndDrifts() {
       const RC = 40;
@@ -2004,6 +2010,7 @@
       root.add(rockIM); root.add(driftIM);
     })();
 
+    yield;
     // ---- SKI LODGE (enterable; fireplace + warm interior) ----------------
     (function lodge() {
       const lx = 360 + DX, lz = -1250 + DZ, w = 22, d = 16, storeys = 2;
@@ -2039,6 +2046,7 @@
       tag(grp, "ALPINE LODGE", 0);
     })();
 
+    yield;
     // ---- mountain CABIN ---------------------------------------------------
     // One low hunter's cabin remains tucked into a broad shoulder. The former
     // frozen outpost and its 12m radio mast were an isolated vertical building
@@ -2095,6 +2103,7 @@
 
     })();
 
+    yield;
     // ---- CHAIRLIFT line up a slope (towers + cable + moving chairs) ------
     // WHY: it carries skiers up to the ski run; chairs glide on the cable.
     const lift = { chairIM: null, baseX: 300 + DX, baseZ: -1275 + DZ, topX: 470 + DX, topZ: -1655 + DZ, towerTopY: 16, chairY: 10, n: 8, t: 0 };
@@ -2152,6 +2161,7 @@
       lift.chairIM.instanceMatrix.needsUpdate = true;
     }
 
+    yield;
     // ---- SKI RUN with slalom gates (red/blue poles down the slope) -------
     (function skiRun() {
       const sx = 470 + DX, sz0 = -1680 + DZ, sz1 = -1295 + DZ;     // summit to resort valley
@@ -2193,6 +2203,7 @@
       root.add(poleIM);
     })();
 
+    yield;
     // ============================================================
     //  PINECREST — the alpine resort VILLAGE, grown from the reusable generator
     //  on the flat slope-base SE of the lodge (T8). Now that the keystone (T1)
@@ -2233,6 +2244,7 @@
       }
     }
 
+    yield;
     // ============================================================
     //  CAUSEWAY: winding snowy road deck south toward the speedway,
     //  with instanced guardrail posts. North end = the snow shore (MAXZ,
@@ -2320,6 +2332,7 @@
       root.add(postIM);
     })();
 
+    yield;
     // ---- LIFE: the resort's own people (low live count per spec) ---------
     //
     //  THE MOUNTAIN REGISTERED A "ski instructor" WORK ANCHOR AND THEN CAST
@@ -2395,6 +2408,7 @@
       // somebody draws one, this is where the station goes.
     })();
 
+    yield;
     // ============================================================
     //  SNOWFALL: ONE THREE.Points cloud (a few hundred recycled flakes),
     //  VISIBLE only while the player stands in the snow biome — so it is
@@ -2454,6 +2468,7 @@
       });
     })();
 
+    yield;
     // ---- CHAIRLIFT animation (slow glide; cheap; only writes a matrix) ---
     CBZ.onUpdate(37.8, function (dt) {
       lift.t = (lift.t + dt * 0.012) % 1;     // very slow loop
@@ -2483,6 +2498,7 @@
       });
     }
 
+    yield;
     // ============================================================
     //  REGISTER the regions (the archipelago contract).
     // ============================================================

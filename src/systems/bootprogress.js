@@ -296,15 +296,20 @@
   // (city/mode.js build() early-outs after that), so a later PLAY is a short
   // reset, not a 30 s world build — the plan has to know that or the meter
   // parks at 4% and then teleports to 100%.
+  // An unbuilt city is prebuilt (sliced) BEFORE startRun's reset: world steps,
+  // then city:batch, then boot:reset and the population. A built one goes
+  // straight to the reset (batch is a guarded no-op by then).
   function planFor(mode, worldOnly) {
     const keys = [];
-    if (!worldOnly) keys.push("boot:reset");
-    if (mode === "city" && !(CBZ.city && CBZ.city.built)) {
+    const unbuilt = mode === "city" && !(CBZ.city && CBZ.city.built);
+    if (unbuilt) {
       const w = cityWorldSteps();
       for (let i = 0; i < w.length; i++) keys.push(w[i]);
+      keys.push("city:batch");
     }
+    if (!worldOnly) keys.push("boot:reset");
     if (mode === "city" && !worldOnly) {
-      for (let i = 0; i < CITY_RUN_STEPS.length; i++) keys.push(CITY_RUN_STEPS[i]);
+      for (let i = 0; i < CITY_RUN_STEPS.length; i++) if (!unbuilt || CITY_RUN_STEPS[i] !== "city:batch") keys.push(CITY_RUN_STEPS[i]);
     }
     keys.push("boot:frames");
     return keys;

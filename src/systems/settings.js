@@ -343,13 +343,12 @@
   // already open) — doesn't compete with other modals' own Esc handling
   // since those guard on g.state==="playing" while we're on "paused", or on
   // CBZ.settingsOpen specifically.
+  // [Esc] closes the panel. It no longer OPENS it from the pause card: Esc on
+  // the pause card resumes the game (systems/state.js), like every other
+  // game; the Settings button below is the way in.
   addEventListener("keydown", function (e) {
-    const k = e.key;
-    if (k !== "Escape") return;
-    if (open_) { e.preventDefault(); close(); return; }
-    if (g.state === "paused" && !CBZ.cityMenuOpen && !(CBZ.fullMap && CBZ.fullMap.active)) {
-      e.preventDefault(); open();
-    }
+    if (e.key !== "Escape" || !open_) return;
+    e.preventDefault(); close();
   });
 
   // ---- inject a "Settings" button into the existing #pause card -----------

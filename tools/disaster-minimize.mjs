@@ -40,7 +40,7 @@ const JOBS = +arg("--jobs", "3");
 const BOTS = arg("--bots", "12");
 const MANIFEST = path.join(ROOT, "tools/disaster-slice.json");
 const INDEX = readFileSync(path.join(ROOT, "index.html"), "utf8");
-const ORDER = [...INDEX.matchAll(/<script src="([^"]+)"/g)].map((m) => m[1].split("?")[0]);
+const ORDER = [...INDEX.matchAll(/<script(?: defer)? src="([^"]+)"/g)].map((m) => m[1].split("?")[0]);
 
 const sizeOf = (p) => { try { return statSync(path.join(ROOT, p)).size; } catch (_) { return 0; } };
 const bytes = (list) => list.reduce((a, p) => a + sizeOf(p), 0);

@@ -30,6 +30,7 @@
     screens.win.classList.toggle("hidden", !(s === "won" && !arena));
     if (screens.survwin) screens.survwin.classList.toggle("hidden", !(s === "won" && arena));
     if (screens.survlose) screens.survlose.classList.toggle("hidden", s !== "lost");
+    if (s === "title") refreshPlayLabel();   // PLAY vs CONTINUE (below)
   }
 
   function setRole(role) {
@@ -78,6 +79,7 @@
     // leaving city cleanly cancels any in-progress WASTED/spectate state so the
     // kill-cam HUD + global respawn listeners can't leak into another mode.
     if (g.mode !== "city" && CBZ.cityDeathReset) CBZ.cityDeathReset();
+    refreshPlayLabel();
   }
   CBZ.setMode = setMode;
 
@@ -658,17 +660,34 @@
   // after the compositor has PAINTED the card. Handing the thread over on the
   // first frame draws nothing and we are back to a frozen blank page. ~32 ms,
   // so pointer-lock user activation survives it.
+  //
+  // An UNBUILT city is the one heavy case, and it no longer runs as a single
+  // task: city/mode.js's prebuildGen is driven by CBZ.runSliced (core/loop.js),
+  // which gives the thread back to the browser between every builder, every
+  // mini-city and every static pass. The page stays responsive for the whole
+  // build, so a phone's watchdog never sees a hung tab. `work` (the actual
+  // startRun / setMode) then runs synchronously against the finished world,
+  // exactly as before — its own build() call finds nothing left to do.
   function present(mode, worldOnly, work) {
     bootBusy = true;
     CBZ.bootMeter.show(mode, worldOnly);
+    const sliced = mode === "city" && CBZ.city && CBZ.city.prebuildGen && !CBZ.city.built
+      && CBZ.runSliced && CBZ.CONFIG.SLICED_BOOT !== false;
+    function runWork() {
+      try { work(); }
+      finally {
+        waitForCheapFrames(function () {
+          CBZ.bootMeter.finish(function () { bootBusy = false; });
+        });
+      }
+    }
     requestAnimationFrame(function () {
       requestAnimationFrame(function () {
-        try { work(); }
-        finally {
-          waitForCheapFrames(function () {
-            CBZ.bootMeter.finish(function () { bootBusy = false; });
-          });
-        }
+        if (!sliced) { runWork(); return; }
+        CBZ.runSliced(CBZ.city.prebuildGen()).then(runWork, function (e) {
+          console.error("[sliced boot]", e);
+          runWork();
+        });
       });
     });
   }
@@ -695,7 +714,98 @@
   CBZ.startRunPresented = startRunPresented;
 
   bindButton("playBtn", startRunPresented);
-  bindButton("resumeBtn", () => { CBZ.requestLock(); });
+
+  // =======================================================================
+  //  PAUSE — one real pause, four ways in, one way out
+  // =======================================================================
+  // In: Esc (pointer lock's own exit lands in camera.js's pointerlockchange,
+  // an unlocked Esc lands here), the touch HUD's ❚❚ button, gamepad START
+  // (systems/gamepad.js), and the tab going hidden. While paused the update
+  // chain is off (core/loop.js), the day clock and the weather hold
+  // (core/daynight.js, systems/weather.js), and in the city the ledger is
+  // committed on the way in — a pause is a save. Out: Resume, Esc, START.
+  function pauseGame() {
+    if (g.state !== "playing") return false;
+    if (CBZ.surv && CBZ.surv.spectating) return false;
+    if (g.mode === "city" && CBZ.cityWorldCommit && !g._citySaveBlocked) { try { CBZ.cityWorldCommit(); } catch (e) {} }
+    // release the pointer FIRST: camera.js's pointerlockchange sees the state
+    // already paused and does nothing; if the pointer was never locked (touch,
+    // a menu) we pause directly.
+    setState("paused");
+    try { if (document.pointerLockElement) document.exitPointerLock(); } catch (e) {}
+    return true;
+  }
+  function resumeGame() {
+    if (g.state !== "paused") return false;
+    if (CBZ.settingsOpen && CBZ.closeSettings) { try { CBZ.closeSettings(); } catch (e) {} }
+    setState("playing");
+    CBZ.requestLock();
+    return true;
+  }
+  CBZ.pauseGame = pauseGame;
+  CBZ.resumeGame = resumeGame;
+  bindButton("resumeBtn", resumeGame);
+  bindButton("touchPauseBtn", pauseGame);
+  // SAVE & QUIT (city): commit the ledger, leave the run, keep the built
+  // world — the next PLAY is a short reset that resumes this character where
+  // they stood (city/mode.js reads the session back from the ledger).
+  bindButton("quitBtn", function () {
+    if (g.mode === "city" && CBZ.cityWorldCommit && !g._citySaveBlocked) { try { CBZ.cityWorldCommit(); } catch (e) {} }
+    if (CBZ.settingsOpen && CBZ.closeSettings) { try { CBZ.closeSettings(); } catch (e) {} }
+    try { if (document.pointerLockElement) document.exitPointerLock(); } catch (e) {}
+    setState("title");
+    refreshPlayLabel();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape" || e.repeat) return;
+    if (g.state === "paused") {
+      if (CBZ.settingsOpen) return;                        // settings.js closes itself on Esc
+      e.preventDefault(); resumeGame(); return;
+    }
+    if (g.state !== "playing" || document.pointerLockElement) return;   // locked: the browser's own Esc unlocks → camera.js pauses
+    if (CBZ.cityMenuOpen || CBZ.invOpen || CBZ.settingsOpen || (CBZ.fullMap && CBZ.fullMap.active)) return;   // a modal owns Esc
+    if (g.busted || (CBZ.cityCam && CBZ.cityCam.death) || (CBZ.player && CBZ.player.dead)) return;
+    e.preventDefault(); pauseGame();
+  });
+  // The tab went away: pause, unless this client is simulating a multiplayer
+  // world that other people are standing in.
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden || g.state !== "playing") return;
+    if (CBZ.net && CBZ.net.active) return;
+    pauseGame();
+  });
+
+  // =======================================================================
+  //  CONTINUE — the title's PLAY says what it will do
+  // =======================================================================
+  // A city character on the ledger resumes where they stood (position, day,
+  // wanted level, hunger, health — city/worldstate.js's session block), so
+  // the button says CONTINUE and names the life it is about to resume.
+  function refreshPlayLabel() {
+    const btn = document.getElementById("playBtn");
+    if (!btn) return;
+    let label = "Play", sub = "";
+    if (g.mode === "city" && CBZ.cityWorldEnsure) {
+      let w = null;
+      try { w = CBZ.cityWorldEnsure(); } catch (e) { w = null; }
+      if (w && w.originPlayed) {
+        label = "Continue";
+        const day = w.session && w.session.dayN != null ? "Day " + ((w.session.dayN | 0) + 1) : "";
+        const cash = "$" + Math.round(w.cash || 0).toLocaleString();
+        sub = [day, cash].filter(Boolean).join(" · ");
+      }
+    }
+    btn.textContent = label;
+    let subEl = document.getElementById("playSub");
+    if (!subEl) {
+      subEl = document.createElement("div");
+      subEl.id = "playSub"; subEl.className = "smallnote";
+      btn.parentNode.insertBefore(subEl, btn.nextSibling);
+    }
+    subEl.textContent = sub;
+    subEl.hidden = !sub;
+  }
+  CBZ.refreshPlayLabel = refreshPlayLabel;
   bindButton("againBtn", startRunPresented);
   // survival result screens
   bindButton("survAgainBtn", startRunPresented);

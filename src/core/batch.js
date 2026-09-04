@@ -428,7 +428,11 @@
   // so the top-level load-time pass below never reached them). Merged meshes are
   // baked to WORLD space and re-parented to `target`, so they inherit its
   // mode-visibility toggle (A.root.visible) while costing one draw call apiece.
-  function run(target, recurse) {
+  /* run() is a generator underneath: the sliced city boot (city/mode.js
+     prebuildGen via core/loop.js runSliced) resumes it one merged bucket at
+     a time so the 3-8 s static batch never holds the thread; the
+     synchronous run() below drains it in one call for every other caller. */
+  function* runGen(target, recurse) {
     target = target || scene;
     const v2 = !!(CBZ.CONFIG && CBZ.CONFIG.BATCH_V2);
     const wallBatch = !!CBZ.wallBatch && recurse;   // only the recursive city pass walls-batches
@@ -558,9 +562,10 @@
     // and a building group holds hundreds of props — 100k removes was 0.46 s
     // of the build (load-profile 2026-09-01, `remove` in three.r128).
     const doomed = new Set();
-    buckets.forEach((b, bkey) => {
+    for (const [bkey, b] of buckets) {
       const meshes = b.meshes;
-      if (meshes.length < 2) return;              // nothing to gain
+      if (meshes.length < 2) continue;            // nothing to gain
+      yield;
       let merged, counts;
       if (v2) {
         const r = bakeMergeV2(meshes);
@@ -625,7 +630,7 @@
         for (let i = 0; i < meshes.length; i++) { const m = meshes[i]; if (m.parent) doomed.add(m); m.geometry.dispose && m.geometry.dispose(); removed++; }
         mergedMeshes++;
       }
-    });
+    }
 
     if (doomed.size) {
       const parents = new Set();
@@ -649,6 +654,10 @@
     };
     return { mergedMeshes, removed, wallMerged, wallHidden };
   }
+  function run(target, recurse) {
+    const it = runGen(target, recurse);
+    for (;;) { const r = it.next(); if (r.done) return r.value; }
+  }
 
   // Collapse the static geometry under a freshly-built root (the city). Call
   // ONCE, after the world is assembled but BEFORE any dynamic actors (peds /
@@ -658,6 +667,12 @@
     if (!root || root.userData._batched) return null;
     root.userData._batched = true;
     return run(root, true);
+  };
+  // the sliced form of the same pass (same guard, same result)
+  CBZ.batchStaticUnderGen = function* (root) {
+    if (!root || root.userData._batched) return null;
+    root.userData._batched = true;
+    return yield* runGen(root, true);
   };
 
   // Run after every load-time world/entity module has populated the scene.

@@ -626,7 +626,17 @@
   // world.js calls this once, after the original expansion island. Runs every
   // registered landmass builder in order; each is independently try/caught so
   // one bad biome can never take down the rest of the world.
-  CBZ.cityWorldGeo = function (city) {
+  /* Generator form: yields once before every builder, and hands a builder
+     that is ITSELF a generator (minicities, countries — one town per step)
+     its own inner yields. CBZ.cityWorldGeo() below drains it synchronously
+     and is what every existing caller and tool still gets. */
+  CBZ.cityWorldGeoGen = function* (city) {
+    // settlements.js's town builders push lots/shops/roads onto the LIVE
+    // under-construction city (CBZ.city.arena is only assigned once buildCity
+    // returns), so stash it before any builder runs. SETTLEMENTS_V2 off = the
+    // pre-V2 baseline: town lots never reach the arena.
+    CBZ.settlements = [];
+    CBZ._settlementArena = (CBZ.CONFIG && CBZ.CONFIG.SETTLEMENTS_V2 !== false) ? city : null;
     city.regions = city.regions || [];
     CBZ._biomeBlendSpecs.length = 0;
     city.biomeBlends = CBZ._biomeBlendSpecs;
@@ -645,7 +655,19 @@
     const boot = CBZ.bootStep;
     for (const b of list) {
       if (boot) boot(b.bootKey);          // the loading meter's per-builder tick
-      try { b.fn(city); } catch (e) { console.error("[landmass]", e); }
+      yield;
+      let it = null;
+      try { it = b.fn(city); } catch (e) { console.error("[landmass]", e); }
+      // a builder written as function* is stepped here so its own inner
+      // yields (one mini-city, one country at a time) reach the browser too
+      if (it && typeof it.next === "function" && typeof it[Symbol.iterator] === "function") {
+        for (;;) {
+          let r;
+          try { r = it.next(); } catch (e) { console.error("[landmass]", e); break; }
+          if (r.done) break;
+          yield;
+        }
+      }
     }
     // ---- FOG-RATE HARMONY SWEEP (owner, from the air: "city areas look
     // bright and rendered while the ground around them is grayer… the same
@@ -694,5 +716,9 @@
       } catch (e) { console.error("[map-reserve]", e); }
     }
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  };
+  CBZ.cityWorldGeo = function (city) {
+    const it = CBZ.cityWorldGeoGen(city);
+    for (;;) { if (it.next().done) return; }
   };
 })();

@@ -11,4 +11,4 @@
    either — no integrations run there, by design. That's the intended
    direction of travel for the O wave (BUILD-PLAN.md Stage O), not a gap.
 ============================================================ */
-import "./grass.js";
+// (no integrations at the moment — the grass demo went with its vendored copy)

@@ -811,3 +811,10 @@ body.mode-survival #objective:not(.killfeed){ display:none; }
 #objective .kfeed.in{ opacity:.96; transform:translateX(0); }
 #objective .kfeed.out{ opacity:0; transform:translateX(8px); }
 #objective .kfeed-you{ font-weight:700; border-left-color:#ff3b3b; text-shadow:0 1px 2px rgba(0,0,0,.5); }
+
+/* touch pause — a phone has no Esc key. Only on body.touch, only while playing. */
+#touchPauseBtn{display:none; position:absolute; top:max(10px, env(safe-area-inset-top)); left:50%; transform:translateX(-50%);
+  width:44px; height:36px; border-radius:12px; border:2px solid rgba(255,255,255,.55); background:rgba(0,0,0,.45);
+  color:#fff; font-size:14px; font-weight:700; letter-spacing:-2px; pointer-events:auto; z-index:9; touch-action:manipulation;}
+body.touch.state-playing #touchPauseBtn{display:block;}
+#playSub{margin-top:6px;}

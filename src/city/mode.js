@@ -273,10 +273,15 @@
   };
   CBZ.city = city;
 
-  function build() {
+  /* build() is a generator underneath: the presented boot (systems/state.js
+     present()) steps city.prebuildGen() one phase per macrotask so the page
+     stays responsive through the world build, the static batch, the instancer
+     and the matrix freeze; the synchronous build() drains the same generator
+     in one call for tools and for any path that never showed a meter. */
+  function* buildGen() {
     if (city.built) return;
     const colStart = CBZ.colliders ? CBZ.colliders.length : 0;
-    city.arena = CBZ.buildCity();
+    city.arena = yield* CBZ.buildCityGen();
     // CITY COLLIDER STAMP: the airport rect (x -370..290, z -280..40) — and
     // potentially other city content — OVERLAPS the prison arena's coordinate
     // space around the origin. The meshes hide on mode switch but these AABBs
@@ -302,7 +307,24 @@
     CBZ.registerGroundBase("city", function (x, z) { return city.arena.groundHeightAt(x, z); });
     city.built = true;
   }
+  function build() { const it = buildGen(); for (;;) { if (it.next().done) return; } }
   city.build = build;
+  // The whole world phase of a PLAY, sliced: build, then the three static
+  // passes reset() also runs (each is guarded per-root, so reset() finds them
+  // done and moves straight on to the population).
+  city.prebuildGen = function* () {
+    yield* buildGen();
+    const A = city.arena;
+    if (!A || !A.root) return;
+    if (CBZ.bootStep) CBZ.bootStep("city:batch");
+    yield;
+    if (CBZ.batchStaticUnderGen) yield* CBZ.batchStaticUnderGen(A.root);
+    else if (CBZ.batchStaticUnder) CBZ.batchStaticUnder(A.root);
+    yield;
+    if (CBZ.instanceStaticUnder) CBZ.instanceStaticUnder(A.root);
+    yield;
+    if (CBZ.freezeStaticUnder) CBZ.freezeStaticUnder(A.root);
+  };
 
   // ---- lighting override: re-aim the sun + shadow box onto the far-off city
   //      (daynight.js @2 and survival's override @93 both run first; we sit
@@ -775,6 +797,14 @@
         if (CBZ.setFPS) CBZ.setFPS(false);
       } else if (!(originResult && originResult.introActive)) {
         if (CBZ.setFPS) CBZ.setFPS(true);
+      }
+      // CONTINUE: a returning character (origins.js put them back at lastPos)
+      // gets the rest of their moment back — day, time, stars, hunger, health,
+      // look direction (city/worldstate.js session block). Not on a jailbreak
+      // entry (that IS a new moment) and not over a live origin intro.
+      if (!jailbreakEntry && !(originResult && originResult.introActive) && !campaignMode
+          && game.cityWorld && game.cityWorld.originPlayed && CBZ.cityWorldRestoreSession) {
+        try { CBZ.cityWorldRestoreSession(); } catch (e) { console.error("[continue]", e); }
       }
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     },

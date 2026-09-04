@@ -45,7 +45,7 @@ const MANIFEST = path.join(ROOT, arg("--manifest", "tools/disaster-slice.json"))
 const OUT = path.join(ROOT, arg("--out", "disaster.html"));
 
 export function scriptList(html) {
-  return [...html.matchAll(/<script src="([^"]+)"/g)].map((m) => m[1].split("?")[0]);
+  return [...html.matchAll(/<script(?: defer)? src="([^"]+)"/g)].map((m) => m[1].split("?")[0]);
 }
 
 export function buildPage(html, dropSet) {
@@ -57,7 +57,7 @@ export function buildPage(html, dropSet) {
   //    place deliberately — it explains an ordering constraint that still
   //    applies to the tags that remain.
   let out = html.split("\n").filter((line) => {
-    const m = line.match(/<script src="([^"]+)"/);
+    const m = line.match(/<script(?: defer)? src="([^"]+)"/);
     if (!m) return true;
     const p = m[1].split("?")[0];
     if (dropSet.has(p)) { dropped.push(p); return false; }

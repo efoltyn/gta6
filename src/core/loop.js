@@ -219,6 +219,36 @@
 
   CBZ.startLoop = function () { schedule(); };
 
+  /* ---- THE SLICED RUN --------------------------------------------------
+     Drives a generator (the city build: city/mode.js prebuildGen) to
+     completion without ever holding the thread longer than `budget` ms:
+     steps run back to back until the budget is spent, then the thread goes
+     back to the browser for one macrotask (input, paint, the responsiveness
+     watchdog) and the run resumes. While it runs the frame loop is HELD
+     (CBZ.loopHold) so no updater or always-runner ever sees a half-built
+     world between slices. Resolves with the generator's return value. */
+  CBZ.runSliced = function (it, opts) {
+    opts = opts || {};
+    const budget = opts.budget != null ? opts.budget : 24;
+    const hold = opts.hold !== false;
+    const prevHold = CBZ.loopHold;
+    if (hold) CBZ.loopHold = true;
+    return new Promise(function (resolve, reject) {
+      function pump() {
+        const t0 = performance.now();
+        try {
+          for (;;) {
+            const r = it.next();
+            if (r.done) { if (hold) CBZ.loopHold = prevHold; resolve(r.value); return; }
+            if (performance.now() - t0 >= budget) break;
+          }
+        } catch (e) { if (hold) CBZ.loopHold = prevHold; reject(e); return; }
+        setTimeout(pump, 0);
+      }
+      pump();
+    });
+  };
+
   // ---- HEADLESS SIM STEP (tools only — inert in normal play) --------------
   // Drives ONE update tick with a fixed dt and NO render: the whole updater +
   // always chain runs exactly like loop() (same order, same per-updater

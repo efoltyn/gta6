@@ -234,10 +234,16 @@ if (DO_BUILD && booted) {
     // not for quoting an absolute per-builder ms.
     await evl(`(()=>{window.__lp=[];
       for (const b of (CBZ._landmassBuilders||[])) {
-        const orig=b.fn, name=orig.name||('anon@order'+b.order);
-        b.fn=function(){const t=performance.now();
-          try{return orig.apply(this,arguments);}
-          finally{window.__lp.push({name,order:b.order,ms:+(performance.now()-t).toFixed(1)});}};
+        const orig=b.fn, name=(b.bootKey||orig.name||('anon@order'+b.order)).replace(/^lm:/,'');
+        b.fn=function(){const row={name,order:b.order,ms:0}; window.__lp.push(row);
+          let t=performance.now(), r;
+          try{r=orig.apply(this,arguments);}
+          finally{row.ms+=performance.now()-t;}
+          // a builder written as function* (the sliced boot) does its work in
+          // next(): time every resumption onto the same row
+          if(r&&typeof r.next==='function'){const inner=r;
+            return {next(v){const t0=performance.now();try{return inner.next(v);}finally{row.ms+=performance.now()-t0;}},[Symbol.iterator](){return this;}};}
+          return r;};
       }})()`);
   }
   if (DO_PROFILE) await send("Profiler.start");
@@ -252,7 +258,7 @@ if (DO_BUILD && booted) {
     const outPath = opt("--profile-out", null);
     if (outPath) { const { writeFile } = await import("node:fs/promises"); await writeFile(outPath, JSON.stringify(profile)); }
   }
-  if (DO_BUILDERS) builderRows = JSON.parse(await evl("JSON.stringify(window.__lp||[])"));
+  if (DO_BUILDERS) builderRows = JSON.parse(await evl("JSON.stringify((window.__lp||[]).map(function(r){r.ms=+r.ms.toFixed(1);return r;}))"));
 
   console.log("\n2. BUILD (CBZ.startRun — ONE synchronous task; the tab is frozen for all of it)");
   line("world build", buildMs + " ms");

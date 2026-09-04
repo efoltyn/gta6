@@ -270,9 +270,12 @@
   // ---- register ALL four as ONE landmass builder (order 34: after biomes/
   //      placement). Each city is independently try/caught so one bad city can
   //      never sink the rest of the world (worldmap contract). --------------
-  CBZ.addLandmass(function (city) {
+  // function*: the sliced boot (city/worldmap.js cityWorldGeoGen) breathes
+  // between towns, so a 6 s builder becomes a dozen sub-second steps.
+  CBZ.addLandmass(function* (city) {
     for (const place of PLACEMENTS) {
       try { buildMiniCity(city, place); } catch (e) { try { console.error("[minicity]", place.id, e); } catch (e2) {} }
+      yield;
     }
   }, 34);
 })();

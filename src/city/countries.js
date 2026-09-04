@@ -453,9 +453,11 @@
   // register ALL 4 countries as ONE landmass builder, order 35 (after
   // minicities.js's own 34) — each country independently try/caught so one
   // bad nation can never sink the rest of the world (worldmap contract).
-  CBZ.addLandmass(function (city) {
+  // function*: one country per step of the sliced boot (city/worldmap.js).
+  CBZ.addLandmass(function* (city) {
     for (const cd of COUNTRIES) {
       try { buildCountry(city, cd); } catch (e) { try { console.error("[countries]", cd.id, e); } catch (e2) {} }
+      yield;
     }
   }, 35);
 })();

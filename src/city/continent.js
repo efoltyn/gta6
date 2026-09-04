@@ -408,7 +408,7 @@
     };
   };
 
-  CBZ.addLandmass(function (city) {
+  CBZ.addLandmass(function* (city) {
     if (CFG.CITY_CONTINENT === false) return;
     const regs = (city.regions || []).slice();
     const waterBodies = (city.waterBodies || []).slice();
@@ -540,6 +540,7 @@
       return false;
     }
 
+    yield;
     // ================= THE SHORE FIELD (deterministic) ====================
     // s(x,z): metres of dry land between the point and the nearest water.
     // Positive on land, negative in water. Two water bodies: the OUTER
@@ -716,6 +717,7 @@
       } catch (e) { console.error("[river]", e); }
     }
 
+    yield;
     // ================= CONTINUOUS COUNTRY RELIEF =========================
     // The old continent only changed Y inside the 20m beach rim.  Everywhere
     // else its 100k vertices were mathematically flat, so even a huge map read
@@ -1172,6 +1174,7 @@
       inlandWaterAt: function (x, z) { return inlandWaterField(x, z) < 0; },
     };
 
+    yield;
     // ---- the ground plate: one draw call, vertex-coloured country ---------
     // With COAST on the grid is denser (the rim needs resolution) and the
     // outer band slopes through sand into carved seabed under the sea plane.
@@ -1308,6 +1311,7 @@
       colors[i * 3] = c.r * shade; colors[i * 3 + 1] = c.g * shade; colors[i * 3 + 2] = c.b * shade;
     }
 
+    yield;
     // ==================================================================
     //  TERRAIN_PHYSICS_MATCH — THE SURFACE YOU SEE IS THE SURFACE YOU DRIVE ON
     // ==================================================================
@@ -1667,6 +1671,7 @@
       };
     };
 
+    yield;
     // ---- FRONTIER EXPANSION: real travel distance, not a camera trick -------
     // Four long rural highway legs live wholly OUTSIDE the old authored union,
     // 190m inside the rounded/noisy coast, keeping the road shoulders dry at
@@ -1836,6 +1841,7 @@
       terrainVertices: pos.count,
     };
 
+    yield;
     // ---- FOAM BREAKERS: marched along the true coast ----------------------
     // Scan the plate grid for zero crossings of the cached shore field and
     // drop a small white dash at each, oriented along the coast (perpendicular
@@ -1918,6 +1924,7 @@
       });
     })();
 
+    yield;
     // ---- dressing: trees + rocks, instanced -------------------------------
     // THE CANOPY CARPET (world/forestlook.js). OWNER REFERENCE, coastal
     // Alaska: a wood is a continuous roof on the valley floors and lower
@@ -2680,6 +2687,7 @@
       };
     }
 
+    yield;
     // ---- the walkable underlay region(s) (registered LAST on purpose:
     //      every specific place wins point-in-region queries; these only
     //      catch the country between them) --------------------------------

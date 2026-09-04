@@ -119,6 +119,9 @@
   const sunTarget = CBZ.sunTarget;
 
   CBZ.onAlways(2, function (dt) {
+    // A REAL PAUSE STOPS THE SUN. The always-chain keeps running on the pause
+    // card (camera, HUD, net), but world time is the one thing that must not.
+    if (CBZ.game && CBZ.game.state === "paused") dt = 0;
     const cyc = cycleSecs();
     if (t + dt / cyc >= 1) dayN++;            // midnight wrap → next calendar day
     t = (t + dt / cyc) % 1;

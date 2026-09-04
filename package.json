@@ -64,6 +64,8 @@
     "test:prison-sit-revert": "node tools/prison-sit-check.mjs --revert",
     "test:bailout-presentation": "node tools/test-bailout-presentation-browser.mjs",
     "test:boot-health": "node tools/boot-health.mjs",
+    "test:continue": "node tools/continue-check.mjs",
+    "test:appcache": "node tools/appcache-check.mjs",
     "test:subtitles": "node tools/subtitle-dedupe-check.mjs",
     "test:verbs": "node tools/interact-verbs-check.mjs",
     "test:ipad-boot": "node tools/ipad-boot-check.mjs",

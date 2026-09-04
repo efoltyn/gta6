@@ -238,10 +238,58 @@
     w.criminalRecord.wantedPeak = Math.max(w.criminalRecord.wantedPeak || 0, g.wanted || 0);
     w.criminalRecord.heatPeak = Math.max(w.criminalRecord.heatPeak || 0, g.heat || 0);
     if (CBZ.cityIdentities && CBZ.cityIdentities.serialize) try { w.identities = CBZ.cityIdentities.serialize(); } catch (e) {}
+    /* THE SESSION: what "continue where I was" needs on top of the character.
+       Position already rides w.lastPos (origins.js). This is the rest of the
+       moment — the calendar and time of day, the manhunt, hunger, health and
+       which way you were looking. Skipped while dead or busted: a WASTED pose
+       is not a place to resume, and a bust is its own flow. */
+    const P = CBZ.player;
+    if (P && !P.dead && !g.busted && g.state !== "title") {
+      w.session = {
+        dayN: CBZ.dayCount ? CBZ.dayCount() : 0,
+        day: CBZ.dayPhase ? CBZ.dayPhase() : 0.3,
+        wanted: g.wanted | 0, heat: g.heat || 0,
+        hunger: g.hunger != null ? g.hunger : 100, tired: g.tired || 0,
+        hp: P.hp, maxHp: P.maxHp,
+        yaw: CBZ.cam ? CBZ.cam.yaw : 0, pitch: CBZ.cam ? CBZ.cam.pitch : 0,
+        fps: CBZ.fpsActive ? !!CBZ.fpsActive() : true,
+        elapsed: g.elapsed || 0,
+        savedAt: now(),
+      };
+    }
     save(w);
     return w;
   }
   CBZ.cityWorldCommit = commit;
+  // city/mode.js calls this at the end of reset() for a returning character
+  // (after the origin/spawn logic has placed them). Everything the run reset
+  // just zeroed for "a fresh life" is put back to the saved moment.
+  CBZ.cityWorldRestoreSession = function () {
+    const w = g.cityWorld, S = w && w.session, P = CBZ.player;
+    if (!S || !P) return false;
+    if (CBZ.dayCount && S.dayN != null) CBZ.dayCount(S.dayN);
+    if (CBZ.dayPhase && S.day != null) CBZ.dayPhase(S.day);
+    g.hunger = S.hunger != null ? S.hunger : g.hunger;
+    g.tired = S.tired || 0;
+    g.elapsed = S.elapsed || 0;
+    if (S.maxHp > 0) P.maxHp = S.maxHp;
+    if (S.hp > 0) P.hp = Math.min(P.maxHp || S.hp, S.hp);
+    if (CBZ.cam && Number.isFinite(S.yaw)) { CBZ.cam.yaw = S.yaw; if (Number.isFinite(S.pitch)) CBZ.cam.pitch = S.pitch; }
+    if (CBZ.playerChar && CBZ.playerChar.group && Number.isFinite(S.yaw)) CBZ.playerChar.group.rotation.y = S.yaw - Math.PI;
+    if ((S.wanted | 0) > 0) {
+      g.heat = Math.max(g.heat || 0, S.heat || 0);
+      if (CBZ.cityAddStars) { try { CBZ.cityAddStars((S.wanted | 0) - (g.wanted | 0), "resumed"); } catch (e) { g.wanted = S.wanted | 0; } }
+      else g.wanted = S.wanted | 0;
+    }
+    if (CBZ.setFPS && S.fps != null) { try { CBZ.setFPS(!!S.fps); } catch (e) {} }
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return true;
+  };
+  // The tab is closing or being backgrounded: the last five seconds must not
+  // be lost. pagehide fires on iOS where beforeunload does not.
+  if (typeof addEventListener === "function") addEventListener("pagehide", function () {
+    if (g.mode === "city" && g.state !== "title" && !g._citySaveBlocked) { try { commit(); } catch (e) {} }
+  });
 
   function applyToGame() {
     const w = ensure();

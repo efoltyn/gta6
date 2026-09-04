@@ -1153,7 +1153,12 @@
     if (city.radius == null) city.radius = R;
     for (let i = 0; i < list.length; i++) {
       list[i]._raised = true;             // an island raised twice is two islands
-      try { list[i].fn(city); }
+      try {
+        // a builder written as function* (the sliced boot's contract) is
+        // drained here, synchronously — a slice page has no meter to feed
+        const r = list[i].fn(city);
+        if (r && typeof r.next === "function" && typeof r[Symbol.iterator] === "function") { for (;;) { if (r.next().done) break; } }
+      }
       catch (e) { try { console.error("[studio.raise]", name, e); } catch (e2) {} }
     }
     return city;

@@ -56,7 +56,7 @@ rmSync(path.join(ROOT, "dist-ios"), { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 
 // ---- 1. the bundle ---------------------------------------------------------
-const scripts = [...page.matchAll(/<script src="([^"]+)"><\/script>/g)].map((m) => m[1]);
+const scripts = [...page.matchAll(/<script(?: defer)? src="([^"]+)"><\/script>/g)].map((m) => m[1]);
 const parts = [];
 parts.push(`/* Natural Disaster Survival — bundled by tools/build-ios.mjs.
    ${scripts.length} files, concatenated in the page's own order. Each block is
@@ -122,8 +122,9 @@ if (!has("--no-minify")) {
 
 // ---- 3. the page, with one script tag --------------------------------------
 let html = page;
-const first = html.indexOf(`<script src="${scripts[0]}"></script>`);
-html = html.split("\n").filter((l) => !/<script src="[^"]+"><\/script>/.test(l)).join("\n");
+let first = html.indexOf(`<script defer src="${scripts[0]}"></script>`);
+if (first < 0) first = html.indexOf(`<script src="${scripts[0]}"></script>`);
+html = html.split("\n").filter((l) => !/<script(?: defer)? src="[^"]+"><\/script>/.test(l)).join("\n");
 const marker = `<!-- 0. namespace + constants -->`;
 const tag = `<!-- THE WHOLE GAME, IN ONE FILE. tools/build-ios.mjs concatenated the
      ${scripts.length} script tags disaster.html lists, in that order, into bundle.js.

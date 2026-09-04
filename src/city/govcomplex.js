@@ -3153,7 +3153,8 @@
      ==================================================================== */
   // guarded, not early-returned: the audit + the ticks below must still be
   // exported in a build where worldmap.js is absent (they answer empty).
-  if (CBZ.addLandmass) CBZ.addLandmass(function (city) {
+  // function*: the sliced boot (city/worldmap.js) breathes between complexes
+  if (CBZ.addLandmass) CBZ.addLandmass(function* (city) {
     if (!on()) return;
     const root = city.root || CBZ.scene;
     if (!root || !CBZ.registerCityRegion) return;
@@ -3198,6 +3199,7 @@
       if (def.flag && CFG[def.flag] === false) continue;     // this row, reverted
       const site = { id: def.id, def: def, rect: null, cx: 0, cz: 0, roads: [], rejected: 0, regions: [], seated: false };
       SITES.push(site);
+      yield;
 
       const got = claim(city, def, U, LB, belt);
       site.rejected = got.rejected;

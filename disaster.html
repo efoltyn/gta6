@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 471
+     Natural Disaster Survival, standing alone: index.html minus the 472
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -65,6 +65,8 @@
   </div>
 
   <div id="gangHud" class="panel"></div>
+  <!-- touch pause: the phone has no Esc key (systems/state.js pauseGame) -->
+  <button id="touchPauseBtn" type="button" aria-label="Pause">❚❚</button>
   <div id="compass" class="panel"><div id="compassArrow">▲</div><span id="compassDist">--</span></div>
 
   <canvas id="minimap" class="panel" width="112" height="168"></canvas>
@@ -325,9 +327,13 @@
 <div id="pause" class="screen hidden">
   <div class="card-box">
     <div class="logo" style="font-size:clamp(32px,6vw,46px)">PAUSED</div>
+    <div class="sub">the world is holding · saved</div>
     <!-- Performance/quality controls live in ONE place: the Settings panel
-         (systems/settings.js injects its button below; [Esc] from here opens it). -->
+         (systems/settings.js injects its button after Resume). Esc resumes.
+         Save & Quit (city) commits the ledger and returns to the title; the
+         next CONTINUE resumes this character where they stood. -->
     <button class="btn" id="resumeBtn">Resume</button>
+    <button class="btn mode-city-only" id="quitBtn" style="background:#6b7686;box-shadow:0 6px 0 #4a5562,0 10px 18px rgba(0,0,0,.25)">Save &amp; Quit</button>
   </div>
 </div>
 
@@ -377,13 +383,8 @@
 </div>
 
 <!-- Three.js (vendored locally — same r128 build the CDN served; local files load
-     offline, deterministically, and inside the headless screenshot harness).
-     NOTE: an r164 IIFE bundle + legacy compat shim exist on disk
-     (src/vendor/three-r164/ + src/compat/three-legacy.js) from the O3
-     migration spike — verified pixel-identical on its branch but NOT yet
-     re-verified against this tree's newest THREE usage, so r128 stays the
-     loaded build for now. -->
-<script src="src/vendor/three.r128.min.js"></script>
+     offline, deterministically, and inside the headless screenshot harness). -->
+<script defer src="src/vendor/three.r128.min.js"></script>
 <!-- Slayvin flat-mirror reflective water (ported to r128 as THREE.WaterReflect;
      wired onto the ocean by src/world/waterfx.js). Must follow the THREE tag. -->
 <!-- Official Three.js sample loaders used by the farm truck / BIM campus.
@@ -426,13 +427,15 @@
   } catch (e) {}
 </script>
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=sharkmode1"></script>
+<script defer src="src/config.js?v=sharkmode1"></script>
+<!-- the file cache that makes a reload free (sw.js). Not on localhost. -->
+<script defer src="src/core/appcache.js"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
      of being refused by a mode enum. Loads before every consumer; flag
      MODE_CAPS_V1=false restores the old city-only answers everywhere at once. -->
-<script src="src/systems/modecaps.js?v=caps1"></script>
+<script defer src="src/systems/modecaps.js?v=caps1"></script>
 <!-- ONE LINE, ONE SURFACE. Four DOM layers render speech into the same
      bottom-centre band (#campaignDialogue / #pinteractSay / #citySpeech /
      #hint), and hud.css's ladder OFFSETS a collision rather than suppressing
@@ -440,7 +443,7 @@
      collapses to the same 120px, is the "two layers of text slightly offset"
      bug. This is the claim desk that decides which surface owns a sentence.
      Must precede all four of them. ?cfg_SUBTITLE_DEDUPE=0 reverts. -->
-<script src="src/systems/subtitlebus.js?v=onemouth1"></script>
+<script defer src="src/systems/subtitlebus.js?v=onemouth1"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
@@ -454,44 +457,36 @@
      vegetation builder (they register planted parts into it) -->
 <!-- Shared scenery-scale vegetation archetypes. Biomes own ecology/placement;
      this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
-<script src="src/core/prio.js?v=arch2"></script>
-<script src="src/core/matrixskip.js?v=mskip1"></script>
-<!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
-     which ~290 are the contracts index's prose and the rest is a single
-     CBZ.INTERFACES list of 16 strings that, measured across src/, index.html,
-     tools/ and docs/, has ZERO readers anywhere — the file implements nothing
-     and executes nothing, so parsing it every boot bought exactly nothing.
-     THE FILE STAYS WHERE IT IS ON PURPOSE: eight comments across the repo
-     cite "core/interfaces.js #4", "#6", "#12" as documentation, and moving it
-     would make all eight stale to save nothing. It is a reference document
-     that is deliberately not a script. (CLAUDE.md names it as the canonical
-     failed block: shipped July 1-2, zero adopters ever.) -->
+<script defer src="src/core/prio.js?v=arch2"></script>
+<script defer src="src/core/matrixskip.js?v=mskip1"></script>
+<!-- core/interfaces.js (a contracts index that executed nothing) was deleted
+     2026-09-04; the "#4 / #6 / #12" citations in a few comments refer to it. -->
 
 
 <!-- 1. core engine -->
-<script src="src/core/scene.js?v=neutralhaze1"></script>
-<script src="src/core/renderer.js?v=scale3"></script>
+<script defer src="src/core/scene.js?v=neutralhaze1"></script>
+<script defer src="src/core/renderer.js?v=scale3"></script>
 <!-- THE GROUND STOPS BEING DRAWN OVER A HOLE. Must load AFTER core/renderer.js:
      its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
      installed before it is erased in silence. groundmask.js asserts CBZ.renderer
      exists and appends rather than rewriting. -->
 <!-- THE GROUND IS A SOLID: base field minus carvings. Owns CBZ.floorAt, so it
      must load before any mode registers its base (city/mode.js, modes/*). -->
-<script src="src/systems/solidground.js?v=solid1"></script>
+<script defer src="src/systems/solidground.js?v=solid1"></script>
 <!-- ORDNANCE LEAVES THE GROUND CHANGED: a bomb digs a carving. -->
 <!-- A ROOM UNDER AN INTACT STREET: a hole with a lid on it. -->
 <!-- A TUNNEL IS A HOLE LYING DOWN: a swept carving with its lid intact. -->
 <!-- GROUND YOU CAN TAKE AWAY A BUCKET AT A TIME (bare ground only). -->
-<script src="src/core/lights.js"></script>
-<script src="src/core/sky.js?v=neutralhaze2"></script>
-<script src="src/core/daynight.js?v=neutralhaze1"></script>
+<script defer src="src/core/lights.js"></script>
+<script defer src="src/core/sky.js?v=neutralhaze2"></script>
+<script defer src="src/core/daynight.js?v=neutralhaze1"></script>
 
 <!-- 2. world geometry -->
 <!-- Procedural surface library: tiling colour + normal + roughness CanvasTextures
      (asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass grime).
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
-<script src="src/world/materials.js?v=pbr1"></script>
+<script defer src="src/world/materials.js?v=pbr1"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
      ashlar (drafted-margin blocks) CanvasTextures + the fixed 6-colourway
      palette. After materials.js — it consumes CBZ.cmat. -->
@@ -515,14 +510,14 @@
      after core/batch.js has run would already be welded into a static buffer.
      Runtime deps (markCollidersDirty, queryCollidersNear, propNearestSeat) are
      all resolved inside the per-frame driver, never at parse. -->
-<script src="src/world/cellblock.js"></script>
+<script defer src="src/world/cellblock.js"></script>
 <!-- crates.js/props.js moved below systems/pieces.js (F7): both now call
      CBZ.spawnPiece at parse time, so they must load after chunks.js/
      pieces.js define it. Nothing else in this file's original 283-284 slot
      depended on their (synchronous, load-time) execution happening this
      early — every cross-file reader (e.g. CBZ.breaker) only touches them
      from inside a runtime callback, long after all scripts have loaded. -->
-<script src="src/world/door.js?v=scale2"></script>
+<script defer src="src/world/door.js?v=scale2"></script>
 
 <!-- 2b. rooms (need world helpers; loaded after coins for stash drops) -->
 
@@ -530,7 +525,7 @@
      before any entity that registers a prop type, e.g. coins.js below -->
 
 <!-- 3. entities -->
-  <script src="src/entities/character.js?v=holster1"></script>
+  <script defer src="src/entities/character.js?v=holster1"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
@@ -539,7 +534,7 @@
        profile character.js already builds and the species row's own scale —
        nothing new is authored. MUST follow entities/character.js: it reads
        CBZ.charProfile. -->
-<script src="src/entities/player.js?v=radio1"></script>
+<script defer src="src/entities/player.js?v=radio1"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
      is gone as of 2026-07-26; this comment used to describe it in the present
      tense and offer "re-add the tag" as a revert, which no longer works).
@@ -548,8 +543,8 @@
      systems/gore.js + wounds.js own blood from explicit damage events. -->
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=nukefield1"></script>
-<script src="src/systems/hud.js?v=allmain3"></script>
+<script defer src="src/systems/audio.js?v=nukefield1"></script>
+<script defer src="src/systems/hud.js?v=allmain3"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
@@ -561,7 +556,7 @@
      After holsterprops — it reads the gun that module just placed. -->
 
 <!-- 2c. rooms (use addBox + addPack) -->
-<script src="src/world/roombuild.js"></script>
+<script defer src="src/world/roombuild.js"></script>
 <!-- THE PRISON GETS A LID. Every interior above was open-topped (roomShell
      builds four walls and no ceiling), so you could stand in the mess hall and
      watch the crows. roofs.js lays a real ceiling over each of them and hangs
@@ -571,7 +566,7 @@
      draws a room; BEFORE world/adminwing.js, which asks it for its own roof. -->
 
 <!-- 3b. actors that depend on economy -->
-<script src="src/entities/vision.js"></script>
+<script defer src="src/entities/vision.js"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
      aircraft passengers request real actors through one reusable contract. -->
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
@@ -655,10 +650,10 @@
      and state.js, which call CBZ.prisonTier at runtime. -->
 
 <!-- 4b. remaining systems -->
-<script src="src/systems/input.js"></script>
-<script src="src/systems/spatialgrid.js?v=scale3"></script>
-<script src="src/systems/camera.js?v=sharkmode1"></script>
-<script src="src/systems/physics.js?v=sharkmode1"></script>
+<script defer src="src/systems/input.js"></script>
+<script defer src="src/systems/spatialgrid.js?v=scale3"></script>
+<script defer src="src/systems/camera.js?v=sharkmode1"></script>
+<script defer src="src/systems/physics.js?v=sharkmode1"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
      re-centring on a moving parent. CBZ.movingPlatform(parent, spec) carries
@@ -670,7 +665,7 @@
      a floating dock + hinged gangway, marina pontoons, and yacht decks.
      Next adopters are one line each — elevators.js (the teleporting cab is
      the reason this exists) and the airliner cabin deck. -->
-<script src="src/systems/actorcollide.js?v=contact1"></script>
+<script defer src="src/systems/actorcollide.js?v=contact1"></script>
 <!-- A DEAD MAN LIES ON THE FLOOR, IN THE ROOM. Owns every prison corpse's
      transform: clear lie direction, wall depenetration at both ends of the
      body, limb sprawl. entities/npc.js + entities/guards.js call its tick
@@ -691,9 +686,9 @@
      what a stab DOES lives in systems/combat.js. Loads beside taserfx for the
      same reason: both re-assert a carried weapon every frame because
      actorweapons' self-heal pass is city-only. -->
-<script src="src/systems/weather.js?v=snowbury1"></script>
-<script src="src/systems/compass.js"></script>
-<script src="src/systems/minimap.js?v=route1"></script>
+<script defer src="src/systems/weather.js?v=snowbury1"></script>
+<script defer src="src/systems/compass.js"></script>
+<script defer src="src/systems/minimap.js?v=route1"></script>
 <!-- FRIENDSHIP IS OFFERED, NOT BROWSED. BEFRIEND used to sit on every inmate's
      card as a permanent button that actually opened the FAVOUR loop (it is
      called TALK now, which is what it does). This owns the real thing: an NPC
@@ -703,7 +698,7 @@
      shadowPlayer, off its rental timer). Loads after interact.js (which reads
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
-<script src="src/systems/prisonfriends.js?v=crew1"></script>
+<script defer src="src/systems/prisonfriends.js?v=crew1"></script>
 <!-- WHAT A THING IN YOUR BAG LOOKS LIKE: one real 3D object per item KIND,
      which city/itemicons.js photographs for the slot and city/inventory.js
      drops on the pavement. Needs THREE + actorweapons + materials, all
@@ -718,8 +713,8 @@
      keeps counting through the 20-30 s synchronous world build (the main
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
-<script src="src/systems/bootprogress.js?v=meter1"></script>
-<script src="src/systems/state.js?v=sharkmode1"></script>
+<script defer src="src/systems/bootprogress.js?v=meter1"></script>
+<script defer src="src/systems/state.js?v=sharkmode1"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -729,7 +724,7 @@
      for the context back if it has not returned. AFTER state.js (it pauses
      through CBZ.setState, so there is exactly one kind of paused).
      ?cfg_GL_CONTEXT_GUARD=0 reverts. -->
-<script src="src/systems/glcontext.js?v=glguard1"></script>
+<script defer src="src/systems/glcontext.js?v=glguard1"></script>
 <!-- THE SIM ADVANCES IN WHOLE TICKS (survival only, by default). core/loop.js
      measures TIME, which is right for one player and is the reason two machines
      can never run the same match — a phone at 47 fps and a laptop at 60 take
@@ -737,18 +732,18 @@
      seed. This turns the frame delta into whole 1/60 ticks. MUST load before
      core/loop.js, which reads CBZ.fixedStep every frame. ?cfg_FIXED_STEP_V1=0
      puts survival back on the variable step, live. -->
-<script src="src/systems/fixedstep.js?v=fixed1"></script>
-<script src="src/systems/touch.js?v=sharkmode1"></script>
+<script defer src="src/systems/fixedstep.js?v=fixed1"></script>
+<script defer src="src/systems/touch.js?v=sharkmode1"></script>
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
-<script src="src/systems/gamepad.js?v=nodash1"></script>
+<script defer src="src/systems/gamepad.js?v=nodash1"></script>
 
 <!-- 4c. SURVIVAL — natural-disaster battle royale (a second game mode).
      Additive: registers its own updaters (gated by game.mode) and builds
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
-<script src="src/systems/fx.js?v=sharkmode1"></script>
+<script defer src="src/systems/fx.js?v=sharkmode1"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -757,27 +752,27 @@
      detects the missing CBZ.lightningStrike and keeps the old blast, so the
      page still runs; it just looks like an RPG again. Needs only config.js +
      scene; it wires itself to the bus lazily, in any script order. -->
-<script src="src/systems/lightningfx.js?v=bolt1"></script>
-<script src="src/world/disaster_arena.js?v=sharkmode1"></script>
-<script src="src/systems/grapple.js?v=nohint1"></script>
-<script src="src/entities/survivorbot.js?v=sharkmode1"></script>
-<script src="src/modes/survival.js?v=sharkmode1"></script>
+<script defer src="src/systems/lightningfx.js?v=bolt1"></script>
+<script defer src="src/world/disaster_arena.js?v=sharkmode1"></script>
+<script defer src="src/systems/grapple.js?v=nohint1"></script>
+<script defer src="src/entities/survivorbot.js?v=sharkmode1"></script>
+<script defer src="src/modes/survival.js?v=sharkmode1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
      (survival sinkholes today, CITY_SINKHOLES tomorrow). Must precede
      systems/disasters.js so the roster finds CBZ.groundShaft at load. -->
-<script src="src/world/groundshaft.js?v=shaft1"></script>
+<script defer src="src/world/groundshaft.js?v=shaft1"></script>
 <!-- THE VOLCANO IS SHARED: world/volcanofx.js owns the opaque crusted lava,
      the pyroclastic density current, the lahar and the ash LOAD, all keyed on
      a position + a height field so a city-side eruption calls the same four
      builders. Must precede systems/disasters.js so the roster finds
      CBZ.volcanoFx (and its VOLCANO_* flag defaults) at load. -->
-<script src="src/world/volcanofx.js?v=plume2"></script>
+<script defer src="src/world/volcanofx.js?v=plume2"></script>
 <!-- THE QUAKE IS SHARED: systems/quake.js owns facade shedding, drop-cover,
      gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
      Must precede systems/disasters.js so the roster finds CBZ.quake. -->
-<script src="src/systems/quake.js?v=quake1"></script>
+<script defer src="src/systems/quake.js?v=quake1"></script>
 <!-- ==== PER-DISASTER MODULE SEAM ==========================================
      One line per disaster in the survival roster, each owned by exactly that
      disaster and nobody else. A disaster whose behaviour outgrows its entry in
@@ -795,27 +790,27 @@
 <!-- seam:flashflood — systems/flashflood.js owns the churn spray, the entrained
      debris and the roar. Two draw calls and no water planes: the flood itself
      is still a term in the ONE shared depth field, never a mesh. -->
-<script src="src/systems/flashflood.js?v=flood1"></script>
+<script defer src="src/systems/flashflood.js?v=flood1"></script>
 <!-- seam:hurricane — a cyclone, not a wind number: systems/hurricane.js owns the
      tracking eye, the eyewall field, the surge curve and the advected debris. -->
-<script src="src/systems/hurricane.js?v=hur1"></script>
+<script defer src="src/systems/hurricane.js?v=hur1"></script>
 <!-- seam:wildfire — systems/wildfire.js owns the wind/slope-driven front, the
      killing smoke plume, the ember spotting and the persistent burn scar. -->
-<script src="src/systems/wildfire.js?v=fire1"></script>
+<script defer src="src/systems/wildfire.js?v=fire1"></script>
 <!-- seam:tornado        — systems/tornado.js, tagged with the city systems -->
 <!-- seam:volcano        — world/volcanofx.js, tagged above -->
 <!-- seam:blizzard — systems/blizzard.js owns the windchill clock, the windbreak
      query, the gusting whiteout, the lee-side drifts and the burial. -->
-<script src="src/systems/blizzard.js?v=snow1"></script>
+<script defer src="src/systems/blizzard.js?v=snow1"></script>
 <!-- seam:meteor — systems/meteor.js owns the radiant, the bolides and their smoke
      trains, the airbursts, the delayed-sound queue and the crater digs. -->
-<script src="src/systems/meteor.js?v=meteor1"></script>
+<script defer src="src/systems/meteor.js?v=meteor1"></script>
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=plume2"></script>
-<script src="src/systems/survival_interact.js?v=climbdock1"></script>
-<script src="src/systems/survivalhud.js?v=sharkmode1"></script>
+<script defer src="src/systems/disasters.js?v=plume2"></script>
+<script defer src="src/systems/survival_interact.js?v=climbdock1"></script>
+<script defer src="src/systems/survivalhud.js?v=sharkmode1"></script>
 <!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
      have to be true before a transport is worth writing: every actor carries a
      stable id, the whole match serialises to one ArrayBuffer and back
@@ -823,7 +818,7 @@
      tools/determinism-check.mjs is what compares it. AFTER survival.js and
      systems/disasters.js — it reads their public surfaces and publishes
      nothing they need. ?cfg_SURVNET_V1=0 makes it inert. -->
-<script src="src/net/survnet.js?v=survnet1"></script>
+<script defer src="src/net/survnet.js?v=survnet1"></script>
 <!-- GUN GAME ladder HUD (mode-gated; shares #survBars with survival) -->
 
 <!-- 4d. CITY — open-world GTA-style mode (a third game mode). Additive:
@@ -836,7 +831,12 @@
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=shallow1"></script>
+<script defer src="src/world/water_spec.js?v=shallow1"></script>
+<!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
+     inventory item; an NPC's keys live on the NPC and every existing way to
+     take something off a person moves them. MUST load before city/buildings.js
+     and city/interact.js, both of which ask CBZ.cityKeys at parse-adjacent time. -->
+<script defer src="src/city/keys.js?v=keys1"></script>
 <!-- Masonry + civic building grammar: the BLD_* flags, the civic trade table and
      the shared masonry / portico / roof-clutter geometry. MUST load BEFORE
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
@@ -846,16 +846,16 @@
      register ONE style and must load after it. The generalisation of what
      govcomplex.js does to this same office shell: a spec at the call site.
      Inert until a caller passes {dress:{style}} (or ?cfg_FACADE_KIT_CITY=1). -->
-<script src="src/city/facade_kit.js?v=fk1"></script>
-<script src="src/city/facades/brick.js?v=fk1"></script>
-<script src="src/city/facades/stone.js?v=fk1"></script>
-<script src="src/city/facades/mosque.js?v=fk1"></script>
-<script src="src/city/facades/artdeco.js?v=fk1"></script>
-<script src="src/city/facades/brutalist.js?v=fk1"></script>
-<script src="src/city/facades/hightech.js?v=fk1"></script>
-<script src="src/city/facades/pagoda.js?v=fk1"></script>
-<script src="src/city/facades/gothic.js?v=fk1"></script>
-<script src="src/city/facades/adobe.js?v=fk1"></script>
+<script defer src="src/city/facade_kit.js?v=fk1"></script>
+<script defer src="src/city/facades/brick.js?v=fk1"></script>
+<script defer src="src/city/facades/stone.js?v=fk1"></script>
+<script defer src="src/city/facades/mosque.js?v=fk1"></script>
+<script defer src="src/city/facades/artdeco.js?v=fk1"></script>
+<script defer src="src/city/facades/brutalist.js?v=fk1"></script>
+<script defer src="src/city/facades/hightech.js?v=fk1"></script>
+<script defer src="src/city/facades/pagoda.js?v=fk1"></script>
+<script defer src="src/city/facades/gothic.js?v=fk1"></script>
+<script defer src="src/city/facades/adobe.js?v=fk1"></script>
 <!-- TOWER GRAMMARS. Same contract, written for the 40-storey end of the range
      (buildings.js's own makeMegaTower is 52 storeys / ~166m). These declare
      minStoreys so FACADE_KIT_CITY only ever hands them to real towers. -->
@@ -868,7 +868,7 @@
      grammar to a tower. -->
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=nodash1"></script>
+<script defer src="src/city/worldmap.js?v=nodash1"></script>
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
@@ -913,7 +913,7 @@
 <!-- F7 — world/crates.js + world/props.js migrated onto CBZ.spawnPiece
      (moved from the "2. world geometry" wave above, right after
      towers.js): they now need spawnPiece to exist at parse time. -->
-<script src="src/world/crates.js?v=nodash1"></script>
+<script defer src="src/world/crates.js?v=nodash1"></script>
 <!-- THE YARD IS A PRISON YARD. crates.js already killed the loot verb on its
      five packing cases; this stands the cases DOWN and puts what a real
      exercise yard contains on the same five spots — handball wall, weight
@@ -945,14 +945,14 @@
 <!-- 4d-4. WILDLIFE + HUNTING + DOGS. The bestiary (defineSpecies) loads FIRST,
      then every biome batch of species, then the hunting engine and the dog
      companion system (both self-register as high-order landmasses). -->
-<script src="src/city/wildlife_rig.js?v=beasts1"></script>
-<script src="src/city/wildlife_species.js?v=attach1"></script>
-<script src="src/city/wildlife/aquatic.js?v=finblade1"></script>
+<script defer src="src/city/wildlife_rig.js?v=beasts1"></script>
+<script defer src="src/city/wildlife_species.js?v=attach1"></script>
+<script defer src="src/city/wildlife/aquatic.js?v=finblade1"></script>
 <!-- EVERY ANIMAL IS AN INDIVIDUAL: the per-individual size draw and the
      hunger scalar wildlife.js spends. Must load BEFORE the engine (it
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
      straight back to the species constant. -->
-<script src="src/city/wildlife.js?v=indiv1"></script>
+<script defer src="src/city/wildlife.js?v=indiv1"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
 <!-- THE ANGLE LAW loads first because it is the one thing all three biters
@@ -961,7 +961,7 @@
      no build step and no dependency of its own — every neighbour it consumes
      (predatorKit, marineGape, marineHurt) is asked for at CALL time, so its
      position here is about readability, not load order. -->
-<script src="src/systems/bite_angles.js?v=biteangles1"></script>
+<script defer src="src/systems/bite_angles.js?v=biteangles1"></script>
 <!-- IRONJAW ARENA. arena_venue.js is the BUILDING (raked bowl, concourse,
      vomitories, roof truss, light rig, jumbotron, instanced crowd);
      arena_fights.js is the FIGHT SURFACES + sim. Both only run at world build,
@@ -1048,7 +1048,7 @@
      ?cfg_PAX_CHAUFFEUR=0 (riding while a companion drives). PAX_AIRCRAFT is
      declared and OFF: a passenger deck in a machine the player is flying is
      playeraircraft.js/bailout.js's wave, and the button says so. -->
-<script src="src/city/passengerseat.js?v=pax1"></script>
+<script defer src="src/city/passengerseat.js?v=pax1"></script>
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
@@ -1057,7 +1057,7 @@
      building damage ledger (INTACT→SCARRED→WOUNDED→BURNING→CRITICAL→COLLAPSING→
      RUBBLE). nukefx + aircraftimpact register FX/consumers by name.
      MUST precede strategic.js, which now routes its B-2/nuke through the bus. -->
-<script src="src/systems/impactbus.js?v=nukefield2"></script>
+<script defer src="src/systems/impactbus.js?v=nukefield2"></script>
 <!-- THE COLLAPSE ENGINE. The ONE answer to "what does a building look like
      while it is being destroyed", shared by the city ledger (structural.js),
      the disaster island (systems/disasters.js) and anything else that
@@ -1069,14 +1069,14 @@
      are still standing. Reverts: ?cfg_COLLAPSE_V2=0 (both callers fall back
      to the collapse they had) · ?cfg_COLLAPSE_FRAGMENTS=0 (motion without
      debris) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
-<script src="src/city/collapse.js?v=collapse1"></script>
-<script src="src/city/structural.js?v=collapse1"></script>
+<script defer src="src/city/collapse.js?v=collapse1"></script>
+<script defer src="src/city/structural.js?v=collapse1"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
      severe weather, deterministic per in-game day. The survival-mode duplicate
      was deleted and migrated onto this file — WITHOUT THIS TAG the survival
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
-<script src="src/systems/tornado.js?v=tornado1"></script>
+<script defer src="src/systems/tornado.js?v=tornado1"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips — sold at the
      gunsmith bench in the gun store; scopeview does the zoom + scope overlay -->
 <!-- missile lock-on squares + homing hand-off + the factory sniper's REAL
@@ -1084,7 +1084,7 @@
      scopeview.js (whose gamepad fine-aim hook it wraps; a bought optic
      always wins over the factory scope). Revert: CBZ.CONFIG.WEAPON_LOCKON /
      CBZ.CONFIG.SNIPER_REAL_SCOPE = false. -->
-<script src="src/city/interactions.js?v=nodash1"></script>
+<script defer src="src/city/interactions.js?v=nodash1"></script>
 <!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
      before this file — they just had nothing to sell, because no vehicle had
      a tank. Player vehicle only (a hundred NPC cars silently running dry is a
@@ -1159,7 +1159,13 @@
      its one live organ, the mode-aware item store, moved to
      CBZ.econ.itemStore in systems/economy.js.) -->
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
-<script src="src/city/swim.js?v=sharkmode1"></script>
+<!-- THE SHELVES SELL THE GOODS (city/storegoods.js): every generic store stands
+     its own real stock on its own shelves as the real item models, and the
+     painted blocks furnishShop used to put there are stripped before the batch
+     merge. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
+     models), interactions.js (the verbs) and worldmap.js (addLandmass). -->
+<script defer src="src/city/storegoods.js?v=realgoods1"></script>
+<script defer src="src/city/swim.js?v=sharkmode1"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
      world/water_spec.js — because everything that cares about water in this
      game already reads sea level. It authors no water mesh, no flood damage
@@ -1184,8 +1190,8 @@
      same game. Loads after interactions/interact (registers its verbs), after
      shops (cityTill is the only money source) and after gangs/turf (it steers
      crews and feeds zone control). Flag: RACKET_V1. -->
-<script src="src/city/racket.js?v=racket1"></script>
-<script src="src/city/stuntjumps.js?v=ballistic2z"></script>
+<script defer src="src/city/racket.js?v=racket1"></script>
+<script defer src="src/city/stuntjumps.js?v=ballistic2z"></script>
 <!-- MARINA + BOATYARD: finger berths, Med-moor quay, fuel dock, travel-lift
      well, IALA Region B buoyage, and a dealer with three demo hulls floating
      at its own dock. Buying reuses zillow.js's cash AND financed paths (no 7th
@@ -1240,7 +1246,7 @@
      item-drop pickups + placeable storage chests, and wraps cityKillPlayer so
      the player's guns drop on death. Needs economy/worldstate/combat/fpsmode/
      death.js/charpanel.js, all loaded above. -->
-<script src="src/city/killfeed.js?v=sharkmode1"></script>
+<script defer src="src/city/killfeed.js?v=sharkmode1"></script>
 <!-- THE MORGUE (DEATH_DROPS_V2 / CORPSE_PERSIST / EMS_RESPONSE): what a death
      leaves behind and who comes for it. Wraps cityKillPed + cityHurtCop the
      same way killfeed.js does — so it loads AFTER killfeed, leaving the feed
@@ -1271,11 +1277,11 @@
      metre 683 pedestrians tried to walk went into geometry, 37 of them grinding
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
-<script src="src/systems/fullmap.js?v=sharkmode1"></script>
+<script defer src="src/systems/fullmap.js?v=sharkmode1"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
-<script src="src/systems/gore.js?v=sharkmode1"></script>
+<script defer src="src/systems/gore.js?v=sharkmode1"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
      sprayed arterial red) and never for the violent, physical, player-caused
@@ -1284,7 +1290,7 @@
      nothing itself. After gore.js + wounds.js (routes through CBZ.goreImpact,
      CBZ.gore and CBZ.bodyWound), before core/loop.js so its clock makes the
      boot sort. Consumers: grapple.js, physics.js, modes/survival.js. -->
-<script src="src/systems/trauma.js?v=sharkmode1"></script>
+<script defer src="src/systems/trauma.js?v=sharkmode1"></script>
 <!-- PREDATOR GRAMMAR — the shared answer to "a thing hunts you and takes you":
      predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
      predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the
@@ -1309,7 +1315,7 @@
      full) and the caller falls back to CBZ.wildlifeDeathTumble. -->
 <!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
      predator.js AND wildlife.js so both seams exist. -->
-<script src="src/city/wildlife_shark.js?v=marinefix1"></script>
+<script defer src="src/city/wildlife_shark.js?v=marinefix1"></script>
 <!-- THE ORCA. Re-registers id:"orca" over city/wildlife/aquatic.js's build
      (defineSpecies is last-write-wins) so the markings that actually identify
      the animal exist: the white post-ocular eye patch, the grey saddle, the
@@ -1324,7 +1330,7 @@
      takedown is CONSUMED from marine_predation, not re-implemented.
      Reverts whole with CBZ.CONFIG.ORCA_V1 / ORCA_POD / ORCA_SURFACE /
      ORCA_ACTS / ORCA_DRAG / ORCA_HUNT. -->
-<script src="src/city/wildlife_orca.js?v=orca1"></script>
+<script defer src="src/city/wildlife_orca.js?v=orca1"></script>
 <!-- THE SEA EATS ITSELF: the marine predation graph (who preys on whom, who
      MOBS whom), the orca pod's bearings/ram/roll-over finisher, a big shark
      taking a small boat, and the chum producers that had never existed — a
@@ -1595,7 +1601,7 @@
      five metres off the hull centre the generic vehicle card can't reach.
      Every cross-read (mpGroundAt, interactions, cityEnter/ExitVehicle,
      marineHulls) is feature-detected. Revert with ?cfg_BOAT_WALK=0. -->
-<script src="src/city/boatwalk.js?v=boatwalk1"></script>
+<script defer src="src/city/boatwalk.js?v=boatwalk1"></script>
 
 <!-- SEATS OF POWER — the standalone complexes that do NOT fit inside a city
      block: the capitol, the executive mansion, the agency headquarters, the
@@ -1625,6 +1631,12 @@
      (it reads that file's published site record), storage.js (the property
      ledger it writes through) and inventory.js (CBZ.cashBags). Revert with
      ?cfg_CASH_STORE_V1=0. -->
+<!-- A VAULT YOU BOUGHT, ON LAND YOU BOUGHT (city/propertyvault.js). The SAME
+     CBZ.cityVaultRoom the bank uses, built into a property you own, paid for at
+     the [G] desk, keyed through city/keys.js and banked through CBZ.cityTill.
+     Loads after storage.js (ownership), bank.js (the room) and cashstore.js
+     (the bag verbs it hooks). -->
+<script defer src="src/city/propertyvault.js?v=pvault1"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
      feature-detected/lazy — this tag itself is tiny (no wasm, no Worker
@@ -1642,7 +1654,7 @@
 
 <!-- 4b. game packages: engine registry first, then each packaged venue game
      (after every city system they facade: interactions, worldmap, economy) -->
-<script src="src/core/packages.js?v=pkg8"></script>
+<script defer src="src/core/packages.js?v=pkg8"></script>
 <!-- games/warband.js DELETED 2026-07-29. OWNER: "the whole war band code — it
      was a dumb idea, but it's really what this whole game's point is: get
      enough people recruited, or get enough money, or enough guns, or somehow
@@ -1655,7 +1667,7 @@
      scoreboard existed only to host those two rules and are gone with it. -->
 
 <!-- 5. quality + loop + boot -->
-<script src="src/core/quality.js?v=scale8"></script>
+<script defer src="src/core/quality.js?v=scale8"></script>
 
 <!-- REAL BOATS. Four hulls with real numbers replace one mesh wearing three
      name aliases: a 4.5m RIB, the 6.2m runabout (mesh untouched — zero art
@@ -1666,16 +1678,33 @@
      with a yaw-ACCELERATION cap, which is what makes the yacht take seconds
      to answer the helm rather than merely being slow. Both before core/loop.js
      — it sorts CBZ.updaters once at parse time. -->
+<!-- A HULL IS A LOFTED SURFACE, not a stack of boxes. CBZ.hullLoft turns a
+     sheer/chine/keel line set into one welded smooth-shaded BufferGeometry
+     with hard edges only where a real hull has them. Pure geometry, no CBZ
+     reads but THREE — but it MUST parse before water_hulls.js, whose builders
+     call it at build() time. -->
 
 <!-- WATER V2 runtime: submerged-camera state, boat buoyancy off the live wave
      field, splash/wake FX. After core/quality.js so CBZ.onQualityChange exists
      at parse time; before core/loop.js so their updaters make the boot sort.
      No dependency on each other — any order among these three works. -->
-<script src="src/world/water_buoyancy.js?v=waterv2"></script>
+<script defer src="src/world/water_buoyancy.js?v=waterv2"></script>
+<!-- Roll and capsize. A shark can now put a boat on its beam ends and roll it
+     over, and a hull that goes over stays over — inverted, keel up, its people
+     in the water — then floods and sinks or drifts. Registers at order 38.4,
+     one tick BEFORE the buoyancy pass above, which composes its phi into the
+     ride. Parse order among these does not matter (every cross-read is
+     feature-detected at call time). -->
+<script defer src="src/world/water_stability.js?v=capsize1"></script>
 <!-- The float block (CBZ.waterFloat / waterSubmergenceAt / waterRideAt — cars
      sink and wallow, corpses float face-down) and the impact bus
      (CBZ.waterHit — one call made ~58 existing bullet/explosion sites
      water-aware by wrapping, with zero edits to their files). -->
+<!-- SMALL CRAFT WITHOUT vehicles.js (CBZ.seaCraft): boats in the shark sim
+     and any other mode that has water but no road fleet, plus the shark-vs-boat
+     rules (engulf / bite / tip). After water_hulls + water_float, both of which
+     it spends. -->
+<script defer src="src/world/sea_craft.js?v=seacraft1"></script>
 <!-- ONE WATER ORACLE, BOTH WORLDS. Wraps CBZ.cityWaterAt / citySeaHeightAt /
      citySeaBedDepthAt / citySeaBedYAt so they answer with the survival island's
      numbers in survival mode, and publishes CBZ.waterModeOn() — the predicate
@@ -1696,17 +1725,17 @@
        - detail_kit.js FIRST; the other four only register passes into it.
        - street_furniture.js before building_dress.js — it owns the shared sign
          atlas texture the house-number plates reuse. -->
-<script src="src/core/farcull.js?v=fc2z"></script>
-<script src="src/core/staticfreeze.js?v=sf1"></script>
-<script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js"></script>
+<script defer src="src/core/farcull.js?v=fc2z"></script>
+<script defer src="src/core/staticfreeze.js?v=sf1"></script>
+<script defer src="src/systems/settings.js?v=nodash1"></script>
+<script defer src="src/core/batch.js"></script>
 <!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
      exposure, contact AO. MUST load after core/quality.js (reads
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder
      and registers its own window-load handler SECOND, so the static merge has
      finished before it promotes materials. -->
-<script src="src/core/gfx.js?v=gfx1"></script>
-<script src="src/core/loop.js?v=scale1"></script>
-<script src="src/main.js?v=sharkmode1"></script>
+<script defer src="src/core/gfx.js?v=gfx1"></script>
+<script defer src="src/core/loop.js?v=scale1"></script>
+<script defer src="src/main.js?v=sharkmode1"></script>
 </body>
 </html>

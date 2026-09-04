@@ -46,11 +46,18 @@
   function armRng() { rng = CBZ.seedStream ? CBZ.seedStream("world") : (function () { let s = 90210; return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })(); }
   armRng();
 
-  CBZ.buildCity = function () {
+  /* THE BUILD IS A GENERATOR. Every `yield` below is a place the presented
+     boot (systems/state.js) hands the thread back to the browser for one
+     macrotask — input, paint, the watchdog — before the next heavy phase.
+     The synchronous CBZ.buildCity() below drains it in one call and is
+     byte-identical to the old monolith: same order, same rng draws, same
+     world. Tools keep calling that. Only the human-facing PLAY runs it sliced. */
+  function* buildCityGen() {
     if (city) return city;
     // loading-meter checkpoints (systems/bootprogress.js) — AFTER the memo
     // guard: a cached call is free and must not report a build step.
     if (CBZ.bootStep) CBZ.bootStep("city:core");
+    yield;
     armRng();
     const C = CBZ.CITY;
     const cx = C.center.x, cz = C.center.z;
@@ -1112,16 +1119,19 @@
 
     // ---- let sibling modules furnish the city (buildings, props, lights) ----
     if (CBZ.bootStep) CBZ.bootStep("city:buildings");
+    yield;
     if (CBZ.cityBuildings) try { CBZ.cityBuildings(city); } catch (e) { console.error("[city buildings]", e); }
     if (CBZ.bootStep) CBZ.bootStep("city:expansion");
+    yield;
     if (CBZ.cityExpansion) try { CBZ.cityExpansion(city); } catch (e) { console.error("[city expansion]", e); }
     // worldmap.js: 3 new islands (speedway/airport/military) + 4 biome
     // landmasses (desert/forest/farmland/snow). Runs AFTER the original island
     // so it can read city.maxX/annex and register its own walkable regions.
-    if (CBZ.cityWorldGeo) try { CBZ.cityWorldGeo(city); } catch (e) { console.error("[city worldgeo]", e); }
+    if (CBZ.cityWorldGeoGen) yield* CBZ.cityWorldGeoGen(city);
     // No procedural horizon/backdrop terrain is built. Elevation must be owned
     // by a reachable registered landmass and its shared ground-height oracle.
     if (CBZ.bootStep) CBZ.bootStep("city:props");
+    yield;
     if (CBZ.cityProps) try { CBZ.cityProps(city); } catch (e) { console.error("[city props]", e); }
 
     // ---- RED CURBS at hydrants (props.js just placed them): paint the curb
@@ -1208,8 +1218,10 @@
     //      boardwalk + pier in the south seawall gap and a painted parking
     //      apron. Runs last, after the seawall and landmass builders. ----
     if (CBZ.bootStep) CBZ.bootStep("city:beach");
+    yield;
     if (CBZ.cityBuildBeach) try { CBZ.cityBuildBeach(city); } catch (e) { console.error("[city beach]", e); }
     if (CBZ.bootStep) CBZ.bootStep("city:finish");
+    yield;
 
     // =====================================================================
     //  THE SEA, REBUILT AGAIN (CBZ.CONFIG.SEA_OVERHAUL + WATER_V2, both on
@@ -1536,5 +1548,10 @@
 
     root.visible = false;     // hidden until city mode activates
     return city;
+  }
+  CBZ.buildCityGen = buildCityGen;
+  CBZ.buildCity = function () {
+    const it = buildCityGen();
+    for (;;) { const r = it.next(); if (r.done) return r.value; }
   };
 })();

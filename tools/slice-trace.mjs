@@ -152,7 +152,7 @@ try {
 
   // ---- the verdict --------------------------------------------------------
   const html = readFileSync(path.join(ROOT, "index.html"), "utf8");
-  const ORDER = [...html.matchAll(/<script src="([^"]+)"/g)].map((m) => m[1].split("?")[0]);
+  const ORDER = [...html.matchAll(/<script(?: defer)? src="([^"]+)"/g)].map((m) => m[1].split("?")[0]);
   const key = (p) => p.replace(/^src\//, "");
 
   const readSet = new Set(raw.read);
