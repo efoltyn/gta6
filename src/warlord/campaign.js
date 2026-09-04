@@ -539,12 +539,46 @@
      which re-forked the one number the previous wave had just unified — and a
      second copy is how the headless economy check goes back to measuring an
      island nobody rides. Read it, do not restate it. */
+  /* ============================================================ THE BUDGET
+     HOW MANY PARTIES THE ISLAND CAN CARRY AT ALL, and it is published because
+     a second file needs it and was guessing.
+
+     match.js raises the rival warlords' columns, and its guard against
+     overfilling the world read `S.bands.length >= 150` — a number written when
+     the island carried ninety-six parties and captioned "banner-limited",
+     against a banner cap that is not a population limit at all (BANNER_CAP
+     bounds how many banners are DRAWN in one frame, out of the parties inside
+     BAND_DRAW). The island now spawns 444 neutral parties, so that guard was
+     true on frame one and stayed true forever: raiseColumn() returned null
+     every single time and NOT ONE RIVAL WARLORD HAS EVER RIDDEN THIS ISLAND.
+     Fourteen names, fourteen holdings, zero columns — measured, seed 1337.
+
+     The real ceiling is the SAVE, and this file's own scale sweep found it:
+     1 770 parties is a 5.02 MB payload, i.e. exactly the localStorage quota
+     W.save() fails silently at. Three quarters of that is the budget, which
+     leaves the headroom a long campaign needs to grow an army, a baggage train
+     and forty garrisons into.
+
+     AND THE NEUTRALS YIELD, NEVER THE COLUMNS. The rivals' reserve comes off
+     the top: if the arithmetic is ever tight it is the anonymous crews that do
+     not spawn, because a looter gang nobody has met is scenery and a warlord
+     with no column is a name on a scoreboard — which is the thing this whole
+     game deleted a scoreboard to stop being. */
+  const PARTY_CAP = 1320;
+  C.partyCap = function () { return PARTY_CAP; };
+  function columnReserve() {
+    const M = W.warlords;
+    if (M && M.reserve) { try { return M.reserve() | 0; } catch (e) {} }
+    return 0;
+  }
+  C.columnReserve = columnReserve;
   function smallTarget() {
     const raw = QP.get("smalls");
     if (raw === "0" || raw === "off") return 0;
     const q = parseInt(raw || "", 10);
     if (q > 0) return Math.min(2000, q);
-    return Math.round(bandTarget() * W.SMALL_PER_BIG);
+    const want = Math.round(bandTarget() * W.SMALL_PER_BIG);
+    return Math.max(0, Math.min(want, PARTY_CAP - bandTarget() - columnReserve()));
   }
   function spawnBand(opts) {
     opts = opts || {};
@@ -3382,8 +3416,20 @@
          "replaced" by another two-hundred-man army, and the island would drift
          back to nothing but massive ones over an hour of play. The deficit is
          per tier and the small tier is refilled first for the same reason. */
+      /* A RIVAL'S COLUMN IS NOT THE ISLAND'S POPULATION. It has no `kind`, so
+         the census counted every one of them as a power-law neutral — and with
+         fourteen warlords riding up to five columns each that is seventy
+         phantom "big parties", enough to hold nBig permanently over its target
+         and stop the island ever replacing a neutral army it lost. match.js
+         owns how many columns exist and it has its own budget (C.partyCap);
+         this count is about the parties THIS file spawns. A province's
+         garrison standing to for a STORM is the same case. */
       let nBig = 0, nSmall = 0;
-      for (let i = 0; i < S.bands.length; i++) (S.bands[i].kind ? nSmall++ : nBig++);
+      for (let i = 0; i < S.bands.length; i++) {
+        const b = S.bands[i];
+        if (b.warlordId || b._garrison) continue;
+        if (b.kind) nSmall++; else nBig++;
+      }
       const wantBig = bandTarget(), wantSmall = smallTarget();
       /* THE REFILL RATE FOLLOWS THE DEFICIT, because a fixed one does not
          scale and this population is seven times what it was.
@@ -3560,6 +3606,19 @@
        THERE"); army.js now does the same, keeps the phase on `campaign` and
        announces the meeting with encounter:open / encounter:close instead.
        It sets the phase itself under ?show=old, so nothing here needs to. */
+    /* ANOTHER HUMAN IS NOT A CARD, HE IS A MATCH. warnet.js's peerBands()
+       builds a band per connected player and stamps `peer` on it; this file's
+       contact test could not tell one from a bandit crew, so riding into
+       another warlord's column opened army.js's fight/hire/demand rail —
+       offering to HIRE a person — and the only real way to fight a human was a
+       button on the room screen. The hand-off is GUARDED because W.warnet.fight
+       arrives on the multiplayer builder's branch, not this one: without it the
+       peer band simply falls through to the ordinary rail exactly as it does
+       today, which is the behaviour this line is replacing rather than a
+       regression. Requested by that builder; noted in the wave report. */
+    if (b.peer) {
+      if (W.warnet && W.warnet.fight) { try { W.warnet.fight(b.peerId); } catch (e) { console.error("[warlord] peer fight", e); } return true; }
+    }
     // army.js owns the card. It may not exist yet — this file must not be
     // the reason the page dies when a sibling module is missing.
     if (W.army && W.army.encounter) { try { W.army.encounter(b); } catch (e) { console.error("[warlord] encounter", e); } }
