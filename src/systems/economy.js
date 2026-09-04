@@ -1200,6 +1200,7 @@
     if (S.bought) chance += 0.08;                    // he is relaxed around you
     if (actor.bribed > 0) chance += 0.12;            // already looking away
     if ((actor.alert || 0) > 0.6 || (actor.hunt || 0) > 0) chance -= 0.22;
+    if ((actor.pocketGuardT || 0) > 0) chance -= 0.15;   // his hand is ON the pocket
     // THE CLASSIFICATION IS THE LAST TERM. A high-security screw is a harder
     // mark than a farm screw in exactly the way the tier table says, and it
     // multiplies rather than subtracts so every reason above (the hour, the
@@ -1286,9 +1287,7 @@
         addLoyalty(actor, -30);
         actor.alert = Math.max(actor.alert || 0, 0.5);
         addRespect(actor, -4);
-        // the head icon entities/ai.js already ships for "this person is
-        // reacting to you" — an existing world signal, not a new one.
-        if (CBZ.npcEmote) CBZ.npcEmote(actor, "!");
+        caughtBody(actor);
         return { ok: false, msg: pick(VOICE.guardCaughtBought) };
       }
       CBZ.reportCrime(55, { type: "steal", actorRole: g.role });
@@ -1297,7 +1296,7 @@
       actor.bribed = 0;
       addLoyalty(actor, -40);
       addRespect(actor, -8);
-      if (CBZ.npcEmote) CBZ.npcEmote(actor, "!");
+      caughtBody(actor);
       return { ok: false, msg: pick(VOICE.guardCaught) };
     }
     CBZ.reportCrime(16, { type: "steal", actorRole: g.role });
@@ -1307,8 +1306,20 @@
     if (actor.gang >= 0) nudgeGang(actor, -5, 1);
     if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "steal", 5, { source: "failed theft" });
     noteRead("snitch", 10, nm(actor), 14);
-    if (CBZ.npcEmote) CBZ.npcEmote(actor, "!");
+    caughtBody(actor);
     return { ok: false, msg: pick(afterDark() ? VOICE.inmateCaughtNight : VOICE.inmateCaught) };
+  }
+  /* A MAN WHO FEELS YOUR HAND IN HIS POCKET. This used to be an "!" over his
+     head (CBZ.npcEmote, and systems/markers.js's disc once his grudge sent
+     him to the screws). OWNER: "no emojis over heads, it should be bodily
+     movement." So: one step off you, his hand clamped over the pocket, body
+     turned that side away, eyes on your hands. systems/reactions.js owns all
+     three, and systems/markers.js re-arms the clamp whenever you come back
+     inside reach of a man whose grudgeWhy is his pockets. */
+  function caughtBody(actor) {
+    if (CBZ.npcStepBack) CBZ.npcStepBack(actor);
+    if (CBZ.npcGuardPockets) CBZ.npcGuardPockets(actor, 4);
+    else if (CBZ.npcStare) CBZ.npcStare(actor, 1.7);
   }
 
   /* RESPECT IS EARNED IN FRONT OF PEOPLE. Winning a fight raises your standing

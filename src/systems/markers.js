@@ -1,93 +1,45 @@
 /* ============================================================
-   systems/markers.js — contextual actor markers plus the shared
-   cityTargetsPlayer() hostility predicate used by map surfaces.
+   systems/markers.js — what a prison actor DOES about you when you are
+   close, plus the shared cityTargetsPlayer() hostility predicate used by
+   map surfaces.
 
    Hostility is communicated by actor behavior, sound, and the map — never
    by a floating marker over an enemy or predator's head.
+
+   THE ICONS ARE GONE. (OWNER 2026-09-04: "when i try to steal multiple
+   times from someone there's an emoji that shows over their head ... no
+   emojis over heads, it should be bodily movement, i want npcs more real
+   acting.")
+
+   This file used to own three canvas sprites pinned over heads: an orange
+   "!" for a screw whose alert was rising, a white "!" disc for a man who had
+   told on you (or was on his way to), and a torch for a cop-role tip. A
+   failed lift feeds the victim's grudge into detection.js's snitch roll, so
+   the second or third time through the same man's pockets sent HIM to the
+   guards — and the disc lit over his head. Every state those sprites
+   announced is still here; each one is now a thing the man's body does,
+   through systems/reactions.js:
+
+     the mark you keep robbing   hand clamped over the pocket, body turned
+                                 that side off you, eyes on your hands, and
+                                 a step back when you come inside reach
+                                 (CBZ.npcGuardPockets / CBZ.npcStepBack)
+     a screw getting suspicious  he watches you (CBZ.npcStare); past half
+                                 alert his free hand rests on his belt
+     a man who told on you       he will not hold your eye — head turned off
+                                 you with a sidelong glance every couple of
+                                 seconds, and he backs off when you close
+                                 (CBZ.npcAvert / CBZ.npcStepBack)
+     a man worth a stop (cop)    the same shifty avert
+     a man with an offer         he looks at you for the whole walk-up
+                                 (unchanged from the previous wave)
+
+   Range is the actor's, not a HUD's: no facing cone, no LOS raycast, no
+   fade. A man notices you whether or not you are looking at him.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-
-  const tc = document.createElement("canvas");
-  tc.width = tc.height = 64;
-  const tx = tc.getContext("2d");
-  tx.fillStyle = "#ffd451";
-  tx.strokeStyle = "rgba(0,0,0,.65)"; tx.lineWidth = 5;
-  tx.beginPath();
-  tx.arc(32, 26, 14, 0, Math.PI * 2);
-  tx.fill(); tx.stroke();
-  tx.beginPath();
-  tx.lineWidth = 6;
-  tx.moveTo(42, 38); tx.lineTo(54, 52);
-  tx.stroke();
-  const tipTex = new THREE.CanvasTexture(tc);
-
-  const sc = document.createElement("canvas");
-  sc.width = sc.height = 64;
-  const sx = sc.getContext("2d");
-  sx.fillStyle = "#f7f1df";
-  sx.strokeStyle = "rgba(0,0,0,.65)"; sx.lineWidth = 5;
-  sx.beginPath();
-  sx.arc(32, 26, 17, 0, Math.PI * 2);
-  sx.fill(); sx.stroke();
-  sx.fillStyle = "#ff7a1a";
-  sx.font = "bold 34px Fredoka, Arial, sans-serif";
-  sx.textAlign = "center"; sx.textBaseline = "middle";
-  sx.fillText("!", 32, 29);
-  const snitchTex = new THREE.CanvasTexture(sc);
-
-  const ac = document.createElement("canvas");
-  ac.width = ac.height = 64;
-  const ax = ac.getContext("2d");
-  ax.fillStyle = "#ffb020";
-  ax.strokeStyle = "rgba(0,0,0,.65)"; ax.lineWidth = 5;
-  ax.beginPath();
-  ax.arc(32, 32, 13, 0, Math.PI * 2);
-  ax.fill(); ax.stroke();
-  ax.fillStyle = "#1a1207";
-  ax.font = "bold 30px Fredoka, Arial, sans-serif";
-  ax.textAlign = "center"; ax.textBaseline = "middle";
-  ax.fillText("!", 32, 32);
-  const alertTex = new THREE.CanvasTexture(ac);
-
-  /* ---- THE ICONS ARE DEPTH-TESTED NOW -------------------------------------
-     Every one of these was `depthTest: false`, which is not a style choice —
-     it is a wallhack. A snitch two cells away, a guard on the far side of the
-     block and every offer in the south wing floated THROUGH solid geometry,
-     so the prison's whole social layer was readable from the yard without
-     walking anywhere. Turning depth back on hands that information to the
-     walls the rest of the game already respects, and `depthWrite:false` keeps
-     the transparent quads from fighting each other for sort order. */
-  function markerMat(map) {
-    return new THREE.SpriteMaterial({
-      map: map, depthTest: true, depthWrite: false, transparent: true, opacity: 0,
-    });
-  }
-
-  function makeTipMarker() {
-    const spr = new THREE.Sprite(markerMat(tipTex));
-    spr.scale.set(0.72, 0.72, 1);
-    spr.position.y = 3.8;
-    spr.visible = false;
-    return spr;
-  }
-
-  function makeSnitchMarker() {
-    const spr = new THREE.Sprite(markerMat(snitchTex));
-    spr.scale.set(0.66, 0.66, 1);
-    spr.position.y = 3.85;
-    spr.visible = false;
-    return spr;
-  }
-
-  function makeAlertMarker() {
-    const spr = new THREE.Sprite(markerMat(alertTex));
-    spr.scale.set(0.42, 0.42, 1);
-    spr.position.y = 3.55;
-    spr.visible = false;
-    return spr;
-  }
 
   function hunting(a) {
     return (a.hunt > 0 || a.huntPlayer > 0) && !a.dead && !(a.ko > 0) && !a.escaped;
@@ -115,153 +67,55 @@
     return !!(a && (a.wedge || a.kind === "guard" || a.kind === "warden"));
   }
 
-  // overhead-marker height: just above the (unscaled-root) character's head.
-  // Post HUMAN_SCALE=0.70 the old 3.55–3.85 literals (tuned to the 2.60u rig)
-  // floated a metre high; CBZ.charHeadY(a) resolves to ~1.97 (head 1.82 + margin).
-  // Guard-called so a missing helper falls back to the old flush-head value.
-  const headY = (a) => (CBZ.charHeadY ? CBZ.charHeadY(a) : 1.97);
-
-  /* ============================================================
-     WHEN AN ICON IS ALLOWED TO EXIST — the conversation gate.
-
-     The information these three sprites carry (this man has already talked
-     ABOUT you, this screw is getting suspicious, this man is worth a stop) is
-     good information. It was being delivered at the wrong moment, to a player
-     stood 40 m away who could do nothing about it, THROUGH the walls of the
-     room it was happening in. So the icon becomes a property of BEING THERE:
-
-       range   3.8 m — systems/interact.js's own RANGE (3.6) plus a hair, so
-               the icon appears a step before the verbs it advertises do and
-               can never promise a conversation the panel then refuses.
-       facing  you are looking roughly at him (dot > 0.30, a ~72° half-cone).
-               An icon behind your head is a HUD element, not a world one.
-       sight   one raycast against CBZ.losBlockers. Depth-testing the sprite
-               hides it behind a wall visually; this stops it being MISSED-BY-
-               A-PIXEL visible round a door frame and, more usefully, stops us
-               paying for the fade at all through a solid wall.
-       fade    0.22 s in and out. A sprite that pops is a notification; a
-               sprite that fades is something you walked up to.
-
-     Cost is lower than what it replaces: the state tests and the four
-     `visible` writes now run only for actors already inside 3.8 m (typically
-     none to three), and the raycast only for those.
-     ============================================================ */
-  const NEAR = 3.8, NEAR2 = NEAR * NEAR;
-  const FADE = 4.5;                        // opacity units per second (≈0.22 s)
-  const FACE_DOT = 0.30;
-  const _ro = new THREE.Vector3(), _rd = new THREE.Vector3();
-  const _ray = new THREE.Raycaster();
-
-  function seesActor(a, dist) {
-    const bl = CBZ.losBlockers;
-    if (!bl || !bl.length || !CBZ.player) return true;
-    const p = CBZ.player.pos;
-    _ro.set(p.x, (p.y || 0) + 1.35, p.z);
-    _rd.set(a.group.position.x - p.x, headY(a) - 0.35 - ((p.y || 0) + 1.35), a.group.position.z - p.z).normalize();
-    _ray.set(_ro, _rd);
-    _ray.far = Math.max(0.1, dist - 0.45);
-    return (CBZ.losRaycast ? CBZ.losRaycast(_ray, bl) : _ray.intersectObjects(bl, false)).length === 0;
-  }
-
-  // one fade channel per actor, shared by whichever of its four sprites is up
-  function fadeTo(a, want, dt) {
-    const cur = a._markFade || 0;
-    const next = want ? Math.min(1, cur + dt * FADE) : Math.max(0, cur - dt * FADE);
-    a._markFade = next;
-    return next;
-  }
-  function paint(spr, on, op, y) {
-    const vis = on && op > 0.02;
-    if (spr.visible !== vis) spr.visible = vis;
-    if (!vis) return;
-    spr.material.opacity = op;
-    spr.position.y = y;
-  }
+  const NOTICE = 7.0, NOTICE2 = NOTICE * NOTICE;   // a man clocks you from here
+  const REACH = 3.2;                               // inside this the mark covers his pocket
+  const CLOSE = 2.8;                               // inside this a man who wants none of you steps off
+  const POCKETS = "you going through my pockets";  // economy.js's grudgeWhy for a lift
 
   function tick(dt) {
-    // Context markers below belong to the prison rosters. City hostility stays
-    // physical and diegetic; cityTargetsPlayer() remains available to maps.
+    // City hostility stays physical and diegetic through its own tells;
+    // cityTargetsPlayer() remains available to maps.
     if (CBZ.game && CBZ.game.mode === "city") return;
-    dt = dt > 0 ? Math.min(dt, 0.1) : 0.016;
-    const bob = 0.12 * Math.sin(CBZ.now * 0.006);
     const p = CBZ.player && CBZ.player.pos;
-    const pc = CBZ.playerChar;
-    // player facing: (sin h, cos h), the convention systems/minimap.js reads
-    const h = pc && pc.group ? pc.group.rotation.y : 0;
-    const fx = Math.sin(h), fz = Math.cos(h);
+    const cop = CBZ.game && CBZ.game.role === "cop";
     const all = CBZ.guards.concat(CBZ.npcs);
     for (const a of all) {
-      // ---- the wedge is not a marker: it belongs to the torch, and a guard
-      //      50 m away must still show his beam. Kept outside the gate.
+      if (!a) continue;
+      // the wedge is not a marker: it belongs to the torch, and a guard 50 m
+      // away must still show his beam.
       if (guardish(a) && a.wedge) a.wedge.visible = !!a.flashlightOn;
+      if (!p || !a.group || a.dead || (a.ko || 0) > 0 || a.escaped) continue;
+      const dx = a.group.position.x - p.x, dz = a.group.position.z - p.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > NOTICE2) continue;
+      // A HUNT IS THE THREAT. A man running you down is already doing the
+      // most legible thing a body can do; nothing here should soften it.
+      if (hunting(a)) continue;
+      const d = Math.sqrt(d2);
 
-      const near = a._markFade > 0 || (p && !a.escaped &&
-        (a.group.position.x - p.x) * (a.group.position.x - p.x) +
-        (a.group.position.z - p.z) * (a.group.position.z - p.z) < NEAR2);
-      if (!near) continue;                       // no sprites, no state tests
-
-      if (!a._tipMarker) { a._tipMarker = makeTipMarker(); a.group.add(a._tipMarker); }
-      if (!a._snitchMarker) { a._snitchMarker = makeSnitchMarker(); a.group.add(a._snitchMarker); }
-      if (!a._alertMarker) { a._alertMarker = makeAlertMarker(); a.group.add(a._alertMarker); }
-
-      // A HUNT IS THE THREAT, NOT THE TORCH. This used to require a guard's
-      // flashlight to be ON before his hunt counted as hostile — which only
-      // ever worked because entities/guards.js lit the beam for every hunt,
-      // including a midday sprint across the yard. Now that a torch is a
-      // dark-hours tool again, a guard chasing you under the sun would have
-      // fallen through to `softAlert` and grown a friendly "walk up and talk"
-      // marker over his head mid-charge. Ask the brain state directly.
-      const hostile = hunting(a);
-      const softAlert = !hostile && guardish(a) && (a.alert || 0) > 0.15 && !a.flashlightOn && !a.dead && !(a.ko > 0);
-      const tip = !hostile && CBZ.game && CBZ.game.role === "cop" && a.copMarked > 0 && !a.dead && !(a.ko > 0) && !a.escaped;
-      const knownReport = (a.reportedPlayerT || 0) > 0;
-      const snitch = !hostile && !tip && (a.aiState === "snitch" || knownReport) && !a.dead && !(a.ko > 0) && !a.escaped;
-      const offer = !hostile && !tip && !snitch && a.approach && a.approach.t > 0 && !a.dead && !(a.ko > 0) && !a.escaped;
-
-      // eligible = has something to say AND you are walking up to him
-      let want = softAlert || tip || snitch || offer;
-      if (want && p) {
-        const dx = a.group.position.x - p.x, dz = a.group.position.z - p.z;
-        const d2 = dx * dx + dz * dz;
-        if (d2 >= NEAR2) want = false;
-        else {
-          const d = Math.sqrt(d2) || 1e-4;
-          if ((dx / d) * fx + (dz / d) * fz < FACE_DOT) want = false;
-          else if (!seesActor(a, d)) want = false;
-        }
+      // the mark you keep robbing (economy.js set his grudgeWhy on the lift)
+      if (a.grudgeWhy === POCKETS && (a.playerGrudge || 0) >= 1.5 && d < REACH) {
+        if (CBZ.npcGuardPockets) CBZ.npcGuardPockets(a, 0.5);
+        if (d < CLOSE && CBZ.npcStepBack) CBZ.npcStepBack(a);
+        continue;
       }
-      const op = fadeTo(a, want, dt);
-      paint(a._alertMarker, softAlert, op, headY(a) + bob * 0.55);
-      paint(a._tipMarker, tip, op, headY(a) + bob);
-      paint(a._snitchMarker, snitch, op, headY(a) + bob);
-      if (snitch) a._snitchMarker.scale.setScalar(knownReport ? 0.56 : 0.66);
-      /* THE OFFER MARKER IS GONE — HE LOOKS AT YOU INSTEAD.
-
-         OWNER: "question and money means the dialogue they say when you walk
-         up is relevant to that, plus [+] means they run towards you to help."
-
-         Both halves are already true and the glyph was previewing them:
-           · "?" and "$" said "this man wants something from you" — and the
-             thing he wants is spelled out the moment you arrive, in his own
-             approach line (systems/interact.js reads a.approach.msg). This
-             marker only ever appeared at 3.8m, and the panel that names the
-             offer opens at 3.6m, so the sprite was a two-tenths-of-a-metre
-             preview of a card about to open by itself.
-           · "+" said "backup". Five of the six sites that drew it set
-             aiState="shadowPlayer" on the line ABOVE, and shadowPlayer targets
-             a spot at your shoulder and returns baseSpeed * 1.25 — he is
-             already running to you at a jog while the symbol explains that he
-             is running to you.
-
-         What a man walking over to talk to you actually does is LOOK at you,
-         so that is what he does now (CBZ.npcStare, systems/reactions.js). The
-         stare is re-armed while the approach is live, so his head stays on you
-         for the whole walk-up instead of snapping once.
-
-         The other three markers stay: softAlert, tip and snitch are hidden
-         KNOWLEDGE (this screw suspects you, this man has already talked about
-         you) with no behaviour of their own to read. */
-      if (offer && want && CBZ.npcStare) CBZ.npcStare(a, 0.6);
+      // a screw getting suspicious
+      if (guardish(a)) {
+        if ((a.alert || 0) > 0.15) {
+          if ((a.alert || 0) > 0.45 && !a.flashlightOn && CBZ.npcGuardPockets) CBZ.npcGuardPockets(a, 0.5);
+          else if (CBZ.npcStare) CBZ.npcStare(a, 0.6);
+        }
+        continue;
+      }
+      // a man who told on you, is on his way to, or is worth a stop
+      const shifty = a.aiState === "snitch" || (a.reportedPlayerT || 0) > 0 || (cop && a.copMarked > 0);
+      if (shifty) {
+        if (CBZ.npcAvert) CBZ.npcAvert(a, 0.6);
+        if (d < CLOSE && CBZ.npcStepBack) CBZ.npcStepBack(a);
+        continue;
+      }
+      // a man with an offer looks at you for the whole walk-up
+      if (a.approach && a.approach.t > 0 && CBZ.npcStare) CBZ.npcStare(a, 0.6);
     }
   }
 

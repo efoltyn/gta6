@@ -153,6 +153,19 @@
   // not a shoulder-committed aim.
   const STARE_YAW = 1.05;
   const STARE_RANGE2 = 26 * 26;
+  // AVERT (CBZ.npcAvert): a man who does not want your eye turns his head
+  // OFF you, and steals a sidelong glance every couple of seconds.
+  const AVERT_YAW = 0.8;
+  const AVERT_PERIOD = 2.6, AVERT_GLANCE = 0.45;
+  // POCKET GUARD (CBZ.npcGuardPockets): the mark's hand clamps over his
+  // pocket — upper arm a touch forward, forearm folded across the waist —
+  // and his body turns that side off you. Hard-assigned through a clean
+  // weight (the guardK pattern below) because animChar re-damps the arm
+  // toward its idle every frame and an additive offset cannot HOLD.
+  const POCKET_ARM = -0.42, POCKET_ELBOW = -1.35, POCKET_YAW = 0.5;
+  // STEP BACK (CBZ.npcStepBack): a shove off the player through the shared
+  // _phys knockback slide; 3.2 m/s decays to ~0.45 m of ground.
+  const STEP_BACK_SPEED = 3.2;
   const AIM_ELEV = 0.55;        // max gun-arm elevation correction (rad)
 
   // per-actor reaction record, keyed by the actor object.
@@ -202,6 +215,8 @@
         jailHitT: 0, jailHitX: 0, jailHitZ: 1, jailHitAmp: 0,
         headAmp: 0, headKind: "cross", headLf: 1, headLs: 0, hsX: 0, hsY: 0, hsZ: 0,  // HEAD SNAP (CBZ.reactPunch)
         stK: 0, stOff: 0,                          // STARE (CBZ.npcStare) — eased neck yaw + last frame's offset
+        avSide: 0, avSeed: (R.size % 7) * 0.37,    // AVERT: which way he turns off you (fixed per bout) + glance phase
+        pkK: 0,                                    // POCKET GUARD weight (CBZ.npcGuardPockets), hard-assigned pose
         aimK: 0, aimY: 0, aimP: 0, aimA: 0, hyOff: 0,
         swingT: 0, swingArm: 1, dazeK: 0, guardK: 0,
         // seed the detectors from the CURRENT values so an actor first seen
@@ -225,13 +240,13 @@
     const pp = a._phys;
     if (pp && pp.fl !== r.lastFl) { _qWhy = _qWhy || "fl"; return false; }  // un-consumed impact edge
     if ((a.attackCD || 0) !== r.atkCd) { _qWhy = _qWhy || "cd"; return false; }  // un-consumed swing edge / live cadence
-    if (a.rage || (a.stareT || 0) > 0) { _qWhy = _qWhy || "rage/stare"; return false; }
+    if (a.rage || (a.stareT || 0) > 0 || (a.pocketGuardT || 0) > 0) { _qWhy = _qWhy || "rage/stare"; return false; }
     if (a.poseAimBack || a.poseHandsUp || (a.poseCower || 0) > 0 || a.surrender) { _qWhy = _qWhy || "pose"; return false; }
     if (a.state === "flee" || a.aiState === "flee") { _qWhy = _qWhy || "flee"; return false; }
     if ((a._blockT || 0) > 0 || (a._broken || 0) > 0) { _qWhy = _qWhy || "block"; return false; }
     if (r.recoil || r.flash || r.stagT || r.flinT || r.clutchT || r.swingT ||
         r.jailHitT || r.headAmp || r.hsX || r.hsY || r.hsZ || r.stK || r.stOff ||
-        r.aimK || r.dazeK || r.guardK || r.cowerLean || r.gbx || r.gbz ||
+        r.aimK || r.dazeK || r.guardK || r.pkK || r.cowerLean || r.gbx || r.gbz ||
         r.laOff || r.raOff || r.nkOff || r.byOff || r.hyOff || r.llOff || r.rlOff ||
         r.lowLaOff || r.lowRaOff || r.lowLlOff || r.lowRlOff || r.savedEm !== -1) {
       _qWhy = _qWhy || ("chan:" + (r.stK ? "stK" : r.savedEm !== -1 ? "savedEm" : r.aimK ? "aimK" : r.dazeK ? "dazeK" : r.headAmp ? "headAmp" : r.hyOff ? "hyOff" : "other"));
@@ -512,11 +527,21 @@
               if (rel < -Math.PI) rel += Math.PI * 2;
               // a neck only turns so far; past that he would have to step round
               want = rel > STARE_YAW ? STARE_YAW : (rel < -STARE_YAW ? -STARE_YAW : rel);
+              if (a.stareAvert) {
+                /* HE WON'T HOLD YOUR EYE. (CBZ.npcAvert — what the snitch's
+                   floating "!" became.) The head goes to the far side of you
+                   and stays there, with a sidelong glance every AVERT_PERIOD
+                   seconds — a man who has talked about you and knows it. */
+                if (!r.avSide) r.avSide = rel >= 0 ? -1 : 1;
+                const ph = (((CBZ.now || 0) * 0.001 + r.avSeed) % AVERT_PERIOD + AVERT_PERIOD) % AVERT_PERIOD;
+                want = ph < AVERT_GLANCE ? want * 0.7 : r.avSide * AVERT_YAW;
+              }
             }
           }
-          r.stK = damp(r.stK || 0, want, 11, dt);   // snap on, ease off
+          r.stK = damp(r.stK || 0, want, 11, dt);   // snap on, ease off (the avert's glance snaps too — a slow swing through zero reads as a man shaking his head)
           if (neck && Math.abs(r.stK) > 0.001) { r.stOff = r.stK; neck.rotation.y += r.stOff; }
         } else if (r.stK) {
+          r.avSide = 0; a.stareAvert = false;
           r.stK = damp(r.stK, 0, 11, dt);
           if (Math.abs(r.stK) < 0.002) r.stK = 0;
           if (neck && r.stK) { r.stOff = r.stK; neck.rotation.y += r.stOff; }
@@ -543,6 +568,26 @@
           }
           r.nkOff = 0; r.hyOff = 0; r.byOff = 0; r.llOff = 0; r.rlOff = 0;
           r.lowLaOff = 0; r.lowRaOff = 0; r.lowLlOff = 0; r.lowRlOff = 0;
+
+          /* THE MARK GUARDS HIS POCKETS. (CBZ.npcGuardPockets — what the
+             floating "!" over a man you keep robbing became.) Weight eases in
+             fast and out slow; the arm and elbow are LERPED from animChar's
+             own base toward the pose so weight 0 is exactly the idle and
+             nothing is left to back out. The body turns that side off you
+             the same way. */
+          if ((a.pocketGuardT || 0) > 0) a.pocketGuardT -= dt;
+          const pkWant = (a.pocketGuardT || 0) > 0 && !a.dead && !(a.ko > 0) && !(a.koT > 0) &&
+            !a.surrender && !(a.char.handsUp || a.char.surrender) && !(a.armed && !a._holstered) ? 1 : 0;   // a drawn weapon owns the arms
+          if (pkWant || r.pkK > 0.001) {
+            r.pkK = damp(r.pkK, pkWant, pkWant ? 12 : 5, dt);
+            if (r.pkK < 0.002) r.pkK = 0;
+            const k = r.pkK;
+            if (k && parts && parts.la) parts.la.rotation.x += (POCKET_ARM - parts.la.rotation.x) * k;
+            if (k && low && low.la) low.la.rotation.x += (POCKET_ELBOW - low.la.rotation.x) * k;
+            // body yaw is a channel animChar damps toward 0 every frame, so an
+            // additive byOff can never hold the turn — lerp the bone itself.
+            if (k && body) body.rotation.y += (POCKET_YAW - body.rotation.y) * k;
+          }
 
           if (isCity) {
           // ---- EDGE DETECTORS (city) ----
@@ -1260,7 +1305,49 @@
   CBZ.npcStare = function (actor, secs, at) {
     if (!actor) return;
     actor.stareT = Math.max(actor.stareT || 0, secs || 1.6);
+    actor.stareAvert = false;
     if (at) actor.stareAt = at;
+  };
+
+  /* CBZ.npcAvert(actor, secs, at) — make somebody NOT look at you: head
+     turned off you with a sidelong glance every couple of seconds. The
+     replacement for the "!" disc that hung over a man who had told on you. */
+  CBZ.npcAvert = function (actor, secs, at) {
+    if (!actor) return;
+    actor.stareT = Math.max(actor.stareT || 0, secs || 1.6);
+    actor.stareAvert = true;
+    if (at) actor.stareAt = at;
+  };
+
+  /* CBZ.npcGuardPockets(actor, secs) — his hand clamps over his pocket and
+     his body turns that side off you. The mark's answer to a hand he has
+     already felt once; economy.js's stealOdds reads pocketGuardT (a hand on
+     the pocket is a harder mark). He watches your hands while he does it. */
+  CBZ.npcGuardPockets = function (actor, secs) {
+    if (!actor) return;
+    actor.pocketGuardT = Math.max(actor.pocketGuardT || 0, secs || 3);
+    CBZ.npcStare(actor, Math.min(1.2, secs || 3));
+  };
+
+  /* CBZ.npcStepBack(actor, from, speed) — one step off `from` (default the
+     player) through the shared _phys knockback slide the jail passes above
+     already integrate. Rate-limited per actor so a held state re-arming it
+     every frame reads as one step, not a moonwalk. */
+  CBZ.npcStepBack = function (actor, from, speed) {
+    if (!actor || !actor.group || actor.dead || (actor.ko || 0) > 0) return;
+    const now = CBZ.now || 0;
+    if (now - (actor._stepBackAt || -1e9) < 1400) return;
+    actor._stepBackAt = now;
+    const me = actor.group.position;
+    const src = from || CBZ.player;
+    const fp = src && (src.pos || (src.group && src.group.position));
+    if (!fp) return;
+    let dx = me.x - fp.x, dz = me.z - fp.z;
+    const d = Math.hypot(dx, dz) || 1e-4;
+    dx /= d; dz /= d;
+    const ph = actor._phys || (actor._phys = { kx: 0, kz: 0 });
+    const v = speed || STEP_BACK_SPEED;
+    ph.kx = (ph.kx || 0) + dx * v; ph.kz = (ph.kz || 0) + dz * v;
   };
 
   // LATE (89): after animChar (20/22) and facial.js (88) have posed the
