@@ -120,26 +120,57 @@
   };
 
   // ---- connect / disconnect ----------------------------------------------
-  net.connect = function (opts) {
-    opts = opts || {};
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const url = opts.url || proto + "//" + location.host + "/ws";
-    try { net.ws = new WebSocket(url); } catch (e) { opts.onError && opts.onError("Could not open a connection."); return; }
-    net.name = opts.name || "Stranger";
-    net.role = opts.role || "civ";
-    net.ws.onopen = function () {
+  /* THE SEAM: A ROOM IS A SOCKET.
+     A `room:CODE` url is not a server. It is another player's browser tab
+     running server.js's room logic over WebRTC (src/net/rooms.js), and what
+     it hands back is an object with the seven WebSocket members this file
+     actually uses — readyState, bufferedAmount, send, close, and the four
+     handlers. Everything below this function, handle() included, therefore
+     never learns which one it is talking to, and neither does the city: the
+     day a city page wants rooms it passes a room url and gets them.
+
+     THE WSS PATH IS UNCHANGED for anyone running server/server.js. The only
+     structural difference from the old code is that the handler wiring moved
+     into attach(), because a room's socket takes a moment to exist (a script
+     to fetch, a broker to answer) while a WebSocket exists on the same line
+     it is constructed. */
+  const SELFDIR = (function () {
+    try {
+      const s = document.currentScript && document.currentScript.src;
+      if (s) return s.replace(/[^/]*$/, "");
+    } catch (e) {}
+    return "src/net/";
+  })();
+  let roomsLoading = null;
+  function loadRooms() {
+    if (CBZ.rooms) return Promise.resolve(CBZ.rooms);
+    if (roomsLoading) return roomsLoading;
+    roomsLoading = new Promise(function (res, rej) {
+      const s = document.createElement("script");
+      s.src = SELFDIR + "rooms.js";
+      s.async = false;
+      s.onload = function () { CBZ.rooms ? res(CBZ.rooms) : rej(new Error("rooms.js defined nothing")); };
+      s.onerror = function () { roomsLoading = null; rej(new Error("rooms.js did not load")); };
+      document.head.appendChild(s);
+    });
+    return roomsLoading;
+  }
+
+  function attach(sock, opts) {
+    net.ws = sock;
+    sock.onopen = function () {
       const m = { t: "hello", name: opts.name, role: opts.role, pass: opts.pass || "", v: 1 };
       // stable identity across sessions (netpersist.js) — keys the saved character
       if (CBZ.netPid) try { m.pid = CBZ.netPid(); } catch (e) {}
       net.send(m);
     };
-    net.ws.onmessage = function (e) {
+    sock.onmessage = function (e) {
       let m;
       try { m = JSON.parse(e.data); } catch (err) { return; }
       if (!m || !m.t) return;
       handle(m, opts);
     };
-    net.ws.onclose = function () {
+    sock.onclose = function () {
       const was = net.active;
       net.active = false;
       net.feat = [];
@@ -148,7 +179,34 @@
       emit(net._handlers, "_offline", {});
       if (was && CBZ.city && CBZ.city.note) CBZ.city.note("Disconnected from server, world is now local", 4);
     };
-    net.ws.onerror = function () { opts.onError && opts.onError("Connection failed."); };
+    /* A ROOM KNOWS WHY IT FAILED and a WebSocket does not — the spec hands an
+       error event with nothing in it. So the true sentence rides on the
+       socket (`reason`), and the generic one is the fallback the ws path has
+       always had. This is the difference between "Connection failed." and
+       "Nobody is holding room QK4T." */
+    sock.onerror = function () { opts.onError && opts.onError(sock.reason || "Connection failed."); };
+  }
+
+  net.connect = function (opts) {
+    opts = opts || {};
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    const url = opts.url || proto + "//" + location.host + "/ws";
+    net.name = opts.name || "Stranger";
+    net.role = opts.role || "civ";
+    if (/^room:/i.test(url)) {
+      loadRooms().then(function (R) {
+        attach(R.open(url, {
+          onCode: opts.onCode, onRoster: opts.onRoster,
+          maxPlayers: opts.maxPlayers, roomName: opts.roomName,
+        }), opts);
+      }).catch(function (e) {
+        opts.onError && opts.onError("Rooms are unavailable: " + e.message);
+      });
+      return;
+    }
+    let sock;
+    try { sock = new WebSocket(url); } catch (e) { opts.onError && opts.onError("Could not open a connection."); return; }
+    attach(sock, opts);
   };
 
   net.disconnect = function () { if (net.ws) try { net.ws.close(); } catch (e) {} };
