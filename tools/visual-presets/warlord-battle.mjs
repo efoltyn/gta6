@@ -53,17 +53,25 @@ const subjects = [
     focus: "THE OPENING. Two ranked columns of real soldier objects — every man carrying the wid and armour his roster row says — walking at each other across the piece of the island the encounter happened on. Identical on both sides by construction: morale has nothing to do until somebody dies, and the page boots ?frozen=1 so both builds genuinely start at simulated second zero. If these two frames are not the same picture, the A/B is not controlled and nothing after it means anything.",
     at: 12, cam: { mode: "cmd", pitch: 0.26, yaw: 1.55 } },
 
+  { id: "hull-down", label: "Hull down, and not a rock in sight",
+    focus: "THE GROUND IS THE COVER. There is nothing on this field — biome dune, zero cover props, and that is the change: desert.js used to scatter eight boulders here and battle.js thirty-four more, because combat_iq's cover search can only see BOXES and a battlefield with no boxes made every man stand upright in the open. battle.js's hullDown() searches the terrain instead, for the position where a CROUCHED man (eye 1.0 m) is hidden from the threat by the ground and a STANDING one (1.6 m) is not — the reverse slope. What to look for: men low behind a crest with the far slope empty above them, and men beside them up on the lip firing, because a fold is worked and not occupied. This beat is at t=26 and BEFORE the flank and the charge on purpose. Two reasons, both measured: a charging man clears his fold and stands up (which is the whole cost of a charge, so photographing hull-down men after the CHARGE order photographs zero of them), and at t=16 — where this beat sat on its first run — most of the line is still a FORMED SECTION marching to contact, and a section is driven by stepSquad rather than by think(), so nobody has asked for a fold yet. The fight has to have started. The old note read: a charging man clears his fold and stands up, which is the whole cost of a charge, so photographing hull-down men after the CHARGE order photographs zero of them. The counter to read is coverProps, which must be 0, and menHullDown, which must not be. This row is IDENTICAL on both columns by construction — morale has nothing to do with terrain — and a difference here means the flag is touching something it should not.",
+    at: 26, order: "hold", cam: { mode: "hull" } },
+
+  { id: "through-the-glass", label: "Ten power, and the mil ticks are real",
+    focus: "THE SIGHT ON THE GUN. Every weapon in this game used to aim by narrowing the lens 25 degrees, and exactly one — the bolt sniper, named in an `if` — got an optic, at a hard-coded 16-degree FOV whose comment called it '4.7x' (that is 75/16, a ratio of angles; the honest magnification of a 16-degree lens seen from a 75-degree one is 5.46). The M24 in his hands now wears the sight the real M24 wears, a Leupold Ultra M3A 10x42: the field of view is the tangent law on ten power (8.8 degrees), the look sensitivity is 1/10, the sway is the shooter's own body at 4 milliradians standing, and the tick spacing is SOLVED from this optic's field of view so a mark is a real milliradian and holdover works. Look for the tube, the eye-relief crescent swimming against the sway, and the legend under the reticle naming the optic and what a tick is worth.",
+    at: 29, order: "hold", cam: { mode: "scope" } },
+
   { id: "flank-wing", label: "FLANK — the wing swings wide",
     focus: "THE FIRST REAL DECISION. FLANK sends men who are out of contact to an anchor 90 degrees off the fight axis, on the side of the enemy mass with fewer of them in it, and hands them straight back to combat_iq the moment they arrive — so the gunfight on the wing is still the engine's, and only the WALK is the order's. The wing has to read as a wing: a limb reaching around the enemy mass, not a second frontal rank.",
-    at: 22, order: "flank", cam: { mode: "cmd", pitch: 0.34, yaw: 1.55 } },
+    at: 34, order: "flank", cam: { mode: "cmd", pitch: 0.34, yaw: 1.55 } },
 
   { id: "charge-lands", label: "CHARGE, from inside the line",
     focus: "THE ORDER THAT FINISHES IT, photographed from where the brief says you should be: in it. CHARGE does not call combat_iq's posture() at all — posture exists to hold a weapon's preferred distance, which is precisely what a charge refuses to do — so the goal becomes the enemy himself and the slot becomes 'push'. Look for the line breaking into a run and the warlord's own rifle, the same actorweapons model every NPC carries, in the corner of the frame. The counters move together: charging costs YOU men too.",
-    at: 30, order: "charge", cam: { mode: "fps" } },
+    at: 42, order: "charge", cam: { mode: "fps" } },
 
   { id: "the-rout", label: "The line breaks",
     focus: "THE WHOLE POINT OF THE FLAG. AFTER: a third of an army is gone — power-weighted, so its veterans count for more than its levies — morale falls under the men's own nerve rows and the levies break first, running for their own map edge while the veterans hold. BEFORE (?morale=old): nobody CAN break, so the same simulated second is two intact lines still grinding. If both frames look the same, the mechanic is not doing anything.",
-    at: 38, cam: { mode: "cmd", pitch: 0.40, yaw: 1.55 } },
+    at: 50, cam: { mode: "cmd", pitch: 0.40, yaw: 1.55 } },
 
   { id: "aftermath", label: "The dead, by name",
     focus: "THE PAYOFF SCREEN, which is the reason core.js gives every man a name. Your dead listed individually, the wounded who fight at 60% until they rest, promotions, the guns stripped off every body on the field with what they are worth, and the enemy survivors as PRISONERS to conscript, ransom, release or execute. The before side reaches this screen too — later, bloodier, and with fewer prisoners, because an army that cannot break has to be killed to the last man instead of captured standing on the field.",
@@ -107,8 +115,21 @@ async function stageWarlordBattle(input) {
     let a = null;
     try { a = B.audit(); } catch (_) {}
     if (!a || !a.live) return S.last || {};
+    let hullMen = 0, hullDown = 0;
+    try {
+      const men = B.men();
+      for (let i = 0; i < men.length; i++) {
+        if (men[i].dead || men[i].fled || men[i].you) continue;
+        if (men[i].hull) hullMen++;
+        if (men[i].stance === "crouch") hullDown++;
+      }
+    } catch (_) {}
     S.last = {
       battleT: a.simT,
+      coverProps: a.field.cover,
+      coreRelief: a.field.coreRelief,
+      menHullDown: hullMen,
+      menCrouched: hullDown,
       menAlive: a.mine.alive,
       enemyAlive: a.them.alive,
       yourDead: a.mine.dead,
@@ -160,6 +181,76 @@ async function stageWarlordBattle(input) {
   if (want > 0) { B.advance(want); S.t += want; }
 
   const cam = subject.cam || { mode: "cmd" };
+
+  /* ---- THE FOLD, PHOTOGRAPHED FROM THE SIDE. A hull-down man is only legible
+     from across the crest line: from behind him he is a man crouching, from in
+     front of him he is not there at all. So the lens goes to a man who has
+     found a fold and looks ALONG the line rather than down it, low, close. */
+  if (cam.mode === "hull") {
+    const men = B.men();
+    let pick = null;
+    for (let i = 0; i < men.length; i++) {
+      const m = men[i];
+      if (m.dead || m.fled || m.you || !m.hull) continue;
+      if (!pick || (m.stance === "crouch" && pick.stance !== "crouch")) pick = m;
+      if (pick && pick.stance === "crouch") break;
+    }
+    B.camera("cmd");
+    if (pick) B.look({ x: pick.x, z: pick.z, dist: 22, pitch: 0.12, yaw: 1.55 });
+    else B.look({ dist: 40, pitch: 0.14, yaw: 1.55 });
+    B.render();
+    return { ok: true, metrics: snap(), simT: S.t, pick: pick ? pick.i : null };
+  }
+
+  /* ---- DOWN THE TUBE. The warlord takes the bolt gun out of his own cart
+     (rearm is the same call stepPickup makes when he lifts one off the sand),
+     aims at the nearest live enemy and holds the trigger hand steady; lockon.js
+     engages the optic off the ADS state, exactly as a right mouse button does. */
+  if (cam.mode === "scope") {
+    const GP = window.__warlordGunplay;
+    const W = CBZ.warlord;
+    W.state.baggage = W.state.baggage || {};
+    if (!W.state.baggage.sniper) W.state.baggage.sniper = 1;
+    GP.heal();
+    GP.rearm("sniper");
+    B.camera("fps");
+    B.advance(0.5); S.t += 0.5;
+    /* THE FARTHEST MAN, NOT THE NEAREST. GP.nearestEnemy() is the right verb
+       for a preset about a crosshair; it is the wrong one for a preset about
+       TEN POWER, because the nearest man in a line that has closed is ten
+       metres away and fills the eyepiece whatever the magnification is. The
+       subject is the reach. */
+    let mark = GP.nearestEnemy();
+    try {
+      const you = B.you(), men = B.men();
+      let far = null, fd = -1;
+      for (let i = 0; i < men.length; i++) {
+        const m = men[i];
+        if (m.you || m.dead || m.fled || m.team === "mine") continue;
+        const d = Math.hypot(m.x - you.pos.x, m.z - you.pos.z);
+        if (d > fd) { fd = d; far = m; }
+      }
+      if (far) mark = { x: far.x, y: B.groundAt(far.x, far.z) + 1.3, z: far.z, d: fd };
+    } catch (_) {}
+    GP.aim(true);
+    // the FOV ease is the optic's own ADS time (0.55 s for a 10x); give it
+    // enough simulated frames to arrive, then re-lay the aim through the sway
+    B.advance(1.6); S.t += 1.6;
+    if (mark) GP.look({ at: mark });
+    B.advance(0.2); S.t += 0.2;
+    if (mark) GP.look({ at: mark });
+    B.render();
+    const m2 = snap();
+    let g = {};
+    try { g = GP.audit() || {}; } catch (_) {}
+    m2.scopeFov = g.fov;
+    m2.opticMag = g.optic === "m3a" ? 10 : 1;
+    m2.swayMrad = g.sway ? Math.round(g.sway * 100000) / 100 : 0;
+    m2.markRange = mark && mark.d ? Math.round(mark.d) : 0;
+    S.last = m2;
+    return { ok: true, metrics: m2, simT: S.t, optic: g.optic, scoped: g.scoped };
+  }
+
   B.camera(cam.mode);
   if (cam.mode === "cmd") {
     // no dist => battle.js sizes the range off the two masses' own separation
@@ -190,8 +281,25 @@ export default {
      which is a campaign encounter a warlord would actually take: better men,
      not more of them, which is the game's own thesis about who gets the good
      rifle. */
+  /* bx/bz PIN THE GROUND. buildGround centres the battlefield on the
+     warlord's campaign position, so without these the storyboard fights
+     wherever the island happened to put him — and the hull-down subject needs
+     FOLDED ground. (1600, 2400) is a dune field, zero cover props, whose
+     reference fan is 78/120 hull-down ground: the best-covered dune country on
+     this island.
+
+     HARNESS TRAP: `seed: 1337` below IS NOT APPLIED. games/warlord.html only
+     starts a new game from ?seed when ?go=1 is also present; with ?battle=1
+     alone the page comes up on the DEFAULT save, and CBZ.warlord.state.seed
+     reads 1. Every warlord preset in this directory carries the same inert
+     seed param and has since they were written, so the pairNote's "same seed"
+     is true (both columns boot the same default) but the number is decoration.
+     The coordinates above are measured on the world this preset ACTUALLY
+     boots, seed 1 — which is why they are not the ones
+     tools/warlord-cover-check.mjs picks, and it took a whole storyboard run to
+     find that out. Fix the seam or leave the trap named; do not re-guess. */
   urlParams: { battle: 1, frozen: 1, mine: 24, them: 52, seed: 1337, gun: "ak47",
-    faction: "militia", myfaction: "legion" },
+    bx: 1600, bz: 2400, faction: "militia", myfaction: "legion" },
   readyExpression: "!!(window.CBZ && window.CBZ.warlord)",
   // the first subject pays the whole studio boot under a software rasteriser
   stageTimeoutMs: 600000,
@@ -202,6 +310,14 @@ export default {
     "moraleMine/moraleThem are the live morale numbers: 1 - (power lost) * 1.6 + (their power lost) * 0.55, with a bonus for the warlord standing near his own line — power, not head count, so losing a veteran costs more than losing a levy. routing counts men currently running for the map edge and fled counts men who reached it; with ?morale=old both are structurally zero, which is what makes them the honest measure of what the flag adds. battleEndT is how long the whole fight took: an army that cannot break has to be killed to the last man, and prisoners is what that costs you.",
   metrics: {
     battleT: { label: "Simulated time at this beat", unit: "s" },
+    coverProps: { label: "Cover props on the field", unit: "objects", better: "lower" },
+    coreRelief: { label: "Relief of the ground they fight on", unit: "m" },
+    menHullDown: { label: "Men holding a reverse-slope position", unit: "men", better: "higher" },
+    menCrouched: { label: "Men down behind the lip this frame", unit: "men", better: "higher" },
+    scopeFov: { label: "Field of view through the optic", unit: "deg", better: "lower" },
+    opticMag: { label: "Magnification of the sight on the gun", unit: "x", better: "higher" },
+    swayMrad: { label: "The shooter's own hold wobble", unit: "mrad", better: "lower" },
+    markRange: { label: "Range to the man in the reticle", unit: "m" },
     menAlive: { label: "Your men standing", unit: "men", better: "higher" },
     enemyAlive: { label: "Enemy standing", unit: "men" },
     yourDead: { label: "Your dead", unit: "men", better: "lower" },
