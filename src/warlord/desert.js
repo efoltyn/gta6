@@ -1108,15 +1108,38 @@
      raise()/clear() are explicit because registering colliders at build
      time would put mesa boulders in the campaign's collision world, where
      nothing collides with anything and the only effect is cost. */
+  /* THE OWNER, 2026-09-04: "desert is great but fake rocks fuck, there is
+     already cover from the natural steepness of the desert dunes."
+
+     He is describing exactly what this table used to do. A dune-biome fight
+     got eight boulders scattered across 340 m of sand and a gravel one got
+     fourteen — objects with no geological reason to be there, hashed onto a
+     surface that already had ten to twenty metres of relief in it, and put
+     there for ONE reason: systems/combat_iq.js's cover() only understands
+     BOXES. It scans queryCollidersNear for a solid thing to stand behind, and
+     a dune is not a collider. So a battlefield with no boxes on it made every
+     man stand in the open, and the fix was to litter the desert.
+
+     The fix is to teach the fight about the ground instead — battle.js's
+     hullDown() searches the terrain for a reverse-slope position, which is the
+     real thing a dune offers and always did. With that in place the scatter is
+     not cover, it is set dressing that stops rounds.
+
+     SO THE ROWS THAT SURVIVE ARE THE ONES THAT ARE REALLY THERE:
+       rock  — a mesa/outcrop field. The slabs ARE the biome; that is what rock
+               country looks like and a fight in it is a maze on purpose.
+       oasis — palms. Real trees, growing where the water is.
+     Everything else fights on the ground it has. A salt pan is open, a dune
+     field is folded, a wadi is a cut channel, and none of them needs a box. */
   const COVER_BY_BIOME = {
     rock:   { n: 26, w: [3, 11], h: [2.4, 7.0], kind: "slab" },
-    wadi:   { n: 18, w: [4, 14], h: [1.8, 4.2], kind: "bank" },
-    gravel: { n: 14, w: [1.6, 4.5], h: [1.0, 2.4], kind: "boulder" },
-    dune:   { n: 8,  w: [1.4, 3.6], h: [0.9, 2.0], kind: "boulder" },
     oasis:  { n: 16, w: [0.9, 2.2], h: [3.5, 7.5], kind: "palm" },
-    shore:  { n: 7,  w: [1.6, 4.0], h: [0.9, 2.2], kind: "boulder" },
-    salt:   { n: 2,  w: [1.2, 2.4], h: [0.8, 1.6], kind: "boulder" },
-    sea:    { n: 0,  w: [1, 2], h: [1, 2], kind: "boulder" },
+    wadi:   { n: 0 },
+    gravel: { n: 0 },
+    dune:   { n: 0 },
+    shore:  { n: 0 },
+    salt:   { n: 0 },
+    sea:    { n: 0 },
   };
   D.battlefieldAt = function (wx, wz, radius) {
     if (!inited) ensureInit();
@@ -1146,9 +1169,10 @@
     const relief = Math.round((hi - lo) * 10) / 10;
     const rms = Math.sqrt(acc / Math.max(1, n));
 
-    const spec = COVER_BY_BIOME[biome] || COVER_BY_BIOME.gravel;
+    const spec = COVER_BY_BIOME[biome] || COVER_BY_BIOME.dune;
     const cover = [];
-    for (let i = 0; i < spec.n * 2 && cover.length < spec.n; i++) {
+    // an `n: 0` biome fights on its own ground — no sizes to read, no loop.
+    for (let i = 0; spec.n > 0 && i < spec.n * 2 && cover.length < spec.n; i++) {
       const a = W.hash01(wx + i * 37, wz, 1601 + i) * TAU;
       const r = radius * (0.12 + 0.86 * Math.sqrt(W.hash01(wx, wz + i * 41, 1699 + i)));
       const lx = Math.cos(a) * r, lz = Math.sin(a) * r;
