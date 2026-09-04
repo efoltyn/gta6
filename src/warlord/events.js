@@ -24,10 +24,14 @@
                       heat that kills the men already hurt, night that hides
                       you from a band that wants you.
      4. THE ENDGAME   the game could not be won or lost, which means nothing
-                      in it meant anything. Four named warlords hold this
-                      island. Break all four and you are the Desert Warlord.
-                      Die, or get killed by your own men, or go broke alone in
-                      the salt, and the run is over and you read what it was.
+                      in it meant anything. It is LAND now, openfront's rule:
+                      hold 80% of the island's provinces and it is yours, with
+                      the fraction on the strip from the first frame. THE
+                      ISLAND is the leaderboard everybody on the map is ranked
+                      on. Die, or get killed by your own men, or go broke alone
+                      in the salt, and the run is over and you read what it was.
+                      (What was here was THE FOUR — four frozen names — and it
+                      ended runs on day one. See THE ISLAND, below.)
      5. THE CHRONICLE core keeps W.state.log. In a game where every man has a
                       name, the log IS the save file's soul, so it gets a
                       screen worth reading back rather than a scrolling strip.
@@ -65,7 +69,7 @@
      events:loyalty   {loy, delta, why}
      events:weather   {kind, day}
      events:mutiny    {men, band}
-     events:warlord   {band, fallen}  one of the four fell
+     events:warlord   {name, fallen}  a rival warlord went out
      events:over      {kind, why}
 
    WHAT THIS FILE NEEDS FROM campaign.js — all of it optional, all of it
@@ -88,10 +92,9 @@
      ?events=off     no road events at all. The pre-wave loop, byte for byte.
      ?loyalty=off    loyalty never moves and nobody ever mutinies
      ?weather=off    no sandstorms, no heat, no night cover
-     ?endgame=off    the run can never end — no four warlords, no death
+     ?endgame=off    the run can never end — no victory, no death
      ?event=<id>     DEBUG: fire that card on demand. `?event=list` prints the
                      library to the console. Never be blocked on a random roll.
-     ?four=N         how many warlords hold the island (default 4)
      ?shown=off      THE SHOW-DON'T-TELL REVERT, and it is the same word in
                      warlord/territory.js. Everything below happens as it used
                      to: nobody walks in or out, no fire is lit, an ambush
@@ -143,7 +146,7 @@
   /* ?events=off IS THE WHOLE WAVE'S REVERT and it has to actually revert the
      whole wave, not just stop the cards: with it on, this file adds nothing to
      the page — no cards, no chips in the strip, no loyalty, no weather, no
-     four warlords, no way to win or lose. That is the pre-wave game byte for
+     no leaderboard, no way to win or lose. That is the pre-wave game byte for
      byte, and it is what tools/visual-presets/warlord-events.mjs photographs
      as its BEFORE side. The three narrower flags exist to isolate ONE system
      while the rest keeps running, which is a different job. */
@@ -151,7 +154,6 @@
   const FLAG_NOLOYALTY = FLAG_NOEVENTS || QP.get("loyalty") === "off";
   const FLAG_NOWEATHER = FLAG_NOEVENTS || QP.get("weather") === "off";
   const FLAG_NOEND = FLAG_NOEVENTS || QP.get("endgame") === "off";
-  const FOUR_N = Math.max(1, Math.min(8, parseInt(QP.get("four") || "", 10) || 4));
   /* ONE FLAG FOR THE WHOLE SHOW-DON'T-TELL PASS, and warlord/territory.js
      reads the same word. Two files fixing one failure want one switch. */
   const FLAG_NOSHOW = FLAG_NOEVENTS || QP.get("shown") === "off";
@@ -170,7 +172,7 @@
   /* ============================================================ THE BUCKET
      EVERYTHING THIS FILE REMEMBERS LIVES IN W.state.flags.ev, and that is the
      whole persistence story. flags is already inside the one state object, so
-     the loyalty number, the memorial, the four warlords and the weather all
+     the loyalty number, the memorial, the fallen rivals and the weather all
      survive a save, a load and a network hop for free — and none of it needs
      a second serialiser that would rot the first time somebody adds a field.
      Rebuilt lazily rather than at newgame, because a load has to be able to
@@ -195,9 +197,15 @@
         warned: 0,          // day the ringleader card last went up
         wea: "clear", weaP: 0, weaDay: 0, wx: 1, wz: 0,
         camped: 0,          // day the player last sat a storm out
-        four: null,         // [bandId] — the warlords who hold the island
-        fell: [],           // {name,day,size} — the ones you broke
-        last: null,         // the last warlord, once three are down
+        /* `four` IS GONE. It was a frozen list of four warlord ids raised once
+           at boot, and the run's whole win condition hung off it. The standing
+           is DERIVED now — W.warlords.leaderboard(), read off the map and off
+           S.bands every time anybody asks — so there is nothing here to raise,
+           nothing to keep in sync and nothing to go stale when a fifth warlord
+           takes half the north. What survives is the MEMORY: who you have seen
+           broken, and whether the last war has started. */
+        fell: [],           // {id,name,day,held,men} — the warlords who went out
+        last: null,         // the last rival standing, once everyone else is out
         peak: 1,            // biggest this army ever was
         broke: 0,           // consecutive dawns with nothing at all
         contracts: [],      // {bandId, kind, pay, men, from}
@@ -326,6 +334,52 @@
     W.emit("events:loyalty", { loy: v.loy, delta: v.loy - was, why: why || "" });
     paintChips();
   }
+
+  /* ============================================================ PUBLISHED
+     TWO SEAMS army.js's aftermath acts through, because that screen makes
+     decisions whose cost is denominated in this file's currency and the
+     alternative is army.js keeping its own second opinion about loyalty.
+
+     provenance() — WHERE A MAN CAME FROM, SAID OUT LOUD. reconcile() below
+     infers it by diffing core's stat counters against the roster, which is
+     exact while one kind of man arrives at a time and wrong the instant one
+     screen adds nineteen volunteers and twelve pressed men in the same frame:
+     the counters say "12 conscripted, 19 recruited" and the array says nothing
+     about which is which, so the first twelve strangers get the pressed man's
+     bond whoever they actually are. The aftermath is the only place in the
+     game that does that, so it stamps each man as it adds him.
+
+     settle() — A DECISION THAT CHANGED WHO THIS ARMY IS, PAID NOW INSTEAD OF
+     OVER A FORTNIGHT. Both of the aftermath's costly verbs move the CEILING
+     rather than the number: pressed men have a low bond, and every execution
+     poisons every bond through bondOf's dread term. Loyalty drifts toward that
+     ceiling at 0.3 a dawn, so without this the player presses a button, sees
+     nothing happen, and mutinies two weeks later for reasons he cannot connect
+     to anything. Nothing new is invented and NO MAGNITUDE IS TYPED: it is the
+     ceiling that just moved, arriving when the decision does. */
+  /* AND THE THREE BASES THEMSELVES, because army.js's willing/unwilling roll
+     is asking the identical question these numbers already answer: how much of
+     a man's own choice was it. BASE_JOINED — "a man who walked up and asked is
+     in between", 0.58 — IS the odds that a captured man would rather march
+     than walk, so the roll is centred on it rather than on a number picked to
+     feel right. The first draft of that roll centred on 0.92 (the old PAID
+     conscription's success odds, which is a different question with money in
+     it) and photographed "27 WILL MARCH FOR YOU · 0 WILL NOT" — a decision
+     screen with nothing on it to decide. */
+  E.BASE = { hired: BASE_HIRED, pressed: BASE_PRESSED, joined: BASE_JOINED, unknown: BASE_UNKNOWN };
+  E.provenance = function (s, kind) {
+    if (!s) return null;
+    const v = ev();
+    v.base[s.id] = kind === "pressed" ? BASE_PRESSED : kind === "joined" ? BASE_JOINED : BASE_HIRED;
+    return v.base[s.id];
+  };
+  E.settle = function (why) {
+    reconcile();
+    const v = ev();
+    const ceiling = avgBond() * 100;
+    if (ceiling < v.loy) loyMove(ceiling - v.loy, why || "");
+    return Math.round(ceiling);
+  };
 
   const MOODS = [
     { at: 82, label: "DEVOTED",  cls: "good", note: "they would follow you into the sea." },
@@ -1388,7 +1442,7 @@
   let CAST = null;               // {L, bands, t, arg} — a party on the road, card not yet up
   let leaving = [];              // transient parties riding off the map: [{b, t}]
   let railT = 0;
-  let summonsFrom = null;        // which of the four sent the rider being cast
+  let summonsFrom = null;        // which rival sent the rider being cast
 
   /* where the road goes: the destination you tapped, else the way you face */
   function heading() {
@@ -2792,43 +2846,47 @@
     },
   });
 
-  /* ---- 18. one of THE FOUR sends a rider. The endgame reaching into the
-       road-event layer, which is how a player finds out the endgame exists. */
+  /* ---- 18. THE NAME AT THE TOP OF THE LEADERBOARD sends a rider. The
+       endgame reaching into the road-event layer, which is how a player finds
+       out there is one. It used to pick out of THE FOUR — a list frozen at
+       boot — and it picks off the live standing now, so the man who sends for
+       you is a man who is actually winning. */
   add({
     id: "summons", tag: "A RIDER UNDER A WHITE RAG",
     weight: function () {
       if (FLAG_NOEND) return 0;
-      const alive = fourAlive();
+      const alive = rivals();
       return (alive.length && size() >= 30 && S.fame >= 30) ? 1.4 : 0;
     },
     /* his rider, in his colours, walking in under the rag. The warlord is
        chosen here so the man and the card agree about whose he is. */
     cast: function () {
-      if (!ev().four) raiseTheFour();
-      const alive = fourAlive();
+      const alive = rivals();
       if (!alive.length) return null;
-      const f = alive[Math.floor(W.rnd() * alive.length)];
+      /* THE BIGGEST OF THE TOP THREE, not a flat roll over fourteen. A summons
+         from the man in eleventh place is not the endgame reaching in, it is a
+         stranger; the board is already sorted, so this is one slice. */
+      const f = alive[Math.floor(W.rnd() * Math.min(3, alive.length))];
       summonsFrom = f;
-      return { name: String(f.rec.name).toUpperCase() + "'S RIDER", faction: "warlord", hostile: 0, size: 1,
+      return { name: String(f.name).toUpperCase() + "'S RIDER", faction: "warlord", hostile: 0, size: 1,
                mode: "approach", gold: 0,
                men: function () { return [W.makeSoldier("soldier", gunFor(0.6), { battles: 6 })]; } };
     },
     build: function (arg) {
       const rider = arg && arg.band;
-      /* raised on demand, because ?event=summons has to work on a page where
-         the player has not ridden far enough to meet anybody. The weight above
-         already refuses to fire this naturally without a live warlord. */
-      if (!ev().four) raiseTheFour();
-      const alive = fourAlive();
+      const alive = rivals();
       if (!alive.length) return null;
-      let f = (rider && summonsFrom && alive.indexOf(summonsFrom) >= 0) ? summonsFrom : alive[Math.floor(W.rnd() * alive.length)];
+      let f = alive[Math.floor(W.rnd() * Math.min(3, alive.length))];
+      if (rider && summonsFrom) {
+        for (let i = 0; i < alive.length; i++) if (alive[i].id === summonsFrom.id) f = alive[i];
+      }
       summonsFrom = null;
-      const name = f.rec.name;
+      const name = f.name;
       /* HE ANSWERS WITH EVERY COLUMN HE HAS. The old card picked one band and
          turned that one band around, which is what "he comes with everything
          he has" meant when a warlord WAS one band. He is a man with holdings
          and columns now, so the answer reaches all of them. */
-      const cols = (WL() && WL().columns) ? WL().columns(f.rec.wid) : [];
+      const cols = (WL() && WL().columns) ? WL().columns(f.id) : [];
       const tribute = Math.round(W.payroll() * 6 + size() * 9);
       return {
         title: esc(name) + ' SENDS A <em>RIDER</em>',
@@ -3158,171 +3216,153 @@
   }
   E.mutiny = mutiny;
 
-  /* ============================================================ THE FOUR
-     THE WIN CONDITION, AND WHY IT IS THIS ONE.
+  /* ============================================================ THE ISLAND
+     THE WIN CONDITION, AND WHY IT IS NO LONGER THE ONE THIS FILE INVENTED.
 
-     core.js already says four armies of 120-320 exist on this island and calls
-     them "the endgame" in a comment. That comment was the whole design; all
-     this does is give them names, put them on the map on purpose rather than
-     by accident, and make breaking them mean something. Taking every outpost
-     was the other candidate and it loses: outposts are where you SPEND, so a
-     win condition made of outposts turns the economy into a checklist. An army
-     you have to be able to beat is a win condition made of the thing the game
-     is actually about.
+     WHAT WAS HERE: THE FOUR. Four named warlords, picked once, and the run was
+     won when all four were broken. It was written against a comment in core.js
+     ("four armies of 120-320 exist on this island … they are the endgame") and
+     as an ARC it was good: break three and the survivor absorbs the rest and
+     comes for you. Two things killed it.
 
-     THE ARC has a shape rather than a count. Break three and the fourth stops
-     roaming: he absorbs what is left of the others and comes for you with
-     everything, and that fight is the end of the run either way. */
-  /* THE ISLAND ALREADY HAS ITS WARLORDS, AND IT USED TO HAVE TWO SETS.
+     ONE, IT COULD NOT COUNT. "Broken" was `men <= max(4, size0 * 0.15)`, and
+     match.js could not put a single column on the island (see its
+     COLUMN_CEILING tombstone), so every warlord had zero men and all four were
+     already broken before the player had met anybody. First aftermath of the
+     first skirmish: THE ISLAND IS YOURS, day one, two dead. That is the
+     screenshot the owner sent.
 
-     This file invented four: a hand-typed table of names and epithets, each
-     promoted onto some big band already on the map, stamped `band.warlord =
-     true`. warlord/match.js — built in the same wave as this rewrite — raises
-     FOURTEEN named warlords off the seed, gives each one holdings in
-     territory.js, columns on the sand, alliances, grudges and a colour, and
-     tags his parties `band.warlordId`. match.js:511 names the collision in its
-     own comment and measured it: those four read as columns belonging to a
-     warlord called "true", four phantom entries in its audit. Nothing read
-     this file's flag, so it was harmless — and two populations called "rival
-     warlord" on one island is exactly the drift CLAUDE.md is about, so the
-     invented four are gone and the endgame targets the real ones.
+     TWO, IT WAS A SCOREBOARD ABOUT FOUR PEOPLE ON AN ISLAND OF TWENTY-ONE.
+     Fourteen rivals, five factions and you all hold ground on the same map,
+     and a win condition that watches four of them is blind to the DESERT
+     LEGION taking a third of the north.
 
-     WHAT IS LOST: eight authored epithets and eight authored one-line notes.
-     What replaces the note is not prose, it is the fact — how much of the
-     island he holds, and whether he is your ally or a man you betrayed. That
-     is shorter, it is true, and it changes while you play.
+     WHAT IS HERE NOW is openfront's rule and nothing invented: THE RUN IS WON
+     WHEN YOU HOLD 80% OF THE PROVINCES. territory.js owns the arithmetic
+     (T.winTarget, derived off however many holdings the island cut itself
+     into), the fraction is on the strip from the first frame, and it cannot be
+     satisfied by an accident because every one of those provinces had to be
+     taken off somebody.
 
-     WHAT IS GAINED: breaking a warlord now means what match.js means by it
-     (he holds nothing and rides nothing, match.js's own retire()), his columns
-     are the columns you have been fighting all campaign, and the "last war"
-     absorption lands on a man who actually has ground. */
+     THE FOUR'S GOOD PARTS SURVIVE, pointed at the live standing instead of a
+     frozen list: the leaderboard screen (openWar), the summons card, and the
+     LAST WAR — when every other rival is out, the survivor takes in what is
+     left of them and comes for you. */
   function WL() { return (W.warlords && W.warlords.list) ? W.warlords : null; }
 
   function menOf(wid) {
     const M = WL();
-    if (!M || !M.columns) return 0;
-    const cols = M.columns(wid);
-    let n = 0;
-    for (let i = 0; i < cols.length; i++) n += cols[i].men.length;
-    return n;
-  }
-  function noteOf(w) {
-    const T = W.territory;
-    const held = (T && T.held) ? T.held(w.id).length : 0;
-    const M = WL();
-    let tail = "";
-    if (M && M.grudge && M.grudge(w.id)) tail = " · GRUDGE";
-    else if (M && M.allied && M.allied("you", w.id)) tail = " · ALLIED";
-    return held + (held === 1 ? " PROVINCE" : " PROVINCES") + tail;
+    if (!M || !M.menOut) return 0;
+    return M.menOut(wid);
   }
 
-  /* {rec, w, band, men, dist} — `band` is his NEAREST column, which is the one
-     the odds and the distance on the war screen are about. */
-  function fourList() {
-    const v = ev();
-    if (!v.four) return [];
+  /* THE STANDING, WITH THE THINGS THIS FILE CARES ABOUT WELDED ON. match.js's
+     leaderboard answers "who holds what and who has how many men out"; a
+     screen in here also needs his nearest column (that is the one the odds and
+     the distance are about) and whether he is your ally or a man you betrayed.
+
+     ONE row per contender, and every one of them is on it: you, fourteen named
+     rivals, any human peers, and each of core's five factions still holding
+     ground. THE FOUR was a list of four in a world of twenty-one. */
+  function board() {
     const M = WL();
-    const out = [];
-    for (let i = 0; i < v.four.length; i++) {
-      const rec = v.four[i];
-      const w = (M && M.warlord) ? M.warlord(rec.wid) : null;
-      const cols = (M && M.columns) ? M.columns(rec.wid) : [];
-      let band = null, bd = 1e18, n = 0, pow = 0;
-      for (let j = 0; j < cols.length; j++) {
-        const c = cols[j];
-        n += c.men.length;
-        pow += W.bandPower(c);
-        const d = Math.hypot(c.x - S.you.x, c.z - S.you.z);
-        if (d < bd) { bd = d; band = c; }
+    if (!M || !M.leaderboard) return [];
+    let rows = [];
+    try { rows = M.leaderboard(); } catch (e) { return []; }
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      r.band = null; r.dist = null; r.power = 0;
+      if (r.kind === "warlord" || r.kind === "peer") {
+        const cols = M.columns ? M.columns(r.id) : [];
+        let bd = 1e18;
+        for (let j = 0; j < cols.length; j++) {
+          const c = cols[j];
+          r.power += W.bandPower(c);
+          const d = Math.hypot(c.x - S.you.x, c.z - S.you.z);
+          if (d < bd) { bd = d; r.band = c; r.dist = d; }
+        }
+        r.note = r.grudge ? "HE HUNTS YOU" : r.allied ? "ALLIED" : "";
+      } else if (r.kind === "you") {
+        r.power = W.yourPower();
       }
-      out.push({ rec: rec, w: w, band: band, men: n, power: pow,
-                 dist: band ? bd : null });
     }
-    return out;
+    return rows;
   }
-  function fourAlive() {
-    const out = [];
-    const L = fourList();
-    for (let i = 0; i < L.length; i++) if (!L[i].rec.dead && L[i].w && L[i].w.alive) out.push(L[i]);
-    return out;
+  E.board = board;
+  /* the living rivals, best first — what the summons card picks from and what
+     the last war counts down to. */
+  function rivals() {
+    return board().filter(function (r) { return r.kind === "warlord" && !r.out; });
   }
-  E.four = fourList;
 
-  /* raise them once, the first time the player is actually on the island. The
-     targets are the biggest names match.js has out there — ranked by ground
-     first and columns second, because ground is what a warlord IS in this game
-     and a column is what he can spare today. If match.js has not raised its
-     roster yet this returns without setting v.four and the dawn hook tries
-     again, which is what the old code did too. */
-  function raiseTheFour() {
+  /* HOW MUCH OF THE ISLAND IS YOURS, and how much of it wins the run. One
+     call, because the chip, the leaderboard screen, the end screen and a
+     headless probe all print it and none of them may type 32. */
+  function land() {
+    const T = W.territory;
+    if (!T || !T.share) return { held: 0, of: 0, need: 0, won: false };
+    try { return T.share("you"); } catch (e) { return { held: 0, of: 0, need: 0, won: false }; }
+  }
+  E.land = land;
+
+  /* ============================================================ THE BOOK
+     WHO WENT OUT, AND WHEN THE LAST WAR STARTS.
+
+     This used to be checkFour(), and it is worth writing down exactly what it
+     did wrong because it is the bug the owner photographed. It marked a
+     warlord BROKEN when `men <= Math.max(4, size0 * 0.15)`, where size0 was
+     the men he had when the list was raised. match.js could not raise a single
+     column (see its COLUMN_CEILING tombstone), so every warlord had zero men,
+     so size0 was 1, so `0 <= 4` was true for all four of them — and the first
+     time anything called this, which is the first aftermath of the first
+     skirmish, all four "broke" and the run was WON. Day one, two dead.
+
+     There is no floor now and no size0. A warlord is out when match.js's
+     retire() says he is out — he holds nothing and rides nothing — which is
+     one system's answer to one question, and it cannot be true of a man who
+     has never been given anything to lose. */
+  function checkBoard() {
     if (FLAG_NOEND) return;
     const v = ev();
-    if (v.four) return;
     const M = WL();
     if (!M) return;
-    const T = W.territory;
-    const live = M.list().filter(function (w) { return w && w.alive && !w.peer; });
-    if (!live.length) return;
-    live.sort(function (a, b) {
-      const ha = (T && T.held) ? T.held(a.id).length : 0;
-      const hb = (T && T.held) ? T.held(b.id).length : 0;
-      if (hb !== ha) return hb - ha;
-      return menOf(b.id) - menOf(a.id);
-    });
-    v.four = [];
-    for (let i = 0; i < Math.min(FOUR_N, live.length); i++) {
-      const w = live[i];
-      v.four.push({ wid: w.id, name: w.name, size0: Math.max(1, menOf(w.id)), dead: 0 });
-    }
-    W.log(v.four.length + " names hold this island. Nobody else matters.", "");
-  }
-
-  function checkFour() {
-    if (FLAG_NOEND) return;
-    const v = ev();
-    if (!v.four) return;
-    let alive = 0, fellNow = null;
-    const L = fourList();
-    for (let i = 0; i < L.length; i++) {
-      const rec = L[i].rec;
-      if (rec.dead) continue;
-      /* BROKEN MEANS WHAT match.js MEANS BY IT. Its retire() clears `alive`
-         the dawn a warlord holds no ground and rides no column, and that is
-         the real death of a warlord in this game — one system's answer, not a
-         second one. The 15% floor stays on top of it because a man with nine
-         men left and one province is not a boss fight, he is admin, and
-         chasing him across fourteen kilometres is not the end of a campaign. */
-      const w = L[i].w;
-      if (!w || !w.alive || L[i].men <= Math.max(4, rec.size0 * 0.15)) {
-        rec.dead = S.day;
-        v.fell.push({ name: rec.name, day: S.day, size: rec.size0 });
-        fellNow = rec;
-        W.emit("events:warlord", { name: rec.name, fallen: true });
-      } else alive++;
+    const seen = {};
+    for (let i = 0; i < v.fell.length; i++) seen[v.fell[i].id] = 1;
+    const rows = board();
+    let live = 0, fellNow = null;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.kind !== "warlord") continue;
+      if (!r.out) { live++; continue; }
+      if (seen[r.id]) continue;
+      seen[r.id] = 1;
+      v.fell.push({ id: r.id, name: r.name, day: S.day });
+      fellNow = r;
+      W.emit("events:warlord", { name: r.name, fallen: true });
     }
     if (fellNow) {
-      W.log(fellNow.name + " is finished. " + alive + " left.", "good");
+      W.log(fellNow.name + " is finished. " + live + " rivals left.", "good");
       S.fame += 40;
       loyMove(+12, "they broke a warlord and they know it");
       W.toast(fellNow.name + " IS FINISHED", "good");
     }
-    if (alive === 0 && v.four.length) { victory(); return; }
-    /* THE LAST WAR. Three down and the survivor stops being a party on a map:
-       he takes in what is left of everyone else's columns and comes for you.
-       The absorption is real men built by core, at his own wealth, and it
-       lands on his NEAREST column, which is the one you will meet. */
-    if (alive === 1 && !v.last) {
-      const f = fourAlive()[0];
+    /* THE LAST WAR, POINTED AT THE LEADERBOARD'S TOP NAME. Everyone else is
+       out and the survivor stops being a party on a map: he takes in what is
+       left of the rest and comes for you. Kept exactly as it was — it is a
+       good moment — and only its trigger changed, from "three of four are
+       broken" to "he is the only rival left standing". */
+    if (live === 1 && !v.last) {
+      const f = rivals()[0];
       const b = f && f.band;
       if (b) {
-        v.last = f.rec.wid;
+        v.last = f.id;
         const take = Math.round(Math.max(1, f.men) * 0.45);
         for (let i = 0; i < take; i++) {
           const F = W.faction(b.faction);
           const tid = F.tiers[Math.floor(W.rnd() * F.tiers.length)];
           b.men.push(W.makeSoldier(tid, W.bandGunFor(b.wealth)));
         }
-        b.name = f.rec.name + " — THE LAST";
+        b.name = f.name + " — THE LAST";
         b.mood = "hunt";
         b.goal = { x: S.you.x, z: S.you.z };
         b.cooldown = 0;
@@ -3334,6 +3374,17 @@
         if (canOpen()) openWar();
       }
     }
+    checkVictory();
+  }
+
+  /* ============================================================ VICTORY IS LAND
+     openfront's rule, and territory.js owns the arithmetic (T.winTarget is
+     ceil(regions * 0.8), derived off however many holdings the island cut
+     itself into). This is only the moment it is noticed. */
+  function checkVictory() {
+    if (FLAG_NOEND) return;
+    if (ev().over) return;
+    if (land().won) victory();
   }
 
   /* ============================================================ THE END
@@ -3352,7 +3403,7 @@
        3. NOTHING LEFT. No men, no gold, nothing in the cart, three dawns
           running. Two warnings, then the salt.
 
-     WINNING is the four. */
+     WINNING IS LAND — 80% of the island's provinces, and see checkVictory. */
   function endRun(kind, why) {
     const v = ev();
     if (v.over) return;
@@ -3363,7 +3414,11 @@
   }
   E.over = endRun;
 
-  function victory() { endRun("won", "There is nobody left on this island who can tell you no."); }
+  function victory() {
+    const l = land();
+    endRun("won", "You hold " + l.held + " of the island's " + l.of +
+      " provinces. There is nobody left on it who can tell you no.");
+  }
 
   function bankruptCheck() {
     if (FLAG_NOEND) return;
@@ -3415,13 +3470,22 @@
     }
     if (!shown.length) names = '<span class="wl-dim">NOBODY</span>';
 
-    let four = "";
-    const L = fourList();
-    for (let i = 0; i < L.length; i++) {
-      const rec = L[i].rec;
-      four += '<div class="w' + (rec.dead ? " dead" : "") + '"><b>' + esc(rec.name) + '</b>' +
-        '<div class="wl-small wl-dim">' + (rec.dead ? "BROKEN — DAY " + rec.dead
-          : L[i].men ? L[i].men + " MEN, STILL OUT THERE" : "GONE") + '</div></div>';
+    /* THE FINAL STANDINGS, and they are the same picture as the leaderboard
+       you have been reading all run rather than a second one written for the
+       ending. Capped at ten rows: on a 393 pt phone twenty-one contenders is
+       a scroll nobody reaches the bottom of, and the bottom of a leaderboard
+       is where the people who lost are. */
+    const rows = board();
+    const l = land();
+    let stand = "";
+    for (let i = 0; i < rows.length && i < 10; i++) {
+      const r = rows[i];
+      stand += '<div class="w' + (r.out ? " dead" : "") + '"' +
+        (r.kind === "you" ? ' style="border-color:#ff8a3d"' : '') + '><b>' + esc(r.name) + '</b>' +
+        '<div class="wl-small wl-dim">' + (r.out ? "OUT" :
+          r.held + (r.held === 1 ? " PROVINCE" : " PROVINCES") + " · " +
+          (r.kind === "faction" ? (r.parties || 0) + " PARTIES" : r.men + " MEN")) +
+        '</div></div>';
     }
 
     takeScreen(
@@ -3431,17 +3495,24 @@
       '<div class="wl-card"><div style="opacity:.9;line-height:1.5;font-weight:500">' +
         esc(v.over ? v.over.why : "") + '</div></div>' +
       '<div class="wl-lbl">THE RUN</div>' +
+      /* THE RUN, AS THE GAME NOW MEASURES IT. PROVINCES HELD is first after
+         the day count because it is the win condition — a summary whose top
+         line is not the thing you were playing for is a summary of a
+         different game. HIRED/PRESSED split into their own tiles because the
+         aftermath's three verbs are exactly that decision, made over and over,
+         and this is the only place the run adds them up. */
       '<div class="wl-stats">' +
         statCard("DAYS", S.day) +
+        statCard("PROVINCES HELD", l.held + " OF " + l.of) +
         statCard("BIGGEST COLUMN", v.peak + " MEN") +
         statCard("BATTLES", (st.battles || 0) + " — " + (st.won || 0) + " WON") +
         statCard("THEY LOST", (st.killed || 0) + " DEAD") +
         statCard("YOU LOST", (st.lost || 0) + " DEAD") +
-        statCard("HIRED / PRESSED", (st.recruited || 0) + " / " + (st.conscripted || 0)) +
+        statCard("PRESSED", st.conscripted || 0) +
         statCard("EXECUTED", st.executed || 0) +
         statCard("FAME", S.fame) +
       '</div>' +
-      '<div class="wl-lbl">THE FOUR</div><div class="wl-four">' + four + '</div>' +
+      '<div class="wl-lbl">THE ISLAND</div><div class="wl-four">' + stand + '</div>' +
       '<div class="wl-lbl">YOUR DEAD — ' + fallen.length + '</div>' +
       '<div class="wl-card">' + names + '</div>' +
       '<div class="wl-btns">' +
@@ -3542,7 +3613,7 @@
       '<div class="wl-btns">' +
         '<button class="wl-btn hot" id="loBack">BACK</button>' +
         '<button class="wl-btn" id="loCh">THE CHRONICLE</button>' +
-        (fourList().length ? '<button class="wl-btn" id="loWar">THE FOUR</button>' : '') +
+        (board().length ? '<button class="wl-btn" id="loWar">THE ISLAND</button>' : '') +
       '</div></div>'
     );
     const b = ctx.el("loBack");
@@ -3554,43 +3625,72 @@
   }
   E.loyaltyScreen = openLoyalty;
 
-  /* ---- THE FOUR: the progress bar for the whole run ---- */
+  /* ---- THE ISLAND: the leaderboard, and the progress bar for the whole run ----
+     This screen was THE FOUR: four frozen names, a bar counting how many of
+     them you had broken, and the odds against each. Two of those three were
+     lies about the game. The four were picked once at boot out of twenty-one
+     contenders and never re-picked, so the DESERT LEGION could take nine
+     provinces and not appear on the screen that says who is winning; and the
+     bar measured a win condition that no longer exists.
+
+     What is here instead is the standing — everybody on the island, ranked the
+     way the game itself ranks them, with your own row marked — under the one
+     bar that IS the run: how much of the island you hold against how much of
+     it wins. The odds are kept, on the rivals, because "can I take him" is
+     still the question you open this screen with. */
   function openWar() {
+    /* ?events=off ADDS NOTHING TO THE PAGE, and that promise covers the
+       screens too. board() reads match.js and territory.js, both of which are
+       alive under the flag, so without this guard the whole-wave revert
+       photographed a fully populated leaderboard — a "before" side showing the
+       feature it is the before side of. */
+    if (FLAG_NOEVENTS) return;
     css();
-    const L = fourList();
+    const rows = board();
     const v = ev();
-    let cards = "";
+    const l = land();
     const mine = W.yourPower();
-    for (let i = 0; i < L.length; i++) {
-      const f = L[i], rec = f.rec;
-      /* the whole man, not his nearest column: he is beaten when everything
-         he has out there is beaten, so the odds are against all of it. */
-      const odds = f.power > 0 ? W.odds(mine, f.power) : 1;
+    let cards = "";
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
       let line;
-      if (rec.dead) line = "BROKEN ON DAY " + rec.dead;
-      else if (!f.men) line = "NOTHING IN THE FIELD";
-      else {
-        const d = Math.round(f.dist);
-        line = f.men + " MEN · " + (d > 999 ? (d / 1000).toFixed(1) + " km" : d + " m") + " · YOU WIN " + Math.round(odds * 100) + "%";
+      if (r.out) line = "OUT";
+      else if (r.kind === "you") line = r.men + " MEN RIDING WITH YOU";
+      /* A FACTION IS A POPULATION, NOT AN ARMY. Its "men" are two hundred
+         unrelated caravans and looter crews sharing a colour, so printing that
+         total beside a warlord's 185-man column claims a command that does not
+         exist. Parties is the honest unit for it, and it is the one that says
+         what the island actually looks like. */
+      else if (r.kind === "faction") {
+        line = (r.parties || 0) + (r.parties === 1 ? " PARTY" : " PARTIES") + " ON THE ISLAND";
       }
-      cards += '<div class="w' + (rec.dead ? " dead" : "") + '"><b>' + esc(rec.name) + '</b>' +
-        '<div class="wl-small wl-dim" style="margin-bottom:5px">' + esc(f.w ? noteOf(f.w) : "") + '</div>' +
+      else if (!r.men) line = "NOTHING IN THE FIELD";
+      else if (r.dist != null) {
+        const d = Math.round(r.dist);
+        line = r.men + " MEN · " + (d > 999 ? (d / 1000).toFixed(1) + " km" : d + " m") +
+          " · YOU WIN " + Math.round(W.odds(mine, r.power || 1) * 100) + "%";
+      } else line = r.men + " MEN OUT";
+      const odds = r.power > 0 ? W.odds(mine, r.power) : 0;
+      cards += '<div class="w' + (r.out ? " dead" : "") + '"' +
+        (r.kind === "you" ? ' style="border-color:#ff8a3d"' : '') + '>' +
+        '<b>' + (r.rank) + '. ' + esc(r.name) + '</b>' +
+        '<div class="wl-small wl-dim" style="margin-bottom:5px">' +
+          r.held + (r.held === 1 ? " PROVINCE" : " PROVINCES") +
+          (r.note ? " · " + esc(r.note) : "") + '</div>' +
         '<div class="wl-small">' + esc(line) + '</div>' +
-        (f.men && !rec.dead ? meter(odds, odds > 0.5 ? "good" : "bad") : "") +
+        (!r.out && r.kind !== "you" && r.power > 0 ? meter(odds, odds > 0.5 ? "good" : "bad") : "") +
         '</div>';
     }
-    const done = v.fell.length, total = L.length;
     takeScreen(
       '<div class="wl-ch">' +
-      '<h1 class="wl-h">THE <em>FOUR</em></h1>' +
-      '<p class="wl-sub">' + done + " OF " + total + ' BROKEN' + (v.last ? " · THE LAST WAR" : "") + '</p>' +
-      /* THE SECOND LINE ONLY SURVIVES WHEN IT IS NEWS. "Four names hold this
-         island. Break all four and there is nobody left who can tell you no."
-         is the win condition explained under a progress bar reading "1 OF 4
-         BROKEN" — the bar is the sentence. The LAST WAR line stays, because
-         that is not a rule, it is a thing that has just happened to you. */
-      '<div class="wl-card">' + meter(total ? done / total : 0, done === total ? "good" : "") +
-        (v.last ? '<div class="wl-small wl-dim" style="margin-top:7px">Three are down. ' +
+      '<h1 class="wl-h">THE <em>ISLAND</em></h1>' +
+      '<p class="wl-sub">' + l.held + " OF " + l.of + ' · YOURS AT ' + l.need +
+        (v.last ? " · THE LAST WAR" : "") + '</p>' +
+      /* THE BAR IS THE WIN CONDITION AND THE BAR IS THE SENTENCE. No line
+         under it explaining that eighty percent of the island ends the run —
+         the bar has a target on it and the sub-heading says the number. */
+      '<div class="wl-card">' + meter(l.need ? l.held / l.need : 0, l.won ? "good" : "") +
+        (v.last ? '<div class="wl-small wl-dim" style="margin-top:7px">Every other rival is out. ' +
           'The survivor has taken in what is left of them and he is coming.</div>' : '') +
         '</div>' +
       '<div class="wl-four">' + cards + '</div>' +
@@ -3644,11 +3744,19 @@
       c2.textContent = isNight() && v.wea === "clear" ? "NIGHT" : WEATHER[v.wea].label;
       h.appendChild(c2);
     }
-    const L = fourList();
-    if (L.length) {
+    /* THE CHIP IS THE RUN'S PROGRESS AND IT IS LAND. It read "0/4 WARLORDS",
+       which was a count of a win condition that has been deleted and which
+       printed 0/4 for the whole of a run in which you took half the island.
+       territory.js's own chip carries the fraction; this one is the rank —
+       where you stand on the leaderboard the screen behind it opens. */
+    const rows = board();
+    if (rows.length) {
+      let me = null;
+      for (let i = 0; i < rows.length; i++) if (rows[i].kind === "you") { me = rows[i]; break; }
       const c3 = document.createElement("span");
       c3.className = "chip act wl-evchip";
-      c3.textContent = ev().fell.length + "/" + L.length + " WARLORDS";
+      c3.textContent = me ? ("#" + me.rank + " OF " + rows.length) : "THE ISLAND";
+      if (me && me.rank === 1) c3.style.color = "#8fe0a2";
       c3.onclick = function () { if (W.phase() === "campaign") openWar(); };
       h.appendChild(c3);
     }
@@ -3676,6 +3784,42 @@
       if (v.wea === "heat") loyMove(-2.5, "marched in killing heat");
       if (S.prisoners.length > S.army.length * 0.5 && S.prisoners.length > 4) {
         loyMove(-2, "the wire is bigger than the column");
+      }
+    }
+
+    /* ---- THE MEN WHO SAID NO ------------------------------------------
+       PRESS EVERY MAN is army.js's second verb: the unwilling march too. This
+       is what it costs, and it is the reason it is a decision rather than a
+       free TAKE ALL.
+
+       WHO: a man whose provenance row is BASE_PRESSED — this file's own
+       existing record of "he did not choose you", which the aftermath stamps
+       before he is added. No new field on core's soldier and no second list.
+
+       HOW OFTEN: his own doubt (1 - bondOf) against the army's own opinion of
+       you (1 - loyalty), at the same per-dawn rate the loyalty drift above
+       runs at. Every term is a number this file already keeps. A pressed levy
+       in a devoted column is under two in a hundred a night; the same man in a
+       sullen one is nearly one in five. So pressing a whole company is
+       survivable if the rest of the army likes you and it bleeds out over a
+       fortnight if it does not — which is exactly the trade the verb is for.
+
+       AND HE TAKES HIS RIFLE. removeSoldier's keepKit:false — he is not
+       deserting into your cart, he is walking off into the desert with what
+       you handed him. */
+    if (!FLAG_NOLOYALTY && S.army.length) {
+      const DRIFT = 0.3;                       // the same per-dawn rate as above
+      const gone = [];
+      for (let i = 0; i < S.army.length; i++) {
+        const s = S.army[i];
+        if ((v.base[s.id] == null ? BASE_UNKNOWN : v.base[s.id]) > BASE_PRESSED + 0.02) continue;
+        if (W.chance((1 - bondOf(s)) * (1 - v.loy / 100) * DRIFT)) gone.push(s);
+      }
+      for (let i = 0; i < gone.length; i++) W.removeSoldier(gone[i].id, false);
+      if (gone.length) {
+        W.log(gone.length + (gone.length === 1 ? " pressed man was" : " pressed men were") +
+          " gone before light, and their rifles with them.", "bad");
+        loyMove(-gone.length * 0.5, "the men you pressed are walking");
       }
     }
 
@@ -3729,7 +3873,7 @@
       }
     }
 
-    checkFour();
+    checkBoard();
     bankruptCheck();
     paintChips();
   }
@@ -3797,7 +3941,7 @@
     setTimeout(function () {
       safe(function () {
         if (end) { endRun(end[0], end[1]); return; }
-        checkFour();
+        checkBoard();
       });
     }, 0);
   }
@@ -3956,7 +4100,13 @@
       loyalty: loyalty(), mood: mood().label, ceiling: Math.round(avgBond() * 100),
       unrest: v.unrest, weather: v.wea, vis: Math.round(visibility()),
       night: isNight(), events: LIB.length, fired: v.seen,
-      four: fourList().map(function (f) { return f.rec.name + (f.rec.dead ? " (dead)" : " " + f.men); }),
+      /* THE STANDING, top five, as strings — what a probe and a ba preset
+         read. `four` is gone with the mechanic it named. */
+      land: land(),
+      board: board().slice(0, 5).map(function (r) {
+        return r.rank + ". " + r.name + " " + r.held + "p/" + r.men + "m" + (r.out ? " (out)" : "");
+      }),
+      rivalsLeft: rivals().length, fell: ev().fell.length,
       fallen: v.fallen.length, over: v.over ? v.over.kind : null, peak: v.peak,
     };
   };
@@ -4016,10 +4166,16 @@
        still there when the game comes back and its men are still not on the
        roster. They fall in on load. */
     W.on("loaded", function () { safe(sweepJoiners); });
-    W.on("campaign:ready", function () { safe(raiseTheFour); safe(rollWeather); safe(paintChips); });
+    W.on("campaign:ready", function () { safe(rollWeather); safe(paintChips); });
     W.on("phase:campaign", function () { setTimeout(function () { safe(pending); }, 600); });
-    // if campaign never emits its ready event, the first dawn still raises them
-    W.on("dawn", function () { if (!ev().four) safe(raiseTheFour); });
+    /* THE WIN IS CHECKED WHEREVER A PROVINCE CHANGES HANDS, not only at dawn.
+       Taking your thirty-second province in a battle at noon has to end the
+       run at noon; waiting for the next dawn is a game that says nothing
+       happened for six hours after you won it. */
+    W.on("territory:claim", function (c) {
+      if (!c || (c.to !== "you" && c.from !== "you")) return;
+      setTimeout(function () { safe(checkVictory); safe(paintChips); }, 0);
+    });
 
     if (CBZ.onAlways) CBZ.onAlways(96, function (dt) { safe(function () { tick(dt); }); });
     /* order 20, i.e. AFTER campaign.js's day tint at -20. See tintStorm. */
@@ -4084,7 +4240,6 @@
         if (opened) return;
         opened = true;
         setTimeout(function () {
-          safe(raiseTheFour);
           safe(stage);
           if (want === "chronicle") return openChronicle(null);
           if (want === "loyalty") return openLoyalty();

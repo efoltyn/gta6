@@ -218,7 +218,29 @@
   W.WARLORD_N = WARLORD_N;
   const COLUMNS_BASE = 1, COLUMNS_PER = 0.5, COLUMNS_MAX = 5;
   const COLUMN_MEN_LO = 35, COLUMN_MEN_HI = 190;
-  const COLUMN_CEILING = 150;        // total parties on the island, banner-limited
+  /* COLUMN_CEILING IS DELETED AND THIS IS ITS TOMBSTONE, because it was the
+     single line that made this whole file a scoreboard again.
+
+       const COLUMN_CEILING = 150;   // total parties on the island, banner-limited
+       …
+       if ((S().bands || []).length >= COLUMN_CEILING) return null;
+
+     The caption is wrong twice. campaign.js's BANNER_CAP does not limit the
+     POPULATION of the island — it limits how many banners are drawn in one
+     frame, out of the parties within 1.5 km — and it is 420, not 150. And the
+     comparison is against every party on the island, which the scale wave took
+     to 444. So the guard was true on the first frame of every game ever
+     played: raiseColumn() returned null fourteen times at boot and once per
+     warlord per dawn forever after. Measured on seed 1337, day 1:
+     `{warlords:14, alive:14, holdings:14, columns:0, islandBands:444}`.
+     Fourteen rival warlords, no rival warlord.
+
+     THE BUDGET IS NOW SOMEBODY ELSE'S NUMBER AND THE COLUMNS COME OFF THE TOP.
+     campaign.js publishes C.partyCap() (derived from the save quota, which is
+     the island's real ceiling) and asks this file for reserve() — the columns
+     the rivals are entitled to — before it decides how many anonymous crews to
+     add. So if the world is ever genuinely full it is the looters that do not
+     spawn. A warlord rides fewer columns only when he holds less ground. */
   const ANSWER_DAYS = 1;
   const OFFER_DAYS = 3;
   const BETRAYAL_MEMORY = 3;
@@ -484,13 +506,28 @@
     return n;
   }
 
+  /* WHAT THE RIVALS ARE ENTITLED TO, published for campaign.js's spawner. Every
+     living warlord's full allowance, plus a column each for the humans, so the
+     neutral population is sized around the columns rather than the columns
+     being fitted into whatever the neutrals left. */
+  function reserve() {
+    let n = 0;
+    for (let i = 0; i < M.order.length; i++) if (M.wl[M.order[i]].alive) n += COLUMNS_MAX;
+    return n + Object.keys(S().peers || {}).length;
+  }
+  function partyCap() {
+    const C = W.campaign;
+    if (C && C.partyCap) { try { return C.partyCap() | 0; } catch (e) {} }
+    return 1320;
+  }
+
   /* SPAWNING IS THE ONE PLACE THIS FILE TOUCHES core's RNG, and it is host
      only for exactly that reason — see DETERMINISM in the header. */
   function raiseColumn(w) {
     const t = T();
     const C = W.campaign;
     if (!t || !C || !C.spawnBand) return null;
-    if ((S().bands || []).length >= COLUMN_CEILING) return null;
+    if ((S().bands || []).length >= partyCap()) return null;
     const mine = t.held(w.id);
     if (!mine.length) return null;
     const r = mine[Math.floor(W.hash01(w.idx, day(), 61) * mine.length) % mine.length];
@@ -557,23 +594,177 @@
   }
 
   /* Every dawn: bring each living warlord's column count up to what his
-     ground can pay for, and retire the warlord who has neither. */
+     ground can pay for, march the men his ground raised, take what he has been
+     sitting on, and retire the warlord who has neither ground nor a column. */
   function keepColumns() {
     if (!isHost()) return;                       // host authors, guests render
     for (let i = 0; i < M.order.length; i++) {
       const w = M.wl[M.order[i]];
       if (!w.alive) continue;
-      const have = columnsOf(w.id).length;
-      const want = columnsWanted(w);
-      if (have < want) raiseColumn(w);           // one a dawn — an army is raised, not conjured
-      if (!have && !want) retire(w);
+      if (columnsOf(w.id).length < columnsWanted(w)) raiseColumn(w);
+      topUpColumns(w);
+      takeEmptyGround(w);
+      if (!columnsOf(w.id).length && !holdings(w.id)) retire(w);
     }
   }
+
+  /* HIS COLUMNS ARE FED BY HIS GROUND, NOT CONJURED, and that is the rule
+     every side of this game now plays by. territory.js raises a levy into
+     every holding at dawn — the men that ground feeds, as core soldiers for
+     you and as strength for everybody else — and this is the rival's version
+     of the player's RAISE THE LEVY: the men walk to his nearest column and he
+     rides with them. A warlord who is being ground down gets weaker every
+     dawn because he has less ground raising less levy, which is the whole
+     point of a map; the old file's answer to a lost column was to spawn a
+     fresh 35-190 man party out of nothing, which meant taking his provinces
+     cost you nothing at all.
+
+     THE COLUMN HAS A CEILING and the ground banks the rest. COLUMN_MEN_HI is
+     already this file's statement of how big a rival's retinue gets (core's
+     BAND_CLASSES call that seam the top of a COMPANY); past it he needs
+     another column, which columnsWanted only gives him for more ground. */
+  function topUpColumns(w) {
+    const t = T();
+    if (!t || !t.levyPower) return 0;
+    const cols = columnsOf(w.id);
+    if (!cols.length) return 0;
+    const mine = t.held(w.id);
+    const lp = t.levyPower();
+    const wid = W.cheapestGun ? W.cheapestGun() : "sidearm";
+    let moved = 0;
+    for (let i = 0; i < mine.length; i++) {
+      const r = mine[i];
+      const p = t.garrisonPower(r.id);
+      if (!(p > 0) || !(lp > 0)) continue;
+      let b = null, bd = 1e18;
+      for (let k = 0; k < cols.length; k++) {
+        if (cols[k].men.length >= COLUMN_MEN_HI) continue;
+        const dx = cols[k].x - r.x, dz = cols[k].z - r.z;
+        const d = dx * dx + dz * dz;
+        if (d < bd) { bd = d; b = cols[k]; }
+      }
+      if (!b) break;                             // every column is full
+      const n = Math.min(COLUMN_MEN_HI - b.men.length, Math.floor(p / lp));
+      if (n < 1) continue;
+      for (let k = 0; k < n; k++) b.men.push(W.makeSoldier("levy", wid));
+      t.setGarrisonPower(r.id, Math.max(0, p - n * lp));
+      moved += n;
+    }
+    return moved;
+  }
+
+  /* AND HE TAKES EMPTY GROUND BY STANDING ON IT, exactly as you do. Without
+     this a warlord could only ever grow through territory.js's warDawn, which
+     asks pressureOn() — and pressureOn only looks at a region's NEIGHBOURS'
+     owners, so unclaimed ground nobody borders is invisible to it and a
+     warlord ground down to no provinces at all can never take another one
+     however many men he still has out. The player's rule is one campaign
+     HOUR; his is two DAWNS on the same holding, because he is a column on a
+     map and you are a man standing there. */
+  function takeEmptyGround(w) {
+    const t = T();
+    if (!t || !t.at) return false;
+    const cols = columnsOf(w.id);
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      const r = t.at(c.x, c.z);
+      if (!r || t.owner(r.id)) { c._sat = null; continue; }
+      if (c._sat !== r.id) { c._sat = r.id; continue; }
+      c._sat = null;
+      t.claim(r.id, w.id);
+      return true;                               // one province a dawn, like the war
+    }
+    return false;
+  }
+
+  /* BROKEN MEANS RETIRED, AND THIS FUNCTION IS THE ONLY DEFINITION OF IT.
+     events.js used to keep a second one — a warlord counted as "broken" when
+     his men fell under 15% of what he started with — and that floor is what
+     ended a run on day one: every warlord started with ZERO men (no column
+     could be raised), so `men <= max(4, 0.15 * 1)` was true for all of them
+     the first time anything asked. One system's answer, not a second one. */
   function retire(w) {
     if (!w.alive) return;
     w.alive = false;
     W.log(w.name + " holds nothing and rides nothing.", "bad");
     W.emit("warlords:out", { id: w.id });
+  }
+
+  /* ============================================================ THE LEADERBOARD
+     WHO IS WINNING THIS ISLAND, and it is a question with one answer for
+     everybody on it.
+
+     events.js used to keep its own: THE FOUR, a frozen list of four names
+     picked once at boot, with the run's win condition hanging off it. That is
+     a scoreboard about four people on an island of twenty-one contenders, and
+     it went stale the moment a fifth warlord took ground. This replaces it,
+     and it is DERIVED — there is nothing to raise, nothing to keep in sync and
+     nothing to go stale, because it is read off the map and off S.bands every
+     time somebody asks.
+
+     RANKED BY PROVINCES, THEN BY MEN OUT, because that is the order the game
+     itself values them in: ground raises men and men take ground, so a man
+     with six provinces and a small column is ahead of one with a big column
+     and two. It is the same sort raiseTheFour used to pick its four with — the
+     ranking was already right, it was the freezing that was wrong.
+
+     EVERYBODY IS ON IT. You, every named rival, every human peer, and each of
+     core's five factions that still holds something or still has parties out —
+     because an island where the leaderboard only lists warlords is an island
+     where the DESERT LEGION taking nine provinces is invisible. */
+  function menOut(id) { return countOut(id).men; }
+  /* MEN AND PARTIES ARE DIFFERENT FACTS AND THE BOARD PRINTS DIFFERENT ONES.
+     A warlord's men are an ARMY — a handful of columns he commands. A
+     faction's are the island's population: two hundred unrelated caravans,
+     looter crews and patrols that share a colour and nothing else. Printing
+     "OASIS MILITIA · 3 359 MEN OUT" next to "BREN VALE ONE-HAND · 185 MEN" as
+     if they were the same kind of number reads as the militia being nineteen
+     times the warlord, which is not what either of those is. Both are counted
+     here; whoever draws the row picks the one that is true of it. */
+  function countOut(id) {
+    const t = T();
+    const B = S().bands || [];
+    let men = 0, parties = 0;
+    for (let i = 0; i < B.length; i++) {
+      const b = B[i];
+      if (!b.men || !b.men.length) continue;
+      const o = t && t.bandOwner ? t.bandOwner(b) : (b.warlordId || b.faction);
+      if (o !== id) continue;
+      men += b.men.length;
+      parties++;
+    }
+    if (id === ME) men += W.armySize();
+    return { men: men, parties: parties };
+  }
+  function leaderboard() {
+    const t = T();
+    const rows = [];
+    const held = function (id) { try { return t ? t.held(id).length : 0; } catch (e) { return 0; } };
+    const me = countOut(ME);
+    rows.push({ id: ME, kind: "you", name: (S().you && S().you.name) || "YOU",
+                colour: 0xff8a3d, held: held(ME), men: me.men, parties: me.parties, out: false });
+    for (let i = 0; i < M.order.length; i++) {
+      const w = M.wl[M.order[i]];
+      const c = countOut(w.id);
+      rows.push({ id: w.id, kind: w.peer != null ? "peer" : "warlord", name: w.name,
+                  colour: w.colour, held: held(w.id), men: c.men, parties: c.parties,
+                  out: !w.alive, grudge: !!w.grudge, allied: allied(ME, w.id) });
+    }
+    const F = W.FACTIONS || [];
+    for (let i = 0; i < F.length; i++) {
+      const h = held(F[i].id), c = countOut(F[i].id);
+      if (!h && !c.men) continue;
+      rows.push({ id: F[i].id, kind: "faction", name: F[i].label, colour: F[i].colour,
+                  held: h, men: c.men, parties: c.parties, out: !h && !c.men });
+    }
+    rows.sort(function (a, b) {
+      if (a.out !== b.out) return a.out ? 1 : -1;
+      if (b.held !== a.held) return b.held - a.held;
+      if (b.men !== a.men) return b.men - a.men;
+      return a.name < b.name ? -1 : 1;
+    });
+    for (let i = 0; i < rows.length; i++) rows[i].rank = i + 1;
+    return rows;
   }
 
   /* ============================================================ THE STANDING */
@@ -1002,6 +1193,14 @@
     warlord: wl,
     colourOf: function (id) { const w = wl(id); return w ? w.colour : 0x9a8f72; },
     columns: columnsOf,
+    /* THE STANDING, for events.js's screens and for a headless probe. Derived
+       on every call: there is no roster to raise and nothing to go stale. */
+    leaderboard: leaderboard,
+    menOut: menOut,
+    countOut: countOut,
+    /* what campaign.js's spawner holds back for the rivals — see reserve() */
+    reserve: reserve,
+    alive: function (id) { const w = wl(id); return !!(w && w.alive); },
 
     // ---- the standing. territory.js asks allied() on every frontier.
     allied: allied,
@@ -1048,7 +1247,23 @@
         offersOpen: Object.keys(M.wait).length,
         betrayals: M.myBetrayals,
         regions: t ? t.regions.length : 0,
-        ceiling: COLUMN_CEILING,
+        columnMen: (function () {
+          let n = 0;
+          for (let i = 0; i < M.order.length; i++) n += menOut(M.order[i]);
+          return n;
+        })(),
+        /* THE ONE THAT WOULD HAVE CAUGHT IT: how many living warlords have no
+           column at all. It was fourteen of fourteen for the life of this file
+           and nothing printed it. */
+        columnless: (function () {
+          let n = 0;
+          for (let i = 0; i < M.order.length; i++) {
+            const w = M.wl[M.order[i]];
+            if (w.alive && !columnsOf(w.id).length) n++;
+          }
+          return n;
+        })(),
+        reserve: reserve(), cap: partyCap(),
         host: isHost(), online: online(),
       };
     },

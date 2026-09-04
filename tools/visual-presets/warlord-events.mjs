@@ -119,15 +119,27 @@ export default {
         "numbers. In a game where every man has a name the log is the save file's soul; before this it " +
         "was a strip that scrolled past you once." },
     { id: "four", event: "war",
-      label: "The endgame has a progress bar",
+      label: "The endgame is a leaderboard and the win is land",
       focus:
-        "AFTER: four named warlords, how big each is, how far away, and the odds core.js gives you against " +
-        "each one. This is the long arc made visible. BEFORE: the game cannot be won." },
+        "AFTER: THE ISLAND — every contender on the map ranked by provinces held then men out, your own row " +
+        "marked, the odds core.js gives you against each rival, over one bar: how much of the island you hold " +
+        "against how much of it wins the run (32 of 40, derived from T.winTarget). This replaced THE FOUR, which " +
+        "was four names frozen at boot in a world of twenty-one and which ended runs on day one. BEFORE: the " +
+        "game cannot be won." },
     { id: "summary", event: "over",
       label: "The run summary",
       focus:
-        "AFTER: what you became, the numbers, the fate of the four, and YOUR DEAD BY NAME — the reason " +
-        "core.js gives every soldier a name. BEFORE: the run cannot end." },
+        "AFTER: what you became, the run as nine numbers (DAYS / PROVINCES HELD / BIGGEST COLUMN / BATTLES / " +
+        "THEY LOST / YOU LOST / PRESSED / EXECUTED / FAME), THE ISLAND's final standings, and YOUR DEAD BY NAME " +
+        "— the reason core.js gives every soldier a name. BEFORE: the run cannot end." },
+    { id: "prisoners", event: "aftermath",
+      label: "They decide, then you decide",
+      focus:
+        "AFTER: the aftermath's prisoner block. One line — how many of the men you took will march for you and " +
+        "how many will not, rolled once before you touch anything — over a tier bar with the unwilling hatched, " +
+        "and AT MOST THREE VERBS: TAKE THE WILLING, PRESS EVERY MAN, SHOOT THE UNWILLING. What was here was four " +
+        "priced bulk buttons plus four more per man behind a triangle, and a roll that could refuse you after you " +
+        "had paid. BEFORE: events.js is off, so this is the same screen this checkout draws without it." },
   ],
 
   metrics: {
@@ -211,6 +223,22 @@ export default {
       else if (want === "chronicle") { try { E.chronicle(); fired = true; } catch (_) {} }
       else if (want === "loyalty") { try { E.loyaltyScreen(); fired = true; } catch (_) {} }
       else if (want === "war") { try { E.war(); fired = true; } catch (_) {} }
+      else if (want === "aftermath") {
+        /* THE PRISONER SCREEN NEEDS PRISONERS, and the ?event= door does not
+           stage any — it stages an ARMY. A band off the same seeded stream is
+           the honest source: the same men, in the same order, on both sides. */
+        try {
+          const b = W.makeBand({ size: 22, faction: "bandit", x: W.state.you.x, z: W.state.you.z });
+          for (let i = 0; i < b.men.length; i++) W.state.prisoners.push(b.men[i]);
+          W.army.aftermath({
+            band: b, outcome: "won", duration: 74, ratio: 1.9, gold: 240,
+            yourDead: W.state.army.slice(0, 3), yourSurvivors: W.state.army.slice(3), yourFled: [],
+            theirDead: [], theirSurvivors: W.state.prisoners.slice(),
+            loot: { ak47: 9, "12g": 4 }, armourLoot: { vest: 3 }, alreadyBanked: true,
+          });
+          fired = true;
+        } catch (_) {}
+      }
       else if (want === "over") {
         try {
           E.over("killed", "You went down at the salt pan and there was nobody left standing to pick you up.");
@@ -278,7 +306,7 @@ export default {
         cardChars: bodyText.length,
         loyaltyVisible,
         visibility: fogFar,
-        warlords: audit && audit.four ? audit.four.length : 0,
+        warlords: audit && audit.board ? audit.board.length : 0,
         library: audit ? audit.events || 0 : 0,
       },
     };

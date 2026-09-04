@@ -42,8 +42,7 @@
    phase switched the island off behind it.
 
    FLAGS (repo doctrine: every behaviour switch reverts in one param)
-     ?dread=old     executions stop discouraging future surrenders (see DREAD)
-     ?conscript=old conscription is a flat roll again, tier-blind
+     ?conscript=old the willing/unwilling roll is a flat 0.6 again, tier-blind
      ?show=old      no tableaux: every act above is the mutation and the toast
                     again, and the meeting keeps the phase (see THE SAND)
      ?encounter=1   debug: put a generated band's card up at boot
@@ -62,39 +61,40 @@
     });
   };
 
-  /* ============================================================ DREAD
-     THE EXECUTE TRADE-OFF, MADE REAL.
+  /* ============================================================ FEAR
+     THE EXECUTE TRADE-OFF, AND IT NOW POINTS THE OTHER WAY.
 
-     The brief says executing prisoners must make future bands LESS willing to
-     surrender — "a warlord who kills prisoners gets fought to the last man" —
-     and core's surrenderChance cannot express that on its own. Its reputation
-     term is `clamp(S.fame / 900, 0, 0.16)`: fame only ever ADDS, and the clamp
-     floors a negative reputation at zero. So under the shipped formula an
-     execution costs you the fame you would have gained by releasing him and
-     nothing else, which is a smaller penalty than the mercy is a bonus — the
-     opposite of the mechanic the brief describes.
+     WHAT WAS HERE WAS DREAD: every prisoner you shot made future bands LESS
+     likely to surrender — "a warlord who kills prisoners gets fought to the
+     last man". It was built to an older brief and it is a coherent mechanic.
+     It is also, on this island, a punishment with no upside anywhere, because
+     executing men ALREADY costs you: core's fame term (the mercy you did not
+     buy), and events.js's bondOf, where every execution poisons the whole
+     roster and poisons the men you pressed worst. Three costs, no benefit, on
+     a button the design wants people to press sometimes.
 
-     Rather than fork the formula (never fork; route the name), army.js WRAPS
-     the core call. Dread is this file's mechanic, so this file owns the term,
-     and campaign.js/warnet.js get the corrected number for free because they
-     are calling the same W.surrenderChance they always were.
+     So the term is inverted and the mechanic is FEAR. A warlord who shoots the
+     men who will not march for him is a warlord parties fold to on sight, and
+     the price he pays for that is his own army's opinion of him. That is a
+     trade a player can weigh — surrenders against loyalty — where "everything
+     gets worse" is not.
 
-     The shape: every execution multiplies the odds down. Five executions is
-     0.69x, fifteen is 0.43x — a reputation you can dig yourself out of by
-     releasing men (which raises fame through core's own term), never a switch
-     you flip once and live with forever. ?dread=old restores the shipped
-     behaviour verbatim so the difference is measurable. */
-  function dreadMul() {
-    if (Q && Q.get("dread") === "old") return 1;
+     It is still a WRAP rather than a fork (never fork; route the name), so
+     campaign.js, warnet.js and army.js's own agar-scale absorption all read
+     the corrected number through the same W.surrenderChance they always
+     called. The curve is the old one with its sign turned over: five
+     executions is 1.45x, fifteen is 2.35x, and core's own 0.93 ceiling still
+     says there is always a chance they fight. */
+  function fearMul() {
     const n = (W.state.stats && W.state.stats.executed) || 0;
-    return 1 / (1 + n * 0.09);
+    return 1 + n * 0.09;
   }
   let coreSurrender = null;
-  function installDread() {
+  function installFear() {
     if (coreSurrender) return;
     coreSurrender = W.surrenderChance;
     W.surrenderChance = function (band, myPower) {
-      return clamp(coreSurrender(band, myPower) * dreadMul(), 0, 0.93);
+      return clamp(coreSurrender(band, myPower) * fearMul(), 0, 0.93);
     };
   }
 
@@ -197,19 +197,19 @@
   /* THE COMPOSITION, AS A PICTURE. One stacked bar segmented by tier plus a
      swatch legend — the two pieces the encounter rail already used, lifted out
      of it so the INSPECT roster stops describing the same army in prose. */
-  /* A MAN WHO WILL NOT TURN IS HATCHED, FOREVER. `_refused` is permanent
-     per-man state and it used to be rendered as a 2 600 ms toast — the player
-     was told once, briefly, about a fact that outlives the run, and then had
-     no way to see it again. The bar is already on the screen and already
-     grouped by tier; the refusers become their own hatched block inside their
-     own tier's colour, so the picture answers "how many of these will never
-     ride with me" without one character of new copy. Diagonal, because a
-     hatch reads as struck out and a tint reads as "far away". */
+  /* THE MEN WHO WILL NOT MARCH ARE HATCHED, AND THAT IS THE PICTURE THE
+     PRISONER SENTENCE IS ABOUT. It used to hatch `_refused` — a man who had
+     said no to a specific offer of money, decided the moment you pressed a
+     button. Nobody offers money any more (see THE PRISONERS): every captured
+     man decides once, before you decide anything, so the hatched share of the
+     bar is "how many of these will never ride with me" read straight off the
+     roll, in each man's own tier colour. Diagonal, because a hatch reads as
+     struck out and a tint reads as "far away". */
   const HATCH = "repeating-linear-gradient(-45deg,rgba(0,0,0,.62) 0 3px,transparent 3px 7px)";
   function tierStack(men) {
     const byTier = {};
     for (let i = 0; i < men.length; i++) {
-      const k = men[i].tier + (!showOld && men[i]._refused ? "|no" : "");
+      const k = men[i].tier + (!showOld && men[i]._willing === false ? "|no" : "");
       byTier[k] = (byTier[k] || 0) + 1;
     }
     /* Refusers sit immediately after their own tier, so the hatch is next to
@@ -301,8 +301,6 @@
       if ((W.phase() === "menu" || W.phase() === "boot") && W.campaign && W.campaign.enter) W.campaign.enter();
       else W.setPhase("campaign");
     }
-    W.emit("encounter:open", { band: band });
-    if (!showOld && W.feel && W.feel.ui) W.feel.ui("open", { volume: 0.8 });
     /* AND THE LENS TURNS TO THEM. The campaign camera keeps whatever yaw the
        player last dragged, so a party met from the flank or from behind put
        the rail up over an empty dune with the men off the edge of the frame —
@@ -312,7 +310,104 @@
       const dd = Math.hypot(band.x - W.state.you.x, band.z - W.state.you.z);
       lensOn(band.x, band.z, clamp(dd * 0.9 + 5, 20, 40));
     }
+    /* BIGGER EATS SMALLER, AND IT DOES NOT ASK. See THE SCALE RULE below —
+       past the ratio at which core's own surrender roll has stopped being a
+       roll, this meeting has no decision in it and the card is a formality. */
+    if (!opts.noAuto && !showOld && scaleRule(band)) return;
+    W.emit("encounter:open", { band: band });
+    if (!showOld && W.feel && W.feel.ui) W.feel.ui("open", { volume: 0.8 });
     paintEncounter(opts);
+  }
+
+  /* ============================================================ THE SCALE RULE
+     THE OWNER: "think about openfront.io mixed with agar.io".
+
+     agar.io has exactly one rule and this is it: something enough smaller than
+     you is absorbed on contact, and something enough bigger absorbs you. There
+     is no menu in agar.io. Every meeting in this game used to open the same
+     five-verb rail whether the party was two hundred men or two, which means a
+     warlord with four hundred men riding down a three-man looter crew got a
+     stat block, an odds bar and a DEMAND button reading 93%. That is not a
+     decision, it is a formality with a UI on it.
+
+     WHERE THE LINE IS, AND IT IS NOT TYPED. core's surrenderChance ramps
+     (ratio - floor) * slope and CLAMPS at cap; above floor + cap/slope the
+     ramp has stopped moving, so every ratio past it is the same number with a
+     die in front of it. core publishes those three and W.surrenderSure()
+     returns the ratio — 3.05x — which is exactly "the advantage at which
+     asking has stopped being a question". One number, derived, and it moves if
+     anybody ever retunes the curve.
+
+     BOTH DIRECTIONS, and the asymmetry between them is the game:
+
+       YOU ARE 3.05x THEM, and they want a fight   they put their guns down
+                            where they stand. Absorbed: prisoners, aftermath,
+                            the same screen a demanded surrender gives you.
+                            HOSTILE ONLY - a salt caravan is not surrendering
+                            to anybody, it is trying to sell you something, and
+                            W.bandHostile is already the game's word for that.
+
+       THEY ARE 3.05x YOU, and they caught you     your column comes apart.
+                            You lose men, you keep the warlord, they ride on.
+                            `mood === "hunt"` is the "if you let it catch you"
+                            half: walk UP to a legion and you still get the
+                            rail, because that was your idea.
+
+     WHAT A SCATTER COSTS is core's own SHED_CAP - the most a column may lose
+     in one night, the number the wage brake already sheds by - scaled by how
+     badly you were beaten (1 - odds). At 3x that is a third of the roster; at
+     ten times it is nearly the whole of the cap. They leave with their rifles.
+     Levies first, veterans last, in the same order and for the same reason
+     core's dawn sheds them: a veteran has somewhere to be and a levy has a
+     farm. */
+  function scaleRule(band) {
+    /* NEVER A PERSON. A human's column is not absorbed on contact and does not
+       scatter yours without him getting a say — the rule is about the island's
+       AI, and a player who loses forty men to a function call is a player who
+       stops playing. campaign.js hands peer bands to warnet.js before this,
+       and this is the belt to that brace. */
+    if (band.peer) return false;
+    const sure = W.surrenderSure ? W.surrenderSure() : 3.05;
+    const mine = W.yourPower(), theirs = W.bandPower(band);
+    if (!(theirs > 0) || !(mine > 0)) return false;
+    if (W.bandHostile(band) > 0 && mine >= theirs * sure) {
+      unhold();
+      surrenderTo(band, band.name + " put their guns in the sand at the sight of your column.");
+      return true;
+    }
+    if (band.mood === "hunt" && theirs >= mine * sure) { scatter(band); return true; }
+    return false;
+  }
+
+  function scatter(band) {
+    unhold();
+    const mine = W.yourPower(), theirs = W.bandPower(band);
+    const frac = (W.SHED_CAP || 0.4) * (1 - W.odds(mine, theirs));
+    const n = Math.min(W.state.army.length, Math.round(W.state.army.length * frac));
+    /* levies first: core's dawn sheds in exactly this order, for exactly this
+       reason, and two different orders would be two different games. */
+    const order = W.state.army.slice().sort(function (a, b) {
+      return W.tierIndex(a.tier) - W.tierIndex(b.tier);
+    });
+    for (let i = 0; i < n; i++) W.removeSoldier(order[i].id, false);
+    W.state.you.hp = Math.max(1, Math.round(W.state.you.maxHp * 0.55));
+    if (n) {
+      W.log(band.name + " rode through your column. " + n +
+        (n === 1 ? " man scattered into the dark." : " men scattered into the dark."), "bad");
+      W.toast(n + " MEN SCATTER", "bad");
+    } else {
+      W.log("you got clear of " + band.name + " with what you had.", "bad");
+      W.toast("YOU GOT CLEAR", "bad");
+    }
+    /* THEY TOOK WHAT THEY CAME FOR AND RIDE ON, through this file's own
+       break-off so the party is visibly leaving rather than standing on you
+       waiting to do it again. */
+    band.cooldown = BREAK_OFF;
+    band.mood = "roam";
+    band._brokeOff = true;
+    ridesAway(band);
+    if (W.feel && W.feel.ui) W.feel.ui("bad");
+    finish();
   }
   function unhold() { if (curBand) curBand.held = false; }
   /* the band can have been used up by the time a verb is pressed (a tableau
@@ -587,39 +682,7 @@
     const p = W.surrenderChance(band, W.yourPower());
     band._askedDay = W.state.day;
     if (W.chance(p)) {
-      /* THE MUTATION, HELD BACK UNTIL THE PICTURE IS OVER. `band.men.length =
-         0` is what campaign.js draws off, so doing it now is sixty men
-         vanishing in one frame — which is the bug. They stay on the sand for
-         three seconds, lay their arms down, and walk in; THEN they are
-         prisoners. Under ?show=old apply() runs immediately and this is the
-         shipped line-for-line behaviour. */
-      const apply = function () {
-        for (let i = 0; i < band.men.length; i++) W.state.prisoners.push(band.men[i]);
-        W.earn(band.gold);
-        band.gold = 0;
-        band.men.length = 0;
-        /* AND THE EMPTY BAND LEAVES THE MAP. bank() splices a wiped band out
-           of W.state.bands after a battle; this path passes alreadyBanked and
-           so never did, which left a nought-man party sitting on the island
-           for the rest of the run with a banner over it. */
-        if (W.state.bands) {
-          const bi = W.state.bands.indexOf(band);
-          if (bi >= 0) W.state.bands.splice(bi, 1);
-        }
-        W.state.fame += Math.round(2 + W.state.prisoners.length * 0.5);
-        W.log(band.name + " laid down their guns without a shot.", "good");
-        W.toast("THEY SURRENDER", "good");
-        W.state.stats.battles++;
-        W.state.stats.won++;
-        aftermath({
-          band: band, outcome: "surrender", duration: 0,
-          yourDead: [], yourSurvivors: W.state.army.slice(), yourFled: [],
-          theirDead: [], theirSurvivors: W.state.prisoners.slice(),
-          loot: {}, armourLoot: {}, gold: 0, youKills: 0, alreadyBanked: true,
-        });
-      };
-      if (stageable()) showSurrender(band, apply);
-      else { takeTheirArms(band); apply(); }
+      surrenderTo(band, band.name + " laid down their guns without a shot.");
     } else {
       band.mood = "hunt";
       band.cooldown = 0;
@@ -627,6 +690,50 @@
       W.toast("THEY REFUSE", "bad");
       startBattle({ surprised: true, defending: true });
     }
+  }
+
+  /* ONE SURRENDER PATH, because there are two ways to get one now — you asked
+     (DEMAND) or you were simply too big to fight (THE SCALE RULE) — and the
+     consequences must not be able to drift apart. The mutation is HELD BACK
+     UNTIL THE PICTURE IS OVER: `band.men.length = 0` is what campaign.js draws
+     off, so doing it now is sixty men vanishing in one frame. They stay on the
+     sand for three seconds, lay their arms down, and walk in; THEN they are
+     prisoners. Under ?show=old apply() runs immediately and this is the shipped
+     line-for-line behaviour. */
+  function surrenderTo(band, line) {
+    /* THE RATIO IS TAKEN BEFORE THE ROSTER IS EMPTIED, and it is the number the
+       aftermath's willing/unwilling roll turns on: a man who was overrun three
+       to one does not think he had a choice. The old call passed no ratio at
+       all, so every surrendered band's prisoners were judged as if the fight
+       had been even. */
+    const ratio = W.yourPower() / Math.max(0.001, W.bandPower(band));
+    const apply = function () {
+      for (let i = 0; i < band.men.length; i++) W.state.prisoners.push(band.men[i]);
+      W.earn(band.gold);
+      band.gold = 0;
+      band.men.length = 0;
+      /* AND THE EMPTY BAND LEAVES THE MAP. bank() splices a wiped band out of
+         W.state.bands after a battle; this path passes alreadyBanked and so
+         never did, which left a nought-man party sitting on the island for the
+         rest of the run with a banner over it. */
+      if (W.state.bands) {
+        const bi = W.state.bands.indexOf(band);
+        if (bi >= 0) W.state.bands.splice(bi, 1);
+      }
+      W.state.fame += Math.round(2 + W.state.prisoners.length * 0.5);
+      W.log(line, "good");
+      W.toast("THEY SURRENDER", "good");
+      W.state.stats.battles++;
+      W.state.stats.won++;
+      aftermath({
+        band: band, outcome: "surrender", duration: 0, ratio: ratio,
+        yourDead: [], yourSurvivors: W.state.army.slice(), yourFled: [],
+        theirDead: [], theirSurvivors: W.state.prisoners.slice(),
+        loot: {}, armourLoot: {}, gold: 0, youKills: 0, alreadyBanked: true,
+      });
+    };
+    if (stageable()) showSurrender(band, apply);
+    else { takeTheirArms(band); apply(); }
   }
 
   function hireBand(price) {
@@ -1623,28 +1730,115 @@
     r.alreadyBanked = true;
   }
 
-  /* CONSCRIPTION. Two knobs, and both of them are the same sentence from the
-     brief: "cheaper the more you outnumbered them, and higher-tier prisoners
-     resist". So the RATIO sets the price and the TIER sets the odds, and a
-     veteran is genuinely hard — 0.30 at parity, and no amount of gold moves it,
-     because a man who will not turn will not turn.
+  /* ============================================================ THE PRISONERS
+     THEY DECIDE, THEN YOU DECIDE.
 
-     `ratio` is the power ratio the battle was actually fought at, handed over
-     by battle.js. Not head count: fifteen veterans standing over forty broken
-     levies IS an overwhelming victory and the levies know it. */
-  function conscriptOdds(s, ratio) {
+     THE OWNER, verbatim: "the whole conscript and rejecting conscription
+     buttons are so dumb its conscript or execute I decide or they decide idk".
+
+     He is describing a screen that could not say who was choosing, and he is
+     right. What was here: four bulk verbs (TAKE ALL / RANSOM / RELEASE /
+     EXECUTE), a disclosure triangle with four MORE buttons per man, a price on
+     every one of them - and a per-man roll that could refuse you AFTER you had
+     paid. So TAKE ALL was a purchase with a random outcome, "he refuses" was a
+     thing that happened to your money rather than a thing a man decided, and
+     fourteen prisoners was fifty-six controls on one screen.
+
+     THE SHAPE NOW IS ONE SENTENCE AND THREE VERBS.
+
+     FIRST THEY DECIDE. Every captured man rolls WILLING or UNWILLING ONCE, the
+     moment the screen goes up, and the card says the result in one line: "31
+     TAKEN - 19 WILL MARCH FOR YOU - 12 WILL NOT". That is a fact by the time
+     you read it, which is the entire difference from the old screen: you are
+     choosing what to do about an answer instead of gambling on getting one.
+
+     THEN YOU DECIDE, and there are exactly three things a warlord does about
+     twelve men who have just told him no:
+
+       TAKE THE WILLING     the men who said yes ride with you and the rest
+                            walk. Costs nothing, buys fame (core's own
+                            reputation term - letting men go is what makes
+                            bands fold to you later), and gives you the
+                            smallest army.
+       PRESS EVERY MAN      all of them march. The unwilling carry events.js's
+                            pressed provenance, which is a per-dawn desertion
+                            chance and a permanent drag on the loyalty CEILING
+                            the whole column drifts toward. You get the men
+                            tonight and pay for them every night after.
+       SHOOT THE UNWILLING  the willing ride, the rest are shot, on the sand,
+                            in one volley. Fear: every execution multiplies
+                            what future bands will fold to (see FEAR at the top
+                            of this file) and poisons your own army's opinion
+                            of you through events.js's bondOf.
+
+     NO PRICE ON ANY OF THEM. Gold was the old screen's answer to "why not just
+     take everybody", and it was the wrong answer twice: it made the decision
+     about your purse rather than about what kind of warlord you are, and it
+     made the button fail at random. The costs are loyalty, desertion and fear
+     - three things this game already models, none of them money.
+
+     RANSOM AND RELEASE ARE DELETED. Ransom was a gold trickle weighed against
+     nothing. Release was the same act as TAKE THE WILLING's "and the rest
+     walk", carrying the fame chip that verb now carries. */
+
+  /* WILLING OR NOT, off numbers that already exist and already mean this:
+
+       the CENTRE    events.js's BASE_JOINED — 0.58, "a man who walked up and
+                     asked is in between" — which is the same question this
+                     roll asks and is therefore where it starts. THE FIRST
+                     DRAFT STARTED AT 0.92 and it was wrong for a reason worth
+                     recording: 0.92 was the old PAID conscription's success
+                     rate, which is "will he take your money", not "would he
+                     rather march than walk". The ba sheet caught it in one
+                     frame — "27 WILL MARCH FOR YOU · 0 WILL NOT", a decision
+                     screen with no decision on it.
+       his TIER      a veteran of somebody else's army is a hard sell, and
+                     core's tier index is the game's own word for it.
+       his BATTLES   but only the fights beyond the promotion he has already
+                     been given: core promotes at PROMOTE_AT*(tier+1), so
+                     "seasoned" is what he survived past that. Without the
+                     subtraction, tier and battles are the same argument
+                     counted twice and a veteran becomes unrecruitable.
+       the RATIO     the power ratio the battle was actually fought at, handed
+                     over by battle.js. A man who was overrun does not believe
+                     he had a choice.
+       your FAME     core's reputation number, the same one that does work for
+                     you in surrenderChance.
+       your FEAR     men fold to a warlord who shoots men. The same term the
+                     surrender roll reads, not a second copy of it.
+
+     ?conscript=old is the old flat, tier-blind 0.6 for the A/B. */
+  function willChance(s, ratio) {
     if (Q && Q.get("conscript") === "old") return 0.6;
+    const base = (W.events && W.events.BASE && W.events.BASE.joined) || 0.58;
     const ti = W.tierIndex(s.tier);
-    const dread = (W.state.stats && W.state.stats.executed) || 0;
-    return clamp(0.92 - ti * 0.21 + (clamp(ratio, 0.5, 4) - 1) * 0.09 +
-      clamp(W.state.fame / 1500, 0, 0.1) - dread * 0.02, 0.04, 0.97);
+    const owed = (W.PROMOTE_AT || 3) * (ti + 1);
+    const seasoned = clamp(((s.battles || 0) - owed) / owed, 0, 1);
+    /* THE TIER AND THE SEASONING SPAN THE BASE. A levy at parity is the base
+       and a veteran of somebody else's wars is near nothing, so the two terms
+       together are worth the whole of it rather than a scalar I liked: three
+       tier steps and a full seasoning share it. */
+    const p = base * (1 - ti * 0.25 - seasoned * 0.25) +
+      (clamp(ratio, 0.5, 4) - 1) * 0.09 + clamp(W.state.fame / 1500, 0, 0.1);
+    return clamp(p * fearMul(), 0.04, 0.97);
   }
-  function conscriptPrice(s, ratio) {
-    const T = W.tier(s.tier);
-    return Math.max(5, Math.round(T.hire * clamp(1.35 - clamp(ratio, 0.5, 4) * 0.22, 0.3, 1.35) / 5) * 5);
+
+  /* ROLLED ONCE AND STAMPED ON THE MAN. Re-rolling on every repaint would make
+     the headline number flicker while the player reads it, and re-rolling per
+     verb would turn the sentence into a forecast. `_willing` is cleared when he
+     leaves the wire - see enlist. */
+  function rollWilling(ratio) {
+    const P = W.state.prisoners;
+    for (let i = 0; i < P.length; i++) {
+      if (P[i]._willing != null) continue;
+      P[i]._willing = W.chance(willChance(P[i], ratio));
+    }
   }
-  function ransomFor(s) {
-    return Math.max(8, Math.round(W.tier(s.tier).hire * 0.8 / 5) * 5);
+  function splitPrisoners() {
+    const yes = [], no = [];
+    const P = W.state.prisoners;
+    for (let i = 0; i < P.length; i++) (P[i]._willing ? yes : no).push(P[i]);
+    return { yes: yes, no: no };
   }
 
   function takePrisoner(id) {
@@ -1654,78 +1848,34 @@
     return null;
   }
 
-  /* THE ROLL AND THE MOVE ARE TWO CALLS NOW, because the bulk path has to
-     know who turned BEFORE the men walk across, and the men only leave
-     W.state.prisoners when they arrive. */
-  function conscriptRoll(s, ratio) {
-    if (!s || s._refused) return null;
-    if (!W.pay(conscriptPrice(s, ratio))) return null;      // caller says why
-    if (W.chance(conscriptOdds(s, ratio))) return true;
-    /* A REFUSAL IS PERMANENT FOR THIS MAN, and that is the cost of trying.
-       Without it the button is a slot machine you pull until it pays, which
-       makes a veteran's resistance decorative.
+  /* ONE DOOR OUT OF THE WIRE AND INTO THE COLUMN, so the stats, the wounds and
+     the provenance can never be set by one path and missed by another.
 
-       IT USED TO BE A 2 600 ms TOAST — "HE REFUSES" — about a fact that lasts
-       for the rest of the game, and after it faded there was nothing on any
-       screen that said so. It is a PICTURE now, in two places that both
-       outlast it: he is the man still standing on the other side when the
-       rest walk across (showTurn), and his block on the prisoner bar is
-       hatched from here until the day he is sold (tierStack). */
-    s._refused = true;
-    W.log(s.name + " spat the money back at you.", "bad");
-    if (showOld) W.toast("HE REFUSES", "bad");     // ?show=old — the shipped toast
-    return false;
-  }
-  function conscriptJoin(s) {
+     THE PROVENANCE IS STAMPED, NOT INFERRED, and that is a real fix. events.js
+     works out where a man came from by diffing core's stat counters against the
+     roster - fine when one kind of man arrives at a time, and wrong the instant
+     one screen adds nineteen volunteers and twelve pressed men in the same
+     frame: the counters say "12 conscripted, 19 recruited" and the array says
+     nothing about which is which, so the first twelve strangers it finds get
+     the pressed man's bond whoever they actually are. This screen is the only
+     place in the game that adds two kinds of man at once, so it is the only
+     place that has to say it out loud. */
+  function enlist(s, kind) {
     if (!takePrisoner(s.id)) return false;
     s.wounded = s.hp < s.maxHp * 0.4;
     s.hp = s.maxHp;
+    delete s._willing;
+    if (W.events && W.events.provenance) W.events.provenance(s, kind === "pressed" ? "pressed" : "hired");
     W.addSoldier(s);
-    W.state.stats.conscripted++;
-    W.log(s.name + " took the gold and the gun.", "good");
+    if (kind === "pressed") W.state.stats.conscripted++;
+    else W.state.stats.recruited++;
     return true;
   }
+  function backToAftermath() { if (R) { W.setPhase("aftermath", R); paintAftermath(); } }
 
-  function doConscript(id) {
-    const list = W.state.prisoners;
-    let s = null;
-    for (let i = 0; i < list.length; i++) if (list[i].id === id) s = list[i];
-    if (!s || s._refused) return;
-    const ratio = (R && R.ratio) || 1;
-    if (W.state.gold < conscriptPrice(s, ratio)) { W.toast("NOT ENOUGH GOLD", "bad"); return; }
-    /* ONE MAN OFF THE OPEN LIST DOES NOT GET A TABLEAU, and that is a
-       deliberate asymmetry rather than an omission. The bulk verb is the one
-       the screen offers and the one that was a silent forty-man mutation; the
-       per-man roll lives behind a disclosure triangle and is pressed in runs
-       of ten. Three seconds of world per press would make the list unusable,
-       and both outcomes are already visible on the screen it stays on — the
-       prisoner bar loses a block, the strip's MEN count goes up, feel.js's
-       "army" listener sounds the join, and a refusal hatches his block. */
-    if (conscriptRoll(s, ratio)) {
-      conscriptJoin(s);
-      W.toast(s.name.toUpperCase() + " JOINS YOU", "good");
-    }
-    paintAftermath();
-  }
-  function doRansom(id) {
-    const s = takePrisoner(id);
-    if (!s) return;
-    const g = ransomFor(s);
-    W.earn(g);
-    W.log("ransomed " + s.name + " for $" + g + ".");
-    paintAftermath();
-  }
-  function doRelease(id) {
-    const s = takePrisoner(id);
-    if (!s) return;
-    const f = (W.tierIndex(s.tier) + 1) * 2;
-    W.state.fame += f;
-    W.log("let " + s.name + " walk. +" + f + " fame.", "good");
-    paintAftermath();
-  }
   /* THE RECORD DIES. Everything about the picture is elsewhere; this is the
      book-keeping, and it is called from inside the volley so that the man
-     leaves the roster on the frame the round arrives (deaths.js's own rule —
+     leaves the roster on the frame the round arrives (deaths.js's own rule -
      a death cannot wait, or the sim disagrees with itself). */
   function killRecord(s) {
     if (!takePrisoner(s.id)) return false;
@@ -1733,84 +1883,71 @@
     W.state.fame = Math.max(0, W.state.fame - (W.tierIndex(s.tier) + 1) * 3);
     return true;
   }
-  function doExecute(id) {
-    const list = W.state.prisoners;
-    let s = null;
-    for (let i = 0; i < list.length; i++) if (list[i].id === id) s = list[i];
-    if (!s) return;
-    const back = function () { if (R) { W.setPhase("aftermath", R); paintAftermath(); } };
-    if (!stageable()) { killRecord(s); W.log("executed " + s.name + ".", "bad"); paintAftermath(); return; }
-    if (W.feel && W.feel.ui) W.feel.ui("demand");
-    showExecution([s], function () {
-      killRecord(s);
-      W.log("executed " + s.name + ".", "bad");
-    }, back);
-  }
-  /* EXECUTE ALL IS ONE VOLLEY, NOT FORTY EXECUTIONS. "Bulk actions must stay
-     bulk" and the shape that satisfies both halves of it is a firing party:
-     the whole list stands in a rank, one volley puts all of them down, and it
-     costs the player the same three and a half seconds whether the rank is
-     four men or forty. The old bulk() ran the list through doExecute in ONE
-     FRAME with no feedback at all, and it also wrote forty lines into the log
-     to say so; that is one line now. */
-  function executeAll() {
-    const men = W.state.prisoners.slice();
-    if (!men.length) return;
-    const kill = function () {
-      let n = 0;
-      for (let i = 0; i < men.length; i++) if (killRecord(men[i])) n++;
-      W.log("shot " + n + " prisoner" + (n === 1 ? "" : "s") + ".", "bad");
+
+  /* ---- VERB 1: TAKE THE WILLING -------------------------------------- */
+  function takeWilling() {
+    const sp = splitPrisoners();
+    const walk = sp.no.slice();
+    const apply = function () {
+      let joined = 0;
+      for (let i = 0; i < sp.yes.length; i++) if (enlist(sp.yes[i], "willing")) joined++;
+      /* AND THE REST WALK, which is where the mercy is paid. core's
+         surrenderChance reads fame, so letting men go is literally what makes
+         the next band fold - the old RELEASE button's chip was telling the
+         truth, it just had a button of its own to say it on. */
+      let fame = 0;
+      for (let i = 0; i < walk.length; i++) {
+        if (takePrisoner(walk[i].id)) fame += (W.tierIndex(walk[i].tier) + 1) * 2;
+      }
+      W.state.fame += fame;
+      W.log(joined + " took the gun. " + walk.length + " walked" +
+        (fame ? ", and that is worth " + fame + " fame" : "") + ".", "good");
+      if (W.events && W.events.settle) W.events.settle("");
     };
-    if (!stageable()) { kill(); paintAftermath(); return; }
+    if (!stageable() || !sp.yes.length) { apply(); paintAftermath(); return; }
+    showTurn(sp.yes, walk, apply, backToAftermath);
+  }
+
+  /* ---- VERB 2: PRESS EVERY MAN --------------------------------------- */
+  function pressEveryMan() {
+    const sp = splitPrisoners();
+    const apply = function () {
+      for (let i = 0; i < sp.yes.length; i++) enlist(sp.yes[i], "willing");
+      for (let i = 0; i < sp.no.length; i++) enlist(sp.no[i], "pressed");
+      W.log((sp.yes.length + sp.no.length) + " men fell in - " + sp.no.length +
+        " of them at gunpoint.", sp.no.length ? "bad" : "good");
+      /* THE COST, PAID NOW RATHER THAN OVER A FORTNIGHT. events.js owns the
+         magnitude and derives it: a pressed man's bond drags the CEILING the
+         whole column drifts toward, and settle() moves loyalty to wherever that
+         ceiling has just gone. Nothing is typed here. */
+      if (sp.no.length && W.events && W.events.settle) {
+        W.events.settle(sp.no.length + " men are marching who did not agree to");
+      }
+    };
+    if (!stageable()) { apply(); paintAftermath(); return; }
+    showTurn(sp.yes.concat(sp.no), [], apply, backToAftermath);
+  }
+
+  /* ---- VERB 3: SHOOT THE UNWILLING ----------------------------------- */
+  /* ONE VOLLEY, NOT TWELVE EXECUTIONS. "Bulk actions must stay bulk", and the
+     shape that satisfies both halves of it is a firing party: the men who said
+     no stand in a rank, one volley puts all of them down, and it costs the
+     player the same three and a half seconds whether the rank is four men or
+     forty. */
+  function shootUnwilling() {
+    const sp = splitPrisoners();
+    if (!sp.no.length) { takeWilling(); return; }
+    const doomed = sp.no.slice();
+    const apply = function () {
+      for (let i = 0; i < sp.yes.length; i++) enlist(sp.yes[i], "willing");
+      let n = 0;
+      for (let i = 0; i < doomed.length; i++) if (killRecord(doomed[i])) n++;
+      W.log("shot " + n + " prisoner" + (n === 1 ? "" : "s") + " who would not march.", "bad");
+      if (W.events && W.events.settle) W.events.settle("they watched you shoot men who said no");
+    };
+    if (!stageable()) { apply(); paintAftermath(); return; }
     if (W.feel && W.feel.ui) W.feel.ui("demand");
-    showExecution(men, kill, function () {
-      if (R) { W.setPhase("aftermath", R); paintAftermath(); }
-    });
-  }
-  function bulk(fn) {
-    const ids = W.state.prisoners.map(function (s) { return s.id; });
-    for (let i = 0; i < ids.length; i++) fn(ids[i]);
-    paintAftermath();
-  }
-  /* TAKE ALL IS NOT `bulk(doConscript)`, AND THE DIFFERENCE IS FOURTEEN
-     TOASTS. doConscript pays per man and toasts "not enough gold" when it
-     cannot — run over a purse that covers nine of fourteen prisoners, the
-     plain bulk would stack five identical failures on top of the screen. It
-     stops at the first one it cannot afford instead, which is also the
-     honest reading of the button: take as many as the money buys. */
-  function bulkConscript() {
-    const ratio = (R && R.ratio) || 1;
-    const tried = [];
-    for (let i = 0; i < W.state.prisoners.length; i++) {
-      const s = W.state.prisoners[i];
-      if (s._refused) continue;
-      if (W.state.gold < conscriptPrice(s, ratio)) break;
-      tried.push(s);
-    }
-    if (!tried.length) { paintAftermath(); return; }
-    /* ROLL FIRST, WALK SECOND. Who turned has to be known before anybody
-       moves — that is what makes the picture a fact rather than an animation
-       — but they may not leave W.state.prisoners until they have crossed, or
-       campaign.js starts drawing them in your column while they are still
-       standing over there. */
-    const takers = [], refusers = [];
-    for (let i = 0; i < tried.length; i++) {
-      const got = conscriptRoll(tried[i], ratio);
-      (got ? takers : refusers).push(tried[i]);
-    }
-    /* THE MEN WHO WOULD NOT EVEN BE ASKED still stand in the rank. A prisoner
-       who already refused once, or who costs more than the purse holds, is
-       part of "who is left over there" and leaving him out would make the
-       picture claim the decision was cleaner than it was. */
-    for (let i = 0; i < W.state.prisoners.length; i++) {
-      const s = W.state.prisoners[i];
-      if (tried.indexOf(s) < 0) refusers.push(s);
-    }
-    const join = function () { for (let i = 0; i < takers.length; i++) conscriptJoin(takers[i]); };
-    if (!stageable() || !takers.length) { join(); paintAftermath(); return; }
-    showTurn(takers, refusers, join, function () {
-      if (R) { W.setPhase("aftermath", R); paintAftermath(); }
-    });
+    showExecution(doomed, apply, backToAftermath);
   }
 
   /* NAMES, AND NOTHING BUT NAMES. This printed a full-width row per man
@@ -1855,14 +1992,6 @@
     }
     return '<div class="wl-stack">' + bar + '</div><div class="wl-legend">' + legend + '</div>';
   }
-
-  /* ONE-BY-ONE IS OFF BY DEFAULT, and that is the whole prisoner fix. Every
-     prisoner used to be a CARD with four buttons in it: fourteen prisoners —
-     an ordinary haul off a 60-man band — was 1 960 px of cards and 56 controls
-     on one screen. The decision is nearly always taken in bulk (take the lot,
-     ransom the lot, let them all walk), so bulk is what the screen offers and
-     the individual roll is behind the heading. */
-  let PRIS_OPEN = false;
 
   function paintAftermath() {
     const r = R;
@@ -1911,62 +2040,38 @@
     const pris = W.state.prisoners;
 
     /* ---- THE PRISONER BLOCK ----
-       A tier stack, four bulk verbs carrying their own price, and the roll
-       behind the heading. The paragraph that used to sit under it —
-       "releasing men buys a reputation: bands surrender to a warlord who lets
-       men walk. executing them buys the opposite — you have executed 3, and
-       every band you meet now fights 23% harder to the last man." — was 250
-       characters of the interface explaining its own buttons. Both halves of
-       it are now chips ON those buttons: RELEASE says what it buys in fame,
-       EXECUTE says what it costs in surrenders. */
+       ONE SENTENCE AND AT MOST THREE VERBS. See THE PRISONERS above for what
+       was here and why none of it survived. The paragraph that used to sit
+       under the buttons explaining what release and execute buy is gone with
+       the buttons it explained; what replaces it is the SENTENCE, which is not
+       an explanation of a mechanic but the result of one. */
     let prisH = "";
     if (pris.length) {
       askBlood();   // see THE BLOOD PACK: asked when the decision goes up
-      let conCost = 0, ranTake = 0, relFame = 0;
-      for (let i = 0; i < pris.length; i++) {
-        if (!pris[i]._refused) conCost += conscriptPrice(pris[i], ratio);
-        ranTake += ransomFor(pris[i]);
-        relFame += (W.tierIndex(pris[i].tier) + 1) * 2;
-      }
-      /* WHAT EXECUTING THEM COSTS, AS A NUMBER ON THE BUTTON THAT DOES IT.
-         Derived from dreadMul's own curve rather than a second copy of it, and
-         it reads 0 under ?dread=old because under that flag executions really
-         do cost nothing later — a chip that lies about a reverted mechanic is
-         worse than no chip. */
-      const dreadAfter = (Q && Q.get("dread") === "old") ? dreadMul()
-        : 1 / (1 + (((W.state.stats && W.state.stats.executed) || 0) + pris.length) * 0.09);
+      rollWilling(ratio);
+      const sp = splitPrisoners();
+      /* WHAT SHOOTING THEM BUYS, AS A NUMBER ON THE BUTTON THAT DOES IT.
+         Derived from fearMul's own curve rather than a second copy of it: how
+         much more likely the NEXT band is to fold once these men are in the
+         sand. */
+      const fearNow = fearMul();
+      const fearAfter = 1 + (((W.state.stats && W.state.stats.executed) || 0) + sp.no.length) * 0.09;
       prisH =
-        '<div class="wl-lbl"><button class="lblbtn" id="pOpen"><span>PRISONERS ' + pris.length +
-          '</span><span>' + (PRIS_OPEN ? "&#9662;" : "&#9656;") + '</span></button></div>' +
+        '<div class="wl-lbl">PRISONERS ' + pris.length + '</div>' +
         tierStack(pris) +
+        '<div class="wl-small" style="margin:-4px 0 9px;letter-spacing:.05em">' +
+          '<b>' + sp.yes.length + '</b> WILL MARCH FOR YOU · <b>' + sp.no.length + '</b> WILL NOT' +
+        '</div>' +
         '<div class="wl-btns">' +
-          '<button class="wl-btn hot" id="pAllCon"' + (W.state.gold < conCost ? " disabled" : "") +
-            '>TAKE ALL <span class="wl-dim">$' + conCost + '</span></button>' +
-          '<button class="wl-btn" id="pAllRan">RANSOM <span class="wl-gold">+$' + ranTake + '</span></button>' +
-          '<button class="wl-btn" id="pAllRel">RELEASE <span class="wl-dim">+' + relFame + ' FAME</span></button>' +
-          '<button class="wl-btn bad" id="pAllExe">EXECUTE <span class="wl-dim">&minus;' +
-            Math.round((1 - dreadAfter / dreadMul()) * 100) + '%</span></button>' +
+          '<button class="wl-btn hot" id="pWilling">TAKE THE WILLING <span class="wl-dim">' +
+            sp.yes.length + '</span></button>' +
+          (sp.no.length
+            ? '<button class="wl-btn" id="pPress">PRESS EVERY MAN <span class="wl-dim">' +
+                pris.length + '</span></button>' +
+              '<button class="wl-btn bad" id="pShoot">SHOOT THE UNWILLING <span class="wl-dim">+' +
+                Math.round((fearAfter / fearNow - 1) * 100) + '%</span></button>'
+            : '') +
         '</div>';
-      if (PRIS_OPEN) {
-        prisH += '<div class="wl-card" style="margin-top:8px">';
-        for (let i = 0; i < pris.length; i++) {
-          const s = pris[i];
-          const price = conscriptPrice(s, ratio);
-          prisH +=
-            '<div class="prow"><span class="who" style="color:' + tierColour(s.tier) + '">' +
-              esc(s.name) + '</span><span class="acts">' +
-              (s._refused
-                ? '<button class="wl-btn ghost" disabled>NO</button>'
-                : '<button class="wl-btn" data-con="' + s.id + '"' +
-                  (W.state.gold < price ? " disabled" : "") + '>$' + price + ' &middot; ' +
-                  Math.round(conscriptOdds(s, ratio) * 100) + '%</button>') +
-              '<button class="wl-btn" data-ran="' + s.id + '">$' + ransomFor(s) + '</button>' +
-              '<button class="wl-btn" data-rel="' + s.id + '">GO</button>' +
-              '<button class="wl-btn bad" data-exe="' + s.id + '">KILL</button>' +
-            '</span></div>';
-        }
-        prisH += '</div>';
-      }
     }
 
     ctx.screen('<div class="wl-aft">' +
@@ -2022,32 +2127,15 @@
       '</div></div>'
     );
 
-    const stage = ctx.el("stage");
-    stage.querySelectorAll("[data-con]").forEach(function (b) {
-      b.onclick = function () { doConscript(+b.dataset.con); };
-    });
-    stage.querySelectorAll("[data-ran]").forEach(function (b) {
-      b.onclick = function () { doRansom(+b.dataset.ran); };
-    });
-    stage.querySelectorAll("[data-rel]").forEach(function (b) {
-      b.onclick = function () { doRelease(+b.dataset.rel); };
-    });
-    stage.querySelectorAll("[data-exe]").forEach(function (b) {
-      b.onclick = function () { doExecute(+b.dataset.exe); };
-    });
-    const po = ctx.el("pOpen");
-    if (po) po.onclick = function () { PRIS_OPEN = !PRIS_OPEN; paintAftermath(); };
-    const ac = ctx.el("pAllCon"); if (ac) ac.onclick = function () { bulkConscript(); };
-    const ar = ctx.el("pAllRel"); if (ar) ar.onclick = function () { bulk(doRelease); };
-    const an = ctx.el("pAllRan"); if (an) an.onclick = function () { bulk(doRansom); };
-    const ax = ctx.el("pAllExe"); if (ax) ax.onclick = function () { executeAll(); };
+    const bw = ctx.el("pWilling"); if (bw) bw.onclick = takeWilling;
+    const bp = ctx.el("pPress");   if (bp) bp.onclick = pressEveryMan;
+    const bs = ctx.el("pShoot");   if (bs) bs.onclick = shootUnwilling;
     ctx.el("aDone").onclick = function () {
       /* PRISONERS YOU DID NOT DECIDE ON RIDE WITH YOU. They stay in
          W.state.prisoners and the HUD keeps counting them, so an outpost can
          sell them later — leaving the screen is not a decision that silently
          deletes men. */
       R = null;
-      PRIS_OPEN = false;
       finish();
     };
   }
@@ -2076,7 +2164,7 @@
       THREE = c.THREE || G.THREE || null;
       scene = c.scene || CBZ.scene || null;
       showOld = !!(Q && (Q.get("show") === "old" || Q.get("show") === "0"));
-      installDread();
+      installFear();
       W.on("dawn", restAtDawn);
       /* A TABLEAU MUST NOT SURVIVE THE THING IT IS ABOUT. A battle starting
          under a running one would leave a rank of instanced men standing in
@@ -2102,6 +2190,9 @@
 
     // ---- the screens
     encounter: encounter,
+    /* THE SCALE RULE, published so a probe can ask where the line is without
+       reproducing core's surrender curve. */
+    surrenderSure: function () { return W.surrenderSure ? W.surrenderSure() : 3.05; },
     aftermath: aftermath,
 
     // ---- the shared roster shape (loadout.js and the encounter card read it)
@@ -2141,7 +2232,8 @@
         standing: standing, fallen: fallen, walking: walking,
         arms: armsOut.length,
         prisoners: W.state.prisoners.length,
-        refused: W.state.prisoners.filter(function (s) { return s._refused; }).length,
+        unwilling: W.state.prisoners.filter(function (s) { return s._willing === false; }).length,
+        willing: W.state.prisoners.filter(function (s) { return s._willing === true; }).length,
         executed: (W.state.stats && W.state.stats.executed) || 0,
         army: W.state.army.length,
         blood: !!CBZ.gore, bloodEvents: goreN,
@@ -2153,8 +2245,15 @@
     // ---- the numbers other modules ask for
     hirePrice: hirePrice,
     canRob: canRob,
-    dreadMul: dreadMul,
-    conscriptOdds: conscriptOdds,
-    conscriptPrice: conscriptPrice,
+    fearMul: fearMul,
+    willChance: willChance,
+    /* THE THREE VERBS, PUBLISHED. tools/warlord-island-check.mjs asserts there
+       are exactly three and drives them; a screen whose only door is a click
+       handler cannot be checked by anything but a photograph. */
+    prisonerVerbs: function () { return ["TAKE THE WILLING", "PRESS EVERY MAN", "SHOOT THE UNWILLING"]; },
+    takeWilling: takeWilling,
+    pressEveryMan: pressEveryMan,
+    shootUnwilling: shootUnwilling,
+    splitPrisoners: function () { const sp = splitPrisoners(); return { willing: sp.yes.length, unwilling: sp.no.length }; },
   });
 })();
