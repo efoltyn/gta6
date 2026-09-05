@@ -126,7 +126,8 @@
     "city:story": "node tools/city-story.mjs",
     "visual:debris-conserved": "node tools/before-after.mjs debris-conserved --keep-going",
     "test:collapse-loadpath": "node tools/test-collapse-loadpath.mjs",
-    "test:president": "node tools/president-check.mjs"
+    "test:president": "node tools/president-check.mjs",
+    "visual:president-loop": "node tools/visual-compare.mjs --preset president-loop --before local --only after --no-open --keep-going"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.0",
