@@ -834,7 +834,13 @@
   function civic(root, x, z, w, d, storeys, hex, side, spec, name, bopts) {
     let b = null;
     try {
-      const base = spec ? { facade: "civic", civic: spec, district: "core" } : { facade: "office", district: "core" };
+      // dress:false — the facade kit's city-wide hash pick stays OFF these
+      // shells. A civic shell already wears buildings_civic.js's order and
+      // crown; letting the kit roll a second grammar over it is how the
+      // Executive Mansion shipped as a Tudor manor with a dome through its
+      // roof and a pagoda for a West Wing. A caller may still pass its own
+      // `dress` (the Freeport's shed does) and that wins.
+      const base = spec ? { facade: "civic", civic: spec, district: "core", dress: false } : { facade: "office", district: "core", dress: false };
       b = CBZ.cityMakeBuilding(root, x, z, w, d, storeys, hex, side,
         bopts ? Object.assign(base, bopts) : base);
     } catch (e) { b = null; }
@@ -855,7 +861,8 @@
   // a plain block (barracks, annex, warehouse, garage) with no civic dressing
   function block(root, x, z, w, d, storeys, hex, side, opts) {
     let b = null;
-    try { b = CBZ.cityMakeBuilding(root, x, z, w, d, storeys, hex, side, opts || { facade: "office" }); }
+    opts = Object.assign({ facade: "office", dress: false }, opts || {});   // plain shells stay plain (see civic())
+    try { b = CBZ.cityMakeBuilding(root, x, z, w, d, storeys, hex, side, opts); }
     catch (e) { b = null; }
     if (b && _curSite) _shells.push({ site: _curSite, b: b, name: null });
     return b;
@@ -1012,7 +1019,11 @@
         }
         const main = civic(root, cx, cz - 34, 56, 34, 2, M.marble, 1, mansionSpec, "Executive Mansion");
         c.main = main;
-        perron(root, cx, cz - 17, 30, 9, M.stone, 1);              // facade z -17, out to -8
+        // THE STYLOBATE IS AS WIDE AS THE ORDER. bldCivicOrder stands its
+        // eleven columns and two flagpoles on a 0.30 m deck across the whole
+        // 56 m front; a 30 m deck left the outer six columns and both poles
+        // on plinths floating over the lawn.
+        perron(root, cx, cz - 17, 56, 9, M.stone, 1);              // facade z -17, out to -8
         // the WEST WING: the office half of "residence and workplace"
         const wingSpec = { kind: "federal", crown: "flat", order: "pilaster", motto: "WEST WING", stone: true };
         if (CFG.PRESIDENT_COMPOUND_V2 !== false) wingSpec.monumental = true;
@@ -1051,7 +1062,7 @@
         repeat(root, bg(4.6, 1.5, 1.5), M.hedge, hedge, function () { return 0.75; });
         // the lawn a helicopter lands on. Every real one has this.
         helipad(root, cx + 74, cz + 62, 12);
-        flagpole(root, cx - 22, cz - 8, 14);
+        // (no loose flagpole: the order's own pair stands on the stylobate)
         const lamps = [];
         for (let i = 0; i < 5; i++) { lamps.push({ x: cx - 16, z: cz + 58 + i * 11 }); lamps.push({ x: cx + 16, z: cz + 58 + i * 11 }); }
         lampRow(root, lamps);

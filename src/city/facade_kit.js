@@ -409,6 +409,12 @@
   // crown question below so the two can never disagree about it.
   function resolve(dress, hash, storeys) {
     if (!on("FACADE_KIT")) return null;
+    // `dress: false` is a call site saying "this building already has its
+    // grammar, keep the city pick off it". govcomplex.js's civic shells carry
+    // buildings_civic.js's own order + crown; before this opt-out existed the
+    // city-wide hash pick landed a Tudor manor on the Executive Mansion and a
+    // pagoda on its West Wing, on top of the doric order and the dome.
+    if (dress === false) return null;
     let spec = dress || null;
     // CITY-WIDE MODE (off by default): give an undressed building a style by
     // position hash. Deterministic — lot #23's style is decidable without
@@ -441,7 +447,7 @@
      what the position hash is over) and its storey count. `dress` is the call
      site's explicit spec when it had one. Returns the style id or null. */
   CBZ.facadePick = function (ox, oz, storeys, dress) {
-    const r = resolve(dress || null,
+    const r = resolve(dress === false ? false : (dress || null),
       function (salt) { return CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42; },
       storeys);
     return r ? r.spec.style : null;

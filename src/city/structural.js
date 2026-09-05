@@ -1218,7 +1218,7 @@
     if (b.dress && b.dress.style) return b.dress.style;
     if (b.facadeStyle) return b.facadeStyle;
     if (!CBZ.facadePick) return null;
-    try { return CBZ.facadePick(b.ox, b.oz, b.storeys, b.dress || null); } catch (e) { return null; }
+    try { return CBZ.facadePick(b.ox, b.oz, b.storeys, b.dress === false ? false : (b.dress || null)); } catch (e) { return null; }
   }
 
   S.forceCollapse = function (lot, opts) {

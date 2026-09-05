@@ -3306,7 +3306,7 @@
     // A dome, a minaret, a mansard or a setback tower must not have the host's
     // own spire growing up through it.
     const facadeTakesRoof = !!(CBZ.facadeCrownsRoof && CBZ.facadeCrownsRoof(
-      opts.dress || null,
+      opts.dress === false ? false : (opts.dress || null),
       function (salt) { return CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42; }, storeys));
     let MPAL = null;
     if (MASONRY && CBZ.masonryPalette) {
@@ -4550,7 +4550,7 @@
         // THE FACADE KIT's spec, written at the CALL SITE exactly the way
         // govcomplex.js writes {crown, order, motto} for the Capitol. Absent on
         // every existing caller, so the kit is inert until someone asks for it.
-        dress: opts.dress || null,
+        dress: opts.dress === false ? false : (opts.dress || null),   // false = explicit opt-out
         pal: MPAL || { wall: color, stone: TRIM, dirt: 0x2a2420, kind: "brick", id: null },
         color, TRIM, BASE, PIL, MULL,
         hash: bhash,
@@ -4687,6 +4687,7 @@
       floorSlabs,                                   // intermediate floor slabs (carvable for an elevator shaft — see CBZ.cityCarveShaft)
       floorTops,                                    // per-floor arrival Y (ground..roof) — elevators.js multi-stop contract
       shaftRects,                                   // reserved shaft footprints (building-local), so clearFloorPoint keeps later furniture/props out of the chase
+      dress: opts.dress === false ? false : (opts.dress || null),   // the facade-kit spec this shell was built with (false = opted out); structural.js asks facadePick with it
       roofCx: ox + slabCx, roofCz: oz + slabCz };   // world centre of the solid roof slab (clear of the -x stairwell)
     // A swinging entrance only speaks when this player caused its cycle or is
     // physically inside THIS shell. Keep the ownership link on the mechanism,
