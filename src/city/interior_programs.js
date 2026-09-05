@@ -2272,11 +2272,12 @@
   //  their coordinates for presidency.js to wire into the one interaction
   //  registry; the room program does not implement political state itself.
   // ========================================================================
-  const PRESIDENTIAL = { rooms: [], props: [], usable: 0, symbols: 0, emptyDecor: 0 };
+  const PRESIDENTIAL = { rooms: [], props: [], press: [], usable: 0, symbols: 0, emptyDecor: 0 };
 
   function presidentialReset() {
     PRESIDENTIAL.rooms.length = 0;
     PRESIDENTIAL.props.length = 0;
+    PRESIDENTIAL.press.length = 0;
     PRESIDENTIAL.usable = 0;
     PRESIDENTIAL.symbols = 0;
     PRESIDENTIAL.emptyDecor = 0;
@@ -2352,6 +2353,206 @@
     A.fitbox(A.at(depth - 0.10, lateral), 2.70, gapW + 0.46, 0.06, 0.44, P.gold);
   }
 
+  /* ======================================================================
+     THE ROOM-OF-STATE KIT — the six pieces every presidential room shares.
+
+     WHERE THE CEILING ACTUALLY IS. buildings.js pours each storey slab as
+     `lbox(cx, L*FH - 0.1, cz, w, 0.2, d)`, so the slab occupies FH-0.20..FH
+     and the REAL ceiling plane of a room is `h.fh - 0.20`, not `h.fh`. Every
+     presidential room used to author its "recessed ceiling light panels" at
+     `h.fh - 0.10` with a 0.055 height: dead centre INSIDE the slab. Three per
+     room, in four rooms, none of which has ever been visible in a screenshot
+     — which is the whole reason the State Entrance Hall photographed as an
+     unlit grey plate. CEIL is that plane, it is derived once, and no fixture
+     in this section is allowed above it.
+     ====================================================================== */
+  const CEIL = 0.20;                    // slab thickness: ceiling = h.fh - CEIL
+
+  // Emissive boxes are the ONE thing core/batch.js refuses to merge, so each
+  // call here is a real draw call and they are rationed by hand: a hall gets
+  // three chandeliers and six sconces, not a light every four metres. In
+  // exchange every one of them joins the INTERIOR_LIGHT_DAY ramp for free.
+  function stateLight(A, h, r, p, ly, across, hh, deep, hex, ei) {
+    if (!inRect(r, p.x, p.z, 0.08)) return 0;
+    const m = h.b.lbox(p.x, r.y + ly, p.z, A.along ? deep : across, hh, A.along ? across : deep,
+      hex, { emissive: hex, ei: ei == null ? 0.8 : ei, cast: false });
+    ceilingStrip(m);
+    return 1;
+  }
+
+  // A CEILING, so the room has a top. A stone cornice round the walls with a
+  // brass datum under it. `wallLat` is the lateral of the side WALL FACE and
+  // `d1` the depth of the far one — every offset is measured off those, so no
+  // caller has to know how thick a cornice is and nothing ever spills into the
+  // shell clamp.
+  function stateCornice(A, h, r, d0, d1, wallLat, skipFar) {
+    const top = h.fh - CEIL, run = Math.max(1.0, (d1 - 0.02) - d0), mid = (d0 + (d1 - 0.02)) / 2;
+    for (const s of [-1, 1]) {
+      A.fitbox(A.at(mid, s * (wallLat - 0.24)), top - 0.22, 0.44, 0.44, run, P.marble);
+      A.fitbox(A.at(mid, s * (wallLat - 0.30)), top - 0.50, 0.12, 0.10, run, P.gold);
+    }
+    if (skipFar) return;                 // a wall that carries its own entablature
+    A.fitbox(A.at(d1 - 0.24, 0), top - 0.22, (wallLat - 0.02) * 2, 0.44, 0.44, P.marble);
+    A.fitbox(A.at(d1 - 0.30, 0), top - 0.50, (wallLat - 0.60) * 2, 0.10, 0.12, P.gold);
+  }
+  // …and COFFERS inside it: two longitudinal ribs crossed on the bay rhythm.
+  // The bays are deliberately the SAME rhythm as the piers below, so the
+  // ceiling reads as the building's structure rather than as applied trim.
+  function stateCoffers(A, h, r, d0, d1, latHalf, bay, crossLat) {
+    const top = h.fh - CEIL, run = Math.max(1.0, d1 - d0), mid = (d0 + d1) / 2;
+    const cross = (crossLat == null ? latHalf : crossLat) * 2 + 0.26;
+    for (const s of [-1, 1]) {
+      A.fitbox(A.at(mid, s * latHalf), top - 0.13, 0.26, 0.26, run, P.marble);
+      // an inner pair on a wide ceiling, clear of the light hung on the axis
+      if (latHalf > 3.0) A.fitbox(A.at(mid, s * latHalf * 0.42), top - 0.13, 0.22, 0.24, run, P.marble);
+    }
+    // The transverse beams may run WALL TO WALL even where the longitudinal
+    // ribs stop at the colonnade: a 55 m hall whose ceiling is coffered only
+    // over the carpet still photographs as thirty metres of flat grey.
+    for (let d = d0; d <= d1 + 0.01; d += bay)
+      A.fitbox(A.at(d, 0), top - 0.13, cross, 0.26, 0.26, P.marble);
+  }
+  // A chandelier on the axis: brass drop, corona, warm disc, finial. ONE
+  // emissive box each. Hang them in the MIDDLE of a coffer bay so the drop rod
+  // never shares a volume with a rib.
+  function stateChandelier(A, h, r, d, lat) {
+    const p = A.at(d, lat), top = h.fh - CEIL;
+    if (!inRect(r, p.x, p.z, 0.10)) return 0;
+    A.fitbox(p, top - 0.125, 0.12, 0.25, 0.12, P.gold);          // drop rod, under the slab
+    A.fitbox(p, top - 0.30, 1.90, 0.10, 1.90, P.gold);           // corona
+    stateLight(A, h, r, p, top - 0.50, 1.58, 0.30, 1.58, P.lamp, 0.95);
+    A.fitbox(p, top - 0.74, 0.40, 0.18, 0.40, P.gold);           // finial
+    return 1;
+  }
+  // A wall sconce bracketed to the side wall at lateral `side * wallLat`.
+  function stateSconce(A, h, r, d, wallLat, side) {
+    const p = A.at(d, side * (wallLat - 0.18));
+    if (!inRect(r, p.x, p.z, 0.10)) return 0;
+    A.fitbox(p, 1.98, 0.30, 0.40, 0.30, P.gold);                 // bracket
+    stateLight(A, h, r, A.at(d, side * (wallLat - 0.42)), 2.30, 0.42, 0.34, 0.54, P.lamp, 0.9);
+    return 1;
+  }
+
+  /* THE ONE TEXTURED MESH IN THIS FILE. buildings_civic.js already mints the
+     incised plaque and the branch seal as canvas textures for civic anchors,
+     and core/batch.js spares anything carrying a `map`, so a plate is one draw
+     call that never merges. That is why there are SIX of them in the whole
+     world (three seals, one motto, two nameplates) and why they go
+     on a registered interior fixture group: raw meshes bypass b.lbox, and the
+     shell clamp only sees boxes drawn through b.lbox. Degrade-safe — without
+     THREE, without the textures, or without a host group the caller's framed
+     box still stands and nothing throws. */
+  function platesRoot(h) {
+    const T = window.THREE;
+    const g = h && h.b && h.b.group;
+    if (!T || !g || typeof g.add !== "function") return null;
+    let root = g.__presidentPlates;
+    if (root && root.parent === g) return root;
+    root = new T.Group();
+    root.name = "presidentPlates";
+    g.add(root);
+    g.__presidentPlates = root;
+    if (CBZ.interiorTrackFixture)
+      CBZ.interiorTrackFixture("president:" + Math.round(h.ox) + ":" + Math.round(h.oz), h.b, root, null);
+    return root;
+  }
+  function statePlate(h, tex, x, y, z, w, hgt, yaw, transparent) {
+    const T = window.THREE;
+    const root = tex ? platesRoot(h) : null;
+    if (!root) return false;
+    const m = new T.Mesh(new T.PlaneGeometry(w, hgt),
+      new T.MeshBasicMaterial(transparent ? { map: tex, transparent: true } : { map: tex }));
+    m.position.set(x, y, z);
+    m.rotation.y = yaw;
+    m.castShadow = false; m.receiveShadow = false;
+    m.renderOrder = 3;
+    root.add(m);
+    return true;
+  }
+  function plaqueTex(text) {
+    try { return CBZ.civicPlaqueTex ? CBZ.civicPlaqueTex(text, P.wood) : null; } catch (e) { return null; }
+  }
+  function sealTex() {
+    try { return CBZ.civicSealTex ? CBZ.civicSealTex("federal") : null; } catch (e) { return null; }
+  }
+  // Which way a wall faces in the approach frame. `side` 0 = the wall you walk
+  // toward, ±1 = a side wall; the plate's normal points back into the room.
+  function stateFace(A, side) {
+    return side ? Math.atan2(-side * A.tx, -side * A.tz) : A.faceIn;
+  }
+  function stateOff(A, d, lat, side, off) {
+    return side ? A.at(d, lat - side * off) : A.at(d - off, lat);
+  }
+
+  // THE STATE SEAL — framed, inset, lit, with the real engraved medallion on
+  // it. Falls back to the incised relief boxes when the canvas texture is not
+  // available, so the wall is never a blank blue rectangle.
+  function stateSeal(A, h, r, d, lat, ly, w, hgt, side) {
+    const p = A.at(d, lat);
+    if (!inRect(r, p.x, p.z, 0.10)) return 0;
+    const across = side ? 0.10 : w, deep = side ? w : 0.10;
+    A.fitbox(p, ly, across, hgt, deep, P.gold);
+    const q = stateOff(A, d, lat, side, 0.10);
+    A.fitbox(q, ly, side ? 0.05 : w - 0.6, hgt - 0.55, side ? w - 0.6 : 0.05, P.glow,
+      { emissive: P.glow, ei: 0.38 });
+    const f = stateOff(A, d, lat, side, 0.16);
+    const med = Math.min(w - 0.8, hgt - 0.62);
+    if (!statePlate(h, sealTex(), f.x, r.y + ly, f.z, med, med, stateFace(A, side), true)) {
+      const rel = stateOff(A, d, lat, side, 0.155);
+      A.fitbox(rel, ly, side ? 0.02 : 1.72, 0.15, side ? 1.72 : 0.02, P.gold);
+      A.fitbox(rel, ly - 0.21, side ? 0.02 : 0.22, 0.78, side ? 0.22 : 0.02, P.gold);
+      for (const s of [-1, 1])
+        A.fitbox(stateOff(A, d, lat + (side ? 0 : s * 0.72), side, 0.155), ly + 0.21,
+          side ? 0.02 : 0.60, 0.14, side ? 0.60 : 0.02, P.gold);
+    }
+    return 1;
+  }
+  // A FRAMED PORTRAIT: brass frame, dark canvas, and an engraved nameplate
+  // under it. Two boxes and (optionally) one plate.
+  function statePortrait(A, h, r, d, lat, ly, w, hgt, side, name) {
+    const p = A.at(d, lat);
+    if (!inRect(r, p.x, p.z, 0.10)) return 0;
+    A.fitbox(p, ly, side ? 0.09 : w, hgt, side ? w : 0.09, P.gold);
+    const q = stateOff(A, d, lat, side, 0.055);
+    A.fitbox(q, ly, side ? 0.04 : w - 0.26, hgt - 0.26, side ? w - 0.26 : 0.04, P.wood);
+    if (name) {
+      const ny = ly - hgt / 2 - 0.22, nw = Math.min(w * 0.8, 1.5);
+      const n = stateOff(A, d, lat, side, 0.075);
+      A.fitbox(p, ny, side ? 0.08 : nw, 0.26, side ? nw : 0.08, P.gold);
+      statePlate(h, plaqueTex(name), n.x, r.y + ny, n.z, nw - 0.06, 0.22, stateFace(A, side), false);
+    }
+    return 1;
+  }
+  // TWO STANDARDS FLANKING AN AXIS: a floor-standing pole with a gold finial
+  // and cloth that hangs flat, sideways, the way a mounted flag actually does.
+  function stateStandards(A, h, r, d, lat, hex) {
+    let n = 0;
+    for (const s of [-1, 1]) {
+      const p = A.at(d, s * lat);
+      if (!inRect(r, p.x, p.z, 0.3) || !h.clear(p.x, p.z, 0.45)) continue;
+      // The plinth reaches from y=0 to 0.30 so it clears the GROUND floor's
+      // 0.15 covering as well as an upper floor's 0.04 one.
+      A.fitbox(p, 0.15, 0.52, 0.30, 0.52, P.bezel);              // plinth
+      A.fitbox(p, 1.49, 0.09, 2.38, 0.09, P.gold);               // pole → 2.68
+      A.fitbox(p, 2.76, 0.17, 0.16, 0.17, P.gold);               // finial
+      A.fitbox(A.at(d, s * lat - s * 0.06), 1.86, 0.86, 1.24, 0.05, hex);   // cloth
+      n++;
+    }
+    return n;
+  }
+  // A PANELLED WALL: wainscot, brass datum and a run of raised panels. The one
+  // treatment that turns a 55 m painted span into a room.
+  function statePanelling(A, h, r, d0, d1, wallLat, bay, hex) {
+    const run = Math.max(1.0, d1 - d0), mid = (d0 + d1) / 2;
+    for (const s of [-1, 1]) {
+      A.fitbox(A.at(mid, s * (wallLat - 0.20)), 0.72, 0.10, 1.10, run, hex);   // wainscot
+      A.fitbox(A.at(mid, s * (wallLat - 0.20)), 1.31, 0.12, 0.07, run, P.gold); // brass datum
+      // Raised panels stand PROUD of the wainscot (0.27..0.31 off the wall
+      // against its 0.15..0.25) so no two faces are ever coplanar.
+      for (let d = d0 + bay / 2; d < d1; d += bay)
+        A.fitbox(A.at(d, s * (wallLat - 0.29)), 0.74, 0.04, 0.86, bay * 0.62, P.gold);
+    }
+  }
   function progStateHall(r, h, opts) {
     // This is always the first presidential program built, so it is also the
     // world-rebuild boundary for the tiny room/prop ledger below.
@@ -2367,11 +2568,19 @@
     A.obox(A.at(mid, 0), 0.18, 5.2, 0.05, run, P.rug, { pad: 0.4 });
     for (const s of [-1, 1]) A.obox(A.at(mid, s * 2.52), 0.215, 0.08, 0.025, run, P.gold, { pad: 0.3 });
 
+    // Stone flanking the carpet, so the 55 m plate reads as a paved state hall
+    // rather than as one rug lost on a floor covering. It starts at the rug's
+    // own edge — a strip of bare floor covering between carpet and paving is
+    // the thing that made the hall read as a plate with a rug dropped on it.
+    for (const s of [-1, 1])
+      A.obox(A.at(mid, s * 7.0), 0.168, 8.8, 0.03, run, P.marble, { pad: 0.6 });
+
     // A state hall this wide needs architecture, not more loose furniture.
     // Four paired piers and their ceiling ties turn the carpet into a real
     // processional gallery while preserving a 5 m clear presidential axis.
     const pierLat = Math.min(half - 2.0, 4.45);
-    for (const d of [6.5, 13.2, 19.9, 26.6]) {
+    const bays = [6.5, 13.2, 19.9, 26.6];
+    for (const d of bays) {
       if (d > dep - 3.0) continue;
       for (const s of [-1, 1]) {
         const pp = A.at(d, s * pierLat);
@@ -2379,12 +2588,23 @@
         A.obox(pp, 1.55, 0.52, 2.62, 0.52, P.marble, { pad: 0.30 });
         A.obox(pp, 2.86, 0.88, 0.16, 0.88, P.gold, { pad: 0.32 });
       }
-      A.obox(A.at(d, 0), h.fh - 0.20, pierLat * 2 + 1.0, 0.16, 0.34, P.marble, { pad: 0.25 });
+      // the tie beam sits UNDER the slab (h.fh - CEIL), not inside it
+      A.fitbox(A.at(d, 0), h.fh - CEIL - 0.11, pierLat * 2 + 1.0, 0.22, 0.34, P.marble);
     }
-    // Recessed light panels continue that bay rhythm overhead. They are
-    // attached fixtures; no floor lamp is allowed to compete with a doorway.
-    for (const d of [9.8, 16.5, 23.2])
-      A.obox(A.at(d, 0), h.fh - 0.10, 2.8, 0.055, 0.34, P.lamp, { emissive: P.lamp, ei: 0.62, pad: 0.2 });
+
+    // THE ROOM HAS A TOP. Cornice round the walls, coffers on the SAME bay
+    // rhythm as the piers, and three chandeliers hung in the middle of a bay
+    // (never on a rib) — which is also the only real light in the hall.
+    const wallLat = A.span / 2;
+    stateCornice(A, h, r, 0.6, dep, wallLat);
+    stateCoffers(A, h, r, bays[0], dep - 0.5, pierLat + 0.5, 6.7, wallLat - 0.5);
+    for (const d of [9.85, 16.55, 23.25]) if (d < dep - 3.0) stateChandelier(A, h, r, d, 0);
+    // Panelled side walls with a sconce between each pair of panels. Warm
+    // brackets on both flanks are what stop the hall reading as a grey box
+    // from the middle of the carpet, where the player actually stands.
+    statePanelling(A, h, r, 2.0, dep - 1.0, wallLat, 7.0, P.wood);
+    for (const s of [-1, 1]) for (const d of [12.5, 19.5, 26.5])
+      if (d < dep - 2.0) stateSconce(A, h, r, d, wallLat, s);
 
     // Waiting belongs by the entrance, square to the axis. These are real
     // benches, so the room offers an action before it offers exposition.
@@ -2415,21 +2635,77 @@
     usable += presidentialUse(presidentialPiece("bench", r, h, press.x, press.z,
       A.faceIn + Math.PI / 2, { len: 3.0, tone: "exec" }));
 
-    // The far wall terminates the walk with one large state seal and two framed
-    // portraits. They are attached architectural signals, never floor clutter.
-    A.fitbox(A.at(dep - 0.28, 0), 1.65, 4.2, 2.25, 0.10, P.gold);
-    A.fitbox(A.at(dep - 0.38, 0), 1.65, 3.6, 1.72, 0.05, P.glow, { emissive: P.glow, ei: 0.35 });
-    A.fitbox(A.at(dep - 0.44, 0), 1.68, 1.75, 0.15, 0.025, P.gold);
-    A.fitbox(A.at(dep - 0.44, 0), 1.47, 0.22, 0.78, 0.025, P.gold);
-    for (const s of [-1, 1])
-      A.fitbox(A.at(dep - 0.44, s * 0.72), 1.86, 0.62, 0.14, 0.025, P.gold);
+    // THE FAR WALL terminates the walk: paired stone pilasters and a brass
+    // entablature framing the engraved state seal, the mansion's motto under
+    // it, and a predecessor's portrait on each flank. Attached architectural
+    // signals, never floor clutter.
+    let symbols = 0;
+    // 0.20 in from the far wall: `inRect` rejects a point closer than 0.10 to
+    // an edge, so authoring ON the wall plane silently deletes the whole
+    // composition — which is exactly how a seal goes missing.
+    const wallD = dep - 0.20;
     for (const s of [-1, 1]) {
-      A.fitbox(A.at(dep - 0.26, s * 5.2), 1.65, 1.45, 1.85, 0.08, P.gold);
-      A.fitbox(A.at(dep - 0.37, s * 5.2), 1.65, 1.16, 1.52, 0.04, P.marble);
+      A.fitbox(A.at(dep - 0.32, s * 3.55), 1.35, 0.62, 2.40, 0.46, P.marble);
+      A.fitbox(A.at(dep - 0.32, s * 3.55), 1.35, 0.10, 2.16, 0.50, P.gold);
     }
-    presidentialRoom("statehall", "State Entrance Hall", h, r, usable, 3, A, {
+    symbols += stateSeal(A, h, r, wallD, 0, 1.63, 3.2, 1.78, 0);
+    // the motto, cut into stone the way the facade's is
+    A.fitbox(A.at(dep - 0.14, 0), 0.40, 4.3, 0.52, 0.16, P.marble);
+    if (statePlate(h, plaqueTex("EXECUTIVE MANSION"), A.at(dep - 0.24, 0).x, r.y + 0.40,
+      A.at(dep - 0.24, 0).z, 3.9, 0.44, A.faceIn, false)) symbols++;
+    for (const s of [-1, 1])
+      symbols += statePortrait(A, h, r, wallD, s * 6.4, 1.72, 1.45, 1.60, 0,
+        s < 0 ? "THE FIRST PRESIDENT" : "THE FOUNDER");
+    // TWO STANDARDS flanking the axis in front of it. This is the pair of
+    // flags the room has never had, and the reason the seal reads as a seal.
+    symbols += stateStandards(A, h, r, dep - 2.1, 2.55, 0x8f3434);
+    // A portrait gallery down the panelled flanks, hung in the GAPS between
+    // the raised panels and clear of both the brass datum and the cornice.
+    for (const s of [-1, 1]) for (const d of [9.0, 16.0, 23.0])
+      if (d < dep - 2.0) symbols += statePortrait(A, h, r, d, s * (wallLat - 0.34), 1.98, 1.30, 1.10, s, null);
+
+    // THE PRESS CORPS. A seat of state has a press pool standing in the public
+    // half of its hall; that is what the room is FOR between ceremonies. The
+    // program publishes the standing spots and posts them through the ONE
+    // sanctioned atom (citystaff, via CBZ.interiorPeople) — no spawner, no
+    // brain and no budget of its own here, and no political state either: who
+    // holds the seat is presidency.js's to decide, and it can re-read
+    // CBZ.presidentInteriorPressPoints() to move or clear them.
+    const pressJobs = [];
+    for (const q of [[9.0, -5.6], [11.4, -8.4], [9.0, 5.6], [11.4, 8.4], [13.6, -6.9]]) {
+      if (q[0] > dep - 4.0) continue;
+      const pp = A.at(q[0], q[1]);
+      if (!inRect(r, pp.x, pp.z, 1.0) || !h.clear(pp.x, pp.z, 0.6)) continue;
+      const rec = { x: h.ox + pp.x, z: h.oz + pp.z, yaw: A.faceOut };
+      PRESIDENTIAL.press.push(rec);
+      pressJobs.push({
+        x: rec.x, z: rec.z, face: rec.yaw,
+        job: "press correspondent", archetype: "worker", pose: "foldarms",
+        opts: { wealth: 0.35, aggr: 0.05, armed: false, outfit: 0x2f3640 },
+        near: 90, far: 150,
+      });
+    }
+    // Posted through citystaff DIRECTLY rather than through CBZ.interiorPeople:
+    // that door shares INTERIOR_LIFE_MAX_POSTS with every shop and office in a
+    // 400-lot city and would silently drop the five rows that matter most.
+    // Redeclaring the venue clears its previous rows, so a world rebuild can
+    // never inherit a ghost press pool. citystaff's own VENUE_STAFF_MAX still
+    // caps the live bodies, and the 90 m leash means they exist only when you
+    // are in the house.
+    if (pressJobs.length && CBZ.cityStaffPost) {
+      if (CBZ.cityStaffVenue)
+        CBZ.cityStaffVenue("president", { stations: pressJobs.length, note: "press corps in the State Entrance Hall" });
+      for (let i = 0; i < pressJobs.length; i++) {
+        const j = pressJobs[i];
+        try { CBZ.cityStaffPost(Object.assign({ venue: "president", id: "president:press:" + i }, j)); }
+        catch (e) {}
+      }
+    }
+
+    presidentialRoom("statehall", "State Entrance Hall", h, r, usable, symbols, A, {
       diplomaticSalon: coffee,
       stateSeal: A.at(dep - 0.25, 0),
+      pressPen: A.at(11.0, 0),
     });
     return { anchors: [] };
   }
@@ -2455,8 +2731,14 @@
     // upper floor's circulation intentional rather than leftover carpet.
     const galleryRun = Math.max(5, dep - 4.4);
     A.obox(A.at(2.2 + galleryRun / 2, 0), 0.17, 2.6, 0.035, galleryRun, P.rug, { pad: 0.3 });
-    for (const d of [6.2, dep * 0.54, dep - 4.2])
-      A.obox(A.at(d, 0), h.fh - 0.10, 2.2, 0.05, 0.30, P.lamp, { emissive: P.lamp, ei: 0.55, pad: 0.2 });
+    // Pendants down the gallery. They hang UNDER the slab (h.fh - CEIL): the
+    // panels these replace were authored at h.fh - 0.10, i.e. buried inside the
+    // storey slab, and had never been visible in any screenshot.
+    for (const d of [6.2, dep * 0.54, dep - 4.2]) {
+      const p = A.at(d, 0);
+      A.fitbox(p, h.fh - CEIL - 0.10, 0.08, 0.20, 0.08, P.gold);
+      stateLight(A, h, r, p, h.fh - CEIL - 0.28, 2.0, 0.16, 0.44, P.lamp, 0.85);
+    }
 
     // A state dining room near the stairs, sized by the plate and ringed with
     // seats from the shared furniture kit.
@@ -2578,18 +2860,42 @@
     usable += presidentialUse(presidentialPiece("table", r, h, table.x, table.z,
       A.faceIn + Math.PI / 2, { len: Math.min(7.0, dep - divider - 2.4), deep: 1.45, seats: 10, tone: "exec" }));
     // Continuous acoustic wainscot and brass datum bind the secure half into
-    // one briefing chamber. These are fitted wall surfaces, not more props.
+    // one briefing chamber. These are fitted wall surfaces, not more props —
+    // and they sit ON the wall now (0.15..0.25 off it) instead of floating the
+    // best part of a metre into the room the way `half - 0.22` put them.
     const chamberRun = Math.max(5.0, dep - divider - 1.2);
-    for (const s of [-1, 1]) {
-      const wallLat = s * (half - 0.22);
-      A.fitbox(A.at(divider + 0.6 + chamberRun / 2, wallLat), 0.72, 0.07, 1.10, chamberRun, P.steel);
-      A.fitbox(A.at(divider + 0.6 + chamberRun / 2, wallLat), 1.26, 0.08, 0.055, chamberRun, P.gold);
-    }
-    A.fitbox(A.at(dep - 0.25, 0), 1.62, Math.min(7.8, A.span - 2.4), 1.45, 0.08, P.bezel);
+    const wall = A.span / 2;
+    statePanelling(A, h, r, divider + 0.6, divider + 0.6 + chamberRun, wall, 5.4, P.steel);
+
+    // THE BRIEFING WALL — one framed situation screen over three live panels…
+    A.fitbox(A.at(dep - 0.18, 0), 1.52, Math.min(8.4, A.span - 1.8), 1.74, 0.12, P.gold);
+    A.fitbox(A.at(dep - 0.29, 0), 1.52, Math.min(7.9, A.span - 2.3), 1.45, 0.08, P.bezel);
     for (const s of [-1, 0, 1])
-      A.fitbox(A.at(dep - 0.36, s * 2.25), 1.62, 1.8, 1.12, 0.035, P.glow, { emissive: P.glow, ei: 0.52 });
-    for (const d of [3.3, divider + 4.0, dep - 4.0])
-      A.obox(A.at(d, 0), h.fh - 0.10, 2.4, 0.05, 0.30, P.light, { emissive: P.light, ei: 0.48, pad: 0.2 });
+      A.fitbox(A.at(dep - 0.37, s * 2.25), 1.52, 1.8, 1.12, 0.035, P.glow, { emissive: P.glow, ei: 0.52 });
+    // …flanked by the national standards, which is what makes this the CABINET
+    // room and not a meeting room with a projector, plus the seal on the wall
+    // the table faces.
+    let symbols = 1 + stateStandards(A, h, r, dep - 1.5, Math.min(half - 1.2, 4.9), 0x8f3434);
+    // The seal goes on the long wall the table faces, hung in a GAP between the
+    // wainscot's raised panels and standing clear of the brass datum — so no
+    // two surfaces on that wall ever share a plane.
+    symbols += stateSeal(A, h, r, Math.min(dep - 4.0, divider + 16.8),
+      -(wall - 0.40), 1.78, 1.9, 1.50, -1);
+
+    // A CEILING, AND LIGHT OVER THE TABLE. Same rule as the hall: nothing above
+    // h.fh - CEIL, because that plane is the underside of the storey slab and
+    // the three "recessed panels" this replaces were authored inside it.
+    stateCornice(A, h, r, divider + 0.4, dep, wall);
+    stateCoffers(A, h, r, divider + 1.6, dep - 1.2, Math.min(half - 1.6, 3.4), 5.0);
+    const pendant = function (d, deep) {
+      const p = A.at(d, 0);
+      A.fitbox(p, h.fh - CEIL - 0.09, 0.09, 0.18, 0.09, P.gold);
+      stateLight(A, h, r, p, h.fh - CEIL - 0.26, 1.5, 0.16, deep, P.light, 0.72);
+    };
+    for (const d of [divider + 4.1, divider + 9.1, divider + 14.1]) if (d < dep - 2.4) pendant(d, 3.0);
+    pendant(Math.max(2.4, divider - 3.4), 2.4);      // …and the reception half
+    for (const s of [-1, 1]) for (const d of [divider + 4.5, divider + 13.5])
+      if (d < dep - 2.0) stateSconce(A, h, r, d, wall, s);
 
     // A physical intelligence folio on the table is the room's verb. The
     // geometry owner publishes position+intent; presidency.js performs the
@@ -2597,7 +2903,7 @@
     const folio = A.at(Math.min(dep - 4.0, tableD + 1.0), 0);
     A.obox(folio, 0.82, 0.72, 0.06, 0.48, P.gold, { pad: 0.25 });
     presidentialProp("cabinet-bureau", "Authorize Bureau raid", "bureau", h, r, folio);
-    presidentialRoom("cabinetroom", "Cabinet and Briefing Room", h, r, usable + 1, 1, A, {
+    presidentialRoom("cabinetroom", "Cabinet and Briefing Room", h, r, usable + 1, symbols, A, {
       reception: reception,
       clearancePortal: A.at(divider, 0),
       dutyStation: duty,
@@ -2660,15 +2966,11 @@
       A.fitbox(A.at(dep - 0.40, flagLat - s * 0.34), 2.04, 0.90, 1.05, 0.045,
         s < 0 ? 0x2f4f86 : 0x8f3434);
     }
-    // Seal behind the chair: framed, inset, and centred on the desk axis.
-    A.fitbox(A.at(dep - 0.25, 0), 1.68, 3.4, 2.25, 0.10, P.gold);
-    A.fitbox(A.at(dep - 0.39, 0), 1.68, 2.85, 1.72, 0.035, P.glow, { emissive: P.glow, ei: 0.42 });
-    // A small relief reads as an emblem at room distance; the prior blank blue
-    // inset was technically a symbol but visually just another screen.
-    A.fitbox(A.at(dep - 0.45, 0), 1.70, 1.72, 0.15, 0.022, P.gold);
-    A.fitbox(A.at(dep - 0.45, 0), 1.47, 0.22, 0.78, 0.022, P.gold);
-    for (const s of [-1, 1])
-      A.fitbox(A.at(dep - 0.45, s * 0.70), 1.88, 0.60, 0.14, 0.022, P.gold);
+    // Seal behind the chair: framed, inset, centred on the desk axis, and now
+    // carrying the real engraved medallion (the incised relief is the fallback
+    // when the civic canvas texture is not available).
+    let symbols = 2;                                  // the two standards above
+    symbols += stateSeal(A, h, r, dep - 0.20, 0, 1.68, 3.4, 2.25, 0);
     // Monumental desk wall: paired stone pilasters and a brass entablature
     // frame the flags/seal as one architectural composition.
     for (const s of [-1, 1]) {
@@ -2678,26 +2980,57 @@
     A.fitbox(A.at(dep - 0.30, 0), 2.78, 11.1, 0.18, 0.42, P.marble);
     A.fitbox(A.at(dep - 0.38, 0), 2.70, 10.5, 0.06, 0.46, P.gold);
 
-    // Warm fitted wainscot makes the office perimeter feel occupied even when
-    // all staff are elsewhere. It stops at the arrival portal and desk wall.
-    const officeRun = Math.max(5.0, dep - portalD - 1.2);
+    // Warm panelled perimeter makes the office feel occupied even when all
+    // staff are elsewhere. It stops at the arrival portal and the desk wall.
+    const wall = A.span / 2;
+    statePanelling(A, h, r, portalD + 0.6, dep - 0.9, wall, 5.6, P.wood);
+
+    // THE FIREPLACE. An office of state is a room you receive people in, and
+    // this is the wall the visitor group sits beside. Stone jambs and lintel,
+    // a real firebox with one warm ember bed, a mantel, an overmantel painting
+    // and a bookcase bay on each flank. Every dimension is measured off the
+    // WALL FACE, and no two faces are ever left coplanar.
+    const fireD = Math.min(dep - 7.0, Math.max(loungeD + 4.5, dep * 0.66));
+    const fireLat = wall - 0.32;
+    for (const s of [-1, 1])
+      A.fitbox(A.at(fireD + s * 1.0, fireLat), 0.86, 0.60, 1.72, 0.55, P.marble);   // jambs
+    A.fitbox(A.at(fireD, fireLat), 1.62, 0.56, 0.30, 2.55, P.marble);               // lintel
+    A.fitbox(A.at(fireD, wall - 0.40), 1.80, 0.72, 0.16, 2.78, P.marble);           // mantel
+    A.fitbox(A.at(fireD, wall - 0.16), 0.74, 0.16, 1.28, 1.46, P.bezel);            // firebox
+    A.fitbox(A.at(fireD, wall - 0.66), 0.12, 1.12, 0.14, 2.30, P.marble);           // hearth
+    stateLight(A, h, r, A.at(fireD, wall - 0.36), 0.34, 0.34, 0.36, 1.10, P.lamp, 1.0);
+    symbols += statePortrait(A, h, r, fireD, fireLat, 2.22, 1.50, 0.60, 1, null);
     for (const s of [-1, 1]) {
-      const wallLat = s * (half - 0.22);
-      A.fitbox(A.at(portalD + 0.6 + officeRun / 2, wallLat), 0.72, 0.07, 1.10, officeRun, P.wood);
-      A.fitbox(A.at(portalD + 0.6 + officeRun / 2, wallLat), 1.26, 0.08, 0.055, officeRun, P.gold);
+      A.fitbox(A.at(fireD + s * 2.6, fireLat), 1.15, 0.58, 2.20, 1.60, P.wood);     // bookcase
+      for (const sh of [0.55, 1.05, 1.55, 2.05])
+        A.fitbox(A.at(fireD + s * 2.6, fireLat), sh, 0.50, 0.06, 1.50, P.shelf);
     }
 
     // Low fitted credenzas occupy the otherwise dead side wall and read as
-    // document storage, while paired portraits terminate the visitor salon.
-    const credLat = -Math.min(half - 0.55, 8.0);
-    for (const d of [portalD + 4.0, portalD + 7.0]) {
-      A.obox(A.at(d, credLat), 0.18, 1.95, 0.58, 0.52, P.wood, { pad: 0.30 });
-      A.obox(A.at(d, credLat), 0.78, 2.05, 0.06, 0.58, P.marble, { pad: 0.28 });
-      A.obox(A.at(d, credLat - 0.03), 1.72, 1.35, 1.38, 0.055, P.gold, { pad: 0.24 });
-      A.obox(A.at(d, credLat - 0.06), 1.72, 1.08, 1.10, 0.03, P.glow, { emissive: P.glow, ei: 0.28, pad: 0.22 });
+    // document storage. They are AGAINST that wall now: `across` is the lateral
+    // extent, so 1.95 across put a 2 m-deep sideboard sticking out of a wall it
+    // was already floating 1.5 m clear of, with its framed panel hanging in
+    // mid-air above it.
+    const credLat = -(wall - 0.30);
+    for (const d of [portalD + 4.0, portalD + 7.4]) {
+      A.obox(A.at(d, credLat), 0.20, 0.56, 0.62, 1.95, P.wood, { pad: 0.30 });
+      A.obox(A.at(d, credLat), 0.82, 0.62, 0.06, 2.05, P.marble, { pad: 0.28 });
+      A.obox(A.at(d, credLat + 0.04), 1.72, 0.055, 1.38, 1.35, P.gold, { pad: 0.24 });
+      A.obox(A.at(d, credLat + 0.07), 1.72, 0.03, 1.10, 1.08, P.glow, { emissive: P.glow, ei: 0.28, pad: 0.22 });
     }
-    for (const d of [portalD + 4.0, deskD - 1.8, dep - 2.2])
-      A.obox(A.at(d, 0), h.fh - 0.10, 2.3, 0.05, 0.30, P.lamp, { emissive: P.lamp, ei: 0.58, pad: 0.2 });
+
+    // A CEILING and pendants hung under the slab. The three "recessed panels"
+    // this replaces were authored at h.fh - 0.10, inside the storey slab, and
+    // have never once been visible.
+    stateCornice(A, h, r, portalD + 0.4, dep - 0.6, wall, true);
+    stateCoffers(A, h, r, portalD + 2.0, dep - 1.6, Math.min(half - 2.0, 3.6), 5.0);
+    for (const d of [portalD + 4.5, portalD + 9.5, deskD - 1.4]) {
+      const p = A.at(d, 0);
+      A.fitbox(p, h.fh - CEIL - 0.09, 0.09, 0.18, 0.09, P.gold);
+      stateLight(A, h, r, p, h.fh - CEIL - 0.28, 1.7, 0.18, 1.7, P.lamp, 0.85);
+    }
+    for (const s of [-1, 1]) for (const d of [portalD + 2.6, dep - 3.4])
+      if (d > 1.5 && d < dep - 2.0) stateSconce(A, h, r, d, wall, s);
 
     // Two small, visually distinct desk objects turn the office into a second
     // command surface. Their actions call the SAME presidency orders as the
@@ -2708,12 +3041,13 @@
     A.obox(folder, 0.82, 0.62, 0.05, 0.42, P.gold, { pad: 0.2 });
     presidentialProp("oval-address", "Address the nation", "address", h, r, phone);
     presidentialProp("oval-pardon", "Sign a pardon", "pardon", h, r, folder);
-    presidentialRoom("ovaloffice", "The President's Office", h, r, usable + 2, 3, A, {
+    presidentialRoom("ovaloffice", "The President's Office", h, r, usable + 2, symbols, A, {
       arrivalPortal: A.at(portalD, 0),
       presidentialDesk: desk,
       visitorSofa: sofa,
       visitorTable: low,
       stateSeal: A.at(dep - 0.25, 0),
+      fireplace: A.at(fireD, wall - 0.6),
       securePhone: phone,
       pardonFolder: folder,
     });
@@ -2732,6 +3066,15 @@
     });
   };
   CBZ.presidentInteriorProps = function () { return PRESIDENTIAL.props.map(function (r) { return Object.assign({}, r); }); };
+  /* THE PRESS CORPS' STANDING SPOTS, in WORLD coords. progStateHall already
+     posts these through citystaff (CBZ.interiorPeople), because a seat of
+     state has a press pool in its hall whoever is sitting in the chair — this
+     file owns the room, never the politics. The list is published so the file
+     that DOES own the politics (presidency.js) can move, add to or clear them
+     when the regime changes, without re-deriving a single coordinate. */
+  CBZ.presidentInteriorPressPoints = function () {
+    return PRESIDENTIAL.press.map(function (p) { return { x: p.x, z: p.z, yaw: p.yaw }; });
+  };
   CBZ.presidentInteriorAudit = function () {
     return {
       namedRooms: PRESIDENTIAL.rooms.length,
