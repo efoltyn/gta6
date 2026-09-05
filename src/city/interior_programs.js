@@ -2278,6 +2278,7 @@
     PRESIDENTIAL.rooms.length = 0;
     PRESIDENTIAL.props.length = 0;
     PRESIDENTIAL.press.length = 0;
+    PRESIDENTIAL.pressJobs = null; PRESIDENTIAL.pressPosted = undefined;   // a rebuilt hall re-posts its pool
     PRESIDENTIAL.usable = 0;
     PRESIDENTIAL.symbols = 0;
     PRESIDENTIAL.emptyDecor = 0;
@@ -2692,15 +2693,12 @@
     // never inherit a ghost press pool. citystaff's own VENUE_STAFF_MAX still
     // caps the live bodies, and the 90 m leash means they exist only when you
     // are in the house.
-    if (pressJobs.length && CBZ.cityStaffPost) {
-      if (CBZ.cityStaffVenue)
-        CBZ.cityStaffVenue("president", { stations: pressJobs.length, note: "press corps in the State Entrance Hall" });
-      for (let i = 0; i < pressJobs.length; i++) {
-        const j = pressJobs[i];
-        try { CBZ.cityStaffPost(Object.assign({ venue: "president", id: "president:press:" + i }, j)); }
-        catch (e) {}
-      }
-    }
+    // THE PRESS CAN LEAVE. president_regime.js decides whether a regime keeps a
+    // press pool (its pressAllowed()); it calls CBZ.presidentInteriorPressSet
+    // on every change. Redeclaring the venue clears the old rows either way,
+    // so "leave" is a venue with zero posts and "return" is the rows again.
+    PRESIDENTIAL.pressJobs = pressJobs;
+    postPressCorps(!(CBZ.presidentRegime && CBZ.presidentRegime.pressAllowed) || CBZ.presidentRegime.pressAllowed());
 
     presidentialRoom("statehall", "State Entrance Hall", h, r, usable, symbols, A, {
       diplomaticSalon: coffee,
@@ -3072,6 +3070,25 @@
      file owns the room, never the politics. The list is published so the file
      that DOES own the politics (presidency.js) can move, add to or clear them
      when the regime changes, without re-deriving a single coordinate. */
+  function postPressCorps(allowed) {
+    const jobs = PRESIDENTIAL.pressJobs || [];
+    if (!CBZ.cityStaffPost || !CBZ.cityStaffVenue) return 0;
+    CBZ.cityStaffVenue("president", { stations: jobs.length, note: allowed ? "press corps in the State Entrance Hall" : "press pool cleared by the regime" });
+    if (!allowed) return 0;
+    let n = 0;
+    for (let i = 0; i < jobs.length; i++) {
+      try { if (CBZ.cityStaffPost(Object.assign({ venue: "president", id: "president:press:" + i }, jobs[i]))) n++; }
+      catch (e) {}
+    }
+    PRESIDENTIAL.pressPosted = allowed;
+    return n;
+  }
+  // regime -> hall: post the press pool or clear it. Idempotent.
+  CBZ.presidentInteriorPressSet = function (allowed) {
+    allowed = !!allowed;
+    if (PRESIDENTIAL.pressPosted === allowed) return PRESIDENTIAL.pressJobs ? PRESIDENTIAL.pressJobs.length : 0;
+    return postPressCorps(allowed);
+  };
   CBZ.presidentInteriorPressPoints = function () {
     return PRESIDENTIAL.press.map(function (p) { return { x: p.x, z: p.z, yaw: p.yaw }; });
   };

@@ -680,6 +680,8 @@
     }
     D.lastChangeDay = day();
     try { lastDetail = retintDetail(now.rec, now.key); } catch (e) { lastDetail = null; }
+    // the hall's press pool follows the regime (interior_programs.js owns the rows)
+    if (CBZ.presidentInteriorPressSet) { try { CBZ.presidentInteriorPressSet(pressAllowed()); } catch (e) {} }
 
     // ONE headline per real change. Booting straight into a save that is
     // already a dictatorship is not a change and does not get a headline.
