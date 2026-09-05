@@ -5975,9 +5975,12 @@
         const mg = IQ.moveGate(ped, ped.rage, d, slot);
         if (mg && mg.halt) {
           spd = 0;
+          // the target can die inside this same frame (the gate firefight showed it): face it only while it exists
+          if (ped.rage && ped.rage.pos) {
           const fdx = ped.rage.pos.x - ped.pos.x, fdz = ped.rage.pos.z - ped.pos.z;
           if (fdx * fdx + fdz * fdz > 0.01)
             ped.group.rotation.y = lerpAngle(ped.group.rotation.y, Math.atan2(fdx, fdz), 1 - Math.pow(0.002, dt));
+          }
         }
       }
       // COMBAT FOOTWORK FACES THE MARK. A short tactical hop — a peek step,
