@@ -22,6 +22,14 @@ const subjects = [
     player: { x: 0, y: 0.08, z: 20 },
   },
   {
+    id: "threshold-feet",
+    label: "Feet on the Stylobate",
+    focus: "The butler at the door and the press inside stand ON the 0.30 m deck and the hall slab — NPCs read the same groundAt as the player instead of being pinned to y = 0.",
+    pre: "CBZ.player.pos.set(site.cx + 3, 0.31, site.cz - 12); tick(600);",
+    cam: { x: 7.5, y: 1.5, z: -9.5, ax: 0, ay: 0.9, az: -16.5 },
+    player: { x: 3, y: 0.31, z: -12 },
+  },
+  {
     id: "motorcade-court",
     label: "The Motorcade Waits",
     focus: "A real black state car on the motor-court ring, a chauffeur beside it, the perron behind. The car is stealable, drivable, and the E on the chauffeur is the fast way across a 4.7 km country.",

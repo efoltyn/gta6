@@ -208,6 +208,27 @@ else {
   check("…and the republic takes them down again", !!(after && (after.back.pieces | 0) <= (after.before.pieces | 0) + 0), after && `pieces ${after.before.pieces} -> ${after.dictatorship.pieces} -> ${after.back.pieces}`);
 }
 
+// ---- 6b. the feet -----------------------------------------------------------
+// Every NPC on the compound must stand ON what the world raised under him
+// (stylobate 0.30, paving 0.10, hall slab) — the player's own groundAt law.
+const feet = await evl(`
+  if (!CBZ.groundAt || !CBZ.presidency || !CBZ.presidency.site) return null;
+  var s = CBZ.presidency.site(); CBZ.player.pos.set(s.cx, 0.31, s.cz - 12); CBZ.player.vy = 0;
+  for (var k = 0; k < 600; k++) CBZ.stepSim(1/60);        // let citystaff mint the household + press
+  var P = CBZ.cityPeds || [], n = 0, bad = 0, worst = 0, raised = 0, sample = [];
+  for (var i = 0; i < P.length; i++) { var p = P[i]; if (!p || !p.pos || p.dead || p.inCar || p.culled) continue;
+    if (Math.hypot(p.pos.x - s.cx, p.pos.z - s.cz) > 90) continue;
+    var g = CBZ.groundAt(p.pos.x, p.pos.z, p.pos.y); var d = Math.abs(p.pos.y - g); n++;
+    if (g > 0.05) raised++;
+    if (d > worst) worst = d;
+    if (d > 0.06) { bad++; if (sample.length < 4) sample.push({ job: p.job, y: +p.pos.y.toFixed(2), g: +g.toFixed(2) }); } }
+  return { bodies: n, onRaisedGround: raised, sunkOrFloating: bad, worst: +worst.toFixed(3), sample: sample };`);
+if (!feet) skip("NPC feet", "no groundAt/site");
+else {
+  check("NPCs on the compound stand on the surface under them", feet.bodies > 0 && feet.sunkOrFloating === 0, JSON.stringify(feet));
+  check("…and some of that surface is raised (the check is not vacuous)", feet.onRaisedGround > 0, `raised=${feet.onRaisedGround}/${feet.bodies}`);
+}
+
 // ---- 7. the house -----------------------------------------------------------
 const ia = await evl("return CBZ.presidentInteriorAudit ? CBZ.presidentInteriorAudit() : null;");
 if (!ia) skip("interior audit", "no presidentInteriorAudit");
