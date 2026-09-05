@@ -1772,7 +1772,7 @@
       if (CBZ.collide) CBZ.collide(p.pos, PED_R, p.pos.y, p.pos.y + 1.7);
       const A = CBZ.city && CBZ.city.arena;
       if (A && A.clampToCity) A.clampToCity(p.pos, PED_R);
-      p.pos.y = 0;
+      settleFeet(p, dt);
     }
     p.speed = s;
     return true;
@@ -5775,6 +5775,40 @@
   }
 
   // ---- movement / engagement ----
+  /* THE FEET ARE ON THE GROUND. move() used to end with `pos.y = 0` for every
+     living body, so a ped standing on anything the world raised — the
+     Executive Mansion's 0.30 m stylobate, a hall slab, motor-court paving, a
+     graded relief — stood in it to the shins while the player beside him read
+     CBZ.groundAt and stood on top. One law for both now: physics.js's
+     groundAt (floorAt + the platform grid + moving decks). One exception the
+     world already owns: a body occupy.js lifted to a storey keeps that storey
+     (its sweep is the last word on Y and runs after this file).
+     Sampled every frame on camera (a body on a stair must not step in 4 Hz),
+     every FEET_FAR_T beyond FEET_NEAR, eased when the change is under a step
+     so a re-sample never pops. Flag PED_FEET_V1 (off → y = 0, as shipped). */
+  const FEET_NEAR2 = 90 * 90, FEET_FAR_T = 0.4, FEET_STEP = 0.45;
+  if (CBZ.CONFIG.PED_FEET_V1 == null) CBZ.CONFIG.PED_FEET_V1 = true;
+  function settleFeet(ped, dt) {
+    const pos = ped.pos;
+    if (CBZ.CONFIG.PED_FEET_V1 === false || !CBZ.groundAt) { pos.y = 0; return; }
+    if (ped._occupyY > 0.2) return;
+    const P = CBZ.player && CBZ.player.pos;
+    const near = !P || ((pos.x - P.x) * (pos.x - P.x) + (pos.z - P.z) * (pos.z - P.z)) < FEET_NEAR2;
+    // a body that is far, or standing still, reuses its last sample for a while
+    if (!near || !(ped.speed > 0.05)) {
+      ped._feetT = (ped._feetT || 0) - (dt || 0);
+      if (ped._feetT > 0 && ped._feetY != null) { if (!near) pos.y = ped._feetY; return; }
+      ped._feetT = near ? 0.25 : FEET_FAR_T;
+    }
+    let g = 0;
+    try { g = CBZ.groundAt(pos.x, pos.z, pos.y); } catch (e) { g = 0; }
+    if (!Number.isFinite(g)) g = 0;
+    ped._feetY = g;
+    const d = g - pos.y;
+    pos.y = (near && Math.abs(d) < FEET_STEP && dt > 0) ? pos.y + d * Math.min(1, dt * 14) : g;
+  }
+  CBZ.cityPedSettleFeet = settleFeet;
+
   function move(ped, dt, animate) {
     // physics.js owns the short vault/mantle trajectory once this pedestrian
     // commits. Keep it ahead of face/chat/wander steering so those ordinary
@@ -5803,7 +5837,7 @@
         if (dx * dx + dz * dz > 0.05) ped.group.rotation.y = lerpAngle(ped.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.0004, dt));
         ped.speed = 0; ped.pause = Math.max(ped.pause, 0.3);
         if (animate) animChar(ped.char, 0, dt);
-        if (!ped.vendor) { if (CBZ.collide) CBZ.collide(ped.pos, PED_R, ped.pos.y, ped.pos.y + 1.7); ped.pos.y = 0; }
+        if (!ped.vendor) { if (CBZ.collide) CBZ.collide(ped.pos, PED_R, ped.pos.y, ped.pos.y + 1.7); settleFeet(ped, dt); }
         return;
       }
     }
@@ -5821,6 +5855,7 @@
       if (surr) ped.poseHandsUp = true; else if (ped.poseHandsUp && !ped._covered) ped.poseHandsUp = false;
       ped.speed = 0;
       if (animate) animChar(ped.char, 0, dt);
+      settleFeet(ped, dt);                       // a butler on the stylobate stands ON it
       return;
     }
     if (ped.inCar) { ped.speed = 0; return; }   // out on the road; vehicles.js drives it
@@ -6146,7 +6181,7 @@
     } else if (CBZ.city && CBZ.city.arena) {
       CBZ.city.arena.clampToCity(ped.pos, PED_R);
     }
-    ped.pos.y = 0;
+    settleFeet(ped, dt);
     // STUCK DETECTION: a ped that tried to move but got shoved back by a wall is
     // grinding into it — reroute instead of standing there forever (smarter AI).
     if (_trying) {
