@@ -95,7 +95,7 @@
   ground((S.x1 + OUT.x1) / 2, OUT.z1 - 0.5 - RW / 2, OUT.x1 - S.x1 - 1, RW, "asphalt", { program: "patrol-road-se" });
   // the road's edge line
   for (const s of [-1, 1]) paint(s * (FX + 0.25), (OUT.z0 + OUT.z1) / 2, 0.12, OUT.z1 - OUT.z0 - 14, 0xd8d2b8);
-  const SZ_SIGN = "STERILE ZONE\nNO INMATE ACCESS";
+  const SZ_SIGN = "OUT OF BOUNDS";
   fence({ x0: -FX, z0: FZN, x1: -FX, z1: FZS, h: 4.2, gates: [{ at: 50 - FZN, w: 4, open: false, sign: SZ_SIGN }] });
   fence({ x0: FX, z0: FZN, x1: FX, z1: FZS, h: 4.2, gates: [{ at: 50 - FZN, w: 4, open: false, sign: SZ_SIGN }] });
   fence({ x0: -FX, z0: FZN, x1: VG.x0 - 2, z1: FZN, h: 4.2, gates: [{ at: -40 + FX, w: 4, open: false, sign: SZ_SIGN }] });
@@ -134,7 +134,6 @@
   const RY = { x0: -112, x1: -46, z0: -100, z1: -12 };
   ground((RY.x0 + RY.x1) / 2, (RY.z0 + RY.z1) / 2, RY.x1 - RY.x0, RY.z1 - RY.z0, "turf", { program: "rec-yard" });
   ring(RY.x0, RY.z0, RY.x1, RY.z1, { h: 4.2, gates: [{ side: "S", at: -48, w: 4, open: true }] });
-  K.sign("RECREATION YARD\nCOUNT AT 15:30 · YARD CLOSES AT DUSK", -52, 2.2, RY.z1 + 0.15, 4.2, 0.9, 0, "#f3f3ef", "#1f3a5f");
   // the track: a stadium ring, four 1.22 m lanes
   (function track() {
     const cx = -88, cz = -58, L = 36, Ro = 17.6, lanes = 4, lw = 1.22, Ri = Ro - lanes * lw;
@@ -296,7 +295,7 @@
   const PEN = { x0: 90, x1: 114, z1: -98 };
   fence({ x0: PEN.x0, z0: OUT.z0 + 0.5, x1: PEN.x0, z1: PEN.z1, h: 4.6 });
   fence({ x0: PEN.x1, z0: OUT.z0 + 0.5, x1: PEN.x1, z1: PEN.z1, h: 4.6 });
-  fence({ x0: PEN.x0, z0: PEN.z1, x1: PEN.x1, z1: PEN.z1, h: 4.6, gates: [{ at: 12, w: 9, open: false, sign: "VEHICLE SALLY PORT\nSTOP · ALL VEHICLES SEARCHED" }] });
+  fence({ x0: PEN.x0, z0: PEN.z1, x1: PEN.x1, z1: PEN.z1, h: 4.6, gates: [{ at: 12, w: 9, open: false, sign: "STOP\nALL VEHICLES SUBJECT TO SEARCH" }] });
   ground((PEN.x0 + PEN.x1) / 2, (OUT.z0 + PEN.z1) / 2, PEN.x1 - PEN.x0, PEN.z1 - OUT.z0, "asphalt", { y: 0.025 });
   for (let i = 0; i < 4; i++) paint(PEN.x0 + 4 + i * 5.5, PEN.z1 + 1.2, 3.0, 0.14, 0xe1c744);
   (function wallGate() {
@@ -319,7 +318,6 @@
     }
     const lintel = addBox((VG.x0 + VG.x1) / 2, 9.2, VG.z, VG.x1 - VG.x0 + 1, 3.6, 1.0, 0x9aa3ad, { cast: true });
     K.skinBox(lintel, "panel", 0x9aa3ad);
-    K.sign("H.M. PRISON · VEHICLE ENTRANCE", (VG.x0 + VG.x1) / 2, 8.3, VG.z + 0.55, 12, 1.1, 0, "#f3f3ef", "#1f3a5f");
     K.program("sally-port", PEN.x0, PEN.x1, OUT.z0, PEN.z1);
   })();
   // the gatehouse beside the pen: a small glazed room with a counter
@@ -330,7 +328,6 @@
     stat(new THREE.PlaneGeometry(2.4, 1.1), glass, x1 + 0.26, 1.9, (z0 + z1) / 2, { ry: Math.PI / 2, cast: false });
     stat(new THREE.PlaneGeometry(4.0, 1.1), glass, (x0 + x1) / 2, 1.9, z0 - 0.26, { cast: false });
     addBox((x0 + x1) / 2, 0.5, z1 - 0.2, 3.6, 1.0, 0.5, 0x515a66, { solid: true });
-    K.sign("GATE 2\nALL VISITORS REPORT HERE", 86, 2.6, z1 + 0.28, 3.0, 0.8, 0, "#f3f3ef", "#b3261e");
   })();
   // the warehouse: a shell with a roof, a raised dock, three roller doors
   (function warehouse() {
@@ -338,7 +335,7 @@
     CBZ.roomShell({ x0: x0, x1: x1, z0: z0, z1: z1, h: h, wall: 0x8d949c, floor: 0x5e656e, skin: "panel", doors: [{ side: "S", center: 66, width: 3 }] });
     addBox(66, (3.1 + h) / 2, z1, 3, h - 3.1, 0.5, 0x8d949c, { cast: false });
     if (CBZ.prisonRoof) CBZ.prisonRoof({ id: "warehouse", x0: x0, x1: x1, z0: z0, z1: z1, top: h, over: 0.25, cast: true });
-    K.sign("RECEIVING · STORES", 86, 6.2, z1 + 0.3, 8, 0.9, 0, "#f3f3ef", "#1f3a5f");
+    K.sign("RECEIVING", 86, 6.2, z1 + 0.3, 4, 0.9, 0, "#f3f3ef", "#1f3a5f");
     // three roller shutters on the south face, over the dock
     for (const dx of [76, 84, 92]) {
       const door = new THREE.PlaneGeometry(4.2, 4.4);
@@ -380,7 +377,7 @@
     stat(new THREE.BoxGeometry(8.2, 0.3, 6.2), steelDark, x, 4.85, z, { cast: false });
     const island = addBox(x, 0.1, z, 6, 0.2, 1.4, 0x8f959c, { solid: true }); K.skinBox(island, "concrete", 0xa0a5aa);
     for (const s of [-1, 1]) { const p = addBox(x + s * 1.6, 0.85, z, 0.9, 1.5, 0.5, 0xd8d2c4, { solid: true }); K.skinBox(p, "steel", 0xd8d2c4); addBox(x + s * 1.6, 1.2, z + 0.28, 0.5, 0.3, 0.02, 0x101418, { cast: false }); }
-    K.sign("NO SMOKING · ENGINES OFF", x, 3.6, z + 3.1, 4.4, 0.6, 0, "#f3f3ef", "#b3261e");
+    K.sign("NO SMOKING", x, 3.6, z + 3.1, 2.4, 0.6, 0, "#f3f3ef", "#b3261e");
   })();
   // the motor pool: painted bays along the east fence, four vehicles in them
   function vehicle(kind, x, z, ry) {
@@ -432,7 +429,7 @@
   (function utilities() {
     const UY = { x0: -116, x1: -48, z0: 98, z1: 120 };
     ground((UY.x0 + UY.x1) / 2, (UY.z0 + UY.z1) / 2, UY.x1 - UY.x0, UY.z1 - UY.z0, "gravel", { program: "utility-yard" });
-    ring(UY.x0, UY.z0, UY.x1, UY.z1, { h: 3.6, gates: [{ side: "N", at: -60, w: 5, open: false, sign: "MAINTENANCE\nAUTHORISED STAFF ONLY" }] });
+    ring(UY.x0, UY.z0, UY.x1, UY.z1, { h: 3.6, gates: [{ side: "N", at: -60, w: 5, open: false, sign: "AUTHORIZED\nPERSONNEL ONLY" }] });
     // the water tower: four braced legs, a riser, a tank with a domed floor and a conical roof
     (function waterTower() {
       const x = -98, z = 109, H = 17, R = 4.6;
@@ -472,7 +469,6 @@
       for (let y = 0.4; y < H; y += 0.3) stat(new THREE.CylinderGeometry(0.014, 0.014, 0.44, 5), galv, x + 3.2 + 0.4, y, z - 3.2, { rx: Math.PI / 2, cast: false });
       for (let y = 2.4; y < H - 1; y += 1.0) stat(new THREE.TorusGeometry(0.38, 0.015, 5, 9, Math.PI), galv, x + 3.2 + 0.45, y, z - 3.2, { rx: Math.PI / 2, ry: Math.PI / 2, cast: false });
       CBZ.colliders.push({ minX: x - 3.9, maxX: x + 3.9, minZ: z - 3.9, maxZ: z + 3.9, noBreach: true });
-      K.sign("H.M.P. — 250,000 L", x, H + 3.6, z + R + 0.02, 5.6, 0.7, 0, "#2a2f38", "#c9cdd1");
     })();
     // two horizontal tanks on saddles, a bunded pad, a generator container
     for (const tz of [104, 110]) {
@@ -485,7 +481,7 @@
     const bund = addBox(-70, 0.3, 107, 14, 0.6, 10, 0x8f959c, { cast: false }); K.skinBox(bund, "concrete", 0xa0a5aa);
     const gen = addBox(-86, 1.45, 114, 12, 2.9, 2.6, 0x3f5a46, { solid: true, blockLOS: true }); K.skinBox(gen, "corrugated", 0x3f5a46, 0.6);
     addBox(-86, 3.2, 114, 1.2, 0.6, 1.2, 0x2a2f38, { cast: false }); addBox(-86, 4.1, 114, 0.4, 1.2, 0.4, 0x2a2f38, { cast: false });
-    K.sign("STANDBY GENERATOR\nDIESEL — NO NAKED FLAME", -86, 2.0, 115.35, 3.2, 0.7, 0, "#f3f3ef", "#b3261e");
+    K.sign("NO SMOKING", -86, 2.0, 115.35, 1.6, 0.5, 0, "#f3f3ef", "#b3261e");
     // the transformer yard, hard against the powerhouse
     const TY = { x0: -116, x1: -100, z0: 46, z1: 60 };
     ground((TY.x0 + TY.x1) / 2, (TY.z0 + TY.z1) / 2, TY.x1 - TY.x0, TY.z1 - TY.z0, "gravel", { program: "transformer-yard" });

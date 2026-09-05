@@ -298,7 +298,7 @@
     stat(new THREE.PlaneGeometry(1.3, 0.9), glass, wx, 5.3, Z0 - 0.03, { ry: Math.PI, cast: false });
   }
   // the entry: a blue plate, a caged lamp, a camera
-  K.sign("SALLY PORT 3 · MAIN EXIT", 0, 3.0, Z0 - 0.02, 2.4, 0.42, Math.PI, "#f3f3ef", "#1f3a5f");
+  K.sign("GATE 3", 0, 3.0, Z0 - 0.02, 0.9, 0.34, Math.PI, "#f3f3ef", "#1f3a5f");
   cagedLamp(-2.2, 3.15, Z0 - 0.1, { x: 0, z: -1 });
   stat(new THREE.BoxGeometry(0.18, 0.18, 0.34), steelDark, 2.4, 3.3, Z0 - 0.2, { ry: -0.5, rx: 0.4, cast: false });
   stat(new THREE.SphereGeometry(0.16, 10, 8), K.skin("glass", 0x202830), 2.4, 3.3, Z0 - 0.3, { cast: false });
@@ -332,7 +332,7 @@
   // signs read by a man walking SOUTH face north (ry = PI: a plane's front is +z)
   exitSign(0, 3.22, EZ - 0.55, Math.PI);
   exitSign(0, 2.72, IZ1 - 0.35, Math.PI);
-  K.sign("NO INMATE MOVEMENT BEYOND THIS POINT\nWITHOUT ESCORT", -3.0, 2.05, EZ - 0.42, 1.8, 0.5, Math.PI, "#f3f3ef", "#b3261e");
+  K.sign("AUTHORIZED PERSONNEL ONLY\nBEYOND THIS POINT", -3.0, 2.05, EZ - 0.42, 1.3, 0.42, Math.PI, "#f3f3ef", "#b3261e");
 
   // THE ENTRY PAIR: blue steel frames, glass, swing in
   const entryLamp = new THREE.MeshLambertMaterial({ color: 0x39ff88, emissive: 0x14c258, emissiveIntensity: 1.0 });
@@ -358,7 +358,6 @@
   // outside the outer door: a step, a lamp over it, the ground beyond
   const step = addBox(0, 0.08, Z1 + 0.6, 2.4, 0.16, 1.2, 0x8f959c, { cast: false }); K.skinBox(step, "concrete", 0xa0a5aa);
   cagedLamp(0, 2.9, Z1 + 0.1, { x: 0, z: 1 });
-  K.sign("H.M. PRISON — SALLY PORT 3\nNO PARKING · NO WAITING", 0, 3.9, Z1 + 0.02, 3.2, 0.7, 0, "#f3f3ef", "#1f3a5f");
 
   /* ==========================================================
      4. THE BOOTH. Off the vestibule's east wall: a window on the corridor
@@ -389,7 +388,6 @@
   addBox(KBX, 1.55, KBZ, 0.9, 0.7, 0.06, 0x6a563c, { cast: false });
   for (let i = 0; i < 6; i++) addBox(KBX - 0.32 + i * 0.13, 1.72 - (i % 2) * 0.22, KBZ + 0.04, 0.02, 0.05, 0.02, 0x8b95a1, { cast: false });
   if (CBZ.prisonPlaceItem) { try { CBZ.prisonPlaceItem("Gate Key", KBX + 0.1, 1.42, KBZ + 0.08); } catch (e) {} }
-  K.sign("GATE 3 KEYS · SIGN OUT", KBX, 2.0, KBZ + 0.02, 0.9, 0.2, 0, "#f3f3ef", "#1f3a5f");
   strip(B.x0 + 2.1, B.h - 0.02, EZ - 2.9, 2.2, "z");
   // the booth's own door: carded, on the yard side
   door({ id: "prison-exit-booth", label: "The gate booth", axis: "z", x: B.x1, z0: (B.z0 + B.z1) / 2 - 0.6, z1: (B.z0 + B.z1) / 2 + 0.6, h: 2.2, keys: ["Keycard"], lb: 5, hinge: -1, swing: 1,
@@ -397,7 +395,7 @@
       const leaf = new THREE.Mesh(new THREE.BoxGeometry(w - 0.04, h - 0.03, 0.06), steelGreen); leaf.position.set(dir * w / 2, h / 2, 0); g.add(leaf);
       const win = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.5), K.skin("glass", 0x8a9a9a)); win.position.set(dir * w / 2, 1.6, 0.04); g.add(win);
     } });
-  K.sign("GATE 3 CONTROL\nAUTHORISED STAFF ONLY", B.x1 + 0.28, 2.6, (B.z0 + B.z1) / 2, 1.4, 0.4, Math.PI / 2, "#f3f3ef", "#b3261e");
+  K.sign("AUTHORIZED\nPERSONNEL ONLY", B.x1 + 0.28, 2.6, (B.z0 + B.z1) / 2, 0.9, 0.42, Math.PI / 2, "#f3f3ef", "#b3261e");
 
   /* ==========================================================
      5. THE WALKWAY. Chain-link both sides from the stop line to the door,
@@ -406,7 +404,6 @@
   const WX = 4.7, WKZ = EZ - 15;
   CBZ.prisonFence({ x0: -WX, z0: WKZ, x1: -WX, z1: Z0 + 0.1, h: 3.6 });
   CBZ.prisonFence({ x0: WX, z0: WKZ, x1: WX, z1: Z0 + 0.1, h: 3.6 });
-  K.sign("ALL PERSONS AND PROPERTY\nSUBJECT TO SEARCH", -WX + 0.12, 1.8, WKZ + 3, 1.6, 0.5, Math.PI / 2, "#f3f3ef", "#1f3a5f");
   K.program("exit-walkway", -WX, WX, WKZ, Z0);
   K.program("sallyport", -BX, B.x1, Z0, Z1);
   K.flush();
