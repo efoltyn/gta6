@@ -57,7 +57,7 @@ const subjects = [
     label: "The Gatehouse Under the Regime",
     focus: "Close on the gate: banners, searchlights, sandbags. The republic's gatehouse was a stone box with a barrier.",
     pre: "var h = CBZ.presidency.seat(); if (h) h.rec.govType = 'dictatorship'; tick(300);",
-    cam: { x: -18, y: 3.0, z: 100, ax: 0, ay: 2.5, az: 116 },
+    cam: { x: -7, y: 3.0, z: 104, ax: 0, ay: 2.5, az: 116 },   // lamp posts stand at x ±16 — stay off them
     player: { x: 0, y: 0.08, z: 92 },
   },
 ];
