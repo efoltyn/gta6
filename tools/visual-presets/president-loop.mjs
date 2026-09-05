@@ -14,6 +14,14 @@ import base from "./president-compound.mjs";
 
 const subjects = [
   {
+    id: "hud-strip",
+    label: "The President's HUD",
+    focus: "Approval, treasury, emergency, day of term and the threat line are on screen from the motor court — the mode's numbers live on the player, not on a canvas in a locked room.",
+    keepHud: true,
+    cam: { x: 0, y: 5.8, z: 78, ax: 0, ay: 6.8, az: -34 },
+    player: { x: 0, y: 0.08, z: 20 },
+  },
+  {
     id: "motorcade-court",
     label: "The Motorcade Waits",
     focus: "A real black state car on the motor-court ring, a chauffeur beside it, the perron behind. The car is stealable, drivable, and the E on the chauffeur is the fast way across a 4.7 km country.",
@@ -60,7 +68,11 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const stage = new AsyncFunction("input", `
   const baseStage = (${base.stage.toString()});
   const first = await baseStage(input);          // boots the world on first call, frames the tripod
-  if (!first || !first.ok || !input.subject.pre) return first;
+  if (!first || !first.ok) return first;
+  if (!input.subject.pre) {
+    if (input.subject.keepHud) for (const child of Array.from(document.body.children)) child.style.visibility = "";
+    return first;
+  }
   const CBZ = window.CBZ;
   const site = CBZ.presidency && CBZ.presidency.site ? CBZ.presidency.site() : null;
   if (!site) return first;
@@ -68,7 +80,12 @@ const stage = new AsyncFunction("input", `
   const newDay = () => { CBZ.polity._checkDayWrap(0.95); CBZ.polity._checkDayWrap(0.05); tick(120); return CBZ.worldDay(); };
   try { (new Function("CBZ", "site", "tick", "newDay", input.subject.pre))(CBZ, site, tick, newDay); }
   catch (e) { return { ok: false, err: "pre failed: " + (e && e.message) }; }
-  return baseStage(input);                       // re-frame and render after the scene was staged
+  const out = await baseStage(input);            // re-frame and render after the scene was staged
+  if (input.subject.keepHud) {                   // the base stage hides every DOM child; this subject IS the DOM
+    for (const child of Array.from(document.body.children)) child.style.visibility = "";
+    if (CBZ.presidentHud && CBZ.presidentHud.refresh) { try { CBZ.presidentHud.refresh(); } catch (_) {} }
+  }
+  return out;
 `);
 
 export default {
