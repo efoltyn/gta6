@@ -538,10 +538,12 @@
     _rockA.r *= 0.90 + bedH * 0.24;
     _rockA.g *= 0.93 + bedH * 0.12;
     _rockA.b *= 1.02 - bedH * 0.16;
-    out.copy(_rockA).lerp(_rockB, 0.18 + bedV * 0.44);
+    // 0.18 + 0.44·bedV gave neighbouring beds a 2:1 value swing — from a
+    // kilometre away that is a striped ziggurat, not geology
+    out.copy(_rockA).lerp(_rockB, 0.26 + bedV * 0.24);
     // bedding plane: the contact between two beds is a recessed, shadowed line
     const contact = Math.max(sm((fr - 0.88) / 0.12), sm((0.08 - fr) / 0.08));
-    out.multiplyScalar(1 - 0.20 * contact);
+    out.multiplyScalar(1 - 0.12 * contact);
     // aspect: sunlit faces bleach and warm, shaded faces cool and darken
     const asp = o.aspect == null ? 1 : o.aspect;
     const lit = clamp01(faceLight);

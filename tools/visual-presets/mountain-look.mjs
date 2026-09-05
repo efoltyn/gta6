@@ -266,7 +266,15 @@ export default {
 
     const camera = CBZ.camera;
     camera.aspect = input.width / input.height;
-    const hero = S.hero, face = S.face;
+    // THE AFTER SIDE FRAMES WHAT THE BEFORE SIDE FOUND. A wave that touches
+    // the height field (crest crags, benches) moves the tallest sample and
+    // the steepest bearing, and a summit scan run fresh on each side then
+    // photographs two different mountains. ba hands the before capture's
+    // stage record over as input.referenceStage; its summit and camera are
+    // reused verbatim so the only difference in the pair is the look.
+    const ref = input.referenceStage && input.referenceStage.ok ? input.referenceStage : null;
+    const hero = (ref && ref.summit && Number.isFinite(ref.summit.h)) ? ref.summit : S.hero;
+    const face = S.face;
     const seaY = CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48;
 
     // Put the PLAYER where the camera is looking from, so streaming, LOD and
@@ -340,6 +348,12 @@ export default {
         try { wet = !!CBZ.cityWaterAt(x, z); } catch (_) { wet = true; }
         if (!wet) { standX = x; standZ = z; break; }
       }
+    }
+    if (ref && ref.camera && Number.isFinite(ref.camera.x)) {
+      camPos = { x: ref.camera.x, y: ref.camera.y, z: ref.camera.z };
+      if (ref.stand && Number.isFinite(ref.stand.x)) { standX = ref.stand.x; standZ = ref.stand.z; }
+      else if (shot !== "from-water") { standX = camPos.x; standZ = camPos.z; }
+      if (ref.fov) camera.fov = ref.fov;
     }
     standAt(standX, standZ, camPos.y);
     for (let i = 0; i < 60; i++) tick();
@@ -429,8 +443,11 @@ export default {
 
     return {
       ok: true,
-      summit: { x: Math.round(hero.x), z: Math.round(hero.z), h: Math.round(hero.h) },
-      camera: { x: Math.round(camPos.x), y: Math.round(camPos.y), z: Math.round(camPos.z) },
+      summit: { x: hero.x, z: hero.z, h: hero.h },
+      camera: { x: camPos.x, y: camPos.y, z: camPos.z },
+      stand: { x: standX, z: standZ },
+      fov: camera.fov,
+      face: { bx: face.bx, bz: face.bz },
       fogFar: CBZ.scene && CBZ.scene.fog ? Math.round(CBZ.scene.fog.far) : null,
       metricSamples: samples,
       metrics: {

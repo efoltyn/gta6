@@ -627,7 +627,11 @@
     // material a builder already dialled by hand
     mat.userData = mat.userData || {};
     mat.userData._cbzFogScaled = true;
+    // chain-safe like terrainDayTint/terrainAerial below: a material that
+    // already carries its own onBeforeCompile (world/alpine_skin.js) keeps it
+    const prev = mat.onBeforeCompile;
     mat.onBeforeCompile = function (sh) {
+      if (prev) prev.call(this, sh);
       sh.uniforms.uFogScale = fogScaleUniform(scale);
       sh.vertexShader = "uniform float uFogScale;\n" + sh.vertexShader
         .replace("#include <fog_vertex>",

@@ -434,7 +434,9 @@
     // 6. STRATA — quantise the steep high faces into warped bedding benches.
     //    mtnTerrace is <= h by construction, so LAW 1 still holds.
     h = CBZ.mtnTerrace(h, x, z, {
-      amount: 0.80 * highFace * smooth01((er.slope - 0.05) / 0.28),
+      // 0.80 cut every high face into a staircase a kilometre away reads as
+      // a ziggurat; benches are a hint on real rock, not the silhouette
+      amount: 0.42 * highFace * smooth01((er.slope - 0.05) / 0.28),
       step: 16, dip: 24, dipCell: 560, dipCell2: 155, salt: S_STRATA,
     });
     return h;
@@ -675,7 +677,7 @@
         ? 0.5 + 0.5 * Math.cos(angle * (6 + (i % 4)) + i * 1.37)
         : 0.5 + 0.5 * Math.cos(angle * (6 + (i % 4)) + radius * 7.0 + i * 1.37);
       const ribFade = PEAKS_V2() ? 1 / (1 + 0.45 * radius * radius) : 1;
-      const face = l.major ? (1 - (1 - ribs) * 0.20 * ribFade) : (1 - (1 - ribs) * 0.09 * ribFade);
+      const face = l.major ? (1 - (1 - ribs) * 0.11 * ribFade) : (1 - (1 - ribs) * 0.06 * ribFade);
       const h = l.a * profile * face;
       sum2 += h * h;
     }
@@ -735,7 +737,7 @@
     h = Math.max(0, h * f * skirt);
     // strata benches, one scale up from Mount Mercy's
     h = CBZ.mtnTerrace(h, x, z, {
-      amount: 0.74 * highFace * smooth01((er.slope - 0.05) / 0.28),
+      amount: 0.30 * highFace * smooth01((er.slope - 0.05) / 0.28),
       step: 34, dip: 52, dipCell: 1250, dipCell2: 340, salt: S_GSTRATA,
     });
     return h;
@@ -746,7 +748,18 @@
     if (!(h > 14) || !HAS_KIT || !EROSION_V4()) return 1;
     const alt = smooth01((h - 30) / 220);
     const a = CBZ.mtnNoise(x, z, 15, S_GFINE + 7);
-    return 1 - 0.014 * alt * (1 - Math.abs(2 * a - 1));
+    let f = 1 - 0.014 * alt * (1 - Math.abs(2 * a - 1));
+    // crest crags (2026-09-05): from the coast this range was a row of smooth
+    // cones with radial pleats. Ridged relief at 64 m and 27 m, up to ~6% of
+    // the height on the top half of the massif, breaks the skyline into rock
+    // teeth the way a real crest line is broken. Multiplier <= 1 (LAW 1).
+    const crag = smooth01((h - 120) / 260);
+    if (crag > 0) {
+      const r1 = 1 - Math.abs(2 * CBZ.mtnNoise(x, z, 64, S_GFINE + 11) - 1);
+      const r2 = 1 - Math.abs(2 * CBZ.mtnNoise(x, z, 27, S_GFINE + 13) - 1);
+      f *= 1 - crag * (0.040 * (1 - r1) + 0.024 * (1 - r2));
+    }
+    return f;
   }
   // memo: cell 6 over a 3.2 x 2.3 km envelope (~207k floats). The clearings
   // list is applied OUTSIDE it, because it is build-time state.
@@ -1097,13 +1110,20 @@
                      : (function () { const g = new THREE.PlaneGeometry(HX * 2, HZ * 2, segX, segZ); g.rotateX(-Math.PI / 2); return g; })();
       const pa = geo.attributes.position;
       const colors = new Float32Array(pa.count * 3);
-      // Natural-colour snow is nearly neutral white; only sky-lit shadow planes
-      // skew blue. These values stay below display white so erosion normals do
-      // not clip, while removing the old all-over cyan cast.
+      // THE SKIN IS LIT NOW (world/alpine_skin.js). The vertex loop below
+      // writes an UNLIT base albedo plus a material description (aMat: snow
+      // cover, bare rock, vegetation, hollow occlusion) and the fragment
+      // shader resolves snow edges, rock relief and forest texture per pixel
+      // under the real sun. No sun direction is baked here any more; the
+      // `light`/`faceLight` below only feed the snow-cover ASPECT term
+      // (a sunlit slope holds a higher snowline), which is a climate fact,
+      // not a shading one.
+      const SKIN = typeof CBZ.alpineSkin === "function";
+      const mats = SKIN ? new Float32Array(pa.count * 4) : null;
       const c = new THREE.Color(), rc = new THREE.Color(), snowLit = new THREE.Color(0xf9fafb);
       const snowShadow = new THREE.Color(0xd4dfe4), iceBlue = new THREE.Color(0xaec7d4);
       const lakeIce = new THREE.Color(COL.ice), lakeIceDeep = new THREE.Color(COL.iceDeep);
-      const granite = new THREE.Color(0x554f47), graniteDark = new THREE.Color(0x232829);
+      const granite = new THREE.Color(0x4d4b48), graniteDark = new THREE.Color(0x202527);
       const tundraEdge = new THREE.Color(0x5e6f52);
       // Alpine soil/tundra/turf — what shows on SHALLOW ground below the snow.
       // The old field had no soil at all: every non-snow pixel was granite, so
@@ -1138,7 +1158,8 @@
             // bedding params IDENTICAL to the mtnTerrace call in mercyMacroA,
             // so the colour bands sit exactly on the geometric risers.
             step: 16, dip: 24, dipCell: 560, dipCell2: 155,
-            slope0: 0.05, slope1: 0.30, salt: S_STRATA, aspect: 1, mixOut: _mixOut,
+            // aspect 0 under the lit skin: sun-facing bleach is the sun's job now
+            slope0: 0.05, slope1: 0.30, salt: S_STRATA, aspect: SKIN ? 0 : 1, mixOut: _mixOut,
             // the lower flank is vegetated, and vegetation holds ground far too
             // steep for a pure-slope window: the green climbs the massif's foot
             // instead of surrendering to granite at the first 6° of tilt.
@@ -1153,7 +1174,8 @@
           const scree = smooth01((bedrock - 0.42) / 0.30) * smooth01((slope - 0.07) / 0.13) *
                         (1 - smooth01((y - 150) / 90));
           c.lerp(screeCol, scree * 0.55);
-          c.lerp(rc, Math.min(0.94, bare * (0.55 + 0.45 * smooth01((bedrock - 0.34) / 0.34))));
+          const rockW = Math.min(0.94, bare * (0.55 + 0.45 * smooth01((bedrock - 0.34) / 0.34)));
+          c.lerp(rc, rockW);
           // --- SNOW COVERAGE: altitude sets the line, slope sheds it, sun
           // aspect raises it on lit faces and drops it on shaded ones, two
           // noise octaves feather the edge. faceLight was already being
@@ -1181,13 +1203,23 @@
             // LEDGES: the same bedding field mercyMacroA cut the benches with
             // and mtnStrataTint painted the bands with, so the white lands on
             // the tread you can stand on, under its own colour band.
-            ledge: 0.55, bedSalt: S_STRATA, step: 16, dip: 24, dipCell: 560, dipCell2: 155,
+            ledge: 0.28, bedSalt: S_STRATA, step: 16, dip: 24, dipCell: 560, dipCell2: 155,
           });
-          rc.copy(snowShadow).lerp(snowLit, 0.70 + 0.27 * faceLight);
-          rc.lerp(iceBlue, cold);
-          c.lerp(rc, cover);
-          // wind-scoured crowns keep a hint of blue-white even where rock wins
-          c.lerp(iceBlue, cold * (1 - cover) * 0.5);
+          if (SKIN) {
+            // the skin paints the snow itself; the vertex just carries the
+            // coverage and a base that meets the snow colour at cover = 1
+            c.lerp(iceBlue, cold * 0.35);
+            mats[i * 4] = cover;
+            mats[i * 4 + 1] = rockW;
+            mats[i * 4 + 2] = (1 - smooth01((y - 96) / 105)) * (1 - scree * 0.55);
+            mats[i * 4 + 3] = clamp01(conc * 1.6);
+          } else {
+            rc.copy(snowShadow).lerp(snowLit, 0.70 + 0.27 * faceLight);
+            rc.lerp(iceBlue, cold);
+            c.lerp(rc, cover);
+            // wind-scoured crowns keep a hint of blue-white even where rock wins
+            c.lerp(iceBlue, cold * (1 - cover) * 0.5);
+          }
         } else {
           // ---- LEGACY colour path (MOUNT_STRATA_V1 = false) ----------------
           const cliff = smooth01((slope - 0.04) / 0.16);
@@ -1212,31 +1244,33 @@
         if (iceD < 92) {
           const ring = 0.5 + 0.5 * Math.sin(iceD * 0.19 + Math.atan2(wz - (-1380 + DZ), wx - (180 + DX)) * 5.0);
           c.copy(lakeIce).lerp(lakeIceDeep, 0.12 + ring * 0.10);
+          // ice is neither snow nor rock nor forest: the skin leaves it alone
+          if (mats) { mats[i * 4] = 0; mats[i * 4 + 1] = 0; mats[i * 4 + 2] = 0; mats[i * 4 + 3] = 0; }
         }
         // Eighty metres of tundra -> snow transition prevents the playable
         // cold biome from advertising its rectangular allocation boundary.
         const edgeD = Math.min(wx - MINX, MAXX - wx, wz - MINZ, MAXZ - wz);
         rc.copy(c); c.copy(tundraEdge).lerp(rc, smooth01(edgeD / 82));
-        // Most of snow's form comes from its subtly cool shadow hue. A shallow
-        // value multiplier preserves its high albedo instead of turning the
-        // shaded half of every peak into slate-blue terrain.
-        const shade = 0.76 + faceLight * 0.28;
+        // Unlit path only: a shallow value multiplier stands in for the sun.
+        // Under the skin the sun is the sun.
+        const shade = SKIN ? 1 : 0.76 + faceLight * 0.28;
         colors[i * 3] = c.r * shade;
         colors[i * 3 + 1] = c.g * shade;
         colors[i * 3 + 2] = c.b * shade;
       }
       pa.needsUpdate = true;
       geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      if (mats) geo.setAttribute("aMat", new THREE.BufferAttribute(mats, 4));
       geo.computeVertexNormals();
       geo.computeBoundingSphere();
-      // Lighting direction is already baked per vertex above. Basic keeps that
-      // authored snow/rock value without a second Lambert multiply, while the
-      // shared shallow terrain-fog scale gives the massif atmospheric depth at
-      // distance instead of leaving a self-lit white cardboard cutout.
-      const groundMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff, vertexColors: true, flatShading: false, fog: true,
-        polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2,
-      });
+      // Lit, per-pixel skin (world/alpine_skin.js). The unlit Basic material
+      // is the fallback for a build without the skin module.
+      const groundMat = SKIN
+        ? CBZ.alpineSkin({ step: 16, scale: 1, snow: 0xdde3ea, fineFar: 700, midFar: 3200 })
+        : new THREE.MeshBasicMaterial({
+            color: 0xffffff, vertexColors: true, flatShading: false, fog: true,
+            polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2,
+          });
       if (CBZ.terrainFogScale) CBZ.terrainFogScale(groundMat, 0.12);
       // Mount Mercy is the MID-ground headland, so it recedes on a much longer
       // leash than the Greater Range behind it (start 2.4 km vs 1.4 km, less
@@ -1245,9 +1279,9 @@
       if (CBZ.terrainAerial) {
         CBZ.terrainAerial(groundMat, { start: 1500, full: 6000, minY: 6, maxY: 40, amount: 0.62 });
       }
-      // unlit material — must darken with the day like the Lambert plate it
-      // stands on, or it glows as a self-lit white massif at dawn/night
-      if (CBZ.terrainDayTint) CBZ.terrainDayTint(groundMat);
+      // the unlit fallback must darken with the day like the Lambert plate it
+      // stands on; the lit skin darkens because the sun does
+      if (!SKIN && CBZ.terrainDayTint) CBZ.terrainDayTint(groundMat);
       const g = new THREE.Mesh(geo, groundMat);
       g.position.set(CX, 0, CZ);
       g.matrixAutoUpdate = false; g.updateMatrix();
@@ -1290,7 +1324,9 @@
       // cells are index-stripped below), so a uniform grid wasted most of its
       // vertices on triangles that get thrown away — the CDF puts them on the
       // ten families instead.
-      const DENSG = Math.max(0.5, Math.min(2.4, +CFGS.MOUNT_MESH_DENSITY || 1)) * 0.9;
+      // 0.9 left this range at ~12 m/vertex, and from its own foot the facets
+      // showed through the skin; 1.35 is ~8 m and ~105k vertices for one mesh
+      const DENSG = Math.max(0.5, Math.min(2.4, +CFGS.MOUNT_MESH_DENSITY || 1)) * 1.35;
       const segX = Math.round(300 * DENSG), segZ = Math.round(216 * DENSG);
       let gxs = null, gzs = null;
       if (CBZ.mtnAdaptiveAxis && CBZ.mtnGridGeometry) {
@@ -1318,6 +1354,10 @@
                       : (function () { const g = new THREE.PlaneGeometry(gw, gd, segX, segZ); g.rotateX(-Math.PI / 2); return g; })();
       const pa = geo.attributes.position;
       const colors = new Float32Array(pa.count * 3);
+      // same contract as Mount Mercy: unlit base albedo + aMat material
+      // description, shaded per pixel by world/alpine_skin.js
+      const SKIN = typeof CBZ.alpineSkin === "function";
+      const mats = SKIN ? new Float32Array(pa.count * 4) : null;
       const c = new THREE.Color(), rc = new THREE.Color();
       // Distant families still need tonal range through fog, but their lit snow
       // is neutral and the blue component is limited to sky-facing shadows.
@@ -1330,7 +1370,7 @@
       // so rock, plant and snow all collapsed into one value. A real range is
       // THREE separated materials — dark grey-brown rock, saturated green
       // flank, near-white snow — and the separation is the whole picture.
-      const granite = new THREE.Color(0x554e46), graniteDark = new THREE.Color(0x242a2c);
+      const granite = new THREE.Color(0x4c4a47), graniteDark = new THREE.Color(0x21272a);
       const alpineFoot = new THREE.Color(0x3f5a34);
       // A single flat green over two kilometres of flank reads as paint. The
       // reference's lower slopes are mottled — darker where the forest closes
@@ -1364,7 +1404,7 @@
             rock: granite, rockDark: graniteDark,
             // identical bedding params to greaterMercyMacroA's mtnTerrace call
             step: 34, dip: 52, dipCell: 1250, dipCell2: 340,
-            slope0: 0.05, slope1: 0.32, salt: S_GSTRATA, aspect: 1, mixOut: _mixG,
+            slope0: 0.05, slope1: 0.32, salt: S_GSTRATA, aspect: SKIN ? 0 : 1, mixOut: _mixG,
             // vegetated foothills: the range stands on green, not on scree
             vegHold: 1 - smooth01((y - 40) / 120), vegSlope: 0.20,
           });
@@ -1373,7 +1413,8 @@
           const scree = smooth01((bedrock - 0.44) / 0.30) * smooth01((slope - 0.07) / 0.14) *
                         (1 - smooth01((y - 260) / 160));
           c.lerp(screeCol, scree * 0.5);
-          c.lerp(rc, Math.min(0.92, bare * (0.55 + 0.45 * smooth01((bedrock - 0.36) / 0.34))));
+          const rockW = Math.min(0.92, bare * (0.55 + 0.45 * smooth01((bedrock - 0.36) / 0.34)));
+          c.lerp(rc, rockW);
           // Same couloir/spine law one scale up (bigger stencil, deeper drop):
           // this range is the far panorama, and a far range that wears a flat
           // white cap is the single most artificial thing in the skyline.
@@ -1392,11 +1433,19 @@
             slopeHold: gHold,
             // one scale up: 34 u beds, so the ledge lines are the ones a
             // kilometre-distant eye actually resolves on this range.
-            ledge: 0.5, bedSalt: S_GSTRATA, step: 34, dip: 52, dipCell: 1250, dipCell2: 340,
+            ledge: 0.18, bedSalt: S_GSTRATA, step: 34, dip: 52, dipCell: 1250, dipCell2: 340,
           });
-          rc.copy(coldSnow).lerp(snow, 0.68 + faceLight * 0.29);
-          rc.lerp(shadeSnow, (1 - faceLight) * 0.22);
-          c.lerp(rc, cover);
+          if (SKIN) {
+            const foot = smooth01((y - 4) / 30);
+            mats[i * 4] = cover * foot;
+            mats[i * 4 + 1] = rockW * foot;
+            mats[i * 4 + 2] = Math.max(1 - foot, (1 - smooth01((y - 155) / 190)) * (1 - scree * 0.5));
+            mats[i * 4 + 3] = clamp01(gconc * 1.6);
+          } else {
+            rc.copy(coldSnow).lerp(snow, 0.68 + faceLight * 0.29);
+            rc.lerp(shadeSnow, (1 - faceLight) * 0.22);
+            c.lerp(rc, cover);
+          }
           // the geological root at the very feet stays, so no summit floats
           rc.copy(c); c.copy(alpineFoot).lerp(rc, smooth01((y - 4) / 30));
         } else {
@@ -1416,16 +1465,16 @@
           }
           rc.copy(c); c.copy(alpineFoot).lerp(rc, smooth01((y - 4) / 30));
         }
-        // Wider than the old 0.80..0.98: an 18% swing across a whole massif is
-        // not enough modelling to tell a lit face from a shaded one at 4 km,
-        // and flat light is most of what made the range read as cardboard.
-        const shade = 0.72 + faceLight * 0.32;
+        // Unlit path only: a value swing stands in for the sun. The skin is
+        // lit by the real one.
+        const shade = SKIN ? 1 : 0.72 + faceLight * 0.32;
         colors[i * 3] = c.r * shade;
         colors[i * 3 + 1] = c.g * shade;
         colors[i * 3 + 2] = c.b * shade;
       }
       pa.needsUpdate = true;
       geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      if (mats) geo.setAttribute("aMat", new THREE.BufferAttribute(mats, 4));
       // Keep only the actual mountain skin. PlaneGeometry stores a rectangular
       // grid, but zero-height cells are not part of the range and previously
       // rendered as a kilometre-wide white tile. The continent remains beneath
@@ -1441,10 +1490,14 @@
       }
       geo.computeVertexNormals();
       geo.computeBoundingSphere();
-      const rangeMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff, vertexColors: true, flatShading: false, fog: true,
-        polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2,
-      });
+      // one scale up from Mount Mercy: 34 m beds, coarser relief, and the
+      // fine terms gone by 1.2 km — this range is seen from kilometres away
+      const rangeMat = SKIN
+        ? CBZ.alpineSkin({ step: 34, scale: 2.1, snow: 0xdfe5ec, fineFar: 1200, midFar: 5200 })
+        : new THREE.MeshBasicMaterial({
+            color: 0xffffff, vertexColors: true, flatShading: false, fog: true,
+            polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2,
+          });
       // Retain the distant landmark through normal city fog, but let it gain
       // atmospheric depth instead of remaining a full-white cardboard cutout.
       if (CBZ.terrainFogScale) CBZ.terrainFogScale(rangeMat, 0.12);
@@ -1460,9 +1513,9 @@
         // is the band that actually exists between the coast and this range.
         CBZ.terrainAerial(rangeMat, { start: 900, full: 4200, minY: 6, maxY: 40, amount: 0.85 });
       }
-      // unlit — darken with the day in step with the lit ground (see
-      // terrainDayTint: the luminance seam at the massif's foot was the tell)
-      if (CBZ.terrainDayTint) CBZ.terrainDayTint(rangeMat);
+      // unlit fallback only — darken with the day in step with the lit ground
+      // (see terrainDayTint: the luminance seam at the massif's foot was the tell)
+      if (!SKIN && CBZ.terrainDayTint) CBZ.terrainDayTint(rangeMat);
       const mesh = new THREE.Mesh(geo, rangeMat);
       mesh.position.set(gcx, 0, gcz);
       mesh.matrixAutoUpdate = false; mesh.updateMatrix();
@@ -1959,6 +2012,114 @@
         Math.hypot(MAXX - MINX, MAXZ - MINZ) / 2 + 14);
       trunkG.boundingSphere = bs.clone(); canopyG.boundingSphere = bs.clone(); capG.boundingSphere = bs.clone();
       root.add(trunkIM); root.add(canopyIM); root.add(capIM);
+
+      /* ---- THE FOREST BELT: the flanks are wooded up to the treeline ------
+         130 pines in a 55 ha valley is a car park, not a forest. The owner's
+         reference photographs (coastal Alaska) show the lower slopes DENSE
+         with conifers, the green climbing the flank and thinning out into
+         open ground just under the rock. The skin (world/alpine_skin.js)
+         paints that canopy texture at a distance; this stands the actual
+         trees there. Same trunk/crown/cap geometry as the resort pines, three
+         InstancedMeshes per belt, sited on a jittered lattice through
+         CBZ.hash01 — no rng draws, so every scatter after this is byte-
+         identical to what it was. Density follows the same treeline ramp
+         the colour loop uses for vegHold (Mercy 26+62, the range 40+120), and
+         cliffs (normal.y < 0.6), the lake, the village, the piste, the lift
+         line and the causeway stay clear. No colliders: a belt of thousands
+         is scenery you drive through the edge of, not a wall. */
+      (function forestBelt() {
+        if (typeof CBZ.hash01 !== "function") return;
+        const tN = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+        function belt(o) {
+          const tG = trunkG.clone(), cG = canopyG.clone(), kG = capG.clone();
+          const tIM = new THREE.InstancedMesh(tG, mTrunk, o.count);
+          const cIM = new THREE.InstancedMesh(cG, mPine, o.count);
+          const kIM = new THREE.InstancedMesh(kG, mSnow, o.count);
+          cIM.castShadow = !!o.shadows;
+          tIM.castShadow = false; kIM.castShadow = false;
+          const nx = Math.ceil((o.maxX - o.minX) / o.cell), nz = Math.ceil((o.maxZ - o.minZ) / o.cell);
+          // PASS 1 counts the cells that can hold a tree, so PASS 2 can thin
+          // them to the budget UNIFORMLY. Taking the first `count` cells in
+          // lattice order wooded the north rows and left the south faces bare.
+          const sites = [];
+          for (let j = 0; j < nz; j++) {
+            for (let i = 0; i < nx; i++) {
+              const x = o.minX + (i + CBZ.hash01(i, j, o.salt)) * o.cell;
+              const z = o.minZ + (j + CBZ.hash01(i, j, o.salt + 1)) * o.cell;
+              const gy = o.heightAt(x, z);
+              if (!(gy > o.floorY)) continue;
+              const hold = 1 - smooth01((gy - o.treeline) / o.fade);
+              if (hold <= 0.02 || CBZ.hash01(i, j, o.salt + 2) > hold * o.density) continue;
+              o.normalAt(x, z, tN);
+              if (tN.y < 0.60) continue;                       // cliff: bare rock
+              if (o.reject && o.reject(x, z)) continue;
+              sites.push(i, j, x, z, gy);
+            }
+          }
+          const keep = Math.min(1, o.count / Math.max(1, sites.length / 5));
+          let k = 0;
+          for (let si = 0; si < sites.length && k < o.count; si += 5) {
+            const i = sites[si], j = sites[si + 1], x = sites[si + 2], z = sites[si + 3], gy = sites[si + 4];
+            {
+              if (keep < 1 && CBZ.hash01(i, j, o.salt + 6) > keep) continue;
+              if (!openNature(x, z, 1.4)) continue;
+              const sc = o.scale0 + CBZ.hash01(i, j, o.salt + 3) * o.scale1;
+              q.setFromAxisAngle(up, CBZ.hash01(i, j, o.salt + 4) * Math.PI * 2);
+              const trunkTop = gy + 1.6 * sc;
+              const seatY = gy - 0.35 * sc;                    // seated into the slope
+              const span = trunkTop - seatY;
+              if (ROOTED) { s.set(sc, span, sc); v.set(x, seatY, z); }
+              else { s.set(sc, span / 1.6, sc); v.set(x, (seatY + trunkTop) / 2, z); }
+              m4.compose(v, q, s); tIM.setMatrixAt(k, m4);
+              if (TREES2) {
+                const vst = 0.85 + CBZ.hash01(i, j, o.salt + 5) * 0.4;
+                const canopyBase = trunkTop - 0.5 * sc;
+                s.set(sc, sc * vst, sc); v.set(x, canopyBase, z);
+                m4.compose(v, q, s); cIM.setMatrixAt(k, m4);
+                v.set(x, canopyBase + 2.7 * sc * vst, z);
+                m4.compose(v, q, s); kIM.setMatrixAt(k, m4);
+              } else {
+                s.set(sc, sc, sc);
+                v.set(x, gy + (1.6 + 2.1) * sc, z); m4.compose(v, q, s); cIM.setMatrixAt(k, m4);
+                v.set(x, gy + 4.9 * sc, z); m4.compose(v, q, s); kIM.setMatrixAt(k, m4);
+              }
+              k++;
+            }
+          }
+          tIM.count = cIM.count = kIM.count = k;
+          tIM.instanceMatrix.needsUpdate = cIM.instanceMatrix.needsUpdate = kIM.instanceMatrix.needsUpdate = true;
+          const sph = new THREE.Sphere(
+            new THREE.Vector3((o.minX + o.maxX) / 2, o.treeline * 0.5, (o.minZ + o.maxZ) / 2),
+            Math.hypot(o.maxX - o.minX, o.maxZ - o.minZ) / 2 + o.treeline);
+          tG.boundingSphere = sph.clone(); cG.boundingSphere = sph.clone(); kG.boundingSphere = sph.clone();
+          tIM.name = o.name + "-trunks"; cIM.name = o.name + "-crowns"; kIM.name = o.name + "-caps";
+          tIM.userData.forestBelt = cIM.userData.forestBelt = kIM.userData.forestBelt = o.name;
+          root.add(tIM); root.add(cIM); root.add(kIM);
+          return k;
+        }
+        const lakeX = 180 + DX, lakeZ = -1380 + DZ;
+        const mercyReject = function (x, z) {
+          if (Math.hypot(x - lakeX, z - lakeZ) < 104) return true;
+          if (Math.abs(x - (470 + DX)) < 26 && z > MAXZ - 120) return true;
+          if (inTown(x, z)) return true;
+          if (z > -1735 + DZ && z < -1285 + DZ && Math.abs(x - snowRunXAt(z)) < 30) return true;   // piste
+          return false;
+        };
+        CBZ.snowForestBelt = {
+          mercy: belt({
+            name: "mount-mercy-forest", heightAt: mountainHeightAt, normalAt: snowTerrainNormalAt,
+            minX: MINX, maxX: MAXX, minZ: MINZ, maxZ: MAXZ, cell: 7.5, count: 3200,
+            floorY: 4, treeline: 62, fade: 36, density: 0.92, scale0: 0.8, scale1: 1.2,
+            salt: 0x5f01, shadows: true, reject: mercyReject,
+          }),
+          greater: belt({
+            name: "greater-mercy-forest", heightAt: greaterMercyHeightAt, normalAt: greaterMercyNormalAt,
+            minX: GREAT_MINX, maxX: GREAT_MAXX, minZ: GREAT_MINZ, maxZ: GREAT_MAXZ, cell: 15, count: 5000,
+            floorY: 6, treeline: 118, fade: 62, density: 0.95, scale0: 1.1, scale1: 1.3,
+            salt: 0x5f11, shadows: false, reject: function (x, z) { return inTown(x, z); },
+          }),
+        };
+      })();
     })();
 
     // ---- instanced ROCKY OUTCROPS + SNOWDRIFTS ---------------------------

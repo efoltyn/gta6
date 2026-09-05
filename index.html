@@ -440,6 +440,9 @@
      MUST load AFTER terrain_overhaul.js (reads CBZ.terrainFogScale) and BEFORE
      city/biome_snow.js, which reads CBZ.mtn* at PARSE time. -->
 <script src="src/world/mountain_detail.js?v=geology1"></script>
+<!-- The massif SKIN: per-pixel snow/rock/forest shading on a lit Standard material.
+     Reads CBZ.gfxRegisterPbr lazily; city/biome_snow.js calls CBZ.alpineSkin at build time. -->
+<script src="src/world/alpine_skin.js?v=skin1"></script>
 
 <!-- ============================================================
      Game modules — loaded in dependency order. Each is a tiny
