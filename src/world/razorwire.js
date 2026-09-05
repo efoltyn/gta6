@@ -31,7 +31,7 @@
   run(S.x1, S.z0 + 1, S.x1, S.z1 - 1);
   run(-30, N.z0, -16, N.z0); run(16, N.z0, 30, N.z0);                     // against the cell house
   // far south wall, either side of the freedom gate
-  run(S.x0 + 1, S.z1, -gap - 1, S.z1); run(gap + 1, S.z1, S.x1 - 1, S.z1);
+  run(S.x0 + 1, S.z1, -6, S.z1); run(6, S.z1, S.x1 - 1, S.z1);              // the sally port building sits in x±5.2
 
   // ---- the outer wire: a heavier coil, the gate gap left open
   run(OUT.x0, OUT.z0 + 2, OUT.x0, OUT.z1 - 2, 0.45);

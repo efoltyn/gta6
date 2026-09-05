@@ -216,6 +216,20 @@
         let l = 220 + Math.sin(u * Math.PI * 2 * 8) * 16 + (fbm(u, v, 6, 2, 71) - 0.5) * 8;
         grey(px, l);
       });
+    } else if (kind === "block") {
+      /* painted concrete block, 1.6 m tile = 4 blocks x 8 courses of
+         400 x 200 mm in running bond; 10 mm mortar joints read dark through
+         the paint, each block a hair different in tone, a soft roller texture */
+      c = canvasOf(512, function (u, v, px) {
+        const course = Math.floor(v * 8), yy = (v * 8) % 1;
+        const xx = ((u * 4) + (course % 2) * 0.5) % 1;
+        const bx = Math.floor((u * 4) + (course % 2) * 0.5);
+        let l = 222 + (hash2(bx, course, 91) - 0.5) * 7 + (fbm(u, v, 48, 2, 92) - 0.5) * 10;
+        const ej = Math.min(xx, 1 - xx) * 0.4, ev = Math.min(yy, 1 - yy) * 0.2;   // metres to the joint
+        if (ej < 0.006 || ev < 0.006) l = 168 + fbm(u, v, 60, 1, 93) * 18;
+        else if (ej < 0.011 || ev < 0.011) l -= 14;
+        grey(px, l);
+      });
     } else if (kind === "grating") {
       // open steel grating for the deck: 30 x 100 mm bars, seen from above
       c = canvasOf(256, function (u, v, px) {
@@ -236,9 +250,12 @@
         environment through core/gfx.js when a tier has one.
      ========================================================== */
   const MATS = new Map();
-  const TILE = { panel: 4, concrete: 2, steel: 1, galv: 1, chainlink: 2, roller: 1, corrugated: 1, grating: 1 };
-  function skin(kind, tint) {
-    const key = kind + ":" + (tint == null ? "" : tint);
+  const TILE = { panel: 4, concrete: 2, steel: 1, galv: 1, chainlink: 2, roller: 1, corrugated: 1, grating: 1, block: 1.6, polished: 2 };
+  // `rough` overrides the kind's roughness (a polished floor is the concrete
+  // map at 0.3); "polished" is that as a kind of its own
+  function skin(kind, tint, rough) {
+    if (kind === "polished") { rough = rough != null ? rough : 0.3; }
+    const key = kind + ":" + (tint == null ? "" : tint) + (rough != null ? ":" + rough : "");
     if (MATS.has(key)) return MATS.get(key);
     let m;
     if (kind === "glass") {
@@ -248,16 +265,16 @@
         envMap: CBZ.ENV || null, envMapIntensity: 0.9,
       });
     } else {
-      const canvas = surface(kind);
+      const canvas = surface(kind === "polished" ? "concrete" : kind);
       const map = tex(canvas, kind === "chainlink" ? 16 : 8);
       const metal = kind === "galv" || kind === "chainlink" || kind === "grating";
       m = new THREE.MeshStandardMaterial({
         color: tint != null ? tint : 0xffffff, map: map,
         bumpMap: kind === "chainlink" ? null : map,
-        bumpScale: kind === "panel" ? 0.02 : kind === "concrete" ? 0.008 : kind === "roller" ? 0.01 : kind === "corrugated" ? 0.012 : 0.002,
-        roughness: metal ? 0.42 : kind === "steel" ? 0.55 : kind === "roller" ? 0.6 : 0.92,
-        metalness: metal ? 0.72 : kind === "steel" || kind === "roller" || kind === "corrugated" ? 0.35 : 0.0,
-        envMap: CBZ.ENV || null, envMapIntensity: metal ? 0.8 : 0.45,
+        bumpScale: kind === "panel" ? 0.02 : kind === "concrete" ? 0.008 : kind === "block" ? 0.012 : kind === "roller" ? 0.01 : kind === "corrugated" ? 0.012 : kind === "polished" ? 0.003 : 0.002,
+        roughness: rough != null ? rough : metal ? 0.42 : kind === "steel" ? 0.55 : kind === "roller" ? 0.6 : kind === "block" ? 0.72 : 0.92,
+        metalness: metal ? 0.72 : kind === "steel" || kind === "roller" || kind === "corrugated" ? 0.35 : kind === "polished" ? 0.06 : 0.0,
+        envMap: CBZ.ENV || null, envMapIntensity: metal ? 0.8 : kind === "polished" ? 0.7 : 0.45,
       });
       if (kind === "chainlink") {
         m.transparent = true; m.alphaTest = 0.08; m.side = THREE.DoubleSide; m.depthWrite = true;

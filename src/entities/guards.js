@@ -86,7 +86,11 @@
   makeGuard([[-30, 70], [-30, 116], [-22, 116]], 3.2, 13, 0.58);
   makeGuard([[30, 74], [30, 112], [22, 112]], 3.2, 13, 0.58);
   // the sally-port detail watching the freedom gate
-  makeGuard([[-12, 122], [12, 122], [12, 114], [-12, 114]], 3.0, 15, 0.64);
+  // (2026-09-05: the exit is a fenced walkway x±4.7 into world/sallyport.js's
+  //  building, so the detail holds its west flank instead of a box across it;
+  //  his nearest waypoint is 10.8 m from the wall line, still `post: gate`,
+  //  and systems/economy.js hangs the Gate Key on that post's belt)
+  makeGuard([[-12, 119], [-6, 119], [-6, 111], [-12, 111]], 3.0, 15, 0.64);
   /* PERIMETER PATROLS (2026-09-04). The sterile zone world/prisongrounds.js
      fences off inside the outer wall is a patrol road, and a patrol road with
      nobody on it is the empty ring again. One man per side, walking the

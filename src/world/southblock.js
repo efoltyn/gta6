@@ -453,10 +453,11 @@
   // ============================================================
   //  SALLY PORT — checkpoint flanking the gate, guard hut, transport
   // ============================================================
-  // checkpoint pillars + boom-gate look either side of the central path
-  addBox(-6.5, 1.6, 118, 1.0, 3.2, 1.0, 0x515a66, { solid: true });
-  addBox(6.5, 1.6, 118, 1.0, 3.2, 1.0, 0x515a66, { solid: true });
-  addBox(0, 3.4, 118, 14, 0.5, 0.5, 0xc94d3a, { cast: false }); // overhead beam
+  // The checkpoint pillars, the red boom and the jersey barriers that stood
+  // here until 2026-09-05 are gone: the exit is a building now
+  // (world/sallyport.js — a fenced walkway into a vestibule with a barred
+  // grille on the wall line), and nothing a prison does not have stands in
+  // front of it.
   // guard hut (small roofed booth)
   roomShell({ x0: -22, x1: -14, z0: 116, z1: 124, h: 3.2, wall: 0x515a66, floor: 0x3c424d, door: { side: "E", center: 120, width: 2.2 } });
   addBox(-18, 3.4, 120, 8.4, 0.4, 8.4, 0x44505a, { cast: false }); // roof
@@ -471,9 +472,6 @@
     addBox(bx, 0.45, bz + 3.2, 1.0, 0.9, 0.5, 0x14181f, { cast: false }); // rear wheel
     addBox(bx - 2.34, 1.4, bz + 4.2, 0.06, 0.5, 0.3, 0xffd451, { emissive: 0x6a5510, ei: 0.5, cast: false }); // headlight
   })();
-  // jersey barriers funnelling toward the gate
-  function barrier(x, z) { addBox(x, 0.55, z, 3.0, 1.1, 0.8, 0xd8d2c4, { solid: true }); addBox(x, 0.16, z, 3.4, 0.2, 1.1, 0xb9b3a4, { cast: false }); }
-  barrier(-10, 124); barrier(10, 124);
 
   // ---- service waste belongs at the workshop, not across circulation ----
   function dumpster(x, z) {
@@ -650,17 +648,7 @@
     // ---- 6. THE SALLY PORT ------------------------------------------------
     // The last thing between you and the gate should look like it was built to
     // stop a vehicle, not like two posts and a stick.
-    for (const s of [-1, 1]) {
-      PD.band(s * 6.5, 2.4, 117.48, 1.0, "x", 0xe8c33c, { h: 0.3, t: 0.06 });   // hazard band, pillar face
-      PD.band(s * 6.5, 1.8, 117.48, 1.0, "x", 0xe8c33c, { h: 0.3, t: 0.06 });
-      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 1.1, 8), CBZ.cmat(0xe8c33c));
-      b.position.set(s * 4.2, 0.55, 118); b.castShadow = false; scene.add(b);       // bollards
-      if (CBZ.colliders) CBZ.colliders.push({ minX: s * 4.2 - 0.16, maxX: s * 4.2 + 0.16, minZ: 117.84, maxZ: 118.16, ref: b });
-    }
-    PD.floorLine(0, 115.6, 9, "x", 0xe8e2d2, { w: 0.3, y: 0.05 });            // stop line
-    for (let i = -2; i <= 2; i++)                                              // hatched no-stand box
-      PD.floorLine(i * 1.8, 121, 3.6, "z", 0xe8c33c, { w: 0.1, y: 0.043 });
-    PD.pipe(0, 4.05, 118, 13.4, "x", 0.07, 0x66717c);                          // conduit over the boom
+    PD.floorLine(0, 112.4, 9, "x", 0xe8e2d2, { w: 0.3, y: 0.05 });            // stop line at the walkway mouth
     // The rules board on the guard hut's yard face — the last words you read.
     // SOUTH of the hut's own doorway (z 118.9..121.1), not across it.
     addBox(-13.70, 2.3, 117.2, 0.08, 1.3, 1.8, 0x6a563c, { cast: false });
@@ -672,7 +660,6 @@
     // face: the hut's east wall face is -13.75 and the pillars' inner faces
     // are +/-6.0, and the hut lamp ducks under its own 3.2-3.6 m roof slab.
     PD.lamp(-13.69, 2.9, 122.4, "x+");
-    PD.lamp(5.94, 3.2, 118, "x-", { w: 0.4 });
   })();
 
   // The facade pass (world/building_dress.js) dresses whatever registers here.

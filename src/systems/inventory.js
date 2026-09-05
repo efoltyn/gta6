@@ -163,7 +163,7 @@
     "Stolen Wallet": "wallet", "Cash Roll": "cash", "Gold Tooth": "tooth",
     "Gold Chain": "chain", "Luxury Watch": "watch",
     // --- keys / weapon (Gun renders as the MESH; this is its fallback) ---
-    "Gun-Room Key": "key", "Gun": "gun", "Guard Torch": "torch", "C4 Charge": "c4",
+    "Gun-Room Key": "key", "Gate Key": "key", "Gun": "gun", "Guard Torch": "torch", "C4 Charge": "c4",
     // B7: resource/tool catalog parity (systems/economy.js) — see city/hud.js
     // + city/charpanel.js for the city-mode equivalents.
     "Wood": "wood", "Stone": "stone", "Scrap": "scrap", "Hatchet": "hatchet", "Pickaxe": "pickaxe",
