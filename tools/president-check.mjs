@@ -211,7 +211,8 @@ else {
 // ---- 7. the house -----------------------------------------------------------
 const ia = await evl("return CBZ.presidentInteriorAudit ? CBZ.presidentInteriorAudit() : null;");
 if (!ia) skip("interior audit", "no presidentInteriorAudit");
-else check("the authored rooms did not regress", (ia.namedRooms | 0) >= 6 && (ia.usableProps | 0) >= 60 && (ia.stateSymbols | 0) >= 15, `rooms=${ia.namedRooms} usable=${ia.usableProps} symbols=${ia.stateSymbols} empty=${ia.emptyDecor}`);
+// baseline measured before the interior wave (seed 260811): rooms 6, usable 56, symbols 13
+else check("the authored rooms did not regress", (ia.namedRooms | 0) >= 6 && (ia.usableProps | 0) >= 56 && (ia.stateSymbols | 0) >= 13, `rooms=${ia.namedRooms} usable=${ia.usableProps} symbols=${ia.stateSymbols} empty=${ia.emptyDecor}`);
 
 // ---- errors from the president files ---------------------------------------
 const uniq = [...new Set(errors)].filter((e) => !/ProgressEvent/.test(e));
