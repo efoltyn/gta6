@@ -353,6 +353,14 @@
     for (let i = 0; i < (actors || []).length; i++) {
       const a = actors[i];
       if (!a || a.dead || a._propLie || !a.group) continue;
+      /* A SEATED MAN IN A MATTRESS FOOTPRINT IS ITS SITTER, NOT A WALKER.
+         world/cellblock.js's "back" perch sits a resident INTO his bed (hips
+         at b.x + 0.06, down the mattress), and this sweep read him as a body
+         that had wandered into a rack: every half second it shoved him to the
+         entry point, the lounge sat him straight back down, and a seated man
+         "travelled" 293 m in a minute (measured, 2026-09-05, six of them in
+         lockstep). Bodies the furniture holds are skipped the way a sleeper is. */
+      if (a._propSeat || a._propBed || (a.char && (a.char.sitting || a.char.lying))) continue;
       if (opts.eligible && !opts.eligible(a)) continue;
       const g = a.group.position;
       for (let k = 0; k < (list || []).length; k++) {

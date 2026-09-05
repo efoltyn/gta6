@@ -91,6 +91,28 @@
       s === "pressurePlayer" || s === "tailPlayer" || s === "interceptThreat" || s === "diversion");
   }
 
+  const ACCEL = 11;                      // m/s² to turn or stop: never a flip inside a frame
+  const ACCEL_UP = 26;                   // m/s² along the way he is already facing: off in ~0.07 s
+  /* What the body gained over the last frame once the wall resolver had
+     spoken, in metres per second, smoothed. `_acX/_acZ` is the settled
+     position systems/actorcollide.js stamps at the end of each frame; the
+     difference between two of those is the achieved step, not the ordered
+     one. The knockback slide (`_phys.kx/kz`, integrated by reactions.js) is
+     ground moving under a body without its legs and is taken back out. */
+  function groundSpeed(n, dt) {
+    const ax = n._acX, az = n._acZ;
+    let gs = n._gs || 0;
+    if (ax != null && n._gsX != null && dt > 1e-4) {
+      const ph = n._phys;
+      const mx = (ax - n._gsX) / dt - (ph ? ph.kx || 0 : 0);
+      const mz = (az - n._gsZ) / dt - (ph ? ph.kz || 0 : 0);
+      gs = CBZ.damp(gs, Math.hypot(mx, mz), 14, dt);
+    }
+    n._gsX = ax; n._gsZ = az;
+    n._gs = gs;
+    return gs;
+  }
+
   function recoverStuck(n, dt, speed, gp, routed) {
     /* NOT WHILE A ROUTE OWNS HIM. `pickTarget` samples his `region`, and at
        lights-out systems/prisonschedule.js pins that region to a 2.2 m box
@@ -319,7 +341,20 @@
           : !SCH.inBlock(gp.x, gp.z, -0.5));
         if (outside) {
           const route = n._muster.route;
-          n.target.set(route ? route.x : 0, 0, route ? route.z : -9.8);
+          const rx = route ? route.x : 0, rz = route ? route.z : -9.8;
+          const gate = CBZ.door;
+          if (gate && !gate.open && !gate.blown) {
+            /* LOCKED OUT. The block racked shut with him still in the yard —
+               which a prison securing itself does — and the route home runs
+               through a leaf that is not going to open for him. Walking at
+               it put a dozen men on the throat every night, sliding along
+               the gate and back into it until dawn (measured 23:00: 22 bodies
+               grinding, 9% of the block's movement). He comes up to it,
+               stops short, and waits for the screws like a man does. */
+            const gd = Math.hypot(rx - gp.x, rz - gp.z);
+            if (gd > 3.6) n.target.set(rx + (gp.x - rx) / gd * 3.0, 0, rz + (gp.z - rz) / gd * 3.0);
+            else { n.target.set(gp.x, 0, gp.z); n.pause = Math.max(n.pause || 0, 2 + Math.random() * 3); }
+          } else n.target.set(rx, 0, rz);
         }
         else n.target.set(n._bedX, 0, n._bedZ);
         const bdx = n.target.x - gp.x, bdz = n.target.z - gp.z;
@@ -350,20 +385,57 @@
     if (CBZ.npcConfine) CBZ.npcConfine(n);
     if (CBZ.prisonNav) CBZ.prisonNav.step(n, dt);
 
-    if (n.pause > 0) { n.pause -= dt; if (near) animChar(n.char, 0, dt); }
-    else {
+    /* THE STEP. Two things this used to get wrong every frame, and both read
+       as "glitchy" from the player's cell (owner, 2026-09-04: "fix glitchiness,
+       there's a lot of glitchiness, getting stuck in cell"):
+
+       · THE BODY HAD NO VELOCITY. Position moved `speed * dt` along whatever
+         `target` said THIS frame, so a re-rolled target, a new waypoint or a
+         pal's next step flipped a walking man's heading inside one frame and
+         a body arriving at its goal went from full pace to a dead stop in
+         one. Now the mover carries a velocity and turns it toward what the
+         brain wants at a bounded rate (walking pace in about a quarter of a
+         second), and a goal in plain sight is eased into over its last metre.
+       · THE LEGS WERE FED THE ORDER, NOT THE GROUND. animChar got the speed
+         the brain ASKED for, so a man held on a bunk frame, a jamb or another
+         body by systems/actorcollide.js ran on the spot — the treadmill,
+         wherever it happens. The walk cycle is now driven by what the body
+         actually gained last frame after the wall resolver had its say
+         (`_acX/_acZ`, stamped at order 25), less any knockback slide, so a
+         body that is not going anywhere STANDS. */
+    if (n.pause > 0) {
+      n.pause -= dt;
+      n._vx = n._vz = 0;
+      if (near) animChar(n.char, 0, dt);
+    } else {
       const dx = n.target.x - gp.x;
       const dz = n.target.z - gp.z;
       const dist = Math.hypot(dx, dz);
-      if (dist < 0.4) {
+      if (dist < 0.3) {
         if (!CBZ.aiThink) { n.pause = 0.8 + econ.rng() * 2.4; pickTarget(n); }
         else n.pause = 0.15;
+        n._vx = n._vz = 0;
         if (near) animChar(n.char, 0, dt);
       } else {
-        gp.x += (dx / dist) * speed * dt;
-        gp.z += (dz / dist) * speed * dt;
-        n.group.rotation.y = lerpAngle(n.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.0001, dt));
-        if (near) animChar(n.char, speed, dt);
+        // a route leg or a muster leg is walked at full pace (the corner is
+        // not the goal); a goal in plain sight is eased into over its last metre
+        const leg = (n._muster && n._muster.way) || !!(CBZ.prisonNav && CBZ.prisonNav.owns(n));
+        const want = (!leg && dist < 1.0) ? speed * Math.max(0.6, dist) : speed;
+        const wx = (dx / dist) * want, wz = (dz / dist) * want;
+        let vx = n._vx || 0, vz = n._vz || 0;
+        let ex = wx - vx, ez = wz - vz;
+        // getting going is quick (a man steps off in a tenth of a second);
+        // turning and stopping are what the bound is for
+        const along = (vx * wx + vz * wz) >= 0.6 * Math.hypot(vx, vz) * want;
+        const el = Math.hypot(ex, ez), cap = (along ? ACCEL_UP : ACCEL) * dt;
+        if (el > cap) { ex *= cap / el; ez *= cap / el; }
+        vx += ex; vz += ez;
+        n._vx = vx; n._vz = vz;
+        gp.x += vx * dt;
+        gp.z += vz * dt;
+        const vl = Math.hypot(vx, vz);
+        if (vl > 0.05) n.group.rotation.y = lerpAngle(n.group.rotation.y, Math.atan2(vx, vz), 1 - Math.pow(0.0001, dt));
+        if (near) animChar(n.char, Math.min(vl, groundSpeed(n, dt) * 1.3 + 0.05), dt);
       }
     }
     if (near) poseRoutine(n, dt);

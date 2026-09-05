@@ -52,6 +52,14 @@
       if (n.char && (n.char.sitting || n.char.lying)) return false;
       return G.step(n, n.group.position, n.target, dt, {
         speed: n._spd != null ? n._spd : (n.speed || 1.8),
+        // a cell door is 1.6 m clear and the grid grows its jambs by a body
+        // radius: the lane through it is ONE 0.4 m square. A waypoint counted
+        // "reached" from 0.85 m away is a body cutting the jamb; 0.55 keeps
+        // him on the lane through the leaf.
+        arrive: 0.55,
+        // a sealed door is retried every 3.5 s; a shorter wait had him pushing
+        // at the leaf for the other two seconds of every cycle
+        sealedWait: 3.4,
         wait: function (a, s) { a.pause = Math.max(a.pause || 0, s); },
       });
     },

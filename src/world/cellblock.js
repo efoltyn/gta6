@@ -2101,36 +2101,95 @@
     const want = hold ? c.room : c.aisle;
     if (n.region !== want) n.region = want;
   }
-  /* SIT ON YOUR OWN BUNK. Walks him to the seat when he is off it (the old
-     code teleported a man back onto the mattress the frame a fight ended)
-     and pins him only inside the settle radius; `pre` decides, the post-mover
-     pass only re-pins a body that was pushed since. */
+  /* SIT ON YOUR OWN BUNK — and STAY sat.
+
+     THE FLICKER, MEASURED (2026-09-04, tools: a per-frame position trace with
+     the writer's stack on every jump): Bishop, cell 14, socialising with a
+     man he could not reach, moved 1,836 m in sixty seconds without leaving
+     his cell. Every frame: the pre-pass unseated him (stepClearOfBunk, +0.5 m),
+     the post-pass pinned him back onto the mattress WITHOUT the sit pose, the
+     wall resolver threw the standing body out of the frame (-0.5 m), and the
+     next pre-pass found a standing man at the entry point and sat him down
+     again. At the 21:30 count three ground-floor men did the same at 60 m a
+     second. Two faults, one function:
+
+       · THE ENTRY POINT WAS THE SEAT PLUS HALF A METRE, and "am I still
+         walking" was `distance to the entry > 0.5`. A seated man's distance
+         to the entry is 0.5 by construction, so floating point decided every
+         frame whether he had arrived. A seated body needs a HYSTERESIS: he
+         gets up for a reason (the brain wants out, a fight, a shove of more
+         than a metre), never because a threshold was re-measured.
+       · THE POST-PASS PINNED A STANDING MAN INTO THE FRAME. Only the pre-pass
+         has a pose to give him; the post-pass may re-pin a body that is
+         SEATED and was nudged, and nothing else.
+
+     THE ENTRY POINT IS A BODY'S RADIUS CLEAR OF THE FRAME, NOT OF THE SEAT.
+     The "back" style seats a man INSIDE the mattress (b.x + 0.06), and an
+     entry measured off THAT sat on the frame's own collider edge — a point
+     the wall resolver never let a 0.5 m body reach. Measured: Kessler,
+     cell 11, 4.4 of 4.8 s stalled at x 13.72 walking at an entry at 14.24 =
+     the frame's edge, legs going, gaining nothing — the "stuck in cell" in
+     the owner's own words. A man who still makes no progress toward the
+     entry (something else in the way) gives the bunk up for a while instead
+     of pressing into it for as long as he is calm. */
+  const LOUNGE_ARRIVE = 0.75;   // metres from the entry at which the sit begins (mover stops at 0.3; the frame holds a body 0.08 short)
+  const LOUNGE_HOLD = 1.1;      // a seated man shoved further than this off his seat stands up
+  const LOUNGE_STALL = 1.5;     // seconds of no progress toward the entry before he gives it up
+  const LOUNGE_GIVEUP = 25;     // ...and for how long
+  function loungeEntry(c, s) {
+    const b = c.bunk;
+    const lat = c.dz !== 0 ? 1 : c.dx;
+    const wide = b.along === "z" ? b.latOut : b.lonOut;
+    return { x: b.x + lat * (wide + BODY_R + 0.08), z: s.z };
+  }
   function lounge(c, n, dt, pre) {
     const s = postIn(c, "bunk");
     const p = n.group.position;
-    /* THE SEAT IS INSIDE THE FRAME. bunkSpot puts his hips on the mattress
-       edge, and the frame is a solid collider (PRISON_REAL_PROPS) — a body
-       WALKED at that point is shoved back out by systems/actorcollide.js
-       every frame and never arrives (measured: tools/prison-nav-check.mjs
-       went 0 → 5 grinders the first time this walked him). So he walks to
-       the ENTRY point a body's radius clear of the frame, and the last
-       half-metre onto the mattress is the sit itself, as it always was. */
-    const lat = c.dz !== 0 ? 1 : c.dx;
-    const ax = s.x + lat * (BODY_R + 0.08), az = s.z;
-    if (Math.hypot(p.x - ax, p.z - az) > 0.5) {
+    const seated = !!(n.char && n.char.sitting);
+    // THE BUNK IS HIS ROUTINE while this runs: entities/npc.js's calm routine
+    // otherwise parks him mid-walk for a stretch ("stand"/"activity" write
+    // `target` back to where he is and hand the mover a speed of zero), and
+    // a man told "walk to your bunk" by one system and "stand there" by the
+    // other every frame is a man who does neither. `walk` leaves the target
+    // alone.
+    if (pre) { n._lifeActivity = "walk"; n._lifeT = Math.max(n._lifeT || 0, 2); }
+    if (seated) {
+      if (Math.hypot(p.x - s.x, p.z - s.z) > LOUNGE_HOLD) { if (pre) unseat(n, c); return; }
+      p.x = s.x; p.z = s.z;
       if (!pre) return;
-      if (n.char && n.char.sitting) unseat(n, c);
-      n.target.set(ax, 0, az); n.pause = 0;
+      n.target.set(s.x, 0, s.z);
+      n.pause = Math.max(n.pause || 0, 0.6);
+      loungeFace(c, n, s, dt);
       return;
     }
+    const e = loungeEntry(c, s);
+    const d = Math.hypot(p.x - e.x, p.z - e.z);
+    if (d > LOUNGE_ARRIVE) {
+      if (!pre) return;
+      // no progress counts only while he is actually being walked: a man
+      // stood still by his own routine (a stretch, a spell at the wall — the
+      // mover's velocity is zero and he is not paused) is not stuck
+      // ...and only within reach of it: a man held up across the room (a
+      // crowd in the door, a fight in the aisle) has not found the frame in
+      // his way, and must not lose his bunk to that
+      const trying = !(n.pause > 0) && d < 2.5 && Math.hypot(n._vx || 0, n._vz || 0) > 0.3;
+      const prog = n._lgD == null ? 1 : n._lgD - d;
+      n._lgD = d;
+      n._lgStall = !trying ? (n._lgStall || 0) : (prog < 0.004 ? (n._lgStall || 0) + dt : 0);
+      if (n._lgStall > LOUNGE_STALL) {
+        n._lgStall = 0; n._lgD = null; n._bunkGiveUp = LOUNGE_GIVEUP;
+        n.pause = 0;
+        return;
+      }
+      n.target.set(e.x, 0, e.z); n.pause = 0;
+      return;
+    }
+    if (!pre) return;   // no pose to give in the post-pass: a standing body in the frame is a body the wall resolver throws out
+    n._lgD = null; n._lgStall = 0;
     p.x = s.x; p.z = s.z;
-    if (!pre) return;
     n.target.set(s.x, 0, s.z);
     n.pause = Math.max(n.pause || 0, 0.6);
-    // FACE OUT OF THE BED for the edge/brace perch; the "back" style
-    // publishes its own yaw (down the mattress, against the pillow wall).
-    const face = s.face == null ? Math.atan2(c.dx, c.dz) : s.face;
-    n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, face, 1 - Math.pow(0.02, dt));
+    loungeFace(c, n, s, dt);
     if (n.char && CBZ.setCharPose) {
       // `kind` is not decoration: entities/character.js's SEAT_POSTURE
       // reads it — edge is the ducked bunk perch, back/brace are the two
@@ -2141,6 +2200,18 @@
         ceiling: c.bunk.deckY || 0, kind: SEAT_KIND[style] || "bunk" };
       CBZ.setCharPose(n.char, "sit");
     }
+  }
+  // FACE OUT OF THE BED for the edge/brace perch; the "back" style publishes
+  // its own yaw (down the mattress, against the pillow wall).
+  function loungeFace(c, n, s, dt) {
+    const face = s.face == null ? Math.atan2(c.dx, c.dz) : s.face;
+    n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, face, 1 - Math.pow(0.02, dt));
+  }
+  // the bunk trait, asked once per man per pass: on, and not given up for now
+  function wantsBunk(n, dt, pre) {
+    if (n._cellPose !== "bunk") return false;
+    if (n._bunkGiveUp > 0) { if (pre) n._bunkGiveUp -= dt; return false; }
+    return true;
   }
 
   /* One pass of the cell leash over every occupied cell. `pre` runs before the
@@ -2164,7 +2235,7 @@
         // THE DOOR IS OPEN (or he is already through it): no box, no post.
         // entities/ai.js owns him. The one thing the cell still asks is the
         // bunk trait, and only of a calm man who is actually in the room.
-        if (n._cellPose !== "bunk" || !c.bunk || !calm(n) || !inBox(cellBox(c), n.group.position, 0)) {
+        if (!wantsBunk(n, dt, pre) || !c.bunk || !calm(n) || !inBox(cellBox(c), n.group.position, 0)) {
           if (pre) unseat(n, c);
           continue;
         }
@@ -2178,7 +2249,7 @@
       // holds: a fight inside a LOCKED cell is a fight inside THAT cell.
       const owned = n.ko > 0 || n.intimidMode || n.huntPlayer > 0
         || n.aiState === "fight" || n.aiState === "flee";
-      const pose = owned ? "pace" : n._cellPose;
+      const pose = owned ? "pace" : (n._cellPose === "bunk" && !wantsBunk(n, dt, pre) ? "pace" : n._cellPose);
       // A bunk too low for this rig is not this man's bunk — `seatFits`
       // measures HIS body against the clearance the bunk PUBLISHES, so the
       // overlap is unreachable rather than "fixed by being taller". The
@@ -2248,9 +2319,21 @@
       return true;
     }
     if (to) {                                      // enter through that one's door
-      const mouth = facePoint(to, (to.oa + to.ob) / 2, 1.3);
-      if (Math.hypot(p.x - mouth.x, p.z - mouth.z) > 0.7) { t.x = mouth.x; t.z = mouth.z; }
-      else { const inn = facePoint(to, (to.oa + to.ob) / 2, -0.9); t.x = inn.x; t.z = inn.z; }
+      /* THE DOOR LANE, NOT A RADIUS. This used to aim at the mouth (1.3 m
+         out) until he was within 0.7 m of it, then at a point 0.9 m inside
+         — and the moment he was 0.7 m past the mouth on his way IN, the test
+         aimed him back OUT at it. A man walking home at the count ping-
+         ponged in his own doorway for the whole block (measured: 129 s of
+         door-band stall across the cast, 44 bodies grinding, every trace a
+         target flipping between x -10.4 and -12.6). Once he is in the lane
+         through the leaf — level with the mouth or nearer, and inside the
+         opening's width — the point inside is the only thing he aims at. */
+      const mid = (to.oa + to.ob) / 2;
+      const depth = to.dx !== 0 ? (p.x - to.faceX) * to.dx : (p.z - to.faceZ) * to.dz;
+      const lat = to.dx !== 0 ? p.z - (to.faceZ + mid) : p.x - (to.faceX + mid);
+      const inLane = depth < 1.45 && Math.abs(lat) < DOOR_W / 2 + 0.15;
+      const aim = facePoint(to, mid, inLane ? -0.9 : 1.3);
+      t.x = aim.x; t.z = aim.z;
       return true;
     }
     return false;

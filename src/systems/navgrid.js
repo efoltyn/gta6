@@ -441,12 +441,38 @@
     lastNodes = nodes;
     lastPlanMs = ((window.performance && performance.now) ? performance.now() : Date.now()) - t0;
     const end = found ? goal : bestNode;
-    const sealed = !found && heapN === 0;      // the search ran DRY, not out of budget
+    /* SEALED: the search ran DRY — or it ran out of nodes with its best cell
+       a couple of metres from the goal and a wall between them. The prison
+       is one connected floor: twelve thousand nodes flood a yard before they
+       run dry, so a goal behind a LOCKED leaf never read as sealed, only as
+       "a long walk seen a chunk at a time" — and the follower re-planned it
+       every 0.6 s from the cell front, pushing at the bars in between
+       (measured 23:00: three men, 9 s each, at locked cell fronts). A best
+       cell that close with no line to the goal is a door that is shut. */
+    const bestX = ctrX(bestNode), bestZ = ctrZ(bestNode);
+    const sealed = !found && (heapN === 0
+      || (bestH * gs < 2.5 && lineBlocked(bestX, bestZ, to.x, to.z, 0)));
     if (!found) {
       // a partial walk is not a failed plan — it is the honest answer to a
       // goal behind a locked door, and the body walks to the door. Only a
-      // route that cannot even improve on standing still is a failure.
-      if (end === start || bestH * gs < 1.2) { planFails++; return null; }
+      // route that cannot even improve on standing still is a failure —
+      // and even that has two readings. A search that ran DRY a step short
+      // of its goal is a man ALREADY at the shut door (the block gate at
+      // night, his mark on the far side of it): "stand here and wait" is the
+      // answer, the same one a longer sealed route gets. Returning null
+      // instead handed him to the wall-follow, which is a body sliding along
+      // the gate and walking back into it for as long as the goal stood
+      // (measured 23:00: 22 men grinding the throat, 9% of the block's
+      // movement, every one of them "slide").
+      if (end === start || bestH * gs < 1.2) {
+        if (sealed) {
+          partials++; plans++;
+          const here = [{ x: from.x, z: from.z }];
+          here.partial = true; here.sealed = true;
+          return here;
+        }
+        planFails++; return null;
+      }
       partials++;
     }
     plans++;
@@ -523,7 +549,7 @@
 
   function navOf(a) {
     return a._nav || (a._nav = {
-      pts: null, i: 0, gx: 0, gz: 0, wx: null, wz: null,
+      pts: null, i: 0, gx: 0, gz: 0, wx: null, wz: null, snap: 0, rx: NaN, rz: NaN, pd: null, pk: -2,
       chk: 0, cool: 0, px: 0, pz: 0, stall: 0, slide: 0, sx: 0, sz: 0, need: 0,
     });
   }
@@ -570,22 +596,33 @@
        A DESTINATION THAT WOBBLES IS STILL THE SAME DESTINATION: an escaping
        inmate's exit and a fighter's mark both re-roll a metre or two per
        think, and inside the slack the route stands. */
-    const slack = o.slack || GOAL_SLACK;
-    const sameErrand = S.wx != null && Math.hypot(t.x - S.gx, t.z - S.gz) < slack;
-    const ours = S.wx != null && (
-      (Math.abs(t.x - S.wx) < 1e-4 && Math.abs(t.z - S.wz) < 1e-4) || sameErrand);
-    if (ours && sameErrand) { S.gx = t.x; S.gz = t.z; }
-    if (!ours) {
-      S.pts = null; S.wx = S.wz = null; S.gx = t.x; S.gz = t.z; S.chk = 0;
+    // the same errand, re-rolled: a fixed slack for a goal in the room, and a
+    // twentieth of the distance for a goal across the compound — a runner's
+    // gap in a fence 150 m off moving three metres is not a new destination
+    const slack = Math.max(o.slack || GOAL_SLACK, Math.hypot(S.gx - p.x, S.gz - p.z) * 0.05);
+    // `t` still reads back the waypoint we wrote: nobody has spoken since
+    const isWp = S.wx != null && Math.abs(t.x - S.wx) < 1e-4 && Math.abs(t.z - S.wz) < 1e-4;
+    const sameErrand = !isWp && S.wx != null && Math.hypot(t.x - S.gx, t.z - S.gz) < slack;
+    const ours = isWp || sameErrand;
+    if (!ours) { S.pts = null; S.wx = S.wz = null; S.chk = 0; }
+    if (!isWp) {
       /* A GOAL INSIDE A TABLE IS A GOAL NOBODY REACHES. A brain picks the spot
          a body wants to be — a bench, a bunk edge, the man it is fighting —
          and some of those points are inside the furniture's own collider. The
          mover then walks at it forever from a body-radius away, which is a
          grind with no wall in sight. Snap it to the nearest square he can
-         actually stand on, once, when it arrives. */
-      if (!standable(S.gx, S.gz)) {
-        const id = nearestFree(S.gx, S.gz, 6);
-        if (id >= 0) { S.gx = cx(id % nx); S.gz = cz((id / nx) | 0); }
+         actually stand on — and REMEMBER that it was snapped (`S.snap`): the
+         straight-shot path below used to leave `target` pointing into the
+         furniture, so the snap only ever helped a body that needed a route.
+         The same errand re-rolled (a pal took a step) is re-snapped the same
+         way rather than pasted over the snapped goal raw. */
+      if (!(ours && t.x === S.rx && t.z === S.rz)) {   // the same raw point again costs nothing
+        S.rx = t.x; S.rz = t.z;
+        S.gx = t.x; S.gz = t.z; S.snap = 0;
+        if (!standable(S.gx, S.gz)) {
+          const id = nearestFree(S.gx, S.gz, 6);
+          if (id >= 0) { S.gx = cx(id % nx); S.gz = cz((id / nx) | 0); S.snap = 1; }
+        }
       }
     }
     const gx = S.gx, gz = S.gz;
@@ -594,10 +631,21 @@
     const dg = Math.hypot(dgx, dgz);
     if (dg < (o.nearGoal || NEAR_GOAL)) { release(a, S, t, ours); return; }
 
-    // stall bookkeeping — the measurement this file exists for, live
-    const moved = Math.hypot(p.x - S.px, p.z - S.pz);
-    S.px = p.x; S.pz = p.z;
-    if (moved < (o.speed || 1.8) * dt * 0.35) S.stall += dt;
+    /* stall bookkeeping — the measurement this file exists for, live.
+       PROGRESS, NOT MOTION. This used to count displacement, and a body the
+       wall resolver slides along a shut leaf at a metre a second is moving
+       fine by that reading while getting nowhere at all (measured 23:00: two
+       men sliding up and down a locked cell front for nine seconds, never
+       "stalled", never routed). What counts is the distance to the point he
+       is walking at — the waypoint on a route, the goal on a straight shot —
+       closing by a third of the ordered step. */
+    const rx = (S.pts && S.i < S.pts.length) ? S.pts[S.i].x : gx;
+    const rz = (S.pts && S.i < S.pts.length) ? S.pts[S.i].z : gz;
+    const dr = Math.hypot(rx - p.x, rz - p.z);
+    const pk = S.pts ? S.i : -1;
+    const prog = (S.pk === pk && S.pd != null) ? S.pd - dr : 1;
+    S.pd = dr; S.pk = pk; S.px = p.x; S.pz = p.z;
+    if (prog < (o.speed || 1.8) * dt * 0.35) S.stall += dt;
     else S.stall = Math.max(0, S.stall - dt * 2);
 
     /* STRAIGHT SHOT? THEN THIS FILE HAS NO BUSINESS HERE — but the answer is
@@ -619,12 +667,28 @@
         // says every direction is blocked, including the open one
         S.need = lineBlocked(p.x, p.z, gx, gz, 0.75) ? 1 : 0;
       }
-      if (!S.need) return;
+      /* THE WALL INSIDE THE SKIP. The line test starts a stride out, so a
+         thin wall RIGHT in front of him — a shut cell leaf 0.7 m away, the
+         block gate at his chest, a yard wall he is sliding along — is
+         invisible to it, the shot reads clear, and he grinds it for as long
+         as the goal stands (measured 23:00: a man 16 s at a locked leaf, a
+         man at the shut gate, three men on a yard wall, none of them ever
+         asking for a route). A straight shot that is not getting anywhere
+         asks. The planner then answers properly: a way round, or "sealed,
+         stand and wait". */
+      if (!S.need && S.stall > STALL_SPAN) { S.need = 1; S.chk = CHECK_MIN; }
+      if (!S.need) {
+        // a straight walk to a goal that had to be moved out of the furniture:
+        // the mover must be handed the moved goal, or he walks into the table
+        if (S.snap) { setT(t, gx, gz); S.wx = gx; S.wz = gz; }
+        return;
+      }
     }
 
     // ---- follow an existing route ----
     if (S.pts) {
-      while (S.i < S.pts.length && Math.hypot(S.pts[S.i].x - p.x, S.pts[S.i].z - p.z) <= ARRIVE) S.i++;
+      const arrive = o.arrive || ARRIVE;
+      while (S.i < S.pts.length && Math.hypot(S.pts[S.i].x - p.x, S.pts[S.i].z - p.z) <= arrive) S.i++;
 
       if (S.i >= S.pts.length) {
         const last = S.pts[S.pts.length - 1];
@@ -713,7 +777,7 @@
      the same breath: anything decided before that call is overwritten by it.
      So the navigator is not a pass over the cast; it is a step the mover takes.
 
-     opts: {speed, slack, nearGoal, sealedWait, wait(actor, seconds)} */
+     opts: {speed, slack, nearGoal, arrive, sealedWait, wait(actor, seconds)} */
   const NO_OPTS = {};
   function step(a, p, t, dt, opts) {
     if (!blocked || budget < 0 || !a || !p || !t) return false;

@@ -2956,11 +2956,22 @@
   }
 
   // nearest non-hostile inmate to chat with
+  // "is this man shut in his cell right now" — world/cellblock.js's own answer.
+  // A pal, a turf run or a break for the wire are all things a HELD man cannot
+  // walk to: aiming him at them put him on the bars for as long as the pal
+  // stood near (measured: an upper-tier resident "socialising" for a full
+  // minute with a friend four metres below him, sitting down and standing up
+  // every frame). He keeps to his room until the leaf opens.
+  function heldInCell(n) {
+    const cb = CBZ.cellblock;
+    return !!(cb && cb.held && cb.held(n));
+  }
   function findPal(n) {
     let best = null, bd = 9 * 9;
     for (const a of nearbyNpcs(n, 9, _palNear)) {
       if (a === n || !alive(a)) continue;
       if (a.gang >= 0 && n.gang >= 0 && a.gang !== n.gang) continue; // rivals don't mingle
+      if (heldInCell(a)) continue;             // a man behind a shut leaf is nobody's company
       const dx = a.group.position.x - n.group.position.x, dz = a.group.position.z - n.group.position.z;
       const d2 = dx * dx + dz * dz;
       if (d2 < bd) { bd = d2; best = a; }
@@ -5338,8 +5349,9 @@
       }
       case "socialize": {
         const p = n.social;
-        if (!alive(p) || dist(n, p) > 12) { n.aiState = "wander"; n.aiTimer = 0; break; }
+        if (!alive(p) || dist(n, p) > 12 || heldInCell(n) || heldInCell(p)) { n.aiState = "wander"; n.social = null; n.aiTimer = 0; break; }
         if (dist(n, p) < 2.2) {
+          n.socialT = 0;
           n.target.set(n.group.position.x, 0, n.group.position.z); // stop and chat
           if (n.aiTimer <= 0) {
             n.aiTimer = 1.4 + rng() * 2;
@@ -5367,7 +5379,15 @@
             if (n.gang < 0 && p.gang >= 0 && rng() < 0.3) { n.gang = p.gang; addBand(n, n.gang); emote(n, ""); }
             if (rng() < 0.45) { n.aiState = "wander"; n.social = null; }
           }
-        } else n.target.set(p.group.position.x, 0, p.group.position.z);
+        } else {
+          // A PAL YOU CANNOT GET TO IS NOT A PAL. Ten seconds walking at a man
+          // through a wall (a sitter in an alcove, a resident behind his own
+          // grille) and he lets it go — measured: 8 s pressed to a cell front
+          // with the friend a metre away on the wrong side of it.
+          n.socialT = (n.socialT || 0) + dt;
+          if (n.socialT > 10) { n.aiState = "wander"; n.social = null; n.socialT = 0; n.aiTimer = 1 + rng() * 2; break; }
+          n.target.set(p.group.position.x, 0, p.group.position.z);
+        }
         return n.baseSpeed * 0.9;
       }
       case "fight": {
@@ -5398,7 +5418,13 @@
         // (0,-8) once the wing's residents were let off their leash). He
         // thinks better of it and goes back to his business.
         if (blockGateShut(n)) { n.aiState = "wander"; n.aiTimer = 2 + rng() * 3; break; }
-        n.target.set((rng() - 0.5) * 6, 0, ez + 2);
+        // ONE GAP IN THE WIRE, PICKED ONCE. This re-rolled the spot every
+        // think — up to six metres sideways — so a runner at the fence
+        // zigzagged along it and a runner 150 m off threw his route away
+        // each tick and re-planned from scratch (measured: 28 s of a count
+        // block stalled on one man). He picks his gap and keeps it.
+        if (n.aiTimer <= 0 || n._escX == null) { n._escX = (rng() - 0.5) * 6; n.aiTimer = 4 + rng() * 4; }
+        n.target.set(n._escX, 0, ez + 2);
         if (n.group.position.z > ez - 2) {
           n.escaped = true; n.group.visible = false;
           if (CBZ.player && Math.hypot(CBZ.player.pos.x - n.group.position.x, CBZ.player.pos.z - n.group.position.z) < 26)
@@ -5409,6 +5435,11 @@
       default: { // wander
         if (n.aiTimer <= 0) {
           n.aiTimer = 1.5 + rng() * 3;
+          // shut in: his room is the whole world until the leaf opens (heldInCell)
+          if (heldInCell(n)) { CBZ.npcPickTarget(n); return n.baseSpeed * 0.7; }
+          // locked in the cell house with a yard patch for a region: the hall
+          // is his yard tonight, not the far side of the racked gate
+          if (blockGateShut(n)) { n.target.set((rng() - 0.5) * 5, 0, -12 - rng() * 22); return n.baseSpeed * 0.8; }
           // re-evaluate: settle something, make a run for it, or just roam.
           // WHETHER they start a fight is now the answer to "does this man
           // have a reason, and is anyone watching" (wantsToSwing) instead of a
@@ -5442,6 +5473,7 @@
     const p = n.group.position;
     return S.inBlock(p.x, p.z, 0.5);
   }
+  CBZ.blockGateShut = blockGateShut;
 
   // called by systems/state.js on restart: revive everyone, re-elect leaders
   function aiReset() {
