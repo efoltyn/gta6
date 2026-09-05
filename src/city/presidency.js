@@ -86,7 +86,7 @@
                                paintBoard() consumes it too, so the board in
                                the room and any HUD are the same source.
      CBZ.presidency.site()     the execmansion entry of CBZ.govComplexes
-     CBZ.presidency.on/.emit   a synchronous bus. The seven moments, with the
+     CBZ.presidency.on/.emit   a synchronous bus. The ten moments, with the
                                payload each one carries:
                                  sworn        {seat, country, govType, day}
                                  order        {key, ok, why}
@@ -98,6 +98,11 @@
                                                where:{x,z}}
                                  raid         {phase|null, won?}
                                  impeach      {day, scandal, approval}
+                                 campaign     {day, voteDay, polling, challenger,
+                                               seat} — elections.js called the
+                                               race at office.termDay-2
+                                 reelected    {day, seat, terms, termDay}
+                                 defeated     {day, seat, terms}
                                  arrest       {why, title, impeached}
 
    COUNTERTERROR IS PEOPLE AT PEOPLE (the owner's standing ask: "ways to
@@ -142,7 +147,6 @@
 
   if (CFG.PRESIDENCY_V1 == null) CFG.PRESIDENCY_V1 = true;
   if (CFG.PRESIDENCY_SITROOM == null) CFG.PRESIDENCY_SITROOM = true;
-  if (CFG.PRESIDENCY_ROOMS_V2 == null) CFG.PRESIDENCY_ROOMS_V2 = true;
   if (CFG.PRESIDENCY_TERROR == null) CFG.PRESIDENCY_TERROR = true;
   if (CFG.PRESIDENCY_RAIDS == null) CFG.PRESIDENCY_RAIDS = true;
   if (CFG.PRESIDENCY_FALLS == null) CFG.PRESIDENCY_FALLS = true;
@@ -178,7 +182,26 @@
   // so nothing pops into view and the last seconds are a standoff.
   const GATE_ROLL_SPEED = GATE_APPROACH / Math.max(4, ATTACK_WARN_SEC - 4);   // m/s
   const RAID_WIN_APPROVAL = 4, RAID_LOSS_APPROVAL = -3;
-  const IMPEACH_SCANDAL = 85, IMPEACH_APPROVAL = 15, IMPEACH_SCANDAL_LO = 50;
+  // IMPEACHMENT IS REACHABLE (PRESIDENT-PLAN 2.6). The old bar (scandal 85,
+  // or approval < 15 with scandal >= 50) could not be cleared in a session
+  // because NOTHING the president did moved scandal — statecraft only ever
+  // wrote it on a corruption DISCOVERY roll. Now the day tick drifts scandal
+  // toward tyranny (below), so the tempting buttons carry their own risk, and
+  // the bar sits where a 7-day term can actually reach it.
+  const IMPEACH_SCANDAL = 70, IMPEACH_APPROVAL = 25, IMPEACH_SCANDAL_LO = 45;
+  // SCANDAL = WHAT YOU DID, MINUS WHAT YOU EXPLAINED. One line, all three
+  // terms read off systems that already own them:
+  //   tyranny   statecraft's addTyranny (pardons 5-9, curfew 8, emergency 15,
+  //             crackdown/surge 4-6, martial law 18) — scandal chases it at a
+  //             quarter per day, so force shows up in two days and a clean
+  //             week walks it back down as statecraft's own tyranny decays.
+  //   attacks   a bombing on your watch is a scandal about YOU (+4 each).
+  //   address   speaking to the country buys 6 points of it back — the same
+  //             button approval.js already rewards, now with a second use.
+  const SCANDAL_PULL = 0.25, SCANDAL_PER_ATTACK = 4, SCANDAL_ADDRESS_RELIEF = 6;
+  // elections.js's own lead-in (openRaces() publishes it per race as
+  // `campaignDays`; this is only the fallback when that read is unavailable).
+  const CAMPAIGN_LEAD = 2;
   const ARREST_GRACE_SEC = 30;                          // marshals give you one warning
   const JAIL_SENTENCE_SEC = 240, JAIL_BAIL = 60000;
 
@@ -262,12 +285,21 @@
       // the falls
       impeachDay: null, impeached: false,
       arrestT: 0, arrestArmed: false, arrestWhy: null,
-      wasPresident: false,
+      wasPresident: false, lastSeatId: null,
+      // the ballot — elections.js runs the race; these three fields are all
+      // this file keeps about it: how many terms have been won, which vote
+      // day is armed for settling, and which race has already been announced
+      // (so the campaign order is posted once, not every day of the window).
+      terms: 0, voteDay: null, campaignFor: null,
+      // attacks counted at the last day tick — the difference is "attacks
+      // since yesterday", which is what the scandal drift prices.
+      attacksSeen: 0,
     };
   }
   function st() { if (!g.presWorld) g.presWorld = fresh(); return g.presWorld; }
   function reset() {
     g.presWorld = fresh(); teardownRoom();
+    ballotPending = false; _einfo = null; _einfoKey = "";
     RAID.phase = null; RAID.agents = []; RAID.car = null; RAID.target = null;
     ATT.armed = null; OCC.done = {}; OCC.arena = null; _safehouses = null;
   }
@@ -319,10 +351,20 @@
     if (!ok) return null;                       // no parallel holder write, ever
     S.began = true;
     S.wasPresident = true;
+    S.lastSeatId = rec.id;
+    S.terms = 1;                                // the term you are standing in
     bindDetail({ id: rec.id, rec: rec });
     emitEvent("sworn", { seat: rec.id, country: rec.name || null, govType: rec.govType || null, day: day() });
     big("SWORN IN · PRESIDENT OF " + String(rec.name || "THE REPUBLIC").toUpperCase());
     orders("Chief of Staff", "The Mansion is yours. The Situation Room is behind the steel door off the entrance hall, your seal opens it. Nobody else's does.", 2);
+    // THE CLOCK IS PART OF THE JOB. swearIn() already stamped office.termDay
+    // (officials.termDaysFor gives the PLAYER's country seat 7 days, ~17 real
+    // minutes); elections.js calls the race two days before it and counts the
+    // ballot on it. Say so out loud, on day one, or the term is invisible.
+    const E0 = electionInfo();
+    if (E0.voteDay != null) {
+      orders("Chief of Staff", "The country votes on day " + E0.voteDay + ". Approval is the ballot.", 1);
+    }
     // the first WHY is a locked door: walk to it. mission.js owns the HUD
     // line, waypoint and beacon — build none of those.
     const site = mansionSite();
@@ -428,59 +470,50 @@
     // ground floor spans x cx±28, z cz-51..cz-17, front door on +z. The room
     // takes the west end of that hall. All offsets fixed => deterministic.
     const cx = site.cx, cz = site.cz;
-    const intentional = CFG.PRESIDENCY_ROOMS_V2 !== false;
-    // V2 is still entirely inside the published 56x34 mansion floorplate, but
-    // it is a real 13x13 command room instead of an 11x8 closet around a slab.
-    // V1 occupied x cx-24..cx-13 — exactly the shell's reserved stair strip.
-    // Its 0.92 m console hid the flight in screenshots, but the stair wall
-    // physically crossed the room. V2 uses the clear east bay instead.
-    const x0 = intentional ? cx + 12.5 : cx - 24;
-    const x1 = intentional ? cx + 25.5 : cx - 13;
-    const z0 = intentional ? cz - 47.5 : cz - 45;
-    const z1 = intentional ? cz - 34.5 : cz - 37;
+    // A real 13x13 command room in the shell's clear east bay, entirely
+    // inside the published 56x34 mansion floorplate.
+    const x0 = cx + 12.5;
+    const x1 = cx + 25.5;
+    const z0 = cz - 47.5;
+    const z1 = cz - 34.5;
     const zc = (z0 + z1) / 2;
     ROOM.rect = { minX: x0, maxX: x1, minZ: z0, maxZ: z1 };
     const grp = new THREE.Group();
     root.add(grp); ROOM.group = grp;
     const H = 3.0, T = 0.24;
 
-    if (intentional) {
-      // A fitted floor and a waist-height acoustic wainscot make the room read
-      // as deliberately embedded in the state residence, not a gray box that
-      // appeared on top of its lobby.
-      addBox(grp, (x0 + x1) / 2, 0.165, zc, x1 - x0 - 0.32, 0.05, z1 - z0 - 0.32, CARPET);
-      addBox(grp, (x0 + x1) / 2, 0.72, z0 + T + 0.035, x1 - x0 - 0.6, 1.22, 0.07, NAVY);
-      addBox(grp, (x0 + x1) / 2, 0.72, z1 - T - 0.035, x1 - x0 - 0.6, 1.22, 0.07, NAVY);
-      for (let i = 0; i < 7; i++) {
-        const px = x0 + 1.1 + i * ((x1 - x0 - 2.2) / 6);
-        addBox(grp, px, 0.74, z0 + T + 0.09, 0.05, 1.12, 0.045, BRASS);
-        addBox(grp, px, 0.74, z1 - T - 0.09, 0.05, 1.12, 0.045, BRASS);
-      }
+    // A fitted floor and a waist-height acoustic wainscot make the room read
+    // as deliberately embedded in the state residence, not a gray box that
+    // appeared on top of its lobby.
+    addBox(grp, (x0 + x1) / 2, 0.165, zc, x1 - x0 - 0.32, 0.05, z1 - z0 - 0.32, CARPET);
+    addBox(grp, (x0 + x1) / 2, 0.72, z0 + T + 0.035, x1 - x0 - 0.6, 1.22, 0.07, NAVY);
+    addBox(grp, (x0 + x1) / 2, 0.72, z1 - T - 0.035, x1 - x0 - 0.6, 1.22, 0.07, NAVY);
+    for (let i = 0; i < 7; i++) {
+      const px = x0 + 1.1 + i * ((x1 - x0 - 2.2) / 6);
+      addBox(grp, px, 0.74, z0 + T + 0.09, 0.05, 1.12, 0.045, BRASS);
+      addBox(grp, px, 0.74, z1 - T - 0.09, 0.05, 1.12, 0.045, BRASS);
     }
 
     // walls (real colliders — the room is a fact, not a texture)
     addBox(grp, (x0 + x1) / 2, H / 2, z0 + T / 2, (x1 - x0), H, T, WALLC); addCol((x0 + x1) / 2, z0 + T / 2, x1 - x0, T, 0, H);
     addBox(grp, (x0 + x1) / 2, H / 2, z1 - T / 2, (x1 - x0), H, T, WALLC); addCol((x0 + x1) / 2, z1 - T / 2, x1 - x0, T, 0, H);
-    // V2 faces its door WEST into the state hall. Legacy keeps the old east-
-    // facing door so the feature flag remains a complete one-line rollback.
-    const doorX = intentional ? x0 : x1;
-    const solidX = intentional ? x1 : x0;
-    const doorOut = intentional ? -1 : 1;
+    // The room faces its door WEST, into the state hall.
+    const doorX = x0;
+    const solidX = x1;
+    const doorOut = -1;
     addBox(grp, solidX + doorOut * T / 2, H / 2, zc, T, H, (z1 - z0), WALLC);
     addCol(solidX + doorOut * T / 2, zc, T, z1 - z0, 0, H);
     // door wall: two jamb segments with a 2.2 m gap at zc
     const gz0 = zc - 1.1, gz1 = zc + 1.1;
     addBox(grp, doorX - doorOut * T / 2, H / 2, (z0 + gz0) / 2, T, H, (gz0 - z0), WALLC); addCol(doorX - doorOut * T / 2, (z0 + gz0) / 2, T, gz0 - z0, 0, H);
     addBox(grp, doorX - doorOut * T / 2, H / 2, (gz1 + z1) / 2, T, H, (z1 - gz1), WALLC); addCol(doorX - doorOut * T / 2, (gz1 + z1) / 2, T, z1 - gz1, 0, H);
-    if (intentional) {
-      // The wainscot belongs to the two wall leaves, never across the door
-      // opening. The former full-span panel left a navy waist-high slab in a
-      // physically open doorway even after the steel leaf slid away.
-      const southA = z0 + 0.30, southB = gz0 - 0.08;
-      const northA = gz1 + 0.08, northB = z1 - 0.30;
-      if (southB > southA) addBox(grp, x0 + T + 0.035, 0.72, (southA + southB) / 2, 0.07, 1.22, southB - southA, NAVY);
-      if (northB > northA) addBox(grp, x0 + T + 0.035, 0.72, (northA + northB) / 2, 0.07, 1.22, northB - northA, NAVY);
-    }
+    // The wainscot belongs to the two wall leaves, never across the door
+    // opening. A full-span panel would leave a navy waist-high slab in a
+    // physically open doorway even after the steel leaf slid away.
+    const southA = z0 + 0.30, southB = gz0 - 0.08;
+    const northA = gz1 + 0.08, northB = z1 - 0.30;
+    if (southB > southA) addBox(grp, x0 + T + 0.035, 0.72, (southA + southB) / 2, 0.07, 1.22, southB - southA, NAVY);
+    if (northB > northA) addBox(grp, x0 + T + 0.035, 0.72, (northA + northB) / 2, 0.07, 1.22, northB - northA, NAVY);
     // lintel over the gap
     addBox(grp, doorX - doorOut * T / 2, 2.8, zc, T, 0.4, 2.4, WALLC);
 
@@ -504,161 +537,127 @@
     plateMesh.position.set(doorX + doorOut * 0.19, 2.48, zc); plateMesh.rotation.y = doorOut * Math.PI / 2;
     grp.add(plateMesh);
 
-    if (intentional) {
-      // Deep frame, vision panel, clearance reader and the seal: the lock now
-      // advertises both what is behind it and why this player can cross it.
-      addBox(grp, doorX + doorOut * 0.02, 1.35, zc - 1.22, 0.34, 2.7, 0.22, TRIM);
-      addBox(grp, doorX + doorOut * 0.02, 1.35, zc + 1.22, 0.34, 2.7, 0.22, TRIM);
-      addBox(grp, doorX + doorOut * 0.02, 2.73, zc, 0.34, 0.22, 2.66, TRIM);
-      // Vision glass and seal are hardware ON the leaf, so they travel with it
-      // rather than hovering in the opening after the collider has moved.
-      const vision = addBox(door, doorOut * 0.215, 0.16, 0, 0.035, 0.52, 0.82, 0x8fb0c4);
-      vision.material = new THREE.MeshBasicMaterial({ color: 0x8fb0c4, transparent: true, opacity: 0.42 });
-      addBox(grp, doorX + doorOut * 0.16, 1.18, zc + 1.55, 0.18, 0.52, 0.30, STEEL);
-      addBox(grp, doorX + doorOut * 0.27, 1.20, zc + 1.55, 0.035, 0.20, 0.16, 0x66d89c);
-      addCylinder(door, doorOut * 0.24, 0.38, -0.58, 0.24, 0.24, 0.045, BRASS, 18).rotation.z = Math.PI / 2;
-      ROOM.stateSymbols++;
-    }
+    // Deep frame, vision panel, clearance reader and the seal: the lock
+    // advertises both what is behind it and why this player can cross it.
+    addBox(grp, doorX + doorOut * 0.02, 1.35, zc - 1.22, 0.34, 2.7, 0.22, TRIM);
+    addBox(grp, doorX + doorOut * 0.02, 1.35, zc + 1.22, 0.34, 2.7, 0.22, TRIM);
+    addBox(grp, doorX + doorOut * 0.02, 2.73, zc, 0.34, 0.22, 2.66, TRIM);
+    // Vision glass and seal are hardware ON the leaf, so they travel with it
+    // rather than hovering in the opening after the collider has moved.
+    const vision = addBox(door, doorOut * 0.215, 0.16, 0, 0.035, 0.52, 0.82, 0x8fb0c4);
+    vision.material = new THREE.MeshBasicMaterial({ color: 0x8fb0c4, transparent: true, opacity: 0.42 });
+    addBox(grp, doorX + doorOut * 0.16, 1.18, zc + 1.55, 0.18, 0.52, 0.30, STEEL);
+    addBox(grp, doorX + doorOut * 0.27, 1.20, zc + 1.55, 0.035, 0.20, 0.16, 0x66d89c);
+    addCylinder(door, doorOut * 0.24, 0.38, -0.58, 0.24, 0.24, 0.045, BRASS, 18).rotation.z = Math.PI / 2;
+    ROOM.stateSymbols++;
 
-    // THE CONSOLE. V1 was a 5.5 m illuminated keyboard with no chairs. V2 is
-    // a real ten-seat command table: the shared furniture owner draws it and
-    // registers every sit anchor, while this file owns only the state orders.
+    // THE CONSOLE — a real ten-seat command table: the shared furniture owner
+    // draws it and registers every sit anchor, while this file owns only the
+    // state orders on its rails.
     const tx = (x0 + x1) / 2, tz = zc;
     ROOM.board = canvasTexLive(1024, 512);
     ROOM.pads = [];
-    if (!intentional) {
-      addBox(grp, tx, 0.46, tz, 5.5, 0.92, 1.7, TABLE);
-      addBox(grp, tx, 0.94, tz, 5.62, 0.06, 1.82, TRIM);
-      addCol(tx, tz, 5.5, 1.7, 0, 0.98);
-      const face = new THREE.Mesh(new THREE.PlaneGeometry(5.1, 1.5), new THREE.MeshBasicMaterial({ map: ROOM.board.tex }));
-      face.rotation.x = -Math.PI / 2;
-      face.position.set(tx, 1.0, tz);
-      grp.add(face);
-      addBox(grp, x0 + T + 0.05, 1.8, zc, 0.1, 2.0, 3.6, STEEL);
-      const wface = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 1.7), new THREE.MeshBasicMaterial({ map: ROOM.board.tex }));
-      wface.position.set(x0 + T + 0.13, 1.8, zc); wface.rotation.y = Math.PI / 2;
-      grp.add(wface);
-      const rail = ["address", "emergency", "crackdown", "wall", "bureau"];
-      for (let i = 0; i < rail.length; i++) {
-        const px = tx - 2.2 + i * 1.1, pz = tz + 1.0;
-        addBox(grp, px, 0.99, pz, 0.34, 0.1, 0.3, PADC);
-        const cap = addBox(grp, px, 1.05, pz, 0.2, 0.05, 0.18, 0xb5443a);
-        cap.material = new THREE.MeshLambertMaterial({ color: 0xb5443a });
-        ROOM.pads.push({ key: rail[i], x: px, z: pz, cap: cap });
-        padLabel(grp, rail[i], px, 1.0, pz + 0.28, 0);
-      }
-      const panel = ["pardon", "fascism", "communism", "crown"];
-      addBox(grp, tx, 1.35, z0 + T + 0.08, 4.8, 0.9, 0.12, STEEL);
-      for (let i = 0; i < panel.length; i++) {
-        const px = tx - 1.65 + i * 1.1, pz = z0 + T + 0.17;
-        const cap = addBox(grp, px, 1.35, pz, 0.22, 0.22, 0.08, 0xb5443a);
-        cap.material = new THREE.MeshLambertMaterial({ color: 0xb5443a });
-        ROOM.pads.push({ key: panel[i], x: px, z: pz, cap: cap });
-        padLabel(grp, panel[i], px, 1.58, pz + 0.02, 0);
-      }
-    } else {
-      let tableRec = null;
-      if (CBZ.furnish && CBZ.furnish.table) {
-        try {
-          tableRec = CBZ.furnish.table(tx, 0.18, tz, 0, {
-            box: function (x, y, z, w, h, d, color) { return addBox(grp, x, y, z, w, h, d, color); },
-            ox: 0, oz: 0, oy: 0, solid: false,
-            len: 6.4, deep: 1.65, seats: 10, tone: "exec",
-          });
-        } catch (e) { tableRec = null; }
-      }
-      if (!tableRec) {
-        addBox(grp, tx, 0.52, tz, 6.4, 0.68, 1.65, LEATHER);
-        addBox(grp, tx, 0.89, tz, 6.55, 0.08, 1.80, TABLE);
-      }
-      ROOM.seats = tableRec && tableRec.seats ? tableRec.seats.length : 0;
-      addCol(tx, tz, 6.4, 1.65, 0.18, 0.94);
-      // A leather writing inset, bound briefing books and two red phones make
-      // the table read as a place where people work, without pretending those
-      // props are separate political systems.
-      addBox(grp, tx, 0.935, tz, 4.55, 0.025, 0.78, LEATHER);
-      for (const s of [-1, 1]) {
-        addBox(grp, tx + s * 2.25, 0.97, tz, 0.48, 0.055, 0.34, PAPER);
-        addBox(grp, tx + s * 2.78, 0.99, tz + 0.14, 0.34, 0.12, 0.22, 0x8f3434);
-        addBox(grp, tx + s * 2.78, 1.075, tz + 0.14, 0.28, 0.07, 0.09, BRASS);
-      }
-
-      // The country's live state belongs on the far wall, readable by every
-      // chair. It is not a duplicate glowing texture across the table top.
-      addBox(grp, tx, 1.76, z1 - T - 0.07, 7.30, 2.18, 0.11, STEEL);
-      addBox(grp, tx, 1.76, z1 - T - 0.145, 7.02, 1.90, 0.035, TRIM);
-      const wallFace = new THREE.Mesh(new THREE.PlaneGeometry(6.78, 1.68), new THREE.MeshBasicMaterial({ map: ROOM.board.tex }));
-      wallFace.position.set(tx, 1.76, z1 - T - 0.17); wallFace.rotation.y = Math.PI;
-      grp.add(wallFace);
-
-      // Two communications stations flank the main briefing screen. Their
-      // screens, rack slots and handsets give the walls a specific purpose.
-      let stationSeats = 0;
-      for (const s of [-1, 1]) {
-        const sx = tx + s * 4.75;
-        addBox(grp, sx, 0.54, z1 - T - 0.45, 1.55, 0.72, 0.72, STEEL);
-        addBox(grp, sx, 0.94, z1 - T - 0.45, 1.64, 0.08, 0.80, TRIM);
-        addBox(grp, sx, 1.42, z1 - T - 0.26, 1.20, 0.70, 0.08, PADC);
-        addBox(grp, sx, 1.43, z1 - T - 0.31, 1.02, 0.52, 0.025, 0x7ba2b8);
-        for (let i = -1; i <= 1; i++) addBox(grp, sx + i * 0.38, 0.65, z1 - T - 0.86, 0.22, 0.05, 0.12, i === 0 ? BRASS : PADC);
-        addCol(sx, z1 - T - 0.45, 1.55, 0.72, 0, 1.02);
-        // Each communications console is a station someone can actually sit
-        // at, using the same shared seat grammar as the command table.
-        if (CBZ.furnish && CBZ.furnish.chair) {
-          try {
-            const cr = CBZ.furnish.chair(sx, 0.18, z1 - T - 1.42, 0, {
-              box: function (x, y, z, w, h, d, color) { return addBox(grp, x, y, z, w, h, d, color); },
-              ox: 0, oz: 0, oy: 0, solid: false, tone: "exec",
-            });
-            stationSeats += cr && cr.seats ? cr.seats.length : 0;
-          } catch (e) {}
-        }
-      }
-      ROOM.seats += stationSeats;
-
-      // Acoustic panels give the otherwise blank secure wall a deliberate
-      // material rhythm. They are wall treatment, not another prop row.
-      for (const px of [tx - 3.1, tx, tx + 3.1]) {
-        addBox(grp, px, 1.82, z0 + T + 0.08, 2.35, 1.22, 0.06, NAVY);
-        addBox(grp, px, 1.82, z0 + T + 0.115, 2.05, 0.92, 0.025, CARPET);
-      }
-
-      // The orders are compact physical keys on the two writing rails. Their
-      // unique materials let paintBoard show live state without recolouring a
-      // shared material bucket elsewhere in the city.
-      const front = ["address", "emergency", "crackdown", "wall", "bureau"];
-      for (let i = 0; i < front.length; i++) {
-        const px = tx - 2.40 + i * 1.20, pz = tz - 0.70;
-        addBox(grp, px, 0.97, pz, 0.72, 0.07, 0.36, PADC);
-        const cap = addBox(grp, px, 1.035, pz, 0.20, 0.06, 0.16, 0xb5443a);
-        cap.material = new THREE.MeshLambertMaterial({ color: 0xb5443a });
-        ROOM.pads.push({ key: front[i], x: px, z: pz, cap: cap });
-        padLabel(grp, front[i], px, 1.005, pz - 0.30, Math.PI);
-      }
-      const rear = ["pardon", "fascism", "communism", "crown"];
-      for (let i = 0; i < rear.length; i++) {
-        const px = tx - 1.80 + i * 1.20, pz = tz + 0.70;
-        addBox(grp, px, 0.97, pz, 0.76, 0.07, 0.36, PADC);
-        const cap = addBox(grp, px, 1.035, pz, 0.20, 0.06, 0.16, 0xb5443a);
-        cap.material = new THREE.MeshLambertMaterial({ color: 0xb5443a });
-        ROOM.pads.push({ key: rear[i], x: px, z: pz, cap: cap });
-        padLabel(grp, rear[i], px, 1.005, pz + 0.30, 0);
-      }
-
-      // Paired standards and an inset seal terminate the room. They are wall-
-      // attached state symbols, never another row of loose floor props.
-      for (const s of [-1, 1]) {
-        const fx = tx + s * 5.10;
-        addBox(grp, fx, 1.48, z0 + T + 0.10, 0.06, 2.62, 0.06, BRASS);
-        addBox(grp, fx - s * 0.22, 1.94, z0 + T + 0.16, 0.50, 0.92, 0.06, s < 0 ? 0x2f4f86 : 0x8f3434);
-      }
-      const seal = addCylinder(grp, tx, 1.86, z0 + T + 0.10, 0.48, 0.48, 0.06, BRASS, 24);
-      seal.rotation.x = Math.PI / 2;
-      ROOM.stateSymbols += 3;
-      // Recessed warm strips establish a ceiling rhythm without spawning
-      // point lights or adding an unrelated decorative object to the floor.
-      for (const lx of [-3.4, 0, 3.4]) addBox(grp, tx + lx, 2.83, tz, 1.75, 0.05, 0.18, 0xffe6b0);
+    let tableRec = null;
+    if (CBZ.furnish && CBZ.furnish.table) {
+      try {
+        tableRec = CBZ.furnish.table(tx, 0.18, tz, 0, {
+          box: function (x, y, z, w, h, d, color) { return addBox(grp, x, y, z, w, h, d, color); },
+          ox: 0, oz: 0, oy: 0, solid: false,
+          len: 6.4, deep: 1.65, seats: 10, tone: "exec",
+        });
+      } catch (e) { tableRec = null; }
     }
+    if (!tableRec) {
+      addBox(grp, tx, 0.52, tz, 6.4, 0.68, 1.65, LEATHER);
+      addBox(grp, tx, 0.89, tz, 6.55, 0.08, 1.80, TABLE);
+    }
+    ROOM.seats = tableRec && tableRec.seats ? tableRec.seats.length : 0;
+    addCol(tx, tz, 6.4, 1.65, 0.18, 0.94);
+    // A leather writing inset, bound briefing books and two red phones make
+    // the table read as a place where people work, without pretending those
+    // props are separate political systems.
+    addBox(grp, tx, 0.935, tz, 4.55, 0.025, 0.78, LEATHER);
+    for (const s of [-1, 1]) {
+      addBox(grp, tx + s * 2.25, 0.97, tz, 0.48, 0.055, 0.34, PAPER);
+      addBox(grp, tx + s * 2.78, 0.99, tz + 0.14, 0.34, 0.12, 0.22, 0x8f3434);
+      addBox(grp, tx + s * 2.78, 1.075, tz + 0.14, 0.28, 0.07, 0.09, BRASS);
+    }
+
+    // The country's live state belongs on the far wall, readable by every
+    // chair. It is not a duplicate glowing texture across the table top.
+    addBox(grp, tx, 1.76, z1 - T - 0.07, 7.30, 2.18, 0.11, STEEL);
+    addBox(grp, tx, 1.76, z1 - T - 0.145, 7.02, 1.90, 0.035, TRIM);
+    const wallFace = new THREE.Mesh(new THREE.PlaneGeometry(6.78, 1.68), new THREE.MeshBasicMaterial({ map: ROOM.board.tex }));
+    wallFace.position.set(tx, 1.76, z1 - T - 0.17); wallFace.rotation.y = Math.PI;
+    grp.add(wallFace);
+
+    // Two communications stations flank the main briefing screen. Their
+    // screens, rack slots and handsets give the walls a specific purpose.
+    let stationSeats = 0;
+    for (const s of [-1, 1]) {
+      const sx = tx + s * 4.75;
+      addBox(grp, sx, 0.54, z1 - T - 0.45, 1.55, 0.72, 0.72, STEEL);
+      addBox(grp, sx, 0.94, z1 - T - 0.45, 1.64, 0.08, 0.80, TRIM);
+      addBox(grp, sx, 1.42, z1 - T - 0.26, 1.20, 0.70, 0.08, PADC);
+      addBox(grp, sx, 1.43, z1 - T - 0.31, 1.02, 0.52, 0.025, 0x7ba2b8);
+      for (let i = -1; i <= 1; i++) addBox(grp, sx + i * 0.38, 0.65, z1 - T - 0.86, 0.22, 0.05, 0.12, i === 0 ? BRASS : PADC);
+      addCol(sx, z1 - T - 0.45, 1.55, 0.72, 0, 1.02);
+      // Each communications console is a station someone can actually sit
+      // at, using the same shared seat grammar as the command table.
+      if (CBZ.furnish && CBZ.furnish.chair) {
+        try {
+          const cr = CBZ.furnish.chair(sx, 0.18, z1 - T - 1.42, 0, {
+            box: function (x, y, z, w, h, d, color) { return addBox(grp, x, y, z, w, h, d, color); },
+            ox: 0, oz: 0, oy: 0, solid: false, tone: "exec",
+          });
+          stationSeats += cr && cr.seats ? cr.seats.length : 0;
+        } catch (e) {}
+      }
+    }
+    ROOM.seats += stationSeats;
+
+    // Acoustic panels give the otherwise blank secure wall a deliberate
+    // material rhythm. They are wall treatment, not another prop row.
+    for (const px of [tx - 3.1, tx, tx + 3.1]) {
+      addBox(grp, px, 1.82, z0 + T + 0.08, 2.35, 1.22, 0.06, NAVY);
+      addBox(grp, px, 1.82, z0 + T + 0.115, 2.05, 0.92, 0.025, CARPET);
+    }
+
+    // The orders are compact physical keys on the two writing rails. Their
+    // unique materials let paintBoard show live state without recolouring a
+    // shared material bucket elsewhere in the city.
+    const front = ["address", "emergency", "crackdown", "wall", "bureau"];
+    for (let i = 0; i < front.length; i++) {
+      const px = tx - 2.40 + i * 1.20, pz = tz - 0.70;
+      addBox(grp, px, 0.97, pz, 0.72, 0.07, 0.36, PADC);
+      const cap = addBox(grp, px, 1.035, pz, 0.20, 0.06, 0.16, 0xb5443a);
+      cap.material = new THREE.MeshLambertMaterial({ color: 0xb5443a });
+      ROOM.pads.push({ key: front[i], x: px, z: pz, cap: cap });
+      padLabel(grp, front[i], px, 1.005, pz - 0.30, Math.PI);
+    }
+    const rear = ["pardon", "fascism", "communism", "crown"];
+    for (let i = 0; i < rear.length; i++) {
+      const px = tx - 1.80 + i * 1.20, pz = tz + 0.70;
+      addBox(grp, px, 0.97, pz, 0.76, 0.07, 0.36, PADC);
+      const cap = addBox(grp, px, 1.035, pz, 0.20, 0.06, 0.16, 0xb5443a);
+      cap.material = new THREE.MeshLambertMaterial({ color: 0xb5443a });
+      ROOM.pads.push({ key: rear[i], x: px, z: pz, cap: cap });
+      padLabel(grp, rear[i], px, 1.005, pz + 0.30, 0);
+    }
+
+    // Paired standards and an inset seal terminate the room. They are wall-
+    // attached state symbols, never another row of loose floor props.
+    for (const s of [-1, 1]) {
+      const fx = tx + s * 5.10;
+      addBox(grp, fx, 1.48, z0 + T + 0.10, 0.06, 2.62, 0.06, BRASS);
+      addBox(grp, fx - s * 0.22, 1.94, z0 + T + 0.16, 0.50, 0.92, 0.06, s < 0 ? 0x2f4f86 : 0x8f3434);
+    }
+    const seal = addCylinder(grp, tx, 1.86, z0 + T + 0.10, 0.48, 0.48, 0.06, BRASS, 24);
+    seal.rotation.x = Math.PI / 2;
+    ROOM.stateSymbols += 3;
+    // Recessed warm strips establish a ceiling rhythm without spawning
+    // point lights or adding an unrelated decorative object to the floor.
+    for (const lx of [-3.4, 0, 3.4]) addBox(grp, tx + lx, 2.83, tz, 1.75, 0.05, 0.18, 0xffe6b0);
     ROOM.builtFor = CBZ.govComplexes;
     wireZones();
     wireOfficeZones();
@@ -1032,6 +1031,9 @@
       scandal: (p && p.scandal) || 0,
       day: day(),
       termDay: office && office.termDay != null ? office.termDay : null,
+      // THE BALLOT, READ OFF ELECTIONS.JS — never a second race model. See
+      // electionInfo() in §6b for exactly which public calls it reads.
+      election: electionInfo(),
       impeachDay: S.impeachDay != null ? S.impeachDay : null,
       threat: {
         members: CFG.PRESIDENCY_TERROR ? livingCell().length : 0,
@@ -1606,6 +1608,7 @@
       const a = RAID.agents[i];
       if (a && !a.dead) { a.guard = null; a._presRaid = false; if (a.staffPost) a.staffPost = null; }
     }
+    ballotPending = false; _einfo = null; _einfoKey = "";
     RAID.phase = null; RAID.agents = []; RAID.car = null; RAID.target = null;
     emitEvent("raid", { phase: null, won: !!won, embodied: !!embodied });
     paintBoard();
@@ -1690,9 +1693,176 @@
   }
 
   // ============================================================
-  //  §6  THE FALLS — impeachment (scandal/approval), and the junta's knock
-  //  after a coup. Both end in games/jail.js's own transport pipe.
+  //  §6  THE FALLS — the ballot (a term you can lose), impeachment
+  //  (scandal/approval), and the junta's knock after a coup. The last two end
+  //  in games/jail.js's own transport pipe.
   // ============================================================
+
+  // ------------------------------------------------------------
+  //  §6b  THE BALLOT. elections.js runs the whole race — tickOffice() calls
+  //  it at office.termDay − CAMPAIGN_DAYS, campaignDay() polls it every day
+  //  of the window, resolve() counts it on termDay and writes office.holder.
+  //  THIS FILE NEVER WRITES A RACE OR A HOLDER. It reads four public calls
+  //  and reacts to them:
+  //    CBZ.elections.openRaces()   per-seat callDay / daysLeft / phase
+  //    CBZ.elections.playerRace()  the live race the player stands in, and
+  //                                `me` — the player's own side of lastPoll
+  //    CBZ.elections.status(id)    non-null ONLY while the race is uncounted
+  //                                (the settle-ordering probe, below)
+  //    CBZ.gov.holds()             via seat() — who holds the seat NOW
+  //  _pollFor is a test hook and is NOT read here; `polling` is playerRace()'s
+  //  `me`, which is elections' own lastPoll snapshot.
+  // ------------------------------------------------------------
+  // status() is read by the HUD strip every frame, and openRaces() walks
+  // every office in the world — so the answer is cached on exactly the inputs
+  // that can change it: the day, who holds the seat, and the term's end.
+  let _einfo = null, _einfoKey = "";
+  function electionInfo() {
+    const h = seat();
+    const rec = h ? h.rec : null;
+    const office = rec && rec.office ? rec.office : null;
+    const d = day();
+    const key = d + "|" + (h ? h.id : "-") + "|" + (office ? String(office.holder) : "-")
+      + "|" + (office && office.termDay != null ? office.termDay : "-");
+    if (_einfo && _einfoKey === key) {
+      return { callDay: _einfo.callDay, voteDay: _einfo.voteDay, campaigning: _einfo.campaigning, polling: _einfo.polling };
+    }
+    const E = CBZ.elections;
+    let voteDay = office && office.termDay != null ? office.termDay : null;
+    let callDay = voteDay != null ? voteDay - CAMPAIGN_LEAD : null;
+    let campaigning = false, polling = null;
+    if (h && E && E.openRaces) {
+      try {
+        const rows = E.openRaces() || [];
+        for (let i = 0; i < rows.length; i++) {
+          if (!rows[i] || rows[i].id !== h.id) continue;
+          const r = rows[i];
+          campaigning = r.phase === "campaign";
+          if (r.daysLeft != null) voteDay = d + r.daysLeft;
+          callDay = r.callDay != null ? r.callDay
+            : (voteDay != null ? voteDay - (r.campaignDays || CAMPAIGN_LEAD) : null);
+          break;
+        }
+      } catch (e) {}
+    }
+    if (h && E && E.playerRace) {
+      try {
+        const pr = E.playerRace();
+        if (pr && pr.id === h.id) {
+          campaigning = true;
+          if (pr.daysLeft != null) voteDay = d + pr.daysLeft;
+          if (pr.me != null) polling = pr.me;
+        }
+      } catch (e) {}
+    }
+    _einfoKey = key;
+    _einfo = { callDay: callDay, voteDay: voteDay, campaigning: campaigning, polling: polling };
+    return { callDay: callDay, voteDay: voteDay, campaigning: campaigning, polling: polling };
+  }
+  // who is the president running against? elections' own candidate list.
+  function challengerName(id) {
+    const E = CBZ.elections;
+    if (!E || !E.status) return null;
+    let s = null;
+    try { s = E.status(id); } catch (e) {}
+    if (!s || !s.candidates) return null;
+    for (let i = 0; i < s.candidates.length; i++) {
+      const c = s.candidates[i];
+      if (c && c.type !== "incumbent") return c.name || null;
+    }
+    return null;
+  }
+  // A NEW TERM BUYS THE CELL A NEW BOMBER — the roster shape seedRoster()
+  // already mints (a parked ledger identity + a rank), never a second kind of
+  // enemy. Deterministic off the term number, like everything else here.
+  function recruitBomber() {
+    const S = st();
+    if (!CFG.PRESIDENCY_TERROR || !CBZ.cityPedStash) return null;
+    const stream = CBZ.seedStream ? CBZ.seedStream("presidency:cell:term" + (S.terms | 0)) : rng;
+    const gender = stream() < 0.7 ? "m" : "f";
+    const name = CBZ.cityMintName ? CBZ.cityMintName(stream, gender) : ("Cell Member " + (S.roster.length + 1));
+    const obj = {
+      _parked: true, nameKnown: true, kind: "civilian", archetype: "thug",
+      name: name, gender: gender, job: "quarry worker", wealth: 0.2, aggr: 0.85,
+      cash: 40 + Math.round(stream() * 200),
+    };
+    try { CBZ.cityPedStash(obj); } catch (e) {}
+    const m = { sid: obj._sid || ("cell_term" + (S.terms | 0)), name: name, rank: "bomber", dead: false, held: false };
+    S.roster.push(m);
+    return m;
+  }
+  function wonTerm(d, h) {
+    const S = st();
+    S.terms = (S.terms | 0) + 1;
+    const termDay = h.rec.office && h.rec.office.termDay != null ? h.rec.office.termDay : null;
+    emitEvent("reelected", { day: d, seat: h.id, terms: S.terms, termDay: termDay });
+    big("RE-ELECTED · FOUR MORE YEARS");
+    news("The count is in: " + (h.title || "the President") + " holds " + (h.rec.name || "the country") + " for a second term.");
+    const m = recruitBomber();
+    orders("Chief of Staff",
+      "Term " + S.terms + "." + (termDay != null ? " The country votes again on day " + termDay + "." : "")
+      + (m ? " The Bureau says the cell swore in a new bomber the same night." : ""), 2);
+  }
+  function lostTerm(d) {
+    const S = st();
+    emitEvent("defeated", { day: d, seat: S.lastSeatId || null, terms: S.terms | 0 });
+    big("DEFEATED AT THE BALLOT");
+    news("The count is in. The Republic has a new president.");
+    // NOT ONE WRITE TO office.holder — elections' resolve() already moved the
+    // seat, statecraft's holds() already reads empty, power.js re-reads the
+    // record, and doorOpensFor() seals the Situation Room because seat() is
+    // null. The presidency does nothing here but say so.
+    orders("Chief of Staff", "You are a private citizen. The detail stands down at midnight. The gate is no longer yours.", 2);
+  }
+  // THE SETTLE. Ordering: polity fires its onNewDay subscribers in
+  // REGISTRATION order, and elections.js is parsed at index.html:1903 against
+  // this file's :2105 — so on the vote day elections' resolve() has already
+  // run by the time our day tick reads seat(). That is not a fact worth
+  // betting a whole mode on, so this probes for it: while elections.status()
+  // still returns a live race for the seat, the count is not in and the
+  // settle is retried from the update tick on a later frame.
+  let ballotPending = false;
+  function settleBallot(d) {
+    const S = st();
+    const id = S.lastSeatId;
+    S.voteDay = null;
+    if (!id) return true;
+    if (CBZ.elections && CBZ.elections.status) {
+      let live = null;
+      try { live = CBZ.elections.status(id); } catch (e) {}
+      if (live) { S.voteDay = d; return false; }        // uncounted — try again
+    }
+    const h = seat();
+    if (h && h.id === id) wonTerm(d, h); else lostTerm(d);
+    return true;
+  }
+  // THE DAY TICK'S BALLOT HALF: announce the race when elections calls it,
+  // and settle it on the day it is counted.
+  function tickBallotDay(d) {
+    const S = st();
+    // a conviction is not a ballot — the Senate already took the seat, and
+    // §6's own arrest path owns what happens next.
+    if (S.impeached) { S.voteDay = null; S.campaignFor = null; return; }
+    const h = seat();
+    if (h) S.lastSeatId = h.id;
+    const E = electionInfo();
+    if (h && E.campaigning && E.voteDay != null && S.campaignFor !== E.voteDay) {
+      S.campaignFor = E.voteDay;
+      S.voteDay = E.voteDay;
+      const who = challengerName(h.id);
+      emitEvent("campaign", { day: d, voteDay: E.voteDay, polling: E.polling, challenger: who || null, seat: h.id });
+      // no big() here: elections.js's callElection already spent one on "YOU
+      // ARE ON THE BALLOT" this same tick. The orders line is the new thing.
+      orders("Chief of Staff",
+        "The race is called. " + (E.polling != null
+          ? "You poll " + Math.round(E.polling) + " to " + Math.round(100 - E.polling) + " against " + (who || "the challenger") + "."
+          : "You are on the ballot against " + (who || "a challenger") + ".")
+        + " Vote is day " + E.voteDay + ". Approval is the ballot: address the nation, break the cell, keep the wall standing, and do not let them hit us again.", 2);
+    }
+    if (S.voteDay != null && d >= S.voteDay) {
+      if (!settleBallot(d)) ballotPending = true;
+    }
+  }
   function arrestNow(why, title) {
     const S = st();
     S.arrestArmed = false;
@@ -1724,17 +1894,36 @@
       S.wasPresident = true;
       S.lastSeatId = h.id;
       const p = politics();
+      // ---- SCANDAL DRIFTS TOWARD TYRANNY. p.scandal is the field approval.js
+      // already reads (events -= scandal*0.1) and statecraft already writes on
+      // a corruption discovery; this is the SAME number, moved by the same
+      // day, not a second meter. See the SCANDAL_* comment at the top for why
+      // each term is there. Deterministic: every input is a system read.
+      const tyr = (CBZ.gov && CBZ.gov.tyranny) ? CBZ.gov.tyranny() : 0;
+      const attacksToday = Math.max(0, (S.attacksDone | 0) - (S.attacksSeen | 0));
+      S.attacksSeen = S.attacksDone | 0;
+      const addressed = S.lastAddressDay >= d - 1;      // spoke since yesterday's tick
+      if (p) {
+        p.scandal = clamp((p.scandal || 0) + (tyr - (p.scandal || 0)) * SCANDAL_PULL
+          + attacksToday * SCANDAL_PER_ATTACK - (addressed ? SCANDAL_ADDRESS_RELIEF : 0), 0, 100);
+      }
       const scandal = (p && p.scandal) || 0;
       const approval = h.rec.approval || 0;
       const bad = scandal >= IMPEACH_SCANDAL || (approval < IMPEACH_APPROVAL && scandal >= IMPEACH_SCANDAL_LO);
+      const numbers = "Scandal " + Math.round(scandal) + " (limit " + IMPEACH_SCANDAL
+        + "), approval " + Math.round(approval) + " (floor " + IMPEACH_APPROVAL + " while scandal is over " + IMPEACH_SCANDAL_LO + ").";
       if (bad && S.impeachDay == null) {
         S.impeachDay = d + 2;
         emitEvent("impeach", { day: S.impeachDay, scandal: scandal, approval: approval });
         big("ARTICLES OF IMPEACHMENT FILED");
-        orders("Chief of Staff", "The Capitol has the votes and the auditors have the ledgers. Two days. Bury the scandal or start packing.", 2);
+        orders("Chief of Staff", "The Capitol has the votes and the auditors have the ledgers. " + numbers
+          + " The Senate votes on day " + S.impeachDay + " — two days. Get under those numbers or start packing.", 2);
       } else if (S.impeachDay != null && !bad) {
         S.impeachDay = null;
         news("The impeachment collapses, the scandal went quiet before the vote.");
+      } else if (S.impeachDay != null && d < S.impeachDay) {
+        orders("Chief of Staff", "Impeachment vote in " + (S.impeachDay - d) + " day(s). " + numbers
+          + " An address buys " + SCANDAL_ADDRESS_RELIEF + " points back; every order given by force adds more.", 2);
       } else if (S.impeachDay != null && d >= S.impeachDay) {
         // CONVICTED. The seat moves through the record's own fields (the
         // same holder/vacuum bookkeeping regimes' restoration writes), the
@@ -1825,10 +2014,17 @@
     tickAttack(dt);
     tickRaid(dt);
     tickArrest(dt);
+    // the one-shot the ballot settle asks for when the count was not in yet
+    // (see settleBallot). Retried on a later frame; never polled otherwise.
+    if (ballotPending && settleBallot(day())) ballotPending = false;
   });
   if (CBZ.onNewDay) CBZ.onNewDay(function (d) {
     if (!on()) return;
     try { tickCellDay(d); } catch (e) { try { console.error("[presidency] cell tick failed", e); } catch (e2) {} }
+    // the ballot BEFORE the falls: on a vote day elections.js has already
+    // written the seat, so settling first means tickFallsDay reads the world
+    // the player actually woke up in (president, or private citizen).
+    try { tickBallotDay(d); } catch (e) { try { console.error("[presidency] ballot tick failed", e); } catch (e2) {} }
     try { tickFallsDay(d); } catch (e) { try { console.error("[presidency] falls tick failed", e); } catch (e2) {} }
     try { paintBoard(); } catch (e) {}
   });
@@ -1849,6 +2045,8 @@
       raidsOrdered: S.raidsOrdered | 0, raidsWon: S.raidsWon | 0, raidsLost: S.raidsLost | 0,
       impeachDay: S.impeachDay, impeached: !!S.impeached,
       wasPresident: !!S.wasPresident, lastSeatId: S.lastSeatId || null,
+      terms: S.terms | 0, voteDay: S.voteDay, campaignFor: S.campaignFor,
+      attacksSeen: S.attacksSeen | 0,
     };
   }
   function apply(obj) {
@@ -1866,6 +2064,13 @@
     S.impeachDay = obj.impeachDay != null ? obj.impeachDay : null;
     S.impeached = !!obj.impeached;
     S.wasPresident = !!obj.wasPresident; S.lastSeatId = obj.lastSeatId || null;
+    S.terms = obj.terms | 0;
+    S.voteDay = obj.voteDay != null ? obj.voteDay : null;
+    S.campaignFor = obj.campaignFor != null ? obj.campaignFor : null;
+    // a save written before the drift existed has no counter — start it at
+    // whatever has already happened, so an old blob does not price every past
+    // attack into today's scandal.
+    S.attacksSeen = obj.attacksSeen != null ? (obj.attacksSeen | 0) : (S.attacksDone | 0);
   }
   function stamp() { const led = g.cityWorld; if (led && typeof led === "object") led.pres = serialize(); }
   let _wrapsDone = false;
