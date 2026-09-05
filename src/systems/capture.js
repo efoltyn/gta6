@@ -315,11 +315,7 @@
     if (transferring || (!tiered && strike >= 3 && !campaign && restrained)) {
       // TRANSFERRED TO MAX SECURITY — the run is over. Clean up any capture
       // theatrics first so the lose screen isn't hidden under the fade.
-      escortT = 0; escorted = false;
-      if (fadeEl) fadeEl.style.opacity = "0";
-      CBZ.playerChar.cuffed = false; player.subdue = 0; player.stun = 0;
-      setCaptureState("normal", 0);
-      CBZ.playerChar.group.rotation.z = 0;
+      endEscort();
       confineT = 0; confineShown = -1;
       releasePlayerCell();        // a transferred man leaves no door of ours shut
       // TRANSFERRED, and now it means it. The tier owns the whole beat from
@@ -427,20 +423,337 @@
     return CBZ.hurtPlayer(dmg, fromX, fromZ, opts || {});
   };
 
-  // cuffed-escort: hands behind back, fade to black, wake in cell. EVERY
-  // capture path ends here now (haulToCell routes through it), so the cuffs
+  // ============================================================
+  //  THE HAUL IS A SCENE — OWNER: "goes to this stupid screen way too fast,
+  //  it should show the player getting handcuffed or at least getting tased,
+  //  I want to see my death, not get cut to this stupid screen early."
+  //
+  //  The old escort was 1.9 s long and the screen was BLACK from 0.95 s: the
+  //  fade began on the frame the cuffs flag flipped, the strike/transfer
+  //  landed at the blackout, and the TRANSFERRED card was up before a hand had
+  //  visibly touched you. On the tower/beat-down paths (haulToCell) there was
+  //  never a taser at all — you dropped and the card came.
+  //
+  //  Every haul now runs the city's arrest grammar (wanted.js: hands → cuff →
+  //  walk → ride) in the pen's own vocabulary, ON CAMERA, before any fade:
+  //
+  //    down  — you are on the floor; the nearest screws RUN to the body
+  //    tase  — a drive-stun from the lead screw if nobody tased you yet
+  //    cuff  — he kneels on you, the ties go on (restrain.js's real wrist
+  //            meshes when present), the ratchet clicks, he says so
+  //    lift  — hauled to your feet, still cuffed
+  //    walk  — marched toward your own cell door, screws one pace behind,
+  //            the lens easing round behind you
+  //    fade  — THEN the blackout. The strike/transfer lands there, in the
+  //            cuffs, exactly where it always did (the ONE place).
+  //    wake  — fade back in on the bunk, ties off (in-tier strike only; a
+  //            transfer's card is up at the blackout and this never runs)
+  //
+  //  The screws are real guards put on `_escort` duty (entities/guards.js
+  //  yields the body while the flag is set; this file steers it). No screw
+  //  alive = a short down beat and the cuffs go on anyway (the tower crew),
+  //  so a capture can never wait forever on an empty wing.
+  // ============================================================
+  const ESC = {
+    DOWN_MAX: 4.5,     // s — longest the body lies waiting for the screws
+    DOWN_ALONE: 1.2,   // s — the wait when there is nobody to run in
+    TASE: 1.0,         // s — the drive-stun on the ground
+    CUFF: 1.5,         // s — kneel + ties
+    LIFT: 1.0,         // s — up on your feet
+    WALK_MIN: 2.4,     // s — you always SEE yourself marched
+    WALK_MAX: 5.5,     // s — a far cell is walked off-screen (elevator law)
+    WALK_SPD: 1.35,    // m/s — a perp walk, not a jog
+    FADE: 1.0, WAKE: 0.9,
+    REACH: 1.45,       // m — where a screw stops to work on a body (actorcollide.js
+                       //     holds two standing bodies ~1.4 m apart; asking for less
+                       //     is a man pushed back out every frame and never "arriving")
+    SECOND_R: 30,      // m — a second screw only if he is already near; a far one
+                       //     is a man jogging into a wall for the whole scene
+  };
+  let esc = null;      // the live scene, or null
+  const lerpAng = CBZ.lerpAngle || function (a, b, t) {
+    let d = ((b - a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+    return a + d * t;
+  };
+  // screws for the haul: the two nearest guards who can walk.
+  function pickScrews() {
+    const out = [];
+    for (const gd of CBZ.guards || []) {
+      if (!gd || !gd.group || gd.dead || gd.ko > 0 || gd.asleep || gd.bribed > 0 || gd.tied || gd._escort) continue;
+      const dx = player.pos.x - gd.group.position.x, dz = player.pos.z - gd.group.position.z;
+      out.push({ gd, d2: dx * dx + dz * dz });
+    }
+    out.sort((a, b) => a.d2 - b.d2);
+    const picked = out.slice(0, 2).filter((o, i) => i === 0 || o.d2 < ESC.SECOND_R * ESC.SECOND_R);
+    return picked.map((o) => o.gd);
+  }
+  function screwUsable(gd) { return !!(gd && gd.group && !gd.dead && !(gd.ko > 0)); }
+  function releaseScrews() {
+    if (!esc) return;
+    for (const gd of esc.screws) {
+      if (!gd) continue;
+      gd._escort = false;
+      if (gd.char) gd.char.crouch = false;
+      gd.capCD = 3.0;              // he does not re-grab the man he just booked
+    }
+    esc.screws.length = 0;
+  }
+  // move a screw toward (tx,tz), stopping `stop` short of it, facing (fx,fz).
+  // Returns the distance still to go.
+  function screwStep(gd, tx, tz, stop, fx, fz, run, dt) {
+    const gp = gd.group.position;
+    const dx = tx - gp.x, dz = tz - gp.z, d = Math.hypot(dx, dz);
+    const sp = (gd.speed || 3) * (run ? 1.7 : 1.15);
+    const step = Math.max(0, Math.min(d - stop, sp * dt));
+    if (step > 0 && d > 1e-4) { gp.x += dx / d * step; gp.z += dz / d * step; }
+    // a body on the gallery is worked on at the gallery's height
+    if (d < 3) gp.y = CBZ.damp(gp.y, player.pos.y, 8, dt);
+    const ax = fx - gp.x, az = fz - gp.z;
+    if (Math.abs(ax) + Math.abs(az) > 1e-3) gd.group.rotation.y = lerpAng(gd.group.rotation.y, Math.atan2(ax, az), 1 - Math.pow(0.0005, dt));
+    if (gd.group.rotation.z !== 0) gd.group.rotation.z = CBZ.damp(gd.group.rotation.z, 0, 9, dt);
+    if (CBZ.animChar && gd.char) CBZ.animChar(gd.char, step / Math.max(dt, 1e-4), dt);
+    return Math.max(0, d - stop);
+  }
+  function flash() {
+    if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
+  }
+  function tiesOn(on) {
+    CBZ.playerChar.cuffed = !!on;
+    const R = CBZ.cityRestrain;
+    if (R && R.cuffPlayer) { try { R.cuffPlayer(!!on); } catch (e) {} }
+  }
+  // THE LENS. The pen's camera is a tight room-aware boom over your shoulder,
+  // so a scene played under it is a wall: you lie under the pivot and the
+  // screw kneels behind the camera. city/cinematics.js publishes a scripted
+  // camera channel (CBZ.cineCam) that systems/camera.js yields to outright;
+  // we write it directly — no director steps, no holster, and it hands back
+  // the moment the scene does. Two shots: a low side-on of the body with the
+  // screws arriving behind it, then a CUT to the perp walk, backing away in
+  // front of the cuffed man with the screws on his heels.
+  function camOwn() {
+    const cc = CBZ.cineCam;
+    if (!cc || (CBZ.cineBusy && CBZ.cineBusy())) return null;   // a real director has the lens
+    if (!esc.cam) {
+      esc.cam = true; cc.snap = true;
+      // systems/fpsmode.js writes the camera AFTER camera.js (always-order 52
+      // vs 50) whenever first person is on — the pen auto-drops into FP in
+      // tight rooms (CAM_TIGHT_FP) — so a scripted shot under FP is a shot
+      // nobody sees. The city director drops FP for its scenes; so do we,
+      // and hand it back with the lens.
+      esc.fpWas = !!(CBZ.fps && CBZ.fps.active);
+      if (esc.fpWas && CBZ.setFPS) { try { CBZ.setFPS(false); } catch (er) {} }
+    }
+    cc.active = true;
+    return cc;
+  }
+  function camDrop() {
+    if (!esc || !esc.cam) return;
+    esc.cam = false;
+    if (CBZ.cineCam) CBZ.cineCam.active = false;
+    if (esc.fpWas && CBZ.setFPS && !player.dead) { try { CBZ.setFPS(true); } catch (er) {} }
+    esc.fpWas = false;
+  }
+  function camGround(px, py, pz) {
+    const cc = camOwn(); if (!cc) return;
+    const e = esc;
+    cc.x = px + e.cx * 2.5; cc.y = py + 1.45; cc.z = pz + e.cz * 2.5;
+    cc.lx = px; cc.ly = py + 0.45; cc.lz = pz;
+  }
+  function camWalk(px, py, pz, hx, hz) {
+    const cc = camOwn(); if (!cc) return;
+    const sx = -hz, sz = hx;
+    cc.x = px + hx * 3.2 + sx * 1.5; cc.y = py + 1.7; cc.z = pz + hz * 3.2 + sz * 1.5;
+    cc.lx = px; cc.ly = py + 1.0; cc.lz = pz;
+  }
+  // where the walk goes: your own cell's door mouth, else the cell, else the
+  // spawn — the same "back to your cell" the blackout lands you at.
+  function walkTarget() {
+    const c = beatOn() ? playerCell() : null;
+    if (c && isFinite(+c.doorX) && isFinite(+c.doorZ)) return { x: +c.doorX, z: +c.doorZ };
+    if (c && isFinite(+c.x) && isFinite(+c.z)) return { x: +c.x, z: +c.z };
+    return CBZ.SPAWN ? { x: CBZ.SPAWN.x, z: CBZ.SPAWN.z } : { x: player.pos.x, z: player.pos.z };
+  }
+
+  // EVERY capture path ends here (haulToCell routes through it), so the cuffs
   // are always ON before applyStrike can ever say TRANSFERRED.
-  let escortT = 0, escorted = false, escortStrike = true;
   function startEscort(msg, opts) {
-    if (escortT > 0) return;
-    escortStrike = !(opts && opts.strike === false);
+    if (esc) return;
     if (CBZ.killstreakBreak) CBZ.killstreakBreak(msg || "Cuffed");
-    escortT = 1.9; escorted = false;
-    CBZ.playerChar.cuffed = true; player.stun = 2.2;
-    setCaptureState("cuffed", 1.9);
+    CBZ.playerChar.cuffed = false;
+    player.stun = 2.2;
+    setCaptureState("cuffed", 60);             // non-normal for the whole scene; escortTick keeps it alive
     tellToast(msg || "CUFFED · BACK TO YOUR CELL");
     CBZ.guards.forEach((gd) => { gd.hunt = 0; gd.alert = 0; gd.investigate = null; gd.capCD = 0; });
+    const screws = pickScrews();
+    for (const gd of screws) { gd._escort = true; gd.approach = null; }
+    let cx = Math.sin(CBZ.playerChar.group.rotation.y + Math.PI * 0.5), cz = Math.cos(CBZ.playerChar.group.rotation.y + Math.PI * 0.5);
+    if (screws[0]) {
+      const ax = player.pos.x - screws[0].group.position.x, az = player.pos.z - screws[0].group.position.z, al = Math.hypot(ax, az);
+      if (al > 0.5) { cx = ax / al; cz = az / al; }
+    }
+    esc = {
+      cam: false, cx, cz,
+      phase: "down", t: 0, total: 0,
+      strike: !(opts && opts.strike === false),
+      // a man tased on his feet (tryCapture) is not tased again on the floor
+      tased: (player.subdue || 0) >= 1,
+      tied: false, stall: 0,
+      screws, tx: 0, tz: 0, hx: 0, hz: 1,
+    };
   }
+  // tear the scene down without landing anything: a transfer card, a new run,
+  // a death, leaving play. Safe from anywhere, any number of times.
+  function endEscort() {
+    if (!esc) return;
+    camDrop();
+    releaseScrews();
+    esc = null;
+    tiesOn(false);
+    player.subdue = 0; player.stun = 0;
+    setCaptureState("normal", 0);
+    CBZ.playerChar.group.rotation.z = 0;
+    if (fadeEl) fadeEl.style.opacity = "0";
+  }
+  function escortTick(dt) {
+    const e = esc, ch = CBZ.playerChar, P = player;
+    e.t += dt; e.total += dt;
+    // nothing else may move, hit or grab you mid-scene
+    P.stun = Math.max(P.stun || 0, 0.5); g.invuln = Math.max(g.invuln || 0, 0.6);
+    P.captureT = 60; P.captureState = "cuffed";
+    // a screw shot off the scene drops out of it; the man is still cuffed
+    for (let i = e.screws.length - 1; i >= 0; i--) if (!screwUsable(e.screws[i])) { e.screws[i]._escort = false; e.screws.splice(i, 1); }
+    const lead = e.screws[0], second = e.screws[1];
+    const px = P.pos.x, pz = P.pos.z;
+    // down on whichever side the hit put you on (a tackle lands you on the other)
+    const side = ch.group.rotation.z < -0.05 ? -1 : 1;
+    const lie = () => { ch.group.rotation.z = CBZ.damp(ch.group.rotation.z, side * Math.PI / 2, 10, dt); };
+    // the second screw takes the far side of the body
+    const flank = (sx, sz, sgn) => {
+      const ax = lead ? lead.group.position.x - px : 1, az = lead ? lead.group.position.z - pz : 0;
+      const al = Math.hypot(ax, az) || 1;
+      return { x: px - az / al * 1.5 * sgn - ax / al * 0.3, z: pz + ax / al * 1.5 * sgn - az / al * 0.3 };
+    };
+
+    if (e.phase === "down") {
+      lie(); camGround(px, P.pos.y, pz);
+      let near = Infinity;
+      if (lead) near = screwStep(lead, px, pz, ESC.REACH, px, pz, true, dt);
+      if (second) { const f = flank(px, pz, 1); screwStep(second, f.x, f.z, 0.2, px, pz, true, dt); }
+      // arrived = within reach, OR he has stopped gaining on you (a body on a
+      // ledge, a wall on the straight line): the beat goes on from where he is
+      if (lead) { if (near < (e.gain == null ? Infinity : e.gain) - 0.02) { e.gain = near; e.stuck = 0; } else e.stuck = (e.stuck || 0) + dt; }
+      const arrived = lead ? (near <= 0.35 || (e.stuck > 0.8 && near < 3.0)) : false;
+      if (arrived || e.t >= (lead ? ESC.DOWN_MAX : ESC.DOWN_ALONE)) {
+        e.phase = (!e.tased && lead) ? "tase" : "cuff"; e.t = 0;
+      }
+      return;
+    }
+    if (e.phase === "tase") {
+      lie(); camGround(px, P.pos.y, pz);
+      if (!e.tased) {
+        e.tased = true;
+        // the drive-stun: the lead screw's own taser on the body, same event
+        // the standing tase fires, same body-pose signal
+        if (CBZ.taserFx && CBZ.taserFx.actorTasePlayer) { try { CBZ.taserFx.actorTasePlayer(lead); } catch (er) {} }
+        if (CBZ.sfx) { try { CBZ.sfx("tase"); } catch (er) {} }
+        if (CBZ.shake) CBZ.shake(0.55);
+        flash();
+      }
+      if (ch.body) ch.body.rotation.x += 0.28 * Math.max(0, 1 - e.t / ESC.TASE);
+      if (lead) screwStep(lead, px, pz, ESC.REACH, px, pz, false, dt);
+      if (second) { const f = flank(px, pz, 1); screwStep(second, f.x, f.z, 0.2, px, pz, false, dt); }
+      if (e.t >= ESC.TASE) { e.phase = "cuff"; e.t = 0; }
+      return;
+    }
+    if (e.phase === "cuff") {
+      lie(); camGround(px, P.pos.y, pz);
+      if (lead) { screwStep(lead, px, pz, ESC.REACH * 0.75, px, pz, false, dt); if (lead.char) lead.char.crouch = true; }
+      if (second) { const f = flank(px, pz, 1); screwStep(second, f.x, f.z, 0.2, px, pz, false, dt); }
+      if (!e.tied && e.t >= 0.45) {
+        e.tied = true;
+        tiesOn(true);
+        if (CBZ.sfx) { try { CBZ.sfx("reload"); } catch (er) {} }   // the ratchet click
+        if (lead && CBZ.prisonSay) { try { CBZ.prisonSay(lead, "Hands. Behind your back.", { secs: 2.0, rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 }); } catch (er) {} }
+      }
+      if (e.t >= ESC.CUFF) { e.phase = "lift"; e.t = 0; if (lead && lead.char) lead.char.crouch = false; }
+      return;
+    }
+    if (e.phase === "lift") {
+      camGround(px, P.pos.y, pz);
+      ch.group.rotation.z = CBZ.damp(ch.group.rotation.z, 0, 7, dt);
+      if (ch.body && ch.body.rotation.x) ch.body.rotation.x = CBZ.damp(ch.body.rotation.x, 0, 9, dt);
+      if (lead) screwStep(lead, px, pz, ESC.REACH * 0.75, px, pz, false, dt);
+      if (second) { const f = flank(px, pz, 1); screwStep(second, f.x, f.z, 0.2, px, pz, false, dt); }
+      if (e.t >= ESC.LIFT) {
+        const w = walkTarget();
+        e.tx = w.x; e.tz = w.z;
+        const dx = e.tx - px, dz = e.tz - pz, d = Math.hypot(dx, dz);
+        if (d > 0.01) { e.hx = dx / d; e.hz = dz / d; }
+        else { e.hx = Math.sin(ch.group.rotation.y); e.hz = Math.cos(ch.group.rotation.y); }
+        ch.group.rotation.z = 0;
+        if (CBZ.cineCam && e.cam) CBZ.cineCam.snap = true;      // CUT to the walk
+        e.phase = "walk"; e.t = 0;
+      }
+      return;
+    }
+    // ---- walk / fade: the march, with the blackout riding on the end of it
+    const marching = e.phase === "walk" || e.phase === "fade";
+    if (marching) {
+      const dx = e.tx - px, dz = e.tz - pz, d = Math.hypot(dx, dz);
+      // the legs follow the GROUND COVERED, never the intent: a wall between
+      // you and the door must not make a cuffed man jog on the spot
+      let moved = 0;
+      if (d > 0.6) {
+        e.hx = dx / d; e.hz = dz / d;
+        const step = Math.min(d - 0.5, ESC.WALK_SPD * dt);
+        const ox = P.pos.x, oz = P.pos.z;
+        P.pos.x += e.hx * step; P.pos.z += e.hz * step; P.vy = 0;
+        if (CBZ.collide) { try { CBZ.collide(P.pos, BODY_R, 0, 1.7); } catch (er) {} }
+        moved = Math.hypot(P.pos.x - ox, P.pos.z - oz);
+        e.stall = moved < 0.25 * step ? e.stall + dt : 0;
+      }
+      ch.group.position.copy(P.pos);
+      ch.group.rotation.y = lerpAng(ch.group.rotation.y, Math.atan2(e.hx, e.hz), 1 - Math.pow(0.002, dt));
+      ch.cuffed = true;
+      if (CBZ.animChar) CBZ.animChar(ch, moved / Math.max(dt, 1e-4), dt);
+      camWalk(P.pos.x, P.pos.y, P.pos.z, e.hx, e.hz);
+      // the lens eases round behind the march — slowly, never a locked camera
+      if (CBZ.cam) CBZ.cam.yaw = lerpAng(CBZ.cam.yaw, Math.atan2(e.hx, e.hz) + Math.PI, 1 - Math.pow(0.55, dt));
+      const back = (CBZ.cityRestrain && CBZ.cityRestrain.ESCORT_D) || 0.9;
+      if (lead) screwStep(lead, P.pos.x - e.hx * (back + 0.55), P.pos.z - e.hz * (back + 0.55), 0.02, P.pos.x + e.hx, P.pos.z + e.hz, false, dt);
+      if (second) screwStep(second, P.pos.x - e.hx * 0.6 - e.hz * 1.0, P.pos.z - e.hz * 0.6 + e.hx * 1.0, 0.02, P.pos.x + e.hx, P.pos.z + e.hz, false, dt);
+      if (e.phase === "walk") {
+        // arrived, walked long enough, or walled off: the rest is off-screen
+        if ((d <= 0.6 && e.t >= ESC.WALK_MIN) || e.t >= ESC.WALK_MAX || (e.stall > 0.7 && e.t >= 1.0)) { e.phase = "fade"; e.t = 0; }
+        return;
+      }
+      // fade
+      if (fadeEl) fadeEl.style.opacity = Math.min(1, e.t / ESC.FADE).toFixed(2);
+      if (e.t < ESC.FADE) return;
+      // ---- THE HAUL SITE — every capture (and every drag) ends at the same
+      // real door; this blackout is the ONE place a strike can land, and the
+      // player is cuffed by construction when it does.
+      camDrop(); releaseScrews();
+      if (!landInCell()) { P.pos.copy(CBZ.SPAWN); P.vy = 0; ch.group.position.copy(P.pos); }
+      g.detection = 0; g.invuln = 2.0;
+      if (e.strike) {
+        g.caughtCount++;
+        applyStrike();                            // a transfer ends the scene (and the run) in here
+        if (!esc) return;
+        if (confineT > 0) sealPlayerCell();
+      }
+      e.phase = "wake"; e.t = 0;
+      return;
+    }
+    if (e.phase === "wake") {
+      if (fadeEl) fadeEl.style.opacity = Math.max(0, 1 - e.t / ESC.WAKE).toFixed(2);
+      if (e.tied && e.t >= 0.3) { e.tied = false; tiesOn(false); }
+      if (e.t >= ESC.WAKE) endEscort();
+      return;
+    }
+    endEscort();   // unknown phase: never strand the player in a half-scene
+  }
+  CBZ.jailEscortPhase = function () { return esc ? esc.phase : null; };
 
   // orange pepper-spray sting overlay
   let sprayT = 0;
@@ -550,7 +863,7 @@
   });
   // leaving play (title / won / lost) — the shared run-lifecycle dispatcher
   if (CBZ.jailBoost && CBZ.jailBoost.onStateExit) {
-    CBZ.jailBoost.onStateExit(function () { releasePlayerCell(); confineT = 0; confineShown = -1; });
+    CBZ.jailBoost.onStateExit(function () { endEscort(); releasePlayerCell(); confineT = 0; confineShown = -1; });
   }
 
   // ============================================================
@@ -751,7 +1064,7 @@
 
     // new run? clear strike-beat leftovers before anything else ticks
     if (pollStrikeRun && pollStrikeRun()) {
-      releasePlayerCell(); muster(false);
+      endEscort(); releasePlayerCell(); muster(false);
       confineT = 0; confineShown = -1; cellWatchCD = 0; sentShown = -1; beatI = 0; beatT = 0; sentCall = "";
       beatLock = false; intakeDone = false; lastServed = -1;
     }
@@ -822,6 +1135,7 @@
     }
 
     if (player.dead) {
+      if (esc) { camDrop(); releaseScrews(); esc = null; tiesOn(false); }
       player.captureState = "dead";
       player.captureT = 0;
       player.stun = 0;
@@ -834,6 +1148,9 @@
       return;
     }
 
+    // the haul owns the body, the screws and the lens until it is done
+    if (esc) { escortTick(dt); return; }
+
     if (player.captureT > 0) {
       player.captureT -= dt;
       const prone = player.captureState === "tased" || player.captureState === "tackled" || player.captureState === "cuffed";
@@ -842,37 +1159,10 @@
         CBZ.playerChar.group.rotation.z = CBZ.damp(CBZ.playerChar.group.rotation.z, side * Math.PI / 2, 10, dt);
         if (CBZ.playerChar.body) CBZ.playerChar.body.rotation.x += player.captureState === "tased" ? 0.28 : 0.10;
       }
-      if (player.captureT <= 0 && escortT <= 0) setCaptureState("normal", 0);
+      if (player.captureT <= 0 && !esc) setCaptureState("normal", 0);
     } else if ((!player.captureState || player.captureState === "normal") && Math.abs(CBZ.playerChar.group.rotation.z) > 0.001) {
       CBZ.playerChar.group.rotation.z = CBZ.damp(CBZ.playerChar.group.rotation.z, 0, 9, dt);
       if (Math.abs(CBZ.playerChar.group.rotation.z) < 0.02) CBZ.playerChar.group.rotation.z = 0;
-    }
-
-    // drive the cuffed-escort fade sequence
-    if (escortT > 0) {
-      escortT -= dt;
-      const phase = 1.9 - escortT;
-      if (fadeEl) fadeEl.style.opacity = (phase < 0.95 ? phase / 0.95 : Math.max(0, (1.9 - phase) / 0.95)).toFixed(2);
-      if (!escorted && phase >= 0.95) {           // blackout — drop into the cell
-        escorted = true;
-        // THE HAUL SITE — every capture (and every drag) ends at the same
-        // real door; this blackout is the ONE place a strike can land, and
-        // the player is cuffed by construction when it does.
-        if (!landInCell()) { player.pos.copy(CBZ.SPAWN); player.vy = 0; }
-        g.detection = 0; g.invuln = 2.0;
-        if (escortStrike) {
-          g.caughtCount++;
-          applyStrike();                           // strike 3 / transfer ends the run here
-          if (confineT > 0) sealPlayerCell();
-        }
-      }
-      if (escortT <= 0) {
-        CBZ.playerChar.cuffed = false; player.subdue = 0; player.stun = 0;
-        setCaptureState("normal", 0);
-        CBZ.playerChar.group.rotation.z = 0;
-        if (fadeEl) fadeEl.style.opacity = "0";
-      }
-      return; // nothing else escalates mid-escort
     }
 
     // if nobody is hunting, the escalation resets (fresh start next time)

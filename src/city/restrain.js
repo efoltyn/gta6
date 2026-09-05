@@ -484,7 +484,15 @@
     "“Where are you taking me?!”",
   ];
   CBZ.onUpdate(38.5, function (dt) {
-    if (g.mode !== "city") { if (restrained.length) releaseAll(); if (PCUFF) cuffPlayer(false); return; }
+    // Outside the city the NPC restraints die with the mode. The PLAYER's ties
+    // are a different matter: systems/capture.js's haul scene puts them on in
+    // the pen (escape) and takes them off itself, so there they are posed, not
+    // cut. Every other mode still strips them.
+    if (g.mode !== "city") {
+      if (restrained.length) releaseAll();
+      if (PCUFF) { if (g.mode === "escape") posePlayerCuffs(); else cuffPlayer(false); }
+      return;
+    }
     posePlayerCuffs();
     if (!restrained.length) return;
     const P = CBZ.player;
