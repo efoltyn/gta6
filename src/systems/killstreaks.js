@@ -270,9 +270,12 @@
     // Armed = tappable. Re-armed every frame; interactions.js's TTL sweep
     // retires the pill the instant the nuke is spent, the streak breaks or the
     // run ends, so a live nuke button can never outlive the nuke.
-    if (nukeReady && !nukeUsed && CBZ.prisonPrompt &&
+    // Touch only: on a keyboard the streak callout already says "Press N".
+    // No world point — the nuke is not a thing you stand at — so the pill
+    // sits in the bottom band.
+    if (nukeReady && !nukeUsed && CBZ.prisonPrompt && onTouch() &&
         !(CBZ.buildMode && CBZ.buildMode.active)) {
-      CBZ.prisonPrompt("nuke", "@prisonNukeDetonate", "TACTICAL NUKE", null);
+      CBZ.prisonPrompt("nuke", "@prisonNukeDetonate", "TACTICAL NUKE", { key: "n" });
     }
   });
 

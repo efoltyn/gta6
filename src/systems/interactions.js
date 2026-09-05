@@ -11,137 +11,131 @@
   const { player, el, keycard, door } = CBZ;
   const g = CBZ.game;
 
-  let hintTimer = 0;
   const fadeEl = document.getElementById("fade");
 
   /* ============================================================
-     PRISON TOUCH PROMPTS — CBZ.prisonPrompt   (PRISON_TOUCH_PROMPTS)
+     THE PROMPT IS ON THE THING — CBZ.prisonPrompt
 
-     OWNER (verbatim): "there's many things on iPad where a pop will say
-     press g or shift DUH i can't do that what a dumb iPad popup."
+     OWNER (2026-09-05): "it should be like on the cell door it should say
+     to press e to close, instead of a button in middle of screen saying
+     press e to close cell. you always put the noun on the button but really
+     the noun should be what the button is on and it shouldnt say what its
+     on. sabotage power should just be sabotage."
 
-     A prompt that names a key the player does not have is a bug. The CITY
-     already cured this with CBZ.touchActionPrompt; the PRISON could not just
-     adopt it, for two reasons that are arithmetic, not taste:
+     So a prompt is a VERB pinned to a WORLD POINT. The word never names the
+     object — the object is under it. Desktop and touch render the SAME
+     element: a key chip + the verb on a keyboard, a tappable pill on a
+     touchscreen (the chip is hidden there by mobile.css's .ikey rule and the
+     pill fires touch.js's own data-tfn / data-tkey routing).
 
-     (1) touchActionPrompt RETURNS PILL HTML, and every prison prompt is
-         delivered through CBZ.showHint — which is `el.hint.textContent = t`
-         (hud.js:62). HTML lands in a textContent slot as literal <button>
-         markup. So on desktop the words still go to the hint, and on touch
-         the PILL gets its own surface here, in the very same 168px band
-         mobile.css already gives every city walk-up prompt.
+       CBZ.prisonPrompt(id, act, verb, opts)
+         id     slot key — the owner re-arms it every frame, TTL retires it
+         act    "@cbzFnName" (a POLLED verb must name a function: touch.js's
+                synthesized keydown/keyup is gone before the poll runs) or a
+                key letter for an event-driven listener
+         verb   the word. ONE verb, no noun: "Close", "Sabotage", "Crawl".
+         opts   at    {x,y,z} the thing this is about. The label floats over
+                      it. Absent = no thing (the nuke) → the bottom band.
+                key   letter the desktop chip shows for an @fn act (dflt "E")
+                hold  a hold-to-work beat (pick / saw) — the chip says HOLD
+                sub   a small second line ("to Cell Block Aisle")
+                d2    squared metres to the thing, for ONE PILL below
+                ttl   seconds without a re-arm before it goes (dflt 0.25)
 
-     (2) touch.js's touchKeyTap synthesizes keydown AND keyup back to back,
-         but every prison verb is POLLED, not event-driven: updateInteractions
-         reads `CBZ.keys["e"]` once per frame, and by the time that frame runs
-         input.js's keyup (systems/input.js:14) has already set it false. A
-         synthesized key can therefore NEVER fire a prison verb. These pills
-         fire the "@fnName" form instead — and THE KEY PATH CALLS THE SAME
-         EXPORTED FUNCTION, so a tap and a keypress cannot drift apart.
-
-     Adoption is one line at the call site: prisonPrompt REPLACES the showHint
-     the caller already wrote. Desktop and flag-off both hand back the exact
-     legacy string, so neither can change.
+     ONE PILL, THE NEAREST (owner's law 5: "fewer button popups"). Several
+     owners may arm at once — a vent beside a crate beside the breaker — and
+     exactly one is shown: the thing you are stood closest to. Losers are
+     hidden, not removed, so their owners' re-arm loops are untouched.
   ============================================================ */
-  if (CBZ.CONFIG && CBZ.CONFIG.PRISON_TOUCH_PROMPTS == null) CBZ.CONFIG.PRISON_TOUCH_PROMPTS = true;
-  const PTP = () => !CBZ.CONFIG || CBZ.CONFIG.PRISON_TOUCH_PROMPTS !== false;
+  let promptLayer = null;
+  const pills = new Map();          // id -> {wrap, el, act, verb, at, ttl, d2, seq, shown}
+  const DEFAULT_D2 = 4;
+  let pillSeq = 0;
+  const _pv = new THREE.Vector3();
 
-  // Live read, exactly like controls.js's isTouch(): CBZ.touchMode is the flag
-  // touch.js raises in enable() alongside body.touch, so a prompt built before
-  // the first touch and one built after it are each correct.
   function onTouch() {
     if (CBZ.touchMode) return true;
     try { return !!(document.body && document.body.classList.contains("touch")); } catch (e) { return false; }
   }
 
-  let pillWrap = null;
-  const pills = new Map();          // id -> {el, ttl}
-
-  function ensureWrap() {
-    if (pillWrap) return pillWrap;
-    pillWrap = document.createElement("div");
-    pillWrap.id = "prisonPrompts";
-    // The shared walk-up band (mobile.css: 168px above the safe area) — clear
-    // of #hint (206/188), the #interact card (224) and the #touch layer (z22).
-    // The CONTAINER never takes a touch; only the pills do, so the joystick
-    // and the world-tap never see one.
-    pillWrap.style.cssText =
-      "position:fixed;left:50%;transform:translateX(-50%);" +
-      "bottom:calc(168px + env(safe-area-inset-bottom,0px));z-index:24;" +
-      "display:none;flex-wrap:wrap;justify-content:center;align-items:center;" +
-      "max-width:78vw;pointer-events:none;";
-    document.body.appendChild(pillWrap);
-    return pillWrap;
+  function ensureLayer() {
+    if (promptLayer) return promptLayer;
+    promptLayer = document.createElement("div");
+    promptLayer.id = "prisonPrompts";
+    document.body.appendChild(promptLayer);
+    return promptLayer;
   }
 
-  // Build one pill to touch.js's OWN contract: class .tpill (mobile.css styles
-  // and pointer-events:auto it) carrying data-tfn / data-tkey, which touch.js's
-  // capture-phase document click handler already routes. The local listener
-  // below is only the degrade path — that capture handler stopPropagation()s,
-  // so it can never double-fire with this one.
-  function makePill(act, label) {
+  function fireAct(act) {
+    if (String(act).charAt(0) === "@") {
+      const fn = String(act).slice(1);
+      if (typeof CBZ[fn] === "function") CBZ[fn]();
+    } else if (CBZ.touchKeyTap) CBZ.touchKeyTap(String(act));
+  }
+
+  // One prompt = an anchor div (positioned) holding the pill. The pill is a
+  // <button class="tpill"> to touch.js's contract, so the capture-phase click
+  // router there fires it and the UI_SEL list keeps a tap on it from becoming
+  // a joystick press or a world tap. The local listener is the degrade path.
+  function makePill(act, verb, opts) {
+    const wrap = document.createElement("div");
+    wrap.className = "wprompt" + (opts.at ? "" : " band");
     const b = document.createElement("button");
     b.type = "button";
     b.className = "tpill";
     if (String(act).charAt(0) === "@") b.setAttribute("data-tfn", String(act).slice(1));
     else b.setAttribute("data-tkey", String(act));
-    b.textContent = label;
+    const key = document.createElement("span");
+    key.className = "ikey wkey";
+    const letter = (opts.key || (String(act).charAt(0) === "@" ? "e" : String(act))).toUpperCase();
+    key.textContent = opts.hold ? "HOLD " + letter : letter;
+    const word = document.createElement("span");
+    word.className = "wverb";
+    word.textContent = verb;
+    b.appendChild(key); b.appendChild(word);
+    if (opts.sub) {
+      const sub = document.createElement("span");
+      sub.className = "wsub";
+      sub.textContent = opts.sub;
+      b.appendChild(sub);
+    }
     b.addEventListener("click", function (e) {
       e.preventDefault(); e.stopPropagation();
-      const fn = b.getAttribute("data-tfn");
-      if (fn) { if (typeof CBZ[fn] === "function") CBZ[fn](); return; }
-      if (CBZ.touchKeyTap) CBZ.touchKeyTap(b.getAttribute("data-tkey"));
+      fireAct(act);
     });
-    return b;
+    wrap.appendChild(b);
+    return wrap;
   }
 
-  /* Show / refresh one prompt slot.
-       id       slot key — several prompts may coexist without clobbering
-       act      "@cbzFnName" (required for POLLED verbs) or "e" (event-driven)
-       label    the worded verb the pill shows — never a key glyph
-       desktop  the exact legacy hint string (null = caller draws its own text)
-       ttl      seconds the pill survives without a refresh (callers re-arm it
-                every frame, exactly like the hintTimer they already run)
-       d2       OPTIONAL squared metres from the player to the thing this
-                prompt is about. See ONE PILL below.
-     Returns true when the pill took the prompt (touch), false on desktop. */
-  const DEFAULT_D2 = 4;
-  let pillSeq = 0;
-  function prisonPrompt(id, act, label, desktop, ttl, d2) {
-    if (!PTP() || !onTouch() || !act) {
-      if (desktop != null) CBZ.showHint(desktop);
-      return false;
-    }
+  function prisonPrompt(id, act, verb, opts) {
+    if (!act || !verb) return false;
+    opts = opts || {};
+    const sig = act + "|" + verb + "|" + (opts.sub || "") + "|" + (opts.hold ? 1 : 0) + "|" + (opts.at ? 1 : 0);
     let p = pills.get(id);
-    if (!p || p.act !== act || p.label !== label) {
-      if (p && p.el.parentNode) p.el.parentNode.removeChild(p.el);
-      p = { el: makePill(act, label), act: act, label: label, ttl: 0, d2: 0, seq: 0 };
+    if (!p || p.sig !== sig) {
+      if (p && p.wrap.parentNode) p.wrap.parentNode.removeChild(p.wrap);
+      p = { wrap: makePill(act, verb, opts), sig: sig, ttl: 0, d2: 0, seq: 0, at: null, shown: null };
       pills.set(id, p);
-      ensureWrap().appendChild(p.el);
+      ensureLayer().appendChild(p.wrap);
     }
-    p.ttl = ttl || 0.25;
+    p.at = opts.at || null;
+    p.ttl = opts.ttl || 0.25;
     // Unranked callers sit at 2 m — the range nearly every prison prompt arms
-    // itself at — so a site that never learns about d2 still competes fairly
-    // and is never permanently outranked by one that does.
-    p.d2 = (d2 == null || !isFinite(d2)) ? DEFAULT_D2 : d2;
+    // itself at — so a site that never learns about d2 still competes fairly.
+    p.d2 = (opts.d2 == null || !isFinite(opts.d2)) ? DEFAULT_D2 : opts.d2;
     p.seq = ++pillSeq;
-    pillWrap.style.display = "flex";
+    promptLayer.classList.add("on");
     return true;
   }
 
-  /* ---- ONE PILL, THE NEAREST -----------------------------------------------
-     OWNER'S LAW 5: "Fewer button popups on both desktop and touch, not more."
-     Desktop has enforced that for free since this block was written — every
-     desktop prompt is CBZ.showHint, which is one DOM node where the last
-     writer wins. TOUCH had no such floor: #prisonPrompts is a flex-WRAP row
-     and every id got its own pill, so standing on a vent beside a dropped
-     pistol next to the breaker built a three-button wall across the bottom of
-     an iPad — the exact chrome the pill row was invented to stop.
+  function prisonPromptClear(id) {
+    const p = pills.get(id);
+    if (!p) return;
+    if (p.wrap.parentNode) p.wrap.parentNode.removeChild(p.wrap);
+    pills.delete(id);
+    if (promptLayer && !pills.size) promptLayer.classList.remove("on");
+  }
 
-     The arbitration is the one a walk-up prompt has always implied: the
-     thing you are STOOD ON is the thing you meant. Losers are hidden rather
-     than removed, so their owners' TTL re-arm loops are untouched and the
-     winner can change on any frame without a DOM rebuild. */
   function arbitrate() {
     let best = null;
     pills.forEach(function (p) {
@@ -149,61 +143,86 @@
     });
     pills.forEach(function (p) {
       const show = p === best;
-      if (p._shown === show) return;
-      p._shown = show;
-      p.el.style.display = show ? "" : "none";
+      if (p.shown !== show) { p.shown = show; p.wrap.style.display = show ? "" : "none"; }
     });
     return best;
   }
 
-  function prisonPromptClear(id) {
-    const p = pills.get(id);
-    if (!p) return;
-    if (p.el.parentNode) p.el.parentNode.removeChild(p.el);
-    pills.delete(id);
-    if (pillWrap && !pills.size) pillWrap.style.display = "none";
+  /* Pin the shown prompt over its thing: project the world point through the
+     LIVE camera (camera.js updates it at always-order 50; this runs at 96).
+     A point behind the camera hides the label — a prompt is for what you are
+     facing. A point in front but off the edge is clamped to a margin, the
+     way a marker is, so a door at your shoulder still tells you it is there. */
+  const EDGE = 0.06;
+  function placePrompt(p) {
+    if (!p.at) return;
+    const cam = CBZ.camera;
+    if (!cam) return;
+    _pv.set(p.at.x, p.at.y, p.at.z).project(cam);
+    if (_pv.z > 1) { p.wrap.style.visibility = "hidden"; return; }
+    const w = window.innerWidth || 800, h = window.innerHeight || 600;
+    const nx = Math.max(-1 + EDGE * 2, Math.min(1 - EDGE * 2, _pv.x));
+    const ny = Math.max(-1 + EDGE * 3, Math.min(1 - EDGE * 2, _pv.y));
+    const sx = Math.round((nx * 0.5 + 0.5) * w), sy = Math.round((-ny * 0.5 + 0.5) * h);
+    if (p._sx !== sx || p._sy !== sy) {
+      p._sx = sx; p._sy = sy;
+      p.wrap.style.left = sx + "px";
+      p.wrap.style.top = sy + "px";
+    }
+    p.wrap.style.visibility = "";
   }
 
-  // TTL sweep — a prompt whose owner stopped re-arming it goes away, and the
-  // whole row stands down outside a live prison run (a prison pill must never
-  // survive into the city, a pause or a death screen).
+  // TTL sweep + placement. A prompt whose owner stopped re-arming it goes
+  // away, and the whole layer stands down outside a live prison run (a prison
+  // prompt must never survive into the city, a pause or a death screen).
   CBZ.onAlways(96, function (dt) {
     if (!pills.size) return;
     const gm = CBZ.game;
-    const dead = !gm || gm.mode === "city" || gm.state !== "playing" || !PTP() || !onTouch();
+    const dead = !gm || gm.mode === "city" || gm.state !== "playing";
     const ids = [];
     pills.forEach(function (p, id) {
       p.ttl -= dt;
       if (dead || p.ttl <= 0) ids.push(id);
     });
     for (let i = 0; i < ids.length; i++) prisonPromptClear(ids[i]);
-    if (pills.size) arbitrate();
+    if (!pills.size) return;
+    const best = arbitrate();
+    if (best) placePrompt(best);
   });
 
   CBZ.prisonPrompt = prisonPrompt;
   CBZ.prisonPromptClear = prisonPromptClear;
+  CBZ.prisonPromptShown = function () {
+    let out = null;
+    pills.forEach(function (p, id) {
+      if (p.shown) out = { id: id, verb: p.wrap.querySelector(".wverb").textContent, sub: (p.wrap.querySelector(".wsub") || {}).textContent || "",
+        key: p.wrap.querySelector(".wkey").textContent, anchored: !!p.at, x: p._sx, y: p._sy };
+    });
+    return out;
+  };
 
   /* ---- ratchet -------------------------------------------------------------
      Boot-stable by construction: every owning file DECLARES its site at load
      into a plain array (order-independent — killstreaks.js loads BEFORE this
      file), so the count never depends on the player having walked to a
      breaker. `legacy` is the number of prison prompts still naming a keyboard
-     key on a touch screen and may only ever go DOWN.
-       pilled   — sites that gained a tappable pill
-       textOnly — sites whose key glyph was removed but whose ACTION already had
-                  a touch surface (a reload button, a verb dock, a Done button),
-                  so a second pill would be duplicate chrome. */
+     key on a touch screen and may only ever go DOWN. `nouned` is the number of
+     LIVE prompts whose verb carries a noun ("Close cell", "Sabotage Power")
+     and must stay 0. */
+  const NOUN_RE = /\b(the|your|a|an|power|door|cell|lock|racks|crate|padlock|safe|vent|hatch)\b/i;
   CBZ.prisonPromptAudit = function () {
     const s = CBZ._prisonPromptSites || [];
     const pilled = [], textOnly = [];
     for (let i = 0; i < s.length; i++) (s[i].act ? pilled : textOnly).push(s[i].id);
-    // `shown` is the ONE PILL ratchet: however many prompts are live, at most
-    // one may be on screen. It can only ever be 0 or 1.
-    let shown = 0;
-    pills.forEach(function (p) { if (p._shown) shown++; });
+    let shown = 0, nouned = 0, anchored = 0;
+    pills.forEach(function (p) {
+      if (p.shown) shown++;
+      if (p.at) anchored++;
+      if (NOUN_RE.test(p.wrap.querySelector(".wverb").textContent)) nouned++;
+    });
     return {
       sites: s.length, pilled: pilled.length, textOnly: textOnly.length,
-      legacy: 0, live: pills.size, shown: shown, touch: onTouch(),
+      legacy: 0, live: pills.size, shown: shown, anchored: anchored, nouned: nouned, touch: onTouch(),
       pilledIds: pilled, textOnlyIds: textOnly,
     };
   };
@@ -368,8 +387,7 @@
       latched: latched, closeable: closeable, rows: rows };
   };
 
-  // The polled half. Runs from updateInteractions so it shares the one hint
-  // slot and the one hintTimer every other prison verb already writes.
+  // The polled half. Runs from updateInteractions.
   let doorKeyWas = false;
   function doorCloseKey() {
     // updateInteractions runs in the CITY too (its mode gate is the win check
@@ -380,12 +398,12 @@
     const down = !!(CBZ.keys && CBZ.keys["e"]);
     const s = nearestDoor(true, DOOR_KEY_REACH, true);
     if (s) {
-      /* TOUCH GETS NO PILL, ON PURPOSE. The owner asked for this verb as a
-         TAP ON THE DOOR ("no button needed"), and systems/touch.js's tapWorld
-         fires the very doorAct() this key does. A pill here would be exactly
-         the chrome LAW 5 ("fewer button popups") forbids, and it would fight
-         the vent/breaker pills for the one arbitrated slot. */
-      if (!onTouch()) { CBZ.showHint("Press [E] to close " + (s.label || "the door")); hintTimer = 0.2; }
+      /* THE WORD IS ON THE DOOR: "[E] Close" pinned over the leaf itself, so
+         nothing has to say WHICH door. TOUCH GETS NO PILL, ON PURPOSE: the
+         owner asked for this verb as a TAP ON THE DOOR ("no button needed"),
+         and systems/touch.js's tapWorld fires the very doorAct() this key
+         does — a pill would be the chrome LAW 5 forbids. */
+      if (!onTouch()) CBZ.prisonPrompt("door", "@prisonDoorCloseNearest", "Close", { at: doorPoint(s), d2: doorD2(s) });
       // EDGE-TRIGGERED, unlike every other polled prison verb: this one acts
       // on a door whose auto-open is still live, so a held key would flap the
       // leaf open/shut at 60 Hz.
@@ -489,6 +507,20 @@
       lamp.material.color.setHex(0xff3b3b);
       lamp.material.emissive.setHex(0xff0000);
     }
+  }
+
+  // Where a prompt HANGS: the face of the breaker box (CBZ.breaker.x/z is the
+  // stand spot 0.7 m in front of it, world/props.js), and a hand's height
+  // over a grate. Cheap objects, built per frame only while a prompt is live.
+  function breakerPoint() {
+    const b = CBZ.breaker;
+    const box = b && b.box;
+    if (box && box.position) return { x: box.position.x, y: box.position.y + 0.35, z: box.position.z };
+    return { x: b.x, y: 2.0, z: b.z - 0.7 };
+  }
+  function ventPoint(v) {
+    const g = v.grate;
+    return { x: g ? g.x : v.x, y: (v.y || 0.1) + 0.55, z: g ? g.z : v.z };
   }
 
   function updateInteractions(dt) {
@@ -601,9 +633,9 @@
       } else {
         const bdx = player.pos.x - breaker.x, bdz = player.pos.z - breaker.z;
         if (bdx * bdx + bdz * bdz < 1.8) {
-          CBZ.prisonPrompt("breaker", "@prisonSabotagePower", "Sabotage Power",
-            "Press [E] to Sabotage Power", 0.25, bdx * bdx + bdz * bdz);
-          hintTimer = 0.2;
+          // "Sabotage", over the box. The box is the noun.
+          CBZ.prisonPrompt("breaker", "@prisonSabotagePower", "Sabotage",
+            { at: breakerPoint(), d2: bdx * bdx + bdz * bdz });
           if (CBZ.keys && CBZ.keys["e"]) sabotagePower();
         }
       }
@@ -681,9 +713,10 @@
           armedVent = vent;                       // what a pill tap would enter
           armedVentT = 0.25;
           if (player.crouch) {
-            CBZ.prisonPrompt("vent", "@prisonVentCrawl", "Crawl to " + vent.dest.name,
-              `Press [E] to Crawl to ${vent.dest.name}`, 0.25, vd2);
-            hintTimer = 0.2;
+            // "Crawl" over the grate; where it goes is the one thing the
+            // grate itself cannot show, so it rides as the small second line.
+            CBZ.prisonPrompt("vent", "@prisonVentCrawl", "Crawl",
+              { at: ventPoint(vent), sub: "to " + vent.dest.name, d2: vd2 });
             if (CBZ.keys && CBZ.keys["e"]) crawlVent(vent);
           } else {
             // FOUND BY READING: this said "Crouch [Shift]" for its whole life
@@ -694,12 +727,10 @@
             // is the one mode stanceRoute() refuses (touch.js:761), so crouch
             // falls back to touch.js's PRIVATE crouchLatch — an unlabelled
             // press-the-stick gesture with no exported API. The pill therefore
-            // performs the stance and the crawl as one act.
-            // The corrected key name is FLAG-GATED, so PRISON_TOUCH_PROMPTS=false
-            // restores the legacy (wrong) string byte-for-byte.
-            CBZ.prisonPrompt("vent", "@prisonVentCrawl", "Crouch & Crawl to " + vent.dest.name,
-              PTP() ? "Crouch [C] to enter vent / hatch" : "Crouch [Shift] to enter vent / hatch", 0.25, vd2);
-            hintTimer = 0.2;
+            // performs the stance and the crawl as one act — so on touch it
+            // says "Crawl"; on a keyboard it names the key you actually need.
+            CBZ.prisonPrompt("vent", "@prisonVentCrawl", onTouch() ? "Crawl" : "Crouch",
+              { at: ventPoint(vent), key: "c", sub: "to " + vent.dest.name, d2: vd2 });
           }
         }
       }
@@ -708,9 +739,6 @@
 
     // ---- shut it behind you (every registered door, one implementation) ----
     doorCloseKey();
-
-    // hint fade-out
-    if (hintTimer > 0) { hintTimer -= dt; if (hintTimer <= 0) CBZ.hideHint(); }
 
     // ---- win ---- (escape-mode only, and role-gated: only the ESCAPING role
     // wins by crossing the wire. A cop reaching the gate is just on shift —
@@ -739,8 +767,9 @@
 
   // ---- ratchet declarations (see CBZ.prisonPromptAudit) ----
   (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
-    { id: "breaker", act: "@prisonSabotagePower", was: "Press [E] to Sabotage Power" },
-    { id: "vent", act: "@prisonVentCrawl", was: "Press [E] to Crawl to … / Crouch [Shift] to enter vent" }
+    { id: "breaker", act: "@prisonSabotagePower", was: "Press [E] to Sabotage Power", now: "Sabotage, over the box" },
+    { id: "vent", act: "@prisonVentCrawl", was: "Press [E] to Crawl to … / Crouch [Shift] to enter vent", now: "Crawl, over the grate" },
+    { id: "door", act: "@prisonDoorCloseNearest", was: "Press [E] to close your cell door", now: "Close, over the leaf" }
   );
 
   CBZ.updateInteractions = updateInteractions;

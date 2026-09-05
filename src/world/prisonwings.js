@@ -833,7 +833,7 @@
     const has = !!(econ && econ.hasItem && econ.hasItem("Lockpick"));
     const pid = d.id;
     if (!has) { if (CBZ.prisonPromptClear) CBZ.prisonPromptClear(pid); d.picked = 0; tell(d, 0, 0); return; }
-    if (CBZ.prisonPrompt) CBZ.prisonPrompt(pid, "e", "Pick the lock", null);
+    if (CBZ.prisonPrompt) CBZ.prisonPrompt(pid, "e", "Pick", { at: { x: d.x, y: 1.5, z: d.z }, hold: true });
     const working = !!(CBZ.keys && CBZ.keys.e);
     if (!working) { d.picked = Math.max(0, (d.picked || 0) - dt * 1.6); tell(d, d.picked / d.pick, 0); return; }
     d.picked = (d.picked || 0) + dt;
@@ -937,7 +937,8 @@
     if (!RELEASE.thrown) {
       const dx = P.x - RELEASE.x, dz = P.z - RELEASE.z;
       if (dx * dx + dz * dz < 5.0) {
-        if (CBZ.prisonPrompt) CBZ.prisonPrompt("prison-control-console", "e", "Throw the racks", "Throw the racks");
+        // "Throw", over the release lamp: the racks are the console you stand at.
+        if (CBZ.prisonPrompt) CBZ.prisonPrompt("prison-control-console", "e", "Throw", { at: { x: RELEASE.x, y: 1.7, z: RELEASE.z }, d2: dx * dx + dz * dz });
         if (CBZ.keys && CBZ.keys.e) throwEverything();
       } else if (CBZ.prisonPromptClear) CBZ.prisonPromptClear("prison-control-console");
     }

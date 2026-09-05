@@ -1012,13 +1012,11 @@
     const econ = CBZ.econ;
     const has = !!(econ && econ.hasItem && econ.hasItem("Lockpick"));
     if (!has) { if (CBZ.prisonPromptClear) CBZ.prisonPromptClear(promptId); target.picked = 0; tell(target, 0, 0); return; }
-    // The prompt is the TOUCH pill only (desktop arg null → systems/
-    // interactions.js prints nothing). What tells a desktop player is the
-    // world: the lock's own status lamp goes amber the moment you are stood
-    // at a lock your pick will actually open, and it beats faster the further
-    // through the shackle you are. That is the security-camera dot metaphor
-    // applied to a door, and it is the entire readout.
-    if (CBZ.prisonPrompt) CBZ.prisonPrompt(promptId, "e", target === SAFE ? "Pick the safe" : "Pick the lock", null);
+    // "Pick", held, pinned over the lock itself. The lock's own status lamp
+    // still goes amber at a lock your pick will open and beats faster the
+    // further through the shackle you are — that is the progress readout.
+    if (CBZ.prisonPrompt) CBZ.prisonPrompt(promptId, "e", "Pick",
+      { at: { x: target.x, y: target === SAFE ? 1.15 : 1.5, z: target.z }, hold: true });
     const working = !!(CBZ.keys && CBZ.keys.e);
     if (!working) { target.picked = Math.max(0, (target.picked || 0) - dt * 1.6); tell(target, target.picked / secs, 0); return; }
     target.picked = (target.picked || 0) + dt;

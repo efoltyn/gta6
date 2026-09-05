@@ -340,16 +340,16 @@
     if (_promptT >= 1 / 12) {
       _promptT = 0;
       const ct = crateNear();
-      // PRISON_TOUCH_PROMPTS: "[E]" is unactionable on a touchscreen, and this
-      // chip is a textContent slot (chipText, line 150) so pill HTML cannot go
-      // in it. On touch the prompt becomes a real pill in the shared band.
-      // Unlike the polled prison verbs this one can fire the PLAIN "e" key:
-      // onKey below is a genuine document keydown listener, so touch.js's
-      // synthesized KeyboardEvent reaches it.
-      const pilled = !!(ct && CBZ.prisonPrompt &&
-        CBZ.prisonPrompt("crate", "e", "Pry the crate open", null));
-      if (!ct && CBZ.prisonPromptClear) CBZ.prisonPromptClear("crate");
-      chipText(pilled ? null : (ct ? "[E] Pry the crate open" : null));
+      // THE WORD SITS ON THE LID: "Pry open" pinned over the crate itself
+      // (systems/interactions.js prisonPrompt — key chip on a keyboard, a
+      // tappable pill on touch). Unlike the polled prison verbs this one can
+      // fire the PLAIN "e" key: onKey below is a genuine document keydown
+      // listener, so touch.js's synthesized KeyboardEvent reaches it.
+      if (ct && CBZ.prisonPrompt) {
+        CBZ.prisonPrompt("crate", "e", "Pry open",
+          { at: { x: ct.x, y: ct.s + 0.15, z: ct.z }, d2: (P.pos.x - ct.x) ** 2 + (P.pos.z - ct.z) ** 2 });
+      } else if (CBZ.prisonPromptClear) CBZ.prisonPromptClear("crate");
+      chipText(null);
     }
   });
 

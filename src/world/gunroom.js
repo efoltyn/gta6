@@ -966,7 +966,8 @@
               // owns the shared prison pill band, so adopt it if it is there.
               // Degrade-safe: with no touch layer this is a no-op and the
               // polled key above is still the whole interaction.
-              if (saw && CBZ.prisonPrompt) CBZ.prisonPrompt("gunroom-cage", "e", "Saw the padlock", null);
+              // "Saw", held, over the padlocked leaf. The cage is the noun.
+              if (saw && CBZ.prisonPrompt) CBZ.prisonPrompt("gunroom-cage", "e", "Saw", { at: { x: 23.40, y: 1.55, z: -1.55 }, hold: true });
               else if (CBZ.prisonPromptClear) CBZ.prisonPromptClear("gunroom-cage");
               if (saw && pressing) {
                 inner.saw += dt;
@@ -1003,10 +1004,10 @@
                   // raised above already says "Saw the padlock" in words —
                   // so on touch the sentence keeps the FACT and drops the
                   // instruction, exactly as crates.js/prisondrops.js do.
-                  const pilled = saw && CBZ.touchMode && CBZ.prisonPrompt;
+                  // The instruction is on the padlock now (the prompt above);
+                  // the sentence keeps only the fact.
                   tellHint(saw
-                    ? (pilled ? "Padlocked. That blade will go through it."
-                              : "Padlocked. Hold [E] to saw through it.")
+                    ? "Padlocked. That blade will go through it."
                     : "Padlocked, the Warden has that key. Or find something that cuts.", 1.5);
                 }
               }
