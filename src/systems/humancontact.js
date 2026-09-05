@@ -225,10 +225,22 @@
     blocks++;
   }
 
+  /* SQUARED UP MEANS AT ARM'S LENGTH. Two body radii put a man's centre 0.74 m
+     from yours; his fight stance leans the head a third of a metre forward
+     of that and the first-person eye sits ON your centre, so a man jumping
+     you in the yard put his skull inside the 0.1 m near plane — "their head
+     at the top, I see through it". A man who is fighting you holds fist
+     range instead: +0.16 m on the pair. The swing (1.9 m) still lands. */
+  const FIGHT_GAP = 0.16;
+  function fightingYou(a) {
+    return !!(a && !isPlayer(a) && ((a.huntPlayer || 0) > 0 || (a.char && a.char.fightStance)));
+  }
   function separatePair(A, B, mode) {
     const ap = posOf(A), bp = posOf(B); if (!ap || !bp) return;
     let dx = bp.x - ap.x, dz = bp.z - ap.z;
-    const min = radiusOf(A) + radiusOf(B), d2 = dx * dx + dz * dz;
+    let min = radiusOf(A) + radiusOf(B);
+    if (mode === "escape" && (isPlayer(A) ? fightingYou(B) : (isPlayer(B) && fightingYou(A)))) min += FIGHT_GAP;
+    const d2 = dx * dx + dz * dz;
     if (d2 >= min * min) return;
     let d;
     if (d2 <= 1e-8) {
@@ -269,6 +281,48 @@
       }
     }
     if (opts.clamp) for (let i = 0; i < list.length; i++) opts.clamp(list[i]);
+    /* YOUR BACK IS TO THE WALL. blockPlayer above moves the PLAYER 88% of the
+       overlap and the other body 12%, which is right in the open — you walked
+       into him — and wrong against a wall: the clamp puts you straight back
+       into him and he yields 12% a frame, so a man pushing you into a cell
+       corner ended the frame with his chest in your lens. Close the residual
+       on HIM after the clamp (and on you only if he is pinned too). */
+    for (let i = 0; i < list.length; i++) {
+      const P = list[i]; if (!isPlayer(P)) continue;
+      const pp = posOf(P); if (!pp) continue;
+      const gx = grid.cellIndex(pp.x), gz = grid.cellIndex(pp.z);
+      for (let cx = gx - 1; cx <= gx + 1; cx++) for (let cz = gz - 1; cz <= gz + 1; cz++) {
+        const bucket = grid.bucket(cx, cz); if (!bucket) continue;
+        for (let k = 0; k < bucket.length; k++) {
+          const H = bucket[k]; if (H === P || isPlayer(H)) continue;
+          const hp = posOf(H); if (!hp) continue;
+          if (Math.abs((hp.y || 0) - (pp.y || 0)) > 1.6) continue;
+          let min = radiusOf(P) + radiusOf(H);
+          if (mode === "escape" && fightingYou(H)) min += FIGHT_GAP;
+          let dx = hp.x - pp.x, dz = hp.z - pp.z, d = Math.hypot(dx, dz);
+          if (d >= min) continue;
+          if (d < 1e-4) { dx = 1; dz = 0; d = 1; }
+          hp.x += (dx / d) * (min - d); hp.z += (dz / d) * (min - d);
+          if (opts.clamp) opts.clamp(H);
+          dx = hp.x - pp.x; dz = hp.z - pp.z; d = Math.hypot(dx, dz) || 1;
+          if (d < min) { pp.x -= (dx / d) * (min - d); pp.z -= (dz / d) * (min - d); if (opts.clamp) opts.clamp(P); }
+          // both pinned (you between a wall and him): he slides SIDEWAYS along
+          // the wall instead of staying in your chest — try either tangent
+          dx = hp.x - pp.x; dz = hp.z - pp.z; d = Math.hypot(dx, dz) || 1;
+          if (d < min - 0.02) {
+            const need = Math.sqrt(Math.max(0, min * min - d * d)) + 0.01;
+            const tx = -dz / d, tz = dx / d, hx0 = hp.x, hz0 = hp.z;
+            hp.x = hx0 + tx * need; hp.z = hz0 + tz * need;
+            if (opts.clamp) opts.clamp(H);
+            if (Math.hypot(hp.x - pp.x, hp.z - pp.z) < min - 0.02) {
+              hp.x = hx0 - tx * need; hp.z = hz0 - tz * need;
+              if (opts.clamp) opts.clamp(H);
+            }
+          }
+        }
+      }
+      break;
+    }
   }
 
   // Compact equivalent for the typed-array prison crowd. This performs the

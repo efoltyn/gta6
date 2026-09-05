@@ -50,6 +50,60 @@
     stab:       { dmg: 13, roll: 8, stun: 0.34, shake: 0.32, push: 0.30 },
   };
 
+  /* THE BLOW LANDS ON THE FIST'S FRAME, AND A CROWD TAKES TURNS.
+
+     Two things made "fight a group and they freeze you" true, and both lived
+     in the swing below:
+
+       · the hit was billed on the WIND-UP frame. `hurtPlayer` fired on the
+         same line that set `punchT`, so you were hurt 0.12 s before the fist
+         moved, nothing you did to him in that window mattered, and a man you
+         floored mid-swing still landed the punch he had not thrown yet;
+       · every man swung on his own 1.0 s clock. Three men = a hit every
+         0.33 s, each one re-arming a 0.42-0.72 s full input lock — the lock
+         never expired. That was the freeze.
+
+     `_blow` is the pending strike: it lands `t` seconds after the swing
+     starts (the rig's drive peak — character.js's `drive` maxes at prog
+     0.43), and only if he is still in reach and nobody cut the swing
+     (systems/combat.js nulls `_blow` when your fist lands first). The
+     swing log is the attack token every brawler game ends up with: at most
+     two men are inside a swing beat at once, the rest circle. */
+  const SWING_WINDOW = 0.5, SWING_SLOTS = 2;
+  const _swingLog = [];
+  function swingCrowded(n) {
+    const now = (CBZ.now || 0) / 1000;
+    let k = 0;
+    for (let i = _swingLog.length - 1; i >= 0; i--) {
+      const e = _swingLog[i];
+      if (e.until <= now || !alive(e.n)) { _swingLog.splice(i, 1); continue; }
+      if (e.n !== n) k++;
+    }
+    return k >= SWING_SLOTS;
+  }
+  function logSwing(n) { _swingLog.push({ n, until: (CBZ.now || 0) / 1000 + SWING_WINDOW }); }
+  function landBlow(n, B) {
+    const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
+    const d = Math.hypot(px - n.group.position.x, pz - n.group.position.z);
+    // you stepped out of it: a whiff, which is what a fight is mostly made of
+    if (d > 2.15 || CBZ.player.dead) return false;
+    n.group.rotation.y = Math.atan2(px - n.group.position.x, pz - n.group.position.z);
+    if (CBZ.hurtPlayer) {
+      CBZ.hurtPlayer(B.swing, n.group.position.x, n.group.position.z,
+        { melee: true, stun: B.M.stun, heat: 4, shake: B.M.shake,
+          sfx: B.stabbing ? "hit" : "punch", by: n });
+    }
+    // A LANDED PUNCH MOVES YOU. `CBZ.knockback` is deliberately NOT used:
+    // it reads `actor.group.position`, and the player is a `pos` vector
+    // with no group — calling it here would throw on every blow. The shove
+    // is the same two lines against the surface the player actually has.
+    const kx = px - n.group.position.x, kz = pz - n.group.position.z;
+    const kd = Math.hypot(kx, kz) || 1;
+    CBZ.player.pos.x += (kx / kd) * B.M.push;
+    CBZ.player.pos.z += (kz / kd) * B.M.push;
+    return true;
+  }
+
   /* ============================================================
      SHOW DON'T TELL — THE ONE NARRATION SINK (JAIL_SHOW_DONT_TELL).
 
@@ -4831,7 +4885,14 @@
       // he SQUARES UP inside striking range — the wind-up is the telegraph, and
       // it is what the printed line used to stand in for.
       if (n.char) n.char.fightStance = d < 3.4;
-      if (d < 1.9 && n.hitCD <= 0) {
+      // the blow in flight lands on its own frame (see landBlow above)
+      if (n._blow) {
+        n._blow.t -= dt;
+        if (n._blow.t <= 0) { const B = n._blow; n._blow = null; landBlow(n, B); }
+      }
+      if (d < 1.9 && n.hitCD <= 0 && !n._blow) {
+        // two men are already swinging: he waits his turn and keeps his feet
+        if (swingCrowded(n)) { n.hitCD = 0.22 + rng() * 0.30; return n.baseSpeed * 1.5; }
         n.hitCD = 1.0;
         n.jumpBlows = (n.jumpBlows || 0) + 1;
         /* THE GRAB IS RARE NOW, AND THAT IS THE POINT (owner, verbatim: "in
@@ -4923,10 +4984,6 @@
         }
         // face him at you so the fist travels the right way
         n.group.rotation.y = Math.atan2(px - n.group.position.x, pz - n.group.position.z);
-        // AND YOUR HEALTH GOES DOWN. Routed through the mode's own damage entry
-        // so a beating can put you on the floor exactly like a bullet does.
-        // Being shanked is roughly twice being punched, and it is meant to be:
-        // the answer to a man with a blade is not to trade blows with him.
         /* AND EACH ONE COSTS SOMETHING DIFFERENT, or the vocabulary above is
            choreography over one number. These are the honest relationships:
            an elbow is short and sharp (less damage than a hook, more stun
@@ -4944,30 +5001,17 @@
            genuinely bigger or smaller than you. */
         const swing = (M.dmg + rng() * M.roll) *
           (CBZ.meleeScale ? CBZ.meleeScale(n, CBZ.player) : 1);
-        if (CBZ.hurtPlayer) {
-          CBZ.hurtPlayer(swing, n.group.position.x, n.group.position.z,
-            { melee: true, stun: M.stun, heat: 4, shake: M.shake,
-              sfx: stabbing ? "hit" : "punch", by: n });
-        } else {
-          CBZ.player.hp = (CBZ.player.hp == null ? 100 : CBZ.player.hp) - swing;
-          CBZ.player.stun = Math.max(CBZ.player.stun || 0, 0.5);
-          CBZ.addHeat(4);
-          CBZ.sfx("punch");
-        }
-        // A LANDED PUNCH MOVES YOU. `CBZ.knockback` is deliberately NOT used:
-        // it reads `actor.group.position`, and the player is a `pos` vector
-        // with no group — calling it here would throw on every blow. The shove
-        // is the same two lines against the surface the player actually has.
-        const kx = CBZ.player.pos.x - n.group.position.x, kz = CBZ.player.pos.z - n.group.position.z;
-        const kd = Math.hypot(kx, kz) || 1;
-        CBZ.player.pos.x += (kx / kd) * M.push;
-        CBZ.player.pos.z += (kz / kd) * M.push;
+        // the fist arrives on the rig's drive peak, not on this frame
+        const flight = kick ? (n.char ? n.char.kickDur : 0.42) * 0.45
+          : (n.char ? n.char.punchDur : 0.28) * 0.43;
+        n._blow = { t: flight, M, swing, stabbing, kick: !!kick, kind };
+        logSwing(n);
       }
       return n.baseSpeed * 1.5;
     }
     // he broke off (or the hunt timed out): the blow count and his one
     // takedown both reset, so "once" means once per fight and not once ever
-    if (n.jumpBlows) { n.jumpBlows = 0; n._jumpGrabbed = 0; if (n.char) n.char.fightStance = false; }
+    if (n.jumpBlows) { n.jumpBlows = 0; n._jumpGrabbed = 0; n._blow = null; if (n.char) n.char.fightStance = false; }
 
     // DEFEND: once you've joined a gang, your crew jumps whoever's hunting you
     if (CBZ.player.gang != null && n.gang === CBZ.player.gang && n.aiState !== "fight") {
@@ -5094,7 +5138,9 @@
             addBuzz(n.blockRead.kind, 1.2, actorName(n));
           }
           if ((tactic === "block" || tactic === "lean") && d < 2.35 && rng() < 0.010) {
-            CBZ.player.stun = Math.max(CBZ.player.stun || 0, tactic === "block" ? 0.16 : 0.10);
+            // a shoulder in your way slows you; it never takes the controls
+            if (CBZ.playerHitReact) CBZ.playerHitReact(tactic === "block" ? 0.16 : 0.10);
+            else CBZ.player.stun = Math.max(CBZ.player.stun || 0, tactic === "block" ? 0.16 : 0.10);
           }
           if (tactic === "command" && rng() < 0.010) {
             src.approach.t = Math.max(src.approach.t || 0, 3.5);

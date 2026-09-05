@@ -52,6 +52,30 @@
      showHP() stays as a no-op so the four call sites keep working. */
   function showHP() {}
 
+  /* ---------- THE HIT REACTION (what a punch does to YOUR body) ----------
+     Three timers on CBZ.player, all read by systems/physics.js:
+       hitT     — the reaction: movement at 45%, no sprint (0.12-0.45 s)
+       hitLock  — the impact beat: you cannot start a swing (0.11 s)
+       poiseT   — while > 0 a new hit lands (damage, flash, shake) but does
+                  NOT re-arm the reaction. Set from the start of each
+                  reaction to outlast it by POISE, so a crowd landing a fist
+                  every third of a second gets one reaction per ~0.9 s and
+                  you can always move and swing back between them.
+     `player.stun` (the hard lock) is untouched and still means what it
+     always meant: tased, tackled, grabbed. */
+  const HIT_LOCK = 0.11, HIT_POISE = 0.55;
+  CBZ.playerHitReact = function (secs, opts) {
+    const P = CBZ.player; if (!P || P.dead) return false;
+    if ((P.poiseT || 0) > 0) { P.hitT = Math.max(P.hitT || 0, 0.06); return false; }
+    const s = Math.max(0.12, Math.min(0.45, +secs || 0.3));
+    P.hitT = Math.max(P.hitT || 0, s);
+    P.hitLock = Math.max(P.hitLock || 0, HIT_LOCK);
+    P.poiseT = s + HIT_POISE;
+    P.hitN = (P.hitN || 0) + 1;
+    if (CBZ.fpsHitTaken) CBZ.fpsHitTaken(opts);   // the first-person guard flinches
+    return true;
+  };
+
   /* ---------- launched bodies (uppercut pop-up) ---------- */
   const flying = [];
   function launch(actor, vy) { actor._lvy = vy; if (flying.indexOf(actor) < 0) flying.push(actor); }
@@ -200,7 +224,7 @@
     // you that the punch you are watching has not landed yet is the clearest
     // case in the game of narrating an animation.
     if (pendingPunch) return { ok: false, msg: "" };
-    if (CBZ.player.dead || (CBZ.player.stun || 0) > 0) return { ok: false, msg: "" };
+    if (CBZ.player.dead || (CBZ.player.stun || 0) > 0 || (CBZ.player.hitLock || 0) > 0) return { ok: false, msg: "" };
     // Fists never stop working. Tired means WEAKER, not blocked — the damage
     // scales off stamina below, and the guard visibly drops (ch.winded). There
     // is nothing left to explain, so there is no line to print.
@@ -270,7 +294,7 @@
     if (!punchable(actor)) {
       popup("MISS!", 0);
       combo = 0;
-      CBZ.player.stun = Math.max(CBZ.player.stun || 0, 0.10);
+      CBZ.player.hitLock = Math.max(CBZ.player.hitLock || 0, 0.10);
       CBZ.sfx("step");
       CBZ.doHitstop(0.025);
       return { ok: false, msg: "" };
@@ -283,7 +307,7 @@
     if (!inPunchArc(actor, attack)) {
       popup("MISS!", 0);
       combo = 0;
-      CBZ.player.stun = Math.max(CBZ.player.stun || 0, 0.10);
+      CBZ.player.hitLock = Math.max(CBZ.player.hitLock || 0, 0.10);
       CBZ.sfx("step");
       CBZ.doHitstop(0.025);
       return { ok: false, msg: "" };
@@ -298,6 +322,15 @@
        existing fights do not move a point. */
     const dmg = attack.dmg * (CBZ.meleeScale ? CBZ.meleeScale(CBZ.player, actor) : 1);
     actor.hp -= dmg;
+    // YOU BEAT HIM TO THE PUNCH. A fist landing on a man mid-wind-up ends the
+    // swing he was throwing (entities/ai.js parks the blow in `_blow` until
+    // the fist's own frame, so cancelling it here really does cancel the
+    // hit), and he needs a beat before the next one. This is the whole of
+    // what makes trading blows a fight instead of two damage timers.
+    if (actor.char && (actor.char.punchT > 0 || actor.char.kickT > 0)) { actor.char.punchT = 0; actor.char.kickT = 0; }
+    actor._blow = null;
+    actor.hitCD = Math.max(actor.hitCD || 0, heavy ? 0.85 : 0.45);
+    if (CBZ.fpsPunchLanded) CBZ.fpsPunchLanded(attack.kind, heavy);
     /* punches BRUISE (wounds.js) — the face you beat carries it.
 
        THIS THREW ON EVERY LANDED PUNCH. `actor.pos` does not exist on a prison
@@ -410,7 +443,8 @@
     // means the forearm is where it goes in. The roll survives so a stab is
     // not strictly better than a fist in every case — it is much rarer.
     if (actor.hp > 0 && !heavy && CBZ.econ.rng() < (blade ? 0.06 : 0.16)) {
-      CBZ.player.stun = Math.max(CBZ.player.stun || 0, 0.55);
+      CBZ.player.hitLock = Math.max(CBZ.player.hitLock || 0, 0.30);
+      CBZ.player.hitT = Math.max(CBZ.player.hitT || 0, 0.30);
       stamina = Math.max(0, stamina - 0.12);
       combo = 0;
       CBZ.shake(0.4); popup("BLOCKED!", 0); CBZ.sfx("step");

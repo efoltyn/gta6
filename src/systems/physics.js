@@ -2095,6 +2095,12 @@
     if (player.stun > 0) { player.stun -= dt; mx = mz = 0; }
     if (player._cityArrested) mx = mz = 0;
     const stunned = player.stun > 0 || !!player._cityArrested;
+    // the melee hit reaction (systems/combat.js playerHitReact): a beat of
+    // slow, not a lock — you keep the controls while a fist rocks you
+    if (player.hitLock > 0) player.hitLock -= dt;
+    if (player.poiseT > 0) player.poiseT -= dt;
+    let hitSlow = 1;
+    if (player.hitT > 0) { player.hitT -= dt; hitSlow = 0.45; }
 
     const len = Math.hypot(mx, mz);
     // One movement language in every mode: Shift runs. Jail used to steal
@@ -2125,7 +2131,7 @@
       player.crouch = sliding || st.mode !== "stand";
       player.prone = st.mode === "prone" && !sliding;
     } else if (st.mode !== "stand" || st.slideT >= 0 || player.prone) stanceReset();
-    player.sprint = !overview && !mapOpen && !stunned && !player.crouch &&
+    player.sprint = !overview && !mapOpen && !stunned && !player.crouch && hitSlow === 1 &&
       !!keys["shift"] && len > 0 && staminaReady;
     const sprintMul = (CBZ.SURV && CBZ.SURV.sprintMul) || 1.7;
     // a leg wound (city/death.js injury model) publishes player._moveScale (&lt;1)
@@ -2135,7 +2141,7 @@
     const woundScale = (player._moveScale != null ? player._moveScale : 1) * (player._rideScale || 1);
     const moveSpeed = (player.prone ? T.walkSpeed * PRONE_SPEED
       : player.crouch ? T.crouchSpeed
-      : (player.sprint ? T.walkSpeed * sprintMul : T.walkSpeed)) * woundScale;
+      : (player.sprint ? T.walkSpeed * sprintMul : T.walkSpeed)) * woundScale * hitSlow;
     let desX = 0, desZ = 0;
     if (len > 0) { mx /= len; mz /= len; }
     if (sliding) {

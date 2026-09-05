@@ -386,7 +386,15 @@
     if (player.captureState && player.captureState !== "normal" && player.captureT > 0) return false;
     playerHits++;
     player.hp = (player.hp == null ? 100 : player.hp) - (dmg || 30);
-    player.stun = Math.max(player.stun || 0, opts.stun || 0.25);
+    // A FIST IS NOT A TASER. `player.stun` is the hard lock — no input at all
+    // — and it is the right thing for a drive-stun or a tackle. A punch used
+    // to write the same lock for 0.42-0.72 s, so three men hitting you on
+    // their own clocks kept it armed forever ("they freeze you"). A melee hit
+    // goes through the reaction in systems/combat.js instead: a short slow,
+    // an impact beat you cannot swing through, and POISE so the next fist
+    // inside the window still hurts but does not re-arm the reaction.
+    if (opts.melee && CBZ.playerHitReact) CBZ.playerHitReact(opts.stun != null ? opts.stun : 0.42, opts);
+    else player.stun = Math.max(player.stun || 0, opts.stun || 0.25);
     if (CBZ.addHeat) CBZ.addHeat(opts.heat != null ? opts.heat : 10);
     if (CBZ.shake) CBZ.shake(opts.shake || 0.6);
     if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }

@@ -867,6 +867,56 @@
     return best;
   }
 
+  /* THE CAMERA RESPECTS PEOPLE TOO (owner: "when the cam gets too close to
+     another player it makes their head partially see-through … just make the
+     camera respect colliders"). The sweep above only knows the world's
+     colliders; a man standing behind you was air to it, so the boom parked
+     the lens inside his skull and the near plane opened it. Every standing
+     body near the arm is a 0.6 m box, head height, swept exactly like a wall.
+     Bodies on the floor (dead, KO'd) are stepped over, as they are for feet. */
+  function slabT(ox, oy, oz, dx, dy, dz, minX, maxX, minY, maxY, minZ, maxZ, best) {
+    let t0 = 0, t1 = best, ta, tb, tmp;
+    if (dx > -1e-8 && dx < 1e-8) { if (ox < minX || ox > maxX) return -1; }
+    else { ta = (minX - ox) / dx; tb = (maxX - ox) / dx; if (ta > tb) { tmp = ta; ta = tb; tb = tmp; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) return -1; }
+    if (dy > -1e-8 && dy < 1e-8) { if (oy < minY || oy > maxY) return -1; }
+    else { ta = (minY - oy) / dy; tb = (maxY - oy) / dy; if (ta > tb) { tmp = ta; ta = tb; tb = tmp; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) return -1; }
+    if (dz > -1e-8 && dz < 1e-8) { if (oz < minZ || oz > maxZ) return -1; }
+    else { ta = (minZ - oz) / dz; tb = (maxZ - oz) / dz; if (ta > tb) { tmp = ta; ta = tb; tb = tmp; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) return -1; }
+    return t0;
+  }
+  const BODY_HALF = 0.30, BODY_TOP = 1.82;
+  function sweepBody(a, p, ox, oy, oz, dx, dy, dz, best, rad) {
+    if (!p) return best;
+    // only bodies the arm can reach: cheap reject on the flat distance
+    const ax = Math.abs(p.x - ox), az = Math.abs(p.z - oz);
+    if (ax > best + BODY_HALF + rad || az > best + BODY_HALF + rad) return best;
+    const t = slabT(ox, oy, oz, dx, dy, dz,
+      p.x - BODY_HALF - rad, p.x + BODY_HALF + rad,
+      (p.y || 0) - rad, (p.y || 0) + BODY_TOP + rad,
+      p.z - BODY_HALF - rad, p.z + BODY_HALF + rad, best);
+    return (t > 0.001 && t < best) ? t : best;
+  }
+  function standingBody(a) { return a && !a.dead && !(a.ko > 0) && !a.escaped && !(a.group && a.group.visible === false); }
+  function sweepActors(ox, oy, oz, dx, dy, dz, dist, rad) {
+    let best = dist;
+    const mode = CBZ.game && CBZ.game.mode;
+    if (mode === "escape") {
+      const G = CBZ.guards || [], N = CBZ.npcs || [];
+      for (let i = 0; i < G.length; i++) { const a = G[i]; if (standingBody(a)) best = sweepBody(a, a.group.position, ox, oy, oz, dx, dy, dz, best, rad); }
+      for (let i = 0; i < N.length; i++) { const a = N[i]; if (!a._crowd && standingBody(a)) best = sweepBody(a, a.group.position, ox, oy, oz, dx, dy, dz, best, rad); }
+    } else if (mode === "city") {
+      const P = CBZ.cityPeds || [], C = CBZ.cityCops || [];
+      for (let i = 0; i < P.length; i++) { const a = P[i]; if (!a.dead && !a.culled && !a.inCar && a.pos) best = sweepBody(a, a.pos, ox, oy, oz, dx, dy, dz, best, rad); }
+      for (let i = 0; i < C.length; i++) { const a = C[i]; if (!a.dead && !a.inCar && a.pos) best = sweepBody(a, a.pos, ox, oy, oz, dx, dy, dz, best, rad); }
+    }
+    return best;
+  }
+  // …and it never shows the inside of YOUR skull either: an arm shorter than
+  // this hides the rig for the frame (the reference shot was exactly that —
+  // the prison boom's 0.28 m floor parked the lens in the player's own head).
+  const OWN_HEAD_CLEAR = 0.95;   // pivot is head height; the head box is 0.3 m and the sphere pads 0.34
+  let _ownHid = false;
+
   // The floor-aware boom (CAM_RDR2_ORBIT): CAM_FLOOR_CLEAR is the SAME 0.35 m
   // the last-resort dy clamp has always used, so the radial clamp lands exactly
   // where the old vertical one did instead of introducing a second floor.
@@ -1768,6 +1818,7 @@
     const hit = CBZ.losRaycast ? CBZ.losRaycast(raycaster, CBZ.losBlockers) : raycaster.intersectObjects(CBZ.losBlockers, false);
     if (hit.length > 0 && hit[0].distance < occ) occ = hit[0].distance;
     occ = Math.min(occ, sweepColliders(baseX, baseY, baseZ, _rd.x, _rd.y, _rd.z, rayDist, 0.34));
+    occ = Math.min(occ, sweepActors(baseX, baseY, baseZ, _rd.x, _rd.y, _rd.z, rayDist, 0.30));
     if (occ < rayDist) {
       // The DENSE city boxes the camera in on all sides; with a 0.28 floor it
       // slammed to your back every step (a broken first-person feel). Keep a
@@ -2049,6 +2100,20 @@
     camera.position.x = smoothDamp(camera.position.x, dx, camV.x, posS, fdt);
     camera.position.y = smoothDamp(camera.position.y, dy, camV.y, TP ? (CBZ.CONFIG.CAM_TP_V2 ? (breathe ? 0.075 : 0.025) : (tpPresent ? 0.08 : TP.DAMP_POS * 1.1)) : 0.10, fdt);
     camera.position.z = smoothDamp(camera.position.z, dz, camV.z, posS, fdt);
+    // the lens is inside your own head: hide the rig rather than open the skull
+    {
+      const ax = camera.position.x - baseX, ay = camera.position.y - baseY, az = camera.position.z - baseZ;
+      const nearOwn = !(CBZ.fps && CBZ.fps.active) && !player.driving && !player.dead &&
+        (ax * ax + ay * ay + az * az) < OWN_HEAD_CLEAR * OWN_HEAD_CLEAR;
+      const rig = CBZ.playerChar && CBZ.playerChar.group;
+      // in first person fpsmode.js owns the rig's visibility — drop any claim,
+      // never restore over it (restoring put your own face in the FP lens)
+      if (CBZ.fps && CBZ.fps.active) _ownHid = false;
+      else if (rig) {
+        if (nearOwn) { rig.visible = false; _ownHid = true; }
+        else if (_ownHid) { _ownHid = false; rig.visible = true; }
+      }
+    }
 
     // The look target carries the view DIRECTION (its target already tracks live
     // yaw via yawView). Under feelCam we additionally TIGHTEN its smoothTime so
