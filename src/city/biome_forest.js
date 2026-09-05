@@ -582,6 +582,7 @@
         const m = new THREE.InstancedMesh(g, mat, caps[v]);
         m.name = nameBase + (K > 1 ? "-v" + v : "");
         m.castShadow = treeShadows; m.receiveShadow = true; m.frustumCulled = false;
+        if (treeShadows && SCENERY && KIT.depthMaterial && g.userData.leafCards) m.customDepthMaterial = KIT.depthMaterial(kind);
         m.userData.vegetationLayer = layer || kind;
         m.userData.sceneryScale = SCENERY;
         m.userData.vegetationVariant = v;
@@ -931,6 +932,7 @@
     const bushInst = new THREE.InstancedMesh(bushGeo, bushMat, bushes.length);
     const rockInst = new THREE.InstancedMesh(rockGeo, rockMat, rocks.length);
     bushInst.castShadow = true; rockInst.castShadow = true;
+    if (SCENERY && KIT.depthMaterial && bushGeo.userData && bushGeo.userData.leafCards) bushInst.customDepthMaterial = KIT.depthMaterial("thicket");
     bushInst.receiveShadow = true; rockInst.receiveShadow = true;
     const bushCol = [], rockCol = [], bc = new THREE.Color(), rc = new THREE.Color();
     for (let i = 0; i < bushes.length; i++) {

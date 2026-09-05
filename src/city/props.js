@@ -2388,8 +2388,13 @@
 
     // ----- PLANTER + low-poly TREE -----------------------------------------
     const planterM = smat(0x8a7a64), soilM = smat(0x3a2a1c);
-    const trunkM = smat(0x6e4a2c);
-    const FOLIAGE = [smat(0x3f7d3a), smat(0x4f9942), smat(0x356e34), smat(0x5aa84c)];
+    // THE REAL TREE (world/vegetation.js): barked bole, leaf-card crown.
+    // The kit's materials carry the maps; the tint per tree stays this list.
+    const VKIT = CBZ.vegetationKit;
+    const trunkM = VKIT ? VKIT.material("wood", 0x8c6a48) : smat(0x6e4a2c);
+    const FOLIAGE = VKIT
+      ? [VKIT.material("foliage", 0x5f9a4c), VKIT.material("foliage", 0x76b45a), VKIT.material("foliage", 0x4f8a48), VKIT.material("foliage", 0x86c262)]
+      : [smat(0x3f7d3a), smat(0x4f9942), smat(0x356e34), smat(0x5aa84c)];
     function planterTree(x, z, withTree) {
       const g = new THREE.Group(); g.position.set(x, 0, z);
       const box = new THREE.Mesh(geo("planterBox", () => new THREE.BoxGeometry(1.0, 0.42, 1.0)), planterM);
@@ -2419,8 +2424,9 @@
         const fm = FOLIAGE[(rng() * FOLIAGE.length) | 0];
         if (GRAM) {
           const c = new THREE.Mesh(geo("treeCrownStack",
-            () => CBZ.treeCrownGeo({ tiers: 2, r: 0.82, h: 1.8, seg: 7, taper: 0.66, site: "street" })), fm);
+            () => CBZ.treeCrownGeo({ tiers: 2, r: 0.82, h: 1.8, seg: 7, taper: 0.66, site: "street", leaf: !!VKIT, cards: 9 })), fm);
           c.position.y = 1.30; c.castShadow = true; g.add(c);
+          if (VKIT && c.geometry.userData.leafCards) c.customDepthMaterial = VKIT.depthMaterial("foliage");
         } else {
           // two stacked low-poly blobs for a stylised canopy
           const c1 = new THREE.Mesh(geo("treeCanopy1", () => new THREE.IcosahedronGeometry(0.82, 0)), fm);
@@ -2436,7 +2442,7 @@
         // grammar — a shrub is just a very squat crown)
         const sm = FOLIAGE[(rng() * FOLIAGE.length) | 0];
         if (GRAM) {
-          const sg = geo("shrubStack", () => CBZ.treeCrownGeo({ tiers: 2, r: 0.34, h: 0.44, seg: 5, taper: 0.70, site: "street" }));
+          const sg = geo("shrubStack", () => CBZ.treeCrownGeo({ tiers: 2, r: 0.34, h: 0.44, seg: 5, taper: 0.70, site: "street", leaf: !!VKIT, cards: 5 }));
           const b1 = new THREE.Mesh(sg, sm);
           b1.position.set(-0.18, 0.45, 0.1); b1.scale.set(1, 1.05, 1); g.add(b1);
           const b2 = new THREE.Mesh(sg, sm);

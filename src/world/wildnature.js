@@ -185,6 +185,9 @@
     //  loop moves and CBZ.treeAudit()'s chain sees the same overlaps.
     // ============================================================
     const GRAM = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_ONE_GRAMMAR !== false && CBZ.treeCrownGeo);
+    // THE REAL TREE: leaf-card crowns and barked boles from world/vegetation.js
+    const VKIT = CBZ.vegetationKit;
+    const LEAF = !!(GRAM && VKIT && VKIT.customCrown);
     function trunkOf(rTop, rBase, roots, spread) {
       if (CBZ.treeTrunkGeo) {
         return CBZ.treeTrunkGeo({ rTop: rTop, rBase: rBase, h: 1, seg: 5,
@@ -203,7 +206,7 @@
       // to live here (0.62/0.48/0.30 radii over 0.55/0.48/0.40 heights) to
       // within a rounding step at taper 0.73 — same envelope, same 3 whorls,
       // one fewer copy of the layer table in the codebase.
-      if (GRAM) return CBZ.treeCrownGeo({ tiers: 3, r: 0.62, h: 1.18, seg: 6, taper: 0.73, site: "wildnature" });
+      if (GRAM) return CBZ.treeCrownGeo({ tiers: 3, r: 0.62, h: 1.18, seg: 6, taper: 0.73, site: "wildnature", leaf: LEAF });
       const parts = [];
       // three stacked cones, widest at the bottom — a fir silhouette in unit space
       const layers = [
@@ -240,10 +243,10 @@
     // authored in the blob's exact unit envelope: y0 0.13, height 0.84, max
     // radius 0.51 == IcosahedronGeometry(0.6).scale(1,0.82,1)+0.55
     const broadCrownGeo = GRAM
-      ? CBZ.treeCrownGeo({ tiers: 2, r: 0.51, h: 0.84, y0: 0.13, seg: 7, taper: 0.72, site: "wildnature" })
+      ? CBZ.treeCrownGeo({ tiers: 2, r: 0.51, h: 0.84, y0: 0.13, seg: 7, taper: 0.72, site: "wildnature", leaf: LEAF, seed: 1 })
       : LEGACY_CROWN();
     const birchCrownGeo = GRAM
-      ? CBZ.treeCrownGeo({ tiers: 2, r: 0.44, h: 0.86, y0: 0.13, seg: 6, taper: 0.58, site: "wildnature" })
+      ? CBZ.treeCrownGeo({ tiers: 2, r: 0.44, h: 0.86, y0: 0.13, seg: 6, taper: 0.58, site: "wildnature", leaf: LEAF, seed: 2, n: 3, cards: 5 })
       : broadCrownGeo;
 
     // SNAG (4th species) — a bare, gnarled dead/burned trunk with a couple of
@@ -499,11 +502,12 @@
     function buildSpecies(list, trunkGeo, crownGeo, opts) {
       const N = list.length;
       if (!N) return;
-      const trunkMat = whiteMat(false);
-      const crownMat = whiteMat(false);
+      const trunkMat = LEAF ? VKIT.material("wood") : whiteMat(false);
+      const crownMat = LEAF && crownGeo.userData.leafCards ? VKIT.material("foliage") : whiteMat(false);
       const trunkIM = new THREE.InstancedMesh(trunkGeo, trunkMat, N);
       const crownIM = new THREE.InstancedMesh(crownGeo, crownMat, N);
       trunkIM.castShadow = crownIM.castShadow = true;
+      if (LEAF && crownGeo.userData.leafCards) crownIM.customDepthMaterial = VKIT.depthMaterial("foliage");
       trunkIM.receiveShadow = crownIM.receiveShadow = true;
       trunkIM.frustumCulled = false; crownIM.frustumCulled = false;   // r128 instanced cull bug
       const tCol = new Float32Array(N * 3), cCol = new Float32Array(N * 3);

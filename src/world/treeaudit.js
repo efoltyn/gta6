@@ -321,6 +321,26 @@
     const T = window.THREE;
     if (!T) return null;
     o = o || {};
+    // leaf:true — THE REAL CROWN. A cloud of textured leaf cards from the
+    // vegetation kit (world/vegetation.js) in this caller's metres: r wide,
+    // h tall, seated at y0, spruce whorls for 3+ tiers and a broadleaf lobe
+    // set otherwise. The caller must draw it with the kit's foliage
+    // material (CBZ.vegetationKit.material("foliage", tint)) — the cards are
+    // alpha-tested quads and any other material shows the quads.
+    if (o.leaf && CBZ.vegetationKit && CBZ.vegetationKit.customCrown) {
+      const tiers = o.tiers == null ? 2 : o.tiers;
+      let seed = 0;
+      const site = String(o.site || "");
+      for (let i = 0; i < site.length; i++) seed = (seed * 31 + site.charCodeAt(i)) | 0;
+      const base = CBZ.vegetationKit.customCrown({
+        spire: tiers >= 3, r: o.r == null ? 1 : o.r, h: o.h == null ? 1 : o.h,
+        n: o.n, cards: o.cards, shape: o.shape, seed: seed ^ ((o.seed | 0) * 0x9e37),
+      });
+      let g = base;
+      if (o.y0) { g = base.clone(); g.translate(0, o.y0, 0); g.computeBoundingBox(); g.computeBoundingSphere(); g.userData = Object.assign({}, base.userData); }
+      stats.crowns++; stats.tiers += tiers; note(stats.sites, o.site);
+      return g;
+    }
     const tiers = Math.max(1, Math.min(5, o.tiers == null ? 2 : o.tiers));
     const R = o.r == null ? 1 : o.r;
     const H = o.h == null ? 1 : o.h;
@@ -372,6 +392,11 @@
     const seg = o.seg == null ? 5 : o.seg;
 
     const bole = new T.CylinderGeometry(rTop, rBase, H, seg);
+    // bark repeats: the kit's bark map wraps twice round and once per
+    // `uvRepeat`-th of the height (callers scale a unit bole ~15x, so the
+    // default is one period per ~3 m of a 15 m tree)
+    const uv = bole.attributes.uv, vRep = o.uvRepeat == null ? 5 : o.uvRepeat;
+    if (uv) for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 2, uv.getY(i) * vRep);
     bole.translate(0, y0 + H / 2, 0);
     const n = (CFG.TREES_ROOTS === false) ? 0 : (o.roots == null ? 4 : o.roots);
     if (n <= 0) { stats.trunks++; note(stats.sites, o.site); return bole; }

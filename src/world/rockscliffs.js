@@ -157,13 +157,13 @@
     const rng = makeRng(seed == null ? 1 : seed);
     const src = new THREE.IcosahedronGeometry(radius, detail);
 
-    // pull raw positions into plain Vector3s we can freely mutate + a shared
-    // index buffer for adjacency (r128 IcosahedronGeometry is indexed).
+    // Pull raw positions into mutable vectors. Indexed inputs retain their
+    // topology; r128's unindexed polyhedra are welded below for adjacency.
     const posAttr = src.attributes && src.attributes.position;
     if (!posAttr || !posAttr.count) return src;      // headless/stub-safe bail
 
-    const vcount = posAttr.count;
-    const positions = new Array(vcount);
+    let vcount = posAttr.count;
+    let positions = new Array(vcount);
     for (let i = 0; i < vcount; i++) {
       positions[i] = new THREE.Vector3(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
     }
@@ -175,7 +175,19 @@
     } else if (idxAttr && idxAttr.array) {
       indexArr = idxAttr.array;
     } else {
-      indexArr = [];   // no index available (stub) — adjacency empty, scrape no-ops safely
+      // r128 polyhedra are triangle soup. Weld coincident corners before
+      // building adjacency, otherwise scrapes never leave a single corner
+      // and the fallback below returns the untouched source sphere.
+      const unique = [], byPosition = new Map();
+      indexArr = [];
+      for (const p of positions) {
+        const key = [p.x, p.y, p.z].map(v => Math.round(v / radius * 1e6)).join(",");
+        let ix = byPosition.get(key);
+        if (ix == null) { ix = unique.length; unique.push(p); byPosition.set(key, ix); }
+        indexArr.push(ix);
+      }
+      positions = unique;
+      vcount = positions.length;
     }
 
     const adj = buildAdjacency(indexArr, vcount);
@@ -219,6 +231,8 @@
       out.setAttribute("position", posAttr);   // stub fallback: nothing to scrape, pass through
     }
     src.dispose();
+    out.computeBoundingBox();
+    out.computeBoundingSphere();
     return out;
   }
   CBZ.makeRock = makeRock;

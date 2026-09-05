@@ -814,7 +814,7 @@
       // calls, same unit envelope (y[0,1.2], radius 0.6) so every placement
       // number below and the whole treeaudit chain are untouched.
       const crownGeo = GRAM
-        ? CBZ.treeCrownGeo({ tiers: 2, r: 0.6, h: 1.2, seg: 6, taper: 0.68, site: "island" })
+        ? CBZ.treeCrownGeo({ tiers: 2, r: 0.6, h: 1.2, seg: 6, taper: 0.68, site: "island", leaf: !!(CBZ.vegetationKit && CBZ.vegetationKit.customCrown) })
         : (function () {
             const g = new THREE.IcosahedronGeometry(0.6, 0);
             g.translate(0, 0.6, 0);
@@ -822,11 +822,13 @@
             return g;
           })();
 
-      const trunkMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); trunkMat._shared = true;
-      const crownMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); crownMat._shared = true;
+      const LEAF = !!(crownGeo.userData && crownGeo.userData.leafCards);
+      const trunkMat = LEAF ? CBZ.vegetationKit.material("wood") : (function () { const m = new THREE.MeshLambertMaterial({ color: 0xffffff }); m._shared = true; return m; })();
+      const crownMat = LEAF ? CBZ.vegetationKit.material("foliage") : (function () { const m = new THREE.MeshLambertMaterial({ color: 0xffffff }); m._shared = true; return m; })();
       const trunkIM = new THREE.InstancedMesh(trunkGeo, trunkMat, N);
       const crownIM = new THREE.InstancedMesh(crownGeo, crownMat, N);
       trunkIM.castShadow = crownIM.castShadow = true;
+      if (LEAF) crownIM.customDepthMaterial = CBZ.vegetationKit.depthMaterial("foliage");
       trunkIM.receiveShadow = crownIM.receiveShadow = true;
       trunkIM.frustumCulled = false; crownIM.frustumCulled = false;   // r128 instanced cull bug
 
