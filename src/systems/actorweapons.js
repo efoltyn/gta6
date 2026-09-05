@@ -834,6 +834,9 @@
     for (let i = 0; i < list.length; i++) {
       const a = list[i];
       if (!a || a.dead || a._parked || (a.ko > 0) || !a.armed) continue;
+      // A culled ped's group is out of the scene (city/peds.js removes it);
+      // posing arms nobody can see is a walk over ~700 actors for nothing.
+      if (a.culled) continue;
       // character.js owns every limb during a vault/mantle. A late gun-ready
       // overwrite would pin one arm forward and erase the hand plant/grab that
       // makes the obstacle contact physically readable.

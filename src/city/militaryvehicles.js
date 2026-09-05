@@ -140,6 +140,13 @@
     for (let i = 0; i < props.length; i++) {
       const v = props[i];
       if (!v || v.taken || v.destroyed || !v.group || !v.group.parent) continue;
+      // The interaction scanner asks this at 12 Hz for every prop in the
+      // world; the surface distance below builds a Box3 (and a stamp string)
+      // per aircraft. Nothing whose CENTRE is more than its own half-span
+      // past the cutoff can have a surface inside it — one squared subtract.
+      const cx = x - v.pos.x, cz = z - v.pos.z;
+      const halfSpan = (v.kind === "plane" || v.kind === "heli") ? 45 : Math.max(v.footW || 3, v.footL || 5);
+      if (cx * cx + cz * cz > (bd + halfSpan) * (bd + halfSpan)) continue;
       const d = vehicleSurfaceDistance(v, x, z, y);
       if (d < bd) { bd = d; best = v; }
     }

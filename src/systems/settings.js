@@ -47,9 +47,9 @@
    separate from the heavy per-world save blob (city/worldstate.js) and from
    the population override key (CBZ_POP_OVERRIDE_V1, read at next boot).
 
-   KEY BINDING: [Escape] toggles the panel (only meaningful from the pause
-   screen reachable today — see openFromPause()). The panel can also be
-   opened directly via the new "Settings" button injected into #pause.
+   KEY BINDING: [Escape] closes the panel. It is opened through the
+   "Settings" button injected into #pause (Escape on the pause card resumes
+   the game — systems/state.js resumeGame).
 
    Exposes: CBZ.settingsOpen (bool flag, see above), CBZ.openSettings(),
    CBZ.closeSettings().
@@ -338,18 +338,16 @@
   CBZ.closeSettings = close;
   if (CBZ.settingsOpen === undefined) CBZ.settingsOpen = false;
 
-  // ---- [Esc] toggles ------------------------------------------------------
-  // Only meaningful while the panel itself is reachable (pause screen, or
-  // already open) — doesn't compete with other modals' own Esc handling
-  // since those guard on g.state==="playing" while we're on "paused", or on
-  // CBZ.settingsOpen specifically.
+  // ---- [Esc] closes the panel ---------------------------------------------
+  // It used to also OPEN the panel from the pause card, which made Escape on
+  // the pause card do the one thing nobody expects (every other game resumes)
+  // and left the keyboard with no way back into the game at all: pause card →
+  // Esc → Settings → Esc → pause card, Resume button or nothing. Escape on the
+  // pause card now resumes (systems/state.js resumeGame); the panel is reached
+  // through its own button.
   addEventListener("keydown", function (e) {
-    const k = e.key;
-    if (k !== "Escape") return;
-    if (open_) { e.preventDefault(); close(); return; }
-    if (g.state === "paused" && !CBZ.cityMenuOpen && !(CBZ.fullMap && CBZ.fullMap.active)) {
-      e.preventDefault(); open();
-    }
+    if (e.key !== "Escape" || !open_) return;
+    e.preventDefault(); close();
   });
 
   // ---- inject a "Settings" button into the existing #pause card -----------

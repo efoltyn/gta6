@@ -672,7 +672,19 @@
   const _segCols = [], _ptCols = [];
   function solidWalk(c) { if (c.y0 == null || c.y1 == null) return true; return c.y0 <= 1.1 && (c.y1 - c.y0) >= 0.4; }
   function solidFire(c) { if (c.y0 == null || c.y1 == null) return true; return c.y0 <= CHEST_Y && c.y1 >= CHEST_Y; }
+  // The segment is handed to the collider grid with a hit predicate and the
+  // walk stops at the first box that crosses it (CBZ.segmentHitsCollider —
+  // the note there has the measurement). Same boxes, same height filters,
+  // same segBox; a lane is blocked by the same collider it always was.
+  let _sgAx = 0, _sgAz = 0, _sgBx = 0, _sgBz = 0;
+  function _hitWalk(c) { return solidWalk(c) && segBox(_sgAx, _sgAz, _sgBx, _sgBz, c); }
+  function _hitFire(c) { return solidFire(c) && segBox(_sgAx, _sgAz, _sgBx, _sgBz, c); }
   function segBlocked(ax, az, bx, bz, fire) {
+    if (CBZ.segmentHitsCollider) {
+      if (Math.hypot(bx - ax, bz - az) < 0.05) return false;
+      _sgAx = ax; _sgAz = az; _sgBx = bx; _sgBz = bz;
+      return CBZ.segmentHitsCollider(ax, az, bx, bz, 0.05, fire ? _hitFire : _hitWalk);
+    }
     if (!CBZ.queryCollidersNear) return false;
     const len = Math.hypot(bx - ax, bz - az);
     if (len < 0.05) return false;

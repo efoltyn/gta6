@@ -4988,3 +4988,37 @@ the audit's own counter and again from outside, against measured speed.
 `orphanRides` is pinned at 0. `--revert` (`?cfg_PASSENGER_SEAT_V1=0`) asserts
 the old world comes back: the seat verb refuses, holding W drives the car, and
 stepping out at speed parks it on the spot.
+
+---
+
+## 2026-09-05 — Gang City: the pause that would not resume, and the frame
+
+Owner: "When Gang City pauses, you can't resume. Fix that. And also just make
+it run better. Figure out what's making it run slow."
+
+**The pause.** Resume only ever called `CBZ.requestLock()`; the state came
+back to `playing` solely in camera.js's `pointerlockchange` handler, so a
+refused pointer lock (Chrome's post-Escape window, no user activation, touch,
+GL-context restore) was a pause card nothing could dismiss — reproduced with
+CDP input: two Resume clicks, still paused, `pointerlockerror` each time.
+Escape on the card opened Settings. Now `CBZ.resumeGame` flips the state first
+and the lock follows best-effort; Escape resumes; a refused lock shows "Click
+to capture the mouse" and the next click or key press retries.
+
+**The frame.** Headed Chrome on the real GPU over CDP (the display was asleep,
+so the extension's tab reported `hidden` and ran zero frames — a screensaver
+is a perf-measurement trap). CPU-bound: ~30 ms of 478 updaters, ~14 ms of
+three.js walking ~30k visible nodes with 22 draw calls. Street fight: the
+combat position picker gathered thousands of the 142k colliders per candidate
+lane (queryCollidersNear 15% self) and cityShotHole scanned all 37,540 panes
+per line-of-fire test. Shipped: `CBZ.segmentHitsCollider` (early-out, 4.2x,
+800/800 identical), a broken-pane list, `core/viewscope.js` (whole-building
+hide, exact against view AND sun frustum, 0 px diff at 422 hidden groups),
+plus four small tail cuts. Full ledger with numbers:
+artifacts/perf/2026-09-05-gang-city-pause-and-frame.md.
+
+**Traps.** `CBZ.always.find(a=>a.order===-99)` returned official_assets.js's
+runner, not mine — my first exactness check compared scoped with scoped and
+passed trivially; tools now use `CBZ.viewScopePass/Restore`. Cross-window
+numbers on a Mac at load 13 lie by 2x; only in-page micro-benchmarks and
+same-frame comparisons were trusted.

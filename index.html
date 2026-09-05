@@ -350,6 +350,7 @@
     <!-- Performance/quality controls live in ONE place: the Settings panel
          (systems/settings.js injects its button below; [Esc] from here opens it). -->
     <button class="btn" id="resumeBtn">Resume</button>
+    <div class="smallnote">Esc resumes</div>
   </div>
 </div>
 
@@ -2232,6 +2233,8 @@
 <script src="src/world/world_grime.js?v=detail1"></script>
 <script src="src/world/building_dress.js?v=detail1"></script>
 <script src="src/core/farcull.js?v=fc2z"></script>
+<!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
+<script src="src/core/viewscope.js?v=vs1"></script>
 <script src="src/core/losgrid.js?v=lg1"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>

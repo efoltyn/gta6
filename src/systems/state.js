@@ -8,6 +8,7 @@
   const { player, playerChar, el, keycard, cam } = CBZ;
   const g = CBZ.game;
 
+  let pausedAt = 0;   // when the pause card came up (resumeGame's double-tap guard)
   const screens = {
     title: document.getElementById("title"),
     pause: document.getElementById("pause"),
@@ -19,6 +20,7 @@
   const modeButtons = Array.from(document.querySelectorAll(".mode-btn"));
 
   function setState(s) {
+    if (s === "paused" && g.state !== "paused") pausedAt = performance.now();
     g.state = s;
     document.body.classList.toggle("state-playing", s === "playing");
     // the ARENA modes (survival + gungame) share one pair of result cards
@@ -695,7 +697,7 @@
   CBZ.startRunPresented = startRunPresented;
 
   bindButton("playBtn", startRunPresented);
-  bindButton("resumeBtn", () => { CBZ.requestLock(); });
+  bindButton("resumeBtn", resumeGame);
   bindButton("againBtn", startRunPresented);
   // survival result screens
   bindButton("survAgainBtn", startRunPresented);
@@ -703,6 +705,93 @@
   bindButton("survMenuBtn", () => setState("title"));
   bindButton("loseMenuBtn", () => setState("title"));
   CBZ.canvas.addEventListener("click", () => {
-    if ((g.state === "playing" || g.state === "paused") && !(CBZ.surv && CBZ.surv.spectating)) CBZ.requestLock();
+    if (CBZ.surv && CBZ.surv.spectating) return;
+    if (g.state === "paused") resumeGame();
+    else if (g.state === "playing") CBZ.requestLock();
+  });
+
+  /* ---- RESUME — THE STATE FLIPS FIRST, THE MOUSE FOLLOWS ------------------
+     The pause card used to have exactly one way out: CBZ.requestLock(), and
+     nothing else. The state only came back to "playing" when the browser
+     GRANTED pointer lock and camera.js's pointerlockchange handler noticed.
+     Chrome refuses that request in the common cases — for about a second
+     after the Escape that exited the lock, on any call without a fresh user
+     activation (Escape itself is the one key that never counts as one), on
+     a touch screen where requestLock() returns before asking, after a GL
+     context restore (systems/glcontext.js "Tap to continue") — and a refused
+     request fires pointerlockerror, which nobody listened to. Every refusal
+     was a pause card that would not go away: Resume clicked, nothing.
+
+     Now resuming is a state change and the lock is a best-effort follow-up.
+     If the lock is refused the world is running with a free cursor, the small
+     hint below says so, and the next click on the canvas or key press (both
+     are user activations) retries it. Escape on the pause card resumes too,
+     the way every other game does it; opening Settings is its own button. */
+  let lastLockTry = 0;
+  function resumeGame() {
+    if (g.state !== "paused" || CBZ.settingsOpen) return false;
+    setState("playing");
+    lastLockTry = performance.now();
+    CBZ.requestLock();
+    return true;
+  }
+  CBZ.resumeGame = resumeGame;
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || e.repeat) return;
+    if (g.state !== "paused" || CBZ.settingsOpen) return;
+    // The Escape that exits pointer lock is swallowed by the browser and never
+    // reaches the page, so the pause it caused cannot bounce here — but a fast
+    // double-tap on a browser that does deliver it must not un-pause instantly.
+    if (performance.now() - pausedAt < 300) return;
+    e.preventDefault();
+    resumeGame();
+  });
+
+  // A refused lock heals on the next real input. mousedown on the canvas
+  // already retries (above); a key press is a user activation too, so the
+  // first W after a refused resume takes the mouse back without a click.
+  document.addEventListener("keydown", (e) => {
+    if (CBZ.touchMode || g.state !== "playing" || cam.locked) return;
+    if (e.key === "Escape" || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (CBZ.settingsOpen || CBZ.cityMenuOpen || CBZ.invOpen || (CBZ.fullMap && CBZ.fullMap.active)) return;
+    if (CBZ.surv && CBZ.surv.spectating) return;
+    const a = document.activeElement;
+    if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
+    const t = performance.now();
+    if (t - lastLockTry < 900) return;
+    lastLockTry = t;
+    CBZ.requestLock();
+  });
+
+  // The hint: playing, desktop, no menu, no lock → "Click to capture the mouse".
+  // Shown only after a resume or a refused request, never at a fresh start (the
+  // title→game transition has its own click), and cleared on the lock event.
+  let lockHint = null, lockHintT = 0;
+  function showLockHint(on) {
+    if (on && !lockHint) {
+      lockHint = document.createElement("div");
+      lockHint.id = "lockHint";
+      lockHint.textContent = "Click to capture the mouse";
+      lockHint.style.cssText = "position:fixed;left:50%;top:14%;transform:translateX(-50%);z-index:40;padding:8px 14px;" +
+        "border-radius:10px;background:rgba(9,14,24,.82);color:#e6ecf5;font:600 14px/1.3 Fredoka,system-ui,sans-serif;" +
+        "pointer-events:none;box-shadow:0 6px 18px rgba(0,0,0,.4)";
+      document.body.appendChild(lockHint);
+    }
+    if (lockHint) lockHint.style.display = on ? "block" : "none";
+  }
+  function lockHintWanted() {
+    return !CBZ.touchMode && g.state === "playing" && !cam.locked && !CBZ.settingsOpen && !CBZ.cityMenuOpen &&
+      !CBZ.invOpen && !(CBZ.fullMap && CBZ.fullMap.active) && !(CBZ.surv && CBZ.surv.spectating) &&
+      !(CBZ.cityCam && CBZ.cityCam.death) && !g.busted && !(CBZ.player && CBZ.player.dead);
+  }
+  document.addEventListener("pointerlockerror", () => { lockHintT = performance.now() + 250; });
+  document.addEventListener("pointerlockchange", () => { if (document.pointerLockElement === CBZ.canvas) showLockHint(false); });
+  CBZ.onAlways(99.7, function () {
+    if (!lockHintT) return;
+    if (performance.now() < lockHintT) return;
+    const want = lockHintWanted();
+    showLockHint(want);
+    if (!want) lockHintT = 0;
   });
 })();

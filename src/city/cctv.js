@@ -423,13 +423,10 @@
      OFF (?cfg_CCTV_FEED_SCOPED=0) = far 520 + an untouched scene = the exact
      old full-scene render, byte for byte.
   ======================================================================== */
-  const scopeB = new WeakMap();               // object -> { x,y,z,r, px,pz, iv, dyn }
   const _scopeHidden = [];                    // objects WE hid, in the order we hid them
   const _scopeFrustum = new THREE.Frustum();
   const _scopeM = new THREE.Matrix4();
   const _scopeSph = new THREE.Sphere();
-  const _scopeBox = new THREE.Box3();
-  const _scopeV = new THREE.Vector3();
   let auScoped = 0, auFull = 0, auHidden = 0, auCandidates = 0, auMeasured = 0;
 
   // Depth this feed is allowed to reach. Derived, never a fresh literal: the
@@ -442,85 +439,10 @@
     return Math.max(FEED_FAR_MIN, Math.min(FEED_FAR_FULL, r));
   }
 
-  // ONE measured world sphere per top-level arena child, cached forever.
-  // Mirrors core/farcull.js's boundsFor (same three cases, same never-cull
-  // guards) but keeps Y as well, because a frustum test needs three axes
-  // where farcull's flat distance test only needed two.
-  function scopeBoundsFor(o) {
-    let b = scopeB.get(o);
-    // an InstancedMesh that re-wrote its matrices moved its own footprint;
-    // the version counter is the measurement's own receipt (farcull's trick).
-    if (b && b.iv != null && o.instanceMatrix && o.instanceMatrix.version !== b.iv) b = null;
-    if (b) return b;
-    b = { x: 0, y: 0, z: 0, r: 0, px: o.position.x, pz: o.position.z, iv: null, dyn: false };
-    try {
-      if (o.userData && o.userData.dynamic) b.dyn = true;
-      else if (o.isInstancedMesh) {
-        // r128's Box3.expandByObject uses geometry.boundingBox * matrixWorld
-        // and NEVER looks at instance matrices, so a pool measured that way
-        // reads as one prototype sitting at the pool origin. Scan the
-        // instances, exactly as farcull does, or the sphere is a lie.
-        const a = o.instanceMatrix && o.instanceMatrix.array, n = o.count | 0;
-        if (!a || !n) b.dyn = true;
-        else {
-          let mnx = 1e9, mxx = -1e9, mny = 1e9, mxy = -1e9, mnz = 1e9, mxz = -1e9, maxS = 0;
-          for (let i = 0; i < n; i++) {
-            const q = i * 16, x = a[q + 12], y = a[q + 13], z = a[q + 14];
-            if (x < mnx) mnx = x; if (x > mxx) mxx = x;
-            if (y < mny) mny = y; if (y > mxy) mxy = y;
-            if (z < mnz) mnz = z; if (z > mxz) mxz = z;
-            // columns 0..2 are the SCALED basis vectors — their lengths are
-            // the instance's per-axis scale.
-            const sx = Math.hypot(a[q], a[q + 1], a[q + 2]);
-            const sy = Math.hypot(a[q + 4], a[q + 5], a[q + 6]);
-            const sz = Math.hypot(a[q + 8], a[q + 9], a[q + 10]);
-            if (sx > maxS) maxS = sx; if (sy > maxS) maxS = sy; if (sz > maxS) maxS = sz;
-          }
-          // computeBoundingBox does NOT write boundingSphere, so a pool that
-          // hand-published a sector sphere keeps it (and keeps frustum-culling).
-          if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
-          const bb = o.geometry.boundingBox;
-          const protoR = bb
-            ? Math.hypot(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z) * 0.5
-            : 2;
-          const proto = Math.max(0.5, protoR * (maxS > 0 ? maxS : 1));
-          b.x = (mnx + mxx) / 2 + o.position.x;
-          b.y = (mny + mxy) / 2 + o.position.y;
-          b.z = (mnz + mxz) / 2 + o.position.z;
-          b.r = Math.hypot(mxx - mnx, mxy - mny, mxz - mnz) * 0.5 + proto;
-          b.iv = o.instanceMatrix.version;
-        }
-      }
-      else if (o.isMesh && o.geometry) {
-        // O(1): batch.js/buildings.js already computed these spheres.
-        if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
-        const s = o.geometry.boundingSphere;
-        if (!s) b.dyn = true;
-        else {
-          _scopeV.copy(s.center).applyMatrix4(o.matrixWorld);
-          b.x = _scopeV.x; b.y = _scopeV.y; b.z = _scopeV.z;
-          b.r = s.radius * Math.max(o.scale.x, o.scale.y, o.scale.z, 1);
-        }
-      }
-      else {
-        _scopeBox.setFromObject(o);           // the expensive case: a subtree walk
-        if (isFinite(_scopeBox.min.x) && isFinite(_scopeBox.max.x)) {
-          _scopeBox.getCenter(_scopeV);
-          b.x = _scopeV.x; b.y = _scopeV.y; b.z = _scopeV.z;
-          b.r = Math.hypot(_scopeBox.max.x - _scopeBox.min.x,
-                           _scopeBox.max.y - _scopeBox.min.y,
-                           _scopeBox.max.z - _scopeBox.min.z) * 0.5;
-        } else b.dyn = true;
-      }
-      // world-spanning things (terrain tiles, the sea, the road web, the
-      // whole-world dressing pools) can never be dropped wholesale and their
-      // measured sphere is the least trustworthy — stop testing them forever.
-      if (b.r > SCOPE_MAX_R) b.dyn = true;
-    } catch (e) { b.dyn = true; }
-    scopeB.set(o, b);
-    return b;
-  }
-
+  // ONE measured world sphere per top-level arena child, cached forever —
+  // core/viewscope.js owns the measurement now (it needs the same sphere for
+  // the main camera every frame); this is the same function under the old name.
+  function scopeBoundsFor(o) { return CBZ.subtreeSphere(o); }
   // Hand back everything WE hid. Called from renderFeed's finally, and again
   // at the head of scopeApply — a restore that can run twice and cannot throw
   // is the only shape allowed here, because a city left invisible is the one
@@ -550,7 +472,7 @@
       // few to be worth the risk.
       if (!o.isMesh && !o.isGroup) continue;
       if (o === camRoot || o === feedRoot) continue;   // renderFeed owns those two
-      if (!scopeB.has(o)) {
+      if (!CBZ.subtreeSphereMeasured(o)) {
         // A group's first measurement is a Box3 subtree walk — the exact
         // 30-50 ms hitch-stack farcull budgets against. Unmeasured stays
         // VISIBLE, so the scope tightens over the first couple of seconds of

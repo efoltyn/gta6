@@ -164,6 +164,12 @@
     };
   };
   let shatteredPanes = 0;   // live count of open holes (fast-path for cityShotHole)
+  // THE BROKEN ONES, BY NAME. cityShotHole is asked on every line-of-fire test
+  // (npcAttack's muzzle gate, the flee exit search, the player's reticle) and
+  // walked ALL 37,540 panes looking for the handful that are broken — 3.9% of
+  // the frame during a street fight, on a loop that skipped 99.9% of what it
+  // read. The three places a pane breaks push it here; the re-glaze empties it.
+  const shatteredList = [];
   let _gmat = null, _shardGeo = null, _shardGeoBig = null, _crackTex = null;
   // THE reference glass — now sourced from CBZ.glass() so the cockpit, the
   // cabin windows and anything else with a pane get THIS material, not a
@@ -768,7 +774,7 @@
   }
   function burstPane(gp) {
     if (gp.shattered) return;
-    gp.shattered = true; shatteredPanes++;
+    gp.shattered = true; shatteredPanes++; shatteredList.push(gp);
     if (gp.mesh) gp.mesh.visible = false;
     else paneShow(gp, false);          // pooled pane: zero its instance matrix
     if (gp.col) { const i = CBZ.colliders.indexOf(gp.col); if (i >= 0) CBZ.colliders.splice(i, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
@@ -1006,8 +1012,8 @@
   CBZ.cityShotHole = function (px, py, pz, nx, nz) {
     if (!shatteredPanes) return false;
     const faceX = Math.abs(nx || 0) >= Math.abs(nz || 0);   // wall faces ±X → panes run along Z
-    for (let i = 0; i < cityGlass.length; i++) {
-      const gp = cityGlass[i];
+    for (let i = 0; i < shatteredList.length; i++) {
+      const gp = shatteredList[i];
       if (!gp.shattered) continue;
       const dy = py - gp.y;
       if (dy > gp.hh + HOLE_TOL || dy < -(gp.hh + HOLE_TOL)) continue;
@@ -1029,7 +1035,7 @@
   // re-seats them on rebuild — same primitive burstPane/cityGlassReset use).
   CBZ._paneShow = paneShow;
   CBZ.cityGlassReset = function () {
-    shatteredPanes = 0;
+    shatteredPanes = 0; shatteredList.length = 0;
     winOpenQ.length = 0;   // never carve a fresh arena from a stale pre-reset queue
     /* CBZ.CONFIG.DEMO_FAST_PURGE (declared in city/demolition.js, which loads
        after this file — so it is read here at CALL time, never at parse time,
@@ -2076,7 +2082,7 @@
       const gu = horiz ? gp.x : gp.z, gf = horiz ? gp.z : gp.x;
       if (Math.abs(gf - fixed) > thick / 2 + 0.5) continue;
       if (gu < u0 - 0.2 || gu > u1 + 0.2 || gp.y < v0 - 0.3 || gp.y > v1 + 0.3) continue;
-      gp.shattered = true; shatteredPanes++;
+      gp.shattered = true; shatteredPanes++; shatteredList.push(gp);
       if (gp.mesh) gp.mesh.visible = false; else paneShow(gp, false);
       if (gp.col) { const gi = CBZ.colliders.indexOf(gp.col); if (gi >= 0) CBZ.colliders.splice(gi, 1); }
       // A PANE IS MATERIAL TOO. It leaves in the same instant the concrete
@@ -2562,7 +2568,7 @@
       if (Math.abs(gf - g.fixed) > offTol) continue;
       if (gu + hu < wMinU - 0.2 || gu - hu > wMaxU + 0.2) continue;
       if (o.y + o.hh < wY0 - 0.2 || o.y - o.hh > wY1 + 0.2) continue;
-      o.shattered = true; shatteredPanes++;
+      o.shattered = true; shatteredPanes++; shatteredList.push(o);
       if (o.mesh) o.mesh.visible = false; else paneShow(o, false);
       if (o.col) { const ci = CBZ.colliders.indexOf(o.col); if (ci >= 0) CBZ.colliders.splice(ci, 1); }
     }

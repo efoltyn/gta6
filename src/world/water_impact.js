@@ -1101,7 +1101,13 @@
     const prevY = obj._wiY;
     obj._wiY = py;
     if (prevY == null) { obj._wiWet = 0; return; }
-    if (!overWater(px, pz)) { obj._wiWet = 0; return; }
+    // Every car in the city is swept every frame; a parked one has not moved
+    // since the last sweep and its over-water answer has not changed either.
+    const mdx = px - (obj._wiOx || 0), mdz = pz - (obj._wiOz || 0);
+    let over;
+    if (obj._wiOx !== undefined && mdx * mdx + mdz * mdz < 0.25) over = obj._wiOver;
+    else { obj._wiOx = px; obj._wiOz = pz; over = obj._wiOver = overWater(px, pz); }
+    if (!over) { obj._wiWet = 0; return; }
     const sy = surfY(px, pz);
     const wet = py <= sy + 0.25 ? 1 : 0;
     if (wet && !obj._wiWet) {

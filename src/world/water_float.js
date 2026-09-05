@@ -172,6 +172,15 @@
     if (wf && wf.isSurfaceWater) return !!wf.isSurfaceWater(x, z, clearance || 0);
     return !!(CBZ.cityWaterAt && CBZ.cityWaterAt(x, z));
   }
+  // Per-entity memo: the occupant census asks "over water?" for every ped and
+  // every car in the city at 10 Hz, and most of them (parked cars, idle peds)
+  // have not moved since it last asked. Same answer within half a metre.
+  function overWaterMemo(o, x, z) {
+    const dx = x - (o._fowX || 0), dz = z - (o._fowZ || 0);
+    if (o._fowX !== undefined && dx * dx + dz * dz < 0.25) return o._fow;
+    o._fowX = x; o._fowZ = z;
+    return (o._fow = overWater(x, z, 0));
+  }
   function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
   // ============================================================
@@ -717,7 +726,7 @@
       for (let i = 0; i < peds.length; i++) {
         const p = peds[i];
         if (!p || p._waterFloat || p.culled || p._parked || !p.pos) continue;
-        if (!overWater(p.pos.x, p.pos.z, 0)) continue;
+        if (!overWaterMemo(p, p.pos.x, p.pos.z)) continue;
         pushOcc(p.dead ? "corpse" : "ped", p, p.pos.x, p.pos.y, p.pos.z,
                 p.dead ? 0.5 : 1.8, !p.dead && (+p.speed || 0) > 0.15);
       }
@@ -730,7 +739,7 @@
       for (let i = 0; i < cars.length; i++) {
         const c = cars[i];
         if (!c || c._waterFloat || !c.pos || !c.group) continue;
-        if (!overWater(c.pos.x, c.pos.z, 0)) continue;
+        if (!overWaterMemo(c, c.pos.x, c.pos.z)) continue;
         const feel = c._playerCarFeel;
         const marine = feel ? !!feel.marine : !!(c.model && c.model.body === "boat");
         pushOcc(marine ? "boat" : "car", c, c.pos.x, c.group.position.y, c.pos.z,

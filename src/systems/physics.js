@@ -97,6 +97,42 @@
     return out;
   };
 
+  /* SEGMENT QUERY WITH AN EARLY OUT. combat_iq's position picker asked
+     queryCollidersNear for a DISC around each candidate lane (radius half the
+     lane + slack — up to ~17 m, twenty-five 8 m cells), had every collider in
+     it stamped and pushed into an array, and only THEN walked the array to
+     find the first box the lane crosses. With 142k colliders in the city and
+     ~40 lanes per pick per shooter, the gather alone profiled at 15% of the
+     whole frame during a street fight. This walks the same buckets but tests
+     each collider as it is met (cheap slab reject, then the caller's
+     predicate) and returns on the first hit — no output array, no stamps,
+     and most lanes in a built-up block are blocked within the first cell.
+     Duplicates across cells cost a repeated reject, never a wrong answer.
+
+     hit(c) → true if this collider blocks the segment. `pad` widens the cell
+     band and the slab reject (a body radius). Same mode gate as collide(). */
+  CBZ.segmentHitsCollider = function (ax, az, bx, bz, pad, hit) {
+    if (colDirty || colCount !== CBZ.colliders.length) rebuildColliderGrid();
+    pad = pad || 0;
+    const cityOn = !CBZ.game || CBZ.game.mode === "city";
+    const minX = Math.min(ax, bx) - pad, maxX = Math.max(ax, bx) + pad;
+    const minZ = Math.min(az, bz) - pad, maxZ = Math.max(az, bz) + pad;
+    const gx0 = Math.floor(minX / COL_CELL), gx1 = Math.floor(maxX / COL_CELL);
+    const gz0 = Math.floor(minZ / COL_CELL), gz1 = Math.floor(maxZ / COL_CELL);
+    for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) {
+      const bucket = colBuckets.get(colKey(gx, gz));
+      if (!bucket) continue;
+      for (let i = 0; i < bucket.length; i++) {
+        const c = bucket[i];
+        if (c._city && !cityOn) continue;
+        if (c.minX == null) continue;
+        // slab reject against the segment's own bounding box first
+        if (c.maxX < minX || c.minX > maxX || c.maxZ < minZ || c.minZ > maxZ) continue;
+        if (hit(c)) return true;
+      }
+    }
+    return false;
+  };
   // ============================================================
   //  SHARED WALL RESOLVER — CBZ.collide  (THE entry every moving
   //  body, player AND NPC, calls each frame to slide out of walls)
@@ -1171,8 +1207,20 @@
     }
     const roadCars = traversalCars();
     if (opts.cars !== false && roadCars && roadCars.length) {
+      // Every running pedestrian probed EVERY car in the city (500+) through
+      // carCandidate's frame transform and rectangle sweep — 2% of the whole
+      // frame in the profiler, for cars streets away. A car whose centre is
+      // farther than reach + its own half-length + the body radius cannot be
+      // entered within reach; skip it on one squared distance.
+      const ax = apos.x, az = apos.z;
       for (let i = 0; i < roadCars.length; i++) {
-        const hit = carCandidate(actor, rig, dirX, dirZ, opts, roadCars[i], radius, height, reach);
+        const car = roadCars[i];
+        if (!car || !car.pos) continue;
+        const cd = car.dims || (car.group && car.group.userData && car.group.userData.vehicleDims);
+        const span = reach + radius + 0.5 + (cd ? Math.max(cd.length || 0, cd.width || 0) * 0.5 : 6);
+        const cdx = car.pos.x - ax, cdz = car.pos.z - az;
+        if (cdx * cdx + cdz * cdz > span * span) continue;
+        const hit = carCandidate(actor, rig, dirX, dirZ, opts, car, radius, height, reach);
         if (hit && (!best || hit.enter < best.enter)) best = hit;
       }
     }
