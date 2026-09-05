@@ -30,7 +30,11 @@
      node tools/probe.mjs --isolated '<expr>'    # never attach to a shared run
      node tools/probe.mjs --live-raf '<expr>'    # keep full rendering active
      node tools/probe.mjs --reset               # rebuild the world in place
+     node tools/probe.mjs --reload              # reload the PAGE: edited sources, same world
      node tools/probe.mjs --stop
+     node tools/probe.mjs --shot out.png [--size 960x600] ['<expr>']
+         Evaluate (optionally), then render one frame with the game's own
+         renderer/camera and write a PNG. The eyes for a camera question.
 
    THE POINT: a subagent iterating on a change runs the second form. It gets a
    real answer from the REAL game in about the time a unit test would take, and
@@ -227,13 +231,13 @@ if (has("--serve")) {
    Unexpected identifier` or `TypeError: 180000 is not a function` — an error
    about the caller's code, pointing nowhere near the real cause. Adding a new
    value-taking flag means adding it here. */
-const VALUED = new Set(["--seed", "--step", "--file", "--eval-timeout"]);
+const VALUED = new Set(["--seed", "--step", "--file", "--eval-timeout", "--shot", "--size"]);
 
 // ---- one-shot query: attach to the live world if there is one --------------
 const expr = has("--file")
   ? await readFile(argS("--file", ""), "utf8")
   : argv.filter((a, i) => !a.startsWith("--") && !VALUED.has(argv[i - 1])).join(" ");
-if (!expr && !has("--reset") && !has("--step")) {
+if (!expr && !has("--reset") && !has("--step") && !has("--shot") && !has("--reload")) {
   console.error("usage: probe.mjs '<expression>' | --file f.js | --serve | --stop | --step N | --reset | --isolated");
   process.exit(2);
 }
@@ -262,6 +266,35 @@ if (!attached) {
   attached = own.c;
 }
 
+/* --reload: the page is navigated again so edited source files are picked up
+   (an IIFE module cannot be hot-swapped), then the same boot sequence as a
+   fresh --serve: play, wait for the world, freeze rAF. The lockfile, the
+   Chrome and the server all stay. */
+if (has("--reload")) {
+  // HARNESS TRAP: Page.navigate to the page's own URL did not always produce
+  // a new document (the old world answered every readiness poll at once and
+  // the run photographed stale state). Stamp the old document, force a
+  // reload, and refuse to continue until the stamp is gone.
+  // A reload must be a NEW GAME, not a restored one: this is the probe's own
+  // throwaway profile, and a save that puts the player back on foot with last
+  // run's loadout makes every boarding script after it lie.
+  await attached.evl("(()=>{window.__probeOldDoc=true;try{localStorage.clear();sessionStorage.clear();}catch(e){}return true;})()");
+  await attached.send("Page.reload", { ignoreCache: true });
+  let fresh = false;
+  for (let i = 0; i < 400 && !fresh; i++) { await sleep(150); try { fresh = !(await attached.evl("!!window.__probeOldDoc")); } catch (_) { fresh = true; } }
+  if (!fresh) { console.error("RELOAD FAILED: the old document never went away"); process.exit(2); }
+  for (let i = 0, r = false; i < 500 && !r; i++) { try { r = !!(await attached.evl("!!(window.CBZ&&CBZ.game&&CBZ.stepSim&&document.getElementById('playBtn'))")); } catch (_) {} if (!r) await sleep(150); }
+  for (let i = 0, p = false; i < 400 && !p; i++) { p = await attached.evl("(()=>{if(CBZ.game&&CBZ.game.state==='playing')return true;const b=document.getElementById('playBtn');if(b)b.click();return CBZ.game&&CBZ.game.state==='playing';})()"); if (!p) await sleep(200); }
+  for (let i = 0; i < 300; i++) {
+    if (await attached.evl("!!((CBZ.city&&CBZ.city.arena&&CBZ.city.arena.roads&&CBZ.city.arena.roads.length)||(CBZ.surv&&CBZ.surv.arena))")) break;
+    await sleep(200);
+  }
+  if (!has("--live-raf")) {
+    await attached.evl("(()=>{if(window.__probeStopRaf)window.__probeStopRaf();window.__probeRafFrozen=true;return true;})()");
+    await sleep(250);
+  }
+  console.error("[probe] reloaded.");
+}
 if (has("--reset")) {
   await attached.evl("(()=>{const b=document.getElementById('playBtn');if(CBZ.resetGame)CBZ.resetGame();else if(b)b.click();return true;})()");
   for (let i = 0; i < 200; i++) { if (await attached.evl("!!(CBZ.city&&CBZ.city.arena&&CBZ.city.arena.roads&&CBZ.city.arena.roads.length)")) break; await sleep(150); }
@@ -287,6 +320,24 @@ if (expr) {
   catch (e) { console.error("EVAL THREW: " + e.message); process.exitCode = 1; }
   finally { if (timer) clearTimeout(timer); }
   console.log(typeof out === "object" ? JSON.stringify(out, null, 1) : String(out));
+}
+/* --shot: one frame from the game's own renderer and camera, as a PNG. The
+   run's rAF is frozen, so nothing else will draw it; render explicitly, then
+   capture the page (the game canvas is the page). --size WxH resizes the
+   viewport first (Chrome was started at 480x300 for speed). */
+if (has("--shot")) {
+  const shotPath = argS("--shot", "shot.png");
+  const size = /^(\d+)x(\d+)$/.exec(argS("--size", "960x600")) || [0, 960, 600];
+  const W = +size[1], H = +size[2];
+  try {
+    await attached.send("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+    await attached.evl(`(()=>{try{window.dispatchEvent(new Event('resize'));}catch(e){}return true;})()`);
+    await sleep(120);
+    await attached.evl(`(()=>{try{if(CBZ.renderer&&CBZ.renderer.setSize){CBZ.renderer.setSize(innerWidth,innerHeight,false);}if(CBZ.camera){CBZ.camera.aspect=innerWidth/innerHeight;CBZ.camera.updateProjectionMatrix();}if(CBZ.renderer&&CBZ.scene&&CBZ.camera)CBZ.renderer.render(CBZ.scene,CBZ.camera);}catch(e){return String(e);}return true;})()`);
+    const shot = await attached.send("Page.captureScreenshot", { format: "png" });
+    await writeFile(shotPath, Buffer.from((shot.result && shot.result.data) || shot.data || "", "base64"));
+    console.error(`[probe] shot ${W}x${H} -> ${shotPath}`);
+  } catch (e) { console.error("SHOT FAILED: " + e.message); process.exitCode = 1; }
 }
 if (attached.errors.length) console.error("[probe] console errors: " + attached.errors.slice(0, 6).join(" | "));
 

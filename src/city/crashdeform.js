@@ -323,6 +323,7 @@
   function isGlassMat(m) {
     if (!m || !m.color) return false;
     if (m._playerCarOwned || m._bodyPaint) return false; // per-car PAINT clones — dark blue fleet coats read "glassy" by hue alone
+    if (m.vertexColors) return false;   // a vertex-shaded cabin piece (playercars.js dressCabin) is never a pane
     return !!(m.color.b - m.color.r > 0.045 && m.color.b < 0.4 && m.color.r < 0.25);
   }
   function swappedMat(src, cache, tint) {

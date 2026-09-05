@@ -547,6 +547,24 @@
     const out = new THREE.BufferGeometry();
     out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     out.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+    // THE SHADE RIDES ALONG. playercars.js bakes a per-vertex shade into the
+    // cabin pieces (a `color` attribute their vertex-coloured materials read);
+    // a merge that dropped it would draw every cabin black. Any piece in the
+    // bucket that has one makes the bucket carry one, with white (no shade)
+    // filled in for the pieces that do not.
+    let anyColor = false;
+    for (const geo of geos) if (geo.attributes.color) { anyColor = true; break; }
+    if (anyColor) {
+      const col = new Float32Array(vertices * 3);
+      let ci = 0;
+      for (const geo of geos) {
+        const n = geo.attributes.position.count * 3;
+        if (geo.attributes.color && geo.attributes.color.itemSize === 3) col.set(geo.attributes.color.array, ci);
+        else col.fill(1, ci, ci + n);
+        ci += n;
+      }
+      out.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    }
     out.computeBoundingSphere();
     return out;
   }
@@ -1517,7 +1535,7 @@
   if (CBZ.CONFIG.CAR_DRIVER_VISIBLE == null) CBZ.CONFIG.CAR_DRIVER_VISIBLE = true;
 
   const _drvV = new THREE.Vector3();
-  const drv = { car: null, fit: 1, steer: 0, fpHid: false };
+  const drv = { car: null, fit: 1, steer: 0, fpHid: false, leanHid: false };
 
   /* THE ONE CABIN QUERY. Hands back playercars.js's authored cabin frame when
      there is one, and derives an equivalent from the greenhouse box when there
@@ -1658,6 +1676,19 @@
         for (let i = 0; i < near.length; i++) if (near[i]) near[i].visible = !fp;
       }
     }
+    /* THE ARMS GO TOO. The eye now sits a hand ahead of the seat frame
+       (playercars.js dressCabin), which puts the rig's shoulders at the lens:
+       measured, the upper arm and whatever the hand was holding (a slung
+       launcher) filled the left third of the frame. The arm GROUPS are hidden
+       — not just the sleeve skins — so a holstered prop socketed on the hand
+       goes with them. Out of the window (CAR_FP_LEAN) the gun viewmodel's
+       own arms take over in front of the lens, same rule. */
+    const armsHid = fp;
+    if (drv.leanHid !== armsHid) {
+      drv.leanHid = armsHid;
+      const pr = ch.parts;
+      if (pr) { if (pr.la) pr.la.visible = !armsHid; if (pr.ra) pr.ra.visible = !armsHid; }
+    }
     if (CBZ.animChar) CBZ.animChar(ch, 0, dt);
     return true;
   }
@@ -1682,8 +1713,10 @@
         const near = (sk.torso || []).concat(sk.collar || []);
         for (let i = 0; i < near.length; i++) if (near[i]) near[i].visible = true;
       }
+      if (ch.parts) { if (ch.parts.la) ch.parts.la.visible = true; if (ch.parts.ra) ch.parts.ra.visible = true; }
     }
     drv.fpHid = false;
+    drv.leanHid = false;
     return true;
   }
   CBZ.carDriverRelease = releaseDriver;

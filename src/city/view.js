@@ -132,6 +132,44 @@
 
   let fpWant = false, fpOn = false, fpCar = null, fpTold = false;
   const head = { z: 0, x: 0, roll: 0, buzz: 0, t: 0, lastV: 0, lastH: null };
+  /* THE WINDOW — CAR_FP_LEAN. A passenger (or the driver) puts his head and
+     his gun out of his OWN window. Two things ask for it: the verb below
+     (touch, scripts) and holding aim with a firearm in hand while seated in
+     first person. The eye slides from the seat to just outboard of the door
+     line, the look is confined to the window's sector, the head rolls into
+     the wind, and systems/fpsmode.js — which bows out of every car — is told
+     through CBZ.carLeanActive() that this one seat is a firing position. */
+  if (CFG.CAR_FP_LEAN == null) CFG.CAR_FP_LEAN = true;
+  let leanWant = false, lean = 0, leanHeld = false, leanSide = 1;
+  // the window that is down: the live door leaf of the seat's own door, its
+  // pane hidden while the head is out of it (vehicles.js carDoorPose hangs the
+  // live leaves; boarding.js's sweep shuts any leaf nobody claims, so it is
+  // claimed every frame exactly as passengerseat.js does)
+  let leanDoor = null, leanPane = null;
+  function windowDown(car, sx) {
+    if (!CBZ.carDoorPose || !car) return;
+    const id = "F" + (sx > 0 ? "L" : "R");
+    if (!CBZ.carDoorPose(car, id, 0.003)) return;
+    if (!leanDoor || leanDoor.userData.carDoor.id !== id || !leanDoor.parent) {
+      leanDoor = null; leanPane = null;
+      const vis = (car.group.userData && car.group.userData.carVisual) || car.group;
+      for (let i = 0; i < vis.children.length; i++) {
+        const g = vis.children[i];
+        if (g.userData && g.userData.carDoor && g.userData.carDoor.id === id) { leanDoor = g; break; }
+      }
+      if (leanDoor) leanPane = leanDoor.children[2] || null;   // buildDoor: paint, card, pane
+    }
+    if (leanPane) leanPane.visible = false;
+  }
+  function windowUp(car) {
+    if (leanPane) leanPane.visible = true;
+    if (leanDoor && car && CBZ.carDoorPose) CBZ.carDoorPose(car, leanDoor.userData.carDoor.id, 0);
+    leanDoor = null; leanPane = null;
+  }
+  CBZ.carLeanOut = function (on) { leanWant = !!on; return leanWant; };
+  CBZ.carLeanActive = function () { return fpOn && lean > 0.5; };
+  CBZ.carLeanK = function () { return fpOn ? lean : 0; };
+  CBZ.carLeanSide = function () { return leanSide; };   // +1 driver's window (car's left), -1 shotgun
   const _v = THREE ? new THREE.Vector3() : null;
   const _q = THREE ? new THREE.Quaternion() : null;
   const _q2 = THREE ? new THREE.Quaternion() : null;
@@ -177,7 +215,16 @@
   function resetHead() {
     head.z = head.x = head.roll = head.buzz = 0;
     head.t = 0; head.lastV = 0; head.lastH = null;
+    lean = 0;
+    if (leanHeld) { leanHeld = false; if (CBZ.camFreeLook) CBZ.camFreeLook(false); }
+    if (leanDoor) windowUp(fpCar);
   }
+  function firearmInHand() {
+    if (CBZ.game && CBZ.game.cityMeleeWeapon) return false;
+    const w = CBZ.equippedWeapon ? CBZ.equippedWeapon() : null;
+    return !!(w && !w.melee);
+  }
+  function clamp01s(k) { return k * k * (3 - 2 * k); }
 
   /* YOU SIT DOWN LOOKING AT THE ROAD.
      The head angle below is the DIFFERENCE between the free-look yaw and the
@@ -217,6 +264,8 @@
       fpMounted: fpOn ? 1 : 0,
       fpWanted: fpWant ? 1 : 0,
       fpFov: fpOn ? +pose.fov.toFixed(1) : null,
+      leanK: +lean.toFixed(3),
+      leanSide: leanSide,
     };
   };
 
@@ -243,6 +292,13 @@
     const eye = marine ? helmEye(car) : (ci && ci.eye);
     const grp = car.group;
     if (!eye || !grp || !grp.parent) { fpOn = false; return null; }
+    /* WHICH SEAT. ci.eye.x is the DRIVER's half-track (+X, the car's left);
+       riding shotgun (city/passengerseat.js) mirrors it — before this the
+       passenger's body sat on the right and his eye stayed in the driver's
+       head. One sign, same as vehicles.js's seatSideX. */
+    const pax = !marine && !!(CBZ.cityPaxAboard && CBZ.cityPaxAboard(car));
+    const sx = pax ? -1 : 1;
+    leanSide = sx;
     // A hull's live attitude — heading, trim, heel, the wave seat water_
     // buoyancy composes — is all on the GROUP; carVisual carries the crash
     // deformation only cars have. So a boat's eye rides the group itself.
@@ -275,9 +331,40 @@
       head.buzz = Math.sin(head.t * 41) * amp + Math.sin(head.t * 97) * amp * 0.4;
     }
 
+    // ---- the lean, eased ------------------------------------------------
+    const wantLean = CFG.CAR_FP_LEAN !== false && !marine && !!ci &&
+      (leanWant || (firearmInHand() && !!(CBZ.fpsAimHeld && CBZ.fpsAimHeld())));
+    if (wantLean && !leanHeld) {
+      // taking the window: turn the head to it once, and hold the free-look
+      // so the behind-the-car recenter does not drag it back to the road
+      leanHeld = true;
+      if (CBZ.cam) {
+        const nose0 = (car.heading || 0) + Math.PI;
+        let d0 = (CBZ.cam.yaw == null ? nose0 : CBZ.cam.yaw) - nose0;
+        while (d0 > Math.PI) d0 -= Math.PI * 2;
+        while (d0 < -Math.PI) d0 += Math.PI * 2;
+        if (d0 * sx < 0.35) CBZ.cam.yaw = nose0 + sx * 1.35;
+      }
+      if (CBZ.camFreeLook) CBZ.camFreeLook(true);
+    } else if (!wantLean && leanHeld) {
+      leanHeld = false;
+      if (CBZ.camFreeLook) CBZ.camFreeLook(false);
+    }
+    lean += ((wantLean ? 1 : 0) - lean) * Math.min(1, dt * 7);
+    if (lean < 0.002) lean = 0; else if (lean > 0.998) lean = 1;
+    const lk = clamp01s(lean);
+    if (lean > 0.05) windowDown(car, sx); else if (leanDoor) windowUp(car);
+
     // ---- where the eye is, in the vehicle's own frame --------------------
     vis.updateWorldMatrix(true, false);
-    _v.set(eye.x + head.x, eye.y + head.buzz, eye.z + head.z);
+    // seated: the authored eye on this seat's side. Leaning: just outboard of
+    // the door line, a touch higher and forward, the way a shoulder goes out
+    // of a window first.
+    const doorX = (ci && ci.doorX) || Math.abs(eye.x) + 0.42;
+    const ex = sx * (Math.abs(eye.x) + (doorX + 0.22 - Math.abs(eye.x)) * lk);
+    const ey = eye.y + 0.03 * lk;
+    const ez = eye.z + 0.06 * lk;
+    _v.set(ex + head.x, ey + head.buzz, ez + head.z);
     _v.applyMatrix4(vis.matrixWorld);
 
     // ---- where it looks --------------------------------------------------
@@ -292,6 +379,13 @@
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;
       hy = clamp(d, -2.30, 2.30);        // ~132° each way: you can check your blind spot
+      // out of the window the look is the window's: from a glance forward
+      // along the fender to right back down the flank, on this seat's side
+      if (lk > 0) {
+        const lo = sx > 0 ? 0.30 : -2.75, hi = sx > 0 ? 2.75 : -0.30;
+        const inWin = clamp(d, lo, hi);
+        hy = hy * (1 - lk) + inWin * lk;
+      }
       // tighter than the cockpit's ±0.95: a seated driver cannot put his chin
       // on his chest, and a pitch that steep just aims the lens at the footwell
       // SIGN: hp is a three.js Euler X — UP-positive — but cam.pitch is
@@ -299,11 +393,12 @@
       // `const cam = {...}`). Reading it raw made the driver's head pitch the
       // wrong way against the mouse. The clamp stays in the UP-positive sense
       // it was authored in: -0.62 chin-down, 0.72 up.
-      hp = clamp(-(CBZ.cam.pitch || 0), -0.62, 0.72);
+      hp = clamp(-(CBZ.cam.pitch || 0), -0.62 - 0.35 * lk, 0.72);
     }
     // THE HALF TURN. A three.js camera looks down its own local -Z; the car's
     // +Z is the nose. Without the PI you are seated facing the back seats.
-    _e.set(hp, hy + Math.PI, head.roll, "YXZ");
+    // the head rolls into the wind when it is out of the window
+    _e.set(hp, hy + Math.PI, head.roll + sx * 0.09 * lk, "YXZ");
     _q2.setFromEuler(_e);
     grp.getWorldQuaternion(_q).multiply(_q2);
 

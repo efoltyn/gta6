@@ -388,7 +388,10 @@
         "</div>" +
         '<div class="tv-car-utils">' +
           pill("tvTilt", "TILT OFF", "tv-sm tv-tilt") + SEAT_BTN + LOOK_BTN + VIEW_BTN + pill("tvExit", "EXIT", "tv-sm") +
-        "</div>";
+        "</div>" +
+        // THE WINDOW: shown by the watcher only in the seat view with a gun in
+        // hand (city/view.js CAR_FP_LEAN). Hold = lean out and fire.
+        FIRE_BTN;
       resetTiltCenter();
     } else if (next === "boat") {
       // Boats keep the exact joystick helm the owner likes. ASTERN is the
@@ -452,7 +455,13 @@
     // stick is free to be the pitch+roll joystick (FLIGHT_CONTROLS_V2).
     if (q("tvThrUp")) holdBtn(q("tvThrUp"), " ");
     if (q("tvThrDn")) holdBtn(q("tvThrDn"), "control");
-    if (q("tvFire")) tapBtn(q("tvFire"), doFire);
+    if (q("tvFire")) {
+      if (mode === "drive") holdFn(q("tvFire"), function (down) {
+        if (CBZ.carLeanOut) CBZ.carLeanOut(down);
+        if (CBZ.fpsFire) CBZ.fpsFire(!!down);
+      });
+      else tapBtn(q("tvFire"), doFire);
+    }
     // LOOK BACK: hold pins the chase cam over the shoulder (camera agent's
     // feature-detected API — the button only shows once that API exists).
     if (q("tvLook")) holdFn(q("tvLook"), (down) => { if (CBZ.camLookBack) CBZ.camLookBack(down); });
@@ -943,6 +952,15 @@
           if (a !== ammoEl.textContent) ammoEl.textContent = a;
         }
       }
+    } else if (mode === "drive") {
+      // the seat view with a firearm: the window is a firing position
+      const fb = btnWrap.querySelector("#tvFire");
+      if (fb) {
+        const w = CBZ.equippedWeapon ? CBZ.equippedWeapon() : null;
+        const gun = !!(w && !w.melee && !(CBZ.game && CBZ.game.cityMeleeWeapon));
+        show(fb, !!(CBZ.carFpActive && CBZ.carFpActive() && gun));
+      }
+      if (ammoEl) ammoEl.style.display = "none";
     } else if (mode === "armor") {
       // The main gun carries no magazine (militaryvehicles.js gates it on a
       // 0.85 s fireCD, not on rounds), so the ammo badge is HIDDEN rather than

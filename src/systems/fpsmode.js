@@ -236,6 +236,21 @@
     const p = CBZ.player;
     return !!(p && p._aquaticMount);
   }
+  /* THE WINDOW IS A FIRING POSITION (city/view.js CAR_FP_LEAN). This file
+     bows out of every car — shoot(), the viewmodel, the mouse — because the
+     car owns the camera. When the seated first-person eye is out of the
+     window with a firearm in hand, that one seat behaves like first person:
+     the viewmodel shows in the game camera (it is a camera child, so the
+     car's own eye carries it), the trigger works, and the aim is the lens.
+     carGunEligible() is the wider gate for the mouse: seated in car FP with
+     a gun, so that HOLDING aim is what puts you out of the window. */
+  function carGun() {
+    return !!(CBZ.carLeanActive && CBZ.carLeanActive() && armed() && CBZ.player && CBZ.player.driving);
+  }
+  function carGunEligible() {
+    return !!(CBZ.carFpActive && CBZ.carFpActive() && armed() && CBZ.player && CBZ.player.driving && !CBZ.player._aircraft);
+  }
+  CBZ.fpsCarGun = carGun;
   function shoulderActive() {
     const p = CBZ.player;
     // The shoulder owner is strictly an alive, on-foot third-person state.
@@ -1627,6 +1642,9 @@
   }
 
   function aimForward(out) {
+    // out of a car window the camera IS the aim (the car's own attitude is
+    // composed into it by city/view.js); cam.yaw/fps.fp know nothing of that
+    if (carGun() && CBZ.camera) return out.set(0, 0, -1).applyQuaternion(CBZ.camera.quaternion).normalize();
     if (shoulderActive()) {
       // PINNED THIRD-PERSON FRAME (systems/camera.js, CAM_TP_FIXED_ANGLE): the
       // lens is held at the rig's resting angle on purpose, so it is no longer
@@ -3146,7 +3164,7 @@
 
   const _shotAcc = newLand();
   function shoot() {
-    if (!(fps.active || shoulderActive()) || CBZ.game.state !== "playing" || CBZ.player.dead || (CBZ.player.stun || 0) > 0 || CBZ.player.driving || CBZ.player._swim) return;
+    if (!(fps.active || shoulderActive() || carGun()) || CBZ.game.state !== "playing" || CBZ.player.dead || (CBZ.player.stun || 0) > 0 || (CBZ.player.driving && !carGun()) || CBZ.player._swim) return;
     if (!armed()) {
       if (CBZ.game.mode === "city") return;   // city/combat.js owns unarmed melee in the city
       const hit = aimedActor(MELEE);
@@ -4099,10 +4117,10 @@
   });
   document.addEventListener("mousedown", (e) => {
     if (CBZ.islandModeOn(CBZ.game.mode)) return;   // island games: grapple / the mount own the pointer, not gunplay
-    if ((fps.active || shoulderActive()) && CBZ.game.state === "playing" && document.pointerLockElement) {
+    if ((fps.active || shoulderActive() || carGunEligible()) && CBZ.game.state === "playing" && document.pointerLockElement) {
       e.preventDefault();
       if (e.button === 0) fireControl(true);
-      else if (e.button === 2) aimHeld = true;   // RMB raises the gun to aim
+      else if (e.button === 2) aimHeld = true;   // RMB raises the gun to aim (in a car: out of the window)
     }
   });
   document.addEventListener("mouseup", (e) => {
@@ -4111,7 +4129,7 @@
   });
   // suppress the context menu so right-click can drive third-person aiming
   document.addEventListener("contextmenu", (e) => {
-    if ((fps.active || shoulderActive()) && CBZ.game.state === "playing") e.preventDefault();
+    if ((fps.active || shoulderActive() || carGunEligible()) && CBZ.game.state === "playing") e.preventDefault();
   });
   // index of the currently-selected entry in the unified city bar (the active
   // gun, or the holster chip when holstered/empty-handed). For scroll stepping.
@@ -4290,8 +4308,9 @@
        A red dot is a sight you look OVER, so the gun stays in frame there —
        fpsScopeTube(), not fpsScoped(), is the question. */
     const tubeUp = !!(CBZ.fpsScopeTube && CBZ.fpsScopeTube());
-    if (ddT < 0) vm.visible = !!(fps.active && !chutePresentation && !aquaticRide() && !tubeUp);
-    const aiming = fps.active || shoulderActive();
+    const seatGun = carGun();
+    if (ddT < 0) vm.visible = !!((fps.active || seatGun) && !chutePresentation && !aquaticRide() && !tubeUp);
+    const aiming = fps.active || shoulderActive() || seatGun;
     /* A SHARK HAS NO GUNSIGHT.
 
        OWNER (2026-09-01): "first person shark game should not have a crosshair
@@ -4582,7 +4601,7 @@
 
     const w = weapon();
     const reloadDip = fps.reloading > 0 ? 0.13 + Math.sin(CBZ.now * 0.018) * 0.025 : 0;
-    if (fps.active) {
+    if (fps.active || seatGun) {
       // First-person: the player body is hidden, so the 3PS aim/carry poses
       // must not linger on the rig (animChar reads these flags). Clear here.
       if (CBZ.playerChar) { CBZ.playerChar.aimingPose = false; CBZ.playerChar.carryPose = false; }

@@ -269,7 +269,11 @@
     if (!ch || !ch.body) return;
     const g = CBZ.game;
     // survival/battle-royale keeps its own loadout drama; jail + city show steel.
-    const show = g && (g.mode === "city" || g.mode === "escape") && !(CBZ.player && CBZ.player.dead);
+    // ...and not in a car's first person (city/view.js): the eye is inside
+    // this body, and a launcher slung across its back stood up through the
+    // left third of the driver's-seat frame (measured).
+    const show = g && (g.mode === "city" || g.mode === "escape") && !(CBZ.player && CBZ.player.dead) &&
+      !(CBZ.carFpActive && CBZ.carFpActive());
     if (!show) {
       endTransfer();
       if (mounts.back.prop) mounts.back.prop.visible = false;
