@@ -38,6 +38,7 @@
   run(OUT.x1, OUT.z0 + 2, OUT.x1, OUT.z1 - 2, 0.45);
   run(OUT.x0 + 2, OUT.z0, VG.x0 - 0.5, OUT.z0, 0.45);
   run(VG.x1 + 0.5, OUT.z0, OUT.x1 - 2, OUT.z0, 0.45);
-  run(OUT.x0 + 2, OUT.z1, S.x0 - 1, OUT.z1, 0.45);
-  run(S.x1 + 1, OUT.z1, OUT.x1 - 2, OUT.z1, 0.45);
+  const PORT = CBZ.prisonSpinePorts || { x: 50, half: 4.6 };
+  run(OUT.x0 + 2, OUT.z1, -PORT.x - PORT.half - 0.5, OUT.z1, 0.45); run(-PORT.x + PORT.half + 0.5, OUT.z1, S.x0 - 1, OUT.z1, 0.45);
+  run(S.x1 + 1, OUT.z1, PORT.x - PORT.half - 0.5, OUT.z1, 0.45); run(PORT.x + PORT.half + 0.5, OUT.z1, OUT.x1 - 2, OUT.z1, 0.45);
 })();

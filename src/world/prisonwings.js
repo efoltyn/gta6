@@ -156,10 +156,17 @@
   // SOUTH: the existing wall (world/yard.js) already closes x[-44,44] and owns
   // the freedom gate. Only the two new shoulders out to the corners are ours,
   // so the gate keeps its exact geometry, its exact gap and its exact meaning.
+  // Two more sally ports stand in this wall (world/corridors.js, at ±50):
+  // each is a gap the building's own noBreach walls and grille close.
+  const PORT = CBZ.prisonSpinePorts = { x: 50, half: 4.6 };
   for (const s of [-1, 1]) {
     const a = s < 0 ? OUT.x0 : S.x1, b = s < 0 ? S.x0 : OUT.x1;
-    perim((a + b) / 2, OUT.z1, b - a, 1);
-    trim((a + b) / 2, OUT.z1, b - a, "x");
+    const g0 = s * PORT.x - PORT.half, g1 = s * PORT.x + PORT.half;
+    for (const r of [[a, Math.min(b, g0)], [Math.max(a, g1), b]]) {
+      if (r[1] - r[0] < 0.5) continue;
+      perim((r[0] + r[1]) / 2, OUT.z1, r[1] - r[0], 1);
+      trim((r[0] + r[1]) / 2, OUT.z1, r[1] - r[0], "x");
+    }
   }
 
   /* ---- ground. The new wings are hardstanding, not grass: a prison yard is

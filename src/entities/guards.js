@@ -66,6 +66,10 @@
           : ["Keep moving, inmate.", "Nothing to see here.", "Back to your block."],
       },
     };
+    // a post named by the roster outranks the one systems/economy.js derives
+    // from the waypoints (a corridor officer walks a long straight line that
+    // the derivation would read as a yard patrol)
+    if (opts.post) { g.post = opts.post; g.rank = opts.rank != null ? opts.rank : 1; }
     g.group.position.copy(g.start);
     CBZ.guards.push(g);
     return g;
@@ -95,10 +99,26 @@
      fences off inside the outer wall is a patrol road, and a patrol road with
      nobody on it is the empty ring again. One man per side, walking the
      road between the corner towers; the legs are straight and clear. */
-  makeGuard([[-120.5, -100], [-120.5, 112]], 3.0, 15, 0.6);
-  makeGuard([[120.5, -100], [120.5, 112]], 3.0, 15, 0.6);
-  makeGuard([[-108, -112.5], [84, -112.5]], 3.0, 15, 0.6);
-  makeGuard([[-108, 124.5], [-52, 124.5]], 3.0, 15, 0.6);
+  makeGuard([[-120.5, -100], [-120.5, 112]], 3.0, 15, 0.6, { post: "perimeter" });
+  makeGuard([[120.5, -100], [120.5, 112]], 3.0, 15, 0.6, { post: "perimeter" });
+  makeGuard([[-108, -112.5], [84, -112.5]], 3.0, 15, 0.6, { post: "perimeter" });
+  makeGuard([[-108, 124.5], [-64, 124.5]], 3.0, 15, 0.6, { post: "perimeter" });
+  /* THE CORRIDORS (world/corridors.js). Movement officers walk the spine's
+     four legs and carry the Corridor Key — the one ring every grille in the
+     network answers to (systems/economy.js hangs it on `post: corridor`).
+     A posted officer stands each ring building: he holds nothing but a
+     baton, which is what a post officer holds. */
+  makeGuard([[-40, -60], [-40, 36]], 2.8, 14, 0.6, { post: "corridor", rank: 2 });
+  makeGuard([[40, 36], [40, -60]], 2.8, 14, 0.6, { post: "corridor", rank: 2 });
+  makeGuard([[-50, 52], [-50, 112]], 2.8, 14, 0.6, { post: "corridor", rank: 2 });
+  makeGuard([[50, 112], [50, 52]], 2.8, 14, 0.6, { post: "corridor", rank: 2 });
+  makeGuard([[-92, 8], [-92, 34]], 2.4, 13, 0.6, { post: "industries" });
+  makeGuard([[68, 72], [100, 72]], 2.4, 13, 0.6, { post: "kitchen" });
+  makeGuard([[64, 20], [104, 20]], 2.4, 13, 0.6, { post: "segregation" });
+  makeGuard([[68, 121], [102, 121]], 2.4, 13, 0.6, { post: "visitation" });
+  makeGuard([[68, -90], [94, -90]], 2.4, 13, 0.6, { post: "warehouse" });
+  makeGuard([[-80, -30], [-56, -30], [-56, -20]], 2.6, 14, 0.6, { post: "recyard" });
+  makeGuard([[-12, -90], [12, -90]], 2.2, 13, 0.6, { post: "control" });
   /* THE WARDEN — slow, sharp-eyed; bribe him for the gun-room key.
      He used to patrol a 12 x 6 m rectangle of open yard outside the gun-room
      door and never leave it: the man with the highest key in the prison spent
@@ -1126,6 +1146,17 @@
       g.hunt = 0; g.alert = 0; g.investigate = null;
       updateFlashlight(g, dt);
       animChar(g.char, 0, dt);
+      return;
+    }
+
+    // ON ESCORT DUTY (systems/capture.js's haul scene sets `_escort` and
+    // steers the body itself — the run-in, the kneel, the perp walk). Same
+    // shape as the sleeper above: an inert body this function does not move,
+    // animate or roll, because two writers on one man is a man who vibrates.
+    if (g._escort) {
+      noteState(g, "escort");
+      g.hunt = 0; g.alert = 0; g.investigate = null; g.approach = null;
+      updateFlashlight(g, dt);
       return;
     }
 

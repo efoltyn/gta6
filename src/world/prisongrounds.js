@@ -100,32 +100,20 @@
   fence({ x0: FX, z0: FZN, x1: FX, z1: FZS, h: 4.2, gates: [{ at: 50 - FZN, w: 4, open: false, sign: SZ_SIGN }] });
   fence({ x0: -FX, z0: FZN, x1: VG.x0 - 2, z1: FZN, h: 4.2, gates: [{ at: -40 + FX, w: 4, open: false, sign: SZ_SIGN }] });
   fence({ x0: VG.x1 + 2, z0: FZN, x1: FX, z1: FZN, h: 4.2 });
-  fence({ x0: -FX, z0: FZS, x1: S.x0 - 0.5, z1: FZS, h: 4.2, gates: [{ at: 40, w: 4, open: false, sign: SZ_SIGN }] });
-  fence({ x0: S.x1 + 0.5, z0: FZS, x1: FX, z1: FZS, h: 4.2, gates: [{ at: 40, w: 4, open: false, sign: SZ_SIGN }] });
+  // the south runs stop at the two spine sally ports (world/corridors.js, ±50)
+  fence({ x0: -FX, z0: FZS, x1: -60.5, z1: FZS, h: 4.2, gates: [{ at: 40, w: 4, open: false, sign: SZ_SIGN }] });
+  fence({ x0: 60.5, z0: FZS, x1: FX, z1: FZS, h: 4.2, gates: [{ at: 40, w: 4, open: false, sign: SZ_SIGN }] });
   // masts on the road, aimed into the compound
   for (const z of [-95, -50, -5, 40, 85]) { mast(-(OUT.x1 - 1.6), z, 18, { x: 1, z: 0 }); mast(OUT.x1 - 1.6, z, 18, { x: -1, z: 0 }); }
   for (const x of [-85, -40, 0, 40]) mast(x, OUT.z0 + 1.6, 18, { x: 0, z: 1 });
-  for (const x of [-85, -60, 60, 85]) mast(x, OUT.z1 - 1.6, 18, { x: 0, z: -1 });
+  for (const x of [-95, -70, 70, 95]) mast(x, OUT.z1 - 1.6, 18, { x: 0, z: -1 });
 
   /* ==========================================================
-     2. THE WALKWAYS. From each sally gate to each door, inside chain-link.
+     2. THE WALKWAYS were open-air chain-link from each gate to each door
+        until 2026-09-05; they are enclosed corridors now (world/corridors.js)
+        and the network they form is the map's spine. `walkway()` stays for
+        a fenced approach where one is wanted.
      ========================================================== */
-  // west gate (-30,22) -> industries door (-66, 20 +-3)
-  walkway("walk-w1", "x", 22, -31, -66.2, 9, { gaps: [{ at: -48, w: 4, side: -1 }] });
-  // branch north to the rec yard gate
-  walkway("walk-w2", "z", -48, -12, 17.5, 4, { razor: false });
-  // lower west gate (-44,84) -> powerhouse door (-84, 78 +-2.5)
-  walkway("walk-w3", "x", 81.25, -45, -84.2, 12.5);
-  // east gate (30,22) -> segregation door (58, 20 +-2.5)
-  walkway("walk-e1", "x", 21.5, 31, 57.8, 9, { gaps: [{ at: 47, w: 6, side: -1 }] });
-  // branch north to the service yard
-  walkway("walk-e2", "z", 47, -14, 17, 6, { razor: false });
-  // lower east gate (44,84) -> kitchen door (58, 78 +-2.5)
-  walkway("walk-e3", "x", 81.25, 45, 57.8, 12.5, { gaps: [{ at: 49, w: 6, side: 1 }] });
-  // south to visitation (62, 115 +-2)
-  walkway("walk-e4", "z", 49, 87.5, 118, 6, { gaps: [{ at: 115, w: 6, side: 1 }] });
-  walkway("walk-e5", "x", 115, 52, 62.2, 6);
-
   /* ==========================================================
      3. THE RECREATION YARD. x[-112,-46] z[-100,-12]: turf, a four-lane
         track, two courts, bleachers, a weight pit under a canopy, a
@@ -275,9 +263,11 @@
         in the north wall, a gatehouse, the warehouse with its dock, a
         fuel island, the motor pool, painted bays, the dumpsters.
      ========================================================== */
-  const SY = { x0: 42, x1: FX, z0: FZN, z1: -14 };
+  const SY = { x0: 44, x1: FX, z0: FZN, z1: -14 };
   ground((SY.x0 + SY.x1) / 2, (SY.z0 + SY.z1) / 2, SY.x1 - SY.x0, SY.z1 - SY.z0, "asphalt", { program: "service-yard" });
-  fence({ x0: SY.x0, z0: SY.z1, x1: SY.x1, z1: SY.z1, h: 4.2, gates: [{ at: 47 - SY.x0 + 0, w: 6, open: true, side: -1 }] });
+  // the yard's south fence; its west fence (with the gate off the north
+  // spine's east end) is world/corridors.js's, so the two agree on x=44
+  fence({ x0: SY.x0, z0: SY.z1, x1: SY.x1, z1: SY.z1, h: 4.2 });
   /* THE NORTH COURT. Central control (x±26, z[-108,-78]) stands north of the
      administration wing; before the walkways it was reached across open
      ground, and a walkway network that forgot it would strand the gun-room
@@ -287,9 +277,12 @@
      cell house's own walls: one enclosure from the west fence to the wire,
      entered at the service-yard gate. Measured by flood-fill (0.5 m): the
      control door reads reachable with the sally cards, unreachable without. */
-  fence({ x0: -42, z0: SY.z0, x1: -42, z1: SY.z1, h: 4.2 });
-  fence({ x0: -42, z0: SY.z1, x1: -16.6, z1: SY.z1, h: 4.2, razor: false });
-  fence({ x0: 16.6, z0: SY.z1, x1: SY.x0, z1: SY.z1, h: 4.2, razor: false });
+  // (the spine's legs at x=±40 pass through this line; the stubs die into
+  //  the corridor walls either side of them)
+  fence({ x0: -46, z0: SY.z0, x1: -46, z1: SY.z1, h: 4.2 });
+  fence({ x0: -46, z0: SY.z1, x1: -42.3, z1: SY.z1, h: 4.2, razor: false });
+  fence({ x0: -37.7, z0: SY.z1, x1: -16.6, z1: SY.z1, h: 4.2, razor: false });
+  fence({ x0: 16.6, z0: SY.z1, x1: 37.7, z1: SY.z1, h: 4.2, razor: false });
   ground(0, (SY.z0 - 64) / 2, 84, -64 - SY.z0, "asphalt", { program: "north-court" });
   // the sally port: pen fences, inner vehicle gate (shut), the wall gate (shut, solid)
   const PEN = { x0: 90, x1: 114, z1: -98 };
@@ -427,7 +420,7 @@
         the transformer yard against the powerhouse. Fenced, signed, gravel.
      ========================================================== */
   (function utilities() {
-    const UY = { x0: -116, x1: -48, z0: 98, z1: 120 };
+    const UY = { x0: -116, x1: -61, z0: 98, z1: 120 };
     ground((UY.x0 + UY.x1) / 2, (UY.z0 + UY.z1) / 2, UY.x1 - UY.x0, UY.z1 - UY.z0, "gravel", { program: "utility-yard" });
     ring(UY.x0, UY.z0, UY.x1, UY.z1, { h: 3.6, gates: [{ side: "N", at: -60, w: 5, open: false, sign: "AUTHORIZED\nPERSONNEL ONLY" }] });
     // the water tower: four braced legs, a riser, a tank with a domed floor and a conical roof

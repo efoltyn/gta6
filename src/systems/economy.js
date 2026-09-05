@@ -108,6 +108,10 @@
     // line takes it and nothing electric; the man on the gate carries it
     // every shift (rollLoadout), and one hangs on the booth's board.
     "Gate Key":        { value: 45, tag: "key",       rarity: "rare" },
+    // THE CORRIDOR KEY is one ring for every grille in world/corridors.js's
+    // network — a real key-control policy issues one ring per post, never a
+    // key per door. On the movement officers' belts and the board in control.
+    "Corridor Key":    { value: 40, tag: "key",       rarity: "rare" },
     Gun:               { value: 50, tag: "key",       rarity: "epic" },
     // --- B7: catalog parity with city/economy.js's harvest-node resources +
     // tools (systems/resources.js is CITY-only — no gather nodes in the
@@ -1267,7 +1271,7 @@
       const lifted = liftBest(actor, load);
       if (lifted) { addItem(lifted, 1); grantKeyItem(lifted); }
       if (lifted || loot) {
-        CBZ.sfx(lifted === "Keycard" || lifted === "Cell Key" || lifted === "Gun-Room Key" || lifted === "Gate Key" ? "key" : "loot");
+        CBZ.sfx(lifted === "Keycard" || lifted === "Cell Key" || lifted === "Gun-Room Key" || lifted === "Gate Key" || lifted === "Corridor Key" ? "key" : "loot");
         announceLoot(loot, lifted ? [lifted] : []);
       } else {
         // his pockets were already empty. The hand came back with nothing and
@@ -1559,6 +1563,7 @@
       maybe("Cell Key", key(0.4));   // the wing keys ride on a screw's belt — steal the belt
       if (rank >= 2) maybe("Keycard", key(actor.post === "gate" || actor.post === "wing" ? 0.75 : 0.6));
       if (actor.post === "gate") add("Gate Key");     // the exit's key is on the exit's man, not rolled
+      if (actor.post === "corridor") add("Corridor Key");
       if (actor.corrupt) { maybe("Cash Roll", 0.6); maybe("Burner SIM", 0.4); maybe("Gold Tooth", 0.2); maybe("Cigarette Carton", 0.45); }
       // Guns are a CITY thing now — the jail is mostly shivs and fists. The
       // warden still rarely carries one, but firearms moved out to the streets.

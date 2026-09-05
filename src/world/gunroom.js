@@ -392,6 +392,13 @@
     );
   }
 
+  /* THE RACK STOPS A BODY (owner 2026-09-05: "gun shelves have no colliders,
+     you can run through them"). One collider for the shelf column and one
+     for the heavy rack's bracket stack; the take verb reaches over them. */
+  if (CBZ.colliders) {
+    CBZ.colliders.push({ minX: 26.55, maxX: 27.55, minZ: -4.7, maxZ: 6.7, rack: true, noBreach: true });
+    if (FULL) CBZ.colliders.push({ minX: 24.45, maxX: 25.2, minZ: -3.95, maxZ: -2.25, rack: true, noBreach: true });
+  }
   function makeSlot(data) {
     const model = buildRackModel(data.id);
     model.updateMatrixWorld(true);

@@ -55,6 +55,16 @@
     { x0: -27, x1: 27, z0: 5,  z1: 49 },
     { x0: -18, x1: 18, z0: 56, z1: 78 },
     { x0: -18, x1: 18, z0: 82, z1: 123 },
+    // the ring (2026-09-05): islands — a body assigned here stays here, the
+    // way a work detail does; the portal table below only knows 0/1/2
+    { x0: -106, x1: -52, z0: -94, z1: -18 },     // recreation yard
+    { x0: -110, x1: -72, z0: 0, z1: 40 },        // industries
+    { x0: 62, x1: 106, z0: 64, z1: 92 },         // kitchen
+    { x0: 66, x1: 106, z0: 106, z1: 124 },       // visitation
+    { x0: -41.5, x1: -38.5, z0: -60, z1: 40 },   // west spine
+    { x0: 38.5, x1: 41.5, z0: -60, z1: 40 },     // east spine
+    { x0: 48.5, x1: 51.5, z0: 50, z1: 112 },     // east spine, south leg
+    { x0: -42, x1: -29, z0: -105, z1: -79 },     // Housing Unit B
   ];
   const WORLD = CBZ.WORLD, DENSITY_CELL_SIZE = 8;
   const DENSITY_W = Math.ceil((WORLD.maxX - WORLD.minX) / DENSITY_CELL_SIZE);
@@ -216,7 +226,8 @@
     let nextZone = zone;
     // Hidden movement is portal-to-portal. Only the current segment matters;
     // intermediate invisible footsteps are never integrated frame by frame.
-    if (rnd(id) < 0.11) {
+    if (zone >= 3) nextZone = zone;                 // a ring island: nobody leaves
+    else if (rnd(id) < 0.11) {
       if (zone === 0) nextZone = 1;
       else if (zone === 2) nextZone = 1;
       else nextZone = rnd(id) < 0.5 ? 0 : 2;

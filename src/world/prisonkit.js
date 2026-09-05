@@ -258,7 +258,10 @@
     const key = kind + ":" + (tint == null ? "" : tint) + (rough != null ? ":" + rough : "");
     if (MATS.has(key)) return MATS.get(key);
     let m;
-    if (kind === "glass") {
+    if (kind === "lit") {
+      // a lit tube: emissive, merged; corridors and vestibules are lit 24 h
+      m = new THREE.MeshStandardMaterial({ color: 0xfff6dc, emissive: 0xffe9a8, emissiveIntensity: 1.0, roughness: 0.5, metalness: 0.0 });
+    } else if (kind === "glass") {
       m = new THREE.MeshStandardMaterial({
         color: tint != null ? tint : 0x4b6e86, transparent: true, opacity: 0.42,
         roughness: 0.08, metalness: 0.55, side: THREE.DoubleSide, depthWrite: false,
@@ -511,6 +514,24 @@
     for (let i = 0; i < 3; i++) {
       const s = i - 1;
       stat(new THREE.BoxGeometry(0.03, H - 2.5, 0.03), galv, lx + face.x * 0.42 * Math.cos(s * 1.2) + px * 0.4 * Math.sin(s * 1.2), (H + 2.3) / 2, lz + face.z * 0.42 * Math.cos(s * 1.2) + pz * 0.4 * Math.sin(s * 1.2), { cast: false });
+    }
+    /* THE CLIMB. A ladder you cannot climb is a decal (owner 2026-09-05:
+       "you can't actually get to the towers, the ladders don't work"). The
+       rung ramp below is honest geometry but a 12 m rise over 0.8 m is not a
+       slope a body walks; the climb is the vent verb systems/interactions.js
+       already owns — stand at the foot, press, you are on the deck; stand at
+       the hatch, press, you are on the ground. The deck is a platform record
+       and the rail is a height-gated collider, so up there you can walk to
+       the edge and not off it. */
+    CBZ.vents = CBZ.vents || [];
+    const foot = { x: lx + face.x * 0.55, z: lz + face.z * 0.55, y: 0.12, name: "the ground", verb: "Climb", dest: null, route: false, ladder: true };
+    const hatch = { x: lx - face.x * 1.45, z: lz - face.z * 1.45, y: H + 0.26, name: "the tower", verb: "Climb down", dest: null, route: false, ladder: true };
+    foot.dest = hatch; hatch.dest = foot;
+    CBZ.vents.push(foot, hatch);
+    stat(new THREE.BoxGeometry(1.0, 0.04, 1.0), grating, hatch.x, H + 0.27, hatch.z, { uv: 1, cast: false });
+    for (const s of [-1, 1]) {
+      CBZ.colliders.push({ minX: x - R, maxX: x + R, minZ: z + s * (R - 0.1) - 0.1, maxZ: z + s * (R - 0.1) + 0.1, y0: H + 0.2, y1: H + 1.5, rail: true, noBreach: true });
+      CBZ.colliders.push({ minX: x + s * (R - 0.1) - 0.1, maxX: x + s * (R - 0.1) + 0.1, minZ: z - R, maxZ: z + R, y0: H + 0.2, y1: H + 1.5, rail: true, noBreach: true });
     }
     if (CBZ.platforms) {
       const l0 = { x: lx, z: lz }, along = Math.abs(face.z) >= Math.abs(face.x);

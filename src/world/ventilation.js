@@ -67,7 +67,7 @@
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.PRISON_VENTS_V2 == null) CBZ.CONFIG.PRISON_VENTS_V2 = true;
 
-  CBZ.vents = [];
+  CBZ.vents = CBZ.vents || [];   // world/prisonkit.js's tower ladders are vents too, registered before this parses
   const solved = [];        // every grate this file placed, for the audit
 
   /* ----------------------------------------------------------

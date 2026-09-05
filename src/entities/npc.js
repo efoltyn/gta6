@@ -700,7 +700,7 @@
      purpose) still wins. */
   const wing = CBZ.prisonBeds ? CBZ.prisonBeds() : null;
   const CROWD = (typeof CBZ.JAIL_CROWD === "number" && CBZ.JAIL_CROWD_EXPLICIT) ? CBZ.JAIL_CROWD
-    : (wing ? Math.max(0, wing.houses - CBZ.npcs.length - wing.cells)
+    : (wing ? Math.min(24, Math.max(0, wing.houses - CBZ.npcs.length - wing.cells))   // the rest is the ambient rig's
             : ((typeof CBZ.JAIL_CROWD === "number") ? CBZ.JAIL_CROWD : 26));
   (function spawnCrowd(count) {
     let s = 0x4a1f7b;
@@ -711,15 +711,17 @@
     // open spawn boxes: north yard + south block (avoid the cell block z<-8)
     // open spawn boxes: the two yards, and (2026-09-05) the ring's rooms and
     // corridors, so the half of the map that had no bodies has bodies
+    // A NAMED BODY MUSTERS ON FOOT, so it spawns where it can walk to its bunk
+    // without a grille in the way: the two yards, or Housing Unit B and the
+    // corridor pocket outside it (world/corridors.js). The ring's rooms are
+    // the AMBIENT crowd's (entities/ambientstate.js), which travels by portal.
     const ZONES = [[-28, 28, -6, 50], [-42, 42, 56, 124],
-      [-106, -52, -94, -18],        // the recreation yard
-      [-110, -72, 0, 40],           // prison industries
-      [62, 106, 64, 92],            // the kitchen
-      [66, 106, 106, 124],          // visitation
-      [-41.5, -38.5, -60, 40],      // the west spine
-      [38.5, 41.5, -60, 40]];       // the east spine
+      [-42, -29, -105, -79],        // Housing Unit B
+      [-41.5, -38.5, -70, -48],     // the west spine's north pocket
+      [-41, -27, -73.5, -70.5]];    // the north spine, west end
     for (let i = 0; i < count; i++) {
-      const z = ZONES[rr() < 0.42 ? 0 : 1];
+      // 55% in the two old yards, the rest spread over the ring's rooms and corridors
+      const z = rr() < 0.55 ? ZONES[rr() < 0.42 ? 0 : 1] : ZONES[2 + ((rr() * (ZONES.length - 2)) | 0)];
       const x = z[0] + rr() * (z[1] - z[0]);
       const zz = z[2] + rr() * (z[3] - z[2]);
       makeNpc({
