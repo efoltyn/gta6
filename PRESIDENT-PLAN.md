@@ -78,7 +78,42 @@ Read together:
   each keep a legacy branch alive (old fountain, lobby/bosssuite interiors,
   the east-door 11×8 closet). Nobody will ever flip them back.
 
-## 2. The plan
+## 1c. What shipped (this branch)
+
+Every item of §2 is built. One headless gate covers all of it:
+`npm run test:president` (tools/president-check.mjs) boots the real title-card
+President run, advances days through polity's own wrap hook and asks each
+organ the one question a player asks of it. Pictures: `npm run
+visual:president-loop` (tools/visual-presets/president-loop.mjs) and
+`artifacts/president-facade/`.
+
+| item | where | what |
+|---|---|---|
+| 1 threat at the gate | presidency.js §4 | attacks alternate market/gate; a gate attack rolls a real car up the drive, casts gunmen at the leaf, the detail answers |
+| 2 HUD | president_hud.js | approval · treasury · emergency · day/term · threat (armed target, red pulse) · wall/bureau/impeachment chips · deposed banner; flag PRESIDENT_HUD |
+| 3 Chief of Staff | president_agenda.js | 2–3 tasks a day through core/mission.js: podium address (E = presidency.press("address"), press corps), the General's briefing, a ride to the Bureau or the wall crossing, the drill when a threat is armed; ignored tasks cost approval |
+| 4 motorcade | motorcade.js | state car in the court, verb card on the chauffeur (Capitol / Bureau / Saltlands / Home), a helicopter on the pad the head of state boards without stealing it |
+| 5 a term you can lose | officials.js + presidency.js §6b | the player's country term is 7 days (PRESIDENT_TERM_DAYS); the presidency rides elections.js's real cycle: campaign call with the live poll, RE-ELECTED (one more bomber) or DEFEATED (a private citizen at your own gate) |
+| 6 scandal | presidency.js §6 | scandal drifts toward statecraft's tyranny plus attacks minus addresses; impeachment at scandal ≥ 70 or approval < 25 with scandal ≥ 45 |
+| 7 the falls on the building | president_regime.js | banners, searchlights, sandbags, leader plate (dictatorship/fascism); red cloth, star, podium (communism); purple and gold, sentry posts (monarchy); MARTIAL LAW (junta); the detail's gear tier follows; the press leaves the hall |
+| 8 all the powers | presidency.js §3 | 17 pads on two table ranks and a standing console, every statecraft decree and deployment as a thin wrapper; the board draws the country |
+| 9 a real interior | interior_programs.js | the light panels were poured inside the slab; chandeliers, sconces, coffers, panelling, seal, portraits, standards, a fireplace wall, a briefing wall, a press corps; state symbols 13 → 26 |
+| 10 legacy deleted | govcomplex.js, presidency.js | PRESIDENT_COMPOUND_V2 and PRESIDENCY_ROOMS_V2 and every branch they guarded |
+
+Found and fixed on the way:
+
+- **The Saltlands never existed to the mode.** Regions are registered on the
+  arena, and presidency.js and construction.js read `CBZ.city.regions`, which
+  is empty on a booted world. The wall order refused, safehouses were empty
+  and the Dry Gulch target never fired. Both now read whichever ledger is
+  filled.
+- **Every NPC stood in the ground.** peds.js pinned `pos.y = 0` each frame;
+  the Mansion's paving is at 0.10, the hall slab at 0.14, the stylobate at
+  0.30. NPCs now settle on physics.js's `groundAt`, the player's own law
+  (PED_FEET_V1). The gate checks 24 bodies on the compound, none sunk.
+- **The Executive Mansion wore two facades** (§1a).
+
+## 2. The plan (as written before the build)
 
 Principle: **bring the plot to the player, and put the president's numbers
 on the player.** Every order should produce a scene within 60 s and within

@@ -118,6 +118,20 @@ else {
   check("events: on()/emit() exist", ev === true);
 }
 
+// ---- 1b. the room's powers and the frontier ----------------------------------
+if (st) {
+  const pw = await evl(`
+    var B = CBZ.presidency.buttons ? CBZ.presidency.buttons() : [];
+    var ok = B.filter(function (b) { return b.ok; }).length;
+    var w = CBZ.presidency.press('wall');
+    for (var k=0;k<120;k++) CBZ.stepSim(1/60);
+    var s = CBZ.presidency.status();
+    return { pads: B.length, pressable: ok, wall: w, wallStatus: s.wall, members: s.threat.members };`);
+  check("every shipped power is a pad, most pressable on day one", pw && pw.pads >= 15 && pw.pressable >= 10, `pads=${pw && pw.pads} pressable=${pw && pw.pressable}`);
+  check("BUILD THE WALL finds the Saltlands frontier", !!(pw && pw.wall && pw.wall.ok && pw.wallStatus && pw.wallStatus.ordered && pw.wallStatus.total > 0), JSON.stringify(pw && { wall: pw.wall, status: pw.wallStatus }));
+  check("the cell has a roster on the first morning", !!(pw && pw.members > 0), `members=${pw && pw.members}`);
+}
+
 // ---- 2. the HUD ------------------------------------------------------------
 const hud = await evl("return CBZ.presidentHudAudit ? CBZ.presidentHudAudit() : null;");
 if (!hud) skip("president HUD", "no presidentHudAudit");
