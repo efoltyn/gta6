@@ -793,6 +793,11 @@
     A.rect("side", 0.08, 0.09, 0.84, 0.055, hi);
     A.rect("front", 0, 0.88, 1, 0.12, seam);                        // coverall cuff
     A.shade();
+    inmateLegs(L, c, orange, seam);
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+  PAINT.inmate_cap = PAINT.inmate;
+  function inmateLegs(L, c, orange, seam) {
     const leg = (c && c.legs != null) ? c.legs : tone2(orange, -0.04);
     L.fill(hx(leg));
     L.rect("side", 0.46, 0, 0.08, 1, seam);                         // outside seam
@@ -800,9 +805,35 @@
     L.rect("side", 0.16, 0.18, 0.68, 0.18, tone(leg, -0.12));      // thigh pocket
     L.rect("front", 0, 0.92, 1, 0.08, seam);                       // ankle break
     L.shade();
+  }
+
+  // THE JUMPSUIT TIED AT THE WAIST. The way half a real yard wears the issue
+  // coverall: top peeled off, sleeves knotted round the waist, a tank under
+  // it — and BARE ARMS, which is the only place arm ink is ever seen. Skin-
+  // keyed (the arms are the wearer's tone) and ink-keyed (entities/heritage.js
+  // paints the sleeve set into the same row). Legs are the ordinary coverall.
+  PAINT.inmate_tank = function (P, c) {
+    const orange = (c && c.legs != null) ? c.legs : 0xe76518;
+    const white = 0xe6e3d9, skin = (c && c.skin != null) ? c.skin : 0xcf9a72;
+    const oc = hx(orange), seam = tone(orange, -0.30), wc = hx(white), sk = hx(skin), rib = tone(white, -0.09);
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(wc);
+    T.poly("front", [[0.36, 0], [0.64, 0], [0.5, 0.20]], sk);          // the tank's neckline
+    T.poly("back", [[0.40, 0], [0.60, 0], [0.5, 0.12]], sk);
+    for (const col of ["front", "back", "side"]) for (let x = 0.08; x < 1; x += 0.11) T.rect(col, x, 0.20, 0.014, 0.52, rib);
+    T.rect("front", 0.2, 0.42, 0.16, 0.08, "rgba(40,34,24,0.14)");   // yard grime
+    // the knotted sleeves: an orange band round the hips with the knot in front
+    for (const col of ["front", "back", "side"]) { T.rect(col, 0, 0.74, 1, 0.26, oc); T.rect(col, 0, 0.74, 1, 0.03, seam); }
+    T.poly("front", [[0.30, 0.74], [0.50, 0.66], [0.70, 0.74], [0.62, 1], [0.38, 1]], tone(orange, 0.10));   // the knot
+    T.rect("front", 0.46, 0.70, 0.08, 0.30, seam);
+    T.poly("front", [[0.20, 0.80], [0.36, 0.80], [0.30, 1], [0.12, 1]], tone(orange, -0.14));   // a sleeve hanging
+    T.shade();
+    A.fill(sk);
+    if (c && c.ink && CBZ.inkPaintArm) CBZ.inkPaintArm(A, c.ink, sk);
+    A.shade();
+    inmateLegs(L, c, orange, seam);
     return { torso: 1, arms: 1, legs: 1 };
   };
-  PAINT.inmate_cap = PAINT.inmate;
 
   PAINT.inmate_orderly = function (P, c) {
     const top = (c && c.torso != null) ? c.torso : 0xe7edf0;
@@ -2393,7 +2424,7 @@
   //   child's shins). The shared atlas can't know a wearer's tone unless the
   //   tone is part of the key — a handful of atlases, never one per rig.
   const COLOR_KEYED = { dress: 1, sundress: 1, hoodie: 1, blouse: 1, onesie: 1, pyjamas: 1, school: 1, schoolgirl: 1, kidhoodie: 1 };
-  const SKIN_KEYED = { wifebeater: 1, romper: 1, kidtee: 1, pinafore: 1 };
+  const SKIN_KEYED = { wifebeater: 1, romper: 1, kidtee: 1, pinafore: 1, inmate_tank: 1 };
 
   // ============================================================
   //  SUIT_STYLES — the parameterized suit catalog. A suit's cache key is
@@ -2473,7 +2504,10 @@
     // rides too, so two kids in different tees don't share one texture.
     if (SKIN_KEYED[id]) {
       const sk = (c.skin != null) ? c.skin | 0 : (ch && ch.skinTone != null ? ch.skinTone | 0 : 0xcf9a72);
-      return id + "|" + (c.torso != null ? c.torso | 0 : 0) + "|" + sk;
+      // …and the wearer's INK SET (entities/heritage.js stamps ch.ink): bare
+      // arms carry tattoos, and a tattoo is part of the picture, so it is part
+      // of the key. Ten heritages x a few sets — still a handful of atlases.
+      return id + "|" + (c.torso != null ? c.torso | 0 : 0) + "|" + sk + "|" + (ch && ch.ink ? ch.ink : "");
     }
     if (PAINT[id]) return id;
     // …and anything with no painter at all keeps the flat-colour path in
@@ -2601,7 +2635,7 @@
     // the WEARER's skin tone isn't in rec.colors (it comes off the rig), so it
     // rides the cache key and is handed back to the painter here. The garment
     // colors stay exactly where every other painter reads them: rec.colors.
-    else if (SKIN_KEYED[kind]) parts = PAINT[kind](P, Object.assign({}, c, { skin: key.split("|")[2] | 0 }));
+    else if (SKIN_KEYED[kind]) { const seg = key.split("|"); parts = PAINT[kind](P, Object.assign({}, c, { skin: seg[2] | 0, ink: seg[3] || "" })); }
     else if (PAINT[kind]) parts = PAINT[kind](P, c);
     if (!parts) return null;
     const tex = new THREE.CanvasTexture(cv);

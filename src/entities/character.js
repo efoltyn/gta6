@@ -919,6 +919,31 @@
     const mouth = new THREE.Mesh(boxGeom(0.22, 0.06, 0.06), cmat(0x4a2528));
     mouth.position.set(0, 0.16, faceZ);
     face.add(le, re, brow, mouth);
+    /* ---- FACIAL HAIR (entities/heritage.js) --------------------------------
+       c.beard: "full" | "goatee" | "moustache" | "stubble". Boxes in the face
+       frame (head spans y 0..0.60, z ±0.30, the face plane at 0.315), every
+       face at least 0.01 clear of the skull's (the z-fight law above). A full
+       beard wraps the jaw and hangs 0.03 below the chin; its top stops UNDER
+       the mouth so the lips still read; the moustache sits over them. Stubble
+       is the same jaw box in a tone halfway between hair and skin — a
+       five-o'clock shadow, not a beard. */
+    const beardParts = [];
+    if (c.beard) {
+      const bh = c.hair != null ? c.hair : 0x4a3526;
+      const mix = (a, b, t) => {
+        const ar = a >> 16 & 255, ag = a >> 8 & 255, ab = a & 255, br = b >> 16 & 255, bg = b >> 8 & 255, bb = b & 255;
+        return ((ar + (br - ar) * t) << 16) | ((ag + (bg - ag) * t) << 8) | (ab + (bb - ab) * t);
+      };
+      const bm = c.beard === "stubble" ? cmat(mix(bh, c.skin != null ? c.skin : 0xcf9a72, 0.55)) : cmat(bh);
+      const add = (w, h, d, x, y, z) => {
+        const m = new THREE.Mesh(boxGeom(w, h, d), bm);
+        m.position.set(x, y, z); m.castShadow = false; face.add(m); beardParts.push(m);
+      };
+      if (c.beard === "full") { add(0.62, 0.17, 0.64, 0, 0.055, 0); add(0.30, 0.055, 0.07, 0, 0.225, 0.325); }
+      else if (c.beard === "goatee") { add(0.24, 0.15, 0.07, 0, 0.075, 0.325); add(0.30, 0.055, 0.07, 0, 0.225, 0.325); }
+      else if (c.beard === "moustache") add(0.32, 0.055, 0.07, 0, 0.225, 0.325);
+      else if (c.beard === "stubble") add(0.62, 0.15, 0.64, 0, 0.065, 0);
+    }
     body.add(neck);
 
     // ---- accessories (all on the body so they move with it) ----
@@ -978,7 +1003,9 @@
       cap.position.y = headSize + 0.07 * ck; neck.add(cap); capParts.push(cap);
       const brim = new THREE.Mesh(boxGeom(0.66 * ck, 0.1 * ck, 0.3 * ck), cmat(c.cap));
       brim.position.set(0, headSize - 0.02 * ck, 0.42 * ck); neck.add(brim); capParts.push(brim);
-    } else {
+    } else if (!c.bald) {
+      // c.bald (entities/heritage.js): a SHAVED head is no hair mesh at all —
+      // the scalp is the skull's own skin, not a skin-coloured cap.
       // ONE MERGED SHELL — see the HAIR SHELL block above for the owner bug and
       // why a skull-cap-plus-back-plank can never be fixed by tucking. The
       // boxes are merged into a single cached BufferGeometry, so the seam
@@ -1049,9 +1076,10 @@
         badge: badgeParts,
         cap: capParts,
         hair: hairParts,
+        beard: beardParts,
       },
       face: { eyeL: le, eyeR: re, brow, mouth }, // animated by systems/facial.js
-      detail: [le, re, brow, mouth].concat(hairParts, capParts, body.userData.stripes || [], badgeParts),
+      detail: [le, re, brow, mouth].concat(hairParts, beardParts, capParts, body.userData.stripes || [], badgeParts),
       phase: Math.random() * 6.28,  // desync gaits between actors
       bob: 0, breath: Math.random() * 6.28,
       lean: 0, sway: 0, headYaw: 0,

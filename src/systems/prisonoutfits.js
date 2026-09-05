@@ -28,10 +28,11 @@
   const NPC_FIT = {
     inmate: "inmate",
     cap: "inmate_cap",
+    tank: "inmate_tank",     // top tied at the waist, bare (inked) arms — entities/heritage.js
     orderly: "inmate_orderly",
     chapel: "inmate_chapel",
   };
-  const REQUIRED = ["inmate", "inmate_cap", "inmate_orderly", "inmate_chapel", "corrections", "warden", "swat"];
+  const REQUIRED = ["inmate", "inmate_cap", "inmate_tank", "inmate_orderly", "inmate_chapel", "corrections", "warden", "swat"];
 
   function catalog() {
     try { return CBZ.cityOutfitCatalog ? CBZ.cityOutfitCatalog() : null; } catch (e) { return null; }

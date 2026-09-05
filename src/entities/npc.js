@@ -18,6 +18,10 @@
     const lifeDef = CBZ.npcLife ? CBZ.npcLife.resolve("jailInmate") : { id: "jailInmate", actor: {}, life: { routine: true } };
     opts = Object.assign({}, lifeDef.actor, opts || {});
     const ch = makeCharacter(opts.skin);
+    // WHO HE IS (entities/heritage.js): a rolled look carries heritage/ink/
+    // beard/tank; stamp the head ink + the tags the wardrobe reads off the rig.
+    if (opts.skin && opts.skin.heritage && CBZ.heritageApply) CBZ.heritageApply(ch, opts.skin);
+    if (!opts.prisonOutfit && opts.skin && opts.skin.tank) opts.prisonOutfit = "tank";
     ch.group.position.set(opts.pos[0], 0, opts.pos[1]);
     ch.group.userData.dynamic = true;
     scene.add(ch.group);
@@ -456,7 +460,7 @@
   makeNpc({
     pos: [-22, 30], region: [-27, -15, 24, 40], role: "merchant", speed: 1.4,
     tagText: "Old Timer · shop", tagColor: "#ffd451",
-    skin: { legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a, skin: 0xe8c39a, hair: 0xdedede, stripes: 0xc85c00, shoes: 0x2b2b2b },
+    skin: jump("white", "the Old Timer", { hair: 0xdedede, hairStyle: "short", bald: false, beard: "full", ink: "", tank: false }),
     data: {
       name: "the Old Timer", pool: "goods", offer: econ.pickOffer("goods"),
       tip: "Psst, guards go blind in the searchlight glare. Use it.",
@@ -471,7 +475,7 @@
     pos: [14, 18], region: [10, 17, 12, 24], role: "dealer", speed: 2.0,
     prisonOutfit: "cap",
     tagText: "Dealer · product", tagColor: "#b07aff",
-    skin: { legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a, skin: 0x6b4a32, cap: 0x222222, stripes: 0xc85c00, shoes: 0x111111 },
+    skin: jump("black", "the Dealer", { cap: 0x222222, shoes: 0x111111 }),
     data: {
       name: "the Dealer", pool: "drugs", offer: econ.pickOffer("drugs"),
       tip: "You didn't get it from me, yeah?",
@@ -486,7 +490,7 @@
     makeNpc({
       pos: [i ? -6 : 6, 38], region: [-14, 14, 26, 46], role: "thief", speed: 2.8,
       tagText: "Shifty Inmate", tagColor: "#ff7a7a",
-      skin: { legs: 0x3a3f47, torso: 0x3a3f47, collar: 0x2a2e34, arms: 0x3a3f47, skin: 0xe7b58c, hair: 0x2a2018, shoes: 0x111111 },
+      skin: jump(i ? "eastasian" : "white", "thief " + id, { legs: 0x3a3f47, torso: 0x3a3f47, collar: 0x2a2e34, arms: 0x3a3f47, shoes: 0x111111 }),
       data: { name: "a thief", pool: "fenced", offer: econ.pickOffer("fenced"),
         talk: ["Nice cigs. Be a shame if they vanished.", "Wanna buy? Fell off a truck, swear."] },
     })
@@ -497,7 +501,7 @@
     makeNpc({
       pos: p, region: [p[0] - 6, p[0] + 6, p[1] - 6, p[1] + 6], role: "inmate", speed: 1.8 + i * 0.3,
       tagText: "Inmate", tagColor: "#cfe9ff",
-      skin: { legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a, skin: i ? 0x8a5a3a : 0xf0c39a, hair: 0x4a3526, stripes: 0xc85c00, shoes: 0x2b2b2b },
+      skin: jump(["white", "black", "latino"][i], "convict " + i),
       data: { name: "an inmate", pool: "goods", offer: econ.pickOffer("goods"),
         talk: ["Yard time's the only time.", "Keep your head down out there.", "Heard the warden's got a key to the gun room."] },
     })
@@ -524,11 +528,9 @@
     tagText: m.tag, tagColor: m.gang === 0 ? "#ff7979" : "#7aa6ff",
     // Everyone wears the SAME prison orange — you can't tell a gang by their
     // jumpsuit, only by who they run with (name tag / radar). Realistic.
-    skin: {
-      legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a,
-      skin: m.gang === 0 ? 0xb67b52 : 0xd8a177, hair: m.gang === 0 ? 0x22160f : 0x101820,
-      stripes: 0xc85c00, shoes: 0x2b2b2b,
-    },
+    // The cars sort the way real yards do: the Reds run Latino, the Blues run
+    // Black. Each man's own look (ink, beard, tank) is rolled off his name.
+    skin: jump(m.gang === 0 ? "latino" : "black", m.name),
     data: {
       name: m.name, pool: m.crewRole === "runner" ? "fenced" : "goods", offer: econ.pickOffer(m.crewRole === "runner" ? "fenced" : "goods"),
       crewRole: m.crewRole,
@@ -545,108 +547,118 @@
      brilliant cowards, immovable walls. Most are loners (forceNeutral) so
      they stay in their district instead of marching to a gang turf. */
 
-  // a standard prison-orange jumpsuit with per-character skin/hair tweaks
-  function jump(skin, hair, opts) {
-    return Object.assign({
-      legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a,
-      skin: skin, hair: hair, stripes: 0xc85c00, shoes: 0x2b2b2b,
-    }, opts || {});
+  // a standard prison-orange jumpsuit on a MAN OF A HERITAGE (entities/
+  // heritage.js). jump("latino", "Hector") rolls Hector's look deterministically
+  // off his name; `over` pins any field (hair, beard, ink, tank, hairStyle…).
+  // The legacy jump(skinHex, hairHex, opts) form still works for a one-off.
+  function jump(heritage, name, over) {
+    const base = { legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a, stripes: 0xc85c00, shoes: 0x2b2b2b };
+    if (typeof heritage === "number") return Object.assign(base, { skin: heritage, hair: name }, over || {});
+    const look = CBZ.heritageRoll ? CBZ.heritageRoll(heritage, typeof name === "string" ? name : undefined, over)
+      : Object.assign({ skin: 0xc08a5a, hair: 0x2a2018 }, over || {});
+    return Object.assign(base, look);
+  }
+  // the crowd's roll: heritage by weight, then the look — one seeded stream
+  function crowdLook(rr) {
+    if (!CBZ.heritageRoll) return jump(0xc08a5a, 0x2a2018);
+    return Object.assign({ legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a, stripes: 0xc85c00, shoes: 0x2b2b2b },
+      CBZ.heritageRoll(null, rr));
   }
 
   const ROSTER = [
     // ===== showcase legends in the original north yard =====
     { name: "Tiny", tag: "Tiny", color: "#cfe9ff", pos: [-7, 18], box: [-14, 2, 10, 30], role: "inmate", neutral: true, speed: 1.6,
-      behavior: "defensive", ratings: { fighting: 96, toughness: 99, speed: 28, cunning: 30 }, skin: jump(0xb5825a, 0x1a120c, { collar: 0xff9747 }),
+      behavior: "defensive", ratings: { fighting: 96, toughness: 99, speed: 28, cunning: 30 }, skin: jump("black", "Tiny", { beard: "full", collar: 0xff9747 }),
       talk: ["I don't start nothin'. I just finish it.", "Leave me be and we're fine, friend."] },
     { name: "Mad Dog Mickey", tag: "Mad Dog", color: "#ff9a7a", pos: [4, 30], box: [-12, 14, 22, 44], role: "inmate", neutral: true, speed: 2.7,
-      behavior: "predator", ratings: { fighting: 34, toughness: 36, speed: 64, cunning: 22 }, skin: jump(0xd8a177, 0x2a2018),
+      behavior: "predator", ratings: { fighting: 34, toughness: 36, speed: 64, cunning: 22 }, skin: jump("white", "Mad Dog Mickey", { hairStyle: "buzz", ink: "web", tank: true }),
       talk: ["You wanna go?! HUH?!", "I'll take ALL of yas!"] },
     { name: "the Professor", tag: "the Professor", color: "#b9e6ff", pos: [-9, 40], box: [-16, -2, 32, 48], role: "inmate", neutral: true, speed: 1.5,
-      behavior: "pacifist", ratings: { fighting: 16, toughness: 28, speed: 40, cunning: 97, stealth: 72 }, skin: jump(0xe8c39a, 0xb9b1a6),
+      behavior: "pacifist", ratings: { fighting: 16, toughness: 28, speed: 40, cunning: 97, stealth: 72 }, skin: jump("white", "the Professor", { hair: 0xb9b1a6, hairStyle: "short", beard: "full", bald: false, ink: "", tank: false }),
       talk: ["Violence is a failure of imagination.", "I can get you anything but a fistfight."] },
 
     // ===== extra north-yard background convicts (gang fodder) =====
     { name: "Vince", tag: "Inmate", color: "#cfe9ff", pos: [10, 36], box: [2, 16, 28, 46], role: "inmate", speed: 2.0,
-      behavior: "hothead", skin: jump(0x8a5a3a, 0x4a3526), talk: ["Yard's mine when I say so.", "Don't crowd me."] },
+      behavior: "hothead", skin: jump("latino", "Vince"), talk: ["Yard's mine when I say so.", "Don't crowd me."] },
     { name: "Lou", tag: "Inmate", color: "#cfe9ff", pos: [-13, 14], box: [-18, -6, 8, 26], role: "inmate", speed: 1.9,
-      behavior: "opportunist", skin: jump(0xf0c39a, 0x2a2018), talk: ["Pick a winner, back a winner.", "I only fight what's already losin'."] },
+      behavior: "opportunist", skin: jump("white", "Lou"), talk: ["Pick a winner, back a winner.", "I only fight what's already losin'."] },
     { name: "Hector", tag: "Inmate", color: "#cfe9ff", pos: [12, 44], box: [4, 18, 36, 48], role: "inmate", speed: 2.1,
-      behavior: "defensive", skin: jump(0x7a4a2e, 0x1a120c), talk: ["Keep walkin'.", "I mind mine. You mind yours."] },
+      behavior: "defensive", skin: jump("latino", "Hector", { ink: "chicano", tank: true }), talk: ["Keep walkin'.", "I mind mine. You mind yours."] },
 
     // ===== WORKSHOP (south-west) — welders & grinders =====
     { name: "Rivet", tag: "Workshop", color: "#ffcf8a", pos: [-33, 68], box: [-41, -24, 60, 78], role: "inmate", neutral: true, speed: 1.7,
-      behavior: "defensive", ratings: { fighting: 72, toughness: 84, speed: 34 }, skin: jump(0xc08a5a, 0x2a2018, { collar: 0x6b4a2a }),
+      behavior: "defensive", ratings: { fighting: 72, toughness: 84, speed: 34 }, skin: jump("latino", "Rivet", { collar: 0x6b4a2a }),
       talk: ["Mind the sparks.", "I bend steel, not the truth."] },
     { name: "Sparks", tag: "Workshop", color: "#ffcf8a", pos: [-28, 74], box: [-40, -22, 62, 80], role: "inmate", neutral: true, speed: 2.3,
-      behavior: "hothead", ratings: { fighting: 46, toughness: 44, speed: 58 }, skin: jump(0xe8c39a, 0xa33b1f),
+      behavior: "hothead", ratings: { fighting: 46, toughness: 44, speed: 58 }, skin: jump("white", "Sparks", { hair: 0xa3401f, bald: false }),
       talk: ["Watch it, watch it!", "You lookin' at my bench?"] },
     { name: "Bolt", tag: "Workshop", color: "#ffcf8a", pos: [-36, 74], box: [-42, -26, 64, 80], role: "inmate", neutral: true, speed: 1.9,
-      behavior: "protector", ratings: { fighting: 64, toughness: 70, speed: 44 }, skin: jump(0x7a4a2e, 0x101820),
+      behavior: "protector", ratings: { fighting: 64, toughness: 70, speed: 44 }, skin: jump("black", "Bolt"),
       talk: ["Nobody gets jumped on my floor.", "We look out for our crew down here."] },
 
     // ===== CHAPEL (south-east) — the quiet wing =====
     { name: "Brother Amos", tag: "Chapel", outfit: "chapel", color: "#e7d8ff", pos: [33, 68], box: [25, 41, 60, 78], role: "inmate", neutral: true, speed: 1.3,
-      behavior: "pacifist", ratings: { fighting: 22, toughness: 40, cunning: 86, stealth: 60 }, skin: jump(0xd8a177, 0xdedede, { torso: 0x4a4f57, legs: 0x4a4f57, arms: 0x4a4f57, stripes: 0 }),
+      behavior: "pacifist", ratings: { fighting: 22, toughness: 40, cunning: 86, stealth: 60 }, skin: jump("black", "Brother Amos", { hair: 0xdedede, beard: "full", ink: "", tank: false, torso: 0x4a4f57, legs: 0x4a4f57, arms: 0x4a4f57, stripes: 0x000000 }),
       talk: ["Peace, brother. Always peace.", "Even in here, grace finds a way."] },
     { name: "Deacon", tag: "Chapel", color: "#e7d8ff", pos: [37, 73], box: [28, 42, 62, 80], role: "inmate", neutral: true, speed: 1.7,
-      behavior: "defensive", ratings: { fighting: 66, toughness: 72 }, skin: jump(0x8a5a3a, 0x2a2018),
+      behavior: "defensive", ratings: { fighting: 66, toughness: 72 }, skin: jump("black", "Deacon", { tank: false }),
       talk: ["I keep the peace in the pews.", "Turn the other cheek, once."] },
     { name: "Solomon", tag: "Chapel", color: "#e7d8ff", pos: [30, 76], box: [25, 40, 66, 80], role: "inmate", neutral: true, speed: 1.4,
-      behavior: "pacifist", ratings: { fighting: 30, toughness: 50, cunning: 70 }, skin: jump(0xe8c39a, 0x4a3526),
+      behavior: "pacifist", ratings: { fighting: 30, toughness: 50, cunning: 70 }, skin: jump("white", "Solomon", { beard: "full", tank: false }),
       talk: ["Let it go, son.", "Not here. Not in here."] },
 
     // ===== INFIRMARY (east) — the doc + the sick =====
     { name: "Doc Mercer", tag: "Infirmary · meds", outfit: "orderly", color: "#9fe6c0", pos: [33, 96], box: [26, 41, 88, 104], role: "merchant", neutral: true, speed: 1.4,
-      behavior: "pacifist", ratings: { fighting: 28, toughness: 46, cunning: 90, stealth: 55 }, skin: jump(0xe8c39a, 0xcfcfcf, { torso: 0xeef2f5, arms: 0xeef2f5, legs: 0xeef2f5, collar: 0xeef2f5, stripes: 0 }),
+      behavior: "pacifist", ratings: { fighting: 28, toughness: 46, cunning: 90, stealth: 55 }, skin: jump("white", "Doc Mercer", { hair: 0xcfcfcf, bald: false, ink: "", tank: false, torso: 0xeef2f5, arms: 0xeef2f5, legs: 0xeef2f5, collar: 0xeef2f5, stripes: 0x000000 }),
       data: { name: "Doc Mercer", pool: "goods", tip: "Bad cut? I've patched worse for less.",
         talk: ["I keep folks breathing in here.", "Painkillers for cigs. Don't tell the Warden."] } },
     { name: "Patient Zero", tag: "Infirmary", color: "#9fe6c0", pos: [29, 100], box: [25, 40, 90, 104], role: "inmate", neutral: true, speed: 1.5,
-      behavior: "unpredictable", ratings: { fighting: 22, toughness: 26, speed: 30 }, skin: jump(0xd0b08a, 0x6a6a6a),
+      behavior: "unpredictable", ratings: { fighting: 22, toughness: 26, speed: 30 }, skin: jump("white", "Patient Zero", { skin: 0xfae0c8, hair: 0x6a6a6a, beard: "stubble", tank: false }),
       talk: ["...is it cold in here?", "They said I'd be out by spring. Which spring?"] },
     { name: "Orderly Pratt", tag: "Infirmary", outfit: "orderly", color: "#9fe6c0", pos: [37, 100], box: [28, 42, 90, 104], role: "inmate", neutral: true, speed: 1.9,
-      behavior: "defensive", ratings: { fighting: 56, toughness: 64 }, skin: jump(0xc08a5a, 0x2a2018, { torso: 0xeef2f5, arms: 0xeef2f5 }),
+      behavior: "defensive", ratings: { fighting: 56, toughness: 64 }, skin: jump("latino", "Orderly Pratt", { ink: "", tank: false, torso: 0xeef2f5, arms: 0xeef2f5 }),
       talk: ["No rough stuff near the beds.", "I'll sedate the next one who swings."] },
 
     // ===== LAUNDRY (west) — steam, carts & sticky fingers =====
     { name: "Suds", tag: "Laundry", color: "#bfeaff", pos: [-33, 96], box: [-41, -26, 88, 104], role: "thief", neutral: true, speed: 2.6,
-      behavior: "opportunist", ratings: { fighting: 48, speed: 72, stealth: 80, cunning: 64 }, skin: jump(0xe8c39a, 0x2a2018),
+      behavior: "opportunist", ratings: { fighting: 48, speed: 72, stealth: 80, cunning: 64 }, skin: jump("white", "Suds"),
       data: { name: "Suds", pool: "fenced", talk: ["Pockets lighter than your laundry, huh?", "Everything comes out in the wash."] } },
     { name: "Wringer", tag: "Laundry", color: "#bfeaff", pos: [-37, 100], box: [-42, -27, 90, 104], role: "inmate", neutral: true, speed: 2.0,
-      behavior: "bully", ratings: { fighting: 76, toughness: 66, speed: 50 }, skin: jump(0x7a4a2e, 0x101820),
+      behavior: "bully", ratings: { fighting: 76, toughness: 66, speed: 50 }, skin: jump("black", "Wringer", { ink: "script", tank: true }),
       talk: ["Little guys do my folding.", "You got a problem? Didn't think so."] },
 
     // ===== LOWER EXERCISE YARD (center-south) — the real fighters =====
     { name: "Iron Mike", tag: "Yard Apex", color: "#ff7979", pos: [0, 92], box: [-14, 14, 80, 110], role: "inmate", neutral: true, speed: 2.2,
-      behavior: "predator", ratings: { fighting: 93, toughness: 90, speed: 60, cunning: 55 }, skin: jump(0x6b4a32, 0x0a0a0a, { collar: 0x222222 }),
+      behavior: "predator", ratings: { fighting: 93, toughness: 90, speed: 60, cunning: 55 }, skin: jump("black", "Iron Mike", { bald: true, beard: "goatee", ink: "chest", tank: true, collar: 0x222222 }),
       talk: ["Everybody bleeds. Step up.", "This whole yard's mine to take."] },
     { name: "Knuckles", tag: "Brawler", color: "#ffc07a", pos: [-8, 100], box: [-18, 8, 86, 116], role: "inmate", neutral: true, speed: 2.4,
-      behavior: "hothead", ratings: { fighting: 88, toughness: 72, speed: 66 }, skin: jump(0xd8a177, 0x3a1f12),
+      behavior: "hothead", ratings: { fighting: 88, toughness: 72, speed: 66 }, skin: jump("latino", "Knuckles", { ink: "chicano", tank: true }),
       talk: ["Put 'em up! Let's GO!", "I been waitin' all day for this."] },
     { name: "Glass Jaw", tag: "Brawler", color: "#ffc07a", pos: [8, 100], box: [-6, 18, 86, 116], role: "inmate", neutral: true, speed: 2.3,
-      behavior: "bully", ratings: { fighting: 82, toughness: 28, speed: 58 }, skin: jump(0xe8c39a, 0x4a3526),
+      behavior: "bully", ratings: { fighting: 82, toughness: 28, speed: 58 }, skin: jump("white", "Glass Jaw"),
       talk: ["I hit like a truck, just don't hit back.", "Easy pickings, easy pickings."] },
     { name: "The Wall", tag: "Immovable", color: "#cfe9ff", pos: [-12, 110], box: [-20, 2, 100, 120], role: "inmate", neutral: true, speed: 1.3,
-      behavior: "defensive", ratings: { fighting: 52, toughness: 98, speed: 22 }, skin: jump(0x8a5a3a, 0x1a120c),
+      behavior: "defensive", ratings: { fighting: 52, toughness: 98, speed: 22 }, skin: jump("islander", "The Wall", { ink: "tribal", tank: true }),
       talk: ["You'll tire before I move.", "Go around."] },
     { name: "Sprinter", tag: "Trackster", color: "#a6ffd0", pos: [10, 112], box: [-16, 16, 100, 122], role: "inmate", neutral: true, speed: 3.4,
-      behavior: "pacifist", ratings: { fighting: 38, toughness: 40, speed: 98, stealth: 78 }, skin: jump(0xc08a5a, 0x2a2018),
+      behavior: "pacifist", ratings: { fighting: 38, toughness: 40, speed: 98, stealth: 78 }, skin: jump("black", "Sprinter", { tank: true }),
       talk: ["Can't hit what you can't catch!", "I run laps, not my mouth."] },
     { name: "Boss Hask", tag: "South Yard Boss", color: "#ffd451", pos: [0, 116], box: [-16, 16, 106, 124], role: "inmate", neutral: true, speed: 1.8,
-      behavior: "protector", ratings: { fighting: 85, toughness: 84, speed: 48, cunning: 78 }, skin: jump(0x6b4a32, 0x101820, { collar: 0x3a2a1a }),
+      behavior: "protector", ratings: { fighting: 85, toughness: 84, speed: 48, cunning: 78 }, skin: jump("black", "Boss Hask", { beard: "full", collar: 0x3a2a1a }),
       talk: ["Down here, you answer to me.", "I keep my people standing. Remember that."] },
 
     // ===== a few athletes jogging the lower track =====
     { name: "Jab", tag: "Trackster", color: "#a6ffd0", pos: [-4, 84], box: [-14, 14, 76, 100], role: "inmate", neutral: true, speed: 2.6,
-      behavior: "unpredictable", ratings: { fighting: 58, speed: 80 }, skin: jump(0xe8c39a, 0x2a2018), talk: ["Lap forty. Who's counting.", "Footwork, baby."] },
+      behavior: "unpredictable", ratings: { fighting: 58, speed: 80 }, skin: jump("white", "Jab"), talk: ["Lap forty. Who's counting.", "Footwork, baby."] },
     { name: "Cardio", tag: "Trackster", color: "#a6ffd0", pos: [5, 86], box: [-12, 16, 78, 102], role: "inmate", neutral: true, speed: 2.8,
-      behavior: "pacifist", ratings: { fighting: 30, speed: 88 }, skin: jump(0xc08a5a, 0x4a3526), talk: ["No time to scrap, on a streak here.", "Keep movin'."] },
+      behavior: "pacifist", ratings: { fighting: 30, speed: 88 }, skin: jump("latino", "Cardio"), talk: ["No time to scrap, on a streak here.", "Keep movin'."] },
 
     // ===== sally-port loiterers near the new gate =====
     { name: "Lifer", tag: "Sally Port", color: "#d8d8d8", pos: [-10, 122], box: [-20, -2, 116, 126], role: "inmate", neutral: true, speed: 1.5,
-      behavior: "defensive", ratings: { fighting: 78, toughness: 80, cunning: 70 }, skin: jump(0xb5825a, 0xb9b1a6),
+      behavior: "defensive", ratings: { fighting: 78, toughness: 80, cunning: 70 }, skin: jump("native", "Lifer", { hair: 0xb9b1a6, hairStyle: "long", bald: false }),
       talk: ["Forty years. The gate stopped meaning anything.", "Run if you want. I'll watch."] },
     { name: "Twitch", tag: "Sally Port", color: "#d8d8d8", pos: [12, 122], box: [2, 20, 116, 126], role: "thief", neutral: true, speed: 2.9,
-      behavior: "opportunist", ratings: { fighting: 40, speed: 84, stealth: 86 }, skin: jump(0xe8c39a, 0x2a2018),
+      behavior: "opportunist", ratings: { fighting: 40, speed: 84, stealth: 86 }, skin: jump("white", "Twitch", { hairStyle: "crop" }),
       data: { name: "Twitch", pool: "fenced", talk: ["So close to out, so much to lift.", "Nervous? Me? Nah. Nah nah nah."] } },
   ];
 
@@ -689,15 +701,23 @@
   const wing = CBZ.prisonBeds ? CBZ.prisonBeds() : null;
   const CROWD = (typeof CBZ.JAIL_CROWD === "number" && CBZ.JAIL_CROWD_EXPLICIT) ? CBZ.JAIL_CROWD
     : (wing ? Math.max(0, wing.houses - CBZ.npcs.length - wing.cells)
-            : ((typeof CBZ.JAIL_CROWD === "number") ? CBZ.JAIL_CROWD : 14));
+            : ((typeof CBZ.JAIL_CROWD === "number") ? CBZ.JAIL_CROWD : 26));
   (function spawnCrowd(count) {
     let s = 0x4a1f7b;
     const rr = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
     const BEH = ["defensive", "hothead", "opportunist", "pacifist", "predator", "bully", "protector", "unpredictable", "defensive", "pacifist"];
-    const SKIN = [0xf0c39a, 0xe8b58c, 0xc08a5a, 0x8a5a3a, 0x6b4a32, 0xd8a177, 0xe7b58c, 0xb5825a];
-    const HAIR = [0x2a2018, 0x4a3526, 0x101820, 0xb9b1a6, 0x7a4a2e, 0x222222, 0xdedede, 0x3a1f12];
+    // the crowd's faces come from the heritage catalogue (weighted), not from
+    // two independent colour pools — see entities/heritage.js.
     // open spawn boxes: north yard + south block (avoid the cell block z<-8)
-    const ZONES = [[-28, 28, -6, 50], [-42, 42, 56, 124]];
+    // open spawn boxes: the two yards, and (2026-09-05) the ring's rooms and
+    // corridors, so the half of the map that had no bodies has bodies
+    const ZONES = [[-28, 28, -6, 50], [-42, 42, 56, 124],
+      [-106, -52, -94, -18],        // the recreation yard
+      [-110, -72, 0, 40],           // prison industries
+      [62, 106, 64, 92],            // the kitchen
+      [66, 106, 106, 124],          // visitation
+      [-41.5, -38.5, -60, 40],      // the west spine
+      [38.5, 41.5, -60, 40]];       // the east spine
     for (let i = 0; i < count; i++) {
       const z = ZONES[rr() < 0.42 ? 0 : 1];
       const x = z[0] + rr() * (z[1] - z[0]);
@@ -706,7 +726,7 @@
         pos: [x, zz], region: [x - 7, x + 7, zz - 7, zz + 7], role: "inmate",
         speed: 1.5 + rr() * 1.6, forceNeutral: rr() < 0.72, behavior: BEH[(rr() * BEH.length) | 0],
         tagText: "Inmate", tagColor: "#cfe9ff",
-        skin: jump(SKIN[(rr() * SKIN.length) | 0], HAIR[(rr() * HAIR.length) | 0]),
+        skin: crowdLook(rr),
         data: { name: "an inmate", pool: "goods", talk: ["Yard time's all we got.", "Keep walkin'.", "Mind your business."] },
       });
     }

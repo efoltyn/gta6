@@ -207,6 +207,8 @@
     inmate_cap: { id: "inmate_cap", name: "DOC Jumpsuit and Yard Cap", tier: "institution", who: "yard inmates with issued caps", price: 0, drip: 0,
                  cap: true, capColor: 0x22252b,
                  colors: { legs: 0xe76518, torso: 0xf27a1f, collar: 0xffa14a, arms: 0xf27a1f, shoes: 0x25282d, belt: 0x5b351f } },
+    inmate_tank: { id: "inmate_tank", name: "DOC Jumpsuit Tied at the Waist", tier: "institution", who: "yard inmates, top off, tank under", price: 0, drip: 0,
+                 colors: { legs: 0xe76518, torso: 0xe6e3d9, collar: 0xe6e3d9, arms: 0xf27a1f, shoes: 0x25282d, belt: 0x5b351f } },
     inmate_orderly: { id: "inmate_orderly", name: "Inmate Medical Orderly", tier: "institution", who: "infirmary orderlies", price: 0, drip: 0,
                  colors: { legs: 0xe76518, torso: 0xe7edf0, collar: 0xf27a1f, arms: 0xe7edf0, shoes: 0x30363d, belt: 0x5b351f } },
     inmate_chapel: { id: "inmate_chapel", name: "Chapel Trustee Greys", tier: "institution", who: "chapel trustees", price: 0, drip: 0,
@@ -1392,7 +1394,7 @@
   // never a badge, crew colors, turnout gear or a $7500 tuxedo.
   const MINOR_BAN_ID = {
     police: 1, swat: 1, sheriff: 1, soldier: 1, security: 1, corrections: 1, warden: 1,
-    inmate: 1, inmate_cap: 1, inmate_orderly: 1, inmate_chapel: 1, firefighter: 1, ems: 1,
+    inmate: 1, inmate_cap: 1, inmate_tank: 1, inmate_orderly: 1, inmate_chapel: 1, firefighter: 1, ems: 1,
     doctor: 1, scrubs: 1, hivis: 1, construction: 1, coveralls: 1, janitor: 1, valet: 1,
     busdriver: 1, mailman: 1, pilot: 1, office: 1, chef: 1, dress: 1,
     hunter: 1, ranger: 1, hiker: 1, farmer: 1, fisherman: 1, mariner: 1, lifeguard: 1,

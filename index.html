@@ -588,7 +588,7 @@
 <script src="src/systems/proptypes.js?v=arch2"></script>
 
 <!-- 3. entities -->
-  <script src="src/entities/character.js?v=holster1"></script>
+  <script src="src/entities/character.js?v=races1"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
@@ -673,7 +673,11 @@
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
      aircraft passengers request real actors through one reusable contract. -->
 <script src="src/entities/npclife.js?v=allmain3"></script>
-<script src="src/entities/npc.js?v=nodash1"></script>
+<!-- Who is in this prison: ten heritages (skin range, hair, facial hair, ink,
+     jumpsuit tied at the waist). Rolled by npc.js; the ink is painted by
+     city/clothes.js and the head atlas below. -->
+<script src="src/entities/heritage.js?v=races1"></script>
+<script src="src/entities/npc.js?v=races1"></script>
 <script src="src/entities/ai.js?v=nodash1"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
@@ -1214,8 +1218,8 @@
 <script src="src/city/adboard.js?v=onecall1"></script>
 <script src="src/city/mode.js?v=raceabort1"></script>
 <script src="src/city/economy.js?v=allmain1"></script>
-<script src="src/city/clothes.js?v=allmain3"></script>
-<script src="src/city/outfits.js?v=nodash1"></script>
+<script src="src/city/clothes.js?v=races1"></script>
+<script src="src/city/outfits.js?v=races1"></script>
 <script src="src/city/hunger.js?v=nodash1"></script>
 <script src="src/city/wanted.js?v=nodash1"></script>
 <script src="src/city/identity.js?v=perm1"></script>
@@ -1609,7 +1613,7 @@
 <!-- Direct Prison Escape cast through Gang City's canonical painted wardrobe.
      Loaded after clothes/outfits/armor so the adapter only assigns roles; the
      shared garment and fit owners do every actual visual operation. -->
-<script src="src/systems/prisonoutfits.js?v=outfit1"></script>
+<script src="src/systems/prisonoutfits.js?v=races1"></script>
 <!-- WORN PELTS (PELT_WEAR): skin an animal and WEAR it — the species' own
      harvested head as a hood + a fur mantle over the shoulders. Reuses
      armor.js's measured fit (loads after it) and wildlife's species builds;

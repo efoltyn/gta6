@@ -2009,7 +2009,13 @@
           role: "inmate", speed: 1.3 + hh * 0.7, forceNeutral: true,
           behavior: pick(BEH, c.x, c.z, 6002),
           tagText: "Inmate", tagColor: "#cfe9ff",
-          skin: jump(pick(SKIN, c.x, c.z, 6003), pick(HAIR, c.x, c.z, 6004)),
+          // WHO HE IS: a resident rolls a heritage off his cell (entities/
+          // heritage.js) — skin range, hair, facial hair, ink, top tied at the
+          // waist — instead of the two flat colour pools above (kept as the
+          // fallback for a boot without that file).
+          skin: CBZ.heritageRoll
+            ? Object.assign(jump(0, 0), CBZ.heritageRoll(null, CBZ.heritageSeeded("cell " + c.tag + " " + c.i)))
+            : jump(pick(SKIN, c.x, c.z, 6003), pick(HAIR, c.x, c.z, 6004)),
           data: {
             name: pick(NAMES, c.x, c.z, 6005), pool: "goods",
             cell: c.tag, talk: pick(TALK, c.x, c.z, 6006),
