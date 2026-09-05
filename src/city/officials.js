@@ -169,7 +169,20 @@
   // federal-territory title exists yet).
   const MAYOR_ID = "libertyville";   // still used to seed the founding mayor's identity wealth (see mintHolder) — P5 generalized the PHYSICAL PRESENCE section below off every office, not just this one
   const KIND_TERM_DAYS = { city: 7, state: 14, federal: 14, country: 28 };
-  function termDaysFor(rec) { return (rec && KIND_TERM_DAYS[rec.kind]) || 7; }
+  /* THE PLAYER'S PRESIDENCY IS A SHORT TERM. A 28-day country term is 70 real
+     minutes at the city's 150 s day — longer than any session, so the ballot
+     that could end a presidency never arrives and the mode has no clock. When
+     the PLAYER holds a country seat (sworn in by origin or by winning) the
+     term is PRESIDENT_TERM_DAYS (7 days ≈ 17 min; elections.js's 2-day
+     campaign then calls at day 5). NPC presidents keep the 28. Read here,
+     once, so candidacy.swearIn, elections.js's post-win reset and the
+     caretaker auto-extend all agree. One-line revert: PRESIDENT_TERM_DAYS=0. */
+  const CFGT = (CBZ.CONFIG = CBZ.CONFIG || {});
+  if (CFGT.PRESIDENT_TERM_DAYS == null) CFGT.PRESIDENT_TERM_DAYS = 7;
+  function termDaysFor(rec) {
+    if (rec && rec.kind === "country" && rec.office && rec.office.holder === "player" && (CFGT.PRESIDENT_TERM_DAYS | 0) > 0) return CFGT.PRESIDENT_TERM_DAYS | 0;
+    return (rec && KIND_TERM_DAYS[rec.kind]) || 7;
+  }
   function titleFor(rec) {
     if (!rec) return "Official";
     if (rec.kind === "country") {
