@@ -77,8 +77,14 @@
   // mode override set (city/mode.js's hard-coded 190).
   if (CBZ.CONFIG.GFX_TIGHT_SHADOWS == null) CBZ.CONFIG.GFX_TIGHT_SHADOWS = true;
   // Detail-normal projection scale, in tiles per world metre, and strength.
-  if (CBZ.CONFIG.GFX_DETAIL_SCALE == null) CBZ.CONFIG.GFX_DETAIL_SCALE = 0.42;
-  if (CBZ.CONFIG.GFX_DETAIL_STRENGTH == null) CBZ.CONFIG.GFX_DETAIL_STRENGTH = 0.55;
+  // 2026-09-05: was 0.42 / 0.55 with the CONCRETE author — pores and grit
+  // every 0.42 m on everything, i.e. sandpaper on a painted beam at the high
+  // tier and nothing at the low one (owner: "at fastest and low res it's
+  // perfect, at high res it looks like sandpaper"). The map is now the
+  // grit-free `detail` author (world/textures_surface.js), one tile per
+  // 1.6 m, at a third of the strength.
+  if (CBZ.CONFIG.GFX_DETAIL_SCALE == null) CBZ.CONFIG.GFX_DETAIL_SCALE = 0.62;
+  if (CBZ.CONFIG.GFX_DETAIL_STRENGTH == null) CBZ.CONFIG.GFX_DETAIL_STRENGTH = 0.30;
 
   function tier() { return CBZ.gfxTier || {}; }
   function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
@@ -140,7 +146,7 @@
     if (!CBZ.CONFIG.GFX_WORLD_DETAIL || !tier().normals || !CBZ.surfaceMaps) { detailTex = false; return false; }
     // repeat:1 — we sample this texture with our OWN world-projected UVs, so
     // three's uv-transform (texture.repeat/offset) never applies to it.
-    const maps = CBZ.surfaceMaps("concrete", { repeat: 1 });
+    const maps = CBZ.surfaceMaps("detail", { repeat: 1 });
     detailTex = (maps && maps.normalMap) || false;
     return detailTex;
   }

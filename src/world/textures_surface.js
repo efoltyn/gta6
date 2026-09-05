@@ -106,6 +106,26 @@
   // Height is deliberately authored at a HIGHER frequency than colour: the
   // eye reads "material" from specular breakup far more than from albedo.
   const SURFACES = {
+    // ---- detail: the world-projected micro normal core/gfx.js stamps on
+    //      every merged surface at the tiers with `normals`. It USED to be
+    //      the concrete author above (pores at 96 and grit at 200 per tile,
+    //      tiled every 0.42 m at 0.55 strength) — which is why, on the
+    //      fastest tier, a painted steel boom read as a painted steel boom
+    //      and on the high tier the same boom read as sandpaper. A blanket
+    //      detail map cannot know what it is on, so it may only carry what
+    //      EVERY surface shares: a broad, soft undulation (a panel is never
+    //      dead flat) and a faint medium breakup. No pores, no grit.
+    detail: {
+      def: { roughness: 0.88, metalness: 0.0, normalScale: 0.35, repeat: 1 },
+      author: function (u, v, out) {
+        const broad = fbm(u, v, 3, 2, 0x0d81);
+        const mid = fbm(u, v, 11, 2, 0x0d82);
+        const l = 0.5;
+        out.r = l; out.g = l; out.b = l;
+        out.h = broad * 0.72 + mid * 0.28;
+        out.q = 0.88;
+      },
+    },
     // ---- asphalt: aggregate stones in bitumen, hairline cracks -----------
     asphalt: {
       def: { roughness: 0.92, metalness: 0.02, normalScale: 0.85, repeat: 6 },
