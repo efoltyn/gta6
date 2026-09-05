@@ -53,6 +53,19 @@
                           (a president needs emergency powers to get there)
      TAKE THE CROWN       CBZ.crown.selfCrown — visible ONLY while the
                           country reads "dictatorship". A category door.
+     …AND THE REST OF THE DESK
+                          statecraft.js always shipped seven decrees and three
+                          deployments and this room exposed ONE of them. All
+                          of them are pads now — fund the force, tax up, tax
+                          down, curfew, amnesty, and deploy guard / surge /
+                          martial — as THIN wrappers whose name, price,
+                          cooldown, refusal and lit state all come back out
+                          of CBZ.gov. Seventeen orders, grouped SECURITY /
+                          THE CELL / THE PURSE / THE PEOPLE / THE REGIME
+                          across two ranks of the table and one standing
+                          console at the east wall. Skim is deliberately not
+                          a pad: it is not an order given in front of ten
+                          chairs.
 
    TERROR IN THE SAND CITY. One org, declared ONCE via CBZ.factions.declare
    (id "cell" — the id militia.js's hostileTo and worldstate's extremists
@@ -354,6 +367,7 @@
     S.lastSeatId = rec.id;
     S.terms = 1;                                // the term you are standing in
     bindDetail({ id: rec.id, rec: rec });
+    try { seedRoster(); } catch (e) {}          // the threat board is not empty on the first morning
     emitEvent("sworn", { seat: rec.id, country: rec.name || null, govType: rec.govType || null, day: day() });
     big("SWORN IN · PRESIDENT OF " + String(rec.name || "THE REPUBLIC").toUpperCase());
     orders("Chief of Staff", "The Mansion is yours. The Situation Room is behind the steel door off the entrance hall, your seal opens it. Nobody else's does.", 2);
@@ -555,7 +569,7 @@
     // draws it and registers every sit anchor, while this file owns only the
     // state orders on its rails.
     const tx = (x0 + x1) / 2, tz = zc;
-    ROOM.board = canvasTexLive(1024, 512);
+    ROOM.board = canvasTexLive(2048, 512);   // 4:1 - exactly the screen's aspect
     ROOM.pads = [];
     let tableRec = null;
     if (CBZ.furnish && CBZ.furnish.table) {
@@ -576,7 +590,7 @@
     // A leather writing inset, bound briefing books and two red phones make
     // the table read as a place where people work, without pretending those
     // props are separate political systems.
-    addBox(grp, tx, 0.935, tz, 4.55, 0.025, 0.78, LEATHER);
+    addBox(grp, tx, 0.933, tz, 4.55, 0.025, 0.56, LEATHER);   // clears both key ranks
     for (const s of [-1, 1]) {
       addBox(grp, tx + s * 2.25, 0.97, tz, 0.48, 0.055, 0.34, PAPER);
       addBox(grp, tx + s * 2.78, 0.99, tz + 0.14, 0.34, 0.12, 0.22, 0x8f3434);
@@ -623,27 +637,70 @@
       addBox(grp, px, 1.82, z0 + T + 0.115, 2.05, 0.92, 0.025, CARPET);
     }
 
-    // The orders are compact physical keys on the two writing rails. Their
-    // unique materials let paintBoard show live state without recolouring a
-    // shared material bucket elsewhere in the city.
-    const front = ["address", "emergency", "crackdown", "wall", "bureau"];
-    for (let i = 0; i < front.length; i++) {
-      const px = tx - 2.40 + i * 1.20, pz = tz - 0.70;
-      addBox(grp, px, 0.97, pz, 0.72, 0.07, 0.36, PADC);
-      const cap = addBox(grp, px, 1.035, pz, 0.20, 0.06, 0.16, 0xb5443a);
-      cap.material = new THREE.MeshLambertMaterial({ color: 0xb5443a });
-      ROOM.pads.push({ key: front[i], x: px, z: pz, cap: cap });
-      padLabel(grp, front[i], px, 1.005, pz - 0.30, Math.PI);
+    // THE ORDERS — every power the state actually ships, on three rails.
+    // Seventeen pads do not fit on one edge of a 6.4 m table without either
+    // stacking them (nothing in this room may be climbed to be reached) or
+    // running the labels into each other, so they sit on TWO RANKS of the
+    // table plus one standing console against the east wall — the room's one
+    // solid wall, the only one with no door, no screen and no station on it.
+    // Groups never interleave across a rail: SECURITY is the whole south
+    // rank; THE PEOPLE then THE REGIME share the north; THE CELL and THE
+    // PURSE stand at the wall. Each pad's own material carries its light, so
+    // paintBoard can recolour one order without touching a shared bucket.
+    const SOUTH = ["emergency", "crackdown", "curfew", "surge", "martial", "guard"];
+    const NORTH = ["address", "amnesty", "pardon", "fascism", "communism", "crown"];
+    const EAST = ["bureau", "wall", "police", "taxup", "taxdown"];
+    // furniture.js's F.table puts its worktop face at exactly (piece y + 0.74),
+    // and this room places the piece at 0.18 - so TTOP is 0.92 and every key,
+    // cap and plate is drawn ON it rather than a centimetre above it.
+    const STEP = 1.05, TTOP = 0.92;          // pad pitch: a 0.46 m plate, a 0.59 m gap
+    function tableRank(keys, pz, yaw, labelDz) {
+      for (let i = 0; i < keys.length; i++) {
+        const px = tx + (i - (keys.length - 1) / 2) * STEP;
+        addBox(grp, px, TTOP + 0.035, pz, 0.58, 0.07, 0.32, PADC);
+        const cap = addBox(grp, px, TTOP + 0.10, pz, 0.19, 0.06, 0.15, 0xb5443a);
+        cap.material = new THREE.MeshLambertMaterial({ color: 0xb5443a });
+        ROOM.pads.push({ key: keys[i], x: px, z: pz, cap: cap });
+        padLabel(grp, keys[i], px, TTOP + 0.028, pz + labelDz, yaw);
+      }
     }
-    const rear = ["pardon", "fascism", "communism", "crown"];
-    for (let i = 0; i < rear.length; i++) {
-      const px = tx - 1.80 + i * 1.20, pz = tz + 0.70;
-      addBox(grp, px, 0.97, pz, 0.76, 0.07, 0.36, PADC);
-      const cap = addBox(grp, px, 1.035, pz, 0.20, 0.06, 0.16, 0xb5443a);
+    // BOTH RANKS LIVE INSIDE THE TABLE. The plate is tilted only 20.8 degrees
+    // off flat, so 93.5% of its 0.161 m height lies along Z: a rank at 0.52
+    // with its plate 0.26 further out put the plate's far edge 3 cm past the
+    // 0.825 m table edge, hanging over the carpet. Keys at 0.46, plates
+    // centred at 0.715 -> plate spans 0.64..0.79, clear of both.
+    tableRank(SOUTH, tz - 0.46, Math.PI, -0.255);
+    tableRank(NORTH, tz + 0.46, 0, 0.255);
+    // a hairline divider where THE PEOPLE ends and THE REGIME begins
+    addBox(grp, tx, TTOP + 0.01, tz + 0.46, 0.03, 0.02, 0.40, BRASS);
+
+    // THE STANDING CONSOLE. Waist height, against the solid east wall, with
+    // 2.4 m of clear floor between it and the table: you walk the room to
+    // give an order instead of leaning across the map.
+    const ex = x1 - T - 0.33, ez = zc, ETOP = 0.95, ESTEP = 1.00;
+    addBox(grp, ex, 0.46, ez, 0.60, 0.92, 5.20, STEEL);
+    addBox(grp, ex, 0.935, ez, 0.66, 0.03, 5.36, TRIM);
+    addBox(grp, ex - 0.31, 0.84, ez, 0.05, 0.05, 5.20, BRASS);       // grab rail
+    addBox(grp, ex - 0.295, 0.34, ez, 0.03, 0.56, 5.00, NAVY);       // inset front panel
+    addCol(ex, ez, 0.60, 5.20, 0, ETOP + 0.05);
+    for (let i = 0; i < EAST.length; i++) {
+      const pz = ez + (i - (EAST.length - 1) / 2) * ESTEP;
+      addBox(grp, ex + 0.06, ETOP + 0.035, pz, 0.34, 0.07, 0.56, PADC);
+      const cap = addBox(grp, ex + 0.06, ETOP + 0.10, pz, 0.16, 0.06, 0.20, 0xb5443a);
       cap.material = new THREE.MeshLambertMaterial({ color: 0xb5443a });
-      ROOM.pads.push({ key: rear[i], x: px, z: pz, cap: cap });
-      padLabel(grp, rear[i], px, 1.005, pz + 0.30, 0);
+      ROOM.pads.push({ key: EAST[i], x: ex + 0.06, z: pz, cap: cap });
+      padLabel(grp, EAST[i], ex - 0.19, ETOP + 0.030, pz, -Math.PI / 2);
     }
+    // the console's header, on the wall it stands against
+    addBox(grp, x1 - T - 0.03, 1.62, ez, 0.06, 0.62, 1.90, STEEL);
+    const ehdr = canvasTexLive(256, 64);
+    ehdr.cc.fillStyle = "#11151c"; ehdr.cc.fillRect(0, 0, 256, 64);
+    ehdr.cc.strokeStyle = "#b99347"; ehdr.cc.strokeRect(3, 3, 250, 58);
+    ehdr.cc.fillStyle = "#d8e2f2"; ehdr.cc.font = "bold 22px monospace"; ehdr.cc.textAlign = "center";
+    ehdr.cc.fillText("STANDING ORDERS", 128, 41); ehdr.paint();
+    const ehm = new THREE.Mesh(new THREE.PlaneGeometry(1.60, 0.40), new THREE.MeshBasicMaterial({ map: ehdr.tex }));
+    ehm.position.set(x1 - T - 0.07, 1.62, ez); ehm.rotation.y = -Math.PI / 2;
+    grp.add(ehm);
 
     // Paired standards and an inset seal terminate the room. They are wall-
     // attached state symbols, never another row of loose floor props.
@@ -664,18 +721,50 @@
     paintBoard();
     return true;
   }
+  // THE CONSOLE, GROUPED. Seventeen orders is a lot of brass to read at a
+  // glance, so every pad carries its GROUP on its own plate: five decisions
+  // (who you police, who you hunt, what you spend, who you talk to, what the
+  // country IS), not seventeen unrelated switches.
   const PAD_NAMES = {
-    address: "ADDRESS", emergency: "EMERGENCY", crackdown: "CRACKDOWN",
-    wall: "THE WALL", bureau: "BUREAU", pardon: "PARDON",
-    fascism: "ONE STATE", communism: "THE MARKET", crown: "THE CROWN",
+    emergency: ["SECURITY", "EMERGENCY"],
+    crackdown: ["SECURITY", "CRACKDOWN"],
+    curfew:    ["SECURITY", "CURFEW"],
+    surge:     ["SECURITY", "SURGE"],
+    martial:   ["SECURITY", "MARTIAL LAW"],
+    guard:     ["SECURITY", "GUARD DETAIL"],
+    bureau:    ["THE CELL", "BUREAU"],
+    wall:      ["THE CELL", "THE WALL"],
+    police:    ["THE PURSE", "FUND POLICE"],
+    taxup:     ["THE PURSE", "TAX UP"],
+    taxdown:   ["THE PURSE", "TAX DOWN"],
+    address:   ["THE PEOPLE", "ADDRESS"],
+    amnesty:   ["THE PEOPLE", "AMNESTY"],
+    pardon:    ["THE PEOPLE", "PARDON"],
+    fascism:   ["THE REGIME", "ONE STATE"],
+    communism: ["THE REGIME", "THE MARKET"],
+    crown:     ["THE REGIME", "THE CROWN"],
   };
+  function padGroup(key) { const e = PAD_NAMES[key]; return e ? e[0] : ""; }
+  function padName(key) { const e = PAD_NAMES[key]; return e ? e[1] : String(key).toUpperCase(); }
   function padLabel(grp, key, x, y, z, yaw) {
-    const t = canvasTexLive(128, 40);
-    t.cc.fillStyle = "#0d1117"; t.cc.fillRect(0, 0, 128, 40);
-    t.cc.fillStyle = "#c8d4e4"; t.cc.font = "bold 15px monospace"; t.cc.textAlign = "center";
-    t.cc.fillText(PAD_NAMES[key] || key.toUpperCase(), 64, 26); t.paint();
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.44, 0.14), new THREE.MeshBasicMaterial({ map: t.tex }));
-    m.position.set(x, y, z); m.rotation.x = -Math.PI / 2.6; m.rotation.y = yaw || 0;
+    const t = canvasTexLive(160, 56);
+    t.cc.fillStyle = "#0d1117"; t.cc.fillRect(0, 0, 160, 56);
+    t.cc.strokeStyle = "#2b3444"; t.cc.lineWidth = 2; t.cc.strokeRect(1, 1, 158, 54);
+    t.cc.textAlign = "center";
+    t.cc.fillStyle = "#b99347"; t.cc.font = "bold 12px monospace";
+    t.cc.fillText(padGroup(key), 80, 19);
+    t.cc.fillStyle = "#c8d4e4"; t.cc.font = "bold 16px monospace";
+    t.cc.fillText(padName(key), 80, 42);
+    t.paint();
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.161), new THREE.MeshBasicMaterial({ map: t.tex }));
+    m.position.set(x, y, z);
+    // YXZ ON PURPOSE: tilt the plate back off the surface FIRST, then turn the
+    // whole plate to face the chair that reads it. Under the default XYZ order
+    // the yaw was applied inside the tilt, so a yaw of PI tipped the plate's
+    // printed face into the table — the five front-rail labels were pointing
+    // at the floor and rendered as nothing (MeshBasicMaterial is FrontSide).
+    m.rotation.order = "YXZ";
+    m.rotation.set(-Math.PI / 2.6, yaw || 0, 0);
     grp.add(m);
   }
   function inRoom(x, z) {
@@ -689,8 +778,162 @@
   //  (statecraft's own audit discipline): a button that names none fails
   //  the audit.
   // ============================================================
+  // ---- statecraft's own desk, ON THE CONSOLE -----------------------------
+  // statecraft.js has always shipped seven decrees and three deployments, and
+  // this room exposed exactly one of them. These two factories put the rest on
+  // the table in the SAME shape as the hand-written buttons, and they are
+  // THIN by design: the name, the price, the cooldown, the refusal text and
+  // the lit/dark light all come back out of CBZ.gov, so not one number or
+  // rule is retyped here. Change a price in statecraft and this room changes.
+  //
+  // NOT a pad, deliberately: skim. It is the one decree that is not an order
+  // - nobody gives it in front of ten chairs - and it already has its own
+  // desk. A console key for stealing from the treasury would be a lie about
+  // what the Situation Room is.
+  function decreeRow(key) {
+    if (!CBZ.gov || !CBZ.gov.decrees) return null;
+    let rows = [];
+    try { rows = CBZ.gov.decrees() || []; } catch (e) { rows = []; }
+    for (let i = 0; i < rows.length; i++) if (rows[i] && rows[i].key === key) return rows[i];
+    return null;
+  }
+  function decreeButton(key, group, moves) {
+    return {
+      group: group,
+      // statecraft names its own decree; the pad plate is the fallback for a
+      // world where the desk never loaded at all.
+      name: function () { const r = decreeRow(key); return (r && r.name) || padName(key); },
+      note: function () { const r = decreeRow(key); return (r && r.note) || ""; },
+      moves: moves,
+      live: function () { const r = decreeRow(key); return !!(r && r.live); },
+      gate: function () {
+        if (!CBZ.gov || !CBZ.gov.decree) return { ok: false, why: "No statecraft loaded." };
+        if (CFG.GOV_OFFICE === false) return { ok: false, why: "Office powers are switched off." };
+        const r = decreeRow(key);
+        if (!r) return { ok: false, why: "That decree is not on the desk." };
+        return r.ok ? { ok: true } : { ok: false, why: r.why || "Refused." };
+      },
+      run: function () {
+        const r = CBZ.gov.decree(key);
+        return r && r.ok ? { ok: true, why: "" } : { ok: false, why: (r && r.why) || "Refused." };
+      },
+    };
+  }
+  function deploymentOf(kind) {
+    if (!CBZ.gov || !CBZ.gov.deployments) return null;
+    let list = [];
+    try { list = CBZ.gov.deployments() || []; } catch (e) { list = []; }
+    for (let i = 0; i < list.length; i++) if (list[i] && list[i].kind === kind) return list[i];
+    return null;
+  }
+  // the detail officials.js already raises for every officeholder - statecraft's
+  // deployGuard grows THAT record, so this is where the guard pad reads back.
+  function guardDetail(h) {
+    if (!h || !CBZ.protection || !CBZ.protection.get) return null;
+    try { return CBZ.protection.get("off_" + h.id) || null; } catch (e) { return null; }
+  }
+  // WHERE THE BODIES GO.
+  //   guard            -> you.
+  //   surge / martial  -> the threat. The gate the cell has armed if there is
+  //                       one, else the Mansion's own gate: the point
+  //                       govcomplex publishes, never a typed coordinate.
+  // ONE WRINKLE, AND IT IS THE WORLD'S NOT THIS FILE'S. statecraft will only
+  // move police or soldiers INSIDE the seat's jurisdiction, and polity's map
+  // of a country is made of CITY rects - the Executive Mansion stands on its
+  // own land, outside every one of them, so "surge, here" from the Situation
+  // Room is a point no polity owns. So when the aim is off the political map,
+  // the order lands on the nearest neighbourhood the seat actually governs,
+  // which is what "surge officers into a neighbourhood" always meant. That
+  // point is a polity record's own rect centre - still nothing typed here.
+  function seatOwns(h, rec) {
+    if (!h || !rec || !CBZ.polity || !CBZ.polity.countryOf) return false;
+    let up = null;
+    try { up = CBZ.polity.countryOf(rec.id); } catch (e) { up = null; }
+    return !!(up && up.id === h.rec.id);
+  }
+  function nearestOwnPlace(h, pt) {
+    if (!pt || !CBZ.polity || !CBZ.polity.list) return null;
+    let cands = [];
+    try { cands = (CBZ.polity.list("city") || []).concat(CBZ.polity.list("federal") || []); } catch (e) { cands = []; }
+    let best = null, bd = Infinity;
+    for (let i = 0; i < cands.length; i++) {
+      const c = cands[i];
+      if (!c || !c.rect || !seatOwns(h, c)) continue;
+      const d = Math.hypot(c.rect.cx - pt.x, c.rect.cz - pt.z);
+      if (d < bd) { bd = d; best = { x: c.rect.cx, z: c.rect.cz }; }
+    }
+    return best;
+  }
+  function deployAim() {
+    const A = ATT.armed;
+    if (A && A.at && A.at.gate) return { x: A.at.x, z: A.at.z };
+    const t = gateTarget();
+    if (t) return { x: t.x, z: t.z };
+    const s = mansionSite();
+    if (s) { const gp = s.gate || { x: s.cx, z: s.rect ? s.rect.maxZ : s.cz }; return { x: gp.x, z: gp.z }; }
+    const P = CBZ.player;
+    return P && P.pos ? { x: P.pos.x, z: P.pos.z } : null;
+  }
+  function deployPoint(kind, h) {
+    if (kind === "guard") { const P = CBZ.player; return P && P.pos ? { x: P.pos.x, z: P.pos.z } : null; }
+    const aim = deployAim();
+    if (!aim || !h || !CBZ.polity || !CBZ.polity.of) return aim;
+    let loc = null;
+    try { loc = CBZ.polity.of(aim.x, aim.z); } catch (e) { loc = null; }
+    if (loc && seatOwns(h, loc)) return aim;             // the threat is already on your map
+    return nearestOwnPlace(h, aim) || aim;               // the nearest ground you govern
+  }
+  function deployButton(kind, group, name, moves) {
+    return {
+      group: group, name: name, moves: moves,
+      live: function () {
+        if (kind === "guard") { const d = guardDetail(seat()); return !!(d && (d.memberCount | 0) > 0); }
+        return !!deploymentOf(kind);
+      },
+      // THIN, AND REFUSABLE ON PURPOSE. The price, the legitimacy band and the
+      // General's refusal live in statecraft.deploy(), and a refusal there has
+      // TEETH (it decays readiness, which is civilwar.js's own coup
+      // precondition) - so an order the army might refuse is NOT gated away
+      // here to keep the pad tidy. This gate answers only what a pad can know
+      // by itself: is the desk loaded, are they already out, and does the
+      // world supply a reason to put soldiers on a street.
+      gate: function (h) {
+        if (!CBZ.gov || !CBZ.gov.deploy) return { ok: false, why: "No statecraft loaded." };
+        if (CFG.GOV_MILITARY === false) return { ok: false, why: "Deployments are switched off." };
+        if (kind === "guard") {
+          if (!CBZ.protection || !CBZ.protection.create) return { ok: false, why: "No protection system loaded." };
+          const d = guardDetail(h), cap = (CBZ.protection.HIRE_CAP || 8);
+          if (d && (d.memberCount | 0) >= cap) return { ok: false, why: "Your detail is at full strength \u00b7 " + d.memberCount + " bodies." };
+          return { ok: true };
+        }
+        const out = deploymentOf(kind);
+        if (out) return { ok: false, why: "Already out. They come home on day " + out.until + "." };
+        if (kind === "martial" && CBZ.gov._martialReason) {
+          // statecraft owns the test for whether the world can name a reason;
+          // this only READS it, so the pad can say why it is dark instead of
+          // pretending the order is available and swallowing the refusal.
+          let reason = null;
+          try { reason = CBZ.gov._martialReason(h); } catch (e) { reason = null; }
+          if (!reason) return { ok: false, why: "Nothing in the country justifies soldiers on a street. The garrison stays inside the wire." };
+        }
+        return { ok: true };
+      },
+      run: function (h) {
+        const at = deployPoint(kind, h);
+        const r = CBZ.gov.deploy(kind, at);
+        return r && r.ok ? { ok: true, why: "" } : { ok: false, why: (r && r.why) || "Refused." };
+      },
+    };
+  }
+  // a button's name may be a string or a read-back off the system it commands
+  function bname(B) {
+    if (!B) return "";
+    try { return (typeof B.name === "function" ? B.name() : B.name) || ""; } catch (e) { return ""; }
+  }
+
   const BUTTONS = {
     address: {
+      group: "THE PEOPLE",
       name: "Address the nation",
       moves: ["approval.js approvalShock", "w.politics.scandal (approval reads events - scandal*0.1)", "rec.treasury"],
       live: function () { return day() - (st().lastAddressDay || -999) < ADDRESS_COOLDOWN; },
@@ -715,20 +958,13 @@
         return { ok: true, why: "" };
       },
     },
-    emergency: {
-      name: "Assume emergency powers",
-      moves: ["statecraft decree('emergency') -> g.cityPolitics.emergencyPowers -> regimes.js ladder"],
-      live: function () { const p = politics(); return !!(p && (p.emergencyPowers || 0) > 0); },
-      gate: function () {
-        if (!CBZ.gov || !CBZ.gov.decree) return { ok: false, why: "No statecraft loaded." };
-        return { ok: true };
-      },
-      run: function () {
-        const r = CBZ.gov.decree("emergency");
-        return r && r.ok ? { ok: true, why: "" } : { ok: false, why: (r && r.why) || "Refused." };
-      },
-    },
+    // the emergency pad was always statecraft's decree with a hand-written
+    // gate that could not refuse anything; it is the same wrapper as the six
+    // decrees below it now, so "you already have it all" reaches the plate.
+    emergency: decreeButton("emergency", "SECURITY",
+      ["statecraft decree('emergency') -> g.cityPolitics.emergencyPowers -> regimes.js ladder", "approvalShock", "tyranny"]),
     crackdown: {
+      group: "SECURITY",
       name: "Order a crackdown",
       moves: ["militia.js crackdown (gang machinery: members released, turf freed)", "rec.treasury", "approvalShock via militia's own dip"],
       live: function () { return !!(CBZ.militia && CBZ.militia.list && CBZ.militia.list().length); },
@@ -754,6 +990,7 @@
       },
     },
     wall: {
+      group: "THE CELL",
       name: "Build the wall",
       moves: ["construction.js stateWall: real segments + colliders", "rec.treasury per segment", "checkpoints via garrison _post", "cell supply runs (presidency tick reads stateWall.coverage)"],
       live: function () { const W = CBZ.stateWall; const s = W && W.status ? W.status() : null; return !!(s && s.ordered && !s.done); },
@@ -773,6 +1010,7 @@
       },
     },
     bureau: {
+      group: "THE CELL",
       name: "Direct the Bureau",
       moves: ["real agents (cityPostNpc) at real cell members", "rec.treasury", "cityEvent('counterterror') -> extremists/police standings + emergencyPowers", "approvalShock", "cell roster deaths/arrests"],
       live: function () { return !!RAID.phase; },
@@ -789,6 +1027,7 @@
       run: function (h) { return orderRaid(h); },
     },
     pardon: {
+      group: "THE PEOPLE",
       name: "Sign a pardon",
       moves: ["statecraft pardon -> cityWantedReset/cityReduceWanted", "approvalShock", "tyranny"],
       live: function () { return (CBZ.cityStars ? CBZ.cityStars() : (g.wanted | 0)) > 0; },
@@ -804,6 +1043,7 @@
       },
     },
     fascism: {
+      group: "THE REGIME",
       name: "Proclaim: one state",
       moves: ["regimes.js declareDoctrine('fascism') -> govType read by 9 gates (police x1.3, heat x1.4, curfew, polwar, centralbank)"],
       live: function () { const r = seatRec(); return !!(r && r.govType === "fascism"); },
@@ -811,6 +1051,7 @@
       run: function (h) { return runDoctrine(h, "fascism"); },
     },
     communism: {
+      group: "THE REGIME",
       name: "Proclaim: the state takes the market",
       moves: ["regimes.js declareDoctrine('communism') -> govType read by market.setControls price ceiling, stocks dividends, taxRate"],
       live: function () { const r = seatRec(); return !!(r && r.govType === "communism"); },
@@ -818,6 +1059,7 @@
       run: function (h) { return runDoctrine(h, "communism"); },
     },
     crown: {
+      group: "THE REGIME",
       name: "Take the crown",
       moves: ["crown.js selfCrown -> govType 'monarchy', a royal house with YOUR bloodline, relations insults from every other crown"],
       // only VISIBLE as a dictator — the categorical door. see zone find().
@@ -832,6 +1074,33 @@
         return r && r.ok ? { ok: true, why: "" } : { ok: false, why: (r && r.why) || "The coronation did not happen." };
       },
     },
+
+    // ---- the rest of the state's own desk, finally in the room -----------
+    // SECURITY. The curfew binds the president too; the surge and the
+    // garrison go where the threat is, which after PRESIDENT-PLAN item 1 is
+    // usually your own gate; the detail is the one the ledger already funds.
+    curfew: decreeButton("curfew", "SECURITY",
+      ["statecraft decree('curfew') -> g.heat on the player outdoors at night", "ped.npcHeat/npcWanted via cityNpcOffense", "rec.treasury", "approvalShock", "tyranny"]),
+    surge: deployButton("surge", "SECURITY", "Surge the police",
+      ["statecraft deploy('surge') -> police.js forcePool via cityPoliceForceAdd", "rec.treasury", "approvalShock", "tyranny", "statecraft standDown restores the force"]),
+    martial: deployButton("martial", "SECURITY", "Put soldiers on the street",
+      ["statecraft deploy('martial') -> real Fort Brandt troopers moved and posted", "polwar militaryOf().readiness/.soldiers debited", "rec.treasury", "approvalShock", "tyranny", "a refusal decays readiness -> civilwar coupEligible"]),
+    guard: deployButton("guard", "SECURITY", "Add to your detail",
+      ["statecraft deploy('guard') -> protection.js detail off_<seat>, real spawned bodies", "rec.treasury", "militia.js tryEscalate past MILITIA_HEADCOUNT", "tyranny"]),
+
+    // THE PURSE. The two ends of the lever the treasury runs on, and the
+    // badges that lever pays for.
+    police: decreeButton("police", "THE PURSE",
+      ["statecraft decree('police') -> police.js forcePool via cityPoliceForceAdd", "CBZ.CITY.policeForce", "rec.treasury", "approvalShock", "tyranny"]),
+    taxup: decreeButton("taxUp", "THE PURSE",
+      ["statecraft decree('taxUp') -> rec.taxRate -> approval.js services term", "rec.taxRate -> sim/econstate.js treasury flow"]),
+    taxdown: decreeButton("taxDown", "THE PURSE",
+      ["statecraft decree('taxDown') -> rec.taxRate -> approval.js services term", "rec.taxRate -> sim/econstate.js treasury flow"]),
+
+    // THE PEOPLE. The mirror of the pardon: the pardon is for you, the
+    // amnesty is for everybody else the law is hunting inside your border.
+    amnesty: decreeButton("amnesty", "THE PEOPLE",
+      ["statecraft decree('amnesty') -> ped.npcHeat/npcWanted/bounty across the jurisdiction", "g.respect via CBZ.city.addRespect", "approvalShock"]),
   };
   function doctrineGate(gov) {
     return function (h) {
@@ -895,7 +1164,7 @@
       CBZ.interactions.registerZone({
         id: "pres-office-" + key, kind: "presprop", radius: 1.75, prio: 14,
         find: function (px, pz) {
-          if (!on() || CFG.PRESIDENT_COMPOUND_V2 === false) return null;
+          if (!on()) return null;
           const mine = officeProp(key);
           if (!mine) return null;
           const P = CBZ.player;
@@ -988,9 +1257,9 @@
           label: function () {
             const B = BUTTONS[key];
             const h = seat();
-            if (!h) return B.name + " (not yours)";
+            if (!h) return bname(B) + " (not yours)";
             const gt = B.gate(h);
-            return B.name + (gt.ok ? "" : " — " + gt.why);
+            return bname(B) + (gt.ok ? "" : " — " + gt.why);
           },
           onSelect: function () { pressButton(key); },
         }],
@@ -1051,7 +1320,173 @@
     };
   }
 
-  // ---- the board — painted on events, never per frame --------------------
+  // ---- THE MAP PANEL - the country, drawn out of the registries that own it
+  // The board used to be six lines of text about places the player has never
+  // seen. Half of it is a real top-down schematic now: every walkable region
+  // the world registered, the two seats of power govcomplex published, the
+  // frontier construction.js is building, the safehouses the Bureau has a
+  // thread on, and live markers for the raid you ordered and the attack that
+  // is coming. Not one rect is authored here - every one is read back out of
+  // the registry that owns it, on the SAME event-driven repaint as the text.
+  // THE WALKABLE REGIONS, WHEREVER THE WORLD PUT THEM. The landmass builders
+  // are handed the ARENA as their `city`, so on a real world the 100-odd
+  // registered regions land on CBZ.city.arena.regions and CBZ.city.regions is
+  // an empty array. Read both. (This is worth knowing outside this panel:
+  // saltlandsRegion() in section 4 and construction.js's own saltlands() both
+  // read only CBZ.city.regions, which is why the wall plan, the safehouses
+  // and the Dry Gulch target all come back empty on a booted world.)
+  function cityRegions() {
+    const A = CBZ.city && CBZ.city.arena;
+    const a = (CBZ.city && CBZ.city.regions) || [];
+    const b = (A && A.regions) || [];
+    return a.length >= b.length ? a : b;
+  }
+  function mapRects() {
+    const out = [];
+    const regs = cityRegions();
+    for (let i = 0; i < regs.length; i++) {
+      const r = regs[i];
+      if (!r || !isFinite(r.minX) || !isFinite(r.maxX) || !isFinite(r.minZ) || !isFinite(r.maxZ)) continue;
+      if (r.maxX <= r.minX || r.maxZ <= r.minZ) continue;
+      out.push({ name: String(r.name || ""), minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ });
+    }
+    return out;
+  }
+  // the frontier line construction.js is actually building on. Its plan is
+  // derived from the Saltlands region; read the plan when it is reachable and
+  // fall back to the region's own west edge, never to a typed coordinate.
+  function wallLine() {
+    if (CBZ.stateWall && CBZ.stateWall._plan) {
+      try { const P = CBZ.stateWall._plan(); if (P && isFinite(P.x)) return { x: P.x, z0: P.z0, z1: P.z1 }; } catch (e) {}
+    }
+    const regs = cityRegions();
+    for (let i = 0; i < regs.length; i++) {
+      const R = regs[i];
+      if (R && R.name === "The Saltlands" && isFinite(R.minX)) return { x: R.minX, z0: R.minZ, z1: R.maxZ };
+    }
+    return null;
+  }
+  function paintMap(cc, X, Y, W, H, T) {
+    const rects = mapRects();
+    const mans = mansionSite(), bur = agencySite();
+    const marks = [];
+    if (mans) marks.push({ x: mans.cx, z: mans.cz, hex: "#b99347", tag: "MANSION", shape: "seat" });
+    if (bur) marks.push({ x: bur.cx, z: bur.cz, hex: "#7ba2b8", tag: "BUREAU", shape: "seat" });
+    if (T.threat.intel) {
+      let sh = [];
+      try { sh = safehouses() || []; } catch (e) { sh = []; }
+      for (let i = 0; i < sh.length; i++) marks.push({ x: sh[i].cx, z: sh[i].cz, hex: "#c2652a", tag: i ? "" : "SAFEHOUSE", shape: "x" });
+    }
+    if (T.threat.armed && ATT.armed && ATT.armed.at) marks.push({ x: ATT.armed.at.x, z: ATT.armed.at.z, hex: "#d9584e", tag: "ATTACK", shape: "ring" });
+    if (T.raid && RAID.target) marks.push({ x: RAID.target.x, z: RAID.target.z, hex: "#e0a63c", tag: "RAID", shape: "ring" });
+    const line = (T.wall && T.wall.ordered) ? wallLine() : null;
+
+    let b = null;
+    function grow(x0, z0, x1, z1) {
+      if (!isFinite(x0) || !isFinite(z0) || !isFinite(x1) || !isFinite(z1)) return;
+      if (!b) b = { x0: x0, z0: z0, x1: x1, z1: z1 };
+      else { b.x0 = Math.min(b.x0, x0); b.z0 = Math.min(b.z0, z0); b.x1 = Math.max(b.x1, x1); b.z1 = Math.max(b.z1, z1); }
+    }
+    for (let i = 0; i < rects.length; i++) grow(rects[i].minX, rects[i].minZ, rects[i].maxX, rects[i].maxZ);
+    for (let i = 0; i < marks.length; i++) grow(marks[i].x, marks[i].z, marks[i].x, marks[i].z);
+    if (line) grow(line.x, line.z0, line.x, line.z1);
+
+    cc.save();
+    cc.beginPath(); cc.rect(X, Y, W, H); cc.clip();
+    cc.fillStyle = "#070d14"; cc.fillRect(X, Y, W, H);
+    cc.strokeStyle = "#2c3a4e"; cc.lineWidth = 2; cc.strokeRect(X + 1, Y + 1, W - 2, H - 2);
+    cc.textAlign = "left"; cc.font = "bold 20px monospace"; cc.fillStyle = "#8fc1ff";
+    cc.fillText("THE COUNTRY", X + 16, Y + 28);
+    if (!b || (b.x1 - b.x0) <= 0 || (b.z1 - b.z0) <= 0) {
+      cc.font = "20px monospace"; cc.fillStyle = "#5f708a";
+      cc.fillText("no survey - the world has registered no ground yet", X + 16, Y + 64);
+      cc.restore(); return;
+    }
+    const TOP = 40, BOT = 26, PAD = 18;
+    const bw = Math.max(1, b.x1 - b.x0), bh = Math.max(1, b.z1 - b.z0);
+    const sc = Math.min((W - PAD * 2) / bw, (H - TOP - BOT - PAD) / bh);
+    const ox = X + (W - bw * sc) / 2 - b.x0 * sc;
+    const oz = Y + TOP + (H - TOP - BOT - bh * sc) / 2 - b.z0 * sc;
+    const MX = function (x) { return ox + x * sc; };
+    const MZ = function (z) { return oz + z * sc; };
+
+    // the ground, as the world filed it
+    for (let i = 0; i < rects.length; i++) {
+      const r = rects[i];
+      const px = MX(r.minX), pz = MZ(r.minZ), pw = (r.maxX - r.minX) * sc, ph = (r.maxZ - r.minZ) * sc;
+      cc.fillStyle = "rgba(38,60,88,0.55)"; cc.fillRect(px, pz, pw, ph);
+      cc.strokeStyle = "#31506f"; cc.lineWidth = 1; cc.strokeRect(px + 0.5, pz + 0.5, Math.max(1, pw - 1), Math.max(1, ph - 1));
+    }
+    cc.textAlign = "center"; cc.font = "12px monospace"; cc.fillStyle = "#6f8bab";
+    for (let i = 0; i < rects.length; i++) {
+      const r = rects[i];
+      const pw = (r.maxX - r.minX) * sc, ph = (r.maxZ - r.minZ) * sc;
+      if (!r.name || pw < 92 || ph < 30) continue;
+      cc.fillText(r.name.toUpperCase(), MX((r.minX + r.maxX) / 2), MZ((r.minZ + r.maxZ) / 2) + 4);
+    }
+
+    // THE WALL - built sections solid, the rest of the ordered line dashed
+    if (line) {
+      const frac = (T.wall.total ? clamp(T.wall.built / T.wall.total, 0, 1) : 0);
+      const zA = MZ(line.z0), zB = MZ(line.z1), xw = MX(line.x);
+      cc.lineWidth = 3; cc.strokeStyle = "#8b96a6";
+      cc.beginPath(); cc.moveTo(xw, zA); cc.lineTo(xw, zA + (zB - zA) * frac); cc.stroke();
+      cc.strokeStyle = "rgba(139,150,166,0.32)"; cc.setLineDash([5, 6]);
+      cc.beginPath(); cc.moveTo(xw, zA + (zB - zA) * frac); cc.lineTo(xw, zB); cc.stroke();
+      cc.setLineDash([]);
+    }
+
+    // the seats of power, the threat, and whatever is happening right now.
+    // Two markers can land on the same 30 m of desert, so a tag steps UP the
+    // panel until it clears every tag already placed rather than printing
+    // through it - the board is unreadable the one time it matters otherwise.
+    cc.font = "bold 12px monospace"; cc.textAlign = "center";
+    const taken = [];
+    function placeTag(px, pz, text, hex) {
+      const tw = cc.measureText(text).width + 6, th = 14;
+      let ty = pz - 22, tries = 0;
+      for (; tries < 6; tries++) {
+        let hit = false;
+        for (let k = 0; k < taken.length; k++) {
+          const b = taken[k];
+          if (px + tw / 2 > b.x0 && px - tw / 2 < b.x1 && ty + th > b.y0 && ty < b.y1) { hit = true; break; }
+        }
+        if (!hit) break;
+        ty -= th + 2;
+      }
+      if (tries >= 6) return;
+      taken.push({ x0: px - tw / 2, x1: px + tw / 2, y0: ty, y1: ty + th });
+      cc.fillStyle = "#070d14"; cc.fillRect(px - tw / 2, ty, tw, th);
+      cc.fillStyle = hex; cc.fillText(text, px, ty + 11);
+    }
+    for (let i = 0; i < marks.length; i++) {
+      const m = marks[i], px = MX(m.x), pz = MZ(m.z);
+      cc.strokeStyle = m.hex; cc.fillStyle = m.hex; cc.lineWidth = 2;
+      if (m.shape === "seat") { cc.fillRect(px - 5, pz - 5, 10, 10); cc.strokeStyle = "#0b1018"; cc.strokeRect(px - 5, pz - 5, 10, 10); }
+      else if (m.shape === "x") {
+        cc.beginPath(); cc.moveTo(px - 5, pz - 5); cc.lineTo(px + 5, pz + 5); cc.moveTo(px + 5, pz - 5); cc.lineTo(px - 5, pz + 5); cc.stroke();
+      } else {
+        cc.beginPath(); cc.arc(px, pz, 7, 0, Math.PI * 2); cc.stroke();
+        cc.beginPath(); cc.arc(px, pz, 2.5, 0, Math.PI * 2); cc.fill();
+      }
+      if (m.tag) placeTag(px, pz, m.tag, m.hex);
+    }
+
+    // the legend - what the four colours on this map mean
+    cc.textAlign = "left"; cc.font = "12px monospace";
+    const key = [["#b99347", "seat of power"], ["#8b96a6", "the wall"], ["#c2652a", "safehouse"], ["#d9584e", "live threat"]];
+    let lx = X + 16;
+    for (let i = 0; i < key.length; i++) {
+      cc.fillStyle = key[i][0]; cc.fillRect(lx, Y + H - 18, 9, 9);
+      cc.fillStyle = "#5f708a"; cc.fillText(key[i][1], lx + 14, Y + H - 10);
+      lx += 16 + cc.measureText(key[i][1]).width + 20;
+    }
+    cc.textAlign = "right"; cc.fillStyle = "#3f5064"; cc.font = "bold 13px monospace";
+    cc.fillText("N \u2191", X + W - 14, Y + 28);
+    cc.restore();
+  }
+
+  // ---- the board - painted on events, never per frame --------------------
   function paintBoard() {
     const b = ROOM.board;
     if (!b) return;
@@ -1070,31 +1505,41 @@
       pad.cap.material.color.setHex(active ? 0x4fc487 : (ready ? BRASS : 0x873d3d));
     }
     const cc = b.cc;
+    const COLW = 1440;   // the text column. The map is height-limited and
+                         // square, so extra panel width would only be margin.
+    function fit(text, maxW) {
+      let t = String(text);
+      if (cc.measureText(t).width <= maxW) return t;
+      while (t.length > 1 && cc.measureText(t + "\u2026").width > maxW) t = t.slice(0, -1);
+      return t + "\u2026";
+    }
     cc.fillStyle = "#0b1018"; cc.fillRect(0, 0, b.w, b.h);
     cc.strokeStyle = "#2c3a4e"; cc.lineWidth = 3; cc.strokeRect(6, 6, b.w - 12, b.h - 12);
-    cc.fillStyle = "#8fc1ff"; cc.font = "bold 34px monospace"; cc.textAlign = "left";
-    cc.fillText(T.country ? String(T.country).toUpperCase() + " — " + String(T.govType || "").toUpperCase()
-      : (rec ? String(rec.name).toUpperCase() + " — " + String(rec.govType || "").toUpperCase() : "NO COUNTRY"), 28, 52);
-    cc.font = "24px monospace"; cc.fillStyle = "#d8e2f2";
+    cc.textAlign = "left";
+    cc.fillStyle = "#8fc1ff"; cc.font = "bold 34px monospace";
+    cc.fillText(fit(T.country ? String(T.country).toUpperCase() + " \u2014 " + String(T.govType || "").toUpperCase()
+      : (rec ? String(rec.name).toUpperCase() + " \u2014 " + String(rec.govType || "").toUpperCase() : "NO COUNTRY"), COLW - 56), 28, 52);
+    cc.font = "22px monospace"; cc.fillStyle = "#d8e2f2";
     const S = st();
     const W = CBZ.stateWall && CBZ.stateWall.status ? CBZ.stateWall.status() : null;
     const threat = CFG.PRESIDENCY_TERROR
-      ? (T.threat.members + " known members · supply " + T.threat.supply + (T.threat.intel ? " · safehouse marked" : " · no intel")
-         + (T.threat.armed ? " · ATTACK ARMED ON " + String(T.threat.target || "an unknown target").toUpperCase() : ""))
+      ? (T.threat.members + " known members \u00b7 supply " + T.threat.supply + (T.threat.intel ? " \u00b7 safehouse marked" : " \u00b7 no intel")
+         + (T.threat.armed ? " \u00b7 ATTACK ARMED ON " + String(T.threat.target || "an unknown target").toUpperCase() : ""))
       : "quiet";
     const lines = [
       "TREASURY   " + money(T.treasury),
       "APPROVAL   " + Math.round(T.approval) + "%    TYRANNY " + Math.round(T.tyranny) + "    SCANDAL " + Math.round(T.scandal),
       "EMERGENCY  " + Math.round(T.emergency) + "%  (100 = the republic ends)",
       "THREAT     " + threat,
-      "THE WALL   " + (T.wall ? (T.wall.ordered ? T.wall.built + "/" + T.wall.total + " sections · " + (T.wall.manned ? "gaps manned" : "gaps open") + (W && W.breaches ? " · " + W.breaches + " breached" : "") : "not ordered") : "no machinery"),
+      "THE WALL   " + (T.wall ? (T.wall.ordered ? T.wall.built + "/" + T.wall.total + " sections \u00b7 " + (T.wall.manned ? "gaps manned" : "gaps open") + (W && W.breaches ? " \u00b7 " + W.breaches + " breached" : "") : "not ordered") : "no machinery"),
       "BUREAU     " + (T.raid ? ("raid " + T.raid) : (S.raidsOrdered ? S.raidsWon + " won / " + S.raidsLost + " lost" : "standing by")),
     ];
-    for (let i = 0; i < lines.length; i++) cc.fillText(lines[i], 28, 104 + i * 40);
+    for (let i = 0; i < lines.length; i++) cc.fillText(fit(lines[i], COLW - 56), 28, 104 + i * 40);
     cc.fillStyle = "#5f708a"; cc.font = "20px monospace";
-    cc.fillText("DAY " + T.day + (T.seat
-      ? "  ·  TERM ENDS " + (T.termDay != null ? "DAY " + T.termDay : "—") + (T.impeachDay != null ? "  ·  IMPEACHMENT VOTE DAY " + T.impeachDay : "")
-      : "  ·  YOU DO NOT HOLD THE SEAT"), 28, b.h - 28);
+    cc.fillText(fit("DAY " + T.day + (T.seat
+      ? "  \u00b7  TERM ENDS " + (T.termDay != null ? "DAY " + T.termDay : "\u2014") + (T.impeachDay != null ? "  \u00b7  IMPEACHMENT VOTE DAY " + T.impeachDay : "")
+      : "  \u00b7  YOU DO NOT HOLD THE SEAT"), COLW - 56), 28, b.h - 28);
+    try { paintMap(cc, COLW + 12, 20, b.w - COLW - 32, b.h - 40, T); } catch (e) {}
     b.paint();
   }
 
@@ -1176,7 +1621,12 @@
 
   // ---- the Saltlands + safehouses ---------------------------------------
   function saltlandsRegion() {
-    const regs = (CBZ.city && CBZ.city.regions) || [];
+    // The landmass builders are handed the ARENA as their `city`, so every
+    // registered region lives on CBZ.city.arena.regions and CBZ.city.regions
+    // is empty on a booted world. Reading only the latter is why the wall
+    // answered "the Saltlands never registered", safehouses() was empty and
+    // the Dry Gulch target never fired. cityRegions() reads both ledgers.
+    const regs = cityRegions();
     for (let i = 0; i < regs.length; i++) {
       const r = regs[i];
       if (r && r.name === "The Saltlands" && r.minX != null) return r;
@@ -2113,7 +2563,7 @@
     const W = CBZ.stateWall && CBZ.stateWall.status ? CBZ.stateWall.status() : null;
     let IA = { namedRooms: 0, usableProps: 0, stateSymbols: 0, emptyDecor: 0, roomNames: [], orderProps: [] };
     if (CBZ.presidentInteriorAudit) { try { IA = CBZ.presidentInteriorAudit() || IA; } catch (e) {} }
-    const architecture = (CFG.PRESIDENT_COMPOUND_V2 !== false && mansionSite())
+    const architecture = mansionSite()
       ? ["monumental order", "state dome", "carved mansion seal", "state standard", "ceremonial fountain"]
       : [];
     let buttons = 0, live = 0, moveless = 0;
@@ -2189,7 +2639,7 @@
         let gt = { ok: false, why: "You do not hold the country." };
         if (h) { try { gt = B.gate(h); } catch (e) { gt = { ok: false, why: "?" }; } }
         let lv = false; try { lv = !!B.live(); } catch (e) {}
-        out.push({ key: k, name: B.name, ok: gt.ok, why: gt.why || "", live: lv, moves: (B.moves || []).slice() });
+        out.push({ key: k, name: bname(B), group: B.group || "", ok: gt.ok, why: gt.why || "", live: lv, moves: (B.moves || []).slice() });
       }
       return out;
     },

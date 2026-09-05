@@ -773,7 +773,11 @@
   // ---- the line — derived from the region the desert itself registered ---
   let PLAN = null;                  // { x, z0, z1, segs:[{z,gap:false}], gaps:[{z, road}] }
   function saltlands() {
-    const regs = (CBZ.city && CBZ.city.regions) || [];
+    // regions are registered on the arena (the landmass builders' `city`);
+    // CBZ.city.regions is empty on a booted world — read whichever is filled.
+    const A = CBZ.city && CBZ.city.arena;
+    const a = (CBZ.city && CBZ.city.regions) || [], b = (A && A.regions) || [];
+    const regs = a.length >= b.length ? a : b;
     for (let i = 0; i < regs.length; i++) {
       const r = regs[i];
       if (r && r.name === "The Saltlands" && r.minX != null) return r;
