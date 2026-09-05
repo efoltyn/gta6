@@ -2103,6 +2103,14 @@
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
 <script src="src/city/presidency.js?v=nodash1"></script>
+<!-- THE PRESIDENT WAVE — four organs on presidency.js's status() API, in
+     load order: the HUD strip (reads status), the Chief of Staff's agenda
+     (mission.js + presidency.press), the motorcade (chauffeur + helipad), and
+     the regime dressing that changes the Mansion when the republic falls. -->
+<script src="src/city/president_hud.js?v=pres2"></script>
+<script src="src/city/president_agenda.js?v=pres2"></script>
+<script src="src/city/motorcade.js?v=pres2"></script>
+<script src="src/city/president_regime.js?v=pres2"></script>
 
 <!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
      your own place can store the cash, not just rob"). Turns govcomplex's
