@@ -313,7 +313,6 @@
   }
 
   let cracking = null;   // { ct, t }
-  let _promptT = 0;
   CBZ.onUpdate(42, function (dt) {
     // A CRATE IS COVER. With PRISON_NO_CHESTS there is no container verb at
     // all: no prompt, no pry beat, no payout, and the chip node is never even
@@ -332,13 +331,12 @@
       if (cracking.t >= CRACK_T) { crackOpen(ct); cracking = null; }
       return;
     }
-    // prompt scan at ~12 Hz (matches roofloot's own throttle — a walk-up
-    // prompt doesn't need frame-rate reactions). Skipped while a result flash
+    // Every frame: the pinned prompt (systems/interactions.js) retires any
+    // slot not re-armed within two frames, so a 12 Hz scan would flicker it.
+    // crateNear is one pass over a short list. Skipped while a result flash
     // is still holding the chip (flashChip owns it until _chipHoldT expires).
     if (_chipHoldT > 0) return;
-    _promptT += dt;
-    if (_promptT >= 1 / 12) {
-      _promptT = 0;
+    {
       const ct = crateNear();
       // THE WORD SITS ON THE LID: "Pry open" pinned over the crate itself
       // (systems/interactions.js prisonPrompt — key chip on a keyboard, a

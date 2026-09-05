@@ -40,7 +40,12 @@
                 hold  a hold-to-work beat (pick / saw) — the chip says HOLD
                 sub   a small second line ("to Cell Block Aisle")
                 d2    squared metres to the thing, for ONE PILL below
-                ttl   seconds without a re-arm before it goes (dflt 0.25)
+
+     A prompt lives exactly as long as its owner keeps arming it: the sweep
+     below retires any slot not re-armed within the last two frames. There is
+     no time-based tail — MEASURED (tools/visual-presets/prison-prompt-live
+     .mjs): a 0.25 s TTL let the door label outlive the door by fifteen
+     frames of a mouse turn, sliding across the screen pinned to nothing.
 
      ONE PILL, THE NEAREST (owner's law 5: "fewer button popups"). Several
      owners may arm at once — a vent beside a crate beside the breaker — and
@@ -48,7 +53,7 @@
      hidden, not removed, so their owners' re-arm loops are untouched.
   ============================================================ */
   let promptLayer = null;
-  const pills = new Map();          // id -> {wrap, el, act, verb, at, ttl, d2, seq, shown}
+  const pills = new Map();          // id -> {wrap, sig, frame, d2, seq, at, shown}
   const DEFAULT_D2 = 4;
   let pillSeq = 0;
   const _pv = new THREE.Vector3();
@@ -114,12 +119,12 @@
     let p = pills.get(id);
     if (!p || p.sig !== sig) {
       if (p && p.wrap.parentNode) p.wrap.parentNode.removeChild(p.wrap);
-      p = { wrap: makePill(act, verb, opts), sig: sig, ttl: 0, d2: 0, seq: 0, at: null, shown: null };
+      p = { wrap: makePill(act, verb, opts), sig: sig, frame: 0, d2: 0, seq: 0, at: null, shown: null };
       pills.set(id, p);
       ensureLayer().appendChild(p.wrap);
     }
     p.at = opts.at || null;
-    p.ttl = opts.ttl || 0.25;
+    p.frame = frameNo;
     // Unranked callers sit at 2 m — the range nearly every prison prompt arms
     // itself at — so a site that never learns about d2 still competes fairly.
     p.d2 = (opts.d2 == null || !isFinite(opts.d2)) ? DEFAULT_D2 : opts.d2;
@@ -150,19 +155,29 @@
 
   /* Pin the shown prompt over its thing: project the world point through the
      LIVE camera (camera.js updates it at always-order 50; this runs at 96).
-     A point behind the camera hides the label — a prompt is for what you are
-     facing. A point in front but off the edge is clamped to a margin, the
-     way a marker is, so a door at your shoulder still tells you it is there. */
-  const EDGE = 0.06;
+     OFF THE FRAME = NO LABEL. A point behind the camera, or past the edge by
+     more than a sliver, hides the label; only a point just off the edge is
+     held at the margin. The first version clamped EVERY off-screen anchor to
+     the edge, and that is what the owner saw as "nowhere close to the cell
+     door" — a word parked on the border, pinned to nothing (18% of frames in
+     a live walk-and-turn, worst 2,500 px from the leaf). The verb still
+     works off-screen; it just does not pretend to be somewhere. */
+  const EDGE = 0.03, SLIVER = 1.12;
   function placePrompt(p) {
     if (!p.at) return;
     const cam = CBZ.camera;
     if (!cam) return;
+    // THIS frame's camera, not last frame's. camera.js moved it at order 50;
+    // the renderer will not refresh matrixWorldInverse until the draw AFTER
+    // this, so project() here would trail the camera by a frame — which on
+    // a fast mouse turn reads as the label swimming off the door. r128's
+    // Camera.updateMatrixWorld refreshes the inverse too.
+    cam.updateMatrixWorld();
     _pv.set(p.at.x, p.at.y, p.at.z).project(cam);
-    if (_pv.z > 1) { p.wrap.style.visibility = "hidden"; return; }
+    if (_pv.z > 1 || Math.abs(_pv.x) > SLIVER || Math.abs(_pv.y) > SLIVER) { p.wrap.style.visibility = "hidden"; return; }
     const w = window.innerWidth || 800, h = window.innerHeight || 600;
     const nx = Math.max(-1 + EDGE * 2, Math.min(1 - EDGE * 2, _pv.x));
-    const ny = Math.max(-1 + EDGE * 3, Math.min(1 - EDGE * 2, _pv.y));
+    const ny = Math.max(-1 + EDGE * 4, Math.min(1 - EDGE * 2, _pv.y));
     const sx = Math.round((nx * 0.5 + 0.5) * w), sy = Math.round((-ny * 0.5 + 0.5) * h);
     if (p._sx !== sx || p._sy !== sy) {
       p._sx = sx; p._sy = sy;
@@ -172,17 +187,19 @@
     p.wrap.style.visibility = "";
   }
 
-  // TTL sweep + placement. A prompt whose owner stopped re-arming it goes
-  // away, and the whole layer stands down outside a live prison run (a prison
-  // prompt must never survive into the city, a pause or a death screen).
-  CBZ.onAlways(96, function (dt) {
+  // Sweep + placement. A prompt whose owner stopped re-arming it goes away
+  // within two frames, and the whole layer stands down outside a live prison
+  // run (a prison prompt must never survive into the city, a pause or a death
+  // screen — a pause stops the updaters, so nothing re-arms and it clears).
+  let frameNo = 0;
+  CBZ.onAlways(96, function () {
+    frameNo++;
     if (!pills.size) return;
     const gm = CBZ.game;
     const dead = !gm || gm.mode === "city" || gm.state !== "playing";
     const ids = [];
     pills.forEach(function (p, id) {
-      p.ttl -= dt;
-      if (dead || p.ttl <= 0) ids.push(id);
+      if (dead || frameNo - p.frame > 2) ids.push(id);
     });
     for (let i = 0; i < ids.length; i++) prisonPromptClear(ids[i]);
     if (!pills.size) return;
@@ -462,6 +479,7 @@
   function crawlVent(vent) {
     if (!vent || CBZ.crawling) return;
     CBZ.crawling = true;
+    player.crouch = true;                 // you go in low; the stance is part of the act
     if (fadeEl) fadeEl.style.opacity = "1";
     setTimeout(() => {
       player.pos.set(vent.dest.x, vent.dest.y, vent.dest.z);
@@ -712,26 +730,16 @@
         if (vd2 < 1.6) {
           armedVent = vent;                       // what a pill tap would enter
           armedVentT = 0.25;
-          if (player.crouch) {
-            // "Crawl" over the grate; where it goes is the one thing the
-            // grate itself cannot show, so it rides as the small second line.
-            CBZ.prisonPrompt("vent", "@prisonVentCrawl", "Crawl",
-              { at: ventPoint(vent), sub: "to " + vent.dest.name, d2: vd2 });
-            if (CBZ.keys && CBZ.keys["e"]) crawlVent(vent);
-          } else {
-            // FOUND BY READING: this said "Crouch [Shift]" for its whole life
-            // and Shift is SPRINT (controls.js) — physics.js:742 reads the
-            // escape-mode sneak off `keys["control"] || keys["c"]`, so the
-            // string named a key that has never crouched anybody.
-            // On touch there is no discoverable crouch at all here: escape mode
-            // is the one mode stanceRoute() refuses (touch.js:761), so crouch
-            // falls back to touch.js's PRIVATE crouchLatch — an unlabelled
-            // press-the-stick gesture with no exported API. The pill therefore
-            // performs the stance and the crawl as one act — so on touch it
-            // says "Crawl"; on a keyboard it names the key you actually need.
-            CBZ.prisonPrompt("vent", "@prisonVentCrawl", onTouch() ? "Crawl" : "Crouch",
-              { at: ventPoint(vent), key: "c", sub: "to " + vent.dest.name, d2: vd2 });
-          }
+          /* ONE BUTTON. This used to be two prompts — "Crouch" first, then
+             "Crawl" once you were down — and the stance gate was ceremony:
+             the crawl teleports you and puts you down on arrival anyway, and
+             touch already did both in one tap. (Owner, 2026-09-05: "the whole
+             crouch crawl vent thing should just be a button to enter the
+             vent.") Where it goes is the one thing the grate itself cannot
+             show, so it rides as the small second line. */
+          CBZ.prisonPrompt("vent", "@prisonVentCrawl", vent.verb || "Enter",
+            { at: ventPoint(vent), sub: "to " + vent.dest.name, d2: vd2 });
+          if (CBZ.keys && CBZ.keys["e"]) crawlVent(vent);
         }
       }
     }
@@ -768,7 +776,7 @@
   // ---- ratchet declarations (see CBZ.prisonPromptAudit) ----
   (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
     { id: "breaker", act: "@prisonSabotagePower", was: "Press [E] to Sabotage Power", now: "Sabotage, over the box" },
-    { id: "vent", act: "@prisonVentCrawl", was: "Press [E] to Crawl to … / Crouch [Shift] to enter vent", now: "Crawl, over the grate" },
+    { id: "vent", act: "@prisonVentCrawl", was: "Press [E] to Crawl to … / Crouch [Shift] to enter vent", now: "Enter, over the grate" },
     { id: "door", act: "@prisonDoorCloseNearest", was: "Press [E] to close your cell door", now: "Close, over the leaf" }
   );
 

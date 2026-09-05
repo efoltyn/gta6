@@ -43,8 +43,8 @@ const SUBJECTS = [
     focus: "Stood at the breaker. BEFORE: \"Press [E] to Sabotage Power\" at bottom-centre / a \"Sabotage Power\" band pill. AFTER: Sabotage, over the box.",
   },
   {
-    id: "vent", label: "A vent grate — Crawl",
-    focus: "Crouched on a grate. BEFORE: \"Press [E] to Crawl to <room>\" in the HUD slot. AFTER: Crawl over the grate, the destination as a small second line.",
+    id: "vent", label: "A vent grate — Enter",
+    focus: "Standing on a grate. BEFORE: a Crouch prompt first, then Crawl once down. AFTER: one button, Enter, over the grate — the destination as a small second line.",
   },
 ];
 
@@ -191,7 +191,6 @@ export default {
       const g = v.grate || v;
       thing = { x: g.x, y: (v.y || 0.1) + 0.55, z: g.z };
       stand = { x: v.x, z: v.z };
-      crouch = true;
     }
 
     hold(stand.x, stand.z, y0, thing.x, thing.z, crouch, 1.2);
