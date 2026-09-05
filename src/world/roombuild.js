@@ -107,10 +107,15 @@
         gaps.push([Math.max(from, d.center - w2), Math.min(to, d.center + w2)]);
       }
       gaps.sort(function (a, b) { return a[0] - b[0]; });
+      // `skin` re-skins the run through world/prisonkit.js (precast panels
+      // with world-metre joints); prison rooms built at parse get it by
+      // default, the city's interiors (built later) do not.
+      const skinKind = cfg.skin !== undefined ? cfg.skin : (CBZ.prisonKit && CBZ.prisonKit.defaultSkin);
       const seg = function (a, b) {
         if (b - a <= 0.02) return;                // a run the door ate entirely
-        if (horizontal) addBox((a + b) / 2, h / 2, fixed, b - a, h, T, wall, { solid: true, blockLOS: true });
-        else addBox(fixed, h / 2, (a + b) / 2, T, h, b - a, wall, { solid: true, blockLOS: true });
+        const m = horizontal ? addBox((a + b) / 2, h / 2, fixed, b - a, h, T, wall, { solid: true, blockLOS: true })
+          : addBox(fixed, h / 2, (a + b) / 2, T, h, b - a, wall, { solid: true, blockLOS: true });
+        if (skinKind && CBZ.prisonKit) CBZ.prisonKit.skinBox(m, skinKind, wall);
       };
       let cur = from;
       for (let i = 0; i < gaps.length; i++) {

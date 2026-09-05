@@ -25,15 +25,18 @@
   // compound perimeter declares `noBreach`: the blast still scars it, shakes
   // the camera and throws debris — it just does not open. ONE line, and it is
   // the whole policy; delete it and the prison becomes a jailbreak sandbox.
+  const K = CBZ.prisonKit;
   const wall = (x, z, w, d) => {
     const m = addBox(x, YH / 2, z, w, YH, d, WALL, { solid: true, blockLOS: true });
     if (m && m.userData && m.userData.collider) m.userData.collider.noBreach = true;
+    if (K) K.skinBox(m, "panel", WALL);               // precast panels (world/prisonkit.js)
     return m;
   };
-  // red warning trim hugging a wall top; ax 'x' runs along x, 'z' along z
+  // a concrete coping on the wall top (it was a red stripe 0.5 m below it)
   function trim(x, z, len, ax) {
-    if (ax === "z") addBox(x, YH - 0.5, z, 0.4, 0.4, len, TRIM, { cast: false });
-    else addBox(x, YH - 0.5, z, len, 0.4, 0.4, TRIM, { cast: false });
+    const m = ax === "z" ? addBox(x, YH + 0.18, z, 1.5, 0.36, len, 0x8f959c, { cast: false })
+      : addBox(x, YH + 0.18, z, len, 0.36, 1.5, 0x8f959c, { cast: false });
+    if (K) K.skinBox(m, "concrete", 0x9ea3a8);
   }
 
   /* ---- THESE TWO WALLS ARE NOT THE PERIMETER ANY MORE ---------------------

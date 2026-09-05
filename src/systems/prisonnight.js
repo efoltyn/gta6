@@ -144,6 +144,10 @@
   const fixtures = RIG.fixtures;
   const register = RIG.register;
   const lightAt = RIG.level;
+  // world/prisonkit.js builds tower eave lights and 18 m masts before this
+  // file parses; it parks their records and this drains them onto the circuit
+  for (const rec of (CBZ._prisonLateFixtures || [])) { try { register(rec); } catch (e) {} }
+  CBZ._prisonLateFixtures = [];
 
   // the cell wing: barred openings, and §4 drives its own level
   RIG.region({ id: "wing", x0: CB.x0, x1: CB.x1, z0: CB.z0, z1: CB.z1,

@@ -13,19 +13,21 @@
   // the beam that is actually holding the player flushes red as feedback.
   if (CBZ.CONFIG && CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT == null) CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT = true;
 
+  // where the head sits: on the tower's roof finial (world/prisonkit.js), HY m if the kit is absent
+  const HY = CBZ.towerHeadY || HY;
   function makeLight(towerX, towerZ, phase, sweep, sweepZ, sweepZAmp) {
     // the lamp head on the tower
     const head = new THREE.Mesh(
       new THREE.CylinderGeometry(0.5, 0.7, 0.8, 12),
       CBZ.mat(0xf7f4d8, { emissive: 0xfff1a8, ei: 0.9 })
     );
-    head.position.set(towerX, 6.2, towerZ);
+    head.position.set(towerX, HY, towerZ);
     head.rotation.z = Math.PI / 2;
     scene.add(head);
 
     // a real spotlight for the glow (no shadow — keeps it cheap)
     const spot = new THREE.SpotLight(0xfff3c0, 1.4, 60, 0.5, 0.5, 1.2);
-    spot.position.set(towerX, 6.2, towerZ);
+    spot.position.set(towerX, HY, towerZ);
     const tgt = new THREE.Object3D();
     tgt.userData.mover = true;
     scene.add(tgt);
@@ -38,7 +40,7 @@
       new THREE.MeshBasicMaterial({ color: 0xfff3c0, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false })
     );
     cone.userData.mover = true;
-    cone.position.set(towerX, 6.2, towerZ);
+    cone.position.set(towerX, HY, towerZ);
     scene.add(cone);
 
     // bright pool on the ground
@@ -102,10 +104,10 @@
       sl.pool.position.x = tx; sl.pool.position.z = tz;
 
       // aim the visible cone from the head toward the pool
-      const dir = sl.target.clone().sub(new THREE.Vector3(sl.gx, 6.2, sl.gz));
+      const dir = sl.target.clone().sub(new THREE.Vector3(sl.gx, HY, sl.gz));
       const len = dir.length();
       sl.cone.scale.y = len / 14;
-      sl.cone.position.set((sl.gx + tx) / 2, (6.2) / 2, (sl.gz + tz) / 2);
+      sl.cone.position.set((sl.gx + tx) / 2, (HY) / 2, (sl.gz + tz) / 2);
       sl.cone.lookAt(sl.target);
       sl.cone.rotateX(Math.PI / 2);
 

@@ -125,21 +125,34 @@
         scars it, shakes the camera and throws debris — it does not open.
         Delete that line and the escape game collapses into one verb.
      ========================================================== */
+  const K = CBZ.prisonKit;
   function perim(x, z, w, d) {
     const m = addBox(x, YH / 2, z, w, YH, d, WALL, { solid: true, blockLOS: true });
     if (m && m.userData && m.userData.collider) m.userData.collider.noBreach = true;
+    if (K) K.skinBox(m, "panel", WALL);               // precast panels, joints in world metres
     return m;
   }
+  // a concrete coping on the wall top, not a red stripe: it is what a wall has
   function trim(x, z, len, ax) {
-    if (ax === "z") addBox(x, YH - 0.5, z, 0.4, 0.4, len, TRIM, { cast: false });
-    else addBox(x, YH - 0.5, z, len, 0.4, 0.4, TRIM, { cast: false });
+    const m = ax === "z" ? addBox(x, YH + 0.18, z, 1.5, 0.36, len, 0x8f959c, { cast: false })
+      : addBox(x, YH + 0.18, z, len, 0.36, 1.5, 0x8f959c, { cast: false });
+    if (K) K.skinBox(m, "concrete", 0x9ea3a8);
   }
   const OW = OUT.x1 - OUT.x0, OD = OUT.z1 - OUT.z0;
   const OCX = (OUT.x0 + OUT.x1) / 2, OCZ = (OUT.z0 + OUT.z1) / 2;
   perim(OUT.x0, OCZ, 1, OD);                       // west
   perim(OUT.x1, OCZ, 1, OD);                       // east
-  perim(OCX, OUT.z0, OW, 1);                       // north
-  trim(OUT.x0, OCZ, OD, "z"); trim(OUT.x1, OCZ, OD, "z"); trim(OCX, OUT.z0, OW, "x");
+  /* THE NORTH WALL HAS A VEHICLE GATE. A prison this size takes trucks in
+     through a sally port, not through the freedom gate; the gap is a fixed
+     span of the north wall and world/prisongrounds.js stands the port in it
+     — two solid steel leaves, shut, `noBreach`, LOS-blocking, so the
+     perimeter is exactly as closed as it was (it is drawn as a gate; it
+     behaves as the wall). Published so razorwire.js leaves the span clear. */
+  const VG = CBZ.prisonVehicleGate = { x0: 92, x1: 112, z: OUT.z0 };
+  perim((OUT.x0 + VG.x0) / 2, OUT.z0, VG.x0 - OUT.x0, 1);   // north, west of the gate
+  perim((VG.x1 + OUT.x1) / 2, OUT.z0, OUT.x1 - VG.x1, 1);   // north, east of it
+  trim(OUT.x0, OCZ, OD, "z"); trim(OUT.x1, OCZ, OD, "z");
+  trim((OUT.x0 + VG.x0) / 2, OUT.z0, VG.x0 - OUT.x0, "x"); trim((VG.x1 + OUT.x1) / 2, OUT.z0, OUT.x1 - VG.x1, "x");
   // SOUTH: the existing wall (world/yard.js) already closes x[-44,44] and owns
   // the freedom gate. Only the two new shoulders out to the corners are ours,
   // so the gate keeps its exact geometry, its exact gap and its exact meaning.
@@ -183,15 +196,16 @@
   /* ---- corner towers. world/towers.js rings the OLD wall and keeps doing
        exactly that; these four stand on the new corners so the enlarged
        perimeter is watched rather than merely long. ---- */
-  function tower(x, z) {
-    addBox(x, 6.0, z, 3.0, 12.0, 3.0, 0x6b7480, { solid: true, blockLOS: true });
-    addBox(x, 12.4, z, 4.6, 0.9, 4.6, 0x515a66, { cast: false });
-    addBox(x, 13.1, z, 4.2, 0.5, 4.2, 0x3c424d, { cast: false });
-    addBox(x, 11.6, z, 4.2, 0.9, 0.12, 0x9fd6ff, { emissive: 0x3a6ea5, ei: 0.45, cast: false });
-    addBox(x, 11.6, z + 2.1, 4.2, 0.9, 0.12, 0x9fd6ff, { emissive: 0x3a6ea5, ei: 0.45, cast: false });
+  // world/prisonkit.js's tower, same deck height as the wall towers; NOT
+  // registered in CBZ.towers (capture.js's fire came from the eight old
+  // posts and still does), ladder and eave light facing the compound.
+  const d7 = 0.7071;
+  if (CBZ.guardTower) {
+    CBZ.guardTower(OUT.x0 + 4, OUT.z0 + 4, { register: false, face: { x: d7, z: d7 } });
+    CBZ.guardTower(OUT.x1 - 4, OUT.z0 + 4, { register: false, face: { x: -d7, z: d7 } });
+    CBZ.guardTower(OUT.x0 + 4, OUT.z1 - 4, { register: false, face: { x: d7, z: -d7 } });
+    CBZ.guardTower(OUT.x1 - 4, OUT.z1 - 4, { register: false, face: { x: -d7, z: -d7 } });
   }
-  for (const c of [[OUT.x0 + 4, OUT.z0 + 4], [OUT.x1 - 4, OUT.z0 + 4],
-    [OUT.x0 + 4, OUT.z1 - 4], [OUT.x1 - 4, OUT.z1 - 4]]) tower(c[0], c[1]);
 
   /* ==========================================================
      2. THE DOOR PRIMITIVE. One shape for every lock in this file, and it is
@@ -356,7 +370,7 @@
   function room(cfg) {
     CBZ.roomShell({
       x0: cfg.x0, x1: cfg.x1, z0: cfg.z0, z1: cfg.z1, h: cfg.h,
-      wall: cfg.wall, floor: cfg.floor,
+      wall: cfg.wall, floor: cfg.floor, skin: "panel",
       doors: [{ side: cfg.side, center: cfg.dc, width: cfg.dw }],
     });
     if (CBZ.prisonRoof) CBZ.prisonRoof({
@@ -365,13 +379,15 @@
     // A DOORWAY NEEDS A HEAD. roomShell splits its wall floor-to-top for the
     // gap, so without this every door in the new wings is an h-metre slot.
     const east = cfg.side === "E", west = cfg.side === "W";
+    let headBox;
     if (east || west) {
       const wx = east ? cfg.x1 : cfg.x0;
-      addBox(wx, (3.1 + cfg.h) / 2, cfg.dc, 0.5, cfg.h - 3.1, cfg.dw, cfg.wall, { cast: false });
+      headBox = addBox(wx, (3.1 + cfg.h) / 2, cfg.dc, 0.5, cfg.h - 3.1, cfg.dw, cfg.wall, { cast: false });
     } else {
       const wz = cfg.side === "N" ? cfg.z0 : cfg.z1;
-      addBox(cfg.dc, (3.1 + cfg.h) / 2, wz, cfg.dw, cfg.h - 3.1, 0.5, cfg.wall, { cast: false });
+      headBox = addBox(cfg.dc, (3.1 + cfg.h) / 2, wz, cfg.dw, cfg.h - 3.1, 0.5, cfg.wall, { cast: false });
     }
+    if (K) K.skinBox(headBox, "panel", cfg.wall);
     // the interior lives on the shared schedule: a strip drawn through
     // CBZ.prisonDress dies at lights-out for free (world/roofs.js flushes it).
     if (PD && typeof PD.strip === "function") {

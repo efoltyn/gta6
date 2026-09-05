@@ -87,6 +87,14 @@
   makeGuard([[30, 74], [30, 112], [22, 112]], 3.2, 13, 0.58);
   // the sally-port detail watching the freedom gate
   makeGuard([[-12, 122], [12, 122], [12, 114], [-12, 114]], 3.0, 15, 0.64);
+  /* PERIMETER PATROLS (2026-09-04). The sterile zone world/prisongrounds.js
+     fences off inside the outer wall is a patrol road, and a patrol road with
+     nobody on it is the empty ring again. One man per side, walking the
+     road between the corner towers; the legs are straight and clear. */
+  makeGuard([[-120.5, -100], [-120.5, 112]], 3.0, 15, 0.6);
+  makeGuard([[120.5, -100], [120.5, 112]], 3.0, 15, 0.6);
+  makeGuard([[-108, -112.5], [84, -112.5]], 3.0, 15, 0.6);
+  makeGuard([[-108, 124.5], [-52, 124.5]], 3.0, 15, 0.6);
   /* THE WARDEN — slow, sharp-eyed; bribe him for the gun-room key.
      He used to patrol a 12 x 6 m rectangle of open yard outside the gun-room
      door and never leave it: the man with the highest key in the prison spent
