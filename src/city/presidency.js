@@ -66,6 +66,40 @@
    rampage brain; a far one resolves as a world event (terror-threat through
    cityEvent, real approval, real emergencyPowers) — reported, never faked.
 
+   THE THREAT COMES TO THE GATE. Once you have been sworn in the cell stops
+   only bombing a market 4.7 km from your house: targets ALTERNATE (strictly,
+   with the phase off a day hash) between the Dry Gulch market and the GATE OF
+   THE EXECUTIVE MANSION. A gate attack counts you as present anywhere on your
+   own compound, arrives in a REAL car (cityMakeCar, entered on the access
+   road 60 m outside the leaf and driven up the drive by this file's own tick
+   — ai:false + road:null, which is the only state in which the vehicle sim
+   leaves a car alone), and puts 2-3 gunmen out of it at the gatehouse on the
+   same rampage brain. The Mansion's own detail (power.js's principal ring,
+   protection.js) answers it: there is no guard AI in this file. Twenty
+   seconds before the bodies, "attack-armed" fires so the HUD can warn.
+
+   THE PUBLIC FACE (other systems code against exactly this):
+     CBZ.presidency.status()   one read of the whole presidency, every number
+                               READ BACK from its owner (rec.treasury,
+                               rec.approval, politics().emergencyPowers /
+                               .scandal, gov.tyranny(), stateWall.status()).
+                               paintBoard() consumes it too, so the board in
+                               the room and any HUD are the same source.
+     CBZ.presidency.site()     the execmansion entry of CBZ.govComplexes
+     CBZ.presidency.on/.emit   a synchronous bus. The seven moments, with the
+                               payload each one carries:
+                                 sworn        {seat, country, govType, day}
+                                 order        {key, ok, why}
+                                 attack-armed {at:{x,z,name}, name, gate, eta}
+                                   fired twice: once when the day schedules
+                                   it (eta null), once when the fuse lights
+                                   ~20 s before the bodies (eta 20)
+                                 attack       {real, at:NAME, name, gate,
+                                               where:{x,z}}
+                                 raid         {phase|null, won?}
+                                 impeach      {day, scandal, approval}
+                                 arrest       {why, title, impeached}
+
    COUNTERTERROR IS PEOPLE AT PEOPLE (the owner's standing ask: "ways to
    order real npcs to interact with other npcs"): DIRECT THE BUREAU casts
    real agents at the Bureau gate (cityPostNpc — occupy's own atom, never a
@@ -130,6 +164,19 @@
   const ATTACK_MIN_GAP_DAYS = 2;
   const ATTACK_NEAR = 150;                              // stage a real scene inside this range
   const ATTACK_APPROVAL = -5;                           // a bombing the state failed to stop
+  // THE THREAT COMES TO THE GATE. A gate attack counts the player as present
+  // anywhere on his own compound (the Mansion plot is 248x244 m, so 200 m off
+  // the centre is "you are home"), and it arrives on the access road in a real
+  // car instead of teleporting bodies onto the lawn.
+  const GATE_NEAR = 200;                                // anywhere on the compound
+  const GATE_APPROACH = 60;                             // where the car enters the drive
+  const GATE_STOP = 6;                                  // where it stops, outside the leaf
+  const GATE_ATTACKERS = 3;                             // 2-3, by day hash
+  const ATTACK_WARN_SEC = 20;                           // radio warning before the bodies
+  // the roll is PACED off the warning: the car enters the drive the moment the
+  // radio call goes out and pulls up at the leaf ~4 s before the doors open,
+  // so nothing pops into view and the last seconds are a standoff.
+  const GATE_ROLL_SPEED = GATE_APPROACH / Math.max(4, ATTACK_WARN_SEC - 4);   // m/s
   const RAID_WIN_APPROVAL = 4, RAID_LOSS_APPROVAL = -3;
   const IMPEACH_SCANDAL = 85, IMPEACH_APPROVAL = 15, IMPEACH_SCANDAL_LO = 50;
   const ARREST_GRACE_SEC = 30;                          // marshals give you one warning
@@ -173,6 +220,23 @@
     return true;
   }
   function shock(id, n) { if (CBZ.approvalShock && isFinite(n)) { try { CBZ.approvalShock(id, n); } catch (e) {} } }
+
+  // ---- THE BUS. A five-line synchronous emitter, because the HUD, the
+  // director and the motorcade all want to hear the same seven moments and none
+  // of them should have to poll for them. Listeners never throw into a caller.
+  const LISTEN = Object.create(null);
+  function onEvent(evt, fn) {
+    if (!evt || typeof fn !== "function") return function () {};
+    const l = (LISTEN[evt] = LISTEN[evt] || []);
+    l.push(fn);
+    return function off() { const i = l.indexOf(fn); if (i >= 0) l.splice(i, 1); };
+  }
+  function emitEvent(evt, payload) {
+    const l = LISTEN[evt];
+    if (!l || !l.length) return;
+    const c = l.slice();
+    for (let i = 0; i < c.length; i++) { try { c[i](payload, evt); } catch (e) {} }
+  }
 
   // own seeded LCG for runtime casting order (repo convention; never
   // Math.random). Build-path choices below use hash01/seedStream instead.
@@ -256,6 +320,7 @@
     S.began = true;
     S.wasPresident = true;
     bindDetail({ id: rec.id, rec: rec });
+    emitEvent("sworn", { seat: rec.id, country: rec.name || null, govType: rec.govType || null, day: day() });
     big("SWORN IN · PRESIDENT OF " + String(rec.name || "THE REPUBLIC").toUpperCase());
     orders("Chief of Staff", "The Mansion is yours. The Situation Room is behind the steel door off the entrance hall, your seal opens it. Nobody else's does.", 2);
     // the first WHY is a locked door: walk to it. mission.js owns the HUD
@@ -796,13 +861,19 @@
     const h = seat();
     if (!h) return { ok: false, why: "You do not hold the country." };
     const gt = B.gate(h);
-    if (!gt.ok) { orders("Situation Room", gt.why, 1); paintBoard(); return gt; }
+    if (!gt.ok) {
+      orders("Situation Room", gt.why, 1); paintBoard();
+      emitEvent("order", { key: key, ok: false, why: gt.why || "" });
+      return gt;
+    }
     let r;
     try { r = B.run(h); } catch (e) { r = { ok: false, why: "The order did not go through." }; }
     if (r && !r.ok && r.why) orders("Situation Room", r.why, 1);
     paintBoard();
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    return r || { ok: true, why: "" };
+    const out = r || { ok: true, why: "" };
+    emitEvent("order", { key: key, ok: !!out.ok, why: out.why || "" });
+    return out;
   }
 
   // The Cabinet folio and the two desk objects are published by the shared
@@ -934,13 +1005,57 @@
     }
   }
 
+  // ---- THE STATUS — ONE READ OF THE WHOLE PRESIDENCY ---------------------
+  // Every number here is READ BACK from the system that owns it, never
+  // mirrored into this file's own state: the treasury and approval off the
+  // polity record, emergency and scandal off w.politics, tyranny off
+  // statecraft, the wall off construction.js. paintBoard() below consumes
+  // this same object, so the board in the room and the HUD on the player can
+  // never disagree — there is one source and this is it.
+  function status() {
+    const h = seat();
+    const rec = h ? h.rec : null;
+    const p = politics();
+    const S = st();
+    const W = (CBZ.stateWall && CBZ.stateWall.status) ? CBZ.stateWall.status() : null;
+    const A = ATT.armed;
+    const office = rec && rec.office ? rec.office : null;
+    return {
+      seat: !!h,
+      title: h ? (h.title || null) : null,
+      country: rec ? (rec.name || null) : null,
+      govType: rec ? (rec.govType || null) : null,
+      treasury: rec ? (rec.treasury || 0) : 0,
+      approval: clamp(rec ? (rec.approval || 0) : 0, 0, 100),
+      emergency: clamp((p && p.emergencyPowers) || 0, 0, 100),
+      tyranny: (CBZ.gov && CBZ.gov.tyranny) ? CBZ.gov.tyranny() : 0,
+      scandal: (p && p.scandal) || 0,
+      day: day(),
+      termDay: office && office.termDay != null ? office.termDay : null,
+      impeachDay: S.impeachDay != null ? S.impeachDay : null,
+      threat: {
+        members: CFG.PRESIDENCY_TERROR ? livingCell().length : 0,
+        supply: S.supply | 0,
+        intel: !!S.intelKnown,
+        armed: !!A,
+        target: A && A.at ? (A.at.name || null) : null,
+      },
+      wall: W ? {
+        ordered: !!W.ordered, built: W.built | 0, total: W.total | 0,
+        manned: !!W.manned, done: !!W.done,
+      } : null,
+      raid: RAID.phase || null,
+      began: !!S.began,
+    };
+  }
+
   // ---- the board — painted on events, never per frame --------------------
   function paintBoard() {
     const b = ROOM.board;
     if (!b) return;
     const h = seat();
     const rec = h ? h.rec : countryRecAny();
-    const p = politics();
+    const T = status();
     // Each cap owns its material so this event-driven status pass can show a
     // live order in green, an available one in brass and a refused one in
     // muted red without recolouring any shared material elsewhere.
@@ -956,21 +1071,28 @@
     cc.fillStyle = "#0b1018"; cc.fillRect(0, 0, b.w, b.h);
     cc.strokeStyle = "#2c3a4e"; cc.lineWidth = 3; cc.strokeRect(6, 6, b.w - 12, b.h - 12);
     cc.fillStyle = "#8fc1ff"; cc.font = "bold 34px monospace"; cc.textAlign = "left";
-    cc.fillText(rec ? String(rec.name).toUpperCase() + " — " + String(rec.govType || "").toUpperCase() : "NO COUNTRY", 28, 52);
+    cc.fillText(T.country ? String(T.country).toUpperCase() + " — " + String(T.govType || "").toUpperCase()
+      : (rec ? String(rec.name).toUpperCase() + " — " + String(rec.govType || "").toUpperCase() : "NO COUNTRY"), 28, 52);
     cc.font = "24px monospace"; cc.fillStyle = "#d8e2f2";
     const S = st();
     const W = CBZ.stateWall && CBZ.stateWall.status ? CBZ.stateWall.status() : null;
+    const threat = CFG.PRESIDENCY_TERROR
+      ? (T.threat.members + " known members · supply " + T.threat.supply + (T.threat.intel ? " · safehouse marked" : " · no intel")
+         + (T.threat.armed ? " · ATTACK ARMED ON " + String(T.threat.target || "an unknown target").toUpperCase() : ""))
+      : "quiet";
     const lines = [
-      "TREASURY   " + money(rec ? rec.treasury || 0 : 0),
-      "APPROVAL   " + Math.round(rec ? rec.approval || 0 : 0) + "%    TYRANNY " + Math.round(CBZ.gov && CBZ.gov.tyranny ? CBZ.gov.tyranny() : 0),
-      "EMERGENCY  " + Math.round((p && p.emergencyPowers) || 0) + "%  (100 = the republic ends)",
-      "THREAT     " + (CFG.PRESIDENCY_TERROR ? (livingCell().length + " known members · supply " + S.supply + (S.intelKnown ? " · safehouse marked" : " · no intel")) : "quiet"),
-      "THE WALL   " + (W ? (W.ordered ? W.built + "/" + W.total + " sections · " + (W.manned ? "gaps manned" : "gaps open") + (W.breaches ? " · " + W.breaches + " breached" : "") : "not ordered") : "no machinery"),
-      "BUREAU     " + (RAID.phase ? ("raid " + RAID.phase) : (S.raidsOrdered ? S.raidsWon + " won / " + S.raidsLost + " lost" : "standing by")),
+      "TREASURY   " + money(T.treasury),
+      "APPROVAL   " + Math.round(T.approval) + "%    TYRANNY " + Math.round(T.tyranny) + "    SCANDAL " + Math.round(T.scandal),
+      "EMERGENCY  " + Math.round(T.emergency) + "%  (100 = the republic ends)",
+      "THREAT     " + threat,
+      "THE WALL   " + (T.wall ? (T.wall.ordered ? T.wall.built + "/" + T.wall.total + " sections · " + (T.wall.manned ? "gaps manned" : "gaps open") + (W && W.breaches ? " · " + W.breaches + " breached" : "") : "not ordered") : "no machinery"),
+      "BUREAU     " + (T.raid ? ("raid " + T.raid) : (S.raidsOrdered ? S.raidsWon + " won / " + S.raidsLost + " lost" : "standing by")),
     ];
     for (let i = 0; i < lines.length; i++) cc.fillText(lines[i], 28, 104 + i * 40);
     cc.fillStyle = "#5f708a"; cc.font = "20px monospace";
-    cc.fillText("DAY " + day() + (h ? "  ·  TERM ENDS " + (h.rec.office && h.rec.office.termDay != null ? "DAY " + h.rec.office.termDay : "—") : "  ·  YOU DO NOT HOLD THE SEAT"), 28, b.h - 28);
+    cc.fillText("DAY " + T.day + (T.seat
+      ? "  ·  TERM ENDS " + (T.termDay != null ? "DAY " + T.termDay : "—") + (T.impeachDay != null ? "  ·  IMPEACHMENT VOTE DAY " + T.impeachDay : "")
+      : "  ·  YOU DO NOT HOLD THE SEAT"), 28, b.h - 28);
     b.paint();
   }
 
@@ -1156,7 +1278,7 @@
   // ---- ATTACKS — staged on real bodies when you are there; a reported
   // world event when you are not. Either way the numbers moved are real.
   const ATT = { armed: null };
-  function attackTarget() {
+  function marketTarget() {
     // the market: Dry Gulch's centre; the highway spine z is published
     const R = saltlandsRegion();
     if (!R) return null;
@@ -1164,13 +1286,90 @@
     const z = (CBZ.DESERT_HWY_Z != null) ? CBZ.DESERT_HWY_Z : cz - 40;
     return { x: cx + 30, z: z, name: "the Dry Gulch market" };
   }
+  // WHICH WAY IS OUT of a compound? govcomplex publishes `gate` as a point ON
+  // one edge of `rect`; the outward normal is whichever edge it sits on. Read
+  // rather than hard-coded, so moving the Mansion's gateSide can never point
+  // the access road at the lawn.
+  function gateOut(site) {
+    const R = site.rect, gp = site.gate || { x: site.cx, z: R.maxZ };
+    const dl = Math.abs(gp.x - R.minX), dr = Math.abs(gp.x - R.maxX);
+    const db = Math.abs(gp.z - R.minZ), dt = Math.abs(gp.z - R.maxZ);
+    const m = Math.min(dl, dr, db, dt);
+    if (m === dt) return { x: 0, z: 1 };
+    if (m === db) return { x: 0, z: -1 };
+    if (m === dr) return { x: 1, z: 0 };
+    return { x: -1, z: 0 };
+  }
+  // THE SECOND TARGET: your own gate. The point is just INSIDE the leaf, in
+  // front of the gatehouse (govcomplex row 2: gatehouse at cx, R.maxZ-6), so
+  // the fight happens where the Mansion's own detail already stands.
+  function gateTarget() {
+    const s = mansionSite();
+    if (!s || !s.rect) return null;
+    const gp = s.gate || { x: s.cx, z: s.rect.maxZ };
+    const o = gateOut(s);
+    return {
+      x: gp.x - o.x * 4, z: gp.z - o.z * 4,
+      name: "the gate of the Executive Mansion", gate: true,
+      site: s, out: o, gx: gp.x, gz: gp.z,
+    };
+  }
+  // ALTERNATION. Before the swearing-in the cell only knows the market. After
+  // it, targets strictly alternate market -> gate -> market, with the PHASE
+  // picked by the day hash (so which one opens the term is deterministic per
+  // world without every world opening the same way).
+  function attackTarget(d) {
+    const S = st();
+    const market = marketTarget();
+    if (!(S.began || seat())) return market;
+    const gate = gateTarget();
+    if (!gate) return market;
+    const phase = h01(d, 9, 0x5a1c) < 0.5 ? 0 : 1;
+    const wantGate = ((S.attacksDone | 0) + phase) % 2 === 1;
+    return wantGate ? gate : (market || gate);
+  }
+  // the bus payload: a point and a name, never this file's live target record
+  // (a listener must not be handed the site rect to hold on to).
+  function armedPayload(t, eta) {
+    return { at: { x: t.x, z: t.z, name: t.name || null }, name: t.name || null, gate: !!t.gate, eta: eta };
+  }
   function armAttack(d) {
     const S = st();
-    const t = attackTarget();
+    const t = attackTarget(d);
     if (!t) return;
-    S.supply -= CELL_SUPPLY_PER_ATTACK;
+    S.supply = clamp(S.supply - CELL_SUPPLY_PER_ATTACK, 0, CELL_MAX_SUPPLY);
     S.lastAttackDay = d;
-    ATT.armed = { at: t, t: 0 };
+    ATT.armed = { at: t, t: 0, lit: false, fuse: 0, car: null };
+    emitEvent("attack-armed", armedPayload(t, null));
+  }
+  // ---- casting: the ONE sanctioned atom, the ONE existing brain ----------
+  function armPed(ped, rank) {
+    if (!ped) return null;
+    ped.organization = "cell";
+    ped._cellRank = rank || "bomber";
+    ped.job = "terror attacker";
+    ped.aggr = 0.98;
+    ped.ammo = Math.max(ped.ammo || 0, 90);
+    if (!ped.armed) { ped.armed = true; ped.weapon = "AK-47"; if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(ped); } catch (e) {} } }
+    let ok = false;
+    if (CBZ.cityStartRampage) { try { ok = !!CBZ.cityStartRampage(ped); } catch (e) { ok = false; } }
+    if (!ok) {
+      ped.rampage = true;
+      if (CBZ.cityNpcOffense) { try { CBZ.cityNpcOffense(ped, 90, "terror attack"); } catch (e) {} }
+      if ((ped.npcWanted | 0) < 3) ped.npcWanted = 3;
+    }
+    return ped;
+  }
+  function castAttacker(x, z, rank) {
+    if (!CBZ.cityPostNpc) return null;
+    let ped = null;
+    try {
+      ped = CBZ.cityPostNpc(x, z, {
+        job: "terror attacker", archetype: "thug", armed: true, weapon: "AK-47",
+        ammo: 120, aggr: 0.98,
+      });
+    } catch (e) { ped = null; }
+    return armPed(ped, rank);
   }
   function stageAttackReal(t) {
     // a REAL attacker: prefer a live embodied cell body; else cast ONE at the
@@ -1182,54 +1381,148 @@
       const p = peds[i];
       if (p && !p.dead && p.organization === "cell") { ped = p; break; }
     }
-    if (!ped && CBZ.cityPostNpc) {
+    if (ped) armPed(ped, ped._cellRank || "bomber");
+    if (!ped) {
       const sh = safehouses()[0];
       const sx = sh ? sh.cx : t.x + 26, sz = sh ? sh.cz : t.z + 26;
-      ped = CBZ.cityPostNpc(sx, sz, { job: "terror attacker", archetype: "thug", armed: true, weapon: "AK-47", aggr: 0.98 });
-      if (ped) { ped.organization = "cell"; ped._cellRank = "bomber"; }
+      ped = castAttacker(sx, sz, "bomber");
     }
     if (!ped) return false;
-    ped.ammo = Math.max(ped.ammo || 0, 90);
-    if (!ped.armed) { ped.armed = true; ped.weapon = "AK-47"; if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(ped); } catch (e) {} } }
-    let ok = false;
-    if (CBZ.cityStartRampage) { try { ok = !!CBZ.cityStartRampage(ped); } catch (e) { ok = false; } }
-    if (!ok) {
-      ped.rampage = true; ped.aggr = 0.98;
-      if (CBZ.cityNpcOffense) { try { CBZ.cityNpcOffense(ped, 90, "terror attack"); } catch (e) {} }
-      if ((ped.npcWanted | 0) < 3) ped.npcWanted = 3;
-    }
     if (CBZ.cityPanicRaise) { try { CBZ.cityPanicRaise(t.x, t.z, 1.6); } catch (e) {} }
     return true;
   }
-  function resolveAttack(realStaged) {
+  // ---- THE CAR. A real record out of vehicles.js's own makeCar, entered on
+  // the access road GATE_APPROACH metres outside the leaf and driven up the
+  // drive by this file (ai:false + road:null = the vehicle sim leaves a car
+  // alone, so the roll below is the only thing moving it). It is a normal
+  // car afterwards: shootable, stealable, and it stays at your gate.
+  function spawnGateCar(t) {
+    if (!CBZ.cityMakeCar || !CBZ.city || !CBZ.city.arena || !CBZ.city.arena.root) return null;
+    const o = t.out || { x: 0, z: 1 };
+    const sx = t.gx + o.x * GATE_APPROACH, sz = t.gz + o.z * GATE_APPROACH;
+    // heading faces back down the drive: forward is (sin h, cos h)
+    const heading = Math.atan2(-o.x, -o.z);
+    let car = null;
+    try { car = CBZ.cityMakeCar(sx, sz, heading, false, null, 0); } catch (e) { car = null; }
+    if (!car) return null;
+    car.ai = false; car.road = null; car.parked = false; car.v = GATE_ROLL_SPEED;
+    car._presGateCar = true;
+    return car;
+  }
+  function rollGateCar(A, dt) {
+    const c = A.car, t = A.at;
+    if (!c || c.dead || !c.pos) return;
+    const o = t.out || { x: 0, z: 1 };
+    const tx = t.gx + o.x * GATE_STOP, tz = t.gz + o.z * GATE_STOP;
+    const dx = tx - c.pos.x, dz = tz - c.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 0.4) { c.v = 0; return; }
+    const step = Math.min(GATE_ROLL_SPEED * dt, d);
+    c.heading = Math.atan2(dx / d, dz / d);
+    c.pos.x += (dx / d) * step;
+    c.pos.z += (dz / d) * step;
+    c.v = step / Math.max(dt, 0.001);
+    if (c.group) c.group.rotation.y = c.heading;
+  }
+  // 2-3 gunmen out of the car, at the gate, on the rampage brain. The
+  // Mansion's own detail (power.js's principal ring / protection.js) answers
+  // this for free — there is no guard AI in this file and never will be.
+  function stageGateAttack(A) {
+    const t = A.at;
+    const c = A.car;
+    const bx = (c && c.pos) ? c.pos.x : t.x, bz = (c && c.pos) ? c.pos.z : t.z;
+    const n = 2 + (h01(day(), st().attacksDone | 0, 0x5a1d) < 0.5 ? 0 : 1);
+    let cast = 0;
+    for (let i = 0; i < Math.min(n, GATE_ATTACKERS); i++) {
+      const ped = castAttacker(bx + (i - 1) * 1.9, bz + 1.7, i === 0 ? "bomber" : "runner");
+      if (ped) cast++;
+    }
+    if (!cast) {
+      // the atom refused (no ped machinery this world) — fall back to the
+      // safehouse cast so the attack is still bodies somewhere, then report.
+      return stageAttackReal(t);
+    }
+    if (c) { c.v = 0; c.abandoned = true; }
+    if (CBZ.cityPanicRaise) { try { CBZ.cityPanicRaise(t.x, t.z, 2.0); } catch (e) {} }
+    return true;
+  }
+  function resolveAttack(realStaged, t) {
     const S = st();
     const h = seat();
     const recId = h ? h.id : (countryRecAny() ? countryRecAny().id : null);
+    const atGate = !!(t && t.gate);
     S.attacksDone++;
     S.intelKnown = true;                                // the cell surfaced; the Bureau has a thread
     if (CBZ.cityEvent) { try { CBZ.cityEvent("terror-threat", { panic: 8, emergency: 6, confidence: -3 }); } catch (e) {} }
     if (recId) shock(recId, ATTACK_APPROVAL);
-    big("ATTACK IN THE SALTLANDS");
-    news(realStaged
-      ? "Gunfire at the Dry Gulch market, the Sons of the Dune claim the attack."
-      : "A bomb tears through the Dry Gulch market. The Sons of the Dune claim it; the count is still coming in.");
+    if (atGate) {
+      big(realStaged ? "GUNMEN AT YOUR GATE" : "THEY HIT THE MANSION GATE");
+      news(realStaged
+        ? "Gunmen hit the gate of the Executive Mansion. The Sons of the Dune claim the attack."
+        : "Gunmen hit the gate of the Executive Mansion while the " + (h ? h.title : "head of state") + " was away. The Sons of the Dune claim it.");
+      feed(realStaged ? "Shooting at the Mansion gate." : "Shooting reported at the Mansion gate.", "#ff8b6a");
+    } else {
+      big("ATTACK IN THE SALTLANDS");
+      news(realStaged
+        ? "Gunfire at the Dry Gulch market, the Sons of the Dune claim the attack."
+        : "A bomb tears through the Dry Gulch market. The Sons of the Dune claim it; the count is still coming in.");
+    }
+    // `at` is the PLACE AS A NAME here (the HUD prints it straight); the
+    // coordinates ride along as `where` for anyone who wants a waypoint.
+    emitEvent("attack", {
+      real: !!realStaged,
+      at: t ? (t.name || null) : null,
+      name: t ? (t.name || null) : null,
+      gate: atGate,
+      where: t ? { x: t.x, z: t.z } : null,
+    });
     paintBoard();
+  }
+  // is the player close enough for this attack to be BODIES? For the market,
+  // the old 150 m. For the gate, anywhere on his own compound.
+  function attackIsNear(t) {
+    const P = CBZ.player;
+    if (!P || !P.pos || !t) return false;
+    if (t.gate) {
+      const s = t.site || mansionSite();
+      if (!s) return false;
+      return Math.hypot(P.pos.x - s.cx, P.pos.z - s.cz) < GATE_NEAR;
+    }
+    return Math.hypot(P.pos.x - t.x, P.pos.z - t.z) < ATTACK_NEAR;
   }
   function tickAttack(dt) {
     const A = ATT.armed;
     if (!A) return;
     A.t += dt;
-    const P = CBZ.player;
-    const near = P && P.pos && Math.hypot(P.pos.x - A.at.x, P.pos.z - A.at.z) < ATTACK_NEAR;
-    if (near) {
-      ATT.armed = null;
-      const staged = stageAttackReal(A.at);
-      resolveAttack(staged);
+    if (!A.lit) {
+      if (attackIsNear(A.at)) {
+        // THE FUSE. Twenty seconds of warning, then bodies — long enough for
+        // the HUD to say it and for the player to run to the gate.
+        A.lit = true; A.fuse = 0;
+        if (A.at.gate) {
+          A.car = spawnGateCar(A.at);
+          orders("Mansion Detail", "Vehicle running the access road, twenty seconds out. Get off the lawn or get behind the wall.", 2);
+          feed("A car is coming up the drive to YOUR gate.", "#ff9a6a");
+        } else {
+          feed("Something is about to happen at the Dry Gulch market.", "#ff9a6a");
+        }
+        emitEvent("attack-armed", armedPayload(A.at, ATTACK_WARN_SEC));
+        return;
+      }
+      if (A.t > 60) {                                   // far away: it happens without you
+        const t = A.at;
+        ATT.armed = null;
+        resolveAttack(false, t);
+      }
       return;
     }
-    if (A.t > 60) {                                     // far away: the world event happens without you
+    A.fuse += dt;
+    if (A.at.gate) rollGateCar(A, dt);
+    if (A.fuse >= ATTACK_WARN_SEC) {
+      const t = A.at;
+      const staged = t.gate ? stageGateAttack(A) : stageAttackReal(t);
       ATT.armed = null;
-      resolveAttack(false);
+      resolveAttack(staged, t);
     }
   }
 
@@ -1269,6 +1562,7 @@
     }
     orders("Bureau Director", "Team of " + RAID.agents.length + " rolling on the Saltlands safehouse in " + RAID_MUSTER_SEC + "s. Ride along or watch the wire.", 2);
     news("Bureau vehicles seen leaving headquarters at speed.");
+    emitEvent("raid", { phase: RAID.phase, agents: RAID.agents.length });
     return { ok: true, why: "" };
   }
   function raidCasualties() {
@@ -1313,8 +1607,8 @@
       if (a && !a.dead) { a.guard = null; a._presRaid = false; if (a.staffPost) a.staffPost = null; }
     }
     RAID.phase = null; RAID.agents = []; RAID.car = null; RAID.target = null;
+    emitEvent("raid", { phase: null, won: !!won, embodied: !!embodied });
     paintBoard();
-    void embodied;
   }
   function tickRaid(dt) {
     if (!RAID.phase) return;
@@ -1324,6 +1618,7 @@
     if (RAID.phase === "muster") {
       if (RAID.t >= RAID_MUSTER_SEC) {
         RAID.phase = "breach"; RAID.t = 0;
+        emitEvent("raid", { phase: RAID.phase });
         if (near) {
           // EMBODIED: the team appears on the approach (they drove — the
           // sealed-transit convention every transport in this repo uses),
@@ -1409,6 +1704,7 @@
       if (CBZ.setRole) CBZ.setRole("inmate");
       if (CBZ.startRun) CBZ.startRun();
     };
+    emitEvent("arrest", { why: why || null, title: title || "UNDER ARREST", impeached: !!S.impeached });
     big(title || "UNDER ARREST");
     if (CBZ.cityBustOverlay) { try { CBZ.cityBustOverlay(0, go, { title: title || "ARRESTED", note: why }); return; } catch (e) {} }
     go();
@@ -1433,6 +1729,7 @@
       const bad = scandal >= IMPEACH_SCANDAL || (approval < IMPEACH_APPROVAL && scandal >= IMPEACH_SCANDAL_LO);
       if (bad && S.impeachDay == null) {
         S.impeachDay = d + 2;
+        emitEvent("impeach", { day: S.impeachDay, scandal: scandal, approval: approval });
         big("ARTICLES OF IMPEACHMENT FILED");
         orders("Chief of Staff", "The Capitol has the votes and the auditors have the ledgers. Two days. Bury the scandal or start packing.", 2);
       } else if (S.impeachDay != null && !bad) {
@@ -1637,6 +1934,11 @@
       terrorRoster: S.roster.length,
       terrorSupply: S.supply | 0,
       attacksDone: S.attacksDone | 0,
+      // THE PLOT TRAVELS: is the seat itself a reachable target this world,
+      // and is one armed at it right now? (PRESIDENT-PLAN 1a: from the
+      // Mansion every attack used to be a headline 4.7 km away.)
+      gateTargetable: !!gateTarget(),
+      attackArmedAtGate: !!(ATT.armed && ATT.armed.at && ATT.armed.at.gate),
       runsBlocked: S.runsBlocked | 0,
       raidsOrdered: S.raidsOrdered | 0,
       raidsWon: S.raidsWon | 0,
@@ -1687,6 +1989,13 @@
       return out;
     },
     seat: seat,
+    // THE PUBLIC READ + THE PUBLIC BUS. Other systems (the HUD strip, the
+    // Chief of Staff's missions, the motorcade) consume exactly these two and
+    // nothing else out of this file's internals.
+    status: status,
+    site: mansionSite,
+    on: onEvent,
+    emit: emitEvent,
     roster: function () { return st().roster.slice(); },
     orderRaid: function () { const h = seat(); return h ? orderRaid(h) : { ok: false, why: "You do not hold the country." }; },
     audit: audit,
@@ -1695,7 +2004,8 @@
     apply: apply,
     // harness/test hooks only — not part of the public contract
     _state: st, _buildRoom: buildRoom, _room: ROOM, _raid: RAID,
-    _armAttack: function () { armAttack(day()); }, _tickCellDay: tickCellDay,
+    _armAttack: function (d) { armAttack(d == null ? day() : d); }, _tickCellDay: tickCellDay,
+    _att: ATT, _attackTarget: attackTarget, _tickAttack: tickAttack, _gateTarget: gateTarget,
     _tickFallsDay: tickFallsDay, _safehouses: safehouses, _paint: paintBoard,
   };
   CBZ.presidencyReset = reset;
