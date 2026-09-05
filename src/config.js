@@ -357,7 +357,7 @@
     crowd: typeof CBZ.CITY_CROWD === "number" ? CBZ.CITY_CROWD : 700,
     cops: typeof CBZ.CITY_COPS === "number" ? CBZ.CITY_COPS : 0, // spawn on wanted
     ambientCops: typeof CBZ.CITY_AMBIENT_COPS === "number" ? CBZ.CITY_AMBIENT_COPS : 3, // patrols policing NPCs/traffic at 0 stars
-    traffic: typeof CBZ.CITY_TRAFFIC === "number" ? CBZ.CITY_TRAFFIC : 66,
+    traffic: typeof CBZ.CITY_TRAFFIC === "number" ? CBZ.CITY_TRAFFIC : 84,   // was 66: nine cars per km of road read as a ghost town
     hungerDrain: 0.22,     // hunger lost per second (slow — the real pressure is night/sleep, not starving)
     starveDmg: 2.2,        // hp/s once hunger hits 0
     tireNight: 1.15,       // tiredness/s gained while up & about at deep night

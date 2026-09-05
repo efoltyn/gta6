@@ -232,8 +232,13 @@
     function quadField(rects, material, y) {
       const n = rects.length;
       const pos = new Float32Array(n * 18), nrm = new Float32Array(n * 18), uvA = new Float32Array(n * 12);
+      // optional per-rect `tone` (0..1 brightness) → a vertex-colour attribute,
+      // so a field of paint dashes can be worn unevenly in one draw call
+      const toned = rects.some((r) => r.tone != null);
+      const col = toned ? new Float32Array(n * 18) : null;
       let p = 0, u = 0;
       for (const r of rects) {
+        if (col) { const t = r.tone != null ? r.tone : 1; for (let k = 0; k < 18; k++) col[p + k] = t; }
         const x0 = r.x - r.w / 2, x1 = r.x + r.w / 2, z0 = r.z - r.d / 2, z1 = r.z + r.d / 2;
         const ux = r.w / 8, uz = r.d / 8;
         const V = [[x0, z0, 0, uz], [x0, z1, 0, 0], [x1, z1, ux, 0], [x0, z0, 0, uz], [x1, z1, ux, 0], [x1, z0, ux, uz]];
@@ -247,7 +252,102 @@
       geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
       geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
       geo.setAttribute("uv", new THREE.BufferAttribute(uvA, 2));
+      if (col) { geo.setAttribute("color", new THREE.BufferAttribute(col, 3)); material.vertexColors = true; }
       const m = new THREE.Mesh(geo, material);
+      m.receiveShadow = true; m.matrixAutoUpdate = false; root.add(m);
+      return m;
+    }
+
+    // deterministic smooth noise on world coordinates (no rng() draws, so the
+    // seeded build downstream of this file is byte-identical)
+    function hash2(ix, iz, salt) {
+      let h = (ix * 374761393 + iz * 668265263 + salt * 2246822519) | 0;
+      h = Math.imul(h ^ (h >>> 13), 1274126177);
+      return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+    }
+    function smooth2(x, z, scale, salt) {
+      const fx = x / scale, fz = z / scale;
+      const ix = Math.floor(fx), iz = Math.floor(fz);
+      let tx = fx - ix, tz = fz - iz;
+      tx = tx * tx * (3 - 2 * tx); tz = tz * tz * (3 - 2 * tz);
+      const a = hash2(ix, iz, salt), b = hash2(ix + 1, iz, salt), c = hash2(ix, iz + 1, salt), d = hash2(ix + 1, iz + 1, salt);
+      return (a + (b - a) * tx) * (1 - tz) + (c + (d - c) * tx) * tz;
+    }
+    // A road strip as a SUBDIVIDED grid carrying a wear profile in vertex
+    // colour (see the note at the call site). `vertical` strips run along z.
+    // Lateral samples every 0.6 m, longitudinal every 5 m; UVs are world-scaled
+    // at 11 m per repeat with a per-strip offset so the two fields never tile
+    // in step across a junction.
+    let roadFieldVerts = 0, wornDashes = 0;   // census for the ba preset (city.roadLook)
+    function roadField(rects, vertical, y) {
+      const LAT = 0.6, ALONG = 5, REP = 11;
+      let vCount = 0, iCount = 0;
+      const dims = rects.map((r) => {
+        const w = vertical ? r.w : r.d, len = vertical ? r.d : r.w;
+        const nc = Math.max(2, Math.round(w / LAT) + 1), nr = Math.max(2, Math.round(len / ALONG) + 1);
+        vCount += nc * nr; iCount += (nc - 1) * (nr - 1) * 6;
+        return { w, len, nc, nr };
+      });
+      const pos = new Float32Array(vCount * 3), nrm = new Float32Array(vCount * 3);
+      const uvA = new Float32Array(vCount * 2), col = new Float32Array(vCount * 3);
+      const idx = vCount > 65535 ? new Uint32Array(iCount) : new Uint16Array(iCount);
+      let v = 0, ii = 0;
+      const lw = laneW, nl = lanesPerDir;
+      rects.forEach((r, k) => {
+        const D = dims[k];
+        const base = r.avenue ? AVE_MEDIAN / 2 : 0;
+        const uOff = hash2(k, vertical ? 1 : 2, 11) * 7, vOff = hash2(k, vertical ? 3 : 4, 13) * 7;
+        const v0 = v;
+        for (let row = 0; row < D.nr; row++) {
+          const t = -D.len / 2 + (D.len * row) / (D.nr - 1);
+          const wx = vertical ? r.x : r.x + t, wz = vertical ? r.z + t : r.z;
+          // longitudinal tone: repairs and age at ~28 m, drainage at ~7 m
+          const along = (smooth2(wx, wz, 28, 5) - 0.5) * 0.14 + (smooth2(wx, wz, 7, 6) - 0.5) * 0.05;
+          const wearK = 0.55 + smooth2(wx, wz, 40, 7) * 0.45;   // how hard this stretch is driven
+          for (let c = 0; c < D.nc; c++) {
+            const u = -D.w / 2 + (D.w * c) / (D.nc - 1);        // lateral, centreline = 0
+            const px = vertical ? r.x + u : wx, pz = vertical ? wz : r.z + u;
+            const au = Math.abs(u);
+            let tone = 1 + along;
+            // the lanes on this side: wheel paths lighter, lane centre darker
+            const inLane = au - base;
+            if (inLane > 0) {
+              const li = Math.min(nl - 1, Math.floor(inLane / lw));
+              const f = inLane - li * lw;                         // 0..lw across the lane
+              const wp = Math.exp(-Math.pow((f - lw * 0.25) / 0.32, 2)) + Math.exp(-Math.pow((f - lw * 0.75) / 0.32, 2));
+              const oil = Math.exp(-Math.pow((f - lw * 0.5) / 0.38, 2));
+              tone += wp * 0.09 * wearK - oil * 0.06 * wearK;
+            }
+            // the gutter: the last 0.7 m to the kerb is stained and shaded
+            const edge = D.w / 2 - au;
+            if (edge < 0.7) tone -= (0.7 - edge) / 0.7 * (0.12 + smooth2(px, pz, 4, 8) * 0.08);
+            // median shadow on the avenues
+            if (r.avenue && au < base + 0.5) tone -= (base + 0.5 - au) / (base + 0.5) * 0.08;
+            tone = Math.max(0.55, Math.min(1.22, tone));
+            pos[v * 3] = px; pos[v * 3 + 1] = y; pos[v * 3 + 2] = pz;
+            nrm[v * 3] = 0; nrm[v * 3 + 1] = 1; nrm[v * 3 + 2] = 0;
+            uvA[v * 2] = px / REP + uOff; uvA[v * 2 + 1] = pz / REP + vOff;
+            col[v * 3] = tone; col[v * 3 + 1] = tone; col[v * 3 + 2] = tone;
+            v++;
+          }
+        }
+        for (let row = 0; row < D.nr - 1; row++) {
+          for (let c = 0; c < D.nc - 1; c++) {
+            const a = v0 + row * D.nc + c, b = a + 1, cc = a + D.nc, d = cc + 1;
+            // same winding as quadField (x0,z0)->(x0,z1)->(x1,z1): up-facing
+            idx[ii++] = a; idx[ii++] = cc; idx[ii++] = d;
+            idx[ii++] = a; idx[ii++] = d; idx[ii++] = b;
+          }
+        }
+      });
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+      geo.setAttribute("uv", new THREE.BufferAttribute(uvA, 2));
+      geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      geo.setIndex(new THREE.BufferAttribute(idx, 1));
+      roadFieldVerts += vCount;
+      const m = new THREE.Mesh(geo, roadMat);
       m.receiveShadow = true; m.matrixAutoUpdate = false; root.add(m);
       return m;
     }
@@ -260,8 +360,23 @@
     const roadCg = roadCv.getContext("2d"); roadCg.fillStyle = "#282a30"; roadCg.fillRect(0, 0, 256, 256);
     const roadTex = new THREE.CanvasTexture(roadCv);
     roadTex.wrapS = roadTex.wrapT = THREE.RepeatWrapping;
+    // THE WASHED-OUT ROAD. This canvas is an sRGB photo (a 512 asphalt jpg
+    // with a dark fill over it, mean ~70/255), but it was uploaded with the
+    // default LinearEncoding, so the renderer read every texel as if it were
+    // already linear light and the road came out at the same value as the
+    // beige sidewalk beside it (measured 187-194/255 at noon, 90/255 at
+    // MIDNIGHT). Asphalt is three to four times darker than concrete; that
+    // contrast is most of what makes a street read as a street. Decode it as
+    // the sRGB it is, and lighten the fill a little so the decoded road lands
+    // on real asphalt (~0.07 linear) instead of coal.
+    if (THREE.sRGBEncoding) roadTex.encoding = THREE.sRGBEncoding;
+    try { if (CBZ.renderer && CBZ.renderer.capabilities) roadTex.anisotropy = Math.min(8, CBZ.renderer.capabilities.getMaxAnisotropy()); } catch (e) {}
     photoLayer(roadTex, "assets/textures/asphalt512.jpg", function (g2, c) {
-      g2.globalAlpha = 0.42; g2.fillStyle = "#26282e"; g2.fillRect(0, 0, c.width, c.height); g2.globalAlpha = 1;
+      // a heavier fill than before ON PURPOSE: the jpg is a close-up of
+      // cracked asphalt, and at full contrast the road read as cobbles from
+      // a balcony. The grain stays; the crackle recedes to where a road's
+      // texture actually lives, under the wear profile in the vertex colour.
+      g2.globalAlpha = 0.52; g2.fillStyle = "#42454c"; g2.fillRect(0, 0, c.width, c.height); g2.globalAlpha = 1;
     });
     // wet-road tie-in (feature-detected): CBZ.roadMat() hands back ONE shared
     // MeshStandardMaterial that materials.js keeps darkening/shining as
@@ -307,15 +422,21 @@
       const seg = len / n, dashL = Math.min(2.6, seg * 0.55);
       for (let i = 0; i < n; i++) {
         const t = -len / 2 + (i + 0.5) * seg;
-        if (vertical) whiteRects.push({ x: cx + off, z: cz + t, w: 0.22, d: dashL });
-        else whiteRects.push({ x: cx + t, z: cz + off, w: dashL, d: 0.22 });
+        const px = vertical ? cx + off : cx + t, pz = vertical ? cz + t : cz + off;
+        // worn unevenly: every dash its own brightness, the odd one nearly gone
+        const h = hash2(Math.round(px * 2), Math.round(pz * 2), 21);
+        const tone = 0.62 + h * 0.38 - (h < 0.08 ? 0.3 : 0);
+        if (tone < 0.7) wornDashes++;
+        if (vertical) whiteRects.push({ x: px, z: pz, w: 0.22, d: dashL, tone });
+        else whiteRects.push({ x: px, z: pz, w: dashL, d: 0.22, tone });
       }
     }
     // one centred SOLID line (white edge / yellow centre) down a span
     function pushSolid(cx, cz, vertical, len, off, yellow) {
       const arr = yellow ? yellowRects : whiteRects;
-      if (vertical) arr.push({ x: cx + off, z: cz, w: 0.18, d: len });
-      else arr.push({ x: cx, z: cz + off, w: len, d: 0.18 });
+      const tone = 0.78 + hash2(Math.round(cx), Math.round(cz), 22) * 0.2;
+      if (vertical) arr.push({ x: cx + off, z: cz, w: 0.18, d: len, tone });
+      else arr.push({ x: cx, z: cz + off, w: len, d: 0.18, tone });
     }
     // Paint the whole lane set for one street. Avenues retain the same legal
     // lane contract as traffic but use a hard median/double-yellow centreline;
@@ -356,7 +477,7 @@
     const aveRects = [], crossRects = [];
     xLines.forEach((x, i) => {              // avenues (run along z)
       const ave = isAvenueLine(i);
-      aveRects.push({ x, z: (minZ + maxZ) / 2, w: ROAD, d: spanZ });
+      aveRects.push({ x, z: (minZ + maxZ) / 2, w: ROAD, d: spanZ, avenue: ave });
       if (ROADS_V2) paintStreetSegmented(x, true, zLines, ave);
       else paintStreet(x, (minZ + maxZ) / 2, true, spanZ, ave);
       // stamp the avenue's real per-segment lane data (lanesPerDir/laneW/avenue)
@@ -385,8 +506,19 @@
     // instance, so any offset would move them together. Widening the ladder to
     // 25mm is the honest fix — still visually flat asphalt, four times the
     // depth separation.
-    quadField(aveRects, roadMat, 0.040);
-    quadField(crossRects, roadMat, 0.065);
+    // ROAD WEAR IN VERTEX COLOUR. A flat quad with one repeating photo is what
+    // a road looks like in a diorama: the same 8 m tile forever, no wheel
+    // paths, no gutter, no patch that is darker than the next. Real asphalt
+    // has a lateral PROFILE (polished aggregate under the tyres reads
+    // lighter, the lane centre carries the oil drips, the gutter is stained
+    // dark) and a longitudinal one (repairs, age, drainage). Both are metres
+    // to tens of metres in scale, which is exactly what vertex colour on a
+    // subdivided strip carries for free: still one merged mesh per field,
+    // still one draw call, ~55k vertices for the whole grid, and the
+    // multiplier rides on top of the photo so the fine grain is untouched.
+    roadMat.vertexColors = true;
+    roadField(aveRects, true, 0.040);
+    roadField(crossRects, false, 0.065);
     // bake ALL lane paint into two merged flat meshes (white + yellow).
     // PAINTED, NOT GEOMETRY: every marking material is a polygonOffset decal —
     // the depth offset (factor/units -2) does the separation from the asphalt,
@@ -409,8 +541,8 @@
       m.userData.roadPaint = true;
       return m;
     }
-    paintMesh(whiteRects, 0xeef1f5, 0.055);
-    paintMesh(yellowRects, 0xf2c83a, 0.057);
+    paintMesh(whiteRects, 0xdadcd8, 0.055);
+    paintMesh(yellowRects, 0xd9b23c, 0.057);
     // permanent raised concrete MEDIAN on the two avenues — was flag-gated decor
     // (CITY_MEDIANS) shared by every line; now it's the avenues' OWN structural
     // tell (always on), sized to the lane layout above (AVE_MEDIAN), and GAPPED
@@ -421,7 +553,7 @@
     // One merged mesh per avenue (BoxGeometry per segment, BGU-folded), so two
     // avenues still cost about 1 extra draw call total, same budget as before.
     {
-      const medMat = mat(0x9aa0a6);
+      const medMat = mat(0x7a7f86);   // weathered concrete, not a white wall down the avenue
       const medGeoms = [];
       AVENUE_LINES.forEach((i) => {
         const x = xLines[i];
@@ -452,13 +584,15 @@
     const intersections = [];
     // ONE shared polygonOffset decal material for every zebra stripe in the
     // city (was a fresh MeshBasicMaterial per stripe) — paint, not geometry.
-    const zebraM = paintMat(0xeef1f5);
+    const zebraM = paintMat(0xdadcd8);
     // ALL zebra stripes accumulate into one merged quadField (was ~60 separate
     // planes PER intersection — thousands of meshes the batcher merged while
     // stripping their polygonOffset, the same float bug as the centrelines).
     const zebraRects = [];
     xLines.forEach((x, i) => zLines.forEach((z, j) => {
-      plane(x, z, ROAD, ROAD, 0x202227, 0.05);   // darker box at the crossing
+      // (a "darker box at the crossing" used to be drawn here at y=0.05 —
+      // UNDER the cross-street field at 0.065, so it was never visible: one
+      // dead plane per junction, deleted.)
       // zebra stripes on all four approaches — stripe COUNT scales with the
       // road width (ceil(road/1.2)) so a wide multi-lane road gets a full
       // crosswalk that spans it instead of a fixed 5-stripe band.
@@ -865,6 +999,9 @@
       root, center: { x: cx, z: cz },
       N, step, BLK, ROAD, xLines, zLines, minX, maxX, minZ, maxZ,
       lots, roads, intersections, rng,
+      // road-surface census (ba preset city-roads-traffic): subdivided road
+      // field vertices and dashes painted worn
+      roadLook: { fieldVertices: roadFieldVerts, wornDashes },
       // the day/night-tinted water material — expansion.js's island ocean can
       // share it so the whole sea shifts tone together
       seaMat,
@@ -947,7 +1084,9 @@
         return m;
       }
       // a low raised curb box (a sliver of height so it reads as a kerb edge)
-      const curbM = dm(0xb9ad88);
+      // kerb stone: a cooler grey than the beige slab it rings, so the face
+      // reads as a step down to the gutter instead of vanishing into the walk
+      const curbM = dm(0x9d9a92);
       function curb(x, z, len, vertical) {
         const w = vertical ? 0.34 : len, d = vertical ? len : 0.34;
         const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.22, d), curbM);
@@ -1013,10 +1152,10 @@
       const stopOff = ROAD / 2 + 3.6;
       intersections.forEach((it) => {
         // thick white bar across each of the four entries, set back behind the zebra
-        decal(it.x - ROAD / 4, it.z - stopOff, ROAD / 2 - 0.4, 0.4, 0xeef1f5, 0.065, true);
-        decal(it.x + ROAD / 4, it.z + stopOff, ROAD / 2 - 0.4, 0.4, 0xeef1f5, 0.065, true);
-        decal(it.x - stopOff, it.z + ROAD / 4, 0.4, ROAD / 2 - 0.4, 0xeef1f5, 0.065, true);
-        decal(it.x + stopOff, it.z - ROAD / 4, 0.4, ROAD / 2 - 0.4, 0xeef1f5, 0.065, true);
+        decal(it.x - ROAD / 4, it.z - stopOff, ROAD / 2 - 0.4, 0.4, 0xdadcd8, 0.065, true);
+        decal(it.x + ROAD / 4, it.z + stopOff, ROAD / 2 - 0.4, 0.4, 0xdadcd8, 0.065, true);
+        decal(it.x - stopOff, it.z + ROAD / 4, 0.4, ROAD / 2 - 0.4, 0xdadcd8, 0.065, true);
+        decal(it.x + stopOff, it.z - ROAD / 4, 0.4, ROAD / 2 - 0.4, 0xdadcd8, 0.065, true);
       });
 
       // ---- 3) manhole covers + storm-drain grates -------------------------
@@ -1077,7 +1216,7 @@
       //  (why: managed, money-side streets — the core LOOKS administered).
       //  Shared geometry + the dm() cache; no rng draws, so everything the
       //  sibling modules build from city.rng stays byte-identical.
-      const arrowM = dm(0xeef1f5, true);
+      const arrowM = dm(0xdadcd8, true);
       const shaftGV = new THREE.PlaneGeometry(0.26, 1.5), shaftGH = new THREE.PlaneGeometry(1.5, 0.26);
       const headG = new THREE.CircleGeometry(0.42, 3);   // 3-segment circle = clean triangle head
       function turnArrow(x, z, fx, fz, rotZ) {

@@ -345,6 +345,37 @@
     return base;
   }
 
+  // ---- ROLLING WHEELS ON EVERY CAR YOU CAN SEE -----------------------------
+  // Only the DRIVEN car ever spun its wheels (cityUpdatePlayerCarVisual); the
+  // ambient fleet slid along the road on locked tyres, which at eye level is
+  // the single loudest "toy" tell there is. The unified visual keeps its four
+  // tyres unmerged and tagged playerWheel precisely so they can turn; this
+  // turns them, with the same 1.6 rad per metre the driven car uses, for
+  // cars inside 70 m of the camera. The list is cached per visual (the [C]
+  // style-cycler can rebuild it), so the per-frame cost is four rotation
+  // writes per near car. `_wheelRolled` is a census flag for the ba preset.
+  function rollWheels(c, dt) {
+    if (!c.group || !c.group.visible || !dt) { c._wheelRolled = false; return; }
+    const cam = CBZ.camera.position;
+    const dx = c.pos.x - cam.x, dz = c.pos.z - cam.z;
+    if (dx * dx + dz * dz > 70 * 70) { c._wheelRolled = false; return; }
+    const vis = (c.group.userData && c.group.userData.carVisual) || null;
+    let list = c._wheelList;
+    if (!list || c._wheelVis !== vis) {
+      list = [];
+      if (vis) {
+        const tagged = vis.userData && vis.userData.playerWheels;
+        if (tagged && tagged.length) list = tagged.slice();
+        else vis.traverse(function (o) { if (o.userData && o.userData.playerWheel) list.push(o); });
+      }
+      c._wheelList = list; c._wheelVis = vis;
+    }
+    if (!list.length) { c._wheelRolled = false; return; }
+    const a = c.v * dt * 1.6;
+    for (let i = 0; i < list.length; i++) list[i].rotation.x -= a;
+    c._wheelRolled = Math.abs(c.v) > 0.05;
+  }
+
   // ---- RUN-OVER JUICE ------------------------------------------------------
   // A lethal run-over currently fires shake + a speed-bleed but — unlike a melee
   // land() (combat.js) — NO hit-stop and NO bass impact, so a kill at speed reads
@@ -2091,7 +2122,71 @@
       c.baseV = (cLo + rng() * (cHi - cLo)) * (reckless ? (TR().aggrSpeedMul || 1.7) : 1);
       c.v = c.baseV * 0.6; c.reckless = reckless;
     }
+    if (n > 0) spawnKerbParking(A);
   };
+
+  /* KERBSIDE PARKING. Not one car was ever parked along a downtown street:
+     every cityAddParkedCar caller was an airport rank, a speedway paddock or
+     a military apron, so the core grid read as a fresh model set with the
+     traffic dropped in. A street is defined by the cars nobody is driving.
+     This parks a deterministic (position-hashed, no rng draws) ~40% of the
+     bays along the Midtown block faces and a thinner ~18% elsewhere on the
+     grid, in the shoulder outboard of the outer travel lane (centre 8.15 m
+     off the road axis on an 18 m street: the body sits between the fog line
+     and the kerb, 0.75 m clear of the outer lane's cars, and carAhead's
+     2.3 m lateral window never mistakes it for the car in front). Bays keep
+     clear of the junction box, the crosswalk and stop bar (ROAD/2 + 6.5) and
+     of the lot's own driveway. Capped at KERB_CAP cars: parked fixtures are
+     matrix-held and frustum-culled, so the price is draw calls, not sim. */
+  const KERB_CAP = 64;
+  function spawnKerbParking(A) {
+    if (!CBZ.cityAddParkedCar || !A.roads || !A.xLines || !A.zLines) return;
+    if (CBZ.CONFIG && CBZ.CONFIG.KERB_PARKING === false) return;
+    for (const c of CBZ.cityCars) if (c._kerbParked && c._arenaRoot === A.root) return;   // already dressed
+    const ROAD = A.ROAD, BAY = 6.4, SIDE = ROAD / 2 - 0.85;
+    const mid = (A.xLines.length - 1) / 2;
+    const bays = [];
+    for (const r of A.roads) {
+      if (r.district) continue;                                   // core grid only
+      const lines = r.vertical ? A.zLines : A.xLines;
+      const li = r.vertical ? A.xLines.indexOf(r.x) : A.zLines.indexOf(r.z);
+      const core = Math.abs(li - mid) <= 1;
+      for (let j = 0; j < lines.length - 1; j++) {
+        const a0 = lines[j] + ROAD / 2 + 6.5, a1 = lines[j + 1] - ROAD / 2 - 6.5;
+        if (a1 - a0 < BAY) continue;
+        const nb = Math.floor((a1 - a0) / BAY);
+        const start = a0 + ((a1 - a0) - nb * BAY) / 2 + BAY / 2;
+        for (let side = -1; side <= 1; side += 2) {
+          // the lot this face belongs to → its driveway (approach.js) stays open
+          const i = r.vertical ? (side > 0 ? li : li - 1) : j;
+          const jj = r.vertical ? j : (side > 0 ? li : li - 1);
+          const lot = A.lotAt ? A.lotAt(i, jj) : null;
+          const ap = lot && CBZ.cityLotApproach ? CBZ.cityLotApproach(lot, A.center) : null;
+          for (let b = 0; b < nb; b++) {
+            const along = start + b * BAY;
+            const x = r.vertical ? r.x + side * SIDE : along;
+            const z = r.vertical ? along : r.z + side * SIDE;
+            if (ap && Math.abs((r.vertical ? ap.z : ap.x) - along) < ap.half + 4) continue;
+            const h = carHash(x, z, 91);
+            if (h > (core ? 0.4 : 0.18)) continue;
+            // parked WITH the flow of its side of the street (dirSign ↔ lateral sign)
+            const heading = r.vertical ? (side > 0 ? 0 : Math.PI) : (side > 0 ? Math.PI / 2 : -Math.PI / 2);
+            bays.push({ x, z, heading, pri: core ? h : 1 + h });
+          }
+        }
+      }
+    }
+    bays.sort(function (a, b) { return a.pri - b.pri; });
+    let made = 0;
+    for (let k = 0; k < bays.length && made < KERB_CAP; k++) {
+      const bay = bays[k];
+      if (CBZ.roadPointOpen && !CBZ.roadPointOpen(bay.x, bay.z)) continue;
+      const c = CBZ.cityAddParkedCar(bay.x, bay.z, bay.heading, {});
+      if (!c) continue;
+      c._kerbParked = true; made++;
+    }
+    A.kerbParked = made;
+  }
 
   function clearCars() {
     const keep = [];
@@ -5732,6 +5827,7 @@
           c.v *= catastrophic ? 0.08 : (hard ? 0.18 : 0.45);
         }
         seatCar(c, dt);
+        rollWheels(c, dt);
         const wdx = c.pos.x - CBZ.camera.position.x, wdz = c.pos.z - CBZ.camera.position.z;
         c.group.visible = (wdx * wdx + wdz * wdz) < 150 * 150;
         if (c.wreckT <= 0 && c.abandoned) c.ai = false;   // settle as an abandoned wreck
@@ -5752,6 +5848,7 @@
         c.v = Math.max(0.8, c.v);
         advanceTurn(c, dt);
         seatCar(c, dt);
+        rollWheels(c, dt);
         if (c.v > 9 && (c.reckless || c.pullover === 4)) runOver(c, c.v);
         const tdx = c.pos.x - CBZ.camera.position.x, tdz = c.pos.z - CBZ.camera.position.z;
         c.group.visible = (tdx * tdx + tdz * tdz) < 150 * 150;
@@ -6043,6 +6140,7 @@
 
       // keep a carjacker's body riding with the car so cops chase the right spot
       seatCar(c, dt);
+      rollWheels(c, dt);
       // any moving car hits whoever's in front of it — calm drivers braked
       // above so they rarely connect; reckless ones plow straight through.
       if (c.v > 5) runOver(c, c.v);

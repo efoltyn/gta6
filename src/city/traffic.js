@@ -293,7 +293,12 @@
     // cars active near the camera so the recycle never costs frames.
     const q = CBZ.qualityLevel != null ? CBZ.qualityLevel : 2;
     const qmul = q <= 1 ? 0.5 : (q === 2 ? 0.74 : 0.95);
-    return Math.max(6, Math.min(40, Math.round(scaled * 0.42 * qmul * hourDensityMul())));
+    // 0.42 → 0.6 and the cap 40 → 56: measured on the Midtown avenue at noon,
+    // the old pool put nine cars inside a 120 m camera cone and ONE on the
+    // whole visible avenue — a street with no traffic on it. The far-car
+    // stride and the recycle radius are unchanged, so the extra cars live
+    // where you are looking and nowhere else.
+    return Math.max(6, Math.min(56, Math.round(scaled * 0.6 * qmul * hourDensityMul())));
   }
   const NEAR2 = 80 * 80;     // "near the camera" radius²
   const FAR2 = 150 * 150;    // "way off, fair to recycle" radius² (past the cull)

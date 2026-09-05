@@ -1261,6 +1261,11 @@
 <script src="src/city/club.js?v=nodash1"></script>
 <script src="src/city/crowd.js?v=nukefield1"></script>
 <script src="src/city/blobshadows.js?v=blob1"></script>
+<!-- headlight pools + tail glow on the road at night (instanced ground decals,
+     no dynamic lights); pushes the shared lamp emissives up after dark.
+     After blobshadows.js (same pool shape) and before vehicles.js: it only
+     READS the fleet at order 37.7, after vehicles.js has moved it at 37. -->
+<script src="src/city/carlamps.js?v=lamps1"></script>
 <script src="src/city/medics.js?v=medic2"></script>
 <script src="src/city/security.js?v=seawave1"></script>
 <script src="src/city/vips.js?v=nodash1"></script>
