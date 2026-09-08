@@ -200,7 +200,11 @@
       },
     };
 
-    const piece = CBZ.spawnPiece(def, { pos: { x: x, y: half, z: z }, solid: true, blockLOS: true });
+    // parent: the prison root, never spawnPiece's default chunk root — chunk
+    // roots hang off CBZ.scene and do not hide with the prison, so a crate
+    // here would stand in the open sea of the island modes (world/props.js
+    // has the full note; its barrels were the ones the owner saw from the shark).
+    const piece = CBZ.spawnPiece(def, { pos: { x: x, y: half, z: z }, solid: true, blockLOS: true, parent: CBZ.prisonRoot || CBZ.scene });
     crateList.push({ x, z, s, lid, cracked: false, tool: (SPINE && tool) || null });
     return piece;
   }

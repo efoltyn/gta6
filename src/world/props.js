@@ -33,6 +33,18 @@
   "use strict";
   const CBZ = window.CBZ;
   const { addBox } = CBZ;
+  /* THE ROOT IS THE PRISON, NOT THE SCENE. addBox parents into prisonRoot on
+     its own, but spawnPiece defaults to a CHUNK root (systems/chunks.js), and
+     chunk roots hang off CBZ.scene — they are the cross-world registry
+     player building uses in the city, and they never hide with a mode switch.
+     So the three pieces below (the picnic table, the weight bench, the green
+     oil barrels) were the only prison objects still standing when the prison
+     was hidden: in Shark Sim and Disaster Survival the island's sea runs 3 km
+     and covers the prison's origin, and from the shark they were a bench and
+     three barrels hovering half a metre over the swell 480 m off the beach
+     (owner, 2026-09-08: "the fucking floating bench and barrels wtf"). Every
+     piece this file spawns is parented here explicitly. */
+  const ROOT = CBZ.prisonRoot || CBZ.scene;
 
   // ---- basketball hoop against the west wall ----
   (function hoop(x, z) {
@@ -78,7 +90,7 @@
         return top;
       },
     };
-    CBZ.spawnPiece(def, { pos: { x: x, y: 0.85, z: z }, solid: false, walkTop: true });
+    CBZ.spawnPiece(def, { pos: { x: x, y: 0.85, z: z }, solid: false, walkTop: true, parent: ROOT });
   })(18, 30);
 
   // ---- outdoor workout gym area (Reds' turf recreation zone) ----
@@ -110,7 +122,7 @@
           return top;
         },
       };
-      CBZ.spawnPiece(def, { pos: { x: x, y: 0.55, z: z }, solid: true });
+      CBZ.spawnPiece(def, { pos: { x: x, y: 0.55, z: z }, solid: true, parent: ROOT });
     })();
 
     // barbell rack stands
@@ -203,7 +215,7 @@
         return m;
       },
     };
-    CBZ.spawnPiece(def, { pos: { x: x, y: 0.8, z: z }, solid: true, blockLOS: true });
+    CBZ.spawnPiece(def, { pos: { x: x, y: 0.8, z: z }, solid: true, blockLOS: true, parent: ROOT });
   }
   barrel(-19, 44); barrel(-20.2, 45); barrel(-19.6, 43);
 })();

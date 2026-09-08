@@ -135,6 +135,13 @@
     // Always index the piece into its natural chunk (for bookkeeping/
     // reap/dirty-marking) even when an explicit parent is given; only the
     // MESH's actual scene-graph parent is conditional on opts.parent.
+    // WORLD OWNERSHIP TRAP: a chunk root is a child of CBZ.scene, not of any
+    // mode's world root, so a piece left on the default parent is drawn in
+    // EVERY mode. That is right for a base the player builds in the city
+    // (chunks are the city's registry) and wrong for a load-time world prop:
+    // the prison's barrels and picnic table sat here and hovered over the
+    // shark sim's sea when the prison was hidden. A world builder passes its
+    // own root as opts.parent (world/props.js, world/crates.js do).
     const chunk = CBZ.chunkAt ? CBZ.chunkAt(pos.x, pos.z) : null;
     const parent = opts.parent || (chunk && chunk.root) || CBZ.scene;
     if (parent) parent.add(mesh);
