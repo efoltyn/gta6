@@ -150,7 +150,11 @@ export async function launch(opts = {}) {
       return false;
     },
     async open(rel, query) {
-      const url = origin + rel.replace(/^\//, "") + (query ? (rel.includes("?") ? "&" : "?") + query : "");
+      // HARNESS TRAP: release checks need an absolute deployment URL. Prefixing
+      // it with localhost silently probes a nonexistent local path instead.
+      const target = new URL(rel, origin);
+      if(query) for(const [key,value] of new URLSearchParams(query)) target.searchParams.set(key,value);
+      const url = target.href;
       await s.send("Page.navigate", { url });
       return url;
     },

@@ -16,6 +16,7 @@
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/hud.css?v=survrail1">
 <link rel="stylesheet" href="css/screens.css?v=bagless1">
+<link rel="stylesheet" href="css/shark_title.css?v=frontdoor1">
 <link rel="stylesheet" href="css/mobile.css?v=onecall1">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=bagless1">
@@ -920,6 +921,9 @@
 <script src="src/entities/survivorbot.js?v=sharkmode1"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
 <script src="src/modes/shark_sim.js?v=sharkmode1"></script>
+<!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
+     PLAY over the live sea, proxies every original control by id. -->
+<script src="src/modes/shark_title.js?v=frontdoor1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
 <script src="src/modes/gungame.js?v=nodash1"></script>

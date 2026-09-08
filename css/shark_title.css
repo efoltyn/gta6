@@ -1,0 +1,92 @@
+/* ============================================================
+   shark_title.css — SHARK SIM's own front door.
+
+   The generic title card (a beige .card-box on a blue gradient, one logo
+   line and a Controls disclosure) is the wrong screen for a product that
+   is a sea with a shark in it. In shark mode the card is hidden, #title
+   goes transparent so the LIVE island renders behind it (core/loop.js
+   draws every frame in every state; src/modes/shark_title.js parks the
+   lens over the water), and #sharkTitle lays the one decision out on top.
+   Every pressable here PROXIES a hidden original by id (#playBtn, the
+   .quality-btn set, the .mode-btn set) so gamepad.js, state.js, quality.js
+   and forty tool scripts keep their hooks. Nothing is moved in the DOM.
+============================================================ */
+#sharkTitle{display:none;}
+body.mode-sharksim #title{background:transparent; padding:0; align-items:stretch; justify-content:stretch;}
+body.mode-sharksim #title .card-box{display:none;}
+/* the island HUD is keyed on body.mode-survival and would print its alive
+   count, clock and health bar straight through the now-transparent title */
+body.mode-sharksim:not(.state-playing) #hud,
+body.mode-sharksim:not(.state-playing) #survFlash{visibility:hidden;}
+body.mode-sharksim #sharkTitle{
+  display:flex; flex-direction:column; align-items:center; justify-content:space-between;
+  position:absolute; inset:0; padding:max(18px,3vh) 4vw max(14px,2.4vh);
+  color:#fff; text-align:center; pointer-events:none;
+  background:linear-gradient(to bottom, rgba(3,20,36,.62) 0%, rgba(3,20,36,.18) 26%, rgba(3,20,36,0) 46%, rgba(3,20,36,.28) 70%, rgba(3,20,36,.88) 100%);
+}
+#sharkTitle > *{pointer-events:auto;}
+#sharkTitle .st-head{margin-top:1.5vh;}
+#sharkTitle .st-mark{
+  font-family:'Fredoka','Arial Black',Arial,sans-serif; font-weight:700;
+  font-size:clamp(56px,13.5vw,168px); line-height:.86; letter-spacing:-.045em;
+  color:#fff; text-shadow:0 5px 0 #08344b, 0 10px 28px rgba(2,24,40,.85);
+  user-select:none;
+}
+#sharkTitle .st-tag{
+  margin-top:clamp(8px,1.6vh,16px); font-weight:600; letter-spacing:.34em; text-indent:.34em;
+  font-size:clamp(11px,1.5vw,16px); text-transform:uppercase; color:#dbeeff; text-shadow:0 2px 8px rgba(2,24,40,.9);
+}
+/* the ladder: the promise, in four words */
+#sharkTitle .st-ladder{
+  display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:6px 10px;
+  margin-top:clamp(10px,2.2vh,22px); font-size:clamp(11px,1.35vw,15px); font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+}
+#sharkTitle .st-ladder span{padding:6px 12px; border-radius:999px; background:rgba(4,30,52,.55); border:1px solid rgba(255,255,255,.22); text-shadow:0 1px 4px rgba(0,0,0,.6);}
+#sharkTitle .st-ladder span.st-top{background:rgba(255,122,26,.85); border-color:#ffb27a;}
+#sharkTitle .st-ladder i{font-style:normal; opacity:.7;}
+
+/* the middle: PLAY */
+#sharkTitle .st-mid{display:flex; flex-direction:column; align-items:center; gap:clamp(10px,2vh,18px);}
+#sharkTitle .st-play{
+  appearance:none; border:0; cursor:pointer; font:inherit; font-weight:700;
+  font-size:clamp(24px,3.6vw,40px); letter-spacing:.18em; text-indent:.18em; text-transform:uppercase; color:#fff;
+  padding:clamp(12px,2vh,20px) clamp(48px,8vw,110px); border-radius:999px;
+  background:linear-gradient(#ff8c2f,#ff6a00); box-shadow:0 6px 0 #b34500, 0 14px 34px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.45);
+  transition:transform .08s ease, box-shadow .08s ease;
+}
+#sharkTitle .st-play:hover{transform:translateY(-2px); box-shadow:0 8px 0 #b34500, 0 18px 40px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.45);}
+#sharkTitle .st-play:active{transform:translateY(4px); box-shadow:0 2px 0 #b34500, 0 8px 20px rgba(0,0,0,.4);}
+#sharkTitle .st-play[disabled]{opacity:.55; cursor:default; transform:none;}
+#sharkTitle .st-quality{display:flex; align-items:center; gap:8px; font-size:clamp(11px,1.2vw,14px); font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:#cfe3f5;}
+#sharkTitle .st-quality .st-seg{display:inline-flex; border-radius:999px; overflow:hidden; border:1px solid rgba(255,255,255,.3); background:rgba(4,30,52,.55);}
+#sharkTitle .st-quality button{
+  appearance:none; border:0; background:transparent; color:#dbeeff; cursor:pointer; font:inherit; font-weight:700; letter-spacing:.1em;
+  padding:7px 14px; min-width:64px;
+}
+#sharkTitle .st-quality button.active{background:#fff; color:#08344b;}
+
+/* the foot: controls in one line, other games in a smaller one */
+#sharkTitle .st-foot{display:flex; flex-direction:column; align-items:center; gap:10px; width:100%;}
+#sharkTitle .st-keys{display:flex; flex-wrap:wrap; justify-content:center; gap:8px 22px; font-size:clamp(11px,1.25vw,14px); font-weight:600; color:#e6f1fa; text-shadow:0 1px 4px rgba(0,0,0,.7);}
+#sharkTitle .st-keys .st-k{display:inline-flex; align-items:center; gap:6px;}
+#sharkTitle .st-keys kbd{
+  font:inherit; font-weight:700; font-size:.9em; color:#08344b; background:#fff; border-radius:6px; padding:2px 7px;
+  box-shadow:0 2px 0 #9fb8c9;
+}
+#sharkTitle .st-keys .st-touch{display:none;}
+body.touch #sharkTitle .st-keys .st-kbd{display:none;}
+body.touch #sharkTitle .st-keys .st-touch{display:inline-flex;}
+#sharkTitle .st-more{display:none; flex-wrap:wrap; justify-content:center; align-items:center; gap:4px 12px; font-size:clamp(10px,1.05vw,12px); letter-spacing:.14em; text-transform:uppercase; color:#9dbdd6;}
+#sharkTitle .st-more.on{display:flex;}
+#sharkTitle .st-more button{appearance:none; border:0; background:transparent; color:#cfe3f5; font:inherit; font-weight:700; letter-spacing:.14em; cursor:pointer; padding:4px 6px; text-decoration:underline; text-underline-offset:3px; text-decoration-color:rgba(255,255,255,.35);}
+#sharkTitle .st-more button:hover{color:#fff;}
+
+@media (max-width:520px){
+  #sharkTitle .st-ladder{display:grid; grid-template-columns:1fr 1fr; gap:6px; max-width:340px;}
+  #sharkTitle .st-ladder i{display:none;}
+}
+@media (max-height:520px){
+  #sharkTitle .st-tag{display:none;}
+  #sharkTitle .st-ladder{margin-top:8px;}
+  #sharkTitle .st-mark{font-size:clamp(44px,11vh,120px);}
+}

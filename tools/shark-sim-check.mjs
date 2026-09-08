@@ -54,7 +54,7 @@ const report = { ok: false, fails: [], stages: {}, errors: [], shots: [] };
 const fail = (m) => { report.fails.push(m); say("  ✗ " + m); };
 const pass = (m) => { say("  ✓ " + m); };
 
-const SHOTS = path.join(ROOT, "artifacts", "shark-sim");
+const SHOTS = path.resolve(arg("--out", path.join(ROOT, "artifacts", "shark-sim")));
 await mkdir(SHOTS, { recursive: true });
 
 const rig = await launch({ rafBudget: 0 });
@@ -168,7 +168,7 @@ const PEACE = `(() => {
 
 async function bootIntoMatch(label) {
   const t0 = Date.now();
-  await rig.open("index.html", `mode=sharksim&seed=${SEED}`);
+  await rig.open(arg("--url", "index.html"), `mode=sharksim&seed=${SEED}`);
   if (!await rig.wait("window.CBZ && CBZ.game", 150000)) { fail(label + ": page never published CBZ"); return false; }
   await rig.evl(`CBZ.SURV_BOTS = ${BOTS}`);
   const playing = await rig.wait(`(() => {
