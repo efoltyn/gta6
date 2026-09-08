@@ -3116,6 +3116,32 @@
       // a gib in the water SINKS — full 24 u/s^2 with no drag reads as a rock,
       // not as a piece of a body. One boolean set at spawn, so the land path
       // never pays for the test and stays byte-identical.
+      /* A GIB CROSSES THE SURFACE TOO (2026-09-08, the owner's "the bitten-off
+         fin floats in mid-air above water" — the same fix as the severed lobes
+         in systems/wounds.js). `wet` was decided ONCE at spawn from the joint's
+         medium and then the wrong physics ran for the rest of the flight: a leg
+         torn off a swimmer at the surface flew UP out of the water at 3-5 m/s
+         and hung there under water gravity and water drag, and a limb taken by
+         a head that was out of the water fell through the swell as a dry gib.
+         One guarded submRaw on a ~0.1 s stagger keeps the flag honest both
+         ways; going in is a splash sized to the piece and the water taking most
+         of the speed. Bounded: gibs are capped, and submRaw short-circuits to
+         DRY with no water system, so land maps pay one call per gib per tenth. */
+      if (b.kind === "gib" && waterOn()) {
+        b.seaT = (b.seaT || 0) - dt;
+        if (b.seaT <= 0) {
+          b.seaT = 0.08 + Math.random() * 0.06;
+          const sub = submRaw(m.position.x, m.position.y, m.position.z);
+          const under = sub !== DRY && sub >= 0;
+          if (under && !b.wet) {
+            if (CBZ.waterSplashAt) {
+              try { CBZ.waterSplashAt(m.position.x, m.position.y + sub, m.position.z, b.limb ? 1.4 : 0.6); } catch (e) {}
+            }
+            b.vx *= 0.45; b.vy *= 0.35; b.vz *= 0.45;
+          }
+          b.wet = under;
+        }
+      }
       if (b.wet) {
         b.vy -= GRAV * 0.22 * dt;
         const wd = Math.pow(0.25, dt);

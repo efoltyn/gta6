@@ -2634,13 +2634,12 @@
        velocity, which is why it does not simply drop out of the mouth: it is
        thrown by the head shake that took it.
 
-       FALL. After release: near-neutral buoyancy (flesh is a little heavier
-       than seawater — CHIP_SINK), quadratic-ish drag applied as exp(-k dt) so
-       a long frame cannot overshoot, and a tumble that spins down with it. It
-       SETTLES on the sea floor and stays there — it does not pop, it does not
-       shrink at four seconds like a chip does. It is a piece of an animal
-       lying on the bottom, and it fades out only when the budget needs the
-       slot back.
+       FALL. After release it obeys whichever medium it is in — see THE
+       PIECE OBEYS THE WATER above stepPieces: gravity and a splash in the
+       air, its own buoyancy in the water. A sinker SETTLES on the sea floor
+       and stays there; a floater rides the surface and drifts. Neither pops
+       or shrinks at four seconds like a chip does: it is a piece of an
+       animal, and it fades out only when the budget needs the slot back.
 
      Budget: eight pieces in the world, oldest recycled, geometry SHARED with
      the rig it came off (never disposed here — `_cbzPiece` marks it so any
@@ -2712,10 +2711,22 @@
     m.position.copy(_org);
     CBZ.scene.add(m);
     const mo = mouthOf(by);
+    // how big the lobe is in the world — sizes its splash and its draft
+    if (!m.geometry.boundingSphere) { try { m.geometry.computeBoundingSphere(); } catch (e) {} }
+    const size = (m.geometry.boundingSphere ? m.geometry.boundingSphere.radius : 0.3) *
+      Math.max(Math.abs(m.scale.x), Math.abs(m.scale.y), Math.abs(m.scale.z));
     const rec = {
-      m: m, t: 0, life: PIECE_LIFE, rest: false,
+      m: m, t: 0, life: PIECE_LIFE, rest: false, afloat: false,
       carry: mo ? PIECE_CARRY * (0.7 + Math.random() * 0.6) : 0,
       by: mo ? by : null,
+      size: size,
+      // ITS OWN BUOYANCY (see THE PIECE OBEYS THE WATER): fat and cartilage
+      // float, muscle sinks. Net m/s^2 in water, positive = up.
+      buoy: Math.random() < 0.55 ? 0.35 + Math.random() * 0.55 : -(0.45 + Math.random() * 0.7),
+      draft: Math.max(0.04, size * 0.35),
+      // a slow swell set of its own so two floaters never track in lockstep
+      setA: Math.random() * 6.283,
+      curT: 0, cx: 0, cz: 0,
       // out along the flank normal, with the bite's own violence behind it
       vx: _nrm.x * (1.1 + sev * 2.2) + (Math.random() - 0.5) * 1.4,
       vy: _nrm.y * (0.6 + sev * 1.1) + (Math.random() - 0.5) * 0.8,
@@ -2724,6 +2735,81 @@
     };
     PIECES.push(rec);
     return rec;
+  }
+  /* ---- THE PIECE OBEYS THE WATER --------------------------------------------
+     Owner, 2026-09-08: "when I bite something sometimes the bitten-off fin
+     will float in mid-air above water."
+
+     The lobe had exactly one physics: CHIP_SINK (-1.15 m/s^2, flesh in
+     seawater) under a water drag of exp(-1.43 dt), applied wherever the
+     piece happened to be. That is right a metre down and wrong in the air —
+     and the jaw that carries it is out of the water more often than not. The
+     bite that takes a fin is a surface lunge; the head shake that throws the
+     piece (the release velocity is the mouth's own, see the carry branch
+     below) happens with the head UP. A lobe let go two metres over the swell
+     then had a terminal fall speed of 1.15 / 1.43 = 0.8 m/s: it drifted back
+     down to the sea over five to ten seconds with nothing visibly acting on
+     it, which is the hang the owner saw. (The seabed rest test was not the
+     problem — sharksim is an island mode, so the floor oracle IS the
+     bathymetry there. The medium was.)
+
+     So the piece now asks which medium it is in every frame, off the live
+     swell, and has a physics for each:
+       AIR     real gravity — PIECE_G_AIR is BREACH_G, the 17.5 m/s^2 the
+               shark that threw it falls through (city/wildlife_tame.js), so
+               a fin and the jaw that let go of it agree on how fast down is
+               — light drag, and the tumble the throw gave it. Crossing the
+               surface is an ENTRY: the water_wake splash sized to the piece,
+               most of the velocity taken by the water, and from there
+       WATER   the old near-neutral physics, but with a buoyancy of its OWN
+               (shedPiece rolls it): a fin's fat and cartilage float, muscle
+               sinks, so a little over half of what comes off rises and rides
+               the swell and the rest settles on the bed as before. Nothing
+               rests in mid-water and nothing rests in the air: a rest is the
+               seabed, or dry ground.
+       AFLOAT  re-seated on the live surface every frame (eight pieces at
+               most, so this is eight swell reads a frame, not the hundreds
+               the blood slicks have to throttle), drifting with the field's
+               current plus a slow set of its own; it grounds where the bed
+               comes up to meet it — a fin washed up on the sand is the right
+               ending, and it is the one place a piece may lie above the sea. */
+  const PIECE_G_AIR = 17.5;
+  const PIECE_DRAG_AIR = 0.32;
+  const _pcur = { x: 0, z: 0 };
+  // the live surface over this column, or null when it is not water at all
+  // (CBZ.cityWaterAt is survival-wrapped, so this is honest on the island too)
+  function pieceSeaY(x, z) {
+    if (!CBZ.citySeaHeightAt) return null;
+    try {
+      if (CBZ.cityWaterAt && !CBZ.cityWaterAt(x, z)) return null;
+      const y = CBZ.citySeaHeightAt(x, z);
+      return (typeof y === "number" && isFinite(y)) ? y : null;
+    } catch (e) { return null; }
+  }
+  // what a piece can come to rest on: the seabed under water (city/swim.js's
+  // bathymetry, survival-wrapped to the arena's own field), the walkable
+  // ground over land. surv.floorAt is the last resort — it answers 0 outside
+  // the island modes, which is a rest at y=0.12 over whatever the sea is
+  // doing, so it is only ever trusted when nothing better is loaded.
+  function pieceFloorY(x, z, wet) {
+    try {
+      if (wet && typeof CBZ.citySeaBedYAt === "function") {
+        const b = +CBZ.citySeaBedYAt(x, z); if (isFinite(b)) return b;
+      }
+      if (!wet && typeof CBZ.floorAt === "function") {
+        const f = +CBZ.floorAt(x, z); if (isFinite(f)) return f;
+      }
+      if (CBZ.surv && typeof CBZ.surv.floorAt === "function") {
+        const f = +CBZ.surv.floorAt(x, z); if (isFinite(f)) return f;
+      }
+    } catch (e) {}
+    return null;
+  }
+  function pieceSettle(p, floor) {
+    p.m.position.y = floor + 0.12;
+    p.rest = true; p.afloat = false;
+    p.rx = p.ry = p.rz = 0;
+    p.vx = p.vy = p.vz = 0;
   }
   const _mpos = new THREE.Vector3();
   function stepPieces(dt) {
@@ -2760,25 +2846,83 @@
         continue;
       }
       if (!p.rest) {
-        const k = Math.exp(-CHIP_DRAG * 0.55 * dt);
-        p.vy += CHIP_SINK * dt;
-        p.vx *= k; p.vy *= k; p.vz *= k;
-        m.position.x += p.vx * dt; m.position.y += p.vy * dt; m.position.z += p.vz * dt;
-        m.rotation.x += p.rx * dt; m.rotation.y += p.ry * dt; m.rotation.z += p.rz * dt;
-        p.rx *= k; p.ry *= k; p.rz *= k;
-        /* THE BOTTOM. survFloorAt is the same oracle the swimmers and the
-           spawners walk the sea floor with, so a lobe comes to rest on the
-           real seabed and not at y=0. With no oracle it simply keeps sinking
-           and the life timer takes it. */
-        let floor = null;
-        if (CBZ.surv && typeof CBZ.surv.floorAt === "function") {
-          try { floor = CBZ.surv.floorAt(m.position.x, m.position.z); } catch (e) { floor = null; }
-        }
-        if (floor != null && isFinite(floor) && m.position.y <= floor + 0.12) {
-          m.position.y = floor + 0.12;
-          p.rest = true;
-          p.rx = p.ry = p.rz = 0;
-          p.vx = p.vy = p.vz = 0;
+        const sy = pieceSeaY(m.position.x, m.position.z);   // live surface, or null over dry ground
+        if (p.afloat) {
+          if (sy == null) {
+            // drifted onto a column that is not water any more (a drawdown, a
+            // sandbar): it is in the air now and falls like anything else
+            p.afloat = false;
+          } else {
+            p.curT -= dt;
+            if (p.curT <= 0) {
+              p.curT = 0.4;
+              p.cx = p.cz = 0;
+              if (CBZ.waterField && CBZ.waterField.currentAt) {
+                try {
+                  const c = CBZ.waterField.currentAt(m.position.x, m.position.z, undefined, _pcur);
+                  if (isFinite(c.x) && isFinite(c.z)) { p.cx = c.x; p.cz = c.z; }
+                } catch (e) {}
+              }
+            }
+            // the current, a slow swell set of its own, and whatever the throw left
+            const kd = Math.exp(-1.2 * dt);
+            p.vx *= kd; p.vz *= kd; p.vy = 0;
+            m.position.x += (p.cx + Math.cos(p.setA) * 0.07 + p.vx) * dt;
+            m.position.z += (p.cz + Math.sin(p.setA) * 0.07 + p.vz) * dt;
+            m.position.y = sy - p.draft;
+            // it rolls over flat and rides, rocking a little with the swell
+            const ks = Math.exp(-2.5 * dt);
+            p.rx *= ks; p.ry *= ks; p.rz *= ks;
+            m.rotation.x += (p.rx + Math.sin(p.t * 1.7 + p.setA) * 0.05) * dt;
+            m.rotation.y += p.ry * dt;
+            m.rotation.z += (p.rz + Math.cos(p.t * 1.3 + p.setA) * 0.05) * dt;
+            // the bed came up to meet it: washed up, and it stays there
+            const floor = pieceFloorY(m.position.x, m.position.z, true);
+            if (floor != null && floor + 0.12 >= m.position.y) pieceSettle(p, floor);
+          }
+        } else if (sy == null || m.position.y > sy) {
+          /* AIR. Real gravity, light drag, the tumble the throw gave it. */
+          const k = Math.exp(-PIECE_DRAG_AIR * dt);
+          p.vy -= PIECE_G_AIR * dt;
+          p.vx *= k; p.vy *= k; p.vz *= k;
+          m.position.x += p.vx * dt; m.position.y += p.vy * dt; m.position.z += p.vz * dt;
+          m.rotation.x += p.rx * dt; m.rotation.y += p.ry * dt; m.rotation.z += p.rz * dt;
+          if (sy != null && m.position.y <= sy) {
+            /* ENTRY: it hits the water. One water_wake splash sized to the
+               piece (1 is a person, so a lobe off a seal is a small one and a
+               slab off a megalodon's fluke is a real crash), and the water
+               takes most of the velocity on the way in. */
+            if (CBZ.waterSplashAt) {
+              try { CBZ.waterSplashAt(m.position.x, sy, m.position.z, Math.max(0.3, Math.min(3, p.size * 1.6))); } catch (e) {}
+            }
+            p.vx *= 0.45; p.vy *= 0.35; p.vz *= 0.45;
+            p.rx *= 0.5; p.ry *= 0.5; p.rz *= 0.5;
+          } else if (sy == null) {
+            // over dry ground: it lands on the ground and lies there
+            const floor = pieceFloorY(m.position.x, m.position.z, false);
+            if (floor != null && m.position.y <= floor + 0.12) pieceSettle(p, floor);
+          }
+        } else {
+          /* WATER. Near-neutral, with its own sign: floaters rise to the
+             surface and ride it, sinkers settle on the bed. Nothing rests
+             anywhere else. */
+          const k = Math.exp(-CHIP_DRAG * 0.55 * dt);
+          p.vy += p.buoy * dt;
+          p.vx *= k; p.vy *= k; p.vz *= k;
+          m.position.x += p.vx * dt; m.position.y += p.vy * dt; m.position.z += p.vz * dt;
+          m.rotation.x += p.rx * dt; m.rotation.y += p.ry * dt; m.rotation.z += p.rz * dt;
+          p.rx *= k; p.ry *= k; p.rz *= k;
+          if (p.buoy > 0 && m.position.y >= sy - p.draft) {
+            m.position.y = sy - p.draft;
+            p.vy = 0;
+            p.afloat = true;
+          }
+          /* THE BOTTOM. The same bathymetry the swimmers and the spawners
+             walk the sea floor with, so a lobe comes to rest on the real
+             seabed and not at y=0. With no oracle it simply keeps sinking and
+             the life timer takes it. */
+          const floor = pieceFloorY(m.position.x, m.position.z, true);
+          if (floor != null && m.position.y <= floor + 0.12) pieceSettle(p, floor);
         }
       }
       if (p.t >= p.life) {
