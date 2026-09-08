@@ -1431,8 +1431,8 @@
     // which is the whole failure mode the encoder note guards against.
     //
     // CONTRACT: every geometry drawn with one of these materials MUST carry a
-    // `color` attribute or it renders BLACK. gashGeo(), stumpGeo() and
-    // chipGeo() all bake one; nothing else may use these three.
+    // `color` attribute or it renders BLACK. gashGeo() and stumpGeo() both
+    // bake one; nothing else may use these three.
     const m = new THREE.MeshBasicMaterial({ color: c, vertexColors: true });
     m._shared = true;                      // rig-disposal sweeps skip it
     return m;
@@ -1516,7 +1516,7 @@
      per-vertex colour, the ramp only ever multiplies DOWN, so the brightest
      pixel of a wound is still MAT_RIM as authored against the sRGB encoder
      (see solidMat / cutMat). Every geometry drawn with those materials MUST
-     carry a `color` attribute; gashGeo, stumpGeo and chipGeo all bake one.
+     carry a `color` attribute; gashGeo and stumpGeo both bake one.
 
      Two shared variants of each, built once at boot, `_shared` so the rig
      disposal sweeps skip them. A wound still allocates NO geometry per bite. */
@@ -1673,55 +1673,10 @@
     return (i & 1) ? GEO_STUMP_B : GEO_STUMP;
   }
 
-  /* ---- AND THE MEAT THAT LEFT THE BODY ------------------------------------
-     A crater says material is missing. Chunks flying off say it LEFT. This is
-     the old jaggedBox, kept for the one job it was ever right for: a chunk of
-     torn flesh is a LUMP, and a corner-jittered box is a lump for free.
-
-     THE JITTER IS KEYED ON THE CORNER, not on the vertex. r128's BoxGeometry
-     carries 24 vertices for 8 corners (each face needs its own normal/uv), so
-     jittering per-vertex splits every corner three ways and opens visible
-     cracks along the seams. Hashing the ORIGINAL position instead moves all
-     three copies of a corner to the same place and the box stays closed. The
-     jitter is +-0.45 here (it was +-0.30 when this was pretending to be a
-     wound) because nothing about a torn chunk should be square either. */
-  let GEO_CHIP = null, GEO_CHIP_B = null;
-  function chipGeo(seed) {
-    const g = new THREE.BoxGeometry(1, 1, 1);
-    const arr = g.attributes.position.array;
-    const col = new Float32Array(arr.length);
-    for (let i = 0; i < arr.length; i += 3) {
-      // corner key: the unit box's coords are all +-0.5, so a sign triple
-      let h = (((arr[i] > 0 ? 1 : 0) * 73856093) ^ ((arr[i + 1] > 0 ? 1 : 0) * 19349663) ^
-               ((arr[i + 2] > 0 ? 1 : 0) * 83492791) ^ seed) >>> 0;
-      h = (h * 1664525 + 1013904223) >>> 0; arr[i] += (((h >>> 9) & 255) / 255 - 0.5) * 0.45;
-      h = (h * 1664525 + 1013904223) >>> 0; arr[i + 1] += (((h >>> 9) & 255) / 255 - 0.5) * 0.45;
-      h = (h * 1664525 + 1013904223) >>> 0; arr[i + 2] += (((h >>> 9) & 255) / 255 - 0.5) * 0.45;
-      // the same corner hash drives the shading: one or two faces of a torn
-      // lump are raw and the rest is dark meat, and an unlit material can only
-      // say so through the colour attribute (which solidMat now requires).
-      /* AND THEY ARE MEAT, NOT CHERRIES. This ramp used to run 0.34..1.00 over
-         cutMat(0) — MAT_RIM, the brightest of the three and the one chosen to
-         be the single raw margin of a wound. Twenty of those in the water at
-         once, magnified, are a handful of bright red lumps hanging beside the
-         animal: the same "red playdough" read the wound itself was just fixed
-         out of. A torn chunk is dark with one or two raw faces, so the ramp
-         tops out lower and the base material drops to MAT_MEAT (see the call
-         in tossChips). */
-      h = (h * 1664525 + 1013904223) >>> 0;
-      const v = 0.26 + (((h >>> 9) & 255) / 255) * 0.48;
-      col[i] = v; col[i + 1] = v * 0.78; col[i + 2] = v * 0.78;
-    }
-    g.attributes.position.needsUpdate = true;
-    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-    g.computeBoundingBox(); g.computeBoundingSphere();
-    g._shared = true;
-    return g;
-  }
-  function chipGeoOf(i) {
-    if (!GEO_CHIP) { GEO_CHIP = chipGeo(0x2b7f41); GEO_CHIP_B = chipGeo(0xd10e93); }
-    return i ? GEO_CHIP_B : GEO_CHIP;
-  }
+  /* THERE IS NO "CHIP" GEOMETRY ANY MORE. A corner-jittered BoxGeometry used
+     to live here as the "torn flesh" a bite threw into the water — the last
+     anonymous box gib in the game. See THE MEAT LEAVING THE BODY below for why
+     it is gone. */
   const _cbv = new THREE.Vector3();
   const _half = new THREE.Vector3();     // half-extents in PARENT units (geometry x scale)
   const _geoH = new THREE.Vector3();     // ..and in the mesh's own local units
@@ -2515,100 +2470,36 @@
     }
   }
 
-  /* ---- THE MEAT LEAVING THE BODY -----------------------------------------
-     Owner: "real missing shit". A crater is the AFTER. This is the DURING —
-     the material that came off, visibly coming off, on the frame the jaw
-     closes. Without it a bite is a wound that appears by magic; with it the
-     wound is the hole the chunks came out of.
+  /* ---- THE MEAT LEAVING THE BODY: THERE ARE NO "CHIPS" ------------------
+     Owner, 2026-09-08, Shark Sim: "look at the black floating geometry that
+     is left when I bite something."
 
-     A TRUNK bite is the case that needed it most. The trunk exemption a few
-     hundred lines down is correct and stays (an orca is ONE generated hull
-     mesh; shrinking it makes the whole animal shorter, which is the 5-metre
-     maroon plank that started all of this) — but it meant a bite to the body
-     removed nothing whatsoever. Now the crater deepens AND the flesh leaves.
+     It was this file. Every bite in water used to throw two to seven
+     corner-jittered BOXES out of the wound — "chips", anonymous lumps of
+     "torn flesh" — and drew them with the wound's own unlit cut materials.
+     Half of them were drawn with MAT_BORE (0x040002: the near-black bore of a
+     cut) and the other half with MAT_MEAT under a vertex ramp that tops out
+     at 0.74, so even those left the encoder at roughly rgb(60,20,20). Unlit,
+     under water (where the veil term is dead code), sized 16-42% of the wound
+     and stopped by their own drag within a second, they were black cubes
+     hanging at the bite point for three to six seconds. The comment above
+     them said "MEAT, NOT CHERRIES" — the previous pass had darkened them
+     because the bright version read as "red playdough". Both ends of that
+     dial had now been rejected by the same owner, which is the tell that the
+     COLOUR was never the problem: an unlit box is not a piece of an animal
+     at any brightness.
 
-     WHY THESE ARE MADE HERE AND NOT ASKED FOR FROM gore.js. gore.js's only
-     public particle entries are goreBloom (blood puffs), goreImpact (a spray)
-     and gore() (a whole death event: flash, shake, kill context). None of
-     them emits a solid gib on request — severBody does, but only as part of
-     taking a named humanoid limb off a named humanoid rig. Rather than invent
-     a function in a file another builder owns, the chunks ride this file's
-     own shared torn geometry and its own cut materials, which is also what
-     keeps them inside the water veil with the wound they came out of.
+     So they are gone, not recoloured. The whole system, the pooled meshes and
+     the chip geometry with them. What a bite leaves now is exactly the list
+     the owner gave: the wounded body (the rake of cuts and the stump, above),
+     the piece that came off (a REAL clone of the part's own geometry and
+     material, below) and blood (goreBloom + the chum trail). Everything in
+     the water after a bite is now something that visibly came off something.
 
-     ONLY IN WATER, and that is the file's existing law, not a new gate: the
-     same `wet` test that decides whether goreBloom fires. On land gore.js
-     already owns the debris for a mauling and a second, unarbitrated source
-     of flying meat would double it. Chunks in air also want ballistics,
-     bounce and a ground contact that nothing here has; in water they simply
-     decelerate and sink, which is three lines and always correct. */
-  const CHIPS = [];                      // {m, vx,vy,vz, t, life, rx,ry,rz, s}
-  const CHIP_FREE = [];                  // recycled meshes (no churn during a frenzy)
-  const CHIP_CAP = 30;                   // hard ceiling: a frenzy is many bites
-  const CHIP_SINK = -1.15;               // m/s^2 — gravity minus flesh's near-neutral buoyancy
-  const CHIP_DRAG = 2.6;                 // 1/s, applied as exp(-k*dt) so a long frame cannot overshoot
-  function dropChip(i) {
-    const c = CHIPS.splice(i, 1)[0];
-    if (c.m.parent) c.m.parent.remove(c.m);
-    if (CHIP_FREE.length < 18) CHIP_FREE.push(c.m);
-  }
-  // n chunks off the wound at (x,y,z), thrown along the surface normal (nx,ny,nz)
-  function tossChips(n, x, y, z, nx, ny, nz, woundR, sev) {
-    if (!CBZ.scene) return;
-    for (let k = 0; k < n; k++) {
-      if (CHIPS.length >= CHIP_CAP) dropChip(0);        // oldest first, same law as the decals
-      let m = CHIP_FREE.pop();
-      if (!m) {
-        m = new THREE.Mesh(chipGeoOf(k & 1), cutMat(1 + (k & 1)));
-        m.castShadow = m.receiveShadow = false;
-      } else {
-        m.geometry = chipGeoOf(k & 1);
-        m.material = cutMat(1 + (k & 1));  // ALWAYS refetched: the veil twin is cached, not free
-      }
-      // a chunk is a fraction of the hole it came out of, and no two match
-      const s = Math.max(0.02, woundR * (0.16 + Math.random() * 0.26));
-      m.scale.set(s, s * (0.6 + Math.random() * 0.7), s * (0.6 + Math.random() * 0.7));
-      m.position.set(x + (Math.random() - 0.5) * woundR * 0.9,
-                     y + (Math.random() - 0.5) * woundR * 0.9,
-                     z + (Math.random() - 0.5) * woundR * 0.9);
-      m.rotation.set(Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28);
-      CBZ.scene.add(m);
-      // OUT ALONG THE NORMAL, hard, then the water takes it. No upward bias:
-      // meat is heavier than seawater, and a chunk that arcs UP reads as a
-      // firework. The spread is wide because a jaw does not aim.
-      const sp = (1.4 + Math.random() * 2.2) * (0.55 + sev * 0.75);
-      CHIPS.push({
-        m: m,
-        vx: nx * sp + (Math.random() - 0.5) * 1.9,
-        vy: ny * sp * 0.55 + (Math.random() - 0.5) * 1.1,
-        vz: nz * sp + (Math.random() - 0.5) * 1.9,
-        rx: (Math.random() - 0.5) * 7, ry: (Math.random() - 0.5) * 7, rz: (Math.random() - 0.5) * 7,
-        t: 0, life: 3.2 + Math.random() * 2.6, s: s,
-      });
-    }
-  }
-  function stepChips(dt) {
-    for (let i = CHIPS.length - 1; i >= 0; i--) {
-      const c = CHIPS[i], m = c.m;
-      c.t += dt;
-      const k = Math.exp(-CHIP_DRAG * dt);
-      c.vy += CHIP_SINK * dt;
-      c.vx *= k; c.vy *= k; c.vz *= k;
-      m.position.x += c.vx * dt; m.position.y += c.vy * dt; m.position.z += c.vz * dt;
-      m.rotation.x += c.rx * dt; m.rotation.y += c.ry * dt; m.rotation.z += c.rz * dt;
-      c.rx *= k; c.ry *= k; c.rz *= k;
-      // the last second is a shrink, not a pop: something eats it or it
-      // disperses. (Scale, not opacity — these share the opaque cut materials
-      // with the wound itself and must never fade one of those to transparent.)
-      const left = c.life - c.t;
-      if (left < 1) {
-        const f = Math.max(0, left);
-        m.scale.set(c.s * f, c.s * f, c.s * f);
-      }
-      if (c.t >= c.life) dropChip(i);
-    }
-  }
-  function chipsClear() { for (let i = CHIPS.length - 1; i >= 0; i--) dropChip(i); }
+     The two constants below survive because the severed lobe's water physics
+     were written against them. */
+  const PIECE_SINK = -1.15;              // m/s^2 — gravity minus flesh's near-neutral buoyancy
+  const PIECE_DRAG = 2.6;                // 1/s, applied as exp(-k*dt) so a long frame cannot overshoot
 
   /* ---- THE PIECE THAT CAME OFF -------------------------------------------
      Owner, 2026-08-29: "the piece — like the tail or fin etc — bit off should
@@ -2616,9 +2507,8 @@
 
      Until now nothing left the body. The severance branch shrank the part and
      capped the cut, so a fluke that had visibly lost a third of itself had put
-     that third precisely nowhere: the animal got smaller and the ocean got a
-     handful of gristle-sized CHIPS (tossChips, below) that were never the
-     missing lobe. From the water it reads as the fin retracting.
+     that third precisely nowhere: the animal simply got smaller. From the
+     water it reads as the fin retracting.
 
      So the removed lobe is now a REAL OBJECT. It is the part's own geometry
      and the part's own material — a bitten pectoral looks like a pectoral,
@@ -2906,7 +2796,7 @@
           /* WATER. Near-neutral, with its own sign: floaters rise to the
              surface and ride it, sinkers settle on the bed. Nothing rests
              anywhere else. */
-          const k = Math.exp(-CHIP_DRAG * 0.55 * dt);
+          const k = Math.exp(-PIECE_DRAG * 0.55 * dt);
           p.vy += p.buoy * dt;
           p.vx *= k; p.vy *= k; p.vz *= k;
           m.position.x += p.vx * dt; m.position.y += p.vy * dt; m.position.z += p.vz * dt;
@@ -3072,16 +2962,13 @@
 
     if (!wet) return true;                 // land: the caller owns the blood
 
-    /* THE MATERIAL THAT LEFT. Fired before the bloom so the chunks are already
-       moving when the blood arrives around them, and seeded from exactly the
-       same pair the seat left behind (_cbv = the wound's real world point,
-       _nrm = the flank's true outward normal) so the meat and the blood leave
-       along the same line. Count rides severity and size: a nip throws two, an
-       orca taking a fluke throws seven. */
-    tossChips(Math.max(2, Math.min(7, Math.round(2 + sev * 3 + woundR * 3.5))),
-      _cbv.x, _cbv.y, _cbv.z, _nrm.x, _nrm.y, _nrm.z, woundR, sev);
+    /* NOTHING ELSE IS THROWN. There used to be a burst of "chips" here — box
+       gibs of torn flesh — and they were the black geometry the owner saw
+       floating at every bite (see THE MEAT LEAVING THE BODY). The material
+       that leaves the body is the severed lobe shedPiece already spawned
+       above, or nothing: a rake of cuts on a trunk does not shed cubes.
 
-    /* BLOOD IN THE WATER, staged. _cbv is the wound's real world position and
+       BLOOD IN THE WATER, staged. _cbv is the wound's real world position and
        _nrm is the surface it came out of — so the burst ERUPTS from the flank
        along the outward normal instead of ballooning symmetrically about a
        point inside the animal, which is the difference between "a bite" and
@@ -3178,7 +3065,7 @@
     }
     return {
       actors: seen.length, chunks: CHUNKS.length, severed: severed, craters: craters,
-      veiled: veiled, bleeders: BLEED.length, chips: CHIPS.length,
+      veiled: veiled, bleeders: BLEED.length,
       marks: marks, pieces: PIECES.length,
       deepest: Math.round(deepest * 100) / 100,
       widestWound: Math.round(widest * 100) / 100,
@@ -3250,8 +3137,7 @@
   CBZ.clearWounds = function () {
     CBZ.creatureBiteChunkRestore(null);
     bleedStop(null);
-    chipsClear();                  // loose meat is scene-parented, so it does NOT go with the rigs
-    piecesClear();                 // ..and so are the severed lobes
+    piecesClear();                 // severed lobes are scene-parented, so they do NOT go with the rigs
     marksClear();
     for (let i = 0; i < wounds.length; i++) {
       const r = wounds[i];
@@ -3283,9 +3169,6 @@
       // a death has to read on the frame it happens, not on the 1.1s sweep
       deadT += dt; if (deadT > 0.16) { deadT = 0; deathScan(); }
     }
-    // torn flesh in the water: at most 30 records, and only for the few
-    // seconds after a bite. One length check when nothing is being eaten.
-    if (CHIPS.length) stepChips(dt);
     // severed lobes: at most eight, and they are the only thing here that
     // lives for half a minute — one length check when nothing has lost a fin.
     if (PIECES.length) stepPieces(dt);
