@@ -450,7 +450,10 @@
   function craftPoint(ix, row, spec, salt) {
     const A = arena(); if (!A) return null;
     const WL = sim.waterline;
-    const need = ((spec && spec.draft) || 0.5) + 0.6;
+    // the hull's draft with a margin — and never shallower than SWIMMING
+    // water (survivorbot's SWIM_ENTER is 1.35 m): a man who goes over the
+    // side of a kayak sitting in a metre of water would land on his feet
+    const need = Math.max(((spec && spec.draft) || 0.5) + 0.6, 1.6);
     for (let k = 0; k < 12; k++) {
       const a = h01(ix * 5.31 + k * 1.77 + 41, sim.match * 7 + salt) * 6.283;
       const r = WL + row.r0 + h01(ix * 3.13 + k * 2.9 + 77, sim.match * 11 + salt) * (row.r1 - row.r0);
