@@ -99,91 +99,18 @@
   // ============================================================
   //  §1. THE FLEET ROWS THIS FILE NEEDS AND WHERE THEY COME FROM
   // ============================================================
-  /* water_hulls.js + yachts.js already register dinghy / boat / skiff /
-     sloop / sportfish / trawler / cruiser / yacht. The three SMALL rows a
-     beach fleet is mostly made of — a sea kayak, a PWC and a centre console —
-     may or may not exist yet (another builder owns the geometry). So:
-
-       • if the registry HAS the key, we use it, art and all;
-       • if it does not, we register a spec-only row HERE, with the real
-         dimensions and a stand-in mesh scaled from the nearest hull that does
-         exist, so the RULES are right today and the art upgrades itself the
-         moment the real row lands (registration is skipped when the key is
-         already there — first parse wins, and a real builder always parses
-         before we ever spawn).
-
-     These are the dimensions, not decoration: the whole shark-vs-boat model
-     reads loa/beam/massT off them. */
-  const STANDIN = {
-    kayak: {
-      from: "dinghy",
-      label: "Sea Kayak", model: "Sea Kayak",
-      hull: {
-        loa: 4.2, beam: 0.75, draft: 0.18, massT: 0.09,
-        topKts: 5, cruiseKts: 3.2, planeKts: 0, canPlane: false, accel0: 0.5, humpFrac: 0.30,
-        steerKind: "rudder", yawRate: 1.2, yawAccel: 3.0, yawDamp: 2.6,
-        heelSign: 1, heelGain: 0.03, maxHeel: 0.30,
-        rideAbove: 0.10, waveGain: 1.0, slamV: 2.0,
-        deckY: 0.12, boardY: 0.20, sternOffset: 2.1, wakeScale: 0.25, audio: "bike",
-      },
-      stab: { gm: 0.05, phiV: 0.70, freeboard: 0.22, swampT: 2, crew: 1 },
-    },
-    jetski: {
-      from: "dinghy",
-      label: "Personal Watercraft", model: "Personal Watercraft",
-      hull: {
-        loa: 3.3, beam: 1.2, draft: 0.25, massT: 0.35,
-        topKts: 48, cruiseKts: 30, planeKts: 9, canPlane: true, accel0: 5.4, humpFrac: 0.38,
-        steerKind: "thrust", yawRate: 2.9, yawAccel: 9.0, yawDamp: 3.4,
-        heelSign: -1, heelGain: 0.038, maxHeel: 0.34,
-        rideAbove: 0.06, waveGain: 1.0, slamV: 2.4,
-        deckY: 0.36, boardY: 0.42, sternOffset: 1.65, wakeScale: 0.7, audio: "bike",
-      },
-      stab: { gm: 0.25, phiV: 1.00, freeboard: 0.30, swampT: 4, crew: 2 },
-    },
-    console: {
-      from: "boat",
-      label: "Centre Console 25", model: "Centre Console 25",
-      hull: {
-        loa: 7.5, beam: 2.6, draft: 0.55, massT: 2.2,
-        topKts: 42, cruiseKts: 28, planeKts: 11, canPlane: true, accel0: 3.4, humpFrac: 0.55,
-        steerKind: "thrust", yawRate: 1.35, yawAccel: 3.4, yawDamp: 2.2,
-        heelSign: -1, heelGain: 0.022, maxHeel: 0.22,
-        rideAbove: 0.30, waveGain: 0.9, slamV: 3.6,
-        deckY: 0.72, boardY: 0.78, sternOffset: 3.7, wakeScale: 1.0, audio: "sports",
-      },
-      stab: { gm: 0.90, phiV: 1.20, freeboard: 0.72, swampT: 18, crew: 4 },
-    },
-  };
-  // What a missing key falls back to for its MESH when even the stand-in's
-  // donor is gone.
-  const MESH_FALLBACK = { kayak: "dinghy", jetski: "dinghy", console: "boat" };
-
-  // Defaults for spec.stab, so a hull whose author has not declared stability
-  // still has a real righting moment rather than a divide by zero. Same
-  // numbers water_stability.js defaults to (the contract's table).
-  const STAB_DEFAULT = {
-    kayak: { gm: 0.05, phiV: 0.70, freeboard: 0.22, swampT: 2, crew: 1 },
-    jetski: { gm: 0.25, phiV: 1.00, freeboard: 0.30, swampT: 4, crew: 2 },
-    skiff: { gm: 0.35, phiV: 0.95, freeboard: 0.45, swampT: 5, crew: 3 },
-    dinghy: { gm: 0.60, phiV: 1.15, freeboard: 0.42, swampT: 20, crew: 4 },
-    boat: { gm: 0.90, phiV: 1.25, freeboard: 0.60, swampT: 14, crew: 5 },
-    console: { gm: 0.90, phiV: 1.20, freeboard: 0.72, swampT: 18, crew: 4 },
-    pirate_skiff: { gm: 0.50, phiV: 1.05, freeboard: 0.55, swampT: 8, crew: 6 },
-    sloop: { gm: 0.80, phiV: 2.10, freeboard: 0.85, swampT: 40, crew: 4 },
-    sportfish: { gm: 1.20, phiV: 1.40, freeboard: 1.10, swampT: 50, crew: 6 },
-    cruiser: { gm: 1.40, phiV: 1.45, freeboard: 1.25, swampT: 60, crew: 8 },
-    trawler: { gm: 1.00, phiV: 1.30, freeboard: 1.60, swampT: 90, crew: 6 },
-    yacht: { gm: 2.40, phiV: 1.90, freeboard: 2.40, swampT: 999, crew: 14 },
-  };
+  /* water_hulls.js registers every row a beach fleet is made of — the sea
+     kayak, the PWC and the centre console included — and every spec it
+     registers carries a derived `stab` (gm / phiV / freeboard / swampT /
+     crew / seats). This file used to keep a second copy of three of those
+     rows and a table of stability defaults "in case the real builder had not
+     landed"; it has, so the copies are gone. A key the registry does not
+     know spawns as a dinghy rather than as a scaled stand-in. */
   function stabOf(spec) {
-    if (!spec) return STAB_DEFAULT.dinghy;
-    if (spec.stab) return spec.stab;
-    const d = STAB_DEFAULT[spec.key];
-    if (d) return d;
+    if (spec && spec.stab) return spec.stab;
     // derived, so an unknown hull is never a special case: a stiffer boat is a
     // beamier one, and freeboard scales with length.
-    const loa = num(spec.loa, 6), beam = num(spec.beam, 2);
+    const loa = num(spec && spec.loa, 6), beam = num(spec && spec.beam, 2);
     return {
       gm: clamp(beam * 0.22, 0.05, 3),
       phiV: clamp(0.6 + beam * 0.16, 0.7, 2.1),
@@ -194,53 +121,56 @@
   }
   CBZ.hullStabSpec = stabOf;        // read by the rules and by tools
 
-  /* Register a stand-in row once, lazily, and only when nobody else has. */
-  function ensureRow(key) {
-    const R = MH();
-    if (!R || typeof R.get !== "function") return null;
-    let rec = R.get(key);
-    if (rec) return rec;
-    const S = STANDIN[key];
-    if (!S || typeof R.register !== "function") return null;
-    const donor = S.from;
-    rec = R.register(key, {
-      label: S.label, marque: "—", model: S.model, price: 0,
-      // The stand-in mesh: the nearest registered hull, scaled to THESE
-      // dimensions. It is a placeholder and it says so — the real builder's
-      // row simply wins the `R.get(key)` above and none of this runs.
-      build: function () {
-        const g = R.build(donor) || R.build(MESH_FALLBACK[key] || "dinghy");
-        if (!g) return new THREE.Group();
-        const ds = R.spec(donor);
-        if (ds && ds.loa > 0 && ds.beam > 0) {
-          const sx = S.hull.beam / ds.beam, sz = S.hull.loa / ds.loa;
-          g.scale.set(sx, Math.sqrt(sx * sz), sz);
-        }
-        g.userData.seaCraftStandIn = true;
-        return g;
-      },
-      hull: S.hull,
-    });
-    if (rec && rec.spec && !rec.spec.stab) rec.spec.stab = S.stab;
-    return rec;
-  }
-
   // ============================================================
   //  §2. SPAWN / DESPAWN
   // ============================================================
-  function seatsFor(spec) {
+  /* ---- THE BERTHS: where each body is, and whether it sits or stands -----
+     water_hulls' stab.seats are PELVIS points (deriveSeats says so, and the
+     authored rows agree — a speedboat's bucket is 0.70 over a 0.24 sole). A
+     survivor bot's `pos` is its FEET (survivorbot.js: pos IS group.position,
+     planted on floorAt). Writing a pelvis into the feet hung every crewman
+     half a metre over his bench — the hovering people. So a berth carries
+     both numbers: the sole under the seat, where the feet go, and the cushion
+     height over it, which character.js's chair solve turns into hips ON the
+     bench and soles ON the sole.
+
+     STAND OR SIT is the seat's own height over its sole. A thwart or a bucket
+     is 0.3-0.5 m up and you sit on it; a leaning post or a casting deck is
+     0.6 m+ and nobody sits on those, they stand at them. On a hull with real
+     deck space (10 m+) every other derived berth is a deck hand on his feet,
+     because six men sat in a row down the centreline of a 14 m cruiser read
+     as a bus. */
+  const STAND_OVER_SOLE = 0.60;
+  function berthsFor(spec) {
     const st = stabOf(spec);
-    if (st && st.seats && st.seats.length) return st.seats;
-    // Derived: down the centreline on the deck sole, facing forward, from a
-    // quarter of the way aft to just abaft the bow. A boat with no authored
-    // seats still puts its people IN it rather than on its origin.
     const loa = num(spec && spec.loa, 6);
-    const n = Math.max(1, Math.min(14, num(st && st.crew, 2)));
-    const y = num(spec && spec.deckY, loa * 0.09);
+    const deckY = num(spec && spec.deckY, loa * 0.09);
+    let seats = (st && st.seats && st.seats.length) ? st.seats : null;
+    if (!seats) {
+      // no authored or derived seats at all: down the centreline on the sole
+      const n = Math.max(1, Math.min(14, num(st && st.crew, 2)));
+      seats = [];
+      for (let i = 0; i < n; i++) {
+        const t = n === 1 ? 0.5 : i / (n - 1);
+        seats.push({ x: 0, y: deckY + 0.44, z: loa * (0.28 - 0.52 * t), yaw: 0 });
+      }
+    }
     const out = [];
-    for (let i = 0; i < n; i++) {
-      const t = n === 1 ? 0.5 : i / (n - 1);
-      out.push({ x: 0, y: y, z: loa * (0.28 - 0.52 * t), yaw: 0 });
+    for (let i = 0; i < seats.length; i++) {
+      const s = seats[i];
+      const pelvis = num(s.y, deckY + 0.44);
+      // the sole under this seat: the deck — or, when the pelvis sits at or
+      // below the deck line (a kayak), the cockpit floor his legs are down in
+      const floor = num(s.floor, Math.min(deckY, pelvis - 0.30));
+      const over = pelvis - floor;
+      const stand = over > STAND_OVER_SOLE || (loa >= 10 && i > 0 && (i % 2) === 1);
+      out.push({
+        x: num(s.x, 0), z: num(s.z, 0), yaw: num(s.yaw, 0),
+        floor: floor, stand: stand,
+        cushion: Math.max(0.12, over - 0.10),     // the solve puts the hips cushion + 0.10 up
+        kind: (i === 0 && spec && spec.engine !== false) ? "helm" : "bench",
+        vary: h01(i * 2.3 + 1, loa * 3.1),
+      });
     }
     return out;
   }
@@ -269,9 +199,7 @@
     o = o || {};
     const R = MH();
     if (!R) return null;
-    ensureRow(key);
-    let builtKey = R.get(key) ? key : (MESH_FALLBACK[key] || "dinghy");
-    if (!R.get(builtKey)) builtKey = "dinghy";
+    const builtKey = R.get(key) ? key : "dinghy";
     const spec = R.spec(builtKey);
     if (!spec) return null;
     let group = null;
@@ -300,7 +228,7 @@
       _hullMesh: hullMeshOf(group),
       _heel: 0, _heelV: 0, _capsized: false, _swamp: 0, _holed: false,
       _sinking: false, _sinkT: 0, _engulf: null,
-      _seats: seatsFor(spec), _ramCd: 0, _lift: 0,
+      _seats: berthsFor(spec), _ramCd: 0,
     };
     craft.push(rec);
     AUDIT.spawned++;
@@ -319,18 +247,20 @@
   function boardOne(rec, i) {
     const seat = rec._seats[i];
     if (!seat) return null;
-    const p = seatWorld(rec, seat, _tmpV);
+    rec.group.updateMatrixWorld(true);
+    const p = berthWorld(rec, seat, _tmpV);
     let b = null;
     if (CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game && CBZ.game.mode) && CBZ.spawnSurvivorBotAt) {
       try { b = CBZ.spawnSurvivorBotAt(p.x, p.z); } catch (e) { b = null; }
     } else if (typeof CBZ.citySpawnPedAt === "function") {
       try { b = CBZ.citySpawnPedAt(p.x, p.z); } catch (e) { b = null; }
     }
-    if (!b) return null;
+    if (!b || !b.group) return null;
     b._aboard = rec;
     b._aboardSeat = i;
-    if (b.char) b.char.sitting = true;
     if (b.pause != null) b.pause = 1e9;
+    poseAboard(b, seat);
+    placeAboard(rec, b, seat);
     return b;
   }
 
@@ -338,25 +268,64 @@
   const _tmpV2 = new THREE.Vector3();
   const _e = new THREE.Euler(0, 0, 0, "YXZ");
   const _q = new THREE.Quaternion();
+  const _UP = new THREE.Vector3(0, 1, 0);
   const _ride = {};
   const _rideOpts = { heading: 0, len: 1, beam: 1 };
 
-  function seatWorld(rec, seat, out) {
-    out.set(seat.x, seat.y, seat.z);
-    rec.group.updateMatrixWorld(true);
+  // the FEET point of a berth, in world space (the hull's matrixWorld must be current)
+  function berthWorld(rec, seat, out) {
+    out.set(seat.x, seat.floor, seat.z);
     return out.applyMatrix4(rec.group.matrixWorld);
+  }
+  /* The pose a berth asks for. Seated: character.js's chair solve, fed the
+     cushion height so the hips land on the bench and the soles on the sole —
+     the same seatRef contract playeraircraft.js's pilot uses. Standing: the
+     plain idle, feet on the deck. Cheap to call every frame: the seatRef is
+     built once per berth, not per frame. */
+  function poseAboard(b, seat) {
+    const ch = b.char;
+    if (!ch) return;
+    ch.swimming = false; ch.airPose = null;
+    if (seat.stand) { ch.sitting = false; ch.seatRef = null; return; }
+    ch.sitting = true;
+    if (!ch.seatRef || ch.seatRef._berth !== seat) {
+      ch.seatRef = { cushion: seat.cushion, floorBelow: 0, kind: seat.kind, vary: seat.vary, _berth: seat };
+    }
+  }
+  /* Put the body ON the hull this frame: feet at the berth, and the WHOLE
+     attitude of the hull — heading, pitch AND roll — not just its yaw. A body
+     that only turned with the boat stayed bolt upright while the deck under
+     it heeled thirty degrees, which is the other half of "not on the boat". */
+  function placeAboard(rec, b, seat) {
+    berthWorld(rec, seat, _tmpV);
+    // bodies and hulls hang off the same root in every island mode; a city
+    // ped may not, so express the point in the body's own parent frame
+    const P = b.group.parent;
+    if (P && P !== rec.group.parent) P.worldToLocal(_tmpV);
+    b.pos.x = _tmpV.x; b.pos.y = _tmpV.y; b.pos.z = _tmpV.z;
+    _q.setFromAxisAngle(_UP, num(seat.yaw, 0)).premultiply(rec.group.quaternion);
+    b.group.quaternion.copy(_q);
+    if (b.target && b.target.set) b.target.set(_tmpV.x, 0, _tmpV.z);
+    b.speed = 0; b.swim = false; b.wet = false;
+  }
+  // the flags a berth set, cleared: a body that is nobody's crew any more
+  function unseat(b) {
+    b._aboard = null; b._aboardSeat = null; b._overboard = null;
+    if (b.char) { b.char.sitting = false; b.char.seatRef = null; b.char.airPose = null; }
+    if (b.group) b.group.rotation.set(0, b.group.rotation.y, 0);
+    if (b.pause != null && b.pause > 1e6) b.pause = 0;
   }
 
   function despawn(rec) {
     if (!rec) return;
-    releaseCrew(rec, false);
+    releaseCrew(rec);
     if (rec._floatH) { try { rec._floatH.release(); } catch (e) {} rec._floatH = null; }
     if (rec.group && rec.group.parent) rec.group.parent.remove(rec.group);
     const i = craft.indexOf(rec);
     if (i >= 0) craft.splice(i, 1);
     rec.dead = true;
   }
-  function despawnAll() { while (craft.length) despawn(craft[craft.length - 1]); }
+  function despawnAll() { dropFalling(); while (craft.length) despawn(craft[craft.length - 1]); }
 
   // ============================================================
   //  §3. THE MOVER — one autopilot, one ride, one wake
@@ -431,7 +400,23 @@
 
   /* THE RIDE. Seat the hull on the live surface with the wave attitude, then
      compose whatever roll the stability owner has for it. water_buoyancy.js's
-     own pass only ever walks cityCars, which is exactly why this exists. */
+     own pass only ever walks cityCars, which is exactly why this exists — and
+     it has to make the same three decisions that pass makes, or the shark
+     sim's boats sit in the water differently from the city's:
+
+       • PITCH SIGN. The sampler's pitch is positive when the bow's water is
+         higher; in this engine bow-UP is NEGATIVE rotation.x (water_helm.js
+         writes -trim, water_buoyancy.js says so in as many words). This pass
+         had the sign the other way, so every hull nosed INTO each swell it
+         rode up — the "boats don't sit right in the water".
+       • WAVE GAIN. The spec's own seakeeping number: below 1 the hull only
+         partly answers the swell (heave pulled toward mean sea level, the
+         gradients damped). A 4 m kayak at 1.25 lives on every ripple; a 14 m
+         cruiser at 0.55 rides through them. Ignored here, the cruiser
+         pitched like the kayak.
+       • LIFT. A body surfacing under a hull throws it UP (water_stability's
+         "under" heave). Composed in the city pass, never here — a breach
+         under a kayak rolled it without ever lifting it. */
   function ride(rec, dt) {
     const spec = rec._hullSpec;
     _rideOpts.heading = rec.heading;
@@ -441,12 +426,23 @@
     if (typeof CBZ.waterRideAt === "function") {
       try { r = CBZ.waterRideAt(rec.pos.x, rec.pos.z, _rideOpts, _ride); } catch (e) { r = null; }
     }
-    const baseY = r ? num(r.y, seaY(rec.pos.x, rec.pos.z)) : seaY(rec.pos.x, rec.pos.z);
-    let pitch = (r ? num(r.pitch, 0) : 0) + num(rec._pitch, 0);
-    let roll = (r ? num(r.roll, 0) : 0) + num(rec._roll, 0);
-    let y = baseY + num(spec.rideAbove, 0.06) * (1 - 0.55 * clamp(num(rec._planing, 0), 0, 1));
+    let mean = r ? num(r.y, seaY(rec.pos.x, rec.pos.z)) : seaY(rec.pos.x, rec.pos.z);
+    let pitchW = r ? num(r.pitch, 0) : 0;
+    let rollW = r ? num(r.roll, 0) : 0;
+    const wg = num(spec.waveGain, 1);
+    if (wg !== 1) {
+      const flat = typeof CBZ.waterSeaY === "function" ? num(CBZ.waterSeaY(), mean) : mean;
+      mean = flat + (mean - flat) * wg;
+      pitchW *= wg; rollW *= wg;
+    }
+    // a planing hull flattens out: the bow lifts and the ride stops mirroring every ripple
+    const planing = clamp(num(rec._planing, 0), 0, 1);
+    pitchW *= 1 - planing * 0.55; rollW *= 1 - planing * 0.55;
+    const pitch = -pitchW + num(rec._pitch, 0);
+    let roll = rollW + num(rec._roll, 0);
+    let y = mean + num(spec.rideAbove, 0.06) * (1 - 0.55 * planing);
 
-    // Extra roll and ride drop from the stability owner (water_stability.js),
+    // Extra roll, ride drop and lift from the stability owner (water_stability.js),
     // feature-detected: without it §5's own small heel model is the answer.
     if (typeof CBZ.hullStabTick === "function") {
       try { CBZ.hullStabTick(rec, dt); } catch (e) {}
@@ -462,7 +458,11 @@
       const st = stabOf(spec);
       y -= num(st.freeboard, 0.4) + num(spec.draft, 0.4) * 0.3;
     }
+    if (typeof CBZ.hullStabLift === "function") {
+      try { y += num(CBZ.hullStabLift(rec), 0); } catch (e) {}
+    }
 
+    rec._pitchNow = pitch; rec._rollNow = roll;     // read by the crew (seatCrew)
     rec.group.position.set(rec.pos.x, y, rec.pos.z);
     _e.set(pitch, rec.heading, roll, "YXZ");
     rec.group.quaternion.setFromEuler(_e);
@@ -472,45 +472,179 @@
     }
   }
 
-  function seatCrew(rec, dt) {
+  // ---- crew on deck, and crew off it ------------------------------------
+  /* WHEN A MAN LOSES HIS FOOTING. The composed roll of the hull this frame
+     (swell + the driver's heel + water_stability's phi) against what a body
+     can hold on through: a seated man rides out about 30 degrees, a standing
+     one about 22, and a violent enough roll RATE — the snap of a ram — throws
+     a standing man before the angle is reached. No hysteresis is needed: a
+     man who goes over is no longer crew. */
+  const TIP_SEATED = 0.55, TIP_STAND = 0.40;      // rad
+  const RATE_SEATED = 2.2, RATE_STAND = 1.4;      // rad/s
+  function rollOf(rec) {
+    const r = num(rec._rollNow, NaN);
+    return Number.isFinite(r) ? r : num(rec._roll, 0);
+  }
+  function seatCrew(rec, dt, calm) {
+    if (!rec.crew.length) return;
+    rec.group.updateMatrixWorld(true);
+    const roll = rollOf(rec);
+    const rate = rec._stab ? num(rec._stab.phiDot, 0) : num(rec._heelV, 0);
     for (let i = 0; i < rec.crew.length; i++) {
       const b = rec.crew[i];
-      if (!b || b.dead || b._aboard !== rec) { rec.crew.splice(i--, 1); continue; }
+      if (!b || b.dead || b._aboard !== rec || b._overboard) { rec.crew.splice(i--, 1); continue; }
       const seat = rec._seats[num(b._aboardSeat, i)] || rec._seats[0];
       if (!seat) continue;
-      seatWorld(rec, seat, _tmpV);
-      b.pos.x = _tmpV.x; b.pos.y = _tmpV.y; b.pos.z = _tmpV.z;
-      if (b.group) b.group.rotation.y = rec.heading + num(seat.yaw, 0);
-      if (b.target && b.target.set) b.target.set(_tmpV.x, 0, _tmpV.z);
-      b.speed = 0;
-      b.swim = false;
-      // A seated body is posed by character.js's chair pose; the bot's own
-      // mover is skipped while `_aboard` is set (entities/survivorbot.js), so
-      // this is the ONE writer of that rig for the frame.
+      if (!calm) {
+        const tip = seat.stand ? TIP_STAND : TIP_SEATED;
+        const snap = seat.stand ? RATE_STAND : RATE_SEATED;
+        if (Math.abs(roll) > tip || Math.abs(rate) > snap) {
+          // over the LOW rail: +roll = heeled to starboard
+          const side = (Math.abs(roll) > 0.05 ? roll : rate) >= 0 ? 1 : -1;
+          rec.crew.splice(i--, 1);
+          launchOverboard(rec, b, { side: side, violent: Math.abs(rate) > snap, cause: "heel" });
+          continue;
+        }
+      }
+      placeAboard(rec, b, seat);
       if (b.char) {
-        b.char.sitting = true;
+        poseAboard(b, seat);
+        // the ONE writer of this rig for the frame: survivorbot's mover skips
+        // a body that is `_aboard`, so the pose has to be driven from here
         if (typeof CBZ.animChar === "function") { try { CBZ.animChar(b.char, 0, dt); } catch (e) {} }
       }
     }
   }
-
-  function releaseCrew(rec, overboard) {
-    for (let i = 0; i < rec.crew.length; i++) {
+  /* A RAM'S SHOVE, FELT BY THE PEOPLE. `push` is the hull's own velocity
+     change (m/s) and `lift` the heave a body coming up underneath gave it.
+     A high-sided hull's deck hands stagger and grab a rail; on anything you
+     can step over the side of, a hard enough shove puts them in. A kayak
+     rammed by anything takes a push of 6 — the paddler always goes. */
+  function staggerCrew(rec, push, lift, side) {
+    if (!rec.crew.length) return;
+    const fb = num(stabOf(rec._hullSpec).freeboard, 0.5);
+    const standing = push > 0.9 + fb * 0.6 || lift > 0.35;
+    const seated = push > 2.0 + fb * 0.8 || lift > 0.7;
+    if (!standing && !seated) return;
+    for (let i = rec.crew.length - 1; i >= 0; i--) {
       const b = rec.crew[i];
-      if (!b) continue;
-      b._aboard = null; b._aboardSeat = null;
-      if (b.char) b.char.sitting = false;
-      if (b.pause != null) b.pause = 0;
-      if (!overboard) continue;
+      if (!b || b.dead) continue;
+      const seat = rec._seats[num(b._aboardSeat, i)] || rec._seats[0];
+      if (!(seat && seat.stand ? standing : seated)) continue;
+      rec.crew.splice(i, 1);
+      launchOverboard(rec, b, { side: side, violent: push > 3 || lift > 0.7, kick: push * 0.3, cause: "ram" });
     }
+  }
+  function releaseCrew(rec) {
+    for (let i = 0; i < rec.crew.length; i++) if (rec.crew[i]) unseat(rec.crew[i]);
     rec.crew.length = 0;
   }
 
-  /* CBZ.hullOccupantsOverboard(rec) — everyone in the water beside the hull,
-     hurt but ALIVE and bleeding. That is marine_predation.js's own philosophy
-     for a bitten boat (throwOccupants:1265) and it is load-bearing: the men in
-     the water are what brings the rest of the sharks (§7 chum). */
-  CBZ.hullOccupantsOverboard = function (rec) {
+  /* ---- OVER THE SIDE ----------------------------------------------------
+     Nobody teleports into the sea. A body that leaves a hull is THROWN: a
+     short ballistic arc from where it stood, over the low rail, carrying the
+     hull's own way, tumbling — and it goes UNDER when it lands and comes back
+     up on survivorbot's own float line. The craft still owns the body for the
+     length of the arc (`_aboard` stays set, so the bot's mover and the crowd
+     separation leave it alone); the sea owns it from the splash. A shark can
+     take a man out of the air — he is a live body the whole way. */
+  const falling = [];
+  const FLOAT_DEPTH = 1.275;        // survivorbot.js / swim.js: feet below the surface on a floating body
+  function launchOverboard(rec, b, o) {
+    o = o || {};
+    const spec = rec._hullSpec;
+    const beam = num(spec && spec.beam, 2);
+    const h = rec.heading;
+    // hull-local +X is PORT (water_stability.js's header derives it); the
+    // low rail is the side she is rolled toward: +phi = starboard = local -X
+    const side = o.side < 0 ? -1 : 1;
+    const ox = -side * Math.cos(h), oz = side * Math.sin(h);   // world outward unit
+    const seatI = num(b._aboardSeat, 0);
+    const seat = rec._seats[seatI] || rec._seats[0];
+    const j = h01(seatI * 3.1 + 1, rec.pos.x + rec.pos.z);
+    const surf = seaY(b.pos.x, b.pos.z);
+    const h0 = Math.max(0, b.pos.y - surf);
+    const vy0 = 0.8 + (o.violent ? 1.6 : 0.6) * j;
+    const tFall = (vy0 + Math.sqrt(vy0 * vy0 + 2 * 9.81 * (h0 + 0.35))) / 9.81;
+    // he must come down clear of the rail plus a stride, from wherever on
+    // the beam he was — solved for the lateral speed rather than typed
+    const cur = seat ? -side * seat.x : 0;                // his offset toward the low rail
+    const want = beam * 0.5 + 0.9 + j * 1.1 + num(o.kick, 0);
+    const vlat = Math.max(0.9, (want - cur) / tFall);
+    const fx = Math.sin(h), fz = Math.cos(h);
+    const way = num(rec.v, 0) * 0.8;
+    const F = {
+      b: b, t: 0, yaw: Math.atan2(ox, oz),
+      vx: ox * vlat + fx * way + num(rec.vx, 0), vy: vy0, vz: oz * vlat + fz * way + num(rec.vz, 0),
+      tumble: (o.violent ? 2.4 : 1.3) * (0.7 + j * 0.6),
+      violent: !!o.violent, cause: o.cause || "fall",
+    };
+    b._aboard = rec; b._aboardSeat = null; b._overboard = F;
+    if (b.char) { b.char.sitting = false; b.char.seatRef = null; b.char.airPose = { t: 0, rise: 1, fall: 0 }; }
+    falling.push(F);
+    AUDIT.overboard++;
+    return F;
+  }
+  function tickFalling(dt) {
+    for (let i = falling.length - 1; i >= 0; i--) {
+      const F = falling[i], b = F.b;
+      if (!b || b.dead || b._overboard !== F || !b.group) {
+        if (b && b._overboard === F) b._overboard = null;
+        falling.splice(i, 1); continue;
+      }
+      F.t += dt;
+      F.vy -= 9.81 * dt;
+      b.pos.x += F.vx * dt; b.pos.y += F.vy * dt; b.pos.z += F.vz * dt;
+      // he goes over head-first: a forward tumble about his own hips
+      _e.set(Math.min(1.45, F.t * F.tumble), F.yaw, 0, "YXZ");
+      b.group.quaternion.setFromEuler(_e);
+      if (b.char) {
+        const air = b.char.airPose || (b.char.airPose = { t: 0, rise: 0, fall: 0 });
+        air.t = F.t; air.rise = clamp(F.vy / 2, 0, 1); air.fall = clamp(-F.vy / 3, 0, 1);
+        if (typeof CBZ.animChar === "function") { try { CBZ.animChar(b.char, 0, dt); } catch (e) {} }
+      }
+      const surf = seaY(b.pos.x, b.pos.z);
+      // feet 0.35 under the surface with the body pitched over = he is in
+      if (b.pos.y <= surf - 0.35 || F.t > 4) { landInWater(F, surf); falling.splice(i, 1); }
+    }
+  }
+  function landInWater(F, surf) {
+    const b = F.b;
+    unseat(b);
+    b.group.rotation.set(0, F.yaw, 0);
+    // UNDER, then up: survivorbot's swim step damps _floatY onto the float
+    // line over about half a second, which IS the surfacing
+    b.swim = true; b.wet = true;
+    b._floatY = surf - FLOAT_DEPTH - 0.5;
+    b.pos.y = b._floatY;
+    if (b.target && b.target.set) b.target.set(b.pos.x, 0, b.pos.z);
+    b.pause = 0; b._arrived = false;
+    b.panicT = F.violent ? 3.5 : 2.0;
+    // hurt, ALIVE, and bleeding — the men in the water are what brings the
+    // rest of the sharks (marine_predation §7 chum). A man who simply went
+    // over the side is bruised; one thrown by a bite or a capsize is hurt.
+    const j = h01(b.pos.x * 1.3, b.pos.z * 0.7);
+    const mx = num(b.maxHp, 100);
+    const to = mx * (F.violent ? 0.20 + j * 0.20 : 0.55 + j * 0.25);
+    if (b.hp == null || b.hp > to) b.hp = Math.round(to);
+    if (typeof CBZ.marineBleed === "function") { try { CBZ.marineBleed(b, F.violent ? 0.5 : 0.2); } catch (e) {} }
+    splash(b.pos.x, b.pos.z, F.violent ? 1.4 : 1.0);
+  }
+  // every arc ended where it is (a reset, a teardown): the bodies are the sea's
+  function dropFalling() {
+    while (falling.length) {
+      const F = falling.pop();
+      if (F.b && !F.b.dead) landInWater(F, seaY(F.b.pos.x, F.b.pos.z));
+      else if (F.b) F.b._overboard = null;
+    }
+  }
+
+  /* CBZ.hullOccupantsOverboard(rec, {cause, side}) — everyone aboard goes
+     over the low rail, hurt but ALIVE and bleeding (marine_predation.js's own
+     philosophy for a bitten boat, throwOccupants:1265). water_stability.js
+     calls this from its capsize and flood events; a bite and a sinking call
+     it from here. */
+  CBZ.hullOccupantsOverboard = function (rec, o) {
     if (!rec) return 0;
     if (!rec._seaCraft) {
       // a cityCars boat — marine_predation owns those bodies
@@ -523,39 +657,16 @@
       }
       return 0;
     }
-    const spec = rec._hullSpec, st = stabOf(spec);
-    const beam = num(spec.beam, 2);
-    // over the LOW rail: the side the hull is heeled toward
-    const side = (num(rec._heel, 0) || (typeof CBZ.hullStabRoll === "function" ? num(CBZ.hullStabRoll(rec), 0) : 0)) >= 0 ? 1 : -1;
-    const c = Math.cos(rec.heading), s = Math.sin(rec.heading);
+    o = o || {};
+    const roll = rollOf(rec);
+    const side = num(o.side, 0) || (Math.abs(roll) > 0.05 ? (roll >= 0 ? 1 : -1) : (h01(rec.pos.x, rec.pos.z) < 0.5 ? 1 : -1));
     let n = 0;
-    const list = rec.crew.slice();
-    for (let i = 0; i < list.length; i++) {
-      const b = list[i];
-      if (!b || b.dead) continue;
-      const off = beam * 0.5 + 1.5 + h01(i * 3.1, rec.pos.x) * 1.5;
-      const along = (h01(i * 7.7, rec.pos.z) - 0.5) * num(spec.loa, 6) * 0.6;
-      // hull-local: +z is the bow, +x is starboard
-      const wx = rec.pos.x + s * along + c * (side * off);
-      const wz = rec.pos.z + c * along - s * (side * off);
-      b._aboard = null; b._aboardSeat = null;
-      if (b.char) b.char.sitting = false;
-      b.pos.x = wx; b.pos.z = wz;
-      b.pos.y = seaY(wx, wz) - 1.0;
-      if (b.target && b.target.set) b.target.set(wx, 0, wz);
-      b.pause = 0;
-      b.swim = true;
-      b.panicT = 3.5;
-      const mx = num(b.maxHp, 100);
-      const to = mx * (0.20 + h01(i * 11.3, rec.pos.x + rec.pos.z) * 0.20);
-      if (b.hp == null || b.hp > to) b.hp = Math.round(to);
-      if (typeof CBZ.marineBleed === "function") { try { CBZ.marineBleed(b, 0.5); } catch (e) {} }
-      splash(wx, wz, 1.2);
+    while (rec.crew.length) {
+      const b = rec.crew.pop();
+      if (!b || b.dead || b._overboard) continue;
+      launchOverboard(rec, b, { side: side, violent: true, cause: o.cause || "wreck" });
       n++;
     }
-    rec.crew.length = 0;
-    AUDIT.overboard += n;
-    if (st && st.swampT) rec._swamp = Math.max(rec._swamp, 0);
     return n;
   };
 
@@ -666,7 +777,10 @@
     rec.vx = num(rec.vx, 0) - (dx / m) * push;
     rec.vz = num(rec.vz, 0) - (dz / m) * push;
     rec.v = num(rec.v, 0) * 0.75;
-    if (under) rec._lift = Math.max(num(rec._lift, 0), clamp(moment * 0.02, 0.2, 2.2));
+    // ..and the PEOPLE feel the shove: the hull's own velocity change and the
+    // heave under it decide who goes over the rail she is now heeled to
+    const lift = under ? (typeof CBZ.hullStabLift === "function" ? num(CBZ.hullStabLift(rec), 0) : clamp(moment * 0.02, 0, 2.2)) : 0;
+    staggerCrew(rec, push, lift, phi >= 0 ? 1 : -1);
     /* THE WHITE WATER IS THE SIZE OF THE THING THAT MADE IT. Scaled off the
        moment AND the hull, because a 4 m kayak rolling threw the same wall of
        spray as a megalodon hitting a cruiser and it hid the whole event. */
@@ -727,7 +841,7 @@
     rec.v = 0; rec._planing = 0;
     rec.anchored = false; rec.route = null;
     AUDIT.tipped++;
-    CBZ.hullOccupantsOverboard(rec);
+    CBZ.hullOccupantsOverboard(rec, { cause: "capsize" });
     splash(rec.pos.x, rec.pos.z, clamp(0.9 + num(rec._hullSpec && rec._hullSpec.loa, 6) * 0.14, 0.9, 3.2));
   }
   CBZ.seaCraftCapsize = onCapsize;      // the storyboard and the tests stage it
@@ -787,7 +901,7 @@
       if (typeof CBZ.marineFrenzyAt === "function") {
         try { CBZ.marineFrenzyAt(p.x, p.z, { boil: true, seconds: 30, press: 0.8 }); } catch (e) {}
       }
-      CBZ.hullOccupantsOverboard(rec);
+      CBZ.hullOccupantsOverboard(rec, { cause: "bite" });
     }
     if (rec.hp <= 0 || o.flood) sink(rec);
     return true;
@@ -834,7 +948,7 @@
     rec.route = null; rec.anchored = false;
     rec.dead = true;                        // the ENGINE is dead; the hull still floats
     AUDIT.sunk++;
-    CBZ.hullOccupantsOverboard(rec);
+    CBZ.hullOccupantsOverboard(rec, { cause: "sink" });
     splash(rec.pos.x, rec.pos.z, 2.4);
     const spec = rec._hullSpec, st = stabOf(spec);
     if (typeof CBZ.waterFloat === "function") {
@@ -893,8 +1007,8 @@
       rec.heading = num(a.heading, rec.heading);
       _e.set(0.4 * (E.t / E.dur), rec.heading, num(rec._heel, 0), "YXZ");
       rec.group.quaternion.setFromEuler(_e);
-      // the crew ride it into the mouth
-      seatCrew(rec, dt);
+      // the crew ride it into the mouth (calm: nobody falls off a boat in a jaw)
+      seatCrew(rec, dt, true);
     }
     if (E.t < E.dur) return;
     swallow(rec, a);
@@ -909,8 +1023,7 @@
     for (let i = 0; i < rec.crew.length; i++) {
       const b = rec.crew[i];
       if (!b || b.dead) continue;
-      b._aboard = null;
-      if (b.char) b.char.sitting = false;
+      unseat(b);
       if (CBZ.surv && typeof CBZ.surv.hurt === "function" && CBZ.bots && CBZ.bots.indexOf(b) >= 0) {
         try {
           CBZ.surv.hurt(b, 9999, {
@@ -945,8 +1058,9 @@
   //  only ever walks cityCars) and before the stability post-pass (38.7).
   // ============================================================
   CBZ.onUpdate(37.9, function (dt) {
-    if (!craft.length) return;
     dt = clamp(num(dt, 0.016), 0.001, 0.05);
+    if (falling.length) tickFalling(dt);     // men in the air outlive the hull they left
+    if (!craft.length) return;
     for (let i = craft.length - 1; i >= 0; i--) {
       const rec = craft[i];
       if (!rec || !rec.group || !rec.group.parent) { craft.splice(i, 1); continue; }
@@ -987,7 +1101,7 @@
       if (rec._swamp > 0 && rec._swamp >= num(stabOf(rec._hullSpec).swampT, 10)) { sink(rec); continue; }
 
       ride(rec, dt);
-      if (rec.crew.length) seatCrew(rec, dt);
+      seatCrew(rec, dt, false);
     }
   });
 
@@ -1012,7 +1126,7 @@
         alive++; crewed += craft[i].crew.length;
       }
       return {
-        craft: alive, aboard: crewed,
+        craft: alive, aboard: crewed, falling: falling.length,
         spawned: AUDIT.spawned, eaten: AUDIT.eaten, tipped: AUDIT.tipped,
         sunk: AUDIT.sunk, holed: AUDIT.holed, overboard: AUDIT.overboard,
         rams: AUDIT.rams, bites: AUDIT.bites,
