@@ -2498,7 +2498,6 @@
 
      The two constants below survive because the severed lobe's water physics
      were written against them. */
-  const PIECE_SINK = -1.15;              // m/s^2 — gravity minus flesh's near-neutral buoyancy
   const PIECE_DRAG = 2.6;                // 1/s, applied as exp(-k*dt) so a long frame cannot overshoot
 
   /* ---- THE PIECE THAT CAME OFF -------------------------------------------
