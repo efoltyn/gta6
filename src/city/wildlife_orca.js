@@ -867,6 +867,9 @@
       }), [unlit(0x0b0304), unlit(0x050202), unlit(0x010101), unlit(0x000000)])
       : new T.Mesh(cached("orcaCavity", function () { return new T.SphereGeometry(1, 12, 8); }), pink);
     cavity.name = "orcaMouthCavity";
+    // the inside of the mouth, not a body part: systems/wounds.js's bite
+    // never seats on, severs, or sheds anything marked interior
+    cavity.userData.interior = true;
     // retracted from the old footprint (JAW_X+0.82 ± 0.86 reached the snout
     // tip): front pole behind the tooth rows' end, back pole behind the hinge,
     // so the hole lives entirely inside the closed head.

@@ -1729,6 +1729,33 @@
      outside by more than an order of magnitude. Anything smaller than that is
      detail ON the body, and a bite that lands there belongs to the body. */
   const BITEABLE_FRAC = 0.07;
+  /* ---- AND THE INSIDE OF THE ANIMAL IS NOT A PART OF IT -------------------
+     Owner, 2026-09-08, biting another shark in Shark Sim: "a black geometry
+     comes out of its mouth like a black rock and floats, it's so dumb."
+
+     It was the victim's THROAT. city/wildlife/aquatic.js builds every
+     snout-shell shark (the hero great white, the megalodon, the mako) with a
+     hull that ENDS seven percent of a jaw past the hinge — the head front is
+     the two jaw shells — and, as a direct child of the same group, an
+     inside-out bore called sharkThroat that starts THIRTY percent of a jaw
+     forward of the hinge. So the throat reaches 0.2 m past the trunk's box:
+     it is bigger than the appendage floor, it "sticks out" by more than the
+     decal gate asks, and it is a small box close to a head bite, which is
+     exactly what the tie-break below prefers. A jaw closes around its 0.3 m
+     section with room to spare, so the bite SEVERED it — shedPiece cloned a
+     tube painted in four unlit near-blacks, wound with its faces inward, and
+     rolled it a floater 55% of the time. That is the rock. And what stayed
+     behind was a shrunken black throat with a raw-flesh stump face seated in
+     the mouth.
+
+     No measurement of a box can tell a throat from a fin — both are long,
+     both are narrow, both poke out of a hull that was cut short to make room
+     for a mouth. The rig KNOWS, though: it painted those meshes as cavity
+     walls on purpose. So the rig says so (`userData.interior` on the buccal
+     sack, the mandible liner, the throat, the orca's cavity), and a wound
+     never lands on, severs, or measures the trunk against anything so marked.
+     A bite at the head goes to the body under it, as it should. */
+  function isInterior(m) { return !!(m.userData && m.userData.interior); }
   function partAt(actor, wp, jawR) {
     const grp = actor.group; if (!grp) return null;
     grp.updateMatrixWorld(true);
@@ -1752,7 +1779,7 @@
     const reach = Math.max(0.6, jawR * 2.4) / Math.max(0.05, grp.scale.x || 1);
     for (let i = 0; i < kids.length; i++) {
       const m = kids[i];
-      if (!m || !m.isMesh || m.visible === false || m._tornCap) continue;
+      if (!m || !m.isMesh || m.visible === false || m._tornCap || isInterior(m)) continue;
       if (!meshHalf(m, _half)) continue;
       // distance from the bite point to this box, in group-local metres
       const cx = m.position.x + _geoC.x * m.scale.x;
@@ -1834,7 +1861,7 @@
     const kids = grp.children;
     for (let i = 0; i < kids.length; i++) {
       const m = kids[i];
-      if (!m || !m.isMesh || m._tornCap) continue;
+      if (!m || !m.isMesh || m._tornCap || isInterior(m)) continue;
       if (!meshHalf(m, _half)) continue;
       const vol = _half.x * _half.y * _half.z;
       if (vol > bestVol) { bestVol = vol; best = m; }
@@ -2537,6 +2564,7 @@
   const PIECE_CAP = 8;
   const PIECE_LIFE = 34;                 // s on the bottom before the slot is reclaimed
   const PIECE_CARRY = 1.35;              // s in the jaw before the head shake throws it
+  const _unitZ = new THREE.Vector3(0, 0, 1);
   function dropPiece(i) {
     const p = PIECES.splice(i, 1)[0];
     if (!p || !p.m) return;
@@ -2593,11 +2621,52 @@
                 m.scale.y * (axis === 1 ? cut : unpinch),
                 m.scale.z * (axis === 2 ? cut : unpinch));
     meshHalf(mesh, _half);
-    const outer = (axis === 0 ? _geoC.x + _geoH.x : axis === 1 ? _geoC.y + _geoH.y : _geoC.z + _geoH.z);
-    const mid = outer * (k + k2) * 0.5 / Math.max(0.05, k);
-    _org.set(axis === 0 ? mid : 0, axis === 1 ? mid : 0, axis === 2 ? mid : 0);
+    /* WHICH END CAME OFF. The shrink is about the part's origin, so the end
+       that leaves is the one FAR from it: +axis for a fin authored root-at-
+       origin (every fin in city/wildlife/aquatic.js), but the sign is read
+       off the box rather than assumed. */
+    const gC = axis === 0 ? _geoC.x : axis === 1 ? _geoC.y : _geoC.z;
+    const gH = axis === 0 ? _geoH.x : axis === 1 ? _geoH.y : _geoH.z;
+    const sgn = gC >= 0 ? 1 : -1;
+    const tipA = gC + sgn * gH;                 // the far end, geometry units
+    const rootA = gC - sgn * gH;                // the end the cut is at
+    /* SEATED BY ITS TIP. The piece's geometry is the whole part squashed to
+       the slice, so it has to be placed so that its far end lands where the
+       part's far end WAS a frame ago — that is the point the eye is anchored
+       on. (Placing its origin at the middle of the removed shell, as this
+       used to, put a root-at-origin fin's lobe half a lobe too far out along
+       its own axis: it spawned clear of the tip, in open water.) */
+    const o = tipA * (1 - cut);
+    _org.set(axis === 0 ? o : 0, axis === 1 ? o : 0, axis === 2 ? o : 0);
     _org.applyMatrix4(mesh.matrixWorld);
     m.position.copy(_org);
+    /* AND A CUT FACE ON THE END THAT LEFT THE BODY. Without it the lobe is a
+       miniature of the whole part — skin all the way round, the root end
+       shaped like a root — which is a small fin, not a piece of one. The
+       stump face the body gets (seatStump) is the right thing here too: the
+       same ragged disc, torn margin bright, meat dark, seated flush across
+       the root end of the piece and facing back down the axis toward the
+       body it was bitten off. It is a child of the piece, so it inherits the
+       slice's own squash, banks with the carry, and goes with the piece when
+       the slot is reclaimed (shared geometry and material — never disposed). */
+    const cap = new THREE.Mesh(stumpGeoOf(axis), cutMat(0));
+    cap._tornCap = true;
+    cap.castShadow = false; cap.receiveShadow = false;
+    _dir.set(axis === 0 ? -sgn : 0, axis === 1 ? -sgn : 0, axis === 2 ? -sgn : 0);
+    cap.quaternion.setFromUnitVectors(_unitZ, _dir);  // the torn face looks out of the root end
+    // the disc's own x/y landed on the two cross axes in some order: measure
+    // which, and size each to the part's cross-section there
+    _bit.set(1, 0, 0).applyQuaternion(cap.quaternion);
+    const cA = axis === 0 ? 1 : 0, cB = axis === 2 ? 1 : 2;   // the two cross axes
+    const hA = cA === 0 ? _geoH.x : _geoH.y, hB = cB === 1 ? _geoH.y : _geoH.z;
+    const xOnA = Math.abs(cA === 0 ? _bit.x : _bit.y) >= Math.abs(cB === 1 ? _bit.y : _bit.z);
+    const th = Math.max(0.01, Math.min(Math.min(hA, hB), gH));
+    cap.scale.set((xOnA ? hA : hB) * 1.84, (xOnA ? hB : hA) * 1.84, th);
+    // origin a little inside the root end: the rim sits 5% of th proud of
+    // it, the skirt is buried in the piece
+    const capA = rootA + sgn * 0.45 * th;
+    cap.position.set(axis === 0 ? capA : _geoC.x, axis === 1 ? capA : _geoC.y, axis === 2 ? capA : _geoC.z);
+    m.add(cap);
     CBZ.scene.add(m);
     const mo = mouthOf(by);
     // how big the lobe is in the world — sizes its splash and its draft

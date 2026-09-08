@@ -2007,6 +2007,12 @@
     }), [unlit(o.cavity || 0x140505), unlit(o.cavityDeep || 0x070202),
       unlit(0x020101), unlit(o.cavityEnd || 0x000000), skinWrap]);
     sack.name = "sharkBuccalSack";
+    /* THE INSIDE SAYS SO. These three are cavity walls — unlit, wound with
+       their faces inward — and nothing that reads the rig's children as body
+       parts may treat them as one: systems/wounds.js used to find the throat
+       (it reaches forward of the hull on every snout-shell shark), sever it,
+       and throw it in the water as a floating black tube. See isInterior. */
+    sack.userData.interior = true;
     dental.add(sack);
 
     const liner = meshOf(cachedGeom("mandibleLiner|v3|" + [len, width, gap, cx, rad,
@@ -2038,6 +2044,7 @@
       return sh.geom();
     }), [unlit(o.cavity || 0x140505), unlit(o.cavityDeep || 0x070202), unlit(0x020101)]);
     liner.name = "sharkMandibleLiner";
+    liner.userData.interior = true;
     lower.add(liner);
 
     /* THE THROAT. Behind the oral arc neither jaw reaches, so this is the one
@@ -2085,6 +2092,7 @@
       }), [unlit(o.cavityDeep || 0x070202), unlit(0x020101), unlit(0x010000),
       unlit(o.cavityEnd || 0x000000)]);
     throat.name = "sharkThroat";
+    throat.userData.interior = true;
     throat.position.set(hingeX, hingeY, 0);
     g.add(throat);
     // the authored-mouth contract still wants one named cavity handle; the
