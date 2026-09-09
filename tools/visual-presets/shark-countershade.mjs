@@ -69,12 +69,19 @@ async function stageCountershade(input) {
   scene.traverse(function (o) { if (!animal && o._aquaticMouth) animal = o; });
   if (!animal) return out;
   animal.updateMatrixWorld(true);
-  let rostrum = null, eye = null;
+  // the upper shell the contract names (sharkRostrum, cetaceanHull..); slot 1
+  // is the belly white on every one of them
+  const mo0 = animal._aquaticMouth, shellName = (mo0 && mo0.contract && mo0.contract.upperShell) || 'sharkRostrum';
+  // ..and the lower shell (the chin), whose slot 0 is the same white
+  const lowerName = (mo0 && mo0.contract && mo0.contract.lowerShell) || 'sharkChin';
+  let rostrum = null, chin = null, eye = null;
   animal.traverse(function (o) {
     if (!o.isMesh) return;
-    if (!rostrum && o.name === 'sharkRostrum') rostrum = o;
-    if (!eye && /eye/i.test(o.name || '')) eye = o;
+    if (!rostrum && o.name === shellName) rostrum = o;
+    if (!chin && o.name === lowerName) chin = o;
+    if (!eye && (o.name === 'sharkEye' || o.name === 'orcaEye')) eye = o;
   });
+  if (!rostrum) return out;
   const metrics = out.metrics || (out.metrics = {});
   const inv = new T.Matrix4().copy(animal.matrixWorld).invert();
   const eyeY = eye ? eye.getWorldPosition(new T.Vector3()).applyMatrix4(inv).y : null;
@@ -95,9 +102,9 @@ async function stageCountershade(input) {
       const hit = pr.intersectObject(animal, true);
       if (!hit.length) continue;
       const h = hit[0];
-      if (h.object !== rostrum) continue;
       const mi = h.face && h.face.materialIndex != null ? h.face.materialIndex : -1;
-      if (mi !== 1) continue;
+      const white = (h.object === rostrum && mi === 1) || (chin && h.object === chin && mi === 0);
+      if (!white) continue;
       return h.point.clone().applyMatrix4(inv).y;
     }
     return null;

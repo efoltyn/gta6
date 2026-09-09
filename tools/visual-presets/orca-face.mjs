@@ -1,0 +1,53 @@
+/* Shark Sim — THE ORCA'S FACE. OWNER (2026-09-08), Frédérique Lucas's
+   "Namu the Orca" head-on painting against ours: "our orca face is not good,
+   it also has the white/black issue, white being pointy, and the orca just
+   doesn't look as real as it can."
+
+   What the painting has, head-on: a jet black dome over a broad white chin
+   that is a wide, soft-cornered U; the black comes down over the whole melon
+   and meets the white in a line that runs low across the face just above the
+   mouth, curving up under the eyes; two white post-ocular patches like
+   teardrops above and behind the eyes; a long mouth line running back past
+   the eye. Same studio stage and part map as shark-face; the subjects are
+   the orca's head seen the ways the painting sees it. The ruler is the same
+   one as shark-countershade: the top of the white on the centre line and to
+   either side, as a share of the way from the mouth up to the eye.
+     ba orca-face --before http://127.0.0.1:<HEAD worktree>/ */
+import cs from './shark-countershade.mjs';
+
+const ORCA = 'orca';
+const subjects = [
+  { id: 'orca-head-on', label: 'Orca — Closed, Head-On', species: ORCA, open: 0,
+    frame: 4.4, target: [4.2, 1.45, 0], cameraOffset: [12, 0.15, 0.05], whiteTop: true,
+    focus: 'The painting\'s angle. Black dome over a wide white chin; the boundary a low line just above the mouth that curves up under the eyes; teardrop eye patches.',
+    state: 'REST · HEAD-ON', metric: 'A wide white U, not a spike' },
+  { id: 'orca-head-on-open', label: 'Orca — Opening, Head-On', species: ORCA, open: 0.5,
+    frame: 4.6, target: [4.2, 1.30, 0], cameraOffset: [12, 0.35, 0.05],
+    focus: 'The jaw drops: the white chin goes with it.',
+    state: 'OPENING · HEAD-ON', metric: 'Chin is the jaw' },
+  { id: 'orca-three-quarter', label: 'Orca — Closed, Three-Quarter', species: ORCA, open: 0,
+    frame: 4.4, target: [3.9, 1.35, 0], cameraOffset: [5.0, 1.6, 7.0],
+    focus: 'The eye patch above and behind the eye, the black cap, the white chin wrapping under the head.',
+    state: 'REST · THREE-QUARTER', metric: 'Eye patch reads' },
+  { id: 'orca-profile', label: 'Orca — Closed, Profile', species: ORCA, open: 0,
+    frame: 4.8, target: [3.5, 1.40, 0], cameraOffset: [0.4, 0.4, 10],
+    focus: 'The mouth line runs back past the eye; the white chin and throat under it; the flank flare behind the pectoral.',
+    state: 'REST · PROFILE', metric: 'Mouth past the eye' },
+  { id: 'orca-low', label: 'Orca — Closed, Low Three-Quarter', species: ORCA, open: 0,
+    frame: 4.4, target: [3.9, 1.20, 0], cameraOffset: [4.5, -1.6, 7.0],
+    focus: 'From below and ahead: the chin and throat are one white surface to the mouth line.',
+    state: 'REST · LOW VIEW', metric: 'White chin, one piece' },
+  { id: 'orca-parts', label: 'Orca — Closed, Head-On, Part Map', species: ORCA, open: 0, parts: true,
+    frame: 4.4, target: [4.2, 1.45, 0], cameraOffset: [12, 0.15, 0.05],
+    focus: 'Every mesh its own colour.', state: 'REST · PART MAP', metric: 'Names, not guesses' },
+];
+
+export default {
+  ...cs,
+  id: 'orca-face',
+  title: 'The Orca\'s Face — a black dome over a wide white chin',
+  description: 'The orca photographed the way the owner\'s reference painting sees it: head-on closed and opening, three-quarter, profile, low, and a part map. BEFORE is HEAD.',
+  beforeLabel: 'BEFORE · HEAD', afterLabel: 'AFTER',
+  readyExpression: 'window.THREE && window.CBZ && CBZ.buildSwimRig && CBZ.swimJaw && CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES.orca && CBZ.orcaBrain',
+  subjects,
+};

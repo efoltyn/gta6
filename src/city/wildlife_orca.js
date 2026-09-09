@@ -236,6 +236,44 @@
     (this.g[g] || (this.g[g] = [])).push(a, b, c);
   };
   Shell.prototype.quad = function (g, a, b, c, d) { this.tri(g, a, b, c); this.tri(g, a, c, d); };
+  // a convex polygon fanned from its first point, wound to face `nrm`
+  Shell.prototype.polyN = function (g, nrm, pts) {
+    if (pts.length < 3) return;
+    let nx = 0, ny = 0, nz = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      nx += (a[1] - b[1]) * (a[2] + b[2]); ny += (a[2] - b[2]) * (a[0] + b[0]); nz += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+    const flip = nx * nrm[0] + ny * nrm[1] + nz * nrm[2] < 0;
+    const v = pts.map(function (q) { return this.v(q[0], q[1], q[2]); }, this);
+    for (let i = 1; i + 1 < v.length; i++) {
+      if (flip) this.tri(g, v[0], v[i + 1], v[i]); else this.tri(g, v[0], v[i], v[i + 1]);
+    }
+  };
+  /* THE LINE CUTS THE QUAD (the same cut city/wildlife/aquatic.js's sharks
+     got on 2026-09-08). A marking painted per face can only move in
+     face-sized steps — on this hull that was the "stair-stepped" boundary the
+     header below apologises for and tried to hide with jitter. Given a signed
+     value per corner (negative = `neg`), the quad is split along the zero
+     crossing and both pieces are painted; the crossing on a shared edge is
+     the same point from either side, so the pieces weld. */
+  Shell.prototype.quadSplit = function (neg, pos, nrm, p, f) {
+    let allNeg = true, allPos = true;
+    for (let i = 0; i < 4; i++) { if (f[i] > 0) allNeg = false; else allPos = false; }
+    if (allNeg) return this.polyN(neg, nrm, p);
+    if (allPos) return this.polyN(pos, nrm, p);
+    const A = [], B = [];
+    for (let i = 0; i < 4; i++) {
+      const j = (i + 1) % 4, fi = f[i], fj = f[j];
+      (fi <= 0 ? A : B).push(p[i]);
+      if ((fi <= 0) !== (fj <= 0)) {
+        const t = fi / (fi - fj);
+        A.push([lerp(p[i][0], p[j][0], t), lerp(p[i][1], p[j][1], t), lerp(p[i][2], p[j][2], t)]);
+        B.push(A[A.length - 1]);
+      }
+    }
+    this.polyN(neg, nrm, A); this.polyN(pos, nrm, B);
+  };
   Shell.prototype.geom = function () {
     const idx = [], groups = [];
     let start = 0;
@@ -285,10 +323,11 @@
      aquatic.js's bellyCut number. */
   function hullGeom(o) {
     const rings = o.rings, n = rings.length, sides = Math.max(8, o.sides || 20);
-    const paint = o.paint, mouth = o.mouth || null;
-    const sh = new Shell(), id = [];
+    const field = o.field, mouth = o.mouth || null;
+    const sh = new Shell(), pts = [], fv = [];
     for (let i = 0; i < n; i++) {
-      const r = rings[i], row = [];
+      const r = rings[i], row = [], frow = [];
+      const u = n > 1 ? i / (n - 1) : 0;
       for (let j = 0; j < sides; j++) {
         const a = (j / sides) * Math.PI * 2;
         let y = r.y + Math.sin(a) * r.ry;
@@ -301,39 +340,52 @@
           const seam = mouth.seamY(r.x);
           if (y < seam) y = seam;
         }
-        row.push(sh.v(r.x, y, Math.cos(a) * r.rz));
+        row.push([r.x, y, Math.cos(a) * r.rz]);
+        /* THE MARKING IS A FIELD ON THE VERTICES, not a verdict per face:
+           negative is white, positive is black, and the zero crossing is
+           where the boundary actually runs — through the faces, cut. The
+           field reads the vertex's true height on the skin (a clamped
+           vertex reads the seam), so the line never depends on the column
+           count. */
+        frow.push(field ? field(i, u, j, a, (y - r.y) / Math.max(0.02, r.ry), r.x) : 1);
       }
-      id.push(row);
+      pts.push(row); fv.push(frow);
     }
-    function slot(i, j) {
+    function interior(i, j) {
+      if (!mouth) return false;
       const a0 = (j / sides) * Math.PI * 2, a1 = ((j + 1) / sides) * Math.PI * 2;
-      const am = (a0 + a1) * 0.5;
-      const s = Math.sin(am);
-      const af = Math.atan2(s, Math.abs(Math.cos(am)));      // folded onto one flank
-      const u = n > 1 ? i / (n - 1) : 0;
-      if (mouth) {
-        const r0 = rings[Math.min(i, n - 1)], r1 = rings[Math.min(i + 1, n - 1)];
-        const x = (r0.x + r1.x) * 0.5;
-        if (x >= mouth.startX) {
-          const cy = (r0.y + r1.y) * 0.5;
-          const ry = (r0.ry + r1.ry) * 0.5;
-          if (cy + s * ry < mouth.seamY(x) + 1e-5) return mouth.interiorSlot == null ? 2 : mouth.interiorSlot;
-        }
-      }
-      return paint ? paint(i, u, j, am, af, s) : 0;
+      const s = Math.sin((a0 + a1) * 0.5);
+      const r0 = rings[Math.min(i, n - 1)], r1 = rings[Math.min(i + 1, n - 1)];
+      const x = (r0.x + r1.x) * 0.5;
+      if (x < mouth.startX) return false;
+      const cy = (r0.y + r1.y) * 0.5, ry = (r0.ry + r1.ry) * 0.5;
+      return cy + s * ry < mouth.seamY(x) + 1e-5;
     }
+    const intSlot = mouth && mouth.interiorSlot != null ? mouth.interiorSlot : 2;
     for (let i = 0; i < n - 1; i++) {
       for (let j = 0; j < sides; j++) {
         const nj = (j + 1) % sides;
-        sh.quad(slot(i, j), id[i][j], id[i + 1][j], id[i + 1][nj], id[i][nj]);
+        const P = [pts[i][j], pts[i + 1][j], pts[i + 1][nj], pts[i][nj]];
+        if (interior(i, j)) {
+          sh.polyN(intSlot, [0, -1, 0], P);
+          continue;
+        }
+        const am = ((j + 0.5) / sides) * Math.PI * 2;
+        sh.quadSplit(1, 0, [0, Math.sin(am), Math.cos(am)], P,
+          [fv[i][j], fv[i + 1][j], fv[i + 1][nj], fv[i][nj]]);
       }
     }
-    const rear = sh.v(rings[0].x, rings[0].y, 0);
-    const fr = rings[n - 1], front = sh.v(fr.x, fr.y, 0);
+    // the end caps: a fan to the ring's centre, each blade cut by the same
+    // field (the centre reads the ring's own centre height: zero)
+    const rear = [rings[0].x, rings[0].y, 0];
+    const fr = rings[n - 1], front = [fr.x, fr.y, 0];
+    const fc = field ? field(n - 1, 1, 0, 0, 0, fr.x) : 1;
+    const rc = field ? field(0, 0, 0, 0, 0, rings[0].x) : 1;
     for (let j = 0; j < sides; j++) {
       const nj = (j + 1) % sides;
-      sh.tri(slot(0, j), rear, id[0][j], id[0][nj]);
-      sh.tri(slot(n - 1, j), front, id[n - 1][nj], id[n - 1][j]);
+      sh.quadSplit(1, 0, [-1, 0, 0], [rear, pts[0][j], pts[0][nj], rear], [rc, fv[0][j], fv[0][nj], rc]);
+      if (interior(n - 1, j)) sh.polyN(intSlot, [1, 0, 0], [front, pts[n - 1][nj], pts[n - 1][j]]);
+      else sh.quadSplit(1, 0, [1, 0, 0], [front, pts[n - 1][nj], pts[n - 1][j], front], [fc, fv[n - 1][nj], fv[n - 1][j], fc]);
     }
     return sh.geom();
   }
@@ -360,7 +412,11 @@
       // chin from below — a maroon ring on a closed whale. At rest this
       // surface IS the body's lower silhouette, so it keeps the hull's beam
       // to within a crease everywhere it can be seen.
-      halfW *= (i === 0 ? 0.96 : (i === 1 ? 0.99 : 1)) * (i === N - 1 ? 0.55 : 1);
+      // (the last station used to be narrowed to 0.55 — with the chin now
+      // ending where the ring's bottom meets the roof, its own width is
+      // already a sliver, and narrowing it further opened a slot at the
+      // sides that showed the cavity as a maroon wedge under the nose)
+      halfW *= (i === 0 ? 0.96 : (i === 1 ? 0.99 : 1));
       const pts = [], ids = [];
       for (let k = 0; k <= ARC; k++) {
         const ph = (k / ARC) * Math.PI;
@@ -606,6 +662,32 @@
      read as a blade rather than a sausage. */
   const RY = [0.42, 0.58, 0.74, 0.85, 0.92, 0.92, 0.86, 0.72, 0.34];
   const RZ = [0.28, 0.46, 0.63, 0.75, 0.82, 0.82, 0.78, 0.66, 0.30];
+  /* THE NOSE IS A MELON, NOT A DISC. The profile above ends at 0.34 x 0.30
+     at the last station and the hull closed it with a flat fan — a vertical
+     wall the size of a dinner plate on the front of the face, and because
+     the mouth seam cut through it, its lower half was painted mouth
+     interior: the dark diamond in the middle of the closed face, head-on.
+     The last 0.62 of the head now rounds off as a dome (the taper starts
+     gently and ends vertical), so the hull's own skin wraps the front and
+     the fan closes a point. */
+  function orcaRings() {
+    const L = 0.62, xd = HX1 - L;
+    // the body, evenly, up to where the dome starts..
+    const body = ringsOf(HX0, HX1, HY, RY, RZ, 56).filter(function (r) { return r.x < xd - 0.02; });
+    const out = body.slice();
+    // ..then the dome by ANGLE, so the rings crowd toward the tip where the
+    // curvature is and a 36-sided ring is never a long thin sliver (which is
+    // what put a starburst of shading lines on the nose)
+    const DN = 9;
+    for (let k = 0; k <= DN; k++) {
+      const th = (k / DN) * Math.PI * 0.5 * 0.96;
+      const x = xd + L * Math.sin(th);
+      const b = ringAt(ringsOf(HX0, HX1, HY, RY, RZ, 56), x);
+      const c = Math.cos(th);
+      out.push({ x: x, y: HY, ry: Math.max(0.03, b.ry * c), rz: Math.max(0.03, b.rz * c) });
+    }
+    return out;
+  }
   /* HOW FINE THE SKIN IS, and it is the marking resolution, not a polish
      number. At 34x24 the countershading boundary — which the reference sheet
      calls a HARD, RAGGED, high-contrast line — snapped to whole columns and
@@ -615,25 +697,55 @@
      the "ragged" edge was perfectly regular. 48x36 puts the step at 0.09 and
      the jitter below is scaled to actually cross it. ONE cached geometry for
      every orca in the world, so the cost is 3.5k triangles once. */
-  const HULL_RINGS = 48, HULL_SIDES = 36;
+  const HULL_RINGS = 56, HULL_SIDES = 36;
   /* THE COUNTERSHADING LINE, as the sine of the ring angle below which a face
      is WHITE. Tail -> nose. The nose end goes POSITIVE: an orca's white chin
      and throat climb well up the lower head, which is why the animal reads
      white-faced from below and from the front. */
-  const CUT = [-0.28, -0.58, -0.70, -0.70, -0.66, -0.58, -0.46, -0.12, 0.26];
-  const EYE_X = 2.45, EYE_AF = -0.10;
-  const PATCH_X = 2.30, PATCH_AF = 0.31;      // above AND behind the eye
+  /* OWNER (2026-09-08), Frédérique Lucas's head-on orca against ours: "our
+     orca face is not good, it also has the white/black issue, white being
+     pointy, and the orca just doesn't look as real as it can."
+
+     THE NOSE END OF THIS LINE WAS THE FACE'S WHOLE PROBLEM. It went POSITIVE
+     at the nose — white climbing a quarter of the way up the upper jaw in
+     front of the eye — and because the hull under the mouth seam is removed
+     for the jaw, what that painted was a band of white hull faces standing
+     between the seam and the line: head-on, a row of white blocks along the
+     top of the mouth, torn by a jitter sized for the old stair-step. On the
+     animal the upper jaw is BLACK to the mouth line; the white face is the
+     lower jaw, and it climbs only at the corner of the mouth, where the
+     white throat runs back under the eye. So the line ahead of the corner
+     is pinned just under the seam (see orcaCut), and the last two entries
+     here are only what it does at the corner and behind it. */
+  const CUT = [-0.28, -0.58, -0.70, -0.70, -0.66, -0.56, -0.34, -0.14, -0.14];
+  /* THE FLANK FLARE sits behind the DORSAL, not under it: u=0.255 put the
+     lobe's peak 74% of the way from the nose, back on the tailstock; the
+     photographs put it at 60-65%. */
+  const FLARE_U = 0.36;
+  const EYE_X = 2.45, EYE_AF = -0.02;
+  /* THE EYE PATCH IS A TEARDROP THAT POINTS AT THE EYE. Its narrow end sits
+     just above and behind the eye and it broadens as it runs BACK AND UP.
+     The old oval was tilted the other way (forward end high) and equally
+     wide at both ends. */
+  const PATCH_X = 2.12, PATCH_AF = 0.36;
   const SADDLE_X = 0.05, SADDLE_AF = 1.17;    // behind and below the dorsal
   const DORSAL_X = 0.35, DORSAL_Y = 1.90;
   const BLOW_X = 2.05, BLOW_Y = 1.86;
-  const JAW_X = 1.52, JAW_Y = 0.74;
+  /* THE MOUTH ENDS BEHIND THE EYE, NOT AT THE PECTORAL. The hinge sat at
+     1.52 — a gape 31% of the body long, its corner under the pectoral root,
+     which in profile read as a whale with its throat slit. An orca's mouth
+     is about a fifth of its length and its corner is just below and behind
+     the eye. 2.12 is 0.33 behind the eye. The bite and grip sockets below
+     are ABSOLUTE for that reason: they used to be hinge-relative, and would
+     have marched off the end of the nose. */
+  const JAW_X = 2.12, JAW_Y = 0.74;
   // The roof and the white chin share one closure curve.  Teeth interlock
   // behind that outer seam; leaving a visible vertical gap for them made the
-  // resting animal look permanently open.  The curve still tapers with the
-  // blunt nose instead of drawing a ruler-straight cut through the melon.
+  // resting animal look permanently open. The line rises a little toward
+  // the corner, which is what gives the closed mouth its smile head-on.
   function orcaRoofY(x) {
     const t = clamp((x - JAW_X) / Math.max(0.01, HX1 - JAW_X), 0, 1);
-    return lerp(0.93, 0.89, t * t);
+    return lerp(0.965, 0.895, Math.pow(t, 1.4));
   }
   function orcaChinRimY(x) {
     return orcaRoofY(x);
@@ -662,22 +774,40 @@
        4. the eye patch and the saddle are NOT painted here — they are their own
           conforming meshes, because at 24 columns a painted oval is a
           staircase, and the eye patch is the identifying mark of the animal. */
-  function orcaPaint(i, u, j, ang, af, s) {
-    // A WANDERING LINE DOWN THE FLANK (per column) plus a smaller per-ring
-    // wobble. Both hash-derived, so the same animal always tears the same way
-    // and the world stays byte-identical. Sized to be MORE than one angular
-    // step, which is the whole difference between ragged and stair-stepped.
-    const jit = (h01(j * 7 + 1, 0, 0x0C1) - 0.5) * 0.135
-      + (h01(j * 7 + 1, i * 13 + 3, 0x0C2) - 0.5) * 0.075;
-    let cut = sample(CUT, u) + jit;
-    const d = u - 0.255;
+  const HULL = orcaRings();
+  /* the countershading line at a station, as the sine of the ring angle
+     below which the skin is white (see CUT); ahead of the mouth corner it is
+     pinned just under the seam so the upper jaw is black to the lip */
+  function orcaCut(u, x) {
+    let cut = sample(CUT, u);
+    const d = u - FLARE_U;
     const w = d < 0 ? 0.185 : 0.135;                 // skewed: it flares TAILWARD
     cut += 0.92 * Math.exp(-(d * d) / (w * w));
-    return s < cut ? 1 : 0;
+    if (x > JAW_X - 0.30) {
+      const r = ringAt(HULL, x);
+      const seamS = (orcaRoofY(Math.max(x, JAW_X)) - r.y) / Math.max(0.02, r.ry) - 0.05;
+      const t = clamp((x - (JAW_X - 0.30)) / 0.40, 0, 1);
+      cut = lerp(cut, Math.min(cut, seamS), t * t * (3 - 2 * t));
+    }
+    return cut;
+  }
+  function orcaField(i, u, j, ang, s, x) {
+    // a small wandering offset per column and a smaller one per ring, so the
+    // cut line is a hand-drawn edge and not a ruler; a couple of hundredths
+    // in sine is all a CUT line needs — the stair-steps used to be the rag
+    const jit = (h01(j * 7 + 1, 0, 0x0C1) - 0.5) * 0.030
+      + (h01(j * 7 + 1, i * 13 + 3, 0x0C2) - 0.5) * 0.018;
+    return s - (orcaCut(u, x) + jit);
   }
 
-  const HULL_KEY = "orcaHull|mouth-envelope-v3|tailstock2|" + HULL_RINGS + "x" + HULL_SIDES;
+  const HULL_KEY = "orcaHull|face-v2|" + HULL_RINGS + "x" + HULL_SIDES;
 
+  let BLACK = null;
+  function orcaBlack() {
+    // a wet sheen, not a chrome ball: a low, broad highlight
+    if (!BLACK) BLACK = new T.MeshPhongMaterial({ color: 0x0a0c10, specular: 0x1e2428, shininess: 16 });
+    return BLACK;
+  }
   function build(ctx) {
     const m = ctx.mat, g = new T.Group();
     // GLOSSY JET BLACK against CRISP BRIGHT WHITE. This is the
@@ -688,14 +818,19 @@
     // rendered as a second eye patch on the back — a marking that does not read
     // as its own colour is a marking that is not there. It sits between the jet
     // and the white with clear daylight on both sides.
-    const black = m(0x0a0c10), white = m(0xf7faf8), saddle = m(0x717f88);
+    /* ..AND THE BLACK IS WET. A Lambert near-black under the game's sky
+       reads as flat charcoal; an orca's skin is one of the glossiest
+       surfaces in the sea and the highlight rolling over the melon is half
+       of what makes the painting look alive. One Phong for the black, its
+       own (the shared cache is Lambert), shared by every orca. */
+    const black = orcaBlack(), white = m(0xf7faf8), saddle = m(0x717f88);
     const eyeM = m(0x04050a), pink = m(0x7a3a40), gum = m(0x6f353b), tooth = m(0xf2ead6);
     const mouthDark = unlit(0x070202), deckGum = unlit(0x0b0304);
 
-    const rings = ringsOf(HX0, HX1, HY, RY, RZ, HULL_RINGS);
+    const rings = HULL;
     const hull = meshOf(cached(HULL_KEY, function () {
       return hullGeom({
-        rings: rings, sides: HULL_SIDES, paint: orcaPaint,
+        rings: rings, sides: HULL_SIDES, field: orcaField,
         mouth: { startX: JAW_X - 0.12, seamY: orcaRoofY, interiorSlot: 2 },
       });
     }), [black, white, mouthDark]);
@@ -706,10 +841,12 @@
        the eye, its long axis angled BACK along the body. Its absence is the
        entire reason the old model read as a generic dolphin, and a photograph
        of an orca is unmistakable at 200 m because of this one mark. */
-    const patch = new T.Mesh(cached("orcaEyePatch|v1", function () {
+    const patch = new T.Mesh(cached("orcaEyePatch|teardrop-v2", function () {
       return patchGeom({
-        rings: rings, x: PATCH_X, ang: PATCH_AF, rx: 0.34, rArc: 0.145,
-        tilt: 0.36, arcR: 0.74, lift: 0.030, seg: 24, rad: 4,
+        rings: rings, x: PATCH_X, ang: PATCH_AF, rx: 0.38, rArc: 0.15,
+        tilt: -0.30, arcR: 0.74, lift: 0.030, seg: 24, rad: 4,
+        // narrow at the eye end (+x), full at the back
+        radius: function (th) { return 1 - 0.34 * Math.max(0, Math.cos(th)); },
       });
     }), white);
     patch.name = "orcaEyePatch"; g.add(patch);
@@ -791,13 +928,13 @@
 
        Only the far end is a decision this species gets to make: how thin the
        stock is where the flukes take over. */
-    const ped = meshOf(cached("orcaPeduncle|weld2", function () {
+    const ped = meshOf(cached("orcaPeduncle|weld3-cut", function () {
       return hullGeom({
         rings: CBZ.aquaticWeldedSleeve(rings, {
           at: [-2.64, HY], x0: -0.78, x1: 0.34, tipRy: 0.20, tipRz: 0.115, n: 6,
         }),
         sides: HULL_SIDES,
-        paint: function (i, u, j, ang, af, s) { return s < -0.34 ? 1 : 0; },
+        field: function (i, u, j, ang, s) { return s + 0.34; },
       });
     }), [black, white]);
     ped.name = "orcaPeduncle"; ped.position.set(-2.64, HY, 0); g.add(ped);
@@ -873,34 +1010,55 @@
     // retracted from the old footprint (JAW_X+0.82 ± 0.86 reached the snout
     // tip): front pole behind the tooth rows' end, back pole behind the hinge,
     // so the hole lives entirely inside the closed head.
-    cavity.position.set(JAW_X + 0.72, JAW_Y + 0.10, 0);
+    cavity.position.set(2.56, JAW_Y + 0.10, 0);
     // At rest this is a black-red seam, not a pink stripe pasted along the
     // whale's face.  The shared rig expands it tenfold during a gape.
-    cavity.scale.set(0.78, 0.018, 0.28);
+    cavity.scale.set(0.42, 0.018, 0.14);
     g.add(cavity);
 
     const lower = new T.Group();
     lower.name = "orcaLowerJaw";
     lower.position.set(JAW_X, JAW_Y, 0);
     g.add(lower);
-    const mand = meshOf(cached("orcaLowerEnvelope|v4", function () {
+    /* THE CHIN ENDS WHERE THE HULL'S UNDERSIDE RISES ABOVE THE MOUTH LINE.
+       With a domed nose the last rings sit entirely above the seam and the
+       hull carries its own (white) underside there; a chin built out to the
+       nose tip would hang a sliver below it with a slot between. So the
+       envelope runs to the first station where the ring's bottom meets the
+       roof, and no further. */
+    let chinEnd = HX1 - 0.03;
+    for (let x = JAW_X; x <= HX1 - 0.03; x += 0.01) {
+      const r = ringAt(rings, x);
+      if (r.y - r.ry >= orcaChinRimY(x) - 0.012) { chinEnd = x; break; }
+    }
+    const mand = meshOf(cached("orcaLowerEnvelope|face-v2", function () {
       return lowerEnvelopeGeom({
         rings: rings, hingeX: JAW_X, hingeY: JAW_Y,
-        x0: JAW_X - 0.12, x1: HX1 - 0.03, rimY: orcaChinRimY,
+        x0: JAW_X - 0.12, x1: chinEnd, rimY: orcaChinRimY,
         stations: 16, arcSteps: 12, deckDrop: 0.024,
       });
     }), [white, deckGum]);
     mand.name = "orcaLowerEnvelope"; lower.add(mand);
 
+    /* THE TOOTH ROWS FOLLOW THE JAW'S OWN WIDTH. They were written against
+       the old long jaw (z 0.26 -> 0.075 over 1.4 m); on the short jaw under
+       a domed nose the rows and the gum rails poked out through the sides of
+       the chin near the tip as maroon. The half-width at the mouth line is
+       read off the rings, with a margin for the lip. */
+    function jawHalfW(xj) {
+      const x = JAW_X + xj, r = ringAt(rings, x);
+      const rel = clamp((orcaRoofY(x) - r.y) / Math.max(0.02, r.ry), -0.96, 0.96);
+      return r.rz * Math.sqrt(Math.max(0.02, 1 - rel * rel)) * 0.72;
+    }
     function toothRow(up) {
-      return meshOf(cached("orcaTeeth|" + (up ? "u" : "l"), function () {
+      return meshOf(cached("orcaTeeth|jawfit|" + (up ? "u" : "l"), function () {
         const sh = new Shell();
         const N = 11;
         for (let side = -1; side <= 1; side += 2) {
           for (let i = 0; i < N; i++) {
             const t = i / (N - 1);
-            const x = lerp(0.20, 1.62, t);
-            const z = side * lerp(0.26, 0.075, t);
+            const x = lerp(0.14, 1.00, t);
+            const z = side * Math.min(jawHalfW(x), lerp(0.30, 0.06, t));
             // NOAA's status review records roughly two-thirds of an orca tooth
             // inside the maxillary/mandibular alveolus.  The gum rails below
             // cover the root two-thirds; only this short interlocking crown is
@@ -925,13 +1083,13 @@
     // denture silhouette back inside otherwise-correct body geometry.  These
     // narrow rails converge with the teeth and leave real dark volume between.
     function gumRails() {
-      return meshOf(cached("orcaPairedGumRails|v1", function () {
+      return meshOf(cached("orcaPairedGumRails|jawfit", function () {
         const sh = new Shell(), N = 9, SIDES = 8;
         for (let side = -1; side <= 1; side += 2) {
           const rings2 = [];
           for (let i = 0; i < N; i++) {
-            const t = i / (N - 1), x = lerp(0.16, 1.66, t);
-            const z = side * lerp(0.26, 0.075, t);
+            const t = i / (N - 1), x = lerp(0.10, 1.04, t);
+            const z = side * Math.min(jawHalfW(x), lerp(0.30, 0.06, t));
             const ry = lerp(0.034, 0.021, t), rz = lerp(0.050, 0.030, t);
             const row = [];
             for (let j = 0; j < SIDES; j++) {
@@ -946,8 +1104,8 @@
               sh.quad(0, rings2[i][j], rings2[i + 1][j], rings2[i + 1][nj], rings2[i][nj]);
             }
           }
-          const rear = sh.v(0.16, 0, side * 0.26);
-          const front = sh.v(1.66, 0, side * 0.075);
+          const rear = sh.v(0.10, 0, side * Math.min(jawHalfW(0.10), 0.30));
+          const front = sh.v(1.04, 0, side * Math.min(jawHalfW(1.04), 0.06));
           for (let j = 0; j < SIDES; j++) {
             const nj = (j + 1) % SIDES;
             sh.tri(0, rear, rings2[0][nj], rings2[0][j]);
@@ -988,10 +1146,10 @@
     const contract = {
       version: 5, shape: "articulated-body-envelope",
       hinge: { x: JAW_X, y: JAW_Y, z: 0 },
-      bite: { x: JAW_X + 1.30, y: JAW_Y + 0.16, z: 0 },
+      bite: { x: 2.84, y: JAW_Y + 0.16, z: 0 },
       // Contact starts at `bite`; compression carries that contacted surface a
       // little deeper and down between the tooth rows at this authored socket.
-      grip: { x: JAW_X + 1.12, y: JAW_Y + 0.04, z: 0 },
+      grip: { x: 2.66, y: JAW_Y + 0.04, z: 0 },
       maxOpen: MAX_OPEN, travel: MAX_OPEN + REST_CLOSE, restClose: REST_CLOSE,
       protrude: 0, upperDrop: 0,                        // an orca protrudes nothing
       upperTeeth: 22, lowerTeeth: 22, toothRows: 1,
