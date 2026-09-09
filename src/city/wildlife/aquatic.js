@@ -133,6 +133,45 @@
     (this.g[g] || (this.g[g] = [])).push(a, b, c);
   };
   Shell.prototype.quad = function (g, a, b, c, d) { this.tri(g, a, b, c); this.tri(g, a, c, d); };
+  // a convex polygon (3..n points), wound to face `nrm`, fanned from its first
+  // point; the points are interned, so an edge shared with a neighbour welds
+  Shell.prototype.polyN = function (g, nrm, pts) {
+    if (pts.length < 3) return;
+    let nx = 0, ny = 0, nz = 0;                        // Newell
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      nx += (a[1] - b[1]) * (a[2] + b[2]); ny += (a[2] - b[2]) * (a[0] + b[0]); nz += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+    const flip = nx * nrm[0] + ny * nrm[1] + nz * nrm[2] < 0;
+    const v = pts.map(function (q) { return this.v(q[0], q[1], q[2]); }, this);
+    for (let i = 1; i + 1 < v.length; i++) {
+      if (flip) this.tri(g, v[0], v[i + 1], v[i]); else this.tri(g, v[0], v[i], v[i + 1]);
+    }
+  };
+  /* THE LINE CUTS THE QUAD. A boundary painted per quad can only move in
+     quad-sized steps, and on a snout whose quads are a hand wide that is a
+     staircase, not a line. Given a signed value per corner (negative = the
+     `neg` slot, positive = the `pos` slot), split the quad along the zero
+     crossing and paint the two pieces: the boundary is then a true curve
+     through the faces, and the crossing points on a shared edge are the
+     same on both sides of it, so the pieces weld. */
+  Shell.prototype.quadSplit = function (neg, pos, nrm, p, f) {
+    let allNeg = true, allPos = true;
+    for (let i = 0; i < 4; i++) { if (f[i] > 0) allNeg = false; else allPos = false; }
+    if (allNeg) return this.polyN(neg, nrm, p);
+    if (allPos) return this.polyN(pos, nrm, p);
+    const A = [], B = [];
+    for (let i = 0; i < 4; i++) {
+      const j = (i + 1) % 4, fi = f[i], fj = f[j];
+      (fi <= 0 ? A : B).push(p[i]);
+      if ((fi <= 0) !== (fj <= 0)) {
+        const t = fi / (fi - fj);
+        const q = [lerp(p[i][0], p[j][0], t), lerp(p[i][1], p[j][1], t), lerp(p[i][2], p[j][2], t)];
+        A.push(q); B.push(q);
+      }
+    }
+    this.polyN(neg, nrm, A); this.polyN(pos, nrm, B);
+  };
   // quad, wound to face `nrm`. p* are the four positions in order, v* the
   // interned indices for the same points.
   Shell.prototype.quadN = function (g, nrm, p, v) {
@@ -670,8 +709,8 @@
     return out;
   }
   // The countershading line has to cross the weld without a jog, so the
-  // snout's belly cuts are generated too: they leave at the hull's own value
-  // at the weld station and ramp to whatever the species wants at the nose.
+  // snout's belly line is generated too: it leaves at the hull's own height
+  // at the weld station and runs to wherever the species puts it on the nose.
   function bellyAt(rings, cuts, x) {
     if (!Array.isArray(cuts)) return cuts == null ? -0.16 : cuts;
     let i = 0;
@@ -680,18 +719,53 @@
     const t = b.x === a.x ? 0 : clamp((x - a.x) / (b.x - a.x), 0, 1);
     return lerp(cuts[i], cuts[Math.min(cuts.length - 1, i + 1)], t);
   }
-  function rostrumBelly(snoutRings, weldCut, tipCut) {
-    const x0 = snoutRings[1].x, x1 = snoutRings[snoutRings.length - 1].x;
-    return snoutRings.map(function (r) {
-      const t = clamp((r.x - x0) / Math.max(1e-4, x1 - x0), 0, 1);
-      return weldCut + (tipCut - weldCut) * (t * t * (3 - 2 * t));
-    });
+  // the hull's own countershading boundary as a HEIGHT: the ring at x, and
+  // the authored cut on it, read back as world y
+  function hullLineY(rings, cuts, x) {
+    const r = ringAt(rings, x);
+    return r.y + r.ry * bellyAt(rings, cuts, x);
+  }
+  /* THE LINE IS A HEIGHT, NOT AN ANGLE. OWNER (2026-09-08, the head-on
+     reference against ours): "the white and gray on the front of the shark
+     face is not a pointy thing; on our shark the white is pointy like a
+     triangle on the face."
+
+     The snout used to carry its countershading the way the hull does — a
+     cut in sin-space per station, sampled between the weld's value and a
+     `tipCut` at the nose. That is fine on a body whose rings are all about
+     the same size. On the rostrum the rings shrink to a nose of a tenth of
+     the weld's depth, so the same cut lands higher and higher on the animal
+     as the sections get smaller, and head-on — where every section is a
+     concentric outline around the nose — the boundary is a straight run
+     from each mouth corner up to a point at the tip. A diamond, apex at eye
+     level. The photograph has the grey cap coming down OVER the nose to the
+     level of the nostrils, and the boundary a soft arch that is lowest at
+     the corners of the mouth.
+
+     So the species names a height on the nose front (`tipLine`, world y)
+     and the shell paints against a line in metres: the hull's own line
+     behind the weld, easing to tipLine at the nose. Where a section is
+     stretched down to the jaw (addSnoutShell's `deepen`) the paint follows
+     the stretched surface, which the angle never could. */
+  function rostrumLine(hullRings, hullBelly, snoutRings, x1, tipLine) {
+    const yW = hullLineY(hullRings, hullBelly, x1);
+    const xN = snoutRings[snoutRings.length - 1].x;
+    const yN = tipLine == null ? yW : tipLine;
+    return function (x) {
+      if (x <= x1) return hullLineY(hullRings, hullBelly, x);
+      const t = clamp((x - x1) / Math.max(1e-4, xN - x1), 0, 1);
+      return yW + (yN - yW) * (t * t * (3 - 2 * t));
+    };
   }
   /* Everything a species needs to say about its own snout, in one call: the
-     rings AND the belly line that has to cross the same seam. */
+     rings AND the belly line that has to cross the same seam. `belly` is the
+     same line read back as one sin-space cut per ring, for the shells that
+     still paint by angle (the unsplit rostrum behind ?sharkmouth=off). */
   function rostrumOf(hullRings, hullBelly, o) {
     const rings = weldedRostrum(hullRings, o);
-    return { rings: rings, belly: rostrumBelly(rings, bellyAt(hullRings, hullBelly, o.x1), o.tipCut) };
+    const line = rostrumLine(hullRings, hullBelly, rings, o.x1, o.tipLine);
+    const belly = rings.map(function (r) { return clamp((line(r.x) - r.y) / Math.max(0.01, r.ry), -1, 1); });
+    return { rings: rings, belly: belly, line: line };
   }
 
   // build it, name it (every sleeve in this file used to be anonymous, which
@@ -2275,14 +2349,25 @@
     const px = o.pivotX, py = o.pivotY;
     const mo = o.mouth;
     const len = mo.length, gap = mo.gap;
+    /* the countershading boundary as a HEIGHT along the snout (see
+       rostrumLine): world y at x. A bare number or a per-ring cut array is
+       still accepted, read against the ring table, so a species without a
+       solved rostrum paints the way it always did. */
     const cutRaw = o.bellyCut == null ? -0.2 : o.bellyCut;
-    const cutOf = Array.isArray(cutRaw) ? function (u) { return sample(cutRaw, u); }
-      : function () { return +cutRaw; };
+    const lineOf = typeof o.bellyLine === "function" ? o.bellyLine : function (x) {
+      const r = ringAt(rings, x);
+      const c = Array.isArray(cutRaw) ? bellyAt(rings, cutRaw, x) : +cutRaw;
+      return r.y + r.ry * c;
+    };
     const x0 = mo.hingeX - len * 0.24;                 // buried behind the corner
     const xTip = rings[rings.length - 1].x + len * 0.07;
     const seed = o.seed || 7;
-    const key = "snoutshell|" + [px, py, gap, len, seed].join(",") +
-      "|" + JSON.stringify(rings) + "|" + JSON.stringify(cutRaw) +
+    // the ragged edge, in metres: the authored sin-space amount on the weld ring
+    const ragM = (o.ragged == null ? 0.05 : o.ragged) * rings[Math.min(1, rings.length - 1)].ry;
+    const lineKey = [];
+    for (let i = 0; i <= 12; i++) lineKey.push(lineOf(lerp(x0, xTip, i / 12)).toFixed(4));
+    const key = "snoutshell|" + [px, py, gap, len, seed, ragM.toFixed(4)].join(",") +
+      "|" + JSON.stringify(rings) + "|" + lineKey.join(",") +
       "|" + [mo.hingeX, mo.hingeY, mo.cornerRise].join(",");
     const geo = cachedGeom(key, function () {
       const sh = new Shell();
@@ -2347,9 +2432,28 @@
           const p = [x - px, pal, zz];                 // the palate, closing it below
           pts.push(p); ang.push(null); v.push(sh.v(p[0], p[1], p[2]));
         });
-        st.push({ pts: pts, v: v, ang: ang, yc: r.y - py, ry: ry });
+        st.push({ pts: pts, v: v, ang: ang, yc: r.y - py, ry: ry, x: x });
       }
-      function skinGrp(am, i, k, u) {
+      /* THE NOSE IS A DOME, NOT A FAN. The last station used to close to the
+         tip point with one ring of triangles, every one of them touching the
+         tip — so whichever of them the paint called white ran all the way up
+         to the ridge, and head-on the nose wore a white spike to the eyes.
+         The same envelope, cut into three courses: the lower ones can be
+         white and the tip stays grey. */
+      const F0 = st[N - 1];
+      const rT = ringAt(rings, xTip - len * 0.10);
+      const tip = [xTip - px, rT.y - py + rT.ry * 0.18, 0];
+      [0.45, 0.78].forEach(function (s) {
+        const pts = [], v = [], ang = [];
+        for (let k = 0; k < M; k++) {
+          const q = F0.pts[k];
+          const p = [lerp(q[0], tip[0], s), lerp(q[1], tip[1], s), lerp(q[2], tip[2], s)];
+          pts.push(p); ang.push(F0.ang[k]); v.push(sh.v(p[0], p[1], p[2]));
+        }
+        st.push({ pts: pts, v: v, ang: ang, yc: lerp(F0.yc, tip[1], s), ry: F0.ry * (1 - s), x: lerp(F0.x, xTip, s), nose: true });
+      });
+      const NS = st.length;
+      function skinGrp(am, i, k, yMid, xMid) {
         /* THE GUM LINE. Above the tooth row a shark is oral tissue, not belly:
            in every reference photograph the upper teeth stand against a dark
            margin, and that contrast IS what makes them read as teeth. This
@@ -2368,26 +2472,54 @@
         // line and came out as a maroon patch in the middle of the snout's
         // white underside, which is a blotch, not a gum.
         if (am < seamA + 0.14 || am > Math.PI - seamA - 0.14) return 2;
-        const s = Math.sin(am);
-        /* THE RAGGED EDGE IS A HINT, NOT A SAW. At +/-0.11 in sin-space the
-           jitter was wider than the gap between two stations, so adjacent
-           quads flipped sides of the line and the boundary came out as
-           interlocking teeth of white and grey. Halved, it reads as the soft
+        /* THE RAGGED EDGE IS A HINT, NOT A SAW. When the jitter was wider
+           than the gap between two stations, adjacent quads flipped sides of
+           the line and the boundary came out as interlocking teeth of white
+           and grey. Kept to a couple of centimetres, it reads as the soft
            irregular margin the photographs show. */
-        const jit = (h01(k * 7 + 1, 0, seed) - 0.5) * 0.07
-          + (h01(k * 7 + 1, i * 13 + 3, seed + 1) - 0.5) * 0.04;
-        return s < cutOf(u) + jit ? 1 : 0;
+        const jit = ((h01(k * 7 + 1, 0, seed) - 0.5) * 0.64
+          + (h01(k * 7 + 1, i * 13 + 3, seed + 1) - 0.5) * 0.36) * ragM;
+        // the quad's own height on the stretched surface against the line
+        // in metres: a small section near the nose reads the same line a
+        // big one at the weld does
+        return yMid + py < lineOf(xMid) + jit ? 1 : 0;
       }
-      for (let i = 0; i < N - 1; i++) {
+      // the same line as a signed height per VERTEX, for the cut: below the
+      // line is negative (white). The ragged edge is a per-course offset
+      // with a smaller per-vertex one, so the line waves rather than saws.
+      function bellyF(stn, k) {
+        // a cut line needs far less raggedness than a stepped one did: the
+        // steps used to BE the irregularity, and the photograph's margin is
+        // nearly clean
+        const jit = ((h01(k * 7 + 1, 0, seed) - 0.5) * 0.64
+          + (h01(k * 7 + 1, Math.round(stn.x * 37) + 3, seed + 1) - 0.5) * 0.36) * ragM * 0.45;
+        return stn.pts[k][1] + py - lineOf(stn.x) - jit;
+      }
+      for (let i = 0; i < NS - 1; i++) {
         const A0 = st[i], A1 = st[i + 1];
-        const u = (i + 0.5) / (N - 1);
+        const xMid = (A0.x + A1.x) * 0.5;
         for (let k = 0; k < M; k++) {
           const k2 = (k + 1) % M;
           let grp, nrm;
           if (k < K - 1) {                             // the outer skin
             const am = (A0.ang[k] + A0.ang[k2]) * 0.5;
-            grp = skinGrp(am, i, k, u);
-            nrm = [0, Math.sin(am), Math.cos(am)];
+            const yMid = (A0.pts[k][1] + A0.pts[k2][1] + A1.pts[k][1] + A1.pts[k2][1]) * 0.25;
+            grp = skinGrp(am, i, k, yMid, xMid);
+            nrm = [A1.nose ? 0.7 : 0, Math.sin(am), Math.cos(am)];
+            if (grp !== 2) {                           // belly/back: cut along the line
+              sh.quadSplit(1, 0, nrm, [A0.pts[k], A0.pts[k2], A1.pts[k2], A1.pts[k]],
+                [bellyF(A0, k), bellyF(A0, k2), bellyF(A1, k2), bellyF(A1, k)]);
+              continue;
+            }
+          } else if (A1.nose) {
+            /* the seam walls and the palate converging on the nose are the
+               underside of the nose tip: skin against the same line, never
+               the cavity — painted dark they were a wedge on the underside
+               of the nose, facing forward, the great white's "black lip"
+               standing out of a closed mouth */
+            sh.quadSplit(1, 0, [0.7, -1, 0], [A0.pts[k], A0.pts[k2], A1.pts[k2], A1.pts[k]],
+              [bellyF(A0, k), bellyF(A0, k2), bellyF(A1, k2), bellyF(A1, k)]);
+            continue;
           } else {                                     // seam walls + palate: interior
             /* AND IT IS UNLIT. Slot 2 is the species' lit "interior" material
                (0x421a1e on the hero), and lit dark hex comes out of this
@@ -2404,22 +2536,16 @@
         }
       }
       // THE NOSE TIP — a point, slightly upturned (reference §2), where the
-      // hull grammar used to leave a flat octagon.
-      const F = st[N - 1];
-      const rT = ringAt(rings, xTip - len * 0.10);
-      const tip = [xTip - px, rT.y - py + rT.ry * 0.18, 0];
-      const vt = sh.v(tip[0], tip[1], tip[2]);
+      // hull grammar used to leave a flat octagon. Only the last, smallest
+      // nose course fans into it now, so the point is one colour: the cap's.
+      const F = st[NS - 1];
       const B = st[0];
       const back = [x0 - px - len * 0.02, B.yc + gap * 0.15, 0];
       const vb = sh.v(back[0], back[1], back[2]);
+      const fTip = tip[1] + py - lineOf(xTip);
       for (let k = 0; k < M; k++) {
         const k2 = (k + 1) % M;
-        /* ..and the two palate points and the seam walls fan into the nose
-           as SKIN. Painted with the cavity slot they were a dark wedge on the
-           underside of the nose tip, facing forward: the great white's
-           "black lip" that stood out of a closed mouth. */
-        const tg = k < K - 1 ? skinGrp((F.ang[k] + F.ang[k2]) * 0.5, N - 1, k, 1) : 1;
-        sh.quadN(tg, [1, 0, 0], [F.pts[k], F.pts[k2], tip, tip], [F.v[k], F.v[k2], vt, vt]);
+        sh.quadSplit(1, 0, [1, 0, 0], [F.pts[k], F.pts[k2], tip, tip], [bellyF(F, k), bellyF(F, k2), fTip, fTip]);
         sh.quadN(0, [-1, 0, 0], [B.pts[k], B.pts[k2], back, back], [B.v[k], B.v[k2], vb, vb]);
       }
       return sh.geom();
@@ -2506,13 +2632,19 @@
   // The countershading LINE, per ring. It runs low across the cheek and kicks
   // hard UP behind the pectoral and over the gills — reference sheet §2. The
   // old single scalar made it a dead-level band all the way down the animal.
-  const GW_BELLY = [-0.38, -0.34, -0.26, -0.10, 0.16, 0.00, -0.20, -0.28];
+  /* ..AND LOW ACROSS THE CHEEK MEANS LOW. At 0.00 on the cheek ring the
+     line sat at the ring's centre, ten centimetres above the corner of the
+     mouth; in the head-on photograph the grey cap comes down to the
+     corners of the mouth and the white arch is lowest there. -0.17 puts
+     it three centimetres over the corner. */
+  const GW_BELLY = [-0.38, -0.34, -0.26, -0.10, 0.16, -0.17, -0.26, -0.30];
   /* THE SNOUT IS NOT A SECOND TABLE ANY MORE. Rings and countershading are
      both solved off the hull at the weld: the species says only where the
      shell emerges (x1), where the nose ends (x0), how blunt and how flat it is
      there (tipRy/tipRz — a great white's rostrum is a FLATTENED cone, wider
      than it is deep, which is why tipRz is the larger of the two), how far the
-     nose lifts (tipY) and where the white reaches (tipCut). */
+     nose lifts (tipY) and how high the white reaches on the nose front
+     (tipLine, world y — see rostrumLine). */
   /* THE WELD STATION IS THE HULL'S OWN LAST STATION, and it is not a matter
      of taste: addSharkHull hands the whole head front to the jaw shells at
      `hingeX + length*0.07` (1.683 here) and caps itself there. A shell whose
@@ -2526,10 +2658,11 @@
        shell's width has to give up less of itself per metre than its depth
        does. The body behind it stays deeper than it is wide, which is the
        contrast the head-on photograph is all about. */
-    x1: 1.66, x0: 2.62, tipRy: 0.090, tipRz: 0.250, tipY: 1.030, tipCut: -0.46, n: 5,
+    x1: 1.66, x0: 2.62, tipRy: 0.090, tipRz: 0.250, tipY: 1.030, tipLine: 0.900, n: 5,
   });
   const GW_SNOUT = GW_ROSTRUM.rings;
   const GW_SNOUT_BELLY = GW_ROSTRUM.belly;
+  const GW_SNOUT_LINE = GW_ROSTRUM.line;
 
   S({
     id: "great_white_shark", name: "Great White Shark", biome: "water",
@@ -2596,7 +2729,7 @@
         // MUST be the hull's own side count: the weld ring and the hull ring
         // are then the same polygon, not two polygons on the same ellipse.
         pivotX: 1.95, pivotY: 0.950, sides: 20,
-        bellyCut: GW_SNOUT_BELLY, ragged: 0.055, seed: 22, tuck: 0.90,
+        bellyCut: GW_SNOUT_BELLY, bellyLine: GW_SNOUT_LINE, ragged: 0.055, seed: 22, tuck: 0.90,
         mouth: MOUTH,
       });
       addSharkFaceDetails(g, T, m, {
@@ -2705,9 +2838,9 @@
      left the head as a 0.66 CYLINDER while the hull's own cap stood 0.71 wide
      around it — a collar of body edge visible right round the base of the
      face, and the largest single step measured on any shark here. */
-  const MEG_BELLY = [-0.40, -0.34, -0.24, -0.06, 0.18, 0.02, -0.18, -0.26];
+  const MEG_BELLY = [-0.40, -0.34, -0.24, -0.06, 0.18, -0.17, -0.30, -0.34];
   const MEG_ROSTRUM = rostrumOf(MEG_RINGS, MEG_BELLY, {
-    x1: 2.38, x0: 3.98, tipRy: 0.16, tipRz: 0.42, tipY: 1.240, tipCut: -0.46, n: 5,
+    x1: 2.38, x0: 3.98, tipRy: 0.16, tipRz: 0.42, tipY: 1.240, tipLine: 1.045, n: 5,
   });
   const MEG_SNOUT = MEG_ROSTRUM.rings;
   S({
@@ -2736,7 +2869,7 @@
       }));
       const snout = addSharkRostrum(g, [dark, white, m(0x3c171d)], MEG_SNOUT, {
         pivotX: 3.20, pivotY: 1.160, sides: 16,
-        bellyCut: MEG_ROSTRUM.belly, ragged: 0.06, seed: 52, tuck: 0.90,
+        bellyCut: MEG_ROSTRUM.belly, bellyLine: MEG_ROSTRUM.line, ragged: 0.06, seed: 52, tuck: 0.90,
         mouth: MOUTH,
       });
       addSharkFaceDetails(g, T, m, {
@@ -2943,9 +3076,9 @@
     { x: 1.66, y: 0.98, ry: 0.345, rz: 0.360 },
     { x: 1.84, y: 1.00, ry: 0.255, rz: 0.290 },
   ];
-  const BULL_BELLY = [-0.36, -0.30, -0.14, 0.14, -0.02, -0.22, -0.30];
+  const BULL_BELLY = [-0.36, -0.30, -0.14, 0.14, -0.25, -0.35, -0.36];
   const BULL_ROSTRUM = rostrumOf(BULL_RINGS, BULL_BELLY, {
-    x1: 1.39, x0: 2.16, tipRy: 0.145, tipRz: 0.225, tipY: 1.025, tipCut: -0.46, n: 5,
+    x1: 1.39, x0: 2.16, tipRy: 0.145, tipRz: 0.225, tipY: 1.025, tipLine: 0.940, n: 5,
   });
   const BULL_SNOUT = BULL_ROSTRUM.rings;
   S({
@@ -2972,7 +3105,7 @@
       }));
       const snout = addSharkRostrum(g, [grey, white, m(0x421a1e)], BULL_SNOUT, {
         pivotX: 1.66, pivotY: 0.980, sides: 14,
-        bellyCut: BULL_ROSTRUM.belly, ragged: 0.055, seed: 72, tuck: 0.90,
+        bellyCut: BULL_ROSTRUM.belly, bellyLine: BULL_ROSTRUM.line, ragged: 0.055, seed: 72, tuck: 0.90,
         mouth: MOUTH,
       });
       addSharkFaceDetails(g, T, m, {
