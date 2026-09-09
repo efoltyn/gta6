@@ -824,8 +824,26 @@
        of what makes the painting look alive. One Phong for the black, its
        own (the shared cache is Lambert), shared by every orca. */
     const black = orcaBlack(), white = m(0xf7faf8), saddle = m(0x717f88);
-    const eyeM = m(0x04050a), pink = m(0x7a3a40), gum = m(0x6f353b), tooth = m(0xf2ead6);
-    const mouthDark = unlit(0x070202), deckGum = unlit(0x0b0304);
+    /* THE MOUTH IS TISSUE, LIT. OWNER (2026-09-08), sixteen frames of a real
+       orca opening on the camera: "the teeth look bad, it's all dark blue
+       purplish in the mouth, not realistic." Every surface inside the mouth
+       was an UNLIT near-black (0x070202, 0x0b0304..0x000000) and the gum
+       rails a lit maroon, so an open mouth was one flat dark hole with a
+       purple cast and a comb of 7 cm nubs at the rim. The photographs show
+       what the light reaches: salmon-pink gums along both jaws, a pink
+       tongue on the floor, a ridged grey-pink palate, and black only down
+       the throat. So the gums, tongue and palate are lit tissue now, and
+       unlit dark is kept for the throat alone. */
+    /* ..and it is a mouth, so the light falls off going in: gum at the rim
+       is the brightest tissue, the tongue a step darker, the palate a dark
+       grey-pink, the throat black. (Lit at the gum's value everywhere, the
+       gape was one flat pale-pink blob and the teeth vanished into it.) */
+    /* The hexes are the sharks' (aquatic.js: "WET GUM, NOT BUBBLEGUM",
+       gum 0x6a1c22 / dark 0x3b0f14), measured against this renderer's
+       linear-hex trap: a mid pink typed here comes out as bubblegum. */
+    const eyeM = m(0x04050a), pink = m(0x7a3a40), gum = m(0x6a1c22), tooth = m(0xefe3c8);
+    const palate = m(0x24100f), tongue = m(0x4a1a1f);
+    const mouthDark = palate, deckGum = tongue;
 
     const rings = HULL;
     const hull = meshOf(cached(HULL_KEY, function () {
@@ -979,7 +997,7 @@
        One-line revert: ORCA_CAVITY_HOLE = false. */
     const ORCA_CAVITY_HOLE = true;
     const cavity = ORCA_CAVITY_HOLE
-      ? meshOf(cached("orcaCavityHole|v2", function () {
+      ? meshOf(cached("orcaCavityHole|tissue-v5", function () {
         const sh = new Shell(), SEG = 14, ST = 8;
         const rr = [];
         for (let i = 0; i <= ST; i++) {
@@ -1001,7 +1019,7 @@
           }
         }
         return sh.geom();
-      }), [unlit(0x0b0304), unlit(0x050202), unlit(0x010101), unlit(0x000000)])
+      }), [m(0x3b0f14), m(0x1e0a0c), unlit(0x0c0506), unlit(0x030202)])
       : new T.Mesh(cached("orcaCavity", function () { return new T.SphereGeometry(1, 12, 8); }), pink);
     cavity.name = "orcaMouthCavity";
     // the inside of the mouth, not a body part: systems/wounds.js's bite
@@ -1051,7 +1069,7 @@
       return r.rz * Math.sqrt(Math.max(0.02, 1 - rel * rel)) * 0.72;
     }
     function toothRow(up) {
-      return meshOf(cached("orcaTeeth|jawfit|" + (up ? "u" : "l"), function () {
+      return meshOf(cached("orcaTeeth|cones2|" + (up ? "u" : "l"), function () {
         const sh = new Shell();
         const N = 11;
         for (let side = -1; side <= 1; side += 2) {
@@ -1059,18 +1077,25 @@
             const t = i / (N - 1);
             const x = lerp(0.14, 1.00, t);
             const z = side * Math.min(jawHalfW(x), lerp(0.30, 0.06, t));
-            // NOAA's status review records roughly two-thirds of an orca tooth
-            // inside the maxillary/mandibular alveolus.  The gum rails below
-            // cover the root two-thirds; only this short interlocking crown is
-            // allowed out into the gape.
-            const hgt = lerp(0.075, 0.044, t) * (up ? -1 : 1);
-            const w = lerp(0.055, 0.032, t);
-            const y0 = up ? 0 : 0;
-            const a = sh.v(x - w, y0, z - w), b = sh.v(x + w, y0, z - w);
-            const c = sh.v(x + w, y0, z + w), d = sh.v(x - w, y0, z + w);
-            const tip = sh.v(x + w * 0.25, y0 + hgt, z);
-            sh.tri(0, a, b, tip); sh.tri(0, b, c, tip);
-            sh.tri(0, c, d, tip); sh.tri(0, d, a, tip);
+            /* A TOOTH YOU CAN COUNT. The crowns were 7.5 cm four-sided
+               pyramids — anatomically about right for a 9 m animal and
+               invisible in every frame. The reference frames show conical
+               ivory teeth about a tenth of the mouth's width, curving
+               slightly inward; these are eight-sided cones twice the height,
+               the largest at the front. */
+            const hgt = lerp(0.170, 0.095, t) * (up ? -1 : 1);
+            const w = lerp(0.064, 0.036, t);
+            const y0 = 0;
+            const tip = sh.v(x + w * 0.35, y0 + hgt, z - side * w * 0.5);
+            const ring = [];
+            for (let q = 0; q < 8; q++) {
+              const a = (q / 8) * Math.PI * 2;
+              ring.push(sh.v(x + Math.cos(a) * w, y0, z + Math.sin(a) * w));
+            }
+            for (let q = 0; q < 8; q++) {
+              const a = ring[q], b = ring[(q + 1) % 8];
+              if (up) sh.tri(0, a, tip, b); else sh.tri(0, a, b, tip);
+            }
           }
         }
         return sh.geom();
@@ -1083,14 +1108,14 @@
     // denture silhouette back inside otherwise-correct body geometry.  These
     // narrow rails converge with the teeth and leave real dark volume between.
     function gumRails() {
-      return meshOf(cached("orcaPairedGumRails|jawfit", function () {
+      return meshOf(cached("orcaPairedGumRails|full", function () {
         const sh = new Shell(), N = 9, SIDES = 8;
         for (let side = -1; side <= 1; side += 2) {
           const rings2 = [];
           for (let i = 0; i < N; i++) {
             const t = i / (N - 1), x = lerp(0.10, 1.04, t);
             const z = side * Math.min(jawHalfW(x), lerp(0.30, 0.06, t));
-            const ry = lerp(0.034, 0.021, t), rz = lerp(0.050, 0.030, t);
+            const ry = lerp(0.052, 0.030, t), rz = lerp(0.066, 0.040, t);
             const row = [];
             for (let j = 0; j < SIDES; j++) {
               const a = (j / SIDES) * Math.PI * 2;
