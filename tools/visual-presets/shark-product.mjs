@@ -110,29 +110,44 @@ const stageSource = `async function stage(input) {
   title.textContent = ${JSON.stringify(TITLE)};
   title.style.display = '';
 
-  // 8. THE TRAILER HOOK. One fixed 1/24 s sim step per encoded frame, real keys,
-  //    a chase lens that stays dry. The first half second holds the cover.
+  // 8. THE TRAILER HOOK. One fixed 1/24 s sim step per encoded frame, real
+  //    keys, and the GAME'S OWN chase camera from the first cut on (what the
+  //    player sees, underwater grade included). The first half second holds
+  //    the cover through the product lens. Two traps this hook owns:
+  //      · the day is 150 s long, so a sun pinned at .47 SETS during a 16 s
+  //        clip (the first cut of this trailer faded to black) — pinned per frame;
+  //      · state.js raises a "Click to capture the mouse" pill on a playing
+  //        desktop page with no pointer lock — hidden per frame, it is re-shown.
   const H = window.__cbzVisualCompare;
   const yaw0 = C.cam ? C.cam.yaw : 0;
+  const sunClip = 0.38;
   H.videoFrame = async function (dt, index) {
     if (index <= 12) { C.renderer.render(C.scene, cam); return; }
     title.style.display = 'none';
+    // state.js re-shows the pill by writing style.display each frame, which
+    // overwrites an inline !important; a stylesheet rule outranks it.
+    if (!document.getElementById('sharkProductNoHint')) { const st = document.createElement('style'); st.id = 'sharkProductNoHint'; st.textContent = '#lockHint{display:none!important}'; document.head.appendChild(st); }
+    if (typeof C.dayPhase === 'function') C.dayPhase(sunClip);
     const t = index * dt;
-    // sprint the whole way; a two-second run-up then a leap, every six seconds
-    const cycle = t % 6;
-    const rise = cycle > 2.0 && cycle < 2.8;
+    // sprint the whole way; a short run-up, then the rise key HELD so the body
+    // keeps the surface and leaps again instead of sinking out of the picture
+    const cycle = t % 5;
+    const rise = cycle > 1.4;
     D.keys(true, true, rise, false);
-    if (C.cam) { C.cam.yaw = yaw0; C.cam.pitch = 0.06; }
+    // steer along the shore with an outward lean, so sixteen seconds of sprint
+    // never runs the animal up the beach (the first cut ended on the sand)
+    if (C.cam && C.surv && C.surv.arena) {
+      const A = C.surv.arena, p = S.group.position;
+      const rx = p.x - A.center.x, rz = p.z - A.center.z, rl = Math.hypot(rx, rz) || 1;
+      const ox = rx / rl, oz = rz / rl;
+      const hh = S.heading || 0;
+      const tsign = (Math.cos(hh) * -oz + Math.sin(hh) * ox) >= 0 ? 1 : -1;   // keep the tangent we are already on
+      const dx = -oz * tsign * 0.9 + ox * 0.35, dz = ox * tsign * 0.9 + oz * 0.35;
+      const want = Math.atan2(dz, dx);
+      C.cam.yaw = Math.atan2(-Math.cos(want), -Math.sin(want));
+    }
     C.stepSim(dt);
-    const g = S.group, p = g.position;
-    const seaHere = D.seaY(p.x, p.z);
-    const hh = S.heading || 0;
-    const back = new T.Vector3(Math.cos(hh + 2.35), 0.16, Math.sin(hh + 2.35)).normalize();
-    cam.position.copy(p).addScaledVector(back, fit * 0.9);
-    cam.position.y = Math.max(seaHere + 1.6, cam.position.y);
-    const look = p.clone(); look.y = Math.max(seaHere + 0.3, p.y);
-    cam.lookAt(look); cam.updateMatrixWorld(true);
-    C.renderer.render(C.scene, cam);
+    C.renderer.render(C.scene, C.camera);
   };
 
   await H.render();
