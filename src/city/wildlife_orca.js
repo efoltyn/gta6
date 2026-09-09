@@ -1063,20 +1063,28 @@
        a domed nose the rows and the gum rails poked out through the sides of
        the chin near the tip as maroon. The half-width at the mouth line is
        read off the rings, with a margin for the lip. */
+    /* ..AND THEY SIT ON THE RIM. OWNER (2026-09-08, the PDF): "from the
+       front it looks like a small triangle in the mouth… teeth in the middle
+       bottom of the mouth, not at the rims where the gums end like from the
+       side." The rows were a V — z from 0.30 at the hinge to 0.06 at the
+       front — so head-on they met on the floor. A jaw is a U: full width
+       back to the corner, closing only around the front. The rows and their
+       gum rails now follow the rim's own half-width at every station, a lip
+       inboard of the skin. */
     function jawHalfW(xj) {
       const x = JAW_X + xj, r = ringAt(rings, x);
       const rel = clamp((orcaRoofY(x) - r.y) / Math.max(0.02, r.ry), -0.96, 0.96);
-      return r.rz * Math.sqrt(Math.max(0.02, 1 - rel * rel)) * 0.72;
+      return r.rz * Math.sqrt(Math.max(0.02, 1 - rel * rel)) * 0.84;
     }
     function toothRow(up) {
-      return meshOf(cached("orcaTeeth|cones2|" + (up ? "u" : "l"), function () {
+      return meshOf(cached("orcaTeeth|rim|" + (up ? "u" : "l"), function () {
         const sh = new Shell();
         const N = 11;
         for (let side = -1; side <= 1; side += 2) {
           for (let i = 0; i < N; i++) {
             const t = i / (N - 1);
             const x = lerp(0.14, 1.00, t);
-            const z = side * Math.min(jawHalfW(x), lerp(0.30, 0.06, t));
+            const z = side * jawHalfW(x);
             /* A TOOTH YOU CAN COUNT. The crowns were 7.5 cm four-sided
                pyramids — anatomically about right for a 9 m animal and
                invisible in every frame. The reference frames show conical
@@ -1108,13 +1116,13 @@
     // denture silhouette back inside otherwise-correct body geometry.  These
     // narrow rails converge with the teeth and leave real dark volume between.
     function gumRails() {
-      return meshOf(cached("orcaPairedGumRails|full", function () {
+      return meshOf(cached("orcaPairedGumRails|rim", function () {
         const sh = new Shell(), N = 9, SIDES = 8;
         for (let side = -1; side <= 1; side += 2) {
           const rings2 = [];
           for (let i = 0; i < N; i++) {
             const t = i / (N - 1), x = lerp(0.10, 1.04, t);
-            const z = side * Math.min(jawHalfW(x), lerp(0.30, 0.06, t));
+            const z = side * jawHalfW(x);
             const ry = lerp(0.052, 0.030, t), rz = lerp(0.066, 0.040, t);
             const row = [];
             for (let j = 0; j < SIDES; j++) {
@@ -1129,8 +1137,8 @@
               sh.quad(0, rings2[i][j], rings2[i + 1][j], rings2[i + 1][nj], rings2[i][nj]);
             }
           }
-          const rear = sh.v(0.10, 0, side * Math.min(jawHalfW(0.10), 0.30));
-          const front = sh.v(1.04, 0, side * Math.min(jawHalfW(1.04), 0.06));
+          const rear = sh.v(0.10, 0, side * jawHalfW(0.10));
+          const front = sh.v(1.04, 0, side * jawHalfW(1.04));
           for (let j = 0; j < SIDES; j++) {
             const nj = (j + 1) % SIDES;
             sh.tri(0, rear, rings2[0][nj], rings2[0][j]);
