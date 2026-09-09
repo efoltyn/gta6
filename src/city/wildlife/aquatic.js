@@ -1432,38 +1432,57 @@
         const skirt = toothH * skirtK * (up ? 1 + corner3 * 0.55 : 1 - corner3 * 0.30);
         const kGum = up ? 0.80 : 1, kLipDn = up ? 0.21 : 0.45;
         const kLipUp = up ? (split ? 1.05 : 0.21) : 0.45;
-        rows.push({
-          a: a,
-          c: [corner(-railIn * kIn, gumH * 0.5 * kGum), corner(-railIn * kIn, -gumH * 0.5 * kGum),
-            corner(railOut * kOut, -lipH * kLipDn - (up ? skirt : 0)),
-            corner(railOut * kOut, lipH * kLipUp + (up ? 0 : skirt))],
-        });
+        const c = [corner(-railIn * kIn, gumH * 0.5 * kGum), corner(-railIn * kIn, -gumH * 0.5 * kGum)];
+        let groups;
+        if (up && split) {
+          /* THE TOP OF THE MOUTH IS A HOLE, NOT A PIECE OF GUM. The band's
+             outer face was one flat pink rectangle 1.26 lipH tall — the
+             "membrane" that kept the snout's skin edge covered through the
+             protrusion — and once the jaw dropped more than half the gap
+             (the deeper snout) that whole rectangle hung below the snout at
+             full gape as a lit pink wall across the top of the mouth: the
+             owner's "big piece of gum in their mouth … too geometric, it's
+             supposed to be a hole" (great white and bull shark, 2026-09-08).
+             A rounded version of the same wall read as a bigger lip. What
+             the storyboard shows above the upper teeth is a THIN pale gum,
+             and above that shadow — the roof of the mouth — up to the
+             snout's skin. So the pink stays a gum's height, and the rest of
+             the membrane up into the snout is the cavity's own unlit dark:
+             skin, dark, a thin pink gum, teeth. */
+          const yBot = -lipH * kLipDn, yGum = lipH * 0.34, yTop = lipH * kLipUp;
+          const dOut = railOut * kOut;
+          c.push(corner(dOut, yBot), corner(dOut, yGum));
+          // the dark membrane leans back into the snout as it rises
+          c.push(corner(dOut - railIn * 0.25, yGum + (yTop - yGum) * 0.5), corner(dOut - railIn * 0.55, yTop));
+          groups = [0, 0, 3, 4, 4, 4];               // inner, bottom, pink gum, dark membrane x2, top
+        } else {
+          c.push(corner(railOut * kOut, -lipH * kLipDn - (up ? skirt : 0)),
+            corner(railOut * kOut, lipH * kLipUp + (up ? 0 : skirt)));
+          // face 0 inner, 1 bottom, 2 outer, 3 top.  Gingiva belongs on the wet
+          // inner/bottom faces; the world-facing lip is the same pale skin as
+          // the body around it.
+          groups = up ? [0, 0, 3, 3] : [0, 1, 1, 0];
+        }
+        rows.push({ a: a, c: c, groups: groups });
       }
-      // face 0 inner, 1 bottom, 2 outer, 3 top.  Gingiva belongs on the wet
-      // inner/bottom faces; the world-facing upper lip is the same pale skin
-      // as the rostrum around it.  This is what visually joins the dental row
-      // to the moving crown instead of drawing a long pink bar under it.
-      // ..and the UPPER band's world-facing faces are the protruded jaw's own
-      // pale tissue (slot 3), because at gape they hang below the snout's skin
-      // and are the thing the teeth visibly grow out of.
-      const faceGroup = up ? [0, 0, 3, 3] : [0, 1, 1, 0];
       for (let i = 0; i < stations; i++) {
         const am = (rows[i].a + rows[i + 1].a) * 0.5;
         const corner = Math.abs(am) > A * 0.60;
-        for (let k = 0; k < 4; k++) {
-          const k2 = (k + 1) % 4;
-          let grp = faceGroup[k];
+        const M = rows[i].c.length;
+        for (let k = 0; k < M; k++) {
+          const k2 = (k + 1) % M;
+          let grp = rows[i].groups[k];
           if (corner && (grp === 0 || grp === 2)) grp = 2;
           sh.quad(grp, rows[i].c[k], rows[i].c[k2], rows[i + 1].c[k2], rows[i + 1].c[k]);
         }
       }
-      sh.quad(2, rows[0].c[3], rows[0].c[2], rows[0].c[1], rows[0].c[0]);
-      const L = rows[stations].c;
-      sh.quad(2, L[0], L[1], L[2], L[3]);
+      // the end caps, fanned from the inner-top point so any section closes
+      const F = rows[0].c, L = rows[stations].c;
+      for (let j = 1; j < F.length - 1; j++) { sh.tri(2, F[0], F[j + 1], F[j]); sh.tri(2, L[0], L[j], L[j + 1]); }
       return sh.geom();
     }
     function band(y, up, name, parent) {
-      const key = "jawband3|" + mouthSplitOn() + "|" +
+      const key = "jawband5|" + mouthSplitOn() + "|" +
         [y, up, gumH, lipH, lipRecess, railIn, railOut, len, width, A, cornerRise].join(",");
       // 20 stations, not 14: the skirt's edge is now a visible line on the
       // face, and at 14 the teeth behind it poked through between stations.
@@ -1472,7 +1491,9 @@
       // photographs the protruded upper jaw is whitish-pink, and painting it
       // the dark dorsal colour is exactly what made it read as a bolted-on
       // grey object instead of the animal's own lip.
-      const mesh = meshOf(geo, [gum, skin, gumDark, jawSkin]);
+      // slot 4: the dark membrane above the upper gum (see bandGeom), the
+      // same unlit cavity colour the sack's walls wear
+      const mesh = meshOf(geo, [gum, skin, gumDark, jawSkin, unlit(o.cavity || 0x140505)]);
       mesh.name = name;
       parent.add(mesh);
       return mesh;
@@ -1578,7 +1599,7 @@
        painted interior-dark; the gum band and tooth row stand proud of it. */
     function chinMesh() {
       const rings = o.rings;
-      const key = "sharkchin|v4|" + [hingeX, hingeY, len, width, gap, cornerRise, A].join(",") +
+      const key = "sharkchin|v5|" + [hingeX, hingeY, len, width, gap, cornerRise, A].join(",") +
         "|" + JSON.stringify(rings);
       const geo = cachedGeom(key, function () {
         const sh = new Shell();
@@ -1645,7 +1666,19 @@
              the lip: skin, lit, like the rest of the chin. */
           const bu = clamp((lx - cx) / rad, -1, 1);
           const bandHz = hw * Math.sqrt(Math.max(0, 1 - bu * bu));
+          /* THE CHIN NARROWS WITH THE MOUTH. Forward of the arc's widest
+             point the chin kept the hull's beam (0.34 width at the very tip)
+             while the tooth arc closed to a point, so the lip between the
+             band and the chin's rim was a wide flat triangle in plan — head-on
+             at full gape, a pale shelf under the lower teeth (owner,
+             2026-09-08: "fix the shark chin too"). The lower jaw of the
+             animal is a U no wider than its own gum plus a lip. */
+          const wf = Math.pow(Math.max(0, bu), 1.5);
+          rz = lerp(rz, Math.max(gap * 0.12, bandHz + railOut * 0.55 + lipRecess + gap * 0.05), wf);
           const deckZ = Math.max(0, Math.min(rz * 0.55, bandHz - railIn * 0.6));
+          // ..and the floor stops before it becomes a sliver: at the tip the
+          // deck's two dark triangles converging to a point were the notches
+          const deckK = clamp(deckZ / (railIn * 0.6), 0, 1);
           /* THE LIP IS A HARD EDGE. Shell.v interns vertices by position, so
              the rim vertex where the white outer wall meets the dark deck wall
              was ONE vertex, and computeVertexNormals averaged the wall's
@@ -1662,14 +1695,14 @@
             if (k <= 6) {                        // rim +z, around the belly, rim -z
               const ph = (k / 6) * Math.PI;
               p = [lx, rim - dep * Math.pow(Math.sin(ph), 0.8), Math.cos(ph) * rz];
-            } else if (k === 7) p = [lx, rim - deckDrop, -deckZ];
-            else p = [lx, rim - deckDrop, deckZ];
+            } else if (k === 7) p = [lx, rim - deckDrop * deckK, -deckZ];
+            else p = [lx, rim - deckDrop * deckK, deckZ];
             pts.push(p); v.push(sh.v(p[0], p[1], p[2]));
           }
           // the deck walls' own copies of the two rim points, 2 mm inboard
           inner.push([lx, rim - 0.001, rz - 0.002], [lx, rim - 0.001, -rz + 0.002]);
           inner.v = inner.map(function (q) { return sh.v(q[0], q[1], q[2]); });
-          st.push({ pts: pts, v: v, lx: lx, rim: rim, dep: dep, inner: inner });
+          st.push({ pts: pts, v: v, lx: lx, rim: rim, dep: dep, inner: inner, deckK: deckK });
         }
         for (let i = 0; i < N - 1; i++) {
           const A0 = st[i], A1 = st[i + 1];
@@ -1685,8 +1718,8 @@
               sh.quadN(grp, nrm,
                 [A0.pts[k], A0.pts[k2], A1.pts[k2], A1.pts[k]],
                 [A0.v[k], A0.v[k2], A1.v[k2], A1.v[k]]);
-            } else if (k === 7) {                // the deck
-              grp = 1; nrm = [0, 1, 0];
+            } else if (k === 7) {                // the deck; skin where it has closed to a line
+              grp = A0.deckK > 0.35 ? 1 : 0; nrm = [0, 1, 0];
               sh.quadN(grp, nrm,
                 [A0.pts[k], A0.pts[k2], A1.pts[k2], A1.pts[k]],
                 [A0.v[k], A0.v[k2], A1.v[k2], A1.v[k]]);
