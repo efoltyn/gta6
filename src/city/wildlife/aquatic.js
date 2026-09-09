@@ -1713,7 +1713,11 @@
          are what you see behind the teeth, and at near-black they read as a
          hole in the animal — the owner's "black shit in the mouth" on the
          megalodon and bull. The same unlit dark red the mouth roof wears. */
-      return meshOf(geo, [skin, unlit(o.chinDeck || 0x1c0708)]);
+      /* ..and 0x2e0f12, not 0x1c0708: head-on at full gape the deck faces
+         the camera as a bar the width of the lower jaw, and at that hex it
+         was a black stripe under the lower teeth. The floor of a great
+         white's mouth is dark red tissue; this lands there. */
+      return meshOf(geo, [skin, unlit(o.chinDeck || 0x2e0f12)]);
     }
 
     // the mandible: a slim seat under the lower gum — the pre-split clamp
@@ -1833,10 +1837,17 @@
        tall outer face (kLipUp) is the membrane that keeps the snout's skin
        edge covered through the whole travel — checked: at full rake the
        band's top is still 8 cm inside the shell on the hero. */
-    const dentalProtrude = o.dentalProtrude == null ? (hasUpperEnvelope ? len * 0.05 : 0) : o.dentalProtrude;
-    const dentalDrop = o.dentalDrop == null ? (hasUpperEnvelope ? gap * 0.26 : 0) : o.dentalDrop;
+    /* ..AND FURTHER STILL, since addSnoutShell brought the snout's underside
+       down to the jaw line. With the old quarter-gap drop the upper roots
+       sat level with the deeper skin edge at full gape on every snout-shell
+       shark (measured: hero +2 mm, bull -17 mm, megalodon -87 mm) and the
+       pink band hid under the nose. The reference's protruded jaw is a full
+       band of tissue with the teeth standing in it: more than half the gap
+       of drop, twice the slide, and the snout lifts a little more. */
+    const dentalProtrude = o.dentalProtrude == null ? (hasUpperEnvelope ? len * 0.10 : 0) : o.dentalProtrude;
+    const dentalDrop = o.dentalDrop == null ? (hasUpperEnvelope ? gap * 0.56 : 0) : o.dentalDrop;
     const dentalRake = o.dentalRake == null ? (hasUpperEnvelope ? 0.08 : 0) : o.dentalRake;
-    const snoutLift = o.snoutLift == null ? (hasUpperEnvelope ? 0.16 : 0) : o.snoutLift;
+    const snoutLift = o.snoutLift == null ? (hasUpperEnvelope ? 0.20 : 0) : o.snoutLift;
 
     /* §6: THE INTERIOR IS TWO PIECES, AND EACH IS WELDED TO A BONE.
 
@@ -2256,10 +2267,30 @@
            The roof of a mouth is above the gum that hangs from it. Bounded by
            the section's own crown so the nose stays a solid volume. */
         const pal = Math.min(r.y + ry * 0.55, Math.max(seam + gap * 0.60, r.y - ry + gap * 0.05)) - py;
+        /* THE UNDERSIDE OF THE SNOUT REACHES THE JAW LINE. Forward of the
+           cheek the rings sit ABOVE the mouth seam (the great white's last
+           hull ring bottoms out 7 cm over it, the nose ring 20 cm), and this
+           section simply closed at the ring's own bottom — so from the jaw
+           corner to the nose the closed head had a slot between the snout's
+           skin and the chin's rim, and the gum band, the teeth and the cheek
+           wall stood in it: the owner's "mouth is not really inside the
+           body". In every head-on photograph the snout is a deep rounded
+           dome and the mouth is a crescent set into the BOTTOM of it. So
+           wherever the seam lies below the ring, the lower half of the
+           section is stretched down to meet it and filled out a little
+           sideways, and the mouth is inside the head. The palate and the
+           bands are unchanged: they live inside this deeper shell now. */
+        const deepen = Math.max(0, (r.y - ry) - seam);
         const pts = [], v = [], ang = [];
         for (let k = 0; k < K; k++) {
           const a = a0 + (k / (K - 1)) * (Math.PI - 2 * a0);  // seam +z -> crown -> seam -z
-          const p = [x - px, r.y + Math.sin(a) * ry - py, Math.cos(a) * rz];
+          const sn = Math.sin(a);
+          let yy = r.y + sn * ry - py, zz = Math.cos(a) * rz;
+          if (deepen > 0 && sn < 0) {
+            const d = Math.pow(-sn, 1.35);
+            yy -= deepen * d; zz *= 1 + 0.12 * d;
+          }
+          const p = [x - px, yy, zz];
           pts.push(p); ang.push(a); v.push(sh.v(p[0], p[1], p[2]));
         }
         const zi = Math.cos(a0) * rz * 0.78;
@@ -2334,7 +2365,11 @@
       const vb = sh.v(back[0], back[1], back[2]);
       for (let k = 0; k < M; k++) {
         const k2 = (k + 1) % M;
-        const tg = k < K - 1 ? skinGrp((F.ang[k] + F.ang[k2]) * 0.5, N - 1, k, 1) : 3;
+        /* ..and the two palate points and the seam walls fan into the nose
+           as SKIN. Painted with the cavity slot they were a dark wedge on the
+           underside of the nose tip, facing forward: the great white's
+           "black lip" that stood out of a closed mouth. */
+        const tg = k < K - 1 ? skinGrp((F.ang[k] + F.ang[k2]) * 0.5, N - 1, k, 1) : 1;
         sh.quadN(tg, [1, 0, 0], [F.pts[k], F.pts[k2], tip, tip], [F.v[k], F.v[k2], vt, vt]);
         sh.quadN(0, [-1, 0, 0], [B.pts[k], B.pts[k2], back, back], [B.v[k], B.v[k2], vb, vb]);
       }
@@ -2482,7 +2517,13 @@
          shark's mouth line curves back UNDER the cheek past its widest point;
          at 0.56pi ours does too, and the band that is the lip is there to
          cover the hole. */
-      const MOUTH = { hingeX: 1.62, hingeY: 0.716, length: 0.90, width: 0.72, gap: 0.30, cornerRise: 0.135, snoutShell: true, railOut: 0.72 * 0.055, arcSpan: Math.PI * 0.56 };
+      /* AND THE MOUTH STOPS WELL SHORT OF THE NOSE. At 0.90 the jaw's front
+         reached x 2.52 on a nose that ends at 2.62 — the chin came out level
+         with the snout tip and read as a beak under it. On the animal the
+         snout overhangs the mouth by about a quarter of its own length (the
+         head-on reference: the crescent sits in the lower third of the dome,
+         nowhere near the tip). 0.74 puts the front at 2.36. */
+      const MOUTH = { hingeX: 1.62, hingeY: 0.716, length: 0.74, width: 0.72, gap: 0.30, cornerRise: 0.135, snoutShell: true, railOut: 0.72 * 0.055, arcSpan: Math.PI * 0.56 };
       addSharkHull(g, {
         // 20, not 16, and only on the hero: head-on, the face is the one part
         // of this animal a player is ever close enough to count the flats on,
@@ -2629,7 +2670,10 @@
       const m = ctx.mat, g = new T.Group();
       const dark = m(0x2a3035), white = m(0xe6ebec);
       const finDark = m(0x232930), finTip = m(0x161a1e), finPale = m(0x474f55);
-      const MOUTH = { hingeX: 2.30, hingeY: 0.800, length: 1.58, width: 1.10, gap: 0.56, cornerRise: 0.25, snoutShell: true };
+      // 1.32, not 1.58: the front of the mouth sat 10 cm behind a nose 1.6 m
+      // long (see the great white's note) — a beak at the tip. 3.62 on a nose
+      // that ends at 3.98 is the same quarter-snout overhang the hero has.
+      const MOUTH = { hingeX: 2.30, hingeY: 0.800, length: 1.32, width: 1.10, gap: 0.56, cornerRise: 0.25, snoutShell: true };
       addSharkHull(g, {
         top: dark, belly: white, sides: 16, rings: MEG_RINGS,
         bellyCut: [-0.40, -0.34, -0.24, -0.06, 0.18, 0.02, -0.18, -0.26],
@@ -2864,7 +2908,8 @@
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
       const grey = m(0x464e52), white = m(0xf0f2f2), finDark = m(0x394045), finTip = m(0x252b2f);
-      const MOUTH = { hingeX: 1.36, hingeY: 0.716, length: 0.78, width: 0.56, gap: 0.28, cornerRise: 0.12, snoutShell: true };
+      // 0.64, not 0.78: the mouth reached 2.14 on a nose that ends at 2.16.
+      const MOUTH = { hingeX: 1.36, hingeY: 0.716, length: 0.64, width: 0.56, gap: 0.28, cornerRise: 0.12, snoutShell: true };
       addSharkHull(g, {
         top: grey, belly: white, sides: 14, rings: BULL_RINGS,
         bellyCut: [-0.36, -0.30, -0.14, 0.14, -0.02, -0.22, -0.30],
