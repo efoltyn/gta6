@@ -1578,7 +1578,7 @@
        painted interior-dark; the gum band and tooth row stand proud of it. */
     function chinMesh() {
       const rings = o.rings;
-      const key = "sharkchin|v2|" + [hingeX, hingeY, len, width, gap, cornerRise, A].join(",") +
+      const key = "sharkchin|v4|" + [hingeX, hingeY, len, width, gap, cornerRise, A].join(",") +
         "|" + JSON.stringify(rings);
       const geo = cachedGeom(key, function () {
         const sh = new Shell();
@@ -1628,8 +1628,24 @@
              chin, with the dark deck showing as a panel in it. Every reference
              photograph has a lower jaw that closes to a rounded blade. Taper
              the deck over the front fifth and the cap becomes that blade. */
-          const nose = clamp((t - 0.78) / 0.22, 0, 1);
-          const deckZ = rz * 0.55 * (1 - 0.72 * nose * nose);
+          /* THE FLOOR OF THE MOUTH ENDS AT THE GUM. The deck was carried at
+             55% of the chin's width from the hinge to the tip, and its side
+             walls (rim down to deck) ran the whole length with it, painted
+             floor-dark. Forward of the gum band's front the band is INSIDE
+             those walls, so at full gape — jaw swung 62 degrees down, tip
+             at the lens — the walls were a dark cap across the front of the
+             chin, under the lower teeth, with the chin's skin standing under
+             it like a second lip (owner, head-on, 2026-09-08: "this
+             protruding part of the mouth"; probed: sharkChin group 1 at
+             97% of the jaw, at the rim). On the animal the floor is the
+             dark inside the tooth arc and everything outside the arc is the
+             lower lip. So the deck's edge now follows the band's own plan —
+             the same ellipse the gum is swept on, less the band's inner
+             rail — and the walls between that edge and the chin's rim are
+             the lip: skin, lit, like the rest of the chin. */
+          const bu = clamp((lx - cx) / rad, -1, 1);
+          const bandHz = hw * Math.sqrt(Math.max(0, 1 - bu * bu));
+          const deckZ = Math.max(0, Math.min(rz * 0.55, bandHz - railIn * 0.6));
           /* THE LIP IS A HARD EDGE. Shell.v interns vertices by position, so
              the rim vertex where the white outer wall meets the dark deck wall
              was ONE vertex, and computeVertexNormals averaged the wall's
@@ -1674,8 +1690,8 @@
               sh.quadN(grp, nrm,
                 [A0.pts[k], A0.pts[k2], A1.pts[k2], A1.pts[k]],
                 [A0.v[k], A0.v[k2], A1.v[k2], A1.v[k]]);
-            } else {                             // deck walls, off their OWN rim copies
-              grp = 1; nrm = [0, 0.35, k === 6 ? 1 : -1];
+            } else {                             // the lip: rim down to the deck's edge, skin
+              grp = 0; nrm = [0, 0.35, k === 6 ? 1 : -1];
               // k=6: rim(-z) -> deck(-z) uses inner[1]; k=8: deck(+z) -> rim(+z) uses inner[0]
               const r0 = k === 6 ? A0.inner[1] : A0.inner[0], r1 = k === 6 ? A1.inner[1] : A1.inner[0];
               const rv0 = k === 6 ? A0.inner.v[1] : A0.inner.v[0], rv1 = k === 6 ? A1.inner.v[1] : A1.inner.v[0];

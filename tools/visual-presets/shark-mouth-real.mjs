@@ -276,8 +276,12 @@ async function stageSharkMouthReal(input) {
       const hit = pr.intersectObject(animal, true);
       if (!hit.length) return "(" + pt[0] + "," + pt[1] + ")=nothing";
       const h0 = hit[0], mi = h0.face && h0.face.materialIndex != null ? h0.face.materialIndex : -1;
+      // ..and in the hit mesh's OWN frame, which for a jaw part is jaw space:
+      // the number a builder can act on (world space is the rotated jaw)
+      const lp = h0.object.worldToLocal(h0.point.clone());
       return "(" + pt[0] + "," + pt[1] + ")=" + (h0.object.name || "(unnamed)") + "#g" + mi +
-        "@" + h0.point.x.toFixed(2) + "," + h0.point.y.toFixed(2) + "," + h0.point.z.toFixed(2);
+        "@" + h0.point.x.toFixed(2) + "," + h0.point.y.toFixed(2) + "," + h0.point.z.toFixed(2) +
+        " local " + lp.x.toFixed(3) + "," + lp.y.toFixed(3) + "," + lp.z.toFixed(3);
     });
     out.probed = outp;
     const metricEl = studio.overlay.querySelector("[data-metric]");
