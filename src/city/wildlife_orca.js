@@ -425,7 +425,13 @@
           Math.cos(ph) * halfW];
         pts.push(p); ids.push(sh.v(p[0], p[1], p[2]));
       }
-      const deckDrop = o.deckDrop == null ? 0.035 : o.deckDrop;
+      /* THE TONGUE SITS BELOW THE LIP, NOT AT IT. At 2.4 cm under the rim
+         the deck was a pink plate flush with the lip, and from ahead it
+         showed past both sides of the chin tip as two red streaks (owner,
+         2026-09-08: "this bottom lip weird thing"). The deck now drops a
+         lip's height below the rim, clamped to the chin's own depth where
+         it thins toward the tip. */
+      const deckDrop = Math.min(o.deckDrop == null ? 0.035 : o.deckDrop, depth * 0.75);
       [[-halfW * 0.72, 0], [halfW * 0.72, 0]].forEach(function (q) {
         const p = [x - o.hingeX, rim - deckDrop, q[0]];
         pts.push(p); ids.push(sh.v(p[0], p[1], p[2]));
@@ -443,11 +449,18 @@
        chin) and the deck UP (the mouth floor you see when the jaw drops).
        Verified from underneath by orca-pod's markings-under frame, which is
        exactly the angle that caught it. */
+    /* THE RIM STRIP IS THE LIP, AND THE LIP IS SKIN. OWNER (2026-09-08, the
+       PDF zoomed on the open chin's front): a white point with two dark-red
+       wedges either side of it. The strip from the rim down to the deck
+       (k = ARC and ARC+2) and the front cap were painted with the deck's
+       tissue, and seen from ahead they are a pair of red wings around the
+       chin tip. Only the deck itself (k = ARC+1) is tongue; the strip is the
+       white lip the gum rails sit inside, and the cap is the chin's own tip. */
     for (let i = 0; i < N - 1; i++) {
       const a = rows[i], b = rows[i + 1];
       for (let k = 0; k < M; k++) {
         const k2 = (k + 1) % M;
-        sh.quad(k <= ARC - 1 ? 0 : 1, a.ids[k2], b.ids[k2], b.ids[k], a.ids[k]);
+        sh.quad(k === ARC + 1 ? 1 : 0, a.ids[k2], b.ids[k2], b.ids[k], a.ids[k]);
       }
     }
     const cap = function (row, forward) {
@@ -455,8 +468,8 @@
         row.rim - row.depth * 0.48, 0);
       for (let k = 0; k < M; k++) {
         const k2 = (k + 1) % M;
-        if (forward) sh.tri(k <= ARC - 1 ? 0 : 1, row.ids[k2], c, row.ids[k]);
-        else sh.tri(k <= ARC - 1 ? 0 : 1, row.ids[k], c, row.ids[k2]);
+        if (forward) sh.tri(0, row.ids[k2], c, row.ids[k]);
+        else sh.tri(0, row.ids[k], c, row.ids[k2]);
       }
     };
     cap(rows[0], false); cap(rows[rows.length - 1], true);
@@ -1028,10 +1041,16 @@
     // retracted from the old footprint (JAW_X+0.82 ± 0.86 reached the snout
     // tip): front pole behind the tooth rows' end, back pole behind the hinge,
     // so the hole lives entirely inside the closed head.
-    cavity.position.set(2.56, JAW_Y + 0.10, 0);
+    /* ..AND BEHIND THE CHIN TIP. With the nose domed, the chin at x 2.98 is
+       fifteen centimetres wide; a cavity whose front pole reached there put
+       its lit red rim THROUGH the tip — the two red streaks either side of
+       the chin's point in every head-on frame, open or closed (owner:
+       "this bottom lip weird thing"). The hole now ends at 2.81, where the
+       jaw is still forty centimetres wide around it. */
+    cavity.position.set(2.45, JAW_Y + 0.10, 0);
     // At rest this is a black-red seam, not a pink stripe pasted along the
     // whale's face.  The shared rig expands it tenfold during a gape.
-    cavity.scale.set(0.42, 0.018, 0.14);
+    cavity.scale.set(0.36, 0.018, 0.13);
     g.add(cavity);
 
     const lower = new T.Group();
@@ -1049,11 +1068,11 @@
       const r = ringAt(rings, x);
       if (r.y - r.ry >= orcaChinRimY(x) - 0.012) { chinEnd = x; break; }
     }
-    const mand = meshOf(cached("orcaLowerEnvelope|face-v2", function () {
+    const mand = meshOf(cached("orcaLowerEnvelope|lip-v4", function () {
       return lowerEnvelopeGeom({
         rings: rings, hingeX: JAW_X, hingeY: JAW_Y,
         x0: JAW_X - 0.12, x1: chinEnd, rimY: orcaChinRimY,
-        stations: 16, arcSteps: 12, deckDrop: 0.024,
+        stations: 16, arcSteps: 12, deckDrop: 0.10,
       });
     }), [white, deckGum]);
     mand.name = "orcaLowerEnvelope"; lower.add(mand);
@@ -1076,15 +1095,21 @@
       const rel = clamp((orcaRoofY(x) - r.y) / Math.max(0.02, r.ry), -0.96, 0.96);
       return r.rz * Math.sqrt(Math.max(0.02, 1 - rel * rel)) * 0.84;
     }
+    /* ..AND THEY STOP SHORT OF THE CHIN'S END. The rows and rails ran to
+       1.04 past the hinge, which under the domed nose is beyond where the
+       chin ends (it stops where the hull's underside meets the roof); the
+       last stretch of the lower rail stood out in front of the chin tip as
+       two red streaks in every open head-on frame. */
+    const rowEnd = Math.min(1.00, chinEnd - JAW_X - 0.07);
     function toothRow(up) {
-      return meshOf(cached("orcaTeeth|rim|" + (up ? "u" : "l"), function () {
+      return meshOf(cached("orcaTeeth|rim3|" + rowEnd.toFixed(3) + "|" + (up ? "u" : "l"), function () {
         const sh = new Shell();
         const N = 11;
         for (let side = -1; side <= 1; side += 2) {
           for (let i = 0; i < N; i++) {
             const t = i / (N - 1);
-            const x = lerp(0.14, 1.00, t);
-            const z = side * jawHalfW(x);
+            const x = lerp(0.14, rowEnd, t);
+            const z = side * Math.max(0.02, jawHalfW(x) - lerp(0.064, 0.036, t) * 0.6);
             /* A TOOTH YOU CAN COUNT. The crowns were 7.5 cm four-sided
                pyramids — anatomically about right for a 9 m animal and
                invisible in every frame. The reference frames show conical
@@ -1116,14 +1141,21 @@
     // denture silhouette back inside otherwise-correct body geometry.  These
     // narrow rails converge with the teeth and leave real dark volume between.
     function gumRails() {
-      return meshOf(cached("orcaPairedGumRails|rim", function () {
+      /* THE RAIL STAYS INSIDE THE LIP. A ray through the red streaks either
+         side of the open chin's tip named this mesh at local x 1.03: the
+         rail ran to the very end of the tooth row with a 4 cm radius centred
+         ON the rim line, and where the chin thins to a sliver at the tip
+         that radius stood outside the skin. It ends a hand short of the
+         tip now, tapers to nothing, and sits one radius inboard of the rim. */
+      const railEnd = rowEnd - 0.12;
+      return meshOf(cached("orcaPairedGumRails|inboard|" + railEnd.toFixed(3), function () {
         const sh = new Shell(), N = 9, SIDES = 8;
         for (let side = -1; side <= 1; side += 2) {
           const rings2 = [];
           for (let i = 0; i < N; i++) {
-            const t = i / (N - 1), x = lerp(0.10, 1.04, t);
-            const z = side * jawHalfW(x);
-            const ry = lerp(0.052, 0.030, t), rz = lerp(0.066, 0.040, t);
+            const t = i / (N - 1), x = lerp(0.10, railEnd, t);
+            const ry = lerp(0.052, 0.014, t), rz = lerp(0.066, 0.016, t);
+            const z = side * Math.max(0.02, jawHalfW(x) - rz - 0.012);
             const row = [];
             for (let j = 0; j < SIDES; j++) {
               const a = (j / SIDES) * Math.PI * 2;
@@ -1137,8 +1169,8 @@
               sh.quad(0, rings2[i][j], rings2[i + 1][j], rings2[i + 1][nj], rings2[i][nj]);
             }
           }
-          const rear = sh.v(0.10, 0, side * jawHalfW(0.10));
-          const front = sh.v(1.04, 0, side * jawHalfW(1.04));
+          const rear = sh.v(0.10, 0, side * Math.max(0.02, jawHalfW(0.10) - 0.078));
+          const front = sh.v(railEnd + 0.02, 0, side * Math.max(0.02, jawHalfW(railEnd) - 0.028));
           for (let j = 0; j < SIDES; j++) {
             const nj = (j + 1) % SIDES;
             sh.tri(0, rear, rings2[0][nj], rings2[0][j]);
@@ -1149,9 +1181,9 @@
       }), [gum]);
     }
     const lt = toothRow(false); lt.name = "orcaLowerTeeth";
-    lt.position.set(0, 0.145, 0); lower.add(lt);
+    lt.position.set(0, 0.125, 0); lower.add(lt);
     const lowerGum = gumRails();
-    lowerGum.name = "orcaLowerGum"; lowerGum.position.set(0, 0.135, 0); lower.add(lowerGum);
+    lowerGum.name = "orcaLowerGum"; lowerGum.position.set(0, 0.112, 0); lower.add(lowerGum);
 
     /* AN UPPER JAW GROUP THAT DOES NOT MOVE, and it is not ceremony.
 
