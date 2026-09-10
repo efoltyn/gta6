@@ -1449,7 +1449,17 @@
            real great white the upper teeth come straight out of the gum under
            the snout and there is nothing outboard of them. 0.10 leaves the
            band as a seam, not a rail. The lower jaw keeps its lip: it has one. */
-        const kIn = up ? 0.75 : 1, kOut = (up ? 0.10 : 0.55) * (1 - front * 0.82);
+        /* THE LOWER GUM IS A THIN PALE RIM, NOT A SALMON RING. At full gape,
+           head-on, the lower band's TOP face is what the lens sees around the
+           whole U — and at a full railIn (0.079 m on the hero) that face was
+           a shelf of wet-red gum a fifth of the mouth's width on each side:
+           the owner's cover, a wide flat grin of pink with the teeth stuck
+           in it. In the storyboard (frames 8-9) the lower teeth stand in a
+           gum you can barely see — a thin pale line inside the white lip —
+           and the dark floor starts right behind them. So the lower band
+           reaches half as far in, and the replacement rows lie flat over
+           the dark floor instead of on a pink shelf. */
+        const kIn = up ? 0.75 : 0.5, kOut = (up ? 0.10 : 0.55) * (1 - front * 0.82);
         /* ---- THE LIP COVERS THE TEETH, WHICH IS WHY A CLOSED SHARK MOUTH IS
            A LINE ------------------------------------------------------------
            Owner, 2026-08-30, on the front of the great white's mouth: "there
@@ -1535,7 +1545,12 @@
           // face 0 inner, 1 bottom, 2 outer, 3 top.  Gingiva belongs on the wet
           // inner/bottom faces; the world-facing lip is the same pale skin as
           // the body around it.
-          groups = up ? [0, 0, 3, 3] : [0, 1, 1, 0];
+          /* ..and the top face of the lower band is the PALE jaw tissue the
+             upper jaw already wears (slot 3, the colour that rides the
+             gape), not the wet-red gum: what the reference shows around the
+             lower teeth is whitish-pink, and the red lives on the inner
+             face, seen only from inside the mouth. */
+          groups = up ? [0, 0, 3, 3] : [0, 1, 1, 3];
         }
         rows.push({ a: a, c: c, groups: groups });
       }
@@ -1556,7 +1571,7 @@
       return sh.geom();
     }
     function band(y, up, name, parent) {
-      const key = "jawband5|" + mouthSplitOn() + "|" +
+      const key = "jawband6|" + mouthSplitOn() + "|" +
         [y, up, gumH, lipH, lipRecess, railIn, railOut, len, width, A, cornerRise].join(",");
       // 20 stations, not 14: the skirt's edge is now a visible line on the
       // face, and at 14 the teeth behind it poked through between stations.
@@ -1607,10 +1622,15 @@
            it and lie FLAT — folded back against the gum, the way they are in
            the reference photographs — not standing up as a second comb. */
         { n: nFront, r: 1.00, size: 1.00, rake: 0.22 },
-        { n: nFront, r: 0.90, size: 0.62, rake: 0.95 },
-        { n: Math.max(5, (nFront * 0.60) | 0), r: 0.80, size: 0.40, rake: 1.30 },
+        /* ..and the replacement rows are SMALLER than they were: at 0.62
+           and 0.40 of the working row, lying flat, head-on at full gape they
+           were a second and third ring of white chips over the floor of the
+           mouth — the "grid of teeth" on the owner's cover. The storyboard
+           shows the rows behind as a much smaller echo of the front row. */
+        { n: nFront, r: 0.90, size: 0.50, rake: 1.05 },
+        { n: Math.max(5, (nFront * 0.60) | 0), r: 0.80, size: 0.30, rake: 1.30 },
       ];
-      const key = "teeth|v2|" + [up, len, width, tH, tW, A, cornerRise, JSON.stringify(rows)].join(",");
+      const key = "teeth|v3|" + [up, len, width, tH, tW, A, cornerRise, JSON.stringify(rows)].join(",");
       const geo = cachedGeom(key, function () {
         const sh = new Shell();
         const sgn = up ? -1 : 1;                     // which way the crowns point
@@ -1673,7 +1693,7 @@
        painted interior-dark; the gum band and tooth row stand proud of it. */
     function chinMesh() {
       const rings = o.rings;
-      const key = "sharkchin|v5|" + [hingeX, hingeY, len, width, gap, cornerRise, A].join(",") +
+      const key = "sharkchin|v6|" + [hingeX, hingeY, len, width, gap, cornerRise, A].join(",") +
         "|" + JSON.stringify(rings);
       const geo = cachedGeom(key, function () {
         const sh = new Shell();
@@ -1793,7 +1813,15 @@
                 [A0.pts[k], A0.pts[k2], A1.pts[k2], A1.pts[k]],
                 [A0.v[k], A0.v[k2], A1.v[k2], A1.v[k]]);
             } else if (k === 7) {                // the deck; skin where it has closed to a line
-              grp = A0.deckK > 0.35 ? 1 : 0; nrm = [0, 1, 0];
+              /* THE FLOOR GOES DARK TOWARD THE THROAT. One flat unlit maroon
+                 from the teeth to the hinge is a plane, and head-on at full
+                 gape that plane was most of the open mouth: a pink panel,
+                 not a cavern. The storyboard's mouth is red tissue at the
+                 rim and black by the time the eye reaches the throat, so the
+                 deck is three shades along the jaw — the front third the
+                 tissue it was, the middle darker, the back near-black. */
+              const tDeck = (i + 0.5) / (N - 1);        // 0 = hinge, 1 = tip
+              grp = A0.deckK > 0.35 ? (tDeck > 0.66 ? 1 : (tDeck > 0.40 ? 2 : 3)) : 0; nrm = [0, 1, 0];
               sh.quadN(grp, nrm,
                 [A0.pts[k], A0.pts[k2], A1.pts[k2], A1.pts[k]],
                 [A0.v[k], A0.v[k2], A1.v[k2], A1.v[k]]);
@@ -1840,7 +1868,8 @@
          the camera as a bar the width of the lower jaw, and at that hex it
          was a black stripe under the lower teeth. The floor of a great
          white's mouth is dark red tissue; this lands there. */
-      return meshOf(geo, [skin, unlit(o.chinDeck || 0x2e0f12)]);
+      // slots 2 and 3: the same floor, deeper in (see the deck loop above)
+      return meshOf(geo, [skin, unlit(o.chinDeck || 0x2e0f12), unlit(o.chinDeckMid || 0x180708), unlit(o.chinDeckBack || 0x0a0303)]);
     }
 
     // the mandible: a slim seat under the lower gum — the pre-split clamp
@@ -2345,6 +2374,7 @@
      below that, INSIDE the closed head, and only exist to the eye when the
      jaws part. And the nose finally ends in a NOSE: the sections taper into
      a single slightly-upturned tip point instead of a sawn-off end cap. */
+  const SNOUT_SHADE_MATS = new Map();     // belly material -> its vertex-shaded twin
   function addSnoutShell(g, mats, rings, o) {
     const px = o.pivotX, py = o.pivotY;
     const mo = o.mouth;
@@ -2366,7 +2396,7 @@
     const ragM = (o.ragged == null ? 0.05 : o.ragged) * rings[Math.min(1, rings.length - 1)].ry;
     const lineKey = [];
     for (let i = 0; i <= 12; i++) lineKey.push(lineOf(lerp(x0, xTip, i / 12)).toFixed(4));
-    const key = "snoutshell|" + [px, py, gap, len, seed, ragM.toFixed(4)].join(",") +
+    const key = "snoutshell3|" + [px, py, gap, len, seed, ragM.toFixed(4)].join(",") +
       "|" + JSON.stringify(rings) + "|" + lineKey.join(",") +
       "|" + [mo.hingeX, mo.hingeY, mo.cornerRise].join(",");
     const geo = cachedGeom(key, function () {
@@ -2432,7 +2462,7 @@
           const p = [x - px, pal, zz];                 // the palate, closing it below
           pts.push(p); ang.push(null); v.push(sh.v(p[0], p[1], p[2]));
         });
-        st.push({ pts: pts, v: v, ang: ang, yc: r.y - py, ry: ry, x: x });
+        st.push({ pts: pts, v: v, ang: ang, yc: r.y - py, ry: ry, rz: rz, x: x });
       }
       /* THE NOSE IS A DOME, NOT A FAN. The last station used to close to the
          tip point with one ring of triangles, every one of them touching the
@@ -2450,7 +2480,7 @@
           const p = [lerp(q[0], tip[0], s), lerp(q[1], tip[1], s), lerp(q[2], tip[2], s)];
           pts.push(p); ang.push(F0.ang[k]); v.push(sh.v(p[0], p[1], p[2]));
         }
-        st.push({ pts: pts, v: v, ang: ang, yc: lerp(F0.yc, tip[1], s), ry: F0.ry * (1 - s), x: lerp(F0.x, xTip, s), nose: true });
+        st.push({ pts: pts, v: v, ang: ang, yc: lerp(F0.yc, tip[1], s), ry: F0.ry * (1 - s), rz: F0.rz * (1 - s), x: lerp(F0.x, xTip, s), nose: true });
       });
       const NS = st.length;
       function skinGrp(am, i, k, yMid, xMid) {
@@ -2487,13 +2517,28 @@
       // the same line as a signed height per VERTEX, for the cut: below the
       // line is negative (white). The ragged edge is a per-course offset
       // with a smaller per-vertex one, so the line waves rather than saws.
+      const arch = o.lineArch == null ? 0.085 : o.lineArch;
       function bellyF(stn, k) {
         // a cut line needs far less raggedness than a stepped one did: the
         // steps used to BE the irregularity, and the photograph's margin is
         // nearly clean
         const jit = ((h01(k * 7 + 1, 0, seed) - 0.5) * 0.64
           + (h01(k * 7 + 1, Math.round(stn.x * 37) + 3, seed + 1) - 0.5) * 0.36) * ragM * 0.45;
-        return stn.pts[k][1] + py - lineOf(stn.x) - jit;
+        /* THE ARCH CURVES DOWN AT THE SIDES OF THE NOSE. A line that is a
+           height in x alone cuts every nose section as a level chord — and
+           the great white's nose is a flat wide wedge (tipRz nearly three
+           times tipRy), so head-on the top of the white was one straight
+           horizontal edge across the nose front with two straight diagonals
+           to the mouth corners: a shield where the storyboard has a rounded
+           arch, highest on the centre line and curving down toward the
+           corners of the mouth. So the line is lowered by up to `arch`
+           metres at the lateral edge of each section, as the square of the
+           vertex's share of the section's half-width, fading in from the
+           back of the shell so the cheek line behind the weld is untouched. */
+        const p = stn.pts[k];
+        const w = Math.pow(clamp((stn.x - x0) / Math.max(1e-4, xTip - x0), 0, 1), 1.5);
+        const side = clamp(Math.abs(p[2]) / Math.max(0.02, stn.rz || 0.02), 0, 1);
+        return p[1] + py - (lineOf(stn.x) - arch * w * side * side) - jit;
       }
       for (let i = 0; i < NS - 1; i++) {
         const A0 = st[i], A1 = st[i + 1];
@@ -2548,10 +2593,42 @@
         sh.quadSplit(1, 0, [1, 0, 0], [F.pts[k], F.pts[k2], tip, tip], [bellyF(F, k), bellyF(F, k2), fTip, fTip]);
         sh.quadN(0, [-1, 0, 0], [B.pts[k], B.pts[k2], back, back], [B.v[k], B.v[k2], vb, vb]);
       }
-      return sh.geom();
+      const out = sh.geom();
+      /* THE UNDERSIDE OF THE SNOUT IS IN SHADOW. Owner's cover, head-on at
+         full gape, against the storyboard: our white was one flat lit slab
+         with a hard edge — a bib — and there was no depth under the nose at
+         all. In every reference frame the front of the snout below the
+         countershade line is a PALE GREY, not white, and it darkens all the
+         way into the overhang over the mouth; the bright white is the chin.
+         A lit material cannot do that on its own here (the sun at the
+         waterline lights the whole front of the face evenly), so the shade
+         is baked as a vertex colour on the white slot: 0.86 of white at the
+         line, falling to about half at the mouth seam, with the fall-off
+         concentrated in the last stretch over the jaw so the dome still
+         reads as one rounded pale surface and the shadow sits where the
+         snout overhangs the teeth. The grey cap and the cavity slots ignore
+         the attribute. */
+      const P = out.attributes.position, col = new Float32Array(P.count * 3);
+      for (let i = 0; i < P.count; i++) {
+        const wx = P.getX(i) + px, wy = P.getY(i) + py;
+        const L = lineOf(wx), S = mouthSeamY(mo, wx);
+        const f = clamp((L - wy) / Math.max(0.05, L - S), 0, 1);
+        const s = 0.84 - 0.42 * f * f;
+        col[i * 3] = s; col[i * 3 + 1] = s; col[i * 3 + 2] = s;
+      }
+      out.setAttribute("color", new T.Float32BufferAttribute(col, 3));
+      return out;
     });
+    // the white slot reads the baked shade above: its own copy of the
+    // species' belly material, one per source material, never disposed
+    const white = mats[1];
+    let shaded = SNOUT_SHADE_MATS.get(white);
+    if (!shaded) {
+      shaded = white.clone(); shaded.vertexColors = true; shaded._shared = true;
+      SNOUT_SHADE_MATS.set(white, shaded);
+    }
     // slot 3 = the mouth roof, unlit (see the seam-wall note in the loft)
-    const mesh = meshOf(geo, mats.concat([unlit(mo.cavityRoof || 0x1c0708)]));
+    const mesh = meshOf(geo, [mats[0], shaded, mats[2], unlit(mo.cavityRoof || 0x1c0708)]);
     mesh.name = "sharkRostrum";
     mesh.userData._splitShell = true;   // face details put the EYES on this one
     mesh.userData._rootOrigin = { x: px, y: py, z: 0 };
