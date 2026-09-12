@@ -953,9 +953,30 @@
          contact. The flattening (0.85, 1, 0.6) lives on the OUTER holder so
          the socket keeps its shape while the pattern turns inside it. */
       const size = o.eyeSize || 0.075;
-      const pale = m(o.eyeBack || 0x8c8a84);
+      /* THE ROLLED EYE IS STILL AN EYE. Owner, on the head-on cover at full
+         gape (2026-09-12): "this shows no eyes on the shark, why". The pale
+         half at 0x8c8a84 lands within a few values of the lit skin around it,
+         and rolled 144 degrees nothing dark was left — so at the one moment
+         the game photographs the animal, the eye vanished into the face. On
+         the animal the rolled sclera is a milky orb sitting in a DARK orbit,
+         and a sliver of the black still shows at the edge. So: a dark orbit
+         ring on the holder that never rolls, a colder off-white for the
+         sclera, and the roll capped at 112 degrees (applyGape) so a crescent
+         of black stays. */
+      const pale = m(o.eyeBack || 0xb9c4c8);
       const halfPos = cachedGeom("eyehalf+|" + size, function () { return new T.SphereGeometry(size, 8, 6, 0, Math.PI); });
       const halfNeg = cachedGeom("eyehalf-|" + size, function () { return new T.SphereGeometry(size, 8, 6, Math.PI, Math.PI); });
+      const orbitGeo = cachedGeom("eyeorbit|" + size, function () { return new T.TorusGeometry(size * 1.02, size * 0.26, 6, 16); });
+      /* AND IT FACES THE WAY THE HEAD DOES THERE. The eye is a disc flattened
+         along z, so it faced dead sideways on a snout that is narrowing
+         toward the nose; head-on the disc was edge-on and its own dome hid
+         it. The shell's plan slope at the eye station yaws the socket to the
+         skin it sits in, which is what turns the eye toward a head-on lens. */
+      let eyeYaw = 0;
+      if (o.snoutRings && o.snoutRings.length > 1) {
+        const rA = ringAt(o.snoutRings, o.eyeX - 0.06), rB = ringAt(o.snoutRings, o.eyeX + 0.06);
+        eyeYaw = Math.atan2(rA.rz - rB.rz, 0.12);
+      }
       [-1, 1].forEach(function (side) {
         const eye = new T.Group();
         eye.name = "sharkEye";
@@ -963,7 +984,11 @@
         const front = new T.Mesh(side > 0 ? halfPos : halfNeg, dark); front.name = "sharkEye";
         const back = new T.Mesh(side > 0 ? halfNeg : halfPos, pale); back.name = "sharkEyeBack";
         roller.add(front); roller.add(back); eye.add(roller);
+        const orbit = new T.Mesh(orbitGeo, dark); orbit.name = "sharkEyeOrbit";
+        orbit.position.z = side * size * 0.35;     // proud of the skin, behind the lens
+        eye.add(orbit);
         eye.position.set(o.eyeX, o.eyeY, side * o.eyeZ);
+        eye.rotation.y = -side * eyeYaw;
         eye.scale.set(0.85, 1, 0.6);
         // §7c: the eye lives on the head's UPPER HALF, so when that half is
         // a jaw shell the eye rides it — look at the orca photograph: the
@@ -2335,7 +2360,7 @@
       const eyes = g._aquaticMouth && g._aquaticMouth.eyes;
       if (eyes) {
         const rk0 = clamp((oo - 0.55) / 0.35, 0, 1), rk = rk0 * rk0 * (3 - 2 * rk0);
-        for (let i = 0; i < eyes.length; i++) eyes[i].roller.rotation.y = -eyes[i].side * rk * Math.PI * 0.8;
+        for (let i = 0; i < eyes.length; i++) eyes[i].roller.rotation.y = -eyes[i].side * rk * Math.PI * 0.62;
       }
       // NOTHING TO REVEAL. The roof rides `dental`, the floor rides `lower`
       // and the throat is fixed in the head, so the interior opens because the
