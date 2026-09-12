@@ -64,6 +64,11 @@ const stageSource = `async function stage(input) {
 
   const S = C.sharkSim.shark;
   if (!S || !S.group) throw new Error('no player shark to photograph');
+  // THE POSE IS A PHOTOGRAPH, NOT A MEASUREMENT. The breach's flank roll and
+  // pitch differ run to run (measured: 5 to 50 degrees of roll), and a rolled
+  // animal fitted to its own bounding box came out with the head cut off. A
+  // cover holds one pose: level, nose a little up, so the face is the frame.
+  S.group.rotation.x = 0; S.group.rotation.z = sub.front ? 0.18 : 0.42;
   // 4. the gape. wildlife_rig.js's own jaw seam; the arc re-closes it only for wild strikes.
   if (C.swimJaw && sub.jaw) { try { C.swimJaw(S, sub.jaw); } catch (e) {} }
   S.group.updateMatrixWorld(true);
@@ -89,10 +94,19 @@ const stageSource = `async function stage(input) {
     // a body-length ahead of the nose, a hand over the water, looking back into the mouth
     const jaw = (C.creatureJawPoint ? C.creatureJawPoint(S) : { x: 2, y: 0.7, z: 0 });
     const jw = new T.Vector3(jaw.x, jaw.y, jaw.z).applyMatrix4(S.group.matrixWorld);
-    const ahead = new T.Vector3(Math.cos(h), 0, Math.sin(h));
-    cam.position.copy(jw).addScaledVector(ahead, Math.max(2.5, size.x * 0.55));
-    cam.position.y = Math.max(sea + 0.6, jw.y - 0.2);
-    aim = jw.clone();
+    // twenty degrees off the axis: dead ahead the eyes sit on the sides of a
+    // wedge and perspective hides both; a hair off, one shows with the mouth
+    const ahead = new T.Vector3(Math.cos(h + 0.35), 0, Math.sin(h + 0.35));
+    const crown = new T.Vector3(jw.x, box.max.y, jw.z);
+    aim = jw.clone().lerp(crown, 0.22);
+    // a third of the body length ahead: the head fills the middle of the frame
+    // measured: 0.34 of the body length put the lens on the nose, the old
+    // 0.55 from the jaw point framed the whole head; 0.55 from the head's
+    // centre, level with it, is the storyboard's frame
+    const headR = size.y * 0.5;
+    const dist = Math.max(2.5, size.x * 0.55);
+    cam.position.copy(aim).addScaledVector(ahead, dist);
+    cam.position.y = Math.max(sea + 0.6, aim.y - headR * 0.25);   // a little below, looking up into it
   } else {
     // three-quarter from the flank, LOW: the horizon in the lower third, sky behind the animal
     const dir = new T.Vector3(Math.cos(h + 1.05), sub.low ? 0.10 : 0.24, Math.sin(h + 1.05)).normalize();

@@ -1540,7 +1540,10 @@
         const corner3 = Math.pow(Math.abs(a) / (A || 1), 3);
         const skirt = toothH * skirtK * (up ? 1 + corner3 * 0.55 : 1 - corner3 * 0.30);
         const kGum = up ? 0.80 : 1, kLipDn = up ? 0.21 : 0.45;
-        const kLipUp = up ? (split ? 1.05 : 0.21) : 0.45;
+        // 0.72, not 1.05: the tall upper face only has to cover the snout's
+        // skin edge through a gap*0.40 drop now, and every millimetre past
+        // that is dark membrane showing below the nose
+        const kLipUp = up ? (split ? 0.72 : 0.21) : 0.45;
         const c = [corner(-railIn * kIn, gumH * 0.5 * kGum), corner(-railIn * kIn, -gumH * 0.5 * kGum)];
         let groups;
         if (up && split) {
@@ -2022,7 +2025,13 @@
        band of tissue with the teeth standing in it: more than half the gap
        of drop, twice the slide, and the snout lifts a little more. */
     const dentalProtrude = o.dentalProtrude == null ? (hasUpperEnvelope ? len * 0.10 : 0) : o.dentalProtrude;
-    const dentalDrop = o.dentalDrop == null ? (hasUpperEnvelope ? gap * 0.56 : 0) : o.dentalDrop;
+    /* ..AND NOT SO FAR THAT THE BAND HANGS OUT. At gap*0.56 the whole upper
+       band — pink gum AND the dark membrane above it — came out from under
+       the snout at full gape as a thick bar across the top of the mouth
+       (owner, 2026-09-12: "the roof-of-mouth piece is pink and black and too
+       big and looks dumb"). 0.40 keeps the teeth out in tissue and the
+       membrane inside the snout where it belongs. */
+    const dentalDrop = o.dentalDrop == null ? (hasUpperEnvelope ? gap * 0.40 : 0) : o.dentalDrop;
     const dentalRake = o.dentalRake == null ? (hasUpperEnvelope ? 0.08 : 0) : o.dentalRake;
     const snoutLift = o.snoutLift == null ? (hasUpperEnvelope ? 0.20 : 0) : o.snoutLift;
 
