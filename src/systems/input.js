@@ -1,0 +1,1 @@
+(function(){"use strict";const CBZ=window.CBZ,keys={};addEventListener("keydown",e=>{const k=e.key.toLowerCase();keys[k]=!0,k===" "&&e.preventDefault()}),addEventListener("keyup",e=>{keys[e.key.toLowerCase()]=!1}),CBZ.keys=keys})();

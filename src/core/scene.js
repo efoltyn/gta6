@@ -1,0 +1,1 @@
+(function(){"use strict";const CBZ=window.CBZ,scene=new THREE.Scene;scene.fog=new THREE.Fog(11977928,95,360);const camera=new THREE.PerspectiveCamera(62,innerWidth/innerHeight,.1,1e3);scene.add(camera);const prisonRoot=new THREE.Group;prisonRoot.name="prison-world",scene.add(prisonRoot),CBZ.scene=scene,CBZ.camera=camera,CBZ.prisonRoot=prisonRoot})();

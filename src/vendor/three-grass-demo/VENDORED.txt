@@ -1,0 +1,107 @@
+Vendored for BUILD-PLAN.md O2 (first OSS integration proof — see
+src/integrations/grass.js for the adapter that consumes this).
+
+Source:  https://github.com/James-Smyth/three-grass-demo
+Commit:  086fe4fcc178e174e6f06bf21de07847e3f84819 (branch: main)
+         https://github.com/James-Smyth/three-grass-demo/tree/086fe4fcc178e174e6f06bf21de07847e3f84819
+Vendored: 2026-07-02
+License: MIT (Copyright (c) 2020-2021 James Smyth) — full text in ./LICENSE,
+         copied verbatim from the repo root. Covers the whole repository;
+         no per-file license notices exist upstream.
+
+Files taken from the repo, BYTE-IDENTICAL (verified via `diff` at vendor time
+— re-run the diff against a fresh clone if this file is ever re-vendored):
+  LICENSE                            - upstream's MIT text, unmodified.
+  README.md                          - upstream's own README, unmodified,
+                                        for provenance/reference.
+  src/index.js                       - the full original demo entry point,
+                                        unmodified. NOT imported by the
+                                        adapter (see "WHAT'S ACTUALLY USED"
+                                        below) — kept for provenance/diffing
+                                        and because it's where the geometry-
+                                        builder algorithm the adapter ports
+                                        lives (generateField/generateBlade).
+  src/shaders/grass.js               - upstream's shader re-export shim,
+                                        unmodified. NOT imported (see below).
+  src/shaders/glsl/grass.vert.glsl   - the actual grass-sway vertex shader.
+                                        IMPORTED VERBATIM by the adapter.
+  src/shaders/glsl/grass.frag.glsl   - the actual grass fragment shader
+                                        (grass+cloud texture blend).
+                                        IMPORTED VERBATIM by the adapter.
+
+NOT vendored: dist/ (upstream's own rollup build output — not source),
+package.json/package-lock.json/rollup.config.js (upstream's OWN build
+tooling — irrelevant to this repo, which uses Vite; see below), the two
+JPEG textures upstream's demo ships (dist/grass.jpg, dist/cloud.jpg) —
+see "TEXTURES" below for why.
+
+WHAT'S ACTUALLY USED, AND WHY NOT ALL OF IT (r128 / no-bundler compat notes
+for the NEXT person reading this — none of this touches the vendored
+BYTES, only what the adapter chooses to `import`):
+
+1. THE SHADERS (grass.vert.glsl / grass.frag.glsl) are the real deliverable
+   — imported completely unmodified via Vite's built-in `?raw` suffix
+   (`import vert from ".../grass.vert.glsl?raw"`), which returns the file's
+   raw text content with ZERO new dependency (this is a native Vite feature,
+   not a plugin) and zero bytes changed in the vendored files. They are
+   plain GLSL ES1 (`texture2D`, no `#version` pragma), which is exactly
+   what THREE.ShaderMaterial expects on r128 (this game's CDN-vendored
+   three version, index.html:246) — no compat shim needed for the shaders
+   themselves.
+
+2. src/shaders/grass.js (upstream's `export default {vert, frag}` shim) is
+   NOT imported. Upstream wrote it assuming a bundler with a raw-text-import
+   plugin for `.glsl` files (rollup-plugin-string — see upstream's own
+   rollup.config.js), which this project doesn't have and isn't adding just
+   for this. Vite's native `?raw` suffix (see #1) is the drop-in equivalent
+   — same result (raw shader source strings), reached by having the adapter
+   import the two .glsl files directly instead of going through this shim.
+   Kept vendored for provenance; effectively unused.
+
+3. src/index.js is NOT imported. It's a self-contained demo that builds its
+   OWN THREE.Scene/PerspectiveCamera/WebGLRenderer/OrbitControls and drives
+   its own requestAnimationFrame loop — running it verbatim would fight the
+   live game's actual renderer/camera/loop (adoptScene() hands the adapter
+   the game's REAL scene/camera/renderer per bootstrap.js's contract; a
+   second renderer is not an option). What IS reused from it is the pure
+   geometry-building algorithm (`generateField()` / `generateBlade()`,
+   index.js:78-167) — the part with no scene/camera/renderer coupling.
+   src/integrations/grass.js PORTS this (not verbatim — upstream doesn't
+   export it as a callable function) with exactly 4 documented changes,
+   called out again inline at the port site:
+     a. wrapped in a factory taking (patchRadius, bladeCount, ...) as
+        parameters instead of upstream's hardcoded module-level constants
+        (PLANE_SIZE/BLADE_COUNT/BLADE_WIDTH/...), so the adapter can build
+        more than one differently-sized patch;
+     b. `Math.random()` -> the adapter's own seeded LCG (this repo's
+        convention: seeded LCG, never Math.random, for world state —
+        BUILD-PLAN.md's own preamble; ports the exact same
+        `s = (s*1103515245+12345) & 0x7fffffff` LCG already used by
+        src/city/minicities.js:58-61 and src/city/countries.js:346);
+     c. dropped the trailing `geom.computeVertexNormals(); geom.computeFaceNormals();`
+        calls (index.js:113-114) — the vertex shader never reads a normal
+        attribute (see grass.vert.glsl), so upstream's own call was dead
+        weight; the port skips it (also sidesteps BufferGeometry not
+        exposing `computeFaceNormals` at all on modern three — a legacy-
+        Geometry-only method upstream's copy-paste left in);
+     d. multi-patch: the port is called once per anchor (see grass.js's
+        PATCHES table) instead of upstream's single `generateField()` call.
+   Vertex layout, index winding, the 5-vertex blade shape (bl/br/tl/tr/tc),
+   the yaw/tipBend random-lean math, and the black/gray/white vertex-color
+   sway-weight encoding the vertex shader keys off of (grass.vert.glsl:17-21)
+   are otherwise IDENTICAL to upstream, line for line.
+
+TEXTURES: upstream's fragment shader (grass.frag.glsl:11,13) samples two
+textures (a grass-blade colour texture and a tiling cloud texture) blended
+40%. Upstream ships these as two JPEGs (dist/grass.jpg, dist/cloud.jpg) —
+NOT vendored here: unlike the GLSL/JS (plainly covered by the repo's MIT
+LICENSE, which the repo root applies to "the Software" generically), a
+photographic/rasterized texture asset's own rights are murkier to inherit
+from a code license, and it's not worth the ambiguity for two small
+placeholder images. src/integrations/grass.js instead generates two tiny
+procedural canvas textures at runtime (grassProceduralTexture() /
+cloudProceduralTexture(), adapter-authored, not vendored, clearly marked
+where they're defined) that feed the exact same two texture-uniform slots
+the UNTOUCHED fragment shader already samples — the shader code doing the
+sampling/blending is unchanged; only the pixel source feeding it differs
+from upstream's JPEGs.

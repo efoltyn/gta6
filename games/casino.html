@@ -1,0 +1,1825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" href="data:," />
+<title>THE GOLDEN ACE — Games of Chance</title>
+<!-- ============================================================
+  THE GOLDEN ACE — a complete casino game in one file.
+  Same method that built this repo: cell-block-z.original.html was JAIL
+  as its own finished game before it became the city. This is CASINO as
+  its own finished game before it becomes a room in the city.
+  (Integration recipe + the general method: GAMES-FIRST.md)
+
+  Every object answers WHY:
+    cage      -> you can only bet CHIPS; cash<->chips happens here
+    tables    -> blackjack (6-deck, S17, 3:2) with a dealer per table
+    wheel     -> European single-zero roulette, true pocket order
+    slots     -> 3-reel 22-stop machine, exact 90.8% RTP (enumerable)
+    tote      -> last-numbers board, because pattern-chasers exist
+    bar       -> drinks cost money; the house comps you when you're hot
+    pit boss  -> appears when you run the table; the house watches
+    shark     -> when you bust, his booth is the only money left
+    security  -> the arc's hands: escorts winners, tosses debtors
+  Arc: walk in with $500 -> leave with $5,000 (WIN), bust in debt to
+  the shark (LOSE), or cash out and walk into the night (LEAVE).
+
+  Tech: three.js r128 (vendored, UMD global), no build step, no CDN,
+  no external requests. Deterministic geometry (seeded hash), gameplay
+  RNG through nextRand() so the check tool can rig hands.
+  Gate: node tools/casino-check.mjs
+============================================================ -->
+<style>
+  :root{
+    --ink:#0e1512;
+    --felt:#155e3c;
+    --felt-d:#0b3f27;
+    --gold:#e8b64c;
+    --gold-d:#a97c1f;
+    --cream:#fff6e2;
+    --wine:#8c1a2c;
+    --neon:#ff4fa3;
+    --shadow:0 8px 0 rgba(0,0,0,.28), 0 14px 30px rgba(0,0,0,.38);
+    --font:'Trebuchet MS','Segoe UI',Verdana,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%; overflow:hidden; background:#060b09; font-family:var(--font);}
+  #game{position:fixed; inset:0;}
+  canvas{display:block;}
+
+  /* ---------- HUD ---------- */
+  #hud{position:fixed; inset:0; pointer-events:none; color:#fff; user-select:none;}
+  .panel{
+    background:rgba(10,22,17,.72);
+    backdrop-filter:blur(6px);
+    border:2px solid rgba(232,182,76,.35);
+    border-radius:14px;
+    box-shadow:0 6px 0 rgba(0,0,0,.25);
+  }
+  #objective{
+    position:absolute; top:16px; left:16px; max-width:min(58vw,400px);
+    padding:11px 15px; font-size:15px; font-weight:600; line-height:1.3; letter-spacing:.2px;
+  }
+  #objective .tag{
+    display:inline-block; font-size:10px; font-weight:800; letter-spacing:2.4px;
+    color:var(--gold); text-transform:uppercase; margin-bottom:3px;
+  }
+  #topright{position:absolute; top:16px; right:16px; display:flex; gap:10px; align-items:stretch;}
+  #topright .pill{padding:9px 14px; font-weight:800; font-size:17px; display:flex; align-items:center; gap:9px;}
+  .ic-cash{width:20px;height:13px;border-radius:3px;background:linear-gradient(180deg,#67d98a,#2f9c55);box-shadow:inset 0 -2px 0 rgba(0,0,0,.25);}
+  .ic-chip{width:17px;height:17px;border-radius:50%;background:radial-gradient(circle at 50% 42%,#ffd980 0 34%,#c9962e 35% 100%);box-shadow:inset 0 -2px 0 rgba(0,0,0,.3), 0 0 0 2.5px #7c5a17;}
+  #debtPill{display:none; border-color:rgba(255,80,90,.6);}
+  #debtPill.on{display:flex; color:#ff9aa2;}
+  #hint{
+    position:absolute; left:50%; bottom:96px; transform:translateX(-50%) translateY(10px);
+    padding:9px 16px; font-weight:700; font-size:15px; opacity:0; transition:opacity .18s, transform .18s;
+    white-space:nowrap;
+  }
+  #hint.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  #feed{position:absolute; right:16px; top:74px; display:flex; flex-direction:column; gap:7px; align-items:flex-end; max-width:min(46vw,380px);}
+  .feedline{
+    padding:7px 12px; font-size:13.5px; font-weight:700; color:var(--cream);
+    animation:feedin .25s ease, feedout .5s ease 4.4s forwards;
+  }
+  .feedline.gold{color:var(--gold);}
+  .feedline.bad{color:#ff9aa2;}
+  @keyframes feedin{from{opacity:0; transform:translateX(14px);}to{opacity:1; transform:none;}}
+  @keyframes feedout{to{opacity:0; transform:translateY(-6px);}}
+  #toast{
+    position:absolute; left:50%; top:34%; transform:translate(-50%,-50%) scale(.7);
+    font-size:58px; font-weight:800; letter-spacing:3px; color:#fff; text-align:center;
+    text-shadow:0 4px 0 var(--gold-d), 0 8px 0 #6b4c0e, 0 16px 30px rgba(0,0,0,.55);
+    opacity:0; pointer-events:none; white-space:nowrap;
+  }
+  #toast.pop{animation:toastpop 1.5s ease forwards;}
+  @keyframes toastpop{
+    0%{opacity:0; transform:translate(-50%,-50%) scale(.6) rotate(-3deg);}
+    16%{opacity:1; transform:translate(-50%,-50%) scale(1.08) rotate(1.5deg);}
+    30%{transform:translate(-50%,-50%) scale(1) rotate(0);}
+    82%{opacity:1;}
+    100%{opacity:0; transform:translate(-50%,-58%) scale(1);}
+  }
+  #vignette{position:fixed; inset:0; pointer-events:none; box-shadow:inset 0 0 190px 34px rgba(0,0,0,.52); transition:box-shadow .4s;}
+  #vignette.warm{box-shadow:inset 0 0 220px 60px rgba(196,120,30,.34);}
+  #crosshair{position:absolute; left:50%; top:50%; width:5px; height:5px; margin:-2.5px; border-radius:50%; background:rgba(255,246,226,.85); box-shadow:0 0 6px rgba(0,0,0,.7);}
+  body.seated #crosshair{display:none;}
+
+  /* ---------- Tote board (roulette history) ---------- */
+  #tote{position:absolute; left:16px; top:96px; padding:9px 12px; display:none;}
+  body.at-roulette #tote{display:block;}
+  #tote .lab{font-size:9.5px; font-weight:800; letter-spacing:2px; color:var(--gold); text-transform:uppercase; margin-bottom:6px;}
+  #toteNums{display:flex; gap:5px;}
+  .tnum{width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12.5px; font-weight:800; background:#222; box-shadow:inset 0 -2px 0 rgba(0,0,0,.4);}
+  .tnum.red{background:#a41f2f;} .tnum.green{background:#0f7a44;}
+
+  /* ---------- Seated game panel ---------- */
+  #gamePanel{
+    position:absolute; left:50%; bottom:14px; transform:translateX(-50%);
+    width:min(860px,96vw); padding:13px 16px 14px; pointer-events:auto; display:none;
+  }
+  body.seated #gamePanel{display:block;}
+  #gpTitle{display:flex; justify-content:space-between; align-items:center; margin-bottom:9px;}
+  #gpName{font-size:15px; font-weight:800; letter-spacing:2px; color:var(--gold); text-transform:uppercase;}
+  #gpSub{font-size:12px; font-weight:600; opacity:.75;}
+  #gpBody{min-height:52px;}
+  .gbtn{
+    display:inline-flex; align-items:center; justify-content:center; padding:9px 16px; margin:3px 4px 3px 0;
+    background:linear-gradient(180deg,#2c8d58,#1c6b40); color:#fff; border:0; border-radius:11px;
+    font-family:var(--font); font-size:14.5px; font-weight:800; letter-spacing:.4px; cursor:pointer;
+    box-shadow:0 4px 0 #114227, 0 7px 14px rgba(0,0,0,.35); transition:transform .06s, filter .12s;
+  }
+  .gbtn:hover{filter:brightness(1.12);}
+  .gbtn:active{transform:translateY(3px); box-shadow:0 1px 0 #114227;}
+  .gbtn.gold{background:linear-gradient(180deg,#f0c25e,#c98f22); color:#3a2803; box-shadow:0 4px 0 #7c5a17, 0 7px 14px rgba(0,0,0,.35);}
+  .gbtn.gold:active{box-shadow:0 1px 0 #7c5a17;}
+  .gbtn.dark{background:linear-gradient(180deg,#3a4a52,#26343c); box-shadow:0 4px 0 #131c21, 0 7px 14px rgba(0,0,0,.35);}
+  .gbtn.dark:active{box-shadow:0 1px 0 #131c21;}
+  .gbtn.wine{background:linear-gradient(180deg,#a83246,#7c1626); box-shadow:0 4px 0 #470a15, 0 7px 14px rgba(0,0,0,.35);}
+  .gbtn.wine:active{box-shadow:0 1px 0 #470a15;}
+  .gbtn:disabled{filter:grayscale(.7) brightness(.75); cursor:default; transform:none;}
+  .chipbtn{
+    width:46px; height:46px; border-radius:50%; border:0; cursor:pointer; margin-right:7px;
+    font-family:var(--font); font-weight:800; font-size:12.5px; color:#fff; position:relative;
+    box-shadow:inset 0 0 0 3px rgba(255,255,255,.85), inset 0 0 0 6px rgba(0,0,0,.18), 0 4px 0 rgba(0,0,0,.35);
+    transition:transform .07s;
+  }
+  .chipbtn:active{transform:translateY(3px);}
+  .chipbtn.sel{outline:3px solid var(--gold); outline-offset:2px;}
+  .gp-row{display:flex; align-items:center; flex-wrap:wrap; gap:4px 6px;}
+  .gp-msg{font-size:14px; font-weight:700; color:var(--cream); margin:4px 2px 6px;}
+  .gp-msg b{color:var(--gold);}
+
+  /* roulette board */
+  #rboard{display:grid; grid-template-columns:34px repeat(12,1fr) 44px; gap:3px; margin:6px 0 8px;}
+  .rcell{
+    position:relative; height:30px; border-radius:6px; display:flex; align-items:center; justify-content:center;
+    font-size:12.5px; font-weight:800; color:#fff; cursor:pointer; background:#232d29;
+    box-shadow:inset 0 -2px 0 rgba(0,0,0,.35); transition:filter .1s;
+  }
+  .rcell:hover{filter:brightness(1.35);}
+  .rcell.red{background:#a41f2f;} .rcell.black{background:#1a1f24;} .rcell.green{background:#0f7a44;}
+  .rcell.outer{background:#2c4438; font-size:11px; letter-spacing:.6px;}
+  .rcell .amt{
+    position:absolute; right:-4px; top:-7px; min-width:20px; height:20px; padding:0 4px; border-radius:10px;
+    background:var(--gold); color:#3a2803; font-size:10.5px; font-weight:800;
+    display:flex; align-items:center; justify-content:center; box-shadow:0 2px 0 rgba(0,0,0,.35);
+  }
+  .rspan3{grid-column:span 4;} .rspan2{grid-column:span 6;}
+
+  /* ---------- Screens ---------- */
+  .screen{
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(120% 130% at 50% 0%, #1c4a35 0%, #0d2b1e 46%, #050f0b 100%);
+    z-index:30; text-align:center; color:#fff; padding:24px;
+  }
+  .screen.hidden{display:none;}
+  .card-box{
+    pointer-events:auto; width:min(600px,94vw); padding:34px 34px 30px;
+    background:var(--cream); color:var(--ink); border-radius:24px;
+    box-shadow:var(--shadow); border:3px solid #fff; position:relative;
+  }
+  .suits{font-size:20px; letter-spacing:8px; color:var(--wine); margin-bottom:6px; font-weight:800;}
+  .logo{
+    font-size:clamp(38px,7.6vw,60px); font-weight:800; line-height:.95; letter-spacing:1px;
+    color:var(--gold-d);
+    text-shadow:0 3px 0 #6b4c0e, 0 5px 0 #55390a, 0 10px 22px rgba(0,0,0,.25);
+  }
+  .logo .ace{color:var(--wine); text-shadow:0 3px 0 #470a15, 0 5px 0 #2e0209, 0 10px 22px rgba(0,0,0,.25);}
+  .sub{margin-top:7px; font-weight:800; letter-spacing:3.4px; font-size:12px; text-transform:uppercase; color:#6b5636;}
+  .blurb{margin:16px auto 4px; max-width:470px; font-size:15.5px; line-height:1.5; color:#3a3324; font-weight:600;}
+  .keys{display:grid; grid-template-columns:repeat(2,1fr); gap:8px 16px; margin:18px auto 4px; max-width:470px; text-align:left;}
+  .keys .row{display:flex; align-items:center; gap:10px; font-size:13.5px; font-weight:700;}
+  .kbd{
+    display:inline-flex; align-items:center; justify-content:center; min-width:30px; height:30px; padding:0 9px;
+    background:#fff; border:2px solid #2a2622; border-bottom-width:4px; border-radius:8px;
+    font-weight:800; font-size:12.5px; color:#2a2622;
+  }
+  .bigbtn{
+    margin-top:22px; display:inline-flex; align-items:center; justify-content:center;
+    padding:15px 44px; font-family:var(--font); font-size:21px; font-weight:800; letter-spacing:1.4px;
+    color:#fff; background:linear-gradient(180deg,#b13a50,#8c1a2c); border:0; border-radius:16px; cursor:pointer;
+    box-shadow:0 6px 0 #470a15, 0 12px 24px rgba(0,0,0,.35); transition:transform .07s, filter .15s;
+  }
+  .bigbtn:hover{filter:brightness(1.1);}
+  .bigbtn:active{transform:translateY(4px); box-shadow:0 2px 0 #470a15;}
+  .bigbtn.green{background:linear-gradient(180deg,#2c8d58,#1c6b40); box-shadow:0 6px 0 #114227, 0 12px 24px rgba(0,0,0,.35);}
+  .bigbtn.green:active{box-shadow:0 2px 0 #114227;}
+  .statgrid{display:grid; grid-template-columns:1fr 1fr; gap:7px 18px; margin:16px auto 2px; max-width:420px; text-align:left;}
+  .statgrid .s{display:flex; justify-content:space-between; font-size:14px; font-weight:700; color:#3a3324; border-bottom:2px dotted #d8c9a4; padding-bottom:4px;}
+  .statgrid .s b{color:var(--ink);}
+  #endTitle{font-size:clamp(34px,6.6vw,52px);}
+  .mutehint{position:fixed; right:14px; bottom:10px; font-size:11px; font-weight:700; color:rgba(255,246,226,.5); letter-spacing:1px; z-index:5;}
+</style>
+</head>
+<body>
+<div id="game"></div>
+
+<div id="hud">
+  <div id="objective" class="panel"><span class="tag">The Golden Ace</span><div id="objText">Walk in with $500. Walk out with $5,000.</div></div>
+  <div id="topright">
+    <div class="pill panel" id="cashPill"><span class="ic-cash"></span><span id="cashVal">$500</span></div>
+    <div class="pill panel" id="chipPill"><span class="ic-chip"></span><span id="chipVal">0</span></div>
+    <div class="pill panel" id="debtPill">OWED <span id="debtVal">$0</span></div>
+  </div>
+  <div id="tote" class="panel"><div class="lab">Last Numbers</div><div id="toteNums"></div></div>
+  <div id="feed"></div>
+  <div id="hint" class="panel"></div>
+  <div id="toast"></div>
+  <div id="crosshair"></div>
+  <div id="gamePanel" class="panel">
+    <div id="gpTitle"><span id="gpName">BLACKJACK</span><span id="gpSub"></span></div>
+    <div id="gpBody"></div>
+  </div>
+</div>
+<div id="vignette"></div>
+<div class="mutehint">M — sound</div>
+
+<div id="titleScreen" class="screen">
+  <div class="card-box">
+    <div class="suits">&#9824; &#9829; &#9827; &#9830;</div>
+    <div class="logo">THE GOLDEN <span class="ace">ACE</span></div>
+    <div class="sub">Games of Chance &middot; Est. Tonight</div>
+    <p class="blurb">You've got <b>$500</b> of street money and a plan: turn it into
+    <b>$5,000</b> at the Ace and buy into the big job. The cage sells chips, the felt
+    takes them, and the house always has an edge. Don't end the night owing the shark.</p>
+    <div class="keys">
+      <div class="row"><span class="kbd">W A S D</span> Walk the floor</div>
+      <div class="row"><span class="kbd">Mouse</span> Look around</div>
+      <div class="row"><span class="kbd">E</span> Sit &middot; talk &middot; buy in</div>
+      <div class="row"><span class="kbd">Esc</span> Stand up</div>
+      <div class="row"><span class="kbd">Shift</span> Hustle</div>
+      <div class="row"><span class="kbd">M</span> Sound on / off</div>
+    </div>
+    <button class="bigbtn" id="playBtn">DEAL ME IN</button>
+  </div>
+</div>
+
+<div id="endScreen" class="screen hidden">
+  <div class="card-box">
+    <div class="suits" id="endSuits">&#9824; &#9829; &#9827; &#9830;</div>
+    <div class="logo" id="endTitle">HOUSE MONEY</div>
+    <div class="sub" id="endSub">You beat the Ace</div>
+    <p class="blurb" id="endBlurb"></p>
+    <div class="statgrid" id="endStats"></div>
+    <button class="bigbtn green" id="againBtn">ANOTHER NIGHT</button>
+  </div>
+</div>
+
+<script src="../src/vendor/three.r128.min.js"></script>
+<script>
+"use strict";
+/* ================= CONFIG / SEEDED HASH / RNG ================= */
+var CFG = {
+  GOAL: 5000, START_CASH: 500,
+  BJ_MIN: 25, BJ_MAX: 1000, RL_MAX: 500, SLOT_BETS: [5, 10, 25],
+  DRINK_COST: 15, LOAN_GIVE: 300, LOAN_OWE: 450,
+  PITBOSS_AT: 2500, COMP_STREAK: 3,
+};
+var qs = {}; location.search.replace(/[?&]([^=&]+)=?([^&]*)/g, function (_, k, v) { qs[k] = decodeURIComponent(v || "1"); });
+
+/* deterministic build-time hash (geometry variety) — NOT gameplay */
+function mulberry32(a) { return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; var t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+var seedRand = mulberry32(20260718);
+
+/* gameplay RNG — single funnel so the check tool can rig outcomes */
+var rigQueue = [];
+function nextRand() { if (rigQueue.length) return rigQueue.shift(); return Math.random(); }
+
+/* ================= AUDIO (all synthesized, no assets) ================= */
+var SFX = (function () {
+  var ctx = null, master = null, muted = false, padOsc = null;
+  function ac() {
+    if (!ctx) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      ctx = new AC(); master = ctx.createGain(); master.gain.value = 0.42; master.connect(ctx.destination);
+    }
+    if (ctx.state === "suspended") ctx.resume();
+    return ctx;
+  }
+  function blip(freq, dur, type, vol, slide) {
+    var c = ac(); if (!c || muted) return;
+    var o = c.createOscillator(), g = c.createGain();
+    o.type = type || "square"; o.frequency.setValueAtTime(freq, c.currentTime);
+    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(20, freq + slide), c.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.12, c.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + dur);
+    o.connect(g); g.connect(master); o.start(); o.stop(c.currentTime + dur + 0.02);
+  }
+  function noise(dur, freq, vol) {
+    var c = ac(); if (!c || muted) return;
+    var n = Math.floor(c.sampleRate * dur), buf = c.createBuffer(1, n, c.sampleRate), d = buf.getChannelData(0);
+    for (var i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    var src = c.createBufferSource(); src.buffer = buf;
+    var f = c.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = freq; f.Q.value = 0.9;
+    var g = c.createGain(); g.gain.value = vol || 0.2;
+    src.connect(f); f.connect(g); g.connect(master); src.start();
+  }
+  function ambience() { /* faint lounge pad — two detuned triangles */
+    var c = ac(); if (!c || padOsc) return;
+    padOsc = [];
+    [110, 164.8, 220.5].forEach(function (f, i) {
+      var o = c.createOscillator(), g = c.createGain();
+      o.type = "triangle"; o.frequency.value = f + (i ? 0.7 : 0);
+      g.gain.value = 0.012; o.connect(g); g.connect(master); o.start(); padOsc.push(o);
+    });
+  }
+  return {
+    unlock: function () { ac(); ambience(); },
+    toggleMute: function () { muted = !muted; if (master) master.gain.value = muted ? 0 : 0.42; return muted; },
+    card: function () { noise(0.09, 2600, 0.16); },
+    chip: function () { blip(2300, 0.05, "square", 0.05); noise(0.05, 3600, 0.1); },
+    chips: function () { var i = 0; var t = setInterval(function () { SFX.chip(); if (++i > 3) clearInterval(t); }, 45); },
+    tick: function () { blip(1900, 0.03, "square", 0.035); },
+    reel: function () { noise(0.05, 900, 0.07); },
+    stop: function () { blip(300, 0.09, "square", 0.09); },
+    win: function () { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { blip(f, 0.16, "square", 0.09); }, i * 90); }); },
+    jackpot: function () { [523, 659, 784, 1047, 784, 1047, 1319, 1568].forEach(function (f, i) { setTimeout(function () { blip(f, 0.18, "square", 0.1); }, i * 95); }); },
+    lose: function () { blip(196, 0.3, "sawtooth", 0.07, -60); },
+    pour: function () { noise(0.5, 700, 0.12); },
+    cash: function () { blip(1200, 0.07, "square", 0.08); setTimeout(function () { blip(1600, 0.09, "square", 0.08); }, 70); },
+    door: function () { noise(0.25, 300, 0.16); },
+    boo: function () { blip(130, 0.5, "sawtooth", 0.1, -40); },
+  };
+})();
+/* ================= THREE BOOT ================= */
+var renderer, scene, camera;
+var IX = 17, IZ = 11, WALL_H = 5.6;              // interior half-extents / height
+var solids = [];                                  // 2D collision AABBs {x1,z1,x2,z2}
+var animators = [];                               // fn(dt,t) per-frame
+var gWorld, gProps, gNPCs, gCards, gChips;
+function solid(x1, z1, x2, z2) { solids.push({ x1: Math.min(x1, x2), z1: Math.min(z1, z2), x2: Math.max(x1, x2), z2: Math.max(z1, z2) }); }
+
+function boot3D() {
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setClearColor(0x070d14);
+  document.getElementById("game").appendChild(renderer.domElement);
+  scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x070d14, 34, 78);
+  camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.08, 220);
+  camera.position.set(0, 1.62, -16.5);
+  window.addEventListener("resize", function () {
+    camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+  gWorld = new THREE.Group(); gProps = new THREE.Group(); gNPCs = new THREE.Group();
+  gCards = new THREE.Group(); gChips = new THREE.Group();
+  scene.add(gWorld); scene.add(gProps); scene.add(gNPCs); scene.add(gCards); scene.add(gChips);
+
+  scene.add(new THREE.AmbientLight(0x322a20, 0.85));
+  var hemi = new THREE.HemisphereLight(0x2c3a4a, 0x14100a, 0.5); scene.add(hemi);
+  var moon = new THREE.DirectionalLight(0x5a76b0, 0.4); moon.position.set(-18, 26, -30); scene.add(moon);
+}
+function ptLight(x, y, z, color, intensity, dist) {
+  var L = new THREE.PointLight(color, intensity, dist, 1.6); L.position.set(x, y, z); scene.add(L); return L;
+}
+
+/* ================= MATERIALS / TEXTURES ================= */
+var _mats = {};
+function mat(c) { if (!_mats["l" + c]) _mats["l" + c] = new THREE.MeshLambertMaterial({ color: c }); return _mats["l" + c]; }
+function pmat(c, shin) { var k = "p" + c + "_" + (shin || 6); if (!_mats[k]) _mats[k] = new THREE.MeshPhongMaterial({ color: c, shininess: shin || 6, specular: 0x1c1c1c }); return _mats[k]; }
+function emat(c, i) { var k = "e" + c + "_" + i; if (!_mats[k]) _mats[k] = new THREE.MeshLambertMaterial({ color: c, emissive: c, emissiveIntensity: i == null ? 0.9 : i }); return _mats[k]; }
+function box(parent, x, y, z, w, h, d, m, ry) {
+  var mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+  mesh.position.set(x, y, z); if (ry) mesh.rotation.y = ry;
+  parent.add(mesh); return mesh;
+}
+function cyl(parent, x, y, z, rt, rb, h, m, seg) {
+  var mesh = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg || 14), m);
+  mesh.position.set(x, y, z); parent.add(mesh); return mesh;
+}
+function canvasTex(w, h, draw, rx, ry) {
+  var c = document.createElement("canvas"); c.width = w; c.height = h;
+  draw(c.getContext("2d"), w, h);
+  var t = new THREE.CanvasTexture(c);
+  if (rx || ry) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx || 1, ry || 1); }
+  return t;
+}
+
+var PAL = {
+  wood: 0x4a2e1c, woodD: 0x33200f, brass: 0xc9a227, brassD: 0x8a6a14,
+  feltG: 0x1c6e46, feltD: 0x12492e, wine: 0x6e1524, cream: 0xe8dcc0,
+  wallG: 0x1d3a2c, wainscot: 0x3a2416, carpetBg: 0x451018, slotBody: 0x232c38,
+};
+
+function carpetTexture() {
+  return canvasTex(256, 256, function (g) {
+    g.fillStyle = "#451018"; g.fillRect(0, 0, 256, 256);
+    g.strokeStyle = "#7c5a17"; g.lineWidth = 3;
+    for (var i = -1; i < 3; i++) for (var j = -1; j < 3; j++) {
+      var cx = i * 128 + 64, cy = j * 128 + 64;
+      g.beginPath(); g.moveTo(cx, cy - 54); g.lineTo(cx + 54, cy); g.lineTo(cx, cy + 54); g.lineTo(cx - 54, cy); g.closePath(); g.stroke();
+      g.fillStyle = "#8c1a2c"; g.beginPath(); g.arc(cx, cy, 9, 0, 7); g.fill();
+      g.fillStyle = "#c9a227"; g.beginPath(); g.arc(cx, cy, 4, 0, 7); g.fill();
+    }
+  }, 9, 6);
+}
+function textPanelTex(lines, opts) {
+  opts = opts || {};
+  return canvasTex(opts.w || 512, opts.h || 128, function (g, w, h) {
+    g.fillStyle = opts.bg || "#170f08"; g.fillRect(0, 0, w, h);
+    g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillStyle = opts.fg || "#ffd977";
+    var fs = opts.fs || 64;
+    g.font = "800 " + fs + "px 'Trebuchet MS', Verdana, sans-serif";
+    var n = lines.length;
+    for (var i = 0; i < n; i++) {
+      if (opts.glow) { g.shadowColor = opts.fg || "#ffd977"; g.shadowBlur = 22; }
+      g.fillText(lines[i], w / 2, h * (i + 0.5) / n);
+    }
+  });
+}
+
+/* ================= ARCHITECTURE ================= */
+function buildWorld() {
+  /* --- ground: street + sidewalk + interior slab --- */
+  var street = new THREE.Mesh(new THREE.PlaneGeometry(80, 18), pmat(0x0e1218, 14));
+  street.rotation.x = -Math.PI / 2; street.position.set(0, 0, -20); gWorld.add(street);
+  var lane = box(gWorld, 0, 0.005, -21.5, 60, 0.01, 0.3, emat(0xc9a227, 0.12)); lane.userData.ground = 1;
+  var walk = new THREE.Mesh(new THREE.PlaneGeometry(80, 8), pmat(0x2a2d33, 10));
+  walk.rotation.x = -Math.PI / 2; walk.position.set(0, 0.02, -15); gWorld.add(walk);
+  var carpet = new THREE.Mesh(new THREE.PlaneGeometry(IX * 2, IZ * 2), new THREE.MeshPhongMaterial({ map: carpetTexture(), shininess: 4, specular: 0x111111 }));
+  carpet.rotation.x = -Math.PI / 2; carpet.position.set(0, 0.03, 0); gWorld.add(carpet);
+  var entryRug = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 8), pmat(0x8c1a2c, 4));
+  entryRug.rotation.x = -Math.PI / 2; entryRug.position.set(0, 0.05, -13.5); gWorld.add(entryRug);
+
+  /* --- facade (front wall of the building, faces the street) --- */
+  var fw = 19.5, FH = 9.2;
+  // wall pieces around the door gap [-1.8, 1.8]
+  box(gWorld, -(1.8 + (fw - 1.8) / 2), FH / 2, -IZ - 0.25, fw - 1.8, FH, 0.5, mat(0x2c2320));
+  box(gWorld, (1.8 + (fw - 1.8) / 2), FH / 2, -IZ - 0.25, fw - 1.8, FH, 0.5, mat(0x2c2320));
+  box(gWorld, 0, FH - 1.1, -IZ - 0.25, 3.6, 2.2, 0.5, mat(0x2c2320)); // header above door
+  solid(-fw, -IZ - 0.5, -1.8, -IZ); solid(1.8, -IZ - 0.5, fw, -IZ);
+  // upper-floor windows: warm slits (implied life upstairs)
+  for (var wx = -3; wx <= 3; wx++) { if (!wx) continue; box(gWorld, wx * 2.6, 7.4, -IZ - 0.51, 1.1, 1.5, 0.06, emat(0xffb45e, 0.55)); }
+  // side + back walls (interior faces them)
+  box(gWorld, -IX - 0.25, WALL_H / 2, 0, 0.5, WALL_H, IZ * 2 + 1, mat(PAL.wallG)); solid(-IX - 0.5, -IZ, -IX, IZ);
+  box(gWorld, IX + 0.25, WALL_H / 2, 0, 0.5, WALL_H, IZ * 2 + 1, mat(PAL.wallG)); solid(IX, -IZ, IX + 0.5, IZ);
+  box(gWorld, 0, WALL_H / 2, IZ + 0.25, IX * 2 + 1, WALL_H, 0.5, mat(PAL.wallG)); solid(-IX, IZ, IX, IZ + 0.5);
+  // interior face of the front wall: green above wainscot
+  box(gWorld, -(1.8 + (IX - 1.8) / 2), WALL_H / 2, -IZ + 0.05, IX - 1.8, WALL_H, 0.12, mat(PAL.wallG));
+  box(gWorld, (1.8 + (IX - 1.8) / 2), WALL_H / 2, -IZ + 0.05, IX - 1.8, WALL_H, 0.12, mat(PAL.wallG));
+  box(gWorld, 0, WALL_H - 0.6, -IZ + 0.05, 3.6, 1.2, 0.12, mat(PAL.wallG));
+  // wainscot + gold trim, all 4 interior walls
+  [[-IX + 0.1, 0, 0.2, IZ * 2], [IX - 0.1, 0, 0.2, IZ * 2], [0, IZ - 0.1, IX * 2, 0.2]].forEach(function (s) {
+    box(gWorld, s[0], 0.65, s[1], s[2], 1.3, s[3], mat(PAL.wainscot));
+    box(gWorld, s[0], 1.36, s[1], s[2] + 0.02, 0.1, s[3] + 0.02, mat(PAL.brass));
+  });
+  box(gWorld, -(1.8 + (IX - 1.8) / 2), 0.65, -IZ + 0.16, IX - 1.8, 1.3, 0.2, mat(PAL.wainscot));
+  box(gWorld, (1.8 + (IX - 1.8) / 2), 0.65, -IZ + 0.16, IX - 1.8, 1.3, 0.2, mat(PAL.wainscot));
+
+  /* --- doors: propped open inward (the Ace never closes) --- */
+  var doorM = pmat(0x3a2416, 20);
+  box(gWorld, -1.75, 1.5, -IZ + 0.75, 0.14, 3.0, 1.5, doorM, 0).rotation.y = -0.5;
+  box(gWorld, 1.75, 1.5, -IZ + 0.75, 0.14, 3.0, 1.5, doorM, 0).rotation.y = 0.5;
+  box(gWorld, 0, 3.15, -IZ, 4.0, 0.3, 0.7, mat(PAL.brass)); // door lintel
+
+  /* --- marquee: THE GOLDEN ACE + chase bulbs --- */
+  var mq = new THREE.Group(); gWorld.add(mq);
+  box(mq, 0, 5.1, -IZ - 1.35, 12.4, 1.9, 2.6, mat(0x1a1410));
+  var face = new THREE.Mesh(new THREE.PlaneGeometry(11.6, 1.5),
+    new THREE.MeshBasicMaterial({ map: textPanelTex(["THE GOLDEN ACE"], { w: 1024, h: 160, fs: 104, bg: "#12100c", fg: "#ffd977", glow: true }) }));
+  face.position.set(0, 5.1, -IZ - 2.68); face.rotation.y = Math.PI; mq.add(face);
+  var chase = [];
+  for (var b = 0; b < 26; b++) { // bulbs along marquee bottom+top edges
+    var bx = -5.9 + (b % 13) * 0.985, by = b < 13 ? 4.05 : 6.15;
+    var bulb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), new THREE.MeshLambertMaterial({ color: 0xffe6a8, emissive: 0xffc84e, emissiveIntensity: 1 }));
+    bulb.position.set(bx, by, -IZ - 2.62); mq.add(bulb); chase.push(bulb);
+  }
+  animators.push(function (dt, t) {
+    for (var i = 0; i < chase.length; i++) chase[i].material.emissiveIntensity = (((i + Math.floor(t * 9)) % 4) === 0) ? 1.3 : 0.12;
+  });
+  ptLight(0, 4.6, -IZ - 3.4, 0xffbe5e, 1.1, 12);
+
+  /* --- mast sign: C-A-S-I-N-O stacked, neon-edged, on a grounded pylon --- */
+  var mastX = 8.6;
+  box(gWorld, mastX, 7.1, -IZ - 0.9, 0.5, 14.2, 0.5, mat(0x1a1410)); solid(mastX - 0.35, -IZ - 1.25, mastX + 0.35, -IZ - 0.55);
+  box(gWorld, mastX, 0.3, -IZ - 0.9, 1.0, 0.6, 1.0, mat(0x211a12)); // plinth
+  box(gWorld, mastX, 8.6, -IZ - 1.5, 1.9, 9.6, 0.9, mat(0x211a12)); // panel reaches the pylon
+  var letters = "CASINO";
+  for (var li = 0; li < letters.length; li++) {
+    var lp = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.42),
+      new THREE.MeshBasicMaterial({ map: textPanelTex([letters[li]], { w: 128, h: 128, fs: 96, bg: "#211a12", fg: li % 2 ? "#ff4fa3" : "#ffd977", glow: true }) }));
+    lp.position.set(mastX, 12.4 - li * 1.52, -IZ - 1.72); lp.rotation.y = Math.PI; gWorld.add(lp);
+  }
+  var star = new THREE.Mesh(new THREE.SphereGeometry(0.42, 10, 8), emat(0xff4fa3, 1.2));
+  star.position.set(mastX, 13.9, -IZ - 1.5); gWorld.add(star);
+  animators.push(function (dt, t) { star.material.emissiveIntensity = 0.7 + 0.6 * Math.sin(t * 3.2); });
+  ptLight(mastX, 9.5, -IZ - 2.6, 0xff77b8, 0.9, 11);
+
+  /* --- velvet ropes: queue funnel to the door (also collision) --- */
+  for (var side = -1; side <= 1; side += 2) {
+    var rx = side * 2.5;
+    for (var p = 0; p < 3; p++) {
+      var pz = -12.2 - p * 2.1;
+      cyl(gProps, rx, 0.5, pz, 0.05, 0.05, 1.0, mat(PAL.brass));
+      cyl(gProps, rx, 1.02, pz, 0.11, 0.11, 0.06, mat(PAL.brass));
+      cyl(gProps, rx, 0.14, pz, 0.2, 0.24, 0.28, mat(PAL.brassD));
+      if (p < 2) { var rope = box(gProps, rx, 0.86, pz - 1.05, 0.09, 0.09, 1.9, mat(PAL.wine)); rope.rotation.x = 0.06; }
+    }
+    solid(rx - 0.15, -16.5, rx + 0.15, -12.0);
+  }
+  /* --- street lamps --- */
+  for (var sl = -1; sl <= 1; sl += 2) {
+    cyl(gWorld, sl * 12, 2.6, -18.6, 0.09, 0.13, 5.2, mat(0x22262c));
+    box(gWorld, sl * 12, 5.3, -18.6, 0.5, 0.24, 0.5, emat(0xcfe4ff, 1.0));
+    ptLight(sl * 12, 5.0, -18.6, 0x9fc3ff, 0.75, 13);
+    solid(sl * 12 - 0.15, -18.75, sl * 12 + 0.15, -18.45);
+  }
+
+  /* --- ceiling: coffered, 3 chandeliers --- */
+  box(gWorld, 0, WALL_H + 0.15, 0, IX * 2 + 1, 0.3, IZ * 2 + 1, mat(0x17130d));
+  for (var cx = -3; cx <= 3; cx++) box(gWorld, cx * 4.8, WALL_H - 0.06, 0, 0.22, 0.12, IZ * 2, mat(PAL.brassD));
+  for (var cz = -2; cz <= 2; cz++) box(gWorld, 0, WALL_H - 0.06, cz * 4.4, IX * 2, 0.12, 0.22, mat(PAL.brassD));
+  [-8.4, 0, 8.4].forEach(function (chx) {
+    var ch = new THREE.Group(); ch.position.set(chx, 0, -0.5); gWorld.add(ch);
+    cyl(ch, 0, WALL_H - 0.55, 0, 0.05, 0.05, 1.1, mat(PAL.brassD));
+    var ring = new THREE.Mesh(new THREE.TorusGeometry(0.85, 0.09, 8, 20), mat(PAL.brass));
+    ring.rotation.x = Math.PI / 2; ring.position.y = WALL_H - 1.15; ch.add(ring);
+    for (var bu = 0; bu < 6; bu++) {
+      var a = bu / 6 * Math.PI * 2;
+      cyl(ch, Math.cos(a) * 0.85, WALL_H - 1.02, Math.sin(a) * 0.85, 0.055, 0.075, 0.22, emat(0xffdf9e, 1.1));
+    }
+    cyl(ch, 0, WALL_H - 1.3, 0, 0.16, 0.28, 0.34, mat(PAL.brass));
+    ptLight(chx, WALL_H - 1.6, -0.5, 0xffca72, 1.05, 16);
+  });
+
+  /* --- columns (structure; tables nest between them) --- */
+  [[-8.4, -5.2], [8.4, -5.2], [-8.4, 4.6], [8.4, 4.6]].forEach(function (cp) {
+    cyl(gWorld, cp[0], WALL_H / 2, cp[1], 0.42, 0.5, WALL_H, mat(PAL.wainscot), 10);
+    cyl(gWorld, cp[0], 0.14, cp[1], 0.62, 0.68, 0.28, mat(PAL.brassD), 10);
+    cyl(gWorld, cp[0], WALL_H - 0.2, cp[1], 0.66, 0.52, 0.4, mat(PAL.brassD), 10);
+    solid(cp[0] - 0.5, cp[1] - 0.5, cp[0] + 0.5, cp[1] + 0.5);
+  });
+}
+/* ================= GAME DATA SHARED WITH BUILDERS ================= */
+var seats = [];   // {id,game,pos:[x,z],yaw, cam:{pos,look}, data}
+var zones = [];   // {id,label,pos:[x,z],r,action}
+var TABLES = { bj: [], rl: null, slots: [] };
+var WHEEL_ORDER = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
+var RED_SET = {}; [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36].forEach(function(n){ RED_SET[n]=1; });
+var SLOT_STRIP = ["CHR","LEM","BAR","ORN","CHR","BELL","LEM","CHR","ORN","SEV","LEM","CHR","BELL","ORN","LEM","BAR","CHR","BELL","ORN","LEM","DIA","CHR"];
+
+/* ================= VOXEL RIGS ================= */
+function makeRig(o) {
+  o = o || {};
+  var g = new THREE.Group();
+  var skin = o.skin || 0xd9a066, shirt = o.shirt || 0x3a4a52, pants = o.pants || 0x22262c, hair = o.hair || 0x241a10;
+  var legL = new THREE.Group(); legL.position.set(-0.12, 0.74, 0); g.add(legL);
+  var legR = new THREE.Group(); legR.position.set(0.12, 0.74, 0); g.add(legR);
+  box(legL, 0, -0.37, 0, 0.17, 0.74, 0.2, mat(pants));
+  box(legR, 0, -0.37, 0, 0.17, 0.74, 0.2, mat(pants));
+  box(legL, 0, -0.71, 0.045, 0.18, 0.1, 0.3, mat(0x14100c));
+  box(legR, 0, -0.71, 0.045, 0.18, 0.1, 0.3, mat(0x14100c));
+  var torso = box(g, 0, 1.05, 0, 0.48, 0.64, 0.27, mat(shirt));
+  if (o.vest) box(g, 0, 1.0, 0.0, 0.5, 0.5, 0.29, mat(o.vest));
+  var armL = new THREE.Group(); armL.position.set(-0.305, 1.3, 0); g.add(armL);
+  var armR = new THREE.Group(); armR.position.set(0.305, 1.3, 0); g.add(armR);
+  box(armL, 0, -0.3, 0, 0.13, 0.6, 0.16, mat(o.sleeves || shirt));
+  box(armR, 0, -0.3, 0, 0.13, 0.6, 0.16, mat(o.sleeves || shirt));
+  box(armL, 0, -0.56, 0, 0.11, 0.12, 0.13, mat(skin));
+  box(armR, 0, -0.56, 0, 0.11, 0.12, 0.13, mat(skin));
+  var head = new THREE.Group(); head.position.set(0, 1.55, 0); g.add(head);
+  box(head, 0, 0, 0, 0.3, 0.3, 0.3, mat(skin));
+  box(head, 0, 0.13, -0.02, 0.32, 0.1, 0.32, mat(hair));
+  if (o.cap) { box(head, 0, 0.17, 0, 0.33, 0.09, 0.33, mat(o.cap)); box(head, 0, 0.13, 0.19, 0.32, 0.05, 0.1, mat(o.cap)); }
+  if (o.shades) box(head, 0, 0.02, 0.16, 0.26, 0.06, 0.03, mat(0x0a0a0a));
+  var R = { g: g, armL: armL, armR: armR, legL: legL, legR: legR, head: head, torso: torso };
+  R.stand = function () { armL.rotation.set(0.06, 0, 0.14); armR.rotation.set(0.06, 0, -0.14); legL.rotation.x = 0; legR.rotation.x = 0; return R; };
+  R.fold = function () { armL.rotation.set(-1.15, 0, -0.5); armR.rotation.set(-1.2, 0, 0.55); return R; };
+  R.deal = function () { armL.rotation.set(-0.75, 0, -0.38); armR.rotation.set(-0.75, 0, 0.38); return R; };
+  R.sit = function () { legL.rotation.x = -1.32; legR.rotation.x = -1.32; g.position.y += 0.18; armL.rotation.set(-0.6, 0, -0.1); armR.rotation.set(-0.6, 0, 0.1); return R; };
+  R.at = function (x, z, ry) { g.position.x = x; g.position.z = z; g.rotation.y = ry || 0; return R; };
+  R.stand();
+  return R;
+}
+function idleBob(R, phase, amp) {
+  animators.push(function (dt, t) { R.torso.position.y = 1.05 + Math.sin(t * 2.1 + phase) * (amp || 0.012); R.head.position.y = 1.55 + Math.sin(t * 2.1 + phase) * (amp || 0.012); });
+}
+
+/* ================= PROPS: CAGE / BAR / BOOTH / SLOTS / TABLES ================= */
+function buildCage() {
+  var g = gProps;
+  // teller counter facing the floor (east), cage interior against west wall
+  box(g, -11.9, 0.55, -8.45, 0.7, 1.1, 4.2, mat(PAL.wood)); solid(-12.25, -10.55, -11.55, -6.35);
+  box(g, -11.9, 1.13, -8.45, 0.86, 0.08, 4.4, mat(PAL.brass));
+  // brass bars above counter, window gap at z -8.9..-8.0
+  for (var bz = -104; bz <= -64; bz += 3) {
+    var z = bz / 10;
+    if (z > -8.95 && z < -7.95) continue;
+    cyl(g, -11.9, 1.95, z, 0.035, 0.035, 1.6, mat(PAL.brass), 8);
+  }
+  box(g, -11.9, 2.8, -8.45, 0.16, 0.14, 4.4, mat(PAL.brass));
+  // side screen closing the cage toward the door side
+  box(g, -14.2, 1.4, -6.35, 4.6, 2.8, 0.16, mat(PAL.wainscot)); solid(-16.5, -6.45, -11.9, -6.25);
+  // back fixtures: vault + count shelf (the money lives here)
+  box(g, -16.05, 1.1, -9.4, 0.8, 2.2, 1.6, mat(0x2c3038));
+  cyl(g, -15.6, 1.25, -9.4, 0.3, 0.3, 0.12, mat(PAL.brass)); // vault wheel
+  box(g, -16.1, 0.9, -7.2, 0.7, 1.8, 1.4, mat(PAL.wood));
+  box(g, -16.05, 1.86, -7.2, 0.5, 0.12, 1.2, emat(0x67d98a, 0.25)); // banded cash on the shelf
+  var sign = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.62),
+    new THREE.MeshBasicMaterial({ map: textPanelTex(["C A G E"], { w: 512, h: 128, fs: 84, bg: "#12100c", fg: "#ffd977", glow: true }) }));
+  sign.position.set(-11.85, 3.15, -8.45); sign.rotation.y = Math.PI / 2; g.add(sign); // seated on the bars' top rail
+  ptLight(-13.5, 3.2, -8.4, 0xffd48a, 0.9, 9);
+  zones.push({ id: "cage", label: "[E] The Cage — buy in / cash out", pos: [-11.2, -8.45], r: 1.5, action: function () { openCage(); } });
+}
+
+function buildBar() {
+  var g = gProps;
+  box(g, -12.7, 0.53, 8.2, 6.6, 1.06, 0.75, mat(PAL.wood)); solid(-16.0, 7.8, -9.4, 8.6);
+  box(g, -12.7, 1.1, 8.2, 6.8, 0.1, 0.9, pmat(0x2c1a0c, 30));
+  cyl(g, -15.6, 0.2, 7.75, 0.03, 0.03, 6.2, mat(PAL.brass), 6).rotation.z = Math.PI / 2; // foot rail
+  // backbar: OPEN hutch — back panel, two shelves, bottles in plain view
+  box(g, -12.7, 1.5, 10.45, 6.8, 3.0, 0.14, mat(0x241609)); solid(-16.1, 10.0, -9.3, 10.55);
+  box(g, -16.0, 1.15, 10.25, 0.2, 2.3, 0.5, mat(PAL.wainscot));
+  box(g, -9.4, 1.15, 10.25, 0.2, 2.3, 0.5, mat(PAL.wainscot));
+  box(g, -12.7, 0.5, 10.25, 6.8, 1.0, 0.5, mat(PAL.wainscot)); // cabinet base
+  box(g, -12.7, 1.42, 10.28, 6.4, 0.07, 0.42, mat(PAL.wood));  // lower shelf
+  box(g, -12.7, 2.14, 10.28, 6.4, 0.07, 0.42, mat(PAL.wood));  // upper shelf
+  box(g, -12.7, 2.98, 10.32, 6.8, 0.1, 0.4, mat(PAL.wainscot)); // crown
+  var bottleCols = [0x67d98a, 0xffd977, 0xff77b8, 0x9fc3ff, 0xff9a5e, 0xc9a2ff];
+  for (var t = 0; t < 2; t++) for (var i = 0; i < 9; i++) {
+    var bc = bottleCols[Math.floor(seedRand() * bottleCols.length)];
+    cyl(g, -15.4 + i * 0.68, 1.66 + t * 0.72, 10.3, 0.055, 0.075, 0.36, emat(bc, 0.75), 8);
+  }
+  box(g, -12.7, 1.5, 10.06, 6.4, 0.05, 0.05, emat(0xffd977, 0.7)); // shelf-edge lights
+  box(g, -12.7, 2.22, 10.06, 6.4, 0.05, 0.05, emat(0xffd977, 0.7));
+  // taps + glasses on the counter
+  cyl(g, -14.4, 1.35, 8.3, 0.04, 0.05, 0.4, mat(PAL.brass), 8);
+  cyl(g, -13.9, 1.35, 8.3, 0.04, 0.05, 0.4, mat(PAL.brass), 8);
+  for (var gl = 0; gl < 3; gl++) cyl(g, -11.6 + gl * 0.7, 1.22, 8.25, 0.06, 0.05, 0.14, pmat(0xcfe4ff, 70), 8);
+  var bsign = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 0.56),
+    new THREE.MeshBasicMaterial({ map: textPanelTex(["ACES HIGH BAR"], { w: 512, h: 96, fs: 60, bg: "#12100c", fg: "#ff9a5e", glow: true }) }));
+  bsign.position.set(-12.7, 3.55, 10.96); bsign.rotation.y = Math.PI; g.add(bsign); // mounted on the back wall
+  ptLight(-12.7, 3.0, 8.6, 0xffab66, 0.75, 9);
+  for (var s = 0; s < 3; s++) {
+    var sx = -14.2 + s * 1.5;
+    cyl(g, sx, 0.4, 7.2, 0.07, 0.09, 0.8, mat(0x22262c), 8);
+    cyl(g, sx, 0.84, 7.2, 0.26, 0.26, 0.09, mat(PAL.wine), 10);
+    solid(sx - 0.2, 7.0, sx + 0.2, 7.4);
+  }
+  zones.push({ id: "bar", label: "[E] Bar — whiskey $" + CFG.DRINK_COST, pos: [-12.7, 7.35], r: 1.7, action: function () { buyDrink(); } });
+}
+
+function buildBooth() {
+  var g = gProps;
+  // the shark's corner: U-bench, table, low lamp — deliberately the darkest spot
+  box(g, 14.4, 0.3, 10.1, 3.6, 0.6, 0.7, mat(PAL.wine)); box(g, 14.4, 0.75, 10.35, 3.6, 0.9, 0.2, mat(PAL.wine));
+  box(g, 12.75, 0.3, 9.2, 0.7, 0.6, 2.4, mat(PAL.wine)); box(g, 12.5, 0.75, 9.2, 0.2, 0.9, 2.4, mat(PAL.wine));
+  box(g, 16.05, 0.3, 9.2, 0.7, 0.6, 2.4, mat(PAL.wine)); box(g, 16.3, 0.75, 9.2, 0.2, 0.9, 2.4, mat(PAL.wine));
+  solid(12.4, 8.0, 16.5, 10.55);
+  cyl(g, 14.4, 0.5, 8.9, 0.12, 0.16, 1.0, mat(PAL.woodD), 8);
+  cyl(g, 14.4, 1.02, 8.9, 0.75, 0.75, 0.08, mat(PAL.wood), 12);
+  // his working props: the ledger, the roll, the lamp
+  box(g, 14.05, 1.1, 8.75, 0.36, 0.06, 0.26, mat(0x1a2c1c));
+  box(g, 14.75, 1.12, 8.95, 0.2, 0.1, 0.14, emat(0x67d98a, 0.35));
+  cyl(g, 14.4, 1.2, 9.25, 0.1, 0.14, 0.24, emat(0xffab66, 0.9), 8);
+  ptLight(14.4, 1.7, 9.0, 0xff9a4e, 0.65, 5.5);
+  zones.push({ id: "shark", label: "[E] The Shark", pos: [14.4, 7.6], r: 1.6, action: function () { openShark(); } });
+}
+
+function slotSymbolStrip() {
+  var CELL = 48;
+  return canvasTex(CELL * SLOT_STRIP.length, 96, function (g) {
+    g.fillStyle = "#f4ead2"; g.fillRect(0, 0, CELL * SLOT_STRIP.length, 96);
+    for (var i = 0; i < SLOT_STRIP.length; i++) {
+      var x0 = i * CELL, cx = x0 + CELL / 2, cy = 48, s = SLOT_STRIP[i];
+      g.strokeStyle = "#d8c9a4"; g.strokeRect(x0 + 1, 8, CELL - 2, 80);
+      if (s === "CHR") { g.fillStyle = "#c22"; g.beginPath(); g.arc(cx - 8, cy + 10, 9, 0, 7); g.fill(); g.beginPath(); g.arc(cx + 8, cy + 12, 9, 0, 7); g.fill(); g.strokeStyle = "#2a7"; g.lineWidth = 3; g.beginPath(); g.moveTo(cx - 8, cy + 2); g.quadraticCurveTo(cx, cy - 22, cx + 8, cy + 3); g.stroke(); g.lineWidth = 1; }
+      else if (s === "LEM") { g.fillStyle = "#e8c62c"; g.beginPath(); g.ellipse(cx, cy, 15, 10, 0.5, 0, 7); g.fill(); }
+      else if (s === "ORN") { g.fillStyle = "#e8862c"; g.beginPath(); g.arc(cx, cy, 12, 0, 7); g.fill(); g.fillStyle = "#2a7"; g.fillRect(cx - 2, cy - 16, 4, 6); }
+      else if (s === "BELL") { g.fillStyle = "#d9a712"; g.beginPath(); g.arc(cx, cy - 2, 11, Math.PI, 0); g.fill(); g.fillRect(cx - 11, cy - 2, 22, 10); g.fillStyle = "#8a6a14"; g.beginPath(); g.arc(cx, cy + 12, 4, 0, 7); g.fill(); }
+      else if (s === "BAR") { g.fillStyle = "#222"; g.fillRect(cx - 17, cy - 8, 34, 16); g.fillStyle = "#f4ead2"; g.font = "800 13px Verdana"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("BAR", cx, cy + 1); }
+      else if (s === "SEV") { g.fillStyle = "#c22"; g.font = "800 40px 'Trebuchet MS'"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("7", cx, cy + 2); }
+      else if (s === "DIA") { g.fillStyle = "#3ec6d9"; g.beginPath(); g.moveTo(cx, cy - 15); g.lineTo(cx + 12, cy); g.lineTo(cx, cy + 15); g.lineTo(cx - 12, cy); g.closePath(); g.fill(); }
+    }
+  });
+}
+var slotStripTex = null;
+function slotCabinet(x, z, ry, idx) {
+  slotStripTex = slotStripTex || slotSymbolStrip();
+  var g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry; gProps.add(g);
+  box(g, 0, 0.45, 0, 0.9, 0.9, 0.62, mat(PAL.slotBody));
+  box(g, 0, 1.32, -0.05, 0.9, 0.85, 0.52, mat(PAL.slotBody));
+  box(g, 0, 1.9, -0.09, 0.9, 0.32, 0.44, mat(0x2c3644));
+  var top = box(g, 0, 2.14, -0.09, 0.78, 0.18, 0.3, emat(idx % 2 ? 0xff4fa3 : 0x3ec6d9, 0.9));
+  animators.push(function (dt, t) { top.material.emissiveIntensity = 0.55 + 0.4 * Math.sin(t * 2.4 + idx * 1.7); });
+  var marq = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.24),
+    new THREE.MeshBasicMaterial({ map: textPanelTex(["LUCKY 7s"], { w: 256, h: 64, fs: 40, bg: "#1a2230", fg: "#ffd977", glow: true }) }));
+  marq.position.set(0, 1.9, 0.135); g.add(marq);
+  // reel window: 3 cylinders behind a frame
+  var reels = [];
+  for (var r = 0; r < 3; r++) {
+    var reel = new THREE.Mesh(new THREE.CylinderGeometry(0.155, 0.155, 0.16, 24, 1, true),
+      new THREE.MeshLambertMaterial({ map: slotStripTex }));
+    reel.rotation.z = Math.PI / 2;
+    reel.position.set(-0.2 + r * 0.2, 1.42, 0.16);
+    g.add(reel); reels.push(reel);
+  }
+  box(g, 0, 1.62, 0.21, 0.76, 0.07, 0.06, mat(0x10161e));
+  box(g, 0, 1.22, 0.21, 0.76, 0.07, 0.06, mat(0x10161e));
+  box(g, -0.36, 1.42, 0.21, 0.07, 0.5, 0.06, mat(0x10161e));
+  box(g, 0.36, 1.42, 0.21, 0.07, 0.5, 0.06, mat(0x10161e));
+  box(g, -0.12, 1.42, 0.21, 0.05, 0.42, 0.05, mat(0x10161e));
+  box(g, 0.12, 1.42, 0.21, 0.05, 0.42, 0.05, mat(0x10161e));
+  box(g, 0, 0.98, 0.28, 0.66, 0.16, 0.14, mat(0x141a24)); // payout tray
+  var dome = cyl(g, 0, 2.32, -0.09, 0.09, 0.11, 0.14, emat(0xff2a3a, 0.15), 10);
+  // lever
+  var lever = new THREE.Group(); lever.position.set(0.5, 1.35, 0.05); g.add(lever);
+  cyl(lever, 0, 0.24, 0, 0.028, 0.028, 0.5, mat(0xb8bcc4), 8);
+  var ball = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), mat(0xc22323)); ball.position.set(0, 0.5, 0); lever.add(ball);
+  solid(x - 0.55, z - 0.45, x + 0.55, z + 0.45);
+  var M = { group: g, reels: reels, lever: lever, dome: dome, idx: idx, spinning: false };
+  TABLES.slots.push(M);
+  return M;
+}
+function buildSlots() {
+  // wall bank of 4 (east wall, facing the floor) + island pair
+  for (var i = 0; i < 4; i++) {
+    var z = -6.4 + i * 1.65;
+    var m = slotCabinet(15.9, z, -Math.PI / 2, i);
+    cyl(gProps, 14.9, 0.38, z, 0.07, 0.09, 0.76, mat(0x22262c), 8);
+    cyl(gProps, 14.9, 0.8, z, 0.25, 0.25, 0.09, mat(PAL.wine), 10);
+    seats.push({ id: "slot" + i, game: "slots", pos: [14.9, z], yaw: -Math.PI / 2, machine: m,
+      cam: { pos: [14.65, 1.5, z], look: [15.9, 1.42, z] } });
+  }
+  slotCabinet(11.3, 2.2, Math.PI / 2, 4);
+  slotCabinet(11.3, 3.9, Math.PI / 2, 5);
+  seats.push({ id: "slot4", game: "slots", pos: [12.35, 2.2], yaw: Math.PI / 2, machine: TABLES.slots[4], cam: { pos: [12.6, 1.5, 2.2], look: [11.3, 1.42, 2.2] } });
+  seats.push({ id: "slot5", game: "slots", pos: [12.35, 3.9], yaw: Math.PI / 2, machine: TABLES.slots[5], cam: { pos: [12.6, 1.5, 3.9], look: [11.3, 1.42, 3.9] } });
+  var neon = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 0.7),
+    new THREE.MeshBasicMaterial({ map: textPanelTex(["S L O T S"], { w: 512, h: 96, fs: 64, bg: "#12100c", fg: "#3ec6d9", glow: true }) }));
+  neon.position.set(16.95, 3.6, -2.2); neon.rotation.y = -Math.PI / 2; gProps.add(neon);
+  ptLight(14.6, 3.0, -2.2, 0x55b8d9, 0.7, 10);
+}
+
+function feltBJTexture() {
+  return canvasTex(512, 288, function (g) {
+    g.fillStyle = "#1c6e46"; g.fillRect(0, 0, 512, 288);
+    g.strokeStyle = "rgba(255,246,226,.75)"; g.lineWidth = 2;
+    g.beginPath(); g.arc(256, -40, 250, 0.42, Math.PI - 0.42); g.stroke();
+    g.fillStyle = "rgba(255,246,226,.85)"; g.font = "800 22px 'Trebuchet MS'"; g.textAlign = "center";
+    g.save(); g.translate(256, 148); g.fillText("BLACKJACK PAYS 3 TO 2", 0, 0); g.restore();
+    g.font = "600 13px 'Trebuchet MS'"; g.fillText("DEALER STANDS ON 17 · $25 MIN", 256, 175);
+    for (var i = 0; i < 3; i++) {
+      var bx = 128 + i * 128;
+      g.beginPath(); g.arc(bx, 232, 26, 0, 7); g.stroke();
+    }
+  });
+}
+var bjFeltTex = null;
+function bjTable(cx, cz, which) {
+  bjFeltTex = bjFeltTex || feltBJTexture();
+  var g = new THREE.Group(); g.position.set(cx, 0, cz); gProps.add(g);
+  box(g, 0, 0.5, 0, 3.4, 0.82, 1.9, mat(PAL.wood));
+  cyl(g, -1.7, 0.5, 0, 0.95, 0.95, 0.82, mat(PAL.wood), 14);
+  cyl(g, 1.7, 0.5, 0, 0.95, 0.95, 0.82, mat(PAL.wood), 14);
+  var felt = new THREE.Mesh(new THREE.PlaneGeometry(3.36, 1.82), new THREE.MeshPhongMaterial({ map: bjFeltTex, shininess: 3 }));
+  felt.rotation.x = -Math.PI / 2; felt.rotation.z = Math.PI; felt.position.y = 0.925; g.add(felt);
+  [[-1.7, 0], [1.7, 0]].forEach(function (e) {
+    var half = new THREE.Mesh(new THREE.CircleGeometry(0.91, 14), pmat(0x1c6e46, 3));
+    half.rotation.x = -Math.PI / 2; half.position.set(e[0], 0.921, e[1]); g.add(half); // under the felt: caps only show past its ends
+  });
+  // padded rail on player side, chip rack + shoe on dealer side
+  box(g, 0, 0.98, -0.99, 3.4, 0.12, 0.14, mat(PAL.wine));
+  box(g, 0, 0.99, 0.86, 1.5, 0.1, 0.34, mat(PAL.woodD));
+  [0xc22323, 0x1c8a4e, 0x222222, 0x6a3aa0, 0xc9a227].forEach(function (cc, ci) {
+    cyl(g, -0.56 + ci * 0.28, 1.06, 0.86, 0.09, 0.09, 0.1, mat(cc), 10);
+  });
+  var shoe = box(g, 1.15, 1.02, 0.7, 0.42, 0.18, 0.3, pmat(0x14100c, 40)); shoe.rotation.y = -0.2;
+  box(g, -1.15, 1.0, 0.7, 0.34, 0.12, 0.26, pmat(0x14100c, 40)); // discard
+  cyl(g, 0, 0.46, 0, 0.3, 0.42, 0.92, mat(PAL.woodD), 10);
+  solid(cx - 2.6, cz - 0.95, cx + 2.6, cz + 0.95);
+  // 3 player stools on the -z arc
+  for (var s = -1; s <= 1; s++) {
+    var sx = cx + s * 1.15, sz = cz - 1.65;
+    cyl(gProps, sx, 0.42, sz, 0.08, 0.1, 0.84, mat(0x22262c), 8);
+    cyl(gProps, sx, 0.88, sz, 0.27, 0.27, 0.1, mat(PAL.wine), 10);
+    solid(sx - 0.2, sz - 0.2, sx + 0.2, sz + 0.2);
+  }
+  var T = {
+    id: "bj" + which, cx: cx, cz: cz,
+    dealerSpot: [cx, 0.94, cz + 0.35],
+    playerSpot: [cx, 0.94, cz - 0.42],
+    splitSpot: [cx + 1.05, 0.94, cz - 0.42],
+    betSpot: [cx, 0.94, cz - 0.72],
+  };
+  TABLES.bj.push(T);
+  seats.push({ id: T.id, game: "bj", pos: [cx, cz - 1.65], yaw: 0, table: T,
+    cam: { pos: [cx, 1.52, cz - 1.62], look: [cx, 0.95, cz + 0.25] } });
+  return T;
+}
+
+function wheelDiscTexture() {
+  return canvasTex(512, 512, function (g) {
+    var C = 256, N = 37, TAU = Math.PI * 2;
+    g.fillStyle = "#33200f"; g.beginPath(); g.arc(C, C, 254, 0, TAU); g.fill();
+    for (var i = 0; i < N; i++) {
+      var n = WHEEL_ORDER[i], a0 = i / N * TAU - Math.PI / 2, a1 = (i + 1) / N * TAU - Math.PI / 2;
+      g.fillStyle = n === 0 ? "#0f7a44" : (RED_SET[n] ? "#a41f2f" : "#15181d");
+      g.beginPath(); g.moveTo(C, C); g.arc(C, C, 236, a0, a1); g.closePath(); g.fill();
+      g.strokeStyle = "#c9a227"; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(C, C); g.lineTo(C + Math.cos(a0) * 236, C + Math.sin(a0) * 236); g.stroke();
+      var am = (a0 + a1) / 2;
+      g.save(); g.translate(C + Math.cos(am) * 208, C + Math.sin(am) * 208); g.rotate(am + Math.PI / 2);
+      g.fillStyle = "#fff6e2"; g.font = "800 24px 'Trebuchet MS'"; g.textAlign = "center"; g.textBaseline = "middle";
+      g.fillText(String(n), 0, 0); g.restore();
+    }
+    g.fillStyle = "#2a1a0c"; g.beginPath(); g.arc(C, C, 150, 0, TAU); g.fill();
+    g.strokeStyle = "#c9a227"; g.lineWidth = 5; g.beginPath(); g.arc(C, C, 150, 0, TAU); g.stroke();
+    g.fillStyle = "#c9a227"; g.beginPath(); g.arc(C, C, 26, 0, TAU); g.fill();
+  });
+}
+function rlLayoutTexture() {
+  return canvasTex(640, 384, function (g) {
+    g.fillStyle = "#1c6e46"; g.fillRect(0, 0, 640, 384);
+    g.strokeStyle = "rgba(255,246,226,.9)"; g.lineWidth = 2;
+    g.font = "800 22px 'Trebuchet MS'"; g.textAlign = "center"; g.textBaseline = "middle";
+    // zero
+    g.strokeRect(20, 30, 44, 270); g.fillStyle = "#0f7a44"; g.fillRect(21, 31, 42, 268);
+    g.fillStyle = "#fff6e2"; g.fillText("0", 42, 165);
+    for (var col = 0; col < 12; col++) for (var row = 0; row < 3; row++) {
+      var n = col * 3 + (3 - row);
+      var x = 64 + col * 44, y = 30 + row * 90;
+      g.fillStyle = RED_SET[n] ? "#a41f2f" : "#15181d"; g.fillRect(x, y, 44, 90);
+      g.strokeRect(x, y, 44, 90);
+      g.fillStyle = "#fff6e2"; g.fillText(String(n), x + 22, y + 45);
+    }
+    g.font = "800 16px 'Trebuchet MS'";
+    var outs = [["1st 12", 64, 176], ["2nd 12", 240, 176], ["3rd 12", 416, 176]];
+    outs.forEach(function (o) { g.strokeRect(o[1], 306, o[2], 34); g.fillStyle = "rgba(255,246,226,.92)"; g.fillText(o[0], o[1] + o[2] / 2, 323); });
+    var evens = [["1-18", 64], ["EVEN", 152], ["RED", 240], ["BLACK", 328], ["ODD", 416], ["19-36", 504]];
+    evens.forEach(function (o) {
+      g.strokeRect(o[1], 344, 88, 34);
+      if (o[0] === "RED") { g.fillStyle = "#a41f2f"; g.fillRect(o[1] + 1, 345, 86, 32); }
+      if (o[0] === "BLACK") { g.fillStyle = "#15181d"; g.fillRect(o[1] + 1, 345, 86, 32); }
+      g.fillStyle = "rgba(255,246,226,.92)"; g.fillText(o[0], o[1] + 44, 361);
+    });
+  });
+}
+function buildRoulette() {
+  var cx = 0.2, cz = 4.4;
+  var g = new THREE.Group(); g.position.set(cx, 0, cz); gProps.add(g);
+  box(g, 0, 0.5, 0, 5.0, 0.86, 2.1, mat(PAL.wood));
+  box(g, 0, 0.97, 0, 5.16, 0.1, 2.26, mat(PAL.woodD));
+  box(g, 0, 0.4, 0, 4.4, 0.6, 1.5, mat(PAL.woodD));
+  var felt = new THREE.Mesh(new THREE.PlaneGeometry(2.7, 1.62), new THREE.MeshPhongMaterial({ map: rlLayoutTexture(), shininess: 3 }));
+  felt.rotation.x = -Math.PI / 2; felt.rotation.z = -Math.PI / 2; felt.position.set(1.05, 1.03, 0); g.add(felt);
+  // wheel assembly, west end
+  cyl(g, -1.55, 1.06, 0, 0.98, 1.06, 0.18, mat(0x2a1a0c), 24);
+  var rim = new THREE.Mesh(new THREE.TorusGeometry(0.99, 0.055, 8, 26), mat(PAL.brass));
+  rim.rotation.x = Math.PI / 2; rim.position.set(-1.55, 1.16, 0); g.add(rim);
+  var disc = new THREE.Mesh(new THREE.CircleGeometry(0.92, 37), new THREE.MeshLambertMaterial({ map: wheelDiscTexture() }));
+  disc.rotation.x = -Math.PI / 2; disc.position.set(-1.55, 1.165, 0); g.add(disc);
+  var turret = new THREE.Group(); turret.position.set(-1.55, 1.17, 0); g.add(turret);
+  cyl(turret, 0, 0.12, 0, 0.1, 0.14, 0.24, mat(PAL.brass), 10);
+  var orb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), mat(PAL.brass)); orb.position.y = 0.3; turret.add(orb);
+  for (var hh = 0; hh < 4; hh++) {
+    var ha = hh * Math.PI / 2;
+    box(turret, Math.cos(ha) * 0.17, 0.24, Math.sin(ha) * 0.17, 0.22, 0.04, 0.04, mat(PAL.brass), ha);
+  }
+  var ballM = new THREE.Mesh(new THREE.SphereGeometry(0.042, 8, 8), pmat(0xf4f4f0, 80));
+  ballM.position.set(-1.55, 1.21, 0.72); ballM.userData.dyn = 1; g.add(ballM);
+  solid(cx - 2.7, cz - 1.15, cx + 2.7, cz + 1.15);
+  TABLES.rl = { cx: cx, cz: cz, group: g, disc: disc, ball: ballM, turret: turret, discTheta: 0,
+    chipRoot: new THREE.Group() };
+  g.add(TABLES.rl.chipRoot);
+  seats.push({ id: "roulette", game: "rl", pos: [cx, cz - 1.9], yaw: 0, table: TABLES.rl,
+    cam: { pos: [cx - 0.4, 1.72, cz - 1.75], look: [cx - 0.9, 1.0, cz + 0.3] } });
+  ptLight(cx, 3.3, cz, 0xffca72, 0.85, 9); // the wheel gets its own pool of light
+}
+
+/* ================= NPC CAST ================= */
+var CAST = {};
+function buildCast() {
+  CAST.bouncer = makeRig({ shirt: 0x14100c, pants: 0x14100c, skin: 0x8a5c34, shades: true, vest: 0x0e0c0a }).at(3.1, -12.6, -0.6).fold();
+  CAST.cashier = makeRig({ shirt: 0xe8dcc0, pants: 0x22262c, skin: 0xd9a066, vest: 0x6e1524 }).at(-13.2, -8.45, Math.PI / 2);
+  CAST.guard = makeRig({ shirt: 0x2c3038, pants: 0x14100c, skin: 0x704c28, cap: 0x2c3038 }).at(-10.6, -5.5, 2.4).fold();
+  CAST.barman = makeRig({ shirt: 0xe8dcc0, pants: 0x33200f, skin: 0xc2905c, vest: 0x1a2c1c }).at(-13.6, 9.3, Math.PI);
+  CAST.shark = makeRig({ shirt: 0x39424e, pants: 0x14100c, skin: 0xb87c4c, hair: 0x555a60, shades: true }).at(14.4, 9.85, Math.PI).sit();
+  CAST.shark.g.position.y -= 0.28; // booth bench sits lower than a stool
+  CAST.pitboss = makeRig({ shirt: 0x14100c, pants: 0x14100c, skin: 0xd9a066, vest: 0x211a12, hair: 0x777c82 }).at(2.6, 2.0, 2.6).fold();
+  CAST.dealer1 = makeRig({ shirt: 0xe8dcc0, pants: 0x14100c, skin: 0xc2905c, vest: 0x1c6e46 }).at(-4.6, -1.55, Math.PI).deal();
+  CAST.dealer2 = makeRig({ shirt: 0xe8dcc0, pants: 0x14100c, skin: 0x8a5c34, vest: 0x1c6e46 }).at(4.6, -1.55, Math.PI).deal();
+  CAST.croupier = makeRig({ shirt: 0xe8dcc0, pants: 0x14100c, skin: 0xd9a066, vest: 0x6e1524 }).at(0.2, 5.9, Math.PI).deal();
+  CAST.patronSlot = makeRig({ shirt: 0x6a3aa0, pants: 0x22262c, skin: 0xd9a066, hair: 0x777c82 }).at(14.9, -4.75, -Math.PI / 2).sit();
+  CAST.patronBar = makeRig({ shirt: 0x2c5c8a, pants: 0x33200f, skin: 0xb87c4c }).at(-12.7, 7.2, Math.PI).sit();
+  CAST.patronRail = makeRig({ shirt: 0xc9a227, pants: 0x22262c, skin: 0x704c28 }).at(2.1, 2.3, -2.2);
+  Object.keys(CAST).forEach(function (k, i) { gNPCs.add(CAST[k].g); idleBob(CAST[k], i * 1.3); });
+  // slot patron pulls the lever on a loop; their machine's reels tick over
+  var pm = TABLES.slots[1];
+  animators.push(function (dt, t) {
+    var ph = (t % 5.2);
+    CAST.patronSlot.armR.rotation.x = ph < 0.5 ? -1.4 + ph * 1.6 : (ph < 1 ? -0.6 - (ph - 0.5) * 1.6 : -0.6);
+    pm.lever.rotation.x = ph < 0.5 ? ph * 1.5 : (ph < 1 ? (1 - ph) * 1.5 : 0);
+    if (ph > 0.5 && ph < 2.2) pm.reels.forEach(function (r, ri) { r.rotation.x -= dt * (9 - ri * 1.5); });
+  });
+  // rail patron leans and cheers on wheel spins
+  animators.push(function (dt, t) { CAST.patronRail.torso.rotation.x = 0.1 + Math.sin(t * 1.4) * 0.05; });
+  // bouncer scans the street
+  animators.push(function (dt, t) { CAST.bouncer.head.rotation.y = Math.sin(t * 0.55) * 0.7; });
+  zones.push({ id: "bouncer", label: "[E] Talk to the bouncer", pos: [3.1, -12.6], r: 1.6, action: function () { bouncerTalk(); } });
+}
+/* ================= WALLET / STATS / HUD ================= */
+var wallet = { cash: CFG.START_CASH, chips: 0, debt: 0 };
+var stats = { hands: 0, spins: 0, pulls: 0, biggestWin: 0, peak: CFG.START_CASH, drinks: 0, streak: 0, t0: 0 };
+var mode = "title", currentSeat = null, pitbossCalled = false;
+function $(id) { return document.getElementById(id); }
+function fmt(n) { return "$" + Math.round(n).toLocaleString("en-US"); }
+function updateHUD() {
+  $("cashVal").textContent = fmt(wallet.cash);
+  $("chipVal").textContent = wallet.chips.toLocaleString("en-US");
+  $("debtPill").className = "pill panel" + (wallet.debt > 0 ? " on" : ""); $("debtPill").classList.toggle("on", wallet.debt > 0);
+  $("debtVal").textContent = fmt(wallet.debt);
+  var total = wallet.cash + wallet.chips;
+  if (total > stats.peak) stats.peak = total;
+  $("objText").innerHTML = wallet.debt > 0
+    ? "Square the Shark's <b>" + fmt(wallet.debt) + "</b> — then get to " + fmt(CFG.GOAL)
+    : "Walk in with $500. Walk out with <b>" + fmt(CFG.GOAL) + "</b>. (" + fmt(total) + " now)";
+  if (!pitbossCalled && total >= CFG.PITBOSS_AT) callPitboss();
+}
+function feed(msg, cls) {
+  var d = document.createElement("div");
+  d.className = "feedline panel" + (cls ? " " + cls : ""); d.textContent = msg;
+  var f = $("feed"); f.appendChild(d);
+  while (f.children.length > 5) f.removeChild(f.firstChild);
+  setTimeout(function () { if (d.parentNode) d.parentNode.removeChild(d); }, 5200);
+}
+function toast(txt) { var t = $("toast"); t.textContent = txt; t.classList.remove("pop"); void t.offsetWidth; t.classList.add("pop"); }
+function hint(txt) { var h = $("hint"); if (!txt) { h.classList.remove("show"); return; } h.textContent = txt; h.classList.add("show"); }
+function assets() { return wallet.cash + wallet.chips; }
+
+/* ================= PLAYER / CONTROLS ================= */
+var player = { x: 0, z: -16.5, yaw: 0, pitch: 0, r: 0.32 };
+var keys = {}, tweens = [];
+function collideMove(nx, nz) {
+  var x = player.x, z = player.z, r = player.r;
+  var tx = nx, tz = z;
+  for (var i = 0; i < solids.length; i++) { var s = solids[i];
+    if (tx + r > s.x1 && tx - r < s.x2 && z + r > s.z1 && z - r < s.z2) { tx = x; break; } }
+  var fx = tx; tz = nz;
+  for (var j = 0; j < solids.length; j++) { var s2 = solids[j];
+    if (fx + r > s2.x1 && fx - r < s2.x2 && tz + r > s2.z1 && tz - r < s2.z2) { tz = z; break; } }
+  player.x = Math.max(-23, Math.min(23, fx));
+  player.z = Math.max(-26, Math.min(IZ + 10, tz));
+}
+function tweenCam(toPos, toLook, dur, done) {
+  var p0 = camera.position.clone();
+  var l0 = p0.clone().add(new THREE.Vector3(Math.sin(player.yaw) * Math.cos(player.pitch), Math.sin(player.pitch), Math.cos(player.yaw) * Math.cos(player.pitch)));
+  if (mode === "seated" || mode === "dialog") { var cl = camLookNow || l0; l0 = cl.clone(); }
+  tweens.push({ t: 0, dur: dur || 0.7, p0: p0, p1: new THREE.Vector3(toPos[0], toPos[1], toPos[2]), l0: l0, l1: new THREE.Vector3(toLook[0], toLook[1], toLook[2]), done: done });
+}
+var camLookNow = null;
+function setWalkCam() {
+  camera.position.set(player.x, 1.62, player.z);
+  var dir = new THREE.Vector3(Math.sin(player.yaw) * Math.cos(player.pitch), Math.sin(player.pitch), Math.cos(player.yaw) * Math.cos(player.pitch));
+  var look = camera.position.clone().add(dir);
+  camera.lookAt(look); camLookNow = look;
+}
+function lockPointer() { if (!qs.nolock && renderer.domElement.requestPointerLock) renderer.domElement.requestPointerLock(); }
+function setupInput() {
+  window.addEventListener("keydown", function (e) {
+    keys[e.code] = true;
+    if (e.code === "KeyM") { var m = SFX.toggleMute(); feed(m ? "Sound off" : "Sound on"); }
+    if (e.code === "KeyE" && mode === "walk") tryInteract();
+    if (e.code === "Escape" && (mode === "seated" || mode === "dialog")) requestStand();
+  });
+  window.addEventListener("keyup", function (e) { keys[e.code] = false; });
+  document.addEventListener("mousemove", function (e) {
+    if (mode !== "walk" || document.pointerLockElement !== renderer.domElement) return;
+    player.yaw -= e.movementX * 0.0023;
+    player.pitch = Math.max(-1.25, Math.min(1.25, player.pitch - e.movementY * 0.0023));
+  });
+  renderer.domElement.addEventListener("mousedown", function () { if (mode === "walk") lockPointer(); });
+}
+function nearestUse() {
+  var best = null, bd = 1e9;
+  function scan(list, kind) {
+    for (var i = 0; i < list.length; i++) {
+      var it = list[i], dx = it.pos[0] - player.x, dz = it.pos[1] - player.z, d = Math.sqrt(dx * dx + dz * dz);
+      var r = it.r || 1.35;
+      if (d < r && d < bd) { bd = d; best = { kind: kind, item: it }; }
+    }
+  }
+  scan(zones, "zone"); scan(seats, "seat");
+  return best;
+}
+function tryInteract() {
+  var u = nearestUse(); if (!u) return;
+  if (u.kind === "zone") u.item.action();
+  else sitAt(u.item);
+}
+function seatLabel(s) {
+  if (s.game === "bj") return "[E] Sit — Blackjack ($" + CFG.BJ_MIN + " min)";
+  if (s.game === "rl") return "[E] Play the wheel — European Roulette";
+  return "[E] Play — Lucky 7s slots";
+}
+function sitAt(seat) {
+  if (mode !== "walk") return;
+  currentSeat = seat; mode = "seated";
+  document.exitPointerLock && document.exitPointerLock();
+  document.body.classList.add("seated");
+  document.body.classList.toggle("at-roulette", seat.game === "rl");
+  player.x = seat.pos[0]; player.z = seat.pos[1]; player.yaw = seat.yaw;
+  tweenCam(seat.cam.pos, seat.cam.look, 0.7);
+  openGamePanel(seat);
+}
+var busyCheck = function () { return false; };
+function requestStand() {
+  if (mode === "dialog") { closeDialog(); return; }
+  if (busyCheck()) { feed("Finish the round first.", "bad"); return; }
+  standUp();
+}
+function standUp() {
+  mode = "walk"; document.body.classList.remove("seated"); document.body.classList.remove("at-roulette");
+  var s = currentSeat; currentSeat = null;
+  if (s) { player.x = s.pos[0] - Math.sin(s.yaw) * 0.5; player.z = s.pos[1] - Math.cos(s.yaw) * 0.5; player.yaw = s.yaw + Math.PI; player.pitch = -0.05; }
+  onStandGame();
+  tweens.length = 0; setWalkCam();
+}
+
+/* ================= DIALOG PANELS (cage / shark) ================= */
+function openDialog(title, sub) {
+  mode = "dialog";
+  document.exitPointerLock && document.exitPointerLock();
+  document.body.classList.add("seated");
+  $("gpName").textContent = title; $("gpSub").textContent = sub || "";
+  return $("gpBody");
+}
+function closeDialog() {
+  mode = "walk"; document.body.classList.remove("seated"); $("gpBody").innerHTML = "";
+}
+function gbtn(label, cls, fn, dis) {
+  var b = document.createElement("button");
+  b.className = "gbtn" + (cls ? " " + cls : ""); b.innerHTML = label; b.disabled = !!dis;
+  b.addEventListener("click", function () { SFX.chip(); fn(); });
+  return b;
+}
+function openCage() {
+  var body = openDialog("THE CAGE", "Chips are the only money the felt takes");
+  body.innerHTML = "";
+  var msg = document.createElement("div"); msg.className = "gp-msg";
+  msg.innerHTML = "Cash <b>" + fmt(wallet.cash) + "</b> · Chips <b>" + wallet.chips.toLocaleString() + "</b>" + (wallet.debt ? " · <b style='color:#c22'>Marker " + fmt(wallet.debt) + "</b>" : "");
+  body.appendChild(msg);
+  var row = document.createElement("div"); row.className = "gp-row"; body.appendChild(row);
+  [100, 250].forEach(function (amt) {
+    row.appendChild(gbtn("Buy $" + amt, "", function () { buyChips(amt); }, wallet.cash < amt));
+  });
+  row.appendChild(gbtn("Buy ALL (" + fmt(wallet.cash) + ")", "", function () { buyChips(wallet.cash); }, wallet.cash < 5));
+  row.appendChild(gbtn("Cash out chips", "gold", function () { cashOut(); }, wallet.chips <= 0));
+  row.appendChild(gbtn("Done", "dark", function () { closeDialog(); }));
+}
+function buyChips(amt) {
+  amt = Math.min(amt, wallet.cash); if (amt <= 0) return;
+  wallet.cash -= amt; wallet.chips += amt;
+  SFX.chips(); feed("Bought " + amt.toLocaleString() + " in chips");
+  updateHUD(); openCage();
+}
+function cashOut() {
+  var amt = wallet.chips; wallet.chips = 0;
+  var toShark = Math.min(amt, wallet.debt);
+  if (toShark > 0) { wallet.debt -= toShark; amt -= toShark; feed("The cage routes " + fmt(toShark) + " to the Shark's marker", "bad"); }
+  wallet.cash += amt; SFX.cash(); feed("Cashed out " + fmt(amt), "gold");
+  updateHUD();
+  if (wallet.cash >= CFG.GOAL && wallet.debt <= 0) { winSequence(); return; }
+  openCage();
+}
+function openShark() {
+  var body = openDialog("THE SHARK", "Vig is vig. Nothing personal.");
+  body.innerHTML = "";
+  var msg = document.createElement("div"); msg.className = "gp-msg";
+  if (wallet.debt > 0) {
+    msg.innerHTML = "“You already carry my marker — <b>" + fmt(wallet.debt) + "</b>. Pay the cage. Then we talk.”";
+    body.appendChild(msg);
+    body.appendChild(gbtn("Walk away", "dark", closeDialog));
+  } else {
+    msg.innerHTML = "“Quiet night, friend? I'll front you <b>" + fmt(CFG.LOAN_GIVE) + "</b> in chips. You'll owe me <b>" + fmt(CFG.LOAN_OWE) + "</b> before you leave. The house always pays me first.”";
+    body.appendChild(msg);
+    var row = document.createElement("div"); row.className = "gp-row"; body.appendChild(row);
+    row.appendChild(gbtn("Take the marker (+" + CFG.LOAN_GIVE + " chips)", "wine", function () {
+      wallet.chips += CFG.LOAN_GIVE; wallet.debt += CFG.LOAN_OWE;
+      SFX.chips(); feed("The Shark slides you " + CFG.LOAN_GIVE + " in chips. You owe " + fmt(CFG.LOAN_OWE) + ".", "bad");
+      updateHUD(); closeDialog();
+    }));
+    row.appendChild(gbtn("Walk away", "dark", closeDialog));
+  }
+}
+function buyDrink() {
+  var comp = stats.streak >= CFG.COMP_STREAK;
+  if (!comp && wallet.cash < CFG.DRINK_COST) { feed("Barman: “Cash up front, champ.”", "bad"); return; }
+  if (!comp) wallet.cash -= CFG.DRINK_COST; else feed("Barman: “This one's on the house. Keep the heater going.”", "gold");
+  stats.drinks++; SFX.pour();
+  if (!comp) feed("Whiskey, neat. −" + fmt(CFG.DRINK_COST));
+  $("vignette").classList.add("warm");
+  setTimeout(function () { $("vignette").classList.remove("warm"); }, 12000);
+  updateHUD();
+}
+var bouncerLines = [
+  "“Cage first. Felt second. Door last — if you're smart.”",
+  "“The wheel's honest. That's the problem.”",
+  "“See the booth in the back? Don't.”",
+  "“Hot streak buys you a drink upstairs. House rules.”"];
+var bouncerIx = 0;
+function bouncerTalk() { feed("Bouncer: " + bouncerLines[bouncerIx++ % bouncerLines.length]); }
+function callPitboss() {
+  pitbossCalled = true;
+  feed("The pit boss drifts your way. The eye in the sky found you.", "gold");
+  var pb = CAST.pitboss, t0 = null;
+  animators.push(function (dt, t) {
+    if (t0 === null) t0 = t;
+    var k = Math.min(1, (t - t0) / 3.2);
+    pb.g.position.x = 2.6 + (1.2 - 2.6) * k; pb.g.position.z = 2.0 + (1.4 - 2.0) * k;
+    var dx = player.x - pb.g.position.x, dz = player.z - pb.g.position.z;
+    pb.g.rotation.y = Math.atan2(dx, dz);
+  });
+}
+
+/* ================= ARC: DOOR / ENDINGS ================= */
+function leaveDoor() {
+  if (wallet.chips > 0) { feed("Bouncer: “Cage buys back your chips first.”", "bad"); return; }
+  if (wallet.debt > 0) {
+    if (wallet.cash >= wallet.debt) {
+      wallet.cash -= wallet.debt; feed("The Shark's boys collect " + fmt(wallet.debt) + " at the door.", "bad"); wallet.debt = 0; updateHUD();
+    } else { loseSequence("marker"); return; }
+  }
+  if (wallet.cash >= CFG.GOAL) { winSequence(); return; }
+  showEnd("leave");
+}
+function winSequence() {
+  SFX.jackpot(); toast("HOUSE MONEY");
+  feed("Security falls in beside you — the polite kind of escort.", "gold");
+  setTimeout(function () { showEnd("win"); }, 1600);
+}
+function loseSequence(why) {
+  SFX.boo();
+  if (why === "marker") feed("You can't cover the marker. The night goes dark.", "bad");
+  setTimeout(function () { showEnd("lose"); }, 1200);
+}
+function checkBust() {
+  if (assets() >= CFG.BJ_MIN && !(assets() < 5)) return;
+  if (assets() < 5) {
+    if (wallet.debt > 0) { loseSequence("bust"); }
+    else feed("Felt's closed to you — unless you visit the booth in the back.", "bad");
+  }
+}
+function showEnd(kind) {
+  mode = "end"; document.body.classList.remove("seated");
+  document.exitPointerLock && document.exitPointerLock();
+  var mins = Math.max(1, Math.round((performance.now() - stats.t0) / 60000));
+  var T = $("endTitle"), S = $("endSub"), B = $("endBlurb");
+  if (kind === "win") {
+    T.textContent = "HOUSE MONEY"; T.style.color = "";
+    S.textContent = "You beat the Ace";
+    B.innerHTML = "You walk past the marquee with <b>" + fmt(wallet.cash) + "</b> — buy-in money for the big job. The bouncer nods. The pit boss doesn't.";
+  } else if (kind === "lose") {
+    T.textContent = "BUSTED OUT"; T.style.color = "#8c1a2c";
+    S.textContent = "The Shark owns your night";
+    B.innerHTML = "No chips, no cash, and a marker you can't cover. The Ace's boys walk you out the back way. The alley does not pay 3 to 2.";
+  } else {
+    T.textContent = "CALLED IT A NIGHT"; T.style.color = "";
+    S.textContent = "Nobody beats the house. Some leave it.";
+    B.innerHTML = "You step into the street with <b>" + fmt(wallet.cash) + "</b>" + (wallet.cash > CFG.START_CASH ? " — up on the night. Smart." : ". The marquee hums behind you.");
+  }
+  var sg = $("endStats"); sg.innerHTML = "";
+  [["Blackjack hands", stats.hands], ["Wheel spins", stats.spins], ["Slot pulls", stats.pulls],
+   ["Biggest win", fmt(stats.biggestWin)], ["Peak bankroll", fmt(stats.peak)], ["Drinks", stats.drinks + (stats.drinks ? "" : " (steady hands)")],
+   ["Minutes inside", mins]].forEach(function (r) {
+    var d = document.createElement("div"); d.className = "s"; d.innerHTML = "<span>" + r[0] + "</span><b>" + r[1] + "</b>"; sg.appendChild(d);
+  });
+  $("endScreen").classList.remove("hidden");
+}
+/* ================= PURE GAME MATH (shared with the check tool) ================= */
+function handValue(cards) {
+  var s = 0, ace = 0;
+  for (var i = 0; i < cards.length; i++) {
+    var r = cards[i].r;
+    if (r === "A") { s += 1; ace = 1; }
+    else if (r === "J" || r === "Q" || r === "K") s += 10;
+    else s += parseInt(r, 10);
+  }
+  var soft = false;
+  if (ace && s + 10 <= 21) { s += 10; soft = true; }
+  return { v: s, soft: soft };
+}
+function isNatural(cards) { return cards.length === 2 && handValue(cards).v === 21; }
+/* settle ONE player hand vs a finished dealer hand. returns chips RETURNED for a 1-unit... uses actual bet */
+function settleBJ(hand, dealer, bet, naturalEligible) {
+  var pv = handValue(hand).v, dv = handValue(dealer).v;
+  if (pv > 21) return 0;
+  if (naturalEligible && isNatural(hand)) {
+    if (isNatural(dealer)) return bet;            // push
+    return bet + bet * 1.5;                        // 3:2
+  }
+  if (isNatural(dealer)) return 0;
+  if (dv > 21) return bet * 2;
+  if (pv > dv) return bet * 2;
+  if (pv === dv) return bet;
+  return 0;
+}
+function rlPayout(bets, n) {
+  var ret = 0, red = !!RED_SET[n];
+  for (var k in bets) {
+    var amt = bets[k]; if (!amt) continue;
+    if (k[0] === "n") { if (parseInt(k.slice(1), 10) === n) ret += amt * 36; continue; }
+    if (n === 0) continue;                          // outside bets lose on zero
+    if (k === "red" && red) ret += amt * 2;
+    else if (k === "black" && !red) ret += amt * 2;
+    else if (k === "even" && n % 2 === 0) ret += amt * 2;
+    else if (k === "odd" && n % 2 === 1) ret += amt * 2;
+    else if (k === "low" && n <= 18) ret += amt * 2;
+    else if (k === "high" && n >= 19) ret += amt * 2;
+    else if (k === "dz1" && n <= 12) ret += amt * 3;
+    else if (k === "dz2" && n >= 13 && n <= 24) ret += amt * 3;
+    else if (k === "dz3" && n >= 25) ret += amt * 3;
+    else if (k === "col1" && n % 3 === 1) ret += amt * 3;
+    else if (k === "col2" && n % 3 === 2) ret += amt * 3;
+    else if (k === "col3" && n % 3 === 0) ret += amt * 3;
+  }
+  return ret;
+}
+function slotPay(a, b, c) {
+  var t = [a, b, c], ch = t.filter(function (s) { return s === "CHR"; }).length;
+  if (a === b && b === c) {
+    return { DIA: 500, SEV: 250, BAR: 40, BELL: 20, ORN: 12, LEM: 8, CHR: 6 }[a] || 0;
+  }
+  if (ch === 2) return 2;
+  if (ch === 1 && a === "CHR") return 1;
+  return 0;
+}
+function slotRTP() {
+  var N = SLOT_STRIP.length, total = 0;
+  for (var i = 0; i < N; i++) for (var j = 0; j < N; j++) for (var k = 0; k < N; k++)
+    total += slotPay(SLOT_STRIP[i], SLOT_STRIP[j], SLOT_STRIP[k]);
+  return total / (N * N * N);
+}
+
+/* ================= 3D CARD / CHIP HELPERS ================= */
+var SUITS = ["♠", "♥", "♦", "♣"], _cardTex = {}, _cardBack = null, _cardGeo = null;
+function cardTexture(r, s) {
+  var key = r + s;
+  if (_cardTex[key]) return _cardTex[key];
+  var red = (s === 1 || s === 2);
+  _cardTex[key] = canvasTex(128, 180, function (g) {
+    g.fillStyle = "#f8f4ea"; g.fillRect(0, 0, 128, 180);
+    g.strokeStyle = "#c9bfa4"; g.lineWidth = 4; g.strokeRect(2, 2, 124, 176);
+    g.fillStyle = red ? "#b0242e" : "#1c1c22";
+    g.font = "800 34px 'Trebuchet MS'"; g.textAlign = "left"; g.textBaseline = "top";
+    g.fillText(r, 9, 6); g.font = "800 30px 'Trebuchet MS'"; g.fillText(SUITS[s], 9, 40);
+    g.save(); g.translate(128, 180); g.rotate(Math.PI);
+    g.font = "800 34px 'Trebuchet MS'"; g.fillText(r, 9, 6); g.font = "800 30px 'Trebuchet MS'"; g.fillText(SUITS[s], 9, 40);
+    g.restore();
+    g.font = "800 64px 'Trebuchet MS'"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(SUITS[s], 64, 94);
+  });
+  return _cardTex[key];
+}
+function cardBackTexture() {
+  _cardBack = _cardBack || canvasTex(128, 180, function (g) {
+    g.fillStyle = "#6e1524"; g.fillRect(0, 0, 128, 180);
+    g.strokeStyle = "#c9a227"; g.lineWidth = 3; g.strokeRect(7, 7, 114, 166);
+    for (var y = 20; y < 170; y += 24) for (var x = 18; x < 118; x += 24) {
+      g.beginPath(); g.moveTo(x, y - 9); g.lineTo(x + 9, y); g.lineTo(x, y + 9); g.lineTo(x - 9, y); g.closePath(); g.stroke();
+    }
+  });
+  return _cardBack;
+}
+function cardMesh(card, faceUp) {
+  _cardGeo = _cardGeo || new THREE.PlaneGeometry(0.26, 0.365);
+  var m = new THREE.Mesh(_cardGeo, new THREE.MeshLambertMaterial({ map: faceUp ? cardTexture(card.r, card.s) : cardBackTexture(), side: THREE.DoubleSide }));
+  m.rotation.x = -Math.PI / 2; m.userData.dyn = 1; m.userData.card = card;
+  gCards.add(m); return m;
+}
+function revealCard(mesh) { mesh.material.map = cardTexture(mesh.userData.card.r, mesh.userData.card.s); mesh.material.needsUpdate = true; }
+function oneShot(dur, step, done) {
+  var el = 0;
+  animators.push(function (dt) {
+    el += dt; var k = Math.min(1, el / dur);
+    step(k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2, k);
+    if (k >= 1) { if (done) done(); return false; }
+  });
+}
+function flyCard(mesh, from, to, rz, delay) {
+  mesh.visible = false;
+  setTimeout(function () {
+    mesh.visible = true; SFX.card();
+    oneShot(0.26, function (e) {
+      mesh.position.set(from[0] + (to[0] - from[0]) * e, from[1] + 0.12 * Math.sin(e * Math.PI) + (to[1] - from[1]) * e, from[2] + (to[2] - from[2]) * e);
+      mesh.rotation.z = rz * e;
+    });
+  }, delay || 0);
+  mesh.position.set(from[0], from[1], from[2]);
+}
+var CHIP_COLS = { 5: 0xc22323, 25: 0x1c8a4e, 100: 0x26262c, 500: 0x6a3aa0, 1000: 0xc9a227 };
+var _chipGeo = null;
+function chipBreakdown(amount) {
+  var out = [], denoms = [1000, 500, 100, 25, 5];
+  for (var i = 0; i < denoms.length; i++) { var d = denoms[i]; var n = Math.floor(amount / d); if (n) { out.push([d, n]); amount -= n * d; } }
+  return out;
+}
+function chipStack(x, y, z, amount, root) {
+  _chipGeo = _chipGeo || new THREE.CylinderGeometry(0.075, 0.075, 0.024, 12);
+  var bd = chipBreakdown(amount), made = [];
+  for (var c = 0; c < bd.length; c++) {
+    var n = Math.min(bd[c][1], 8);
+    for (var i = 0; i < n; i++) {
+      var m = new THREE.Mesh(_chipGeo, mat(CHIP_COLS[bd[c][0]]));
+      m.position.set(x + c * 0.17 - (bd.length - 1) * 0.085, y + 0.015 + i * 0.026, z);
+      m.userData.dyn = 1; (root || gChips).add(m); made.push(m);
+    }
+  }
+  return made;
+}
+function clearGroup(g) { while (g.children.length) g.remove(g.children[0]); }
+
+/* ================= BLACKJACK (table game) ================= */
+var SHOE = [];
+function buildShoe() {
+  SHOE = [];
+  var ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+  for (var d = 0; d < 6; d++) for (var s = 0; s < 4; s++) for (var r = 0; r < 13; r++) SHOE.push({ r: ranks[r], s: s });
+  for (var i = SHOE.length - 1; i > 0; i--) { var j = Math.floor(nextRand() * (i + 1)); var t = SHOE[i]; SHOE[i] = SHOE[j]; SHOE[j] = t; }
+}
+function draw() { if (SHOE.length < 78) { buildShoe(); feed("Dealer shuffles a fresh shoe"); } return SHOE.pop(); }
+var BJ = { phase: "bet", hands: [], act: 0, dealer: [], stake: 0, unit: 25, splitDone: false };
+function bjTableRef() { return currentSeat && currentSeat.table; }
+function bjCardTo(hand, hi, card, faceUp, delay) {
+  var T = bjTableRef(); if (!T) return;
+  var spot = hi === "D" ? T.dealerSpot : (hi === 0 ? T.playerSpot : T.splitSpot);
+  var idx = hi === "D" ? BJ.dealer.length - 1 : BJ.hands[hi].cards.length - 1;
+  var m = cardMesh(card, faceUp);
+  m.userData.hole = !faceUp;
+  var tx = spot[0] - 0.55 + idx * 0.3, tz = spot[2] + (hi === "D" ? 0 : idx * 0.06);
+  flyCard(m, [T.cx + 1.15, 1.1, T.cz + 0.7], [tx, spot[1] + idx * 0.003, tz], (hi === "D" ? 0.1 : -0.12), delay);
+  if (hi !== "D") BJ.hands[hi].meshes.push(m); else BJ.dealerMeshes.push(m);
+}
+function bjDeal() {
+  if (BJ.stake < CFG.BJ_MIN) { feed("Table minimum is $" + CFG.BJ_MIN, "bad"); return; }
+  if (wallet.chips < BJ.stake) { feed("Not enough chips — the cage is by the door.", "bad"); return; }
+  wallet.chips -= BJ.stake; updateHUD();
+  clearGroup(gCards); clearGroup(gChips);
+  BJ.phase = "player"; BJ.act = 0; BJ.splitDone = false;
+  BJ.hands = [{ cards: [], bet: BJ.stake, meshes: [], done: false }];
+  BJ.dealer = []; BJ.dealerMeshes = [];
+  var T = bjTableRef();
+  chipStack(T.betSpot[0], T.betSpot[1], T.betSpot[2], BJ.stake);
+  BJ.hands[0].cards.push(draw()); bjCardTo(BJ.hands[0], 0, BJ.hands[0].cards[0], true, 60);
+  BJ.dealer.push(draw()); bjCardTo(null, "D", BJ.dealer[0], true, 340);
+  BJ.hands[0].cards.push(draw()); bjCardTo(BJ.hands[0], 0, BJ.hands[0].cards[1], true, 620);
+  BJ.dealer.push(draw()); bjCardTo(null, "D", BJ.dealer[1], false, 900);
+  stats.hands++;
+  setTimeout(function () {
+    var up = BJ.dealer[0], upTen = (handValue([up]).v === 10 || up.r === "A");
+    if (upTen && isNatural(BJ.dealer)) { bjFinish(true); return; }        // peek: dealer natural
+    if (isNatural(BJ.hands[0].cards)) { bjFinish(false, false, true); return; } // player natural: no dealer draw
+    renderGame();
+  }, 1250);
+}
+function bjActiveHand() { return BJ.hands[BJ.act]; }
+function bjHit() {
+  var h = bjActiveHand(); h.cards.push(draw()); bjCardTo(h, BJ.act, h.cards[h.cards.length - 1], true, 0);
+  if (handValue(h.cards).v > 21) { h.done = true; bjNextHand(); } else renderGame();
+}
+function bjStand() { bjActiveHand().done = true; bjNextHand(); }
+function bjDouble() {
+  var h = bjActiveHand();
+  if (h.cards.length !== 2 || wallet.chips < h.bet) return;
+  wallet.chips -= h.bet; h.bet *= 2; updateHUD();
+  var T = bjTableRef(); chipStack(T.betSpot[0], T.betSpot[1], T.betSpot[2] + 0.18, h.bet / 2);
+  h.cards.push(draw()); bjCardTo(h, BJ.act, h.cards[h.cards.length - 1], true, 0);
+  h.done = true; setTimeout(bjNextHand, 420);
+}
+function bjSplit() {
+  var h = BJ.hands[0];
+  if (BJ.splitDone || BJ.hands.length > 1 || h.cards.length !== 2) return;
+  var v0 = handValue([h.cards[0]]).v, v1 = handValue([h.cards[1]]).v;
+  if (v0 !== v1 || wallet.chips < h.bet) return;
+  wallet.chips -= h.bet; updateHUD(); BJ.splitDone = true;
+  var moved = h.cards.pop(), movedMesh = h.meshes.pop();
+  var T = bjTableRef();
+  BJ.hands.push({ cards: [moved], bet: h.bet, meshes: [movedMesh], done: false });
+  oneShot(0.3, function (e) { movedMesh.position.x = h.meshes[0].position.x + (T.splitSpot[0] - 0.55 - h.meshes[0].position.x) * e; movedMesh.position.z = T.splitSpot[2]; });
+  chipStack(T.splitSpot[0], 0.94, T.cz - 0.72, h.bet);
+  var aces = h.cards[0].r === "A";
+  [0, 1].forEach(function (hi) {
+    var hh = BJ.hands[hi];
+    setTimeout(function () { hh.cards.push(draw()); bjCardTo(hh, hi, hh.cards[1], true, 0); if (aces) hh.done = true; }, 350 + hi * 350);
+  });
+  setTimeout(function () { if (aces) bjNextHand(); else { BJ.act = 0; renderGame(); } }, 1150);
+}
+function bjNextHand() {
+  if (BJ.act < BJ.hands.length - 1 && !BJ.hands[BJ.act + 1].done) { BJ.act++; renderGame(); return; }
+  var anyLive = BJ.hands.some(function (h) { return handValue(h.cards).v <= 21; });
+  bjFinish(false, !anyLive);
+}
+function bjFinish(dealerPeekedNatural, allBusted, skipDraw) {
+  BJ.phase = "dealer"; renderGame();
+  var hole = BJ.dealerMeshes[1];
+  setTimeout(function () { if (hole) revealCard(hole); SFX.card(); }, 400);
+  var extraDelay = 800;
+  if (!dealerPeekedNatural && !allBusted && !skipDraw) {
+    (function drawLoop() {
+      var dv = handValue(BJ.dealer);
+      if (dv.v < 17) {
+        setTimeout(function () {
+          BJ.dealer.push(draw()); bjCardTo(null, "D", BJ.dealer[BJ.dealer.length - 1], true, 0);
+          drawLoop();
+        }, extraDelay); extraDelay = 620;
+        return;
+      }
+      setTimeout(bjSettle, extraDelay + 300);
+    })();
+  } else setTimeout(bjSettle, 900);
+}
+function bjSettle() {
+  BJ.phase = "done";
+  var naturalOK = BJ.hands.length === 1 && !BJ.splitDone;
+  var totalBet = 0, totalRet = 0, lines = [];
+  BJ.hands.forEach(function (h, i) {
+    totalBet += h.bet;
+    var ret = settleBJ(h.cards, BJ.dealer, h.bet, naturalOK);
+    totalRet += ret;
+    var pv = handValue(h.cards).v, dv = handValue(BJ.dealer).v, tag;
+    if (pv > 21) tag = "bust";
+    else if (naturalOK && isNatural(h.cards) && !isNatural(BJ.dealer)) tag = "BLACKJACK — pays 3:2";
+    else if (isNatural(BJ.dealer) && !isNatural(h.cards)) tag = "dealer blackjack";
+    else if (dv > 21) tag = "dealer busts on " + dv;
+    else tag = pv > dv ? (pv + " beats " + dv) : (pv === dv ? "push on " + pv : dv + " beats " + pv);
+    lines.push((BJ.hands.length > 1 ? "Hand " + (i + 1) + ": " : "") + tag);
+  });
+  wallet.chips += totalRet; updateHUD();
+  var profit = totalRet - totalBet;
+  if (profit > 0) { SFX.win(); stats.streak++; if (profit > stats.biggestWin) stats.biggestWin = profit; }
+  else if (profit < 0) { SFX.lose(); stats.streak = 0; }
+  if (lines.some(function (l) { return l.indexOf("BLACKJACK") >= 0; })) toast("BLACKJACK!");
+  feed(lines.join(" · ") + " (" + (profit >= 0 ? "+" : "") + fmt(profit).replace("$-", "-$") + ")", profit > 0 ? "gold" : (profit < 0 ? "bad" : ""));
+  renderGame(); checkBust();
+}
+
+/* ================= ROULETTE (the wheel) ================= */
+var RL = { bets: {}, unit: 25, spinning: false, hist: [] };
+function rlStake() { var s = 0; for (var k in RL.bets) s += RL.bets[k]; return s; }
+function rlAnchor(key) {
+  var x, y;
+  if (key[0] === "n") {
+    var n = parseInt(key.slice(1), 10);
+    if (n === 0) { x = 42; y = 165; }
+    else { var col = Math.ceil(n / 3) - 1, row = 3 - (n - col * 3); x = 64 + col * 44 + 22; y = 30 + row * 90 + 45; }
+  } else {
+    var map = { dz1: [152, 323], dz2: [328, 323], dz3: [504, 323], low: [108, 361], even: [196, 361], red: [284, 361], black: [372, 361], odd: [460, 361], high: [548, 361] };
+    x = map[key][0]; y = map[key][1];
+  }
+  var lx = (x / 640 - 0.5) * 2.7, ly = (0.5 - y / 384) * 1.62;
+  return { lx: lx, ly: ly };
+}
+function rlDrawChips() {
+  var T = TABLES.rl; clearGroup(T.chipRoot);
+  T.feltMesh.updateWorldMatrix(true, false);
+  for (var k in RL.bets) {
+    if (!RL.bets[k]) continue;
+    var a = rlAnchor(k);
+    var wp = T.feltMesh.localToWorld(new THREE.Vector3(a.lx, a.ly, 0.02));
+    T.group.worldToLocal(wp);
+    chipStack(wp.x, wp.y - 0.015, wp.z, Math.max(5, RL.bets[k]), T.chipRoot);
+  }
+}
+function rlPlace(key) {
+  if (RL.spinning) return;
+  var amt = Math.min(RL.unit, wallet.chips);
+  if (amt <= 0) { feed("No chips — visit the cage.", "bad"); return; }
+  if (rlStake() + amt > CFG.RL_MAX) { feed("Table limit is $" + CFG.RL_MAX + " total.", "bad"); return; }
+  wallet.chips -= amt; RL.bets[key] = (RL.bets[key] || 0) + amt;
+  SFX.chip(); updateHUD(); rlDrawChips(); renderGame();
+}
+function rlClear() {
+  if (RL.spinning) return;
+  wallet.chips += rlStake(); RL.bets = {}; updateHUD(); rlDrawChips(); renderGame();
+}
+function pocketAngle(i) { return Math.PI / 2 - ((i + 0.5) / 37) * Math.PI * 2; }
+function rlSpin() {
+  if (RL.spinning || !rlStake()) { if (!rlStake()) feed("Place a bet first.", "bad"); return; }
+  RL.spinning = true; renderGame();
+  var outcome = Math.floor(nextRand() * 37);
+  var idx = WHEEL_ORDER.indexOf(outcome), T = TABLES.rl;
+  var t = 0, DUR = 5.4, ballA = Math.atan2(-(T.ball.position.z), T.ball.position.x - (-1.55)), R = 0.85;
+  var lastSector = -1;
+  stats.spins++;
+  animators.push(function (dt) {
+    t += dt;
+    var wDisc = 2.6 * Math.max(0.22, 1 - t / DUR * 0.85);
+    T.discTheta += wDisc * dt; T.disc.rotation.z = T.discTheta;
+    T.turret.rotation.y = T.discTheta;
+    var target = pocketAngle(idx) + T.discTheta;
+    if (t < 3.1) {
+      ballA -= (6.5 - t * 1.5) * dt;
+      var sec = Math.floor(ballA / (Math.PI * 2 / 37));
+      if (sec !== lastSector) { lastSector = sec; if (t > 1.2) SFX.tick(); }
+    } else if (t < DUR) {
+      var k = (t - 3.1) / (DUR - 3.1);
+      R = 0.85 - 0.23 * k;
+      var diff = ((target - ballA) % (Math.PI * 2) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+      ballA += diff * Math.min(1, dt * (1.5 + k * 6)) + wDisc * dt * k;
+    } else {
+      ballA = target; R = 0.62;
+    }
+    T.ball.position.set(-1.55 + Math.cos(ballA) * R, 1.19 + (t < 3.1 ? 0.02 : 0.005), -Math.sin(ballA) * R);
+    if (t >= DUR + 0.7) { rlSettleLive(outcome); return false; }
+  });
+}
+function rlSettleLive(n) {
+  var stakeTot = rlStake(), ret = rlPayout(RL.bets, n);
+  wallet.chips += ret; RL.bets = {};
+  var profit = ret - stakeTot;
+  RL.hist.unshift(n); if (RL.hist.length > 9) RL.hist.pop();
+  var tn = $("toteNums"); tn.innerHTML = "";
+  RL.hist.forEach(function (h) {
+    var d = document.createElement("div");
+    d.className = "tnum " + (h === 0 ? "green" : (RED_SET[h] ? "red" : ""));
+    d.textContent = h; tn.appendChild(d);
+  });
+  var name = n + (n === 0 ? " GREEN" : (RED_SET[n] ? " RED" : " BLACK"));
+  if (profit > 0) { SFX.win(); stats.streak++; if (profit > stats.biggestWin) stats.biggestWin = profit; }
+  else { SFX.lose(); stats.streak = 0; }
+  if (profit >= 500) toast(name);
+  feed("Wheel: " + name + " — " + (ret > 0 ? "returned " + fmt(ret) : "house takes it") + " (" + (profit >= 0 ? "+" : "") + fmt(profit).replace("$-", "-$") + ")", profit > 0 ? "gold" : "bad");
+  wallet.debt > 0 && feed("The Shark watches from the booth.", "bad");
+  setTimeout(function () { clearGroup(TABLES.rl.chipRoot); }, 1500);
+  RL.spinning = false; updateHUD(); renderGame(); checkBust();
+}
+
+/* ================= SLOTS ================= */
+var SL = { bet: 5, spinning: false, last: null };
+function slotStopAngle(k) { return ((k + 0.5) / SLOT_STRIP.length) * Math.PI * 2; }
+function slPull() {
+  if (SL.spinning) return;
+  var M = currentSeat.machine;
+  if (wallet.chips < SL.bet) { feed("No chips — visit the cage.", "bad"); return; }
+  wallet.chips -= SL.bet; updateHUD();
+  SL.spinning = true; renderGame(); stats.pulls++;
+  var stops = [Math.floor(nextRand() * 22), Math.floor(nextRand() * 22), Math.floor(nextRand() * 22)];
+  oneShot(0.4, function (e) { M.lever.rotation.x = Math.sin(e * Math.PI) * 1.4; });
+  var t = 0, stopT = [1.15, 1.7, 2.25], stopped = [false, false, false];
+  animators.push(function (dt) {
+    t += dt;
+    var allDone = true;
+    for (var r = 0; r < 3; r++) {
+      if (stopped[r]) continue;
+      if (t < stopT[r]) {
+        M.reels[r].rotation.x -= dt * 13; allDone = false;
+        if (Math.random() < dt * 8) SFX.reel();
+      } else {
+        var cur = M.reels[r].rotation.x, target = slotStopAngle(stops[r]);
+        var final = target - Math.PI * 2 * Math.ceil((target - cur) / (Math.PI * 2));
+        M.reels[r].rotation.x = final; stopped[r] = true; SFX.stop(); allDone = false;
+      }
+    }
+    if (allDone && t > stopT[2] + 0.15) { slSettle(stops); return false; }
+  });
+}
+function slSettle(stops) {
+  var syms = stops.map(function (k) { return SLOT_STRIP[k]; });
+  var mult = slotPay(syms[0], syms[1], syms[2]);
+  var winAmt = mult * SL.bet;
+  SL.last = { syms: syms, win: winAmt };
+  var M = currentSeat.machine;
+  if (winAmt > 0) {
+    wallet.chips += winAmt;
+    if (winAmt > stats.biggestWin) stats.biggestWin = winAmt;
+    stats.streak++;
+    if (mult >= 200) { toast("JACKPOT!"); SFX.jackpot(); } else SFX.win();
+    oneShot(2.0, function (e, k) { M.dome.material.emissiveIntensity = 0.15 + Math.abs(Math.sin(k * 14)) * 1.3; }, function () { M.dome.material.emissiveIntensity = 0.15; });
+    feed("Reels: " + syms.join(" · ") + " — pays " + mult + "x (+" + fmt(winAmt - SL.bet) + ")", "gold");
+  } else { SFX.lose(); stats.streak = 0; }
+  SL.spinning = false; updateHUD(); renderGame(); checkBust();
+}
+
+/* ================= SEATED GAME PANEL RENDER ================= */
+function chipRow(container, denoms, current, onPick) {
+  denoms.forEach(function (d) {
+    var b = document.createElement("button");
+    b.className = "chipbtn" + (current === d ? " sel" : "");
+    b.style.background = "#" + ("000000" + CHIP_COLS[d].toString(16)).slice(-6);
+    b.textContent = "$" + d;
+    b.addEventListener("click", function () { SFX.chip(); onPick(d); });
+    container.appendChild(b);
+  });
+}
+function openGamePanel(seat) {
+  $("gpName").textContent = seat.game === "bj" ? "BLACKJACK — 3:2, DEALER STANDS 17" : seat.game === "rl" ? "EUROPEAN ROULETTE — SINGLE ZERO" : "LUCKY 7s — 3 REEL";
+  $("gpSub").textContent = seat.game === "bj" ? "$" + CFG.BJ_MIN + "–$" + CFG.BJ_MAX : seat.game === "rl" ? "$" + CFG.RL_MAX + " table cap · Esc stands up" : "90.8% return. The dome knows.";
+  if (seat.game === "bj") { BJ.phase = "bet"; BJ.stake = 0; }
+  renderGame();
+}
+function renderGame() {
+  if (!currentSeat) return;
+  var body = $("gpBody"); body.innerHTML = "";
+  var msg = document.createElement("div"); msg.className = "gp-msg"; body.appendChild(msg);
+  var row = document.createElement("div"); row.className = "gp-row";
+  if (currentSeat.game === "bj") {
+    if (BJ.phase === "bet") {
+      msg.innerHTML = "Stake: <b>" + fmt(BJ.stake) + "</b> — chips " + wallet.chips.toLocaleString();
+      chipRow(row, [5, 25, 100, 500], null, function (d) { if (BJ.stake + d <= CFG.BJ_MAX && wallet.chips >= BJ.stake + d) { BJ.stake += d; renderGame(); } });
+      row.appendChild(gbtn("DEAL", "gold", bjDeal, BJ.stake < CFG.BJ_MIN));
+      row.appendChild(gbtn("Clear", "dark", function () { BJ.stake = 0; renderGame(); }));
+    } else if (BJ.phase === "player") {
+      var h = bjActiveHand(), hv = handValue(h.cards);
+      msg.innerHTML = (BJ.hands.length > 1 ? "<b>Hand " + (BJ.act + 1) + "</b> — " : "") + "You: <b>" + hv.v + (hv.soft ? " soft" : "") + "</b> vs dealer " + handValue([BJ.dealer[0]]).v;
+      row.appendChild(gbtn("HIT", "", bjHit));
+      row.appendChild(gbtn("STAND", "gold", bjStand));
+      row.appendChild(gbtn("DOUBLE", "wine", bjDouble, h.cards.length !== 2 || wallet.chips < h.bet));
+      var canSplit = !BJ.splitDone && BJ.hands.length === 1 && h.cards.length === 2 && handValue([h.cards[0]]).v === handValue([h.cards[1]]).v && wallet.chips >= h.bet;
+      row.appendChild(gbtn("SPLIT", "dark", bjSplit, !canSplit));
+    } else if (BJ.phase === "dealer") {
+      msg.innerHTML = "Dealer plays…";
+    } else {
+      msg.innerHTML = "Dealer had <b>" + handValue(BJ.dealer).v + "</b>. Chips " + wallet.chips.toLocaleString();
+      row.appendChild(gbtn("REBET $" + BJ.stake, "gold", bjDeal, wallet.chips < BJ.stake || BJ.stake < CFG.BJ_MIN));
+      row.appendChild(gbtn("CHANGE BET", "dark", function () { BJ.phase = "bet"; BJ.stake = 0; renderGame(); }));
+    }
+  } else if (currentSeat.game === "rl") {
+    msg.innerHTML = RL.spinning ? "No more bets — ball's away…"
+      : "On the felt: <b>" + fmt(rlStake()) + "</b> — unit $" + RL.unit + " — chips " + wallet.chips.toLocaleString();
+    var board = document.createElement("div"); board.id = "rboard";
+    function rc(label, key, cls, span) {
+      var c = document.createElement("div"); c.className = "rcell " + (cls || "") + (span ? " " + span : "");
+      c.textContent = label;
+      if (RL.bets[key]) { var a = document.createElement("span"); a.className = "amt"; a.textContent = RL.bets[key]; c.appendChild(a); }
+      c.addEventListener("click", function () { rlPlace(key); });
+      board.appendChild(c);
+    }
+    rc("0", "n0", "green");
+    for (var col = 0; col < 12; col++) { var n3 = col * 3 + 3; rc(String(n3), "n" + n3, RED_SET[n3] ? "red" : "black"); }
+    rc("C3", "col3", "outer");
+    board.appendChild(document.createElement("div"));
+    for (var col2 = 0; col2 < 12; col2++) { var n2 = col2 * 3 + 2; rc(String(n2), "n" + n2, RED_SET[n2] ? "red" : "black"); }
+    rc("C2", "col2", "outer");
+    board.appendChild(document.createElement("div"));
+    for (var col1 = 0; col1 < 12; col1++) { var n1 = col1 * 3 + 1; rc(String(n1), "n" + n1, RED_SET[n1] ? "red" : "black"); }
+    rc("C1", "col1", "outer");
+    body.appendChild(board);
+    var outer = document.createElement("div"); outer.id = "rboard"; outer.style.gridTemplateColumns = "repeat(12,1fr)";
+    [["1st 12", "dz1", "rspan3"], ["2nd 12", "dz2", "rspan3"], ["3rd 12", "dz3", "rspan3"]].forEach(function (o) {
+      var c = document.createElement("div"); c.className = "rcell outer " + o[2]; c.textContent = o[0];
+      if (RL.bets[o[1]]) { var a = document.createElement("span"); a.className = "amt"; a.textContent = RL.bets[o[1]]; c.appendChild(a); }
+      c.addEventListener("click", function () { rlPlace(o[1]); }); outer.appendChild(c);
+    });
+    [["1-18", "low"], ["EVEN", "even"], ["RED", "red", "red"], ["BLACK", "black", "black"], ["ODD", "odd"], ["19-36", "high"]].forEach(function (o) {
+      var c = document.createElement("div"); c.className = "rcell outer rspan2 " + (o[2] || ""); c.textContent = o[0];
+      if (RL.bets[o[1]]) { var a = document.createElement("span"); a.className = "amt"; a.textContent = RL.bets[o[1]]; c.appendChild(a); }
+      c.addEventListener("click", function () { rlPlace(o[1]); }); outer.appendChild(c);
+    });
+    body.appendChild(outer);
+    chipRow(row, [5, 25, 100], RL.unit, function (d) { RL.unit = d; renderGame(); });
+    row.appendChild(gbtn("SPIN", "gold", rlSpin, RL.spinning || !rlStake()));
+    row.appendChild(gbtn("CLEAR", "dark", rlClear, RL.spinning || !rlStake()));
+  } else {
+    msg.innerHTML = (SL.last ? "Last: <b>" + SL.last.syms.join(" ") + "</b>" + (SL.last.win ? " — paid " + fmt(SL.last.win) : " — nothing") + " · " : "")
+      + "Bet <b>$" + SL.bet + "</b> — chips " + wallet.chips.toLocaleString()
+      + "<br><span style='opacity:.65;font-size:12px'>DIA 500x · 7s 250x · BAR 40x · BELL 20x · fruit 12/8/6x · cherries pay small</span>";
+    CFG.SLOT_BETS.forEach(function (b) {
+      var bb = gbtn("$" + b, SL.bet === b ? "gold" : "dark", function () { SL.bet = b; renderGame(); });
+      row.appendChild(bb);
+    });
+    row.appendChild(gbtn("PULL", "wine", slPull, SL.spinning));
+  }
+  body.appendChild(row);
+}
+function onStandGame() {
+  if (rlStake() && !RL.spinning) { rlClear(); feed("Unspun bets returned."); }
+}
+busyCheck = function () {
+  if (!currentSeat) return false;
+  if (currentSeat.game === "bj") return BJ.phase === "player" || BJ.phase === "dealer";
+  if (currentSeat.game === "rl") return RL.spinning;
+  return SL.spinning;
+};
+
+/* ================= MAIN LOOP ================= */
+/* simT is accumulated game time — headless SwiftShader frames crawl, so the
+   check tool advances the same pipeline synchronously via __casino.ff(). */
+var lastT = 0, simT = 0, hintClock = 0, aimHold = false;
+function stepSim(dt) {
+  simT += dt;
+  for (var i = animators.length - 1; i >= 0; i--) { if (animators[i](dt, simT) === false) animators.splice(i, 1); }
+  if (tweens.length) {
+    var tw = tweens[0]; tw.t += dt;
+    var k = Math.min(1, tw.t / tw.dur), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+    camera.position.lerpVectors(tw.p0, tw.p1, e);
+    var lk = new THREE.Vector3().lerpVectors(tw.l0, tw.l1, e);
+    camera.lookAt(lk); camLookNow = lk;
+    if (k >= 1) { tweens.shift(); if (tw.done) tw.done(); }
+  }
+}
+function tick(now) {
+  requestAnimationFrame(tick);
+  var t = now / 1000, dt = Math.min(0.05, t - lastT || 0.016); lastT = t;
+  stepSim(dt);
+  if (!tweens.length && mode === "walk" && !aimHold) {
+    var sp = (keys.ShiftLeft || keys.ShiftRight ? 6.4 : 3.9) * dt;
+    var mx = 0, mz = 0;
+    if (keys.KeyW) { mx += Math.sin(player.yaw); mz += Math.cos(player.yaw); }
+    if (keys.KeyS) { mx -= Math.sin(player.yaw); mz -= Math.cos(player.yaw); }
+    if (keys.KeyA) { mx += Math.cos(player.yaw); mz -= Math.sin(player.yaw); }
+    if (keys.KeyD) { mx -= Math.cos(player.yaw); mz += Math.sin(player.yaw); }
+    if (mx || mz) { var L = Math.sqrt(mx * mx + mz * mz); collideMove(player.x + mx / L * sp, player.z + mz / L * sp); }
+    setWalkCam();
+    hintClock += dt;
+    if (hintClock > 0.12) {
+      hintClock = 0;
+      var u = nearestUse();
+      hint(u ? (u.kind === "zone" ? u.item.label : seatLabel(u.item)) : null);
+    }
+  }
+  renderer.render(scene, camera);
+}
+
+/* ================= AIM POSES (for the check tool) ================= */
+var AIM_POSES = {
+  marquee: { pos: [11.8, 2.5, -23.0], look: [1.0, 5.6, -11] },
+  floor: { pos: [0, 1.75, -10.3], look: [0, 1.1, 5] },
+  blackjack: { pos: [-4.6, 2.05, -4.9], look: [-4.6, 0.9, -1.6] },
+  roulette: { pos: [-2.7, 2.2, 2.2], look: [-1.35, 1.05, 4.4] },
+  slots: { pos: [13.0, 1.65, -7.9], look: [15.9, 1.35, -3.2] },
+  bar: { pos: [-12.7, 1.65, 5.4], look: [-12.7, 1.6, 10.0] },
+  cage: { pos: [-8.9, 1.75, -8.45], look: [-12.2, 1.5, -8.45] },
+  booth: { pos: [12.6, 1.6, 6.8], look: [14.6, 0.95, 9.6] },
+};
+
+/* ================= BOOT ================= */
+function start() {
+  if (mode !== "title") return;
+  mode = "walk"; stats.t0 = performance.now();
+  $("titleScreen").classList.add("hidden");
+  SFX.unlock();
+  feed("The bouncer waves you through the ropes.");
+  if (!qs.boot) lockPointer();
+}
+function bootGame() {
+  boot3D();
+  buildWorld(); buildCage(); buildBar(); buildBooth(); buildSlots();
+  bjTable(-4.6, -2.6, 0); bjTable(4.6, -2.6, 1);
+  buildRoulette(); buildCast();
+  TABLES.rl.feltMesh = TABLES.rl.group.children.filter(function (c) { return c.geometry && c.geometry.type === "PlaneGeometry"; })[0];
+  zones.push({ id: "door", label: "[E] Leave the Ace", pos: [0, -11.6], r: 1.5, action: leaveDoor });
+  buildShoe();
+  setupInput(); updateHUD();
+  $("playBtn").addEventListener("click", start);
+  $("againBtn").addEventListener("click", function () { location.reload(); });
+  requestAnimationFrame(tick);
+  if (qs.boot) start();
+}
+
+/* ================= DEBUG API (tools/casino-check.mjs) ================= */
+window.__casino = {
+  version: 1,
+  state: function () {
+    return { mode: mode, cash: wallet.cash, chips: wallet.chips, debt: wallet.debt,
+      seat: currentSeat ? currentSeat.id : null, stats: JSON.parse(JSON.stringify(stats)),
+      pitboss: pitbossCalled, shoe: SHOE.length, bjPhase: BJ.phase, rlSpinning: RL.spinning, slSpinning: SL.spinning };
+  },
+  warp: function (x, z, yaw) { player.x = x; player.z = z; player.yaw = yaw || 0; player.pitch = 0; if (mode === "walk") setWalkCam(); return true; },
+  ff: function (sec) { var n = Math.ceil((sec || 1) / 0.05); for (var i = 0; i < n; i++) stepSim(0.05); renderer.render(scene, camera); return simT; },
+  aim: function (name) {
+    if (!name) { aimHold = false; return true; }
+    var p = AIM_POSES[name]; if (!p) return false;
+    aimHold = true; tweens.length = 0;
+    camera.position.set(p.pos[0], p.pos[1], p.pos[2]);
+    camera.lookAt(new THREE.Vector3(p.look[0], p.look[1], p.look[2]));
+    return true;
+  },
+  poses: function () { return Object.keys(AIM_POSES); },
+  rig: function (arr) { for (var i = 0; i < arr.length; i++) rigQueue.push(arr[i]); return rigQueue.length; },
+  props: function () {
+    var out = [];
+    [gWorld, gProps, gNPCs].forEach(function (root) {
+      root.updateWorldMatrix(true, true);
+      root.traverse(function (o) {
+        if (!o.isMesh || o.userData.dyn) return;
+        var b = new THREE.Box3().setFromObject(o);
+        out.push([b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z]);
+      });
+    });
+    return out;
+  },
+  sit: function (id) { var s = seats.filter(function (x) { return x.id === id; })[0]; if (!s) return false; player.x = s.pos[0]; player.z = s.pos[1]; sitAt(s); return true; },
+  stand: function () { standUp(); return mode; },
+  bj: { deal: bjDeal, hit: bjHit, stand: bjStand, dbl: bjDouble, split: bjSplit,
+    setStake: function (n) { BJ.stake = n; }, state: function () { return BJ; },
+    value: handValue, settle: settleBJ, natural: isNatural, shoeSize: function () { return SHOE.length; }, rebuildShoe: buildShoe,
+    stack: function (cards) { for (var i = cards.length - 1; i >= 0; i--) SHOE.push(cards[i]); } },
+  rl: { place: rlPlace, spin: rlSpin, clear: rlClear, payout: rlPayout, wheel: WHEEL_ORDER, red: RED_SET,
+    setUnit: function (n) { RL.unit = n; }, bets: function () { return RL.bets; }, hist: function () { return RL.hist; } },
+  sl: { pull: slPull, pay: slotPay, strip: SLOT_STRIP, rtp: slotRTP, setBet: function (n) { SL.bet = n; }, last: function () { return SL.last; } },
+  wallet: wallet, cfg: CFG,
+  give: function (o) { if (o.cash != null) wallet.cash = o.cash; if (o.chips != null) wallet.chips = o.chips; if (o.debt != null) wallet.debt = o.debt; updateHUD(); },
+  cage: { buy: buyChips, out: cashOut }, shark: openShark, drink: buyDrink, leave: leaveDoor,
+  seats: function () { return seats.map(function (s) { return s.id; }); },
+  zones: function () { return zones.map(function (z) { return z.id; }); },
+};
+
+bootGame();
+
+</script>
+</body>
+</html>

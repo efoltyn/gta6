@@ -1,0 +1,1 @@
+(function(){"use strict";const CBZ=window.CBZ,player=CBZ.player;let strideAccum=0;CBZ.onUpdate(80,function(dt){if(player.grounded&&player.speed>.5&&player.stun<=0){strideAccum+=player.speed*dt;const stride=player.crouch?1.1:1.7;strideAccum>=stride&&(strideAccum=0,CBZ.sfx("step"))}else strideAccum=0})})();

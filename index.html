@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Play</title>
+<meta name="description" content="Free browser games, all one engine: Shark Sim, Disaster Survival, Prison Escape, Gang City, Gun Game, NPC War, Bomb Survivor, Desert Warlord.">
+<link rel="stylesheet" href="css/fonts.css">
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#0b1622;color:#e8ecf2;font-family:Fredoka,system-ui,sans-serif}
+header{display:flex;align-items:center;gap:16px;padding:14px 24px;background:#0f1d2c;border-bottom:1px solid #1e2f42}
+header b{font-size:22px;letter-spacing:.06em}
+header span{opacity:.6;font-size:13px}
+main{padding:22px 24px 60px;max-width:1500px;margin:0 auto}
+h1{font-size:30px;margin:6px 0 18px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:18px 14px}
+.card{display:block;color:inherit;text-decoration:none;border-radius:12px;overflow:hidden;background:#13243a;border:1px solid #1e2f42;transition:transform .12s ease,border-color .12s ease}
+.card:hover{transform:translateY(-3px);border-color:#4da3ff}
+.card img,.card .nothumb{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#0a1420}
+.card .nothumb{display:flex;align-items:center;justify-content:center;font-weight:700;opacity:.5}
+.meta{padding:10px 12px 12px}
+.meta b{display:block;font-size:16px;margin-bottom:3px}
+.meta span{display:block;font-size:12.5px;opacity:.72;line-height:1.3}
+.meta em{display:block;margin-top:6px;font-size:11px;font-style:normal;color:#ffb27a;letter-spacing:.04em}
+footer{padding:20px 24px;font-size:12px;opacity:.5}
+</style></head>
+<body>
+<header><b>PLAY</b><span>free browser games · one engine · thumbnails are real gameplay</span></header>
+<main><h1>All games</h1><div class="grid">
+<a class="card" href="shark-sim.html"><img src="thumbs/shark-sim.jpg" alt="Shark Sim" loading="lazy"><div class="meta"><b>Shark Sim</b><span>Eat. Grow. Become the megalodon.</span></div></a>
+<a class="card" href="disaster-survival.html"><img src="thumbs/disaster-survival.jpg" alt="Disaster Survival" loading="lazy"><div class="meta"><b>Disaster Survival</b><span>100 on an island. One disaster. Last one alive.</span></div></a>
+<a class="card" href="prison-escape.html"><img src="thumbs/prison-escape.jpg" alt="Prison Escape" loading="lazy"><div class="meta"><b>Prison Escape</b><span>Cell Block Z. Get out.</span></div></a>
+<a class="card" href="gang-city.html"><img src="thumbs/gang-city.jpg" alt="Gang City" loading="lazy"><div class="meta"><b>Gang City</b><span>Turf, gangs, cops. The whole city.</span><em>Big world · desktop · 30 s load</em></div></a>
+<a class="card" href="gun-game.html"><img src="thumbs/gun-game.jpg" alt="Gun Game" loading="lazy"><div class="meta"><b>Gun Game</b><span>Every kill climbs the ladder. The last rung is fists.</span></div></a>
+<a class="card" href="games/battle.html"><img src="thumbs/npc-war.jpg" alt="NPC War" loading="lazy"><div class="meta"><b>NPC War</b><span>Two armies. Any size. You hold the clock.</span></div></a>
+<a class="card" href="games/bomb-survivor.html"><img src="thumbs/bomb-survivor.jpg" alt="Bomb Survivor" loading="lazy"><div class="meta"><b>Bomb Survivor</b><span>6 v 6 over the real city.</span></div></a>
+<a class="card" href="games/warlord.html"><img src="thumbs/desert-warlord.jpg" alt="Desert Warlord" loading="lazy"><div class="meta"><b>Desert Warlord</b><span>Your army. Your dead stay dead.</span></div></a>
+</div></main>
+<footer>Every game here is built with three.js and runs in your browser. Nothing to install.</footer>
+</body></html>

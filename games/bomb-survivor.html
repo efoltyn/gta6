@@ -1,0 +1,910 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Bomb Survivor</title>
+<!-- ============================================================
+  BOMB SURVIVOR — the one version.
+
+  There used to be two of these, and both were the same mistake wearing
+  different loaders: a purpose-built desert of box towers standing in for a
+  city this repo already ships. This page deletes the fake world and stands
+  the game on GANG CITY'S OWN MAP:
+
+    • the REAL military island at its authored place (-620,-700) — fence,
+      airstrip, parked fighters, the heavy bomber — raised by the same
+      builder the full game runs, via CBZ.studio.raise("militaryisland");
+    • a REAL downtown across the strait at the mainland's own coordinates
+      (0,-700) — CBZ.studio.town() calls city/towngen.js + the one shell
+      mint (cityMakeBuilding), so every tower is the enterable, instanced-
+      glass, stairs-inside building the mainland is made of, and a runner
+      ducks through a REAL door for cover;
+    • Halloran Field, the REAL civil airport island, north across the water
+      (?airport=0 to skip it);
+    • civilians who WALK, on the shipped gait, sliding along the real
+      colliders — because forty statues never read as a city.
+
+  What is left in this file is the game: who bombs, who runs, what a tower
+  is worth, what a civilian costs, and what the clock decides. The world is
+  an afterthought. That is the whole point.
+
+  THE HEADING CONVENTION, restated because getting it wrong cost a session:
+  systems/airframe.js publishes heading() as atan2(-fx,-fz) — the nose is
+  -Z, so for heading h the aeroplane's forward is (-sin h, -cos h).
+    fly toward p from q:   h = atan2(q.x - p.x, q.z - p.z)
+    d metres ahead:        (pos.x - sin h * d, pos.z - cos h * d)
+============================================================ -->
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#0b0d10;overflow:hidden;
+    font:600 15px/1.35 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#f2efe8;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  canvas{display:block}
+  #gate{position:fixed;inset:0;display:grid;place-items:center;padding:26px;z-index:60;
+    background:radial-gradient(120% 90% at 50% 0%,#1b2330,#0b0d10 70%)}
+  #gate .in{text-align:center;max-width:480px;width:100%}
+  #gate h1{margin:0 0 8px;font-size:clamp(32px,10vw,58px);letter-spacing:-.02em;line-height:.92}
+  #gate h1 em{font-style:normal;color:#ff7a45}
+  #gate p{margin:0 0 30px;opacity:.6;letter-spacing:.16em;font-size:11px}
+  #gate button{-webkit-appearance:none;appearance:none;border:0;cursor:pointer;width:100%;
+    padding:22px;border-radius:18px;background:#4fbf6a;color:#07130b;font:800 21px/1 inherit;
+    letter-spacing:.14em;box-shadow:0 6px 0 #2f8a4a}
+  #gate button:active{transform:translateY(3px);box-shadow:0 3px 0 #2f8a4a}
+  #gate .st{margin-top:22px;font-size:11px;letter-spacing:.18em;opacity:.4;min-height:15px}
+  #role{position:fixed;left:50%;top:calc(58px + env(safe-area-inset-top,0px));transform:translateX(-50%);
+    z-index:41;font-size:11px;letter-spacing:.28em;opacity:.7;pointer-events:none;white-space:nowrap}
+  #streak{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+    z-index:41;font-size:12px;letter-spacing:.22em;color:#ffc46a;opacity:0;transition:opacity .3s;pointer-events:none}
+  #streak.on{opacity:.95}
+  #swap{position:fixed;inset:0;display:grid;place-items:center;z-index:58;pointer-events:none;
+    background:rgba(9,11,14,.82);opacity:0;transition:opacity .45s;font-size:clamp(26px,8vw,52px);
+    letter-spacing:.06em;text-align:center;line-height:1.15}
+  #swap.on{opacity:1}
+  #swap small{display:block;font-size:12px;letter-spacing:.3em;opacity:.55;margin-top:14px}
+  #radar{position:fixed;right:calc(14px + env(safe-area-inset-right,0px));
+    bottom:calc(14px + env(safe-area-inset-bottom,0px));width:132px;height:132px;z-index:41;
+    opacity:.82;pointer-events:none;display:none}
+  #flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:55;transition:opacity .5s}
+  #over{position:fixed;inset:0;display:none;place-items:center;z-index:62;background:rgba(9,11,14,.92);padding:26px}
+  #over .in{text-align:center}
+  #over h2{margin:0 0 16px;font-size:clamp(26px,7vw,42px)}
+  #over table{margin:0 auto 24px;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  #over td{padding:7px 18px;opacity:.85}
+  #over button{-webkit-appearance:none;appearance:none;border:1px solid rgba(255,255,255,.25);
+    background:transparent;color:inherit;padding:15px 32px;border-radius:999px;font:700 15px/1 inherit;
+    letter-spacing:.16em;cursor:pointer}
+</style>
+</head>
+<body>
+
+<div id="gate"><div class="in">
+  <h1>BOMB <em>SURVIVOR</em></h1>
+  <p>THREE MINUTES BOMBING. THREE MINUTES BOMBED. THE REAL CITY.</p>
+  <button id="go">PLAY</button>
+  <div class="st" id="st"></div>
+</div></div>
+
+<div id="role"></div>
+<div id="swap"></div>
+<div id="streak"></div>
+<canvas id="radar" width="264" height="264"></canvas>
+<div id="flash"></div>
+
+<div id="over"><div class="in">
+  <h2 id="overTitle">RESULT</h2>
+  <table id="overTable"></table>
+  <button id="again">AGAIN</button>
+</div></div>
+
+<!-- ONE TAG. Everything this game draws, Gang City already draws. -->
+<script src="../src/core/studio.js?v=nodash1"></script>
+<script>
+(function () {
+"use strict";
+const Q = new URLSearchParams(location.search);
+const WANT_AIRPORT = Q.get("airport") !== "0";
+const WORLD_SEED = Q.get("seed") || "talloran";
+
+const NEEDS = [
+  "caps",           // be reachable: modeHas, worldActors, blast damage
+  "batch",          // the two passes that make the real fabric affordable
+  "green",          // instanced trees
+  "people",         // the shipped 1.82 m rig, gait, poses
+  "military",       // the real fleet models: jets, the B-2, tanks, trucks
+  "militaryisland", // the REAL base from the map, raisable
+  "citycore",       // the REAL city fabric: cityMakeBuilding + buildTown
+  "airbase",        // model seating (wheels on concrete), used by fly()
+  "air",            // flight with derived coefficients
+  "ordnance",       // bombs and the one shared ballistic integrator
+  "damage",         // fireball, wall ruin, building collapse
+  "nukefx",         // the researched mushroom
+  "radar",          // PPI scope
+  "match",          // two sides, a clock, the half-time swap
+];
+if (WANT_AIRPORT) NEEDS.push("airport");
+
+CBZ.studio.need(NEEDS).then(function () {
+const CBZ = window.CBZ, THREE = window.THREE;
+const el = function (id) { return document.getElementById(id); };
+const st = function (t) { const n = el("st"); if (n) n.textContent = t; };
+
+// ============================================================ THE RULES
+const SQUAD        = 6;        // per side
+const HALVES       = 2;
+const HALF_SECONDS = 180;      // three minutes each way; ten was a siege
+const PTS_KILL     = 250;
+const PTS_TOWER    = 150;      // a building brought down — the city is the scoreboard
+const PTS_ALIVE    = 0.5;      // per second, per living runner
+const CIV_PENALTY  = 250;      // a civilian is not a target; the ledger says so
+const BOMB_ALT     = 320;
+const ALT_MIN      = 170, ALT_MAX = 640;
+const RELEASE_MIN  = 120;      // press the attack below this and the stick is yours
+const RUN_SPEED    = 6.4;
+const STICK        = 7;        // stores per press
+const NUKE_ARM     = 5;        // kills that earn the one round
+const RESPAWN_AIR  = 8;
+const CIVILIANS    = 20;
+
+// ONE-LINE REVERT for the takeoff repair, so tools/before-after.mjs can
+// photograph this checkout against its own broken self rather than against a
+// deployed build that differs by forty other commits. ?cfg_BOMB_TAKEOFF_V1=0
+// restores BOTH halves of the old behaviour: the spawn that passed 64 into
+// place()'s PITCH argument, and the roll that only ever ended if the player
+// pulled the stick. Pair it with ?cfg_PLANE_SEATING_V1=0&cfg_AIRFRAME_ROTATE_V1=0
+// for the complete before.
+const TAKEOFF_V1 = CBZ.CONFIG.BOMB_TAKEOFF_V1 !== false;
+
+function headingToward(fromX, fromZ, toX, toZ) { return Math.atan2(fromX - toX, fromZ - toZ); }
+
+const TEAMS = [
+  { id: "talon", name: "TALON", color: 0xff6a3d },
+  { id: "ghost", name: "GHOST", color: 0x49c6ff },
+];
+
+let town = null, base = null, port = null;
+let hud, match, cam, chase, sight, scope, eng;
+let ctlFly, ctlWalk, ctl;
+let units = [], civs = [], me = null, started = false;
+const nuke = { kills: 0, armed: false, spent: false };
+const _v = new THREE.Vector3();
+
+// ============================================================ BOOT
+st("RAISING THE STRAIT");
+CBZ.micro.boot({
+  fov: 74, far: 15000, exposure: 0.92,
+  sky: { top: 0x6ea7d8, bottom: 0xdfe6ea, fogNear: 1500, fogFar: 8500, radius: 11000 },
+  lights: { sun: 0.95, hemi: 0.5, shadowSpan: 900, groundColor: 0x7a828a },
+});
+cam = CBZ.camera;
+
+// ============================================================ THE WORLD
+// Gang City's own geography. The military island and Halloran Field build at
+// their AUTHORED map coordinates; downtown stands at the mainland's slot.
+// Everything else is the strait. groundAt answers from the rects the builders
+// themselves own — no heightfield, no fake terrain, just the map.
+const SEA_Y = -0.4;
+const BASE_RECT = { minX: -860, maxX: -380, minZ: -950, maxZ: -450 };          // island_military.js's own extents
+const BASE_CW   = { minX: -380, maxX: -133, minZ: -712, maxZ: -688 };          // its causeway toward the mainland
+const PORT_RECT = { minX: -900, maxX: 290, minZ: -280, maxZ: 40 };             // island_airport.js A_MINX..A_MAXZ
+const PORT_CW   = { minX: -12,  maxX: 12,  minZ: -566, maxZ: -280 };
+const TOWN_AT   = { x: 0, z: -700 };                                           // the mainland core's slot
+let   TOWN_RECT = { minX: -180, maxX: 180, minZ: -880, maxZ: -520 };           // replaced by town.rect after build
+
+function inRect(r, x, z) { return x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ; }
+function groundAt(x, z) {
+  if (inRect(TOWN_RECT, x, z)) return 0.03;
+  if (inRect(BASE_RECT, x, z) || inRect(BASE_CW, x, z)) return 0.05;
+  if (WANT_AIRPORT && (inRect(PORT_RECT, x, z) || inRect(PORT_CW, x, z))) return 0.05;
+  return -2.2;                                        // the sea floor
+}
+function waterAt(x, z) { return groundAt(x, z) < SEA_Y; }
+CBZ.studio.setWorld({ groundAt: groundAt, waterAt: waterAt, seaLevel: SEA_Y });
+
+// the sea: one deep plate under everything, fog does the rest
+(function sea() {
+  const g = new THREE.PlaneGeometry(24000, 24000);
+  g.rotateX(-Math.PI / 2); g.translate(0, SEA_Y, -400);
+  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x2e4c66 }));
+  m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
+  m.userData.terrain = true;
+  CBZ.scene.add(m);
+})();
+
+// BE REACHABLE. One call and every shared verb can find these people. The
+// blastActors cap is 0 ON PURPOSE: systems/ordnance.js already sweeps this
+// roster through addTarget WITH the cover rules (wall trace + overhead lid);
+// a second sweep would kill the same man twice and skip the roof test.
+CBZ.studio.join({
+  id: "bombsurvivor", label: "Bomb Survivor",
+  caps: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 0, breach: 1 },
+  actors: function (out) {
+    for (let i = 0; i < units.length; i++) if (units[i].alive) out.push(units[i]);
+    for (let i = 0; i < civs.length; i++) if (!civs[i].dead) out.push(civs[i]);
+    return out;
+  },
+  hurt: function (u, dmg, imp) { if (u.civ) { hurtCiv(u, dmg, imp); } else { hurt(u, dmg, imp); } return true; },
+  hurtPlayer: function (dmg, x, z, cause) { if (!me || !me.alive) return false; hurt(me, dmg, { cause: cause }); return true; },
+  route: "bomb survivor units + hurt()",
+});
+
+// THE BASE — the real island, its own builder, its authored place.
+st("THE MILITARY ISLAND");
+base = CBZ.studio.raise("militaryisland");
+
+// DOWNTOWN — the real fabric at the mainland's coordinates. Marked streets,
+// sidewalks, shops with signs, and a cluster of real glass towers. The base's
+// own causeway (built above) already points at this rect's west edge.
+st("DOWNTOWN, THE REAL FABRIC");
+town = CBZ.studio.town({
+  at: TOWN_AT, seed: WORLD_SEED, name: "Talloran",
+  cols: 6, rows: 6, blockW: 42, blockD: 42, roadW: 14,
+});
+if (town && town.rect) {
+  TOWN_RECT = { minX: town.rect.minX - 26, maxX: town.rect.maxX + 26,
+                minZ: town.rect.minZ - 26, maxZ: town.rect.maxZ + 26 };
+}
+// a shore apron so the town reads as an island, not a raft
+(function apron() {
+  const g = new THREE.PlaneGeometry(TOWN_RECT.maxX - TOWN_RECT.minX + 40, TOWN_RECT.maxZ - TOWN_RECT.minZ + 40);
+  g.rotateX(-Math.PI / 2);
+  g.translate((TOWN_RECT.minX + TOWN_RECT.maxX) / 2, 0.005, (TOWN_RECT.minZ + TOWN_RECT.maxZ) / 2);
+  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x8d9198 }));
+  m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
+  m.userData.terrain = true;
+  CBZ.scene.add(m);
+})();
+
+// HALLORAN FIELD — the real airport, north across the water. Optional, and
+// try/caught inside raise(): a bad builder costs the island, never the game.
+if (WANT_AIRPORT) {
+  st("HALLORAN FIELD");
+  port = CBZ.studio.raise("airport");
+}
+
+// THE MAP IS FINISHED — settle it before a single body goes in. The real
+// fabric is authored one wall-box at a time because the mainland's colliders
+// and LOS rays need those identities; city/mode.js then merges the render
+// copies and freezes their matrices, and a slice page never ran that. Same
+// two passes, same order, and everything added after this line keeps its own
+// live matrix, which is why it goes here and not at the end.
+st("SETTLING THE MAP");
+CBZ.studio.settle(CBZ.scene);
+
+CBZ.ordnance.init({ scene: CBZ.scene, groundAt: groundAt });
+
+// ============================================================ INSTRUMENTS
+// Score and feed are ON. The old page shipped them off in the name of a bare
+// HUD and the result was a game where nothing you did was ever said back to
+// you — bombing with no feedback is weather, not play.
+hud   = CBZ.studio.hud({ health: true, clock: true, score: true, feed: true, note: false });
+chase = CBZ.studio.chase({ groundAt: groundAt, camera: cam });
+sight = CBZ.studio.bombsight({ kind: "iron", outer: 9 });
+ctlFly  = CBZ.studio.controls("fly",  { buttons: { fire: "DROP", nuke: "NUKE" } });
+ctlWalk = CBZ.studio.controls("walk", { buttons: { sprint: "RUN" } });
+ctl = ctlFly;
+eng = CBZ.studio.engineSound({ vRef: 260, earshot: 300 });
+scope = CBZ.radar.create({
+  canvas: el("radar"), range: 1600, label: "AIR",
+  self: function () {
+    if (!me) return { x: 0, z: 0, y: 0, heading: 0 };
+    return { x: me.pos.x, z: me.pos.z, y: me.pos.y, heading: me.af ? me.af.heading() : me.yaw };
+  },
+  contacts: function () {
+    const out = [];
+    if (!me) return out;
+    for (let i = 0; i < units.length; i++) {
+      const u = units[i];
+      if (!u.alive || u === me) continue;
+      out.push({ id: u.id, x: u.pos.x, z: u.pos.z, y: u.pos.y, hostile: u.team !== me.team });
+    }
+    return out;
+  },
+});
+
+// ============================================================ CIVILIANS
+// They walk the streets on the shipped gait, they slide along the real
+// colliders, and they are worth NEGATIVE points. A city you are afraid to
+// hit carelessly is a city that matters.
+const civRoll = CBZ.seedStream ? CBZ.seedStream("bs-civ") : function () { return 0.5; };
+(function castCivilians() {
+  const roads = (town && town.roads) || [];
+  const bodies = CBZ.studio.crowd(CIVILIANS, "civilian", {
+    at: function (i) {
+      if (roads.length) {
+        const seg = roads[(i * 7) % roads.length];
+        const t = (civRoll() - 0.5) * seg.len * 0.8;
+        const side = (i % 2 ? 1 : -1) * (seg.w / 2 + 2.2);
+        const x = seg.vertical ? seg.x + side : seg.x + t;
+        const z = seg.vertical ? seg.z + t : seg.z + side;
+        return { x: x, z: z, y: groundAt(x, z) };
+      }
+      const a = (i / CIVILIANS) * Math.PI * 2;
+      return { x: TOWN_AT.x + Math.cos(a) * 60, z: TOWN_AT.z + Math.sin(a) * 60, y: 0.03 };
+    },
+    wander: { range: 52, speed: 1.25, pause: 2.2, groundAt: groundAt },
+  });
+  for (let i = 0; i < bodies.length; i++) {
+    const g = bodies[i];
+    const c = {
+      civ: true, id: "civ" + i, group: g, pos: g.position, dead: false, hp: 60,
+      team: null, alive: true,
+    };
+    c.tgt = CBZ.ordnance.addTarget({
+      pos: c.pos, team: "civilian", unit: c,
+      onDamage: function (dmg, info) { hurtCiv(c, dmg, info); },
+    });
+    civs.push(c);
+  }
+})();
+
+function hurtCiv(c, dmg, info) {
+  if (!c || c.dead || !(dmg > 0)) return;
+  c.hp -= dmg;
+  if (c.hp > 0) return;
+  c.dead = true; c.alive = false;
+  c.group.userData.dead = true;                     // the wander tick lets go
+  c.group.rotation.z = Math.PI / 2;                 // down, not despawned
+  c.group.position.y = groundAt(c.pos.x, c.pos.z) + 0.45;
+  if (c.tgt && CBZ.ordnance.removeTarget) CBZ.ordnance.removeTarget(c.tgt);
+  const killer = info && info.by ? unitById(info.by) : null;
+  if (killer) {
+    match.addScore(killer.team, -CIV_PENALTY, "civilian");
+    hud.feed("CIVILIAN KILLED · " + teamOf(killer.team).name + " −" + CIV_PENALTY);
+    if (killer === me && CBZ.micro.sfx) CBZ.micro.sfx.tone(190, 0.5, { type: "sine", gain: 0.14 });
+  }
+}
+
+// ============================================================ THE CAST
+// Nobody here is drawn by this file. A runner is the shipped body. A bomber
+// is the shipped B-2 with the derived-coefficient airframe. The human's one
+// starts ON the island's own airstrip with speed already on the clock,
+// because a 25-second unpiloted crawl was the old game's first impression.
+const RW_Z = BASE_RECT.maxZ - 70;                    // the island's strip: z = -520, along X
+const RW_X0 = BASE_RECT.minX + 40;                   // threshold
+const RW_HDG = -Math.PI / 2;                         // forward = (+1, 0): east, toward downtown
+
+function spawnUnit(rec, role, i) {
+  const team = teamOf(rec.team);
+  const u = {
+    rec: rec, id: rec.id, team: rec.team, role: role, human: !!rec.human,
+    alive: true, hp: 100, pos: new THREE.Vector3(), yaw: 0, hdg: 0,
+    group: null, af: null, tgt: null, cool: 0, respawnIn: 0, rolling: false,
+  };
+  if (role === "bomber") {
+    const flown = CBZ.studio.fly("bomber", { groundAt: groundAt });
+    if (flown) { u.group = flown.group; u.af = flown.af; }
+    if (u.human && u.af) {
+      // launch(), NOT place(). place()'s fifth argument is PITCH IN RADIANS
+      // and this line used to pass 64 there, meaning "64 m/s". The result was
+      // the whole first impression of this game: a B-2 standing on its tail at
+      // 64 rad ≡ 67° nose-up, velocity zeroed by place() so the 64 never
+      // happened, thrust pointing 92% at the sky — 6.9 m/s² of it against
+      // 9.81 of gravity, so it could never leave the ground — creeping down
+      // the runway at walking pace forever. It read as a plane FLOATING.
+      // launch() is the verb that takes a heading AND an airspeed, and it
+      // seats the attitude level (-0.03 rad) instead of guessing.
+      const ry = groundAt(RW_X0, RW_Z) + (u.af.spec.gearHeight || 3.4);
+      if (TAKEOFF_V1) u.af.launch(RW_X0, ry, RW_Z, RW_HDG, 64);
+      else u.af.place(RW_X0, ry, RW_Z, RW_HDG, 64);   // the bug: 64 rad of PITCH
+      u.af.throttle = 1;            // after launch(), which sets its own 0.85
+      u.rolling = true;
+      u.hdg = RW_HDG;
+    } else if (u.af) {
+      const a = (i / SQUAD) * Math.PI * 2 + (rec.team === TEAMS[1].id ? Math.PI : 0);
+      const r = 900 + (i % 4) * 220;
+      const x = TOWN_AT.x + Math.cos(a) * r, z = TOWN_AT.z + Math.sin(a) * r;
+      u.hdg = headingToward(x, z, TOWN_AT.x, TOWN_AT.z);
+      u.af.launch(x, BOMB_ALT + (i % 3) * 45, z, u.hdg, 168);
+    }
+    if (u.af) u.pos.copy(u.af.pos);
+    u.trail = CBZ.studio.trail({ length: 70, color: team.color, opacity: 0.4, minStep: 22 });
+  } else {
+    u.group = CBZ.studio.cast("runner", { color: team.color, variant: i });
+    if (u.group) CBZ.scene.add(u.group);
+    // dust so a man is findable from altitude; it fades when he holds still,
+    // so standing quiet under a real roof is a choice, not a lost cause
+    u.trail = CBZ.studio.trail({ length: 26, color: 0xc9cdd3, opacity: 0.5, minStep: 3.5 });
+    const sq = (town && town.square && town.square.bx != null) ? { x: town.square.bx, z: town.square.bz } : TOWN_AT;
+    const a = (i / SQUAD) * Math.PI * 2 + (rec.team === TEAMS[1].id ? 0.4 : 0);
+    const r = 40 + (i % 4) * 34;
+    u.pos.set(sq.x + Math.cos(a) * r, 0, sq.z + Math.sin(a) * r);
+    u.pos.y = groundAt(u.pos.x, u.pos.z);
+    if (CBZ.micro.resolveCircle) CBZ.micro.resolveCircle(u.pos, 0.55, u.pos.y, 1.8);
+  }
+  u.tgt = CBZ.ordnance.addTarget({
+    pos: u.pos, team: u.team, unit: u,
+    onDamage: function (dmg, info) { hurt(u, role === "bomber" ? dmg * 0.55 : dmg, info); },
+  });
+  units.push(u);
+  return u;
+}
+
+function teamOf(id) { for (let i = 0; i < TEAMS.length; i++) if (TEAMS[i].id === id) return TEAMS[i]; return TEAMS[0]; }
+function unitById(id) { for (let i = 0; i < units.length; i++) if (units[i].id === id) return units[i]; return null; }
+function clearUnits() {
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    if (u.tgt && CBZ.ordnance.removeTarget) CBZ.ordnance.removeTarget(u.tgt);
+    // drop(), not remove(): a bare remove leaves geometry resident on the GPU,
+    // measured at +11.7 MB per aircraft in a game that respawns on a timer
+    if (u.group) CBZ.studio.drop(u.group);
+    if (u.af && u.af.dispose) u.af.dispose();
+    if (u.trail) u.trail.dispose();
+  }
+  units = [];
+  me = null;
+}
+
+// ============================================================ DAMAGE
+function hurt(u, dmg, info) {
+  if (!u || !u.alive || !(dmg > 0)) return;
+  u.hp -= dmg;
+  if (u === me && CBZ.micro.shake) CBZ.micro.shake(Math.min(1, dmg / 80));
+  if (u.hp > 0) return;
+  u.alive = false; u.hp = 0;
+  const killer = info && info.by ? unitById(info.by) : null;
+  match.kill(u.rec, killer ? killer.rec : null, (info && info.crash) ? "CRASH" : "ORDNANCE");
+  if (u.role === "runner") {
+    const enemy = match.enemyOf(u.team);
+    if (enemy) {
+      match.addScore(enemy.id, PTS_KILL, "kill");
+      hud.feed(u.rec.name + " DOWN · +" + PTS_KILL);
+    }
+    if (killer === me) earnKill();
+    CBZ.studio.boom(u.pos, { radius: 5, power: 0.45, structural: false });
+    if (u.trail) u.trail.cut();
+    if (u.group) CBZ.studio.drop(u.group);
+    if (u === me) hud.health(0);
+  } else {
+    if (u.af) CBZ.studio.boom(u.af.pos, { radius: 22, power: 1.5, structural: false });
+    if (u.group) u.group.visible = false;
+    if (u.trail) u.trail.cut();
+    u.respawnIn = RESPAWN_AIR;        // pressure that stops when you die is not pressure
+  }
+}
+
+// A STORE THAT LANDS ON A BUILDING TAKES THE BUILDING DOWN — the REAL
+// building. The town's lots carry real extents, so the collapse verb gets the
+// true footprint and roofline instead of guessing, the team is PAID for the
+// tower, and anyone standing inside learns why the shelter rules matter.
+function lotNear(x, z, reach) {
+  const lots = (town && town.lots) || [];
+  let best = null, bd = 1e18;
+  for (let i = 0; i < lots.length; i++) {
+    const L = lots[i];
+    if (!L.building) continue;
+    const dx = Math.max(L.cx - L.w / 2 - x, 0, x - (L.cx + L.w / 2));
+    const dz = Math.max(L.cz - L.d / 2 - z, 0, z - (L.cz + L.d / 2));
+    const d = dx * dx + dz * dz;
+    if (d < bd) { bd = d; best = L; }
+  }
+  return best && bd <= reach * reach ? best : null;
+}
+function crushInside(L, byId) {
+  // the building came down; the people in and against it come down with it
+  const pad = 6;
+  const hitRect = { minX: L.cx - L.w / 2 - pad, maxX: L.cx + L.w / 2 + pad,
+                    minZ: L.cz - L.d / 2 - pad, maxZ: L.cz + L.d / 2 + pad };
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    if (u.alive && u.role === "runner" && inRect(hitRect, u.pos.x, u.pos.z)) hurt(u, 95, { by: byId, cause: "collapse" });
+  }
+  for (let i = 0; i < civs.length; i++) {
+    const c = civs[i];
+    if (!c.dead && inRect(hitRect, c.pos.x, c.pos.z)) hurtCiv(c, 95, { by: byId });
+  }
+}
+function onStoreLands(b) {
+  if (!b || !b.impact) return;
+  const L = lotNear(b.impact.x, b.impact.z, Math.max(16, (b.radius || 12) * 1.2));
+  if (L && CBZ.cityAirstrikeCollapse) {
+    try { CBZ.cityAirstrikeCollapse(L, { at: b.impact, power: b.power || 1, radius: b.radius || 14 }); } catch (e) {}
+    if (!L._down) {
+      L._down = true;
+      const owner = b.owner ? unitById(b.owner) : null;
+      if (owner) {
+        match.addScore(owner.team, PTS_TOWER, "tower");
+        hud.feed((L.building.name || "TOWER").toUpperCase() + " DOWN · +" + PTS_TOWER);
+        if (owner === me) streak("TOWER DOWN");
+      }
+      crushInside(L, b.owner);
+    }
+  } else {
+    CBZ.studio.collapseAt(b.impact, { radius: b.radius, power: b.power });
+  }
+}
+
+// ============================================================ THE MATCH
+match = CBZ.teammatch.create({
+  teams: TEAMS, roles: ["bomber", "runner"], halves: HALVES, halfSeconds: HALF_SECONDS,
+  onHalfStart: function (half, m) {
+    clearUnits();
+    nuke.kills = 0; nuke.armed = false; nuke.spent = false;
+    ctlFly.button("nuke", false);
+    ctlFly.button("fire", true);
+    const players = m.players;
+    for (let i = 0; i < players.length; i++) {
+      const p = players[i];
+      const u = spawnUnit(p, m.roleOf(p.team), i % SQUAD);
+      if (p.human) me = u;
+    }
+    if (chase) chase.reset();
+    const flying = !!(me && me.role === "bomber");
+    ctl = flying ? ctlFly : ctlWalk;
+    ctlFly.show(flying);
+    ctlWalk.show(!flying);
+    el("radar").style.display = flying ? "block" : "none";
+    setRole();
+    if (me) showSwap(half);
+  },
+  onEnd: function (result, m) { finish(result, m); },
+});
+
+for (let t = 0; t < TEAMS.length; t++) {
+  for (let i = 0; i < SQUAD; i++) {
+    match.addPlayer({
+      id: TEAMS[t].id + i, name: TEAMS[t].name + " " + (i + 1),
+      team: TEAMS[t].id, human: t === 0 && i === 0,
+    });
+  }
+}
+
+let swapT = 0;
+function showSwap(half) {
+  const n = el("swap");
+  const rows = match.standings();
+  let line = "";
+  for (let i = 0; i < rows.length; i++) line += (i ? "   " : "") + rows[i].name + " " + Math.round(rows[i].total);
+  n.innerHTML = (me.role === "bomber" ? "YOU BOMB" : "YOU RUN") +
+    "<small>HALF " + (half + 1) + " OF " + HALVES + (half > 0 ? "   ·   " + line : "") + "</small>";
+  n.classList.add("on");
+  swapT = 2.4;
+}
+
+function setRole() {
+  if (!me) { el("role").textContent = ""; return; }
+  el("role").textContent = me.role === "bomber"
+    ? (me.rolling ? "FULL POWER · ROTATE" : "YOU BOMB")
+    : "YOU RUN";
+}
+
+// ============================================================ A BOMBING RUN
+function dropStick(u) {
+  if (!u.af || u.cool > 0) return;
+  const agl = u.af.pos.y - groundAt(u.af.pos.x, u.af.pos.z);
+  if (agl < RELEASE_MIN && u.human) {
+    if (CBZ.micro.sfx) CBZ.micro.sfx.tone(140, 0.18, { type: "square", gain: 0.16 });
+  }
+  u.cool = 2.4;
+  CBZ.ordnance.stick({
+    count: STICK, interval: 0.13, kind: "iron", team: u.team, owner: u.id, by: u.id,
+    getState: function () { return u.alive && u.af ? { pos: u.af.pos, vel: u.af.vel } : null; },
+    onDetonate: onStoreLands,
+  });
+}
+
+function fireNuke(u) {
+  if (!u || !u.af || !nuke.armed || nuke.spent) return;
+  nuke.spent = true; nuke.armed = false;
+  ctlFly.button("nuke", false);
+  CBZ.ordnance.release({
+    pos: u.af.pos, vel: u.af.vel, kind: "nuke", team: u.team, owner: u.id,
+    onDetonate: function (b) {
+      const f = el("flash");
+      f.style.transition = "none"; f.style.opacity = "1";
+      setTimeout(function () { f.style.transition = "opacity 2.4s"; f.style.opacity = "0"; }, 90);
+      if (CBZ.cityNukeFX) { try { CBZ.cityNukeFX(b.impact.x, b.impact.y, b.impact.z, {}); } catch (e) {} }
+      // the mushroom is nukefx's, the kill sweep is ordnance's; what is owed
+      // here is the CITY coming down, and it comes down by the same scored
+      // path a single store uses — a nuke is not exempt from the ledger
+      for (let r = 0; r < 9; r++) {
+        const a = (r / 9) * Math.PI * 2, d = (b.radius || 120) * 0.55;
+        onStoreLands({ impact: { x: b.impact.x + Math.cos(a) * d, y: b.impact.y, z: b.impact.z + Math.sin(a) * d },
+          radius: d * 0.5, power: 3, owner: u.id });
+      }
+    },
+  });
+  streak("ROUND AWAY");
+}
+
+function earnKill() {
+  if (nuke.spent) return;
+  nuke.kills++;
+  if (nuke.kills >= NUKE_ARM && !nuke.armed) { nuke.armed = true; streak("NUKE ARMED"); ctlFly.button("nuke", true, true); }
+  else streak(nuke.kills + " OF " + NUKE_ARM);
+}
+let streakT = 0;
+function streak(t) { el("streak").textContent = t; el("streak").classList.add("on"); streakT = 2.6; }
+
+// ============================================================ THE FRAME
+CBZ.micro.onFrame(function (rawDt) {
+  if (!started) return;
+  const dt = Math.min(rawDt || 0, 0.05);            // a slow phone frame must not slingshot the sim
+  match.step(dt);
+  if (streakT > 0 && (streakT -= dt) <= 0) el("streak").classList.remove("on");
+  if (swapT > 0 && (swapT -= dt) <= 0) el("swap").classList.remove("on");
+  if (match.phase === "over") return;
+
+  ctl.step(dt);
+
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    if (!u.alive) {
+      if (u.role === "bomber" && (u.respawnIn -= dt) <= 0) reflight(u);
+      continue;
+    }
+    if (u.role === "bomber") stepBomber(u, dt, u === me);
+    else {
+      stepRunner(u, dt, u === me);
+      match.addScore(u.team, PTS_ALIVE * dt, "alive");
+    }
+  }
+
+  CBZ.ordnance.step(dt);
+
+  if (me && !me.alive) hud.danger(0);
+  if (me && me.alive && eng) {
+    if (me.role === "bomber" && me.af) { eng.set(me.af.throttle, me.af.speed, 0); hud.danger(0); }
+    else {
+      eng.set(0, 0, 400);
+      const risk = CBZ.ordnance.dangerAt ? CBZ.ordnance.dangerAt(me.pos.x, me.pos.z, 10) : 0;
+      CBZ.studio.alarm(risk);
+      hud.danger(risk);
+    }
+  }
+
+  aimAndFollow(dt);
+  hud.clock(match.clock());
+  if (me) hud.health(Math.max(0, me.hp) / 100);
+  const rows = match.standings();
+  const sc = {};
+  for (let i = 0; i < rows.length; i++) sc[rows[i].name] = Math.round(rows[i].total);
+  hud.score(sc);
+  if (scope && me && me.role === "bomber") scope.draw(dt);
+});
+
+const _reroll = CBZ.seedStream ? CBZ.seedStream("bs-reflight") : function () { return 0.5; };
+function reflight(u) {
+  u.alive = true; u.hp = 100; u.respawnIn = 0;
+  if (u.group) u.group.visible = true;
+  const a = _reroll() * Math.PI * 2;
+  const r = 1100;
+  const x = TOWN_AT.x + Math.cos(a) * r, z = TOWN_AT.z + Math.sin(a) * r;
+  u.hdg = headingToward(x, z, TOWN_AT.x, TOWN_AT.z);
+  if (u.af) u.af.launch(x, BOMB_ALT, z, u.hdg, 168);
+  if (u === me) setRole();
+}
+
+function nearestEnemyRunner(u) {
+  let best = null, bd = Infinity;
+  for (let i = 0; i < units.length; i++) {
+    const t = units[i];
+    if (!t.alive || t.role !== "runner" || t.team === u.team) continue;
+    const d = (t.pos.x - u.af.pos.x) * (t.pos.x - u.af.pos.x) + (t.pos.z - u.af.pos.z) * (t.pos.z - u.af.pos.z);
+    if (d < bd) { bd = d; best = t; }
+  }
+  return best;
+}
+
+function stepBomber(u, dt, mine) {
+  if (!u.af) return;
+  u.cool = Math.max(0, u.cool - dt);
+
+  if (u.rolling) {
+    /* THE ROLL IS SHORT AND IT ENDS WHETHER OR NOT ANYBODY PULLS.
+
+       EVERY VERB IN THIS GAME LIVES BELOW THE `return` AT THE BOTTOM OF THIS
+       BRANCH — the DROP read, the NUKE read, the run altitude, the bombsight.
+       So `rolling` is not a cosmetic state: while it is true the player has no
+       game at all. It used to clear on ONE condition, a stick pulled past 0.4
+       above 85 m/s, and nothing on screen says to do that beyond the word
+       ROTATE. A player who did not pull rolled to the end of the island and
+       then skimmed the sea at gear height forever, still rolling, still unable
+       to drop anything. That is what "there's no bombs" was.
+
+       So Vr flies the aeroplane off. The centreline hold pins the nose to the
+       deck until rotation speed and then aims at a climb-out instead, which is
+       the airframe's own autopilot doing it with the shipped coefficients —
+       no hand-poked vertical velocity. Pulling early still rotates early,
+       because that part was a good idea. */
+    const VR = 86;                     // rotate speed, m/s — bomber stalls at 55
+    u.af.throttle = 1;
+    if (mine) u.hdg += ctl.move.x * 0.22 * dt;
+    const rotate = TAKEOFF_V1
+      ? (u.af.speed > VR || (mine && ctl.move.y > 0.4 && u.af.speed > 78))
+      : (mine && ctl.move.y > 0.4 && u.af.speed > 85);   // the bug: pull, or never
+    const gy = groundAt(u.af.pos.x, u.af.pos.z);
+    // hold the deck, or climb out at ~10° — a near aim point so steerTo
+    // commands a firm pitch rather than a suggestion
+    const lever = rotate ? 1000 : 3000;
+    const aimY = rotate ? gy + 180 : gy + 4;
+    const aim = u.af.steerTo(_v.set(
+      u.af.pos.x - Math.sin(u.hdg) * lever, aimY, u.af.pos.z - Math.cos(u.hdg) * lever), { gain: 3.2 });
+    u.af.step(dt, aim);
+    u.pos.copy(u.af.pos);
+    if (u.group) u.af.applyTo(u.group);
+    if (u.af.pos.y - gy > 40) { u.rolling = false; if (mine) setRole(); }
+    return;
+  }
+
+  if (mine) {
+    u.hdg += ctl.move.x * 0.95 * dt;
+    u.af.throttle = Math.max(0.3, ctl.throttle);
+    // the stick's Y walks the RUN ALTITUDE — lower is accurate and lethal and
+    // inside your own fragmentation, higher is safe and vague
+    u.alt = Math.max(ALT_MIN, Math.min(ALT_MAX, (u.alt || BOMB_ALT) - ctl.move.y * 130 * dt));
+    if (ctl.tapped("fire")) dropStick(u);
+    if (ctl.tapped("nuke")) fireNuke(u);
+  } else {
+    // hunt a MAN, not the middle of the map; commit to a run, re-pick slowly
+    u.pick = (u.pick || 0) - dt;
+    if (u.pick <= 0 || !u.mark || !u.mark.alive) { u.mark = nearestEnemyRunner(u); u.pick = 7; }
+    const mk = u.mark;
+    u.af.throttle = 0.85;
+    if (mk) {
+      u.hdg = headingToward(u.af.pos.x, u.af.pos.z, mk.pos.x, mk.pos.z);
+      // release when the SHARED integrator says the fall lands on him
+      const p = CBZ.ordnance.predict(u.af.pos, u.af.vel, "iron", 40);
+      if (p && Math.hypot(p.x - mk.pos.x, p.z - mk.pos.z) < 70) dropStick(u);
+    } else {
+      u.hdg = headingToward(u.af.pos.x, u.af.pos.z, TOWN_AT.x, TOWN_AT.z);
+    }
+  }
+
+  const alt = u.alt || BOMB_ALT;
+  _v.set(u.af.pos.x - Math.sin(u.hdg) * 2400, alt, u.af.pos.z - Math.cos(u.hdg) * 2400);
+  const aim = u.af.steerTo(_v, { gain: 2.0 });
+  u.af.holdAltitude(alt, aim);
+  u.af.step(dt, aim);
+  u.pos.copy(u.af.pos);
+  if (u.group) u.af.applyTo(u.group);
+  if (u.trail && !u.rolling) u.trail.push(u.af.pos);
+}
+
+// the runner half happens BETWEEN REAL BUILDINGS: cover is a wall the blast
+// trace already respects, and shelter is a real doorway in a real facade
+function nearestDoor(x, z, reach) {
+  const lots = (town && town.lots) || [];
+  let best = null, bd = reach * reach;
+  for (let i = 0; i < lots.length; i++) {
+    const L = lots[i];
+    const b = L.building;
+    if (!b || !b.door || L._down) continue;         // a collapsed shell shelters nobody
+    const d = (b.door.x - x) * (b.door.x - x) + (b.door.z - z) * (b.door.z - z);
+    if (d < bd) { bd = d; best = L; }
+  }
+  return best;
+}
+
+function stepRunner(u, dt, mine) {
+  let mx = 0, mz = 0;
+  if (mine) {
+    mx = ctl.move.x; mz = ctl.move.y;
+    const s = Math.hypot(mx, mz);
+    if (s > 0.01) {
+      // move relative to where the camera looks — the only third-person
+      // scheme anybody finds natural
+      const c = Math.cos(u.camYaw || 0), sn = Math.sin(u.camYaw || 0);
+      const wx = mx * c + mz * sn, wz = -mx * sn + mz * c;
+      mx = wx; mz = wz;
+    }
+    // look.x is already a per-frame delta — do NOT scale by dt
+    u.camYaw = (u.camYaw || 0) + ctl.look.x * 58;
+  } else {
+    // ordnance publishes a danger field; a runner walks down the gradient,
+    // and under fire he makes for a REAL door — the town is the shelter
+    let best = 1e9, bx = Math.cos(u.yaw), bz = Math.sin(u.yaw);
+    const here = CBZ.ordnance.dangerAt ? CBZ.ordnance.dangerAt(u.pos.x, u.pos.z, 10) : 0;
+    let lid = null;
+    if (here > 0.05) {
+      const L = nearestDoor(u.pos.x, u.pos.z, 80);
+      if (L) {
+        const b = L.building;
+        // the point just INSIDE the doorway — through the real gap in the
+        // real collider, which resolveCircle politely allows
+        lid = { x: b.door.x - b.door.nx * 3.2, z: b.door.z - b.door.nz * 3.2 };
+      }
+    }
+    for (let a = 0; a < 8; a++) {
+      const th = (a / 8) * Math.PI * 2;
+      const cx = Math.cos(th), cz = Math.sin(th);
+      const sx = u.pos.x + cx * 16, sz = u.pos.z + cz * 16;
+      let cost = CBZ.ordnance.dangerAt ? CBZ.ordnance.dangerAt(sx, sz, 10) : 0;
+      cost += Math.abs(Math.atan2(Math.sin(th - u.yaw), Math.cos(th - u.yaw))) * 0.03;
+      if (lid) {
+        const dx = lid.x - u.pos.x, dz = lid.z - u.pos.z, n2 = Math.hypot(dx, dz) || 1;
+        cost -= (cx * dx / n2 + cz * dz / n2) * 0.55;
+      }
+      if (cost < best) { best = cost; bx = cx; bz = cz; }
+    }
+    mx = bx; mz = bz;
+    // near the door and the sky is quiet again: drift back out
+    if (lid && Math.hypot(lid.x - u.pos.x, lid.z - u.pos.z) < 1.4 && here < 0.04) { mx = -bx; mz = -bz; }
+  }
+  const n = Math.hypot(mx, mz);
+  const spd = RUN_SPEED * ((mine && ctl.held("sprint")) ? 1.7 : 1);
+  if (n > 0.01) {
+    u.pos.x += (mx / n) * spd * dt;
+    u.pos.z += (mz / n) * spd * dt;
+    u.yaw = Math.atan2(mx, mz);
+    // the engine's own slide resolver: the city is cover, not scenery
+    if (CBZ.micro.resolveCircle) CBZ.micro.resolveCircle(u.pos, 0.55, u.pos.y, 1.8);
+  }
+  u.pos.y = groundAt(u.pos.x, u.pos.z);
+  if (u.trail && n > 0.01) u.trail.push(u.pos);
+  if (u.group) {
+    u.group.position.copy(u.pos);
+    u.group.rotation.y = u.yaw;
+    if (CBZ.animChar && u.group.userData.charRig) {
+      try { CBZ.animChar(u.group.userData.charRig, dt, { speed: n > 0.01 ? spd : 0 }); } catch (e) {}
+    }
+  }
+}
+
+function aimAndFollow(dt) {
+  // spectate the nearest living friend rather than a black screen
+  let look = me;
+  if (!look || !look.alive) {
+    for (let i = 0; i < units.length; i++) if (units[i].alive && (!me || units[i].team === me.team)) { look = units[i]; break; }
+  }
+  if (!look) return;
+  const air = look.role === "bomber";
+  if (air && look.af) {
+    chase.followAir(look.af, dt, { back: look.rolling ? 34 : 66, up: look.rolling ? 9 : 18 });
+    if (look === me && !look.rolling) sight.aim(look.af.pos, look.af.vel); else sight.hide();
+  } else {
+    chase.follow(look.pos, look.camYaw || look.yaw, dt, { air: false });
+    sight.hide();
+  }
+}
+
+// ============================================================ START / END
+function finish(result, m) {
+  el("over").style.display = "grid";
+  el("overTitle").textContent = (result && result.winner) ? (result.winner.name + " TAKE IT") : "DRAW";
+  const rows = m.standings();
+  let h = "";
+  for (let i = 0; i < rows.length; i++) h += "<tr><td>" + rows[i].name + "</td><td>" + Math.round(rows[i].total) + "</td></tr>";
+  el("overTable").innerHTML = h;
+  if (scope) el("radar").style.display = "none";
+}
+el("again").addEventListener("click", function () { location.reload(); });
+
+st("READY");
+el("go").addEventListener("click", function () {
+  el("gate").style.display = "none";
+  started = true;
+  match.start();
+  ctl.lock();
+});
+
+// a probe surface, so the reuse claim can be checked rather than asserted
+window.__bomb = {
+  audit: function () {
+    const towers = ((town && town.lots) || []).filter(function (L) { return L.skylineStoreys; }).length;
+    return {
+      tags: document.querySelectorAll("script[src]").length,
+      studio: CBZ.studio.audit(),
+      caps: CBZ.modeHas ? {
+        traverse: CBZ.modeHas("traverse"), blast: CBZ.modeHas("blast"),
+        blastActors: CBZ.modeHas("blastActors"), breach: CBZ.modeHas("breach"),
+      } : null,
+      route: CBZ.modeCapsAudit ? CBZ.modeCapsAudit().routes[CBZ.game.mode] : null,
+      colliders: (CBZ.colliders && CBZ.colliders.length) || 0,
+      world: { town: !!town, lots: ((town && town.lots) || []).length, towers: towers,
+               base: !!(base && base.regions && base.regions.length), baseRoads: (base && base.roads.length) || 0,
+               airport: !!(port && port.regions && port.regions.length) },
+      civs: { cast: civs.length, alive: civs.filter(function (c) { return !c.dead; }).length },
+      units: units.length, alive: units.filter(function (u) { return u.alive; }).length,
+      nuke: { kills: nuke.kills, armed: nuke.armed, spent: nuke.spent },
+    };
+  },
+};
+});
+})();
+</script>
+<a href="../" id="portalHome" style="position:fixed;left:12px;top:10px;z-index:2147483000;font:700 13px/1 Fredoka,Arial,sans-serif;letter-spacing:.08em;color:#fff;text-decoration:none;background:rgba(4,20,36,.55);padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.25)">◀ ALL GAMES</a>
+</body>
+</html>

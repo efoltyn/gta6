@@ -1,0 +1,1 @@
+(function(){"use strict";const CBZ=window.CBZ;CBZ.bootComplete=!0,CBZ.game.mode!=="escape"&&!CBZ.modes[CBZ.game.mode]?CBZ.setMode(CBZ.START_MODE&&CBZ.modes[CBZ.START_MODE]?CBZ.START_MODE:"escape"):CBZ.START_MODE&&CBZ.modes[CBZ.START_MODE]&&CBZ.game.mode!==CBZ.START_MODE&&CBZ.setMode(CBZ.START_MODE),CBZ.setState("title"),CBZ.startLoop()})();
