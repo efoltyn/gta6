@@ -960,6 +960,21 @@
     },
   });
 
+  // ---- THE URL DOOR, ANSWERED LATE ------------------------------------------
+  // config.js turns ?mode=gungame (or CBZ.START_MODE) into g.mode, and
+  // state.js answers it with setMode(g.mode) AT PARSE TIME — which is before
+  // this file has registered the mode, so setMode's registry check normalised
+  // "gungame" to "escape" and the door opened onto the prison every time
+  // (measured 2026-09-14: index.html?mode=gungame booted to mode "escape").
+  // sharksim dodged this by being string-matched in setMode; this mode is
+  // registry-checked on purpose (GUNGAME_V1 off must fall back), so it
+  // re-answers the door itself, once, now that the registry has it.
+  try {
+    const want = (typeof location !== "undefined" && location.search &&
+      new URLSearchParams(location.search).get("mode")) || CBZ.START_MODE;
+    if (want === "gungame" && g.mode !== "gungame" && g.state !== "playing" && CBZ.setMode) CBZ.setMode("gungame");
+  } catch (e) {}
+
   // ---- audit (the orchestrator runs this) -----------------------------------
   CBZ.gungameAudit = function () {
     const L = ladder();
