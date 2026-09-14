@@ -19,6 +19,14 @@
   // script that runs after every mode has had its chance to register.
   if (CBZ.game.mode !== "escape" && !CBZ.modes[CBZ.game.mode]) {
     CBZ.setMode(CBZ.START_MODE && CBZ.modes[CBZ.START_MODE] ? CBZ.START_MODE : "escape");
+  } else if (CBZ.START_MODE && CBZ.modes[CBZ.START_MODE] && CBZ.game.mode !== CBZ.START_MODE) {
+    /* AND THE OTHER WAY ROUND. state.js's parse-time setMode runs before
+       modes/gungame.js has registered, so a page locked to gungame was
+       normalised to escape there and arrived here as a perfectly valid
+       escape — the standalone Gun Game page opened on Cell Block Z. Now that
+       every mode has registered, a START_MODE the early pass dropped is
+       applied. */
+    CBZ.setMode(CBZ.START_MODE);
   }
   CBZ.setState("title");
   CBZ.startLoop();
