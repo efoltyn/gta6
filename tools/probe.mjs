@@ -16,7 +16,7 @@
 
    This is one tool with two modes:
 
-     node tools/probe.mjs --serve [--seed 90210]
+     node tools/probe.mjs --serve [--seed 90210] [--mode escape]
          Boot ONCE. Build the world ONCE. Hold it open and write the CDP
          endpoint to a lockfile. Prints READY and stays alive.
 
@@ -51,7 +51,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const LOCK = "/tmp/cbz-probe-world.json";
+/* CBZ_PROBE_LOCK: a PRIVATE world. The lockfile is shared machine-wide, so a
+   session that serves an escape-mode world under the default path hands every
+   other session's next probe a prison instead of the city they asked about.
+   Point this at your own path and only probes given the same path attach. */
+const LOCK = process.env.CBZ_PROBE_LOCK || "/tmp/cbz-probe-world.json";
+/* --mode escape|sharksim|survival|city: which title-screen door to click before
+   Play. Default is whatever the title selects on its own (the city). */
+const MODE = (() => { const i = process.argv.indexOf("--mode"); return i >= 0 ? process.argv[i + 1] : ""; })();
+const CLICK_MODE = MODE ? `(()=>{const m=document.querySelector('[data-mode="${MODE}"]');if(m)m.click();})();` : "";
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
 const argS = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] != null ? argv[i + 1] : d; };
@@ -175,7 +183,7 @@ async function boot(seed, quiet) {
   await c.send("Page.navigate", { url: target });
   log("booted, starting the run…");
   for (let i = 0, r = false; i < 500 && !r; i++) { try { r = !!(await c.evl("!!(window.CBZ&&CBZ.game&&CBZ.stepSim&&document.getElementById('playBtn'))")); } catch (_) {} if (!r) await sleep(150); }
-  for (let i = 0, p = false; i < 400 && !p; i++) { p = await c.evl("(()=>{if(CBZ.game&&CBZ.game.state==='playing')return true;const b=document.getElementById('playBtn');if(b)b.click();return CBZ.game&&CBZ.game.state==='playing';})()"); if (!p) await sleep(200); }
+  for (let i = 0, p = false; i < 400 && !p; i++) { p = await c.evl("(()=>{if(CBZ.game&&CBZ.game.state==='playing')return true;" + CLICK_MODE + "const b=document.getElementById('playBtn');if(b)b.click();return CBZ.game&&CBZ.game.state==='playing';})()"); if (!p) await sleep(200); }
   // World-built, whatever the mode is: the city lays roads, the island modes
   // (survival/sharksim) build an arena instead and never lay one. Waiting on
   // roads alone burnt a full 60 s timeout on every non-city boot.
@@ -231,7 +239,7 @@ if (has("--serve")) {
    Unexpected identifier` or `TypeError: 180000 is not a function` — an error
    about the caller's code, pointing nowhere near the real cause. Adding a new
    value-taking flag means adding it here. */
-const VALUED = new Set(["--seed", "--step", "--file", "--eval-timeout", "--shot", "--size"]);
+const VALUED = new Set(["--seed", "--step", "--file", "--eval-timeout", "--shot", "--size", "--mode"]);
 
 // ---- one-shot query: attach to the live world if there is one --------------
 const expr = has("--file")
@@ -284,7 +292,7 @@ if (has("--reload")) {
   for (let i = 0; i < 400 && !fresh; i++) { await sleep(150); try { fresh = !(await attached.evl("!!window.__probeOldDoc")); } catch (_) { fresh = true; } }
   if (!fresh) { console.error("RELOAD FAILED: the old document never went away"); process.exit(2); }
   for (let i = 0, r = false; i < 500 && !r; i++) { try { r = !!(await attached.evl("!!(window.CBZ&&CBZ.game&&CBZ.stepSim&&document.getElementById('playBtn'))")); } catch (_) {} if (!r) await sleep(150); }
-  for (let i = 0, p = false; i < 400 && !p; i++) { p = await attached.evl("(()=>{if(CBZ.game&&CBZ.game.state==='playing')return true;const b=document.getElementById('playBtn');if(b)b.click();return CBZ.game&&CBZ.game.state==='playing';})()"); if (!p) await sleep(200); }
+  for (let i = 0, p = false; i < 400 && !p; i++) { p = await attached.evl("(()=>{if(CBZ.game&&CBZ.game.state==='playing')return true;" + CLICK_MODE + "const b=document.getElementById('playBtn');if(b)b.click();return CBZ.game&&CBZ.game.state==='playing';})()"); if (!p) await sleep(200); }
   for (let i = 0; i < 300; i++) {
     if (await attached.evl("!!((CBZ.city&&CBZ.city.arena&&CBZ.city.arena.roads&&CBZ.city.arena.roads.length)||(CBZ.surv&&CBZ.surv.arena))")) break;
     await sleep(200);
