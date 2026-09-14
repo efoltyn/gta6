@@ -4972,6 +4972,10 @@
       wired: wired,
       live: live ? {
         kind: live.kind, t: +live.t.toFixed(2), r: +live.r.toFixed(1),
+        // WHERE. A preset that wants to point a lens at the cloud used to
+        // guess ground zero off the enemy's centre of mass at release time —
+        // 160 m out on the first cover run. The record has always known.
+        x: +live.x.toFixed(1), z: +live.z.toFixed(1),
         maxR: +live.maxR.toFixed(1), eff: +live.eff.toFixed(1),
         gy: +live.y.toFixed(1), burstY: +live.by.toFixed(1),
         R: +live.R.toFixed(1), capW: +live.capW.toFixed(1), riseH: +live.riseH.toFixed(1),
