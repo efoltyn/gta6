@@ -733,6 +733,9 @@
   function bucketKey(owner, x, z, mat) {
     return (owner || "") + "|" + Math.floor(x / CELL) + "," + Math.floor(z / CELL) + "|" + mat.uuid;
   }
+  // height-field cells each owner raised, so clear(owner) lowers them again
+  const hfOwned = new Map();
+  function ownKey(owner, k) { let s = hfOwned.get(owner); if (!s) { s = new Set(); hfOwned.set(owner, s); } s.add(k); }
   function freeze(b) {
     const m = b.mesh, geo = m.geometry;
     // never bake a piece into the ground: lift it by its deepest vertex
@@ -782,12 +785,12 @@
       const wx = e[0] * lx + e[4] * ly + e[8] * lz + e[12];
       const wy = e[1] * lx + e[5] * ly + e[9] * lz + e[13];
       const wz = e[2] * lx + e[6] * ly + e[10] * lz + e[14];
-      const k = hfKey(wx, wz); const h = hf.get(k);
+      const k = hfKey(wx, wz); const h = hf.get(k); if (b.owner) ownKey(b.owner, k);
       if (h == null || wy > h) hf.set(k, wy);
       if (wy > top) top = wy;
     }
     // centre column: the top face over the piece's middle
-    { const k = hfKey(pos.x, pos.z), h = hf.get(k); const mid = (top + pos.y) / 2; if (h == null || mid > h) hf.set(k, mid); }
+    { const k = hfKey(pos.x, pos.z), h = hf.get(k); if (b.owner) ownKey(b.owner, k); const mid = (top + pos.y) / 2; if (h == null || mid > h) hf.set(k, mid); }
     if (b.solid && CBZ.colliders && top - pos.y > 0.35) {
       const r = Math.min(b.radius, Math.max(b.ext[0], b.ext[2]));
       const col = { minX: pos.x - r * 0.7, maxX: pos.x + r * 0.7, minZ: pos.z - r * 0.7, maxZ: pos.z + r * 0.7,
@@ -1412,6 +1415,8 @@
       bk.parts.length = 0; rebuildBucket(bk);
       const qi = dirtyQ.indexOf(bk); if (qi >= 0) dirtyQ.splice(qi, 1);
     }
+    if (owner != null) { const ks = hfOwned.get(owner); if (ks) { for (const k of ks) hf.delete(k); hfOwned.delete(owner); } }
+    else hfOwned.clear();
     staticCount = Math.max(0, staticCount - gone.size);
     if (CBZ.colliders) {
       let changed = false;
