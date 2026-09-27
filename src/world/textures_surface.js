@@ -39,7 +39,9 @@
         material.needsUpdate, and no-ops on tier 0 / flag off.
      CBZ.surfaceDefaults(name) -> { roughness, metalness, normalScale, repeat }
      CBZ.surfaceNames -> string[]
-   Names: asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass.
+   Names: asphalt, concrete, plaster, metal, dirt, grass, sand, rock, wood, glass.
+     CBZ.surfaceMapMean(tex) -> [r,g,b] mean LINEAR colour of a colour map
+     CBZ.groundSkin(opts) -> the ONE ground material (see its block below)
 ============================================================ */
 (function () {
   "use strict";
@@ -218,6 +220,26 @@
         out.r = l * 1.10; out.g = l * 1.01; out.b = l * 0.80;
         out.h = rip * 0.55 + drift * 0.30 + grain * 0.15;
         out.q = 0.95 - grain * 0.06;
+      },
+    },
+    // ---- rock: fractured bedrock / talus — angular blocks split by joints,
+    //      lichen-flecked. Used by CBZ.groundSkin on steep ground and on
+    //      outcrops, so a cut bank reads as stone, not as green paint on a
+    //      slope.
+    rock: {
+      def: { roughness: 0.92, metalness: 0.0, normalScale: 1.2, repeat: 4 },
+      author: function (u, v, out) {
+        const block = fbm(u, v, 5, 3, 0x11c1);
+        const joint = Math.pow(clamp01(ridge(u, v, 4, 2, 0x11c2)), 10);
+        const joint2 = Math.pow(clamp01(ridge(u * 0.6, v * 1.7, 9, 2, 0x11c3)), 14);
+        const grain = fbm(u, v, 110, 1, 0x11c4);
+        const lichen = Math.pow(clamp01(fbm(u, v, 22, 2, 0x11c5)), 5);
+        const l = 0.36 + block * 0.22 + grain * 0.06 - (joint * 0.26 + joint2 * 0.18);
+        out.r = l * (1.00 + lichen * 0.20);
+        out.g = l * (0.98 + lichen * 0.30);
+        out.b = l * (0.95 - lichen * 0.10);
+        out.h = block * 0.55 + grain * 0.15 - joint * 0.5 - joint2 * 0.3 + 0.3;
+        out.q = 0.93 - block * 0.05;
       },
     },
     // ---- wood: ring grain along one axis, knots --------------------------
@@ -455,5 +477,162 @@
       envMap: CBZ.ENV || null,
     });
     return surfaceApply(m, name, opts);
+  };
+
+  /* CBZ.surfaceMapMean(tex) — the mean LINEAR colour of a colour map (sRGB
+     bytes decoded). A consumer that multiplies a vertex-authored albedo by a
+     map divides by this, so the map adds grain without moving the colour the
+     vertex authored. Headless / tainted canvas -> [1,1,1]. */
+  const _meanCache = new Map();
+  function surfaceMapMean(tex) {
+    if (!tex) return [1, 1, 1];
+    if (_meanCache.has(tex)) return _meanCache.get(tex);
+    let out = [1, 1, 1];
+    try {
+      const img = tex.image, N = img.width;
+      const d = img.getContext("2d").getImageData(0, 0, N, img.height).data;
+      const s2l = function (v) { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let i = 0; i < d.length; i += 4 * 7) { r += s2l(d[i]); g += s2l(d[i + 1]); b += s2l(d[i + 2]); n++; }
+      if (n) out = [r / n, g / n, b / n];
+    } catch (e) { /* headless: leave the map un-normalised */ }
+    _meanCache.set(tex, out);
+    return out;
+  }
+  CBZ.surfaceMapMean = surfaceMapMean;
+
+  /* ==================================================================
+     CBZ.groundSkin(opts) — THE ONE GROUND MATERIAL (city + disaster island).
+
+     WHAT IT REPLACES. The Gang Life backcountry (city/continent.js's plate,
+     ~17 m between vertices) was a Lambert with vertex colours and nothing
+     else: from the road it read as a smooth green blanket with Gouraud
+     blotches, no grass, no soil, no stone, and every slope the same paint as
+     the flat. The disaster island had solved half of it privately (a grass
+     map normalised to mean 1 + a second rotated read against the tile
+     checkerboard). This is that fix, grown up and shared:
+
+       - the VERTEX COLOUR stays the author's macro albedo (land cover,
+         biome blends, shore sand, strata outcrops: nobody's colour logic
+         changes), and the pixel shader MULTIPLIES in world-space detail from
+         this file's maps, each normalised to mean 1;
+       - WHICH detail is chosen per pixel from what the ground is:
+           grass  where the vertex colour is green (g/r),
+           sand   where it is not green and sits near sea level,
+           dirt   everywhere else that is not green (fields, tracks, scrub),
+           rock   where the interpolated surface is STEEP, and there the
+                  albedo is also pulled toward a desaturated stone of the
+                  same brightness, so a cut bank or a hill crest is stone,
+                  not green paint on a slope;
+       - no tile can be counted: every layer reads its map twice (the second
+         read rotated 37 deg at 3.2x the size) and mixes the two by a 9 m
+         noise, and a 23 m / 61 m brightness + dryness mottle rides over all
+         of it so a meadow is patchy at every distance;
+       - the detail fades out by `far` (mip averages are ~1 anyway; the fade
+         keeps grazing angles from shimmering), the mottle does not.
+
+     Lambert on purpose: lighting stays per vertex (the cost the plate always
+     had), only the albedo is per pixel: a handful of texture reads, no new
+     draw, no new geometry. Tier 0 / textures off -> the exact plain
+     vertex-colour Lambert it replaces.
+
+       opts.tile      { grass, dirt, sand, rock } metres per repeat
+       opts.rockSlope [s0, s1] of 1-n.y where rock starts / is full
+       opts.sandY     [y0, y1] world heights over which sand gives way
+       opts.far       metres by which the per-pixel detail has faded
+       opts.chroma    how much of the maps' own colour survives (0.35)
+       opts.mottle    strength of the 23/61 m patch mottle (1)
+       opts.extra     extra MeshLambertMaterial params (polygonOffset, side)
+     ================================================================== */
+  const GND_GLSL = [
+    "float gndH( vec2 p ) { p = fract( p * vec2( 443.897, 441.423 ) ); p += dot( p, p.yx + 19.19 ); return fract( ( p.x + p.y ) * p.x ); }",
+    "float gndVn( vec2 p ) { vec2 i = floor( p ), f = fract( p ); f = f * f * ( 3.0 - 2.0 * f );",
+    "  return mix( mix( gndH( i ), gndH( i + vec2( 1.0, 0.0 ) ), f.x ), mix( gndH( i + vec2( 0.0, 1.0 ) ), gndH( i + vec2( 1.0, 1.0 ) ), f.x ), f.y ); }",
+    // two reads of one tiling map, the second rotated + enlarged, mixed by a
+    // slow noise; decoded sRGB -> linear (polynomial fit)
+    "vec3 gndTap( sampler2D m, vec2 uv, float w ) {",
+    "  vec3 a = texture2D( m, uv ).rgb;",
+    "  vec3 b = texture2D( m, mat2( 0.8, -0.6, 0.6, 0.8 ) * uv * 0.3125 + vec2( 0.37, 0.11 ) ).rgb;",
+    "  vec3 c = mix( a, b, 0.25 + 0.5 * w );",
+    "  return c * ( c * ( c * 0.305306011 + 0.682171111 ) + 0.012522878 ); }",
+  ].join("\n");
+  CBZ.groundSkin = function (opts) {
+    opts = opts || {};
+    const tile = Object.assign({ grass: 3.2, dirt: 2.6, sand: 2.6, rock: 5.5 }, opts.tile || {});
+    const rockSlope = opts.rockSlope || [0.30, 0.55];
+    const sandY = opts.sandY || [0.6, 2.2];
+    const far = opts.far == null ? 420 : +opts.far;
+    const mat = new THREE.MeshLambertMaterial(Object.assign({ color: 0xffffff, vertexColors: true }, opts.extra || {}));
+    mat.name = opts.name || "ground-skin";
+    // r128 samples a custom sampler raw (no mapTexelToLinear), so the shader
+    // decodes; these are the SAME cached maps the island volcano reads
+    const mg = surfaceMaps("grass", { repeat: 1 }), md = surfaceMaps("dirt", { repeat: 1 });
+    const ms = surfaceMaps("sand", { repeat: 1 }), mr = surfaceMaps("rock", { repeat: 1 });
+    if (!mg || !md || !ms || !mr) return mat;            // tier 0 / textures off: plain vertex colour
+    function inv(t) { const m = surfaceMapMean(t); return new THREE.Vector3(1 / Math.max(0.02, m[0]), 1 / Math.max(0.02, m[1]), 1 / Math.max(0.02, m[2])); }
+    const U = {
+      uGndG: { value: mg.map }, uGndD: { value: md.map }, uGndS: { value: ms.map }, uGndR: { value: mr.map },
+      uGndKG: { value: inv(mg.map) }, uGndKD: { value: inv(md.map) }, uGndKS: { value: inv(ms.map) }, uGndKR: { value: inv(mr.map) },
+      uGndTile: { value: new THREE.Vector4(1 / tile.grass, 1 / tile.dirt, 1 / tile.sand, 1 / tile.rock) },
+      uGndPar: { value: new THREE.Vector4(rockSlope[0], rockSlope[1], sandY[0], sandY[1]) },
+      uGndFar: { value: far },
+      uGndMix: { value: new THREE.Vector2(opts.chroma == null ? 0.35 : +opts.chroma, opts.mottle == null ? 1 : +opts.mottle) },
+    };
+    mat.userData.groundSkin = true;
+    mat.onBeforeCompile = function (sh) {
+      const vs = sh.vertexShader, fs0 = sh.fragmentShader;
+      if (vs.indexOf("#include <project_vertex>") < 0 || fs0.indexOf("#include <color_fragment>") < 0) return;
+      Object.assign(sh.uniforms, U);
+      sh.vertexShader = vs
+        .replace("#include <common>", "#include <common>\nvarying vec3 vGndW;\nvarying vec3 vGndN;\nvarying float vGndD;")
+        .replace("#include <project_vertex>", "#include <project_vertex>\n" +
+          "vGndW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n" +
+          "vGndN = normalize( mat3( modelMatrix ) * objectNormal );\n" +
+          "vGndD = length( mvPosition.xyz );");
+      sh.fragmentShader = fs0
+        .replace("#include <common>", "#include <common>\nvarying vec3 vGndW;\nvarying vec3 vGndN;\nvarying float vGndD;\n" +
+          "uniform sampler2D uGndG;\nuniform sampler2D uGndD;\nuniform sampler2D uGndS;\nuniform sampler2D uGndR;\n" +
+          "uniform vec3 uGndKG;\nuniform vec3 uGndKD;\nuniform vec3 uGndKS;\nuniform vec3 uGndKR;\n" +
+          "uniform vec4 uGndTile;\nuniform vec4 uGndPar;\nuniform float uGndFar;\nuniform vec2 uGndMix;\n" + GND_GLSL)
+        .replace("#include <color_fragment>", "#include <color_fragment>\n{\n" +
+          "  vec3 vc = diffuseColor.rgb;\n" +
+          "  vec2 xz = vGndW.xz;\n" +
+          "  float gr = vc.g / max( vc.r, 1e-4 );\n" +
+          "  float grassW = smoothstep( 0.88, 1.22, gr );\n" +
+          "  float slope = 1.0 - clamp( normalize( vGndN ).y, 0.0, 1.0 );\n" +
+          // rock: steepness, frayed by a 7 m noise so the edge is a band of
+          // outcrops, not a contour line
+          "  float rockW = smoothstep( uGndPar.x, uGndPar.y, slope + ( gndVn( xz / 7.0 ) - 0.5 ) * 0.12 );\n" +
+          "  float sandW = ( 1.0 - grassW ) * ( 1.0 - smoothstep( uGndPar.z, uGndPar.w, vGndW.y ) );\n" +
+          "  float fade = 1.0 - smoothstep( uGndFar * 0.35, uGndFar, vGndD );\n" +
+          "  float w9 = gndVn( xz / 9.0 );\n" +
+          "  vec3 det = vec3( 1.0 );\n" +
+          "  if ( fade > 0.001 ) {\n" +
+          "    vec3 tG = gndTap( uGndG, xz * uGndTile.x, w9 ) * uGndKG;\n" +
+          "    vec3 tD = gndTap( uGndD, xz * uGndTile.y, w9 ) * uGndKD;\n" +
+          "    vec3 tS = sandW > 0.001 ? gndTap( uGndS, xz * uGndTile.z, w9 ) * uGndKS : vec3( 1.0 );\n" +
+          "    vec3 tR = rockW > 0.001 ? gndTap( uGndR, xz * uGndTile.w, w9 ) * uGndKR : vec3( 1.0 );\n" +
+          "    det = mix( mix( mix( tD, tG, grassW ), tS, sandW ), tR, rockW );\n" +
+          // the vertex owns the hue; the map brings brightness and a little
+          // of its own chroma
+          "    float dl = dot( det, vec3( 0.2126, 0.7152, 0.0722 ) );\n" +
+          "    det = mix( vec3( dl ), det, uGndMix.x );\n" +
+          "    det = mix( vec3( 1.0 ), det, fade );\n" +
+          "  }\n" +
+          // exposed rock: the vertex's own brightness, desaturated to stone
+          "  float vl = dot( vc, vec3( 0.2126, 0.7152, 0.0722 ) );\n" +
+          "  vec3 stone = vec3( vl ) * vec3( 1.08, 1.0, 0.90 ) * 1.25;\n" +
+          "  vec3 base = mix( vc, stone, rockW * 0.8 );\n" +
+          // patch mottle: brightness at 23 m + 61 m, and sun-dried grass in
+          // the dry half of the 61 m field
+          "  float m1 = gndVn( xz / 23.0 ), m2 = gndVn( xz / 61.0 + 3.1 );\n" +
+          "  float mott = 1.0 + uGndMix.y * ( 0.28 * ( m1 * 0.55 + m2 * 0.45 ) - 0.14 );\n" +
+          "  float dry = smoothstep( 0.55, 0.85, m2 ) * grassW * ( 1.0 - rockW );\n" +
+          "  base *= mix( vec3( 1.0 ), vec3( 1.16, 1.04, 0.72 ), dry * 0.55 * uGndMix.y );\n" +
+          "  diffuseColor.rgb = base * det * mott;\n" +
+          "}");
+    };
+    mat.customProgramCacheKey = function () { return "cbzGroundSkin1"; };
+    return mat;
   };
 })();

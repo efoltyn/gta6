@@ -1294,6 +1294,9 @@
       g.name = "mount-mercy-earth-terrain";
       g.frustumCulled = false;
       root.add(g);
+      // far LOD: every 2nd grid line past 1.5 km (the grid is ~2 m on the
+      // summits, 4 m at 1.5 km is well under a pixel); same vertex buffers
+      if (CBZ.mtnIndexLod) CBZ.mtnIndexLod(g, { stride: 2, near: 1500 });
       if (CBZ.registerCityGroundHeight) {
         CBZ.registerCityGroundHeight(mountainHeightAt, { name: "Mount Mercy terrain", biome: "snow" });
       }
@@ -1531,6 +1534,10 @@
       mesh.userData.mountainFamilies = GREAT_MAJOR.length;
       mesh.userData.gaussianLobes = GREAT_LOBES.length;
       root.add(mesh);
+      // far LOD: every 2nd grid line once the camera is 2.2 km from the
+      // range's box (8 m -> 16 m spacing is ~0.4 deg there, under aerial
+      // haze); the strip rule above is re-applied to the coarse cells
+      if (CBZ.mtnIndexLod) CBZ.mtnIndexLod(mesh, { stride: 2, near: 2200, keepY: 0.8 });
       if (CBZ.registerCityGroundHeight) {
         CBZ.registerCityGroundHeight(greaterMercyHeightAt, {
           name: "Greater Mercy Range terrain", biome: "snow",
@@ -2063,7 +2070,11 @@
             {
               if (keep < 1 && CBZ.hash01(i, j, o.salt + 6) > keep) continue;
               if (!openNature(x, z, 1.4)) continue;
-              const sc = o.scale0 + CBZ.hash01(i, j, o.salt + 3) * o.scale1;
+              // a treeline STUNTS before it stops: the last trees up a real
+              // slope are half-height krummholz, not full spruce cut off at a
+              // contour. Full size below treeline-fade, ~half at the line.
+              const stunt = 1 - 0.5 * smooth01((gy - (o.treeline - o.fade)) / (o.fade * 1.6));
+              const sc = (o.scale0 + CBZ.hash01(i, j, o.salt + 3) * o.scale1) * stunt;
               q.setFromAxisAngle(up, CBZ.hash01(i, j, o.salt + 4) * Math.PI * 2);
               const trunkTop = gy + 1.6 * sc;
               const seatY = gy - 0.35 * sc;                    // seated into the slope

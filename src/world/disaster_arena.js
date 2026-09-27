@@ -837,25 +837,17 @@
       return out;
     }
     const GRASS_TILE = 3.2;
-    const grassMat = skinMat("grass");
+    /* THE TILE WAS A CHECKERBOARD (one 3.2 m repeat of a clumpy map is a grid
+       you can count from a boat). The fix that lived here, a second rotated
+       read of the same map, is now the shared ground material
+       (world/textures_surface.js CBZ.groundSkin), which the Gang Life
+       backcountry wears too: grass / soil / sand / stone detail by what the
+       vertex colour is, anti-tiled, normalised to mean 1. The island keeps
+       its full map chroma and a half-strength patch mottle over its own. */
+    const grassMat = CBZ.groundSkin
+      ? CBZ.groundSkin({ name: "survival-grass", tile: { grass: GRASS_TILE }, chroma: 1, mottle: 0.5, far: 300, sandY: [-0.4, -0.05] })
+      : skinMat("grass");
     grassMat.name = "survival-grass";
-    /* THE TILE WAS A CHECKERBOARD. One 3.2 m repeat of a map with clumps in
-       it is a grid you can count from the beach and a chessboard from a boat
-       (the mipmaps average each tile to its own blotch). A second read of the
-       same map, rotated 37 degrees at 3.2x the size, averaged in, breaks the
-       period without a second texture or a second draw. */
-    if (grassMat.map) {
-      grassMat.onBeforeCompile = function (sh) {
-        sh.fragmentShader = sh.fragmentShader.replace("#include <map_fragment>",
-          "#ifdef USE_MAP\n" +
-          "  vec2 uvB = mat2(0.8, -0.6, 0.6, 0.8) * vUv * 0.3125 + vec2(0.37, 0.11);\n" +
-          "  vec4 texelColor = mix(texture2D(map, vUv), texture2D(map, uvB), 0.5);\n" +
-          "  texelColor = mapTexelToLinear(texelColor);\n" +
-          "  diffuseColor *= texelColor;\n" +
-          "#endif");
-      };
-      grassMat.customProgramCacheKey = function () { return "survival-grass-2tap"; };
-    }
 
     // ---- hills / mountain (the high-ground height field) ----
     const hills = [
@@ -1735,7 +1727,9 @@
       shoreGeo.computeVertexNormals();
       shoreGeo.computeBoundingSphere();
       worldUV(shoreGeo, 2.6, cx, cz, function (pp, i, w) { w.x = pp.getX(i); w.z = -pp.getY(i); });
-      const shoreMat = skinMat("sand");
+      const shoreMat = CBZ.groundSkin
+        ? CBZ.groundSkin({ name: "survival-beach-shore", tile: { sand: 2.6 }, chroma: 1, mottle: 0.5, far: 300, sandY: [1.2, 2.4] })
+        : skinMat("sand");
       shoreMat.name = "survival-beach-shore";     // no water/ocean/sea in the name (test contract)
       const shore = new THREE.Mesh(shoreGeo, shoreMat);
       shore.rotation.x = -Math.PI / 2; shore.position.set(cx, 0, cz);
@@ -2927,11 +2921,6 @@
       g.setAttribute("color", new THREE.BufferAttribute(c, 3));
       return g;
     }
-    function mergeGeos(parts) {
-      const BGU = THREE.BufferGeometryUtils;
-      const out = BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(parts, false) : null;
-      return out || parts[0];
-    }
     // broadleaf bole: unit height (scaled per tree), roots into the soil
     function broadTrunkGeo() {
       return geoOnce("bt", function () {
@@ -2957,105 +2946,12 @@
         return g;
       });
     }
-    /* A COCONUT PALM, in two meshes. The trunk is a leaning curve (slender,
-       swelling at the foot, banded by the dark leaf-scar collars a palm trunk
-       is read by — vertex colour, not extra meshes); the crown is 11 pinnate
-       fronds — a spine that leaves the hub near level and hangs over its
-       length, with a leaflet pair at every step — merged into ONE geometry.
-       Geometry, not a texture: a frond's read is its comb of leaflets
-       against the sky. */
-    function palmTrunkGeo(v) {
-      return geoOnce("pt" + v, function () {
-        const SEG = 7, parts = [];
-        const bend = [0.10, 0.16, 0.06][v];
-        const at = function (t) { return new THREE.Vector3(bend * Math.pow(t, 1.8), t, 0); };
-        const up = new THREE.Vector3(0, 1, 0);
-        for (let i = 0; i < SEG; i++) {
-          const a = at(i / SEG), b = at((i + 1) / SEG);
-          const r0 = 0.20 - 0.07 * (i / SEG) + (i === 0 ? 0.06 : 0), r1 = 0.20 - 0.07 * ((i + 1) / SEG);
-          const len = a.distanceTo(b);
-          const c = new THREE.CylinderGeometry(r1, r0, len * 1.02, 8, 1, true);
-          const uv = c.attributes.uv;
-          for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) * 1.5, uv.getY(k) * 0.35 + i * 0.35);
-          const dir = b.clone().sub(a).normalize();
-          c.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(up, dir)));
-          c.translate((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
-          parts.push(c);
-        }
-        const g = mergeGeos(parts);
-        rampColor(g, 0.62);
-        const p = g.attributes.position, col = g.attributes.color;
-        for (let i = 0; i < p.count; i++) {
-          const band = 0.5 + 0.5 * Math.cos(p.getY(i) * Math.PI * 2 * 9);
-          const k = 1 - 0.3 * Math.pow(band, 6);
-          col.setXYZ(i, col.getX(i) * k, col.getY(i) * k * 0.98, col.getZ(i) * k * 0.95);
-        }
-        g.userData.top = at(1);
-        g.computeBoundingSphere();
-        return g;
-      });
-    }
-    function palmCrownGeo(v) {
-      return geoOnce("pc" + v, function () {
-        const pos = [], col = [];
-        const N = 11, SEG = 17;
-        function tri(a, b, c, ca, cb, cc) {
-          pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
-          col.push(ca, ca, ca * 0.85, cb, cb, cb * 0.85, cc, cc, cc * 0.85);
-        }
-        for (let f = 0; f < N; f++) {
-          const yaw = (f / N) * Math.PI * 2 + (h01t(f, v, 0x9a1) - 0.5) * 0.35;
-          const len = 2.6 + h01t(f, v, 0x9a2) * 0.9;
-          const lift = -0.2 + h01t(f, v, 0x9a3) * 0.7;              // start pitch, above/below level
-          const hang = 1.2 + h01t(f, v, 0x9a4) * 0.7;               // how hard it droops
-          const dx = Math.cos(yaw), dz = Math.sin(yaw);
-          const sx = -dz, sz = dx;                                   // leaflet side direction
-          // the spine: integrate the pitch so it is a real arc, not a chord
-          const pts = [new THREE.Vector3(0, 0, 0)];
-          const STEPS = 18;
-          for (let s = 1; s <= STEPS; s++) {
-            const u = (s - 0.5) / STEPS, ang = lift - hang * u * u, dl = len / STEPS;
-            const q = pts[s - 1];
-            pts.push(new THREE.Vector3(q.x + dx * Math.cos(ang) * dl, q.y + Math.sin(ang) * dl, q.z + dz * Math.cos(ang) * dl));
-          }
-          const spine = function (u) {
-            const f2 = u * STEPS, i0 = Math.min(STEPS - 1, Math.floor(f2));
-            return pts[i0].clone().lerp(pts[i0 + 1], f2 - i0);
-          };
-          for (let i = 0; i < SEG; i++) {
-            const u0 = 0.06 + (i / SEG) * 0.94, u1 = 0.06 + ((i + 1) / SEG) * 0.94;
-            // a leaflet is a narrow blade: its base spans only the first half
-            // of the step, so the comb has gaps between blades
-            const a = spine(u0), b = spine(u0 + (u1 - u0) * 0.5);
-            const w = 0.8 * Math.sin(Math.PI * Math.min(1, 0.12 + u0 * 0.95)) + 0.12;   // leaflet length
-            const shade = 0.6 + 0.4 * u0;
-            for (let sgn = -1; sgn <= 1; sgn += 2) {
-              const tip = new THREE.Vector3(
-                (a.x + b.x) / 2 + sx * sgn * w + dx * w * 0.55,
-                (a.y + b.y) / 2 - w * 0.6,
-                (a.z + b.z) / 2 + sz * sgn * w + dz * w * 0.55);
-              tri(a, b, tip, shade * 0.85, shade * 0.95, shade * 1.1);
-            }
-          }
-        }
-        const g = new THREE.BufferGeometry();
-        g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-        g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
-        // lighting normals point OUT of the crown, up-biased, so both faces
-        // of a leaflet shade as part of the canopy mass, not as a flipped card
-        const nrm = new Float32Array(pos.length);
-        for (let i = 0; i < pos.length; i += 3) {
-          const x = pos[i], y = pos[i + 1] + 0.8, z = pos[i + 2];
-          const l = Math.hypot(x, y, z) || 1;
-          let nx = x / l * 0.55, ny = y / l * 0.55 + 0.45, nz = z / l * 0.55;
-          const m = Math.hypot(nx, ny, nz) || 1;
-          nrm[i] = nx / m; nrm[i + 1] = ny / m; nrm[i + 2] = nz / m;
-        }
-        g.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
-        g.computeBoundingSphere();
-        return g;
-      });
-    }
+    /* A COCONUT PALM: the vegetation kit's (world/vegetation.js palmTrunk /
+       palmCrown, moved there from this file so every coast shares one
+       palm): a leaning barked trunk with leaf-scar collars and 11 pinnate
+       drooping fronds merged into one geometry. */
+    function palmTrunkGeo(v) { return geoOnce("pt" + v, function () { return VKIT.palmTrunk(v); }); }
+    function palmCrownGeo(v) { return geoOnce("pc" + v, function () { return VKIT.palmCrown(v); }); }
     // THE SHARED LOOKS. One material per role; each tree clones it (see the
     // record contract above). Tints multiply bright kit textures, so they are
     // authored DARK (linear albedo — this pipeline brightens on the way out).
