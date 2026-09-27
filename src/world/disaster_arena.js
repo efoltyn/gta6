@@ -541,7 +541,8 @@
           const nOut = f.out * (f.halfN - GIN);
           const rec = { parts: [], shattered: false, mesh: null,
             x: o.ox + (f.horiz ? tm * f.tx : nOut), y: o.gy + (v0 + v1) / 2,
-            z: o.oz + (f.horiz ? nOut : tm * f.tz), span: (u1 - u0) / 2 };
+            z: o.oz + (f.horiz ? nOut : tm * f.tz), span: (u1 - u0) / 2,
+            hh: (v1 - v0) / 2, horiz: !!f.horiz, mat: null };
           for (let m = 0; m < nMod; m++) {
             const a = u0 + m * mw, bb = a + mw;
             glass(f, a, bb, v0, vT, 0x51 + m + k * 7, rec, shop);
@@ -627,6 +628,8 @@
       meshes[K] = { mesh: m, orig: Float32Array.from(k.p) };
     }
     for (const rec of panes) {
+      // the pane's own glass material: what its shards are made of
+      rec.mat = meshes.glass ? meshes.glass.mesh.material : null;
       rec.hide = function () {
         for (const pt of rec.parts) {
           const mm = meshes[pt.K]; if (!mm) continue;
@@ -2267,19 +2270,31 @@
       allGlass.push(rec); if (list) list.push(rec);
       return m;
     }
-    function burstPane(gp) {
+    /* A pane bursts into ITS OWN GLASS: the pane solid (the real mesh, or
+       for the merged facade glass a pane-thin slab of the facade's glass
+       material exactly where the window was) is fractured by CBZ.debris into
+       radial shards that fall and settle as glass on the pavement. `full`
+       false (the far panes of a mass blow-out) throws glass grit only, so a
+       collapsing tower does not fracture sixty windows in one frame. */
+    function burstPane(gp, full) {
       if (gp.shattered) return;
       gp.shattered = true;
-      if (gp.hide) gp.hide(); else gp.mesh.visible = false;
-      if (!CBZ.fx || !CBZ.fx.dropDebris) return;
-      const shards = 4 + ((rng() * 4) | 0);
-      for (let i = 0; i < shards; i++) {
-        CBZ.fx.dropDebris({
-          x: gp.x + (rng() - 0.5) * gp.span * 2, z: gp.z + (rng() - 0.5) * 0.5,
-          fromY: gp.y + (rng() - 0.5) * 1.2, vy: 1 + rng() * 2.6,
-          size: 0.15 + rng() * 0.18, color: 0xcdeefb, linger: 1.1,
-        });
+      const D = CBZ.debris;
+      const at = { x: gp.x, y: gp.y, z: gp.z };
+      if (gp.mesh && !gp.hide) {
+        if (D && full !== false) D.shatter(gp.mesh, { kind: "glass", at, power: 1, maxPieces: 8, owner: "fx" });
+        else if (D) D.chips(at.x, at.y, at.z, { kind: "glass", count: 6, power: 0.8, spread: gp.span || 0.5 });
+        gp.mesh.visible = false;
+        return;
       }
+      if (gp.hide) gp.hide(); else if (gp.mesh) gp.mesh.visible = false;
+      if (!D) return;
+      if (full === false || !gp.mat) { D.chips(at.x, at.y, at.z, { kind: "glass", count: 6, power: 0.8, spread: gp.span || 0.5 }); return; }
+      const hs = gp.span || 0.6, hh = gp.hh || 0.7, th = 0.012;
+      const box = gp.horiz
+        ? { minX: gp.x - hs, maxX: gp.x + hs, minY: gp.y - hh, maxY: gp.y + hh, minZ: gp.z - th, maxZ: gp.z + th }
+        : { minX: gp.x - th, maxX: gp.x + th, minY: gp.y - hh, maxY: gp.y + hh, minZ: gp.z - hs, maxZ: gp.z + hs };
+      D.shatterBox(box, gp.mat, { kind: "glass", at, power: 1, maxPieces: 8, owner: "fx" });
     }
     // shatter every intact pane within `r` of (x,z) — called by the quake (on
     // collapse) and by every explosion (CBZ.fx.blast). Caps work per call.
@@ -2288,7 +2303,7 @@
       for (let i = 0; i < allGlass.length; i++) {
         const gp = allGlass[i]; if (gp.shattered) continue;
         const dx = gp.x - x, dz = gp.z - z;
-        if (dx * dx + dz * dz <= r2) { burstPane(gp); if (++n > 60) break; }
+        if (dx * dx + dz * dz <= r2) { burstPane(gp, n < 8); if (++n > 60) break; }
       }
       return n;
     };
@@ -3449,6 +3464,8 @@
             if (CBZ.colliders.indexOf(car.collider) === -1) CBZ.colliders.push(car.collider);
             car.flung = false;
           }
+          // its windows were shattered off the real pane (disasters.js flingCar)
+          if (car._pane) { car._pane.visible = true; car._pane = null; }
         }
         // re-glaze every shattered window for the new match
         for (const gp of allGlass) { if (gp.shattered) { gp.shattered = false; if (gp.show) gp.show(); else gp.mesh.visible = true; } }

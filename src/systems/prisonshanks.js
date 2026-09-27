@@ -206,7 +206,24 @@
       if (!draw(n)) continue;
       carry(n, dt);
       drawn++;
+      steelSeen(n, dt);
     }
+  }
+
+  /* STEEL IN FRONT OF A SCREW. A blade out on a man closing on the player,
+     where a guard can see it, is a fight the guard breaks up before it
+     starts (systems/prisonlaw.js). Unwatched, nobody is coming: that is the
+     lethal mistake the law leaves you to make. Polled at 2 Hz per carrier. */
+  function steelSeen(n, dt) {
+    n._steelPollT = (n._steelPollT || 0) - dt;
+    if (n._steelPollT > 0) return;
+    n._steelPollT = 0.5;
+    if (!((n.huntPlayer || 0) > 0) || !CBZ.guardWatching || !CBZ.breakUpFight) return;
+    const p = n.group.position;
+    let w = null;
+    try { w = CBZ.guardWatching(p.x, p.y || 0, p.z); } catch (e) { w = null; }
+    if (!w) return;
+    try { CBZ.breakUpFight(p.x, p.z, { seenBy: w, starter: n, reason: "steel" }); } catch (e) {}
   }
 
   /* ============================================================

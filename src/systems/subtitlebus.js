@@ -1,6 +1,15 @@
 /* ============================================================
    systems/subtitlebus.js — ONE LINE, ONE SURFACE.
 
+   2026-09-27 UPDATE. The owner still saw doubled NPC text after this desk
+   shipped, because the desk dedupes SURFACES and the doubling was inside
+   ONE element: the shared ink recipe (css/hud.css :root --ink-shadow) drew
+   five offset copies of every glyph under a text stroke, and at touch sizes
+   the copies separate into a second layer. That recipe is now a zero-offset
+   halo with no stroke. The prison no longer uses the bottom band at all
+   (#pinteractSay is gone; speech is over the speaker's head, interact.js),
+   so the desk now arbitrates city/campaign speech and the hint only.
+
    THE BUG, in the owner's words (iPad/iPhone, 2026-08-21):
      "dialogue will show 2 times at once slightly offset so you can tell
       there's 2 layers of text"

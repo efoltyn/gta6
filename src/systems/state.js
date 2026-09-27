@@ -255,15 +255,18 @@
          place words are legitimate. The tier owns the copy so the regime and
          the sentence describing it cannot drift apart; when the ladder is
          off (or this is a plain death) the original lines below still run. */
-      const T = CBZ.prisonTier && CBZ.prisonTier.card ? CBZ.prisonTier.card() : null;
-      if (logo) logo.textContent = T ? T.logo : "TRANSFERRED";
-      if (sub) sub.textContent = T ? T.sub : (reason === "transferred"
+      // DEAD is its own card (systems/capture.js: a shank into a downed man, a
+      // second lethal down, the tower on the wire). Never the tier's copy.
+      const dead = reason === "dead";
+      const T = !dead && CBZ.prisonTier && CBZ.prisonTier.card ? CBZ.prisonTier.card() : null;
+      if (logo) logo.textContent = dead ? "DEAD" : T ? T.logo : "TRANSFERRED";
+      if (sub) sub.textContent = dead ? (g._deathLine || "You didn't make it") : T ? T.sub : (reason === "transferred"
         ? "Strike three, shipped to max security"
         : "The escape is over");
-      setText("slPlace", T ? T.place : String(Math.min(3, g.caughtCount || 3)));
-      setText("slTotal", T ? T.total : "strikes");
+      setText("slPlace", T ? T.place : String(dead ? (g.caughtCount || 0) : Math.min(3, g.caughtCount || 3)));
+      setText("slTotal", T ? T.total : dead ? "times caught" : "strikes");
       setText("slTime", CBZ.fmtTime(g.elapsed));
-      if (timeLabel) timeLabel.textContent = "On the run";
+      if (timeLabel) timeLabel.textContent = dead ? "Inside" : "On the run";
       setText("slDis", T ? T.kept : (g.cigs || 0));
       if (disLabel) disLabel.textContent = T ? T.keptLabel : "Cigs left";
       // the button is part of the scene: you are not retrying, you are being

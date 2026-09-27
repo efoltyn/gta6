@@ -7,8 +7,10 @@
                                   smoke/embers/dust); fall | rise | swirl.
      CBZ.fx.groundMarker(x,z,r) — pulsing telegraph disc on the floor.
      CBZ.fx.blast(x,z,opts)     — expanding shock ring + flash + shake.
-     CBZ.fx.dropDebris(opts)    — a box that falls under gravity, lands,
-                                  optionally crushes, then lingers as rubble.
+     CBZ.fx.dropDebris(opts)    — a rock (shape:"rock") or a piece of a
+                                  material that falls / is thrown, lands and
+                                  optionally crushes. Material pieces are
+                                  real fractured chunks sim'd by CBZ.debris.
      CBZ.fx.flash(s,color)      — additive full-screen white-out (0..1).
 
    Fire-and-forget effects (markers/blasts/debris) are animated by one
@@ -187,44 +189,82 @@
   };
 
   // ---------------------------------------------------------------
-  // dropDebris: a box that falls under gravity onto the arena floor,
-  // optionally crushing actors on landing, then lingers as rubble.
+  // dropDebris: something heavy that falls (or is THROWN) onto the arena
+  // floor, optionally crushing actors where it lands.
+  //
+  // Two kinds of thing fall, and they are drawn two different ways:
+  //
+  //  · A ROCK (`shape:"rock"`): a lava bomb, a meteor, a boulder off a
+  //    rockfall. It IS a whole rock: a lumpy, flat-faced stone of its own
+  //    (never a cube), driven here because its landing is gameplay (it
+  //    crushes, it fires onLand, a kept bomb sits there for the match).
+  //  · ANYTHING ELSE is a piece of MATERIAL coming off something that broke:
+  //    `material` (the source's own material, pass it!) or `color` + `kind`.
+  //    That is handed to CBZ.debris: a block of that material is fractured
+  //    into real irregular pieces with raw cut faces, which tumble under the
+  //    one rigid-body sim, pile on each other and freeze into the shared
+  //    rubble. There is no box here any more (owner, 2026-09-27: "I hate big
+  //    cubes of fake debris"). The gameplay half (the crush damage and
+  //    onLand) rides an invisible tracker on the same arc, so a caller gets
+  //    exactly the landing it always got.
   //
   // IT CAN ALSO BE THROWN. Give it `fromX`/`fromZ` (with `fromY`) and it
   // launches from there on a real ballistic arc that LANDS on (x, z): the
   // flight time is picked off the range, and vx/vy/vz are then solved for
-  // that time against the same gravity every other body in the game uses.
-  // Without those two fields the behaviour is exactly what it always was —
-  // a vertical drop — so every existing caller is untouched.
+  // that time against the gravity that body actually falls under.
   //
-  // The volcano is why. A lava bomb that materialises directly above its
-  // victim and drops is the "not even with physics" the owner reported; a
-  // lava bomb has to come OUT OF THE MOUNTAIN, and you have to be able to
-  // watch it come.
+  //   o: {x, z, fromX?, fromZ?, fromY?, vy?, size?, dims?:{w,h,d},
+  //       shape?:"rock", glow?, color?, material?, kind?, pieces?, whole?,
+  //       dmg?, onLand?(x,z), linger?, keep?, owner?}
   // ---------------------------------------------------------------
+  const _dropVel = new THREE.Vector3(), _dropSpin = new THREE.Vector3();
+  function lumpyRock(s) {
+    // a flat-faced stone: an icosphere pushed in and out per vertex (the SAME
+    // push for every copy of a vertex, so it stays closed), then squashed a
+    // little on each axis, so no two rocks share a silhouette
+    let g = new THREE.IcosahedronGeometry(1, 1);
+    if (g.index) g = g.toNonIndexed();
+    const p = g.attributes.position.array;
+    const kx = 0.8 + rng() * 0.45, ky = 0.6 + rng() * 0.35, kz = 0.8 + rng() * 0.45;
+    const seed = rng() * 1000;
+    for (let i = 0; i < p.length; i += 3) {
+      const x = p[i], y = p[i + 1], z = p[i + 2];
+      const hh = Math.sin(Math.round(x * 100) * 12.9898 + Math.round(y * 100) * 78.233 + Math.round(z * 100) * 37.719 + seed) * 43758.5453;
+      const f = 0.78 + (hh - Math.floor(hh)) * 0.36;
+      p[i] = x * f * kx * s; p[i + 1] = y * f * ky * s; p[i + 2] = z * f * kz * s;
+    }
+    g.computeVertexNormals();
+    return { geo: g, h: 2 * ky * s * 0.95 };
+  }
+  function pieceMaterial(o) {
+    if (o.material) return o.material;
+    const c = o.color != null ? o.color : 0x8b9097;
+    return CBZ.cmat ? CBZ.cmat(c) : new THREE.MeshLambertMaterial({ color: c });
+  }
   fx.dropDebris = function (o) {
     o = o || {};
+    const rock = o.shape === "rock";
+    const D = CBZ.debris;
     const s = o.size || (0.6 + rng() * 1.4);
-    const w = s, h = s * (0.6 + rng() * 0.8), d = s;
-    /* A BOX IS RUBBLE; A ROCK IS NOT A BOX. `shape:"rock"` gets a lumpy solid
-       instead — the volcano's bombs are the caller that needed it, because a
-       bomb lands with keep:true and sits there for the rest of the match, and
-       twenty cubes scattered over an island read as exactly that. */
-    const geo = o.shape === "rock"
-      ? new THREE.DodecahedronGeometry(s * 0.62, 0)
-      : new THREE.BoxGeometry(w, h, d);
-    /* `glow: true` — incandescent debris. An unlit material IS incandescence
-       (the volcano's own doctrine: it ignores the sun, so it is exactly as
-       bright at night as at noon). The eruption's rolling embers are why:
-       a lit rock under an ash-dimmed sun is a grey dot, and the reference
-       photograph's flanks are streaked with fire, not gravel. Opaque, never
-       additive — glow is a material state here, not alpha. */
-    const mat = o.glow
-      ? new THREE.MeshBasicMaterial({ color: o.color != null ? o.color : 0xff8a2e })
-      : (CBZ.mat ? CBZ.mat(o.color != null ? o.color : 0x6b7079) : new THREE.MeshLambertMaterial({ color: 0x6b7079 }));
-    const m = new THREE.Mesh(geo, mat);
     const x = o.x, z = o.z;
     const sy = o.fromY != null ? o.fromY : 26;
+    // a rock falls under the game's gravity; a piece falls under debris.js's
+    // (9.81) because that is the sim that actually carries it
+    const gg = rock ? ((CBZ.TUNE && CBZ.TUNE.gravity) || 20) : 9.81;
+    let geo = null, mat = null, m = null, h;
+    if (rock) {
+      const r = lumpyRock(s * 0.62);
+      geo = r.geo; h = r.h;
+      /* `glow: true` — incandescent rock. An unlit material IS incandescence
+         (the volcano's own doctrine: it ignores the sun, so it is exactly as
+         bright at night as at noon). Opaque, never additive. */
+      mat = o.glow
+        ? new THREE.MeshBasicMaterial({ color: o.color != null ? o.color : 0xff8a2e })
+        : (CBZ.mat ? CBZ.mat(o.color != null ? o.color : 0x6b7079) : new THREE.MeshLambertMaterial({ color: 0x6b7079 }));
+      m = new THREE.Mesh(geo, mat);
+    } else {
+      h = o.dims ? o.dims.h : s * (0.6 + rng() * 0.8);
+    }
     let vx = 0, vz = 0, vy = o.vy || 0, px = x, pz = z;
     if (o.fromX != null && o.fromZ != null) {
       px = o.fromX; pz = o.fromZ;
@@ -234,20 +274,35 @@
       const T = Math.max(0.9, 0.75 + range / 26);
       const ty = (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + h / 2;
       vx = dx / T; vz = dz / T;
-      // the same gravity the updater below integrates with, defaulted rather
-      // than assumed: a throw solved against a different g lands somewhere else
-      const gg = (CBZ.TUNE && CBZ.TUNE.gravity) || 20;
       vy = ((ty - sy) + 0.5 * gg * T * T) / T;
     }
-    m.position.set(px, sy, pz);
-    m.castShadow = true;
-    m.rotation.set(rng() * 3, rng() * 3, rng() * 3);
-    scene.add(m);
+    if (m) {
+      m.position.set(px, sy, pz);
+      m.castShadow = true;
+      m.rotation.set(rng() * 3, rng() * 3, rng() * 3);
+      scene.add(m);
+    } else if (D) {
+      const w = o.dims ? o.dims.w : s, d = o.dims ? o.dims.d : s;
+      _dropVel.set(vx, vy, vz);
+      _dropSpin.set((rng() - 0.5) * 6, (rng() - 0.5) * 6, (rng() - 0.5) * 6);
+      D.shatter({ box: { minX: px - w / 2, maxX: px + w / 2, minY: sy - h / 2, maxY: sy + h / 2, minZ: pz - d / 2, maxZ: pz + d / 2 },
+        material: pieceMaterial(o) }, {
+        kind: o.kind, launch: false, velocity: _dropVel, angular: _dropSpin,
+        maxPieces: o.pieces || (o.whole ? 1 : (s > 1.2 ? 4 : s > 0.6 ? 3 : 2)),
+        // pieces a little over half the block: it always breaks (never one
+        // whole cube); snap off, a thing in flight is not a pole with a stump
+        size: Math.max(0.12, Math.max(w, h, d) / 1.9), snap: false,
+        whole: o.whole || false, owner: o.owner || "fx", grit: false, dust: false, solid: !!o.keep && s > 1.1,
+      });
+    }
+    // the tracker: the rock's own body, or (for a piece) the invisible point
+    // that carries the landing damage along the pieces' arc
+    if (!m && !(o.dmg > 0) && !o.onLand) return;
     debris.push({
-      mesh: m, geo, mat, x: px, z: pz, vy: vy, vx: vx, vz: vz, h,
+      mesh: m, geo, mat, x: px, z: pz, y: sy, vy: vy, vx: vx, vz: vz, h, g: gg,
       spin: { x: (rng() - 0.5) * 4, z: (rng() - 0.5) * 4 },
       landed: false, lingerT: o.linger != null ? o.linger : 6,
-      radius: Math.max(w, d) * 0.6, dmg: o.dmg || 0, onLand: o.onLand || null,
+      radius: Math.max(s, o.dims ? Math.max(o.dims.w, o.dims.d) : s) * 0.6, dmg: o.dmg || 0, onLand: o.onLand || null,
       keep: !!o.keep,
     });
   };
@@ -289,26 +344,31 @@
       mk.mesh.scale.set(sc, sc, 1);
     }
 
-    // falling debris
+    // falling debris: rocks (with a mesh) and the invisible landing
+    // trackers of material pieces (CBZ.debris draws and settles those)
     for (let i = debris.length - 1; i >= 0; i--) {
       const b = debris[i];
       if (!b.landed) {
-        b.vy -= g * dt;
-        b.mesh.position.y += b.vy * dt;
+        b.vy -= (b.g || g) * dt;
+        b.y += b.vy * dt;
         // a thrown piece carries its horizontal velocity, and b.x/b.z follow
         // it so the floor probe and the landing damage stay under the rock
-        if (b.vx || b.vz) {
-          b.x += b.vx * dt; b.z += b.vz * dt;
-          b.mesh.position.x = b.x; b.mesh.position.z = b.z;
+        b.x += b.vx * dt; b.z += b.vz * dt;
+        if (b.mesh) {
+          b.mesh.position.set(b.x, b.y, b.z);
+          b.mesh.rotation.x += b.spin.x * dt;
+          b.mesh.rotation.z += b.spin.z * dt;
         }
-        b.mesh.rotation.x += b.spin.x * dt;
-        b.mesh.rotation.z += b.spin.z * dt;
         const floor = (CBZ.floorAt ? CBZ.floorAt(b.x, b.z) : 0) + b.h / 2;
-        if (b.mesh.position.y <= floor) {
-          b.mesh.position.y = floor; b.landed = true;
-          if (CBZ.shake) CBZ.shake(0.18);
+        if (b.y <= floor) {
+          b.y = floor; b.landed = true;
+          if (b.mesh) b.mesh.position.y = floor;
+          if (CBZ.shake) CBZ.shake(b.mesh ? 0.18 : 0.1);
           if (b.dmg > 0 && CBZ.surv) CBZ.surv.hurtRadius(b.x, b.z, b.radius + 0.6, b.dmg, { instakill: b.dmg >= 999 });
           if (b.onLand) try { b.onLand(b.x, b.z); } catch (e) {}
+          if (!b.mesh) { debris.splice(i, 1); continue; }
+          // a rock lands in its own dust
+          if (CBZ.debris && b.h > 0.5) CBZ.debris.dust(b.x, floor - b.h / 2 + 0.2, b.z, { kind: "dirt", power: Math.min(1.5, b.h * 0.5), radius: Math.min(2, b.h * 0.6) });
         }
       } else if (!b.keep) {
         b.lingerT -= dt;
@@ -321,8 +381,9 @@
   fx.clear = function () {
     for (const r of rings) { scene.remove(r.mesh); r.geo.dispose(); r.mat.dispose(); }
     rings.length = 0;
-    for (const b of debris) { scene.remove(b.mesh); b.geo.dispose(); if (b.mat.dispose) b.mat.dispose(); }
+    for (const b of debris) if (b.mesh) { scene.remove(b.mesh); b.geo.dispose(); if (b.mat.dispose) b.mat.dispose(); }
     debris.length = 0;
+    if (CBZ.debris) CBZ.debris.clear("fx");
     for (let i = markers.length - 1; i >= 0; i--) markers[i].dispose();
     CBZ.survEnv.flash = 0;
   };

@@ -375,6 +375,20 @@
   // stopped loading or stopped accepting the island's descriptor, and the
   // island has quietly gone back to having a second, worse collapse of its own.
   let engineFalls = 0, legacyFalls = 0;
+  // the building's OWN wall material (the shell mesh wearing its wall colour,
+  // else its biggest opaque mesh): what its debris and rubble are made of
+  function wallMatOf(b) {
+    if (b._wallMat !== undefined) return b._wallMat;
+    let best = null, bestN = -1;
+    if (b.group) b.group.traverse(function (o) {
+      if (!o.isMesh || !o.material || Array.isArray(o.material) || o.material.transparent || !o.material.color) return;
+      const pa = o.geometry && o.geometry.attributes && o.geometry.attributes.position;
+      const n = (pa ? pa.count : 0) + (b.color != null && o.material.color.getHex() === b.color ? 1e7 : 0);
+      if (n > bestN) { bestN = n; best = o.material; }
+    });
+    b._wallMat = best || (CBZ.cmat ? CBZ.cmat(b.color != null ? b.color : 0x8b9097) : null);
+    return b._wallMat;
+  }
   function structureHit(b, amount, ctx, opts) {
     if (!b || b.fallen) return 0;
     opts = opts || {};
@@ -430,11 +444,22 @@
                   floor: Math.max(0, Math.round((b.storeys || 2) * 0.4)) });
         } catch (e) {}
       }
-      for (let i = 0; i < 7; i++) CBZ.fx.dropDebris({
-        x: b.x + (rnd() - 0.5) * b.w, z: b.z + (rnd() - 0.5) * b.d,
-        fromY: b.h * (0.4 + rnd() * 0.6), vy: -1 - rnd() * 2,
-        size: 0.5 + rnd() * 1.1, color: 0x8b9097, dmg: scale(14, ctx || { intensity: 0.4 }), keep: true,
-      });
+      // THE FACADE SHEDS ITS OWN SKIN: slabs of this building's wall, in its
+      // own material, come off the face (not grey cubes out of its middle)
+      // and break up as they fall onto the pavement below that face.
+      const wm = wallMatOf(b);
+      for (let i = 0; i < 7; i++) {
+        const side = (rnd() * 4) | 0, t = rnd() - 0.5;
+        const fxw = side < 2 ? t * b.w : (side === 2 ? -1 : 1) * (b.w / 2 + 0.3);
+        const fzw = side < 2 ? (side === 0 ? -1 : 1) * (b.d / 2 + 0.3) : t * b.d;
+        const sz = 0.5 + rnd() * 1.1;
+        CBZ.fx.dropDebris({
+          x: b.x + fxw, z: b.z + fzw,
+          fromY: (b.gy || 0) + b.h * (0.4 + rnd() * 0.6), vy: -1 - rnd() * 2,
+          size: sz, dims: side < 2 ? { w: sz * 1.3, h: sz, d: 0.28 } : { w: 0.28, h: sz, d: sz * 1.3 },
+          material: wm, dmg: scale(14, ctx || { intensity: 0.4 }), keep: true,
+        });
+      }
       if (CBZ.shake && near({ x: b.x, z: b.z }, 45)) CBZ.shake(0.22);
     }
     if (now >= 1) collapse(b, ctx, opts);
@@ -1607,7 +1632,7 @@
             CBZ.fx.dropDebris({
               x: p.x + (rnd() - 0.5) * 5, z: p.z + (rnd() - 0.5) * 5,
               fromY: p.y + 3 + rnd() * 4, vy: -2 - rnd() * 3,
-              size: 0.4 + rnd() * 0.9, color: 0x4a4038, dmg: 0, linger: 5,
+              size: 0.4 + rnd() * 0.9, shape: "rock", color: 0x4a4038, dmg: 0, linger: 5,
             });
           }
         }
@@ -4609,17 +4634,28 @@
     // out after half a minute; this is the rubble that is still there at the
     // end of the match, and it lands when the building does, not when it
     // starts falling.
+    //   It is a MOUND OF THE BUILDING: its own wall material broken into real
+    //   pieces plus its pale floor slabs, seated on each other by
+    //   CBZ.debris.pile and frozen solid (you climb it). Taller towers leave a
+    //   higher, wider heap. The last few storeys still come down on whoever
+    //   is standing at the edge of the footprint.
     const layRubble = function () {
-      const RUBBLE = [0x70757e, 0x8b9097, 0x5c6168, 0xb9bec6, 0x9aa0a8];
-      const n = 22 + (rnd() * 14 | 0) + (b.h > 24 ? 16 : 0);   // taller towers leave more
-      for (let i = 0; i < n; i++) {
-        CBZ.fx.dropDebris({
-          x: b.x + (rnd() - 0.5) * b.w * 1.4, z: b.z + (rnd() - 0.5) * b.d * 1.4,
-          fromY: 1.2 + rnd() * 2.5, vy: -1 - rnd() * 2,
-          size: 0.7 + rnd() * 2.2, color: RUBBLE[(rnd() * RUBBLE.length) | 0],
-          dmg: i < 6 && ctx ? scale(30, ctx) : 0, keep: true,
-        });
+      if (ctx && surv()) {
+        for (let i = 0; i < 6; i++) {
+          surv().hurtRadius(b.x + (rnd() - 0.5) * b.w * 1.4, b.z + (rnd() - 0.5) * b.d * 1.4, 1.6, scale(30, ctx));
+        }
       }
+      if (!CBZ.debris) return;
+      const tall = b.h > 24;
+      CBZ.debris.pile({
+        x: b.x, z: b.z, y: b.gy || undefined,
+        w: b.w * 1.25, d: b.d * 1.25, h: Math.min(tall ? 4.5 : 3, 0.9 + b.h * 0.1),
+        materials: [
+          { material: wallMatOf(b), weight: 3 },
+          { material: CBZ.cmat ? CBZ.cmat(0xb4b9c1) : wallMatOf(b), kind: "concrete", weight: 1 },
+        ],
+        owner: "fx", solid: true,
+      });
     };
 
     const job = (CBZ.collapse && CBZ.CONFIG.COLLAPSE_V2) ? CBZ.collapse.play({
@@ -4668,7 +4704,19 @@
       vx: dirx * force + (rnd() - 0.5) * 2, vy: up + rnd() * 3, vz: dirz * force + (rnd() - 0.5) * 2,
       sx: (rnd() - 0.5) * 6, sz: (rnd() - 0.5) * 6, settled: false,
     });
-    CBZ.fx.dropDebris({ x: car.group.position.x, z: car.group.position.z, fromY: 2, vy: 4, size: 0.6, color: 0xbfe0ff, linger: 0.4 });
+    // the windows go as it is ripped off the street: THIS car's own glass
+    // shatters (a single-material glass mesh on its body), else a burst of
+    // glass grit where the windows were
+    if (CBZ.debris) {
+      const gp = car.group.position;
+      let pane = null;
+      car.group.traverse(function (o) {
+        if (!pane && o.isMesh && o.visible && o.material && !Array.isArray(o.material) && CBZ.debris.kindOf(o.material, o) === "glass") pane = o;
+      });
+      const at = { x: gp.x, y: gp.y + 1.2, z: gp.z };
+      if (pane) { car._pane = pane; CBZ.debris.shatter(pane, { kind: "glass", at, dir: { x: dirx, y: 0.4, z: dirz }, power: 1.2, maxPieces: 12, owner: "fx" }); }
+      else CBZ.debris.chips(at.x, at.y, at.z, { kind: "glass", count: 18, power: 1.2, dir: { x: dirx, y: 0.5, z: dirz }, spread: 1.4 });
+    }
   }
 
   // ---- WILDFIRE: real flames + glow + smoke + scorch on each burning tree ----
@@ -4717,7 +4765,9 @@
     removeTreeFire(t);
     if (t.foliage && t.foliage.material) { t.foliage.material.color.setHex(0x1a1410); if (t.foliage.material.emissive) t.foliage.material.emissive.setHex(0x000000); }
     if (t.trunk && t.trunk.material) t.trunk.material.color.setHex(0x140d08);
-    if (CBZ.fx) CBZ.fx.dropDebris({ x: t.x, z: t.z, fromY: floor(t.x, t.z) + 3, vy: 2, size: 0.5, color: 0x2a2622, linger: 0.6 });
+    // the crown burns out: charred twig and bark flecks rain off it in a
+    // puff of ash (the tree's own char, not a black cube)
+    if (CBZ.debris) CBZ.debris.chips(t.x, floor(t.x, t.z) + 3, t.z, { kind: "wood", color: 0x1a1410, count: 14, power: 0.6, spread: 2, size: 0.06, dustColor: 0x5a5550 });
   }
 
   /* ============================================================
@@ -4986,12 +5036,32 @@
       // A TREE THAT IS STRUCK EXPLODES. The sap inside the trunk flashes to
       // steam and blows the bark off in strips — the one piece of genuine
       // blunt-trauma debris a strike produces, and nothing like an ejecta cone.
-      if (at.kind === "tree" && CBZ.fx && CBZ.fx.dropDebris) {
+      // The strips are cut from THIS trunk: a bark-thick slab of its own
+      // surface on the struck side, in its own bark material, split along the
+      // grain by CBZ.debris (wood fractures into long splinters).
+      if (at.kind === "tree") {
         const t = at.ref, base = floor(at.x, at.z);
-        for (let i = 0; i < 4; i++) {
-          CBZ.fx.dropDebris({ x: at.x + (rnd() - 0.5) * 2.4, z: at.z + (rnd() - 0.5) * 2.4,
-            fromY: base + 2 + rnd() * 2.5, vy: 3 + rnd() * 3, size: 0.28 + rnd() * 0.3,
-            color: 0x4a3520, linger: 5 });
+        if (CBZ.debris && t && t.trunk && t.trunk.geometry && t.trunk.material) {
+          const tr = t.trunk;
+          tr.updateWorldMatrix(true, false);
+          if (!tr.geometry.boundingBox) tr.geometry.computeBoundingBox();
+          const bb = tr.geometry.boundingBox.clone().applyMatrix4(tr.matrixWorld);
+          const cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2;
+          const rad = Math.max(0.08, Math.min(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2);
+          const y0 = Math.max(bb.min.y, base) + 0.6, y1 = Math.min(bb.max.y, y0 + 2.6);
+          // (a trunk mesh wider than a tree is a merged forest: no strips off that)
+          const strips = (bb.max.x - bb.min.x < 3 && bb.max.z - bb.min.z < 3) ? 2 + ((rnd() * 2) | 0) : 0;
+          for (let i = 0; i < strips && y1 > y0 + 0.4; i++) {
+            const a = rnd() * 6.283, ux = Math.cos(a), uz = Math.sin(a);
+            const sx = cx + ux * rad * 0.9, sz = cz + uz * rad * 0.9;
+            const hw = Math.max(0.05, rad * 0.45), th = Math.min(0.06, rad * 0.35) / 2;
+            CBZ.debris.shatterBox({
+              minX: sx - Math.abs(uz) * hw - Math.abs(ux) * th, maxX: sx + Math.abs(uz) * hw + Math.abs(ux) * th,
+              minY: y0, maxY: y1,
+              minZ: sz - Math.abs(ux) * hw - Math.abs(uz) * th, maxZ: sz + Math.abs(ux) * hw + Math.abs(uz) * th,
+            }, tr.material, { kind: "wood", at: { x: sx, y: (y0 + y1) / 2, z: sz }, dir: { x: ux, y: 0.35, z: uz },
+              power: 1.4, maxPieces: 4, owner: "fx", snap: false });
+          }
         }
         if (t && t.trunk && t.trunk.material) t.trunk.material.color.setHex(0x2a1c10);
       }
@@ -5397,7 +5467,7 @@
           const p = ctx.st.pending[i]; p.t -= dt; p.m.set(1 - p.t / 1.2);
           if (p.t <= 0) {
             p.m.dispose();
-            CBZ.fx.dropDebris({ x: p.x, z: p.z, fromY: 40, vy: -22, size: 2.4, color: 0x3a2018, dmg: 0, linger: 4, keep: true, onLand: (x, z) => {
+            CBZ.fx.dropDebris({ x: p.x, z: p.z, fromY: 40, vy: -22, size: 2.4, shape: "rock", color: 0x3a2018, dmg: 0, linger: 4, keep: true, onLand: (x, z) => {
               // THE BLAST BUS OWNS THE IMPACT. `meteor` is a real ordnance row
               // (systems/impactbus.js) and it is PURE KINETICS — refE 1.2e8 J,
               // a 6 t stone at 200 m/s — so passing this rock's mass and speed

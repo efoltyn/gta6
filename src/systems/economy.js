@@ -542,7 +542,7 @@
     if (!offer) return "";
     const p = offerPrice(actor);
     const tag = priceTag(p.reasons);
-    return `${offer.item}·${p.price}${tag ? " " + tag : ""}`;
+    return `${offer.item} ${p.price}${tag ? " " + tag : ""}`;
   }
   function payoffCost(actor) {
     // GUARDS ONLY — the warden refuses cigarettes (see payoff()), so his old
@@ -625,18 +625,10 @@
     wardenPaidName: ["That's worth some quiet. Your sheet just got thinner.",
                      "Noted. My officers will take it from here.",
                      "Good. Keep your ears open and your mouth this useful."],
-    wardenInsulted: ["Segregation has a bed with your name on it.",
-                     "Brave. My officers collect brave."],
-    wardenIgnores: ["Noted. Everything in here gets noted.",
-                    "Enjoy the yard while you still have yard."],
-    // the trespass ladder — world/adminwing.js speaks these when an inmate
-    // stands in his office or his quarters and stays there
-    wardenOut1: ["This is my office. Out.",
-                 "Wrong room, convict."],
-    wardenOut2: ["I will not say it twice. OUT.",
-                 "Last chance to walk."],
-    wardenOut3: ["Officers! Inmate in the admin wing!",
-                 "Control — my office, NOW."],
+    // his card has no Insult any more (systems/prisonwarden.js); these only
+    // answer a stray insult() from an old path
+    wardenInsulted: ["Segregation. Tonight."],
+    wardenIgnores: ["Noted."],
     guardCaught: ["Hand. Out. Of my belt.",
                   "You just bought yourself a shakedown.",
                   "Radio's already in my hand, boy."],
@@ -950,7 +942,7 @@
           if (CBZ.addRacketStanding) CBZ.addRacketStanding(2);
           noteRead("badge", 6, who, 13);
           CBZ.sfx("coin");
-          return { ok: true, msg: `${nm(known)} talks to the office. — That, I can use. Go on, I'm watching the wall.` };
+          return { ok: true, msg: `${nm(known)} talks to the office? That I can use. Go on.` };
         }
         if (bought(actor)) {
           // A RELATIONSHIP FAVOUR. Free at the point of use, and it draws the
@@ -1114,6 +1106,11 @@
     return "";
   }
   function snitchMark() {
+    // THE MAN WHO JUST SHOOK YOU DOWN is the name a new arrival gives
+    // (ai.js's new-fish arc: this is the "snitched" answer to a test)
+    const nf = g.newFish;
+    const t = nf && nf.lastTester;
+    if (t && !t.dead && !t.escaped && !((t.ko || 0) > 0) && t.group && nf.t - (nf.lastTestAt || 0) < 180) return t;
     // a name worth money: a live rival-crew man, weighted by what he holds
     let best = null, bs = -1;
     for (const n of CBZ.npcs || []) {
@@ -1164,8 +1161,9 @@
     // uses), and the block-gossip channel starts carrying "talks to the
     // screws" about YOU — the exact read the game already prints on any
     // other man who does this.
+    if (CBZ.prisonNoteSnitched) CBZ.prisonNoteSnitched(mark);
     if (rng() < 0.35) {
-      if (CBZ.provokeGang) CBZ.provokeGang(mark, 11);
+      if (CBZ.provokeGang) CBZ.provokeGang(mark, 11, { crew: 1, why: "snitch" });
       noteRead("snitch", 14, nm(mark), 22);
       if (CBZ.prisonSay) CBZ.prisonSay(mark, "You went to the man. That's done now.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
     }
@@ -1234,10 +1232,17 @@
     if (lifted === "Guard Torch") { actor.flashlightLost = true; actor.flashlightOn = false; }
     return lifted;
   }
+  /* THE WARDEN IS NOT A PUNCHING BAG (2026-09-27). His pockets and his jaw
+     are reachable only when prisonwarden.js says he is exposed: asleep in his
+     quarters, or alone at his desk with no officer near. Anywhere else the
+     hand and the fist both fail, and no Gun-Room Key changes hands. */
+  function wardenShielded(actor) {
+    return !!(actor && actor.kind === "warden" && !(CBZ.warden && CBZ.warden.exposed && CBZ.warden.exposed()));
+  }
   function steal(actor) {
     const guardish = actor.kind === "guard" || actor.kind === "warden";
     const load = rollLoadout(actor);
-    const chance = stealOdds(actor);
+    const chance = wardenShielded(actor) ? 0 : stealOdds(actor);
     playerReach(actor, guardish ? 0 : 0.15);     // the hand moves either way
     if (rng() < chance) {
       // the grab is bounded by the ROLL and by his actual pockets
@@ -1406,7 +1411,7 @@
     noteRead("fear", 3, nm(actor), 11);
     if (rng() < 0.5) {
       if (actor.kind === "guard" || actor.kind === "warden") { actor.hunt = 3; CBZ.addHeat(25); }
-      else if (CBZ.provokeGang) CBZ.provokeGang(actor, 10);
+      else if (CBZ.provokeGang) CBZ.provokeGang(actor, 10, { crew: 0, why: "insult", standing: 2 });
       // trash talk answered in the speaker's OWN register — the warden does
       // not square up like an inmate, he files you somewhere cold
       return { ok: false, msg: pick(actor.kind === "warden" ? VOICE.wardenInsulted : INSULT_BACK) };
@@ -1421,13 +1426,15 @@
     const guardish = actor.kind === "guard" || actor.kind === "warden";
     // throwing hands has consequences either way: guards hunt, gangs retaliate
     if (guardish) actor.hunt = 3;
-    else if (CBZ.provokeGang) CBZ.provokeGang(actor, 12);
+    else if (CBZ.provokeGang) CBZ.provokeGang(actor, 12, { started: !((actor.huntPlayer || 0) > 0) });
     // a lifted BATON is a real weapon in a fist-fight — the point of taking
     // one off a screw is that you are now the one holding it.
     const armed = hasItem("Shiv") || hasItem("Baton");
+    const shielded = wardenShielded(actor);
     let chance = guardish ? 0.45 : 0.8;
     if (armed) chance += 0.2;                   // a shiv makes you scary
     if (actor.bribed > 0) chance += 0.15;       // already off-guard
+    if (shielded) chance = 0;
     if (rng() < Math.min(chance, 0.95)) {
       actor.ko = guardish ? 16 : 10;            // seconds down
       actor.hp = Math.max(actor.hp || 0, guardish ? 55 : 45);
@@ -1440,7 +1447,7 @@
       if (actor.gang >= 0) nudgeGang(actor, -10, 2);
       if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "ko", 9, { source: "beatdown" });
       if (guardish && actor.corrupt) addRacketDebt(4);
-      if (guardish && rng() < 0.5 && !hasItem("Gun-Room Key") && actor.kind === "warden") addItem("Gun-Room Key", 1);
+      if (guardish && !shielded && rng() < 0.5 && !hasItem("Gun-Room Key") && actor.kind === "warden") addItem("Gun-Room Key", 1);
       // A DOWNED MARK DROPS WHAT HE HAD, not what the die felt like minting.
       // Same odds, same magnitude, taken off HIS pile — so beating the same
       // man twice does not print money, and a poor man is a poor score.

@@ -14,7 +14,7 @@
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=survrail1">
+<link rel="stylesheet" href="css/hud.css?v=bare1">
 <link rel="stylesheet" href="css/screens.css?v=bagless1">
 <link rel="stylesheet" href="css/shark_title.css?v=uicut1">
 <link rel="stylesheet" href="css/mobile.css?v=onecall1">
@@ -22,7 +22,7 @@
 <link rel="stylesheet" href="css/inventory.css?v=bagless1">
 <link rel="stylesheet" href="css/city.css?v=onecall1">
 <link rel="stylesheet" href="css/campaign.css?v=onecall1">
-<link rel="stylesheet" href="css/interact_touch.css?v=hudtidy1">
+<link rel="stylesheet" href="css/interact_touch.css?v=bare1">
 <link rel="stylesheet" href="css/title_hub.css?v=hub1">
 </head>
 <body class="campaign-build">
@@ -70,7 +70,6 @@ document.body.appendChild(b);}}catch(e){}})();
     <div id="detectBarBg"><div id="detectBar"></div></div>
   </div>
 
-  <div id="gangHud" class="panel"></div>
   <div id="compass" class="panel"><div id="compassArrow">▲</div><span id="compassDist">--</span></div>
 
   <canvas id="minimap" class="panel" width="112" height="168"></canvas>
@@ -470,7 +469,7 @@ document.body.appendChild(b);}}catch(e){}})();
      collapses to the same 120px, is the "two layers of text slightly offset"
      bug. This is the claim desk that decides which surface owns a sentence.
      Must precede all four of them. ?cfg_SUBTITLE_DEDUPE=0 reverts. -->
-<script src="src/systems/subtitlebus.js?v=onemouth1"></script>
+<script src="src/systems/subtitlebus.js?v=bare1"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
@@ -610,8 +609,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/security.js"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=cars1"></script>
-<script src="src/systems/hud.js?v=allmain3"></script>
+<script src="src/systems/audio.js?v=m0927p"></script>
+<script src="src/systems/hud.js?v=m0927p"></script>
 <script src="src/systems/economy.js?v=radio1"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
@@ -686,7 +685,7 @@ document.body.appendChild(b);}}catch(e){}})();
      warden it schedules is spawned there) and after roofs.js (it asks
      CBZ.prisonRoof for its own ceiling); BEFORE prisonschedule.js, whose
      block ids it reads at runtime. -->
-<script src="src/world/adminwing.js?v=warden1"></script>
+<script src="src/world/adminwing.js?v=warden2"></script>
 
 <!-- THE COMPOUND'S REAL SIZE (owner 2026-08-11: "the prison should be bigger…
      think of scale of human vs prison size"). 92x195 m of authored prison was
@@ -821,22 +820,24 @@ document.body.appendChild(b);}}catch(e){}})();
      same reason: both re-assert a carried weapon every frame because
      actorweapons' self-heal pass is city-only. -->
 <script src="src/systems/prisonshanks.js"></script>
+<script src="src/systems/prisonlaw.js?v=law1"></script>
 <script src="src/systems/capture.js?v=nodash1"></script>
 <script src="src/systems/markers.js?v=allmain2"></script>
 <script src="src/systems/music.js?v=samples1"></script>
 <script src="src/systems/reinforcements.js?v=allmain2"></script>
-<script src="src/systems/lockdown.js?v=nodash1"></script>
+<script src="src/systems/lockdown.js?v=warden1"></script>
+<!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
+<script src="src/systems/prisonwarden.js?v=warden1"></script>
 <script src="src/systems/difficulty.js?v=sharkmode1"></script>
 <script src="src/systems/reactions.js?v=prisonhit1"></script>
 <script src="src/systems/facial.js?v=glance1"></script>
 <script src="src/systems/ambient.js"></script>
 <script src="src/systems/weather.js?v=snowbury1"></script>
 <script src="src/systems/compass.js"></script>
-<script src="src/systems/minimap.js?v=route1"></script>
 <script src="src/systems/dashboard.js?v=nodash1"></script>
 <script src="src/systems/combat.js?v=sharkmode1"></script>
 <script src="src/systems/killstreaks.js?v=sharkmode1"></script>
-<script src="src/systems/interact.js?v=threeverb1"></script>
+<script src="src/systems/interact.js?v=bare1"></script>
 <!-- FRIENDSHIP IS OFFERED, NOT BROWSED. BEFRIEND used to sit on every inmate's
      card as a permanent button that actually opened the FAVOUR loop (it is
      called TALK now, which is what it does). This owns the real thing: an NPC
@@ -847,8 +848,8 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=crew1"></script>
-<script src="src/systems/interactions.js?v=cars1"></script>
-<script src="src/systems/escapeplan.js?v=plan1"></script>
+<script src="src/systems/interactions.js?v=m0927p"></script>
+<script src="src/systems/escapeplan.js?v=m0927p"></script>
 <!-- WHAT A THING IN YOUR BAG LOOKS LIKE: one real 3D object per item KIND,
      which city/itemicons.js photographs for the slot and city/inventory.js
      drops on the pavement. Needs THREE + actorweapons + materials, all
@@ -903,6 +904,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=sharkmode1"></script>
+<script src="src/systems/debris.js?v=debris1"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -1245,7 +1247,7 @@ document.body.appendChild(b);}}catch(e){}})();
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
 <script src="src/city/factions.js?v=nodash1"></script>
 <script src="src/city/gangs.js?v=nodash1"></script>
-<script src="src/city/social.js?v=nodash1"></script>
+<script src="src/city/social.js?v=bare1"></script>
 <script src="src/city/realestate.js?v=nodash1"></script>
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
@@ -1527,6 +1529,16 @@ document.body.appendChild(b);}}catch(e){}})();
      merge. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
      models), interactions.js (the verbs) and worldmap.js (addLandmass). -->
 <script src="src/city/storegoods.js?v=realgoods1"></script>
+<!-- THE WALK-IN FIT-OUT (city/fitout.js + its planners): the building you are
+     in or at the door of is fitted out for real (finished floors, bathrooms,
+     kitchens, bedrooms, stockrooms, a gang's count room, baked light from
+     real fixtures) and freed when you leave. After storegoods (same lazy
+     dresser shape), furniture.js (CBZ.furnish) and interior_programs.js
+     (which declares every floor to it). -->
+<script src="src/city/fitout.js?v=fit1"></script>
+<script src="src/city/fitout_plans.js?v=fit1"></script>
+<script src="src/city/fitout_work.js?v=fit1"></script>
+<script src="src/city/fitout_gang.js?v=fit1"></script>
 <script src="src/city/realtyoffice.js?v=nodash1"></script>
 <script src="src/city/family.js?v=nodash1"></script>
 <script src="src/city/swim.js?v=sharkmode1"></script>
@@ -1924,9 +1936,9 @@ document.body.appendChild(b);}}catch(e){}})();
      every office's guard lifecycle (officials.js's calls are runtime-lazy so
      load order is soft either way, but this keeps "the record before its
      first consumer" honest). -->
-<script src="src/city/protection.js?v=nodash1"></script>
+<script src="src/city/protection.js?v=pres3"></script>
 <script src="src/city/officials.js?v=seawave1"></script>
-<script src="src/city/approval.js?v=nodash1"></script>
+<script src="src/city/approval.js?v=pres3"></script>
 <script src="src/city/elections.js?v=nodash1"></script>
 
 <!-- X-wave: the world -->
@@ -2118,26 +2130,31 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=nodash1"></script>
+<script src="src/city/govcomplex.js?v=pres3"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's
-     Executive Mansion (a locked door + a console of real orders), the
+     Executive Mansion (a locked door + the General, the Bureau Director and
+     the Police Commissioner, who propose real orders you answer), the
      Saltlands terror cell (factions/occupy/aigoals), Bureau raids (real
      agents at real cell members), the border wall order (construction.js's
      CBZ.stateWall) and the falls (regimes' dictatorship, crown's coronation,
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/presidency.js?v=nodash1"></script>
-<!-- THE PRESIDENT WAVE — four organs on presidency.js's status() API, in
-     load order: the HUD strip (reads status), the Chief of Staff's agenda
-     (mission.js + presidency.press), the motorcade (chauffeur + helipad), and
-     the regime dressing that changes the Mansion when the republic falls. -->
-<script src="src/city/president_hud.js?v=pres2"></script>
-<script src="src/city/president_agenda.js?v=pres2"></script>
-<script src="src/city/motorcade.js?v=pres2"></script>
-<script src="src/city/president_regime.js?v=pres2"></script>
+<script src="src/city/presidency.js?v=pres3"></script>
+<!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
+     list, no button console. In load order: the office (desk phone that rings
+     with real calls, briefing folders you read on the desk, the TV news, aides
+     who walk in), the motorcade (a real convoy you ride in), the public life
+     (the day's schedule, the balcony speech and its crowd, protests, curfew
+     and lockdown bodies in the street), and the regime dressing that changes
+     the Mansion when the republic falls. Security (the detail, the gate
+     checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
+<script src="src/city/president_office.js?v=pres3"></script>
+<script src="src/city/motorcade.js?v=pres3"></script>
+<script src="src/city/president_public.js?v=pres3"></script>
+<script src="src/city/president_regime.js?v=pres3"></script>
 
 <!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
      your own place can store the cash, not just rob"). Turns govcomplex's

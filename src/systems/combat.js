@@ -280,6 +280,8 @@
       t: blade ? (heavy ? 0.17 : 0.12) : (heavy ? 0.19 : 0.15),
       max: blade ? (heavy ? 0.38 : 0.28) : (heavy ? 0.42 : 0.34),
     };
+    // a swing is a swing: systems/capture.js reads it as resisting an order
+    CBZ.game._lawSwingT = CBZ.game.elapsed || 0;
     // NO "Swing..." / "Heavy swing...". Eight lines above, this function set
     // punchArm, punchKind, punchDur and punchT — entities/character.js:2509
     // drives a real jab / cross / hook / uppercut off those, with its own
@@ -435,7 +437,28 @@
     if (CBZ.body) CBZ.body.hit(actor, { fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z, force: blade ? (heavy ? 3.4 : 2.2) : (heavy ? 8 : 4.5) });
     if (CBZ.reactPunch) CBZ.reactPunch(actor, { kind: attack.kind, heavy, fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z });
     CBZ.sfx(blade ? "hit" : "punch");
-    CBZ.reportCrime(7, { type: "melee", actorRole: CBZ.game.role });
+    /* THE LAW (systems/prisonlaw.js). Who you hit and who started it decide
+       what it is: a screw is ASSAULT, always on file (he felt it). A man who
+       came for you and gets hit back is self-defence: no heat, no case, and
+       a guard who sees it breaks it up (the 4 Hz poll there). Throwing first
+       where a screw can see it is a FIGHT on file; steel in front of a screw
+       is a serious one. */
+    const inPen = CBZ.game.mode === "escape" && CBZ.game.role !== "cop";
+    const nowT = CBZ.game.elapsed || 0;
+    const selfDefense = !guardish && (((actor.huntPlayer || 0) > 0) || (nowT - (actor._lawHitPlayerT || -1e9)) < 10);
+    CBZ.reportCrime(7, { type: "melee", actorRole: CBZ.game.role, selfDefense: selfDefense && !blade });
+    if (inPen) {
+      if (guardish) {
+        if (CBZ.prisonOffense) CBZ.prisonOffense("assault", { seenBy: actor, severity: blade ? 4 : 3 });
+      } else {
+        if (CBZ.prisonLawNoteBlow) CBZ.prisonLawNoteBlow("player", actor);
+        if (blade && CBZ.prisonOffense && CBZ.guardWatching) {
+          let w = null;
+          try { w = CBZ.guardWatching(CBZ.player.pos.x, CBZ.player.pos.y || 0, CBZ.player.pos.z); } catch (e) { w = null; }
+          if (w) CBZ.prisonOffense("fight", { seenBy: w, severity: 3 });
+        }
+      }
+    }
     if (guardish) actor.hunt = 3; else if (CBZ.provokeGang) CBZ.provokeGang(actor, 12);
 
     // Light jabs can be blocked. A point is a different problem: you can put

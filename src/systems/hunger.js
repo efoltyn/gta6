@@ -175,7 +175,7 @@
         } else if (g.mode === "escape") {
           P.hp = (P.hp == null ? 100 : P.hp) - dmg;
           if (P.hp <= 0) {
-            P.hp = 100;
+            P.hp = 1;                       // the infirmary wakes you at 45
             // A collapse is a MEDICAL drag, not a capture: strike:false, so a
             // starved man can never be reclassified/TRANSFERRED for it — an
             // empty stomach is not an escape attempt (capture.js owns the
@@ -184,7 +184,8 @@
             // wake and the drag would loop every ~400 s for the rest of the run.
             g._oocHunger = Math.max(g._oocHunger || 0, 25);
             CBZ.player.hunger = g._oocHunger;
-            if (CBZ.haulToCell) CBZ.haulToCell("STARVED · DRAGGED TO YOUR CELL", { strike: false });
+            // carried to the infirmary (systems/capture.js "medical" haul)
+            if (CBZ.haulToCell) CBZ.haulToCell(null, { kind: "medical", strike: false, wakeHp: 45 });
           }
         }
       }

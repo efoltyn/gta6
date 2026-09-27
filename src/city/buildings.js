@@ -115,7 +115,7 @@
   // it: the pane hides — and SOLID showroom glass also drops its collider so
   // you can drive straight THROUGH the hole — while a few glass shards rain
   // down. One shared translucent material + shard geometry keep it cheap.
-  const cityGlass = [], cityShards = [];
+  const cityGlass = [];
   // Ground-front glass is a measurable architectural promise, not a camera
   // impression. `role` is stamped only by storefront/showroom/garage frontage
   // recipes that intentionally meet the floor; upper windows and sill windows
@@ -170,7 +170,7 @@
   // the frame during a street fight, on a loop that skipped 99.9% of what it
   // read. The three places a pane breaks push it here; the re-glaze empties it.
   const shatteredList = [];
-  let _gmat = null, _shardGeo = null, _shardGeoBig = null, _crackTex = null;
+  let _gmat = null, _crackTex = null;
   // THE reference glass — now sourced from CBZ.glass() so the cockpit, the
   // cabin windows and anything else with a pane get THIS material, not a
   // guess at it. Degrade-safe: no CBZ.glass (materials.js stripped) and the
@@ -179,8 +179,6 @@
     if (CBZ.glass) return CBZ.glass();
     return _gmat || (_gmat = new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x3f8aa6, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 }));
   }
-  function shardGeo() { return _shardGeo || (_shardGeo = new THREE.BoxGeometry(0.18, 0.25, 0.035)); }
-  function shardGeoBig() { return _shardGeoBig || (_shardGeoBig = new THREE.BoxGeometry(0.30, 0.40, 0.04)); }
 
   // ---- INSTANCED GLASS POOLS ---------------------------------------------
   // Window panes are all axis-aligned boxes, so the whole city's glass folds
@@ -772,7 +770,9 @@
     CBZ.scene.add(q);
     crackQuads.push({ mesh: q, gp, life: 0.45 + Math.random() * 0.25, fade: 0 });
   }
-  function burstPane(gp) {
+  // hit (optional): {x, y, z, dx, dz, power} — where the pane was struck and
+  // which way the blow travelled, so the shards radiate from the strike.
+  function burstPane(gp, hit) {
     if (gp.shattered) return;
     gp.shattered = true; shatteredPanes++; shatteredList.push(gp);
     if (gp.mesh) gp.mesh.visible = false;
@@ -780,30 +780,24 @@
     if (gp.col) { const i = CBZ.colliders.indexOf(gp.col); if (i >= 0) CBZ.colliders.splice(i, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
     // clear any lingering crack decal for this pane
     for (let i = crackQuads.length - 1; i >= 0; i--) if (crackQuads[i].gp === gp) { CBZ.scene.remove(crackQuads[i].mesh); crackQuads.splice(i, 1); }
-    if (cityShards.length > 180) return;
-    // raining shards: a mix of big jagged plates and small chips, span-scaled,
-    // biased to fall outward from the pane plane for a real "blown out" look.
-    const big = Math.max(2, Math.min(7, Math.round(gp.span * 1.6)));
-    const small = 3 + ((Math.random() * 4) | 0);
+    if (!CBZ.debris) return;
+    // THE PANE ITSELF BREAKS: its own box and its own glass, cut into radial
+    // shards around the strike (debris.js glass fracture), thrown the way the
+    // blow was going, leaving glitter and a fine glass dust.
     const horiz = gp.hd < gp.hw, outN = horiz ? (gp.z >= 0 ? 1 : -1) : (gp.x >= 0 ? 1 : -1);
-    for (let i = 0; i < big + small; i++) {
-      const isBig = i < big;
-      const sh = new THREE.Mesh(isBig ? shardGeoBig() : shardGeo(), glassMat());
-      const sc = isBig ? 0.65 + Math.random() * 0.35 : 0.5 + Math.random() * 0.35;
-      sh.scale.set(sc, sc * (0.7 + Math.random() * 0.8), 1);
-      sh.userData.fractureShard = true;
-      sh.position.set(gp.x + (Math.random() - 0.5) * gp.span * 2, gp.y + (Math.random() - 0.5) * Math.max(0.7, gp.span), gp.z + (Math.random() - 0.5) * 0.4);
-      sh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
-      CBZ.scene.add(sh);
-      const lateral = horiz ? 0 : (Math.random() - 0.5) * 3, lateralZ = horiz ? (Math.random() - 0.5) * 3 : 0;
-      cityShards.push({
-        mesh: sh,
-        vx: lateral + (horiz ? (Math.random() - 0.5) * 3 : outN * (0.8 + Math.random() * 2.2)),
-        vy: 0.8 + Math.random() * 3.0,
-        vz: lateralZ + (horiz ? outN * (0.8 + Math.random() * 2.2) : (Math.random() - 0.5) * 3),
-        spin: (Math.random() - 0.5) * 11, life: 0.75 + Math.random() * 0.55,
-      });
-    }
+    let dx = horiz ? 0 : outN, dz = horiz ? outN : 0;
+    if (hit && (hit.dx || hit.dz)) { dx = hit.dx; dz = hit.dz; }
+    const at = hit ? { x: hit.x, y: hit.y, z: hit.z } : { x: gp.x + (Math.random() - 0.5) * gp.hw, y: gp.y + (Math.random() - 0.5) * gp.hh, z: gp.z + (Math.random() - 0.5) * gp.hd };
+    const mat = (gp.mesh && gp.mesh.material) || (gp.proxy && gp.proxy.material) || (gp.pool && gp.pool.material) || glassMat();
+    CBZ.debris.shatterBox({
+      minX: gp.x - gp.hw, maxX: gp.x + gp.hw, minY: gp.y - gp.hh, maxY: gp.y + gp.hh,
+      minZ: gp.z - Math.max(gp.hd, 0.006), maxZ: gp.z + Math.max(gp.hd, 0.006),
+    }, mat, {
+      kind: "glass", at, dir: { x: dx, y: 0.1, z: dz },
+      power: hit && hit.power != null ? hit.power : 0.9,
+      maxPieces: Math.max(5, Math.min(16, Math.round(gp.span * 7))),
+      speed: 2.2,
+    });
   }
   // Glass is audible only when the player personally strikes/shoots a pane.
   // The physical shatter APIs are also called by NPC fire, crashes, tornadoes,
@@ -866,7 +860,9 @@
         // gather BEFORE bursting (burstPane marks shattered): pooled (no mesh),
         // above the sill, window-sized — so we open windows, not transoms
         if (!gp.mesh && gp.y > 1.0 && Math.max(gp.hw, gp.hd) * 2 >= 0.7) cand.push({ gp, dd });
-        burstPane(gp); if (dd < nearD) { nearD = dd; near = gp; } if (++n > 50) break;
+        { const d = Math.sqrt(dd) || 1, fall = Math.max(0.35, 1.6 - d / Math.max(1, r));
+          burstPane(gp, { x: gp.x, y: gp.y, z: gp.z, dx: (gp.x - x) / d, dz: (gp.z - z) / d, power: Math.min(2.2, fall * (opts.power || 1.2)) }); }
+        if (dd < nearD) { nearD = dd; near = gp; } if (++n > 50) break;
       }
     }
     // open the nearest few as real holes/rooms; tryWindowOpening reads the
@@ -881,7 +877,7 @@
     if (n > 0 && opts.directPlayer && near) playPlayerGlass(near);
     // a hard impact (big radius shatter = a car ploughing a storefront) also
     // knocks a couple of concrete chunks off and leaves no scorch — just rubble.
-    if (r >= 7 && CBZ.cityChunk) CBZ.cityChunk(x, (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 0.8, z, { count: 2 + ((Math.random() * 2) | 0), force: 3 });
+    if (r >= 7 && near && CBZ.debris) CBZ.debris.chips(near.x, near.y, near.z, { kind: "glass", count: 10, power: 1 });
     return n;
   };
   // SHOOTING a window: ray-test (origin, dir) against every intact pane and burst
@@ -963,13 +959,13 @@
       // The pane bursts NOW (the feedback); the room-reveal carve queues (1-
       // frame slip, same winOpenQ de-spike the blast path uses).
       if (force || best.cracked || best.col) {
-        burstPane(best); queueWindowOpening(best);
+        burstPane(best, { x: bestHX, y: bestHY, z: bestHZ, dx: dx, dz: dz, power: force ? 1.1 : 0.7 }); queueWindowOpening(best);
         if (opts.directPlayer) playPlayerGlass(best);
       }
       else {
         // strike direction reversed → the decal lands on the face being hit
         crackPane(best, bestHX, bestHY, bestHZ, -dx, -dz);
-        spawnGlassChip(bestHX, bestHY, bestHZ);
+        spawnGlassChip(bestHX, bestHY, bestHZ, -dx, -dz);
         // A LANDED HIT MUST BE AUDIBLE. The first swing of the two-stage break
         // used to make no sound at all, so a punch that genuinely connected was
         // indistinguishable from one that missed the pane entirely — the other
@@ -980,18 +976,9 @@
     }
     return best;
   };
-  // one or two tiny shards spit off the impact point of a single bullet
-  function spawnGlassChip(x, y, z) {
-    if (cityShards.length > 180) return;
-    const n = 1 + ((Math.random() * 2) | 0);
-    for (let i = 0; i < n; i++) {
-      const sh = new THREE.Mesh(shardGeo(), glassMat());
-      sh.scale.setScalar(0.5 + Math.random() * 0.4);
-      sh.userData.fractureShard = true;
-      sh.position.set(x, y, z); sh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
-      CBZ.scene.add(sh);
-      cityShards.push({ mesh: sh, vx: (Math.random() - 0.5) * 2, vy: 0.6 + Math.random() * 1.4, vz: (Math.random() - 0.5) * 2, spin: (Math.random() - 0.5) * 10, life: 0.75 });
-    }
+  // one or two tiny glass chips spit off the impact point of a single bullet
+  function spawnGlassChip(x, y, z, dx, dz) {
+    if (CBZ.debris) CBZ.debris.chips(x, y, z, { kind: "glass", count: 2 + ((Math.random() * 2) | 0), dir: { x: dx || 0, y: 0.2, z: dz || 0 }, power: 0.5, dust: false });
   }
   // ---- OPEN-WINDOW SHOT HOLES --------------------------------------------
   // Walls are SOLID per-storey boxes; window panes are decorative glass hanging
@@ -1064,8 +1051,6 @@
     crackedPanes.length = 0;   // a re-glazed city holds no half-broken panes
     // interior band dressing hidden by wall carves comes back with the glass
     for (let i = 0; i < roomDeco.length; i++) if (roomDeco[i].hidden) decoShow(roomDeco[i], true);
-    for (const s of cityShards) CBZ.scene.remove(s.mesh);
-    cityShards.length = 0;
     for (const cq of crackQuads) { CBZ.scene.remove(cq.mesh); if (cq.mesh.material) cq.mesh.material.dispose(); cq.mesh.geometry.dispose(); }
     crackQuads.length = 0;
     CBZ.cityDamageReset && CBZ.cityDamageReset();
@@ -1111,17 +1096,6 @@
       const gp = crackedPanes[i];
       gp.crackHold -= dt;
       if (gp.shattered || gp.crackHold <= 0) { gp.cracked = false; crackedPanes.splice(i, 1); }
-    }
-    if (!cityShards.length) return;
-    const G = (CBZ.TUNE && CBZ.TUNE.gravity) || 22;
-    for (let i = cityShards.length - 1; i >= 0; i--) {
-      const s = cityShards[i]; s.life -= dt; s.vy -= G * dt;
-      const p = s.mesh.position;
-      p.x += s.vx * dt; p.y += s.vy * dt; p.z += s.vz * dt;
-      s.mesh.rotation.x += s.spin * dt; s.mesh.rotation.z += s.spin * 0.6 * dt;
-      const fl = (CBZ.floorAt ? CBZ.floorAt(p.x, p.z) : 0) + 0.04;
-      if (p.y <= fl) { p.y = fl; s.vy = 0; s.vx *= 0.3; s.vz *= 0.3; s.spin *= 0.3; }
-      if (s.life <= 0) { CBZ.scene.remove(s.mesh); cityShards.splice(i, 1); }
     }
   });
 
@@ -1202,8 +1176,7 @@
   const BULLET_CAP = 110;
   const bulletPool = [];
   let bulletIdx = 0;
-  let _holeGeo = null, _holeMat = null, _chunkGeo = null, _chunkMat = null;
-  const cityChunks = [];
+  let _holeGeo = null, _holeMat = null;
   function holeGeo() { return _holeGeo || (_holeGeo = new THREE.PlaneGeometry(0.3, 0.3)); }
   // a soft dark bullet-pit texture (dark core + cracked ring) painted once
   function holeMat() {
@@ -1220,8 +1193,6 @@
     _holeMat = new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     return _holeMat;
   }
-  function chunkGeo() { return _chunkGeo || (_chunkGeo = new THREE.BoxGeometry(0.4, 0.4, 0.4)); }
-  function chunkMat() { return _chunkMat || (_chunkMat = new THREE.MeshLambertMaterial({ color: 0x7c828b })); }
   // a shared CRACKED-CONCRETE decal (jagged radiating fracture lines on a faint
   // grey scuff) painted once — the tier-2 wound mark before a wall blows open.
   let _crackMat = null;
@@ -1284,24 +1255,20 @@
   // shattered glass, cracks and carved openings carry building damage instead.
   CBZ.cityScorch = function () { return null; };
 
-  // PUBLIC: knock physical concrete CHUNKS off a surface on a big hit (blast /
-  // ram). Cheap pooled debris boxes that tumble and settle, capped.
+  // PUBLIC: knock chips of a surface off it on a big hit (blast / ram).
+  // opts {count, force, dirx, dirz, color, material}: the chips + dust take the
+  // colour of the surface that was hit (pass its material) — CBZ.debris owns
+  // them; the struck wall's actual volume only ever leaves through a carve.
   CBZ.cityChunk = function (x, y, z, opts) {
     opts = opts || {};
-    if (cityChunks.length > 60) return;
+    if (!CBZ.debris) return;
     const n = opts.count || (2 + ((Math.random() * 3) | 0));
-    const col = opts.color != null ? opts.color : 0x7c828b;
-    for (let i = 0; i < n; i++) {
-      const m = new THREE.Mesh(chunkGeo(), col === 0x7c828b ? chunkMat() : new THREE.MeshLambertMaterial({ color: col }));
-      const s = 0.25 + Math.random() * 0.55; m.scale.set(s, s * (0.6 + Math.random()), s);
-      m.position.set(x + (Math.random() - 0.5) * 0.5, y + (Math.random() - 0.5) * 0.5, z + (Math.random() - 0.5) * 0.5);
-      m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
-      m.castShadow = true; CBZ.scene.add(m);
-      const dirx = opts.dirx != null ? opts.dirx : (Math.random() - 0.5) * 2;
-      const dirz = opts.dirz != null ? opts.dirz : (Math.random() - 0.5) * 2;
-      const sp = opts.force || 3;
-      cityChunks.push({ mesh: m, vx: dirx * sp * (0.5 + Math.random()), vy: 2 + Math.random() * 3, vz: dirz * sp * (0.5 + Math.random()), spin: (Math.random() - 0.5) * 12, life: 2.2 + Math.random() * 1.5, dispose: col !== 0x7c828b });
-    }
+    const hasDir = opts.dirx != null || opts.dirz != null;
+    CBZ.debris.chips(x, y, z, {
+      count: Math.round(n * 3), material: opts.material || null, color: opts.color,
+      dir: hasDir ? { x: opts.dirx || 0, y: 0.35, z: opts.dirz || 0 } : null,
+      power: Math.max(0.5, Math.min(2.2, (opts.force || 3) / 3.5)), spread: 0.6,
+    });
   };
 
   // PUBLIC: CINEMATIC STRUCTURAL DAMAGE at an impact point (missiles, rockets,
@@ -1336,6 +1303,7 @@
     CBZ.cityChunk(onWall ? bsx : x, onWall ? bsy : y, onWall ? bsz : z, {
       count: Math.round(3 + 3 * power), force: 4 + 2.5 * power,
       dirx: onWall ? bnx : null, dirz: onWall ? bnz : null,
+      material: onWall && best.ref ? best.ref.material : null,
     });
     // (3) shatter every pane within the blast radius (cracked → blown out)
     CBZ.cityShatter(x, z, 4.0 + power * 2.2);
@@ -1398,7 +1366,7 @@
     if (rec.dmg >= 1.6 && before < rec.dmg && rec.t2 < 2 && Math.floor((rec.dmg - 1.6) / 0.6) >= rec.t2) {
       rec.t2++;
       placeCrack(sx + (Math.random() - 0.5) * 0.5, sy + (Math.random() - 0.5) * 0.5, sz, nx, nz, 1.2 + Math.random() * 0.5);
-      CBZ.cityChunk(sx, sy, sz, { count: 2 + ((Math.random() * 2) | 0), force: 3, dirx: nx, dirz: nz });
+      CBZ.cityChunk(sx, sy, sz, { count: 2 + ((Math.random() * 2) | 0), force: 3, dirx: nx, dirz: nz, material: col.ref ? col.ref.material : null });
     }
     // TIER 3 (>=2.8): the wall finally GIVES — promote to a real walk-through
     // carve at the accumulated impact centroid, routed through the fracture
@@ -1412,7 +1380,7 @@
         if (fr && fr._adopt) fr._adopt(r2, 1.3);
         const g = r2.gap, gc = (g.u0 + g.u1) / 2;
         const rx = g.horiz ? gc : g.fixed, rz = g.horiz ? g.fixed : gc;
-        CBZ.cityChunk(rx, (g.v0 + g.v1) / 2, rz, { count: 4 + ((Math.random() * 3) | 0), force: 5, dirx: -nx, dirz: -nz });
+        CBZ.cityChunk(rx, (g.v0 + g.v1) / 2, rz, { count: 4 + ((Math.random() * 3) | 0), force: 5, dirx: -nx, dirz: -nz, material: r2.wall && r2.wall.material });
         if (CBZ.shake) CBZ.shake(0.5);
       }
     }
@@ -1460,8 +1428,6 @@
     if (crackPool) { for (const m of crackPool) m.visible = false; crackIdx = 0; }
     if (wallDmg) wallDmg.clear();   // wipe the accumulated wall-wound records
     bulletIdx = 0;
-    for (const c of cityChunks) { CBZ.scene.remove(c.mesh); if (c.dispose && c.mesh.material) c.mesh.material.dispose(); }
-    cityChunks.length = 0;
     resetBreaches();
   };
 
@@ -1498,9 +1464,8 @@
       // inherit a facade quietly missing its sill run and its mullions.)
       if (b.clearedCols) for (const cc of b.clearedCols) { if (CBZ.colliders.indexOf(cc) === -1) { CBZ.colliders.push(cc); dirty = true; } }
       if (b.clippedCols) for (const q of b.clippedCols) { q.c.minX = q.minX; q.c.maxX = q.maxX; q.c.minZ = q.minZ; q.c.maxZ = q.maxZ; dirty = true; }
-      // Rim cells are real geometry on a SHARED cube — remove them, never
-      // dispose them, or the next shed in the world draws nothing.
-      if (b.shedKept) for (const k of b.shedKept) { if (k.parent) k.parent.remove(k); }
+      // the hole's own debris (welded rim + what it threw) goes with it
+      if (b.debrisKey && CBZ.debris) CBZ.debris.clear(b.debrisKey);
       if (b.hidRefs) for (const hr of b.hidRefs) hr.visible = true;
       // restore the original wall mesh + its collider. A BATCH-V2 merged wall
       // renders through its slice in the merged shell — restore the slice and
@@ -1529,9 +1494,9 @@
   // slabs that would float across the gap, warm spill after dusk) + a fractured
   // concrete rim of jittered prism chunks (merged to ONE mesh, fake-AO shaded).
   // city/fracture.js drives this primitive and owns ledger/caps/persistence.
-  let _rimMat = null, _insetMat = null, _spillMat = null, _plyMat = null, _plyBatMat = null;
+  let holeDebrisSeq = 0;
+  let _insetMat = null, _spillMat = null, _plyMat = null, _plyBatMat = null;
   let _roomBackMat = null, _roomFloorMat = null, _roomFurnMat = null, _rebarMat = null, _roomCeilMat = null, _warmLightMat = null;
-  function rimMat() { return _rimMat || (_rimMat = new THREE.MeshLambertMaterial({ color: 0x8d8576, vertexColors: true })); }
   // INTERIOR REVEAL palette — light, showroom-grade tones so a shot-open window
   // OR a blast hole reads as a real LIT ROOM, never a dark gray crater. (MeshBasic
   // = self-lit, so these show full-bright wherever the sun is; distinct warm-wall /
@@ -1964,11 +1929,10 @@
        neighbours. Every edit is recorded on the rec so resetBreaches puts the
        facade back byte-for-byte on a new run. */
     /* WHAT LEAVES THE WORLD IS WHAT LANDS IN THE STREET. Every solid this carve
-       takes out is recorded here as {box, mat} and handed to crashfx's
-       CBZ.cityShedSolid below, which dices it and throws the cells. Nothing
+       takes out is recorded here as {box, mat} and handed to
+       CBZ.debris.shatterBox below, which cuts it into real pieces. Nothing
        else mints debris for this event. See CONSERVATION OF MATTER. */
     rec.shed = [];
-    rec.shedKept = [];         // rim cells welded to the shell (shared geo: never disposed)
     const shedBox = (a, b, ry0, ry1, mat) => {
       if (!mat || b - a < 0.04 || ry1 - ry0 < 0.04) return;
       rec.shed.push({
@@ -2089,7 +2053,7 @@
       // does, so it falls as ITS OWN glass rather than as more grey masonry —
       // which is why a curtain wall now sheds mostly glass and a brick pier
       // sheds mostly brick, with nobody tuning a ratio.
-      const gm = (gp.mesh && gp.mesh.material) || (gp.proxy && gp.proxy.material) || null;
+      const gm = (gp.mesh && gp.mesh.material) || (gp.proxy && gp.proxy.material) || (gp.pool && gp.pool.material) || glassMat();
       if (gm) rec.shed.push({
         minX: gp.x - gp.hw, maxX: gp.x + gp.hw,
         minY: gp.y - gp.hh, maxY: gp.y + gp.hh,
@@ -2122,26 +2086,40 @@
        cells, a two-storey brick pier gets the lion's share, and the total is
        bounded whatever the ordnance was. Glass dices finer than concrete
        because glass breaks smaller. */
-    if (CBZ.cityShedSolid && rec.shed.length) {
+    rec.debrisKey = "hole" + (++holeDebrisSeq);
+    let shedBld = null;
+    for (let a = parent; a && !shedBld; a = a.parent) shedBld = (a.userData && a.userData.bld) || null;
+    const shedFacade = shedBld ? shedBld.facade : null;
+    if (CBZ.debris && rec.shed.length) {
       let vol = 0;
       for (const b of rec.shed) vol += (b.maxX - b.minX) * (b.maxY - b.minY) * (b.maxZ - b.minZ);
-      const TOTAL = 130;
-      const outN = { nx: horiz ? 0 : outS, nz: horiz ? outS : 0 };
+      const TOTAL = 44;
+      const outN = { x: horiz ? 0 : outS, y: 0.15, z: horiz ? outS : 0 };
+      const P = Math.min(2.6, Math.max(0.7, (r || 1.3) * 0.7));
       for (const b of rec.shed) {
         const v = (b.maxX - b.minX) * (b.maxY - b.minY) * (b.maxZ - b.minZ);
         const share = vol > 0 ? v / vol : 0;
-        const budget = Math.max(3, Math.round(TOTAL * share));
-        try {
-          CBZ.cityShedSolid(b, b.mat, {
-            nx: outN.nx, nz: outN.nz, power: (r || 1.3) * 0.55,
-            parent: freeStanding ? null : parent,
-            // glass does not leave a ragged lip hanging in a window head
-            rim: b.glass ? 0 : 0.32,
-            cell: b.glass ? 0.42 : 0.52,          // glass breaks smaller than concrete
-            budget: b.glass ? Math.min(budget, 10) : budget,
-            keptOut: rec.shedKept,
-          });
-        } catch (e) {}
+        const budget = Math.max(2, Math.round(TOTAL * share));
+        // the face the player SEES: a shell under a facade-kit skin is
+        // painted by the skin, so pieces wear the building's visible wall
+        // material (collapse.js's materialsOf), not the hidden core course
+        let skinMat = null;
+        if (!b.glass && shedBld && CBZ.collapse && CBZ.collapse.materialsOf) {
+          try { const mo = CBZ.collapse.materialsOf(shedBld); skinMat = mo && mo.wall; } catch (e) { skinMat = null; }
+          if (Array.isArray(skinMat)) skinMat = skinMat[0];
+          if (skinMat && (skinMat.transparent || !skinMat.color)) skinMat = null;
+        }
+        CBZ.debris.shatterBox(b, skinMat || b.mat, {
+          at: { x, y, z }, dir: outN, power: P,
+          // what the wall is MADE of: a brick building sheds brick; civic /
+          // fortified shells are stone and concrete; glass is glass
+          kind: b.glass ? "glass" : (shedFacade === "brick" ? "brick" : (shedFacade === "civic" ? "rock" : undefined)),
+          // the rim of surviving wall stays welded: a broken edge, not a saw cut
+          keepEdge: b.glass ? 0 : 0.35,
+          maxPieces: b.glass ? Math.min(budget, 14) : budget,
+          owner: rec.debrisKey,
+          grit: b.glass ? 1 : 0.8,
+        });
       }
     }
     /* TELL THE LEDGER WHAT IS PHYSICALLY GONE.
@@ -2390,50 +2368,10 @@
       } catch (e) { return false; }
     }
 
-    // --- FRACTURED RIM: 8-13 jittered concrete prisms ringing the opening in
-    //     a radial crack pattern, a few HANGING into the gap as cracked
-    //     overhang. Built in face space, merged to ONE mesh, fake-AO shaded.
-    //     (a function — hoisted — so the free-standing early-out above keeps
-    //     its rim while skipping the interior dress) ---
-    function buildRim() {
-      const rim = [];
-      const nCh = 8 + ((Math.random() * 6) | 0);
-      const per = 2 * (gapU + gapV);
-      for (let i = 0; i < nCh; i++) {
-        const cw = 0.2 + Math.random() * (0.25 + Math.min(0.5, r * 0.18));
-        const chh = cw * (0.7 + Math.random() * 0.9);
-        const g = new THREE.BoxGeometry(cw, chh, 0.16 + Math.random() * 0.22);
-        g.rotateZ((Math.random() - 0.5) * 1.1);   // radial jitter around the face normal
-        g.rotateX((Math.random() - 0.5) * 0.4);
-        // walk the perimeter (bottom → right → top → left), jittered
-        const t = ((i + Math.random() * 0.6) / nCh) * per;
-        let fu, fv;
-        if (t < gapU) { fu = u0 + t; fv = v0 + (Math.random() * 0.12 - 0.04); }
-        else if (t < gapU + gapV) { fu = u1 + (Math.random() * 0.1 - 0.04); fv = v0 + (t - gapU); }
-        else if (t < gapU * 2 + gapV) {
-          fu = u1 - (t - gapU - gapV);
-          fv = Math.random() < 0.45 ? v1 - chh * 0.45 : v1 + (Math.random() * 0.1 - 0.03);   // overhang chunks HANG into the gap
-        } else { fu = u0 - (Math.random() * 0.1 - 0.04); fv = v1 - (t - gapU * 2 - gapV); }
-        fu = Math.max(u0 - 0.15, Math.min(u1 + 0.15, fu + (Math.random() - 0.5) * 0.2));
-        fv = Math.max(v0 - 0.1, Math.min(v1 + 0.12, fv));
-        const fn = fixed + outS * (thick / 2 - 0.05 + Math.random() * 0.16);   // proud of the face
-        if (horiz) g.translate(fu - px, fv, fn - pz);
-        else { g.rotateY(Math.PI / 2); g.translate(fn - px, fv, fu - pz); }
-        rim.push(g);
-      }
-      const BGU = THREE.BufferGeometryUtils;
-      let rgs = null;
-      if (BGU && BGU.mergeBufferGeometries && rim.length > 1) { const m = BGU.mergeBufferGeometries(rim); for (const g of rim) g.dispose(); rgs = m ? [m] : null; }
-      else if (rim.length) rgs = rim;            // no merger: every chunk still lands, one mesh each
-      if (rgs) for (let ri = 0; ri < rgs.length; ri++) {
-        const rg = rgs[ri];
-        shadeGeo(rg, false);
-        const rm = new THREE.Mesh(rg, rimMat());
-        rm.castShadow = false; rm.receiveShadow = true;
-        if (parent) parent.add(rm); else CBZ.scene.add(rm);
-        rec.extras.push(rm);
-      }
-    }
+    // The ragged rim is the wall's own surviving material: the shed above
+    // keeps its edge cells welded in place (CBZ.debris keepEdge). No invented
+    // concrete teeth are added around an opening.
+    function buildRim() {}
   }
   // PUBLIC primitive for city/fracture.js (ledger/caps/persistence live there)
   CBZ.cityCarveWall = carveHole;
@@ -2707,7 +2645,7 @@
     const gapCen = (g.u0 + g.u1) / 2;
     const rubX = g.horiz ? gapCen : g.fixed, rubZ = g.horiz ? g.fixed : gapCen;
     CBZ.cityChunk(rubX, (g.v0 + g.v1) / 2 - (g.v1 - g.v0) * 0.2, rubZ,
-      { count: 5 + ((Math.random() * 4) | 0), force: 5, dirx: dxr, dirz: dzr });
+      { count: 5 + ((Math.random() * 4) | 0), force: 5, dirx: dxr, dirz: dzr, material: rec.wall && rec.wall.material });
     CBZ.cityShatter(x, z, r * 2 + 4);
     if (CBZ.shake) CBZ.shake(0.6);
     return true;
@@ -2731,8 +2669,9 @@
       const elevated = impactY > groundY + 3;
       // A rocket 30m up a tower must not damage a phantom ground-floor wall.
       // Debris and building damage stay at the actual impact seat.
-      CBZ.cityChunk(x, elevated ? impactY : groundY + 0.6, z,
-        { count: Math.round(4 + 3 * power), force: 4 + 2 * power });
+      // (no generic chunk spray here: a wall that is hit sheds its own
+      // pieces through the carve, and the ground under an open-air blast
+      // throws its own chips in crashfx)
       CBZ.cityDamageBuilding(x, impactY, z, Math.min(3, power));
       if (CBZ.cityFracture && CBZ.cityFracture.blastAt && power >= 0.85 && !(opts && opts.noDamage)) {
         const hy = impactY;
@@ -2804,21 +2743,6 @@
         }
         o.side = s;
       }
-    }
-  });
-
-  // chunk physics (only runs while chunks exist)
-  CBZ.onAlways(9, function (dt) {
-    if (!cityChunks.length) return;
-    const G = (CBZ.TUNE && CBZ.TUNE.gravity) || 22;
-    for (let i = cityChunks.length - 1; i >= 0; i--) {
-      const c = cityChunks[i]; c.life -= dt; c.vy -= G * dt;
-      const p = c.mesh.position;
-      p.x += c.vx * dt; p.y += c.vy * dt; p.z += c.vz * dt;
-      c.mesh.rotation.x += c.spin * dt; c.mesh.rotation.y += c.spin * 0.7 * dt;
-      const fl = (CBZ.floorAt ? CBZ.floorAt(p.x, p.z) : 0) + 0.08;
-      if (p.y <= fl) { p.y = fl; c.vy = -c.vy * 0.18; c.vx *= 0.55; c.vz *= 0.55; c.spin *= 0.55; if (Math.abs(c.vy) < 0.6) c.vy = 0; }
-      if (c.life <= 0) { CBZ.scene.remove(c.mesh); if (c.dispose && c.mesh.material) c.mesh.material.dispose(); cityChunks.splice(i, 1); }
     }
   });
 
@@ -6465,6 +6389,8 @@
     // tinted hardwood FLOOR slab over the solid plate (-x stair strip stays open).
     b.lbox((k.xLo + k.xHi) / 2, Y + 0.02, 0, Math.max(1, k.xHi - k.xLo), 0.04, k.zHi - k.zLo, 0x33373f, { cast: false });
     // VACANT building: the shell above (light + finished floor) IS the design.
+    if (CBZ.fitoutDeclare) CBZ.fitoutDeclare(b, Y, "flat", CBZ.interiorFloorRoom ? CBZ.interiorFloorRoom(b, Math.round(Y / (b.FH || FH))) : null,
+      { vacant: !!vacant, idx: idx, door: b.localDoor });
     if (vacant) return;
 
     // ---- PROGRAMMED FLAT (only when the plate is big enough to zone) ----------
@@ -6503,6 +6429,10 @@
       setKitchen(k, dinR);
       if (!planSet(b, Y, bedR, "bedroom", { x: midX, z: (bedR.z0 + bedR.z1) / 2 }, ftone)) setBedroom(k, bedR, linen);
       if (bathR.z1 - bathR.z0 >= 2.2) setBath(k, bathR);
+      if (CBZ.fitoutSiteOf) {
+        const fs = CBZ.fitoutSiteOf(b), fk = fs && fs.floors[Math.round(Y / (b.FH || FH))];
+        if (fk && fk.info) fk.info.zones = { liv: livR, din: dinR, bed: bedR, bath: bathR, midX: midX, midZ: midZ };
+      }
       return;
     }
 
@@ -7437,7 +7367,10 @@
     const sgn = vh < 0.5 ? 1 : -1;            // which corner gave way
     const ccol = 0x7a7f86, dcol = 0x63686f;
     function chunk(x, y, z, s, ry, rz, col) {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.6, s * 1.15), mat(col));
+      // a broken lump of the parapet, not a box (debris.js's shared chunk)
+      const g = CBZ.debris ? CBZ.debris.chunkGeo(((x * 7 + z * 13) | 0)) : new THREE.BoxGeometry(1, 1, 1);
+      const m = new THREE.Mesh(g, mat(col));
+      m.scale.set(s, s * 0.6, s * 1.15);
       m.position.set(x, y, z); m.rotation.y = ry; m.rotation.z = rz;
       m.castShadow = false; m.receiveShadow = true; b.group.add(m);
     }
@@ -7868,6 +7801,9 @@
         lot.kind = "abandoned";
         lot.building = { ...b, name: "Gang Hideout", sign: color, side, door: doorPt, abandoned: true, gang: null };
         makeStash(b, lot, 0x4caf6e);
+        // a crew's building, every floor of it: the fit-out (city/fitout_gang.js)
+        // stands the count room, the lounge, the cook kitchen and the mattresses.
+        if (CBZ.fitoutDeclareBuilding) CBZ.fitoutDeclareBuilding(b, "hideout", { door: b.localDoor });
         abandonedLots.push(lot);
         placed.push(lot);
         continue;
@@ -7958,6 +7894,11 @@
           realtor: !!shop.realtor, chop: !!shop.chop,
         };
         furnishShop(b, lot, door);
+        // THE FIT-OUT (city/fitout.js) learns what this ground floor is: the
+        // trade, the counter it stands behind, the door you came in by.
+        if (CBZ.fitoutDeclare) CBZ.fitoutDeclare(b, 0, "shop", CBZ.interiorFloorRoom ? CBZ.interiorFloorRoom(b, 0) : null,
+          { kind: shop.kind, name: shop.name, counter: { x: ccx, z: ccz, w: cw, d: cd }, door: b.localDoor,
+            flags: { gas: !!shop.gas, hospital: !!shop.hospital, carlot: !!shop.carlot, chop: !!shop.chop, realtor: !!shop.realtor, retail: !!shop.retail } });
         // the district field stacks HOMES over the storefront — stairs (and
         // anyone ducking upstairs mid-robbery) walk through them, so every
         // upper floor is a dressed flat, not a bare slab. EXCEPT dealerships:

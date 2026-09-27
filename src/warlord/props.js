@@ -1781,19 +1781,50 @@
     }
   }
 
+  /* THE WRECK'S OWN SKIN ON THE SAND. What lies round a burnt-out truck or a
+     downed plane is torn panel: thin plates of its charred body with ragged
+     outlines and a crease where they folded, a few centimetres thick, half
+     sunk in the sand. Every plate is its own irregular outline (5-7 torn
+     corners), one merged static mesh per wreck (one draw call). It used to be
+     one 0.9 x 0.14 x 0.6 box instanced n times: a scatter of charred bricks
+     round a vehicle made of sheet metal. */
   function debrisInto(g, r, n, spread) {
-    const im = new THREE.InstancedMesh(BG(0.9, 0.14, 0.6), M("char"), n);
-    const d = new THREE.Object3D();
+    const P = [];
+    const d = new THREE.Object3D(), v = new THREE.Vector3();
+    const put = function (x, y, z) { v.set(x, y, z).applyMatrix4(d.matrix); P.push(v.x, v.y, v.z); };
     for (let i = 0; i < n; i++) {
-      const a = r.f() * TAU, rr = r.range(spread * 0.3, spread);
-      d.position.set(Math.cos(a) * rr, 0.08, Math.sin(a) * rr);
-      d.rotation.set(r.range(-0.4, 0.4), r.f() * TAU, r.range(-0.4, 0.4));
-      d.scale.setScalar(r.range(0.5, 1.7));
-      d.updateMatrix(); im.setMatrixAt(i, d.matrix);
+      const k = 5 + Math.floor(r.f() * 3);
+      const sc = r.range(0.6, 1.5);
+      const ax = r.range(0.35, 0.8) * sc, az = r.range(0.2, 0.5) * sc;
+      const ring = [];
+      for (let j = 0; j < k; j++) {
+        const t = (j / k) * TAU + r.range(-0.3, 0.3), rr = r.range(0.55, 1);
+        ring.push([Math.cos(t) * ax * rr, Math.sin(t) * az * rr]);
+      }
+      const th = r.range(0.02, 0.05), crease = r.range(-0.3, 0.3);
+      const Y = function (x) { return crease * Math.abs(x); };
+      const a = r.f() * TAU, dist = r.range(spread * 0.3, spread);
+      d.position.set(Math.cos(a) * dist, 0.02, Math.sin(a) * dist);
+      d.rotation.set(r.range(-0.25, 0.25), r.f() * TAU, r.range(-0.25, 0.25));
+      d.scale.set(1, 1, 1);
+      d.updateMatrix();
+      for (let j = 0; j < k; j++) {
+        const p0 = ring[j], p1 = ring[(j + 1) % k];
+        // top and bottom faces (fans from the plate centre)
+        put(0, th / 2, 0); put(p1[0], Y(p1[0]) + th / 2, p1[1]); put(p0[0], Y(p0[0]) + th / 2, p0[1]);
+        put(0, -th / 2, 0); put(p0[0], Y(p0[0]) - th / 2, p0[1]); put(p1[0], Y(p1[0]) - th / 2, p1[1]);
+        // the torn edge
+        put(p0[0], Y(p0[0]) + th / 2, p0[1]); put(p1[0], Y(p1[0]) + th / 2, p1[1]); put(p1[0], Y(p1[0]) - th / 2, p1[1]);
+        put(p0[0], Y(p0[0]) + th / 2, p0[1]); put(p1[0], Y(p1[0]) - th / 2, p1[1]); put(p0[0], Y(p0[0]) - th / 2, p0[1]);
+      }
     }
-    im.instanceMatrix.needsUpdate = true;
-    im.castShadow = true;
-    g.add(im);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, M("char"));
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    g.add(mesh);
   }
 
   /* BONES. Ribs are half-tori — the one shape in this file that is not a box

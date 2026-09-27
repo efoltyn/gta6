@@ -358,9 +358,14 @@
       kp.alive = false;
       reapQueue.add(kid);
       // debris hook: only for pieces that fell as CASCADE collateral (the
-      // explicit target's own destruction FX is the caller's job).
-      if (kid !== id && CBZ.fx && CBZ.fx.dropDebris) {
-        CBZ.fx.dropDebris({ x: kp.pos.x, z: kp.pos.z, fromY: kp.pos.y + (kp.platforms[0] ? (kp.platforms[0].top - kp.pos.y) : 1) + 1, size: 0.4 + Math.random() * 0.5 });
+      // explicit target's own destruction FX is the caller's job). The piece
+      // that lost its support breaks up into ITS OWN geometry and material
+      // (a wood wall into planks and splinters, a stone one into blocks) and
+      // falls; the reap below then removes the hidden original.
+      if (kid !== id && CBZ.debris && kp.meshRef) {
+        CBZ.debris.shatter(kp.meshRef, {
+          at: { x: kp.pos.x, y: kp.pos.y + 0.5, z: kp.pos.z }, power: 0.7, speed: 1.6, maxPieces: 10,
+        });
       }
     });
     return true;
