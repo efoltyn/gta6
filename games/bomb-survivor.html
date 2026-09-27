@@ -15,7 +15,7 @@
     • The running half had nothing to DO. The optimal play was to stand in a
       doorway for three minutes, and the first stick that found you ended
       your half: runners never came back, so you spectated.
-      → FLAK. Four anti-aircraft emplacements stand in the open streets.
+      → FLAK. Five anti-aircraft emplacements stand in the open streets.
         Runners score by MANNING them and by SHOOTING BOMBERS DOWN; a manned
         gun is loud, lit and exposed, so every gun is a bet on how long you
         dare to stay on it while a stick walks toward you. Runners respawn.
@@ -96,7 +96,7 @@
     display:none;text-align:center;font-size:11px;letter-spacing:.2em;color:#ffd9a0;text-shadow:0 1px 3px rgba(0,0,0,.9)}
   #nav i{display:block;width:0;height:0;margin:0 auto 4px;border-left:9px solid transparent;border-right:9px solid transparent;
     border-bottom:15px solid #ffc46a;filter:drop-shadow(0 1px 3px rgba(0,0,0,.8))}
-  #gunhud{position:fixed;left:50%;bottom:calc(30px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+  #gunhud{position:fixed;left:50%;bottom:calc(104px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
     z-index:42;pointer-events:none;display:none;text-align:center;font-size:12px;letter-spacing:.2em;text-shadow:0 1px 3px rgba(0,0,0,.9)}
   #gunhud .bar{width:220px;height:8px;border-radius:4px;background:rgba(255,255,255,.18);margin:6px auto 0;overflow:hidden}
   #gunhud .bar s{display:block;height:100%;width:0;background:linear-gradient(90deg,#ffd27a,#ff5a2a);text-decoration:none}
@@ -438,7 +438,7 @@ scope = CBZ.radar.create({
 });
 
 // ============================================================ FLAK
-// Four emplacements in the open: a sandbag ring, a twin-barrel mount on a
+// Five emplacements in the open: a sandbag ring, a twin-barrel mount on a
 // pedestal, ammunition, and a light column over it so both halves can find
 // it — the bomber to kill it, the runner to crew it.
 const FLAK_MAT = {
@@ -543,7 +543,9 @@ function gunColor(g) {
 }
 function refreshGunLook(g) {
   const c = gunColor(g), M = g.model;
-  M.beam.visible = c != null; M.ring.visible = c != null;
+  // the column is for finding a gun, not for sitting inside: the human's own
+  // gun drops its beam while he is on it
+  M.beam.visible = c != null && !(g.crew && g.crew.human); M.ring.visible = c != null;
   if (c != null) {
     M.beam.material.color.setHex(c); M.ring.material.color.setHex(c);
     M.beam.material.opacity = g.crew ? 0.55 : 0.3;
@@ -626,7 +628,7 @@ function stepShells(dt) {
     s.t -= dt;
     if (s.t > 0) continue;
     shells.splice(i, 1);
-    fx.puff(s.x, s.y, s.z, { size: 11 + rnd() * 5, flash: true });
+    fx.puff(s.x, s.y, s.z, { size: 17 + rnd() * 7, flash: true });
     for (let j = 0; j < units.length; j++) {
       const u = units[j];
       if (!u.alive || u.role !== "bomber" || !u.af || u.team === s.team) continue;
