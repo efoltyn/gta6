@@ -171,7 +171,9 @@
 
   function liveBots() {
     let n = 0; const b = CBZ.bots || [];
-    for (let i = 0; i < b.length; i++) if (!b[i].dead) n++;
+    // a man sitting in a boat is the FLEET's, not the beach's: counting the
+    // crews here starved the beach restock once the sea had sixty people afloat
+    for (let i = 0; i < b.length; i++) if (!b[i].dead && !b[i]._aboard) n++;
     return n;
   }
   /* ---- THE SEA IS THE GAME ------------------------------------------------
@@ -413,29 +415,54 @@
      A sea with people in it has boats on it. This mode builds nothing physical
      (see the header) and vehicles.js is city-only, so the craft come from
      world/sea_craft.js — real registered hulls with real crews, on the same
-     water the crowd wades in.
+     water the crowd wades in — and every one of them is DRIVEN: sea_craft's
+     helm brains (§3b there) give each hull a job, and the job is the shape of
+     its track. Nobody orbits the island any more.
 
-     WHY THESE SIX ROWS AND THESE DISTANCES: they are the ladder made visible
-     from the sand. The kayaks and the PWC are in the swimming band where a
-     bull shark starts, and a bull shark can only TIP them — which is the first
-     thing this game teaches you that is not "bite the thing in front of you".
-     The anchored skiffs at 60-120 m are the first hull a great white can take
-     a piece out of. The console, the sloop and the cruiser are further out
-     than a small shark has any business being, and they are exactly what a
-     megalodon eats. Nobody is told any of that; the sizes say it.
+     THE LADDER IS THE BANDS. Distances are metres past the waterline:
+
+       0-60     paddleboards, kayaks, jetskis: the swimming band, where a bull
+                shark starts, and the first thing it learns is it can only TIP
+                them
+       40-180   anchored skiffs with lines out, tenders and runabouts running
+                in and out, a dive boat drifting over a site: the first hulls
+                a great white can take a piece out of
+       120-330  centre consoles and sportfishers trolling lanes, keelboats
+                beating and reaching on the wind, cruisers going somewhere, a
+                trawler working a ledge, a yacht at anchor — megalodon food
+       300-360  the far traffic: a freighter and a big yacht on passage, just
+                inside the fog, so the horizon is never empty
+
+     Nobody is told any of that; the sizes say it.
+
+     A ROW'S KEYS ARE A PREFERENCE LIST, feature-detected against the hull
+     registry: the first key water_hulls/yachts registered wins, so a board or
+     a dive boat that does not exist in a build falls back to the nearest hull
+     that does rather than to nothing.
 
      Placement is deterministic (CBZ.hash01 + the match number, never
      Math.random) and depth-checked against the island's own bathymetry, so a
-     boat can never be spawned sitting on a sandbar. */
+     boat can never be spawned sitting on a sandbar; every mark a job picks
+     later is checked the same way (sea_craft.js legOk). */
   const FLEET = [
-    { key: "kayak",   n: 2, r0: 25,  r1: 60,  crew: 1, anchored: false },
-    { key: "jetski",  n: 1, r0: 25,  r1: 60,  crew: 1, anchored: false },
-    { key: "skiff",   n: 2, r0: 60,  r1: 120, crew: 2, anchored: true },
-    { key: "console", n: 1, r0: 150, r1: 250, crew: 3, anchored: false, cruise: true },
-    { key: "sloop",   n: 1, r0: 200, r1: 300, crew: 2, anchored: true },
-    { key: "cruiser", n: 1, r0: 250, r1: 400, crew: 6, anchored: false, cruise: true },
+    { keys: ["sup", "kayak"],             n: 3, r0: 8,   r1: 40,  crew: 1, job: "paddle" },
+    { keys: ["kayak"],                    n: 4, r0: 12,  r1: 60,  crew: 1, job: "paddle" },
+    { keys: ["jetski"],                   n: 3, r0: 18,  r1: 95,  crew: 1, crew2: 0.4, job: "carve" },
+    { keys: ["skiff", "dinghy"],          n: 4, r0: 45,  r1: 140, crew: 2, job: "fish" },
+    { keys: ["dinghy"],                   n: 2, r0: 25,  r1: 120, crew: 2, job: "transit" },
+    { keys: ["boat"],                     n: 2, r0: 50,  r1: 190, crew: 2, crew2: 0.5, job: "transit" },
+    { keys: ["diveboat", "console"],      n: 2, r0: 80,  r1: 180, crew: 3, job: "dive" },
+    { keys: ["console"],                  n: 2, r0: 120, r1: 250, crew: 2, crew2: 0.5, job: "troll" },
+    { keys: ["sportfish", "console"],     n: 2, r0: 170, r1: 300, crew: 3, job: "troll" },
+    { keys: ["sloop"],                    n: 3, r0: 140, r1: 320, crew: 2, crew2: 0.5, job: "sail" },
+    { keys: ["cruiser"],                  n: 2, r0: 170, r1: 320, crew: 3, job: "transit" },
+    { keys: ["trawler", "cruiser"],       n: 2, r0: 230, r1: 330, crew: 2, job: "troll" },
+    { keys: ["yacht"],                    n: 2, r0: 230, r1: 320, crew: 3, job: "moor" },
+    { keys: ["yacht46", "yacht"],         n: 1, r0: 280, r1: 345, crew: 2, job: "liner" },
+    // scenery: a ship on the horizon, never prey (water_hulls marks it so)
+    { keys: ["freighter", "yacht46", "trawler"], n: 1, r0: 315, r1: 365, crew: 0, job: "liner" },
   ];
-  const fleet = [];              // {row, rec, respawnT} — one slot per hull the sea owes
+  const fleet = [];              // {row, key, rec, respawnT} — one slot per hull the sea owes
   let fleetSeq = 0;
 
   function depthAt(x, z) {
@@ -444,9 +471,15 @@
     }
     return depthMean(x, z);
   }
-  /* A POINT THIS HULL FLOATS AT. Twelve deterministic bearings, first one that
-     clears the draft wins; null is a refusal to spawn rather than a boat on
-     the beach. */
+  function rowKey(row) {
+    const R = CBZ.marineHulls;
+    if (!R || !R.spec) return row.keys[row.keys.length - 1];
+    for (let i = 0; i < row.keys.length; i++) if (R.spec(row.keys[i])) return row.keys[i];
+    return "dinghy";
+  }
+  /* A POINT THIS HULL FLOATS AT. Sixteen deterministic bearings, first one
+     that clears the draft wins; null is a refusal to spawn rather than a boat
+     on the beach. */
   function craftPoint(ix, row, spec, salt) {
     const A = arena(); if (!A) return null;
     const WL = sim.waterline;
@@ -454,7 +487,7 @@
     // water (survivorbot's SWIM_ENTER is 1.35 m): a man who goes over the
     // side of a kayak sitting in a metre of water would land on his feet
     const need = Math.max(((spec && spec.draft) || 0.5) + 0.6, 1.6);
-    for (let k = 0; k < 12; k++) {
+    for (let k = 0; k < 16; k++) {
       const a = h01(ix * 5.31 + k * 1.77 + 41, sim.match * 7 + salt) * 6.283;
       const r = WL + row.r0 + h01(ix * 3.13 + k * 2.9 + 77, sim.match * 11 + salt) * (row.r1 - row.r0);
       const x = A.center.x + Math.cos(a) * r, z = A.center.z + Math.sin(a) * r;
@@ -462,37 +495,31 @@
     }
     return null;
   }
-  // A hull under way orbits the island at its own radius: always over the same
-  // water it was proved on, and always crossing the player's front.
-  function orbitRoute(A, r, ang0) {
-    const out = [];
-    for (let i = 0; i < 6; i++) {
-      const a = ang0 + (i / 6) * 6.283;
-      out.push({ x: A.center.x + Math.cos(a) * r, z: A.center.z + Math.sin(a) * r });
-    }
-    return out;
-  }
   function spawnCraftFor(slot, salt) {
     const A = arena(); if (!A || !CBZ.seaCraft) return null;
     const R = CBZ.marineHulls;
-    const spec = (R && R.spec) ? (R.spec(slot.row.key) || R.spec("dinghy")) : null;
+    const spec = (R && R.spec) ? (R.spec(slot.key) || R.spec("dinghy")) : null;
     const p = craftPoint(slot.ix, slot.row, spec, salt);
     if (!p) return null;
-    const heading = p.ang + Math.PI / 2;
-    const rec = CBZ.seaCraft.spawn(slot.row.key, p.x, p.z, heading, {
-      crew: slot.row.crew,
-      anchored: !!slot.row.anchored,
-      route: slot.row.cruise ? orbitRoute(A, p.r, p.ang) : null,
+    const row = slot.row, WL = sim.waterline;
+    const j = h01(slot.ix * 2.77 + 13, sim.match * 5 + salt);
+    // across the band, never pointing at the beach
+    const heading = p.ang + (j < 0.5 ? 1 : -1) * Math.PI / 2 + (j - 0.5) * 0.8;
+    const crew = row.crew + (row.crew2 && h01(slot.ix * 7.1 + 3, sim.match + salt) < row.crew2 ? 1 : 0);
+    return CBZ.seaCraft.spawn(slot.key, p.x, p.z, heading, {
+      crew: crew,
+      job: row.job,
+      band: { cx: A.center.x, cz: A.center.z, r0: WL + row.r0, r1: WL + row.r1, shore: WL + 3 },
+      seed: slot.ix * 13.7 + sim.match * 3.1 + salt,
     });
-    return rec;
   }
   function spawnFleet() {
     if (!CBZ.seaCraft) return;
     fleet.length = 0; fleetSeq = 0;
     for (let i = 0; i < FLEET.length; i++) {
-      const row = FLEET[i];
+      const row = FLEET[i], key = rowKey(row);
       for (let k = 0; k < row.n; k++) {
-        const slot = { row: row, ix: fleetSeq++, rec: null, respawnT: 0 };
+        const slot = { row: row, key: key, ix: fleetSeq++, rec: null, respawnT: 0 };
         slot.rec = spawnCraftFor(slot, 0);
         if (!slot.rec) slot.respawnT = 4;     // no water on any bearing yet: try again shortly
         fleet.push(slot);

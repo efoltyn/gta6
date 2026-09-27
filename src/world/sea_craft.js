@@ -26,7 +26,12 @@
 
    NOTHING HERE IS A SECOND COPY of any of those. The file is a registry, a
    mover that spends the autopilot, a seat for the people aboard, and the
-   damage model for "a shark bit a piece out of my boat".
+   damage model for "a shark bit a piece out of my boat" — plus the people
+   DRIVING (§3b helm jobs: paddle, carve, fish, troll, dive, transit, sail on
+   the weather's wind, liner, moor), what they do when they see a fin (§3c:
+   stop and point, cut the anchor and run, come back for the man in the
+   water), what their arms are doing (§3d), the rods and lines (§3e), and the
+   distance tier that lets the sea hold thirty-odd hulls (§10).
 
    THE RULES OF SHARK VS BOAT (§4) — the numbers decide, never a list of names
    ------------------------------------------------------------
@@ -194,7 +199,11 @@
        o.crew      how many bodies aboard (clamped to the hull's own maximum)
        o.anchored  hold station on a rode instead of steaming
        o.route     [{x,z}, ...] a loop of waypoints for a boat under way
-       o.speed     m/s target under way (default the spec's cruise) */
+       o.speed     m/s target under way (default the spec's cruise)
+       o.job       a helm brain from §3b (paddle carve fish troll dive transit
+                   sail liner moor) — the boat then drives itself
+       o.band      {cx, cz, r0, r1, shore} the ring of water the job works in
+       o.seed      a number that makes this hull's choices its own */
   function spawn(key, x, z, heading, o) {
     o = o || {};
     const R = MH();
@@ -229,6 +238,12 @@
       _heel: 0, _heelV: 0, _capsized: false, _swamp: 0, _holed: false,
       _sinking: false, _sinkT: 0, _engulf: null,
       _seats: berthsFor(spec), _ramCd: 0,
+      jobKind: (o.job && JOBS[o.job]) ? o.job : null,
+      band: o.band || null,
+      _seed: num(o.seed, AUDIT.spawned * 3.7 + 1),
+      mood: "calm", moodT: 0, alarm: 0, seen: null,
+      wp: null, holdT: 0, lines: false,
+      _hadCrew: false, _lost: [], _far: false,
     };
     craft.push(rec);
     AUDIT.spawned++;
@@ -237,6 +252,9 @@
       const b = boardOne(rec, i);
       if (b) rec.crew.push(b);
     }
+    rec._hadCrew = rec.crew.length > 0;
+    if (rec.jobKind && rec.band) startJob(rec);
+    else rec.jobKind = null;
     return rec;
   }
 
@@ -303,7 +321,7 @@
     const P = b.group.parent;
     if (P && P !== rec.group.parent) P.worldToLocal(_tmpV);
     b.pos.x = _tmpV.x; b.pos.y = _tmpV.y; b.pos.z = _tmpV.z;
-    _q.setFromAxisAngle(_UP, num(seat.yaw, 0)).premultiply(rec.group.quaternion);
+    _q.setFromAxisAngle(_UP, num(seat.yaw, 0) + num(b._lookYaw, 0)).premultiply(rec.group.quaternion);
     b.group.quaternion.copy(_q);
     if (b.target && b.target.set) b.target.set(_tmpV.x, 0, _tmpV.z);
     b.speed = 0; b.swim = false; b.wet = false;
@@ -311,6 +329,8 @@
   // the flags a berth set, cleared: a body that is nobody's crew any more
   function unseat(b) {
     b._aboard = null; b._aboardSeat = null; b._overboard = null;
+    b._lookYaw = 0; b._actW = 0; b._act = null;
+    if (b.group) b.group.visible = true;
     if (b.char) { b.char.sitting = false; b.char.seatRef = null; b.char.airPose = null; }
     if (b.group) b.group.rotation.set(0, b.group.rotation.y, 0);
     if (b.pause != null && b.pause > 1e6) b.pause = 0;
@@ -398,6 +418,621 @@
     }
   }
 
+  // ============================================================
+  //  §3b. THE HELM — somebody is driving every one of these boats
+  // ============================================================
+  /* A boat on a loop of six waypoints round the island reads as a toy on a
+     rail, however good the hull is: it never stops, never speeds up, never
+     goes anywhere and never looks at anything. People on the water have a
+     REASON to be where they are, and the reason is the shape of the track:
+
+       paddle   kayaks / boards: short legs along the shore band, a rest, on
+       carve    jetskis: fast legs with hard turns between them, then a stop
+       fish     anchor on a mark with lines over the side, later up-anchor and
+                try another mark
+       troll    sportfishers: slow lanes back and forth over a ledge, lines
+                trailing astern, U-turns at the ends; then a new ledge
+       dive     drift over a site on the current, motor back up-current
+       transit  cruisers and runabouts: go somewhere, slow down, stop a
+                while, go somewhere else
+       sail     keelboats: a destination and a WIND. Inside the no-go cone
+                she beats on alternate tacks; she heels to leeward
+       liner    the far traffic: long straight passages on the horizon
+       moor     the big yacht: anchored, swinging, almost never moves
+
+     Every leg is steered by the ONE autopilot (CBZ.marineAutopilot), so a
+     brain here only ever chooses WHERE and HOW FAST. Speed-up and slow-down
+     are the hull's own thrust and drag; the brake is a stopping-distance
+     ramp in front of every mark a boat means to stop at.
+
+     THE BAND. The mode hands each hull a ring (cx, cz, r0..r1): the water it
+     works in. Every mark is picked inside it and proved deep enough for her
+     draft, so a leg can never be planned onto a sandbar. */
+  function depthHere(x, z) {
+    if (typeof CBZ.cityWaterDepthAt === "function") { try { return +CBZ.cityWaterDepthAt(x, z) || 0; } catch (e) {} }
+    if (typeof CBZ.survFloodDepthMeanAt === "function") { try { return Math.max(0, +CBZ.survFloodDepthMeanAt(x, z) || 0); } catch (e) {} }
+    return 6;
+  }
+  function needOf(rec) { return Math.max(num(rec._hullSpec && rec._hullSpec.draft, 0.5) + 0.7, 1.4); }
+  function wrapA(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; }
+  function rnd(rec, k) { rec._rn = (rec._rn || 0) + 1; return h01(rec._seed * 1.37 + rec._rn * 7.91 + k, rec._seed + rec._rn * 0.61); }
+  function bandAng(rec, x, z) { const B = rec.band; return Math.atan2(z - B.cz, x - B.cx); }
+  function bandRad(rec, x, z) { const B = rec.band; return Math.hypot(x - B.cx, z - B.cz); }
+  function bandPt(rec, a, r) { const B = rec.band; return { x: B.cx + Math.cos(a) * r, z: B.cz + Math.sin(a) * r }; }
+  // deep enough here AND at the middle of the leg from where she is now
+  function legOk(rec, p) {
+    const need = needOf(rec);
+    if (depthHere(p.x, p.z) < need) return false;
+    const mx = (p.x + rec.pos.x) * 0.5, mz = (p.z + rec.pos.z) * 0.5;
+    return depthHere(mx, mz) >= need * 0.8;
+  }
+  /* A mark in the band, near (a, r): tried as asked, then walked outward in
+     bearing and radius until the water is deep enough. null = keep the old. */
+  function markNear(rec, a, r) {
+    const B = rec.band;
+    for (let k = 0; k < 10; k++) {
+      const s = (k & 1) ? 1 : -1, n = (k + 1) >> 1;
+      const rr = clamp(r + n * 9 * ((k & 2) ? 1 : 0.4), B.r0, B.r1 + 20);
+      const p = bandPt(rec, a + s * n * (14 / Math.max(40, r)), rr);
+      if (legOk(rec, p)) return p;
+    }
+    return null;
+  }
+  function setLeg(rec, p, speed, o) {
+    o = o || {};
+    rec.wp = p; rec.wpSpeed = speed;
+    rec.wpBrake = o.brake !== false;
+    rec.wpArrive = num(o.arrive, 6);
+    rec.legT = 0;
+    const d = Math.hypot(p.x - rec.pos.x, p.z - rec.pos.z);
+    rec.legMax = 25 + d / Math.max(0.6, speed) * 2.5;
+  }
+  function hold(rec, sec, mode) {
+    rec.holdT = sec; rec.holdMode = mode;
+    rec.wp = null;
+    if (mode === "anchor") { rec.anchored = true; rec.anchor.x = rec.pos.x; rec.anchor.z = rec.pos.z; }
+  }
+  function cruiseOf(rec) { return num(rec._hullSpec && rec._hullSpec.cruiseMs, 6); }
+  function topOf(rec) { return num(rec._hullSpec && rec._hullSpec.topMs, 8); }
+
+  /* THE JOBS. start(rec) sets her up where she is; leg(rec) plans the next
+     leg; arrive(rec) says what she does when she gets there. */
+  const JOBS = {
+    paddle: {
+      start(rec) { rec.jd = { dir: rnd(rec, 1) < 0.5 ? -1 : 1 }; if (rnd(rec, 2) < 0.4) hold(rec, 3 + rnd(rec, 3) * 10, "drift"); },
+      leg(rec) {
+        const a = bandAng(rec, rec.pos.x, rec.pos.z), r = bandRad(rec, rec.pos.x, rec.pos.z);
+        const step = 22 + rnd(rec, 4) * 40;
+        const B = rec.band;
+        const rr = clamp(r + (rnd(rec, 5) - 0.5) * 18, B.r0, B.r1);
+        const p = markNear(rec, a + rec.jd.dir * step / Math.max(30, r), rr);
+        if (!p) { rec.jd.dir *= -1; hold(rec, 4, "drift"); return; }
+        setLeg(rec, p, cruiseOf(rec) * (0.75 + rnd(rec, 6) * 0.3), { arrive: 3 });
+      },
+      arrive(rec) {
+        if (rnd(rec, 7) < 0.15) rec.jd.dir *= -1;
+        if (rnd(rec, 8) < 0.35) hold(rec, 5 + rnd(rec, 9) * 12, "drift");
+      },
+    },
+    carve: {
+      start(rec) { rec.jd = { legs: 0, stopAt: 3 + Math.floor(rnd(rec, 1) * 4) }; },
+      leg(rec) {
+        const J = rec.jd, B = rec.band;
+        J.legs++;
+        const stop = J.legs >= J.stopAt;
+        for (let k = 0; k < 6; k++) {
+          const sgn = ((k + (rnd(rec, 2) < 0.5 ? 0 : 1)) & 1) ? 1 : -1;
+          const turn = sgn * (0.7 + rnd(rec, 3) * 1.7);
+          const h = rec.heading + turn;
+          const d = 35 + rnd(rec, 4) * 60;
+          let x = rec.pos.x + Math.sin(h) * d, z = rec.pos.z + Math.cos(h) * d;
+          // out of the band: fold the point back across it
+          const r = bandRad(rec, x, z);
+          if (r < B.r0 || r > B.r1) {
+            const a = bandAng(rec, x, z), rr = clamp(r < B.r0 ? B.r0 + (B.r0 - r) : B.r1 - (r - B.r1), B.r0, B.r1);
+            const p = bandPt(rec, a, rr); x = p.x; z = p.z;
+          }
+          if (legOk(rec, { x: x, z: z })) {
+            if (stop) { J.legs = 0; J.stopAt = 3 + Math.floor(rnd(rec, 5) * 4); }
+            setLeg(rec, { x: x, z: z }, topOf(rec) * (0.62 + rnd(rec, 6) * 0.3), { brake: stop, arrive: stop ? 4 : 11 });
+            rec.jd.stopping = stop;
+            return;
+          }
+        }
+        hold(rec, 3, "drift");
+      },
+      arrive(rec) { if (rec.jd.stopping) hold(rec, 4 + rnd(rec, 7) * 7, "drift"); },
+    },
+    fish: {
+      start(rec) {
+        rec.jd = { big: false };
+        hold(rec, (0.25 + rnd(rec, 1) * 0.75) * (100 + rnd(rec, 2) * 160), "anchor");
+        rec.lines = true;
+      },
+      leg(rec) {
+        rec.lines = false;
+        const a = bandAng(rec, rec.pos.x, rec.pos.z), r = bandRad(rec, rec.pos.x, rec.pos.z);
+        const B = rec.band;
+        const d = 60 + rnd(rec, 3) * 90;
+        const p = markNear(rec, a + (rnd(rec, 4) < 0.5 ? -1 : 1) * d / Math.max(40, r), clamp(r + (rnd(rec, 5) - 0.5) * 40, B.r0, B.r1));
+        if (!p) { hold(rec, 60, "anchor"); rec.lines = true; return; }
+        setLeg(rec, p, cruiseOf(rec) * 0.6, { arrive: 5 });
+      },
+      arrive(rec) { hold(rec, 100 + rnd(rec, 6) * 160, "anchor"); rec.lines = true; },
+    },
+    moor: {
+      start(rec) { rec.jd = {}; hold(rec, 400 + rnd(rec, 1) * 500, "anchor"); },
+      leg(rec) { JOBS.transit.leg(rec); if (rec.wp) rec.wpSpeed = cruiseOf(rec) * 0.45; },
+      arrive(rec) { hold(rec, 500 + rnd(rec, 2) * 500, "anchor"); },
+    },
+    troll: {
+      start(rec) {
+        const a = bandAng(rec, rec.pos.x, rec.pos.z);
+        // a lane roughly along the bottom contour (tangent to the ring), 110-200 m
+        const ax = a + Math.PI / 2 + (rnd(rec, 1) - 0.5) * 0.5;
+        const L = 110 + rnd(rec, 2) * 90;
+        rec.jd = { cx: rec.pos.x, cz: rec.pos.z, ux: Math.cos(ax), uz: Math.sin(ax), L: L, end: 1, pass: 0,
+          passes: 4 + Math.floor(rnd(rec, 3) * 5), relocating: false };
+        rec.lines = true;
+      },
+      leg(rec) {
+        const J = rec.jd;
+        if (J.pass >= J.passes) {
+          // new ledge: run to it at cruise with the lines in
+          J.relocating = true; rec.lines = false;
+          const a = bandAng(rec, rec.pos.x, rec.pos.z), r = bandRad(rec, rec.pos.x, rec.pos.z);
+          const p = markNear(rec, a + (rnd(rec, 4) < 0.5 ? -1 : 1) * (150 + rnd(rec, 5) * 120) / Math.max(60, r),
+            clamp(r + (rnd(rec, 6) - 0.5) * 60, rec.band.r0, rec.band.r1));
+          if (p) { setLeg(rec, p, cruiseOf(rec) * 0.75, { arrive: 10 }); return; }
+          J.pass = 0;
+        }
+        J.relocating = false; rec.lines = true;
+        J.end = -J.end; J.pass++;
+        // each pass slides a boat-width over, the way you comb a ledge
+        const off = ((J.pass % 3) - 1) * 14;
+        const nx = -J.uz, nz = J.ux;
+        let p = { x: J.cx + J.ux * J.L * 0.5 * J.end + nx * off, z: J.cz + J.uz * J.L * 0.5 * J.end + nz * off };
+        if (!legOk(rec, p)) {
+          p = { x: J.cx + J.ux * J.L * 0.25 * J.end, z: J.cz + J.uz * J.L * 0.25 * J.end };
+          if (!legOk(rec, p)) { J.pass = J.passes; hold(rec, 3, "drift"); return; }
+        }
+        // trolling speed is 6-8 knots whatever the boat, never her cruise
+        setLeg(rec, p, Math.min(cruiseOf(rec), 3.1 + rnd(rec, 7) * 0.9), { brake: false, arrive: 16 });
+      },
+      arrive(rec) {
+        const J = rec.jd;
+        if (J.relocating) {
+          J.cx = rec.pos.x; J.cz = rec.pos.z; J.pass = 0; J.passes = 4 + Math.floor(rnd(rec, 8) * 5);
+          J.relocating = false;
+          hold(rec, 4 + rnd(rec, 9) * 6, "drift");       // set the spread
+        }
+      },
+    },
+    dive: {
+      start(rec) { rec.jd = { sx: rec.pos.x, sz: rec.pos.z, cycles: 0 }; hold(rec, 25 + rnd(rec, 1) * 60, "set"); },
+      leg(rec) {
+        const J = rec.jd;
+        J.cycles++;
+        if (J.cycles > 3) {
+          J.cycles = 0;
+          const a = bandAng(rec, rec.pos.x, rec.pos.z), r = bandRad(rec, rec.pos.x, rec.pos.z);
+          const p = markNear(rec, a + (rnd(rec, 2) < 0.5 ? -1 : 1) * (80 + rnd(rec, 3) * 70) / Math.max(40, r), r);
+          if (p) { J.sx = p.x; J.sz = p.z; }
+        }
+        const p = { x: J.sx, z: J.sz };
+        if (!legOk(rec, p)) { hold(rec, 30, "set"); return; }
+        setLeg(rec, p, Math.min(cruiseOf(rec) * 0.4, 3.2), { arrive: 5 });
+      },
+      arrive(rec) { hold(rec, 40 + rnd(rec, 4) * 50, "set"); },
+    },
+    transit: {
+      start(rec) { rec.jd = { out: rnd(rec, 1) < 0.5 }; if (rnd(rec, 2) < 0.3) hold(rec, 5 + rnd(rec, 3) * 25, "drift"); },
+      leg(rec) {
+        const J = rec.jd, B = rec.band;
+        J.out = !J.out;
+        const a = bandAng(rec, rec.pos.x, rec.pos.z);
+        const r = J.out ? B.r0 + (B.r1 - B.r0) * (0.6 + rnd(rec, 4) * 0.4) : B.r0 + (B.r1 - B.r0) * rnd(rec, 5) * 0.4;
+        let p = null;
+        for (let k = 0; k < 4 && !p; k++) {
+          const da = (rnd(rec, 6) < 0.5 ? -1 : 1) * (0.22 + rnd(rec, 7) * 0.4) / (1 + k * 0.6);
+          p = markNear(rec, a + da, r);
+        }
+        if (!p) { hold(rec, 8, "drift"); return; }
+        setLeg(rec, p, cruiseOf(rec) * (0.55 + rnd(rec, 8) * 0.3), { arrive: 8 });
+      },
+      arrive(rec) { if (rnd(rec, 9) < 0.55) hold(rec, 12 + rnd(rec, 10) * 40, rnd(rec, 11) < 0.5 ? "anchor" : "drift"); },
+    },
+    sail: {
+      start(rec) { rec.jd = { tack: rnd(rec, 1) < 0.5 ? -1 : 1, tackT: 0 }; },
+      leg(rec) {
+        const B = rec.band;
+        const a = bandAng(rec, rec.pos.x, rec.pos.z);
+        let p = null;
+        for (let k = 0; k < 5 && !p; k++) {
+          const da = (rnd(rec, 2) < 0.5 ? -1 : 1) * (0.3 + rnd(rec, 3) * 0.45);
+          p = markNear(rec, a + da, B.r0 + (B.r1 - B.r0) * rnd(rec, 4));
+        }
+        if (!p) { hold(rec, 10, "drift"); return; }
+        setLeg(rec, p, 0, { brake: false, arrive: 25 });
+      },
+      arrive(rec) { if (rnd(rec, 5) < 0.25) hold(rec, 20 + rnd(rec, 6) * 40, "drift"); },
+    },
+    liner: {
+      start(rec) { rec.jd = { dir: rnd(rec, 1) < 0.5 ? -1 : 1 }; },
+      leg(rec) {
+        const B = rec.band;
+        const a = bandAng(rec, rec.pos.x, rec.pos.z);
+        const p = markNear(rec, a + rec.jd.dir * (0.45 + rnd(rec, 2) * 0.3), B.r0 + (B.r1 - B.r0) * rnd(rec, 3));
+        if (!p) { rec.jd.dir *= -1; hold(rec, 5, "drift"); return; }
+        setLeg(rec, p, cruiseOf(rec) * 0.6, { brake: false, arrive: 25 });
+      },
+      arrive() {},
+    },
+  };
+  function startJob(rec) {
+    rec.wp = null; rec.holdT = 0; rec.lines = false;
+    const J = JOBS[rec.jobKind];
+    if (J) J.start(rec);
+  }
+
+  /* THE WIND. The weather owner's one vector (weather.js: "never a private
+     bearing"); a still day still has a direction, taken from the match. */
+  const _wind = { x: 0.7, z: 0.7, speed: 5 };
+  function windNow() {
+    let wx = 0, wz = 0, sp = 0;
+    if (typeof CBZ.weatherWind === "function") {
+      try { const w = CBZ.weatherWind(); wx = num(w.x, 0); wz = num(w.z, 0); sp = num(w.speed, 0); } catch (e) {}
+    }
+    const m = Math.hypot(wx, wz);
+    if (m < 1e-3) {
+      const a = h01(CBZ.sharkSim ? num(CBZ.sharkSim.match, 1) : 1, 91.7) * Math.PI * 2;
+      wx = Math.cos(a); wz = Math.sin(a);
+    } else { wx /= m; wz /= m; }
+    _wind.x = wx; _wind.z = wz; _wind.speed = Math.max(4, sp);
+    return _wind;
+  }
+  /* A keelboat's polar, reduced to one curve of the angle off the true wind:
+     nothing inside 40 degrees, about 60% close-hauled, best on a beam reach,
+     a little less dead downwind. */
+  const NOGO = 0.72, CLOSE = 0.8;
+  function polar(twa) {
+    const t = Math.abs(twa);
+    if (t < NOGO) return 0.12;
+    if (t < 1.6) return 0.6 + 0.4 * (t - NOGO) / (1.6 - NOGO);
+    return 1 - 0.22 * (t - 1.6) / (Math.PI - 1.6);
+  }
+  const _cmd = { x: 0, z: 0, speed: 0, arrive: 0 };
+  function steer(rec, dt, x, z, speed, arrive) {
+    _cmd.x = x; _cmd.z = z; _cmd.speed = speed; _cmd.arrive = arrive;
+    let d = -1;
+    if (typeof CBZ.marineAutopilot === "function") {
+      try { d = CBZ.marineAutopilot(rec, dt, _cmd); } catch (e) { d = -1; }
+    }
+    if (d < 0) {
+      const s = rec.v = Math.max(0, rec.v * (1 - dt * 0.6));
+      rec.pos.x += Math.sin(rec.heading) * s * dt;
+      rec.pos.z += Math.cos(rec.heading) * s * dt;
+      d = Math.hypot(x - rec.pos.x, z - rec.pos.z);
+    } else rec._apWake = true;           // the autopilot already threw this frame's wake
+    return d;
+  }
+  // sailing: the course a boat can actually hold toward (x, z) with this wind
+  function sailCourse(rec, x, z, dt) {
+    const W = windNow();
+    const up = Math.atan2(-W.x, -W.z);            // the bearing the wind comes FROM
+    const want = Math.atan2(x - rec.pos.x, z - rec.pos.z);
+    const twa = wrapA(want - up);
+    const J = rec.jd;
+    if (Math.abs(twa) >= CLOSE) { J.tackT = 0; return want; }
+    // beating: close-hauled on the current tack, tack at the lay line, when a
+    // leg has gone on too long, or when the water ahead shoals
+    J.tackT += dt;
+    let course = up + J.tack * CLOSE;
+    const ahead = { x: rec.pos.x + Math.sin(course) * 45, z: rec.pos.z + Math.cos(course) * 45 };
+    if ((twa * J.tack < -0.05 && Math.abs(twa) > 0.25) || J.tackT > 45 || depthHere(ahead.x, ahead.z) < needOf(rec)) {
+      if (J.tackT > 6) { J.tack = -J.tack; J.tackT = 0; course = up + J.tack * CLOSE; }
+    }
+    return course;
+  }
+  function sailSpeed(rec, course) {
+    const W = windNow();
+    const up = Math.atan2(-W.x, -W.z);
+    return Math.min(topOf(rec) * 1.1, 1.6 + W.speed * 0.38) * polar(wrapA(course - up));
+  }
+  // leeward heel from the rig: the wind across the deck, times the sail
+  function sailHeel(rec, dt) {
+    const W = windNow();
+    const h = rec.heading;
+    const toStarboard = W.x * (-Math.cos(h)) + W.z * Math.sin(h);
+    const up = Math.atan2(-W.x, -W.z);
+    const k = Math.sin(Math.min(Math.PI / 2, Math.abs(wrapA(h - up))));
+    const want = clamp(toStarboard * k * (0.10 + W.speed * 0.012), -0.24, 0.24);
+    // composed in ride(), never folded into _roll: the autopilot damps _roll
+    // toward its own turn heel every frame and an added term would snowball
+    rec._sailHeel = num(rec._sailHeel, 0) + (want - num(rec._sailHeel, 0)) * Math.min(1, dt * 0.8);
+    rec._sailFrame = true;
+  }
+
+  function moveSet(rec, dt) {
+    // drifting on the set with the engine off: the current, slowly beam-on
+    let cx = 0, cz = 0;
+    const wf = CBZ.waterField;
+    if (wf && typeof wf.currentAt === "function") {
+      try { const c = wf.currentAt(rec.pos.x, rec.pos.z); if (c) { cx = num(c.x, 0); cz = num(c.z, 0); } } catch (e) {}
+    }
+    if (!cx && !cz) { const W = windNow(); cx = W.x * 0.28; cz = W.z * 0.28; }
+    rec.v *= Math.max(0, 1 - dt * 0.5);
+    rec.pos.x += (cx + Math.sin(rec.heading) * rec.v) * dt;
+    rec.pos.z += (cz + Math.cos(rec.heading) * rec.v) * dt;
+    const beam = Math.atan2(cx, cz) + Math.PI / 2;
+    rec.heading += wrapA(beam - rec.heading) * Math.min(1, dt * 0.05);
+    if (typeof CBZ.marineShoreBlock === "function") { try { CBZ.marineShoreBlock(rec, rec._hullSpec, dt); } catch (e) {} }
+  }
+
+  function helmTick(rec, dt) {
+    rec._apWake = false;
+    const S = rec.mood;
+    // nobody at the helm: the kill cord is out and she drifts
+    if (!rec.crew.length && rec._hadCrew) {
+      rec.anchored = false; rec.lines = false;
+      moveDrifting(rec, dt);
+      return;
+    }
+    if (S === "flee") { fleeTick(rec, dt); return; }
+    if (S === "watch") {
+      // a big hull stops to look: throttle off, drifting, everyone at the rail
+      if (rec.anchored) moveAnchored(rec, dt); else moveDrifting(rec, dt);
+      rec.moodT -= dt;
+      if (rec.moodT <= 0) { rec.mood = "calm"; if (rec.wp) rec.legT = 0; }
+      return;
+    }
+    if (rec._rescue && rescueTick(rec, dt)) return;
+    if (rec.holdT > 0) {
+      rec.holdT -= dt;
+      if (rec.holdMode === "anchor") moveAnchored(rec, dt);
+      else if (rec.holdMode === "set") moveSet(rec, dt);
+      else moveDrifting(rec, dt);
+      if (rec.holdT <= 0) { rec.anchored = false; rec.holdT = 0; rec.wp = null; }
+      return;
+    }
+    const J = JOBS[rec.jobKind];
+    if (!J) return;
+    if (!rec.wp) { J.leg(rec); if (!rec.wp) return; }
+    rec.legT += dt;
+    const wp = rec.wp;
+    let d;
+    if (rec.jobKind === "sail") {
+      const course = sailCourse(rec, wp.x, wp.z, dt);
+      const sp = sailSpeed(rec, course);
+      d = steer(rec, dt, rec.pos.x + Math.sin(course) * 60, rec.pos.z + Math.cos(course) * 60, sp, 0);
+      d = Math.hypot(wp.x - rec.pos.x, wp.z - rec.pos.z);
+      sailHeel(rec, dt);
+    } else {
+      const d0 = Math.hypot(wp.x - rec.pos.x, wp.z - rec.pos.z);
+      let sp = rec.wpSpeed;
+      if (rec.wpBrake) {
+        // a stopping distance, not a wall: v^2 = 2 a s with a hull-sized a
+        const a = clamp(3.2 / Math.sqrt(Math.max(1, num(rec._hullSpec.loa, 6))), 0.35, 1.6);
+        sp = Math.min(sp, Math.sqrt(2 * a * Math.max(0, d0 - rec.wpArrive * 0.6)) + 0.25);
+      }
+      d = steer(rec, dt, wp.x, wp.z, sp, rec.wpBrake ? rec.wpArrive * 0.5 : 0.1);
+    }
+    if (d < rec.wpArrive || rec.legT > rec.legMax) {
+      rec.wp = null;
+      J.arrive(rec);
+    }
+  }
+
+  // ============================================================
+  //  §3c. A FIN — who sees the shark, and what they do about it
+  // ============================================================
+  /* One small list of things that eat people (the ridden shark always, and
+     anything aquatic that charges and bites — survivorbot.js draws the same
+     line at danger 0.5), rebuilt a few times a second; each hull asks it for
+     the nearest one it can SEE. A fin at the surface is seen a long way off
+     and further the bigger the animal; a shadow deep under the hull only up
+     close. The crew see it before anyone does anything, which is the point:
+     the reaction is theirs. */
+  const threats = [];
+  let threatT = 0;
+  function refreshThreats() {
+    threats.length = 0;
+    const list = CBZ.cityWildlife;
+    if (!list) return;
+    const ridden = CBZ.sharkSim && CBZ.sharkSim.shark;
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      if (!a || a.dead || !a.pos || !a.species || !a.species.aquatic) continue;
+      if (a !== ridden && !(+a.species.danger >= 0.5)) continue;
+      threats.push(a);
+    }
+  }
+  function seeRange(a) {
+    const L = Math.max(1.5, lenOf(a) || 3);
+    const under = seaY(a.pos.x, a.pos.z) - num(a.pos.y, 0);
+    const R = 16 + L * 4.5;
+    // the dorsal breaks the surface only when she is about a fin's height
+    // down; deeper than that it is a shadow, seen from almost on top of it
+    return under < 0.35 + L * 0.13 ? R : R * 0.35;
+  }
+  function spotTick() {
+    refreshThreats();
+    for (let i = 0; i < craft.length; i++) {
+      const rec = craft[i];
+      if (rec.dead || rec._capsized || rec._sinking || rec._engulf || !rec.crew.length) continue;
+      let best = null, bd = 1e9;
+      for (let k = 0; k < threats.length; k++) {
+        const a = threats[k];
+        const d = Math.hypot(a.pos.x - rec.pos.x, a.pos.z - rec.pos.z);
+        if (d < seeRange(a) && d < bd) { bd = d; best = a; }
+      }
+      if (best) alarm(rec, best.pos.x, best.pos.z, false, best, bd, seeRange(best));
+    }
+  }
+  /* alarm(rec, x, z, attacked): she has seen it. Small and open boats run;
+     a big hull that has only SEEN a fin stops to look (everyone to the rail,
+     pointing) and runs only once it is attacked or the thing comes close. */
+  function alarm(rec, x, z, attacked, who, dist, range) {
+    if (rec.dead || rec._capsized || rec._sinking || rec._engulf) return;
+    rec.seen = rec.seen || { x: 0, z: 0 };
+    rec.seen.x = x; rec.seen.z = z; rec.seenT = 0;
+    rec.alarm = 1;
+    /* SEEN IS NOT CHASED. A fin at the edge of what they can see stops them:
+       throttle off, everyone to the rail, pointing. One that comes on (within
+       about half that range, or 14 m of any hull) sends the small boats
+       running; a big hull holds her ground until she is actually hit. */
+    const big = num(rec._hullSpec && rec._hullSpec.loa, 6) >= 12;
+    const close = dist != null && (dist < 14 || (!big && range != null && dist < range * 0.55));
+    if (!attacked && !close && rec.mood !== "flee") {
+      rec.mood = "watch";
+      rec.moodT = 10;
+      return;
+    }
+    if (rec.mood !== "flee") {
+      rec.mood = "flee"; rec.fleeT = 0; rec.fleeWp = null;
+      if (rec.anchored) {
+        // cut the rode and go
+        rec.anchored = false; rec.holdT = 0;
+        splash(rec.anchor.x, rec.anchor.z, 0.6);
+      }
+      rec.lines = false; rec.holdT = 0; rec._rescue = null;
+      honk(rec);
+    }
+    rec.moodT = 18;
+    rec.fleeFrom = rec.fleeFrom || { x: 0, z: 0 };
+    rec.fleeFrom.x = x; rec.fleeFrom.z = z;
+    rec.fleeWp = null;
+  }
+  function honk(rec) {
+    if (!(rec._hullSpec && rec._hullSpec.engine !== false)) return;
+    if (num(rec._hullSpec.loa, 0) < 5 || !CBZ.sfxAt || !CBZ.camera) return;
+    const c = CBZ.camera.position;
+    if (Math.hypot(c.x - rec.pos.x, c.z - rec.pos.z) > 120) return;
+    try { CBZ.sfxAt("horn", rec.pos.x, rec.pos.z, { volume: 0.5 }); } catch (e) {}
+  }
+  /* WHERE TO RUN. Away from the thing, but a runabout from the swimming band
+     runs for the beach end of its own water, not two kilometres out to sea:
+     twelve headings are scored by how squarely they point away and how far
+     each would leave the band she works in, and the deep ones compete. A
+     paddler cannot outrun anything and makes for the sand. */
+  function fleeTarget(rec) {
+    const B = rec.band;
+    const paddled = rec._hullSpec && rec._hullSpec.engine === false;
+    let ax = rec.pos.x - rec.fleeFrom.x, az = rec.pos.z - rec.fleeFrom.z;
+    const m = Math.hypot(ax, az) || 1; ax /= m; az /= m;
+    if (paddled && B) {
+      const a = bandAng(rec, rec.pos.x, rec.pos.z);
+      return bandPt(rec, a + (ax * -Math.sin(a) + az * Math.cos(a)) * 0.05, Math.max(0, num(B.shore, B.r0 - 10)));
+    }
+    const need = needOf(rec);
+    const L = 110;
+    let best = null, bs = -1e9;
+    for (let k = 0; k < 12; k++) {
+      const h = k / 12 * Math.PI * 2;
+      const dx = Math.sin(h), dz = Math.cos(h);
+      const p = { x: rec.pos.x + dx * L, z: rec.pos.z + dz * L };
+      let sc = dx * ax + dz * az;
+      if (sc < -0.2) continue;
+      if (B) {
+        const r = bandRad(rec, p.x, p.z);
+        sc -= Math.max(0, r - (B.r1 + 50)) / 80 + Math.max(0, (B.r0 - 15) - r) / 40;
+      }
+      if (sc <= bs) continue;
+      if (depthHere(p.x, p.z) < need || depthHere(rec.pos.x + dx * L * 0.5, rec.pos.z + dz * L * 0.5) < need) continue;
+      bs = sc; best = p;
+    }
+    if (best) return best;
+    if (B) { const a = bandAng(rec, rec.pos.x, rec.pos.z); return bandPt(rec, a, bandRad(rec, rec.pos.x, rec.pos.z) + 100); }
+    return { x: rec.pos.x + ax * L, z: rec.pos.z + az * L };
+  }
+  function fleeTick(rec, dt) {
+    rec.fleeT += dt; rec.moodT -= dt;
+    if (!rec.fleeWp || (rec.fleeT % 2) < dt) rec.fleeWp = fleeTarget(rec);
+    const top = topOf(rec);
+    const d = steer(rec, dt, rec.fleeWp.x, rec.fleeWp.z, top * 0.95, 2);
+    if (rec.moodT <= 0 || d < 4) calm(rec);
+  }
+  function calm(rec) {
+    rec.mood = "calm"; rec.moodT = 0; rec.fleeWp = null;
+    startJob(rec);
+    // she ran fast: coast a moment before whatever the job asks next
+    if (!(rec.holdT > 0)) hold(rec, 3 + rnd(rec, 31) * 4, "drift");
+    if (rec._lost && rec._lost.length) rec._rescue = true;
+  }
+  /* AN ALARM IN THE WATER: a boat hit, a man thrown in, a hull going into a
+     mouth. Every crewed hull in earshot hears it, and the ones close enough
+     to see run. */
+  function alarmAt(x, z, r, attacked) {
+    for (let i = 0; i < craft.length; i++) {
+      const c = craft[i];
+      const d = Math.hypot(c.pos.x - x, c.pos.z - z);
+      if (d < r && c.crew.length) alarm(c, x, z, attacked && d < r * 0.5, null, d);
+    }
+  }
+
+  /* ---- MAN OVERBOARD: swim for the boat, and the boat comes back ---------
+     A body that went over the side is remembered by the hull it left. Once
+     the water is quiet the boat (if anyone is still at the helm) comes back
+     for him at a walking pace; whoever is in the water within reach swims
+     for her, and a man who reaches the hull climbs back aboard into the
+     first free seat. A man whose boat turned over or sank has nothing to
+     swim to, and survivorbot's own brain takes him for the beach. */
+  function freeSeat(rec) {
+    for (let s = 0; s < rec._seats.length; s++) {
+      let used = false;
+      for (let i = 0; i < rec.crew.length; i++) if (rec.crew[i] && rec.crew[i]._aboardSeat === s) { used = true; break; }
+      if (!used) return s;
+    }
+    return -1;
+  }
+  function swimmersTick(rec) {
+    const L = rec._lost;
+    if (!L || !L.length) return;
+    const ok = !rec.dead && !rec._capsized && !rec._sinking && !rec._engulf;
+    const reach = num(rec._hullSpec.beam, 2) * 0.5 + 1.4;
+    for (let i = L.length - 1; i >= 0; i--) {
+      const b = L[i];
+      if (!b || b.dead || b._aboard || !b.swim) { if (!b || b.dead || b._aboard) L.splice(i, 1); continue; }
+      const d = Math.hypot(b.pos.x - rec.pos.x, b.pos.z - rec.pos.z);
+      if (!ok || d > 70) { L.splice(i, 1); continue; }
+      if (b.panicT > 0 && rec.mood === "flee") continue;           // everyone is running; so is he
+      if (d < reach) {
+        const s = freeSeat(rec);
+        if (s < 0) { L.splice(i, 1); continue; }
+        L.splice(i, 1);
+        b._aboard = rec; b._aboardSeat = s;
+        b.swim = false; b.wet = true; b.panicT = 0;
+        if (b.pause != null) b.pause = 1e9;
+        rec.crew.push(b);
+        poseAboard(b, rec._seats[s]);
+        placeAboard(rec, b, rec._seats[s]);
+        splash(b.pos.x, b.pos.z, 0.7);
+        continue;
+      }
+      // swim for her: survivorbot follows a target leg until it gets there
+      if (b.target && b.target.set) b.target.set(rec.pos.x, 0, rec.pos.z);
+      b.pause = 0;
+      if (b.state !== "panic") b.state = "move";
+    }
+    if (!L.length) rec._rescue = null;
+  }
+  // the boat comes back for him: slow, and stopping beside him
+  function rescueTick(rec, dt) {
+    const L = rec._lost;
+    if (!L || !L.length || !rec.crew.length) { rec._rescue = null; return false; }
+    let b = null, bd = 1e9;
+    for (let i = 0; i < L.length; i++) {
+      const s = L[i]; if (!s || s.dead) continue;
+      const d = Math.hypot(s.pos.x - rec.pos.x, s.pos.z - rec.pos.z);
+      if (d < bd) { bd = d; b = s; }
+    }
+    if (!b) { rec._rescue = null; return false; }
+    rec.anchored = false; rec.holdT = 0; rec.lines = false;
+    if (bd < 5) { moveDrifting(rec, dt); return true; }
+    steer(rec, dt, b.pos.x, b.pos.z, Math.min(2.4, Math.sqrt(2 * 0.6 * Math.max(0, bd - 4)) + 0.3), 4);
+    return true;
+  }
+
   /* THE RIDE. Seat the hull on the live surface with the wave attitude, then
      compose whatever roll the stability owner has for it. water_buoyancy.js's
      own pass only ever walks cityCars, which is exactly why this exists — and
@@ -439,7 +1074,10 @@
     const planing = clamp(num(rec._planing, 0), 0, 1);
     pitchW *= 1 - planing * 0.55; rollW *= 1 - planing * 0.55;
     const pitch = -pitchW + num(rec._pitch, 0);
-    let roll = rollW + num(rec._roll, 0);
+    // the rig's leeward heel (§3b sailHeel), eased off when she is not sailing
+    if (!rec._sailFrame && rec._sailHeel) rec._sailHeel *= Math.max(0, 1 - dt * 0.8);
+    rec._sailFrame = false;
+    let roll = rollW + num(rec._roll, 0) + num(rec._sailHeel, 0);
     let y = mean + num(spec.rideAbove, 0.06) * (1 - 0.55 * planing);
 
     // Extra roll, ride drop and lift from the stability owner (water_stability.js),
@@ -467,7 +1105,9 @@
     _e.set(pitch, rec.heading, roll, "YXZ");
     rec.group.quaternion.setFromEuler(_e);
 
-    if (typeof CBZ.waterWakeFor === "function" && !rec._capsized && Math.abs(rec.v) > 0.4) {
+    // the autopilot already threw this frame's wake for a hull it drove; a
+    // far hull's wake is spent on water nobody is looking at
+    if (typeof CBZ.waterWakeFor === "function" && !rec._capsized && !rec._apWake && !rec._far && Math.abs(rec.v) > 0.4) {
       try { CBZ.waterWakeFor(rec, dt); } catch (e) {}
     }
   }
@@ -487,6 +1127,22 @@
   }
   function seatCrew(rec, dt, calm) {
     if (!rec.crew.length) return;
+    // a far hull's people are hidden: keep them on their berths twice a
+    // second (the bite scan still reads where they are), skip the rig
+    if (rec._far && !calm) {
+      rec._farCrewT = num(rec._farCrewT, 0) - dt;
+      if (rec._farCrewT > 0) return;
+      rec._farCrewT = 0.5;
+      rec.group.updateMatrixWorld(true);
+      for (let i = 0; i < rec.crew.length; i++) {
+        const b = rec.crew[i];
+        if (!b || b.dead || b._aboard !== rec || b._overboard) { rec.crew.splice(i--, 1); continue; }
+        const seat = rec._seats[num(b._aboardSeat, i)] || rec._seats[0];
+        if (seat) placeAboard(rec, b, seat);
+        if (b.group && b.group.visible) b.group.visible = false;   // climbed aboard a far hull
+      }
+      return;
+    }
     rec.group.updateMatrixWorld(true);
     const roll = rollOf(rec);
     const rate = rec._stab ? num(rec._stab.phiDot, 0) : num(rec._heelV, 0);
@@ -512,6 +1168,7 @@
         // the ONE writer of this rig for the frame: survivorbot's mover skips
         // a body that is `_aboard`, so the pose has to be driven from here
         if (typeof CBZ.animChar === "function") { try { CBZ.animChar(b.char, 0, dt); } catch (e) {} }
+        crewAct(rec, b, seat, i, dt);
       }
     }
   }
@@ -583,6 +1240,9 @@
     if (b.char) { b.char.sitting = false; b.char.seatRef = null; b.char.airPose = { t: 0, rise: 1, fall: 0 }; }
     falling.push(F);
     AUDIT.overboard++;
+    if (rec._lost && rec._lost.indexOf(b) < 0) rec._lost.push(b);
+    // a man going in off a boat is heard across the water
+    alarmAt(rec.pos.x, rec.pos.z, 70, o.cause !== "fall" && o.cause !== "heel");
     return F;
   }
   function tickFalling(dt) {
@@ -781,6 +1441,8 @@
     // heave under it decide who goes over the rail she is now heeled to
     const lift = under ? (typeof CBZ.hullStabLift === "function" ? num(CBZ.hullStabLift(rec), 0) : clamp(moment * 0.02, 0, 2.2)) : 0;
     staggerCrew(rec, push, lift, phi >= 0 ? 1 : -1);
+    alarm(rec, ap.x, ap.z, true, a, 0);
+    alarmAt(p.x, p.z, 90, true);
     /* THE WHITE WATER IS THE SIZE OF THE THING THAT MADE IT. Scaled off the
        moment AND the hull, because a 4 m kayak rolling threw the same wall of
        spray as a megalodon hitting a cruiser and it hid the whole event. */
@@ -864,6 +1526,7 @@
     const spec = rec._hullSpec, st = stabOf(spec);
     if (o.bite) {
       AUDIT.bites++;
+      alarmAt(rec.pos.x, rec.pos.z, 110, true);
       const p = o.point || rec.pos;
       const nx = num(o.normal && o.normal.x, Math.cos(rec.heading));
       const nz = num(o.normal && o.normal.z, Math.sin(rec.heading));
@@ -975,6 +1638,7 @@
   function engulf(rec, eater) {
     if (!rec || rec.dead || !eater || rec._engulf) return false;
     rec._engulf = { by: eater, t: 0, dur: 0.5 };
+    alarmAt(rec.pos.x, rec.pos.z, 130, true);
     rec.engineDead = true; rec.route = null; rec.anchored = false;
     rec.v = 0;
     return true;
@@ -1054,13 +1718,383 @@
   }
 
   // ============================================================
+  //  §3d. WHAT THE PEOPLE ABOARD ARE DOING WITH THEIR ARMS
+  // ============================================================
+  /* animChar poses a seated body in the chair solve and RETURNS (the seated
+     branch owns the whole rig), so nothing about the job ever reached the
+     arms: a kayaker sat with his hands in his lap at three knots and a
+     fisherman looked at the horizon with no rod. This is a late layer written
+     AFTER animChar, blended by a per-body weight so it eases in and out:
+
+       paddle  both arms forward, alternating strokes, a torso twist into
+               each one; faster when he is running from something
+       rod     the fishing arm out over the rail (the line itself is drawn
+               in §3e from the same hand)
+       point   head and chest turned to the fin, one arm straight at it
+       wave    both arms up over the head, flailing: the scream
+       helm    the man driving hunches over the wheel when she is running
+
+     A STANDING man turns his whole body to look (the berth yaw is blended
+     toward the bearing); a seated one turns his chest and head. */
+  function damp1(cur, want, rate, dt) { return cur + (want - cur) * Math.min(1, rate * dt); }
+  function crewAct(rec, b, seat, idx, dt) {
+    const ch = b.char;
+    if (!ch || !ch.parts) return;
+    const P = ch.parts, J = ch.low || {};
+    const alarmed = rec.alarm > 0.02 && rec.seen;
+    const helm = idx === 0 && seat.kind === "helm";
+    const paddled = rec._hullSpec && rec._hullSpec.engine === false;
+    let act = null;
+    if (paddled && idx === 0) act = Math.abs(rec.v) > 0.25 ? "paddle" : (alarmed ? "wave" : null);
+    else if (alarmed) act = helm ? (rec.mood === "flee" ? "helm" : "point") : ((idx & 1) ? "point" : "wave");
+    else if (rec.lines && !helm && !seat.stand) act = "rod";
+    else if (rec.lines && seat.stand && idx > 0) act = "rod";
+    const w = b._actW = damp1(num(b._actW, 0), act ? 1 : 0, act ? 4 : 2.5, dt);
+    if (act) b._act = act;
+    // the bearing to the fin, in this body's own frame
+    let rel = 0;
+    if (rec.seen) {
+      const bear = Math.atan2(rec.seen.x - b.pos.x, rec.seen.z - b.pos.z);
+      rel = wrapA(bear - rec.heading - num(seat.yaw, 0));
+    }
+    const look = alarmed && act !== "paddle" && act !== "helm";
+    b._lookYaw = damp1(num(b._lookYaw, 0), look && seat.stand ? rel : 0, 3, dt);
+    if (w < 0.01) { b._act = null; return; }
+    const k = w, mix = function (o, key, v) { o[key] = o[key] + (v - o[key]) * k; };
+    const t = (b._actPh = num(b._actPh, h01(idx, b.pos.x) * 6) + dt * (b._act === "paddle" ? (rec.mood === "flee" ? 9 : 5.2) : 8.5));
+    switch (b._act) {
+      case "paddle": {
+        const s = Math.sin(t);
+        if (P.la) { mix(P.la.rotation, "x", -1.05 + s * 0.42); mix(P.la.rotation, "z", -0.18); }
+        if (P.ra) { mix(P.ra.rotation, "x", -1.05 - s * 0.42); mix(P.ra.rotation, "z", 0.18); }
+        if (J.la) mix(J.la.rotation, "x", -0.55 - Math.max(0, s) * 0.35);
+        if (J.ra) mix(J.ra.rotation, "x", -0.55 - Math.max(0, -s) * 0.35);
+        if (ch.body) { mix(ch.body.rotation, "y", s * 0.3); mix(ch.body.rotation, "x", 0.12); }
+        break;
+      }
+      case "rod": {
+        const bob = Math.sin(t * 0.25) * 0.05;
+        if (P.ra) { mix(P.ra.rotation, "x", -1.05 + bob); mix(P.ra.rotation, "z", 0.22); }
+        if (J.ra) mix(J.ra.rotation, "x", -0.75);
+        if (P.la) { mix(P.la.rotation, "x", -0.75 + bob); mix(P.la.rotation, "z", -0.1); }
+        if (J.la) mix(J.la.rotation, "x", -0.9);
+        break;
+      }
+      case "point": {
+        const by = seat.stand ? 0 : clamp(rel, -0.9, 0.9);
+        if (ch.body) mix(ch.body.rotation, "y", by);
+        if (ch.neck) mix(ch.neck.rotation, "y", clamp((seat.stand ? rel - b._lookYaw : rel - by), -0.7, 0.7));
+        if (P.ra) { mix(P.ra.rotation, "x", -1.5 + Math.sin(t * 0.7) * 0.06); mix(P.ra.rotation, "z", 0.08); mix(P.ra.rotation, "y", 0); }
+        if (J.ra) mix(J.ra.rotation, "x", -0.05);
+        if (P.la) { mix(P.la.rotation, "x", -0.35); mix(P.la.rotation, "z", -0.25); }
+        break;
+      }
+      case "wave": {
+        const f = Math.sin(t) * 0.3;
+        if (ch.body && !seat.stand) mix(ch.body.rotation, "y", clamp(rel, -0.6, 0.6));
+        if (ch.neck) mix(ch.neck.rotation, "y", clamp(rel * 0.5, -0.6, 0.6));
+        if (P.la) { mix(P.la.rotation, "x", -2.55); mix(P.la.rotation, "z", -0.35 - f); }
+        if (P.ra) { mix(P.ra.rotation, "x", -2.55); mix(P.ra.rotation, "z", 0.35 - f); }
+        if (J.la) mix(J.la.rotation, "x", -0.35 - Math.abs(f));
+        if (J.ra) mix(J.ra.rotation, "x", -0.35 - Math.abs(f));
+        break;
+      }
+      case "helm": {
+        if (ch.body) mix(ch.body.rotation, "x", 0.22);
+        if (ch.neck) mix(ch.neck.rotation, "y", clamp(rel, -0.8, 0.8) * (Math.sin(t * 0.4) > 0.6 ? 1 : 0));
+        break;
+      }
+    }
+    // the neck turn is not one animChar resets: take it home ourselves
+    if (ch.neck && b._act !== "point" && b._act !== "wave" && b._act !== "helm") ch.neck.rotation.y *= 1 - Math.min(1, dt * 3);
+  }
+
+  // ============================================================
+  //  §3e. LINES OVER THE SIDE — every rod and line in the sea, ONE draw call
+  // ============================================================
+  /* A fisherman is a man with a line in the water. Each rod is two segments
+     (butt to tip, tip to where the line enters the sea) in one shared
+     LineSegments whose buffer is rewritten each frame for the near hulls
+     only: a trolling boat trails two lines astern from the transom holders,
+     an anchored one has a line over the side per angler. */
+  const LINE_CAP = 48;
+  let lineSeg = null;
+  function lineMesh() {
+    const root = sceneRoot();
+    if (lineSeg && lineSeg.parent === root) return lineSeg;
+    if (!root) return null;
+    if (!lineSeg) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(LINE_CAP * 4 * 3), 3));
+      g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(LINE_CAP * 4 * 3), 3));
+      g.attributes.position.setUsage(THREE.DynamicDrawUsage);
+      g.setDrawRange(0, 0);
+      const m = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85 });
+      lineSeg = new THREE.LineSegments(g, m);
+      lineSeg.frustumCulled = false;
+      lineSeg.name = "sea_craft_lines";
+      lineSeg.renderOrder = 2;
+    }
+    root.add(lineSeg);
+    return lineSeg;
+  }
+  let lineN = 0;
+  function pushSeg(ax, ay, az, bx, by, bz, c) {
+    if (lineN >= LINE_CAP * 2) return;
+    const P = lineSeg.geometry.attributes.position.array, C = lineSeg.geometry.attributes.color.array;
+    const o = lineN * 6;
+    P[o] = ax; P[o + 1] = ay; P[o + 2] = az; P[o + 3] = bx; P[o + 4] = by; P[o + 5] = bz;
+    C[o] = C[o + 3] = c; C[o + 1] = C[o + 4] = c; C[o + 2] = C[o + 5] = c * 1.02;
+    lineN++;
+  }
+  function rodsFor(rec) {
+    const spec = rec._hullSpec, h = rec.heading;
+    const fx = Math.sin(h), fz = Math.cos(h), sx = -Math.cos(h), sz = Math.sin(h);   // fwd, starboard
+    const t = (typeof CBZ.waterClock === "function" ? CBZ.waterClock() : 0);
+    if (rec.jobKind === "troll") {
+      // two rods in the transom holders, lines streaming astern and out
+      const st = num(spec.sternOffset, num(spec.loa, 8) * 0.5) * 0.92;
+      const deck = rec.group.position.y + num(spec.deckY, 0.8);
+      for (let s = -1; s <= 1; s += 2) {
+        const bx = rec.pos.x - fx * st + sx * s * num(spec.beam, 3) * 0.32, bz = rec.pos.z - fz * st + sz * s * num(spec.beam, 3) * 0.32;
+        const tx = bx - fx * 1.2 + sx * s * 1.4, tz = bz - fz * 1.2 + sz * s * 1.4, ty = deck + 2.4;
+        pushSeg(bx, deck + 0.4, bz, tx, ty, tz, 0.12);
+        const L = 26 + s * 4;
+        const wx = tx - fx * L + sx * s * 6, wz = tz - fz * L + sz * s * 6;
+        pushSeg(tx, ty, tz, wx, seaY(wx, wz) + 0.02, wz, 0.82);
+      }
+      return;
+    }
+    for (let i = 0; i < rec.crew.length; i++) {
+      const b = rec.crew[i];
+      if (!b || b._act !== "rod" || !(b._actW > 0.3)) continue;
+      const seat = rec._seats[num(b._aboardSeat, i)]; if (!seat) continue;
+      const side = seat.x > 0.05 ? -1 : (seat.x < -0.05 ? 1 : ((i & 1) ? 1 : -1));   // local +X is port
+      const hx = b.pos.x + fx * 0.35 + sx * side * 0.3, hz = b.pos.z + fz * 0.35 + sz * side * 0.3;
+      const hy = b.pos.y + (seat.stand ? 1.15 : 0.85);
+      const bob = Math.sin(t * 0.8 + i * 1.7) * 0.12;
+      const tx = hx + sx * side * 1.7 + fx * 0.6, tz = hz + sz * side * 1.7 + fz * 0.6, ty = hy + 1.25 + bob;
+      pushSeg(hx, hy, hz, tx, ty, tz, 0.12);
+      const wx = tx + sx * side * 4.5 + fx * 1.5, wz = tz + sz * side * 4.5 + fz * 1.5;
+      pushSeg(tx, ty, tz, wx, seaY(wx, wz) + 0.02, wz, 0.82);
+    }
+  }
+  function linesTick() {
+    if (!lineMesh()) return;
+    lineN = 0;
+    for (let i = 0; i < craft.length; i++) {
+      const rec = craft[i];
+      if (rec._far || !rec.lines || rec.dead || rec._capsized || !rec.crew.length) continue;
+      rodsFor(rec);
+    }
+    const g = lineSeg.geometry;
+    g.setDrawRange(0, lineN * 2);
+    g.attributes.position.needsUpdate = true;
+    g.attributes.color.needsUpdate = true;
+    lineSeg.visible = lineN > 0;
+  }
+
+  // ============================================================
+  //  §10. FAR HULLS — the sea can be busy because distance is cheap
+  // ============================================================
+  /* MEASURED ON HEAD: one hull is 13-38 meshes (a kayak 14, a skiff 25, a
+     console 38) and every crewman is another 21. Eight hulls with seventeen
+     people was already ~540 potential draw calls; thirty-odd hulls drawn the
+     same way would be two thousand. So only the NEAREST few hulls are the
+     real thing (full hull, live crew rigs, lines, wakes). Every other hull is
+     ONE INSTANCE of its own class's impostor: the real hull template baked
+     once into a single vertex-coloured geometry (the same silhouette to the
+     centimetre, because it IS that hull), drawn with its whole class in one
+     InstancedMesh — and everyone aboard a far hull is one instance of a
+     small figure in another. The real hull and crew stay in the scene with
+     visible=false and keep their state; the rules, the bite scan and the
+     damage model never know. Anything past the fog is not drawn at all.
+
+     Cost: <= MAX_FULL real hulls + one call per hull CLASS in view + one for
+     all the far people + one for all the lines. */
+  const MAX_FULL = 6;
+  const NEAR_IN = 120, NEAR_OUT = 140;            // m from the camera, with hysteresis
+  const IMP_CAP = 20;
+  const imp = new Map();                           // key -> { mesh, n }
+  let impMat = null, figMesh = null, figN = 0;
+  const _m4 = new THREE.Matrix4(), _m4b = new THREE.Matrix4(), _p3 = new THREE.Vector3(), _s3 = new THREE.Vector3(1, 1, 1);
+  const _col = new THREE.Color();
+  function impostorGeo(key) {
+    const R = MH();
+    if (!R) return null;
+    let g = null;
+    try { g = R.build(R.get(key) ? key : "dinghy"); } catch (e) { g = null; }
+    if (!g) return null;
+    g.position.set(0, 0, 0); g.rotation.set(0, 0, 0); g.updateMatrixWorld(true);
+    const pos = [], nor = [], col = [];
+    const _n3 = new THREE.Matrix3(), va = new THREE.Vector3(), na = new THREE.Vector3();
+    g.traverse(function (o) {
+      if (!o.isMesh || !o.geometry || !o.visible) return;
+      const geo = o.geometry, P = geo.attributes.position;
+      if (!P) return;
+      if (!geo.boundingSphere) geo.computeBoundingSphere();
+      if (geo.boundingSphere && geo.boundingSphere.radius < 0.12) return;   // a cleat is not a silhouette
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      const N = geo.attributes.normal;
+      const idx = geo.index;
+      _n3.getNormalMatrix(o.matrixWorld);
+      const groups = (Array.isArray(o.material) && geo.groups.length) ? geo.groups : [{ start: 0, count: idx ? idx.count : P.count, materialIndex: 0 }];
+      for (let gi = 0; gi < groups.length; gi++) {
+        const G = groups[gi], m = mats[G.materialIndex] || mats[0];
+        if (!m || m.visible === false) continue;
+        if (m.transparent && num(m.opacity, 1) < 0.3) continue;
+        _col.setRGB(1, 1, 1);
+        if (m.color) _col.copy(m.color);
+        if (m.emissive) { const ei = num(m.emissiveIntensity, 1) * 0.5; _col.r += m.emissive.r * ei; _col.g += m.emissive.g * ei; _col.b += m.emissive.b * ei; }
+        if (m.transparent) _col.multiplyScalar(0.55);      // glass reads dark from outside
+        const end = Math.min(G.start + G.count, idx ? idx.count : P.count);
+        for (let k = G.start; k < end; k++) {
+          const vi = idx ? idx.getX(k) : k;
+          va.fromBufferAttribute(P, vi).applyMatrix4(o.matrixWorld);
+          pos.push(va.x, va.y, va.z);
+          if (N) { na.fromBufferAttribute(N, vi).applyMatrix3(_n3).normalize(); nor.push(na.x, na.y, na.z); } else nor.push(0, 1, 0);
+          col.push(_col.r, _col.g, _col.b);
+        }
+      }
+    });
+    if (!pos.length) return null;
+    const out = new THREE.BufferGeometry();
+    out.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    out.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+    out.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    out.computeBoundingSphere();
+    return out;
+  }
+  function impFor(key) {
+    const root = sceneRoot();
+    if (!root) return null;
+    let I = imp.get(key);
+    if (I === null) return null;                     // could not be baked: keep the real hull
+    if (!I) {
+      const geo = impostorGeo(key);
+      if (!geo) { imp.set(key, null); return null; }
+      if (!impMat) impMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+      const mesh = new THREE.InstancedMesh(geo, impMat, IMP_CAP);
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.frustumCulled = false;                    // r128 culls an InstancedMesh by the template's sphere
+      mesh.castShadow = false; mesh.receiveShadow = false;
+      mesh.name = "sea_craft_far_" + key;
+      mesh.count = 0;
+      I = { mesh: mesh, n: 0 };
+      imp.set(key, I);
+    }
+    if (I.mesh.parent !== root) root.add(I.mesh);
+    return I;
+  }
+  const FIG_CAP = 96;
+  const FIG_COLS = [0x2d4b73, 0xc9c3b4, 0x8b2d2a, 0x3b3b3b, 0xd8d2c0, 0x2f6b4f, 0xb5732e];
+  function figFor() {
+    const root = sceneRoot();
+    if (!root) return null;
+    if (!figMesh) {
+      const g = new THREE.BoxGeometry(0.46, 1.0, 0.3);
+      g.translate(0, 0.5, 0);
+      const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
+      figMesh = new THREE.InstancedMesh(g, m, FIG_CAP);
+      figMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      figMesh.frustumCulled = false; figMesh.castShadow = false;
+      figMesh.name = "sea_craft_far_people";
+      for (let i = 0; i < FIG_CAP; i++) { _col.setHex(FIG_COLS[i % FIG_COLS.length]); figMesh.setColorAt(i, _col); }
+      if (figMesh.instanceColor) figMesh.instanceColor.needsUpdate = true;
+      figMesh.count = 0;
+    }
+    if (figMesh.parent !== root) root.add(figMesh);
+    return figMesh;
+  }
+  function mustBeReal(rec) {
+    return !!(rec._engulf || rec._sinking || rec._capsized || rec._holes || rec._floatH);
+  }
+  let tierT = 0;
+  const _order = [];
+  function tierTick(dt) {
+    tierT -= dt;
+    if (tierT > 0) return;
+    tierT = 0.25;
+    const cam = CBZ.camera;
+    if (!cam) return;
+    const cx = cam.position.x, cz = cam.position.z;
+    const fog = CBZ.scene && CBZ.scene.fog;
+    const gone = fog && fog.far ? fog.far + 40 : 1e9;
+    _order.length = 0;
+    for (let i = 0; i < craft.length; i++) {
+      const rec = craft[i];
+      rec._camD = Math.hypot(rec.pos.x - cx, rec.pos.z - cz);
+      _order.push(rec);
+    }
+    _order.sort(function (a, b) { return a._camD - b._camD; });
+    let full = 0;
+    for (let i = 0; i < _order.length; i++) {
+      const rec = _order[i];
+      const lim = rec._far ? NEAR_IN : NEAR_OUT;
+      let far = !(rec._camD < lim && full < MAX_FULL);
+      if (mustBeReal(rec)) far = false;
+      if (far && !impFor(rec.detailStyle || rec.key)) far = false;
+      if (!far) full++;
+      rec._hidden = far && rec._camD > gone;
+      setFar(rec, far);
+    }
+  }
+  function setFar(rec, far) {
+    if (!!rec._far === far) return;
+    rec._far = far;
+    rec.group.visible = !far;
+    for (let i = 0; i < rec.crew.length; i++) {
+      const b = rec.crew[i];
+      if (b && b.group) b.group.visible = !far;
+    }
+  }
+  function farDraw() {
+    imp.forEach(function (I) { if (I) I.n = 0; });
+    figN = 0;
+    const F = figFor();
+    for (let i = 0; i < craft.length; i++) {
+      const rec = craft[i];
+      if (!rec._far || rec._hidden) continue;
+      const I = impFor(rec.detailStyle || rec.key);
+      if (!I || I.n >= IMP_CAP) continue;
+      rec.group.updateMatrix();
+      I.mesh.setMatrixAt(I.n++, rec.group.matrix);
+      if (!F) continue;
+      for (let k = 0; k < rec.crew.length && figN < FIG_CAP; k++) {
+        const b = rec.crew[k];
+        const seat = b && rec._seats[num(b._aboardSeat, k)];
+        if (!seat) continue;
+        _p3.set(seat.x, seat.floor, seat.z).applyMatrix4(rec.group.matrix);
+        _s3.set(1, seat.stand ? 1.65 : 0.95, 1);
+        _m4.compose(_p3, rec.group.quaternion, _s3);
+        F.setMatrixAt(figN++, _m4);
+      }
+    }
+    imp.forEach(function (I) {
+      if (!I) return;
+      I.mesh.count = I.n; I.mesh.visible = I.n > 0;
+      I.mesh.instanceMatrix.needsUpdate = true;
+    });
+    if (F) { F.count = figN; F.visible = figN > 0; F.instanceMatrix.needsUpdate = true; }
+  }
+  function dropFar() {
+    imp.forEach(function (I) { if (I && I.mesh.parent) I.mesh.parent.remove(I.mesh); });
+    if (figMesh && figMesh.parent) figMesh.parent.remove(figMesh);
+    if (lineSeg && lineSeg.parent) lineSeg.parent.remove(lineSeg);
+  }
+
+  // ============================================================
   //  §8. THE TICK. Order 37.9 — before water_buoyancy's own pass (38.5, which
   //  only ever walks cityCars) and before the stability post-pass (38.7).
   // ============================================================
   CBZ.onUpdate(37.9, function (dt) {
     dt = clamp(num(dt, 0.016), 0.001, 0.05);
     if (falling.length) tickFalling(dt);     // men in the air outlive the hull they left
-    if (!craft.length) return;
+    if (!craft.length) { if (lineSeg && lineSeg.visible) lineSeg.visible = false; return; }
+    threatT -= dt;
+    const spot = threatT <= 0;
+    if (spot) { threatT = 0.3; spotTick(); }
+    tierTick(dt);
     for (let i = craft.length - 1; i >= 0; i--) {
       const rec = craft[i];
       if (!rec || !rec.group || !rec.group.parent) { craft.splice(i, 1); continue; }
@@ -1075,8 +2109,12 @@
         continue;
       }
 
+      rec._apWake = false;
+      if (rec.alarm > 0) rec.alarm = Math.max(0, rec.alarm - dt / (rec.mood === "calm" ? 6 : 20));
+      if (spot) swimmersTick(rec);
       if (rec._capsized) moveDrifting(rec, dt);
       else if (rec.engineDead) moveDrifting(rec, dt);
+      else if (rec.jobKind) helmTick(rec, dt);
       else if (rec.anchored) moveAnchored(rec, dt);
       else if (rec.route) moveCruising(rec, dt);
       else moveDrifting(rec, dt);
@@ -1100,9 +2138,12 @@
       if (!rec._capsized && typeof CBZ.hullCapsized === "function" && CBZ.hullCapsized(rec)) onCapsize(rec);
       if (rec._swamp > 0 && rec._swamp >= num(stabOf(rec._hullSpec).swampT, 10)) { sink(rec); continue; }
 
+      if (rec._hidden) continue;          // past the fog: nobody can see where she sits
       ride(rec, dt);
       seatCrew(rec, dt, false);
     }
+    farDraw();
+    linesTick();
   });
 
   // ============================================================
@@ -1119,14 +2160,22 @@
     capsize: onCapsize,
     spec: specOfRec,
     stab: stabOf,
+    // a shark was seen / something happened here: every crewed hull within r reacts
+    alarm: alarmAt,
+    wind: windNow,
+    jobs: function () { return Object.keys(JOBS); },
     audit: function () {
-      let alive = 0, crewed = 0;
+      let alive = 0, crewed = 0, far = 0, fleeing = 0, underWay = 0;
       for (let i = 0; i < craft.length; i++) {
         if (craft[i].dead || craft[i]._sinking) continue;
         alive++; crewed += craft[i].crew.length;
+        if (craft[i]._far) far++;
+        if (craft[i].mood === "flee") fleeing++;
+        if (Math.abs(craft[i].v) > 0.6) underWay++;
       }
       return {
         craft: alive, aboard: crewed, falling: falling.length,
+        far: far, fleeing: fleeing, underWay: underWay,
         spawned: AUDIT.spawned, eaten: AUDIT.eaten, tipped: AUDIT.tipped,
         sunk: AUDIT.sunk, holed: AUDIT.holed, overboard: AUDIT.overboard,
         rams: AUDIT.rams, bites: AUDIT.bites,
@@ -1135,6 +2184,7 @@
     },
     reset: function () {
       despawnAll();
+      dropFar();
       AUDIT.spawned = AUDIT.eaten = AUDIT.tipped = AUDIT.sunk = 0;
       AUDIT.holed = AUDIT.overboard = AUDIT.rams = AUDIT.bites = 0;
       AUDIT.biggestEatenM = 0;
