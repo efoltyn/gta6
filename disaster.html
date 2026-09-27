@@ -882,11 +882,13 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=tsureal2"></script>
+<script src="src/world/water_spec.js?v=roadmerge1"></script>
 <!-- the tsunami kit shared by the island and the city: the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
 <script src="src/world/tsunami_debris.js?v=tsureal1"></script>
 <script src="src/world/tsunami_flow.js?v=tsureal1"></script>
 <script src="src/world/tsunami_scene.js?v=tsureal1"></script>
+<!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
+<script src="src/city/streetkit.js?v=streets1"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -956,6 +958,9 @@ document.body.appendChild(b);}}catch(e){}})();
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
      continent plate reads its relief-corridor gate). -->
+<!-- THE INTERCHANGE: the R5/R1 flyover (planned by highwaynet at order 91,
+     built in highways.js's late pass at 97.5). -->
+<script src="src/city/interchange.js?v=hwy1"></script>
 <!-- 4d-3. SIMS-STYLE WORLD FOUNDATION: asset catalog + occupancy/anti-overlap
      placement + per-biome town generator (loaded before biome/island builders). -->
 <!-- 4d-3b. F4 — the player-building ENABLING ENGINE (additive, zero call
@@ -1048,6 +1053,9 @@ document.body.appendChild(b);}}catch(e){}})();
      vomitories, roof truss, light rig, jumbotron, instanced crowd);
      arena_fights.js is the FIGHT SURFACES + sim. Both only run at world build,
      so either order works — keep them adjacent, still landmass order 40. -->
+<!-- street hardware kit: signal/lamp prototypes + the additive road light
+     pools. Pure builders, no placement; props.js (next) places them. -->
+<script src="src/city/street_hardware.js?v=hw1"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
