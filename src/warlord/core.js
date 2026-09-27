@@ -1117,7 +1117,7 @@
      WHO OWNS THE SCREEN. Exactly one module at a time, and the transition is
      a function so that a module can never leave its own DOM up behind the
      next one — the single ugliest class of bug in a game made of screens. */
-  const PHASES = ["boot", "menu", "campaign", "encounter", "battle", "aftermath", "outpost", "armoury", "over"];
+  const PHASES = ["boot", "menu", "campaign", "encounter", "battle", "aftermath", "outpost", "armoury", "over", "war"];
   W.phase = function () { return S.phase; };
   W.setPhase = function (p, data) {
     if (PHASES.indexOf(p) < 0) { console.warn("[warlord] unknown phase", p); return; }
