@@ -80,6 +80,18 @@
   if (CBZ.CONFIG.PRISON_PROP_USE_V1 == null) CBZ.CONFIG.PRISON_PROP_USE_V1 = true;
   const USE = !!CBZ.CONFIG.PRISON_PROP_USE_V1;
 
+  // round things are ROUND: plates, the bar, the chalk bucket (they were
+  // 50 cm black squares and a cube). Shared geometry per size, one material each.
+  const _cg = {};
+  function cyl(x, y, z, r, h, color, axis, seg) {
+    const k = r + "|" + h + "|" + (seg || 18);
+    const g = _cg[k] || (_cg[k] = new THREE.CylinderGeometry(r, r, h, seg || 18));
+    const m = new THREE.Mesh(g, CBZ.mat(color));
+    if (axis === "x") m.rotation.z = Math.PI / 2; else if (axis === "z") m.rotation.x = Math.PI / 2;
+    m.position.set(x, y, z); m.castShadow = true;
+    ROOT.add(m);
+    return m;
+  }
   const C_CONC = 0xa9a396, C_CONC_D = 0x8d8779, C_STEEL = 0x6b7480, C_STEEL_D = 0x4a525c;
   let cover = 0;                 // LOS blockers this file stands up
   function blocker(x, y, z, w, h, d, color, opts) {
@@ -128,10 +140,11 @@
     addBox(x, 2.24, z - 0.6, 2.0, 0.12, 0.12, C_STEEL, { cast: false });
     // J-hooks and the loaded bar sitting in them
     for (const s of [-1, 1]) addBox(x + s * 0.85, 1.42, z - 0.44, 0.2, 0.1, 0.22, C_STEEL, { cast: false });
-    addBox(x, 1.5, z - 0.44, 2.3, 0.07, 0.07, 0x9aa0a8, { cast: false });
+    cyl(x, 1.5, z - 0.44, 0.014, 2.2, 0x9aa0a8, "x", 8);                          // the bar
     for (const s of [-1, 1]) {
-      addBox(x + s * 1.0, 1.5, z - 0.44, 0.13, 0.52, 0.52, 0x14181d, {});
-      addBox(x + s * 0.86, 1.5, z - 0.44, 0.12, 0.44, 0.44, 0x14181d, { cast: false });
+      cyl(x + s * 1.0, 1.5, z - 0.44, 0.225, 0.05, 0x1a1d22, "x");                  // 20 kg plates
+      cyl(x + s * 0.94, 1.5, z - 0.44, 0.225, 0.05, 0x1a1d22, "x");
+      cyl(x + s * 1.06, 1.5, z - 0.44, 0.03, 0.08, 0x9aa0a8, "x", 8);               // collar
     }
     // THE THREE LOOSE THINGS IN THE WEIGHT PILE. The rack is bolted through
     // the mat and stays; the bench, the plate tree and the chalk bucket are
@@ -146,15 +159,21 @@
       mass: 45, kind: "bench", leash: 4.0, stand: true, mode: "escape",
     });
     // plate tree — four 20 kg plates on a steel post: it moves, grudgingly
-    const tree = [addBox(x + 2.0, 0.55, z + 0.4, 0.5, 1.1, 0.5, C_STEEL_D, { solid: true })];
-    for (let i = 0; i < 4; i++)
-      tree.push(addBox(x + 2.0, 0.42 + (i % 2) * 0.44, z + 0.4 + (i < 2 ? -0.3 : 0.3), 0.5, 0.5, 0.13, 0x14181d, { cast: false }));
+    // (the collider box is the tree's footprint; it is hidden, the post and
+    // plates are what you see)
+    const treeBase = addBox(x + 2.0, 0.55, z + 0.4, 0.5, 1.1, 0.5, C_STEEL_D, { solid: true });
+    treeBase.visible = false;
+    const tree = [treeBase, cyl(x + 2.0, 0.03, z + 0.4, 0.26, 0.06, C_STEEL_D), cyl(x + 2.0, 0.58, z + 0.4, 0.035, 1.1, C_STEEL_D, null, 10)];
+    for (let i = 0; i < 4; i++) {
+      tree.push(cyl(x + 2.0, 0.34 + (i % 2) * 0.46, z + 0.4 + (i < 2 ? -0.09 : 0.09), 0.225, 0.05, 0x1a1d22, "z"));
+      tree.push(cyl(x + 2.0, 0.34 + (i % 2) * 0.46, z + 0.4 + (i < 2 ? -0.14 : 0.14), 0.03, 0.12, C_STEEL, "z", 8));   // horn
+    }
     if (CBZ.pushProp) CBZ.pushProp({
       parts: tree, x: x + 2.0, z: z + 0.4, hx: 0.25, hz: 0.28, y1: 1.10,
       mass: 110, kind: "platetree", leash: 2.5, mode: "escape",
     });
     // chalk bucket — 4 kg, and it is the lightest thing in the compound
-    const bucket = addBox(x - 1.9, 0.18, z + 1.0, 0.36, 0.36, 0.36, 0xd8d2c4, { cast: false });
+    const bucket = cyl(x - 1.9, 0.18, z + 1.0, 0.16, 0.36, 0xd8d2c4);
     if (CBZ.pushProp) CBZ.pushProp({
       parts: [bucket], x: x - 1.9, z: z + 1.0, hx: 0.18, hz: 0.18, y1: 0.36,
       mass: 4, kind: "bucket", solid: true, leash: 6.0, mode: "escape",
