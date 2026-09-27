@@ -528,11 +528,23 @@
      recycles the most-spent puff instead of refusing the fresh one. Fog-correct
      (the underwater column fogs it like everything else).
      ============================================================ */
-  const PLUME_FRESH = 0x220505, PLUME_DEEP = 0x0a0202;
+  /* COLOUR IS AUTHORED AS THE PIXEL, NOT AS A LIGHT VALUE. The in-game
+     chain is not plain ACES: core/renderer.js runs a CustomToneMapping with a
+     lift/gamma/gain grade and a SATURATION BOOST, times a live day/night
+     exposure from core/gfx.js. That chain took the first cut of this block's
+     0x220505 (#6A161B through plain ACES) to a saturated #B01020 in the real
+     Shark Sim frame — the exact "bright red smear" the owner hates. So the
+     plume and the slicks are toneMapped:false and their colours are the
+     sRGB hexes that land on screen (converted to linear once, because the
+     output encoding still applies). Fog then mixes toward the scene's own
+     already-graded fog colour, so distance and the water column still eat it. */
+  const PLUME_FRESH = 0x7a0c0e, PLUME_DEEP = 0x2a0608;   // display sRGB
+  const SLICK_COL = 0x5a0a0c;                             // display sRGB
+  function displayColor(hex) { return new THREE.Color(hex).convertSRGBToLinear(); }
   const PLUME_DARK_DEPTH = 6.5;         // metres under the swell to reach PLUME_DEEP
   const PUFF_VIS = 0.4, LID_GAP = 0.18; // drawn rim as a fraction of the quad; lid clearance
   const PUFF_MAX = 256;                 // hard allocation; the live cap is puffCap()
-  function puffCap() { return CBZ.qScale ? CBZ.qScale(90, 240) : 160; }
+  function puffCap() { return CBZ.qScale ? CBZ.qScale(70, 160) : 110; }
 
   // a soft, lumpy, gaussian-ish blot — NOT bloodTexture(), whose core is 95%
   // solid out to half its radius: that is a disc, and a disc reads as a ball.
@@ -548,7 +560,7 @@
       gr.addColorStop(1, "rgba(255,255,255,0)");
       g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 6.2832); g.fill();
     };
-    lump(32, 32, 26, 0.55);
+    lump(32, 32, 26, 0.85);
     for (let i = 0; i < 9; i++) {
       const a = i * 2.39996, r = 6 + (i % 3) * 5;
       lump(32 + Math.cos(a) * r, 32 + Math.sin(a) * r, 9 + (i % 4) * 3, 0.22 + (i % 2) * 0.12);
@@ -592,26 +604,44 @@
       const mat = new THREE.ShaderMaterial({
         uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
           map: { value: null },
-          cFresh: { value: new THREE.Color(PLUME_FRESH) },
-          cDeep: { value: new THREE.Color(PLUME_DEEP) },
+          cFresh: { value: displayColor(PLUME_FRESH) },
+          cDeep: { value: displayColor(PLUME_DEEP) },
+          uAbove: { value: 0 },
+          uSeaY: { value: 0 },
         }]),
         vertexShader: [
           "attribute vec4 iPos;",   // xyz centre, w = quad size (m)
           "attribute vec4 iMisc;",  // x alpha, y darkness 0..1, z rotation
+          "uniform float uAbove; uniform float uSeaY;",
           "varying vec2 vUv; varying float vA; varying float vDark;",
           "#include <fog_pars_vertex>",
           "void main() {",
           "  vUv = uv;",
           "  vec4 mvPosition = modelViewMatrix * vec4(iPos.xyz, 1.0);",
+          "  float vz = -mvPosition.z;",
+          "  float w = iPos.w, veil = 1.0;",
+          /* SEEN FROM ABOVE THE SEA. The sea writes depth at the surface and
+             veils what is under it by the column to the SEABED (it reads the
+             opaque depth, and a transparent plume has none), so a plume under
+             it drew either nothing or a ghost. From above, the puff is slid
+             along its own view ray up to where that ray meets the surface and
+             shrunk by the same factor: identical on screen, but now in front
+             of the sea's depth. Its own depth becomes the veil instead. */
+          "  if (uAbove > 0.5 && iPos.y < uSeaY) {",
+          "    float k = clamp(0.97 * (cameraPosition.y - uSeaY) / max(0.001, cameraPosition.y - iPos.y), 0.02, 1.0);",
+          "    mvPosition.xyz *= k; w *= k;",
+          "    veil = exp(-(uSeaY - iPos.y) * 0.3);",
+          "  }",
           "  float c = cos(iMisc.z), s = sin(iMisc.z);",
-          "  vec2 q = position.xy * iPos.w;",
+          "  vec2 q = position.xy * w;",
           "  mvPosition.xy += vec2(c * q.x - s * q.y, s * q.x + c * q.y);",
           // THE LENS IS NOT INSIDE THE CLOUD: fade as the camera enters it.
-          "  float vz = -mvPosition.z;",
-          "  vA = iMisc.x * smoothstep(0.35 * iPos.w, 0.9 * iPos.w + 1.2, vz);",
+          "  vA = iMisc.x * veil * smoothstep(0.35 * iPos.w, 0.9 * iPos.w + 1.2, vz);",
           "  vDark = iMisc.y;",
           "  gl_Position = projectionMatrix * mvPosition;",
-          "  #include <fog_vertex>",
+          "  #ifdef USE_FOG",
+          "  fogDepth = vz;",
+          "  #endif",
           "}",
         ].join("\n"),
         fragmentShader: [
@@ -622,12 +652,11 @@
           "  float a = texture2D(map, vUv).a * vA;",
           "  if (a < 0.004) discard;",
           "  gl_FragColor = vec4(mix(cFresh, cDeep, vDark), a);",
-          "  #include <tonemapping_fragment>",
           "  #include <encodings_fragment>",
           "  #include <fog_fragment>",
           "}",
         ].join("\n"),
-        transparent: true, depthWrite: false, fog: true,
+        transparent: true, depthWrite: false, fog: true, toneMapped: false,
       });
       mat.uniforms.map.value = murkTexture();
       mat._shared = true;
@@ -649,6 +678,7 @@
      the newest blood is the blood the player is looking at. */
   function puff(x, y, z, vx, vy, vz, s0, s1, life, alpha, fadeIn) {
     if (!plumeReady()) return -1;
+    PLUME_AUDIT.puffs++;
     let i = puffs.length;
     const cap = Math.min(PUFF_MAX, puffCap());
     if (i >= cap) {
@@ -679,7 +709,7 @@
   // third leave a wisp of their own, or a burst of forty drops is forty clouds.
   function puffFromBit(x, y, z, vx, vy, vz, size, mist) {
     if (Math.random() > (mist ? 0.15 : 0.3)) return;
-    puff(x, y, z, vx * 0.08, 0, vz * 0.08, 0.1, 0.35 + size * 2, 1.8 + Math.random() * 1.2, 0.22, 0.2);
+    puff(x, y, z, vx * 0.08, 0, vz * 0.08, 0.1, 0.35 + size * 2, 1.8 + Math.random() * 1.2, 0.4, 0.2);
   }
 
   function updatePuffs(dt) {
@@ -733,15 +763,37 @@
     plumeGeo.instanceCount = n;
     if (!n) return;
     const ap = aPos.array, am = aMisc.array;
+    const cp = CBZ.camera && CBZ.camera.position;
+    const camSea = cp ? seaY(cp.x, cp.z) : 0;
+    const camAtLine = !!cp && Math.abs(cp.y - camSea) < 1.5;
+    /* WHICH SIDE OF THE SEA IS THE LENS ON. The sea writes depth and draws in
+       the transparent pass (renderOrder -1/0). Drawn AFTER it (the old 5),
+       a plume seen from above was depth-rejected by the surface; drawn
+       before it, the sea veiled it by the whole column to the seabed. So it
+       draws after the sea and, from above, the vertex shader lifts each puff
+       along its view ray onto the surface (see uAbove in the shader). */
+    plumeMesh.renderOrder = 5;
+    const U = plumeMesh.material.uniforms;
+    U.uAbove.value = (cp && cp.y > camSea + 0.05) ? 1 : 0;
+    U.uSeaY.value = camSea;
     for (let i = 0; i < n; i++) {
       const t = P_T[i], f = t / P_LIFE[i];
       const sc = P_S0[i] + (P_S1[i] - P_S0[i]) * Math.sqrt(f);
       // fade in over the bloom, then thin as it spreads: (1-f)^1.6 is the
       // mass conserved over a growing area, near enough, and it reaches 0.
       const fin = t < P_IN[i] ? t / P_IN[i] : 1;
-      const k = 1 - f;
-      const alpha = P_A[i] * fin * k * Math.sqrt(k);
+      // holds its body through mid-life, then thins to nothing
+      let alpha = P_A[i] * fin * (1 - f * Math.sqrt(f));
       const depth = P_SY[i] - P_Y[i];
+      /* NO BAND AT THE WATERLINE. Puffs held under the lid all sit at the
+         same height, and from a camera at the surface a row of them reads as
+         one long flat smear along the waterline. Blood that has reached the
+         top is the slick's job: a puff fades out as its rim nears the lid,
+         and fades harder when the lens itself is at the waterline, looking
+         along that row edge-on. */
+      const rimGap = depth - sc * PUFF_VIS - LID_GAP;          // 0 when pinned
+      let sf = rimGap / 1.2; sf = sf < 0 ? 0 : (sf > 1 ? 1 : sf);
+      alpha *= camAtLine && !(cp.y > camSea) ? 0.45 + 0.55 * sf : 0.7 + 0.3 * sf;
       let dark = depth > 0 ? depth / PLUME_DARK_DEPTH : 0;
       dark = dark * 0.85 + f * 0.2; if (dark > 1) dark = 1;
       const o = i * 4;
@@ -756,7 +808,8 @@
   // same few frames. A second bloom on the same spot is the "red wall" — it
   // is cut to a third instead of stacking.
   let lastBloomX = 1e9, lastBloomY = 0, lastBloomZ = 0, lastBloomT = -1;
-  let plumeClock = 0;
+  let plumeClock = 0, lastBiteSlickT = -9;
+  const PLUME_AUDIT = { puffs: 0, blooms: 0, kills: 0, chumPuffs: 0 };   // lifetime emit counts (goreAudit)
 
   // public: an UNDERWATER blood bloom at a wound. `amount` 0.3..3: ~0.5 is a
   // nick, 1 a real bite, 2+ a torn artery. A burst of small puffs thrown out
@@ -774,6 +827,7 @@
       else { lastBloomX = x; lastBloomY = y; lastBloomZ = z; lastBloomT = plumeClock; }
     }
     const art = !!opts.arterial;
+    PLUME_AUDIT.blooms++;
     let dx = 0, dy = 0, dz = 0;
     if (opts.dir) {
       dx = +opts.dir.x || 0; dy = +opts.dir.y || 0; dz = +opts.dir.z || 0;
@@ -789,7 +843,18 @@
       puff(x + Math.cos(a) * r, y + (Math.random() - 0.5) * 0.15, z + Math.sin(a) * r,
         dx * sp + Math.cos(a) * sp * 0.35, dy * sp * 0.5, dz * sp + Math.sin(a) * sp * 0.35,
         0.1 + Math.random() * 0.08, (0.55 + Math.random() * 0.45) * big,
-        2.2 + Math.random() * 1.3, art ? 0.5 : 0.42, 0.22);
+        2.2 + Math.random() * 1.3, art ? 0.62 : 0.55, 0.22);
+    }
+    /* FROM ABOVE, THE STAIN IS THE BLOOD. The sea is translucent only a few
+       metres around the lens and veils everything under it, so a plume half
+       a metre down is nearly invisible from a camera riding the waterline —
+       which is where the chase camera lives. Real footage shows the same
+       thing: what you see from the surface is the dark patch ON it. So a
+       wound near the top stains the water directly (its own budget, not the
+       0.3 s arrival throttle, which a bite would lose to the trail). */
+    if (seaY(x, z) - y < 2 && plumeClock - lastBiteSlickT > 0.4) {
+      lastBiteSlickT = plumeClock;
+      CBZ.goreSlick(x, z, Math.min(1.4, 0.35 + amt * 0.35));
     }
     // the haze: one or two faint, wide, slow puffs that are what is left
     const nh = Math.max(1, Math.round((0.6 + amt * 0.7) * lod));
@@ -797,7 +862,7 @@
       const a = Math.random() * 6.28, r = Math.random() * 0.3 * big;
       puff(x + Math.cos(a) * r, y + (Math.random() - 0.4) * 0.3, z + Math.sin(a) * r,
         dx * 0.25 + Math.cos(a) * 0.12, 0, dz * 0.25 + Math.sin(a) * 0.12,
-        0.3, (1.2 + Math.random() * 0.8) * big, 4 + Math.random() * 2, 0.18, 0.6);
+        0.3, (1.2 + Math.random() * 0.8) * big, 4 + Math.random() * 2, 0.3, 0.6);
     }
   };
 
@@ -815,13 +880,15 @@
   // own smaller cap, a spawn-distance LOD, and a throttled surface re-read.
   const SLICK_MATS = [];          // free list — materials outlive their meshes
   let slickN = 0;                 // live water splats (kept in step by freeSlick)
-  function slickCap() { return CBZ.qScale ? CBZ.qScale(16, 46) : 28; }
+  function slickCap() { return CBZ.qScale ? CBZ.qScale(8, 20) : 12; }
   function slickMat() {
     const m = SLICK_MATS.pop();
     if (m) { m.opacity = 0; return m; }
     const nm = new THREE.MeshBasicMaterial({
-      color: 0x2a0404, map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false,
+      color: 0xffffff, map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false,
+      toneMapped: false,             // see PLUME_FRESH: the grade saturated it to candy red
     });
+    nm.color.copy(displayColor(SLICK_COL));
     // rm() must never dispose a pooled material — the repo's convention is a
     // _shared tag, and every disposal sweep in the game already honours it.
     nm._shared = true;
@@ -881,7 +948,7 @@
     const bt = Math.max(0, +o.decay || 0);
     slickN++;
     splats.push({
-      m, water: true, t: 0, grow: 0.6 + amt * 1.0, max: 0.6 + amt * 1.0, growT: 5,
+      m, water: true, t: 0, grow: 0.4 + amt * 0.55, max: 0.4 + amt * 0.55, growT: 5,
       hold: near ? 14 : 8, fade: 9,
       ax: 0.82 + Math.random() * 0.36, az: 0.82 + Math.random() * 0.36,
       cx: 0, cz: 0, curT: 0, syT: 0,
@@ -934,29 +1001,35 @@
       const ex = x - KC_X[k], ez = z - KC_Z[k];
       if (plumeClock - KC_T[k] < 2 && ex * ex + ez * ez < 16) return true;   // already bleeding here
     }
+    // KILLS STACK in normal play (thirty eaten in forty seconds): count the
+    // recent ones and thin each new plume, so a frenzy is a murky patch of
+    // water rather than a red wall.
+    let recent = 0;
+    for (let k = 0; k < 4; k++) if (plumeClock - KC_T[k] < 6) recent++;
     KC_X[kcI] = x; KC_Z[kcI] = z; KC_T[kcI] = plumeClock; kcI = (kcI + 1) & 3;
-    const lod = d2 > 55 * 55 ? 0.5 : 1;
+    PLUME_AUDIT.kills++;
+    const lod = (d2 > 55 * 55 ? 0.5 : 1) / (1 + recent * 0.5);
     // 1 — the bloom at the wound (goreBloom's own merge would cut it if a bite
     //     burst just fired here, so reset that memory: this one is the kill)
     lastBloomT = -1;
-    CBZ.goreBloom(x, y, z, { amount: Math.min(2.4, 0.9 + size * 0.7), arterial: true });
+    CBZ.goreBloom(x, y, z, { amount: Math.min(2.4, 0.9 + size * 0.7) * (recent ? 0.6 : 1), arterial: true });
     // 2 — the plume: a few wide, faint, slow puffs around the body, a little
     //     taller than wide (it lifts as it spreads), clearing in 6-9 s.
-    const n = Math.max(2, Math.round((2 + size * 2) * lod));
+    const n = Math.max(1, Math.round((2 + size * 2) * lod));
     const rad = 0.3 + size * 0.35;
     const top = Math.min(4.5, 1.8 + size * 1.1);
     for (let i = 0; i < n; i++) {
       const a = Math.random() * 6.28, r = rad * (0.3 + Math.random() * 0.7);
       puff(x + Math.cos(a) * r, y + (Math.random() - 0.3) * rad, z + Math.sin(a) * r,
         Math.cos(a) * 0.12, 0.04, Math.sin(a) * 0.12,
-        0.4 + size * 0.2, top * (0.7 + Math.random() * 0.3), 6 + Math.random() * 3, 0.2, 0.8);
+        0.4 + size * 0.2, top * (0.7 + Math.random() * 0.3), 6 + Math.random() * 3, 0.42, 0.8);
     }
     // 3 — the body keeps leaking while it sinks
     if (opts.trail !== false) {
       try { CBZ.goreChum(x, y, z, 0.8, 3 + size * 1.5); } catch (e) {}
     }
     // and the stain overhead: from a boat, that dark patch IS the kill
-    CBZ.goreSlick(x, z, 0.6 + 0.5 * size);
+    CBZ.goreSlick(x, z, (0.7 + 0.5 * size) * (recent ? 0.5 : 1));
     return true;
   };
 
@@ -1025,10 +1098,13 @@
            on, the puffs stay in the water behind it and spread with the
            current, and the line of them IS the trail. Severity sets how thick
            and how long it lingers. */
-        if (dist2Cam(x, z) < 80 * 80) {
+        // under load (a feeding frenzy, thirty eaten in forty seconds) the
+        // ribbons thin out rather than filling the cap with trail
+        if (dist2Cam(x, z) < 80 * 80 && (puffs.length < puffCap() * 0.5 || Math.random() < 0.4)) {
+          PLUME_AUDIT.chumPuffs++;
           puff(x + (Math.random() - 0.5) * 0.2, y + (Math.random() - 0.5) * 0.2, z + (Math.random() - 0.5) * 0.2,
             0, 0, 0, 0.14 + c.rate * 0.1, 0.55 + c.rate * 0.9, 2.4 + c.rate * 1.8 + Math.random() * 0.6,
-            0.14 + c.rate * 0.2, 0.3);
+            0.18 + c.rate * 0.22, 0.3);
         }
         // a torn artery PUMPS: now and then a small burst, not every tick
         if (c.rate > 0.75 && Math.random() < 0.12) CBZ.goreBloom(x, y, z, { amount: 0.5, arterial: true });
@@ -3381,7 +3457,21 @@
       // more. It only ever rises, so a mark the waves have thinned does not
       // come back crisp when the water goes out.
       const dil = s.dilute > 0 ? Math.min(1, s.dilute) : 0;
-      s.m.material.opacity = (s.water ? 0.26 : (realism() ? 0.88 : 0.66)) * fadeIn * fadeOut * (1 - under) * (1 - dil);
+      /* A SLICK IS A FILM SEEN FROM ABOVE. Looked at edge-on — a chase camera
+         riding the waterline — a flat disc a few metres wide foreshortens into
+         a long thin smear along the horizon, which is the wrong read entirely
+         (from there real blood is simply not visible on the surface). Fade by
+         the camera's elevation angle over the slick: gone below ~1 degree,
+         full from ~8. A slick is at most ~2 m across, so nothing
+         far off can still foreshorten into a 10 m streak. */
+      let seen = 1;
+      if (s.water && CBZ.camera) {
+        const cp = CBZ.camera.position, mp = s.m.position;
+        const hx = cp.x - mp.x, hz = cp.z - mp.z;
+        const el = (cp.y - mp.y) / (Math.sqrt(hx * hx + hz * hz) + 0.5);
+        seen = (el - 0.01) / 0.07; seen = seen < 0 ? 0 : (seen > 1 ? 1 : seen);
+      }
+      s.m.material.opacity = (s.water ? 0.55 * seen : (realism() ? 0.88 : 0.66)) * fadeIn * fadeOut * (1 - under) * (1 - dil);
       if (under >= 1 || dil >= 1 || s.t > s.hold + s.fade) { freeSlick(s); splats.splice(i, 1); }
     }
 
@@ -3485,7 +3575,7 @@
       // LIMBS off, not rigs affected — one body missing an arm and a leg is two
       severed: (function () { let n = 0; for (let i = 0; i < severed.length; i++) n += severed[i].items.length; return n; })(),
       severedRigs: severed.length,
-      puffs: puffs.length, pending: later.length,
+      puffs: puffs.length, plumeEmits: PLUME_AUDIT, pending: later.length,
       float: +worst.toFixed(3), floatAt: worstAt,
       slopeDecals: slopeOn(),
       snowCover: +cov.toFixed(3), buried,
