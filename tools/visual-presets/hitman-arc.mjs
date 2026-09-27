@@ -13,7 +13,7 @@
                     the approach road vs the dictator on the steps with a crowd
 
    Run (one at a time, the city build is heavy):
-     ba hitman-arc --before https://efoltyn.github.io/gta6/ --no-open --cdp-timeout 600000
+     ba --preset hitman-arc --no-open --keep-going --cdp-timeout 600000
 
    HARNESS TRAP: stage() is serialized into the page by toString(); nothing in
    this module's scope is reachable inside it. Knobs ride on input.subject. */
@@ -51,7 +51,10 @@ async function stageHitmanArc(input) {
   };
   const tickUntil = (test, max) => { for (let i = 0; i < (max || 600); i++) { let ok = false; try { ok = test(); } catch (_) {} if (ok) return true; tick(1); } return false; };
   const notes = [];
-  const hasArc = !!CBZ.agency;
+  // the before side is this same build with the arc held back (?agency_off=1):
+  // the old pipe (phone card, motel wall, feed line, a quiet Mansion) at the
+  // same beat. The deployed build is too old to boot this preset at all.
+  const hasArc = !!CBZ.agency && !/agency_off=1/.test(String(location.search));
 
   // ---- boot once per page ----
   let S = window.__hitmanArc;
@@ -157,8 +160,9 @@ async function stageHitmanArc(input) {
     if (hasArc) {
       CBZ.agency.jump("meet1");
       tickUntil(() => { const a = CBZ.game.cityWorld && CBZ.game.cityWorld.records && CBZ.game.cityWorld.records.hitman.arc; return a && a.meet; }, 400);
-      const a = CBZ.game.cityWorld.records.hitman.arc;
-      const m = a.meet;
+      const a = CBZ.game.cityWorld && CBZ.game.cityWorld.records && CBZ.game.cityWorld.records.hitman && CBZ.game.cityWorld.records.hitman.arc;
+      const m = a && a.meet;
+      if (!m) return fin({ ok: false, error: "no meet spot", audit: CBZ.agency.audit() });
       const fx = Math.sin(m.face), fz = Math.cos(m.face);
       put(m.x + fx * 16, m.z + fz * 16); face(m.x, m.z); tick(40);
       tickUntil(() => CBZ.agency._rt.meet && CBZ.agency._rt.meet.voss, 1200);
@@ -185,8 +189,8 @@ async function stageHitmanArc(input) {
     const site = (CBZ.govComplexes || []).find((s) => s && s.rect && (s.id === "execmansion" || (s.def && s.def.id === "execmansion")));
     if (!site) return fin({ ok: false, error: "no mansion" });
     const gx = site.gate ? site.gate.x : site.cx, gz = site.gate ? site.gate.z : site.rect.maxZ;
-    const standZ = gz + 110;
-    put(gx + 1.5, standZ); tick(30);
+    const standZ = gz + 85;
+    put(gx - 0.8, standZ); tick(30);
     if (hasArc) {
       CBZ.agency.jump("finale");
       tickUntil(() => CBZ.agency._rt.fin && CBZ.agency._rt.fin.staged, 900);
@@ -202,8 +206,12 @@ async function stageHitmanArc(input) {
     tick(20);
     const cam = CBZ.camera;
     cam.fov = 14; cam.updateProjectionMatrix();
-    cam.position.set(gx + 1.5, (CBZ.floorAt ? CBZ.floorAt(gx, standZ) : 0) + 1.7, standZ);
-    cam.lookAt(site.cx, 2.4, site.cz - 6);
+    cam.position.set(gx - 0.8, (CBZ.floorAt ? CBZ.floorAt(gx, standZ) : 0) + 1.7, standZ);
+    cam.lookAt(site.cx, 2.6, site.cz - 9);
+    // a frozen loop leaves the sky dome where the player was (the black-dome
+    // trap); put it back around this lens
+    if (typeof CBZ.skySync === "function") { try { CBZ.skySync(); } catch (_) {} }
+    else { const rig = CBZ.skyDome && CBZ.skyDome.parent; if (rig && rig.position) rig.position.set(cam.position.x, 0, cam.position.z); }
     if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = false;
     frame([]);
     return fin();
@@ -217,6 +225,10 @@ export default {
   description: "Four in-engine beats of the Bureau arc (city/agency.js, city/dossier.js) against the same moments before it existed: the contract, the handler, the confirm, the dictator's address.",
   viewport: { width: 1280, height: 800 },
   urlParams: { seed: 260811 },
+  defaultBefore: "local",
+  beforeParams: { agency_off: 1 },
+  beforeLabel: "BEFORE: the old contract pipe",
+  afterLabel: "AFTER: the Bureau arc",
   stageTimeoutMs: 600000,
   readyExpression: "window.CBZ && window.THREE && window.CBZ.stepSim && document.getElementById('playBtn')",
   subjects,

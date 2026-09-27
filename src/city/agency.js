@@ -97,7 +97,12 @@
   function campaignOwns() { return !!(CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission()); }
   function isPresident() {
     if (g.cityOrigin === "president") return true;
-    try { return !!(CBZ.regimes && CBZ.regimes.heldByPlayer && CBZ.regimes.heldByPlayer()); } catch (e) { return false; }
+    // heldByPlayer() answers with a LIST of the seats you hold (an empty
+    // array is truthy); only the country's seat makes you the President.
+    try {
+      const held = CBZ.regimes && CBZ.regimes.heldByPlayer ? CBZ.regimes.heldByPlayer() : null;
+      return !!(held && held.length && held.some(function (r) { return r && (r.kind === "country" || r.id === "republic"); }));
+    } catch (e) { return false; }
   }
 
   // THE BUREAU TALKS ON THE PHONE. One sender name, the missions app.
