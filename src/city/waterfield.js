@@ -200,7 +200,7 @@
   function isNavigableWater(x, z, clearance) {
     clearance = Math.max(0, +clearance || 0);
     if (CBZ.CONFIG && CBZ.CONFIG.MARINE_FLOOD_NAV === false) return coastAt(x, z) < -clearance;
-    return shoreAt(x, z) < -clearance + floodReach();
+    return shoreAt(x, z) < -clearance + floodReach(x, z);
   }
 
   /* ============================================================
@@ -398,8 +398,18 @@
   // the gore medium all actually ask about. They must move together or the
   // sea will look like it is over the road while the road is still dry.
   const INUNDATE_PER_M = 22;
-  function floodReach() {
-    const s = CBZ.waterSurge ? CBZ.waterSurge() : 0;
+  /* THE SURGE THAT HAS ARRIVED HERE (2026-09-27). A tsunami front has an
+     edge: ahead of it the water is still at its pre-wave level, so a street
+     the wall has not reached is dry however high the sea behind the wall
+     already stands. CBZ.waterFrontDropAt (world/water_spec.js) is that
+     difference, the same number the rendered sea is pulled down by
+     (uSeaFront), so what you see and what you can swim in agree. With no
+     live front it is 0 and every query below is exactly what it was. */
+  function frontDrop(x, z) {
+    return x != null && CBZ.waterFrontDropAt ? CBZ.waterFrontDropAt(x, z) : 0;
+  }
+  function floodReach(x, z) {
+    const s = (CBZ.waterSurge ? CBZ.waterSurge() : 0) - frontDrop(x, z);
     return s > 0 ? s * INUNDATE_PER_M : 0;
   }
   /* ---- THE EXPORTED SHORE QUERY: coast PLUS standing rainwater -------------
@@ -431,7 +441,7 @@
     clearance = Math.max(0, +clearance || 0);
     if (overDeck(A, x, z, 0.6)) return false;
     const terrain = A && A.mapTerrain;
-    if (terrain && typeof terrain.shoreAt === "function") return shoreAt(x, z) < -clearance + floodReach();
+    if (terrain && typeof terrain.shoreAt === "function") return shoreAt(x, z) < -clearance + floodReach(x, z);
     return fallbackWater(A, x, z, false) || groundWaterAt(x, z) >= GW_WET;
   }
   // Metres of standing water at a point that is only wet BECAUSE of a surge or
@@ -439,7 +449,7 @@
   // "am I in the flood", as opposed to "am I in the sea".
   CBZ.cityFloodDepthAt = function (x, z) {
     const gw = groundWaterAt(x, z);
-    const reach = floodReach();
+    const reach = floodReach(x, z);
     if (reach <= 0) return gw;
     const A = arena();
     const terrain = A && A.mapTerrain;
@@ -527,7 +537,7 @@
         }
       }
     }
-    if (CBZ.waterWaveHeight) return CBZ.waterWaveHeight(x, z, t);
+    if (CBZ.waterWaveHeight) return CBZ.waterWaveHeight(x, z, t) - frontDrop(x, z);
     if (!Number.isFinite(t)) t = clockSeconds();
     const y0 = CBZ.SEA_Y != null ? CBZ.SEA_Y : MEAN_Y;
     const p1 = x * 0.052 + z * 0.030 + t * 1.1;

@@ -511,7 +511,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
      installed before it is erased in silence. groundmask.js asserts CBZ.renderer
      exists and appends rather than rewriting. -->
-<script src="src/core/groundmask.js?v=nodash1"></script>
+<script src="src/core/groundmask.js?v=nodist1"></script>
 <!-- THE GROUND IS A SOLID: base field minus carvings. Owns CBZ.floorAt, so it
      must load before any mode registers its base (city/mode.js, modes/*). -->
 <script src="src/systems/solidground.js?v=solid1"></script>
@@ -996,12 +996,12 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=tsureal1"></script>
+<script src="src/world/water_spec.js?v=tsureal2"></script>
 <!-- the tsunami kit shared by the island and the city: the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
 <script src="src/world/tsunami_debris.js?v=tsureal1"></script>
 <script src="src/world/tsunami_flow.js?v=tsureal1"></script>
 <script src="src/world/tsunami_scene.js?v=tsureal1"></script>
-<script src="src/city/world.js?v=nodash1"></script>
+<script src="src/city/world.js?v=tsuedge1"></script>
 <script src="src/city/interior_programs.js?v=nodash1"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
@@ -1079,11 +1079,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
-<script src="src/city/waterfield.js?v=riverchan1"></script>
+<script src="src/city/waterfield.js?v=tsuedge1"></script>
 <!-- Reflective-ocean FX: swaps CBZ.citySea for a THREE.WaterReflect plane when
      CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
      so load order past config.js + WaterReflect.js is all it needs. -->
-<script src="src/world/waterfx.js?v=waterv2"></script>
+<script src="src/world/waterfx.js?v=tsuedge1"></script>
 <script src="src/city/highways.js?v=nodash1"></script>
 <!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
      builder. Loads right after the ribbon builder it drives; registers its
@@ -1535,7 +1535,7 @@ document.body.appendChild(b);}}catch(e){}})();
      mask, crowd.js's flee and the predator dread bus do all of it. Fires only
      on CBZ.cityTsunami() unless ?cfg_TSUNAMI_AUTO=1. After swim.js and
      waterfield.js. Revert with ?cfg_TSUNAMI=0. -->
-<script src="src/city/tsunami.js?v=tsureal1"></script>
+<script src="src/city/tsunami.js?v=tsureal2"></script>
 <script src="src/city/empire.js?v=nodash1"></script>
 <script src="src/city/construction.js?v=nodash1"></script>
 <script src="src/city/companies.js?v=nodash1"></script>

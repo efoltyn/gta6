@@ -187,7 +187,7 @@
       [
         "#include <logdepthbuf_fragment>",
         "vec4 cbzField = cbzWaterField( worldPosition.xz );",
-        "if ( uSeaHasLandMask > 0.5 && cbzField.r > uShoreCut ) discard;",   // uShoreCut: 0.5 = the real coast; a surge raises it and the sea comes ashore
+        "if ( uSeaHasLandMask > 0.5 && cbzField.r > cbzShoreCutAt( worldPosition.xz ) ) discard;",   // uShoreCut: 0.5 = the real coast; a surge raises it and the sea comes ashore
         "float cbzInland = max( vInland, cbzField.a );",
         // WATER_FAR_CALM: the metre-scale ripple normal is pure aliasing once
         // its texels are far smaller than a pixel, so lerp the shading normal
