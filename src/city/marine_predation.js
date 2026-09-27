@@ -151,7 +151,11 @@
   const POD_R = 90;            // u — inside this you are in the same pod fight
   const SHADOW_K = 0.85;       // × the FSM's wake radius: how close a shadowing pod closes to
   const PREY_MAX = 1.05;       // a loner's quarry may be at most this × its size
-  const MOB_MAX = 2.4;         // a POD's quarry may be at most this × its size
+  // a POD's quarry may be at most this × its size. 3.0 since the orca went to
+  // its real size (0.95): a 16 m megalodon over a 6.6 m cow is 2.74, and the
+  // headline "enough orcas kill a megalodon" must survive that. needFor's
+  // maxPack clause below still keeps every other pod animal off an apex.
+  const MOB_MAX = 3.0;
   const POD_HERD_MIN = 3;      // herd[1] this big or more = a pod animal
   const RAM_EVERY = 2.6;       // s — a flanker's ram cadence at scale 1
   const STAGGER_S = 1.15;      // s the quarry loses its facing after a ram
@@ -433,6 +437,137 @@
   // per hunter — a pod is 3-7 and the list is bounded.
   // Throttled: the sweep is O(animals) and a pod does not need to recount
   // itself sixty times a second. Same discipline as wildlife.js's pickPrey.
+  /* WHERE IS THE REST OF MY POD on this quarry — the centre of every live
+     same-species hunter with the same target inside POD_R*2 of me. Throttled
+     per hunter (0.5 s); the answer lives on the hunter's own scratch. */
+  /* ============================================================
+     THE POD'S FIGHT. How orcas really take a shark: the pod arrives
+     TOGETHER, spreads onto the quarry's flanks and tail — never its nose —
+     and takes turns darting in to bite and ram from behind the pectorals
+     while the others hold their slots, until the shark is spent; then one of
+     them flips it belly-up (tonic immobility) and holds it there until it
+     drowns.
+
+     This used to be the shared lone-stalker FSM with a pack token on top:
+     one "commit" member ran a great white's scent -> circle -> VANISH ->
+     rush grammar (the vanish drives it 100+ m away on purpose) while the
+     flankers circled wherever the FSM parked them. Measured on a pod of
+     three working a bull shark for 50 s: the pod 85 -> 340 m wide, members
+     "circling" 300 m from the quarry, zero flank passes landed, no kill.
+
+     Now every member runs the same three beats, and each is one of the
+     primitives this file already owned:
+       APPROACH  far out: close on the quarry as a group (heading bent toward
+                 the pod's centre, the one in front easing off);
+       STATION   inside a few body lengths: hold MY slot — bearings spread
+                 round the quarry's rear half by pod rank, radius just inside
+                 the pass's commit range, re-read off the quarry's live
+                 heading every frame, so the pod rotates with the shark;
+       PASS      ramTick (the bite_flank strike) whenever my slot has me off
+                 its nose and in range — the flank gate, cadence and damage
+                 are unchanged, so the numbers are the numbers.
+     The finisher unlocks exactly as before (rollReady: the quarry spent AND
+     enough of us present) for whichever member is closest to the flank.
+     ============================================================ */
+  // the quarry's velocity, eased, per hunter; a new quarry or a jump (a
+  // respawn, a staging teleport) restarts it rather than reading as 200 m/s
+  function quarryVel(m, target, tp, dt) {
+    const v = m.qv || (m.qv = { x: 0, z: 0, px: null, pz: null, t: null });
+    if (v.t !== target) { v.t = target; v.px = null; v.x = 0; v.z = 0; }
+    if (v.px != null && dt > 0) {
+      const jx = tp.x - v.px, jz = tp.z - v.pz;
+      if (jx * jx + jz * jz > 900 * dt * dt) { v.x = 0; v.z = 0; }
+      else {
+        const k = Math.min(1, dt * 3);
+        v.x += (jx / dt - v.x) * k; v.z += (jz / dt - v.z) * k;
+      }
+    }
+    v.px = tp.x; v.pz = tp.z;
+    return v;
+  }
+  function podMobTick(a, target, dt, opts) {
+    const m = mp(a);
+    // 1. a pass lined up or in the air owns the frame
+    if (ramTick(a, target, dt)) return;
+    const hp = a.group.position, tp = actorPos(target);
+    if (!tp) return;
+    _t0 = tp.x - hp.x; _t1 = tp.z - hp.z;
+    const d = Math.sqrt(_t0 * _t0 + _t1 * _t1) || 0.01;
+    // 2. the finisher
+    if (rollReady(a, target, dt) && d < bodyLen(a) * 0.9 + bodyLen(target) * 0.5) {
+      beginRoll(a, target);
+      return;
+    }
+    const qv = quarryVel(m, target, tp, dt);
+    const qs = Math.sqrt(qv.x * qv.x + qv.z * qv.z);
+    const cruise = opts.cruiseSpeed > 0 ? opts.cruiseSpeed : 4;
+    const reach = ramReach(a, target);
+    const R = reach * 1.9;                       // inside RAM_COMMIT_K (2.6): the gate can fire
+    const c = podCentre(a, target, dt);
+    if (d > R * 3) {
+      // APPROACH, as a group
+      const ux = _t0 / d, uz = _t1 / d;
+      let hx = ux, hz = uz, spd = Math.max(cruise * 1.3, qs * 1.15);
+      if (c.n > 1) {
+        const cx = c.x - hp.x, cz = c.z - hp.z;
+        const cd = Math.sqrt(cx * cx + cz * cz);
+        if (cd > 6) { const w = Math.min(0.9, cd / 60); hx += (cx / cd) * w; hz += (cz / cd) * w; }
+        const ahead = -(cx * ux + cz * uz);   // + = I am ahead of the pod's centre
+        spd *= clamp(1 - ahead / 45, 0.6, 1.35);
+      }
+      try { opts.move(a, Math.atan2(hz, hx), spd, dt); } catch (e) {}
+      AUDIT.shadowed++;
+      return;
+    }
+    // STATION: my bearing on the quarry's rear half, spread by pod rank
+    const face = (target.heading != null) ? target.heading
+      : (target.group ? -target.group.rotation.y : 0);
+    const i = c.idx | 0;
+    const side = (i % 2) ? 1 : -1;
+    const b = face + Math.PI + side * (0.75 + 0.6 * Math.ceil(i * 0.5)) * (i === 0 ? 0.6 : 1);
+    const wx = tp.x + Math.cos(b) * R, wz = tp.z + Math.sin(b) * R;
+    const sx = wx - hp.x, sz = wz - hp.z;
+    /* PURSUIT OF A MOVING POINT: the quarry's own velocity plus a closing
+       term toward the slot. Steering straight at the slot at a sprint
+       overshot it every time (measured: members looping 10 -> 60 m off a
+       7 m/s megalodon on a 15 s cycle); this velocity already points along
+       the quarry's track when the member is on station, so it settles
+       beside it instead of orbiting the spot. */
+    const vx = qv.x + sx * 0.45, vz = qv.z + sz * 0.45;
+    const want = Math.atan2(vz, vx);
+    let spd = clamp(Math.sqrt(vx * vx + vz * vz), 2, Math.max(cruise * 1.6, qs * 1.35));
+    // a big body slows to turn: a hard turn at a sprint is a 20 m loop
+    spd *= 0.4 + 0.6 * Math.max(0, Math.cos(shortAngle(want - (a.heading || 0))));
+    try { opts.move(a, want, Math.max(2, spd), dt); } catch (e) {}
+  }
+
+  const CHASE_GIVEUP = 35;     // s a pod chases without ever closing before it lets go
+  const QUIT_FORGET = 45;      // s before a quarry it gave up on may be picked again
+  function podCentre(a, target, dt) {
+    const m = mp(a);
+    const c = m.pc || (m.pc = { x: 0, z: 0, n: 0, t: 0 });
+    c.t -= dt;
+    if (c.t > 0) return c;
+    c.t = 0.5;
+    const list = CBZ.cityWildlife, hp = actorPos(a);
+    c.x = 0; c.z = 0; c.n = 0; c.idx = 0;
+    if (!list || !hp) return c;
+    const my = rankOf(a);
+    const R2 = POD_R * POD_R * 4;
+    for (let i = 0; i < list.length; i++) {
+      const o = list[i];
+      if (o.species !== a.species || !alive(o)) continue;
+      if (o !== a && !(o._mp && o._mp.target === target)) continue;
+      const p = actorPos(o);
+      if (!p) continue;
+      _t0 = p.x - hp.x; _t1 = p.z - hp.z;
+      if (_t0 * _t0 + _t1 * _t1 > R2) continue;
+      c.x += p.x; c.z += p.z; c.n++;
+      if (o !== a && rankOf(o) > my) c.idx++;      // my slot = how many outrank me
+    }
+    if (c.n) { c.x /= c.n; c.z /= c.n; }
+    return c;
+  }
   function podCount(hunter, target, dt) {
     const m = mp(hunter);
     m.podT -= (dt || 0);
@@ -457,19 +592,77 @@
     return n || 1;
   }
 
+  /* A POD HUNTS ONE THING. Every member used to choose its own quarry, so a
+     pod of three was three loners — measured: one orca chasing a turtle 450 m
+     off while the other two worked a bull shark, the "pod" 440 m wide. A pod
+     animal now follows the pod's LEAD: the highest-ranked member within
+     2 x POD_R that chose its quarry itself. Rank is a hash of the spawn point
+     (stable, order-independent, no talking), so every member agrees who that
+     is and a follower can never adopt from another follower. */
+  function rankOf(a) {
+    const m = mp(a);
+    if (m.rank == null) {
+      const h = a.home || actorPos(a) || { x: 0, z: 0 };
+      m.rank = CBZ.hash01 ? CBZ.hash01(h.x, h.z, 0x0C71) : Math.random();
+    }
+    return m.rank;
+  }
+  function podLeadTarget(a) {
+    const list = CBZ.cityWildlife, hp = actorPos(a);
+    if (!list || !hp) return null;
+    const my = rankOf(a), R2 = POD_R * POD_R * 4;
+    let lead = null, lr = my;
+    for (let i = 0; i < list.length; i++) {
+      const o = list[i];
+      if (o === a || o.species !== a.species || !alive(o)) continue;
+      const om = o._mp;
+      if (!om || !om.target || om.follow || !alive(om.target)) continue;
+      const r = rankOf(o);
+      if (r <= lr) continue;
+      const p = actorPos(o);
+      if (!p) continue;
+      _t0 = p.x - hp.x; _t1 = p.z - hp.z;
+      if (_t0 * _t0 + _t1 * _t1 > R2) continue;
+      lead = o; lr = r;
+    }
+    return lead;
+  }
+
   function pickTarget(a, dt) {
     const m = mp(a);
+    const pod = isPodSpecies(a.species);
+    /* A POD KEEPS LOOKING. The old rule held a quarry for as long as it was
+       inside FIGHT_R (1.4 km) and never scanned again, so an orca pod that
+       once caught the scent of a megalodon shadowed it at 10 m/s forever —
+       measured: three orcas locked on a megalodon 150-250 m away for the
+       whole of a 30 s watch while the player's shark swam 45 m from them
+       untouched. A pod animal keeps re-scanning on its ordinary cadence while
+       it hunts: a follower re-checks its lead, a lead TRADES UP when
+       something clearly better turns up (a nearer, a weaker, a bleeding
+       quarry). A loner keeps the old commitment. */
+    let cur = null, curScore = 0;
     if (m.target && alive(m.target)) {
       // keep it while it is still in reach of the fight
       const tp = actorPos(m.target), hp = actorPos(a);
       if (tp && hp) {
         _t0 = tp.x - hp.x; _t1 = tp.z - hp.z;
-        if (_t0 * _t0 + _t1 * _t1 < FIGHT_R2) return m.target;
+        const d2 = _t0 * _t0 + _t1 * _t1;
+        if (d2 < FIGHT_R2) {
+          if (!pod || m.rolling) return m.target;
+          m.scanT -= dt;
+          if (m.scanT > 0) return m.target;
+          cur = m.target;
+          const hurtC = 1 - clamp((cur.hp || 0) / maxHpOf(cur), 0, 1);
+          curScore = (m.kind === 2 ? 3 : 1) * (1 + hurtC) / (1 + Math.sqrt(d2) * 0.01);
+        }
       }
     }
-    m.target = null; m.kind = 0;
-    m.scanT -= dt;
-    if (m.scanT > 0) return null;
+    if (!cur) {
+      if (m.target && m.target._mpHuntedBy === a) m.target._mpHuntedBy = null;
+      m.target = null; m.kind = 0; m.follow = false;
+      m.scanT -= dt;
+      if (m.scanT > 0) return null;
+    }
     if (!m.jitter) m.jitter = 0.6 + Math.random() * 0.8;
     m.scanT = RESCAN * m.jitter;
 
@@ -478,13 +671,31 @@
     if (!hp || !list) return null;
     const k = kitOf(a);
     const hunger = hungerOf(a);
+
+    // ---- THE POD'S QUARRY FIRST -------------------------------------------
+    if (pod && PODS()) {
+      const lead = podLeadTarget(a);
+      const t = lead && lead._mp.target;
+      if (t && t !== a && m.quit !== t) {
+        const rel = marineRelation(hsp, t.species);
+        if (rel && (rel === 2 || hunger >= 0.15 || lead._mp.kind === 1)) {
+          if (t !== cur) { m.chaseT = 0; AUDIT.hunts++; }
+          if (cur && cur !== t && cur._mpHuntedBy === a) cur._mpHuntedBy = null;
+          m.target = t; m.kind = rel; m.follow = true;
+          return t;
+        }
+      }
+    }
+    m.follow = false;
+    if (cur && m.kind !== 2) return cur;       // a lead on a snack keeps it
+
     // a hunter reaches further for a MOB target than for a snack: an apex is
     // the thing a pod crosses water for.
     const senseR = (k && k.senseR > 0 ? k.senseR : 110) * 2.2;
     let best = null, bestKind = 0, bestScore = -1;
     for (let i = 0; i < list.length; i++) {
       const o = list[i];
-      if (o === a || !alive(o)) continue;
+      if (o === a || !alive(o) || o === m.quit) continue;
       const rel = marineRelation(hsp, o.species);
       if (!rel) continue;
       const p = actorPos(o);
@@ -513,6 +724,12 @@
       // a MOB only happens if the mobber is a pod animal AND has company —
       // one orca does not decide to take a megalodon on its own.
       if (!PODS()) { best = null; bestKind = 0; }
+    }
+    // a hunting pod switches only for something CLEARLY better (1.6x), so two
+    // near-equal quarries never make it flip-flop between them
+    if (cur) {
+      if (!best || best === cur || bestScore < curScore * 1.6) return cur;
+      m.chaseT = 0;
     }
     if (!best) return null;
     if (bestKind === 1) best._mpHuntedBy = a;
@@ -713,7 +930,20 @@
       },
     };
     const sh = a._shark;
-    if (sh && sh.opts && typeof sh.opts.move === "function") o.move = sh.opts.move;
+    /* THE TWO MOVERS DO NOT SPEAK THE SAME LANGUAGE, and this is why the pod's
+       flank pass had never once landed. creatureFight drives its approach
+       through opts.move(actor, dx, dz, step, dt) — a unit direction and a
+       step in metres — while the shark's water mover is move(actor, heading,
+       speed, dt). Handed straight across, the mover read the direction's x as
+       a HEADING in radians and its z as a speed: an orca 11 m from a shark it
+       had committed to sat still for twenty seconds (measured), re-arming a
+       pass that could never close. The adapter converts, nothing else. */
+    if (sh && sh.opts && typeof sh.opts.move === "function") {
+      const mv = sh.opts.move;
+      o.move = function (h, dx, dz, step, dt) {
+        return mv(h, Math.atan2(dz, dx), dt > 0 ? step / dt : 0, dt);
+      };
+    }
     return o;
   }
 
@@ -746,6 +976,7 @@
      shark's water mover, not a raw position write). That is what a pass looks
      like: it leaves the ring, drives in, hits, and rejoins. */
   const RAM_COMMIT_K = 2.6;      // × contact reach: how far out it decides
+  const PASS_GAP = 1.6;          // s between ANY two passes on one quarry (the pod takes turns)
   const RAM_RUN_MAX = 4.0;       // s it is allowed to spend closing before it gives up
 
   function ramGate(a, target) {
@@ -772,7 +1003,24 @@
     const swinging = (a._atkAnim >= 0);
     if (!swinging) {
       if (!(m.ramRun > 0)) {
+        /* THE COOLDOWN HAS TO RUN WHILE WE WAIT FOR IT. creatureFight arms
+           `_atkT` after every strike and only counts it down while it is
+           being called — and the gate below refuses to call it while `_atkT`
+           is up. So every pod member got exactly ONE pass per life: measured,
+           a member holding its slot beside a megalodon with `_atkT` frozen at
+           2.5 s for the rest of the fight. The clock ticks here now. */
+        if (a._atkT > 0) a._atkT -= dt;
+        /* ONE AT A TIME. The pod takes TURNS: a member may start a pass only
+           when nobody else has started one in the last PASS_GAP seconds. With
+           every member passing on its own clock (once the pass could land at
+           all) three orcas hit a bull shark three times in a second. Turns
+           are what the footage shows and what reads from a boat — one dark
+           shape peels off, strikes, rejoins, the next goes. */
+        const now = CBZ.now || 0;
+        if (target._mpPassAt > now) return false;
         if (!ramGate(a, target)) return false;
+        target._mpPassAt = now + PASS_GAP * 1000;
+        AUDIT.passes = (AUDIT.passes || 0) + 1;
         m.ramRun = RAM_RUN_MAX;
         // §L's trick, for the same reason: a fresh attacker is seeded with a
         // cooldown that only ticks while creatureFight is actually being
@@ -782,10 +1030,31 @@
       } else m.ramRun -= dt;
     }
     const o = ramOpts(a);
+    /* A PASS HAS TO BE FASTER THAN WHAT IT IS CHASING. The pass speed was a
+       constant (0.8 x the kit's rush), and a pass is taken from behind the
+       quarry's shoulder — so against a shark swimming away at 14 m/s the
+       swing never closed inside its four seconds (measured: two orcas on
+       station 5-20 m off a fleeing bull shark for 25 s, zero passes). It is
+       the faster of that and 1.35 x the quarry's own measured speed. */
+    if (o.speed0 == null) o.speed0 = o.speed;
+    const qv = m.qv && m.qv.t === target ? m.qv : null;
+    o.speed = Math.max(o.speed0, qv ? Math.sqrt(qv.x * qv.x + qv.z * qv.z) * 1.35 : 0);
     o.reach = ramReach(a, target);
     o.targetRad = bodyBeam(target) * 0.5;      // teeth stop at the measured flank
-    o.dmg = dpsAgainst(a, target) * 1.6;
-    try { CBZ.creatureFight(a, target, dt, o); } catch (e) {}
+    /* 0.4, not the 1.6 this was written with. The 1.6 was never felt: the
+       pass could not close (the mover adapter in ramOpts) and each member
+       got one pass per life (the cooldown in ramTick), so it was an untested
+       number. Once passes landed, one pass from a big bull took 45% of the
+       player's bull shark and a pod of three had a motionless player rolled
+       and dead three seconds after contact. At 0.4, with the pod taking turns
+       (PASS_GAP), a pass is a hard bite — about a quarter of a bull shark
+       from a big bull, less from a cow — the finisher unlocks after three or
+       four of them, and a pod of four works a megalodon down to the roll in
+       about a minute. */
+    o.dmg = dpsAgainst(a, target) * 0.4;
+    let res = null;
+    try { res = CBZ.creatureFight(a, target, dt, o); } catch (e) {}
+    if (res && res.missed) AUDIT.passMiss = (AUDIT.passMiss || 0) + 1;
     if (a._atkAnim >= 0) { m.ramRun = 0; return true; }   // committed: the swing owns it
     return m.ramRun > 0;                                   // still closing
   }
@@ -1044,15 +1313,6 @@
   const MOB_FLOOR = ROLL_HP - 0.06;
   function hurt(victim, dmg, by, cause) {
     if (!victim || victim.dead || !(dmg > 0)) return;
-    /* A HIT ON A BALLED-UP SCHOOL EATS THE SCHOOL, NOT THE FISH. One guarded
-       call into city/marine_frenzy.js, which owns the ball and therefore owns
-       what its remaining mass is. Without it the anchor fish (3 hp) dies to the
-       first bite and the whole event is over before the player can see it. */
-    if (typeof CBZ.marineFrenzyAbsorb === "function") {
-      let ate = false;
-      try { ate = CBZ.marineFrenzyAbsorb(victim, dmg); } catch (e) { ate = false; }
-      if (ate) return;
-    }
     if (by && by.species && victim.species && !victim._mpRoll &&
         marineRelation(by.species, victim.species) === 2) {
       const floor = maxHpOf(victim) * MOB_FLOOR;
@@ -1658,6 +1918,31 @@
       return false;                                     // the player hunt gets it
     }
 
+    /* A POD GIVES UP ON WHAT IT CANNOT CATCH. A pod animal that has chased
+       one quarry for CHASE_GIVEUP seconds without once getting within a
+       couple of body lengths of it lets it go, and will not pick that one
+       again for QUIT_FORGET seconds — it goes back to travelling as a pod.
+       Real pods abandon hunts all the time; ours chased a turtle 450 m out
+       to sea at 10 m/s and a megalodon for as long as it stayed in range. */
+    // (never on the PLAYER's shark: in Shark Sim the pod IS the threat curve,
+    // and modes/shark_sim.js owns when it relents)
+    if (isPodSpecies(sp) && !m.rolling && !target.huntable) {
+      const tpc = actorPos(target), hpc = grp.position;
+      if (m.quitT > 0) { m.quitT -= dt; if (m.quitT <= 0) m.quit = null; }
+      if (tpc) {
+        _t0 = tpc.x - hpc.x; _t1 = tpc.z - hpc.z;
+        const close = bodyLen(a) * 2.2 + bodyLen(target) * 0.5;
+        if (_t0 * _t0 + _t1 * _t1 < close * close) m.chaseT = 0;
+        else m.chaseT = (m.chaseT || 0) + dt;
+        if (m.chaseT > CHASE_GIVEUP) {
+          m.chaseT = 0; m.quit = target; m.quitT = QUIT_FORGET;
+          drop(a); m.scanT = 3;
+          AUDIT.gaveUp = (AUDIT.gaveUp || 0) + 1;
+          return false;
+        }
+      }
+    }
+
     // A POD MEMBER THAT IS LOSING LEAVES, AND IT LEAVES BLEEDING. That is what
     // makes one orca against a megalodon a visible defeat rather than a draw.
     if (m.kind === 2) {
@@ -1693,6 +1978,16 @@
     const role = podRole(a, target, dt);
     const opts = optsFor(a);
     m.held = (role === "hold");
+
+    // A POD ON AN APEX FIGHTS AS A POD (see podMobTick). The lone-stalker FSM
+    // below is for everything else.
+    if (m.kind === 2 && PODS() && isPodSpecies(sp) && typeof opts.move === "function") {
+      m.held = false;
+      podMobTick(a, target, dt, opts);
+      a.state = "wander";        // never the player's threat chevron (shark_sim owns that read)
+      show(a, pd2);
+      return true;
+    }
 
     // A FLANKER THAT HAS A PASS LINED UP TAKES IT, and while that swing is in
     // flight the shared combat driver owns the body outright — calling the
@@ -1763,8 +2058,28 @@
         _t0 = tp2.x - hp2.x; _t1 = tp2.z - hp2.z;
         const wake = ((opts.senseR > 0 ? opts.senseR : 110) * SHADOW_K);
         if (_t0 * _t0 + _t1 * _t1 > wake * wake) {
-          const spd = (opts.cruiseSpeed > 0 ? opts.cruiseSpeed : 4) * 1.3;
-          try { opts.move(a, Math.atan2(_t1, _t0), spd, dt); } catch (e) {}
+          /* ..AND IT CROSSES THE WATER AS A POD, and gives up when it
+             cannot close. Each member used to shadow alone at its own speed
+             straight at the quarry, so a pod arrived as three animals strung
+             out over 100 m (measured 30-110 m apart, the whole way). Now the
+             heading is the quarry's bearing bent toward the pod's centre and
+             the speed is trimmed by where I sit along that line: the one in
+             front eases off, the one behind pushes, so the group closes up
+             and travels together. (Giving up on a quarry it cannot close
+             on is the chase clock above, not this branch.) */
+          const d = Math.sqrt(_t0 * _t0 + _t1 * _t1) || 1;
+          const ux = _t0 / d, uz = _t1 / d;
+          let hx = ux, hz = uz, spd = (opts.cruiseSpeed > 0 ? opts.cruiseSpeed : 4) * 1.3;
+          const c = podCentre(a, target, dt);
+          if (c.n > 1) {
+            const cx = c.x - hp2.x, cz = c.z - hp2.z;
+            const cd = Math.sqrt(cx * cx + cz * cz);
+            if (cd > 6) { const w = Math.min(0.9, cd / 60); hx += (cx / cd) * w; hz += (cz / cd) * w; }
+            // + = I am ahead of the pod's centre along the line to the quarry
+            const ahead = -(cx * ux + cz * uz);
+            spd *= clamp(1 - ahead / 45, 0.6, 1.35);
+          }
+          try { opts.move(a, Math.atan2(hz, hx), spd, dt); } catch (e) {}
           AUDIT.shadowed++;
           a.state = "wander";        // never the player's threat chevron
           show(a, pd2);
@@ -1995,6 +2310,8 @@
       chumSources: (typeof CBZ.goreChumList === "function" && CBZ.goreChumList()) ? CBZ.goreChumList().length : 0,
       hudWrites: AUDIT.hudWrites,
       chunks: AUDIT.chunks,          // flank bites that took material off the quarry
+      passes: AUDIT.passes || 0, passMiss: AUDIT.passMiss || 0,   // the pod's turns, and the ones that snapped on water
+      gaveUp: AUDIT.gaveUp || 0,     // pod chases abandoned (CHASE_GIVEUP)
       wrapped: inChain(),
       // THE RATCHET (see the wrap note above): how many links deep the shark
       // brain chain is. Two files wrap it, so this is 3 with wildlife_shark.js
