@@ -1693,15 +1693,39 @@
     return m;
   }
   // wing mirror: arm + a pod that is wider at the glass than at the arm
-  function addMirrors(root, sec, zM, paint, trim) {
+  /* WING MIRRORS, on the door at the A-pillar base: a short black stalk out
+     of the belt and a rounded housing (~0.22 x 0.12 x 0.10) in body colour,
+     its flat back the dark glass. The old pod was a paint-coloured slab
+     standing on the fender, and read as a block hovering off the hood. */
+  let mirrorGeo = null, mirrorGlassGeo = null;
+  function mirrorGeos() {
+    if (mirrorGeo) return;
+    const g = new THREE.SphereGeometry(1, 12, 8);
+    g.scale(0.11, 0.06, 0.055);
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) if (p.getZ(i) < -0.012) p.setZ(i, -0.012);   // the flat back the glass sits in
+    g.computeVertexNormals();
+    mirrorGeo = g.toNonIndexed(); mirrorGeo.computeVertexNormals(); mirrorGeo._shared = true;
+    mirrorGlassGeo = new THREE.BoxGeometry(0.19, 0.095, 0.006); mirrorGlassGeo._shared = true;
+  }
+  function addMirrors(root, sec, zM, paint, trim, k) {
+    mirrorGeos();
+    k = k || 1;
     const s = sec(zM), P = CBZ.carBody.P;
-    const x0 = s.pts[P.G0][0], y0 = s.pts[P.G0][1];
+    const xg = s.pts[P.G0][0], xs = s.pts[P.S][0], y0 = s.pts[P.G0][1];
     [1, -1].forEach(function (side) {
-      addShaped(root, 0.11, 0.03, 0.06, side * (x0 + 0.05), y0 + 0.035, zM, trim);               // arm
-      const pod = addShaped(root, 0.17, 0.115, 0.10, side * (x0 + 0.15), y0 + 0.075, zM - 0.01, paint,
-        { topTaper: 0.12, frontPinch: 0.35 });
-      pod.rotation.y = side * 0.08;
-      addShaped(root, 0.15, 0.095, 0.012, side * (x0 + 0.15), y0 + 0.075, zM - 0.066, trim);   // the glass face (dark)
+      const armOut = xs + 0.04;
+      const arm = addShaped(root, armOut - (xg - 0.02), 0.03, 0.05, side * ((armOut + xg - 0.02) / 2), y0 + 0.035, zM, trim);
+      arm.rotation.z = side * 0.18;
+      const cx = side * (armOut + 0.10 * k), cy = y0 + 0.075, cz = zM - 0.005;
+      const h = new THREE.Mesh(mirrorGeo, paint);
+      h.position.set(cx, cy, cz); h.scale.setScalar(k); h.rotation.y = side * -0.12;
+      h.castShadow = false; h.userData.noSeal = true;
+      root.add(h);
+      const gl = new THREE.Mesh(mirrorGlassGeo, trim);
+      gl.position.set(cx - side * 0.004, cy, cz - 0.014 * k); gl.scale.setScalar(k); gl.rotation.y = side * -0.12;
+      gl.castShadow = false; gl.userData.noSeal = true;
+      root.add(gl);
     });
   }
 
@@ -1741,7 +1765,9 @@
       doors: S.doors.map((d) => ({ id: d.id, side: d.side, row: d.row, z0: d.z0, z1: d.z1 })),
     });
     // mirrors at the A-pillar base, plates/lamps/grilles come with the brand face
-    addMirrors(root, B.section, S.zCowl - 0.16, paint, trim);
+    // on the front door, just behind its leading edge (the A-pillar base)
+    const fd = S.doors.filter((d) => d.row === 0)[0];
+    addMirrors(root, B.section, fd ? fd.z1 - 0.1 : S.zCowl - 0.12, paint, trim);
     // per-model accents that ride the shell
     const top = (z) => B.section(z).pts[P.RC][1];
     const wingZ = -b.L / 2 + 0.22;
@@ -1815,7 +1841,10 @@
       noseTopY: noseTop, tailTopY: tailTop, bodyY: S.yB, baseH: Math.max(noseTop, tailTop) - S.yB,
       roofY: S.yRoof, roofZ: (S.zRoofF + S.zRoofR) / 2, roofW: midCab.xG0 * S.tumble * 2, roofLen: S.zRoofF - S.zRoofR,
       zCowl: S.zCowl, zDeck: S.zDeck, beltY: midCab.yEdge,
-      fz: CBZ.carBody.faceGrid(B, 1, 9, 9), rz: CBZ.carBody.faceGrid(B, -1, 9, 9),
+      // fine grids (4-5 cm): the lamps and intakes are LAID ON these, so a
+      // coarse grid's chord error would sink them into the curved corners
+      fz: CBZ.carBody.faceGrid(B, 1, 25, 19), rz: CBZ.carBody.faceGrid(B, -1, 25, 19),
+      sport: /^(porsche|ferrari|enzo|aventador|veyron)$/.test(style),
       lines: CBZ.carBody.lines(B, 32),
       doors: S.doors.map((d) => [d.z0, d.z1, d.side]),
       paint: paint,
@@ -2303,7 +2332,7 @@
       doorSpans: S.doors.filter((d) => d.side > 0).map((d) => [d.z0, d.z1]),
       doors: S.doors.map((d) => ({ id: d.id, side: d.side, row: d.row, z0: d.z0, z1: d.z1 })),
     });
-    addMirrors(root, B.section, zCowl - 0.12, trim, trim);
+    addMirrors(root, B.section, lead - 0.1, trim, trim, 1.25);
     // kerb-side (-x) sliding-door shut lines + its roller track
     const sd0 = holdFront - 0.02, sd1 = holdFront - 1.12;
     const flank = B.section((sd0 + sd1) / 2);
@@ -2676,7 +2705,7 @@
      livery, the parked-car repaint and the respray land at all. */
   function recolorBody(root, color) {
     if (root && root.userData && root.userData.marineLivery) return;
-    const c = new THREE.Color(color);
+    const c = CBZ.carPaintColor ? CBZ.carPaintColor(color) : new THREE.Color(color);
     const swapped = new Map();
     root.traverse(function (o) {
       // A SHUT DOOR IS NOT IN THE TREE. vehicles.js parks the live door groups

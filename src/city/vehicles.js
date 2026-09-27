@@ -677,6 +677,41 @@
   // Ambient-car parts never animate independently, except for the deformable
   // hull and cabin. Bake the rest into a few per-material meshes so richer car
   // silhouettes do not cost dozens of draw calls per traffic vehicle.
+  /* ONE MERGED GEOMETRY PER CAR MODEL, NOT PER CAR. Every traffic car is a
+     clone of a per-style template: same geometries, same transforms, only the
+     paint MATERIAL differs. Merging per car minted a fresh ~2 MB non-indexed
+     buffer set for every car on the map (the loft bodies doubled the tris, and
+     this city has OOM-killed phones on geometry before). The merge result is a
+     pure function of (source geometry ids + their matrices), so it is cached
+     and flagged _shared: crashdeform.js copies a _shared geometry before it
+     dents it (copy-on-write) and every teardown path skips _shared buffers. */
+  const _mergeCache = new Map();
+  function mergeKey(parts) {
+    let k = "";
+    for (let i = 0; i < parts.length; i++) {
+      const e = parts[i].m.elements;
+      k += parts[i].g.uuid + ":";
+      for (let j = 0; j < 16; j++) k += Math.round(e[j] * 1e4) + ",";
+      k += ";";
+    }
+    return k;
+  }
+  function sharedMerge(parts) {
+    const key = mergeKey(parts);
+    let geo = _mergeCache.get(key);
+    if (geo) return geo;
+    const copies = parts.map(function (p) {
+      const c = p.g.index ? p.g.toNonIndexed() : p.g.clone();
+      c.applyMatrix4(p.m);
+      return c;
+    });
+    geo = mergeGeometryCopies(copies);
+    copies.forEach(function (c) { if (c.dispose) c.dispose(); });
+    geo._shared = true;
+    _mergeCache.set(key, geo);
+    return geo;
+  }
+
   function mergeStaticCarParts(grp, keep) {
     const isMesh = (o) => !!(o && o.geometry && o.material);
     const sourceParts = grp.children.reduce((n, o) => n + (isMesh(o) ? 1 : 0), 0);
@@ -697,14 +732,7 @@
       const proto = meshes[0];
       let mergedGeo;
       if (proto.updateMatrix && proto.geometry.attributes && proto.geometry.attributes.position && proto.geometry.clone && proto.geometry.applyMatrix4) {
-        const copies = meshes.map((mesh) => {
-          mesh.updateMatrix();
-          const geo = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
-          geo.applyMatrix4(mesh.matrix);
-          return geo;
-        });
-        mergedGeo = mergeGeometryCopies(copies);
-        copies.forEach((geo) => geo.dispose && geo.dispose());
+        mergedGeo = sharedMerge(meshes.map((mesh) => { mesh.updateMatrix(); return { g: mesh.geometry, m: mesh.matrix.clone() }; }));
       } else {
         // Lightweight test renderers do not implement BufferGeometry baking.
         mergedGeo = proto.geometry;
@@ -745,11 +773,9 @@
       for (const m of g.children) {
         if (!m.geometry || !m.material || !m.geometry.attributes || !m.geometry.attributes.position) continue;
         m.updateMatrix();
-        const geo = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
-        geo.applyMatrix4(m.matrix);
-        geo.applyMatrix4(g.matrix);
+        const mat4 = new THREE.Matrix4().multiplyMatrices(g.matrix, m.matrix);
         const key = m.material.id + "|" + (m.renderOrder | 0);
-        (buckets.get(key) || buckets.set(key, { proto: m, geos: [] }).get(key)).geos.push(geo);
+        (buckets.get(key) || buckets.set(key, { proto: m, parts: [] }).get(key)).parts.push({ g: m.geometry, m: mat4 });
       }
       visual.remove(g);
       g._cbzOpenT = 0;
@@ -757,9 +783,8 @@
     const shut = [];
     buckets.forEach((b) => {
       let merged;
-      try { merged = new THREE.Mesh(mergeGeometryCopies(b.geos), b.proto.material); }
+      try { merged = new THREE.Mesh(sharedMerge(b.parts), b.proto.material); }
       catch (e) { return; }
-      b.geos.forEach((geo) => geo.dispose && geo.dispose());
       merged.castShadow = false;
       merged.receiveShadow = b.proto.receiveShadow;
       merged.renderOrder = b.proto.renderOrder;
@@ -2336,6 +2361,7 @@
   }
 
   function clearCars() {
+    while (sleepers.length) wakeCar(sleepers[sleepers.length - 1]);   // the sleep list never outlives its cars
     const keep = [];
     for (const c of CBZ.cityCars) {
       // _persist records (farm tractor/combine — world fixtures registered via
@@ -2370,6 +2396,7 @@
      or a car that was never registered, is a no-op rather than a double
      dispose of shared geometry. */
   CBZ.cityScrapCar = function (car) {
+    wakeCar(car);
     if (!car || car._scrapped) return false;
     car._scrapped = true;
     // never scrap the car under the player — hand the seat back first
@@ -2492,6 +2519,7 @@
      here — a van built by makeCar off the catalog, a semi registered by the
      fleet placer, anything a future builder publishes a holdSpec on. */
   function adoptHold(c) {
+    wakeCar(c);
     if (!c || !c.group || !c.group.parent || c.dead) return null;
     if (c.hold && !c.hold.inert) return c.hold;
     if (!CBZ.vehicleHold) return null;
@@ -2948,6 +2976,7 @@
   // ---- carjacking: a high-aggression ped grabs an ambient car + rampages ----
   let npcDrivers = 0;
   CBZ.cityNpcCarjack = function (ped, target) {
+    wakeCar(target);
     if (npcDrivers >= 3) return false;            // bound the chaos
     const car = nearestAmbientCar(ped.pos.x, ped.pos.z, 6.5);
     if (!car) return false;
@@ -3933,6 +3962,7 @@
     const cars = CBZ.cityCars;
     for (let i = 0; i < cars.length; i++) {
       const c = cars[i];
+      if (c._sleep) continue;                // parked, far, inert (see sleepers)
       syncOccupants(c);                      // driver body appears/vanishes with control state
       // a passenger who froze in his seat: still there, still yours, and the
       // moment you actually drive off with him it stops being a jack.
@@ -4073,6 +4103,7 @@
   // PUBLIC: a bullet landed at `point` — if that's a wheel, blow the tire.
   // Returns true when the round hit rubber (callers soften engine damage).
   CBZ.cityCarTireHit = function (car, point) {
+    wakeCar(car);
     if (!car || car.dead || !point) return false;
     const bit = tireAt(car, point);
     if (!bit) return false;
@@ -4109,6 +4140,7 @@
   //      amount is in engine-HP points; opts.byPlayer attributes the kill. A
   //      direct hit on an already-smoking car can light it; big hits pop it. ----
   CBZ.cityDamageCar = function (car, amount, opts) {
+    wakeCar(car);
     if (!car || car.dead) return;
     opts = opts || {};
     if (opts.byPlayer) car._burnByPlayer = true;
@@ -4160,6 +4192,7 @@
   // {fuse, fuseOnly, burnsOut, quiet} — so a caller with a reason to pick the
   // beat can, and the 2-argument call every existing site makes is unchanged.
   CBZ.cityCarIgnite = function (car, byPlayer, opts) {
+    wakeCar(car);
     if (!car || car.dead) return;
     if (car.engineHp == null || car.engineHp > FIRE_AT) car.engineHp = FIRE_AT;
     if (byPlayer) car._burnByPlayer = true;
@@ -4190,6 +4223,7 @@
 
   // ---- enter / exit ----
   CBZ.cityEnterVehicle = function (car) {
+    wakeCar(car);
     if (!car || car.player) return false;
     /* TAKING THE WHEEL UNCHAINS IT. vehicle_hold.js's law is that a latched
        machine is released the instant somebody claims its controls — that is
@@ -5700,7 +5734,48 @@
   // simulation the instant it matters (turning, wrecked, wanted, fleeing, or
   // back on screen). This is the single biggest CPU saving in the traffic loop.
   let _vframe = 0, _vslice = 0;
-  const FARCAR_D2 = 150 * 150;     // == the group-visibility cull distance below
+  const FARCAR_D2 = 150 * 150;
+  /* PARKED CARS SLEEP. ~500 cars live in cityCars and most are parked; both
+     per-frame passes (37 AI, 38 damage/occupants) walked every one of them at
+     every tier (measured 40-75 ms/frame at 4x CPU throttle on the iPad
+     profile). A settled, undamaged, unoccupied parked car past SLEEP_D is put
+     in `sleepers`, hidden (the same 150 m cull the moving traffic uses) and
+     skipped by both passes. Waking is a round-robin slice of the sleep list
+     per frame (never a scan of all 500) plus wakeCar() at every door into a
+     car's state: damage, fire, tyres, entry, carjack, hold, scrap. */
+  const SLEEP_D2 = 150 * 150, WAKE_D2 = 140 * 140, WAKE_SLICE = 24;
+  const sleepers = [];
+  let _wakeCursor = 0;
+  function sleepCar(c) {
+    if (c._sleep) return;
+    c._sleep = true;
+    if (c.group) c.group.visible = false;
+    sleepers.push(c);
+  }
+  function wakeCar(c) {
+    if (!c || !c._sleep) return;
+    c._sleep = false;
+    if (c.group) c.group.visible = true;
+    const i = sleepers.indexOf(c);
+    if (i >= 0) { sleepers[i] = sleepers[sleepers.length - 1]; sleepers.pop(); }
+  }
+  CBZ.cityWakeCar = wakeCar;
+  function sleepable(c) {
+    return !c.player && !c.dead && !c.ai && !c._heldBy && !c._runaway && !(c.wreckT > 0) &&
+      !c._onFire && !c._smoking && !c._husk && !(c.occ && c.occ.jacked) && !c.npcDriver;
+  }
+  function wakeSlice(camx, camz) {
+    const n = Math.min(WAKE_SLICE, sleepers.length);
+    for (let k = 0; k < n; k++) {
+      if (!sleepers.length) return;
+      if (_wakeCursor >= sleepers.length) _wakeCursor = 0;
+      const c = sleepers[_wakeCursor];
+      const dx = c.pos.x - camx, dz = c.pos.z - camz;
+      if (c.dead || !sleepable(c) || dx * dx + dz * dz < WAKE_D2) wakeCar(c);   // swap-remove: this index now holds another sleeper
+      else _wakeCursor++;
+    }
+  }
+  CBZ.citySleepAudit = function () { return { sleeping: sleepers.length, cars: (CBZ.cityCars || []).length }; };     // == the group-visibility cull distance below
 
   // ---- CAR-AHEAD broad phase (the O(n²) killer) -----------------------------
   // carAhead() below is the traffic loop's hot path: it scans the ENTIRE car
@@ -5745,7 +5820,9 @@
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     _vframe++;
     rebuildCarGrid();   // ONE rebuild per frame; carAhead queries it per car
+    wakeSlice(camx, camz);
     for (const c of CBZ.cityCars) {
+      if (c._sleep) continue;
       dt = baseDt;     // reset each car (a strided far car overrides this below)
       /* A CHAINED-DOWN LOAD HAS NO GROUND UNDER IT. This pass runs at 37 and
          vehicle_hold.js writes strapped freight at 12.7, so anything this loop
@@ -5777,9 +5854,10 @@
           // traffic). Near cars stay live for door/entry/impact animation.
           const settled = c._parkX === c.pos.x && c._parkZ === c.pos.z && c._parkH === c.heading;
           parkSeat(c);
-          if (settled && CBZ.CONFIG.CAR_MATRIX_HOLD !== false && c.group) {
-            const pdx = c.pos.x - camx, pdz = c.pos.z - camz;
-            if (pdx * pdx + pdz * pdz > 3600) c.group._cbzMatrixOwnedFrame = CBZ._matrixOwnStamp;
+          if (settled && c.group) {
+            const pdx = c.pos.x - camx, pdz = c.pos.z - camz, pd2 = pdx * pdx + pdz * pdz;
+            if (pd2 > SLEEP_D2 && sleepable(c)) { sleepCar(c); continue; }
+            if (pd2 > 3600 && CBZ.CONFIG.CAR_MATRIX_HOLD !== false) c.group._cbzMatrixOwnedFrame = CBZ._matrixOwnStamp;
           }
         }
         continue;

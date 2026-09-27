@@ -506,16 +506,33 @@
      COST: r128 always compiles CLEARCOAT for a Physical material, so every
      paint in the city is ONE program (one extra specular lobe per light plus
      one env fetch, on car pixels only). Draw calls unchanged. */
-  const PAINT_V2 = { metalness: 0.40, envMapIntensity: 0.75 };
+  /* Measured in the car-showcase studio: at base metalness 0.40 x authored the
+     base layer mirrored the bright street sky across every panel and a navy
+     sedan photographed powder blue. Solid paint is a dielectric; the gloss
+     lives in the CLEARCOAT lobe, so the base keeps only a trace of metal
+     (flake) and the car keeps its colour. */
+  const PAINT_V2 = { metalness: 0.12, envMapIntensity: 0.75 };
   // A paint whose env reflection out-weighs this much of its own colour is the
   // defect above. paintResponse clamps envMapIntensity so metalness x env can
   // never exceed 0.32 (the old unscaled table's softest, a hatch, was 0.48).
   const METAL_ENV_CEIL = 0.35;
+  /* PAINT IS AUTHORED IN sRGB, THIS RENDERER IS NOT. The game runs the legacy
+     pipeline (hex taken as linear, sRGB output), which lifts every mid-tone:
+     a catalog navy 0x2d5f9a photographed powder blue and a red went salmon.
+     Car paint is the one surface a stranger judges by saturation, so its hex
+     is pulled most of the way into linear (gamma 1.7, not the full 2.2, so a
+     car still sits in the same world as the lifted buildings around it). */
+  function paintColor(hex) {
+    const c = new THREE.Color(hex);
+    c.r = Math.pow(c.r, 1.7); c.g = Math.pow(c.g, 1.7); c.b = Math.pow(c.b, 1.7);
+    return c;
+  }
+  CBZ.carPaintColor = paintColor;
   function paintResponse(metalness, roughness, envMapIntensity) {
     const m = metalness * PAINT_V2.metalness;
     const e = Math.min(0.32 / Math.max(m, 0.05), envMapIntensity * PAINT_V2.envMapIntensity);
     // base: satin under the coat; the authored table's ordering is kept
-    const r = Math.min(0.9, 0.22 + roughness * 0.7);
+    const r = Math.min(0.9, 0.34 + roughness * 0.5);
     // coat: the wetter the authored paint, the tighter the coat (~0.04..0.09)
     const cr = Math.min(0.12, 0.02 + roughness * 0.16);
     return {
@@ -647,7 +664,7 @@
       // flatShading OFF: a panel shades by the normals its geometry carries
       // (faceted geometry still reads faceted; a smooth panel can now be one).
       const m = new THREE.MeshPhysicalMaterial({
-        color: col,
+        color: paintColor(col),
         metalness: P.metalness,
         roughness: P.roughness,
         clearcoat: 1.0,
@@ -658,7 +675,7 @@
       m._paintResponse = P;                    // read by CBZ.carPaintAudit()
       // a whisper of self-glow only: the env's diffuse fill lifts the shadow
       // side now, and a bigger glow is what turns paint chalky after dark.
-      m.emissive = new THREE.Color(col).multiplyScalar(0.03);
+      m.emissive = paintColor(col).multiplyScalar(0.03);
       m.emissiveIntensity = num(opts.emissiveIntensity, 1.0);
       m._bodyPaint = true; // <-- EXACT flag matched from playercars.js recolorBody
       registerForEnv(m); // back-fill envMap if ENV builds after this
@@ -770,7 +787,7 @@
           color: tint,
           metalness: 0.0,
           roughness: 0.04,
-          transmission: num(opts.transmission, 0.64),
+          transmission: num(opts.transmission, 0.5),   // 0.64 read as pale grey-blue glass in daylight
           transparent: true,
           opacity: 1.0,
           depthWrite: false,

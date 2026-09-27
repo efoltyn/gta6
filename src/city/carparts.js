@@ -291,44 +291,228 @@
     return m;
   }
 
-  // lamp materials beyond the two contract singletons. DRAW CALLS: every
-  // distinct material is one more merged bucket per car, so the reflector
-  // bowl and the plate recess share the grille's black, and the reverse lamp
-  // shares the plate's white.
-  const housing = () => grille();                                                       // dark reflector bowl
+  // ---- face materials. DRAW CALLS: every distinct material is one more
+  //      merged bucket per car, so these are few and shared fleet-wide. ----
+  // near-black and UNLIT-ish: an opening in a bumper is a hole, it must not
+  // catch the sun as a mid-grey slot (carfx's plastic singleton did exactly that)
+  const holeM = () => L("cp-hole", 0x0b0c0e, { emissive: 0, ei: 0 });
+  const rimM = () => L("cp-rim", 0x1a1d21, { emissive: 0x060708, ei: 0.4 });            // intake surrounds, fins, splitter
+  const smokeM = () => L("cp-smoke", 0x10151b, { emissive: 0x06090c, ei: 0.5 });        // smoked lamp housing
   const reflector = () => M("cp-chrome", "chrome", 0xc4ccd4, { emissive: 0x262b31, ei: 0.3 });
-  const tailLens = () => L("cp-taillens", 0x4a0a10, { emissive: 0x2a0306, ei: 0.5 });    // dark red outer lens (NOT a tail by the detector: r<0.78)
+  const tailLens = () => L("cp-taillens", 0x4a0a10, { emissive: 0x2a0306, ei: 0.5 });   // dark red outer lens (NOT a tail by the detector: r<0.78)
   const plateM = () => L("cp-plate", 0xe8ebef, { emissive: 0x30343a, ei: 0.35 });
   const reverseM = () => plateM();                                                      // unlit reverse lamp
-  const plateRim = () => grille();
+  const grilleM = () => holeM();
 
-  /* A HEADLAMP UNIT: a dark reflector housing set into the fascia, a chrome
-     reflector ring and the lit element (the lightFront contract singleton —
-     carlamps.js pushes its emissive at night, crashdeform kills it). */
-  function headLamp(root, ctx, x, y, w, h, roll, kind) {
-    const r = kind === "round" ? Math.min(w, h) / 2 : kind === "brow" ? h / 2 : Math.min(w, h) * 0.32;
-    put(slab(root, w + 0.03, h + 0.03, 0.05, r + 0.015, housing()), ctx, 1, x, y, 0.004, roll);
-    if (kind !== "brow") put(slab(root, w, h, 0.02, r, reflector(), 0.004), ctx, 1, x, y, 0.012, roll);
-    const ew = kind === "brow" ? w : w * (kind === "quad" ? 0.62 : 0.78), eh = kind === "brow" ? h * 0.8 : h * 0.62;
-    put(slab(root, ew, eh, 0.02, Math.min(ew, eh) * 0.45, head(), 0.004), ctx, 1, x + (kind === "brow" ? 0 : Math.sign(x) * w * 0.06), y, 0.024, roll);
+  /* ============================================================
+     SKIN PATCHES. A lamp or an intake is not a box stuck on the nose: it is
+     a piece of the nose. skinPatch() samples the body's own fascia grid
+     over a (u, v) parameter square mapped to (x, y), and lays a mesh `off`
+     metres out along the local surface normal — so a headlamp that runs out
+     to the bumper corner WRAPS round it toward the fender, and a smoked
+     housing sits flush instead of standing 5 cm proud in a black frame.
+     Built in the car frame (the mesh has no transform) and cached per
+     (body template, brand), so every clone reuses the geometry.
+  ============================================================ */
+  function surfPt(ctx, end, x, y, off) {
+    const e = 0.02;
+    const z = surfZ(ctx, end, x, y);
+    const zx = (surfZ(ctx, end, x + e, y) - surfZ(ctx, end, x - e, y)) / (2 * e);
+    const zy = (surfZ(ctx, end, x, y + e) - surfZ(ctx, end, x, y - e)) / (2 * e);
+    let nx = -zx * end, ny = -zy * end, nz = end;
+    if (end < 0) { nx = zx; ny = zy; nz = -1; }
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nx /= l; ny /= l; nz /= l;
+    return { p: [x + nx * off, y + ny * off, z + nz * off], n: [nx, ny, nz] };
   }
-  /* A TAIL LAMP: dark red lens, a bright bar inside it (the lightTail
-     singleton — vehicles.js swaps it for the braking twin), a reverse lamp. */
-  function tailLamp(root, ctx, x, y, w, h, roll, kind, rev) {
-    const r = kind === "round" ? Math.min(w, h) / 2 : Math.min(w, h) * 0.3;
-    put(slab(root, w + 0.02, h + 0.02, 0.045, r, tailLens(), 0.005), ctx, -1, x, y, 0.004, roll);
-    if (kind === "round") put(slab(root, w * 0.66, h * 0.66, 0.02, w * 0.33, tail()), ctx, -1, x, y, 0.016, roll);
-    else put(slab(root, w * 0.86, Math.max(0.03, h * 0.36), 0.02, 0.012, tail()), ctx, -1, x, y + h * 0.16, 0.016, roll);
-    if (rev) put(slab(root, Math.min(0.12, w * 0.3), Math.max(0.03, h * 0.26), 0.02, 0.01, reverseM()), ctx, -1, x - Math.sign(x) * w * 0.22, y - h * 0.24, 0.016, roll);
+  // map(u, v) -> [x, y]; u across (nu cells), v up (nv cells)
+  function skinPatch(ctx, end, map, nu, nv, off, walls) {
+    const P = [], N = [];
+    for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
+      const xy = map(i / nu, j / nv), s = surfPt(ctx, end, xy[0], xy[1], off);
+      P.push(s.p); N.push(s.n);
+    }
+    const pos = [], nor = [];
+    const idx = (i, j) => j * (nu + 1) + i;
+    const push = (k) => { pos.push(P[k][0], P[k][1], P[k][2]); nor.push(N[k][0], N[k][1], N[k][2]); };
+    const tri = (a, b, c) => {
+      const A = P[a], B = P[b], C = P[c];
+      const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2], vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+      const fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx;
+      if (Math.hypot(fx, fy, fz) < 1e-10) return;
+      if (fx * N[a][0] + fy * N[a][1] + fz * N[a][2] >= 0) { push(a); push(b); push(c); } else { push(a); push(c); push(b); }
+    };
+    for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
+      tri(idx(i, j), idx(i + 1, j), idx(i + 1, j + 1)); tri(idx(i, j), idx(i + 1, j + 1), idx(i, j + 1));
+    }
+    // RIM: the opening's wall, from the skin out to `walls.h`, facing in —
+    // what makes a black patch read as a HOLE with depth and not as paint
+    if (walls) {
+      const ring = [];
+      for (let i = 0; i <= nu; i++) ring.push([i / nu, 0]);
+      for (let j = 1; j <= nv; j++) ring.push([1, j / nv]);
+      for (let i = nu - 1; i >= 0; i--) ring.push([i / nu, 1]);
+      for (let j = nv - 1; j >= 1; j--) ring.push([0, j / nv]);
+      const cxy = map(0.5, 0.5);
+      for (let k = 0; k < ring.length; k++) {
+        const r0 = ring[k], r1 = ring[(k + 1) % ring.length];
+        const a = map(r0[0], r0[1]), b = map(r1[0], r1[1]);
+        const pa0 = surfPt(ctx, end, a[0], a[1], off), pb0 = surfPt(ctx, end, b[0], b[1], off);
+        const pa1 = surfPt(ctx, end, a[0], a[1], off + walls.h), pb1 = surfPt(ctx, end, b[0], b[1], off + walls.h);
+        // outward in-plane direction of this edge = away from the centre
+        const mx = (a[0] + b[0]) / 2 - cxy[0], my = (a[1] + b[1]) / 2 - cxy[1];
+        const wall = [pa0.p, pb0.p, pb1.p, pa1.p];
+        const ux = wall[1][0] - wall[0][0], uy = wall[1][1] - wall[0][1], uz = wall[1][2] - wall[0][2];
+        const vx = wall[3][0] - wall[0][0], vy = wall[3][1] - wall[0][1], vz = wall[3][2] - wall[0][2];
+        const fx = uy * vz - uz * vy, fy = uz * vx - ux * vz;
+        const inward = -(fx * mx + fy * my) >= 0;
+        const n = inward ? [fx, fy] : [-fx, -fy];
+        const nl = Math.hypot(n[0], n[1]) || 1;
+        const nn = [n[0] / nl, n[1] / nl, 0];
+        const q = inward ? [wall[0], wall[1], wall[2], wall[3]] : [wall[0], wall[3], wall[2], wall[1]];
+        [[0, 1, 2], [0, 2, 3]].forEach(function (t) { t.forEach(function (ti) { pos.push(q[ti][0], q[ti][1], q[ti][2]); nor.push(nn[0], nn[1], nn[2]); }); });
+        // the lip on top of the wall, a thin band outward (the bezel face)
+        const w = walls.lip || 0.012, ml = Math.hypot(mx, my) || 1;
+        const ox = mx / ml * w, oy = my / ml * w;
+        const pa2 = surfPt(ctx, end, a[0] + ox, a[1] + oy, off + walls.h * 0.6), pb2 = surfPt(ctx, end, b[0] + ox, b[1] + oy, off + walls.h * 0.6);
+        const lip = [pa1.p, pb1.p, pb2.p, pa2.p], ln = pa1.n;
+        const lu = [lip[1][0] - lip[0][0], lip[1][1] - lip[0][1], lip[1][2] - lip[0][2]], lv = [lip[3][0] - lip[0][0], lip[3][1] - lip[0][1], lip[3][2] - lip[0][2]];
+        const lf = [lu[1] * lv[2] - lu[2] * lv[1], lu[2] * lv[0] - lu[0] * lv[2], lu[0] * lv[1] - lu[1] * lv[0]];
+        const ok = lf[0] * ln[0] + lf[1] * ln[1] + lf[2] * ln[2] >= 0;
+        const lq = ok ? lip : [lip[0], lip[3], lip[2], lip[1]];
+        [[0, 1, 2], [0, 2, 3]].forEach(function (t) { t.forEach(function (ti) { pos.push(lq[ti][0], lq[ti][1], lq[ti][2]); nor.push(ln[0], ln[1], ln[2]); }); });
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+    g.computeBoundingSphere();
+    g._shared = true;
+    return g;
+  }
+  function addGeo(root, geo, mat) {
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = false;
+    m.userData.noSeal = true;
+    root.add(m);
+    return m;
+  }
+  // a swept band: x from xa to xb, centre y and height varying linearly,
+  // ends rounded by `round` (0 square .. 1 pill)
+  function band(xa, xb, ya, yb, ha, hb, round) {
+    return function (u, v) {
+      const r = round == null ? 0.5 : round;
+      const e = Math.min(u, 1 - u) * 2;                       // 0 at the ends
+      const k = r > 0 ? Math.pow(Math.min(1, e / 0.35), 0.5) * r + (1 - r) : 1;
+      const h = (ha + (hb - ha) * u) * Math.max(0.35, k);
+      return [xa + (xb - xa) * u, ya + (yb - ya) * u + (v - 0.5) * h];
+    };
+  }
+  function disc(cx, cy, rx, ry) {
+    return function (u, v) { const a = u * Math.PI * 2; return [cx + Math.cos(a) * rx * v, cy + Math.sin(a) * ry * v]; };
+  }
+
+  /* HEADLAMP CLUSTER: a smoked housing laid flush on the nose, running from
+     `xi` out to `xo` (signed: the side is in the sign) and wrapping the
+     corner; inside it a thin bright strip (the lightFront singleton —
+     carlamps pushes it at night, crashdeform kills it) and/or projector
+     dots, and a chrome sliver of reflector under the strip. */
+  // the outer end of a cluster never runs past the skin at ANY height it
+  // spans (a tall tail over a rolled deck edge would sample empty grid and
+  // spike off the corner)
+  function clampOuter(ctx, end, o) {
+    const yo = o.y + (o.slant || 0), hh = Math.max(o.hi || 0, o.ho || 0) / 2;
+    let m = o.xo;
+    for (let k = 0; k <= 4; k++) m = Math.min(m, cornerX(ctx, end, yo - hh + (2 * hh) * k / 4, 0.025));
+    o.xo = Math.max(o.xi + 0.04, m);
+  }
+  function headCluster(root, ctx, o) {
+    clampOuter(ctx, 1, o);
+    const s = o.side, yi = o.y, yo = o.y + (o.slant || 0);
+    const xi = s * o.xi, xo = s * o.xo;
+    addGeo(root, skinPatch(ctx, 1, band(xi, xo, yi, yo, o.hi, o.ho, o.round), 10, 2, 0.006), smokeM());
+    const ei = xi + s * (o.xo - o.xi) * 0.06, eo = xo - s * (o.xo - o.xi) * 0.05;
+    const ey = o.stripAt != null ? o.stripAt : 0.26;           // strip centre, fraction of height above the middle
+    const eh = o.strip != null ? o.strip : 0.24;
+    if (eh > 0) addGeo(root, skinPatch(ctx, 1, band(ei, eo, yi + o.hi * ey, yo + o.ho * ey, o.hi * eh, o.ho * eh, 1), 8, 1, 0.011), head());
+    addGeo(root, skinPatch(ctx, 1, band(ei, eo, yi - o.hi * 0.22, yo - o.ho * 0.22, o.hi * 0.12, o.ho * 0.12, 1), 8, 1, 0.009), reflector());
+    (o.dots || []).forEach(function (f) {
+      const x = xi + (xo - xi) * f, y = yi + (yo - yi) * f - o.hi * 0.05;
+      const r = Math.min(o.hi, o.ho) * (o.dotR || 0.3);
+      addGeo(root, skinPatch(ctx, 1, disc(x, y, r, r), 10, 1, 0.012), head());
+    });
+  }
+  /* TAIL CLUSTER: a dark red lens wrapping the rear corner, a thinner lit
+     band inside it (the lightTail singleton — braking brightens it), and a
+     reverse lamp at the inboard end. */
+  function tailCluster(root, ctx, o) {
+    if (!o.round) clampOuter(ctx, -1, o);
+    const s = o.side, xi = s * o.xi, xo = s * o.xo;
+    const yi = o.y, yo = o.y + (o.slant || 0);
+    if (o.round) {
+      addGeo(root, skinPatch(ctx, -1, disc(xi, yi, o.hi / 2, o.hi / 2), 12, 1, 0.006), tailLens());
+      addGeo(root, skinPatch(ctx, -1, disc(xi, yi, o.hi * 0.3, o.hi * 0.3), 10, 1, 0.011), tail());
+      return;
+    }
+    addGeo(root, skinPatch(ctx, -1, band(xi, xo, yi, yo, o.hi, o.ho, 0.35), 10, 2, 0.006), tailLens());
+    const f0 = o.rev ? 0.22 : 0.05;
+    const bi = xi + (xo - xi) * f0, bo = xo - (xo - xi) * 0.04;
+    addGeo(root, skinPatch(ctx, -1, band(bi, bo, yi + (yo - yi) * f0 + o.hi * 0.12, yo + o.ho * 0.12, o.hi * 0.34, o.ho * 0.34, 1), 8, 1, 0.011), tail());
+    if (o.rev) {
+      const ri = xi + (xo - xi) * 0.03, ro = xi + (xo - xi) * 0.19;
+      addGeo(root, skinPatch(ctx, -1, band(ri, ro, yi, yi + (yo - yi) * 0.19, o.hi * 0.5, o.hi * 0.5, 1), 3, 1, 0.011), reverseM());
+    }
+  }
+  /* AN OPENING: near-black, with a rim wall standing out of the skin
+     around it so it reads as a recess with depth; `fins` horizontal bars
+     across it; `lip` a splitter blade along its bottom edge. */
+  function intake(root, ctx, end, x, y, w, h, o) {
+    o = o || {};
+    const map = band(x - w / 2, x + w / 2, y, y + (o.slant || 0), h, h, o.round == null ? 0.35 : o.round);
+    addGeo(root, skinPatch(ctx, end, map, 8, 1, 0.003), holeM());
+    addGeo(root, skinPatch(ctx, end, map, 8, 1, 0.003, { h: o.depth || 0.03, lip: o.bezel || 0.012 }), o.chrome ? reflector() : rimM());
+    for (let i = 1; i <= (o.fins || 0); i++) {
+      const fy = y - h / 2 + h * i / ((o.fins || 0) + 1);
+      addGeo(root, skinPatch(ctx, end, band(x - w / 2 + 0.02, x + w / 2 - 0.02, fy, fy + (o.slant || 0), 0.014, 0.014, 0), 6, 1, 0.018), o.chrome ? reflector() : rimM());
+    }
+    if (o.lip) splitter(root, ctx, end, x - w / 2 - 0.04, x + w / 2 + 0.04, y - h / 2 - 0.03, o.lip);
+  }
+  // a thin blade standing out of the skin along a line (the splitter lip)
+  function splitter(root, ctx, end, x0, x1, y, depth) {
+    const n = 10, pos = [], nor = [];
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+      const x = x0 + (x1 - x0) * i / n;
+      const a = surfPt(ctx, end, x, y, 0), b = surfPt(ctx, end, x, y, depth);
+      const c = [b.p[0], b.p[1] - 0.018, b.p[2]], d = [a.p[0], a.p[1] - 0.018, a.p[2]];
+      pts.push([a.p, b.p, c, d]);
+    }
+    const quad = (A, B, C, D, nn) => { [A, B, C, A, C, D].forEach((p) => { pos.push(p[0], p[1], p[2]); nor.push(nn[0], nn[1], nn[2]); }); };
+    for (let i = 0; i < n; i++) {
+      const P0 = pts[i], P1 = pts[i + 1];
+      quad(P0[0], P1[0], P1[1], P0[1], [0, 1, 0]);                        // top
+      quad(P0[1], P1[1], P1[2], P0[2], [0, 0, end]);                      // front edge
+      quad(P0[3], P0[2], P1[2], P1[3], [0, -1, 0]);                       // underside
+    }
+    // wind every triangle to its stated normal
+    for (let t = 0; t < pos.length; t += 9) {
+      const ux = pos[t + 3] - pos[t], uy = pos[t + 4] - pos[t + 1], uz = pos[t + 5] - pos[t + 2];
+      const vx = pos[t + 6] - pos[t], vy = pos[t + 7] - pos[t + 1], vz = pos[t + 8] - pos[t + 2];
+      const f = [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
+      if (f[0] * nor[t] + f[1] * nor[t + 1] + f[2] * nor[t + 2] < 0) {
+        for (let k = 0; k < 3; k++) { const tmp = pos[t + 3 + k]; pos[t + 3 + k] = pos[t + 6 + k]; pos[t + 6 + k] = tmp; }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+    g.computeBoundingSphere();
+    addGeo(root, g, rimM());
   }
   // a plain plate in a dark recess (no marque, no text)
   function plate(root, ctx, end, y) {
-    put(slab(root, 0.56, 0.16, 0.03, 0.012, plateRim()), ctx, end, 0, y, 0.002);
-    put(slab(root, 0.52, 0.12, 0.02, 0.01, plateM()), ctx, end, 0, y, 0.012);
-  }
-  function grilleAt(root, ctx, w, h, y, r, frame) {
-    put(slab(root, w, h, 0.05, r, grille()), ctx, 1, 0, y, 0.003);
-    if (frame) put(slab(root, w + 0.04, 0.025, 0.03, 0.01, frame), ctx, 1, 0, y + h / 2 + 0.005, 0.012);
+    put(slab(root, 0.56, 0.16, 0.03, 0.012, holeM()), ctx, end, 0, y, 0.004);
+    put(slab(root, 0.52, 0.12, 0.02, 0.01, plateM()), ctx, end, 0, y, 0.014);
   }
   function pipe(root, ctx, x, y, r, material) {
     const m = new THREE.Mesh(cylGeo(r, 0.16, 12), material || chrome());
@@ -337,67 +521,69 @@
     m.position.set(x, y, z - 0.02);
     m.rotation.x = Math.PI / 2;
     root.add(m);
-    const inner = new THREE.Mesh(cylGeo(r * 0.72, 0.165, 10), grille());
+    const inner = new THREE.Mesh(cylGeo(r * 0.72, 0.165, 10), holeM());
     inner.position.copy(m.position); inner.rotation.x = Math.PI / 2;
     root.add(inner);
   }
+  // the lamp corner x: out to the body's side at that height, less a margin
+  function cornerX(ctx, end, y, margin) {
+    const G = end > 0 ? ctx.fz : ctx.rz;
+    let x = ctx.w * 0.47;
+    if (G) {
+      // the widest x that still has surface in the grid at this height
+      const j = Math.max(0, Math.min(G.ys.length - 1, Math.round((y - G.ys[0]) / (G.ys[1] - G.ys[0]))));
+      for (let i = G.xs.length - 1; i >= 0; i--) if (G.z[j][i] != null) { x = G.xs[i]; break; }
+    }
+    return x - (margin == null ? 0.03 : margin);
+  }
 
   // ============================================================
-  //  BRAND FACES — the design language, placed ON the skin.
-  //  ctx (playercars loftCtx): w, frontZ/rearZ, baseY (valance), headY,
-  //  tailY, noseTopY, fz/rz grids, lines, paint, noBumpers
+  //  BRAND FACES — the design language, laid INTO the skin.
+  //  No badges: the house rule is no invented logos, so a marque is
+  //  told apart by its lamps, its openings and its tail, not a plaque.
   // ============================================================
   const FACES = {
     falcone: function (root, ctx) {
       const w = ctx.w, hy = ctx.headY;
-      // a low wide mouth under a slim nose, twin side intakes
-      put(slab(root, w * 0.46, 0.11, 0.05, 0.05, grille()), ctx, 1, 0, ctx.baseY + 0.07, 0.003);
       [1, -1].forEach(function (s) {
-        put(slab(root, w * 0.16, 0.12, 0.05, 0.04, grille()), ctx, 1, s * w * 0.34, ctx.baseY + 0.08, 0.003, s * 0.12);
-        headLamp(root, ctx, s * w * 0.33, hy, w * 0.22, 0.075, s * -0.16, "slant");
+        headCluster(root, ctx, { side: s, xi: w * 0.17, xo: cornerX(ctx, 1, hy + 0.02, 0.02), y: hy - 0.01, slant: 0.035, hi: 0.055, ho: 0.095, strip: 0.2, stripAt: 0.22, round: 0.6 });
+        intake(root, ctx, 1, s * w * 0.34, ctx.baseY + 0.08, w * 0.17, 0.12, { fins: 1, slant: 0.02, lip: 0.05 });
       });
-      put(slab(root, 0.07, 0.09, 0.02, 0.02, badgeGold()), ctx, 1, 0, hy + 0.02, 0.01);
-      // twin round tails a side, quad pipes in a finned diffuser
+      intake(root, ctx, 1, 0, ctx.baseY + 0.06, w * 0.40, 0.10, { fins: 2, lip: 0.06 });
       [1, -1].forEach(function (s) {
-        [0.36, 0.23].forEach(function (fx) { tailLamp(root, ctx, s * w * fx, ctx.tailY, 0.13, 0.13, 0, "round", false); });
+        [0.37, 0.23].forEach(function (fx) { tailCluster(root, ctx, { side: s, xi: w * fx, y: ctx.tailY, hi: 0.13, round: true }); });
       });
-      put(slab(root, w * 0.62, 0.12, 0.06, 0.03, grille()), ctx, -1, 0, ctx.baseY + 0.02, 0.003);
-      [-0.2, -0.08, 0.08, 0.2].forEach(function (fx) { pipe(root, ctx, fx * w, ctx.baseY + 0.03, 0.042); });
+      intake(root, ctx, -1, 0, ctx.baseY + 0.02, w * 0.62, 0.11, { fins: 0 });
+      [-0.2, -0.08, 0.08, 0.2].forEach(function (fx) { pipe(root, ctx, fx * w, ctx.baseY + 0.02, 0.042); });
       plate(root, ctx, -1, (ctx.baseY + ctx.tailY) / 2 + 0.02);
     },
     adler: function (root, ctx) {
       const w = ctx.w, hy = ctx.headY;
       if (!ctx.noBumpers) addBumpers(root, ctx, true);
-      grilleAt(root, ctx, w * 0.42, 0.12, ctx.baseY + 0.12, 0.04, chrome());
-      put(slab(root, w * 0.5, 0.1, 0.05, 0.04, grille()), ctx, 1, 0, ctx.baseY + 0.02, 0.003);   // lower intake
+      intake(root, ctx, 1, 0, hy - 0.05, w * 0.34, 0.11, { fins: 2, chrome: true, round: 0.5 });
+      intake(root, ctx, 1, 0, ctx.baseY + 0.04, w * 0.54, 0.08, { fins: 0, lip: ctx.sport ? 0.05 : 0 });
       [1, -1].forEach(function (s) {
-        headLamp(root, ctx, s * w * 0.32, hy, 0.24, 0.15, s * -0.08, "round");
-        put(slab(root, 0.05, 0.04, 0.02, 0.012, amber()), ctx, 1, s * w * 0.44, hy - 0.08, 0.008);
+        headCluster(root, ctx, { side: s, xi: w * 0.22, xo: cornerX(ctx, 1, hy, 0.03), y: hy, slant: 0.01, hi: 0.10, ho: 0.12, strip: 0.12, stripAt: 0.36, dots: [0.3, 0.62], dotR: 0.28, round: 0.9 });
+        tailCluster(root, ctx, { side: s, xi: w * 0.12, xo: cornerX(ctx, -1, ctx.tailY, 0.02), y: ctx.tailY, slant: 0.01, hi: 0.07, ho: 0.10, rev: true });
       });
-      put(slab(root, 0.08, 0.08, 0.015, 0.04, chrome()), ctx, 1, 0, hy + 0.02, 0.01);            // roundel
-      // full-width slim tail bar
-      [1, -1].forEach(function (s) { tailLamp(root, ctx, s * w * 0.26, ctx.tailY, w * 0.42, 0.08, 0, "bar", true); });
-      [1, -1].forEach(function (s) { pipe(root, ctx, s * w * 0.3, ctx.baseY + 0.03, 0.045); });
+      [1, -1].forEach(function (s) { pipe(root, ctx, s * w * 0.3, ctx.baseY + 0.02, 0.045); });
       plate(root, ctx, 1, ctx.baseY + 0.04);
-      plate(root, ctx, -1, (ctx.baseY + ctx.tailY) / 2);
+      plate(root, ctx, -1, (ctx.baseY + ctx.tailY) / 2 - 0.02);
     },
     bison: function (root, ctx) {
       const w = ctx.w, hy = ctx.headY;
       if (!ctx.noBumpers) addBumpers(root, ctx, true);
-      // tall slatted grille with a chrome crossbar and a red badge bar
-      const gH = Math.max(0.16, Math.min(0.32, (hy - ctx.baseY) * 1.1));
-      const gy = (hy + ctx.baseY) / 2 + 0.03;
-      put(slab(root, w * 0.5, gH, 0.05, 0.03, grille()), ctx, 1, 0, gy, 0.003);
-      for (let i = -2; i <= 2; i++) put(slab(root, 0.028, gH * 0.9, 0.02, 0.006, darkTrim()), ctx, 1, i * w * 0.09, gy, 0.012);
-      put(slab(root, w * 0.54, 0.05, 0.03, 0.012, chrome()), ctx, 1, 0, gy, 0.02);
-      put(slab(root, 0.14, 0.06, 0.02, 0.012, badgeRed()), ctx, 1, 0, gy, 0.034);
-      [1, -1].forEach(function (s) { headLamp(root, ctx, s * w * 0.37, hy, 0.24, 0.13, 0, "quad"); });
-      // vertical tails at the corners
+      const gH = Math.max(0.16, Math.min(0.30, (hy - ctx.baseY) * 1.0));
+      const gy = (hy + ctx.baseY) / 2 + 0.04;
+      intake(root, ctx, 1, 0, gy, w * 0.46, gH, { fins: 3, round: 0.2, depth: 0.035 });
+      addGeo(root, skinPatch(ctx, 1, band(-w * 0.25, w * 0.25, gy, gy, 0.045, 0.045, 0.3), 8, 1, 0.03), reflector());   // chrome crossbar
+      [1, -1].forEach(function (s) {
+        headCluster(root, ctx, { side: s, xi: w * 0.27, xo: cornerX(ctx, 1, hy, 0.02), y: hy, hi: 0.12, ho: 0.13, strip: 0.14, stripAt: 0.36, dots: [0.28, 0.66], dotR: 0.3, round: 0.3 });
+      });
       const tH = Math.max(0.2, Math.min(0.42, (ctx.tailTopY || ctx.tailY + 0.2) - ctx.baseY - 0.12));
-      // (a body with a rear opening says where its lamps may go: the van's
-      // tail posts, its bumper step — never the door that swings away)
-      const tx = ctx.tailX != null ? ctx.tailX : w * 0.4;
-      [1, -1].forEach(function (s) { tailLamp(root, ctx, s * tx, ctx.tailY, ctx.tailW || 0.11, tH, 0, "bar", true); });
+      const tx = ctx.tailX != null ? ctx.tailX : cornerX(ctx, -1, ctx.tailY, 0.03) - 0.05;
+      const tw = ctx.tailW || 0.16;
+      [1, -1].forEach(function (s) { tailCluster(root, ctx, { side: s, xi: tx - tw / 2, xo: tx + tw / 2 + (ctx.tailX != null ? 0 : 0.05), y: ctx.tailY, hi: tH, ho: tH * 0.9, rev: false }); });
       [1, -1].forEach(function (s) { pipe(root, ctx, s * w * 0.32, ctx.baseY - 0.01, 0.05); });
       plate(root, ctx, 1, ctx.baseY + 0.02);
       plate(root, ctx, -1, ctx.rearPlateY != null ? ctx.rearPlateY : (ctx.baseY + ctx.tailY) / 2);
@@ -405,52 +591,76 @@
     voltra: function (root, ctx) {
       const w = ctx.w, hy = ctx.headY;
       if (!ctx.noBumpers) addBumpers(root, ctx, false);
-      // closed nose: a slim LED brow each side + a low aero slot, no grille
-      [1, -1].forEach(function (s) { headLamp(root, ctx, s * w * 0.33, hy, w * 0.2, 0.05, s * -0.05, "brow"); });
-      put(slab(root, w * 0.44, 0.07, 0.05, 0.03, grille()), ctx, 1, 0, ctx.baseY + 0.05, 0.003);
+      // closed nose: slim swept lamps, a fine dark upper grille line between
+      // them, a low aero intake with a lip
       [1, -1].forEach(function (s) {
-        const b = put(slab(root, 0.07, 0.02, 0.015, 0.008, chrome()), ctx, 1, s * 0.03, hy + 0.01, 0.01, s * -0.6);
-        b.userData.noSeal = true;
+        headCluster(root, ctx, { side: s, xi: w * 0.19, xo: cornerX(ctx, 1, hy + 0.02, 0.02), y: hy, slant: 0.03, hi: 0.05, ho: 0.095, strip: 0.2, stripAt: 0.18, dots: [0.72], dotR: 0.22, round: 0.7 });
       });
-      // full-width tail blade
-      tailLamp(root, ctx, 0, ctx.tailY, w * 0.84, 0.06, 0, "bar", false);
-      put(slab(root, w * 0.5, 0.08, 0.05, 0.03, grille()), ctx, -1, 0, ctx.baseY + 0.02, 0.003);
+      intake(root, ctx, 1, 0, hy - 0.07, w * 0.30, 0.03, { fins: 0, depth: 0.018, bezel: 0.008, round: 1 });
+      intake(root, ctx, 1, 0, ctx.baseY + 0.05, w * 0.46, 0.08, { fins: 1, lip: ctx.sport ? 0.05 : 0.025 });
+      // wraparound tails joined by a thin light line
+      [1, -1].forEach(function (s) {
+        tailCluster(root, ctx, { side: s, xi: w * 0.2, xo: cornerX(ctx, -1, ctx.tailY, 0.02), y: ctx.tailY, slant: 0.015, hi: 0.05, ho: 0.08 });
+      });
+      addGeo(root, skinPatch(ctx, -1, band(-w * 0.21, w * 0.21, ctx.tailY + 0.005, ctx.tailY + 0.005, 0.018, 0.018, 1), 10, 1, 0.009), tail());
+      intake(root, ctx, -1, 0, ctx.baseY + 0.02, w * 0.5, 0.07, { fins: 0 });
       plate(root, ctx, -1, (ctx.baseY + ctx.tailY) / 2 - 0.02);
     },
     kotori: function (root, ctx) {
       const w = ctx.w, hy = ctx.headY;
       if (!ctx.noBumpers) addBumpers(root, ctx, false);
-      // slim upper slot + a big lower "smile"
-      put(slab(root, w * 0.34, 0.05, 0.05, 0.02, grille()), ctx, 1, 0, hy, 0.003);
-      put(slab(root, w * 0.5, 0.14, 0.05, 0.05, grille()), ctx, 1, 0, ctx.baseY + 0.06, 0.003);
+      intake(root, ctx, 1, 0, hy, w * 0.32, 0.05, { fins: 0, round: 1 });
+      intake(root, ctx, 1, 0, ctx.baseY + 0.08, w * 0.48, 0.13, { fins: 2, round: 0.8 });
       [1, -1].forEach(function (s) {
-        headLamp(root, ctx, s * w * 0.32, hy, 0.22, 0.1, s * -0.06, "rect");
-        put(slab(root, 0.05, 0.05, 0.02, 0.012, amber()), ctx, 1, s * w * 0.45, hy - 0.02, 0.008);
+        headCluster(root, ctx, { side: s, xi: w * 0.2, xo: cornerX(ctx, 1, hy, 0.02), y: hy, slant: 0.02, hi: 0.07, ho: 0.10, strip: 0.16, stripAt: 0.3, dots: [0.35], dotR: 0.34, round: 0.6 });
+        tailCluster(root, ctx, { side: s, xi: w * 0.24, xo: cornerX(ctx, -1, ctx.tailY, 0.02), y: ctx.tailY, slant: 0.01, hi: 0.10, ho: 0.13, rev: true });
       });
-      put(slab(root, 0.06, 0.06, 0.015, 0.03, badgeRed()), ctx, 1, 0, hy, 0.02);
-      [1, -1].forEach(function (s) { tailLamp(root, ctx, s * w * 0.36, ctx.tailY, 0.18, 0.13, 0, "rect", true); });
       pipe(root, ctx, -w * 0.28, ctx.baseY - 0.01, 0.038);
-      plate(root, ctx, 1, ctx.baseY + 0.06 - 0.1);
-      plate(root, ctx, -1, (ctx.baseY + ctx.tailY) / 2);
+      plate(root, ctx, 1, ctx.baseY - 0.02);
+      plate(root, ctx, -1, (ctx.baseY + ctx.tailY) / 2 - 0.02);
     },
     vitesse: function (root, ctx) {
       const w = ctx.w, hy = ctx.headY;
-      // chrome horseshoe grille front and centre, slim lamps
-      put(slab(root, 0.2, 0.2, 0.05, 0.1, grille()), ctx, 1, 0, hy - 0.06, 0.003);
-      put(slab(root, 0.24, 0.024, 0.03, 0.01, chrome()), ctx, 1, 0, hy + 0.04, 0.012);
-      put(slab(root, w * 0.56, 0.08, 0.05, 0.03, grille()), ctx, 1, 0, ctx.baseY + 0.03, 0.003);
-      [1, -1].forEach(function (s) { headLamp(root, ctx, s * w * 0.31, hy, 0.2, 0.07, s * -0.04, "rect"); });
-      tailLamp(root, ctx, 0, ctx.tailY, w * 0.78, 0.09, 0, "bar", false);
-      put(slab(root, 0.2, 0.12, 0.05, 0.05, chrome()), ctx, -1, 0, ctx.baseY + 0.02, 0.004);
-      put(slab(root, 0.14, 0.08, 0.05, 0.04, grille()), ctx, -1, 0, ctx.baseY + 0.02, 0.02);
+      // the horseshoe grille front and centre, chrome-rimmed
+      intake(root, ctx, 1, 0, hy - 0.06, 0.2, 0.19, { fins: 2, chrome: true, round: 1 });
+      intake(root, ctx, 1, 0, ctx.baseY + 0.04, w * 0.6, 0.08, { fins: 0, lip: 0.05 });
+      [1, -1].forEach(function (s) {
+        headCluster(root, ctx, { side: s, xi: w * 0.2, xo: cornerX(ctx, 1, hy, 0.02), y: hy, slant: 0.015, hi: 0.05, ho: 0.07, strip: 0.22, stripAt: 0.2, dots: [0.4, 0.7], dotR: 0.3, round: 0.8 });
+        tailCluster(root, ctx, { side: s, xi: w * 0.08, xo: cornerX(ctx, -1, ctx.tailY, 0.02), y: ctx.tailY, hi: 0.07, ho: 0.09 });
+      });
+      intake(root, ctx, -1, 0, ctx.baseY + 0.02, 0.22, 0.12, { fins: 0, chrome: true, round: 0.6 });   // the one big exhaust
     },
   };
 
   function brandForStyle(style) { return STYLE_BRAND[style] || "bison"; }
 
+  /* The face depends only on the body template and the marque, so it is
+     BUILT ONCE per (template ctx, brand) and every clone gets meshes that
+     share its geometry — the conforming patches cost real work to sample
+     and none of it needs repeating per car in traffic. */
+  const faceCache = new WeakMap();
   function applyBrandFace(root, brandKey, ctx) {
     const face = FACES[brandKey] || FACES.bison;
-    face(root, ctx);
+    let per = faceCache.get(ctx);
+    if (!per) { per = new Map(); faceCache.set(ctx, per); }
+    let parts = per.get(brandKey);
+    if (!parts) {
+      const tmp = new THREE.Group();
+      face(tmp, ctx);
+      parts = [];
+      tmp.children.forEach(function (m) {
+        if (m.geometry) m.geometry._shared = true;
+        parts.push({ geo: m.geometry, mat: m.material, p: m.position.clone(), q: m.quaternion.clone(), s: m.scale.clone(), noSeal: !!(m.userData && m.userData.noSeal) });
+      });
+      per.set(brandKey, parts);
+    }
+    for (let i = 0; i < parts.length; i++) {
+      const P = parts[i], m = new THREE.Mesh(P.geo, P.mat);
+      m.position.copy(P.p); m.quaternion.copy(P.q); m.scale.copy(P.s);
+      m.castShadow = false;
+      if (P.noSeal) m.userData.noSeal = true;
+      root.add(m);
+    }
   }
 
   // ---- a strip laid along the body's top line (stripes), skipping glass ---

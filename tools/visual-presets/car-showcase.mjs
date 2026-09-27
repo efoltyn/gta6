@@ -21,17 +21,6 @@
    Everything is feature-detected: a build without a seat model photographs
    what its own seat verbs give, and the notes say so. */
 
-const LINEUP = [
-  { name: "Voltra Ion", tag: "SEDAN", color: 0x2d5f9a },
-  { name: "Kotori Pip", tag: "HATCH", color: 0x4caf6e },
-  { name: "Bison Frontier", tag: "SUV", color: 0x44505e },
-  { name: "Bison Rampart", tag: "PICKUP", color: 0xb8322e },
-  { name: "Adler 901 Turbo", tag: "SPORTS", color: 0xf3cf39 },
-  { name: "Bison Stampede", tag: "MUSCLE", color: 0xe88a3c },
-  { name: "Bison Hauler", tag: "VAN", color: 0xe8e8ee },
-  { name: "Metro Cab", tag: "TAXI", color: null },
-  { model: { name: "Police Cruiser", value: 3200, color: 0x16181d, body: "sedan", designStyle: "malibu", livery: "police" }, tag: "POLICE", color: null },
-];
 
 const subjects = [
   {
@@ -107,6 +96,19 @@ async function stageCarShowcase(input) {
   if (!T || !CBZ) return { ok: false, error: "no window.THREE / window.CBZ" };
   const S = input.subject || {};
   const DEG = Math.PI / 180;
+  // (inside the stage: the stage function is serialised into the page alone)
+  const LINEUP = [
+    { name: "Voltra Ion", tag: "SEDAN", color: 0x2d5f9a },
+    { name: "Kotori Pip", tag: "HATCH", color: 0x4caf6e },
+    { name: "Bison Frontier", tag: "SUV", color: 0x44505e },
+    { name: "Bison Rampart", tag: "PICKUP", color: 0xb8322e },
+    { name: "Adler 901 Turbo", tag: "SPORTS", color: 0xf3cf39 },
+    { name: "Bison Stampede", tag: "MUSCLE", color: 0xe88a3c },
+    { name: "Bison Hauler", tag: "VAN", color: 0xe8e8ee },
+    { name: "Metro Cab", tag: "TAXI", color: null },
+    { model: { name: "Police Cruiser", value: 3200, color: 0x16181d, body: "sedan", designStyle: "malibu", livery: "police" }, tag: "POLICE", color: null },
+  ];
+
   const round = function (v, n) {
     const k = Math.pow(10, n == null ? 3 : n);
     return Number.isFinite(Number(v)) ? Math.round(Number(v) * k) / k : 0;
@@ -132,7 +134,7 @@ async function stageCarShowcase(input) {
     // is graded exactly like a street car
     renderer.outputEncoding = T.sRGBEncoding;
     renderer.toneMapping = T.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
+    renderer.toneMappingExposure = 0.92;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = T.PCFSoftShadowMap;
     renderer.domElement.style.cssText =
@@ -206,7 +208,7 @@ async function stageCarShowcase(input) {
     const skyGeo = new T.SphereGeometry(400, 32, 16);
     const col = [];
     const pos = skyGeo.attributes.position;
-    const top = new T.Color(0x6f8fb3), hor = new T.Color(0xd9d3c8), bot = new T.Color(0x3a3a3c);
+    const top = new T.Color(0x6f8fb3), hor = new T.Color(0xb9b5ae), bot = new T.Color(0x3a3a3c);
     for (let i = 0; i < pos.count; i++) {
       const y = pos.getY(i) / 400;
       const c = y > 0 ? hor.clone().lerp(top, Math.pow(y, 0.6)) : hor.clone().lerp(bot, Math.min(1, -y * 4));
@@ -214,8 +216,8 @@ async function stageCarShowcase(input) {
     }
     skyGeo.setAttribute("color", new T.Float32BufferAttribute(col, 3));
     scene.add(new T.Mesh(skyGeo, new T.MeshBasicMaterial({ vertexColors: true, side: T.BackSide, depthWrite: false })));
-    scene.add(new T.HemisphereLight(0xdfeaff, 0x3a342c, 0.75));
-    const key = new T.DirectionalLight(0xfff0d8, 2.1);
+    scene.add(new T.HemisphereLight(0xdfeaff, 0x3a342c, 0.45));
+    const key = new T.DirectionalLight(0xfff0d8, 1.55);
     key.position.set(9, 14, 10);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -226,9 +228,9 @@ async function stageCarShowcase(input) {
     scene.add(key); scene.add(key.target);
     const rim = new T.DirectionalLight(0x9cc4ff, 0.9); rim.position.set(-9, 6, -8); scene.add(rim);
     const fill = new T.DirectionalLight(0xffffff, 0.3); fill.position.set(-2, 3, 10); scene.add(fill);
-    const g = new T.Mesh(new T.CircleGeometry(80, 64), new T.MeshStandardMaterial({ color: 0x55585c, roughness: 0.82, metalness: 0.0 }));
+    const g = new T.Mesh(new T.CircleGeometry(80, 64), new T.MeshStandardMaterial({ color: 0x44474b, roughness: 0.82, metalness: 0.0 }));
     g.rotation.x = -Math.PI / 2; g.receiveShadow = true; scene.add(g);
-    scene.fog = new T.Fog(0xd9d3c8, 45, 160);
+    scene.fog = new T.Fog(0xb9b5ae, 45, 160);
     return scene;
   };
   const tripod = function (aim, azDeg, camY, dist, fov) {
@@ -291,16 +293,9 @@ async function stageCarShowcase(input) {
       built.push({ tag: L.tag, grp: r.grp, style: st, tris: c.tris, meshes: c.meshes, x: x });
     }
     scene.updateMatrixWorld(true);
-    const cam = applyCamera(scene, { pos: [-9.5, 4.3, 17.5], target: [0.8, 0.7, 0], up: [0, 1, 0], fov: 40 });
-    // a class tag under each car
-    let html = "";
-    for (let i = 0; i < built.length; i++) {
-      const b = built[i];
-      const d = b.grp.userData.vehicleDims || { length: 4.5 };
-      const p = screenOf(ST.camera, new T.Vector3(b.x, -0.05, (d.length || 4.5) * 0.5 + 0.9));
-      html += "<div style=\"position:absolute;left:" + Math.round(p.x - 40) + "px;top:" + Math.round(p.y) + "px;width:80px;text-align:center;font:800 11px/1.2 sans-serif;letter-spacing:.12em;color:#fff\">" + b.tag + "</div>";
-    }
-    tagsHtml = html;
+    const cam = applyCamera(scene, { pos: [-12.5, 5.2, 21.5], target: [1.2, 0.6, 0], up: [0, 1, 0], fov: 42 });
+    // left to right, nearest first
+    tagsHtml = "<div style=\"position:absolute;left:24px;top:132px;font:800 12px/1.4 sans-serif;letter-spacing:.12em;color:#fff\">" + built.map(function (b) { return b.tag; }).join(" \u2192 ") + "</div>";
     let triSum = 0, meshSum = 0;
     built.forEach(function (b) { triSum += b.tris; meshSum += b.meshes; });
     stateText = built.length + " CLASSES · AVG " + Math.round(triSum / Math.max(1, built.length)) + " TRIS · AVG " + round(meshSum / Math.max(1, built.length), 1) + " MESHES / CAR";
