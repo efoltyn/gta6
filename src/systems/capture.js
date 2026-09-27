@@ -318,6 +318,8 @@
       endEscort();
       confineT = 0; confineShown = -1;
       releasePlayerCell();        // a transferred man leaves no door of ours shut
+      // the next run names what the reception search took (escapeplan.js)
+      if (CBZ.escapePlan && CBZ.escapePlan.noteTransferLoss) { try { CBZ.escapePlan.noteTransferLoss(); } catch (e) {} }
       // TRANSFERRED, and now it means it. The tier owns the whole beat from
       // here — it packs what survives a reception shakedown, moves you up the
       // ladder and shows the between-levels card through CBZ.loseGame, which
@@ -327,6 +329,14 @@
       if (CBZ.loseGame) CBZ.loseGame("transferred");
       return;
     }
+
+    /* THE SHAKEDOWN TAKES THE PLAN. Half your cigs was the whole price of a
+       capture, and a keycard, a gate key or a hacksaw blade walked back to the
+       cell with you, so getting caught cost nothing that mattered to the
+       escape. Now every key and tool goes, the cut culvert grate is welded
+       again and the desk card goes back on the desk; systems/escapeplan.js
+       does it and says what you lost, on screen and on the plan panel. */
+    if (CBZ.escapePlan && CBZ.escapePlan.confiscate) { try { CBZ.escapePlan.confiscate(); } catch (e) {} }
 
     if (strike >= 2) {
       // strike two (and every campaign strike after it): the block stays hot
