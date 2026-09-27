@@ -497,7 +497,11 @@
     //     staff-door head: cellblock.js's opening (CBZ.cellblockStaffGap) is
     //     2.6 m tall at x[-4.2,-2.2], and a stripe at chest height would have
     //     been painted straight across the top of a doorway.
-    band(0, 2.95, -43.44, 29, 0.30, 0.08);
+    //     …but not at 2.95: that ran one 29 m stripe through the back wall of
+    //     every ground cell, straight across their windows and in and out of
+    //     the partitions. It goes over the upper cells' roofs instead (7.8),
+    //     under the truss chords, where the whole hall faces it.
+    band(0, 8.12, -43.44, 29, 0.30, 0.08);
     // (c) THE CLASSIFICATION PLACARD, beside the throat at eye height:
     //     a dark backer with four bar slots, N of them burning.
     addBox(-4.35, 3.5, -7.42, 1.5, 1.5, 0.09, 0x16202a, { cast: false });

@@ -40,6 +40,11 @@
   if (CBZ.CONFIG.PRISON_DRESS_V2 == null) CBZ.CONFIG.PRISON_DRESS_V2 = true;
   const DRESS = !!CBZ.CONFIG.PRISON_DRESS_V2;
   const PD = CBZ.prisonDress || null;   // world/cafeteria.js; degrade-safe
+  // the interior finish layer (floors, trim, ceilings) and its small helpers
+  const FIN = PD && PD.finish ? PD : null;
+  const K = CBZ.prisonKit || null;
+  const PD_M = PD && PD.Merge ? PD.Merge : null;
+  const PD_PIPE = function () { if (PD && PD.pipe) return PD.pipe.apply(PD, arguments); };
 
   /* ============================================================
      PRISON_PROP_USE_V1 — THE FLAG'S HOME. (2026-08-15)
@@ -85,7 +90,7 @@
   // positions, same `tex.repeat.set(rx, rz)` shape — only the canvas changed.
   const GV2 = !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_GROUND_V2 && CBZ.prisonGroundTex);
   function slab(x, z, w, d, a, b, rx, rz, kind) {
-    const tex = GV2 ? CBZ.prisonGroundTex(kind || "concrete", { a: a, b: b })
+    const tex = GV2 ? CBZ.prisonGroundTex(kind || "concrete", { a: a, b: b, srgb: true })
       : CBZ.checkerTex(a, b, 2);
     tex.repeat.set(rx, rz);
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshLambertMaterial({ map: tex }));
@@ -96,7 +101,7 @@
   // two panels per tile the joints land on 3.15 m centres, which is what a
   // real poured apron uses. A slab is the one tiling surface allowed to show
   // where it repeats.
-  slab(0, 90, 88, 76, "#586069", "#4f5760", 14, 12, "concrete");   // lower-yard apron
+  slab(0, 90, 88, 76, "#8e908b", "#858782", 14, 12, "concrete");   // lower-yard apron (sRGB weathered concrete)
   // path: 1x8 -> a ~9 m square tile. The old 2x16 repeated a 4.6 m cell
   // sixteen times down the corridor you walk the whole length of.
   // PRISON_ROAD_FIX (world/ground.js owns the flag and PUBLISHES the width).
@@ -104,34 +109,25 @@
   // to type "9" independently, which is exactly how a 132 m two-lane band ended
   // up running the length of the compound. One number, read, never retyped.
   const WALK = (CBZ.prisonWalkway && CBZ.prisonWalkway.w) || 9;
-  slab(0, 90, WALK, 76, CBZ.COL.ASPHALT_A, CBZ.COL.ASPHALT_B, GV2 ? 1 : 2, GV2 ? 8 : 16, "asphalt"); // central path to the gate
-  // the kerb continues with it, so the path does not lose its edges at z=52
-  if (CBZ.prisonWalkway && CBZ.prisonWalkway.fixed) {
-    for (const sx of [-1, 1]) addBox(sx * (WALK / 2 + 0.09), 0.06, 90, 0.18, 0.12, 76, 0xa9a294, { cast: false });
-  }
+  slab(0, 90, WALK, 76, "#4e5257", "#474b50", GV2 ? 1 : 2, GV2 ? Math.max(1, Math.round(76 / WALK)) : 16, "asphalt"); // square tile: 1 x 8 on a 2.8 m path stretched it 3.4x along the walk // central path to the gate
+  // (No kerb: world/ground.js dropped the pale 12 cm curb strips that ran
+  // both edges; the bitumen against the concrete apron IS the path's edge.)
 
   // a basketball half-court painted into the apron
   (function court() {
     const c = new THREE.Mesh(new THREE.PlaneGeometry(16, 22),
       new THREE.MeshLambertMaterial({ color: 0x8a5a2b }));
     c.rotation.x = -Math.PI / 2; c.position.set(-11, 0.02, 96); scene.add(c);
-    const line = (x, z, w, d) => addBox(x, 0.04, z, w, 0.02, d, 0xe7e2d2, { cast: false });
-    line(-11, 85.2, 16, 0.16); line(-11, 96, 5.0, 5.0); line(-3.2, 96, 0.16, 22);
+    // flush paint on the court plane (top 3 mm proud of it), worn white; the
+    // old middle "line" was a solid 5 x 5 m white square, not a key outline
+    const line = (x, z, w, d) => addBox(x, 0.021, z, w, 0.004, d, 0xc9c5b8, { cast: false });
+    line(-11, 85.2, 16, 0.08); line(-3.2, 96, 0.08, 22);
+    line(-11, 93.5, 5.0, 0.08); line(-11, 98.5, 5.0, 0.08); line(-8.5, 96, 0.08, 5.0); line(-13.5, 96, 0.08, 5.0);
   })();
 
-  // running-track oval outline around the infield (just painted lines).
-  // WHITE and small: the old 0.7 m yellow dabs read as road dashes from the
-  // air and chained with the walkway into a phantom carriageway (owner:
-  // "yellow dotted road going through the middle of it"). A track is lined
-  // in white; nothing painted in this compound is yellow-dashed.
-  (function track() {
-    const seg = 40, R = 30;
-    for (let i = 0; i < seg; i++) {
-      const a = (i / seg) * Math.PI * 2;
-      const x = Math.cos(a) * (R * 0.9), z = 94 + Math.sin(a) * (R * 0.62);
-      addBox(x, 0.03, z, 0.42, 0.02, 0.42, 0xcfd5d8, { cast: false });
-    }
-  })();
+  // (The "running track" was 40 white 0.42 m squares dotted in an oval over
+  // the concrete apron: no track surface, no lanes, a ring of floor tiles.
+  // Deleted 2026-09-27.)
 
   /* ---- floodlight poles: DELETED (PRISON_PROP_USE_V1) -------------------
      THE YARD ALREADY HAS FLOOD MASTS AND THEY ARE NOT THESE.
@@ -160,8 +156,15 @@
   // ============================================================
   //  WORKSHOP (south-west) — welding bay
   // ============================================================
-  roomShell({ x0: -42, x1: -24, z0: 58, z1: 80, h: 6, wall: 0x7c8590, floor: 0x6a6f78, door: { side: "E", center: 69, width: 4.2 } });
+  roomShell({ x0: -42, x1: -24, z0: 58, z1: 80, h: 6, wall: 0x7c8590, floor: null, skin: null, door: { side: "E", center: 69, width: 4.2 } });
   addBox(-24, 5.4, 69, 0.2, 0.9, 4.0, 0xc85c00, { cast: false }); // sign band
+  // FINISHES (2026-09-27): sealed slab, block walls with a painted dado, and a
+  // hard ceiling at 5.2 m with industrial pendants: a shop keeps its height.
+  if (FIN) FIN.finish({ x0: -41.75, x1: -24.25, z0: 58.25, z1: 79.75 }, {
+    id: "workshop", floor: "slab", floorTint: 0x9fa3a6,
+    doors: [{ side: "E", a0: 66.9, a1: 71.1 }], dado: 0x5f6975, dadoH: 1.4, base: 0x2b2d30,
+    ceilingY: 5.2, ceiling: { kind: "slab", tint: 0xc9ccce, lights: "pendant", nx: 4, nz: 5, drop: 0.8 },
+  });
   // workbenches with vices + scattered parts
   // NO-DECOY SWEEP (owner: "find things in the game that you can run through").
   // This file was written with `{ solid: true }` on the things whose author
@@ -192,88 +195,189 @@
   // tables and the round-table stools are — an obstacle, never a pillar.
   const STOCK = USE ? { cast: false, solid: true, y0: 0, y1: 0.78 } : { cast: false };
   for (let i = 0; i < 4; i++) addBox(-27 + (i % 2) * 0.4, 0.3 + Math.floor(i / 2) * 0.34, 75 + (i % 2) * 0.5, 2.6, 0.28, 0.28, 0x6b7480, STOCK);
-  addBox(-28, 0.5, 62, 1.6, 1.0, 1.6, CBZ.COL.CRATE, { solid: true });
+  // (the 1.6 m wooden crate that stood alone in the corner is gone: no reason)
 
   // ============================================================
   //  CHAPEL (south-east) — the quiet wing
   // ============================================================
-  roomShell({ x0: 24, x1: 42, z0: 58, z1: 80, h: 6.5, wall: 0xbfb6a4, floor: 0x6e5a3c, door: { side: "W", center: 69, width: 4.2 } });
+  roomShell({ x0: 24, x1: 42, z0: 58, z1: 80, h: 6.5, wall: 0xbfb6a4, floor: null, skin: null, door: { side: "W", center: 69, width: 4.2 } });
   addBox(42, 5.8, 69, 0.2, 0.9, 4.0, 0x6d5a8f, { cast: false }); // sign band
-  // altar + a tall cross on the far (east) wall
-  addBox(40, 0.6, 69, 1.4, 1.2, 2.4, 0xece3d1, { solid: true });     // stone altar
-  addBox(41, 2.6, 69, 0.22, 2.4, 0.22, 0xe8d44f, { emissive: 0x6a5a10, ei: 0.4, cast: false });
-  addBox(41, 3.0, 69, 0.22, 0.22, 1.1, 0xe8d44f, { emissive: 0x6a5a10, ei: 0.4, cast: false });
-  // rows of pews
-  function pew(z) {
-    // the seat plank is the collider (world/clutter.js's bench rule); the
-    // backrest rides inside its footprint, so one AABB, not two.
-    addBox(31, 0.45, z, 7.2, 0.16, 0.5, 0x9a6a2d, { solid: true });
-    addBox(31, 0.8, z - 0.28, 7.2, 0.5, 0.12, 0x8a5e2b, { cast: false });
+  /* THE CHAPEL, REBUILT (2026-09-27). The pews ran EAST-WEST with the altar at
+     the east wall — every seat faced the side wall — and they were a plank
+     and a board, full-height colliders. The cross was two glowing yellow
+     boxes and the "stained glass" three glowing coloured slabs at 4 m.
+     Now: warm VCT with a carpet runner up the aisle from the door, a 4.6 m
+     ceiling with pendants, twelve pews in two banks FACING the altar, a
+     draped altar table on a low dais, a plain wooden cross on the east wall,
+     and three tall narrow windows set into it. */
+  if (FIN) {
+    FIN.finish({ x0: 24.25, x1: 41.75, z0: 58.25, z1: 79.75 }, {
+      id: "chapel", floor: "vct", floorTint: 0xcbb99a,
+      doors: [{ side: "W", a0: 66.9, a1: 71.1 }], base: 0x3a2c20,
+      ceilingY: 4.6, ceiling: { kind: "slab", tint: 0xe2dccd, lights: "pendant", nx: 3, nz: 4, drop: 0.7 },
+    });
+    FIN.floor(24.25, 38.6, 67.4, 70.6, "carpet", 0x7a2f2f, { top: 0.068 });          // the aisle runner
   }
-  [62, 64.4, 66.8, 71.2, 73.6, 76]. forEach(pew);
-  // narrow stained-glass slits on the east wall
-  for (let i = -1; i <= 1; i++) addBox(41.78, 4.0, 69 + i * 5, 0.06, 2.0, 1.0, [0x6fb0ff, 0xff8e6f, 0x8dff9f][i + 1], { emissive: [0x2a4a7a, 0x7a3a20, 0x2a6a3a][i + 1], ei: 0.6, cast: false });
+  // the dais and the altar table with its cloth
+  addBox(39.6, 0.1, 69, 3.2, 0.2, 7.0, 0x8a7358, { solid: true, y0: 0, y1: 0.2 });
+  addBox(40.2, 0.62, 69, 0.9, 0.84, 2.0, 0x6b4a2a, { solid: true, y0: 0, y1: 1.05 });   // altar
+  addBox(40.2, 1.055, 69, 0.96, 0.03, 2.06, 0xefe9da, { cast: false });                 // altar cloth
+  addBox(39.73, 0.8, 69, 0.02, 0.5, 2.06, 0xefe9da, { cast: false });                   // its front fall
+  addBox(39.72, 0.86, 69, 0.012, 0.3, 0.18, 0x7a2f2f, { cast: false });                 // the stole mark
+  // the cross: plain wood, on the wall, lit by the room
+  addBox(41.68, 2.7, 69, 0.08, 2.0, 0.16, 0x6b4a2a, { cast: false });
+  addBox(41.68, 3.15, 69, 0.08, 0.16, 1.0, 0x6b4a2a, { cast: false });
+  // three tall narrow windows in the east wall, clear leaded glass in a frame
+  for (let i = -1; i <= 1; i += 2) {
+    const z = 69 + i * 4.2;
+    addBox(41.72, 2.6, z, 0.06, 2.6, 0.9, 0x3a3f46, { cast: false });                  // frame
+    addBox(41.68, 2.6, z, 0.02, 2.44, 0.74, 0xbfd6e0, { emissive: 0x5c7a8a, ei: 0.45, cast: false });
+    for (const t of [-0.6, 0, 0.6]) addBox(41.665, 2.6 + t, z, 0.01, 0.02, 0.74, 0x3a3f46, { cast: false });
+    addBox(41.665, 2.6, z, 0.01, 2.44, 0.02, 0x3a3f46, { cast: false });
+  }
+  // PEWS, facing +x at the altar: seat, raked back, two end panels. The seat
+  // is the collider (waist-gated), and each pew declares three seats.
+  function pew(x, zc, len) {
+    addBox(x, 0.45, zc, 0.46, 0.05, len, 0x8a5e2b, { solid: true, y0: 0, y1: 0.95 });
+    const back = addBox(x - 0.25, 0.72, zc, 0.05, 0.52, len, 0x7a5226, { cast: false });
+    back.rotation.z = 0.1;
+    addBox(x - 0.1, 0.24, zc, 0.03, 0.2, len - 0.1, 0x6e4a22, { cast: false });       // stretcher
+    for (const e of [-1, 1]) addBox(x - 0.02, 0.47, zc + e * (len / 2 + 0.03), 0.58, 0.94, 0.05, 0x6e4a22, { cast: false });
+    for (let k = 0; k < 3; k++) if (CBZ.roomSeatAnchor)
+      CBZ.roomSeatAnchor(x + 0.04, 0, zc - len / 3 + k * len / 3, Math.PI / 2, "bench", null, { cushion: 0.475, floorBelow: 0 });
+  }
+  for (let r = 0; r < 6; r++) { const x = 27.2 + r * 1.55; pew(x, 63.2, 5.2); pew(x, 74.8, 5.2); }
 
   // ============================================================
   //  INFIRMARY (east, lower) — beds + screens
   // ============================================================
-  roomShell({ x0: 26, x1: 42, z0: 88, z1: 104, h: 6, wall: 0xd7dde2, floor: 0xb9c0c8, door: { side: "W", center: 96, width: 4.0 } });
+  roomShell({ x0: 26, x1: 42, z0: 88, z1: 104, h: 6, wall: 0xd7dde2, floor: null, skin: null, door: { side: "W", center: 96, width: 4.0 } });
   addBox(42, 5.4, 96, 0.2, 0.9, 3.4, 0x2f9e6a, { cast: false }); // green cross band
   addBox(42.0, 5.4, 96, 0.22, 0.6, 0.2, 0xffffff, { emissive: 0xbfeada, ei: 0.5, cast: false });
+  /* THE INFIRMARY, REBUILT (2026-09-27). Four beds stood in the middle of a
+     6 m-high room, each with a grey board beside it as a "privacy screen",
+     and a cabinet with a glowing blue rectangle stuck to it. A ward is beds
+     with their heads to the wall, curtain tracks on the ceiling between
+     them, a treatment area, a sink, and a nurse's desk by the door — under a
+     3 m lay-in ceiling with troffers, on sheet vinyl. */
+  const IR = { x0: 26.25, x1: 41.75, z0: 88.25, z1: 103.75 }, ICEIL = 3.0;
+  if (FIN) FIN.finish(IR, {
+    id: "infirmary", floor: "vct", floorTint: 0xb9c2bd,
+    doors: [{ side: "W", a0: 94, a1: 98 }], dado: 0xa9c1b8, dadoH: 1.1, base: 0x39514a, rail: 0x7f9a91,
+    ceilingY: ICEIL, ceiling: { kind: "acoustic", lights: "troffer", along: "x", nx: 4, nz: 4 },
+  });
+  const BED_X = [29.0, 32.5, 36.0, 39.5], BED_Z = 89.62;
   function bed(x, z) {
-    // THE WARD BED IS THE SHARED KIT'S. It was three flat slabs — frame, sheet,
-    // pillow — and NO sleep anchor at all, so an infirmary full of beds was an
-    // infirmary nobody could lie down in. CBZ.furnish.bed draws rails, a duvet
-    // with a turned-down fold and a headboard, in the "clinic" tone (pale
-    // frame + white linen: the same two colours this room already used, no new
-    // batch bucket), and its own base box carries the collider the frame used
-    // to. yaw = PI points from the mattress centre at the PILLOW, which is the
-    // -z end the old pillow box sat on.
-    //
-    // KIT CALL, THEN FALL BACK (the world/lounge.js idiom — always through the
-    // namespace, always inside a try, null = draw the authored boxes instead).
+    // THE WARD BED IS THE SHARED KIT'S (CBZ.furnish.bed, "clinic" tone), head
+    // at -z against the north wall; the authored slabs are the degrade path.
     const F = CBZ.furnish;
     let kitTop = null;
     if (F && typeof F.bed === "function") {
-      try { if (F.bed(x, 0, z, Math.PI, { len: 2.4, wide: 1.4, tone: "clinic" })) kitTop = 0.55; }
+      try { if (F.bed(x, 0, z, Math.PI, { len: 2.4, wide: 1.2, tone: "clinic" })) kitTop = 0.55; }
       catch (e) { kitTop = null; }
     }
     if (kitTop == null) {
-      // FRAME is the collider; the sheet and pillow lie ON it and add nothing.
-      // Safe for propuse: entryOf() approaches a bed from its long side at
-      // >=0.95 m, clear of a 1.5 m-wide frame, and the settle beats deliberately
-      // skip collision (city/propuse.js) — a solid frame is the NORMAL case there
-      // (CBZ.furnish draws a 1.4 m one).
-      addBox(x, 0.45, z, 1.5, 0.2, 2.6, 0x9aa0a8, { solid: true });  // frame
-      addBox(x, 0.62, z, 1.3, 0.14, 2.4, 0xeef2f5, { cast: false }); // sheet
-      addBox(x, 0.78, z - 0.9, 1.1, 0.16, 0.5, 0xdfe6ec, { cast: false }); // pillow
+      addBox(x, 0.45, z, 1.2, 0.2, 2.4, 0x9aa0a8, { solid: true });
+      addBox(x, 0.62, z, 1.1, 0.14, 2.3, 0xeef2f5, { cast: false });
+      addBox(x, 0.78, z - 0.9, 0.9, 0.16, 0.5, 0xdfe6ec, { cast: false });
     }
-    addBox(x - 0.95, 0.7, z, 0.08, 1.0, 2.4, 0xcfd6dc, { cast: false }); // privacy screen
-    // THE SLEEP ANCHOR THIS ROOM NEVER HAD. This file is parsed from the world
-    // block, LONG before city/propuse.js exists, so it goes through
-    // CBZ.roomBedAnchor — the queue-and-flush shim world/roombuild.js owns for
-    // exactly this load-order gap. Head at -z (hx,hz = 0,-1), mattress top from
-    // whichever body actually got drawn, never a retyped constant.
     const topY = kitTop != null ? kitTop : 0.69;
     if (CBZ.roomBedAnchor) CBZ.roomBedAnchor(x, 0, z, 0, -1, 2.4, topY, "bed", null);
     else if (CBZ.propRegisterBed) CBZ.propRegisterBed(x, 0, z, 0, -1, 2.4, topY, "bed", null);
+    // bedside locker at the head, right-hand side
+    addBox(x + 0.95, 0.42, z - 0.8, 0.46, 0.72, 0.46, 0xe4e1d8, { solid: true, y0: 0, y1: 0.8 });
+    addBox(x + 0.95, 0.785, z - 0.8, 0.5, 0.03, 0.5, 0xc9c4b8, { cast: false });
+    addBox(x + 0.71, 0.45, z - 0.8, 0.012, 0.3, 0.36, 0xd1cdc2, { cast: false });
+    // the headwall service rail: oxygen/suction outlets and a call button
+    addBox(x, 1.45, IR.z0 + 0.03, 1.6, 0.16, 0.05, 0xe9e7e0, { cast: false });
+    addBox(x - 0.4, 1.45, IR.z0 + 0.06, 0.08, 0.08, 0.03, 0x3a8a4a, { cast: false });
+    addBox(x - 0.2, 1.45, IR.z0 + 0.06, 0.08, 0.08, 0.03, 0xe8e8e8, { cast: false });
   }
-  bed(30, 92); bed(30, 100); bed(38, 92); bed(38, 100);
-  // a supply cabinet + a glowing monitor
-  addBox(34, 0.9, 90, 1.2, 1.8, 0.7, 0xc7ccd2, { solid: true });   // supply cabinet
-  addBox(34, 1.6, 90.4, 0.6, 0.4, 0.06, 0x6fb7ff, { emissive: 0x2a6ea5, ei: 0.7, cast: false });
+  for (const x of BED_X) bed(x, BED_Z);
+  // CUBICLE CURTAINS: tracks screwed to the ceiling between and in front of
+  // the beds; the dividers drawn, the front curtains pushed back to the walls
+  if (PD_M) (function curtains() {
+    const trackY = ICEIL - 0.04, front = BED_Z + 1.75;
+    const rail = new PD_M(), cloth = new PD_M(), mesh = new PD_M();
+    rail.box((IR.x0 + IR.x1) / 2, trackY, front, IR.x1 - IR.x0 - 0.2, 0.03, 0.05);
+    for (let i = 0; i < 3; i++) {
+      const x = (BED_X[i] + BED_X[i + 1]) / 2;
+      rail.box(x, trackY, (IR.z0 + front) / 2, 0.05, 0.03, front - IR.z0);
+      // the drawn divider: fabric from the knees to the mesh band, gently folded
+      for (let k = 0; k < 7; k++) {
+        const z = IR.z0 + 0.25 + k * (front - IR.z0 - 0.4) / 6.5;
+        cloth.box(x + (k & 1 ? 0.03 : -0.03), 1.33, z, 0.02, 1.9, (front - IR.z0 - 0.4) / 6.2);
+      }
+      mesh.box(x, 2.6, (IR.z0 + front) / 2, 0.015, 0.5, front - IR.z0 - 0.2);
+    }
+    // the front curtains, gathered back at the two ends of the run
+    for (const x of [IR.x0 + 0.45, IR.x1 - 0.45]) {
+      for (let k = 0; k < 4; k++) cloth.box(x + (k - 1.5) * 0.08, 1.33, front + (k & 1 ? 0.03 : -0.03), 0.07, 1.9, 0.05);
+      mesh.box(x, 2.6, front, 0.32, 0.5, 0.015);
+    }
+    rail.mesh(CBZ.cmat(0xc9ccd0));
+    cloth.mesh(CBZ.cmat(0x8fb3ad));
+    mesh.mesh(CBZ.cmat(0xe6ebe8));
+  })();
+  // an IV pole and a vitals monitor by the first bed
+  PD_PIPE(BED_X[0] - 0.85, 0.95, BED_Z - 0.4, 1.8, "y", 0.013, 0xc3c9d0);
+  addBox(BED_X[0] - 0.85, 0.07, BED_Z - 0.4, 0.5, 0.03, 0.5, 0x6b7480, { cast: false });
+  addBox(BED_X[0] - 0.85, 1.72, BED_Z - 0.45, 0.14, 0.2, 0.05, 0xe8f0f2, { cast: false });   // bag
+  addBox(BED_X[0] - 0.85, 1.25, BED_Z - 0.3, 0.3, 0.24, 0.14, 0x2a2f38, { cast: false });   // monitor
+  addBox(BED_X[0] - 0.85, 1.25, BED_Z - 0.225, 0.26, 0.18, 0.005, 0x10261c, { emissive: 0x1d6a3a, ei: 0.55, cast: false });
+  // THE TREATMENT AREA (south-east): an exam couch with its paper roll, a
+  // sink run on the east wall with wall cabinets over it, a glazed supply
+  // cabinet, and the sharps box. The door lane (z 94..98) is clear to x 40.
+  addBox(38.2, 0.36, 102.4, 1.9, 0.6, 0.62, 0xd9d4c8, { solid: true, y0: 0, y1: 0.8 });      // couch base
+  addBox(38.0, 0.72, 102.4, 1.5, 0.1, 0.7, 0x2f6f73, { cast: false });                       // pad
+  const headRest = addBox(39.1, 0.83, 102.4, 0.62, 0.1, 0.7, 0x2f6f73, { cast: false });      // raised head
+  headRest.rotation.z = 0.32;
+  addBox(38.0, 0.78, 102.4, 1.5, 0.006, 0.5, 0xf4f1e8, { cast: false });                     // paper sheet
+  PD_PIPE(37.2, 0.78, 102.4, 0.58, "z", 0.05, 0xf4f1e8);                                     // the roll
+  // sink run: base cabinets, a laminate top, a steel basin, a gooseneck
+  addBox(41.43, 0.45, 97.2 + 3.3, 0.6, 0.78, 2.6, 0xe4e1d8, { solid: true, y0: 0, y1: 0.95 });
+  addBox(41.42, 0.88, 100.5, 0.66, 0.04, 2.66, 0xcfd6d4, { cast: false });
+  addBox(41.4, 0.885, 100.1, 0.4, 0.012, 0.5, 0x8d959c, { cast: false });                  // basin
+  addBox(41.64, 1.0, 100.1, 0.04, 0.24, 0.04, 0xc3c9d0, { cast: false });                    // faucet
+  addBox(41.56, 1.12, 100.1, 0.18, 0.03, 0.03, 0xc3c9d0, { cast: false });
+  for (let i = 0; i < 4; i++) addBox(41.12, 0.47, 99.53 + i * 0.65, 0.012, 0.62, 0.6, 0xd6d2c7, { cast: false });  // doors
+  addBox(41.55, 1.9, 100.5, 0.35, 0.7, 2.6, 0xe4e1d8, { cast: false });                     // wall cabinets
+  for (let i = 0; i < 4; i++) addBox(41.37, 1.9, 99.53 + i * 0.65, 0.012, 0.62, 0.58, 0xbfd6dc, { cast: false });
+  addBox(41.6, 1.3, 98.6, 0.14, 0.3, 0.22, 0xd8b021, { cast: false });                      // sharps box
+  // glazed supply cabinet on the south wall
+  addBox(34.0, 0.95, 103.45, 1.2, 1.9, 0.5, 0xd9dcdf, { solid: true });
+  addBox(34.0, 1.2, 103.19, 1.1, 1.3, 0.012, 0xbfd6dc, { cast: false });
+  for (let i = 0; i < 3; i++) addBox(34.0, 0.75 + i * 0.42, 103.3, 1.1, 0.02, 0.4, 0xc9ccd0, { cast: false });
+  for (let i = 0; i < 6; i++) addBox(33.6 + (i % 3) * 0.35, 0.83 + ((i / 3) | 0) * 0.42, 103.32, 0.24, 0.14, 0.2, [0xeef0f2, 0x7aa6c2, 0xe0d6c0][i % 3], { cast: false });
+  // the nurse's desk by the door, facing into the ward
+  if (CBZ.furnish && CBZ.furnish.desk) { try { CBZ.furnish.desk(28.0, 0, 101.9, 0, { len: 1.6 }); } catch (e) {} }
+  if (CBZ.furnish && CBZ.furnish.chair) { try { CBZ.furnish.chair(28.0, 0, 102.9, Math.PI, {}); } catch (e) {} }
 
   // ============================================================
   //  LAUNDRY (west, lower) — steam, machines & carts
   // ============================================================
-  roomShell({ x0: -42, x1: -26, z0: 88, z1: 104, h: 6, wall: 0x8a929c, floor: 0x7a828c, door: { side: "E", center: 96, width: 4.0 } });
+  roomShell({ x0: -42, x1: -26, z0: 88, z1: 104, h: 6, wall: 0x8a929c, floor: null, skin: null, door: { side: "E", center: 96, width: 4.0 } });
   addBox(-26, 5.4, 96, 0.2, 0.9, 3.4, 0x3a6ea5, { cast: false });
-  // a bank of industrial washers along the west wall
+  if (FIN) FIN.finish({ x0: -41.75, x1: -26.25, z0: 88.25, z1: 103.75 }, {
+    id: "laundry", floor: "slab", floorTint: 0xa3a8ac,
+    doors: [{ side: "E", a0: 94, a1: 98 }], dado: 0x6b7784, dadoH: 1.4, base: 0x2b2d30,
+    ceilingY: 4.4, ceiling: { kind: "slab", tint: 0xcfd2d3, lights: "vapor", nx: 3, nz: 4, along: "z" },
+  });
+  // a bank of industrial washer-extractors along the west wall: a steel
+  // cabinet on a plinth, a round porthole door in a chrome ring, the control
+  // panel over it. (The "glass" was a glowing blue square.)
   for (let i = 0; i < 4; i++) {
     const z = 90 + i * 3.5;
-    addBox(-40, 0.9, z, 1.8, 1.8, 1.8, 0xbfc6cd, { solid: true }); // industrial washer
-    addBox(-39.1, 1.2, z, 0.1, 0.9, 0.9, 0x223047, { cast: false });          // door
-    addBox(-39.05, 1.2, z, 0.06, 0.7, 0.7, 0x6fb7ff, { emissive: 0x2a5e85, ei: 0.4, cast: false }); // glass glow
+    addBox(-40.3, 0.1, z, 1.6, 0.2, 1.7, 0x3c424d, { cast: false });                 // plinth
+    const body = addBox(-40.3, 1.0, z, 1.5, 1.6, 1.6, 0xc4cad0, { solid: true });   // cabinet
+    if (K) K.skinBox(body, "steel", 0xc4cad0);
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.46, 0.08, 20), CBZ.cmat(0x9aa3ad));
+    ring.rotation.z = Math.PI / 2; ring.position.set(-39.52, 0.95, z); scene.add(ring);
+    const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.1, 20), CBZ.cmat(0x2a3440));
+    glass.rotation.z = Math.PI / 2; glass.position.set(-39.51, 0.95, z); scene.add(glass);
+    addBox(-39.53, 1.6, z, 0.04, 0.3, 1.3, 0x3a4048, { cast: false });                // control panel
+    addBox(-39.5, 1.62, z + 0.35, 0.02, 0.08, 0.2, 0x1e4a2e, { emissive: 0x1a5a30, ei: 0.5, cast: false });
+    addBox(-39.5, 1.3, z - 0.55, 0.05, 0.16, 0.06, 0xc3c9d0, { cast: false });        // door latch
   }
   // rolling laundry carts (canvas bins on a frame)
   // PRISON_PROP_USE_V1: both were drawn `{}` — a 1.5 m3 canvas bin you walked
@@ -313,7 +417,7 @@
   const HD = { id: "south-dorm", x0: -42, x1: -24, z0: 106, z1: 124, doorX: -33, doorZ: 106 };
   roomShell({
     x0: HD.x0, x1: HD.x1, z0: HD.z0, z1: HD.z1, h: 6,
-    wall: 0x76818c, floor: 0x626b74,
+    wall: 0x76818c, floor: null, skin: null,
     doors: [
       { side: "N", center: HD.doorX, width: 3.4 },
       { side: "N", center: -38.5, width: 3.0 },
@@ -388,7 +492,12 @@
   dormSanitary(-34.4); dormSanitary(-31.6);
   addBox(-35.55, 1.05, 122.75, 0.08, 2.10, 2.0, 0xc7ccd2, { cast: false });
   addBox(-30.45, 1.05, 122.75, 0.08, 2.10, 2.0, 0xc7ccd2, { cast: false });
-  addBox(-33.0, 0.035, 112.0, 2.2, 0.02, 10.2, 0xd7dde2, { cast: false }); // clear circulation spine
+  if (FIN) FIN.finish({ x0: -41.75, x1: -24.25, z0: 106.25, z1: 123.75 }, {
+    id: "south-dorm", floor: "slab", floorTint: 0x9da2a6,
+    doors: [{ side: "N", a0: -34.7, a1: -31.3 }, { side: "N", a0: -40, a1: -37 }], dado: 0x5d6873, dadoH: 1.3, base: 0x2b2d30,
+    ceilingY: 3.6, ceiling: { kind: "slab", tint: 0xc9ccce, lights: "vapor", nx: 3, nz: 4, along: "z",
+      skip: (x, z) => z > 121.4 && x > -36 && x < -30 },
+  });
 
   // ============================================================
   //  LOWER-YARD FITTINGS — hoop, weights, pull-up rig, bleachers
@@ -459,7 +568,12 @@
   // grille on the wall line), and nothing a prison does not have stands in
   // front of it.
   // guard hut (small roofed booth)
-  roomShell({ x0: -22, x1: -14, z0: 116, z1: 124, h: 3.2, wall: 0x515a66, floor: 0x3c424d, door: { side: "E", center: 120, width: 2.2 } });
+  roomShell({ x0: -22, x1: -14, z0: 116, z1: 124, h: 3.2, wall: 0x515a66, floor: null, skin: null, door: { side: "E", center: 120, width: 2.2 } });
+  if (FIN) FIN.finish({ x0: -21.75, x1: -14.25, z0: 116.25, z1: 123.75 }, {
+    id: "gatehouse", floor: "vct", floorTint: 0xb8b6ae,
+    doors: [{ side: "E", a0: 118.9, a1: 121.1 }], dado: 0x3f4751, dadoH: 1.1, base: 0x1d1f22,
+    ceilingY: 2.8, ceiling: { kind: "acoustic", lights: "troffer", nx: 2, nz: 2 },
+  });
   addBox(-18, 3.4, 120, 8.4, 0.4, 8.4, 0x44505a, { cast: false }); // roof
   addBox(-18, 1.7, 116.1, 3.0, 0.9, 0.08, 0x9fd6ff, { emissive: 0x3a6ea5, ei: 0.4, cast: false });
   // a parked transport bus (big prop) on the east side
@@ -516,38 +630,14 @@
   if (DRESS && PD) (function institutional() {
     const WX = 43.5, SZ1 = 127.5;                 // perimeter inner faces
 
-    // ---- 1. WAYFINDING PAINT ---------------------------------------------
-    // Prisons and hospitals route people with COLOURED LINES ON THE DECK, and
-    // a line on the deck is the only wayfinding a third-person camera can read
-    // at this scale. Each trunk peels off at the z of the door it serves, so
-    // the paint is a map of the block rather than decoration.
-    const GATE = 0xe8c33c, MED = 0x4fbf7a, WORK = 0x3f7fd0, CHAP = 0x9a7ad0, LAUN = 0xd8d2c4;
-    PD.floorLine(-0.6, 89, 70, "z", GATE);          // trunk: the gate, z 54..124
-    PD.floorLine(-1.6, 75, 42, "z", MED);           // trunk: medical, z 54..96
-    PD.floorLine(11.9, 96, 27, "x", MED, { y: 0.047 });   // branch east to the infirmary door
-    PD.floorLine(-1.1, 61.5, 15, "z", WORK);        // trunk: workshop, z 54..69
-    PD.floorLine(-12.3, 69, 22.4, "x", WORK, { y: 0.047 }); // branch west to the workshop door
-    PD.floorLine(11.4, 69.6, 24.1, "x", CHAP, { y: 0.047 }); // branch east to the chapel door
-    // the laundry gets a DOOR LEG only: a full branch at this z would run
-    // under the bleachers (x -18.1..-15.9) and across the painted half-court,
-    // i.e. a line you cannot see for half its length.
-    PD.floorLine(-22.6, 96.6, 6.2, "x", LAUN, { y: 0.047 });
-    PD.chevron(-0.6, 112, "z", 1, GATE);
-    PD.chevron(-0.6, 84, "z", 1, GATE);
-    PD.chevron(18, 96, "x", 1, MED);
-    PD.chevron(-18, 69, "x", -1, WORK);
-    // The same colours carried onto the wall each line ends at, so a lane and
-    // a doorway are the same idea in two places. Each x is the wall's YARD
-    // face plus a hair — a roomShell wall is 0.5 thick and centred on the rect
-    // edge, so the yard face is edge -/+ 0.25 and getting the sign wrong hides
-    // the stripe inside the concrete.
-    // Each band sits BESIDE its doorway, never across it: a roomShell door gap
-    // is a full-height hole in the wall, so a stripe centred on the door
-    // centreline would hang in the opening with nothing behind it.
-    PD.band(-23.72, 1.55, 73.2, 3.6, "z", WORK);    // workshop east face (yard side x > -23.75)
-    PD.band(23.72, 1.55, 73.2, 3.6, "z", CHAP);     // chapel west face   (yard side x <  23.75)
-    PD.band(25.72, 1.55, 100.2, 3.4, "z", MED);     // infirmary west face
-    PD.band(-25.72, 1.55, 100.2, 3.4, "z", LAUN);   // laundry east face
+    // ---- 1. WAYFINDING PAINT: DELETED (2026-09-27) --------------------------
+    // Five coloured trunks (gate yellow, medical green, workshop blue, chapel
+    // violet, laundry white) ran down the OUTDOOR yard walkway with chevrons,
+    // plus a matching coloured band beside each door. Coloured routing lines
+    // are an indoor hospital-corridor device; on an open prison yard they read
+    // as a board-game track, and from a phone at eye level they were thick
+    // bright bars (owner: "lines on ground are dumb"). The yard is navigated by
+    // the doors, the signs over them and the walkway itself.
 
     // ---- 2. PERIMETER WEAR ------------------------------------------------
     // A 76 m concrete wall with one red trim line on top is a boundary; the
@@ -598,20 +688,14 @@
       addBox(outX + (east ? 0.16 : -0.16), 3.13, dc, 0.24, 0.1, 0.5, 0xffe9a8,
         { emissive: 0xffcf66, ei: 0.8, cast: false });
 
-      // interior wear: the dado + scuff on the long wall opposite the door,
-      // which is the wall you look at from the doorway.
-      const farX = east ? x0 : x1;
-      PD.dado(farX + (east ? 0.03 : -0.03), 0.5, cz, dz, "z", 0x6f7a86);
-      PD.scuff(farX + (east ? 0.03 : -0.03), 1.32, cz, dz, "z", { color: 0x59616b });
-      // service run under the wall head, with hangers — the chapel is exempt:
-      // a nave does not have exposed conduit, and that difference is what
-      // makes the other three read as working rooms.
-      if (R[0] !== "chapel") {
-        PD.pipe(inX + dirIn * 0.45, h - 0.85, cz, dz - 1.2, "z", 0.09, 0x6f7a86);
-        for (const t of [-0.3, 0.3]) PD.hanger(inX + dirIn * 0.45, h - 0.76, cz + t * dz, 0.5);
+      // (the dado plank + scuff stripe, and the caged wall lamp, are gone: each
+      // room has its finish layer and ceiling fittings now.) A service run
+      // under the ceiling, with hangers, in the two working rooms only.
+      if (R[0] === "workshop" || R[0] === "laundry") {
+        const py = (R[0] === "workshop" ? 5.2 : 4.4) - 0.35;
+        PD.pipe(inX + dirIn * 0.45, py, cz, dz - 1.2, "z", 0.09, 0x6f7a86);
+        for (const t of [-0.3, 0.3]) PD.hanger(inX + dirIn * 0.45, py, cz + t * dz, 0.35);
       }
-      // one caged lamp inside, on the door wall so it lights the room you enter
-      PD.lamp(inX + dirIn * 0.06, 3.6, dc + (dw / 2 + 1.4), east ? "x-" : "x+");
     }
 
     // ---- 4. FIRE KIT ------------------------------------------------------

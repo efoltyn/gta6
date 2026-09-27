@@ -11,7 +11,7 @@
 
    SKY IS A YARD THING. A roofed room is the whole difference between a
    building and a stage set, and it is the difference the towers, the
-   searchlights and entities/ambientlife.js's four crows (y 18-25) make
+   searchlights (and, until 2026-09-27, four box crows at y 18-25) make
    visible from inside every room in the prison.
 
    ---- WHY THE CAMERA IS NO LONGER AN ARGUMENT --------------------------
@@ -113,7 +113,8 @@
       cfg.deck != null ? cfg.deck : C_DECK, { solid: false, cast: !!cfg.cast, blockLOS: true });
     // The underside is what you are standing under, and a roof deck colour
     // read from below is the wrong colour. One thin plate, 4 cm proud.
-    addBox(cx, top - 0.02, cz, w - 0.1, 0.06, d - 0.1,
+    // (skipped when the room below has its own finished ceiling: nobody sees it)
+    if (cfg.soffit !== false) addBox(cx, top - 0.02, cz, w - 0.1, 0.06, d - 0.1,
       cfg.soffit != null ? cfg.soffit : C_SOFFIT, { cast: false, receive: false });
     // parapet kerb — the silhouette a tower guard sees, and the thing that
     // stops a flat slab reading as a lid dropped on a box
@@ -208,16 +209,25 @@
     return made;
   }
 
+  // A room that laid its own finished ceiling (CBZ.prisonDress.ceiling: a
+  // real height, real fittings) is not re-lit from up here — fluorescent
+  // sticks hung under the roof slab would be ABOVE its ceiling, in the void.
+  function ownCeiling(id) {
+    const list = (PD && PD.ceilings) || [];
+    for (let i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return null;
+  }
   for (let i = 0; i < ROOMS.length; i++) {
     const room = ROOMS[i], R = room.r;
     const top = R.h;
+    const own = ownCeiling(room.id);
     if (!room.roofed) prisonRoof({
       id: room.id, x0: R.x0, x1: R.x1, z0: R.z0, z1: R.z1, top: top,
-      over: room.over, deck: room.deck, cast: room.cast,
+      over: room.over, deck: room.deck, cast: room.cast, soffit: own ? false : undefined,
       // a 8x8 hut wants no rooftop plant; everything else does
       plant: (R.x1 - R.x0) * (R.z1 - R.z0) > 90,
     });
-    room.made = fitOut(room, top);
+    room.made = own ? own.n : fitOut(room, top);
     const rec = laid[laid.length - 1];
     if (rec && rec.id === room.id) rec.lights = room.made;
   }

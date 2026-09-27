@@ -67,7 +67,6 @@
 
   // Canonical declaration + doctrine comment: world/southblock.js.
   if (CBZ.CONFIG.PRISON_DRESS_V2 == null) CBZ.CONFIG.PRISON_DRESS_V2 = true;
-  const DRESS = !!CBZ.CONFIG.PRISON_DRESS_V2;
   const PD = CBZ.prisonDress || null;   // degrade-safe: no kit → no dressing
   // PRISON_PROP_USE_V1 — canonical declaration + doctrine: world/southblock.js.
   // Here: 67 dead props in a 140 m2 dayroom. The phone bank goes (18 boxes,
@@ -75,13 +74,22 @@
   // collider a 1.9 m unit of furniture should always have had. What stays and
   // why is written at each site.
   if (CBZ.CONFIG.PRISON_PROP_USE_V1 == null) CBZ.CONFIG.PRISON_PROP_USE_V1 = true;
-  const USE = !!CBZ.CONFIG.PRISON_PROP_USE_V1;
 
   roomShell({
     x0: 19, x1: 29, z0: 30, z1: 44, h: 6,
-    wall: 0x6b7480, floor: 0x4a5560,
+    wall: 0x6b7480, floor: null, skin: null,
     door: { side: "W", center: 37, width: 3.4 },
   });
+  /* FINISHES (2026-09-27): VCT on the floor, block walls with a painted dado
+     and a vinyl base, and a lay-in ceiling at 3.0 m with 2 x 4 troffers — a
+     staff dayroom, not a 6 m shed with joists and sticks under an open top. */
+  if (CBZ.prisonDress && CBZ.prisonDress.finish) {
+    CBZ.prisonDress.finish({ x0: 19.25, x1: 28.75, z0: 30.25, z1: 43.75 }, {
+      id: "lounge", floor: "vct", floorTint: 0xc9c6bb,
+      doors: [{ side: "W", a0: 35.3, a1: 38.7 }], dado: 0x55606c, dadoH: 1.2, base: 0x2b2d30,
+      ceilingY: 3.0, ceiling: { kind: "acoustic", lights: "troffer", along: "z", nx: 2, nz: 3 },
+    });
+  }
 
   // "STAFF ONLY" sign band over the door
   addBox(19, 5.4, 37, 0.2, 0.8, 3.0, 0x1d2a4d, { cast: false });
@@ -143,7 +151,7 @@
   // aimed at it all read these two numbers. TV_X sits against the west wall's
   // inner face (19.25) under the flag; flag off restores the old floating
   // 21.0 so the revert is exact.
-  const TV_Z = 33, TV_X = DRESS ? 19.55 : 21.0;
+  const TV_Z = 33, TV_X = 19.55, TV_Y = 1.95;
 
   // ---- armchair, angled at the TV ---------------------------------------
   const CHAIR_X = 24.5, CHAIR_Z = 41.5;
@@ -167,17 +175,29 @@
   if (!kit("coffee", 25.5, 0, 37, 0, { len: 1.6, deep: 1.2 })) {
     addBox(25.5, 0.45, 37, 1.6, 0.12, 1.2, 0x3c424d, { solid: true, y0: 0, y1: 0.55 });
   }
-  addBox(25.5, 0.62, 37, 0.18, 0.22, 0.18, 0xffffff, { cast: false });
+  // a mug ON the table (it was a 22 cm white block hovering 11 cm over it)
+  (function mug() {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.04, 0.1, 12), CBZ.cmat(0xece8df));
+    m.position.set(25.3, 0.45, 36.8); m.castShadow = false; (CBZ.prisonRoot || CBZ.scene).add(m);
+  })();
 
-  // wall-mounted TV (2.6 m up — over a body's head, stays open)
-  addBox(TV_X, 2.6, TV_Z, 0.2, 1.4, 2.4, 0x0a0d18, {});
-  // Bezel's room-facing surface is TV_X+0.10; keep real air behind the glass.
-  addBox(TV_X + 0.17, 2.6, TV_Z, 0.06, 1.2, 2.1, 0x6fb7ff,
-    { emissive: 0x2a6ea5, ei: 0.8, cast: false });
+  // wall-mounted TV, bezel and screen; the screen is just off (dark glass
+  // with a faint picture), not a glowing blue slab
+  addBox(TV_X, TV_Y, TV_Z, 0.1, 1.05, 1.8, 0x0a0d12, {});
+  addBox(TV_X + 0.056, TV_Y, TV_Z, 0.012, 0.97, 1.72, 0x1c2a36,
+    { emissive: 0x0f2230, ei: 0.6, cast: false });
 
-  // coffee machine in the corner — floor-standing, so SOLID like the rest.
-  addBox(28.2, 1.0, 31.5, 0.9, 1.2, 0.9, 0x222831, { solid: true });
-  addBox(28.2, 1.5, 31.5, 0.5, 0.2, 0.5, 0xff3b3b, { emissive: 0xff0000, ei: 0.6, cast: false });
+  // coffee station in the corner: a base cabinet with a laminate top, the
+  // brewer and its pot on it. (It was a 1.2 m black box hanging 40 cm off
+  // the floor with a glowing red box on top.)
+  addBox(28.3, 0.47, 31.5, 0.6, 0.82, 1.4, 0x7a6a55, { solid: true });                  // cabinet
+  addBox(28.28, 0.9, 31.5, 0.66, 0.04, 1.46, 0xd8d2c4, { cast: false });                 // top
+  for (const dz of [-0.35, 0.35]) addBox(27.99, 0.5, 31.5 + dz, 0.02, 0.66, 0.66, 0x6b5c49, { cast: false });   // doors
+  addBox(28.45, 1.12, 31.3, 0.3, 0.4, 0.26, 0x1e2227, { cast: false });                  // brewer
+  addBox(28.36, 1.3, 31.3, 0.36, 0.06, 0.28, 0x1e2227, { cast: false });                 // brewer head
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.16, 12), CBZ.cmat(0x3b2a1e));
+  pot.position.set(28.34, 1.0, 31.3); (CBZ.prisonRoot || CBZ.scene).add(pot);
+  addBox(28.3, 0.935, 31.3, 0.02, 0.012, 0.02, 0xff5a3a, { emissive: 0xc02a10, ei: 0.8, cast: false }); // power lamp
 
   // a couple of loose cigarette packs left on the table (steal-bait)
   if (CBZ.addPack) { CBZ.addPack(25.5, 37, 8); CBZ.addPack(24.5, 41.5, 6); }
@@ -195,49 +215,11 @@
   // CIRCULATION HELD: the door bay (z 35.3..38.7) runs clear from the west
   // wall to the coffee table, the north-south lane at x 21.4..24.4 is open
   // end to end, and nothing new is within 1.2 m of either.
-  if (DRESS && PD) (function dayroom() {
+  if (PD) (function dayroom() {
     const WX0 = 19.25, WX1 = 28.75, WZ0 = 30.25, WZ1 = 43.75;   // inner faces
 
-    // ---- 1. THE TV, ON A REAL BRACKET -------------------------------------
-    addBox(TV_X - 0.22, 2.6, TV_Z, 0.26, 0.5, 0.5, 0x3c424d, { cast: false });  // wall plate + arm
-    addBox(TV_X - 0.02, 3.34, TV_Z, 0.1, 0.16, 1.9, 0x2a2f38, { cast: false }); // top trim
-    // The screen carries a picture instead of one flat blue rectangle: two
-    // dim bands over the bright pane read as a broadcast from across the room.
-    // STATIC on purpose — this file registers no per-frame work and a dayroom
-    // TV is not worth being the first thing in it that does.
-    addBox(TV_X + 0.19, 2.98, TV_Z, 0.02, 0.34, 2.0, 0xdff0ff,
-      { emissive: 0x6fa8d0, ei: 0.6, cast: false });
-    addBox(TV_X + 0.19, 2.16, TV_Z, 0.02, 0.22, 2.0, 0x16324a,
-      { emissive: 0x0d2436, ei: 0.5, cast: false });
-
-    // ---- 2. PHONE BANK — DELETED (PRISON_PROP_USE_V1) ---------------------
-    // Eighteen boxes: three kiosks of five (backboard, body, handset, cord,
-    // shelf) and three 0.66 m privacy dividers, EVERY ONE of them drawn
-    // cast:false with no collider, no anchor and no verb. There is no phone
-    // verb in this game, so a payphone is only ever worth its silhouette —
-    // and the compound already spends that silhouette where it earns
-    // something: world/yardfurniture.js:183 stands the canonical three-kiosk
-    // bank on the ARMOURY APPROACH and says in its own header why ("a man on
-    // the phone is a man standing still with his back to the yard — the one
-    // legitimate reason to be stationary within sight of the gun-room door").
-    // That is level design. A second bank 20 m away on a staff-lounge wall is
-    // the same fitting with the reason removed, and the dividers were the one
-    // part of it a body could meet: 0.56 m proud of the wall at chest height,
-    // walked straight through.
-    // The owner's line was "they could put couches or something, but not in
-    // everything". The couches stay and are sittable. This does not.
-    if (!USE) {
-      for (let i = 0; i < 3; i++) {
-        const x = 21.3 + i * 1.7;
-        addBox(x, 1.35, WZ0 + 0.14, 0.9, 1.5, 0.14, 0x5b6470, { cast: false });        // backboard
-        addBox(x, 1.42, WZ0 + 0.3, 0.26, 0.5, 0.2, 0x1e232b, { cast: false });         // phone body
-        addBox(x - 0.19, 1.42, WZ0 + 0.34, 0.1, 0.34, 0.12, 0x2f3641, { cast: false }); // handset
-        addBox(x - 0.19, 1.16, WZ0 + 0.3, 0.03, 0.22, 0.03, 0x14181f, { cast: false }); // cord
-        addBox(x, 1.0, WZ0 + 0.32, 0.62, 0.06, 0.24, 0x8b95a1, { cast: false });        // shelf
-      }
-      for (let i = 0; i < 3; i++)                                                        // privacy dividers
-        addBox(22.15 + i * 1.7, 1.5, WZ0 + 0.48, 0.08, 1.7, 0.66, 0x3c424d, { cast: false });
-    }
+    // ---- 1. THE TV BRACKET --------------------------------------------------
+    addBox(TV_X - 0.2, TV_Y, TV_Z, 0.3, 0.3, 0.4, 0x2a2f38, { cast: false });   // wall arm
 
     // ---- 3. CARD TABLE (south-west, out of the door lane) -----------------
     // The one thing a dayroom is FOR. A round bolted table with four stools
@@ -265,7 +247,7 @@
     // roundTable gives one rect to a welded table rather than one per plank.
     // Solid, it is also the only cover on the south wall.
     const shelfMid = addBox(26.9, 0.95, WZ1 - 0.2, 1.9, 0.08, 0.34, 0x6a563c, { cast: false });
-    if (USE && CBZ.colliders) {
+    if (CBZ.colliders) {
       CBZ.colliders.push({
         minX: 25.95, maxX: 27.85, minZ: WZ1 - 0.37, maxZ: WZ1 - 0.03,
         y0: 0, y1: 1.53, ref: shelfMid,
@@ -288,12 +270,12 @@
     }
 
     // ---- 5. NOTICE BOARD (west wall, south of the door) -------------------
-    addBox(WX0 + 0.05, 2.5, 41.0, 0.07, 1.5, 2.4, 0x6a563c, { cast: false });
-    addBox(WX0 + 0.1, 2.5, 41.0, 0.03, 1.32, 2.22, 0x3f4a3c, { cast: false });   // cork
-    const NOTES = [[2.9, 40.2, 0.44, 0.3], [2.88, 41.4, 0.5, 0.34], [2.35, 40.6, 0.4, 0.5],
-    [2.3, 41.8, 0.46, 0.32]];
+    addBox(WX0 + 0.04, 1.75, 41.0, 0.05, 1.2, 2.0, 0x6a563c, { cast: false });
+    addBox(WX0 + 0.075, 1.75, 41.0, 0.02, 1.06, 1.86, 0x8a6f4a, { cast: false });   // cork
+    const NOTES = [[2.05, 40.4, 0.3, 0.21], [2.02, 41.3, 0.3, 0.21], [1.55, 40.7, 0.21, 0.3],
+    [1.5, 41.6, 0.3, 0.21]];
     for (const n of NOTES)
-      PD.paper(WX0 + 0.13, n[0], n[1], "x+", n[2], n[3],
+      PD.paper(WX0 + 0.09, n[0], n[1], "x+", n[2], n[3],
         { color: PD.h01(n[0], n[1], 0x9331) > 0.6 ? 0xf1ecdd : 0xe0d8c2 });
 
     // ---- 6. VENDING MACHINE (north-east, beside the coffee machine) -------
@@ -306,37 +288,12 @@
     addBox(27.75, 1.92, 33.6, 0.1, 0.16, 0.8, 0xff8a3c,
       { emissive: 0xc85c00, ei: 0.5, cast: false });                   // header glow
 
-    // ---- 7. THE SHELL: wear, structure, light -----------------------------
-    // West wall runs are SPLIT around the doorway (z 35.3..38.7) — a roomShell
-    // gap is full height, so an unbroken band hangs across the opening.
-    const RUNS = [
-      [24.0, WZ0 + 0.03, 9.5, "x"], [24.0, WZ1 - 0.03, 9.5, "x"],
-      [WX1 - 0.03, 37.0, 13.5, "z"],
-      [WX0 + 0.03, 32.775, 5.05, "z"], [WX0 + 0.03, 41.225, 5.05, "z"],
-    ];
-    for (const r of RUNS) {
-      PD.dado(r[0], 0.5, r[1], r[2], r[3], 0x55606c);
-      PD.scuff(r[0], 1.32, r[1], r[2], r[3], { color: 0x454e58 });
-    }
-    // door head — stops at 5.0, the underside of the STAFF ONLY band that
-    // hangs in this gap (y 5.0..5.8), for the same reason as the cafeteria's
+    // ---- 7. THE DOOR HEAD + FIRE KIT ----------------------------------------
+    // (the dado/scuff planks, joists, sticks, wall lamps, conduit and the blue
+    // floor line are gone: the finish kit above is the shell now)
     addBox(19, 3.95, 37, 0.5, 2.1, 3.4, 0x6b7480, { cast: false });
     addBox(19.3, 2.88, 37, 0.14, 0.16, 3.5, 0x515a66, { cast: false });
-    for (const z of [33.0, 41.0]) PD.beam(24.0, 5.62, z, 9.6, "x");
-    PD.beam(24.0, 5.82, 37.0, 13.6, "z", { w: 0.14, h: 0.16 });
-    for (const z of [34.0, 40.0]) PD.strip(24.0, 5.44, z, 4.0, "x");
-    PD.lamp(WX0 + 0.06, 3.6, 34.0, "x+");
-    PD.lamp(WX1 - 0.06, 3.6, 41.6, "x-");
-    PD.pipe(28.4, 5.05, 37.0, 12.6, "z", 0.08, 0x66717c);
-    for (const z of [33.0, 41.0]) PD.hanger(28.4, 5.14, z, 0.55);
     PD.extinguisher(WX0 + 0.18, 1.1, 34.9, "x+");
-
-    // ---- 8. WAYFINDING ----------------------------------------------------
-    // Blue = rec. It meets the yard's blue line at the door, so the two rooms
-    // the DAY BEAT rotates you between are painted as one route.
-    PD.floorLine(22.4, 37.0, 6.0, "x", 0x3f7fd0);
-    PD.chevron(24.6, 37.0, "x", 1, 0x3f7fd0);
-    PD.band(WX0 + 0.03, 1.55, 41.225, 5.05, "z", 0x3f7fd0);
   })();
 
   // The facade pass (world/building_dress.js) dresses whatever is registered.

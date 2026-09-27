@@ -219,18 +219,27 @@
   //      at night a decision rather than a free pass.
   const floods = [];
   function floodMast(x, z) {
-    addBox(x, 3.5, z, 0.36, 7, 0.36, 0x6b7480, { solid: true });                   // pole
-    addBox(x, 7.02, z, 1.10, 0.18, 0.55, 0x515a66, { cast: false });               // bracket
-    const head = addBox(x, 6.86, z, 0.90, 0.16, 0.42, 0x2b2b2b, { cast: false });  // the lamp itself
+    // A REAL LIGHT POLE (2026-09-27): a tapered round galvanized pole on a
+    // concrete footing with a mast arm and a flat luminaire under it. It was a
+    // 36 cm square grey box stick with a box on top. The collider keeps the old
+    // 0.36 square footprint so nothing that walks the yard changes.
+    const galv = CBZ.mat(0x9aa2aa), s = x > 0 ? -1 : 1;   // arm reaches into the yard
+    addBox(x, 0.15, z, 0.6, 0.3, 0.6, 0x8f9499, { solid: true, y0: 0, y1: 7 });      // footing (+ the pole's collider)
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.13, 6.8, 10), galv);
+    pole.position.set(x, 0.3 + 3.4, z); pole.castShadow = true; root.add(pole);
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.9, 8), galv);
+    arm.rotation.z = -s * (Math.PI / 2 - 0.12); arm.position.set(x + 0.42 * s, 7.08, z); root.add(arm);
+    addBox(x + 0.88 * s, 7.02, z, 0.62, 0.12, 0.36, 0x3a4048, { cast: false });           // luminaire housing
+    const head = addBox(x + 0.88 * s, 6.95, z, 0.52, 0.03, 0.28, 0x2b2b2b, { cast: false });  // the lens (the lamp itself)
     head.userData.mover = true;
     const pool = new THREE.Mesh(new THREE.CircleGeometry(9, 22),
       new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0, depthWrite: false }));
     pool.rotation.x = -Math.PI / 2;
-    pool.position.set(x, 0.045, z);
+    pool.position.set(x + 0.88 * s, 0.045, z);
     root.add(pool);
     const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 8.4, 6.9, 14, 1, true),
       new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
-    beam.position.set(x, 3.42, z);
+    beam.position.set(x + 0.88 * s, 3.42, z);
     root.add(beam);
     const rec = register({ x: x, z: z, r: 13, kind: "flood", mesh: head, pool: pool, poolPeak: 0.26,
       beam: beam, beamPeak: 0.07, color: 0xfff4d2, emissive: 0xffd88a, off: 0x2b2b2b });

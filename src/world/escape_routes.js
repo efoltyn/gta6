@@ -22,7 +22,6 @@
   // the reasoning for all three is written at the site.
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.PRISON_PROP_USE_V1 == null) CBZ.CONFIG.PRISON_PROP_USE_V1 = true;
-  const USE = !!CBZ.CONFIG.PRISON_PROP_USE_V1;
 
   function sign(text, x, y, z, w, h, ry, fg, bg) {
     const c = document.createElement("canvas");
@@ -51,22 +50,29 @@
   /* opts.grate: the bars are a real, cuttable grate (systems/escapeplan.js
      owns the cut). They are flagged dynamic so core/batch.js never bakes them
      into a static merge, which would leave a cut grate still drawn shut. */
+  /* A FLOOR HATCH IS FLUSH WITH THE FLOOR. It was a 22 cm stack — an 11 cm
+     curb, a plate on it and a grid of bars standing on the plate — which read
+     as a crate lid lying on the concrete. Now a steel curb frame 3 cm proud,
+     the plate inside it and the bars as a grating in the plate's own plane.
+     `opts.size` scales it (a hatch inside a cell is not a yard culvert);
+     `opts.floor` is the surface it is set into (the ditch slab is 7 cm). */
   function floorHatch(x, z, name, accent, opts) {
-    addBox(x, 0.055, z, 1.75, 0.11, 1.75, 0x26313a, { cast: false });
-    const plate = addBox(x, 0.13, z, 1.35, 0.08, 1.35, accent || 0x515a66, { cast: false });
+    const k = (opts && opts.size ? opts.size : 1.75) / 1.75, f = (opts && opts.floor) || 0;
+    addBox(x, f + 0.015, z, 1.75 * k, 0.03, 1.75 * k, 0x26313a, { cast: false });
+    const plate = addBox(x, f + 0.035, z, 1.45 * k, 0.012, 1.45 * k, accent || 0x515a66, { cast: false });
     const bars = [];
     for (let i = -2; i <= 2; i++) {
-      bars.push(addBox(x + i * 0.26, 0.2, z, 0.08, 0.08, 1.25, 0x11171c, { cast: false }));
-      bars.push(addBox(x, 0.22, z + i * 0.26, 1.25, 0.05, 0.06, 0x11171c, { cast: false }));
+      bars.push(addBox(x + i * 0.26 * k, f + 0.045, z, 0.05 * k, 0.012, 1.3 * k, 0x11171c, { cast: false }));
+      bars.push(addBox(x, f + 0.047, z + i * 0.26 * k, 1.3 * k, 0.012, 0.04 * k, 0x11171c, { cast: false }));
     }
     const vent = { x, z, y: 0.12, name, dest: null, route: true };
     if (opts && opts.grate) {
       for (const b of bars) if (b) b.userData.dynamic = true;
       if (plate) plate.userData.dynamic = true;
       // the open shaft under a cut grate: black, a hair above the plate
-      const hole = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.2), new THREE.MeshBasicMaterial({ color: 0x050607 }));
+      const hole = new THREE.Mesh(new THREE.PlaneGeometry(1.2 * k, 1.2 * k), new THREE.MeshBasicMaterial({ color: 0x050607 }));
       hole.rotation.x = -Math.PI / 2;
-      hole.position.set(x, 0.175, z);
+      hole.position.set(x, f + 0.043, z);
       hole.visible = false;
       hole.userData.dynamic = true;
       scene.add(hole);
@@ -101,29 +107,21 @@
     return mesh;
   }
 
-  // ---- ceiling structure so the cell block reads like an enclosed facility ----
-  // KEPT, DELIBERATELY (PRISON_PROP_USE_V1). The room audit files the five
-  // longitudinal rails on the next line as dead props and the six cross
-  // members on this one as ROOF SHELL, and the only thing separating them is a
-  // 6 m2 footprint threshold the rails miss by 0.4 m2 (0.16 x 35 = 5.6). They
-  // are one object: a purlin grid under a 9 m lid, primaries at 8.90 in
-  // 0.16 x 0.22 and secondaries hung 12 cm below them at 8.78 in 0.16 x 0.14 —
-  // which is the right way round, and is why the ceiling reads as built rather
-  // than as a painted plane. Deleting structure to move a number is exactly
-  // the over-count this pass is supposed to avoid.
-  for (let z = -41; z <= -12; z += 5.8) addBox(0, 8.9, z, 31.4, 0.16, 0.22, 0x515a66, { cast: false });
-  for (let x = -12; x <= 12; x += 6) addBox(x, 8.78, -26, 0.16, 0.14, 35, 0x3f4852, { cast: false });
-  pipe(-14.9, 7.55, -28, 0.16, 27, "z", 0x47515c);
-  pipe(14.9, 7.35, -26, 0.12, 24, "z", 0x5a6570);
+  /* THE CELL HOUSE ROOF IS world/cellblock.js's. This file drew a SECOND
+     purlin grid under the same 9 m lid (the same five x-lines, 12 cm apart
+     from cellblock's own purlins, fighting them) plus a 24 m "catwalk and
+     cable tray" slab at 6.45 m that nobody could reach, whose ends ran 30 cm
+     into the upper-tier cells. Both deleted: one roof, built once.
 
-  // overhead catwalk and cable tray: visual route language above the cells.
-  addBox(0, 6.45, -17, 24, 0.18, 1.65, 0x333c46, { cast: false });
-  addBox(0, 7.15, -16.1, 24, 0.14, 0.14, 0x8b95a1, { cast: false });
-  addBox(0, 7.15, -17.9, 24, 0.14, 0.14, 0x8b95a1, { cast: false });
-  for (let x = -11; x <= 11; x += 2.2) {
-    addBox(x, 6.82, -16.1, 0.08, 0.72, 0.08, 0x6b7480, { cast: false });
-    addBox(x, 6.82, -17.9, 0.08, 0.72, 0.08, 0x6b7480, { cast: false });
-  }
+     The service pipes stay, but where pipes go: along the side walls in the
+     bay between the truss chords (8.15..8.80), clear of every upper cell.
+     They were at 7.2-7.55 m, i.e. INSIDE the east and west upper cells, run
+     through their partitions and their roof slabs. */
+  pipe(-15.28, 8.45, -28, 0.14, 27, "z", 0x47515c);
+  pipe(15.30, 8.45, -26, 0.12, 24, "z", 0x5a6570);
+  pipe(14.72, 8.45, -21.9, 0.12, 27.2, "z", 0x717c86);
+  for (let z = -40; z <= -13; z += 3) for (const x of [-15.28, 15.3])       // wall brackets
+    addBox(x + (x < 0 ? -0.12 : 0.12), 8.45, z, 0.18, 0.05, 0.05, 0x3a4048, { cast: false });
 
   // The housing gate already owns its jambs, reader, signal and moving leaf.
   // The old "checkpoint dressing" duplicated all of that with freestanding
@@ -132,8 +130,12 @@
   sign("HOUSING UNIT A", 0, 4.30, -8.38, 4.6, 0.78, Math.PI, "#e8edf2", "#202833");
 
   // ---- route 1: cell utility crawl to the west drainage ditch ----
-  const cellCrawl = floorHatch(-12.2, -38.2, "Cell Utility Crawl", 0x6b7480);
-  const yardDrainIn = floorHatch(-25.4, 10.5, "Yard Drainage Ditch", 0x4f6d75);
+  // Inside A-1 on purpose (cellblock.js header): a way out through your own
+  // floor. At (-12.2, -38.2) and 1.75 m square it straddled the cell's barred
+  // front, half in the cell and half in the aisle under the bars; a 0.9 m
+  // access plate between the bunk's foot and the door sits wholly inside.
+  const cellCrawl = floorHatch(-12.2, -39.6, "Cell Utility Crawl", 0x6b7480, { size: 0.9 });
+  const yardDrainIn = floorHatch(-25.4, 10.5, "Yard Drainage Ditch", 0x4f6d75, { floor: 0.07 });
   cellCrawl.dest = yardDrainIn;
   yardDrainIn.dest = cellCrawl;
 
@@ -145,7 +147,7 @@
   // crawl only goes when nobody is watching the ditch. The mouth outside the
   // wall is where the route is won, and escapeplan.js checks the grate was
   // really cut before it counts.
-  const yardCulvert = floorHatch(-25.2, 18.2, "Perimeter Culvert", 0x4f6d75, { grate: true });
+  const yardCulvert = floorHatch(-25.2, 18.2, "Perimeter Culvert", 0x4f6d75, { grate: true, floor: 0.07 });
   const outerCulvert = floorHatch(-9, SZ + 3, "Outer Culvert Mouth", 0x39ff88);
   yardCulvert.dest = outerCulvert;
   yardCulvert.culvert = true;
@@ -154,10 +156,9 @@
   CBZ.culvertGrate = yardCulvert;
   CBZ.altExitZones.push({ x: -9, z: SZ + 3, r: 3.4, name: "culvert" });
 
-  // Give the ditch a readable path and some stealth cover.
-  addBox(-25.3, 0.035, 14.4, 6.3, 0.07, 14.8, 0x3f4c54, { cast: false });
-  addBox(-28.4, 0.22, 14.4, 0.32, 0.45, 14.8, 0x2d373f, { cast: false });
-  addBox(-22.2, 0.22, 14.4, 0.32, 0.45, 14.8, 0x2d373f, { cast: false });
+  // (2026-09-27) The dark 6.3 x 14.8 m "ditch path" slab and its two 45 cm
+  // kerbs ran straight through the middle of the MESS HALL floor — a drainage
+  // ditch across a dining room. Deleted: the hatches are the route.
   pipe(-25.3, 0.72, 24.3, 0.42, 5.0, "z", 0x3f4852);
   pipe(-9, 0.9, SZ + 1.3, 0.62, 3.4, "z", 0x1b242b);
   sign("CULVERT", -9, 2.3, SZ + 0.2, 2.6, 0.7, 0, "#39ff88", "#17211c");
@@ -169,7 +170,7 @@
   checkpointDrop.dest = ceilingCell;
   // THE TWO CEILING PATCHES ARE GONE (PRISON_PROP_USE_V1). Route 3's two ends
   // are drawn by floorHatch() on the line above: a 1.75 m grated hatch ON THE
-  // FLOOR at y 0.055-0.22, with the CBZ.vents record — the thing the player
+  // FLOOR, flush, with the CBZ.vents record — the thing the player
   // actually crawls into — registered at y 0.12. These two boxes were 2.2 x
   // 0.18 x 2.2 grey squares hung 6.5 m ABOVE those hatches, saying "ceiling"
   // because the route is named "Ceiling Service Hatch", with nothing at that
@@ -177,14 +178,9 @@
   // the single largest dead prop in the north yard and the second largest in
   // the cell house. A grey square in the air is the definition of the thing
   // this pass deletes.
-  if (!USE) {
-    addBox(11.6, 6.7, -36.4, 2.2, 0.18, 2.2, 0x59636f, { cast: false });
-    addBox(12.4, 6.65, -5.4, 2.2, 0.18, 2.2, 0x59636f, { cast: false });
-  }
-  pipe(12.0, 7.2, -20.5, 0.14, 30, "z", 0x717c86);
 
   // ---- route 4: cafeteria grease duct into the same ditch network ----
-  const kitchenDuct = floorHatch(-27.1, 19.2, "Kitchen Grease Duct", 0x9a6a2d);
+  const kitchenDuct = floorHatch(-27.1, 19.2, "Kitchen Grease Duct", 0x9a6a2d, { floor: 0.07 });
   const ditchService = floorHatch(-25.5, 25.3, "Drain Service Grate", 0x4f6d75);
   kitchenDuct.dest = ditchService;
   ditchService.dest = kitchenDuct;
@@ -198,11 +194,7 @@
   // a painted ditch, both of them at ankle height, and a dashed line of stubs
   // halfway up a 6 m wall is not a conduit run — a conduit run is continuous.
   // Nothing reaches them, nothing reads them, nothing is lit by them.
-  if (!USE) {
-    for (let z = 5; z <= 47; z += 7) {
-      addBox(-29.45, 5.2, z, 0.12, 0.12, 3.3, 0x66717c, { cast: false });
-      addBox(29.45, 5.2, z + 2.5, 0.12, 0.12, 3.0, 0x66717c, { cast: false });
-    }
-  }
-  pipe(0, 9.8, 22, 0.10, 48, "z", 0x5b6470);
+  // (The 48 m, 10 cm "pipe" hung 9.8 m over the middle of the north yard is
+  // GONE. It touched no wall and no roof: from the ground it was a grey line
+  // drawn diagonally across the sky, and the owner saw exactly that.)
 })();

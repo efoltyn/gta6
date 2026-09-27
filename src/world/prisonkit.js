@@ -564,7 +564,7 @@
     if (len < 0.3) return null;
     const ux = dx / len, uz = dz / len, nx = -uz, nz = ux;
     const h = run.h || 3.6, ang = -Math.atan2(dz, dx);
-    const mesh = skin("chainlink", 0xb9c0c7), galv = skin("galv", 0xb4bcc4), steel = skin("steel", 0x4a525c);
+    const mesh = skin("chainlink", 0xb9c0c7), galv = skin("galv", 0xb4bcc4), steel = skin("steel", 0x3a4048);
     const coil = skin("galv", 0xd8dde3);
     const gates = (run.gates || []).slice().sort((a, b) => a.at - b.at);
     const solid = run.solid !== false;
@@ -737,15 +737,28 @@
   function ground(x, z, w, d, kind, o) {
     o = o || {};
     let tex = null;
-    const kinds = { asphalt: ["#4b515a", "#434950"], turf: ["#6f8a4a", "#5d7a3e"], concrete: ["#5b636c", "#535b64"], gravel: ["#6c6a63", "#5e5c56"], track: ["#8a4d3d", "#7a4335"] };
+    // outdoor paving tones are sRGB (tagged below); turf keeps the untagged path
+    const kinds = { asphalt: ["#4e5257", "#474b50"], turf: ["#6f8a4a", "#5d7a3e"], concrete: ["#8e908b", "#858782"], gravel: ["#8a857a", "#7d786e"], track: ["#8a4d3d", "#7a4335"] };
     const gk = kind === "turf" ? "yard-grass" : kind === "track" || kind === "gravel" ? "asphalt" : kind;
     const ab = kinds[kind] || kinds.concrete;
-    if (CBZ.prisonGroundTex) tex = CBZ.prisonGroundTex(gk, { a: o.a || ab[0], b: o.b || ab[1] });
+    // every outdoor paving tone is authored sRGB; only turf keeps the untagged path
+    if (CBZ.prisonGroundTex) tex = CBZ.prisonGroundTex(gk, { a: o.a || ab[0], b: o.b || ab[1], srgb: kind !== "turf" });
     else if (CBZ.checkerTex) tex = CBZ.checkerTex(ab[0], ab[1], 2);
     if (!tex) return null;
     tex.repeat.set(Math.max(1, Math.round(w / 6.3)), Math.max(1, Math.round(d / 6.3)));
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshLambertMaterial({ map: tex }));
-    m.rotation.x = -Math.PI / 2; m.position.set(x, o.y != null ? o.y : 0.02, z);
+    /* LAYERS. Patches lie on patches (a court on the turf, a pad on the
+       yard, all on the wing slab) a centimetre apart, which the depth
+       buffer cannot separate at 100 m: they shimmered through each other.
+       The height still orders them up close; a polygon offset per
+       centimetre of it orders them at every distance. The offset only ever
+       pushes BACK (lower patches further), so paint and props standing on
+       a patch are never overdrawn by it. */
+    const y = o.y != null ? o.y : 0.02;
+    const back = Math.max(1, 9 - Math.round((y - 0.011) / 0.005));
+    const mat = new THREE.MeshLambertMaterial({ map: tex });
+    mat.polygonOffset = true; mat.polygonOffsetFactor = back; mat.polygonOffsetUnits = 2 * back;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
+    m.rotation.x = -Math.PI / 2; m.position.set(x, y, z);
     m.receiveShadow = true;
     m.userData.ground = kind;
     root().add(m);
@@ -753,12 +766,131 @@
     return m;
   }
   CBZ.prisonGround = ground;
-  // a painted line on the ground (a thin box; nothing casts, nothing collides)
+  // a painted line on the ground: FLUSH paint, 4 mm thick with its top 5 mm
+  // over a ground() patch (y 0.02). It was 12 mm thick with its top at 5 cm,
+  // which from eye height is a raised curb. Colours are worn, never tin-fresh.
   function paint(x, z, w, d, color, y) {
-    return addBox(x, y != null ? y : 0.045, z, w, 0.012, d, color != null ? color : 0xe9e9e4, { cast: false });
+    const c = new THREE.Color(color != null ? color : 0xe9e9e4);
+    const g = (c.r + c.g + c.b) / 3;
+    c.setRGB((c.r * 0.7 + g * 0.3) * 0.84, (c.g * 0.7 + g * 0.3) * 0.84, (c.b * 0.7 + g * 0.3) * 0.84);
+    return addBox(x, y != null ? y : 0.023, z, w, 0.004, d, c.getHex(), { cast: false });
   }
   CBZ.prisonPaint = paint;
   function program(id, x0, x1, z0, z1) { programs.push({ id, x0, x1, z0, z1, m2: (x1 - x0) * (z1 - z0) }); }
+
+  /* ==========================================================
+     8b. YARD KIT. The real objects the compound's yards are furnished
+        with, shared by world/prisongrounds.js, world/props.js and
+        world/yardfurniture.js so there is ONE picnic table, ONE hoop and
+        ONE canopy in the prison, not a box stand-in per file. Everything is
+        stat()-merged; the caller owns the collider.
+     ========================================================== */
+  // a tube between two points (a leg, a brace, a rail)
+  const _ya = new THREE.Vector3(), _yb = new THREE.Vector3(), _yd = new THREE.Vector3(), _yq = new THREE.Quaternion(), _ym = new THREE.Matrix4(), _yup = new THREE.Vector3(0, 1, 0);
+  function tube(ax, ay, az, bx, by, bz, r, mat, o) {
+    _ya.set(ax, ay, az); _yb.set(bx, by, bz); _yd.subVectors(_yb, _ya);
+    const len = _yd.length();
+    if (len < 1e-4) return null;
+    const g = new THREE.CylinderGeometry(r, r, len, (o && o.seg) || 8, 1, !!(o && o.open));
+    _yq.setFromUnitVectors(_yup, _yd.normalize());
+    g.applyMatrix4(_ym.makeRotationFromQuaternion(_yq));      // r128 geometry has no applyQuaternion
+    return stat(g, mat, (ax + bx) / 2, (ay + by) / 2, (az + bz) / 2, { cast: o ? o.cast : undefined });
+  }
+  // a box in a frame rotated `ry` about (x, z); local (lx, y, lz)
+  function rbox(x, z, ry, lx, y, lz, w, h, d, mat, o) {
+    const c = Math.cos(ry), s = Math.sin(ry);
+    return stat(new THREE.BoxGeometry(w, h, d), mat, x + lx * c + lz * s, y, z - lx * s + lz * c, Object.assign({ ry: ry }, o || {}));
+  }
+  function rtube(x, z, ry, a, b, r, mat, o) {
+    const c = Math.cos(ry), s = Math.sin(ry);
+    return tube(x + a[0] * c + a[2] * s, a[1], z - a[0] * s + a[2] * c, x + b[0] * c + b[2] * s, b[1], z - b[0] * s + b[2] * c, r, mat, o);
+  }
+
+  /* THE PICNIC TABLE. A 1.8 m galvanised walk-through table: three top
+     planks with a gap between them, two bench planks a side, and at each
+     end the A-frame of round tube it all stands on, with the cross-bar the
+     benches bolt to. Top 0.76 m, seats 0.45 m. `ry` turns it. */
+  function picnicTable(x, z, ry, o) {
+    o = o || {};
+    ry = ry || 0;
+    const top = skin("steel", o.tone != null ? o.tone : 0x55705f), frame = skin("galv", 0xb4bcc4);
+    for (let i = -1; i <= 1; i++) rbox(x, z, ry, 0, 0.74, i * 0.25, 1.8, 0.04, 0.235, top, { cast: i === 0 });
+    for (const s of [-1, 1]) for (const k of [0, 1]) rbox(x, z, ry, 0, 0.43, s * (0.56 + k * 0.15), 1.8, 0.04, 0.135, top, { cast: false });
+    for (const e of [-0.68, 0.68]) {
+      for (const s of [-1, 1]) rtube(x, z, ry, [e, 0.0, s * 0.72], [e, 0.72, s * 0.18], 0.024, frame, { cast: false });
+      rtube(x, z, ry, [e, 0.40, -0.8], [e, 0.40, 0.8], 0.02, frame, { cast: false });      // the bench bar
+      rtube(x, z, ry, [e, 0.71, -0.36], [e, 0.71, 0.36], 0.02, frame, { cast: false });    // the top bar
+    }
+    rtube(x, z, ry, [-0.68, 0.40, 0], [0.68, 0.40, 0], 0.018, frame, { cast: false });      // the stretcher
+  }
+
+  /* THE HOOP. A round pole, a gooseneck arm, a 1.8 x 1.05 board with its
+     shooter's square painted on (not a red block glued to it), an orange
+     rim on a bracket and a net. Pole at (px, pz); the board faces `f` (the
+     unit direction into the court) with its face 1.2 m out from the pole. */
+  function hoop(px, pz, fx, fz, o) {
+    o = o || {};
+    const ry = Math.atan2(fx, fz);                // local +z = into the court
+    const post = skin("steel", 0x3a4048), white = skin("steel", 0xe6e7e3), line = skin("steel", 0xa3261f), orange = skin("steel", 0xe0672a);
+    const net = skin("chainlink", 0xf2f2ee);
+    const rimY = o.rimY || 3.05, boardZ = o.reach || 1.2;
+    tube(px, 0, pz, px, rimY + 0.35, pz, 0.075, post, { seg: 10 });
+    rtube(px, pz, ry, [0, rimY + 0.3, 0], [0, rimY + 0.3, boardZ - 0.1], 0.05, post, { cast: false });
+    rtube(px, pz, ry, [0, rimY - 0.2, 0], [0, rimY + 0.3, boardZ - 0.35], 0.035, post, { cast: false });
+    rbox(px, pz, ry, 0, rimY + 0.3, boardZ - 0.07, 0.6, 0.5, 0.08, post, { cast: false });   // board mount
+    rbox(px, pz, ry, 0, rimY + 0.3, boardZ, 1.8, 1.05, 0.04, white, {});
+    // the shooter's square and the board border: 5 cm strips 3 mm proud
+    const fz0 = boardZ + 0.023;
+    for (const s of [-1, 1]) {
+      rbox(px, pz, ry, s * 0.295, rimY + 0.3, fz0, 0.05, 0.45, 0.004, line, { cast: false });
+      rbox(px, pz, ry, 0, rimY + 0.3 + s * 0.2, fz0, 0.64, 0.05, 0.004, line, { cast: false });
+      rbox(px, pz, ry, s * 0.875, rimY + 0.3, fz0, 0.05, 1.05, 0.004, line, { cast: false });
+      rbox(px, pz, ry, 0, rimY + 0.3 + s * 0.5, fz0, 1.8, 0.05, 0.004, line, { cast: false });
+    }
+    // bracket and rim, the net under it
+    const c = Math.cos(ry), s = Math.sin(ry), rz = boardZ + 0.15 + 0.23;
+    rbox(px, pz, ry, 0, rimY - 0.02, boardZ + 0.1, 0.2, 0.06, 0.18, orange, { cast: false });
+    stat(new THREE.TorusGeometry(0.23, 0.01, 6, 20), orange, px + rz * s, rimY, pz + rz * c, { rx: Math.PI / 2, cast: false });
+    stat(new THREE.CylinderGeometry(0.23, 0.14, 0.42, 14, 1, true), net, px + rz * s, rimY - 0.21, pz + rz * c, { cast: false });
+    return { x: px, z: pz };
+  }
+
+  /* THE CANOPY. A mono-pitch steel shed roof on square posts: eave beams
+     on the post heads, a rafter over every post line, and a corrugated
+     sheet with an overhang that is a real slab (a single-sided plane
+     vanishes the moment you look up at it from under it). High at z0,
+     low at z1. */
+  function canopy(x0, x1, z0, z1, hHigh, hLow, o) {
+    o = o || {};
+    const steelDark = skin("steel", 0x3a4048), sheet = skin("corrugated", o.tone != null ? o.tone : 0x9aa1a8);
+    const bays = Math.max(1, Math.round((x1 - x0) / 5));
+    for (let i = 0; i <= bays; i++) {
+      const x = x0 + (x1 - x0) * i / bays;
+      stat(new THREE.BoxGeometry(0.15, hHigh, 0.15), steelDark, x, hHigh / 2, z0, {});
+      stat(new THREE.BoxGeometry(0.15, hLow, 0.15), steelDark, x, hLow / 2, z1, {});
+      tube(x, hHigh + 0.1, z0 - 0.35, x, hLow + 0.1, z1 + 0.35, 0.07, steelDark, { seg: 4, cast: false });   // rafter
+    }
+    stat(new THREE.BoxGeometry(x1 - x0 + 0.15, 0.2, 0.12), steelDark, (x0 + x1) / 2, hHigh, z0, { cast: false });
+    stat(new THREE.BoxGeometry(x1 - x0 + 0.15, 0.2, 0.12), steelDark, (x0 + x1) / 2, hLow, z1, { cast: false });
+    const run = z1 - z0 + 0.9, rise = hHigh - hLow, len = Math.sqrt(run * run + rise * rise);
+    const roof = new THREE.BoxGeometry(x1 - x0 + 0.8, 0.035, len);
+    roof.rotateX(Math.atan2(rise, run));
+    stat(roof, sheet, (x0 + x1) / 2, (hHigh + hLow) / 2 + 0.2, (z0 + z1) / 2, { uv: 1 });
+  }
+
+  // a 55 gallon steel drum: body, three rolling hoops, the lid with its bung
+  function drum(x, z, tone) {
+    const body = skin("steel", tone != null ? tone : 0x2f5e8a), rim = skin("steel", 0x3a4048);
+    stat(new THREE.CylinderGeometry(0.29, 0.29, 0.88, 18), body, x, 0.44, z, {});
+    for (const y of [0.02, 0.3, 0.58, 0.86]) stat(new THREE.TorusGeometry(0.29, 0.012, 4, 18), y > 0.8 || y < 0.1 ? rim : body, x, y, z, { rx: Math.PI / 2, cast: false });
+    stat(new THREE.CylinderGeometry(0.03, 0.03, 0.02, 8), rim, x + 0.16, 0.885, z + 0.06, { cast: false });
+  }
+  // a hardwood pallet, 1.2 x 1.0 x 0.14: top boards, three stringer blocks rows
+  function pallet(x, z, ry) {
+    const wood = skin("concrete", 0x9c7a4e);
+    for (let i = 0; i < 5; i++) rbox(x, z, ry || 0, -0.5 + i * 0.25, 0.125, 0, 0.1, 0.022, 1.0, wood, { cast: false });
+    for (const lz of [-0.44, 0, 0.44]) rbox(x, z, ry || 0, 0, 0.06, lz, 1.2, 0.1, 0.1, wood, { cast: false });
+  }
 
   /* ==========================================================
      9. THE AUDIT. Numbers the exterior preset prints, and what the
@@ -796,6 +928,7 @@
 
   CBZ.prisonKit = {
     skin, skinBox, worldUV, stat, flush, octRing, post, coilRun, fence, floodMast, ground, paint, program, sign: signPlate, toneUp,
+    tube, rbox, rtube, picnicTable, hoop, canopy, drum, pallet,
     TOWER_DECK, TILE,
     // roombuild.js's roomShell skins its walls with this when a caller does not
     // say; world/prisongrounds.js (the last prison builder) clears it so the

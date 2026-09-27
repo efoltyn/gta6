@@ -140,7 +140,9 @@
     "  float prDist = length( prWPos - cameraPosition );\n" +
     "  float prM = prNoise( prUV * 0.55 ) * 0.6 + prNoise( prUV * 2.3 + 7.0 ) * 0.4;\n" +
     "  float prShade = 1.0 + ( prM - 0.5 ) * 0.16;\n" +
-    "  float prYy = prWPos.y >= " + (FY - 0.05).toFixed(2) + " && prWPos.y < 8.0 ? prWPos.y - " + FY.toFixed(2) + " : prWPos.y;\n" +
+    // the second tier's floor line exists only in the wing; elsewhere a wall at
+    // 3.9 m would get a band of foot grime painted across it mid-height
+    "  float prYy = prInWing( prWPos ) > 0.5 && prWPos.y >= " + (FY - 0.05).toFixed(2) + " && prWPos.y < 8.0 ? prWPos.y - " + FY.toFixed(2) + " : prWPos.y;\n" +
     // scuffs and grime at the foot of every wall
     "  float prFoot = ( 1.0 - prUp ) * ( 1.0 - smoothstep( 0.0, 0.42, prYy ) );\n" +
     "  prShade *= 1.0 - prFoot * ( 0.16 + 0.10 * prNoise( prUV * vec2( 6.0, 1.5 ) ) );\n" +
@@ -158,6 +160,10 @@
     "      float prStripe = step( 1.15, prYy ) * ( 1.0 - step( 1.21, prYy ) );\n" +
     "      diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * vec3( 0.62, 0.70, 0.74 ), prDado );\n" +
     "      diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.20, 0.27, 0.34 ), prStripe * 0.85 );\n" +
+    // a 10 cm epoxy cove base where the wall meets the floor: the dark line
+    // every institutional floor has, and the reason a wall stops floating
+    "      float prCove = 1.0 - smoothstep( 0.095, 0.105, prYy );\n" +
+    "      diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.16, 0.18, 0.20 ), prCove * 0.9 );\n" +
     "    }\n" +
     "  }\n" +
     "  #endif\n" +
@@ -165,6 +171,19 @@
     // a sealed floor: broad trowel clouding, darker along the walked lines
     "  prShade *= 0.94 + 0.12 * prNoise( prUV * 0.18 ) ;\n" +
     "  #endif\n" +
+    // THE UNDERSIDE OF A SLAB IS PRECAST PLANK, not a flat lid. Every cell
+    // roof in the wing faces down at exactly CH (3.60) or FY + CH (7.50); a
+    // cell ceiling is 1.2 m hollow-core planks spanning front to back, so it
+    // shows a grouted joint every 1.2 m across the span and faint formwork
+    // staining. Chosen by where the face IS, not by kind: core/batch.js folds
+    // the slabs into shared materials that no longer know they are slabs.
+    "  float prCy = min( abs( prWPos.y - 3.60 ), abs( prWPos.y - 7.50 ) );\n" +
+    "  if ( prN.y < -0.5 && prCy < 0.004 && prInWing( prWPos ) > 0.5 ) {\n" +
+    "    float prAx = prWPos.z < -38.0 ? prWPos.x : prWPos.z;\n" +
+    "    float prPj = abs( fract( prAx / 1.2 + 0.5 ) - 0.5 ) * 1.2;\n" +
+    "    prShade *= 1.0 - ( 1.0 - smoothstep( 0.006, 0.016, prPj ) ) * 0.30 * ( 1.0 - smoothstep( 6.0, 14.0, prDist ) );\n" +
+    "    prShade *= 0.9 + 0.1 * prNoise( prUV * vec2( 0.6, 4.0 ) );\n" +
+    "  }\n" +
     "  diffuseColor.rgb *= prShade;\n" +
     "}\n" +
     "#endif\n";
@@ -303,7 +322,8 @@
   }
   const HALL_COL = new THREE.Color(1.0, 0.9, 0.74), NIGHT_COL = new THREE.Color(0.55, 0.68, 0.95);
   const TUNE = { hall: 2.2, night: 0.55, amb: 0.30, ambDay: 0.16, sun: 0.14 };
-  let level = 1, nightLevel = 0;
+  let level = 1, nightLevel = 0, glassDay = -1;
+  const GLASS_DAY = new THREE.Color(0xd4e6f0), GLASS_NIGHT = new THREE.Color(0x1b2432);
   function drive(dt) {
     const g = CBZ.game;
     const on = !!(g && g.mode === "escape" && CBZ.prisonRoot && CBZ.prisonRoot.visible);
@@ -335,6 +355,13 @@
     const day = CBZ.dayness == null ? 1 : Math.max(0, Math.min(1, CBZ.dayness * 2));
     U.prIndoorAmb.value = TUNE.amb + TUNE.ambDay * day;
     U.prIndoorSun.value = TUNE.sun;
+    // the cells' wired glass is lit by the sky behind it: pale daylight by
+    // day, a dark blue pane at night (one shared material, cellblock.js)
+    const gl = CBZ.cellWindowGlass;
+    if (gl && Math.abs(day - glassDay) > 0.01) {
+      glassDay = day;
+      gl.color.copy(GLASS_NIGHT).lerp(GLASS_DAY, day);
+    }
   }
 
   let sweepT = 0, maskDone = false;

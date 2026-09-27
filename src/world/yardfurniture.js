@@ -71,15 +71,45 @@
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.PRISON_YARD_FURNITURE == null) CBZ.CONFIG.PRISON_YARD_FURNITURE = true;
   if (CBZ.CONFIG.PRISON_YARD_FURNITURE === false) return;
-  // PRISON_PROP_USE_V1 — canonical declaration + doctrine: world/southblock.js.
-  // Here it fixes the two objects in this file the room audit caught: the
-  // handball wall's buttress piers (drawn `{}`, so 1.8 m of concrete you walk
-  // through) and the phone bank's kerb (a 16 cm step, and the second-largest
-  // dead prop in the north yard). Everything else in this file already prices
-  // its own collider or its own shove.
-  if (CBZ.CONFIG.PRISON_PROP_USE_V1 == null) CBZ.CONFIG.PRISON_PROP_USE_V1 = true;
-  const USE = !!CBZ.CONFIG.PRISON_PROP_USE_V1;
+  // the compound's textured kit (world/prisonkit.js): poured concrete,
+  // painted and stainless steel, merged per material at load
+  const K = CBZ.prisonKit || null;
+  const skinned = (m, kind, tint) => { if (K && m) K.skinBox(m, kind, tint); return m; };
 
+  // round things are ROUND: plates, the bar, the chalk bucket (they were
+  // 50 cm black squares and a cube). Shared geometry per size, one material each.
+  const _cg = {};
+  function cyl(x, y, z, r, h, color, axis, seg) {
+    const k = r + "|" + h + "|" + (seg || 18);
+    const g = _cg[k] || (_cg[k] = new THREE.CylinderGeometry(r, r, h, seg || 18));
+    const m = new THREE.Mesh(g, CBZ.mat(color));
+    if (axis === "x") m.rotation.z = Math.PI / 2; else if (axis === "z") m.rotation.x = Math.PI / 2;
+    m.position.set(x, y, z); m.castShadow = true;
+    ROOT.add(m);
+    return m;
+  }
+  // the phone's face: brushed plate, a 4 x 3 keypad, a card reader slot
+  let _phoneFace = null;
+  function phoneFace() {
+    if (_phoneFace) return _phoneFace;
+    const c = document.createElement("canvas"); c.width = 128; c.height = 196;
+    const g = c.getContext("2d");
+    g.fillStyle = "#aab0b6"; g.fillRect(0, 0, 128, 196);
+    for (let y = 0; y < 196; y += 2) { g.fillStyle = "rgba(255,255,255," + (0.03 + ((y * 13) % 7) / 120) + ")"; g.fillRect(0, y, 128, 1); }
+    g.fillStyle = "#1d2126"; g.fillRect(34, 18, 60, 10);                    // card slot
+    g.fillStyle = "#2b3138"; g.fillRect(22, 40, 84, 26);                    // display window
+    const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"];
+    g.font = "700 13px Arial, Helvetica, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+    for (let k = 0; k < 12; k++) {
+      const kx = 30 + (k % 3) * 34, ky = 88 + ((k / 3) | 0) * 26;
+      g.fillStyle = "#6b7178"; g.fillRect(kx - 12, ky - 9, 24, 18);
+      g.fillStyle = "#d9dde0"; g.fillRect(kx - 11, ky - 8, 22, 15);
+      g.fillStyle = "#23272c"; g.fillText(keys[k], kx, ky);
+    }
+    const t = new THREE.CanvasTexture(c);
+    _phoneFace = new THREE.MeshLambertMaterial({ map: t });
+    return _phoneFace;
+  }
   const C_CONC = 0xa9a396, C_CONC_D = 0x8d8779, C_STEEL = 0x6b7480, C_STEEL_D = 0x4a525c;
   let cover = 0;                 // LOS blockers this file stands up
   function blocker(x, y, z, w, h, d, color, opts) {
@@ -96,11 +126,11 @@
      ========================================================== */
   (function handball(x, z) {
     const W = 6.0, HH = 3.2;
-    blocker(x, HH / 2, z, W, HH, 0.5, C_CONC);
-    addBox(x, HH + 0.12, z, W + 0.2, 0.24, 0.66, C_CONC_D, { cast: false });      // coping
-    // the service line and the strike scuff, on the side you play from
-    addBox(x, 1.72, z + 0.27, W - 0.3, 0.09, 0.04, 0xc94d3a, { cast: false });
-    addBox(x, 0.95, z + 0.27, W - 1.8, 1.3, 0.03, 0x9b968a, { cast: false, receive: false });
+    skinned(blocker(x, HH / 2, z, W, HH, 0.5, C_CONC), "concrete", C_CONC);
+    skinned(addBox(x, HH + 0.12, z, W + 0.2, 0.24, 0.66, C_CONC_D, { cast: false }), "concrete", C_CONC_D);   // coping
+    // the service line, painted ON the face you play from (it was a 4 cm red
+    // bar and a 3 cm grey slab standing proud of the wall as a "scuff")
+    addBox(x, 1.72, z + 0.252, W - 0.3, 0.07, 0.004, 0xa4553f, { cast: false });
     // buttress piers, because a free-standing 3 m wall has them.
     // PRISON_PROP_USE_V1: drawn `{}` — 0.63 m3 of poured concrete EACH and the
     // two largest dead props in the north yard, standing 1.8 m tall against a
@@ -108,9 +138,9 @@
     // A pier is solid. It is NOT counted into `cover` below: it hides nothing
     // the 6 m wall it braces does not already hide, and the ratchet has to
     // keep meaning "installations that block a sightline".
-    for (const s of [-1, 1]) addBox(x + s * (W / 2 - 0.4), 0.9, z - 0.55, 0.5, 1.8, 0.7, C_CONC_D, USE ? { solid: true } : {});
+    for (const s of [-1, 1]) skinned(addBox(x + s * (W / 2 - 0.4), 0.9, z - 0.55, 0.5, 1.8, 0.7, C_CONC_D, { solid: true }), "concrete", C_CONC_D);
     // the poured pad it stands on
-    addBox(x, 0.025, z + 3.2, W + 1.6, 0.05, 6.4, 0x8f8a80, { cast: false });
+    skinned(addBox(x, 0.025, z + 3.2, W + 1.6, 0.05, 6.4, 0x8f8a80, { cast: false }), "concrete", 0x8f8a80);
   })(-9, 22);
 
   /* ==========================================================
@@ -128,10 +158,11 @@
     addBox(x, 2.24, z - 0.6, 2.0, 0.12, 0.12, C_STEEL, { cast: false });
     // J-hooks and the loaded bar sitting in them
     for (const s of [-1, 1]) addBox(x + s * 0.85, 1.42, z - 0.44, 0.2, 0.1, 0.22, C_STEEL, { cast: false });
-    addBox(x, 1.5, z - 0.44, 2.3, 0.07, 0.07, 0x9aa0a8, { cast: false });
+    cyl(x, 1.5, z - 0.44, 0.014, 2.2, 0x9aa0a8, "x", 8);                          // the bar
     for (const s of [-1, 1]) {
-      addBox(x + s * 1.0, 1.5, z - 0.44, 0.13, 0.52, 0.52, 0x14181d, {});
-      addBox(x + s * 0.86, 1.5, z - 0.44, 0.12, 0.44, 0.44, 0x14181d, { cast: false });
+      cyl(x + s * 1.0, 1.5, z - 0.44, 0.225, 0.05, 0x1a1d22, "x");                  // 20 kg plates
+      cyl(x + s * 0.94, 1.5, z - 0.44, 0.225, 0.05, 0x1a1d22, "x");
+      cyl(x + s * 1.06, 1.5, z - 0.44, 0.03, 0.08, 0x9aa0a8, "x", 8);               // collar
     }
     // THE THREE LOOSE THINGS IN THE WEIGHT PILE. The rack is bolted through
     // the mat and stays; the bench, the plate tree and the chalk bucket are
@@ -146,15 +177,21 @@
       mass: 45, kind: "bench", leash: 4.0, stand: true, mode: "escape",
     });
     // plate tree — four 20 kg plates on a steel post: it moves, grudgingly
-    const tree = [addBox(x + 2.0, 0.55, z + 0.4, 0.5, 1.1, 0.5, C_STEEL_D, { solid: true })];
-    for (let i = 0; i < 4; i++)
-      tree.push(addBox(x + 2.0, 0.42 + (i % 2) * 0.44, z + 0.4 + (i < 2 ? -0.3 : 0.3), 0.5, 0.5, 0.13, 0x14181d, { cast: false }));
+    // (the collider box is the tree's footprint; it is hidden, the post and
+    // plates are what you see)
+    const treeBase = addBox(x + 2.0, 0.55, z + 0.4, 0.5, 1.1, 0.5, C_STEEL_D, { solid: true });
+    treeBase.visible = false;
+    const tree = [treeBase, cyl(x + 2.0, 0.03, z + 0.4, 0.26, 0.06, C_STEEL_D), cyl(x + 2.0, 0.58, z + 0.4, 0.035, 1.1, C_STEEL_D, null, 10)];
+    for (let i = 0; i < 4; i++) {
+      tree.push(cyl(x + 2.0, 0.34 + (i % 2) * 0.46, z + 0.4 + (i < 2 ? -0.09 : 0.09), 0.225, 0.05, 0x1a1d22, "z"));
+      tree.push(cyl(x + 2.0, 0.34 + (i % 2) * 0.46, z + 0.4 + (i < 2 ? -0.14 : 0.14), 0.03, 0.12, C_STEEL, "z", 8));   // horn
+    }
     if (CBZ.pushProp) CBZ.pushProp({
       parts: tree, x: x + 2.0, z: z + 0.4, hx: 0.25, hz: 0.28, y1: 1.10,
       mass: 110, kind: "platetree", leash: 2.5, mode: "escape",
     });
     // chalk bucket — 4 kg, and it is the lightest thing in the compound
-    const bucket = addBox(x - 1.9, 0.18, z + 1.0, 0.36, 0.36, 0.36, 0xd8d2c4, { cast: false });
+    const bucket = cyl(x - 1.9, 0.18, z + 1.0, 0.16, 0.36, 0xd8d2c4);
     if (CBZ.pushProp) CBZ.pushProp({
       parts: [bucket], x: x - 1.9, z: z + 1.0, hx: 0.18, hz: 0.18, y1: 0.36,
       mass: 4, kind: "bucket", solid: true, leash: 6.0, mode: "escape",
@@ -169,7 +206,7 @@
   (function pavilion(x, z) {
     const W = 6.4, D = 5.0, HH = 2.7;
     // the back wall (north side): the LOS blocker
-    blocker(x, 1.2, z - D / 2, W, 2.4, 0.34, C_CONC);
+    skinned(blocker(x, 1.2, z - D / 2, W, 2.4, 0.34, C_CONC), "block", 0xb9b3a4);
     // posts
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
       if (sz < 0) continue;                                  // the back wall carries that side
@@ -177,11 +214,11 @@
     }
     // the roof. Non-solid + blockLOS, the same contract world/roofs.js uses:
     // a tower cannot see through it, and no body is ever walled out by it.
-    addBox(x, HH + 0.12, z, W, 0.24, D, 0x59616b, { solid: false, cast: false, blockLOS: true });
-    addBox(x, HH + 0.3, z, W + 0.3, 0.12, D + 0.3, 0x4a525c, { cast: false });
+    skinned(addBox(x, HH + 0.12, z, W, 0.24, D, 0x59616b, { solid: false, cast: false, blockLOS: true }), "steel", 0x59616b);
+    skinned(addBox(x, HH + 0.3, z, W + 0.3, 0.12, D + 0.3, 0x4a525c, { cast: false }), "corrugated", 0x7d858e);
     for (let i = -1; i <= 1; i++) addBox(x + i * 2.0, HH - 0.06, z, 0.14, 0.16, D, C_STEEL_D, { cast: false });
     // the slab and its two bolted tables — the shared kit's, with real seats
-    addBox(x, 0.025, z, W + 0.8, 0.05, D + 0.8, 0x8f8a80, { cast: false });
+    skinned(addBox(x, 0.025, z, W + 0.8, 0.05, D + 0.8, 0x8f8a80, { cast: false }), "concrete", 0x8f8a80);
     if (PD && typeof PD.roundTable === "function") {
       PD.roundTable(x - 1.5, z + 0.5, { tone: 0xb9b3a4, seatTone: 0x54606d });
       PD.roundTable(x + 1.5, z + 0.5, { tone: 0xb9b3a4, seatTone: 0x54606d, spin: 0.35 });
@@ -195,22 +232,37 @@
         stationary within sight of the gun-room door.
      ========================================================== */
   (function phones(x, z) {
-    blocker(x, 1.2, z, 3.6, 2.4, 0.36, C_CONC);
-    addBox(x, 2.48, z, 3.9, 0.2, 0.62, C_CONC_D, { cast: false });                 // hood
-    // the pad it stands on. PRISON_PROP_USE_V1: it used to be a 16 cm KERB
-    // (4.0 x 0.16 x 1.2) — 0.768 m3, the second-biggest dead prop in the north
-    // yard, and a step a body walked through rather than over. The other three
-    // installations in this file each stand on a 5 cm poured pad; so does this
-    // one now. Same object, drawn as what it always was.
-    if (USE) addBox(x, 0.025, z + 0.45, 4.4, 0.05, 1.7, 0x8f8a80, { cast: false }); // poured pad
-    else addBox(x, 0.08, z + 0.4, 4.0, 0.16, 1.2, 0x8f8a80, { cast: false });       // kerb
-    for (let i = -1; i <= 1; i++) {
-      const px = x + i * 1.15;
-      addBox(px, 1.42, z + 0.28, 0.44, 0.62, 0.22, 0x2b3038, { cast: false });      // body
-      addBox(px, 1.72, z + 0.30, 0.34, 0.16, 0.2, 0x1a1d22, { cast: false });       // handset cradle
-      addBox(px - 0.26, 1.32, z + 0.34, 0.06, 0.3, 0.1, 0x1a1d22, { cast: false }); // handset
-      addBox(px, 0.92, z + 0.30, 0.2, 0.28, 0.16, 0x9aa0a8, { cast: false });       // coin box
-      addBox(px, 2.05, z + 0.2, 0.7, 0.5, 0.1, C_STEEL_D, { cast: false });         // acoustic wing
+    skinned(blocker(x, 1.2, z, 3.6, 2.4, 0.36, C_CONC), "block", 0xb9b3a4);
+    skinned(addBox(x, 2.48, z, 3.9, 0.2, 0.62, C_CONC_D, { cast: false }), "concrete", C_CONC_D);   // hood
+    skinned(addBox(x, 0.025, z + 0.45, 4.4, 0.05, 1.7, 0x8f8a80, { cast: false }), "concrete", 0x8f8a80);   // poured pad
+    /* THREE INMATE PHONES. A wall-mounted stainless housing with a
+       twelve-key pad and a card reader (no coin box: nobody in a prison
+       pays in coins), the handset on its side hook, the armoured cord
+       looping to the housing's foot, a stainless privacy wing between each
+       pair. They were five stacked dark boxes a phone. */
+    if (K) {
+      const stainless = K.skin("steel", 0xb5bbc1, 0.35), black = K.skin("steel", 0x1c1e22, 0.7);
+      const faceMat = phoneFace();
+      const fz = z + 0.18;                                   // the wall face
+      for (let i = -1; i <= 1; i++) {
+        const px = x + i * 1.15;
+        K.stat(new THREE.BoxGeometry(0.34, 0.52, 0.1), stainless, px, 1.38, fz + 0.05, {});
+        const face = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.46), faceMat);
+        face.position.set(px, 1.38, fz + 0.1 + 0.002); ROOT.add(face);
+        // handset on the hook on its left flank: earpiece, grip, mouthpiece
+        const hx = px - 0.21;
+        K.stat(new THREE.BoxGeometry(0.06, 0.08, 0.04), stainless, hx + 0.02, 1.5, fz + 0.06, { cast: false });   // hook
+        K.stat(new THREE.CylinderGeometry(0.022, 0.022, 0.2, 8), black, hx, 1.4, fz + 0.1, { cast: false });
+        K.stat(new THREE.CylinderGeometry(0.04, 0.036, 0.05, 10), black, hx, 1.52, fz + 0.1, { cast: false });
+        K.stat(new THREE.CylinderGeometry(0.036, 0.04, 0.05, 10), black, hx, 1.28, fz + 0.1, { cast: false });
+        const cord = new THREE.CatmullRomCurve3([
+          new THREE.Vector3(hx, 1.25, fz + 0.1), new THREE.Vector3(hx - 0.02, 1.02, fz + 0.14),
+          new THREE.Vector3(px - 0.08, 0.98, fz + 0.12), new THREE.Vector3(px - 0.06, 1.13, fz + 0.06),
+        ]);
+        K.stat(new THREE.TubeGeometry(cord, 16, 0.009, 5, false), stainless, 0, 0, 0, { cast: false });
+      }
+      for (const wx of [x - 1.73, x - 0.575, x + 0.575, x + 1.73])
+        K.stat(new THREE.BoxGeometry(0.02, 0.8, 0.38), stainless, wx, 1.5, fz + 0.19, { cast: false });   // privacy wings
     }
   })(11, 17);
 
@@ -222,17 +274,23 @@
         on each side is a lane you can cross unseen.
      ========================================================== */
   (function board(x, z) {
-    for (const s of [-1, 1]) addBox(x + s * 1.35, 1.15, z, 0.16, 2.3, 0.16, C_STEEL_D, { solid: true });
-    blocker(x, 1.85, z, 3.0, 1.5, 0.14, 0x16202a, { cast: false });
-    // the sheets pinned to it: the count times, the rules, the visiting list.
-    // The prison's timetable, as an object rather than a caption.
+    // two posts, a steel cabinet with a cork back under glass, the sheets
+    // pinned inside it (the count times, the rules, the visiting list), a hood
+    for (const s of [-1, 1]) skinned(addBox(x + s * 1.35, 1.15, z, 0.16, 2.3, 0.16, C_STEEL_D, { solid: true }), "steel", C_STEEL_D);
+    skinned(blocker(x, 1.85, z, 3.0, 1.5, 0.14, 0x3c4a45, { cast: false }), "steel", 0x3c4a45);
+    addBox(x, 1.85, z - 0.072, 2.8, 1.3, 0.004, 0x9c7b56, { cast: false });                               // cork
     for (let i = 0; i < 6; i++)
-      addBox(x - 1.05 + (i % 3) * 1.05, 2.16 - ((i / 3) | 0) * 0.56, z - 0.08, 0.72, 0.44, 0.02,
-        i % 2 ? 0xe8e2d2 : 0xd2cdbe, { cast: false });
-    addBox(x, 2.68, z, 3.2, 0.16, 0.4, C_STEEL_D, { cast: false });                 // rain hood
+      addBox(x - 0.9 + (i % 3) * 0.9 + ((i * 37) % 7 - 3) * 0.02, 2.12 - ((i / 3) | 0) * 0.56, z - 0.076, 0.62, 0.42 + (i % 2) * 0.06, 0.003,
+        i % 2 ? 0xe8e2d2 : 0xd9d4c6, { cast: false });
+    if (K) K.stat(new THREE.PlaneGeometry(2.86, 1.36), K.skin("glass", 0x9fb4c0), x, 1.85, z - 0.1, { ry: Math.PI, cast: false });
+    for (const s of [-1, 1]) {
+      addBox(x, 1.85 + s * 0.69, z - 0.09, 3.0, 0.06, 0.05, 0x9aa1a8, { cast: false });                  // the glazing frame
+      addBox(x + s * 1.47, 1.85, z - 0.09, 0.06, 1.44, 0.05, 0x9aa1a8, { cast: false });
+    }
+    skinned(addBox(x, 2.68, z, 3.2, 0.16, 0.4, C_STEEL_D, { cast: false }), "steel", C_STEEL_D);          // rain hood
   })(3.6, 11);
   if (PD && typeof PD.roundTable === "function") {
-    addBox(-4.0, 0.025, 11, 5.0, 0.05, 4.4, 0x8f8a80, { cast: false });
+    skinned(addBox(-4.0, 0.025, 11, 5.0, 0.05, 4.4, 0x8f8a80, { cast: false }), "concrete", 0x8f8a80);
     PD.roundTable(-3.0, 10.0, { tone: 0xb9b3a4, seatTone: 0x54606d });
     PD.roundTable(-5.0, 12.4, { tone: 0xb9b3a4, seatTone: 0x54606d, spin: 0.35 });
   }

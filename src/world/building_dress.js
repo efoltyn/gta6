@@ -697,7 +697,10 @@
       if (!s.quiet) {
         const bays = Math.max(2, Math.min(4, Math.floor(span / 5.0)));
         const step = span / (bays + 1);
-        const wy = h * 0.6;
+        // at a person's window height, not 3.6 m up: the rooms behind these
+        // walls have real ceilings (2.8-4.6 m) now, and a window has to sit
+        // under them
+        const wy = 1.9;
         for (let b = 1; b <= bays; b++) {
           const p = a0 + b * step;
           if (!clearOfDoor(p, 0.7)) continue;

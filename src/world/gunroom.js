@@ -216,9 +216,23 @@
     // Rule (b): the floor is the largest surface in the room and the cheapest
     // thing to make read as a hardened facility — dark rubber matting instead
     // of the same blue-grey concrete every other prison room has.
-    wall: 0x515a66, floor: SPINE ? 0x272b31 : 0x3a414b,
+    wall: 0x515a66, floor: null, skin: null,
     door: { side: "W", center: 1, width: 3.0 },
   });
+  /* FINISHES (2026-09-27). A sealed, dark epoxy-coated slab instead of a flat
+     charcoal plane; block walls (world/prisonlook.js paints an unskinned slab
+     as block) with a darker painted dado and a vinyl base; and a CLOSED
+     ceiling at 3.6 m with vapour-tight fittings, instead of a 6 m void with
+     two fake light cones standing in it. The outer gate rides up the wall
+     plane at x 18.7..19.3, so the ceiling starts just inside it. */
+  if (CBZ.prisonDress && CBZ.prisonDress.finish) {
+    const PDk = CBZ.prisonDress;
+    PDk.floor(19, 29, -6, 8, "slab", 0x5a6068, { rough: 0.45 });
+    PDk.trim({ x0: 19.25, x1: 28.75, z0: -5.75, z1: 7.75 }, [{ side: "W", a0: -0.5, a1: 2.5 }],
+      { dado: 0x3f4751, dadoH: 1.25, base: 0x1d1f22, rail: 0x2c323a });
+    PDk.ceiling({ x0: 19.32, x1: 28.75, z0: -5.75, z1: 7.75 }, 3.6,
+      { id: "armory", kind: "slab", tint: 0xc4c7c9, lights: "vapor", nx: 2, nz: 3, along: "z" });
+  }
 
   // red "ARMORY" band. It used to sit at x=19 with a 0.2 depth, which put it
   // fully INSIDE the gate slab (18.7..19.3) — visible only once the gate had
@@ -536,32 +550,9 @@
   };
 
   if (SPINE) {
-    // ---- light. There are no real lights in this scene, so a luminaire is a
-    // housing + an emissive lens + a translucent cone + a floor pool. Four
-    // cheap pieces read as one warm wash across the guns, which is the whole
-    // "see something bright at the back of a dark room" pull.
-    const coneMat = new THREE.MeshBasicMaterial({
-      color: 0xffcf8a, transparent: true, opacity: 0.06, depthWrite: false, side: THREE.DoubleSide,
-    });
-    const poolMat = new THREE.MeshBasicMaterial({
-      color: 0xffd9a0, transparent: true, opacity: 0.11, depthWrite: false, side: THREE.DoubleSide,
-    });
-    const luminaire = function (x, z, span, coneR, poolR) {
-      addBox(x, 5.62, z, 0.50, 0.22, span, 0x2b313a, { cast: false });
-      addBox(x, 5.46, z, 0.42, 0.09, span - 0.16, 0xffe6b0, { emissive: 0xffb347, ei: 1.0, cast: false });
-      // the shaft has to REACH the pool it makes, or it reads as a floating
-      // cone: lens at y 5.46, pool at 0.085, so span 0.28..5.48
-      const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.5, coneR, 5.2, 14, 1, true), coneMat);
-      cone.position.set(x, 2.88, z);
-      ROOT.add(cone);
-      const pool = new THREE.Mesh(new THREE.CircleGeometry(poolR, 20), poolMat);
-      pool.rotation.x = -Math.PI / 2;
-      pool.position.set(x, 0.085, z);
-      ROOT.add(pool);
-    };
-    luminaire(26.4, -1.6, 1.4, 2.0, 1.7);
-    luminaire(26.4, 4.0, 1.4, 2.0, 1.7);
-
+    // (the two "luminaires" — a housing at 5.6 m, a translucent cone down to a
+    // painted pool of light on the floor — are gone: the room has a ceiling
+    // and real fittings now, and a visible light cone indoors is a stage prop)
     // task strip washing the rack backboard from just above it
     addBox(27.50, 3.34, 1, 0.26, 0.10, 11.2, 0x2b313a, { cast: false });
     addBox(27.42, 3.22, 1, 0.10, 0.07, 11.0, 0xffe6b0, { emissive: 0xffb347, ei: 0.9, cast: false });
@@ -795,15 +786,8 @@
     // a warm shrine light so the prize reads from outside two sets of bars
     addBox(23.40, 2.86, -4.50, 0.34, 0.14, 0.90, 0x2b313a, { cast: false });
     addBox(23.40, 2.75, -4.50, 0.28, 0.07, 0.76, 0xffe6b0, { emissive: 0xffb347, ei: 1.0, cast: false });
-    const shrine = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 1.05, 2.62, 12, 1, true), coneMat);
-    shrine.position.set(23.40, 1.42, -4.50);
-    ROOT.add(shrine);
-    const shrinePool = new THREE.Mesh(new THREE.CircleGeometry(1.05, 18), poolMat);
-    shrinePool.rotation.x = -Math.PI / 2;
-    shrinePool.position.set(23.40, 0.09, -4.50);
-    ROOT.add(shrinePool);
-    // a painted floor caution box around the cage mouth
-    addBox(23.40, 0.078, -1.55, 3.60, 0.02, 0.14, 0xd8b021, { cast: false });
+    // a painted caution line across the cage mouth, flush on the slab
+    addBox(23.40, 0.062, -1.55, 3.60, 0.006, 0.1, 0xb89a2a, { cast: false });
   }
 
   inner.setOpen = function (v, quiet) {

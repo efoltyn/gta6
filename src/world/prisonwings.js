@@ -174,18 +174,24 @@
        the compound reading as one surface. Four slabs, laid AROUND the old
        compound so nothing is drawn twice over authored paving. ---- */
   const GV2 = !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_GROUND_V2 && CBZ.prisonGroundTex);
+  // OUTDOOR hardstanding: sRGB-tagged with real poured-concrete tones, the
+  // same path world/southblock.js's apron and prisonkit's ground() take (it
+  // was untagged #5b636c, which the sRGB output lifted to a pale blue sheet).
+  // Tiles stay SQUARE (6.3 m, two pours per tile) and the slab is the lowest
+  // layer, pushed back in depth so every patch laid on it wins at distance.
   function slab(x, z, w, d, a, b, kind) {
-    const tex = GV2 ? CBZ.prisonGroundTex(kind || "concrete", { a: a, b: b })
+    const tex = GV2 ? CBZ.prisonGroundTex(kind || "concrete", { a: a, b: b, srgb: true })
       : (CBZ.checkerTex ? CBZ.checkerTex(a, b, 2) : null);
     if (!tex) return null;
     tex.repeat.set(Math.max(1, Math.round(w / 6.3)), Math.max(1, Math.round(d / 6.3)));
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d),
-      new THREE.MeshLambertMaterial({ map: tex }));
+    const mat = new THREE.MeshLambertMaterial({ map: tex });
+    mat.polygonOffset = true; mat.polygonOffsetFactor = 10; mat.polygonOffsetUnits = 20;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
     m.rotation.x = -Math.PI / 2; m.position.set(x, 0.011, z);
     m.receiveShadow = true; ROOT.add(m);
     return m;
   }
-  const GA = "#5b636c", GB = "#535b64";
+  const GA = "#8a8c87", GB = "#81837e";
   slab((OUT.x0 + S.x0) / 2, (N.z0 + OUT.z1) / 2, S.x0 - OUT.x0, OUT.z1 - N.z0, GA, GB, "concrete");   // west wing
   slab((S.x1 + OUT.x1) / 2, (N.z0 + OUT.z1) / 2, OUT.x1 - S.x1, OUT.z1 - N.z0, GA, GB, "concrete");   // east wing
   /* THE NORTH GROUND STOPS AT THE CELL HOUSE. This slab used to run the full
@@ -377,12 +383,22 @@
   function room(cfg) {
     CBZ.roomShell({
       x0: cfg.x0, x1: cfg.x1, z0: cfg.z0, z1: cfg.z1, h: cfg.h,
-      wall: cfg.wall, floor: cfg.floor, skin: "panel",
+      wall: cfg.wall, floor: cfg.fin && PD && PD.finish ? null : cfg.floor, skin: null,
       doors: [{ side: cfg.side, center: cfg.dc, width: cfg.dw }],
     });
     if (CBZ.prisonRoof) CBZ.prisonRoof({
       id: cfg.id, x0: cfg.x0, x1: cfg.x1, z0: cfg.z0, z1: cfg.z1, top: cfg.h, over: 0.25,
+      soffit: cfg.fin ? false : undefined,
     });
+    /* THE FINISH (2026-09-27): a real floor, block walls (no skin: world/
+       prisonlook.js paints an unskinned slab as block), base + dado, and a
+       closed ceiling at the room's REAL height with its fittings, instead of
+       precast panels to 7 m and fluorescent sticks hung under the roof. */
+    if (cfg.fin && PD && PD.finish) {
+      PD.finish({ x0: cfg.x0 + 0.25, x1: cfg.x1 - 0.25, z0: cfg.z0 + 0.25, z1: cfg.z1 - 0.25 },
+        Object.assign({ id: cfg.id, base: 0x2b2d30,
+          doors: [{ side: cfg.side, a0: cfg.dc - cfg.dw / 2, a1: cfg.dc + cfg.dw / 2 }] }, cfg.fin));
+    }
     // A DOORWAY NEEDS A HEAD. roomShell splits its wall floor-to-top for the
     // gap, so without this every door in the new wings is an h-metre slot.
     const east = cfg.side === "E", west = cfg.side === "W";
@@ -397,7 +413,7 @@
     if (K) K.skinBox(headBox, "panel", cfg.wall);
     // the interior lives on the shared schedule: a strip drawn through
     // CBZ.prisonDress dies at lights-out for free (world/roofs.js flushes it).
-    if (PD && typeof PD.strip === "function") {
+    if (!cfg.fin && PD && typeof PD.strip === "function") {
       const w = cfg.x1 - cfg.x0, dd = cfg.z1 - cfg.z0;
       const along = w >= dd ? "x" : "z";
       const n = Math.max(3, Math.min(9, Math.round(Math.max(w, dd) / 7)));
@@ -556,7 +572,9 @@
      A prison this size runs a shop, and a shop is where the TOOLS are, which
      is the only reason the crib in the corner is worth a lock. */
   room({ id: "industries", x0: -116, x1: -66, z0: -4, z1: 44, h: 7.5,
-    wall: 0x7c8590, floor: 0x69707a, side: "E", dc: 20, dw: 6 });
+    wall: 0x7c8590, floor: 0x69707a, side: "E", dc: 20, dw: 6,
+    fin: { floor: "slab", floorTint: 0x9ea2a5, dado: 0x5f6975, dadoH: 1.4,
+      ceilingY: 6.2, ceiling: { kind: "slab", tint: 0xc9ccce, lights: "pendant", nx: 7, nz: 7, drop: 1.0 } } });
   addBox(-66, 6.6, 20, 0.2, 0.9, 5.0, 0xc85c00, { cast: false });        // sign band
   // shop floor: benches down the middle, stock racks on the back wall. Solid,
   // because world/clutter.js's rule is that anything a body can approach is
@@ -571,7 +589,31 @@
     addBox(-86.2, 0.4, z, 0.22, 0.8, 1.1, 0x5b6470, { cast: false });
     addBox(-81.8, 0.4, z, 0.22, 0.8, 1.1, 0x5b6470, { cast: false });
   }
-  for (let i = 0; i < 6; i++) addBox(-70, 1.3, -1 + i * 7.6, 2.2, 2.6, 2.4, 0x6b7480, { solid: true });  // stock racks
+  /* STOCK RACKS (2026-09-27): six solid 2.6 m grey cubes became pallet racks
+     — orange beams on blue uprights, three levels, cartons and banded stock on
+     pallets — with the same footprint and the same full-height collider. */
+  (function racks() {
+    const M = PD && PD.Merge ? PD.Merge : null;
+    if (!M) { for (let i = 0; i < 6; i++) addBox(-70, 1.3, -1 + i * 7.6, 2.2, 2.6, 2.4, 0x6b7480, { solid: true }); return; }
+    const up = new M(), beam = new M(), pal = new M(), box = new M(), deck = new M();
+    for (let i = 0; i < 6; i++) {
+      const x = -70, z = -1 + i * 7.6;
+      for (const sx of [-1.05, 1.05]) for (const sz of [-1.15, 1.15]) up.box(x + sx, 1.3, z + sz, 0.08, 2.6, 0.08);
+      for (const sx of [-1.05, 1.05]) for (const y of [0.9, 1.8]) up.box(x + sx, y - 0.45, z, 0.03, 0.03, 2.3);   // side bracing
+      for (const y of [0.12, 1.2, 2.3]) {
+        for (const sx of [-1.02, 1.02]) beam.box(x + sx, y, z, 0.05, 0.1, 2.3);
+        deck.box(x, y + 0.06, z, 2.0, 0.02, 2.3);
+        if (y > 2) continue;
+        // a pallet with a load on it, a different load per bay
+        pal.box(x, y + 0.14, z, 1.0, 0.14, 1.2);
+        const hgt = 0.5 + PD.h01(i, y * 10, 0x71) * 0.4;
+        box.box(x + (PD.h01(i, y, 0x72) - 0.5) * 0.2, y + 0.21 + hgt / 2, z, 0.95, hgt, 1.12);
+      }
+      CBZ.colliders.push({ minX: x - 1.1, maxX: x + 1.1, minZ: z - 1.2, maxZ: z + 1.2 });
+    }
+    up.mesh(CBZ.cmat(0x2f4f7a)); beam.mesh(CBZ.cmat(0xd9772a)); deck.mesh(CBZ.cmat(0x8a939d));
+    pal.mesh(CBZ.cmat(0x9a7a50)); box.mesh(CBZ.cmat(0xb79b72));
+  })();
   /* The crib sits in the shop's SOUTH-WEST corner, so its host walls are the
      room's own x=-116 and z=44 and the faces that look INTO the shop are
      x=-104 and z=28. `open:"S"` paned z=44 — the exterior wall it already
@@ -596,7 +638,9 @@
      compound where every door is a puzzle is a puzzle box, not a place. What
      it gives is COVER and a second way to cross the west wing at night. */
   room({ id: "powerhouse", x0: -112, x1: -84, z0: 62, z1: 94, h: 8,
-    wall: 0x6f7883, floor: 0x5e656e, side: "E", dc: 78, dw: 5 });
+    wall: 0x6f7883, floor: 0x5e656e, side: "E", dc: 78, dw: 5,
+    fin: { floor: "slab", floorTint: 0x8f9498, dado: 0x55606b, dadoH: 1.4,
+      ceilingY: 6.6, ceiling: { kind: "slab", tint: 0xbfc3c6, lights: "pendant", nx: 5, nz: 6, drop: 1.2 } } });
   /* PLANT A BODY MOVES THROUGH — not three cubes in 896 m2.
      WHAT WAS MEASURED (prison-rooms baseline): 35 props, 10 solid, 15 dead.
      Three 4 m grey cubes, each carrying a smaller cube and a "flue" that
@@ -659,7 +703,9 @@
      control door takes the Keycard, so the card that gets you out of the
      housing unit is also the card that gets you into the one nobody walks. */
   room({ id: "segregation", x0: 58, x1: 112, z0: -4, z1: 44, h: 7,
-    wall: 0x848d98, floor: 0x646b74, side: "W", dc: 20, dw: 5 });
+    wall: 0x848d98, floor: 0x646b74, side: "W", dc: 20, dw: 5,
+    fin: { floor: "slab", floorTint: 0x969b9f, dado: 0x5d6873, dadoH: 1.3,
+      ceilingY: 4.2, ceiling: { kind: "slab", tint: 0xc9ccce, lights: "vapor", nx: 8, nz: 5 } } });
   addBox(58, 6.1, 20, 0.2, 0.9, 4.2, 0x9a3b3b, { cast: false });
   // sixteen singles in two facing rows off a central corridor. Partitions are
   // real colliders and deliberately NOT noBreach: blowing through a seg wall
@@ -714,13 +760,68 @@
      that room is where every edged weapon in the yard comes from. The cage
      in the corner is the only reason it is on the map. */
   room({ id: "kitchen", x0: 58, x1: 110, z0: 60, z1: 96, h: 7,
-    wall: 0xb6bcc2, floor: 0x9aa2aa, side: "W", dc: 78, dw: 5 });
+    wall: 0xb6bcc2, floor: 0x9aa2aa, side: "W", dc: 78, dw: 5,
+    fin: { floor: "quarry", floorTint: 0xffffff, dado: 0xffffff, tile: 0xf1f0ea, dadoH: 2.0, rail: 0x9aa3ad,
+      ceilingY: 4.2, ceiling: { kind: "slab", tint: 0xdfe1e0, lights: "vapor", nx: 10, nz: 7 } } });
   addBox(58, 6.1, 78, 0.2, 0.9, 4.2, 0x2f9e6a, { cast: false });
-  for (let i = 0; i < 4; i++) {                            // ranges + steam kettles
-    addBox(64 + i * 7, 0.5, 66, 4.4, 1.0, 2.2, 0x8a939d, { solid: true });
-    addBox(64 + i * 7, 1.06, 66, 4.0, 0.12, 1.9, 0x5b6470, { cast: false });
-  }
-  for (let i = 0; i < 5; i++) addBox(66 + i * 8, 0.5, 80, 5.4, 1.0, 1.4, 0xc7ccd2, { solid: true });  // prep tables
+  /* THE COOK LINE (rebuilt 2026-09-27). It was four 4.4 x 1.0 x 2.2 grey
+     blocks with a darker slab on top and five pale blocks for prep tables.
+     Now: one back-to-back island of heavy-duty ranges (oven doors both
+     sides, burner grates, a flue riser down the middle) under ONE canopy
+     hood hung from the ceiling on rods, two tilting steam kettles at the
+     end, and stainless prep tables on legs with an undershelf. */
+  (function cookLine() {
+    const M = PD && PD.Merge ? PD.Merge : null;
+    const steel = (m, t) => { if (K && m) K.skinBox(m, "steel", t); return m; };
+    const IZ = 66, IX0 = 62, IX1 = 88;                    // island centreline, extent
+    steel(addBox((IX0 + IX1) / 2, 0.47, IZ, IX1 - IX0, 0.82, 2.0, 0x9aa3ad, { solid: true, y0: 0, y1: 0.95 }), 0x9aa3ad);
+    steel(addBox((IX0 + IX1) / 2, 0.9, IZ, IX1 - IX0 + 0.04, 0.05, 2.04, 0x5b636c, { cast: false }), 0x5b636c);
+    addBox((IX0 + IX1) / 2, 1.1, IZ, IX1 - IX0, 0.36, 0.1, 0x8a939d, { cast: false });   // flue riser
+    if (M) {
+      const doors = new M(), grates = new M(), knobs = new M();
+      const n = Math.round((IX1 - IX0) / 1.0);
+      for (let i = 0; i < n; i++) {
+        const x = IX0 + 0.5 + i * (IX1 - IX0) / n;
+        for (const s of [-1, 1]) {
+          doors.box(x, 0.46, IZ + s * 1.005, 0.86, 0.54, 0.02);                          // oven door
+          knobs.box(x, 0.76, IZ + s * 1.03, 0.7, 0.03, 0.03);                            // door bar
+          for (let k = 0; k < 4; k++) knobs.box(x - 0.3 + k * 0.2, 0.84, IZ + s * 1.02, 0.04, 0.04, 0.03);
+          for (const gz of [0.3, 0.7]) grates.box(x, 0.94, IZ + s * gz, 0.4, 0.03, 0.34);   // burner grates
+        }
+      }
+      doors.mesh(CBZ.cmat(0x7d868f)); grates.mesh(CBZ.cmat(0x1c1f23)); knobs.mesh(CBZ.cmat(0x2a2f36));
+      // the canopy hood: one box, its filter band, and four rods to the ceiling
+      const hood = new M(), rods = new M();
+      hood.box((IX0 + IX1) / 2, 2.35, IZ, IX1 - IX0 + 0.6, 0.6, 3.0);
+      rods.box((IX0 + IX1) / 2, 2.07, IZ, IX1 - IX0 + 0.4, 0.06, 2.8);                  // filter band
+      for (const rx of [IX0 + 1, (IX0 + IX1) / 2 - 6, (IX0 + IX1) / 2 + 6, IX1 - 1])
+        for (const s of [-1, 1]) rods.box(rx, 3.4, IZ + s * 1.3, 0.04, 1.6, 0.04);
+      rods.box((IX0 + IX1) / 2, 3.4, IZ, 1.2, 1.0, 0.8);                                   // exhaust duct stub
+      const hm = hood.mesh(K ? K.skin("steel", 0xb9c0c7) : CBZ.cmat(0xb9c0c7));
+      if (hm && K) { K.worldUV(hm.geometry, 1, null); hm.userData.prisonSkin = "steel"; }
+      rods.mesh(CBZ.cmat(0x8a939d));
+    }
+    // two tilting steam kettles at the east end of the line
+    for (const kx of [90.2, 92.2]) {
+      const k = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.42, 0.7, 16), CBZ.cmat(0xb9c0c7));
+      k.position.set(kx, 0.75, IZ); ROOT.add(k);
+      addBox(kx, 0.45, IZ - 0.7, 0.14, 0.9, 0.14, 0x8a939d, { cast: false });
+      addBox(kx, 0.45, IZ + 0.7, 0.14, 0.9, 0.14, 0x8a939d, { cast: false });
+      CBZ.colliders.push({ minX: kx - 0.6, maxX: kx + 0.6, minZ: IZ - 0.8, maxZ: IZ + 0.8, y0: 0, y1: 1.1 });
+    }
+    // stainless prep tables: top, undershelf, four legs with feet
+    for (let i = 0; i < 5; i++) {
+      const x = 66 + i * 8, z = 80;
+      steel(addBox(x, 0.89, z, 3.0, 0.04, 0.9, 0xc7ccd2, { solid: true, y0: 0, y1: 0.95 }), 0xc7ccd2);
+      steel(addBox(x, 0.25, z, 2.9, 0.03, 0.8, 0xb9c0c7, { cast: false }), 0xb9c0c7);
+      for (const sx of [-1.42, 1.42]) for (const sz of [-0.4, 0.4])
+        addBox(x + sx, 0.47, z + sz, 0.04, 0.84, 0.04, 0xa8b0b8, { cast: false });
+      // what is on them: a cutting board and a stock pot
+      addBox(x - 0.7, 0.925, z, 0.6, 0.03, 0.4, 0xe8e4d6, { cast: false });
+      const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.34, 14), CBZ.cmat(0xaab1b8));
+      pot.position.set(x + 0.8, 1.08, z); ROOT.add(pot);
+    }
+  })();
   // WALK-IN COOLER: a room inside a room, and the only place in the compound
   // out of every sightline in it. Not a locked prize — a hiding place.
   addBox(64, 1.55, 92.2, 12, 3.1, 0.3, 0x9aa2aa, { solid: true, blockLOS: true });
@@ -742,7 +843,9 @@
      his own things are kept in while he is inside — which is why the property
      cage holds valuables and a phone rather than a weapon. */
   room({ id: "visitation", x0: 62, x1: 110, z0: 104, z1: 126, h: 6,
-    wall: 0xc0b8a6, floor: 0x7d7466, side: "W", dc: 115, dw: 4 });
+    wall: 0xc0b8a6, floor: 0x7d7466, side: "W", dc: 115, dw: 4,
+    fin: { floor: "vct", floorTint: 0xc4bcaa, dado: 0x8f8574, dadoH: 1.1,
+      ceilingY: 3.0, ceiling: { kind: "acoustic", lights: "troffer", nx: 12, nz: 5 } } });
   addBox(62, 5.2, 115, 0.2, 0.9, 3.4, 0x3a6ea5, { cast: false });
   for (let i = 0; i < 6; i++) {                            // visit booths: a counter and a screen
     const x = 66 + i * 5;
@@ -777,7 +880,9 @@
      the compound at once. That is the category change rule (c): you stop
      being a man with a key and become the man who runs the doors. */
   room({ id: "control", x0: -26, x1: 26, z0: -108, z1: -78, h: 6.5,
-    wall: 0x8d9099, floor: 0x4a525c, side: "S", dc: 0, dw: 4 });
+    wall: 0x8d9099, floor: 0x4a525c, side: "S", dc: 0, dw: 4,
+    fin: { floor: "vct", floorTint: 0x8c9196, dado: 0x5d636c, dadoH: 1.1,
+      ceilingY: 3.0, ceiling: { kind: "acoustic", lights: "troffer", nx: 10, nz: 6 } } });
   const ctrlDoor = makeDoor({
     id: "prison-control", label: "Central control", keys: ["Gun-Room Key"], lb: 7,
     axis: "x", a0: -2, a1: 2, fixed: -78, color: 0x5c4326,
