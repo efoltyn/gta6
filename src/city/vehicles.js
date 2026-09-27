@@ -323,6 +323,9 @@
   // and again only when something has moved them: a still car costs three float
   // compares a frame and no ground probe at all.
   function parkSeat(c) {
+    // a parked hull's body settles level on its springs (it may have been
+    // abandoned mid-dive or mid-roll by whoever drove it last)
+    if (c && c._susp && c.group) { bodyAttitude(c, 0, 0, 0, 0); c._susp = null; c._suspV = null; }
     if (!TERRAIN_ON() || !c || !c.group || !c.pos) return;
     if (c._parkX === c.pos.x && c._parkZ === c.pos.z && c._parkH === c.heading) return;
     c._parkX = c.pos.x; c._parkZ = c.pos.z; c._parkH = c.heading;
@@ -345,21 +348,19 @@
     return base;
   }
 
-  // ---- ROLLING WHEELS ON EVERY CAR YOU CAN SEE -----------------------------
-  // Only the DRIVEN car ever spun its wheels (cityUpdatePlayerCarVisual); the
-  // ambient fleet slid along the road on locked tyres, which at eye level is
-  // the single loudest "toy" tell there is. The unified visual keeps its four
-  // tyres unmerged and tagged playerWheel precisely so they can turn; this
-  // turns them, with the same 1.6 rad per metre the driven car uses, for
-  // cars inside 70 m of the camera. The list is cached per visual (the [C]
-  // style-cycler can rebuild it), so the per-frame cost is four rotation
-  // writes per near car. `_wheelRolled` is a census flag for the ba preset.
-  function rollWheels(c, dt) {
-    if (!c.group || !c.group.visible || !dt) { c._wheelRolled = false; return; }
-    const cam = CBZ.camera.position;
-    const dx = c.pos.x - cam.x, dz = c.pos.z - cam.z;
-    if (dx * dx + dz * dz > 70 * 70) { c._wheelRolled = false; return; }
-    const vis = (c.group.userData && c.group.userData.carVisual) || null;
+  // ---- ROLLING WHEELS + A BODY ON SPRINGS, ON EVERY CAR YOU CAN SEE --------
+  // Only the DRIVEN car ever spun its wheels; the ambient fleet slid along on
+  // locked tyres, the loudest "toy" tell there is. This turns them (1.6 rad/m,
+  // the driven car's rate), steers the fronts from the car's own yaw rate, and
+  // hangs the body on the SAME spring-damper the driven car uses
+  // (cardyn.suspStep), fed by the traffic car's real accelerations — so a
+  // queue at a red light dips its noses as it stops and squats as it pulls
+  // away, and a car rounding a corner leans out of it. Near cars only (70 m);
+  // the wheel list is cached per visual (the [C] style-cycler rebuilds it).
+  // `_wheelRolled` is a census flag for the ba preset.
+  const AI_AX_MAX = 7, AI_AY_MAX = 7;   // m/s^2 clamps: a lane snap or a teleport is not a 3 g corner
+  const AI_ATT_GAIN = 1.6;              // traffic brakes gently (2-3 m/s^2 -> ~0.6 deg real dive); x1.6 so the nod reads from the chase cam
+  function wheelsOf(c, vis) {
     let list = c._wheelList;
     if (!list || c._wheelVis !== vis) {
       list = [];
@@ -370,10 +371,85 @@
       }
       c._wheelList = list; c._wheelVis = vis;
     }
+    return list;
+  }
+  function rollWheels(c, dt) {
+    if (!c.group || !c.group.visible || !dt) { c._wheelRolled = false; return; }
+    const cam = CBZ.camera.position;
+    const dx = c.pos.x - cam.x, dz = c.pos.z - cam.z;
+    if (dx * dx + dz * dz > 70 * 70) { c._wheelRolled = false; c._suspV = null; return; }
+    const vis = (c.group.userData && c.group.userData.carVisual) || null;
+    const list = wheelsOf(c, vis);
     if (!list.length) { c._wheelRolled = false; return; }
     const a = c.v * dt * 1.6;
     for (let i = 0; i < list.length; i++) list[i].rotation.x -= a;
+    if (CBZ.carWheelSteer) CBZ.carWheelSteer(c, list, dt, vis);   // front axle yaws with the arc (carwheels.js)
     c._wheelRolled = Math.abs(c.v) > 0.05;
+    // ---- attitude from the car's real accelerations ----
+    const CD = CBZ.carDyn;
+    if (!CD) return;
+    const v = c.v || 0;
+    let dh = c.heading - (c._suspH == null ? c.heading : c._suspH);
+    while (dh > Math.PI) dh -= Math.PI * 2; while (dh < -Math.PI) dh += Math.PI * 2;
+    const yr = c._suspV == null ? 0 : dh / dt;
+    const ax = c._suspV == null ? 0 : Math.max(-AI_AX_MAX, Math.min(AI_AX_MAX, (v - c._suspV) / dt));
+    const ay = Math.max(-AI_AY_MAX, Math.min(AI_AY_MAX, v * yr));
+    c._suspV = v; c._suspH = c.heading;
+    const P = c._suspP || (c._suspP = CD.params(carDynamics(c), bodyKind(c), {}));
+    const sp = c._susp || (c._susp = CD.newSusp());
+    CD.suspStep(sp, ax * AI_ATT_GAIN, ay * AI_ATT_GAIN, P, dt);
+    // road-wheel angle that produces this yaw rate on this wheelbase
+    const steer = Math.abs(v) > 0.5 ? Math.max(-0.5, Math.min(0.5, Math.atan(P.L * yr / v))) : (c._aiSteer || 0);
+    c._aiSteer = (c._aiSteer || 0) + (steer - (c._aiSteer || 0)) * Math.min(1, dt * 8);
+    bodyAttitude(c, sp.p, sp.r, sp.h, c._aiSteer);
+  }
+  /* bodyAttitude(car, pitch, roll, heave, steer) — THE ONE WRITER of body
+     attitude. The whole car group keeps the TERRAIN's pitch/roll (so all four
+     tyres follow the hill); this tilts only the body visual on top of it and
+     then moves each wheel by exactly the inverse, so the tyres stay on the
+     road while the body dives, squats and rolls above them — which is what a
+     suspension IS. Front wheels also turn by the road-wheel angle. Pure
+     position/rotation writes on existing objects; no allocation.
+     Skipped for visuals that aren't a sprung road body: aircraft/boat props,
+     or a visual whose root carries its own authored tilt. A motorbike keeps
+     rotation.z for its rider lean (playercars' leanRider). */
+  function bodyAttitude(c, pitch, roll, heave, steer) {
+    const vis = c.group && c.group.userData && c.group.userData.carVisual;
+    if (!vis) return;
+    const ud = vis.userData;
+    if (ud.mainRotor || ud.boatProp) return;
+    if (ud._suspY0 == null) {
+      ud._suspY0 = vis.position.y;
+      ud._suspOk = Math.abs(vis.rotation.x) < 1e-4 && Math.abs(vis.rotation.z) < 1e-4 && Math.abs(vis.rotation.y) < 1e-4;
+    }
+    if (!ud._suspOk) return;
+    const lean = !!ud.leanRider;
+    if (lean) roll = 0;
+    vis.rotation.x = pitch;
+    if (!lean) vis.rotation.z = roll;
+    vis.position.y = ud._suspY0 + heave;
+    const cp = Math.cos(pitch), spn = Math.sin(pitch), cr = Math.cos(roll), sr = Math.sin(roll);
+    const list = wheelsOf(c, vis);
+    for (let i = 0; i < list.length; i++) {
+      const w = list[i];
+      if (w.parent !== vis) continue;
+      const o = w.userData._so || (w.userData._so = { x: 0, y: 0, z: 0 });
+      // the wheel's authored spot in the car's frame (flat-tyre drop included)
+      const rx = w.position.x - o.x, ry = w.position.y - o.y, rz = w.position.z - o.z;
+      // inverse of the body transform: q = Rz(-roll) Rx(-pitch) (rest - heave)
+      const uy = ry - heave;
+      const wy = uy * cp + rz * spn, wz = -uy * spn + rz * cp;
+      const qx = rx * cr + wy * sr, qy = -rx * sr + wy * cr;
+      o.x = qx - rx; o.y = qy - ry; o.z = wz - rz;
+      w.position.set(qx, qy, wz);
+      // steer the fronts (procedural wheels only: their Euler is spin-x on a
+      // z-laid cylinder, and YXZ order puts the steer outermost; with y=0 the
+      // reorder is the identical rotation, so the first write is seamless)
+      if (rz > 0.05 && w.userData.playerWheel) {
+        if (w.rotation.order !== "YXZ") w.rotation.order = "YXZ";
+        w.rotation.y = steer;
+      }
+    }
   }
 
   // ---- RUN-OVER JUICE ------------------------------------------------------
@@ -601,6 +677,41 @@
   // Ambient-car parts never animate independently, except for the deformable
   // hull and cabin. Bake the rest into a few per-material meshes so richer car
   // silhouettes do not cost dozens of draw calls per traffic vehicle.
+  /* ONE MERGED GEOMETRY PER CAR MODEL, NOT PER CAR. Every traffic car is a
+     clone of a per-style template: same geometries, same transforms, only the
+     paint MATERIAL differs. Merging per car minted a fresh ~2 MB non-indexed
+     buffer set for every car on the map (the loft bodies doubled the tris, and
+     this city has OOM-killed phones on geometry before). The merge result is a
+     pure function of (source geometry ids + their matrices), so it is cached
+     and flagged _shared: crashdeform.js copies a _shared geometry before it
+     dents it (copy-on-write) and every teardown path skips _shared buffers. */
+  const _mergeCache = new Map();
+  function mergeKey(parts) {
+    let k = "";
+    for (let i = 0; i < parts.length; i++) {
+      const e = parts[i].m.elements;
+      k += parts[i].g.uuid + ":";
+      for (let j = 0; j < 16; j++) k += Math.round(e[j] * 1e4) + ",";
+      k += ";";
+    }
+    return k;
+  }
+  function sharedMerge(parts) {
+    const key = mergeKey(parts);
+    let geo = _mergeCache.get(key);
+    if (geo) return geo;
+    const copies = parts.map(function (p) {
+      const c = p.g.index ? p.g.toNonIndexed() : p.g.clone();
+      c.applyMatrix4(p.m);
+      return c;
+    });
+    geo = mergeGeometryCopies(copies);
+    copies.forEach(function (c) { if (c.dispose) c.dispose(); });
+    geo._shared = true;
+    _mergeCache.set(key, geo);
+    return geo;
+  }
+
   function mergeStaticCarParts(grp, keep) {
     const isMesh = (o) => !!(o && o.geometry && o.material);
     const sourceParts = grp.children.reduce((n, o) => n + (isMesh(o) ? 1 : 0), 0);
@@ -621,14 +732,7 @@
       const proto = meshes[0];
       let mergedGeo;
       if (proto.updateMatrix && proto.geometry.attributes && proto.geometry.attributes.position && proto.geometry.clone && proto.geometry.applyMatrix4) {
-        const copies = meshes.map((mesh) => {
-          mesh.updateMatrix();
-          const geo = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
-          geo.applyMatrix4(mesh.matrix);
-          return geo;
-        });
-        mergedGeo = mergeGeometryCopies(copies);
-        copies.forEach((geo) => geo.dispose && geo.dispose());
+        mergedGeo = sharedMerge(meshes.map((mesh) => { mesh.updateMatrix(); return { g: mesh.geometry, m: mesh.matrix.clone() }; }));
       } else {
         // Lightweight test renderers do not implement BufferGeometry baking.
         mergedGeo = proto.geometry;
@@ -669,11 +773,9 @@
       for (const m of g.children) {
         if (!m.geometry || !m.material || !m.geometry.attributes || !m.geometry.attributes.position) continue;
         m.updateMatrix();
-        const geo = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
-        geo.applyMatrix4(m.matrix);
-        geo.applyMatrix4(g.matrix);
+        const mat4 = new THREE.Matrix4().multiplyMatrices(g.matrix, m.matrix);
         const key = m.material.id + "|" + (m.renderOrder | 0);
-        (buckets.get(key) || buckets.set(key, { proto: m, geos: [] }).get(key)).geos.push(geo);
+        (buckets.get(key) || buckets.set(key, { proto: m, parts: [] }).get(key)).parts.push({ g: m.geometry, m: mat4 });
       }
       visual.remove(g);
       g._cbzOpenT = 0;
@@ -681,9 +783,8 @@
     const shut = [];
     buckets.forEach((b) => {
       let merged;
-      try { merged = new THREE.Mesh(mergeGeometryCopies(b.geos), b.proto.material); }
+      try { merged = new THREE.Mesh(sharedMerge(b.parts), b.proto.material); }
       catch (e) { return; }
-      b.geos.forEach((geo) => geo.dispose && geo.dispose());
       merged.castShadow = false;
       merged.receiveShadow = b.proto.receiveShadow;
       merged.renderOrder = b.proto.renderOrder;
@@ -714,6 +815,7 @@
      it open, exactly as boarding.js's leaf contract says. Returns false when
      the car has no such door, so callers can fall back. */
   CBZ.carDoorPose = function (car, id, t) {
+    if (car && car._proxy) wakeCar(car);           // a door moving is the real car's job
     const rig = doorRigOf(car);
     if (!rig) return false;
     const vis = rig.shut.length ? rig.shut[0].parent : null;
@@ -1158,12 +1260,16 @@
 
   // how many bodies ride in THIS car, and who they are. Everything below is a
   // threshold on a stable channel — no draw, no rng, no per-look re-decision.
-  const OCC_SLOTS = [
-    { slot: "driver",  side: -1, row: 0 },
-    { slot: "shotgun", side:  1, row: 0 },
-    { slot: "rearR",   side:  1, row: 1 },
-    { slot: "rearL",   side: -1, row: 1 },
-  ];
+  /* THE SEATS ARE city/carseats.js's — one model for every body. This file
+     used to carry its own four-slot table with the DRIVER at -X, i.e. every
+     NPC drove from the passenger seat, mirror image of the wheel the player
+     holds at +X. A slot is now a seat id of that model (driver, shotgun,
+     frontC, rearL/C/R, thirdL/C/R), so a van's bench and an SUV's third row
+     carry people too, and every occupant claims its seat in the ONE
+     occupancy map (car.seatOcc) the player, companions and a future remote
+     player share. */
+  const SEATS = () => CBZ.carSeats || null;
+  function modelSeats(c) { const S = SEATS(); const m = S && S.of(c); return m ? m.seats : null; }
   function occDistrictAt(c) {
     if (c.road && c.road.district) return String(c.road.district);
     if (CBZ.roadSegmentAt) { const r = CBZ.roadSegmentAt(c.pos.x, c.pos.z, 8); if (r && r.district) return String(r.district); }
@@ -1188,20 +1294,23 @@
     if (outlying) { pRear += 0.05; pFront += 0.03; }
     if (dist === "highway") { pFront += 0.05; pRear += 0.03; }
     const seats = [];
-    for (let i = 0; i < OCC_SLOTS.length; i++) {
-      const S = OCC_SLOTS[i];
+    const list = modelSeats(c) || [];
+    for (let i = 0; i < list.length; i++) {
+      const S = list[i];
       const h = carHash(hx, hz, 601 + i * 7);
       let want;
-      if (i === 0) want = true;                                   // somebody is driving it
-      else if (i === 1) want = h < pFront;
-      else if (i === 2) want = h < pRear;
-      else want = h < pRear * 0.34;                               // both rear seats filled is rare
+      if (S.isDriver) want = true;                                // somebody is driving it
+      else if (S.row === 0) want = h < (S.side ? pFront : pFront * 0.25);
+      else if (S.row === 1) want = h < (S.side < 0 ? pRear : S.side > 0 ? pRear * 0.34 : pRear * 0.15);
+      else want = h < pRear * 0.2;                                 // a third row is family day out
       if (!want) continue;
-      seats.push({
-        slot: S.slot, side: S.side, row: S.row, h: h,
+      const st = {
+        slot: S.id, side: S.side, row: S.row, h: h,
         variant: (carHash(hx, hz, 640 + i * 3) * 24) | 0,
         blob: null, ped: null, spawned: false, react: null, armed: null,
-      });
+      };
+      seats.push(st);
+      SEATS().claim(c, S.id, { kind: "npc", ref: null, ambient: st });
     }
     c.occ = { hx: hx, hz: hz, hour: hour, district: dist, seats: seats, rigs: 0, jacked: false };
     return c.occ;
@@ -1221,12 +1330,9 @@
   // where a seat SITS, in the car group's local frame — the one cabin query,
   // so a blob, a promoted rig and a door-side step-out can never disagree.
   function occSeatPose(c, seat) {
-    const f = c._occFrame; if (!f) return null;
-    return {
-      x: seat.side * f.seatX,
-      y: seat.row ? f.cushionY + 0.01 : f.cushionY,
-      z: seat.row ? f.rearZ : f.frontZ,
-    };
+    if (!c._occFrame) return null;
+    const S = SEATS() && SEATS().seat(c, seat.slot);
+    return S ? { x: S.x, y: S.cushionY, z: S.z } : null;
   }
 
   function addOccupants(c) {
@@ -1247,77 +1353,32 @@
        ON the seat and is scaled so ITS eye (occGeo puts the head ~0.86 over
        the seat surface) lands on the same eye height the player's own rig
        uses. Flag off keeps the original two lines, byte for byte. */
-    const v2 = !CBZ.CONFIG || CBZ.CONFIG.CAR_CABIN_V2 !== false;
-    const ci = (v2 ? cabinFrame(c) : null) || occSeatAnchor(grp); if (!ci) return;
-    const fit = v2 && ci.eye;
-    const roomY = Math.max(0.3, ci.peakY + 0.08);              // seat surface → roofline
-    const seatY = fit ? ci.cushionY : ci.baseY - 0.1;
-    const seatX = fit ? ci.seatX : Math.min(0.45, ci.w * 0.22);
-    const s = fit
-      ? Math.max(0.55, Math.min(1.0, (ci.eye.y - seatY) / 0.86))
-      : Math.max(0.6, Math.min(1.0, roomY / 0.98));
-    const h = carHash(c.pos.x, c.pos.z, 101);
-    function seatBody(x, z, variant) {
+    const ci = cabinFrame(c); if (!ci || !ci.eye) return;
+    const list = modelSeats(c); if (!list || !list.length) return;
+    // occGeo puts the eye ~0.86 over the seat surface and the crown ~0.95:
+    // the front scale lands the eye on the cabin's eye; every other seat is
+    // also clamped under the roof over ITS row (the raked backlight, a third
+    // row under the tail glass), or the head comes out through the car.
+    const s = Math.max(0.55, Math.min(1.0, (ci.eye.y - ci.cushionY) / 0.86));
+    function seatBody(S, variant) {
       const m = new THREE.Mesh(occGeo(variant), occMat());
-      m.position.set(x, seatY, z);
-      m.scale.setScalar(s);
+      m.position.set(S.x, S.cushionY, S.z);
+      m.scale.setScalar(Math.max(0.5, Math.min(s, (S.roofY - 0.06 - S.cushionY) / 0.95)));
       m.castShadow = false; m.receiveShadow = false;
       m.userData.occupant = true;                              // spare from any merge/batch pass
-      grp.add(m);
+      // on the BODY, so a blob pitches and rolls with the cabin it sits in
+      ((grp.userData && grp.userData.carVisual) || grp).add(m);
       return m;
     }
-    const occZ = fit ? ci.seatZ : ci.cx + 0.12;
-    if (!occOn()) {
-      // ---- LEGACY (CAR_OCCUPANCY_REAL=false): the original two lines, byte
-      //      for byte. One driver, a 30% coin-flip passenger, no record. ----
-      c._occDriver = seatBody(seatX, occZ, (h * 24) | 0);
-      if (carHash(c.pos.x, c.pos.z, 102) < 0.3) {
-        c._occPass = seatBody(-seatX, occZ, (carHash(c.pos.x, c.pos.z, 103) * 24) | 0);
-      }
-      syncOccupants(c);
-      return;
-    }
-    // THE CABIN FRAME IS PUBLISHED ONCE, and every occupant query reads it: the
-    // blob below, the promoted rig, and the door-side step-out all solve off
-    // these four numbers, so they can never drift apart.
-    c._occFrame = {
-      seatX: seatX, cushionY: seatY, frontZ: occZ, fit: s,
-      // the bench: behind the front cushion, ahead of the rear bulkhead. A
-      // dressed cabin publishes its own; a derived one gets the same
-      // proportion (a road car's rows sit ~0.74 m apart).
-      rearZ: (fit && ci.rearSeatZ != null) ? ci.rearSeatZ
-        : Math.max((ci.zRear != null ? ci.zRear + 0.30 : occZ - 0.95), occZ - 0.74),
-      halfW: Math.max(0.7, (ci.w || 1.8) * 0.5),
-    };
-    /* THE REAR ROOF IS LOWER THAN THE FRONT EYE (CAR_CABIN_V3). The one fit
-       scale `s` solves the FRONT seat against the front eye height — but the
-       bench sits under the raked backlight, and a body at the front scale put
-       its crown through that glass plane: photographed as a skin cube poking
-       out of the body-coloured tail, i.e. "the passenger is merged with the
-       car". The rake line is published by dressCabin (zRoofRear); clamp the
-       rear body under it with a hand of clearance. Derived cabins keep the
-       old single scale — they have no rake line to clamp against. */
-    let sRear = s;
-    if ((!CBZ.CONFIG || CBZ.CONFIG.CAR_CABIN_V3 !== false) && fit &&
-        ci.zRoofRear != null && ci.zRear != null && c._occFrame.rearZ < ci.zRoofRear) {
-      const t = (c._occFrame.rearZ - ci.zRear) / Math.max(0.05, ci.zRoofRear - ci.zRear);
-      const roofAtBench = ci.beltY + (ci.roofY - ci.beltY) * Math.max(0, Math.min(1, t));
-      // occGeo's crown sits 0.95 over the cushion at scale 1
-      sRear = Math.max(0.5, Math.min(s, (roofAtBench - 0.06 - seatY) / 0.95));
-    }
+    c._occFrame = { fit: s, halfW: Math.max(0.7, (ci.w || 1.8) * 0.5) };
     const occ = occDecide(c);
     for (let i = 0; i < occ.seats.length; i++) {
       const st = occ.seats[i];
-      const p = occSeatPose(c, st);
-      st.blob = seatBody(p.x, p.z, st.variant);
-      if (st.row) {
-        st.blob.position.y = p.y;
-        if (sRear < s) st.blob.scale.setScalar(sRear);
-      }
+      const S = SEATS().seat(c, st.slot);
+      if (S) st.blob = seatBody(S, st.variant);
     }
     // the two legacy handles stay pointed at the real meshes: airside.js reads
-    // `_occDriver` directly and gangs.js clears both. A field other files use
-    // is part of the contract — it gets a new meaning, not a new name.
+    // `_occDriver` directly and gangs.js clears both.
     c._occDriver = occ.seats[0] ? occ.seats[0].blob : null;
     c._occPass = occ.seats[1] ? occ.seats[1].blob : null;
     syncOccupants(c);
@@ -1549,26 +1610,36 @@
     const ci = occSeatAnchor(grp);
     if (!ci) return null;
     if (ci.dressed) return ci;
+    /* A BOX WITH NO DRESSED CABIN (the legacy box rig, a registered custom
+       group) still gets a whole seat model: the same carseats.js layout,
+       read off the greenhouse, cached on the group so every query agrees. */
+    if (grp.userData._cabinDerived && grp.userData._cabinDerived.src === ci.baseY + "|" + ci.peakY + "|" + ci.cx) {
+      return grp.userData._cabinDerived;
+    }
     const beltY = ci.baseY, gh = Math.max(0.16, ci.peakY), w = ci.w || 1.8;
     const roofY = beltY + gh;
     const dims = grp.userData.vehicleDims;
     const cl = Math.max(1.2, ((dims && dims.length) || 4.4) * 0.42);
     const zF = ci.cx + cl * 0.5, zR = ci.cx - cl * 0.5;
     const floorY = Math.max(0.05, beltY - Math.max(0.30, gh * 0.9));
-    const cushionY = floorY + Math.max(0.11, (beltY - floorY) * 0.26);
-    const seatX = Math.min(0.42, w * 0.24);
-    const seatZ = Math.max(zR + 0.34, zF - 0.86);
-    const eyeY = Math.max(beltY + 0.04,
-      Math.min(beltY + Math.max(0.12, Math.min(gh * 0.30, 0.42)), roofY - 0.20));
-    return {
+    const S = CBZ.carSeats;
+    const kind = S ? (S.KIND_BY_STYLE[grp.userData.carStyle] || null) : null;
+    const L = S ? S.layout({ cabW: w, zR: zR, zF: zF, beltY: beltY, roofY: roofY, floorY: floorY }, kind) : null;
+    if (!L) return null;
+    const D = L.drive, drv = L.seats[0], rear = L.seats.find(function (x) { return x.row === 1; });
+    const out = {
       baseY: beltY, peakY: gh, cx: ci.cx, w: w,
-      beltY: beltY, roofY: roofY, floorY: floorY, zRear: zR, zFront: zF, rows: 1,
-      cushionY: cushionY, seatX: seatX, seatZ: seatZ, rearSeatZ: null,
-      wheel: { x: seatX, y: Math.max(cushionY + 0.28, beltY + gh * 0.09), z: seatZ + 0.44,
-        r: Math.min(0.185, w * 0.108) },
-      eye: { x: seatX, y: eyeY, z: seatZ + 0.19 },
-      dressed: false, derived: true,
+      beltY: beltY, roofY: roofY, floorY: D.floorY, zRear: zR, zFront: zF, rows: L.rows, kind: L.kind,
+      zRoofRear: D.zTR,
+      cushionY: D.cushionY, seatX: D.seatX, seatZ: D.seatZ, rearSeatZ: rear ? rear.z : null,
+      wheel: { x: D.wheelX, y: D.wheelY, z: D.wheelZ, r: D.wheelR, rake: 0.42 },
+      eye: { x: drv.eye.x, y: drv.eye.y, z: drv.eye.z },
+      doorX: D.halfW, windowTopY: roofY - 0.05,
+      seatLayout: { kind: L.kind, rows: L.rows, seats: L.seats, doors: L.doors },
+      dressed: false, derived: true, src: ci.baseY + "|" + ci.peakY + "|" + ci.cx,
     };
+    grp.userData._cabinDerived = out;
+    return out;
   }
   CBZ.carCabinInfo = function (car) { return cabinFrame(car); };
 
@@ -1608,64 +1679,128 @@
     return true;
   }
 
-  /* WHICH CHAIR. `ci.seatX` is the DRIVER's half-track and this file's law
-     (see the seat-side note in city/boarding.js) is that the player sits at
-     +seatX, so the shotgun seat is the same number mirrored. One sign, and
-     the whole seated solve — the fit, the lean, the cushion, the first-person
-     head drop — is reused rather than copied. */
-  function seatSideX(car, ci) {
-    return (CBZ.cityPaxAboard && CBZ.cityPaxAboard(car)) ? -ci.seatX : ci.seatX;
+  /* WHICH CHAIR. The seat the player holds in the ONE occupancy map
+     (city/carseats.js) — any seat of any body, a van's middle place or an
+     SUV's third row as much as the wheel. A car he is in without a claim (a
+     scripted seat, an old save) reads as the wheel, or as the passenger seat
+     when passengerseat.js says he is riding. */
+  function playerSeatOf(car) {
+    const S = CBZ.carSeats; if (!S) return null;
+    const own = S.playerSeat(car);
+    if (own) return own;
+    const pax = CBZ.cityPaxAboard && CBZ.cityPaxAboard(car);
+    return S.seat(car, pax ? "shotgun" : "driver") || S.seat(car, "driver");
+  }
+  CBZ.carPlayerSeat = playerSeatOf;
+
+  /* THE LIVE COCKPIT — only in the car the player sits in. Two needles on
+     the cluster dials, the wheel turning with the steering input, and in
+     driver first person a pair of forearms and hands ON the rim (the rig's
+     own arms are hidden there: its shoulders are at the lens). Materials are
+     the rig's own skin and sleeve, so the hands wear what he wears. */
+  const live = { car: null, needles: null, spin: null, hands: null };
+  function dropLive() {
+    if (live.needles) {
+      if (live.needles.parent) live.needles.parent.remove(live.needles);
+      live.needles.traverse(function (o) { if (o.geometry) o.geometry.dispose(); });
+    }
+    if (live.hands && live.hands.parent) live.hands.parent.remove(live.hands);
+    if (live.spin) live.spin.rotation.z = 0;
+    live.car = null; live.needles = null; live.spin = null; live.hands = null;
+  }
+  function firstMat(list) {
+    const m = list && list[0] && list[0].material;
+    return Array.isArray(m) ? m[0] : m;
+  }
+  function tickLive(car, vis, ci, ch, seat, fp, steerLeft) {
+    if (live.car !== car) {
+      dropLive();
+      live.car = car;
+      if (CBZ.carCabinNeedles) {
+        live.needles = CBZ.carCabinNeedles(ci);
+        if (live.needles) vis.add(live.needles);
+      }
+      const steer = vis.getObjectByName(ci.steerName || "cabin_steer");
+      live.spin = steer ? (steer.getObjectByName("cabin_steer_spin") || null) : null;
+      const sk = ch && ch.skinSlots;
+      if (live.spin && CBZ.carCabinHands && sk) {
+        const skin = firstMat(sk.hands) || firstMat(sk.head);
+        if (skin) {
+          live.hands = CBZ.carCabinHands(skin, firstMat(sk.armsLower) || skin, ci.wheel && ci.wheel.r);
+          live.spin.add(live.hands);
+        }
+      }
+    }
+    if (live.spin) live.spin.rotation.z = -steerLeft * 1.55;       // ~90° of wheel at full lock
+    if (live.hands) live.hands.visible = !!(fp && seat && seat.isDriver);
+    if (live.needles) {
+      const spd = Number.isFinite(car.v) ? Math.abs(car.v) : Math.hypot(car.vx || 0, car.vz || 0);
+      const mph = spd * 2.4;                                         // carcluster.js's own scale
+      // revs: the drive loop's gear band when it publishes one, else the
+      // same five-gear sawtooth shape, off the same speed
+      let rev = car._rev;
+      if (!Number.isFinite(rev)) {
+        const sN = Math.min(1, spd / 38), g = Math.min(4.999, sN * 5);
+        rev = spd < 0.3 ? 0.12 : 0.18 + (g - Math.floor(g)) * 0.62 + Math.floor(g) * 0.02;
+      }
+      for (let i = 0; i < live.needles.children.length; i++) {
+        const piv = live.needles.children[i], d = piv.userData.dial;
+        const t = Math.max(0, Math.min(1, d.kind === "speed" ? mph / d.max : rev * 0.95));
+        const a = d.a0 + (d.a1 - d.a0) * t;
+        piv.rotation.z = Math.PI - a;                                // canvas angle -> the driver-facing dial
+      }
+    }
   }
 
   function seatDriver(car, dt) {
     const ch = CBZ.playerChar;
     const ci = cabinFrame(car);
     if (!ci) return false;
+    const seat = playerSeatOf(car);
     const grp = car.group;
     const vis = (grp.userData && grp.userData.carVisual) || grp;
-    if (drv.car !== car) { drv.car = car; drv.fit = fitSeatedRig(ch, ci); drv.steer = 0; }
+    const seatId = seat ? seat.id : "driver";
+    if (drv.car !== car || drv.seatId !== seatId) {
+      drv.car = car; drv.seatId = seatId; drv.steer = 0;
+      drv.fit = fitSeatedRig(ch, seat
+        ? { cushionY: seat.cushionY, floorY: ci.floorY, eye: seat.eye, roofY: seat.roofY }
+        : ci);
+    }
     const s = drv.fit;
+    const cush = seat ? seat.cushionY : ci.cushionY;
     vis.updateWorldMatrix(true, false);
-    _drvV.set(seatSideX(car, ci), ci.floorY, ci.seatZ).applyMatrix4(vis.matrixWorld);
+    _drvV.set(seat ? seat.x : ci.seatX, ci.floorY, seat ? seat.z : ci.seatZ).applyMatrix4(vis.matrixWorld);
     ch.group.position.copy(_drvV);
     // the rig faces its own local +Z and so does the car body, so the car's
     // full attitude (terrain pitch, weight-transfer roll, heading) copies over
-    // one-for-one — the driver leans with the car, which is half of why a
-    // seated body reads as riding IN something rather than glued to it.
-    ch.group.rotation.set(grp.rotation.x, grp.rotation.y, grp.rotation.z, grp.rotation.order);
+    // one-for-one — the driver leans with the car. The BODY's world
+    // attitude (vehicles.js bodyAttitude: the spring-damper pitch/roll rides
+    // the visual, not the group), so the seated rig tilts with the cabin he
+    // is sitting in rather than ~3 degrees off it.
+    vis.getWorldQuaternion(ch.group.quaternion);
     if (ch.group.scale.x !== s) ch.group.scale.setScalar(s);
     ch.group.visible = true;
     ch.sitting = true;
     ch.crouch = false; ch.slidePose = false; ch.pronePose = false; ch.typing = false;
     // cushion/floorBelow are GROUP-LOCAL (the seat solve runs inside the scaled
     // group), so the world clearance is divided back out by the fit.
-    if (!ch.seatRef || ch.seatRef.kind !== "car" || ch.seatRef._fit !== s) {
-      ch.seatRef = { cushion: (ci.cushionY - ci.floorY) / s, floorBelow: 0, kind: "car", _fit: s };
+    if (!ch.seatRef || ch.seatRef.kind !== "car" || ch.seatRef._fit !== s || ch.seatRef._seat !== seatId) {
+      ch.seatRef = { cushion: (cush - ci.floorY) / s, floorBelow: 0, kind: "car", _fit: s, _seat: seatId };
     }
-    // HANDS FOLLOW THE WHEEL. The sim keeps no steering angle of its own, so
-    // the honest signal is the heading RATE. +heading turns the nose toward
-    // local +X, which is the car's left, so the sign flips into driveSteer's
-    // "+1 is right" convention.
+    // the heading RATE is the steering signal a wheel nobody reports can
+    // still show (a chauffeur, the traffic AI). +heading turns the nose toward
+    // local +X, the car's left.
     let dh = car.heading - (car._drvHeading == null ? car.heading : car._drvHeading);
     while (dh > Math.PI) dh -= Math.PI * 2;
     while (dh < -Math.PI) dh += Math.PI * 2;
     car._drvHeading = car.heading;
-    // A PASSENGER HAS NO WHEEL. driveSteer is what puts both hands out in
-    // front of the chest; leaving it running in the shotgun seat is a man
-    // steering thin air, so the hands ease back to rest instead.
-    const want = (CBZ.cityPaxAboard && CBZ.cityPaxAboard(car))
-      ? 0 : Math.max(-1, Math.min(1, -(dh / Math.max(0.001, dt)) * 1.35));
-    drv.steer += (want - drv.steer) * Math.min(1, dt * 8);
+    const rateLeft = Math.max(-1, Math.min(1, (dh / Math.max(0.001, dt)) * 1.35));
+    const atWheel = !!(seat && seat.isDriver) && !(CBZ.cityPaxAboard && CBZ.cityPaxAboard(car));
+    // A PASSENGER HAS NO WHEEL: his hands ease back to rest.
+    drv.steer += ((atWheel ? -rateLeft : 0) - drv.steer) * Math.min(1, dt * 8);
     ch.driveSteer = drv.steer;
-    // FIRST PERSON: you are inside this body, so drop the two parts of it that
-    // are AT the camera — the head (with the face) and the chest — and keep
-    // everything the view exists to show: the arms on the wheel, the hands,
-    // the legs in the footwell, and whatever the player is wearing on them.
-    // cockpit_view.js hides its pilot outright; a car cannot, because the
-    // driver's own hands ARE the shot. The chest has to go with the head
-    // regardless of how far forward the eye is authored — a torso box is
-    // ~0.28 m deep and the near plane is 0.10, so a few centimetres of eye
-    // placement is the difference between a cabin and a wall of shirt.
+    // FIRST PERSON: drop the parts of this body that are AT the camera — the
+    // head and the chest — and keep the legs in the footwell.
     const fp = !!(CBZ.carFpActive && CBZ.carFpActive());
     if (drv.fpHid !== fp) {
       drv.fpHid = fp;
@@ -1676,30 +1811,29 @@
         for (let i = 0; i < near.length; i++) if (near[i]) near[i].visible = !fp;
       }
     }
-    /* THE ARMS GO TOO. The eye now sits a hand ahead of the seat frame
-       (playercars.js dressCabin), which puts the rig's shoulders at the lens:
-       measured, the upper arm and whatever the hand was holding (a slung
-       launcher) filled the left third of the frame. The arm GROUPS are hidden
-       — not just the sleeve skins — so a holstered prop socketed on the hand
-       goes with them. Out of the window (CAR_FP_LEAN) the gun viewmodel's
-       own arms take over in front of the lens, same rule. */
+    /* THE ARMS GO TOO — the rig's shoulders are at the lens. The arm GROUPS
+       are hidden (a prop socketed on a hand goes with them); at the wheel the
+       live cockpit's own forearms hold the rim instead, and out of the window
+       (CAR_FP_LEAN) the gun viewmodel's arms take over. */
     const armsHid = fp;
     if (drv.leanHid !== armsHid) {
       drv.leanHid = armsHid;
       const pr = ch.parts;
       if (pr) { if (pr.la) pr.la.visible = !armsHid; if (pr.ra) pr.ra.visible = !armsHid; }
     }
+    const steerLeft = atWheel && Number.isFinite(car._steerInput) ? car._steerInput : rateLeft;
+    tickLive(car, vis, ci, ch, seat, fp && !(CBZ.carLeanActive && CBZ.carLeanActive()), steerLeft);
     if (CBZ.animChar) CBZ.animChar(ch, 0, dt);
     return true;
   }
 
   /* Everything the seat owns, handed back. Called on exit, on death, on any
-     frame the player is not driving (city/view.js's visibility pass) and
-     whenever the flag goes off mid-session — the rig must never be left scaled
-     down, folded, or missing its head. */
+     frame the player is not driving (city/view.js's visibility pass) — the rig
+     must never be left scaled down, folded, or missing its head. */
   function releaseDriver() {
+    dropLive();
     if (!drv.car) return false;
-    drv.car = null; drv.steer = 0; drv.fit = 1;
+    drv.car = null; drv.seatId = null; drv.steer = 0; drv.fit = 1;
     const ch = CBZ.playerChar;
     if (ch) {
       ch.sitting = false; ch.seatRef = null; ch.driveSteer = 0;
@@ -1871,7 +2005,10 @@
     // (bikes/aircraft/boats have open frames by design — no shell, no sealing)
     if (!/motorcycle|helicopter|boat/.test(style)) {
       sealSeams(visual, dims);
-      addInteriorShell(visual, dims, null);
+      // A LOFTED BODY (playercars.js + carbody.js) is a closed shell with real
+      // wheel wells and a sealed cabin: the dark hole-proofing blocks would
+      // only poke through its curved hood and deck, so it gets none.
+      if (!visual.userData.loftBody) addInteriorShell(visual, dims, null);
     }
     if (mergeStaticCarParts) mergeStaticCarParts(visual, keep);
     bakeShutDoors(visual);
@@ -2083,7 +2220,10 @@
   // multiplayer: net code spawns real local cars (ownership transfer on enter/exit)
   CBZ.cityMakeCar = makeCar;
   CBZ.cityBuildAmbientCarVisual = function (modelName) {
-    const model = CBZ.cityEcon && CBZ.cityEcon.carByName ? CBZ.cityEcon.carByName(modelName) : null;
+    // a catalog NAME, or a model record itself (the police cruiser and other
+    // off-catalog fleets live in their own files, not in the econ catalog)
+    const model = (modelName && typeof modelName === "object") ? modelName
+      : (CBZ.cityEcon && CBZ.cityEcon.carByName ? CBZ.cityEcon.carByName(modelName) : null);
     return buildCar(model);
   };
   // A drive-by / hit car used to be a crude placeholder box (gangs.js buildDbCar)
@@ -2222,6 +2362,8 @@
   }
 
   function clearCars() {
+    while (sleepers.length) wakeCar(sleepers[sleepers.length - 1]);   // the sleep list never outlives its cars
+    if (CBZ.carInstances) CBZ.carInstances.releaseAll();                // nor does the proxy list
     const keep = [];
     for (const c of CBZ.cityCars) {
       // _persist records (farm tractor/combine — world fixtures registered via
@@ -2256,6 +2398,7 @@
      or a car that was never registered, is a no-op rather than a double
      dispose of shared geometry. */
   CBZ.cityScrapCar = function (car) {
+    wakeCar(car);
     if (!car || car._scrapped) return false;
     car._scrapped = true;
     // never scrap the car under the player — hand the seat back first
@@ -2378,6 +2521,7 @@
      here — a van built by makeCar off the catalog, a semi registered by the
      fleet placer, anything a future builder publishes a holdSpec on. */
   function adoptHold(c) {
+    wakeCar(c);
     if (!c || !c.group || !c.group.parent || c.dead) return null;
     if (c.hold && !c.hold.inert) return c.hold;
     if (!CBZ.vehicleHold) return null;
@@ -2834,6 +2978,7 @@
   // ---- carjacking: a high-aggression ped grabs an ambient car + rampages ----
   let npcDrivers = 0;
   CBZ.cityNpcCarjack = function (ped, target) {
+    wakeCar(target);
     if (npcDrivers >= 3) return false;            // bound the chaos
     const car = nearestAmbientCar(ped.pos.x, ped.pos.z, 6.5);
     if (!car) return false;
@@ -2873,15 +3018,20 @@
      `CBZ.cityRelShift` + `CBZ.cityTraitShift`.
   ========================================================================== */
   const _occOut = { x: 0, y: 0, z: 0 };
-  function occDoorSpot(c, side, row, out) {
+  function occDoorSpot(c, side, row, out, slotId) {
     out = out || _occOut;
     const h = c.heading || 0;
     const rx = Math.cos(h), rz = -Math.sin(h);          // car's local +X, in world
     const fx = Math.sin(h), fz = Math.cos(h);           // car's local +Z (forward)
     const dims = vehicleDims(c);
     const half = c._occFrame ? c._occFrame.halfW : (((dims && dims.width) || 1.9) * 0.5);
-    const outD = half + 0.85;
-    const alongZ = row ? -0.75 : 0.25;                  // rear doors are behind the B-pillar
+    let outD = half + 0.85;
+    let alongZ = row ? -0.75 : 0.25;                    // rear doors are behind the B-pillar
+    // THE SEAT'S OWN DOOR (city/carseats.js): the middle of the rear bench
+    // leaves by the kerb-side rear door, a 2+2's back seat by the front one
+    const S = slotId && SEATS() ? SEATS().seat(c, slotId) : null;
+    const D = S && S.doorId ? SEATS().door(c, S.doorId) : null;
+    if (D) { side = D.side; alongZ = D.zc; outD = Math.abs(D.x) + 0.85; }
     out.x = c.pos.x + rx * side * outD + fx * alongZ;
     out.z = c.pos.z + rz * side * outD + fz * alongZ;
     // A DOOR THAT OPENS INTO A WALL IS NOT AN EXIT. Same depenetration every
@@ -2897,7 +3047,8 @@
   function occStepOut(c, seat, opts) {
     opts = opts || {};
     const p = seat.ped; if (!p) return null;
-    const spot = occDoorSpot(c, seat.side, seat.row);
+    const spot = occDoorSpot(c, seat.side, seat.row, null, seat.slot);
+    if (SEATS()) SEATS().release(c, seat.slot);
     const gy = CBZ.floorAt ? CBZ.floorAt(spot.x, spot.z) : 0;
     if (p._npcAttached && CBZ.cityUnseat) {
       try { CBZ.cityUnseat(p, { x: spot.x, z: spot.z, y: gy, state: p.dead ? "dead" : (opts.state || "walk") }); } catch (e) {}
@@ -3136,7 +3287,7 @@
     car.npcDriver = null; car._occOwnsDriver = false;
     if (ped._njCarjack) { ped._njCarjack = false; npcDrivers = Math.max(0, npcDrivers - 1); }
     ped.inCar = null; ped.controlled = false;
-    const spot = occDoorSpot(car, -1, 0);
+    const spot = occDoorSpot(car, 1, 0, null, "driver");
     const gy = CBZ.floorAt ? CBZ.floorAt(spot.x, spot.z) : 0;
     if (ped._npcAttached && CBZ.cityUnseat) {
       try { CBZ.cityUnseat(ped, { x: spot.x, z: spot.z, y: gy, state: ped.dead ? "dead" : "walk" }); } catch (e) {}
@@ -3277,23 +3428,34 @@
     if (!c || !ped) return false;
     if (!c.occ) c.occ = { hx: c.pos.x, hz: c.pos.z, hour: occHour(), district: "core", seats: [], rigs: 0, jacked: false };
     if (!c._occFrame) return false;                    // no cabin (bike/boat) — caller keeps its own
-    const S = OCC_SLOTS.filter(function (s) { return s.slot === slotName; })[0] || OCC_SLOTS[0];
+    const S = seatFor(c, slotName); if (!S) return false;
     let st = null;
-    for (let i = 0; i < c.occ.seats.length; i++) if (c.occ.seats[i].slot === S.slot) st = c.occ.seats[i];
+    for (let i = 0; i < c.occ.seats.length; i++) if (c.occ.seats[i].slot === S.id) st = c.occ.seats[i];
     if (!st) {
-      st = { slot: S.slot, side: S.side, row: S.row, h: 0, variant: 0, blob: null, ped: null,
+      st = { slot: S.id, side: S.side, row: S.row, h: 0, variant: 0, blob: null, ped: null,
         spawned: false, react: null, armed: !!(opts && opts.armed) };
       c.occ.seats.push(st);
     }
+    SEATS().claim(c, S.id, { kind: "npc", ref: ped, ambient: st });
     st.gone = false; st.armed = opts && opts.armed != null ? !!opts.armed : st.armed;
     if (st.blob && st.blob.parent) { st.blob.parent.remove(st.blob); st.blob = null; }
     return occSeatPed(c, st, ped, opts);
   };
   CBZ.carOccupancySeatAnchor = function (c, slotName) {
     if (!c || !c._occFrame) return null;
-    const S = OCC_SLOTS.filter(function (s) { return s.slot === slotName; })[0] || OCC_SLOTS[0];
-    return occAnchorFor(c, { slot: S.slot, side: S.side, row: S.row });
+    const S = seatFor(c, slotName); if (!S) return null;
+    return occAnchorFor(c, { slot: S.id, side: S.side, row: S.row });
   };
+  // a named slot on THIS body: the seat itself, else the nearest thing to it
+  // (a "rearR" asked of a two-seater is the passenger seat)
+  function seatFor(c, id) {
+    const S = SEATS(); if (!S) return null;
+    const m = S.of(c); if (!m) return null;
+    if (m.byId[id]) return m.byId[id];
+    const want = /L$/.test(id) ? 1 : /R$/.test(id) ? -1 : 0;
+    for (let i = m.seats.length - 1; i >= 0; i--) if (!m.seats[i].isDriver && m.seats[i].side === want) return m.seats[i];
+    return m.seats[m.seats.length - 1];
+  }
   // THE CAR MOVED HOUSE. traffic.js teleports a far idle car onto a fresh road;
   // it is a different car in a different place now, so its crew is re-decided
   // from the NEW point rather than riding along as a stale fact.
@@ -3845,6 +4007,7 @@
     const cars = CBZ.cityCars;
     for (let i = 0; i < cars.length; i++) {
       const c = cars[i];
+      if (c._sleep || c._proxy) continue;    // parked + inert: asleep far, or drawn by carinstances.js
       syncOccupants(c);                      // driver body appears/vanishes with control state
       // a passenger who froze in his seat: still there, still yours, and the
       // moment you actually drive off with him it stops being a jack.
@@ -3985,6 +4148,7 @@
   // PUBLIC: a bullet landed at `point` — if that's a wheel, blow the tire.
   // Returns true when the round hit rubber (callers soften engine damage).
   CBZ.cityCarTireHit = function (car, point) {
+    wakeCar(car);
     if (!car || car.dead || !point) return false;
     const bit = tireAt(car, point);
     if (!bit) return false;
@@ -4021,6 +4185,7 @@
   //      amount is in engine-HP points; opts.byPlayer attributes the kill. A
   //      direct hit on an already-smoking car can light it; big hits pop it. ----
   CBZ.cityDamageCar = function (car, amount, opts) {
+    wakeCar(car);
     if (!car || car.dead) return;
     opts = opts || {};
     if (opts.byPlayer) car._burnByPlayer = true;
@@ -4072,6 +4237,7 @@
   // {fuse, fuseOnly, burnsOut, quiet} — so a caller with a reason to pick the
   // beat can, and the 2-argument call every existing site makes is unchanged.
   CBZ.cityCarIgnite = function (car, byPlayer, opts) {
+    wakeCar(car);
     if (!car || car.dead) return;
     if (car.engineHp == null || car.engineHp > FIRE_AT) car.engineHp = FIRE_AT;
     if (byPlayer) car._burnByPlayer = true;
@@ -4102,6 +4268,7 @@
 
   // ---- enter / exit ----
   CBZ.cityEnterVehicle = function (car) {
+    wakeCar(car);
     if (!car || car.player) return false;
     /* TAKING THE WHEEL UNCHAINS IT. vehicle_hold.js's law is that a latched
        machine is released the instant somebody claims its controls — that is
@@ -4122,6 +4289,13 @@
     const P = CBZ.player;
     P.driving = true; P._vehicle = car;
     car.player = true; car.ai = false; car.pullover = 0;
+    // THE WHEEL IS YOURS in the one seat map; anybody the jack left aboard
+    // (a frozen passenger) keeps his own seat
+    if (CBZ.carSeats) {
+      CBZ.carSeats.releaseRef(car, P);
+      CBZ.carSeats.release(car, "driver");
+      CBZ.carSeats.claim(car, "driver", CBZ.carSeats.playerOccupant());
+    }
     if (!car.stolen && !car.owned) {
       car.stolen = true;
       CBZ.cityCrime && CBZ.cityCrime(60, { x: car.pos.x, z: car.pos.z, type: "gta" });
@@ -4157,15 +4331,18 @@
   };
   CBZ.cityExitVehicle = function () {
     const P = CBZ.player, car = P._vehicle;
-    // WHICH DOOR YOU CAME OUT OF. Read the seat BEFORE the state is torn down;
-    // a passenger steps out onto the kerb side, which is the one thing about
-    // his exit that is different from the driver's. (city/passengerseat.js's
-    // release also clears the ride, so this is the only place that has to ask.)
+    // WHICH DOOR YOU CAME OUT OF: your seat's own (city/carseats.js), read
+    // BEFORE the state is torn down. A rider in somebody else's car (an NPC at
+    // the wheel, city/passengerseat.js cityRideVehicle) leaves the car to its
+    // driver: it is not parked, not stopped, not demoted — he drives on.
+    const seat = car ? playerSeatOf(car) : null;
     const paxSide = !!(CBZ.cityPaxAboard && car && CBZ.cityPaxAboard(car));
+    const npcRide = !!(car && CBZ.cityPaxNpcRide && CBZ.cityPaxNpcRide(car));
     P.driving = false; P._vehicle = null;
+    if (car && CBZ.carSeats) CBZ.carSeats.releaseRef(car, P);
     if (CBZ.carAudio) CBZ.carAudio.stop();    // key off — the engine voice dies with the seat
-    if (car && car._skid) car._skid.on = false;
-    if (car) {
+    if (car && car._skid && !npcRide) car._skid.on = false;
+    if (car && !npcRide) {
       car.player = false; car.v = 0; car.vx = car.vz = 0; car.ai = false;
       car._playerLeft = true;             // nobody steers it now: a hit shoves it (order-37 slide)
       car._pitch = car._roll = 0;
@@ -4176,15 +4353,27 @@
     releaseDriver();          // unfold, un-scale, give the head back
     CBZ.playerChar.group.visible = true;
     if (car) {
-      // The car's local +X is (cos h, −sin h) — its LEFT flank, the driver's
-      // door. A passenger leaves through the other one, so the side is a sign.
-      const side = paxSide ? -1 : 1;
-      const ox = Math.cos(car.heading) * 1.6 * side, oz = -Math.sin(car.heading) * 1.6 * side;
-      P.pos.set(car.pos.x + ox, 0, car.pos.z + oz);
+      // The car's local +X is (cos h, -sin h) — its LEFT flank, the driver's
+      // door; local +Z is (sin h, cos h). You stand clear of YOUR door.
+      const D = seat && seat.doorId && CBZ.carSeats ? CBZ.carSeats.door(car, seat.doorId) : null;
+      const h = car.heading || 0;
+      const side = D ? D.side : (paxSide ? -1 : 1);
+      const lx = D ? side * (Math.abs(D.x) + 0.7) : side * 1.6, lz = D ? D.zc : 0;
+      P.pos.set(car.pos.x + lx * Math.cos(h) + lz * Math.sin(h), 0, car.pos.z - lx * Math.sin(h) + lz * Math.cos(h));
       P.grounded = true; P.vy = 0;
       CBZ.playerChar.group.position.copy(P.pos);
     }
     if (CBZ.cityPaxRelease) CBZ.cityPaxRelease(car);
+  };
+  /* Is somebody OTHER than the player driving this car right now? The
+     ambient driver in its occupancy seat, a carjacker, a companion on an
+     errand. Used to decide what a passenger door means (ride, not theft). */
+  CBZ.carNpcDriven = function (car) {
+    if (!car || car.dead || car.player) return false;
+    if (car.npcDriver && !car.npcDriver.dead) return true;
+    if (!(car.ai || car.npcDriver)) return false;
+    const o = CBZ.carSeats ? CBZ.carSeats.occupant(car, "driver") : null;
+    return !!(o && o.kind === "npc");
   };
 
   function anyWitness(x, z, r) {
@@ -4489,64 +4678,11 @@
     if (bk === "suv" || bk === "pickup" || bk === "van" || bk === "semi") return "truck";
     return "sedan";
   }
-  // top-of-gear points as fractions of the car's own top speed: revs climb
-  // through each band and DROP on the shift — five fake gears read as a real
-  // box without simulating one.
-  const GEAR_TOP = [0.14, 0.30, 0.50, 0.74, 1.01];
-  // ---- PER-GEAR TORQUE-BAND CURVE ----------------------------------------
-  // Real engines aren't a flat taper to top speed: torque is soft right off
-  // idle, builds to a mid-band peak, then falls again near the redline (where
-  // you'd shift). A handful of (revFrac, torqueMul) keypoints per gear is
-  // cheap (one lerp per frame) and makes a downshift/upshift actually feel
-  // like it changed available power, instead of one smooth accel taper for
-  // the whole speed range. revFrac is this gear's OWN 0..1 band (matches the
-  // `sN`/`glo`/GEAR_TOP[gear] math the audio rev code already computes), so
-  // the same curve drives both throttle response and the engine voice — sound
-  // and power stay in sync by construction (one curve, two readers).
-  // 1st gear bites hard off idle (launch torque); top gear is long and flat
-  // (cruise gear, no torque headroom to spare); middle gears get the classic
-  // low→peak→fall hump. modshop.js Stage N performance reshapes this curve
-  // (flatter, higher peak, later fall-off) rather than just scaling a number.
-  const GEAR_TORQUE = [
-    [[0, 0.62], [0.18, 1.0], [0.55, 0.96], [1, 0.74]],     // 1st: bites instantly, eases late
-    [[0, 0.7], [0.3, 1.0], [0.65, 0.92], [1, 0.7]],        // 2nd
-    [[0, 0.68], [0.35, 0.97], [0.7, 0.88], [1, 0.66]],     // 3rd
-    [[0, 0.64], [0.4, 0.92], [0.75, 0.82], [1, 0.62]],     // 4th
-    [[0, 0.6], [0.45, 0.84], [0.8, 0.76], [1, 0.58]],      // 5th/top: long, flatter, less headroom
-  ];
-  // PUBLIC (read-only reference): modshop.js's Stage N performance mod builds
-  // a RESHAPED copy of this table (flatter, higher-peak, later-falling curves)
-  // instead of just multiplying a flat scalar — see cityApplyCarMod("perf",...).
-  CBZ.cityGearTorqueBase = GEAR_TORQUE;
-  function lerpCurve(curve, t) {
-    t = Math.max(0, Math.min(1, t));
-    for (let i = 1; i < curve.length; i++) {
-      if (t <= curve[i][0]) {
-        const a = curve[i - 1], b = curve[i], span = b[0] - a[0];
-        const u = span > 1e-5 ? (t - a[0]) / span : 0;
-        return a[1] + (b[1] - a[1]) * u;
-      }
-    }
-    return curve[curve.length - 1][1];
-  }
-  // gear index + this-gear rev fraction for a given speedNorm (0..1 of top
-  // speed) — shared by the throttle integrator AND the audio rev code so a
-  // shift always lands on the same gear both readers agree on.
-  function gearFor(sN) {
-    let gear = 0; while (gear < GEAR_TOP.length - 1 && sN >= GEAR_TOP[gear]) gear++;
-    const glo = gear === 0 ? 0 : GEAR_TOP[gear - 1];
-    const revFrac = Math.max(0, Math.min(1, (sN - glo) / Math.max(0.05, GEAR_TOP[gear] - glo)));
-    return { gear, revFrac };
-  }
-  // torque multiplier for the gear/rev-fraction a car is CURRENTLY turning,
-  // optionally reshaped by a performance-mod curve override (modshop.js
-  // publishes car._perfGearTorque — same [revFrac,mul] keypoint shape).
-  function gearTorqueMul(car, sN) {
-    const { gear, revFrac } = gearFor(sN);
-    const table = (car && car._perfGearTorque) || GEAR_TORQUE;
-    const curve = table[Math.min(gear, table.length - 1)];
-    return { mul: lerpCurve(curve, revFrac), gear, revFrac };
-  }
+  // THE GEARBOX lives in city/cardyn.js now (gear points, per-gear torque
+  // bands, the auto box with its upshift torque cut) — one owner, read by the
+  // chassis step and the engine voice alike. modshop.js's Stage N still
+  // reshapes a copy of the base table into car._perfGearTorque.
+  CBZ.cityGearTorqueBase = CBZ.carDyn ? CBZ.carDyn.GEAR_TORQUE : null;
   function wallRadius(car) {
     const d = vehicleDims(car);
     return Math.max(1.05, Math.min(1.6, d.width * 0.58));
@@ -4671,6 +4807,15 @@
      (city/passengerseat.js owns the state; feature-detected, so with that file
      absent this is the live keyboard exactly as before.) */
   const NO_KEYS = Object.freeze(Object.create(null));
+  // the chassis step's input record, reused every frame (no per-frame alloc)
+  const _dynIn = { throttle: 0, brake: 0, handbrake: false, steer: 0, air: false, flatPull: 0 };
+  // ---- CHASE-CAMERA YAW (the driving camera's heading is steered from here)
+  const CAM_YAW_RATE = 3.2;        // 1/s: the boom swings behind the car in ~0.3 s — lags a turn-in, then catches up
+  const CAM_YAW_RATE_V = 0.04;     // extra 1/s per m/s: at speed it tracks tighter so the road stays centred
+  const CAM_DRIFT_LOOK = 0.55;     // share of the body slip angle the camera swings toward: it looks where you're GOING in a drift
+  const CAM_DRIFT_MAX = 0.7;       // rad cap on that swing, so a full spin never whips the view round
+  const LAND_HEAVE = 0.12;         // m/s of body drop onto the springs per m/s of landing speed
+  const BUMP_HEAVE = 0.35;         // share of the ground's vertical acceleration the sprung body lags (kerbs, crests)
   function paxIn(car) { return !!(CBZ.cityPaxAboard && CBZ.cityPaxAboard(car)); }
 
   // ---- player driving (order 11) ----
@@ -4705,66 +4850,27 @@
     // runs exactly as it always has. carDynamics()'s marine branch stays put
     // as that fallback path.
     if (CBZ.marineHelm && CBZ.CONFIG.WATER_HELM !== false && CBZ.marineHelm(car, dt, D)) return;
-    const ACCEL = D.accel, MAXV = D.top, REV = 13, TURN = D.turn;
-    // ---- throttle / braking ----
+    // ================= THE CHASSIS (city/cardyn.js) =======================
+    // Everything that makes this a car and not a puck — tyre slip curves per
+    // axle, the friction circle, load transfer, the handbrake locking the
+    // rears, the gearbox, the body on its springs — lives in cardyn.js as a
+    // pure step that tools/car-dyn-sim.mjs drives in node. This loop only
+    // reads the pedals, hands them over, and writes the answer back onto the
+    // car's public fields (car.v signed forward speed, car.vx/vz world
+    // velocity, car.heading) that every other system already reads.
+    const CD = CBZ.carDyn;
+    // ---- pedals ----
     let throttle = 0;
     if (k["w"]) throttle += 1;
     if (k["s"]) throttle -= 1;
     // CARS_NO_WATER: a flooded engine takes no throttle (set in the water block
     // below once the grace window passes — during grace you can reverse out).
     if (car._flooded && (!CBZ.CONFIG || CBZ.CONFIG.CARS_NO_WATER !== false)) throttle = 0;
-    // VEH_FUEL: a dry tank is the same statement as a drowned engine — this
-    // engine makes no torque right now — so it cuts throttle in exactly the
-    // same place and the same way. city/fuel.js owns the tank; feature-detected
-    // and flag-gated, so with fuel.js absent or VEH_FUEL=false this is a no-op.
-    // `_lastThrottle` is read back by the burn tick so fuel is priced against
-    // the throttle actually applied, not the key that was held.
+    // VEH_FUEL: a dry tank is the same statement as a drowned engine. city/
+    // fuel.js prices the burn against `_lastThrottle`, the key actually held.
     car._lastThrottle = throttle;
     if (CBZ.fuelStarved && CBZ.fuelStarved(car)) throttle = 0;
-    const handbrake = !!k[" "];   // SPACE = handbrake → break grip and DRIFT
-    if (throttle > 0) {
-      if (car.v < 0) car.v += D.brake * dt;           // brake out of reverse first
-      else {
-        // REAL GEAR/TORQUE: the old flat top-end taper is replaced by a
-        // per-gear torque-band curve (gearTorqueMul) — same gear math the
-        // engine-voice code below reads, so a downshift's extra grunt and its
-        // sound stay in sync. A loose surface also caps how much of that
-        // torque the tires can put down (wheelspin on sand/snow/wet tarmac)
-        // instead of pure ground friction silently eating the power.
-        const sN0 = Math.min(1, Math.abs(car.v) / MAXV);
-        const gt = gearTorqueMul(car, sN0);
-        const wheelspinCap = throttle > 0 && Math.abs(car.v) < MAXV * 0.4 ? Math.min(1, 0.55 + D.surfMul * 0.6) : 1;
-        // AERO DRAG TAPER: the gear-torque curve alone models engine/gearbox
-        // power delivery per gear -- it has no notion of the car's own
-        // aerodynamic drag rising with v^2, which is what actually caps real
-        // top speed (the old flat taper this replaced folded that in
-        // implicitly). Without an equivalent term a car sustains far more of
-        // its peak torque all the way to MAXV than before and reaches a given
-        // speed dramatically sooner (verified: without this, a full-throttle
-        // run into a wall a fixed distance away hits at a meaningfully higher
-        // speed than the pre-existing formula produced for the same run,
-        // enough to flip a survivable "hard" wall hit into a fatal
-        // "catastrophic" one). Keep the same overall envelope the old taper
-        // guaranteed -- multiply the gear curve by it directly -- while still
-        // letting the per-gear shape do its job in the low/mid range where
-        // the old taper was close to 1 anyway.
-        const dragTaper = 1 - Math.min(0.7, sN0);
-        car.v += ACCEL * gt.mul * dragTaper * wheelspinCap * dt;
-      }
-    } else if (throttle < 0) {
-      if (car.v > 0.5) car.v -= D.brake * dt;         // S brakes hard when rolling forward
-      else car.v -= (ACCEL * 0.55) * dt;              // then backs up
-    }
-    if (throttle === 0) {
-      const coast = (D.rolling + D.drag * car.v * car.v) * dt;
-      if (car.v > 0) car.v = Math.max(0, car.v - coast);
-      else if (car.v < 0) car.v = Math.min(0, car.v + coast);
-    }
-    if (handbrake) car.v *= Math.pow(0.34, dt);       // handbrake bleeds forward speed
-    car.v = Math.max(-REV, Math.min(MAXV, car.v));
-    // ---- steering: smooth input + speed-sensitive bicycle-model yaw. This
-    //      keeps low-speed parking controllable and removes instant high-speed
-    //      direction changes while preserving arcade authority. ----
+    const handbrake = !!k[" "];   // SPACE = handbrake: locks the rear axle
     // The tilt/steer seam is a SECOND input surface, so the dead-keyboard rule
     // has to hold here too — an iPad left flat on the passenger's knee must not
     // steer a car nobody is driving.
@@ -4774,129 +4880,68 @@
       if (k["a"]) steer += 1;
       if (k["d"]) steer -= 1;
     }
-    const vmag = Math.abs(car.v);
-    // brake lights: S while rolling forward, or the handbrake at speed
-    setBrake(car, (throttle < 0 && car.v > 0.4) || (handbrake && vmag > 1));
-    const steerRate = steer ? 7.5 : 10.5;
-    car._steerInput = (car._steerInput || 0) + (steer - (car._steerInput || 0)) * Math.min(1, dt * steerRate);
-    const speedNorm = Math.min(1, vmag / Math.max(1, MAXV));
-    const lock = D.steerLock * (1 - speedNorm * 0.48);
-    // HANDBRAKE TURN: locked rears stop fighting the yaw, so the same lock
-    // swings the car harder. Without this the handbrake only bled speed, and
-    // less speed meant LESS yaw: pulling it made the car turn wider.
-    const hbYaw = handbrake && vmag > 4 ? 1.55 : 1;
-    const bicycleYaw = hbYaw * (car.v / Math.max(1.8, D.wheelbase)) * Math.tan(car._steerInput * lock);
-    const yawLimit = TURN * (1 - speedNorm * 0.42) * (handbrake ? 1.35 : 1);
-    const yaw = Math.max(-yawLimit, Math.min(yawLimit, bicycleYaw));
-    if (vmag > 0.3) {
-      car.heading += yaw * dt;
-      if (D.dmg > 0.45) {                              // damaged axle drags the nose to one side
-        if (car._pull == null) car._pull = (car._cside || 1) * (0.18 + Math.random() * 0.12);
-        car.heading += car._pull * (D.dmg - 0.45) * dt * Math.min(1, vmag / 8);
-      }
-      // a blown FRONT tire drags the wheel steadily toward the flat — you hold
-      // opposite lock the whole way home (carDynamics signs it per corner)
-      if (D.flatPull) car.heading += D.flatPull * dt * Math.min(1, vmag / 8);
-      // a dead corner from CRASH damage (sideL/sideR) drags the nose toward
-      // its healthy side, same channel as the flat-tire pull above.
-      if (D.cornerPull) car.heading += D.cornerPull * dt * Math.min(1, vmag / 8);
+    // ---- sync the chassis state with whatever the world did to the car ----
+    // (a wall ricochet, a PIT, a respawn, marine_helm handing a beached hull
+    // back) — forward speed from car.v, sideways from the world velocity.
+    const S = car._dyn || (car._dyn = CD.newState());
+    const DP = car._dynP = CD.params(D, (car._playerCarFeel && car._playerCarFeel.class) || bodyKind(car), car._dynP);
+    if (car._perfGearTorque) DP.torque = car._perfGearTorque;   // modshop Stage N reshapes the band
+    const h0 = car.heading || 0, sh0 = Math.sin(h0), ch0 = Math.cos(h0);
+    S.heading = h0;
+    S.vx = car.v || 0;
+    S.vy = car.vx == null ? 0 : car.vx * ch0 - car.vz * sh0;
+    if (!Number.isFinite(S.vy)) S.vy = 0;
+    if (Number.isFinite(car._yawRate)) S.r = car._yawRate;
+    // a car nobody has driven for a while (just entered, respawned, handed
+    // back by AI) carries stale world velocity / yaw from whoever moved it
+    // last — start it from its forward speed only, never with a phantom slide
+    const nowMs = performance.now();
+    if (car._dynLast == null || nowMs - car._dynLast > 300) { S.vy = 0; S.r = 0; S.shiftT = 0; }
+    car._dynLast = nowMs;
+    // damage pulls were heading nudges (rad/s at speed); on a real chassis they
+    // are a bent-toe STEERING bias, which the tyres then turn into a pull.
+    const spd0 = Math.hypot(S.vx, S.vy);
+    let pullRate = 0;
+    if (D.dmg > 0.45) {
+      if (car._pull == null) car._pull = (car._cside || 1) * (0.18 + Math.random() * 0.12);
+      pullRate += car._pull * (D.dmg - 0.45);
     }
-    // ---- GRIP model: split the PREVIOUS velocity into forward + lateral
-    //      (relative to the now-steered heading), bleed the lateral slip down by
-    //      grip, then rebuild velocity = engine-forward + the surviving slip. Low
-    //      grip (handbrake / a steered hard turn / a worn car) lets the rear step
-    //      out and the car holds a power-slide instead of running on rails. ----
+    pullRate += (D.flatPull || 0) + (D.cornerPull || 0);
+    _dynIn.throttle = throttle > 0 ? throttle : 0;
+    _dynIn.brake = throttle < 0 ? -throttle : 0;
+    _dynIn.handbrake = handbrake;
+    _dynIn.steer = steer;
+    _dynIn.air = !!(car._airborne && (car._airY || 0) > 0.05);
+    _dynIn.flatPull = pullRate ? pullRate * DP.L / Math.max(8, spd0) : 0;
+    CD.step(S, _dynIn, DP, dt);
+    car.heading = S.heading;
+    car.v = S.vx;
+    car._yawRate = S.r;
+    car._steerInput = S.steer;         // passengerseat/air-roll/water wake read this, -1..1
+    car._steerAngle = S.delta;         // road-wheel angle: the front tyres turn on screen
+    car._slipAngle = S.beta;           // body slip: the chase camera looks into the drift
     const fwdX = Math.sin(car.heading), fwdZ = Math.cos(car.heading);
-    const prevX = car.vx == null ? fwdX * car.v : car.vx;
-    const prevZ = car.vz == null ? fwdZ * car.v : car.vz;
-    const latDot = prevX * fwdX + prevZ * fwdZ;        // forward component of old vel
-    let latX = prevX - fwdX * latDot, latZ = prevZ - fwdZ * latDot;   // sideways slip
-    // grip = how fast lateral slip decays. handbrake / power-steer keeps it alive.
-    // loose-tailed cars (muscle, van — D.drift>1) let the rear step out sooner; a
-    // grippy super (D.drift<1) stays planted. throttle-on in a hard turn also
-    // breaks traction a touch (power-oversteer) so muscle cars feel rowdy.
-    const driftMul = D.drift || 1;
-    const power = throttle > 0 && vmag > 10 ? 1.4 * driftMul : 0;
-    const rawSlip = Math.hypot(latX, latZ);
-    const slipRatio = rawSlip / Math.max(3, vmag);
-    // ---- WEIGHT TRANSFER feeds the grip curve (Marco Monster "Car Physics for
-    //      Games"): braking dives the nose (front axle load UP, rear DOWN —
-    //      the rear has LESS grip to resist a slide, which is exactly why
-    //      trail-braking into a corner can snap the tail loose); accelerating
-    //      squats the tail (rear load UP, front DOWN — power-on understeer).
-    //      accelG mirrors the cosmetic pitch-lean's sign convention below so the
-    //      body dive you SEE is the same load shift the tires actually feel.
-    const accelG = throttle > 0 ? -1 : (throttle < 0 && car.v > 0.5 ? 1.3 : 0);
-    // FRICTION CIRCLE: a tire has one shared budget for longitudinal (brake/
-    // accel) + lateral (cornering) force — you can't have 100% of both. Hard
-    // braking (accelG>0, i.e. nose-dive) eats into the rear's lateral budget on
-    // top of the static load shift, so a hard stop mid-corner genuinely induces
-    // a slide instead of just scrubbing speed. brakeDemand is how much of the
-    // rear tire's grip the braking itself is currently spending.
-    const brakeDemand = throttle < 0 && car.v > 0.5 ? Math.min(0.55, vmag / Math.max(8, MAXV) * 0.6) : 0;
-    const rearLoadGrip = 1 - Math.max(-0.22, Math.min(0.3, accelG * 0.18)) - brakeDemand;   // dive/brake steals rear grip
-    // Tire force peaks at modest slip, then falls once the tire is sliding. It
-    // makes a drift recoverable without the rear snapping unrealistically back.
-    // DRIVE_FEEL_V2 raises the sliding-tire floor 0.38→0.5 (a fully lit-up
-    // tire still finds half its grip — arcade-GTA recoverability, not ice).
-    const feel2 = !CBZ.CONFIG || CBZ.CONFIG.DRIVE_FEEL_V2 !== false;
-    const slideGrip = slipRatio <= 0.18 ? 1 : Math.max(feel2 ? 0.5 : 0.38, 1 - (slipRatio - 0.18) * 1.75);
-    // D.grip already carries SURFACE (asphalt/dirt/sand/snow/rain) and
-    // LOCALIZED CORNER DAMAGE (carDynamics folds both in — see surfaceGripMul
-    // + cornerGripMul there) — this block only adds the per-frame DYNAMIC
-    // terms (weight transfer / friction circle / slip curve) on top.
-    // DRIVE_FEEL_V2 ("driving feels too out of control"):
-    //   • grip floor 0.42 → 1.6: the old floor let a broken-loose car keep its
-    //     slide with a ~1.7s half-life — every clipped corner turned into a
-    //     runaway drift. Slides still happen (steer penalty + power-oversteer)
-    //     but recover in a beat unless the handbrake deliberately holds them.
-    //   • steer-at-speed penalty −2.25 → −1.3, and scaled by the ACTUAL
-    //     steering input: the old gate was `car._steerInput &&` — truthiness
-    //     of an exponentially-decaying float that never re-reaches exactly 0,
-    //     so after your first-ever turn the full penalty applied FOREVER
-    //     (plain straight-line cruising drove on buttered rears).
-    const steerMag = Math.abs(car._steerInput || 0);
-    const steerPen = feel2
-      ? (steerMag > 0.05 && vmag > 8 ? -1.3 * driftMul * Math.min(1, steerMag) : 0)
-      : (car._steerInput && vmag > 8 ? -2.25 * driftMul : 0);
-    const gripFactor = handbrake ? 0.75 * D.surfMul
-      : Math.max(feel2 ? 1.6 : 0.42, (D.grip * rearLoadGrip + steerPen - power) * slideGrip);
-    // the handbrake keep is a PER-FRAME factor tuned at 60 fps; raised to dt*60
-    // so a 30 fps phone holds the same slide instead of losing it twice as fast
-    const latKeep = handbrake ? Math.pow(Math.min(0.95, 0.9 + driftMul * 0.02 + (1 - D.surfMul) * 0.5), dt * 60) : Math.max(0, 1 - gripFactor * dt);
-    latX *= latKeep; latZ *= latKeep;
-    const velX = fwdX * car.v + latX, velZ = fwdZ * car.v + latZ;
-    const slip = Math.hypot(latX, latZ);
-    car._drift = slip;
-    // ---- DRIVING JUICE: one number — how hard are the rear tyres working?
-    //      Slides (lateral slip), handbrake lock-ups, a full-brake stop from
-    //      speed and a hard launch in something powerful all count. It drives
-    //      the screech volume, the white smoke and the rubber on the road. ----
-    const burnout = throttle > 0 && vmag > 0.6 && vmag < 7 && D.accel > 32;   // a strong motor lights them up off the line
-    const skidAmt = Math.max(
-      slip > 2.2 && vmag > 6 ? Math.min(1, slip / 8) : 0,
-      handbrake && vmag > 6 ? 0.85 : 0,
-      throttle < 0 && car.v > Math.max(14, MAXV * 0.55) ? 0.55 : 0,           // locked-up panic stop
-      burnout ? 0.6 : 0
-    );
+    const velX = fwdX * S.vx + fwdZ * S.vy, velZ = fwdZ * S.vx - fwdX * S.vy;
+    const vmag = Math.hypot(S.vx, S.vy);
+    car._drift = Math.abs(S.vy);
+    // brake lights: the brake pedal while rolling, or the handbrake at speed
+    setBrake(car, (S.braking && vmag > 0.4) || (handbrake && vmag > 1));
+    // ---- THE TYRES' RECEIPT: one honest slip number from the chassis ------
+    // lateral slide past the peak, wheelspin, the locked handbrake rear and
+    // brakes at the limit. It drives rubber, smoke, dust and the squeal.
+    const skidAmt = S.skid;
     if (skidAmt > 0.3) {                               // white smoke boils off BOTH rears
       car._tireT = (car._tireT || 0) + dt;
       if (car._tireT > 0.13 - skidAmt * 0.06) { car._tireT = 0; emitTireSmoke(car, 1); emitTireSmoke(car, -1); }
     }
-    // ALL FOUR SHOT OUT: grinding along on bare rims — a constant cough of
-    // shredded-rubber/rim smoke off both rears whenever you force it to move
+    // ALL FOUR SHOT OUT: grinding along on bare rims
     if (car._flats === 15 && vmag > 6) {
       car._rimT = (car._rimT || 0) + dt;
       if (car._rimT > 0.16) { car._rimT = 0; emitTireSmoke(car, 1); emitTireSmoke(car, -1); }
     }
     laySkids(car, skidAmt, fwdX, fwdZ);
     // ---- POOLED fading skid-TRAILS + drift/burnout DUST (systems/skidmarks.js
-    //      + systems/dustfx.js) — feature-detected, ADDITIVE to the opaque
-    //      laySkids() rubber above; reuses the exact same skidAmt slip signal
-    //      so both effects only ever run while the tyres are actually working.
-    //      Smallest possible hook: compute the two rear-wheel world seats (same
-    //      rb/tw geometry laySkids already derives) and hand them to the pooled
-    //      systems, which own all their own pooling/eviction/fade internally.
+    //      + systems/dustfx.js) — feature-detected, additive to laySkids().
     if (skidAmt > 0.3 && (CBZ.cityBeginSkid || CBZ.cityDriftDust)) {
       const rd = vehicleDims(car);
       const rb2 = (rd.wheelbase || 2.7) * 0.45;
@@ -4913,36 +4958,21 @@
         if (!two2) CBZ.cityDriftDust(wrx, 0.15, wrz, { amt: skidAmt });
       }
     } else if (CBZ.cityEndSkid) { CBZ.cityEndSkid(car, 0); CBZ.cityEndSkid(car, 1); }
-    // ---- ENGINE VOICE: revs climb through the fake gear band, snap down on
-    //      the upshift. Reverse whines low; revving at a standstill screams.
-    //      gear/revFrac come from the SAME gearFor() the throttle integrator
-    //      above reads (via gearTorqueMul), so a downshift's extra grunt and
-    //      the note you hear are always the same gear, every frame. ----
+    // ---- ENGINE VOICE: the chassis's own rpm (true in-gear ratio, clutch
+    //      slip off the line, flare when the tyres light up, the dip on the
+    //      upshift) and the tyres' squeal, which starts before the slide. ----
+    car._gear = S.gear;
+    car._rev = S.rpm;                 // the cabin tach reads the same rev the engine voice gets
     if (CBZ.carAudio) {
-      const sN = Math.min(1, vmag / Math.max(1, MAXV));
-      const gf = gearFor(sN);
-      const gear = gf.gear;
-      let rev = car.v < 0 ? Math.min(1, vmag / REV) * 0.4 : gf.revFrac;
-      rev = 0.06 + Math.max(0, Math.min(1, rev)) * 0.9;
-      if (throttle > 0 && vmag < 2.5) rev = Math.max(rev, 0.5);   // revving it off the line / mid-burnout
-      const shifted = car._gear != null && gear > car._gear && throttle > 0;
-      car._gear = gear;
-      CBZ.carAudio.update(rev, throttle > 0 ? 1 : 0, Math.max(skidAmt, car._scrapeAmt || 0), engineFlavor(car), shifted);   // a wall grind screams too
+      CBZ.carAudio.update(0.06 + S.rpm * 0.9, S.throttleOut, Math.max(S.squeal, car._scrapeAmt || 0), engineFlavor(car), S.shifted);   // a wall grind screams too
     }
-    // ---- WEIGHT TRANSFER (visual + physical — accelG is the SAME load-shift
-    //      signal the grip model above already consumed, so the dive/squat you
-    //      SEE here is exactly the load shift the tires felt this frame, not a
-    //      decorative coincidence): the body PITCHES (squat on throttle, dive
-    //      on brake) and ROLLS into a turn, eased so it reads as mass shifting.
-    //      softer cars (high D.roll) lean more. Touches only the group rotation
-    //      x/z, which the crash crumple leaves alone. ----
-    const pitchTarget = Math.max(-0.07, Math.min(0.09, accelG * 0.05 * Math.min(1, vmag / 14)));
-    // body leans OUTWARD of the turn: steering at speed plus any tail-out slip.
-    const latG = car._steerInput * Math.min(1, vmag / 12) + (latX * fwdZ - latZ * fwdX) * 0.16;
-    let rollTarget = Math.max(-0.16, Math.min(0.16, latG * 0.06 * (D.roll || 0.6)));
-    let pitchT2 = pitchTarget;
-    // the body SITS on its blown corner(s) — the lean rides the same eased
-    // weight-transfer channel, so it composes with squat/dive/roll for free
+    // ---- THE BODY ON ITS SPRINGS: pitch / roll / heave from the specific
+    //      forces the tyres just produced (cardyn.suspStep). Applied to the
+    //      body VISUAL below, never the group — the wheels stay on the road. ----
+    const sp = car._susp || (car._susp = CD.newSusp());
+    CD.suspStep(sp, _dynIn.air ? 0 : S.ax, _dynIn.air ? 0 : S.ay, DP, dt);
+    // the GROUP only carries what moves the wheels too: the sag of a blown tyre
+    let pitchT2 = 0, rollTarget = 0;
     if (car._flats) {
       const FL = flatLean(car);
       if (FL) { pitchT2 += FL.pitch; rollTarget += FL.roll; }
@@ -4976,6 +5006,8 @@
       if (car._airY <= 0 && car._airVy < 0) {
         const impactV = -car._airVy;
         car._airY = 0; car._airVy = 0; car._airborne = false;
+        // the body slams down onto its springs and bounces back up
+        if (car._susp && CBZ.carDyn) CBZ.carDyn.suspKick(car._susp, -impactV * LAND_HEAVE);
         if (impactV > 10) {
           damageEngine(car, Math.max(0, (impactV - 9) * 1.8), false);
           if (CBZ.shake) CBZ.shake(Math.min(1.4, impactV * 0.07));
@@ -5229,6 +5261,18 @@
       car._airPitch = (car._airPitch || 0) * Math.max(0, 1 - dt * 7);
       car._airRoll = (car._airRoll || 0) * Math.max(0, 1 - dt * 7);
     }
+    // KERBS AND CRESTS: the sprung body lags the ground's vertical
+    // acceleration (the wheels follow it, the body is thrown against its
+    // springs), then settles through the same damper.
+    if (!car._airborne && dt > 0) {
+      const gv = car._suspGy == null ? 0 : (rideY - car._suspGy) / dt;
+      const ga = car._suspGv == null ? 0 : (gv - car._suspGv) / dt;
+      car._suspGy = rideY; car._suspGv = gv;
+      if (sp && Math.abs(ga) < 400) sp.hv -= Math.max(-40, Math.min(40, ga)) * BUMP_HEAVE * dt;
+    } else { car._suspGy = null; car._suspGv = null; }
+    // the BODY rides its springs; the wheels stay planted and the fronts steer
+    if (!isHull) bodyAttitude(car, sp.p, sp.r, sp.h, car._steerAngle || 0);
+    else bodyAttitude(car, 0, 0, 0, 0);
     if (vmag > 6) runOver(car, vmag);
     P.pos.set(car.pos.x, rideY, car.pos.z);
     // THE DRIVER. CAR_DRIVER_VISIBLE seats the player's real, dressed rig at
@@ -5243,16 +5287,17 @@
     }
     P.speed = vmag;
     if (CBZ.cityUpdatePlayerCarVisual) CBZ.cityUpdatePlayerCarVisual(car, dt);
+    // CHASE YAW: behind the car, swung part-way toward where it is actually
+    // TRAVELLING when it slides (you see the corner exit mid-drift, not the
+    // kerb the nose points at). Reversing keeps the boom behind the heading —
+    // the velocity points the other way there, and following it would flip
+    // the whole view 180 degrees.
     if (CBZ.cam && vmag > 3 && !(CBZ.camRecenterSuspended && CBZ.camRecenterSuspended())) {
-      // IN A SLIDE THE CAMERA LOOKS WHERE THE CAR IS GOING, not where its nose
-      // points: chasing the nose swung the view sideways on every drift and you
-      // lost the road. Forward only; reversing keeps the view behind the car.
-      let target = car.heading + Math.PI;
-      if (car.v > 3) {
-        const velH = Math.atan2(car.vx || 0, car.vz || 0);
-        target = CBZ.lerpAngle(car.heading, velH, 0.6) + Math.PI;
-      }
-      CBZ.cam.yaw = CBZ.lerpAngle(CBZ.cam.yaw, target, 1 - Math.pow(0.02, dt));
+      const slip = car.v > 2 ? Math.max(-CAM_DRIFT_MAX, Math.min(CAM_DRIFT_MAX, (car._slipAngle || 0) * CAM_DRIFT_LOOK)) : 0;
+      // body slip is measured toward the +heading side (the side +steer turns to)
+      const target = car.heading + slip + Math.PI;
+      const rate = CAM_YAW_RATE + CAM_YAW_RATE_V * vmag;
+      CBZ.cam.yaw = CBZ.lerpAngle(CBZ.cam.yaw, target, 1 - Math.exp(-rate * dt));
     }
     // chop shop: idle a stolen/owned car in the bay to cash it out
     chopCheck(car, vmag, dt);
@@ -5740,7 +5785,60 @@
   // simulation the instant it matters (turning, wrecked, wanted, fleeing, or
   // back on screen). This is the single biggest CPU saving in the traffic loop.
   let _vframe = 0, _vslice = 0;
-  const FARCAR_D2 = 150 * 150;     // == the group-visibility cull distance below
+  const FARCAR_D2 = 150 * 150;
+  /* PARKED CARS SLEEP. ~500 cars live in cityCars and most are parked; both
+     per-frame passes (37 AI, 38 damage/occupants) walked every one of them at
+     every tier (measured 40-75 ms/frame at 4x CPU throttle on the iPad
+     profile). A settled, undamaged, unoccupied parked car past SLEEP_D is put
+     in `sleepers`, hidden (the same 150 m cull the moving traffic uses) and
+     skipped by both passes. Waking is a round-robin slice of the sleep list
+     per frame (never a scan of all 500) plus wakeCar() at every door into a
+     car's state: damage, fire, tyres, entry, carjack, hold, scrap. */
+  const SLEEP_D2 = 150 * 150, WAKE_D2 = 140 * 140, WAKE_SLICE = 24;
+  const sleepers = [];
+  let _wakeCursor = 0;
+  /* THREE STATES, ONE DOOR. A parked car is AWAKE (draws itself), PROXIED
+     (city/carinstances.js draws it inside a shared instanced pool, 35-150 m)
+     or ASLEEP (hidden, past 150 m). Proxied and asleep both skip the two
+     per-car passes; wakeCar() is the one exit from either, so every wake
+     hook below (damage, fire, tyres, entry, carjack, hold, scrap, doors)
+     brings a proxied car back as its real self too. */
+  function sleepCar(c) {
+    if (c._sleep) return;
+    if (c._proxy && CBZ.carInstances) CBZ.carInstances.release(c);
+    c._sleep = true;
+    if (c.group) c.group.visible = false;
+    sleepers.push(c);
+  }
+  function wakeCar(c) {
+    if (!c) return;
+    if (c._proxy && CBZ.carInstances) CBZ.carInstances.release(c);
+    if (!c._sleep) return;
+    c._sleep = false;
+    if (c.group) c.group.visible = true;
+    const i = sleepers.indexOf(c);
+    if (i >= 0) { sleepers[i] = sleepers[sleepers.length - 1]; sleepers.pop(); }
+  }
+  CBZ.cityWakeCar = wakeCar;
+  CBZ.citySleepCar = sleepCar;
+  function sleepable(c) {
+    return !c.player && !c.dead && !c.ai && !c._heldBy && !c._runaway && !(c.wreckT > 0) &&
+      !c._onFire && !c._smoking && !c._husk && !(c.occ && c.occ.jacked) && !c.npcDriver;
+  }
+  CBZ.cityCarSleepable = sleepable;     // carinstances.js re-checks it on every proxy, every frame
+  const PROXY_IN2 = 35 * 35;            // == carinstances.js PROXY_IN (it re-checks the band itself)
+  function wakeSlice(camx, camz) {
+    const n = Math.min(WAKE_SLICE, sleepers.length);
+    for (let k = 0; k < n; k++) {
+      if (!sleepers.length) return;
+      if (_wakeCursor >= sleepers.length) _wakeCursor = 0;
+      const c = sleepers[_wakeCursor];
+      const dx = c.pos.x - camx, dz = c.pos.z - camz;
+      if (c.dead || !sleepable(c) || dx * dx + dz * dz < WAKE_D2) wakeCar(c);   // swap-remove: this index now holds another sleeper
+      else _wakeCursor++;
+    }
+  }
+  CBZ.citySleepAudit = function () { return { sleeping: sleepers.length, cars: (CBZ.cityCars || []).length }; };     // == the group-visibility cull distance below
 
   // ---- CAR-AHEAD broad phase (the O(n²) killer) -----------------------------
   // carAhead() below is the traffic loop's hot path: it scans the ENTIRE car
@@ -5837,7 +5935,9 @@
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     _vframe++;
     rebuildCarGrid();   // ONE rebuild per frame; carAhead queries it per car
+    wakeSlice(camx, camz);
     for (const c of CBZ.cityCars) {
+      if (c._sleep || c._proxy) continue;
       dt = baseDt;     // reset each car (a strided far car overrides this below)
       /* A CHAINED-DOWN LOAD HAS NO GROUND UNDER IT. This pass runs at 37 and
          vehicle_hold.js writes strapped freight at 12.7, so anything this loop
@@ -5880,9 +5980,11 @@
           // traffic). Near cars stay live for door/entry/impact animation.
           const settled = c._parkX === c.pos.x && c._parkZ === c.pos.z && c._parkH === c.heading;
           parkSeat(c);
-          if (settled && CBZ.CONFIG.CAR_MATRIX_HOLD !== false && c.group) {
-            const pdx = c.pos.x - camx, pdz = c.pos.z - camz;
-            if (pdx * pdx + pdz * pdz > 3600) c.group._cbzMatrixOwnedFrame = CBZ._matrixOwnStamp;
+          if (settled && c.group) {
+            const pdx = c.pos.x - camx, pdz = c.pos.z - camz, pd2 = pdx * pdx + pdz * pdz;
+            if (pd2 > SLEEP_D2 && sleepable(c)) { sleepCar(c); continue; }
+            if (pd2 > PROXY_IN2 && sleepable(c) && CBZ.carInstances && CBZ.carInstances.acquire(c)) continue;
+            if (pd2 > 3600 && CBZ.CONFIG.CAR_MATRIX_HOLD !== false) c.group._cbzMatrixOwnedFrame = CBZ._matrixOwnStamp;
           }
         }
         continue;

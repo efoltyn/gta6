@@ -1095,7 +1095,7 @@
     const cars = CBZ.game.mode === "city" && CBZ.cityCars;
     if (cars) for (let i = 0; i < cars.length; i++) {
       const c = cars[i];
-      if (!c || c.dead || c.player || !c.pos || !c.group || c.group.visible === false) continue;
+      if (!c || c.dead || c.player || !c.pos || !c.group || (c.group.visible === false && !c._proxy)) continue;   // proxied = drawn instanced
       const dims = c.dims || {};
       const cy = (c.pos.y || 0) + (dims.height || 1.8) * 0.5;
       const dx = c.pos.x - from.x, dy = cy - from.y, dz = c.pos.z - from.z;
