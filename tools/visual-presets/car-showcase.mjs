@@ -61,7 +61,7 @@ const subjects = [
   {
     id: "roll",
     label: "06 · Mid-turn: body roll",
-    kind: "live", live: "roll", model: "Bison Stampede",
+    kind: "live", live: "roll", model: "Voltra Surge",
     focus: "Driven down the avenue and steered hard. The body should lean out of the turn on its springs while the wheels stay on the road.",
   },
   {
@@ -443,7 +443,12 @@ async function stageCarShowcase(input) {
   };
   // the seat model if this build has one, else the verbs it does have
   const seatLayout = function (car) {
-    try { if (CBZ.carSeatDebug && CBZ.carSeatDebug.layout) return CBZ.carSeatDebug.layout(car) || null; } catch (e) {}
+    try {
+      if (CBZ.carSeatDebug && CBZ.carSeatDebug.layout) {
+        const L0 = CBZ.carSeatDebug.layout(car);
+        return L0 ? (Array.isArray(L0) ? L0 : L0.seats) : null;
+      }
+    } catch (e) {}
     return null;
   };
   const pickSeat = function (layout, want) {
@@ -486,14 +491,14 @@ async function stageCarShowcase(input) {
   let metrics = {}, camOut = null, how = "";
   if (S.live === "roll") {
     try { if (CBZ.dayPhase) CBZ.dayPhase(0.40); } catch (e) {}
-    const car = L.car = spawnOnRoad(S.model || "Bison Stampede", 0.3);
+    const car = L.car = spawnOnRoad(S.model || "Voltra Surge", 0.35);
     if (!car) { bigText = "NO CAR"; paint(); return { ok: true, subject: S.id, staged: false }; }
     how = sitIn(car, "driver");
     try { if (CBZ.carFpSetView) CBZ.carFpSetView(false); } catch (e) {}
     dismissHelp();
     // launch, cruise, then a hard left at ~45 mph
-    keys.w = true; tick(150);
-    keys.a = true; tick(26);
+    keys.w = true; tick(260);
+    keys.a = true; tick(24);
     const grp = car.group;
     let body = grp;
     const rz = function (o) { return o ? o.rotation.z : 0; };

@@ -1111,7 +1111,9 @@
     // ---- PILLARS, handles, the sill -------------------------------------
     [1, -1].forEach(function (s) {
       const xIn = s * (halfW - 0.11), xTop = s * (roofW * 0.5 - 0.075);
-      A.bar([xIn, beltY - 0.02, zF - 0.05], [xTop, roofY - 0.065, zTF - 0.01], 0.06, 0.04, TONE.head);   // A-pillar
+      // no A-pillar trim: pulled inboard of the curved loft windscreen it read,
+      // from both front seats, as a second pale pillar floating in the glass a
+      // hand's width from the body's own (measured in the car-showcase FP plates)
       A.bar([xIn, beltY - 0.02, zR + 0.05], [xTop, roofY - 0.065, zTR + 0.01], 0.07, 0.04, TONE.head);   // C-pillar
       A.box(0.045, gh - 0.06, 0.10, s * ((halfW - 0.09) + (roofW * 0.5 - 0.07)) * 0.5, beltY + gh * 0.5 - 0.03, bpZ, TONE.head, 0, 0, s * Math.atan2((halfW - 0.09) - (roofW * 0.5 - 0.07), gh));   // B-pillar
       // grab handles over every passenger door
