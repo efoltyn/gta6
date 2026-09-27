@@ -153,6 +153,9 @@
       [0.88, 1.00, "mag", "support", 0.06],
     ],
   };
+  // the same choreography, read by fpsmode.js so the FIRST-PERSON off hand
+  // walks the identical path through the viewmodel's anchors (one table, two views)
+  CBZ.gunReloadChoreo = function (style) { return CHOREO[style] || CHOREO.mag; };
   // when the old magazine physically leaves the gun, per style (null = never)
   const EJECT_AT = { mag: 0.20, cylinder: 0.26, belt: 0.40, shell: null, rocket: null };
   // when a fresh one is in the fist: [grabbed, seated]

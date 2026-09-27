@@ -17,10 +17,10 @@
    on the CALLER's material table (fpsmode flips flags on its own table, so
    an NPC's gun never shares a material object with the viewmodel).
 
-   THE HAND: in first person the viewmodel has no other hand, so the grip
-   hand is part of the model — shaped as a hand (palm, wrapped fingers,
-   thumb, trigger finger, wrist) on mat.skin, which fpsmode tints to the
-   player's skin and which the gun room and weapon-scale skip.
+   THE HAND: the firing hand is part of the model (systems/fphands.js's one
+   hand, closed on the grip) on mat.skin, which fpsmode tints to the
+   player's skin and which the gun room and weapon-scale skip. fpsmode grows
+   the forearm out of its wrist and puts the off hand on userData.grips.
 ============================================================ */
 (function () {
   "use strict";
@@ -166,46 +166,45 @@
     return pts;
   }
 
-  /* The firing hand around a pistol grip, on mat.skin. `at` = centre of the
-     top of the grip, `rake` = grip angle back from vertical (radians), gripW /
-     gripD = the grip's width and front-to-back depth there, `size` scales the
-     whole hand, `trigger` = [y, z] of the trigger face (the index finger lies
-     along the frame's right side and curls onto it). */
+  /* The firing hand around a pistol grip, on mat.skin — systems/fphands.js's
+     ONE hand (real palm, jointed fingers, opposed thumb, wrist), closed in its
+     pistol pose. `at` = centre of the top of the grip, `rake` = grip angle
+     back from vertical (radians), gripW / gripD = the grip's width and
+     front-to-back depth there, `size` scales the whole hand, `trigger` = [y, z]
+     of the trigger face (the index finger's knuckle sits level with it and
+     the finger reaches forward onto it). The hand's origin is the WRIST and it
+     is flagged userData.fpGripHand, so fpsmode can grow the forearm out of it.
+     These models are ~2.1x real scale, so the hand is too. */
+  const _hv = { a: null, b: null };
   function hand(ctx, parent, h) {
     // a rack/shop display has no hand; a caller whose rig draws its own
-    // hands (NPC props) can pass ctx.noHand to skip the six meshes
+    // hands (NPC props) passes ctx.noHand
     if (ctx.display || ctx.noHand || !ctx.mat.skin) return null;
-    const THREE = ctx.THREE, skin = ctx.mat.skin, box = ctx.box;
-    const k = h.size || 1, w = h.gripW, d = h.gripD;
+    const FPH = CBZ.fpHands;
+    if (!FPH) return null;
+    const THREE = ctx.THREE;
+    if (!_hv.a) { _hv.a = new THREE.Vector3(); _hv.b = new THREE.Vector3(); }
+    const k = (h.size || 1) * 2.1, w = h.gripW, d = h.gripD;
     const g = new THREE.Group();
     g.position.set(0, h.at[0], h.at[1]);
     g.rotation.x = -(h.rake || 0);
     parent.add(g);
-    // palm + back of the hand: right flank and the backstrap, hanging down the grip
-    box(g, w * 0.55 + 0.05 * k, 0.125 * k, d * 0.85 + 0.03 * k, skin, w * 0.30 + 0.012 * k, -0.075 * k, d * 0.18);
-    // web of the hand, high under the tang
-    box(g, w + 0.02 * k, 0.045 * k, 0.05 * k, skin, 0.004, -0.018 * k, d * 0.5 + 0.012 * k);
-    // three fingers wrapped across the front strap: one profile, three
-    // rounded knuckles stacked down the grip, tips around to the left
-    const fp = [], f0 = d * 0.5 - 0.012 * k, fh = 0.036 * k, reach = 0.046 * k;
-    for (let i = 0; i < 3; i++) {
-      const top = -0.045 * k - i * fh;
-      fp.push([f0, top - 0.002 * k], [f0 + reach * 0.75, top], [f0 + reach, top - fh * 0.3],
-        [f0 + reach, top - fh * 0.7], [f0 + reach * 0.8, top - fh + 0.002 * k]);
-    }
-    fp.push([f0, -0.045 * k - 3 * fh + 0.004 * k]);
-    prof(ctx, g, "hand.fingers:" + k + ":" + d + ":" + w, fp, w + 0.05 * k, skin, { bevel: 0.006 * k, x: -0.004 });
-    // thumb along the left of the frame, pointing at the target
-    box(g, 0.032 * k, 0.032 * k, d + 0.04 * k, skin, -w * 0.5 - 0.013 * k, -0.020 * k, -0.012 * k, h.rake || 0);
-    // wrist leaving toward the camera, just under the bore line
-    box(g, 0.085 * k, 0.090 * k, 0.15 * k, skin, w * 0.2, -0.085 * k, d * 0.5 + 0.075 * k, (h.rake || 0) * 0.85);
-    // trigger finger: along the right of the frame, onto the trigger face
-    if (h.trigger) {
-      const ty = h.trigger[0], tz = h.trigger[1];
-      const sx = w * 0.5 + 0.012 * k, len = Math.abs(tz - (h.at[1] - d * 0.45)) + 0.02 * k;
-      box(parent, 0.024 * k, 0.026 * k, len, skin, sx * 0.9, ty, (tz + h.at[1] - d * 0.45) / 2 + 0.01 * k, 0, 0.12);
-    }
-    return g;
+    // grip frame: +Y up the grip, -Z toward the muzzle, +X the gun's right.
+    // Index/thumb side UP the grip, back of the hand to the right and a touch
+    // forward, so the fingers run forward-left round the front strap.
+    const hd = FPH.makeHand(1, "pistol", ctx.mat.skin);
+    FPH.orientGrip(1, _hv.a.set(0, 1, 0), _hv.b.set(1, 0, -0.2), hd.quaternion);
+    hd.scale.setScalar(k);
+    const F = FPH.FINGERS[0];
+    // the index knuckle: on the right flank, level with the trigger, far
+    // enough back that the finger's length lands on the trigger face
+    const idxY = h.trigger ? Math.min(-0.012, (h.trigger[0] - h.at[0]) * Math.cos(h.rake || 0)) : -0.028 * k;
+    const target = _hv.b.set(w * 0.5 + (FPH.PALM.th * 0.5 + 0.002) * k, idxY, -d * 0.5 + 0.034 * k);
+    _hv.a.set(F.x, 0, F.z).multiplyScalar(k).applyQuaternion(hd.quaternion);
+    hd.position.copy(target).sub(_hv.a);
+    hd.userData.fpGripHand = true;
+    g.add(hd);
+    return hd;
   }
 
   CBZ.gunKit = function (ctx) {
@@ -283,7 +282,7 @@
     const bx = (front[6][0] + back[0][0]) / 2, by = (front[6][1] + back[0][1]) / 2;
     box(g, 0.072, 0.016, 0.118, mat.black, 0, by - 0.004, -bx + 0.004, -R);
 
-    // the hand on the grip (first person has no other)
+    // the firing hand on the grip
     K.hand(g, { at: [-0.036, -0.030], rake: R, gripW: 0.068, gripD: 0.118, size: 1.0, trigger: [-0.062, -0.118] });
 
     g.userData.muzzle = new THREE.Vector3(0, 0.036, -0.424);

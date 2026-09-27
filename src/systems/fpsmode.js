@@ -417,11 +417,68 @@
     return builder ? builder(appearanceCtx) : fallbackAppearance();
   }
 
+  /* THE OFF HAND, IN FIRST PERSON. Every weapon already publishes where its
+     support hand goes (userData.grips.support, read by gunhands.js for the
+     third-person body) — first person simply never drew one, so a rifle was
+     held by one floating hand. The support hand is systems/fphands.js's hand,
+     closed round what is there: cupped under a handguard (index forward,
+     back of the hand down-left), round a vertical foregrip, or wrapped over
+     the firing fist on a two-hand pistol hold. It is a child of the model
+     (of the pump on a pump gun, so it racks with it); the arm behind it is
+     solved per frame (poseFpArms). A melee weapon gets its fist here too. */
+  const FPH = CBZ.fpHands || null;
+  const SUPPORT_K = 1.95;            // hand size in model units (the guns are ~2.1x real)
+  const _ofA = new THREE.Vector3(), _ofB = new THREE.Vector3(), _ofC = new THREE.Vector3();
+  function fitOffHand(model, w) {
+    if (!FPH || !mat.skin) return;
+    let fire = null;
+    model.traverse((o) => { if (!fire && o.userData && o.userData.fpGripHand) fire = o; });
+    if (!fire && w && w.melee) {
+      // a shank / blade: a hammer fist round the wrap, thumb toward the point,
+      // knuckles up and to the left, forearm leaving to the lower right
+      fire = FPH.attachGrip(model, {
+        side: 1, pose: "grip", scale: 1.6,
+        center: _ofC.set(0, 0.004, 0.06),
+        axis: _ofA.set(0, 0.1, -1), dorsal: _ofB.set(-0.84, -0.5, 0.1),
+      }, mat.skin);
+      fire.userData.fpGripHand = true;
+    }
+    model.userData.fpFire = fire;
+    const gr = model.userData.grips, sp = gr && gr.support;
+    if (!sp) { model.userData.fpSupport = null; return; }
+    let spec;
+    if (sp.z > -0.2 && sp.x < -0.04) {
+      // two-hand pistol: the off hand closes over the firing fingers from the left
+      spec = { side: -1, pose: FPH.POSES.cupover, scale: SUPPORT_K,
+        axis: _ofA.set(0.05, 0.93, -0.36), dorsal: _ofB.set(-0.95, -0.1, -0.25) };
+    } else if (sp.y < -0.1) {
+      // a vertical foregrip (RPG, grenade launcher): index on top, palm round the front
+      spec = { side: -1, pose: FPH.POSES.grip, scale: SUPPORT_K,
+        axis: _ofA.set(0, 1, -0.12), dorsal: _ofB.set(-1, 0, -0.2) };
+    } else {
+      // a handguard: cupped under it, index forward, back of the hand down-left
+      spec = { side: -1, pose: FPH.POSES.support, scale: SUPPORT_K,
+        axis: _ofA.set(-0.35, 0, -0.94), dorsal: _ofB.set(-0.3, -0.95, 0) };
+    }
+    // the grip point is where the PALM touches; the hand closes round an axis
+    // one wrap-radius beyond it, away from the back of the hand
+    const R = (spec.pose.wrap || 0.02) * SUPPORT_K;
+    spec.center = _ofC.copy(sp).addScaledVector(_ofB.clone().normalize(), -R);
+    const holder = (model.userData.pump && model.userData.pump.parent === model) ? model.userData.pump : model;
+    if (holder !== model) spec.center.sub(holder.position);
+    const hand = FPH.attachGrip(holder, spec, mat.skin);
+    hand.userData.pose0 = spec.pose;
+    hand.userData.baseQ = hand.quaternion.clone();
+    hand.userData.basePos = hand.position.clone();
+    model.userData.fpSupport = hand;
+  }
+
   WEAPONS.forEach((w, i) => {
     const viewModel = buildWeaponModel(w);
     if (!viewModel.userData.muzzle) viewModel.userData.muzzle = new THREE.Vector3(0, 0.05, -0.58);  // every gun MUST have a barrel tip (else tracers fall back to the head)
     viewModel.visible = i === 0;
     viewModel.scale.setScalar(1.28);
+    fitOffHand(viewModel, w);
     viewModel.traverse((obj) => {
       obj.renderOrder = 1000;
       if (obj.material) {
@@ -512,106 +569,82 @@
   worldMuzzle.visible = false;
   CBZ.scene.add(worldMuzzle);
 
-  /* UNARMED FIRST PERSON — TWO HANDS THAT FIGHT.
-     This was one Minecraft hand, bottom-right, that slid 0.5 m forward and
-     back on every swing, whatever the swing was; the fist reached full
-     extension 0.08 s in and was already halfway home when systems/combat.js
-     landed the hit at 0.15 s. The third-person rig throws a real jab, cross,
-     hook and uppercut (entities/character.js) — but in first person the rig
-     is hidden, so none of that was ever on screen.
+  /* UNARMED FIRST PERSON — TWO HANDS THAT FIGHT, ON TWO REAL ARMS.
+     A relaxed right hand when nothing is happening; both fists up in a guard
+     the moment a man squares up to you, you swing, or you take one; each
+     punch kind has its own arc, timed to the SAME envelope the third-person
+     rig uses so the fist is at full reach on the frame combat.js bills the
+     hit; a landed hit jolts the fist back; a hit taken tucks the guard.
 
-     Now: a relaxed right hand when nothing is happening (the city keeps the
-     look it had); both fists up in a boxing guard the moment a man squares
-     up to you, you swing, or you take one; each punch kind gets its own arc,
-     timed to the SAME envelope the rig uses so the fist is at full reach on
-     the frame combat.js bills the hit; a landed hit jolts the fist back; a
-     hit taken tucks the guard; the lens rolls a few degrees with the torso. */
+     WHY THE ARMS USED TO CROSS. Each fist was a Group whose forearm box was a
+     RIGID CHILD of the fist, so the forearm could only ever point where the
+     fist's hand-typed Euler pointed it — and the guard table yawed both fists
+     INWARD (ry -0.50 right, +0.55 left). Both 0.28 m forearm tails therefore
+     converged on the midline (x +0.03 and -0.04) and the two 0.16 m boxes
+     overlapped into an X at the bottom of the frame. The hook was worse: it
+     ended the right fist at x -0.12, inside the left guard at -0.16, so the
+     right forearm went straight through the left one.
+
+     Now the tables say only WHERE THE WRIST IS (vm space), how the fist is
+     rolled about the forearm and how the wrist bends. The arm is SOLVED:
+     systems/fphands.js two-bone IK from a fixed shoulder to that wrist with
+     the elbow pole DOWN and OUT on its own side. A fist may cross the
+     midline (a hook ends in front of the chin); an elbow never does, so the
+     forearms cannot pass through each other. tools/fp-hands-check.mjs
+     asserts it for every pose. */
   const fists = new THREE.Group();
-  const HAND_REST = { x: 0.26, y: -0.26, z: 0.04, rx: 0.16, ry: -0.34, rz: -0.12 };
-  const LEFT_DOWN = { x: -0.30, y: -0.60, z: 0.10, rx: 0.10, ry: 0.30, rz: 0.10 };
+  // roll: positive turns the thumb up (either hand); bend: + = back of the hand up
+  const HAND_REST = { x: 0.26, y: -0.26, z: 0.04, roll: 0.95, bend: -0.20 };
+  const LEFT_DOWN = { x: -0.30, y: -0.60, z: 0.10, roll: 0.95, bend: -0.20 };
   // vm sits 0.66 m out; a guard wrist at +0.20 is 0.46 m from the eye — INSIDE
   // an opponent's face (0.55-0.70 m at fist range), or his head hides your hands
   // vm space: the root sits 0.30 m under the eye, so chin height is y ≈ +0.15
-  const GUARD_R = { x: 0.16, y: 0.12, z: 0.20, rx: 0.62, ry: -0.50, rz: -0.45 };
-  const GUARD_L = { x: -0.19, y: 0.10, z: 0.15, rx: 0.58, ry: 0.55, rz: 0.45 };
-  // THE FIST WEARS WHAT YOU WEAR. This sleeve was born 0xff7a1a — the prison
-  // jumpsuit entities/player.js BUILDS the rig in — and never moved again, so
-  // every outfit in the game was contradicted by the one arm you can always
-  // see. The literals stay as the floor (an undressed player IS in the jumpsuit,
-  // so nothing about the opening minutes changes); dressFists() below re-reads
-  // them off the live body.
+  const GUARD_R = { x: 0.17, y: 0.10, z: 0.20, roll: 1.15, bend: 0.10 };
+  const GUARD_L = { x: -0.19, y: 0.09, z: 0.15, roll: 1.15, bend: 0.10 };
+  // THE FIST WEARS WHAT YOU WEAR: hand (skin or glove), forearm (bare for a
+  // tee, a sleeve with a cuff for a jacket), upper arm (the shirt) — read off
+  // the live body every frame by fphands.dressOf (heritage skin comes through
+  // the rig). The jumpsuit literals are only the floor with no body at all.
   const FIST_SLEEVE_FALLBACK = 0xff7a1a;
   const FIST_SKIN_FALLBACK = 0xf0c39a;
   const fistSleeve = new THREE.MeshLambertMaterial({ color: FIST_SLEEVE_FALLBACK });
-  const fistKnuckle = new THREE.MeshLambertMaterial({ color: 0xe7b58c });
-  function buildHand(side) {
-    const g = new THREE.Group();                 // origin = the wrist
-    // SHORT forearm: at guard depth (0.46 m) a 0.40 m forearm reached the near
-    // plane and became a wall across the frame; 0.26 ends at 0.20 m, angled down
-    const forearm = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.15, 0.26), fistSleeve);
-    forearm.position.set(0, 0, 0.15);            // recedes toward the camera
-    const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.175, 0.165, 0.05), fistSleeve);
-    cuff.position.set(0, 0, 0.03);
-    const wrist = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.12, 0.09), mat.skin);
-    wrist.position.set(0, 0, -0.03);
-    const fist = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.19, 0.19), mat.skin);
-    fist.position.set(0, 0.005, -0.165);
-    const fingers = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.12, 0.075), fistKnuckle);
-    fingers.position.set(0, -0.02, -0.285);      // the curled fingers, front face
-    const knuckles = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.055, 0.07), fistKnuckle);
-    knuckles.position.set(0, 0.085, -0.24);      // the ridge that reads as a fist
-    const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.085, 0.13), mat.skin);
-    thumb.position.set(-side * 0.115, 0.03, -0.15);   // on the inner side, over the fingers
-    g.add(forearm, cuff, wrist, fist, fingers, knuckles, thumb);
-    g.userData.side = side;
-    return g;
-  }
-  const handR = buildHand(1), handL = buildHand(-1);
-  handR.position.set(HAND_REST.x, HAND_REST.y, HAND_REST.z);
-  handR.rotation.set(HAND_REST.rx, HAND_REST.ry, HAND_REST.rz);
-  handL.position.set(LEFT_DOWN.x, LEFT_DOWN.y, LEFT_DOWN.z);
-  handL.rotation.set(LEFT_DOWN.rx, LEFT_DOWN.ry, LEFT_DOWN.rz);
+  const fistUpper = new THREE.MeshLambertMaterial({ color: FIST_SLEEVE_FALLBACK });
+  const HAND_K = 1.9;                 // FP hand size (the viewmodel world is ~2x real)
+  const handR = FPH ? FPH.makeHand(1, "relaxed", mat.skin) : new THREE.Group();
+  const handL = FPH ? FPH.makeHand(-1, "fist", mat.skin) : new THREE.Group();
+  handR.scale.setScalar(HAND_K); handL.scale.setScalar(HAND_K);
   handL.visible = false;
   fists.add(handR, handL);
-  fists.userData.hand = handR;
-
-  // Re-read the sleeve/skin off the body whenever its wardrobe moves. Called
-  // every frame the fist is up: city/outfits.js's cityArmColors is memoised for
-  // exactly this, and the setHex calls only fire on a colour that actually
-  // moved. Late-bound and guarded because this file loads BEFORE outfits.js —
-  // no wardrobe loaded, no change, and the literals above stand.
-  // the ratio the two authored literals already had (0xe7b58c under 0xf0c39a)
-  const KNUCKLE_SHADE = 0.86;   // deeper than the old 0.94: a pale sleeve over a pale hand needs the ridge to read
-  function shadeHex(hex, k) {
-    const r = Math.max(0, Math.min(255, Math.round(((hex >> 16) & 255) * k)));
-    const gg = Math.max(0, Math.min(255, Math.round(((hex >> 8) & 255) * k)));
-    const b = Math.max(0, Math.min(255, Math.round((hex & 255) * k)));
-    return (r << 16) | (gg << 8) | b;
-  }
-  let fistSleeveHex = FIST_SLEEVE_FALLBACK, fistSkinHex = FIST_SKIN_FALLBACK;
+  // the two arms: shared by the fists AND the gun (one pair of arms, whatever you hold)
+  const fpArms = new THREE.Group();
+  fpArms.name = "fp_arms";
+  const armR = FPH ? FPH.makeArm({ fore: fistSleeve, upper: fistUpper }) : new THREE.Group();
+  const armL = FPH ? FPH.makeArm({ fore: fistSleeve, upper: fistUpper }) : new THREE.Group();
+  fpArms.add(armR, armL);
+  let armSleeved = false;
+  let fistSleeveHex = -1, fistUpperHex = -1, fistSkinHex = -1;
   function dressFists() {
-    const c = (CBZ.cityArmColors && CBZ.cityArmColors()) || null;
-    const sleeveHex = (c && c.sleeve != null) ? c.sleeve : FIST_SLEEVE_FALLBACK;
-    const skinHex = (c && c.skin != null) ? c.skin : FIST_SKIN_FALLBACK;
-    if (fistSleeveHex !== sleeveHex) { fistSleeveHex = sleeveHex; fistSleeve.color.setHex(sleeveHex); }
-    if (fistSkinHex !== skinHex) {
-      fistSkinHex = skinHex;
-      mat.skin.color.setHex(skinHex);
-      // keep the knuckle ridge one shade under the hand at ANY tone, or a fist
-      // stops reading as a fist and becomes a flat block.
-      fistKnuckle.color.setHex(shadeHex(skinHex, KNUCKLE_SHADE));
-    }
+    const d = FPH ? FPH.dressOf(CBZ.playerChar, { skin: FIST_SKIN_FALLBACK, sleeve: FIST_SLEEVE_FALLBACK }) : null;
+    const handHex = d ? d.hand : FIST_SKIN_FALLBACK;
+    const foreHex = d ? d.fore : FIST_SLEEVE_FALLBACK;
+    const upperHex = d ? d.upper : FIST_SLEEVE_FALLBACK;
+    armSleeved = !!(d && d.sleeved);
+    if (fistSleeveHex !== foreHex) { fistSleeveHex = foreHex; fistSleeve.color.setHex(foreHex); }
+    if (fistUpperHex !== upperHex) { fistUpperHex = upperHex; fistUpper.color.setHex(upperHex); }
+    if (fistSkinHex !== handHex) { fistSkinHex = handHex; mat.skin.color.setHex(handHex); }
   }
 
-  vm.add(gun, fists);
-  fists.traverse((obj) => {
+  vm.add(gun, fists, fpArms);
+  [fists, fpArms].forEach((grp) => grp.traverse((obj) => {
     obj.renderOrder = 1000;
+    obj.frustumCulled = false;
     if (obj.material) {
-      obj.material.depthTest = true;     // fists self-occlude like the guns now
+      obj.material.depthTest = true;     // hands self-occlude like the guns
       obj.material.depthWrite = true;
       obj.material.transparent = true;   // same late-queue ride as the guns
     }
-  });
+  }));
+  // the gun's own hands (firing + support) ride the same flags via the gun traverse
   // DEPTH-CLEAR SENTINEL: a degenerate, invisible triangle that renders just
   // before the viewmodel (renderOrder 999 < 1000, opaque queue) and wipes the
   // depth buffer — the world is already drawn, so the gun then depth-tests
@@ -834,36 +867,44 @@
       if (dx * dx + dz * dz < 36) { guardHold = Math.max(guardHold, 1.2); return; }
     }
   }
-  function lerpPose(h, a, b, k) {
-    h.position.set(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k, a.z + (b.z - a.z) * k);
-    h.rotation.set(a.rx + (b.rx - a.rx) * k, a.ry + (b.ry - a.ry) * k, a.rz + (b.rz - a.rz) * k);
+  function lerpPose(out, a, b, k) {
+    out.x = a.x + (b.x - a.x) * k; out.y = a.y + (b.y - a.y) * k; out.z = a.z + (b.z - a.z) * k;
+    out.roll = a.roll + (b.roll - a.roll) * k; out.bend = a.bend + (b.bend - a.bend) * k;
+    return out;
   }
-  // where a given punch kind puts the striking hand at full reach (vm space)
+  /* where a given punch kind puts the striking WRIST at full reach (vm space).
+     Full reach puts the wrist ~0.70 m from the eye. The hook finishes in
+     front of the chin (x -0.02), not across the far guard: it travels on a
+     wide arc and its elbow comes up and out (see HOOK_POLE). */
   function reachPose(kind, side, out) {
     const s = side;
-    // full reach puts the wrist ~0.70 m from the eye (fist front ~1.0 m)
-    // rx stays positive so the forearm leaves the frame DOWN toward the shoulder
-    if (kind === "hook") { out.x = -s * 0.12; out.y = 0.14; out.z = 0.02; out.rx = 0.30; out.ry = -s * 0.70; out.rz = -s * 0.50; }
-    else if (kind === "upper") { out.x = s * 0.06; out.y = 0.34; out.z = 0.02; out.rx = 1.15; out.ry = s * 0.10; out.rz = -s * 0.40; }
-    else if (kind === "stab") { out.x = 0.10; out.y = -0.02; out.z = -0.06; out.rx = 0.30; out.ry = -0.10; out.rz = -0.35; }   // the body, not the chin
-    else if (kind === "cross") { out.x = s * 0.04; out.y = 0.18; out.z = -0.10; out.rx = 0.28; out.ry = -s * 0.15; out.rz = -s * 1.35; }
-    else { out.x = s * 0.06; out.y = 0.16; out.z = -0.04; out.rx = 0.30; out.ry = -s * 0.12; out.rz = -s * 1.25; }   // jab / default
+    if (kind === "hook") { out.x = -s * 0.02; out.y = 0.15; out.z = 0.02; out.roll = 0.30; out.bend = 0.0; }
+    else if (kind === "upper") { out.x = s * 0.07; out.y = 0.32; out.z = 0.04; out.roll = 2.55; out.bend = 0.15; }
+    else if (kind === "stab") { out.x = 0.10; out.y = -0.02; out.z = -0.06; out.roll = 1.25; out.bend = 0.0; }   // the body, not the chin
+    else if (kind === "cross") { out.x = s * 0.05; out.y = 0.17; out.z = -0.10; out.roll = 0.10; out.bend = 0.05; }
+    else { out.x = s * 0.07; out.y = 0.16; out.z = -0.04; out.roll = 0.20; out.bend = 0.05; }   // jab / default: the fist corkscrews palm-down
     return out;
   }
   // where the wind-up chambers it
   function windPose(kind, side, base, out) {
     const s = side;
-    if (kind === "hook") { out.x = base.x + s * 0.18; out.y = base.y + 0.01; out.z = base.z + 0.08; out.rx = base.rx; out.ry = base.ry + s * 0.45; out.rz = base.rz; }
-    else if (kind === "upper") { out.x = base.x + s * 0.02; out.y = base.y - 0.18; out.z = base.z + 0.10; out.rx = base.rx + 0.25; out.ry = base.ry; out.rz = base.rz; }
-    else if (kind === "stab") { out.x = 0.30; out.y = -0.44; out.z = 0.14; out.rx = 0.35; out.ry = -0.20; out.rz = -0.10; }
-    else { out.x = base.x + s * 0.03; out.y = base.y - 0.02; out.z = base.z + 0.07; out.rx = base.rx + 0.15; out.ry = base.ry; out.rz = base.rz; }
+    copyPose(base, out);
+    if (kind === "hook") { out.x = base.x + s * 0.18; out.y = base.y + 0.01; out.z = base.z + 0.08; out.roll = base.roll - 0.5; }
+    else if (kind === "upper") { out.x = base.x + s * 0.02; out.y = base.y - 0.18; out.z = base.z + 0.10; out.roll = base.roll + 0.6; }
+    else if (kind === "stab") { out.x = 0.30; out.y = -0.44; out.z = 0.14; out.roll = 1.2; out.bend = -0.1; }
+    else { out.x = base.x + s * 0.03; out.y = base.y - 0.02; out.z = base.z + 0.07; }
     return out;
   }
   const _reach = {}, _wind = {}, _base = {};
-  function copyPose(a, out) { out.x = a.x; out.y = a.y; out.z = a.z; out.rx = a.rx; out.ry = a.ry; out.rz = a.rz; return out; }
+  function copyPose(a, out) { out.x = a.x; out.y = a.y; out.z = a.z; out.roll = a.roll; out.bend = a.bend; return out; }
   function rollAmt(kind) {
     return kind === "hook" ? 0.048 : kind === "cross" ? 0.032 : kind === "upper" ? 0.022 : kind === "stab" ? 0.014 : 0.012;
   }
+  // this frame's wrist targets for the two fists (vm space), read by poseFpArms
+  const fistT = [
+    { x: 0, y: 0, z: 0, roll: 0, bend: 0, vis: true, curl: "relaxed", hook: 0 },
+    { x: 0, y: 0, z: 0, roll: 0, bend: 0, vis: false, curl: "fist", hook: 0 },
+  ];
 
   function animFists(dt) {
     if (punchT > 0) punchT = Math.max(0, punchT - dt);
@@ -880,7 +921,6 @@
     const wv = Math.sin(weave), wv2 = Math.sin(weave * 2 + 1.3);
     const gR = copyPose(GUARD_R, _base);
     gR.y += wv2 * 0.012 * guardK; gR.x += wv * 0.008 * guardK;
-    let restR = HAND_REST, restL = LEFT_DOWN;
     // the striking hand rides its own arc; the other holds the guard
     let strikeSide = 0, prog = 0, wind = 0, drive = 0, recover = 0;
     if (swing && punchT > 0) {
@@ -896,47 +936,51 @@
     const jolt = impactT > 0 ? impactT / 0.14 : 0;
 
     for (let i = 0; i < 2; i++) {
-      const h = i === 0 ? handR : handL, s = i === 0 ? 1 : -1;
+      const T = fistT[i], s = i === 0 ? 1 : -1;
       const guard = i === 0 ? gR : GUARD_L;
-      const rest = i === 0 ? restR : restL;
+      const rest = i === 0 ? HAND_REST : LEFT_DOWN;
+      T.hook = 0;
       if (strikeSide === s) {
         // base = the guard (a man who is swinging has his hands up)
         const base = guard;
         windPose(swing.kind, s, base, _wind);
         reachPose(swing.kind, s, _reach);
         // wind out of the base, drive from the wound-up chamber to full reach, settle home
-        const wx = base.x + (_wind.x - base.x) * wind, wy = base.y + (_wind.y - base.y) * wind, wz = base.z + (_wind.z - base.z) * wind;
-        const wrx = base.rx + (_wind.rx - base.rx) * wind, wry = base.ry + (_wind.ry - base.ry) * wind, wrz = base.rz + (_wind.rz - base.rz) * wind;
-        let px = wx + (_reach.x - wx) * drive, py = wy + (_reach.y - wy) * drive, pz = wz + (_reach.z - wz) * drive;
-        let rx = wrx + (_reach.rx - wrx) * drive, ry = wry + (_reach.ry - wry) * drive, rz = wrz + (_reach.rz - wrz) * drive;
+        lerpPose(T, base, _wind, wind);
+        const wx = T.x, wy = T.y, wz = T.z, wr = T.roll, wb = T.bend;
+        T.x = wx + (_reach.x - wx) * drive; T.y = wy + (_reach.y - wy) * drive; T.z = wz + (_reach.z - wz) * drive;
+        T.roll = wr + (_reach.roll - wr) * drive; T.bend = wb + (_reach.bend - wb) * drive;
         if (swing.kind === "hook") {
-          // a hook travels on an arc, not a line: it swings wide before it comes in
-          px += s * 0.16 * Math.sin(drive * Math.PI);
+          // a hook travels on an arc, not a line: it swings wide before it comes in,
+          // and the elbow rises and goes OUT (never across)
+          T.x += s * 0.16 * Math.sin(drive * Math.PI);
+          T.hook = Math.max(drive, wind * 0.4);
         }
         // the landed hit: the fist stops short and kicks back at the wrist
-        if (jolt > 0) { pz += 0.07 * jolt; py += 0.02 * jolt; rx += 0.25 * jolt; }
+        if (jolt > 0) { T.z += 0.07 * jolt; T.y += 0.02 * jolt; T.bend += 0.25 * jolt; }
         // recovery eases toward the guard blend rather than snapping
         const home = 1 - guardK;
-        px += (rest.x - guard.x) * home * recover; py += (rest.y - guard.y) * home * recover; pz += (rest.z - guard.z) * home * recover;
-        h.position.set(px, py, pz);
-        h.rotation.set(rx, ry, rz);
-        h.visible = true;
+        T.x += (rest.x - guard.x) * home * recover; T.y += (rest.y - guard.y) * home * recover; T.z += (rest.z - guard.z) * home * recover;
+        T.vis = true;
+        T.curl = "fist";
       } else {
         // the guard hand (or the relaxed hand): rest → guard by guardK
-        lerpPose(h, rest, guard, guardK);
+        lerpPose(T, rest, guard, guardK);
         // an off-hand during a stab reaches to grab the collar
         if (swing && punchT > 0 && swing.kind === "stab" && s === -1) {
           const k = Math.min(1, drive + wind * 0.3);
-          h.position.set(h.position.x + (-0.12 - h.position.x) * k, h.position.y + (0.12 - h.position.y) * k, h.position.z + (0.02 - h.position.z) * k);
-          h.rotation.y += 0.5 * k;
+          T.x += (-0.12 - T.x) * k; T.y += (0.12 - T.y) * k; T.z += (0.02 - T.z) * k;
+          T.roll += 0.4 * k;
         }
-        // a cross / hook turns the torso: the guard hand pulls in and back a touch
+        // a cross / hook turns the torso: the guard hand pulls in and back a
+        // touch — toward its OWN side of the chin, never across it
         if (strikeSide !== 0 && (swing.kind === "cross" || swing.kind === "hook")) {
-          h.position.x -= s * 0.03 * drive; h.position.z += 0.05 * drive;
+          T.x += s * 0.01 * drive; T.z += 0.05 * drive; T.y += 0.02 * drive;
         }
         // the flinch: tuck, rise, pull in
-        if (flinch > 0) { h.position.y += 0.06 * flinch; h.position.x -= s * 0.04 * flinch; h.position.z += 0.05 * flinch; h.rotation.x += 0.3 * flinch; }
-        h.visible = i === 0 || guardK > 0.02;
+        if (flinch > 0) { T.y += 0.06 * flinch; T.x -= s * 0.03 * flinch; T.z += 0.05 * flinch; T.bend += 0.25 * flinch; }
+        T.vis = i === 0 || guardK > 0.02;
+        T.curl = guardK > 0.35 || (swing && punchT > 0) ? "fist" : "relaxed";
       }
     }
 
@@ -946,6 +990,137 @@
     fpRollV *= Math.max(0, 1 - 16 * dt);
     fpRoll += fpRollV * dt;
     if (Math.abs(fpRoll) < 1e-5 && Math.abs(fpRollV) < 1e-4) { fpRoll = 0; fpRollV = 0; }
+  }
+
+  /* ---- THE ARMS, SOLVED EVERY FRAME ---------------------------------------
+     Shoulders are fixed in CAMERA space (a body, not the swaying viewmodel)
+     and carried into vm space through vm's own transform, so bob and recoil
+     move the hands against the shoulders the way a real body does. The elbow
+     pole is always down and OUT on the arm's own side. */
+  const SHOULDER_CAM = [[0.30, -0.45, 0.12], [-0.30, -0.45, 0.12]];
+  const ARM_FIST = [0.46, 0.44];            // upper, fore (vm metres at HAND_K)
+  const ARM_GUN = [0.60, 0.62];             // the gun world is bigger still
+  const _vmInv = new THREE.Matrix4();
+  const _aS = new THREE.Vector3(), _aW = new THREE.Vector3(), _aE = new THREE.Vector3(), _aAlong = new THREE.Vector3();
+  const _aQ = new THREE.Quaternion(), _aP = new THREE.Vector3();
+  const _sArr = [0, 0, 0], _wArr = [0, 0, 0], _pArr = [0, 0, 0];
+  function shoulderVm(i, out) {
+    const s = SHOULDER_CAM[i];
+    return out.set(s[0], s[1], s[2]).applyMatrix4(_vmInv);
+  }
+  function elbowFor(i, W, S, pole, lens, out) {
+    _sArr[0] = S.x; _sArr[1] = S.y; _sArr[2] = S.z;
+    _wArr[0] = W.x; _wArr[1] = W.y; _wArr[2] = W.z;
+    const e = FPH.math.solveElbow(_sArr, _wArr, pole, lens[0], lens[1]);
+    return out.set(e[0], e[1], e[2]);
+  }
+  function defaultPole(side, hook, out) {
+    // down and out; a hook lifts the elbow up and out to the side
+    out[0] = side * (0.45 + 0.55 * hook); out[1] = -1 + 1.15 * hook; out[2] = 0.15 + 0.1 * hook;
+    return out;
+  }
+  // position + orientation of a descendant of vm, in vm space
+  function inVm(obj, localPoint, outP, outQ) {
+    outP.copy(localPoint || _zeroV);
+    if (outQ) outQ.identity();
+    let o = obj;
+    while (o && o !== vm) {
+      o.updateMatrix();
+      outP.applyMatrix4(o.matrix);
+      if (outQ) outQ.premultiply(o.quaternion);
+      o = o.parent;
+    }
+    return o === vm;
+  }
+  const _zeroV = new THREE.Vector3();
+  function worldScaleInVm(obj) {
+    let k = 1, o = obj;
+    while (o && o !== vm) { k *= o.scale.x; o = o.parent; }
+    return k;
+  }
+  // the support hand's reload path: support → magwell → belt → magwell → charge → support
+  function supportReloadOffset(model, hand, out) {
+    out.set(0, 0, 0);
+    const rp = CBZ.gunReloadPose ? CBZ.gunReloadPose() : null;
+    if (!rp || !rp.active || !CBZ.gunReloadChoreo) return 0;
+    const rows = CBZ.gunReloadChoreo(rp.style);
+    const gr = model.userData.grips;
+    if (!rows || !gr || !gr.support) return 0;
+    const pouch = _aP.copy(gr.support).add(_pouchOff);
+    const anchor = (key, o) => key === "pouch" ? o.copy(pouch) : o.copy(gr[key] || gr.mag || gr.support);
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      if (rp.p < row[0] || rp.p > row[1]) continue;
+      const u = row[1] > row[0] ? (rp.p - row[0]) / (row[1] - row[0]) : 1;
+      const e = u * u * (3 - 2 * u);
+      anchor(row[2], _rA); anchor(row[3], _rB);
+      out.copy(_rA).lerp(_rB, e);
+      // bow the path outward (down-left, away from the gun) so the hand swings clear
+      out.x -= row[4] * Math.sin(Math.PI * e) * 0.7;
+      out.y -= row[4] * Math.sin(Math.PI * e);
+      out.sub(gr.support);
+      return row[2] === row[3] ? 2 : 1;          // 2 = dwelling on something (closed), 1 = travelling (open)
+    }
+    return 0;
+  }
+  const _pouchOff = new THREE.Vector3(-0.30, -0.62, 0.55), _rA = new THREE.Vector3(), _rB = new THREE.Vector3(), _rOff = new THREE.Vector3();
+  const _poleArr = [0, 0, 0];
+
+  function poseFpArms() {
+    if (!FPH) return;
+    if (ddT >= 0) {
+      // the death drop: the gun tumbles out of the grip — the off hand lets go
+      fpArms.visible = false;
+      const dm = weaponModels[fps.weapon];
+      if (dm && dm.userData.fpSupport) dm.userData.fpSupport.visible = false;
+      return;
+    }
+    const showFists = fists.visible && vm.visible;
+    const model = gun.visible && vm.visible ? weaponModels[fps.weapon] : null;
+    fpArms.visible = !!(showFists || model);
+    if (!fpArms.visible) return;
+    dressFists();
+    vm.updateMatrix();
+    _vmInv.copy(vm.matrix).invert();
+    if (showFists) {
+      for (let i = 0; i < 2; i++) {
+        const T = fistT[i], hand = i === 0 ? handR : handL, arm = i === 0 ? armR : armL, side = i === 0 ? 1 : -1;
+        hand.visible = T.vis; arm.visible = T.vis;
+        if (!T.vis) continue;
+        FPH.setPose(hand, T.curl);
+        _aW.set(T.x, T.y, T.z);
+        shoulderVm(i, _aS);
+        elbowFor(i, _aW, _aS, defaultPole(side, T.hook, _poleArr), ARM_FIST, _aE);
+        _aAlong.subVectors(_aW, _aE);
+        FPH.orientAlong(side, _aAlong, T.roll, T.bend, hand.quaternion);
+        hand.position.copy(_aW);
+        FPH.poseArm(arm, _aW, _aE, _aS, hand.quaternion, HAND_K, armSleeved);
+      }
+      return;
+    }
+    // ARMED: the firing arm grows out of the gun's own hand; the off arm out
+    // of the support hand (or hangs out of frame on a one-handed weapon)
+    const fire = model && model.userData.fpFire;
+    const sup = model && model.userData.fpSupport;
+    armR.visible = !!fire;
+    if (fire) {
+      inVm(fire, null, _aW, _aQ);
+      shoulderVm(0, _aS);
+      elbowFor(0, _aW, _aS, defaultPole(1, 0, _poleArr), ARM_GUN, _aE);
+      FPH.poseArm(armR, _aW, _aE, _aS, _aQ, worldScaleInVm(fire), armSleeved);
+    }
+    armL.visible = !!sup;
+    if (sup) {
+      sup.visible = true;
+      // the reload walks the hand through the gun's own anchors
+      const mode = supportReloadOffset(model, sup, _rOff);
+      sup.position.copy(sup.userData.basePos).add(_rOff);
+      FPH.setPose(sup, mode === 1 ? "relaxed" : (mode === 2 ? "grip" : sup.userData.pose0));
+      inVm(sup, null, _aW, _aQ);
+      shoulderVm(1, _aS);
+      elbowFor(1, _aW, _aS, defaultPole(-1, 0, _poleArr), ARM_GUN, _aE);
+      FPH.poseArm(armL, _aW, _aE, _aS, _aQ, worldScaleInVm(sup), armSleeved);
+    }
   }
   let aimHeld = false;     // third-person ADS (right mouse): raise the gun to aim
   let switchCD = 0;        // debounce weapon switching so mashing Q can't spam/stall
@@ -4450,7 +4625,7 @@
     if (ddT >= 0) {
       ddT += dt;
       const k = Math.min(1, ddT / DD_DUR);
-      vm.visible = true; gun.visible = true; fists.visible = false; muzzle.visible = false;
+      vm.visible = true; gun.visible = true; fists.visible = false; muzzle.visible = false; fpArms.visible = false;
       gun.position.set(k * 0.34, -k * k * 1.5, -k * 0.18);     // falls away, accelerating
       gun.rotation.set(k * 1.9, -k * 0.8, k * 1.1);            // pitches forward, yaws + rolls free
       if (k >= 1) { ddT = -1; gun.position.set(0, 0, 0); gun.rotation.set(0, 0, 0); vm.visible = false; }
@@ -4820,7 +4995,7 @@
     const fpStowingGun = fps.active && fpSwapT > 0 && !!fpSwapFrom && !fpSwapTo && fpSwapP < 0.80;
     gun.visible = armed() || fpStowingGun;
     fists.visible = !armed() && !fpStowingGun;
-    if (fists.visible) dressFists();
+    poseFpArms();
 
     if (muzzleT > 0) {
       muzzleT -= dt;
