@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/hud.css?v=survrail1">
 <link rel="stylesheet" href="css/screens.css?v=bagless1">
-<link rel="stylesheet" href="css/shark_title.css?v=frontdoor1">
+<link rel="stylesheet" href="css/shark_title.css?v=launch1">
 <link rel="stylesheet" href="css/mobile.css?v=onecall1">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=bagless1">
@@ -933,10 +933,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/grapple.js?v=nohint1"></script>
 <script src="src/entities/survivorbot.js?v=sharkmode1"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
-<script src="src/modes/shark_sim.js?v=sharkmode1"></script>
+<script src="src/modes/shark_sim.js?v=loop1"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
-<script src="src/modes/shark_title.js?v=frontdoor1"></script>
+<script src="src/modes/shark_title.js?v=launch1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
 <script src="src/modes/gungame.js?v=nodash1"></script>
@@ -1207,7 +1207,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/wildlife/snow_ungulates.js?v=attach1"></script>
 <script src="src/city/wildlife/small_game.js?v=attach1"></script>
 <script src="src/city/wildlife/snakes.js?v=wild1"></script>
-<script src="src/city/wildlife/aquatic.js?v=finblade1"></script>
+<script src="src/city/wildlife/aquatic.js?v=gillcrease1"></script>
 <!-- EVERY ANIMAL IS AN INDIVIDUAL: the per-individual size draw and the
      hunger scalar wildlife.js spends. Must load BEFORE the engine (it
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
@@ -2210,7 +2210,7 @@ document.body.appendChild(b);}}catch(e){}})();
      field, splash/wake FX. After core/quality.js so CBZ.onQualityChange exists
      at parse time; before core/loop.js so their updaters make the boot sort.
      No dependency on each other — any order among these three works. -->
-<script src="src/world/water_underwater.js?v=uwlook2"></script>
+<script src="src/world/water_underwater.js?v=snow1"></script>
 <script src="src/world/water_buoyancy.js?v=waterv2"></script>
 <!-- Roll and capsize. A shark can now put a boat on its beam ends and roll it
      over, and a hull that goes over stays over — inverted, keel up, its people
