@@ -60,8 +60,6 @@
   let appTitle = null;
   let clockEl = null;
   let dialogueEl = null;
-  let dialogueSpeaker = null;
-  let dialogueText = null;
   let dialogueChoices = null;
   let choiceResolve = null;
   let ownsMenuLock = false;
@@ -583,18 +581,12 @@
       if (button) selectApp(button.getAttribute("data-app"));
     });
 
-    dialogueEl = make("section", "campaign-dialogue world-subtitle");
+    // THE ANSWERS, NOT THE LINE. What a person says goes over his head
+    // (systems/speech.js); this panel only carries the player's reply buttons.
+    dialogueEl = make("section", "campaign-dialogue");
     dialogueEl.id = "campaignDialogue";
-    dialogueEl.setAttribute("aria-live", "polite");
-    dialogueEl.innerHTML =
-      "<div class='campaign-dialogue-line'>" +
-      "  <div class='campaign-dialogue-speaker campaign-title world-subtitle-speaker'></div>" +
-      "  <div class='campaign-dialogue-text world-subtitle-line'></div>" +
-      "</div>" +
-      "<div class='campaign-dialogue-choices'></div>";
+    dialogueEl.innerHTML = "<div class='campaign-dialogue-choices'></div>";
     document.body.appendChild(dialogueEl);
-    dialogueSpeaker = dialogueEl.querySelector(".campaign-dialogue-speaker");
-    dialogueText = dialogueEl.querySelector(".campaign-dialogue-text");
     dialogueChoices = dialogueEl.querySelector(".campaign-dialogue-choices");
     dialogueChoices.addEventListener("click", function (event) {
       const button = event.target.closest && event.target.closest("[data-choice]");
@@ -1033,21 +1025,50 @@
     const resolve = choiceResolve;
     state.dialogue = null;
     choiceResolve = null;
+    if (lineTimer) { clearTimeout(lineTimer); lineTimer = 0; }
     if (dialogueEl) dialogueEl.classList.remove("show");
     document.body.classList.remove("campaign-dialogue-active");
-    if (CBZ.subtitles) CBZ.subtitles.release("campaignDialogue");
     if (runCallback && pending && result && result.onSelect) {
       try { result.onSelect(result.value, result); } catch (e) { setTimeout(function () { throw e; }, 0); }
     }
     if (resolve) resolve(result ? result.value : null);
   }
 
-  function say(speaker, text, choices) {
+  /* WHO IS SAYING IT, IN THE WORLD. A line is spoken by a body: the actor the
+     caller handed us ({ actor }), a phone call ({ phone: true }: the voice by
+     the player's hand), or a named person standing near the player. A line
+     with none of those has no one to say it and is not shown. */
+  let lineTimer = 0;
+  function findSpeaker(name) {
+    const peds = CBZ.cityPeds, P = CBZ.player;
+    if (!name || !peds || !P || !P.pos) return null;
+    const want = String(name).toLowerCase().replace(/\s*\(.*\)\s*$/, "").trim();
+    if (!want) return null;
+    let best = null, bd = 30 * 30;
+    for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      if (!p || p.dead || !p.pos || !p.name) continue;
+      const n = String(p.name).toLowerCase();
+      if (n !== want && n.indexOf(want) !== 0 && want.indexOf(n) !== 0) continue;
+      const dx = p.pos.x - P.pos.x, dz = p.pos.z - P.pos.z, d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; best = p; }
+    }
+    return best;
+  }
+  function speakLine(meta, speaker, text) {
+    if (!CBZ.speech || !text) return false;
+    const secs = Math.min(4, 1.4 + String(text).length * 0.05);
+    if (meta && meta.phone) return CBZ.speech.phone(text, { secs: secs });
+    const actor = (meta && meta.actor) || (speaker && typeof speaker === "object" && (speaker.group || speaker.pos) ? speaker : null) || findSpeaker(speakerName(speaker));
+    if (!actor) return false;
+    return CBZ.speech.say(actor, text, { secs: secs, force: true, important: true });
+  }
+
+  // say(speaker, text, choices?|meta?, meta?) -> Promise<choice|null>
+  function say(speaker, text, choices, meta4) {
     ensureDom();
     if (choiceResolve) finishDialogue(null, false);
-    // The director's canonical third argument is metadata ({ actor }). Arrays
-    // retain the compact legacy form for inline dialogue choices.
-    const metadata = (!Array.isArray(choices) && choices && typeof choices === "object") ? choices : null;
+    const metadata = (!Array.isArray(choices) && choices && typeof choices === "object") ? choices : (meta4 || null);
     const normalized = normalizeChoices(Array.isArray(choices) ? choices : []);
     state.dialogue = {
       speaker: speakerName(speaker),
@@ -1055,8 +1076,7 @@
       choices: normalized,
       actor: metadata && metadata.actor ? metadata.actor : null,
     };
-    if (dialogueSpeaker) dialogueSpeaker.textContent = state.dialogue.speaker;
-    if (dialogueText) dialogueText.textContent = state.dialogue.text;
+    const spoke = speakLine(metadata, speaker, state.dialogue.text);
     if (dialogueChoices) {
       dialogueChoices.textContent = "";
       normalized.forEach(function (choice, i) {
@@ -1068,21 +1088,13 @@
         dialogueChoices.appendChild(button);
       });
     }
-    if (dialogueEl) {
-      dialogueEl.classList.toggle("has-choices", normalized.length > 0);
-      dialogueEl.classList.add("show");
-    }
-    document.body.classList.add("campaign-dialogue-active");
-    /* ONE LINE, ONE SURFACE (systems/subtitlebus.js). Authored dialogue is the
-       TOP rank, so this claim is never refused — it is here to EVICT: if a ped
-       bark, a verb result or a HUD hint is already carrying this same sentence
-       (campaign.js:213 fixed one such path by hand; there are others), the
-       duplicate goes dark instead of being laddered a slot above this card.
-       No expiry to speak of — an authored line ends when finishDialogue says
-       it does, which is where the release lives. */
-    if (CBZ.subtitles) {
-      CBZ.subtitles.claim("campaignDialogue", "campaign", state.dialogue.text, 600,
-        state.dialogue.speaker, function () { finishDialogue(null, false); });
+    if (normalized.length) {
+      if (dialogueEl) { dialogueEl.classList.add("has-choices"); dialogueEl.classList.add("show"); }
+      document.body.classList.add("campaign-dialogue-active");
+    } else {
+      // a plain line is done when it has been said (or, unspoken, at once)
+      const hold = spoke ? Math.min(4, 1.4 + state.dialogue.text.length * 0.05) * 1000 : 0;
+      lineTimer = setTimeout(function () { lineTimer = 0; finishDialogue(null, false); }, hold);
     }
     return new Promise(function (resolve) { choiceResolve = resolve; });
   }

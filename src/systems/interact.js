@@ -550,187 +550,28 @@
   // ===========================================================================
   //  SPEECH IS OVER THE SPEAKER'S HEAD — CBZ.prisonSay(actor, line, opts)
   //
-  //  THE PRISON'S ONE MOUTH. Every inmate, guard, the warden and the answer
-  //  to a verb you pressed come through here (ai.js say()/nar(), guards.js,
-  //  detection.js, capture.js, prisonfriends.js, adminwing.js, and in escape
-  //  mode city/social.js's citySay, which forwards here).
-  //
-  //  It used to print into a bottom-centre subtitle band (#pinteractSay) with
-  //  the speaker's name hidden, one line for the whole prison, while the card
-  //  printed the same pitch a second time in its note line. Now:
-  //    - a line floats over the head of the man saying it (#prisonSpeech),
-  //      one line per speaker (a new line replaces his old one);
-  //    - only within earshot (EAR m; a man walking up to you, EAR_ENGAGED);
-  //    - a few words: the first sentence, cut to a clause, else nothing;
-  //    - at most SPEAK_MAX on screen; the nearest speakers win;
-  //    - short-lived, fades, hidden when the head is off screen;
-  //    - third-person narration ("Marcus backs off.") is not speech and is
-  //      dropped: his body already did it.
-  //  The dead, the knocked-out and the escaped do not talk.
+  //  The prison's mouth is the shared one now (systems/speech.js, the same
+  //  over-head line every game uses). What stays here is the prison's own
+  //  earshot: a yard is noisier than a street, so ambient talk carries 12 m and
+  //  a man walking up to you (or the answer to a verb you pressed) 18 m.
   // ===========================================================================
-  const EAR = 12, EAR_ENGAGED = 18, SPEAK_MAX = 2, SPEAK_CHARS = 48;
-  const HEAD_Y = 2.15;
-  let saidLines = 0, sayRefused = 0, narrationDropped = 0;
-  const speaking = [];            // {actor, el, t, life, d}
-  let speechRoot = null;
-  const _hv = new THREE.Vector3();
-
-  function actorSpot(a) {
-    if (!a) return null;
-    if (a.group && a.group.position) return a.group.position;
-    return a.pos || null;
-  }
-  const QUOTE_OPEN = "“‘\"'";
-  const QUOTE_CLOSE = "”’\"'";
-  // the words a person said: no `Name:` prefix, no wrapping quotes
-  function speechText(who, msg) {
-    let s = String(msg == null ? "" : msg).trim();
-    if (!s) return "";
-    const colon = s.indexOf(":");
-    if (colon > 0 && colon <= 34) {
-      const head = s.slice(0, colon).trim().toLowerCase().replace(/^(the|a|an)\s+/, "");
-      const me = String(who || "").trim().toLowerCase().replace(/^(the|a|an)\s+/, "");
-      if (me && head === me) s = s.slice(colon + 1).trim();
-    }
-    for (let pass = 0; pass < 2 && s.length > 1; pass++) {
-      if (QUOTE_OPEN.indexOf(s.charAt(0)) < 0) break;
-      const last = s.charAt(s.length - 1);
-      s = s.slice(1);
-      if (QUOTE_CLOSE.indexOf(last) >= 0) s = s.slice(0, -1);
-      s = s.trim();
-    }
-    return s;
-  }
-  CBZ.prisonSpeechText = speechText;
-
-  // a few words, or nothing
-  function fewWords(s) {
-    s = String(s || "").replace(/\s*[—–·•]\s*/g, ". ").replace(/\s+-\s+/g, ". ").replace(/\s+/g, " ").trim();
-    if (!s) return "";
-    if (s.length <= SPEAK_CHARS) return s;
-    // whole sentences, as many as fit
-    const sents = s.match(/[^.!?]+[.!?]+(?=\s|$)|[^.!?]+$/g) || [];
-    let out = "";
-    for (let i = 0; i < sents.length; i++) {
-      const next = (out ? out + " " : "") + sents[i].trim();
-      if (next.length > SPEAK_CHARS) break;
-      out = next;
-    }
-    if (out) return out;
-    const clause = s.split(/[,;:]\s/)[0].trim();
-    if (clause.length <= SPEAK_CHARS && clause.length >= 2) return clause;
-    return "";
-  }
-  // "Marcus backs off." / "the Old Timer counts it." is a caption, not a line
-  function isNarration(actor, s) {
-    const full = actor && actor.data && actor.data.name ? String(actor.data.name).toLowerCase() : "";
-    const bare = cleanName(actor).toLowerCase();
-    const low = s.toLowerCase();
-    return !!((full && low.indexOf(full + " ") === 0) || (bare && bare !== "someone" && low.indexOf(bare + " ") === 0) ||
-      (bare && low.indexOf(bare + "'s ") === 0));
-  }
-
-  function ensureSpeechRoot() {
-    if (speechRoot && speechRoot.parentNode) return speechRoot;
-    speechRoot = document.createElement("div");
-    speechRoot.id = "prisonSpeech";
-    speechRoot.setAttribute("aria-live", "polite");
-    document.body.appendChild(speechRoot);
-    return speechRoot;
-  }
-  function dropSpeech(i) {
-    const s = speaking[i];
-    if (s && s.el.parentNode) s.el.parentNode.removeChild(s.el);
-    speaking.splice(i, 1);
-  }
-  function clearSpeech() { while (speaking.length) dropSpeech(speaking.length - 1); }
-
-  // force = the answer to a verb the player just pressed: it always shows
+  const EAR = 12, EAR_ENGAGED = 18;
   function speak(actor, msg, secs, force) {
-    if (!actor || !msg || !CBZ.game || CBZ.game.mode !== "escape" || CBZ.game.state !== "playing") { sayRefused++; return false; }
-    if (actor.dead || actor.escaped || (actor.ko || 0) > 0) { sayRefused++; return false; }
-    const p = actorSpot(actor), P = CBZ.player;
-    if (!p || !P || !P.pos) { sayRefused++; return false; }
-    const d = Math.hypot(P.pos.x - p.x, P.pos.z - p.z);
-    const ear = (actor.approach && (actor.approach.t || 0) > 0) || force ? EAR_ENGAGED : EAR;
-    if (d > ear) { sayRefused++; return false; }
-    const raw = speechText(cleanName(actor), msg);
-    if (!raw || isNarration(actor, raw)) { narrationDropped++; return false; }
-    const line = fewWords(raw);
-    if (!line) { sayRefused++; return false; }
-    const life = Math.min(3.2, Math.max(1.6, (+secs || 2.2)));
-    let s = null;
-    for (let i = 0; i < speaking.length; i++) if (speaking[i].actor === actor) { s = speaking[i]; break; }
-    if (!s) {
-      if (speaking.length >= SPEAK_MAX) {
-        let far = 0;
-        for (let i = 1; i < speaking.length; i++) if (speaking[i].d > speaking[far].d) far = i;
-        if (!force && d >= speaking[far].d) { sayRefused++; return false; }
-        dropSpeech(far);
-      }
-      const el = document.createElement("div");
-      el.className = "psay";
-      ensureSpeechRoot().appendChild(el);
-      s = { actor: actor, el: el, t: 0, life: life, d: d };
-      speaking.push(s);
-    }
-    s.el.textContent = line;
-    s.el.classList.remove("out");
-    s.t = 0; s.life = life; s.d = d;
-    placeSpeech(s);
-    saidLines++;
-    return true;
+    if (!actor || !msg || !CBZ.speech || !CBZ.game || CBZ.game.mode !== "escape") return false;
+    const eng = force || (actor.approach && (actor.approach.t || 0) > 0);
+    return CBZ.speech.say(actor, msg, { secs: secs, force: !!force, ear: eng ? EAR_ENGAGED : EAR, headY: 1.85 });
   }
-
-  function placeSpeech(s) {
-    const cam = CBZ.camera, p = actorSpot(s.actor);
-    if (!cam || !p) { s.el.style.visibility = "hidden"; return; }
-    _hv.set(p.x, (p.y || 0) + HEAD_Y, p.z).project(cam);
-    if (_hv.z > 1 || Math.abs(_hv.x) > 1.05 || Math.abs(_hv.y) > 1.05) { s.el.style.visibility = "hidden"; return; }
-    const w = window.innerWidth || 800, h = window.innerHeight || 600;
-    s.el.style.left = Math.round((_hv.x * 0.5 + 0.5) * w) + "px";
-    s.el.style.top = Math.round((-_hv.y * 0.5 + 0.5) * h) + "px";
-    s.el.style.visibility = "";
-  }
-
-  // order 97: after camera.js (50) moved the camera and after the prompt
-  // layer (96) — the same projection contract interactions.js documents
-  function tickSpeech(dt) {
-    if (!speaking.length) return;
-    const g = CBZ.game, P = CBZ.player;
-    if (!g || g.mode !== "escape" || g.state !== "playing") { clearSpeech(); return; }
-    if (CBZ.camera) CBZ.camera.updateMatrixWorld();
-    for (let i = speaking.length - 1; i >= 0; i--) {
-      const s = speaking[i], a = s.actor;
-      s.t += dt;
-      if (s.t >= s.life || !a || a.dead || a.escaped || (a.ko || 0) > 0) { dropSpeech(i); continue; }
-      if (s.t > s.life - 0.3 && !s.el.classList.contains("out")) s.el.classList.add("out");
-      const p = actorSpot(a);
-      if (p && P && P.pos) s.d = Math.hypot(P.pos.x - p.x, P.pos.z - p.z);
-      placeSpeech(s);
-    }
-  }
-
   // the answer to a verb you pressed: spoken by the man you pressed it on
   function sayResult(actor, msg, secs) {
     if (!msg || !actor) return;
     speak(actor, msg, secs || 2.8, true);
   }
-
   function prisonSay(actor, line, opts) {
     opts = opts || {};
-    return speak(actor, line, opts.secs || 2.2, false);
+    return speak(actor, line, opts.secs || 2.2, !!opts.force);
   }
   CBZ.prisonSay = prisonSay;
-  // kept for callers that pass a rank; ranks no longer order anything
-  CBZ.PRISON_SAY = { ambient: 0, act: 1, answer: 2 };
-  // said = lines that reached the screen; refused = out of earshot / out of
-  // the nearest-two / downed; narration = third-person captions dropped
-  CBZ.prisonSayAudit = function () {
-    return { said: saidLines, refused: sayRefused, narration: narrationDropped, live: speaking.length,
-      ear: EAR, engaged: EAR_ENGAGED, max: SPEAK_MAX,
-      lines: speaking.map(function (s) { return { who: cleanName(s.actor), text: s.el.textContent, d: +s.d.toFixed(1) }; }) };
-  };
+  CBZ.prisonSayAudit = function () { return CBZ.speech ? CBZ.speech.audit() : null; };
 
   // ===========================================================================
   //  THE TOUCH ROW (PRISON_INTERACT_TOUCH)
@@ -979,7 +820,6 @@
 
   CBZ.onUpdate(45, update);
   CBZ.onAlways(97, function (dt) {
-    tickSpeech(dt);
     // onUpdate stops at the pause/title screen, so the quiet latch is
     // re-evaluated here too — a mode change while paused must still hand
     // #interact back to whoever owns it next.

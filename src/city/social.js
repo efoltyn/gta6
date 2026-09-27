@@ -375,129 +375,33 @@
   //  without the per-frame cost of a real crowd sim.
   // ===========================================================================
 
-  // Dialogue belongs to the speaker, but not to their skeleton. One bottom-
-  // centre subtitle carries the line; new nearby speech replaces the prior
-  // line instead of filling the scene with bubbles. The speaker name stays in
-  // the accessible text, but the observed-world presentation is the clean GTA
-  // subtitle grammar shared with campaign_ui.js: white, outlined, no panel.
-  let speechEl = null, speechNameEl = null, speechTextEl = null;
-  let speechT = 0, speechPed = null;
-  function ensureSpeech() {
-    if (speechEl) return speechEl;
-    speechEl = document.createElement("div");
-    speechEl.id = "citySpeech";
-    speechEl.className = "citySpeech world-subtitle";
-    speechEl.setAttribute("role", "status");
-    speechEl.setAttribute("aria-live", "polite");
-    speechEl.innerHTML =
-      "<div class='citySpeechSpeaker world-subtitle-speaker'></div>" +
-      "<div class='citySpeechLine world-subtitle-line'></div>";
-    document.body.appendChild(speechEl);
-    speechNameEl = speechEl.querySelector(".citySpeechSpeaker");
-    speechTextEl = speechEl.querySelector(".citySpeechLine");
-    return speechEl;
-  }
-  function speakerName(ped) {
-    if (!ped) return "Stranger";
-    if (ped.name) return ped.name;
-    if (ped.swat) return "SWAT Officer";
-    if (ped.kind === "cop") return "Police Officer";
-    // ONE VOCABULARY, AND IT IS THE COVERED ONE. Title-casing the raw `job`
-    // string put "Panhandling" and "Chasing A Fix" in the speaker slot of a
-    // subtitle — `job` is free-form prose here. Worse, it is the TRUE role:
-    // routing through it would have captioned a covered operative's small talk
-    // with "Agent:", which is the exact leak level.js's §COVER split exists to
-    // close. cityTitle is the presented role, viewer-defaulted to the player,
-    // so the caption says what you are entitled to know and nothing more.
-    if (CBZ.cityTitle) { const st = CBZ.cityTitle(ped); if (st) return st; }
-    if (ped.job) return String(ped.job).replace(/\b\w/g, function (c) { return c.toUpperCase(); });
-    return "Stranger";
-  }
-  // Subtitles read as conversation, not surveillance: by default a line only
-  // shows when the player is basically beside the speaker (~9.5u), so distant
-  // street chatter no longer fills the subtitle bar. The ped you are actually
-  // DEALING with — the live interaction-panel target, or one approaching /
-  // pointing you out — keeps slack beyond interaction reach (~4-6u) so a menu
-  // exchange never drops its line over a half-step. false restores the old
-  // 34u wide gate.
-  if (CBZ.CONFIG.SPEECH_CLOSE_RANGE == null) CBZ.CONFIG.SPEECH_CLOSE_RANGE = true;
-  const SPEECH_D_WIDE = 34, SPEECH_D_AMBIENT = 9.5, SPEECH_D_ENGAGED = 12;
-  function speechEngaged(ped) {
-    if (ped.approach || ped.reportState) return true;  // walking up to / snitching on the player
-    const reg = CBZ.interactions;
-    const cur = reg && reg.current ? reg.current() : null;
-    return !!(cur && cur.target === ped);              // the ped you're mid-interaction with
-  }
-  /* SAY REPORTS WHETHER IT SPOKE (2026-08-11). Every early return below is a
-     silent drop — out of earshot, mid-flight, driving — and the caller could
-     not tell a delivered line from a swallowed one. That is fine for a bark
-     that does not care, and wrong for anything that COUNTS: city/read.js was
-     incrementing its contact audit on lines this function had already thrown
-     away, which is the "an audit nobody has executed is not a measurement"
-     failure one layer down. It now returns true only when a line reached the
-     element. Backward-compatible: every existing caller ignores the value, and
-     the old behaviour was `undefined` — which is falsy, same as the new
-     `false`. systems/interact.js's prisonSay has always done this. */
+  // ---- SPEECH: over the speaker's head (systems/speech.js) -----------------
+  // The bottom subtitle band (#citySpeech) is gone: a person's line floats over
+  // his head, small and short, and only when you are near enough to hear it.
+  // The ped you are DEALING with (interaction target, one walking up to you or
+  // pointing you out) carries further than street chatter.
+  const SPEECH_D_AMBIENT = 11, SPEECH_D_ENGAGED = 16;
   function say(ped, text, color, secs) {
-    // In the prison a person's line goes over his head (systems/interact.js).
-    // Prison actors keep their position on .group.position, not .pos, so this
-    // band's range gate below used to throw for every one of them.
+    if (!ped || !text || !CBZ.speech) return false;
     if (CBZ.game && CBZ.game.mode === "escape" && CBZ.prisonSay) return CBZ.prisonSay(ped, text, { secs: secs || 2.2 });
-    if (!ped || ped.dead || !ped.group || !text) return false;
-    // only show near the camera so we don't pay for the whole map
-    const P = CBZ.player;
-    if (P && ped !== P) {
-      const d = Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z);
-      const lim = CBZ.CONFIG.SPEECH_CLOSE_RANGE === false ? SPEECH_D_WIDE
-        : speechEngaged(ped) ? SPEECH_D_ENGAGED : SPEECH_D_AMBIENT;
-      if (d > lim) return false;
-    }
+    if (ped.dead) return false;
     // DIALOGUE IS A FACE-TO-FACE THING (owner: "I shouldn't see passenger
-    // dialogue popups when I'm flying a plane — dialogue is when a character is
-    // standing right in front of you"). The distance gate above is not enough
-    // on its own: seated cabin passengers are metres from you and technically
-    // "close", so their barks fired the whole time you were flying. You are not
-    // in a conversation with anyone while you are flying an aeroplane, driving,
-    // falling under a canopy, or dead.
+    // dialogue popups when I'm flying a plane"). You are not in a conversation
+    // while flying, falling under a canopy or dead; in a car only the person
+    // sharing it with you talks.
+    const P = CBZ.player;
     if (P && ped !== P) {
       if (P._aircraft || P.dead) return false;
       if (CBZ.cityChuteState && CBZ.cityChuteState()) return false;
-      // In a vehicle, only the person you are sharing it with gets to talk.
       if (P.driving && ped._vehicle !== P._vehicle) return false;
     }
-    /* ONE LINE, ONE SURFACE (systems/subtitlebus.js). #citySpeech is one of
-       four DOM layers that render speech into the same bottom band, and when
-       two of them carry the SAME sentence the hud.css ladder renders the
-       duplicate a slot higher instead of not at all — which on iPad, where
-       #hint wears this very skin, is the owner's "2 layers of text, slightly
-       offset". A ped bark loses that race to an authored line or to the answer
-       to the player's own verb, and simply doesn't show. */
-    const dur = secs || 2.4;
-    if (CBZ.subtitles && !CBZ.subtitles.claim("citySpeech", "speech", text, dur, speakerName(ped), silenceSpeech)) return false;
-    ensureSpeech();
-    speechPed = ped;
-    speechT = dur;
-    speechNameEl.textContent = speakerName(ped);
-    speechTextEl.textContent = String(text).replace(/^[“\"]|[”\"]$/g, "");
-    speechEl.style.setProperty("--speaker-color", color || "#dfe7ff");
-    speechEl.classList.add("show");
-    return true;
+    const opts = (secs && typeof secs === "object") ? secs : { secs: secs || undefined };
+    if (opts.ear == null) {
+      const reg = CBZ.interactions, cur = reg && reg.current ? reg.current() : null;
+      opts.ear = (ped.approach || ped.reportState || (cur && cur.target === ped)) ? SPEECH_D_ENGAGED : SPEECH_D_AMBIENT;
+    }
+    return CBZ.speech.say(ped, text, opts);
   }
-  // Drop the line NOW. Called both by the tick (the line aged out) and by the
-  // subtitle desk when a higher-ranked surface takes this sentence off us.
-  function silenceSpeech() {
-    speechT = 0; speechPed = null;
-    if (speechEl) speechEl.classList.remove("show");
-    if (CBZ.subtitles) CBZ.subtitles.release("citySpeech");
-  }
-  function tickBubbles(dt) {
-    if (speechT <= 0) return;
-    speechT -= dt;
-    if (speechT <= 0 || !speechPed || speechPed.dead) silenceSpeech();
-  }
-  // peds.js leans on the same pooled bubbles for its relationship barks (the
-  // cross-street mutter, the by-name greeting, the snitch point-out) — same
-  // budget, same near-camera gate, so it can never out-spend the pool.
   CBZ.citySay = say;
 
   // ---- relationship / reputation graph (lazy, lives on each ped) ----
@@ -629,7 +533,7 @@
   CBZ.citySocialInit = function () {
     g.cityPartner = null; g.citySpouse = false; g.cityHostage = null;
     clearBeacon(); kidnapCD = 12;
-    silenceSpeech();
+    if (CBZ.speech) CBZ.speech.clear();
     clubT = 0; queueT = 0; gossipT = 2; eventT = 6; routineT = 1.5;
     // fresh run: the prior spawn's family bodies were already disposed by
     // clearCityPeds (they live in CBZ.cityPeds); just drop our stale refs.
@@ -972,7 +876,7 @@
     if (CBZ.cityKinshipReset) { try { CBZ.cityKinshipReset(); } catch (e) {} }
     clearBeacon(); kidnapCD = 12;
     // retire any live subtitle + pending rumors
-    silenceSpeech();
+    if (CBZ.speech) CBZ.speech.clear();
     RUMORS.length = 0;
     // drop refs to spawned family bodies — they're disposed with the rest of the
     // population by the clearCityPeds that follows on a fresh spawn.
@@ -1582,7 +1486,6 @@
     if (g.mode !== "city") return;
     _clock += dt;                                    // city-time clock (vendor refusal windows)
     if (partsCD > 0) partsCD -= dt;                  // street-parts show rate gate
-    tickBubbles(dt);
     tickGossip(dt);
     tickRoutines(dt);
     tickEvents(dt);

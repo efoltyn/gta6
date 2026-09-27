@@ -212,14 +212,8 @@ async function stagePrisonPosse(input) {
   const bandLine = bandEl && bandEl.querySelector(".pi-subtitle-line");
   const bandWas = bandLine ? (bandLine.textContent || "") : "";
   if (bandEl) bandEl.classList.remove("show");
-  // ...and BLANK it, not merely hide it. The band is arbitrated by
-  // systems/subtitlebus.js, which holds a claim on the surface with its own
-  // wall-clock timer while interact.js's own countdown runs on SIMULATED
-  // seconds — two clocks that a frozen-rAF storyboard drives at wildly
-  // different rates. Releasing the claim and emptying the text means whatever
-  // survives that mismatch has nothing to print.
   if (bandLine) bandLine.textContent = "";
-  try { if (CBZ.subtitles && CBZ.subtitles.release) CBZ.subtitles.release("pinteractSay"); } catch (_) {}
+  try { if (CBZ.speech) CBZ.speech.clear(); } catch (_) {}
   const saidAtStart = (CBZ.prisonSayAudit && CBZ.prisonSayAudit().said) || 0;
   CBZ.game.cigs = sub.cigs;
   // ...and tell the HUD. Writing game.cigs straight leaves the corner chip
