@@ -273,12 +273,32 @@
     return _white;
   }
   // smoke/haze wants its own transparent material and must never be batched
-  let _smokeMat = null;
+  let _smokeMat = null, _puffTex = null;
+  /* one soft round puff, alpha falling off like a gaussian, with a little
+     lumpy break-up so overlapping puffs do not read as circles */
+  function puffTex() {
+    if (_puffTex || typeof document === "undefined") return _puffTex;
+    const S = 64, c = document.createElement("canvas");
+    c.width = c.height = S;
+    const g = c.getContext("2d"), img = g.createImageData(S, S);
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const dx = (x + 0.5) / S * 2 - 1, dy = (y + 0.5) / S * 2 - 1;
+      const r = Math.sqrt(dx * dx + dy * dy);
+      const lump = 0.85 + 0.15 * Math.sin(dx * 7.1 + Math.sin(dy * 5.3) * 2) * Math.cos(dy * 6.7);
+      const a = Math.max(0, Math.exp(-r * r * 3.2) - 0.04) * lump;
+      const o = (y * S + x) * 4;
+      img.data[o] = img.data[o + 1] = img.data[o + 2] = 255;
+      img.data[o + 3] = Math.round(Math.min(1, a) * 255);
+    }
+    g.putImageData(img, 0, 0);
+    _puffTex = new THREE.CanvasTexture(c);
+    return _puffTex;
+  }
   function smokeMat() {
     if (!_smokeMat) {
       _smokeMat = new THREE.MeshBasicMaterial({
         color: 0x9c9280, transparent: true, opacity: 1, depthWrite: false,
-        side: THREE.DoubleSide, vertexColors: true,
+        side: THREE.DoubleSide, vertexColors: true, map: puffTex(),
       });
     }
     return _smokeMat;
@@ -810,36 +830,36 @@
      Still two crossed quads and still unlit, because at the range this is
      FOR — the thing that says "a camp is over there" from a kilometre — the
      silhouette is the whole information content. */
+  /* A SMOKE COLUMN, third version. The first two were crossed quads with
+     straight edges, and however the alpha was tuned they photographed as a
+     pair of white LIGHT SHAFTS fanning off the fire (owner's screenshot,
+     2026-09-27 wave). Smoke is a rope of soft puffs that swell, drift
+     downwind and thin out. So: eight puffs up a sheared curve, each one two
+     crossed quads carrying a soft round texture (puffTex), alpha falling
+     with height through the vertex colour. Still ONE draw call per fire. */
   function smokeCol(h) {
-    const w0 = 0.45, w1 = h * 0.13;
-    const SEG = 4;
-    const pos = [], colr = [];
-    function strip(ax, az) {
-      const drift = h * 0.30;
-      const p = function (u, v) {
-        const wq = w0 + (w1 - w0) * v;
-        return [ax * u * wq + drift * v * v, v * h, az * u * wq];
-      };
-      /* 0.46 at the base. The first pass was 0.16 flat and photographed as a
-         white light-shaft; the correction to 0.30-with-falloff went too far
-         the other way and the camp had no plume at all at the range the
-         plume exists FOR. */
-      const a = function (v) { return 0.38 * (1 - v) * (1 - v * 0.35); };
-      for (let j = 0; j < SEG; j++) {
-        const v0 = j / SEG, v1 = (j + 1) / SEG;
-        const q = [p(-1, v0), p(1, v0), p(1, v1), p(-1, v1)];
-        const av = [a(v0), a(v0), a(v1), a(v1)];
+    const pos = [], colr = [], uv = [];
+    const N = 8, drift = h * 0.34;
+    for (let i = 0; i < N; i++) {
+      const v = (i + 0.5) / N;
+      const cx = drift * v * v + Math.sin(i * 2.3) * 0.25 * v, cy = v * h, cz = Math.cos(i * 1.7) * 0.2 * v;
+      const r = 0.55 + v * h * 0.16;
+      const al = 0.55 * Math.pow(1 - v, 1.3);
+      for (let q = 0; q < 2; q++) {
+        const ax = q ? 0 : 1, az = q ? 1 : 0;
+        const P = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
         const tri = [0, 1, 2, 0, 2, 3];
         for (let k = 0; k < 6; k++) {
-          const i = tri[k];
-          pos.push(q[i][0], q[i][1], q[i][2]);
-          colr.push(1, 1, 1, av[i]);
+          const p = P[tri[k]];
+          pos.push(cx + ax * p[0] * r, cy + p[1] * r, cz + az * p[0] * r);
+          uv.push((p[0] + 1) / 2, (p[1] + 1) / 2);
+          colr.push(1, 1, 1, al);
         }
       }
     }
-    strip(1, 0); strip(0, 1);
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pos), 3));
+    g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uv), 2));
     g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(colr), 4));
     return g;
   }
