@@ -770,7 +770,7 @@
       const key = bucketKey(b.owner, pos.x, pos.z, mat);
       let bk = buckets.get(key);
       if (!bk) { bk = { key, mat, root, parts: [], mesh: null, dirty: false, owner: b.owner }; buckets.set(key, bk); }
-      bk.parts.push({ id, p, n: nn, u, c, x: pos.x, z: pos.z, t: nowT });
+      bk.parts.push({ id, p, n: nn, u, c, x: pos.x, z: pos.z, t: nowT, perm: !!b.permanent });
       if (!bk.dirty) { bk.dirty = true; dirtyQ.push(bk); }
     }
     // the height-field learns this piece's top so the next one piles on it
@@ -830,7 +830,7 @@
     if (staticCount <= STATIC_CAP) return;
     let want = staticCount - STATIC_CAP + 20;
     const cand = [];
-    for (const bk of buckets.values()) for (const q of bk.parts) cand.push(q);
+    for (const bk of buckets.values()) for (const q of bk.parts) if (!q.perm) cand.push(q);
     cand.sort((a, b) => (camD2(b.x, b.z) > 3600 ? 1 : 0) - (camD2(a.x, a.z) > 3600 ? 1 : 0) || a.t - b.t);
     const drop = new Set();
     for (const q of cand) { if (want-- <= 0) break; drop.add(q.id); }
@@ -914,7 +914,7 @@
       const q = {
         V, slot, x: x + rr(-0.2, 0.2) * (o.spread || 1), y, z: z + rr(-0.2, 0.2) * (o.spread || 1),
         vx, vy, vz, s, rx: rng() * 6, ry: rng() * 6, rz: rng() * 6, sx: rr(-14, 14), sy: rr(-14, 14),
-        t: 0, floor: null, drag: k.leaves ? 2.6 : glass ? 0.4 : 0.1, flat: glass || k.leaves,
+        owner: o.owner || null, t: 0, floor: null, drag: k.leaves ? 2.6 : glass ? 0.4 : 0.1, flat: glass || k.leaves,
       };
       if (V.slots[slot]) { const old = V.slots[slot]; old.dead = true; }
       V.slots[slot] = q;
@@ -1234,7 +1234,7 @@
         let share = kinds.size;
         for (const [kd, c] of kinds) {
           const cnt = Math.round(n / share * (kd === "foliage" ? 2 : 1));
-          out.grit += spawnGrit(ax, ay, az, { kind: kd, color: c.gritCol.getHex(), count: cnt, dir: dirV, power, spread: Math.min(3, Math.max(...c.ext) * 0.5) });
+          out.grit += spawnGrit(ax, ay, az, { owner: o.owner, kind: kd, color: c.gritCol.getHex(), count: cnt, dir: dirV, power, spread: Math.min(3, Math.max(...c.ext) * 0.5) });
         }
       }
       if (o.dust !== false && comps.length) {
@@ -1257,7 +1257,8 @@
      frozen straight into static rubble. The aftermath of a collapse, built
      from the building's own wall, glass and trim — never a heap of boxes.
        o: {x, z, w, d, h, y?, material | materials:[{material, kind, weight}],
-           kind?, owner?, count?, size?, solid?} */
+           kind?, owner?, count?, size?, solid?, permanent? (never evicted:
+           authored scenery rubble)} */
   function pile(o) {
     o = o || {};
     const res = { pieces: 0 };
@@ -1323,7 +1324,7 @@
         root.add(m);
         const k = K(it.kind);
         const fake = { mesh: m, pts: piece.pts, radius: piece.radius, ext: piece.ext, owner: o.owner || null,
-          solid: !!o.solid, anchored: true, kind: it.kind, mass: 1, e: k.e };
+          solid: !!o.solid, anchored: true, kind: it.kind, mass: 1, e: k.e, permanent: !!o.permanent };
         freeze(fake); frozenPending.push(fake);
         res.pieces++;
       }
@@ -1358,7 +1359,7 @@
     const n = o.count != null ? o.count : Math.round(k.gritN * 0.6 * power);
     const dir = o.dir ? new THREE.Vector3(o.dir.x || 0, o.dir.y || 0, o.dir.z || 0) : null;
     if (dir && dir.lengthSq() > 1e-6) dir.normalize();
-    const got = spawnGrit(x, y, z, { kind, color, count: Math.min(PHONE ? 14 : 40, n), dir, power, size: o.size, spread: o.spread });
+    const got = spawnGrit(x, y, z, { kind, color, count: Math.min(PHONE ? 14 : 40, n), dir, power, size: o.size, spread: o.spread, owner: o.owner });
     if (o.dust !== false && k.dust != null) dust(x, y, z, { color: o.dustColor != null ? o.dustColor : (color != null ? new THREE.Color(k.dust).lerp(new THREE.Color(color), 0.3).getHex() : k.dust), power: power * 0.7, radius: o.radius || 0.6, dir });
     return got;
   }
@@ -1419,6 +1420,14 @@
         if (c && c.debris && (owner == null || c.debrisOwner === owner)) { CBZ.colliders.splice(i, 1); changed = true; }
       }
       if (changed && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    }
+    if (owner != null && grit) {
+      const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+      for (const v of grit.variants) {
+        let d = false;
+        for (let k = 0; k < v.slots.length; k++) { const q = v.slots[k]; if (q && q.owner === owner) { q.dead = true; v.slots[k] = null; v.im.setMatrixAt(k, zero); d = true; } }
+        if (d) v.im.instanceMatrix.needsUpdate = true;
+      }
     }
     if (owner == null) {
       hf.clear();

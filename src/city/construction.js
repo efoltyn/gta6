@@ -227,7 +227,7 @@
           rec.mesh.material, { kind: "concrete", at, dir: { x: dx / dl, y: 0.3, z: dz / dl }, power: 1.4, owner: "border-wall", solid: true });
         if (rec.cap && rec.cap.visible) CBZ.debris.shatter(rec.cap, { kind: "concrete", at, power: 1.2, maxPieces: 6, owner: "border-wall", hide: false });
       } else {
-        CBZ.debris.pile({ x: cx, z: rec.z, y: rec.floorY, w: (c.maxX - c.minX) + 3, d: (c.maxZ - c.minZ) * 0.9, h: rec.h * 0.25,
+        CBZ.debris.pile({ permanent: true, x: cx, z: rec.z, y: rec.floorY, w: (c.maxX - c.minX) + 3, d: (c.maxZ - c.minZ) * 0.9, h: rec.h * 0.25,
           materials: [{ material: rec.mesh.material, kind: "concrete", weight: 3 }, { material: rec.cap ? rec.cap.material : rec.mesh.material, kind: "concrete", weight: 1 }],
           owner: "border-wall", solid: true });
       }
