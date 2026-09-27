@@ -250,7 +250,7 @@
         ? Math.max(0, Math.min(1, -signedSun))
         : (1 - k) * (1 - k);
       sun.intensity *= 1 - 0.78 * deep;
-      hemi.intensity *= 1 - 0.72 * deep;
+      hemi.intensity *= 1 - 0.60 * deep;   // moonlight: the street stays readable, lamps still own it
       bounce.intensity *= 1 - 0.76 * deep;
     }
     // THE SUN MOVES. This used to be a constant offset (70, 146, -50): the

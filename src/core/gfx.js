@@ -382,7 +382,7 @@
       "  {",
       "    vec3 cbzSky = hemisphereLights[ 0 ].skyColor;",
       "    float cbzSkyL = dot( cbzSky, vec3( 0.2126, 0.7152, 0.0722 ) );",
-      "    float cbzK = clamp( cbzSkyL / 0.45, 0.04, 1.0 );",
+      "    float cbzK = clamp( cbzSkyL / 0.45, 0.10, 1.0 );",
       "    cbzEnvSky = mix( vec3( 1.0 ), cbzSky / max( cbzSkyL, 1e-4 ), 0.35 ) * cbzK;",
       "  }",
       "#endif",
