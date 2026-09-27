@@ -327,6 +327,9 @@
     note(quiet
       ? "Clean. Fee plus the quiet margin" + (st && st._dressed ? ", and the uniform walked you out." : ".")
       : "It made the scanner. Fee only.", 3);
+    // THE BUREAU IS READING THE SAME PAPERS. city/agency.js decides when a
+    // freelancer has done enough clean work to be worth a meeting.
+    if (CBZ.agency && CBZ.agency.onStreetSettled) { try { CBZ.agency.onStreetSettled(con, quiet); } catch (e) {} }
     paintBoard(true);
   }
   function releaseMark(con) {
@@ -628,7 +631,8 @@
     const R0 = recs() || {};
     const camp = g.cityCampaign ? (g.cityCampaign.phase + ":" + (g.cityCampaign.contractNo | 0)) : "";
     const face = (liveCon && liveHit()) ? (liveCon.name || "?") : "";
-    return [R0.completed | 0, R0.failed | 0, R0.paid | 0, haveSeal() ? 1 : 0, caseOpened() ? 1 : 0, camp, face].join("|");
+    const bw = (CBZ.agency && CBZ.agency.wall) ? ((CBZ.agency.wall() || {}).line || "") : "";
+    return [R0.completed | 0, R0.failed | 0, R0.paid | 0, haveSeal() ? 1 : 0, caseOpened() ? 1 : 0, camp, face, bw].join("|");
   }
   function card(cc, x, y, w, h, tone) {
     cc.save();
@@ -657,7 +661,7 @@
     cc.fillStyle = "#f0e6cf"; cc.font = "700 20px monospace";
     cc.fillText("MARKS", 14, 24);
     cc.font = "600 13px monospace";
-    cc.fillText("$" + (R0.paid | 0).toLocaleString() + " PAID  ·  " + (R0.completed | 0) + " SETTLED", 110, 23);
+    cc.fillText("$" + (R0.paid | 0).toLocaleString() + " PAID    " + (R0.completed | 0) + " SETTLED", 110, 23);
     // the string hub sits in the strip between the header and the first card,
     // so no card is ever pinned on top of it (it used to be buried under the
     // settled-marks grid, and the live polaroid below would bury it deeper).
@@ -736,6 +740,23 @@
       marks++;
     }
 
+    // THE BUREAU'S THREAD. Once the arc has started (city/agency.js), the
+    // bottom-left card is the file you are on, on black stock, pinned like
+    // everything else. The campaign's Director card keeps the slot for the
+    // Contract origin, which the arc never runs under.
+    const bw = (CBZ.agency && CBZ.agency.wall) ? CBZ.agency.wall() : null;
+    if (bw && !(g.cityCampaign && (g.cityOrigin === "contract" || g.cityOrigin === "hitman"))) {
+      const x = 16, y = 216, w = 228, h = 56;
+      card(cc, x, y, w, h, "#15171b");
+      pin(cc, x + w / 2, y + 4);
+      stringTo(cc, hub.x, hub.y, x + w / 2, y + 4);
+      cc.fillStyle = "#d8322a"; cc.fillRect(x + 10, y + 12, 6, 16);
+      cc.fillStyle = "#e8e2d4"; cc.font = "700 14px monospace";
+      cc.fillText(bw.title, x + 24, y + 25);
+      cc.fillStyle = "#9aa1ab"; cc.font = "600 12px monospace";
+      cc.fillText(String(bw.line).slice(0, 28), x + 12, y + 44);
+      marks++;
+    }
     // the Director's thread — the authored campaign is the same wall
     if (g.cityCampaign && (g.cityOrigin === "contract" || g.cityOrigin === "hitman")) {
       const x = 16, y = 216, w = 228, h = 56;   // clears the live mark's polaroid
@@ -797,6 +818,8 @@
         onSelect: function () {
           paintBoard(true);
           if (campaignOwns()) { if (CBZ.campaignUI && CBZ.campaignUI.open) { try { CBZ.campaignUI.open("missions"); } catch (e) {} } return; }
+          // a Bureau file on the go: the wall IS that file
+          if (CBZ.agency && CBZ.agency.file && CBZ.agency.file()) { CBZ.agency.openFile(); return; }
           const m = liveHit();
           if (m) { note("Finish " + (m.def.targetName || "the open name") + " first.", 2.4); return; }
           CBZ.hitmanStart();
@@ -838,11 +861,12 @@
   }
 
   /* ---------------- tick -------------------------------------------------- */
-  let repaintT = 0;
+  let repaintT = 0, agencyWired = false;
   if (CBZ.onUpdate) CBZ.onUpdate(39.45, function (dt) {
     if (g.mode !== "city" || g.state !== "playing") return;
     if (CFG.HITMAN_PIPE === false) return;
     ensureRoom();
+    if (CBZ.agency && CBZ.agency.setRepaint && !agencyWired) { agencyWired = true; CBZ.agency.setRepaint(function () { paintBoard(true); }); }
     repaintT -= dt || 0;
     if (repaintT <= 0) { repaintT = 5; paintBoard(false); }   // dirty-check every 5s; paint only on change
   });
