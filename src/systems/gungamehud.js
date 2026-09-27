@@ -1,171 +1,494 @@
 /* ============================================================
-   systems/gungamehud.js — the GUN GAME ladder HUD.
+   systems/gungamehud.js — the GUN GAME HUD. Wordless.
 
-   THE GRADIENT IS THE HUD. Gun game's whole why is "one kill from the next
-   gun", so the panel shows exactly that, always: the rung you are ON, the
-   kill pips left on it, and the weapon you are ONE KILL FROM — plus the
-   leader's rung, because a race you can't see isn't a race. While you are
-   dead it counts the respawn down. HP/stamina reuse the shared #survBars
-   (css/screens.css shows them under body.mode-gungame), same as survival.
+   The owner deleted the old text panel twice ("MASSIVE HUD SPACE WASTED ON
+   WORDS THAT DONT EVER CHANGE", then "you know what gun you're on because
+   you're holding it"). So nothing here is a sentence. Everything is either a
+   shape that changes when the match changes, or news (a name you just killed,
+   the name that just killed you).
 
-   DOM discipline copied from survivalhud.js: writes go to prebuilt nodes,
-   gated on the mode, no per-frame innerHTML, no new popup class — kills
-   already narrate through city/killfeed.js's corner feed.
+     .gg-track     top-centre: nine slim segments = the ladder. Cleared rungs
+                   are filled, your rung glows, the last segment is a fist.
+                   A small red tick under a segment marks the leading bot's
+                   rung, ONLY while a bot is ahead of you. Promote flashes the segment gold;
+                   demote drains it red and shakes the track.
+     .gg-pulse     one full-screen edge pulse: gold (promote), red-gold
+                   (you reached the fists), red (demoted).
+     .gg-lowhp     blood-red vignette that breathes under 35 HP.
+     .gg-shield    edge shimmer while spawn protection is live.
+     .gg-arcs      damage direction: a pool of 4 red arcs around the reticle,
+                   each pointing at the attacker relative to where you face,
+                   re-aimed every frame as you turn, gone in 0.9 s.
+     .gg-kc        kill confirm under the reticle: skull pop + the victim's
+                   name, tiny; melee kills are a gold fist (humiliation).
+     .gg-death     while dead: killer name + their gun's picture, countdown ring.
+     #survBars     restyled (css/screens.css, gungame only) into a glass HP
+                   plate: tabular HP number + bar + a hairline stamina bar.
+                   This file adds .gg-hpnum and a .gg-hpghost damage trail.
+     CBZ.gungameResultCard(win)  standings table on #survwin/#survlose.
 
-   ---- 2026-08-04: THE LABELS WERE THE PANEL (GUNGAME_HUD_TERSE) ------------
-   OWNER, verbatim: "gun game has MASSIVE HUD SPACE WASTED ON FUCKING WORDS
-   THAT DONT EVER CHANGE — COMPLETELY BREAKS FOURTH WALL."
-
-   Measured on the shipped panel, mid-match, five stacked lines:
-       RUNG 3/9 — COMPACT SMG
-       NEXT: 12G PUMP
-       LEADER: You
-   Fifty-one characters, of which "RUNG", "/9", "—", "NEXT:", "LEADER:" and
-   "You" — thirty-one — say the same thing in every frame of every match ever
-   played. Worse, the two that DID carry news were the ones being pushed down
-   the screen by them, and "LEADER: You" is a whole line spent announcing that
-   nothing is wrong.
-
-   Every number survives; the sentences around them do not. The panel is one
-   short row: the rung as a bare fraction, the gun you are one kill from behind
-   a climb arrow, and — only while somebody is actually ahead of you — that
-   person's name and rung. Nobody ahead prints nothing at all, because the
-   absence of a threat is not a readout. GUNGAME_HUD_TERSE=false restores the
-   five labelled lines exactly.
-
-   ---- 2026-08-05: THE ROW IS GONE (GUNGAME_HUD_PANEL=false) ----------------
-   OWNER, on the row sitting just above the hotbar: "it has this pop up right
-   above the gun that says, like, what gun you're on. Remove that. You know
-   what gun you're on because you're holding it in your hand."
-
-   Told that the ▲ gun is the NEXT rung and not the one in his hands, the
-   verdict did not move: kill the whole row. That is the honest read of the
-   2026-08-04 terse pass too — that wave cut the row from fifty-one characters
-   to about fourteen and the row STILL read as clutter, which is the shape of a
-   readout nobody was looking at rather than one that was merely too wordy. The
-   gradient survives where it always actually lived: the gun in your hands
-   changes category the instant you climb a rung, killfeed narrates the kill,
-   and the timer is already top-right. A panel that restates all three is the
-   fourth wall.
-
-   The BARS still write. #survBars (HP/stamina) is shared arena furniture that
-   survival draws too — it was never part of the row and returning early out of
-   this tick would have blanked it. So the panel is what is gated; the bar
-   writes below run in every gungame frame exactly as before.
-
-   GUNGAME_HUD_PANEL=true rebuilds the row (and GUNGAME_HUD_TERSE still picks
-   which of the two layouts it rebuilds), so both of the owner's past calls on
-   this panel stay one line apart.
+   Events come from modes/gungame.js via gg.on(type, fn). Every field is
+   guarded: a missing event or field makes the matching piece inert, never
+   throws. Writes are change-only to prebuilt nodes; nothing here writes
+   innerHTML per frame.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ) return;
-
   const hud = document.getElementById("hud");
   if (!hud) return;
-  // declared HERE, in the owning file (CLAUDE.md: config.js is an Edit-race file)
-  CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.GUNGAME_HUD_TERSE == null) CBZ.CONFIG.GUNGAME_HUD_TERSE = true;
-  // OFF by default as of 2026-08-05 — see the block comment above. The node is
-  // never even created, so there is nothing for the DOM (or a screenshot) to
-  // find; flipping this true is the whole revert.
-  if (CBZ.CONFIG.GUNGAME_HUD_PANEL == null) CBZ.CONFIG.GUNGAME_HUD_PANEL = false;
-  const PANEL = CBZ.CONFIG.GUNGAME_HUD_PANEL === true;
 
-  // built once, hidden by CSS outside body.mode-gungame.state-playing
-  let root = null, nowEl = null, pipsEl = null, nextEl = null, leadEl = null, spawnEl = null;
-  if (PANEL) {
-    root = document.createElement("div");
-    root.id = "gungameHud";
-    // one ROW of cells (terse) vs the legacy stack of five lines. The class is
-    // what css/screens.css hangs the row layout off, so the flag flips both
-    // halves of the change together.
-    if (CBZ.CONFIG.GUNGAME_HUD_TERSE !== false) root.className = "gg-terse";
-    nowEl = document.createElement("div"); nowEl.className = "gg-now";
-    pipsEl = document.createElement("div"); pipsEl.className = "gg-pips";
-    nextEl = document.createElement("div"); nextEl.className = "gg-next";
-    leadEl = document.createElement("div"); leadEl.className = "gg-lead";
-    spawnEl = document.createElement("div"); spawnEl.className = "gg-spawn";
-    root.appendChild(nowEl); root.appendChild(pipsEl); root.appendChild(nextEl);
-    root.appendChild(leadEl); root.appendChild(spawnEl);
-    hud.appendChild(root);
+  const SVGNS = "http://www.w3.org/2000/svg";
+  // a knuckle-forward fist (viewBox 0 0 24 24) and a skull; drawn, never typed
+  const FIST_D = "M6.2 9.4V7.3c0-1 .8-1.8 1.8-1.8s1.8.8 1.8 1.8v-.6c0-1 .8-1.8 1.8-1.8s1.8.8 1.8 1.8v.2c0-1 .8-1.7 1.8-1.7s1.7.8 1.7 1.7v.9c.2-.8.9-1.3 1.7-1.3 1 0 1.7.8 1.7 1.7v5.2c0 3.6-2.9 6.6-6.6 6.6h-1.2c-2.8 0-5.2-1.8-6.1-4.4l-.9-2.5c-.3-.9.1-1.9 1-2.3.8-.3 1.6-.1 2.1.5z";
+  const SKULL_D = "M12 2.6c-4.7 0-8.2 3.3-8.2 7.8 0 2.6 1.2 4.6 3.1 5.8v2.6c0 .9.7 1.6 1.6 1.6h.8v-1.9h1.5v1.9h2.4v-1.9h1.5v1.9h.8c.9 0 1.6-.7 1.6-1.6v-2.6c1.9-1.2 3.1-3.2 3.1-5.8 0-4.5-3.5-7.8-8.2-7.8zM8.6 14.1c-1.2 0-2-.9-2-2.1s.9-2 2-2 2.1.9 2.1 2-.9 2.1-2.1 2.1zm6.8 0c-1.2 0-2.1-.9-2.1-2.1s.9-2 2.1-2 2 .9 2 2-.8 2.1-2 2.1zM12 17l-1.1-1.9h2.2z";
+
+  function mk(tag, cls, parent) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function svg(d, cls, parent) {
+    const s = document.createElementNS(SVGNS, "svg");
+    s.setAttribute("viewBox", "0 0 24 24");
+    s.setAttribute("aria-hidden", "true");
+    if (cls) s.setAttribute("class", cls);
+    const p = document.createElementNS(SVGNS, "path");
+    p.setAttribute("d", d);
+    s.appendChild(p);
+    if (parent) parent.appendChild(s);
+    return s;
+  }
+  // restart a one-shot CSS animation class (remove, reflow, add, auto-clear)
+  const timers = new WeakMap();
+  function fire(el, cls, ms) {
+    if (!el) return;
+    el.classList.remove(cls);
+    void el.offsetWidth;
+    el.classList.add(cls);
+    const key = cls;
+    let m = timers.get(el); if (!m) { m = {}; timers.set(el, m); }
+    clearTimeout(m[key]);
+    m[key] = setTimeout(function () { el.classList.remove(cls); }, ms);
+  }
+  function setCls(el, cls, on) {
+    if (!el) return;
+    if (el.classList.contains(cls) !== !!on) el.classList.toggle(cls, !!on);
+  }
+  function ladder() { return (CBZ.CONFIG && CBZ.CONFIG.GUNGAME_LADDER) || []; }
+  function N() { return Math.max(1, ladder().length || 9); }
+
+  // ---- weapon picture (cached; the same photographs the hotbar chip uses) --
+  const iconCache = {};
+  function resolveRung(weapon) {
+    // weapon may be an FPS id ("ak47"), a ladder name ("AK-47"), or "fists"
+    if (weapon == null) return null;
+    const w = String(weapon).toLowerCase();
+    const L = ladder();
+    for (let i = 0; i < L.length; i++) {
+      const r = L[i];
+      if (!r) continue;
+      if ((r.id && r.id.toLowerCase() === w) || (r.name && r.name.toLowerCase() === w)) return r;
+    }
+    if (w === "fists" || w === "fist" || w === "melee" || w === "punch") return { id: "fists", melee: true };
+    return { id: String(weapon) };
+  }
+  function iconSrc(id) {
+    if (!id) return "";
+    if (iconCache[id] !== undefined) return iconCache[id];
+    let src = "";
+    try { if (CBZ.itemIconGun) src = CBZ.itemIconGun(id) || ""; } catch (e) { src = ""; }
+    if (!src) { try { if (CBZ.weaponThumbnail) src = CBZ.weaponThumbnail(id) || ""; } catch (e) { src = ""; } }
+    iconCache[id] = src;
+    return src;
   }
 
-  const el = {
-    hp: document.getElementById("hpBar"),
-    stam: document.getElementById("stamBar"),
+  // ======================================================================
+  // DOM (built once; css/screens.css hides #ggHud outside a live gungame)
+  // ======================================================================
+  const root = mk("div", "", hud);
+  root.id = "ggHud";
+
+  // full-screen layers, back to front
+  const lowEl = mk("div", "gg-lowhp", root);
+  const shieldEl = mk("div", "gg-shield", root);
+  const pulseEl = mk("div", "gg-pulse", root);
+
+  // ---- ladder track
+  const trackEl = mk("div", "gg-track", root);
+  const segs = [];
+  let segCount = 0;
+  function buildTrack() {
+    const n = N();
+    if (n === segCount) return;
+    for (const s of segs) s.remove();
+    segs.length = 0;
+    const L = ladder();
+    for (let i = 0; i < n; i++) {
+      const s = mk("div", "gg-seg");
+      if (i === n - 1 || (L[i] && L[i].melee)) { s.classList.add("fist"); svg(FIST_D, "gg-fistic", s); }
+      trackEl.appendChild(s);
+      segs.push(s);
+    }
+    segCount = n;
+    S.rung = -1; S.rival = -1;   // fresh nodes carry no state
+  }
+
+  // ---- damage arcs (pool of 4)
+  const arcsEl = mk("div", "gg-arcs", root);
+  const arcs = [];
+  for (let i = 0; i < 4; i++) {
+    const w = mk("div", "gg-arc", arcsEl);
+    const s = document.createElementNS(SVGNS, "svg");
+    s.setAttribute("viewBox", "0 0 100 100");
+    const p = document.createElementNS(SVGNS, "path");
+    // arc at 12 o'clock, radius 44, spanning -26..+26 degrees
+    p.setAttribute("d", "M30.7 10.5 A44 44 0 0 1 69.3 10.5");
+    s.appendChild(p);
+    w.appendChild(s);
+    arcs.push({ el: w, t0: -1e9, x: 0, z: 0, by: null, deg: null, live: false });
+  }
+
+  // ---- kill confirm
+  const kcEl = mk("div", "gg-kc", root);
+  const kcSkull = svg(SKULL_D, "gg-kc-skull", kcEl);
+  const kcFist = svg(FIST_D, "gg-kc-fist", kcEl);
+  const kcName = mk("div", "gg-kc-name", kcEl);
+  void kcSkull; void kcFist;
+
+  // ---- death card
+  const deathEl = mk("div", "gg-death", root);
+  const ringWrap = mk("div", "gg-ring", deathEl);
+  const RING_R = 21, RING_C = 2 * Math.PI * RING_R;
+  const ringSvg = document.createElementNS(SVGNS, "svg");
+  ringSvg.setAttribute("viewBox", "0 0 50 50");
+  const ringBg = document.createElementNS(SVGNS, "circle");
+  const ringFg = document.createElementNS(SVGNS, "circle");
+  for (const c of [ringBg, ringFg]) {
+    c.setAttribute("cx", "25"); c.setAttribute("cy", "25"); c.setAttribute("r", String(RING_R));
+    ringSvg.appendChild(c);
+  }
+  ringBg.setAttribute("class", "bg"); ringFg.setAttribute("class", "fg");
+  ringFg.setAttribute("stroke-dasharray", RING_C.toFixed(2));
+  ringWrap.appendChild(ringSvg);
+  const ringNum = mk("div", "gg-ring-n", ringWrap);
+  const deathInfo = mk("div", "gg-death-info", deathEl);
+  const deathSkull = svg(SKULL_D, "gg-death-skull", deathInfo);
+  void deathSkull;
+  const deathName = mk("div", "gg-death-name", deathInfo);
+  const deathWep = mk("div", "gg-death-wep", deathInfo);
+  const deathImg = mk("img", "", deathWep); deathImg.alt = "";
+  const deathFist = svg(FIST_D, "gg-death-fist", deathWep);
+  void deathFist;
+  const deathLbl = mk("span", "gg-death-lbl", deathWep);
+
+  // ---- health plate: restyle the shared #survBars, add a number + ghost trail
+  const bars = document.getElementById("survBars");
+  const hpBar = document.getElementById("hpBar");
+  const stamBar = document.getElementById("stamBar");
+  let hpNum = null, hpGhost = null;
+  if (bars) {
+    hpNum = mk("div", "gg-hpnum");
+    bars.insertBefore(hpNum, bars.firstChild);
+    if (hpBar && hpBar.parentNode) {
+      hpGhost = mk("div", "gg-hpghost");
+      hpBar.parentNode.insertBefore(hpGhost, hpBar);
+    }
+  }
+
+  // ======================================================================
+  // state
+  // ======================================================================
+  const S = {
+    gg: null, subscribed: false, match: null,
+    rung: -1, rival: -2, threat: null,
+    hp: -1, ghost: 100, ghostHoldT: 0, hpState: "", stam: -1, hpNumStr: "",
+    dead: false, deathBy: "", deathWeapon: null, respawnMax: 3, ringOff: "", ringN: "",
+    low: false, shield: false,
+    lastT: 0,
   };
 
-  // cache the last written strings — a HUD that re-writes identical
-  // textContent every frame is layout work for nothing (survivalhud's rule).
-  const last = { now: "", pips: "", next: "", lead: "", spawn: "" };
-  function put(node, key, v) { if (last[key] !== v) { last[key] = v; node.textContent = v; } }
-
-  function rungLabelAt(i) {
-    const L = (CBZ.CONFIG && CBZ.CONFIG.GUNGAME_LADDER) || [];
-    const r = L[i];
-    if (!r) return null;
-    if (r.melee) return "BARE FISTS";
-    const w = CBZ.weaponById && CBZ.weaponById(r.id);
-    return (w && w.label) || r.name || r.id;
+  function resetMatch() {
+    drawRival(-1);
+    S.rung = -1; S.threat = null;
+    S.ghost = 100; S.hp = -1;
+    S.dead = false; S.deathBy = ""; S.deathWeapon = null;
+    for (const a of arcs) { a.live = false; a.t0 = -1e9; a.el.classList.remove("on"); }
+    setCls(deathEl, "on", false);
+    setCls(kcEl, "on", false);
+    buildTrack();
   }
 
-  CBZ.onUpdate(49.2, function () {
+  // ======================================================================
+  // events (modes/gungame.js)
+  // ======================================================================
+  function onPromote(e) {
+    const r = e && typeof e.rung === "number" ? e.rung : (S.gg ? S.gg.playerRung : 0);
+    drawTrack(r);
+    if (segs[r - 1]) fire(segs[r - 1], "flash", 650);
+    if (segs[r]) fire(segs[r], "arrive", 650);
+    if (r < N() - 1) fire(pulseEl, "promote", 600);
+  }
+  function onDemote(e) {
+    const r = e && typeof e.rung === "number" ? e.rung : (S.gg ? S.gg.playerRung : 0);
+    drawTrack(r);
+    if (segs[r + 1]) fire(segs[r + 1], "drain", 750);
+    fire(trackEl, "shake", 480);
+    fire(pulseEl, "demote", 700);
+  }
+  function onFinal(e) {
+    if (!e) return;
+    if (e.you) { fire(pulseEl, "final", 1100); if (segs[N() - 1]) fire(segs[N() - 1], "arrive", 900); }
+    else fire(trackEl, "threatpop", 900);
+  }
+  function onKill(e) {
+    if (!e) return;
+    setCls(kcEl, "melee", !!e.melee);
+    setCls(kcEl, "hs", !!e.headshot && !e.melee);
+    const nm = e.victim ? String(e.victim) : "";
+    if (kcName.textContent !== nm) kcName.textContent = nm;
+    fire(kcEl, "on", 800);
+  }
+  function onHurt(e) {
+    if (!e || typeof e.fromX !== "number" || typeof e.fromZ !== "number") return;
+    const now = performance.now();
+    // same attacker still on screen → refresh that arc; else oldest slot
+    let slot = null;
+    if (e.by) for (const a of arcs) if (a.live && a.by === e.by) { slot = a; break; }
+    if (!slot) { slot = arcs[0]; for (const a of arcs) if (a.t0 < slot.t0) slot = a; }
+    slot.x = e.fromX; slot.z = e.fromZ; slot.by = e.by || null; slot.t0 = now; slot.live = true;
+    const k = Math.max(0.45, Math.min(1, (+e.dmg || 20) / 40));
+    slot.el.style.setProperty("--k", k.toFixed(2));
+    aimArc(slot);
+    fire(slot.el, "on", 900);
+  }
+  function onDeath(e) {
+    S.deathBy = e && e.by ? String(e.by) : "";
+    S.deathWeapon = e ? resolveRung(e.weapon) : null;
+    S.respawnMax = 0;   // captured from the first respawnT we see
+    paintDeathInfo();
+  }
+  function onRespawn() {
+    for (const a of arcs) { a.live = false; a.el.classList.remove("on"); }
+  }
+  function onMatchStart() { resetMatch(); }
+
+  function subscribe(gg) {
+    if (S.subscribed || !gg || typeof gg.on !== "function") return;
+    S.subscribed = true;
+    const on = function (type, fn) { try { gg.on(type, function (e) { try { fn(e); } catch (err) { /* HUD must never break the match */ } }); } catch (err) {} };
+    on("matchstart", onMatchStart);
+    on("promote", onPromote);
+    on("demote", onDemote);
+    on("final", onFinal);
+    on("kill", onKill);
+    on("hurt", onHurt);
+    on("death", onDeath);
+    on("respawn", onRespawn);
+  }
+
+  // ======================================================================
+  // painters
+  // ======================================================================
+  function drawTrack(r) {
+    buildTrack();
+    if (r === S.rung) return;
+    for (let i = 0; i < segs.length; i++) {
+      setCls(segs[i], "done", i < r);
+      setCls(segs[i], "cur", i === r);
+    }
+    S.rung = r;
+  }
+  function drawRival(rv) {
+    if (rv === S.rival) return;
+    if (segs[S.rival]) segs[S.rival].classList.remove("rv");
+    if (segs[rv]) segs[rv].classList.add("rv");
+    S.rival = rv;
+  }
+
+  function aimArc(a) {
+    const P = CBZ.player && CBZ.player.pos;
+    const yaw = CBZ.cam && typeof CBZ.cam.yaw === "number" ? CBZ.cam.yaw : 0;
+    if (!P) return;
+    const dx = a.x - P.x, dz = a.z - P.z;
+    // forward (-sin, -cos), right (cos, -sin): angle 0 = ahead, + = clockwise
+    const fwd = -Math.sin(yaw) * dx - Math.cos(yaw) * dz;
+    const rgt = Math.cos(yaw) * dx - Math.sin(yaw) * dz;
+    const deg = Math.round(Math.atan2(rgt, fwd) * 180 / Math.PI);
+    if (deg !== a.deg) { a.deg = deg; a.el.style.transform = "translate(-50%,-50%) rotate(" + deg + "deg)"; }
+  }
+
+  function paintDeathInfo() {
+    const nm = S.deathBy;
+    if (deathName.textContent !== nm) deathName.textContent = nm;
+    setCls(deathInfo, "anon", !nm);
+    const r = S.deathWeapon;
+    const melee = !!(r && (r.melee || r.id === "fists"));
+    const src = r && !melee ? iconSrc(r.id) : "";
+    setCls(deathWep, "melee", melee);
+    setCls(deathWep, "img", !!src);
+    if (src && deathImg.getAttribute("src") !== src) deathImg.setAttribute("src", src);
+    // no picture and not fists: the gun's own label is the only fallback
+    let lbl = "";
+    if (r && !melee && !src) {
+      const w = CBZ.weaponById && CBZ.weaponById(r.id);
+      lbl = (w && w.label) || r.name || r.id || "";
+    }
+    if (deathLbl.textContent !== lbl) deathLbl.textContent = lbl;
+    setCls(deathWep, "none", !r);
+  }
+
+  function leaderBot(gg) {
+    let lead = null;
+    for (const b of gg.bots || []) {
+      if (!b) continue;
+      if (!lead || b.rung > lead.rung || (b.rung === lead.rung && (b.kills | 0) > (lead.kills | 0))) lead = b;
+    }
+    return lead;
+  }
+
+  // ======================================================================
+  // tick
+  // ======================================================================
+  CBZ.onUpdate(49.2, function (dt) {
     const g = CBZ.game;
-    if (!g || g.mode !== "gungame") return;
+    if (!g || g.mode !== "gungame" || g.state !== "playing") return;
     const gg = CBZ.gungame;
     if (!gg || !gg.match) return;
-    if (PANEL) panel(gg);
+    if (S.gg !== gg) { S.gg = gg; S.subscribed = false; }
+    subscribe(gg);
+    if (S.match !== gg.match) { S.match = gg.match; resetMatch(); }
+    const step = typeof dt === "number" && dt > 0 && dt < 0.5 ? dt : 1 / 60;
 
-    // shared arena bars (survivalhud's exact write). NOT part of the row —
-    // these are #survBars, drawn for survival too, so they write either way.
-    if (el.hp) {
-      const h = Math.max(0, CBZ.player.hp);
-      el.hp.style.width = h + "%";
-      el.hp.style.background = h > 50 ? "#3ad17a" : (h > 22 ? "#ffd451" : "#ff4d4d");
+    // ---- ladder: diff-driven fallback when the event bus is missing
+    const r = Math.max(0, gg.playerRung | 0);
+    if (r !== S.rung) {
+      const prev = S.rung;
+      if (!S.subscribed && prev >= 0) {
+        if (r > prev) onPromote({ rung: r });
+        else onDemote({ rung: r });
+      } else drawTrack(r);
     }
-    if (el.stam) {
-      el.stam.style.width = Math.max(0, CBZ.player.stamina || 0) + "%";
-      el.stam.style.background = "#5bc8ff";
+    // the leading bot's tick: only while somebody is ahead of you
+    const lead = leaderBot(gg);
+    const rv = lead && lead.rung > r ? lead.rung : -1;
+    drawRival(rv);
+    setCls(trackEl, "threat", !!(lead && lead.rung >= N() - 1 && r < N() - 1));
+
+    // ---- health plate
+    const P = CBZ.player || {};
+    const hp = Math.max(0, Math.min(100, Math.round(P.hp || 0)));
+    if (hp !== S.hp) {
+      if (hpBar) hpBar.style.width = hp + "%";
+      if (hp > S.hp) { S.ghost = hp; if (hpGhost) hpGhost.style.width = hp + "%"; }
+      else S.ghostHoldT = 0.45;
+      S.hp = hp;
+      const str = String(hp);
+      if (hpNum && S.hpNumStr !== str) { S.hpNumStr = str; hpNum.textContent = str; }
+      const st = hp > 60 ? "" : hp > 30 ? "gg-amber" : "gg-red";
+      if (bars && st !== S.hpState) {
+        bars.classList.remove("gg-amber", "gg-red");
+        if (st) bars.classList.add(st);
+        S.hpState = st;
+      }
+    }
+    // the damage trail: holds, then drains toward the real bar
+    if (S.ghost > hp) {
+      if (S.ghostHoldT > 0) S.ghostHoldT -= step;
+      else {
+        S.ghost = Math.max(hp, S.ghost - 70 * step);
+        if (hpGhost) hpGhost.style.width = S.ghost.toFixed(1) + "%";
+      }
+    }
+    const stam = Math.max(0, Math.min(100, Math.round(P.stamina || 0)));
+    if (stamBar && stam !== S.stam) { S.stam = stam; stamBar.style.width = stam + "%"; }
+
+    // ---- low-HP breathing vignette
+    const dead = !!P.dead;
+    const low = !dead && hp > 0 && hp < 35;
+    if (low !== S.low) { S.low = low; setCls(lowEl, "on", low); }
+
+    // ---- spawn protection shimmer
+    const shield = !dead && (+gg.spawnProtectT || 0) > 0;
+    if (shield !== S.shield) { S.shield = shield; setCls(shieldEl, "on", shield); }
+
+    // ---- damage arcs follow your turning
+    const now = performance.now();
+    for (const a of arcs) {
+      if (!a.live) continue;
+      if (now - a.t0 > 900 || dead) { a.live = false; continue; }
+      aimArc(a);
+    }
+
+    // ---- death card
+    const showDeath = dead && (+gg.respawnT || 0) > 0 && !gg.match.over;
+    if (showDeath !== S.dead) {
+      S.dead = showDeath;
+      setCls(deathEl, "on", showDeath);
+      if (showDeath) { paintDeathInfo(); S.ringOff = ""; S.ringN = ""; }
+    }
+    if (showDeath) {
+      const t = +gg.respawnT;
+      if (t > S.respawnMax) S.respawnMax = t;
+      const max = Math.max(S.respawnMax, +(CBZ.CONFIG && CBZ.CONFIG.GUNGAME_RESPAWN_SEC) || 3, 0.01);
+      const off = (RING_C * (1 - Math.min(1, t / max))).toFixed(1);
+      if (off !== S.ringOff) { S.ringOff = off; ringFg.setAttribute("stroke-dashoffset", off); }
+      const n = String(Math.max(1, Math.ceil(t)));
+      if (n !== S.ringN) { S.ringN = n; ringNum.textContent = n; }
     }
   });
 
-  function panel(gg) {
-    const L = (CBZ.CONFIG && CBZ.CONFIG.GUNGAME_LADDER) || [];
-    const total = L.length || 1;
-    const r = gg.playerRung;
-    const isFinal = r >= total - 1;
-    const need = isFinal ? 1 : Math.max(1, (CBZ.CONFIG.GUNGAME_KILLS_PER_RUNG | 0) || 1);
-
-    const terse = CBZ.CONFIG.GUNGAME_HUD_TERSE !== false;
-
-    put(nowEl, "now", terse
-      ? (r + 1) + "/" + total
-      : "RUNG " + (r + 1) + "/" + total + " — " + (rungLabelAt(r) || "?"));
-    // kill pips on this rung (● done ○ to go) — omitted when one kill a rung
-    let pips = "";
-    if (need > 1) for (let i = 0; i < need; i++) pips += (i < gg.playerRungKills ? "●" : "○") + (i < need - 1 ? " " : "");
-    put(pipsEl, "pips", pips);
-    // THE GRADIENT. The next gun is the only thing on this panel a player
-    // actually plays toward, so it is the only thing that gets to be big — and
-    // the arrow does the work "NEXT:" was doing.
-    put(nextEl, "next", isFinal
-      ? (terse ? "FINAL" : "FINAL RUNG, one kill wins")
-      : (terse ? "▲ " : "NEXT: ") + (rungLabelAt(r + 1) || "?"));
-
-    // the race: whoever holds the highest rung. Ties go to you (you can see
-    // your own screen; the line is for the threat).
-    let lead = null;
-    for (const b of gg.bots) if (!lead || b.rung > lead.rung || (b.rung === lead.rung && b.kills > lead.kills)) lead = b;
-    const ahead = lead && lead.rung > r;
-    put(leadEl, "lead", terse
-      // nobody ahead → no cell. `.gg-lead:empty` is display:none.
-      ? (ahead ? lead.name + " " + (lead.rung + 1) : "")
-      : (ahead ? "LEADER: " + lead.name + " · rung " + (lead.rung + 1) + "/" + total : "LEADER: You"));
-
-    put(spawnEl, "spawn", CBZ.player.dead && gg.respawnT > 0
-      ? (terse ? String(Math.ceil(gg.respawnT)) : "RESPAWN IN " + Math.ceil(gg.respawnT))
-      : "");
+  // ======================================================================
+  // RESULT CARD — standings on the shared survival result screens.
+  // modes/gungame.js calls this from gungameFillResult. Built once per card,
+  // rows rewritten per call (the end screen, not a frame loop).
+  // ======================================================================
+  function standingsNode(card) {
+    const box = card && card.querySelector(".card-box");
+    if (!box) return null;
+    let t = box.querySelector(".gg-standings");
+    if (t) return t;
+    t = mk("div", "gg-standings");
+    const stats = box.querySelector(".stats");
+    if (stats && stats.nextSibling) box.insertBefore(t, stats.nextSibling);
+    else box.appendChild(t);
+    return t;
   }
+  function miniTrack(rung, n) {
+    const tr = mk("span", "gg-mini");
+    for (let i = 0; i < n; i++) {
+      const s = mk("i", i < rung ? "d" : i === rung ? "c" : "", tr);
+      if (i === n - 1) s.classList.add("f");
+    }
+    return tr;
+  }
+  CBZ.gungameResultCard = function (win) {
+    try {
+      const card = document.getElementById(win ? "survwin" : "survlose");
+      const t = standingsNode(card);
+      if (!t) return;
+      const rows = (CBZ.gungameStandings && CBZ.gungameStandings()) || [];
+      const n = N();
+      const gg = CBZ.gungame || {};
+      const winner = gg.winner;
+      while (t.firstChild) t.removeChild(t.firstChild);
+      const show = [];
+      for (let i = 0; i < rows.length && i < 6; i++) show.push(i);
+      const youIdx = rows.findIndex(function (r) { return r && r.you; });
+      if (youIdx >= 6) show.push(youIdx);
+      for (const i of show) {
+        const r = rows[i];
+        const row = mk("div", "gg-row", t);
+        if (r.you) row.classList.add("you");
+        if (winner && (r.name === winner || (r.you && winner === "You"))) row.classList.add("win");
+        if (i === youIdx && youIdx >= 6) row.classList.add("gap");
+        mk("span", "gg-pl", row).textContent = String(i + 1);
+        mk("span", "gg-nm", row).textContent = r.you ? "You" : String(r.name || "");
+        row.appendChild(miniTrack(Math.max(0, r.rung | 0), n));
+        mk("span", "gg-k", row).textContent = String(r.kills | 0);
+      }
+    } catch (e) { /* the end screen must still open */ }
+  };
 })();
