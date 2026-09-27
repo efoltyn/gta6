@@ -128,7 +128,7 @@ async function stageHitmanArc(input) {
   };
   const R = CBZ.hmRoom;
   const room = R && R.ensure ? R.ensure() : (CBZ.hitmanRoom ? CBZ.hitmanRoom() : null);
-  const inRoom = () => { if (room && room.spawn) { put(room.spawn.x, room.spawn.z, room.floorY); if (CBZ.cam) CBZ.cam.yaw = room.spawn.heading || 0; tick(10); } };
+  const inRoom = () => { if (room && room.spawn) { put(room.spawn.x, room.spawn.z, room.floorY); if (CBZ.cam) { CBZ.cam.yaw = room.spawn.heading || 0; if (CBZ.cam.pitch != null) CBZ.cam.pitch = 0.12; } tick(10); } };
   reset();
 
   // ------------------------------------------------------------------ beats
@@ -168,7 +168,7 @@ async function stageHitmanArc(input) {
     let found = false;
     for (let k = 0; k < 24 && !found; k++) {
       CBZ.cam.yaw = (room.spawn.heading || 0) + k * (Math.PI * 2 / 24);
-      if (CBZ.cam.pitch != null) CBZ.cam.pitch = -0.35;
+      if (CBZ.cam.pitch != null) CBZ.cam.pitch = 0.45;   // positive pitch looks DOWN (origins uses 0.28)
       tick(8);
       const v = CBZ.hmVerbs && CBZ.hmVerbs.current();
       if (v && /Answer/.test(v.verb || "")) found = true;
@@ -190,8 +190,12 @@ async function stageHitmanArc(input) {
     if (hasArc) { CBZ.agency.jump("cargo"); tick(30); reset(); }
     inRoom();
     try { R.gunCase.open(); } catch (e) { notes.push("gunCase.open failed: " + e.message); }
-    tick(120);
-    await wait(400);
+    tick(30);
+    await wait(700);                                    // the case opens on a timer before the lean-in
+    tick(40);
+    try { if (CBZ.hmInspect && CBZ.hmInspect.active()) CBZ.hmInspect.stop(1); } catch (_) {}
+    tick(90);
+    await wait(300);
     frame(KEEP);
     return fin({ kit: hasArc ? CBZ.agency.kit() : null });
   }
@@ -200,7 +204,7 @@ async function stageHitmanArc(input) {
     const site = (CBZ.govComplexes || []).find((s) => s && s.rect && (s.id === "execmansion" || (s.def && s.def.id === "execmansion")));
     if (!site) return fin({ ok: false, error: "no mansion" });
     const gx = site.gate ? site.gate.x : site.cx, gz = site.gate ? site.gate.z : site.rect.maxZ;
-    const standZ = gz + 85;
+    const standZ = gz + 48;   // on the approach, the gate framing the steps
     put(gx - 0.8, standZ); tick(30);
     try { if (CBZ.cityHour) CBZ.cityHour(14); } catch (_) {}
     if (hasArc) {
@@ -215,11 +219,13 @@ async function stageHitmanArc(input) {
       }
       tick(120);
     }
-    faceTo(site.cx, site.cz - 12);
-    if (CBZ.cam && CBZ.cam.pitch != null) CBZ.cam.pitch = 0.02;
+    faceTo(site.cx, site.cz - 10);
+    if (CBZ.cam && CBZ.cam.pitch != null) CBZ.cam.pitch = 0.03;
     try { if (CBZ.hmBinoculars) CBZ.hmBinoculars.toggle(true); } catch (_) {}
     tick(60);
-    faceTo(site.cx, site.cz - 12);
+    faceTo(site.cx, site.cz - 10);
+    if (CBZ.cam && CBZ.cam.pitch != null) CBZ.cam.pitch = 0.03;
+    if (CBZ.fps && CBZ.fps.pitch != null) CBZ.fps.pitch = 0.03;
     tick(20);
     if (typeof CBZ.skySync === "function") { try { CBZ.skySync(); } catch (_) {} }
     if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = false;
@@ -239,6 +245,8 @@ async function stageHitmanArc(input) {
         put(p.pos.x + 70, p.pos.z + 70); faceTo(p.pos.x, p.pos.z); tick(10);
         CBZ.cityKillPed(p, { dir: { x: -1, z: -1 } }, "gunfire");
         tick(60);
+        await wait(36000);                              // the news breaks 22 to 34 s after a kill
+        tick(30);
       }
     }
     inRoom();

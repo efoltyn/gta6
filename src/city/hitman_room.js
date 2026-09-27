@@ -1548,7 +1548,9 @@
     if (!B || !B.board) return;
     const list = readingOrder(B.board.items);
     if (!list.length) return;
-    const stops = [];
+    // first the whole board, the way you see it when you walk up; then each paper
+    const dAll = fitDist(BOARD.w + 0.2, BOARD.h + 0.15);
+    const stops = [{ pos: W(BOARD.x, BOARD.y, -HZ + 0.06 + dAll), look: W(BOARD.x, BOARD.y, -HZ + 0.06), id: "board" }];
     for (let i = 0; i < list.length; i++) {
       const it = list[i];
       const lx = BOARD.x + (it.x || 0), ly = BOARD.y + (it.y || 0), lz = -HZ + 0.03 + 0.03;
