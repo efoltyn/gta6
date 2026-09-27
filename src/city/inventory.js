@@ -54,6 +54,22 @@
   function arena() { return (CBZ.city && CBZ.city.arena) || null; }
   function arenaRoot() { const a = arena(); return a ? a.root : null; }
   function floorY(x, z) { if (CBZ.floorAt) { try { return CBZ.floorAt(x, z) || 0; } catch (e) {} } return 0; }
+  // THE SURFACE A DROPPED THING COMES TO REST ON. floorY is the terrain and
+  // knows nothing about roofs, storeys or decks, so a wallet dropped on a
+  // roof was drawn at the player's feet and a corpse's cash on the third floor
+  // went to the street under it. CBZ.groundAt (systems/physics.js) is the
+  // floor the player actually stands on — terrain, slabs, roofs, stairs —
+  // asked from just above where the thing left the hand, so it lands on the
+  // highest surface at or below that point (over a roof edge: the street).
+  function restY(x, z, fromY) {
+    if (CBZ.groundAt) {
+      try {
+        const y = CBZ.groundAt(x, z, fromY != null && isFinite(fromY) ? fromY + 0.4 : undefined);
+        if (typeof y === "number" && isFinite(y)) return y;
+      } catch (e) {}
+    }
+    return (fromY != null && isFinite(fromY)) ? fromY : floorY(x, z);
+  }
   function note(m, s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(m, s); }
   function sfx(n) { if (CBZ.sfx) { try { CBZ.sfx(n); } catch (e) {} } }
   if (CBZ.weaponPhysics && CBZ.weaponPhysics.adopt) CBZ.weaponPhysics.adopt("inventory-drops");
@@ -355,6 +371,23 @@
     return assetProp("Briefcase of Cash", null, "briefcase", { small: !!small }) ||
       crateDegrade(small ? 0.59 : 0.82, small ? 0.27 : 0.38, small ? 0.16 : 0.22, PM.case);
   }
+  // CASH ON THE GROUND IS CASH. A pocket's worth is a folded wad of notes,
+  // a take is banded stacks in a heap, a fortune is a zipped duffel. It used
+  // to be a BRIEFCASE for every amount — a dead man's $80 appeared beside
+  // him as an attache case. Amounts are bucketed so the baked-geometry cache
+  // holds a dozen variants, not one per dollar figure.
+  function cashOpts(amt) {
+    amt = Math.max(1, amt | 0);
+    if (amt < 400) return { amount: amt >= 120 ? 200 : 100 };
+    return { amount: Math.max(1, Math.min(10, Math.round(amt / 2000))) * 2000 };
+  }
+  function makeCash(amt) {
+    amt = Math.max(0, amt | 0);
+    if (amt >= 60000) {
+      return assetProp(null, null, "moneybag", { state: "closed" }) || crateDegrade(0.34, 0.30, 0.72, PM.cloth);
+    }
+    return assetProp(null, null, "cashpile", cashOpts(amt)) || makeBriefcase(amt < 250);
+  }
   function makeBackpack() {
     return assetProp(null, null, "backpack", null) || crateDegrade(0.56, 0.66, 0.28, PM.cloth);
   }
@@ -400,7 +433,7 @@
     let prop = null;
     if (payload.weaponId) prop = makeWeapon(payload.weaponId);
     else if (payload.melee) prop = makeMelee(payload.melee);
-    else if (payload.cash != null) prop = makeBriefcase((payload.cash | 0) < 250);
+    else if (payload.cash != null) prop = makeCash(payload.cash);
     else if (payload.name) {
       // the item ITSELF, from the registry — the line that ends the backpacks.
       prop = assetProp(payload.name, items()[payload.name] || null, null, null);
@@ -421,7 +454,7 @@
     payload = payload || {};
     let mesh = null;
     const root = arenaRoot();
-    const y0 = payload.y != null ? payload.y : floorY(x, z);
+    const y0 = restY(x, z, payload.y != null ? payload.y : null);
     const physicalGun = !!(payload.weaponId && CBZ.weaponPhysics &&
       CBZ.weaponPhysics.drop && (!CBZ.CONFIG || CBZ.CONFIG.WEAPON_GROUND_PHYSICS !== false));
     if (root) {
@@ -429,7 +462,7 @@
       // A physical gun leaves hand/hip height and falls. Non-gun items retain
       // their old static placement until they gain an honest body contract.
       const lift = physicalGun ? 0.78 :
-        (mesh.userData._assetSeated ? 0.02 : (payload.weaponId || payload.melee ? 0.18 : 0.03));
+        (mesh.userData._assetSeated ? 0.004 : (payload.weaponId || payload.melee ? 0.18 : 0.03));   // seated assets rest ON the surface
       mesh.position.set(x, y0 + lift, z);
       mesh.rotation.y = (x * 7 + z * 13) % 6.28;
       root.add(mesh);
@@ -464,7 +497,7 @@
     prop.userData.transient = true; prop.userData._invPhysicalDrop = true;
     const physicalGun = !!(CBZ.weaponPhysics && CBZ.weaponPhysics.drop &&
       (!CBZ.CONFIG || CBZ.CONFIG.WEAPON_GROUND_PHYSICS !== false));
-    const lift = physicalGun ? 0.72 : (prop.userData._assetSeated ? 0.02 : 0.18);
+    const lift = physicalGun ? 0.72 : (prop.userData._assetSeated ? 0.004 : 0.18);
     prop.position.set(d.x, y + lift, d.z);
     prop.rotation.y = (d.x * 7 + d.z * 13) % 6.28;
     parent.add(prop);
@@ -558,10 +591,41 @@
   }
   function clearItemDrops() { for (let i = CBZ.cityItemDrops.length - 1; i >= 0; i--) removeItemDrop(i); }
 
-  // Corpse contents get a physical container beside the body. A meaningful
-  // cash haul reads as a briefcase; carried belongings read as a backpack.
-  // The corpse remains the interaction target, so all existing loot rules and
-  // economy debits stay authoritative.
+  // WHAT A BODY LEAVES ON THE GROUND is what fell out of its pockets: the
+  // wallet (or, for a man carrying a real amount, the banded stacks), and ONE
+  // carried thing that spilled — the baggie, the phone, the keys. It used to
+  // be a BRIEFCASE or a BACKPACK conjured beside every corpse in the city,
+  // luggage nobody was carrying a second earlier. Worn things (the watch, the
+  // ring, the chain) stay on the body, where the loot card finds them. The
+  // corpse remains the interaction target, so every loot rule and economy
+  // debit stays authoritative; this is only what you SEE.
+  const SPILL_KINDS = { drug: 1, pill: 1, phone: 1, key: 1, keycard: 1, cash: 1, ammo: 1, grenade: 1,
+                        melee: 1, pick: 1, tool: 1, crowbar: 1, gold: 1, laptop: 1, bomb: 1 };
+  function spillName(list) {
+    if (!Array.isArray(list) || !CBZ.itemAssetKind) return null;
+    for (let i = 0; i < list.length; i++) {
+      const n = list[i];
+      if (!n || typeof n !== "string") continue;
+      let k = null;
+      try { k = CBZ.itemAssetKind(n, items()[n] || null, null); } catch (e) { k = null; }
+      if (k && SPILL_KINDS[k]) return n;
+    }
+    return null;
+  }
+  function corpseProp(dl) {
+    const grp = new THREE.Group();
+    if (dl.cash > 0) {
+      const c = dl.cash >= 1500 ? assetProp(null, null, "cashpile", cashOpts(dl.cash))
+        : assetProp("Wallet", items()["Wallet"] || null, "wallet", null);
+      if (c) grp.add(c);
+    }
+    const sp = spillName(dl.items);
+    if (sp) {
+      const s = assetProp(sp, items()[sp] || null, null, null);
+      if (s) { s.position.set(0.30, 0, 0.16); s.rotation.y = 1.1; grp.add(s); }
+    }
+    return grp.children.length ? grp : null;
+  }
   function clearCorpseProp(ped) {
     const prop = ped && ped._invLootProp;
     if (prop && prop.parent) prop.parent.remove(prop);
@@ -571,12 +635,14 @@
     if (!ped || !ped.dead || !ped.deadLoot || ped.deadLoot.looted) { clearCorpseProp(ped); return; }
     if (ped._invLootProp && ped._invLootProp.parent) return;
     const root = arenaRoot(); if (!root || !ped.pos) return;
-    const dl = ped.deadLoot, hasItems = Array.isArray(dl.items) && dl.items.some(Boolean);
-    if (!(dl.cash > 0) && !hasItems) return;
-    const payload = dl.cash >= 250 ? { cash: dl.cash } : hasItems ? { name: "Backpack" } : { cash: dl.cash };
-    const prop = makePhysicalDrop(payload);
+    const dl = ped.deadLoot;
+    if (ped._invLootNone === dl) return;             // nothing fell out of these pockets: never re-ask
+    const prop = corpseProp(dl);
+    if (!prop) { ped._invLootNone = dl; return; }
+    prop.userData.transient = true;
     const a = ((ped.pos.x * 5 + ped.pos.z * 11) % 6.28);
-    prop.position.set(ped.pos.x + Math.cos(a) * 0.48, floorY(ped.pos.x, ped.pos.z) + 0.03, ped.pos.z + Math.sin(a) * 0.48);
+    const px = ped.pos.x + Math.cos(a) * 0.48, pz = ped.pos.z + Math.sin(a) * 0.48;
+    prop.position.set(px, restY(px, pz, ped.pos.y) + 0.004, pz);
     prop.rotation.y = a;
     root.add(prop);
     ped._invLootProp = prop;
@@ -705,7 +771,7 @@
   function persistChests() {
     if (!CBZ.cityWorldEnsure) return;
     const w = CBZ.cityWorldEnsure(); if (!w) return;
-    w.chests = chests.map((c) => ({ id: c.id, x: c.x, z: c.z, slots: serializeSlots(c.slots) }));
+    w.chests = chests.map((c) => ({ id: c.id, x: c.x, z: c.z, y: c.y, slots: serializeSlots(c.slots) }));
   }
   function commit() { if (CBZ.cityWorldCommit) { try { CBZ.cityWorldCommit(); } catch (e) {} } }
 
@@ -734,25 +800,27 @@
   let _chestRoot = null;
   let openChestRef = null;
 
-  // THE CHEST IN YOUR BAG IS THE CHEST ON THE GROUND. Its three boxes moved to
-  // city/itemassets.js's `chest` builder — same dimensions, same palette, same
-  // emissive lift — so the item icon is a photograph of the object you are
-  // about to place, not a drawing of one. `itemAsset` (not `itemAssetPickup`)
+  // THE CHEST IN YOUR BAG IS THE CHEST ON THE GROUND: city/itemassets.js's
+  // `chest` builder (a banded wooden trunk, same 1.0 x 0.8 x 0.8 footprint),
+  // so the item icon is a photograph of the object you are about to place,
+  // not a drawing of one. `itemAsset` (not `itemAssetPickup`)
   // because a chest is world-sized already and must not be normalised.
-  function buildChestMesh(x, z) {
+  function buildChestMesh(x, z, y0) {
     const root = arenaRoot(); if (!root) return null;
     const grp = new THREE.Group();
-    const y = floorY(x, z);
+    // the floor it was set down on (a chest in a flat upstairs stays upstairs);
+    // records saved before `y` existed fall back to the terrain as before
+    const y = (y0 != null && isFinite(y0)) ? restY(x, z, y0) : floorY(x, z);
     grp.position.set(x, y, z);
     let body = null;
     if (CBZ.itemAsset) { try { body = CBZ.itemAsset("Chest", null, { kind: "chest" }); } catch (e) { body = null; } }
     if (body) grp.add(body);
     else {
-      const b = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.6, 0.8), cmat(0x6b4a2a, { emissive: 0x241505, ei: 0.15 }));
+      const b = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.6, 0.8), cmat(0x5e3f24));
       b.position.y = 0.3; grp.add(b);
-      const lid = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.2, 0.84), cmat(0x4a3320, { emissive: 0x1a0f04, ei: 0.15 }));
+      const lid = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.2, 0.84), cmat(0x6d4a2b));
       lid.position.y = 0.7; grp.add(lid);
-      const latch = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.18, 0.06), cmat(0xc9a44a, { emissive: 0x6b4f12, ei: 0.4 }));
+      const latch = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.18, 0.06), cmat(0x3a3e44));
       latch.position.set(0, 0.58, 0.44); grp.add(latch);
     }
     grp.userData.transient = true;
@@ -768,7 +836,7 @@
       if (!rec || rec.x == null || rec.z == null) continue;
       const slots = new Array(CHEST_N).fill(null);
       if (Array.isArray(rec.slots)) for (let i = 0; i < CHEST_N; i++) slots[i] = validEntry(rec.slots[i]);
-      chests.push({ id: rec.id || ("c" + chests.length), x: rec.x, z: rec.z, slots, mesh: buildChestMesh(rec.x, rec.z) });
+      chests.push({ id: rec.id || ("c" + chests.length), x: rec.x, z: rec.z, y: rec.y, slots, mesh: buildChestMesh(rec.x, rec.z, rec.y) });
     }
     _chestRoot = arenaRoot();
   }
@@ -826,7 +894,8 @@
       if (paid) { g.cash += CHEST_COST; } else { E.add("Chest", 1); }
       return false;
     }
-    const c = { id: "c" + Date.now().toString(36) + ((Math.random() * 1e4) | 0), x, z, slots: new Array(CHEST_N).fill(null), mesh: buildChestMesh(x, z) };
+    const cy = restY(x, z, P.pos.y);
+    const c = { id: "c" + Date.now().toString(36) + ((Math.random() * 1e4) | 0), x, z, y: cy, slots: new Array(CHEST_N).fill(null), mesh: buildChestMesh(x, z, cy) };
     chests.push(c);
     note("Chest placed, walk up and press [E] to open it.", 2.4);
     persistChests(); commit();
@@ -1632,12 +1701,13 @@
   // the mesh. `dyed` swaps the canvas for the ruined red a burst pack leaves.
   function bagMesh(bag) {
     let m = null;
-    if (CBZ.itemAsset) {
+    const mk = CBZ.itemAssetBaked || (CBZ.itemAsset && function (k, n, r, o) { return CBZ.itemAsset(n, r, o); });
+    if (mk) {
       try {
-        m = CBZ.itemAsset(null, null, {
+        m = mk(null, null, null, {
           kind: "moneybag",
           canvas: bag.dyed ? 0x7a2a26 : (bag.tone != null ? bag.tone : 0x2f3a2c),
-          note: bag.dyed ? 0x8c4a44 : 0x6fae5a,
+          dyed: !!bag.dyed,
           flash: bag.flash != null ? bag.flash : 0xc9a227,
         });
       } catch (e) { m = null; }

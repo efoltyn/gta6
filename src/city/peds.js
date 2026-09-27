@@ -2986,8 +2986,22 @@
       // Inventory V2 swaps this compatibility proxy for the authored weapon
       // model before presentation. Keep even the fallback neutral: a dropped
       // gun must never become a glowing green pickup marker for one frame.
-      mesh = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.16, 0.22), CBZ.mat(0x1c1f24));
-      mesh.position.set(x, y + 0.25, z); mesh.userData.transient = true;
+      // THE REAL WEAPON from the first frame (city/itemassets.js's gun
+      // builder, seated on its own lowest point), never a 70 cm black bar
+      // floating 25 cm off the floor; the box stays only as the no-registry
+      // degrade.
+      if (CBZ.itemAssetPickup) {
+        try {
+          const wid = (CBZ.weaponIdFromName && CBZ.weaponIdFromName(weapon)) || weapon || "Pistol";
+          mesh = CBZ.itemAssetPickup(wid, { gun: wid }, { kind: "gun" });
+        } catch (e) { mesh = null; }
+        if (mesh) mesh.position.set(x, y + 0.004, z);
+      }
+      if (!mesh) {
+        mesh = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.16, 0.22), CBZ.mat(0x1c1f24));
+        mesh.position.set(x, y + 0.08, z);
+      }
+      mesh.userData.transient = true;
       CBZ.city.arena.root.add(mesh);
     }
     CBZ.cityDrops.push({
@@ -3002,7 +3016,7 @@
     if (d && d._weaponBody && CBZ.weaponPhysics && CBZ.weaponPhysics.release) {
       CBZ.weaponPhysics.release(d._weaponBody);
     }
-    if (d && d.mesh && d.mesh.parent) { d.mesh.parent.remove(d.mesh); if (d.mesh.geometry) d.mesh.geometry.dispose(); if (d.mesh.material) d.mesh.material.dispose(); }
+    if (d && d.mesh && d.mesh.parent) { d.mesh.parent.remove(d.mesh); if (d.mesh.geometry && !d.mesh.geometry._shared) d.mesh.geometry.dispose(); if (d.mesh.material && !d.mesh.material._shared) d.mesh.material.dispose(); }
     CBZ.cityDrops.splice(i, 1);
   }
 

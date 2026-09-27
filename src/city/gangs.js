@@ -548,14 +548,11 @@
         // garrison is deliberately excluded there rather than compensated for
         // here, which the later `gang.rosterCap = ...` would have overwritten.)
       }
-      // recolour this turf's graffiti hint (stash glow) toward the gang colour
       for (const lot of gang.turf) {
         // the buildings cluster stamps lot.building.owner on every building — if
         // it's there, claim this derelict for the gang (guard: owner may not exist).
         if (lot.building && lot.building.owner) { lot.building.owner.id = gang.id; lot.building.owner.type = "gang"; }
-        if (!lot.demolished && lot.building.stash && lot.building.stash.mesh && lot.building.stash.mesh.material && lot.building.stash.mesh.material.emissive) {
-          try { lot.building.stash.mesh.material.emissive.setHex(gang.color); } catch (e) {}
-        }
+        if (!lot.demolished && lot.building.stash) dressStash(lot.building.stash);
         // bench size scales with the archetype: a SET / BRAWLER mob is deeper,
         // a SYNDICATE holds the same block with a handful of heavy earners.
         const baseN = lo + ((rng() * (hi - lo + 1)) | 0);
@@ -1077,9 +1074,7 @@
     lot.building.gang = winner.id;
     lot.building.gangColor = winner.color;
     if (lot.building.stash) lot.building.stash.gang = winner.id;
-    if (!lot.demolished && lot.building.stash && lot.building.stash.mesh && lot.building.stash.mesh.material && lot.building.stash.mesh.material.emissive) {
-      try { lot.building.stash.mesh.material.emissive.setHex(winner.color); } catch (e) {}
-    }
+    if (!lot.demolished && lot.building.stash) dressStash(lot.building.stash);
     // re-home any winner members who raided here so they hold the new ground
     for (const m of winner.members) {
       if (m.raidLot === lot && !m.dead) { m.homeGuard = { x: lot.cx, z: lot.cz }; m.guard = { x: lot.cx, z: lot.cz }; m.raidT = 0; m.raidGang = null; m.raidLot = null; clearWarRole(m); }
@@ -2888,6 +2883,56 @@
     return best;
   };
 
+  // ---- THE STASH IS A REAL BAG. city/buildings.js's makeStash draws a
+  // 1.0 x 0.5 x 0.5 box through the building's lbox with the gang colour as
+  // EMISSIVE — a glowing brick in a derelict's back room — and this file used
+  // to recolour it by writing .emissive/.color straight into that material,
+  // which is a POOLED cmat shared by every mesh with the same colour key.
+  // Now the box is hidden and a real stash stands in its place: a zipped
+  // black duffel with a hard case beside it (city/itemassets.js, baked, one
+  // draw call each). Robbed = the same two things gone through: the duffel
+  // slumped open and empty, the case lid thrown back. No glow either way.
+  const STASH_LOOK = {
+    bag: { kind: "moneybag", state: "closed", canvas: 0x1c1e22, flash: false },
+    bagEmpty: { kind: "moneybag", state: "empty", canvas: 0x1c1e22, flash: false },
+    kase: { kind: "stashcase" },
+    kaseOpen: { kind: "stashcase", open: true },
+  };
+  function dressStash(st) {
+    if (!st || st._real || !st.mesh || !CBZ.itemAssetBaked) return;
+    const box = st.mesh, parent = box.parent;
+    if (!parent) return;
+    let a = null, b = null, c = null, d = null;
+    try {
+      a = CBZ.itemAssetBaked(null, null, null, STASH_LOOK.bag);
+      b = CBZ.itemAssetBaked(null, null, null, STASH_LOOK.bagEmpty);
+      c = CBZ.itemAssetBaked(null, null, null, STASH_LOOK.kase);
+      d = CBZ.itemAssetBaked(null, null, null, STASH_LOOK.kaseOpen);
+    } catch (e) { return; }
+    if (!a || !b || !c || !d) return;
+    const grp = new THREE.Group();
+    // the box was centred at its lbox y with its height in scale.y; the room
+    // floor is the foundation slab top (0.14), where the old box was sunk 4 cm
+    const fy = Math.max(0.14, box.position.y - (box.scale ? box.scale.y / 2 : 0.25));
+    grp.position.set(box.position.x, fy, box.position.z);
+    grp.rotation.y = Math.PI / 2 + 0.12;                 // long side to the back wall
+    b.visible = false; d.visible = false;
+    c.position.set(0.06, 0, 0.62); c.rotation.y = -0.2; d.position.copy(c.position); d.rotation.y = c.rotation.y;
+    grp.add(a); grp.add(b); grp.add(c); grp.add(d);
+    parent.add(grp);
+    box.visible = false;
+    st._real = { full: [a, c], empty: [b, d], grp: grp };
+    setStashLook(st, !!st.looted);
+  }
+  function setStashLook(st, looted) {
+    if (!st) return;
+    if (!st._real) dressStash(st);
+    const R = st._real;
+    if (!R) return;
+    for (const m of R.full) m.visible = !looted;
+    for (const m of R.empty) m.visible = !!looted;
+  }
+
   // ---- rob a gang's stash (interact.js [I] near the stash duffel) ----
   CBZ.cityRobStash = function (lot) {
     const st = lot && !lot.demolished && lot.building && lot.building.stash;
@@ -2897,9 +2942,9 @@
     if (st.cash > 0) CBZ.city.addCash(st.cash);
     if (econ && st.drugs > 0) econ.add(rng() < 0.5 ? "Coke" : "Meth", st.drugs);
     if (st.weapon && econ) econ.add(st.weapon, 1);
-    if (st.mesh && st.mesh.material && st.mesh.material.color) try { st.mesh.material.color.setHex(0x202020); } catch (e) {}
+    setStashLook(st, true);
     CBZ.city.addRespect(8);
-    CBZ.city.big("STASH ROBBED + $" + st.cash);
+    CBZ.city.note("Their stash. $" + st.cash + ". They will know by morning.", 2.6);
     if (CBZ.sfx) CBZ.sfx("coin");
     // the whole gang knows + the cops get a tip
     if (st.gang) CBZ.cityGangProvoke(st.gang, 1);
@@ -2952,7 +2997,7 @@
     const A = CBZ.city && CBZ.city.arena;
     if (A && A.abandonedLots) for (const lot of A.abandonedLots) {
       const st = lot.building && lot.building.stash;
-      if (st) { st.looted = false; if (st.mesh && st.mesh.material && st.mesh.material.color) try { st.mesh.material.color.setHex(0x2a2f26); } catch (e) {} }
+      if (st) { st.looted = false; setStashLook(st, false); }
     }
   };
 

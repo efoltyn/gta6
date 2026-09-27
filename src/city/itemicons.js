@@ -520,6 +520,20 @@
       "............",
       "............",
     ],
+    keycard: [
+      "............",
+      "............",
+      ".OOOOOOOOOO.",
+      ".ODDDDDDDDO.",
+      ".OAAAAAAAAO.",
+      ".OBBBAAAAAO.",
+      ".OBEBAOOOAO.",
+      ".OBBBAAAAAO.",
+      ".OAAAAAOOAO.",
+      ".OAAAAAAAAO.",
+      "..OOOOOOOO..",
+      "............",
+    ],
     chest: [
       "............",
       ".OOOOOOOOOO.",
@@ -893,6 +907,7 @@
     crowbar:   [0xb0362f, 0x6d2019, 0x4a1611],
     pick:      [0xc3ccd6, 0x5b636d, 0x3e444b],
     key:       [0xc9a44a, 0x8a6c22, 0x5c4715],
+    keycard:   [0xf1f1ec, 0x2f5fa8, 0x1d3a6a],   // white card / issuer stripe / lanyard
     chest:     [0x7a5230, 0xc9a44a, 0x3d2716],
     wood:      [0x6c4526, 0xd9b483, 0x3a2411],   // bark / end-grain
     stone:     [0x8b9099, 0x5b6068, 0x3c4046],
@@ -1178,6 +1193,9 @@
     if (/tattoo|drill|wrench|spanner/.test(n)) return "tool";
     if (/crowbar|prybar|pry bar/.test(n)) return "crowbar";
     if (/^chest$|foot ?locker|stash box/.test(n)) return "chest";
+    // a CARD is not a key: "Keycard" never matched \bkey\b and fell to the
+    // tag, where it drew a brass key. It is a rounded card on a lanyard now.
+    if (/keycard|key card|access card|swipe card|vault card|pass card/.test(n)) return "keycard";
     if (/\bkey\b/.test(n)) return "key";
     if (/laptop|computer|tablet/.test(n)) return "laptop";
     if (/phone|burner|sim\b/.test(n)) return "phone";
