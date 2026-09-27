@@ -341,6 +341,20 @@
     }
   }
   C.fragCount = function () { return frags.length; };
+  /* HAULED OFF: the owner's crew clears a lot it was paid to clear
+     (demolition.js, when a held lot reaches its bare pad). Fragments inside
+     the radius go; the ones that flew into the street thin out on their own
+     clock like any other collapse. */
+  C.clearNear = function (x, z, r) {
+    const r2 = r * r; let n = 0;
+    for (let i = frags.length - 1; i >= 0; i--) {
+      const p = frags[i].mesh.position, dx = p.x - x, dz = p.z - z;
+      if (dx * dx + dz * dz > r2) continue;
+      if (frags[i].mesh.parent) frags[i].mesh.parent.remove(frags[i].mesh);
+      frags.splice(i, 1); n++;
+    }
+    return n;
+  };
 
   /* ============================================================
      3. THE LOOK-ALIKE SHELL.

@@ -900,6 +900,19 @@
       }
     }
 
+    // ---- YOUR LAND (city/plots.js): every lot you own is a home pin on the
+    //      radar, pinned to the rim when it is out of range so you can always
+    //      drive back to the compound. ----
+    if (CBZ.cityPlots && CBZ.cityPlots.list) {
+      let own = []; try { own = CBZ.cityPlots.list(); } catch (e) { own = []; }
+      for (const pl of own) {
+        blip(pl.center.x, pl.center.z, function (x, y, rim) {
+          if (MI) MI.draw(ctx, x, y, "home", { size: rim ? 4.5 : 6, tier: !rim });
+          else diamond(x, y, "#39ff88", rim ? 2.6 : 3.6);
+        }, true);
+      }
+    }
+
     // ---- crew HQ stars (rivals) — quiet anchors, only when near ----
     if (CBZ.cityGangs) for (const gang of CBZ.cityGangs) {
       if (!gang || gang.isPlayer || gang.absorbed) continue;

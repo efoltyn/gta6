@@ -271,7 +271,13 @@
       let marketable;
       if (!legal) marketable = false;
       else if (category === "land") marketable = false;             // parkland isn't bought at a desk
-      else if (stamp) marketable = stamp.buyable !== false;          // honor the curated flag
+      // ALMOST EVERY LOT IS FOR SALE (owner: "being able to buy almost every
+      // property in almost every lot"). The curated flag used to keep every
+      // apartment block that was not a rung of the home ladder off the market;
+      // a landlord sells for the right price, so a residence is always
+      // listed. What stays off: city-held civic buildings and parks (the
+      // stamp says city), and gang operations (illegal, taken by force).
+      else if (stamp) marketable = stamp.buyable !== false || (category === "residence" && stamp.type !== "city");
       else marketable = true;                                        // unstamped lot → legacy behaviour
 
       const flavor = category === "residence" ? RES_FLAVOR[(rnd() * RES_FLAVOR.length) | 0]
@@ -298,7 +304,11 @@
       listings.push(rec); byId[rec.id] = rec;
     });
 
-    A.realty = { listings, byId };
+    // lot -> listing, so "is this lot mine" is O(1) for the map, the build
+    // gate and the sale signs (it was a linear find over every listing).
+    const byLot = new Map();
+    for (const rec of listings) byLot.set(rec.lot, rec);
+    A.realty = { listings, byId, byLot };
     return A.realty;
   }
 
@@ -894,6 +904,10 @@
         if (m.balance <= 1) delete mortgages()[rec.id];
       }
       if (isHome(rec)) { net -= tax; continue; }
+      // A LOT YOU KNOCKED DOWN HAS NO TENANTS. Nobody leases a unit in a
+      // building that is a pad; the land still owes its tax. What a cleared
+      // lot earns is what its crew physically brings home (city/compoundcrew.js).
+      if (rec.lot.demolished) { net -= tax; continue; }
       n++;
       const t = tenants()[rec.id] || (tenants()[rec.id] = { occupied: true });
       // E4: real vacancies — VACANCY_BASE was a dead 0; a district's cohort
@@ -1472,8 +1486,8 @@
     if (CBZ.requestLock && g.state === "playing") CBZ.requestLock();
   }
   CBZ.cityOpenZillow = open;
-  CBZ.cityOwnsLot = function (lot) { const r = reg(); if (!r || !lot) return false; const rec = r.listings.find((x) => x.lot === lot); return rec ? isOwned(rec) : false; };
-  function recForLot(lot) { const r = reg(); if (!r || !lot) return null; return r.listings.find((x) => x.lot === lot) || null; }
+  CBZ.cityOwnsLot = function (lot) { const rec = recForLot(lot); return rec ? isOwned(rec) : false; };
+  function recForLot(lot) { const r = reg(); if (!r || !lot) return null; return (r.byLot && r.byLot.get(lot)) || r.listings.find((x) => x.lot === lot) || null; }
 
   // total equity in the player's portfolio (consumed by economy.js net worth)
   function portfolioValue() {
@@ -1509,6 +1523,15 @@
     financeByLot: (lot) => { const rec = recForLot(lot); if (rec) financeBuy(rec.id); return rec ? isOwned(rec) : false; },
     financeQuoteForLot: (lot) => { const rec = recForLot(lot); return rec ? financeQuote(rec) : null; },
     canFinanceLot: (lot) => { const rec = recForLot(lot); return rec ? canFinance(rec) : false; },
+    // THE PHYSICAL PROPERTY LAYER (city/plots.js) reads the market through
+    // these: the sale sign's price, whether the lot can be bought here, the
+    // name/address on the deed, and the sell path.
+    listingForLot: (lot) => recForLot(lot),
+    canBuyLot: (lot) => { const rec = recForLot(lot); return rec ? canBuy(rec) : false; },
+    sellByLot: (lot) => { const rec = recForLot(lot); if (rec && isOwned(rec)) sell(rec.id); return rec ? !isOwned(rec) : false; },
+    sellPriceForLot: (lot) => { const rec = recForLot(lot); return rec ? Math.round(mval(rec) * SELL_CUT) : null; },
+    nameOfLot: (lot) => { const rec = recForLot(lot); return rec ? nameOf(rec) : null; },
+    ownedLots: () => { const r = reg(); if (!r) return []; const out = []; for (const rec of r.listings) if (isOwned(rec)) out.push(rec.lot); return out; },
   };
 
   // ==========================================================================

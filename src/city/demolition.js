@@ -53,6 +53,13 @@
   const T_CLEARED = 2.2;    // rubble sits smoking this long
   const T_SCAFFOLD = 4.2;   // then a cleared, barriered lot
   const T_REBUILT = 7.0;    // then scaffolding, then the building returns
+  /* AN OWNER'S TEARDOWN IS NOT A WOUND. When the player's contractor knocks a
+     building down on a lot he owns (city/plots.js), the city does not heal it:
+     the rubble is carted off in a fraction of a day and the lot is left as a
+     bare poured pad, HELD, for as long as he owns it. Selling the lot releases
+     the hold and the ordinary calendar (cleared -> scaffold -> rebuilt) takes
+     the parcel back. 0.12 day = 18 s real, enough to see the pile. */
+  const T_HELD_CLEAR = 0.12;
   // Storey ceiling above which a building is immune to collapse. This used to
   // be a hardcoded 11, which made the city's TALLEST buildings — the ones you
   // actually want to fly a plane into — the only ones that could never fall.
@@ -339,6 +346,62 @@
     return { group: g, cols: [] };
   }
 
+  /* PHASE 4, THE HELD PAD: the rubble is gone and what is left is the lot an
+     owner builds on. Poured concrete over the whole footprint, saw-cut control
+     joints on a 3 m module (the same module the build grid snaps to, so a
+     foundation or a wall reads as SET on the slab), a darker cure stain at the
+     edges. No colliders: it is ground, and the build gate reads live
+     colliders, so nothing here may block a piece. */
+  let _padMat = null;
+  function padMaterial() {
+    if (_padMat) return _padMat;
+    const c = document.createElement("canvas"); c.width = c.height = 256;
+    const g2 = c.getContext("2d");
+    g2.fillStyle = "#9a9d9f"; g2.fillRect(0, 0, 256, 256);
+    // aggregate speckle + trowel mottling (deterministic arithmetic, no rng)
+    for (let i = 0; i < 2600; i++) {
+      const x = (i * 97) % 256, y = (i * 61 + ((i * 13) % 17)) % 256;
+      const v = 128 + ((i * 53) % 60) - 30;
+      g2.fillStyle = "rgba(" + v + "," + v + "," + (v + 2) + ",0.22)";
+      g2.fillRect(x, y, 1 + (i % 3 === 0 ? 1 : 0), 1);
+    }
+    for (let i = 0; i < 26; i++) {
+      const x = (i * 71) % 256, y = (i * 113) % 256, r = 18 + (i * 7) % 30;
+      const gr = g2.createRadialGradient(x, y, 0, x, y, r);
+      gr.addColorStop(0, i % 2 ? "rgba(70,72,74,0.10)" : "rgba(200,200,196,0.08)");
+      gr.addColorStop(1, "rgba(0,0,0,0)");
+      g2.fillStyle = gr; g2.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    // one saw-cut joint at the tile edge: the tile repeats every 3 m
+    g2.fillStyle = "rgba(58,60,62,0.75)"; g2.fillRect(0, 0, 256, 2); g2.fillRect(0, 0, 2, 256);
+    g2.fillStyle = "rgba(210,210,206,0.35)"; g2.fillRect(0, 2, 256, 1); g2.fillRect(2, 0, 1, 256);
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    _padMat = new THREE.MeshLambertMaterial({ map: t });
+    _padMat._shared = true;
+    return _padMat;
+  }
+  function buildPad(rec) {
+    const lot = rec.lot, b = lot.building, g = new THREE.Group();
+    const W = Math.max(2, b.w + 0.6), Dd = Math.max(2, b.d + 0.6);
+    const geo = new THREE.BoxGeometry(W, 0.1, Dd);
+    // UVs in metres / 3 so one joint tile == one 3 m build cell on the top face
+    const uv = geo.attributes.uv, pos = geo.attributes.position;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, (pos.getX(i) + b.ox) / 3, (pos.getZ(i) + b.oz) / 3);
+    uv.needsUpdate = true;
+    const m = new THREE.Mesh(geo, padMaterial());
+    m.position.set(b.ox, 0.075, b.oz);
+    m.receiveShadow = true; m.castShadow = false;
+    g.add(m);
+    // a thin darker curb band where the slab meets the yard, so the pad reads as poured, not painted
+    const edge = mat(0x6f7274);
+    box(g, b.ox, 0.06, b.oz - Dd / 2, W + 0.2, 0.12, 0.18, edge);
+    box(g, b.ox, 0.06, b.oz + Dd / 2, W + 0.2, 0.12, 0.18, edge);
+    box(g, b.ox - W / 2, 0.06, b.oz, 0.18, 0.12, Dd, edge);
+    box(g, b.ox + W / 2, 0.06, b.oz, 0.18, 0.12, Dd, edge);
+    return { group: g, cols: [] };
+  }
+
   function buildScaffold(rec) {
     const lot = rec.lot, b = lot.building, g = new THREE.Group();
     const H = Math.min(b.h * 0.75, b.FH * 3.2);                // frame climbs partway up
@@ -537,7 +600,11 @@
     rec.phase = phase;
     const A = arena();
     if (!A || !A.root) { if (anim && oldGroup) disposeGroup(oldGroup); return; }
-    const built = phase === 1 ? buildRubble(rec) : phase === 2 ? buildCleared(rec) : phase === 3 ? buildScaffold(rec) : null;
+    if (phase === 4 && CBZ.collapse && CBZ.collapse.clearNear) {
+      const bb = rec.lot.building;
+      try { CBZ.collapse.clearNear(bb.ox, bb.oz, Math.max(bb.w, bb.d) * 0.72); } catch (e) {}
+    }
+    const built = phase === 1 ? buildRubble(rec) : phase === 2 ? buildCleared(rec) : phase === 3 ? buildScaffold(rec) : phase === 4 ? buildPad(rec) : null;
     if (built) {
       A.root.add(built.group);
       rec.propGroup = built.group;
@@ -675,7 +742,9 @@
     const rec = {
       k: keyOf(lot), lot, at: opts.at != null ? opts.at : (CBZ.dayTime ? CBZ.dayTime() : 0),
       phase: 0, propGroup: null, propCols: [], rubbleDetailed: false,
+      held: !!(opts.held || lot._plotHold),
     };
+    if (rec.held) lot._plotHold = true;
     ledger.set(rec.k, rec);
     setPhase(rec, phaseFor(rec));
 
@@ -752,6 +821,7 @@
   function phaseFor(rec) {
     const now = CBZ.dayTime ? CBZ.dayTime() : 0;
     const el = now - rec.at;
+    if (rec.held) return el >= T_HELD_CLEAR ? 4 : 1;
     return el >= T_SCAFFOLD ? 3 : el >= T_CLEARED ? 2 : 1;
   }
 
@@ -918,11 +988,11 @@
     // it. A frame of pure phase ticking must not pay an O(colliders) Set build,
     // and this ticker runs every frame for as long as any rubble exists.
     let healed = 0;
-    for (const rec of recs) if (now - rec.at >= T_REBUILT) healed++;
+    for (const rec of recs) if (!rec.held && now - rec.at >= T_REBUILT) healed++;
     const owned = (healed > 1 && fastPurge()) ? reSetsBegin() : false;
     try {
       for (const rec of recs) {
-        if (now - rec.at >= T_REBUILT) rebuild(rec);
+        if (!rec.held && now - rec.at >= T_REBUILT) rebuild(rec);
         else setPhase(rec, phaseFor(rec));
       }
     } finally { reSetsEnd(owned); }
@@ -946,22 +1016,51 @@
   D.propGroup = function (lot) { const rec = ledger.get(keyOf(lot)); return rec ? rec.propGroup : null; };
   // save / late-join snapshot (netpersist worldBlob.demo — see fracture's twin)
   D.serialize = function () {
-    return { v: 1, list: Array.from(ledger.values()).map((r) => ({ x: Math.round(r.lot.cx), z: Math.round(r.lot.cz), at: +r.at.toFixed(3) })) };
+    return { v: 1, list: Array.from(ledger.values()).map((r) => {
+      const row = { x: Math.round(r.lot.cx), z: Math.round(r.lot.cz), at: +r.at.toFixed(3) };
+      if (r.held) row.h = 1;                 // an owner's pad: never healed by the calendar
+      return row;
+    }) };
   };
   D.applyOne = function (row) {
     if (!row) return false;
     const A = arena();
     if (!A || !A.lots) return false;
     const now = CBZ.dayTime ? CBZ.dayTime() : 0;
-    if (row.at != null && now - row.at >= T_REBUILT) return false;   // already healed
+    if (!row.h && row.at != null && now - row.at >= T_REBUILT) return false;   // already healed
     let best = null, bd = 1e9;
     for (const lot of A.lots) {
       const d = Math.hypot(lot.cx - row.x, lot.cz - row.z);
       if (d < bd) { bd = d; best = lot; }
     }
     if (!best || bd > 3) return false;                                // address didn't resolve
-    return destroy(best, { quiet: true, silent: true, at: row.at });
+    return destroy(best, { quiet: true, silent: true, at: row.at, held: !!row.h });
   };
+  /* THE HOLD (city/plots.js). hold(lot, true) marks a lot's teardown as the
+     owner's: a record that already exists stops its calendar and settles to
+     the pad; a lot that is still standing is stamped so the NEXT destroy()
+     (the contractor's collapse) opens held. hold(lot, false) hands the parcel
+     back to the city: the pad becomes the barriered cleared lot and the normal
+     rebuild arc resumes from there. */
+  D.hold = function (lot, on) {
+    if (!lot) return false;
+    const rec = ledger.get(keyOf(lot));
+    if (on) {
+      lot._plotHold = true;
+      if (rec && !rec.held) { rec.held = true; setPhase(rec, phaseFor(rec)); }
+      return true;
+    }
+    lot._plotHold = false;
+    if (rec && rec.held) {
+      rec.held = false;
+      const now = CBZ.dayTime ? CBZ.dayTime() : 0;
+      rec.at = now - T_CLEARED;
+      setPhase(rec, phaseFor(rec));
+    }
+    return true;
+  };
+  D.held = function (lot) { const rec = lot && ledger.get(keyOf(lot)); return !!(rec && rec.held); };
+  D.phaseOf = function (lot) { const rec = lot && ledger.get(keyOf(lot)); return rec ? rec.phase : 0; };
   /* THE LOAD PATH (DEMO_LOAD_V1). This ran a full destroy() per row,
      synchronously, inside net/netpersist.js's applyWorld: measured 2,063 ms
      for a 328-row blob, because every row paid its own indexOf storm against
@@ -1117,7 +1216,7 @@
     // a section written by an older build of this file — fall through to the
     // raw rows rather than inventing an age.
     const rows = base == null ? blob.list : blob.list.map(function (r) {
-      return { x: r.x, z: r.z, at: now - Math.max(0, base - r.at) };
+      return { x: r.x, z: r.z, at: now - Math.max(0, base - r.at), h: r.h };
     });
     try { D.apply({ v: 1, list: rows }); } catch (e) {}
   }
