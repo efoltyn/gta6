@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "99f9b8cc2ddef318ba7e4645ca713babc0c45b3d",
-  "createdAt": "2026-09-27T06:36:10.710Z",
+  "sourceCommit": "c13770594be20aff987416d082ee832c57836326",
+  "createdAt": "2026-09-27T06:39:39.380Z",
   "fileCount": 1104,
-  "totalBytes": 44857083,
+  "totalBytes": 44917767,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -1738,8 +1738,8 @@
     },
     {
       "file": "src/entities/survivorbot.js",
-      "bytes": 13011,
-      "sha256": "bdaabc111d10eeabb83721e2c95ac8d6e91f5e6a18c42020a52cddf4e65b56e0"
+      "bytes": 26240,
+      "sha256": "2bd321f96a6ecab4256c7fd0a015df82a5caa6e4f82a9aa2a68313703672e7c6"
     },
     {
       "file": "src/entities/vision.js",
@@ -1828,8 +1828,8 @@
     },
     {
       "file": "src/modes/survival.js",
-      "bytes": 13477,
-      "sha256": "48d637dad97eb3c2cee21f2a01afe4440097720620891e9b4d4285726f8d31f8"
+      "bytes": 14433,
+      "sha256": "f7a73f4091b560082c8d48fd0eae297241bf0252c90c97e97977bc598e66c599"
     },
     {
       "file": "src/modes/teammatch.js",
@@ -2123,8 +2123,8 @@
     },
     {
       "file": "src/systems/disasters.js",
-      "bytes": 119116,
-      "sha256": "b5590003ee8a6803130b8d6e62e9137705e62cc0d5aa27d16591766b7f9bd9bc"
+      "bytes": 123602,
+      "sha256": "a002ef96b2aab580c7d7951ed2b0385366d53eefb5bc0b68973bbac9006ac376"
     },
     {
       "file": "src/systems/dustfx.js",
@@ -2428,8 +2428,8 @@
     },
     {
       "file": "src/systems/quake.js",
-      "bytes": 27125,
-      "sha256": "1125d0a6e5fc625ff670de1f5649cd93e9a512610a0c50e588f30603fdcfe445"
+      "bytes": 27667,
+      "sha256": "79ea983ab88a9ba5ad7fc118fb2bb4ebf4c52de0f1174bebce7233e774f6c9f1"
     },
     {
       "file": "src/systems/quests.js",
@@ -2523,8 +2523,8 @@
     },
     {
       "file": "src/systems/survivalhud.js",
-      "bytes": 3022,
-      "sha256": "0c386a2cbe6d776b60f17cb31155c37df59e9e4773da05efff97b6cfbb4d890a"
+      "bytes": 9226,
+      "sha256": "7db6cc44eda6d0e8ce401b698e1f8e91967d11ff710c14ced6cfe7755f290e08"
     },
     {
       "file": "src/systems/taserfx.js",
@@ -3038,8 +3038,8 @@
     },
     {
       "file": "src/world/disaster_arena.js",
-      "bytes": 44579,
-      "sha256": "26ff8b1c4e3bf803cdf0ce586f0606b4d5282f38bb64ec13c5ec1882c945b578"
+      "bytes": 74192,
+      "sha256": "c4eee41fdc4023daa4e9640706ed357bd5b93026cd5b78b002b3c1cce2dd2c9d"
     },
     {
       "file": "src/world/door.js",
@@ -3218,8 +3218,8 @@
     },
     {
       "file": "src/world/volcanofx.js",
-      "bytes": 42945,
-      "sha256": "f533dc70d3ba4e872552e8194b7b995218f8ac8ba18053f801b35946a8114360"
+      "bytes": 48402,
+      "sha256": "ca64ec9ae696638591222f07be5fed889666a9cd93afff82c5e295258b780a48"
     },
     {
       "file": "src/world/water_buoyancy.js",
@@ -3248,8 +3248,8 @@
     },
     {
       "file": "src/world/water_spec.js",
-      "bytes": 72516,
-      "sha256": "7a50c02c2c827765a9a0415001b977ab6863147ddc47204a45eecf86c21703f3"
+      "bytes": 72713,
+      "sha256": "c692206ec8a21e47109dea06a2f0b1bd24c3d4fa02c35c10c9b6e5fdcd2b31e9"
     },
     {
       "file": "src/world/water_stability.js",
