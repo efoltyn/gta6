@@ -38,13 +38,8 @@
 
   const K = CBZ.prisonKit || null;
 
-  // ---- basketball hoop behind the half-court's baseline (world/ground.js
-  // paints the court: baseline x=-28.4, key to -22.6). The kit's hoop: round
-  // pole, gooseneck, a board with its square painted on, rim, net. It was a
-  // square post, a white slab and a 50 cm ORANGE SQUARE for a rim, standing
-  // inside the baseline. Board 1.2 m inside the baseline, rim over the key.
-  if (K) K.hoop(-29.2, 14, 1, 0, { reach: 2.0 });
-  CBZ.colliders.push({ minX: -29.45, maxX: -28.95, minZ: 13.75, maxZ: 14.25, noBreach: true });
+  // (The north-yard basketball hoop stood inside the mess hall's west wall,
+  // backboard facing the diners; deleted with world/ground.js's court pad.)
 
   // ---- picnic table (F7 spawnPiece: solid:false, walkTop:true — the top is a
   // platform findSupport can return). What you see is the kit's galvanised

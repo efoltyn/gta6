@@ -163,42 +163,12 @@
     // It was a 2 cm box with its top at 5 cm: a curb, not paint.
     const paint = (x, z, w, d, c) => addBox(x, 0.012, z, w, 0.004, d, c, { cast: false });
 
-    // ---- the basketball pad ------------------------------------------------
-    // props.js stands a 5 m hoop at (-28, 14) on bare grass, with the rim
-    // overhanging +x. A yard court is a POURED PAD, so it gets one: 12.4 x 13.6
-    // of darker asphalt, tucked 0.9 m off the west wall face (x=-29.5) and
-    // ending 11.7 m short of the walkway (x=-4.5). y=0.01 is the SAME lift the
-    // walkway already uses over the yard plane — a margin this scene has
-    // proven does not z-fight — and the two never overlap in x, so they cannot
-    // fight each other either.
-    // Same asphalt CANVAS as the walkway (one cached bake, not a second one) —
-    // the pad is told apart by a darker material tint, which is also what a
-    // court that never gets resurfaced actually looks like next to a swept path.
-    const padTex = CBZ.prisonGroundTex("asphalt", { a: "#55595e", b: "#4d5156", srgb: true });
-    padTex.repeat.set(1.4, 1.5);
-    const pad = new THREE.Mesh(
-      new THREE.PlaneGeometry(12.4, 13.6),
-      new THREE.MeshLambertMaterial({ map: padTex, color: 0xcfd3d8 })
-    );
-    pad.rotation.x = -Math.PI / 2;
-    pad.position.set(-22.4, 0.01, 14);
-    pad.receiveShadow = true;
-    scene.add(pad);
-
-    // half-court markings, FIBA proportions squeezed to the pad: the key is
-    // 4.9 wide x 5.8 deep and the free-throw circle is r=1.8, which is why
-    // those three numbers are not round.
-    paint(-28.4, 14, 0.14, 13.0, PAINT);     // baseline, behind the backboard
-    paint(-22.4, 7.5, 12.0, 0.14, PAINT);    // sideline, north
-    paint(-22.4, 20.5, 12.0, 0.14, PAINT);   // sideline, south
-    paint(-16.4, 14, 0.14, 13.0, PAINT);     // half-court line
-    paint(-25.5, 11.55, 5.8, 0.12, PAINT);   // key, north edge
-    paint(-25.5, 16.45, 5.8, 0.12, PAINT);   // key, south edge
-    paint(-22.6, 14, 0.12, 4.9, PAINT);      // free-throw line
-    for (let i = 0; i < 7; i++) {            // free-throw arc, dabbed
-      const a = (-1 + (i / 6) * 2) * 1.22;   // +-70 deg about +x
-      paint(-22.6 + Math.cos(a) * 1.8, 14 + Math.sin(a) * 1.8, 0.22, 0.22, PAINT);
-    }
+    // ---- (no basketball pad) ----------------------------------------------
+    // The 12.4 x 13.6 m court pad and its lines were laid at (-22.4, 14), i.e.
+    // on the mess hall's own footprint (world/cafeteria.js x[-29,-19]
+    // z[6,22]): a hoop and a painted key stood INSIDE the dining room. The
+    // lower yard (world/southblock.js) and the recreation yard (world/
+    // prisongrounds.js) have the prison's real courts. Deleted 2026-09-27.
 
     // ---- walkway edge lines ------------------------------------------------
     // ONLY on the legacy 9 m band. A continuous white line down each side of a
