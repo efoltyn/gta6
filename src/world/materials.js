@@ -804,19 +804,19 @@
     // proportion, so the network averages out instead of shimmering
     "  float wEff = max(0.011, vAsD * 0.0011); float wK = clamp(0.011 / wEff, 0.12, 1.0);",
     "  float t = 1.0; rough = 1.0; vec3 tint = vec3(1.0);",
-    "  t *= 0.86 + 0.26 * asNoise(p / 21.0 + 3.7);",
-    "  t *= 0.93 + 0.14 * asNoise(p / 4.3 + 9.1);",
+    "  t *= 0.95 + 0.10 * asNoise(p / 21.0 + 3.7);",
+    "  t *= 0.975 + 0.05 * asNoise(p / 4.3 + 9.1);",
     "#if ASPH_Q > 0",
     "  t *= 1.0 + fine * ((asNoise(p * 7.0) - 0.5) * 0.30 + (asNoise(p * 23.0 + 5.0) - 0.5) * 0.24);",
     "#endif",
     "#if ASPH_Q > 1",
-    "  t *= 1.0 + fine * step(0.955, asHash(floor(p * 34.0))) * 0.6;",
+    "  t *= 1.0 + fine * step(0.955, asHash(floor(p * 34.0))) * 0.3;",
     "#endif",
     // ---- patches: big old overlays, then the fresh utility cuts over them
     "  vec3 pb = asPatch(p, vec2(41.0, 27.0), vec2(7.0, 4.0), vec2(19.0, 10.0), 0.30 * ASPH_PATCHY, 29.0);",
     "  vec3 pa = asPatch(p, vec2(13.0, 8.0), vec2(1.1, 0.8), vec2(4.6, 2.6), 0.34 * ASPH_PATCHY, 11.0);",
     "  float oldLight = step(0.55, pb.z);",
-    "  t *= mix(1.0, mix(0.88, 1.13, oldLight), pb.x);",
+    "  t *= mix(1.0, mix(0.93, 1.07, oldLight), pb.x);",
     "  tint = mix(tint, vec3(1.03, 1.0, 0.95), pb.x * oldLight);",
     "  t *= mix(1.0, mix(0.70, 0.84, pa.z), pa.x);",
     "  tint = mix(tint, vec3(0.96, 0.98, 1.04), pa.x);",
@@ -863,7 +863,7 @@
     "  t *= 1.0 - 0.24 * grime * (0.55 + 0.45 * asNoise(p * 0.9 + 8.0));",
     "#endif",
     "#endif",
-    "  vec3 col = vec3(0.078, 0.079, 0.084) * ASPH_TONE * t * tint;",
+    "  vec3 col = vec3(0.068, 0.067, 0.066) * ASPH_TONE * t * tint;",
     "#if defined(ASPH_LANES) && ASPH_GUTTER > 0",
     "  vec3 panCol = vec3(0.215, 0.208, 0.196) * (0.84 + 0.22 * asNoise(p * 0.8 + 21.0));",
     "  panCol *= 1.0 + fine * (asNoise(p * 16.0) - 0.5) * 0.22;",
@@ -986,10 +986,10 @@
         .replace("#include <color_fragment>", "#include <color_fragment>\n{\n" +
           "  vec2 pwp = vPwW.xz;\n" +
           "  float fineK = 1.0 - smoothstep(20.0, 80.0, vPwD);\n" +
-          "  float w = pwNoise(pwp * 0.55 + 7.0) * 0.62 + pwNoise(pwp * 3.1) * 0.38 * fineK + (1.0 - fineK) * 0.19;\n" +
-          "  float worn = smoothstep(0.50, 0.86, w) * " + glslF(amt) + ";\n" +
-          "  float grain = 1.0 - fineK * 0.22 * step(0.62, pwHash(floor(pwp * 28.0)));\n" +
-          "  diffuseColor.rgb *= mix(1.0, 0.30, worn) * grain;\n}");
+          "  float w = pwNoise(pwp * 0.32 + 7.0) * 0.7 + pwNoise(pwp * 1.4 + 3.0) * 0.3;\n" +
+          "  float worn = smoothstep(0.62, 0.95, w) * 0.55 * " + glslF(amt) + ";\n" +
+          "  float fine = 1.0 - fineK * 0.06 * pwNoise(pwp * 9.0);\n" +
+          "  diffuseColor.rgb *= mix(1.0, 0.45, worn) * fine;\n}");
     };
     const prevKey = material.customProgramCacheKey;
     material.customProgramCacheKey = function () {

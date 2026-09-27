@@ -11,27 +11,19 @@
      ba --preset city-roads-highways --before http://127.0.0.1:8811/
 */
 
-// Filled from the HIGHWAYS builder's report (world coordinates). `null` keeps
-// the plate on the city grid so the preset never photographs the void.
-const HIGHWAY = {
-  // Route 5 meets Route 1's west leg at (-2380,-700); the flyover crosses R1.
-  aerial: { x: -2230, y: 170, z: -560, ax: -2375, ay: 0, az: -790, fov: 55 },
-  under: { x: -2371, y: 1.6, z: -735, ax: -2384, ay: 6.8, az: -800, fov: 60 },
-  merge: { x: -2399.6, y: 1.4, z: -1000, ax: -2392, ay: 1.2, az: -1140, fov: 58 },
-};
 
 const subjects = [
-  { id: "junction-street", label: "Noon · a downtown junction at street level", phase: 0.25, view: "junction",
+  { id: "junction-street", label: "Noon: a downtown junction at street level", phase: 0.25, view: "junction",
     focus: "Kerb returns, kerb ramps, gutters, crosswalks, stop bars, signals and signs at a Midtown crossing." },
-  { id: "avenue-golden", label: "Golden hour · down the avenue", phase: 0.465, view: "avenue",
+  { id: "avenue-golden", label: "Golden hour: down the avenue", phase: 0.465, view: "avenue",
     focus: "Asphalt aggregate, cracks and patches, wheel paths, lane paint and the kerb line in low sun." },
-  { id: "interchange-aerial", label: "Noon · the highway interchange from above", phase: 0.3, view: "hwAerial",
+  { id: "interchange-aerial", label: "Noon: the highway interchange from above", phase: 0.3, view: "hwAerial",
     focus: "Ramps, gores, flyover bridge, barriers and shoulders read as a real freeway interchange." },
-  { id: "under-overpass", label: "Noon · under the overpass", phase: 0.3, view: "hwUnder",
+  { id: "under-overpass", label: "Noon: under the overpass", phase: 0.3, view: "hwUnder",
     focus: "Deck thickness, girders, piers, bearings and the road passing beneath." },
-  { id: "ramp-merge", label: "Afternoon · a ramp merge at driver height", phase: 0.36, view: "hwMerge",
+  { id: "ramp-merge", label: "Afternoon: a ramp merge at driver height", phase: 0.36, view: "hwMerge",
     focus: "Acceleration lane, gore chevrons, barrier and guardrail, rumble strips." },
-  { id: "night-street", label: "Night · a lit street", phase: 0.75, view: "night",
+  { id: "night-street", label: "Night: a lit street", phase: 0.75, view: "night",
     focus: "Street lights throwing warm pools on the asphalt and footway; signals lit." },
 ];
 
@@ -119,6 +111,14 @@ async function stageCityRoadsHighways(input) {
     };
   }
 
+  // Filled from the HIGHWAYS builder's report (world coordinates). `null` keeps
+  // the plate on the city grid so the preset never photographs the void.
+  const HIGHWAY = {
+    // Route 5 meets Route 1's west leg at (-2380,-700); the flyover crosses R1.
+    aerial: { x: -2230, y: 170, z: -560, ax: -2375, ay: 0, az: -790, fov: 55 },
+    under: { x: -2371, y: 1.6, z: -735, ax: -2384, ay: 6.8, az: -800, fov: 60 },
+    merge: { x: -2399.6, y: 1.4, z: -1000, ax: -2392, ay: 1.2, az: -1140, fov: 58 },
+  };
   const subject = input.subject;
   const A = S.A;
   const ROAD = A.ROAD || 18;
@@ -130,15 +130,12 @@ async function stageCityRoadsHighways(input) {
   const surfY = (x, z) => (A.vehicleSurfaceY ? A.vehicleSurfaceY(x, z) : 0.065);
   const H = ROAD / 2;
   const cams = {
-    // standing on the SW footway corner of the central junction, looking NE across it
-    junction: { x: midX - H - 2.4, y: surfY(midX - H - 2.4, crossZ - H - 2.4) + 1.65, z: crossZ - H - 2.4,
-                ax: midX + 6, ay: 1.2, az: crossZ + 10, fov: 62 },
-    // driver's eye in the avenue's kerb lane, looking north up it into the low sun side
-    avenue: { x: aveX + 5.4, y: surfY(aveX + 5.4, crossZ - H - 30) + 1.35, z: crossZ - H - 30,
-              ax: aveX + 3.2, ay: 0.4, az: crossZ + 70, fov: 55 },
-    // night: from the footway of the cross street looking along it
-    night: { x: midX + H + 14, y: surfY(midX + H + 14, crossZ - H - 1.2) + 1.7, z: crossZ - H - 1.2,
-             ax: midX + H + 70, ay: 0.3, az: crossZ + 1.5, fov: 60 },
+    // on block (3,3)'s west footway at the Midtown junction (0,-700)
+    junction: { x: 10.2, y: 1.9, z: -686, ax: -4, ay: 0.1, az: -706, fov: 62 },
+    // driver's eye on the median avenue x=52, looking north up it
+    avenue: { x: 57.4, y: 1.3, z: -780, ax: 52, ay: 0.3, az: -640, fov: 55 },
+    // on the east footway of the median avenue x=-52, looking north along it
+    night: { x: -41.5, y: 1.9, z: -770, ax: -50, ay: 0.2, az: -680, fov: 60 },
   };
   const hwFallback = { x: midX + 8, y: 190, z: crossZ - 40, ax: midX + 8, ay: 0, az: crossZ + 30, fov: 50 };
   cams.hwAerial = HIGHWAY.aerial || hwFallback;
@@ -191,7 +188,7 @@ export default {
   title: "Gang Life: streets and highways that read as real",
   description: "A downtown junction, an avenue at golden hour, a highway interchange from above, under the overpass, a ramp merge, and a night street.",
   beforeLabel: "BEFORE",
-  afterLabel: "AFTER · ROADS WAVE",
+  afterLabel: "AFTER: ROADS WAVE",
   viewport: { width: 1180, height: 700 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90326, cfg_BOOT_METER: 0 },

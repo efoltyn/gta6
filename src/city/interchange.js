@@ -293,6 +293,41 @@
 
   function sgn(v) { return v < 0 ? -1 : 1; }
 
+  /* planSlip(q, travS, travT, Hs, Ht, gy) — PURE, local frame. The slip in
+     quadrant q (z' sign) on the stem's side of the through route. */
+  const SLIP_R = 30, SLIP_L = 95;
+  function planSlip(q, travS, travT, Hs, Ht, gy) {
+    const lcS = travS + R.laneHalf, lcT = travT + R.laneHalf;
+    const segs = [{ len: SLIP_L, zone: "a" }, { r: SLIP_R, ang: -q * Math.PI / 2, zone: "arc" }, { len: SLIP_L, zone: "b" }];
+    const T = walk(segs, lcT + SLIP_R + SLIP_L, q * lcS, -1, 0, R.step);
+    const arcLen = SLIP_R * Math.PI / 2, sT1 = SLIP_L, sT2 = SLIP_L + arcLen, sMid = (sT1 + sT2) / 2, sEnd = T[T.length - 1].s;
+    let nose1 = null, nose2 = null;
+    const e0S = Math.max(0.2, (Hs - travS) - R.laneHalf), e0T = Math.max(0.2, (Ht - travT) - R.laneHalf);
+    for (const p of T) {
+      const first = p.s < sMid;
+      const d = first ? Math.abs(p.z) : Math.abs(p.x), trav = first ? travS : travT;
+      const dx = first ? 0 : -1, dz = first ? -q : 0;
+      p.side = Math.sign(-p.hz * dx + p.hx * dz) || 1;
+      p.hug = d - R.laneHalf - trav < R.noseGap;
+      // reach the (axis-aligned) edge line exactly along this station's
+      // rotated normal, or a grass sliver opens inside the gore on the curve
+      const perp = first ? Math.abs(p.hx) : Math.abs(p.hz);
+      p.eIn = p.hug ? Math.max(R.laneHalf, (d - trav) / Math.max(0.35, perp)) : R.half;
+      p.eOut = R.half;
+      if (p.s < R.taper) p.eOut = e0S + (R.half - e0S) * (p.s / R.taper);
+      if (sEnd - p.s < R.taper) p.eOut = e0T + (R.half - e0T) * ((sEnd - p.s) / R.taper);
+      p.y = gy; p.bridge = false;
+      if (!p.hug && nose1 == null) nose1 = p.s;
+      if (!p.hug) nose2 = p.s;
+    }
+    if (nose1 == null) return null;
+    let xN1 = 0, zN2 = 0;
+    for (const p of T) { if (p.s <= nose1) xN1 = p.x; if (p.s <= nose2) zN2 = p.z; }
+    return { S: T, q: q, sT1: sT1, sT2: sT2, nose1: nose1, nose2: nose2,
+      xNose1: xN1, xMax: T[0].x, zNose2: zN2, zMax: Math.abs(T[T.length - 1].z) };
+  }
+  CBZ.highwaySlipPlan = planSlip;
+
   /* spec: { through: route, stem: route, recs: {id -> highway rec}, city } */
   CBZ.planInterchange = function (spec) {
     const thr = spec.through, stem = spec.stem, city = spec.city;
@@ -346,6 +381,35 @@
     for (const p of plan.piers) {
       if (Math.abs(p.x) < TS.medHalf) tRec.barrierGaps.push({ x: p.wx, z: p.wz, r: 3.2 });
     }
+    // ---- AT-GRADE SLIP RAMPS in the two stem-side quadrants: every movement
+    //      of the T gets a visible ramp. A slip is a connector, the same
+    //      curve whichever way traffic uses it: it rides the stem's outer lane
+    //      line, a 90 degree curve through the quadrant, then the through
+    //      route's outer lane line, each end attached through a taper, a
+    //      parallel lane and a painted gore exactly like the flyover's.
+    G.slips = [];
+    let flyStemCut = Infinity;
+    for (const p of S) if (p.s <= plan.noseD) flyStemCut = Math.min(flyStemCut, p.x);
+    for (const q of [-1, 1]) {
+      const SLp = planSlip(q, SS.trav, TS.trav, sRec.half, tRec.half, tRec.deckY + 0.0015);
+      if (!SLp) continue;
+      const T = SLp.S;
+      // the flyover owns the stem shoulder from its own nose on
+      if (q === sIn && SLp.xMax + 5 >= flyStemCut) continue;
+      // never stand a flyover pier on (or within 0.3 m of) a slip deck
+      let clash = false;
+      for (const pr of plan.piers) for (const t of T) if (Math.hypot(pr.x - t.x, pr.z - t.z) < Math.max(t.eIn, t.eOut) + 1.0) { clash = true; break; }
+      if (clash) { console.warn("[interchange] slip q=" + q + " clears no pier; skipped"); continue; }
+      for (const t of T) { const w = W(t.x, t.z); t.wx = w.x; t.wz = w.z; t.whx = sStem * t.hx; t.whz = t.hz; }
+      // cuts: the slip takes over each mainline's outer shoulder while attached
+      const xs0 = X0 + sStem * SLp.xNose1, xs1 = X0 + sStem * (SLp.xMax + 1);
+      const zs0 = Z0 + q * (SS.trav + 0.05), zs1 = Z0 + q * (sRec.half + 0.5);
+      sRec.cuts.push({ minX: Math.min(xs0, xs1), maxX: Math.max(xs0, xs1), minZ: Math.min(zs0, zs1), maxZ: Math.max(zs0, zs1) });
+      const zt0 = Z0 + SLp.zNose2, zt1 = Z0 + q * (SLp.zMax + 1);
+      const xt0 = X0 + sStem * (TS.trav + 0.05), xt1 = X0 + sStem * (tRec.half + 0.5);
+      tRec.cuts.push({ minX: Math.min(xt0, xt1), maxX: Math.max(xt0, xt1), minZ: Math.min(zt0, zt1), maxZ: Math.max(zt0, zt1) });
+      G.slips.push(SLp);
+    }
     _plans.push(G);
     // ---- relief corridors (terrain flat under the whole footprint) ---------
     const cor = [];
@@ -384,8 +448,11 @@
     group.userData.terrain = true;
     city.root.add(group);
 
-    const WHITE = col(0xe6e9ec), JOINT = col(0x3b3d41), CONC = col(0xa9a79f), CONC_D = col(0x8f8d86),
-      CONC_S = col(0x9b9990), GIRDER = col(0x98968e), CUSH_Y = col(0xe2b418), CUSH_K = col(0x1f1f21), EARTH = col(0x6d6a5c);
+    // colour contrast that makes a flyover read from the air: pale parapet
+    // caps and outer faces, a darker traffic face, a dark weathered fascia band
+    // along the deck edge, mid-grey girders and a darker soffit
+    const WHITE = col(0xe6e9ec), JOINT = col(0x3b3d41), CONC = col(0xc8c5ba), CONC_D = col(0x5f5d58),
+      CONC_S = col(0x8f8d86), GIRDER = col(0x9c9a92), CAP = col(0xe0ddd2), CUSH_Y = col(0xe2b418), CUSH_K = col(0x1f1f21), EARTH = col(0x6d6a5c);
 
     // world cross-section helpers
     function lnorm(p) { return { x: -p.whz, z: p.whx }; }              // left normal in world
@@ -409,28 +476,6 @@
       const k = Math.floor(s / 400);
       return chunks[k] || (chunks[k] = { deck: new K.Acc(true), paint: new K.Acc(false), furn: new K.Acc(false), s0: k * 400 });
     }
-    const laneAttr = [0, 3.8, 0, 0];
-    for (let i = 0; i < n - 1; i++) {
-      const a = S[i], b = S[i + 1], c = C((a.s + b.s) / 2);
-      const aL = latSide(a, 1), aR = latSide(a, -1), bL = latSide(b, 1), bR = latSide(b, -1);
-      const aI = edgePt(a, aL), aO = edgePt(a, aR);
-      const bI = edgePt(b, bL), bO = edgePt(b, bR);
-      const va = a.s - c.s0, vb = b.s - c.s0;
-      // aSec: lateral from lane centre, along, edge-line offset (rumble outside it), inner
-      const sa = function (lat, v) { return [lat, v, 2.0, 0]; };
-      c.deck.tri(aI, aO, bO, null, true, sa(aL, va), sa(aR, va), sa(bR, vb), laneAttr);
-      c.deck.tri(aI, bO, bI, null, true, sa(aL, va), sa(bR, vb), sa(bL, vb), laneAttr);
-    }
-
-    // ---- paint ----------------------------------------------------------------
-    function line(i0, i1, latFn, w, color, dash) {
-      for (let i = i0; i < i1; i++) {
-        const a = S[i], b = S[i + 1];
-        if (dash) { const ph = (a.s % dash[1]); if (ph > dash[0]) continue; }
-        const la = latFn(a), lb = latFn(b), c = C(a.s);
-        c.paint.quad(edgePt(a, la - w / 2, 0.012), edgePt(a, la + w / 2, 0.012), edgePt(b, lb + w / 2, 0.012), edgePt(b, lb - w / 2, 0.012), color, true);
-      }
-    }
     const R0 = P.R;
     const sG = R0.taper + R0.decel;                                     // gore point (diverge)
     let iG = 0, iND = 0, iNM = n - 1, iAcc = n - 1;
@@ -440,35 +485,63 @@
       if (S[i].s < P.noseM) iNM = i + 1;
       if (S[i].zone === "cutM" && iAcc === n - 1) iAcc = i;
     }
-    const innerLane = function (p) { return innerW(p) * (R0.laneHalf + 0.1); };
-    const hugLine = function (p) { return innerW(p) * (p.eIn - 0.1); };
-    // lane edge lines on both world sides; on the attached side the decel /
-    // accel lane zones get the dotted line below instead
-    for (const w of [1, -1]) {
-      const i0 = Math.round(R0.taper / R0.step), i1 = n - 1 - Math.round(R0.taperOut / R0.step);
-      for (let i = i0; i < i1; i++) {
-        if (innerW(S[i]) === w && (i < iG || i >= iAcc)) continue;
-        line(i, i + 1, function () { return w * (R0.laneHalf + 0.1); }, 0.2, WHITE);
+    // ---- deck + paint of one ramp (the flyover, then each slip) -----------------
+    // S: stations; iG/iND: diverge gore start / nose; iNM/iAcc: merge nose /
+    // accel lane start; tIn/tOut: taper lengths in stations; C: its chunks
+    function surface(S, n, iG, iND, iNM, iAcc, tIn, tOut, C, deckMat) {
+      const laneAttr = [0, 3.8, 0, 0];
+      for (let i = 0; i < n - 1; i++) {
+        const a = S[i], b = S[i + 1], c = C((a.s + b.s) / 2);
+        const aL = latSide(a, 1), aR = latSide(a, -1), bL = latSide(b, 1), bR = latSide(b, -1);
+        const aI = edgePt(a, aL), aO = edgePt(a, aR);
+        const bI = edgePt(b, bL), bO = edgePt(b, bR);
+        const va = a.s - c.s0, vb = b.s - c.s0;
+        // aSec: lateral from lane centre, along, edge-line offset (rumble outside it), inner
+        const sa = function (lat, v) { return [lat, v, 2.0, 0]; };
+        c.deck.tri(aI, aO, bO, null, true, sa(aL, va), sa(aR, va), sa(bR, vb), laneAttr);
+        c.deck.tri(aI, bO, bI, null, true, sa(aL, va), sa(bR, vb), sa(bL, vb), laneAttr);
       }
-    }
-    // decel / accel lane lines: wide dotted, on the mainline edge
-    line(Math.round(R0.taper / R0.step), iG, hugLine, 0.3, WHITE, [1.2, 4]);
-    line(iAcc, n - 1 - Math.round(R0.taperOut / R0.step), hugLine, 0.3, WHITE, [1.2, 4]);
-    // gores: the mainline edge line continues, the ramp's own edge line starts,
-    // chevrons fill the wedge between them
-    line(iG, iND, hugLine, 0.2, WHITE);
-        line(iNM, iAcc, hugLine, 0.2, WHITE);
-    function chevrons(i0, i1) {
-      for (let i = i0; i < i1; i += 3) {
-        const a = S[i], b = S[Math.min(i1, i + 2)];
-        const la0 = innerLane(a), la1 = hugLine(a), lb1 = hugLine(b);
-        if (Math.abs(la1 - la0) < 0.8) continue;
-        const c = C(a.s), w = 0.25;
-        // a diagonal bar from the lane line (at a) to the mainline line (at b)
-        c.paint.quad(edgePt(a, la0 - w, 0.013), edgePt(a, la0 + w, 0.013), edgePt(b, lb1 + w, 0.013), edgePt(b, lb1 - w, 0.013), WHITE, true);
+
+      // ---- paint ----------------------------------------------------------------
+      function line(i0, i1, latFn, w, color, dash) {
+        for (let i = i0; i < i1; i++) {
+          const a = S[i], b = S[i + 1];
+          if (dash) { const ph = (a.s % dash[1]); if (ph > dash[0]) continue; }
+          const la = latFn(a), lb = latFn(b), c = C(a.s);
+          c.paint.quad(edgePt(a, la - w / 2, 0.012), edgePt(a, la + w / 2, 0.012), edgePt(b, lb + w / 2, 0.012), edgePt(b, lb - w / 2, 0.012), color, true);
+        }
       }
+      const innerLane = function (p) { return innerW(p) * (R0.laneHalf + 0.1); };
+      const hugLine = function (p) { return innerW(p) * (p.eIn - 0.1); };
+      // lane edge lines on both world sides; on the attached side the decel /
+      // accel lane zones get the dotted line below instead
+      for (const w of [1, -1]) {
+        const i0 = tIn, i1 = n - 1 - tOut;
+        for (let i = i0; i < i1; i++) {
+          if (innerW(S[i]) === w && (i < iG || i >= iAcc)) continue;
+          line(i, i + 1, function () { return w * (R0.laneHalf + 0.1); }, 0.2, WHITE);
+        }
+      }
+      // decel / accel lane lines: wide dotted, on the mainline edge
+      line(tIn, iG, hugLine, 0.3, WHITE, [1.2, 4]);
+      line(iAcc, n - 1 - tOut, hugLine, 0.3, WHITE, [1.2, 4]);
+      // gores: the mainline edge line continues, the ramp's own edge line starts,
+      // chevrons fill the wedge between them
+      line(iG, iND, hugLine, 0.2, WHITE);
+          line(iNM, iAcc, hugLine, 0.2, WHITE);
+      function chevrons(i0, i1) {
+        for (let i = i0; i < i1; i += 3) {
+          const a = S[i], b = S[Math.min(i1, i + 2)];
+          const la0 = innerLane(a), la1 = hugLine(a), lb1 = hugLine(b);
+          if (Math.abs(la1 - la0) < 0.8) continue;
+          const c = C(a.s), w = 0.25;
+          // a diagonal bar from the lane line (at a) to the mainline line (at b)
+          c.paint.quad(edgePt(a, la0 - w, 0.013), edgePt(a, la0 + w, 0.013), edgePt(b, lb1 + w, 0.013), edgePt(b, lb1 - w, 0.013), WHITE, true);
+        }
+      }
+      chevrons(iG, iND); chevrons(iNM, iAcc);
     }
-    chevrons(iG, iND); chevrons(iNM, iAcc);
+    surface(S, n, iG, iND, iNM, iAcc, Math.round(R0.taper / R0.step), Math.round(R0.taperOut / R0.step), C, M.ramp || M.asphalt);
 
     // ---- structure -------------------------------------------------------------
     const colliders = [];
@@ -492,9 +565,9 @@
         const up = function (p, h) { return [p[0], p[1] + h, p[2]]; };
         quadF(c, A0, B0, up(B0, PAR_H), up(A0, PAR_H), CONC);                   // outer face
         quadF(c, A1, B1, up(B1, PAR_H), up(A1, PAR_H), CONC_S);                 // traffic face
-        quadF(c, up(A0, PAR_H), up(B0, PAR_H), up(B1, PAR_H), up(A1, PAR_H), CONC_D);  // cap
+        quadF(c, up(A0, PAR_H), up(B0, PAR_H), up(B1, PAR_H), up(A1, PAR_H), CAP);  // cap
         // below the deck: fascia (bridge) or retaining wall to the ground (fill)
-        const drop = bridge ? R0.slab + 0.15 : Math.max(a.y, b.y) + 0.4;
+        const drop = bridge ? R0.slab + 0.55 : Math.max(a.y, b.y) + 0.4;   // a 0.9 m fascia beam on the bridge
         const down = function (p, d) { return [p[0], p[1] - d, p[2]]; };
         quadF(c, A0, B0, down(B0, bridge ? drop : b.y + 0.4), down(A0, bridge ? drop : a.y + 0.4), bridge ? CONC_D : CONC_S);
         // collider: the parapet (and the wall under it on fill), height-banded
@@ -563,16 +636,37 @@
       if (CBZ.highwayChevronSign) CBZ.highwayChevronSign(e[0] + fx * 2.8, p.y, e[2] + fz * 2.8, fx, fz);
     }
 
-    for (const ch of chunks) {
-      if (!ch) continue;
-      const d = ch.deck.mesh(M.asphalt);
-      if (d) { d.receiveShadow = true; d.castShadow = true; group.add(d); }
-      const detail = [];
-      const pm = ch.paint.mesh(M.paint);
-      if (pm) { pm.renderOrder = 1; pm.userData.roadPaint = true; group.add(pm); detail.push(pm); }
-      const fm = ch.furn.mesh(M.furn);
-      if (fm) { fm.castShadow = true; fm.receiveShadow = true; group.add(fm); }
-      if (d && detail.length && K.chunks) K.chunks.push({ c: d.geometry.boundingSphere.center.clone(), r: d.geometry.boundingSphere.radius, detail: detail });
+    function emit(chunks, deckMat) {
+      for (const ch of chunks) {
+        if (!ch) continue;
+        const d = ch.deck.mesh(deckMat);
+        if (d) { d.receiveShadow = true; d.castShadow = true; group.add(d); }
+        const detail = [];
+        const pm = ch.paint.mesh(M.paint);
+        if (pm) { pm.renderOrder = 1; pm.userData.roadPaint = true; group.add(pm); detail.push(pm); }
+        const fm = ch.furn.mesh(M.furn);
+        if (fm) { fm.castShadow = true; fm.receiveShadow = true; group.add(fm); }
+        if (d && detail.length && K.registerChunk) K.registerChunk(d, detail);
+      }
+    }
+    emit(chunks, M.ramp || M.asphalt);
+    // ---- the at-grade slip ramps: same surface builder, ordinary asphalt -------
+    for (const SL of (G.slips || [])) {
+      const sc = [];
+      const C2 = function (s) {
+        const k = Math.floor(s / 400);
+        return sc[k] || (sc[k] = { deck: new K.Acc(true), paint: new K.Acc(false), furn: new K.Acc(false), s0: k * 400 });
+      };
+      const T = SL.S, m = T.length;
+      let jG = 0, jND = 0, jNM = m - 1, jAcc = m - 1;
+      for (let i = 0; i < m; i++) {
+        if (T[i].s <= SL.sT1) jG = i;
+        if (T[i].s <= SL.nose1) jND = i;
+        if (T[i].s < SL.nose2) jNM = i + 1;
+        if (T[i].s <= SL.sT2) jAcc = i;
+      }
+      surface(T, m, jG, jND, jNM, jAcc, Math.round(R0.taper / R0.step), Math.round(R0.taper / R0.step), C2, M.asphalt);
+      emit(sc, M.asphalt);
     }
     if (CBZ.colliders) for (const c of colliders) CBZ.colliders.push(c);
 

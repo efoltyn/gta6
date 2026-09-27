@@ -179,6 +179,9 @@
     if (_mats) return _mats;
     _mats = {
       asphalt: deckMaterial(0x2c2e33, 0),
+      // bridge decks get their own, darker, fresher surfacing (a flyover is
+      // newer pavement than the road it crosses and reads as its own layer)
+      ramp: deckMaterial(0x202125, 0),
       concrete: deckMaterial(0x8a8e94, -1),
       dirt: deckMaterial(0x6b5a42, 1),
       // LIT paint (Lambert), pulled toward the camera in depth only: no
@@ -195,6 +198,10 @@
         _mats.asphalt.color.setHex(0xffffff);
         CBZ.asphaltDetail(_mats.asphalt, { scale: 1, crackiness: 0.7, patchiness: 0.6, lanes: { laneW: 3.6, lanesPerDir: 3, median: 0 } });
       } catch (e) { _mats.asphalt.color.setHex(0x2c2e33); }
+      try {
+        _mats.ramp.color.setHex(0xffffff);
+        CBZ.asphaltDetail(_mats.ramp, { scale: 1, crackiness: 0.25, patchiness: 0.15, tone: 0.72 });
+      } catch (e) { _mats.ramp.color.setHex(0x202125); }
     }
     return _mats;
   }
@@ -588,15 +595,39 @@
 
     // ---- DECK --------------------------------------------------------------
     const laneAttr = [S.isDirt ? 0 : S.medHalf, S.laneW, S.isDirt ? 0 : S.lanesPerDir, half];
-    for (let i = 0; i < st.length - 1; i++) {
-      const a = st[i], b = st[i + 1], C = chunkOf((a.s + b.s) / 2);
+    // A JUNCTION BOX IS PLAIN ASPHALT: no rumble, no lane paint, no markers
+    // where another road's box crosses this deck. The deck is split exactly
+    // at every box boundary so the rumble stops square, not on a station.
+    function inBox(sq) {
+      for (const g of gaps) if (sq >= g.s0 && sq <= g.s1) return true;
+      return false;
+    }
+    const cutsS = [];
+    for (const g of gaps) { if (g.s0 > 0 && g.s0 < totalS) cutsS.push(g.s0); if (g.s1 > 0 && g.s1 < totalS) cutsS.push(g.s1); }
+    cutsS.sort(function (x, y) { return x - y; });
+    const deckPts = [];
+    let ci = 0;
+    for (let i = 0; i < st.length; i++) {
+      while (ci < cutsS.length && cutsS[ci] < st[i].s - 1e-6) {
+        const q = at(cutsS[ci]);
+        const lo = st[Math.max(0, i - 1)];
+        q.cutN = lo.cutN; q.cutP = lo.cutP; q.e = lo.e; q.out = lo.out; q.mit = 1;
+        if (!deckPts.length || cutsS[ci] > deckPts[deckPts.length - 1].s + 1e-3) deckPts.push(q);
+        ci++;
+      }
+      deckPts.push(st[i]);
+    }
+    for (let i = 0; i < deckPts.length - 1; i++) {
+      const a = deckPts[i], b = deckPts[i + 1], C = chunkOf((a.s + b.s) / 2);
       const eN_a = a.cutN ? S.trav : half, eP_a = a.cutP ? S.trav : half;
       const eN_b = b.cutN ? S.trav : half, eP_b = b.cutP ? S.trav : half;
       const aL = P3(a, -eN_a), aR = P3(a, eP_a), bL = P3(b, -eN_b), bR = P3(b, eP_b);
       const va = a.s - C.s0, vb = b.s - C.s0;
-      const eo = S.isDirt ? 1e4 : S.trav, ei = (S.median && !S.isDirt) ? S.medHalf : 0;
-      C.deck.tri(aL, aR, bR, null, true, [-eN_a, va, eo, ei], [eP_a, va, eo, ei], [eP_b, vb, eo, ei], laneAttr);
-      C.deck.tri(aL, bR, bL, null, true, [-eN_a, va, eo, ei], [eP_b, vb, eo, ei], [-eN_b, vb, eo, ei], laneAttr);
+      const box = inBox((a.s + b.s) / 2);
+      const eo = (S.isDirt || box) ? 1e4 : S.trav, ei = (S.median && !S.isDirt && !box) ? S.medHalf : 0;
+      const la = box ? [0, 3.6, 0, half] : laneAttr;
+      C.deck.tri(aL, aR, bR, null, true, [-eN_a, va, eo, ei], [eP_a, va, eo, ei], [eP_b, vb, eo, ei], la);
+      C.deck.tri(aL, bR, bL, null, true, [-eN_a, va, eo, ei], [eP_b, vb, eo, ei], [-eN_b, vb, eo, ei], la);
     }
 
     // ---- PAINT (paved only) -------------------------------------------------
@@ -638,7 +669,7 @@
         for (let k = 1; k < S.lanesPerDir; k++) {
           const lat = side * (S.medHalf + k * S.laneW);
           for (let s = 6; s + 3 < totalS - endPad; s += 12) {
-            if (inGap(s, side, false) && inGap(s, -side, false)) continue;
+            if (inBox(s) || inBox(s + 3)) continue;
             const a = at(s), b = at(s + 3), C = chunkOf(s + 1.5);
             C.paint.quad(P3(a, lat - 0.075, 0.012), P3(a, lat + 0.075, 0.012), P3(b, lat + 0.075, 0.012), P3(b, lat - 0.075, 0.012), WHITE, true);
             if (((s / 12) | 0) % 2 === 0) {
@@ -652,7 +683,7 @@
         // yellow markers along the inner edge line every 24 m
         if (S.median) {
           for (let s = 12; s < totalS - 2; s += 24) {
-            if (inGap(s, 0, true)) continue;
+            if (inGap(s, 0, true) || inBox(s)) continue;
             const m = at(s), lat = side * (S.medHalf + 0.12), C = chunkOf(s);
             const q0 = P3(m, lat - 0.06, 0.03), q1 = P3(m, lat + 0.06, 0.03);
             C.paint.quad(q0, q1, [q1[0] + m.tx * 0.12, q1[1], q1[2] + m.tz * 0.12], [q0[0] + m.tx * 0.12, q0[1], q0[2] + m.tz * 0.12], RPMY, true);
@@ -887,12 +918,210 @@
       if (pm) { pm.renderOrder = 1; pm.userData.roadPaint = true; rec.group.add(pm); detail.push(pm); }
       const fm = C.furn.mesh(M.furn);
       if (fm) { fm.castShadow = false; fm.receiveShadow = true; rec.group.add(fm); detail.push(fm); }
-      if (detail.length && d) _chunks.push({ c: d.geometry.boundingSphere.center.clone(), r: d.geometry.boundingSphere.radius, detail: detail });
+      if (detail.length && d) registerChunk(d, detail);
     }
     if (CBZ.colliders) for (const c of colliders) CBZ.colliders.push(c);
     rec.stations = st;
     rec.at = at;
     rec.yAt = yAt;
+    // open water on BOTH sides along a straight run: bridge-landmark candidates
+    rec.waterRuns = [];
+    if (!S.isDirt) for (const run of runs) {
+      for (const r of runsWhere(function (sq) { const p = at(sq); return waterSide(p, -1) && waterSide(p, 1); }, st[run.i0].s, st[run.i1].s, 4)) {
+        if (r[1] - r[0] >= 150) rec.waterRuns.push({ s0: st[run.i0].s, s1: st[run.i1].s, wet: r[1] - r[0] });
+      }
+    }
+  }
+
+  // ============================================================
+  //  THE SUSPENSION-BRIDGE LANDMARK (owner's favourite: kept). Dressing over
+  //  the causeway-on-fill: two towers standing BESIDE the deck (solid, full
+  //  height colliders), catenary main cables (Newton-solved, below) and an
+  //  instanced run of hangers. It is chosen by the world, not by a
+  //  fingerprint: the late pass dresses the straight run with the longest
+  //  open-water span (>= 150 m) nearest downtown.
+  // ============================================================
+  function solveCatenary(dx, dy, sag) {
+    sag = Math.max(0.05, sag);
+    if (dx <= 1e-4) return { a: 1e6, offsetX: dx / 2, offsetY: -1e6 };
+    // vertex sag relative to the straight chord, for a trial `a` — the exact
+    // (non-approximated) quantity Newton-Raphson drives to zero below.
+    function vertexSag(a) {
+      const half = dx / 2;
+      const sh = Math.sinh(half / a) || 1e-12;
+      const offX = half - a * Math.asinh(dy / (2 * a * sh));
+      const offY = -a * Math.cosh(-offX / a);
+      const chordY = dy * (offX / dx);           // straight chord's height at x=offX
+      return chordY - (offY + a);                // chord height minus the curve's vertex height
+    }
+    // shallow-cable parabolic approximation (exact in the small-sag limit) —
+    // a well-conditioned starting guess with no large-number cancellation.
+    let a = (dx * dx) / (8 * sag);
+    for (let i = 0; i < 40; i++) {
+      const h = Math.max(a * 1e-4, 1e-6);
+      const g = vertexSag(a) - sag;
+      const gPrime = (vertexSag(a + h) - sag - g) / h;
+      if (!isFinite(g) || Math.abs(gPrime) < 1e-9) break;
+      let next = a - g / gPrime;
+      if (!isFinite(next) || next <= 0) next = a / 2;    // keep it in-domain
+      if (Math.abs(next - a) < 1e-4) { a = next; break; }
+      a = next;
+    }
+    if (!isFinite(a) || a <= 0) a = (dx * dx) / (8 * sag);   // non-convergent — safe fallback
+    const half = dx / 2;
+    const sh = Math.sinh(half / a) || 1e-12;
+    const offX = half - a * Math.asinh(dy / (2 * a * sh));
+    const offY = -a * Math.cosh(-offX / a);
+    return { a, offsetX: offX, offsetY: offY };
+  }
+  // sample nPts points along the solved catenary from anchor A to anchor B
+  // (world-space, A/B are {x,y,z}); returns an array of THREE.Vector3 in the
+  // curve's own local sag plane mapped back into world XYZ. `sag` is metres
+  // of droop below the straight A→B chord at the curve's lowest point.
+  function catenaryPoints(A, B, sag, nPts) {
+    const dx = Math.hypot(B.x - A.x, B.z - A.z);   // horizontal span (XZ plane)
+    const dy = B.y - A.y;
+    const { a, offsetX, offsetY } = solveCatenary(dx, dy, sag);
+    const ux = dx > 1e-6 ? (B.x - A.x) / dx : 0, uz = dx > 1e-6 ? (B.z - A.z) / dx : 0;
+    const pts = [];
+    for (let i = 0; i <= nPts; i++) {
+      const t = i / nPts, x = t * dx;
+      const y = a * Math.cosh((x - offsetX) / a) + offsetY;
+      pts.push(new THREE.Vector3(A.x + ux * x, A.y + y, A.z + uz * x));
+    }
+    return pts;
+  }
+  function buildSuspensionDressing(group, path, width, deckY, gradeAt) {
+    if (!THREE.TubeGeometry || !THREE.CatmullRomCurve3) return;   // headless/minimal THREE stub — skip gracefully
+    // the span runs along path[0]->path[1] (the fingerprinted call is a
+    // straight 2-point causeway); towers stand 1/5 of the way in from each
+    // end so the cable's central sag reads clearly over the main gap, with a
+    // shorter "back-stay" segment from each tower down to its own deck anchor.
+    const a0 = path[0], a1 = path[path.length - 1];
+    let dx = a1.x - a0.x, dz = a1.z - a0.z;
+    const span = Math.hypot(dx, dz) || 1e-3;
+    dx /= span; dz /= span;
+    const px = -dz, pz = dx;                    // unit perpendicular (across the deck)
+    const towerT = span * 0.18;                 // towers stand 18% of the way in from each end
+    const towerY = deckY + 26;                   // tower deck-top height (tall enough to read over the gap)
+    // A TOWER STANDS BESIDE THE CARRIAGEWAY, NEVER IN IT. This was
+    // `width/2 - 1.2`, which put a 26 m concrete leg 1.2 m INBOARD of the deck
+    // edge — on a 24 m deck the outer travel lane ends at 11.4 and the leg
+    // occupied 10.02..11.58, i.e. squarely in traffic — and drew it with no
+    // collider, so cars drove straight THROUGH a bridge tower. Two faults, one
+    // number: pushing the offset out by exactly one leg half-width seats the
+    // leg's INNER face on the deck edge, so the silhouette still straddles the
+    // deck, the outer lane is clear, and the leg can be solid (below) without
+    // turning that lane into a trap. Cables and hangers ride the SAME constant
+    // — one object, one number (the lampMast/ATTACH law).
+    const LEG_R = 0.55;                          // half-width of the 1.1 m square leg
+    const railOff = width / 2 + LEG_R;           // cable line == tower line == deck edge + leg
+
+    const towerMat = new THREE.MeshLambertMaterial({ color: 0x8b929c });
+    const cableMat = new THREE.MeshLambertMaterial({ color: 0x2a2d33 });
+    const hangerMat = new THREE.MeshLambertMaterial({ color: 0x3a3e46 });
+
+    function towerAt(t) {
+      const bx = a0.x + dx * t, bz = a0.z + dz * t;
+      return { x: bx, z: bz, y: gradeAt(bx, bz) };
+    }
+    const towers = [towerAt(towerT), towerAt(span - towerT)];
+
+    // ---- two A-frame towers straddling the deck (one leg each side + a
+    //      crossbeam near the top, like a real suspension tower silhouette) ----
+    towers.forEach((tw) => {
+      const tg = new THREE.Group();
+      tg.position.set(tw.x, tw.y, tw.z);
+      const yaw = Math.atan2(dx, dz);
+      tg.rotation.y = yaw;
+      const legH = towerY - tw.y;
+      const legGeo = new THREE.BoxGeometry(LEG_R * 2, legH, LEG_R * 2);
+      for (const s of [-1, 1]) {
+        const leg = new THREE.Mesh(legGeo, towerMat);
+        leg.position.set(s * railOff, legH / 2, 0);
+        leg.castShadow = true;
+        tg.add(leg);
+        // SOLIDITY: the one piece of this bridge a body can actually reach.
+        // The group is yawed by atan2(dx,dz), so local +X maps to world
+        // (dz, -dx) — take the leg's world centre through THAT, never by
+        // re-typing an offset (the utility_lines wire bug). The AABB is the
+        // yawed square's own extent, so it is honest at any bearing, and it
+        // is FULL HEIGHT because the leg is a 26 m column: nothing on this
+        // bridge should be able to pass through it at any altitude.
+        const lx = tw.x + s * railOff * dz, lz = tw.z - s * railOff * dx;
+        const ext = LEG_R * (Math.abs(dz) + Math.abs(dx));
+        if (CBZ.colliders) CBZ.colliders.push({
+          minX: lx - ext, maxX: lx + ext, minZ: lz - ext, maxZ: lz + ext,
+          ref: leg, noCam: true,
+        });
+      }
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(railOff * 2 + 1.1, 1.0, 1.0), towerMat);
+      beam.position.set(0, legH - 3.0, 0);
+      tg.add(beam);
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(railOff * 2 + 1.4, 0.8, 1.4), towerMat);
+      cap.position.set(0, legH + 0.4, 0);
+      tg.add(cap);
+      group.add(tg);
+    });
+
+    // ---- main cable per side: three catenary spans (back-stay/main/back-stay)
+    //      strung tower-to-tower over deck anchors, sampled into one smooth
+    //      CatmullRomCurve3 per side and extruded as a single TubeGeometry ----
+    const hangerSpots = [];   // {x,y,z, hx,hy,hz (deck point)} accumulated across both sides
+    [-1, 1].forEach((s) => {
+      const offX = px * s * railOff, offZ = pz * s * railOff;
+      const anchorA = { x: a0.x + offX, y: gradeAt(a0.x, a0.z) + 1.2, z: a0.z + offZ };
+      const tA = { x: towers[0].x + offX, y: towerY, z: towers[0].z + offZ };
+      const tB = { x: towers[1].x + offX, y: towerY, z: towers[1].z + offZ };
+      const anchorB = { x: a1.x + offX, y: gradeAt(a1.x, a1.z) + 1.2, z: a1.z + offZ };
+
+      // sample each of the 3 sub-spans with its own catenary SAG in metres
+      // (Newton-solved `a` per span — a real hanging cable, not a hand-tuned
+      // bezier), stitched into one point list for the smooth CatmullRomCurve3
+      // below. A real suspension bridge's main cable sags gently (roughly
+      // span/9..span/11 — the classic engineering ratio) while the back-stay
+      // from tower down to the low deck anchor is short and much straighter.
+      const mainSag = Math.hypot(tB.x - tA.x, tB.z - tA.z) / 10;
+      const backSag = Math.max(0.3, Math.hypot(tA.x - anchorA.x, tA.z - anchorA.z) / 30);
+      const segPts = [];
+      [[anchorA, tA, backSag], [tA, tB, mainSag], [tB, anchorB, backSag]].forEach(([A, B, sag], si) => {
+        const pts = catenaryPoints(A, B, sag, 14);
+        for (let i = si === 0 ? 0 : 1; i < pts.length; i++) segPts.push(pts[i]);   // skip dup joint point
+      });
+      const curve = new THREE.CatmullRomCurve3(segPts);
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 64, 0.22, 6, false), cableMat);
+      tube.castShadow = false;
+      group.add(tube);
+
+      // ---- hangers: vertical drops from the MAIN span (tA..tB, the sagging
+      //      part) down to the existing deck, every ~10m. Sampled straight off
+      //      the same segPts (the main-span slice) rather than re-solving. ----
+      const mainSpan = catenaryPoints(tA, tB, mainSag, 20);
+      for (let i = 1; i < mainSpan.length - 1; i += 2) {   // every other sample ≈ 10 spots
+        const p = mainSpan[i];
+        const deckY2 = gradeAt(p.x, p.z);
+        if (p.y - deckY2 < 1.0) continue;   // near the towers the cable is nearly AT deck height — skip degenerate hangers
+        hangerSpots.push({ x: p.x, y: p.y, z: p.z, dy: deckY2 + 0.3 });
+      }
+    });
+
+    // one InstancedMesh for every hanger cable (thin vertical tube, scaled per
+    // instance to its own drop length) — a single draw call no matter how many
+    // hangers the span has.
+    if (hangerSpots.length) {
+      const hangGeo = new THREE.CylinderGeometry(0.05, 0.05, 1, 5);
+      const him = new THREE.InstancedMesh(hangGeo, hangerMat, hangerSpots.length);
+      const m4 = new THREE.Matrix4(), pos = new THREE.Vector3(), q0 = new THREE.Quaternion(), scl = new THREE.Vector3();
+      hangerSpots.forEach((hs, i) => {
+        const drop = Math.max(0.1, hs.y - hs.dy);
+        pos.set(hs.x, (hs.y + hs.dy) / 2, hs.z);
+        scl.set(1, drop, 1);
+        m4.compose(pos, q0, scl);
+        him.setMatrixAt(i, m4);
+      });
+      him.instanceMatrix.needsUpdate = true; him.castShadow = false;
+      group.add(him);
+    }
   }
 
   // ============================================================
@@ -1058,120 +1287,27 @@
   if (CBZ.registerCityGroundHeight) CBZ.registerCityGroundHeight(bendHeight, { name: "Highway superelevation", biome: "road" });
 
   // ---- distance pass: hide far paint/furniture chunks -----------------------
-  let _tick = 0;
-  if (CBZ.onUpdate) CBZ.onUpdate(61, function () {
-    if (!_chunks.length || (++_tick % 12)) return;
-    const cam = CBZ.camera;
-    if (!cam) return;
-    const far = DETAIL_FAR * ((CBZ.getQualityLevel && CBZ.getQualityLevel() >= 3) ? 1.4 : 1);
-    const cx = cam.position.x, cz = cam.position.z, cy = cam.position.y;
-    for (let i = 0; i < _chunks.length; i++) {
-      const k = _chunks[i];
-      const d = Math.hypot(k.c.x - cx, k.c.z - cz, (k.c.y - cy) * 0.5) - k.r;
+  // Driven by the RENDER, not the sim: the chunk's always-drawn deck checks
+  // the camera that is actually drawing it (a paused sim, a photo rig that
+  // teleports the camera, a cutscene — all still see near paint). A far
+  // chunk re-shows its detail within one frame of the camera arriving.
+  function detailCull(k) {
+    return function (renderer, scene, camera) {
+      const far = DETAIL_FAR * ((CBZ.getQualityLevel && CBZ.getQualityLevel() >= 3) ? 1.4 : 1);
+      const p = camera.position;
+      const d = Math.hypot(k.c.x - p.x, k.c.z - p.z, (k.c.y - p.y) * 0.5) - k.r;
       const on = d < far;
-      for (let j = 0; j < k.detail.length; j++) k.detail[j].visible = on;
-    }
-  });
-
-  // ---- HWY-4: CAUSEWAY → GRID CONNECTORS (pure road DATA, no geometry — the
-  //      seawall gates + causeway decks already exist in world.js). The WHY: a
-  //      car on a grid avenue reaching the map edge needs ONE overlapping road
-  //      segment that bridges the grid intersection and the causeway mouth so
-  //      vehicles.js findRoad (9m snap tolerance) can turn the car NORTH onto the
-  //      causeway instead of dead-ending at the seawall. Each connector is a
-  //      single short segment laid EXACTLY on an existing grid line (so the snap
-  //      lands) that overlaps both the grid edge and the first causeway segment.
-  //      Registered via the same HWY-3 city.roads path; idempotent by coord.
-  function pushConnector(roads, seg) {
-    if (!roads) return false;
-    for (let k = 0; k < roads.length; k++) {
-      const r = roads[k];
-      if (!!r.vertical !== !!seg.vertical) continue;
-      if (Math.abs(r.x - seg.x) < 1.0 && Math.abs(r.z - seg.z) < 1.0) return false;   // already connected
-    }
-    seg.district = seg.district || "highway";
-    roads.push(seg);
-    return true;
-  }
-  CBZ.buildHighwayConnector = function (opts, roads) {
-    opts = opts || {};
-    roads = roads || (CBZ.city && CBZ.city.roads);
-    if (!roads) return false;
-    // {x,z,vertical,len} describing the short overlap segment; defaults give the
-    // airport causeway connector (x=0 avenue → causeway start at z≈-558).
-    const seg = {
-      x: opts.x != null ? opts.x : 0,
-      z: opts.z != null ? opts.z : -558,
-      vertical: opts.vertical != null ? !!opts.vertical : true,
-      len: opts.len != null ? opts.len : 24,
-      district: "highway",
-      // carry the causeway cross-section onto the join segment so every lane-
-      // aware consumer (props clearance, roadLanes, world-audit) reads a real
-      // width here too — a connector overlaps a 24m 3+3 causeway.
-      w: opts.w != null ? opts.w : 24,
-      lanesPerDir: opts.lanesPerDir != null ? opts.lanesPerDir : 3,
-      laneW: opts.laneW != null ? opts.laneW : 3.6,
-      median: opts.median != null ? !!opts.median : true,
-      medianW: opts.medianW != null ? opts.medianW : 1.2,
+      if (on !== k.on) { k.on = on; for (let j = 0; j < k.detail.length; j++) k.detail[j].visible = on; }
     };
-    return pushConnector(roads, seg);
-  };
-
-  // ---- HWY-4 connector registrar. The world tail runs this after every
-  //      landmass/causeway is built so the short, data-only joins enter
-  //      city.roads for HWY-3/traffic. It operates on the LIVE city descriptor
-  //      passed in (city.roads), robust during the build phase where CBZ.city
-  //      may not be wired yet. ------------------------------------------------
-  CBZ.buildArterials = function (city) {
-    city = city || CBZ.city;
-    const roads = city && city.roads;
-    if (!roads) return;
-
-    // HWY-4: the causeway mouths that meet the CITY GRID (coords VERIFIED against
-    // config CITY center 0,-700, block 34 + road 16 → step 50, grid lines
-    // xLines[-150..150 step 50], zLines[-850..-550 step 50]). Each connector is
-    // ONE short segment laid EXACTLY on an existing grid line that OVERLAPS both
-    // the grid edge and the causeway's first registered segment, so vehicles.js
-    // findRoad (9m snap) can turn a car off the grid onto the causeway.
-    //   • airport : causeway x=0 (avenue xLines[3]), z=-566..-280. Grid north
-    //     cross-street is z=-550. Connector at x=0 spans z=-546..-570 → bridges
-    //     the grid (z≈-550) to the causeway south end (z=-566).
-    //   • military: causeway z=CEN_Z (authored -700, cross-street zLines[3]),
-    //     island end..x=-133. Grid west avenue is x=-150. Connector spans
-    //     x=-129..-153 → bridges the grid (x≈-150) to the causeway east end
-    //     (x=-133). The deck's z-band rides the world-layout dial with the
-    //     island (island_military.js CW_MINZ/CW_MAXZ = CEN_Z ∓ 12), so the
-    //     connector follows the SAME dial — a fixed -700 would leave it
-    //     freestanding on a deck that moved to another cross-street. The
-    //     military dz must stay a multiple of the 50u grid step so CEN_Z
-    //     lands ON a zLine (dz=-150 → -850 = zLines[0]); layout.js owns
-    //     that constraint.
-    // (Speedway/other islands reached by their OWN bridges — already internally
-    //  connected at their L-corner — are out of this connector's scope.)
-    const _MILOFF = (CBZ.worldOff && CBZ.worldOff("military")) || { dx: 0, dz: 0 };
-    CBZ.buildHighwayConnector({ x: 0, z: -558, vertical: true, len: 24, w: 24, district: "highway" }, roads);            // airport (mainland lane — never moves)
-    CBZ.buildHighwayConnector({ x: -141, z: -700 + _MILOFF.dz, vertical: false, len: 24, w: 24, district: "highway" }, roads); // military
-
-    // The desert is already connected by real, authored infrastructure:
-    // city bridge -> commerce annex -> Diamond Speedway causeway -> Saltlands
-    // causeway. The former direct L-shaped arterial duplicated the bridge deck,
-    // cut through the annex, and then projected a bright centreline into open
-    // space at its turn. Leave the existing connected roads as the sole owner
-    // of that route instead of drawing a second, overlapping highway.
-  };
-
-  // SELF-REGISTER the connector registrar as a late landmass builder so it runs
-  // in cityWorldGeo AFTER every island/biome causeway has pushed its own road
-  // segments (default order 50 -> we use 90). This is the safe world-tail hook
-  // without touching world.js. Headless-safe when worldmap.js is absent.
-  if (CBZ.addLandmass) {
-    CBZ.addLandmass(function (city) {
-      try { CBZ.buildArterials(city); } catch (e) { /* never break the world build */ }
-    }, 90);
+  }
+  function registerChunk(deckMesh, detail) {
+    const k = { c: deckMesh.geometry.boundingSphere.center.clone(), r: deckMesh.geometry.boundingSphere.radius, detail: detail, on: true };
+    _chunks.push(k);
+    deckMesh.onBeforeRender = detailCull(k);
   }
 
   // ---- the kit city/interchange.js builds with --------------------------------
-  CBZ._hwyKit = { Acc: Acc, col: col, mats: mats, chunks: _chunks, stationize: stationize };
+  CBZ._hwyKit = { Acc: Acc, col: col, mats: mats, registerChunk: registerChunk, stationize: stationize };
 
   // ---- pipeline hooks -----------------------------------------------------------
   if (CBZ.addLandmass) {
@@ -1191,6 +1327,7 @@
       for (const rec of list) { try { buildNow(rec, city); } catch (e) { console.error("[highways]", e); } }
       if (CBZ.buildInterchanges) { try { CBZ.buildInterchanges(city); } catch (e) { console.error("[interchange]", e); } }
       try { causewayMouthGantries(city); } catch (e) { console.error("[highways] gantries", e); }
+      try { dressLandmarkBridge(city); } catch (e) { console.error("[highways] bridge", e); }
       // the world's gantry steel + sign faces: two draws
       const root = city && city.root;
       if (root && _gantryAcc && !_gantryAcc.empty()) {
@@ -1207,6 +1344,22 @@
         root.add(m);
       }
     }, 97.5);
+  }
+
+  function dressLandmarkBridge(city) {
+    const cx = city && city.center ? city.center.x : 0, cz = city && city.center ? city.center.z : -700;
+    let best = null, bd = 1e18;
+    for (const rec of _highways) {
+      if (!rec.waterRuns || !rec.waterRuns.length || rec.spec.route) continue;   // causeways, not the network
+      for (const w of rec.waterRuns) {
+        const m = rec.at((w.s0 + w.s1) / 2), d = Math.hypot(m.x - cx, m.z - cz);
+        if (d < bd) { bd = d; best = { rec: rec, w: w }; }
+      }
+    }
+    if (!best) return;
+    const R = best.rec, a = R.at(best.w.s0 + 1), b = R.at(best.w.s1 - 1);
+    buildSuspensionDressing(R.group, [{ x: a.x, z: a.z }, { x: b.x, z: b.z }], R.half * 2, R.deckY,
+      function (x, z) { return R.spec.heightAt ? R.spec.heightAt(x, z) + R.deckY : R.deckY; });
   }
 
   /* Gantries at the causeway mouths that leave the downtown grid: over the

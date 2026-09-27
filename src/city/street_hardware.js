@@ -31,13 +31,17 @@
    the headless harness stub too. Every triangle is wound by its intended
    normal (triN), so a winding mistake cannot silently cull a face.
 
-   THE LIGHT ON THE ROAD. A lamp that lights nothing is a prop. One
-   InstancedMesh of additive ground decals (the city/carlamps.js pattern,
-   no dynamic lights: r128 recompiles every lit shader when the light count
-   moves) paints a warm elliptical pool under every cobra head, and a faint
-   coloured wash in front of every signal approach. Instance colour carries
-   the tint, so a shot-out lamp simply zero-scales its instance and a signal
-   pool retints on the phase change. One draw call for the whole city.
+   THE LIGHT ON THE ROAD. A lamp that lights nothing is a prop. Instanced
+   additive ground decals (the city/carlamps.js idea, no dynamic lights:
+   r128 recompiles every lit shader when the light count moves) paint a warm
+   elliptical pool under every cobra head, and a faint coloured wash in front
+   of every signal approach. A per-instance tint attribute carries the
+   colour, so a shot-out lamp simply zero-scales its instance and a signal
+   pool retints on the phase change.
+
+   EVERYTHING is chunked (chunked()): one InstancedMesh per 200 m cell per
+   part, each with a real world-space bounding sphere, so r128 frustum-culls
+   whole cells instead of shading every lamp on the map every frame.
 
    Exports CBZ.streetHW. Nothing here places anything or owns state.
 ============================================================ */
@@ -366,7 +370,25 @@
       const o = lumOffsets(LM);
       // slip fitter + the head: a domed shell with a flat belly the lens hangs from
       p.tube([0, yT, LM.tipZ - 0.14], [0, yT, LM.tipZ + 0.02], 0.075, 0.08, 10, LUM_BODY, {});
-      p.dome(0.26, 0.2, 0.5, 14, 5, LUM_BODY, 0, o.bellyY, o.headZ, 1, LUM_BELLY);
+      p.dome(0.26, 0.2, 0.5, 14, 5, LUM_BODY, 0, o.bellyY, o.headZ, 1, null);
+      // the belly is an open SKIRT: a shallow elliptical rim hangs 4 cm below
+      // the shell, and the flat glass lens sits recessed inside it, so from
+      // the side by day you see a grey housing edge, not a glowing disc
+      const skirt = [];
+      for (let i = 0; i <= 16; i++) {
+        const a = i / 16 * Math.PI * 2;
+        skirt.push([Math.cos(a) * 0.25, Math.sin(a) * 0.49]);
+      }
+      for (let i = 0; i < 16; i++) {
+        const a0 = skirt[i], a1 = skirt[i + 1];
+        const n0 = [a0[0] / 0.25, 0, a0[1] / 0.49], n1 = [a1[0] / 0.25, 0, a1[1] / 0.49];
+        const col = hexRGB(LUM_BODY);
+        const P0 = [a0[0], o.bellyY + 0.005, o.headZ + a0[1]], P1 = [a1[0], o.bellyY + 0.005, o.headZ + a1[1]];
+        const Q0 = [a0[0], o.bellyY - 0.04, o.headZ + a0[1]], Q1 = [a1[0], o.bellyY - 0.04, o.headZ + a1[1]];
+        p.triN(P0, P1, Q1, n0, n1, n1, col); p.triN(P0, Q1, Q0, n0, n1, n0, col);
+        const m0 = [-n0[0], 0, -n0[2]], m1 = [-n1[0], 0, -n1[2]];   // inner face of the rim
+        p.triN(P0, Q1, P1, m0, m1, m1, hexRGB(LUM_BELLY)); p.triN(P0, Q0, Q1, m0, m0, m1, hexRGB(LUM_BELLY));
+      }
       return p.geometry();
     });
   }
@@ -392,10 +414,16 @@
     });
   }
   function lampLens() {
-    // drop lens: a shallow glass bowl under the belly, facing the road
+    // FLAT glass lens facing straight down (a flat ellipse, normal -Y),
+    // recessed inside the head's skirt: edge-on by day, a bright oval from
+    // below at night. Never a bowl or a sphere (those read as a white ball).
     return once("lampLens", function () {
       const p = new Proto(); p.noColor = true;
-      p.dome(0.2, 0.06, 0.38, 14, 3, 0xffffff, 0, 0, 0, -1, null);
+      const n = [0, -1, 0], seg = 16;
+      for (let s2 = 0; s2 < seg; s2++) {
+        const a0 = s2 / seg * Math.PI * 2, a1 = (s2 + 1) / seg * Math.PI * 2;
+        p.triN([0, 0, 0], [Math.cos(a0) * 0.22, 0, Math.sin(a0) * 0.44], [Math.cos(a1) * 0.22, 0, Math.sin(a1) * 0.44], n, n, n, [1, 1, 1]);
+      }
       return p.geometry();
     });
   }
@@ -403,7 +431,7 @@
   // ---------------------------------------------------------------------
   //  TEXTURES
   // ---------------------------------------------------------------------
-  let _poolTex = null, _pedTex = null;
+  let _pedTex = null;
   function canvas(w, h) {
     if (typeof document === "undefined" || !document.createElement) return null;
     const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
@@ -414,19 +442,6 @@
     if (THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;
     t.anisotropy = 4;
     return t;
-  }
-  // radial light pool: a bright hot spot under the head and a long soft
-  // shoulder (roughly what a type-III cobra distribution paints on asphalt)
-  function poolTexture() {
-    if (_poolTex) return _poolTex;
-    const S = 128, cv = canvas(S, S); if (!cv) return null;
-    const g = cv.getContext("2d");
-    const grad = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-    const stops = [[0, 1], [0.08, 0.93], [0.18, 0.72], [0.3, 0.5], [0.45, 0.31], [0.6, 0.17], [0.75, 0.075], [0.9, 0.02], [1, 0]];
-    for (const s of stops) grad.addColorStop(s[0], "rgba(255,255,255," + s[1] + ")");
-    g.fillStyle = grad; g.fillRect(0, 0, S, S);
-    _poolTex = finishTex(cv);
-    return _poolTex;
   }
   // MUTCD pedestrian symbols, white on black (instance colour tints them)
   function pedTexture() {
@@ -457,8 +472,53 @@
   }
 
   // ---------------------------------------------------------------------
-  //  INSTANCING
+  //  CHUNKED INSTANCING — one InstancedMesh per (cell, part), frustum-culled
   // ---------------------------------------------------------------------
+  // A city-wide InstancedMesh must be frustumCulled=false (r128 culls it by
+  // the PROTOTYPE's bounding sphere, which sits at the origin), and then every
+  // lamp in the world is vertex-shaded every frame, even from a highway 2 km
+  // away. So each part is split into CELL x CELL m cells; each cell gets its
+  // own mesh on a geometry that SHARES the prototype's attribute buffers but
+  // carries its own boundingSphere, enclosing that cell's instances in world
+  // space. r128 then culls whole cells like any mesh (camera AND shadow).
+  //
+  // chunked() returns a SET that also behaves like one big InstancedMesh for
+  // callers that address instances by their GLOBAL index (city/props.js's
+  // hitProp zero-scales a shot lamp through lampPools.bulb/glow by lampIdx):
+  // set.setMatrixAt(i, m) / set.setColorAt(i, c) route to (mesh, local) and
+  // flag that mesh's buffer; set.instanceMatrix / set.instanceColor are inert
+  // stand-ins so `x.instanceMatrix.needsUpdate = true` stays harmless.
+  // 550 m cells: big enough that a far camera sees a handful of cells per
+  // part (draw calls), small enough that the frustum still drops most tris.
+  const CELL = 550;
+  // DISTANCE GATE (invisible-distance only): every set registers here and a
+  // 2 Hz tick hides any cell whose nearest point is beyond its set's maxDist:
+  // hardware 700 m (a lamp post there is a few pixels), lenses 600, pools
+  // 420, signal halos 350. resetSets() at the start of each world build.
+  const HW_DIST = 700;
+  let live = [], tickOn = false;
+  function resetSets() { live = []; }
+  function register(set) {
+    live.push(set);
+    if (!tickOn && CBZ.onAlways) {
+      tickOn = true;
+      let acc = 1;
+      CBZ.onAlways(7.35, function (dt) {
+        const g = CBZ.game;
+        if (!g || g.mode !== "city") return;
+        acc += (dt || 0.016);
+        if (acc < 0.5) return; acc = 0;
+        cullSets(live, CBZ.camera && CBZ.camera.position);
+      });
+    }
+    return set;
+  }
+  // plain meshes (e.g. props.js's glow-shell pools) joining the gate
+  function registerMeshes(meshes, maxDist) {
+    const ms = meshes.filter(function (m) { return m && m.geometry && m.geometry.boundingSphere; });
+    for (const m of ms) { const b = m.geometry.boundingSphere; m._cellC = { x: b.center.x, z: b.center.z, r: b.radius }; }
+    return register({ meshes: ms, enabled: true, maxDist: maxDist });
+  }
   // items: [{x,y,z,ry,sx,sy,sz}]
   const _m4 = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(1, 1, 1);
   const _Y = new THREE.Vector3(0, 1, 0);
@@ -478,28 +538,105 @@
     if (!_litVC) { _litVC = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }); _litVC._shared = true; }
     return _litVC;
   }
-  // one InstancedMesh of a hardware prototype, placed city-wide (one draw)
-  function instanced(name, geo, mat, items, o) {
-    if (!items.length || !geo || !THREE.InstancedMesh) return null;
+  // a geometry that shares every attribute buffer with `geo` (no copy)
+  function shareGeo(geo) {
+    const g = new THREE.BufferGeometry();
+    for (const k in geo.attributes) g.setAttribute(k, geo.attributes[k]);
+    if (geo.index && g.setIndex) g.setIndex(geo.index);
+    return g;
+  }
+  function protoRadius(geo) {
+    if (!geo.boundingSphere && geo.computeBoundingSphere) geo.computeBoundingSphere();
+    const s = geo.boundingSphere;
+    if (!s || !s.center) return 12;
+    return Math.hypot(s.center.x, s.center.y, s.center.z) + s.radius;
+  }
+  function cellOf(x, z) { return Math.floor(x / CELL) + "," + Math.floor(z / CELL); }
+  // o: {cast, receive, order, userData, perMesh(im, count)}
+  function chunked(name, geo, mat, items, o) {
     o = o || {};
-    const im = new THREE.InstancedMesh(geo, mat, items.length);
-    im.name = "street-hw-" + name;
-    for (let i = 0; i < items.length; i++) setInst(im, i, items[i]);
-    im.instanceMatrix.needsUpdate = true;
-    im.castShadow = !!o.cast; im.receiveShadow = o.receive !== false;
-    // r128 culls an InstancedMesh by the PROTOTYPE's bounds (at the origin);
-    // a city-wide pool must always submit. userData spares it from batch.js
-    // and farcull (both would mis-handle a pool that spans the map).
-    im.frustumCulled = false;
-    im.userData.terrain = true;
-    im.userData.streetHardware = name;
-    return im;
+    const n = items.length;
+    const set = {
+      isChunkSet: true, name: name, meshes: [], count: n, material: mat,
+      map: new Int32Array(n).fill(-1), local: new Int32Array(n),
+      instanceMatrix: { needsUpdate: false }, instanceColor: { needsUpdate: false },
+      enabled: true, maxDist: o.maxDist != null ? o.maxDist : HW_DIST,
+      setMatrixAt: function (i, m) {
+        const mi = this.map[i]; if (mi < 0) return;
+        const im = this.meshes[mi]; im.setMatrixAt(this.local[i], m); im.instanceMatrix.needsUpdate = true;
+      },
+      setColorAt: function (i, c) {
+        const mi = this.map[i]; if (mi < 0) return;
+        const im = this.meshes[mi]; im.setColorAt(this.local[i], c);
+        if (im.instanceColor) im.instanceColor.needsUpdate = true;
+      },
+      meshOf: function (i) { const mi = this.map[i]; return mi < 0 ? null : this.meshes[mi]; },
+      addTo: function (root) { for (const m of this.meshes) root.add(m); return this; },
+    };
+    if (!n || !geo || !THREE.InstancedMesh) return set;
+    register(set);
+    const cells = new Map();
+    for (let i = 0; i < n; i++) {
+      const k = cellOf(items[i].x, items[i].z);
+      let c = cells.get(k); if (!c) { c = []; cells.set(k, c); }
+      c.push(i);
+    }
+    const pr = protoRadius(geo);
+    cells.forEach(function (idx) {
+      const im = new THREE.InstancedMesh(shareGeo(geo), mat, idx.length);
+      im.name = "street-hw-" + name;
+      let cx = 0, cy = 0, cz = 0, sMax = 1;
+      for (let j = 0; j < idx.length; j++) {
+        const it = items[idx[j]];
+        setInst(im, j, it);
+        set.map[idx[j]] = set.meshes.length; set.local[idx[j]] = j;
+        cx += it.x; cy += it.y; cz += it.z;
+        sMax = Math.max(sMax, it.sx || 1, it.sy || 1, it.sz || 1);
+      }
+      cx /= idx.length; cy /= idx.length; cz /= idx.length;
+      let r = 0;
+      for (let j = 0; j < idx.length; j++) {
+        const it = items[idx[j]];
+        r = Math.max(r, Math.hypot(it.x - cx, it.y - cy, it.z - cz));
+      }
+      r += pr * sMax;
+      if (THREE.Sphere && THREE.Vector3) im.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(cx, cy, cz), r);
+      im._cellC = { x: cx, z: cz, r: r };
+      im.instanceMatrix.needsUpdate = true;
+      im.castShadow = !!o.cast; im.receiveShadow = o.receive !== false;
+      im.frustumCulled = true;
+      if (o.order != null) im.renderOrder = o.order;
+      // userData: batch.js skips it, farcull leaves it to the frustum
+      im.userData.terrain = true;
+      im.userData.streetHardware = name;
+      if (o.userData) for (const k in o.userData) im.userData[k] = o.userData[k];
+      if (o.perMesh) o.perMesh(im, idx.length);
+      set.meshes.push(im);
+    });
+    return set;
+  }
+  // distance gate for sets that are pointless far away (lenses, light pools):
+  // a cell draws only when set.enabled and its sphere is within maxDist.
+  function cullSets(sets, cam) {
+    for (let s = 0; s < sets.length; s++) {
+      const set = sets[s];
+      for (let i = 0; i < set.meshes.length; i++) {
+        const m = set.meshes[i], c = m._cellC;
+        let vis = set.enabled;
+        if (vis && set.maxDist && c && cam) vis = Math.hypot(c.x - cam.x, c.z - cam.z) - c.r < set.maxDist;
+        if (m.visible !== vis) m.visible = vis;
+      }
+    }
   }
 
   // ---------------------------------------------------------------------
-  //  GROUND LIGHT POOLS — additive decals, one draw for the whole city
+  //  GROUND LIGHT POOLS — additive decals, chunked like the hardware
   // ---------------------------------------------------------------------
   // items: [{x,y,z,ry,sx,sz,color:hex,k}] ; sx across local X, sz along local Z
+  // The falloff is computed in the fragment shader (no texture, no encoding
+  // or alpha-premultiply question) and the tint is a per-instance attribute
+  // (aTint), so a pool is exactly: tint * falloff(r) * uI, added to the
+  // surface under it. uI is the night ramp (setPoolIntensity).
   function poolGeometry() {
     return once("poolGeo", function () {
       const p = new Proto({ uv: true }); p.noColor = true;
@@ -507,38 +644,70 @@
       return p.geometry();
     });
   }
-  const _c = new THREE.Color();
-  function setPoolColor(im, i, hex, k) {
-    _c.setHex(hex);
-    if (_c.multiplyScalar) _c.multiplyScalar(k == null ? 1 : k);
-    im.setColorAt(i, _c);
+  function poolMaterial() {
+    const m = new THREE.ShaderMaterial({
+      uniforms: { uI: { value: 0 } },
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+      vertexShader: [
+        "attribute vec3 aTint;",
+        "varying vec3 vTint;",
+        "varying vec2 vUv;",
+        "void main() {",
+        "  vTint = aTint;",
+        "  vUv = uv;",
+        "  gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);",
+        "}",
+      ].join("\n"),
+      fragmentShader: [
+        "uniform float uI;",
+        "varying vec3 vTint;",
+        "varying vec2 vUv;",
+        "void main() {",
+        "  vec2 d = vUv * 2.0 - 1.0;",
+        "  float r2 = dot(d, d);",
+        "  if (r2 >= 1.0) discard;",
+        "  float r = sqrt(r2);",
+        // hot spot under the head + a soft shoulder that reaches 0 at the rim
+        "  float a = 0.62 * exp(-r2 * 9.0) + 0.38 * pow(1.0 - r, 2.0);",
+        "  gl_FragColor = vec4(vTint * (a * uI), 1.0);",
+        "}",
+      ].join("\n"),
+    });
+    m._shared = true;
+    return m;
+  }
+  function setPoolColor(set, i, hex, k) {
+    const im = set.meshOf ? set.meshOf(i) : null;
+    if (!im) return;
+    const a = im.geometry.attributes.aTint;
+    if (!a) return;
+    const rgb = hexRGB(hex), s = k == null ? 1 : k, j = set.local[i] * 3;
+    a.array[j] = rgb[0] * s; a.array[j + 1] = rgb[1] * s; a.array[j + 2] = rgb[2] * s;
+    a.needsUpdate = true;
   }
   function lightPools(items) {
-    if (!items.length || !THREE.InstancedMesh) return null;
-    const tex = poolTexture();
-    if (!tex) return null;              // no canvas (headless): no pool beats a white slab
-    const mat = new THREE.MeshBasicMaterial({
-      map: tex, color: 0xffffff, transparent: true, opacity: 0,
-      blending: THREE.AdditiveBlending, depthWrite: false,
-      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
-      fog: false,
+    if (!items.length || !THREE.InstancedMesh || !THREE.ShaderMaterial || !THREE.InstancedBufferAttribute) return null;
+    const mat = poolMaterial();
+    const set = chunked("light-pools", poolGeometry(), mat, items.map(function (it) {
+      return { x: it.x, y: it.y, z: it.z, ry: it.ry, sx: it.sx, sy: 1, sz: it.sz };
+    }), {
+      cast: false, receive: false, order: 3, maxDist: 420,
+      // batch-exempt (batch.js would drop polygonOffset)
+      userData: { roadPaint: true },
+      perMesh: function (im, count) {
+        im.geometry.setAttribute("aTint", new THREE.InstancedBufferAttribute(new Float32Array(count * 3), 3));
+      },
     });
-    mat._shared = true;
-    const im = new THREE.InstancedMesh(poolGeometry(), mat, items.length);
-    im.name = "street-light-pools";
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      setInst(im, i, { x: it.x, y: it.y, z: it.z, ry: it.ry, sx: it.sx, sy: 1, sz: it.sz });
-      setPoolColor(im, i, it.color, it.k);
-    }
-    im.instanceMatrix.needsUpdate = true;
-    if (im.instanceColor) im.instanceColor.needsUpdate = true;
-    im.castShadow = false; im.receiveShadow = false; im.frustumCulled = false;
-    im.renderOrder = 2;                 // after road paint, with the car lamp pools
-    im.userData.roadPaint = true;       // batch-exempt: batch.js would drop polygonOffset
-    im.userData.terrain = true;         // farcull: a city-spanning pool
-    im.visible = false;                 // the night driver turns it on at dusk
-    return im;
+    for (let i = 0; i < items.length; i++) setPoolColor(set, i, items[i].color, items[i].k);
+    set.enabled = false;              // the night driver turns it on at dusk
+    for (const m of set.meshes) m.visible = false;
+    return set;
+  }
+  function setPoolIntensity(set, v) {
+    if (!set) return;
+    set.material.uniforms.uI.value = v;
+    set.enabled = v > 0.02;
   }
   // seat a decal footprint on the DRAWN ground stack (world.js's groundDecalY):
   // the highest surface anywhere under the ellipse, so a raised footway never
@@ -565,8 +734,8 @@
     vehicleHead: vehicleHead, pedHead: pedHead,
     luminaire: luminaire, lumOffsets: lumOffsets,
     signalLens: signalLens, pedLens: pedLens, lampLens: lampLens,
-    pedTexture: pedTexture, poolTexture: poolTexture,
-    hardwareMaterial: hardwareMaterial, instanced: instanced, setInst: setInst,
-    lightPools: lightPools, setPoolColor: setPoolColor, seatY: seatY,
+    pedTexture: pedTexture,
+    hardwareMaterial: hardwareMaterial, chunked: chunked, cullSets: cullSets, resetSets: resetSets, registerMeshes: registerMeshes, setInst: setInst, CELL: CELL,
+    lightPools: lightPools, setPoolColor: setPoolColor, setPoolIntensity: setPoolIntensity, seatY: seatY,
   };
 })();

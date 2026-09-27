@@ -354,6 +354,16 @@
     //     flat grain (litter, weeds, drains) opts OUT: a stain is not a prop
     //     and must not spend an alley's budget.
     const PURGED = !CBZ.CONFIG || CBZ.CONFIG.PROPS_PURGE_V1 !== false;
+    // Seat everything on the DRAWN street surface: the landmass floor
+    // (DK.groundY) is 0 across the city, but the footway is a raised slab
+    // (city.street.heightAt: road, gutter, kerb, footway). Posts, bollards
+    // and drains read the higher of the two, so no base is ever buried.
+    const street = city.street;
+    function gY(x, z) {
+      const g0 = DK.groundY(x, z);
+      const h = street && typeof street.heightAt === "function" ? +street.heightAt(x, z) : NaN;
+      return Number.isFinite(h) ? Math.max(g0, h) : g0;
+    }
     let cutN = 0;
 
     // Regulatory signs are never thinned by the quality tier: a STOP sign that
@@ -381,7 +391,7 @@
     // Faces sample exactly their plate's pixels (faceUV), so the quad IS the
     // plate: no cutout margin, no halo.
     function post(x, z, nx, nz, postH) {
-      const y = DK.groundY(x, z);
+      const y = gY(x, z);
       posts.add(x, y, z, { sy: (postH || 3.0) / 3.0, ry: Math.atan2(-nx, -nz) });
       // SOLID: a 3 m galvanised post on a kerb is not pass-through.
       DK.solid(x, z, 0.12, 0.12, null);
@@ -566,7 +576,7 @@
       // (b) kerb-inlet storm drain — sits ON the kerb line, flush, no collider
       if (h > 0.90 && drainN < DRAIN_MAX) {
         const gx = p.x - p.nx * 0.95, gz = p.z - p.nz * 0.95;   // back at the gutter
-        drains.add(gx, DK.groundY(gx, gz), gz, { ry: Math.atan2(-p.nx, -p.nz) });
+        drains.add(gx, gY(gx, gz), gz, { ry: Math.atan2(-p.nx, -p.nz) });
         drainN++;
         return true;
       }
@@ -578,7 +588,7 @@
         for (let k = -1; k <= 1; k++) {
           const ox = bx - p.nz * k * 1.35, oz = bz + p.nx * k * 1.35;
           if (!DK.free(ox, oz, { doorR: 2.4, ring: 0, alley: { solid: true, r: 0.18 } })) continue;
-          bollards.add(ox, DK.groundY(ox, oz), oz, { tint: 0.92 + DK.h01(ox, oz, 0x4433) * 0.16 });
+          bollards.add(ox, gY(ox, oz), oz, { tint: 0.92 + DK.h01(ox, oz, 0x4433) * 0.16 });
           DK.solid(ox, oz, 0.16, 0.16, null);
           DK.claim(ox, oz);
           bollN++;
@@ -593,7 +603,7 @@
         // applied about the WORLD x axis and would pitch a yawed bike instead
         // of leaning it. Chained upright against the property line is correct.
         const yaw = Math.atan2(-p.nz, -p.nx) + Math.PI / 2 + DK.h11(bx, bz, 0x4434) * 0.18;
-        bikes.add(bx, DK.groundY(bx, bz), bz, { ry: yaw });
+        bikes.add(bx, gY(bx, bz), bz, { ry: yaw });
         bikeN++;
         return true;
       }
@@ -637,7 +647,7 @@
         // most needs to prove it leaves a run behind it.
         if (DK.free(ox, oz, { doorR: 3.2, ring: 1, alley: { solid: true, r: 1.05 } })) {
           const yaw = Math.atan2(face.nx, face.nz);
-          dumps.add(ox, DK.groundY(ox, oz), oz, { ry: yaw, tint: 0.88 + DK.h01(ox, oz, 0x4443) * 0.24 });
+          dumps.add(ox, gY(ox, oz), oz, { ry: yaw, tint: 0.88 + DK.h01(ox, oz, 0x4443) * 0.24 });
           // a real dumpster is solid: cars dent on it, you can hide behind it
           const rx = Math.abs(face.nx) > 0.5 ? 0.62 : 1.05;
           const rz = Math.abs(face.nx) > 0.5 ? 1.05 : 0.62;
@@ -651,7 +661,7 @@
             // bags are 0.3m soft, no collider, and hugging the dumpster that
             // already paid for this alley's slot — they never spend one
             if (!DK.free(gx, gz, { doorR: 2.6, ring: 0, alley: false })) continue;
-            bags.add(gx, DK.groundY(gx, gz), gz, { ry: DK.h01(gx, gz, 0x4444) * 6.28, sx: 0.85 + DK.h01(gx, gz, 0x4445) * 0.4, sz: 0.85 + DK.h01(gz, gx, 0x4446) * 0.4 });
+            bags.add(gx, gY(gx, gz), gz, { ry: DK.h01(gx, gz, 0x4444) * 6.28, sx: 0.85 + DK.h01(gx, gz, 0x4445) * 0.4, sz: 0.85 + DK.h01(gz, gx, 0x4446) * 0.4 });
             DK.claim(gx, gz); bagN++;
           }
         }
@@ -668,12 +678,12 @@
           // 3-high stack is 0.78m of walk-through geometry.
           const stack = PURGED ? 1 : 1 + ((DK.h01(ox2, oz2, 0x4449) * 3) | 0);
           if (PURGED) cutN += (1 + ((DK.h01(ox2, oz2, 0x4449) * 3) | 0)) - 1;
-          for (let k = 0; k < stack; k++) pallets.add(ox2, DK.groundY(ox2, oz2) + k * 0.26, oz2, { ry: yaw + k * 0.06 });
+          for (let k = 0; k < stack; k++) pallets.add(ox2, gY(ox2, oz2) + k * 0.26, oz2, { ry: yaw + k * 0.06 });
           DK.claim(ox2, oz2); palN++;
         } else if (h2 < 0.62 && crateN < CRATE_MAX) {
-          crates.add(ox2, DK.groundY(ox2, oz2), oz2, { ry: yaw, tint: 0.9 + DK.h01(ox2, oz2, 0x444a) * 0.2 });
+          crates.add(ox2, gY(ox2, oz2), oz2, { ry: yaw, tint: 0.9 + DK.h01(ox2, oz2, 0x444a) * 0.2 });
           if (DK.h01(oz2, ox2, 0x444b) < 0.45 && crateN + 1 < CRATE_MAX) {
-            crates.add(ox2 + tx * 0.15, DK.groundY(ox2, oz2) + 0.7, oz2 + tz * 0.15, { ry: yaw + 0.4, sx: 0.82, sy: 0.82, sz: 0.82 });
+            crates.add(ox2 + tx * 0.15, gY(ox2, oz2) + 0.7, oz2 + tz * 0.15, { ry: yaw + 0.4, sx: 0.82, sy: 0.82, sz: 0.82 });
             crateN++;
           }
           DK.solid(ox2, oz2, 0.48, 0.48, null);
@@ -683,7 +693,7 @@
           // at the top of the pass. BAR_MAX is 0 under the flag, so the whole
           // slice draws nothing and the alley simply has a gap in it.
           if (barN < BAR_MAX) {
-            barriers.add(ox2, DK.groundY(ox2, oz2), oz2, { ry: yaw + Math.PI / 2 });
+            barriers.add(ox2, gY(ox2, oz2), oz2, { ry: yaw + Math.PI / 2 });
             DK.solid(ox2, oz2, 0.28, 0.75, null);
             DK.claim(ox2, oz2); barN++;
           } else if (PURGED) cutN++;
@@ -704,7 +714,7 @@
       // litter collects IN the gutter, against the kerb face
       if (h < 0.30 && litN < LIT_MAX) {
         const gx = p.x - p.nx * (0.55 + h), gz = p.z - p.nz * (0.55 + h);
-        litter.add(gx, DK.groundY(gx, gz) + 0.005, gz, {
+        litter.add(gx, gY(gx, gz) + 0.005, gz, {
           ry: DK.h01(gx, gz, 0x4452) * 6.28,
           sx: 0.7 + DK.h01(gx, gz, 0x4453) * 0.7, sz: 0.7 + DK.h01(gz, gx, 0x4454) * 0.7,
         });
@@ -714,7 +724,7 @@
       if (h > 0.42 && h < 0.78 && weedN < WEED_MAX) {
         const wx = p.x - p.nx * 0.16 + p.nz * DK.h11(p.x, p.z, 0x4455) * 0.5;
         const wz = p.z - p.nz * 0.16 - p.nx * DK.h11(p.x, p.z, 0x4455) * 0.5;
-        weeds.add(wx, DK.groundY(wx, wz), wz, {
+        weeds.add(wx, gY(wx, wz), wz, {
           ry: DK.h01(wx, wz, 0x4456) * 6.28,
           sy: 0.55 + DK.h01(wx, wz, 0x4457) * 0.9,
           sx: 0.7 + DK.h01(wz, wx, 0x4458) * 0.6,
@@ -740,7 +750,7 @@
           const wz = fc.cz + (fc.nx) * t + fc.nz * 0.22;
           if (DK.h01(wx, wz, 0x4459) > 0.42) continue;
           if (DK.onRoad(wx, wz, 0.2)) continue;
-          weeds.add(wx, DK.groundY(wx, wz), wz, {
+          weeds.add(wx, gY(wx, wz), wz, {
             ry: DK.h01(wx, wz, 0x445a) * 6.28,
             sy: 0.5 + DK.h01(wx, wz, 0x445b) * 0.8,
           });

@@ -1569,6 +1569,10 @@
         // blocks, real kerbs, ramps). A second fan/kerb/paint layer here would
         // only fight it, so both-grid junctions are left to the kit.
         if (J.a && J.b && J.a.grid && J.b.grid) continue;
+        // A freeway is not a street: no crosswalks, stop bars, kerb returns
+        // or resurface patches where anything meets a highway-district road
+        // (highways.js stops its own paint at those junctions).
+        if ((J.a && J.a.district === "highway") || (J.b && J.b.district === "highway")) continue;
         list.push(J);
       }
       if (!list.length) return list;
@@ -1912,6 +1916,7 @@
     // CBZ.citySignalSet — every extra head is simply another handle in the
     // SAME ns/ew axis arrays, so traffic.js needed no change at all.
     const HW = CBZ.streetHW || null;
+    if (HW) HW.resetSets();          // this world's cells only in the distance gate
     const D = HW ? HW.D : {      // headless (no kit loaded): handles only, same numbers
       MAST_TOP: 7.7, ARM_Y: 6.25, HEAD_HANG: 0.76, LENS_Z: 0.135, LENS_DY: 0.355, SIDE_BACK: 0.46,
       PED_Y: 2.72, PED_OUT: 0.35, PED_LENS_DY: 0.19, SIDE_HEAD_Y: 3.95,
@@ -1974,14 +1979,13 @@
       { leg: "E", corner: [1, 1],   face: Math.PI,      axis: "ns" }, { leg: "E", corner: [1, -1],  face: 0,           axis: "ns" },
       { leg: "W", corner: [-1, 1],  face: Math.PI,      axis: "ns" }, { leg: "W", corner: [-1, -1], face: 0,           axis: "ns" },
     ];
-    // one instance transform (yaw only) for the pools this file builds itself
-    const _pm4 = new THREE.Matrix4(), _pp = new THREE.Vector3(), _pq = new THREE.Quaternion(), _ps = new THREE.Vector3(1, 1, 1), _pY = new THREE.Vector3(0, 1, 0);
-    function placeInst(im, i, x, y, z, ry, sx, sy, sz) {
-      _pp.set(x, y, z);
-      if (_pq.setFromAxisAngle) _pq.setFromAxisAngle(_pY, ry || 0);
-      _ps.set(sx, sy, sz);
-      _pm4.compose(_pp, _pq, _ps);
-      im.setMatrixAt(i, _pm4);
+    // the footway surface a pole's footing stands on (STREETS' analytic
+    // street profile: raised footway, kerb, road). Everything bolted to a
+    // pole is placed relative to its own base, so a raised kerb lifts it all.
+    function footY(x, z) {
+      const st = city.street;
+      const h = st && typeof st.heightAt === "function" ? +st.heightAt(x, z) : 0;
+      return Number.isFinite(h) ? h : 0;
     }
     // THE POLE STANDS ON THE CORNER THE CORNER ACTUALLY HAS. This offset used
     // to be a flat ROAD/2 + 0.6 — 0.6 m outside the square kerb, which is
@@ -2018,7 +2022,11 @@
       const corner = function (s, kind) {
         const k = s[0] + "," + s[1];
         let c = corners.get(k);
-        if (!c) { c = { sx: s[0], sz: s[1], x: it.x + s[0] * off, z: it.z + s[1] * off, kind: kind }; corners.set(k, c); }
+        if (!c) {
+          const cx = it.x + s[0] * off, cz = it.z + s[1] * off;
+          c = { sx: s[0], sz: s[1], x: cx, z: cz, y: footY(cx, cz), kind: kind };
+          corners.set(k, c);
+        }
         else if (kind === "mast") c.kind = "mast";
         return c;
       };
@@ -2033,12 +2041,12 @@
         // distance along the arm from the pole axis to each lane centre
         const along = lanes.map(function (c) { return off - c; }).sort(function (a, b) { return a - b; });
         const L = along[along.length - 1] + 0.55;
-        HWI.arm.push({ x: P.x, y: D.ARM_Y, z: P.z, ry: Math.atan2(A.arm[0], A.arm[1]), sx: 1, sy: 1, sz: L });
+        HWI.arm.push({ x: P.x, y: P.y + D.ARM_Y, z: P.z, ry: Math.atan2(A.arm[0], A.arm[1]), sx: 1, sy: 1, sz: L });
         const axisHeads = A.axis === "ns" ? ns : ew;
         let firstHead = null, fx0 = 0, fy0 = 0, fz0 = 0;
         for (const s of along) {
           const hx = P.x + A.arm[0] * s, hz = P.z + A.arm[1] * s;
-          const hy = D.armYAt(s, L) - D.armRAt(s, L) - D.HEAD_HANG + 0.02;
+          const hy = P.y + D.armYAt(s, L) - D.armRAt(s, L) - D.HEAD_HANG + 0.02;
           const h = vehHead(hx, hy, hz, A.face, "top", true);
           axisHeads.push(h);
           if (!firstHead) { firstHead = h; fx0 = hx; fy0 = hy; fz0 = hz; }
@@ -2052,7 +2060,7 @@
         // the CROSS street's name, hung from the arm between pole and heads
         const sb = along[0] - 0.25 - 0.9 - 0.35;
         if (sb - 0.9 > 0.4) {
-          const by = D.armYAt(sb, L) - D.armRAt(sb, L) - 0.02 - 0.225;
+          const by = P.y + D.armYAt(sb, L) - D.armRAt(sb, L) - 0.02 - 0.225;
           signalBlades.push({
             x: P.x + A.arm[0] * sb, y: by, z: P.z + A.arm[1] * sb, nx: fvx, nz: fvz, w: 1.8, h: 0.45,
             key: A.vert ? "h:" + Math.round(it.z) : "v:" + Math.round(it.x), vertical: !A.vert,
@@ -2061,7 +2069,7 @@
         // the supplementary head bolted to the far-left pole
         const F = corner(A.far, "ped");
         const rr = (F.kind === "mast" ? D.mastRAt(D.SIDE_HEAD_Y) : D.pedRAt(D.SIDE_HEAD_Y)) + D.SIDE_BACK;
-        axisHeads.push(vehHead(F.x + fvx * rr, D.SIDE_HEAD_Y, F.z + fvz * rr, A.face, "side", false));
+        axisHeads.push(vehHead(F.x + fvx * rr, F.y + D.SIDE_HEAD_Y, F.z + fvz * rr, A.face, "side", false));
       }
       // pedestrian heads + push buttons on every crosswalk end
       for (const E of PED_ENDS) {
@@ -2070,25 +2078,25 @@
         const rr = C.kind === "mast" ? D.mastRAt(D.PED_Y) : D.pedRAt(D.PED_Y);
         const fvx = Math.sin(E.face), fvz = Math.cos(E.face);
         const bx = C.x + fvx * rr, bz = C.z + fvz * rr;
-        HWI.pedHead.push({ x: bx, y: D.PED_Y, z: bz, ry: E.face });
+        HWI.pedHead.push({ x: bx, y: C.y + D.PED_Y, z: bz, ry: E.face });
         const lx = bx + fvx * (D.PED_OUT + 0.004), lz = bz + fvz * (D.PED_OUT + 0.004);
         pedHandles.push({
           axis: E.axis, state: -1,
-          hand: { x: lx, y: D.PED_Y + D.PED_LENS_DY, z: lz, ry: E.face },
-          walk: { x: lx, y: D.PED_Y - D.PED_LENS_DY, z: lz, ry: E.face },
+          hand: { x: lx, y: C.y + D.PED_Y + D.PED_LENS_DY, z: lz, ry: E.face },
+          walk: { x: lx, y: C.y + D.PED_Y - D.PED_LENS_DY, z: lz, ry: E.face },
         });
       }
       // the poles themselves: slim colliders matched to the shafts
       corners.forEach(function (c) {
         const ry = Math.atan2(c.sx, c.sz);     // handhole faces the footway, not the road
         if (c.kind === "mast") {
-          HWI.mast.push({ x: c.x, y: 0, z: c.z, ry: ry });
+          HWI.mast.push({ x: c.x, y: c.y, z: c.z, ry: ry });
           // the junction is the best-lit spot on a real street: a cobra head
           // on every mast top, aimed diagonally into the box
-          mastLums.push({ x: c.x, z: c.z, ang: Math.atan2(-c.sx, -c.sz) });
+          mastLums.push({ x: c.x, y: c.y, z: c.z, ang: Math.atan2(-c.sx, -c.sz) });
           solidCollider(c.x, c.z, 0.23, null);
         } else {
-          HWI.ped.push({ x: c.x, y: 0, z: c.z, ry: ry });
+          HWI.ped.push({ x: c.x, y: c.y, z: c.z, ry: ry });
           solidCollider(c.x, c.z, 0.15, null);
         }
       });
@@ -2099,14 +2107,14 @@
     }
     if (HW) {
       const M = HW.hardwareMaterial(false), MDS = HW.hardwareMaterial(true);
-      const put = function (im) { if (im) root.add(im); };
-      put(HW.instanced("signal-mast", HW.mastPole(), M, HWI.mast, { cast: true }));
-      put(HW.instanced("signal-pedestal", HW.pedPole(), M, HWI.ped, { cast: true }));
-      put(HW.instanced("signal-arm", HW.mastArm(), M, HWI.arm, { cast: true }));
+      // one InstancedMesh per 200 m cell per part, frustum-culled (see chunked())
+      HW.chunked("signal-mast", HW.mastPole(), M, HWI.mast, { cast: true }).addTo(root);
+      HW.chunked("signal-pedestal", HW.pedPole(), M, HWI.ped, { cast: true }).addTo(root);
+      HW.chunked("signal-arm", HW.mastArm(), M, HWI.arm, { cast: true }).addTo(root);
       // heads are DoubleSide: the visors are open tubes you see the inside of
-      put(HW.instanced("signal-head-arm", HW.vehicleHead("top"), MDS, HWI.headTop, { cast: true }));
-      put(HW.instanced("signal-head-pole", HW.vehicleHead("side"), MDS, HWI.headSide, {}));
-      put(HW.instanced("ped-head", HW.pedHead(), MDS, HWI.pedHead, {}));
+      HW.chunked("signal-head-arm", HW.vehicleHead("top"), MDS, HWI.headTop, { cast: true }).addTo(root);
+      HW.chunked("signal-head-pole", HW.vehicleHead("side"), MDS, HWI.headSide, {}).addTo(root);
+      HW.chunked("ped-head", HW.pedHead(), MDS, HWI.pedHead, {}).addTo(root);
     }
 
     // ---- STREET LIGHTS: cobra heads on davit poles, both kerbs ----
@@ -2148,10 +2156,13 @@
     const LO = HW ? HW.lumOffsets(LM) : { bellyY: LM.tipY - 0.04, bulbY: LM.tipY - 0.075, bulbZ: LM.tipZ + 0.33 };
     const headLampM = lampMat(0xffe9a8);          // the drop lens: shared, glow driven by night
     headLampM.emissiveIntensity = 0.0;
+    headLampM.color.setHex(0x8e8a80);             // by day: dull glass in a grey housing, not a white disc
     // LIGHT ON THE ROAD. Warm (~3000 K) and roughly a type-III footprint:
     // long along the kerb, shorter across, hot spot under the head.
-    const LAMP_POOL_HEX = 0xffc88a, LAMP_POOL_K = 0.5, LAMP_POOL_ALONG = 17, LAMP_POOL_ACROSS = 12;
-    const SIG_POOL = { red: [0xff2a1c, 0.3], yel: [0xffae00, 0.24], grn: [0x1cff8e, 0.22] };
+    // (a lamp every 13 m, alternating kerbs: 15 m along keeps the pools
+    // distinct, with dark asphalt between the hot spots)
+    const LAMP_POOL_HEX = 0xffc88a, LAMP_POOL_K = 1.0, LAMP_POOL_ALONG = 15, LAMP_POOL_ACROSS = 11;
+    const SIG_POOL = { red: [0xff2a1c, 0.16], yel: [0xffae00, 0.13], grn: [0x1cff8e, 0.11] };
     const lampBulbSpots = [];                     // {x,z,ang} per luminaire; index == lampIdx
     const lampPosts = [];                         // pole instances (the full lamp prototype)
     // LAMP CENSUS — every lamp POLE in this world and whether its head actually
@@ -2164,27 +2175,28 @@
     // instance, a light-pool instance at the SAME index (hitProp zero-scales
     // both through lampPools when the head is shot out), a Fresnel glow shell,
     // a shootable centred on the HEAD, and a real-light candidate.
-    function registerLamp(x, z, ang) {
+    function registerLamp(x, z, ang, y0) {
       const lampIdx = lampBulbSpots.length;
-      lampBulbSpots.push({ x, z, ang });
+      lampBulbSpots.push({ x, z, ang, y0 });
       const bwx = x + Math.sin(ang) * LO.bulbZ, bwz = z + Math.cos(ang) * LO.bulbZ;
-      const glowSpot = { x: bwx, y: LO.bulbY, z: bwz, r: 0.36 };
+      const glowSpot = { x: bwx, y: y0 + LO.bulbY, z: bwz, r: 0.36 };
       lampGlowSpots.push(glowSpot);
-      const shootRec = { type: "lamp", x: bwx, z: bwz, y: LO.bulbY, r: 0.7, bulb: null, glow: null, lampIdx, broken: false, glowSpot };
+      const shootRec = { type: "lamp", x: bwx, z: bwz, y: y0 + LO.bulbY, r: 0.7, bulb: null, glow: null, lampIdx, broken: false, glowSpot };
       shootables.push(shootRec);
       // `ref` lets the pool driver below skip a shot-out lamp (shootRec.broken
       // flips true in hitProp) without a separate "is this lamp dead" lookup.
-      lightCandidates.push({ x: bwx, y: LO.bulbY, z: bwz, kind: "lamp", ref: shootRec });
+      lightCandidates.push({ x: bwx, y: y0 + LO.bulbY, z: bwz, kind: "lamp", ref: shootRec });
     }
     function makeLampPost(x, z, faceX, faceZ) {
       const ang = Math.atan2(faceX, faceZ);       // davit reaches toward the road centre
-      lampPosts.push({ x, y: 0, z, ry: ang });
+      const y0 = footY(x, z);
+      lampPosts.push({ x, y: y0, z, ry: ang });
       // SLIM COLLIDER, matched to the 0.155 m butt of the shaft.
       solidCollider(x, z, 0.17, null);
       city.streetProps.push({ x, z, type: "lamp" });
-      registerLamp(x, z, ang);
+      registerLamp(x, z, ang, y0);
     }
-    for (const m of mastLums) registerLamp(m.x, m.z, m.ang);
+    for (const m of mastLums) registerLamp(m.x, m.z, m.ang, m.y);
     // Stations every LAMP_STEP metres alternate kerbs, so each kerb gets a
     // lamp every 2*LAMP_STEP, staggered against the opposite one: the classic
     // two-sided arterial layout, and the pools overlap into a continuous lit
@@ -2221,31 +2233,21 @@
         if (r.vertical ? Math.abs(hx - r.x) < half : Math.abs(hz - r.z) < half) lampCensus.overRoad++;
       }
     }
-    // Build: the poles + davits + heads (two prototypes, one draw each), the
-    // lens pool, and the ground light pools — lamps first so a lamp's pool
-    // index IS its lampIdx, then one faint coloured wash per signal approach.
+    // Build: poles + davits + heads, the lens set and the ground light pools,
+    // all chunked per 200 m cell (frustum-culled). lampPools.bulb / .glow are
+    // chunk SETS addressed by GLOBAL index: a lamp's lens and pool are both
+    // at its lampIdx (lamps first, in lampIdx order), then one faint coloured
+    // wash per signal approach; hitProp's zero-scale routes to the right cell.
+    lampPools.bulb = null; lampPools.glow = null;      // never a previous world's pools
     if (HW) {
       const M = HW.hardwareMaterial(false);
-      const posts = HW.instanced("lamp-post", HW.luminaire(LM, true, "city"), M, lampPosts, { cast: true });
-      const tops = HW.instanced("mast-luminaire", HW.luminaire(LM, false, "city"), M,
-        mastLums.map(function (m) { return { x: m.x, y: 0, z: m.z, ry: m.ang }; }), { cast: true });
-      if (posts) root.add(posts);
-      if (tops) root.add(tops);
-    }
-    lampPools.bulb = null; lampPools.glow = null;      // never a previous world's pools
-    if (lampBulbSpots.length && THREE.InstancedMesh) {
-      const lensG = HW ? HW.lampLens() : geo("lampBulb", () => new THREE.BoxGeometry(0.22, 0.06, 0.5));
-      const bulbIM = new THREE.InstancedMesh(lensG, headLampM, lampBulbSpots.length);
-      bulbIM.name = "street-lamp-lenses";
-      bulbIM.castShadow = false; bulbIM.receiveShadow = false; bulbIM.frustumCulled = false;
-      bulbIM.userData.terrain = true;   // farcull: city-wide pool
-      for (let i = 0; i < lampBulbSpots.length; i++) {
-        const sp = lampBulbSpots[i];
-        placeInst(bulbIM, i, sp.x + Math.sin(sp.ang) * LO.bulbZ, LO.bellyY - 0.003, sp.z + Math.cos(sp.ang) * LO.bulbZ, sp.ang, 1, 1, 1);
-      }
-      bulbIM.instanceMatrix.needsUpdate = true;
-      root.add(bulbIM);
-      lampPools.bulb = bulbIM;
+      HW.chunked("lamp-post", HW.luminaire(LM, true, "city"), M, lampPosts, { cast: true }).addTo(root);
+      HW.chunked("mast-luminaire", HW.luminaire(LM, false, "city"), M,
+        mastLums.map(function (m) { return { x: m.x, y: m.y, z: m.z, ry: m.ang }; }), { cast: true }).addTo(root);
+      const lenses = HW.chunked("lamp-lens", HW.lampLens(), headLampM, lampBulbSpots.map(function (sp) {
+        return { x: sp.x + Math.sin(sp.ang) * LO.bulbZ, y: sp.y0 + LO.bellyY - 0.004, z: sp.z + Math.cos(sp.ang) * LO.bulbZ, ry: sp.ang };
+      }), { cast: false, receive: false, maxDist: 600 }).addTo(root);
+      lampPools.bulb = lenses;
     }
     if (HW) {
       const items = [];
@@ -2255,12 +2257,14 @@
         items.push({ x: cx, y: HW.seatY(city, cx, cz, sp.ang, LAMP_POOL_ALONG, LAMP_POOL_ACROSS), z: cz, ry: sp.ang,
           sx: LAMP_POOL_ALONG, sz: LAMP_POOL_ACROSS, color: LAMP_POOL_HEX, k: LAMP_POOL_K });
       }
+      // the pool index of lamp k MUST be k (hitProp zero-scales pools by lampIdx)
+      if (items.length !== lampBulbSpots.length) console.error("[props] light-pool index bookkeeping broke", items.length, lampBulbSpots.length);
       for (const s of sigPoolSrc) {
         s.idx = items.length; s.key = null;
         items.push({ x: s.x, y: HW.seatY(city, s.x, s.z, s.ry, s.sx, s.sz), z: s.z, ry: s.ry, sx: s.sx, sz: s.sz, color: 0x000000, k: 0 });
       }
       const pools = HW.lightPools(items);
-      if (pools) { root.add(pools); lampPools.glow = pools; }
+      if (pools) { pools.addTo(root); lampPools.glow = pools; }
     }
 
     // =====================================================================
@@ -3335,7 +3339,7 @@
         headLampM.emissiveIntensity = 0.05 + on * 0.95;
         // the light pools on the asphalt: the street reads by lamplight after dark
         const pools = lampPools.glow;
-        if (pools) { pools.material.opacity = on * 0.9; pools.visible = on > 0.02; }
+        if (pools && HW) { HW.setPoolIntensity(pools, on * 0.9); HW.cullSets([pools], CBZ.camera && CBZ.camera.position); }
         for (const glow of nightLamps) { if (glow.material && glow.material.emissive) glow.material.emissiveIntensity = on * 0.9; }
         for (const am of nightAds) { am.emissiveIntensity = 0.06 + on * 0.6; }
       });
@@ -3402,10 +3406,38 @@
     //  cleanly (buildGlowShellPool returns null) on a headless/minimal THREE
     //  stub that lacks ShaderMaterial, or when a city rebuild has zero spots.
     // =====================================================================
-    const lampGlowIM = buildGlowShellPool(0xffe9a8, lampGlowSpots, 0.62);
-    const sigRedIM = buildGlowShellPool(0xff3b3b, sigGlowSpots.red, 0.4);
-    const sigYelIM = buildGlowShellPool(0xffcf3b, sigGlowSpots.yel, 0.4);
-    const sigGrnIM = buildGlowShellPool(0x39ff66, sigGlowSpots.grn, 0.4);
+    // (no glow shell on the street lamps: a Fresnel sphere under a cobra head
+    // reads as a white ball hanging off the arm. The flat lens + the light
+    // pool on the road are the lamp. lampGlowSpots stay registered so
+    // hitProp's setGlowOn is a harmless no-op.)
+    // signal halos: one shell pool per 200 m cell per colour, each with a
+    // world-space bounding sphere so r128 frustum-culls it (a city-wide pool
+    // has to be frustumCulled=false and shades every junction every frame).
+    // setGlowOn keeps working unchanged: each spot records its own cell pool.
+    function glowShellCells(colorHex, spots, size) {
+      const cell = HW ? HW.CELL : 1e9, groups = new Map(), out = [];
+      for (const sp of spots) {
+        const k = Math.floor(sp.x / cell) + "," + Math.floor(sp.z / cell);
+        let gl = groups.get(k); if (!gl) { gl = []; groups.set(k, gl); }
+        gl.push(sp);
+      }
+      groups.forEach(function (gl) {
+        const im = buildGlowShellPool(colorHex, gl, size);
+        if (!im) return;
+        let cx = 0, cy = 0, cz = 0;
+        for (const sp of gl) { cx += sp.x; cy += sp.y; cz += sp.z; }
+        cx /= gl.length; cy /= gl.length; cz /= gl.length;
+        let r = 0;
+        for (const sp of gl) r = Math.max(r, Math.hypot(sp.x - cx, sp.y - cy, sp.z - cz));
+        if (THREE.Sphere) { im.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(cx, cy, cz), r + 1.5); im.frustumCulled = true; }
+        out.push(im);
+      });
+      return out;
+    }
+    const sigShellMeshes = [].concat(
+      glowShellCells(0xff3b3b, sigGlowSpots.red, 0.4),
+      glowShellCells(0xffcf3b, sigGlowSpots.yel, 0.4),
+      glowShellCells(0x39ff66, sigGlowSpots.grn, 0.4));
 
     // ---- SIGNAL LENSES ------------------------------------------------------
     // One InstancedMesh per colour SLOT (red/amber/green) for every vehicle
@@ -3425,20 +3457,17 @@
       for (const key of ["red", "yel", "grn"]) {
         const handles = sigLampHandles[key];
         if (!handles.length) continue;
-        const im = new THREE.InstancedMesh(lensG, lensM, handles.length);
-        im.name = "signal-lenses-" + key;
-        im.castShadow = false; im.receiveShadow = false; im.frustumCulled = false;
-        im.userData.terrain = true;
+        // chunked per cell; each handle keeps (its cell mesh, local index)
+        const set = HW ? HW.chunked("signal-lens-" + key, lensG, lensM, handles, { cast: false, receive: false }).addTo(root) : null;
+        if (!set) continue;
         for (let i = 0; i < handles.length; i++) {
-          const h = handles[i];
-          placeInst(im, i, h.x, h.y, h.z, h.ry, 1, 1, 1);
+          const h = handles[i], im = set.meshOf(i);
+          if (!im) continue;
           h.litHex = LENS_LIT[key]; h.darkHex = LENS_DARK[key];
-          im.setColorAt(i, _sigC.setHex(h.darkHex));
-          h.sigPool = im; h.sigIdx = i;
+          h.sigPool = im; h.sigIdx = set.local[i];
+          im.setColorAt(h.sigIdx, _sigC.setHex(h.darkHex));
         }
-        im.instanceMatrix.needsUpdate = true;
-        if (im.instanceColor) im.instanceColor.needsUpdate = true;
-        root.add(im);
+        for (const im of set.meshes) if (im.instanceColor) im.instanceColor.needsUpdate = true;
       }
     }
     CBZ.citySignalSet = function (lamp, on, colorHex) {
@@ -3459,19 +3488,15 @@
       const pm = new THREE.MeshBasicMaterial({ color: 0xffffff, map: pedTex });
       pm._shared = true;
       for (const which of ["hand", "walk"]) {
-        const im = new THREE.InstancedMesh(HW.pedLens(which), pm, pedHandles.length);
-        im.name = "ped-signal-" + which;
-        im.castShadow = false; im.receiveShadow = false; im.frustumCulled = false;
-        im.userData.terrain = true;
-        for (let i = 0; i < pedHandles.length; i++) {
-          const h = pedHandles[i][which];
-          placeInst(im, i, h.x, h.y, h.z, h.ry, 1, 1, 1);
-          im.setColorAt(i, _sigC.setHex(PED_DARK[which]));
-          h.pool = im; h.idx = i; h.which = which;
+        const hs = pedHandles.map(function (p) { return p[which]; });
+        const set = HW.chunked("ped-signal-" + which, HW.pedLens(which), pm, hs, { cast: false, receive: false }).addTo(root);
+        for (let i = 0; i < hs.length; i++) {
+          const h = hs[i], im = set.meshOf(i);
+          if (!im) continue;
+          h.pool = im; h.idx = set.local[i]; h.which = which;
+          im.setColorAt(h.idx, _sigC.setHex(PED_DARK[which]));
         }
-        im.instanceMatrix.needsUpdate = true;
-        if (im.instanceColor) im.instanceColor.needsUpdate = true;
-        root.add(im);
+        for (const im of set.meshes) if (im.instanceColor) im.instanceColor.needsUpdate = true;
       }
     }
     function pedSet(h, on) {
@@ -3508,30 +3533,15 @@
       if (l.lit != null) return !!l.lit;
       return !!(l.material && l.material.emissiveIntensity > 0.5);
     }
-    if (lampGlowIM) root.add(lampGlowIM);
-    if (sigRedIM) root.add(sigRedIM);
-    if (sigYelIM) root.add(sigYelIM);
-    if (sigGrnIM) root.add(sigGrnIM);
-    // the lamp glow-shell pool RIDES the same night ramp as headLampM (a
-    // streetlamp shouldn't glow at high noon) — read its already-throttled
-    // emissiveIntensity (the night driver above writes it) instead of
-    // re-deriving CBZ.nightAmount a second time.
-    if (CBZ.onAlways && lampGlowIM && !city._lampGlowNightHooked) {
-      city._lampGlowNightHooked = true;
-      CBZ.onAlways(7.1, function () {
-        const g = CBZ.game;
-        if (!g || g.mode !== "city" || !root.visible) return;
-        const n = (headLampM.emissiveIntensity - 0.05) / 0.95;   // 0..1, same ramp headLampM rides
-        lampGlowIM.visible = n > 0.02;
-      });
-    }
+    for (const im of sigShellMeshes) root.add(im);
+    if (HW) HW.registerMeshes(sigShellMeshes, 350);   // halos gate at 350 m
     // signal glow shells track whichever colour traffic.js actually lit —
     // read the SAME lamp materials traffic.js's axisSet/lampSet already
     // drive (emissiveIntensity 1.0 lit / 0.04 dark) rather than re-deriving
     // the phase clock here, so this never drifts from the real state machine
     // (traffic.js already IS the red/yellow/green timer this task asked for;
     // this only mirrors its output onto the Fresnel shells).
-    if (CBZ.onAlways && (sigRedIM || sigYelIM || sigGrnIM || (lampPools.glow && sigPoolSrc.length)) && !city._sigGlowHooked) {
+    if (CBZ.onAlways && (sigShellMeshes.length || (lampPools.glow && sigPoolSrc.length)) && !city._sigGlowHooked) {
       city._sigGlowHooked = true;
       let acc = 0;
       CBZ.onAlways(7.2, function (dt) {
@@ -3549,16 +3559,14 @@
         // only when that approach's phase actually changes
         const pools = lampPools.glow;
         if (pools && HW) {
-          let dirty = false;
           for (let i = 0; i < sigPoolSrc.length; i++) {
             const s = sigPoolSrc[i], h = s.head;
             const key = sigLit(h.red) ? "red" : sigLit(h.yel) ? "yel" : sigLit(h.grn) ? "grn" : null;
             if (key === s.key) continue;
-            s.key = key; dirty = true;
+            s.key = key;
             if (key) HW.setPoolColor(pools, s.idx, SIG_POOL[key][0], SIG_POOL[key][1]);
             else HW.setPoolColor(pools, s.idx, 0x000000, 0);
           }
-          if (dirty && pools.instanceColor) pools.instanceColor.needsUpdate = true;
         }
       });
     }

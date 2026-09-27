@@ -629,7 +629,7 @@
     stats.roadVerts = road.pos.length / 3;
     // THE MATERIAL: CBZ.roadMat (wet-weather driver) + the procedural asphalt
     const roadMat = CBZ.roadMat
-      ? CBZ.roadMat({ color: 0xffffff, detailRepeat: 1, normalScale: 0.5 })
+      ? CBZ.roadMat({ color: 0xffffff, detailRepeat: 1, normalScale: 0.3 })
       : new THREE.MeshLambertMaterial({ color: 0xffffff });
     if (CBZ.asphaltDetail) {
       CBZ.asphaltDetail(roadMat, {
@@ -638,6 +638,10 @@
         gutter: P.gutter,
       });
     } else roadMat.color.setRGB(0.08, 0.08, 0.085);
+    // The library's roughness map scatters metre-scale glossy blotches that
+    // mirror the sky (the "camouflage" read at noon); the shader owns the
+    // roughness variation here (polish, tar, oil), so drop the map.
+    if (roadMat.roughnessMap) { roadMat.roughnessMap = null; roadMat.needsUpdate = true; }
     if (CBZ.terrainFogScale) CBZ.terrainFogScale(roadMat, 0.10);
     const roadMesh = finish("mainland-city-surface", road.geo(THREE, false), roadMat, { surface: true });
 
