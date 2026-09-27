@@ -268,14 +268,11 @@ const arc = await evl(`(() => {
   window.requestAnimationFrame = function () { return 0; };
   const out = { stages: [], skinPieces: 0 };
 
+  // The wound is the building's own wall carved open (collapse.js section 6),
+  // not a dressing of boxes hung on it: count this building's breached walls.
   const skinOf = () => {
-    const A = CBZ.city && (CBZ.city.arena || CBZ.city);
-    const root = (A && A.root) || CBZ.scene;
     let found = 0;
-    root.traverse(function (o) {
-      if (found || !o.userData || !o.userData.cbzCollapseSkin) return;
-      let m = 0; o.traverse(function (n) { if (n.isMesh) m++; }); found = m;
-    });
+    if (b.group) b.group.traverse(function (o) { if (o._breached) found++; });
     return found;
   };
 
@@ -337,7 +334,7 @@ if (arc && arc.stages) {
     arc.stages.some((s) => s.skins > 0), arc.stages);
   ok("the skin is one group per building, rebuilt not accumulated",
     arc.stages.every((s) => s.skins <= 1), arc.stages);
-  ok("the wound dressing is real geometry on the facade", arc.skinPieces > 3, { pieces: arc.skinPieces });
+  ok("the wound opens the building's own wall (carved bays)", arc.skinPieces > 0, { carved: arc.skinPieces });
   await shot("collapse-1-wounded.png");
 
   ok("the ledger accepts the condemnation", arc.forced === true, { forced: arc.forced });
@@ -359,8 +356,10 @@ if (arc && arc.stages) {
   await shot("collapse-3-rubble.png");
 
   const cleared = await evl(`(() => { CBZ.collapse.reset(); return { active: CBZ.collapse.active(), frags: CBZ.collapse.fragCount(), skins: CBZ.collapse.skinCount() }; })()`);
-  ok("reset() frees every shell, fragment and skin",
-    cleared && cleared.active === 0 && cleared.frags === 0 && cleared.skins === 0, cleared);
+  // (pieces are CBZ.debris's now and other sources may have live ones; reset
+  // clears the collapse's own owners, so only shells and skins are pinned)
+  ok("reset() frees every shell and skin",
+    cleared && cleared.active === 0 && cleared.skins === 0, cleared);
 } else {
   ok("the collapse arc ran", false, arc);
 }
