@@ -224,17 +224,21 @@
      so a session that starts on a mouse and gets a finger later still flips.
      `.waypoint-mapkey`'s "[M] map" tail is the third site; it is
      pointer-events:none so mobile.css drops it instead of retitling it. */
+  // CITY (HUD purge 2026-09-27, owner: no key legends, never the fourth
+  // wall): the city map on a keyboard carries plain words too, and no
+  // how-to line at all; clicking a map is not something to be taught.
   const KEYCAPS = {
-    close: { key: "Close [M]", touch: "✕ Close" },
-    clear: { key: "[Space] clear waypoint", touch: "Clear waypoint" },
-    place: { key: "Click or right-click to place a waypoint", touch: "Tap the map to place a waypoint" },
+    close: { key: "Close [M]", touch: "✕ Close", city: "Close" },
+    clear: { key: "[Space] clear waypoint", touch: "Clear waypoint", city: "Clear waypoint" },
+    place: { key: "Click or right-click to place a waypoint", touch: "Tap the map to place a waypoint", city: "" },
   };
   function keycaps() {
     if (CBZ.CONFIG && CBZ.CONFIG.MAP_TOUCH_LABELS === false) return;
     const t = !!CBZ.touchMode;
+    const city = !t && CBZ.game && CBZ.game.mode === "city";
     const set = function (el, spec) {
       if (!el) return;
-      const want = t ? spec.touch : spec.key;
+      const want = city ? spec.city : t ? spec.touch : spec.key;
       if (el.textContent !== want) el.textContent = want;
     };
     set(closeBtn, KEYCAPS.close);

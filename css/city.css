@@ -45,12 +45,14 @@ body.mode-city #interact { display: none; }
 /* ============================================================
    CITY LIVE-WORLD DECLUTTER
 
-   The world keeps instruments (reticle, map, vitals, wanted stars, money,
-   population and numeric route/ammo state), but it is not a tutorial panel.
-   These are passive walk-up/control chips owned by otherwise independent
-   modules.  Most of them write display:block inline every frame, hence the
-   deliberate !important at this single policy boundary.  Their keyboard/click
-   handlers stay installed, so hiding the prose never disables the action.
+   After the 2026-09-27 HUD purge the city screen carries: a small minimap,
+   the reticle with a gun out, the ammo count with a gun out, cash only when
+   it changes, a new objective for a few seconds, and two screen-edge washes
+   (wound, wanted). Everything below is a passive walk-up/control chip owned
+   by some other module that still writes display:block inline every frame,
+   hence the deliberate !important at this single policy boundary. Their
+   keyboard/click handlers stay installed, so hiding the prose never disables
+   the action.
 ============================================================ */
 body.mode-city.state-playing #hint,
 body.mode-city.state-playing #toast,
@@ -70,11 +72,7 @@ body.mode-city.state-playing #modshopHud,
 body.mode-city.state-playing #cityOrders,
 body.mode-city.state-playing #cityHeistHud,
 body.mode-city.state-playing #invHotbar,
-body.mode-city.state-playing #cFeed,
-body.mode-city.state-playing #cKill,
 body.mode-city.state-playing #cKillFeed,
-body.mode-city.state-playing #cRel,
-body.mode-city.state-playing #cMemb,
 body.mode-city.state-playing #cTurfMeta,
 body.mode-city.state-playing #streakHud,
 body.mode-city.state-playing #streakMeter,
@@ -93,18 +91,16 @@ body.mode-city.state-playing > div[style*="bottom:132px"][style*="z-index:15"] {
 body.mode-city.state-playing #interact.show { display: block !important; }
 
 /* Route guidance remains useful while moving, but only as direction + range.
-   The destination sentence and the old "[M] map" legend belong on the map. */
+   The destination sentence and the old "[M] map" legend belong on the map.
+   It rides ABOVE the bottom-centre weapon cluster (#cWpn: pad 14 + 40px slots
+   + ammo line) so the arrow and the ammo count never share pixels. */
 body.mode-city.state-playing #waypointLabel,
 body.mode-city.state-playing #waypointGuide .waypoint-mapkey {
   display: none !important;
 }
+body.mode-city #waypointGuide { bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
 
-/* Posture is a physical meter.  Names, YOU/OPEN captions are narration. */
-body.mode-city.state-playing #cPost .lbl { display: none !important; }
-
-/* Race telemetry is still present as numbers, lamps and arrows. */
-body.mode-city.state-playing #raceHud .rLab,
-body.mode-city.state-playing #raceHud .rGap .nm,
+/* The start gantry's lamps say GO; the word is redundant. */
 body.mode-city.state-playing #raceLights .go { display: none !important; }
 
 /* ============================================================
@@ -223,7 +219,6 @@ body.mode-city.state-playing #raceLights .go { display: none !important; }
 /* Pausing is a clean break in the world view. City overlays used to keep
    drawing through the pause card (including the portrait in screenshot #1). */
 body:not(.state-playing) #cityHud,
-body:not(.state-playing) #cpPanel,
 body:not(.state-playing) #cTurfMeta,
 body:not(.state-playing) #cKillFeed { display: none !important; }
 
