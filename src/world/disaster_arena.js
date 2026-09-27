@@ -236,28 +236,396 @@
     return (r << 16) | (g2 << 8) | b;
   }
 
+  /* ============================================================
+     THE FINISH: what turns the island's boxes into buildings
+     ============================================================
+     OWNER: "all of the building facades kind of flicker and they're kind of
+     weird", and of the same facades, "is that real art?".
+
+     THE FLICKER was z-fighting, measured, not guessed: render one frame, then
+     the same frame with only the camera's near plane nudged 0.3% (geometry
+     projects to the same pixels, only the depth mapping moves), and 1.2% of
+     the street view changed colour, every changed pixel on facade ornament.
+     Those are EXACT depth ties: the grammars lay a band and a pier with the
+     same projection, a sill on a panel with the same face plane, and each
+     colour is its own merged mesh, so which one wins a pixel is decided by
+     rounding and changes with every step the camera takes. No amount of
+     depth precision fixes an exact tie. What fixes it is saying who wins:
+     every deco colour bucket gets a polygonOffset rank from the order the
+     grammar painted it (cladding first, the trim laid over it later), and the
+     shell walls rank 0 under all of it. Ties now resolve the same way every
+     frame at every distance, because polygonOffset is in depth units.
+
+     THE ART had three faults, each one a sentence:
+       * the shell was painted from a party palette (sky blue, pink, mint) and
+         every grammar that leaves the host wall showing showed THAT, so a
+         gothic chapel had canary yellow walls and a brick loft had baby blue
+         "windows" that were really the shell's paint behind its openings;
+       * the host's glass was BURIED: panes at wall-face minus 10 cm, inside a
+         30 cm wall, so no grammar ever had glass behind its openings (they
+         were all written against buildings.js's glass band, which the island
+         never provided). The towers had the opposite fault, one floating pane
+         per face per storey, light cyan, half transparent;
+       * every surface was one flat Lambert colour with no age on it.
+     So: real wall materials, a real glazing pass (below), and a weathering
+     term in the wall shader (streaks, mottle, a darker splash-back at the
+     foot of the wall) that costs no draw calls and no textures.
+
+     THE GLAZING PASS reads the facade instead of guessing at it. After the
+     grammar has built, the host's glass band (the one the city host has:
+     storey floor + 0.55 m to ceiling - 0.45 m) is SAMPLED along each face
+     against every box the grammar laid on the wall. Whatever stays uncovered
+     is an opening the grammar meant to show glass through, and each opening
+     gets exactly one window: a pane of glass set back behind a thin frame,
+     mullions if it is wide, a transom if it is tall, and ONE interior state
+     (reflecting the sky, curtains drawn, blinds half down, a dark room, a lit
+     room) so no two windows in a row read as the same tile. Glass behind
+     cladding is never built at all. All the panes of a building are merged
+     into three meshes (reflective / room / lit) and a shattered pane is
+     collapsed in place, so a 22-storey tower's glazing went from ~80 draw
+     calls to 3 while every pane still bursts on its own. */
+  const GR_VHEAD = "#include <common>\nvarying vec3 vGrP;\nvarying vec3 vGrN;";
+  const GR_VBODY = "#include <project_vertex>\nvGrP = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvGrN = normalize(mat3(modelMatrix) * objectNormal);";
+  const GR_FHEAD = "#include <common>\nvarying vec3 vGrP;\nvarying vec3 vGrN;\nuniform float uGrBase;\n" +
+    "float grH(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }\n" +
+    "float grN(vec2 p) { vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);\n" +
+    "  return mix(mix(grH(i), grH(i + vec2(1.0, 0.0)), f.x), mix(grH(i + vec2(0.0, 1.0)), grH(i + vec2(1.0, 1.0)), f.x), f.y); }";
+  // mottle everywhere; on walls, rain streaks running down and the darker
+  // splash-back band at the foot where rain and dirt hit it
+  const GR_FBODY = "#include <color_fragment>\n{\n" +
+    "  vec3 gn = abs(vGrN);\n" +
+    "  float gh = vGrP.y - uGrBase;\n" +
+    "  vec2 fp = gn.y > 0.6 ? vGrP.xz : (gn.x > gn.z ? vGrP.zy : vGrP.xy);\n" +
+    "  float mt = grN(fp * 0.9) * 0.55 + grN(fp * 3.1) * 0.3 + grN(fp * 11.0) * 0.15;\n" +
+    "  float gk = 0.85 + 0.25 * mt;\n" +
+    "  if (gn.y < 0.6) {\n" +
+    "    float st = grN(vec2(fp.x * 1.9, fp.y * 0.11 + mt * 0.5));\n" +
+    "    gk *= 1.0 - 0.24 * smoothstep(0.5, 0.95, st);\n" +
+    "    gk *= mix(0.56, 1.0, smoothstep(0.05, 1.5, gh + 0.5 * (mt - 0.5)));\n" +
+    "  }\n" +
+    "  diffuseColor.rgb *= gk;\n" +
+    "}";
+  function grimeCompile(base) {
+    return function (sh) {
+      sh.uniforms.uGrBase = base;
+      sh.vertexShader = sh.vertexShader.replace("#include <common>", GR_VHEAD).replace("#include <project_vertex>", GR_VBODY);
+      sh.fragmentShader = sh.fragmentShader.replace("#include <common>", GR_FHEAD).replace("#include <color_fragment>", GR_FBODY);
+    };
+  }
+  function grimeKey() { return "cbz-island-grime"; }
+
+  // One material per (colour, rank, foot height), shared island-wide. rank 0
+  // is the shell; rank >= 1 is facade deco, pulled forward one step per rank.
+  const finMats = new Map();
+  function finishMat(col, rank, baseY) {
+    const key = col + "|" + rank + "|" + Math.round(baseY * 5);
+    let m = finMats.get(key);
+    if (m) return m;
+    m = new THREE.MeshLambertMaterial({ color: col });
+    if (rank > 0) {
+      m.polygonOffset = true;
+      m.polygonOffsetFactor = -1;
+      m.polygonOffsetUnits = -(1 + rank);
+    }
+    m.onBeforeCompile = grimeCompile({ value: Math.round(baseY * 5) / 5 });
+    m.customProgramCacheKey = grimeKey;
+    m._shared = true;
+    finMats.set(key, m);
+    return m;
+  }
+  // Glass. Opaque on purpose: a transparent pane over an opaque wall is a
+  // second sorting problem, and there is nothing behind these panes to see.
+  let glassMats = null;
+  function islandGlassMats() {
+    if (glassMats) return glassMats;
+    const refl = new THREE.MeshStandardMaterial({
+      color: 0xffffff, vertexColors: true, metalness: 0.9, roughness: 0.14,
+      envMap: CBZ.ENV || null, envMapIntensity: 1.1,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+    });
+    const room = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    const lit = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true,
+      emissive: 0xffb866, emissiveIntensity: 0.28,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    refl._shared = room._shared = lit._shared = true;
+    glassMats = { refl: refl, room: room, lit: lit };
+    envWanting.push(refl); hookEnv();
+    return glassMats;
+  }
+  // The environment map can arrive after the island is built (carfx makes it
+  // late on some boots); a mirror-metal pane without it renders black, so
+  // every glass material is re-pointed at it the first frame it exists.
+  const envWanting = [];
+  let envHooked = false;
+  function hookEnv() {
+    if (envHooked || !CBZ.onUpdate) return;
+    envHooked = true;
+    let done = false;
+    CBZ.onUpdate(48.1, function () {
+      if (done || !CBZ.ENV) return;
+      done = true;
+      for (const m of envWanting) if (m.envMap !== CBZ.ENV) { m.envMap = CBZ.ENV; m.needsUpdate = true; }
+    });
+  }
+  // a grammar's own dark glass box, as glass: its colour becomes the tint
+  const glassBoxMats = new Map();
+  function glassBoxMat(col, rank) {
+    const key = col + "|" + rank;
+    let m = glassBoxMats.get(key);
+    if (m) return m;
+    const c = new THREE.Color(col).lerp(new THREE.Color(0x6d7c89), 0.55);
+    m = new THREE.MeshStandardMaterial({ color: c, metalness: 0.9, roughness: 0.16,
+      envMap: CBZ.ENV || null, envMapIntensity: 1.1 });
+    if (rank > 0) { m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -(1 + rank); }
+    m._shared = true;
+    envWanting.push(m); hookEnv();
+    glassBoxMats.set(key, m);
+    return m;
+  }
+  // Is this deco colour a grammar's own "glass" box (dark, cool)? Those get
+  // the reflective glass material instead of a flat dark Lambert.
+  function isGlassHex(c) {
+    const r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
+    const l = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+    return l < 0.14 && b >= r && b >= g * 0.9;
+  }
+
+  /* THE WINDOWS. o: { group, ox, oz, gy, w, d, storeys, fh, doorHalf, list,
+     boxes (the facade's boxes, local [x,y,z,w,h,d]), dbox (deco emitter),
+     frameCol, sillCol, noTopBand }. */
+  function glazeBuilding(o) {
+    const THREE_ = window.THREE;
+    const G = islandGlassMats();
+    const h01 = function (a, b, s) { return CBZ.hash01 ? CBZ.hash01(o.ox + a, o.oz + b, s) : 0.5; };
+    const kinds = { refl: { p: [], n: [], c: [], i: [] }, room: { p: [], n: [], c: [], i: [] }, lit: { p: [], n: [], c: [], i: [] } };
+    const panes = [];
+    const GP = 0.02;                      // glass plane, proud of the wall face
+    const FW = 0.055, FP = 0.05;          // frame bar width / projection
+
+    function quad(K, cxx, cyy, czz, tx, tz, nx, nz, u0, u1, v0, v1, cBot, cTop, rec) {
+      const k = kinds[K], base = k.p.length / 3;
+      const pts = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
+      for (let q = 0; q < 4; q++) {
+        const u = pts[q][0], v = pts[q][1];
+        k.p.push(cxx + tx * u, cyy + v, czz + tz * u);
+        k.n.push(nx, 0, nz);
+        const c = v === v0 ? cBot : cTop;
+        k.c.push(c[0], c[1], c[2]);
+      }
+      k.i.push(base, base + 1, base + 2, base, base + 2, base + 3);
+      rec.parts.push({ K: K, v: base });
+    }
+    // vertex colours in the same space as every material colour in the game
+    // (a hex is used as-is, the renderer encodes to sRGB on output)
+    const lin = function (hex) { return [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255]; };
+    const mul = function (c, f) { return [c[0] * f, c[1] * f, c[2] * f]; };
+    // the four faces: normal axis, outward sign, tangent, span, halfN
+    const faces = [
+      { s: 0, horiz: true, out: -1, tx: -1, tz: 0, span: o.w, halfN: o.d / 2 },
+      { s: 1, horiz: true, out: 1, tx: 1, tz: 0, span: o.w, halfN: o.d / 2 },
+      { s: 2, horiz: false, out: -1, tx: 0, tz: 1, span: o.d, halfN: o.w / 2 },
+      { s: 3, horiz: false, out: 1, tx: 0, tz: -1, span: o.d, halfN: o.w / 2 },
+    ];
+    // a pane of glass with ONE interior, u across [u0,u1], v up [v0,v1]
+    function glass(f, cxx, czz, u0, u1, v0, v1, salt, rec, shop) {
+      const nx = f.horiz ? 0 : f.out, nz = f.horiz ? f.out : 0;
+      let r = h01(u0 * 3.1 + f.s, v0 * 1.7, salt);
+      // a shopfront is plate glass or a lit display, never curtains
+      if (shop) r = r < 0.5 ? r * 0.9 : (r < 0.72 ? 0.7 : 0.95);
+      const hw = (u1 - u0);
+      if (r < 0.46) {
+        // sky in the glass; the head of the reveal shades the top of it
+        const tint = [[0.5, 0.58, 0.64], [0.44, 0.52, 0.48], [0.6, 0.6, 0.62]][(h01(f.s, v0, salt + 7) * 3) | 0];
+        quad("refl", cxx, 0, czz, f.tx, f.tz, nx, nz, u0, u1, v0, v1 - 0.12, mul(tint, 0.8), tint, rec);
+        quad("refl", cxx, 0, czz, f.tx, f.tz, nx, nz, u0, u1, v1 - 0.12, v1, mul(tint, 0.35), mul(tint, 0.3), rec);
+      } else if (r < 0.64) {
+        // curtains drawn to the sides, a dark room in the gap
+        const cloth = lin([0xd8cbb0, 0xb9a88a, 0x8c3b34, 0x5b6a7c, 0xe6e0d2][(h01(f.s, v1, salt + 3) * 5) | 0]);
+        const gap = Math.min(hw * 0.5, 0.25 + h01(u1, v0, salt + 5) * hw * 0.4);
+        const um = (u0 + u1) / 2;
+        quad("room", cxx, 0, czz, f.tx, f.tz, nx, nz, u0, um - gap / 2, v0, v1, mul(cloth, 0.55), mul(cloth, 0.4), rec);
+        quad("room", cxx, 0, czz, f.tx, f.tz, nx, nz, um + gap / 2, u1, v0, v1, mul(cloth, 0.55), mul(cloth, 0.4), rec);
+        quad("room", cxx, 0, czz, f.tx, f.tz, nx, nz, um - gap / 2, um + gap / 2, v0, v1, [0.12, 0.12, 0.13], [0.08, 0.08, 0.09], rec);
+      } else if (r < 0.78) {
+        // blinds part way down over a dim room
+        const vb = v1 - (v1 - v0) * (0.25 + h01(u0, v1, salt + 9) * 0.5);
+        const bl = lin([0xe9e4d6, 0xcfc6b0, 0xa9a39a][(h01(u1, v1, salt + 11) * 3) | 0]);
+        quad("room", cxx, 0, czz, f.tx, f.tz, nx, nz, u0, u1, vb, v1, mul(bl, 0.5), mul(bl, 0.42), rec);
+        quad("room", cxx, 0, czz, f.tx, f.tz, nx, nz, u0, u1, v0, vb, [0.11, 0.11, 0.12], [0.17, 0.16, 0.15], rec);
+      } else if (r < 0.9) {
+        // a dark room: the back wall barely there, a little light at the top
+        quad("room", cxx, 0, czz, f.tx, f.tz, nx, nz, u0, u1, v0, v1, [0.1, 0.105, 0.115], [0.2, 0.195, 0.19], rec);
+      } else {
+        // somebody left the light on
+        quad("lit", cxx, 0, czz, f.tx, f.tz, nx, nz, u0, u1, v0, v1, [0.62, 0.5, 0.34], [0.78, 0.68, 0.5], rec);
+      }
+    }
+
+    // does the facade cover local point (t, y) on face f?
+    function coveredFn(f) {
+      const list = [];
+      for (const b of o.boxes) {
+        const nC = f.horiz ? b[2] : b[0], nH = (f.horiz ? b[5] : b[3]) / 2;
+        const outer = f.out > 0 ? (nC + nH) - f.halfN : -f.halfN - (nC - nH);
+        const inner = f.out > 0 ? (nC - nH) - f.halfN : -f.halfN - (nC + nH);
+        if (outer < GP + 0.006 || inner > 0.12) continue;     // behind the glass, or standing well off the wall
+        const tC = (f.horiz ? b[0] : b[2]) * (f.horiz ? f.tx : f.tz), tH = (f.horiz ? b[3] : b[5]) / 2;
+        list.push([tC - tH, tC + tH, b[1] - b[4] / 2, b[1] + b[4] / 2]);
+      }
+      return function (t, y) {
+        for (let i = 0; i < list.length; i++) {
+          const q = list[i];
+          if (t > q[0] && t < q[1] && y > q[2] && y < q[3]) return true;
+        }
+        return false;
+      };
+    }
+
+    const STEP = 0.06, VSTEP = 0.05;
+    for (const f of faces) {
+      const cov = coveredFn(f);
+      const cxx = f.horiz ? 0 : f.out * (f.halfN + GP), czz = f.horiz ? f.out * (f.halfN + GP) : 0;
+      const half = f.span / 2 - 0.35;
+      for (let k = 0; k < o.storeys; k++) {
+        // the street face's ground floor is a SHOPFRONT on a low-rise
+        // building: plate glass from a low stall riser, dark metal frames
+        const shop = !o.tower && f.s === 0 && k === 0;
+        const b0 = k * o.fh + (shop ? 0.4 : 0.55), b1 = (k + 1) * o.fh - 0.45;
+        const yMid = b0 + (b1 - b0) * 0.55;
+        // runs of open wall along the band
+        const runs = [];
+        let start = null;
+        for (let t = -half; t <= half + 1e-6; t += STEP) {
+          const doorBlock = f.s === 0 && k === 0 && Math.abs(t) < o.doorHalf;
+          const open = !doorBlock && !cov(t, yMid);
+          if (open && start == null) start = t;
+          if ((!open || t + STEP > half + 1e-6) && start != null) {
+            const end = open ? t : t - STEP;
+            if (end - start >= 0.3) runs.push([start, end]);
+            start = null;
+          }
+        }
+        for (const run of runs) {
+          const tm = (run[0] + run[1]) / 2;
+          // vertical extent of the opening at its centre, inside the band
+          let v0 = yMid, v1 = yMid;
+          while (v0 - VSTEP >= b0 && !cov(tm, v0 - VSTEP)) v0 -= VSTEP;
+          while (v1 + VSTEP <= b1 && !cov(tm, v1 + VSTEP)) v1 += VSTEP;
+          if (v1 - v0 < 0.35) continue;
+          const u0 = run[0] - STEP / 2, u1 = run[1] + STEP / 2;
+          const bare = !cov(tm, v0 - 0.12);           // plain wall under it: give it a sill
+          // modules: a wide opening is several windows in one frame
+          const nMod = Math.max(1, Math.round((u1 - u0) / 1.45));
+          const mw = (u1 - u0) / nMod;
+          const tall = (v1 - v0) > 1.75;
+          const vT = tall ? v1 - Math.min(0.55, (v1 - v0) * 0.26) : v1;
+          const rec = { parts: [], shattered: false, mesh: null,
+            x: o.ox + (f.horiz ? tm * f.tx : cxx), y: o.gy + (v0 + v1) / 2,
+            z: o.oz + (f.horiz ? czz : tm * f.tz), span: (u1 - u0) / 2 };
+          for (let m = 0; m < nMod; m++) {
+            const a = u0 + m * mw, bb = a + mw;
+            glass(f, cxx, czz, a, bb, v0, vT, 0x51 + m + k * 7, rec, shop);
+            if (tall) glass(f, cxx, czz, a, bb, vT, v1, 0x91 + m + k * 7, rec, shop);
+          }
+          panes.push(rec);
+          if (o.list) o.list.push(rec);
+          // ---- the frame, laid through the deco merge -------------------
+          const fb = function (t, y, len, hh, proj, col) {
+            const n = f.halfN + proj / 2;
+            if (f.horiz) o.dbox(t * f.tx, y, f.out * n, len, hh, proj, col);
+            else o.dbox(f.out * n, y, t * f.tz, proj, hh, len, col);
+          };
+          const fc = shop ? 0x2a2a2c : o.frameCol;
+          fb(tm, v1 - FW / 2, u1 - u0, FW, FP, fc);                      // head
+          fb(tm, v0 + FW / 2, u1 - u0, FW, FP, fc);                      // bottom rail
+          fb(u0 + FW / 2, (v0 + v1) / 2, FW, v1 - v0, FP, fc);           // jambs
+          fb(u1 - FW / 2, (v0 + v1) / 2, FW, v1 - v0, FP, fc);
+          for (let m = 1; m < nMod; m++) fb(u0 + m * mw, (v0 + v1) / 2, FW * 1.2, v1 - v0, FP, fc);
+          if (tall) fb(tm, vT, u1 - u0, FW, FP, fc);
+          if (shop && bare) {
+            fb(tm, v0 / 2, (u1 - u0) + 0.1, v0, 0.07, 0x3b3a38);            // stall riser
+          } else if (bare) {
+            fb(tm, v0 - 0.045, (u1 - u0) + 0.16, 0.09, 0.13, o.sillCol);
+            fb(tm, v0 - 0.12, (u1 - u0) + 0.04, 0.06, 0.035, o.sillStain);   // the drip stain under a sill
+          }
+        }
+      }
+    }
+
+    // ---- merge each interior kind into one mesh ------------------------
+    const meshes = {};
+    for (const K in kinds) {
+      const k = kinds[K];
+      if (!k.i.length) continue;
+      const g2 = new THREE_.BufferGeometry();
+      g2.setAttribute("position", new THREE_.Float32BufferAttribute(k.p, 3));
+      g2.setAttribute("normal", new THREE_.Float32BufferAttribute(k.n, 3));
+      g2.setAttribute("color", new THREE_.Float32BufferAttribute(k.c, 3));
+      g2.setIndex(k.i);
+      g2.computeBoundingSphere();
+      const m = new THREE_.Mesh(g2, G[K]);
+      m.castShadow = false; m.receiveShadow = K !== "lit";
+      m.name = "island-glass-" + K;
+      o.group.add(m);
+      meshes[K] = { mesh: m, orig: Float32Array.from(k.p) };
+    }
+    // a pane is shattered by collapsing its quads to a point, restored from
+    // the copy of the original positions
+    for (const rec of panes) {
+      rec.hide = function () {
+        for (const pt of rec.parts) {
+          const mm = meshes[pt.K]; if (!mm) continue;
+          const pa = mm.mesh.geometry.attributes.position, arr = pa.array, v = pt.v * 3;
+          for (let q = 1; q < 4; q++) { arr[v + q * 3] = arr[v]; arr[v + q * 3 + 1] = arr[v + 1]; arr[v + q * 3 + 2] = arr[v + 2]; }
+          pa.needsUpdate = true;
+        }
+      };
+      rec.show = function () {
+        for (const pt of rec.parts) {
+          const mm = meshes[pt.K]; if (!mm) continue;
+          const pa = mm.mesh.geometry.attributes.position, v = pt.v * 3;
+          for (let q = 0; q < 12; q++) pa.array[v + q] = mm.orig[v + q];
+          pa.needsUpdate = true;
+        }
+      };
+    }
+    return panes;
+  }
+
   // o: { group, ox, oz, gy, w, d, storeys, fh, wt, rTop, pp, doorSide, color,
-  //      style, plats }
+  //      style, plats, shell (buckets from the shell builder), glass list,
+  //      doorHalf }
   function dressIslandFacade(o) {
-    if (!CBZ.dressFacade || !o.style) return null;
-    if (CBZ.CONFIG && CBZ.CONFIG.SURV_FACADES === false) return null;
     const THREE = window.THREE;
     const mat = CBZ.mat;
-    const deco = new Map();          // colour -> [BufferGeometry]
+    const deco = new Map();          // colour -> [BufferGeometry], in first-painted order
+    const boxes = [];                // every deco box, local [x,y,z,w,h,d], for the glazing pass
     const group = o.group, ox = o.ox, oz = o.oz, gy = o.gy;
+    const dressed = !!(CBZ.dressFacade && o.style && !(CBZ.CONFIG && CBZ.CONFIG.SURV_FACADES === false));
 
     function dbox(lx, ly, lz, bw, bh, bd, col) {
       if (!(bw > 0) || !(bh > 0) || !(bd > 0)) return;
       if (!Number.isFinite(lx + ly + lz + bw + bh + bd)) return;
       const g2 = new THREE.BoxGeometry(bw, bh, bd);
+      g2.deleteAttribute("uv");      // the finish shader works in world space; no map ever reads these
       g2.translate(lx, ly, lz);
       const key = col >>> 0;
       let list = deco.get(key);
       if (!list) { list = []; deco.set(key, list); }
       list.push(g2);
+      boxes.push([lx, ly, lz, bw, bh, bd]);
+    }
+    // the shell's own merge-able pieces (treads, slabs, landings) join the
+    // deco merge at rank 0, so they cost one draw call per colour
+    if (o.shellMerge) for (const it of o.shellMerge) {
+      const g2 = new THREE.BoxGeometry(it[3], it[4], it[5]);
+      g2.deleteAttribute("uv");
+      g2.translate(it[0], it[1], it[2]);
+      it.push(g2);
     }
     function addMesh(geo, col, lx, ly, lz, emissive) {
-      const m = new THREE.Mesh(geo, emissive ? mat(col, { emissive: col, ei: 0.8 }) : mat(col));
+      const m = new THREE.Mesh(geo, emissive ? mat(col, { emissive: col, ei: 0.8 }) : finishMat(col, 0, gy));
       m.position.set(lx, ly, lz);
       m.castShadow = !emissive; m.receiveShadow = true;
       group.add(m);
@@ -301,29 +669,56 @@
       plaque: function () {}, seal: function () {},
     };
 
-    const def = CBZ.dressFacade(ctx);
+    const def = dressed ? CBZ.dressFacade(ctx) : null;
 
-    // ---- flush the merged deco buckets (one mesh per colour) --------------
+    // ---- the windows, read off what the grammar left open ------------------
+    const fh = (CBZ.hash01 ? CBZ.hash01(ox, oz, 0xf4a3) : 0.3);
+    const frameCol = o.frameCol != null ? o.frameCol
+      : [0xe6e1d6, 0x34312d, 0x6b6f73, 0xe6e1d6, 0x2c3a33][(fh * 5) | 0];
+    glazeBuilding({
+      group: group, ox: ox, oz: oz, gy: gy, w: o.w, d: o.d, storeys: o.storeys,
+      fh: o.fh, doorHalf: o.doorHalf || 1.3, list: o.glassList, boxes: boxes.slice(), tower: !!o.tower,
+      dbox: dbox, frameCol: frameCol,
+      sillCol: shadeHex(0xd6cfbf, 0.94 + fh * 0.1),
+      sillStain: shadeHex(o.color, 0.72),
+    });
+
+    // ---- flush: one mesh per colour, each ranked by when it was painted ----
+    // (see THE FINISH: the rank is what settles a tie between two buckets'
+    // coplanar faces the same way every frame)
     const BGU = THREE.BufferGeometryUtils;
-    deco.forEach(function (geos, col) {
-      const m2 = mat(col);
-      if (BGU && BGU.mergeBufferGeometries && geos.length > 1) {
-        const merged = BGU.mergeBufferGeometries(geos);
-        for (const g2 of geos) g2.dispose();
-        if (merged) {
-          const m = new THREE.Mesh(merged, m2);
-          m.castShadow = false; m.receiveShadow = true;
-          group.add(m);
-        }
-      } else {
-        for (const g2 of geos) {
-          const m = new THREE.Mesh(g2, m2);
-          m.castShadow = false; m.receiveShadow = true;
-          group.add(m);
-        }
+    function flush(geos, m2, cast) {
+      if (!geos.length) return null;
+      const merged = geos.length > 1 && BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(geos) : null;
+      if (merged) for (const g2 of geos) g2.dispose();
+      const list = merged ? [merged] : geos;
+      let last = null;
+      for (const g2 of list) {
+        last = new THREE.Mesh(g2, m2);
+        last.castShadow = !!cast; last.receiveShadow = true;
+        group.add(last);
       }
+      return last;
+    }
+    let rank = 0;
+    deco.forEach(function (geos, col) {
+      rank++;
+      flush(geos, isGlassHex(col) ? glassBoxMat(col, rank) : finishMat(col, rank, gy), false);
     });
     deco.clear();
+    if (o.shellMerge && o.shellMerge.length) {
+      const byCol = new Map();
+      for (const it of o.shellMerge) {
+        const k = it[6] + (it[7] ? "|los" : "");
+        let b = byCol.get(k);
+        if (!b) { b = { col: it[6], los: it[7], geos: [] }; byCol.set(k, b); }
+        b.geos.push(it[8]);
+      }
+      byCol.forEach(function (b) {
+        const m = flush(b.geos, finishMat(b.col, 0, gy), b.los);
+        if (m && b.los) CBZ.losBlockers.push(m);
+      });
+    }
     return def;
   }
 
@@ -359,73 +754,211 @@
       return m;
     }
 
+    /* ---- THE ISLAND'S SKIN: one shared detail-texture law -------------------
+       The ground was flat hexes — 0x53a84e grass, 0xe6d49a sand, 0x33363d
+       asphalt — and because this pipeline treats a hex as LINEAR and grades
+       it bright, the grass photographed near-white mint and the beach cream.
+       Now every ground surface is (a) a VERTEX COLOUR that is the real linear
+       albedo of the thing, varied across the island by low-frequency noise
+       (lush, olive and sun-dried grass; dry, damp and wet sand), times (b)
+       one of world/textures_surface.js's tiling colour maps, NORMALISED to
+       average 1.0 (material.color = 1 / the map's mean linear colour), so the
+       map adds grain — blades, sand ripples, aggregate — without moving the
+       colour the vertex authored. UVs are world metres / tile, so a tile is
+       the same size on the grass, the hills and the volcano. With textures
+       off (tier 0), surfaceMaps answers null, the colour stays white and the
+       vertex colours alone are still the right island. */
+    const h01g = CBZ.hash01 || function () { return 0.5; };
+    function vnoise(x, z, cell, salt) {
+      const gx = x / cell, gz = z / cell, ix = Math.floor(gx), iz = Math.floor(gz);
+      const fx = gx - ix, fz = gz - iz, ux = fx * fx * (3 - 2 * fx), uz = fz * fz * (3 - 2 * fz);
+      const a = h01g(ix, iz, salt), b = h01g(ix + 1, iz, salt), c = h01g(ix, iz + 1, salt), d = h01g(ix + 1, iz + 1, salt);
+      return a + (b - a) * ux + (c - a) * uz + (a - b - c + d) * ux * uz;
+    }
+    function fbm2(x, z, cell, salt) {
+      return vnoise(x, z, cell, salt) * 0.6 + vnoise(x, z, cell * 0.43, salt + 7) * 0.28 + vnoise(x, z, cell * 0.17, salt + 13) * 0.12;
+    }
+    const _mapMean = new Map();
+    function mapMean(tex) {
+      if (_mapMean.has(tex)) return _mapMean.get(tex);
+      let out = [1, 1, 1];
+      try {
+        const img = tex.image, N = img.width;
+        const d = img.getContext("2d").getImageData(0, 0, N, N).data;
+        const s2l = function (v) { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let i = 0; i < d.length; i += 4 * 7) { r += s2l(d[i]); g += s2l(d[i + 1]); b += s2l(d[i + 2]); n++; }
+        out = [r / n, g / n, b / n];
+      } catch (e) { /* headless: no canvas pixels — leave the map un-normalised */ }
+      _mapMean.set(tex, out);
+      return out;
+    }
+    // a Lambert that wears `surface`'s colour map, normalised to mean 1
+    function skinMat(surface, extra) {
+      const m = new THREE.MeshLambertMaterial(Object.assign({ color: 0xffffff, vertexColors: true }, extra || {}));
+      const maps = CBZ.surfaceMaps ? CBZ.surfaceMaps(surface, { repeat: 1 }) : null;
+      if (maps && maps.map) {
+        m.map = maps.map;
+        const mean = mapMean(maps.map);
+        m.color.setRGB(1 / Math.max(0.02, mean[0]), 1 / Math.max(0.02, mean[1]), 1 / Math.max(0.02, mean[2]));
+      }
+      return m;
+    }
+    // world-metre planar UVs for a geometry already in world XZ (+ offset)
+    function worldUV(g, tile, ox, oz, toWorld) {
+      const p = g.attributes.position, uv = new Float32Array(p.count * 2);
+      const w = { x: 0, z: 0 };
+      for (let i = 0; i < p.count; i++) {
+        toWorld(p, i, w);
+        uv[i * 2] = (w.x + ox) / tile; uv[i * 2 + 1] = (w.z + oz) / tile;
+      }
+      g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    }
+    /* THE GRASS, as a linear albedo at a world point. Tropical turf: a deep
+       lush green, olive patches, and a few sun-dried straw patches, over a
+       fine mottle. Shared by the plain, the hills and the volcano's skirt, so
+       the three never disagree at a seam. `edge` 0..1 blends toward the sandy
+       fringe where the grass gives out onto the beach. */
+    const GR_LUSH = [0.040, 0.085, 0.020], GR_OLIVE = [0.062, 0.085, 0.024], GR_DRY = [0.120, 0.108, 0.045];
+    const GR_SANDY = [0.150, 0.125, 0.070];
+    function grassColorAt(x, z, out) {
+      const olive = fbm2(x, z, 38, 0x6a01);
+      const dry = Math.max(0, Math.min(1, (fbm2(x + 71, z - 13, 29, 0x6a02) - 0.58) * 4.2));
+      const mott = 0.84 + 0.32 * vnoise(x, z, 2.3, 0x6a03);
+      const o = Math.max(0, Math.min(1, (olive - 0.35) * 2.2));
+      for (let k = 0; k < 3; k++) {
+        let v = GR_LUSH[k] + (GR_OLIVE[k] - GR_LUSH[k]) * o;
+        v += (GR_DRY[k] - v) * dry * 0.85;
+        out[k] = v * mott;
+      }
+      const dist = Math.hypot(x - cx, z - cz);
+      const e = Math.max(0, Math.min(1, (dist - (R - 7)) / 7));
+      if (e > 0) { const s = e * e * (3 - 2 * e); for (let k = 0; k < 3; k++) out[k] += (GR_SANDY[k] * mott - out[k]) * s * 0.85; }
+      return out;
+    }
+    const GRASS_TILE = 3.2;
+    const grassMat = skinMat("grass");
+    grassMat.name = "survival-grass";
+    /* THE TILE WAS A CHECKERBOARD. One 3.2 m repeat of a map with clumps in
+       it is a grid you can count from the beach and a chessboard from a boat
+       (the mipmaps average each tile to its own blotch). A second read of the
+       same map, rotated 37 degrees at 3.2x the size, averaged in, breaks the
+       period without a second texture or a second draw. */
+    if (grassMat.map) {
+      grassMat.onBeforeCompile = function (sh) {
+        sh.fragmentShader = sh.fragmentShader.replace("#include <map_fragment>",
+          "#ifdef USE_MAP\n" +
+          "  vec2 uvB = mat2(0.8, -0.6, 0.6, 0.8) * vUv * 0.3125 + vec2(0.37, 0.11);\n" +
+          "  vec4 texelColor = mix(texture2D(map, vUv), texture2D(map, uvB), 0.5);\n" +
+          "  texelColor = mapTexelToLinear(texelColor);\n" +
+          "  diffuseColor *= texelColor;\n" +
+          "#endif");
+      };
+      grassMat.customProgramCacheKey = function () { return "survival-grass-2tap"; };
+    }
+
     // ---- hills / mountain (the high-ground height field) ----
     const hills = [
-      { x: cx, z: cz, r: 36, peak: 26 },          // central refuge mountain
+      { x: cx, z: cz, r: 36, peak: 30 },          // central refuge mountain (the volcano)
       { x: cx - 52, z: cz - 30, r: 20, peak: 9 },
       { x: cx + 48, z: cz + 40, r: 22, peak: 11 },
       { x: cx + 40, z: cz - 48, r: 16, peak: 7 },
     ];
     /* ---- THE VOLCANO IS THE MOUNTAIN, NOT A CONE WITH LAVA ON IT --------
-       hills[0] is the island's refuge AND the thing that erupts, and it was
-       a nine-sided ConeGeometry with a linear height field, a grass skirt
-       and a snow cap. Photographed in daylight it was a WHITE PYRAMID; under
-       the eruption's warm sun it went peach. Nothing about it said volcano.
+       hills[0] is the island's refuge AND the thing that erupts. ONE function,
+       volcanoHeightAt, is read by BOTH the mesh below and CBZ.floorAt (via
+       groundHeightAt), so the walkable field is the drawn surface to the
+       millimetre — crater, breach and barrancos included.
 
-       What replaces it is one function — volcanoHeightAt — that the mesh and
-       CBZ.floorAt BOTH read, so the walkable field is the drawn surface to
-       the millimetre. Three things make it a stratovolcano instead of a cone:
+       2026-09-27, OWNER: "when a volcano looks dumb". Photographed from the
+       town the old field was a smooth brown BELL: peak * t^1.3 is so close to
+       a straight cone that the flanks read as one slope, the rim was a perfect
+       circle at one height (a pudding lip), and +-1.15 m of sine corrugation
+       on a 64-sector grid under Gouraud shading was invisible past 40 m. What
+       makes a stratovolcano read from 150 m, in the order the eye takes it:
 
-         CONCAVE FLANKS. peak * t^1.3, steep off the rim (about 45 deg) and
-         easing into the skirt. A cone is t^1: one slope everywhere, which is
-         the silhouette of a party hat and of nothing in geology.
+         THE PROFILE. Concave, and markedly so: peak * t^1.65 — about 58 deg
+         just under the rim, 30 deg at mid flank, a long ~10 deg apron into the
+         island plate. Mayon, Fuji and Agua are all this curve (the log
+         profile of a pile of ejecta that steepens toward its source). The
+         summit is 30 m now (was 26): the mountain is the island's landmark
+         and it stood shorter than the town's mid-rise towers.
 
-         A CRATER. A bowl of radius 6.2 m and 2.85 m deep INSIDE the rim, so
-         the rim — not the centre — is the summit and hills[0].peak still
-         means what every reader in systems/disasters.js thinks it means.
-         The eruption's vent apron (volcanofx ventGlow, r 3.8-8.4, draped on
-         groundAt) now sits in a bowl instead of balancing on a point, and
-         the lava's fall lines start inside it and pour over the rim.
+         THE RIM. Not one height. Three slow harmonics give it a skyline
+         (+-1 m), and a BREACH — one sector where the crater wall failed —
+         drops it ~2.2 m and carries on down the flank as the biggest valley
+         on the mountain. That notch is the single strongest "crater" cue in a
+         silhouette. The notch floor stays above the crater floor, so the
+         crater is still a bowl (and still far above any tsunami surge).
 
-         BARRANCOS. The radial gullies every ash cone wears, +-1.15 m at
-         mid-flank and fading to nothing at both the rim and the base, so
-         nothing here is a cliff and the skirt still meets the island plate
-         flush. They are two out-of-phase harmonics (12 and 7) with a slow
-         radial drift: irregular spacing, no ruler. lavaFlow's fall line
-         hunts the lowest of seven probes, so it finds these and comes down
-         the mountain in channels — which is what a barranco is for.
+         THE BARRANCOS. Radial valleys are V-shaped and narrow, ridges between
+         them broad and rounded. So the corrugation is ASYMMETRIC: the negative
+         lobe is raised to a power (deep, tight valleys), the positive lobe is
+         flattened (broad interfluves), +-2.3 m at their deepest, born right
+         under the rim and fading to nothing at the base — the island plate
+         still meets the skirt flush and nothing outside r = 36 moves. A finer
+         31st harmonic cuts rills into the steep upper cone. lavaFlow's fall
+         line hunts the lowest probe, so the flows now come down IN these.
 
        Deterministic: the only randomness is CBZ.hash01 off the mountain's
        own fixed centre, so the island stays byte-identical per seed. */
     const VOL = hills[0];
     VOL.volcano = true;
     const VOL_RIM = 6.2;                    // crater rim radius (m)
-    const VOL_BOWL = 2.85;                  // crater floor, metres below the rim
+    const VOL_BOWL = 3.6;                   // crater floor, metres below the nominal rim
     const VOL_FLANK = VOL.r - VOL_RIM;      // horizontal run, rim -> base
-    const VOL_GULLY = 1.15;                 // barranco amplitude (m)
-    const VOL_P1 = (CBZ.hash01 ? CBZ.hash01(VOL.x, VOL.z, 0x5601) : 0.31) * 6.2831853;
-    const VOL_P2 = (CBZ.hash01 ? CBZ.hash01(VOL.x, VOL.z, 0x5602) : 0.77) * 6.2831853;
-    // the gully term alone, so the mesh can shade ridges and channels apart
+    const VOL_GULLY = 2.3;                  // barranco depth at its deepest (m)
+    const VOL_POW = 1.65;                   // profile concavity
+    const VOL_BREACH_D = 2.2;               // how far the breached sector drops
+    const _vh = CBZ.hash01 || function (a, b, s) { return ((s * 0.618034) % 1 + 1) % 1; };
+    const VOL_P1 = _vh(VOL.x, VOL.z, 0x5601) * 6.2831853;
+    const VOL_P2 = _vh(VOL.x, VOL.z, 0x5602) * 6.2831853;
+    const VOL_P3 = _vh(VOL.x, VOL.z, 0x5603) * 6.2831853;
+    const VOL_P4 = _vh(VOL.x, VOL.z, 0x5608) * 6.2831853;
+    // the breach faces the town side the island is usually seen from
+    // (-x / +z, away from the sun), wobbled per seed so it is not ruled
+    const VOL_BREACH_A = 2.45 + (_vh(VOL.x, VOL.z, 0x5609) - 0.5) * 0.9;
+    VOL.rim = VOL_RIM; VOL.bowl = VOL_BOWL; VOL.breach = VOL_BREACH_A;
+    function angDiff(a, b) {
+      let d = (a - b) % 6.2831853;
+      if (d > 3.14159265) d -= 6.2831853; else if (d < -3.14159265) d += 6.2831853;
+      return d;
+    }
+    // the rim's own skyline, in metres about VOL.peak (the notch included)
+    function volcanoRimAt(ang) {
+      const db = angDiff(ang, VOL_BREACH_A) / 0.34;
+      return 0.55 * Math.sin(2 * ang + VOL_P3) + 0.32 * Math.sin(3 * ang + VOL_P4)
+        + 0.16 * Math.sin(7 * ang + VOL_P1)
+        - VOL_BREACH_D * Math.exp(-db * db);
+    }
+    // the gully ENVELOPE: nil at the rim and the base, deepest a third down
     function volcanoGully(d) {
       if (d <= VOL_RIM || d >= VOL.r) return 0;
       const u = (d - VOL_RIM) / VOL_FLANK;      // 0 at the rim, 1 at the base
-      return 4 * u * (1 - u);                   // envelope: nil at both ends
+      return Math.sin(3.14159265 * Math.pow(u, 0.62));
     }
+    // the SIGNED corrugation, -1 (valley floor) .. ~+0.45 (ridge crown)
     function volcanoLobe(d, ang) {
       const drift = 0.32 * Math.sin(d * 0.085);
-      return 0.62 * Math.sin(12 * ang + VOL_P1 + drift)
-           + 0.38 * Math.sin(7 * ang + VOL_P2 - drift * 1.7);
+      const c = 0.62 * Math.sin(12 * ang + VOL_P1 + drift)
+              + 0.38 * Math.sin(7 * ang + VOL_P2 - drift * 1.7);
+      return c < 0 ? -Math.pow(-c, 1.9) : 0.45 * Math.pow(c, 0.75);
     }
     function volcanoHeightAt(d, ang) {
       if (d >= VOL.r) return 0;
+      const rimY = VOL.peak + volcanoRimAt(ang);
       if (d <= VOL_RIM) {
-        // the crater: flat-ish floor, steep inner wall, rim at exactly peak
+        // the crater: flat-ish floor, steep inner wall up to the ragged rim
         const u = d / VOL_RIM;
-        return VOL.peak - VOL_BOWL * (1 - Math.pow(u, 2.2));
+        const floorY = VOL.peak - VOL_BOWL;
+        return floorY + (rimY - floorY) * Math.pow(u, 2.4);
       }
       const t = (VOL.r - d) / VOL_FLANK;        // 1 at the rim, 0 at the base
-      const h = VOL.peak * Math.pow(t, 1.3)
-        + VOL_GULLY * volcanoGully(d) * volcanoLobe(d, ang);
+      const env = volcanoGully(d);
+      // fine rills on the steep upper cone only
+      const rill = 0.35 * Math.sin(31 * ang + VOL_P2 * 3 + d * 0.2) * env * t;
+      const h = rimY * Math.pow(t, VOL_POW)
+        + env * (VOL_GULLY * volcanoLobe(d, ang) + rill);
       return h > 0 ? h : 0;
     }
     /* ---- SURV_SEABED — THE ISLAND GETS A BOTTOM ---------------------------
@@ -751,9 +1284,21 @@
        side, so a frame of camera travel is nothing. */
     const oceanGrid = oceanGeo.userData && oceanGeo.userData.waterDisasterGrid;
     const oceanPitch = oceanGrid ? oceanGrid.span / oceanGrid.segments : 16;
+    /* THE DRY DISC (water_spec.js uDwDryDisc): the swell under the island
+       rose through the plain and the upper beach as flickering stripes. Sink
+       the sheet inside the radius where the beach comes down to 0.35 m over
+       calm sea, and only while the sea is calm: a flood (surge over half a
+       metre) turns it off, because then the water on the island is real. */
+    let dryR = R;
+    for (let r = R * 0.6; r < R + 60; r += 0.5) { if (groundHeightAt(cx + r, cz) < OCEAN_Y + 0.35) { dryR = r; break; } }
+    const dryU = oceanMat.uniforms && oceanMat.uniforms.uDwDryDisc;
     if (CBZ.onUpdate) CBZ.onUpdate(47.9, function () {
       if (!arena || !CBZ.game || !CBZ.islandModeOn(CBZ.game.mode)) return;
       ocean.position.y = arena_meanY();
+      if (dryU) {
+        const sg = CBZ.waterSurge ? CBZ.waterSurge() : 0;
+        dryU.value.set(cx, cz, dryR, 3 * Math.max(0, Math.min(1, 1 - Math.max(0, sg) / 0.5)));
+      }
       const cam = CBZ.camera;
       if (cam) {
         ocean.position.x = cx + Math.round((cam.position.x - cx) / oceanPitch) * oceanPitch;
@@ -1160,7 +1705,10 @@
       const base = new Float32Array(vn * 3);   // authored colour, never mutated
       const vh = new Float32Array(vn);         // vertex height (the profile)
       const vth = new Float32Array(vn);        // vertex theta (alongshore phase)
-      const DRY = new THREE.Color(0xe6d49a), BED = new THREE.Color(0xcdbb8f);
+      // DRY is the sand's real linear albedo (the normalised sand map adds
+      // ripples and grain on top); BED stays the seabed mesh's own tone so
+      // the shared outer rim is seamless in colour.
+      const DRY = new THREE.Color().setRGB(0.40, 0.325, 0.205), BED = new THREE.Color(0xcdbb8f);
       const c = new THREE.Color();
       for (let i = 0; i < vn; i++) {
         const lx = sa[i * 3], ly = sa[i * 3 + 1];
@@ -1174,8 +1722,11 @@
         // shared edge is invisible in colour as well as in position.
         const wx = cx + lx, wz = cz - ly;
         const grain = 1 + ((CBZ.hash01 ? CBZ.hash01(wx * 1.7, wz * 1.7, 0xb31c) : 0.5) - 0.5) * 0.11;
-        const drift = 1 + 0.05 * Math.sin(vth[i] * 7 + dist * 0.31);
-        c.copy(DRY).lerp(BED, ss(SHORE_R - 5, SHORE_R - 1, dist)).multiplyScalar(grain * drift);
+        const drift = 1 + 0.05 * Math.sin(vth[i] * 7 + dist * 0.31) + (fbm2(wx, wz, 14, 0xb31d) - 0.5) * 0.22;
+        // the damp band: sand the swash reached recently stays darker for a
+        // metre above the live waterline (the live tick darkens the rest)
+        const damp = 1 - 0.25 * (1 - ss(OCEAN_Y + 0.1, OCEAN_Y + 0.6, h));
+        c.copy(DRY).multiplyScalar(damp).lerp(BED, ss(SHORE_R - 5, SHORE_R - 1, dist)).multiplyScalar(grain * drift);
         base[i * 3] = c.r; base[i * 3 + 1] = c.g; base[i * 3 + 2] = c.b;
       }
       function ss(e0, e1, x2) { let t = (x2 - e0) / (e1 - e0); t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); }
@@ -1183,7 +1734,8 @@
       shoreGeo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
       shoreGeo.computeVertexNormals();
       shoreGeo.computeBoundingSphere();
-      const shoreMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+      worldUV(shoreGeo, 2.6, cx, cz, function (pp, i, w) { w.x = pp.getX(i); w.z = -pp.getY(i); });
+      const shoreMat = skinMat("sand");
       shoreMat.name = "survival-beach-shore";     // no water/ocean/sea in the name (test contract)
       const shore = new THREE.Mesh(shoreGeo, shoreMat);
       shore.rotation.x = -Math.PI / 2; shore.position.set(cx, 0, cz);
@@ -1217,9 +1769,20 @@
         wetLive: shoreRig ? 1 : 0,
       };
     })();
-    // clean solid green — the old two-tone checker tiling read as a debug texture
-    const island = new THREE.Mesh(new THREE.CircleGeometry(R, 64),
-      new THREE.MeshLambertMaterial({ color: 0x53a84e }));
+    // THE GRASS PLAIN — same flat disc at y 0, now a fine polar grid so the
+    // vertex colour can carry the island's patchwork (grassColorAt above),
+    // wearing the normalised grass map at GRASS_TILE metres a repeat.
+    const islandGeo = new THREE.RingGeometry(0.4, R, 128, 40);
+    {
+      const p = islandGeo.attributes.position, n = p.count, col = new Float32Array(n * 3), c3 = [0, 0, 0];
+      for (let i = 0; i < n; i++) {
+        grassColorAt(cx + p.getX(i), cz - p.getY(i), c3);
+        col[i * 3] = c3[0]; col[i * 3 + 1] = c3[1]; col[i * 3 + 2] = c3[2];
+      }
+      islandGeo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      worldUV(islandGeo, GRASS_TILE, cx, cz, function (pp, i, w) { w.x = pp.getX(i); w.z = -pp.getY(i); });
+    }
+    const island = new THREE.Mesh(islandGeo, grassMat);
     island.rotation.x = -Math.PI / 2; island.position.set(cx, 0, cz);
     island.receiveShadow = true; root.add(island);
 
@@ -1235,101 +1798,180 @@
        three green hills sat in the middle of it. `userData.coat` is that file's
        author opt-in — the twin of its `noCoat` opt-out — and it says the one
        thing a size test cannot work out on its own: this is the ground. */
+    /* THE THREE OUTLYING HILLS. They were 6-sided ConeGeometry — hexagonal
+       party hats, and not even the surface you walked on: groundHeightAt
+       says these are ROUND linear cones, peak * (1 - d/r). This mesh is that
+       function drawn (48 sectors, 14 rings, a skirt ring buried just under
+       the plain), in the plain's own grass so the hill grows out of the
+       island, with the crown worn thin to bare soil and rock where the turf
+       would really give out. */
+    const HILL_ROCK = [0.085, 0.070, 0.050];
     hills.forEach((hl) => {
       if (hl.volcano) return;     // the mountain builds itself, below
-      const cone = new THREE.Mesh(new THREE.ConeGeometry(hl.r, hl.peak, 6), mat(0x7faa5e));
-      cone.position.set(hl.x, hl.peak / 2, hl.z);
+      const SEC = 48, RINGS = 14;
+      const VC = 1 + (RINGS + 1) * SEC;
+      const pos = new Float32Array(VC * 3), col = new Float32Array(VC * 3), c3 = [0, 0, 0];
+      function put(o, lx, ly, lz) {
+        pos[o] = lx; pos[o + 1] = ly; pos[o + 2] = lz;
+        const wx = hl.x + lx, wz = hl.z + lz;
+        grassColorAt(wx, wz, c3);
+        const u = ly / hl.peak;                           // 0 foot .. 1 crown
+        const bare = Math.max(0, Math.min(1, (u - 0.55 + (vnoise(wx, wz, 3.1, 0x6b01) - 0.5) * 0.35) * 2.4));
+        for (let k = 0; k < 3; k++) col[o + k] = c3[k] + (HILL_ROCK[k] * (0.8 + 0.4 * vnoise(wx, wz, 1.3, 0x6b02)) - c3[k]) * bare * 0.8;
+      }
+      put(0, 0, hl.peak, 0);
+      for (let k = 1; k <= RINGS + 1; k++) {
+        const skirt = k === RINGS + 1;
+        const d = skirt ? hl.r + 0.6 : hl.r * (k / RINGS);
+        for (let s = 0; s < SEC; s++) {
+          const ang = (s / SEC) * Math.PI * 2;
+          const y = skirt ? -0.3 : Math.max(0, hl.peak * (1 - d / hl.r));
+          put((1 + (k - 1) * SEC + s) * 3, Math.cos(ang) * d, y, Math.sin(ang) * d);
+        }
+      }
+      const idx = [];
+      const vi = function (k, s) { return 1 + (k - 1) * SEC + (s % SEC); };
+      for (let s = 0; s < SEC; s++) idx.push(0, vi(1, s + 1), vi(1, s));
+      for (let k = 1; k <= RINGS; k++) for (let s = 0; s < SEC; s++) {
+        const a = vi(k, s), b = vi(k, s + 1), c = vi(k + 1, s + 1), e = vi(k + 1, s);
+        idx.push(a, c, e, a, b, c);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      geo.setIndex(idx);
+      geo.computeVertexNormals();
+      worldUV(geo, GRASS_TILE, hl.x, hl.z, function (pp, i, w) { w.x = pp.getX(i); w.z = pp.getZ(i); });
+      const cone = new THREE.Mesh(geo, grassMat);
+      cone.position.set(hl.x, 0, hl.z);
       cone.castShadow = true; cone.receiveShadow = true;
       cone.userData.coat = true;
       root.add(cone);
     });
 
     /* ---- THE VOLCANO MESH — the height field, drawn --------------------
-       One polar grid, 64 sectors by 30 rings, and EVERY vertex is placed by
+       One polar grid, 128 sectors by 36 rings, and EVERY vertex is placed by
        volcanoHeightAt. There is no second opinion about where the mountain
-       is: what you see is the surface you walk on, crater and gullies
-       included. Rings are packed tight inside the crater (7 of them across
-       6.2 m) because that is the part with shape in it.
+       is: what you see is the surface you walk on, crater, breach and
+       barrancos included. 128 sectors (was 64) because a V-shaped barranco
+       is a third of a 30-degree period, and two vertices across a valley is
+       a crease, not a valley. Rings pack toward the rim, where the profile
+       bends hardest.
 
-       Colour is per-vertex, not per-mesh — that is the whole reason the old
-       grass-skirt and snow-cap cones existed, and they go away with it.
-       AUTHORED DARK ON PURPOSE: this pipeline treats a material colour as
-       LINEAR, then ACES-tone-maps and grades it (core/renderer.js), so a hex
-       lands on screen far brighter than it reads in the editor — the old
-       0x8a8175 photographed at rgb(238,234,227), i.e. WHITE. Basaltic
-       scoria at the rim, brown scree down the flank, and the island plate's
-       own 0x53a84e at the base so the cone grows out of the island instead
-       of being parked on it.
-
-       The last ring is pushed out past the footprint and DOWN below y=0: it
-       is buried under the island plate, and it is there so the base edge
-       cannot show a seam or z-fight with the plate it lands on. */
+       THE SKIN IS PER PIXEL. It was Lambert (lit per VERTEX in r128) with
+       the dirt map: a smooth brown gradient that Gouraud shading ironed flat,
+       so the gullies and the texture vanished past forty metres and the cone
+       read as a bell. Now it is a MeshStandardMaterial whose vertex colour is
+       the geology (oxidised red scoria at the rim, black-grey tephra on the
+       cone, fresh dark deposits in the valley floors and paler weathered
+       ridges, the island's own turf climbing the lower flank up a ragged line)
+       and whose fragment shader adds, in world space around the vent:
+         - RADIAL STREAKS: ash and scree run straight down a cone, so the
+           albedo and the relief are stretched along the fall line (the one
+           texture cue that says "this pile came out of that hole");
+         - SCORIA GRAIN: two octaves of clinker at 0.2-0.6 m;
+         - a RELIEF NORMAL from both, so the streaks catch the sun;
+         - hollow occlusion on the valley floors (sky light only);
+         - the plain's own grass map where the turf is, so the skirt and the
+           island plate are the same lawn.
+       Every detail term fades with distance so the far cone does not fizz.
+       Colours are LINEAR albedos (see the linear-hex trap): basalt really is
+       this dark. The last ring is pushed out past the footprint and DOWN
+       below y=0, buried under the island plate so the base has no seam. */
+    const VOL_FUMAROLES = [];
     (function buildVolcano() {
-      const SEC = 64, CR = 7, FR = 22;
+      const SEC = 128, CR = 8, FR = 27;
       const RINGS = CR + FR + 1;                 // last one is the buried skirt
       const ringR = new Float32Array(RINGS + 1);
-      for (let k = 1; k <= CR; k++) ringR[k] = VOL_RIM * (k / CR);
-      for (let k = 1; k <= FR; k++) ringR[CR + k] = VOL_RIM + VOL_FLANK * Math.pow(k / FR, 0.94);
+      for (let k = 1; k <= CR; k++) ringR[k] = VOL_RIM * Math.pow(k / CR, 0.8);
+      for (let k = 1; k <= FR; k++) ringR[CR + k] = VOL_RIM + VOL_FLANK * Math.pow(k / FR, 1.18);
       ringR[RINGS] = VOL.r + 0.9;
 
       const VC = 1 + RINGS * SEC;
       const pos = new Float32Array(VC * 3);
       const col = new Float32Array(VC * 3);
+      const aux = new Float32Array(VC * 2);      // x turf weight, y hollow
 
-      // rim scoria -> scree -> ash soil -> scrub -> the island's own green
+      // linear albedos down the cone: u 0 = rim, 1 = base
       const RAMP = [
-        [0.00, 0x171310], [0.13, 0x1e1815], [0.33, 0x2d241b],
-        [0.58, 0x3e3020], [0.80, 0x3f5c2c], [1.00, 0x53a84e],
+        [0.00, [0.050, 0.024, 0.016]],           // oxidised scoria on the lip
+        [0.10, [0.034, 0.030, 0.028]],           // black-grey tephra
+        [0.40, [0.052, 0.047, 0.041]],
+        [0.70, [0.078, 0.066, 0.049]],           // weathered, browning
+        [1.00, [0.090, 0.080, 0.050]],
       ];
-      const CRATER_C = 0x100d0b, SNOW_C = 0xe8eef6;
-      /* THE SNOW IS A BAND, NOT A HAT. First pass put the line at 0.74 peak
-         and blended to 0.9 white, and the photograph came back with the same
-         white cone the old snow-cap mesh drew — the one thing this rebuild
-         exists to kill. High (0.80), ragged (+-1.5 m of hashed line) and
-         thin (0.62 max), it reads as old snow caught below a dark crown. */
-      const SNOW_Y = VOL.peak * 0.80;
-      const _a = new THREE.Color(), _b = new THREE.Color(), _s = new THREE.Color(SNOW_C);
+      const CRATER_C = [0.020, 0.017, 0.015];
+      const SULPHUR = [0.200, 0.160, 0.030];
       const h01 = CBZ.hash01 || function () { return 0.5; };
       function cl01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
       function smooth(e0, e1, v) { const t = cl01((v - e0) / (e1 - e0)); return t * t * (3 - 2 * t); }
+      const _g3 = [0, 0, 0];
 
-      function paint(d, ang, y, o) {
+      /* THE FUMAROLES: two steaming vents, one on the inner crater wall and
+         one just outside the rim. Their ground wears a sulphur stain, and
+         world/volcanofx.js's V.fumarole breathes a wisp off each at rest. */
+      for (let k = 0; k < 2; k++) {
+        const a = VOL_BREACH_A + 2.2 + k * 1.9 + (h01(VOL.x, VOL.z, 0x560a + k) - 0.5) * 0.6;
+        const d = k === 0 ? VOL_RIM * 0.72 : VOL_RIM + 1.6;
+        const fx = VOL.x + Math.cos(a) * d, fz = VOL.z + Math.sin(a) * d;
+        VOL_FUMAROLES.push({ x: fx, z: fz, y: volcanoHeightAt(d, a), a: a, d: d });
+      }
+      VOL.fumaroles = VOL_FUMAROLES;
+
+      function paint(d, ang, y, o, ax) {
+        const wx = VOL.x + Math.cos(ang) * d, wz = VOL.z + Math.sin(ang) * d;
+        let sul = 0;
+        for (let f = 0; f < VOL_FUMAROLES.length; f++) {
+          const F = VOL_FUMAROLES[f];
+          const q = Math.hypot(wx - F.x, wz - F.z) / 2.4;
+          sul = Math.max(sul, Math.exp(-q * q) * (0.7 + 0.3 * vnoise(wx, wz, 0.9, 0x560c)));
+        }
+        ax[0] = 0; ax[1] = 0;
         if (d <= VOL_RIM) {
-          // the crater: dark all the way, and darkest at the floor. An active
-          // vent holds no snow — that is the point of the bowl being here.
-          o.setHex(CRATER_C).lerp(_b.setHex(RAMP[0][1]), cl01(d / VOL_RIM));
+          // the crater: dark all the way, darkest at the floor
+          const f = cl01(d / VOL_RIM);
+          for (let k = 0; k < 3; k++) o[k] = CRATER_C[k] + (RAMP[0][1][k] - CRATER_C[k]) * f * f;
+          ax[1] = 0.6 * (1 - f);
         } else {
           const u = cl01((d - VOL_RIM) / VOL_FLANK);
           let i = 0;
           while (i < RAMP.length - 2 && u > RAMP[i + 1][0]) i++;
           const f = cl01((u - RAMP[i][0]) / (RAMP[i + 1][0] - RAMP[i][0]));
-          o.setHex(RAMP[i][1]).lerp(_b.setHex(RAMP[i + 1][1]), f);
-          // ridges catch the light, gullies sit in their own shadow
-          const g = volcanoLobe(d, ang) * volcanoGully(d);
-          const k = 1 + 0.16 * g + (h01(Math.cos(ang) * d, Math.sin(ang) * d, 0x5604) - 0.5) * 0.12;
-          o.multiplyScalar(k > 0.55 ? k : 0.55);
-          /* SNOW, ABOVE A RAGGED LINE, OUTSIDE THE RIM ONLY. The line itself
-             is hashed by angle so it is a coastline and not a compass circle,
-             and a narrow collar of fresh ejecta keeps the crest itself dark. */
-          const jit = h01(Math.cos(ang) * 12, Math.sin(ang) * 12, 0x5605);
-          const sf = smooth(SNOW_Y + (jit - 0.5) * 3.0, SNOW_Y + 2.2, y)
-            * smooth(6.8, 8.0, d);
-          if (sf > 0) o.lerp(_s, sf * 0.62);
+          const env = volcanoGully(d);
+          const lobe = volcanoLobe(d, ang);              // -1 valley .. +0.45 ridge
+          const valley = env * Math.max(0, -lobe);
+          const ridge = env * Math.max(0, lobe) / 0.45;
+          // valleys carry the freshest, darkest deposits; ridges weather pale
+          const k2 = (1 - 0.34 * valley + 0.2 * ridge)
+            * (1 + (h01(wx, wz, 0x5604) - 0.5) * 0.14 + (vnoise(wx, wz, 4.5, 0x5606) - 0.5) * 0.26);
+          for (let k = 0; k < 3; k++) o[k] = (RAMP[i][1][k] + (RAMP[i + 1][1][k] - RAMP[i][1][k]) * f) * Math.max(0.5, k2);
+          ax[1] = valley;
+          // the turf line: higher up the old ridges, low in the live valleys
+          const line = 0.66 - 0.16 * ridge + 0.14 * valley + (fbm2(wx, wz, 9, 0x5607) - 0.5) * 0.26;
+          const g = smooth(line, line + 0.13, u);
+          if (g > 0) {
+            grassColorAt(wx, wz, _g3);
+            for (let k = 0; k < 3; k++) o[k] += (_g3[k] - o[k]) * g;
+            ax[0] = g;
+          }
         }
+        if (sul > 0.02) for (let k = 0; k < 3; k++) o[k] += (SULPHUR[k] - o[k]) * sul * (1 - ax[0]);
       }
 
+      const _a = [0, 0, 0], _x = [0, 0];
       pos[1] = volcanoHeightAt(0, 0);
-      paint(0, 0, pos[1], _a);
-      col[0] = _a.r; col[1] = _a.g; col[2] = _a.b;
+      paint(0, 0, pos[1], _a, _x);
+      col[0] = _a[0]; col[1] = _a[1]; col[2] = _a[2]; aux[0] = _x[0]; aux[1] = _x[1];
       for (let k = 1; k <= RINGS; k++) {
         const d = ringR[k], skirt = k === RINGS;
         for (let s = 0; s < SEC; s++) {
           const ang = (s / SEC) * Math.PI * 2;
-          const o = (1 + (k - 1) * SEC + s) * 3;
+          const vi0 = 1 + (k - 1) * SEC + s, o = vi0 * 3;
           const y = skirt ? -0.55 : volcanoHeightAt(d, ang);
           pos[o] = Math.cos(ang) * d; pos[o + 1] = y; pos[o + 2] = Math.sin(ang) * d;
-          paint(skirt ? VOL.r : d, ang, y, _a);
-          col[o] = _a.r; col[o + 1] = _a.g; col[o + 2] = _a.b;
+          paint(skirt ? VOL.r : d, ang, y, _a, _x);
+          col[o] = _a[0]; col[o + 1] = _a[1]; col[o + 2] = _a[2];
+          aux[vi0 * 2] = _x[0]; aux[vi0 * 2 + 1] = _x[1];
         }
       }
 
@@ -1350,20 +1992,96 @@
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
       geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      geo.setAttribute("aVol", new THREE.BufferAttribute(aux, 2));
       geo.setIndex(new THREE.BufferAttribute(idx, 1));
       geo.computeVertexNormals();
-      /* MeshLambertMaterial does NOT support flatShading in r128 (see the
-         same note in world/volcanofx.js) — and a smooth-shaded ash cone is a
-         balloon. Phong with no specular IS Lambert, and it facets. */
-      const volMat = new THREE.MeshPhongMaterial({
-        vertexColors: true, flatShading: true, shininess: 0, specular: 0x000000,
+
+      const volMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff, vertexColors: true, roughness: 0.94, metalness: 0,
+        envMapIntensity: 0.3,
       });
+      volMat.name = "survival-volcano";
+      const gm = CBZ.surfaceMaps ? CBZ.surfaceMaps("grass", { repeat: 1 }) : null;
+      const grassTex = gm && gm.map ? gm.map : null;
+      const gMean = grassTex ? mapMean(grassTex) : [1, 1, 1];
+      const uGrass = { value: grassTex };
+      const uGrassK = { value: new THREE.Vector3(1 / Math.max(0.02, gMean[0]), 1 / Math.max(0.02, gMean[1]), 1 / Math.max(0.02, gMean[2])) };
+      const uVolC = { value: new THREE.Vector2(VOL.x, VOL.z) };
+      volMat.onBeforeCompile = function (sh) {
+        const vs = sh.vertexShader, fs0 = sh.fragmentShader;
+        if (vs.indexOf("#include <project_vertex>") < 0 || fs0.indexOf("#include <color_fragment>") < 0 ||
+            fs0.indexOf("#include <normal_fragment_maps>") < 0) return;
+        sh.uniforms.uVolC = uVolC;
+        sh.uniforms.uVolGrass = uGrass;
+        sh.uniforms.uVolGrassK = uGrassK;
+        sh.vertexShader = vs
+          .replace("#include <common>", "#include <common>\nattribute vec2 aVol;\nvarying vec2 vVol;\nvarying vec3 vVolW;\nvarying vec3 vVolN;")
+          .replace("#include <project_vertex>", "#include <project_vertex>\n" +
+            "vVol = aVol;\nvVolW = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvVolN = normalize(mat3(modelMatrix) * objectNormal);");
+        let fs = fs0.replace("#include <common>", "#include <common>\n" +
+          "varying vec2 vVol;\nvarying vec3 vVolW;\nvarying vec3 vVolN;\n" +
+          "uniform vec2 uVolC;\nuniform sampler2D uVolGrass;\nuniform vec3 uVolGrassK;\n" +
+          "float volH(vec2 p){ p = fract(p * vec2(443.897, 441.423)); p += dot(p, p.yx + 19.19); return fract((p.x + p.y) * p.x); }\n" +
+          "float volN(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);\n" +
+          "  return mix(mix(volH(i), volH(i + vec2(1.0, 0.0)), f.x), mix(volH(i + vec2(0.0, 1.0)), volH(i + vec2(1.0, 1.0)), f.x), f.y); }\n" +
+          // relief: radial streaks (long down the fall line, tight across it)
+          // plus isotropic clinker grain; `fine` fades the grain with distance
+          "float volRelief(vec2 xz, float fine){\n" +
+          "  vec2 q = xz - uVolC; float r = length(q); float a = atan(q.y, q.x);\n" +
+          "  float st = volN(vec2(a * 26.0, r * 0.16)) * 0.62 + volN(vec2(a * 71.0, r * 0.42)) * 0.38;\n" +
+          "  float gr = volN(xz * 1.9) * 0.6 + volN(xz * 5.1 + 7.3) * 0.4;\n" +
+          "  return st * 0.75 + gr * 0.45 * fine; }\n" +
+          "float volFine = 1.0; float volMid = 1.0; vec2 volG = vec2(0.0);");
+        fs = fs.replace("#include <color_fragment>", "#include <color_fragment>\n{\n" +
+          "  float dd = length(vViewPosition);\n" +
+          "  volFine = 1.0 - smoothstep(25.0, 90.0, dd);\n" +
+          "  volMid = 1.0 - smoothstep(120.0, 420.0, dd);\n" +
+          "  float veg = clamp(vVol.x, 0.0, 1.0);\n" +
+          "  float e = max(0.12, dd * 0.0022);\n" +
+          "  float h0 = volRelief(vVolW.xz, volFine);\n" +
+          "  volG = vec2(volRelief(vVolW.xz + vec2(e, 0.0), volFine) - h0, volRelief(vVolW.xz + vec2(0.0, e), volFine) - h0) / e;\n" +
+          "  float rockMod = mix(1.0, 0.62 + 0.62 * h0, volMid);\n" +
+          "  vec3 gT = texture2D(uVolGrass, vVolW.xz / " + GRASS_TILE.toFixed(3) + ").rgb;\n" +
+          "  gT = pow(gT, vec3(2.2)) * uVolGrassK;\n" +
+          "  vec3 vegMod = " + (grassTex ? "gT" : "vec3(1.0)") + ";\n" +
+          "  diffuseColor.rgb *= mix(vec3(rockMod), vegMod, veg);\n" +
+          "}");
+        fs = fs.replace("#include <normal_fragment_maps>", "#include <normal_fragment_maps>\n{\n" +
+          "  float amp = 0.55 * volMid * (1.0 - 0.7 * clamp(vVol.x, 0.0, 1.0));\n" +
+          "  vec3 nP = normalize(vVolN + vec3(-volG.x, 0.0, -volG.y) * amp);\n" +
+          "  normal = normalize(normal + mat3(viewMatrix) * (nP - vVolN));\n" +
+          "}");
+        if (fs.indexOf("#include <aomap_fragment>") >= 0) {
+          fs = fs.replace("#include <aomap_fragment>", "#include <aomap_fragment>\n" +
+            "reflectedLight.indirectDiffuse *= 1.0 - 0.45 * clamp(vVol.y, 0.0, 1.0);");
+        }
+        sh.fragmentShader = fs;
+      };
+      volMat.customProgramCacheKey = function () { return "cbzVolcanoSkin1|" + (grassTex ? 1 : 0); };
+      if (CBZ.gfxRegisterPbr) CBZ.gfxRegisterPbr(volMat);
       const mtn = new THREE.Mesh(geo, volMat);
+      mtn.name = "survival-volcano";
       mtn.position.set(VOL.x, 0, VOL.z);
       mtn.castShadow = true; mtn.receiveShadow = true;
-      mtn.userData.coat = true;       // blizzards still lay snow on the ground
+      mtn.userData.coat = true;       // blizzards and ash still lay on the ground
       root.add(mtn);
     })();
+
+    /* AT REST THE MOUNTAIN BREATHES. A faint steam wisp off each fumarole —
+       world/volcanofx.js's V.fumarole, one instanced draw — built lazily on
+       the first island frame (volcanofx loads after this file) and ticked
+       here, so no disaster has to own it. It fades itself out while an
+       eruption column is standing and back in after. */
+    let volSteam = null;
+    CBZ.onUpdate(29.5, function (dt) {
+      if (!root.visible || !CBZ.islandModeOn || !CBZ.islandModeOn(CBZ.game.mode)) return;
+      if (!volSteam) {
+        const VF = CBZ.volcanoFx;
+        if (!VF || !VF.fumarole) return;
+        volSteam = VF.fumarole({ vents: VOL_FUMAROLES, parent: root, salt: 0x5611 });
+      }
+      volSteam.update(dt);
+    });
 
     // ============================================================
     // ENTERABLE BUILDINGS
@@ -1377,8 +2095,12 @@
     const fragile = [];
     const cars = [];
     const elevators = [];   // moving tower lifts (animated each frame)
-    const PALETTE = [0xff7a6b, 0x6bb6ff, 0xffd166, 0x9ad17a, 0xc792ea, 0xff9e6b, 0x66d9c0, 0xf06b9b];
-    const GLASS = 0x9fd8ee;
+    // Real wall materials: limestone render, red brick, lime-washed render,
+    // grey stone, ochre plaster, sage paint, terracotta, cream. (The old list
+    // was sky blue, pink, mint and canary, and every grammar that lets the
+    // host wall show wore it.) Still eight, so the rng stream and the town
+    // plan are exactly what they were.
+    const PALETTE = [0xb3a48e, 0x8a5a4c, 0xd2cabb, 0x8e8a80, 0xb89c7c, 0x7e897d, 0x9e7462, 0xc9bea9];
 
     // ---- SHATTERABLE GLASS -------------------------------------------------
     // Every window pane is registered here so a quake/blast can burst it: the
@@ -1403,7 +2125,8 @@
     }
     function burstPane(gp) {
       if (gp.shattered) return;
-      gp.shattered = true; gp.mesh.visible = false;
+      gp.shattered = true;
+      if (gp.hide) gp.hide(); else gp.mesh.visible = false;
       if (!CBZ.fx || !CBZ.fx.dropDebris) return;
       const shards = 4 + ((rng() * 4) | 0);
       for (let i = 0; i < shards; i++) {
@@ -1442,7 +2165,7 @@
       bgroup.position.set(ox, gy, oz);
       root.add(bgroup);
 
-      const cols = [], plats = [], glassList = [];
+      const cols = [], plats = [], glassList = [], shellMerge = [];
       const ixMin = -w / 2 + WT, ixMax = w / 2 - WT;   // interior x span
       const izMin = -d / 2 + WT, izMax = d / 2 - WT;   // interior z span
       const sx = ixMin + SW / 2;                       // stairwell strip centre (x)
@@ -1450,12 +2173,20 @@
       // local box; opts.solid → height-gated collider, opts.plat → walkable top,
       // opts.los → camera/vision blocker. Coords are local to bgroup; the
       // collider/platform records carry the world-space rectangle.
+      // opts.merge → no mesh of its own: it joins the building's merged shell
+      // (slabs, treads, parapets: nothing that is a collider's ref or a wall
+      // the tsunami tears off)
       function lbox(lx, ly, lz, bw, bh, bd, col, opts) {
         opts = opts || {};
-        const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), mat(col, opts.emissive ? { emissive: opts.emissive, ei: 0.5 } : null));
-        m.position.set(lx, ly, lz);
-        m.castShadow = opts.cast !== false; m.receiveShadow = true;
-        bgroup.add(m);
+        let m = null;
+        if (opts.merge && !opts.solid) {
+          shellMerge.push([lx, ly, lz, bw, bh, bd, col, !!opts.los]);
+        } else {
+          m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), opts.emissive ? mat(col, { emissive: opts.emissive, ei: 0.5 }) : finishMat(col, 0, gy));
+          m.position.set(lx, ly, lz);
+          m.castShadow = opts.cast !== false; m.receiveShadow = true;
+          bgroup.add(m);
+        }
         if (opts.solid) {
           const c = { minX: ox + lx - bw / 2, maxX: ox + lx + bw / 2, minZ: oz + lz - bd / 2, maxZ: oz + lz + bd / 2, ref: m, y0: gy + ly - bh / 2, y1: gy + ly + bh / 2 };
           CBZ.colliders.push(c); cols.push(c);
@@ -1464,24 +2195,8 @@
           const p = { minX: ox + lx - bw / 2, maxX: ox + lx + bw / 2, minZ: oz + lz - bd / 2, maxZ: oz + lz + bd / 2, top: gy + ly + bh / 2 };
           CBZ.platforms.push(p); plats.push(p);
         }
-        if (opts.los) CBZ.losBlockers.push(m);
+        if (opts.los && m) CBZ.losBlockers.push(m);
         return m;
-      }
-
-      // big shatterable glass panes on an exterior wall face (a proper modern
-      // window band — taller and wider than the old specks, and registered so
-      // it bursts in a quake/blast)
-      function windows(face, k) {
-        const yc = k * FH + FH * 0.55, wh = FH * 0.64;
-        if (face === "z+" || face === "z-") {
-          const zz = (face === "z+" ? d / 2 - WT * 0.35 : -d / 2 + WT * 0.35);
-          const n = Math.min(4, Math.max(2, Math.round(w / 2.4))), pad = 0.55, span = (w - pad * 2) / n;
-          for (let i = 0; i < n; i++) addGlass(bgroup, -w / 2 + pad + (i + 0.5) * span, yc, zz, span * 0.82, wh, 0.05, ox, oz, gy, glassList);
-        } else {
-          const xx = (face === "x+" ? w / 2 - WT * 0.35 : -w / 2 + WT * 0.35);
-          const n = Math.min(4, Math.max(2, Math.round(d / 2.4))), pad = 0.55, span = (d - pad * 2) / n;
-          for (let i = 0; i < n; i++) addGlass(bgroup, xx, yc, -d / 2 + pad + (i + 0.5) * span, 0.05, wh, span * 0.82, ox, oz, gy, glassList);
-        }
       }
 
       /* GROUND-FLOOR FOUNDATION: a solid walkable slab at the floor reference
@@ -1495,7 +2210,7 @@
          with a grass floor. It is lifted 8 cm clear (a step far under physics
          STEP_UP, so you still walk straight in) and squared out to the full
          footprint, so no sliver of terrain shows along the wall line either. */
-      lbox(0, -0.27, 0, w, 0.7, d, 0x6c7178, { plat: true });
+      lbox(0, -0.27, 0, w, 0.7, d, 0x6c7178, { plat: true, merge: true });
 
       const wallOpt = { solid: true, los: true };
       for (let k = 0; k < storeys; k++) {
@@ -1504,17 +2219,15 @@
         lbox(0, ly, d / 2 - WT / 2, w, FH, WT, color, wallOpt);          // +z back
         lbox(-w / 2 + WT / 2, ly, 0, WT, FH, d, color, wallOpt);         // -x left
         lbox(w / 2 - WT / 2, ly, 0, WT, FH, d, color, wallOpt);          // +x right
-        windows("z+", k); windows("x-", k); windows("x+", k);
         // front (-z) wall: ground floor has the doorway, upper floors are solid
         if (k === 0) {
           const side = (w - DOORW) / 2;
           lbox(-(DOORW / 2 + side / 2), ly, -d / 2 + WT / 2, side, FH, WT, color, wallOpt);
           lbox(DOORW / 2 + side / 2, ly, -d / 2 + WT / 2, side, FH, WT, color, wallOpt);
           // door lintel above the opening (so the facade reads as a doorway)
-          lbox(0, FH - 0.35, -d / 2 + WT / 2, DOORW, 0.7, WT, color, { los: true });
+          lbox(0, FH - 0.35, -d / 2 + WT / 2, DOORW, 0.7, WT, color, { los: true, merge: true });
         } else {
           lbox(0, ly, -d / 2 + WT / 2, w, FH, WT, color, wallOpt);
-          windows("z-", k);
         }
       }
 
@@ -1523,15 +2236,15 @@
       const slabW = ixMax - (ixMin + SW), slabCx = (ixMin + SW + ixMax) / 2, slabD = izMax - izMin, slabCz = (izMin + izMax) / 2;
       for (let L = 1; L <= storeys; L++) {
         const isRoof = L === storeys;
-        lbox(slabCx, L * FH - 0.1, slabCz, slabW, 0.2, slabD, isRoof ? 0x9fa6ad : 0xb9bec6, { plat: true, los: true, cast: isRoof });
+        lbox(slabCx, L * FH - 0.1, slabCz, slabW, 0.2, slabD, isRoof ? 0x9fa6ad : 0xb9bec6, { plat: true, los: true, cast: isRoof, merge: true });
       }
       // a slab over the stairwell strip on the GROUND floor's far side would
       // block the climb, so we leave the strip open all the way up; the roof
       // gets a low parapet on three sides so you don't walk straight off.
       const rTop = storeys * FH;
-      lbox(slabCx, rTop + 0.35, d / 2 - WT / 2, slabW, 0.7, WT, 0x8b9097, { los: true });   // +z parapet
-      lbox(w / 2 - WT / 2, rTop + 0.35, slabCz, WT, 0.7, slabD, 0x8b9097, { los: true });    // +x parapet
-      lbox(slabCx, rTop + 0.35, -d / 2 + WT / 2, slabW, 0.7, WT, 0x8b9097, { los: true });   // -z parapet
+      lbox(slabCx, rTop + 0.35, d / 2 - WT / 2, slabW, 0.7, WT, 0x8b9097, { los: true, merge: true });   // +z parapet
+      lbox(w / 2 - WT / 2, rTop + 0.35, slabCz, WT, 0.7, slabD, 0x8b9097, { los: true, merge: true });    // +x parapet
+      lbox(slabCx, rTop + 0.35, -d / 2 + WT / 2, slabW, 0.7, WT, 0x8b9097, { los: true, merge: true });   // -z parapet
 
       // TWO-LANE switchback stairs. The up-flight and the down-flight must
       // never share an (x,z), or groundAt() (highest surface within step
@@ -1568,12 +2281,12 @@
         for (let i = 1; i <= nSteps; i++) {
           const vtop = k * FH + (i - 0.5) * rise;
           const cz2 = startZ + dir * (i - 0.5) * runDepth;
-          lbox(lxc, vtop - 0.13, cz2, laneW - 0.16, 0.26, runDepth + 0.04, 0xa7adb5, { cast: false });
+          lbox(lxc, vtop - 0.13, cz2, laneW - 0.16, 0.26, runDepth + 0.04, 0xa7adb5, { cast: false, merge: true });
         }
         // flat landing across BOTH lanes, from the ramp's top edge out to endZ,
         // at exactly (k+1)·FH — bridges the two lanes and meets the next flight
         const lzc = (rampEndZ + endZ) / 2;
-        lbox(ixMin + SW / 2, (k + 1) * FH - 0.1, lzc, SW, 0.2, LD + 0.2, 0xb4b9c1, { plat: true, los: true, cast: false });
+        lbox(ixMin + SW / 2, (k + 1) * FH - 0.1, lzc, SW, 0.2, LD + 0.2, 0xb4b9c1, { plat: true, los: true, cast: false, merge: true });
       }
 
       // THE FACADE. Emitted last so it dresses the finished shell, and into
@@ -1582,7 +2295,9 @@
         group: bgroup, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys,
         fh: FH, wt: WT, rTop: rTop, pp: 0.7, doorSide: 0,   // the door is on -z
         color: color, style: style, plats: plats,
+        shellMerge: shellMerge, glassList: glassList, doorHalf: DOORW / 2 + 0.35,
       });
+      for (const gp of glassList) allGlass.push(gp);
 
       const b = {
         group: bgroup, ox, oz, gy, x: ox, z: oz, w, d, h: storeys * FH, storeys,
@@ -1612,7 +2327,7 @@
       g.position.set(ox, gy, oz);
       root.add(g);
 
-      const cols = [], plats = [], glassT = [];
+      const cols = [], plats = [], glassT = [], shellMerge = [];
       const TW = 0.4;                                   // wall thickness
       const storeys = Math.max(4, Math.round(h / FH));
       const realH = storeys * FH;
@@ -1621,11 +2336,17 @@
       const s = Math.min(iw, id) * 0.42;                // elevator-shaft half-size (central hole)
 
       // local box → mesh on the group; world-space collider/platform records.
+      // opts.merge → joins the tower's merged shell instead of being a mesh
       function tbox(lx, ly, lz, bw, bh, bd, col, opts) {
         opts = opts || {};
-        const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), mat(col, opts.emissive ? { emissive: opts.emissive, ei: opts.ei || 0.4 } : null));
-        m.position.set(lx, ly, lz); m.castShadow = opts.cast !== false; m.receiveShadow = true;
-        g.add(m);
+        let m = null;
+        if (opts.merge && !opts.solid) {
+          shellMerge.push([lx, ly, lz, bw, bh, bd, col, !!opts.los]);
+        } else {
+          m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), opts.emissive ? mat(col, { emissive: opts.emissive, ei: opts.ei || 0.4 }) : finishMat(col, 0, gy));
+          m.position.set(lx, ly, lz); m.castShadow = opts.cast !== false; m.receiveShadow = true;
+          g.add(m);
+        }
         if (opts.solid) {
           const c = { minX: ox + lx - bw / 2, maxX: ox + lx + bw / 2, minZ: oz + lz - bd / 2, maxZ: oz + lz + bd / 2, ref: m, y0: gy + ly - bh / 2, y1: gy + ly + bh / 2 };
           CBZ.colliders.push(c); cols.push(c);
@@ -1634,7 +2355,7 @@
           const p = { minX: ox + lx - bw / 2, maxX: ox + lx + bw / 2, minZ: oz + lz - bd / 2, maxZ: oz + lz + bd / 2, top: gy + ly + bh / 2 };
           CBZ.platforms.push(p); plats.push(p);
         }
-        if (opts.los) CBZ.losBlockers.push(m);
+        if (opts.los && m) CBZ.losBlockers.push(m);
         return m;
       }
 
@@ -1652,26 +2373,18 @@
       // ---- per-floor landings + roof: a slab frame around the central shaft ----
       function landing(ly) {
         const zN = -(id + s) / 2, zS = (id + s) / 2, wN = id - s;
-        tbox(0, ly, zN, 2 * iw, 0.2, wN, 0xb4b9c1, { plat: true, los: true, cast: false });
-        tbox(0, ly, zS, 2 * iw, 0.2, wN, 0xb4b9c1, { plat: true, los: true, cast: false });
-        tbox(-(iw + s) / 2, ly, 0, iw - s, 0.2, 2 * s, 0xb4b9c1, { plat: true, cast: false });
-        tbox((iw + s) / 2, ly, 0, iw - s, 0.2, 2 * s, 0xb4b9c1, { plat: true, cast: false });
+        tbox(0, ly, zN, 2 * iw, 0.2, wN, 0xb4b9c1, { plat: true, los: true, cast: false, merge: true });
+        tbox(0, ly, zS, 2 * iw, 0.2, wN, 0xb4b9c1, { plat: true, los: true, cast: false, merge: true });
+        tbox(-(iw + s) / 2, ly, 0, iw - s, 0.2, 2 * s, 0xb4b9c1, { plat: true, cast: false, merge: true });
+        tbox((iw + s) / 2, ly, 0, iw - s, 0.2, 2 * s, 0xb4b9c1, { plat: true, cast: false, merge: true });
       }
       for (let k = 1; k < storeys; k++) landing(k * FH);
       landing(realH);                                   // roof (with the same shaft opening)
 
-      // ---- MASSIVE curtain-wall glass: floor-to-ceiling panes wrapping every
-      // storey (a modern glass-skyscraper facade), every pane shatterable ----
-      const gi = 0.06, gph = FH * 0.82;
-      for (let k = 0; k < storeys; k++) {
-        const yc = k * FH + FH * 0.5;
-        addGlass(g, 0, yc, d / 2 + gi, w * 0.9, gph, 0.05, ox, oz, gy, glassT);            // +z
-        addGlass(g, w / 2 + gi, yc, 0, 0.05, gph, d * 0.9, ox, oz, gy, glassT);            // +x
-        addGlass(g, -w / 2 - gi, yc, 0, 0.05, gph, d * 0.9, ox, oz, gy, glassT);           // -x
-        if (k > 0) addGlass(g, 0, yc, -d / 2 - gi, w * 0.9, gph, 0.05, ox, oz, gy, glassT); // -z (skip the ground-floor door)
-      }
+      // The glazing is the facade pass's (dressIslandFacade → glazeBuilding):
+      // it reads what the tower grammar left open and glazes exactly that.
       // rooftop plant box (offset off the shaft so it doesn't block the lift)
-      const capm = new THREE.Mesh(new THREE.BoxGeometry(iw * 0.7, 1.2, id * 0.5), mat(0x8b9097));
+      const capm = new THREE.Mesh(new THREE.BoxGeometry(iw * 0.7, 1.2, id * 0.5), finishMat(0x8b9097, 0, gy));
       capm.position.set(0, realH + 0.6, id * 0.55); capm.castShadow = true; g.add(capm);
 
       // THE FACADE — the tower grammars (bundled tube, braced tube, setback
@@ -1681,7 +2394,9 @@
         group: g, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys,
         fh: FH, wt: TW, rTop: realH, pp: 0.6, doorSide: 0,
         color: color, style: style, plats: plats,
+        shellMerge: shellMerge, glassList: glassT, doorHalf: DW / 2 + 0.35, tower: true,
       });
+      for (const gp of glassT) allGlass.push(gp);
 
       const b = { group: g, ox, oz, gy, x: ox, z: oz, w, d, h: realH, storeys,
         facadeStyle: style || null, color: color,   // see makeBuilding: the collapse proxy is built from it
@@ -1744,12 +2459,12 @@
                                                  // where the pad overlapped an avenue at the
                                                  // same 0.04), below the 0.057 dashes
     const PAINT_Y = LAYERS ? 0.057 : 0.07;       // centre-line dashes
-    const roadMat = LAYERS
-      ? new THREE.MeshLambertMaterial({ color: 0x33363d })
-      : new THREE.MeshLambertMaterial({ color: 0x33363d, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const roadMat = LAYERS ? skinMat("asphalt")
+      : skinMat("asphalt", { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    roadMat.name = "survival-asphalt";
     const lineMat = LAYERS
-      ? new THREE.MeshBasicMaterial({ color: 0xf2d14a, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
-      : new THREE.MeshBasicMaterial({ color: 0xf2d14a, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+      ? new THREE.MeshLambertMaterial({ color: 0x9a7a1c, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
+      : new THREE.MeshLambertMaterial({ color: 0x9a7a1c, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
     const roadSegs = [];
     const ROADW = 7;
     /* THE STREET GRID, declared HERE rather than beside the code that draws
@@ -1789,6 +2504,34 @@
       const nx = snapX ? seat : x, nz = snapX ? z : seat;
       return onRoad(nx, nz, w, d) ? null : { x: nx, z: nz };
     }
+    /* THE ASPHALT. It was one flat 0x33363d plane per run plus ONE MESH PER
+       CENTRE-LINE DASH (a draw call for every 6 m of road). Now every run is
+       baked into ONE world-space mesh wearing the normalised asphalt map —
+       aggregate, patching, hairline cracks — with vertex-colour wear: a
+       dusty, sun-bleached kerb edge, darker tyre tracks down each lane, and
+       slow patchwork along the length. All the dashes are ONE mesh too. */
+    const roadParts = [], dashParts = [];
+    function roadGeo(x, z, w, len, vertical, y) {
+      const ax = vertical ? w : len, az = vertical ? len : w;         // world extents
+      const nL = Math.max(1, Math.round(len / 3)), nW = 6;
+      const g = new THREE.PlaneGeometry(ax, az, vertical ? nW : nL, vertical ? nL : nW);
+      g.rotateX(-Math.PI / 2);
+      g.translate(x, y, z);
+      const p = g.attributes.position, col = new Float32Array(p.count * 3), uv = new Float32Array(p.count * 2);
+      for (let i = 0; i < p.count; i++) {
+        const wx = p.getX(i), wz = p.getZ(i);
+        const across = (vertical ? wx - x : wz - z) / (w / 2);          // -1..1 across the road
+        const edge = Math.pow(Math.abs(across), 6);                    // kerb dust
+        const track = Math.exp(-Math.pow((Math.abs(across) - 0.5) / 0.14, 2));   // lane tyre lines
+        const patch = fbm2(wx, wz, 11, 0x7a01);
+        let v = 0.060 * (0.86 + 0.3 * patch) * (1 - 0.16 * track) + 0.05 * edge;
+        col[i * 3] = v * 1.02; col[i * 3 + 1] = v; col[i * 3 + 2] = v * 0.97 + 0.004;
+        uv[i * 2] = wx / 3; uv[i * 2 + 1] = wz / 3;
+      }
+      g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+      return g;
+    }
     function layRoadLine(fixed, vertical) {
       const step = 4, segs = [];
       let runStart = null;
@@ -1806,36 +2549,109 @@
       segs.forEach(([a, bb]) => {
         const midT = (a + bb) / 2, len = bb - a;
         const x = vertical ? fixed : cx + midT, z = vertical ? cz + midT : fixed;
-        const m = new THREE.Mesh(new THREE.PlaneGeometry(vertical ? ROADW : len, vertical ? len : ROADW), roadMat);
         // avenues and cross-streets on SPLIT y levels (city constants) so the
         // planes overlapping at every intersection can never z-fight
-        m.rotation.x = -Math.PI / 2; m.position.set(x, vertical ? ROAD_Y_AVE : ROAD_Y_CROSS, z); m.receiveShadow = true; root.add(m);
+        roadParts.push(roadGeo(x, z, ROADW, len, vertical, vertical ? ROAD_Y_AVE : ROAD_Y_CROSS));
         const dashes = Math.max(1, Math.floor(len / 6));
         for (let i = 0; i < dashes; i++) {
           const tt = a + (i + 0.5) * (len / dashes);
           const lx = vertical ? fixed : cx + tt, lz = vertical ? cz + tt : fixed;
-          const dm = new THREE.Mesh(new THREE.PlaneGeometry(vertical ? 0.3 : 2.4, vertical ? 2.4 : 0.3), lineMat);
-          dm.rotation.x = -Math.PI / 2; dm.position.set(lx, PAINT_Y, lz); root.add(dm);
-          if (LAYERS) { dm.renderOrder = 1; dm.userData.roadPaint = true; }
+          const dg = new THREE.PlaneGeometry(vertical ? 0.3 : 2.4, vertical ? 2.4 : 0.3);
+          dg.rotateX(-Math.PI / 2); dg.translate(lx, PAINT_Y, lz);
+          dashParts.push(dg);
         }
         roadSegs.push({ x, z, len, vertical });
       });
     }
 
-    // ---- CARS: a low-poly body + cabin + 4 wheels, aligned to their street ----
+    /* ---- CARS: a real car silhouette in ONE draw ---------------------------
+       They were a grey box on a grey box on four cylinders — six meshes, six
+       draw calls, and it read as exactly that. Now each car is ONE merged
+       geometry: a bevelled side-profile body (bumpers, sloped bonnet, boot),
+       a glass greenhouse under a painted roof, four tyres with pale hubs,
+       head- and tail-lamps — colour baked per vertex, one shared glossy
+       material for the whole fleet. Geometry is cached per (shape, paint),
+       so the fleet is a handful of buffers. The record the tsunami flings
+       (group/x/z/oy/rotY/collider) is unchanged; the collider's ref is the
+       body mesh as before. */
     const CAR_COLORS = [0xe24b4b, 0x3c6fd6, 0xf2c43d, 0x4caf6e, 0xe8e8ee, 0x2a2d33, 0xe88a3c];
+    const carMat = new THREE.MeshPhongMaterial({ color: 0xffffff, vertexColors: true, shininess: 48, specular: 0x2a2a2a });
+    carMat.name = "survival-car";
+    const carGeos = new Map();
+    const CAR_SHAPES = [
+      // side profile (length axis, height) + greenhouse profile
+      { body: [[-2.1, 0.34], [2.1, 0.34], [2.13, 0.72], [1.95, 0.93], [0.78, 1.03], [-1.55, 1.05], [-2.06, 0.98], [-2.13, 0.62]],
+        cab: [[0.80, 1.0], [0.02, 1.62], [-1.02, 1.62], [-1.58, 1.0]] },                         // saloon
+      { body: [[-2.0, 0.36], [2.05, 0.36], [2.08, 0.74], [1.9, 0.95], [0.9, 1.05], [-1.95, 1.07], [-2.05, 0.98], [-2.08, 0.62]],
+        cab: [[0.92, 1.02], [0.12, 1.66], [-1.72, 1.68], [-1.96, 1.02]] },                        // hatchback
+      { body: [[-2.15, 0.40], [2.15, 0.40], [2.17, 0.82], [2.0, 1.04], [0.95, 1.12], [-2.12, 1.12], [-2.17, 1.04], [-2.19, 0.66]],
+        cab: [[0.97, 1.08], [0.35, 1.78], [-0.75, 1.78], [-0.95, 1.08]] },                       // pickup
+    ];
+    function tintGeo(g, r, gg, b) {
+      const n = g.attributes.position.count, c = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { c[i * 3] = r; c[i * 3 + 1] = gg; c[i * 3 + 2] = b; }
+      g.setAttribute("color", new THREE.BufferAttribute(c, 3));
+      if (!g.attributes.uv) g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(n * 2), 2));
+      return g;
+    }
+    function profileGeo(pts, width, bevel) {
+      const sh = new THREE.Shape();
+      sh.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) sh.lineTo(pts[i][0], pts[i][1]);
+      sh.closePath();
+      const g = new THREE.ExtrudeGeometry(sh, { depth: width - bevel * 2, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel * 0.8, bevelSegments: 2, curveSegments: 4 });
+      g.translate(0, 0, -(width - bevel * 2) / 2);
+      g.rotateY(Math.PI / 2);                    // profile x -> car length (z)
+      return g.index ? g.toNonIndexed() : g;
+    }
+    function carGeo(shapeIdx, paintHex) {
+      const key = shapeIdx + "|" + paintHex;
+      if (carGeos.has(key)) return carGeos.get(key);
+      const S = CAR_SHAPES[shapeIdx];
+      const pc = new THREE.Color(paintHex).multiplyScalar(0.62);
+      const parts = [];
+      parts.push(tintGeo(profileGeo(S.body, 1.92, 0.1), pc.r, pc.g, pc.b));
+      parts.push(tintGeo(profileGeo(S.cab, 1.62, 0.07), 0.035, 0.045, 0.055));
+      // painted roof over the greenhouse
+      const roofY = S.cab[1][1], rz0 = S.cab[1][0], rz1 = S.cab[2][0];
+      const roof = new THREE.BoxGeometry(1.58, 0.07, Math.abs(rz0 - rz1) + 0.1).toNonIndexed();
+      roof.translate(0, roofY + 0.02, -(rz0 + rz1) / 2);
+      parts.push(tintGeo(roof, pc.r, pc.g, pc.b));
+      // tyres + hubs
+      const wz = shapeIdx === 2 ? 1.45 : 1.35;
+      [[0.86, wz], [-0.86, wz], [0.86, -wz], [-0.86, -wz]].forEach(function (w) {
+        const t = new THREE.CylinderGeometry(0.37, 0.37, 0.28, 14).toNonIndexed();
+        t.rotateZ(Math.PI / 2); t.translate(w[0], 0.37, w[1]);
+        parts.push(tintGeo(t, 0.018, 0.018, 0.02));
+        const h = new THREE.CylinderGeometry(0.2, 0.2, 0.3, 10).toNonIndexed();
+        h.rotateZ(Math.PI / 2); h.translate(w[0] * 1.005, 0.37, w[1]);
+        parts.push(tintGeo(h, 0.35, 0.36, 0.38));
+      });
+      // lamps: front is -z after the profile rotation
+      const fz = -S.body[1][0] - 0.02, rzb = -S.body[0][0] + 0.02, ly = 0.78;
+      [[0.62, fz, 0.9, 0.88, 0.75], [-0.62, fz, 0.9, 0.88, 0.75], [0.66, rzb, 0.45, 0.02, 0.02], [-0.66, rzb, 0.45, 0.02, 0.02]].forEach(function (l) {
+        const b = new THREE.BoxGeometry(0.42, 0.13, 0.06).toNonIndexed();
+        b.translate(l[0], ly, l[1]);
+        parts.push(tintGeo(b, l[2], l[3], l[4]));
+      });
+      // dark bumper/sill band
+      const sill = new THREE.BoxGeometry(1.96, 0.16, Math.abs(S.body[1][0] - S.body[0][0]) + 0.1).toNonIndexed();
+      sill.translate(0, S.body[0][1] + 0.06, 0);
+      parts.push(tintGeo(sill, 0.03, 0.03, 0.032));
+      const g = THREE.BufferGeometryUtils.mergeBufferGeometries(parts, false);
+      g.computeBoundingSphere();
+      parts.forEach(function (p) { p.dispose(); });
+      carGeos.set(key, g);
+      return g;
+    }
     function makeCar(x, z, vertical, color) {
       const gy = groundHeightAt(x, z);
       const g = new THREE.Group();
       g.position.set(x, gy, z); g.rotation.y = vertical ? 0 : Math.PI / 2; root.add(g);
-      const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.7, 4.2), mat(color));
-      body.position.y = 0.78; body.castShadow = true; g.add(body);
-      const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.72, 2.2), mat(0x223038, { emissive: 0x0c141a, ei: 0.35 }));
-      cabin.position.set(0, 1.45, -0.2); g.add(cabin);
-      const wgeo = new THREE.CylinderGeometry(0.45, 0.45, 0.42, 10), wmat = mat(0x14161a);
-      [[0.98, 1.35], [-0.98, 1.35], [0.98, -1.35], [-0.98, -1.35]].forEach(([wx, wz]) => {
-        const wh = new THREE.Mesh(wgeo, wmat); wh.rotation.z = Math.PI / 2; wh.position.set(wx, 0.45, wz); g.add(wh);
-      });
+      const shape = (h01g(x, z, 0xca7) * CAR_SHAPES.length) | 0;
+      const body = new THREE.Mesh(carGeo(shape, color), carMat);
+      if (h01g(x, z, 0xca8) < 0.5) body.rotation.y = Math.PI;   // parked either way round
+      body.castShadow = true; body.receiveShadow = true; g.add(body);
       const hw = vertical ? 1.1 : 2.2, hd = vertical ? 2.2 : 1.1;
       const c = { minX: x - hw, maxX: x + hw, minZ: z - hd, maxZ: z + hd, ref: body, noCam: true };
       CBZ.colliders.push(c);
@@ -1982,6 +2798,16 @@
       layRoadLine(cx + k * GRID, true);    // avenues (run along z)
       layRoadLine(cz + k * GRID, false);   // cross-streets (run along x)
     }
+    {
+      const BGU = THREE.BufferGeometryUtils;
+      const roads = new THREE.Mesh(BGU.mergeBufferGeometries(roadParts, false), roadMat);
+      roads.name = "survival-roads"; roads.receiveShadow = true; root.add(roads);
+      const paint = new THREE.Mesh(BGU.mergeBufferGeometries(dashParts, false), lineMat);
+      paint.name = "survival-road-paint";
+      if (LAYERS) { paint.renderOrder = 1; paint.userData.roadPaint = true; }
+      root.add(paint);
+      roadParts.forEach((g) => g.dispose()); dashParts.forEach((g) => g.dispose());
+    }
 
     // a downtown cluster of tall towers, plus a few outliers, on flat ground
     const TOWER_PALETTE = [0x5b6b82, 0x6f7e96, 0x8a98ac, 0x49566b, 0x7a6f8c, 0x5e7d86];
@@ -2058,8 +2884,236 @@
     });
 
     if (CBZ.bootStep) CBZ.bootStep("island:trees");
-    // ---- scattered trees: passable canopy, thin solid trunk (run-around) ----
+    /* ---- THE ISLAND'S TREES: kit trees, not green cubes on sticks ----------
+       Every tree here used to be two addBox cuboids — a 0.5 m square post and
+       a 2.6 m green cube — the single most fake thing on screen. They are now
+       the vegetation kit's (world/vegetation.js): leaf-card broadleaf crowns
+       on a barked, root-flared bole inland, and coconut palms (curved barked
+       trunk, a ring of pinnate drooping fronds) along the coast and on the
+       islets. Same positions, same rng draws, same record shape.
+
+       THE RECORD CONTRACT (systems/wildfire.js + systems/disasters.js read it):
+         trunk / foliage   meshes whose .material each tree OWNS — the fire
+                           recolours and emissive-lights them per tree, so they
+                           are per-tree CLONES of one kit material (same
+                           program, same textures: no new shader, one draw
+                           each, exactly the two draws the boxes cost).
+         foliage origin    the CROWN'S CENTRE: wildfire scales the crown about
+                           it when it chars, and reads position.y as canopy
+                           height (disasters.js: top = y + 1.3).
+         trunk origin      the trunk's BASE: the tsunami pivots a flung tree
+                           about trunk.position, so it topples from its foot.
+         trunkCol          the thin solid collider the boxes had.
+         leafHex/barkHex   what reset() repaints — no more hard-coded box green.
+       Deterministic: shape variety comes from CBZ.hash01 of the position, so
+       the build's rng stream is consumed exactly as before. */
     const flammable = [];
+    const VKIT = CBZ.vegetationKit;
+    const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeGroundUnder);
+    const h01t = CBZ.hash01 || function () { return 0.5; };
+    const treeGeo = {};
+    function geoOnce(key, fn) { return treeGeo[key] || (treeGeo[key] = fn()); }
+    // white-ish vertex colour ramp (dark foot -> full top): the kit materials
+    // run vertexColors, and a geometry without a colour attribute draws BLACK
+    function rampColor(g, low) {
+      g.computeBoundingBox();
+      const p = g.attributes.position, y0 = g.boundingBox.min.y, dy = Math.max(0.001, g.boundingBox.max.y - y0);
+      const c = new Float32Array(p.count * 3);
+      for (let i = 0; i < p.count; i++) {
+        const t = Math.max(0, Math.min(1, (p.getY(i) - y0) / dy));
+        const v = low + (1 - low) * Math.sqrt(t);
+        c[i * 3] = v; c[i * 3 + 1] = v; c[i * 3 + 2] = v;
+      }
+      g.setAttribute("color", new THREE.BufferAttribute(c, 3));
+      return g;
+    }
+    function mergeGeos(parts) {
+      const BGU = THREE.BufferGeometryUtils;
+      const out = BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(parts, false) : null;
+      return out || parts[0];
+    }
+    // broadleaf bole: unit height (scaled per tree), roots into the soil
+    function broadTrunkGeo() {
+      return geoOnce("bt", function () {
+        const g = CBZ.treeTrunkGeo
+          ? CBZ.treeTrunkGeo({ rTop: 0.12, rBase: 0.22, h: 1, seg: 7, roots: 4, spread: 2.3, flare: 1.5, site: "island", uvRepeat: 1.4 })
+          : new THREE.CylinderGeometry(0.12, 0.22, 1, 7).translate(0, 0.5, 0);
+        return rampColor(g, 0.55);
+      });
+    }
+    // broadleaf crown, origin at its centre: three leaf-card variants
+    function broadCrownGeo(v) {
+      return geoOnce("bc" + v, function () {
+        const spec = [[2.2, 2.9, 5], [2.5, 2.5, 4], [1.9, 3.2, 3]][v];
+        let g = CBZ.treeCrownGeo && VKIT
+          ? CBZ.treeCrownGeo({ tiers: 2, r: spec[0], h: spec[1], n: spec[2], cards: 12, site: "island", leaf: true, seed: 11 + v * 7 })
+          : new THREE.IcosahedronGeometry(spec[0], 1);
+        g = g.clone();
+        g.computeBoundingBox();
+        const bb = g.boundingBox;
+        g.translate(0, -(bb.min.y + bb.max.y) / 2, 0);
+        if (!g.attributes.color) rampColor(g, 0.6);
+        g.computeBoundingSphere();
+        return g;
+      });
+    }
+    /* A COCONUT PALM, in two meshes. The trunk is a leaning curve (slender,
+       swelling at the foot, banded by the dark leaf-scar collars a palm trunk
+       is read by — vertex colour, not extra meshes); the crown is 11 pinnate
+       fronds — a spine that leaves the hub near level and hangs over its
+       length, with a leaflet pair at every step — merged into ONE geometry.
+       Geometry, not a texture: a frond's read is its comb of leaflets
+       against the sky. */
+    function palmTrunkGeo(v) {
+      return geoOnce("pt" + v, function () {
+        const SEG = 7, parts = [];
+        const bend = [0.10, 0.16, 0.06][v];
+        const at = function (t) { return new THREE.Vector3(bend * Math.pow(t, 1.8), t, 0); };
+        const up = new THREE.Vector3(0, 1, 0);
+        for (let i = 0; i < SEG; i++) {
+          const a = at(i / SEG), b = at((i + 1) / SEG);
+          const r0 = 0.20 - 0.07 * (i / SEG) + (i === 0 ? 0.06 : 0), r1 = 0.20 - 0.07 * ((i + 1) / SEG);
+          const len = a.distanceTo(b);
+          const c = new THREE.CylinderGeometry(r1, r0, len * 1.02, 8, 1, true);
+          const uv = c.attributes.uv;
+          for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) * 1.5, uv.getY(k) * 0.35 + i * 0.35);
+          const dir = b.clone().sub(a).normalize();
+          c.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(up, dir)));
+          c.translate((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+          parts.push(c);
+        }
+        const g = mergeGeos(parts);
+        rampColor(g, 0.62);
+        const p = g.attributes.position, col = g.attributes.color;
+        for (let i = 0; i < p.count; i++) {
+          const band = 0.5 + 0.5 * Math.cos(p.getY(i) * Math.PI * 2 * 9);
+          const k = 1 - 0.3 * Math.pow(band, 6);
+          col.setXYZ(i, col.getX(i) * k, col.getY(i) * k * 0.98, col.getZ(i) * k * 0.95);
+        }
+        g.userData.top = at(1);
+        g.computeBoundingSphere();
+        return g;
+      });
+    }
+    function palmCrownGeo(v) {
+      return geoOnce("pc" + v, function () {
+        const pos = [], col = [];
+        const N = 11, SEG = 17;
+        function tri(a, b, c, ca, cb, cc) {
+          pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+          col.push(ca, ca, ca * 0.85, cb, cb, cb * 0.85, cc, cc, cc * 0.85);
+        }
+        for (let f = 0; f < N; f++) {
+          const yaw = (f / N) * Math.PI * 2 + (h01t(f, v, 0x9a1) - 0.5) * 0.35;
+          const len = 2.6 + h01t(f, v, 0x9a2) * 0.9;
+          const lift = -0.2 + h01t(f, v, 0x9a3) * 0.7;              // start pitch, above/below level
+          const hang = 1.2 + h01t(f, v, 0x9a4) * 0.7;               // how hard it droops
+          const dx = Math.cos(yaw), dz = Math.sin(yaw);
+          const sx = -dz, sz = dx;                                   // leaflet side direction
+          // the spine: integrate the pitch so it is a real arc, not a chord
+          const pts = [new THREE.Vector3(0, 0, 0)];
+          const STEPS = 18;
+          for (let s = 1; s <= STEPS; s++) {
+            const u = (s - 0.5) / STEPS, ang = lift - hang * u * u, dl = len / STEPS;
+            const q = pts[s - 1];
+            pts.push(new THREE.Vector3(q.x + dx * Math.cos(ang) * dl, q.y + Math.sin(ang) * dl, q.z + dz * Math.cos(ang) * dl));
+          }
+          const spine = function (u) {
+            const f2 = u * STEPS, i0 = Math.min(STEPS - 1, Math.floor(f2));
+            return pts[i0].clone().lerp(pts[i0 + 1], f2 - i0);
+          };
+          for (let i = 0; i < SEG; i++) {
+            const u0 = 0.06 + (i / SEG) * 0.94, u1 = 0.06 + ((i + 1) / SEG) * 0.94;
+            // a leaflet is a narrow blade: its base spans only the first half
+            // of the step, so the comb has gaps between blades
+            const a = spine(u0), b = spine(u0 + (u1 - u0) * 0.5);
+            const w = 0.8 * Math.sin(Math.PI * Math.min(1, 0.12 + u0 * 0.95)) + 0.12;   // leaflet length
+            const shade = 0.6 + 0.4 * u0;
+            for (let sgn = -1; sgn <= 1; sgn += 2) {
+              const tip = new THREE.Vector3(
+                (a.x + b.x) / 2 + sx * sgn * w + dx * w * 0.55,
+                (a.y + b.y) / 2 - w * 0.6,
+                (a.z + b.z) / 2 + sz * sgn * w + dz * w * 0.55);
+              tri(a, b, tip, shade * 0.85, shade * 0.95, shade * 1.1);
+            }
+          }
+        }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+        g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+        // lighting normals point OUT of the crown, up-biased, so both faces
+        // of a leaflet shade as part of the canopy mass, not as a flipped card
+        const nrm = new Float32Array(pos.length);
+        for (let i = 0; i < pos.length; i += 3) {
+          const x = pos[i], y = pos[i + 1] + 0.8, z = pos[i + 2];
+          const l = Math.hypot(x, y, z) || 1;
+          let nx = x / l * 0.55, ny = y / l * 0.55 + 0.45, nz = z / l * 0.55;
+          const m = Math.hypot(nx, ny, nz) || 1;
+          nrm[i] = nx / m; nrm[i + 1] = ny / m; nrm[i + 2] = nz / m;
+        }
+        g.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+        g.computeBoundingSphere();
+        return g;
+      });
+    }
+    // THE SHARED LOOKS. One material per role; each tree clones it (see the
+    // record contract above). Tints multiply bright kit textures, so they are
+    // authored DARK (linear albedo — this pipeline brightens on the way out).
+    const woodBase = VKIT ? VKIT.material("wood") : new THREE.MeshLambertMaterial({ vertexColors: true });
+    const leafBase = VKIT ? VKIT.material("foliage") : new THREE.MeshLambertMaterial({ vertexColors: true });
+    const frondBase = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide });
+    frondBase.name = "survival-palm-frond";
+    const leafDepth = VKIT && VKIT.depthMaterial ? VKIT.depthMaterial("foliage") : null;
+    const LEAF_TINTS = [0x2f6a26, 0x3b7a2a, 0x2a5e2a, 0x48802e];
+    const FROND_TINTS = [0x1c4410, 0x234c12, 0x2a4c14];
+    function ownMat(base, hex) { const m = base.clone(); m.color.setHex(hex); m._shared = false; return m; }
+    function trunkCollider(x, z, mesh, half) {
+      const c = { minX: x - half, maxX: x + half, minZ: z - half, maxZ: z + half, ref: mesh, noCam: true };
+      CBZ.colliders.push(c);
+      mesh.userData.collider = c;
+      return c;
+    }
+    function plantBroadleaf(x, z, gy, th) {
+      const hv = h01t(x, z, 0x7e1);
+      let base = gy;
+      if (TREES2) base = Math.min(gy, CBZ.treeGroundUnder(groundHeightAt, x, z, 0.6).min) - 0.25;
+      const top = gy + th;
+      const barkHex = 0x6e5a48, leafHex = LEAF_TINTS[(hv * LEAF_TINTS.length) | 0];
+      const trunk = new THREE.Mesh(broadTrunkGeo(), ownMat(woodBase, barkHex));
+      trunk.position.set(x, base, z);
+      trunk.scale.set(1.15, top + 0.9 - base, 1.15);            // runs up INTO the crown
+      trunk.rotation.y = hv * Math.PI * 2;
+      trunk.castShadow = true; trunk.receiveShadow = true;
+      root.add(trunk);
+      const foliage = new THREE.Mesh(broadCrownGeo((h01t(x, z, 0x7e2) * 3) | 0), ownMat(leafBase, leafHex));
+      foliage.position.set(x, top + 1.25, z);
+      foliage.rotation.y = h01t(x, z, 0x7e3) * Math.PI * 2;
+      foliage.castShadow = true; foliage.receiveShadow = true;
+      if (leafDepth) foliage.customDepthMaterial = leafDepth;
+      root.add(foliage);
+      return { trunk, foliage, trunkCol: trunkCollider(x, z, trunk, 0.25), leafHex, barkHex };
+    }
+    function plantPalm(x, z, gy, H) {
+      const v = (h01t(x, z, 0x7e4) * 3) | 0;
+      const yaw = h01t(x, z, 0x7e5) * Math.PI * 2;
+      const barkHex = 0x8a7a66, leafHex = FROND_TINTS[(h01t(x, z, 0x7e6) * FROND_TINTS.length) | 0];
+      const tg = palmTrunkGeo(v);
+      const trunk = new THREE.Mesh(tg, ownMat(woodBase, barkHex));
+      const sy = H + 0.3;
+      trunk.position.set(x, gy - 0.3, z);
+      trunk.scale.set(1, sy, 1);
+      trunk.rotation.y = yaw;
+      trunk.castShadow = true; trunk.receiveShadow = true;
+      root.add(trunk);
+      // the hub sits on the trunk's (bent, scaled) top, read off its own curve
+      const tp = tg.userData.top, bx = tp.x * sy;
+      const foliage = new THREE.Mesh(palmCrownGeo((h01t(x, z, 0x7e7) * 3) | 0), ownMat(frondBase, leafHex));
+      foliage.position.set(x + bx * Math.cos(yaw), gy - 0.3 + sy * tp.y - 0.05, z - bx * Math.sin(yaw));
+      foliage.rotation.y = h01t(x, z, 0x7e8) * Math.PI * 2;
+      foliage.castShadow = true;
+      root.add(foliage);
+      return { trunk, foliage, trunkCol: trunkCollider(x, z, trunk, 0.22), leafHex, barkHex };
+    }
     for (let i = 0; i < 70; i++) {
       const a = rng() * Math.PI * 2;
       const dist = 16 + rng() * (R - 18);
@@ -2069,29 +3123,26 @@
       if (onBuilding) continue;
       const gy = groundHeightAt(x, z);
       const th = 2 + rng() * 1.5;
-      // TREES_V2 (config.js): the trunk base sat at EXACTLY the centre
-      // terrain sample (downhill edge floated on arena relief) and the
-      // foliage overlapped the trunk by a hair (0.1). V2 seats the base
-      // below the LOWEST footprint sample and buries the trunk top 0.4 into
-      // the canopy. No registry entry: arena trees are mode-scoped and BURN
-      // (runtime-mutable), so the world audit doesn't track them. rng draw
-      // order below is untouched.
-      const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeGroundUnder);
-      let trunkBase = gy, trunkTop = gy + th;
-      if (TREES2) {
-        const gu = CBZ.treeGroundUnder(groundHeightAt, x, z, 0.6);
-        trunkBase = Math.min(gy, gu.min) - 0.25;
-      }
-      // trunk is a thin SOLID collider you can weave around; foliage is open air
-      const trunk = box(x, (trunkBase + trunkTop) / 2, z, 0.5, trunkTop - trunkBase, 0.5, 0x6b4a2a, { solid: true });
-      // thin trunks must NOT shove the third-person camera around
-      if (trunk.userData.collider) trunk.userData.collider.noCam = true;
-      const foliage = box(x, TREES2 ? gy + th + 0.9 : gy + th + 1.2, z, 2.4 + rng(), 2.6, 2.4 + rng(), 0x3f9a4f);
-      flammable.push({ x, z, trunk, foliage, trunkCol: trunk.userData.collider, burning: 0, burnt: false });
+      // the two draws the box crown's width/depth used, still drawn so the
+      // stream (and everything placed after the trees) is unchanged. Crown
+      // size is NOT a mesh scale any more: wildfire resets foliage.scale to
+      // 1 between matches, so size variety lives in the cached geometries.
+      rng(); rng();
+      // nothing grows on the live cone above its turf line (a tree halfway up
+      // bare scoria is the "tree looks dumb" photo); the draws above are
+      // already spent, so the stream for everything after is unchanged
+      if (Math.hypot(x - VOL.x, z - VOL.z) < VOL.r * 0.82) continue;
+      // palms own the coast and a share of the town; broadleaf the rest
+      const palm = dist > R - 34 || h01t(x, z, 0x7e9) < 0.3;
+      const rec = palm
+        ? plantPalm(x, z, gy, th * 1.9 + 1.2)
+        : plantBroadleaf(x, z, gy, th);
+      flammable.push({ x, z, trunk: rec.trunk, foliage: rec.foliage, trunkCol: rec.trunkCol,
+        leafHex: rec.leafHex, barkHex: rec.barkHex, burning: 0, burnt: false });
     }
-    // ---- the archipelago's palms: the same box trees on the two big islets,
-    // on their OWN rng stream so the main island's layout stays byte-identical.
-    // They join `flammable`, so they burn and regrow with everything else.
+    // ---- the archipelago's palms, on their OWN rng stream so the main
+    // island's layout stays byte-identical. They join `flammable`, so they
+    // burn and regrow with everything else.
     (function isletPalms() {
       let s4 = 90911;
       const rng4 = () => { s4 = (s4 * 1103515245 + 12345) & 0x7fffffff; return s4 / 0x7fffffff; };
@@ -2104,15 +3155,34 @@
           const gy = groundHeightAt(x, z);
           if (gy < 1.2) continue;                 // stay off the wet sand
           const th = 3.2 + rng4() * 1.6;
-          const trunk = box(x, gy + th / 2 - 0.15, z, 0.42, th + 0.3, 0.42, 0x7a5a33, { solid: true });
-          if (trunk.userData.collider) trunk.userData.collider.noCam = true;
-          const foliage = box(x, gy + th + 0.7, z, 2.1 + rng4(), 1.7, 2.1 + rng4(), 0x3f9a4f);
-          flammable.push({ x, z, trunk, foliage, trunkCol: trunk.userData.collider, burning: 0, burnt: false });
+          rng4(); rng4();                         // the old crown's two draws
+          const rec = plantPalm(x, z, gy, th * 1.6 + 1);
+          flammable.push({ x, z, trunk: rec.trunk, foliage: rec.foliage, trunkCol: rec.trunkCol,
+            leafHex: rec.leafHex, barkHex: rec.barkHex, burning: 0, burnt: false });
         }
       }
     })();
 
     if (CBZ.bootStep) CBZ.bootStep("island:rocks");
+    // a faceted boulder of the box's size: a dodecahedron whose corners are
+    // pushed about by a hash of the corner (so shared corners move together
+    // and the solid stays closed), flat-shaded by construction
+    const rockGeos = {};
+    function rockGeo(v, s) {
+      const key = v + "|" + s.toFixed(2);
+      if (rockGeos[key]) return rockGeos[key];
+      const g = new THREE.DodecahedronGeometry(0.62, 0);
+      const p = g.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+        const k = 0.78 + 0.44 * h01g(x * 7 + v * 3, z * 7 + y * 5, 0xb0d);
+        p.setXYZ(i, x * k * s, y * k * s, z * k * s);
+      }
+      g.computeVertexNormals();
+      g.computeBoundingSphere();
+      rockGeos[key] = g;
+      return g;
+    }
     // ---- rocks / cover ----
     // Boulders, not silver dice: earthy grey-brown, randomly rotated and
     // squashed so they read as rough rock — and kept OFF the hill/mountain
@@ -2124,6 +3194,9 @@
       if (gy > 0.8) continue;                 // skip hillsides — no floating cubes on the mountain
       const s = 1 + rng() * 2.2;
       const m = box(x, gy + s * 0.4, z, s, s, s, 0x6e675e, { solid: true });
+      m.geometry.dispose();
+      m.geometry = rockGeo((h01g(x, z, 0xb0c) * 4) | 0, s);
+      m.material.color.setRGB(0.105, 0.098, 0.088);
       m.rotation.set((rng() - 0.5) * 0.5, rng() * Math.PI, (rng() - 0.5) * 0.5);
       m.scale.set(0.8 + rng() * 0.4, 0.55 + rng() * 0.35, 0.8 + rng() * 0.4);
       m.position.y = gy + s * m.scale.y * 0.5 - 0.06;   // rest on the ground, slightly embedded
@@ -2188,8 +3261,8 @@
         }
         for (const t of flammable) {
           t.burning = 0; t.burnt = false;
-          if (t.foliage && t.foliage.material) t.foliage.material.color.setHex(0x3f9a4f);
-          if (t.trunk && t.trunk.material) t.trunk.material.color.setHex(0x6b4a2a);
+          if (t.foliage && t.foliage.material) t.foliage.material.color.setHex(t.leafHex != null ? t.leafHex : 0x3f9a4f);
+          if (t.trunk && t.trunk.material) t.trunk.material.color.setHex(t.barkHex != null ? t.barkHex : 0x6b4a2a);
         }
         // park flung/wrecked cars back where they started
         for (const car of cars) {
@@ -2201,7 +3274,7 @@
           }
         }
         // re-glaze every shattered window for the new match
-        for (const gp of allGlass) { if (gp.shattered) { gp.shattered = false; gp.mesh.visible = true; } }
+        for (const gp of allGlass) { if (gp.shattered) { gp.shattered = false; if (gp.show) gp.show(); else gp.mesh.visible = true; } }
         for (let i = root.children.length - 1; i >= 0; i--) {
           const c = root.children[i];
           if (c.userData && c.userData.transient) {
