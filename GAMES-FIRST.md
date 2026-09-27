@@ -18,7 +18,8 @@ feature **or** as a from-scratch fork.
    `cell-block-z.original.html.bak` was jail as a complete single-file game
    before it became the city. `games/casino.html` (THE GOLDEN ACE) repeated
    that: full arc ($500 → $5,000 or the shark), real rules, every object
-   load-bearing — gated end-to-end by `tools/casino-check.mjs`.
+   load-bearing. (The standalone casino/police/airport drafts were deleted
+   2026-09-27 once their rules lived on in src/games/*.js.)
 3. **Standalone-first fails for SHIPPING.** Build seven venues that way and
    you get seven renderers, seven input systems, seven NPC rigs, seven
    wallets. The fix is not seven better forks — it's ONE engine and games as
@@ -102,9 +103,6 @@ in isolation — but the package is what ships.
   on the paid symbols. Every other town casino's `[E] Sit at the table`
   (`cityOpenCasino`) now opens these same engines — the old menu casino is
   retired (wrap marker: `_pkgWrapped`).
-- `games/casino.html` + `tools/casino-check.mjs` — the standalone design
-  reference and its gate (rules asserts, rigged rounds, RTP enumeration,
-  arc endings, floating-geometry check). The package reuses its exact math.
 
 ## Roles, not one-shots (the platform rule)
 
