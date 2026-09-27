@@ -395,11 +395,9 @@ async function ruleD(rig) {
     else if (u.readout !== wantTxt) fail("D", `the readout says "${u.readout}" at ${s}x`);
     else if (u.value !== u.index) fail("D", `the slider sits at ${u.value} while the clock is at index ${u.index}`);
     else if (u.scale !== s) fail("D", `asked for ${s}x, the clock is at ${u.scale}x`);
-    else if (s !== 1 && !u.hudText.includes(wantTxt)) {
-      fail("D", `the HUD strip does not carry the speed at ${s}x: "${u.hudText}"`);
-    } else if (s === 1 && u.hudText.includes("×")) {
-      fail("D", `the HUD carries a speed chip at 1x, which is furniture: "${u.hudText}"`);
-    } else ok(`${wantTxt}: readout "${u.readout}", slider ${u.value}/${u.index}, HUD carries it`);
+    else if (u.hudText.includes("×")) {
+      fail("D", `the HUD strip carries a speed chip (the slider is the readout since the HUD purge): "${u.hudText}"`);
+    } else ok(`${wantTxt}: readout "${u.readout}", slider ${u.value}/${u.index}`);
   }
 
   /* THE HOLD USED TO BE TESTED THROUGH A LIVE MATCH, and it cannot be any

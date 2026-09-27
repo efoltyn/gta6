@@ -583,10 +583,11 @@
          "SAND BANDITS · 210 MEN · SAND BANDITS" was on screen — the band name
          IS the faction label for every bandit crew, so the header said the
          same thing twice in a line that has to fit on a 390 px phone. */
-      sub: band.men.length + " MEN" +
-           (String(F.label).toUpperCase() === String(band.name).toUpperCase()
-             ? "" : " &middot; " + esc(F.label)) +
-           (band.mood === "hunt" ? " &middot; HUNTING YOU" : ""),
+      /* HUD PURGE: the count is already the split bar's two ends, and a band
+         hunting you is riding at you. The faction stays only when it is not
+         already the name. */
+      sub: String(F.label).toUpperCase() === String(band.name).toUpperCase()
+             ? "" : esc(F.label),
       body: body,
       options: [
         { label: "ATTACK", kind: attackKind, note: Math.round(odds * 100) + "%",
@@ -641,7 +642,7 @@
     const colour = "#" + (band.colour || 0xc4593a).toString(16).padStart(6, "0");
     ctx.screen('<div class="wl-cols">' +
       '<h1 class="wl-h" style="color:' + colour + '">' + esc(band.name) + '</h1>' +
-      '<p class="wl-sub">' + band.men.length + ' MEN &middot; ' + esc(W.faction(band.faction).label) + '</p>' +
+      '<p class="wl-sub">' + band.men.length + ' MEN, ' + esc(W.faction(band.faction).label) + '</p>' +
       tierStack(band.men) +
       '<div class="wl-chips" style="margin:10px 0 12px">' +
         '<span class="wl-chip wl-gold">$' + (band.gold | 0) + '</span>' +

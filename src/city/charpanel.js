@@ -1,6 +1,6 @@
 /* ============================================================
-   city/charpanel.js — YOU, ON YOUR OWN SCREEN: the persistent
-   top-left CHARACTER PANEL + the [I] inventory / wardrobe screen.
+   city/charpanel.js — YOU, ON YOUR OWN SCREEN: the [I] inventory /
+   wardrobe screen.
 
    WHY (the missing self-read): the city already KNOWS everything about
    you — your worn fit (g.cityFit), the chain/watch/ring you OWN
@@ -10,14 +10,9 @@
    tux you bought is actually ON you, that the iced-out chain is worn and
    not just sitting in a duffel. This panel is that mirror.
 
-   • TOP-LEFT PERSISTENT PANEL — a tiny live FRONT-FACING PORTRAIT of
-     your rig (a dedicated CBZ.makeCharacter body, dressed exactly like
-     you via CBZ.cityApplyComposite(g.cityFit)), rendered to a small
-     <canvas> through a dedicated offscreen WebGLRenderer. PERF: it
-     redraws ONLY when the panel is visible AND a cheap signature
-     (fit + items + level) changed — an unchanged look costs nothing.
-     Below it: "Lv.N Title", your wanted ★, the BOUNTY ($), net worth,
-     and the "[I] Inventory" caption.
+   • (the persistent top-left card that used to live here was cut in the
+     2026-09-27 HUD purge; its portrait renderer survives for the [I]
+     screen and mugshot.js.)
 
    • [I] INVENTORY OVERLAY — the Minecraft E-screen, done the city way
      so it can never misfire: on open CBZ.cityMenuOpen=true +
@@ -32,10 +27,8 @@
      CBZ.cityHotbarSelect it.
 
    • [O] HIDE-HUD — hides/shows ALL city HUD (this panel + #cityHud) for
-     a clean, immersive frame. (Was [H]; H is owned by heists.js /
-     realestate.js / interact.js — a 4th handler made H "open a relic",
-     so the hide toggle moved to the verified-free [O], plus an on-panel
-     [×] click control. See the keydown handler + buildPanel.)
+     a clean, immersive frame ([Shift+O]; H belongs to heists.js /
+     realestate.js / interact.js).
 
    COSMETIC ADDITION. Removes nothing, breaks nothing. CITY-ONLY (gated
    on g.mode === "city"); jail / disaster-survival are byte-identical
@@ -606,21 +599,6 @@
     const st = document.createElement("style");
     st.id = "cpCss";
     st.textContent =
-      "#cpPanel{position:fixed;left:max(10px,env(safe-area-inset-left,0px));top:max(10px,env(safe-area-inset-top,0px));z-index:60;width:min(128px,calc(100vw - 20px));max-height:calc(100dvh - max(10px,env(safe-area-inset-top,0px)) - 10px);box-sizing:border-box;font-family:inherit;color:#e8ecf2;pointer-events:none;user-select:none}" +
-      "#cpPanel .cpCard{position:relative;width:100%;box-sizing:border-box;background:rgba(8,11,17,.55);border:1px solid rgba(232,236,242,.12);border-radius:10px;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);overflow:hidden;box-shadow:0 3px 12px rgba(0,0,0,.4)}" +
-      "#cpPanel .cpHide{position:absolute;right:4px;top:4px;z-index:2;width:20px;height:20px;line-height:18px;text-align:center;font-size:15px;font-weight:700;color:#9fb0c6;background:rgba(8,11,17,.6);border:1px solid rgba(232,236,242,.16);border-radius:6px;cursor:pointer;padding:0;pointer-events:auto;font-family:inherit}" +
-      "#cpPanel .cpHide:hover{color:#fff;background:rgba(255,90,90,.32);border-color:rgba(255,120,120,.5)}" +
-      "#cpPanel canvas{display:block;width:100%;height:auto;aspect-ratio:1/1;background:radial-gradient(ellipse at 50% 38%,rgba(60,74,98,.35),rgba(8,11,17,.0) 70%)}" +
-      "#cpPanel .cpMeta{display:block;box-sizing:border-box;padding:6px 8px 7px;border-top:1px solid rgba(232,236,242,.08)}" +
-      "#cpPanel .cpLvl{font-size:13px;font-weight:700;letter-spacing:.2px;line-height:1.15;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.7)}" +
-      "#cpPanel .cpLvl .n{color:#ffd166}" +
-      "#cpPanel .cpStars{font-size:13px;line-height:1.1;margin-top:3px;letter-spacing:1px}" +
-      "#cpPanel .cpRow{display:flex;justify-content:space-between;align-items:baseline;font-size:11px;margin-top:4px;color:#9fb0c6}" +
-      "#cpPanel .cpRow b{color:#e8ecf2;font-weight:700;font-variant-numeric:tabular-nums}" +
-      "#cpPanel .cpRow.bounty b{color:#ff8b6a}" +
-      "#cpPanel .cpRow.worth b{color:#7ed957}" +
-      "#cpPanel .cpHint{margin-top:6px;font-size:10px;letter-spacing:.4px;color:#7f8ba0;text-align:center}" +
-      "#cpPanel .cpHint b{color:#9fb0c6}" +
 
       // full-screen inventory overlay
       "#cpInv{position:fixed;inset:0;z-index:120;display:none;align-items:center;justify-content:center;background:rgba(4,6,10,.72);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);font-family:inherit;color:#e8ecf2}" +
@@ -664,95 +642,12 @@
     document.head.appendChild(st);
   }
 
-  // ============================================================
-  //  TOP-LEFT PANEL DOM
-  // ============================================================
-  let panel = null, pCanvas = null, pLvl = null, pStars = null, pBounty = null, pWorth = null;
+  // (CUT 2026-09-27, HUD PURGE: the persistent top-left CHARACTER CARD,
+  //  portrait, Lv/title, stars, bounty, net worth and an "[I] Inventory
+  //  [Shift+O] Hide" key legend, sat on screen for the whole session. The
+  //  mirror moved where it belongs: the [I] inventory overlay below draws the
+  //  same portrait big, and the world shows the rest.)
   let hudHidden = false;
-  let lastMetaSig = "";
-
-  function buildPanel() {
-    if (panel) return;
-    ensureCss();
-    panel = document.createElement("div");
-    panel.id = "cpPanel";
-    panel.innerHTML =
-      "<div class='cpCard'>" +
-      "<button type='button' class='cpHide' aria-label='Hide HUD'>×</button>" +
-      "<canvas width='128' height='128'></canvas>" +
-      "<div class='cpMeta'>" +
-      "<div class='cpLvl'>Lv.<span class='n'>1</span> <span class='ti'>Nobody</span></div>" +
-      "<div class='cpStars'></div>" +
-      "<div class='cpRow bounty'><span>Bounty</span><b>$0</b></div>" +
-      "<div class='cpRow worth'><span>Net worth</span><b>$0</b></div>" +
-      "<div class='cpHint'><b>[I]</b> Inventory &nbsp; <b>[Shift+O]</b> Hide</div>" +
-      "</div></div>";
-    document.body.appendChild(panel);
-    pCanvas = panel.querySelector("canvas");
-    pLvl = panel.querySelector(".cpLvl");
-    pStars = panel.querySelector(".cpStars");
-    pBounty = panel.querySelector(".cpRow.bounty b");
-    pWorth = panel.querySelector(".cpRow.worth b");
-    // on-panel hide control — the only pointer-interactive element on this
-    // pointer-events:none panel, so it can't eat clicks meant for the world.
-    const hideBtn = panel.querySelector(".cpHide");
-    if (hideBtn) hideBtn.addEventListener("click", function (e) {
-      e.preventDefault();
-      if (e.stopPropagation) e.stopPropagation();
-      setHudHidden(true);
-    });
-    // TOUCH presentation (css/mobile.css collapses the card to a compact chip
-    // under body.touch-tidy): tapping the chip expands/collapses it, and the
-    // INVENTORY pill (swapped in by refreshPanel) opens the same overlay the
-    // [I] key does. Desktop DOM and handlers above are untouched.
-    panel.addEventListener("click", function (e) {
-      if (!CBZ.touchMode) return;
-      if (e.target.closest && e.target.closest(".cpHide")) return;   // ✕ keeps its own handler
-      if (e.target.closest && e.target.closest(".cpInvBtn")) {
-        e.preventDefault(); if (e.stopPropagation) e.stopPropagation();
-        if (g.mode === "city" && g.state === "playing" && !CBZ.cityMenuOpen && !(CBZ.fullMap && CBZ.fullMap.active)) openInv();
-        return;
-      }
-      panel.classList.toggle("cpOpen");
-      // expanding the chip must never show a stale look — force a redraw pass
-      if (panel.classList.contains("cpOpen")) PORT.sig = "";
-    });
-  }
-
-  function starsHtml(w) {
-    w = w | 0; let s = "";
-    for (let i = 1; i <= 5; i++) s += i <= w ? "<span style='color:#ffd166;text-shadow:0 0 7px rgba(255,209,102,.6)'>★</span>" : "<span style='color:#3a4049'>★</span>";
-    return s;
-  }
-
-  // refresh the panel's text + portrait (portrait only on signature change)
-  function refreshPanel() {
-    if (!panel) return;
-    // touch: swap the [I]/[O] key-hint chips for one tappable INVENTORY pill
-    // (done lazily here so it also catches touchMode enabling after build)
-    if (CBZ.touchMode && !panel._tHint) {
-      panel._tHint = 1;
-      const h = panel.querySelector(".cpHint");
-      if (h) h.innerHTML = "<button type='button' class='tpill tpill-sm cpInvBtn'>INVENTORY</button>";
-    }
-    const lvl = CBZ.cityPlayerLevel ? CBZ.cityPlayerLevel() : 1;
-    const title = CBZ.cityPlayerTitle ? CBZ.cityPlayerTitle() : "";
-    const bty = CBZ.cityBounty ? CBZ.cityBounty() : 0;
-    const nw = netWorth();
-    const w = g.wanted | 0;
-    const metaSig = lvl + "|" + title + "|" + bty + "|" + nw + "|" + w;
-    if (metaSig !== lastMetaSig) {
-      lastMetaSig = metaSig;
-      pLvl.querySelector(".n").textContent = lvl;
-      pLvl.querySelector(".ti").textContent = title;
-      pStars.innerHTML = starsHtml(w);
-      pBounty.textContent = fmt$(bty);
-      pWorth.textContent = fmt$(nw);
-    }
-    // portrait: redraw only when the look/level changed
-    const sig = lookSig();
-    if (sig !== PORT.sig) { PORT.sig = sig; drawPortrait(pCanvas, 128); }
-  }
 
   // ============================================================
   //  [I] INVENTORY OVERLAY DOM
@@ -960,14 +855,14 @@
       const def = SLOTS.find((s) => s.key === slotEl.dataset.slot);
       if (!def || !def.cloth) return;
       const id = clothWornIn(def.cloth);
-      if (id && CBZ.cityUnwear) { CBZ.cityUnwear(id); invBigSig = ""; renderInvAll(); refreshPanel(); }
+      if (id && CBZ.cityUnwear) { CBZ.cityUnwear(id); invBigSig = ""; renderInvAll(); }
       return;
     }
     // hotbar slot
     let barEl = n; while (barEl && barEl !== inv && !barEl.dataset.bar) barEl = barEl.parentNode;
     if (barEl && barEl !== inv && barEl.dataset.bar != null) {
       const idx = parseInt(barEl.dataset.bar, 10);
-      if (!isNaN(idx) && CBZ.cityHotbarSelect) { CBZ.cityHotbarSelect(idx); renderHot(); refreshPanel(); }
+      if (!isNaN(idx) && CBZ.cityHotbarSelect) { CBZ.cityHotbarSelect(idx); renderHot(); }
     }
   }
 
@@ -1000,7 +895,6 @@
   // ============================================================
   function setHudHidden(on) {
     hudHidden = !!on;
-    if (panel) panel.style.display = hudHidden ? "none" : "";
     const cHud = document.getElementById("cityHud");
     if (cHud) cHud.style.display = hudHidden ? "none" : "";
   }
@@ -1060,18 +954,9 @@
   // ============================================================
   CBZ.onUpdate(37.2, function () {
     if (!cityNow()) {
-      // outside the city, this panel does not exist (jail/survival untouched)
-      if (panel && panel.style.display !== "none") panel.style.display = "none";
       if (invOpen) closeInv();
       hudHidden = false;
       return;
-    }
-    if (!panel) buildPanel();
-    // honor the hide-HUD toggle; otherwise show + refresh
-    if (hudHidden) { if (panel.style.display !== "none") panel.style.display = "none"; }
-    else {
-      if (panel.style.display === "none") panel.style.display = "";
-      refreshPanel();
     }
     // keep the open overlay's live readouts (hotbar/bounty) current
     if (invOpen) {
@@ -1081,20 +966,12 @@
     }
   });
 
-  // PRE-WARM during the title screen: the first buildPanel+drawPortrait costs
-  // ~1.3s (offscreen WebGL renderer creation for the portrait) — measured as
-  // the single biggest hitch of the first city frame. Building it while the
-  // player is still reading the title hides the stall entirely; the panel
-  // stays display:none until the city updater shows it.
+  // PRE-WARM during the title screen: the offscreen portrait renderer costs
+  // ~1.3s to stand up (a WebGLRenderer). Building it while the player is still
+  // reading the title keeps the first [I] open (and mugshot.js, which borrows
+  // this renderer) from hitching.
   addEventListener("load", function () {
-    setTimeout(function () {
-      try {
-        if (panel) return;
-        buildPanel();
-        panel.style.display = "none";
-        refreshPanel();     // includes the first portrait render = the real cost
-      } catch (e) {}
-    }, 2500);
+    setTimeout(function () { try { buildPortrait(); } catch (e) {} }, 2500);
   }, { once: true });
 
   // ---- public hooks (debug / harness) --------------------------------------
