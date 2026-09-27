@@ -28,6 +28,9 @@
   of guessing. There is NO cap on team size anywhere in this page — the
   input takes what you type and the frame rate tells you the truth.
 ============================================================ -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap">
 <style>
   :root{color-scheme:dark}
   *{box-sizing:border-box}
@@ -37,49 +40,179 @@
   canvas{display:block}
   button{font:inherit;color:inherit}
 
-  /* ---- the war room (setup) ---- */
-  #menu{position:fixed;inset:0;z-index:60;overflow:auto;
-    background:radial-gradient(130% 100% at 50% 0%,#1c2431,#0b0d10 72%);padding:20px 16px 40px}
-  #menu .in{max-width:760px;margin:0 auto}
-  #menu h1{margin:6px 0 2px;font-size:clamp(30px,8vw,52px);letter-spacing:-.02em;line-height:.94}
-  #menu h1 em{font-style:normal;color:#ff7a45}
-  #menu .sub{margin:0 0 18px;opacity:.55;letter-spacing:.18em;font-size:11px}
-  .lbl{font-size:11px;letter-spacing:.22em;opacity:.6;margin:18px 0 8px}
-  .maps{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
-  .maps button{appearance:none;border:1px solid rgba(255,255,255,.14);border-radius:14px;background:rgba(255,255,255,.04);
-    padding:13px 12px;text-align:left;cursor:pointer}
-  .maps button b{display:block;font-size:14px;letter-spacing:.08em}
-  .maps button i{display:block;font-style:normal;font-size:11px;opacity:.55;margin-top:4px}
-  .maps button.on{border-color:#ff7a45;background:rgba(255,122,69,.12)}
-  .teams{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-  @media (max-width:560px){.teams{grid-template-columns:1fr}}
-  .team{border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:14px}
-  .team.red{box-shadow:inset 3px 0 0 #ff5a3d}
-  .team.blue{box-shadow:inset 3px 0 0 #3fa8ff}
-  .team h3{margin:0 0 10px;font-size:13px;letter-spacing:.22em}
-  .team .cnt{display:flex;gap:8px;align-items:center;margin-bottom:10px}
-  .team .cnt button{appearance:none;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);
-    border-radius:10px;width:44px;height:44px;font-size:18px;cursor:pointer;flex:none}
-  .team input[type=number]{appearance:none;-moz-appearance:textfield;width:100%;min-width:0;height:44px;border-radius:10px;
-    border:1px solid rgba(255,255,255,.2);background:rgba(0,0,0,.3);color:inherit;font:700 19px/1 inherit;
-    text-align:center;letter-spacing:.06em}
-  .team input::-webkit-inner-spin-button{display:none}
-  .team select{width:100%;height:42px;border-radius:10px;border:1px solid rgba(255,255,255,.2);
-    background:rgba(0,0,0,.3);color:inherit;font:600 14px/1 inherit;padding:0 10px;margin-bottom:8px}
-  .presets{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  /* ---- the war room (setup) ----
+     A front end, not a form. The page behind it is dark and empty: no WebGL
+     exists yet while this is up, so everything here is CSS. The backdrop is a
+     stack: a readability wash, then the in-engine battle photo
+     (assets/npcwar/warroom.jpg) when it exists, then a CSS dusk over dune
+     ridges that stands in for it when it does not. */
+  #menu{--disp:"Bebas Neue","Oswald",Impact,"Arial Narrow Bold","Arial Narrow",sans-serif;
+    --red:#ff5a3d;--blue:#3fa8ff;--gold:#ffb35c;--ink:#08090c;--line:rgba(255,255,255,.13);
+    position:fixed;inset:0;z-index:60;overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    padding:0 16px;background-color:var(--ink);
+    background-image:
+      linear-gradient(180deg,rgba(8,9,12,.25) 0%,rgba(8,9,12,.5) 34%,rgba(8,9,12,.9) 62%,#08090c 88%),
+      url(../assets/npcwar/warroom.jpg),
+      radial-gradient(70% 22% at 22% 58%,#2b1a10 58%,transparent 59%),
+      radial-gradient(90% 26% at 86% 62%,#1f130c 58%,transparent 59%),
+      radial-gradient(60% 34% at 62% 30%,rgba(255,168,92,.55),transparent 70%),
+      linear-gradient(180deg,#141722 0%,#3a2a2c 22%,#9a5a36 44%,#d98a4b 52%,#3a2416 53%,#0d0907 80%);
+    background-size:cover,cover,auto,auto,auto,auto;
+    background-position:center,center 32%,0 0,0 0,0 0,0 0;
+    background-repeat:no-repeat}
+  #menu .in{max-width:980px;margin:0 auto;padding:0 0 28px}
+  #menu .hero{padding:calc(9vh + env(safe-area-inset-top,0px)) 0 22px;text-align:center}
+  #menu .kick{font:400 14px/1 var(--disp);letter-spacing:.42em;color:var(--gold);opacity:.9}
+  #menu h1{margin:8px 0 6px;font:400 clamp(76px,19vw,150px)/.82 var(--disp);letter-spacing:.02em;
+    text-shadow:0 6px 40px rgba(0,0,0,.55)}
+  #menu h1 em{font-style:normal;color:#ff6a3d}
+  #menu .sub{margin:0 auto;max-width:440px;font-size:14px;font-weight:500;opacity:.72;letter-spacing:.02em}
+
+  #menu section{margin-top:26px}
+  .lbl{display:flex;align-items:baseline;gap:10px;margin:0 0 12px;font:400 22px/1 var(--disp);letter-spacing:.12em}
+  .lbl b{font-weight:400;color:var(--gold);font-size:15px;letter-spacing:.1em}
+  .lbl i{font:500 12px/1.2 ui-sans-serif,system-ui,sans-serif;font-style:normal;opacity:.5;letter-spacing:.04em;margin-left:auto;text-align:right}
+
+  /* THE QUESTIONS: poster cards. A swipe row on a phone, a wall on a desk. */
+  .mus{display:grid;grid-auto-flow:column;grid-auto-columns:min(74vw,280px);gap:12px;overflow-x:auto;
+    scroll-snap-type:x mandatory;margin:0 -16px;padding:2px 16px 10px;scrollbar-width:none}
+  .mus::-webkit-scrollbar{display:none}
+  @media (min-width:760px){.mus{grid-auto-flow:row;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));
+    grid-auto-columns:auto;overflow:visible;margin:0;padding:0}}
+  .mu{appearance:none;position:relative;display:flex;flex-direction:column;justify-content:flex-end;min-height:150px;
+    padding:14px 14px 16px;border-radius:16px;border:1px solid var(--line);text-align:left;cursor:pointer;
+    scroll-snap-align:start;overflow:hidden;background:#15171c;transition:transform .15s,border-color .15s,box-shadow .15s}
+  .mu::before{content:"";position:absolute;inset:0;z-index:0;background:var(--art)}
+  .mu::after{content:"";position:absolute;inset:0;z-index:0;background:linear-gradient(180deg,rgba(8,9,12,.05),rgba(8,9,12,.78) 70%)}
+  .mu>*{position:relative;z-index:1}
+  .mu .mg{position:absolute;top:12px;left:14px;font:600 10px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.2em;
+    padding:5px 8px;border-radius:999px;background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.14)}
+  .mu .mq{font:400 27px/.98 var(--disp);letter-spacing:.03em}
+  .mu .mq em{font-style:normal;color:var(--gold);padding:0 .12em}
+  .mu .ms{margin-top:6px;font-size:12px;font-weight:500;opacity:.72}
+  .mu .mb{position:absolute;left:0;right:0;bottom:0;height:3px;display:flex}
+  .mu .mb s{flex:1}
+  .mu .mb s:first-child{background:var(--red)}
+  .mu .mb s:last-child{background:var(--blue)}
+  .mu:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.3)}
+  .mu.on{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold),0 10px 30px rgba(255,179,92,.18)}
+  .mu.on .mg{background:var(--gold);color:#1a1006;border-color:var(--gold)}
+
+  /* the art each ground carries, on its own card and on every question fought there */
+  .art-dunes{--art:radial-gradient(120% 55% at 28% 112%,#a86a36 58%,transparent 59%),
+    radial-gradient(110% 50% at 88% 118%,#7d4d26 58%,transparent 59%),
+    radial-gradient(90% 60% at 70% -10%,rgba(255,226,170,.55),transparent 60%),
+    linear-gradient(180deg,#e7a468 0%,#c97d44 52%,#9a5c2e 100%)}
+  .art-water{--art:radial-gradient(120% 45% at 50% -8%,rgba(150,215,255,.35),transparent 70%),
+    repeating-linear-gradient(176deg,rgba(255,255,255,.06) 0 2px,transparent 2px 17px),
+    linear-gradient(180deg,#1f6590 0%,#0f3a5e 50%,#061a2c 100%)}
+  .art-arena{--art:repeating-linear-gradient(90deg,rgba(255,255,255,.05) 0 1px,transparent 1px 34px),
+    repeating-linear-gradient(0deg,rgba(255,255,255,.04) 0 1px,transparent 1px 34px),
+    linear-gradient(180deg,#4a4f57 0%,#2b2f35 100%)}
+  .art-venue{--art:radial-gradient(90% 70% at 80% -10%,rgba(255,190,120,.18),transparent 60%),
+    linear-gradient(180deg,#262b33 0%,#16191e 100%)}
+
+  /* THE GROUND */
+  .maps{display:grid;gap:12px}
+  .maps .gfeat{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .maps button{appearance:none;position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;
+    min-height:64px;padding:14px;border-radius:16px;border:1px solid var(--line);background:#15171c;
+    text-align:left;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+  .maps button::before{content:"";position:absolute;inset:0;background:var(--art)}
+  .maps button::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 20%,rgba(8,9,12,.72))}
+  .maps button>*{position:relative;z-index:1}
+  .maps button b{display:block;font:400 22px/1 var(--disp);letter-spacing:.08em}
+  .maps button i{display:block;font-style:normal;font-size:12px;font-weight:500;opacity:.72;margin-top:5px}
+  .maps .gfeat button{min-height:clamp(128px,24vw,190px)}
+  .maps .gfeat button b{font-size:clamp(26px,5vw,36px)}
+  .maps button.on{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold)}
+  .maps button.on b::after{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;
+    background:var(--gold);margin-left:10px;vertical-align:middle;transform:translateY(-3px)}
+  .maps details{border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.025)}
+  .maps summary{list-style:none;display:flex;align-items:center;gap:10px;min-height:52px;padding:0 16px;cursor:pointer;
+    font:400 19px/1 var(--disp);letter-spacing:.12em}
+  .maps summary::-webkit-details-marker{display:none}
+  .maps summary::after{content:"+";margin-left:auto;font:300 24px/1 ui-sans-serif,system-ui,sans-serif;opacity:.6}
+  .maps details[open] summary::after{content:"\2212"}
+  .maps summary i{font:500 12px/1 ui-sans-serif,system-ui,sans-serif;font-style:normal;opacity:.5;letter-spacing:.02em}
+  .maps .gmore{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;padding:0 12px 12px}
+  .maps .gmore button{min-height:78px}
+  .maps .gmore button b{font-size:18px}
+
+  /* THE ARMIES: two facing panels and a V between them */
+  .teams{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:stretch}
+  .teams .vs{align-self:center;font:400 44px/1 var(--disp);color:var(--gold);text-shadow:0 0 24px rgba(255,179,92,.35)}
+  @media (max-width:620px){.teams{grid-template-columns:1fr}.teams .vs{justify-self:center;margin:-4px 0;font-size:36px}}
+  .team{border:1px solid var(--line);border-radius:18px;padding:16px;background:rgba(14,16,20,.72);
+    backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+  .team.red{background:linear-gradient(180deg,rgba(255,90,61,.16),rgba(14,16,20,.72) 42%);border-color:rgba(255,90,61,.38)}
+  .team.blue{background:linear-gradient(180deg,rgba(63,168,255,.16),rgba(14,16,20,.72) 42%);border-color:rgba(63,168,255,.38)}
+  .team .th{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px}
+  .team h3{margin:0;font:400 30px/1 var(--disp);letter-spacing:.14em}
+  .team.red h3{color:#ff8a70}
+  .team.blue h3{color:#7cc4ff}
+  .team .kind{font-size:12px;font-weight:700;letter-spacing:.1em;opacity:.7;text-align:right;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .team .cnt{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+  .team .cnt button{appearance:none;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.07);
+    border-radius:14px;width:54px;height:60px;font:300 28px/1 ui-sans-serif,system-ui,sans-serif;cursor:pointer;flex:none}
+  .team .cnt button:active{background:rgba(255,255,255,.16)}
+  .team input[type=number]{appearance:none;-moz-appearance:textfield;width:100%;min-width:0;height:60px;border-radius:14px;
+    border:1px solid rgba(255,255,255,.16);background:rgba(0,0,0,.35);color:inherit;
+    font:400 44px/1 var(--disp);text-align:center;letter-spacing:.04em;padding:4px 0 0;
+    -webkit-user-select:text;user-select:text}
+  .team input::-webkit-inner-spin-button,.team input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+  .team .f{display:block;margin-bottom:8px;transition:opacity .15s}
+  .team .f>span{display:block;font-size:10px;font-weight:700;letter-spacing:.2em;opacity:.5;margin:0 0 4px 2px}
+  .team .f.off{opacity:.32}
+  .team select{appearance:none;-webkit-appearance:none;width:100%;height:46px;border-radius:12px;
+    border:1px solid rgba(255,255,255,.16);background:rgba(0,0,0,.35) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23f2efe8' stroke-width='1.8' stroke-opacity='.6'/%3E%3C/svg%3E") right 14px center/12px 8px no-repeat;
+    color:inherit;font:700 14px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.06em;padding:0 36px 0 12px;cursor:pointer}
+  .team select:disabled{cursor:default}
+  .team select:focus-visible,.team input:focus-visible{outline:2px solid var(--gold);outline-offset:1px}
+  .team select option,.team select optgroup{background:#15171c;color:#f2efe8}
+  .presets{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}
+  .presets>span{font-size:10px;font-weight:700;letter-spacing:.2em;opacity:.5;margin-right:4px}
   .presets button{appearance:none;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.05);
-    border-radius:999px;padding:9px 14px;font-size:12px;letter-spacing:.1em;cursor:pointer}
-  #start{appearance:none;border:0;cursor:pointer;width:100%;margin-top:20px;
-    padding:20px;border-radius:18px;background:#4fbf6a;color:#07130b;font:800 20px/1 inherit;
-    letter-spacing:.14em;box-shadow:0 6px 0 #2f8a4a}
-  #start:active{transform:translateY(3px);box-shadow:0 3px 0 #2f8a4a}
-  #bench{appearance:none;cursor:pointer;width:100%;margin-top:10px;padding:14px;border-radius:14px;
-    border:1px solid rgba(255,255,255,.22);background:transparent;font:700 14px/1 inherit;letter-spacing:.14em}
-  #maxline{margin-top:10px;font-size:11px;letter-spacing:.16em;opacity:.5;text-align:center;min-height:14px}
-  #bootst{margin-top:14px;font-size:11px;letter-spacing:.2em;opacity:.45;text-align:center;min-height:14px}
-  #boottrack{margin:8px auto 0;max-width:280px;height:2px;border-radius:2px;background:rgba(255,255,255,.1)}
-  #bootbar{height:100%;width:0;border-radius:2px;background:#4fbf6a;transition:width .18s linear}
+    border-radius:999px;min-height:44px;padding:0 16px;font:400 18px/1 var(--disp);letter-spacing:.08em;cursor:pointer}
+  .presets button:active,.presets button.on{border-color:var(--gold);color:var(--gold)}
+
+  /* THE CALL */
+  .callrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .callrow button{appearance:none;cursor:pointer;min-height:84px;border-radius:18px;padding:12px 14px;text-align:center;
+    border:1px solid var(--line);background:rgba(14,16,20,.7);transition:background .15s,border-color .15s,transform .1s}
+  .callrow button b{display:block;font:400 34px/1 var(--disp);letter-spacing:.14em}
+  .callrow button i{display:block;font-style:normal;font-size:12px;font-weight:600;opacity:.6;margin-top:4px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .callrow .cr b{color:#ff8a70}
+  .callrow .cb b{color:#7cc4ff}
+  .callrow .cr.on{background:linear-gradient(180deg,rgba(255,90,61,.45),rgba(255,90,61,.2));border-color:var(--red)}
+  .callrow .cb.on{background:linear-gradient(180deg,rgba(63,168,255,.45),rgba(63,168,255,.2));border-color:var(--blue)}
+  .callrow .on b{color:#fff}
+  .callrow button:active{transform:scale(.98)}
+  #streak{margin-top:12px;min-height:14px;white-space:pre;text-align:center;font:400 16px/1 var(--disp);letter-spacing:.2em;color:var(--gold);opacity:.9}
+
+  /* START: docked to the bottom of the screen while you scroll the choices */
+  .dock{position:sticky;bottom:0;z-index:2;margin:26px -16px 0;
+    padding:26px 16px calc(14px + env(safe-area-inset-bottom,0px));
+    background:linear-gradient(180deg,rgba(8,9,12,0),rgba(8,9,12,.92) 34%,#08090c)}
+  .dock .din{max-width:620px;margin:0 auto}
+  #start{appearance:none;border:0;cursor:pointer;display:block;width:100%;min-height:68px;padding:6px 20px 0;border-radius:18px;
+    background:linear-gradient(180deg,#ffc56e,#ff8a3d);color:#1a0d04;font:400 34px/1 var(--disp);letter-spacing:.16em;
+    box-shadow:0 6px 0 #b4531c,0 18px 40px rgba(255,138,61,.28);transition:transform .08s,box-shadow .08s,opacity .2s}
+  #start:hover{filter:brightness(1.06)}
+  #start:active{transform:translateY(4px);box-shadow:0 2px 0 #b4531c,0 8px 20px rgba(255,138,61,.2)}
+  #menu:not(.ready) #start{opacity:.55;cursor:progress}
+  #bootst{margin-top:12px;font-size:10px;font-weight:700;letter-spacing:.24em;opacity:.45;text-align:center;min-height:13px}
+  #boottrack{margin:7px auto 0;max-width:320px;height:3px;border-radius:3px;background:rgba(255,255,255,.1);overflow:hidden}
+  #bootbar{height:100%;width:0;border-radius:3px;background:linear-gradient(90deg,#ff8a3d,#ffc56e);transition:width .18s linear}
   #boottrack.done{opacity:0;transition:opacity .5s}
+  .quiet{text-align:center;padding:4px 0 calc(22px + env(safe-area-inset-bottom,0px))}
+  #bench{appearance:none;cursor:pointer;min-height:44px;padding:0 14px;border:0;background:transparent;
+    font-size:12px;font-weight:700;letter-spacing:.2em;opacity:.55;text-decoration:underline;text-underline-offset:5px;
+    text-decoration-color:rgba(255,255,255,.3)}
+  #bench:hover{opacity:.9}
+  #maxline{font-size:11px;letter-spacing:.16em;opacity:.45;text-align:center;min-height:14px}
 
   /* ---- battle chrome ---- */
   #top{position:fixed;left:50%;top:calc(10px + env(safe-area-inset-top,0px));transform:translateX(-50%);
@@ -102,17 +235,60 @@
   #ctl button.on{background:rgba(255,122,69,.28);border-color:#ff7a45}
   body.coarse #ctl button{min-width:52px;height:52px}
   #banner{position:fixed;left:50%;top:26%;transform:translateX(-50%);z-index:44;pointer-events:none;
-    font-size:clamp(20px,5.4vw,38px);letter-spacing:.1em;text-align:center;opacity:0;transition:opacity .4s;
-    text-shadow:0 2px 12px rgba(0,0,0,.8);white-space:nowrap}
-  #banner.on{opacity:.96}
-  #banner small{display:block;font-size:12px;letter-spacing:.3em;opacity:.6;margin-top:8px}
-  #end{position:fixed;inset:0;display:none;place-items:center;z-index:62;background:rgba(9,11,14,.9);padding:26px}
-  #end .in{text-align:center;max-width:440px;width:100%}
-  #end h2{margin:0 0 14px;font-size:clamp(26px,7vw,42px)}
-  #end table{margin:0 auto 22px;border-collapse:collapse;font-variant-numeric:tabular-nums}
-  #end td{padding:6px 16px;opacity:.85;text-align:left}
+    font:400 clamp(34px,7.4vw,68px)/1 "Bebas Neue","Oswald",Impact,ui-sans-serif,system-ui,sans-serif;
+    letter-spacing:.06em;text-align:center;opacity:0;transition:opacity .45s,transform .6s cubic-bezier(.2,.8,.2,1);
+    text-shadow:0 3px 18px rgba(0,0,0,.75),0 0 2px rgba(0,0,0,.6);white-space:nowrap}
+  #banner.on{opacity:.97;transform:translateX(-50%) scale(1.02)}
+  #banner small{display:block;font:800 12px/1.2 ui-sans-serif,system-ui,sans-serif;letter-spacing:.34em;opacity:.75;margin-top:10px}
+  /* ---- THE RESULT: a verdict, not a spreadsheet ---- */
+  #end{position:fixed;inset:0;display:none;place-items:center;z-index:62;overflow:auto;
+    background:radial-gradient(120% 90% at 50% 20%,rgba(20,16,12,.72),rgba(6,7,9,.94) 70%);
+    padding:calc(22px + env(safe-area-inset-top,0px)) 16px calc(22px + env(safe-area-inset-bottom,0px));
+    backdrop-filter:blur(3px);animation:endIn .5s ease-out}
+  @keyframes endIn{from{opacity:0}to{opacity:1}}
+  #end .in{text-align:center;max-width:520px;width:100%}
+  #endKick{font-size:11px;letter-spacing:.34em;opacity:.55}
+  #end h2{margin:6px 0 6px;font-size:clamp(34px,9vw,60px);letter-spacing:.02em;line-height:1;
+    font-family:"Bebas Neue","Oswald",Impact,ui-sans-serif,system-ui,sans-serif;font-weight:400;text-shadow:0 4px 24px rgba(0,0,0,.6)}
+  #end h2.red{color:#ff7a5c} #end h2.blue{color:#7cc4ff}
+  #endCall{min-height:22px;font-size:14px;letter-spacing:.2em;font-weight:800;margin-bottom:14px}
+  #endCall.right{color:#8fe3a0} #endCall.wrong{color:#ff9a7a}
+  #endCall small{display:block;font-size:10px;letter-spacing:.26em;opacity:.6;font-weight:700;margin-top:4px;color:#f2efe8}
+  #endScore{display:flex;align-items:center;justify-content:center;gap:18px;margin:6px 0 12px;font-variant-numeric:tabular-nums}
+  #endScore .side{display:flex;flex-direction:column;align-items:center;min-width:110px}
+  #endScore b{font-size:44px;line-height:1;font-weight:800}
+  #endScore .red b{color:#ff7a5c} #endScore .blue b{color:#7cc4ff}
+  #endScore span{font-size:10px;letter-spacing:.24em;opacity:.55;margin-top:4px}
+  #endScore .vs{opacity:.35;font-weight:800}
+  #endMvp{font-size:12px;letter-spacing:.16em;margin:0 0 12px;min-height:16px}
+  #endMvp b{color:#ffd08a}
+  #end table{margin:0 auto 16px;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:13px;
+    background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden}
+  #end td{padding:6px 14px;opacity:.85;text-align:left;border-top:1px solid rgba(255,255,255,.05)}
+  #end tr:first-child td{border-top:0}
   #end td+td{text-align:right}
-  #end .row{display:flex;gap:10px}
+  #end .next{margin:4px 0 12px}
+  #end .nl{font-size:10px;letter-spacing:.28em;opacity:.55;margin-bottom:8px}
+  #end .calls{display:flex;gap:10px;justify-content:center}
+  #end .calls button{flex:0 1 140px;padding:12px 10px;border-radius:12px}
+  #end .calls button.cr.on{background:rgba(255,90,61,.3);border-color:#ff5a3d}
+  #end .calls button.cb.on{background:rgba(63,168,255,.3);border-color:#3fa8ff}
+  #end .row{display:flex;gap:10px;margin-top:10px}
+  #end .row.small button{padding:11px 8px;font-size:12px;opacity:.8}
+  /* BACK TO THE HUB: index.html remembers the last game, so this lands on NPC War's tile */
+  #end a.hub{flex:1;display:flex;align-items:center;justify-content:center;padding:11px 8px;border-radius:999px;
+    border:1px solid rgba(255,255,255,.25);color:inherit;text-decoration:none;font:700 12px/1 inherit;letter-spacing:.14em;opacity:.8}
+  .hubLink{position:absolute;left:calc(16px + env(safe-area-inset-left,0px));top:calc(14px + env(safe-area-inset-top,0px));
+    z-index:3;display:inline-flex;align-items:center;min-height:44px;padding:0 14px;border-radius:999px;
+    background:rgba(8,10,12,.45);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(6px);
+    color:#f2efe8;text-decoration:none;font:800 11px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.2em}
+  .hubLink:hover{background:rgba(255,255,255,.1)}
+  #end button.big2{background:rgba(255,208,138,.14);border-color:rgba(255,208,138,.6);color:#ffd08a}
+  /* the call, riding the battle so it is never forgotten */
+  #warcall{position:fixed;left:50%;transform:translateX(-50%);top:calc(60px + env(safe-area-inset-top,0px));
+    z-index:41;display:none;pointer-events:none;font-size:11px;letter-spacing:.2em;font-weight:800;padding:7px 11px;
+    border-radius:10px;background:rgba(12,14,17,.55);border:1px solid rgba(255,255,255,.12);backdrop-filter:blur(6px)}
+  #warcall.red{color:#ff8a70} #warcall.blue{color:#7cc4ff}
   #end button{appearance:none;border:1px solid rgba(255,255,255,.25);background:transparent;color:inherit;
     flex:1;padding:15px 10px;border-radius:999px;font:700 14px/1 inherit;letter-spacing:.14em;cursor:pointer}
   #end button.big{background:#4fbf6a;border:0;color:#07130b}
@@ -145,55 +321,81 @@
 <body>
 
 <div id="menu"><div class="in">
-  <h1>NPC <em>WAR</em></h1>
-  <p class="sub">TWO ARMIES. YOUR CLOCK. NO CAP.</p>
+  <a class="hubLink" href="../index.html">MAIN MENU</a>
+  <header class="hero">
+    <div class="kick">A BATTLE YOU WATCH</div>
+    <h1>NPC <em>WAR</em></h1>
+    <p class="sub">Any two armies. Any ground. Make your call, then watch who is still standing.</p>
+  </header>
 
-  <div class="lbl">GROUND</div>
-  <div class="maps" id="maps"></div>
+  <section>
+    <div class="lbl"><b>01</b>THE QUESTION<i>tap one, or build your own below</i></div>
+    <div class="mus" id="matchups"></div>
+  </section>
 
-  <div class="teams" style="margin-top:16px">
-    <div class="team red">
-      <h3>RED</h3>
-      <div class="cnt">
-        <button data-t="red" data-d="-10">&minus;</button>
-        <input id="redN" type="number" inputmode="numeric" min="1" value="30">
-        <button data-t="red" data-d="10">+</button>
+  <section>
+    <div class="lbl"><b>02</b>THE GROUND</div>
+    <div class="maps" id="maps"></div>
+  </section>
+
+  <section>
+    <div class="lbl"><b>03</b>THE ARMIES</div>
+    <div class="teams">
+      <div class="team red">
+        <div class="th"><h3>RED</h3><span class="kind" id="redK"></span></div>
+        <div class="cnt">
+          <button data-t="red" data-d="-1" aria-label="fewer red">&minus;</button>
+          <input id="redN" type="number" inputmode="numeric" min="1" value="30" aria-label="red count">
+          <button data-t="red" data-d="1" aria-label="more red">+</button>
+        </div>
+        <label class="f"><span>WHO</span><select id="redU"></select></label>
+        <label class="f"><span>ARMED WITH</span><select id="redW"></select></label>
+        <label class="f"><span>TRAINING</span><select id="redT"></select></label>
+        <label class="f"><span>AIR SUPPORT</span><select id="redS"></select></label>
       </div>
-      <select id="redU"></select>
-      <select id="redW"></select>
-      <select id="redT"></select>
-      <select id="redS"></select>
-    </div>
-    <div class="team blue">
-      <h3>BLUE</h3>
-      <div class="cnt">
-        <button data-t="blue" data-d="-10">&minus;</button>
-        <input id="blueN" type="number" inputmode="numeric" min="1" value="30">
-        <button data-t="blue" data-d="10">+</button>
+      <div class="vs">V</div>
+      <div class="team blue">
+        <div class="th"><h3>BLUE</h3><span class="kind" id="blueK"></span></div>
+        <div class="cnt">
+          <button data-t="blue" data-d="-1" aria-label="fewer blue">&minus;</button>
+          <input id="blueN" type="number" inputmode="numeric" min="1" value="30" aria-label="blue count">
+          <button data-t="blue" data-d="1" aria-label="more blue">+</button>
+        </div>
+        <label class="f"><span>WHO</span><select id="blueU"></select></label>
+        <label class="f"><span>ARMED WITH</span><select id="blueW"></select></label>
+        <label class="f"><span>TRAINING</span><select id="blueT"></select></label>
+        <label class="f"><span>AIR SUPPORT</span><select id="blueS"></select></label>
       </div>
-      <select id="blueU"></select>
-      <select id="blueW"></select>
-      <select id="blueT"></select>
-      <select id="blueS"></select>
     </div>
+    <div class="presets" id="presets">
+      <span>BOTH SIDES</span>
+      <button data-n="1">1 v 1</button>
+      <button data-n="10">10 v 10</button>
+      <button data-n="30">30 v 30</button>
+      <button data-n="80">80 v 80</button>
+      <button data-n="200">200 v 200</button>
+      <button data-n="500">500 v 500</button>
+    </div>
+  </section>
+
+  <section>
+    <div class="lbl"><b>04</b>WHO WINS?<i>make the call, or leave it open</i></div>
+    <div class="callrow" id="callrow">
+      <button class="cr" data-call="red"><b>RED</b><i id="redCallK"></i></button>
+      <button class="cb" data-call="blue"><b>BLUE</b><i id="blueCallK"></i></button>
+    </div>
+    <div id="streak"></div>
+  </section>
+
+  <div class="dock"><div class="din">
+    <button id="start">START THE WAR</button>
+    <div id="bootst"></div>
+    <div id="boottrack"><div id="bootbar"></div></div>
+  </div></div>
+  <div class="quiet">
+    <button id="bench">FIND MY MAX</button>
+    <div id="maxline"></div>
   </div>
-
-  <div class="presets" id="presets">
-    <button data-n="10">10 v 10</button>
-    <button data-n="30">30 v 30</button>
-    <button data-n="80">80 v 80</button>
-    <button data-n="200">200 v 200</button>
-    <button data-n="500">500 v 500</button>
-  </div>
-
-  <div class="lbl">THE MATCHUPS</div>
-  <div class="presets" id="matchups"></div>
-
-  <button id="start">START THE WAR</button>
-  <button id="bench">FIND MY MAX</button>
-  <div id="maxline"></div>
-  <div id="bootst"></div>
-  <div id="boottrack"><div id="bootbar"></div></div>
 </div></div>
 
 <div id="top">
@@ -211,6 +413,7 @@
   <button data-s="4">4</button>
   <button data-s="8">8</button>
   <button id="cCam">AUTO CAM</button>
+  <button id="cSetup">SETUP</button>
 </div>
 <div id="banner"></div>
 <div id="nflash"></div>
@@ -224,14 +427,28 @@
 </div>
 
 <div id="end"><div class="in">
+  <div id="endKick">THE RESULT</div>
   <h2 id="endT">RESULT</h2>
+  <div id="endCall"></div>
+  <div id="endScore"><div class="side red"><b id="endRedN">0</b><span>RED STANDING</span></div>
+    <div class="vs">V</div><div class="side blue"><b id="endBlueN">0</b><span>BLUE STANDING</span></div></div>
+  <div id="endMvp"></div>
   <table id="endTable"></table>
+  <div class="next">
+    <div class="nl">NEXT ROUND, WHO WINS?</div>
+    <div class="calls"><button data-call="red" class="cr">RED</button><button data-call="blue" class="cb">BLUE</button></div>
+  </div>
   <div class="row">
-    <button id="endWatch">WATCH</button>
+    <button id="endAgain" class="big">REMATCH</button>
+    <button id="endLoser" class="big2">LOSER +50%</button>
+  </div>
+  <div class="row small">
+    <button id="endWatch">KEEP WATCHING</button>
     <button id="endMenu">SETUP</button>
-    <button id="endAgain" class="big">AGAIN</button>
+    <a class="hub" href="../index.html">MAIN MENU</a>
   </div>
 </div></div>
+<div id="warcall"></div>
 
 <!-- ============ ONE TAG FOR THE STUDIO ============================
   The packs below are the studio's front door. The combat stack under
@@ -252,7 +469,7 @@ const bootst = function (t) { const n = el("bootst"); if (n) n.textContent = t; 
 const Q = new URLSearchParams(location.search);
 const saved = (function () { try { return JSON.parse(localStorage.getItem("cbz-npcwar") || "{}"); } catch (e) { return {}; } })();
 const SET = {
-  map:   Q.get("map")  || saved.map  || "city",
+  map:   Q.get("map")  || saved.map  || "dunes",
   redN:  parseInt(Q.get("red")  || saved.redN  || 30, 10) || 30,
   blueN: parseInt(Q.get("blue") || saved.blueN || 30, 10) || 30,
   redU:  Q.get("ru") || saved.redU || "men",     // WHO fights: "men" or a bestiary species id
@@ -265,7 +482,12 @@ const SET = {
   blueS: Q.get("bs") || saved.blueS || "none",
   bench: Q.get("bench") === "1",
   auto:  Q.get("auto") === "1",
+  /* THE CALL: who you said would win, "red" | "blue" | null. Set on the war
+     room, persisted in the blob by readMenu(); the end screen scores it
+     against "cbz-npcwar-streak" ({streak, best, calls, right}). */
+  call:  Q.get("call") || null,
 };
+if (SET.call !== "red" && SET.call !== "blue") SET.call = null;
 /* The quality counters cost a segment test and a lane scan on every trigger
    pull, which is worth paying when a tool is watching and worth nothing when
    a person is. On for ?auto=1 and ?bench=1 (both are tools), on for ?probe=1,
@@ -410,7 +632,7 @@ const MAPS = {
   harbor:   { label: "CAPE HARBOR", note: "the coastal strip. apron, helipads", packs: ["capeharbor"], raise: ["capeharbor"], sea: true },
   marina:   { label: "THE MARINA", note: "basin, pontoons, moored boats", packs: ["marina"], raise: ["marina"], sea: true },
   speedway: { label: "THE SPEEDWAY", note: "banked oval. a ground that is NOT flat", packs: ["speedway"], raise: ["speedway"], sea: true },
-  dunes:    { label: "OPEN DUNES", note: "rolling sand. crests hide men", packs: ["desert"] },
+  dunes:    { label: "OPEN DUNES", note: "rolling sand. crests hide men", packs: ["desert"], featured: true },
   /* OPEN WATER — the one venue with NO GROUND IN IT.
 
      Every other row above raises a place. This one raises nothing, on purpose:
@@ -425,10 +647,10 @@ const MAPS = {
      lays the flat -9 m deep plate the raised island venues sit in, and this map
      builds its own seabed forty metres further down. Two plates would fight for
      the depth buffer, which is the exact bug the seaPlate comment records. */
-  water:    { label: "OPEN WATER", note: "real ocean. swell, depth, no land", packs: [], ocean: true },
+  water:    { label: "OPEN WATER", note: "real ocean. swell, depth, no land", packs: [], ocean: true, featured: true },
   arena:    { label: "KILL BOX", note: "flat yard. crates. walls", packs: [] },
 };
-if (!MAPS[SET.map]) SET.map = "city";
+if (!MAPS[SET.map]) SET.map = "dunes";
 
 const TRAININGS = [
   { id: "civ",   label: "UNTRAINED",  role: "civilian", hp: 90 },
@@ -499,6 +721,7 @@ const ARMOURY = [
   "systems/gunfx.js",          // tracers, flashes, impacts, holes, suppression
   "systems/combat_iq.js",      // HOW WELL A PERSON FIGHTS — the whole point
   "systems/wounds.js",         // bodies remember hits (optional, self-capping)
+  "world/hull_loft.js",        // the game's own lofted boat hulls (OPEN WATER's fleet)
 ];
 /* THE LOAD USED TO BE THIRTY-ONE ROUND TRIPS IN A ROW.
 
@@ -616,21 +839,50 @@ CBZ.studio.need(NEED).then(function () {
      the finger arrives the city is already in the cache. */
   const mapsEl = el("maps");
   const pickMap = {};                     // id -> select this ground (matchups use it)
+  /* THREE TIERS OF GROUND. The two open grounds (`featured`) are the big
+     cards; the kill box sits under them; the raised Gang City venues (and the
+     downtown itself) live behind MORE GROUNDS. Every map is still one <button>
+     inside #maps, which is what the capture tools count. */
+  const artOf = function (id) {
+    return id === "dunes" || id === "water" || id === "arena" ? "art-" + id : "art-venue";
+  };
+  const tierOf = function (id) {
+    return MAPS[id].featured ? "feat" : (MAPS[id].raise || id === "city") ? "more" : "main";
+  };
+  mapsEl.innerHTML = "";
+  const gFeat = document.createElement("div"); gFeat.className = "gfeat";
+  const gMain = document.createElement("div"); gMain.className = "gmain";
+  const gDet = document.createElement("details");
+  const gMore = document.createElement("div"); gMore.className = "gmore";
+  const moreIds = Object.keys(MAPS).filter(function (id) { return tierOf(id) === "more"; });
+  gDet.innerHTML = "<summary>MORE GROUNDS<i>" + moreIds.length + " Gang City venues</i></summary>";
+  gDet.appendChild(gMore);
+  mapsEl.appendChild(gFeat); mapsEl.appendChild(gMain);
+  if (moreIds.length) mapsEl.appendChild(gDet);
   Object.keys(MAPS).forEach(function (id) {
     const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.map = id;
     b.innerHTML = "<b>" + MAPS[id].label + "</b><i>" + MAPS[id].note + "</i>";
-    b.className = id === SET.map ? "on" : "";
+    b.className = artOf(id) + (id === SET.map ? " on" : "");
     const pick = function () {
       SET.map = id;
-      mapsEl.querySelectorAll("button").forEach(function (x) { x.className = ""; });
-      b.className = "on";
+      mapsEl.querySelectorAll("button").forEach(function (x) { x.classList.remove("on"); });
+      b.classList.add("on");
+      if (tierOf(id) === "more") gDet.open = true;
       CBZ.studio.prefetch(MAPS[id].packs);
     };
     pickMap[id] = pick;
-    b.addEventListener("click", pick);
+    b.addEventListener("click", function () { pick(); menuTouched(); });
     b.addEventListener("pointerenter", function () { CBZ.studio.prefetch(MAPS[id].packs); });
-    mapsEl.appendChild(b);
+    ({ feat: gFeat, main: gMain, more: gMore })[tierOf(id)].appendChild(b);
   });
+  // featured order: DUNES first, WATER second, whatever the table order is
+  ["dunes", "water"].forEach(function (id) {
+    const b = gFeat.querySelector("[data-map=\"" + id + "\"]");
+    if (b) gFeat.appendChild(b);
+  });
+  if (tierOf(SET.map) === "more") gDet.open = true;
   CBZ.studio.prefetch(MAPS[SET.map].packs);       // whatever was chosen last time
   function fillGuns(sel, cur) {
     let h = "";
@@ -722,10 +974,13 @@ CBZ.studio.need(NEED).then(function () {
   // both — the men in the water are the ones carrying the rifles.
   function kindRows(team) {
     const noMen = String(el(team + "U").value).split("|").indexOf("men") < 0;
-    el(team + "W").disabled = noMen;
-    el(team + "T").disabled = noMen;
-    el(team + "W").style.opacity = noMen ? 0.35 : 1;
-    el(team + "T").style.opacity = noMen ? 0.35 : 1;
+    ["W", "T"].forEach(function (k) {
+      const s = el(team + k);
+      s.disabled = noMen;
+      const f = s.closest(".f") || s;
+      f.classList.toggle("off", noMen);
+    });
+    sumUp();
   }
   function fillTraining(sel, cur) {
     sel.innerHTML = TRAININGS.map(function (t) {
@@ -746,56 +1001,78 @@ CBZ.studio.need(NEED).then(function () {
     kindRows(t);
   });
   el("redN").value = SET.redN; el("blueN").value = SET.blueN;
-  /* THE MATCHUPS — the fights people argue about, one tap each. A button only
-     fills the form (kind, count, weapon, training); START is still yours. */
-  /* A ROW MAY NAME ITS OWN GROUND. Every matchup before this one was a land
-     fight and the map was whatever you last chose; "8 ORCAS v 1 MEGALODON" on
-     the kill box is not a matchup, it is a bug. `map` makes the button choose
-     the venue too — and prefetches it, so the ground is in the cache before
-     the finger reaches START. */
+  /* THE QUESTIONS. Each card is a fight people argue about, asked as the
+     question itself. A tap fills the form (ground, kind, count, weapon,
+     training) and nothing else; START is still yours.
+
+     EVERY ROW NAMES ITS GROUND. "8 ORCAS v A MEGALODON" on the kill box is not
+     a matchup, it is a bug, and a land fight on whatever you picked last is a
+     card that lies about what it shows. The land fights are on the open dunes
+     (the owner's favourite ground), the sea fights on open water.
+
+     The water pod sizes are the argument: 8 is the pod that wins on the
+     shipped rows, 4 is the pod that does not (measured; see
+     tools/visual-presets/water-arena.mjs). A fleet is a crew, not a
+     battalion: at 48 riflemen the megalodon died in nineteen seconds and
+     never reached a hull, because bullets sit outside the body-mass model;
+     twenty men with shotguns is a fishing fleet, and it is a fight. THE SHARK
+     LINE-UP is the animation test bed as a button: one of each shark with
+     something to chase, for the STUDY camera (V, and [ ] to walk it). */
   const MATCHUPS = [
-    { label: "100 MEN v GORILLA", r: { u: "men", n: 100, w: "fists", t: "civ" }, b: { u: "gorilla", n: 1 } },
-    { label: "LIONS v 1000 DOGS", r: { u: "lion", n: 100 }, b: { u: "dog", n: 1000 } },
-    { label: "WOLVES v THE GUARD", r: { u: "gray_wolf", n: 60 }, b: { u: "men", n: 30, w: "ak47", t: "elite" } },
-    { label: "BEARS v BARE HANDS", r: { u: "brown_bear", n: 12 }, b: { u: "men", n: 120, w: "fists", t: "thug" } },
-    { label: "THE STAMPEDE", r: { u: "bison", n: 200 }, b: { u: "men", n: 60, w: "ak47", t: "pro" } },
-    /* ---- THE WATER. The owner's whole point about the sea is that enough
-       orcas beat a megalodon, and this page is where you SEE it: it has to be
-       a button, not something you assemble by hand from two dropdowns and a
-       number pad. The pod sizes below are the argument — 8 is the pod that
-       wins on the shipped rows, 4 is the pod that does not (measured; see
-       tools/visual-presets/water-arena.mjs). ---- */
-    { label: "8 ORCAS v 1 MEGALODON", map: "water", r: { u: "orca", n: 8 }, b: { u: "megalodon", n: 1 } },
-    { label: "4 ORCAS v 1 MEGALODON", map: "water", r: { u: "orca", n: 4 }, b: { u: "megalodon", n: 1 } },
-    /* A FLEET IS A CREW, NOT A BATTALION. Measured at 48 riflemen the
-       megalodon died in nineteen seconds and never reached a hull — bullets
-       are deliberately outside the body-mass model (a round does not care how
-       big you are), so forty-eight rifles kill anything in the game. Twenty
-       men off six boats with shotguns is a fishing fleet, and it is a fight. */
-    { label: "MEG v A FLEET", map: "water", r: { u: "megalodon", n: 1 },
-      b: { u: "men", n: 20, w: "shotgun", t: "civ" } },
-    { label: "GREAT WHITE v A BAIT BALL", map: "water", r: { u: "great_white_shark", n: 1 },
-      b: { u: "sardine", n: 400 } },
-    { label: "SHARK v SWIMMERS", map: "water", r: { u: "great_white_shark", n: 4 },
-      b: { u: "men", n: 30, w: "fists", t: "civ" } },
-    { label: "DIVERS + DOLPHINS v SHARKS", map: "water",
-      r: { u: "men|dolphin", n: 40, w: "sidearm", t: "pro" },
-      b: { u: "bull_shark|hammerhead_shark", n: 26 } },
-    { label: "THE REEF, ALIVE", map: "water", r: { u: "tuna|barracuda", n: 90 },
-      b: { u: "sardine|fish", n: 300 } },
-    /* THE TEST BED, AS A BUTTON. "A lightweight test arena, great for
-       animation" is a claim about a SHOT, not about a fight: one of each shark
-       swimming in open water with something to chase, so the STUDY camera (V,
-       and [ ] to walk the roster) can hold each of them still and you can
-       watch one tail beat finish. Small enough to boot in a blink. */
-    { label: "THE SHARK LINE-UP", map: "water",
-      r: { u: "great_white_shark|hammerhead_shark|bull_shark|orca", n: 8 },
-      b: { u: "sardine", n: 120 } },
+    { q: "100 MEN v A GORILLA", sub: "bare fists, nobody trained", map: "dunes",
+      r: { u: "men", n: 100, w: "fists", t: "civ" }, b: { u: "gorilla", n: 1 } },
+    { q: "A TIGER v A LION", sub: "one on one", map: "dunes",
+      r: { u: "bengal_tiger", n: 1 }, b: { u: "lion", n: 1 } },
+    { q: "100 MEN v AN ELEPHANT", sub: "street fighters, bare fists", map: "dunes",
+      r: { u: "men", n: 100, w: "fists", t: "thug" }, b: { u: "african_elephant", n: 1 } },
+    { q: "100 LIONS v 1000 DOGS", sub: "teeth against numbers", map: "dunes",
+      r: { u: "lion", n: 100 }, b: { u: "dog", n: 1000 } },
+    { q: "60 WOLVES v 30 SOLDIERS", sub: "the pack against rifles", map: "dunes",
+      r: { u: "gray_wolf", n: 60 }, b: { u: "men", n: 30, w: "ak47", t: "elite" } },
+    { q: "12 BEARS v 120 MEN", sub: "and the men have no guns", map: "dunes",
+      r: { u: "brown_bear", n: 12 }, b: { u: "men", n: 120, w: "fists", t: "thug" } },
+    { q: "200 BISON v 60 RIFLES", sub: "the stampede", map: "dunes",
+      r: { u: "bison", n: 200 }, b: { u: "men", n: 60, w: "ak47", t: "pro" } },
+    { q: "8 ORCAS v A MEGALODON", sub: "is a pod of eight enough?", map: "water",
+      r: { u: "orca", n: 8 }, b: { u: "megalodon", n: 1 } },
+    { q: "4 ORCAS v A MEGALODON", sub: "half the pod", map: "water",
+      r: { u: "orca", n: 4 }, b: { u: "megalodon", n: 1 } },
+    { q: "A MEGALODON v A FLEET", sub: "20 fishermen with shotguns", map: "water",
+      r: { u: "megalodon", n: 1 }, b: { u: "men", n: 20, w: "shotgun", t: "civ" } },
+    { q: "A GREAT WHITE v A BAIT BALL", sub: "400 sardines", map: "water",
+      r: { u: "great_white_shark", n: 1 }, b: { u: "sardine", n: 400 } },
+    { q: "4 GREAT WHITES v 30 SWIMMERS", sub: "nobody brought a weapon", map: "water",
+      r: { u: "great_white_shark", n: 4 }, b: { u: "men", n: 30, w: "fists", t: "civ" } },
+    { q: "DIVERS AND DOLPHINS v SHARKS", sub: "pistols against bulls and hammerheads", map: "water",
+      r: { u: "men|dolphin", n: 40, w: "sidearm", t: "pro" }, b: { u: "bull_shark|hammerhead_shark", n: 26 } },
+    { q: "THE REEF, ALIVE", sub: "tuna and barracuda on the shoals", map: "water",
+      r: { u: "tuna|barracuda", n: 90 }, b: { u: "sardine|fish", n: 300 } },
+    { q: "THE SHARK LINE-UP", sub: "one of each, to study up close", map: "water",
+      r: { u: "great_white_shark|hammerhead_shark|bull_shark|orca", n: 8 }, b: { u: "sardine", n: 120 } },
   ];
   const muEl = el("matchups");
+  const muBtns = [];
+  const esc = function (t) { return String(t).replace(/[&<>"]/g, function (c) { return "&#" + c.charCodeAt(0) + ";"; }); };
+  function markMu(btn) { muBtns.forEach(function (x) { x.classList.toggle("on", x === btn); }); }
+  // any hand edit after a card means the form is no longer that card
+  function menuTouched() { markMu(null); sumUp(); }
+  function muMatches(mu) {
+    if (mu.map && mu.map !== SET.map) return false;
+    return [["red", mu.r], ["blue", mu.b]].every(function (row) {
+      const t = row[0], v = row[1];
+      return el(t + "U").value === v.u && String(el(t + "N").value) === String(v.n) &&
+        (!v.w || el(t + "W").value === v.w) && (!v.t || el(t + "T").value === v.t);
+    });
+  }
   MATCHUPS.forEach(function (mu) {
     const b = document.createElement("button");
-    b.textContent = mu.label;
+    b.type = "button";
+    const ground = MAPS[mu.map] ? mu.map : SET.map;
+    b.className = "mu " + artOf(ground);
+    b.innerHTML = "<span class=\"mg\">" + esc(MAPS[ground].label) + "</span>" +
+      "<span class=\"mq\">" + esc(mu.q).split(" v ").join(" <em>v</em> ") + "</span>" +
+      "<span class=\"ms\">" + esc(mu.sub || "") + "</span>" +
+      "<span class=\"mb\"><s></s><s></s></span>";
     b.addEventListener("click", function () {
       if (mu.map && pickMap[mu.map]) pickMap[mu.map]();
       [["red", mu.r], ["blue", mu.b]].forEach(function (row) {
@@ -806,18 +1083,76 @@ CBZ.studio.need(NEED).then(function () {
         if (v.t) el(t + "T").value = v.t;
         kindRows(t);
       });
+      markMu(b);
+      sumUp();
     });
+    muBtns.push(b);
     muEl.appendChild(b);
+    if (muMatches(mu)) b.classList.add("on");
   });
-  document.querySelectorAll(".cnt button").forEach(function (b) {
+  // a hand edit anywhere on the armies clears the highlighted question
+  document.querySelector("#menu .teams").addEventListener("input", menuTouched);
+  document.querySelector("#menu .teams").addEventListener("change", menuTouched);
+
+  /* THE COUNT STEPPER COUNTS IN ORDERS OF MAGNITUDE. 1, 2 .. 9, 10, 20 .. 90,
+     100, 200 .. so "1 v 1000" is a dozen taps and not a hundred. Minus steps by
+     the magnitude BELOW the current value, so it walks back the same ladder. */
+  function stepCount(v, dir) {
+    const base = dir > 0 ? v : Math.max(1, v - 1);
+    const step = Math.pow(10, Math.floor(Math.log10(Math.max(1, base))));
+    return Math.max(1, v + dir * step);
+  }
+  document.querySelectorAll("#menu .cnt button").forEach(function (b) {
     b.addEventListener("click", function () {
       const inp = el(b.dataset.t + "N");
-      inp.value = Math.max(1, (parseInt(inp.value, 10) || 1) + parseInt(b.dataset.d, 10));
+      inp.value = stepCount(parseInt(inp.value, 10) || 1, parseInt(b.dataset.d, 10) > 0 ? 1 : -1);
+      menuTouched();
     });
   });
   el("presets").querySelectorAll("button").forEach(function (b) {
-    b.addEventListener("click", function () { el("redN").value = b.dataset.n; el("blueN").value = b.dataset.n; });
+    b.addEventListener("click", function () {
+      el("redN").value = b.dataset.n; el("blueN").value = b.dataset.n;
+      menuTouched();
+    });
   });
+
+  /* WHAT EACH SIDE IS, read back in words: under the side's name and on its
+     WHO WINS button, so the call is made on "100 MEN" and not on a colour. */
+  function sideWords(t) {
+    const n = Math.max(1, parseInt(el(t + "N").value, 10) || 1);
+    return n + " " + kindLabel(el(t + "U").value);
+  }
+  function sumUp() {
+    ["red", "blue"].forEach(function (t) {
+      const w = sideWords(t);
+      const k = el(t + "K"); if (k) k.textContent = w;
+      const c = el(t + "CallK"); if (c) c.textContent = w;
+    });
+  }
+
+  /* THE CALL. Two buttons, both optional; tapping your pick again takes it
+     back. The end screen reads SET.call and scores it into the streak. */
+  const callBtns = el("callrow").querySelectorAll("button");
+  function showCall() {
+    callBtns.forEach(function (b) { b.classList.toggle("on", b.dataset.call === SET.call); });
+  }
+  callBtns.forEach(function (b) {
+    b.addEventListener("click", function () {
+      SET.call = SET.call === b.dataset.call ? null : b.dataset.call;
+      showCall();
+    });
+  });
+  showCall();
+  const streak = (function () {
+    try { return JSON.parse(localStorage.getItem("cbz-npcwar-streak") || "null"); } catch (e) { return null; }
+  })();
+  if (streak && (streak.calls > 0 || streak.best > 0)) {
+    const parts = ["STREAK " + (streak.streak | 0), "BEST " + (streak.best | 0)];
+    if (streak.calls > 0) parts.push("CALLED " + (streak.right | 0) + " OF " + (streak.calls | 0));
+    el("streak").textContent = parts.join("    ");
+  }
+  sumUp();
+
   const savedMax = (function () { try { return parseInt(localStorage.getItem("cbz-npcwar-max") || "0", 10); } catch (e) { return 0; } })();
   if (savedMax > 0) el("maxline").textContent = "MEASURED HERE " + savedMax + " PER SIDE AT 30 FPS";
 
@@ -833,7 +1168,7 @@ CBZ.studio.need(NEED).then(function () {
         map: SET.map, redN: SET.redN, blueN: SET.blueN,
         redU: SET.redU, blueU: SET.blueU,
         redW: SET.redW, blueW: SET.blueW, redT: SET.redT, blueT: SET.blueT,
-        redS: SET.redS, blueS: SET.blueS,
+        redS: SET.redS, blueS: SET.blueS, call: SET.call,
       }));
     } catch (e) {}
   }
@@ -909,6 +1244,7 @@ CBZ.studio.need(NEED).then(function () {
     begin(true);
   });
   el("boottrack").classList.add("done");
+  el("menu").classList.add("ready");
   bootst("READY");
 
   /* ============================================================ STATE */
@@ -966,16 +1302,125 @@ CBZ.studio.need(NEED).then(function () {
      where BLUE stands. The kill box registers its crates as real colliders,
      which is all it takes for combat_iq to treat them as cover and for
      segmentBlocked to treat them as walls. */
+  /* THE KILL BOX WAS A GREY DISC AND FLAT-COLOURED BOXES. It is a yard now:
+     poured concrete with its joints and stains, poured walls with their form
+     lines, and the cover is what cover in a yard actually is — ribbed steel
+     containers and timber crates. All of it is canvas texture made here (no
+     image files), tiled by the real size of each face so nothing stretches. */
+  const TEX = {};
+  let _tr = 90127;            // the paint has its own dice, so the director's lcg() stream is untouched
+  function trand() { _tr = (_tr * 1103515245 + 12345) & 0x7fffffff; return _tr / 0x7fffffff; }
+  function canvasTex(key, S, draw) {
+    if (TEX[key]) return TEX[key];
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = S;
+    const g = cv.getContext("2d");
+    draw(g, S);
+    const t = new THREE.CanvasTexture(cv);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = 4;
+    return (TEX[key] = t);
+  }
+  function speckle(g, S, n, a, dark) {
+    for (let i = 0; i < n; i++) {
+      const v = dark ? 0 : 255;
+      g.fillStyle = "rgba(" + v + "," + v + "," + v + "," + (trand() * a) + ")";
+      const s = 1 + trand() * 2.5;
+      g.fillRect(trand() * S, trand() * S, s, s);
+    }
+  }
+  function concreteTex() {
+    return canvasTex("concrete", 512, function (g, S) {
+      g.fillStyle = "#8a857b"; g.fillRect(0, 0, S, S);
+      for (let i = 0; i < 40; i++) {              // stains and patching
+        const x = trand() * S, y = trand() * S, r = 20 + trand() * 90;
+        const gr = g.createRadialGradient(x, y, 0, x, y, r);
+        const dk = trand() < 0.7;
+        gr.addColorStop(0, dk ? "rgba(40,36,30,0.16)" : "rgba(255,250,240,0.10)");
+        gr.addColorStop(1, "rgba(0,0,0,0)");
+        g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2);
+      }
+      speckle(g, S, 5000, 0.18, true); speckle(g, S, 3000, 0.12, false);
+      g.strokeStyle = "rgba(30,28,24,0.55)"; g.lineWidth = 2;   // expansion joints, 4 m bays
+      for (let k = 0; k <= 2; k++) {
+        g.beginPath(); g.moveTo(k * S / 2, 0); g.lineTo(k * S / 2, S); g.stroke();
+        g.beginPath(); g.moveTo(0, k * S / 2); g.lineTo(S, k * S / 2); g.stroke();
+      }
+    });
+  }
+  function wallTex() {
+    return canvasTex("wall", 256, function (g, S) {
+      g.fillStyle = "#77736a"; g.fillRect(0, 0, S, S);
+      speckle(g, S, 2500, 0.2, true);
+      g.fillStyle = "rgba(20,18,15,0.22)";
+      for (let y = 0; y < S; y += S / 4) g.fillRect(0, y, S, 2);           // form lines
+      for (let i = 0; i < 6; i++) {                                         // rain streaks
+        const x = trand() * S; const gr = g.createLinearGradient(0, 0, 0, S);
+        gr.addColorStop(0, "rgba(30,26,20,0.25)"); gr.addColorStop(1, "rgba(30,26,20,0)");
+        g.fillStyle = gr; g.fillRect(x, 0, 6 + trand() * 14, S);
+      }
+    });
+  }
+  function containerTex(hex) {
+    return canvasTex("cont" + hex, 256, function (g, S) {
+      const c = "#" + hex.toString(16).padStart(6, "0");
+      g.fillStyle = c; g.fillRect(0, 0, S, S);
+      for (let x = 0; x < S; x += 16) {           // corrugation: a lit rib and a shadowed valley
+        g.fillStyle = "rgba(255,255,255,0.10)"; g.fillRect(x, 0, 5, S);
+        g.fillStyle = "rgba(0,0,0,0.22)"; g.fillRect(x + 9, 0, 5, S);
+      }
+      for (let i = 0; i < 10; i++) {              // rust bleeding down from the top rail
+        const x = trand() * S, w = 3 + trand() * 10, h = S * (0.2 + trand() * 0.6);
+        const gr = g.createLinearGradient(0, 0, 0, h);
+        gr.addColorStop(0, "rgba(110,52,24,0.55)"); gr.addColorStop(1, "rgba(110,52,24,0)");
+        g.fillStyle = gr; g.fillRect(x, 0, w, h);
+      }
+      g.fillStyle = "rgba(0,0,0,0.35)"; g.fillRect(0, 0, S, 6); g.fillRect(0, S - 6, S, 6);
+    });
+  }
+  function timberTex() {
+    return canvasTex("timber", 256, function (g, S) {
+      g.fillStyle = "#8a6a45"; g.fillRect(0, 0, S, S);
+      for (let y = 0; y < S; y += S / 6) {        // planks
+        g.fillStyle = "rgba(" + (trand() < 0.5 ? "255,230,190" : "40,25,10") + "," + (0.05 + trand() * 0.1) + ")";
+        g.fillRect(0, y, S, S / 6);
+        g.fillStyle = "rgba(30,18,8,0.55)"; g.fillRect(0, y, S, 2);
+      }
+      for (let i = 0; i < 90; i++) {              // grain
+        g.strokeStyle = "rgba(50,30,12," + (0.08 + trand() * 0.12) + ")"; g.lineWidth = 1;
+        const y = trand() * S; g.beginPath(); g.moveTo(0, y); g.bezierCurveTo(S * 0.3, y + 3, S * 0.6, y - 3, S, y + 1); g.stroke();
+      }
+      g.fillStyle = "rgba(30,18,8,0.6)"; g.fillRect(0, 0, 8, S); g.fillRect(S - 8, 0, 8, S);   // frame battens
+    });
+  }
+  // one material per (texture, face size): repeat = metres / metres-per-tile
+  function tiledBox(w, h, d, tex, tile, tint) {
+    const faces = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];      // +x -x +y -y +z -z
+    return faces.map(function (f) {
+      const t = tex.clone(); t.needsUpdate = true;
+      t.repeat.set(Math.max(1, Math.round(f[0] / tile)), Math.max(1, Math.round(f[1] / tile)));
+      return new THREE.MeshLambertMaterial({ map: t, color: tint == null ? 0xffffff : tint });
+    });
+  }
   function flatDisc(r, color, y) {
-    const g = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.6, 48),
-      new THREE.MeshLambertMaterial({ color: color }));
-    g.position.y = (y || 0) - 0.3;
+    const geo = new THREE.PlaneGeometry(r * 2, r * 2);
+    geo.rotateX(-Math.PI / 2);
+    const t = concreteTex().clone(); t.needsUpdate = true;
+    t.repeat.set(r * 2 / 8, r * 2 / 8);
+    const g = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: t }));
+    g.position.y = (y || 0);
     g.receiveShadow = true;
     CBZ.scene.add(g);
     return g;
   }
-  function crate(x, z, w, h, d, color) {
-    const m = new THREE.Mesh(CBZ.boxGeom(w, h, d), CBZ.cmat(color));
+  function crate(x, z, w, h, d, color, kind) {
+    let mat;
+    if (kind === "wall") mat = tiledBox(w, h, d, wallTex(), 3.4);
+    else if (kind === "container") mat = tiledBox(w, h, d, containerTex(color), 2.4);
+    else if (kind === "timber") mat = tiledBox(w, h, d, timberTex(), 1.2);
+    else mat = CBZ.cmat(color);
+    const m = new THREE.Mesh(CBZ.boxGeom(w, h, d), mat);
     m.position.set(x, h / 2, z);
     m.castShadow = m.receiveShadow = true;
     CBZ.scene.add(m);
@@ -1010,6 +1455,256 @@ CBZ.studio.need(NEED).then(function () {
     CBZ.scene.add(m);
   }
 
+
+  /* ============================================================ THE ERG
+     OPEN DUNES USED TO BE A TABLECLOTH. The desert world's terrain is one
+     15 km plane at 63 m a cell, and its dune field is a 420 m fbm swell, so
+     the whole ±200 m window the war is fought in was four flat facets lit per
+     vertex: pale sand with no crest, no slip face, no shadow and no ripple.
+     The owner's favourite map looked like the inside of a lampshade.
+
+     Real dunes are a WIND shape: a long gentle windward climb (~8°), a sharp
+     crest, and a steep slip face (~30°) falling off it, repeated every hundred
+     metres or so with the crest line wandering. That shape is a function, and
+     this page already stands everything on a function — so the war window
+     gets a transverse dune field ADDED to the desert's own heightAt, faded out
+     to nothing at the window's edge so it meets the world's terrain exactly.
+     The men, the sight lines (terrainLos), the camera floor and the bombs all
+     read MAP.groundAt, so the crests are real cover, not paint.
+
+     And it is drawn at the resolution it deserves: a 1.2 km skin at 4 m a
+     cell over the window, with the world's coarse plane discarded underneath
+     it (a shader test, so the two can never fight for the depth buffer), a
+     low sun that throws the slip faces into shadow, and wind ripples in the
+     sand's own shader that fade out before they can shimmer. */
+  const DUNE = { on: false, cx: 0, cz: 0, R0: 420, R1: 585, half: 600,
+    wx: Math.cos(0.42), wz: Math.sin(0.42), lam: 92, skin: null };
+  function hash2(ix, iz, salt) {
+    let h = (ix * 374761393 + iz * 668265263 + salt * 2147483647) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+  function vn2(x, z, salt) {
+    const ix = Math.floor(x), iz = Math.floor(z);
+    let fx = x - ix, fz = z - iz;
+    fx = fx * fx * (3 - 2 * fx); fz = fz * fz * (3 - 2 * fz);
+    const a = hash2(ix, iz, salt), b = hash2(ix + 1, iz, salt);
+    const c = hash2(ix, iz + 1, salt), d = hash2(ix + 1, iz + 1, salt);
+    return a + (b - a) * fx + (c - a) * fz + (a - b - c + d) * fx * fz;
+  }
+  function duneWeight(x, z) {
+    const r = Math.max(Math.abs(x - DUNE.cx), Math.abs(z - DUNE.cz));
+    if (r <= DUNE.R0) return 1;
+    if (r >= DUNE.R1) return 0;
+    const t = (r - DUNE.R0) / (DUNE.R1 - DUNE.R0);
+    return 1 - t * t * (3 - 2 * t);
+  }
+  function duneDetail(x, z) {
+    if (!DUNE.on) return 0;
+    const w = duneWeight(x, z);
+    if (w <= 0) return 0;
+    const u = x * DUNE.wx + z * DUNE.wz;           // along the wind
+    const v = -x * DUNE.wz + z * DUNE.wx;          // along the crest
+    // the crest line wanders: long bends plus a short sinuosity
+    const warp = (vn2(v * 0.009, u * 0.003, 17) - 0.5) * 70 + (vn2(v * 0.034, u * 0.011, 29) - 0.5) * 16;
+    const p = (u + warp) / DUNE.lam;
+    const f = p - Math.floor(p);
+    // windward climb over 0..0.74 (eased into the crest), slip face 0.74..1 (~33°, sand at rest)
+    let s;
+    if (f < 0.74) { const t = f / 0.74; s = t * t * (1.7 - 0.7 * t); }
+    else { const t = (f - 0.74) / 0.26; s = 1 - t * t * (3 - 2 * t); }
+    // crests are not all one height, and some die out into flat pan
+    const amp = 2 + 6.4 * vn2(u * 0.0065, v * 0.0045, 41);
+    // a small cross-ripple so no slope is a perfect plane
+    const lump = (vn2(x * 0.045, z * 0.045, 53) - 0.5) * 1.1;
+    return ((s - 0.45) * amp + lump) * w;
+  }
+  function duneSkin(world) {
+    const N = 300, S = DUNE.half * 2, cell = S / N;
+    const g = new THREE.PlaneGeometry(S, S, N, N);
+    g.rotateX(-Math.PI / 2);
+    const pos = g.attributes.position, n = pos.count;
+    const col = new Float32Array(n * 3);
+    const sand = new THREE.Color(0xc4935a), crest = new THREE.Color(0xd8aa6c),
+      trough = new THREE.Color(0xa77a48), slip = new THREE.Color(0xb07c46), pan = new THREE.Color(0xb49a78);
+    const tmp = new THREE.Color();
+    for (let i = 0; i < n; i++) {
+      const x = pos.getX(i) + DUNE.cx, z = pos.getZ(i) + DUNE.cz;
+      const y = MAP_GROUND(x, z);
+      pos.setY(i, y);
+      // what kind of sand this is: height in the local dune, and which face
+      const d = duneDetail(x, z);
+      const gx = MAP_GROUND(x + 1.5, z) - MAP_GROUND(x - 1.5, z);
+      const gz = MAP_GROUND(x, z + 1.5) - MAP_GROUND(x, z - 1.5);
+      const lee = -(gx * DUNE.wx + gz * DUNE.wz) / 3;          // >0 on the slip face
+      tmp.copy(sand);
+      tmp.lerp(d > 0 ? crest : trough, Math.min(1, Math.abs(d) / 5) * 0.55);
+      if (lee > 0.18) tmp.lerp(slip, Math.min(1, (lee - 0.18) * 2.2) * 0.5);
+      // hard pan between the dunes: grey-tan flats where the crest died out
+      const flat = vn2(x * 0.012, z * 0.012, 61);
+      if (flat > 0.62 && d < 0.5) tmp.lerp(pan, Math.min(1, (flat - 0.62) * 4) * 0.45);
+      tmp.multiplyScalar(0.95 + vn2(x * 0.21, z * 0.21, 71) * 0.08);
+      // and blend to the world's own vertex colour at the rim so the seam is gone
+      const w = duneWeight(x, z);
+      if (w < 1) tmp.lerp(sand, 1 - w);
+      col[i * 3] = tmp.r; col[i * 3 + 1] = tmp.g; col[i * 3 + 2] = tmp.b;
+    }
+    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    g.computeVertexNormals();
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    mat.onBeforeCompile = function (sh) {
+      sh.uniforms.uWind = { value: new THREE.Vector2(DUNE.wx, DUNE.wz) };
+      sh.vertexShader = "varying vec3 vSandW;\n" + sh.vertexShader.replace("#include <project_vertex>",
+        "#include <project_vertex>\nvSandW = (modelMatrix * vec4(transformed, 1.0)).xyz;");
+      sh.fragmentShader = "varying vec3 vSandW;\nuniform vec2 uWind;\n" + sh.fragmentShader.replace("#include <color_fragment>",
+        "#include <color_fragment>\n" +
+        "{ float dist = length(vSandW - cameraPosition);\n" +
+        "  float fade = 1.0 - smoothstep(18.0, 95.0, dist);\n" +
+        "  vec2 q = vec2(dot(vSandW.xz, uWind), dot(vSandW.xz, vec2(-uWind.y, uWind.x)));\n" +
+        "  float rip = sin(q.x * 6.3 + sin(q.y * 0.41) * 2.2 + sin(q.y * 1.3 + q.x * 0.35) * 0.7);\n" +
+        "  rip = rip * 0.5 + 0.5; rip = rip * rip;\n" +
+        "  float grain = fract(sin(dot(floor(vSandW.xz * 3.0), vec2(12.9898, 78.233))) * 43758.5453);\n" +
+        "  diffuseColor.rgb *= 1.0 + ((rip - 0.35) * 0.09 + (grain - 0.5) * 0.035) * fade;\n" +
+        "  float far = smoothstep(120.0, 700.0, dist);\n" +
+        "  diffuseColor.rgb *= 1.0 - far * 0.05; }");
+    };
+    const m = new THREE.Mesh(g, mat);
+    m.position.set(DUNE.cx, 0, DUNE.cz);
+    m.receiveShadow = true; m.castShadow = true;
+    m.userData.terrain = true; m.userData.dynamic = true;
+    m.name = "duneSkin";
+    CBZ.scene.add(m);
+    DUNE.skin = m;
+    // the world's own plane gives up the window, per fragment
+    const T = world && world.terrain;
+    if (T && T.material) {
+      T.userData.dynamic = true;
+      T.material.onBeforeCompile = function (sh) {
+        sh.uniforms.uHole = { value: new THREE.Vector3(DUNE.cx, DUNE.cz, DUNE.half - 4) };
+        sh.vertexShader = "varying vec3 vHoleW;\n" + sh.vertexShader.replace("#include <project_vertex>",
+          "#include <project_vertex>\nvHoleW = (modelMatrix * vec4(transformed, 1.0)).xyz;");
+        sh.fragmentShader = "varying vec3 vHoleW;\nuniform vec3 uHole;\n" + sh.fragmentShader.replace("void main() {",
+          "void main() {\n if (abs(vHoleW.x - uHole.x) < uHole.z && abs(vHoleW.z - uHole.y) < uHole.z) discard;")
+          // the erg beyond the skin wears the skin's sand, so the rim has no seam
+          // (the salt pan and the mountains past the dune ring keep their own)
+          .replace("#include <color_fragment>", "#include <color_fragment>\n" +
+            "diffuseColor.rgb *= mix(vec3(0.9, 0.78, 0.65), vec3(1.0), smoothstep(2650.0, 2900.0, length(vHoleW.xz)));");
+      };
+      T.material.needsUpdate = true;
+    }
+    // THE CITY LEAVES THE HORIZON. The desert world is a basin with a 200-tower
+    // downtown in the middle of it, and from the erg every low shot framed a
+    // grey block skyline behind the war — a war in open dunes, fought in front
+    // of an office park. Everything of the downtown is taken off the scene
+    // (its far colliders are two kilometres from any man and stay harmless);
+    // the terrain, the inland sea and the desert's own rocks, scrub and mesas
+    // stay, and the mountains close the view the way a basin should.
+    if (world && world.root) {
+      const drop = [];
+      world.root.children.forEach(function (o) {
+        if (o.name === "terrain" || o.name === "sea") return;
+        if (o.isInstancedMesh && o.count > 0) {
+          const mm = new THREE.Matrix4(), pp = new THREE.Vector3();
+          o.getMatrixAt(0, mm); pp.setFromMatrixPosition(mm);
+          if (Math.hypot(pp.x, pp.z) > 1100) return;     // desert dress, out on the erg
+        }
+        drop.push(o);
+      });
+      drop.forEach(function (o) { world.root.remove(o); });
+    }
+    reseatDesertDress(world);
+  }
+  /* THE DRESS ON THE NEW SAND. The desert's rocks and scrub were seated on the
+     coarse heightAt; inside the window the ground moved under them by up to
+     four metres, so each one is re-seated on the ground it actually stands on.
+     And the scrub was a single five-sided cone per bush — the green triangles
+     in every shot. Inside the window those are retired and replaced by dry
+     grass tufts (a spray of thin blades, instanced) that read as a desert
+     plant from the lens height this page shoots from. The rocks get a real
+     rock shape: a lumpy, flattened, half-buried stone instead of a d12. */
+  function rockGeometry() {
+    const g = new THREE.IcosahedronGeometry(1, 2);
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+      const k = 0.78 + vn2(x * 2.1 + 5, z * 2.1 + y * 1.7, 83) * 0.34 + vn2(x * 5.3, y * 5.3 + z, 89) * 0.1;
+      p.setXYZ(i, x * k, y * k * (y > 0 ? 0.72 : 1), z * k);
+    }
+    g.computeVertexNormals();
+    return g;
+  }
+  function tuftGeometry() {
+    const parts = [];
+    for (let b = 0; b < 9; b++) {
+      const c = new THREE.ConeGeometry(0.035, 0.55 + hash2(b, 1, 7) * 0.5, 3, 1);
+      c.translate(0, (0.55 + hash2(b, 1, 7) * 0.5) / 2, 0);
+      const a = b * 2.39996, lean = 0.25 + hash2(b, 2, 7) * 0.5;
+      c.rotateX(Math.cos(a) * lean); c.rotateZ(Math.sin(a) * lean);
+      c.translate(Math.cos(a) * 0.08, 0, Math.sin(a) * 0.08);
+      parts.push(c);
+    }
+    // merge by hand (r128 BufferGeometryUtils is not on this page)
+    const flat = parts.map(function (c) { return c.index ? c.toNonIndexed() : c; });
+    let total = 0; flat.forEach(function (c) { total += c.attributes.position.count; });
+    const pos = new Float32Array(total * 3), nor = new Float32Array(total * 3);
+    let o = 0;
+    flat.forEach(function (ci) {
+      pos.set(ci.attributes.position.array, o * 3); nor.set(ci.attributes.normal.array, o * 3);
+      o += ci.attributes.position.count;
+    });
+    const out = new THREE.BufferGeometry();
+    out.setAttribute("position", new THREE.BufferAttribute(pos.slice(0, o * 3), 3));
+    out.setAttribute("normal", new THREE.BufferAttribute(nor.slice(0, o * 3), 3));
+    return out;
+  }
+  function reseatDesertDress(world) {
+    if (!world || !world.root) return;
+    const mtx = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3();
+    const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+    world.root.traverse(function (o) {
+      if (!o.isInstancedMesh) return;
+      const geoT = o.geometry && o.geometry.type;
+      const isRock = geoT === "DodecahedronGeometry" || geoT === "DodecahedronBufferGeometry";
+      const isScrub = geoT === "ConeGeometry" || geoT === "ConeBufferGeometry";
+      if (!isRock && !isScrub) return;
+      if (isRock) {
+        o.geometry = rockGeometry();
+        o.material = new THREE.MeshLambertMaterial({ color: 0x8a7a66 });
+        o.receiveShadow = true;
+      }
+      for (let i = 0; i < o.count; i++) {
+        o.getMatrixAt(i, mtx); mtx.decompose(p, q, s);
+        const w = duneWeight(p.x, p.z);
+        if (isScrub) {
+          if (w > 0) o.setMatrixAt(i, zero);      // the cones leave the window
+          continue;
+        }
+        // every rock: sunk a third into its sand, which is how stone sits in an erg
+        p.y = MAP_GROUND(p.x, p.z) + s.y * 0.12;
+        mtx.compose(p, q, s); o.setMatrixAt(i, mtx);
+      }
+      o.instanceMatrix.needsUpdate = true;
+    });
+    // dry grass, only where a lens can see it
+    const N = 900, tuft = new THREE.InstancedMesh(tuftGeometry(),
+      new THREE.MeshLambertMaterial({ color: 0x9a8a5a }), N);
+    let k = 0;
+    for (let i = 0; i < N * 3 && k < N; i++) {
+      const x = DUNE.cx + (hash2(i, 3, 101) - 0.5) * (DUNE.R0 * 1.8), z = DUNE.cz + (hash2(i, 4, 101) - 0.5) * (DUNE.R0 * 1.8);
+      // tufts grow in the troughs and on the pan, never on a live slip face
+      const d = duneDetail(x, z);
+      if (d > 1.5 || vn2(x * 0.02, z * 0.02, 131) < 0.42) continue;
+      const sc = 0.7 + hash2(i, 5, 101) * 1.1;
+      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), hash2(i, 6, 101) * 6.28);
+      mtx.compose(p.set(x, MAP_GROUND(x, z) - 0.05, z), q, s.set(sc, sc * (0.8 + hash2(i, 7, 101) * 0.5), sc));
+      tuft.setMatrixAt(k++, mtx);
+    }
+    tuft.count = k;
+    tuft.instanceMatrix.needsUpdate = true;
+    tuft.castShadow = true; tuft.frustumCulled = false; tuft.userData.dynamic = true;
+    CBZ.scene.add(tuft);
+  }
+  let MAP_GROUND = function () { return 0; };
 
   /* ============================================================ THE SEA
      OPEN WATER, and the reason it is thirty lines and not a water engine.
@@ -1070,10 +1765,44 @@ CBZ.studio.need(NEED).then(function () {
      above the swell and watch a shark's shape move beneath it. */
   function seaSurface(cx, cz) {
     const span = 620, seg = 64;
-    const mat = new THREE.MeshLambertMaterial({
-      color: 0x1f5f80, transparent: true, opacity: 0.76,
+    /* THE SEA IS LIT PER PIXEL. A Lambert sheet lit per vertex at ten metres
+       a cell is a blue tarpaulin: no glint, no chop, nothing that says water.
+       Phong puts the sun on it; a few travelling ripples in the shader break
+       the normal up at the scale a lens actually sees (and fade with range so
+       they never shimmer); a fresnel term lets the sky into the grazing view
+       and the deep colour into the steep one. The far plate carries the same
+       material with a hole cut where the live grid is, so the two sheets no
+       longer stack their opacity into a visible square. */
+    const seaShader = function (hole) {
+      return function (sh) {
+        sh.uniforms.uT = SEA.uT;
+        sh.uniforms.uHole = { value: new THREE.Vector3(cx, cz, hole ? span / 2 - 6 : -1) };
+        sh.vertexShader = "varying vec3 vSeaW;\n" + sh.vertexShader.replace("#include <project_vertex>",
+          "#include <project_vertex>\nvSeaW = (modelMatrix * vec4(transformed, 1.0)).xyz;");
+        sh.fragmentShader = "varying vec3 vSeaW;\nuniform float uT;\nuniform vec3 uHole;\n" + sh.fragmentShader
+          .replace("void main() {", "void main() {\n if (uHole.z > 0.0 && abs(vSeaW.x - uHole.x) < uHole.z && abs(vSeaW.z - uHole.y) < uHole.z) discard;")
+          .replace("#include <normal_fragment_maps>", "#include <normal_fragment_maps>\n" +
+            "{ float dist = length(vSeaW - cameraPosition); float k = 1.0 - smoothstep(40.0, 420.0, dist);\n" +
+            "  vec2 p = vSeaW.xz;\n" +
+            "  float dx = cos(p.x * 0.42 + uT * 1.3) * 0.5 + cos(dot(p, vec2(0.31, 0.27)) + uT * 1.7) * 0.35 + cos(dot(p, vec2(-1.1, 0.7)) + uT * 2.9) * 0.2;\n" +
+            "  float dz = cos(p.y * 0.37 - uT * 1.1) * 0.5 + cos(dot(p, vec2(-0.23, 0.41)) + uT * 1.5) * 0.35 + cos(dot(p, vec2(0.8, 1.3)) - uT * 2.6) * 0.2;\n" +
+            "  normal = normalize(normal + (viewMatrix * vec4(dx, 0.0, dz, 0.0)).xyz * 0.16 * k); }")
+          // r128 has no output_fragment chunk: the colour is written just
+          // before tonemapping, so the fresnel lands there
+          .replace("#include <tonemapping_fragment>",
+            "{ vec3 vdir = normalize(cameraPosition - vSeaW); float fr = pow(1.0 - max(vdir.y, 0.0), 4.0);\n" +
+            "  gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.62, 0.74, 0.82), fr * 0.55);\n" +
+            "  gl_FragColor.a = mix(gl_FragColor.a, 0.96, fr); }\n#include <tonemapping_fragment>");
+      };
+    };
+    SEA.uT = { value: 0 };
+    const mat = new THREE.MeshPhongMaterial({
+      color: 0x14506c, specular: 0xbfd4e0, shininess: 70, transparent: true, opacity: 0.8,
       depthWrite: false, side: THREE.DoubleSide,
     });
+    mat.onBeforeCompile = seaShader(false);
+    const farMat = mat.clone();
+    farMat.onBeforeCompile = seaShader(true);
     const g = new THREE.PlaneGeometry(span, span, seg, seg);
     g.rotateX(-Math.PI / 2);
     const m = new THREE.Mesh(g, mat);
@@ -1084,7 +1813,7 @@ CBZ.studio.need(NEED).then(function () {
     SEA.cx = cx; SEA.cz = cz;
     const far = new THREE.PlaneGeometry(26000, 26000);
     far.rotateX(-Math.PI / 2);
-    const fm = new THREE.Mesh(far, mat);
+    const fm = new THREE.Mesh(far, farMat);
     fm.position.set(cx, 0, cz);
     fm.renderOrder = 3;
     fm.matrixAutoUpdate = false; fm.updateMatrix();
@@ -1102,6 +1831,9 @@ CBZ.studio.need(NEED).then(function () {
       a[j + 1] = swellAt(a[j] + cx, a[j + 2] + cz);
     }
     p.needsUpdate = true;
+    // the swell's own slope lights the swell (Phong reads these per pixel)
+    SEA.surf.geometry.computeVertexNormals();
+    if (SEA.uT) SEA.uT.value = SEA.t;
     for (let i = 0; i < SEA.boats.length; i++) {
       const b = SEA.boats[i];
       const y = swellAt(b.position.x, b.position.z);
@@ -1150,19 +1882,61 @@ CBZ.studio.need(NEED).then(function () {
      picture instead of a label. Scenery, not units: nothing shoots from them
      and nothing can sink them. */
   function seaFleet(cx, cz, side, n) {
-    const hull = CBZ.cmat(0xb9b3a4), deck = CBZ.cmat(0x6f4c33), cab = CBZ.cmat(0xd8d2c4);
+    /* A BOAT IS A HULL, NOT THREE BOXES. world/hull_loft.js lofts a real
+       shell from lines (sheer, chine, keel rocker, deadrise, flare) — the
+       game's own boat builder — so the fleet is fishing boats: a lofted hull
+       riding at its waterline, a laid deck, a wheelhouse with its glass, a
+       mast. The box stack stays only as the fallback if the loft is absent. */
+    const HL = CBZ.hullLoft;
+    const paint = [0xe8e4da, 0x2d4f6b, 0x8a2b22, 0xd8cfb8, 0x3f5b3f];
+    const deckM = CBZ.cmat(0x8a6a48), cabM = CBZ.cmat(0xeeeae0), glassM = CBZ.cmat(0x1b2530),
+      trimM = CBZ.cmat(0x2a2a2c);
     for (let i = 0; i < n; i++) {
       const g = new THREE.Group();
       const L = 9 + sWorld() * 5, W = 3 + sWorld() * 1.4;
-      const h = new THREE.Mesh(CBZ.boxGeom(L, 2.1, W), hull); h.position.y = 0; g.add(h);
-      const d = new THREE.Mesh(CBZ.boxGeom(L * 0.94, 0.3, W * 0.9), deck); d.position.y = 1.1; g.add(d);
-      const c = new THREE.Mesh(CBZ.boxGeom(L * 0.3, 1.7, W * 0.66), cab);
-      c.position.set(-L * 0.18, 2.0, 0); g.add(c);
+      if (HL && HL.stationsFromLines) {
+        const st = HL.stationsFromLines({ loa: L, beam: W, draft: 0.75, freeboard: 1.15, deadrise: 16, flareBow: 14 });
+        const hullM = new THREE.MeshLambertMaterial({ color: paint[i % paint.length], side: THREE.DoubleSide });
+        const hm = HL.mesh(st, hullM);
+        const ol = HL.outline(st);
+        const z0 = ol.z0, z1 = ol.z1, midY = ol.sheerYAt((z0 + z1) / 2);
+        hm.position.z = -(z0 + z1) / 2;          // centred on the group, so it pitches about its middle
+        g.add(hm);
+        // the deck: the sheer plan, laid flat just under the rail
+        const shp = new THREE.Shape();
+        const sb = ol.sheerStarboard, pt = ol.sheerPort;
+        shp.moveTo(sb[0][0] * 0.94, -sb[0][2]);
+        for (let k = 1; k < sb.length; k++) shp.lineTo(sb[k][0] * 0.94, -sb[k][2]);
+        for (let k = pt.length - 1; k >= 0; k--) shp.lineTo(pt[k][0] * 0.94, -pt[k][2]);
+        const dg = new THREE.ShapeGeometry(shp);
+        dg.rotateX(-Math.PI / 2);          // (x, -z) in the plane lands at (x, 0, z) facing UP
+        const dm = new THREE.Mesh(dg, deckM);
+        dm.position.set(0, midY - 0.12, hm.position.z);
+        g.add(dm);
+        const zc = hm.position.z + z0 + (z1 - z0) * 0.42;
+        const cab = new THREE.Mesh(CBZ.boxGeom(W * 0.62, 1.7, L * 0.22), cabM);
+        cab.position.set(0, midY + 0.73, zc); cab.castShadow = true; g.add(cab);
+        const glass = new THREE.Mesh(CBZ.boxGeom(W * 0.64, 0.5, L * 0.18), glassM);
+        glass.position.set(0, midY + 1.15, zc + 0.02); g.add(glass);
+        const roof = new THREE.Mesh(CBZ.boxGeom(W * 0.7, 0.12, L * 0.26), trimM);
+        roof.position.set(0, midY + 1.64, zc); g.add(roof);
+        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 4.2, 6), trimM);
+        mast.position.set(0, midY + 3.6, zc + L * 0.02); g.add(mast);
+        const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, L * 0.34, 5), trimM);
+        boom.rotation.x = 1.15; boom.position.set(0, midY + 2.6, zc - L * 0.14); g.add(boom);
+        g.userData.freeboard = 0;
+      } else {
+        const hull = CBZ.cmat(0xb9b3a4), deck = CBZ.cmat(0x6f4c33), cab = CBZ.cmat(0xd8d2c4);
+        const h = new THREE.Mesh(CBZ.boxGeom(L, 2.1, W), hull); h.position.y = 0; g.add(h);
+        const d = new THREE.Mesh(CBZ.boxGeom(L * 0.94, 0.3, W * 0.9), deck); d.position.y = 1.1; g.add(d);
+        const c = new THREE.Mesh(CBZ.boxGeom(L * 0.3, 1.7, W * 0.66), cab);
+        c.position.set(-L * 0.18, 2.0, 0); g.add(c);
+        g.userData.freeboard = 0.55;
+      }
       const a = i * 2.399963229728653;
       g.position.set(cx + side * (34 + sWorld() * 26) + Math.cos(a) * 16,
                      0, cz + Math.sin(a) * 26 + (sWorld() - 0.5) * 30);
       g.rotation.y = sWorld() * Math.PI * 2;
-      g.userData.freeboard = 0.55;
       CBZ.scene.add(g);
       SEA.boats.push(g);
     }
@@ -1349,14 +2123,17 @@ CBZ.studio.need(NEED).then(function () {
       flatDisc(260, 0x6b6657, 0);
       // walls make it a box; crates make it a fight. Seeded layout.
       const W = 210, D = 150, wallC = 0x54504a;
-      crate(0, -D / 2, W, 3.4, 2, wallC); crate(0, D / 2, W, 3.4, 2, wallC);
-      crate(-W / 2, 0, 2, 3.4, D, wallC); crate(W / 2, 0, 2, 3.4, D, wallC);
+      crate(0, -D / 2, W, 3.4, 2, wallC, "wall"); crate(0, D / 2, W, 3.4, 2, wallC, "wall");
+      crate(-W / 2, 0, 2, 3.4, D, wallC, "wall"); crate(W / 2, 0, 2, 3.4, D, wallC, "wall");
+      const CONT = [0x8a3a2a, 0x3d5a6e, 0x5f6b3c, 0x9a7a3a, 0x6e6e6a];
       for (let i = 0; i < 34; i++) {
         const x = (sWorld() - 0.5) * (W - 40), z = (sWorld() - 0.5) * (D - 30);
         if (Math.abs(x) > gap / 2 - 6 && Math.abs(x) < gap / 2 + 18) continue;  // keep spawn lanes open
         const tall = sWorld() < 0.62;
-        crate(x, z, 2.4 + sWorld() * 4.4, tall ? 1.9 + sWorld() * 0.6 : 1.15,
-          1.6 + sWorld() * 2.6, sWorld() < 0.5 ? 0x7a5f43 : 0x5d6a70);
+        const w = 2.4 + sWorld() * 4.4, h = tall ? 1.9 + sWorld() * 0.6 : 1.15, d = 1.6 + sWorld() * 2.6;
+        const wood = sWorld() < 0.5;
+        // the tall ones are containers (steel, ribbed); the low ones are timber crates
+        crate(x, z, w, h, d, CONT[i % CONT.length], tall && !wood ? "container" : "timber");
       }
     } else if (id === "water") {
       /* OPEN WATER. No world() call, no raise(), no town(): a swell function,
@@ -1444,6 +2221,12 @@ CBZ.studio.need(NEED).then(function () {
           if (cut >= 2) { cx = x; cz = z; break scan; }
         }
       }
+      // THE ERG over the chosen window: crests, slip faces, the skin that shows them
+      DUNE.on = true; DUNE.cx = cx; DUNE.cz = cz;
+      const worldGround = groundAt;
+      groundAt = function (x, z) { return worldGround(x, z) + duneDetail(x, z); };
+      MAP_GROUND = groundAt;
+      duneSkin(world);
     } else if (id === "city") {
       // THE REAL FABRIC. Eight blocks square is 490 m of street — big enough
       // that an army has to cross ground it does not own, small enough that
@@ -1590,14 +2373,80 @@ CBZ.studio.need(NEED).then(function () {
     if (choice === "everything") return GUN_ORDER[(i * 5 + ((i / GUN_ORDER.length) | 0)) % GUN_ORDER.length];
     return GUN_NAME[choice] ? choice : "ak47";
   }
+  /* ============================================================ UNIFORMS
+     TWO ARMIES, NOT TWO PAINT BUCKETS. Every man used to be cast with one flat
+     team colour over torso, collar and cap (0xff5a3d / 0x3fa8ff) — traffic-cone
+     orange and swimming-pool blue on olive trousers, which is what made the
+     whole page read as a toy. A side is a uniform: fatigues that belong on the
+     ground, a helmet cover in the team colour so a crane shot still sorts the
+     two lines, and a little fade from man to man so a rank is not one clone.
+     Soldiers/SWAT/guards wear the full kit; untrained men and street thugs keep
+     their own trousers and wear the colour as a shirt, which is what a militia
+     looks like. */
+  const UNIFORM = {
+    red:  { torso: 0x7a3b28, arms: 0x6e3525, legs: 0x5e4a36, cap: 0x9c2f22, shoes: 0x2a2119, belt: 0x3a2e22,
+            shirt: 0x9a3c2c, swatT: 0x4a2a24 },
+    blue: { torso: 0x2f4a66, arms: 0x2b4460, legs: 0x363f4a, cap: 0x2a63a8, shoes: 0x1c1d20, belt: 0x23272c,
+            shirt: 0x2f5f95, swatT: 0x1f2c3a },
+  };
+  function shade(hex, k) {
+    const r = Math.min(255, ((hex >> 16) & 255) * k) | 0, g = Math.min(255, ((hex >> 8) & 255) * k) | 0,
+      b = Math.min(255, (hex & 255) * k) | 0;
+    return (r << 16) | (g << 8) | b;
+  }
+  function uniformFor(teamId, trId, i) {
+    const U = UNIFORM[teamId];
+    // three fades of the same cloth: quantised so the material cache stays small
+    const k = [0.9, 1, 1.09][(i * 7 + 3) % 3];
+    if (trId === "civ" || trId === "thug") return { torso: shade(U.shirt, k), collar: shade(U.shirt, k), arms: shade(U.shirt, k * 0.96) };
+    if (trId === "swat") return { torso: shade(U.swatT, k), collar: shade(U.swatT, k), arms: shade(U.swatT, k),
+      legs: shade(0x22252a, k), cap: U.cap, shoes: U.shoes, belt: U.belt };
+    return { torso: shade(U.torso, k), collar: shade(U.torso, k * 0.95), arms: shade(U.arms, k), legs: shade(U.legs, k),
+      cap: U.cap, shoes: U.shoes, belt: U.belt };
+  }
+  /* A SOLDIER WEARS A HELMET, NOT A BASEBALL CAP. The rig's cap is a flat box
+     with a brim box — right for a cop, a toy on a rifleman. For the trained
+     tiers the cap box is re-shaped into a combat helmet (a low dome that comes
+     down over the brow and the ears) in the team's cover colour, and the brim
+     goes. Found by the colour the uniform just gave it, so nothing in the rig
+     has to learn a new part name. */
+  const HELMET_GEO = {};
+  function helmetGeometry(w) {
+    const key = Math.round(w * 1000);
+    if (HELMET_GEO[key]) return HELMET_GEO[key];
+    const ck = w / 0.66;
+    const r = w * 0.7;                 // wide enough to swallow the head box's corners
+    const g = new THREE.SphereGeometry(r, 16, 7, 0, Math.PI * 2, 0, Math.PI * 0.5);
+    g.scale(1, 0.62, 1.04);
+    g.translate(0, -0.29 * ck, 0.015 * ck);   // rim just above the brow, crown 5 cm over the skull
+    return (HELMET_GEO[key] = g);
+  }
+  function helmetOn(group, capHex) {
+    const caps = [];
+    group.traverse(function (o) {
+      if (o.isMesh && o.material && o.material.color && o.material.color.getHex() === capHex) caps.push(o);
+    });
+    if (caps.length < 2) return;
+    // the taller of the two boxes is the crown, the flatter one the brim
+    const size = function (o) {
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      const b = o.geometry.boundingBox; return { w: b.max.x - b.min.x, h: b.max.y - b.min.y };
+    };
+    caps.sort(function (a, b) { return size(b).h - size(a).h; });
+    const crown = caps[0];
+    crown.geometry = helmetGeometry(size(crown).w);
+    crown.castShadow = true;
+    for (let k = 1; k < caps.length; k++) caps[k].visible = false;
+  }
   function makeMan(teamId, i) {
     const T = TEAMS[teamId];
     const tr = trainingOf(teamId === "red" ? SET.redT : SET.blueT);
     const wid = pickGun(teamId === "red" ? SET.redW : SET.blueW, i);
     const fists = wid === "fists";
     const w = fists ? null : (CBZ.weaponById(wid) || CBZ.weaponById("ak47"));
-    const group = CBZ.studio.cast(tr.role, { color: T.color, variant: i * 2 + (teamId === "red" ? 0 : 1) });
+    const group = CBZ.studio.cast(tr.role, { uniform: uniformFor(teamId, tr.id, i), variant: i * 2 + (teamId === "red" ? 0 : 1) });
     if (!group) return null;
+    if (tr.id === "pro" || tr.id === "elite" || tr.id === "swat") helmetOn(group, UNIFORM[teamId].cap);
     const at = MAP.spawnAt(teamId, i);
     group.position.set(at.x, MAP.groundAt(at.x, at.z), at.z);
     group.rotation.y = teamId === "red" ? Math.PI / 2 : -Math.PI / 2;
@@ -1626,6 +2475,18 @@ CBZ.studio.need(NEED).then(function () {
       dead: false, dieT: 0, dieDir: 1, animF: (i % 4),
       lastShotT: -9, sq: Math.floor(i / 10), sqSlot: i % 10,
       kills: 0, shotsF: 0, hitsF: 0, reloads: 0,
+      // THE BODY AS THE FIGHT SEES IT, and the standing originals setStance()
+      // restores. eyeLos / fireShot always read these with a man default;
+      // stamping them here is what lets a crouch actually change them.
+      eyeH: 1.52, losY: 1.35, aimY: 1.28, headY: 1.62,
+      eyeH0: 1.52, losY0: 1.35, aimY0: 1.28, headY0: 1.62,
+      stance: "stand", coverK: 1, up: true,
+      // the hull-down fold he has committed to, its search clock, the pop clock
+      hull: null, hullT: 0, popT: 0,
+      // MORALE: his training's nerve (seeded jitter so a line does not break
+      // as one body), how rattled he is, and the rout bookkeeping
+      tier: tr.id, nerve: nerveFor(tr.id, i), supp: 0,
+      routed: false, fled: false, routT: 0, routBest: 0, routStall: 0, rallyT: 0,
     };
     man.target.set(at.x, 0, at.z);
     (squads[teamId][man.sq] = squads[teamId][man.sq] || []).push(man);
@@ -1916,11 +2777,15 @@ CBZ.studio.need(NEED).then(function () {
 
   /* ============================================================ DAMAGE */
   function hurtMan(m, dmg, imp) {
-    if (!m || m.dead || !(dmg > 0) || over) return;
+    if (!m || m.dead || m.fled || !(dmg > 0) || over) return;
     m.hp -= dmg;
     if (CBZ.combatIQ && CBZ.combatIQ.suppress) CBZ.combatIQ.suppress(m, 0.9);
-    // getting shot IS information: retaliate at the shooter if unengaged
-    if (imp && imp.by && imp.by.team && imp.by.team !== m.team && (!m.tgt || m.tgt.dead)) m.tgt = imp.by;
+    // a round that lands rattles harder than one that snaps past
+    m.supp = Math.min(SUPP_CAP, (m.supp || 0) + SUPP_HIT);
+    // getting shot IS information: retaliate at the shooter if unengaged —
+    // unless he is running, in which case it is only a reason to run faster
+    if (!m.routed && imp && imp.by && imp.by.team && imp.by.team !== m.team &&
+        (!m.tgt || m.tgt.dead || m.tgt.fled)) m.tgt = imp.by;
     if (m.hp <= 0) killMan(m, imp);
   }
   function killMan(m, imp) {
@@ -1942,6 +2807,10 @@ CBZ.studio.need(NEED).then(function () {
     if (by && by.team && by.team !== m.team) {
       by.kills = (by.kills || 0) + 1;
       if (by.wid) gunLedger(by.wid).kills++;
+      // A MAN ON A RUN is a thing the HUD can point at
+      if (by.kills === 3 || by.kills === 5 || by.kills === 8) {
+        emitWar("streak", { team: by.team, id: by.id, name: manName(by), kills: by.kills });
+      }
     }
     // sprawl: the rig's own death variety; the topple is ours (caller owns it)
     if (m.char && CBZ.deathPose) { try { CBZ.deathPose(m.char, m.i * 3.7 + 1.3, lcg()); } catch (e) {} }
@@ -1973,15 +2842,411 @@ CBZ.studio.need(NEED).then(function () {
     killCam(m);
     corpses.push(m);
     if (corpses.length > (DEATH_OLD ? 260 : CORPSE_MAX)) retireOldestCorpse();
-    if (camDist2(m.pos) < 120 * 120 || aliveCount("red") + aliveCount("blue") < 40) {
-      hud.feed((m.beast ? TEAMS[m.team].name + " " + String(m.species.name).toUpperCase()
-        : TEAMS[m.team].name + " " + (m.i + 1)) + " DOWN");
+    const aliveMine = aliveCount(m.team);
+    if (camDist2(m.pos) < 120 * 120 || aliveMine + aliveCount(m.team === "red" ? "blue" : "red") < 40) {
+      hud.feed(manName(m) + " DOWN");
     }
+    moraleOnDeath(m, aliveMine);
   }
+  // a fled man has been spliced out of `men` by updateMorale, so this is
+  // "still on the field", which is what the HUD bars and the win check mean
   function aliveCount(team) {
     let n = 0;
-    for (let i = 0; i < men.length; i++) if (men[i].team === team && !men[i].dead) n++;
+    for (let i = 0; i < men.length; i++) if (men[i].team === team && !men[i].dead && !men[i].fled) n++;
     return n;
+  }
+  function manName(m) {
+    return m.beast ? TEAMS[m.team].name + " " + String(m.species.name).toUpperCase()
+      : TEAMS[m.team].name + " " + (m.i + 1);
+  }
+
+  /* ============================================================ MORALE
+     OWNER: "the idea is smart but the logic is dumb, it isn't fun." MEASURED:
+     30 v 30 riflemen on the dunes was two blobs standing in the open trading
+     fire until one side was dead to the last man, ~25 s, no arc. An army that
+     fights to the last man makes head count the only variable, and a fight
+     with no one who can lose their nerve has no moment where it TURNS.
+
+     Ported from src/warlord/battle.js's morale (moraleFrom / updateMorale /
+     nerve per training), adapted to this page's single-man layer:
+
+     ARMY MORALE (updateMorale, on updateCOM's 0.6 s tick) is
+       1 - lost*1.5 + theirLost*0.5 - routingFrac*0.35 - shock
+     where `lost` is a POWER fraction — each man weighs his training x his
+     gun, and a wounded man counts part-standing — so losing veterans or the
+     launcher crew hurts more than losing recruits; `shock` is the recent
+     casualties (each death adds ~1.8x his share of the army, decaying over
+     ~7 s), which is what makes a sudden volley land harder than the same
+     losses spread over a minute. Men watching men run is the cascade term.
+
+     A MAN breaks when (army morale - his own rattle - his own wounds) falls
+     under his NERVE, which is combat_iq's ROLE[].nerve column for his
+     training (civ 0.62 .. swat 0.16) plus a seeded +-0.06: a civilian goes
+     early, a soldier holds until the army is genuinely losing.
+
+     A broken man stops firing and runs — away from the enemy's fighting
+     centre and toward his own start edge. He is still a target. He rallies
+     when the army steadies (with hysteresis), or turns to fight when he is
+     CORNERED (no ground gained for 4.5 s, or an enemy on top of him). If he
+     gets 2.2x the start gap from the enemy he has FLED: out of the fight,
+     not dead, spliced out of the roster and counted on ARMY.fled.
+
+     An army with half its standing men routing has BROKEN ("rout" event);
+     an army with no man left fighting for BREAK_GRACE seconds has LOST
+     (inFight(), read by frame()'s win check). Beasts have their own logic
+     (thinkBeast's own flight rule) and are never moved by any of this. */
+  const NERVE_FALLBACK = { civ: 0.62, thug: 0.42, pro: 0.30, elite: 0.20, swat: 0.16 };
+  // what a man is worth to his army's nerve: training (a veteran's death is
+  // felt more than a recruit's) and the gun he carries
+  const TIER_W = { civ: 0.7, thug: 0.85, pro: 1.0, elite: 1.25, swat: 1.4 };
+  const SUPP_CAP = 1.2;          // the rattle meter's ceiling
+  const SUPP_HIT = 0.4;          // a round that lands
+  const SUPP_SNAP = 0.26;        // a round that snaps within ~2 m (scaled by how close)
+  const SUPP_MATE = 0.22;        // a mate dropping within 7 m of you
+  const SUPP_DECAY = 0.28;       // per second: ~4 s from pinned to composed
+  const SUPP_K = 0.16;           // morale cost per unit of rattle (max ~0.19)
+  const WOUND_K = 0.28;          // morale cost of being at zero hp (linear)
+  const SHOCK_K = 1.8;           // a death costs ~1.8x its share of the army...
+  const SHOCK_TAU = 7;           // ...decaying over ~7 s
+  const RALLY_BAND = 0.16;       // back over nerve by this much to rally
+  const FLEE_GAPS = 2.2;         // routed this many start gaps from the enemy = fled
+  const BREAK_GRACE = 5;         // s with nobody fighting before a broken army LOSES
+  function nerveFor(tier, i) {
+    const R = CBZ.combatIQ && CBZ.combatIQ.ROLE && CBZ.combatIQ.ROLE[tier];
+    const base = (R && R.nerve != null) ? R.nerve : (NERVE_FALLBACK[tier] != null ? NERVE_FALLBACK[tier] : 0.3);
+    return base + (((i * 37) % 11) - 5) * 0.012;
+  }
+  function manWeight(m) {
+    if (m.beast) return Math.max(0.5, (m.maxHp || 100) / 100);
+    let w = TIER_W[m.tier] || 1;
+    if (m.launcher) w *= 1.4;
+    else if (m.wid === "sniper" || m.wid === "lmg") w *= 1.15;
+    return w;
+  }
+  function armyRec() {
+    return { p0: 0, pNow: 0, men0: 0, morale: 1, shock: 0, alive: 0, routing: 0,
+      fled: 0, broken: false, noFightT: 0, lastman: false, beasts: 0 };
+  }
+  const ARMY = { red: armyRec(), blue: armyRec() };
+  const fledMen = [];
+  let moraleT = -1;
+  function emitWar(kind, data) {
+    try { if (typeof warEvent === "function") warEvent(kind, data); } catch (e) {}
+  }
+  function resetArmies() {
+    ARMY.red = armyRec(); ARMY.blue = armyRec();
+    for (let i = 0; i < fledMen.length; i++) {
+      const g = fledMen[i].group;
+      if (g) { try { CBZ.studio.drop(g); } catch (e) {} }
+    }
+    fledMen.length = 0;
+    moraleT = -1;
+  }
+  function updateMorale() {
+    /* A NEW ROSTER IS A NEW WAR. restage() and begin() rebuild `men`
+       without telling this section; a roster with no man this tick has
+       ever counted, while the ledger says it has, is a fresh one. */
+    let counted = 0;
+    for (let i = 0; i < men.length; i++) if (men[i]._mc) { counted = 1; break; }
+    if (!counted && men.length && (ARMY.red.p0 > 0 || ARMY.blue.p0 > 0)) resetArmies();
+    const dt = moraleT < 0 ? 0 : Math.max(0, Math.min(2, simT - moraleT));
+    moraleT = simT;
+    const R = ARMY.red, B = ARMY.blue;
+    R.alive = B.alive = R.routing = B.routing = R.beasts = B.beasts = 0;
+    R.pNow = B.pNow = 0;
+    for (let i = men.length - 1; i >= 0; i--) {
+      const m = men[i];
+      const A = ARMY[m.team];
+      if (!A) continue;
+      if (!m._mc) { m._mc = 1; m._mw = manWeight(m); A.p0 += m._mw; A.men0++; }
+      if (m.dead) continue;
+      if (m.fled) {
+        // OFF THE FIELD: out of every loop that walks `men`, so the grid, the
+        // camera and the HUD forget him without each learning a new flag
+        men.splice(i, 1);
+        A.fled++;
+        fledMen.push(m);
+        if (m.group) m.group.visible = false;
+        if (m.ordTgt) {
+          m.ordTgt.alive = false;
+          if (CBZ.ordnance && CBZ.ordnance.removeTarget) { try { CBZ.ordnance.removeTarget(m.ordTgt); } catch (e) {} }
+          m.ordTgt = null;
+        }
+        continue;
+      }
+      A.alive++;
+      if (m.beast) A.beasts++;
+      if (m.routed) A.routing++;
+      const hf = Math.max(0, Math.min(1, m.hp / (m.maxHp || 1)));
+      A.pNow += m._mw * (0.45 + 0.55 * hf);
+    }
+    const k = Math.exp(-dt / SHOCK_TAU);
+    ["red", "blue"].forEach(function (t) {
+      const A = ARMY[t], F = ARMY[t === "red" ? "blue" : "red"];
+      A.shock *= k;
+      const lost = A.p0 > 0 ? Math.max(0, 1 - A.pNow / A.p0) : 0;
+      const theirLost = F.p0 > 0 ? Math.max(0, 1 - F.pNow / F.p0) : 0;
+      let mo = 1 - lost * 1.5 + theirLost * 0.5 - (A.alive ? A.routing / A.alive : 0) * 0.35 - A.shock;
+      // an army of animals does not do arithmetic about its chances
+      if (bench || (A.alive && A.beasts === A.alive)) mo = 1;
+      A.morale = Math.max(0, Math.min(1, mo));
+      // THE BREAK, latched, and the rally if it genuinely comes back
+      if (!A.broken && A.alive >= 2 && A.routing >= A.alive * 0.5) {
+        A.broken = true;
+        emitWar("rout", { team: t });
+      } else if (A.broken && A.alive - A.routing > 0 && A.routing < A.alive * 0.25) {
+        A.broken = false;
+        emitWar("rally", { team: t });
+      }
+      // nobody left fighting: the clock the win check reads
+      if (A.alive > 0 && A.alive - A.routing <= 0 && spawnQueue.length === 0) A.noFightT += dt;
+      else A.noFightT = 0;
+    });
+  }
+  /* HOW MANY MEN THIS ARMY STILL HAS IN THE FIGHT, for frame()'s win check:
+     the living, unless every one of them has been running for BREAK_GRACE
+     seconds — a broken army with nobody left fighting has lost. */
+  function inFight(team) {
+    let alive = 0, fighting = 0;
+    for (let i = 0; i < men.length; i++) {
+      const m = men[i];
+      if (m.team !== team || m.dead || m.fled) continue;
+      alive++;
+      if (!m.routed) fighting++;
+    }
+    // asked live, so a stale clock from a restaged war can never end this one
+    const A = ARMY[team];
+    if (!fighting && alive && A && A.noFightT >= BREAK_GRACE) return 0;
+    return alive;
+  }
+  // the death's weight on the living: a jolt to the whole army, a harder one
+  // to whoever was standing next to him, and the last man is announced
+  const _mates = [];
+  function moraleOnDeath(m, aliveMine) {
+    const A = ARMY[m.team];
+    if (!A) return;
+    if (m._mc && !m.beast && A.p0 > 0) A.shock += SHOCK_K * (m._mw || 1) / A.p0;
+    if (!m.beast) {
+      const a = fineNear(m.pos.x, m.pos.z, 7, _mates);
+      for (let i = 0; i < a.length; i++) {
+        const o = a[i];
+        if (o === m || o.dead || o.team !== m.team || o.beast) continue;
+        o.supp = Math.min(SUPP_CAP, (o.supp || 0) + SUPP_MATE);
+      }
+    }
+    if (!A.lastman && aliveMine === 1 && spawnCount[m.team] >= 5 && spawnQueue.length === 0) {
+      for (let i = 0; i < men.length; i++) {
+        const o = men[i];
+        if (o.team === m.team && !o.dead && !o.fled) {
+          A.lastman = true;
+          emitWar("lastman", { team: m.team, id: o.id });
+          break;
+        }
+      }
+    }
+  }
+  // his own morale: the army's, less how rattled and how hurt he is
+  function manMorale(m) {
+    const A = ARMY[m.team];
+    const hf = Math.max(0, Math.min(1, m.hp / (m.maxHp || 1)));
+    return (A ? A.morale : 1) - (m.supp || 0) * SUPP_K - (1 - hf) * WOUND_K;
+  }
+  function foeCentre(m) { return teamCOM[m.team === "red" ? "blue" : "red"]; }
+  /* THE BREAK, THE RUN, THE RALLY — one man, on his think tick. Returns true
+     while he is running (think() then owns nothing else about him). */
+  const _near = [];
+  function routCheck(m, dt) {
+    if (m.beast || bench || over) return false;
+    if (m.rallyT > 0) m.rallyT -= dt;
+    const eff = manMorale(m);
+    const foe = foeCentre(m);
+    const fd = Math.hypot(m.pos.x - foe.x, m.pos.z - foe.z);
+    if (!m.routed) {
+      if (m.rallyT > 0 || !(eff < m.nerve)) return false;
+      m.routed = true; m.routT = 0; m.routBest = fd; m.routStall = 0;
+      m.tgt = null; m.sees = false; m.hull = null; m.stepAsideT = 0;
+      setStance(m, "stand");
+      if (hud && ARMY[m.team].alive < 80 && camDist2(m.pos) < 120 * 120) hud.feed(manName(m) + " BREAKS");
+    } else {
+      m.routT += dt;
+      if (fd > m.routBest + 0.6) { m.routBest = fd; m.routStall = 0; }
+      else m.routStall += dt;
+      // CORNERED: no ground gained, or an enemy close enough to touch — he
+      // turns and fights, and will not break again for a while (the last stand)
+      let cornered = m.routStall > 4.5;
+      if (!cornered && m.routT > 1.5) {
+        const a = fineNear(m.pos.x, m.pos.z, 4.5, _near);
+        for (let i = 0; i < a.length; i++) {
+          if (a[i].team !== m.team && !a[i].dead && !a[i].routed) { cornered = true; m.tgt = a[i]; break; }
+        }
+      }
+      if (cornered) {
+        m.routed = false; m.rallyT = 12; m.routStall = 0;
+        if (hud && ARMY[m.team].alive < 80 && camDist2(m.pos) < 120 * 120) hud.feed(manName(m) + " TURNS TO FIGHT");
+        return false;
+      }
+      // RALLY with hysteresis, once the rattle has worn off
+      if (m.routT > 4 && eff > m.nerve + RALLY_BAND && m.supp < 0.3) {
+        m.routed = false; m.rallyT = 6;
+        return false;
+      }
+      // FLED: far enough that this war is no longer his (or he has outrun
+      // it for most of a minute)
+      if (fd > FLEE_GAPS * (MAP.gap || 150) || m.routT > 45) {
+        m.fled = true;
+        return true;
+      }
+    }
+    // THE RUN: away from their fighting centre, leaning toward his own start
+    // edge, with a man-stable lateral so a broken line fans out instead of
+    // funnelling. No steerAroundWalls: its field descends TOWARD the enemy.
+    // stepMan's wall-slide detour is what gets a runner round a corner.
+    let ax = m.pos.x - foe.x, az = m.pos.z - foe.z;
+    const al = Math.hypot(ax, az) || 1;
+    ax /= al; az /= al;
+    ax += (m.team === "red" ? -1 : 1) * 0.55;
+    const bl = Math.hypot(ax, az) || 1;
+    ax /= bl; az /= bl;
+    const lat = (((m.i * 13) % 9) - 4) * 0.09;
+    m.target.set(m.pos.x + (ax - az * lat) * 30, 0, m.pos.z + (az + ax * lat) * 30);
+    m.slot = "rout";
+    m.tgt = null; m.sees = false;
+    return true;
+  }
+
+  /* ============================================================ STANCE
+     A MAN IS A DIFFERENT SHAPE WHEN HE IS DOWN (ported from the warlord
+     fork). eyeH is where he sees from, losY is what an enemy has to see to
+     shoot him, aimY / headY are where a round arrives: dropping all four by
+     a crouched man's real ratio (about 1.0 m of eye against 1.52) is what
+     makes going down actually hide him behind a dune lip. And a crouched body
+     is a smaller one — coverK is the hit-chance multiplier fireShot applies
+     to rounds aimed at him (set each step in stepMan). */
+  const STANCE_K = { stand: 1, crouch: 0.645 };
+  const CROUCH_HIT = 0.5;        // a kneeling man presents about half the target
+  const HULL_UP_HIT = 0.7;       // up over a crest, the sand still covers his legs
+  function setStance(m, st) {
+    if (m.beast || m.stance === st || m.eyeH0 == null) return;
+    m.stance = st;
+    const k = STANCE_K[st] || 1;
+    m.eyeH = m.eyeH0 * k;
+    m.losY = m.losY0 * k;
+    m.aimY = m.aimY0 * k;
+    m.headY = m.headY0 * k;
+  }
+  // what the rig should show: the stance, plus combat_iq's box-cover slots
+  // (read by frame()'s animChar pass)
+  function crouchPose(m) {
+    return m.stance === "crouch" || m.slot === "cover" || m.slot === "peek";
+  }
+  // "could he see him if he stood up" — a man crouched behind his fold is
+  // not blind, he is ducking; think() asks this so the duck does not read as
+  // lost contact and send him charging out of his own cover
+  function seesStanding(m, o) {
+    if (m.stance !== "crouch") return eyeLos(m, o);
+    const e = m.eyeH;
+    m.eyeH = m.eyeH0;
+    const s = eyeLos(m, o);
+    m.eyeH = e;
+    return s;
+  }
+
+  /* ============================================================ HULL DOWN
+     THE GROUND IS COVER (ported from the warlord fork's hullDown). On a map
+     whose sand takes part in the sight lines (MAP.terrainLos), a man under
+     fire looks for a reverse-slope position: somewhere a CROUCHED man is
+     hidden from the threat by the crest but a STANDING one can see over it.
+     Per bearing (fanned away from the threat) march out until the crouched
+     ray first goes blocked, bisect onto the lip, step just behind it, and
+     accept it only if standing there still has the shot. A hole with no shot
+     out of it is not a position.
+
+     COST: a search is <= 7 bearings x ~9 marched probes x one terrain ray.
+     It runs only for a man who is RATTLED (or already in a fold), on a
+     per-man clock of 2.5-4 s phased off his index, and under a global
+     budget of HULL_RATE searches per sim-second — a 500 v 500 line cannot
+     all probe on the same frame. */
+  const HULL_BEARINGS = [0, 0.6, -0.6, 1.25, -1.25, 1.9, -1.9];
+  const HULL_R0 = 2.5, HULL_R1 = 20, HULL_STEP = 2.2;
+  const HULL_CROUCH_EYE = 1.0, HULL_STAND_EYE = 1.55, HULL_BEHIND = 0.7;
+  const HULL_RATE = 60;          // searches per sim-second, whole field
+  let hullTokens = 20, hullTokT = 0, hullQ = 0, hullHit = 0;
+  function hullDown(x, z, tx, tz) {
+    const gA = MAP.groundAt;
+    const ty = gA(tx, tz) + HULL_STAND_EYE;
+    const away = Math.atan2(x - tx, z - tz);
+    const dThreat = Math.hypot(x - tx, z - tz);
+    hullQ++;
+    let best = null, bs = 1e9;
+    for (let ai = 0; ai < HULL_BEARINGS.length; ai++) {
+      const ang = away + HULL_BEARINGS[ai];
+      const sa = Math.sin(ang), ca = Math.cos(ang);
+      let lo = -1, hi = -1;
+      for (let rad = HULL_R0; rad <= HULL_R1; rad += HULL_STEP) {
+        const px = x + sa * rad, pz = z + ca * rad;
+        if (terrainBlocked(tx, ty, tz, px, gA(px, pz) + HULL_CROUCH_EYE, pz, gA)) { hi = rad; break; }
+        lo = rad;
+      }
+      if (hi < 0) continue;
+      if (lo < 0) lo = Math.max(0.5, hi - HULL_STEP);
+      for (let kk = 0; kk < 4; kk++) {
+        const mid = (lo + hi) * 0.5;
+        const px = x + sa * mid, pz = z + ca * mid;
+        if (terrainBlocked(tx, ty, tz, px, gA(px, pz) + HULL_CROUCH_EYE, pz, gA)) hi = mid; else lo = mid;
+      }
+      for (let back = 0; back < 3; back++) {
+        const rad = hi + HULL_BEHIND * (back ? back * 0.5 : 1);
+        const px = x + sa * rad, pz = z + ca * rad;
+        if (blockedAt(px, pz)) continue;
+        const gy = gA(px, pz);
+        if (!terrainBlocked(tx, ty, tz, px, gy + HULL_CROUCH_EYE, pz, gA)) continue;
+        if (terrainBlocked(tx, ty, tz, px, gy + HULL_STAND_EYE, pz, gA)) continue;
+        const walk = Math.hypot(px - x, pz - z);
+        const closing = Math.max(0, dThreat - Math.hypot(px - tx, pz - tz));
+        const score = walk + closing * 1.4 + Math.abs(HULL_BEARINGS[ai]) * 1.1;
+        if (score < bs) { bs = score; best = { x: px, z: pz, d: walk }; }
+        break;
+      }
+    }
+    if (best) hullHit++;
+    return best;
+  }
+  function hullFor(m, tgt) {
+    if (m.hullT > simT) return m.hull;
+    // the global budget, refilled on the sim clock
+    if (simT > hullTokT) {
+      hullTokens = Math.min(HULL_RATE * 0.5, hullTokens + (simT - hullTokT) * HULL_RATE);
+      hullTokT = simT;
+    }
+    if (hullTokens < 1) { m.hullT = simT + 0.4 + (m.i % 7) * 0.05; return m.hull; }
+    hullTokens--;
+    m.hullT = simT + (m.hull ? 3.4 : 2.5) + (m.i % 9) * 0.07;
+    const found = hullDown(m.pos.x, m.pos.z, tgt.pos.x, tgt.pos.z);
+    if (!found) { m.hull = null; return null; }
+    // STICKY: the fold he is in outbids a marginally nearer one
+    if (m.hull) {
+      const keep = Math.hypot(m.hull.x - m.pos.x, m.hull.z - m.pos.z);
+      if (keep < found.d + 3) return m.hull;
+    }
+    m.hull = found;
+    return found;
+  }
+  /* IN THE FOLD AND WORKING IT: down behind the lip (invisible to the
+     enemy's eyeLos — not harder to hit, NOT THERE), up over it to shoot,
+     down again to reload. Returns true while he is up. 3.2 m, because the
+     anti-clump nudges his goal and stepMan stops him a metre short of it:
+     a fold is a stretch of ground, not a coordinate. */
+  function workHull(m, sdt) {
+    const d = Math.hypot(m.hull.x - m.pos.x, m.hull.z - m.pos.z);
+    if (d > 3.2) { setStance(m, "stand"); return false; }
+    if (m.reloadT > 0) { setStance(m, "crouch"); m.popT = Math.min(m.popT, 0.3); return false; }
+    m.popT -= sdt;
+    if (m.popT <= 0) {
+      const up = m.stance === "crouch";
+      m.popT = up ? (1.2 + (m.i % 7) * 0.14) : (1.1 + (m.i % 5) * 0.2);
+      setStance(m, up ? "stand" : "crouch");
+    }
+    return m.stance === "stand";
   }
 
   /* ============================================================ A BEAST DIES
@@ -2200,7 +3465,7 @@ CBZ.studio.need(NEED).then(function () {
     grid.clear();
     for (let i = 0; i < men.length; i++) {
       const m = men[i];
-      if (m.dead) continue;
+      if (m.dead || m.fled) continue;
       const k = gridKey(Math.floor(m.pos.x / GRID_CELL), Math.floor(m.pos.z / GRID_CELL));
       let a = grid.get(k);
       if (!a) { a = []; grid.set(k, a); }
@@ -2683,16 +3948,26 @@ CBZ.studio.need(NEED).then(function () {
   const HUNT = { red: false, blue: false };
   let comAt = -1;
   function updateCOM() {
-    const count = { red: 0, blue: 0 };
+    // the morale tick rides this one: same cadence, and it splices the fled
+    // out of `men` before anything below counts them
+    updateMorale();
+    /* THE CENTRE IS WHERE THE FIGHTING MEN ARE. A routing man running for his
+       edge is not where his army's guns are, and averaging him in dragged
+       every march goal and every rout direction toward the runners. The
+       living are the fallback when nobody is left fighting. */
+    const count = { red: 0, blue: 0 }, live = { red: 0, blue: 0 };
     ["red", "blue"].forEach(function (t) {
-      let x = 0, z = 0, n = 0;
+      let x = 0, z = 0, n = 0, ax = 0, az = 0, an = 0;
       for (let i = 0; i < men.length; i++) {
         const m = men[i];
-        if (m.team !== t || m.dead) continue;
+        if (m.team !== t || m.dead || m.fled) continue;
+        ax += m.pos.x; az += m.pos.z; an++;
+        if (m.routed) continue;
         x += m.pos.x; z += m.pos.z; n++;
       }
-      count[t] = n;
+      count[t] = n; live[t] = an;
       if (n) { teamCOM[t].x = x / n; teamCOM[t].z = z / n; }
+      else if (an) { teamCOM[t].x = ax / an; teamCOM[t].z = az / an; }
     });
     /* THE MOP-UP IS A PHASE, AND EIGHT TO ONE IS NOT WHERE IT STARTS.
        `hunt` is what ends a battle — a wider look, a straight march and a run
@@ -2706,8 +3981,10 @@ CBZ.studio.need(NEED).then(function () {
 
        Three to one is where an army stops manoeuvring and starts sweeping,
        which is both the real answer and the measured one. */
-    HUNT.red = count.blue > 0 && count.red >= count.blue * 3;
-    HUNT.blue = count.red > 0 && count.blue >= count.red * 3;
+    // counted in FIGHTING men: an army whose line has broken is swept, even
+    // while its runners still outnumber the men chasing them
+    HUNT.red = count.red > 0 && (count.blue > 0 ? count.red >= count.blue * 3 : live.blue > 0);
+    HUNT.blue = count.blue > 0 && (count.red > 0 ? count.blue >= count.red * 3 : live.red > 0);
     comAt = simT;
   }
 
@@ -2825,7 +4102,9 @@ CBZ.studio.need(NEED).then(function () {
 
     const cd2 = camDist2(m.pos);
     const seen = cd2 < 240 * 240;
-    const hit = lcg() < r.hit;
+    // a crouched man, or one up over a crest with the sand to his waist, is
+    // less body to hit (coverK, stepMan's per-step read of his stance)
+    const hit = lcg() < r.hit * (tgt.coverK || 1);
     const head = hit && lcg() < 0.12;
 
     // the round, resolved: chest point on a hit, a spread-true near miss on a
@@ -2841,6 +4120,15 @@ CBZ.studio.need(NEED).then(function () {
       _v.x += Math.cos(ang) * miss;
       _v.y += (lcg() - 0.35) * miss * 0.8;
       _v.z += Math.sin(ang) * miss;
+      /* A ROUND THAT SNAPS PAST IS NOT NOTHING. Before this only a HIT
+         rattled anybody (hurtMan's suppress), so a man could stand in a
+         storm of near misses perfectly composed. Within ~2 m it now counts:
+         combat_iq's own suppress (his aim worsens, he wants cover) and this
+         page's rattle meter (his nerve, and whether he looks for a fold). */
+      if (miss < 2.2 && !tgt.beast) {
+        tgt.supp = Math.min(SUPP_CAP, (tgt.supp || 0) + SUPP_SNAP * (1.15 - miss / 2.2 * 0.7));
+        if (CBZ.combatIQ && CBZ.combatIQ.suppress) CBZ.combatIQ.suppress(tgt, 0.7);
+      }
     }
 
     if (seen && fxBudget < 26) {
@@ -3195,7 +4483,7 @@ CBZ.studio.need(NEED).then(function () {
     const com = teamCOM[m.team === "red" ? "blue" : "red"];
     const sq = squads[m.team][m.sq];
     let lead = null;
-    if (sq) for (let i = 0; i < sq.length; i++) if (!sq[i].dead) { lead = sq[i]; break; }
+    if (sq) for (let i = 0; i < sq.length; i++) if (!sq[i].dead && !sq[i].fled && !sq[i].routed) { lead = sq[i]; break; }
     if (lead && lead !== m) {
       const ahead = lead.target;
       const my = Math.atan2(ahead.x - lead.pos.x, ahead.z - lead.pos.z);
@@ -3357,18 +4645,26 @@ CBZ.studio.need(NEED).then(function () {
     m.slot = "push";
   }
 
+  /* Any think that does not end in the fold gives the fold up: a man told to
+     push, chase or run does not carry a crouch across open sand. */
   function think(m, now) {
+    thinkMan(m, now);
+    if (m.hull && m.slot !== "hull") m.hull = null;
+  }
+  function thinkMan(m, now) {
     const thinkDt = Math.min(1.2, now - m.lastThink);
     m.lastThink = now;
     const crowd = men.length;
     m.thinkAt = now + 0.14 + Math.min(0.42, crowd / 2600) + lcg() * 0.06;
     m.hunt = HUNT[m.team];
+    // HIS NERVE FIRST: a man who has broken is not deciding anything else
+    if (routCheck(m, thinkDt)) return;
     // a man stepping off his own man's firing line finishes the step. Half a
     // second of not re-deciding is the whole point: re-deciding is what put
     // him back in the lane.
-    if (m.stepAsideT > 0 && m.tgt && !m.tgt.dead) { m.stepAsideT -= thinkDt; return; }
+    if (m.stepAsideT > 0 && m.tgt && !m.tgt.dead && !m.tgt.fled) { m.stepAsideT -= thinkDt; return; }
 
-    if (!m.tgt || m.tgt.dead) { m.tgt = pickTarget(m, m.hunt ? SIGHT * 2 : SIGHT); m.losBadT = 0; }
+    if (!m.tgt || m.tgt.dead || m.tgt.fled) { m.tgt = pickTarget(m, m.hunt ? SIGHT * 2 : SIGHT); m.losBadT = 0; }
     // CONTACT IS INFORMATION A SQUAD SHARES. Before marching blind past a
     // fight, a man asks his own column: a mate already engaged hands him the
     // mark, and the squad turns to the guns together instead of one man
@@ -3384,7 +4680,7 @@ CBZ.studio.need(NEED).then(function () {
       const sqB = squads[m.team][m.sq];
       if (sqB) for (let i = 0; i < sqB.length; i++) {
         const b = sqB[i];
-        if (b === m || b.dead || !b.tgt || b.tgt.dead) continue;
+        if (b === m || b.dead || b.routed || !b.tgt || b.tgt.dead || b.tgt.fled) continue;
         let onIt = 0;
         for (let j = 0; j < sqB.length; j++) {
           if (sqB[j] !== m && !sqB[j].dead && sqB[j].tgt === b.tgt) onIt++;
@@ -3403,7 +4699,7 @@ CBZ.studio.need(NEED).then(function () {
     const tgt = m.tgt;
     if (!tgt) { marchGoal(m); return; }
     if (m.beast) { thinkBeast(m, tgt, thinkDt); return; }
-    const sees = eyeLos(m, tgt);
+    const sees = seesStanding(m, tgt);
     m.sees = sees;
     if (!sees) {
       m.losBadT += thinkDt;
@@ -3421,6 +4717,21 @@ CBZ.studio.need(NEED).then(function () {
         return;
       }
     } else m.losBadT = 0;
+
+    /* THE PURSUIT. A man whose mark has broken and is running does not hold
+       his band and trade with a back: if he still has the nerve for it he
+       goes after him, shooting (slot "push" fires). This is the half of a
+       rout the watcher actually sees. */
+    if (tgt.routed && !m.launcher && manMorale(m) > m.nerve + 0.12) {
+      const pd = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
+      if (pd < 110 && (!m.fists || pd > meleeReach(m, tgt))) {
+        m.target.set(tgt.pos.x, 0, tgt.pos.z);
+        steerAroundWalls(m);
+        spreadGoal(m);
+        m.slot = "push";
+        return;
+      }
+    }
 
     if (m.fists) {
       // an unarmed man has one range: his arms. Close on the mark; inside it
@@ -3452,6 +4763,22 @@ CBZ.studio.need(NEED).then(function () {
     // hug walls by design — the hide point sits just past the box — so the
     // rule only audits the long moves: bands, bearings, flanks.)
     if (m.slot !== "cover" && m.slot !== "peek") steerAroundWalls(m);
+
+    /* THE GROUND IS COVER. A rattled man on real dunes (or one already in
+       his fold) takes the reverse slope behind the nearest crest instead of
+       standing in the open — hullFor() throttles and budgets the search.
+       Not on the sweep: a hunting army does not go to ground. The fold gets
+       the body-scale spread, not the 2.6 m anti-clump, which could shove the
+       goal out over the lip. */
+    if (MAP.terrainLos && !m.hunt && (m.supp > 0.3 || m.hull)) {
+      const hd = hullFor(m, tgt);
+      if (hd) {
+        m.target.set(hd.x, 0, hd.z);
+        m.slot = "hull";
+        spreadGoal(m);
+        return;
+      }
+    }
 
     // anti-clump on the goal, from the grid: posture's own separation scans
     // city rosters, which are empty out here
@@ -3507,7 +4834,10 @@ CBZ.studio.need(NEED).then(function () {
       }
       return;
     }
+    if (m.fled) return;              // off the field; updateMorale splices him out
     if (simT >= m.thinkAt) think(m, simT);
+    if (m.fled) return;
+    if (m.supp > 0) m.supp = Math.max(0, m.supp - sdt * SUPP_DECAY);
     if (m.reloadT > 0) {
       m.reloadT -= sdt;
       if (m.reloadT <= 0) m.mag = m.magSize;
@@ -3533,7 +4863,7 @@ CBZ.studio.need(NEED).then(function () {
         return;
       }
       const bt = m.tgt;
-      if (bt && !bt.dead && !over) {
+      if (bt && !bt.dead && !bt.fled && !over) {
         const bd = Math.hypot(bt.pos.x - m.pos.x, bt.pos.z - m.pos.z);
         if (bd < m.reach + 2.6) {
           beastFight(m, bt, sdt);
@@ -3578,9 +4908,13 @@ CBZ.studio.need(NEED).then(function () {
               m.slot === "push" ? tn.chase : tn.march;
         if (m.hunt && tdist < 999) spd = Math.max(spd, tn.chase * 1.08);
       } else {
-        spd = m.slot === "fallback" ? 5.2 :
+        // a ROUTING man runs a shade faster than a pursuer walks in (6.2) and
+        // slower than a sweep (7.6-8.0): a broken line gets away from a line
+        // that is still fighting, and is run down by one that has won
+        spd = m.slot === "rout" ? (hurtish ? 5.4 : 6.6) :
+              m.slot === "fallback" ? 5.2 :
               (m.slot === "push" || m.slot === "march" || m.slot === "flank") ? (m.hunt ? 7.6 : 6.2) :
-              (m.slot === "cover" || hurtish) ? 7.0 : 4.6;
+              (m.slot === "cover" || m.slot === "hull" || hurtish) ? 7.0 : 4.6;
         // holding the fire token forty metres out of range is not holding
         // anything: closing to the band is a RUN, whatever the slot says
         if (tdist < 1e9 && tdist > 42 && spd < 6.2) spd = m.hunt ? 7.6 : 6.4;
@@ -3642,6 +4976,23 @@ CBZ.studio.need(NEED).then(function () {
       }
       return;                                    // no rifle on an animal
     }
+
+    /* ---- STANCE. In a fold he works it (down, up to shoot, down to
+       reload). In the open a man who has stopped and is pinned or badly hurt
+       KNEELS — smaller, and the enemy's rounds pay CROUCH_HIT for it — and
+       stands again to move or once the fire comes off him. A running man is
+       always up. coverK is what fireShot multiplies a round's hit chance by. */
+    m.up = true;
+    if (m.routed || m.fists) { if (m.stance !== "stand") setStance(m, "stand"); }
+    else if (m.slot === "hull" && m.hull) m.up = workHull(m, sdt);
+    else if (m.stance === "crouch") {
+      if (spd > 0.1 || !tgt || tgt.dead || (m.supp < 0.12 && m.hp >= m.maxHp * 0.5)) setStance(m, "stand");
+    } else if (spd <= 0.1 && tgt && !tgt.dead && (m.supp > 0.35 || m.hp < m.maxHp * 0.5)) {
+      setStance(m, "crouch");
+    }
+    m.coverK = m.stance === "crouch" ? CROUCH_HIT
+      : (m.slot === "hull" && m.hull && m.up) ? HULL_UP_HIT : 1;
+
     const engaged = tgt && !tgt.dead && m.sees;
     if (!engaged && spd > 0.1) {
       const want = Math.atan2(dx, dz);
@@ -3653,7 +5004,8 @@ CBZ.studio.need(NEED).then(function () {
     }
 
     // ---- the trigger ----
-    if (!tgt || tgt.dead || m.reloadT > 0) return;
+    if (m.routed) return;                  // a broken man is not fighting
+    if (!tgt || tgt.dead || tgt.fled || m.reloadT > 0) return;
     const dist = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
     if (m.fists) {
       // THE PUNCH EXCHANGE is combat_iq's own melee brain — close, circle,
@@ -3695,7 +5047,9 @@ CBZ.studio.need(NEED).then(function () {
     let fireMax = p ? Math.min(125, p.hi * 2.6 + 8) : 60;
     if (m.hunt) fireMax *= 1.6;          // running a man down includes shooting at him
     if (!m.sees || dist > fireMax) return;
-    if (m.slot !== "fire" && m.slot !== "peek" && m.slot !== "push" && m.slot !== "sidestep" && dist > 12) return;
+    if (m.slot !== "fire" && m.slot !== "peek" && m.slot !== "push" && m.slot !== "sidestep" &&
+        m.slot !== "hull" && dist > 12) return;
+    if (!m.up) return;                     // ducked behind his crest (workHull)
     if (m.cool > 0) return;
     /* THE LINE IS CHECKED WHEN THE TRIGGER IS PULLED, NOT WHEN HE LAST THOUGHT.
        `m.sees` is up to half a second old — a think-tick answer about two men
@@ -3752,7 +5106,7 @@ CBZ.studio.need(NEED).then(function () {
      line is clear. It SNAPS in (a frame of masonry across the lens is worse
      than a jump) and eases back out, which is the ordinary third-person
      answer and the reason a pillar does not make the shot pump. */
-  let camOccl = 1;
+  let camOccl = 1, camLift = 0;
   /* HOW LOW THE LENS MAY LOOK FROM. Everywhere else the ground is opaque, so a
      camera below its own focus is a camera inside a hill and the arm has always
      been clamped to +0.12 rad. In OPEN WATER the sea is NOT a wall — the shot
@@ -3793,6 +5147,17 @@ CBZ.studio.need(NEED).then(function () {
     let y = cam.focus.y + sy * dist;
     const g = MAP.camFloor(x, z);
     if (y < g) y = g;
+    /* A DUNE IS A WALL THE COLLIDERS DO NOT KNOW ABOUT. The low framings on
+       the erg can park the lens behind a crest, looking at a face of sand with
+       the war on the other side of it. The arm is not shortened (that would
+       walk the lens INTO the crest); it is lifted until the eye line clears,
+       eased like the occlusion above so the shot rises rather than pops. */
+    if (MAP.terrainTrue && !MAP.water) {
+      let lift = 0;
+      for (let t = 0; t < 8 && terrainBlocked(cam.focus.x, fy, cam.focus.z, x, y + lift, z); t++) lift += 2.2;
+      camLift += (lift - camLift) * Math.min(1, lift > camLift ? dt * 6 : dt * 1.2);
+      y += camLift;
+    }
     /* AND THE ONE SHOT WHOSE HEIGHT IS NOT THE ARM'S TO DECIDE. A lens riding
        the swell has to be ON the swell — at the water under ITSELF, not at the
        water under the animal it is watching — so the crests between the two
@@ -3887,7 +5252,7 @@ CBZ.studio.need(NEED).then(function () {
   // (except for the death beat the director deliberately holds — see below)
   function subjectFor(team) {
     const p = POINT[team];
-    if (p && !p.dead) return p;
+    if (p && !p.dead && !p.fled) return p;
     updatePoint();
     return POINT[team] && !POINT[team].dead ? POINT[team] : null;
   }
@@ -3943,12 +5308,12 @@ CBZ.studio.need(NEED).then(function () {
       cam.wFocus.set(hs.x, MAP.groundAt(hs.x, hs.z), hs.z);
       if (cam.shot === "line") {
         // across the axis: both firing lines in profile
-        cam.wDist = 22 + Math.min(46, Math.sqrt(alive) * 3.4);
-        cam.wPitch = 0.3 + lcg() * 0.22;
+        cam.wDist = 18 + Math.min(40, Math.sqrt(alive) * 3.0);
+        cam.wPitch = 0.1 + lcg() * 0.14;
         cam.wYaw = clearYaw(hs.x, hs.z, ax + (lcg() < 0.5 ? 1 : -1) * Math.PI / 2, cam.wDist, 0.5);
       } else {
-        cam.wDist = 46 + Math.min(150, Math.sqrt(alive) * 9);
-        cam.wPitch = 0.62 + lcg() * 0.4;
+        cam.wDist = 38 + Math.min(95, Math.sqrt(alive) * 5.5);
+        cam.wPitch = 0.34 + lcg() * 0.24;
         cam.wYaw = clearYaw(hs.x, hs.z, ax + Math.PI + (lcg() - 0.5) * 0.8, cam.wDist, 0.6);
       }
     }
@@ -3967,10 +5332,10 @@ CBZ.studio.need(NEED).then(function () {
     if (cam.shot === "push") {
       // ahead of him, walking backwards as the army comes on
       cam.wYaw = m.yaw + (lcg() - 0.5) * 0.02;
-      cam.wPitch = 0.2; cam.wDist = 13;
+      cam.wPitch = 0.12; cam.wDist = 11;
     } else {
       cam.wYaw = m.yaw + Math.PI + 0.35;
-      cam.wPitch = 0.28; cam.wDist = 9.5;
+      cam.wPitch = 0.16; cam.wDist = 7.8;
     }
     if (cam.holdT > 0) cam.holdT -= dt;
   }
@@ -4174,7 +5539,7 @@ CBZ.studio.need(NEED).then(function () {
     if (cam.mode === "auto") {
       const subj = cam.followM;
       const subjGone = (cam.shot === "point" || cam.shot === "push") &&
-        (!subj || (subj.dead && cam.holdT <= 0));
+        (!subj || subj.fled || (subj.dead && cam.holdT <= 0));
       if (subj && subj.dead && cam.holdT === 0) subjectDied();
       if (simT >= cam.cutAt || subjGone) directorCut();
       if ((cam.shot === "point" || cam.shot === "push") && cam.followM) frameSubject(cam.followM, dt);
@@ -4195,7 +5560,7 @@ CBZ.studio.need(NEED).then(function () {
          over him. */
       const m = cam.followM;
       if (m && m.dead && cam.holdT === 0) subjectDied();
-      if (!m || (m.dead && cam.holdT <= 0)) {
+      if (!m || m.fled || (m.dead && cam.holdT <= 0)) {
         const next = subjectFor(cam.followTeam);
         if (next) { cam.followM = next; cam.holdT = 0; cam.reptT = simT + 3; }
       } else if (!m.dead && simT >= cam.reptT) {
@@ -4266,7 +5631,7 @@ CBZ.studio.need(NEED).then(function () {
     // ammo: rounds left, or the reload counting itself down
     const reloading = m.reloadT > 0;
     const ammo = m.magSize > 0
-      ? (reloading ? "RELOADING" : m.mag + "/" + m.magSize) : "—";
+      ? (reloading ? "RELOADING" : m.mag + "/" + m.magSize) : "";
     if (ammo !== whoC.a) { whoC.a = ammo; el("whoAmmo").textContent = ammo; }
     const w = m.magSize > 0 ? (CBZ.weaponById(m.wid) || {}) : null;
     const full = w ? ((w.reloadTime || w.reload) || 1.6) : 1;
@@ -4280,8 +5645,8 @@ CBZ.studio.need(NEED).then(function () {
       t.firstElementChild.style.width = (frac * 100) + "%";
     }
     const k = "<b>" + (m.kills || 0) + "</b> KILLS" +
-      (m.magSize > 0 ? " &middot; " + (m.reloads || 0) + " RELOADS" : "") +
-      (m.shotsF ? " &middot; " + Math.round((m.hitsF / m.shotsF) * 100) + "% HIT" : "");
+      (m.magSize > 0 ? "   " + (m.reloads || 0) + " RELOADS" : "") +
+      (m.shotsF ? "   " + Math.round((m.hitsF / m.shotsF) * 100) + "% HIT" : "");
     if (k !== whoC.k) { whoC.k = k; el("whoK").innerHTML = k; }
   }
 
@@ -4408,6 +5773,8 @@ CBZ.studio.need(NEED).then(function () {
   el("cCam").addEventListener("click", function () {
     cycleCam();
   });
+  // out of the war: back to the war room (which carries MAIN MENU to the hub)
+  el("cSetup").addEventListener("click", function () { location.href = location.pathname; });
 
   /* ============================================================ BENCH
      The honest answer to "how many". Everybody is unkillable so the census
@@ -4519,22 +5886,126 @@ CBZ.studio.need(NEED).then(function () {
     if (wid === "fists") return "FISTS";
     return ((CBZ.weaponById(wid) || {}).label || wid || "").toUpperCase();
   }
+  /* ============================================================ THE CALL
+     A WAR YOU WATCH NEEDS SOMETHING RIDING ON IT. The question machine was
+     always "who wins?" — so the page asks it. You call a side before START
+     (the war room) or for the next round (the result card); the result card
+     answers it, and a streak remembers how good your eye is across rounds.
+     LOSER +50% is the other half of the loop: it hands the beaten side half
+     again and runs it back, which is how "how many men DOES it take to beat a
+     gorilla" gets answered in five rounds instead of argued about. */
+  function sideName(team) {
+    const u = team === "red" ? SET.redU : SET.blueU;
+    if (u === "men" || typeof kindLabel !== "function") return TEAMS[team].name;
+    return kindLabel(u);
+  }
+  const STREAK_KEY = "cbz-npcwar-streak";
+  function readStreak() {
+    try { return Object.assign({ streak: 0, best: 0, calls: 0, right: 0 }, JSON.parse(localStorage.getItem(STREAK_KEY) || "{}")); }
+    catch (e) { return { streak: 0, best: 0, calls: 0, right: 0 }; }
+  }
+  let nextCall = null, callScored = false;
+  function warURL(o) {
+    const p = new URLSearchParams();
+    p.set("map", SET.map);
+    p.set("red", o.red != null ? o.red : SET.redN); p.set("blue", o.blue != null ? o.blue : SET.blueN);
+    p.set("ru", SET.redU); p.set("bu", SET.blueU); p.set("rw", SET.redW); p.set("bw", SET.blueW);
+    p.set("rt", SET.redT); p.set("bt", SET.blueT); p.set("rs", SET.redS); p.set("bs", SET.blueS);
+    if (o.call) p.set("call", o.call);
+    p.set("auto", "1");
+    return location.pathname + "?" + p.toString();
+  }
+  /* MOMENTUM, SAID OUT LOUD. The man layer calls this when the war turns: an
+     army breaks and runs, a broken army rallies, a man goes on a streak, an
+     army is down to its last man. Each is a banner a watcher can read from
+     across the room, and the last man gets the lens. */
+  let lastEventBanner = -9;
+  function warEvent(kind, d) {
+    d = d || {};
+    const team = d.team;
+    if (!team || !TEAMS[team]) return;
+    const name = sideName(team);
+    const who = function () {
+      for (let i = 0; i < men.length; i++) if (men[i].id === d.id) return men[i];
+      return null;
+    };
+    if (kind === "rout") {
+      banner(name + " BREAK", "THE LINE IS RUNNING");
+      lastEventBanner = simT;
+      // the director goes wide over the run: the broken line and the pursuit
+      // behind it is the picture of the moment the war was decided
+      const c = teamCOM[team];
+      if (c && cam.mode === "auto" && MAP) {
+        cam.shot = "crane"; cam.followM = null;
+        cam.wFocus.set(c.x, MAP.groundAt(c.x, c.z), c.z);
+        cam.wDist = 58; cam.wPitch = 0.44;
+        cam.wYaw = fightAxis() + Math.PI * 0.75;
+        cam.craneSpin = 0.02; cam.cutAt = simT + 7;
+      }
+      // a falling horn: the sound of a line giving way
+      if (CBZ.micro.sfx && CBZ.micro.sfx.tone) { try { CBZ.micro.sfx.tone(196, 0.9, { type: "sawtooth", slideTo: 110, gain: 0.08 }); } catch (e) {} }
+    } else if (kind === "rally") {
+      banner(name + " RALLY", "THEY TURN AND FIGHT");
+      lastEventBanner = simT;
+    } else if (kind === "lastman") {
+      const m = who();
+      banner("LAST MAN STANDING", name + (m && !m.beast ? " " + (m.i + 1) : ""));
+      lastEventBanner = simT;
+      // the lens goes to him: this is the shot the whole war was building to
+      if (m && !m.dead && cam.mode === "auto") {
+        cam.shot = "point"; cam.followM = m; cam.holdT = 0; cam.cutAt = simT + 12;
+      }
+    } else if (kind === "streak") {
+      const m = who();
+      const label = (m && m.beast ? String(m.species.name).toUpperCase() : name + " " + (m ? m.i + 1 : "")) +
+        "  " + (d.kills || 0) + " KILLS";
+      if (hud) hud.feed(label);
+      // the big ones get the banner, if nothing bigger just had it
+      if ((d.kills || 0) >= 5 && simT - lastEventBanner > 4) { banner(label, d.kills >= 8 ? "UNSTOPPABLE" : "ON A RUN"); lastEventBanner = simT; }
+    }
+  }
   function endWar(won) {
     over = true;
     winner = won;
-    const rows = [
-      ["DURATION", clockText()],
-      ["RED KILLS", stats.red.kills], ["BLUE KILLS", stats.blue.kills],
-      ["RED SHOTS", stats.red.shots + "  (" + pct(stats.red.hits, stats.red.shots) + " HIT)"],
-      ["BLUE SHOTS", stats.blue.shots + "  (" + pct(stats.blue.hits, stats.blue.shots) + " HIT)"],
-      ["LEFT STANDING", aliveCount("red") + aliveCount("blue")],
-    ];
     const tk = topKiller();
-    if (tk && tk.kills) {
-      rows.push(["TOP KILLER", (tk.beast ? String(tk.species.name).toUpperCase()
-        : TEAMS[tk.team].name + " " + (tk.i + 1)) + " &middot; " + tk.kills + " KILLS" +
-        (tk.beast || tk.fists ? "" : " &middot; " + gunLabel(tk.wid))]);
+    // the verdict
+    const h = el("endT");
+    h.textContent = won ? sideName(won) + " WIN" : "NOBODY LEFT";
+    h.className = won || "";
+    el("endKick").textContent = "AFTER " + clockText();
+    el("endRedN").textContent = aliveCount("red");
+    el("endBlueN").textContent = aliveCount("blue");
+    el("endMvp").innerHTML = tk && tk.kills
+      ? "TOP KILLER  <b>" + (tk.beast ? String(tk.species.name).toUpperCase() : TEAMS[tk.team].name + " " + (tk.i + 1)) +
+        "</b>  " + tk.kills + " KILLS" + (tk.beast || tk.fists ? "" : "  " + gunLabel(tk.wid)) + (tk.dead ? "  FELL" : "  LIVED")
+      : "";
+    // the call, scored once
+    const ec = el("endCall");
+    const st = readStreak();
+    if (SET.call && won && !callScored) {
+      callScored = true;
+      const right = SET.call === won;
+      st.calls++; if (right) { st.right++; st.streak++; st.best = Math.max(st.best, st.streak); } else st.streak = 0;
+      try { localStorage.setItem(STREAK_KEY, JSON.stringify(st)); } catch (e) {}
+      ec.className = right ? "right" : "wrong";
+      ec.innerHTML = (right ? "YOU CALLED IT" : "WRONG CALL") +
+        "<small>STREAK " + st.streak + "   BEST " + st.best + "   " + st.right + " OF " + st.calls + " RIGHT</small>";
+    } else if (!SET.call) {
+      ec.className = "";
+      ec.innerHTML = "<small>CALL A SIDE BELOW AND RUN IT BACK</small>";
     }
+    nextCall = SET.call || null;
+    el("end").querySelectorAll(".calls button").forEach(function (b) { b.classList.toggle("on", b.dataset.call === nextCall); });
+    const loserTeam = won === "red" ? "blue" : won === "blue" ? "red" : null;
+    el("endLoser").style.display = loserTeam ? "" : "none";
+    if (loserTeam) {
+      const n = loserTeam === "red" ? SET.redN : SET.blueN;
+      el("endLoser").textContent = sideName(loserTeam) + " " + n + " TO " + Math.max(n + 1, Math.ceil(n * 1.5));
+    }
+    const rows = [
+      ["KILLS", stats.red.kills + "  v  " + stats.blue.kills],
+      ["ACCURACY", pct(stats.red.hits, stats.red.shots) + "  v  " + pct(stats.blue.hits, stats.blue.shots)],
+    ];
     // and the guns, ranked by what they actually did — the row MIXED and
     // EVERYTHING were always secretly asking for. A launcher lands NO hits by
     // construction (its damage is blast, through studio.boom), so printing it
@@ -4543,20 +6014,35 @@ CBZ.studio.need(NEED).then(function () {
     const gunRow = function (wid) {
       const g = GUNS[wid];
       let s = g.kills + " KILLS";
-      if (g.hits > 0) s += " &middot; " + pct(g.hits, g.shots) + " HIT";
-      if (g.reloads > 0) s += " &middot; " + g.reloads + " RELOADS";
+      if (g.hits > 0) s += "   " + pct(g.hits, g.shots) + " HIT";
+      if (g.reloads > 0) s += "   " + g.reloads + " RELOADS";
       return [gunLabel(wid), s];
     };
-    if (wids.length > 1) wids.slice(0, 5).forEach(function (wid) { rows.push(gunRow(wid)); });
+    if (wids.length > 1) wids.slice(0, 3).forEach(function (wid) { rows.push(gunRow(wid)); });
     else if (wids.length === 1) rows.push(gunRow(wids[0]));
-    el("endT").textContent = won ? TEAMS[won].name + " TAKE IT" : "NOBODY LEFT";
     el("endTable").innerHTML = rows.map(function (r) {
       return "<tr><td>" + r[0] + "</td><td>" + r[1] + "</td></tr>";
     }).join("");
     el("end").style.display = "grid";
+    el("warcall").style.display = "none";
   }
   function pct(a, b) { return b ? Math.round(a / b * 100) + "%" : "0%"; }
-  el("endAgain").addEventListener("click", function () { location.reload(); });
+  el("end").querySelectorAll(".calls button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      nextCall = nextCall === b.dataset.call ? null : b.dataset.call;
+      el("end").querySelectorAll(".calls button").forEach(function (x) { x.classList.toggle("on", x.dataset.call === nextCall); });
+    });
+  });
+  // AGAIN used to be location.reload(), which on a war started from the menu
+  // (no ?auto) dropped you straight back on the setup card. A rematch is the
+  // same war, now, with your next call riding on it.
+  el("endAgain").addEventListener("click", function () { location.href = warURL({ call: nextCall }); });
+  el("endLoser").addEventListener("click", function () {
+    const o = { call: nextCall };
+    if (winner === "red") o.blue = Math.max(SET.blueN + 1, Math.ceil(SET.blueN * 1.5));
+    else if (winner === "blue") o.red = Math.max(SET.redN + 1, Math.ceil(SET.redN * 1.5));
+    location.href = warURL(o);
+  });
   el("endMenu").addEventListener("click", function () {
     location.href = location.pathname;
   });
@@ -4592,12 +6078,17 @@ CBZ.studio.need(NEED).then(function () {
            colours clipped to white and the whole erg rendered as a sheet of
            paper — the exact wash the city map already fixed for its stone.
            Sand is TAN, and the men and the dead have to read against it. */
-        fov: 72, far: 16000, exposure: 0.8,
-        sky: { top: 0x2a6bb2, bottom: 0xe3c893, fogNear: 1100, fogFar: 8600, radius: 12000 },
-        /* skyColor: the hemisphere's sky side defaults to pale BLUE, and blue
-           fill on tan sand is gray — the erg was desaturating itself. Desert
-           ambience is the sand's own bounce: warm. */
-        lights: { sun: 0.84, hemi: 0.42, shadowSpan: 620, skyColor: 0xcfc2a4, groundColor: 0x8f7850 },
+        /* LATE AFTERNOON, NOT NOON. A sun 55° up over sand lights every face
+           the same and the erg reads flat whatever its shape; at ~20° the
+           slip faces fall into shade, the crests catch the light, and every
+           man throws a long shadow down the slope — which is the picture of a
+           desert war. The fill drops so the shade is shade (warm sand bounce,
+           cool sky), and the haze goes gold toward the horizon. */
+        fov: 64, far: 16000, exposure: 0.8,
+        sky: { top: 0x2f63a3, bottom: 0xe6b57c, fogNear: 700, fogFar: 7200, radius: 12000, exponent: 0.55 },
+        lights: { sun: 1.1, hemi: 0.36, shadowSpan: 160, shadowMap: 2048, sunColor: 0xffcf98,
+          skyColor: 0x9db4d0, groundColor: 0xb48a58 },
+        sunDir: [0.78, 0.36, 0.5],
       },
       /* OPEN WATER. A maritime sun high enough to put caustic-bright tops on
          the swell, a short fog so the horizon is haze and not a hard rim on a
@@ -4607,12 +6098,14 @@ CBZ.studio.need(NEED).then(function () {
       water: {
         fov: 70, far: 9000, exposure: 0.88,
         sky: { top: 0x1b4c80, bottom: 0x9dc0d4, fogNear: 240, fogFar: 2400, radius: 7000 },
-        lights: { sun: 0.95, hemi: 0.62, shadowSpan: 240, skyColor: 0xc4dced, groundColor: 0x1d4258 },
+        lights: { sun: 1.2, hemi: 0.5, shadowSpan: 240, sunColor: 0xfff0d8, skyColor: 0xc4dced, groundColor: 0x1d4258 },
+        sunDir: [0.72, 0.5, 0.48],
       },
     };
     SKY.island = SKY.field = SKY.city;
     CBZ.micro.boot(SKY[SET.map] || SKY.dunes);
     CBZ.micro.pauseKey = null;                       // the clock is ours (Space)
+    sunRig((SKY[SET.map] || SKY.dunes).sunDir);
     if (!CBZ.groundAt) CBZ.groundAt = function (x, z) { return MAP ? MAP.groundAt(x, z) : 0; };
 
     MAP = buildMap(SET.map);
@@ -4661,15 +6154,20 @@ CBZ.studio.need(NEED).then(function () {
     cam.wFocus.copy(cam.focus);
     cam.wDist = Math.min(300, 40 + Math.sqrt(spawnTotal) * 3.2);
     cam.dist = cam.wDist + 60;
-    cam.cutAt = 4;
+    /* THE OPENING IS A CRANE DOWN BEHIND THE RED LINE, not a satellite view:
+       it starts high and settles low across the field so the first thing a
+       stranger sees is two armies facing each other over the ground. */
+    cam.yaw = cam.wYaw = Math.atan2(-0.8, 0.6);
+    cam.pitch = 0.62; cam.wPitch = MAP.water ? 0.3 : 0.2;
+    cam.cutAt = 5;
 
     el("top").style.display = "flex";
     el("ctl").style.display = "flex";
     if (!COARSE) {
       el("hint").style.display = "block";
-      el("hint").innerHTML = "DRAG ORBIT &middot; WHEEL ZOOM &middot; WASD PAN<br>" +
-        "SPACE PAUSE &middot; 1-5 SPEED &middot; . STEP &middot; F FRONT CAM &middot; V STUDY &middot; [ ] PICK" +
-        (MAP.water ? "<br>U UNDERWATER &middot; B AT WAVE HEIGHT" : "");
+      el("hint").innerHTML = "DRAG ORBIT   WHEEL ZOOM   WASD PAN<br>" +
+        "SPACE PAUSE   1-5 SPEED   . STEP   F FRONT CAM   V STUDY   [ ] PICK" +
+        (MAP.water ? "<br>U UNDERWATER   B AT WAVE HEIGHT" : "");
     }
     setSpeed(1);
     setCamMode(asBench ? "free" : "auto");
@@ -4681,8 +6179,74 @@ CBZ.studio.need(NEED).then(function () {
       return u === "men" ? TEAMS[team].name : kindLabel(u);
     };
     banner(MAPS[SET.map].label, armyName("red") + " " + SET.redN + "   V   " + armyName("blue") + " " + SET.blueN);
+    if (SET.call === "red" || SET.call === "blue") {
+      const wc = el("warcall");
+      wc.textContent = "YOUR CALL  " + armyName(SET.call);
+      wc.className = SET.call; wc.style.display = "block";
+    }
     if (AIR.on) spawnPlanes();
     CBZ.micro.onFrame(frame);
+  }
+
+  /* THE SUN IS AIMED, AND ITS SHADOW FOLLOWS THE LENS'S SUBJECT.
+     microboot parks the sun at a fixed noon bearing over the CAMERA and spans
+     its shadow map 600 m — at 2048 texels that is 0.6 m a texel, so a man
+     (0.5 m across) cast no readable shadow at all and the armies floated on
+     the sand. Here the map owns the bearing (`sunDir`, low and warm on the
+     dunes), the shadow box is centred on what the lens is LOOKING AT, and it
+     is sized to the arm: tight and crisp on a follow shot, wide on a crane.
+     The sky dome gets the sun too — a glow and a disc where the light comes
+     from, so the key light has a source in frame. */
+  function sunRig(dir) {
+    const sun = CBZ.micro.sun;
+    if (!sun) return;
+    const v = new THREE.Vector3(0.55, 1, 0.35);
+    if (dir) v.fromArray(dir);
+    v.normalize();
+    const D = 700;
+    let lastSpan = 0;
+    /* THE BUG THAT HID EVERY SHADOW ON THIS PAGE. studio.settle() freezes the
+       scene's static matrices, and the sun's TARGET is a plain Object3D in the
+       scene — so it was frozen where boot put it, at the world origin, while
+       the sun itself (a light, skipped by the freeze) followed the camera. The
+       key light aimed from over the battle toward a point two kilometres away:
+       wrong direction, and a shadow frustum that never contained a single man.
+       The target is marked dynamic before the settle, and its matrix is
+       rebuilt by hand every frame regardless. */
+    sun.target.userData.dynamic = true;
+    sun.target.matrixAutoUpdate = true;
+    CBZ.micro.onFrame(function () {
+      const f = cam.focus;
+      sun.position.set(f.x + v.x * D, f.y + v.y * D, f.z + v.z * D);
+      sun.target.position.set(f.x, f.y, f.z);
+      sun.target.updateMatrix();
+      sun.target.updateMatrixWorld(true);
+      if (!sun.castShadow) return;
+      const span = Math.max(38, Math.min(460, cam.dist * camOccl * 1.2 + 26));
+      if (Math.abs(span - lastSpan) > lastSpan * 0.12) {
+        lastSpan = span;
+        const sc = sun.shadow.camera;
+        sc.left = -span; sc.right = span; sc.top = span; sc.bottom = -span;
+        sc.near = 20; sc.far = D * 2;
+        sc.updateProjectionMatrix();
+        const texel = span * 2 / (sun.shadow.mapSize.width || 2048);
+        sun.shadow.bias = -0.0004;
+        sun.shadow.normalBias = texel * 1.6;
+      }
+    }, { order: 50 });
+    const dome = CBZ.micro.skyDome;
+    if (dir && dome && dome.material && dome.material.uniforms) {
+      dome.material.uniforms.sunDir = { value: v.clone() };
+      dome.material.fragmentShader =
+        "uniform vec3 topColor;uniform vec3 bottomColor;uniform float offset;uniform float exponent;uniform vec3 sunDir;" +
+        "varying vec3 vW;void main(){float h=normalize(vW+vec3(0.0,offset,0.0)).y;" +
+        "vec3 col=mix(bottomColor,topColor,pow(max(h,0.0),exponent));" +
+        "vec3 dir=normalize(vW-cameraPosition);float s=max(dot(dir,sunDir),0.0);" +
+        "col+=vec3(1.0,0.66,0.36)*(pow(s,6.0)*0.32+pow(s,48.0)*0.5)*(1.0-max(h,0.0)*0.6);" +
+        "col=mix(col,vec3(1.0,0.95,0.84)*2.2,smoothstep(0.9993,0.9997,s));" +
+        "gl_FragColor=vec4(col,1.0);}";
+      dome.material.needsUpdate = true;
+    }
   }
 
   function clockText() {
@@ -4883,8 +6447,7 @@ CBZ.studio.need(NEED).then(function () {
         // had ever set it, so combat_iq could send a soldier to a real piece
         // of cover and he would stand up straight behind it. One boolean, and
         // the posture the fight brain already chose is finally visible.
-        m.char.crouch = m.slot === "cover" || m.slot === "peek" ||
-          (m.slot === "fire" && m.speed < 0.2 && m.hp < m.maxHp * 0.5);
+        m.char.crouch = crouchPose(m);     // the stance the fight uses (THE MEN: STANCE)
         try { CBZ.animChar(m.char, m.speed * speed, dt * every); } catch (e) {}
       }
       const engaged = m.tgt && !m.tgt.dead && m.sees;
@@ -4930,7 +6493,7 @@ CBZ.studio.need(NEED).then(function () {
       el("blueC").textContent = ab;
       el("redB").style.width = (spawnCount.red ? ar / spawnCount.red * 100 : 0) + "%";
       el("blueB").style.width = (spawnCount.blue ? ab / spawnCount.blue * 100 : 0) + "%";
-      el("clk").textContent = clockText() + "  " + (CBZ.micro.fps || 0) + "FPS";
+      el("clk").textContent = clockText() + (Q.get("fps") === "1" || SET.bench ? "  " + (CBZ.micro.fps || 0) + "FPS" : "");
       // a dial the machine cannot honour says so instead of lying
       if (speed > 0 && effSpeed < speed * 0.8) {
         el("spd").textContent = "SPEED " + speed + "  REAL " + (Math.round(effSpeed * 10) / 10);
@@ -4941,7 +6504,9 @@ CBZ.studio.need(NEED).then(function () {
     winCheckT -= dt;
     if (winCheckT <= 0 && !over && !bench && spawnQueue.length === 0) {
       winCheckT = 0.5;
-      const ar = aliveCount("red"), ab = aliveCount("blue");
+      // inFight: the living, or 0 once a broken army has had nobody fighting
+      // for BREAK_GRACE seconds (MORALE) — a rout ends a war, not only a wipe
+      const ar = inFight("red"), ab = inFight("blue");
       if (ar === 0 || ab === 0) endWar(ar > 0 ? "red" : ab > 0 ? "blue" : null);
     }
   }
@@ -5194,6 +6759,23 @@ CBZ.studio.need(NEED).then(function () {
         relief: MAP ? MAP.relief : null,
         terrainLos: !!(MAP && MAP.terrainLos),
         men: men.length, red: aliveCount("red"), blue: aliveCount("blue"),
+        // MORALE (read-only): army nerve 0..1, men running, men gone, and the
+        // fight's shape — who is down in a fold, who broke, who is pinned
+        morale: { red: Math.round(ARMY.red.morale * 100) / 100, blue: Math.round(ARMY.blue.morale * 100) / 100 },
+        routing: { red: ARMY.red.routing, blue: ARMY.blue.routing },
+        fled: { red: ARMY.red.fled, blue: ARMY.blue.fled },
+        broken: { red: ARMY.red.broken, blue: ARMY.blue.broken },
+        cover: (function () {
+          let crouched = 0, inHull = 0, pinned = 0;
+          for (let i = 0; i < men.length; i++) {
+            const m = men[i];
+            if (m.dead || m.beast) continue;
+            if (m.stance === "crouch") crouched++;
+            if (m.hull && m.slot === "hull") inHull++;
+            if (m.supp > 0.35) pinned++;
+          }
+          return { crouched: crouched, hull: inHull, pinned: pinned, hullQ: hullQ, hullHit: hullHit };
+        })(),
         queued: spawnQueue.length, corpses: corpses.length, rockets: rockets.length,
         /* THE DEAD, MEASURED — and measured on TWO axes, because the pose in
            the report is not the one a single axis catches.
