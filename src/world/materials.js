@@ -643,7 +643,7 @@
       roughness: DRY_ROUGH,
       metalness: DRY_METAL,
       envMap: CBZ.ENV || null, // carfx.js may not have built this yet; opportunistic only
-      envMapIntensity: 0.35,
+      envMapIntensity: 0.18,
     });
     // SURFACE DETAIL. The asphalt normal map is what turns the wet-road
     // specular from a mirror sheet into scattered highlights, and the
@@ -699,13 +699,306 @@
         m.normalScale.set(ns, ns);
       }
       // A wet surface reflects the sky far harder than a dry one.
-      if ("envMapIntensity" in m) m.envMapIntensity = 0.35 + wetK * 1.9;
+      if ("envMapIntensity" in m) m.envMapIntensity = 0.18 + wetK * 2.05;
       // Dry asphalt is a near-black diffuse surface: at 0.9 it mirrored the
       // blue env gradient through the aggregate normals and the whole road
       // read as mottled blue gravel. Dry 0.35, rain still takes it to ~2.
       if (!m.envMap && CBZ.ENV) { m.envMap = CBZ.ENV; m.needsUpdate = true; } // backfill if carfx's env built later
     }
   });
+
+  /* ============================================================
+     CBZ.asphaltDetail(material, opts) — REAL ASPHALT, IN THE SHADER.
+
+     A photo tile on a road is a diorama: the same 8 m of cracked jpg
+     forever, every junction the same grey. Real asphalt is built at a
+     dozen scales at once, and every one of them is procedural in world
+     space here, so nothing repeats and nothing costs a texture:
+
+       aggregate      dark bitumen with fine grain at 2-3 scales and the
+                      odd exposed light stone (fades out with distance so
+                      it never shimmers from the air)
+       age            low-frequency mottle, 4-20 m
+       patches        rectangular utility cuts (fresh, blacker, crisp
+                      sealed seams) and big older overlay patches
+       cracks         a meandering hairline network plus, on high tiers,
+                      block cracking (Voronoi edges); some runs tar-sealed
+                      (a wider, darker, glossier band)
+       lanes (opt)    wheel-path polish, the lane-centre oil-drip band and
+                      longitudinal joint cracks on the lane lines
+       gutter (opt)   a concrete gutter pan with its joint line, and the
+                      dirt band that water leaves beside it
+
+     SIGNATURE (stable — highways.js calls it too):
+       CBZ.asphaltDetail(material, {
+         scale:       1     world-scale multiplier for every feature
+         crackiness:  1     0 = no cracks, 2 = a neglected road
+         patchiness:  1     0 = fresh deck, 2 = dug up constantly
+         tone:        1     albedo multiplier on the dry base (~0.08 linear)
+         origin:  {x,z}     subtracted before hashing (float precision; put
+                            it near the middle of the surface)
+         lanes: { laneW, lanesPerDir, median }
+                            OPTIONAL. Turns on the lane-relative effects and
+                            REQUIRES the geometry to carry a vec3 attribute
+                            `asphaltLane` = (u, e, w):
+                              u  signed lateral metres from the centreline
+                              e  metres to the nearest kerb / road edge
+                              w  0..1 weight of the lane effects (fade it to
+                                 0 inside a junction box)
+                            `median` (m) is subtracted from |u| in the shader;
+                            pass 0 if u is already median-relative.
+         gutter:      0     gutter-pan width in metres (needs `lanes`)
+       })
+     Works on MeshStandardMaterial (albedo + roughness) and
+     MeshLambertMaterial (albedo). The material's own .color stays a
+     MULTIPLIER on top — give it 0xffffff — so the wet-road driver above
+     keeps darkening it exactly as before. Chains any existing
+     onBeforeCompile and sets a stable customProgramCacheKey. Quality tier
+     picks the grain/crack variant (tier 0 keeps patches, cracks, lanes and
+     gutter; it drops only the finest grain and the Voronoi block cracks).
+     ============================================================ */
+  const ASPH_FUNCS = [
+    "varying vec3 vAsW;",
+    "varying float vAsD;",
+    "#ifdef ASPH_LANES",
+    "varying vec3 vAsLane;",
+    "#endif",
+    // sine-free hashes (Dave Hoskins) — stable on mobile highp
+    "float asHash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }",
+    "vec2 asHash2(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973)); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.xx + p3.yz) * p3.zy); }",
+    "float asSq(float x) { return x * x; }",
+    "float asNoise(vec2 p) { vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);",
+    "  return mix(mix(asHash(i), asHash(i + vec2(1.0, 0.0)), u.x), mix(asHash(i + vec2(0.0, 1.0)), asHash(i + vec2(1.0, 1.0)), u.x), u.y); }",
+    // metres to the 0.5 isoline of a noise field of cell size sc: a
+    // meandering crack line whose width does not depend on the local slope
+    "float asIsoDist(vec2 p, float sc, float salt) {",
+    "  vec2 q = p / sc + salt; float n = asNoise(q);",
+    "  float gx = asNoise(q + vec2(0.03, 0.0)) - n; float gy = asNoise(q + vec2(0.0, 0.03)) - n;",
+    "  float g = max(length(vec2(gx, gy)) / 0.03, 0.2);",
+    "  return abs(n - 0.5) / g * sc; }",
+    "#if ASPH_Q > 1",
+    // distance to the nearest Voronoi edge (block cracking), in cell units
+    "float asCellEdge(vec2 p) {",
+    "  vec2 n = floor(p); vec2 f = fract(p); vec2 mr = vec2(0.0); vec2 mg = vec2(0.0); float md = 8.0;",
+    "  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {",
+    "    vec2 g = vec2(float(i), float(j)); vec2 r = g + asHash2(n + g) * 0.8 + 0.1 - f;",
+    "    float d = dot(r, r); if (d < md) { md = d; mr = r; mg = g; } }",
+    "  md = 8.0;",
+    "  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {",
+    "    vec2 g = mg + vec2(float(i), float(j)); vec2 r = g + asHash2(n + g) * 0.8 + 0.1 - f;",
+    "    vec2 dd = r - mr; if (dot(dd, dd) > 0.00001) md = min(md, dot(0.5 * (mr + r), normalize(dd))); }",
+    "  return md; }",
+    "#endif",
+    // one rectangle per cell: x = inside, y = seam line, z = a per-patch hash
+    "vec3 asPatch(vec2 p, vec2 cell, vec2 szA, vec2 szB, float prob, float salt) {",
+    "  vec2 c = floor(p / cell); float has = step(asHash(c + salt), prob);",
+    "  vec2 sz = mix(szA, szB, asHash2(c + salt + 3.1));",
+    "  vec2 ctr = (c + 0.5) * cell + (asHash2(c + salt + 7.7) - 0.5) * max(cell - sz, vec2(0.0));",
+    "  vec2 d = abs(p - ctr) - 0.5 * sz; float m = max(d.x, d.y);",
+    "  return vec3(has * step(m, 0.0), has * (1.0 - smoothstep(0.018, 0.05, abs(m))), asHash(c + salt + 1.3)); }",
+    "vec3 asphaltSurface(out float rough) {",
+    "  vec2 p = (vAsW.xz - ASPH_ORIGIN) / ASPH_SCALE;",
+    "  float fine = 1.0 - smoothstep(16.0, 70.0, vAsD);",
+    "  float mid = 1.0 - smoothstep(110.0, 480.0, vAsD);",
+    // a crack narrower than a pixel is drawn at pixel width and dimmed in
+    // proportion, so the network averages out instead of shimmering
+    "  float wEff = max(0.011, vAsD * 0.0011); float wK = clamp(0.011 / wEff, 0.12, 1.0);",
+    "  float t = 1.0; rough = 1.0; vec3 tint = vec3(1.0);",
+    "  t *= 0.95 + 0.10 * asNoise(p / 21.0 + 3.7);",
+    "  t *= 0.975 + 0.05 * asNoise(p / 4.3 + 9.1);",
+    "#if ASPH_Q > 0",
+    "  t *= 1.0 + fine * ((asNoise(p * 7.0) - 0.5) * 0.30 + (asNoise(p * 23.0 + 5.0) - 0.5) * 0.24);",
+    "#endif",
+    "#if ASPH_Q > 1",
+    "  t *= 1.0 + fine * step(0.955, asHash(floor(p * 34.0))) * 0.3;",
+    "#endif",
+    // ---- patches: big old overlays, then the fresh utility cuts over them
+    "  vec3 pb = asPatch(p, vec2(41.0, 27.0), vec2(7.0, 4.0), vec2(19.0, 10.0), 0.30 * ASPH_PATCHY, 29.0);",
+    "  vec3 pa = asPatch(p, vec2(13.0, 8.0), vec2(1.1, 0.8), vec2(4.6, 2.6), 0.34 * ASPH_PATCHY, 11.0);",
+    "  float oldLight = step(0.55, pb.z);",
+    "  t *= mix(1.0, mix(0.93, 1.07, oldLight), pb.x);",
+    "  tint = mix(tint, vec3(1.03, 1.0, 0.95), pb.x * oldLight);",
+    "  t *= mix(1.0, mix(0.70, 0.84, pa.z), pa.x);",
+    "  tint = mix(tint, vec3(0.96, 0.98, 1.04), pa.x);",
+    "  rough *= 1.0 - 0.10 * pa.x;",
+    "  float seam = max(pa.y, pb.y * 0.7) * mid;",
+    "  t *= 1.0 - 0.40 * seam; rough *= 1.0 - 0.35 * seam;",
+    // ---- cracks: the hairline network, sealed runs, block cracking
+    "  float cmask = smoothstep(0.40, 0.62, asNoise(p / 9.0 + 41.0)) * ASPH_CRACKY * (1.0 - pa.x);",
+    "  float cd = asIsoDist(p, 5.5, 17.0);",
+    "#if ASPH_Q > 1",
+    "  float bmask = smoothstep(0.58, 0.72, asNoise(p / 15.0 + 7.0)) * ASPH_CRACKY * (1.0 - pa.x);",
+    "  float bd = asCellEdge(p / 2.6) * 2.6;",
+    "  float blk = bmask * (1.0 - smoothstep(wEff, wEff * 1.8, bd)) * wK;",
+    "#else",
+    "  float blk = 0.0;",
+    "#endif",
+    "  float crack = max(cmask * (1.0 - smoothstep(wEff, wEff * 1.8, cd)) * wK, blk) * mid;",
+    "  float seal = smoothstep(0.52, 0.60, asNoise(p / 17.0 + 5.0));",
+    "  float tar = cmask * seal * (1.0 - smoothstep(0.035, 0.07, cd)) * mid;",
+    "  t *= 1.0 - 0.55 * crack - 0.38 * tar; rough *= 1.0 - 0.45 * tar - 0.15 * crack;",
+    "#ifdef ASPH_LANES",
+    "  float au = abs(vAsLane.x) - ASPH_MEDIAN * 0.5;",
+    "  float lw = clamp(vAsLane.z, 0.0, 1.0);",
+    "  float inL = step(0.0, au) * step(au, ASPH_LANEW * ASPH_NLANES) * lw;",
+    "  float f = mod(max(au, 0.0), ASPH_LANEW);",
+    "  float wp = exp(-asSq((f - ASPH_LANEW * 0.27) / 0.34)) + exp(-asSq((f - ASPH_LANEW * 0.73) / 0.34));",
+    "  float pol = wp * inL * (0.55 + 0.45 * asNoise(p / 30.0 + 2.0));",
+    "  t *= 1.0 + 0.17 * pol; rough *= 1.0 - 0.30 * pol;",
+    "  float oilB = exp(-asSq((f - ASPH_LANEW * 0.5) / 0.42)) * inL;",
+    "  float drip = oilB * (0.5 * smoothstep(0.35, 0.8, asNoise(p * 1.7 + 13.0)) + 0.5 * fine * step(0.82, asHash(floor(p * 3.0 + 0.5))));",
+    "  t *= 1.0 - 0.24 * drip; rough *= 1.0 - 0.32 * drip; tint = mix(tint, vec3(0.94, 0.96, 1.03), drip * 0.5);",
+    // longitudinal joint cracks where the paver's passes met (lane lines)
+    "  float ja = max(au, 0.0) + (asNoise(p * 0.8 + 3.0) - 0.5) * 0.12;",
+    "  float jd = abs(ja - ASPH_LANEW * floor(ja / ASPH_LANEW + 0.5));",
+    "  float jmask = lw * ASPH_CRACKY * smoothstep(0.38, 0.6, asNoise(p / 7.0 + 71.0));",
+    "  float jc = jmask * (1.0 - smoothstep(wEff, wEff * 1.8, jd)) * wK * mid;",
+    "  t *= 1.0 - 0.5 * jc;",
+    "  float ke = vAsLane.y;",
+    "#if ASPH_GUTTER > 0",
+    "  float gw = ASPH_GUTTERW;",
+    "  float pan = 1.0 - step(gw, ke);",
+    // water leaves a dirt band on the asphalt beside the pan
+    "  float grime = (1.0 - smoothstep(0.0, 1.2, ke - gw)) * (1.0 - pan);",
+    "  t *= 1.0 - 0.24 * grime * (0.55 + 0.45 * asNoise(p * 0.9 + 8.0));",
+    "#endif",
+    "#endif",
+    "  vec3 col = vec3(0.068, 0.067, 0.066) * ASPH_TONE * t * tint;",
+    "#if defined(ASPH_LANES) && ASPH_GUTTER > 0",
+    "  vec3 panCol = vec3(0.215, 0.208, 0.196) * (0.84 + 0.22 * asNoise(p * 0.8 + 21.0));",
+    "  panCol *= 1.0 + fine * (asNoise(p * 16.0) - 0.5) * 0.22;",
+    "  panCol *= 1.0 - 0.38 * (1.0 - smoothstep(0.0, 0.16, ke)) * (0.6 + 0.4 * asNoise(p * 1.3));",   // silt at the kerb root
+    // transverse pan joints every 3 m (x+z runs along either street axis)
+    "  float pjd = abs(fract((vAsW.x + vAsW.z) / 3.0 + 0.5) - 0.5) * 3.0;",
+    "  panCol *= 1.0 - 0.35 * (1.0 - smoothstep(0.008, 0.022, pjd)) * mid;",
+    "  float lip = 1.0 - smoothstep(0.008, 0.024, abs(ke - gw));",               // the pan / asphalt joint
+    "  col = mix(col, panCol, pan);",
+    "  col *= 1.0 - 0.45 * lip * mid;",
+    "  rough = mix(rough, 1.0, pan);",
+    "#endif",
+    "  return col; }",
+  ].join("\n");
+
+  const asphaltMats = [];
+  function asphaltQ(level) {
+    const q = level == null ? (CBZ.qualityLevel != null ? CBZ.qualityLevel : 2) : level;
+    return q <= 0 ? 0 : (q <= 2 ? 1 : 2);
+  }
+  function glslF(v) { const s = String(+v); return /[.e]/.test(s) ? s : s + ".0"; }
+
+  function asphaltDetail(material, opts) {
+    if (!material || material._asphalt) return material;
+    opts = opts || {};
+    const lanes = opts.lanes || null;
+    const o = {
+      scale: opts.scale != null ? +opts.scale : 1,
+      crack: opts.crackiness != null ? +opts.crackiness : 1,
+      patch: opts.patchiness != null ? +opts.patchiness : 1,
+      tone: opts.tone != null ? +opts.tone : 1,
+      ox: opts.origin ? +opts.origin.x || 0 : 0,
+      oz: opts.origin ? +opts.origin.z || 0 : 0,
+      laneW: lanes && lanes.laneW != null ? +lanes.laneW : 3.6,
+      nLanes: lanes && lanes.lanesPerDir != null ? +lanes.lanesPerDir : 2,
+      median: lanes && lanes.median != null ? +lanes.median : 0,
+      gutter: lanes && opts.gutter ? +opts.gutter : 0,
+    };
+    material._asphalt = o;
+    material._asphaltQ = asphaltQ();
+    function defines() {
+      const d = [
+        "#define ASPH_Q " + material._asphaltQ,
+        "#define ASPH_SCALE " + glslF(o.scale),
+        "#define ASPH_CRACKY " + glslF(o.crack),
+        "#define ASPH_PATCHY " + glslF(o.patch),
+        "#define ASPH_TONE " + glslF(o.tone),
+        "#define ASPH_ORIGIN vec2(" + glslF(o.ox) + ", " + glslF(o.oz) + ")",
+        "#define ASPH_GUTTER " + (o.gutter > 0 ? 1 : 0),
+        "#define ASPH_GUTTERW " + glslF(o.gutter),
+      ];
+      if (lanes) {
+        d.push("#define ASPH_LANES 1", "#define ASPH_LANEW " + glslF(o.laneW),
+          "#define ASPH_NLANES " + glslF(o.nLanes), "#define ASPH_MEDIAN " + glslF(o.median));
+      }
+      return d.join("\n") + "\n";
+    }
+    const prev = material.onBeforeCompile;
+    material.onBeforeCompile = function (sh, renderer) {
+      if (prev) prev.call(this, sh, renderer);
+      const D = defines();
+      sh.vertexShader = D + sh.vertexShader
+        .replace("#include <common>", "#include <common>\nvarying vec3 vAsW;\nvarying float vAsD;\n" +
+          "#ifdef ASPH_LANES\nattribute vec3 asphaltLane;\nvarying vec3 vAsLane;\n#endif")
+        .replace("#include <project_vertex>", "#include <project_vertex>\n{ vec4 asWp = vec4(transformed, 1.0);\n" +
+          "#ifdef USE_INSTANCING\n  asWp = instanceMatrix * asWp;\n#endif\n" +
+          "  asWp = modelMatrix * asWp; vAsW = asWp.xyz; vAsD = -mvPosition.z; }\n" +
+          "#ifdef ASPH_LANES\nvAsLane = asphaltLane;\n#endif");
+      let fs = D + sh.fragmentShader
+        .replace("#include <common>", "#include <common>\n" + ASPH_FUNCS)
+        .replace("#include <color_fragment>", "#include <color_fragment>\nfloat asRough = 1.0;\ndiffuseColor.rgb *= asphaltSurface(asRough);");
+      if (fs.indexOf("#include <roughnessmap_fragment>") >= 0) {
+        fs = fs.replace("#include <roughnessmap_fragment>",
+          "#include <roughnessmap_fragment>\nroughnessFactor = clamp(roughnessFactor * asRough, 0.04, 1.0);");
+      }
+      sh.fragmentShader = fs;
+    };
+    const prevKey = material.customProgramCacheKey;
+    material.customProgramCacheKey = function () {
+      const base = prevKey ? prevKey.call(this) : "";
+      return base + "|asph:" + material._asphaltQ + ":" + [o.scale, o.crack, o.patch, o.tone, o.ox, o.oz,
+        lanes ? 1 : 0, o.laneW, o.nLanes, o.median, o.gutter].join(",");
+    };
+    material.needsUpdate = true;
+    asphaltMats.push(material);
+    return material;
+  }
+  if (CBZ.onQualityChange) CBZ.onQualityChange(function (level) {
+    const q = asphaltQ(level);
+    for (let i = 0; i < asphaltMats.length; i++) {
+      const m = asphaltMats[i];
+      if (m._asphaltQ !== q) { m._asphaltQ = q; m.needsUpdate = true; }
+    }
+  });
+  CBZ.asphaltDetail = asphaltDetail;
+
+  /* CBZ.roadPaintWear(material, opts) — traffic paint that has been driven
+     on. Multiplies the paint colour down in world-space patches (paint
+     wears in blotches, worst where tyres cross it) and lets the asphalt
+     grain read through at street level. Cheap: two value-noise taps.
+     opts.amount (0..1, default 1). Same chaining/cache-key contract as
+     asphaltDetail; for any Lambert/Standard/Basic paint material. */
+  function roadPaintWear(material, opts) {
+    if (!material || material._paintWear) return material;
+    const amt = opts && opts.amount != null ? +opts.amount : 1;
+    material._paintWear = amt;
+    const prev = material.onBeforeCompile;
+    material.onBeforeCompile = function (sh, renderer) {
+      if (prev) prev.call(this, sh, renderer);
+      sh.vertexShader = sh.vertexShader
+        .replace("#include <common>", "#include <common>\nvarying vec3 vPwW;\nvarying float vPwD;")
+        .replace("#include <project_vertex>", "#include <project_vertex>\n{ vec4 pwW = vec4(transformed, 1.0);\n" +
+          "#ifdef USE_INSTANCING\n  pwW = instanceMatrix * pwW;\n#endif\n" +
+          "  pwW = modelMatrix * pwW; vPwW = pwW.xyz; vPwD = -mvPosition.z; }");
+      sh.fragmentShader = sh.fragmentShader
+        .replace("#include <common>", "#include <common>\nvarying vec3 vPwW;\nvarying float vPwD;\n" +
+          "float pwHash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }\n" +
+          "float pwNoise(vec2 p) { vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);\n" +
+          "  return mix(mix(pwHash(i), pwHash(i + vec2(1.0, 0.0)), u.x), mix(pwHash(i + vec2(0.0, 1.0)), pwHash(i + vec2(1.0, 1.0)), u.x), u.y); }")
+        .replace("#include <color_fragment>", "#include <color_fragment>\n{\n" +
+          "  vec2 pwp = vPwW.xz;\n" +
+          "  float fineK = 1.0 - smoothstep(20.0, 80.0, vPwD);\n" +
+          "  float w = pwNoise(pwp * 0.32 + 7.0) * 0.7 + pwNoise(pwp * 1.4 + 3.0) * 0.3;\n" +
+          "  float worn = smoothstep(0.62, 0.95, w) * 0.55 * " + glslF(amt) + ";\n" +
+          "  float fine = 1.0 - fineK * 0.06 * pwNoise(pwp * 9.0);\n" +
+          "  diffuseColor.rgb *= mix(1.0, 0.45, worn) * fine;\n}");
+    };
+    const prevKey = material.customProgramCacheKey;
+    material.customProgramCacheKey = function () {
+      return (prevKey ? prevKey.call(this) : "") + "|pwear:" + amt;
+    };
+    material.needsUpdate = true;
+    return material;
+  }
+  CBZ.roadPaintWear = roadPaintWear;
 
   // ============================================================
   //  CBZ.glass(opts) — THE ONE GLASS.

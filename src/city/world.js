@@ -7,9 +7,10 @@
    teleports here. Everything lives in one group (city.root) so the
    other modes just hide it.
 
-   This file lays the FOUNDATION only — a flat ground, a regular grid
-   of streets with lane lines + crosswalks, sidewalks ringing every
-   block, and the descriptor (lots / roads / intersections / waypoint
+   This file lays the FOUNDATION only — the street grid (drawn as ONE
+   solved cross-section by city/streetkit.js: asphalt, rounded kerbs,
+   footways, ramps, markings; the city floor reads the same surface),
+   and the descriptor (lots / roads / intersections / waypoint
    helpers + the DISTRICT personality field: density-weighted spawn
    pickers so downtown is packed and the docks are quiet BY DESIGN —
    crime pacing needs busy and dead streets) that the rest of the city
@@ -22,11 +23,9 @@
    island so every edge reads as coastline, the bridge gap carries real
    moored vehicles rather than prop hulls, and the GROUND tells
    you where the money is without a map: grass yards (the island's own
-   checker) in residential/projects, poured plazas downtown, stained
-   sidewalks + work-yard dirt in projects/industrial, double-yellow
-   arterials + painted turn arrows through the Midtown core, red fire
-   curbs at hydrants. Photo textures (assets/textures/*.jpg) layer into
-   the procedural canvases when present — procedural stays the fallback.
+   checker) in residential/projects, poured plazas downtown, work-yard
+   dirt in industrial, raised medians on the two avenues, painted turn
+   arrows through the Midtown core, red fire kerbs at hydrants.
 
    CBZ.buildCity() builds once and returns the city descriptor.
 ============================================================ */
@@ -87,35 +86,11 @@
       img.src = url;
     }
 
-    // ---- ground: asphalt base, then sidewalk + lot slabs on top ----
-    const baseTex = CBZ.checkerTex ? CBZ.checkerTex("#2b2e33", "#26292e", 2) : null;   // dark asphalt base
-    if (baseTex) baseTex.repeat.set(spanX / 8, spanZ / 8);
-    photoLayer(baseTex, "assets/textures/asphalt512.jpg", function (g2, c) {
-      // keep the near-black city base tone over the photo grain
-      g2.globalAlpha = 0.55; g2.fillStyle = "#26292e"; g2.fillRect(0, 0, c.width, c.height); g2.globalAlpha = 1;
-    });
-    // ground stops just past the seawall line (bounds+26): the city meets the
-    // WATER, not an endless gray apron — the +29 edge tucks under the shoreline
-    const groundMat = baseTex ? new THREE.MeshLambertMaterial({ map: baseTex }) : mat(0x3a3e45);
-    // FOG-RATE HARMONY (owner, from the air: "city areas look bright and
-    // rendered while the ground around them is grayer"): the continent plate
-    // fogs at 0.08x and the mountain landmarks at 0.12x, but this city slab
-    // fogged at the FULL 1.0x rate — from altitude it washed toward the fog
-    // colour ~10x faster than the country touching it, so every authored pad
-    // read as a differently-lit sticker on the landscape. Same shared helper,
-    // same family of rates; the height fog still clears the air up high.
-    if (CBZ.terrainFogScale) CBZ.terrainFogScale(groundMat, 0.10);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(spanX + 58, spanZ + 58), groundMat);
-    ground.rotation.x = -Math.PI / 2; ground.position.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
-    ground.receiveShadow = true;
-    // A land floor is not disposable scenery.  Far-distance culling can keep
-    // the measured building LOD alive after hiding an ordinary top-level mesh;
-    // exempting the authored surface prevents the skyline from appearing to
-    // stand directly in the harbour when viewed from aircraft or a boat.
-    ground.userData.terrain = true;
-    ground.userData.worldSurface = true;
-    ground.name = "mainland-city-surface";
-    root.add(ground);
+    // ---- ground: the whole street layer (road, harbour apron, kerbs,
+    //      footways, markings, lot pads) is ONE solved cross-section built by
+    //      city/streetkit.js further down, once the lots exist. There is no
+    //      base plane under the grid any more: nothing lies under the road to
+    //      fight it for depth from the air. ----
 
     // ---- THE SEA: one giant water plane under city + island, so every map
     //      edge reads as COASTLINE instead of void (the perimeter wall becomes
@@ -213,414 +188,43 @@
       }
     });
 
-    // flat plane helper (decor, no collider). Optional `paintM` supplies a
-    // SHARED material (road-paint decals reuse one polygonOffset singleton
-    // instead of minting a material per stripe); color/basic are ignored then.
-    function plane(x, z, w, d, color, y, basic, paintM) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d),
-        paintM || (basic ? new THREE.MeshBasicMaterial({ color }) : new THREE.MeshLambertMaterial({ color })));
-      m.rotation.x = -Math.PI / 2; m.position.set(x, y == null ? 0.02 : y, z);
-      m.receiveShadow = !basic; root.add(m);
-      return m;
-    }
-
-    // merged QUAD FIELD: many ground rects → ONE textured mesh. The batch
-    // pass (core/batch.js) deliberately skips textured materials, so any
-    // surface that wants a map must pre-merge here or pay a draw call per
-    // rect. UVs are world-scaled (~8 m per texture repeat) so one repeating
-    // texture fits every rect size.
-    function quadField(rects, material, y) {
-      const n = rects.length;
-      const pos = new Float32Array(n * 18), nrm = new Float32Array(n * 18), uvA = new Float32Array(n * 12);
-      // optional per-rect `tone` (0..1 brightness) → a vertex-colour attribute,
-      // so a field of paint dashes can be worn unevenly in one draw call
-      const toned = rects.some((r) => r.tone != null);
-      const col = toned ? new Float32Array(n * 18) : null;
-      let p = 0, u = 0;
-      for (const r of rects) {
-        if (col) { const t = r.tone != null ? r.tone : 1; for (let k = 0; k < 18; k++) col[p + k] = t; }
-        const x0 = r.x - r.w / 2, x1 = r.x + r.w / 2, z0 = r.z - r.d / 2, z1 = r.z + r.d / 2;
-        const ux = r.w / 8, uz = r.d / 8;
-        const V = [[x0, z0, 0, uz], [x0, z1, 0, 0], [x1, z1, ux, 0], [x0, z0, 0, uz], [x1, z1, ux, 0], [x1, z0, ux, uz]];
-        for (const v of V) {
-          pos[p] = v[0]; pos[p + 1] = y; pos[p + 2] = v[1];
-          nrm[p] = 0; nrm[p + 1] = 1; nrm[p + 2] = 0; p += 3;
-          uvA[u] = v[2]; uvA[u + 1] = v[3]; u += 2;
-        }
-      }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-      geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
-      geo.setAttribute("uv", new THREE.BufferAttribute(uvA, 2));
-      if (col) { geo.setAttribute("color", new THREE.BufferAttribute(col, 3)); material.vertexColors = true; }
-      const m = new THREE.Mesh(geo, material);
-      m.receiveShadow = true; m.matrixAutoUpdate = false; root.add(m);
-      return m;
-    }
-
-    // deterministic smooth noise on world coordinates (no rng() draws, so the
-    // seeded build downstream of this file is byte-identical)
-    function hash2(ix, iz, salt) {
-      let h = (ix * 374761393 + iz * 668265263 + salt * 2246822519) | 0;
-      h = Math.imul(h ^ (h >>> 13), 1274126177);
-      return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-    }
-    function smooth2(x, z, scale, salt) {
-      const fx = x / scale, fz = z / scale;
-      const ix = Math.floor(fx), iz = Math.floor(fz);
-      let tx = fx - ix, tz = fz - iz;
-      tx = tx * tx * (3 - 2 * tx); tz = tz * tz * (3 - 2 * tz);
-      const a = hash2(ix, iz, salt), b = hash2(ix + 1, iz, salt), c = hash2(ix, iz + 1, salt), d = hash2(ix + 1, iz + 1, salt);
-      return (a + (b - a) * tx) * (1 - tz) + (c + (d - c) * tx) * tz;
-    }
-    // A road strip as a SUBDIVIDED grid carrying a wear profile in vertex
-    // colour (see the note at the call site). `vertical` strips run along z.
-    // Lateral samples every 0.6 m, longitudinal every 5 m; UVs are world-scaled
-    // at 11 m per repeat with a per-strip offset so the two fields never tile
-    // in step across a junction.
-    let roadFieldVerts = 0, wornDashes = 0;   // census for the ba preset (city.roadLook)
-    function roadField(rects, vertical, y) {
-      const LAT = 0.6, ALONG = 5, REP = 11;
-      let vCount = 0, iCount = 0;
-      const dims = rects.map((r) => {
-        const w = vertical ? r.w : r.d, len = vertical ? r.d : r.w;
-        const nc = Math.max(2, Math.round(w / LAT) + 1), nr = Math.max(2, Math.round(len / ALONG) + 1);
-        vCount += nc * nr; iCount += (nc - 1) * (nr - 1) * 6;
-        return { w, len, nc, nr };
-      });
-      const pos = new Float32Array(vCount * 3), nrm = new Float32Array(vCount * 3);
-      const uvA = new Float32Array(vCount * 2), col = new Float32Array(vCount * 3);
-      const idx = vCount > 65535 ? new Uint32Array(iCount) : new Uint16Array(iCount);
-      let v = 0, ii = 0;
-      const lw = laneW, nl = lanesPerDir;
-      rects.forEach((r, k) => {
-        const D = dims[k];
-        const base = r.avenue ? AVE_MEDIAN / 2 : 0;
-        const uOff = hash2(k, vertical ? 1 : 2, 11) * 7, vOff = hash2(k, vertical ? 3 : 4, 13) * 7;
-        const v0 = v;
-        for (let row = 0; row < D.nr; row++) {
-          const t = -D.len / 2 + (D.len * row) / (D.nr - 1);
-          const wx = vertical ? r.x : r.x + t, wz = vertical ? r.z + t : r.z;
-          // longitudinal tone: repairs and age at ~28 m, drainage at ~7 m
-          const along = (smooth2(wx, wz, 28, 5) - 0.5) * 0.14 + (smooth2(wx, wz, 7, 6) - 0.5) * 0.05;
-          const wearK = 0.55 + smooth2(wx, wz, 40, 7) * 0.45;   // how hard this stretch is driven
-          for (let c = 0; c < D.nc; c++) {
-            const u = -D.w / 2 + (D.w * c) / (D.nc - 1);        // lateral, centreline = 0
-            const px = vertical ? r.x + u : wx, pz = vertical ? wz : r.z + u;
-            const au = Math.abs(u);
-            let tone = 1 + along;
-            // the lanes on this side: wheel paths lighter, lane centre darker
-            const inLane = au - base;
-            if (inLane > 0) {
-              const li = Math.min(nl - 1, Math.floor(inLane / lw));
-              const f = inLane - li * lw;                         // 0..lw across the lane
-              const wp = Math.exp(-Math.pow((f - lw * 0.25) / 0.32, 2)) + Math.exp(-Math.pow((f - lw * 0.75) / 0.32, 2));
-              const oil = Math.exp(-Math.pow((f - lw * 0.5) / 0.38, 2));
-              tone += wp * 0.09 * wearK - oil * 0.06 * wearK;
-            }
-            // the gutter: the last 0.7 m to the kerb is stained and shaded
-            const edge = D.w / 2 - au;
-            if (edge < 0.7) tone -= (0.7 - edge) / 0.7 * (0.12 + smooth2(px, pz, 4, 8) * 0.08);
-            // median shadow on the avenues
-            if (r.avenue && au < base + 0.5) tone -= (base + 0.5 - au) / (base + 0.5) * 0.08;
-            tone = Math.max(0.55, Math.min(1.22, tone));
-            pos[v * 3] = px; pos[v * 3 + 1] = y; pos[v * 3 + 2] = pz;
-            nrm[v * 3] = 0; nrm[v * 3 + 1] = 1; nrm[v * 3 + 2] = 0;
-            uvA[v * 2] = px / REP + uOff; uvA[v * 2 + 1] = pz / REP + vOff;
-            col[v * 3] = tone; col[v * 3 + 1] = tone; col[v * 3 + 2] = tone;
-            v++;
-          }
-        }
-        for (let row = 0; row < D.nr - 1; row++) {
-          for (let c = 0; c < D.nc - 1; c++) {
-            const a = v0 + row * D.nc + c, b = a + 1, cc = a + D.nc, d = cc + 1;
-            // same winding as quadField (x0,z0)->(x0,z1)->(x1,z1): up-facing
-            idx[ii++] = a; idx[ii++] = cc; idx[ii++] = d;
-            idx[ii++] = a; idx[ii++] = d; idx[ii++] = b;
-          }
-        }
-      });
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-      geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
-      geo.setAttribute("uv", new THREE.BufferAttribute(uvA, 2));
-      geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
-      geo.setIndex(new THREE.BufferAttribute(idx, 1));
-      roadFieldVerts += vCount;
-      const m = new THREE.Mesh(geo, roadMat);
-      m.receiveShadow = true; m.matrixAutoUpdate = false; root.add(m);
-      return m;
-    }
-
-    // ---- roads: one strip per grid line, full span ----
-    // Surface: ONE shared asphalt canvas (photo-layered when the jpg exists,
-    // flat #282a30 otherwise) across two merged quad-field meshes — 14 strips
-    // cost 2 draw calls instead of 14 unmergeable textured planes.
-    const roadCv = document.createElement("canvas"); roadCv.width = roadCv.height = 256;
-    const roadCg = roadCv.getContext("2d"); roadCg.fillStyle = "#282a30"; roadCg.fillRect(0, 0, 256, 256);
-    const roadTex = new THREE.CanvasTexture(roadCv);
-    roadTex.wrapS = roadTex.wrapT = THREE.RepeatWrapping;
-    // THE WASHED-OUT ROAD. This canvas is an sRGB photo (a 512 asphalt jpg
-    // with a dark fill over it, mean ~70/255), but it was uploaded with the
-    // default LinearEncoding, so the renderer read every texel as if it were
-    // already linear light and the road came out at the same value as the
-    // beige sidewalk beside it (measured 187-194/255 at noon, 90/255 at
-    // MIDNIGHT). Asphalt is three to four times darker than concrete; that
-    // contrast is most of what makes a street read as a street. Decode it as
-    // the sRGB it is, and lighten the fill a little so the decoded road lands
-    // on real asphalt (~0.07 linear) instead of coal.
-    if (THREE.sRGBEncoding) roadTex.encoding = THREE.sRGBEncoding;
-    try { if (CBZ.renderer && CBZ.renderer.capabilities) roadTex.anisotropy = Math.min(8, CBZ.renderer.capabilities.getMaxAnisotropy()); } catch (e) {}
-    photoLayer(roadTex, "assets/textures/asphalt512.jpg", function (g2, c) {
-      // a heavier fill than before ON PURPOSE: the jpg is a close-up of
-      // cracked asphalt, and at full contrast the road read as cobbles from
-      // a balcony. The grain stays; the crackle recedes to where a road's
-      // texture actually lives, under the wear profile in the vertex colour.
-      g2.globalAlpha = 0.52; g2.fillStyle = "#42454c"; g2.fillRect(0, 0, c.width, c.height); g2.globalAlpha = 1;
-    });
-    // wet-road tie-in (feature-detected): CBZ.roadMat() hands back ONE shared
-    // MeshStandardMaterial that materials.js keeps darkening/shining as
-    // CBZ.weather.intensity rises — same map, same texture, so the merged
-    // quadField batching below is untouched (still one material instance
-    // shared across both merged meshes). Falls back to the original flat
-    // Lambert road if materials.js hasn't loaded (load-order safe).
-    const roadMat = CBZ.roadMat
-      ? CBZ.roadMat({ map: roadTex, color: 0xffffff })
-      : new THREE.MeshLambertMaterial({ map: roadTex });
-    const roads = [];     // {x,z,vertical,len} drivable centre-line segments
-    // LANE PAINT (multi-lane US street): off the centreline we paint, per side,
-    // (lanesPerDir-1) DASHED WHITE lane dividers at ±k*laneW and a SOLID WHITE
-    // edge/fog line near the curb (±road/2-0.3); on the centreline a SINGLE
-    // yellow on ordinary streets, solid DOUBLE-YELLOW on the two avenues FRAMING
-    // the Midtown core (xLines[2]/xLines[4]) so the arterials read at a glance —
-    // you know you're downtown (money) without the map. PERF: every stripe on
-    // every street is folded into TWO merged meshes (one white, one yellow) via
-    // a tiny rect→geometry baker, so 14 multi-lane streets cost 2 draw calls for
-    // ALL paint instead of hundreds of dash meshes. No rng draws (deterministic).
+    // ---- roads: the drivable centre-line records every system reads ----
+    // (traffic, props, roadrules junctions, approach, minimap...). The
+    // DRAWN street comes from city/streetkit.js below; these records keep
+    // their historical shape. `grid: true` is additive: it tells
+    // props.js's junction pass that the kit already drew these corners.
+    const roads = [];     // {x,z,vertical,len,w[,avenue,lanesPerDir,laneW],grid}
     const TRAF = (C.traf) || {};
     const lanesPerDir = Math.max(1, (TRAF.lanesPerDir != null ? TRAF.lanesPerDir : 2) | 0);
     const laneW = (TRAF.laneW != null ? TRAF.laneW : 3.6);
     // ---- THE TWO ARTERIAL AVENUES (xLines[2]/xLines[4]) ----------------------
-    // WHY: road "hierarchy" used to be pure paint (double-yellow, zero geometry
-    // difference) — every street drove identically. A real downtown has a couple
-    // of avenues with a hard median. The old pass squeezed THREE 2.35m lanes per
-    // direction into a 16m envelope: narrower than the 3.6m lanes used by every
-    // traffic controller, so the painted road and driven road disagreed. CITY.road
-    // is now a real 18m four-lane cross-section; avenues keep those same 3.6m
-    // travel lanes and add a 0.7m median inside the remaining clear zone.
-    // AVE_LANES/AVE_LANEW
-    // are stamped onto these two road records (avenue:true), although they now
-    // deliberately equal the global traffic contract. Paint and AI therefore
-    // agree on lane count and width; the median is the avenue's hierarchy cue.
+    // Same four 3.6 m travel lanes as every street (the traffic contract), plus
+    // a raised 0.7 m median and a double yellow each side of it: the avenue's
+    // hierarchy cue. Stamped onto the two road records (avenue:true).
     const AVENUE_LINES = [2, 4];
     function isAvenueLine(i) { return AVENUE_LINES.indexOf(i) >= 0; }
     const AVE_LANES = lanesPerDir, AVE_LANEW = laneW, AVE_MEDIAN = 0.7;
-    const whiteRects = [], yellowRects = [];   // {x,z,w,d}
-    // one centred white DASHED line down a span (axis: 'v' along z, 'h' along x)
-    function pushDashes(cx, cz, vertical, len, off) {
-      const n = Math.max(1, Math.floor(len / 7));
-      const seg = len / n, dashL = Math.min(2.6, seg * 0.55);
-      for (let i = 0; i < n; i++) {
-        const t = -len / 2 + (i + 0.5) * seg;
-        const px = vertical ? cx + off : cx + t, pz = vertical ? cz + t : cz + off;
-        // worn unevenly: every dash its own brightness, the odd one nearly gone
-        const h = hash2(Math.round(px * 2), Math.round(pz * 2), 21);
-        const tone = 0.62 + h * 0.38 - (h < 0.08 ? 0.3 : 0);
-        if (tone < 0.7) wornDashes++;
-        if (vertical) whiteRects.push({ x: px, z: pz, w: 0.22, d: dashL, tone });
-        else whiteRects.push({ x: px, z: pz, w: dashL, d: 0.22, tone });
-      }
-    }
-    // one centred SOLID line (white edge / yellow centre) down a span
-    function pushSolid(cx, cz, vertical, len, off, yellow) {
-      const arr = yellow ? yellowRects : whiteRects;
-      const tone = 0.78 + hash2(Math.round(cx), Math.round(cz), 22) * 0.2;
-      if (vertical) arr.push({ x: cx + off, z: cz, w: 0.18, d: len, tone });
-      else arr.push({ x: cx, z: cz + off, w: len, d: 0.18, tone });
-    }
-    // Paint the whole lane set for one street. Avenues retain the same legal
-    // lane contract as traffic but use a hard median/double-yellow centreline;
-    // ordinary streets keep the single-yellow centreline.
-    function paintStreet(cx, cz, vertical, len, avenue) {
-      const nLanes = avenue ? AVE_LANES : lanesPerDir, lw = avenue ? AVE_LANEW : laneW;
-      // centre line: avenues get a wider double-yellow straddling the median;
-      // every ordinary street keeps the original single-yellow centreline.
-      if (avenue) { pushSolid(cx, cz, vertical, len, -AVE_MEDIAN / 2 - 0.08, true); pushSolid(cx, cz, vertical, len, AVE_MEDIAN / 2 + 0.08, true); }
-      else pushSolid(cx, cz, vertical, len, 0, true);
-      // dashed dividers BETWEEN lanes on each side (k=1..nLanes-1 — the k=0 slot
-      // is the median/centreline itself, already marked above, never re-striped)
-      for (let s = -1; s <= 1; s += 2) {
-        const base = avenue ? AVE_MEDIAN / 2 : 0;
-        for (let k = 1; k < nLanes; k++) pushDashes(cx, cz, vertical, len, s * (base + k * lw));
-        // solid edge/fog line just inside the curb
-        pushSolid(cx, cz, vertical, len, s * (ROAD / 2 - 0.3), false);
-      }
-    }
-    // ROADS_V2: markings STOP at every intersection (real streets don't run a
-    // yellow centreline straight through a junction box — the owner's screenshot
-    // of a "floating yellow line" was that continuous centreline crossing the
-    // raised intersection patch). Paint each street as per-block segments that
-    // end just behind the stop bar (ROAD/2 + 3.0 from each crossing centre);
-    // the crossing itself stays bare asphalt + zebra/stop-bar furniture.
-    const ROADS_V2 = !CBZ.CONFIG || CBZ.CONFIG.ROADS_V2 !== false;
-    const PAINT_SETBACK = ROAD / 2 + 3.0;
-    function paintStreetSegmented(fixed, vertical, crossings, avenue) {
-      for (let j = 0; j < crossings.length - 1; j++) {
-        const c0 = crossings[j] + PAINT_SETBACK, c1 = crossings[j + 1] - PAINT_SETBACK;
-        const segLen = c1 - c0;
-        if (segLen < 3) continue;
-        const mid = (c0 + c1) / 2;
-        if (vertical) paintStreet(fixed, mid, true, segLen, avenue);
-        else paintStreet(mid, fixed, false, segLen, avenue);
-      }
-    }
-    const aveRects = [], crossRects = [];
     xLines.forEach((x, i) => {              // avenues (run along z)
-      const ave = isAvenueLine(i);
-      aveRects.push({ x, z: (minZ + maxZ) / 2, w: ROAD, d: spanZ, avenue: ave });
-      if (ROADS_V2) paintStreetSegmented(x, true, zLines, ave);
-      else paintStreet(x, (minZ + maxZ) / 2, true, spanZ, ave);
-      // stamp the avenue's real per-segment lane data (lanesPerDir/laneW/avenue)
-      // alongside the ordinary {x,z,vertical,len} shape every consumer expects —
-      // a plain additive field, invisible to anything that doesn't look for it.
-      const seg = { x, z: (minZ + maxZ) / 2, vertical: true, len: spanZ, w: ROAD };
-      if (ave) { seg.avenue = true; seg.lanesPerDir = AVE_LANES; seg.laneW = AVE_LANEW; }
+      const seg = { x, z: (minZ + maxZ) / 2, vertical: true, len: spanZ, w: ROAD, grid: true };
+      if (isAvenueLine(i)) { seg.avenue = true; seg.lanesPerDir = AVE_LANES; seg.laneW = AVE_LANEW; }
       roads.push(seg);
     });
     zLines.forEach((z) => {                 // cross-streets (run along x)
-      crossRects.push({ x: (minX + maxX) / 2, z, w: spanX, d: ROAD });
-      if (ROADS_V2) paintStreetSegmented(z, false, xLines, false);
-      else paintStreet((minX + maxX) / 2, z, false, spanX, false);
-      roads.push({ x: (minX + maxX) / 2, z, vertical: false, len: spanX, w: ROAD });
+      roads.push({ x: (minX + maxX) / 2, z, vertical: false, len: spanX, w: ROAD, grid: true });
     });
-    // ROAD FLICKER (owner, from an aerial screenshot: "the roads flicker").
-    // Avenues sat at 0.040 and cross-streets at 0.045 — a FIVE MILLIMETRE gap
-    // between two big coplanar quads that overlap at every single intersection.
-    // Up close the depth buffer resolves that fine; from altitude, where the
-    // near/far range is enormous and precision collapses, 5mm is inside the
-    // noise and the two surfaces trade places per frame. That is the flicker,
-    // and it appears exactly on the grid crossings because that is the only
-    // place the two layers overlap.
-    //
-    // polygonOffset cannot fix this one: both fields share the SAME roadMat
-    // instance, so any offset would move them together. Widening the ladder to
-    // 25mm is the honest fix — still visually flat asphalt, four times the
-    // depth separation.
-    // ROAD WEAR IN VERTEX COLOUR. A flat quad with one repeating photo is what
-    // a road looks like in a diorama: the same 8 m tile forever, no wheel
-    // paths, no gutter, no patch that is darker than the next. Real asphalt
-    // has a lateral PROFILE (polished aggregate under the tyres reads
-    // lighter, the lane centre carries the oil drips, the gutter is stained
-    // dark) and a longitudinal one (repairs, age, drainage). Both are metres
-    // to tens of metres in scale, which is exactly what vertex colour on a
-    // subdivided strip carries for free: still one merged mesh per field,
-    // still one draw call, ~55k vertices for the whole grid, and the
-    // multiplier rides on top of the photo so the fine grain is untouched.
-    roadMat.vertexColors = true;
-    roadField(aveRects, true, 0.040);
-    roadField(crossRects, false, 0.065);
-    // bake ALL lane paint into two merged flat meshes (white + yellow).
-    // PAINTED, NOT GEOMETRY: every marking material is a polygonOffset decal —
-    // the depth offset (factor/units -2) does the separation from the asphalt,
-    // so the markings sit near-coplanar (tiny y ladder kept only to order the
-    // markings among THEMSELVES) instead of visibly hovering above the road.
-    // LIT PAINT. This was MeshBasicMaterial: unlit, so every stripe glowed
-    // at full white through midnight and stayed sunlit inside a building's
-    // shadow, the single loudest "diorama" tell on the street. Paint is a
-    // matte surface like the asphalt under it: Lambert, and it takes shadow.
-    function paintMat(color) {
-      return new THREE.MeshLambertMaterial({ color: color,
-        polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-    }
-    function paintMesh(rects, color, y) {
-      if (!rects.length) return;
-      const m = quadField(rects, paintMat(color), y);
-      m.receiveShadow = true;
-      // BATCH-EXEMPT (the floating-yellow-line root cause): core/batch.js's V2
-      // merge re-materials its buckets with a shared plain material, silently
-      // DROPPING polygonOffset — the paint then z-fights/parallax-hovers over
-      // the asphalt. Non-empty userData spares the mesh (same guard highways.js
-      // uses: userData.roadPaint); renderOrder keeps paint drawn after decks.
-      m.renderOrder = 1;
-      m.userData.roadPaint = true;
-      return m;
-    }
-    paintMesh(whiteRects, 0xdadcd8, 0.055);
-    paintMesh(yellowRects, 0xd9b23c, 0.057);
-    // permanent raised concrete MEDIAN on the two avenues — was flag-gated decor
-    // (CITY_MEDIANS) shared by every line; now it's the avenues' OWN structural
-    // tell (always on), sized to the lane layout above (AVE_MEDIAN), and GAPPED
-    // at every cross-street so it reads as a real left-turn-pocket median
-    // instead of a concrete island bulldozed straight through every intersection
-    // (decor only — no collider either way — but a median floating through a
-    // 4-way crossing looked wrong once this stopped being an occasional flag).
-    // One merged mesh per avenue (BoxGeometry per segment, BGU-folded), so two
-    // avenues still cost about 1 extra draw call total, same budget as before.
-    {
-      const medMat = mat(0x7a7f86);   // weathered concrete, not a white wall down the avenue
-      const medGeoms = [];
-      AVENUE_LINES.forEach((i) => {
-        const x = xLines[i];
-        zLines.forEach((z, j) => {
-          const zNext = zLines[j + 1];
-          if (zNext == null) return;
-          const gapLen = Math.max(0, (zNext - z) - ROAD);   // clear of both intersection boxes (each eats ROAD/2 on its near side)
-          if (gapLen < 1) return;
-          const segZ = (z + zNext) / 2;
-          const g = new THREE.BoxGeometry(AVE_MEDIAN, 0.28, gapLen);
-          g.translate(x, 0.14, segZ);
-          medGeoms.push(g);
-        });
-      });
-      if (medGeoms.length) {
-        const BGU = THREE.BufferGeometryUtils;
-        if (BGU && BGU.mergeBufferGeometries) {
-          const merged = BGU.mergeBufferGeometries(medGeoms);
-          const med = new THREE.Mesh(merged, medMat);
-          med.castShadow = false; med.matrixAutoUpdate = false; med.updateMatrix(); root.add(med);
-        } else {
-          for (const g of medGeoms) { const med = new THREE.Mesh(g, medMat); med.castShadow = false; root.add(med); }
-        }
-      }
-    }
 
-    // ---- intersections + crosswalk stripes ----
+    // ---- intersections (signal phase records; the paint is the kit's) ----
     const intersections = [];
-    // ONE shared polygonOffset decal material for every zebra stripe in the
-    // city (was a fresh MeshBasicMaterial per stripe) — paint, not geometry.
-    const zebraM = paintMat(0xdadcd8);
-    // ALL zebra stripes accumulate into one merged quadField (was ~60 separate
-    // planes PER intersection — thousands of meshes the batcher merged while
-    // stripping their polygonOffset, the same float bug as the centrelines).
-    const zebraRects = [];
     xLines.forEach((x, i) => zLines.forEach((z, j) => {
-      // (a "darker box at the crossing" used to be drawn here at y=0.05 —
-      // UNDER the cross-street field at 0.065, so it was never visible: one
-      // dead plane per junction, deleted.)
-      // zebra stripes on all four approaches — stripe COUNT scales with the
-      // road width (ceil(road/1.2)) so a wide multi-lane road gets a full
-      // crosswalk that spans it instead of a fixed 5-stripe band.
-      const zk = Math.max(2, Math.ceil(ROAD / 1.2) >> 1);
-      for (let s = -1; s <= 1; s += 2) {
-        for (let k = -zk; k <= zk; k++) {
-          zebraRects.push({ x: x + k * 1.1, z: z + s * (ROAD / 2 + 1.2), w: 0.7, d: 2.0 });
-          zebraRects.push({ x: x + s * (ROAD / 2 + 1.2), z: z + k * 1.1, w: 2.0, d: 0.7 });
-        }
-      }
       intersections.push({ x, z, i, j, phase: (i + j) % 2 === 0 ? 0 : 1, t: rng() * 6, ns: true, light: null });
     }));
-    if (zebraRects.length) {
-      const zm = quadField(zebraRects, zebraM, 0.063);
-      zm.receiveShadow = true; zm.renderOrder = 1; zm.userData.roadPaint = true;
-    }
 
-    // ---- blocks: a sidewalk slab + a DISTRICT-flavoured lot pad ----
+    // ---- blocks: lots + a DISTRICT-flavoured lot pad ----
     // GROUND IDENTITY (why: you should know WHERE you are — and where the
     // money is — without the map): residential + projects keep grass yards
     // wearing the island's exact checker (the two landmasses read as one
-    // world), the core + commercial blocks get poured concrete plazas,
-    // industrial gets an oil-stained work yard, and projects/industrial
-    // sidewalks run darker (stained, unwashed) than downtown's bright beige.
+    // world), the core + commercial blocks get poured concrete plazas and
+    // industrial gets a dusty work yard.
     // (district field hoisted here — the lot pads need it at build time;
     // the spawn-weight pickers further down reuse these same definitions)
     const DISTRICTS = (C.districts && C.districts.length) ? C.districts : [];
@@ -641,27 +245,80 @@
     });
     const grassMat = grassTex ? new THREE.MeshLambertMaterial({ map: grassTex })
                               : new THREE.MeshLambertMaterial({ color: 0x55903f });
-    const lots = [], grassRects = [];
+    // The footway is 2 m inside the block envelope (BLK), so the lot pad is
+    // BLK - 4 and the full 18 m of carriageway shows between kerbs.
+    const LOT_HALF = (BLK - 4) / 2;
+    const lots = [], padKind = [];
     for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
       const bx = (xLines[i] + xLines[i + 1]) / 2;
       const bz = (zLines[j] + zLines[j + 1]) / 2;
       const dq = districtQ(i, j);
       const dk = (DISTRICTS[dq] && DISTRICTS[dq].kind) || "";
-      // The sidewalk belongs INSIDE the block envelope. BLK+4 stole two metres
-      // from each side of every road: a nominal 18m four-lane street became 14m
-      // of visible asphalt, narrower than its four 3.6m traffic lanes. Keeping
-      // the slab at BLK and insetting the lot produces a real 2m sidewalk band.
-      plane(bx, bz, BLK, BLK,
-        (dk === "projects" || dk === "industrial") ? 0xa39a7e : 0xc2b896, 0.08);
-      // lot/yard pad in the centre (buildings sit on it)
-      const lotW = BLK - 4, lotD = BLK - 4;
-      if (dk === "core" || dk === "commercial") plane(bx, bz, lotW, lotD, 0xaab0b6, 0.10);   // poured plaza
-      else if (dk === "industrial") plane(bx, bz, lotW, lotD, 0x767064, 0.10);               // dusty work yard
-      else grassRects.push({ x: bx, z: bz, w: lotW, d: lotD });                              // grass yard
-      lots.push({ cx: bx, cz: bz, w: lotW, d: lotD, i, j, district: dq, kind: null, building: null });
+      padKind.push({ bi: i, bj: j, kind: (dk === "core" || dk === "commercial") ? "plaza" : (dk === "industrial" ? "yard" : "grass") });
+      // `grid` (additive): this parcel's kerb, footway and driveway mouth are
+      // drawn by the street kit; approach.js only surfaces the lot side.
+      lots.push({ cx: bx, cz: bz, w: BLK - 4, d: BLK - 4, i, j, district: dq, kind: null, building: null, grid: true });
     }
-    // every grass yard in ONE textured mesh (the batch pass skips maps)
-    if (grassRects.length) quadField(grassRects, grassMat, 0.10);
+
+    // ---- THE STREET (city/streetkit.js): road + harbour apron, rounded
+    //      kerbs, footways, ramps, driveway mouths, markings, ironwork. ----
+    // The driveway mouths come from the SAME solve approach.js uses (one
+    // crossing per parcel, on the face turned toward the city centre) so the
+    // dropped kerb and the driveway can never disagree.
+    const driveways = [];
+    for (const lot of lots) {
+      const ap = CBZ.cityLotApproach ? CBZ.cityLotApproach(lot, { x: cx, z: cz }) : null;
+      if (!ap) continue;
+      driveways[lot.i * N + lot.j] = ap.nx
+        ? { face: ap.nx > 0 ? "x+" : "x-", at: ap.z, half: ap.half, flare: 1.1 }
+        : { face: ap.nz > 0 ? "z+" : "z-", at: ap.x, half: ap.half, flare: 1.1 };
+    }
+    // the kerb-return radius roadrules.js solves for this cross-section
+    // (AASHTO design vehicle, capped by the 2 m footway): ~4.8 m
+    const cornerR = CBZ.roadCornerRadius ? CBZ.roadCornerRadius(roads[0], roads[N + 1], 2.0) : 4.8;
+    const street = CBZ.streetKit ? CBZ.streetKit.build({
+      root, xLines, zLines, ROAD, BLK, lotHalf: LOT_HALF, cornerR,
+      laneW, lanesPerDir, aveMedian: AVE_MEDIAN,
+      isAvenue: isAvenueLine,
+      // painted turn arrows on the Midtown approaches: the money-side streets look administered
+      isMidtown: function (i, j) { return i >= 2 && i <= 4 && j >= 2 && j <= 4; },
+      driveways,
+    }) : null;
+    if (!street) console.error("[city] city/streetkit.js did not load: the grid has no streets");
+    const SP = street ? street.profile : { yRoad: 0, yWalk: 0, yLot: 0 };
+    // lot pads: one mesh per surface, each a fan to the footway's own back edge
+    if (street) {
+      const byKind = { grass: [], plaza: [], yard: [] };
+      for (const pk of padKind) byKind[pk.kind].push(pk);
+      street.lotMesh("lot-grass", byKind.grass, grassMat, 1 / 8);
+      street.lotMesh("lot-plaza", byKind.plaza, street.plazaMaterial(), 1 / 6);
+      const yardMat = new THREE.MeshLambertMaterial();
+      yardMat.color.setRGB(0.20, 0.19, 0.165);     // dusty work yard, linear
+      street.lotMesh("lot-yard", byKind.yard, yardMat, 1 / 8);
+    }
+    // the raised concrete MEDIAN on the two avenues, stopping short of the
+    // stop bars so the crosswalk and the junction stay open (one merged mesh)
+    if (street) {
+      const medMat = mat(0x7a7f86);
+      const medGeoms = [];
+      const noseOff = street.solve.stop1 + 0.8;
+      AVENUE_LINES.forEach((i) => {
+        const x = xLines[i];
+        for (let j = 0; j < N; j++) {
+          const z0 = zLines[j] + noseOff, z1 = zLines[j + 1] - noseOff;
+          if (z1 - z0 < 1) continue;
+          const g = new THREE.BoxGeometry(AVE_MEDIAN, 0.2, z1 - z0);
+          g.translate(x, SP.yRoad + 0.08, (z0 + z1) / 2);
+          medGeoms.push(g);
+        }
+      });
+      const BGU = THREE.BufferGeometryUtils;
+      if (medGeoms.length && BGU && BGU.mergeBufferGeometries) {
+        const med = new THREE.Mesh(BGU.mergeBufferGeometries(medGeoms), medMat);
+        med.name = "avenue-medians";
+        med.castShadow = false; med.receiveShadow = true; med.matrixAutoUpdate = false; med.updateMatrix(); root.add(med);
+      }
+    }
 
     // ---- perimeter: a visible, jumpable waterfront cap. Its collider is the
     //      exact box that is drawn — no hidden four-metre collision slab around
@@ -941,71 +598,51 @@
       return Math.max(0, Math.min(1, distScore * 0.6 + waterBonus + jitter));
     }
 
-    // ---- WHERE A DECAL SITS (the drawn ground, not the walkable floor) ----
-    //  groundHeightAt below is the WALKABLE floor, and across the flat city
-    //  that is 0 everywhere. But the ground is DRAWN as a stack of thin slabs
-    //  ABOVE it — avenues 0.040, cross streets 0.065, the block sidewalk slab
-    //  0.08, lot pads and grass yards 0.10 (see the road/block passes above).
-    //  So anything seated on floorAt() + a few centimetres (blood pools, tyre
-    //  smears) lands INSIDE that stack: on the road it clears the asphalt and
-    //  shows, on a block it is 2-6 cm UNDER the sidewalk slab and the depth
-    //  test eats it whole. Fall off a tower onto the kerb and the blood is
-    //  simply not there — which is exactly the report.
-    //  This returns the top of whatever is actually drawn at (x,z). On real
-    //  terrain (Mount Mercy) none of these slabs exist, so the walkable floor
-    //  is the answer and the old behaviour stands.
-    const GY_AVE = 0.040, GY_ROAD = 0.065, GY_WALK = 0.08, GY_LOT = 0.10;
-    function groundDecalYAt(x, z) {
-      const real = Math.max(0, CBZ.cityGroundHeightAt ? (+CBZ.cityGroundHeightAt(x, z) || 0) : 0);
-      if (real > 0.2) return real;                                  // raised terrain: no slabs
-      if (x < minX || x > maxX || z < minZ || z > maxZ) return real; // off the grid entirely
-      // distance to the nearest block centre on each axis (blocks sit halfway
-      // between two road centre-lines, one `step` apart)
-      const dx = Math.abs((((x - xLines[0]) % step) + step) % step - step / 2);
-      const dz = Math.abs((((z - zLines[0]) % step) + step) % step - step / 2);
-      if (dx > BLK / 2 || dz > BLK / 2) return GY_ROAD;              // carriageway
-      const lotHalf = (BLK - 4) / 2;                                 // the lot/yard pad
-      return (dx <= lotHalf && dz <= lotHalf) ? GY_LOT : GY_WALK;    // pad, else sidewalk band
+    // ---- THE CITY FLOOR IS THE DRAWN STREET ----
+    // The street kit samples every road, kerb, footway, ramp and apron vertex
+    // from ONE analytic surface (street.heightAt), so physics reads that same
+    // function: the player and peds step up the 13 cm kerb, walk down the
+    // corner ramps, and cars roll over the driveway aprons, exactly on what
+    // is drawn. Off the grid it returns null and the registered terrain
+    // oracle (Mount Mercy etc.) owns the answer; where real terrain is higher
+    // it always wins.
+    function streetY(x, z) {
+      return street ? street.heightAt(x, z) : null;
     }
-
-    // ---- WHERE A VEHICLE'S TYRES SIT (the rendered support surface) ----
-    // floorAt() deliberately describes the broad walkable land and is 0 on
-    // the mainland. Cars used that number too, even though their tyre bottoms
-    // are authored at local y=0 and the visible streets sit 4.0/6.5 cm above
-    // it. The result was exact, measurable tyre penetration on every road.
-    //
-    // This is NOT groundDecalYAt renamed: decals want the highest drawable
-    // stack and can tolerate a generic road answer. Suspension needs the
-    // actual supporting layer — 4 cm on an avenue, 6.5 cm on a cross-street,
-    // with the higher cross-street winning at an intersection — then the real
-    // registered terrain/deck height wins wherever it is higher. Keeping this
-    // answer on the arena makes world.js the sole owner of both the geometry
-    // heights and their physical support; vehicles.js only consumes it.
-    function vehicleSurfaceYAt(x, z) {
-      const real = Math.max(0, CBZ.cityGroundHeightAt ? (+CBZ.cityGroundHeightAt(x, z) || 0) : 0);
-      if (x < minX || x > maxX || z < minZ || z > maxZ) return real;
-      let dxLine = Infinity, dzLine = Infinity;
-      for (let i = 0; i < xLines.length; i++) dxLine = Math.min(dxLine, Math.abs(x - xLines[i]));
-      for (let i = 0; i < zLines.length; i++) dzLine = Math.min(dzLine, Math.abs(z - zLines[i]));
-      const onAvenue = dxLine <= ROAD / 2 + 0.001;
-      const onCross = dzLine <= ROAD / 2 + 0.001;
-      if (onCross) return Math.max(real, GY_ROAD);
-      if (onAvenue) return Math.max(real, GY_AVE);
-      // A car that mounts the kerb should ride the slab it visibly climbed,
-      // not sink back to the broad land plane inside a block.
-      const dx = Math.abs((((x - xLines[0]) % step) + step) % step - step / 2);
-      const dz = Math.abs((((z - zLines[0]) % step) + step) % step - step / 2);
-      const lotHalf = (BLK - 4) / 2;
-      return Math.max(real, (dx <= lotHalf && dz <= lotHalf) ? GY_LOT : GY_WALK);
+    function realGround(x, z) {
+      return CBZ.cityGroundHeightAt ? (+CBZ.cityGroundHeightAt(x, z) || 0) : 0;
     }
+    function groundHeightAt(x, z) {
+      const real = realGround(x, z);
+      const s = streetY(x, z);
+      return Math.max(0, real, s == null ? 0 : s);
+    }
+    // top of the DRAWN ground — what a decal (blood, scorch, tyre smear)
+    // seats on. With the street and the floor now the same surface this is
+    // the floor itself; kept as its own export for the consumers that ask.
+    function groundDecalYAt(x, z) { return groundHeightAt(x, z); }
+    // the rendered support under a tyre (vehicles.js suspension probes)
+    function vehicleSurfaceYAt(x, z) { return groundHeightAt(x, z); }
 
     city = {
       root, center: { x: cx, z: cz },
       N, step, BLK, ROAD, xLines, zLines, minX, maxX, minZ, maxZ,
       lots, roads, intersections, rng,
-      // road-surface census (ba preset city-roads-traffic): subdivided road
-      // field vertices and dashes painted worn
-      roadLook: { fieldVertices: roadFieldVerts, wornDashes },
+      // street census (ba preset city-roads-traffic reads the first two):
+      // road-surface vertices, lane/crosswalk paint quads (every one worn in
+      // the shader), and the full street-kit breakdown
+      roadLook: street ? Object.assign({ fieldVertices: street.stats.roadVerts, wornDashes: street.stats.paintQuads }, street.stats)
+                       : { fieldVertices: 0, wornDashes: 0 },
+      // the solved cross-section (heights, corner radius, crosswalk and stop
+      // bar setbacks) for anything that dresses the street: furniture seats
+      // on `heightAt`, a pole goes behind `cornerR`, etc.
+      street: street ? {
+        yRoad: SP.yRoad, yWalk: SP.yWalk, yLot: SP.yLot, kerbTop: SP.kerbTop, gutter: SP.gutter,
+        footway: street.solve.FW, cornerR: street.solve.R,
+        crosswalk: { near: street.solve.cw0, far: street.solve.cw1 },
+        stopBar: { near: street.solve.stop0, far: street.solve.stop1 },
+        heightAt: street.heightAt, regionAt: street.regionAt,
+      } : null,
       // the day/night-tinted water material — expansion.js's island ocean can
       // share it so the whole sea shifts tone together
       seaMat,
@@ -1013,18 +650,12 @@
       // builds sand/boardwalk/pier inside this span; the wall above skips it)
       shore: { EW, EE, ES, EN, beach: { x0: BX0, x1: BX1 } },
       // Universal ground-height oracle (mode.js routes CBZ.floorAt here in
-      // city mode). Decorative backdrop terrain is disabled; only registered,
-      // reachable landmasses may raise the floor. Mount Mercy is the first
-      // provider, and its render mesh samples the exact same function.
-      groundHeightAt(x, z) {
-        const real = CBZ.cityGroundHeightAt ? (+CBZ.cityGroundHeightAt(x, z) || 0) : 0;
-        return Math.max(0, real);
-      },
-      // top of the DRAWN ground stack — what a ground decal seats on. See the
-      // note on groundDecalYAt above; never feed this to physics or footing.
+      // city mode): the street surface on the grid (see streetY above), the
+      // registered reachable landmasses everywhere else, whichever is higher.
+      groundHeightAt,
+      // top of the DRAWN ground — what a ground decal seats on
       groundDecalY: groundDecalYAt,
-      // Exact rendered support for wheel/suspension probes. Unlike the broad
-      // walking floor, this follows the thin road/sidewalk/lot surface stack.
+      // rendered support for wheel/suspension probes (vehicles.js)
       vehicleSurfaceY: vehicleSurfaceYAt,
       // land-value field (PROCGEN.md roadmap #3): distance-to-centre falloff +
       // waterfront proximity bonus + low-freq deterministic noise, ~[0,1].
@@ -1054,238 +685,39 @@
       },
     };
 
-    // =====================================================================
-    //  ROAD + SIDEWALK SURFACE DETAIL — cheap flat geometry that makes the
-    //  streets read as REAL: raised curbs along every block, painted stop-bars
-    //  at intersections, manhole covers + storm-drain grates, sidewalk
-    //  expansion joints, and a sprinkle of asphalt patches/oil stains. All
-    //  decor: no colliders, nothing placed in a driving lane.
-    // =====================================================================
-    let paintRedCurb = null;   // set inside roadDetail; used after the props hook
-    let redCurbsPainted = 0;   // census for CBZ.solidityAudit()
-    (function roadDetail() {
-      // shared materials so hundreds of marks cost almost nothing
-      const M = new Map();
-      function dm(color, basic) {
-        let m = M.get(color + "|" + (basic ? 1 : 0));
-        if (!m) {
-          // basic == a flat painted marking → polygonOffset decal so it hugs
-          // the asphalt like paint; lambert stays plain (curbs/manholes are
-          // raised/shadowed geometry, not paint).
-          m = basic
-            ? new THREE.MeshLambertMaterial({ color, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
-            : new THREE.MeshLambertMaterial({ color });
-          M.set(color + "|" + (basic ? 1 : 0), m);
-        }
-        return m;
-      }
-      // a flat decal quad lying on the ground
-      function decal(x, z, w, d, color, y, basic, rotY) {
-        const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), dm(color, basic));
-        m.rotation.x = -Math.PI / 2; if (rotY) m.rotation.z = rotY;
-        m.position.set(x, y == null ? 0.085 : y, z);
-        m.receiveShadow = true; root.add(m);
-        return m;
-      }
-      // a low raised curb box (a sliver of height so it reads as a kerb edge)
-      // kerb stone: a cooler grey than the beige slab it rings, so the face
-      // reads as a step down to the gutter instead of vanishing into the walk
-      const curbM = dm(0x9d9a92);
-      function curb(x, z, len, vertical) {
-        const w = vertical ? 0.34 : len, d = vertical ? len : 0.34;
-        const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.22, d), curbM);
-        m.position.set(x, 0.11, z); m.receiveShadow = true; root.add(m);
-      }
-
-      // ---- 1) curbs ringing every block (just inside the sidewalk band) ----
-      // The sidewalk slab is BLK wide (the road-width pass pulled it back so the
-      // full 18m of asphalt shows); the kerb runs along the road-facing edge a
-      // touch in from the asphalt so cars visibly mount it but it never blocks.
-      // (Was (BLK+4)/2 — that left every kerb box stranded 1.8m OUT in the
-      // carriageway once the slab shrank: raised strips lining every street that
-      // read as walls and visually narrowed the road.)
-      const sidewalkHalf = BLK / 2;
-      /* THE DROPPED KERB. Every block used to be ringed by four UNBROKEN runs
-         of stone: not one property in the city had a way in that the world
-         drew. city/approach.js solves ONE crossing per parcel (the face the
-         door goes on, which is a function of the lot and the city centre and
-         therefore knowable HERE, hundreds of lines before any building
-         exists), and this run is split around it — so the gap in the kerb and
-         the driveway laid through it come from the same solve and can never
-         end up in different places. Feature-detected: no approach.js, or the
-         flag off, and every run is drawn whole exactly as before. */
-      function curbRun(x, z, span, vertical, gap) {
-        if (!gap) { curb(x, z, span, vertical); return; }
-        // `gap` is the crossing's centre along this run's axis, in world
-        // coordinates, and its half-width. A crossing that does not actually
-        // fall inside the run leaves the run whole.
-        const c0 = (vertical ? z : x) - span / 2, c1 = c0 + span;
-        const g0 = gap.at - gap.half, g1 = gap.at + gap.half;
-        if (g1 <= c0 || g0 >= c1) { curb(x, z, span, vertical); return; }
-        // A stub shorter than the kerb is thick is not a kerb, it is a pebble.
-        if (g0 - c0 > 0.5) curb(vertical ? x : (c0 + g0) / 2, vertical ? (c0 + g0) / 2 : z, g0 - c0, vertical);
-        if (c1 - g1 > 0.5) curb(vertical ? x : (g1 + c1) / 2, vertical ? (g1 + c1) / 2 : z, c1 - g1, vertical);
-      }
-      for (const lot of lots) {
-        const cx2 = lot.cx, cz2 = lot.cz, e = sidewalkHalf - 0.2, span = BLK - 0.8;
-        const ap = CBZ.cityLotApproach ? CBZ.cityLotApproach(lot, { x: cx, z: cz }) : null;
-        // the crossing sits on ONE face; the other three runs stay whole
-        const gz0 = (ap && ap.nz < 0) ? { at: ap.x, half: ap.half + 0.6 } : null;   // -z face
-        const gz1 = (ap && ap.nz > 0) ? { at: ap.x, half: ap.half + 0.6 } : null;   // +z face
-        const gx0 = (ap && ap.nx < 0) ? { at: ap.z, half: ap.half + 0.6 } : null;   // -x face
-        const gx1 = (ap && ap.nx > 0) ? { at: ap.z, half: ap.half + 0.6 } : null;   // +x face
-        curbRun(cx2, cz2 - e, span, false, gz0);
-        curbRun(cx2, cz2 + e, span, false, gz1);
-        curbRun(cx2 - e, cz2, span, true, gx0);
-        curbRun(cx2 + e, cz2, span, true, gx1);
-        // sidewalk expansion-joint lines (subtle scored concrete grid)
-        for (let s = -1; s <= 1; s += 2) {
-          for (let j = -1; j <= 1; j += 1) {
-            if (j === 0) continue;
-            decal(cx2 + j * (BLK / 4), cz2 + s * (sidewalkHalf - 1.0), 0.06, 2.2, 0xa89e7c, 0.088, true);
-            decal(cx2 + s * (sidewalkHalf - 1.0), cz2 + j * (BLK / 4), 2.2, 0.06, 0xa89e7c, 0.088, true);
-          }
-        }
-      }
-
-      // ---- 2) painted STOP-BAR at every intersection approach --------------
-      // ROAD/2 + 3.6, not 2.6: at 2.6 the bar sat 0.2 m behind the zebra, and
-      // MUTCD wants a stop line set back at least 1.2 m from a crosswalk so a
-      // stopped car does not overhang the people crossing in front of it.
-      // (line ~933's aOff = stopOff + 1.7 follows this for free.)
-      const stopOff = ROAD / 2 + 3.6;
-      intersections.forEach((it) => {
-        // thick white bar across each of the four entries, set back behind the zebra
-        decal(it.x - ROAD / 4, it.z - stopOff, ROAD / 2 - 0.4, 0.4, 0xdadcd8, 0.065, true);
-        decal(it.x + ROAD / 4, it.z + stopOff, ROAD / 2 - 0.4, 0.4, 0xdadcd8, 0.065, true);
-        decal(it.x - stopOff, it.z + ROAD / 4, 0.4, ROAD / 2 - 0.4, 0xdadcd8, 0.065, true);
-        decal(it.x + stopOff, it.z - ROAD / 4, 0.4, ROAD / 2 - 0.4, 0xdadcd8, 0.065, true);
-      });
-
-      // ---- 3) manhole covers + storm-drain grates -------------------------
-      // covers down the centre of avenues; grates hug the kerb at corners where
-      // gutter water would drain. Both are flush decals.
-      const manholeG = new THREE.CircleGeometry(0.55, 12);
-      const manM = dm(0x35383d), grateM = dm(0x202327);
-      function manhole(x, z) {
-        const m = new THREE.Mesh(manholeG, manM);
-        m.rotation.x = -Math.PI / 2; m.position.set(x, 0.066, z); root.add(m);
-        // a couple of concentric scribe rings via thin ring decals
-        decal(x, z, 0.84, 0.84, 0x2a2d32, 0.067, true);
-      }
-      for (const r of roads) {
+    // ---- THE WORLD STREAM STAYS WHERE IT WAS ----
+    // The old decal pass (manholes, gutter grates, asphalt patches, skid
+    // stains) drew from the shared "world" rng stream, which city.rng hands
+    // on to buildings/props. All of that is now hash-seeded in the street kit
+    // and the asphalt shader, but removing the draws would reshuffle every
+    // building in the city. So the exact count and order of the old draws is
+    // consumed here and discarded. (Pure bookkeeping: nothing is drawn.)
+    (function burnLegacyStreetRng() {
+      for (const r of roads) {                          // manhole covers
         const n = Math.max(1, Math.floor(r.len / 40));
-        for (let i = 1; i < n; i++) {
-          if (rng() > 0.6) continue;
-          const t = -r.len / 2 + i * (r.len / n) + (rng() - 0.5) * 6;
-          const x = r.vertical ? r.x + (rng() - 0.5) * 1.2 : r.x + t;
-          const z = r.vertical ? r.z + t : r.z + (rng() - 0.5) * 1.2;
-          if (Math.abs(x) < 9990) manhole(x, z);
-        }
+        for (let i = 1; i < n; i++) { if (rng() > 0.6) continue; rng(); rng(); }
       }
-      // gutter grates near intersection corners
-      intersections.forEach((it) => {
-        for (let sx = -1; sx <= 1; sx += 2) for (let sz = -1; sz <= 1; sz += 2) {
-          if (rng() > 0.5) continue;
-          const gx = it.x + sx * (ROAD / 2 + 0.5), gz = it.z + sz * (ROAD / 2 + 0.5);
-          const g = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.55), grateM);
-          g.rotation.x = -Math.PI / 2; g.position.set(gx, 0.066, gz); root.add(g);
-        }
-      });
-
-      // ---- 4) asphalt patches + oil stains + tyre marks (grime/realism) ----
-      const patchCols = [0x1b1d22, 0x222429, 0x303236];
-      for (const r of roads) {
+      for (let k = 0; k < intersections.length; k++) { rng(); rng(); rng(); rng(); }   // gutter grates
+      for (const r of roads) {                          // asphalt patches
         const n = Math.max(2, Math.floor(r.len / 30));
-        for (let i = 0; i < n; i++) {
-          if (rng() > 0.55) continue;
-          const t = -r.len / 2 + (i + rng()) * (r.len / n);
-          const lane = (rng() - 0.5) * (ROAD - 2);
-          const x = r.vertical ? r.x + lane : r.x + t;
-          const z = r.vertical ? r.z + t : r.z + lane;
-          if (Math.abs(x) > 9990) continue;
-          const w = 1.5 + rng() * 3, d = 1.0 + rng() * 2.5;
-          decal(x, z, r.vertical ? d : w, r.vertical ? w : d, patchCols[(rng() * patchCols.length) | 0], 0.055 + rng() * 0.006, false, (rng() - 0.5) * 0.4);
-        }
+        for (let i = 0; i < n; i++) { if (rng() > 0.55) continue; for (let q = 0; q < 7; q++) rng(); }
       }
-      // skid/oil stains right in the intersection boxes (where cars launch off)
-      intersections.forEach((it) => {
-        if (rng() > 0.5) return;
-        for (let s = 0; s < 2; s++) {
-          decal(it.x + (rng() - 0.5) * ROAD * 0.5, it.z + (rng() - 0.5) * ROAD * 0.5, 0.18, 1.4 + rng() * 1.2, 0x141519, 0.053, true, (rng() - 0.5) * 1.4);
-        }
-      });
-
-      // ---- 5) painted TURN ARROWS at the Midtown-core intersections --------
-      //  (why: managed, money-side streets — the core LOOKS administered).
-      //  Shared geometry + the dm() cache; no rng draws, so everything the
-      //  sibling modules build from city.rng stays byte-identical.
-      const arrowM = dm(0xdadcd8, true);
-      const shaftGV = new THREE.PlaneGeometry(0.26, 1.5), shaftGH = new THREE.PlaneGeometry(1.5, 0.26);
-      const headG = new THREE.CircleGeometry(0.42, 3);   // 3-segment circle = clean triangle head
-      function turnArrow(x, z, fx, fz, rotZ) {
-        // shaft along the lane; the head sits at the shaft's front, rotated
-        // 90° toward the curb — reads as a right-turn lane marking
-        const sM = new THREE.Mesh(fx ? shaftGH : shaftGV, arrowM);
-        sM.rotation.x = -Math.PI / 2; sM.position.set(x, 0.065, z); root.add(sM);
-        const h = new THREE.Mesh(headG, arrowM);
-        h.rotation.x = -Math.PI / 2; h.rotation.z = rotZ;
-        h.position.set(x + fx * 0.95, 0.065, z + fz * 0.95); root.add(h);
+      for (let k = 0; k < intersections.length; k++) {  // skid stains
+        if (rng() > 0.5) continue;
+        for (let q = 0; q < 8; q++) rng();
       }
-      // PER-LANE turn arrows at the new lane centres (laneW*(idx+0.5)): the
-      // outermost lane on each approach gets the right-turn marking, so the
-      // arrows sit ON the real lanes the traffic AI drives in.
-      const aOff = stopOff + 1.7, outLane = laneW * (lanesPerDir - 1 + 0.5);
-      intersections.forEach((it) => {
-        if (it.i < 2 || it.i > 4 || it.j < 2 || it.j > 4) return;   // the Midtown frame only
-        turnArrow(it.x + outLane, it.z - aOff, 0, 1, 0);              // south approach → head +x
-        turnArrow(it.x - outLane, it.z + aOff, 0, -1, Math.PI);       // north approach → head -x
-        turnArrow(it.x - aOff, it.z - outLane, 1, 0, Math.PI / 2);    // west approach → head -z
-        turnArrow(it.x + aOff, it.z + outLane, -1, 0, -Math.PI / 2);  // east approach → head +z
-      });
-
-      // ---- 6) RED CURB painter (fire lanes) --------------------------------
-      //  props.js places hydrants AFTER this pass, so expose a painter the
-      //  post-props pass at the bottom of buildCity uses.
-      //
-      //  OWNER, with a screenshot: "the fire extinguisher thing is to prevent
-      //  people parking — cool idea but it shouldn't be geometry... when not
-      //  perfect like this in the street it's really annoying, one of those
-      //  dumb props." TWO separate faults, and the second one is already
-      //  written up as fixed 120 lines above — for the KERB, never for this:
-      //
-      //  (1) IT WAS GEOMETRY. A 4.2 x 0.24 x 0.38 BoxGeometry: a 24 cm tall red
-      //      bar lying loose in the street, with no collider, so it was a
-      //      solid-LOOKING object you drove straight through — a decoy twice
-      //      over. A no-parking fire lane is PAINT ON A KERB. It is now a flat
-      //      quad on the kerb top through the same polygonOffset `dm(...,true)`
-      //      decal idiom every stop bar, zebra and turn arrow in this pass uses.
-      //  (2) ITS OFFSET WAS STALE. The caller solved the kerb line as
-      //      (BLK + 4) / 2 - 0.2 — the EXACT expression the kerb loop above
-      //      abandoned when the road width changed ("Was (BLK+4)/2 — that left
-      //      every kerb box stranded 1.8m OUT in the carriageway"). The kerbs
-      //      moved in by 2 m; this did not, so the bar stood ~1.8 m out in the
-      //      travel lane, detached from the hydrant it belongs to. The painter
-      //      now takes the LOT and solves the line off `sidewalkHalf` ITSELF,
-      //      so no caller can re-type it and the stripe hugs whichever kerb the
-      //      hydrant fronts BY CONSTRUCTION rather than by a matching literal.
-      paintRedCurb = function (lot, px, pz) {
-        const e = sidewalkHalf - 0.2;                    // == the kerb loop's own offset
-        const dx = px - lot.cx, dz = pz - lot.cz;
-        const vertical = Math.abs(dx) > Math.abs(dz);    // kerb runs along Z
-        // 4.2 m of red centred on the hydrant, 0.34 wide = the kerb box's OWN
-        // width (line ~830), 5 mm over the kerb top (0.22) so it never z-fights
-        // and never reads as a step. Basic material: it is paint, not a solid.
-        const w = vertical ? 0.34 : 4.2, d = vertical ? 4.2 : 0.34;
-        const x = vertical ? lot.cx + (dx >= 0 ? e : -e) : px;
-        const z = vertical ? pz : lot.cz + (dz >= 0 ? e : -e);
-        const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), dm(0xc23434, true));
-        m.rotation.x = -Math.PI / 2;
-        m.position.set(x, 0.225, z);
-        m.receiveShadow = false; root.add(m);
-        redCurbsPainted++;
-      };
     })();
+
+    // ---- RED KERB painter (hydrant fire lanes) ----
+    // props.js places hydrants AFTER this, so the pass at the bottom of
+    // buildCity decides WHICH hydrants get a fire lane and WHICH lot (so which
+    // kerb) each fronts; the kit paints the kerb face + granite top there, all
+    // fire lanes merged into one mesh.
+    let redCurbsPainted = 0;   // census for CBZ.solidityAudit()
+    function paintRedCurb(lot, px, pz) {
+      if (!street || !lot) return;
+      if (street.paintRedKerb(lot.i, lot.j, px, pz)) redCurbsPainted++;
+    }
 
     // ---- let sibling modules furnish the city (buildings, props, lights) ----
     if (CBZ.bootStep) CBZ.bootStep("city:buildings");
@@ -1323,7 +755,42 @@
         painted++;
       }
     }
+    if (street) street.finishRed();
     city._redCurbs = redCurbsPainted;
+
+    // ---- SEAT THE STREET FURNITURE ON THE STREET ----
+    // The props pass authored its furniture on the OLD datums: y = 0 (the
+    // flat floor) or ~0.08-0.09 (the old 8 cm sidewalk slab / 10 cm lot pad).
+    // On the real cross-section those sink into the 18 cm footway or under
+    // the 12.5 cm lot pad. Re-seat exactly those: direct children of the city
+    // root, by where their foot is. A lot object at y = 0 is never touched
+    // (buildings own their own foundation), and nothing on the road moves.
+    // Their y-banded colliders move with them.
+    if (street) {
+      const byRef = new Map();
+      for (const c of (CBZ.colliders || [])) if (c && c.ref && c.y1 != null) { let a = byRef.get(c.ref); if (!a) byRef.set(c.ref, a = []); a.push(c); }
+      let seated = 0;
+      for (const o of root.children) {
+        if (!o || o.isInstancedMesh) continue;
+        if (o.userData && (o.userData.terrain || o.userData.roadPaint || o.userData.dynamic)) continue;
+        const px = o.position.x, pz = o.position.z, oy = o.position.y;
+        const onOldSlab = oy >= 0.07 && oy <= 0.105;
+        const region = street.regionAt(px, pz);
+        let dy = 0;
+        if (region === 1) {
+          const y = street.heightAt(px, pz);
+          if (Math.abs(oy) < 0.005) dy = y - oy;
+          else if (onOldSlab) dy = y - 0.08;
+        } else if (region === 2 && onOldSlab) dy = SP.yLot - 0.10;
+        if (!(Math.abs(dy) > 0.004)) continue;
+        o.position.y = oy + dy;
+        if (!o.matrixAutoUpdate) o.updateMatrix();
+        const cs = byRef.get(o);
+        if (cs) for (const c of cs) { if (c.y0 != null) c.y0 += dy; c.y1 += dy; }
+        seated++;
+      }
+      city.roadLook.seatedProps = seated;
+    }
 
     // ---- NO-DECOY FIX: the harbor's moored hulls used to be dead THREE.Mesh
     //      boxes — no collider, no cityCars entry, no [E] prompt: a boat you

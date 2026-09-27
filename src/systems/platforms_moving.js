@@ -251,7 +251,12 @@
   function deckTopLocal(p, d, lx, lz, usePrev) {
     let top = usePrev ? d.ptop : d.top;
     const r = usePrev ? d.pramp : d.ramp;
-    if (r) {
+    // A SHAPED deck (city/interchange.js's curved flyover): `topAt(lx,lz)`
+    // returns the local surface height, or NaN where the footprint has no
+    // surface — NaN fails every `t <= reach && t > best` test, so an off-deck
+    // point is simply not support. Static shape: no snapshot needed.
+    if (d.topAt) { top = d.topAt(lx, lz); if (!(top === top)) return NaN; }
+    else if (r) {
       let t = (r.axis === "x") ? (lx - r.x0) / (r.x1 - r.x0) : (lz - r.z0) / (r.z1 - r.z0);
       if (!(t >= 0)) t = 0; else if (t > 1) t = 1;
       top = r.y0 + t * (r.y1 - r.y0);
@@ -567,8 +572,10 @@
   //            {heading | rotation.y}, OR a function(out) returning
   //            {x, y, z, yaw [, pitch, roll]} for callers with no object.
   //   spec   :
-  //     decks  [{x, z, w, d, top, id?, off?, ramp?}]
+  //     decks  [{x, z, w, d, top, id?, off?, ramp?, topAt?}]
   //                                       LOCAL-space walk surfaces.
+  //         topAt fn(lx,lz) -> local height | NaN   a SHAPED static surface
+  //              (a curved flyover); w/d are then only its bounding box.
   //         ramp {axis?"x"|"z", x0,x1|z0,z1, y0,y1}  a LOCAL slope, exactly the
   //              record shape physics.js already reads off a static platform.
   //         off  true = stowed (not a floor yet); flip it live via handle.deck()
@@ -625,6 +632,7 @@
           // LOCAL slope, physics.js's own ramp record shape. `off` starts a deck
           // stowed (a raised tailgate is not a floor); the owner flips it live.
           e.off = s.off === true;
+          if (typeof s.topAt === "function") e.topAt = s.topAt;
           const r = s.ramp;
           if (r) {
             e.ramp = {
