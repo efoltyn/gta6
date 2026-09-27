@@ -587,7 +587,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/proptypes.js?v=arch2"></script>
 
 <!-- 3. entities -->
-  <script src="src/entities/character.js?v=races1"></script>
+  <script src="src/entities/character.js?v=sharkscene1"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
@@ -776,7 +776,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=sharkmode1"></script>
+<script src="src/systems/camera.js?v=sharkscene1"></script>
 <script src="src/systems/physics.js?v=sharkmode1"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
@@ -913,9 +913,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
 <script src="src/world/disaster_arena.js?v=sharkmode1"></script>
 <script src="src/systems/grapple.js?v=nohint1"></script>
-<script src="src/entities/survivorbot.js?v=sharkmode1"></script>
+<script src="src/entities/survivorbot.js?v=sharkscene1"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
-<script src="src/modes/shark_sim.js?v=loop1"></script>
+<script src="src/modes/shark_sim.js?v=sharkscene1"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
 <script src="src/modes/shark_title.js?v=launch1"></script>
@@ -1178,7 +1178,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4d-4. WILDLIFE + HUNTING + DOGS. The bestiary (defineSpecies) loads FIRST,
      then every biome batch of species, then the hunting engine and the dog
      companion system (both self-register as high-order landmasses). -->
-<script src="src/city/wildlife_rig.js?v=beasts1"></script>
+<script src="src/city/wildlife_rig.js?v=sharkscene1"></script>
 <script src="src/city/wildlife_species.js?v=attach1"></script>
 <script src="src/city/wildlife/forest_deer.js?v=attach1"></script>
 <script src="src/city/wildlife/bears.js?v=attach1"></script>
@@ -1196,8 +1196,8 @@ document.body.appendChild(b);}}catch(e){}})();
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
      straight back to the species constant. -->
 <script src="src/city/wildlife_traits.js?v=indiv1"></script>
-<script src="src/city/wildlife.js?v=indiv1"></script>
-<script src="src/city/wildlife_tame.js?v=sharkmode1"></script>
+<script src="src/city/wildlife.js?v=sharkscene1"></script>
+<script src="src/city/wildlife_tame.js?v=sharkscene1"></script>
 <script src="src/city/dogs.js?v=nodash1"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
@@ -1617,7 +1617,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Steward / Deckhand / Engineer), so a vessel with a bridge has somebody on
      it. After marina/boatyard (berths), aircraft (the helideck), vehicles
      (registration), citystaff (posts) and wildlife (the sea it sails on). -->
-<script src="src/city/yachts.js?v=yacht1"></script>
+<script src="src/city/yachts.js?v=sharkscene1"></script>
 <script src="src/city/seacrew.js?v=yacht1"></script>
 <script src="src/city/armor.js?v=nodash1"></script>
 <!-- Direct Prison Escape cast through Gang City's canonical painted wardrobe.
@@ -1734,7 +1734,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/quadruped_ragdoll.js?v=quadrag1"></script>
 <!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
      predator.js AND wildlife.js so both seams exist. -->
-<script src="src/city/wildlife_shark.js?v=marinefix1"></script>
+<script src="src/city/wildlife_shark.js?v=sharkscene1"></script>
 <!-- THE ORCA. Re-registers id:"orca" over city/wildlife/aquatic.js's build
      (defineSpecies is last-write-wins) so the markings that actually identify
      the animal exist: the white post-ocular eye patch, the grey saddle, the
@@ -1768,7 +1768,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.predatorHunt as every other hunter, never a private loop. AFTER
      marine_predation.js, whose chum producer and damage bus it spends.
      Reverts whole with CBZ.CONFIG.MARINE_FRENZY = false. -->
-<script src="src/city/marine_frenzy.js?v=marinefrenzy1"></script>
+<script src="src/city/marine_frenzy.js?v=sharkscene1"></script>
 <!-- CHILDREN ARE NOT TARGETS. Wraps the shared damage/kill/KO/crowd-kill/gore/
      lock-on/predator buses and seals child hp against the ~32 raw `.hp -=`
      sites that bypass every bus. Hooks are lazily retried for 10s, so exact
@@ -2186,7 +2186,7 @@ document.body.appendChild(b);}}catch(e){}})();
      reads but THREE — but it MUST parse before water_hulls.js, whose builders
      call it at build() time. -->
 <script src="src/world/hull_loft.js?v=loft1"></script>
-<script src="src/world/water_hulls.js?v=seawave1"></script>
+<script src="src/world/water_hulls.js?v=sharkscene1"></script>
 <script src="src/world/water_helm.js?v=boats1"></script>
 
 <!-- WATER V2 runtime: submerged-camera state, boat buoyancy off the live wave
@@ -2212,7 +2212,8 @@ document.body.appendChild(b);}}catch(e){}})();
      and any other mode that has water but no road fleet, plus the shark-vs-boat
      rules (engulf / bite / tip). After water_hulls + water_float, both of which
      it spends. -->
-<script src="src/world/sea_craft.js?v=seacraft1"></script>
+<script src="src/world/sea_craft.js?v=sharkscene1"></script>
+<script src="src/world/sea_scene.js?v=sharkscene1"></script>
 <script src="src/world/water_impact.js?v=waterv2"></script>
 <!-- ONE WATER ORACLE, BOTH WORLDS. Wraps CBZ.cityWaterAt / citySeaHeightAt /
      citySeaBedDepthAt / citySeaBedYAt so they answer with the survival island's
