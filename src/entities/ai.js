@@ -39,16 +39,24 @@
                  which is precisely why a man throws one
      ============================================================ */
   const JUMP_GRAB_P_DEFAULT = 0.12;
+  /* 2026-09-27 (owner: "it's way too easy to die"): FISTS HURT, THEY RARELY
+     KILL. Every fist row is ~45% lighter than it was (a straight averaged 9.5,
+     now 5.5), a man swings every 1.35 s instead of every 1.0 s, and only ONE
+     man swings at the player at a time (SWING_SLOTS below). A beating now
+     takes you down in roughly half a minute of standing in it, not five
+     seconds. The blade row keeps its teeth: 12-18 a stab is why a shank is
+     the thing to be afraid of. */
   const MELEE_BLOW = {
-    "":         { dmg: 7,  roll: 5, stun: 0.42, shake: 0.42, push: 0.42 },  // straight
-    hook:       { dmg: 9,  roll: 5, stun: 0.50, shake: 0.52, push: 0.55 },
-    upper:      { dmg: 10, roll: 5, stun: 0.55, shake: 0.55, push: 0.34 },
-    elbow:      { dmg: 8,  roll: 4, stun: 0.62, shake: 0.50, push: 0.30 },
-    knee:       { dmg: 9,  roll: 5, stun: 0.72, shake: 0.48, push: 0.24 },
-    headbutt:   { dmg: 12, roll: 6, stun: 0.66, shake: 0.66, push: 0.36 },
-    shove:      { dmg: 2,  roll: 2, stun: 0.26, shake: 0.28, push: 1.30 },
-    stab:       { dmg: 13, roll: 8, stun: 0.34, shake: 0.32, push: 0.30 },
+    "":         { dmg: 4,  roll: 3, stun: 0.42, shake: 0.42, push: 0.42 },  // straight
+    hook:       { dmg: 5,  roll: 3, stun: 0.50, shake: 0.52, push: 0.55 },
+    upper:      { dmg: 6,  roll: 3, stun: 0.55, shake: 0.55, push: 0.34 },
+    elbow:      { dmg: 4,  roll: 3, stun: 0.62, shake: 0.50, push: 0.30 },
+    knee:       { dmg: 5,  roll: 3, stun: 0.72, shake: 0.48, push: 0.24 },
+    headbutt:   { dmg: 7,  roll: 3, stun: 0.66, shake: 0.66, push: 0.36 },
+    shove:      { dmg: 1,  roll: 2, stun: 0.26, shake: 0.28, push: 1.30 },
+    stab:       { dmg: 12, roll: 6, stun: 0.34, shake: 0.32, push: 0.30 },
   };
+  const HUNT_HIT_CD = 1.35;
 
   /* THE BLOW LANDS ON THE FIST'S FRAME, AND A CROWD TAKES TURNS.
 
@@ -69,7 +77,8 @@
      (systems/combat.js nulls `_blow` when your fist lands first). The
      swing log is the attack token every brawler game ends up with: at most
      two men are inside a swing beat at once, the rest circle. */
-  const SWING_WINDOW = 0.5, SWING_SLOTS = 2;
+  // one fist at a time on the player: the others circle and wait their turn
+  const SWING_WINDOW = 0.6, SWING_SLOTS = 1;
   const _swingLog = [];
   function swingCrowded(n) {
     const now = (CBZ.now || 0) / 1000;
@@ -88,10 +97,12 @@
     // you stepped out of it: a whiff, which is what a fight is mostly made of
     if (d > 2.15 || CBZ.player.dead) return false;
     n.group.rotation.y = Math.atan2(px - n.group.position.x, pz - n.group.position.z);
+    // he stops when you are down, unless he came with a blade and a reason
+    if (playerDownedNow() && !lethalGrudge(n)) return false;
     if (CBZ.hurtPlayer) {
       CBZ.hurtPlayer(B.swing, n.group.position.x, n.group.position.z,
-        { melee: true, stun: B.M.stun, heat: 4, shake: B.M.shake,
-          sfx: B.stabbing ? "hit" : "punch", by: n });
+        { melee: true, stun: B.M.stun, heat: B.stabbing ? 4 : 2, shake: B.M.shake,
+          sfx: B.stabbing ? "hit" : "punch", by: n, weapon: B.stabbing ? "shank" : "fist" });
     }
     // A LANDED PUNCH MOVES YOU. `CBZ.knockback` is deliberately NOT used:
     // it reads `actor.group.position`, and the player is a `pos` vector
@@ -103,6 +114,63 @@
     CBZ.player.pos.z += (kz / kd) * B.M.push;
     return true;
   }
+
+  /* ============================================================
+     THE HUNT GOVERNOR (2026-09-27, owner: "when I get moved to a tough jail,
+     it seems like everybody hates me").
+
+     The old spiral: a snubbed demand or one punch called provokeGang, which
+     set huntPlayer on EVERY living member of that gang across the compound,
+     and every one of them closed and swung. Hostility is per person now:
+
+       requestHunt(n, secs, why)  the ONE way this file starts a man on you.
+                                  Refused while he has been broken up by a
+                                  guard (n._brokenUpT, set by LAW's
+                                  CBZ.breakUpFight) or while you are down.
+       huntSlot(n)                at most 2 men actually come at you at once
+                                  (3 at ultra-max). Anyone else who wants to
+                                  (including men set hunting by other files,
+                                  which write huntPlayer directly) stands off
+                                  at 4-6 m and watches: the ring, not the pile.
+     ============================================================ */
+  const _hunters = [];
+  let _maxHuntersSeen = 0, _huntStarts = 0, _huntRefused = 0;
+  function huntCap() {
+    const L = CBZ.prisonTier && CBZ.prisonTier.level ? (CBZ.prisonTier.level() | 0) : 0;
+    return L >= 3 ? 3 : 2;
+  }
+  function playerDownedNow() {
+    return !!(CBZ.playerDowned && CBZ.playerDowned());
+  }
+  // THE LETHAL MISTAKE: a man with a blade out and a real grudge, and no screw
+  // looking, does not stop because you are on the floor.
+  function lethalGrudge(n) {
+    return !!(n && n._shankOut && (n.playerGrudge || 0) >= 6 && !watched(n));
+  }
+  function pruneHunters() {
+    for (let i = _hunters.length - 1; i >= 0; i--) {
+      const h = _hunters[i];
+      if (!alive(h) || !((h.huntPlayer || 0) > 0) || (h._brokenUpT || 0) > 0) _hunters.splice(i, 1);
+    }
+  }
+  function huntSlot(n) {
+    pruneHunters();
+    if (_hunters.indexOf(n) >= 0) return true;
+    if (_hunters.length >= huntCap()) return false;
+    _hunters.push(n);
+    if (_hunters.length > _maxHuntersSeen) _maxHuntersSeen = _hunters.length;
+    return true;
+  }
+  function requestHunt(n, secs, why) {
+    if (!n || !alive(n) || !n.group || n.role === "merchant") return false;
+    if ((n._brokenUpT || 0) > 0 || (playerDownedNow() && !lethalGrudge(n))) { _huntRefused++; return false; }
+    if (CBZ.player && CBZ.player.gang != null && n.gang === CBZ.player.gang && why !== "wronged") return false;
+    if (!((n.huntPlayer || 0) > 0)) _huntStarts++;
+    n.huntPlayer = Math.max(n.huntPlayer || 0, secs || 6);
+    n._huntWhy = why || n._huntWhy || "";
+    return true;
+  }
+  function huntersNow() { pruneHunters(); return _hunters.length; }
 
   /* ============================================================
      SHOW DON'T TELL — THE ONE NARRATION SINK (JAIL_SHOW_DONT_TELL).
@@ -168,13 +236,14 @@
      befriend/squash/join/trade head slot it had before. */
   if (CBZ.CONFIG.PRISON_CONTRACTS == null) CBZ.CONFIG.PRISON_CONTRACTS = true;
   let narDropped = 0, narSpoken = 0, narMute = 0;
+  /* 2026-09-27 (owner: "all the text... too much bullshit in the way"): the
+     caption track is gone for good. The JAIL_SHOW_DONT_TELL=false popup
+     branch is deleted, and most nar() call sites with it; what is left is a
+     person saying a few words, or nothing. `say` counts what is actually
+     spoken so the ratchet below stays honest. */
   function nar(text, secs, actor, spoken) {
-    if (CBZ.CONFIG.JAIL_SHOW_DONT_TELL === false) {
-      if (CBZ.flashHint) CBZ.flashHint(text, secs);
-      return false;
-    }
     narDropped++;
-    if (actor && spoken && say(actor, spoken, null, secs)) { narSpoken++; return true; }
+    if (actor && spoken && say(actor, spoken, null, secs)) return true;
     narMute++;
     return true;
   }
@@ -183,9 +252,11 @@
   // is the one that cannot read a prison actor's position.
   function say(actor, text, color, secs) {
     if (!actor || !text) return false;
-    if (CBZ.prisonSay) return CBZ.prisonSay(actor, text, { secs: Math.max(1.6, secs || 2.0) });
-    if (!CBZ.citySay) return false;
-    try { CBZ.citySay(actor, text, color || "#cfd6e6", secs || 1.8); return true; } catch (e) { return false; }
+    let ok = false;
+    if (CBZ.prisonSay) ok = !!CBZ.prisonSay(actor, text, { secs: Math.max(1.6, secs || 2.0) });
+    else if (CBZ.citySay) { try { CBZ.citySay(actor, text, color || "#cfd6e6", secs || 1.8); ok = true; } catch (e) { ok = false; } }
+    if (ok) narSpoken++;
+    return ok;
   }
   /* THE RATCHET (BLOCK LAW rule 5). `mute` is the count of world events this
      file resolved with NOBODY saying or showing anything — the honest size of
@@ -252,16 +323,63 @@
     if (ch === "!" && CBZ.npcStare) CBZ.npcStare(actor, 1.7);
   }
 
+  /* CLIQUES BY WHERE A MAN CAME FROM (2026-09-27).
+
+     This used to be `gi++ % 2` over every generic inmate: the yard dealt into
+     two gangs like a deck of cards, so a Pacific Islander and a skinhead could
+     wear the same armband and half the prison was somebody's soldier. A real
+     yard sorts itself: the Reds are the Latino car, the Blues the Black car
+     (npc.js's named crews already say so), and most men are in NEITHER. They
+     mind their own business, and that is what makes the ones who don't read.
+
+     The mapping is DETERMINISTIC per man (a hash of his name and spawn point,
+     no draw on the shared rng stream): a Latino inmate runs with the Reds ~60%
+     of the time, a Black inmate with the Blues ~55%; everyone else stays
+     unaffiliated. Men housed in the cells run with their car at half that
+     rate (a cell resident is his cell's business first). The named crews keep
+     their preset colours; named loners (Tiny, the Professor, Iron Mike...)
+     stay loners. Roughly six in ten of the yard ends up unaffiliated. */
+  const CLIQUE_OF = { latino: 0, black: 1 };
+  const CLIQUE_P = [0.6, 0.55];
+  function cliqueHash(n, i) {
+    const name = (n.data && n.data.name) || "";
+    const p = n.group ? n.group.position : { x: 0, z: 0 };
+    let h = 2166136261 ^ (i * 374761393);
+    const key = name + "|" + Math.round(p.x * 10) + "|" + Math.round(p.z * 10) + "|" + (n.data && n.data.cell || "");
+    for (let k = 0; k < key.length; k++) { h ^= key.charCodeAt(k); h = Math.imul(h, 16777619); }
+    return ((h >>> 0) % 10000) / 10000;
+  }
+  function heritageOf(n) {
+    return (n && n.char && n.char.heritage) || (n && n.heritage) || null;
+  }
+  function assignClique(n, i) {
+    if (n._baseGang !== undefined) return n._baseGang;
+    const preset = n.gang === 0 || n.gang === 1 ? n.gang : null;
+    let gang = -1;
+    if (preset != null) gang = preset;
+    else if (n.role === "inmate" || n.role === "thief") {
+      // a NAMED loner stays a loner; the anonymous (crowd, cell residents)
+      // roll against their heritage
+      const anon = !!(n.data && (n.data.cell || n.data.name === "an inmate"));
+      if (anon || !n.forceNeutral) {
+        const c = CLIQUE_OF[heritageOf(n)];
+        if (c != null) {
+          const p = CLIQUE_P[c] * (n.data && n.data.cell ? 0.5 : 1);
+          if (cliqueHash(n, i) < p) gang = c;
+        }
+      }
+    }
+    n._baseGang = gang;
+    return gang;
+  }
+
   let inited = false;
   function initWorld() {
     inited = true;
-    let gi = 0;
-    for (const n of CBZ.npcs) {
-      // Named crew members keep their assigned gang; generic inmates split
-      // evenly — unless flagged a loner, who stays unaffiliated.
-      const presetGang = n.gang === 0 || n.gang === 1 ? n.gang : null;
-      n.gang = n.forceNeutral ? -1
-        : (presetGang != null ? presetGang : ((n.role === "inmate" || n.role === "thief") ? (gi++ % 2) : -1));
+    const list = CBZ.npcs;
+    for (let i = 0; i < list.length; i++) {
+      const n = list[i];
+      n.gang = assignClique(n, i);
       if (n.gang >= 0) addBand(n, n.gang);
     }
     // shotcallers lead first; fallback to the first member of each gang
@@ -282,8 +400,15 @@
   const leaders = {};
 
   function addBand(actor, gang) {
+    if (actor._band) { actor._band.material = CBZ.mat(GANG_COLORS[gang]); actor._band.visible = true; return; }
     const band = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.18, 0.34), CBZ.mat(GANG_COLORS[gang]));
     band.position.y = -0.2; actor.char.parts.la.add(band);
+    actor._band = band;
+  }
+  function setClique(n, gang) {
+    n.gang = gang;
+    if (gang >= 0) addBand(n, gang);
+    else if (n._band) n._band.visible = false;
   }
 
   // ---- ratings (CAPABILITY) + behaviour (TEMPERAMENT), decoupled -------
@@ -489,11 +614,12 @@
           bumpSocial(m, "playerGrudge", 0.55 + severity * 0.06, 0, 14);
           if (severity >= 3) m.grudgeWhy = `what you did to ${actorName(actor)}`;
           bumpSocial(m, "playerFear", Math.min(0.8, severity * 0.04), 0, 14);
-          const responseChance = Math.min(0.82, 0.12 + severity * 0.035 + (p.loyalty || 0.5) * 0.22 + (p.nerve || 0.5) * 0.18 - (sameCrew ? 0.14 : 0));
-          if (severity >= 5 && !m.approach && m.aiState !== "snitch" && m.aiState !== "fight" && rng() < responseChance) {
-            m.huntPlayer = Math.max(m.huntPlayer || 0, 4 + severity * 0.45);
-            responders++;
-            emote(m, "!");
+          // one of his own who was STANDING THERE may step in; the rest of
+          // the set hears about it and remembers (the grudge above)
+          const responseChance = Math.min(0.6, 0.08 + severity * 0.03 + (p.loyalty || 0.5) * 0.18 + (p.nerve || 0.5) * 0.14 - (sameCrew ? 0.14 : 0));
+          if (!opts.noResponders && responders < 1 && severity >= 5 && nearActor < 10 && nearPlayer < 14 &&
+              !m.approach && m.aiState !== "snitch" && m.aiState !== "fight" && rng() < responseChance) {
+            if (requestHunt(m, 4 + severity * 0.35, "crew")) { responders++; emote(m, "!"); }
           }
         }
       } else if (!helpful && m.gang >= 0 && m.gang !== gang) {
@@ -508,25 +634,9 @@
     // one voice, the man with the deepest grudge — he NAMES who you hit,
     // which is his memory talking, not a bark
     if (beefCheer && rng() < 0.6) {
-      say(beefCheer, rng() < 0.5
-        ? `${actorName(actor)} had that coming.`
-        : `Been waiting on somebody to get to ${actorName(actor)}.`, null, 2.2);
+      say(beefCheer, rng() < 0.5 ? "Had that coming." : `About time somebody did ${actorName(actor)}.`, null, 2.0);
     }
 
-    const g = CBZ.game || {};
-    const near = CBZ.player && Math.hypot(CBZ.player.pos.x - actor.group.position.x, CBZ.player.pos.z - actor.group.position.z) < 22;
-    if (!opts.silent && near && nar && severity >= (helpful ? 4 : 5)) {
-      g.gangNoticeT = (g.gangNoticeT || 0) - 1;
-      if (g.gangNoticeT <= 0) {
-        g.gangNoticeT = 2.8;
-        const line = helpful
-          ? `${gangName(gang)} notice you did right by ${actorName(actor)}. Respect ${gangStanding(gang)}.`
-          : responders > 0
-          ? `${gangName(gang)} react as a crew. Respect ${gangStanding(gang)}, debt ${gangDebt(gang)}.`
-          : `${gangName(gang)} remember what happened to ${actorName(actor)}.`;
-        nar(line, 1.8);
-      }
-    }
     return { gang, standing: gangStanding(gang), debt: gangDebt(gang), witnesses, responders };
   }
 
@@ -726,14 +836,6 @@
       addBuzz(kind === "snitchThreat" || kind === "witnessFix" || kind === "alibiDeal" ? "snitch" : "debt", Math.min(9, 2 + watchers * 0.28 + opportunists * 0.45), "public-refusal");
     }
 
-    const g = CBZ.game || {};
-    if (nar && CBZ.player && playerDist(source) < 18 && rng() < 0.5) {
-      g.gossipNoticeT = (g.gossipNoticeT || 0) - 1;
-      if (g.gossipNoticeT <= 0) {
-        g.gossipNoticeT = 3;
-        nar(outcome === "paid" ? "People nearby clock who got paid." : outcome === "threatWon" ? "The block clocks the threat." : "People nearby clock the refusal.", 1.4);
-      }
-    }
     return watchers;
   }
 
@@ -856,7 +958,7 @@
   }
 
   function startGangJob(job, actor) {
-    if (!job || job.gang < 0) return { ok: false, msg: "No job available." };
+    if (!job || job.gang < 0) return { ok: false, msg: "" };
     job.t = job.t || 45;
     job.progress = 0;
     job.source = actor && actor.data ? actor.data.name.replace(/^the |^a |^an /, "") : gangName(job.gang);
@@ -907,8 +1009,7 @@
     CBZ.sfx && CBZ.sfx("coin");
     // THE PAYER IS A PERSON. `job.actor` is whoever handed the job over
     // (startGangJob records it) — they pay you, out loud, in front of you.
-    nar && nar(`${gangName(job.gang)} pay ${job.reward || 4} cigs. Respect ${gangStanding(job.gang)}.`, 2.4,
-      jobVoice(job), `That's ${job.reward || 4}. You're solid with us now.`);
+    { const jv = jobVoice(job); if (jv) say(jv, `${job.reward || 4}. Good work.`, null, 2.0); }
     CBZ.setObjective && CBZ.setObjective("Job done. Keycard checkpoints or tunnels can still get you out.");
     CBZ.game.gangJob = null;
   }
@@ -917,9 +1018,8 @@
     if (!job) return;
     addGangStanding(job.gang, -7);
     addGangDebt(job.gang, 3);
-    if (reason === "heat" && job.gang >= 0) provokeGang({ gang: job.gang, huntPlayer: 0 }, 4);
-    nar && nar(`${gangName(job.gang)} job failed. Debt ${gangDebt(job.gang)}.`, 2.2,
-      jobVoice(job), `You blew it. That's ${gangDebt(job.gang)} you owe us.`);
+    const jv = jobVoice(job);
+    if (jv) say(jv, "You blew it.", null, 2.0);
     CBZ.setObjective && CBZ.setObjective("Find a keycard for checkpoints, or scout vents and tunnels for another way out.");
     CBZ.game.gangJob = null;
   }
@@ -940,9 +1040,8 @@
           const rival = CBZ.npcs.find((m) => m.gang === job.rival && alive(m) && playerDist(m) < 18);
           if (rival) {
             job.rivalWarned = true;
-            provokeGang(rival, 4.5);
-            nar && nar(`${gangName(job.rival)} notice you working their turf.`, 1.5, rival,
-              "You're a long way from your side of the yard.");
+            provokeGang(rival, 4.5, { crew: 1, why: "turf" });
+            say(rival, "Wrong side of the yard.", null, 1.8);
           }
         }
         // NO COUNTDOWN CAPTION. A repeating "18s left" line is the purest
@@ -997,10 +1096,9 @@
       ally.shadowT = Math.max(ally.shadowT || 0, 6 + rng() * 4);
       ally.foe = null;
       emote(ally, "+");
-      if (!job.allyHinted && playerDist(ally) < 14 && nar) {
+      if (!job.allyHinted && playerDist(ally) < 14) {
         job.allyHinted = true;
-        nar(`${gangName(job.gang)} send backup while you work.`, 1.7, ally,
-          "Go on, do the work. Nobody's touching you.");
+        say(ally, "Go on. I got you.", null, 1.8);
       }
     }
 
@@ -1008,7 +1106,7 @@
       const cost = Math.max(2, Math.min(CBZ.game.cigs || 0, 2 + Math.floor((CBZ.game.cigs || 0) / 8) + Math.floor(((rival.personality && rival.personality.greed) || 0.5) * 5)));
       startApproach(rival, "jobThreat", cost, { job });
     } else if (rival && (job.rivalPaidT || 0) <= 0 && rng() < 0.18) {
-      provokeGang(rival, 3.5);
+      provokeGang(rival, 3.5, { crew: 0, why: "turf" });
     }
   }
 
@@ -1043,7 +1141,8 @@
     const cigs = (CBZ.game && CBZ.game.cigs) || 0;
     const debt = gangDebt(source.gang);
     const standing = gangStanding(source.gang);
-    const max = Math.min(3, 1 + (cigs >= 12 ? 1 : 0) + (hostile || debt > 8 || standing < -12 ? 1 : 0));
+    // one or two of his standing near is how a shakedown looks; three is a mob
+    const max = Math.min(2, (cigs >= 12 ? 1 : 0) + (hostile || debt > 8 || standing < -12 ? 1 : 0));
     const list = [];
     for (const m of CBZ.npcs || []) {
       if (m === source || !alive(m) || m.gang !== source.gang || !m.group || !m.data) continue;
@@ -1073,9 +1172,6 @@
     if (count) {
       source.approachBackup = count;
       addBuzz(hostile ? "debt" : "wealth", Math.min(5, 1 + count * 1.2), "gang-pressure");
-      if (nar && playerDist(source) < 17 && rng() < 0.45) {
-        nar(`${gangName(source.gang)} drift in behind the talk.`, 1.5);
-      }
     }
     return count;
   }
@@ -1136,28 +1232,15 @@
 
   /* The one line he gets to say as you walk — about THIS deal, once. A man
      repeats himself to nobody: the second walk-away gets a stare. */
+  /* The one line he gets to say as you walk, about THIS deal, once. A man
+     repeats himself to nobody: the second walk-away gets a stare. */
   function standLine(n, a) {
     const k = a.kind;
-    if (k === "gangJob") return "Think on it. The work keeps.";
-    if (k === "gangInvite") return `Door's open at ${gangName(n.gang)}. It doesn't stay open forever.`;
-    if (k === "buyItem") return `I still want that ${a.item}. Find me.`;
-    if (k === "favor") return "It'll keep. Come see me.";
-    if (k === "crewBackup") return "Offer holds. Whistle when it gets loud.";
-    if (k === "infoSell") return "What I know stays true a while. You know where I am.";
-    if (k === "heatWarning") return "Suit yourself. The sweep won't wait on you.";
-    if (k === "alibiDeal") return "The story's still for sale. Not for long.";
-    if (k === "witnessFix") return "Every hour that report sits, it gets harder to reach.";
-    if (k === "recantOffer") return "My statement can still change. Today.";
-    if (k === "gangParley") return a.parleyMode === "truce"
-      ? "The truce is on the table till somebody bleeds."
-      : "We'll talk when you're ready to talk.";
-    if (k === "contract") return a.contract
-      ? `He still owes it. Ask me when you want the work.`
-      : "Offer stands.";
-    if (k === "debtorDodge") return a.contract && a.contract.kind === "repo"
-      ? "It's not on me anyway."
-      : "Tell him Thursday.";
-    return "Offer stands.";
+    if (k === "buyItem") return "Still want it.";
+    if (k === "heatWarning" || k === "alibiDeal" || k === "witnessFix" || k === "recantOffer") return "Not for long.";
+    if (k === "debtorDodge") return a.contract && a.contract.kind === "repo" ? "I don't have it." : "Thursday.";
+    if (k === "gangParley" && a.parleyMode === "truce") return "Think about it.";
+    return rng() < 0.5 ? "Think about it." : "You know where I am.";
   }
 
   /* Walking away from an OFFER: no penalty, no re-roll — he files it. */
@@ -1219,27 +1302,22 @@
 
   /* Coming back to a standing offer: the SAME deal at the SAME price, in
      words that show he remembers asking — never a fresh roll of the dice. */
+  /* Coming back to a standing offer: the SAME deal at the SAME price, in
+     a few words that show he remembers asking. */
   function reopenText(n, a) {
-    const name = n.data.name.replace(/^the |^a |^an /, "");
     const k = a.kind;
-    if (k === "gangJob") return `${name} again: that ${a.job ? jobNoun(a.job) : "work"} is still on the table.`;
-    if (k === "gangInvite") return `${name} is still holding a spot with ${gangName(n.gang)}.`;
-    if (k === "buyItem") return `${name}, like before: your ${a.item} for ${a.price || a.cost} cigs.`;
-    if (k === "favor") return `${name} hasn't forgotten ${gangName(n.gang)} owe you one.`;
-    if (k === "crewBackup") return `${name}, same as before: ${gangName(n.gang)} can watch your back.`;
-    if (k === "infoSell") return `${name} still knows where guards are looking. Same price.`;
-    if (k === "alibiDeal") return `${name}: the alibi's still yours for ${a.cost} cigs. Clock's running.`;
-    if (k === "witnessFix") return `${name} can still reach ${a.targetName || "the witness"}. ${a.cost} cigs, like I said.`;
-    if (k === "recantOffer") return `${name} can still walk that report back. ${a.cost} cigs.`;
-    if (k === "heatWarning") return `${name}, one more time: guards are on your last spot.`;
-    if (k === "gangParley") return a.parleyMode === "truce"
-      ? `${name}: the ${gangName(n.gang)} truce still costs ${a.cost} cigs.`
-      : `${name} still wants that sit-down for ${gangName(n.gang)}.`;
-    if (k === "contract" && a.contract) return `${name}, same as before: ${a.contract.name} still owes him ${a.contract.amt}.`;
-    if (k === "debtorDodge" && a.contract) return a.partial > 0
-      ? `${name} still says ${a.partial} now, the rest later.`
-      : `${name} still says his pockets are empty.`;
-    return a.msg;   // the original pitch is still the truth
+    if (k === "gangJob") return "So. The work?";
+    if (k === "gangInvite") return "Still open.";
+    if (k === "buyItem") return `${a.price || a.cost} for the ${a.item}. Still.`;
+    if (k === "favor") return "Still got that for you.";
+    if (k === "crewBackup") return "Offer's still good.";
+    if (k === "infoSell") return `Still ${a.cost}.`;
+    if (k === "alibiDeal" || k === "witnessFix" || k === "recantOffer") return `${a.cost}. Still.`;
+    if (k === "heatWarning") return "They're still looking.";
+    if (k === "gangParley") return a.parleyMode === "truce" ? `${a.cost}. Still.` : "You ready to talk?";
+    if (k === "contract" && a.contract) return `${a.contract.name} still owes. You in?`;
+    if (k === "debtorDodge" && a.contract) return a.partial > 0 ? `${a.partial} now. Rest later.` : "Still don't have it.";
+    return a.msg;
   }
 
   function reopenOffer(n) {
@@ -1282,10 +1360,10 @@
   function squashGrudge(n) {
     if (!n || !n.data) return { ok: false, msg: "" };
     const who = n.data.name.replace(/^the |^a |^an /, "");
-    if ((n.playerGrudge || 0) < 3) return { ok: false, msg: `${who} isn't holding anything against you.` };
-    if (n.aiState === "fight" && n.foe === CBZ.player) return { ok: false, msg: `${who} isn't hearing offers mid-swing.` };
+    if ((n.playerGrudge || 0) < 3) return { ok: false, msg: "We're good." };
+    if (n.aiState === "fight" && n.foe === CBZ.player) return { ok: false, msg: "" };
     const cost = squashGrudgeCost(n);
-    if ((CBZ.game.cigs || 0) < cost) return { ok: false, msg: `${who} wants ${cost} cigs to bury it. You're short.` };
+    if ((CBZ.game.cigs || 0) < cost) return { ok: false, msg: `${cost}. You don't have it.` };
     CBZ.econ.addCigs(-cost);
     const why = n.grudgeWhy;
     n.playerGrudge = 0;
@@ -1294,7 +1372,7 @@
     n.playerTrust = Math.min(14, (n.playerTrust || 0) + 1);
     if (n.gang >= 0) addGangStanding(n.gang, 2);
     CBZ.sfx && CBZ.sfx("coin");
-    say(n, why ? `For ${why}? ...Alright. We're square.` : "Alright. We're square. Don't make a habit of needing to be.", null, 2.8);
+    say(n, "Alright. We're square.", null, 2.2);
     return { ok: true, msg: "" };   // he said it himself; the card adds nothing
   }
 
@@ -1324,62 +1402,57 @@
       const lastKnown = n.memory && n.memory.lastKnown;
       clearApproach(n);
       n.memory = null;
-      if (near && nar) nar(`${who} got tired of waiting and runs to snitch.`, 1.8, n,
-        "You had your chance. I'll find someone who listens.");
+      if (near) say(n, "Your call.", null, 1.8);
       sendNpcToSnitch(n, heat, { copCrime, lastKnown });
       return;
     }
 
+    /* WALKING OFF A DEMAND. The debt still goes on the book and the clique's
+       standing still dips (word gets round), but the teeth are HIS: see
+       snubbed(). The first walk is a look and maybe three words; the second,
+       he comes himself. Nobody else is sent. */
     if (a.kind === "tax") {
       const gang = n.gang;
       const cost = Math.max(2, a.cost || 3);
       clearApproach(n);
-      addGangDebt(gang, cost);
-      addGangStanding(gang, -8);
+      addGangDebt(gang, Math.ceil(cost * 0.5));
+      addGangStanding(gang, -4);
+      noteFishWalked(n, reason);
       if (near) {
-        const line = closerLine(n, "tax", [
-          `Then ${gangName(gang)} carry you at ${cost}. It follows you.`,
-          `That's ${cost} on the book, then. ${gangName(gang)} always collect.`,
-          "Walking is just paying later, with interest.",
-        ]);
-        if (line) nar(`${gangName(gang)} mark you as unpaid.`, 1.8, n, line);
+        const line = closerLine(n, "tax", ["Alright.", "I'll see you later.", `That's ${cost} you owe.`]);
+        if (line) say(n, line, null, 1.8);
         else if (CBZ.npcStare) CBZ.npcStare(n, 1.6);
       }
-      if (gang >= 0 && gangStanding(gang) < -12) provokeGang(n, 7);
+      snubbed(n, 6);
       return;
     }
 
     if (a.kind === "debtCollect") {
       const gang = n.gang;
       clearApproach(n);
-      const debt = addGangDebt(gang, Math.max(2, Math.ceil((a.cost || 3) * 0.5)));
-      addGangStanding(gang, -6);
+      const debt = addGangDebt(gang, Math.max(1, Math.ceil((a.cost || 3) * 0.3)));
+      addGangStanding(gang, -3);
       if (near) {
-        const line = closerLine(n, "debtCollect", [
-          `That's ${debt} now. It goes up every time I walk away.`,
-          `It's ${debt} now. Count it yourself next time, save us both the walk.`,
-        ]);
-        if (line) nar(`${gangName(gang)} add interest. Debt ${debt}.`, 1.8, n, line);
+        const line = closerLine(n, "debtCollect", [`${debt}. Don't make me find you.`, "You owe us. Don't forget it."]);
+        if (line) say(n, line, null, 1.8);
         else if (CBZ.npcStare) CBZ.npcStare(n, 1.6);
       }
-      if (gang >= 0 && debt > 10) provokeGang(n, 6);
+      snubbed(n, 6);
       return;
     }
 
     if (a.kind === "turfWarning") {
       const gang = n.gang;
       clearApproach(n);
-      addGangDebt(gang, 2);
-      addGangStanding(gang, reason === "walkedAway" ? -3 : -5);
+      addGangDebt(gang, 1);
+      addGangStanding(gang, reason === "walkedAway" ? -2 : -3);
+      noteFishWalked(n, reason);
       if (near) {
-        const line = closerLine(n, "turfWarning", [
-          "Walk off again and it stops being talk.",
-          `You heard me. ${gangName(gang)} grass has a price on it.`,
-        ]);
-        if (line) nar(`${gangName(gang)} take the disrespect personally.`, 1.8, n, line);
+        const line = closerLine(n, "turfWarning", ["Next time.", "Don't let me see you here again."]);
+        if (line) say(n, line, null, 1.8);
         else if (CBZ.npcStare) CBZ.npcStare(n, 1.6);
       }
-      if (gang >= 0 && gangStanding(gang) < -10) provokeGang(n, 5);
+      snubbed(n, 5);
       return;
     }
 
@@ -1388,13 +1461,10 @@
       if (a.job) a.job.t = Math.max(4, (a.job.t || 10) - 5);
       clearApproach(n);
       addGangStanding(gang, -3);
-      provokeGang(n, 4.5);
+      requestHunt(n, 4.5, "snub");
       if (near) {
-        const line = closerLine(n, "jobThreat", [
-          "You're not finishing that. Not today.",
-          `${gangName(gang)} just made your job their business.`,
-        ]);
-        if (line) nar(`${gangName(gang)} move to spoil the job.`, 1.7, n, line);
+        const line = closerLine(n, "jobThreat", ["Not today."]);
+        if (line) say(n, line, null, 1.6);
         else if (CBZ.npcStare) CBZ.npcStare(n, 1.6);
       }
       return;
@@ -1409,11 +1479,8 @@
       if (CBZ.addCasePressure) CBZ.addCasePressure(5 + (a.cost || 2), { type: "ignored cover debt", heardOnly: true, source: who }, n);
       addBuzz("heat", 4, "ignored-cover-debt");
       if (near) {
-        const line = closerLine(n, "coverDebt", [
-          "I covered for you. That's going on your tab.",
-          `I lied to ${a.guard || "a guard"} for you. You'll pay for that one way or another.`,
-        ]);
-        if (line) nar(`${who} decides that cover should cost you later.`, 1.5, n, line);
+        const line = closerLine(n, "coverDebt", ["I lied for you. Remember that.", `I covered for you with ${a.guard || "the CO"}.`]);
+        if (line) say(n, line, null, 1.8);
         else if (CBZ.npcStare) CBZ.npcStare(n, 1.6);
       }
       return;
@@ -1423,38 +1490,36 @@
       const gang = n.gang;
       clearApproach(n);
       n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
-      const debt = addGangDebt(gang, Math.max(2, Math.ceil((a.cost || 3) * 0.65)));
-      addGangStanding(gang, -4);
+      const debt = addGangDebt(gang, Math.max(1, Math.ceil((a.cost || 3) * 0.4)));
+      addGangStanding(gang, -2);
       if (near) {
-        const line = closerLine(n, "crewDues", [
-          `Dues are dues. You're down ${debt} with us.`,
-          `${gangName(gang)} keep their own books. Yours says ${debt}.`,
-        ]);
-        if (line) nar(`${gangName(gang)} mark dues unpaid. Debt ${debt}.`, 1.7, n, line);
+        const line = closerLine(n, "crewDues", [`You're behind. ${debt}.`, "Everybody pays."]);
+        if (line) say(n, line, null, 1.8);
         else if (CBZ.npcStare) CBZ.npcStare(n, 1.6);
       }
-      if (gang >= 0 && debt > 12 && gangStanding(gang) < -8) provokeGang(n, 5);
       return;
     }
 
-      if (a.kind === "stickUp") {
-        clearApproach(n);
-        n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 1);
-        if (a.racketGuard) {
-          CBZ.econ.addRacketDebt(Math.max(2, Math.ceil((a.cost || 3) * 0.55)));
-          if (CBZ.addCasePressure) CBZ.addCasePressure(7 + (a.cost || 3), { type: "racket runner" }, n, { corruptHold: true });
-          addBuzz("badge", 6, "ignored-racket-runner");
-        }
-        if (n.gang >= 0) addGangStanding(n.gang, -3);
-        if (n.role === "thief") n.huntPlayer = Math.max(n.huntPlayer || 0, 3.5);
-        else if (n.gang >= 0 && (a.rivalGang || gangStanding(n.gang) < -10)) provokeGang(n, 4.5);
+    if (a.kind === "stickUp") {
+      clearApproach(n);
+      n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 1);
+      if (a.racketGuard) {
+        CBZ.econ.addRacketDebt(Math.max(2, Math.ceil((a.cost || 3) * 0.55)));
+        if (CBZ.addCasePressure) CBZ.addCasePressure(7 + (a.cost || 3), { type: "racket runner" }, n, { corruptHold: true });
+        addBuzz("badge", 6, "ignored-racket-runner");
+      }
+      if (n.gang >= 0) addGangStanding(n.gang, -2);
+      noteFishWalked(n, reason);
       if (near) {
-        const line = closerLine(n, "stickUp", a.racketGuard
-          ? ["The boss hears you stiffed his runner."]
-          : ["Fine. I'll just take it off you later.", "Keep walking. Pockets empty themselves in here."]);
-        if (line) nar(a.racketGuard ? `${who} leaves the racket tab open.` : `${who} stops asking and starts watching your pockets.`, 1.6, n, line);
+        const line = closerLine(n, "stickUp", a.racketGuard ? [`${a.racketGuard} hears about this.`] : ["Later, then.", "I'll see you."]);
+        if (line) say(n, line, null, 1.6);
         else if (CBZ.npcStare) CBZ.npcStare(n, 1.6);
       }
+      // a tester you stared down may push it; a thief doesn't wait for a
+      // second snub; anyone else remembers it
+      if (a.test) { if (reason !== "walkedAway" && rng() < testerSwing(n)) requestHunt(n, 7, "test"); }
+      else if (n.role === "thief") requestHunt(n, 4.5, "snub");
+      else snubbed(n, 5);
       return;
     }
 
@@ -1462,8 +1527,7 @@
       clearApproach(n);
       n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
       if (CBZ.addComplaint) CBZ.addComplaint(5);
-      if (near && nar) nar(`${who} tells the block you ignored the problem.`, 1.8, n,
-        "Everyone's going to hear you did nothing.");
+      if (near) say(n, "Figures.", null, 1.6);
       return;
     }
 
@@ -1482,76 +1546,61 @@
     return Math.hypot(p.x - t.x, p.z - t.z) < 11.5;
   }
 
+  /* THE OPENER. This is SPOKEN (the greet block in approachPlayer says it
+     over his head, and the card shows it), so it is a man talking, first
+     person, a few words. It used to be a third-person caption ("Mack demands
+     3 cigs for the Reds protection."), which is narration in a man's mouth. */
   function approachText(n, kind, cost, extra) {
     extra = extra || {};
-    const name = n.data.name.replace(/^the |^a |^an /, "");
-    if (kind === "gangInvite") return `${name} wants you with ${gangName(n.gang)}.`;
-    if (kind === "tax" && extra.turfCheckpoint) return `${name} wants ${cost} cigs at the ${gangName(n.gang)} checkpoint.`;
-    if (kind === "tax") return `${name} demands ${cost} cigs for ${gangName(n.gang)} protection.`;
-    if (kind === "rumor") return `${name} has prison gossip for you.`;
-    if (kind === "favor") return `${name} says ${gangName(n.gang)} owe you one.`;
-    if (kind === "snitchThreat") return `${name} saw too much and wants ${cost} cigs.`;
-    if (kind === "turfWarning") return `${name} says you're standing on ${gangName(n.gang)} turf.`;
-    if (kind === "deal") return `${name} wants to make a deal.`;
-    if (kind === "lookout") return `${name} offers to watch your back for ${cost} cigs.`;
-    if (kind === "crewBackup") return `${name} says ${gangName(n.gang)} can watch your back.`;
-    if (kind === "crewDues") return `${name} wants ${cost} cigs for ${gangName(n.gang)} protection dues.`;
-    if (kind === "stickUp" && extra.racketGuard) return `${name} says ${extra.racketGuard} sent word: ${cost} cigs keeps the clean guards out of it.`;
-    if (kind === "stickUp") return `${name} wants ${cost} cigs to leave your pockets alone.`;
-    if (kind === "diversion") return `${name} can pull guard eyes off you for ${cost} cigs.`;
-    if (kind === "stashCover") return `${name} can hide your money trail for ${cost} cigs.`;
-    if (kind === "racketCover") return `${name} can keep bent cops off your trail for ${cost} cigs.`;
-    if (kind === "coverDebt") return `${name} lied to ${extra.guard || "a guard"} for you and wants ${cost} cigs.`;
-    if (kind === "witnessFix") return `${name} can pressure ${extra.targetName || "the witness"}${extra.caseSourceCount > 1 ? " before the reports stack" : ""} for ${cost} cigs.`;
-    if (kind === "recantOffer") return `${name} can walk back their report for ${cost} cigs.`;
-    /* THE WORK IS IN HIS OPENER, not only in the long version.
-
-       ai.js speaks `msg` the moment a collector reaches you (the greet block in
-       approachPlayer sets `greeted` and says this line), and interact.js's
-       autoListen — which is where the LONG "you can't pay it, so work it. Dice
-       owes us too" answer lives — is skipped once greeted is true. So the only
-       way to hear the offer was to walk up to him mid-jog or come back to a
-       standing offer. A way out that most players would never be told about is
-       not a way out, so the opener names it too. */
-    if (kind === "debtCollect") return extra.workOff
-      ? `${name} says ${gangName(n.gang)} want ${cost} cigs — or a collection run.`
-      : `${name} says ${gangName(n.gang)} want ${cost} cigs on your debt.`;
-    if (kind === "buyItem") return `${name} wants to buy your ${extra.item || cost}.`;
-    if (kind === "gangJob") return `${name} has ${extra.job ? `a ${jobNoun(extra.job)}` : "work"} for ${gangName(n.gang)}.`;
+    const c = cost;
+    if (kind === "gangInvite") return "You should be with us.";
+    if (kind === "tax" && extra.turfCheckpoint) return `${c} to walk through here.`;
+    if (kind === "tax") return `${c} smokes. Now.`;
+    if (kind === "rumor") return "Hey. Come here.";
+    if (kind === "favor") return "Here. We owe you.";
+    if (kind === "snitchThreat") return `I saw that. ${c} and I didn't.`;
+    if (kind === "turfWarning") return extra.turfCheckpoint ? "Where you going?" : "This is ours. Walk.";
+    if (kind === "deal") return "Need anything?";
+    if (kind === "lookout") return `${c} and I watch your back.`;
+    if (kind === "crewBackup") return "You want us close?";
+    if (kind === "crewDues") return `Dues. ${c}.`;
+    if (kind === "stickUp" && extra.racketGuard) return `${extra.racketGuard} says ${c}.`;
+    if (kind === "stickUp") return `Empty your pockets. ${c}.`;
+    if (kind === "diversion") return `${c} and the CO's looking the other way.`;
+    if (kind === "stashCover") return `People see what you're carrying. ${c} and they don't.`;
+    if (kind === "racketCover") return `${c} and the bent ones lose your name.`;
+    if (kind === "coverDebt") return `I lied to ${extra.guard || "the CO"} for you. ${c}.`;
+    if (kind === "witnessFix") return `${extra.targetName || "Your witness"}? ${c} and he forgets.`;
+    if (kind === "recantOffer") return `${c} and I got it wrong.`;
+    if (kind === "debtCollect") return extra.workOff ? `You owe us ${c}. Or do something for it.` : `You owe us ${c}.`;
+    if (kind === "buyItem") return `That ${extra.item || c}. I'll buy it.`;
+    if (kind === "gangJob") return extra.job ? `Got work. ${jobNoun(extra.job)}.` : "Got work for you.";
     if (kind === "gangParley") {
-      if (extra.parleyMode === "recruit") return `${name} wants a sit-down about joining ${gangName(n.gang)}.`;
-      if (extra.parleyMode === "work") return `${name} wants to talk crew work for ${gangName(n.gang)}.`;
-      if (extra.parleyMode === "truce") return `${name} wants ${cost} cigs to settle things with ${gangName(n.gang)}.`;
-      return `${name} wants a leader-to-leader word for ${gangName(n.gang)}.`;
+      if (extra.parleyMode === "recruit") return "Sit down a minute.";
+      if (extra.parleyMode === "work") return "Walk with me.";
+      if (extra.parleyMode === "truce") return `${c} and we're square.`;
+      return "We need to talk.";
     }
-    if (kind === "jobThreat") return `${name} wants ${cost} cigs to stop pressing your job.`;
-    if (kind === "heatWarning") return extra.caseSourceCount > 1
-      ? `${name} says the case has ${extra.caseSourceCount} sources and guards are moving.`
-      : `${name} says guards are sweeping your last spot.`;
-    if (kind === "alibiDeal") return extra.caseSourceCount > 1
-      ? `${name} can muddy ${extra.caseSourceCount} reports for ${cost} cigs.`
-      : `${name} can sell you an alibi for ${cost} cigs.`;
-    if (kind === "coverStory") return extra.caseSourceCount > 1
-      ? `${name} can give guards a cover story against ${extra.caseSourceCount} reports.`
-      : `${name} can give guards a cover story.`;
-    if (kind === "infoSell") return extra.caseSourceCount > 1
-      ? `${name} knows which ${extra.caseSourceCount} sources guards believe.`
-      : `${name} knows where guards are looking.`;
+    if (kind === "jobThreat") return `${c}, or you don't finish that.`;
+    if (kind === "heatWarning") return "They're looking for you.";
+    if (kind === "alibiDeal") return `${c} and you were with me.`;
+    if (kind === "coverStory") return "I can tell them you went the other way.";
+    if (kind === "infoSell") return `${c} and I tell you where they're looking.`;
     if (kind === "reputation") {
-      if (extra.repKind === "fear") return `${name} has heard what you do to people.`;
-      if (extra.repKind === "wealth") return `${name} heard you are carrying cigs.`;
-      if (extra.repKind === "badge") return `${name} heard you are paying bent cops.`;
-      if (extra.repKind === "snitch") return `${name} knows the block is talking to guards.`;
-      if (extra.repKind === "debt") return `${name} heard gangs are keeping a tab on you.`;
-      return `${name} has heard your name around the block.`;
+      if (extra.repKind === "fear") return "I heard what you did.";
+      if (extra.repKind === "wealth") return "Heard you're holding.";
+      if (extra.repKind === "badge") return "Heard you pay COs.";
+      if (extra.repKind === "snitch") return "Somebody's talking to the COs.";
+      if (extra.repKind === "debt") return "Heard you owe people.";
+      return "I heard about you.";
     }
     if (kind === "contract" && extra.contract) return contractText(n, extra.contract);
-    if (kind === "debtorDodge" && extra.contract) return `${name} says he's short.`;
-    if (kind === "copBribe") return `${name} offers ${extra.price || 3} cigs to look away.`;
-    if (kind === "copTip") return `${name} has a tip about trouble in the block.`;
-    if (kind === "copPlea") return `${name} asks for protection from gang pressure.`;
-    if (kind === "copTaunt") return `${name} is testing your badge.`;
-    return `${name} wants a word.`;
+    if (kind === "debtorDodge" && extra.contract) return "I don't have it.";
+    if (kind === "copBribe") return `${extra.price || 3} smokes and you didn't see me.`;
+    if (kind === "copTip") return "You want to know who's holding?";
+    if (kind === "copPlea") return "They won't leave me alone.";
+    if (kind === "copTaunt") return "What are you gonna do?";
+    return "Hey.";
   }
 
   function approachMotive(kind, extra) {
@@ -1583,6 +1632,60 @@
     return "";
   }
 
+  /* ============================================================
+     NOT EVERY FEW SECONDS (2026-09-27, owner: "you should not be annoying").
+
+     Seven different things in this file could walk a man over to pitch you
+     (the per-man roll, the social director, the watcher tails, the turf
+     checkpoints, the gang thresholds, the debt collector, the cash predator),
+     and the only thing between them was "nobody is talking to him right now".
+     So the moment one pitch ended the next began.
+
+     pitchOpen() is the one gate all of them pass through startApproach:
+       - after any pitch, the yard leaves you alone for most of a minute
+         (g.pitchGapT, 45-75 s; the arrival test and a shot-caller sizing you
+         up pass `forced` and skip it);
+       - a man with no clique almost never starts anything: only when he has
+         a reason of his own (he saw something, he wants to buy what you
+         carry, the screws are on you);
+       - a clique member pitches business, not threats, unless there is a
+         reason: you are on their ground, you owe them, you pay them, you are
+         a rival, or they have gone sour on you.
+     ============================================================ */
+  const THREAT_KINDS = { tax: 1, stickUp: 1, turfWarning: 1, debtCollect: 1, crewDues: 1, jobThreat: 1 };
+  function pitchOpen(n, kind, extra) {
+    extra = extra || {};
+    if (extra.forced || kind === "debtorDodge" || kind === "contract") return true;
+    const g = CBZ.game || {};
+    if ((g.pitchGapT || 0) > 0) return false;
+    if (g.role === "cop") return true;
+    const yr = yardRep();
+    if (n.gang < 0) {
+      const cased = kind === "snitchThreat" || kind === "coverDebt" || kind === "recantOffer" || kind === "witnessFix" ||
+        kind === "alibiDeal" || kind === "infoSell" || kind === "heatWarning";
+      if (cased) return true;
+      if (kind === "buyItem" || kind === "deal") return n.role !== "inmate" || rng() < 0.3;
+      if (kind === "stickUp") {
+        // a predator with nobody watching, on a man the yard hasn't seen stand
+        const b = n.behavior;
+        return (n.role === "thief" || b === "predator" || b === "bully") && (yr.respect || 0) < 3;
+      }
+      return false;
+    }
+    if (THREAT_KINDS[kind]) {
+      const gang = n.gang;
+      const reason = extra.turfCheckpoint || extra.thresholdPressure || extra.rivalGang || extra.debt ||
+        isOnTurf(gang, CBZ.player.pos) || gangDebt(gang) > 0 || gangStanding(gang) < -10 ||
+        (yr.payer && yr.payer[gang] > 0) ||
+        (CBZ.player.gang != null && CBZ.player.gang !== gang) ||
+        (kind === "crewDues" && CBZ.player.gang === gang) || kind === "jobThreat";
+      if (!reason) return false;
+      // a man who stood his ground gets fewer shakedowns, not none
+      if ((yr.respect || 0) >= 4 && (kind === "tax" || kind === "stickUp") && rng() < 0.6) return false;
+    }
+    return true;
+  }
+
   function startApproach(n, kind, cost, extra) {
     /* TWO MEN AT YOUR SHOULDER CHANGE THE MATH. A tax or a stick-up is a
        bet about being the stronger party; a flanked player visibly isn't
@@ -1591,8 +1694,13 @@
        but not the walk. systems/prisonfriends.js owns the crew read. */
     if ((kind === "tax" || kind === "stickUp") && CBZ.posseFlanked && CBZ.posseFlanked()) {
       n.approachCD = 6 + rng() * 6;
-      return;
+      return false;
     }
+    if (!pitchOpen(n, kind, extra)) {
+      n.approachCD = Math.max(n.approachCD || 0, 8 + rng() * 12);
+      return false;
+    }
+    { const g = CBZ.game || {}; g.pitchGapT = Math.max(g.pitchGapT || 0, 45 + rng() * 30); g.pitches = (g.pitches || 0) + 1; }
     if (cost > 0) {
       const sp = socialProfile();
       const payerRead = Math.max(0, (sp.paid || 0) + (sp.exploited || 0) - (sp.threatened || 0) - (sp.refused || 0));
@@ -1625,7 +1733,8 @@
     n.foe = null;
     n.pause = 0;
     emote(n, approachGlyph(kind));
-    callGangPressure(n, kind, extra || {});
+    if (!(extra && extra.test)) callGangPressure(n, kind, extra || {});   // a test is one man
+    return true;
   }
 
   function approachGlyph(kind) {
@@ -1678,7 +1787,6 @@
     });
     best.approachCD = 0;
     addBuzz("badge", 7 + Math.min(8, debt * 0.25), "racket-runner");
-    if (nar && playerDist(best) < 18) nar(`${guardName}'s racket sends a runner.`, 1.6);
     return true;
   }
 
@@ -2035,9 +2143,6 @@
     }
 
     reporter.reportedPlayerSpread = Math.max(reporter.reportedPlayerSpread || 0, listeners);
-    if (listeners > 0 && nar && playerDist(reporter) < 18) {
-      nar(`${source}'s report starts moving through the block.`, 1.5);
-    }
     return listeners;
   }
 
@@ -2157,91 +2262,22 @@
     return fallback || "guard chatter";
   }
 
+  /* WHAT A MAN TELLS YOU WHEN HE TELLS YOU SOMETHING. One fact, the way a
+     man in a yard says it: a name, a place, a number. No advice, no system
+     explained (owner: "no mechanics in dialogue"). */
   function rumorLine(n) {
-    const who = actorName(n);
     const g = CBZ.game || {};
-    const standing = n.gang >= 0 ? gangStanding(n.gang) : 0;
     const debt = n.gang >= 0 ? gangDebt(n.gang) : 0;
-    const cover = n.gang >= 0 ? gangProtection(n.gang) : 0;
-    const crew = CBZ.player && CBZ.player.gang != null ? CBZ.player.gang : null;
-    const sameCrew = crew != null && n.gang === crew;
-    const rivalCrew = crew != null && n.gang >= 0 && n.gang !== crew;
-
     const activeSnitch = (CBZ.npcs || []).find((m) => alive(m) && m.aiState === "snitch");
-    if (activeSnitch) {
-      const d = Math.round(playerDist(activeSnitch));
-      return `${who}: ${actorName(activeSnitch)} is running to snitch, about ${d}m out. Stop them or buy cover fast.`;
-    }
-
+    if (activeSnitch) return `${actorName(activeSnitch)}'s going to the COs. Right now.`;
     const knownReporter = (CBZ.npcs || []).find((m) => alive(m) && (m.reportedPlayerT || 0) > 0);
-    if (knownReporter) {
-      const d = Math.round(playerDist(knownReporter));
-      const guard = knownReporter.reportedPlayerGuard || "a guard";
-      if (sameCrew || cover > 0 || standing > 28) {
-        return `${who}: ${actorName(knownReporter)} already talked to ${guard}. Confront them or pay for a counter-rumor while it is fresh.`;
-      }
-      return `${who}: ${actorName(knownReporter)} sold your last-known ${d}m from you. People remember who talked.`;
-    }
-
-    if (g.lastKnown && g.lastKnown.t > 0) {
-      const src = g.lastKnown.source || "somebody";
-      const age = Math.ceil(g.lastKnown.t);
-      if (sameCrew || cover > 0 || standing > 28) {
-        return `${who}: Guards are searching off ${src}'s lead. Your crew can still muddy it for ${age}s.`;
-      }
-      if (rivalCrew) {
-        return `${who}: ${gangName(n.gang)} heard ${src} put guards on you. Rivals may sell that twice.`;
-      }
-      return `${who}: Guards are working a last-known from ${src}. Moving now beats waiting.`;
-    }
-
-    const activeCase = caseLead();
-    if (activeCase && activeCase.heat > 14) {
-      const src = activeCase.source || "a witness";
-      if (sameCrew || cover > 0 || standing > 28) return `${who}: ${src}'s story is still in the case file. Buy silence or get a cover story before it hardens.`;
-      if (rivalCrew) return `${who}: ${src} put a case on you. Rivals know that kind of pressure sells.`;
-      return `${who}: Your wanted heat has a source now: ${src}. Random hiding won't erase a case file.`;
-    }
-
+    if (knownReporter) return `${actorName(knownReporter)} talked. About you.`;
+    if (g.lastKnown && g.lastKnown.t > 0) return `They're looking for you. ${g.lastKnown.source ? g.lastKnown.source + " pointed." : ""}`.trim();
     const bent = (CBZ.guards || []).filter((gd) => gd && gd.corrupt && !gd.dead && !(gd.ko > 0));
-    if (bent.length && (g.detection > 18 || (g.cigs || 0) >= 8 || rng() < 0.34)) {
-      const gd = bent[Math.floor(rng() * bent.length)];
-      return `${who}: ${actorName(gd)} is bent. Payoffs bury heat, but they will tax you harder if witnesses talk.`;
-    }
-
-    if (g.gangJob) {
-      const job = g.gangJob;
-      const remain = Math.ceil(job.t || 0);
-      if (n.gang === job.gang) return `${who}: Finish the ${jobNoun(job)} and ${gangName(job.gang)} cover gets stronger. You've got ${remain} seconds.`;
-      if (n.gang === job.rival) return `${who}: That job crosses ${gangName(n.gang)}. Expect pressure unless you pay or scare someone off.`;
-      return `${who}: Jobs are how gangs decide if you are useful or just noise.`;
-    }
-
-    if (n.gang >= 0 && debt > 0) {
-      return `${who}: Your tab with ${gangName(n.gang)} is ${debt} cigs. Debt makes their people tax and jump you.`;
-    }
-
-    if (n.gang >= 0 && cover > 0) {
-      return `${who}: ${gangName(n.gang)} cover has ${Math.ceil(cover)}s left. Snitches think twice while it lasts.`;
-    }
-
-    if (n.gang >= 0 && Math.abs(standing) > 18) {
-      return `${who}: ${gangName(n.gang)} ${standing > 0 ? "trust" : "hate"} you now. Respect changes who lies, fights, or sells you out.`;
-    }
-
-    const buzz = topBuzz();
-    if (buzz.score > 22) {
-      if (buzz.kind === "fear") return `${who}: People talk about who you dropped. Some back off, rivals bring numbers.`;
-      if (buzz.kind === "wealth") return `${who}: Word says you are carrying cigs. That brings friends, thieves, and taxes.`;
-      if (buzz.kind === "badge") return `${who}: Bent cops are in your story now. Protection helps until the tab comes due.`;
-      if (buzz.kind === "snitch") return `${who}: The block is talking to guards. Watch who suddenly wants distance.`;
-      if (buzz.kind === "debt") return `${who}: Gang debt travels faster than you do. Pay it down or expect collectors.`;
-      if (buzz.kind === "heat") return `${who}: The heat on you is block gossip now, not just guard business.`;
-    }
-
-    if ((g.cigs || 0) >= 18) return `${who}: Walking around fat with cigs makes thieves, gangs, and bent cops notice you. Spend it or get taxed.`;
-    if ((g.detection || 0) > 24) return `${who}: Wanted heat is not magic. Witnesses and last-known reports decide who actually chases.`;
-    return n.data.tip || (n.data.talk && n.data.talk[(rng() * n.data.talk.length) | 0]) || "Keep your eyes open.";
+    if (bent.length && rng() < 0.4) return `${actorName(bent[Math.floor(rng() * bent.length)])} takes money.`;
+    if (n.gang >= 0 && debt > 0) return `You owe us ${debt}. Don't forget.`;
+    if ((g.cigs || 0) >= 18) return "People see you carrying.";
+    return n.data.tip || (n.data.talk && n.data.talk[(rng() * n.data.talk.length) | 0]) || "Keep your head down.";
   }
 
   function findCopTipSuspect(source) {
@@ -2292,7 +2328,7 @@
 
     if (suspect && p.snitch > 0.48 && d < 12 && rng() < (complaints > 25 ? 0.055 : 0.034)) {
       const crew = suspect.gang >= 0 ? gangName(suspect.gang) : "someone";
-      startApproach(n, "copTip", 0, { suspect, msg: `${n.data.name.replace(/^the |^a |^an /, "")} points you toward ${crew} trouble.` });
+      startApproach(n, "copTip", 0, { suspect, msg: "You want to know who's holding?" });
       return true;
     }
 
@@ -2326,10 +2362,6 @@
 
     if (cigs >= cost && cost > 0 && p.greed > 0.44 && p.nerve > 0.25 && !meta.forceSnitch) {
       startApproach(n, "snitchThreat", cost, { heat: amount || 12, memoryType: n.memory.type });
-      if (nar && playerDist(n) < 16) {
-        const who = n.data.name.replace(/^the |^a |^an /, "");
-        nar(`${who} ${meta.heardOnly ? "heard enough" : "clocked that"} and wants a word.`, 1.8);
-      }
       return true;
     }
 
@@ -2373,6 +2405,9 @@
        names (PRISON_CONTRACTS). */
     if (considerCornered(n, d)) return;
     if (d < 4.5 || d > APPROACH_FAR) return;
+    if ((CBZ.game.pitchGapT || 0) > 0) return;
+    // a man with no clique mostly minds his own business: he rolls a tenth as often
+    if (n.gang < 0 && n.role === "inmate" && rng() < 0.9) { n.approachCD = 6 + rng() * 10; return; }
 
     const p = n.personality || {};
     const heat = CBZ.game.detection || 0;
@@ -2635,10 +2670,6 @@
         startApproach(n, "debtCollect", Math.min(cigs, Math.max(2, Math.ceil(debt * 0.55) + Math.floor(p.greed * 4))), { debt: true, workOff: workOffAvailable(n) && debt > cigs && debt >= WORKOFF_DEBT });
         return;
       }
-      if (debt >= 14 && rng() < 0.018) {
-        provokeGang(n, 5 + Math.min(6, debt * 0.25));
-        return;
-      }
     }
     if (n.gang >= 0 && isOnTurf(n.gang, CBZ.player.pos) && !sameGang && !protectedHere && standing < 20 && p.nerve > 0.28 && rng() < 0.060) {
       startApproach(n, standing < -10 ? "tax" : "turfWarning", standing < -10 ? Math.min(cigs, 3 + Math.floor(p.greed * 5)) : 0);
@@ -2727,7 +2758,7 @@
     if (g.role === "cop") {
       const suspect = findCopTipSuspect(n);
       if ((n.role === "dealer" || n.role === "thief") && p.greed > 0.4) add("copBribe", 12 + p.greed * 8 + (g.complaints || 0) * 0.08, 0, { price: Math.max(2, 3 + Math.floor(p.greed * 7)) });
-      if (suspect && p.snitch > 0.42) add("copTip", 16 + p.snitch * 8, 0, { suspect, msg: `${actorName(n)} points you toward trouble.` });
+      if (suspect && p.snitch > 0.42) add("copTip", 16 + p.snitch * 8, 0, { suspect, msg: "You want to know who's holding?" });
       if (n.gang >= 0 && (standing < -16 || debt > 6)) add("copPlea", 14 + debt + Math.max(0, -standing) * 0.12, 0, { gang: n.gang });
       if (p.nerve > 0.68) add("copTaunt", 10 + p.nerve * 7 + (g.complaints || 0) * 0.08, 0);
     } else {
@@ -2858,12 +2889,327 @@
     return options[0] || null;
   }
 
+  /* ============================================================
+     THE NEW ARRIVAL (2026-09-27).
+
+     A man walking onto a yard gets LOOKED AT, and then TESTED, once or twice:
+     a predator sizing up a fresh face, or the collector of the car whose
+     ground you just crossed. What you do with the test is your name in here:
+
+       stood     you said no and held there, or you fought back
+       paid      you gave it up (or backed down off his spot)
+       ran       you walked off / ran
+       beaten    he put you down and you never swung
+       snitched  you gave his name to the screws
+
+     The outcome shapes the rest of the arrival and nothing else does. Stood:
+     predators leave you be, shakedowns thin out, a shot-caller comes to see
+     what you are. Paid: that clique has you down as a payer and taxes you,
+     mildly; nobody else cares. Ran or beaten: somebody tries you again. A
+     shot-caller always comes eventually, to size you up.
+
+     g.newFish  { tier, tested, outcome, t, tests[], pending, nextTestAt,
+                  sizeUpAt, sizedUp }   (prisontiers.js stamps it per arrival)
+     g.yardRep  { respect, fear, payer[2], snitch, ran }  carries across a
+                  transfer (prisontiers.js packs it), so the tough jail has
+                  heard of you.
+     ============================================================ */
+  function tierLevel() {
+    return CBZ.prisonTier && CBZ.prisonTier.level ? (CBZ.prisonTier.level() | 0) : ((CBZ.game && CBZ.game.securityTier) | 0);
+  }
+  function yardRep() {
+    const g = CBZ.game || {};
+    if (!g.yardRep) g.yardRep = { respect: 0, fear: 0, payer: [0, 0], snitch: 0, ran: 0 };
+    if (!g.yardRep.payer) g.yardRep.payer = [0, 0];
+    return g.yardRep;
+  }
+  function freshNewFish(tier) {
+    const L = tier != null ? tier : tierLevel();
+    return {
+      tier: L, tested: 0, outcome: null, t: 0, tests: [], outcomes: [],
+      pending: null, testOpen: false, lastTester: null, lastTestAt: 0,
+      // first look comes inside the first minute or so; a harder wing looks sooner
+      nextTestAt: Math.max(15, 30 + ((CBZ.econ && CBZ.econ.rng ? rng() : 0.5) * 40) - L * 6),
+      sizeUpAt: 0, sizedUp: false, done: false,
+    };
+  }
+  function testerSwing(n) {
+    const b = behaviorOf(n);
+    const temper = (n.behavior === "predator" || n.behavior === "bully" || n.behavior === "hothead") ? 0.3 : 0;
+    const p = 0.12 + temper + (b.guts != null ? b.guts : 0.5) * 0.25 + tierLevel() * 0.06
+      - watched(n) * 0.3 - Math.max(0, yardRep().respect || 0) * 0.03;
+    return Math.max(0.05, Math.min(0.85, p));
+  }
+  function pickTester() {
+    let best = null, bs = 0.9;
+    for (const n of CBZ.npcs || []) {
+      if (!alive(n) || !n.group || !n.data || n.role === "merchant" || n.role === "dealer") continue;
+      if (n.approach || n.standingOffer || n.aiState === "fight" || n.aiState === "snitch" || (n.huntPlayer || 0) > 0) continue;
+      if (n._fishTested || heldInCell(n) || (n._brokenUpT || 0) > 0) continue;
+      if (CBZ.player.gang != null && n.gang === CBZ.player.gang) continue;
+      // inside the range an approach survives (APPROACH_FAR + 5), or he
+      // "walks away" from his own test before he reaches you
+      const d = playerDist(n);
+      if (d < 5 || d > 16) continue;
+      let score = 0;
+      const beh = n.behavior;
+      if (beh === "predator" || beh === "bully") score += 3;
+      else if (beh === "hothead" || beh === "opportunist") score += 1.1;
+      else if (beh !== "pacifist" && ((n.personality && n.personality.nerve) || 0) > 0.62) score += 0.9;
+      const role = crewRole(n);
+      if (n.gang >= 0 && isOnTurf(n.gang, CBZ.player.pos)) score += (role === "collector" || role === "enforcer") ? 3.4 : 1.2;
+      if (score <= 0) continue;
+      score += ((n.personality && n.personality.nerve) || 0.5) - d * 0.06 - watched(n) * 1.4;
+      if (score > bs) { bs = score; best = n; }
+    }
+    return best;
+  }
+  const TEST_TAX = ["New fish. You got smokes? {c}.", "{c} smokes. Now.", "You new? That's {c}."];
+  const TEST_SHOVE = ["You lost?", "That's my spot.", "Watch where you're walking."];
+  function startTest(n) {
+    const g = CBZ.game || {};
+    const nf = g.newFish;
+    const cigs = g.cigs || 0;
+    const L = tierLevel();
+    let ok;
+    if (cigs >= 2) {
+      const cost = Math.min(cigs, 2 + Math.floor(L * 0.8) + Math.floor(((n.personality && n.personality.greed) || 0.5) * 2));
+      ok = startApproach(n, "stickUp", cost, { forced: true, test: true,
+        msg: TEST_TAX[(rng() * TEST_TAX.length) | 0].replace("{c}", String(cost)), motive: "new face" });
+    } else {
+      ok = startApproach(n, "turfWarning", 0, { forced: true, test: true, shove: true,
+        msg: TEST_SHOVE[(rng() * TEST_SHOVE.length) | 0], motive: "new face" });
+    }
+    if (!ok) return false;
+    n._fishTested = 1;
+    nf.tested++;
+    nf.testOpen = true;
+    nf.lastTester = n;
+    nf.lastTestAt = nf.t;
+    nf.tests.push({ who: actorName(n), kind: n.approach.kind, at: Math.round(nf.t), gang: n.gang });
+    return true;
+  }
+  // the player's answer to a test that is still being decided in the yard
+  function fishPending(n, mode) {
+    const nf = (CBZ.game || {}).newFish;
+    if (!nf || nf.lastTester !== n || !nf.testOpen) return;
+    nf.pending = { n, mode, t: mode === "fight" ? 14 : 6, fought: false };
+  }
+  function noteFishFightBack(victim) {
+    const nf = (CBZ.game || {}).newFish;
+    if (nf && nf.pending && nf.pending.n === victim) nf.pending.fought = true;
+    else if (nf && nf.testOpen && nf.lastTester === victim) { nf.pending = { n: victim, mode: "fight", t: 14, fought: true }; }
+  }
+  function noteFishWalked(n, reason) {
+    const nf = (CBZ.game || {}).newFish;
+    if (!nf || !nf.testOpen || nf.lastTester !== n || nf.pending) return;
+    if (reason === "walkedAway") fishOutcome("ran", n);
+    else fishPending(n, "held");
+  }
+  function noteFishSnitched(mark) {
+    const nf = (CBZ.game || {}).newFish;
+    if (!nf || !mark) return;
+    const tested = nf.tests.some((r) => r.who === actorName(mark));
+    if (tested || nf.lastTester === mark) fishOutcome("snitched", mark);
+  }
+  function fishOutcome(kind, n) {
+    const g = CBZ.game || {};
+    const nf = g.newFish;
+    if (!nf) return;
+    nf.pending = null;
+    nf.testOpen = false;
+    nf.outcome = kind;
+    nf.outcomes.push({ kind, who: n ? actorName(n) : "", at: Math.round(nf.t) });
+    const yr = yardRep();
+    const L = tierLevel();
+    if (kind === "stood") {
+      yr.respect = Math.min(30, (yr.respect || 0) + 3);
+      addBuzz("fear", 6, "stood-up");
+      for (const m of CBZ.npcs || []) {
+        if (m === n || !alive(m) || !m.group || m.role === "merchant") continue;
+        if (playerDist(m) > 14) continue;
+        rememberBlockRead(m, "fear", 16, "new fish");
+        bumpSocial(m, "playerTrust", 0.3, -8, 14);
+      }
+      if (n) { n.playerFear = Math.min(14, (n.playerFear || 0) + 2); n._snubs = 0; }
+      // a hard wing may try you once more, later; a soft one leaves it there
+      if (nf.tested < 2 && L >= 2 && rng() < 0.35) nf.nextTestAt = nf.t + 150 + rng() * 90;
+      else nf.nextTestAt = Infinity;
+      if (!nf.sizeUpAt) nf.sizeUpAt = nf.t + 40 + rng() * 50;
+    } else if (kind === "paid") {
+      if (n && n.gang >= 0) yr.payer[n.gang] = (yr.payer[n.gang] || 0) + 1;
+      else if (n) n._payer = true;
+      nf.nextTestAt = Infinity;                       // nobody else cares
+      if (!nf.sizeUpAt) nf.sizeUpAt = nf.t + 90 + rng() * 60;
+    } else if (kind === "ran" || kind === "beaten") {
+      yr.ran = (yr.ran || 0) + 1;
+      if (kind === "ran") yr.respect = Math.max(-10, (yr.respect || 0) - 1);
+      if (n) n._fishTested = 1;
+      nf.nextTestAt = nf.tested < 2 ? nf.t + 60 + rng() * 60 : Infinity;
+      if (!nf.sizeUpAt) nf.sizeUpAt = nf.t + 120 + rng() * 60;
+    } else if (kind === "snitched") {
+      yr.snitch = (yr.snitch || 0) + 1;
+      addBuzz("snitch", 12, "new fish talks");
+      if (n) {
+        n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 4);
+        n.grudgeWhy = "you going to the man";
+        if (n.gang >= 0) addGangStanding(n.gang, -6);
+      }
+      nf.nextTestAt = Infinity;
+      if (!nf.sizeUpAt) nf.sizeUpAt = nf.t + 60 + rng() * 60;
+    }
+  }
+  function resolveFishAnswer(n, action, a, res) {
+    const nf = (CBZ.game || {}).newFish;
+    if (!nf || !a || !a.test || nf.lastTester !== n) return;
+    if (action === "pay" && res && res.ok) fishOutcome("paid", n);
+    else if (action === "respect") fishOutcome("paid", n);
+    else if (action === "threaten" && res && res.ok) fishOutcome("stood", n);
+  }
+  function sizeUpLeader() {
+    const nf = (CBZ.game || {}).newFish;
+    const pref = nf && nf.lastTester && nf.lastTester.gang >= 0 ? nf.lastTester.gang : null;
+    let best = null, bs = -Infinity;
+    for (const gg of [0, 1]) {
+      const ld = leaders[gg];
+      if (!alive(ld) || ld.approach || ld.aiState === "fight" || (ld.huntPlayer || 0) > 0 || heldInCell(ld)) continue;
+      if (CBZ.player.gang === gg) continue;
+      const d = playerDist(ld);
+      if (d > 17 || d < 3) continue;
+      const s = (gg === pref ? 10 : 0) - d;
+      if (s > bs) { bs = s; best = ld; }
+    }
+    return best;
+  }
+  function startSizeUp(ld) {
+    const nf = CBZ.game.newFish;
+    const o = nf.outcome;
+    const mode = CBZ.player.gang == null && (o === "stood" || o === "paid") ? (o === "stood" ? "recruit" : "work") : "warning";
+    const msg = o === "stood" ? "Heard about you. Sit down a minute."
+      : o === "paid" ? "You're paying now. Might as well work."
+      : o === "snitched" ? "I know what you did."
+      : "So you're the new one.";
+    const ok = startApproach(ld, "gangParley", 0, { forced: true, sizeUp: true, parleyMode: mode,
+      parleyStanding: gangStanding(ld.gang), parleyDebt: gangDebt(ld.gang), msg, motive: "sizing you up" });
+    if (ok) nf.sizedUp = true;
+    return ok;
+  }
+  function updateArrival(dt) {
+    const g = CBZ.game || {};
+    if (!g.newFish && g.role !== "cop") g.newFish = freshNewFish();
+    const nf = g.newFish;
+    if (!nf || g.role === "cop") return;
+    nf.t += dt;
+    const pd = nf.pending;
+    if (pd) {
+      pd.t -= dt;
+      const n = pd.n;
+      if (!alive(n) || (n.ko || 0) > 0) { yardRep().fear = (yardRep().fear || 0) + 2; fishOutcome("stood", n); }
+      else if (pd.fought && !((n.huntPlayer || 0) > 0)) fishOutcome("stood", n);
+      else if (playerDownedNow()) fishOutcome(pd.fought ? "stood" : "beaten", n);
+      else if (playerDist(n) > 18) fishOutcome("ran", n);
+      else if (pd.t <= 0) fishOutcome("stood", n);
+    }
+    // a test that got swallowed (a lockdown, a cutscene) without an answer
+    if (nf.testOpen && !nf.pending && nf.lastTester && !nf.lastTester.approach && nf.t - nf.lastTestAt > 40) nf.testOpen = false;
+    if (g.state !== "playing") return;
+    if (!nf.testOpen && !nf.pending && nf.tested < 2 && nf.t >= nf.nextTestAt && nf.t < 600 &&
+        !playerApproachBusy() && huntersNow() === 0 && !playerDownedNow() && !((CBZ.player.stun || 0) > 0) &&
+        !(CBZ.player.hp != null && CBZ.player.hp < 55)) {
+      // (nobody tests a man who is already bleeding; they wait and watch)
+      const n = pickTester();
+      if (!n || !startTest(n)) nf.nextTestAt = nf.t + 6 + rng() * 6;
+    }
+    // no one tested you at all (a quiet wing, or you stayed in): the shot-caller still comes
+    if (!nf.sizeUpAt && nf.t > 240) nf.sizeUpAt = nf.t + 10;
+    if (nf.sizeUpAt && !nf.sizedUp && nf.t >= nf.sizeUpAt && !nf.testOpen && !nf.pending &&
+        !playerApproachBusy() && huntersNow() === 0 && !playerDownedNow()) {
+      const ld = sizeUpLeader();
+      if (!ld || !startSizeUp(ld)) {
+        nf.sizeUpAt = nf.t + 6 + rng() * 6;
+        if (nf.t > 900) nf.sizedUp = true;            // he never found you; let it go
+      }
+    }
+  }
+
+  /* ONE LINE FOR A CONSOLE: is the yard a mob or a set of people? */
+  CBZ.prisonSocialAudit = function () {
+    const cl = { 0: 0, 1: 0, neutral: 0 };
+    let wanting = 0;
+    for (const n of CBZ.npcs || []) {
+      if (!n || n.dead || n.escaped || n.role === "merchant") continue;
+      if (n.gang === 0) cl[0]++; else if (n.gang === 1) cl[1]++; else cl.neutral++;
+      if ((n.huntPlayer || 0) > 0) wanting++;
+    }
+    const g = CBZ.game || {};
+    const nf = g.newFish;
+    return {
+      cliques: cl,
+      hunters: huntersNow(), wantHunt: wanting, cap: huntCap(),
+      maxHuntersSeen: _maxHuntersSeen, huntStarts: _huntStarts, huntRefused: _huntRefused,
+      newFish: nf ? { tier: nf.tier, tested: nf.tested, outcome: nf.outcome, t: Math.round(nf.t),
+        pending: nf.pending ? nf.pending.mode : null, sizedUp: nf.sizedUp,
+        nextTestIn: isFinite(nf.nextTestAt) ? Math.max(0, Math.round(nf.nextTestAt - nf.t)) : null } : null,
+      tests: nf ? nf.tests.slice() : [],
+      outcomes: nf ? nf.outcomes.slice() : [],
+      yardRep: Object.assign({}, yardRep(), { payer: yardRep().payer.slice() }),
+      pitches: g.pitches || 0, pitchGapT: Math.round(g.pitchGapT || 0),
+      standing: (g.gangStanding || [0, 0]).slice(), debt: (g.gangDebt || [0, 0]).slice(),
+    };
+  };
+  /* THE WARDEN IS SOMEBODY YOU ALIGN WITH, TOO. prisonwarden.js stamps
+     g.wardenDeal = {clique, name, mark, t, out} when you give him a name.
+     It stays between you and him for a while; yards leak. Once it is out,
+     that clique's standing drops hard, the man you named carries it, and
+     the yard has you down as a man who talks. */
+  function rollWardenDeal(dt) {
+    const g = CBZ.game || {};
+    const d = g.wardenDeal;
+    if (!d || d.out) return;
+    if (!d.seen) {
+      // naming the man who tested you is the "snitched" answer to the test
+      d.seen = true;
+      const mk = d.mark ? (CBZ.npcs || []).find((n) => n.data && n.data.name === d.mark) : null;
+      if (mk) noteFishSnitched(mk);
+    }
+    d.age = (d.age || 0) + dt;
+    if (d.age < 45) return;                                   // nobody knows yet
+    const yr = yardRep();
+    const perSec = 1 / 260 + (yr.snitch || 0) * 0.0015 + (d.age > 240 ? 0.004 : 0);
+    if (rng() >= perSec * dt) return;
+    d.out = true;
+    yr.snitch = (yr.snitch || 0) + 1;
+    addBuzz("snitch", 18, "warden deal");
+    if (d.clique >= 0) addGangStanding(d.clique, -18);
+    const mark = d.mark ? (CBZ.npcs || []).find((n) => n.data && n.data.name === d.mark && alive(n)) : null;
+    if (mark) {
+      mark.playerGrudge = Math.min(14, (mark.playerGrudge || 0) + 6);
+      mark.grudgeWhy = "you giving the warden my name";
+      if (playerDist(mark) < 14) {
+        say(mark, "You gave the warden my name.", null, 2.2);
+        if (rng() < testerSwing(mark) + 0.2) requestHunt(mark, 7, "snitch");
+      }
+    }
+    for (const m of CBZ.npcs || []) {
+      if (m !== mark && alive(m) && m.gang === d.clique) rememberBlockRead(m, "snitch", 30, "warden");
+    }
+  }
+  CBZ.cliqueName = function (id) { return id === 0 ? "Reds" : id === 1 ? "Blues" : "nobody"; };
+  CBZ.prisonNewFish = freshNewFish;
+  CBZ.prisonYardRep = yardRep;
+  CBZ.prisonNoteSnitched = noteFishSnitched;
+  CBZ.requestInmateHunt = requestHunt;
+
   function updateSocialDirector(dt) {
     const g = CBZ.game || {};
-    if (g.state !== "playing" || (CBZ.player.stun || 0) > 0) return;
+    if (g.state !== "playing") return;
+    g.pitchGapT = Math.max(0, (g.pitchGapT || 0) - dt);
+    updateArrival(dt);
+    rollWardenDeal(dt);
+    if ((CBZ.player.stun || 0) > 0) return;
     g.socialDirectorT = Math.max(0, (g.socialDirectorT || 0) - dt);
-    if (g.socialDirectorT > 0 || playerApproachBusy()) return;
-    g.socialDirectorT = 5.5 + rng() * 5.5;
+    if (g.socialDirectorT > 0 || playerApproachBusy() || g.pitchGapT > 0) return;
+    g.socialDirectorT = 9 + rng() * 9;
 
     let best = null;
     for (const n of CBZ.npcs || []) {
@@ -2871,7 +3217,7 @@
       if (c && (!best || c.score > best.score)) best = c;
     }
     if (!best || best.score < 12) return;
-    startApproach(best.n, best.kind, best.cost, best.extra);
+    if (!startApproach(best.n, best.kind, best.cost, best.extra)) return;
     best.n.approach.directed = true;
     g.socialDirectorLast = best.n.data && best.n.data.name;
   }
@@ -2959,11 +3305,11 @@
     if (g.state !== "playing" || (CBZ.player.stun || 0) > 0) return;
     g.watcherDirectorT = Math.max(0, (g.watcherDirectorT || 0) - dt);
     if (g.watcherDirectorT > 0) return;
-    g.watcherDirectorT = 2.4 + rng() * 2.8;
+    g.watcherDirectorT = 5 + rng() * 5;
 
     let active = 0;
     for (const n of CBZ.npcs || []) if (n.aiState === "tailPlayer" && alive(n)) active++;
-    if (active >= 3) return;
+    if (active >= 2) return;
 
     let best = null;
     for (const n of CBZ.npcs || []) {
@@ -3058,9 +3404,6 @@
       if (buzz.kind === "debt" && m.gang >= 0) m.approachCD = Math.min(m.approachCD || 3, 1.8 + rng() * 2);
     }
     if (buzz.score > 32 && rng() < 0.42) startRumorHuddle(a, b, buzz);
-    if (CBZ.player && (playerDist(a) < 16 || playerDist(b) < 16) && rng() < 0.28) {
-      nar("Block gossip shifts how people read you.", 1.4);
-    }
     return true;
   }
 
@@ -3088,7 +3431,6 @@
       n.social = null;
       emote(n, buzz.kind === "wealth" || buzz.kind === "debt" || buzz.kind === "badge" ? "$" : (buzz.kind === "snitch" || buzz.kind === "heat" ? "!" : "?"));
     }
-    if (nar && (playerDist(lead) < 16 || playerDist(echo) < 16)) nar("Two inmates huddle over block gossip.", 1.35);
     return true;
   }
 
@@ -3264,14 +3606,6 @@
       if ((tp.snitch || 0) + (tp.nerve || 0) > 1.15 && rng() < (rivalGang ? 0.38 : 0.22)) {
         sendNpcToSnitch(target, heat, { copCrime: target.memory.type === "copCrime", lastKnown: target.memory.lastKnown, type: target.memory.kind });
         addBuzz("snitch", 6, actorName(target));
-      }
-    }
-
-    if (CBZ.player && playerDist(target) < 18) {
-      CBZ.game.gossipNoticeT = (CBZ.game.gossipNoticeT || 0) - 1;
-      if ((CBZ.game.gossipNoticeT || 0) <= 0) {
-        CBZ.game.gossipNoticeT = 3;
-        nar("Gossip spreads through the block.", 1.5);
       }
     }
   }
@@ -3636,10 +3970,9 @@
   }
   // the card's one line — the pitch is SPOKEN, this is what you glance at
   function contractText(n, c) {
-    const who = n.data.name.replace(/^the |^a |^an /, "");
-    if (c.kind === "repo") return `${who} wants ${c.name}'s ${c.item} back.`;
-    if (c.kind === "roughUp") return `${who} wants ${c.name} put down over ${c.amt}.`;
-    return `${who} wants ${c.amt} collected off ${c.name}.`;
+    if (c.kind === "repo") return `${c.name} has my ${c.item}. Get it back?`;
+    if (c.kind === "roughUp") return `${c.name} owes me ${c.amt}. Put him down?`;
+    return `${c.name} owes me ${c.amt}. Collect it?`;
   }
 
   /* THE SETTLE ROW, in plain words, for the card. It is the one place the
@@ -3649,7 +3982,7 @@
     const c = contract();
     if (!c) return "";
     if (c.kind === "repo") {
-      return c.done ? `holding ${c.name}'s ${c.item}` : `${c.name}'s ${c.item} · ${c.place.replace(/^He /, "he ").replace(/\.$/, "")}`;
+      return c.done ? `holding ${c.name}'s ${c.item}` : `${c.name}'s ${c.item}, ${c.place.replace(/^He /, "he ").replace(/\.$/, "")}`;
     }
     if (c.kind === "roughUp") return c.done ? `${c.name} is down` : `${c.name} still standing`;
     return `${c.got || 0} of ${c.amt} off ${c.name}`;
@@ -4304,9 +4637,6 @@
       emote(ally, "");
     }
 
-    if (nar && (playerDist(ally) < 20 || playerDist(snitch) < 20)) {
-      nar(`${gangName(gang)} intercept the snitch. Respect ${gangStanding(gang)}.`, 1.9);
-    }
     return true;
   }
 
@@ -4418,15 +4748,6 @@
     return best;
   }
 
-  function gangThresholdHint(text) {
-    const g = CBZ.game || {};
-    if (!nar) return;
-    g.gangNoticeT = (g.gangNoticeT || 0) - 1;
-    if (g.gangNoticeT > 0) return;
-    g.gangNoticeT = 3.4;
-    nar(text, 1.7);
-  }
-
   function updateGangThresholds(dt) {
     const g = CBZ.game || {};
     if (g.state !== "playing" || g.role === "cop" || (CBZ.player.stun || 0) > 0) return;
@@ -4459,7 +4780,6 @@
             ally.foe = null;
             emote(ally, "+");
           }
-          if (onTurf || searchHeat) gangThresholdHint(`${gangName(gang)} cover activates from respect.`);
         }
         continue;
       }
@@ -4476,14 +4796,11 @@
         startApproach(collector, kind, kind === "turfWarning" ? 0 : cost, {
           debt: debt > 0,
           thresholdPressure: true,
-          msg: debt >= 10
-            ? `${actorName(collector)} says ${gangName(gang)} are collecting on your tab.`
-            : `${actorName(collector)} says ${gangName(gang)} have you marked.`,
+          msg: debt >= 10 ? `You owe us ${debt}. Pay up.` : "You got a problem with us?",
         });
-        gangThresholdHint(`${gangName(gang)} send a collector. Debt ${debt}, respect ${standing}.`);
-      } else if (onTurf || standing <= -62 || debt >= 26) {
-        provokeGang(collector, 4.5 + Math.min(7, debt * 0.16 + Math.max(0, -standing) * 0.035));
-        gangThresholdHint(`${gangName(gang)} stop talking and press you.`);
+      } else if (onTurf && (standing <= -62 || debt >= 26) && (collector._snubs || 0) > 0) {
+        // the one man you already walked off, on his own ground: he comes himself
+        requestHunt(collector, 5, "debt");
       }
       timers[gang] = 6.8 + rng() * 4.2;
     }
@@ -4615,13 +4932,10 @@
         extra.parleyDebt = profile.debt;
         cost = Math.min(profile.cigs, parley.cost || 0);
       }
-      extra.msg = kind === "turfWarning"
-        ? `${actorName(actor)} blocks the path and says ${gangName(gang)} are watching the checkpoint.`
-        : kind === "stickUp"
-        ? `${actorName(actor)} clocks ${reason} and wants ${cost} cigs before you cross ${gangName(gang)} turf.`
-        : kind === "gangParley"
-        ? `${actorName(actor)} wants a ${gangName(gang)} checkpoint sit-down.`
-        : `${actorName(actor)} clocks ${reason} and wants ${cost} cigs for safe passage.`;
+      extra.msg = kind === "turfWarning" ? "Where you think you're going?"
+        : kind === "stickUp" ? `${cost}. Then you walk through.`
+        : kind === "gangParley" ? "We need to talk first."
+        : `${cost} to cross.`;
 
       startApproach(actor, kind, cost, extra);
       addBuzz(kind === "stickUp" ? "wealth" : "debt", 5 + Math.min(7, profile.score * 0.12), "turf-checkpoint");
@@ -4630,7 +4944,6 @@
           rememberBlockRead(m, kind === "stickUp" ? "wealth" : "debt", 18 + Math.min(22, profile.score), actorName(actor));
         }
       }
-      if (nar && playerDist(actor) < 18) nar(`${gangName(gang)} checkpoint reacts to ${reason}.`, 1.55);
       timers[gang] = 9.5 + rng() * 6.5;
     }
   }
@@ -4649,7 +4962,6 @@
         const ally = findProtectorForThreat(gang, snitch, 18);
         if (ally && startGangIntercept(ally, snitch, "snitch")) {
           addBuzz("snitch", -5, "crew-intercept");
-          if (nar && (playerDist(ally) < 18 || playerDist(snitch) < 18)) nar(`${gangName(gang)} move to cut off the snitch.`, 1.5);
           return;
         }
       }
@@ -4658,7 +4970,6 @@
       if (hunter) {
         const ally = findProtectorForThreat(gang, hunter, 14);
         if (ally && startGangIntercept(ally, hunter, "rival")) {
-          if (nar && playerDist(ally) < 16) nar(`${gangName(gang)} step between you and the pressure.`, 1.4);
           return;
         }
       }
@@ -4736,8 +5047,6 @@
       for (const m of CBZ.npcs) {
         if (m.gang === victim.gang && alive(m)) { m.aiState = "flee"; m.fleeT = 3.5; m.foe = null; }
       }
-      if (CBZ.player && Math.hypot(CBZ.player.pos.x - victim.group.position.x, CBZ.player.pos.z - victim.group.position.z) < 24)
-        nar(`${gangName(victim.gang)} scatter, their leader's down!`, 2);
     }
     // A DEATH HAS A SURFACE ALREADY, AND IT IS NOT A HINT LINE. city/killfeed.js
     // owns the ONE sanctioned popup in this game (engine-systems.md), and every
@@ -4751,7 +5060,7 @@
           CBZ.cityLogDeath(who, opts.cause || "beaten",
             { by: playerKill ? "You" : (killer && killer.data && killer.data.name) || "" });
         } catch (e) {}
-      } else nar(`${who} was taken out!`, 2.2);
+      }
     }
   }
 
@@ -4766,7 +5075,9 @@
   // and a tougher target is harder to put in the ground for good.
   function down(actor, by) {
     const tough = actor.ratings ? actor.ratings.toughness : 50;
-    if (rng() < 0.15 * (1.2 - tough / 200)) { kill(actor, by); return; }
+    // fists rarely kill a grown man (3%); steel is what puts one in the ground
+    const lethal = by && by._shankOut ? 0.22 : 0.03;
+    if (rng() < lethal * (1.2 - tough / 200)) { kill(actor, by); return; }
     credit(by, "knockdowns");
     credit(actor, "downs");
     actor.ko = 6 + rng() * 4; actor.hp = Math.round((actor.maxHp || 100) * 0.5); actor.aiState = "wander"; actor.foe = null;
@@ -4775,9 +5086,12 @@
     // a yard with a memory feels like from the inside.
     if (by && by !== CBZ.player) {
       addBeef(actor, by, 14);
+      // the two of his own standing closest saw it; the rest of the yard did not
       if (actor.gang >= 0) {
-        for (const m of nearbyNpcs(actor, 10, _crewNear)) {
-          if (m !== actor && alive(m) && m.gang === actor.gang && m.gang !== by.gang) addBeef(m, by, 5);
+        let told = 0;
+        for (const m of nearbyNpcs(actor, 8, _crewNear)) {
+          if (told >= 2) break;
+          if (m !== actor && alive(m) && m.gang === actor.gang && m.gang !== by.gang && dist(m, actor) < 8) { addBeef(m, by, 5); told++; }
         }
       }
     }
@@ -4815,6 +5129,8 @@
   // ---- the per-NPC think, returns desired move speed ----
   function aiThink(n, dt) {
     if (!inited) initWorld();
+    // a man dealt in after the yard was sorted (cellblock.js deals its cast late)
+    if (n._baseGang === undefined) setClique(n, assignClique(n, CBZ.npcs.indexOf(n)));
     if (n.hp == null) initActor(n);
     if (n.memory && n.memory.t > 0) {
       n.memory.t -= dt;
@@ -4876,6 +5192,33 @@
     // grammar (CBZ.predatorSeize, style "drag") with its one telegraphed
     // break-free press. Nothing here is new machinery; four existing systems
     // are being called by a file that used to write a string instead.
+    if ((n._brokenUpT || 0) > 0) {
+      // a screw broke it up: he backs off and does not come again for a while
+      n._brokenUpT -= dt;
+      if (n.huntPlayer > 0) { n.huntPlayer = 0; n._blow = null; if (n.char) n.char.fightStance = false; }
+    }
+    if (n.huntPlayer > 0 && playerDownedNow() && !lethalGrudge(n)) {
+      // you are down. He made his point; he walks off and leaves it there.
+      n.huntPlayer = 0; n._blow = null;
+      n._brokenUpT = Math.max(n._brokenUpT || 0, 25);
+      if (n.char) n.char.fightStance = false;
+      n.aiState = "wander"; n.aiTimer = 0.5 + rng();
+    }
+    if (n.huntPlayer > 0 && !huntSlot(n)) {
+      // two men are already on you: he is the ring around it, not the pile
+      n.huntPlayer -= dt;
+      n._blow = null;
+      if (n.char) n.char.fightStance = false;
+      const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
+      const dx = n.group.position.x - px, dz = n.group.position.z - pz;
+      const d = Math.hypot(dx, dz) || 1;
+      const ang = Math.atan2(dz, dx) + (n.tailSide || 1) * 0.35;
+      const r = 4.6 + ((n.slice || 0) % 3) * 0.6;
+      const pos = clampWorld(px + Math.cos(ang) * r, pz + Math.sin(ang) * r);
+      n.target.set(pos.x, 0, pos.z);
+      n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(-dx, -dz), 1 - Math.pow(0.0001, dt));
+      return d < r - 0.8 ? n.baseSpeed * 0.8 : n.baseSpeed * 1.05;
+    }
     if (n.huntPlayer > 0) {
       n.huntPlayer -= dt;
       const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
@@ -4893,7 +5236,7 @@
       if (d < 1.9 && n.hitCD <= 0 && !n._blow) {
         // two men are already swinging: he waits his turn and keeps his feet
         if (swingCrowded(n)) { n.hitCD = 0.22 + rng() * 0.30; return n.baseSpeed * 1.5; }
-        n.hitCD = 1.0;
+        n.hitCD = HUNT_HIT_CD;
         n.jumpBlows = (n.jumpBlows || 0) + 1;
         /* THE GRAB IS RARE NOW, AND THAT IS THE POINT (owner, verbatim: "in
            prison game look how when attacked you get spun around. This is very
@@ -5016,7 +5359,12 @@
     // DEFEND: once you've joined a gang, your crew jumps whoever's hunting you
     if (CBZ.player.gang != null && n.gang === CBZ.player.gang && n.aiState !== "fight") {
       for (const a of nearbyNpcs(n, 12, _defendNear)) {
-        if (a.huntPlayer > 0 && alive(a) && dist(n, a) < 12) { startFight(n, a); break; }
+        if (a.huntPlayer > 0 && alive(a) && dist(n, a) < 12) {
+          // two of yours on him is help; the whole set piling in is a riot
+          let on = 0;
+          for (const m of _defendNear) if (m !== n && m.foe === a && m.aiState === "fight") on++;
+          if (on < 2) { startFight(n, a); break; }
+        }
       }
       const d = playerDist(n);
       if (n.aiState === "wander" && d > 4 && d < 13 && ((CBZ.game.detection || 0) > 28 || CBZ.econ.rng() < 0.006)) {
@@ -5079,7 +5427,13 @@
                louder line rather than stomping it. The instruction half is
                gone; the offer itself is the whole message. */
             if (CBZ.prisonSay) CBZ.prisonSay(n, a.msg, { secs: 2.6, rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
-            else nar(a.msg, 2.2);
+            // the shove IS the question: a hand in your chest, not a sentence
+            if (a.shove) {
+              const kx = px - n.group.position.x, kz = pz - n.group.position.z, kd = Math.hypot(kx, kz) || 1;
+              CBZ.player.pos.x += (kx / kd) * 0.55; CBZ.player.pos.z += (kz / kd) * 0.55;
+              if (CBZ.playerHitReact) CBZ.playerHitReact(0.14);
+              if (n.char) { n.char.punchKind = "shove"; n.char.punchDur = 0.30; n.char.punchT = 0.30; }
+            }
             if (CBZ.npcStare) CBZ.npcStare(n, 2.2);   // and he holds your eye while he says it
           }
           return 0;
@@ -5213,7 +5567,7 @@
           }
           if (kind === "copTip") {
             const suspect = findCopTipSuspect(n);
-            if (suspect) startApproach(n, "copTip", 0, { suspect, watched: true, msg: `${n.data.name.replace(/^the |^a |^an /, "")} has been watching the block and points you toward trouble.` });
+            if (suspect) startApproach(n, "copTip", 0, { suspect, watched: true, msg: "You want to know who's holding?" });
             return n.baseSpeed * 1.0;
           }
           if (kind === "copBribe") {
@@ -5269,7 +5623,6 @@
               addGangStanding(n.gang, n.gang >= 0 ? 1 : 0);
               n.aiState = "shadowPlayer"; n.shadowT = Math.max(n.shadowT || 0, 5 + rng() * 4);
               n.interceptTarget = null; n.interceptMode = null; n.interceptT = 0;
-              if (nar && playerDist(n) < 17) nar(`${n.data.name.replace(/^the |^a |^an /, "")} shuts down the snitch run.`, 1.5);
             } else {
               startFight(n, target);
             }
@@ -5322,22 +5675,18 @@
           if (CBZ.recordWitnessReport) {
             lead = CBZ.recordWitnessReport(amount, reportMeta, n, g);
             markPlayerReported(n, amount, reportMeta, g, lead);
-            nar(n.snitchCop ? `${n.data.name.replace(/^the |^a |^an /, "")} filed a complaint.` : `${n.data.name.replace(/^the |^a |^an /, "")} gave a guard your last location.`, 1.7, n,
-              n.snitchCop ? "Boss, I want that on the record."
-                : (where ? `He was over by the ${where}. I watched him.` : "He was right there. I watched him."));
+            say(n, n.snitchCop ? "I want to make a complaint." : (where ? `He was by the ${where}.` : "It was him. I saw it."), null, 1.8);
           } else if (n.snitchCop) {
             CBZ.addComplaint && CBZ.addComplaint(amount * 0.55);
             markPlayerReported(n, amount, reportMeta, g, null);
-            nar(`${n.data.name.replace(/^the |^a |^an /, "")} filed a complaint.`, 1.7, n,
-              "I'm making a complaint. Write it down.");
+            say(n, "I want to make a complaint.", null, 1.8);
           } else {
             CBZ.addHeat && CBZ.addHeat(amount * 0.78);
             CBZ.game.witnessReportT = Math.max(CBZ.game.witnessReportT || 0, 12);
             CBZ.game.snitchReports = (CBZ.game.snitchReports || 0) + 1;
             markPlayerReported(n, amount, reportMeta, g, null);
             if (g) { g.alert = 1.4; g.hunt = 2.2; }
-            nar(`${n.data.name.replace(/^the |^a |^an /, "")} gave a guard your description.`, 1.7, n,
-              where ? `Orange top, moving fast. Try the ${where}.` : "Orange top, moving fast. You'll know him.");
+            say(n, where ? `Try the ${where}.` : "That way. He went that way.", null, 1.8);
           }
           n.aiState = "flee"; n.fleeT = 2.0 + rng() * 2; n.snitchHeat = 0; n.snitchCop = false; n.snitchMeta = null;
         }
@@ -5354,13 +5703,12 @@
             other.snitchMeta = null;
             emote(n, ""); emote(other, "!");
             addGangStanding(n.gang, n.gang >= 0 ? 1 : 0);
-            if (nar && playerDist(n) < 16) {
+            if (playerDist(n) < 16) {
               // TOLD: your man saw it and hands you the name. That is the third
               // way into snitchKnown, and the only one that costs you nothing
               // but having a friend.
               learnSnitch(other, "told");
-              nar(`${n.data.name.replace(/^the |^a |^an /, "")} scares off a snitch.`, 1.5, n,
-                `${other.data ? other.data.name.replace(/^the |^a |^an /, "") : "That one"} was running to a screw about you.`);
+              say(n, `${other.data ? other.data.name.replace(/^the |^a |^an /, "") : "He"} was going to the COs. Not anymore.`, null, 2.0);
             }
             break;
           }
@@ -5421,8 +5769,9 @@
               if (rng() < 0.3) { n.aiState = "wander"; n.social = null; n.aiTimer = 0.4 + rng(); } // walked off
               break;
             }
-            // a neutral drifter sometimes gets recruited
-            if (n.gang < 0 && p.gang >= 0 && rng() < 0.3) { n.gang = p.gang; addBand(n, n.gang); emote(n, ""); }
+            // a drifter from the same car sometimes gets pulled in; a man
+            // from somewhere else does not get an armband for chatting
+            if (n.gang < 0 && p.gang >= 0 && rng() < 0.3 && CLIQUE_OF[heritageOf(n)] === p.gang && rng() < 0.1) setClique(n, p.gang);
             if (rng() < 0.45) { n.aiState = "wander"; n.social = null; }
           }
         } else {
@@ -5473,8 +5822,6 @@
         n.target.set(n._escX, 0, ez + 2);
         if (n.group.position.z > ez - 2) {
           n.escaped = true; n.group.visible = false;
-          if (CBZ.player && Math.hypot(CBZ.player.pos.x - n.group.position.x, CBZ.player.pos.z - n.group.position.z) < 26)
-            nar(`${n.data.name.replace(/^the |^a |^an /, "")} broke out!`, 2.4);
         }
         return n.baseSpeed * 1.6;
       }
@@ -5502,7 +5849,8 @@
           const pal = findPal(n);
           if (pal && rng() < 0.45) { n.aiState = "socialize"; n.social = pal; break; }
           if (rng() < 0.015 && !blockGateShut(n)) { n.aiState = "escape"; break; }
-          if (n.gang >= 0 && (rng() < 0.52 || !isOnTurf(n.gang, n.group.position))) pickTurfTarget(n);
+          // a cell resident keeps his own routine; his car is who he stands with, not where he walks
+          if (n.gang >= 0 && !(n.data && n.data.cell) && (rng() < 0.52 || !isOnTurf(n.gang, n.group.position))) pickTurfTarget(n);
           else CBZ.npcPickTarget(n);
         }
         return n.baseSpeed;
@@ -5535,8 +5883,20 @@
       // are per-run memory exactly like beef is; carrying them across a death
       // would have men collecting on debts from a life the player didn't live.
       n._tabs = null;
+      // THE YARD'S MEMBERSHIP IS PER RUN. A drifter the Reds picked up last
+      // run is back to minding his own business; without this, recruiting in
+      // socialize() only ever grew the gangs, run after run.
+      if (n._baseGang !== undefined && n.gang !== n._baseGang) setClique(n, n._baseGang);
+      n._snubs = 0; n._brokenUpT = 0; n._huntWhy = ""; n._provokeHp = null; n._fishTested = 0;
       n.isLeader = false; initActor(n);
     }
+    _hunters.length = 0; _maxHuntersSeen = 0; _huntStarts = 0; _huntRefused = 0;
+    // every run is an arrival; prisontiers.js re-stamps this (and carries the
+    // yard's memory of you) when the run is a transfer
+    CBZ.game.newFish = freshNewFish();
+    CBZ.game.yardRep = null;
+    CBZ.game.pitchGapT = 20;          // let him get his bearings before anyone pitches
+    CBZ.game.pitches = 0;
     CBZ.game.contract = null;
     for (const g of CBZ.guards) { g.hp = null; g.dead = false; if (CBZ.prisonCorpseClear) CBZ.prisonCorpseClear(g); }
     for (const gang of [0, 1]) {
@@ -5545,17 +5905,111 @@
     }
   }
 
-  // make the victim's whole gang (and the victim) come after the player
-  function provokeGang(victim, dur) {
+  /* THE WRONGED MAN COMES FOR YOU, AND WHOEVER OF HIS SAW IT.
+
+     This used to set huntPlayer on every living member of the victim's gang,
+     wherever they stood: one punch, or one walked-off demand past a threshold,
+     and half the prison crossed the compound to jump you. That was the whole
+     "everybody hates me" complaint in one loop.
+
+     Now: the man himself, plus at most two of his own crew who are within
+     12 m of him and close enough to the player to have seen it. The clique's
+     STANDING still drops (that is reputation, and it travels by word of
+     mouth), but the fists are local. Every hunt still goes through the
+     governor, so the most that actually swing at once is 2 (3 at ultra).
+
+     opts: { crew: max helpers (default 2, 0 = alone), why, standing: how much
+     the clique's standing drops (default 6), started: true when the player
+     plainly threw the first blow } */
+  function provokeGang(victim, dur, opts) {
+    if (!victim) return 0;
+    opts = opts || {};
     dur = dur || 12;
-    if (victim.gang >= 0) dur += Math.min(7, gangDebt(victim.gang) * 0.25);
-    if (victim.huntPlayer != null || victim.gang != null) victim.huntPlayer = dur;
-    if (victim.gang >= 0) {
-      addGangStanding(victim.gang, -10);
-      noteGangIncident(victim, "attack", Math.max(4, dur * 0.42), { skipStanding: true, source: "fight" });
-      for (const n of CBZ.npcs)
-        if (n.gang === victim.gang && !n.dead && !(n.ko > 0)) n.huntPlayer = dur;
+    if (victim.gang >= 0) dur += Math.min(4, gangDebt(victim.gang) * 0.12);
+    const wasOnYou = (victim.huntPlayer || 0) > 0 || !!(victim.approach && victim.approach.t > 0);
+    // DID YOU START IT? A hit that took hp off a man who was not coming at you.
+    const hpNow = victim.hp != null ? victim.hp : 0;
+    const hpWas = victim._provokeHp != null ? victim._provokeHp : (victim.maxHp || 100);
+    victim._provokeHp = hpNow;
+    const struck = !!opts.started || (opts.why == null && hpNow < hpWas - 0.5);
+    if (struck && !wasOnYou && victim.kind !== "guard" && victim.kind !== "warden") reportPlayerFight(victim);
+    if (struck) noteFishFightBack(victim);
+    // HITTING BACK IS NOT A NEW WRONG. combat.js calls this on every landed
+    // punch; a man who came for you and is eating your fists does not cost
+    // you his clique's standing per punch (that is how debt used to hit 99
+    // in one fight). He just keeps coming.
+    if (wasOnYou && (victim.huntPlayer || 0) > 0 && opts.why == null) {
+      requestHunt(victim, Math.min(dur, 8), "wronged");
+      return 0;
     }
+    let started = 0;
+    if (requestHunt(victim, dur, "wronged")) started++;
+    if (victim.gang >= 0) {
+      addGangStanding(victim.gang, -(opts.standing != null ? opts.standing : 6));
+      noteGangIncident(victim, "attack", Math.max(3, Math.min(8, dur * 0.42)), { skipStanding: true, skipDebt: true, source: "fight", noResponders: true });
+      const want = opts.crew != null ? opts.crew : 2;
+      if (want > 0 && victim.group) {
+        const near = [];
+        for (const m of nearbyNpcs(victim, 12, _crewNear)) {
+          if (m === victim || !alive(m) || m.gang !== victim.gang || m.role === "merchant" || m.role === "dealer") continue;
+          if (m.aiState === "fight" || m.aiState === "snitch") continue;
+          const dv = dist(m, victim);
+          if (dv > 12 || playerDist(m) > 16) continue;
+          if (heldInCell(m)) continue;     // behind his own grille: he heard it, he can't reach it
+          near.push({ m, d: dv });
+        }
+        near.sort((a, b) => a.d - b.d);
+        for (let i = 0; i < near.length && i < want; i++) {
+          if (requestHunt(near[i].m, dur * 0.75, "crew")) started++;
+        }
+      }
+    }
+    return started;
+  }
+
+  /* A GUARD SAW YOU THROW THE FIRST PUNCH. LAW owns what happens next
+     (CBZ.prisonOffense, systems/prisonlaw.js); this file only knows who swung
+     first, which is the one fact LAW cannot see from a hurt event. */
+  function reportPlayerFight(victim) {
+    if (!CBZ.prisonOffense || !victim || !victim.group) return false;
+    const p = victim.group.position;
+    let seer = null;
+    let w = null;
+    try { w = CBZ.guardWatching ? CBZ.guardWatching(p.x, p.y || 0, p.z) : null; } catch (e) { w = null; }
+    if (w && w.group) seer = w;
+    else if (w) {
+      let bd = Infinity;
+      for (const gd of CBZ.guards || []) {
+        if (!alive(gd)) continue;
+        const d = Math.hypot(gd.group.position.x - p.x, gd.group.position.z - p.z);
+        if (d < bd) { bd = d; seer = gd; }
+      }
+    }
+    if (!seer) return false;
+    const g = CBZ.game || {};
+    const now = (CBZ.now || 0) / 1000;
+    if (g._fightReportAt && now - g._fightReportAt < 4) return false;   // one fight is one report
+    g._fightReportAt = now;
+    try {
+      CBZ.prisonOffense("fight", { victim, at: { x: p.x, z: p.z }, seenBy: seer, started: true });
+    } catch (e) { return false; }
+    return true;
+  }
+
+  /* A SNUB IS BETWEEN YOU AND HIM. Walking off a demand (or refusing it to his
+     face) used to escalate the whole gang once standing crossed a threshold.
+     Now the man you snubbed remembers it; the second time, he comes himself.
+     Nobody else is sent. */
+  function snubbed(n, secs) {
+    if (!n) return false;
+    n._snubs = (n._snubs || 0) + 1;
+    n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 1);
+    if (n._snubs < 2) return false;
+    const b = behaviorOf(n);
+    const nerve = (n.personality && n.personality.nerve) || 0.5;
+    if (b.guts < 0.25 && nerve < 0.45) return false;   // all talk
+    n._snubs = 0;
+    return requestHunt(n, secs || 6, "snub");
   }
 
   function sendNpcToSnitch(n, amount, meta) {
@@ -5579,13 +6033,19 @@
 
   function resolveNpcApproach(n, action) {
     const a = n && n.approach;
-    if (!a) return { ok: false, msg: "They've got nothing else to say." };
+    const res = resolveNpcApproachInner(n, action);
+    if (a && a.test) resolveFishAnswer(n, action, a, res);
+    return res;
+  }
+  function resolveNpcApproachInner(n, action) {
+    const a = n && n.approach;
+    if (!a) return { ok: false, msg: "" };
     const who = n.data.name.replace(/^the |^a |^an /, "");
     if (action !== "listen" || !a.greeted) rememberPlayerResponse(n, action, a);
     if (action === "listen") a.greeted = true;
 
     if (action === "listen") {
-      if (a.kind === "tax") return { ok: true, msg: `${who}: ${a.cost} cigs keeps ${gangName(n.gang)} off your back.` };
+      if (a.kind === "tax") return { ok: true, msg: `${a.cost}. And nobody bothers you.` };
       /* THE PITCH IS THE MAN TALKING. interact.js speaks this the moment the
          card opens (autoListen), so it is the four-clause hand-off — name,
          amount, reason, place, cut — and not a description of a feature. */
@@ -5598,74 +6058,74 @@
           const src = ripeCrewTab(n);
           if (src) nameHim(src.tab.who);        // he is about to be named out loud
           const nm2 = src ? src.tab.who.data.name.replace(/^the |^a |^an /, "") : "somebody";
-          return { ok: true, msg: `${who}: you can't pay it, so work it. ${nm2} owes us too. Go get ours and yours gets lighter.` };
+          return { ok: true, msg: `Can't pay? ${nm2} owes us. Get it off him.` };
         }
-        return { ok: true, msg: `${who}: your tab with ${gangName(n.gang)} is ${gangDebt(n.gang)} cigs. Pay or they keep leaning on you.` };
+        return { ok: true, msg: `${gangDebt(n.gang)}. Pay up.` };
       }
-      if (a.kind === "snitchThreat") return { ok: true, msg: `${who}: pay ${a.cost} cigs or I tell a guard.` };
-      if (a.kind === "turfWarning") return { ok: true, msg: `${who}: this is ${gangName(n.gang)} turf. Respect it or pay.` };
-      if (a.kind === "gangInvite") return { ok: true, msg: `${who}: roll with ${gangName(n.gang)} and rivals think twice.` };
-      if (a.kind === "favor") return { ok: true, msg: `${who}: take ${a.gift || 3} cigs. Good standing means something.` };
+      if (a.kind === "snitchThreat") return { ok: true, msg: `${a.cost}, or I go to the CO.` };
+      if (a.kind === "turfWarning") return { ok: true, msg: "Our side. Go around." };
+      if (a.kind === "gangInvite") return { ok: true, msg: "Nobody touches you if you're with us." };
+      if (a.kind === "favor") return { ok: true, msg: `${a.gift || 3} smokes. Take them.` };
       if (a.kind === "deal") {
         if (!n.data.offer) return { ok: true, msg: "No stock right now." };
         const priced = CBZ.econ && CBZ.econ.offerPrice ? CBZ.econ.offerPrice(n) : { price: n.data.offer.price || 0, reasons: [] };
         const why = priced.reasons && priced.reasons.length ? ` (${priced.reasons.slice(0, 2).join(", ")})` : "";
-        return { ok: true, msg: `${who}: ${n.data.offer.item} for ${priced.price} cigs${why}.` };
+        return { ok: true, msg: `${n.data.offer.item}. ${priced.price}.` };
       }
-      if (a.kind === "lookout") return { ok: true, msg: `${who}: I shadow you, point out snitches, and step in if rivals close.` };
-      if (a.kind === "crewBackup") return { ok: true, msg: `${who}: I stay close, scare off talkers, and jump rivals. Crew handles crew business.` };
-      if (a.kind === "crewDues") return { ok: true, msg: `${who}: pay dues and ${gangName(n.gang)} keep thieves, snitches, and rivals off you. Skip it and it turns into debt.` };
-      if (a.kind === "stickUp") return { ok: true, msg: `${who}: ${a.cost} cigs and nobody checks those loud pockets. Refuse and I take my chances.` };
-      if (a.kind === "diversion") return { ok: true, msg: `${who}: I make noise near a guard. You move while they look away.` };
-      if (a.kind === "buyItem") return { ok: true, msg: `${who}: ${a.price} cigs for your ${a.item}. Clean trade, no questions.` };
-      if (a.kind === "gangJob") return { ok: true, msg: `${who}: ${jobPitch(a.job)} Pay is ${a.job ? a.job.reward : 5} cigs, plus respect.` };
+      if (a.kind === "lookout") return { ok: true, msg: `${a.cost}. I stay close.` };
+      if (a.kind === "crewBackup") return { ok: true, msg: "I'll be around." };
+      if (a.kind === "crewDues") return { ok: true, msg: `${a.cost}. Everybody pays.` };
+      if (a.kind === "stickUp") return { ok: true, msg: `${a.cost}. I'm not asking twice.` };
+      if (a.kind === "diversion") return { ok: true, msg: `${a.cost}. I start something, you move.` };
+      if (a.kind === "buyItem") return { ok: true, msg: `${a.price} for the ${a.item}.` };
+      if (a.kind === "gangJob") return { ok: true, msg: `${jobPitch(a.job)} ${a.job ? a.job.reward : 5} smokes.` };
       if (a.kind === "gangParley") {
-        if (a.parleyMode === "recruit") return { ok: true, msg: `${who}: join ${gangName(n.gang)} and your problems become crew business.` };
-        if (a.parleyMode === "work") return { ok: true, msg: `${who}: ${gangName(n.gang)} can put you to work, cover heat, or call in favors if you respect the chain.` };
-        if (a.parleyMode === "truce") return { ok: true, msg: `${who}: ${a.cost || 0} cigs settles the disrespect. Your tab with us is ${gangDebt(n.gang)}.` };
-        return { ok: true, msg: `${who}: ${gangName(n.gang)} are watching your next move. Respect buys room; threats buy trouble.` };
+        if (a.parleyMode === "recruit") return { ok: true, msg: a.sizeUp ? "I hear things. You could be with us." : "You could be with us." };
+        if (a.parleyMode === "work") return { ok: true, msg: "There's work if you want it." };
+        if (a.parleyMode === "truce") return { ok: true, msg: `${a.cost || 0} and it's done.` };
+        return { ok: true, msg: a.sizeUp ? "Just wanted a look at you." : "Watch yourself." };
       }
-      if (a.kind === "stashCover") return { ok: true, msg: `${who}: rich pockets make noise. Pay ${a.cost} and I tell thieves, buyers, and talkers you're dry for a while.` };
-      if (a.kind === "racketCover") return { ok: true, msg: `${who}: bent cops keep a ledger. Pay ${a.cost} and I muddy the tab before clean guards hear it.` };
-      if (a.kind === "coverDebt") return { ok: true, msg: `${who}: I just lied to ${a.guard || "a guard"}. Pay ${a.cost} cigs and I keep the story clean.` };
-      if (a.kind === "jobThreat") return { ok: true, msg: `${who}: pay ${a.cost} cigs or ${gangName(n.gang)} keep interrupting that job.` };
-      if (a.kind === "heatWarning") return { ok: true, msg: `${who}: guards are working off ${a.source || "bad chatter"}. Duck low, change direction, and don't let talkers see you.` };
-      if (a.kind === "alibiDeal") return { ok: true, msg: `${who}: pay ${a.cost} and I say you were with me when ${a.source || "the report"} happened.` };
-      if (a.kind === "coverStory") return { ok: true, msg: `${who}: I can tell guards you went the other way. ${gangName(n.gang)} remember favors.` };
-      if (a.kind === "infoSell") return { ok: true, msg: `${who}: guards are working off ${a.source || "bad chatter"}. Pay me and I feed them a worse lead.` };
-      if (a.kind === "witnessFix") return { ok: true, msg: `${who}: ${a.cost} cigs and ${a.targetName || "the witness"} forgets what they told guards. Cleaner than chasing them yourself.` };
-      if (a.kind === "recantOffer") return { ok: true, msg: `${who}: I already gave guards a story. Pay ${a.cost} and I say I got the details wrong.` };
+      if (a.kind === "stashCover") return { ok: true, msg: `${a.cost} and I tell them you're broke.` };
+      if (a.kind === "racketCover") return { ok: true, msg: `${a.cost}. Your name goes away.` };
+      if (a.kind === "coverDebt") return { ok: true, msg: `${a.cost}. I kept my mouth shut.` };
+      if (a.kind === "jobThreat") return { ok: true, msg: `${a.cost}, or you don't finish.` };
+      if (a.kind === "heatWarning") return { ok: true, msg: a.source ? `${a.source} gave you up. Stay low.` : "Stay low." };
+      if (a.kind === "alibiDeal") return { ok: true, msg: `${a.cost}. You were with me.` };
+      if (a.kind === "coverStory") return { ok: true, msg: "I'll say you went the other way." };
+      if (a.kind === "infoSell") return { ok: true, msg: `${a.cost} and I send them the wrong way.` };
+      if (a.kind === "witnessFix") return { ok: true, msg: `${a.cost}. ${a.targetName || "He"} forgets.` };
+      if (a.kind === "recantOffer") return { ok: true, msg: `${a.cost} and I remember it different.` };
       if (a.kind === "reputation") {
         const buzz = topBuzz();
         n.playerTrust = Math.min(14, (n.playerTrust || 0) + (a.repKind === "fear" ? 0 : 1));
         if (a.repKind === "fear") {
           n.playerFear = Math.min(14, (n.playerFear || 0) + 1);
           clearApproach(n);
-          return { ok: true, msg: `${who}: people saw what you did. Quiet ones back off, proud ones come with friends.` };
+          return { ok: true, msg: "People saw." };
         }
         if (a.repKind === "wealth") {
           clearApproach(n);
-          return { ok: true, msg: `${who}: keep flashing cigs and everybody prices you higher. Spend, hide, or pay cover.` };
+          return { ok: true, msg: "Stop flashing it." };
         }
         if (a.repKind === "badge") {
           clearApproach(n);
-          return { ok: true, msg: `${who}: bent cops covering you makes rivals talk faster. The tab is not friendship.` };
+          return { ok: true, msg: "People know you pay COs." };
         }
         if (a.repKind === "snitch") {
           clearApproach(n);
-          return { ok: true, msg: `${who}: witnesses are naming names. Find the talker before the trail hardens.` };
+          return { ok: true, msg: "Somebody's naming names." };
         }
         if (a.repKind === "debt") {
           clearApproach(n);
-          return { ok: true, msg: `${who}: debt is a dinner bell. Gang collectors hear it first.` };
+          return { ok: true, msg: "Pay what you owe." };
         }
         if (a.repKind === "heat") {
           clearApproach(n);
-          return { ok: true, msg: `${who}: guards are asking about you by name. Give them nothing to look at.` };
+          return { ok: true, msg: "COs are asking about you." };
         }
         clearApproach(n);
         // never speak the raw buzz token ("the block buzz is heat")
-        return { ok: true, msg: `${who}: your name is moving around the block. People act on what they hear.` };
+        return { ok: true, msg: "People are talking about you." };
       }
       if (a.kind === "rumor") {
         const msg = rumorLine(n);
@@ -5674,10 +6134,10 @@
         clearApproach(n);
         return { ok: true, msg };
       }
-      if (a.kind === "copBribe") return { ok: true, msg: `${who}: take ${a.price || 3} cigs and you never searched me.` };
-      if (a.kind === "copTip") return { ok: true, msg: `${who}: I can point you at real trouble. You check them, I stay out of it.` };
-      if (a.kind === "copPlea") return { ok: true, msg: `${who}: ${gangName(a.gang != null ? a.gang : n.gang)} keep leaning on me. Do something.` };
-      if (a.kind === "copTaunt") return { ok: true, msg: `${who}: badge looks heavy. You actually going to use it?` };
+      if (a.kind === "copBribe") return { ok: true, msg: `${a.price || 3}. You never searched me.` };
+      if (a.kind === "copTip") return { ok: true, msg: "I'll show you who. Leave me out of it." };
+      if (a.kind === "copPlea") return { ok: true, msg: "Do something." };
+      if (a.kind === "copTaunt") return { ok: true, msg: "Go on then." };
       clearApproach(n);
       addGangStanding(n.gang, n.gang >= 0 ? 2 : 0);
       // the +2 standing still lands above; it is felt, not read out loud
@@ -5750,7 +6210,7 @@
           const res = joinGang(n);
           addGangStanding(n.gang, 15);
           addGangProtection(n.gang, 28);
-          return { ok: res.ok, msg: `${res.msg} ${gangName(n.gang)} put eyes on you for a while.` };
+          return { ok: res.ok, msg: res.msg };
         }
         if (mode === "work") {
           if (!CBZ.game.gangJob) {
@@ -5762,21 +6222,21 @@
           addGangProtection(n.gang, 18);
           n.playerTrust = Math.min(14, (n.playerTrust || 0) + 2);
           clearApproach(n);
-          return { ok: true, msg: `${who} marks you as useful. ${gangName(n.gang)} cover you while you're on the job.` };
+          return { ok: true, msg: "Good. Don't make me regret it." };
         }
-        if (mode === "truce" && a.cost > 0) return { ok: false, msg: `${who} wants payment, not a handshake.` };
+        if (mode === "truce" && a.cost > 0) return { ok: false, msg: `${a.cost}. Not a handshake.` };
         addGangStanding(n.gang, mode === "truce" ? 7 : 3);
         addGangDebt(n.gang, mode === "truce" ? -4 : -1);
         if (CBZ.player.gang === n.gang || mode === "truce") addGangProtection(n.gang, 14);
         clearApproach(n);
-        return { ok: true, msg: `${who} accepts the respect. The ${gangName(n.gang)} will remember who backed down first.` };
+        return { ok: true, msg: "Alright." };
       }
       if (a.kind === "favor") {
         const gift = a.gift || 3;
         clearApproach(n);
         CBZ.econ.addCigs(gift);
         addGangStanding(n.gang, -1);
-        return { ok: true, msg: `${who} slips you ${gift} cigs and calls it square.` };
+        return { ok: true, msg: "We're square." };
       }
       if (a.kind === "buyItem") {
         if (!CBZ.econ.hasItem(a.item)) {
@@ -5792,7 +6252,7 @@
         if (n.data && n.data.pool) n.data.offer = CBZ.econ.pickOffer(n.data.pool);
         clearApproach(n);
         CBZ.sfx && CBZ.sfx("coin");
-        return { ok: true, msg: `Sold ${a.item} to ${who} for ${a.price} cigs.` };
+        return { ok: true, msg: "Pleasure." };
       }
       if (a.kind === "gangJob") {
         if (CBZ.game.gangJob) return { ok: false, msg: "Finish the job you already took." };
@@ -5808,7 +6268,7 @@
         if (n.gang >= 0) addGangStanding(n.gang, 1);
         addBuzz("heat", -6, "heads-up");
         clearApproach(n);
-        return { ok: true, msg: `${who} points you away from the sweep, and the search goes the other way.` };
+        return { ok: true, msg: "Go that way. Now." };
       }
       if (a.kind === "crewBackup") {
         const standing = n.gang >= 0 ? Math.max(0, gangStanding(n.gang)) : 0;
@@ -5823,7 +6283,7 @@
         for (const m of CBZ.npcs) if (m.gang === n.gang) m.huntPlayer = 0;
         coolWanted(7 + Math.min(10, standing * 0.16));
         emote(n, "+");
-        return { ok: true, msg: `${who} shadows you as crew backup. Snitches and rivals think twice.` };
+        return { ok: true, msg: "I got you." };
       }
       if (a.kind === "coverStory") {
         const standing = n.gang >= 0 ? Math.max(0, gangStanding(n.gang)) : 0;
@@ -5834,7 +6294,7 @@
         addGangStanding(n.gang, 3);
         addGangProtection(n.gang, 10 + Math.min(18, standing * 0.25));
         clearApproach(n);
-        return { ok: true, msg: `${who} gives the guards a story that puts you on the far side of the yard.` };
+        return { ok: true, msg: "You were never here." };
       }
       if (a.kind === "copBribe") {
         const price = a.price || 3;
@@ -5845,7 +6305,7 @@
         clearApproach(n);
         if (CBZ.reportCrime) CBZ.reportCrime(18 + price, { type: "bribe", actorRole: "cop", copCorruption: true });
         CBZ.sfx && CBZ.sfx("coin");
-        return { ok: true, msg: `You pocket ${price} cigs. Complaints can spread if anyone noticed.` };
+        return { ok: true, msg: "" };
       }
       if (a.kind === "copTip") {
         const suspect = (a.suspect && alive(a.suspect)) ? a.suspect : findCopTipSuspect(n);
@@ -5853,9 +6313,9 @@
         if (suspect && markCopSuspect(n, suspect, 28)) {
           if (CBZ.addComplaint) CBZ.addComplaint(-5);
           const suspectName = suspect.data.name.replace(/^the |^a |^an /, "");
-          return { ok: true, msg: `${who} points out ${suspectName}. Search them cleanly for less blowback.` };
+          return { ok: true, msg: `${suspectName}. Didn't hear it from me.` };
         }
-        return { ok: true, msg: `${who}'s tip is too stale to use.` };
+        return { ok: true, msg: "Never mind. He's gone." };
       }
       if (a.kind === "copPlea") {
         const gang = a.gang != null ? a.gang : n.gang;
@@ -5865,26 +6325,26 @@
         clearApproach(n);
         if (bully && markCopSuspect(n, bully, 22)) {
           if (CBZ.addComplaint) CBZ.addComplaint(-7);
-          return { ok: true, msg: `You take the complaint. The ${gangName(gang)} will be watching how you carry it.` };
+          return { ok: true, msg: "Thank you." };
         }
         if (CBZ.addComplaint) CBZ.addComplaint(-4);
-        return { ok: true, msg: `${who} calms down. The block sees you handle it.` };
+        return { ok: true, msg: "Okay." };
       }
       clearApproach(n);
-      return { ok: true, msg: `${who} nods.` };
+      return { ok: true, msg: "" };
     }
 
     if (action === "completeDeal") {
       clearApproach(n);
       n.rep = Math.min(80, (n.rep || 0) + 4);
-      return { ok: true, msg: `${who} files away the favor.` };
+      return { ok: true, msg: "" };
     }
 
     if (action === "respect") {
       if (a.kind === "turfWarning") {
         clearApproach(n);
         addGangStanding(n.gang, 4);
-        return { ok: true, msg: `You give the ${gangName(n.gang)} their space, and they see you do it.` };
+        return { ok: true, msg: "" };
       }
       if (a.kind === "gangParley") {
         const mode = a.parleyMode || "warning";
@@ -5894,18 +6354,18 @@
         n.playerTrust = Math.min(14, (n.playerTrust || 0) + 1);
         n.playerGrudge = Math.max(0, (n.playerGrudge || 0) - 1);
         clearApproach(n);
-        return { ok: true, msg: `You show respect. The ${gangName(n.gang)} take note of it.` };
+        return { ok: true, msg: "Good." };
       }
       clearApproach(n);
-      return { ok: true, msg: `${who} lets it go.` };
+      return { ok: true, msg: "" };
     }
 
     if (action === "pay") {
-      if (a.cost <= 0) return { ok: false, msg: "They don't want money for this." };
+      if (a.cost <= 0) return { ok: false, msg: "Keep it." };
       if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `${a.cost}. Come back when you have it.` };
       if (a.kind === "witnessFix" && !((a.reporter && alive(a.reporter) && a.reporter.reportedPlayerT > 0) || findKnownReporter(n))) {
         clearApproach(n);
-        return { ok: false, msg: "That witness trail has already gone cold." };
+        return { ok: false, msg: "Too late for that." };
       }
       CBZ.econ.addCigs(-a.cost);
       rippleApproach(n, "paid", a, { range: 11.5 });
@@ -5915,7 +6375,7 @@
         addGangProtection(n.gang, 35 + a.cost * 4);
         for (const m of CBZ.npcs) if (m.gang === n.gang) m.huntPlayer = 0;
         clearApproach(n);
-        return { ok: true, msg: `The ${gangName(n.gang)} put themselves between you and trouble for a while.` };
+        return { ok: true, msg: "You're covered." };
       }
       if (a.kind === "debtCollect") {
         addGangDebt(n.gang, -Math.max(a.cost * 2, 4));
@@ -5924,7 +6384,7 @@
         for (const m of CBZ.npcs) if (m.gang === n.gang) m.huntPlayer = 0;
         n.playerTrust = Math.min(12, (n.playerTrust || 0) + 1);
         clearApproach(n);
-        return { ok: true, msg: `The ${gangName(n.gang)} strike some of what you owe off the wall.` };
+        return { ok: true, msg: `${gangDebt(n.gang) > 0 ? gangDebt(n.gang) + " left." : "We're square."}` };
       }
       if (a.kind === "gangParley") {
         const mode = a.parleyMode || "truce";
@@ -5938,7 +6398,7 @@
         addBuzz("debt", -Math.max(4, a.cost), "parley-pay");
         clearApproach(n);
         CBZ.sfx && CBZ.sfx("coin");
-        return { ok: true, msg: `${who} takes the truce money and the crew stands down.` };
+        return { ok: true, msg: "Done. We're good." };
       }
       if (a.kind === "snitchThreat") {
         n.snitchHeat = 0; n.snitchT = 0;
@@ -5947,7 +6407,7 @@
         n.playerGrudge = Math.max(0, (n.playerGrudge || 0) - 2);
         addGangStanding(n.gang, n.gang >= 0 ? 3 : 0);
         clearApproach(n);
-        return { ok: true, msg: `${who} keeps quiet. Money bought silence.` };
+        return { ok: true, msg: "Didn't see a thing." };
       }
       if (a.kind === "recantOffer") {
         const amount = n.reportedPlayerAmount || a.amount || 12;
@@ -5973,7 +6433,7 @@
         n.foe = null;
         clearApproach(n);
         coolWanted(8 + a.cost * 2);
-        return { ok: true, msg: `${who} becomes your lookout. Wanted pressure drops.` };
+        return { ok: true, msg: "I'll be watching." };
       }
       if (a.kind === "crewDues") {
         const standing = n.gang >= 0 ? Math.max(0, gangStanding(n.gang)) : 0;
@@ -5993,7 +6453,7 @@
         coolWanted(5 + a.cost * 1.2);
         addBuzz("debt", -Math.max(4, a.cost), "crew-dues");
         CBZ.sfx && CBZ.sfx("coin");
-        return { ok: true, msg: `${who} marks the dues paid, and the ${gangName(n.gang)} keep an eye out for you.` };
+        return { ok: true, msg: "Good." };
       }
       if (a.kind === "stickUp") {
         const racketGuard = a.racketGuard;
@@ -6023,7 +6483,7 @@
         n.foe = null;
         clearApproach(n);
         coolWanted(12 + a.cost * 2.5);
-        return { ok: true, msg: `${who} starts a diversion. Guards lose focus.` };
+        return { ok: true, msg: "Give me a minute." };
       }
       if (a.kind === "stashCover") {
         CBZ.game.lowProfileT = Math.max(CBZ.game.lowProfileT || 0, 34 + a.cost * 3 + (a.stashItems || 0) * 5);
@@ -6034,7 +6494,7 @@
         n.playerGrudge = Math.max(0, (n.playerGrudge || 0) - 1);
         if (n.gang >= 0) addGangStanding(n.gang, 1);
         clearApproach(n);
-        return { ok: true, msg: `${who} spreads word that your pockets are dry, and the block loses interest.` };
+        return { ok: true, msg: "You're broke, far as anyone knows." };
       }
       if (a.kind === "racketCover") {
         const cut = Math.max(5, a.cost * 2 + Math.ceil((a.racketDebt || 0) * 0.35));
@@ -6054,7 +6514,7 @@
         for (const gd of CBZ.guards || []) if (gd.corrupt) gd.bribed = Math.max(gd.bribed || 0, 7 + a.cost);
         clearApproach(n);
         CBZ.sfx && CBZ.sfx("coin");
-        return { ok: true, msg: `${who} muddies the bent-cop ledger until nobody can read it.` };
+        return { ok: true, msg: "Handled." };
       }
       if (a.kind === "coverDebt") {
         n.coverDebt = null;
@@ -6070,7 +6530,7 @@
         addBuzz("heat", -8, "paid-cover-debt");
         clearApproach(n);
         CBZ.sfx && CBZ.sfx("coin");
-        return { ok: true, msg: `${who} keeps the guard story straight. Wanted pressure cools.` };
+        return { ok: true, msg: "We're good." };
       }
       if (a.kind === "alibiDeal") {
         const lead = misdirectSearch(n, 4 + Math.ceil(a.cost * 0.7));
@@ -6083,7 +6543,7 @@
         if (CBZ.game.lastKnown && (!a.source || CBZ.game.lastKnown.source === a.source || CBZ.game.lastKnown.type !== "visual")) CBZ.game.lastKnown = null;
         CBZ.game.lowProfileT = Math.max(CBZ.game.lowProfileT || 0, 10 + a.cost * 1.5);
         clearApproach(n);
-        return { ok: true, msg: `${who} gives the guards an alibi and points them at the wrong end of the block.` };
+        return { ok: true, msg: "You were with me. All day." };
       }
       if (a.kind === "jobThreat") {
         const job = a.job || CBZ.game.gangJob;
@@ -6096,7 +6556,7 @@
           job.rivalPaidT = Math.max(job.rivalPaidT || 0, 12);
         }
         clearApproach(n);
-        return { ok: true, msg: `${who} takes the payoff. Rival pressure cools, but your employer notices.` };
+        return { ok: true, msg: "Fine." };
       }
       if (a.kind === "infoSell") {
         const lead = misdirectSearch(n, a.cost);
@@ -6105,7 +6565,7 @@
         n.playerGrudge = Math.max(0, (n.playerGrudge || 0) - 1);
         addGangStanding(n.gang, n.gang >= 0 ? 1 : 0);
         clearApproach(n);
-        return { ok: true, msg: `${who} plants a false lead across the yard and the heat follows it.` };
+        return { ok: true, msg: "They'll be looking the wrong way." };
       }
       if (a.kind === "witnessFix") {
         const reporter = (a.reporter && alive(a.reporter) && a.reporter.reportedPlayerT > 0) ? a.reporter : findKnownReporter(n);
@@ -6135,10 +6595,10 @@
         }
         clearApproach(n);
         CBZ.sfx && CBZ.sfx("coin");
-        return { ok: true, msg: `${who} leans on ${rName}. The report trail gets messy and wanted pressure drops.` };
+        return { ok: true, msg: `I'll talk to ${rName}.` };
       }
       clearApproach(n);
-      return { ok: true, msg: `${who} pockets the cigs.` };
+      return { ok: true, msg: "" };
     }
 
     if (action === "warn") {
@@ -6147,7 +6607,7 @@
         n.playerFear = Math.min(14, (n.playerFear || 0) + 2);
         n.aiState = "flee"; n.fleeT = 2.0 + rng() * 1.2;
         if (CBZ.addComplaint) CBZ.addComplaint(-2);
-        return { ok: true, msg: `${who} hides the stash and backs off.` };
+        return { ok: true, msg: "" };
       }
       if (a.kind === "copTaunt") {
         clearApproach(n);
@@ -6155,16 +6615,16 @@
         n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 1);
         n.aiState = "flee"; n.fleeT = 2.4 + rng() * 1.2;
         if (CBZ.addComplaint) CBZ.addComplaint(-3);
-        return { ok: true, msg: `${who} decides not to test you today.` };
+        return { ok: true, msg: "Easy. Easy." };
       }
       if (a.kind === "copPlea") {
         clearApproach(n);
         n.playerTrust = Math.min(14, (n.playerTrust || 0) + 1);
-        return { ok: true, msg: `${who} nods, but still wants action.` };
+        return { ok: true, msg: "" };
       }
       clearApproach(n);
       n.aiState = "flee"; n.fleeT = 1.8;
-      return { ok: true, msg: `${who} backs away.` };
+      return { ok: true, msg: "" };
     }
 
     if (action === "detain") {
@@ -6208,7 +6668,7 @@
         say(n, `${c.cut}. You want it or not?`, null, 2.2);
         return { ok: false, msg: "" };
       }
-      if (a.cost <= 1 || a.haggled) return { ok: false, msg: `${who} won't move on the price.` };
+      if (a.cost <= 1 || a.haggled) return { ok: false, msg: `${a.kind === "buyItem" ? a.price : a.cost}. That's it.` };
       const standing = n.gang >= 0 ? gangStanding(n.gang) : 0;
       const p = n.personality || {};
       const leverage = (n.playerTrust || 0) * 0.045 + Math.max(0, standing) * 0.004 + (CBZ.player.gang === n.gang ? 0.12 : 0);
@@ -6221,18 +6681,18 @@
           a.price = Math.min(Math.ceil(itemValue(a.item) * 1.25), (a.price || 1) + bump);
           a.t = Math.max(a.t || 0, 7);
           n.playerTrust = Math.min(12, (n.playerTrust || 0) + 1);
-          return { ok: true, msg: `${who} raises the offer to ${a.price} cigs.` };
+          return { ok: true, msg: `${a.price}. Last offer.` };
         }
         const cut = Math.max(1, Math.min(a.cost - 1, 1 + Math.floor((n.playerTrust || 0) / 4) + Math.floor(rng() * 2)));
         a.cost -= cut;
         a.t = Math.max(a.t || 0, 7);
         n.playerTrust = Math.min(12, (n.playerTrust || 0) + 1);
-        return { ok: true, msg: `${who} drops it to ${a.cost} cigs.` };
+        return { ok: true, msg: `${a.cost}, then.` };
       }
       if (a.kind === "buyItem") a.price = Math.max(1, (a.price || 1) - 1);
       else a.cost += a.kind === "snitchThreat" || a.kind === "tax" ? 1 : 0;
       n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 1);
-      return { ok: false, msg: a.kind === "buyItem" ? `${who} lowers the offer to ${a.price} cigs.` : `${who} doesn't like bargaining. It stays ${a.cost}.` };
+      return { ok: false, msg: a.kind === "buyItem" ? `${a.price} now.` : `It's ${a.cost}.` };
     }
 
     if (action === "threaten") {
@@ -6277,7 +6737,7 @@
           addGangStanding(n.gang, n.gang >= 0 ? -2 : 0);
           clearApproach(n);
           n.aiState = "flee"; n.fleeT = 2.2 + rng() * 1.5;
-          return { ok: true, msg: `${who} backs down, scared quiet.` };
+          return { ok: true, msg: "" };
         }
         if (a.kind === "recantOffer") {
           const amount = n.reportedPlayerAmount || a.amount || 12;
@@ -6298,14 +6758,14 @@
           clearApproach(n);
           n.aiState = "flee"; n.fleeT = 1.4 + rng();
           addGangStanding(n.gang, n.gang >= 0 ? -2 : 0);
-          return { ok: true, msg: `${who} gives you a sloppy cover story, but resents the threat.` };
+          return { ok: true, msg: "Fine. You went the other way." };
         }
         if (a.kind === "infoSell") {
           misdirectSearch(n, Math.max(1, Math.floor((a.cost || 2) * 0.55)));
           coolWanted(4);
           clearApproach(n);
           n.aiState = "flee"; n.fleeT = 1.6 + rng();
-          return { ok: true, msg: `${who} coughs up enough intel to muddy the search.` };
+          return { ok: true, msg: "Alright, alright. They're looking for you." };
         }
         if (a.kind === "witnessFix") {
           const reporter = (a.reporter && alive(a.reporter) && a.reporter.reportedPlayerT > 0) ? a.reporter : findKnownReporter(n);
@@ -6324,7 +6784,7 @@
           addGangStanding(n.gang, n.gang >= 0 ? -3 : 0);
           clearApproach(n);
           n.aiState = "flee"; n.fleeT = 1.5 + rng();
-          return { ok: true, msg: `${who} forces a shaky warning onto ${reporterName(reporter)}.` };
+          return { ok: true, msg: `Fine. I'll talk to ${reporterName(reporter)}.` };
         }
         if (a.kind === "heatWarning") {
           misdirectSearch(n, 2);
@@ -6332,21 +6792,21 @@
           n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
           clearApproach(n);
           n.aiState = "flee"; n.fleeT = 1.2 + rng();
-          return { ok: true, msg: `${who} blurts the warning and backs away.` };
+          return { ok: true, msg: "They're coming. That's all I know." };
         }
         if (a.kind === "crewBackup") {
           addGangStanding(n.gang, -5);
           addGangDebt(n.gang, 2);
           clearApproach(n);
           n.aiState = "flee"; n.fleeT = 1.5 + rng();
-          return { ok: true, msg: `${who} backs off, but ${gangName(n.gang)} hear you pushed away backup.` };
+          return { ok: true, msg: "" };
         }
         if (a.kind === "crewDues") {
           addGangStanding(n.gang, -5);
           addGangDebt(n.gang, Math.max(2, Math.ceil((a.cost || 3) * 0.5)));
           clearApproach(n);
           n.aiState = "flee"; n.fleeT = 1.6 + rng();
-          return { ok: true, msg: `${who} drops the dues demand, but ${gangName(n.gang)} remember the threat.` };
+          return { ok: true, msg: "Forget it." };
         }
         if (a.kind === "stickUp") {
           const racketGuard = a.racketGuard;
@@ -6369,7 +6829,7 @@
           addBuzz("heat", -3, "forced-alibi");
           clearApproach(n);
           n.aiState = "flee"; n.fleeT = 1.7 + rng();
-          return { ok: true, msg: `${who} gives you a shaky alibi and runs.` };
+          return { ok: true, msg: "You were with me. Okay?" };
         }
         if (a.kind === "stashCover") {
           CBZ.game.lowProfileT = Math.max(CBZ.game.lowProfileT || 0, 12 + (a.cost || 3));
@@ -6377,7 +6837,7 @@
           addGangStanding(n.gang, n.gang >= 0 ? -2 : 0);
           clearApproach(n);
           n.aiState = "flee"; n.fleeT = 1.4 + rng();
-          return { ok: true, msg: `${who} tells people you are dry, but remembers the threat.` };
+          return { ok: true, msg: "Okay. You're broke." };
         }
         if (a.kind === "racketCover") {
           CBZ.game.racketProtectionT = Math.max(CBZ.game.racketProtectionT || 0, 6 + (a.cost || 3));
@@ -6386,7 +6846,7 @@
           addGangStanding(n.gang, n.gang >= 0 ? -2 : 0);
           clearApproach(n);
           n.aiState = "flee"; n.fleeT = 1.4 + rng();
-          return { ok: true, msg: `${who} gives you a shaky racket cover story and backs off.` };
+          return { ok: true, msg: "Okay. Okay." };
         }
         if (a.kind === "coverDebt") {
           n.coverDebt = null;
@@ -6396,7 +6856,7 @@
           addGangStanding(n.gang, n.gang >= 0 ? -2 : 0);
           clearApproach(n);
           n.aiState = "flee"; n.fleeT = 1.4 + rng();
-          return { ok: true, msg: `${who} keeps the lie alive, but remembers the threat.` };
+          return { ok: true, msg: "Fine." };
         }
         if (a.kind === "gangParley") {
           addGangStanding(n.gang, -6);
@@ -6405,25 +6865,25 @@
           n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 2);
           clearApproach(n);
           n.aiState = "flee"; n.fleeT = 1.8 + rng() * 1.5;
-          return { ok: true, msg: `${who} backs off, but ${gangName(n.gang)} log the disrespect.` };
+          return { ok: true, msg: "" };
         }
         if (a.kind === "tax" || a.kind === "turfWarning" || a.kind === "debtCollect") {
           addGangStanding(n.gang, -5);
           addGangDebt(n.gang, a.kind === "debtCollect" ? 4 : 2);
           clearApproach(n);
           n.aiState = "flee"; n.fleeT = 1.8 + rng() * 1.5;
-          return { ok: true, msg: `${who} backs off, but ${gangName(n.gang)} remember it.` };
+          return { ok: true, msg: "" };
         }
         if (a.kind === "jobThreat") {
           if (a.job) a.job.t = Math.max(6, (a.job.t || 12) - 3);
           addGangStanding(n.gang, -4);
           clearApproach(n);
           n.aiState = "flee"; n.fleeT = 1.8 + rng() * 1.4;
-          return { ok: true, msg: `${who} backs down. The rival crew clocks the disrespect.` };
+          return { ok: true, msg: "" };
         }
         clearApproach(n);
         n.aiState = "flee"; n.fleeT = 1.5 + rng();
-        return { ok: true, msg: `${who} decides this isn't worth it.` };
+        return { ok: true, msg: "" };
       }
       n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 3);
       rippleApproach(n, "threatFailed", a, { range: 13.5 });
@@ -6435,9 +6895,14 @@
         clearApproach(n);
         bookDebtorGrudge(n, "you shaking me down over somebody else's money", 4);
         say(n, "Go collect from him then.", null, 2.0);
-        n.huntPlayer = Math.max(n.huntPlayer || 0, 6);
         n.aiState = "wander";
-        if (n.gang >= 0) provokeGang(n, 4);
+        requestHunt(n, 6, "threat");
+        return { ok: false, msg: "" };
+      }
+      if (a.test) {
+        clearApproach(n);
+        fishPending(n, "fight");
+        requestHunt(n, 8, "test");
         return { ok: false, msg: "" };
       }
       if (a.kind === "snitchThreat") {
@@ -6446,7 +6911,7 @@
         clearApproach(n);
         n.memory = null;
         sendNpcToSnitch(n, heat + 8, { forceSnitch: true, lastKnown });
-        return { ok: false, msg: `${who} calls your bluff and runs to snitch.` };
+        return { ok: false, msg: "Watch this." };
       }
       if (a.kind === "recantOffer") {
         const amount = n.reportedPlayerAmount || a.amount || 12;
@@ -6461,23 +6926,28 @@
         CBZ.game.witnessReportT = Math.max(CBZ.game.witnessReportT || 0, 7);
         addBuzz("snitch", 8, "recant-threat-failed");
         clearApproach(n);
-        return { ok: false, msg: `${who} refuses to recant and makes the threat part of the story.` };
+        return { ok: false, msg: "Now I got two things to tell them." };
       }
       if (a.kind === "tax" || a.kind === "turfWarning" || a.kind === "debtCollect") {
         const gang = n.gang;
         clearApproach(n);
-        addGangDebt(gang, a.kind === "debtCollect" ? 5 : 3);
-        addGangStanding(gang, -12);
-        provokeGang(n, 9);
-        return { ok: false, msg: `${gangName(gang)} rush you for the disrespect.` };
+        addGangDebt(gang, a.kind === "debtCollect" ? 2 : 1);
+        addGangStanding(gang, -6);
+        provokeGang(n, 8, { crew: 1, why: "threat", standing: 0 });
+        return { ok: false, msg: "" };
       }
       if (a.kind === "gangParley") {
         const gang = n.gang;
         clearApproach(n);
-        addGangDebt(gang, a.parleyMode === "truce" ? Math.max(5, a.cost || 4) : 3);
-        addGangStanding(gang, -14);
-        provokeGang(n, a.parleyMode === "warning" ? 7 : 10);
-        return { ok: false, msg: `${gangName(gang)} answer the threat together.` };
+        addGangDebt(gang, a.parleyMode === "truce" ? Math.max(2, a.cost || 3) : 1);
+        addGangStanding(gang, -8);
+        // the shot-caller does not swing; one of his who was standing there does
+        let sent = null;
+        for (const m of nearbyNpcs(n, 10, _crewNear)) {
+          if (m !== n && alive(m) && m.gang === gang && m.role !== "merchant" && m.role !== "dealer") { sent = m; break; }
+        }
+        if (sent) requestHunt(sent, 7, "crew");
+        return { ok: false, msg: "You just made a mistake." };
       }
       if (a.kind === "witnessFix") {
         const reporter = (a.reporter && alive(a.reporter)) ? a.reporter : findKnownReporter(n);
@@ -6495,24 +6965,23 @@
         }
         CBZ.game.witnessReportT = Math.max(CBZ.game.witnessReportT || 0, 7);
         addBuzz("snitch", 7, "fixer-threat-failed");
-        if (n.gang >= 0 && gangStanding(n.gang) < -16) provokeGang(n, 5);
-        return { ok: false, msg: `${who} warns ${reporterName(reporter)} you tried to muscle the story.` };
+        return { ok: false, msg: "Try that again." };
       }
       if (a.kind === "crewBackup") {
         const gang = n.gang;
         clearApproach(n);
-        addGangStanding(gang, -10);
-        addGangDebt(gang, 3);
-        provokeGang(n, 5);
-        return { ok: false, msg: `${gangName(gang)} decide backup should become pressure.` };
+        addGangStanding(gang, -5);
+        addGangDebt(gang, 1);
+        requestHunt(n, 5, "threat");
+        return { ok: false, msg: "" };
       }
       if (a.kind === "crewDues") {
         const gang = n.gang;
         clearApproach(n);
-        addGangDebt(gang, Math.max(3, a.cost || 3));
-        addGangStanding(gang, -10);
-        if (gangStanding(gang) < -10 || gangDebt(gang) > 10) provokeGang(n, 5);
-        return { ok: false, msg: `${gangName(gang)} put interest on the dues, your tab's at ${gangDebt(gang)} now.` };
+        addGangDebt(gang, Math.max(1, Math.ceil((a.cost || 3) * 0.5)));
+        addGangStanding(gang, -5);
+        requestHunt(n, 5, "threat");
+        return { ok: false, msg: "" };
       }
       if (a.kind === "stickUp") {
         const gang = n.gang;
@@ -6524,40 +6993,38 @@
           if (CBZ.addCasePressure) CBZ.addCasePressure(10 + (a.cost || 3), { type: "racket threat" }, n, { corruptHold: true });
         }
         if (gang >= 0) {
-          addGangStanding(gang, -8);
-          addGangDebt(gang, a.rivalGang ? 3 : 1);
-          provokeGang(n, a.rivalGang ? 6 : 4);
-        } else {
-          n.huntPlayer = Math.max(n.huntPlayer || 0, 5);
-          n.aiState = "wander";
+          addGangStanding(gang, -4);
+          addGangDebt(gang, 1);
         }
+        n.aiState = "wander";
+        requestHunt(n, 5, "threat");
         addBuzz(racketGuard ? "badge" : "wealth", 6, racketGuard ? "racket-threat" : "stick-up-threat");
-        return { ok: false, msg: racketGuard ? `${who} calls your bluff. ${racketGuard}'s debt climbs to ${Math.ceil(CBZ.game.racketDebt || 0)}.` : `${who} calls your bluff and comes for the pockets.` };
+        return { ok: false, msg: racketGuard ? "Big mistake." : "" };
       }
       if (a.kind === "jobThreat") {
         const gang = n.gang;
         if (a.job) a.job.t = Math.max(4, (a.job.t || 10) - 6);
         clearApproach(n);
-        addGangStanding(gang, -8);
-        provokeGang(n, 7);
-        return { ok: false, msg: `${gangName(gang)} move to wreck the job.` };
+        addGangStanding(gang, -4);
+        requestHunt(n, 6, "threat");
+        return { ok: false, msg: "" };
       }
       if (a.kind === "coverStory") {
         clearApproach(n);
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 1);
         addGangStanding(n.gang, n.gang >= 0 ? -3 : 0);
-        return { ok: false, msg: `${who} refuses to risk lying for you after that.` };
+        return { ok: false, msg: "Forget it then." };
       }
       if (a.kind === "infoSell") {
         clearApproach(n);
         n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 2);
         if (rng() < 0.35) CBZ.game.witnessReportT = Math.max(CBZ.game.witnessReportT || 0, 5);
-        return { ok: false, msg: `${who} keeps the intel and tells people you are desperate.` };
+        return { ok: false, msg: "" };
       }
       if (a.kind === "heatWarning") {
         clearApproach(n);
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 2);
-        return { ok: false, msg: `${who} decides warning you was a mistake.` };
+        return { ok: false, msg: "Should've kept my mouth shut." };
       }
       if (a.kind === "alibiDeal") {
         clearApproach(n);
@@ -6565,14 +7032,14 @@
         if (n.memory && rng() < 0.38) sendNpcToSnitch(n, a.heat || 12, { copCrime: a.memoryType === "copCrime", lastKnown: n.memory.lastKnown, type: "threatened alibi" });
         else CBZ.game.witnessReportT = Math.max(CBZ.game.witnessReportT || 0, 5);
         addBuzz("snitch", 6, "alibi-threat-failed");
-        return { ok: false, msg: `${who} decides the story is worth more to someone else.` };
+        return { ok: false, msg: "" };
       }
       if (a.kind === "stashCover") {
         clearApproach(n);
         n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 3);
         if (n.role === "thief") n.huntPlayer = Math.max(n.huntPlayer || 0, 3.5);
         addBuzz("wealth", 7, "failed-threat");
-        return { ok: false, msg: `${who} clocks the threat and spreads that you are carrying.` };
+        return { ok: false, msg: "" };
       }
       if (a.kind === "racketCover") {
         clearApproach(n);
@@ -6580,7 +7047,7 @@
         CBZ.econ.addRacketDebt(Math.max(3, Math.ceil((a.cost || 3) * 0.75)));
         if (CBZ.addCasePressure) CBZ.addCasePressure(8 + (a.cost || 3), { type: "racket cover threat", heardOnly: true }, n, { corruptHold: true });
         addBuzz("badge", 8, "failed-racket-cover-threat");
-        return { ok: false, msg: `${who} sells the threat straight back to the racket, and you are the one who pays for it.` };
+        return { ok: false, msg: "" };
       }
       if (a.kind === "coverDebt") {
         n.coverDebt = null;
@@ -6595,10 +7062,10 @@
         if (CBZ.addCasePressure) CBZ.addCasePressure(8 + (a.cost || 2), { type: "cover threat", lastKnown: n.reportedPlayerLastKnown, credibility: n.reportedPlayerCred }, n);
         CBZ.game.witnessReportT = Math.max(CBZ.game.witnessReportT || 0, 6);
         addBuzz("snitch", 6, "failed-cover-threat");
-        return { ok: false, msg: `${who} turns the threat into a cleaner story for guards.` };
+        return { ok: false, msg: "" };
       }
       clearApproach(n);
-      return { ok: false, msg: `${who} stares you down. That made an enemy.` };
+      return { ok: false, msg: "" };
     }
 
     if (action === "refuse") {
@@ -6622,25 +7089,37 @@
         return { ok: true, msg: "" };
       }
       rippleApproach(n, "refused", a, { range: 12 });
+      /* THE TEST. A new man told him no to his face. Whether he pushes it is
+         his temperament; whether you STOOD is what you do next (the arrival
+         watcher reads it: stay and hold, or run). */
+      if (a.test) {
+        clearApproach(n);
+        n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 1);
+        const swings = rng() < testerSwing(n);
+        fishPending(n, swings ? "fight" : "held");
+        if (swings) requestHunt(n, 7, "test");
+        else if (CBZ.npcStare) CBZ.npcStare(n, 1.8);
+        return { ok: false, msg: swings ? "" : (rng() < 0.5 ? "Alright. Alright." : "We'll see.") };
+      }
       if (a.kind === "tax") {
         const gang = n.gang;
         clearApproach(n);
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 2);
         n.grudgeWhy = "you shorting the crew";
-        addGangDebt(gang, Math.max(2, a.cost || 3));
-        addGangStanding(gang, -12);
-        provokeGang(n, 8);
-        return { ok: false, msg: `${gangName(gang)} take that personally.` };
+        addGangDebt(gang, Math.max(1, Math.ceil((a.cost || 3) * 0.5)));
+        addGangStanding(gang, -5);
+        snubbed(n, 7);
+        return { ok: false, msg: "Okay. Remember you said that." };
       }
       if (a.kind === "debtCollect") {
         const gang = n.gang;
         clearApproach(n);
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 2);
         n.grudgeWhy = "you shorting the crew";
-        addGangDebt(gang, Math.max(3, a.cost || 4));
-        addGangStanding(gang, -8);
-        provokeGang(n, 7);
-        return { ok: false, msg: `${gangName(gang)} add interest. Your tab's at ${gangDebt(gang)} now.` };
+        addGangDebt(gang, Math.max(1, Math.ceil((a.cost || 4) * 0.4)));
+        addGangStanding(gang, -4);
+        snubbed(n, 7);
+        return { ok: false, msg: `It's ${gangDebt(gang)} now.` };
       }
       if (a.kind === "snitchThreat") {
         const heat = a.heat || a.cost * 9;
@@ -6649,7 +7128,7 @@
         n.memory = null;
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 2);
         sendNpcToSnitch(n, heat, { lastKnown });
-        return { ok: false, msg: `${who} runs to snitch.` };
+        return { ok: false, msg: "" };
       }
       if (a.kind === "recantOffer") {
         const amount = n.reportedPlayerAmount || a.amount || 12;
@@ -6660,68 +7139,68 @@
         n.reportedPlayerDoubt = Math.max(0, 1 - n.reportedPlayerCred);
         if (CBZ.addCasePressure) CBZ.addCasePressure(amount * 0.18, { type: "refused recant", lastKnown: n.reportedPlayerLastKnown, credibility: n.reportedPlayerCred }, n);
         addBuzz("snitch", 5, "refused-recant");
-        return { ok: false, msg: `${who} keeps the report warm and waits for guards to ask again.` };
+        return { ok: false, msg: "" };
       }
       if (a.kind === "buyItem") {
         clearApproach(n);
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 1);
         n.grudgeWhy = "you holding out on me";
-        return { ok: true, msg: `${who} remembers you holding out on ${a.item}.` };
+        return { ok: true, msg: "Your loss." };
       }
       if (a.kind === "copBribe") {
         clearApproach(n);
         n.playerFear = Math.min(14, (n.playerFear || 0) + 1);
-        return { ok: true, msg: `${who} palms the cigs away and plays innocent.` };
+        return { ok: true, msg: "" };
       }
       if (a.kind === "copTip") {
         clearApproach(n);
         n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
-        return { ok: false, msg: `${who} keeps the tip to themselves.` };
+        return { ok: false, msg: "" };
       }
       if (a.kind === "copPlea") {
         clearApproach(n);
         n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 2);
         if (CBZ.addComplaint) CBZ.addComplaint(6);
-        return { ok: false, msg: `${who} tells people you ignored the complaint.` };
+        return { ok: false, msg: "Figures." };
       }
       if (a.kind === "copTaunt") {
         clearApproach(n);
         n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 2);
-        return { ok: false, msg: `${who} laughs and gets bolder.` };
+        return { ok: false, msg: "" };
       }
       if (a.kind === "turfWarning") {
         const gang = n.gang;
         clearApproach(n);
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 1);
-        addGangDebt(gang, 2);
-        addGangStanding(gang, -5);
-        if (gang >= 0 && gangStanding(gang) < -8) provokeGang(n, 5);
-        return { ok: false, msg: `${gangName(gang)} remember the disrespect.` };
+        addGangDebt(gang, 1);
+        addGangStanding(gang, -3);
+        snubbed(n, 5);
+        return { ok: false, msg: "Your funeral." };
       }
       if (a.kind === "gangParley") {
         const gang = n.gang;
         const mode = a.parleyMode || "warning";
         clearApproach(n);
         n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 2);
-        addGangDebt(gang, mode === "truce" ? Math.max(4, a.cost || 4) : 2);
-        addGangStanding(gang, mode === "recruit" ? -6 : -9);
-        if (mode === "truce" || gangStanding(gang) < -16) provokeGang(n, 6 + (mode === "truce" ? 3 : 0));
-        return { ok: false, msg: mode === "recruit" ? `${gangName(gang)} mark you as outside the crew.` : `${gangName(gang)} leave with a worse opinion of you, and your tab creeps to ${gangDebt(gang)}.` };
+        addGangDebt(gang, mode === "truce" ? Math.max(2, Math.ceil((a.cost || 4) * 0.5)) : 1);
+        addGangStanding(gang, mode === "recruit" ? -3 : -6);
+        // a shot-caller does not swing himself; he remembers
+        return { ok: false, msg: mode === "recruit" ? "Suit yourself." : "Okay." };
       }
       if (a.kind === "jobThreat") {
         const gang = n.gang;
         if (a.job) a.job.t = Math.max(4, (a.job.t || 10) - 5);
         clearApproach(n);
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 2);
-        addGangStanding(gang, -6);
-        provokeGang(n, 6);
-        return { ok: false, msg: `${gangName(gang)} start interfering with the job.` };
+        addGangStanding(gang, -4);
+        requestHunt(n, 6, "snub");
+        return { ok: false, msg: "" };
       }
       if (a.kind === "coverStory") {
         clearApproach(n);
         n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
         addGangStanding(n.gang, n.gang >= 0 ? -2 : 0);
-        return { ok: false, msg: `${who} lets the guard rumor keep spreading.` };
+        return { ok: false, msg: "" };
       }
       if (a.kind === "coverDebt") {
         n.coverDebt = null;
@@ -6731,18 +7210,18 @@
         if (CBZ.addCasePressure) CBZ.addCasePressure(5 + (a.cost || 2), { type: "refused cover witness", heardOnly: true, source: who }, n);
         CBZ.game.witnessReportT = Math.max(CBZ.game.witnessReportT || 0, 4);
         addBuzz("heat", 5, "refused-cover-debt");
-        return { ok: false, msg: `${who} stops spending credibility on your story.` };
+        return { ok: false, msg: "Then you're on your own." };
       }
       if (a.kind === "infoSell") {
         clearApproach(n);
         n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 1);
-        return { ok: false, msg: `${who} sells the search rumor somewhere else.` };
+        return { ok: false, msg: "" };
       }
       if (a.kind === "heatWarning") {
         clearApproach(n);
         n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
-        return { ok: false, msg: `${who} stops risking their neck for you.` };
+        return { ok: false, msg: "" };
       }
       if (a.kind === "witnessFix") {
         const reporter = (a.reporter && alive(a.reporter)) ? a.reporter : findKnownReporter(n);
@@ -6751,22 +7230,22 @@
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 1);
         if (reporter && rng() < 0.25) reporter.reportedPlayerT = Math.max(reporter.reportedPlayerT || 0, 12);
         addBuzz("snitch", 4, "refused-fixer");
-        return { ok: false, msg: `${who} leaves ${reporterName(reporter)} as your problem.` };
+        return { ok: false, msg: "Your problem, then." };
       }
       if (a.kind === "crewBackup") {
         clearApproach(n);
         n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
         addGangStanding(n.gang, n.gang >= 0 ? -2 : 0);
-        return { ok: false, msg: `${who} lets you handle the heat alone.` };
+        return { ok: false, msg: "" };
       }
       if (a.kind === "crewDues") {
         const gang = n.gang;
         clearApproach(n);
         n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
-        addGangDebt(gang, Math.max(2, Math.ceil((a.cost || 3) * 0.8)));
-        addGangStanding(gang, -6);
-        if (gangStanding(gang) < -12 || gangDebt(gang) > 12) provokeGang(n, 5);
-        return { ok: false, msg: `${gangName(gang)} chalk the unpaid dues onto your tab. ${gangDebt(gang)} now.` };
+        addGangDebt(gang, Math.max(1, Math.ceil((a.cost || 3) * 0.4)));
+        addGangStanding(gang, -3);
+        snubbed(n, 5);
+        return { ok: false, msg: "Everybody pays. You'll see." };
       }
       if (a.kind === "stickUp") {
         const gang = n.gang;
@@ -6778,15 +7257,14 @@
           if (CBZ.addCasePressure) CBZ.addCasePressure(9 + (a.cost || 3), { type: "racket refusal" }, n, { corruptHold: true });
         }
         if (gang >= 0) {
-          addGangStanding(gang, -6);
-          addGangDebt(gang, a.rivalGang ? 2 : 1);
-          if (a.rivalGang || gangStanding(gang) < -12) provokeGang(n, 5);
-          else n.huntPlayer = Math.max(n.huntPlayer || 0, 4);
-        } else {
-          n.huntPlayer = Math.max(n.huntPlayer || 0, 4.5);
+          addGangStanding(gang, -3);
+          addGangDebt(gang, 1);
         }
+        // a stick-up refused to his face: he either takes it or he doesn't
+        if (!racketGuard && rng() < testerSwing(n)) requestHunt(n, 5, "snub");
+        else snubbed(n, 5);
         addBuzz(racketGuard ? "badge" : "wealth", 5, racketGuard ? "refused-racket-runner" : "refused-stick-up");
-        return { ok: false, msg: racketGuard ? `${who} reports you refused the racket. Bent debt ${Math.ceil(CBZ.game.racketDebt || 0)}.` : `${who} decides asking nicely is over.` };
+        return { ok: false, msg: racketGuard ? `${racketGuard} hears about this.` : "" };
       }
       if (a.kind === "alibiDeal") {
         const heat = a.heat || 12;
@@ -6795,13 +7273,13 @@
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 1);
         addBuzz("snitch", 5, "refused-alibi");
         if (lastKnown && rng() < 0.32) sendNpcToSnitch(n, heat, { copCrime: a.memoryType === "copCrime", lastKnown, type: "refused alibi" });
-        return { ok: false, msg: `${who} keeps the alibi to sell later.` };
+        return { ok: false, msg: "" };
       }
       if (a.kind === "stashCover") {
         clearApproach(n);
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 1);
         addBuzz("wealth", 5, "refused-cover");
-        return { ok: false, msg: `${who} shrugs. Loud pockets stay loud.` };
+        return { ok: false, msg: "" };
       }
       if (a.kind === "racketCover") {
         clearApproach(n);
@@ -6809,34 +7287,34 @@
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 1);
         CBZ.econ.addRacketDebt(2);
         addBuzz("badge", 5, "refused-racket-cover");
-        return { ok: false, msg: `${who} leaves the bent-cop tab alone. It sits at ${Math.ceil(CBZ.game.racketDebt || 0)}.` };
+        return { ok: false, msg: "" };
       }
       if (a.kind === "favor") {
         clearApproach(n);
         addGangStanding(n.gang, 2);
-        return { ok: true, msg: `${who} respects you not taking a handout.` };
+        return { ok: true, msg: "" };
       }
       if (a.kind === "gangJob") {
         clearApproach(n);
         n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
         addGangStanding(n.gang, -3);
-        return { ok: false, msg: `${gangName(n.gang)} think you ducked useful work.` };
+        return { ok: false, msg: "" };
       }
       if (a.kind === "lookout" || a.kind === "diversion") {
         clearApproach(n);
         n.rep = Math.max(-20, (n.rep || 0) - 2);
-        return { ok: false, msg: `${who} shrugs. Your problem.` };
+        return { ok: false, msg: "" };
       }
       clearApproach(n);
       n.rep = Math.max(-20, (n.rep || 0) - 4);
-      return { ok: true, msg: `${who} backs off.` };
+      return { ok: true, msg: "" };
     }
 
     return { ok: false, msg: "" };
   }
 
   function resolveKnownSnitch(n, action) {
-    if (!n || !((n.reportedPlayerT || 0) > 0)) return { ok: false, msg: "That report has gone cold." };
+    if (!n || !((n.reportedPlayerT || 0) > 0)) return { ok: false, msg: "" };
     const who = actorName(n);
     const g = CBZ.game || {};
     const p = n.personality || {};
@@ -6882,12 +7360,12 @@
       if (g.witnessReportT != null) g.witnessReportT = Math.max(g.witnessReportT || 0, 4);
       if (rivalGang) addGangStanding(gang, -2);
       emote(n, "!");
-      return { ok: false, msg: `${who} denies it loudly. The report sounds more credible now.` };
+      return { ok: false, msg: "I didn't say nothing!" };
     }
 
     if (action === "paySilence") {
       const cost = knownSnitchCost(n);
-      if ((g.cigs || 0) < cost) return { ok: false, msg: `Need ${cost} cigs to buy ${who}'s silence.` };
+      if ((g.cigs || 0) < cost) return { ok: false, msg: `${cost}. You don't have it.` };
       CBZ.econ.addCigs(-cost);
       coolWanted(7 + cost + Math.min(7, amount * 0.22));
       const challenged = CBZ.challengeCaseSource ? CBZ.challengeCaseSource(who, 8 + cost, { force: true, reason: "paid silence" }) : null;
@@ -6927,21 +7405,21 @@
         n.aiState = "flee";
         n.fleeT = 2.3 + rng() * 1.7;
         emote(n, "!");
-        return { ok: true, msg: `${who} folds and stops feeding the report, but holds the grudge.` };
+        return { ok: true, msg: "Okay. I'll leave it." };
       }
       n.reportedPlayerCred = Math.min(1, credibility + 0.12);
       n.reportedPlayerDoubt = Math.max(0, 1 - n.reportedPlayerCred);
       if (CBZ.addCasePressure) CBZ.addCasePressure(amount * 0.26, { type: "witness threat", forceSnitch: true, credibility: n.reportedPlayerCred }, n);
       if (gang >= 0) {
-        addGangStanding(gang, -8);
-        addGangDebt(gang, rivalGang ? 3 : 1);
-        provokeGang(n, 5.5);
-        return { ok: false, msg: `${who} yells for ${gangName(gang)}. Threatening a talker made it public.` };
+        addGangStanding(gang, -5);
+        addGangDebt(gang, 1);
+        provokeGang(n, 5.5, { crew: 1, why: "threat", standing: 0 });
+        return { ok: false, msg: "You want to do this here?" };
       }
       const lastKnown = n.reportedPlayerLastKnown || { x: CBZ.player.pos.x, z: CBZ.player.pos.z, type: "threat" };
       clearKnownReport(n);
       sendNpcToSnitch(n, amount + 7, { forceSnitch: true, lastKnown, type: "threat", credibility: Math.min(1, credibility + 0.12) });
-      return { ok: false, msg: `${who} panics and runs to report the threat too.` };
+      return { ok: false, msg: "" };
     }
 
     return { ok: false, msg: "" };
@@ -6958,7 +7436,7 @@
   const GANG_NAMES = ["the Reds", "the Blues"];
   // the player throws in with a gang (called from the interact menu)
   function joinGang(actor) {
-    if (actor.gang < 0) return { ok: false, msg: "They're not in a gang." };
+    if (actor.gang < 0) return { ok: false, msg: "" };
     CBZ.player.gang = actor.gang;
     addGangStanding(actor.gang, 22);
     addGangDebt(actor.gang, -999);
@@ -6970,7 +7448,7 @@
       CBZ.player._bandMesh.material.color.setHex(GANG_COLORS[actor.gang]);
       CBZ.player._bandMesh.visible = true;
     }
-    return { ok: true, msg: `You're in! ${gangName(actor.gang)} have your back now.` };
+    return { ok: true, msg: "You're with us now." };
   }
 
   CBZ.aiThink = aiThink;
