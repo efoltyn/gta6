@@ -2211,6 +2211,7 @@
   CBZ.cityVendettaReset = function () { snitches.length = 0; avengers.list.length = 0; avengers.victim = null; };
   CBZ.onUpdate(34.6, function (dt) {
     if (g.mode !== "city") return;
+    if (corner.lot) judgeCorner((CBZ.now || 0) / 1000);
     for (let i = snitches.length - 1; i >= 0; i--) {
       const w = snitches[i];
       if (!w || w._snitchGangId == null) { snitches.splice(i, 1); continue; }
@@ -2240,6 +2241,85 @@
       }
     }
   });
+
+  // ============================================================
+  //  LOSING A FIGHT, AND LOSING A CORNER.
+  //  A street crew used to fight to the last man every time: the only exit
+  //  was a per-body "under 30% hp" bail, so a set of six stood in the open
+  //  and died one at a time, and when the last one dropped nothing about the
+  //  block changed. Now (1) a crew that has lost as many as it has left
+  //  standing near the fight BREAKS: the shaky ones (low loyalty, or already
+  //  hurt) run and stay gone a while (peds.js honours _routT), the hard core
+  //  and the brass hold; and (2) once nobody from the set is left on the post
+  //  you hit, the corner is CLEARED: their take for the block comes out of
+  //  the gang treasury onto the pavement for you to pick up, plus respect.
+  //  All of it is per-death bookkeeping, nothing per frame except one timer.
+  // ============================================================
+  const BREAK_R2 = 28 * 28;
+  const BREAK_BARK = ["Fall back! Fall back!", "Forget this, I'm out!", "He's killing us, move!"];
+  const corner = { lot: null, gang: null, at: 0 };
+  function lotOfPost(gang, m) {
+    const G = m.homeGuard || m.guard; if (!G) return null;
+    let best = null, bd = 16 * 16;
+    for (const lot of gang.turf) {
+      if (!lot || lot.demolished) continue;
+      const dx = lot.cx - G.x, dz = lot.cz - G.z, dd = dx * dx + dz * dz;
+      if (dd < bd) { bd = dd; best = lot; }
+    }
+    return best;
+  }
+  function crewTakesLoss(gang, dead) {
+    const P = CBZ.player; if (!P || P.dead) return;
+    const now = (CBZ.now || 0) / 1000;
+    // losses in THIS fight: a 25 s window that each fresh body extends
+    if (!(now - (gang._lossT || -1e9) < 25)) gang._lossN = 0;
+    gang._lossN = (gang._lossN || 0) + 1; gang._lossT = now;
+    let standing = 0;
+    for (const m of gang.members) {
+      if (!m || m === dead || m.dead || m.ko > 0 || m._wRole) continue;
+      const dx = m.pos.x - dead.pos.x, dz = m.pos.z - dead.pos.z;
+      if (dx * dx + dz * dz < BREAK_R2) standing++;
+    }
+    if (gang._lossN >= 2 && gang._lossN >= standing && standing > 0) {
+      let barked = false;
+      for (const m of gang.members) {
+        if (!m || m === dead || m.dead || m.ko > 0 || m._wRole || m.restraint || m.controlled) continue;
+        const dx = m.pos.x - dead.pos.x, dz = m.pos.z - dead.pos.z;
+        if (dx * dx + dz * dz >= BREAK_R2) continue;
+        const brass = m === gang.boss || m.isBoss || m.rank === "boss" || m.rank === "lt";
+        const loyal = CBZ.cityMemberLoyalty ? CBZ.cityMemberLoyalty(m) : 0.5;
+        const hurt = m.hp < (m.maxHp || 100) * 0.55;
+        if (brass && !hurt) continue;                         // the brass hold the corner
+        if (loyal > 0.7 && !hurt && Math.random() < 0.6) continue;
+        m.rage = null; m._routT = 10 + Math.random() * 8;
+        m.alarmed = Math.max(m.alarmed || 0, 6); m.fear = 10;
+        if (CBZ.cityFleeFrom) CBZ.cityFleeFrom(m, P.pos.x, P.pos.z); else m.state = "flee";
+        if (!barked) { barked = true; wbark(gang, m, BREAK_BARK); }
+      }
+    }
+    const lot = lotOfPost(gang, dead);
+    if (lot) { corner.lot = lot; corner.gang = gang; corner.at = now + 2.5; }   // judged once the dust settles
+  }
+  function judgeCorner(now) {
+    const lot = corner.lot, gang = corner.gang;
+    if (!lot || now < corner.at) return;
+    corner.lot = null; corner.gang = null;
+    if (!gang || gang.turf.indexOf(lot) < 0 || !nearPlayer(lot.cx, lot.cz, 40) || CBZ.player.dead) return;
+    // anyone still holding the post (routed runners are long gone past 16 m)
+    if (liveOnLot(gang, lot, 16) > 0) return;
+    if (lot._clearedT && now - lot._clearedT < 240) return;   // one payday per corner per ~4 min
+    lot._clearedT = now;
+    const take = Math.min(Math.max(0, gang.treasury || 0), 120 + Math.round((gang.treasury || 0) * 0.15));
+    gang.treasury = Math.max(0, (gang.treasury || 0) - take);
+    if (take > 0) {
+      if (CBZ.cityDropItem) CBZ.cityDropItem(lot.cx, lot.cz, { cash: take, ttl: 180 });
+      else if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(take);
+    }
+    if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(4);
+    gang.lostTurfT = Math.max(gang.lostTurfT || 0, 8);
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("CORNER CLEARED");
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("The " + gang.name + " ran. " + (take > 0 ? "Their take for the block, $" + take + ", is on the pavement." : "The block is quiet."), 3);
+  }
 
   // a member went down — the crew takes it personally. ESCALATION LADDER:
   // each kill the player racks up against a crew raises HOSTILITY, which the
@@ -2272,6 +2352,7 @@
         CBZ.cityFlavor && CBZ.cityFlavor("No one who'd talk saw it. Clean.", "#9aa6bd");
       }
       CBZ.cityGangAddStanding(ped.gang, -8);
+      if (!own) crewTakesLoss(gang, ped);
       // REWARD only a SANCTIONED kill (a rival of the crew you ride with — the
       // same task signal playergang.creditPlayerKill scores). A random member
       // dropped off the books earns NO respect, just the grudge + standing hit.

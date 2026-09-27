@@ -3469,6 +3469,7 @@
         // candidates (a full sort over a few hundred entries is trivial at
         // this cadence, but partial-select avoids even that).
         const n = lightCandidates.length, want = pool.length;
+        const nightSig = 1 + 5 * Math.max(0, Math.min(1, (headLampM.emissiveIntensity - 0.05) / 0.95));
         const best = [];   // {d2, cand}
         for (let i = 0; i < n; i++) {
           const c = lightCandidates[i];
@@ -3481,8 +3482,14 @@
             if (!litOne) continue;
           }
           const dx = c.x - cam.x, dz = c.z - cam.z;
-          const d2 = dx * dx + dz * dz;
+          let d2 = dx * dx + dz * dz;
           if (d2 > 90 * 90) continue;               // further than this, a real light adds nothing visible worth the cost
+          // STREETLAMPS FIRST. A junction has eight signal heads within a
+          // few metres of each other, so standing at one the nearest-eight
+          // rule handed EVERY slot to a 0.55 signal glow and the cobra heads
+          // lit nothing: the night street was black. A signal only wins a
+          // slot over a lamp twice as far away, and at night it has to.
+          if (c.kind === "signal") d2 *= nightSig;
           if (best.length < want) { best.push({ d2, c }); best.sort((p, q) => p.d2 - q.d2); }
           else if (d2 < best[want - 1].d2) { best[want - 1] = { d2, c }; best.sort((p, q) => p.d2 - q.d2); }
         }

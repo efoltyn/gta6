@@ -643,7 +643,7 @@
       roughness: DRY_ROUGH,
       metalness: DRY_METAL,
       envMap: CBZ.ENV || null, // carfx.js may not have built this yet; opportunistic only
-      envMapIntensity: 0.9,
+      envMapIntensity: 0.35,
     });
     // SURFACE DETAIL. The asphalt normal map is what turns the wet-road
     // specular from a mirror sheet into scattered highlights, and the
@@ -655,6 +655,7 @@
       CBZ.surfaceApply(m, "asphalt", {
         color: false,                     // never fight the caller's albedo
         repeat: opts.detailRepeat != null ? opts.detailRepeat : 34,
+        normalScale: opts.normalScale != null ? opts.normalScale : 0.4,
         roughness: DRY_ROUGH,
         metalness: DRY_METAL,
       });
@@ -698,7 +699,10 @@
         m.normalScale.set(ns, ns);
       }
       // A wet surface reflects the sky far harder than a dry one.
-      if ("envMapIntensity" in m) m.envMapIntensity = 0.9 + wetK * 1.5;
+      if ("envMapIntensity" in m) m.envMapIntensity = 0.35 + wetK * 1.9;
+      // Dry asphalt is a near-black diffuse surface: at 0.9 it mirrored the
+      // blue env gradient through the aggregate normals and the whole road
+      // read as mottled blue gravel. Dry 0.35, rain still takes it to ~2.
       if (!m.envMap && CBZ.ENV) { m.envMap = CBZ.ENV; m.needsUpdate = true; } // backfill if carfx's env built later
     }
   });

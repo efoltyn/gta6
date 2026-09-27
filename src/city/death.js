@@ -220,6 +220,8 @@
   const _injReset = CBZ.cityDeathReset;
   CBZ.cityDeathReset = function () {
     if (_injReset) _injReset(); CBZ.cityHealWounds();
+    hospitalT = 0; deathStars = 0;
+    if (CBZ.cityPoliceGrace) CBZ.cityPoliceGrace(20);   // a fresh life is not greeted by a gun-stop
     // mode swap / hard reset: never carry a missing head/limb into the next life
     if (CBZ.goreRestoreBody && CBZ.city && CBZ.city.playerActor) CBZ.goreRestoreBody(CBZ.city.playerActor);
   };
@@ -301,12 +303,18 @@
   //  — a bullet through the skull, an explosion, hitting the pavement from a
   //  rooftop, or a scripted execution (imp.fatal, used by campaign scenes) —
   //  is the end of the story: the saved run is erased and the only way
-  //  forward is a fresh start. CBZ.CONFIG.CITY_PERMADEATH=false reverts to
-  //  hospital-for-everything in one line.
+  //  forward is a fresh start.
+  //
+  //  OPT-IN ONLY NOW (CBZ.CONFIG.CITY_PERMADEATH = true). As a default it was
+  //  the harshest rule in the game hung on the most random causes: any
+  //  headshot, any explosion (your OWN rocket into a wall), any fall off a
+  //  kerb-high roof ERASED THE SAVE. A beginner's first mistake ended the
+  //  whole run. Every death is the hospital by default: a bill, the gun in
+  //  your hand, a dent in respect, and you are back on the street.
   // ============================================================
-  if (CBZ.CONFIG && CBZ.CONFIG.CITY_PERMADEATH == null) CBZ.CONFIG.CITY_PERMADEATH = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_PERMADEATH == null) CBZ.CONFIG.CITY_PERMADEATH = false;
   function isFinalCause(reason, imp) {
-    if (!CBZ.CONFIG || CBZ.CONFIG.CITY_PERMADEATH === false) return false;
+    if (!CBZ.CONFIG || CBZ.CONFIG.CITY_PERMADEATH !== true) return false;
     if (imp && imp.fatal) return true;                    // scripted executions opt in
     if (imp && imp.headshot) return true;                 // through the skull
     if (isExplosionCause(reason)) return true;
@@ -395,10 +403,22 @@
 
   // ---- WASTED ----
   const _ragP = { x: 0, y: 0, z: 0 }, _ragD = { x: 0, y: 0, z: 0 };   // ragdoll scratch
+  let deathStars = 0;                 // the heat you died carrying (the bill reads it)
   CBZ.cityKillPlayer = function (reason, imp) {
     const P = CBZ.player;
     if (P.dead) return;
     P.dead = true; P.hp = 0; dying = true;
+    // THE COST OF DYING, bounded. The manhunt closes and street respect takes
+    // a dent (wanted.js); kills, crew, gang colors and the rest of your
+    // progress survive. The gun in your hand is lost: under Inventory V2 it
+    // already hit the pavement as a real pickup with the rest of your carried
+    // gear (inventory.js's death wrap ran before us); without V2 it is simply
+    // gone. The bill is charged at the hospital (respawn).
+    deathStars = g.wanted | 0;
+    if (CBZ.cityDeathPenalty) { try { CBZ.cityDeathPenalty(); } catch (e) {} }
+    if (CBZ.currentWeaponId && CBZ.lockWeapon && !(CBZ.CONFIG && CBZ.CONFIG.INVENTORY_V2 !== false && CBZ.cityDropItem)) {
+      try { CBZ.lockWeapon(CBZ.currentWeaponId); } catch (e) {}
+    }
     // cinematic third-person replay: orbit the body (camera.js reads cityCam)
     if (CBZ.cityCam) CBZ.cityCam.death = { t: 0, ang0: Math.random() * 6.28 };
 
@@ -683,6 +703,51 @@
   addEventListener("keydown", specSkip);
   addEventListener("mousedown", specSkip);
 
+  // ---- where you wake up, and which way you face ----
+  // The NEAREST hospital to where you fell (the old code took the first one in
+  // the lot list, wherever it was), a couple of metres OUT of its door rather
+  // than inside the door frame, facing the street.
+  function nearestHospital(x, z) {
+    const A = CBZ.city && CBZ.city.arena;
+    if (!A || !A.lots) return null;
+    let best = null, bd = Infinity;
+    for (let i = 0; i < A.lots.length; i++) {
+      const l = A.lots[i];
+      if (!l || l.kind !== "hospital" || !l.building || !l.building.door) continue;
+      const d = l.building.door, dd = (d.x - x) * (d.x - x) + (d.z - z) * (d.z - z);
+      if (dd < bd) { bd = dd; best = l; }
+    }
+    return best;
+  }
+  // unit vector from the lot's centre out through its door (door normals in
+  // this codebase point both ways depending on the builder, so derive it)
+  function doorOut(lot) {
+    const d = lot.building.door;
+    let ox = d.x - (lot.cx != null ? lot.cx : d.x), oz = d.z - (lot.cz != null ? lot.cz : d.z);
+    let l = Math.hypot(ox, oz);
+    if (l < 0.01 && d.nx != null) { ox = d.nx; oz = d.nz; l = Math.hypot(ox, oz); }
+    if (l < 0.01) return { x: 0, z: 1 };
+    return { x: ox / l, z: oz / l };
+  }
+  // facing along/toward the nearest road centre-line (the fallback when
+  // CBZ.cityFaceOpen is not there to pick an open view)
+  function roadYaw(x, z) {
+    const A = CBZ.city && CBZ.city.arena, roads = A && A.roads;
+    if (!roads || !roads.length) return null;
+    let best = null, bd = Infinity, bx = 0, bz = 0;
+    for (let i = 0; i < roads.length; i++) {
+      const r = roads[i], h = (r.len || 0) / 2;
+      const px = r.vertical ? r.x : Math.max(r.x - h, Math.min(r.x + h, x));
+      const pz = r.vertical ? Math.max(r.z - h, Math.min(r.z + h, z)) : r.z;
+      const dd = (px - x) * (px - x) + (pz - z) * (pz - z);
+      if (dd < bd) { bd = dd; best = r; bx = px; bz = pz; }
+    }
+    if (!best) return null;
+    if (bd > 9) return Math.atan2(bx - x, bz - z);           // look at the street
+    return best.vertical ? (z < best.z ? 0 : Math.PI) : (x < best.x ? Math.PI / 2 : -Math.PI / 2);   // standing on it: look down it
+  }
+
+  let hospitalT = 0;                  // the brief "HOSPITAL" card after waking
   function respawn() {
     const P = CBZ.player;
     dying = false; hideOverlay();
@@ -690,15 +755,29 @@
     if (CBZ.fpsDeathDropReset) CBZ.fpsDeathDropReset();   // dropped prop gone, viewmodel whole
     spectating = false; specKiller = null; pendingSpecKiller = null; g._citySpecTarget = null;
     if (specHUD) specHUD.style.display = "none";
-    if (CBZ.cityCam) CBZ.cityCam.death = null;          // end the cinematic, back to FP
-    // own a home? respawn there for free. Otherwise the ER patches you up for a bill.
+    if (CBZ.cityCam) CBZ.cityCam.death = null;          // end the cinematic
+    // own a home? respawn there for free. Otherwise the nearest ER patches you
+    // up for a bill.
     const A = CBZ.city.arena;
-    let spot = A.spawn, atHome = false;
+    let spot = A.spawn, atHome = false, out = null;
+    const fx = P.pos.x, fz = P.pos.z;
     if (g.citySpawnPoint) { spot = g.citySpawnPoint; atHome = true; }
-    else if (A.lots) { const h = A.lots.find((l) => l.kind === "hospital" && l.building); if (h) spot = h.building.door; }
+    else {
+      const h = nearestHospital(fx, fz);
+      if (h) { out = doorOut(h); const d = h.building.door; spot = { x: d.x + out.x * 2.6, z: d.z + out.z * 2.6 }; }
+    }
+    // THE BILL: 250 + 150 per star you died carrying, from your pocket first
+    // and then the bank. Never debt: if you have nothing, the ER eats it.
     let bill = 0;
-    if (!atHome) { bill = Math.min(g.cash || 0, 250 + (g.wanted | 0) * 150); if (bill > 0) g.cash -= bill; }
-    g._lastBill = bill;
+    if (!atHome) {
+      const want = 250 + deathStars * 150;
+      const fromCash = Math.min(Math.max(0, g.cash || 0), want);
+      g.cash = (g.cash || 0) - fromCash;
+      const fromBank = Math.min(Math.max(0, g.cityBank || 0), want - fromCash);
+      if (fromBank > 0) g.cityBank -= fromBank;
+      bill = fromCash + fromBank;
+    }
+    g._lastBill = bill; deathStars = 0;
     if (CBZ.cityWantedReset) CBZ.cityWantedReset();
     if (CBZ.clearCityCops) CBZ.clearCityCops();
     // hand the rig back WHOLE — any head/limb the death took comes back now,
@@ -714,24 +793,40 @@
     else { P._armor = 0; P._armorMax = 0; }
     g.hunger = Math.max(40, g.hunger || 0);
     if (P._phys) { P._phys.air = false; P._phys.down = 0; P._phys.kx = P._phys.kz = 0; }
+    // THIRD PERSON, level lens, facing the street. The old respawn dropped you
+    // into FIRST person at a random yaw with the lens pitched 0.4 (staring at
+    // the pavement / a wall) and you had to find yourself before you could move.
+    let yaw = out ? Math.atan2(out.x, out.z) : null;
+    const ry = roadYaw(spot.x, spot.z);
+    if (ry != null) yaw = ry;
+    if (yaw == null) yaw = CBZ.playerChar.group.rotation.y || 0;
     CBZ.playerChar.group.visible = true;
-    CBZ.playerChar.group.rotation.set(0, Math.random() * 6.28, 0);
+    CBZ.playerChar.group.rotation.set(0, yaw, 0);
     CBZ.playerChar.group.scale.y = 1;
     CBZ.playerChar.group.position.copy(P.pos);
-    g.invuln = 2.5;       // brief grace after the ER
-    if (CBZ.cam) CBZ.cam.pitch = 0.4;
-    if (CBZ.setFPS) {
-      const campaignTP = !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
-      CBZ.setFPS(!campaignTP);            // campaign returns to its shoulder camera; legacy city keeps FP
+    if (CBZ.setFPS) CBZ.setFPS(false);
+    if (typeof CBZ.cityFaceOpen === "function") {
+      try { const fy = CBZ.cityFaceOpen(P); if (typeof fy === "number" && isFinite(fy)) CBZ.playerChar.group.rotation.y = fy; } catch (e) {}
     }
+    if (CBZ.cam) {
+      CBZ.cam.yaw = CBZ.playerChar.group.rotation.y + Math.PI;     // mode.js's spawn convention
+      CBZ.cam.pitch = CBZ.CITY_TP ? CBZ.CITY_TP.PITCH : 0.06;
+    }
+    if (CBZ.resetZoom) CBZ.resetZoom();
+    g.invuln = 2.5;       // brief grace after the ER
+    if (CBZ.cityPoliceGrace) CBZ.cityPoliceGrace(25);   // no gun-stop on the hospital step
     if (CBZ.requestLock) CBZ.requestLock();
-    if (CBZ.city) CBZ.city.note(atHome ? "You wake up at home, patched up." : ("City Hospital. Bill: $" + (g._lastBill || 0)), 2.4);
+    // a short, readable wake-up beat on the existing WASTED overlay
+    showOverlay(atHome ? "HOME" : "HOSPITAL", atHome ? "Patched up at home." : (bill > 0 ? "Patched up. Bill paid: $" + bill : "Patched up. You couldn't pay, so the ER ate it."), "#8fd3ff");
+    hospitalT = 2.2;
+    if (CBZ.city) CBZ.city.note(atHome ? "You wake up at home, patched up." : ("City Hospital. Bill: $" + bill), 2.4);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
 
   CBZ.onUpdate(13, function (dt) {
     if (g.mode !== "city") return;
     if (g.invuln > 0) g.invuln = Math.max(0, g.invuln - dt);
+    if (hospitalT > 0 && !dying) { hospitalT -= dt; if (hospitalT <= 0) hideOverlay(); }
     if (dying) {
       // gun-drop beat over → hand the camera to the stock WASTED orbit
       if (pendingDeathCam) {
@@ -777,7 +872,7 @@
   // word, so every existing caller is unchanged.
   CBZ.cityBustOverlay = function (lost, done, opts) {
     opts = opts || {};
-    showOverlay(opts.title || "BUSTED", opts.note || ("Cuffed and processed" + (lost > 0 ? "  ·  lost $" + lost : "") + "  ·  off to the cells…"), "#5b8bff");
+    showOverlay(opts.title || "BUSTED", opts.note || ("Cuffed and processed." + (lost > 0 ? " Lost $" + lost + "." : "") + " Off to the cells."), "#5b8bff");
     let t = 0;
     const tick = function () {
       t += 0.05;

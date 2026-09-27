@@ -524,14 +524,18 @@
     // the depth offset (factor/units -2) does the separation from the asphalt,
     // so the markings sit near-coplanar (tiny y ladder kept only to order the
     // markings among THEMSELVES) instead of visibly hovering above the road.
+    // LIT PAINT. This was MeshBasicMaterial: unlit, so every stripe glowed
+    // at full white through midnight and stayed sunlit inside a building's
+    // shadow, the single loudest "diorama" tell on the street. Paint is a
+    // matte surface like the asphalt under it: Lambert, and it takes shadow.
     function paintMat(color) {
-      return new THREE.MeshBasicMaterial({ color: color,
+      return new THREE.MeshLambertMaterial({ color: color,
         polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     }
     function paintMesh(rects, color, y) {
       if (!rects.length) return;
       const m = quadField(rects, paintMat(color), y);
-      m.receiveShadow = false;
+      m.receiveShadow = true;
       // BATCH-EXEMPT (the floating-yellow-line root cause): core/batch.js's V2
       // merge re-materials its buckets with a shared plain material, silently
       // DROPPING polygonOffset — the paint then z-fights/parallax-hovers over
@@ -607,7 +611,7 @@
     }));
     if (zebraRects.length) {
       const zm = quadField(zebraRects, zebraM, 0.063);
-      zm.receiveShadow = false; zm.renderOrder = 1; zm.userData.roadPaint = true;
+      zm.receiveShadow = true; zm.renderOrder = 1; zm.userData.roadPaint = true;
     }
 
     // ---- blocks: a sidewalk slab + a DISTRICT-flavoured lot pad ----
@@ -1069,7 +1073,7 @@
           // the asphalt like paint; lambert stays plain (curbs/manholes are
           // raised/shadowed geometry, not paint).
           m = basic
-            ? new THREE.MeshBasicMaterial({ color, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
+            ? new THREE.MeshLambertMaterial({ color, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
             : new THREE.MeshLambertMaterial({ color });
           M.set(color + "|" + (basic ? 1 : 0), m);
         }
@@ -1080,7 +1084,7 @@
         const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), dm(color, basic));
         m.rotation.x = -Math.PI / 2; if (rotY) m.rotation.z = rotY;
         m.position.set(x, y == null ? 0.085 : y, z);
-        m.receiveShadow = !basic; root.add(m);
+        m.receiveShadow = true; root.add(m);
         return m;
       }
       // a low raised curb box (a sliver of height so it reads as a kerb edge)

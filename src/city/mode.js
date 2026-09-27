@@ -409,6 +409,98 @@
     return { x: pick.x, y: pick.y, z: pick.z };
   }
 
+  /* ---- FACE THE STREET: CBZ.cityFaceOpen(player?, opts?) -> yaw | null ----
+     The ONE place a spawn picks where the player looks. Samples 16 headings,
+     marches each against the real solid colliders in the player's standing
+     band (the same boxes the player collides with, so "open" means you could
+     walk that way), and scores clear distance plus a bias toward the nearest
+     street (A.roads) or, when standing inside a building, toward its door.
+     Writes the body yaw, the orbit camera yaw and a level pitch. mode.js
+     calls it at the end of every sandbox reset; origins.js calls it for its
+     generic placements and restores; death.js's respawn may call it too.
+     opts.pitch === false keeps the current camera pitch. Pure CPU, one pass
+     over the collider list, no allocation after the first call. */
+  const _faceNear = [];
+  function cityFaceOpen(P, opts) {
+    P = P || CBZ.player;
+    if (!P || !P.pos) return null;
+    const A = city.arena;
+    const px = P.pos.x, pz = P.pos.z, feet = P.pos.y || 0;
+    const R = 48, N = 16;
+    const cols = CBZ.colliders || [];
+    _faceNear.length = 0;
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (!c || c.maxX < px - R || c.minX > px + R || c.maxZ < pz - R || c.minZ > pz + R) continue;
+      if (c.y1 != null && c.y1 < feet + 0.4) continue;         // below the knees (kerbs, the slab you stand on)
+      if (c.y0 != null && c.y0 > feet + 1.9) continue;         // overhead (the next floor, awnings)
+      if (px > c.minX && px < c.maxX && pz > c.minZ && pz < c.maxZ) continue;   // a volume you are already inside
+      _faceNear.push(c);
+    }
+    // bias target: a building's door when inside one, else the nearest street
+    let bx = null, bz = null, bW = 0, alongRoad = null;
+    const inLot = (CBZ.cityNav && CBZ.cityNav.indoorLotAt && A && A.groundHeightAt && feet < A.groundHeightAt(px, pz) + 3)
+      ? CBZ.cityNav.indoorLotAt(px, pz) : null;
+    const door = inLot && inLot.building && inLot.building.door;
+    if (door && door.x != null) { bx = door.x; bz = door.z; bW = 30; }
+    else if (A && A.roads && A.roads.length) {
+      let best = 140;
+      for (let i = 0; i < A.roads.length; i++) {
+        const r = A.roads[i]; if (!r) continue;
+        const hl = (r.len || 0) / 2;
+        let qx, qz;
+        if (r.vertical) { qx = r.x; qz = Math.max(r.z - hl, Math.min(r.z + hl, pz)); }
+        else { qz = r.z; qx = Math.max(r.x - hl, Math.min(r.x + hl, px)); }
+        const d = Math.hypot(qx - px, qz - pz);
+        if (d < best) {
+          best = d;
+          if (d < (r.w || 18) / 2) { alongRoad = r.vertical ? 0 : Math.PI / 2; bx = null; }
+          else { alongRoad = null; bx = qx; bz = qz; }
+        }
+      }
+      bW = 18;
+    }
+    const biasYaw = bx != null ? Math.atan2(bx - px, bz - pz) : null;
+    let bestYaw = 0, bestScore = -Infinity;
+    for (let k = 0; k < N; k++) {
+      const yaw = (k / N) * Math.PI * 2;
+      const dx = Math.sin(yaw), dz = Math.cos(yaw);
+      let t = R;
+      for (let i = 0; i < _faceNear.length; i++) {
+        const c = _faceNear[i];
+        // 2D slab test, ray from (px,pz) along (dx,dz)
+        let t0 = 0, t1 = t;
+        if (Math.abs(dx) < 1e-6) { if (px < c.minX || px > c.maxX) continue; }
+        else {
+          let a = (c.minX - px) / dx, b = (c.maxX - px) / dx;
+          if (a > b) { const s = a; a = b; b = s; }
+          if (a > t0) t0 = a; if (b < t1) t1 = b;
+          if (t0 > t1) continue;
+        }
+        if (Math.abs(dz) < 1e-6) { if (pz < c.minZ || pz > c.maxZ) continue; }
+        else {
+          let a = (c.minZ - pz) / dz, b = (c.maxZ - pz) / dz;
+          if (a > b) { const s = a; a = b; b = s; }
+          if (a > t0) t0 = a; if (b < t1) t1 = b;
+          if (t0 > t1) continue;
+        }
+        if (t0 < t) t = t0;
+      }
+      let score = t;
+      if (biasYaw != null) score += bW * Math.cos(yaw - biasYaw);
+      else if (alongRoad != null) score += 12 * Math.abs(Math.cos(yaw - alongRoad));
+      if (score > bestScore) { bestScore = score; bestYaw = yaw; }
+    }
+    const ch = CBZ.playerChar && CBZ.playerChar.group;
+    if (ch) ch.rotation.y = bestYaw;
+    if (CBZ.cam) {
+      CBZ.cam.yaw = bestYaw + Math.PI;
+      if (!(opts && opts.pitch === false)) CBZ.cam.pitch = CBZ.CITY_TP ? CBZ.CITY_TP.PITCH : 0.06;
+    }
+    return bestYaw;
+  }
+  CBZ.cityFaceOpen = cityFaceOpen;
+
   // Resolve + place the configured city spawn only after buildCity has run:
   // island_airport.js owns the real geometry and publishes this safe anchor.
   // Keeping the config symbolic avoids duplicating airport coordinates here.
@@ -523,25 +615,20 @@
       // start unarmed in the ONE engine gun system; fresh mags. Buying/looting a
       // gun unlocks it in fpsmode (systems/fpsmode.js), which drives city gunplay.
       if (CBZ.resetWeaponInventory) CBZ.resetWeaponInventory();
-      // TEST LOADOUT: spawn with an RPG + a rifle + a sidearm so weapon switching
-      // (number keys 1-9) and the rocket/helicopter systems are testable from the
-      // first second. Toggle CBZ.CITY_TEST_LOADOUT=false to ship a clean start.
-      if (!campaignMode && CBZ.CITY_TEST_LOADOUT !== false && CBZ.unlockWeapon) {
-        CBZ.unlockWeapon("sidearm", { select: false });
-        CBZ.unlockWeapon("carbine", { select: false });
-        CBZ.unlockWeapon("bazooka", { select: true });
-      } else if (campaignMode && CBZ.unlockWeapon) {
+      // NO TEST KIT. The sandbox used to hand every character an RPG (selected),
+      // a carbine and a sidearm, so the first click of a new life was a rocket
+      // into your own feet and the first cop to see you opened fire. The
+      // sandbox starts EMPTY-HANDED here; each origin grants exactly what its
+      // story says (city/origins.js applyGrants / grant*), and a returning
+      // character gets their own saved arsenal back from the ledger. Guns are
+      // bought at the gun store, looted, or earned.
+      if (campaignMode && CBZ.unlockWeapon) {
         // Story starts as a professional hit, not a weapon sandbox. One sidearm
         // is enough; later dossiers can grant mission-specific equipment.
         CBZ.unlockWeapon("sidearm", { select: true });
       }
       if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();
-      // top the test loadout's reserves right up (fpsResetWeapons set base mags)
-      if (!campaignMode && CBZ.CITY_TEST_LOADOUT !== false && CBZ.fpsAddAmmo) {
-        CBZ.fpsAddAmmo(20, "bazooka"); CBZ.fpsAddAmmo(300, "carbine"); CBZ.fpsAddAmmo(120, "sidearm");
-      } else if (campaignMode && CBZ.fpsAddAmmo) {
-        CBZ.fpsAddAmmo(48, "sidearm");
-      }
+      if (campaignMode && CBZ.fpsAddAmmo) CBZ.fpsAddAmmo(48, "sidearm");
       if (CBZ.cityWorldBeginRun) CBZ.cityWorldBeginRun(game);
 
       // THIRD-PERSON by default (the jail follow camera); [V] toggles FP. The
@@ -704,7 +791,11 @@
       if (CBZ.playerChar.cuffed) CBZ.playerChar.cuffed = false;
       CBZ.playerChar.group.visible = true;
       CBZ.playerChar.group.position.copy(P.pos);
-      CBZ.playerChar.group.rotation.set(0, Math.random() * 6.28, 0);
+      // No random yaw: a coin-flip heading is how the first frame of a run was
+      // a wall at point-blank range. The final facing is chosen at the end of
+      // this reset by CBZ.cityFaceOpen (the longest clear sightline, biased to
+      // the nearest street), once origin/restore has settled the position.
+      CBZ.playerChar.group.rotation.set(0, 0, 0);
       CBZ.playerChar.group.scale.y = 1;
       // spawn pitch: near-level CITY_TP default, NOT a steep look-down — the
       // armed-3PS look target scales pitch by ~12m of aim lead, so 0.4 here
@@ -741,17 +832,27 @@
       // and drop a suited millionaire at the runway with cash still intact).
       // Campaign missions wrap this reset later and remain free to own a
       // required set-piece position such as the prologue helipad.
-      if (airportSpawn && !(originResult && originResult.introActive)) {
-        placePreferredCitySpawn(A, true);
+      const introLive = !!(originResult && originResult.introActive);
+      let airportPlaced = false;
+      if (airportSpawn && !introLive) {
+        airportPlaced = placePreferredCitySpawn(A, true);
       }
-      // CITY defaults to FIRST-PERSON (the jail's fpsmode); [V] toggles to 3rd-person.
-      if (campaignMode) {
-        // The campaign is authored and verified around the shoulder camera;
-        // first-person remains an explicit [V] choice, never the story default.
-        if (CBZ.setFPS) CBZ.setFPS(false);
-      } else if (!(originResult && originResult.introActive)) {
-        if (CBZ.setFPS) CBZ.setFPS(true);
-      }
+      // THIRD PERSON by default, everywhere. The sandbox used to switch
+      // first-person on for every non-intro start, which (with the random yaw
+      // above and a restore that often lands indoors) made the first frame
+      // after PLAY a wall filling the screen. The shoulder rig (city/camera.js
+      // CBZ.CITY_TP) is the tuned default; [V] still toggles first person.
+      if (CBZ.setFPS) CBZ.setFPS(false);
+      // FACE THE STREET. An authored origin scene sets its own staged facing
+      // and an explicit airport anchor carries its own yaw; every other start
+      // (rooftop, restored returning character, legacy adoption) looks down
+      // the most open direction instead of whatever it happened to face.
+      if (!campaignMode && !introLive && !airportPlaced && CBZ.cityFaceOpen) CBZ.cityFaceOpen(P);
+      // Guns ride HOLSTERED on a sandbox start: you own what your story or
+      // your save gave you, but you walk into the city with empty hands, so a
+      // stray click is a punch and cops do not see a drawn weapon. A number
+      // key (or the hotbar) draws.
+      if (!campaignMode && !jailbreakEntry) game.cityHolstered = true;
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     },
     winStats(game) {
