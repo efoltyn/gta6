@@ -447,9 +447,26 @@
     const fy = r.y < 0.1 ? r.y + 0.13 : r.y + 0.02;
     h.b.lbox(cx(r), fy, cz(r), w, 0.04, d, P.floor, { cast: false });
     if (dark) return;
-    const m = h.b.lbox(cx(r), r.y + h.fh - 0.24, cz(r), Math.min(w * 0.6, 8.0), 0.08, 0.5, P.light,
+    // FLUSH with the slab's underside (fh - 0.20), 1 cm deep: from the street
+    // it is the lit ceiling of the floor; walked into, the fit-out's finished
+    // ceiling (at ceil - 0.012) covers it and its own fixtures take over. The
+    // old strip hung 8 cm below that ceiling as a glowing slab in mid-air.
+    const m = h.b.lbox(cx(r), r.y + h.fh - 0.205, cz(r), Math.min(w * 0.6, 8.0), 0.01, 0.5, P.light,
       { emissive: P.light, ei: 0.32, cast: false });
     ceilingStrip(m);
+  }
+  // A TASK CHAIR (eager, 6 boxes): a cross base, a gas lift, the pad whose TOP
+  // is exactly `cush` (the anchor's cushionH), a back on its stem behind the
+  // sitter. (fx,fz) is the axis-aligned way the sitter looks. The old program
+  // chairs were a pad and a back floating in the air with nothing under them.
+  function taskChair(h, x, y, z, fx, fz, cush) {
+    const L = h.b.lbox, o = { cast: false }, ax = Math.abs(fx) > 0.5;
+    L(x, y + 0.035, z, 0.6, 0.03, 0.07, P.bezel, o);
+    L(x, y + 0.035, z, 0.07, 0.03, 0.6, P.bezel, o);
+    L(x, y + (cush - 0.07) / 2 + 0.025, z, 0.06, cush - 0.095, 0.06, P.bezel, o);
+    L(x, y + cush - 0.035, z, 0.5, 0.07, 0.5, P.chair, o);
+    L(x - fx * 0.25, y + cush + 0.05, z - fz * 0.25, ax ? 0.03 : 0.06, 0.16, ax ? 0.06 : 0.03, P.bezel, o);
+    L(x - fx * 0.27, y + cush + 0.34, z - fz * 0.27, ax ? 0.07 : 0.46, 0.46, ax ? 0.46 : 0.07, P.chair, o);
   }
   // rect containment — programs that place relative to a DOOR (lobby) can
   // aim outside a small plate; hosts without clearFloorPoint get no bounds
@@ -932,13 +949,14 @@
       // the SAME 1.5x0.85 station the desk farm draws, minus its worker.
       for (let i = 0; i < 2; i++) {
         const dx = sx - 1.6 + i * 3.0, dz = mz - 0.4;
-        if (!eb(dx, dz, 0.03, 1.5, 0.66, 0.85, P.desk, { pad: 0.6 })) continue;
-        eb(dx, dz, 0.69, 1.62, 0.08, 0.95, P.worktop, { pad: 0.6 });
+        if (!eb(dx, dz, 0.73, 1.6, 0.03, 0.85, P.worktop, { pad: 0.6 })) continue;   // top → 0.76
+        for (const a of [-1, 1]) eb(dx + a * 0.77, dz, 0, 0.03, 0.73, 0.76, P.desk, { pad: 0.05 });
+        eb(dx, dz - 0.39, 0.36, 1.5, 0.34, 0.02, P.desk, { pad: 0.05 });
         if (i === 0) {           // ONE monitor still on — the whole read
-          eb(dx, dz - 0.42, 0.79, 0.7, 0.46, 0.06, P.bezel, { pad: 0.55 });
-          eb(dx, dz - 0.42 + 0.03 + SCREEN_GAP + 0.01,
-            0.81, 0.58, 0.36, 0.02, P.screen,
-            { emissive: P.screen, ei: 0.55, pad: 0.55 }); // 2.5cm clear of bezel
+          eb(dx, dz - 0.37, 0.76, 0.05, 0.1, 0.03, P.bezel, { pad: 0.05 });
+          eb(dx, dz - 0.34, 0.86, 0.62, 0.38, 0.025, P.bezel, { pad: 0.05 });
+          eb(dx, dz - 0.34 + 0.0175, 0.8775, 0.59, 0.33, 0.004, P.screen,
+            { emissive: P.screen, ei: 0.55, pad: 0.05 });  // glass 3 mm proud of the bezel
         }
       }
       // a chair on its side, drawn as what a tipped chair actually is: the pad
@@ -989,19 +1007,25 @@
     const gz0 = cz(r) - ((rows - 1) * PITCH_Z) / 2 - 0.3;   // station reaches +1.15 (chair side)
     for (let c = 0; c < cols; c++) for (let w = 0; w < rows; w++) {
       const dx = gx0 + c * PITCH_X, dz = gz0 + w * PITCH_Z;
-      const seatZ = dz + 0.85, monZ = dz - 0.42;
+      const seatZ = dz + 0.85;
       // gate BOTH the chair and the desk body — the door aisle / stair strip /
       // elevator chase punch clean holes in the grid, nothing else does.
       if (!h.clear(dx, seatZ, 0.6) || !h.clear(dx, dz, 0.7)) continue;
-      h.b.lbox(dx, y + 0.36, dz, 1.5, 0.66, 0.85, P.desk, { cast: false });        // desk pedestal
-      h.b.lbox(dx, y + 0.72, dz, 1.62, 0.08, 0.95, P.worktop, { cast: false });    // worktop
-      h.b.lbox(dx, y + 1.02, monZ, 0.7, 0.46, 0.06, P.bezel, { cast: false });     // monitor
-      const screenZ = monZ + 0.03 + SCREEN_GAP + 0.01;
-      h.b.lbox(dx, y + 1.04, screenZ, 0.58, 0.36, 0.02, P.screen, { cast: false }); // lit face
-      h.b.lbox(dx, y + 0.74, monZ, 0.12, 0.12, 0.12, P.bezel, { cast: false });    // stand
-      h.b.lbox(dx, y + 0.42, seatZ, 0.6, 0.12, 0.6, P.chair, { cast: false });     // seat pad
-      h.b.lbox(dx, y + 0.78, seatZ + 0.26, 0.6, 0.7, 0.12, P.chair, { cast: false }); // backrest
-      h.b.lbox(dx, y + 0.2, seatZ, 0.1, 0.4, 0.1, P.bezel, { cast: false });       // post
+      // A BENCH DESK, not a block: a 30 mm top on two panel legs with a
+      // modesty panel, a slim monitor on a neck with its glass 3 mm proud (the
+      // old glass hovered 2.5 cm off a 6 cm slab), and a task chair. The
+      // fit-out adds the drawer pedestal, the screen and the clutter when you
+      // walk in. Worktop top stays 0.76, the pad top 0.48 (the anchor below).
+      const L = h.b.lbox, lo = { cast: false };
+      const pz = dz - 0.34;                                                         // the panel, on the top
+      L(dx, y + 0.745, dz, 1.6, 0.03, 0.85, P.worktop, lo);                        // worktop → 0.76
+      for (const a of [-1, 1]) L(dx + a * 0.77, y + 0.365, dz, 0.03, 0.73, 0.76, P.desk, lo);   // panel legs
+      L(dx, y + 0.53, dz - 0.39, 1.5, 0.34, 0.02, P.desk, lo);                     // modesty panel
+      L(dx, y + 0.81, pz - 0.03, 0.05, 0.1, 0.03, P.bezel, lo);                    // monitor neck
+      L(dx, y + 1.05, pz, 0.62, 0.38, 0.025, P.bezel, lo);                         // panel 0.86..1.24
+      const screenZ = pz + 0.0125 + 0.003 + 0.002;
+      L(dx, y + 1.06, screenZ, 0.59, 0.33, 0.004, P.screen, lo);                   // glass
+      taskChair(h, dx, y, seatZ, 0, -1, 0.48);
       anchors.push({
         x: h.ox + dx, y: y, z: h.oz + seatZ, face: Math.PI, lx: dx, lz: seatZ,
         cushionH: 0.48, floorBelow: 0,
@@ -1013,7 +1037,7 @@
       // visible face sits at screenZ+0.01 looking +z at the seat. Register the
       // actual outer glass, not the box centre, for the live overlay.
       if (feedReg < 3 && CBZ.cctvAddScreen) {
-        CBZ.cctvAddScreen(h.ox + dx, y + 1.04, h.oz + screenZ + 0.01, 0, 1);
+        CBZ.cctvAddScreen(h.ox + dx, y + 1.06, h.oz + screenZ + 0.004, 0, 1);
         feedReg++;
       }
     }
@@ -1054,8 +1078,16 @@
     const tb = function (across, hh, deep, ly, c) {
       h.b.lbox(mx2, y + ly, mz2, alongX ? deep : across, hh, alongX ? across : deep, c, { cast: false });
     };
-    tb(TL, 0.1, 1.3, 0.48, P.table);                              // top
-    tb(Math.max(0.6, TL - 1.4), 0.42, 0.5, 0.24, P.table);        // spine base
+    // a boardroom table: a 50 mm top on two slab pedestals with feet (it was a
+    // 10 cm slab on a spine block, top at 0.53: below a knee)
+    const tbAt = function (lat, across, hh, deep, ly, c) {
+      h.b.lbox(alongX ? mx2 : mx2 + lat, y + ly, alongX ? mz2 + lat : mz2, alongX ? deep : across, hh, alongX ? across : deep, c, { cast: false });
+    };
+    tb(TL, 0.05, 1.2, 0.715, P.table);                            // top → 0.74
+    for (const e of [-1, 1]) {
+      tbAt(e * TL * 0.3, 0.08, 0.66, 0.8, 0.36, P.table);          // pedestal slab
+      tbAt(e * TL * 0.3, 0.14, 0.03, 0.96, 0.015, P.bezel);        // its foot
+    }
     // INTERIOR_LOOT_V1: what somebody left on the boardroom table after the
     // meeting — one container per meeting room, hash-thinned like every desk.
     lootReg(h.ox + mx2, y, h.oz + mz2, "desk");
@@ -1065,31 +1097,32 @@
       const qx = alongX ? mx2 + off : mx2 + lat;
       const qz = alongX ? mz2 + lat : mz2 + off;
       if (!h.clear(qx, qz, 0.5)) continue;
-      h.b.lbox(qx, y + 0.42, qz, 0.5, 0.14, 0.5, P.chair, { cast: false });
-      h.b.lbox(qx + (alongX ? s * 0.24 : 0), y + 0.8, qz + (alongX ? 0 : s * 0.24),
-        alongX ? 0.12 : 0.5, 0.6, alongX ? 0.5 : 0.12, P.chair, { cast: false });
-      seatReg(h, qx, y, qz, Math.atan2(mx2 - qx, mz2 - qz), "chair", 0.49);
+      taskChair(h, qx, y, qz, alongX ? -s : 0, alongX ? 0 : -s, 0.48);
+      seatReg(h, qx, y, qz, Math.atan2(mx2 - qx, mz2 - qz), "chair", 0.48);
     }
     for (let e = -1; e <= 1; e += 2) {
       const lat = e * (TL / 2 + 0.75);
       const qx = alongX ? mx2 : mx2 + lat;
       const qz = alongX ? mz2 + lat : mz2;
       if (!h.clear(qx, qz, 0.5)) continue;
-      h.b.lbox(qx, y + 0.42, qz, 0.5, 0.14, 0.5, P.chair, { cast: false });
-      h.b.lbox(qx + (alongX ? 0 : e * 0.24), y + 0.8, qz + (alongX ? e * 0.24 : 0),
-        alongX ? 0.5 : 0.12, 0.6, alongX ? 0.12 : 0.5, P.chair, { cast: false });
-      seatReg(h, qx, y, qz, Math.atan2(mx2 - qx, mz2 - qz), "chair", 0.49);
+      taskChair(h, qx, y, qz, alongX ? 0 : -e, alongX ? -e : 0, 0.48);
+      seatReg(h, qx, y, qz, Math.atan2(mx2 - qx, mz2 - qz), "chair", 0.48);
     }
     // one wall screen on the FAR wall (glow proud of the bezel, toward the
     // room) + one light line over the table
-    const fx = alongX ? (din.nx > 0 ? room.x1 - 0.3 : room.x0 + 0.3) : mx2;
-    const fz = alongX ? mz2 : (din.nz > 0 ? room.z1 - 0.3 : room.z0 + 0.3);
-    h.b.lbox(fx, y + 1.62, fz, alongX ? 0.08 : 2.3, 1.15, alongX ? 2.3 : 0.08, P.bezel, { cast: false });
-    const screenOff = 0.04 + SCREEN_GAP + 0.02;
-    h.b.lbox(alongX ? fx - Math.sign(din.nx) * screenOff : fx, y + 1.62,
+    // the screen HANGS ON THE FAR WALL (it used to stand 0.7 m off it, in
+    // mid-air): a 40 mm panel on the shell face, the glass 3 mm proud of it
+    const SH = CBZ.interiorShellRect ? CBZ.interiorShellRect(h.b) : null;
+    const farX = din.nx > 0 ? (SH ? SH.x1 : room.x1 + 0.4) : (SH ? SH.x0 : room.x0 - 0.4);
+    const farZ = din.nz > 0 ? (SH ? SH.z1 : room.z1 + 0.4) : (SH ? SH.z0 : room.z0 - 0.4);
+    const fx = alongX ? farX - Math.sign(din.nx) * 0.03 : mx2;
+    const fz = alongX ? mz2 : farZ - Math.sign(din.nz) * 0.03;
+    h.b.lbox(fx, y + 1.62, fz, alongX ? 0.04 : 2.3, 1.3, alongX ? 2.3 : 0.04, P.bezel, { cast: false });
+    const screenOff = 0.02 + 0.003 + 0.002;
+    h.b.lbox(alongX ? fx - Math.sign(din.nx) * screenOff : fx, y + 1.64,
       alongX ? fz : fz - Math.sign(din.nz) * screenOff,
-      alongX ? 0.04 : 2.0, 0.9, alongX ? 2.0 : 0.04, P.glow, { emissive: P.glow, ei: 0.4, cast: false });
-    ceilingStrip(h.b.lbox(mx2, y + h.fh - 0.28, mz2, alongX ? 0.34 : TL * 0.8, 0.06, alongX ? TL * 0.8 : 0.34, P.light,
+      alongX ? 0.004 : 2.22, 1.2, alongX ? 2.22 : 0.004, P.glow, { emissive: P.glow, ei: 0.4, cast: false });
+    ceilingStrip(h.b.lbox(mx2, y + h.fh - 0.205, mz2, alongX ? 0.34 : TL * 0.8, 0.01, alongX ? TL * 0.8 : 0.34, P.light,
       { emissive: P.light, ei: 0.3, cast: false }));
     return { anchors: anchors };
   }
@@ -1099,6 +1132,7 @@
   //  identical shelf lines. An archive floor: monotony executed cleanly.
   // ========================================================================
   const RACK_PITCH = 2.6, RACK_SEG = 2.2, RACK_GAP = 0.5, RACK_H = 2.2;
+  const RACK_DECK0 = 0.1, RACK_DECK = 0.52;          // deck centres 0.10 .. 2.18 (fitout_work stocks them)
   function progStorage(r, h) {
     shell(h, r);
     const y = r.y;
@@ -1115,10 +1149,14 @@
       for (let z = r.z0 + 1.2; z + RACK_SEG <= Math.min(r.z1 - 1.0, zEnd); z += RACK_SEG + RACK_GAP) {
         const zc2 = z + RACK_SEG / 2;
         if (!h.clear(x, zc2, 0.8)) continue;                       // aisles/stairs punch clean gaps
-        h.b.lbox(x, y + RACK_H / 2, zc2, 0.6, RACK_H, RACK_SEG, P.desk, { cast: false });   // rack body
-        h.b.lbox(x, y + 0.8, zc2, 0.66, 0.06, RACK_SEG + 0.06, P.shelf, { cast: false });   // shelf line
-        h.b.lbox(x, y + 1.5, zc2, 0.66, 0.06, RACK_SEG + 0.06, P.shelf, { cast: false });   // shelf line
-        h.b.lbox(x, y + RACK_H + 0.03, zc2, 0.66, 0.06, RACK_SEG + 0.06, P.shelf, { cast: false }); // cap
+        // OPEN STEEL SHELVING: four uprights and five decks you can see
+        // through (the fit-out stocks them with archive boxes). The old bay
+        // was a SOLID 2.2 m block with three strips on it: a wall of stacked
+        // blocks, the worst thing on the office shot.
+        for (const a of [-1, 1]) for (const e of [-1, 1])
+          h.b.lbox(x + a * 0.28, y + RACK_H / 2, zc2 + e * (RACK_SEG / 2 - 0.03), 0.05, RACK_H, 0.05, P.desk, { cast: false });
+        for (let lv = 0; lv < 5; lv++)
+          h.b.lbox(x, y + RACK_DECK0 + lv * RACK_DECK, zc2, 0.6, 0.03, RACK_SEG, P.shelf, { cast: false });
         // INTERIOR_LOOT_V1: an archive bay you can actually go through. Thinned
         // hard — a rack floor is 80 bays and every one of them paying is a chore.
         lootReg(h.ox + x, y, h.oz + zc2, "rack");
@@ -1146,34 +1184,53 @@
     };
     const depth = along ? (r.x1 - r.x0) : (r.z1 - r.z0);
     const dIn = Math.min(6.0, Math.max(5.2, depth * 0.45));   // desk sits past the door aisle (aisle ends 4.8 in)
+    let featureWall = false;
     // THE DESK — one long front desk square to the door
     const pd = at(dIn, 0);
     if (inRect(r, pd.x, pd.z, 1.2) && h.clear(pd.x, pd.z, 0.9)) {
-      obox(pd, 0.5, 2.6, 0.92, 0.9, P.desk);
-      obox(pd, 0.99, 2.8, 0.07, 1.05, P.worktop);
+      // a reception counter: set-back plinth, the front panel, a transaction
+      // ledge at 1.05 for visitors and the staff worktop at 0.76 behind it
+      obox(at(dIn - 0.04, 0), 0.05, 2.5, 0.1, 0.72, P.bezel);
+      obox(pd, 0.55, 2.6, 0.9, 0.8, P.desk);
+      obox(at(dIn - 0.08, 0), 1.035, 2.8, 0.05, 0.72, P.worktop);
+      obox(at(dIn + 0.55, 0), 0.745, 2.4, 0.03, 0.5, P.worktop);
       // INTERIOR_LOOT_V1: the one desk on the arrival floor, and the only
       // container in this kit that is never thinned — there is exactly one
       // reception desk per lobby and skipping it would be skipping the lobby.
       lootReg(h.ox + pd.x, y, h.oz + pd.z, "reception");
       // the receptionist chair behind the desk, facing the door
       const pc = at(dIn + 0.95, 0);
-      obox(pc, 0.42, 0.56, 0.14, 0.56, P.chair);
-      obox(at(dIn + 1.2, 0), 0.78, 0.56, 0.62, 0.12, P.chair);
+      taskChair(h, pc.x, y, pc.z, -nx, -nz, 0.49);
       const yaw = Math.atan2(-nx, -nz);               // look back out the door
       anchors.push({
         x: h.ox + pc.x, y: y, z: h.oz + pc.z, face: yaw, lx: pc.x, lz: pc.z,
         cushionH: 0.49, floorBelow: 0,
       });
-      // the lit name band floating behind the desk
-      const pb = at(dIn + 1.7, 0);
-      h.b.lbox(pb.x, y + 2.35, pb.z, along ? 0.07 : 2.8, 0.5, along ? 2.8 : 0.07, P.light,
-        { emissive: P.light, ei: 0.35, cast: false });
+      // a FEATURE WALL behind reception, and the lit band mounted ON it (the
+      // band used to float on its own 1.7 m behind the desk). The fit-out
+      // veneers this wall in timber; its face is at dIn + 1.80.
+      const pw = at(dIn + 1.86, 0), fe = at(dIn + 1.92, 0);
+      featureWall = inRect(r, fe.x, fe.z, -0.35) && [-1.9, 0, 1.9].every(function (l) {
+        const q = at(dIn + 1.86, l); return inRect(r, q.x, q.z, -0.35) && h.clear(q.x, q.z, 0.15);
+      });
+      if (featureWall) {
+        h.b.lbox(pw.x, y + (h.fh - 0.2) / 2, pw.z, along ? 0.12 : 3.8, h.fh - 0.2, along ? 3.8 : 0.12, P.table, { cast: false, solid: true });
+        const pb = at(dIn + 1.785, 0);
+        h.b.lbox(pb.x, y + 2.35, pb.z, along ? 0.03 : 2.8, 0.36, along ? 2.8 : 0.03, P.light,
+          { emissive: P.light, ei: 0.35, cast: false });
+      }
     }
     // ONE waiting row — three seats, off the walk line, facing it
     const pbn = at(Math.min(dIn - 0.6, 4.6), -3.1);
     if (inRect(r, pbn.x, pbn.z, 1.0) && h.clear(pbn.x, pbn.z, 0.8)) {
-      obox(pbn, 0.36, 2.2, 0.16, 0.7, P.chair);                        // bench
-      obox(at(Math.min(dIn - 0.6, 4.6), -3.36), 0.72, 2.2, 0.6, 0.14, P.chair);  // backrest
+      // a beam bench: two leg frames, the beam, a seat whose top is 0.44 (the
+      // anchors' cushion), a back on posts. It was a slab and a board in the air.
+      const bd = Math.min(dIn - 0.6, 4.6);
+      for (const e of [-1, 1]) obox(at(bd + e * 0.95, -3.1), 0.2, 0.5, 0.4, 0.06, P.bezel);
+      obox(pbn, 0.32, 0.05, 0.05, 2.1, P.bezel);                       // beam (runs along the bench)
+      obox(pbn, 0.41, 0.48, 0.06, 2.2, P.chair);                       // seat → 0.44
+      for (const e of [-1, 1]) obox(at(bd + e * 0.95, -3.33), 0.66, 0.04, 0.44, 0.04, P.bezel);
+      obox(at(bd, -3.33), 0.74, 0.05, 0.36, 2.2, P.chair);             // back
       const fy = Math.atan2(tx, tz);                  // face across the walk (+tangent)
       for (let s = -1; s <= 1; s++) {
         const ps = at(Math.min(dIn - 0.6, 4.6) + s * 0.8, -3.1);
@@ -1184,10 +1241,11 @@
     for (let s = -1; s <= 1; s += 2) {
       const pp = at(2.0, s * 2.6);
       if (!inRect(r, pp.x, pp.z, 0.5) || !h.clear(pp.x, pp.z, 0.7)) continue;
-      obox(pp, 0.3, 0.6, 0.6, 0.6, P.planter);
-      obox(pp, 0.95, 0.7, 0.7, 0.7, P.leaf);
+      if (CBZ.furnish && CBZ.furnish.planter) {
+        try { CBZ.furnish.planter(pp.x, y, pp.z, 0, { box: h.b.lbox, ox: h.ox, oz: h.oz, kind: "tree", s: 1.0 }); } catch (e) {}
+      }
     }
-    return { anchors: anchors };
+    return { anchors: anchors, fit: { featureWall: featureWall } };
   }
 
   // ========================================================================
@@ -1230,7 +1288,7 @@
     function obox(p, ly, across, hh, deep, c, o) {
       if (!inRect(r, p.x, p.z, 0.12) || !h.clear(p.x, p.z, o && o.pad != null ? o.pad : 0.5)) return false;
       h.b.lbox(p.x, y + ly, p.z, along ? deep : across, hh, along ? across : deep, c,
-        (o && o.emissive) ? { emissive: o.emissive, ei: o.ei || 0.45, cast: false } : { cast: false });
+        (o && o.emissive) ? { emissive: o.emissive, ei: o.ei || 0.45, cast: false } : { cast: false, solid: !!(o && o.solid) });
       return true;
     }
     // Built-in architecture is allowed on a reserved perimeter or partition.
@@ -1328,11 +1386,22 @@
         A.obox(A.at(dep * 0.68 + 0.36, -half + 0.9), 0.6, 0.2, 0.06, 0.06, P.glow, { emissive: P.glow, ei: 0.6, pad: 0.45 });
         A.obox(A.at(dep * 0.68 - 1.0, -half + 0.9), 0.22, 0.4, 0.44, 0.4, P.chair, { pad: 0.4 });
       } }
-    // ---- CRATES stacked in the dead corner (two down, one on top) ---------
-    if (A.obox(A.at(dep - 1.2, -half + 0.7), 0.42, 0.85, 0.82, 0.85, P.crate, { pad: 0.45 }))
-      lootAtA(A, dep - 1.2, -half + 0.7, "crate");
-    A.obox(A.at(dep - 2.1, -half + 0.7), 0.42, 0.85, 0.82, 0.85, P.crate, { pad: 0.45 });
-    A.obox(A.at(dep - 1.2, -half + 0.7), 1.28, 0.8, 0.78, 0.8, P.crate, { pad: 0.45 });
+    // ---- THE FALL-BACK in the dead corner: a steel desk tipped over, its top
+    // standing on edge toward the way in (solid: real cover for the man with
+    // the long angle), the drawer pedestal and modesty panel behind it, and
+    // the ammo cans they keep back there (the loot).
+    { const dd = dep - 1.9, dl = A.lat(-half + 1.0, 0.9);
+      if (A.obox(A.at(dd, dl), 0.38, 1.5, 0.76, 0.05, P.desk, { pad: 0.45, solid: true })) {
+        A.obox(A.at(dd + 0.39, dl - 0.52), 0.36, 0.42, 0.7, 0.72, P.desk, { pad: 0.3 });     // pedestal, drawers up
+        A.obox(A.at(dd + 0.72, dl), 0.52, 1.36, 0.36, 0.03, P.desk, { pad: 0.3 });           // modesty panel
+        A.obox(A.at(dd + 0.39, dl + 0.72), 0.03, 0.05, 0.05, 0.7, P.steel, { pad: 0.3 });    // a leg, floor end
+        const ac = A.at(dd + 0.55, dl + 0.2);
+        if (A.obox(ac, 0.095, 0.3, 0.19, 0.16, 0x4d5a3a, { pad: 0.3 })) {                     // two ammo cans
+          A.obox(A.at(dd + 0.55, dl + 0.2), 0.285, 0.3, 0.19, 0.16, 0x4d5a3a, { pad: 0.3 });
+          A.obox(A.at(dd + 0.55, dl + 0.2), 0.39, 0.12, 0.02, 0.03, 0x2a2a2a, { pad: 0.3 }); // the lid latch
+          lootAtA(A, dd + 0.55, dl + 0.2, "crate");
+        }
+      } }
     // ---- THE POSTS --------------------------------------------------------
     // every lateral goes through A.lat() so a wide plate can't push a post
     // through the far wall and silently lose it to the inRect check
@@ -1759,8 +1828,8 @@
     if (!live) return { anchors: anchors, beds: beds, units: 0 };
     // the hall itself: one long strip light, which is the whole read from the
     // stairhead — a lit corridor with doors down it.
-    ceilingStrip(h.b.lbox(cx(r), y + h.fh - 0.26, cz(r),
-      alongX ? Math.min(runLen - 1.0, 14) : 0.3, 0.06,
+    ceilingStrip(h.b.lbox(cx(r), y + h.fh - 0.205, cz(r),
+      alongX ? Math.min(runLen - 1.0, 14) : 0.3, 0.01,
       alongX ? 0.3 : Math.min(runLen - 1.0, 14), P.light,
       { emissive: P.light, ei: 0.26, cast: false }));
     RES_TALLY.floors++; RES_TALLY.units += live; RES_TALLY.beds += beds.length;

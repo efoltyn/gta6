@@ -514,7 +514,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass grime).
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
-<script src="src/world/textures_surface.js?v=surf1"></script>
+<script src="src/world/textures_surface.js?v=deslop1"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
 <script src="src/world/prisonkit.js"></script>
@@ -885,7 +885,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/tsunami_flow.js?v=tsureal1"></script>
 <script src="src/world/tsunami_scene.js?v=tsureal1"></script>
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
-<script src="src/city/streetkit.js?v=streets1"></script>
+<script src="src/city/streetkit.js?v=deslop1"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -1264,17 +1264,17 @@ document.body.appendChild(b);}}catch(e){}})();
      painted blocks furnishShop used to put there are stripped before the batch
      merge. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
      models), interactions.js (the verbs) and worldmap.js (addLandmass). -->
-<script src="src/city/storegoods.js?v=realgoods1"></script>
+<script src="src/city/storegoods.js?v=deslop1"></script>
 <!-- THE WALK-IN FIT-OUT (city/fitout.js + its planners): the building you are
      in or at the door of is fitted out for real (finished floors, bathrooms,
      kitchens, bedrooms, stockrooms, a gang's count room, baked light from
      real fixtures) and freed when you leave. After storegoods (same lazy
      dresser shape), furniture.js (CBZ.furnish) and interior_programs.js
      (which declares every floor to it). -->
-<script src="src/city/fitout.js?v=fit1"></script>
-<script src="src/city/fitout_plans.js?v=fit1"></script>
-<script src="src/city/fitout_work.js?v=fit1"></script>
-<script src="src/city/fitout_gang.js?v=fit1"></script>
+<script src="src/city/fitout.js?v=deslop1"></script>
+<script src="src/city/fitout_plans.js?v=deslop1"></script>
+<script src="src/city/fitout_work.js?v=deslop1"></script>
+<script src="src/city/fitout_gang.js?v=deslop1"></script>
 <script src="src/city/swim.js?v=sharkmode1"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
      world/water_spec.js — because everything that cares about water in this
@@ -1767,7 +1767,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the [G] desk, keyed through city/keys.js and banked through CBZ.cityTill.
      Loads after storage.js (ownership), bank.js (the room) and cashstore.js
      (the bag verbs it hooks). -->
-<script src="src/city/propertyvault.js?v=pvault1"></script>
+<script src="src/city/propertyvault.js?v=deslop1"></script>
 <!-- LAND YOU OWN, AS A PLACE (city/plots.js): sale signs at the curb, the
      property panel at your address post, the contractor's demolition, locked
      doors, the deed map. Then the crew that lives there and the rival raids

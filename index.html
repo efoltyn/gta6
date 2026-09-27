@@ -528,7 +528,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass grime).
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
-<script src="src/world/textures_surface.js?v=surf1"></script>
+<script src="src/world/textures_surface.js?v=surf2"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
 <script src="src/world/prisonkit.js"></script>
@@ -545,7 +545,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Furniture kit: CBZ.furnish draws a piece AND registers its use-anchor in one
      call. After materials.js (resolves addBox at call time); before its consumers
      lounge.js / cafeteria.js / clutter.js. -->
-<script src="src/city/furniture.js?v=furnish2"></script>
+<script src="src/city/furniture.js?v=deslop1"></script>
 <!-- FURNITURE MOVES WHEN YOU WALK INTO IT (owner: "physics, not another
      f***ing button"). CBZ.pushables.add(spec) — still exported as CBZ.pushProp —
      makes a drawn prop a mass on a floor:
@@ -852,13 +852,13 @@ document.body.appendChild(b);}}catch(e){}})();
      drops on the pavement. Needs THREE + actorweapons + materials, all
      above; resolves itemicons' seams lazily so order between the two does
      not matter. -->
-<script src="src/city/itemassets.js?v=allmain1"></script>
+<script src="src/city/itemassets.js?v=deslop1"></script>
 <!-- WHAT A THING IN YOUR BAG IS: one drawn pictogram per item KIND (so
      runtime registrations — species pelts/meat, the fishing catch, produce,
      C4 — are covered structurally), plus its verb and its worth. Loads
      before every consumer: systems/inventory.js, city/hud.js, charpanel.js,
      city/inventory.js. Only needs CBZ + CBZ.CONFIG. -->
-<script src="src/city/itemicons.js?v=nodash1"></script>
+<script src="src/city/itemicons.js?v=deslop1"></script>
 <script src="src/systems/inventory.js?v=sharkmode1"></script>
 <!-- LOADING METER: the boot card's percentage, drawn on a worker thread so it
      keeps counting through the 20-30 s synchronous world build (the main
@@ -1003,9 +1003,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/tsunami_flow.js?v=tsureal1"></script>
 <script src="src/world/tsunami_scene.js?v=tsureal1"></script>
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
-<script src="src/city/streetkit.js?v=streets1"></script>
-<script src="src/city/world.js?v=roadmerge1"></script>
-<script src="src/city/interior_programs.js?v=nodash1"></script>
+<script src="src/city/streetkit.js?v=deslop1"></script>
+<script src="src/city/world.js?v=deslop1"></script>
+<script src="src/city/interior_programs.js?v=deslop1"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -1015,8 +1015,8 @@ document.body.appendChild(b);}}catch(e){}})();
      the shared masonry / portico / roof-clutter geometry. MUST load BEFORE
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
-<script src="src/city/buildings_civic.js?v=civic1"></script>
-<script src="src/city/buildings.js?v=cpd1"></script>
+<script src="src/city/buildings_civic.js?v=deslop1"></script>
+<script src="src/city/buildings.js?v=deslop1"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1066,14 +1066,14 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/facades/brickhouse.js?v=fk3"></script>
 <script src="src/city/facade_demo.js?v=fk2"></script>
 <script src="src/city/interiormap.js?v=intmap1"></script>
-<script src="src/city/interiorlight.js?v=room1"></script>
+<script src="src/city/interiorlight.js?v=deslop1"></script>
 <script src="src/city/citynav.js?v=brains1"></script>
 <script src="src/city/fracture.js?v=ruin1"></script>
 <script src="src/city/demolition.js?v=cpd1"></script>
-<script src="src/city/elevators.js?v=onecall1"></script>
-<script src="src/city/exec_office.js?v=nodash1"></script>
+<script src="src/city/elevators.js?v=fesc1"></script>
+<script src="src/city/exec_office.js?v=deslop1"></script>
 <script src="src/city/escalators.js?v=esc2"></script>
-<script src="src/city/roofloot.js?v=onecall1"></script>
+<script src="src/city/roofloot.js?v=deslop1"></script>
 <script src="src/city/beach.js?v=sharkfix2"></script>
 <script src="src/city/expansion.js?v=fuel1"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
@@ -1167,14 +1167,14 @@ document.body.appendChild(b);}}catch(e){}})();
      order works — kept adjacent for readability. -->
 <script src="src/city/speedway_structures.js?v=circuit1"></script>
 <script src="src/city/island_speedway.js?v=racerstory1"></script>
-<script src="src/city/island_airport.js?v=nodash1"></script>
+<script src="src/city/island_airport.js?v=deslop1"></script>
 <!-- THE AIRFIELD KIT + THE SECOND AIRPORT. buildAirfield() lays a complete
      field (runway, markings, edge lights, taxiway, apron, stands, terminal,
      tower, fence, kerb, access causeway) from one spec at any origin and any
      bearing, reusing island_airport.js's OWN airframe factories — which is
      why airport_capeharbor.js is a spec and a single call. Both load after
      island_airport.js: it is what publishes CBZ.airportKit. -->
-<script src="src/city/airport_kit.js?v=air1"></script>
+<script src="src/city/airport_kit.js?v=deslop1"></script>
 <script src="src/city/airport_capeharbor.js?v=nodash1"></script>
 <script src="src/city/island_military.js?v=nodash1"></script>
 <script src="src/city/biome_desert.js?v=organicdesert9"></script>
@@ -1234,7 +1234,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- street hardware kit: signal/lamp prototypes + the additive road light
      pools. Pure builders, no placement; props.js (next) places them. -->
 <script src="src/city/street_hardware.js?v=hw1"></script>
-<script src="src/city/props.js?v=nodash1"></script>
+<script src="src/city/props.js?v=deslop1"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
 <script src="src/city/propuse.js?v=nodash1"></script>
@@ -1251,13 +1251,13 @@ document.body.appendChild(b);}}catch(e){}})();
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
 <script src="src/city/factions.js?v=nodash1"></script>
-<script src="src/city/gangs.js?v=nodash1"></script>
+<script src="src/city/gangs.js?v=deslop1"></script>
 <script src="src/city/social.js?v=bare1"></script>
 <script src="src/city/realestate.js?v=nodash1"></script>
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=citysec1"></script>
-<script src="src/city/peds.js?v=nodash1"></script>
+<script src="src/city/peds.js?v=deslop1"></script>
 <script src="src/entities/pedinstance.js?v=pedinst1"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
@@ -1278,7 +1278,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/read.js?v=nodash1"></script>
 <script src="src/city/sizeup.js?v=lvl1y"></script>
 <script src="src/city/bling.js?v=fit3"></script>
-<script src="src/city/club.js?v=nodash1"></script>
+<script src="src/city/club.js?v=deslop1"></script>
 <script src="src/city/crowd.js?v=nukefield1"></script>
 <script src="src/city/blobshadows.js?v=cars1"></script>
 <!-- headlight pools + tail glow on the road at night (instanced ground decals,
@@ -1415,7 +1415,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/tornado.js?v=tornado1"></script>
 <script src="src/city/aircraftimpact.js?v=airimpact1"></script>
 <script src="src/city/shops.js?v=nodash1"></script>
-<script src="src/city/gunstore.js?v=nodash1"></script>
+<script src="src/city/gunstore.js?v=deslop1"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips — sold at the
      gunsmith bench in the gun store; scopeview does the zoom + scope overlay -->
 <script src="src/city/gunmods.js?v=nodash1"></script>
@@ -1426,7 +1426,7 @@ document.body.appendChild(b);}}catch(e){}})();
      always wins over the factory scope). Revert: CBZ.CONFIG.WEAPON_LOCKON /
      CBZ.CONFIG.SNIPER_REAL_SCOPE = false. -->
 <script src="src/systems/lockon.js?v=cars1"></script>
-<script src="src/city/jewelry.js?v=nodash1"></script>
+<script src="src/city/jewelry.js?v=deslop1"></script>
 <script src="src/city/careers.js?v=nodash1"></script>
 <script src="src/city/activities.js?v=nodash1"></script>
 <script src="src/city/heists.js?v=nodash1"></script>
@@ -1467,7 +1467,7 @@ document.body.appendChild(b);}}catch(e){}})();
      enterable, drivable and damageable like anything else — never scenery.
      After roadrules.js (the access law) and island_airport.js (the apron
      geometry it works). Revert with ?cfg_AIRSIDE_TRAFFIC=0. -->
-<script src="src/city/airside.js?v=air1s"></script>
+<script src="src/city/airside.js?v=deslop1"></script>
 <!-- THE AIRLINE. Claims a parked airliner off a stand and flies it, for real:
      doors, taxi to the holding point via a connector, backtrack, line up,
      rotate, climb, cruise, descend on the far field's extended centreline,
@@ -1516,34 +1516,34 @@ document.body.appendChild(b);}}catch(e){}})();
      the cone. (systems/craft.js is DELETED — owner mandate "kill crafting";
      its one live organ, the mode-aware item store, moved to
      CBZ.econ.itemStore in systems/economy.js.) -->
-<script src="src/systems/resources.js?v=allmain1"></script>
+<script src="src/systems/resources.js?v=deslop1"></script>
 <script src="src/city/explosives.js?v=nodash1"></script>
-<script src="src/city/armored.js?v=nodash1"></script>
+<script src="src/city/armored.js?v=deslop1"></script>
 <script src="src/city/death.js?v=nodash1"></script>
 <script src="src/city/camera.js?v=shouldergun2"></script>
 <script src="src/city/ragdoll.js?v=fall1"></script>
 <script src="src/city/leaderboard.js?v=nodash1"></script>
 <script src="src/city/zillow.js?v=cpd1"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
-<script src="src/city/bank.js?v=nodash1"></script>
-<script src="src/city/pawnshop.js?v=nodash1"></script>
-<script src="src/city/clothingstore.js?v=nodash1"></script>
-<!-- THE SHELVES SELL THE GOODS (city/storegoods.js): every generic store stands
-     its own real stock on its own shelves as the real item models, and the
-     painted blocks furnishShop used to put there are stripped before the batch
-     merge. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
+<script src="src/city/bank.js?v=deslop1"></script>
+<script src="src/city/pawnshop.js?v=deslop1"></script>
+<script src="src/city/clothingstore.js?v=deslop1"></script>
+<!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
+     gondola aisles, a cooler bank and its packaged goods for the few stores
+     near you, plus its real catalog stock as the real item models, buyable
+     where they stand. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
      models), interactions.js (the verbs) and worldmap.js (addLandmass). -->
-<script src="src/city/storegoods.js?v=realgoods1"></script>
+<script src="src/city/storegoods.js?v=deslop1"></script>
 <!-- THE WALK-IN FIT-OUT (city/fitout.js + its planners): the building you are
      in or at the door of is fitted out for real (finished floors, bathrooms,
      kitchens, bedrooms, stockrooms, a gang's count room, baked light from
      real fixtures) and freed when you leave. After storegoods (same lazy
      dresser shape), furniture.js (CBZ.furnish) and interior_programs.js
      (which declares every floor to it). -->
-<script src="src/city/fitout.js?v=fit1"></script>
-<script src="src/city/fitout_plans.js?v=fit1"></script>
-<script src="src/city/fitout_work.js?v=fit1"></script>
-<script src="src/city/fitout_gang.js?v=fit1"></script>
+<script src="src/city/fitout.js?v=deslop1"></script>
+<script src="src/city/fitout_plans.js?v=deslop1"></script>
+<script src="src/city/fitout_work.js?v=deslop1"></script>
+<script src="src/city/fitout_gang.js?v=deslop1"></script>
 <script src="src/city/realtyoffice.js?v=nodash1"></script>
 <script src="src/city/family.js?v=nodash1"></script>
 <script src="src/city/swim.js?v=sharkmode1"></script>
@@ -1610,7 +1610,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/captives.js?v=nodash1"></script>
 <script src="src/city/millionaires.js?v=nodash1"></script>
 <script src="src/city/regionlife.js?v=arch2"></script>
-<script src="src/city/modshop.js?v=nodash1"></script>
+<script src="src/city/modshop.js?v=deslop1"></script>
 <script src="src/city/stuntjumps.js?v=ballistic2z"></script>
 <script src="src/city/storage.js?v=cpd1"></script>
 <!-- MARINA + BOATYARD: finger berths, Med-moor quay, fuel dock, travel-lift
@@ -1620,8 +1620,8 @@ document.body.appendChild(b);}}catch(e){}})();
      persistence and net worth work with zero new save code. After storage.js
      — CBZ.cityBerth wraps citySpawnOwnedCar so every existing retrieval path
      became water-aware without a caller changing. -->
-<script src="src/city/marina.js?v=nodash1"></script>
-<script src="src/city/boatyard.js?v=nodash1"></script>
+<script src="src/city/marina.js?v=deslop1"></script>
+<script src="src/city/boatyard.js?v=deslop1"></script>
 <!-- THE APPROACH: how you get IN and OUT of a property. Every block in the
      city was ringed by an UNBROKEN kerb and every home's retrieved car was
      delivered at the pedestrian door on a hard-coded heading of 0 — sideways
@@ -1683,7 +1683,7 @@ document.body.appendChild(b);}}catch(e){}})();
      item-drop pickups + placeable storage chests, and wraps cityKillPlayer so
      the player's guns drop on death. Needs economy/worldstate/combat/fpsmode/
      death.js/charpanel.js, all loaded above. -->
-<script src="src/city/inventory.js?v=nodash1"></script>
+<script src="src/city/inventory.js?v=deslop1"></script>
 <script src="src/city/phone.js?v=nodash1"></script>
 <script src="src/city/killfeed.js?v=sharkmode1"></script>
 <!-- THE MORGUE (DEATH_DROPS_V2 / CORPSE_PERSIST / EMS_RESPONSE): what a death
@@ -1701,7 +1701,7 @@ document.body.appendChild(b);}}catch(e){}})();
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
      already loaded above — so it goes last in the city block. -->
-<script src="src/city/origins.js?v=inworld1"></script>
+<script src="src/city/origins.js?v=deslop1"></script>
 <!-- The one hitman pipe + the motel room HQ (wall of marks, gear case, the
      tiered ladder of marks) — activities' Crime doors and the campaign's
      merged opening both route through it. -->
@@ -1960,7 +1960,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Ace + composed town casinos): marquee/mast exterior, felt tables with
      seats + an "[E] Sit at the table" that opens the casino floor. Loads after
      countries.js and its deps (interactions.js, activities.js, worldmap). -->
-<script src="src/city/casino.js?v=casino1s"></script>
+<script src="src/city/casino.js?v=deslop1"></script>
 <!-- THE RIVER: the marina's way to the sea. The harbour pass in continent.js
      opens a 67 m bay ring around the city rect and closes it on all four
      sides, so every boat in the game floated in a moat — a flood fill from a
@@ -2170,13 +2170,13 @@ document.body.appendChild(b);}}catch(e){}})();
      (it reads that file's published site record), storage.js (the property
      ledger it writes through) and inventory.js (CBZ.cashBags). Revert with
      ?cfg_CASH_STORE_V1=0. -->
-<script src="src/city/cashstore.js?v=nodash1"></script>
+<script src="src/city/cashstore.js?v=deslop1"></script>
 <!-- A VAULT YOU BOUGHT, ON LAND YOU BOUGHT (city/propertyvault.js). The SAME
      CBZ.cityVaultRoom the bank uses, built into a property you own, paid for at
      the [G] desk, keyed through city/keys.js and banked through CBZ.cityTill.
      Loads after storage.js (ownership), bank.js (the room) and cashstore.js
      (the bag verbs it hooks). -->
-<script src="src/city/propertyvault.js?v=pvault1"></script>
+<script src="src/city/propertyvault.js?v=deslop1"></script>
 <!-- LAND YOU OWN, AS A PLACE (city/plots.js): sale signs at the curb, the
      property panel at your address post, the contractor's demolition, locked
      doors, the deed map. Then the crew that lives there and the rival raids
@@ -2293,9 +2293,9 @@ document.body.appendChild(b);}}catch(e){}})();
          atlas texture the house-number plates reuse. -->
 <script src="src/world/detail_kit.js?v=detail1x"></script>
 <script src="src/world/utility_lines.js?v=detail1t"></script>
-<script src="src/world/street_furniture.js?v=detail1"></script>
+<script src="src/world/street_furniture.js?v=deslop1"></script>
 <script src="src/world/world_grime.js?v=detail1"></script>
-<script src="src/world/building_dress.js?v=detail1"></script>
+<script src="src/world/building_dress.js?v=roof1"></script>
 <script src="src/core/farcull.js?v=fc2z"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
 <script src="src/core/viewscope.js?v=vs1"></script>

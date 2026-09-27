@@ -256,23 +256,7 @@
   // vertices × sources with no culling, so a real 3 m grid of troffers
   // bakes from every other fixture (a checkerboard, wider radius) and the
   // rest are the lit fittings you see.
-  function fixtureOnly(B, x, z, o) {
-    const kind = o.kind || "panel", c = B.ceil;
-    if (kind === "panel") {
-      box(B, x, c - 0.03, z, 0.6, 0.03, 0.6, 0xf7f7f2, { glow: true });
-      box(B, x, c - 0.02, z, 0.66, 0.02, 0.66, 0xb8bab8);
-    } else if (kind === "strip") {
-      const L = o.len || 1.2, ax = o.axis === "z";
-      box(B, x, c - 0.08, z, ax ? 0.14 : L, 0.06, ax ? L : 0.14, 0xd9dcdc);
-      box(B, x, c - 0.095, z, ax ? 0.08 : L - 0.04, 0.02, ax ? L - 0.04 : 0.08, 0xfdfcf6, { glow: true });
-    } else if (kind === "dome") {
-      box(B, x, c - 0.075, z, 0.34, 0.07, 0.34, 0xf3f0e6, { glow: true });
-    } else if (kind === "bulb") {
-      const dy = o.drop || 0.45;
-      box(B, x, c - dy, z, 0.012, dy, 0.012, 0x151515);
-      box(B, x, c - dy - 0.1, z, 0.07, 0.1, 0.07, 0xfff0c0, { glow: true });
-    }
-  }
+  function fixtureOnly(B, x, z, o) { B.fixture(x, z, o); }
   // 600×600 troffers (or battens, domes, bulbs) on a real module;
   // skip(x,z) vetoes a slot
   function troffers(B, R, module, skip, o) {
@@ -326,14 +310,10 @@
   }
 
   // ---- pieces (P: a wall frame, u along the wall, v off it) --------------
+  // a floor plant is the furniture kit's F.planter (a ficus in a big pot): it
+  // used to be three green cubes stacked on a grey one
   function plant(B, x, z, s) {
-    s = s || 1;
-    box(B, x, B.fy, z, 0.44 * s, 0.46 * s, 0.44 * s, C.pot);
-    box(B, x, B.fy + 0.46 * s, z, 0.4 * s, 0.02, 0.4 * s, C.soil);
-    box(B, x, B.fy + 0.46 * s, z, 0.05, 0.5 * s, 0.05, 0x4a3a28);
-    box(B, x, B.fy + 0.72 * s, z, 0.62 * s, 0.46 * s, 0.58 * s, C.leaf);
-    box(B, x + 0.04, B.fy + 1.12 * s, z - 0.03, 0.5 * s, 0.42 * s, 0.52 * s, C.leaf2);
-    box(B, x - 0.03, B.fy + 1.48 * s, z + 0.02, 0.32 * s, 0.34 * s, 0.34 * s, C.leaf3);
+    return B.furn("planter", x, z, 0, { kind: "tree", s: (s || 1) * 0.95 });
   }
   function bin(B, x, z) {
     box(B, x, B.fy, z, 0.34, 0.6, 0.34, 0x4a5058);
@@ -478,7 +458,9 @@
       // --- the WC ---
       sp(0.3, 0.7, v0 + 0.0, v0 + 0.18, y + 0.42, 0.36, C.porcelain);          // cistern
       sp(0.36, 0.64, v0 + 0.03, v0 + 0.15, y + 0.78, 0.03, 0xe2e2de);          // cistern lid
-      sp(0.33, 0.67, v0 + 0.18, v0 + 0.68, y, 0.38, C.porcelain);              // bowl
+      sp(0.4, 0.6, v0 + 0.18, v0 + 0.5, y, 0.26, C.porcelain);                 // trap pedestal
+      sp(0.33, 0.67, v0 + 0.18, v0 + 0.56, y + 0.26, 0.12, C.porcelain);       // bowl
+      sp(0.36, 0.64, v0 + 0.56, v0 + 0.68, y + 0.26, 0.12, C.porcelain);       // its rounded front
       sp(0.32, 0.68, v0 + 0.2, v0 + 0.72, y + 0.38, 0.03, 0xfafaf6);           // seat
       sp(0.88, 0.98, v0 + 0.55, v0 + 0.66, y + 0.7, 0.1, C.chrome);            // roll holder
       sp(0.89, 0.97, v0 + 0.56, v0 + 0.65, y + 0.64, 0.1, C.paper);            // the roll
@@ -532,14 +514,14 @@
     o = o || {};
     const R = { x0: S.x0, x1: S.x1, z0: S.z0, z1: S.z1 };
     floorPlane(B, R, floorMat, floorTint);
-    if (o.ceiling !== false) floorPlane(B, R, "ceiling", 0xffffff, 0, true);
+    if (o.ceiling !== false) floorPlane(B, R, o.ceilMat || "ceiling", o.ceilTint == null ? 0xffffff : o.ceilTint, 0, true);
     const mod = o.module || (B.h(1, 2, 0x51) < 0.5 ? 3.0 : 3.6);
     const rooms = o.rooms || [];
     return troffers(B, R, mod, function (x, z) {
       if (inAny(rooms, x, z, 0.35)) return true;
       if (o.skip && o.skip(x, z)) return true;
       return false;
-    }, { r: 5.4, i: 0.5 });
+    }, { r: o.lightR || 5.4, i: o.lightI || 0.5, kind: o.fixture || "panel" });
   }
   // the S rect with the raw x0 (the facade under the stairwell) remembered
   function shellFull(B) {
@@ -603,8 +585,21 @@
   function eagerY(B) { return (B.rect && B.rect.y != null) ? B.rect.y : (B.k === 0 ? 0 : B.y0); }
 
   function deskClutter(B, d, top, lampsLeft) {
-    const x = d.x, z = d.z;
+    const x = d.x, z = d.z, eY = top - 0.76;
+    // what the eager bench desk leaves to the walk-in: a mobile drawer
+    // pedestal under the right of the top, a fabric screen clamped to the
+    // back edge with an aluminium cap, and the task chair's arms
+    box(B, x + 0.52, eY + 0.03, z + 0.06, 0.42, 0.58, 0.52, 0x4a5260);
+    for (let i = 0; i < 3; i++) box(B, x + 0.52, eY + 0.1 + i * 0.19, z + 0.326, 0.38, 0.17, 0.012, 0x565e6c);
+    for (let i = 0; i < 3; i++) box(B, x + 0.52, eY + 0.22 + i * 0.19, z + 0.337, 0.12, 0.015, 0.012, 0xb9bec4);
+    box(B, x, top, z - 0.44, 1.6, 0.42, 0.03, hashPick(B, [0x5b6571, 0x6b6f63, 0x4f5b66], d.c | 0, 1, 0xd9));
+    box(B, x, top + 0.42, z - 0.44, 1.61, 0.012, 0.036, 0xc5c9cc);
+    for (const a of [-1, 1]) {
+      box(B, x + a * 0.27, eY + 0.48, z + 0.9, 0.03, 0.17, 0.03, C.dark);
+      box(B, x + a * 0.27, eY + 0.65, z + 0.86, 0.05, 0.03, 0.26, C.dark);
+    }
     box(B, x, top, z + 0.12, 0.44, 0.022, 0.15, 0x2a2d31);                         // keyboard
+    box(B, x, top + 0.022, z + 0.125, 0.41, 0.003, 0.12, 0x3c4046);                  // its keys
     box(B, x + 0.34, top, z + 0.14, 0.06, 0.03, 0.1, 0x2a2d31);                    // mouse
     const h1 = B.h(x, z, 0xd1), h2 = B.h(x, z, 0xd2), h3 = B.h(x, z, 0xd3);
     if (h1 < 0.7) {                                                                // a mug
@@ -708,12 +703,10 @@
         const P = far.F.at(cu - L / 2, 0);
         const R = far.F.rect(cu - L / 2, 0, cu + L / 2, 0.46);
         if (rectFree(B, null, R, 0.04) && !winHit(B, far.F, cu - L / 2, cu + L / 2, B.fy, B.fy + 0.8)) {
-          P.span(B, 0, L, 0.0, 0.45, B.fy + 0.08, 0.66, C.walnut, { solid: true });
-          P.span(B, 0.04, L - 0.04, 0.0, 0.41, B.fy, 0.08, C.dark);
-          P.span(B, -0.01, L + 0.01, 0.0, 0.47, B.fy + 0.74, 0.03, 0x6e5238);
-          for (let k = 1; k < 3; k++) P.span(B, L * k / 3 - 0.005, L * k / 3 + 0.005, 0.45, 0.455, B.fy + 0.12, 0.58, 0x3a2a1e);
-          P.span(B, 0.2, 0.5, 0.1, 0.34, B.fy + 0.77, 0.06, C.paper);                  // a stack of handouts
-          P.span(B, L - 0.4, L - 0.25, 0.14, 0.3, B.fy + 0.77, 0.24, 0xcfd6dc);         // a water carafe
+          B.furn("credenza", P.x(L / 2, 0.245), P.z(L / 2, 0.245), P.yaw(0, 1), { len: L, h: 0.74, deep: 0.47, tone: { wood: C.walnut } });
+          P.span(B, 0.2, 0.5, 0.1, 0.34, B.fy + 0.74, 0.06, C.paper);                  // a stack of handouts
+          P.span(B, L - 0.38, L - 0.27, 0.16, 0.27, B.fy + 0.74, 0.22, 0xcfd6dc, { glass: true });   // a water carafe
+          P.span(B, L - 0.37, L - 0.28, 0.17, 0.26, B.fy + 0.74, 0.13, 0x9cc8e6);        // the water in it
           occ.add(R);
         }
       }
@@ -770,10 +763,11 @@
       box(B, A.x(0, 1.3), B.fy, A.z(0, 1.3), along ? 1.4 : 2.0, 0.012, along ? 2.0 : 1.4, 0x2b2d31);
       if (deskLanded) {
         // THE FEATURE WALL behind reception: the lit band now hangs on something
-        const fwR = A.rect(-1.9, dIn + 1.8, 1.9, dIn + 1.92);
-        if (rectFree(B, null, fwR, 0.05)) {
-          A.span(B, -1.9, 1.9, dIn + 1.8, dIn + 1.92, B.fy, Math.min(3.0, B.ceil - B.fy - 0.02), C.walnut, { mat: "wood", solid: true });
-          A.span(B, -1.95, 1.95, dIn + 1.78, dIn + 1.94, B.fy, 0.12, C.dark);
+        // the eager lobby stands the wall (with its lit band); this is its
+        // timber veneer, 4 mm proud of it, and a shadow-line skirting
+        if (B.info && B.info.featureWall) {
+          A.span(B, -1.905, 1.905, dIn + 1.796, dIn + 1.8, B.fy, B.ceil - B.fy - 0.012, C.walnut, { mat: "wood" });
+          A.span(B, -1.91, 1.91, dIn + 1.78, dIn + 1.796, B.fy, 0.1, C.dark);
         }
         // three pendants over the desk
         const drop = pendantDrop(B, 2.2);
@@ -796,10 +790,13 @@
         occ.add(sg);
         B.furn("armchair", A.x(3.3, benchD - 0.75), A.z(3.3, benchD - 0.75), sy, { tone: "exec" });
         B.furn("armchair", A.x(3.3, benchD + 0.75), A.z(3.3, benchD + 0.75), sy, { tone: "exec" });
+        // a pedestal side table between them: disc foot, stem, top
         const tx = A.x(3.35, benchD), tz = A.z(3.35, benchD);
-        box(B, tx, B.fy, tz, 0.44, 0.52, 0.44, C.walnut);
-        box(B, tx, B.fy + 0.52, tz, 0.48, 0.03, 0.48, 0x6e5238);
-        box(B, tx, B.fy + 0.55, tz, 0.26, 0.03, 0.2, C.paper);                    // magazines
+        box(B, tx, B.fy, tz, 0.36, 0.02, 0.36, C.dark);
+        box(B, tx, B.fy + 0.02, tz, 0.05, 0.5, 0.05, C.dark);
+        box(B, tx, B.fy + 0.52, tz, 0.5, 0.03, 0.5, C.walnut);
+        box(B, tx, B.fy + 0.55, tz, 0.26, 0.02, 0.2, C.paper);                    // magazines
+        box(B, tx + 0.02, B.fy + 0.57, tz + 0.01, 0.24, 0.012, 0.19, 0x7a2e2e);
       }
       // THE DIRECTORY: a plain dark panel on the side wall by the door
       const sides = sidesOf(S);
@@ -825,7 +822,7 @@
     }
     const rooms = restroomPair(B, occ, S, restroomOrder(B, S)) || [];
     officeShell(B, S, "terrazzo", 0xffffff, {
-      rooms: rooms,
+      rooms: rooms, ceilMat: "plaster", ceilTint: 0xf4f2ee, fixture: "can", module: 2.4, lightR: 4.2, lightI: 0.5,
       skip: function (x, z) { for (let i = 0; i < pend.length; i++) if (Math.abs(x - pend[i].x) < 1.6 && Math.abs(z - pend[i].z) < 1.6) return true; return false; },
     });
     officeExtras(B, S, occ, { copier: false, cooler: false, plants: true, maxPlants: 2 });
@@ -929,7 +926,7 @@
   function planStorage(B) {
     if (!B.rect) return;
     const r = B.rect, S = shellFull(B), occ = baseOcc(B, S);
-    const RACK_PITCH = 2.6, RACK_SEG = 2.2, RACK_GAP = 0.5, RACK_CAP = 80;
+    const RACK_PITCH = 2.6, RACK_SEG = 2.2, RACK_GAP = 0.5, RACK_CAP = 80;   // == interior_programs.js progStorage
     const spanX = (r.x1 - r.x0) - 2.0;
     const aisles = [];
     let zLo = r.z0 + 1.2, zHi = r.z1 - 1.0;
@@ -945,6 +942,39 @@
     }
     const rooms = restroomPair(B, occ, S, restroomOrder(B, S)) || [];
     floorPlane(B, { x0: S.x0, x1: S.x1, z0: S.z0, z1: S.z1 }, B.h(5, 5, 0x5a) < 0.5 ? "concrete" : "vinyl", 0xd4d2cc);
+    floorPlane(B, { x0: S.x0, x1: S.x1, z0: S.z0, z1: S.z1 }, "plaster", 0xd9d9d5, 0, true);   // painted slab soffit
+    // STOCK THE RACKS (interior_programs.js draws them open: four uprights,
+    // five decks at 0.10 + 0.52 k). Archive cartons on the lower four decks,
+    // gaps where somebody pulled one, the same grid the eager pass walked.
+    if (spanX >= 0.5) {
+      const eY = eagerY(B);
+      const segs = Math.max(1, Math.floor(((r.z1 - 1.0) - (r.z0 + 1.2)) / (RACK_SEG + RACK_GAP)) + 1);
+      const runs = gridCap(Math.max(1, 1 + Math.floor(spanX / RACK_PITCH)), segs, RACK_CAP)[0];
+      const zEnd = r.z0 + 1.2 + Math.min(segs, Math.ceil(RACK_CAP / runs)) * (RACK_SEG + RACK_GAP);
+      const rx0 = (r.x0 + r.x1) / 2 - ((runs - 1) * RACK_PITCH) / 2;
+      const CART = [C.carton, C.carton2, 0xe6dcc4, 0xd8ccb0];
+      for (let i = 0; i < runs; i++) {
+        const x = rx0 + i * RACK_PITCH;
+        for (let z = r.z0 + 1.2; z + RACK_SEG <= Math.min(r.z1 - 1.0, zEnd); z += RACK_SEG + RACK_GAP) {
+          const zc = z + RACK_SEG / 2;
+          if (!B.clear(x, zc, 0.8)) continue;
+          for (let lv = 0; lv < 4; lv++) {
+            const yb = eY + 0.1 + lv * 0.52 + 0.015;
+            let u = -RACK_SEG / 2 + 0.08, q = 0;
+            while (u < RACK_SEG / 2 - 0.4 && q < 7) {
+              const hv = B.h(x + u * 3.1, zc + lv * 1.7, 0x5a1 + q);
+              const w = 0.3 + hv * 0.08;
+              if (hv > 0.18) {
+                const hh = 0.26 + (hv * 7.3 % 1) * 0.1;
+                box(B, x, yb, z + RACK_SEG / 2 + u + w / 2, 0.42, hh, w, CART[(hv * 13.7 | 0) % CART.length]);
+                box(B, x, yb + hh, z + RACK_SEG / 2 + u + w / 2, 0.43, 0.012, w + 0.006, 0xcfc2a6);   // the lid
+              }
+              u += w + 0.03; q++;
+            }
+          }
+        }
+      }
+    }
     // battens down the aisles (a store room is lit where you walk)
     let n = 0;
     for (let i = 0; i < aisles.length; i++) {
@@ -1002,6 +1032,7 @@
     }
     const rooms = restroomPair(B, occ, S, restroomOrder(B, S), E.dark) || [];
     floorPlane(B, { x0: S.x0, x1: S.x1, z0: S.z0, z1: S.z1 }, "concrete", 0xd8d6d0);
+    floorPlane(B, { x0: S.x0, x1: S.x1, z0: S.z0, z1: S.z1 }, "concrete", 0xe6e5e1, 0, true);   // bare slab soffit
     // exposed battens on a 3.0 × 2.4 grid, about a quarter of them dead
     const W = S.x1 - S.x0, D = S.z1 - S.z0;
     const nx = Math.max(1, Math.round(W / 3.0)), nz = Math.max(1, Math.round(D / 2.4));
@@ -1057,7 +1088,7 @@
      SHOPS — one planner, the trade picks the set.
      ======================================================================== */
   const FLOOR = {
-    food: ["checker", 0xffffff], bar: ["wood", 0x7a5a48], casino: ["carpet", 0xb04848],
+    food: ["tile", 0xf3efe6], bar: ["wood", 0x7a5a48], casino: ["carpet", 0xb04848],
     clothing: ["wood", 0xffffff], eyewear: ["wood", 0xf0e8de], jewelry: ["wood", 0xa88a78],
     hospital: ["tile", 0xffffff], gym: ["vinyl", 0x4a4d52], guns: ["concrete", 0xd4cfc4],
     drugs: ["concrete", 0xa89f90], barber: ["checker", 0xffffff], bank: ["terrazzo", 0xffffff],
@@ -1071,14 +1102,15 @@
   const FLAG_COUNTER = { guns: 1, jewelry: 1, pawn: 1, bank: 1, casino: 1, realtor: 1, carlot: 1, chop: 1, clothing: 1, raceway: 1 };
   // no floor from us: the showroom's turntable pads sit at the old floor
   const NO_FLOOR = { carlot: 1, chop: 1 };
-  const NO_CEILING = { bar: 1, casino: 1, drugs: 1, carlot: 1, chop: 1, firestation: 1, gym: 1 };
+  // (the trap house gets a real ceiling: an old storefront's drop ceiling, stained, its
+  //  bare bulbs hanging from it; it used to show the raw slab over a concrete floor)
+  const NO_CEILING = { carlot: 1, firestation: 1, gym: 1 };
   // trades that get a stockroom when the room is not already back-walled
   const STOCK_KINDS = { store: 1, gas: 1, electronics: 1, hardware: 1, security: 1, gym: 1, drugs: 1,
     hospital: 1, barber: 1, eyewear: 1, paintball: 1 };
-  // storegoods.js stands shelving along the side walls of these
-  const SG_SKIP = { guns: 1, jewelry: 1, pawn: 1, clothing: 1, boutique: 1, realtor: 1, carlot: 1, chop: 1,
-    casino: 1, bar: 1, bank: 1, cityhall: 1, raceway: 1, courthouse: 1, federal: 1, cityannex: 1,
-    postoffice: 1, dmv: 1, library: 1, firestation: 1 };
+  // the trades that keep buildings.js's back-of-house partition (and so get no
+  // stockroom here): the bank and the civic halls
+  const BACK_OF_HOUSE = { bank: 1, cityhall: 1, courthouse: 1, federal: 1, cityannex: 1, postoffice: 1, dmv: 1, library: 1 };
   const CLAD = {
     food: [0xb8bcc0, 0xc23a36, 0xd8d8d4], hospital: [0xf2f3f4, 0x5b8bd0, 0xe8ecef], gas: [0xd8dadc, 0xe24b4b, 0x9aa0a6],
     electronics: [0xf2f3f4, 0x39d0c0, 0x2a2d31], hardware: [0xc8a878, 0xffd166, 0x8a7a5a], bar: [0x3a2618, 0xc9a54a, 0x2a1a10],
@@ -1108,8 +1140,9 @@
     };
     const Bi = 2 * halfIn - wt;                             // inner back face
     const Ti = halfTan - wt;                                // inner side faces at lat ±Ti
-    const backWalled = kind !== "carlot" && kind !== "chop" && kind !== "realtor" && kind !== "firestation"
-      && (2 * halfTan) >= 8 && (2 * halfIn) >= 13;
+    // (buildings.js keeps its back-of-house partition for the bank and the civic
+    // halls only; every other trade gets a stockroom BESIDE the counter, below)
+    const backWalled = !!BACK_OF_HOUSE[kind] && (2 * halfTan) >= 8 && (2 * halfIn) >= 13;
     const occ = baseOcc(B, S);
     const y = B.fy;
     // the stair strip, in lateral terms (hasStairs puts it on the building's -x side)
@@ -1130,20 +1163,17 @@
     }
     const vendor = K ? { x: K.x + inx * 1.2, z: K.z + inz * 1.2 } : null;
 
-    // ---- storegoods.js's side-wall shelving (replicated so nothing lands in it)
+    // ---- storegoods.js's sales floor: wall bays, gondolas, cooler, coffee ----
+    // It publishes the footprints it stood (building-local); they go straight
+    // into the ledger, with an aisle's worth in front of the wall pieces, so
+    // nothing below lands in a gondola. (This used to RE-DERIVE storegoods'
+    // old layout formula here, a second copy of it that drifted.)
     const sgSpans = [];
-    if (!SG_SKIP[kind] && halfTan - wt - 0.52 >= 1.1) {
-      const walled = (2 * halfTan) >= 8 && (2 * halfIn) >= 13;
-      const maxDepth = 2 * halfIn - (walled ? 6.3 : 4.3);
-      const run = maxDepth - 4.2;
-      const units = Math.max(0, Math.min(3, Math.floor(run / (2.05 + 0.6))));
-      const step = units > 1 ? (run - 2.05) / (units - 1) : 0;
-      for (let u = 0; u < units; u++) {
-        const d0 = 4.2 + 2.05 / 2 + u * step;
-        if (d0 + 2.05 / 2 > maxDepth + 0.01) break;
-        sgSpans.push([d0 - 1.1, d0 + 1.1]);
-        for (let s = -1; s <= 1; s += 2) occ.add(F.rect(s * Ti, d0 - 1.1, s * (Ti - 0.52 - 0.6), d0 + 1.1));
-      }
+    const SGR = (CBZ.storeGoodsRects && CBZ.storeGoodsRects(b)) || [];
+    for (let i = 0; i < SGR.length; i++) {
+      const r = SGR[i];
+      occ.add(grow(r, r.wall ? 0.35 : 0.2));
+      if (r.wall) sgSpans.push([r.d0, r.d1]);
     }
     const inSg = function (d0, d1) { for (let i = 0; i < sgSpans.length; i++) if (d1 > sgSpans[i][0] && d0 < sgSpans[i][1]) return true; return false; };
 
@@ -1158,21 +1188,9 @@
     if (kind === "gym") { for (let i = 0; i < 2; i++) for (let s = -1; s <= 1; s += 2) eagerAt(5.4 + i * 3.0, s * (halfTan - 1.8), 0.9, 1.0); eagerAt(hi2 - 3.4, halfTan - 1.6, 0.7, 1.4); }
     if (kind === "hospital") { for (let i = 0; i < 2; i++) eagerAt(5.6 + i * 3.2, -(halfTan - 1.9), 0.9, 1.3); }
     if (kind === "barber") { for (let s = -1; s <= 1; s += 2) eagerAt(6.0, s * (halfTan - 1.6), 0.9, 0.6); }
-    if (kind === "hardware") { eagerAt(hi2 - 5.0, -(halfTan - 2.0), 0.8, 1.3); eagerAt(6.6, halfTan - 1.2, 0.7, 1.4); }
-    if (kind === "gas") { eagerAt(hi2 - 4.4, halfTan - 1.2, 0.7, 0.5); eagerAt(halfIn, 0, 0.8, 1.2); eagerAt(hi2 - 2.6, 0, 0.6, 1.6); }
-    if (kind === "electronics") { eagerAt(halfIn, 0, 1.0, 1.2); eagerAt(hi2 - 1.8, 0, 0.6, 1.6); }
-    if (kind === "security") eagerAt(hi2 - 2.6, 0, 0.6, 1.6);
+    // (hardware/gas/electronics/security/generic eager floor pieces are gone:
+    //  their sales floors are storegoods.js's, already in the ledger above)
     if (kind === "food") { for (let i = 0; i < 2; i++) for (let s = -1; s <= 1; s += 2) eagerAt(5.0 + i * 3.2, s * (halfTan - 1.7), 0.8, 0.8); }
-    if (kind === "bar") {
-      for (let i = -1; i <= 1; i++) eagerAt(hi2 - 4.4, i * 1.6, 0.6, 0.4);
-      for (let i = 0; i < 2; i++) for (let s = -1; s <= 1; s += 2) eagerAt(5.4 + i * 3.2, s * (halfTan - 2.3), 0.6, 0.6);
-      eagerAt(hi2 - 3.6, -(halfTan - 1.6), 0.8, 1.2);
-    }
-    if (kind === "store" || kind === "eyewear" || kind === "paintball" || !FLOOR[kind]) {
-      // the generic dresser's gondola (its default branch)
-      const gd = halfIn + 0.6;
-      if (gd <= hi2 - 6.0) eagerAt(gd, 1.9, 1.2, 1.4);
-    }
 
     // ---- THE STOCKROOM: a back corner beside the counter ----
     const extraRooms = [];
@@ -1211,7 +1229,7 @@
     const f = FLOOR[kind] || ["vinyl", 0xffffff];
     const SR = { x0: S.x0, x1: S.x1, z0: S.z0, z1: S.z1 };
     if (!NO_FLOOR[kind]) floorPlane(B, SR, f[0], f[1]);
-    if (!NO_CEILING[kind]) floorPlane(B, SR, "ceiling", 0xffffff, 0, true);
+    if (!NO_CEILING[kind]) floorPlane(B, SR, "ceiling", kind === "drugs" ? 0xc4bca9 : 0xffffff, 0, true);   // nicotine-yellowed in the trap house
     const pend = [];
     if (kind === "bar" || kind === "casino") {
       // warm pendants over the counter; the eager neon owns the rest of the mood
@@ -1259,13 +1277,26 @@
       // impulse rack at the far end of the counter from the till
       const irSide = regLat <= cLat ? 1 : -1;
       const irLat = cLat + irSide * (hLat - 0.26);
-      if (hLat > 0.7 && Math.abs(irLat - regLat) > 0.5) {
+      // THE IMPULSE RACK: a wire counter stand of three stepped trays, each
+      // holding three columns of candy bars lying flat, front to back, the size
+      // candy bars are (13 x 3.5 x 1.4 cm). It was three rows of 10 cm painted
+      // cubes. Not on a food counter: the hot food warmer stands at that end.
+      if (hLat > 0.7 && Math.abs(irLat - regLat) > 0.5 && kind !== "food") {
         const IV = cIn - hIn + 0.16;
-        for (let s = -1; s <= 1; s += 2) F.box(B, irLat + s * 0.19, IV, top, 0.02, 0.42, 0.24, 0x8a9098);
-        const cols = [0xe24b4b, 0xffc94a, 0x4caf6e, 0x5a8aff, 0xc792ea, 0xff9e6b];
+        const WIRE = 0x3a3d42;
+        for (let s = -1; s <= 1; s += 2) {
+          F.box(B, irLat + s * 0.2, IV, top, 0.012, 0.46, 0.012, WIRE);                    // upright
+          F.box(B, irLat + s * 0.2, IV + 0.1, top, 0.012, 0.3, 0.012, WIRE);
+        }
+        const cols = [0x8c1f2a, 0xd9a21e, 0x2e6b3a, 0x2a4f8f, 0x5a2d6e, 0xc4541f, 0x3b2a22, 0xb8322a, 0x1f6f5c];
         for (let r2 = 0; r2 < 3; r2++) {
-          F.box(B, irLat, IV, top + 0.02 + r2 * 0.14, 0.38, 0.012, 0.24, 0x9aa0a6);
-          for (let i = 0; i < 3; i++) F.box(B, irLat - 0.12 + i * 0.12, IV, top + 0.032 + r2 * 0.14, 0.1, 0.09, 0.16, cols[(r2 * 3 + i) % cols.length]);
+          const ty = top + 0.04 + r2 * 0.14, tv = IV - 0.04 + r2 * 0.045;            // stepped back as it rises
+          F.box(B, irLat, tv, ty, 0.4, 0.008, 0.2, WIRE);                               // tray
+          F.box(B, irLat, tv - 0.1, ty, 0.4, 0.03, 0.008, WIRE);                        // front lip
+          for (let i = 0; i < 3; i++) {
+            const c = cols[(r2 * 3 + i) % cols.length], la = irLat - 0.13 + i * 0.13;
+            for (let k = 0; k < 5; k++) F.box(B, la, tv - 0.075 + k * 0.037, ty + 0.008 + (k & 1) * 0.001, 0.12, 0.014, 0.034, c);
+          }
         }
       }
       if (kind === "food") {                                                           // tip jar by the till
@@ -1307,8 +1338,7 @@
 
     // ---- the trade's own set pieces, where the eager dresser has none ----
     if (kind === "food") shopFoodBooths(B, F, ept, halfTan, Ti);
-    if (kind === "bar" && K) shopBackBar(B, F, cLat, hLat, Bi, Ti, vendor);
-    if (kind === "bar") shopDanceFloor(B, F, ept, halfIn);
+    // (the bar is the Velvet Club: its back bar and dance floor are club.js's)
     if (kind === "hardware") shopPegboard(B, F, S, Ti, wt, inSg);
     if (kind === "barber") shopBarberMirrors(B, F, ept, halfTan, Ti, inSg);
     if (kind === "gym") { shopGymMirror(B, F, Ti, wt, Bi, inSg); shopGymMats(B, F, ept, along, halfIn); }
@@ -1380,44 +1410,6 @@
         if (B.clear(x, z, 0.05)) B.furn("bench", x, z, F.yaw(-s, 0), { len: 1.4 });
       }
       B.light(table.x, table.z, { kind: "pendant", drop: drop, r: 3.0, i: 0.5, color: 0xffe2b0, shade: 0xc23a36 });
-    }
-  }
-  function shopBackBar(B, F, cLat, hLat, Bi, Ti, vendor) {
-    const y = B.fy;
-    const l0 = Math.max(-Ti + 0.1, cLat - hLat), l1 = Math.min(Ti - 0.1, cLat + hLat);
-    if (l1 - l0 < 1.2) return;
-    const R = F.rect(l0, Bi - 0.5, l1, Bi);
-    if (vendor && inRect(grow(R, 0.45), vendor.x, vendor.z, 0)) return;
-    if (!B.clear(F.x((l0 + l1) / 2, Bi - 0.25), F.z((l0 + l1) / 2, Bi - 0.25), 0.05)) return;
-    F.span(B, l0, l1, Bi - 0.5, Bi, y + 0.1, 0.8, 0x2a1a10, { solid: true });          // back cabinet
-    F.span(B, l0 + 0.02, l1 - 0.02, Bi - 0.47, Bi, y, 0.1, 0x1a1a1c);
-    F.span(B, l0 - 0.02, l1 + 0.02, Bi - 0.53, Bi, y + 0.9, 0.04, 0x3a2618);            // its top
-    F.span(B, l0, l1, Bi - 0.015, Bi, y + 1.1, 1.1, C.mirror);                          // mirror band
-    const cols = [0x6fbf73, 0xc7b06f, 0x8a3b2e, 0xd8d0b0, 0x6f9fbf, 0x4a2a1a];
-    for (let sh = 0; sh < 2; sh++) {
-      const sy = y + 1.3 + sh * 0.48;
-      F.span(B, l0 + 0.05, l1 - 0.05, Bi - 0.24, Bi - 0.015, sy, 0.03, 0x9fb4bc);        // glass shelf
-      const n = Math.floor((l1 - l0 - 0.2) / 0.13);
-      for (let i = 0; i < n; i++) {
-        const la = l0 + 0.15 + i * 0.13;
-        const h = 0.22 + B.h(la, sh, 0xb0) * 0.12;
-        F.box(B, la, Bi - 0.12, sy + 0.03, 0.07, h, 0.07, cols[(i + sh * 2) % cols.length]);
-        F.box(B, la, Bi - 0.12, sy + 0.03 + h, 0.025, 0.06, 0.025, 0x2a2a2a);
-      }
-    }
-    // glasses and a shaker on the back counter
-    for (let i = 0; i < 4; i++) F.box(B, l0 + 0.3 + i * 0.14, Bi - 0.3, y + 0.94, 0.07, 0.1, 0.07, 0xcfe4ec);
-    F.box(B, l1 - 0.35, Bi - 0.28, y + 0.94, 0.09, 0.2, 0.09, C.chrome);
-  }
-  function shopDanceFloor(B, F, ept, halfIn) {
-    // the eager floor is laid at y 0..0.07, under the 0.14 slab: lay it on top
-    const p = ept(halfIn + 0.4, 0, 1.2) || ept(halfIn, 0, 1.2);
-    if (!p) return;
-    const cols = [0xe85d8a, 0x8a4fff, 0x39d0ff, 0xffd400];
-    const dIn = (p.x * F.nx + p.z * F.nz) - (F.ox * F.nx + F.oz * F.nz), dLat = (p.x - F.ox) * F.ax + (p.z - F.oz) * F.az;
-    F.box(B, dLat, dIn, B.fy, 2.95, 0.01, 2.95, 0x111114);
-    for (let gx = -1; gx <= 1; gx++) for (let gz = -1; gz <= 1; gz++) {
-      F.box(B, dLat + gx * 0.95, dIn + gz * 0.95, B.fy + 0.01, 0.88, 0.006, 0.88, cols[(gx + gz + 2) % cols.length], { glow: true });
     }
   }
   function shopPegboard(B, F, S, Ti, wt, inSg) {
