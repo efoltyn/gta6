@@ -157,7 +157,7 @@ body.full-map-open #speech, body.sim-view #speech{ display:none !important; }
     <li><b>2</b>Second half you are on foot in the same city. Run to a flak gun, man it and shoot the bombers down.</li>
     <li><b>3</b>A red ring on the ground is where a bomb will land. Get out of it, or get under a roof.</li>
   </ol>
-  <button id="go">PLAY</button>
+  <button id="go" data-boot-entry>PLAY</button>
   <div class="st" id="st"></div>
   <a class="menu" href="../index.html">MAIN MENU</a>
 </div></div>
@@ -314,15 +314,10 @@ if (town && town.rect) {
   TOWN_RECT = { minX: town.rect.minX - 26, maxX: town.rect.maxX + 26,
                 minZ: town.rect.minZ - 26, maxZ: town.rect.maxZ + 26 };
 }
-(function apron() {
-  const g = new THREE.PlaneGeometry(TOWN_RECT.maxX - TOWN_RECT.minX, TOWN_RECT.maxZ - TOWN_RECT.minZ);
-  g.rotateX(-Math.PI / 2);
-  g.translate((TOWN_RECT.minX + TOWN_RECT.maxX) / 2, 0.005, (TOWN_RECT.minZ + TOWN_RECT.maxZ) / 2);
-  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x66645f }));
-  m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
-  m.userData.terrain = true;
-  CBZ.scene.add(m);
-})();
+// the harbour apron between the town pad and the quay edge is the scene
+// layer's (granite setts, kerb flags); towngen's pad covers town.rect + 3 m
+const APRON_HOLE = town && town.rect ? { minX: town.rect.minX - 3, maxX: town.rect.maxX + 3,
+  minZ: town.rect.minZ - 3, maxZ: town.rect.maxZ + 3 } : null;
 
 if (WANT_AIRPORT) { st("HALLORAN FIELD"); port = CBZ.studio.raise("airport"); }
 
@@ -342,7 +337,7 @@ try {
                    Object.assign({ kind: "causeway" }, BASE_CW)];
     if (WANT_AIRPORT) { lands.push(Object.assign({ kind: "port" }, PORT_RECT)); lands.push(Object.assign({ kind: "causeway" }, PORT_CW)); }
     scene3 = window.BombScene.install({ THREE: THREE, CBZ: CBZ, scene: CBZ.scene, camera: cam, renderer: CBZ.renderer,
-      seaY: SEA_Y, lands: lands, replaceSea: true });
+      seaY: SEA_Y, lands: lands, apronHole: APRON_HOLE, replaceSea: true });
     if (scene3 && scene3.fx) fx = scene3.fx;
   }
 } catch (e) { console.error("[bomb scene]", e); scene3 = null; fx = NOFX; }
@@ -352,6 +347,12 @@ if (!scene3) {
   const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x2e4c66 }));
   m.matrixAutoUpdate = false; m.updateMatrix(); m.userData.terrain = true;
   CBZ.scene.add(m);
+  const ag = new THREE.PlaneGeometry(TOWN_RECT.maxX - TOWN_RECT.minX, TOWN_RECT.maxZ - TOWN_RECT.minZ);
+  ag.rotateX(-Math.PI / 2);
+  ag.translate((TOWN_RECT.minX + TOWN_RECT.maxX) / 2, 0.005, (TOWN_RECT.minZ + TOWN_RECT.maxZ) / 2);
+  const am = new THREE.Mesh(ag, new THREE.MeshLambertMaterial({ color: 0x66645f }));
+  am.matrixAutoUpdate = false; am.updateMatrix(); am.userData.terrain = true;
+  CBZ.scene.add(am);
 }
 
 // ============================================================ THE STREETS
@@ -460,17 +461,11 @@ scope = CBZ.radar.create({
 });
 
 // ============================================================ FLAK
-// Five emplacements in the open: a sandbag ring, a twin-barrel mount on a
-// pedestal, ammunition, and a light column over it so both halves can find
-// it — the bomber to kill it, the runner to crew it.
-const FLAK_MAT = {
-  bag:   new THREE.MeshLambertMaterial({ color: 0x6d6250 }),
-  steel: new THREE.MeshLambertMaterial({ color: 0x48503f }),
-  dark:  new THREE.MeshLambertMaterial({ color: 0x23261f }),
-  crate: new THREE.MeshLambertMaterial({ color: 0x5d5a3a }),
-  char:  new THREE.MeshLambertMaterial({ color: 0x1b1a18 }),
-};
-const BAG_GEO = (function () { const g = new THREE.SphereGeometry(0.5, 10, 6); g.scale(1.25, 0.46, 0.62); return g; })();
+// Five emplacements in the open. The mount, the sandbag pit and the ready
+// ammunition are bomb-survivor-scene.js's flak kit (a real 40 mm twin, not a
+// cylinder with a box for a shield); this page adds the light column over it
+// so both halves can find it: the bomber to kill it, the runner to crew it.
+const FLAK_KIT = window.BombScene && window.BombScene.flakKit ? window.BombScene.flakKit(THREE) : null;
 const BEAM_GEO = (function () {
   const g = new THREE.CylinderGeometry(2.4, 3.6, 260, 16, 1, true);
   g.translate(0, 130, 0);
@@ -480,59 +475,23 @@ const BEAM_GEO = (function () {
   return g;
 })();
 function buildGunModel(x, z) {
-  const root = new THREE.Group();
-  root.position.set(x, groundAt(x, z), z);
-  // sandbags: two courses round a 3.4 m ring, a gap left for the crew to get in
-  const n = 18;
-  const bags = new THREE.InstancedMesh(BAG_GEO, FLAK_MAT.bag, n * 2);
-  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
-  let k = 0;
-  for (let c = 0; c < 2; c++) {
-    for (let i = 0; i < n; i++) {
-      const a = (i + (c ? 0.5 : 0)) / n * Math.PI * 2;
-      if (Math.abs(wrapPi(a - Math.PI * 0.5)) < 0.36) continue;          // the entry
-      p.set(Math.cos(a) * 3.4, 0.22 + c * 0.42, Math.sin(a) * 3.4);
-      q.setFromAxisAngle(_v.set(0, 1, 0), -a + Math.PI / 2 + (rnd() - 0.5) * 0.2);
-      s.set(1 + (rnd() - 0.5) * 0.18, 1, 1);
-      m4.compose(p, q, s); bags.setMatrixAt(k++, m4);
-    }
-  }
-  bags.count = k; bags.castShadow = true; bags.receiveShadow = true;
-  root.add(bags);
-  // pedestal and turntable
-  const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.8, 1.0, 12), FLAK_MAT.steel);
-  ped.position.y = 0.5; ped.castShadow = true; root.add(ped);
-  const yaw = new THREE.Group(); yaw.position.y = 1.05; root.add(yaw);
-  const table = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.05, 0.18, 16), FLAK_MAT.steel);
-  table.castShadow = true; yaw.add(table);
-  const shield = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.1, 0.08), FLAK_MAT.steel);
-  shield.position.set(0, 0.7, 0.55); shield.rotation.x = -0.12; shield.castShadow = true; yaw.add(shield);
-  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.1, 0.45), FLAK_MAT.dark);
-  seat.position.set(0.55, 0.55, -0.5); yaw.add(seat);
-  const pitch = new THREE.Group(); pitch.position.set(0, 0.75, 0.1); yaw.add(pitch);
-  const cradle = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.45, 1.1), FLAK_MAT.steel);
-  cradle.castShadow = true; pitch.add(cradle);
-  const barrelGeo = new THREE.CylinderGeometry(0.075, 0.1, 3.4, 8); barrelGeo.rotateX(Math.PI / 2); barrelGeo.translate(0, 0, 1.9);
-  for (let sgn = -1; sgn <= 1; sgn += 2) {
-    const b = new THREE.Mesh(barrelGeo, FLAK_MAT.dark); b.position.x = sgn * 0.2; b.castShadow = true; pitch.add(b);
-    const fl = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.35, 8), FLAK_MAT.dark);
-    fl.rotation.x = Math.PI / 2; fl.position.set(sgn * 0.2, 0, 3.55); pitch.add(fl);
-  }
-  // ammunition by the entry
-  for (let i = 0; i < 3; i++) {
-    const c = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.42, 0.5), FLAK_MAT.crate);
-    c.position.set(-1.4 + i * 0.25, 0.21 + (i === 2 ? 0.42 : 0), 2.1 - (i === 2 ? 0.1 : 0) + (i === 1 ? -0.6 : 0));
-    c.rotation.y = 0.2 * i; c.castShadow = true; root.add(c);
-  }
+  const M = FLAK_KIT ? FLAK_KIT.build(x, groundAt(x, z), z, rnd) : (function () {
+    const root = new THREE.Group(); root.position.set(x, groundAt(x, z), z);
+    const yaw = new THREE.Group(); yaw.position.y = 1.05; root.add(yaw);
+    const pitch = new THREE.Group(); pitch.position.set(0, 0.75, 0.1); yaw.add(pitch);
+    return { root: root, yaw: yaw, pitch: pitch, parts: [] };
+  })();
+  const root = M.root;
   // the light column: additive, fog-free, fading upward
   const beamMat = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true, transparent: true, opacity: 0.32,
     blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide });
   const beam = new THREE.Mesh(BEAM_GEO, beamMat); beam.renderOrder = 5; root.add(beam);
-  const ring = new THREE.Mesh(new THREE.RingGeometry(4.3, 5.0, 40).rotateX(-Math.PI / 2),
+  // the ring sits outside the sandbag pit, on the paving
+  const ring = new THREE.Mesh(new THREE.RingGeometry(4.5, 5.1, 48).rotateX(-Math.PI / 2),
     new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false, fog: false }));
   ring.position.y = 0.09; root.add(ring);
   CBZ.scene.add(root);
-  return { root: root, yaw: yaw, pitch: pitch, beam: beam, ring: ring, parts: [ped, table, shield, cradle] };
+  return { root: root, yaw: M.yaw, pitch: M.pitch, beam: beam, ring: ring, parts: M.parts };
 }
 function placeGuns() {
   const xs = NAV.xs, zs = NAV.zs;
@@ -584,16 +543,15 @@ function hurtGun(g, dmg, info) {
     if (by === me) streak("GUN DOWN");
   }
   if (g.crew) { const c = g.crew; leaveGun(c); hurt(c, 999, { by: info && info.by, cause: "gun" }); }
-  g.model.pitch.rotation.x = 0.6; g.model.yaw.rotation.z = 0.35;
-  for (let i = 0; i < g.model.parts.length; i++) g.model.parts[i].material = FLAK_MAT.char;
+  g.model.pitch.rotation.x = 0.4; g.model.yaw.rotation.z = 0.3;       // knocked askew, muzzles down but clear of the paving
+  for (let i = 0; i < g.model.parts.length; i++) g.model.parts[i].material = FLAK_KIT.char;
   g.plume = fx.plume(g.x, 1, g.z, { size: 0.8, life: GUN_REPAIR, fire: true });
   refreshGunLook(g);
 }
 function repairGun(g) {
   g.down = 0; g.hp = GUN_HP; g.heat = 0; g.locked = 0;
   g.model.pitch.rotation.x = -0.5; g.model.yaw.rotation.z = 0;
-  const ms = [FLAK_MAT.steel, FLAK_MAT.steel, FLAK_MAT.steel, FLAK_MAT.steel];
-  for (let i = 0; i < g.model.parts.length; i++) g.model.parts[i].material = ms[i];
+  for (let i = 0; i < g.model.parts.length; i++) g.model.parts[i].material = FLAK_KIT.paint;
   refreshGunLook(g);
 }
 function manGun(u, g) {
