@@ -633,12 +633,17 @@
   }
 
   // ============================================================
-  //  PLAYER DEATH DROP — wrap CBZ.cityKillPlayer: the guns leave the body
-  //  as REAL pickups (Minecraft rule: go back for your gear). Items stay and
-  //  carried cash hits the pavement; money deposited in g.cityBank survives.
-  //  Stowed guns (police stop, g._copStow) are the effective loadout and
-  //  must not resurrect via cityRedrawWeapon — snapshot then null it.
+  //  PLAYER DEATH DROP. Wraps CBZ.cityKillPlayer. A death costs the GUN IN
+  //  YOUR HAND (it hits the pavement as a real pickup you can run back for)
+  //  and a QUARTER of the cash in your pocket (scattered at the spot). The
+  //  rest of the loadout and 75% of the pocket ride with you to the hospital,
+  //  where death.js bills the pocket; wanted.js's cityDeathPenalty takes the
+  //  respect + heat. death.js only lockWeapon()s the hand when this V2 path
+  //  is absent, so the gun is never removed twice. Stowed guns (a police
+  //  stop, g._copStow) were not in your hand: they stay stowed and police.js
+  //  redraws them on respawn.
   // ============================================================
+  const DEATH_CASH_DROP = 0.25;
   function installDeathWrap() {
     if (typeof CBZ.cityKillPlayer !== "function" || CBZ.cityKillPlayer._invKPWrap) return;
     const orig = CBZ.cityKillPlayer;
@@ -648,31 +653,34 @@
         const seen = imp && imp._invDeathSeen;
         if (!seen && on() && cityNow() && P && !P.dead) {
           if (imp) imp._invDeathSeen = true;
-          const stow = g._copStow;
-          const ids = (stow && stow.inv && stow.inv.length ? stow.inv : (CBZ.weaponInventory || [])).slice();
           const px = P.pos.x, pz = P.pos.z, py = P.pos.y;
-          const carriedCash = Math.max(0, Math.round(g.cash || 0));
-          if (carriedCash > 0) {
+          const lost = [];
+          const cash = Math.max(0, Math.round(g.cash || 0));
+          const drop = Math.floor(cash * DEATH_CASH_DROP);
+          if (drop > 0) {
             CBZ.cityDropItem(px + (Math.random() - 0.5) * 0.8, pz + (Math.random() - 0.5) * 0.8,
-              { cash: carriedCash, y: py, ttl: 300 });
-            g.cash = 0; // g.cityBank is deliberately untouched
+              { cash: drop, y: py, ttl: 300 });
+            g.cash = cash - drop;
+            lost.push("$" + drop);
           }
-          for (let i = 0; i < ids.length; i++) {
-            // ammo:0 — reserves live per-weapon inside fpsmode and survive the
+          const inHand = !g._copStow && CBZ.currentWeaponId;
+          if (inHand && CBZ.weaponInventory && CBZ.weaponInventory.indexOf(inHand) >= 0) {
+            // ammo:0: reserves live per-weapon inside fpsmode and survive the
             // drop/re-pickup round-trip; a bonus here would be a death-farm.
             CBZ.cityDropItem(px + (Math.random() - 0.5) * 1.6, pz + (Math.random() - 0.5) * 1.6,
-              { weaponId: ids[i], ammo: 0, y: py, ttl: 300 });
-          }
-          if (g.cityMeleeWeapon && !meleeShownAsItem()) {
+              { weaponId: inHand, ammo: 0, y: py, ttl: 300 });
+            const nm = gunName(inHand);
+            if (CBZ.lockWeapon) CBZ.lockWeapon(inHand);
+            else { CBZ.weaponInventory.splice(CBZ.weaponInventory.indexOf(inHand), 1); CBZ.currentWeaponId = CBZ.weaponInventory[0] || null; }
+            lost.push("your " + (nm || "gun"));
+          } else if (!inHand && !g._copStow && g.cityMeleeWeapon && !meleeShownAsItem()) {
+            // bare-handed but swinging a melee piece: that is what was in your hand
             CBZ.cityDropItem(px + (Math.random() - 0.5) * 1.6, pz + (Math.random() - 0.5) * 1.6,
               { melee: g.cityMeleeWeapon, y: py, ttl: 300 });
+            lost.push("your " + g.cityMeleeWeapon);
+            g.cityMeleeWeapon = null;
           }
-          if (ids.length || g.cityMeleeWeapon || carriedCash) note("Your carried gear and cash are still at the scene.", 3);
-          // strip truth so a hospital respawn (or cityRedrawWeapon) can't dupe
-          if (CBZ.weaponInventory) CBZ.weaponInventory.length = 0;
-          CBZ.currentWeaponId = null;
-          g.cityMeleeWeapon = null;
-          g._copStow = null; g.cityStowedWeapon = null;
+          if (lost.length) note("You dropped " + lost.join(" and ") + " where you fell. Go back for it.", 3);
           if (CBZ.cityHudDirty) CBZ.cityHudDirty();
           commit();
         }

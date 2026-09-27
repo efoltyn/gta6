@@ -358,6 +358,14 @@
       const dx = m.pos.x - z.cx, dz = m.pos.z - z.cz;
       if (dx * dx + dz * dz < (z._r2 || (z._r2 = zoneR2(z)))) n++;
     }
+    // THE BOSS STANDS ON IT TOO. The player's own body was never counted, so a
+    // founded crew's leader could wipe a rival zone to the last man and stand
+    // in the middle of it and the zone did not move (bestN >= 2 needed two
+    // RECRUITED bodies). The man who did the clearing counts double.
+    if (gang.isPlayer && CBZ.player && !CBZ.player.dead && CBZ.player.pos) {
+      const dx = CBZ.player.pos.x - z.cx, dz = CBZ.player.pos.z - z.cz;
+      if (dx * dx + dz * dz < (z._r2 || (z._r2 = zoneR2(z)))) n += 2;
+    }
     return n;
   }
 

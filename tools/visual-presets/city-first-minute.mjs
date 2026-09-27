@@ -120,8 +120,8 @@ async function stageCityFirstMinute(input) {
     eye: { x: S.aveX + 2.2, y: roadY + 1.7, z: S.crossZ - ROAD / 2 - 16,
            ax: S.aveX + 1.2, ay: roadY + 3.2, az: S.crossZ + 60, fov: 58 },
     // 34 m over the avenue, south of the junction, looking up it into Midtown
-    block: { x: S.aveX + 34, y: roadY + 46, z: S.crossZ - 96,
-             ax: S.aveX - 12, ay: roadY + 4, az: S.crossZ + 50, fov: 55 },
+    block: { x: S.aveX - 60, y: roadY + 52, z: S.crossZ - 110,
+             ax: S.aveX + 10, ay: roadY + 4, az: S.crossZ + 30, fov: 55 },
   };
   const cam = (input.referenceStage && input.referenceStage.camera) || cams[sub.view] || cams.eye;
   if (P && P.pos) { P.driving = false; P.pos.set(cam.x, roadY + 0.9, cam.z); }

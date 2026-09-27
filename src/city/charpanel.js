@@ -916,7 +916,7 @@
     const lvl = CBZ.cityPlayerLevel ? CBZ.cityPlayerLevel() : 1;
     const title = CBZ.cityPlayerTitle ? CBZ.cityPlayerTitle() : "";
     const sub = inv.querySelector(".cpSub");
-    if (sub) sub.textContent = "Lv." + lvl + " " + title + "  ·  " + fmt$(netWorth());
+    if (sub) sub.textContent = "Lv." + lvl + " " + title + "   " + fmt$(netWorth());
     renderAcc();
     renderGrid();
     renderHot();
@@ -1077,7 +1077,7 @@
     if (invOpen) {
       // light refresh: meta + hotbar are cheap; the grid/acc redraw on demand
       const sub = inv.querySelector(".cpSub");
-      if (sub) { const lvl = CBZ.cityPlayerLevel ? CBZ.cityPlayerLevel() : 1; sub.textContent = "Lv." + lvl + " " + (CBZ.cityPlayerTitle ? CBZ.cityPlayerTitle() : "") + "  ·  " + fmt$(netWorth()); }
+      if (sub) { const lvl = CBZ.cityPlayerLevel ? CBZ.cityPlayerLevel() : 1; sub.textContent = "Lv." + lvl + " " + (CBZ.cityPlayerTitle ? CBZ.cityPlayerTitle() : "") + "   " + fmt$(netWorth()); }
     }
   });
 

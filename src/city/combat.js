@@ -278,6 +278,34 @@
   // expose posture state for the HUD (read-only snapshot, no allocations/frame)
   CBZ.cityPosture = function () { return { p: pPosture, max: pPostureMax(), broken: pBrokenT > 0 }; };
 
+  const _woundP = { x: 0, y: 0, z: 0 };
+  const _woundO = { melee: "blade", cal: 0.7, fromX: 0, fromZ: 0 };
+
+  // ---- CONTACT TIMING -------------------------------------------------------
+  // The blow used to resolve on the CLICK frame: hit-stop, shake, the target's
+  // head snap and the ragdoll all fired while the fist was still at the
+  // shoulder (the punch rig takes 0.32 s, the heavy 0.44 s), so every punch
+  // read as the victim flinching before it was touched. The target is still
+  // chosen at the click (what you aimed at is what you swing at), but the
+  // damage and all its juice land at the arm's extension. One slot, reused;
+  // a new swing, a death or a mode change settles/clears it first.
+  const blow = { t: null, dmg: 0, tier: "light", kind: "jab", reach: 0, T: 0, live: false };
+  function queueBlow(t, dmg, tier, kind, reach, delay) {
+    if (blow.live) settleBlow();
+    blow.t = t; blow.dmg = dmg; blow.tier = tier; blow.kind = kind; blow.reach = reach; blow.T = delay; blow.live = true;
+  }
+  function settleBlow() {
+    if (!blow.live) return;
+    blow.live = false;
+    const t = blow.t; blow.t = null;
+    if (!t || t.dead || P.dead || g.mode !== "city") return;
+    // he stepped out of range during the wind-up: a clean whiff (0.7 m grace)
+    const dx = t.pos.x - P.pos.x, dz = t.pos.z - P.pos.z;
+    if (dx * dx + dz * dz > (blow.reach + 0.7) * (blow.reach + 0.7)) return;
+    const ok = land(t, blow.dmg, blow.tier, { kind: blow.kind });
+    if (ok && blow.tier === "finisher") { combo = 0; comboT = 0; }
+  }
+
   // ---- the connect: shared damage + juice for a single landed blow --------
   // tier: "light" | "heavy" | "finisher".  Returns true if it connected.
   function land(t, dmg, tier, opts) {
@@ -325,6 +353,7 @@
         addPosture(t, dmg * 0.22 * feel.post);
         if (CBZ.city) CBZ.city.note("Blocked!", 0.6);
         if (CBZ.sfx) CBZ.sfx("hit");
+        if (CBZ.fpsPunchLanded) CBZ.fpsPunchLanded(opts.kind || "jab", false);   // you hit forearms, not air
         // they jab back — builds YOUR posture & may stagger you a touch
         addSelfPosture(10);
         if (Math.random() < 0.5) selfStagger(0.30);
@@ -357,6 +386,16 @@
     const lethal = (t.kind === "cop") ? null : (t.hp - dmg <= 0);
     if (CBZ.doHitstop) CBZ.doHitstop(finisher ? 0.14 : (heavy ? 0.09 : 0.055));
     if (CBZ.shake) CBZ.shake(finisher ? 0.7 : (heavy ? 0.5 : 0.22 + combo * 0.04));
+
+    // --- A BLADE CUTS. The knife used to leave nothing on the body in the city
+    // (only an invisible _bleed tick) while the prison's shank already opened a
+    // real slit via wounds.js. Same call, low in the body where a stab lands.
+    // Fists and bats stay mark-free (owner: no punch bruise decals).
+    if (feel.name === "blade" && CBZ.bodyWound && t.pos) {
+      _woundP.x = t.pos.x; _woundP.y = (t.pos.y || 0) + 1.18; _woundP.z = t.pos.z;
+      _woundO.fromX = fx; _woundO.fromZ = fz;
+      try { CBZ.bodyWound(t, _woundP, _woundO); } catch (e) {}
+    }
 
     // --- apply damage through the existing city damage paths ---------------
     if (t.kind === "cop") {
@@ -398,6 +437,13 @@
     // --- audio + KO flourish ---------------------------------------------
     if (CBZ.sfx) CBZ.sfx("punch");
     const downed = (t.dead || t.ko > 0);
+    // THE SAME CONFIRMATION A BULLET GETS. A landed gun round flashes the hit
+    // marker (red on a kill) and fpsmode jolts the viewmodel; a landed punch in
+    // the city did neither, so in first person a connecting jab and a whiff
+    // looked identical. Both hooks already exist (the prison fist uses the
+    // second one); the street melee just never called them.
+    if (CBZ.fpsHitMarker) CBZ.fpsHitMarker(!!t.dead, false);
+    if (CBZ.fpsPunchLanded) CBZ.fpsPunchLanded(opts.kind || "cross", heavy || broken || counter);
     if (downed && (finisher || heavy)) {
       if (CBZ.sfx) CBZ.sfx("ko");
       if (CBZ.doSlowmo) CBZ.doSlowmo(finisher ? 0.5 : 0.28);   // brief bullet-time on a knockout
@@ -465,9 +511,8 @@
     // jab/cross scale up through the chain; the hook (3rd) is the big one
     const dmg = finisher ? Math.round(base * 1.9) : Math.round(base * (1 + (combo - 1) * 0.18));
     if (t) {
-      const ok = land(t, dmg, finisher ? "finisher" : "light", { kind });
-      if (!ok) { /* blocked → combo already reset in land() */ }
-      else if (finisher) { combo = 0; comboT = 0; }
+      // lands at extension (see CONTACT TIMING); a block resets the combo in land()
+      queueBlow(t, dmg, finisher ? "finisher" : "light", kind, finisher ? 2.17 : 1.89, finisher ? 0.13 : 0.1);
     } else if (CBZ.resourceHarvestSwing && CBZ.resourceHarvestSwing()) {
       // B7: no ped in the cone, but a harvest node (tree/rock/scrap pile —
       // systems/resources.js) is — the swing lands on that instead. aimTarget()
@@ -499,7 +544,7 @@
     const t = aimTarget(2.1, 0.2);
     const base = it() ? it().dmg : 16;
     const dmg = Math.round(base * 2.4);
-    if (t) land(t, dmg, "heavy", { kind: "upper" });
+    if (t) queueBlow(t, dmg, "heavy", "upper", 2.1, 0.17);
     else if (CBZ.resourceHarvestSwing && CBZ.resourceHarvestSwing()) {
       // B7: same harvest fallback as lightAttack — a heavy swing chops/mines
       // just as well (no extra yield bonus, keeps this simple).
@@ -1116,6 +1161,7 @@
     if (heavyCD > 0) heavyCD -= dt;
     if (staggerT > 0) staggerT -= dt;
     if (comboT > 0) { comboT -= dt; if (comboT <= 0) combo = 0; }
+    if (blow.live) { blow.T -= dt; if (blow.T <= 0 || P.dead) settleBlow(); }
     if (parryT > 0) parryT -= dt;
     if (P._fighting > 0) P._fighting -= dt;
 
