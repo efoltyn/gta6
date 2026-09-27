@@ -184,6 +184,8 @@ async function stageSharkCam(input) {
     };
     window.__cbzVisualCompare = {
       async render() {
+        // frozen loop: the sky rig only follows the camera in skyFrame, so sync it by hand
+        if (window.CBZ && CBZ.skySync) CBZ.skySync();
         if (CBZ.bootMeter && CBZ.bootMeter.hide) { try { CBZ.bootMeter.hide(); } catch (e) {} }
         D.clearBanner();
         const raf = D._rafOrig;

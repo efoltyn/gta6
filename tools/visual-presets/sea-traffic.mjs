@@ -132,6 +132,8 @@ async function stage(input) {
     };
     window.__cbzVisualCompare = {
       async render() {
+        // frozen loop: the sky rig only follows the camera in skyFrame, so sync it by hand
+        if (window.CBZ && CBZ.skySync) CBZ.skySync();
         if (CBZ.bootMeter && CBZ.bootMeter.hide) { try { CBZ.bootMeter.hide(); } catch (e) {} }
         if (!CBZ.renderer) return;
         await new Promise((res) => D._raf.call(window, () => { CBZ.renderer.render(CBZ.scene, CBZ.camera); res(); }));
