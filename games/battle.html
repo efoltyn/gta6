@@ -620,7 +620,7 @@ const MAPS = {
      builds its own seabed forty metres further down. Two plates would fight for
      the depth buffer, which is the exact bug the seaPlate comment records. */
   water:    { label: "OPEN WATER", note: "real ocean. swell, depth, no land", packs: [], ocean: true, featured: true },
-  arena:    { label: "KILL BOX", note: "flat yard. crates. walls", packs: [] },
+  arena:    { label: "KILL BOX", note: "container yard. block walls", packs: [] },
 };
 if (!MAPS[SET.map]) SET.map = "dunes";
 
@@ -1274,130 +1274,698 @@ CBZ.studio.need(NEED).then(function () {
      where BLUE stands. The kill box registers its crates as real colliders,
      which is all it takes for combat_iq to treat them as cover and for
      segmentBlocked to treat them as walls. */
-  /* THE KILL BOX WAS A GREY DISC AND FLAT-COLOURED BOXES. It is a yard now:
-     poured concrete with its joints and stains, poured walls with their form
-     lines, and the cover is what cover in a yard actually is — ribbed steel
-     containers and timber crates. All of it is canvas texture made here (no
-     image files), tiled by the real size of each face so nothing stretches. */
+  /* ============================================================ THE YARD
+     THE KILL BOX WAS SLOP, EVEN AFTER ITS FIRST FIX. It had a canvas texture,
+     but the "containers" were boxes of RANDOM size (2.4-6.8 m long, 1.9-2.5 m
+     tall, 1.6-4.2 m deep) with ribs painted on and the texture cloned per
+     face, the "timber crates" were 6 m planks of wood the height of a table,
+     and the walls were 2 m thick slabs of grey. Nothing in it was a thing.
+
+     It is a container yard now, and every object is the real article at its
+     real size:
+       - ISO containers, 20 ft (6.06 m) and 40 ft (12.19 m), 2.44 m wide and
+         2.59 m tall, stacked square on their castings. The sides are REAL
+         corrugation (a trapezoid sheet in the geometry, so the sun rakes the
+         ribs), with corner posts, top and bottom rails, eight corner
+         castings, a door end with four locking bars and their handles, and a
+         painted, faded, rust-streaked skin. Rows run in lines like a yard.
+       - precast concrete "lego" blocks for the perimeter (1.6 x 0.8 x 0.8 m,
+         running bond, chamfered edges, the two lifting knobs on the top
+         course), which is what a yard is actually walled with.
+       - jersey barriers (the real F-shape profile) and timber crates on
+         pallets for the low cover in between.
+     Surfaces are canvas textures WITH normal maps derived from their own
+     height fields, tiled at world scale, plus one shared world-space shader
+     patch (macro mottle so the tiling never shows, and grime where things
+     meet the ground). Everything of one material is ONE merged mesh. */
   const TEX = {};
   let _tr = 90127;            // the paint has its own dice, so the director's lcg() stream is untouched
   function trand() { _tr = (_tr * 1103515245 + 12345) & 0x7fffffff; return _tr / 0x7fffffff; }
-  function canvasTex(key, S, draw) {
-    if (TEX[key]) return TEX[key];
-    const cv = document.createElement("canvas");
-    cv.width = cv.height = S;
-    const g = cv.getContext("2d");
-    draw(g, S);
-    const t = new THREE.CanvasTexture(cv);
+  function cvs(S, H) { const c = document.createElement("canvas"); c.width = S; c.height = H || S; return c; }
+  function wrapTex(canvas, srgb) {
+    const t = new THREE.CanvasTexture(canvas);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.encoding = THREE.sRGBEncoding;
+    if (srgb) t.encoding = THREE.sRGBEncoding;
     t.anisotropy = 4;
-    return (TEX[key] = t);
+    return t;
   }
-  function speckle(g, S, n, a, dark) {
+  /* a tangent-space normal map from a grey height canvas (white = high).
+     Canvas y runs DOWN and texture v runs UP (flipY), hence the sign on ny. */
+  function normalFromHeight(hc, strength) {
+    const S = hc.width, H = hc.height;
+    const src = hc.getContext("2d").getImageData(0, 0, S, H).data;
+    const out = cvs(S, H), og = out.getContext("2d"), img = og.createImageData(S, H), d = img.data;
+    const h = function (x, y) { x = (x + S) % S; y = (y + H) % H; return src[(y * S + x) * 4] / 255; };
+    for (let y = 0; y < H; y++) for (let x = 0; x < S; x++) {
+      let nx = -(h(x + 1, y) - h(x - 1, y)) * strength;
+      let ny = (h(x, y + 1) - h(x, y - 1)) * strength;
+      const l = Math.sqrt(nx * nx + ny * ny + 1);
+      const i = (y * S + x) * 4;
+      d[i] = (nx / l * 0.5 + 0.5) * 255; d[i + 1] = (ny / l * 0.5 + 0.5) * 255; d[i + 2] = (1 / l * 0.5 + 0.5) * 255; d[i + 3] = 255;
+    }
+    og.putImageData(img, 0, 0);
+    return out;
+  }
+  // colour + normal from one pair of draw calls, cached by key
+  function texPair(key, S, drawColor, drawHeight, strength) {
+    if (TEX[key]) return TEX[key];
+    const c = cvs(S); drawColor(c.getContext("2d"), S);
+    const out = { map: wrapTex(c, true), normalMap: null };
+    if (drawHeight) {
+      const h = cvs(S); drawHeight(h.getContext("2d"), S);
+      out.normalMap = wrapTex(normalFromHeight(h, strength || 2), false);
+    }
+    return (TEX[key] = out);
+  }
+  function speckle(g, S, n, a, dark, maxS) {
     for (let i = 0; i < n; i++) {
       const v = dark ? 0 : 255;
       g.fillStyle = "rgba(" + v + "," + v + "," + v + "," + (trand() * a) + ")";
-      const s = 1 + trand() * 2.5;
+      const s = 1 + trand() * (maxS || 2.5);
       g.fillRect(trand() * S, trand() * S, s, s);
     }
   }
-  function concreteTex() {
-    return canvasTex("concrete", 512, function (g, S) {
-      g.fillStyle = "#8a857b"; g.fillRect(0, 0, S, S);
-      for (let i = 0; i < 40; i++) {              // stains and patching
-        const x = trand() * S, y = trand() * S, r = 20 + trand() * 90;
-        const gr = g.createRadialGradient(x, y, 0, x, y, r);
-        const dk = trand() < 0.7;
-        gr.addColorStop(0, dk ? "rgba(40,36,30,0.16)" : "rgba(255,250,240,0.10)");
-        gr.addColorStop(1, "rgba(0,0,0,0)");
-        g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2);
+  function blotches(g, S, n, r0, r1, rgba0) {
+    for (let i = 0; i < n; i++) {
+      const x = trand() * S, y = trand() * S, r = r0 + trand() * (r1 - r0);
+      const gr = g.createRadialGradient(x, y, 0, x, y, r);
+      gr.addColorStop(0, rgba0(trand())); gr.addColorStop(1, "rgba(0,0,0,0)");
+      g.fillStyle = gr;
+      // wrap the blotch so the tile has no seam
+      for (let ox = -S; ox <= S; ox += S) for (let oy = -S; oy <= S; oy += S) g.fillRect(x - r + ox, y - r + oy, r * 2, r * 2);
+    }
+  }
+  /* POURED SLAB: 512 px = 8 m. Saw-cut joints every 4 m, broom finish,
+     aggregate, oil and tyre stains, patch repairs. */
+  function slabTex() {
+    return texPair("slab", 512, function (g, S) {
+      g.fillStyle = "#8b867c"; g.fillRect(0, 0, S, S);
+      blotches(g, S, 36, 20, 110, function (k) { return k < 0.7 ? "rgba(40,36,30,0.14)" : "rgba(255,250,240,0.09)"; });
+      blotches(g, S, 6, 10, 34, function () { return "rgba(22,20,18,0.30)"; });     // oil drips where trucks stood
+      for (let y = 0; y < S; y += 2) {                                               // broom finish
+        g.fillStyle = "rgba(0,0,0," + (0.015 + trand() * 0.03) + ")"; g.fillRect(0, y, S, 1);
       }
-      speckle(g, S, 5000, 0.18, true); speckle(g, S, 3000, 0.12, false);
-      g.strokeStyle = "rgba(30,28,24,0.55)"; g.lineWidth = 2;   // expansion joints, 4 m bays
-      for (let k = 0; k <= 2; k++) {
-        g.beginPath(); g.moveTo(k * S / 2, 0); g.lineTo(k * S / 2, S); g.stroke();
-        g.beginPath(); g.moveTo(0, k * S / 2); g.lineTo(S, k * S / 2); g.stroke();
+      speckle(g, S, 6000, 0.2, true); speckle(g, S, 3500, 0.14, false);
+      for (let k = 0; k < 2; k++) {                                                  // tyre tracks
+        const y0 = trand() * S; g.strokeStyle = "rgba(25,22,20,0.07)"; g.lineWidth = 14;
+        g.beginPath(); g.moveTo(0, y0); g.bezierCurveTo(S * 0.3, y0 + 40, S * 0.7, y0 - 40, S, y0); g.stroke();
       }
+      g.fillStyle = "rgba(20,19,17,0.6)";                                            // joints
+      for (let k = 0; k < 2; k++) { g.fillRect(k * S / 2, 0, 2, S); g.fillRect(0, k * S / 2, S, 2); }
+      g.strokeStyle = "rgba(30,28,24,0.35)"; g.lineWidth = 1;                         // hairline cracks off the joints
+      for (let i = 0; i < 5; i++) {
+        let x = trand() * S, y = (trand() < 0.5 ? 0 : S / 2) + 1; g.beginPath(); g.moveTo(x, y);
+        for (let j = 0; j < 8; j++) { x += (trand() - 0.5) * 18; y += 6 + trand() * 10; g.lineTo(x, y); }
+        g.stroke();
+      }
+    }, function (g, S) {
+      g.fillStyle = "#808080"; g.fillRect(0, 0, S, S);
+      for (let y = 0; y < S; y += 2) { g.fillStyle = "rgba(0,0,0," + (0.03 + trand() * 0.05) + ")"; g.fillRect(0, y, S, 1); }
+      speckle(g, S, 2500, 0.35, true, 2); speckle(g, S, 1500, 0.25, false, 2);
+      g.fillStyle = "#1a1a1a";
+      for (let k = 0; k < 2; k++) { g.fillRect(k * S / 2 - 1, 0, 3, S); g.fillRect(0, k * S / 2 - 1, S, 3); }
+    }, 2.5);
+  }
+  /* PRECAST CONCRETE: 512 px = 2 m. Form-face concrete, bug holes (the air
+     pockets every cast face has), rain runs and a pale laitance. */
+  function precastTex() {
+    return texPair("precast", 512, function (g, S) {
+      g.fillStyle = "#9a968c"; g.fillRect(0, 0, S, S);
+      blotches(g, S, 30, 30, 120, function (k) { return k < 0.6 ? "rgba(60,56,48,0.12)" : "rgba(255,252,244,0.10)"; });
+      for (let i = 0; i < 14; i++) {                    // rain runs
+        const x = trand() * S, w = 4 + trand() * 16, gr = g.createLinearGradient(0, 0, 0, S);
+        gr.addColorStop(0, "rgba(40,36,30,0.16)"); gr.addColorStop(1, "rgba(40,36,30,0)");
+        g.fillStyle = gr; g.fillRect(x, 0, w, S * (0.4 + trand() * 0.6));
+      }
+      speckle(g, S, 5000, 0.16, true); speckle(g, S, 3000, 0.12, false);
+      _tr = 90127 + 17;                                 // the height pass rolls the same dice for the holes
+      for (let i = 0; i < 260; i++) {                   // bug holes
+        const x = trand() * S, y = trand() * S, r = 0.8 + trand() * 2.6;
+        g.fillStyle = "rgba(38,35,30,0.75)"; g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill();
+      }
+    }, function (g, S) {
+      g.fillStyle = "#808080"; g.fillRect(0, 0, S, S);
+      speckle(g, S, 3000, 0.25, true, 2); speckle(g, S, 2000, 0.2, false, 2);
+      _tr = 90127 + 17;                                 // same dice as the colour pass: the holes line up
+      for (let i = 0; i < 260; i++) {
+        const x = trand() * S, y = trand() * S, r = 0.8 + trand() * 2.6;
+        g.fillStyle = "#222"; g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill();
+      }
+    }, 3);
+  }
+  /* SAWN PINE: 256 px = 1.2 m, six 200 mm boards, grain, knots, nail heads. */
+  function pineTex() {
+    return texPair("pine", 256, function (g, S) {
+      g.fillStyle = "#a5835a"; g.fillRect(0, 0, S, S);
+      const B = S / 6;
+      for (let y = 0; y < S; y += B) {
+        const k = trand();
+        g.fillStyle = k < 0.5 ? "rgba(255,236,200," + (0.04 + trand() * 0.1) + ")" : "rgba(60,38,16," + (0.05 + trand() * 0.12) + ")";
+        g.fillRect(0, y, S, B);
+      }
+      for (let i = 0; i < 140; i++) {
+        g.strokeStyle = "rgba(70,44,18," + (0.06 + trand() * 0.12) + ")"; g.lineWidth = 1;
+        const y = trand() * S; g.beginPath(); g.moveTo(0, y); g.bezierCurveTo(S * 0.3, y + 2 + trand() * 3, S * 0.6, y - 3, S, y); g.stroke();
+      }
+      for (let i = 0; i < 5; i++) {
+        const x = trand() * S, y = trand() * S;
+        g.fillStyle = "rgba(80,48,20,0.55)"; g.beginPath(); g.ellipse(x, y, 4 + trand() * 3, 2 + trand() * 2, 0, 0, 6.283); g.fill();
+      }
+      blotches(g, S, 8, 20, 60, function () { return "rgba(70,72,66,0.18)"; });     // weathering to silver-grey
+      g.fillStyle = "rgba(30,20,10,0.75)";
+      for (let y = 0; y < S; y += B) g.fillRect(0, y, S, 2);                         // board gaps
+      g.fillStyle = "rgba(40,40,44,0.8)";
+      for (let y = 0; y < S; y += B) { g.fillRect(10, y + B / 2 - 1, 3, 3); g.fillRect(S - 13, y + B / 2 - 1, 3, 3); }
+    }, function (g, S) {
+      g.fillStyle = "#909090"; g.fillRect(0, 0, S, S);
+      const B = S / 6;
+      for (let i = 0; i < 160; i++) {
+        g.strokeStyle = "rgba(0,0,0," + (0.1 + trand() * 0.2) + ")"; g.lineWidth = 1;
+        const y = trand() * S; g.beginPath(); g.moveTo(0, y); g.lineTo(S, y + (trand() - 0.5) * 4); g.stroke();
+      }
+      g.fillStyle = "#101010";
+      for (let y = 0; y < S; y += B) g.fillRect(0, y - 1, S, 3);
+    }, 2.2);
+  }
+  /* THE CONTAINER SKIN, one 512 atlas per paint:
+       SIDE  u 0..1,       v 0.5..1   (one 20 ft side, 6.06 x 2.59 m)
+       DOOR  u 0..0.4375,  v 0..0.5   (the door end, 2.44 x 2.59 m)
+       CAST  u 0.4375..0.5 v 0.375..0.5 (bare dark steel: castings, bars)
+       ROOF  u 0.5..1,     v 0..0.5   (roof and painted frame)
+     The ribs are geometry, so the paint only has to age: sun-faded top, rust
+     bleeding from the rail and the rib roots, scratches, a road-dirt skirt,
+     the CSC plate and the stencilled data block (blank, no invented words). */
+  const ATLAS = {
+    SIDE: [0, 0.5, 1, 1], DOOR: [0, 0, 0.4375, 0.5], CAST: [0.4375, 0.375, 0.5, 0.5], ROOF: [0.5, 0, 1, 0.5],
+  };
+  function containerSkin(hex) {
+    return texPair("cont" + hex, 512, function (g, S) {
+      const c = new THREE.Color(hex);
+      const rgb = function (k, a) {
+        return "rgba(" + Math.round(Math.min(255, c.r * 255 * k)) + "," + Math.round(Math.min(255, c.g * 255 * k)) + "," +
+          Math.round(Math.min(255, c.b * 255 * k)) + "," + (a == null ? 1 : a) + ")";
+      };
+      const rust = function (a) { return "rgba(" + (96 + trand() * 30 | 0) + "," + (44 + trand() * 14 | 0) + ",22," + a + ")"; };
+      const age = function (x, y, w, h, topFade) {
+        g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip();
+        g.fillStyle = rgb(1); g.fillRect(x, y, w, h);
+        const fade = g.createLinearGradient(0, y, 0, y + h);        // the sun bleaches the top
+        fade.addColorStop(0, "rgba(235,230,220," + topFade + ")"); fade.addColorStop(0.6, "rgba(235,230,220,0)");
+        g.fillStyle = fade; g.fillRect(x, y, w, h);
+        for (let i = 0; i < 26; i++) {                               // patchy repaint and fade
+          const bx = x + trand() * w, by = y + trand() * h, r = 12 + trand() * 50;
+          const gr = g.createRadialGradient(bx, by, 0, bx, by, r);
+          gr.addColorStop(0, trand() < 0.5 ? rgb(0.82, 0.35) : rgb(1.15, 0.3)); gr.addColorStop(1, rgb(1, 0));
+          g.fillStyle = gr; g.fillRect(bx - r, by - r, r * 2, r * 2);
+        }
+        for (let i = 0; i < 18; i++) {                               // rust runs from the top rail
+          const rx = x + trand() * w, rw = 1.5 + trand() * 5, rh = h * (0.12 + trand() * 0.55);
+          const gr = g.createLinearGradient(0, y, 0, y + rh);
+          gr.addColorStop(0, rust(0.7)); gr.addColorStop(1, rust(0));
+          g.fillStyle = gr; g.fillRect(rx, y, rw, rh);
+        }
+        for (let i = 0; i < 40; i++) {                               // scratches and chips to bare steel
+          g.strokeStyle = trand() < 0.5 ? rust(0.5) : "rgba(200,196,188,0.25)"; g.lineWidth = 1;
+          const sx = x + trand() * w, sy = y + trand() * h; g.beginPath(); g.moveTo(sx, sy);
+          g.lineTo(sx + (trand() - 0.5) * 40, sy + (trand() - 0.5) * 8); g.stroke();
+        }
+        const dirt = g.createLinearGradient(0, y + h, 0, y + h * 0.7);  // road dirt skirt
+        dirt.addColorStop(0, "rgba(70,58,42,0.45)"); dirt.addColorStop(1, "rgba(70,58,42,0)");
+        g.fillStyle = dirt; g.fillRect(x, y + h * 0.7, w, h * 0.3);
+        speckle(g, S, 600, 0.12, true);
+        g.restore();
+      };
+      // SIDE (canvas y 0..256)
+      age(0, 0, S, S / 2, 0.22);
+      g.fillStyle = "rgba(190,188,180,0.55)"; g.fillRect(S * 0.9, S * 0.28, 22, 14);          // CSC plate by the doors
+      g.fillStyle = "rgba(40,38,34,0.5)"; for (let k = 0; k < 4; k++) g.fillRect(S * 0.9 + 3, S * 0.28 + 3 + k * 3, 16, 1);
+      g.fillStyle = "rgba(235,232,224,0.55)";                                                    // stencilled data block
+      for (let k = 0; k < 3; k++) g.fillRect(S * 0.82, S * 0.08 + k * 7, 18 + trand() * 24, 4);
+      // DOOR (canvas x 0..224, y 256..512)
+      const dx = 0, dy = S / 2, dw = 224, dh = S / 2;
+      age(dx, dy, dw, dh, 0.18);
+      for (let x = dx + 8; x < dx + dw - 8; x += 12) {                                           // door corrugation, drawn
+        g.fillStyle = "rgba(255,255,255,0.06)"; g.fillRect(x, dy + 10, 4, dh - 20);
+        g.fillStyle = "rgba(0,0,0,0.14)"; g.fillRect(x + 6, dy + 10, 4, dh - 20);
+      }
+      g.fillStyle = "rgba(15,14,12,0.85)"; g.fillRect(dx + dw / 2 - 1, dy, 3, dh);               // the door meeting line
+      g.strokeStyle = "rgba(15,14,12,0.6)"; g.lineWidth = 3; g.strokeRect(dx + 4, dy + 4, dw - 8, dh - 8);   // gasket
+      g.fillStyle = "rgba(30,28,25,0.9)";                                                        // hinge blocks
+      for (let k = 0; k < 4; k++) { const hy = dy + 18 + k * (dh - 44) / 3; g.fillRect(dx + 2, hy, 8, 12); g.fillRect(dx + dw - 10, hy, 8, 12); }
+      g.fillStyle = "rgba(190,188,180,0.5)"; g.fillRect(dx + dw * 0.62, dy + dh * 0.3, 20, 13);   // blank weathered placard
+      // CAST (x 224..256, y 256..320)
+      g.fillStyle = "#302b27"; g.fillRect(224, 256, 32, 64);
+      for (let i = 0; i < 60; i++) { g.fillStyle = rust(0.5); g.fillRect(224 + trand() * 32, 256 + trand() * 64, 2, 2); }
+      // the rest of that column is plain door paint so filtering never bleeds grey into it
+      g.fillStyle = rgb(0.9); g.fillRect(224, 320, 32, 192);
+      // ROOF (x 256..512, y 256..512)
+      age(256, 256, 256, 256, 0.3);
+      for (let i = 0; i < 10; i++) {                                                             // standing-water rust pools
+        const bx = 256 + trand() * 256, by = 256 + trand() * 256, r = 6 + trand() * 22;
+        const gr = g.createRadialGradient(bx, by, 0, bx, by, r);
+        gr.addColorStop(0, rust(0.55)); gr.addColorStop(1, rust(0));
+        g.fillStyle = gr; g.fillRect(bx - r, by - r, r * 2, r * 2);
+      }
+    }, null);
+  }
+  /* ---- ONE SHADER PATCH FOR THE WHOLE YARD. World-space value noise at two
+     scales multiplies the albedo (paint and concrete are never one colour, and
+     an 8 m tile repeated 65 times would otherwise show), and every vertical
+     face picks up grime and splash in the bottom half metre above uGround. */
+  const YARD_GLSL =
+    "varying vec3 vYW;\nvarying float vYNy;\nuniform float uMot;\nuniform float uGrime;\nuniform float uGround;\nuniform float uMotScale;\n" +
+    "float yH(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }\n" +
+    "float yN(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);\n" +
+    "  return mix(mix(yH(i), yH(i + vec2(1.0, 0.0)), f.x), mix(yH(i + vec2(0.0, 1.0)), yH(i + vec2(1.0, 1.0)), f.x), f.y); }\n";
+  function yardPatch(mat, o) {
+    o = o || {};
+    mat.onBeforeCompile = function (sh) {
+      sh.uniforms.uMot = { value: o.mottle == null ? 0.25 : o.mottle };
+      sh.uniforms.uGrime = { value: o.grime == null ? 0.4 : o.grime };
+      sh.uniforms.uGround = { value: o.ground || 0 };
+      sh.uniforms.uMotScale = { value: o.scale || 1 };
+      sh.vertexShader = "varying vec3 vYW;\nvarying float vYNy;\n" + sh.vertexShader.replace("#include <project_vertex>",
+        "#include <project_vertex>\n{ vec4 yw = vec4(transformed, 1.0);\n#ifdef USE_INSTANCING\n yw = instanceMatrix * yw;\n#endif\n" +
+        " vYW = (modelMatrix * yw).xyz; vYNy = normalize(mat3(modelMatrix) * objectNormal).y; }");
+      sh.fragmentShader = YARD_GLSL + sh.fragmentShader.replace("#include <color_fragment>",
+        "#include <color_fragment>\n" +
+        "{ vec2 q = vYW.xz * uMotScale;\n" +
+        "  float m = 0.82 + 0.3 * yN(q * 0.043) + 0.1 * (yN(q * 0.29 + 17.0) - 0.5) + 0.06 * (yN(vYW.xy * 0.5 + vYW.zz * 0.5) - 0.5);\n" +
+        "  diffuseColor.rgb *= mix(1.0, m, uMot);\n" +
+        "  float side = 1.0 - abs(vYNy);\n" +
+        "  float low = 1.0 - smoothstep(0.0, 0.55 + 0.25 * yN(vYW.xz * 1.7 + vYW.yy), vYW.y - uGround);\n" +
+        "  float gr = side * low * uGrime;\n" +
+        "  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.62, 0.55, 0.46), gr); }");
+    };
+    mat.customProgramCacheKey = function () { return "npcwar-yard1"; };
+    return mat;
+  }
+
+  /* ---- GEOMETRY BATCH: every static part of one material goes into one
+     non-indexed buffer, transformed by a yaw + origin, flat-normalled per face
+     (so corrugation and chamfers catch the light as facets, which is what
+     pressed steel and cast concrete do). */
+  function GeoBatch() { this.p = []; this.n = []; this.u = []; this.c = []; this.xf(0, 0, 0, 0); }
+  GeoBatch.prototype.xf = function (x, y, z, yaw) {
+    this.ox = x; this.oy = y; this.oz = z; this.cs = Math.cos(yaw || 0); this.sn = Math.sin(yaw || 0); return this;
+  };
+  GeoBatch.prototype._v = function (v, uv, nx, ny, nz, col) {
+    const x = v[0], z = v[2];
+    this.p.push(this.ox + x * this.cs + z * this.sn, this.oy + v[1], this.oz - x * this.sn + z * this.cs);
+    this.n.push(nx, ny, nz); this.u.push(uv[0], uv[1]);
+    this.c.push(col ? col[0] : 1, col ? col[1] : 1, col ? col[2] : 1);
+  };
+  // a..d counter-clockwise seen from the side the face looks at
+  GeoBatch.prototype.quad = function (a, b, c, d, ua, ub, uc, ud, col) {
+    const e1x = b[0] - a[0], e1y = b[1] - a[1], e1z = b[2] - a[2];
+    const e2x = c[0] - a[0], e2y = c[1] - a[1], e2z = c[2] - a[2];
+    let nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+    const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
+    const wx = nx * this.cs + nz * this.sn, wz = -nx * this.sn + nz * this.cs;
+    this._v(a, ua, wx, ny, wz, col); this._v(b, ub, wx, ny, wz, col); this._v(c, uc, wx, ny, wz, col);
+    if (d === c) return;                                 // quad(a, b, c, c) is a triangle
+    this._v(a, ua, wx, ny, wz, col); this._v(c, uc, wx, ny, wz, col); this._v(d, ud, wx, ny, wz, col);
+  };
+  /* a quad in a face frame: origin O, in-plane axes U (along) and V (up), and
+     its outward normal N = U x V. Points are given as (s, t, depth). `uv`
+     maps (s, t) -> [u, v]. */
+  GeoBatch.prototype.fq = function (F, pts, uv, col) {
+    const P = pts.map(function (q) {
+      return [F.O[0] + F.U[0] * q[0] + F.V[0] * q[1] + F.N[0] * q[2],
+              F.O[1] + F.U[1] * q[0] + F.V[1] * q[1] + F.N[1] * q[2],
+              F.O[2] + F.U[2] * q[0] + F.V[2] * q[1] + F.N[2] * q[2]];
     });
+    this.quad(P[0], P[1], P[2], P[3], uv(pts[0][0], pts[0][1]), uv(pts[1][0], pts[1][1]),
+      uv(pts[2][0], pts[2][1]), uv(pts[3][0], pts[3][1]), col);
+  };
+  // the six faces of an axis-aligned box as frames (s runs 0..width, t 0..height)
+  function boxFrames(cx, cy, cz, w, h, d) {
+    const hx = w / 2, hy = h / 2, hz = d / 2;
+    return [
+      { O: [cx + hx, cy - hy, cz + hz], U: [0, 0, -1], V: [0, 1, 0], N: [1, 0, 0], w: d, h: h },     // +x
+      { O: [cx - hx, cy - hy, cz - hz], U: [0, 0, 1], V: [0, 1, 0], N: [-1, 0, 0], w: d, h: h },     // -x
+      { O: [cx - hx, cy + hy, cz + hz], U: [1, 0, 0], V: [0, 0, -1], N: [0, 1, 0], w: w, h: d },     // +y
+      { O: [cx - hx, cy - hy, cz - hz], U: [1, 0, 0], V: [0, 0, 1], N: [0, -1, 0], w: w, h: d },     // -y
+      { O: [cx - hx, cy - hy, cz + hz], U: [1, 0, 0], V: [0, 1, 0], N: [0, 0, 1], w: w, h: h },      // +z
+      { O: [cx + hx, cy - hy, cz - hz], U: [-1, 0, 0], V: [0, 1, 0], N: [0, 0, -1], w: w, h: h },    // -z
+    ];
   }
-  function wallTex() {
-    return canvasTex("wall", 256, function (g, S) {
-      g.fillStyle = "#77736a"; g.fillRect(0, 0, S, S);
-      speckle(g, S, 2500, 0.2, true);
-      g.fillStyle = "rgba(20,18,15,0.22)";
-      for (let y = 0; y < S; y += S / 4) g.fillRect(0, y, S, 2);           // form lines
-      for (let i = 0; i < 6; i++) {                                         // rain streaks
-        const x = trand() * S; const gr = g.createLinearGradient(0, 0, 0, S);
-        gr.addColorStop(0, "rgba(30,26,20,0.25)"); gr.addColorStop(1, "rgba(30,26,20,0)");
-        g.fillStyle = gr; g.fillRect(x, 0, 6 + trand() * 14, S);
-      }
-    });
-  }
-  function containerTex(hex) {
-    return canvasTex("cont" + hex, 256, function (g, S) {
-      const c = "#" + hex.toString(16).padStart(6, "0");
-      g.fillStyle = c; g.fillRect(0, 0, S, S);
-      for (let x = 0; x < S; x += 16) {           // corrugation: a lit rib and a shadowed valley
-        g.fillStyle = "rgba(255,255,255,0.10)"; g.fillRect(x, 0, 5, S);
-        g.fillStyle = "rgba(0,0,0,0.22)"; g.fillRect(x + 9, 0, 5, S);
-      }
-      for (let i = 0; i < 10; i++) {              // rust bleeding down from the top rail
-        const x = trand() * S, w = 3 + trand() * 10, h = S * (0.2 + trand() * 0.6);
-        const gr = g.createLinearGradient(0, 0, 0, h);
-        gr.addColorStop(0, "rgba(110,52,24,0.55)"); gr.addColorStop(1, "rgba(110,52,24,0)");
-        g.fillStyle = gr; g.fillRect(x, 0, w, h);
-      }
-      g.fillStyle = "rgba(0,0,0,0.35)"; g.fillRect(0, 0, S, 6); g.fillRect(0, S - 6, S, 6);
-    });
-  }
-  function timberTex() {
-    return canvasTex("timber", 256, function (g, S) {
-      g.fillStyle = "#8a6a45"; g.fillRect(0, 0, S, S);
-      for (let y = 0; y < S; y += S / 6) {        // planks
-        g.fillStyle = "rgba(" + (trand() < 0.5 ? "255,230,190" : "40,25,10") + "," + (0.05 + trand() * 0.1) + ")";
-        g.fillRect(0, y, S, S / 6);
-        g.fillStyle = "rgba(30,18,8,0.55)"; g.fillRect(0, y, S, 2);
-      }
-      for (let i = 0; i < 90; i++) {              // grain
-        g.strokeStyle = "rgba(50,30,12," + (0.08 + trand() * 0.12) + ")"; g.lineWidth = 1;
-        const y = trand() * S; g.beginPath(); g.moveTo(0, y); g.bezierCurveTo(S * 0.3, y + 3, S * 0.6, y - 3, S, y + 1); g.stroke();
-      }
-      g.fillStyle = "rgba(30,18,8,0.6)"; g.fillRect(0, 0, 8, S); g.fillRect(S - 8, 0, 8, S);   // frame battens
-    });
-  }
-  // one material per (texture, face size): repeat = metres / metres-per-tile
-  function tiledBox(w, h, d, tex, tile, tint) {
-    const faces = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];      // +x -x +y -y +z -z
-    return faces.map(function (f) {
-      const t = tex.clone(); t.needsUpdate = true;
-      t.repeat.set(Math.max(1, Math.round(f[0] / tile)), Math.max(1, Math.round(f[1] / tile)));
-      return new THREE.MeshLambertMaterial({ map: t, color: tint == null ? 0xffffff : tint });
-    });
-  }
-  function flatDisc(r, color, y) {
-    const geo = new THREE.PlaneGeometry(r * 2, r * 2);
-    geo.rotateX(-Math.PI / 2);
-    const t = concreteTex().clone(); t.needsUpdate = true;
-    t.repeat.set(r * 2 / 8, r * 2 / 8);
-    const g = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: t }));
-    g.position.y = (y || 0);
-    g.receiveShadow = true;
-    CBZ.scene.add(g);
-    return g;
-  }
-  function crate(x, z, w, h, d, color, kind) {
-    let mat;
-    if (kind === "wall") mat = tiledBox(w, h, d, wallTex(), 3.4);
-    else if (kind === "container") mat = tiledBox(w, h, d, containerTex(color), 2.4);
-    else if (kind === "timber") mat = tiledBox(w, h, d, timberTex(), 1.2);
-    else mat = CBZ.cmat(color);
-    const m = new THREE.Mesh(CBZ.boxGeom(w, h, d), mat);
-    m.position.set(x, h / 2, z);
-    m.castShadow = m.receiveShadow = true;
+  const UV_TILE = function (tile, ou, ov) { return function (s, t) { return [s / tile + (ou || 0), t / tile + (ov || 0)]; }; };
+  const UV_RECT = function (r, w, h) {
+    const e = 1 / 512;                                   // half a texel in, so the atlas never bleeds
+    return function (s, t) { return [r[0] + e + (r[2] - r[0] - 2 * e) * s / w, r[1] + e + (r[3] - r[1] - 2 * e) * t / h]; };
+  };
+  /* box(): opt.uv(frame) -> (s,t)->uv, opt.skip = face mask (bit i = face i:
+     +x -x +y -y +z -z), opt.col */
+  GeoBatch.prototype.box = function (cx, cy, cz, w, h, d, opt) {
+    opt = opt || {};
+    const F = boxFrames(cx, cy, cz, w, h, d);
+    for (let i = 0; i < 6; i++) {
+      if (opt.skip && (opt.skip & (1 << i))) continue;
+      const f = F[i];
+      this.fq(f, [[0, 0, 0], [f.w, 0, 0], [f.w, f.h, 0], [0, f.h, 0]], opt.uv ? opt.uv(f) : UV_TILE(1), opt.col);
+    }
+  };
+  GeoBatch.prototype.mesh = function (mat, shadows) {
+    if (!this.p.length) return null;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(this.p, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(this.n, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(this.u, 2));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(this.c, 3));
+    g.computeBoundingSphere();
+    mat.vertexColors = true;
+    const m = new THREE.Mesh(g, mat);
+    m.castShadow = shadows !== false; m.receiveShadow = true;
+    m.matrixAutoUpdate = false; m.updateMatrix();
     CBZ.scene.add(m);
-    CBZ.micro.addBoxCollider(x, h / 2, z, w, h, d);
     return m;
+  }
+
+  /* ---- THE ISO CONTAINER, built into a batch in its own frame: length on x,
+     width on z, floor at y = 0 (the batch's xf() places and turns it). */
+  const CN = { W: 2.438, H: 2.591, POST: 0.16, RAILB: 0.16, RAILT: 0.12, PITCH: 0.278, DEPTH: 0.045 };
+  function corrugate(B, F, len, t0, t1, uvOf, col) {
+    // trapezoid sheet: outer flat, slope, inner flat, slope — per pitch
+    let n = Math.max(2, Math.round(len / CN.PITCH));
+    if (len > 8) n += n % 2;                      // a 40 ft side is two sheets: no rib straddles the seam
+    const p = len / n, D = CN.DEPTH;
+    const prof = [[0, D], [0.38, D], [0.5, 0], [0.88, 0], [1, D]];
+    for (let i = 0; i < n; i++) {
+      const uv = uvOf(i, n, p);
+      for (let k = 0; k < 4; k++) {
+        const s0 = (i + prof[k][0]) * p, s1 = (i + prof[k + 1][0]) * p;
+        B.fq(F, [[s0, t0, prof[k][1]], [s1, t0, prof[k + 1][1]], [s1, t1, prof[k + 1][1]], [s0, t1, prof[k][1]]], uv, col);
+      }
+    }
+  }
+  function containerInto(B, L) {
+    const W = CN.W, H = CN.H, P = CN.POST, hx = L / 2, hz = W / 2;
+    const frame = function (f) { return UV_RECT(ATLAS.ROOF, Math.max(f.w, 0.01) * 4, Math.max(f.h, 0.01) * 4); };
+    const cast = function (f) { return UV_RECT(ATLAS.CAST, f.w, f.h); };
+    const tone = [0.93, 0.93, 0.93];
+    // corner posts, rails
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) B.box(sx * (hx - P / 2), H / 2, sz * (hz - P / 2), P, H - 0.02, P, { uv: frame, skip: 12, col: tone });
+    for (const sz of [-1, 1]) {
+      B.box(0, CN.RAILB / 2 + 0.012, sz * (hz - 0.06), L - 2 * P, CN.RAILB, 0.12, { uv: frame, skip: 8, col: tone });
+      B.box(0, H - CN.RAILT / 2, sz * (hz - 0.06), L - 2 * P, CN.RAILT, 0.12, { uv: frame, col: tone });
+    }
+    for (const sx of [-1, 1]) {
+      B.box(sx * (hx - 0.07), CN.RAILB / 2 + 0.012, 0, 0.14, CN.RAILB, W - 2 * P, { uv: frame, skip: 8, col: tone });
+      B.box(sx * (hx - 0.07), H - CN.RAILT / 2, 0, 0.14, CN.RAILT, W - 2 * P, { uv: frame, col: tone });
+    }
+    // eight castings, a hair proud of the posts
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) for (const top of [0, 1]) {
+      B.box(sx * (hx - 0.083), top ? H - 0.059 : 0.059, sz * (hz - 0.075), 0.178, 0.118, 0.162, { uv: cast, skip: 8 });
+    }
+    // corrugated sides: each 20 ft run of sheet maps the SIDE panel once
+    const t0 = CN.RAILB + 0.012, t1 = H - CN.RAILT, sp = L - 2 * P;
+    const segs = L > 8 ? 2 : 1;
+    const sideUV = function (flip) {
+      return function (i, n) {
+        const per = n / segs, seg = Math.floor(i / per);
+        return function (s, t) {
+          let u = (s - seg * sp / segs) / (sp / segs); if (flip) u = 1 - u;
+          const e = 1 / 512;
+          return [e + u * (1 - 2 * e), ATLAS.SIDE[1] + e + (ATLAS.SIDE[3] - ATLAS.SIDE[1] - 2 * e) * (t / H)];
+        };
+      };
+    };
+    corrugate(B, { O: [-hx + P, 0, hz - 0.075], U: [1, 0, 0], V: [0, 1, 0], N: [0, 0, 1] }, sp, t0, t1, sideUV(false));
+    corrugate(B, { O: [hx - P, 0, -hz + 0.075], U: [-1, 0, 0], V: [0, 1, 0], N: [0, 0, -1] }, sp, t0, t1, sideUV(true));
+    // the blind end (x = -L/2): corrugated too
+    const ew = W - 2 * P;
+    corrugate(B, { O: [-hx + 0.075, 0, -hz + P], U: [0, 0, 1], V: [0, 1, 0], N: [-1, 0, 0] }, ew, t0, t1, function () {
+      return function (s, t) { return [0.1 + 0.3 * s / ew, ATLAS.SIDE[1] + 0.002 + (ATLAS.SIDE[3] - ATLAS.SIDE[1] - 0.004) * (t / H)]; };
+    });
+    // the door end (x = +L/2): two doors, four locking bars, handles, cam keepers
+    const DF = { O: [hx - 0.04, 0, hz - P], U: [0, 0, -1], V: [0, 1, 0], N: [1, 0, 0] };
+    const doorUV = UV_RECT(ATLAS.DOOR, ew, t1 - t0);
+    B.fq(DF, [[0, t0, 0], [ew, t0, 0], [ew, t1, 0], [0, t1, 0]], function (s, t) { return doorUV(s, t - t0); });
+    const barZ = [-0.87, -0.35, 0.35, 0.87];
+    for (let k = 0; k < 4; k++) {
+      const z = barZ[k] * (ew / 2) / 1.06;
+      B.box(hx - 0.005, (t0 + t1) / 2, z, 0.04, t1 - t0 - 0.12, 0.04, { uv: cast, skip: 12 });
+      B.box(hx - 0.02, t0 + 0.08, z, 0.07, 0.07, 0.1, { uv: cast, skip: 8 });           // cam keeper, bottom
+      B.box(hx - 0.02, t1 - 0.08, z, 0.07, 0.07, 0.1, { uv: cast, skip: 8 });           // cam keeper, top
+      B.box(hx + 0.03, 1.15, z + (k % 2 ? -0.16 : 0.16) * 0.5, 0.03, 0.05, 0.2, { uv: cast });  // handle
+    }
+    // the roof, sitting 2 cm into the rails the way a dented roof does
+    const rw = L - 2 * P, rd = W - 0.24;
+    B.fq({ O: [-hx + P, H - 0.02, hz - 0.12], U: [1, 0, 0], V: [0, 0, -1], N: [0, 1, 0] },
+      [[0, 0, 0], [rw, 0, 0], [rw, rd, 0], [0, rd, 0]], UV_RECT(ATLAS.ROOF, rw, rd));
+  }
+  // container paints: the faded fleet colours of a real yard
+  const CONT_PAINT = [0x8b3b2c, 0x355b78, 0x4f6a45, 0xa4845a, 0x7a7d7e, 0xc2bfb5, 0x9a5530];
+
+  /* ---- PRECAST "LEGO" BLOCK, chamfered, in a face frame per visible face */
+  /* mode "all": a long face, chamfered on every edge. "lr": the top of the
+     top course, chamfered only at the block ends (the long faces' own
+     chamfers close the front and back). "b": a wall-end face, chamfered at
+     the bottom only (the top face's end chamfer closes it, or the next course
+     up); "tb": a wall-end face below the top course. */
+  function chamferFace(B, F, w, h, c, uv, col, mode) {
+    mode = mode || "all";
+    const L = mode === "all" || mode === "lr", T = mode === "all" || mode === "tb", Bo = mode !== "lr";
+    const s0 = c, s1 = w - c, t0 = c, t1 = h - c;
+    B.fq(F, [[s0, t0, 0], [s1, t0, 0], [s1, t1, 0], [s0, t1, 0]], uv, col);
+    if (Bo) B.fq(F, [[L ? 0 : s0, 0, -c], [L ? w : s1, 0, -c], [s1, c, 0], [s0, c, 0]], uv, col);
+    if (T) B.fq(F, [[s0, h - c, 0], [s1, h - c, 0], [L ? w : s1, h, -c], [L ? 0 : s0, h, -c]], uv, col);
+    if (L) {
+      const a = mode === "lr" ? c : 0, b = mode === "lr" ? h - c : h;
+      B.fq(F, [[0, a, -c], [c, t0, 0], [c, t1, 0], [0, b, -c]], uv, col);
+      B.fq(F, [[w - c, t0, 0], [w, a, -c], [w, b, -c], [w - c, t1, 0]], uv, col);
+    }
+  }
+  function knob(B, x, y, z, r, hgt, uv, col) {
+    const N = 6;
+    for (let i = 0; i < N; i++) {
+      const a0 = i / N * 6.2832, a1 = (i + 1) / N * 6.2832;
+      const p0 = [x + Math.cos(a0) * r, y, z + Math.sin(a0) * r], p1 = [x + Math.cos(a1) * r, y, z + Math.sin(a1) * r];
+      const q0 = [x + Math.cos(a0) * r * 0.9, y + hgt, z + Math.sin(a0) * r * 0.9], q1 = [x + Math.cos(a1) * r * 0.9, y + hgt, z + Math.sin(a1) * r * 0.9];
+      B.quad(p1, p0, q0, q1, uv(a1 * r, 0), uv(a0 * r, 0), uv(a0 * r, hgt), uv(a1 * r, hgt), col);
+      const cc = [x, y + hgt, z];
+      B.quad(q1, q0, cc, cc, uv(q1[0], q1[2]), uv(q0[0], q0[2]), uv(x, z), uv(x, z), col);
+    }
+  }
+  /* a straight run of block wall along the local x axis of the batch frame,
+     from x0 to x1, centred on z = 0, `courses` high, running bond */
+  function legatoRun(B, x0, x1, courses, capEnds) {
+    const BL = 1.6, BH = 0.8, BD = 0.8, C = 0.035, hd = BD / 2;
+    const tint = function () { const k = 0.9 + trand() * 0.16; return [k, k * (0.99 + trand() * 0.02), k * (0.97 + trand() * 0.04)]; };
+    for (let k = 0; k < courses; k++) {
+      let x = x0;
+      const y0 = k * BH, top = k === courses - 1;
+      let first = true;
+      while (x < x1 - 0.05) {
+        const len = Math.min(first && (k % 2) ? BL / 2 : BL, x1 - x);
+        const col = tint(), uv = UV_TILE(2, trand() * 7, trand() * 7);
+        // the two long faces
+        chamferFace(B, { O: [x, y0, hd], U: [1, 0, 0], V: [0, 1, 0], N: [0, 0, 1] }, len, BH, C, uv, col);
+        chamferFace(B, { O: [x + len, y0, -hd], U: [-1, 0, 0], V: [0, 1, 0], N: [0, 0, -1] }, len, BH, C, uv, col);
+        if (top) {
+          chamferFace(B, { O: [x, y0 + BH, hd], U: [1, 0, 0], V: [0, 0, -1], N: [0, 1, 0] }, len, BD, C, uv, col, "lr");
+          if (len > 1.2) { knob(B, x + len * 0.25, y0 + BH, 0, 0.16, 0.09, uv, col); knob(B, x + len * 0.75, y0 + BH, 0, 0.16, 0.09, uv, col); }
+        }
+        if (capEnds && (x === x0 || x + len >= x1 - 0.01)) {
+          const em = top ? "b" : "tb";
+          if (x === x0) chamferFace(B, { O: [x, y0, -hd], U: [0, 0, 1], V: [0, 1, 0], N: [-1, 0, 0] }, BD, BH, C, uv, col, em);
+          if (x + len >= x1 - 0.01) chamferFace(B, { O: [x + len, y0, hd], U: [0, 0, -1], V: [0, 1, 0], N: [1, 0, 0] }, BD, BH, C, uv, col, em);
+        }
+        x += len; first = false;
+      }
+    }
+  }
+  /* ---- JERSEY BARRIER, the F-shape: 610 mm base, 810 mm tall, 3 m long */
+  const JERSEY = [[0.305, 0], [0.305, 0.076], [0.127, 0.33], [0.077, 0.81]];
+  function jerseyInto(B, L, col) {
+    const hl = L / 2, uv = UV_TILE(2, trand() * 5, trand() * 5);
+    const prof = JERSEY.concat(JERSEY.slice().reverse().map(function (p) { return [-p[0], p[1]]; }));
+    // around the profile: +z side up, across the top, -z side down
+    for (let i = 0; i < prof.length - 1; i++) {
+      const a = prof[i], b = prof[i + 1];
+      if (a[0] === -b[0] && a[1] === b[1] && a[1] === 0) continue;
+      const along = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const s0 = i * 0.3, s1 = s0 + along;
+      B.quad([-hl, a[1], a[0]], [hl, a[1], a[0]], [hl, b[1], b[0]], [-hl, b[1], b[0]],
+        uv(0, s0), uv(L, s0), uv(L, s1), uv(0, s1), col);
+    }
+    // end caps: a convex profile, fanned
+    for (const sx of [-1, 1]) {
+      for (let i = 1; i < prof.length - 1; i++) {
+        const a = prof[0], b = prof[i], c = prof[i + 1];
+        const P = function (p) { return [sx * hl, p[1], p[0]]; };
+        const pa = P(a), pb = P(b), pc = P(c);
+        if (sx > 0) B.quad(pa, pc, pb, pb, uv(a[0], a[1]), uv(c[0], c[1]), uv(b[0], b[1]), uv(b[0], b[1]), col);
+        else B.quad(pa, pb, pc, pc, uv(a[0], a[1]), uv(b[0], b[1]), uv(c[0], c[1]), uv(c[0], c[1]), col);
+      }
+    }
+  }
+  /* ---- A PALLET AND ITS CRATES. A 1.2 x 1.0 m pallet (three stringers, a
+     five-board deck) carrying sawn-pine crates with framing battens. */
+  function palletInto(B) {
+    const uv = function () { return UV_TILE(1.2, trand(), trand()); }, pale = [1.12, 1.08, 1.0];
+    for (const z of [-0.44, 0, 0.44]) B.box(0, 0.05, z, 1.2, 0.1, 0.1, { uv: uv, skip: 8, col: pale });
+    for (let i = 0; i < 5; i++) B.box(-0.53 + i * 0.265, 0.111, 0, 0.14, 0.022, 1.0, { uv: uv, skip: 8, col: pale });
+  }
+  function crateInto(B, y0, w, h, d) {
+    const hx = w / 2, hz = d / 2, T = 0.02, bw = 0.09, cy = y0 + h / 2;
+    const plank = function () { return UV_TILE(1.2, trand(), trand()); };
+    const dark = [0.78, 0.74, 0.7];
+    B.box(0, cy, 0, w, h, d, { uv: plank, skip: 8 });
+    for (const sz of [-1, 1]) {                                 // long faces: corner posts, rails, a middle rail
+      for (const sx of [-1, 1]) B.box(sx * (hx - bw / 2), cy, sz * (hz + T / 2), bw, h, T, { uv: plank, skip: 8, col: dark });
+      for (const yy of [y0 + bw / 2, y0 + h - bw / 2, cy]) B.box(0, yy, sz * (hz + T / 2), w - 2 * bw, bw, T, { uv: plank, col: dark });
+    }
+    for (const sx of [-1, 1]) {                                 // short faces
+      for (const sz of [-1, 1]) B.box(sx * (hx + T / 2), cy, sz * (hz - bw / 2), T, h, bw, { uv: plank, skip: 8, col: dark });
+      for (const yy of [y0 + bw / 2, y0 + h - bw / 2]) B.box(sx * (hx + T / 2), yy, 0, T, bw, d - 2 * bw, { uv: plank, col: dark });
+    }
+    for (const sz of [-0.3, 0.3]) B.box(0, y0 + h + T / 2, sz * d, w, T, bw, { uv: plank, skip: 8, col: dark });
+  }
+
+  /* ---- THE YARD, laid out. Returns the list of named props for the audit. */
+  const SCENERY = [];
+  function buildYard(W, D, gap) {
+    // FLOOR: the poured slab, 520 m out to the fog; UVs in metres/8
+    const slab = slabTex();
+    const fg = new THREE.PlaneGeometry(520, 520);
+    fg.rotateX(-Math.PI / 2);
+    const fuv = fg.attributes.uv;
+    for (let i = 0; i < fuv.count; i++) fuv.setXY(i, fuv.getX(i) * 65, fuv.getY(i) * 65);
+    const floorMat = yardPatch(new THREE.MeshPhongMaterial({ map: slab.map, normalMap: slab.normalMap,
+      normalScale: new THREE.Vector2(0.6, 0.6), specular: 0x141414, shininess: 10 }), { mottle: 0.38, grime: 0 });
+    const floor = new THREE.Mesh(fg, floorMat);
+    floor.receiveShadow = true; floor.matrixAutoUpdate = false; floor.updateMatrix();
+    floor.userData.terrain = true;
+    CBZ.scene.add(floor);
+
+    // PERIMETER: four courses of block (3.2 m), knobs up
+    const pc = precastTex();
+    const blockB = new GeoBatch();
+    const hw = W / 2, hd = D / 2;
+    blockB.xf(0, 0, -hd, 0); legatoRun(blockB, -hw - 0.4, hw + 0.4, 4, true);
+    blockB.xf(0, 0, hd, Math.PI); legatoRun(blockB, -hw - 0.4, hw + 0.4, 4, true);
+    blockB.xf(-hw, 0, 0, Math.PI / 2); legatoRun(blockB, -hd + 0.4, hd - 0.4, 4, false);
+    blockB.xf(hw, 0, 0, -Math.PI / 2); legatoRun(blockB, -hd + 0.4, hd - 0.4, 4, false);
+    CBZ.micro.addBoxCollider(0, 1.6, -hd, W + 0.8, 3.2, 0.8); CBZ.micro.addBoxCollider(0, 1.6, hd, W + 0.8, 3.2, 0.8);
+    CBZ.micro.addBoxCollider(-hw, 1.6, 0, 0.8, 3.2, D); CBZ.micro.addBoxCollider(hw, 1.6, 0, 0.8, 3.2, D);
+
+    // PLACEMENT: every prop claims its footprint (+ an aisle) and nothing
+    // intersects anything; the spawn columns stay open ground
+    const taken = [];
+    const lane0 = gap / 2 - 6, lane1 = gap / 2 + 18;
+    const fits = function (x, z, ex, ez, aisle) {
+      if (Math.abs(x) + ex > hw - 2.5 || Math.abs(z) + ez > hd - 2.5) return false;
+      if (Math.abs(x) + ex > lane0 && Math.abs(x) - ex < lane1 && Math.abs(z) - ez < 24) return false;
+      for (let i = 0; i < taken.length; i++) {
+        const t = taken[i];
+        if (Math.abs(x - t[0]) < ex + t[2] + aisle && Math.abs(z - t[1]) < ez + t[3] + aisle) return false;
+      }
+      return true;
+    };
+    const claim = function (x, z, ex, ez) { taken.push([x, z, ex, ez]); };
+
+    const contB = {};                  // one batch per paint
+    const batchFor = function (hex) { return contB[hex] || (contB[hex] = new GeoBatch()); };
+    const paint = function () { return CONT_PAINT[(sWorld() * CONT_PAINT.length) | 0]; };
+    const place = function (x, z, L, alongX, tiers, flip) {
+      const ex = alongX ? L / 2 : CN.W / 2, ez = alongX ? CN.W / 2 : L / 2;
+      const yaw = alongX ? (flip ? Math.PI : 0) : (flip ? Math.PI / 2 : -Math.PI / 2);
+      for (let t = 0; t < tiers; t++) {
+        const B = batchFor(paint());
+        B.xf(x, t * CN.H, z, yaw);
+        containerInto(B, L);
+      }
+      claim(x, z, ex, ez);
+      CBZ.micro.addBoxCollider(x, tiers * CN.H / 2, z, ex * 2, tiers * CN.H, ez * 2);
+      SCENERY.push({ kind: "container", x: x, y: tiers * CN.H / 2, z: z, len: L, tiers: tiers });
+    };
+    const L20 = 6.058, L40 = 12.192;
+
+    // 1. THE BACK OF THE YARD behind each start line: rows along x, stacked
+    //    two high, on the flanks so the columns form up in the open
+    for (const side of [-1, 1]) {
+      for (const zs of [-1, 1]) {
+        let z = zs * (28 + sWorld() * 6);
+        for (let r = 0; r < 3; r++) {
+          const L = sWorld() < 0.55 ? L40 : L20;
+          const x = side * (hw - 3 - L / 2 - sWorld() * 2);
+          if (fits(x, z, L / 2, CN.W / 2, 0.25)) place(x, z, L, true, sWorld() < 0.6 ? 2 : 1, side > 0);
+          z += zs * (CN.W + 0.35 + (sWorld() < 0.3 ? 5 : 0));
+        }
+      }
+    }
+    // 2. NO-MAN'S LAND: broadside rows (long axis across the fire line), some
+    //    stacked, some in pairs, with aisles to move through
+    let tries = 0, placed = 0;
+    while (placed < 14 && tries++ < 80) {
+      const x = (sWorld() - 0.5) * (gap - 20), z = (sWorld() - 0.5) * (D - 24);
+      const L = sWorld() < 0.7 ? L20 : L40;
+      if (!fits(x, z, CN.W / 2, L / 2, 3.2)) continue;
+      const tiers = sWorld() < 0.3 ? 2 : 1;
+      place(x, z, L, false, tiers, sWorld() < 0.5);
+      placed++;
+      // a neighbour in the same row, 30 cm off, the way they get dropped
+      const nx = x + (x > 0 ? -1 : 1) * (CN.W + 0.3);
+      if (sWorld() < 0.35 && fits(nx, z, CN.W / 2, L / 2, 0.1)) { place(nx, z, L, false, 1, sWorld() < 0.5); placed++; }
+    }
+    // 3. JERSEY BARRIER RUNS: low cover, laid end to end
+    const jB = new GeoBatch();
+    let runs = 0; tries = 0;
+    while (runs < 9 && tries++ < 80) {
+      const x = (sWorld() - 0.5) * (gap - 14), z = (sWorld() - 0.5) * (D - 30);
+      const n = 2 + ((sWorld() * 3) | 0), alongZ = sWorld() < 0.6, len = n * 3.05;
+      const ex = alongZ ? 0.31 : len / 2, ez = alongZ ? len / 2 : 0.31;
+      if (!fits(x, z, ex, ez, 2.2)) continue;
+      for (let i = 0; i < n; i++) {
+        const o = -len / 2 + 1.525 + i * 3.05, k = 0.92 + sWorld() * 0.14;
+        jB.xf(alongZ ? x : x + o, 0, alongZ ? z + o : z, alongZ ? Math.PI / 2 + (sWorld() - 0.5) * 0.02 : (sWorld() - 0.5) * 0.02);
+        jerseyInto(jB, 3.0, [k, k, k * 0.98]);
+      }
+      claim(x, z, ex, ez);
+      CBZ.micro.addBoxCollider(x, 0.405, z, ex * 2, 0.81, ez * 2);
+      SCENERY.push({ kind: "barrier", x: x, y: 0.4, z: z });
+      runs++;
+    }
+    // 4. CRATES ON PALLETS, beside the containers they came out of
+    const cB = new GeoBatch();
+    let piles = 0; tries = 0;
+    while (piles < 8 && tries++ < 60) {
+      const x = (sWorld() - 0.5) * (gap - 10), z = (sWorld() - 0.5) * (D - 30);
+      const two = sWorld() < 0.5;             // two pallets side by side
+      const ex = two ? 1.25 : 0.62, ez = 0.52;
+      if (!fits(x, z, ex, ez, 1.6)) continue;
+      const yaw = sWorld() < 0.5 ? 0 : Math.PI;
+      let high = 0;
+      for (let p = 0; p < (two ? 2 : 1); p++) {
+        const px = two ? x + (p ? 0.63 : -0.63) : x;
+        cB.xf(px, 0, z, yaw); palletInto(cB);
+        const stack = 1 + ((sWorld() * 2) | 0);
+        for (let s = 0; s < stack; s++) crateInto(cB, 0.122 + s * 1.02, 1.14, 1.0, 0.94);
+        high = Math.max(high, 0.122 + stack * 1.02);
+      }
+      claim(x, z, ex, ez);
+      CBZ.micro.addBoxCollider(x, high / 2, z, ex * 2, high, ez * 2);
+      SCENERY.push({ kind: "crates", x: x, y: high / 2, z: z });
+      piles++;
+    }
+
+    // ONE MESH PER MATERIAL
+    const concreteMat = function () {
+      return yardPatch(new THREE.MeshPhongMaterial({ map: pc.map, normalMap: pc.normalMap,
+        normalScale: new THREE.Vector2(0.8, 0.8), specular: 0x111111, shininess: 8 }), { mottle: 0.22, grime: 0.55 });
+    };
+    blockB.mesh(concreteMat());
+    jB.mesh(concreteMat());
+    const pine = pineTex();
+    cB.mesh(yardPatch(new THREE.MeshPhongMaterial({ map: pine.map, normalMap: pine.normalMap,
+      normalScale: new THREE.Vector2(0.7, 0.7), specular: 0x0c0c0c, shininess: 6 }), { mottle: 0.2, grime: 0.35 }));
+    Object.keys(contB).forEach(function (hex) {
+      const skin = containerSkin(+hex);
+      contB[hex].mesh(yardPatch(new THREE.MeshPhongMaterial({ map: skin.map, specular: 0x262626, shininess: 22 }),
+        { mottle: 0.16, grime: 0.5 }));
+    });
   }
   /* One deep plate under the ISLAND maps, so a raised island reads as an
      island and the horizon is water rather than the inside of the sky dome.
@@ -1410,18 +1978,66 @@ CBZ.studio.need(NEED).then(function () {
      it is unambiguous at every camera range, and the apron edge below reads
      as the quay it now is. */
   function seaPlate(y) {
+    /* ...and it is WATER, not a blue sheet. It was one flat Lambert colour
+       lit per vertex, so every island venue sat in a matte blue tablecloth
+       with no sun on it. Phong puts the glint back, a few fixed ripple trains
+       break the normal up near the lens (fading out before they can shimmer),
+       and a fresnel term lets the sky into the grazing view. Still one plane,
+       still opaque, still -9 m. */
     const g = new THREE.PlaneGeometry(26000, 26000);
     g.rotateX(-Math.PI / 2); g.translate(0, y == null ? -9 : y, 0);
-    const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x2e4c66 }));
+    const mat = new THREE.MeshPhongMaterial({ color: 0x1d4a64, specular: 0x9fb6c4, shininess: 64 });
+    mat.onBeforeCompile = function (sh) {
+      sh.vertexShader = "varying vec3 vSpW;\n" + sh.vertexShader.replace("#include <project_vertex>",
+        "#include <project_vertex>\nvSpW = (modelMatrix * vec4(transformed, 1.0)).xyz;");
+      sh.fragmentShader = "varying vec3 vSpW;\n" + sh.fragmentShader
+        .replace("#include <normal_fragment_maps>", "#include <normal_fragment_maps>\n" +
+          "{ float dist = length(vSpW - cameraPosition); float k = 1.0 - smoothstep(60.0, 600.0, dist);\n" +
+          "  vec2 p = vSpW.xz;\n" +
+          "  float dx = cos(p.x * 0.42) * 0.5 + cos(dot(p, vec2(0.31, 0.27))) * 0.35 + cos(dot(p, vec2(-1.1, 0.7))) * 0.2;\n" +
+          "  float dz = cos(p.y * 0.37) * 0.5 + cos(dot(p, vec2(-0.23, 0.41))) * 0.35 + cos(dot(p, vec2(0.8, 1.3))) * 0.2;\n" +
+          "  normal = normalize(normal + (viewMatrix * vec4(dx, 0.0, dz, 0.0)).xyz * 0.14 * k); }")
+        .replace("#include <tonemapping_fragment>",
+          "{ vec3 vdir = normalize(cameraPosition - vSpW); float fr = pow(1.0 - max(vdir.y, 0.0), 4.0);\n" +
+          "  gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.6, 0.72, 0.8), fr * 0.5); }\n#include <tonemapping_fragment>");
+    };
+    mat.customProgramCacheKey = function () { return "npcwar-seaplate"; };
+    const m = new THREE.Mesh(g, mat);
     m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
     m.userData.terrain = true;
     CBZ.scene.add(m);
   }
+  /* OPEN WATER's floor. It used to be the same flat blue plate as the island
+     sea, forty metres down: a seabed the colour of the water over it. It is
+     sand now, mottled at two scales so the fog has something to swallow. */
+  function seabed(y) {
+    const g = new THREE.PlaneGeometry(26000, 26000);
+    g.rotateX(-Math.PI / 2); g.translate(0, y, 0);
+    const m = new THREE.Mesh(g, yardPatch(new THREE.MeshLambertMaterial({ color: 0x7a7458 }),
+      { mottle: 0.55, grime: 0, scale: 0.5 }));
+    m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
+    m.userData.terrain = true;
+    CBZ.scene.add(m);
+  }
+  /* GROUND OUT TO THE FOG around a raised venue or the city. It was a flat
+     colour 4 mm ABOVE the venue's own lowest floor, which is a depth fight
+     across the whole venue at any range past a few hundred metres. It sits
+     under the venue now (2 cm down and pushed back in depth), and it is the
+     poured slab texture at 8 m a tile, tinted to the colour the venue asked
+     for, so the far ground has joints and stains instead of paint. */
   function apron(minX, maxX, minZ, maxZ, color, y) {
-    const g = new THREE.PlaneGeometry(maxX - minX, maxZ - minZ);
+    const sx = maxX - minX, sz = maxZ - minZ;
+    const g = new THREE.PlaneGeometry(sx, sz);
     g.rotateX(-Math.PI / 2);
-    g.translate((minX + maxX) / 2, (y == null ? 0 : y) + 0.004, (minZ + maxZ) / 2);
-    const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: color || 0x8d9198 }));
+    g.translate((minX + maxX) / 2, (y == null ? 0 : y) - 0.02, (minZ + maxZ) / 2);
+    const uv = g.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * sx / 8, uv.getY(i) * sz / 8);
+    const want = new THREE.Color(color || 0x8d9198), base = new THREE.Color(0x8b867c);
+    const tint = new THREE.Color(Math.min(1, want.r / base.r), Math.min(1, want.g / base.g), Math.min(1, want.b / base.b));
+    const slab = slabTex();
+    const mat = yardPatch(new THREE.MeshLambertMaterial({ map: slab.map, color: tint,
+      polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }), { mottle: 0.35, grime: 0 });
+    const m = new THREE.Mesh(g, mat);
     m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
     m.userData.terrain = true;
     CBZ.scene.add(m);
@@ -1594,16 +2210,57 @@ CBZ.studio.need(NEED).then(function () {
      grass tufts (a spray of thin blades, instanced) that read as a desert
      plant from the lens height this page shoots from. The rocks get a real
      rock shape: a lumpy, flattened, half-buried stone instead of a d12. */
-  function rockGeometry() {
-    const g = new THREE.IcosahedronGeometry(1, 2);
+  /* A ROCK IS NOT A D12, AND NOT A FACETED BALL EITHER. r128's icosahedron
+     is non-indexed, so displacing it and asking for normals gave every face
+     its own flat normal: a lumpy disco ball in one flat colour. The shell is
+     welded first (smooth normals across the lumps), pushed out by noise at
+     three scales plus bedding ledges, and PAINTED per vertex by a caller
+     (sandstone strata and desert varnish in the erg, encrusting growth and
+     silt on the reef). */
+  function weldGeo(g) {
+    const p = g.attributes.position, seen = new Map(), idx = [], pos = [];
+    for (let i = 0; i < p.count; i++) {
+      const k = Math.round(p.getX(i) * 1e4) + "," + Math.round(p.getY(i) * 1e4) + "," + Math.round(p.getZ(i) * 1e4);
+      let j = seen.get(k);
+      if (j === undefined) { j = pos.length / 3; pos.push(p.getX(i), p.getY(i), p.getZ(i)); seen.set(k, j); }
+      idx.push(j);
+    }
+    const out = new THREE.BufferGeometry();
+    out.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    out.setIndex(idx);
+    return out;
+  }
+  function lumpRock(detail, salt, flat, paint) {
+    const g = weldGeo(new THREE.IcosahedronGeometry(1, detail));
     const p = g.attributes.position;
     for (let i = 0; i < p.count; i++) {
       const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
-      const k = 0.78 + vn2(x * 2.1 + 5, z * 2.1 + y * 1.7, 83) * 0.34 + vn2(x * 5.3, y * 5.3 + z, 89) * 0.1;
-      p.setXYZ(i, x * k, y * k * (y > 0 ? 0.72 : 1), z * k);
+      let k = 0.74 + vn2(x * 1.9 + salt, z * 1.9 + y * 1.6, 83) * 0.38 + vn2(x * 4.7 + y, y * 4.7 + z + salt, 89) * 0.13 +
+        vn2(x * 11 + salt, z * 11 + y * 7, 97) * 0.045;
+      k *= 1 + 0.035 * Math.sin(y * 10 + vn2(x * 2 + salt, z * 2, 7) * 3);      // bedding ledges
+      p.setXYZ(i, x * k, y * k * (y > 0 ? flat : 1), z * k);
     }
     g.computeVertexNormals();
+    const n = g.attributes.normal, col = new Float32Array(p.count * 3);
+    for (let i = 0; i < p.count; i++) {
+      const c = paint(p.getX(i), p.getY(i), p.getZ(i), n.getY(i));
+      col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2];
+    }
+    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
     return g;
+  }
+  function rockGeometry() {
+    return lumpRock(2, 0, 0.72, function (x, y, z, ny) {        // 260 instances: 320 tris each
+      const band = Math.sin(y * 7.5 + vn2(x * 1.3, z * 1.3, 5) * 2.4);
+      let r = 0.6 + band * 0.045, g = 0.47 + band * 0.03, b = 0.36 + band * 0.02;
+      if (band > 0.55) { r += 0.05; g -= 0.01; }                        // an iron-red bed
+      const v = 0.9 + vn2(x * 6, z * 6 + y * 3, 13) * 0.2;
+      r *= v; g *= v; b *= v;
+      if (ny > 0.55) { const k = (ny - 0.55) * 0.5; r -= r * k; g -= g * k; b -= b * k * 0.8; }   // desert varnish
+      const dust = Math.max(0, Math.min(1, (-y - 0.05) * 2.2));         // sand banked at the foot
+      r += (0.77 - r) * dust; g += (0.58 - g) * dust; b += (0.36 - b) * dust;
+      return [r, g, b];
+    });
   }
   function tuftGeometry() {
     const parts = [];
@@ -1641,7 +2298,7 @@ CBZ.studio.need(NEED).then(function () {
       if (!isRock && !isScrub) return;
       if (isRock) {
         o.geometry = rockGeometry();
-        o.material = new THREE.MeshLambertMaterial({ color: 0x8a7a66 });
+        o.material = new THREE.MeshLambertMaterial({ vertexColors: true });
         o.receiveShadow = true;
       }
       for (let i = 0; i < o.count; i++) {
@@ -1826,26 +2483,64 @@ CBZ.studio.need(NEED).then(function () {
      meshes, seven colliders, and it is the only thing on this map that can
      block a line of sight. */
   function seaReef(cx, cz) {
-    const rock = CBZ.cmat(0x36463f), rock2 = CBZ.cmat(0x2c3a36), steel = CBZ.cmat(0x4a4038);
-    const rx = cx, rz = cz + 96;
-    const put = function (mat, w, h, d, x, y, z, ry) {
-      const m = new THREE.Mesh(CBZ.boxGeom(w, h, d), mat);
-      m.position.set(x, y, z); m.rotation.y = ry || 0;
-      m.castShadow = false; m.receiveShadow = true;
-      CBZ.scene.add(m);
-      CBZ.micro.addBoxCollider(x, y, z, w, h, d);
-      return m;
+    /* It was seven boxes: four grey slabs for a pinnacle and three brown
+       planks for a wreck. The pinnacle is four welded, encrusted rock masses
+       now, and the wreck is a real lofted hull (world/hull_loft.js, the same
+       builder as the fleet above it) lying keel-up across the shoulder with
+       its bow section torn off below and the mast down. The colliders are
+       the same boxes as before: they were always the honest volumes. */
+    const rx = cx, rz = cz + 96, bed = SEA.seabed;
+    const collide = function (w, h, d, x, y, z) { CBZ.micro.addBoxCollider(x, y, z, w, h, d); };
+    const reefPaint = function (salt) {
+      return function (x, y, z, ny) {
+        let c = [0.2, 0.25, 0.23];
+        const a = vn2(x * 3 + salt, z * 3 + y * 2, 31), b = vn2(x * 5 + y * 3, z * 5 + salt, 37), f = vn2(x * 9, y * 9 + z * 4 + salt, 41);
+        if (a > 0.58) c = [0.26, 0.36, 0.24];                             // weed and turf algae
+        if (b > 0.7) c = [0.46, 0.3, 0.33];                               // coralline pink crust
+        if (f > 0.86) c = [0.55, 0.48, 0.26];                             // sponge
+        const v = 0.85 + vn2(x * 14, z * 14 + y * 9, 43) * 0.3;
+        const silt = Math.max(0, ny - 0.5) * 0.9;                         // silt settles on every ledge
+        return [(c[0] + (0.44 - c[0]) * silt) * v, (c[1] + (0.43 - c[1]) * silt) * v, (c[2] + (0.36 - c[2]) * silt) * v];
+      };
     };
-    const bed = SEA.seabed;
-    put(rock2, 46, 16, 40, rx, bed + 8, rz, 0.3);
-    put(rock, 30, 16, 26, rx + 3, bed + 22, rz - 3, -0.2);
-    put(rock, 17, 14, 15, rx - 2, bed + 36, rz + 2, 0.6);
-    put(rock, 9, 9, 8, rx + 1, bed + 45, rz - 1, 0.15);
-    // the wreck: a hull broken across the pinnacle's shoulder, keel to the sky
+    const rockMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    const masses = [[23, 9, 20, 0, 7, 0, 0.3], [15, 10, 13, 3, 19, -3, -0.2], [9, 8, 8, -2, 31, 2, 0.6], [5.5, 4, 4.8, 1, 40.5, -1, 0.15]];
+    masses.forEach(function (r, i) {
+      const m = new THREE.Mesh(lumpRock(3, 11 + i * 7, 0.78, reefPaint(i * 3)), rockMat);
+      m.scale.set(r[0], r[1], r[2]); m.position.set(rx + r[3], bed + r[4], rz + r[5]); m.rotation.y = r[6];
+      m.receiveShadow = true;
+      m.matrixAutoUpdate = false; m.updateMatrix();
+      CBZ.scene.add(m);
+      collide(r[0] * 1.7, r[1] * 1.6, r[2] * 1.7, rx + r[3], bed + r[4], rz + r[5]);
+    });
     const wy = bed + 26;
-    put(steel, 34, 4.6, 8, rx - 19, wy, rz + 10, 0.42);
-    put(steel, 12, 3.2, 6.4, rx - 33, wy - 3.4, rz + 16, 0.42);
-    put(steel, 2, 13, 2, rx - 21, wy + 8, rz + 11, 0.42);
+    const HL = CBZ.hullLoft;
+    const rust = yardPatch(new THREE.MeshLambertMaterial({ color: 0x564236, side: THREE.DoubleSide }), { mottle: 0.7, grime: 0, scale: 2.2 });
+    if (HL && HL.stationsFromLines) {
+      const hull = function (o, x, y, z, rotY, rotZ, rotX) {
+        const st = HL.stationsFromLines(o);
+        const ol = HL.outline(st);
+        const hm = HL.mesh(st, rust, { castShadow: false });
+        hm.position.z = -(ol.z0 + ol.z1) / 2;
+        hm.receiveShadow = true;
+        const g = new THREE.Group();
+        g.add(hm);
+        g.position.set(x, y, z); g.rotation.set(rotX || 0, rotY, rotZ, "YXZ");
+        CBZ.scene.add(g);
+      };
+      // the main hull, keel to the sky, rolled onto the rock's shoulder
+      hull({ loa: 30, beam: 7.4, draft: 2.4, freeboard: 2.6, deadrise: 20, roundBilge: true }, rx - 19, wy + 0.4, rz + 10, 0.42 + Math.PI / 2, Math.PI - 0.28);
+      // the bow, torn off and lying on its side further down
+      hull({ loa: 11, beam: 6.2, draft: 2.1, freeboard: 2.4, deadrise: 22, roundBilge: true }, rx - 33, wy - 3.6, rz + 16, 0.42 + Math.PI / 2 + 0.5, 1.9, 0.25);
+    }
+    // the mast, down across the hull
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.34, 13, 8), rust);
+    mast.position.set(rx - 21, wy + 5.5, rz + 11); mast.rotation.set(0.25, 0.42, 1.05);
+    CBZ.scene.add(mast);
+    collide(34, 4.6, 8, rx - 19, wy, rz + 10);
+    collide(12, 3.2, 6.4, rx - 33, wy - 3.4, rz + 16);
+    collide(2, 13, 2, rx - 21, wy + 8, rz + 11);
+    SCENERY.push({ kind: "reef", x: rx, y: bed + 30, z: rz }, { kind: "wreck", x: rx - 19, y: wy, z: rz + 10 });
   }
   /* THE FLEET. Men on this map are SWIMMERS — there is no boat-crew unit and
      inventing one would be a second kind of actor for one matchup. What there
@@ -1853,64 +2548,111 @@ CBZ.studio.need(NEED).then(function () {
      over the men's own start line, which is what makes "MEG v A FLEET" a
      picture instead of a label. Scenery, not units: nothing shoots from them
      and nothing can sink them. */
+  /* THE WHEELHOUSE SKIN: painted steel with its window band (framed panes,
+     sky in the top of the glass, dark below), rust weeping from the frames
+     and a salt-and-dirt skirt. It replaces a dark slab that was 2 cm WIDER
+     than the cabin it sat on, poking out of both sides. */
+  function wheelhouseTex() {
+    if (TEX.wheelhouse) return TEX.wheelhouse;
+    const c = cvs(256, 128), g = c.getContext("2d");
+    g.fillStyle = "#e6e2d6"; g.fillRect(0, 0, 256, 128);
+    const panes = [[10, 84], [92, 164], [172, 246]];
+    panes.forEach(function (pn) {
+      for (let i = 0; i < 4; i++) {                    // rust weeping from the frame corners
+        const x = pn[0] + trand() * (pn[1] - pn[0]), gr = g.createLinearGradient(0, 64, 0, 64 + 30 + trand() * 30);
+        gr.addColorStop(0, "rgba(120,62,30,0.45)"); gr.addColorStop(1, "rgba(120,62,30,0)");
+        g.fillStyle = gr; g.fillRect(x, 62, 2 + trand() * 3, 60);
+      }
+      g.fillStyle = "#34383b"; g.fillRect(pn[0], 14, pn[1] - pn[0], 50);
+      const gl = g.createLinearGradient(0, 18, 0, 60);
+      gl.addColorStop(0, "#9fb3bf"); gl.addColorStop(0.45, "#4d6170"); gl.addColorStop(1, "#1a232b");
+      g.fillStyle = gl; g.fillRect(pn[0] + 4, 18, pn[1] - pn[0] - 8, 42);
+      g.fillStyle = "rgba(255,255,255,0.18)";          // a streak of reflection
+      g.beginPath(); g.moveTo(pn[0] + 14, 18); g.lineTo(pn[0] + 26, 18); g.lineTo(pn[0] + 12, 60); g.lineTo(pn[0] + 4, 60); g.fill();
+    });
+    g.fillStyle = "rgba(40,44,48,0.8)"; g.fillRect(0, 70, 256, 3);          // trim
+    const dirt = g.createLinearGradient(0, 128, 0, 90);
+    dirt.addColorStop(0, "rgba(90,80,62,0.45)"); dirt.addColorStop(1, "rgba(90,80,62,0)");
+    g.fillStyle = dirt; g.fillRect(0, 90, 256, 38);
+    speckle(g, 256, 500, 0.1, true);
+    return (TEX.wheelhouse = wrapTex(c, true));
+  }
+  /* antifouling below the waterline, a black boot-top band on it and a weed
+     scum just under it, read off the hull's own waterline-relative y */
+  function hullPaint(mat) {
+    mat.onBeforeCompile = function (sh) {
+      sh.vertexShader = "varying float vHy;\n" + sh.vertexShader.replace("#include <begin_vertex>", "#include <begin_vertex>\nvHy = position.y;");
+      sh.fragmentShader = "varying float vHy;\n" + sh.fragmentShader.replace("#include <color_fragment>",
+        "#include <color_fragment>\n" +
+        "{ float below = step(vHy, -0.02);\n" +
+        "  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.3, 0.09, 0.07), below);\n" +
+        "  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.2, 0.24, 0.14), below * smoothstep(-0.3, -0.02, vHy) * 0.6);\n" +
+        "  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.07, 0.08, 0.09), step(-0.02, vHy) * step(vHy, 0.14));\n" +
+        "  diffuseColor.rgb *= 1.0 - 0.18 * smoothstep(0.14, 0.5, vHy) * (1.0 - smoothstep(0.5, 1.2, vHy)); }");
+    };
+    mat.customProgramCacheKey = function () { return "npcwar-hull"; };
+    return mat;
+  }
   function seaFleet(cx, cz, side, n) {
     /* A BOAT IS A HULL, NOT THREE BOXES. world/hull_loft.js lofts a real
        shell from lines (sheer, chine, keel rocker, deadrise, flare) — the
-       game's own boat builder — so the fleet is fishing boats: a lofted hull
-       riding at its waterline, a laid deck, a wheelhouse with its glass, a
-       mast. The box stack stays only as the fallback if the loft is absent. */
+       game's own boat builder, always in this page's load — so the fleet is
+       fishing boats: a painted hull with its antifouling and boot top riding
+       at its waterline, a rubbing strake, a laid plank deck, a wheelhouse
+       with framed windows, a mast and a derrick. (The box-stack fallback is
+       gone: the loft is always loaded here, and a box boat was never a boat.) */
     const HL = CBZ.hullLoft;
+    if (!HL || !HL.stationsFromLines) return;
     const paint = [0xe8e4da, 0x2d4f6b, 0x8a2b22, 0xd8cfb8, 0x3f5b3f];
-    const deckM = CBZ.cmat(0x8a6a48), cabM = CBZ.cmat(0xeeeae0), glassM = CBZ.cmat(0x1b2530),
+    const deckTex = pineTex().map.clone(); deckTex.needsUpdate = true;
+    deckTex.center.set(0.5, 0.5); deckTex.rotation = Math.PI / 2; deckTex.repeat.set(1 / 1.2, 1 / 1.2);
+    const deckM = new THREE.MeshLambertMaterial({ map: deckTex, color: 0xb8a58a }),
+      cabM = new THREE.MeshLambertMaterial({ map: wheelhouseTex() }),
       trimM = CBZ.cmat(0x2a2a2c);
     for (let i = 0; i < n; i++) {
       const g = new THREE.Group();
       const L = 9 + sWorld() * 5, W = 3 + sWorld() * 1.4;
-      if (HL && HL.stationsFromLines) {
-        const st = HL.stationsFromLines({ loa: L, beam: W, draft: 0.75, freeboard: 1.15, deadrise: 16, flareBow: 14 });
-        const hullM = new THREE.MeshLambertMaterial({ color: paint[i % paint.length], side: THREE.DoubleSide });
-        const hm = HL.mesh(st, hullM);
-        const ol = HL.outline(st);
-        const z0 = ol.z0, z1 = ol.z1, midY = ol.sheerYAt((z0 + z1) / 2);
-        hm.position.z = -(z0 + z1) / 2;          // centred on the group, so it pitches about its middle
-        g.add(hm);
-        // the deck: the sheer plan, laid flat just under the rail
-        const shp = new THREE.Shape();
-        const sb = ol.sheerStarboard, pt = ol.sheerPort;
-        shp.moveTo(sb[0][0] * 0.94, -sb[0][2]);
-        for (let k = 1; k < sb.length; k++) shp.lineTo(sb[k][0] * 0.94, -sb[k][2]);
-        for (let k = pt.length - 1; k >= 0; k--) shp.lineTo(pt[k][0] * 0.94, -pt[k][2]);
-        const dg = new THREE.ShapeGeometry(shp);
-        dg.rotateX(-Math.PI / 2);          // (x, -z) in the plane lands at (x, 0, z) facing UP
-        const dm = new THREE.Mesh(dg, deckM);
-        dm.position.set(0, midY - 0.12, hm.position.z);
-        g.add(dm);
-        const zc = hm.position.z + z0 + (z1 - z0) * 0.42;
-        const cab = new THREE.Mesh(CBZ.boxGeom(W * 0.62, 1.7, L * 0.22), cabM);
-        cab.position.set(0, midY + 0.73, zc); cab.castShadow = true; g.add(cab);
-        const glass = new THREE.Mesh(CBZ.boxGeom(W * 0.64, 0.5, L * 0.18), glassM);
-        glass.position.set(0, midY + 1.15, zc + 0.02); g.add(glass);
-        const roof = new THREE.Mesh(CBZ.boxGeom(W * 0.7, 0.12, L * 0.26), trimM);
-        roof.position.set(0, midY + 1.64, zc); g.add(roof);
-        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 4.2, 6), trimM);
-        mast.position.set(0, midY + 3.6, zc + L * 0.02); g.add(mast);
-        const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, L * 0.34, 5), trimM);
-        boom.rotation.x = 1.15; boom.position.set(0, midY + 2.6, zc - L * 0.14); g.add(boom);
-        g.userData.freeboard = 0;
-      } else {
-        const hull = CBZ.cmat(0xb9b3a4), deck = CBZ.cmat(0x6f4c33), cab = CBZ.cmat(0xd8d2c4);
-        const h = new THREE.Mesh(CBZ.boxGeom(L, 2.1, W), hull); h.position.y = 0; g.add(h);
-        const d = new THREE.Mesh(CBZ.boxGeom(L * 0.94, 0.3, W * 0.9), deck); d.position.y = 1.1; g.add(d);
-        const c = new THREE.Mesh(CBZ.boxGeom(L * 0.3, 1.7, W * 0.66), cab);
-        c.position.set(-L * 0.18, 2.0, 0); g.add(c);
-        g.userData.freeboard = 0.55;
-      }
+      const st = HL.stationsFromLines({ loa: L, beam: W, draft: 0.75, freeboard: 1.15, deadrise: 16, flareBow: 14 });
+      const hullM = hullPaint(new THREE.MeshLambertMaterial({ color: paint[i % paint.length], side: THREE.DoubleSide }));
+      const hm = HL.mesh(st, hullM);
+      const ol = HL.outline(st);
+      const z0 = ol.z0, z1 = ol.z1, midY = ol.sheerYAt((z0 + z1) / 2);
+      hm.position.z = -(z0 + z1) / 2;          // centred on the group, so it pitches about its middle
+      g.add(hm);
+      // the deck: the sheer plan, laid flat just under the rail
+      const shp = new THREE.Shape();
+      const sb = ol.sheerStarboard, pt = ol.sheerPort;
+      shp.moveTo(sb[0][0] * 0.94, -sb[0][2]);
+      for (let k = 1; k < sb.length; k++) shp.lineTo(sb[k][0] * 0.94, -sb[k][2]);
+      for (let k = pt.length - 1; k >= 0; k--) shp.lineTo(pt[k][0] * 0.94, -pt[k][2]);
+      const dg = new THREE.ShapeGeometry(shp);
+      dg.rotateX(-Math.PI / 2);          // (x, -z) in the plane lands at (x, 0, z) facing UP
+      const dm = new THREE.Mesh(dg, deckM);
+      dm.position.set(0, midY - 0.12, hm.position.z);
+      g.add(dm);
+      // rubbing strakes, a hand's width under the sheer on both sides
+      [sb, pt].forEach(function (line) {
+        const pts = line.map(function (q) { return [q[0] * 1.01, q[1] - 0.16, q[2] + hm.position.z]; });
+        const rs = HL.strip && HL.strip(pts, 0.06, trimM, { radial: 5, castShadow: false });
+        if (rs) g.add(rs);
+      });
+      const zc = hm.position.z + z0 + (z1 - z0) * 0.42;
+      const cab = new THREE.Mesh(CBZ.boxGeom(W * 0.62, 1.7, L * 0.22), cabM);
+      cab.position.set(0, midY + 0.73, zc); cab.castShadow = true; g.add(cab);
+      const roof = new THREE.Mesh(CBZ.boxGeom(W * 0.7, 0.12, L * 0.26), trimM);
+      roof.position.set(0, midY + 1.64, zc); g.add(roof);
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 4.2, 6), trimM);
+      mast.position.set(0, midY + 3.6, zc + L * 0.02); g.add(mast);
+      const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, L * 0.34, 5), trimM);
+      boom.rotation.x = 1.15; boom.position.set(0, midY + 2.6, zc - L * 0.14); g.add(boom);
+      g.userData.freeboard = 0;
       const a = i * 2.399963229728653;
       g.position.set(cx + side * (34 + sWorld() * 26) + Math.cos(a) * 16,
                      0, cz + Math.sin(a) * 26 + (sWorld() - 0.5) * 30);
       g.rotation.y = sWorld() * Math.PI * 2;
       CBZ.scene.add(g);
       SEA.boats.push(g);
+      SCENERY.push({ kind: "boat", x: g.position.x, y: 1, z: g.position.z });
     }
   }
   /* HOW DEEP A BODY SWIMS, and the bestiary already answered it. aquatic.js
@@ -2092,21 +2834,8 @@ CBZ.studio.need(NEED).then(function () {
     let cx = 0, cz = 0, spawners = null;
 
     if (id === "arena") {
-      flatDisc(260, 0x6b6657, 0);
-      // walls make it a box; crates make it a fight. Seeded layout.
-      const W = 210, D = 150, wallC = 0x54504a;
-      crate(0, -D / 2, W, 3.4, 2, wallC, "wall"); crate(0, D / 2, W, 3.4, 2, wallC, "wall");
-      crate(-W / 2, 0, 2, 3.4, D, wallC, "wall"); crate(W / 2, 0, 2, 3.4, D, wallC, "wall");
-      const CONT = [0x8a3a2a, 0x3d5a6e, 0x5f6b3c, 0x9a7a3a, 0x6e6e6a];
-      for (let i = 0; i < 34; i++) {
-        const x = (sWorld() - 0.5) * (W - 40), z = (sWorld() - 0.5) * (D - 30);
-        if (Math.abs(x) > gap / 2 - 6 && Math.abs(x) < gap / 2 + 18) continue;  // keep spawn lanes open
-        const tall = sWorld() < 0.62;
-        const w = 2.4 + sWorld() * 4.4, h = tall ? 1.9 + sWorld() * 0.6 : 1.15, d = 1.6 + sWorld() * 2.6;
-        const wood = sWorld() < 0.5;
-        // the tall ones are containers (steel, ribbed); the low ones are timber crates
-        crate(x, z, w, h, d, CONT[i % CONT.length], tall && !wood ? "container" : "timber");
-      }
+      // a walled container yard, 210 x 150 m inside the block wall (THE YARD above)
+      buildYard(210, 150, gap);
     } else if (id === "water") {
       /* OPEN WATER. No world() call, no raise(), no town(): a swell function,
          a seabed, a reef, and whatever fleet the roster earns. This branch is
@@ -2122,7 +2851,7 @@ CBZ.studio.need(NEED).then(function () {
       cx = 0; cz = 0;
       seaBuildSwell();
       // the bed first, so the surface blends over something and not over sky
-      seaPlate(SEA.seabed);
+      seabed(SEA.seabed);
       seaSurface(cx, cz);
       if (Q.get("reef") !== "0") seaReef(cx, cz);
       groundAt = function (x, z) { return swellAt(x, z); };
@@ -6796,6 +7525,10 @@ CBZ.studio.need(NEED).then(function () {
        hottest FIGHT, which is the right shot for a spectator and the wrong one
        for a photograph of a corpse — the thing under discussion is by
        definition no longer where the fighting is. */
+    // the built props of this map (containers, barriers, crates, reef, wreck,
+    // boats) with where they stand, so a capture can frame the scenery itself
+    scenery: function () { return SCENERY.map(function (o) { return Object.assign({}, o); }); },
+    mapCentre: function () { return MAP ? { x: MAP.cx, z: MAP.cz } : null; },
     lookAt: function (p, off, pitch) {
       cam.mode = "free";
       cam.wFocus.set(p.x, (p.y || 0) + (p.h || 0.5), p.z);
