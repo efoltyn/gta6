@@ -48,11 +48,15 @@
     deathRng = CBZ.seedStream ? CBZ.seedStream("surv-deaths-" + (++matchNo)) : null;
   }
 
-  // a quick impact poof where a body hits — dust ring + a couple of clods
+  // a quick impact poof where a body hits — dust ring + the ground it hit
+  // kicked up (clods and grit of the dirt itself, not grey cubes)
   function deathBurst(x, z) {
     if (!CBZ.fx) return;
     CBZ.fx.blast(x, z, { maxR: 2.6, color: 0xb9b0a2, life: 0.45 });
-    for (let i = 0; i < 3; i++) CBZ.fx.dropDebris({ x: x + (Math.random() - 0.5) * 1.2, z: z + (Math.random() - 0.5) * 1.2, fromY: 1.6, vy: 3 + Math.random() * 2, size: 0.3 + Math.random() * 0.3, color: 0x8a8278, linger: 1.2 });
+    if (CBZ.debris) {
+      const gy = CBZ.floorAt ? CBZ.floorAt(x, z) : 0;
+      CBZ.debris.chips(x, gy + 0.15, z, { kind: "dirt", count: 10, power: 0.9, spread: 1.2, size: 0.09 });
+    }
   }
 
   // colour by how grim the cause is, so the feed reads at a glance

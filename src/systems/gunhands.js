@@ -181,7 +181,6 @@
   }
 
   function reloadTick(dt) {
-    stepDebris(dt || 0);          // the ejected mags keep falling after the reload ends
     const fps = CBZ.fps;
     const left = fps && fps.reloading > 0 ? fps.reloading : 0;
     if (!left || CBZ.CONFIG.CHAR_RELOAD_ANIM === false ||
@@ -245,83 +244,44 @@
 
   /* ---- the falling magazine --------------------------------------------
      A reload you can only see in the arms is half an animation; the piece
-     that sells it is the empty mag hitting the pavement behind you. Pooled,
-     six deep, physical enough to bounce once and lie down. */
-  const debris = [];
-  let debrisMat = null;
+     that sells it is the empty mag hitting the pavement behind you. It is
+     the SAME magazine model the fist carries, handed to CBZ.debris.adopt:
+     the one rigid-body sim gives it real gravity, a bounce off its own
+     corner, a tumble onto its side, and then it lies there as settled
+     debris (capped and recycled by debris.js). No private pool or
+     integrator here any more. */
+  let magMat = null;
   function magMesh(style) {
-    if (!debrisMat) {
-      debrisMat = new THREE.MeshLambertMaterial({ color: 0x22262b });
-      debrisMat._shared = true;
+    if (!magMat) {
+      magMat = new THREE.MeshLambertMaterial({ color: 0x22262b });
+      magMat.name = "magazine";
+      magMat._shared = true;
     }
     const d = style === "belt" ? [0.15, 0.20, 0.26] : style === "cylinder" ? [0.07, 0.05, 0.07]
       : [0.07, 0.21, 0.10];
-    const m = new THREE.Mesh(new THREE.BoxGeometry(d[0], d[1], d[2]), debrisMat);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(d[0], d[1], d[2]), magMat);
     m.castShadow = true;
     return m;
   }
+  const _magV = new THREE.Vector3(), _magW = new THREE.Vector3();
   function dropMag(pos, style) {
-    const root = CBZ.prisonRoot || CBZ.scene;
-    if (!root) return;
-    // Pool of six: reuse a spent record, else grow, else evict the oldest.
-    // A field of magazines is set dressing, not a leak.
-    let rec = null;
-    for (let i = 0; i < debris.length; i++) if (debris[i].free) { rec = debris[i]; break; }
-    if (!rec && debris.length < 6) {
-      rec = { mesh: null, style: null, free: true, t: 0, vx: 0, vy: 0, vz: 0, sx: 0, sy: 0, sz: 0, landed: false };
-      debris.push(rec);
-    }
-    if (!rec) {
-      rec = debris[0];
-      for (let i = 1; i < debris.length; i++) if (debris[i].t > rec.t) rec = debris[i];
-    }
-    if (!rec.mesh || rec.style !== style) {
-      if (rec.mesh) {
-        if (rec.mesh.parent) rec.mesh.parent.remove(rec.mesh);
-        rec.mesh.geometry.dispose();
-      }
-      rec.mesh = magMesh(style);
-      rec.style = style;
-    }
+    const root = CBZ.scene;
+    if (!root || !CBZ.debris) return;
+    const m = magMesh(style);
+    m.position.copy(pos);
+    m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+    root.add(m);
+    m.updateMatrixWorld(true);
     const p = CBZ.player;
-    rec.mesh.position.copy(pos);
-    rec.mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
-    rec.vx = (p && p.vx ? p.vx * 0.5 : 0) + (Math.random() - 0.5) * 0.5;
-    rec.vz = (p && p.vz ? p.vz * 0.5 : 0) + (Math.random() - 0.5) * 0.5;
-    rec.vy = -0.4;
-    rec.sx = (Math.random() - 0.5) * 7; rec.sy = (Math.random() - 0.5) * 7; rec.sz = (Math.random() - 0.5) * 7;
-    rec.t = 0; rec.free = false; rec.landed = false;
-    rec.mesh.visible = true;
-    if (rec.mesh.parent !== root) root.add(rec.mesh);
-  }
-  function stepDebris(dt) {
-    for (let i = 0; i < debris.length; i++) {
-      const r = debris[i];
-      if (r.free) continue;
-      r.t += dt;
-      if (!r.landed) {
-        r.vy -= 19 * dt;
-        r.mesh.position.x += r.vx * dt;
-        r.mesh.position.y += r.vy * dt;
-        r.mesh.position.z += r.vz * dt;
-        r.mesh.rotation.x += r.sx * dt; r.mesh.rotation.y += r.sy * dt; r.mesh.rotation.z += r.sz * dt;
-        const fl = (CBZ.floorAt ? CBZ.floorAt(r.mesh.position.x, r.mesh.position.z) : 0) + 0.04;
-        if (r.mesh.position.y <= fl && r.vy < 0) {
-          if (r.vy < -2.2) {                       // one bounce, then it lies down
-            r.mesh.position.y = fl; r.vy *= -0.28;
-            r.vx *= 0.5; r.vz *= 0.5; r.sx *= 0.4; r.sy *= 0.4; r.sz *= 0.4;
-          } else {
-            r.mesh.position.y = fl; r.landed = true;
-            r.mesh.rotation.set(0, r.mesh.rotation.y, Math.PI / 2 - 0.2);
-            if (CBZ.sfx) CBZ.sfx("shell");
-          }
-        }
-      }
-      if (r.t > 14) {                              // fade the field out, never grow it
-        r.free = true; r.mesh.visible = false;
-        if (r.mesh.parent) r.mesh.parent.remove(r.mesh);
-      }
-    }
+    _magV.set((p && p.vx ? p.vx * 0.5 : 0) + (Math.random() - 0.5) * 0.5, -0.4,
+      (p && p.vz ? p.vz * 0.5 : 0) + (Math.random() - 0.5) * 0.5);
+    _magW.set((Math.random() - 0.5) * 7, (Math.random() - 0.5) * 7, (Math.random() - 0.5) * 7);
+    // kind plastic: a polymer/steel mag body that must not be "bent" like torn sheet metal
+    CBZ.debris.adopt(m, { velocity: _magV, angular: _magW, owner: "mags", kind: "plastic" });
+    // the body carries its own copy of the geometry; the template goes
+    root.remove(m);
+    m.geometry.dispose();
+    if (CBZ.sfx) setTimeout(function () { try { CBZ.sfx("shell"); } catch (e) {} }, 380);
   }
 
   /* ---- the fresh magazine, carried in the fist -------------------------- */

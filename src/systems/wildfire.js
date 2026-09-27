@@ -595,7 +595,9 @@
       const a = rnd() * 6.28, r2 = 3 + rnd() * 4;
       addScar(t.x + Math.cos(a) * r2 + F.wx * 2, t.z + Math.sin(a) * r2 + F.wz * 2, 2 + rnd() * 1.6);
     }
-    if (CBZ.fx) CBZ.fx.dropDebris({ x: t.x, z: t.z, fromY: ground(t.x, t.z) + 3, vy: 2, size: 0.5, color: 0x2a2622, linger: 0.6 });
+    // the crown lets go: charred twig and bark flecks in a puff of ash (the
+    // tree's own char, not a black cube)
+    if (CBZ.debris) CBZ.debris.chips(t.x, ground(t.x, t.z) + 3, t.z, { kind: "wood", color: 0x1a1410, count: 14, power: 0.6, spread: 2, size: 0.06, dustColor: 0x5a5550 });
   }
 
   /* ---- the smoke field --------------------------------------------------

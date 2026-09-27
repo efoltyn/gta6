@@ -351,7 +351,7 @@
     wall(-2.25, -8, 15.5, WALL_H, WALL_T);   // back-left (X -10..5.5)
     // the busted edge beside the gap + a rubble spill (the escape hole reads)
     wallStub(box, ctx, 5.2, -8, 0.6, WALL_T, WALL_H * 0.55);
-    rubblePile(box, ctx, 7.5, -7.3);
+    rubblePile(gp, ctx, 7.5, -7.3);
     // left (-X=-10) and right (+X=10): full runs along Z
     wall(-10, 0, WALL_T, WALL_H, 16);
     wall(10, 0, WALL_T, WALL_H, 16);
@@ -872,10 +872,27 @@
       ctx.cyl(parent, alongX ? x + t : x, y0 + h / 2, alongX ? z : z + t, 0.05, 0.05, h - 0.4, ctx.mat(MAT.bar), 6);
   }
   function wallStub(box, ctx, cx, cz, len, t, h) { box(cx, h / 2, cz, len, h, t, MAT.wallD); }
-  function rubblePile(box, ctx, cx, cz) {
-    box(cx - 0.5, 0.35, cz, 1.0, 0.7, 0.9, MAT.rubble);
-    box(cx + 0.6, 0.5, cz + 0.4, 0.8, 1.0, 0.8, MAT.rubble);
-    box(cx + 0.1, 0.3, cz - 0.5, 0.9, 0.6, 0.7, MAT.rubble);
+  /* THE SPILL IS THE WALL THAT WAS THERE: broken chunks of the yard wall's
+     own material (debris.js's shared irregular cut solids, stretched to
+     block and slab proportions), big ones against the stub, smaller ones
+     thrown further out, a few darker bits of core. It was three boxes. */
+  function rubblePile(gp, ctx, cx, cz) {
+    const D = CBZ.debris;
+    if (!D || !D.chunkGeo) return;
+    const wall = ctx.mat(MAT.wallD), core = ctx.mat(MAT.rubble);
+    //        x     z     w     h     d    yaw   core?
+    const P = [[-0.5, 0.0, 1.0, 0.62, 0.85, 0.3, 0], [0.55, 0.4, 0.85, 0.8, 0.75, 1.9, 0], [0.1, -0.5, 0.9, 0.5, 0.7, 4.1, 1],
+      [-1.1, 0.5, 0.55, 0.35, 0.5, 2.6, 0], [1.3, -0.3, 0.5, 0.3, 0.45, 0.9, 1], [-0.2, 0.9, 0.45, 0.28, 0.4, 5.2, 0],
+      [0.9, 1.1, 0.35, 0.22, 0.3, 3.3, 0], [-1.5, -0.4, 0.32, 0.2, 0.3, 1.2, 1], [1.8, 0.5, 0.28, 0.18, 0.26, 4.8, 0]];
+    for (let i = 0; i < P.length; i++) {
+      const q = P[i];
+      const m = new THREE.Mesh(D.chunkGeo(i), q[6] ? core : wall);
+      m.scale.set(q[2], q[3], q[4]);
+      m.position.set(cx + q[0], q[3] * 0.38, cz + q[1]);
+      m.rotation.set((i % 3 - 1) * 0.25, q[5], (i % 2 ? 0.2 : -0.15));
+      m.castShadow = true; m.receiveShadow = true;
+      gp.add(m);
+    }
   }
   function wireCoil(ctx, parent, x, y, z) {
     const c = ctx.cyl(parent, x, y, z, 0.12, 0.12, 1.9, ctx.mat(MAT.wire), 6);

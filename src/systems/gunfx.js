@@ -37,9 +37,13 @@
    never touches anyone's aim itself; fpsmode.js (player) folds the mul into
    its spread cone, and any NPC shooter can do the same with zero coupling
    back to this file. Decays linearly over SUPPRESS_DECAY seconds back to 0.
-     CBZ.bulletImpact(pos,n,o)   — debris burst; o.power scales it by
-                                   CALIBER, o.kind "chip" + o.color =
-                                   paint flecks in a shot car's coat.
+     CBZ.bulletImpact(pos,n,o)   — impact burst; o.power scales it by
+                                   CALIBER. o.material (+ o.object,
+                                   o.color) = the SURFACE that was hit:
+                                   it throws chips + dust of THAT
+                                   material through CBZ.debris (sparks
+                                   only off metal). o.kind "chip" +
+                                   o.color = paint flecks off a car.
      CBZ.bulletHole(pos, n, o)   — PERSISTENT pocked decal (pooled;
                                    cap + draw distance ride the LIVE
                                    quality tier, oldest recycled).
@@ -296,7 +300,7 @@
         const gt = (from.y - GY) / (from.y - to.y);
         const gp = { x: from.x + (to.x - from.x) * gt, y: GY, z: from.z + (to.z - from.z) * gt };
         CBZ.bulletHole(gp, { x: 0, y: 1, z: 0 }, { size: 0.2, noProp: true });
-        CBZ.bulletImpact(gp, { x: 0, y: 1, z: 0 }, { kind: "dust", power: 0.8 });
+        CBZ.bulletImpact(gp, { x: 0, y: 1, z: 0 }, { kind: "dust", surface: "asphalt", power: 0.8 });
       }
     }
 
@@ -399,9 +403,39 @@
     if (_vt.lengthSq() < 1e-5) _vt.set(1, 0, 0); else _vt.normalize();
     _vb.crossVectors(_vn, _vt).normalize();
 
+    /* THE SURFACE THROWS ITSELF. When the caller knows what the round hit
+       (opts.material, the struck mesh's own material, and opts.color, its
+       real colour at the hit), the burst is chips + dust of that material:
+       grey concrete grit off a wall, brick-red crumbs off brick, splinters
+       off wood, glass grit off glass, dirt off the ground. Sparks are what
+       METAL throws, so only metal (or an unknown surface) still sparks. The
+       chips are CBZ.debris's irregular instanced solids that bounce and
+       settle, never stretched boxes. */
+    const D = CBZ.debris;
+    if (D) {
+      const mat = opts.material ? (Array.isArray(opts.material) ? opts.material[0] : opts.material) : null;
+      let surf = null;
+      if (opts.surface) surf = opts.surface;             // a debris.js kind, stated outright
+      else if (mat) surf = D.kindOf(mat, opts.object || null);
+      else if (kind === "dust") surf = "dirt";
+      else if (kind === "wood") surf = "wood";
+      else if (kind === "chip") surf = "paint";
+      if (surf && surf !== "metal") {
+        const px = pos.x + _vn.x * 0.03, py = pos.y + _vn.y * 0.03, pz = pos.z + _vn.z * 0.03;
+        if (surf === "paint") {
+          D.chips(px, py, pz, { kind: "plastic", color: opts.color, count: Math.min(8, 2 + Math.round(3 * power)),
+            dir: _vn, power: 0.6 + 0.3 * power, size: 0.022, spread: 0.2, dust: false });
+        } else {
+          D.chips(px, py, pz, { kind: surf, material: mat || undefined,
+            color: opts.color != null ? opts.color : (mat ? undefined : (kind === "dust" ? 0xc8b48c : undefined)),
+            count: Math.min(10, 3 + Math.round(3 * power)), dir: _vn, power: 0.5 + 0.35 * power,
+            size: surf === "glass" ? 0.028 : 0.035, spread: 0.25, radius: 0.22 + 0.1 * power });
+        }
+        return;
+      }
+    }
     const dust = kind === "dust" || kind === "wood";
-    // "chip": solid (non-glowing) flecks in the SURFACE's own colour — paint
-    // off a shot car panel. opts.color carries the coat; heavier rounds throw more.
+    // "chip" without CBZ.debris on the page: solid flecks in the car's coat
     const chip = kind === "chip";
     const baseColor = opts.color != null ? opts.color
       : (kind === "wood" ? 0xb98b50 : dust ? 0xc8b48c : 0xffc864);

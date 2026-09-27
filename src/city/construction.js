@@ -127,6 +127,7 @@
     }
     if (CBZ.markCollidersDirty) { try { CBZ.markCollidersDirty(); } catch (e) {} }
     LIVE.group = null; LIVE.meshes = []; LIVE.cols = []; LIVE.posts = []; LIVE.builtFor = null;
+    if (CBZ.debris) CBZ.debris.clear("border-wall");     // a rebuild re-lays the breached rubble
   }
   function segMesh(i, seg) {
     const P = plan();
@@ -209,9 +210,29 @@
     }
     if (CBZ.markCollidersDirty) { try { CBZ.markCollidersDirty(); } catch (e) {} }
   }
-  function applyBreach(rec) {
-    // rubble: the section drops to a third of its height and stops being a
-    // barrier. Mesh scale (never a dispose — batching law).
+  function applyBreach(rec, blast) {
+    // THE WALL BREAKS INTO ITS OWN CONCRETE. The top 70% of the section (and
+    // its coping) is fractured by CBZ.debris out of the section's own
+    // material: live, the pieces are thrown away from the charge; on a
+    // reload the breach is already old, so the same material lies as a
+    // settled heap at the stump. The stump (a third of the height) stays and
+    // stops being a barrier. Mesh scale (never a dispose — batching law).
+    if (CBZ.debris && rec.col && !rec.piled) {
+      const c = rec.col, y0 = rec.floorY + rec.h * 0.3, y1 = rec.floorY + rec.h;
+      const cx = (c.minX + c.maxX) / 2;
+      if (blast) {
+        const dx = cx - blast.x, dz = rec.z - blast.z, dl = Math.hypot(dx, dz) || 1;
+        const at = { x: cx - dx / dl * 0.3, y: (y0 + y1) / 2, z: rec.z - dz / dl * 0.3 };
+        CBZ.debris.shatterBox({ minX: c.minX, maxX: c.maxX, minY: y0, maxY: y1, minZ: c.minZ, maxZ: c.maxZ },
+          rec.mesh.material, { kind: "concrete", at, dir: { x: dx / dl, y: 0.3, z: dz / dl }, power: 1.4, owner: "border-wall", solid: true });
+        if (rec.cap && rec.cap.visible) CBZ.debris.shatter(rec.cap, { kind: "concrete", at, power: 1.2, maxPieces: 6, owner: "border-wall", hide: false });
+      } else {
+        CBZ.debris.pile({ x: cx, z: rec.z, y: rec.floorY, w: (c.maxX - c.minX) + 3, d: (c.maxZ - c.minZ) * 0.9, h: rec.h * 0.25,
+          materials: [{ material: rec.mesh.material, kind: "concrete", weight: 3 }, { material: rec.cap ? rec.cap.material : rec.mesh.material, kind: "concrete", weight: 1 }],
+          owner: "border-wall", solid: true });
+      }
+      rec.piled = true;
+    }
     rec.mesh.scale.y = 0.3;
     rec.mesh.position.y = rec.floorY + (rec.h * 0.3) / 2;
     if (rec.cap) rec.cap.visible = false;
@@ -220,6 +241,11 @@
     rec.hp = 0;
   }
   function repairSeg(rec) {
+    // the crew hauls the rubble off before it pours the section again
+    if (rec.piled && CBZ.debris) {
+      if (CBZ.debris.clearNear) CBZ.debris.clearNear(rec.col ? (rec.col.minX + rec.col.maxX) / 2 : rec.mesh.position.x, rec.z, SEG_LEN * 0.55);
+      rec.piled = false;
+    }
     rec.mesh.scale.y = 1;
     rec.mesh.position.y = rec.floorY + rec.h / 2;
     if (rec.cap) rec.cap.visible = true;
@@ -258,7 +284,7 @@
       rec.hp -= 1;
       if (rec.hp <= 0) {
         S.breached[rec.i] = 1;
-        applyBreach(rec);
+        applyBreach(rec, { x: x, z: z });
         if (CBZ.markCollidersDirty) { try { CBZ.markCollidersDirty(); } catch (e) {} }
         news("A section of the border wall is blown open in the Saltlands.");
       }
