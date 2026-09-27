@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "08f71d97f96365606362492f4d44e4882cd96189",
-  "createdAt": "2026-09-27T06:20:43.289Z",
+  "sourceCommit": "99f9b8cc2ddef318ba7e4645ca713babc0c45b3d",
+  "createdAt": "2026-09-27T06:36:10.710Z",
   "fileCount": 1104,
-  "totalBytes": 44851009,
+  "totalBytes": 44857083,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -1528,8 +1528,8 @@
     },
     {
       "file": "src/config.js",
-      "bytes": 20332,
-      "sha256": "53940144c459f09d18699252c561ae4b5c3e75613df7c3c58b753153f7b0a3bd"
+      "bytes": 21148,
+      "sha256": "9229ac6edd22a2c8d1856703f2f02c14e3a36a320724ce8d1cffdf826ef75c46"
     },
     {
       "file": "src/core/batch.js",
@@ -1543,8 +1543,8 @@
     },
     {
       "file": "src/core/farcull.js",
-      "bytes": 8385,
-      "sha256": "7dab1a2e2baab61f9545a9a4b82a0db060772850313350a34e35b55ab00bb85e"
+      "bytes": 11075,
+      "sha256": "042eafab9799fb4559663fe3d14387438da23cf4cbe7d845ee1674de92de9b9a"
     },
     {
       "file": "src/core/fxwarm.js",
@@ -1618,8 +1618,8 @@
     },
     {
       "file": "src/core/quality.js",
-      "bytes": 7850,
-      "sha256": "566b2b42afacab3c2b0659f5c5a3570bbcff7d3487c033320fd7eba8e0da04e7"
+      "bytes": 10363,
+      "sha256": "94876a9e70e16c49a0a03b85f0290b15096fe8855b71e749d75fb902a7bbe057"
     },
     {
       "file": "src/core/renderer.js",
@@ -2478,8 +2478,8 @@
     },
     {
       "file": "src/systems/settings.js",
-      "bytes": 7881,
-      "sha256": "87eae67d34123bb32877fe18b39520751b7d3017ed039a63d54b81a80ef1208d"
+      "bytes": 7936,
+      "sha256": "6479176d3a30d3feb9671a81f471dc6d8eb42c8d603020363551713a1762a50d"
     },
     {
       "file": "src/systems/simulation.js",
