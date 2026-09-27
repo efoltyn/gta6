@@ -177,9 +177,11 @@
       take(C, C.X0, zpF - 0.1, C.X1, zpF + 0.1);
       take(C, gx - 0.65, zpF - 1.0, gx + 0.65, zpF + 1.0);        // both sides of the doorway stay clear
     }
-    // the eager duffel (buildings.js makeStash): nothing is drawn over it
+    // THE BAG'S SPOT on the floor at the back-centre (where buildings.js
+    // makeStash files the stash): with the count band on +z it lies beside
+    // the table; nothing else is drawn over it
     const dz = b.d / 2 - 2.6;
-    take(C, -0.58, dz - 0.3, 0.58, dz + 0.3);
+    if (cs > 0) take(C, -0.58, dz - 0.3, 0.58, dz + 0.3);
 
     // ---- the COUNT TABLE, beside the duffel, the counter's chair behind it
     // so he sits facing the doorway.
@@ -199,8 +201,8 @@
       table = { x: tx, z: cs * uT };
     }
     const chair = { x: table.x, z: table.z + cs * 0.83, face: cs > 0 ? PI : 0 };
-    // our own bag when the eager duffel is out by the door
-    let duffel = null;
+    // the gang's duffel on the floor beside the table
+    let duffel = cs > 0 ? { x: 0, z: dz } : null;
     if (cs < 0) {
       const dx = table.x + (table.x > 0 ? -1.45 : 1.45);
       duffel = first(C, [{ x: dx, z: table.z, x0: dx - 0.5, x1: dx + 0.5, z0: table.z - 0.28, z1: table.z + 0.28 }]);
@@ -290,7 +292,6 @@
       sofa: sofa, tv: tv, lookout: lookout, cover: cover, crates: crates,
       band: { x0: C.X0, x1: C.X1, z0: bandZ[0], z1: bandZ[1] },
       lounge: { x0: C.X0, x1: C.X1, z0: loungeZ[0], z1: loungeZ[1] },
-      eagerDuffel: { x: 0, z: dz },
     };
   }
 
@@ -312,8 +313,9 @@
     }
     const t = first(C, cands) || { x: cx, z: cz };
     const table = { x: t.x, z: t.z, alongX: alongX, L: L, W: W };
-    const cook = alongX ? { x: t.x - 0.35, z: t.z - (W / 2 + 0.42), face: 0 }
-                        : { x: t.x - (W / 2 + 0.42), z: t.z - 0.35, face: HP };
+    // the cook stands at the burners, which are at the gas bottle's (+) end
+    const cook = alongX ? { x: t.x + 0.55, z: t.z - (W / 2 + 0.42), face: 0 }
+                        : { x: t.x - (W / 2 + 0.42), z: t.z + 0.55, face: HP };
     const tank = alongX ? { x: t.x + L / 2 + 0.3, z: t.z } : { x: t.x, z: t.z + L / 2 + 0.3 };
     // the bagging table against a wall, clear space in front of it
     const bc = [
@@ -329,7 +331,7 @@
       const ex0 = Math.min(0, c.fx) * 0.7, ex1 = Math.max(0, c.fx) * 0.7, ez0 = Math.min(0, c.fz) * 0.7, ez1 = Math.max(0, c.fz) * 0.7;
       if (freeRect(C, c.x - hx + ex0, c.z - hz + ez0, c.x + hx + ex1, c.z + hz + ez1)) {
         take(C, c.x - hx + ex0, c.z - hz + ez0, c.x + hx + ex1, c.z + hz + ez1);
-        bags = { x: c.x, z: c.z, alongX: c.ax };
+        bags = { x: c.x, z: c.z, alongX: c.ax, fx: c.fx, fz: c.fz };
       }
     }
     return { C: C, table: table, cook: cook, tank: tank, bags: bags };
@@ -413,15 +415,27 @@
         if (safe) safe.yaw = cs > 0 ? PI : 0;
       }
     }
-    // a sofa against a side wall and the gun rack on the other
+    // a sofa against a side wall (its coffee table and a floor lamp with it),
+    // the TV on the wall across from it, the gun rack wherever is left
     const sc = [];
     const zc = (C.Z0 + C.Z1) / 2;
     for (let i = 0; i < 3; i++) {
       const z = zc + (i === 0 ? 0 : i === 1 ? 1.3 : -1.3);
-      sc.push({ x: C.X0 + 0.47, z: z, x0: C.X0 + 0.02, x1: C.X0 + 1.4, z0: z - 1.05, z1: z + 1.05, yaw: HP });
-      sc.push({ x: C.X1 - 0.47, z: z, x0: C.X1 - 1.4, x1: C.X1 - 0.02, z0: z - 1.05, z1: z + 1.05, yaw: -HP });
+      sc.push({ x: C.X0 + 0.47, z: z, x0: C.X0 + 0.02, x1: C.X0 + 1.75, z0: z - 1.5, z1: z + 1.5, yaw: HP });
+      sc.push({ x: C.X1 - 0.47, z: z, x0: C.X1 - 1.75, x1: C.X1 - 0.02, z0: z - 1.5, z1: z + 1.5, yaw: -HP });
     }
     const sofa = first(C, spin(sc, hsh(b, k, 3, 3, 0x91)));
+    let tv = null;
+    if (sofa) {
+      const dir = sofa.yaw > 0 ? -1 : 1, wx = dir < 0 ? C.X1 : C.X0, tx = wx + dir * 0.22;
+      const tc = [];
+      const zo = [0, 0.8, -0.8, 1.6, -1.6];
+      for (let i = 0; i < zo.length; i++) {
+        const z = sofa.z + zo[i];
+        tc.push({ x: tx, z: z, x0: Math.min(wx, tx + dir * 0.25), x1: Math.max(wx, tx + dir * 0.25), z0: z - 0.78, z1: z + 0.78, yaw: dir > 0 ? HP : -HP });
+      }
+      tv = first(C, tc);
+    }
     const rc = [];
     for (let i = 0; i < 3; i++) {
       const z = zc + (i === 0 ? 0 : i === 1 ? -1.5 : 1.5);
@@ -429,27 +443,64 @@
       rc.push({ x: C.X0 + 0.2, z: z, x0: C.X0 + 0.02, x1: C.X0 + 0.95, z0: z - 0.75, z1: z + 0.75, yaw: HP });
     }
     const rack = first(C, rc);
-    return { C: C, cs: cs, zw: zw, desk: desk, safe: safe, sofa: sofa, rack: rack };
+    return { C: C, cs: cs, zw: zw, desk: desk, safe: safe, sofa: sofa, tv: tv, rack: rack };
   }
 
   /* ========================================================================
      2. DRAWING — pieces in building-local metres, standing on B.fy.
+     Everything is several parts at its real size, merged into the fit-out's
+     buckets (one draw per material per floor); no real lights, the fixtures
+     are baked (B.light kind "none" behind a fitting drawn here).
      ======================================================================== */
   const COL = {
     metal: 0x3c4046, steel: 0xaeb3b7, steelD: 0x7d8387, black: 0x17181a,
-    ply: 0xb08d5e, crate: 0x8a6a45, crateD: 0x6b5236, cash: 0x6f8f5f, cashD: 0x5a7650, band: 0xd8cfa6,
-    rubber: 0xb8864f, glass: 0xcfe3e0, jug: 0xe8ece6, tarp: 0x9fb0b8, sheet: 0xdfe6e8,
+    crate: 0x8a6a45, crateD: 0x6b5236,
+    // a US note, seen as a strapped bundle: the face note is a dark green-grey,
+    // the cut edges of a hundred notes read a shade lighter
+    billFace: 0x5d6b56, billEdge: 0x86907a,
+    rubber: 0xb8864f, glass: 0xcfe3e0, jug: 0xe8ece6, tarp: 0x3f6784, sheet: 0xdfe6e8,
+    card: 0xa9875a, cardD: 0x8c6d45, web: 0x151613,
   };
+  // currency straps: mustard ($100s), violet ($20s), brown ($50s)
+  const STRAPS = [0xc9a13b, 0x8a5aa0, 0x9a6b45];
   const CAN = [0xc0392b, 0x2e6fbf, 0xd8d8d0, 0x2f7d3a, 0xd9a520, 0x1f1f22];
   const SHEETS = [0xc9b8a0, 0x8fa3b8, 0xb89a9a, 0xd8d2c0, 0x7f8f78, 0x9d8ab0];
+  const BLANKETS = [0x3f4d6b, 0x6e3434, 0x55613f, 0x5c5c63, 0x7a6248];
+  const GARMENTS = [0x2b2d33, 0x6d2c2c, 0x2f4a6d, 0xc9c4b8, 0x3d5a3a, 0x8a6d3b, 0x1c1c1c];
 
-  // a piece frame: (lat, up, fwd) in the piece's own axes, forward = (sin yaw, cos yaw)
-  function piece(B, x, z, yaw) {
-    const s = Math.sin(yaw), c = Math.cos(yaw), swap = (Math.round(yaw / HP) & 1) === 1;
+  function mulHex(hex, f) {
+    const r = Math.min(255, ((hex >> 16) & 255) * f) | 0, g = Math.min(255, ((hex >> 8) & 255) * f) | 0, b = Math.min(255, (hex & 255) * f) | 0;
+    return (r << 16) | (g << 8) | b;
+  }
+  // A PIECE FRAME. forward = (fx, fz) (axis-aligned), lateral = (fz, -fx);
+  // p(lat, up, fwd, across, h, deep, col, o) draws a box whose BOTTOM is at
+  // y0 + up; `across` runs along lateral, `deep` along forward.
+  function frame(B, x, z, fx, fz, y0) {
+    fx = Math.round(fx); fz = Math.round(fz);
+    const lx = fz, lz = -fx, fwdX = fx !== 0;
     return function (lat, up, fwd, across, h, deep, col, o) {
-      return B.box(x + lat * c + fwd * s, B.fy + up + h / 2, z - lat * s + fwd * c,
-        swap ? deep : across, h, swap ? across : deep, col, o);
+      return B.box(x + lat * lx + fwd * fx, y0 + up + h / 2, z + lat * lz + fwd * fz,
+        fwdX ? deep : across, h, fwdX ? across : deep, col, o);
     };
+  }
+  function piece(B, x, z, yaw) { return frame(B, x, z, Math.sin(yaw), Math.cos(yaw), B.fy); }
+  // ROUND THINGS from two crossed boxes: an octagon at room scale. Upright
+  // (y0 = bottom) and lying (yc = axis height). The twin is a hair shorter so
+  // the two caps never share a plane.
+  function cyl(B, x, y0, z, r, h, col, o) {
+    const a = 2 * r, b2 = a * 0.72;
+    B.box(x, y0 + h / 2, z, a, h, b2, col, o);
+    B.box(x, y0 + h / 2 - 0.0005, z, b2, h - 0.001, a, col, o);
+  }
+  function cylH(B, x, yc, z, r, len, ax, col, o) {
+    const a = 2 * r, b2 = a * 0.72;
+    B.box(x, yc, z, ax ? len : b2, a, ax ? b2 : len, col, o);
+    B.box(x, yc, z, ax ? len - 0.001 : a, b2, ax ? a : len - 0.001, col, o);
+  }
+  // a thin square ring (lamp cages, pot rims, tank collars)
+  function ring(B, x, y, z, r, t, col) {
+    B.box(x, y, z - r, 2 * r, t, t, col); B.box(x, y, z + r, 2 * r, t, t, col);
+    B.box(x - r, y, z, t, t, 2 * r - t, col); B.box(x + r, y, z, t, t, 2 * r - t, col);
   }
   function seatAt(wx, y, wz, face, kind, cushion, lot) {
     if (!CBZ.propRegisterSeat) return null;
@@ -458,208 +509,112 @@
     return CBZ.propRegisterSeat(wx, y, wz, face, kind, lot || null, { cushion: cushion, floorBelow: 0 });
   }
 
-  function foldChair(B, x, z, yaw, seat) {
-    const p = piece(B, x, z, yaw), m = COL.metal, s = 0x5d6166;
-    for (let a = -1; a <= 1; a += 2) {
-      p(a * 0.19, 0, 0.17, 0.025, 0.42, 0.025, m);             // front legs
-      p(a * 0.19, 0, -0.19, 0.025, 0.86, 0.025, m);            // rear legs, up into the back
+  // ---- FIXTURES (the fitting is drawn here; the light is baked) -------------
+  // a bare bulb in a wire cage on a cord: the count table, the crash floor
+  function cageLight(B, x, z, o) {
+    o = o || {};
+    const drop = o.drop || 0.55, yb = B.ceil - drop, wire = 0x2a2a2a;
+    B.box(x, B.ceil - 0.012, z, 0.1, 0.024, 0.1, 0xd6d2c8);                       // ceiling rose
+    B.box(x, B.ceil - drop / 2, z, 0.009, drop, 0.009, 0x151515);                 // cord
+    B.box(x, yb - 0.035, z, 0.042, 0.07, 0.042, 0x1c1c1e);                         // lampholder
+    B.box(x, yb - 0.105, z, 0.058, 0.075, 0.058, 0xfff2cc, { glow: true });        // the bulb
+    if (o.cage !== false) {
+      const r = 0.05;
+      B.box(x - r, yb - 0.105, z, 0.005, 0.13, 0.005, wire); B.box(x + r, yb - 0.105, z, 0.005, 0.13, 0.005, wire);
+      B.box(x, yb - 0.105, z - r, 0.005, 0.13, 0.005, wire); B.box(x, yb - 0.105, z + r, 0.005, 0.13, 0.005, wire);
+      ring(B, x, yb - 0.04, z, r, 0.005, wire);
+      ring(B, x, yb - 0.17, z, r * 0.6, 0.005, wire);
     }
-    p(0, 0.18, 0.17, 0.36, 0.02, 0.02, m);                     // stretcher
-    p(0, 0.42, 0, 0.42, 0.03, 0.42, s);                        // seat -> 0.45
-    p(0, 0.6, -0.19, 0.4, 0.22, 0.025, s);                     // back panel
-    if (seat) seatAt(B.ox + x, B.fy, B.oz + z, yaw, "chair", 0.45, B.lot);
+    return B.light(x, z, { kind: "none", y: yb - 0.005, r: o.r || 4.2, i: o.i == null ? 0.7 : o.i,
+      color: o.color == null ? 0xffdca0 : o.color, rect: o.rect || null });
   }
-  function crateBox(B, x, y0, z, w, h, d, col, o) {
-    const cy = y0 + h / 2;
-    B.box(x, cy, z, w, h, d, col, o);
-    // two proud slats round the long faces and a lid rim: reads as a crate
-    const sw = w >= d;
-    B.box(x, y0 + h * 0.25, z, sw ? w + 0.02 : w + 0.02, 0.07, sw ? d + 0.02 : d + 0.02, COL.crateD);
-    B.box(x, y0 + h * 0.75, z, w + 0.02, 0.07, d + 0.02, COL.crateD);
-    B.box(x, y0 + h + 0.01, z, w * 0.96, 0.02, d * 0.96, COL.crate);
-    return y0 + h + 0.02;
-  }
-  function milkCrate(B, x, y0, z, col) {
-    const s = 0.33;
-    B.box(x, y0 + 0.01, z, s, 0.02, s, col);
-    B.box(x, y0 + s / 2, z - s / 2 + 0.01, s, s, 0.02, col); B.box(x, y0 + s / 2, z + s / 2 - 0.01, s, s, 0.02, col);
-    B.box(x - s / 2 + 0.01, y0 + s / 2, z, 0.02, s, s - 0.04, col); B.box(x + s / 2 - 0.01, y0 + s / 2, z, 0.02, s, s - 0.04, col);
-    return y0 + s;
-  }
-  function can(B, x, y, z, col, lying, alongX) {
-    if (lying) B.box(x, y + 0.033, z, alongX ? 0.123 : 0.066, 0.066, alongX ? 0.066 : 0.123, col);
-    else { B.box(x, y + 0.06, z, 0.064, 0.12, 0.064, col); B.box(x, y + 0.122, z, 0.05, 0.005, 0.05, 0xc8c8c8); }
-  }
-  function ashtray(B, x, y, z) {
-    B.box(x, y + 0.015, z, 0.12, 0.03, 0.12, 0x55595e);
-    B.box(x + 0.02, y + 0.034, z, 0.05, 0.008, 0.012, 0xe8e2d0);
-    B.box(x - 0.02, y + 0.034, z + 0.02, 0.012, 0.008, 0.045, 0xe8e2d0);
-  }
-  function pizzaBox(B, x, y, z, n) {
-    for (let i = 0; i < n; i++) B.box(x + i * 0.03, y + 0.023 + i * 0.046, z - i * 0.02, 0.4, 0.045, 0.4, i & 1 ? 0xc9a46b : 0xd3b27a);
-    return y + n * 0.046;
-  }
-  // a TV on a crate: the screen faces `yaw`
-  function tvOnCrate(B, x, z, yaw, on) {
-    const alongX = (Math.round(yaw / HP) & 1) === 0;
-    const w = alongX ? 0.86 : 0.46, d = alongX ? 0.46 : 0.86;
-    const ct = crateBox(B, x, B.fy, z, w, 0.46, d, COL.crate, { solid: true });
-    const p = piece(B, x, z, yaw);
-    const up = ct - B.fy;
-    p(0, up, 0, 0.3, 0.02, 0.18, COL.black);                   // foot
-    p(0, up + 0.02, -0.02, 0.06, 0.08, 0.04, COL.black);       // neck
-    p(0, up + 0.08, -0.02, 0.98, 0.58, 0.06, COL.black);       // body
-    p(0, up + 0.12, 0.012, 0.9, 0.5, 0.012, on ? 0x3d5f82 : 0x0f1317, on ? { glow: true } : null);
-    if (on) B.lamp(x + Math.sin(yaw) * 0.4, B.fy + up + 0.35, z + Math.cos(yaw) * 0.4, { color: 0x8fb4ff, r: 2.4, i: 0.22 });
-  }
-  // a folding table (top at 0.74); returns the top y
-  function foldTable(B, x, z, alongX, L, W, topCol) {
-    const lx = alongX ? L : W, lz = alongX ? W : L;
-    B.box(x, B.fy + 0.72, z, lx, 0.04, lz, topCol || 0xcfc8b6);
-    B.box(x, B.fy + 0.685, z, lx - 0.08, 0.03, lz - 0.08, COL.metal);
-    for (let a = -1; a <= 1; a += 2) for (let c = -1; c <= 1; c += 2)
-      B.box(x + a * (lx / 2 - 0.06), B.fy + 0.35, z + c * (lz / 2 - 0.06), 0.03, 0.7, 0.03, COL.metal);
-    B.solid(x - lx / 2, x + lx / 2, z - lz / 2, z + lz / 2, B.fy, B.fy + 0.76);
-    return B.fy + 0.74;
-  }
-  function cashStack(B, x, y, z, h, alongX) {
-    B.box(x, y + h / 2, z, alongX ? 0.156 : 0.066, h, alongX ? 0.066 : 0.156, COL.cash);
-    B.box(x, y + h / 2, z, alongX ? 0.035 : 0.07, h + 0.004, alongX ? 0.07 : 0.035, COL.band);
-  }
-  function pistol(B, x, y, z, alongX) {
-    B.box(x, y + 0.017, z, alongX ? 0.19 : 0.032, 0.034, alongX ? 0.032 : 0.19, COL.black);
-    B.box(x - (alongX ? 0.06 : 0), y + 0.015, z + (alongX ? 0.055 : -0.06), alongX ? 0.032 : 0.1, 0.03, alongX ? 0.1 : 0.032, 0x222326);
-  }
-  // THE COUNT TABLE: machine, banded stacks, a scale, rubber bands, a pistol.
-  // `full` false = the count is gone (rubber bands and an empty table).
-  // `sgn` is the side (+1/-1 across the table) the counter sits on.
-  function countTable(B, x, z, alongX, full, h, sgn) {
-    const T = foldTable(B, x, z, alongX, 1.8, 0.9, 0xd2cbb8);
-    const sg = sgn < 0 ? -1 : 1;
-    const ax = function (a, c) { return alongX ? [x + a, z + c * sg] : [x + c * sg, z + a]; };  // a along the table, c across (toward the chair)
-    // the counting machine, facing the chair side (+c)
-    const m = ax(-0.45, 0.05);
-    B.box(m[0], T + 0.1, m[1], alongX ? 0.3 : 0.26, 0.2, alongX ? 0.26 : 0.3, 0x3b3f44);
-    B.box(m[0], T + 0.205, m[1], alongX ? 0.2 : 0.07, 0.012, alongX ? 0.07 : 0.2, 0x151618);   // hopper
-    const md = ax(-0.45, 0.185);
-    B.box(md[0], T + 0.16, md[1], alongX ? 0.09 : 0.006, 0.03, alongX ? 0.006 : 0.09, 0x7cff9a, { glow: true });
-    const mt = ax(-0.45, 0.24);
-    B.box(mt[0], T + 0.03, mt[1], alongX ? 0.18 : 0.08, 0.04, alongX ? 0.08 : 0.18, 0x2a2d31); // bill tray
-    if (full) {
-      // banded stacks in rows, some tall, some short (hash, not a roll)
-      for (let i = 0; i < 4; i++) for (let j = 0; j < 3; j++) {
-        const q = ax(-0.05 + i * 0.19, -0.26 + j * 0.1);
-        const hs = 0.03 + Math.floor(h(i, j) * 4) * 0.025;
-        cashStack(B, q[0], T, q[1], hs, alongX);
-      }
-      const s2 = ax(0.72, -0.2);
-      cashStack(B, s2[0], T, s2[1], 0.06, alongX);
+  // a twin-tube shop light on two chains: the cook's bench
+  function shopLight(B, x, z, ax, o) {
+    o = o || {};
+    const L = 1.22, drop = o.drop || 0.5, yb = B.ceil - drop;
+    for (let s = -1; s <= 1; s += 2) {
+      const px = x + (ax ? s * 0.45 : 0), pz = z + (ax ? 0 : s * 0.45);
+      B.box(px, B.ceil - drop / 2, pz, 0.012, drop, 0.012, 0x4a4a4a);             // chain
+      B.box(px, B.ceil - 0.006, pz, 0.05, 0.012, 0.05, 0x4a4a4a);                  // hook plate
     }
-    // rubber bands
-    for (let i = 0; i < 6; i++) {
-      const q = ax(0.25 + h(i, 7) * 0.5, 0.05 + h(i, 8) * 0.3);
-      B.box(q[0], T + 0.003, q[1], 0.05, 0.006, 0.012 + h(i, 9) * 0.02, COL.rubber);
-    }
-    // the digital scale
-    const sc = ax(0.62, 0.18);
-    B.box(sc[0], T + 0.015, sc[1], 0.2, 0.03, 0.2, 0xb9bec2);
-    const sd = ax(0.62, 0.285);
-    B.box(sd[0], T + 0.02, sd[1], alongX ? 0.08 : 0.006, 0.02, alongX ? 0.006 : 0.08, 0x9fe8ff, { glow: true });
-    // the pistol, grip toward the chair
-    const pg = ax(0.3, 0.3);
-    pistol(B, pg[0], T, pg[1], alongX);
-    return T;
-  }
-  function duffelBag(B, x, z, alongX, full) {
-    const w = alongX ? 0.9 : 0.4, d = alongX ? 0.4 : 0.9;
-    B.box(x, B.fy + 0.19, z, w, 0.38, d, 0x23261f);
-    B.box(x, B.fy + 0.385, z, alongX ? 0.8 : 0.04, 0.012, alongX ? 0.04 : 0.8, 0x6a6d68);        // zip
-    if (full) for (let i = 0; i < 3; i++)
-      B.box(x + (alongX ? -0.2 + i * 0.2 : 0), B.fy + 0.4, z + (alongX ? 0 : -0.2 + i * 0.2), alongX ? 0.156 : 0.066, 0.04, alongX ? 0.066 : 0.156, COL.cash);
-  }
-  function steelShelf(B, x, z, yaw, stuff) {
-    const p = piece(B, x, z, yaw);
-    for (let a = -1; a <= 1; a += 2) for (let c = -1; c <= 1; c += 2) p(a * 0.48, 0, c * 0.17, 0.03, 1.8, 0.03, COL.steelD);
-    const lv = [0.12, 0.6, 1.08, 1.56];
-    for (let i = 0; i < lv.length; i++) p(0, lv[i], 0, 1.0, 0.025, 0.38, COL.steel);
-    B.solid(x - 0.5, x + 0.5, z - 0.2, z + 0.2, B.fy, B.fy + 1.8);
-    return function (lvl, lat, w, h, d, col, o) { p(lat, lv[lvl] + 0.025, 0, w, h, d, col, o); };
-  }
-  // A TIPPED TABLE: the top stands on edge toward the door; legs point away.
-  function tippedTable(B, c) {
-    const up = B.fy;
-    if (c.longX) {
-      const zt = c.z - c.lz * 0.36;
-      B.box(c.x, up + 0.375, zt, 1.4, 0.75, 0.04, 0x6b513a, { solid: true });
-      for (let a = -1; a <= 1; a += 2) for (let v = 0; v < 2; v++)
-        B.box(c.x + a * 0.62, up + 0.06 + v * 0.63, zt + c.lz * 0.37, 0.04, 0.04, 0.7, 0x3a2c20);
-    } else {
-      const xt = c.x - c.lx * 0.36;
-      B.box(xt, up + 0.375, c.z, 0.04, 0.75, 1.4, 0x6b513a, { solid: true });
-      for (let a = -1; a <= 1; a += 2) for (let v = 0; v < 2; v++)
-        B.box(xt + c.lx * 0.37, up + 0.06 + v * 0.63, c.z + a * 0.62, 0.7, 0.04, 0.04, 0x3a2c20);
-    }
-  }
-  function mattress(B, s, i) {
-    const len = 1.9, wid = 0.9;
-    const ax = s.hdx !== 0;                               // long axis x
-    const w = ax ? len : wid, d = ax ? wid : len;
-    const col = [0xd9d4c4, 0xc8c2b0, 0xb9b3a0][i % 3];
-    B.box(s.x, B.fy + 0.1, s.z, w, 0.2, d, col);
-    B.box(s.x + (ax ? s.hdx * 0.3 : 0), B.fy + 0.205, s.z + (ax ? 0 : s.hdz * 0.3), ax ? 0.9 : wid - 0.02, 0.012, ax ? wid - 0.02 : 0.9, SHEETS[i % SHEETS.length]);
-    // pillow at the wall end
-    B.box(s.x + s.hdx * (len / 2 - 0.2), B.fy + 0.25, s.z + s.hdz * (len / 2 - 0.2), ax ? 0.3 : 0.55, 0.1, ax ? 0.55 : 0.3, 0xe6e2d8);
-    // a balled-up blanket at the foot
-    B.box(s.x - s.hdx * 0.55, B.fy + 0.27, s.z - s.hdz * 0.55, ax ? 0.5 : 0.6, 0.14, ax ? 0.6 : 0.5, SHEETS[(i + 2) % SHEETS.length]);
-    return { top: B.fy + 0.2 };
-  }
-  function clothesRail(B, s, h) {
-    const len = 1.5, p = piece(B, s.x, s.z, Math.atan2(s.fx, s.fz));
-    for (let a = -1; a <= 1; a += 2) { p(a * len / 2, 0, 0, 0.03, 1.6, 0.03, COL.steelD); p(a * len / 2, 0, 0, 0.05, 0.03, 0.45, COL.steelD); }
-    p(0, 1.58, 0, len, 0.025, 0.025, COL.steel);
-    const cols = [0x2b2d33, 0x6d2c2c, 0x2f4a6d, 0xc9c4b8, 0x3d5a3a, 0x8a6d3b, 0x1c1c1c];
-    for (let i = 0; i < 7; i++) {
-      const hl = 0.55 + h(i, 1) * 0.35;
-      p(-len / 2 + 0.15 + i * 0.2, 1.55 - hl, 0, 0.04, hl, 0.42, cols[(i + Math.floor(h(i, 2) * 7)) % cols.length]);
-    }
-    for (let i = 0; i < 3; i++) p(-0.4 + i * 0.35, 0, 0.1, 0.12, 0.1, 0.28, i === 1 ? 0xe8e8e8 : 0x222222);   // sneakers
-  }
-  function floorSafe(B, x, z, yaw) {
-    const p = piece(B, x, z, yaw);
-    p(0, 0, 0, 0.62, 0.72, 0.58, 0x2e3236);
-    p(0, 0.05, 0.295, 0.54, 0.62, 0.02, 0x3a3f44);
-    p(0.08, 0.42, 0.31, 0.1, 0.1, 0.02, 0xb8b8b0);             // dial
-    p(-0.12, 0.33, 0.31, 0.03, 0.14, 0.03, 0xb8b8b0);           // handle
-    B.solid(x - 0.31, x + 0.31, z - 0.31, z + 0.31, B.fy, B.fy + 0.72);
-  }
-  function gunRack(B, x, z, yaw) {
-    const p = piece(B, x, z, yaw);
-    p(0, 0, -0.12, 1.4, 1.5, 0.04, 0x5a4030);                   // back board on the wall
-    p(0, 0, 0.02, 1.4, 0.12, 0.3, 0x4a3426);                    // butt rest
-    p(0, 1.2, -0.02, 1.4, 0.06, 0.16, 0x4a3426);                // barrel rail
-    for (let i = 0; i < 4; i++) {
-      const lat = -0.5 + i * 0.33;
-      p(lat, 0.12, 0.02, 0.05, 0.28, 0.12, 0x3a2a1c);            // stock
-      p(lat, 0.4, 0.0, 0.045, 0.28, 0.07, COL.black);            // receiver
-      p(lat, 0.68, -0.02, 0.025, 0.62, 0.025, 0x2a2b2e);         // barrel
-    }
-    B.solid(x - (Math.abs(Math.sin(yaw)) > 0.5 ? 0.18 : 0.7), x + (Math.abs(Math.sin(yaw)) > 0.5 ? 0.18 : 0.7),
-            z - (Math.abs(Math.sin(yaw)) > 0.5 ? 0.7 : 0.18), z + (Math.abs(Math.sin(yaw)) > 0.5 ? 0.7 : 0.18), B.fy, B.fy + 1.5);
+    B.box(x, yb - 0.03, z, ax ? L : 0.21, 0.05, ax ? 0.21 : L, 0xe6e6e0);          // reflector
+    B.box(x, yb - 0.005, z, ax ? L - 0.1 : 0.08, 0.02, ax ? 0.08 : L - 0.1, 0xb8bab8);   // ballast box
+    for (let s = -1; s <= 1; s += 2)
+      B.box(x + (ax ? 0 : s * 0.05), yb - 0.07, z + (ax ? s * 0.05 : 0), ax ? L - 0.06 : 0.028, 0.028, ax ? 0.028 : L - 0.06, 0xfdfcf4, { glow: true });
+    return B.light(x, z, { kind: "none", y: yb - 0.07 + 0.1, r: o.r || 4.8, i: o.i == null ? 0.7 : o.i,
+      color: o.color == null ? 0xf4f6ff : o.color, rect: o.rect || null });
   }
 
-  // ---- walls & windows ------------------------------------------------------
-  // a finish skin over the four facade faces, cut round windows and the street
-  // door (a skin over a pane is a painting of a wall where a window was)
-  function skinWalls(B, mat, tint, withDoor) {
-    const b = B.b, wt = wtOf(b), hw = b.w / 2 - wt, hd = b.d / 2 - wt, d = doorOf(b);
-    const wins = B.windows();
-    const walls = [
+  // ---- CEILINGS --------------------------------------------------------------
+  // a drywall ceiling on the slab's underside, grubby, a leak's tide mark or two
+  function drywallCeiling(B, x0, z0, x1, z1, tint, salt) {
+    const y = B.ceil - 0.01;
+    B.plane(x0, z0, x1, z1, y, "plaster", tint, { down: true, cell: 0.9 });
+    const stain = mulHex(tint, 0.86);
+    for (let i = 0; i < 2; i++) {
+      if (B.h(i, 3, salt) < 0.35) continue;
+      const cx = x0 + 1 + B.h(i, 1, salt) * Math.max(0.1, x1 - x0 - 2), cz = z0 + 1 + B.h(i, 2, salt) * Math.max(0.1, z1 - z0 - 2);
+      if (!B.clear(cx, cz, 0.6)) continue;
+      // three offset blotches, each a millimetre lower than the last: a
+      // ragged tide mark, not concentric squares
+      const w = 0.5 + B.h(i, 4, salt) * 0.5;
+      B.box(cx, y - 0.002, cz, w, 0.002, w * 0.7, stain, { mat: "plaster", faces: 8 });
+      B.box(cx + w * 0.3, y - 0.003, cz + w * 0.15, w * 0.6, 0.002, w * 0.55, stain, { mat: "plaster", faces: 8 });
+      B.box(cx - w * 0.2, y - 0.004, cz - w * 0.25, w * 0.45, 0.002, w * 0.4, mulHex(stain, 0.9), { mat: "plaster", faces: 8 });
+    }
+  }
+  // a gutted ceiling: the floorboards of the storey above on exposed joists
+  // (16" centres, spanning the short way), clipped round the stair well
+  function joistCeiling(B, x0, z0, x1, z1) {
+    const top = B.ceil - 0.01, jh = 0.2;
+    B.plane(x0, z0, x1, z1, top, "wood", 0xa8977e, { down: true, cell: 0.9 });
+    const alongX = (x1 - x0) <= (z1 - z0);          // joists span the short way
+    const holes = B.holes ? B.holes() : [];
+    const span0 = alongX ? x0 : z0, span1 = alongX ? x1 : z1;
+    const run0 = alongX ? z0 : x0, run1 = alongX ? z1 : x1;
+    for (let u = run0 + 0.2; u <= run1 - 0.1; u += 0.406) {
+      // the clear runs of this joist
+      let segs = [[span0, span1]];
+      for (let h = 0; h < holes.length; h++) {
+        const R = holes[h];
+        const hu0 = alongX ? R.z0 : R.x0, hu1 = alongX ? R.z1 : R.x1;
+        if (u + 0.03 < hu0 || u - 0.03 > hu1) continue;
+        const hs0 = alongX ? R.x0 : R.z0, hs1 = alongX ? R.x1 : R.z1;
+        const nx = [];
+        for (let s = 0; s < segs.length; s++) {
+          const a = segs[s][0], c = segs[s][1];
+          if (hs1 <= a || hs0 >= c) { nx.push(segs[s]); continue; }
+          if (hs0 > a) nx.push([a, hs0]);
+          if (hs1 < c) nx.push([hs1, c]);
+        }
+        segs = nx;
+      }
+      for (let s = 0; s < segs.length; s++) {
+        const a = segs[s][0], c = segs[s][1];
+        if (c - a < 0.3) continue;
+        if (alongX) B.box((a + c) / 2, top - jh / 2, u, c - a, jh, 0.045, 0x9a8466, { mat: "wood", uv: 1.2 });
+        else B.box(u, top - jh / 2, (a + c) / 2, 0.045, jh, c - a, 0x9a8466, { mat: "wood", uv: 1.2 });
+      }
+    }
+  }
+
+  // ---- WALLS -------------------------------------------------------------------
+  // the four facade faces, cut round the windows and the street door into the
+  // rects of wall actually there: [{W, a0, a1, y0, y1}]
+  function facadeWalls(B) {
+    const b = B.b, wt = wtOf(b), hw = b.w / 2 - wt, hd = b.d / 2 - wt;
+    return [
       { axis: "x", at: -hd, side: 1, lo: -hw, hi: hw }, { axis: "x", at: hd, side: -1, lo: -hw, hi: hw },
       { axis: "z", at: -hw, side: 1, lo: -hd, hi: hd }, { axis: "z", at: hw, side: -1, lo: -hd, hi: hd },
     ];
-    const top = B.ceil, bot = B.fy;
+  }
+  function wallRects(B, withDoor) {
+    const d = doorOf(B.b), wins = B.windows(), walls = facadeWalls(B);
+    const top = B.ceil, bot = B.fy, out = [];
     for (let wi = 0; wi < walls.length; wi++) {
       const W = walls[wi], ops = [];
+      W.face = W.axis === "x" ? (W.side > 0 ? 16 : 32) : (W.side > 0 ? 1 : 2);
+      W.door = null;
       for (let i = 0; i < wins.length; i++) {
         const w = wins[i];
         if (w.axis !== W.axis || w.side !== -W.side) continue;
@@ -668,16 +623,14 @@
       }
       if (withDoor) {
         const on = W.axis === "x" ? Math.abs(d.nz - W.side) < 0.01 : Math.abs(d.nx - W.side) < 0.01;
-        if (on) { const c = W.axis === "x" ? d.x : d.z; ops.push({ a0: c - DOORW / 2 - 0.08, a1: c + DOORW / 2 + 0.08, v0: bot, v1: Math.min(top, B.y0 + 2.6) }); }
+        if (on) {
+          const c = W.axis === "x" ? d.x : d.z;
+          W.door = [c - DOORW / 2 - 0.08, c + DOORW / 2 + 0.08];
+          ops.push({ a0: W.door[0], a1: W.door[1], v0: bot, v1: Math.min(top, B.y0 + 2.6) });
+        }
       }
       ops.sort(function (p, q) { return p.a0 - q.a0; });
-      const face = W.axis === "x" ? (W.side > 0 ? 16 : 32) : (W.side > 0 ? 1 : 2);
-      const off = W.at + W.side * 0.012;
-      const put = function (a, c, ya, yb) {
-        if (c - a < 0.02 || yb - ya < 0.02) return;
-        if (W.axis === "x") B.box((a + c) / 2, (ya + yb) / 2, off, c - a, yb - ya, 0.01, tint, { mat: mat, faces: face });
-        else B.box(off, (ya + yb) / 2, (a + c) / 2, 0.01, yb - ya, c - a, tint, { mat: mat, faces: face });
-      };
+      const put = function (a, c, ya, yb) { if (c - a >= 0.02 && yb - ya >= 0.02) out.push({ W: W, a0: a, a1: c, y0: ya, y1: yb }); };
       let cur = W.lo;
       for (let i = 0; i < ops.length; i++) {
         const o = ops[i];
@@ -687,51 +640,568 @@
         cur = Math.max(cur, a1);
       }
       put(cur, W.hi, bot, top);
-      // a dark scuffed skirting so the skin meets the floor
-      if (W.axis === "x") B.box(0, bot + 0.05, W.at + W.side * 0.02, W.hi - W.lo, 0.1, 0.02, 0x3a3632, { faces: face });
-      else B.box(W.at + W.side * 0.02, bot + 0.05, 0, 0.02, 0.1, W.hi - W.lo, 0x3a3632, { faces: face });
+    }
+    return out;
+  }
+  function wallBox(B, W, a0, a1, y0, y1, off, th, col, o) {
+    const at = W.at + W.side * (off + th / 2);
+    if (W.axis === "x") return B.box((a0 + a1) / 2, (y0 + y1) / 2, at, a1 - a0, y1 - y0, th, col, o);
+    return B.box(at, (y0 + y1) / 2, (a0 + a1) / 2, th, y1 - y0, a1 - a0, col, o);
+  }
+  // THE FINISH over the facade's inside: real brick at real coursing (fitout.js
+  // draws it 20 x 7.6 cm) or painted plaster, full height, a painted skirting broken at
+  // the street door, and a leak's streak down a stretch of blank wall.
+  function skinWalls(B, mat, tint, withDoor, o) {
+    o = o || {};
+    const rects = wallRects(B, withDoor);
+    const stain = mulHex(tint, mat === "brick" ? 0.72 : 0.84);
+    const salt = o.salt || 0x5e;
+    let streaks = 0;
+    for (let i = 0; i < rects.length; i++) {
+      const R = rects[i];
+      wallBox(B, R.W, R.a0, R.a1, R.y0, R.y1, 0.007, 0.01, tint, { mat: mat, faces: R.W.face });
+      // a tapered leak streak from the ceiling on a full-height blank stretch
+      if (streaks < 3 && R.y0 <= B.fy + 0.01 && R.y1 >= B.ceil - 0.01 && R.a1 - R.a0 > 1.3 && B.h(i, 1, salt) < 0.45) {
+        const c = R.a0 + 0.5 + B.h(i, 2, salt) * (R.a1 - R.a0 - 1.0), top = B.ceil;
+        const tiers = [[0.46, 0.0, 0.42], [0.3, 0.42, 0.95], [0.16, 0.95, 1.5]];
+        for (let t = 0; t < tiers.length; t++)
+          wallBox(B, R.W, c - tiers[t][0] / 2, c + tiers[t][0] / 2, top - tiers[t][2], top - tiers[t][1], 0.0175, 0.002, stain, { mat: mat, faces: R.W.face });
+        streaks++;
+      }
+    }
+    // skirting: painted timber, 12 cm, a proud top edge; broken at the door
+    const walls = [];
+    for (let i = 0; i < rects.length; i++) if (walls.indexOf(rects[i].W) < 0) walls.push(rects[i].W);
+    const sk = o.skirt == null ? 0x4a443e : o.skirt;
+    for (let wi = 0; wi < walls.length; wi++) {
+      const W = walls[wi];
+      const runs = W.door ? [[W.lo, W.door[0]], [W.door[1], W.hi]] : [[W.lo, W.hi]];
+      for (let r = 0; r < runs.length; r++) {
+        if (runs[r][1] - runs[r][0] < 0.05) continue;
+        wallBox(B, W, runs[r][0], runs[r][1], B.fy, B.fy + 0.11, 0.012, 0.018, sk, { faces: W.face | 4 });
+        wallBox(B, W, runs[r][0], runs[r][1], B.fy + 0.11, B.fy + 0.125, 0.012, 0.01, mulHex(sk, 1.15), { faces: W.face | 4 });
+      }
+    }
+    return rects;
+  }
+  // POLY SHEETING taped over the walls of a cook room: the same wall rects,
+  // clear film a few centimetres off the finish (never over a window)
+  function sheetWalls(B, rects, onlyAxis) {
+    for (let i = 0; i < rects.length; i++) {
+      const R = rects[i];
+      if (onlyAxis && R.W.axis !== onlyAxis) continue;
+      if (R.y1 - R.y0 < 0.5) continue;
+      wallBox(B, R.W, R.a0 + 0.02, R.a1 - 0.02, Math.max(R.y0, B.fy + 0.02), R.y1 - 0.03, 0.05, 0.004, COL.sheet, { glass: true });
     }
   }
-  // what covers each pane on the inside: fn(w, i) -> "curtain"|"board"|"foil"|"fan"|null
-  function dressWindows(B, pick) {
-    const b = B.b, wt = wtOf(b);
-    const wins = B.windows();
-    for (let i = 0; i < wins.length; i++) {
-      const w = wins[i];
+
+  // ---- WINDOWS: panes merged into the openings they are, then covered --------
+  function winRuns(B, cut) {
+    const all = B.windows(), W = [];
+    for (let i = 0; i < all.length; i++) {
+      const w = all[i];
       if (w.y < B.fy + 0.3 || w.y > B.ceil) continue;
+      W.push({ axis: w.axis, side: w.side, y: w.y, hh: w.hh, c: w.axis === "x" ? w.x : w.z, hw: w.hw });
+    }
+    W.sort(function (p, q) {
+      return (p.axis < q.axis ? -1 : p.axis > q.axis ? 1 : 0) || (p.side - q.side) || (Math.round(p.y * 10) - Math.round(q.y * 10)) || (p.c - q.c);
+    });
+    const runs = [];
+    for (let i = 0; i < W.length; i++) {
+      const w = W[i], r = runs[runs.length - 1];
+      if (r && r.axis === w.axis && r.side === w.side && Math.abs(r.y - w.y) < 0.1 && Math.abs(r.hh - w.hh) < 0.1 && w.c - w.hw <= r.a1 + 0.35) {
+        r.a1 = Math.max(r.a1, w.c + w.hw); r.n++;
+      } else runs.push({ axis: w.axis, side: w.side, y: w.y, hh: w.hh, a0: w.c - w.hw, a1: w.c + w.hw, n: 1, first: w });
+    }
+    // an opening that runs past a partition is dressed as two, one per room
+    if (cut) for (let i = runs.length - 1; i >= 0; i--) {
+      const r = runs[i];
+      if (r.axis !== cut.axis || !(cut.at > r.a0 + 0.1 && cut.at < r.a1 - 0.1)) continue;
+      const r2 = Object.assign({}, r, { a0: cut.at + 0.09, first: null });
+      r.a1 = cut.at - 0.09;
+      runs.splice(i + 1, 0, r2);
+    }
+    return runs;
+  }
+  // is there an opening on the facade wall at x = wx (axis "z" runs) or
+  // z = wz (axis "x" runs) between a0..a1 and heights y0..y1? (wall-hung things
+  // never hang in front of glass)
+  function windowAt(B, onX, wallAt, a0, a1, y0, y1) {
+    const runs = winRuns(B);
+    for (let i = 0; i < runs.length; i++) {
+      const r = runs[i];
+      if ((r.axis === "z") !== onX) continue;                 // "z" runs sit on the ±x walls
+      if (Math.sign(wallAt) !== r.side) continue;
+      if (r.a1 + 0.05 < a0 || r.a0 - 0.05 > a1) continue;
+      if (r.y + r.hh < y0 || r.y - r.hh > y1) continue;
+      return true;
+    }
+    return false;
+  }
+  // what covers each opening on the inside: pick(run, i) -> "curtain"|"board"|"foil"|"fan"|null
+  function dressWindows(B, pick, cut) {
+    const b = B.b, wt = wtOf(b), runs = winRuns(B, cut);
+    for (let i = 0; i < runs.length; i++) {
+      const w = runs[i];
       const kind = pick(w, i);
       if (!kind) continue;
       const alongX = w.axis === "x";
       const face = alongX ? w.side * (b.d / 2 - wt) : w.side * (b.w / 2 - wt);
-      const c = alongX ? w.x : w.z;
       const at = function (off) { return face - w.side * off; };
-      const bx = function (along, y, off, len, h, th, col, o) {
-        if (alongX) B.box(along, y, at(off), len, h, th, col, o);
-        else B.box(at(off), y, along, th, h, len, col, o);
+      const bx = function (a, y, off, len, h, th, col, o) {
+        if (alongX) B.box(a, y, at(off), len, h, th, col, o);
+        else B.box(at(off), y, a, th, h, len, col, o);
       };
-      const W2 = w.hw * 2, H2 = w.hh * 2;
+      const c = (w.a0 + w.a1) / 2, W2 = w.a1 - w.a0, yb = w.y - w.hh, yt = Math.min(B.ceil - 0.04, w.y + w.hh);
+      const board = function (a0, a1, y0, y1) {
+        if (a1 - a0 < 0.05 || y1 - y0 < 0.05) return;
+        // weathered boards, vertical, nailed to two horizontal 2x4 battens
+        bx((a0 + a1) / 2, (y0 + y1) / 2, 0.035, a1 - a0, y1 - y0, 0.02, 0xa39683, { mat: "wood", uv: 1.4 });
+        const bh = y1 - y0;
+        for (let q = 0; q < 2; q++) bx((a0 + a1) / 2, y0 + bh * (q ? 0.78 : 0.22), 0.068, a1 - a0 + 0.08, 0.09, 0.045, 0x6f604c, { mat: "wood", uv: 1.2 });
+      };
       if (kind === "curtain") {
-        const ytop = Math.min(B.ceil - 0.05, w.y + w.hh + 0.14), ybot = w.y - w.hh - 0.12;
-        bx(c, ytop + 0.015, 0.06, W2 + 0.34, 0.02, 0.02, 0x3a3a3a);                  // rod
+        const ytop = Math.min(B.ceil - 0.05, yt + 0.14), ybot = Math.max(B.fy + 0.02, yb - 0.12);
+        bx(c, ytop + 0.02, 0.07, W2 + 0.34, 0.022, 0.022, 0x3a3a3a);                    // rod
+        for (let s = -1; s <= 1; s += 2) bx(c + s * (W2 / 2 + 0.14), ytop + 0.02, 0.035, 0.03, 0.05, 0.05, 0x3a3a3a);   // brackets
         const col = SHEETS[Math.floor(B.h(c, w.y, 0xa1 + i) * SHEETS.length) % SHEETS.length];
-        const pulled = B.h(c, w.y, 0xa2 + i) < 0.4;
-        const len = pulled ? (W2 + 0.24) * 0.55 : W2 + 0.24;
-        const cc = pulled ? c - (W2 + 0.24) / 2 + len / 2 : c;
-        bx(cc, (ytop + ybot) / 2, 0.08, len, ytop - ybot, 0.02, col);
+        const pulled = B.h(c, w.y, 0xa2 + i) < 0.5;
+        // two panels, each pleated: strips alternating depth and shade
+        const full = W2 + 0.26, panel = pulled ? Math.min(full * 0.28, 0.9) : full / 2;
+        for (let s = -1; s <= 1; s += 2) {
+          const pa0 = s < 0 ? c - full / 2 : c + full / 2 - panel;
+          const n = Math.max(2, Math.round(panel / 0.12));
+          const pw = panel / n;
+          for (let q = 0; q < n; q++)
+            bx(pa0 + (q + 0.5) * pw, (ytop + ybot) / 2, (q & 1) ? 0.1 : 0.085, pw + 0.004, ytop - ybot, 0.012, (q & 1) ? col : mulHex(col, 0.86));
+        }
       } else if (kind === "board") {
-        bx(c, w.y, 0.03, W2 + 0.12, H2 + 0.12, 0.025, COL.ply);
-        bx(c, w.y + w.hh * 0.5, 0.055, W2 + 0.2, 0.09, 0.03, 0x8e7048);
-        bx(c, w.y - w.hh * 0.5, 0.055, W2 + 0.2, 0.09, 0.03, 0x8e7048);
+        board(w.a0 - 0.06, w.a1 + 0.06, yb - 0.06, yt + 0.06);
       } else if (kind === "foil") {
-        bx(c, w.y, 0.02, W2 + 0.06, H2 + 0.06, 0.006, 0xc9ced2);
-        bx(c, w.y + w.hh + 0.02, 0.024, W2 + 0.1, 0.04, 0.006, 0xb49a62);            // tape
+        bx(c, (yb + yt) / 2, 0.02, W2 + 0.06, yt - yb + 0.06, 0.004, 0xc9ced2);
+        bx(c, yt + 0.02, 0.024, W2 + 0.1, 0.045, 0.004, 0xb49a62);                     // tape
+        bx(c, yb - 0.02, 0.024, W2 + 0.1, 0.045, 0.004, 0xb49a62);
       } else if (kind === "fan") {
-        const fb = w.y - w.hh, fs = Math.min(0.55, W2, H2);
-        bx(c, fb + fs / 2, 0.09, fs, fs, 0.16, 0xd6d6d0);
-        bx(c, fb + fs / 2, 0.175, fs - 0.06, fs - 0.06, 0.01, 0x262626);
-        const rest = H2 - fs;
-        if (rest > 0.05) bx(c, fb + fs + rest / 2, 0.03, W2 + 0.1, rest + 0.05, 0.025, COL.ply);
+        // a box fan standing on the sill of the first pane, blowing out;
+        // the rest of the opening boarded round it
+        const f = w.first, fs = Math.min(0.52, f.hw * 2 - 0.04, w.hh * 2 - 0.04);
+        const fc = f.c, fy0 = yb + 0.01;
+        // (it stands IN the reveal, on the sill, its grille flush with the room face)
+        bx(fc, fy0 + fs / 2, -0.06, fs, fs, 0.11, 0xd9d9d3);                             // housing
+        bx(fc, fy0 + fs / 2, 0.0, fs - 0.05, fs - 0.05, 0.004, 0x2b2b2b);               // grille
+        for (let q = -2; q <= 2; q++) bx(fc + q * (fs - 0.05) / 5, fy0 + fs / 2, 0.004, 0.006, fs - 0.06, 0.004, 0xbdbdb6);   // grille bars
+        bx(fc, fy0 + fs / 2, 0.008, 0.07, 0.07, 0.006, 0x9a9a94);                        // hub
+        bx(fc + fs * 0.34, fy0 + fs + 0.012, -0.06, 0.05, 0.024, 0.04, 0x4a4a4a);        // speed knob
+        bx(fc, fy0 + fs + 0.01, -0.06, 0.12, 0.02, 0.03, 0xbdbdb6);                       // carry handle
+        board(w.a0 - 0.06, fc - fs / 2 - 0.01, yb - 0.06, yt + 0.06);
+        board(fc + fs / 2 + 0.01, w.a1 + 0.06, yb - 0.06, yt + 0.06);
+        board(fc - fs / 2 - 0.01, fc + fs / 2 + 0.01, fy0 + fs + 0.05, yt + 0.06);
       }
+    }
+  }
+
+  // ---- LOOSE FURNITURE ---------------------------------------------------------
+  function foldChair(B, x, z, yaw, seat) {
+    const p = piece(B, x, z, yaw), m = COL.metal, s = 0x5d6166;
+    for (let a = -1; a <= 1; a += 2) {
+      p(a * 0.19, 0, 0.17, 0.025, 0.42, 0.025, m);             // front legs
+      p(a * 0.19, 0, -0.19, 0.025, 0.86, 0.025, m);            // rear legs, up into the back
+      p(a * 0.19, 0.4, -0.01, 0.022, 0.022, 0.36, m);           // seat rails
+    }
+    p(0, 0.18, 0.17, 0.36, 0.02, 0.02, m);                     // stretchers
+    p(0, 0.18, -0.19, 0.36, 0.02, 0.02, m);
+    p(0, 0.42, 0, 0.42, 0.03, 0.42, s);                        // seat -> 0.45
+    p(0, 0.6, -0.195, 0.4, 0.22, 0.022, s);                    // back panel
+    if (seat) seatAt(B.ox + x, B.fy, B.oz + z, yaw, "chair", 0.45, B.lot);
+  }
+  function crateBox(B, x, y0, z, w, h, d, col, o) {
+    B.box(x, y0 + h / 2, z, w, h, d, col, o);
+    // proud slats round it and a lid rim: reads as a crate
+    B.box(x, y0 + h * 0.25, z, w + 0.02, 0.07, d + 0.02, COL.crateD);
+    B.box(x, y0 + h * 0.75, z, w + 0.02, 0.07, d + 0.02, COL.crateD);
+    for (let a = -1; a <= 1; a += 2) for (let c = -1; c <= 1; c += 2)
+      B.box(x + a * (w / 2 - 0.02), y0 + h / 2, z + c * (d / 2 - 0.02), 0.05, h - 0.004, 0.05, COL.crateD);   // corner posts
+    B.box(x, y0 + h + 0.01, z, w * 0.96, 0.02, d * 0.96, col);
+    return y0 + h + 0.02;
+  }
+  function milkCrate(B, x, y0, z, col) {
+    const s = 0.33, t = 0.02, dk = mulHex(col, 0.75);
+    B.box(x, y0 + 0.01, z, s, 0.02, s, col);
+    for (let q = 0; q < 2; q++) {                             // walls: a top rail, a base rail, a grid of bars
+      const yy = q ? y0 + s - 0.02 : y0 + 0.04;
+      B.box(x, yy, z - s / 2 + 0.01, s, 0.04, t, col); B.box(x, yy, z + s / 2 - 0.01, s, 0.04, t, col);
+      B.box(x - s / 2 + 0.01, yy, z, t, 0.04, s - 0.04, col); B.box(x + s / 2 - 0.01, yy, z, t, 0.04, s - 0.04, col);
+    }
+    for (let i = -1; i <= 1; i++) {
+      B.box(x + i * 0.1, y0 + s / 2, z - s / 2 + 0.01, 0.02, s - 0.08, t, dk); B.box(x + i * 0.1, y0 + s / 2, z + s / 2 - 0.01, 0.02, s - 0.08, t, dk);
+      B.box(x - s / 2 + 0.01, y0 + s / 2, z + i * 0.1, t, s - 0.08, 0.02, dk); B.box(x + s / 2 - 0.01, y0 + s / 2, z + i * 0.1, t, s - 0.08, 0.02, dk);
+    }
+    return y0 + s;
+  }
+  function can(B, x, y, z, col, lying, alongX) {
+    if (lying) cylH(B, x, y + 0.033, z, 0.033, 0.123, alongX, col);
+    else { cyl(B, x, y, z, 0.033, 0.118, col); cyl(B, x, y + 0.118, z, 0.027, 0.004, 0xc8c8c8); }
+  }
+  function ashtray(B, x, y, z) {
+    cyl(B, x, y, z, 0.06, 0.028, 0x55595e);
+    B.box(x, y + 0.029, z, 0.09, 0.002, 0.09, 0x2a2b2c);                            // ash
+    B.box(x + 0.02, y + 0.034, z, 0.05, 0.008, 0.009, 0xe8e2d0);                     // butts
+    B.box(x - 0.02, y + 0.034, z + 0.02, 0.009, 0.008, 0.045, 0xe8e2d0);
+    B.box(x + 0.035, y + 0.034, z + 0.035, 0.012, 0.008, 0.009, 0xc98a4a);           // filter tips
+  }
+  function pizzaBox(B, x, y, z, n) {
+    for (let i = 0; i < n; i++) {
+      const yy = y + i * 0.046, xx = x + i * 0.03, zz = z - i * 0.02, c = i & 1 ? 0xc9a46b : 0xd3b27a;
+      B.box(xx, yy + 0.021, zz, 0.4, 0.042, 0.4, c);
+      B.box(xx, yy + 0.043, zz, 0.36, 0.002, 0.36, mulHex(c, 0.93));               // the lid's printed panel
+      if (i === 0) B.box(xx + 0.12, yy + 0.044, zz - 0.1, 0.1, 0.002, 0.08, 0x8a5a38);   // grease spot
+    }
+    return y + n * 0.046;
+  }
+  // a full black bin bag, knotted: a sagging lump, not a cube
+  function trashBag(B, x, z, s) {
+    const y = B.fy, k = 0x141518;
+    B.box(x, y + 0.14 * s, z, 0.46 * s, 0.28 * s, 0.42 * s, k);
+    B.box(x + 0.01, y + 0.2 * s, z - 0.01, 0.52 * s, 0.2 * s, 0.38 * s, k);
+    B.box(x, y + 0.36 * s, z + 0.01, 0.34 * s, 0.14 * s, 0.3 * s, k);
+    B.box(x, y + 0.46 * s, z, 0.12 * s, 0.07 * s, 0.1 * s, k);
+    B.box(x + 0.05 * s, y + 0.5 * s, z, 0.1 * s, 0.03 * s, 0.03 * s, k);          // knot ears
+    B.box(x - 0.05 * s, y + 0.5 * s, z, 0.1 * s, 0.03 * s, 0.03 * s, k);
+  }
+  // a TV on a crate: the screen faces `yaw`
+  function tvOnCrate(B, x, z, yaw, on) {
+    const alongX = (Math.round(yaw / HP) & 1) === 0;
+    const w = alongX ? 0.86 : 0.46, d = alongX ? 0.46 : 0.86;
+    const ct = crateBox(B, x, B.fy, z, w, 0.46, d, COL.crate, { solid: true });
+    flatTV(B, x, z, yaw, ct - B.fy, on, 0.98);
+  }
+  // a flat screen on its foot, `up` above the floor; `W` the body width
+  function flatTV(B, x, z, yaw, up, on, W) {
+    const p = piece(B, x, z, yaw), H = W * 0.59;
+    p(0, up, 0, W * 0.32, 0.02, 0.2, COL.black);                  // foot
+    p(0, up + 0.02, -0.02, 0.06, 0.08, 0.04, COL.black);          // neck
+    p(0, up + 0.08, -0.02, W, H, 0.06, COL.black);                // body
+    p(0, up + 0.1, 0.012, W - 0.04, H - 0.04, 0.008, on ? 0x3d5f82 : 0x0f1317, on ? { glow: true } : null);
+    if (on) B.lamp(x + Math.sin(yaw) * 0.5, z + Math.cos(yaw) * 0.5, B.fy + up + 0.35, { color: 0x8fb4ff, r: 2.4, i: 0.22 });
+  }
+  // a folding table (top at 0.74); returns the top y
+  function foldTable(B, x, z, alongX, L, W, topCol) {
+    const lx = alongX ? L : W, lz = alongX ? W : L;
+    B.box(x, B.fy + 0.722, z, lx, 0.036, lz, topCol || 0xcfc8b6);
+    B.box(x, B.fy + 0.742, z, lx - 0.004, 0.004, lz - 0.004, mulHex(topCol || 0xcfc8b6, 0.94));   // the worn top sheet
+    B.box(x, B.fy + 0.69, z, lx - 0.06, 0.028, lz - 0.06, COL.metal);                   // apron
+    for (let a = -1; a <= 1; a += 2) for (let c = -1; c <= 1; c += 2)
+      B.box(x + a * (lx / 2 - 0.06), B.fy + 0.345, z + c * (lz / 2 - 0.06), 0.03, 0.69, 0.03, COL.metal);
+    for (let a = -1; a <= 1; a += 2)                                                  // leg braces
+      if (alongX) B.box(x + a * (lx / 2 - 0.06), B.fy + 0.12, z, 0.02, 0.02, lz - 0.12, COL.metal);
+      else B.box(x, B.fy + 0.12, z + a * (lz / 2 - 0.06), lx - 0.12, 0.02, 0.02, COL.metal);
+    B.solid(x - lx / 2, x + lx / 2, z - lz / 2, z + lz / 2, B.fy, B.fy + 0.76);
+    return B.fy + 0.744;
+  }
+
+  // ---- MONEY -----------------------------------------------------------------
+  // ONE STRAPPED BUNDLE: 100 notes, 15.6 x 6.6 x 1.5 cm, a paper strap round
+  // the middle. p is a frame; rot turns the long side onto the fwd axis.
+  function bundle(p, a, up, c, strap, rot) {
+    const L = rot ? 0.066 : 0.156, D = rot ? 0.156 : 0.066;
+    p(a, up, c, L, 0.0128, D, COL.billEdge);
+    p(a, up + 0.0128, c, L - 0.003, 0.0018, D - 0.003, COL.billFace);
+    p(a, up, c, rot ? L + 0.003 : 0.034, 0.0154, rot ? 0.034 : D + 0.003, strap);
+  }
+  // a brick of bundles: nx along lat, nz along fwd, n high
+  function brick(p, a, up, c, nx, nz, n, strap) {
+    for (let k = 0; k < n; k++) for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++)
+      bundle(p, a + (i - (nx - 1) / 2) * 0.158, up + k * 0.0152, c + (j - (nz - 1) / 2) * 0.068, strap, false);
+    return up + n * 0.0152;
+  }
+  // loose counted notes, rubber-banded, in an untidy pile
+  function loosePile(p, a, up, c, n, h) {
+    for (let k = 0; k < n; k++) {
+      const rot = h(k, 21) < 0.3;
+      const da = (h(k, 22) - 0.5) * 0.05, dc = (h(k, 23) - 0.5) * 0.04;
+      const L = rot ? 0.066 : 0.156, D = rot ? 0.156 : 0.066, yy = up + k * 0.011;
+      p(a + da, yy, c + dc, L, 0.009, D, COL.billEdge);
+      p(a + da, yy + 0.009, c + dc, L - 0.003, 0.0016, D - 0.003, COL.billFace);
+      p(a + da + (rot ? 0 : 0.03), yy, c + dc + (rot ? 0.03 : 0), rot ? L + 0.002 : 0.004, 0.0112, rot ? 0.004 : D + 0.002, COL.rubber);   // the band
+    }
+  }
+  function pistol(p, a, up, c) {
+    // a compact pistol lying on its side, muzzle along -lat, grip toward +fwd
+    p(a, up, c, 0.186, 0.028, 0.03, 0x1b1c1e);                  // slide
+    p(a - 0.075, up + 0.028, c, 0.03, 0.002, 0.028, 0x2a2b2e);  // rear serrations
+    p(a + 0.01, up, c + 0.026, 0.15, 0.024, 0.024, 0x222326);   // frame
+    p(a - 0.015, up, c + 0.052, 0.046, 0.006, 0.03, 0x222326);  // trigger guard
+    p(a - 0.02, up, c + 0.046, 0.006, 0.02, 0.012, 0x0f0f10);   // trigger
+    p(a - 0.062, up, c + 0.082, 0.052, 0.026, 0.07, 0x202124);  // grip
+    p(a - 0.066, up, c + 0.12, 0.056, 0.022, 0.008, 0x151516);  // magazine base
+  }
+  function digitalScale(p, a, up, c) {
+    p(a, up, c, 0.2, 0.024, 0.2, 0x2b2e32);                     // body
+    p(a, up + 0.024, c - 0.015, 0.17, 0.006, 0.15, 0xb9bec2);   // platter
+    p(a, up + 0.006, c + 0.1, 0.075, 0.014, 0.003, 0x9fe8a8, { glow: true });   // LCD
+    p(a + 0.06, up + 0.01, c + 0.1, 0.02, 0.008, 0.003, 0x8a8e92);
+  }
+
+  // THE COUNT TABLE: a bill counter, strapped bricks, a banded pile in front
+  // of the counter, a ledger, a scale, a pistol. `full` false = the count is
+  // gone (torn straps and rubber bands). `sgn` is the side the counter sits on.
+  function countTable(B, x, z, alongX, full, h, sgn) {
+    const T = foldTable(B, x, z, alongX, 1.8, 0.9, 0xd2cbb8);
+    const sg = sgn < 0 ? -1 : 1;
+    // lat = along the table, fwd = across it toward the counter's chair
+    const p = alongX ? frame(B, x, z, 0, sg, T) : frame(B, x, z, sg, 0, T);
+    // THE BILL COUNTER (~28 x 26 x 22 cm): notes go in the sloped hopper at
+    // the back, drop counted into the stacker pocket at the front, the count
+    // shows on the LCD facing him.
+    const mA = -0.48, mk = 0x34383d, mkD = 0x1d1f22;
+    p(mA, 0, 0.06, 0.28, 0.12, 0.24, mk);                          // body
+    p(mA, 0.12, 0.08, 0.28, 0.04, 0.2, mk);                        // top shell, front
+    p(mA, 0.12, -0.06, 0.24, 0.02, 0.08, mkD);                     // hopper floor, low step
+    p(mA, 0.14, -0.08, 0.24, 0.02, 0.05, mkD);                     //   ...high step: the slope
+    for (let s = -1; s <= 1; s += 2) p(mA + s * 0.125, 0.12, -0.045, 0.012, 0.1, 0.11, 0x2a2d31);   // hopper guides
+    p(mA, 0.12, -0.1, 0.25, 0.12, 0.012, 0x2a2d31);                // hopper back plate
+    p(mA, 0.0, 0.215, 0.2, 0.025, 0.07, mkD);                      // stacker pocket floor
+    for (let s = -1; s <= 1; s += 2) p(mA + s * 0.096, 0.025, 0.215, 0.01, 0.06, 0.07, 0x2a2d31);   // pocket cheeks
+    p(mA - 0.05, 0.09, 0.181, 0.075, 0.03, 0.003, 0x9fe8a0, { glow: true });   // LCD
+    for (let q = 0; q < 3; q++) p(mA + 0.04 + q * 0.028, 0.095, 0.181, 0.02, 0.016, 0.004, q ? 0x8a8e92 : 0xb8453a);   // keys
+    if (full) {
+      p(mA, 0.145, -0.045, 0.156, 0.022, 0.066, COL.billEdge);    // notes loaded in the hopper
+      p(mA, 0.167, -0.045, 0.153, 0.0016, 0.063, COL.billFace);
+      p(mA, 0.025, 0.215, 0.156, 0.02, 0.066, COL.billEdge);      // counted notes in the pocket
+      p(mA, 0.045, 0.215, 0.153, 0.0016, 0.063, COL.billFace);
+      // strapped bricks along the far side, the day's count
+      brick(p, -0.12, 0, -0.27, 2, 3, 3 + Math.floor(h(1, 1) * 3), STRAPS[0]);
+      brick(p, 0.2, 0, -0.27, 2, 3, 3 + Math.floor(h(2, 1) * 2), STRAPS[1]);
+      if (h(3, 1) < 0.7) brick(p, 0.53, 0, -0.3, 2, 2, 2 + Math.floor(h(3, 2) * 3), STRAPS[2]);
+      // the banded pile in front of him, waiting for straps
+      loosePile(p, -0.08, 0, 0.19, 4 + Math.floor(h(4, 1) * 3), h);
+      loosePile(p, 0.14, 0, 0.23, 2 + Math.floor(h(5, 1) * 3), function (a, c) { return h(a + 9, c); });
+      // a box of fresh straps
+      p(-0.8, 0, 0.26, 0.1, 0.07, 0.13, COL.card);
+      p(-0.8, 0.07, 0.26, 0.09, 0.004, 0.12, STRAPS[0]);
+    } else {
+      // torn straps where the bricks were
+      for (let i = 0; i < 5; i++) p(-0.15 + h(i, 31) * 0.7, 0, -0.3 + h(i, 32) * 0.2, 0.034, 0.002, 0.07, STRAPS[i % 3]);
+    }
+    // rubber bands
+    for (let i = 0; i < 7; i++) p(-0.25 + h(i, 7) * 0.6, 0, 0.0 + h(i, 8) * 0.09, 0.045, 0.004, 0.006 + h(i, 9) * 0.012, COL.rubber);
+    // the ledger and a pen
+    p(0.42, 0, 0.2, 0.21, 0.012, 0.15, 0x2a3a5a);
+    p(0.42, 0.012, 0.2, 0.2, 0.001, 0.14, 0xe8e4d8);
+    p(0.545, 0.012, 0.2, 0.01, 0.009, 0.14, 0x1a1a1a);
+    digitalScale(p, -0.78, 0, -0.26);
+    pistol(p, 0.74, 0, 0.19);
+    return T;
+  }
+  // A DUFFEL: a soft 85 cm holdall, webbing bands, two carry handles, a zip;
+  // `open` shows the bricks inside
+  function duffelBag(B, x, z, alongX, open) {
+    const p = alongX ? frame(B, x, z, 0, 1, B.fy) : frame(B, x, z, 1, 0, B.fy);
+    const L = 0.84, body = 0x2d3128, end = 0x22251f, web = COL.web;
+    p(0, 0, 0, L, 0.28, 0.3, body);                               // core
+    p(0, 0.02, 0, L - 0.002, 0.2, 0.345, body);                   // belly, slumped wide
+    p(0, 0.28, 0, L - 0.05, 0.03, 0.2, body);                     // crown
+    for (let s = -1; s <= 1; s += 2) {
+      p(s * (L / 2 + 0.005), 0.02, 0, 0.01, 0.25, 0.26, end);     // end panels
+      p(s * (L / 2 + 0.012), 0.08, 0, 0.012, 0.12, 0.15, 0x191b17);   // end pockets
+      // webbing bands round the bag, the handles sewn to them
+      p(s * 0.2, 0, 0, 0.04, 0.285, 0.305, web);
+      p(s * 0.2, 0.02, 0, 0.04, 0.205, 0.35, web);
+      p(s * 0.2, 0.28, 0, 0.04, 0.034, 0.205, web);
+      for (let q = -1; q <= 1; q += 2) p(s * 0.2, 0.31, q * 0.07, 0.03, 0.08, 0.018, web);   // handle roots
+    }
+    for (let q = -1; q <= 1; q += 2) p(0, 0.37, q * 0.07, 0.43, 0.018, 0.028, web);        // the handles
+    p(0, 0.385, 0, 0.12, 0.025, 0.17, 0x2a2a28);                   // the grip wrap holding them together
+    if (open) {
+      p(0, 0.3095, 0, 0.62, 0.002, 0.075, 0x0b0b0b);               // the zip gaping
+      for (let i = -1; i <= 1; i++) bundle(p, i * 0.17, 0.3, 0, STRAPS[(i + 3) % 3], false);
+    } else {
+      p(0, 0.31, 0, 0.72, 0.004, 0.012, 0x6a6d68);                 // zip
+      p(0.34, 0.31, 0.014, 0.02, 0.005, 0.032, 0x9a9d98);          // pull
+    }
+  }
+  // a steel wire shelving unit; put(level, lat, fwd, w, h, d, col, o)
+  function steelShelf(B, x, z, yaw) {
+    const p = piece(B, x, z, yaw);
+    for (let a = -1; a <= 1; a += 2) for (let c = -1; c <= 1; c += 2) p(a * 0.48, 0, c * 0.17, 0.025, 1.8, 0.025, COL.steelD);
+    const lv = [0.12, 0.6, 1.08, 1.56];
+    for (let i = 0; i < lv.length; i++) {
+      p(0, lv[i], 0, 0.98, 0.012, 0.36, COL.steel);                              // the deck
+      p(0, lv[i] - 0.03, 0.18, 0.98, 0.03, 0.012, COL.steelD);                   // front rail
+      p(0, lv[i] - 0.03, -0.18, 0.98, 0.03, 0.012, COL.steelD);                  // back rail
+    }
+    B.solid(x - 0.5, x + 0.5, z - 0.2, z + 0.2, B.fy, B.fy + 1.8);
+    return function (lvl, lat, fwd, w, h, d, col, up) { p(lat, lv[lvl] + 0.012 + (up || 0), fwd, w, h, d, col); };
+  }
+  function dressCountShelf(B, g, cs) {
+    const yaw = cs > 0 ? PI : 0;
+    const put = steelShelf(B, g.shelf.x, g.shelf.z, yaw);
+    const cb = COL.card, cbD = COL.cardD;
+    // the cash box: a grey steel box, lid seam, fold-down handle
+    put(1, -0.22, 0, 0.33, 0.09, 0.25, 0x55615a);
+    put(1, -0.22, 0, 0.335, 0.012, 0.255, 0x46504a, 0.07);
+    put(1, -0.22, 0.02, 0.1, 0.012, 0.02, 0x2a2a2a, 0.09);
+    // the vacuum sealer and a roll of bags beside it
+    put(1, 0.22, 0, 0.38, 0.08, 0.16, 0x2a2b2d);
+    put(1, 0.22, 0.02, 0.3, 0.004, 0.06, 0x6c7074, 0.08);
+    // a banker's box of receipts: lid overhang, hand hole
+    put(0, -0.2, 0, 0.4, 0.26, 0.3, cb);
+    put(0, -0.2, 0, 0.41, 0.05, 0.31, cbD, 0.21);
+    put(0, -0.2, 0.156, 0.1, 0.03, 0.004, 0x2a2016, 0.15);
+    // a slab of bottled water under it
+    put(0, 0.25, 0, 0.4, 0.21, 0.27, 0xd9e3e8);
+    put(0, 0.25, 0, 0.405, 0.06, 0.275, 0x2a6fb5, 0.07);
+    // a shoebox and a carton on the next shelf up
+    put(2, -0.25, 0, 0.28, 0.12, 0.2, 0x7a2f2f);
+    put(2, -0.25, 0, 0.29, 0.03, 0.21, 0x5c2323, 0.09);
+    put(2, 0.2, 0, 0.3, 0.1, 0.3, cb);
+    put(2, 0.2, 0, 0.31, 0.02, 0.31, cbD, 0.08);
+    // the roll: lying across the top shelf
+    cylH(B, g.shelf.x, B.fy + 1.56 + 0.012 + 0.07, g.shelf.z, 0.07, 0.34, true, 0xdadfda);
+  }
+  // A TIPPED TABLE: the top stands on edge toward the door; legs point away.
+  function tippedTable(B, c) {
+    const up = B.fy;
+    if (c.longX) {
+      const zt = c.z - c.lz * 0.36;
+      B.box(c.x, up + 0.375, zt, 1.4, 0.75, 0.04, 0x6b513a, { solid: true });
+      B.box(c.x, up + 0.375, zt + c.lz * 0.05, 1.3, 0.65, 0.06, 0x4a3828);      // apron
+      for (let a = -1; a <= 1; a += 2) for (let v = 0; v < 2; v++)
+        B.box(c.x + a * 0.62, up + 0.06 + v * 0.63, zt + c.lz * 0.37, 0.04, 0.04, 0.7, 0x3a2c20);
+    } else {
+      const xt = c.x - c.lx * 0.36;
+      B.box(xt, up + 0.375, c.z, 0.04, 0.75, 1.4, 0x6b513a, { solid: true });
+      B.box(xt + c.lx * 0.05, up + 0.375, c.z, 0.06, 0.65, 1.3, 0x4a3828);
+      for (let a = -1; a <= 1; a += 2) for (let v = 0; v < 2; v++)
+        B.box(xt + c.lx * 0.37, up + 0.06 + v * 0.63, c.z + a * 0.62, 0.7, 0.04, 0.04, 0x3a2c20);
+    }
+  }
+  // a dorm fridge against the wall, a microwave on it: (fx,fz) = the way it faces
+  function miniFridge(B, x, z, fx, fz) {
+    const p = frame(B, x, z, fx, fz, B.fy);
+    p(0, 0, 0, 0.48, 0.84, 0.5, 0xd6d5cf);                         // cabinet
+    p(0, 0.03, 0.252, 0.46, 0.78, 0.012, 0xe2e1db);                // door
+    p(0.19, 0.46, 0.264, 0.024, 0.24, 0.022, 0x9a9a96);            // handle
+    p(0, 0, 0.245, 0.46, 0.03, 0.01, 0x2a2a2a);                    // kick grille
+    p(0, 0.84, -0.03, 0.46, 0.27, 0.36, 0x2c2e31);                 // microwave
+    p(-0.05, 0.87, 0.151, 0.3, 0.2, 0.004, 0x111316);              //   door glass, dark
+    p(0.15, 0.87, 0.151, 0.08, 0.2, 0.004, 0x3a3d41);              //   keypad
+    B.solid(x - (fx ? 0.25 : 0.24), x + (fx ? 0.25 : 0.24), z - (fx ? 0.24 : 0.25), z + (fx ? 0.24 : 0.25), B.fy, B.fy + 1.11);
+  }
+  // cases of bottled water, shrink-wrapped, stacked by the wall
+  function waterCases(B, x, z, fx, fz, h) {
+    const p = frame(B, x, z, fx, fz, B.fy);
+    const n = [3, 3, 2, 2];
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
+      const hi = n[(i * 2 + j + Math.floor(h(i, j) * 4)) % 4];
+      for (let k = 0; k < hi; k++) {
+        const da = (h(i + k, 41) - 0.5) * 0.03, dc = (h(j + k, 42) - 0.5) * 0.03;
+        p((i - 0.5) * 0.28 + da, k * 0.21, (j - 0.5) * 0.41 + dc, 0.27, 0.205, 0.4, 0xd9e3e8);
+        p((i - 0.5) * 0.28 + da, k * 0.21 + 0.07, (j - 0.5) * 0.41 + dc, 0.274, 0.06, 0.404, 0x2a6fb5);   // the label band
+      }
+    }
+    B.solid(x - (fx ? 0.42 : 0.29), x + (fx ? 0.42 : 0.29), z - (fx ? 0.29 : 0.42), z + (fx ? 0.29 : 0.42), B.fy, B.fy + 0.63);
+  }
+  // A FLOOR MATTRESS: the tick, a fitted sheet wrapped over its top edge, a
+  // pillow at the wall end, a blanket thrown over the foot two thirds and
+  // hanging down its sides. On the floor: nothing floats.
+  function mattress(B, s, i) {
+    const len = 1.9, wid = 0.9, H = 0.2;
+    // forward = toward the head (the wall)
+    const p = frame(B, s.x, s.z, s.hdx, s.hdz, B.fy);
+    const tick = [0xd9d4c4, 0xc8c2b0, 0xb9b3a0][i % 3];
+    p(0, 0, 0, wid, H, len, tick);
+    p(0, 0.002, 0, wid + 0.006, 0.02, len + 0.006, mulHex(tick, 0.78));          // the boxed seam at the floor
+    const sheet = SHEETS[i % SHEETS.length];
+    if (i % 3 !== 2) p(0, H - 0.05, 0, wid + 0.008, 0.052, len + 0.008, sheet);  // fitted sheet
+    // pillow: two nested boxes so it is soft at the edges
+    p(0, H, len / 2 - 0.24, 0.56, 0.09, 0.34, 0xe6e2d8);
+    p(0, H, len / 2 - 0.24, 0.6, 0.06, 0.37, 0xe6e2d8);
+    // the blanket
+    const bl = BLANKETS[(i + (s.x > 0 ? 1 : 0)) % BLANKETS.length];
+    const bLen = len * (0.55 + 0.12 * ((i * 7) % 3) / 2), f0 = -len / 2 - 0.02, f1 = f0 + bLen;
+    p(0, H + 0.004, (f0 + f1) / 2, wid + 0.04, 0.028, bLen, bl);                 // over the top
+    for (let q = -1; q <= 1; q += 2) p(q * (wid / 2 + 0.022), 0.03, (f0 + f1) / 2, 0.014, H - 0.02, bLen - 0.04, mulHex(bl, 0.88));   // hanging down the sides
+    p(0, 0.02, f0 - 0.007, wid + 0.04, H - 0.01, 0.014, mulHex(bl, 0.88));       // over the foot
+    p(0, H + 0.03, f1 - 0.07, wid + 0.03, 0.05, 0.16, mulHex(bl, 1.08));         // turned back at the top edge
+    return { top: B.fy + H };
+  }
+  function clothesRail(B, s, h) {
+    const len = 1.5, p = piece(B, s.x, s.z, Math.atan2(s.fx, s.fz));
+    for (let a = -1; a <= 1; a += 2) { p(a * len / 2, 0, 0, 0.03, 1.6, 0.03, COL.steelD); p(a * len / 2, 0, 0, 0.05, 0.03, 0.45, COL.steelD); }
+    p(0, 1.58, 0, len, 0.025, 0.025, COL.steel);
+    for (let i = 0; i < 7; i++) {
+      const hl = 0.6 + h(i, 1) * 0.35, lat = -len / 2 + 0.15 + i * 0.2, col = GARMENTS[(i + Math.floor(h(i, 2) * 7)) % GARMENTS.length];
+      p(lat, 1.53, 0, 0.012, 0.05, 0.02, 0x9a9a9a);                  // hanger hook
+      p(lat, 1.51, 0, 0.014, 0.025, 0.42, 0x3a3a3a);                 // hanger
+      p(lat, 1.51 - hl, 0, 0.045, hl, 0.4, col);                      // the garment
+      p(lat, 1.51 - hl * 0.45, 0, 0.05, 0.06, 0.44, mulHex(col, 0.9));   // its fold/pocket line
+    }
+    // sneakers under it, in pairs
+    for (let i = 0; i < 3; i++) {
+      const col = [0x1c1c1c, 0xd8d8d0, 0x8a2c2c][(i + Math.floor(h(i, 3) * 3)) % 3];
+      for (let q = -1; q <= 1; q += 2) sneaker(p, -0.45 + i * 0.42 + q * 0.065, 0.1, col);
+    }
+  }
+  function sneaker(p, lat, fwd, col) {
+    p(lat, 0, fwd, 0.1, 0.03, 0.28, 0xe8e6e0);                      // sole
+    p(lat, 0.03, fwd - 0.03, 0.094, 0.06, 0.2, col);                // upper
+    p(lat, 0.03, fwd + 0.09, 0.09, 0.04, 0.08, col);                // toe box
+    p(lat, 0.09, fwd - 0.07, 0.07, 0.02, 0.1, 0x2a2a2a);            // collar opening
+  }
+  function footlocker(B, f) {
+    const ax = f.alongX, p = ax ? frame(B, f.x, f.z, 0, 1, B.fy) : frame(B, f.x, f.z, 1, 0, B.fy);
+    const g = 0x4d5a3a, gD = 0x3d4a2e, m = 0x8a8a80;
+    p(0, 0, 0, 0.8, 0.36, 0.4, g, { solid: true });
+    p(0, 0.36, 0, 0.82, 0.05, 0.42, gD);                            // lid
+    for (let a = -1; a <= 1; a += 2) {
+      for (let c = -1; c <= 1; c += 2) p(a * 0.39, 0, c * 0.19, 0.04, 0.41, 0.04, m);   // corner guards
+      p(a * 0.415, 0.2, 0, 0.012, 0.03, 0.14, 0x222222);            // end handles
+      p(a * 0.2, 0.3, 0.205, 0.05, 0.08, 0.012, m);                 // latches
+    }
+    p(0, 0.28, 0.205, 0.06, 0.06, 0.012, m);                        // hasp
+  }
+  function floorSafe(B, x, z, yaw) {
+    const p = piece(B, x, z, yaw), bd = 0x2e3236, dr = 0x3a3f44, br = 0xb8b8b0;
+    for (let a = -1; a <= 1; a += 2) for (let c = -1; c <= 1; c += 2) p(a * 0.26, 0, c * 0.24, 0.06, 0.03, 0.06, 0x1a1a1a);   // feet
+    p(0, 0.03, 0, 0.62, 0.72, 0.58, bd);
+    p(0, 0.09, 0.292, 0.52, 0.6, 0.02, dr);                         // the door, inset in its frame
+    p(-0.27, 0.15, 0.3, 0.03, 0.08, 0.03, 0x1a1a1a); p(-0.27, 0.55, 0.3, 0.03, 0.08, 0.03, 0x1a1a1a);   // hinges
+    p(0.06, 0.46, 0.306, 0.11, 0.11, 0.014, 0x1f2124);              // dial ring
+    p(0.06, 0.475, 0.314, 0.08, 0.08, 0.012, br);                   // dial
+    p(0.06, 0.52, 0.322, 0.008, 0.012, 0.006, 0xd23c2c);            // index mark
+    p(0.12, 0.28, 0.312, 0.018, 0.018, 0.02, br);                   // handle hub
+    p(0.12, 0.27, 0.33, 0.13, 0.016, 0.016, br);                    // spoke
+    p(0.12, 0.215, 0.33, 0.016, 0.13, 0.016, br);                   // spoke
+    B.solid(x - 0.31, x + 0.31, z - 0.31, z + 0.31, B.fy, B.fy + 0.75);
+  }
+  function gunRack(B, x, z, yaw) {
+    const p = piece(B, x, z, yaw);
+    p(0, 0, -0.12, 1.4, 1.5, 0.04, 0x5a4030);                   // back board on the wall
+    p(0, 0, 0.02, 1.4, 0.12, 0.3, 0x4a3426);                    // butt rest
+    p(0, 1.2, -0.02, 1.4, 0.06, 0.16, 0x4a3426);                // barrel rail
+    for (let i = 0; i < 4; i++) {
+      const lat = -0.5 + i * 0.33;
+      p(lat, 0.12, 0.02, 0.05, 0.3, 0.12, 0x3a2a1c);             // stock
+      p(lat, 0.42, 0.0, 0.045, 0.3, 0.07, COL.black);            // receiver
+      p(lat, 0.52, 0.04, 0.03, 0.12, 0.06, 0x202124);            // magazine
+      p(lat, 0.72, -0.02, 0.025, 0.56, 0.025, 0x2a2b2e);         // barrel
+      p(lat, 0.72, 0.0, 0.035, 0.22, 0.04, 0x3a2a1c);            // handguard
+    }
+    const sx = Math.abs(Math.sin(yaw)) > 0.5;
+    B.solid(x - (sx ? 0.18 : 0.7), x + (sx ? 0.18 : 0.7), z - (sx ? 0.7 : 0.18), z + (sx ? 0.7 : 0.18), B.fy, B.fy + 1.5);
+  }
+  // flat clothes on the floor: a hoodie with its arms out, a pair of jeans
+  function floorClothes(B, x, z, kind, col, rot) {
+    const p = rot ? frame(B, x, z, 1, 0, B.fy) : frame(B, x, z, 0, 1, B.fy);
+    if (kind === 0) {
+      p(0, 0, 0, 0.5, 0.03, 0.58, col);                                   // body
+      for (let q = -1; q <= 1; q += 2) p(q * 0.4, 0, 0.06, 0.32, 0.022, 0.14, mulHex(col, 0.92));   // sleeves
+      p(0, 0.012, 0.33, 0.28, 0.025, 0.14, mulHex(col, 0.85));            // hood
+      p(0, 0.03, -0.12, 0.26, 0.004, 0.14, mulHex(col, 0.8));             // pocket
+    } else {
+      for (let q = -1; q <= 1; q += 2) p(q * 0.1, 0, -0.05, 0.19, 0.022, 0.8, col);   // legs
+      p(0, 0, 0.4, 0.4, 0.026, 0.12, mulHex(col, 0.9));                   // waist
     }
   }
 
@@ -747,47 +1217,55 @@
     const h = function (a, c) { return B.h(a, c, 0xb1); };
     // the gang's stash IS the count table
     if (st) { st.x = B.ox + g.table.x; st.z = B.oz + g.table.z; }
-    // slab: stained concrete, darker in the count room
-    B.plane(C.X0, C.Z0, C.X1, C.Z1, fy, "concrete", 0xa39b90);
-    skinWalls(B, "brick", 0xb8aaa0, true);
+    // FLOORS: worn timber in the lounge, sealed slab in the count room, cut
+    // at the partition so neither room's light smears across the wall line
+    if (g.wall) {
+      B.plane(g.lounge.x0, g.lounge.z0, g.lounge.x1, g.lounge.z1, fy, "wood", 0xa89a88, { cell: 0.6 });
+      B.plane(g.band.x0, g.band.z0, g.band.x1, g.band.z1, fy, "concrete", 0xb8b2a6, { cell: 0.6 });
+    } else B.plane(C.X0, C.Z0, C.X1, C.Z1, fy, "concrete", 0xb8b2a6, { cell: 0.6 });
+    drywallCeiling(B, C.X0, C.Z0, C.X1, C.Z1, 0xd4cec2, 0xb3);
+    skinWalls(B, "brick", 0xc9bdb2, true, { salt: 0xb4 });
     dressWindows(B, function (w) {
-      const wz = w.axis === "x" ? w.side * (B.b.d / 2) : w.z;
-      const inBand = cs > 0 ? wz >= g.zp - 0.05 : wz <= g.zp + 0.05;
+      const wz = w.axis === "x" ? w.side * (B.b.d / 2) : (w.a0 + w.a1) / 2;
+      const inBand = w.axis === "x" ? (cs > 0 ? wz >= g.zp - 0.05 : wz <= g.zp + 0.05)
+                                    : (cs > 0 ? w.a1 > g.zp : w.a0 < g.zp);
       return inBand ? "board" : "curtain";
-    });
+    }, g.wall ? { axis: "z", at: g.zp } : null);
     // THE PARTITION: solid, plaster over studs, one doorway at the far end
+    // with its steel door standing open against the jamb
     if (g.wall) {
       for (let i = 0; i < g.segs.length; i++) {
         const s = g.segs[i];
-        const gaps = (g.gx > s[0] + 0.5 && g.gx < s[1] - 0.5) ? [{ c: g.gx, w: g.gapW, h: 2.05 }] : [];
-        B.wall("x", g.zp, s[0], s[1], { gaps: gaps, mat: "plaster", tint: 0xb3ab9c, casing: 0x6b5a48, skirt: 0x3a3632 });
+        const inGap = g.gx > s[0] + 0.5 && g.gx < s[1] - 0.5;
+        const gaps = inGap ? [{ c: g.gx, w: g.gapW, h: 2.05 }] : [];
+        B.wall("x", g.zp, s[0], s[1], { gaps: gaps, mat: "plaster", tint: 0xbdb5a5, casing: 0x6b5a48, skirt: 0x4a443e });
+        if (inGap) {
+          const hx = g.gx - g.side * (g.gapW / 2 - 0.03);                    // the hinge jamb, room side
+          const lz = g.zp + cs * (0.06 + 0.45);
+          B.box(hx, fy + 1.0, lz, 0.045, 2.0, 0.88, 0x59606a, { solid: true });   // the leaf, open 90 degrees
+          B.box(hx - g.side * 0.03, fy + 1.0, lz + cs * 0.3, 0.02, 0.05, 0.12, 0xb8b8b0);   // lever
+          B.box(hx - g.side * 0.03, fy + 1.15, lz + cs * 0.33, 0.02, 0.07, 0.07, 0xb8b8b0); // deadbolt
+          B.box(hx, fy + 0.12, lz, 0.05, 0.2, 0.86, 0x4a5058);                          // kick plate
+        }
       }
     }
     // ---- COUNT ROOM
-    const alongX = true;
-    countTable(B, g.table.x, g.table.z, alongX, !looted, h, cs);
+    countTable(B, g.table.x, g.table.z, true, !looted, h, cs);
     foldChair(B, g.chair.x, g.chair.z, g.chair.face, true);
     if (!looted && !ours) B.loot(g.table.x, g.table.z, "countroom", { lot: lot });
     if (g.duffel) duffelBag(B, g.duffel.x, g.duffel.z, true, !looted);
-    if (g.shelf) {
-      const put = steelShelf(B, g.shelf.x, g.shelf.z, cs > 0 ? PI : 0);
-      put(1, -0.2, 0.35, 0.15, 0.25, 0x5a6a5a);                  // the lockbox
-      put(1, 0.25, 0.3, 0.12, 0.2, 0x2a2a2a);                    // a vacuum sealer
-      put(2, -0.25, 0.36, 0.2, 0.28, 0xb9a57a);                  // a box of bands
-      put(2, 0.2, 0.18, 0.12, 0.3, 0x3a3a3a);                    // a shoebox of receipts
-      put(0, 0.0, 0.7, 0.3, 0.3, 0x8a6a45);                      // a banker's box on the bottom
-      put(3, 0.0, 0.3, 0.3, 0.3, 0xd8d8d8);                      // a roll of plastic
-    }
-    // bare bulb over the table, the light confined to the room it lights
-    B.light(g.table.x, g.table.z, { kind: "bulb", r: 3.6, i: 0.95, color: 0xffdca0, rect: g.wall ? g.band : null });
+    if (g.shelf) dressCountShelf(B, g, cs);
+    // a caged bulb over the table, the light confined to the room it lights
+    cageLight(B, g.table.x, g.table.z, { drop: 0.7, r: 3.8, i: 0.95, rect: g.wall ? g.band : null });
     // ---- LOUNGE
     if (g.sofa) {
       const s = g.sofa, t = g.tv;
       const mx = (s.x + t.x) / 2, mz = (s.z + t.z) / 2;
       const ax = Math.abs(t.x - s.x) > Math.abs(t.z - s.z);     // sofa-to-TV runs along x
-      // the rug, and a stain on it
-      B.box(mx, fy + 0.006, mz, ax ? 2.3 : 2.0, 0.012, ax ? 2.0 : 2.3, 0x6b4a3a);
-      B.box(mx + 0.3, fy + 0.0125, mz - 0.2, 0.45, 0.002, 0.35, 0x4a3226);
+      // the rug: a bound border, a field, a stain on it
+      B.box(mx, fy + 0.005, mz, ax ? 2.3 : 2.0, 0.01, ax ? 2.0 : 2.3, 0x4f3a2e);
+      B.box(mx, fy + 0.0105, mz, ax ? 2.1 : 1.8, 0.001, ax ? 1.8 : 2.1, 0x6b4a3a);
+      B.box(mx + 0.3, fy + 0.0118, mz - 0.2, 0.42, 0.001, 0.3, 0x523a2c);
       B.furn("sofa", s.x, s.z, s.yaw, { len: s.len, tone: 0x5b4d3e });
       tvOnCrate(B, t.x, t.z, t.yaw, h(1, 1) < 0.7);
       // the "coffee table": two milk crates and a board
@@ -796,203 +1274,338 @@
       milkCrate(B, cx - px, fy, cz - pz, 0x2c4a8a);
       milkCrate(B, cx + px, fy, cz + pz, 0x8a2c2c);
       const bt = fy + 0.33;
-      B.box(cx, bt + 0.01, cz, ax ? 0.45 : 1.05, 0.02, ax ? 1.05 : 0.45, 0x8e7048);
-      const T = bt + 0.02;
+      B.box(cx, bt + 0.009, cz, ax ? 0.45 : 1.05, 0.018, ax ? 1.05 : 0.45, 0x8e7048, { mat: "wood", uv: 1.2 });
+      const T = bt + 0.018;
       pizzaBox(B, cx - px * 0.8, T, cz - pz * 0.8, 2);
       ashtray(B, cx + px * 0.5, T, cz + pz * 0.5);
-      for (let i = 0; i < 4; i++) can(B, cx + px * (0.2 + i * 0.12) - pz * 0.12, T, cz + pz * (0.2 + i * 0.12) - px * 0.12, CAN[i % CAN.length], false, false);
-      // cans on the floor round the sofa, some kicked over
-      for (let i = 0; i < 7; i++) {
-        const ox = (h(i, 3) - 0.5) * 2.2, oz = (h(i, 4) - 0.5) * 2.2;
-        const x = mx + ox, z = mz + oz;
-        if (Math.abs(x - cx) < 0.6 && Math.abs(z - cz) < 0.6) continue;
+      for (let i = 0; i < 3; i++) can(B, cx + px * (0.12 + i * 0.1) + pz * 0.12, T, cz + pz * (0.12 + i * 0.1) + px * 0.12, CAN[i % CAN.length], false, false);
+      // cans on the floor in the gap between the sofa and the TV, never under
+      // either: u runs sofa -> TV, v across
+      const ux = (t.x - s.x) / 2.7, uz = (t.z - s.z) / 2.7, vx = -uz, vz = ux;
+      for (let i = 0; i < 6; i++) {
+        const u = 0.62 + h(i, 3) * 1.6, v = (h(i, 4) - 0.5) * 2.0;
+        if (Math.abs(u - 1.13) < 0.42 && Math.abs(v) < 0.72) continue;   // the crate table
+        const x = s.x + ux * u + vx * v, z = s.z + uz * u + vz * v;
         if (!B.clear(x, z, 0.1)) continue;
         can(B, x, fy, z, CAN[i % CAN.length], h(i, 5) < 0.6, h(i, 6) < 0.5);
       }
-      B.light(mx, mz, { kind: "bulb", r: 4.6, i: 0.55, color: 0xffe0b0, rect: g.wall ? g.lounge : null });
+      cageLight(B, mx, mz, { cage: false, drop: 0.5, r: 4.6, i: 0.55, color: 0xffe0b0, rect: g.wall ? g.lounge : null });
     }
     // the lookout by the door
     if (g.lookout) {
       foldChair(B, g.lookout.x, g.lookout.z, g.lookout.face, true);
       if (g.lookout.crate) {
         const c = g.lookout.crate, T = milkCrate(B, c.x, fy, c.z, 0x2d6b3a);
-        B.box(c.x, T + 0.005, c.z, 0.36, 0.01, 0.36, 0x7a6048);
-        ashtray(B, c.x - 0.06, T + 0.01, c.z - 0.06);
+        B.box(c.x, T + 0.005, c.z, 0.36, 0.01, 0.36, 0x7a6048, { mat: "wood", uv: 1.2 });
+        ashtray(B, c.x - 0.07, T + 0.01, c.z - 0.07);
         can(B, c.x + 0.09, T + 0.01, c.z + 0.08, CAN[Math.floor(h(9, 9) * CAN.length) % CAN.length], false, false);
-        B.box(c.x + 0.06, T + 0.02, c.z - 0.1, 0.07, 0.01, 0.14, 0x111111);   // a phone
+        B.box(c.x + 0.06, T + 0.015, c.z - 0.1, 0.072, 0.009, 0.15, 0x111111);           // a phone
+        B.box(c.x + 0.06, T + 0.0195, c.z - 0.1, 0.064, 0.001, 0.138, 0x1c2430);
       }
       const d = C.door;
-      B.light(d.x + d.nx * 2.2, d.z + d.nz * 2.2, { kind: "bulb", r: 4.2, i: 0.5, color: 0xffe6c0, rect: g.wall ? g.lounge : null });
+      // a fluorescent batten over the entrance
+      B.light(d.x + d.nx * 2.2, d.z + d.nz * 2.2, { kind: "strip", len: 1.2, axis: Math.abs(d.nz) > 0.5 ? "x" : "z",
+        r: 4.4, i: 0.55, color: 0xf2f4ff, rect: g.wall ? g.lounge : null });
     }
     // cover
     if (g.cover) tippedTable(B, g.cover);
     for (let i = 0; i < g.crates.length; i++) {
-      const c = g.crates[i], ax = Math.abs(c.x1 - c.x0) >= Math.abs(c.z1 - c.z0);
-      const t1 = crateBox(B, c.x, fy, c.z, ax ? 0.8 : 0.6, 0.6, ax ? 0.6 : 0.8, COL.crate, { solid: true });
-      if (h(i, 11) < 0.7) crateBox(B, c.x + (h(i, 12) - 0.5) * 0.12, t1, c.z + (h(i, 13) - 0.5) * 0.08, ax ? 0.6 : 0.46, 0.45, ax ? 0.46 : 0.6, COL.crate, { solid: true });
+      // the stack by the wall has a reason to be there: a fridge, the water
+      const c = g.crates[i], fx = Math.abs(c.x - C.X0) < Math.abs(c.x - C.X1) ? 1 : -1;
+      const wx = fx > 0 ? C.X0 : C.X1;
+      if (i === 0) miniFridge(B, wx + fx * 0.27, c.z, fx, 0);
+      else waterCases(B, wx + fx * 0.44, c.z, fx, 0, h);
     }
-    // pizza boxes and a trash bag by the partition
-    const tz = g.zp - cs * 0.3;
+    // pizza boxes and a bin bag by the partition
+    const tz = g.zp - cs * 0.32;
     const tx = clamp(g.gx + (g.side > 0 ? -1.2 : 1.2), C.X0 + 0.4, C.X1 - 0.4);
-    if (B.clear(tx, tz, 0.2)) { B.box(tx, fy + 0.28, tz, 0.55, 0.56, 0.5, 0x1b1c1e); pizzaBox(B, tx + (g.side > 0 ? -0.55 : 0.55), fy, tz, 3); }
+    if (B.clear(tx, tz, 0.2)) { trashBag(B, tx, tz, 1); pizzaBox(B, tx + (g.side > 0 ? -0.55 : 0.55), fy, tz, 3); }
   }
 
   function drawKitchen(B, k) {
     const C = k.C, fy = B.fy, t = k.table;
     const h = function (a, c) { return B.h(a, c, 0xc1); };
-    B.plane(C.X0, C.Z0, C.X1, C.Z1, fy, "concrete", 0x9a958c);
-    skinWalls(B, "plaster", 0xa8a08e, false);
+    B.plane(C.X0, C.Z0, C.X1, C.Z1, fy, "vinyl", 0xc2bcaa, { cell: 0.6 });
+    joistCeiling(B, C.X0, C.Z0, C.X1, C.Z1);
+    const rects = skinWalls(B, "plaster", 0xb0a894, false, { salt: 0xc4 });
     const foil = h(2, 2) < 0.5;
     let fanDone = false;
     dressWindows(B, function () { if (!fanDone) { fanDone = true; return "fan"; } return foil ? "foil" : "board"; });
-    // PLASTIC SHEETING hung off the ceiling along the two long walls
+    // POLY SHEETING taped over the two long walls
     const alongX = (C.X1 - C.X0) >= (C.Z1 - C.Z0);
-    const sh = B.ceil - fy - 0.02;
-    if (alongX) {
-      B.box((C.X0 + C.X1) / 2, fy + sh / 2, C.Z0 + 0.1, C.X1 - C.X0 - 0.1, sh, 0.006, COL.sheet, { glass: true });
-      B.box((C.X0 + C.X1) / 2, fy + sh / 2, C.Z1 - 0.1, C.X1 - C.X0 - 0.1, sh, 0.006, COL.sheet, { glass: true });
-    } else {
-      B.box(C.X0 + 0.1, fy + sh / 2, (C.Z0 + C.Z1) / 2, 0.006, sh, C.Z1 - C.Z0 - 0.1, COL.sheet, { glass: true });
-      B.box(C.X1 - 0.1, fy + sh / 2, (C.Z0 + C.Z1) / 2, 0.006, sh, C.Z1 - C.Z0 - 0.1, COL.sheet, { glass: true });
-    }
-    // a tarp under the cook table
-    B.box(t.x, fy + 0.003, t.z, t.alongX ? 3.2 : 1.9, 0.006, t.alongX ? 1.9 : 3.2, COL.tarp);
-    // THE STEEL TABLE (top 0.9)
+    sheetWalls(B, rects, alongX ? "x" : "z");
+    // a blue tarp under the cook table, grommets at the corners
+    const tw = t.alongX ? 3.2 : 1.9, td = t.alongX ? 1.9 : 3.2;
+    B.box(t.x, fy + 0.002, t.z, tw, 0.004, td, COL.tarp);
+    for (let a = -1; a <= 1; a += 2) for (let c = -1; c <= 1; c += 2) B.box(t.x + a * (tw / 2 - 0.05), fy + 0.0045, t.z + c * (td / 2 - 0.05), 0.03, 0.001, 0.03, 0xb8b8b0);
+    // THE STEEL TABLE (top 0.9), an undershelf with the stock on it
     const lx = t.alongX ? t.L : t.W, lz = t.alongX ? t.W : t.L;
     B.box(t.x, fy + 0.885, t.z, lx, 0.03, lz, COL.steel);
-    B.box(t.x, fy + 0.2, t.z, lx - 0.1, 0.02, lz - 0.1, COL.steelD);              // under-shelf
-    for (let a = -1; a <= 1; a += 2) for (let c = -1; c <= 1; c += 2)
+    B.box(t.x, fy + 0.855, t.z, lx - 0.04, 0.03, lz - 0.04, COL.steelD);           // the top's turned-down edge
+    B.box(t.x, fy + 0.2, t.z, lx - 0.1, 0.02, lz - 0.1, COL.steelD);               // under-shelf
+    for (let a = -1; a <= 1; a += 2) for (let c = -1; c <= 1; c += 2) {
       B.box(t.x + a * (lx / 2 - 0.04), fy + 0.435, t.z + c * (lz / 2 - 0.04), 0.035, 0.87, 0.035, COL.steelD);
+      B.box(t.x + a * (lx / 2 - 0.04), fy + 0.015, t.z + c * (lz / 2 - 0.04), 0.045, 0.03, 0.045, 0x2a2a2a);   // feet
+    }
     B.solid(t.x - lx / 2, t.x + lx / 2, t.z - lz / 2, t.z + lz / 2, fy, fy + 0.9);
     const T = fy + 0.9;
-    const at = function (a, c) { return t.alongX ? [t.x + a, t.z + c] : [t.x + c, t.z + a]; };
-    // two hotplates with pots, glowing coils
+    // a runs along the table toward the gas bottle's end, c across it toward
+    // the cook; p(a, up, c, sizeA, h, sizeC, col, o) stands on the top
+    const at = function (a, c) { return t.alongX ? [t.x + a, t.z - c] : [t.x - c, t.z + a]; };
+    const p = function (a, up, c, sa, hh, sc, col, o) {
+      const q = at(a, c);
+      return B.box(q[0], T + up + hh / 2, q[1], t.alongX ? sa : sc, hh, t.alongX ? sc : sa, col, o);
+    };
+    // two single hotplates (one a propane ring off the bottle), pots on them
     for (let i = 0; i < 2; i++) {
-      const p = at(-0.8 + i * 0.6, 0.05);
-      B.box(p[0], T + 0.03, p[1], 0.32, 0.06, 0.32, 0x2a2b2d);
-      B.box(p[0], T + 0.062, p[1], 0.2, 0.004, 0.2, 0xff5a2a, { glow: true });
-      B.box(p[0], T + 0.16, p[1], 0.26, 0.2, 0.26, i ? 0x9aa0a4 : 0x7f8589);
+      const a = 0.85 - i * 0.5;
+      p(a, 0, 0.05, 0.3, 0.07, 0.3, 0x2a2b2d);                                  // hotplate body
+      p(a, 0.03, 0.2, 0.05, 0.03, 0.012, 0xb8b8b0);                              // knob
+      const q = at(a, 0.03);
+      cyl(B, q[0], T + 0.07, q[1], 0.1, 0.008, 0x151515);                        // the cast-iron plate
+      const pr = i ? 0.14 : 0.12, ph = i ? 0.24 : 0.14, pc = i ? 0x9aa0a4 : 0x7f8589;
+      cyl(B, q[0], T + 0.078, q[1], pr, ph, pc);                                 // the pot
+      ring(B, q[0], T + 0.078 + ph, q[1], pr * 0.93, 0.012, mulHex(pc, 1.1));   // its rim
+      if (i) {                                                                    // a stockpot's side handles
+        B.box(q[0] + pr + 0.03, T + 0.078 + ph - 0.03, q[1], 0.05, 0.02, 0.07, 0x55595e);
+        B.box(q[0] - pr - 0.03, T + 0.078 + ph - 0.03, q[1], 0.05, 0.02, 0.07, 0x55595e);
+      } else {                                                                    // a saucepan's handle and lid
+        const hq = at(a, 0.03 + pr + 0.1);
+        B.box(hq[0], T + 0.078 + ph - 0.03, hq[1], t.alongX ? 0.03 : 0.18, 0.02, t.alongX ? 0.18 : 0.03, 0x1c1c1c);
+        cyl(B, q[0], T + 0.078 + ph, q[1], pr * 0.95, 0.008, mulHex(pc, 1.05));
+        cyl(B, q[0], T + 0.086 + ph, q[1], 0.02, 0.02, 0x1c1c1c);
+      }
     }
-    // glassware: flasks, a beaker rack, jugs
-    for (let i = 0; i < 5; i++) {
-      const p = at(0.1 + i * 0.16, -0.18 + (i & 1) * 0.1);
-      const fh = 0.14 + h(i, 1) * 0.1;
-      B.box(p[0], T + fh / 2, p[1], 0.09, fh, 0.09, COL.glass, { glass: true });
-      B.box(p[0], T + fh + 0.03, p[1], 0.03, 0.06, 0.03, COL.glass, { glass: true });
+    // glassware: two conical flasks, three beakers, a measuring cylinder;
+    // the liquid is a body of its own inside the glass
+    const LIQ = [0xc9a45a, 0xe8e2c8, 0xa8c8b0];
+    for (let i = 0; i < 2; i++) {
+      const q = at(-0.1 - i * 0.16, -0.2);
+      cyl(B, q[0], T, q[1], 0.06, 0.07, COL.glass, { glass: true });
+      cyl(B, q[0], T + 0.07, q[1], 0.042, 0.04, COL.glass, { glass: true });
+      cyl(B, q[0], T + 0.11, q[1], 0.018, 0.06, COL.glass, { glass: true });
+      cyl(B, q[0], T + 0.002, q[1], 0.05, 0.05, LIQ[i]);
     }
     for (let i = 0; i < 3; i++) {
-      const p = at(0.4 + i * 0.22, 0.22);
-      B.box(p[0], T + 0.15, p[1], 0.16, 0.3, 0.12, i === 1 ? 0x3d6fa8 : COL.jug);
-      B.box(p[0], T + 0.32, p[1], 0.05, 0.04, 0.05, 0xd0452f);
+      const q = at(-0.12 - i * 0.13, 0.05), bh = 0.1 + h(i, 1) * 0.04;
+      cyl(B, q[0], T, q[1], 0.045, bh, COL.glass, { glass: true });
+      cyl(B, q[0], T + 0.002, q[1], 0.038, bh * (0.3 + h(i, 2) * 0.4), LIQ[(i + 1) % 3]);
     }
-    // the gas bottle at the end, a hose up to the table
-    B.box(k.tank.x, fy + 0.5, k.tank.z, 0.3, 1.0, 0.3, 0xd8d8d0);
-    B.box(k.tank.x, fy + 1.05, k.tank.z, 0.1, 0.1, 0.1, 0x9a8a3a);
-    B.solid(k.tank.x - 0.15, k.tank.x + 0.15, k.tank.z - 0.15, k.tank.z + 0.15, fy, fy + 1.0);
-    // buckets on the floor under the table
-    for (let i = 0; i < 2; i++) { const p = at(-0.6 + i * 0.9, 0); B.box(p[0], fy + 0.2, p[1], 0.3, 0.4, 0.3, i ? 0xe0e0da : 0x2f6fbf); }
+    { const q = at(-0.52, -0.22); cyl(B, q[0], T, q[1], 0.035, 0.012, 0x2a2a2a); cyl(B, q[0], T + 0.012, q[1], 0.02, 0.26, COL.glass, { glass: true }); }
+    // solvent jugs with handles and caps
+    for (let i = 0; i < 3; i++) {
+      const a = -0.66 - i * 0.2, col = i === 1 ? 0x3d6fa8 : COL.jug;
+      p(a, 0, 0.22, 0.16, 0.27, 0.12, col);
+      p(a, 0.27, 0.22, 0.12, 0.03, 0.09, col);
+      p(a + 0.04, 0.3, 0.22, 0.04, 0.035, 0.04, 0xd0452f);                       // cap
+      p(a - 0.05, 0.22, 0.22, 0.03, 0.08, 0.03, col);                             // the handle
+    }
+    digitalScale(p, 0.35, 0, -0.26);
+    // the cook's respirator, put down on the bench by the burners
+    respirator(B, at(0.6, 0.3), T, t.alongX);
+    // on the under-shelf: a case of jugs, a carton of foil pans
+    p(-0.5, -0.69, 0, 0.4, 0.26, 0.3, COL.card);
+    p(-0.5, -0.43, 0, 0.41, 0.01, 0.31, COL.cardD);
+    p(0.3, -0.69, 0, 0.36, 0.12, 0.26, 0xb9bec2);
+    // the gas bottle at the end: a 20 lb cylinder, its collar and valve, the
+    // hose up to the burner
+    const tk = k.tank;
+    cyl(B, tk.x, fy + 0.03, tk.z, 0.155, 0.4, 0xd8d8d0);
+    cyl(B, tk.x, fy, tk.z, 0.13, 0.03, 0x8a8a84);                               // foot ring
+    cyl(B, tk.x, fy + 0.43, tk.z, 0.11, 0.03, 0xd8d8d0);                         // shoulder
+    ring(B, tk.x, fy + 0.52, tk.z, 0.08, 0.012, 0xc8c8c0);                      // collar
+    B.box(tk.x, fy + 0.49, tk.z, 0.04, 0.06, 0.04, 0xb89a3a);                    // valve
+    B.box(tk.x, fy + 0.53, tk.z, 0.06, 0.012, 0.012, 0x2a2a2a);                  // handwheel
+    // the hose: across to the table's end leg, up it, along the top to the ring
+    const e0 = t.L / 2 + 0.3, e1 = t.L / 2 - 0.03;
+    const hose = function (a0, a1, y0, y1, c) {
+      const q = at((a0 + a1) / 2, c), la = Math.abs(a1 - a0) + 0.014;
+      B.box(q[0], (y0 + y1) / 2, q[1], t.alongX ? la : 0.014, Math.abs(y1 - y0) + 0.014, t.alongX ? 0.014 : la, 0x151515);
+    };
+    hose(e0 - 0.02, e1, fy + 0.52, fy + 0.52, 0.0);
+    hose(e1, e1, fy + 0.52, T - 0.04, 0.0);
+    hose(e1, 1.0, T + 0.007, T + 0.007, 0.0);
+    B.solid(tk.x - 0.16, tk.x + 0.16, tk.z - 0.16, tk.z + 0.16, fy, fy + 0.55);
+    // buckets on the floor along the table's back side
+    for (let i = 0; i < 2; i++) {
+      const q = at(-0.3 + i * 0.38, -(t.W / 2 + 0.2)), col = i ? 0xe0e0da : 0x2f6fbf;
+      cyl(B, q[0], fy, q[1], 0.14, 0.36, col);
+      ring(B, q[0], fy + 0.355, q[1], 0.14, 0.02, mulHex(col, 0.85));
+    }
     // the work lamp on a stand, beside the cook
-    const lp = at(-t.L / 2 - 0.05, -0.75);
+    const lp = at(-t.L / 2 + 0.02, 0.75);
     B.box(lp[0], fy + 0.02, lp[1], 0.4, 0.04, 0.4, COL.black);
-    B.box(lp[0], fy + 0.8, lp[1], 0.03, 1.6, 0.03, 0xd8b43a);
-    B.box(lp[0], fy + 1.66, lp[1], 0.24, 0.18, 0.18, 0xd8b43a);
-    B.box(lp[0], fy + 1.58, lp[1], 0.2, 0.01, 0.14, 0xfff4e0, { glow: true });
-    B.lamp(t.x, fy + 1.6, t.z, { color: 0xfff4e0, r: 3.4, i: 0.6 });
-    // the bagging table + product; the lab loot
+    B.box(lp[0], fy + 0.8, lp[1], 0.03, 1.56, 0.03, 0xd8b43a);
+    B.box(lp[0], fy + 1.63, lp[1], 0.24, 0.16, 0.14, 0xd8b43a);
+    B.box(lp[0], fy + 1.63, lp[1] + (t.alongX ? 0.072 : 0), t.alongX ? 0.2 : 0.004, 0.12, t.alongX ? 0.004 : 0.12, 0xfff4e0, { glow: true });
+    B.lamp(t.x, t.z, fy + 1.6, { color: 0xfff4e0, r: 3.4, i: 0.5 });
+    // the bagging table against a wall, a chair at it; the lab loot
     if (k.bags) {
       const g = k.bags, ax = g.alongX;
       const T2 = foldTable(B, g.x, g.z, ax, 1.5, 0.7, 0xcfc8b6);
-      for (let i = 0; i < 5; i++) for (let j = 0; j < 2; j++) {
-        const a = -0.5 + i * 0.2, c = -0.12 + j * 0.2;
-        B.box(g.x + (ax ? a : c), T2 + 0.02, g.z + (ax ? c : a), ax ? 0.12 : 0.17, 0.04, ax ? 0.17 : 0.12, 0xf2f2ee);
+      // into the room from the wall: where the bagger sits, facing the wall
+      const inx = g.fx, inz = g.fz;
+      const q = frame(B, g.x, g.z, inx, inz, T2);
+      // a tray with the product on it, a spoon
+      q(-0.45, 0, 0, 0.36, 0.02, 0.26, 0x9aa0a4);
+      q(-0.45, 0.02, 0, 0.2, 0.02, 0.14, 0xefefe8); q(-0.45, 0.04, 0, 0.12, 0.018, 0.08, 0xefefe8);
+      q(-0.3, 0.02, 0.07, 0.1, 0.006, 0.02, 0xb8b8b0);
+      // rows of filled baggies: clear film, the white inside it
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 3; j++) {
+        const a = -0.08 + i * 0.1, c = -0.12 + j * 0.1;
+        q(a, 0, c, 0.07, 0.008, 0.085, 0xf4f4ee);
+        q(a, 0, c, 0.08, 0.012, 0.1, 0xe6eef0, { glass: true });
+        q(a, 0.012, c + 0.04, 0.078, 0.002, 0.006, 0x3a78c8);                   // the zip strip
       }
-      B.box(g.x + (ax ? 0.55 : 0), T2 + 0.015, g.z + (ax ? 0 : 0.55), 0.18, 0.03, 0.18, 0xb9bec2);   // scale
-      B.box(g.x + (ax ? 0.55 : -0.2), T2 + 0.06, g.z + (ax ? -0.2 : 0.55), 0.12, 0.12, 0.08, 0x3a3a3a); // box of baggies
+      digitalScale(q, 0.45, 0, -0.1);
+      // the box of empty baggies and a spill of them
+      q(0.5, 0, 0.18, 0.14, 0.07, 0.1, 0xe8e2d4);
+      q(0.5, 0.07, 0.18, 0.12, 0.002, 0.08, 0x3a78c8);
+      q(0.34, 0, 0.2, 0.08, 0.004, 0.1, 0xe6eef0, { glass: true });
+      foldChair(B, g.x + inx * 0.62, g.z + inz * 0.62, Math.atan2(-inx, -inz), true);
       B.loot(g.x, g.z, "lab", { lot: B.lot || null });
     }
-    // respirators on a hook on the wall
-    const wallHook = alongX ? { x: t.x + 1.6, z: C.Z0 + 0.12 } : { x: C.X0 + 0.12, z: t.z + 1.6 };
-    if (B.clear(wallHook.x, wallHook.z + (alongX ? 0.3 : 0), 0.05)) {
+    // respirators on a hook rail on the wall
+    // (the rail is screwed through the film, 7.5 cm off the wall)
+    const wallHook = alongX ? { x: t.x + 1.6, z: C.Z0 + 0.075 } : { x: C.X0 + 0.075, z: t.z + 1.6 };
+    const hookGlass = alongX ? windowAt(B, false, C.Z0, wallHook.x - 0.45, wallHook.x + 0.45, fy + 1.3, fy + 1.75)
+                             : windowAt(B, true, C.X0, wallHook.z - 0.45, wallHook.z + 0.45, fy + 1.3, fy + 1.75);
+    if (!hookGlass && B.clear(wallHook.x + (alongX ? 0 : 0.3), wallHook.z + (alongX ? 0.3 : 0), 0.05)) {
       const ax = alongX;
-      B.box(wallHook.x, fy + 1.62, wallHook.z, ax ? 0.8 : 0.03, 0.04, ax ? 0.03 : 0.8, 0x4a3a2a);
-      for (let i = 0; i < 3; i++) {
-        const a = -0.25 + i * 0.25;
-        const x = wallHook.x + (ax ? a : 0.07), z = wallHook.z + (ax ? 0.07 : a);
-        B.box(x, fy + 1.5, z, ax ? 0.14 : 0.1, 0.12, ax ? 0.1 : 0.14, 0x3a3d40);
-        B.box(x + (ax ? -0.06 : 0.04), fy + 1.45, z + (ax ? 0.04 : -0.06), 0.06, 0.06, 0.06, 0xc86f8a);
-        B.box(x + (ax ? 0.06 : 0.04), fy + 1.45, z + (ax ? 0.04 : 0.06), 0.06, 0.06, 0.06, 0xc86f8a);
+      B.box(wallHook.x, fy + 1.66, wallHook.z, ax ? 0.8 : 0.025, 0.07, ax ? 0.025 : 0.8, 0x4a3a2a, { mat: "wood", uv: 1.2 });
+      for (let i = 0; i < 2; i++) {
+        const a = -0.18 + i * 0.36;
+        const hx = wallHook.x + (ax ? a : 0.02), hz = wallHook.z + (ax ? 0.02 : a);
+        const x = wallHook.x + (ax ? a : 0.055), z = wallHook.z + (ax ? 0.055 : a);
+        B.box(hx, fy + 1.66, hz, 0.015, 0.015, 0.015, 0x9a9a9a);                  // the hook
+        B.box(hx, fy + 1.57, hz, 0.012, 0.17, 0.012, 0x1c1c1c);                    // strap
+        respirator(B, [x, z], fy + 1.4, ax, true);
       }
     }
-    B.light(t.x, t.z, { kind: "bulb", r: 4.2, i: 0.5, color: 0xfff0d0 });
-    if (k.bags) B.light(k.bags.x, k.bags.z, { kind: "bulb", r: 3.2, i: 0.45, color: 0xffe8c0 });
+    shopLight(B, t.x, t.z, t.alongX, { r: 4.6, i: 0.72 });
+    if (k.bags) cageLight(B, k.bags.x, k.bags.z, { cage: false, drop: 0.45, r: 3.2, i: 0.45, color: 0xffe8c0 });
+  }
+  // a half-face respirator: rubber body, nose, two pink filter cartridges
+  function respirator(B, q, y, ax, hanging) {
+    const x = q[0], z = q[1];
+    B.box(x, y + 0.045, z, 0.1, 0.09, 0.08, 0x3a3d40);
+    B.box(x, y + 0.075, z, ax ? 0.05 : 0.06, 0.06, ax ? 0.06 : 0.05, 0x2e3033);
+    for (let s = -1; s <= 1; s += 2) {
+      const cx = x + (ax ? s * 0.075 : 0), cz = z + (ax ? 0 : s * 0.075);
+      if (hanging) B.box(cx, y + 0.04, cz + (ax ? 0.01 : 0), ax ? 0.04 : 0.07, 0.07, ax ? 0.07 : 0.04, 0xc86f8a);
+      else cyl(B, cx, y, cz, 0.035, 0.04, 0xc86f8a);
+    }
   }
 
   function drawCrash(B, c) {
     const C = c.C, fy = B.fy;
     const h = function (a, q) { return B.h(a, q, 0xd1); };
-    B.plane(C.X0, C.Z0, C.X1, C.Z1, fy, "wood", 0x9a8a78);
-    skinWalls(B, "plaster", 0xb2a893, false);
+    B.plane(C.X0, C.Z0, C.X1, C.Z1, fy, "wood", 0x9a8a78, { cell: 0.6 });
+    drywallCeiling(B, C.X0, C.Z0, C.X1, C.Z1, 0xd8d2c6, 0xd3);
+    skinWalls(B, "plaster", 0xb8ae98, false, { salt: 0xd4 });
     dressWindows(B, function () { return "curtain"; });
     for (let i = 0; i < c.mats.length; i++) {
       const m = c.mats[i];
       mattress(B, m, i);
       if (i < 2) B.loot(m.x, m.z, "mattress", { lot: B.lot || null });
       // what lives beside a mattress on the floor
-      const sx = m.x + (m.hdx ? m.hdx * 0.7 : 0.62), sz = m.z + (m.hdx ? 0.58 : m.hdz * 0.7);
-      if (B.clear(sx, sz, 0.05) && h(i, 1) < 0.7) {
+      const sx = m.x + (m.hdx ? m.hdx * 0.7 : 0.6), sz = m.z + (m.hdx ? 0.56 : m.hdz * 0.7);
+      if (B.clear(sx, sz, 0.05) && freeRect(c.C, sx - 0.12, sz - 0.12, sx + 0.22, sz + 0.2) && h(i, 1) < 0.7) {
         can(B, sx, fy, sz, CAN[i % CAN.length], h(i, 2) < 0.4, true);
         ashtray(B, sx + 0.12, fy, sz + 0.1);
       }
     }
-    if (c.foot) {
-      const f = c.foot, ax = f.alongX;
-      B.box(f.x, fy + 0.2, f.z, ax ? 0.8 : 0.4, 0.4, ax ? 0.4 : 0.8, 0x4d5a3a, { solid: true });
-      B.box(f.x, fy + 0.41, f.z, ax ? 0.82 : 0.42, 0.03, ax ? 0.42 : 0.82, 0x3d4a2e);
-      B.loot(f.x, f.z, "footlocker", { lot: B.lot || null });
-    }
+    if (c.foot) { footlocker(B, c.foot); B.loot(c.foot.x, c.foot.z, "footlocker", { lot: B.lot || null }); }
     if (c.rail) clothesRail(B, c.rail, h);
     if (c.tv) tvOnCrate(B, c.tv.x, c.tv.z, Math.atan2(c.tv.fx, c.tv.fz), h(5, 5) < 0.5);
     if (c.guns) {
       const g = c.guns, ax = g.ax;
       const top = crateBox(B, g.x, fy, g.z, ax ? 1.2 : 0.48, 0.44, ax ? 0.48 : 1.2, 0x55603f, { solid: true });
-      B.box(g.x + (ax ? 0 : g.fx * 0.05), top + 0.01, g.z + (ax ? g.fz * 0.05 : 0), ax ? 0.5 : 0.1, 0.02, ax ? 0.1 : 0.5, 0xd8d0b0);   // stencil strip
+      B.box(g.x + (ax ? 0 : g.fx * 0.05), top + 0.001, g.z + (ax ? g.fz * 0.05 : 0), ax ? 0.5 : 0.1, 0.002, ax ? 0.1 : 0.5, 0xd8d0b0);   // stencil strip
+      for (let q = -1; q <= 1; q += 2)                                                          // rope handles at the ends
+        B.box(g.x + (ax ? q * 0.615 : 0), fy + 0.3, g.z + (ax ? 0 : q * 0.615), ax ? 0.02 : 0.16, 0.03, ax ? 0.16 : 0.02, 0x8a7a5a);
       B.loot(g.x, g.z, "weapons", { lot: B.lot || null });
     }
-    // clothes on the floor
-    for (let i = 0; i < 5; i++) {
-      const x = C.X0 + 0.8 + h(i, 7) * (C.X1 - C.X0 - 1.6), z = C.Z0 + 0.8 + h(i, 8) * (C.Z1 - C.Z0 - 1.6);
-      if (!B.clear(x, z, 0.2)) continue;
-      B.box(x, fy + 0.02, z, 0.4 + h(i, 9) * 0.2, 0.04, 0.3 + h(i, 10) * 0.2, SHEETS[(i + 3) % SHEETS.length]);
+    // clothes dropped on the floor, never on the furniture
+    for (let i = 0, n = 0; i < 6 && n < 3; i++) {
+      const x = C.X0 + 0.9 + h(i, 7) * (C.X1 - C.X0 - 1.8), z = C.Z0 + 0.9 + h(i, 8) * (C.Z1 - C.Z0 - 1.8);
+      if (!B.clear(x, z, 0.3) || !freeRect(c.C, x - 0.5, z - 0.5, x + 0.5, z + 0.5)) continue;
+      floorClothes(B, x, z, i & 1, GARMENTS[(i + 2) % GARMENTS.length], h(i, 9) < 0.5);
+      n++;
     }
-    const cx = (C.X0 + C.X1) / 2, cz = (C.Z0 + C.Z1) / 2;
-    B.light(cx - (C.X1 - C.X0) * 0.22, cz, { kind: "bulb", r: 4.6, i: 0.5, color: 0xffe0b0 });
-    B.light(cx + (C.X1 - C.X0) * 0.22, cz, { kind: "bulb", r: 4.6, i: 0.42, color: 0xffe0b0 });
+    const cx = (C.X0 + C.X1) / 2, cz = (C.Z0 + C.Z1) / 2, alongX = (C.X1 - C.X0) >= (C.Z1 - C.Z0);
+    const off = (alongX ? C.X1 - C.X0 : C.Z1 - C.Z0) * 0.22;
+    cageLight(B, cx - (alongX ? off : 0), cz - (alongX ? 0 : off), { cage: false, drop: 0.4, r: 4.6, i: 0.5, color: 0xffe0b0 });
+    cageLight(B, cx + (alongX ? off : 0), cz + (alongX ? 0 : off), { cage: false, drop: 0.4, r: 4.6, i: 0.42, color: 0xffe0b0 });
   }
 
   function drawBoss(B, p) {
     const C = p.C, fy = B.fy;
-    B.plane(C.X0, C.Z0, C.X1, C.Z1, fy, "wood", 0x8a6e56);
-    skinWalls(B, "plaster", 0x8c7f6c, false);
+    B.plane(C.X0, C.Z0, C.X1, C.Z1, fy, "wood", 0x7e6450, { cell: 0.6 });
+    drywallCeiling(B, C.X0, C.Z0, C.X1, C.Z1, 0xdcd6ca, 0xe3);
+    skinWalls(B, "plaster", 0x8f8672, false, { salt: 0xe4, skirt: 0x3a2c22 });
     dressWindows(B, function () { return "curtain"; });
     if (p.desk) {
       const d = p.desk;
-      B.box(d.x, fy + 0.006, d.z, 3.2, 0.012, 2.6, 0x5a2e2a);                  // his rug
+      B.box(d.x, fy + 0.005, d.z, 3.2, 0.01, 2.6, 0x4a2622);                   // his rug: border
+      B.box(d.x, fy + 0.0105, d.z, 2.9, 0.001, 2.3, 0x6e3a33);                 //   field
+      B.box(d.x, fy + 0.0112, d.z, 1.2, 0.001, 0.9, 0x8a5a3a);                 //   medallion
       B.furn("bossDesk", d.x, d.z, d.yaw, { tone: 0x3a2c22 });
-      // on the desk: a stack, a phone, a bottle
-      const f = Math.cos(d.yaw);
-      cashStack(B, d.x - 0.7, fy + 0.74, d.z + f * 0.05, 0.08, true);
-      B.box(d.x - 0.35, fy + 0.745, d.z - f * 0.1, 0.07, 0.01, 0.14, 0x111111);
-      B.box(d.x + 1.05, fy + 0.86, d.z + f * 0.2, 0.08, 0.24, 0.08, 0x6b3a1a, { glass: true });
+      // on the desk (the kit's monitor stands at lat +0.55): a brick of cash,
+      // the phone, a bottle and a glass, an ashtray
+      const q = frame(B, d.x, d.z, Math.sin(d.yaw), Math.cos(d.yaw), fy + 0.74);
+      brick(q, -0.72, 0, 0.12, 2, 2, 3, STRAPS[0]);
+      q(-0.3, 0, 0.25, 0.075, 0.009, 0.15, 0x111111);                          // phone
+      q(-0.3, 0.009, 0.25, 0.067, 0.001, 0.138, 0x1c2430);
+      const fx = Math.round(Math.sin(d.yaw)), fz = Math.round(Math.cos(d.yaw));
+      const wp = function (lat, fwd) { return [d.x + lat * fz + fwd * fx, d.z - lat * fx + fwd * fz]; };
+      const bt = wp(1.05, 0.25), gl = wp(0.9, 0.32), as = wp(0.2, 0.3);
+      cyl(B, bt[0], fy + 0.74, bt[1], 0.04, 0.2, 0x6b3a1a, { glass: true });              // the bottle
+      cyl(B, bt[0], fy + 0.94, bt[1], 0.015, 0.08, 0x6b3a1a, { glass: true });            //   its neck
+      cyl(B, bt[0], fy + 1.02, bt[1], 0.017, 0.02, 0x1a1a1a);                             //   cap
+      cyl(B, bt[0], fy + 0.742, bt[1], 0.034, 0.12, 0xb07030);                            // the whiskey in it
+      cyl(B, gl[0], fy + 0.74, gl[1], 0.035, 0.09, COL.glass, { glass: true });           // a glass
+      cyl(B, gl[0], fy + 0.742, gl[1], 0.03, 0.025, 0xb07030);
+      ashtray(B, as[0], fy + 0.74, as[1]);
       B.light(d.x, d.z, { kind: "pendant", r: 4.2, i: 0.6, color: 0xffd9a0, drop: 0.6 });
     }
     if (p.safe) {
       floorSafe(B, p.safe.x, p.safe.z, p.safe.yaw);
       B.loot(p.safe.x, p.safe.z, "safe", { lot: B.lot || null, wealth: 1 });
     }
-    if (p.sofa) B.furn("sofa", p.sofa.x, p.sofa.z, p.sofa.yaw, { len: 2.0, tone: 0x2b2b30 });
+    if (p.sofa) {
+      const s = p.sofa, fx = Math.sin(s.yaw);
+      B.furn("sofa", s.x, s.z, s.yaw, { len: 2.0, tone: 0x2b2b30 });
+      // a low coffee table in front of it
+      const tx = s.x + fx * 0.95;
+      B.box(tx, fy + 0.4, s.z, 0.55, 0.04, 1.1, 0x3a2c22, { mat: "wood", uv: 1.2 });
+      for (let a = -1; a <= 1; a += 2) for (let c2 = -1; c2 <= 1; c2 += 2)
+        B.box(tx + a * 0.23, fy + 0.19, s.z + c2 * 0.5, 0.04, 0.38, 0.04, 0x2a2018);
+      B.solid(tx - 0.28, tx + 0.28, s.z - 0.55, s.z + 0.55, fy, fy + 0.42);
+      ashtray(B, tx, fy + 0.42, s.z + 0.3);
+      B.box(tx - 0.05, fy + 0.425, s.z - 0.25, 0.05, 0.01, 0.16, 0x111111);     // a remote
+      B.furn("lamp", s.x, s.z + (s.z > (C.Z0 + C.Z1) / 2 ? -1.25 : 1.25));
+      B.lamp(s.x, s.z + (s.z > (C.Z0 + C.Z1) / 2 ? -1.25 : 1.25), fy + 1.4, { r: 3.0, i: 0.4 });
+    }
+    if (p.tv) {
+      // a wall-hung screen over a low media unit, across from the sofa
+      const t = p.tv, q = piece(B, t.x, t.z, t.yaw);
+      q(0, 0, 0, 1.5, 0.44, 0.4, 0x2a2420, { solid: true });
+      for (let a = -1; a <= 1; a += 2) q(a * 0.37, 0.05, 0.201, 0.7, 0.34, 0.004, 0x352d27);   // doors
+      q(0, 0.44, 0, 1.52, 0.02, 0.42, 0x3a312a);                                // top
+      const on = B.h(3, 3, 0xe5) < 0.6;
+      const wallX = Math.abs(Math.sin(t.yaw)) > 0.5;                             // hung on a ±x wall
+      const glass = windowAt(B, wallX, wallX ? t.x : t.z, (wallX ? t.z : t.x) - 0.7, (wallX ? t.z : t.x) + 0.7, fy + 0.9, fy + 1.9);
+      if (!glass) {
+        q(0, 1.0, -0.17, 1.3, 0.76, 0.05, COL.black);                           // the screen, on the wall
+        q(0, 1.02, -0.143, 1.26, 0.72, 0.004, on ? 0x3d5f82 : 0x0f1317, on ? { glow: true } : null);
+        if (on) B.lamp(t.x + Math.sin(t.yaw) * 0.6, t.z + Math.cos(t.yaw) * 0.6, fy + 1.3, { color: 0x8fb4ff, r: 2.6, i: 0.2 });
+      } else flatTV(B, t.x, t.z, t.yaw, 0.46, on, 1.1);                        // a window behind: it stands on the unit
+      q(0.52, 0.46, 0.06, 0.34, 0.07, 0.24, 0x151515);                          // a games console
+    }
     if (p.rack) gunRack(B, p.rack.x, p.rack.z, p.rack.yaw);
     const cx = (C.X0 + C.X1) / 2, cz = (C.Z0 + C.Z1) / 2;
-    B.light(cx, cz + (p.cs > 0 ? -1.5 : 1.5), { kind: "bulb", r: 4.8, i: 0.45, color: 0xffe0b0 });
+    B.light(cx, cz + (p.cs > 0 ? -1.5 : 1.5), { kind: "dome", r: 4.8, i: 0.45, color: 0xffe0b0 });
   }
 
   function planOf(b, r, k, n) {
@@ -1010,8 +1623,11 @@
     const P = planOf(b, r, k, n);
     // an owner who cleared this floor keeps the shell, the light and the finish
     if (CBZ.fitoutRoomCleared && CBZ.fitoutRoomCleared(B, "f:" + k)) {
-      B.plane(P.g.C.X0, P.g.C.Z0, P.g.C.X1, P.g.C.Z1, B.fy, P.kind === "ground" || P.kind === "kitchen" ? "concrete" : "wood", 0xa39b90);
-      B.light((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2, { kind: "bulb", r: 5.5, i: 0.6 });
+      const G = P.g.C;
+      B.plane(G.X0, G.Z0, G.X1, G.Z1, B.fy, P.kind === "crash" || P.kind === "boss" ? "wood" : "vinyl", 0xb3ae9f, { cell: 0.6 });
+      drywallCeiling(B, G.X0, G.Z0, G.X1, G.Z1, 0xd8d2c6, 0xf1);
+      skinWalls(B, P.kind === "ground" ? "brick" : "plaster", P.kind === "ground" ? 0xc9bdb2 : 0xc2b9a6, P.kind === "ground", { salt: 0xf2 });
+      cageLight(B, (r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2, { cage: false, drop: 0.45, r: 5.5, i: 0.6 });
       return;
     }
     if (P.kind === "ground") drawGround(B, P.g);
