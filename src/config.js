@@ -715,11 +715,6 @@
   // that file parses before this one; the line below only documents the
   // default for the one-line revert: false = the stage-1 compact world.
   if (CBZ.CONFIG.WORLD_ENLARGE_V2 == null) CBZ.CONFIG.WORLD_ENLARGE_V2 = true;
-  // ROADS OVERHAUL V2: real lane proportions (highways 3+3 with a hard median,
-  // island/side streets widened to fit two cars), markings gapped at every
-  // intersection (no centreline running through junction boxes), per-road
-  // width stamped on road records + CBZ.roadLanes() lane-centre data.
-  if (CBZ.CONFIG.ROADS_V2 == null) CBZ.CONFIG.ROADS_V2 = true;
   // ROAD MARKINGS V1: biome TOWN streets (city/towngen.js) get a yellow
   // centreline (dashed on ordinary 2-way lanes, solid on multi-lane), white
   // dashed lane dividers + curb edge lines, and continental (zebra) crosswalks
@@ -807,9 +802,6 @@
   // GAPPED wherever the deck crosses a registered road, so bridge walls only
   // exist over real water/gap spans — never across intersections/mouths.
   if (CBZ.CONFIG.BRIDGE_WALL_RULES == null) CBZ.CONFIG.BRIDGE_WALL_RULES = true;
-  // Highway deck streetlights (the owner called them dumb): default OFF —
-  // real highways here run unlit; flip true to restore the old 40m poles.
-  if (CBZ.CONFIG.HWY_LAMPS == null) CBZ.CONFIG.HWY_LAMPS = false;
   // HIGHWAY NETWORK V2 (owner: "completely redo the highway and road system
   // to make it significantly significantly bigger, and extendable and
   // natural"). On → city/highwaynet.js builds the 7-route, ~19km continental

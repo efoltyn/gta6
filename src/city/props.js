@@ -592,7 +592,6 @@
     ["civic:engaged-column/cheek-wall", "bare", "8 m colonnade proud of the wall on the front walk-up, but buildings_civic.js draws NOTHING unless BLD_EXTRAS is on, and it defaults false, so this is dormant"],
     ["forest:fallen-log/tent", "bare", "8 logs at 5-10 m, 3 tents at 4.8 m"],
     ["annex:island-tree", "bare", "50 of 64 trunks, capped at 14 by an explicit comment"],
-    ["highway:elevated-pylon/deck-lamp", "bare", "DORMANT, every caller passes elevated:false and HWY_LAMPS defaults off; pre-broken if either flips"],
   ];
   CBZ.solidityAudit = function () {
     const out = { classesChecked: SOLIDITY.length, classesSolid: 0, classesFixed: 0, decoyPolicy: 0, classesBare: 0, bare: [] };

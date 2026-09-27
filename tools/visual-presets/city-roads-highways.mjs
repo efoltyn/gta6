@@ -134,8 +134,8 @@ async function stageCityRoadsHighways(input) {
     junction: { x: 10.2, y: 1.9, z: -686, ax: -4, ay: 0.1, az: -706, fov: 62 },
     // driver's eye on the median avenue x=52, looking north up it
     avenue: { x: 57.4, y: 1.3, z: -780, ax: 52, ay: 0.3, az: -640, fov: 55 },
-    // on the east footway of the median avenue x=-52, looking north along it
-    night: { x: -41.5, y: 1.9, z: -770, ax: -50, ay: 0.2, az: -680, fov: 60 },
+    // mid-block on the median avenue x=-52 (kerb lane), looking north along the lamps
+    night: { x: -46.2, y: 1.6, z: -800, ax: -50, ay: 0, az: -755, fov: 64 },
   };
   const hwFallback = { x: midX + 8, y: 190, z: crossZ - 40, ax: midX + 8, ay: 0, az: crossZ + 30, fov: 50 };
   cams.hwAerial = HIGHWAY.aerial || hwFallback;
