@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "aa138fc642fd99338c06fdf35a14356420d2ba7c",
-  "createdAt": "2026-09-27T07:26:37.412Z",
+  "sourceCommit": "ce889e0039f09a78ba966b24a20d0ae00bd6a2c8",
+  "createdAt": "2026-09-27T07:34:15.283Z",
   "fileCount": 1117,
-  "totalBytes": 45211451,
+  "totalBytes": 45223138,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -138,13 +138,13 @@
     },
     {
       "file": "src/city/biome_forest.js",
-      "bytes": 33014,
-      "sha256": "56738c5af733dbf360f5c0c95b0e7fb80ce5ad07f4f275e9935dc27962602b37"
+      "bytes": 33102,
+      "sha256": "de50bd84e0d2bd99c4134de3071c773d9815f6a8af99f5d270635f93998f4c76"
     },
     {
       "file": "src/city/biome_snow.js",
-      "bytes": 56531,
-      "sha256": "44c1ba5eb5950c77c1c19bce9c4c791c536baf50e868105661b6679284864da8"
+      "bytes": 58949,
+      "sha256": "8d9caea6e5f17809bf4fb0d50c810a15950bf0eb70b21cfdbb34ff8fe4e26417"
     },
     {
       "file": "src/city/births.js",
@@ -403,8 +403,8 @@
     },
     {
       "file": "src/city/continent.js",
-      "bytes": 55865,
-      "sha256": "b9abebe13db90c0ac3423b2e31d57a4ead73499f12412aaeaa1afa0299815a1d"
+      "bytes": 56015,
+      "sha256": "ffd4bddceca53c115c38fe8b1164bfa3fe35189d114204408a9b3f49969d84ae"
     },
     {
       "file": "src/city/contracts.js",
@@ -3033,8 +3033,8 @@
     },
     {
       "file": "src/world/alpine_skin.js",
-      "bytes": 6980,
-      "sha256": "79c049ca5aa5ebd8d4f33b9422b5a4d31b25f1cf54d5eb9ef555cc572c66a3ac"
+      "bytes": 8382,
+      "sha256": "224b91c47e849f1d4f7bcd365919eedc863a0efa3a704c538936dc00977f6fa8"
     },
     {
       "file": "src/world/building_dress.js",
@@ -3088,8 +3088,8 @@
     },
     {
       "file": "src/world/disaster_arena.js",
-      "bytes": 82359,
-      "sha256": "d711a3a1db71f186a7fde2488ec5006948b24d75f703bd72c72123435e0ba65c"
+      "bytes": 79589,
+      "sha256": "e854e428ecd05dbe13ae43130cf2ad71733ee32ed4629791fa4c8319590d2b89"
     },
     {
       "file": "src/world/door.js",
@@ -3153,8 +3153,8 @@
     },
     {
       "file": "src/world/mountain_detail.js",
-      "bytes": 15248,
-      "sha256": "30cb127aaa59ea33848268727fb40ccdb0c7deb1e7a72267b78afb4934b7be29"
+      "bytes": 16887,
+      "sha256": "650ad9285d6622f4615fb5db6dfdf152ffd0d9e9ecb293e9662e94ec34e0a2da"
     },
     {
       "file": "src/world/prisongrounds.js",
@@ -3238,8 +3238,8 @@
     },
     {
       "file": "src/world/textures_surface.js",
-      "bytes": 8744,
-      "sha256": "be37b2113dbf5e95302c3d6f8eb104c3d94296211a320e5c65954216cea2c779"
+      "bytes": 14268,
+      "sha256": "2b1f4234d47c482567b5a127f70fb5d385f1c546c90e10f4e097036794acede7"
     },
     {
       "file": "src/world/towers.js",
@@ -3273,8 +3273,8 @@
     },
     {
       "file": "src/world/vegetation.js",
-      "bytes": 18946,
-      "sha256": "7c220dd8dbc4783f1266fdfa3095819b029f1a4a9b823b14f228f888010cd2b2"
+      "bytes": 22182,
+      "sha256": "812c369f50fe9e8115930aa0f126b3d16857fdad44c61b598d091597c4a6b5b8"
     },
     {
       "file": "src/world/ventilation.js",
