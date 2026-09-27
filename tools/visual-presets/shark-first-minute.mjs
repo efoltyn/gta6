@@ -14,8 +14,8 @@
    scope is reachable inside it. */
 
 const subjects = [
-  { id: "title", label: "The front door",
-    focus: "The title card over the attract lens: the first frame anyone sees." },
+  { id: "title", label: "Launch, a few seconds in",
+    focus: "What a player sees seconds after the page loads, before touching anything. BEFORE: the title card over the attract lens, waiting for PLAY. AFTER: already in the water, the wordmark over the live sea." },
   { id: "spawn", label: "Spawn, three seconds in",
     focus: "PLAY pressed, no input for three seconds: the chase camera over a bull shark off the beach." },
   { id: "dive", label: "The first dive",
@@ -121,9 +121,13 @@ async function stageFirstMinute(input) {
 
   const out = { ok: true, subject: sub.id };
   if (sub.id === "title") {
-    // the attract lens is built one painted frame after the title: give it real time
-    for (let t = 0; t < 300 && !(C.game && C.game.state === "title"); t++) await sleep(100);
-    await sleep(6000);
+    // real frames, not stepped: whichever of the title or the match comes up first
+    for (let t = 0; t < 600; t++) {
+      const st = C.game && C.game.state;
+      if (!document.getElementById("sharkBoot") && (st === "title" || st === "playing")) break;
+      await sleep(100);
+    }
+    await sleep(3000);
     return out;
   }
   if (!await D.boot()) throw new Error("sharksim never armed");

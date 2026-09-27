@@ -1611,48 +1611,6 @@
     if (viewCard.parentNode) viewCard.parentNode.removeChild(viewCard);
     viewCard = null;
   }
-  function viewChooser() {
-    if (viewCard) return;
-    viewCard = document.createElement("div");
-    viewCard.id = "sharkviewpick";
-    viewCard.style.cssText = "position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;" +
-      "align-items:center;justify-content:center;gap:18px;background:rgba(4,10,18,.55);" +
-      "font-family:Fredoka,system-ui,sans-serif;text-align:center";
-    const title = document.createElement("div");
-    title.textContent = "PICK YOUR VIEW";
-    title.style.cssText = "font-size:clamp(26px,5vw,44px);font-weight:700;color:#9fe870;letter-spacing:2px;" +
-      "text-shadow:0 4px 0 #14532d,0 8px 18px rgba(0,0,0,.55)";
-    const sub = document.createElement("div");
-    sub.textContent = "change it any time in pause settings";
-    sub.style.cssText = "font-size:clamp(13px,2.2vw,17px);color:#bcd0e2;margin-top:-8px";
-    const row = document.createElement("div");
-    row.style.cssText = "display:flex;gap:16px;flex-wrap:wrap;justify-content:center;padding:0 16px";
-    const mk = function (v, big, small) {
-      const b = document.createElement("button");
-      b.style.cssText = "min-width:min(220px,42vw);padding:20px 22px;border-radius:16px;cursor:pointer;" +
-        "border:2px solid rgba(159,232,112,.5);background:rgba(8,16,26,.88);color:#eaf4ff;" +
-        "font-family:inherit;font-size:19px;font-weight:700;letter-spacing:1px;" +
-        "box-shadow:0 6px 18px rgba(0,0,0,.45);touch-action:manipulation";
-      const s = document.createElement("div");
-      s.textContent = small;
-      s.style.cssText = "font-size:12.5px;font-weight:400;color:#8fb2cc;margin-top:5px;letter-spacing:.4px";
-      b.appendChild(document.createTextNode(big));
-      b.appendChild(s);
-      b.addEventListener("click", function (e) {
-        if (e && e.preventDefault) e.preventDefault();
-        CBZ.sharkSimViewSet(v);
-        viewCardClose();
-        openingFlash();          // the card held the opening banner back; release it
-      });
-      row.appendChild(b);
-    };
-    mk("chase", "OCEAN VIEW", "see your whole shark");
-    mk("eye", "SHARK EYES", "first person, jaws first");
-    viewCard.appendChild(title);
-    viewCard.appendChild(sub);
-    viewCard.appendChild(row);
-    document.body.appendChild(viewCard);
-  }
   function openingFlash() {
     flash("YOU ARE THE SHARK", "eat to live, chain meals for a frenzy, become the MEGALODON");
   }
@@ -1718,12 +1676,15 @@
     // stayed false and the first capture run photographed the card over every
     // frame. The belt is the repo's own tooling grammar: every tool pins
     // ?seed= or stages ?cfg_ flags, and no player types either.
-    const toolRun = (typeof navigator !== "undefined" && navigator.webdriver) ||
-      /[?&](seed=|cfg_)/.test(location.search);
+    // THE VIEW IS NOT A GATE. A first-run "PICK YOUR VIEW" card used to stand
+    // between launch and the water (CrazyGames: "land directly in gameplay").
+    // Chase is the default; a saved or staged choice still applies, and the
+    // pause Settings panel (CBZ.sharkSimViewSet) and [V] still change it.
     const pv = viewPref() || (CFG.SHARK_VIEW === "eye" || CFG.SHARK_VIEW === "chase" ? CFG.SHARK_VIEW : null);
-    if (pv) { viewApply(pv); openingFlash(); }
-    else if (toolRun) { viewApply("chase"); openingFlash(); }
-    else viewChooser();
+    viewApply(pv || "chase");
+    // the launch intro (modes/shark_title.js) already owns the screen with the
+    // wordmark and the controls; a banner on top of it would be a second one
+    if (!(CBZ.sharkIntroActive && CBZ.sharkIntroActive() && sim.match <= 1)) openingFlash();
   }
 
   function teardown() {

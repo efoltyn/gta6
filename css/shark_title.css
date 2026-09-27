@@ -108,3 +108,42 @@ body.mode-sharksim.state-playing #topright #sharkScore{display:flex;}
 #sharkStarve{position:fixed; inset:0; pointer-events:none; z-index:44; opacity:0;
   box-shadow:inset 0 0 70px 14px rgba(190,10,20,.8), inset 0 0 160px 20px rgba(120,0,10,.35);}
 body:not(.mode-sharksim) #sharkStarve, body:not(.state-playing) #sharkStarve{display:none;}
+
+/* ---- THE BOOT SCREEN (index.html marks html.boot-sharksim before paint) ----
+   The first pixel of a shark page is the sea: no Cell Block Z card, no hub.
+   Pure CSS so it paints before a single game script has parsed. */
+html.boot-sharksim #title .card-box{display:none !important;}
+html.boot-sharksim #title{background:transparent !important;}
+#sharkBoot{position:fixed; inset:0; z-index:2147483600; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px;
+  background:
+    radial-gradient(120% 70% at 50% -10%, rgba(120,200,235,.55) 0%, rgba(40,120,170,0) 60%),
+    linear-gradient(180deg, #1b6d96 0%, #0d4a70 38%, #062b48 72%, #03182b 100%);
+  transition:opacity .8s ease; pointer-events:none;}
+#sharkBoot::before{content:""; position:absolute; inset:-10%; opacity:.35;
+  background:repeating-linear-gradient(100deg, rgba(255,255,255,0) 0 38px, rgba(190,235,255,.10) 38px 52px, rgba(255,255,255,0) 52px 120px);
+  -webkit-mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.4) 45%,transparent 75%); mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.4) 45%,transparent 75%);
+  animation:sharkBootRays 9s linear infinite alternate;}
+@keyframes sharkBootRays{from{transform:translateX(-60px)} to{transform:translateX(60px)}}
+#sharkBoot .sb-mark{position:relative; font-family:'Fredoka','Arial Black',Arial,sans-serif; font-weight:700; color:#fff;
+  font-size:clamp(56px,13.5vw,168px); line-height:.86; letter-spacing:-.045em; text-shadow:0 5px 0 #08344b, 0 10px 28px rgba(2,24,40,.85);}
+#sharkBoot .sb-bar{position:relative; width:min(260px,52vw); height:3px; border-radius:2px; background:rgba(255,255,255,.18); overflow:hidden;}
+#sharkBoot .sb-bar i{position:absolute; left:0; top:0; bottom:0; width:38%; border-radius:2px; background:#ff8c2f; animation:sharkBootBar 1.3s ease-in-out infinite;}
+@keyframes sharkBootBar{0%{transform:translateX(-100%)} 100%{transform:translateX(270%)}}
+#sharkBoot.gone{opacity:0;}
+
+/* ---- THE INTRO, OVER LIVE PLAY (modes/shark_title.js) ---------------------
+   The wordmark and one line of controls sit over the running game for the
+   first seconds and leave on the first input. No separate sequence. */
+#sharkIntro{position:fixed; inset:0; z-index:47; pointer-events:none; display:flex; flex-direction:column; align-items:center; justify-content:space-between;
+  padding:max(20px,5vh) 4vw max(92px,14vh); opacity:0; transition:opacity .7s ease;
+  background:linear-gradient(to bottom, rgba(3,20,36,.45) 0%, rgba(3,20,36,0) 30%, rgba(3,20,36,0) 72%, rgba(3,20,36,.35) 100%);}
+#sharkIntro.on{opacity:1;}
+#sharkIntro .si-mark{font-family:'Fredoka','Arial Black',Arial,sans-serif; font-weight:700; color:#fff; font-size:clamp(44px,9vw,112px); line-height:.86; letter-spacing:-.045em;
+  text-shadow:0 5px 0 #08344b, 0 10px 28px rgba(2,24,40,.85); text-align:center;}
+#sharkIntro .si-tag{margin-top:10px; text-align:center; font-weight:600; letter-spacing:.3em; text-indent:.3em; text-transform:uppercase; font-size:clamp(11px,1.4vw,15px); color:#dbeeff; text-shadow:0 2px 8px rgba(2,24,40,.9);}
+#sharkIntro .si-keys{display:flex; flex-wrap:wrap; justify-content:center; gap:8px 20px; font-size:clamp(12px,1.35vw,15px); font-weight:600; color:#e6f1fa; text-shadow:0 1px 4px rgba(0,0,0,.8);}
+#sharkIntro .si-keys span{display:inline-flex; align-items:center; gap:6px;}
+#sharkIntro kbd{font:inherit; font-weight:700; font-size:.9em; color:#08344b; background:#fff; border-radius:6px; padding:2px 7px; box-shadow:0 2px 0 #9fb8c9;}
+#sharkIntro .si-keys .si-touch{display:none;}
+body.touch #sharkIntro .si-keys .si-kbd{display:none;}
+body.touch #sharkIntro .si-keys .si-touch{display:inline-flex;}

@@ -25,6 +25,19 @@
 <link rel="stylesheet" href="css/interact_touch.css?v=hudtidy1">
 </head>
 <body class="campaign-build">
+<script>
+/* SHARK SIM FIRST PIXEL. The static title markup below is Cell Block Z's card,
+   and it painted for the whole script parse (15-20 s on a loaded machine)
+   before state.js could apply mode-sharksim: CrazyGames rejected the build for
+   "a quick shot of another game at the start". A shark page marks <html>
+   here, before any of that markup paints; css/shark_title.css hides the card
+   and puts up the ocean boot screen, and modes/shark_title.js takes it down
+   once the live sea is on screen. */
+(function(){try{var m=(window.CBZ&&CBZ.START_MODE)||new URLSearchParams(location.search).get("mode");
+if(m==="sharksim"){document.documentElement.classList.add("boot-sharksim");
+var b=document.createElement("div");b.id="sharkBoot";b.innerHTML='<div class="sb-mark">SHARK SIM</div><div class="sb-bar"><i></i></div>';
+document.body.appendChild(b);}}catch(e){}})();
+</script>
 <div id="game"></div>
 
 <!-- HUD -->
