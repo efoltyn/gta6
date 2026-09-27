@@ -1183,6 +1183,7 @@
     }, {
       wound: { nx: w.nx, nz: w.nz, floor: initFloor || 0 },
       preShudder: PRESHUDDER,
+      mode: rec.controlled ? "pancake" : undefined,
       onSwap: function () { hideReal(rec); },
       onGround: function () { finishCollapse(rec, false); },
       onDone: function () {
@@ -1227,6 +1228,12 @@
     if (rec.stage >= STAGE.COLLAPSING) return false;
     if (opts && opts.by) rec.by = opts.by;
     if (opts && opts.byPlayer) rec.byPlayer = true;   // credit vs blame — see hit()
+    /* A CONTROLLED DEMOLITION (city/plots.js: the owner's contractor). Charges
+       at the base, so the frame pancakes straight down into its own footprint
+       instead of hinging across the street, and the debris field stays inside
+       the lot the owner paid to clear: nobody on the sidewalk is buried by a
+       job that was cordoned and legal. */
+    if (opts && opts.controlled) rec.controlled = true;
     if (!collapsible(lot)) return false;
     beginCollapse(rec, 0);
     return true;
@@ -1392,7 +1399,7 @@
          not. Every death goes through the shared kill bus (CLAUDE.md) — this
          file never toasts a death itself. */
       try {
-        const reach = Math.max(b.w, b.d) * 0.6 + (b.h || 12) * 0.35;
+        const reach = rec.controlled ? Math.max(b.w, b.d) * 0.55 + 1 : Math.max(b.w, b.d) * 0.6 + (b.h || 12) * 0.35;
         const cause = "buried in the collapse";
         if (CBZ.cityCrowdCircleKill) {
           CBZ.cityCrowdCircleKill(b.ox, b.oz, reach, { quiet: true, fromX: b.ox, fromZ: b.oz, noCrime: !rec.byPlayer });

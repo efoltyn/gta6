@@ -31,8 +31,18 @@
     // fallback already returns 1.0 for an unlisted type, so the rate reads
     // as a deliberate design choice here, not an accidental default.
     wood: { melee: 1.0, bullet: 0.35, explosive: 4.0, vehicle: 2.0, decay: 1.0 },
-    // stone: { melee: 0.6,  bullet: 0.20, explosive: 2.5, vehicle: 1.4 },  // B-later material tier
-    // metal: { melee: 0.35, bullet: 0.12, explosive: 1.6, vehicle: 0.9 }, // B-later material tier
+    // CITY COMPOUND tiers (city/compoundkit.js stamps piece.tier). Numbers are
+    // read against crashfx.js's blast (70 * power * falloff, C4 power 1.4 ~ 98
+    // raw at the charge) and fpsmode.js's bullets (raw = the weapon's damage):
+    //   concrete: a 520 hp wall section eats ~2 C4 charges; a rifle round
+    //             chips 0.6 hp, so bullets barely scratch it (~900 rounds).
+    //   brick:    a little softer than cast concrete, same story.
+    //   steel:    the gate/doors: bullets spark off (0.05), C4 still opens it.
+    //   fence:    chain-link: cheap to cut through, cars flatten it.
+    concrete: { melee: 0.03, bullet: 0.02, explosive: 2.6, vehicle: 0.35, decay: 1.0 },
+    brick:    { melee: 0.05, bullet: 0.035, explosive: 3.0, vehicle: 0.5, decay: 1.0 },
+    steel:    { melee: 0.04, bullet: 0.05, explosive: 2.2, vehicle: 0.45, decay: 1.0 },
+    fence:    { melee: 0.8, bullet: 0.2, explosive: 5.0, vehicle: 4.0, decay: 1.0 },
   };
   function tierOf(piece) { return (piece.tier != null && TIERS[piece.tier]) ? piece.tier : "wood"; }
   function multFor(piece, type) {
@@ -74,7 +84,12 @@
         // the wood catalog today, but handle it defensively rather than
         // silently skipping a piece that grows one later.
         const mats = Array.isArray(o.material) ? o.material : [o.material];
+        // glow/beam materials the compound kit animates globally (floodlight
+        // heads, light cones) opt out: a cloned beam would stop following the
+        // night, and darkening light is not what damage looks like.
+        if (mats.every(function (m) { return m.userData && m.userData.noTint; })) return;
         const clones = mats.map(function (m) {
+          if (m.userData && m.userData.noTint) return m;
           const c = m.clone();
           c._shared = false; // OURS to mutate/dispose — not the cmat() cache (pieces.js's
                               // teardownBatch only disposes non-_shared materials, so this
@@ -83,6 +98,7 @@
         });
         o.material = Array.isArray(o.material) ? clones : clones[0];
         for (let i = 0; i < clones.length; i++) {
+          if (clones[i].userData && clones[i].userData.noTint) continue;
           st.entries.push({ mesh: o, mat: clones[i], baseHex: clones[i].color ? clones[i].color.getHex() : 0xffffff });
         }
       });

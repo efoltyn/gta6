@@ -274,6 +274,7 @@
     for (let i = 0; i < SCAN; i++) {
       const u = free[i];
       if (!u || u.occupants.length) continue;     // (compacted lazily below)
+      if (u.lot && u.lot.demolished) continue;   // nobody leases a flat in a pile of rubble
       if (cheapest == null) { cheapest = u; cheapestI = i; }
       const within = u.rent <= budget;
       const afford = within ? (1 - (u.rent / Math.max(1, budget)) * 0.35) : Math.max(0, 0.5 - (u.rent - budget) / Math.max(1, budget));
@@ -289,7 +290,7 @@
       // free pool exhausted in the scan window → take any still-free unit, then
       // (true worst case) re-lease the least-occupied; never returns null so a
       // ped always has an address.
-      for (let i = 0; i < c.units.length; i++) { if (!c.units[i].occupants.length) { pick = c.units[i]; break; } }
+      for (let i = 0; i < c.units.length; i++) { if (!c.units[i].occupants.length && !(c.units[i].lot && c.units[i].lot.demolished)) { pick = c.units[i]; break; } }
       pick = pick || c.units[(rng() * c.units.length) | 0];
       pickI = -1;
     }
@@ -370,6 +371,10 @@
     if (!ENABLED()) return null;
     const c = ensure();
     if (!c) return null;
+    // THE BUILDING CAME DOWN (a war, a plane, or an owner who knocked it down
+    // to build on the lot): the lease died with it, he finds a new place.
+    if (ped && ped._unit && ped._unit.lot && ped._unit.lot.demolished) { release(ped); ped._digs = null; }
+    else if (ped && ped._digs && ped._digs.demolished) ped._digs = null;
     // still-live lease wins (the persistent bond — same door every day). Any
     // seat in the unit counts (primary lessee OR a household-mate seated via
     // cityHouseholdJoin) — both read the same door/floor.
