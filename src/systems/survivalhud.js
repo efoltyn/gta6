@@ -189,7 +189,10 @@
       "#survRound .chip.safe{background:#1f9a55;color:#eafff2}#survRound .chip.bad{background:#c8322a;color:#fff1ee;animation:survPulse 1s ease-in-out infinite}" +
       "@keyframes survPulse{50%{opacity:.62}}" +
       "#survRound.slim .box{padding:6px 12px 8px}#survRound.slim .n,#survRound.slim .tip{display:none}#survRound.slim .nm{font-size:clamp(17px,2.8vw,22px);margin:0}#survRound.slim .row{margin-top:5px}" +
-      "#survRound.won .nm{color:#7dffb0}#survRound.won .fuse,#survRound.won .sec,#survRound.won .chip{display:none}";
+      "#survRound.won .nm{color:#7dffb0}#survRound.won .fuse,#survRound.won .sec,#survRound.won .chip{display:none}" +
+      // phones / portrait iPad: the alive + clock pills own the top-right
+      // corner, so the card drops below them instead of sliding under
+      "@media (max-width:820px){#survRound{top:calc(max(14px,env(safe-area-inset-top)) + 56px)}}";
     document.head.appendChild(st);
     card = document.createElement("div");
     card.id = "survRound";
