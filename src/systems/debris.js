@@ -503,6 +503,7 @@
 
   /* ================= piece build ========================================= */
   function buildPiece(cell, mats, coreSlot) {
+    if (!isFinite(cell.cx) || !isFinite(cell.cy) || !isFinite(cell.cz)) { cell.cx = cell.cy = cell.cz = 0; }
     const t = cell.t, cx = cell.cx, cy = cell.cy, cz = cell.cz;
     const nv = t.length / S;
     // order by slot so each material is one contiguous group
@@ -530,6 +531,7 @@
       geo.addGroup(start * 1, (w - start), matList.length);
       matList.push(slot === coreSlot ? coreMat() : mats[slot]);
     }
+    for (let i = 0; i < P.length; i++) if (!isFinite(P[i])) return null;
     geo.setAttribute("position", new THREE.BufferAttribute(P, 3));
     geo.setAttribute("normal", new THREE.BufferAttribute(N, 3));
     geo.setAttribute("uv", new THREE.BufferAttribute(U, 2));
@@ -707,7 +709,7 @@
     if (b.quiet > 0.25) return 1;
     if (b.t > b.maxLife && b.contact) return 1;
     if (b.t > b.maxLife + 5) return 1;
-    if (p.y < -60) return 2;
+    if (p.y < -60 || !isFinite(p.x) || !isFinite(p.y) || !isFinite(p.z)) return 2;
     return 0;
     function applyImpulse(b, jx, jy, jz) {
       b.v.x += jx * b.invM; b.v.y += jy * b.invM; b.v.z += jz * b.invM;
@@ -1079,6 +1081,13 @@
       const slotOf = (m) => { let s = slotMap.get(m); if (s == null) { s = mats.length; mats.push(m); slotMap.set(m, s); } return s; };
       const comps = [];               // {t, kind, mat}
       const pushComps = (tris, obj, mat, convex) => {
+        // drop any triangle carrying a non-finite value (a degenerate source
+        // must never poison a piece or the merged rubble)
+        for (let i = 0; i < tris.length; i += 3 * S) {
+          let ok = true;
+          for (let k = 0; k < 3 * S && ok; k++) if (!isFinite(tris[i + k])) ok = false;
+          if (!ok) { tris.splice(i, 3 * S); i -= 3 * S; }
+        }
         if (!tris.length) return;
         fixNormals(tris);
         const parts = (convex || o.whole === "one") ? [tris] : components(tris);
@@ -1124,8 +1133,9 @@
       }
       comps.sort((a, b) => b.V - a.V);
       const totalV = comps.reduce((s, c) => s + c.V, 0) || 1;
-      const at = o.at || null;
-      const dir = o.dir ? _tmp.set(o.dir.x || 0, o.dir.y || 0, o.dir.z || 0) : null;
+      const fin = (v) => v && isFinite(v.x) && isFinite(v.y == null ? 0 : v.y) && isFinite(v.z);
+      const at = fin(o.at) ? o.at : null;
+      const dir = fin(o.dir) ? _tmp.set(o.dir.x || 0, o.dir.y || 0, o.dir.z || 0) : null;
       const dirV = dir && dir.lengthSq() > 1e-6 ? dir.clone().normalize() : null;
       let gritBudget = 0, dustDone = 0;
       const cells = [];
@@ -1186,6 +1196,7 @@
         if (k.bend && !cell.stump) bendCell(cell, rr(0.05, 0.3) * (cell.axis != null ? 0.6 : 1));
         const cm = c.flat ? mats.map(doubleSided) : mats;
         const piece = buildPiece(cell, cm, coreSlot);
+        if (!piece) continue;
         piece.mesh.castShadow = !PHONE && cell.V > 0.004;
         piece.mesh.receiveShadow = true;
         if ((cell.stump && o.anchorStump !== false) || cell.keep) {
@@ -1218,8 +1229,10 @@
           body.w.set(rr(-1, 1), rr(-1, 1), rr(-1, 1)).multiplyScalar(rr(2, 9) * power / Math.max(0.3, Math.sqrt(piece.radius * 3)));
         }
         if (o.launch === false) body.v.set(0, 0, 0), body.w.set(0, 0, 0);
-        if (o.velocity) body.v.add(o.velocity);
-        if (o.angular) body.w.add(o.angular);
+        if (fin(o.velocity)) body.v.add(o.velocity);
+        if (fin(o.angular)) body.w.add(o.angular);
+        if (!isFinite(body.v.x + body.v.y + body.v.z)) body.v.set(0, 0, 0);
+        if (!isFinite(body.w.x + body.w.y + body.w.z)) body.w.set(0, 0, 0);
         if (o.maxLife) body.maxLife = o.maxLife;
         if (out.bodies) out.bodies.push(body.mesh);
       }
@@ -1297,6 +1310,7 @@
       const root = o.root || CBZ.scene;
       for (const it of all) {
         const piece = buildPiece(it.cell, it.mats, it.coreSlot);
+        if (!piece) continue;
         const m = piece.mesh;
         // random attitude: mostly lying flat, some on edge
         _e.set(rr(-0.7, 0.7), rng() * 6.283, rr(-0.7, 0.7)); m.quaternion.setFromEuler(_e);
