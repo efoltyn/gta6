@@ -190,13 +190,18 @@
       const bm = bump(z), ws = waist(z);
       const hwLow = hwP + (S.bulge || 0) * bm - (S.tuck || 0) * ws * (1 - Math.min(1, bm));
       const hwS = hwP - (S.beltIn != null ? S.beltIn : 0.03) + (S.bulge || 0) * 0.45 * bm - (S.tuck || 0) * 0.4 * ws;
-      const ye = yEdge(z);
+      // FENDER PEAKS: over the front wheel the hood EDGE rises and the hood
+      // centre sinks, so the lid lies in a valley between two crisp fender
+      // ridges (every sports car, most modern sedans). Fades out behind the
+      // cowl so the windscreen base and the belt stay where the spec put them.
+      const fpw = (S.fenderPeak || 0) * Math.exp(-Math.pow((z - zF) / (Ra * 1.5), 2)) * sstep((z - S.zCowl + 0.25) / 0.35);
+      const ye = yEdge(z) + fpw;
       const yS = ye - (S.shoulderDrop != null ? S.shoulderDrop : 0.035);
       const yb = yBfn(z);
       const xG0 = Math.max(0.2, hwS - (S.shoulderIn != null ? S.shoulderIn : 0.035));
       // crown over the hood ahead of the cowl, over the deck behind the deck line
       const tC = sstep((z - S.zDeck) / Math.max(0.1, S.zCowl - S.zDeck));
-      const crown = lerp(crownD, crownH, tC);
+      const crown = lerp(crownD, crownH, tC) - fpw * 1.5;
       const top = (x) => ye + crown * (1 - Math.pow(Math.min(1, x / xG0), 2));
       const g = gFn(z);
       const yR0 = yRoofFn(z);
@@ -213,10 +218,16 @@
       pts[P.Lip] = [hwLow - lerp(0.06, 0.018, aAmt), base];
       pts[P.R] = [hwLow - lerp(0.024, 0.0, aAmt), base + lerp(0.10, 0.045, aAmt)];
       const span = Math.max(0.05, yS - yb);
-      const yFr = yb + 0.40 * span, yMr = yb + 0.74 * span;
+      const yFr = yb + 0.40 * span, yMr = yb + (S.charY != null ? S.charY : 0.72) * span;
       const remap = (y) => inArch ? base + (y - yb) / span * (yS - base) : y;
       pts[P.F] = [hwLow, Math.max(remap(yFr), pts[P.R][1] + 0.02)];
-      pts[P.M] = [hwLow - 0.012 - Math.max(0, hwLow - hwS) * 0.4, Math.max(remap(yMr), pts[P.F][1] + 0.02)];
+      // CHARACTER LINE at M: the point stands a few mm PROUD of the lower
+      // flank and the band above it tumbles in to the shoulder, so the flank
+      // breaks light along one crisp line (lit above, a shade darker below)
+      // instead of one soft barrel from rocker to belt. Its own smoothing
+      // group (cellGroup 9) keeps the break sharp.
+      const cl = S.charLine != null ? S.charLine : 0.006;
+      pts[P.M] = [hwLow + cl, Math.max(remap(yMr), pts[P.F][1] + 0.02)];
       pts[P.S] = [hwS, yS];
       pts[P.G0] = [xG0, ye];
       // greenhouse: lerp(surface under it, roof), per point
@@ -379,7 +390,8 @@
     function cellGroup(s, b) {
       const zc = (zs[s] + zs[s + 1]) / 2;
       if (b <= 3) return b;
-      if (b <= 6) return 4;
+      if (b <= 5) return 4;
+      if (b === 6) return S.flat ? 4 : 9;              // above the character line
       if (b === 7) return 5;
       const reg = zc < zDeck ? 0 : zc < zCowl ? 1 : 2;
       return 6 + reg;
@@ -484,7 +496,12 @@
 
     // pass 4: DOORS — leaves re-sampled from the same section, and jambs on the hole
     const doorOut = [];
-    const SHUT = 0.004, T = S.doorThick || 0.07, J = S.jamb || 0.09;
+    /* SHUT LINES THAT READ. The leaf is inset 6 mm from the hole on every
+       edge, and everything you see down that gap is BLACK: the body's jamb
+       walls are the aperture's rubber weatherstrip (trim), the leaf's own
+       rims are the door's dark inner flange. The old 4 mm gap looked into
+       painted jambs lit like the skin, so from five metres it vanished. */
+    const SHUT = S.shut != null ? S.shut : 0.006, T = S.doorThick || 0.07, J = S.jamb || 0.09;
     const floorY = S.floorY != null ? S.floorY : S.yB + 0.15;
     for (let di = 0; di < doors.length; di++) {
       const d = doors[di], side = d.side;
@@ -492,7 +509,7 @@
       const sIdx = [];
       for (let s = 0; s < NS; s++) if (zs[s] >= d.z0 - 1e-6 && zs[s] <= d.z1 + 1e-6) sIdx.push(s);
       // -- body jambs around the hole
-      const J1 = acc.paint;
+      const J1 = acc.trim;
       const zc = (d.z0 + d.z1) / 2;
       const cs = SH.section(zc);
       const hc = [side * (cs.pts[P.S][0] - J * 0.5), (cs.pts[P.R][1] + cs.pts[P.G1][1]) / 2, zc];
@@ -515,6 +532,18 @@
         const c = V(s0, P.G1, side), dd = V(s1, P.G1, side);
         quadToward(J1, c, dd, inw(dd), inw(c), [c[0], c[1] - 1, c[2]]);
       }
+      // BACKING behind the vertical shut lines: a black flange at the jamb's
+      // depth, 3 cm into the opening, so looking straight into the gap finds
+      // the pillar's seal and not the lit cabin (at the B-pillar, where two
+      // doors meet, the gap otherwise shows the seat belt and the headliner)
+      [[d.z0, 1], [d.z1, -1]].forEach(function (e) {
+        const s = e[0] === d.z0 ? sIdx[0] : sIdx[sIdx.length - 1];
+        for (let p = P.R; p < P.G1; p++) {
+          const a = inw(V(s, p, side)), b = inw(V(s, p + 1, side));
+          const a2 = [a[0], a[1], a[2] + e[1] * 0.03], b2 = [b[0], b[1], b[2] + e[1] * 0.03];
+          quadDir(acc.trim, a, b, b2, a2, [side, 0, 0]);
+        }
+      });
       // -- the leaf
       const lz = [d.z0 + SHUT];
       for (const s of sIdx) if (zs[s] > d.z0 + SHUT + 0.01 && zs[s] < d.z1 - SHUT - 0.01) lz.push(zs[s]);
@@ -536,7 +565,7 @@
       // outer skin, smooth within the door (normals from the body's own groups)
       const lN = new Map();
       const lkey = (k, p, gid) => (k * NP + p) * 16 + gid;
-      const lgid = (b) => (b <= 6 ? 4 : b === 7 ? 5 : 6);
+      const lgid = (b) => (b <= 5 ? 4 : b === 6 ? 9 : b === 7 ? 5 : 6);
       for (let pass = 0; pass < 2; pass++) {
         for (let k = 0; k + 1 < lz.length; k++) {
           for (let b = P.R; b < P.G1; b++) {
@@ -585,12 +614,12 @@
         for (let p = P.R; p < P.G0b; p++) {
           const a = LV(e[0], p), b = LV(e[0], p + 1);
           const t = p < P.G0 ? T : 0.022;
-          quadDir(la.paint, a, b, LV(e[0], p + 1, t), LV(e[0], p, t), e[1]);
+          quadDir(la.dark, a, b, LV(e[0], p + 1, t), LV(e[0], p, t), e[1]);
         }
       });
       for (let k = 0; k < kL; k++) {
         const a = LV(k, P.R), b = LV(k + 1, P.R);
-        quadDir(la.paint, a, b, LV(k + 1, P.R, T), LV(k, P.R, T), [0, -1, 0]);
+        quadDir(la.dark, a, b, LV(k + 1, P.R, T), LV(k, P.R, T), [0, -1, 0]);
         const c = LV(k, P.G0b), dd = LV(k + 1, P.G0b);
         quadDir(la.dark, c, dd, LV(k + 1, P.G0b, 0.022), LV(k, P.G0b, 0.022), [0, 1, 0]);
       }
@@ -609,7 +638,10 @@
           // skin x at that height: between M and S
           const M = sc.pts[P.M], Sx = sc.pts[P.S];
           const u = clamp((y - M[1]) / Math.max(1e-3, Sx[1] - M[1]), 0, 1);
-          return { x: side * lerp(M[0], Sx[0], u), y: y, z: z };
+          // lean of the skin there (radians, + = top tucked in): the handle
+          // lies ON the panel instead of standing square off a sloped skin
+          const tilt = Math.atan2(M[0] - Sx[0], Math.max(1e-3, Sx[1] - M[1]));
+          return { x: side * lerp(M[0], Sx[0], u), y: y, z: z, tilt: tilt };
         })(),
       });
     }
@@ -644,11 +676,288 @@
       });
     }
 
+    // pass 6: PANEL DETAIL — shut lines, cowl, wipers, antenna (trim bucket)
+    if (S.details !== false) addDetails(S, SH, acc.trim, doors, zs);
+
     const geos = {};
     for (const k in acc) geos[k] = acc[k].geo();
     const out = { geos: geos, doors: doorOut, section: SH.section, shape: SH, stations: zs, secs: secs };
     CBZ.carBody.last = out;          // the most recent loft (node checks / debugging)
     return out;
+  }
+
+  /* ---- PANEL DETAIL ------------------------------------------------------
+     A real car is read as much by its SEAMS as by its silhouette: the hood
+     shut line, the bumper cover meeting the fender, the boot or tailgate cut,
+     the fuel flap, a dark cowl grille under the windscreen with two wipers
+     parked on it, a shark fin on the roof. All of it is thin dark geometry
+     laid ON the skin (a few mm proud, normals copied from the surface so it
+     shades with the panel) and pushed into the trim bucket the shell already
+     draws — zero extra draw calls. The skin is sampled from the SAME section
+     function, so every line follows the real curvature.
+
+     spec knobs: rearLid 'boot' | 'gate' | 'engine' | null, antenna (bool),
+     fuelFlap (bool), wipers (bool), hoodLip (m, hood front edge from the nose) */
+  // y of the upper surface (hood / deck / roof / glass) at |x|
+  function upperY(sc, x) {
+    const p = sc.pts, ax = Math.abs(x);
+    if (ax >= p[P.G0][0]) return p[P.G0][1];
+    for (let i = P.G0; i < P.RC; i++) {
+      const a = p[i], b = p[i + 1];
+      if (ax <= a[0] + 1e-9 && ax >= b[0] - 1e-9) {
+        const t = (a[0] - b[0]) > 1e-9 ? (a[0] - ax) / (a[0] - b[0]) : 0;
+        return lerp(a[1], b[1], t);
+      }
+    }
+    return p[P.RC][1];
+  }
+  function addDetails(S, SH, out, doors, zs) {
+    const sec = SH.section;
+    const zN = SH.zN, zT = SH.zT, zF = SH.zF, zR = SH.zR, Ra = SH.Ra;
+    const OFF = 0.0025, SEAM = 0.007;
+    // outer x of the flank at height y (Lip..G0 chain), -1 when off it
+    function sideX(sc, y) {
+      const p = sc.pts; let xo = -1;
+      for (let i = P.Lip; i < P.G0; i++) {
+        const a = p[i], b = p[i + 1];
+        if ((a[1] - y) * (b[1] - y) <= 0 && a[1] !== b[1]) xo = Math.max(xo, lerp(a[0], b[0], (y - a[1]) / (b[1] - a[1])));
+      }
+      return xo;
+    }
+    const h = 0.01;
+    function topPt(x, z) {
+      const y = upperY(sec(z), x);
+      const dx = (upperY(sec(z), x + h) - upperY(sec(z), x - h)) / (2 * h);
+      const dz = (upperY(sec(z + h), x) - upperY(sec(z - h), x)) / (2 * h);
+      const n = [-dx, 1, -dz], l = Math.hypot(n[0], n[1], n[2]);
+      return { p: [x, y, z], n: [n[0] / l, n[1] / l, n[2] / l] };
+    }
+    function sidePt(side, y, z) {
+      const x = sideX(sec(z), y);
+      if (x < 0) return null;
+      const xy = (sideX(sec(z), y + h) - sideX(sec(z), y - h)) / (2 * h);
+      const xz = (sideX(sec(z + h), y) - sideX(sec(z - h), y)) / (2 * h);
+      const n = [side, -xy, -xz], l = Math.hypot(n[0], n[1], n[2]);
+      return { p: [side * x, y, z], n: [n[0] / l, n[1] / l, n[2] / l] };
+    }
+    const facePt = (x, y, z, dz) => ({ p: [x, y, z], n: [0, 0, dz] });
+    // a thin strip along a path of surface samples, lifted OFF along the normal
+    function strip(path, w, closed) {
+      path = path.filter(Boolean);
+      const n = path.length;
+      if (n < 2) return;
+      const L = [], R = [];
+      for (let i = 0; i < n; i++) {
+        const a = path[closed ? (i - 1 + n) % n : Math.max(0, i - 1)].p, b = path[closed ? (i + 1) % n : Math.min(n - 1, i + 1)].p;
+        const t = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        const N = path[i].n;
+        let bn = [N[1] * t[2] - N[2] * t[1], N[2] * t[0] - N[0] * t[2], N[0] * t[1] - N[1] * t[0]];
+        const bl = Math.hypot(bn[0], bn[1], bn[2]) || 1;
+        bn = bn.map((v) => v / bl * w / 2);
+        const c = path[i].p.map((v, k) => v + N[k] * OFF);
+        L.push([c[0] + bn[0], c[1] + bn[1], c[2] + bn[2]]);
+        R.push([c[0] - bn[0], c[1] - bn[1], c[2] - bn[2]]);
+      }
+      const segs = closed ? n : n - 1;
+      for (let i = 0; i < segs; i++) {
+        const j = (i + 1) % n;
+        const Nn = path[i].n, Nj = path[j].n;
+        const a = L[i], b = R[i], c = R[j], d = L[j];
+        const f = faceN(a, b, c);
+        if (f[0] * Nn[0] + f[1] * Nn[1] + f[2] * Nn[2] >= 0) { out.tri(a, b, c, Nn, Nn, Nj); out.tri(a, c, d, Nn, Nj, Nj); }
+        else { out.tri(a, c, b, Nn, Nj, Nn); out.tri(a, d, c, Nn, Nj, Nj); }
+      }
+    }
+    // a beam (box) from a to b with its height along `up` — wipers
+    function beam(a, b, up, w, hh) {
+      const t = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+      let s = [t[1] * up[2] - t[2] * up[1], t[2] * up[0] - t[0] * up[2], t[0] * up[1] - t[1] * up[0]];
+      const sl = Math.hypot(s[0], s[1], s[2]) || 1; s = s.map((v) => v / sl * w / 2);
+      const u = up.map((v) => v * hh);
+      const c = [];
+      for (const e of [a, b]) for (const k of [[-1, 0], [1, 0], [1, 1], [-1, 1]]) c.push([e[0] + s[0] * k[0] + u[0] * k[1], e[1] + s[1] * k[0] + u[1] * k[1], e[2] + s[2] * k[0] + u[2] * k[1]]);
+      const ctr = [(a[0] + b[0]) / 2 + u[0] / 2, (a[1] + b[1]) / 2 + u[1] / 2, (a[2] + b[2]) / 2 + u[2] / 2];
+      const away = (q) => [2 * q[0] - ctr[0], 2 * q[1] - ctr[1], 2 * q[2] - ctr[2]];
+      const Q = (i, j, k, l) => { const m = [0, 1, 2].map((x) => (c[i][x] + c[k][x]) / 2); quadToward(out, c[i], c[j], c[k], c[l], away(m)); };
+      Q(3, 2, 6, 7); Q(0, 3, 7, 4); Q(1, 5, 6, 2); Q(0, 4, 5, 1); Q(0, 1, 2, 3); Q(4, 7, 6, 5);
+    }
+    const nSeg = (a, b, step) => Math.max(2, Math.ceil(Math.abs(b - a) / step));
+    const range = (a, b, step) => { const n = nSeg(a, b, step), o = []; for (let i = 0; i <= n; i++) o.push(lerp(a, b, i / n)); return o; };
+    // along z: the loft stations inside (a, b) plus fill, so a seam runs on
+    // the body's own chords instead of diving under them where it is concave
+    const zRange = (a, b, step) => {
+      const lo = Math.min(a, b), hi = Math.max(a, b);
+      const k = zs.filter((z) => z > lo + 0.01 && z < hi - 0.01).concat(range(lo, hi, step)).sort((p, q) => p - q);
+      const o = [];
+      k.forEach((z) => { if (!o.length || z - o[o.length - 1] > 0.012 || z === hi) o.push(z); });
+      return a > b ? o.reverse() : o;
+    };
+    const glassFree = (z) => sec(z).g < 0.02;
+
+    // -- HOOD (or front lid): two lines inboard of the fender ridges and one
+    //    across, where the lid meets the bumper cover
+    const hoodLip = S.hoodLip != null ? S.hoodLip : Math.max(0.09, S.rcNose * 0.4);
+    const zH0 = S.zCowl + (S.cowlDepth != null ? S.cowlDepth : 0.09), zH1 = zN - hoodLip;
+    if (zH1 - zH0 > 0.25) {
+      const xh = (z) => sec(z).xG0 * 0.9;
+      [1, -1].forEach((sd) => strip(zRange(zH0, zH1, 0.08).map((z) => topPt(sd * xh(z), z)), SEAM));
+      const x1 = xh(zH1);
+      strip(range(-x1, x1, 0.08).map((x) => topPt(x, zH1)), SEAM);
+      // -- COWL: the dark grille panel between the hood's rear edge and the
+      //    windscreen, the full width of the glass
+      const xc = sec(S.zCowl + 0.01).xG0 * 0.93, zc0 = S.zCowl + 0.006, zc1 = zH0 - 0.004;
+      const xs = range(-xc, xc, 0.1);
+      for (let i = 0; i + 1 < xs.length; i++) {
+        const A = topPt(xs[i], zc0), B = topPt(xs[i + 1], zc0), C = topPt(xs[i + 1], zc1), D = topPt(xs[i], zc1);
+        const lift = (q) => q.p.map((v, k) => v + q.n[k] * OFF);
+        const a = lift(A), b = lift(B), c = lift(C), d = lift(D);
+        const f = faceN(a, b, c);
+        if (f[1] >= 0) { out.tri(a, b, c, A.n, B.n, C.n); out.tri(a, c, d, A.n, C.n, D.n); }
+        else { out.tri(a, c, b, A.n, C.n, B.n); out.tri(a, d, c, A.n, D.n, C.n); }
+      }
+      // cowl slats: three thin lines across it read as a grille at 5 m
+      for (let k = 1; k <= 2; k++) {
+        const z = lerp(zc0, zc1, k / 3);
+        strip(range(-xc * 0.9, xc * 0.9, 0.1).map((x) => { const q = topPt(x, z); q.p[1] += 0.002; return q; }), 0.004);
+      }
+    }
+
+    // -- WIPERS parked on the base of the windscreen (not on a flat-fronted
+    //    van: its screen starts at the nose)
+    if (S.wipers !== false && S.zCowl - S.zRoofF > 0.3) {
+      const zw = lerp(S.zCowl, S.zRoofF, 0.1);
+      const sc = sec(zw);
+      const sp = clamp(sc.xG0 / 0.74, 0.8, 1.3);
+      const onGlass = (x, z) => { const q = topPt(x, z); return { p: q.p.map((v, k) => v + q.n[k] * 0.012), n: q.n }; };
+      [[0.03, 0.66], [-0.60, -0.08]].forEach(function (span) {
+        const x0 = span[0] * sp, x1 = span[1] * sp;
+        const pts = range(x0, x1, 0.14).map((x) => onGlass(x, zw + 0.03 * Math.pow(Math.abs(x) / (0.7 * sp), 2)));
+        for (let i = 0; i + 1 < pts.length; i++) beam(pts[i].p, pts[i + 1].p, pts[i].n, 0.02, 0.014);
+        // the arm: from its pivot on the cowl up to the blade's middle
+        const pv = topPt(x0 - 0.02 * sp, S.zCowl + 0.04);
+        const mid = pts[Math.floor(pts.length * 0.55)];
+        const pp = pv.p.map((v, k) => v + pv.n[k] * 0.012);
+        beam(pp, [mid.p[0], mid.p[1] + 0.012, mid.p[2]], mid.n, 0.012, 0.012);
+      });
+    }
+
+    // -- REAR LID: boot (wraps onto the tail face), tailgate (the whole back
+    //    face), engine cover (top only)
+    const lid = S.rearLid || null;
+    const secT = sec(zT + 0.002);
+    const lowT = secT.pts[P.R][1];
+    if (lid === "boot" || lid === "gate") {
+      const yl = lerp(lowT, secT.yEdge, lid === "gate" ? 0.36 : 0.58);
+      const xg = Math.max(0.2, sideX(secT, yl) - (lid === "gate" ? 0.05 : 0.09));
+      const zf = zT - 0.0005;
+      const yTop = upperY(secT, xg) - 0.004;
+      strip(range(-xg, xg, 0.1).map((x) => facePt(x, yl, zf, -1)), SEAM);
+      [1, -1].forEach((sd) => strip(range(yl, yTop, 0.08).map((y) => facePt(sd * xg, y, zf, -1)), SEAM));
+      if (lid === "boot" && S.zDeck - zT > 0.2) {
+        [1, -1].forEach((sd) => strip(zRange(zT + 0.004, S.zDeck - 0.03, 0.08).filter(glassFree).map((z) => topPt(sd * Math.min(xg, sec(z).xG0 * 0.92), z)), SEAM));
+      }
+      if (lid === "gate" && S.zRoofR - zT < 0.35 && !S.bed) {
+        // the tailgate's hinge line across the roof's rear edge
+        const zg = S.zRoofR - 0.03, xr = sec(zg).pts[P.G1][0] * 0.94;
+        strip(range(-xr, xr, 0.1).map((x) => topPt(x, zg)), SEAM);
+      }
+    } else if (lid === "engine" && (S.backGlassR != null ? S.backGlassR : S.zDeck) - zT > 0.4) {
+      const zE1 = zT + 0.12, zE0 = (S.backGlassR != null ? S.backGlassR : S.zDeck) - 0.03;
+      const xe = (z) => sec(z).xG0 * 0.82;
+      [1, -1].forEach((sd) => strip(zRange(zE1, zE0, 0.08).map((z) => topPt(sd * xe(z), z)), SEAM));
+      strip(range(-xe(zE1), xe(zE1), 0.08).map((x) => topPt(x, zE1)), SEAM);
+    }
+
+    if (S.flat) return;              // the faceted wedge truck has no bumper covers
+
+    // -- BUMPER COVERS meeting the fenders: up the flank ahead of the front
+    //    arch / behind the rear arch, then along toward the lamps
+    [[1, zF + Ra + 0.10, zN - Math.max(0.06, S.rcNose * 0.5), 0.60],
+     [-1, zR - Ra - 0.10, zT + Math.max(0.06, S.rcTail * 0.5), 0.55]].forEach(function (e) {
+      const end = e[0], zs0 = e[1], zs1 = e[2];
+      if ((zs1 - zs0) * end < 0.12) return;
+      const s0 = sec(zs0);
+      const y0 = s0.pts[P.R][1] + 0.02, y1 = lerp(s0.pts[P.R][1], s0.yEdge, e[3]);
+      [1, -1].forEach(function (sd) {
+        const up = range(y0, y1, 0.06).map((y) => sidePt(sd, y, zs0));
+        const run = zRange(zs0, zs1, 0.06).slice(1).map((z) => sidePt(sd, y1, z));
+        strip(up.concat(run), SEAM * 0.85);
+      });
+    });
+
+    // -- SIDE INTAKE (mid-engine): the black scoop between the door and the
+    //    rear arch that breaks up the tall flat haunch every mid-engine car
+    //    would otherwise show; a wedge, deep at the arch, tapering forward
+    if (S.sideIntake) {
+      const dz = doors.filter((d) => d.row === 0).map((d) => d.z0);
+      const zA = zR + Ra + 0.03, zD = (dz.length ? Math.min.apply(null, dz) : zA + 0.5) - 0.03;
+      if (zD - zA > 0.25) {
+        const sA = sec(zA), sD = sec(zD);
+        const yTopA = sA.pts[P.S][1] - 0.09, yTopD = sD.pts[P.S][1] - 0.13;
+        const yBotA = SH.archY(zA - 0.001) > 0 ? Math.max(sA.pts[P.R][1] + 0.1, SH.archY(zA) + 0.02) : sA.pts[P.R][1] + 0.12;
+        const yBotD = lerp(sD.pts[P.R][1], yTopD, 0.62);
+        /* the patch must lie on the body's OWN chords or it dives under
+           them: its columns sit on the loft's stations and its rows break at
+           the section's F and M points (M, the character line, stands proud;
+           a row straddling it would cut in beneath the crease) */
+        const cols = [zD].concat(zs.filter((z) => z < zD - 0.01 && z > zA + 0.01).reverse(), [zA]);
+        const rowsAt = (z) => {
+          const u = (zD - z) / (zD - zA);
+          const yb = lerp(yBotD, yBotA, u * u), yt = lerp(yTopD, yTopA, u), p = sec(z).pts;
+          const yF = clamp(p[P.F][1], yb, yt), yM = clamp(p[P.M][1], yF, yt);
+          return [yb, lerp(yb, yF, 0.5), yF, lerp(yF, yM, 0.5), yM, lerp(yM, yt, 0.5), yt];
+        };
+        const NU = cols.length - 1, NV = 6;
+        [1, -1].forEach(function (sd) {
+          const G = cols.map((z) => rowsAt(z).map((y) => sidePt(sd, y, z)));
+          for (let i = 0; i < NU; i++) for (let j = 0; j < NV; j++) {
+            const q = [G[i][j], G[i + 1][j], G[i + 1][j + 1], G[i][j + 1]];
+            if (q.some((x) => !x)) continue;
+            if (Math.abs(q[0].p[1] - q[3].p[1]) < 1e-4 && Math.abs(q[1].p[1] - q[2].p[1]) < 1e-4) continue;   // collapsed row
+            const p = q.map((x) => x.p.map((v, k) => v + x.n[k] * OFF * 1.6));
+            const f = faceN(p[0], p[1], p[2]);
+            if (f[0] * sd >= 0) { out.tri(p[0], p[1], p[2], q[0].n, q[1].n, q[2].n); out.tri(p[0], p[2], p[3], q[0].n, q[2].n, q[3].n); }
+            else { out.tri(p[0], p[2], p[1], q[0].n, q[2].n, q[1].n); out.tri(p[0], p[3], p[2], q[0].n, q[3].n, q[2].n); }
+          }
+        });
+      }
+    }
+
+    // -- FUEL FLAP on the left rear quarter, above the arch
+    if (S.fuelFlap !== false) {
+      const zc = zR + 0.06;
+      const sc = sec(zc);
+      const aTop = SH.archY(zc);
+      const yc = Math.min(sc.pts[P.S][1] - 0.085, Math.max(aTop + 0.13, lerp(sc.pts[P.R][1], sc.pts[P.S][1], 0.72)));
+      const clearDoor = !doors.some((d) => d.side > 0 && zc + 0.1 > d.z0 && zc - 0.1 < d.z1);
+      if (yc - aTop > 0.1 && clearDoor) {
+        const hw = 0.085, hh = 0.062, r = 0.025, loop = [];
+        const corners = [[hw - r, hh - r, 0], [-(hw - r), hh - r, 1], [-(hw - r), -(hh - r), 2], [hw - r, -(hh - r), 3]];
+        corners.forEach(function (c) {
+          for (let k = 0; k <= 3; k++) {
+            const a = (c[2] + k / 3) * Math.PI / 2;
+            loop.push(sidePt(1, yc + c[1] + r * Math.sin(a), zc + c[0] + r * Math.cos(a)));
+          }
+        });
+        strip(loop, 0.005, true);
+      }
+    }
+
+    // -- ANTENNA: a shark fin at the back of the roof
+    if (S.antenna) {
+      const zr = S.zRoofR + 0.05, zf = zr + 0.17;
+      const yr = sec(zr).pts[P.RC][1] - 0.004, yf = sec(zf).pts[P.RC][1] - 0.004;
+      const bw = 0.03;
+      const bl = [bw, yr, zr], br = [-bw, yr, zr], fl = [bw * 0.5, yf, zf], fr = [-bw * 0.5, yf, zf];
+      const tr = [0, yr + 0.068, zr + 0.012], tf = [0, yf + 0.012, zf - 0.012];
+      const ctr = [0, yr + 0.02, (zr + zf) / 2];
+      const away = (a, b, c) => [(a[0] + b[0] + c[0]) / 3 * 2 - ctr[0], (a[1] + b[1] + c[1]) / 3 * 2 - ctr[1], (a[2] + b[2] + c[2]) / 3 * 2 - ctr[2]];
+      const T3 = (a, b, c) => { const f = faceN(a, b, c), t = away(a, b, c); if (f[0] * (t[0] - a[0]) + f[1] * (t[1] - a[1]) + f[2] * (t[2] - a[2]) >= 0) out.tri(a, b, c); else out.tri(a, c, b); };
+      T3(bl, fl, tf); T3(bl, tf, tr);          // flanks
+      T3(br, fr, tf); T3(br, tf, tr);
+      T3(bl, br, tr);                          // back
+      T3(fl, fr, tf);                          // nose
+    }
   }
 
   // ---- SAMPLERS the brand face / accessories read (JSON-safe tables) -------
@@ -710,5 +1019,5 @@
     return out;
   }
 
-  CBZ.carBody = { loft: loft, faceGrid: faceGrid, lines: lines, P: P, makeShape: makeShape };
+  CBZ.carBody = { loft: loft, faceGrid: faceGrid, lines: lines, P: P, makeShape: makeShape, upperY: upperY };
 })();

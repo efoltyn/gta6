@@ -151,8 +151,58 @@ async function stageCarShowcase(input) {
     ST.render = function () {
       try {
         if (ST.mode === "live") { if (CBZ.renderer && CBZ.scene && CBZ.camera) CBZ.renderer.render(CBZ.scene, CBZ.camera); }
-        else if (ST.scene && ST.camera) ST.renderer.render(ST.scene, ST.camera);
+        else if (ST.scene && ST.camera) {
+          /* THE STUDIO HAS ITS OWN WebGL CONTEXT. CBZ.ENV is a PMREM render
+             target that lives in the GAME renderer's context, so bound here it
+             sampled nothing and every studio plate showed paint with no
+             reflection at all (the "matte clay" read). The studio bakes the
+             game's own env picture (CBZ.vehicleEnvCanvas) with ITS renderer
+             and swaps it onto the car's materials for the duration of the
+             draw only: the materials are shared with the live world, whose
+             renderer must keep seeing CBZ.ENV. */
+          const env = ST.studioEnv ? ST.studioEnv() : null;
+          const swapped = [];
+          if (env) {
+            ST.scene.environment = env;
+            ST.scene.traverse(function (o) {
+              const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+              for (let i = 0; i < ms.length; i++) {
+                const m = ms[i];
+                if (m && ("envMap" in m) && m.envMap && m.envMap !== env) { swapped.push([m, m.envMap]); m.envMap = env; }
+              }
+            });
+          }
+          try { ST.renderer.render(ST.scene, ST.camera); }
+          finally { for (let i = 0; i < swapped.length; i++) swapped[i][0].envMap = swapped[i][1]; }
+        }
       } catch (e) {}
+    };
+    ST.studioEnv = function () {
+      if (ST._env !== undefined) return ST._env;
+      ST._env = null;
+      try {
+        let cv = CBZ.vehicleEnvCanvas ? CBZ.vehicleEnvCanvas() : null;
+        if (!cv) {
+          // an older build without the export: a plain sky over a street
+          // (the same two-stop idea its own env had), so BEFORE is not
+          // photographed with no reflection at all
+          cv = document.createElement("canvas"); cv.width = 256; cv.height = 128;
+          const g = cv.getContext("2d");
+          let gr = g.createLinearGradient(0, 0, 0, 64);
+          gr.addColorStop(0, "#3f6fb8"); gr.addColorStop(1, "#dfe8f0");
+          g.fillStyle = gr; g.fillRect(0, 0, 256, 64);
+          gr = g.createLinearGradient(0, 64, 0, 128);
+          gr.addColorStop(0, "#6d6c69"); gr.addColorStop(1, "#18181b");
+          g.fillStyle = gr; g.fillRect(0, 64, 256, 64);
+        }
+        const tex = new T.CanvasTexture(cv);
+        tex.mapping = T.EquirectangularReflectionMapping;
+        tex.encoding = T.sRGBEncoding;
+        const pm = new T.PMREMGenerator(ST.renderer);
+        ST._env = pm.fromEquirectangular(tex).texture;
+        pm.dispose(); tex.dispose();
+      } catch (e) { ST._env = null; }
+      return ST._env;
     };
     window.__cbzVisualCompare = { render: ST.render };
   }

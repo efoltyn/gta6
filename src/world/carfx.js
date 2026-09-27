@@ -110,16 +110,93 @@
       "#include <envmap_physical_pars_fragment>",
       THREE.ShaderChunk.envmap_physical_pars_fragment.replace(/\* envMapIntensity;/g, "* envMapIntensity * cbzEnvK;"));
   }
+  /* ---- METALLIC PAINT: flop + flake (paint materials only) ----------------
+     A metallic paint is not "a shinier solid". Its aluminium flakes lie
+     roughly parallel to the panel, so a panel FACING you is bright and one
+     turning away goes dark: the FLOP that makes a silver car read as metal
+     from across the street. Up close the flakes glint individually. Both are
+     a few lines after lighting, keyed by a per-material uniform (cbzFlake,
+     0 = solid paint: the multiply is 1 and the glint branch never runs), so
+     solid and metallic paint share ONE program. The glint cell is 3 mm in
+     the car's own frame and fades out by 3.5 m, before a cell drops under a
+     pixel and turns into shimmer. No uv needed (the loft has none). */
+  function paintHook(shader) {
+    envHook(shader);
+    shader.uniforms.cbzFlake = this._flakeU || (this._flakeU = { value: 0 });
+    shader.vertexShader = "varying vec3 vCbzObj;\n" + shader.vertexShader.replace(
+      "#include <begin_vertex>", "#include <begin_vertex>\n\tvCbzObj = position;");
+    shader.fragmentShader = "uniform float cbzFlake;\nvarying vec3 vCbzObj;\n" +
+      "float cbzHash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }\n" +
+      shader.fragmentShader.replace(
+        "gl_FragColor = vec4( outgoingLight, diffuseColor.a );",
+        [
+          "if ( cbzFlake > 0.0 ) {",
+          "  vec3 cbzV = normalize( vViewPosition );",
+          "  float cbzNV = saturate( dot( normal, cbzV ) );",
+          "  outgoingLight *= mix( 1.0, mix( 0.5, 1.2, pow( cbzNV, 0.65 ) ), cbzFlake );",
+          "  float cbzD = length( vViewPosition );",
+          "  if ( cbzD < 3.5 ) {",
+          "    vec3 cbzC = floor( vCbzObj * 330.0 );",
+          "    vec3 cbzR = vec3( cbzHash( cbzC + 1.7 ), cbzHash( cbzC + 3.1 ), cbzHash( cbzC + 5.3 ) ) - 0.5;",
+          "    float cbzG = pow( saturate( dot( normalize( normal + cbzR * 0.7 ), cbzV ) ), 90.0 ) * step( 0.8, cbzHash( cbzC ) );",
+          "    outgoingLight += cbzG * cbzFlake * ( 1.0 - smoothstep( 1.0, 3.0, cbzD ) ) * 0.35 *",
+          "      ( reflectedLight.directDiffuse + reflectedLight.indirectDiffuse + reflectedLight.directSpecular );",
+          "  }",
+          "}",
+          "gl_FragColor = vec4( outgoingLight, diffuseColor.a );",
+        ].join("\n"));
+  }
   function hookedClone() {
     const c = new this.constructor().copy(this);
+    if (this._cbzPaint) {
+      c._cbzPaint = true;
+      c._flakeU = { value: this._flakeU ? this._flakeU.value : 0 };
+      c._paintResponse = this._paintResponse;
+    }
     return hookEnv(c);
   }
   function hookEnv(mat) {
     if (!mat || !("envMap" in mat)) return mat;
-    mat.onBeforeCompile = envHook;
+    mat.onBeforeCompile = mat._cbzPaint ? paintHook : envHook;
     mat.clone = hookedClone;
     return mat;
   }
+  /* WHICH PAINTS ARE METALLIC. Deterministic off the hex (multiplayer builds
+     identical cars): the neutrals a real lot is full of (silver, grey,
+     graphite, black, deep blue and green) are metallic, and a hash picks
+     roughly a third of the saturated colours. Solid paint keeps the authored
+     per-style response; metallic trades a little of the diffuse lobe for a
+     colour-tinted reflection, still under the washed-out ceiling below
+     (metalness x envMapIntensity <= 0.32). */
+  function isMetallicHex(hex) {
+    const r = ((hex >> 16) & 255) / 255, g = ((hex >> 8) & 255) / 255, b = (hex & 255) / 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    const sat = mx > 0 ? (mx - mn) / mx : 0;
+    if (sat < 0.18) return true;                                    // silver / grey / black / white-pearl
+    if (mx < 0.42 && b >= r) return true;                           // deep blue / green / navy
+    return ((Math.imul(hex >>> 0, 2654435761) >>> 29) & 7) < 3;
+  }
+  function carPaintFinish(m, hex) {
+    if (!m || !m._cbzPaint) return m;
+    const P = m._paintResponse;
+    const metal = isMetallicHex(hex >>> 0);
+    if (!m._flakeU) m._flakeU = { value: 0 };
+    if (metal) {
+      m.metalness = 0.42;
+      m.roughness = 0.34;
+      m.envMapIntensity = 0.55;
+      m.clearcoatRoughness = 0.03;
+      m._flakeU.value = 1;
+    } else if (P) {
+      m.metalness = P.metalness; m.roughness = P.roughness;
+      m.envMapIntensity = P.envMapIntensity; m.clearcoatRoughness = P.clearcoatRoughness;
+      m._flakeU.value = 0;
+    }
+    m._metallic = metal;
+    return m;
+  }
+  CBZ.carPaintFinish = carPaintFinish;
+  CBZ.carPaintIsMetallic = isMetallicHex;
   function envDaylight() {
     const d = typeof CBZ.dayness === "number" ? CBZ.dayness : 1;
     const k = d <= 0 ? 0 : d >= 1 ? 1 : d;
@@ -167,18 +244,28 @@
        - a dark asphalt ground with a lighter kerb band at the horizon
      Authored as sRGB and TAGGED sRGB (the old canvas was read as linear,
      which lifted every stop and is half of why paint washed to white). */
+  /* 2026-09-27 (cars round 2): 512x256, and the HORIZON IS A HARD EDGE.
+     The line a stranger reads as "that's a car" is the reflected horizon
+     running down the flank: bright sky above, dark street below, meeting
+     in a crisp line that bends with every panel. At 256x128 the PMREM mip
+     the clearcoat samples smeared that edge into a grey gradient (matte
+     clay). Now: sky at full brightness right down to the skyline, a thin
+     bright kerb glint, then the street drops straight to dark asphalt, and
+     two long overhead light banks give the hood and roof a sharp moving
+     highlight instead of a blob. Same picture drives the studio plates
+     (CBZ.vehicleEnvCanvas), so the capture shows what the game shows. */
   function envCanvas() {
-    const W = 256, H = 128;
+    const W = 512, H = 256;
     const c = document.createElement("canvas");
     c.width = W; c.height = H;
     const g = c.getContext("2d");
     const hz = H * 0.5;
     let grad = g.createLinearGradient(0, 0, 0, hz);
-    grad.addColorStop(0.0, "#3f6fb8");
-    grad.addColorStop(0.6, "#8fb2dc");
-    grad.addColorStop(1.0, "#dfe8f0");
+    grad.addColorStop(0.0, "#36629f");
+    grad.addColorStop(0.45, "#7ea6d6");
+    grad.addColorStop(0.85, "#d4e2ef");
+    grad.addColorStop(1.0, "#f2f6fa");
     g.fillStyle = grad; g.fillRect(0, 0, W, hz);
-    // soft bright cloud banks (two bearings) + the sun
     function blob(x, y, rx, ry, a) {
       for (let dx = -W; dx <= W; dx += W) {          // wrap across the seam
         const rg = g.createRadialGradient(x + dx, y, 0, x + dx, y, rx);
@@ -189,28 +276,36 @@
         g.restore();
       }
     }
-    blob(W * 0.62, H * 0.24, 40, 12, 0.85);
-    blob(W * 0.90, H * 0.34, 30, 8, 0.7);
-    blob(W * 0.20, H * 0.18, 9, 9, 1.0);            // sun
-    blob(W * 0.20, H * 0.18, 3, 3, 1.0);
-    // ground: asphalt, darkest straight down
-    grad = g.createLinearGradient(0, hz, 0, H);
-    grad.addColorStop(0.0, "#6d6c69");
-    grad.addColorStop(0.08, "#46464a");
-    grad.addColorStop(1.0, "#18181b");
-    g.fillStyle = grad; g.fillRect(0, hz, W, H - hz);
-    // skyline on the horizon — deterministic blocks
+    blob(W * 0.62, H * 0.24, 80, 22, 0.8);
+    blob(W * 0.90, H * 0.34, 60, 14, 0.65);
+    blob(W * 0.36, H * 0.30, 50, 10, 0.5);
+    // two long bright bands high in the sky: the crisp streak on a hood/roof
+    g.fillStyle = "rgba(255,255,255,0.85)";
+    g.fillRect(0, H * 0.08, W, 5);
+    g.fillStyle = "rgba(255,255,255,0.6)";
+    g.fillRect(0, H * 0.17, W, 3);
+    blob(W * 0.20, H * 0.18, 18, 18, 1.0);          // sun
+    blob(W * 0.20, H * 0.18, 6, 6, 1.0);
+    // skyline on the horizon — deterministic blocks, dark against the bright haze
     let s = 7;
     function rnd() { s = (s * 16807) % 2147483647; return s / 2147483647; }
     for (let x = 0; x < W;) {
-      const bw = 4 + Math.floor(rnd() * 12), bh = 3 + Math.floor(rnd() * 13);
-      const tone = 52 + Math.floor(rnd() * 46);
+      const bw = 8 + Math.floor(rnd() * 24), bh = 4 + Math.floor(rnd() * 22);
+      const tone = 60 + Math.floor(rnd() * 50);
       g.fillStyle = "rgb(" + tone + "," + (tone + 6) + "," + (tone + 16) + ")";
-      g.fillRect(x, hz - bh, bw, bh + 1);
-      x += bw + (rnd() < 0.25 ? 2 + Math.floor(rnd() * 6) : 0);
+      g.fillRect(x, hz - bh, bw, bh);
+      x += bw + (rnd() < 0.3 ? 4 + Math.floor(rnd() * 16) : 0);
     }
+    // the street: a 2 px kerb glint, then straight down to dark asphalt
+    g.fillStyle = "#9a9894"; g.fillRect(0, hz, W, 2);
+    grad = g.createLinearGradient(0, hz + 2, 0, H);
+    grad.addColorStop(0.0, "#3c3c3f");
+    grad.addColorStop(0.25, "#2a2a2d");
+    grad.addColorStop(1.0, "#131315");
+    g.fillStyle = grad; g.fillRect(0, hz + 2, W, H - hz - 2);
     return c;
   }
+  CBZ.vehicleEnvCanvas = envCanvas;
 
   // PMREM-prefilter the equirect ONCE into a roughness-aware env texture,
   // shared by every vehicle material.
@@ -302,18 +397,35 @@
   const vehGlass = [];          // every vehicle-glass material minted, for the audit
   const carGlass = [];          // the car-only reflective panes (role 'autoGlass')
 
-  // ---- the WHEEL RAMP: 8x1 texels, g = roughness, b = metalness ------------
+  // ---- the WHEEL RAMP: 16x1 texels, g = roughness, b = metalness -----------
   // Index names are exported so city/carwheels.js tags its vertices by name.
-  const WHEEL_CH = { tread: 0, side: 1, alloy: 2, chrome: 3, rotor: 4, satin: 5, gloss: 6, dark: 7 };
+  // Rubber is three channels on purpose: the tread face is dead matte, the
+  // groove floors deader still, the sidewall a satin a hair shinier, and only
+  // the SHOULDER roll carries the sheen that tells you it is a tyre. Metal is
+  // split the way a real two-tone alloy is: a machined bright spoke face and
+  // polished lip over gunmetal-painted pockets, a dark barrel, a rotor whose
+  // friction ring is bare steel and whose hat is dull.
+  const WHEEL_CH = {
+    tread: 0, side: 1, alloy: 2, chrome: 3, rotor: 4, satin: 5, gloss: 6, dark: 7,
+    groove: 8, shoulder: 9, face: 10, pocket: 11, hat: 12, lip: 13,
+  };
   const WHEEL_RAMP = [
-    [0.92, 0.00],   // tread rubber
-    [0.78, 0.00],   // sidewall (a touch of tyre shine)
-    [0.24, 0.95],   // machined/painted alloy
-    [0.06, 1.00],   // chrome
-    [0.45, 0.85],   // rotor steel
-    [0.50, 0.15],   // satin paint (steelies, dust shield)
-    [0.20, 0.10],   // gloss paint (aero covers, centre caps)
-    [0.34, 0.80],   // dark alloy (barrel)
+    [0.93, 0.00],   // 0  tread rubber
+    [0.88, 0.00],   // 1  sidewall (satin rubber)
+    [0.30, 0.90],   // 2  painted silver alloy (mesh wheels, aero fins)
+    [0.05, 1.00],   // 3  chrome
+    [0.40, 0.90],   // 4  rotor friction ring (bare steel)
+    [0.50, 0.15],   // 5  satin paint (steelies, dust shield)
+    [0.20, 0.10],   // 6  gloss paint (aero covers, centre caps)
+    [0.36, 0.80],   // 7  dark alloy (barrel)
+    [0.97, 0.00],   // 8  groove floors / sipe walls
+    [0.66, 0.00],   // 9  tyre shoulder (the only rubber with a sheen)
+    [0.14, 1.00],   // 10 machined spoke face
+    [0.42, 0.55],   // 11 gunmetal-painted pockets / spoke flanks
+    [0.62, 0.55],   // 12 rotor hat
+    [0.08, 1.00],   // 13 polished lip
+    [0.93, 0.00],   // 14 spare (= tread)
+    [0.93, 0.00],   // 15 spare (= tread)
   ];
   CBZ.WHEEL_CH = WHEEL_CH;
   CBZ.WHEEL_RAMP_W = WHEEL_RAMP.length;
@@ -678,7 +790,10 @@
       m.emissive = paintColor(col).multiplyScalar(0.03);
       m.emissiveIntensity = num(opts.emissiveIntensity, 1.0);
       m._bodyPaint = true; // <-- EXACT flag matched from playercars.js recolorBody
+      m._cbzPaint = true;  // paintHook (flop + flake) — survives clone via hookedClone
+      m._flakeU = { value: 0 };
       registerForEnv(m); // back-fill envMap if ENV builds after this
+      carPaintFinish(m, col);
       return m;
     }
 
@@ -828,7 +943,7 @@
 
     /* ---- THE WHEEL: one material for tyre, rim, rotor and lugs ------------
        city/carwheels.js builds each wheel as ONE mesh with vertex colours and
-       a uv whose u picks a texel of this 8x1 ramp: green = roughness, blue =
+       a uv whose u picks a texel of this 16x1 ramp: green = roughness, blue =
        metalness (r128 reads roughnessMap.g and metalnessMap.b). Rubber,
        alloy, chrome, rotor steel and satin paint in one draw call. */
     if (role === "wheel") {

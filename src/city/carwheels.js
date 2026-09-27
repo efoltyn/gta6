@@ -10,8 +10,10 @@
 
    WHAT A WHEEL IS NOW, in the wheel's own frame (axle = local +Y, +Y is
    outboard; the caller lays it on its side with rotation.z = -+PI/2):
-     - a LATHED TYRE: bead, a sidewall that bulges past the rim flange, a
-       rounded shoulder, a flat tread with two circumferential grooves;
+     - a near-black TYRE: lathed sidewalls that bulge past the rim flange
+       (plus a rim-protector ridge on low-profile tyres), a rounded shoulder
+       with the only rubber sheen, and a real TREAD: 24 leaning shoulder
+       blocks a side, two circumferential grooves and a centre rib;
      - a DISHED RIM: a flange + lip that sits proud of the bead, a barrel
        you can see down through the spokes, the spoke face recessed into it;
      - SPOKES per style (sport5, twin10, mesh, turbine, sixlug, steel, aero,
@@ -19,7 +21,7 @@
      - a BRAKE ROTOR (and dust shield) behind the spokes, spinning with the
        wheel as a real rotor does.
    All of it is ONE BufferGeometry with vertex colours and a `uv` whose u
-   picks a texel of carfx.js's 8x1 WHEEL RAMP (green = roughness, blue =
+   picks a texel of carfx.js's 16x1 WHEEL RAMP (green = roughness, blue =
    metalness). So rubber is matte, the alloy is a metal, the chrome is a
    mirror and the rotor is dull steel, in one draw call with one shared
    material (CBZ.vehicleMat("wheel")).
@@ -47,15 +49,30 @@
 
   // texel index into carfx's wheel ramp. carfx owns the numbers; this is the
   // fallback so the builder still runs (and verifies in node) without it.
-  const CH = CBZ.WHEEL_CH || { tread: 0, side: 1, alloy: 2, chrome: 3, rotor: 4, satin: 5, gloss: 6, dark: 7 };
-  const RAMP_W = CBZ.WHEEL_RAMP_W || 8;
+  const CH = CBZ.WHEEL_CH || {
+    tread: 0, side: 1, alloy: 2, chrome: 3, rotor: 4, satin: 5, gloss: 6, dark: 7,
+    groove: 8, shoulder: 9, face: 10, pocket: 11, hat: 12, lip: 13,
+  };
+  const RAMP_W = CBZ.WHEEL_RAMP_W || 16;
 
-  function rgb(hex) { return [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255]; }
+  /* THE HEXES BELOW ARE AUTHORED IN sRGB; the renderer takes a vertex colour
+     as LINEAR and encodes to sRGB on output, which lifts every dark value:
+     "near-black" 0x1c rubber photographed as mid-grey (#5x) in the studio.
+     Pulled into linear (gamma 2.0: most of the way, same idea as carfx's
+     paintColor) so the tyre reads as rubber and the machined face as metal. */
+  function rgb(hex) { const k = (v) => Math.pow(v / 255, 2.0); return [k((hex >> 16) & 255), k((hex >> 8) & 255), k(hex & 255)]; }
+  // Rubber is NEAR-BLACK (the old 0x1b/0x23 greys read as grey plastic next
+  // to the rim); the material's env diffuse fill keeps it from going to a
+  // hole in shade. Sidewall a hair lighter than the tread, the shoulder a
+  // hair lighter again (it also carries the only rubber sheen, CH.shoulder).
   const COL = {
-    tread: rgb(0x1b1c1f), groove: rgb(0x0d0e10), side: rgb(0x232427),
-    alloy: rgb(0xc9ced4), alloyDk: rgb(0x7c828a), chrome: rgb(0xeef0f3),
-    rotor: rgb(0x6a6d72), shield: rgb(0x1a1b1e), hat: rgb(0x2a2c30),
-    cap: rgb(0x24272c), lug: rgb(0xb8bcc2), steel: rgb(0x3b3e43), steelDk: rgb(0x26282c),
+    tread: rgb(0x151618), groove: rgb(0x0a0b0c), wall: rgb(0x101113),
+    side: rgb(0x1c1d20), shoulder: rgb(0x1e1f22),
+    alloy: rgb(0xc4c9cf), alloyDk: rgb(0x5d636b), chrome: rgb(0xeef0f3),
+    face: rgb(0xd9dde2), pocket: rgb(0x383c42), lip: rgb(0xe4e7ea),
+    rotor: rgb(0x8c8f93), rotorEdge: rgb(0x5a5d61), hole: rgb(0x0e0f10),
+    shield: rgb(0x17181b), hat: rgb(0x2e3034),
+    cap: rgb(0x1d1f23), lug: rgb(0xb8bcc2), steel: rgb(0x3b3e43), steelDk: rgb(0x26282c),
     aero: rgb(0x2d3137), black: rgb(0x16171a),
   };
 
@@ -159,85 +176,202 @@
     let cx = 0, cy = 0, cz = 0;
     for (let i = 0; i < 8; i++) { cx += v[i][0]; cy += v[i][1]; cz += v[i][2]; }
     cx /= 8; cy /= 8; cz /= 8;
-    function face(a, b, c, d) {
+    // two-tone: the FRONT face wears col/ch (machined bright), the flanks,
+    // back and caps wear s.sideCol/sideCh (the painted pocket) when given
+    const sc = s.sideCol || col, sch = s.sideCol ? s.sideCh : ch;
+    function face(a, b, c, d, fc, fch) {
       const mx = (a[0] + b[0] + c[0] + d[0]) / 4 - cx, my = (a[1] + b[1] + c[1] + d[1]) / 4 - cy, mz = (a[2] + b[2] + c[2] + d[2]) / 4 - cz;
-      acc.quadFlat(a, b, c, d, [mx, my, mz], col, ch);
+      acc.quadFlat(a, b, c, d, [mx, my, mz], fc, fch);
     }
-    face(I(0, -1, 1), I(1, -1, 1), I(1, 1, 1), I(0, 1, 1));            // front
-    if (s.back !== false) face(I(0, -1, 0), I(0, 1, 0), I(1, 1, 0), I(1, -1, 0));   // back
-    face(I(0, -1, 0), I(1, -1, 0), I(1, -1, 1), I(0, -1, 1));          // side -
-    face(I(0, 1, 0), I(0, 1, 1), I(1, 1, 1), I(1, 1, 0));              // side +
+    face(I(0, -1, 1), I(1, -1, 1), I(1, 1, 1), I(0, 1, 1), col, ch);            // front
+    if (s.back !== false) face(I(0, -1, 0), I(0, 1, 0), I(1, 1, 0), I(1, -1, 0), sc, sch);   // back
+    face(I(0, -1, 0), I(1, -1, 0), I(1, -1, 1), I(0, -1, 1), sc, sch);          // side -
+    face(I(0, 1, 0), I(0, 1, 1), I(1, 1, 1), I(1, 1, 0), sc, sch);              // side +
     if (s.caps) {
-      face(I(0, -1, 0), I(0, -1, 1), I(0, 1, 1), I(0, 1, 0));
-      face(I(1, -1, 0), I(1, 1, 0), I(1, 1, 1), I(1, -1, 1));
+      face(I(0, -1, 0), I(0, -1, 1), I(0, 1, 1), I(0, 1, 0), sc, sch);
+      face(I(1, -1, 0), I(1, 1, 0), I(1, 1, 1), I(1, -1, 1), sc, sch);
     }
   }
 
   function pt(r, y, col, ch, crease) { return { r: r, y: y, col: col, ch: ch, crease: !!crease }; }
 
+  // one quad with per-corner normals (winding fixed by Acc.tri)
+  function quadN(acc, a, b, c, d, na, nb, nc, nd, col, ch) {
+    acc.tri(a, b, c, na, nb, nc, col, ch);
+    acc.tri(a, c, d, na, nc, nd, col, ch);
+  }
+  function P(r, a, y) { return [r * Math.cos(a), y, r * Math.sin(a)]; }
+  function NR(a) { return [Math.cos(a), 0, Math.sin(a)]; }          // radial out
+  const NY = [0, 1, 0], NYm = [0, -1, 0];
+
+  /* ---- THE TREAD: a real block pattern, not a lathe with two lines on it.
+     Five lanes across the face: an outboard and an inboard SHOULDER lane cut
+     into N blocks by transverse slots, a circumferential GROOVE inside each,
+     and a continuous CENTRE RIB. The slots lean (a V, mirrored across the
+     centreline, so the tyre is directional like a real performance tread)
+     and the two shoulders are staggered half a pitch. Every slot and groove
+     floor sits at R - g and is groove-dark; the block walls are cut square.
+     At each tread edge a cap closes the lane down to R - g, so the shoulder
+     roll (a coarser lathe that starts a hair below R) meets the blocks as a
+     real stepped edge instead of a crack.
+       e: tread half-width (fraction of h), b: shoulder lane inner edge,
+       c: rib half-width. */
+  function tread(acc, R, g, h, N) {
+    const e = 0.64 * h, b = 0.30 * h, c = 0.18 * h;
+    const f = 0.70, pitch = (Math.PI * 2) / N, lean = 0.32 * pitch, li = lean * (b - c) / (e - c);
+    const rg = R - g;
+    const T = COL.tread, G = COL.groove, Wl = COL.wall;
+    for (let side = -1; side <= 1; side += 2) {
+      const ph = side > 0 ? 0.5 : 0;
+      const yin = side * b, yout = side * e, ygr = side * c;
+      const nIn = side > 0 ? NYm : NY, nOut = side > 0 ? NY : NYm;   // face the groove / face out
+      for (let k = 0; k < N; k++) {
+        // the lean runs from the rib edge (ygr) out to the tread edge, so a
+        // slot floor and the groove floor beside it are ONE straight quad
+        const a0 = (k + ph) * pitch, a1 = a0 + f * pitch, a2 = a0 + pitch;
+        const i0 = a0 + li, i1 = a1 + li, i2 = a2 + li;                // block edges at yin
+        const o0 = a0 + lean, o1 = a1 + lean, o2 = a2 + lean;          // the same edges at the tread edge
+        // block top (radial normals: the face reads round)
+        quadN(acc, P(R, i0, yin), P(R, i1, yin), P(R, o1, yout), P(R, o0, yout), NR(i0), NR(i1), NR(o1), NR(o0), T, CH.tread);
+        // slot floor + the groove floor in line with it, rib edge to tread edge
+        quadN(acc, P(rg, a1, ygr), P(rg, a2, ygr), P(rg, o2, yout), P(rg, o1, yout), NR(a1), NR(a2), NR(o2), NR(o1), G, CH.groove);
+        // groove floor beside the block
+        quadN(acc, P(rg, a0, ygr), P(rg, a1, ygr), P(rg, i1, yin), P(rg, i0, yin), NR(a0), NR(a1), NR(i1), NR(i0), G, CH.groove);
+        // transverse walls: block trailing face, next block's leading face
+        const t1 = [-Math.sin(i1), 0, Math.cos(i1)], t2 = [Math.sin(i2), 0, -Math.cos(i2)];
+        acc.quadFlat(P(rg, i1, yin), P(R, i1, yin), P(R, o1, yout), P(rg, o1, yout), t1, Wl, CH.groove);
+        acc.quadFlat(P(rg, i2, yin), P(R, i2, yin), P(R, o2, yout), P(rg, o2, yout), t2, Wl, CH.groove);
+        // block wall down into the circumferential groove
+        acc.quadFlat(P(rg, i0, yin), P(rg, i1, yin), P(R, i1, yin), P(R, i0, yin), nIn, Wl, CH.groove);
+        // tread-edge caps (block end + slot end) so the shoulder meets a step
+        acc.quadFlat(P(rg, o0, yout), P(rg, o1, yout), P(R, o1, yout), P(R, o0, yout), nOut, T, CH.tread);
+        acc.quadFlat(P(rg, o1, yout), P(rg, o2, yout), P(R, o2, yout), P(R, o1, yout), nOut, Wl, CH.groove);
+      }
+    }
+    // centre rib: continuous, square-walled
+    for (let k = 0; k < N; k++) {
+      const a0 = k * pitch, a1 = a0 + pitch;
+      quadN(acc, P(R, a0, -c), P(R, a1, -c), P(R, a1, c), P(R, a0, c), NR(a0), NR(a1), NR(a1), NR(a0), T, CH.tread);
+      acc.quadFlat(P(rg, a0, c), P(rg, a1, c), P(R, a1, c), P(R, a0, c), NY, Wl, CH.groove);
+      acc.quadFlat(P(rg, a0, -c), P(rg, a1, -c), P(R, a1, -c), P(R, a0, -c), NYm, Wl, CH.groove);
+    }
+  }
+
   // ---- per-style rim recipes ----------------------------------------------
   //  face: spoke-face depth as a fraction of the half-width (1 = flush with the
   //  tyre's outboard wall, 0 = the tyre's centre plane — a deep dish)
   //  lugs: count (0 = centre-lock / covered)  metal: the lip + spoke finish
+  //  twoTone: machined bright spoke faces over gunmetal-painted flanks/pockets
+  //  drilled: cross-drilled rotor
   const STYLE = {
-    sport5:  { face: 0.46, lugs: 5, metal: "alloy" },
-    twin10:  { face: 0.44, lugs: 5, metal: "alloy" },
-    mesh:    { face: 0.40, lugs: 0, metal: "alloy" },
-    turbine: { face: 0.48, lugs: 5, metal: "alloy" },
-    sixlug:  { face: 0.40, lugs: 6, metal: "alloy" },
+    sport5:  { face: 0.46, lugs: 5, metal: "alloy", twoTone: true, drilled: true },
+    twin10:  { face: 0.44, lugs: 5, metal: "alloy", twoTone: true, drilled: true },
+    mesh:    { face: 0.40, lugs: 0, metal: "alloy", drilled: true },
+    turbine: { face: 0.48, lugs: 5, metal: "alloy", twoTone: true, drilled: true },
+    sixlug:  { face: 0.40, lugs: 6, metal: "alloy", twoTone: true },
     steel:   { face: 0.30, lugs: 4, metal: "steel" },
     aero:    { face: 0.62, lugs: 0, metal: "alloy" },
     wire:    { face: 0.02, lugs: 0, metal: "chrome" },
   };
-  const SEG_TYRE = 24, SEG_RIM = 24, SEG_HUB = 14;
+  const SEG_SIDE = 24, SEG_RIM = 20, SEG_HUB = 10, SEG_ROTOR = 14, TREAD_N = 24;
+
+  // rotor plane + thickness, shared by the wheel and the caliper so they agree
+  function rotorFrame(W, st) {
+    const h = W * 0.5, yF = st.face * h;
+    const t = Math.max(0.026, W * 0.10);                 // spoke thickness
+    return { h: h, yF: yF, t: t, yR: Math.max(-0.55 * h, yF - t - 0.045), T: 0.024 };
+  }
 
   function buildWheel(R, W, style, rf) {
     const S = STYLE[style] ? style : "sport5";
     const st = STYLE[S];
     const acc = new Acc();
-    const h = W * 0.5, rr = R * rf, s = R - rr;
-    const g = Math.min(0.009, W * 0.03);                 // groove depth
-    const mc = st.metal === "chrome" ? COL.chrome : st.metal === "steel" ? COL.steel : COL.alloy;
-    const mch = st.metal === "chrome" ? CH.chrome : st.metal === "steel" ? CH.satin : CH.alloy;
+    const rf_ = rotorFrame(W, st);
+    const h = rf_.h, rr = R * rf, s = R - rr;
+    const g = Math.min(0.011, Math.max(0.006, W * 0.04)); // tread depth
+    const chrome = st.metal === "chrome", steel = st.metal === "steel";
+    const mc = chrome ? COL.chrome : steel ? COL.steel : COL.alloy;
+    const mch = chrome ? CH.chrome : steel ? CH.satin : CH.alloy;
+    const lipC = chrome ? COL.chrome : steel ? COL.steel : COL.lip;
+    const lipCh = chrome ? CH.chrome : steel ? CH.satin : CH.lip;
+    const faceC = st.twoTone ? COL.face : mc, faceCh = st.twoTone ? CH.face : mch;
+    const flankC = st.twoTone ? COL.pocket : mc, flankCh = st.twoTone ? CH.pocket : mch;
 
-    // ---- TYRE (walked CCW: inboard bead -> tread -> outboard bead) ----------
+    // ---- TYRE ---------------------------------------------------------------
+    tread(acc, R, g, h, TREAD_N);
+    // SIDEWALLS. Outboard, walked from the tread edge down to the bead (the
+    // CCW order): a rounded shoulder (the sheen channel), the sidewall
+    // bulging PAST the rim flange at mid-height, and on low-profile tyres a
+    // rim-protector ridge standing proud of the flange; the bead tucks in
+    // behind the flange. Inboard gets the same silhouette in fewer rings.
+    const Sd = COL.side, Sh = COL.shoulder;
+    const r0 = R - 0.35 * g;                                // starts under the block tops
+    const rProt = Math.max(rr * 1.075, rr + 0.12 * s);
+    const lowPro = rf >= 0.66 && (rr + 0.40 * s) > rProt + 0.018;
+    const out = [
+      pt(r0, 0.64 * h, Sh, CH.shoulder),
+      pt(R - 0.05 * s, 0.80 * h, Sh, CH.shoulder),
+      pt(R - 0.22 * s, 0.96 * h, Sd, CH.side),
+      pt(rr + 0.40 * s, 1.00 * h, Sd, CH.side),
+    ];
+    if (lowPro) {
+      out.push(pt(rProt + 0.006, 1.035 * h, Sd, CH.side));
+      out.push(pt(rProt - 0.006, 0.985 * h, Sd, CH.side, true));
+    } else {
+      out.push(pt(rr + 0.16 * s, 0.97 * h, Sd, CH.side));
+    }
+    out.push(pt(rr * 1.065, 0.90 * h, Sd, CH.side));
+    out.push(pt(rr, 0.80 * h, Sd, CH.side));
+    // sidewall rings: only as many as the tread-edge caps can hide the chord
+    // sag of (the shoulder starts 0.35 g under the block tops, caps reach g)
+    const segSide = Math.max(18, Math.min(SEG_SIDE, Math.ceil(Math.PI / Math.acos(1 - 0.6 * g / R))));
+    lathe(acc, out, segSide);
     lathe(acc, [
-      pt(rr, -0.78 * h, COL.side, CH.side),
-      pt(rr + 0.45 * s, -1.0 * h, COL.side, CH.side),
-      pt(R - 0.12 * s, -0.93 * h, COL.side, CH.side),
-      pt(R, -0.62 * h, COL.tread, CH.tread),
-      pt(R, -0.36 * h, COL.groove, CH.tread, true),
-      pt(R - g, -0.30 * h, COL.groove, CH.tread, true),
-      pt(R, -0.24 * h, COL.tread, CH.tread, true),
-      pt(R, 0.24 * h, COL.groove, CH.tread, true),
-      pt(R - g, 0.30 * h, COL.groove, CH.tread, true),
-      pt(R, 0.36 * h, COL.tread, CH.tread, true),
-      pt(R, 0.62 * h, COL.side, CH.side),
-      pt(R - 0.12 * s, 0.93 * h, COL.side, CH.side),
-      pt(rr + 0.45 * s, 1.0 * h, COL.side, CH.side),
-      pt(rr, 0.78 * h, COL.side, CH.side),
-    ], SEG_TYRE);
+      pt(rr, -0.80 * h, Sd, CH.side),
+      pt(rr + 0.40 * s, -1.00 * h, Sh, CH.shoulder),
+      pt(r0, -0.64 * h, Sh, CH.shoulder),
+    ], segSide);
 
-    // ---- RIM flange, lip and barrel (CCW round the metal: up the outside,
-    //      over the lip, down the inside of the barrel) ----------------------
-    const yF = st.face * h;                              // spoke face at the lip end
+    // ---- RIM flange, polished lip and barrel (CCW round the metal: up the
+    //      outside, over the lip, down the inside of the barrel) -------------
+    const yF = rf_.yF;
     const barrelIn = rr * 0.95;
+    const barC = chrome ? COL.chrome : steel ? COL.steelDk : COL.alloyDk;
+    const barCh = chrome ? CH.chrome : steel ? CH.satin : CH.dark;
     lathe(acc, [
-      pt(rr * 1.005, 0.72 * h, mc, mch),
-      pt(rr * 1.06, 0.86 * h, mc, mch),
-      pt(rr * 1.045, 0.96 * h, mc, mch),
-      pt(barrelIn, 0.90 * h, S === "wire" ? COL.chrome : COL.alloyDk, S === "wire" ? CH.chrome : CH.dark, true),
-      pt(barrelIn, -0.70 * h, COL.alloyDk, CH.dark),
+      pt(rr * 1.06, 0.86 * h, lipC, lipCh),
+      pt(rr * 1.055, 0.95 * h, lipC, lipCh),
+      pt(rr * 1.02, 0.97 * h, lipC, lipCh),
+      pt(barrelIn * 1.005, 0.93 * h, barC, barCh, true),     // the lip's inner edge: a hard break into the barrel
+      pt(barrelIn, -0.70 * h, barC, barCh),
     ], SEG_RIM);
 
-    // ---- ROTOR + dust shield behind the spokes (faces outboard, +Y) --------
-    const t = Math.max(0.026, W * 0.10);                // spoke thickness
-    const yR = Math.max(-0.55 * h, yF - t - 0.045);     // rotor plane
+    // ---- BRAKES behind the spokes (all faces outboard, +Y): dust shield,
+    //      the rotor's outer edge (its thickness), a bare-steel friction ring,
+    //      the step up to a dark hat. Spins with the wheel as a rotor does. ---
+    const yR = rf_.yR, TT = rf_.T;
+    const rOut = rr * 0.84, rIn = rr * 0.52, rHat = rr * 0.50, hatY = yR + 0.016;
     lathe(acc, [
-      pt(barrelIn, yR - 0.012, COL.shield, CH.satin),
-      pt(rr * 0.80, yR, COL.rotor, CH.rotor, true),
-      pt(rr * 0.30, yR, COL.rotor, CH.rotor),
-    ], 20);
+      pt(barrelIn, yR - 0.034, COL.shield, CH.satin),
+      pt(rOut, yR - TT, COL.rotorEdge, CH.rotor, true),
+      pt(rOut, yR, COL.rotor, CH.rotor, true),
+      pt(rIn, yR, COL.hat, CH.hat, true),
+      pt(rHat, hatY, COL.hat, CH.hat, true),
+      pt(rr * 0.20, hatY, COL.hat, CH.hat),
+    ], SEG_ROTOR);
+    if (st.drilled) {
+      // cross-drilled: two staggered rings of holes, dark dots on the face
+      const hs = Math.max(0.0035, rr * 0.022);
+      for (let ring = 0; ring < 2; ring++) {
+        const rH = rr * (0.63 + ring * 0.11), n = 10;
+        for (let i = 0; i < n; i++) {
+          const a = (i + ring / 2) / n * Math.PI * 2, c = Math.cos(a), sn = Math.sin(a);
+          const tx = -sn * hs, tz = c * hs, rx = c * hs, rz = sn * hs;
+          const x = rH * c, z = rH * sn, y = yR + 0.0008;
+          acc.quadFlat([x - rx, y, z - rz], [x + tx, y, z + tz], [x + rx, y, z + rz], [x - tx, y, z - tz], NY, COL.hole, CH.groove);
+        }
+      }
+    }
     // inboard closing disc (seen from the other side of the car, under the body)
     lathe(acc, [pt(0, -0.74 * h, COL.shield, CH.satin), pt(rr * 1.04, -0.74 * h, COL.shield, CH.satin)], 16);
 
@@ -246,10 +380,12 @@
     const rise = S === "wire" ? 0.30 * h : S === "aero" || S === "steel" ? 0.02 * h : 0.10 * h;
     const yH = yF + rise;                                 // hub face sits proud of the lip end: concave spokes
     const rCap = rHub * 0.5;
-    const capCol = S === "wire" ? COL.chrome : COL.cap, capCh = S === "wire" ? CH.chrome : CH.gloss;
+    const hubC = st.twoTone ? COL.pocket : mc, hubCh = st.twoTone ? CH.pocket : mch;
+    const capCol = chrome ? COL.chrome : COL.cap, capCh = chrome ? CH.chrome : CH.gloss;
     lathe(acc, [
-      pt(rHub, yH - 0.035, mc, mch),
-      pt(rHub * 0.97, yH + 0.004, mc, mch, true),
+      pt(rHub, yH - 0.035, hubC, hubCh),
+      pt(rHub * 0.97, yH + 0.004, hubC, hubCh, true),
+      pt(rCap * 1.08, yH + 0.004, faceC, faceCh, true),       // a machined ring round the cap
       pt(rCap, yH + 0.008, capCol, capCh, true),
       pt(rCap * 0.9, yH + 0.016, capCol, capCh),
       pt(0, yH + 0.02, capCol, capCh),
@@ -263,15 +399,16 @@
     }
 
     // ---- SPOKES / FACE per style --------------------------------------------
-    const r0 = rHub * 0.92, r1 = rr * 0.955;
+    const s0 = rHub * 0.92, s1 = rr * 0.955, t = rf_.t;
     function spokes(n, w0, w1, skew, extra) {
       extra = extra || {};
       for (let i = 0; i < n; i++) {
         const a = (i / n) * Math.PI * 2 + (extra.phase || 0);
         spoke(acc, {
-          a0: a, a1: a + skew, r0: r0, r1: r1, w0: w0, w1: w1,
+          a0: a, a1: a + skew, r0: s0, r1: s1, w0: w0, w1: w1,
           yf0: yH + (extra.dy || 0), yf1: yF + (extra.dy || 0), t: extra.t || t, caps: false, back: extra.back,
-        }, extra.col || mc, extra.ch == null ? mch : extra.ch);
+          sideCol: extra.col ? null : flankC, sideCh: flankCh,
+        }, extra.col || faceC, extra.ch == null ? faceCh : extra.ch);
       }
     }
     if (S === "sport5") spokes(5, rr * 0.22, rr * 0.30, 0);
@@ -285,7 +422,7 @@
       // laced: 20 thin chrome wires, alternate lean, from a proud hub to a sunk lip
       for (let i = 0; i < 20; i++) {
         const a = (i / 20) * Math.PI * 2, sk = (i & 1) ? 0.32 : -0.32;
-        spoke(acc, { a0: a, a1: a + sk, r0: rHub * 0.85, r1: r1, w0: 0.011, w1: 0.009, yf0: yH - (i & 1) * 0.008, yf1: yF + 0.004, t: 0.008, caps: false, back: true },
+        spoke(acc, { a0: a, a1: a + sk, r0: rHub * 0.85, r1: s1, w0: 0.011, w1: 0.009, yf0: yH - (i & 1) * 0.008, yf1: yF + 0.004, t: 0.008, caps: false, back: true },
           COL.chrome, CH.chrome);
       }
       // knock-off spinner: a two-eared bar across the cap
@@ -307,7 +444,7 @@
     } else if (S === "aero") {
       // flush aero cover over a five-fin face
       lathe(acc, [pt(barrelIn, yF - 0.012, COL.aero, CH.gloss), pt(rr * 0.86, yF, COL.aero, CH.gloss), pt(rHub, yH - 0.002, COL.aero, CH.gloss)], SEG_RIM);
-      spokes(5, rr * 0.05, rr * 0.07, 0.2, { t: 0.012, dy: 0.008, back: false, col: COL.alloy, ch: CH.alloy });
+      spokes(5, rr * 0.05, rr * 0.07, 0.2, { t: 0.012, dy: 0.008, back: false, col: COL.face, ch: CH.face });
     }
     return acc.geometry(R, W);
   }
@@ -321,11 +458,15 @@
     return geo;
   }
 
-  /* CALIPER in the CAR ROOT frame, centred on the wheel centre: an arc block
-     straddling the rotor edge near the top of the wheel, a touch behind the
-     vertical. Near-vertical on purpose: the front wheels now steer about the
-     vertical through their centre, and a caliper on that line barely moves
-     relative to the rim at full lock (it stays behind the spokes). */
+  /* CALIPER in the CAR ROOT frame, centred on the wheel centre, up and a
+     touch behind the vertical. Near-vertical on purpose: the front wheels
+     steer about the vertical through their centre, and a caliper on that
+     line barely moves relative to the rim at full lock.
+     SHAPE: a convex D-section swept along an arc — a rounded outboard piston
+     housing standing in front of the friction ring, a bridge over the
+     rotor's outer edge, a shallower inboard half behind it — with the arc
+     ends tapered, so it reads as a cast caliper hugging the disc, not a box
+     floating in front of it. The rotor edge disappears into it. */
   const calCache = new Map();
   function caliperGeo(radius, width, rimFrac, side, style) {
     const rf = rimFrac || 0.66, sd = side < 0 ? -1 : 1;
@@ -333,22 +474,63 @@
     let geo = calCache.get(key);
     if (geo) return geo;
     const st = STYLE[style] || STYLE.sport5;
-    const h = width * 0.5, rr = radius * rf, yF = st.face * h;
-    const t = Math.max(0.026, width * 0.10), yR = Math.max(-0.55 * h, yF - t - 0.045);
-    const y0 = yR - 0.028, y1 = yR + 0.028, q0 = rr * 0.60, q1 = rr * 0.87;
-    const phi = 0.22, span = 0.62;
-    // world direction up-and-back (0, cos phi, -sin phi) mapped into the
-    // wheel's local frame for this side's lay-down rotation
-    const lx = -sd * Math.cos(phi), lz = -Math.sin(phi), tc = Math.atan2(lz, lx);
-    const acc = new Acc();
+    const fr = rotorFrame(width, st), rr = radius * rf, yR = fr.yR, TT = fr.T;
+    const rOut = rr * 0.84, q0 = rr * 0.60, q1 = Math.min(rr * 0.915, rOut + 0.03);
     const col = [1, 1, 1];
-    lathe(acc, [pt(q0, y0, col, 0, true), pt(q1, y0, col, 0, true), pt(q1, y1, col, 0, true), pt(q0, y1, col, 0, true), pt(q0, y0, col, 0, true)],
-      3, { a0: tc - span / 2, a1: tc + span / 2, smooth: false });
-    [tc - span / 2, tc + span / 2].forEach(function (a, k) {
-      const c = Math.cos(a), s = Math.sin(a);
-      const P = function (r, y) { return [r * c, y, r * s]; };
-      const out = k ? [-s, 0, c] : [s, 0, -c];
-      acc.quadFlat(P(q0, y0), P(q1, y0), P(q1, y1), P(q0, y1), out, col, 0);
+    // the D-section, walked CCW in (r, y): outboard face first
+    const sec = [
+      [q0, yR + 0.003], [q0 + 0.006, yR + 0.022], [q0 + 0.018, yR + 0.031],
+      [q1 - 0.014, yR + 0.033], [q1 - 0.002, yR + 0.022], [q1, yR - TT - 0.004],
+      [q1 - 0.016, yR - TT - 0.016], [rOut - 0.02, yR - TT - 0.016],
+    ];
+    const phi = 0.22, span = 0.62, n = 6;
+    const lx = -sd * Math.cos(phi), lz = -Math.sin(phi), tc = Math.atan2(lz, lx);
+    // centroid of the section: the arc ends taper toward it
+    let cr = 0, cy = 0;
+    for (let i = 0; i < sec.length; i++) { cr += sec[i][0]; cy += sec[i][1]; }
+    cr /= sec.length; cy /= sec.length;
+    const ring = [];
+    for (let k = 0; k <= n; k++) {
+      const u = k / n, a = tc - span / 2 + span * u;
+      const taper = 1 - 0.28 * Math.pow(Math.abs(u * 2 - 1), 3);  // ends pinch in
+      ring.push(sec.map(function (p) {
+        const r = cr + (p[0] - cr) * taper, y = cy + (p[1] - cy) * taper;
+        return [r * Math.cos(a), y, r * Math.sin(a)];
+      }));
+    }
+    const acc = new Acc();
+    const m = sec.length;
+    // smooth section normals (2D, averaged across neighbouring edges)
+    const en = [];
+    for (let i = 0; i < m; i++) {
+      const A = sec[i], B = sec[(i + 1) % m];
+      const dr = B[0] - A[0], dy = B[1] - A[1], l = Math.hypot(dr, dy) || 1;
+      en.push([dy / l, -dr / l]);
+    }
+    const vn = [];
+    for (let i = 0; i < m; i++) {
+      const p = en[(i + m - 1) % m], q = en[i];
+      const x = p[0] + q[0], y = p[1] + q[1], l = Math.hypot(x, y) || 1;
+      vn.push([x / l, y / l]);
+    }
+    // the section is CW or CCW depending on walk; orient normals away from the centroid
+    for (let i = 0; i < m; i++) {
+      if ((sec[i][0] - cr) * vn[i][0] + (sec[i][1] - cy) * vn[i][1] < 0) { vn[i][0] = -vn[i][0]; vn[i][1] = -vn[i][1]; }
+    }
+    for (let k = 0; k < n; k++) {
+      const a0 = tc - span / 2 + span * (k / n), a1 = tc - span / 2 + span * ((k + 1) / n);
+      for (let i = 0; i < m; i++) {
+        const j = (i + 1) % m;
+        const N = function (idx, a) { return [vn[idx][0] * Math.cos(a), vn[idx][1], vn[idx][0] * Math.sin(a)]; };
+        quadN(acc, ring[k][i], ring[k + 1][i], ring[k + 1][j], ring[k][j], N(i, a0), N(i, a1), N(j, a1), N(j, a0), col, 0);
+      }
+    }
+    // end caps: fans from the (tapered) section centroid
+    [0, n].forEach(function (k) {
+      const a = tc - span / 2 + span * (k / n);
+      const nrm = k ? [-Math.sin(a), 0, Math.cos(a)] : [Math.sin(a), 0, -Math.cos(a)];
+      const cc = [cr * Math.cos(a), cy, cr * Math.sin(a)];
+      for (let i = 0; i < m; i++) acc.tri(cc, ring[k][i], ring[k][(i + 1) % m], nrm, nrm, nrm, col, 0);
     });
     geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.Float32BufferAttribute(acc.p, 3));

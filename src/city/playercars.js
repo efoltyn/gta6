@@ -1497,79 +1497,113 @@
        sgR        side-glass rear limit (z from front axle; paint behind)
        dp         extra black pillar strips (D-pillars), z from front axle
        rows       seat rows handed to the cabin (3 = six seats)
+       roll hoodBow   nose roll-off of the hood edge / hood bow (m)
+       fp         fender peak: hood edge rises, centre sinks, over the front wheel
+       cl cy      character line: M point proud by cl (m) at cy of the flank height
+       shIn shD   shoulder inset / drop (a flatter shelf = a brighter crease)
+       bgR        back-glass rear limit (z from front axle): paint behind it —
+                  a mid-engine car's sloping engine cover, the wedge truck's sail
+       cwD        cowl grille depth (shallow on a low, raked sports hood)
+       lid        rear shut line: "boot" | "gate" | "engine"
+       ant si fuel    shark-fin antenna / mid-engine side intake / fuel flap (default on)
   ============================================================ */
   const BODY = {
     // -- sedans (the taxi and the police cruiser are liveries on tesla-3) --
-    "tesla-3":   { L: 4.69, W: 1.86, FO: 0.86, WB: 2.88, R: 0.335, WW: 0.235, gap: 0.045, yB: 0.16, nL: 0.08, tL: 0.10,
-                   cowl: -0.52, rf: -1.42, rr: -2.30, deck: -3.02, yN: 0.66, yC: 0.97, yD: 1.02, yT: 0.95, roof: 1.44,
-                   tum: 0.80, rcN: 0.34, rcT: 0.28, bulge: 0.018, tuck: 0.012, doors: 2, bp: -1.55, sgR: -2.52, rows: 2,
-                   hoodC: 0.05, roofC: 0.05, winF: 0.25, winR: 0.7, eTN: 0.05, eTT: 0.03 },
-    "tesla-s":   { L: 4.97, W: 1.96, FO: 0.95, WB: 2.96, R: 0.35, WW: 0.245, gap: 0.045, yB: 0.15, nL: 0.08, tL: 0.10,
-                   cowl: -0.58, rf: -1.50, rr: -2.35, deck: -3.40, yN: 0.65, yC: 0.97, yD: 1.02, yT: 0.96, roof: 1.44,
-                   tum: 0.79, rcN: 0.36, rcT: 0.30, bulge: 0.02, tuck: 0.012, doors: 2, bp: -1.60, sgR: -2.62, rows: 2,
-                   hoodC: 0.05, roofC: 0.05, winF: 0.25, winR: 0.9, eTN: 0.05, eTT: 0.03 },
-    // -- compact hatch --
-    hatch:       { L: 4.10, W: 1.79, FO: 0.80, WB: 2.58, R: 0.31, WW: 0.215, gap: 0.045, yB: 0.16, nL: 0.08, tL: 0.10,
-                   cowl: -0.46, rf: -1.30, rr: -2.66, deck: -3.18, yN: 0.70, yC: 0.98, yD: 1.02, yT: 1.00, roof: 1.48,
-                   tum: 0.84, rcN: 0.30, rcT: 0.22, bulge: 0.018, tuck: 0.01, doors: 2, bp: -1.30, sgR: -2.72, rows: 2,
-                   hoodC: 0.05, roofC: 0.045, winF: 0.25, winR: 0.2, eTN: 0.05, eTT: 0.02 },
+    // Model 3: 4.69 L, 2.875 WB, 1.44 H, overhangs 0.84 / 0.97, a short
+    // boot lid, the screen base well forward, small fender humps
+    "tesla-3":   { L: 4.69, W: 1.85, FO: 0.84, WB: 2.875, R: 0.335, WW: 0.235, gap: 0.04, yB: 0.15, nL: 0.08, tL: 0.10,
+                   cowl: -0.44, rf: -1.38, rr: -2.32, deck: -3.10, yN: 0.68, yC: 0.97, yD: 1.02, yT: 0.96, roof: 1.44,
+                   tum: 0.80, rcN: 0.30, rcT: 0.26, bulge: 0.02, tuck: 0.012, doors: 2, bp: -1.55, sgR: -2.55, rows: 2,
+                   hoodC: 0.04, roofC: 0.05, winF: 0.25, winR: 0.7, eTN: 0.06, eTT: 0.03, roll: 0.05, fp: 0.02,
+                   lid: "boot", ant: true },
+    "tesla-s":   { L: 4.97, W: 1.96, FO: 0.93, WB: 2.96, R: 0.35, WW: 0.245, gap: 0.04, yB: 0.15, nL: 0.08, tL: 0.10,
+                   cowl: -0.52, rf: -1.46, rr: -2.35, deck: -3.40, yN: 0.66, yC: 0.97, yD: 1.02, yT: 0.96, roof: 1.44,
+                   tum: 0.79, rcN: 0.32, rcT: 0.28, bulge: 0.022, tuck: 0.012, doors: 2, bp: -1.60, sgR: -2.62, rows: 2,
+                   hoodC: 0.04, roofC: 0.05, winF: 0.25, winR: 0.9, eTN: 0.06, eTT: 0.03, roll: 0.05, fp: 0.025,
+                   lid: "boot", ant: true },
+    // -- compact hatch (Golf: 4.28 L, 2.64 WB, 1.46 H) --
+    hatch:       { L: 4.20, W: 1.79, FO: 0.84, WB: 2.62, R: 0.315, WW: 0.215, gap: 0.04, yB: 0.16, nL: 0.08, tL: 0.10,
+                   cowl: -0.50, rf: -1.34, rr: -2.66, deck: -3.26, yN: 0.72, yC: 0.99, yD: 1.02, yT: 1.00, roof: 1.47,
+                   tum: 0.84, rcN: 0.26, rcT: 0.18, bulge: 0.018, tuck: 0.01, doors: 2, bp: -1.32, sgR: -2.78, rows: 2,
+                   hoodC: 0.045, roofC: 0.045, winF: 0.25, winR: 0.2, eTN: 0.05, eTT: 0.02, roll: 0.05, fp: 0.012,
+                   lid: "gate", ant: true },
     // -- crossovers / SUVs --
-    "tesla-y":   { L: 4.75, W: 1.92, FO: 0.90, WB: 2.89, R: 0.36, WW: 0.255, gap: 0.05, yB: 0.23, nL: 0.08, tL: 0.10,
-                   cowl: -0.56, rf: -1.50, rr: -2.62, deck: -3.55, yN: 0.80, yC: 1.07, yD: 1.10, yT: 1.08, roof: 1.62,
-                   tum: 0.81, rcN: 0.34, rcT: 0.26, bulge: 0.022, tuck: 0.01, doors: 2, bp: -1.58, sgR: -2.95, rows: 2,
-                   hoodC: 0.05, roofC: 0.05, winF: 0.25, winR: 0.8, eTN: 0.05, eTT: 0.03, archTrim: true },
-    "tesla-x":   { L: 5.04, W: 2.00, FO: 0.98, WB: 2.97, R: 0.375, WW: 0.265, gap: 0.05, yB: 0.24, nL: 0.08, tL: 0.10,
-                   cowl: -0.60, rf: -1.60, rr: -2.95, deck: -3.78, yN: 0.81, yC: 1.09, yD: 1.14, yT: 1.10, roof: 1.68,
-                   tum: 0.82, rcN: 0.36, rcT: 0.26, bulge: 0.022, tuck: 0.01, doors: 2, bp: -1.62, sgR: -3.20, rows: 3,
-                   hoodC: 0.05, roofC: 0.05, winF: 0.25, winR: 0.7, eTN: 0.05, eTT: 0.03, archTrim: true },
-    suv:         { L: 5.02, W: 2.02, FO: 0.90, WB: 3.00, R: 0.40, WW: 0.275, gap: 0.07, yB: 0.30, nL: 0.06, tL: 0.08,
-                   cowl: -0.66, rf: -1.30, rr: -3.85, deck: -4.02, yN: 1.10, yC: 1.17, yD: 1.18, yT: 1.17, roof: 1.84,
-                   tum: 0.88, rcN: 0.22, rcT: 0.16, bulge: 0.03, tuck: 0.008, doors: 2, bp: -1.62, sgR: -3.92, dp: [-2.72], rows: 3,
-                   hoodC: 0.04, roofC: 0.035, winF: 0.15, winR: 0.1, eTN: 0.03, eTT: 0.01, archTrim: true, roll: 0.03, hoodBow: 0.01 },
-    // -- pickup: crew cab + open bed --
-    pickup:      { L: 5.70, W: 2.03, FO: 0.98, WB: 3.60, R: 0.42, WW: 0.28, gap: 0.08, yB: 0.36, nL: 0.06, tL: 0.04,
-                   cowl: -0.62, rf: -1.14, rr: -2.52, deck: -2.60, yN: 1.20, yC: 1.27, yD: 1.28, yT: 1.28, roof: 1.93,
-                   tum: 0.90, rcN: 0.20, rcT: 0.07, bulge: 0.03, tuck: 0.006, doors: 2, bp: -1.66, sgR: -2.56, rows: 2,
-                   hoodC: 0.04, roofC: 0.03, winF: 0.15, winR: 0.0, eTN: 0.03, eTT: 0.0, archTrim: true, seats: "pickup6", roll: 0.025, hoodBow: 0.01,
-                   bed: { z0: 0.07, z1: -2.66, floor: 0.92 } },
-    // -- sports / super: low, wide, cab-rearward fastbacks, one door a side --
-    porsche:     { L: 4.52, W: 1.90, FO: 1.00, WB: 2.45, R: 0.345, WW: 0.27, gap: 0.04, yB: 0.13, nL: 0.06, tL: 0.10,
-                   cowl: -0.62, rf: -1.40, rr: -2.02, deck: -3.12, yN: 0.62, yC: 0.83, yD: 0.91, yT: 0.89, roof: 1.30,
-                   tum: 0.78, rcN: 0.36, rcT: 0.34, bulge: 0.05, tuck: 0.02, doors: 1, sgR: -2.20, rows: 2,
-                   hoodC: 0.055, roofC: 0.055, winF: 0.35, winR: 1.3, eTN: 0.06, eTT: 0.02 },
-    ferrari:     { L: 4.61, W: 1.98, FO: 1.02, WB: 2.65, R: 0.345, WW: 0.285, gap: 0.035, yB: 0.12, nL: 0.04, tL: 0.08,
-                   cowl: -0.42, rf: -1.36, rr: -1.95, deck: -3.12, yN: 0.55, yC: 0.77, yD: 0.87, yT: 0.85, roof: 1.21,
-                   tum: 0.74, rcN: 0.40, rcT: 0.30, bulge: 0.06, tuck: 0.025, doors: 1, sgR: -2.05, rows: 1,
-                   hoodC: 0.06, roofC: 0.05, winF: 0.4, winR: 1.4, eTN: 0.08, eTT: 0.02 },
-    enzo:        { L: 4.70, W: 2.03, FO: 1.05, WB: 2.65, R: 0.35, WW: 0.29, gap: 0.035, yB: 0.12, nL: 0.03, tL: 0.08,
-                   cowl: -0.36, rf: -1.32, rr: -1.92, deck: -3.20, yN: 0.52, yC: 0.75, yD: 0.87, yT: 0.87, roof: 1.15,
-                   tum: 0.72, rcN: 0.44, rcT: 0.28, bulge: 0.07, tuck: 0.03, doors: 1, sgR: -2.02, rows: 1,
-                   hoodC: 0.07, roofC: 0.05, winF: 0.45, winR: 1.4, eTN: 0.10, eTT: 0.02 },
-    aventador:   { L: 4.78, W: 2.03, FO: 1.10, WB: 2.70, R: 0.35, WW: 0.30, gap: 0.035, yB: 0.11, nL: 0.03, tL: 0.08,
-                   cowl: -0.30, rf: -1.40, rr: -1.95, deck: -3.25, yN: 0.50, yC: 0.73, yD: 0.85, yT: 0.85, roof: 1.14,
-                   tum: 0.70, rcN: 0.30, rcT: 0.18, bulge: 0.06, tuck: 0.03, doors: 1, sgR: -2.05, rows: 1,
-                   hoodC: 0.035, roofC: 0.04, winF: 0.1, winR: 0.3, eTN: 0.12, eTT: 0.03 },
-    veyron:      { L: 4.46, W: 1.99, FO: 0.98, WB: 2.71, R: 0.35, WW: 0.29, gap: 0.035, yB: 0.12, nL: 0.04, tL: 0.08,
-                   cowl: -0.40, rf: -1.30, rr: -1.92, deck: -3.10, yN: 0.60, yC: 0.79, yD: 0.89, yT: 0.88, roof: 1.20,
-                   tum: 0.76, rcN: 0.46, rcT: 0.34, bulge: 0.05, tuck: 0.02, doors: 1, sgR: -2.00, rows: 1,
-                   hoodC: 0.06, roofC: 0.055, winF: 0.45, winR: 1.3, eTN: 0.05, eTT: 0.03 },
+    "tesla-y":   { L: 4.75, W: 1.92, FO: 0.90, WB: 2.89, R: 0.36, WW: 0.255, gap: 0.045, yB: 0.23, nL: 0.08, tL: 0.10,
+                   cowl: -0.52, rf: -1.48, rr: -2.62, deck: -3.55, yN: 0.81, yC: 1.07, yD: 1.10, yT: 1.08, roof: 1.62,
+                   tum: 0.81, rcN: 0.30, rcT: 0.24, bulge: 0.022, tuck: 0.01, doors: 2, bp: -1.58, sgR: -2.95, rows: 2,
+                   hoodC: 0.04, roofC: 0.05, winF: 0.25, winR: 0.8, eTN: 0.05, eTT: 0.03, archTrim: true, roll: 0.05, fp: 0.018,
+                   lid: "gate", ant: true },
+    "tesla-x":   { L: 5.04, W: 2.00, FO: 0.98, WB: 2.97, R: 0.375, WW: 0.265, gap: 0.045, yB: 0.24, nL: 0.08, tL: 0.10,
+                   cowl: -0.56, rf: -1.58, rr: -2.95, deck: -3.78, yN: 0.82, yC: 1.09, yD: 1.14, yT: 1.10, roof: 1.68,
+                   tum: 0.82, rcN: 0.32, rcT: 0.24, bulge: 0.022, tuck: 0.01, doors: 2, bp: -1.62, sgR: -3.20, rows: 3,
+                   hoodC: 0.04, roofC: 0.05, winF: 0.25, winR: 0.7, eTN: 0.05, eTT: 0.03, archTrim: true, roll: 0.05, fp: 0.018,
+                   lid: "gate", ant: true },
+    // -- full-size SUV (Tahoe 5.35 / Range Rover 5.05 L, WB 3.0-3.07, H 1.87):
+    //    a LONG front overhang under a tall, square, nearly flat hood, an
+    //    upright screen, the roof carried to a near-vertical tailgate --
+    suv:         { L: 5.20, W: 2.04, FO: 1.00, WB: 3.05, R: 0.405, WW: 0.275, gap: 0.06, yB: 0.30, nL: 0.10, tL: 0.10,
+                   cowl: -0.60, rf: -1.25, rr: -4.00, deck: -4.10, yN: 1.17, yC: 1.22, yD: 1.20, yT: 1.19, roof: 1.88,
+                   tum: 0.89, rcN: 0.14, rcT: 0.12, bulge: 0.03, tuck: 0.008, doors: 2, bp: -1.66, sgR: -4.08, dp: [-2.84], rows: 3,
+                   hoodC: 0.025, roofC: 0.03, winF: 0.12, winR: 0.05, eTN: 0.025, eTT: 0.01, archTrim: true, roll: 0.012, hoodBow: 0.004,
+                   lid: "gate", ant: true, shIn: 0.045, shD: 0.03 },
+    // -- pickup: crew cab + open bed (F-150 SuperCrew 5.5 ft: 5.89 L, 3.68 WB) --
+    pickup:      { L: 5.85, W: 2.03, FO: 1.00, WB: 3.66, R: 0.42, WW: 0.28, gap: 0.07, yB: 0.36, nL: 0.08, tL: 0.04,
+                   cowl: -0.62, rf: -1.22, rr: -2.56, deck: -2.64, yN: 1.24, yC: 1.29, yD: 1.28, yT: 1.28, roof: 1.93,
+                   tum: 0.90, rcN: 0.14, rcT: 0.07, bulge: 0.03, tuck: 0.006, doors: 2, bp: -1.70, sgR: -2.60, rows: 2,
+                   hoodC: 0.03, roofC: 0.03, winF: 0.15, winR: 0.0, eTN: 0.03, eTT: 0.0, archTrim: true, seats: "pickup6", roll: 0.015, hoodBow: 0.006,
+                   lid: "gate", ant: true, shIn: 0.045, shD: 0.03,
+                   bed: { z0: 0.07, z1: -2.70, floor: 0.92 } },
+    // -- sports / super: low, wide, one door a side. The MID-ENGINE cars are
+    //    NOT fastbacks: the glass stops right behind the seats and a high,
+    //    near-flat engine cover runs to a ducktail that sits ABOVE the nose
+    //    (the wedge). The nose is low and sharp: small plan radius, a strong
+    //    plan taper, almost no roll, the hood sunk between two fender ridges.
+    // 911 (992): 4.52 L, 2.45 WB, 1.30 H; rear engine, so it IS a fastback
+    porsche:     { L: 4.52, W: 1.90, FO: 0.97, WB: 2.45, R: 0.345, WW: 0.27, gap: 0.03, yB: 0.13, nL: 0.05, tL: 0.10,
+                   cowl: -0.62, rf: -1.40, rr: -2.02, deck: -3.10, yN: 0.60, yC: 0.83, yD: 0.92, yT: 0.90, roof: 1.30, cwD: 0.05,
+                   tum: 0.78, rcN: 0.32, rcT: 0.30, bulge: 0.05, tuck: 0.02, doors: 1, sgR: -2.20, rows: 2,
+                   hoodC: 0.03, roofC: 0.055, winF: 0.35, winR: 1.3, eTN: 0.08, eTT: 0.02, roll: 0.05, fp: 0.06, cl: 0.004,
+                   lid: "engine" },
+    // F8: 4.61 L, 2.65 WB, 1.21 H, 0.69 m wheels, overhangs ~1.03 / 0.93
+    ferrari:     { L: 4.61, W: 1.98, FO: 1.03, WB: 2.65, R: 0.35, WW: 0.285, gap: 0.028, yB: 0.12, nL: 0.03, tL: 0.08,
+                   cowl: -0.40, rf: -1.30, rr: -1.78, deck: -2.95, yN: 0.50, yC: 0.85, yD: 0.98, yT: 0.93, bgR: -2.15, roof: 1.21,
+                   tum: 0.74, rcN: 0.26, rcT: 0.28, bulge: 0.06, tuck: 0.03, doors: 1, sgR: -1.92, rows: 1, deckC: 0.06,
+                   hoodC: 0.03, roofC: 0.05, winF: 0.4, winR: 0.9, eTN: 0.12, eTT: 0.06, roll: 0.02, hoodBow: 0.015, cwD: 0.04,
+                   fp: 0.06, cl: 0.008, cy: 0.62, lid: "engine", si: true },
+    enzo:        { L: 4.70, W: 2.03, FO: 1.05, WB: 2.65, R: 0.35, WW: 0.29, gap: 0.028, yB: 0.12, nL: 0.03, tL: 0.08,
+                   cowl: -0.36, rf: -1.28, rr: -1.76, deck: -2.95, yN: 0.48, yC: 0.82, yD: 0.97, yT: 0.92, bgR: -2.12, roof: 1.15, deckC: 0.06, cwD: 0.04,
+                   tum: 0.72, rcN: 0.34, rcT: 0.26, bulge: 0.07, tuck: 0.03, doors: 1, sgR: -1.90, rows: 1,
+                   hoodC: 0.03, roofC: 0.05, winF: 0.45, winR: 0.9, eTN: 0.13, eTT: 0.02, roll: 0.02, hoodBow: 0.015,
+                   fp: 0.07, cl: 0.008, cy: 0.60, lid: "engine", si: true },
+    aventador:   { L: 4.78, W: 2.03, FO: 1.10, WB: 2.70, R: 0.355, WW: 0.30, gap: 0.028, yB: 0.11, nL: 0.03, tL: 0.08,
+                   cowl: -0.30, rf: -1.40, rr: -1.88, deck: -3.00, yN: 0.49, yC: 0.77, yD: 0.96, yT: 0.93, bgR: -2.25, roof: 1.14, deckC: 0.045, cwD: 0.035,
+                   tum: 0.70, rcN: 0.24, rcT: 0.16, bulge: 0.06, tuck: 0.03, doors: 1, sgR: -2.00, rows: 1,
+                   hoodC: 0.02, roofC: 0.04, winF: 0.1, winR: 0.2, eTN: 0.13, eTT: 0.03, roll: 0.01, hoodBow: 0.01,
+                   fp: 0.04, cl: 0.01, cy: 0.62, lid: "engine", si: true },
+    veyron:      { L: 4.46, W: 1.99, FO: 0.98, WB: 2.71, R: 0.35, WW: 0.29, gap: 0.03, yB: 0.12, nL: 0.04, tL: 0.08,
+                   cowl: -0.40, rf: -1.30, rr: -1.85, deck: -2.85, yN: 0.58, yC: 0.83, yD: 0.97, yT: 0.92, bgR: -2.15, roof: 1.20, deckC: 0.06, cwD: 0.045,
+                   tum: 0.76, rcN: 0.40, rcT: 0.30, bulge: 0.05, tuck: 0.02, doors: 1, sgR: -2.00, rows: 1,
+                   hoodC: 0.04, roofC: 0.055, winF: 0.45, winR: 0.8, eTN: 0.06, eTT: 0.03, roll: 0.05,
+                   fp: 0.04, cl: 0.006, lid: "engine" },
     // -- muscle: long hood, short deck, blunt nose --
-    muscle:      { L: 5.02, W: 1.96, FO: 0.95, WB: 2.95, R: 0.36, WW: 0.275, gap: 0.04, yB: 0.15, nL: 0.06, tL: 0.08,
+    muscle:      { L: 5.02, W: 1.96, FO: 0.95, WB: 2.95, R: 0.36, WW: 0.275, gap: 0.035, yB: 0.15, nL: 0.06, tL: 0.08,
                    cowl: -0.86, rf: -1.66, rr: -2.52, deck: -3.18, yN: 0.88, yC: 0.99, yD: 1.02, yT: 1.00, roof: 1.40,
-                   tum: 0.80, rcN: 0.14, rcT: 0.14, bulge: 0.03, tuck: 0.012, doors: 1, sgR: -2.62, rows: 2,
-                   hoodC: 0.035, roofC: 0.04, winF: 0.1, winR: 0.3, eTN: 0.02, eTT: 0.01 },
+                   tum: 0.80, rcN: 0.12, rcT: 0.12, bulge: 0.03, tuck: 0.012, doors: 1, sgR: -2.62, rows: 2,
+                   hoodC: 0.03, roofC: 0.04, winF: 0.1, winR: 0.3, eTN: 0.02, eTT: 0.01, cl: 0.009,
+                   lid: "boot", ant: true },
     // -- lowrider: a long, low sixties hardtop --
     lowrider:    { L: 5.40, W: 2.00, FO: 1.05, WB: 3.00, R: 0.33, WW: 0.23, gap: 0.05, yB: 0.13, nL: 0.04, tL: 0.06,
                    cowl: -0.80, rf: -1.62, rr: -2.78, deck: -3.26, yN: 0.84, yC: 0.93, yD: 0.95, yT: 0.92, roof: 1.36,
                    tum: 0.84, rcN: 0.12, rcT: 0.12, bulge: 0.01, tuck: 0.004, doors: 1, sgR: -2.86, rows: 2,
-                   hoodC: 0.03, roofC: 0.035, winF: 0.1, winR: 0.3, eTN: 0.02, eTT: 0.01 },
+                   hoodC: 0.03, roofC: 0.035, winF: 0.1, winR: 0.3, eTN: 0.02, eTT: 0.01, cl: 0.01, cy: 0.78,
+                   lid: "boot" },
     // -- the stainless wedge truck: faceted (flat), one straight rake from
     //    the nose over the apex, a long metal sail down to the tail --
     cybertruck:  { L: 5.68, W: 2.03, FO: 1.05, WB: 3.81, R: 0.44, WW: 0.30, gap: 0.09, yB: 0.40, nL: 0.02, tL: 0.02,
                    cowl: -0.30, rf: -1.52, rr: -1.56, deck: -4.62, yN: 1.02, yC: 1.34, yD: 1.32, yT: 1.30, roof: 1.80,
                    tum: 0.78, rcN: 0.05, rcT: 0.03, bulge: 0.0, tuck: 0.0, doors: 2, bp: -1.72, sgR: -2.35, rows: 2,
                    hoodC: 0.12, roofC: 0.0, deckC: 0.06, winF: 0.0, winR: 0.0, eTN: 0.0, eTT: 0.0, archTrim: true,
-                   roll: 0, hoodBow: 0.0, flat: true, backGlassR: -2.05 },
+                   roll: 0, hoodBow: 0.0, flat: true, bgR: -2.05, cl: 0, fuel: false },
   };
   const BODY_COLOR = {
     "tesla-s": 0xd1262f, "tesla-3": 0x67717b, "tesla-x": 0x185bd6, "tesla-y": 0x1470e3,
@@ -1594,7 +1628,11 @@
       sideGlassR: b.sgR != null ? zF + b.sgR : null,
       archTrim: !!b.archTrim, blackPillars: !!b.blackPillars, glassRoof: !!b.glassRoof,
       floorY: b.yB + 0.13, flat: !!b.flat,
-      backGlassR: b.backGlassR != null ? zF + b.backGlassR : null,
+      backGlassR: b.bgR != null ? zF + b.bgR : null,
+      // feature lines + panel detail (carbody.js addDetails)
+      fenderPeak: b.fp || 0, charLine: b.cl, charY: b.cy,
+      shoulderIn: b.shIn, shoulderDrop: b.shD, cowlDepth: b.cwD,
+      rearLid: b.lid || null, antenna: !!b.ant, fuelFlap: b.fuel !== false, sideIntake: !!b.si,
     };
     // hood bows up between the leading edge and the cowl; the belt kicks
     // up a touch toward the tail (a real car's wedge)
@@ -1616,9 +1654,13 @@
     const plan = [];
     if (b.doors === 1) plan.push({ row: 0, z0: Math.max(trail, lead - 1.32), z1: lead });
     else {
+      // the two doors MEET at the B-pillar: one shut line (two 6 mm leaf
+      // insets over a black jamb), not two lines around a 9 cm painted strip.
+      // The black pillar in the glass band stays 9 cm (S.pillars): the door
+      // frames carry it.
       const bp = zF + b.bp;
-      plan.push({ row: 0, z0: bp + 0.045, z1: lead });
-      plan.push({ row: 1, z0: Math.max(trail, S.zDeck + 0.1), z1: bp - 0.045 });
+      plan.push({ row: 0, z0: bp, z1: lead });
+      plan.push({ row: 1, z0: Math.max(trail, S.zDeck + 0.1), z1: bp });
       S.pillars = [bp];
     }
     if (b.dp) S.pillars = (S.pillars || []).concat(b.dp.map((z) => zF + z));
@@ -1650,8 +1692,16 @@
     darkGeos.push(box(0.04, 0.16, len * 0.30, side * (inner - 0.02), D.y0 + 0.17, zc + 0.02));      // door pocket
     darkGeos.push(box(0.03, 0.03, 0.09, side * (inner - 0.035), D.belt - 0.10, zc - 0.10));         // window switch pod
     darkGeos.push(box(0.04, 0.03, 0.14, side * (inner - 0.02), D.belt - 0.24, zc + 0.14));          // pull
-    const H = D.handle;                                                                          // outside handle, on the skin
-    darkGeos.push(box(0.03, 0.032, 0.13, H.x + side * 0.012, H.y, H.z));
+    /* OUTSIDE HANDLE, lying on the skin (tilted to the panel's lean): a dark
+       recess plate flush with the door and a body-colour pull bar standing
+       proud of it with rounded-off ends, so it reads as a handle with a
+       shadow behind it, not a black tab. */
+    const H = D.handle, tilt = (H.tilt || 0) * side;
+    const onSkin = (g, out) => { g.rotateZ(tilt); g.translate(H.x + side * out, H.y, H.z); return g; };
+    darkGeos.push(onSkin(new THREE.BoxGeometry(0.006, 0.046, 0.19).toNonIndexed(), 0.002));            // recess
+    const bar = new THREE.CylinderGeometry(0.0125, 0.0125, 0.16, 8, 1).toNonIndexed();
+    bar.rotateX(Math.PI / 2); bar.scale(0.9, 1, 1);
+    const paintGeos = [D.geos.paint, onSkin(bar, 0.014)];
     const mk = (geos, mat, shade) => {
       const list = geos.filter(Boolean).map((x) => (x.index ? x.toNonIndexed() : x));
       if (!list.length) return null;
@@ -1665,7 +1715,7 @@
       g.add(m);
       return m;
     };
-    const pm = mk([D.geos.paint], paint);
+    const pm = mk(paintGeos, paint);
     if (pm) pm.userData.paintZone = "door";
     mk(darkGeos, dark, true);
     mk([D.geos.glass], glass);
@@ -1702,12 +1752,14 @@
   let mirrorGeo = null, mirrorGlassGeo = null;
   function mirrorGeos() {
     if (mirrorGeo) return;
-    const g = new THREE.SphereGeometry(1, 12, 8);
+    const g = new THREE.SphereGeometry(1, 20, 12);
     g.scale(0.11, 0.06, 0.055);
     const p = g.attributes.position;
     for (let i = 0; i < p.count; i++) if (p.getZ(i) < -0.012) p.setZ(i, -0.012);   // the flat back the glass sits in
     g.computeVertexNormals();
-    mirrorGeo = g.toNonIndexed(); mirrorGeo.computeVertexNormals(); mirrorGeo._shared = true;
+    // smooth normals come from the INDEXED sphere; recomputing them after
+    // toNonIndexed() gave every triangle its own face normal (a faceted blob)
+    mirrorGeo = g.toNonIndexed(); mirrorGeo._shared = true;
     mirrorGlassGeo = new THREE.BoxGeometry(0.19, 0.095, 0.006); mirrorGlassGeo._shared = true;
   }
   function addMirrors(root, sec, zM, paint, trim, k) {
@@ -1756,11 +1808,27 @@
     const xG0 = midCab.xG0, xRail = xG0 * S.tumble;
     // the room runs to the backlight base: a saloon's parcel shelf, a hatch's
     // or an SUV's cargo floor (the third row lives there on a six-seater)
-    const cabRear = S.zDeck + 0.05;
+    // (a mid-engine car's glass stops at backGlassR: the room ends at the
+    // engine bulkhead there, not under the painted cover behind it)
+    const cabRear = (S.backGlassR != null && !S.flat ? Math.max(S.zDeck, S.backGlassR - 0.1) : S.zDeck) + 0.05;
     const spans = [];
     B.doors.forEach(function (D) { if (D.spec.side > 0) spans.push([D.spec.z0, D.spec.z1]); });
+    // THE DASH STAYS UNDER THE GLASS. carseats puts the dash top at
+    // belt + 5% of the greenhouse and its front edge 2 cm ahead of the room's
+    // zF; under a steeply raked screen (every sports car) a room that starts
+    // at the cowl pushed the dash out THROUGH the windscreen base as a black
+    // slab across the hood. Walk the room's front back until the glass, at
+    // half the cabin width, clears the dash top.
+    const roofIn = S.yRoof - S.roofCrown - 0.02;
+    const dashTop = midCab.yEdge + Math.max(0.16, roofIn - midCab.yEdge) * 0.05;
+    let cabFront = S.zCowl - 0.02;
+    for (let z = cabFront; z > S.zRoofF + 0.2; z -= 0.01) {
+      const sc = B.section(z + 0.03);
+      cabFront = z;
+      if (CBZ.carBody.upperY(sc, sc.xG0 * 0.55) > dashTop + 0.01) break;
+    }
     dressCabin(root, {
-      cabW: xG0 * 2, zR: cabRear, zF: S.zCowl - 0.02,
+      cabW: xG0 * 2, zR: cabRear, zF: cabFront,
       zTR: S.zRoofR, zTF: S.zRoofF, roofW: (xRail - 0.05) * 2,
       beltY: midCab.yEdge, roofY: S.yRoof - S.roofCrown - 0.02,
       floorY: S.floorY, rows: b.rows, doorSpans: spans, seatLayout: b.seats || undefined,
@@ -2724,6 +2792,7 @@
       if (m._playerCarOwned) {                 // ours already — repaint, don't mint
         if (m.color && m.color.copy) m.color.copy(c);
         if (m.emissive && m.emissive.copy) m.emissive.copy(c).multiplyScalar(0.03);
+        if (CBZ.carPaintFinish) CBZ.carPaintFinish(m, color);   // solid or metallic, per colour
         return;
       }
       let nm = swapped.get(m.id);
@@ -2736,6 +2805,7 @@
         // props (see the block comment). Without this line the car becomes
         // unpaintable the instant it is first painted.
         nm._bodyPaint = CFG.CAR_PAINT_HANDLE_V2 !== false;
+        if (CBZ.carPaintFinish) CBZ.carPaintFinish(nm, color);
         swapped.set(m.id, nm);
       }
       o.material = nm;
