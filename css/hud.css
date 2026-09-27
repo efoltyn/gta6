@@ -46,10 +46,6 @@
   padding:12px 16px; font-size:17px; font-weight:500; line-height:1.25;
   letter-spacing:.2px; transition:opacity .5s ease;
 }
-/* the radar takes the top-left after ~2s (see systems/minimap.js); the
-   objective cross-fades out unless it's mid kill-feed. */
-body.show-minimap #objective:not(.killfeed){ opacity:0; pointer-events:none; }
-body.show-minimap #minimap{ opacity:1; pointer-events:auto; }
 #objective .tag{
   display:inline-block; font-size:11px; font-weight:700; letter-spacing:2px;
   color:var(--orange); text-transform:uppercase; margin-bottom:3px; opacity:.95;
@@ -135,19 +131,6 @@ body.show-minimap #minimap{ opacity:1; pointer-events:auto; }
 #detectBar{height:100%; width:0%; border-radius:10px; background:var(--green); transition:width .08s linear, background .18s;}
 #detectState{font-weight:600;}
 
-#gangHud{
-  position:absolute; left:18px; bottom:86px; padding:8px 10px;
-  display:none; align-items:center; flex-wrap:wrap; gap:8px; font-size:11px; font-weight:700;
-  letter-spacing:.8px; text-transform:uppercase; max-width:min(360px,72vw);
-}
-#gangHud .tag{color:var(--orange); letter-spacing:1.6px;}
-#gangHud .red{color:#ff8e8e;}
-#gangHud .blue{color:#9fc3ff;}
-#gangHud .crew{color:#eaf3ff; opacity:.78;}
-#gangHud .good{color:#8dff9f;}
-#gangHud .warn{color:#ffd451;}
-#gangHud .hot{color:#ff9a7a;}
-#gangHud .dim{color:#eaf3ff; opacity:.62;}
 
 #hint{
   /* sits ABOVE the whole bottom-centre stack (loot row + weapon slots + ammo
@@ -160,24 +143,9 @@ body.show-minimap #minimap{ opacity:1; pointer-events:auto; }
 #hint.show{opacity:1; transform:translateX(-50%) translateY(0);}
 @media (max-width:900px),(max-height:560px){ #hint{font-size:13px; padding:7px 12px; bottom:188px} }
 
-/* ON TOUCH the hint is SPEECH, not a cell (systems/hud.js stamps .hint-sub;
-   flag TOUCH_HINT_SUBTITLE). The boxed panel above is a keyboard-era popup —
-   the owner's screenshot had it wedged half under the iPad interaction rail —
-   so on touch it adopts the one observed-world dialogue grammar this game has
-   (.world-subtitle / .pi-subtitle: heavy white Fredoka, black stroke, NO box)
-   and sits one step above the .pi-subtitle band (touch floor 120px) so the two
-   read as stacked lines of the same language, never as competing cards.
-
-   THAT "ONE STEP" WAS A TYPED 166px, AND IT WAS ONLY EVER RIGHT BY LUCK. On
-   touch the speech floor is 120px and one --subtitle-slot is 19.27px x 2.35 =
-   45.3px, so 120 + 45.3 = 165.3 — which is what 166 was approximating. It held
-   while the layer below it could not move. It can now: the subtitle LADDER
-   below (--subtitle-rank) lifts #citySpeech by a slot whenever an authored or
-   interaction line is live, which would have parked ambient speech at 165.3px
-   directly on this hint. So this rides the same ladder, always exactly one rung
-   above the highest live speech layer, and the default resolves to the 165.3px
-   it has always sat at. Derived, not typed — same fix as the flight of steps
-   that arrived nowhere, in a different file. */
+/* THE HINT AS ONE PLAIN LINE (#hint.hint-sub): on touch, and always in the
+   prison (systems/hud.js). No box; the shared ink halo; one rung above the
+   subtitle floor so it never lands on a speech line. */
 #hint.hint-sub{
   bottom:calc(var(--subtitle-floor) + var(--hint-rank, var(--subtitle-slot)));
   max-width:min(74vw, 680px);
@@ -186,14 +154,12 @@ body.show-minimap #minimap{ opacity:1; pointer-events:auto; }
   font-family:Fredoka, "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif;
   font-size:var(--pi-sub-line, 19px); font-weight:700; color:#fff;
   text-align:center; letter-spacing:.005em;
-  -webkit-text-stroke:var(--ink-stroke,1.4px) var(--ink,#090909); paint-order:stroke fill;
-  /* the shared recipe (see :root --ink-*) — this is a TOUCH-ONLY skin, so it
-     was the worst-hit copy of the four: a flat 2px ghost quad on 19px type. */
-  text-shadow:var(--ink-shadow,
-    -2px -2px 0 #090909, 2px -2px 0 #090909,
-    -2px 2px 0 #090909, 2px 2px 0 #090909,
-    0 3px 1px rgba(0,0,0,.9));
+  -webkit-text-stroke:var(--ink-stroke,0px) var(--ink,#090909);
+  text-shadow:var(--ink-shadow, 0 0 2px #000, 0 0 4px #000);
 }
+/* in the prison the line is small and low: it is a note, not a caption */
+body.prison-bare #hint.hint-sub{ font-size:clamp(15px, 1.9vh, 19px); opacity:0; }
+body.prison-bare #hint.hint-sub.show{ opacity:.92; }
 
 /* THE CENTRE TOAST — the legacy skin. 64px of white type over a four-layer
    RED shadow ladder, slammed in at 38% of the screen with a rotate-pop. It is
@@ -600,42 +566,30 @@ body.full-map-open #interact{display:none !important;}
   --subtitle-slot:calc(var(--subtitle-line) * 2.35);
   --subtitle-floor:calc(env(safe-area-inset-bottom,0px) + 206px);
 
-  /* ---- THE ONE INK RECIPE -------------------------------------------------
-     Every observed-world line in this game wears the same outline: heavy white
-     type, a black stroke, and a four-corner black drop that makes it legible
-     over a white pavement or a bright sky. That recipe was hand-copied into
-     FOUR rules (.world-subtitle-line, .pi-subtitle-line, #hint.hint-sub,
-     #pinteractWho) with three different stroke widths. It is declared ONCE
-     here now and each of those four reads it in two lines.
+  /* ---- THE ONE INK RECIPE: NOTHING OFFSET, NOTHING DRAWN TWICE -----------
+     Every observed-world line (.world-subtitle-line, #hint.hint-sub,
+     #pinteractWho, the prison's over-head speech) reads these two vars.
 
-     WHY em AND NOT px — OWNER, 2026-08-04, from an iPad screenshot: "when you
-     see the dialogue, there's little... you can see there's two versions of
-     the dialogue barely overlapping." There is only ONE element (proved: a
-     full-document scan at iPad metrics finds exactly one node carrying the
-     line). The second "version" was the outline itself. The old numbers — a
-     1.6px stroke plus four hard-offset ±2px COPIES of the glyph — were chosen
-     against desktop's 36px cap, where 2px is 5.5% of the em and the four
-     copies fuse into one smooth ring. Touch sizes the same line at ~19px
-     (mobile.css: clamp(16px,2.35vh,24px)), and there the SAME 2px is 10.5% of
-     the em: the copies stop fusing, the upper pair reads as a second sentence
-     ghosted up-left of the first, and they close the counters of o/a/e/g so
-     the letters silt up. One element, an outline made of four ghosts of itself.
+     THE DOUBLED-TEXT BUG (owner, 2026-08-04 and again 2026-09-27: NPC speech
+     "renders as two layers of identical text slightly offset"). There was
+     only ever ONE element. The second layer was THIS RECIPE: a text-shadow is
+     a full COPY of the glyph, and the recipe drew five of them, four at
+     +-.056em on the diagonals plus one .084em straight down with almost no
+     blur, under a -webkit-text-stroke. At 36px the four fuse into a ring; at
+     the 17-24px touch sizes they separate, and the down copy (sharp, 90%
+     black, 1.6px below) reads as a second sentence printed under the first.
+     The 2026-08-04 pass scaled the offsets to em, which kept every copy. And
+     WebKit paints each shadow for the STROKED glyph, and where paint-order is
+     not honoured for HTML text the stroke is drawn across the fill: fat,
+     doubled edges on exactly the iPad the owner plays on.
 
-     In em the ring is the same FRACTION of the letterform at every size. The
-     ratios are taken FROM the desktop cap so that end is byte-identical
-     (.045em x 36px = 1.62px stroke, .056em x 36px = 2.02px offsets, .084em x
-     36px = 3.02px drop), and 19px type finally gets the outline it would have
-     had if anyone had drawn it at 19px. em inside a custom property resolves
-     against the element that USES it — that is the whole reason one
-     declaration can serve four different type sizes without a media query.
-     One-line revert: delete this block and every consumer falls back through
-     its own var() default to the literal that shipped. */
+     So: no stroke, no offset. Three zero-offset blurs stack into a dark halo
+     that holds white type over a white wall and can never be read as a copy. */
   --ink:#090909;
-  --ink-stroke:.045em;
+  --ink-stroke:0px;
   --ink-shadow:
-    -.056em -.056em 0 var(--ink,#090909), .056em -.056em 0 var(--ink,#090909),
-    -.056em .056em 0 var(--ink,#090909), .056em .056em 0 var(--ink,#090909),
-    0 .084em .028em rgba(0,0,0,.9);
+    0 0 .06em var(--ink,#090909), 0 0 .14em var(--ink,#090909),
+    0 0 .3em rgba(0,0,0,.55);
 }
 @media (max-width:900px),(max-height:560px){
   :root{ --subtitle-floor:calc(env(safe-area-inset-bottom,0px) + 186px); }
@@ -654,54 +608,13 @@ body.full-map-open #interact{display:none !important;}
   text-align:center;
 }
 
-/* TWO SUBTITLE LAYERS NEVER SHARE PIXELS.
-   #citySpeech (social.js, z-47) and #campaignDialogue (campaign_ui.js, z-125)
-   are independent fixed elements that adopt the SAME class, so before this rule
-   a street bark and an authored campaign line rendered on top of each other,
-   character for character — the campaign layer simply painted over the world
-   layer 78 z-indexes higher. They are ranked instead of hidden, because losing
-   half a conversation is not better than overlapping it:
-
-     rung 0 — the authored campaign line. It keeps the readable base slot: it is
-              the beat you are not allowed to miss, and (with choices) it is the
-              one that owns a real panel.
-     rung 1 — the answer to a verb YOU pressed (#pinteractSay).
-     rung 2 — ambient world speech, lifted clear of both.
-
-   THE THIRD LAYER, ADDED 2026-08-04. This rule shipped with only two layers
-   enrolled and a third already built: interact.js's #pinteractSay (.pi-subtitle,
-   interact_touch.css). On touch that layer's floor is --pi-sub-floor = 120px and
-   #citySpeech's is --subtitle-floor = 120px — the SAME BAND, byte for byte, with
-   nothing ranking them. A ped bark landing while a verb result was up rendered
-   the two character-on-character, which is the exact fault this comment block
-   was written to end. It is a rung now, not an exception.
-   Order of the ladder is "whose line is it": the authored beat you may not miss
-   keeps the base, then the answer to a button you actually pressed, then the
-   street talking near you.
-
-   campaign_ui.js already stamps `campaign-dialogue-active` on <body> for the
-   whole life of a line (say() adds it, finishDialogue() removes it), and
-   interact.js now stamps `interact-subtitle-active` the same way (sayResult
-   adds, saySilence removes), so this costs no new state anywhere.
-   --subtitle-rank defaults to 0px, so a layer with nothing live under it is
-   unmoved and every existing single-line case is byte-identical. */
-body.campaign-dialogue-active #pinteractSay{ --subtitle-rank:var(--subtitle-slot); }
-body.campaign-dialogue-active #citySpeech,
-body.interact-subtitle-active #citySpeech{ --subtitle-rank:var(--subtitle-slot); }
-body.campaign-dialogue-active.interact-subtitle-active #citySpeech{
-  --subtitle-rank:calc(var(--subtitle-slot) * 2);
-}
-/* …and the touch hint (#hint.hint-sub, systems/hud.js) rides one rung above
-   whatever the tallest live speech layer is, by the same two flags. It is a
-   HINT, not a line of dialogue, so it belongs on top of the conversation
-   rather than inside it. */
-body.campaign-dialogue-active #hint.hint-sub,
-body.interact-subtitle-active #hint.hint-sub{
-  --hint-rank:calc(var(--subtitle-slot) * 2);
-}
-body.campaign-dialogue-active.interact-subtitle-active #hint.hint-sub{
-  --hint-rank:calc(var(--subtitle-slot) * 3);
-}
+/* TWO SUBTITLE LAYERS NEVER SHARE PIXELS. #citySpeech (social.js) and
+   #campaignDialogue (campaign_ui.js) adopt the same class; while an authored
+   campaign line is up (body.campaign-dialogue-active) ambient speech and the
+   touch hint ride one rung higher. The prison's speech is over the speaker's
+   head (systems/interact.js), so it is no longer a rung in this ladder. */
+body.campaign-dialogue-active #citySpeech{ --subtitle-rank:var(--subtitle-slot); }
+body.campaign-dialogue-active #hint.hint-sub{ --hint-rank:calc(var(--subtitle-slot) * 2); }
 .world-subtitle .world-subtitle-speaker{
   position:absolute!important;
   width:1px!important;
@@ -841,3 +754,49 @@ body:not(.touch) .wprompt .tpill{
 /* touch: the pill is a real button, styled by mobile.css's .tpill rule;
    the caret under it takes that rule's colours */
 body.touch .wprompt:not(.band)::after{background:rgba(13,26,40,.85); border-color:rgba(125,231,255,.55);}
+
+/* ============================================================
+   THE BARE PRISON (body.prison-bare, stamped by systems/hud.js in escape
+   mode). Owner, 2026-09-27: "every HUD, the overlapping tabs, everything
+   should be considered for removal, including the minimap, the timer, pills
+   that mean nothing. SHOW DON'T TELL."
+
+   Default is REMOVE. What stays on screen in the prison:
+     - the verb pinned over the thing (#prisonPrompts, interactions.js)
+     - the people card's VERBS (desktop key rows / touch rail); no name plate,
+       no read line, only a stall's item + price above them
+     - speech over the speaker's head (#prisonSpeech, interact.js)
+     - the hotbar (it is how you pick an item), the crosshair, #ammo while armed
+     - the hurt/heat vignette, the lockdown edge
+     - one short note line (#hint) through the renderer policy in hud.js
+     - the escape plan, CLOSED until asked for (P / the small Plan button);
+       the clock, the cigs, the map and the rankings are inside it
+   Everything below is still built and still updated by its owner; it is just
+   not on screen. The functions behind the two tap targets that go (minimap =
+   open map, Ranks = rankings) are buttons in the open plan.
+============================================================ */
+body.prison-bare #objective,
+body.prison-bare #topright,
+body.prison-bare #keycard,
+body.prison-bare #inventory,
+body.prison-bare #detectWrap,
+body.prison-bare #compass,
+body.prison-bare #minimap,
+body.prison-bare #dashBtn,
+body.prison-bare #runStats,
+body.prison-bare #pickupFeed,
+body.prison-bare #crateChip,
+body.prison-bare #streakHud,
+body.prison-bare #streakMeter,
+body.prison-bare #toast,
+body.prison-bare #hitfx,
+body.prison-bare #interactName,
+body.prison-bare #interactNote:empty{
+  display:none !important;
+}
+/* the desktop card is its key rows and nothing else: no panel slab */
+body.prison-bare #interact{
+  width:auto; min-width:0; padding:6px 10px 6px 8px; border-left-width:0;
+  background:rgba(8,11,17,.38); box-shadow:none;
+}
+body.prison-bare #interactNote{ margin:0 0 4px; max-height:15px; }

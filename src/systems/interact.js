@@ -21,12 +21,9 @@
    after you've earned it, and systems/prisonfriends.js owns that — see
    the VERB table for the whole argument.
 
-   ON TOUCH the whole card is REPLACED rather than restyled — on iPad,
-   every choice is a vertical rail of buttons docked beside Reload, ONE
-   WORD per button with price/status as a small chip inside it (the
-   survival dock's Throw/Grab/Punch grammar). Phones retain the compact
-   four-button/pill layout, and results use dialogue instead of a panel. See the
-   PRISON_INTERACT_TOUCH block below and css/interact_touch.css.
+   ON TOUCH the card is replaced by a rail of one-word buttons (see
+   css/interact_touch.css). Every spoken line, the answer to a verb
+   included, floats over the speaker's head (CBZ.prisonSay below).
 ============================================================ */
 (function () {
   "use strict";
@@ -35,43 +32,16 @@
   const RANGE = 3.6;
 
   // ---------------------------------------------------------------------------
-  //  PRISON_INTERACT_TOUCH — the iPad answer to this card.
-  //
-  //  OWNER correction: on iPad every interaction action is a VERTICAL rail
-  //  starting beside Reload, with explanation text to the LEFT of each button.
-  //  And the standing complaint behind it: "many things on iPad where a pop will
-  //  say press g or shift DUH i can't do that... like turning tips off is a key
-  //  I can't press."
-  //
-  //  This card was a keyboard artefact end to end: four [J][K][L][;] chips and
-  //  an "[H] Tips: ON" footer whose only affordance was a key no tablet has.
-  //  On touch it becomes:
-  //    • iPad: the contextual verbs in one vertical rail beside Reload, one
-  //      52px+ button per verb — a single WORD plus a status/price chip;
-  //    • phone: the same verbs stacked in one .svbtn column at the thumb;
-  //    • the actor's name / read / ONE teaching line above the row in the
-  //      gang-city dialogue treatment (white Fredoka 700, black stroke, no box)
-  //      instead of a panel of prose beside the NPC;
-  //    • every verb RESULT spoken as a bottom-centre subtitle in that same
-  //      grammar rather than a HUD hint panel (desktop gets this too — it is the
-  //      one part of the ask that is not touch-specific);
-  //    • a tappable TIPS pill replacing the "[H]" footer.
-  //  Desktop keeps the same panel and rows; J/K/L/; leave I exclusively owned
-  //  by the Prison stash, even while a contextual card is visible.
-  //
-  //  Flags (one-line reverts, declared here rather than in config.js so a
-  //  parallel wave never races this file against that one):
-  //    PRISON_INTERACT_TOUCH    — the whole touch layer (false = legacy card)
-  //    PRISON_INTERACT_SUBTITLE — result lines as subtitles (false = flashHint)
+  //  PRISON_INTERACT_TOUCH: on touch the card is a rail of one-word buttons
+  //  (iPad: beside Reload; phone: a stack at the thumb). Desktop keeps J/K/L
+  //  rows. Either way the card is VERBS; what a man says goes over his head.
   // ---------------------------------------------------------------------------
   if (CBZ.CONFIG && CBZ.CONFIG.PRISON_INTERACT_TOUCH == null) CBZ.CONFIG.PRISON_INTERACT_TOUCH = true;
-  if (CBZ.CONFIG && CBZ.CONFIG.PRISON_INTERACT_SUBTITLE == null) CBZ.CONFIG.PRISON_INTERACT_SUBTITLE = true;
   // systems/touch.js's CBZ.touchMode latch is the ONE touch-mode signal in this
   // codebase (it stamps body.touch at the same moment). Never a second detector.
   function touchUI() {
     return !!(CBZ.touchMode && (!CBZ.CONFIG || CBZ.CONFIG.PRISON_INTERACT_TOUCH !== false));
   }
-  function subtitleOn() { return !CBZ.CONFIG || CBZ.CONFIG.PRISON_INTERACT_SUBTITLE !== false; }
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
       return c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&quot;";
@@ -85,7 +55,7 @@
   function warnActor(a) {
     a.aiState = "flee";
     a.fleeT = 1.8;
-    return { ok: true, msg: `${a.data.name.replace(/^the |^a |^an /, "")} backs off.` };
+    return { ok: true, msg: "Alright. I'm going." };
   }
 
   const VERB = {
@@ -156,6 +126,11 @@
     bribe:    { label: "Bribe",           fn: (a) => CBZ.econ.bribe(a) },
     snitch:   { label: "Snitch",          fn: (a) => (CBZ.econ.snitch ? CBZ.econ.snitch(a) : { ok: false, msg: "" }) },
     steal:    { label: "Steal",           fn: (a) => CBZ.econ.steal(a) },
+    // ---- in the warden's office, when he sent for you (systems/prisonwarden.js owns all four)
+    wdeal:    { label: "Deal",            fn: (a) => (CBZ.warden ? CBZ.warden.act("wdeal", a) : { ok: false, msg: "" }) },
+    wfavor:   { label: "Favor",           fn: (a) => (CBZ.warden ? CBZ.warden.act("wfavor", a) : { ok: false, msg: "" }) },
+    wthreat:  { label: "Threaten",        fn: (a) => (CBZ.warden ? CBZ.warden.act("wthreat", a) : { ok: false, msg: "" }) },
+    whand:    { label: "Hand over",       fn: (a) => (CBZ.warden ? CBZ.warden.act("whand", a) : { ok: false, msg: "" }) },
     payoff:   { label: "Payoff",          fn: (a) => CBZ.econ.payoff(a) },
     join:     { label: "Join",            fn: (a) => CBZ.joinGang(a) },
     listen:   { label: "Listen",          fn: (a) => a.approach ? approachAction(a, "listen") : CBZ.econ.talk(a) },
@@ -179,7 +154,7 @@
       CBZ.game.kos = (CBZ.game.kos || 0) + 1;
       if (CBZ.game.role === "cop" && CBZ.addComplaint) CBZ.addComplaint(justified ? -2 : 5);
       if (CBZ.killstreakOnDown) CBZ.killstreakOnDown(a, "detain");
-      return { ok: true, msg: justified ? `${a.data.name.replace(/^the |^a |^an /, "")} detained on a clean read.` : `${a.data.name.replace(/^the |^a |^an /, "")} detained. Witnesses may complain.` };
+      return { ok: true, msg: "" };   // he goes down; that is the receipt
     } },
     search:   { label: "Search",          fn: (a) => {
       const justified = a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight";
@@ -191,7 +166,7 @@
         else if (CBZ.econ.rng() < 0.25) CBZ.addComplaint(6);
       }
       CBZ.sfx("coin");
-      return { ok: true, msg: justified ? `Good tip. Found ${found} cigs with clean cause.` : `Found ${found} cigs in the shakedown.` };
+      return { ok: true, msg: justified ? "Alright, it's yours." : "That's mine, man." };
     } },
     // ---- held at gunpoint (systems/intimidate.js owns the state) ----------
     // Both dispatch back into intimidate rather than reimplementing the
@@ -218,108 +193,6 @@
     } },
   };
 
-  // one-line teaching text per verb; shown until the player has used it
-  const DESC = {
-    insult:   "Talk trash · drops rep, may start a brawl",
-    fight:    "Throw hands · chain hits for a K.O. combo",
-    talk:     "Ask what they need · running favors builds rep",
-    befriend: "They're offering · take it and they run with you",
-    squash:   "He's holding a grudge · cigs can bury it",
-    collect:  "Somebody owes him · hear the job",
-    settle:   "Hand over what you took · keep your cut",
-    work:     "Can't pay the tab · collect theirs instead",
-    trade:    "Buy contraband with cigarettes",
-    bribe:    "A moment of blindness · a name or standing buys it",
-    snitch:   "Trade a rival's name for the heat on you",
-    steal:    "Lift a key, a chain, or cigs · risky if seen",
-    payoff:   "Corrupt cop cleans up heat for a price",
-    join:     "Join their gang for backup & protection",
-    listen:   "Hear what they want",
-    accept:   "Take the offer",
-    respect:  "Back off and avoid gang trouble",
-    pay:      "Spend cigs to settle it",
-    haggle:   "Try to lower the price",
-    threaten: "Scare them off, risk backlash",
-    refuse:   "Push them off",
-    confrontReport: "Press the witness for details",
-    paySilence: "Spend cigs to cool the report",
-    threatenSnitch: "Scare the reporter, risk gang backlash",
-    question: "Press for a line or tip",
-    warn:     "Make them scatter",
-    detain:   "Drop them without an arrest meter",
-    search:   "Confiscate pocket loot",
-    rob:      "Empty his pockets at gunpoint",
-    restrain: "Spend a bedsheet rope to tie him. He stays down",
-    release:  "Lower the gun and let him go",
-  };
-  // TIPS ARE OFF UNTIL ASKED FOR (JAIL_SHOW_DONT_TELL, declared entities/ai.js).
-  //
-  // OWNER: "the HUD is cluttered with 4th-wall breakers." Measured on the
-  // deployed build: walking up to a guard raised a card carrying FOUR verbs,
-  // each with an explainer line under it ("Slip 10 to look away · Spend cigs to
-  // make authority look away" — the second half restates the first), plus an
-  // "[H] Tips: ON" footer. 433 characters of HUD text at that moment against
-  // 141 idle. The GRAMMAR LAW this repo already enforces on the booking panel
-  // is the same one: a button is a bare VERB.
-  //
-  // Nothing is deleted. `helpOn` simply defaults OFF instead of ON, so the
-  // teaching layer is exactly where the footer always said it was — behind H —
-  // and a player who wants it back gets it in one keypress, persisted. Flag off
-  // restores the old default.
-  //
-  // ---- 2026-08-04: TIPS ARE GONE, NOT DEFAULTED OFF (PRISON_TIPS) ----------
-  // OWNER, playing on a phone: "tips on off button and tips in general need to
-  // be removed from the game — see how it takes up HUD."
-  //
-  // Defaulting `helpOn` to false (above) left the SWITCH on screen forever: a
-  // whole extra row in the docked iPad rail ("Teaching tips · Explain
-  // unfamiliar actions beside their buttons · TIPS OFF"), a "Tips OFF" pill in
-  // the phone overflow, and an "[H] Tips: OFF" footer on the desktop card. That
-  // is a permanent control that says OFF, which is more fourth wall than the
-  // teaching line it was hiding — it is visible in the owner's own screenshot,
-  // parked over the world at the left edge.
-  //
-  // PRISON_TIPS is the whole layer's master switch and it defaults FALSE:
-  // `tipsAllowed()` false means helpOn can never be true, no toggle is drawn on
-  // any of the three surfaces, [H] does nothing and the localStorage choice is
-  // ignored. Set CBZ.CONFIG.PRISON_TIPS = true and every one of them comes back
-  // exactly as it shipped, including the saved preference. `learned` keeps
-  // being recorded either way, so turning tips on does not re-teach verbs the
-  // player has already used.
-  if (CBZ.CONFIG && CBZ.CONFIG.PRISON_TIPS == null) CBZ.CONFIG.PRISON_TIPS = false;
-  function tipsAllowed() { return !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_TIPS); }
-  let learned = {}, helpOn = !(CBZ.CONFIG && CBZ.CONFIG.JAIL_SHOW_DONT_TELL !== false);
-  try { learned = JSON.parse(localStorage.getItem("cbz_learned") || "{}"); } catch (e) {}
-  try {
-    const saved = localStorage.getItem("cbz_help");
-    if (saved != null) helpOn = saved !== "0";        // an explicit choice always wins
-  } catch (e) {}
-  if (!tipsAllowed()) helpOn = false;
-  function persist() {
-    try { localStorage.setItem("cbz_learned", JSON.stringify(learned)); localStorage.setItem("cbz_help", helpOn ? "1" : "0"); } catch (e) {}
-  }
-  function tipsShowing() { return helpOn && !Object.keys(DESC).every((k) => learned[k]); }
-  function reportTone(a) {
-    if (!a || !(a.reportedPlayerT > 0) || a.reportedPlayerCred == null) return "";
-    if (a.reportedPlayerCred < 0.45) return "shaky ";
-    if (a.reportedPlayerCred > 0.78) return "solid ";
-    return "";
-  }
-  /* THE READ LINE IS A THING YOU NOTICE, NOT A RECORD YOU QUERY.
-     This is the strip under the actor's name on the interaction card, and it
-     was printing the snitch ledger as a database row: "KNOWN SNITCH - solid
-     reported to Officer #3 · cred 62% · 14s · 3 heard · visual". Same five
-     facts, said the way you would say them about a man across a yard. Nothing
-     is hidden — credibility, spread and freshness each still change the words. */
-  function reportDetail(a) {
-    const base = `${reportTone(a)}${a.reportedPlayerKind || "reported"} to ${a.reportedPlayerGuard || "a guard"}`;
-    const parts = [];
-    if (a.reportedPlayerCred != null) parts.push(a.reportedPlayerCred > 0.78 ? "believed" : (a.reportedPlayerCred < 0.45 ? "doubted" : "half-believed"));
-    if (a.reportedPlayerT > 0) parts.push("still fresh");
-    if (a.reportedPlayerSpread > 1) parts.push("word got round");
-    if (a.reportedPlayerLastKnown && a.reportedPlayerLastKnown.type) parts.push(a.reportedPlayerLastKnown.type === "visual" ? "saw you himself" : "only heard it");
-    return `talks to the screws. ${base}${parts.length ? " · " + parts.join(" · ") : ""}`;
-  }
   function cleanName(a) {
     return a && a.data && a.data.name ? a.data.name.replace(/^the |^a |^an /, "") : "someone";
   }
@@ -333,116 +206,24 @@
     const names = CBZ.GANG_NAMES || ["Reds", "Blues"];
     return (names[a.gang] || "Crew").replace(/^the /, "");
   }
-  function readKindLabel(kind) {
-    if (kind === "wealth") return "heard cigs";
-    if (kind === "heat") return "heard heat";
-    if (kind === "badge") return "heard badge";
-    if (kind === "snitch") return "heard snitch";
-    if (kind === "debt") return "heard debt";
-    if (kind === "fear") return "heard violence";
-    return kind ? "heard " + kind : "";
-  }
-  function actorRead(a) {
-    if (!a) return "";
-    if (a.kind === "warden") {
-      // he cannot be bought or bent — the read is whether he is BUYING NAMES
-      const w = CBZ.econ && CBZ.econ.snitchOffer ? CBZ.econ.snitchOffer(a) : "";
-      const bits = [w === "" ? "buying names" : (w === "later" ? "heard enough today" : "runs the place")];
-      if (a.flashlightOn) bits.push("flashlight up");
-      return bits.join(" | ");
-    }
-    if (a.kind === "guard") {
-      const guardBits = [a.corrupt ? "bent cop" : "clean guard"];
-      if (a.bribed > 0) guardBits.push("bought");
-      else if (a.corrupt) guardBits.push("wants payoff");
-      if (a.flashlightOn) guardBits.push("flashlight up");
-      return guardBits.slice(0, 3).join(" | ");
-    }
+  /* THE CARD CARRIES VERBS, NOT A DOSSIER (owner, 2026-09-27: "all the
+     text... there's just too much bullshit in the way").
 
-    const bits = [];
-    const trust = a.playerTrust || 0;
-    const fear = a.playerFear || 0;
-    const grudge = a.playerGrudge || 0;
-    if (trust >= 8) bits.push("loyal");
-    else if (trust >= 4) bits.push("trusts you");
-    else if (trust <= -4) bits.push("cold");
-    if (grudge >= 9) bits.push("wants payback");
-    else if (grudge >= 5) bits.push("holds grudge");
-    if (fear >= 9) bits.push("afraid");
-    else if (fear >= 5) bits.push("wary");
+     The card used to print the man's NAME in caps, a "read" line assembled
+     from the social ledger ("loyal | holds grudge | Reds hostile"), the
+     snitch report as prose, "waiting on you: ...", "his offer stands: ..."
+     and his pitch AGAIN under the line he had just said out loud. All of it
+     is still true and still drives the AI; none of it is on screen. You know
+     who he is because he is standing in front of you, and you learn what he
+     thinks of you from how he acts and what he says.
 
-    const read = a.blockRead && (a.blockRead.t || 0) > 0 ? a.blockRead : null;
-    if (read && read.score > 12) {
-      const src = read.source ? ` from ${shortText(read.source, 11)}` : "";
-      bits.push(`${readKindLabel(read.kind)}${src}`);
-    }
-
-    if (a.gang >= 0) {
-      const crew = gangShort(a);
-      const standing = CBZ.gangStanding ? CBZ.gangStanding(a.gang) : 0;
-      const debt = CBZ.gangDebt ? CBZ.gangDebt(a.gang) : 0;
-      if (debt >= 10) bits.push(`${crew} want paying`);
-      else if (standing >= 35) bits.push(`${crew} cover`);
-      else if (standing <= -22) bits.push(`${crew} hostile`);
-      else if (CBZ.player && CBZ.player.gang === a.gang) bits.push(`${crew} crew`);
-    }
-
-    if (!bits.length) {
-      if (a.role === "dealer" || (a.data && a.data.offer)) bits.push("watching pockets");
-      else if ((a.personality && a.personality.snitch) > 0.72) bits.push("talks to guards");
-      else if ((a.personality && a.personality.nerve) > 0.72) bits.push("bold");
-      else bits.push("neutral read");
-    }
-    return bits.slice(0, 3).join(" | ");
-  }
-  /* THE ALL-CAPS LABELS WERE A QUEST LOG WEARING A PERSON'S FACE.
-     "TASK: Rough up Officer #3" · "FRIEND - Befriend to walk free" ·
-     "LOVER - Romance to walk free" · "TIP TARGET - search or detain with
-     cleaner cause": four category headers and two of them naming the BUTTON
-     the player should press next. The state behind each is unchanged and each
-     still shows — as the thing about that person that a man standing in front
-     of them would actually notice. */
+     The one thing that stays is the NOUN on a stall: a Trade button with a
+     price chip and no item name is a button you cannot decide on. */
   function panelNote(a) {
-    // WHAT YOU ARE IN THE MIDDLE OF WITH THIS MAN. Ranked under live speech
-    // (he is talking, that wins) and over the ledger reads, because a job you
-    // are actually carrying is the most current fact about the two of you.
-    const contractNote = CBZ.prisonContract ? CBZ.prisonContract.note(a) : "";
-    const priority = a.quest
-      ? "waiting on you: " + a.quest.text
-      : (a.approach && a.approach.msg ? a.approach.msg
-        : (a.standingOffer && a.standingOffer.saved ? "his offer stands: " + shortText(a.standingOffer.saved.msg, 46)
-        : (contractNote ? contractNote
-        : ((a.reportedPlayerT || 0) > 0 ? reportDetail(a)
-        : (CBZ.game.role === "cop" && a.copMarked > 0 ? "somebody put his name in"
-        : ((a.playerGrudge || 0) >= 4 && a.grudgeWhy ? "still sore about " + a.grudgeWhy
-        : (a.rep >= (CBZ.quests ? CBZ.quests.FRIEND : 100) ? "owes you, and knows it"
-        : "")))))));
-    const read = actorRead(a);
-    const motive = a.approach && a.approach.motive ? `motive: ${shortText(a.approach.motive, 24)}` : "";
-    if (!priority) return stall(a) ? (read ? `${stall(a)} | ${read}` : stall(a)) : read;
-    if (motive) return `${shortText(priority, 62)} | ${motive}`;
-    return priority.length < 58 && read ? `${priority} | ${read}` : priority;
-  }
-
-  /* TRADE FOR WHAT? (owner, with the screenshot: a man called PIKE, a button
-     reading TRADE with a chip reading "4", and a spoken line reading "4. Crew
-     price. Don't go telling people." — the name of the thing on sale appearing
-     NOWHERE on screen.)
-
-     The item was never lost in the data: labelFor() has always said "Buy
-     Burner Phone. 14". But that string is the DESKTOP row and the touch
-     aria-label — on iPad the visible button is one word by house law and the
-     chip is the bare price, so a sighted player got a number and a verb and
-     no noun. A stall is the most ordinary thing in this prison to want to
-     read at a glance, so it goes in the card's own note line, where it sits
-     while you decide instead of only after you press. The price comes from
-     economy.js's live pricer, the same one the chip and the till ask, so the
-     note can never quote a number the sale won't honour. */
-  function stall(a) {
     const o = a && a.data && a.data.offer;
     if (!o || !o.item) return "";
     const p = CBZ.econ && CBZ.econ.offerPrice ? CBZ.econ.offerPrice(a) : null;
-    return `selling ${shortText(o.item, 18)} · ${p ? p.price : o.price}`;
+    return `${shortText(o.item, 22)}, ${p ? p.price : o.price} cigs`;
   }
 
   function verbsFor(a) {
@@ -536,14 +317,17 @@
     if (CBZ.game.role === "cop" && !(a.kind === "guard" || a.kind === "warden")) {
       return ["question", "search", "detain"];
     }
-    /* THE WARDEN IS NOT A BENT SCREW WITH A BIGGER PRICE (owner, 2026-08-19:
-       "he should not accept cigs and have options like [a guard's]... acted
-       like an inmate"). He ran the corrupt-guard menu — bribe/payoff/trade —
-       priced in cigarettes. His menu is now his office: SNITCH (a name for
-       the heat on you — economy.js's snitch(), the one thing an inmate can
-       actually sell the top of a prison), INSULT, and STEAL (the Gun-Room
-       Key hunt, unchanged). Campaign beats still outrank this above. */
-    if (a.kind === "warden") return ["snitch", "insult", "steal"];
+    /* THE WARDEN DOES NOT CHAT. In his office on his summons the card is
+       his three: DEAL, FAVOR, THREATEN (systems/prisonwarden.js). Anywhere
+       else he will hear a name (SNITCH), and his pocket is only reachable
+       asleep or alone at his desk, never on rounds with his officers.
+       Campaign beats still outrank this above. */
+    if (a.kind === "warden") {
+      const W = CBZ.warden;
+      const meet = W && W.verbs ? W.verbs(a) : null;
+      if (meet) return meet;
+      return (W && W.exposed && !W.exposed()) ? ["snitch"] : ["snitch", "steal"];
+    }
     if (a.kind === "guard") {
       /* THE BENT SCREW RAN FIVE (bribe/payoff/trade/insult/steal) — the exact
          menu the owner pointed at ("trading also has like 5"). Two of those
@@ -639,166 +423,65 @@
     const heat = g.detection != null ? g.detection : (g.heat || 0);
     return heat > 0 || (g.complaints || 0) > 0 || (g.racketDebt || 0) > 0 || (g.wanted || 0) > 0;
   }
+  /* THE CHIP IS A NUMBER OR A NOUN, NEVER A MOOD. The button is one word;
+     the chip under it says what it costs or what it is about ("14", "Shiv",
+     "needs rope"). The status words it used to carry ("trust helps", "bad
+     blood", "counting", "dark", "hot", "scared", "risk") were the social
+     ledger printed on a button: the man's face and the hour already say it. */
   function subFor(a, v) {
     if (CBZ.cityCampaignPrisonSub) {
       const authored = CBZ.cityCampaignPrisonSub(a, v);
       if (authored != null) return authored;
     }
-    // THE BUTTON IS ONE WORD (owner, 2026-08-19: "buttons should be one
-    // word") — so the chip is where everything else lives: the PRICE on a
-    // priced verb, the offer on a trade, a status word ("armed", "counting")
-    // otherwise. This used to blank every priced verb because the price was
-    // written into a sentence label; the sentence is aria-only now.
-    /* NO METERS ON A PERSON. `"" + Math.round(a.love)` and `"♥ " + a.rep` were
-       the two floating numbers in this menu — a relationship printed as a
-       percentage beside somebody's face. The state is unchanged and so are the
-       thresholds; what the chip shows is now the WORD for where you stand, out
-       of economy.js's one social accessor so the chip and the dialogue can
-       never disagree about the same person. */
-    // TALK carries the standing chip the old Befriend button carried — it is
-    // the same ledger, and where you stand is the thing worth knowing before
-    // you ask a man for work.
-    if (v === "talk") {
-      if ((a.playerGrudge || 0) >= 6) return "repair";
-      const S = CBZ.econ && CBZ.econ.socialRead ? CBZ.econ.socialRead(a) : null;
-      if (S) {
-        if (S.busy) return "counting";           // he is not talking to you right now
-        if (S.standing === "stranger") return "";
-        return S.standing;                       // known / solid / friend / sour / enemy
+    const ap = a.approach || {};
+    switch (v) {
+      case "trade": {
+        const o = a.data && a.data.offer;
+        if (!o) return "";
+        const p = CBZ.econ.offerPrice ? CBZ.econ.offerPrice(a) : null;
+        return String(p ? p.price : o.price);
       }
-      if ((a.playerTrust || 0) >= 6) return "trust+";
-      return "";
-    }
-    // BEFRIEND's chip is WHY he is offering — the deed he is answering. It only
-    // ever renders on a man who has already decided, so a standing word here
-    // would be telling the player something the button itself just said.
-    if (v === "befriend") return CBZ.prisonFriendReason ? CBZ.prisonFriendReason(a) : "";
-    /* THE CONTRACT CHIPS ARE THE NUMBER AND THE NOUN, like every other priced
-       verb's. COLLECT shows what the claim is worth before you agree to walk
-       across a prison for it; SETTLE shows what you are actually holding, so
-       the button can never promise a payout your pockets can't honour. */
-    if (v === "collect") {
-      const t = CBZ.prisonContract && CBZ.prisonContract.ripeTab(a);
-      return t ? `${Math.round(t.amt)} owed` : "";
-    }
-    if (v === "settle") {
-      const c = CBZ.prisonContract && CBZ.prisonContract.live();
-      if (!c) return "";
-      if (c.dead) return "gone";
-      if (c.kind === "repo") return c.item ? shortText(c.item, 12) : "";
-      if (c.kind === "roughUp") return "he's down";
-      return `${c.got || 0} of ${c.amt}`;
-    }
-    if (v === "work") {
-      const c = CBZ.prisonContract && CBZ.prisonContract.ripeTab(a);
-      return c ? `${Math.round(c.amt)} off` : "off the tab";
-    }
-    // The steal verb is the repo when a repo is live on this man — same hand,
-    // named object (ai.js wraps econ.steal). The chip is what you are after.
-    if (v === "steal" && CBZ.prisonContract) {
-      const want = CBZ.prisonContract.wantedItem(a);
-      if (want) return shortText(want, 12);
-    }
-    if (v === "insult") {
-      if ((a.playerGrudge || 0) >= 6) return "bad blood";
-      if ((a.playerFear || 0) >= 6) return "fear";
-      return "";
-    }
-    if (v === "fight") {
-      if (a.gang >= 0 && CBZ.player && CBZ.player.gang !== a.gang && (CBZ.gangStanding ? CBZ.gangStanding(a.gang) : 0) < -12) return "crew";
-      if ((a.playerFear || 0) >= 7) return "scared";
-      return CBZ.econ.hasItem("Shiv") ? "armed" : "";
-    }
-    /* THE TRADE CHIP IS A PRICE, like every other priced verb's.
-
-       It used to be econ.offerLine() — "Burner Phone·14 fair", an ITEM NAME
-       followed by the number — and every surface that renders it cuts at 12
-       characters, so what actually reached the button was "Burner Phon…":
-       the price gone, the item unreadable, and the widest string in the menu.
-       On the phone dock that one chip sized the whole column (199px against
-       the guard register's 120px, measured at 393x852) because a column of
-       stretch pills is only ever as narrow as its fattest member.
-
-       The item is not lost — labelFor() already says "Buy Burner Phone. 14"
-       and that is the row on desktop and the aria-label on every button. The
-       priceTag reasons go, and they were never legible: two of them join to
-       "heat tax, search risk", which cut to "heat tax, s…". */
-    if (v === "trade") {
-      const o = a.data && a.data.offer;
-      if (!o) return "";
-      const p = CBZ.econ.offerPrice ? CBZ.econ.offerPrice(a) : null;
-      return String(p ? p.price : o.price);
-    }
-    // A PRICE THE MENU COMPUTES SEPARATELY FROM THE TILL IS A PRICE THAT
-    // LIES. economy.js's bribeCost is loyalty- and schedule-aware now (a man
-    // you have already paid is cheaper; a man standing a count is dearer), so
-    // the chip and the label both ask IT rather than re-deriving 25/5/10.
-    if (v === "bribe") {
-      const c = CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : (a.corrupt ? 5 : 10);
-      // no cig price under the bridge doctrine: the chip names the real
-      // currency instead of quoting 0
-      return c > 0 ? c + "" : (a.corrupt ? "a name" : "");
-    }
-    // snitch trades a name for heat — the chip is the warden's mood, straight
-    // off economy.js's own gate so the chip and the refusal can never disagree
-    if (v === "snitch") {
-      const w = CBZ.econ.snitchOffer ? CBZ.econ.snitchOffer(a) : "";
-      if (w === "count") return "counting";
-      if (w === "later") return "later";
-      if (w === "clean") return "no heat";
-      return "-heat";
-    }
-    // the till (economy.js payoffCost) is the ONE price source — the old
-    // fallback here was the last copy of the deleted warden +14 premium
-    if (v === "payoff") return (CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : 6) + "";
-    if (v === "pay") return a.approach && a.approach.cost ? a.approach.cost + "" : "";
-    if (v === "squash") return CBZ.squashGrudgeCost ? CBZ.squashGrudgeCost(a) + "" : "";
-    if (v === "paySilence") return CBZ.knownSnitchCost ? CBZ.knownSnitchCost(a) + "" : "";
-    if (v === "haggle") return a.approach && a.approach.haggled ? "done" : ((a.playerTrust || 0) >= 6 ? "trust helps" : "");
-    if (v === "threaten" || v === "threatenSnitch") return CBZ.playerArmed && CBZ.playerArmed() ? "armed" : "";
-    if (v === "restrain") return CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Bedsheet Rope") ? "" : "needs rope";
-    if (v === "confrontReport") return a.reportedPlayerCred == null ? "" : (a.reportedPlayerCred > 0.78 ? "believed" : (a.reportedPlayerCred < 0.45 ? "doubted" : "heard"));
-    if (v === "question") {
-      if ((a.playerTrust || 0) >= 5) return "talks";
-      if ((a.playerFear || 0) >= 6) return "shaky";
-      if ((a.playerGrudge || 0) >= 6) return "hostile";
-      return "";
-    }
-    if (v === "warn") return (a.playerFear || 0) >= 5 ? "will move" : "";
-    if (v === "detain") return a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight" ? "clean" : "risk";
-    if (v === "search") return a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight" ? "cause" : "complaint";
-    if (v === "steal") {
-      if ((a.playerGrudge || 0) >= 5) return "watching";
-      // THE HOUR IS PART OF THE READ. economy.js prices a lift off
-      // CBZ.prisonSchedule (a count is arithmetic done with the eyes; the
-      // tier after lights-out is dark), so the chip says which it is — a word
-      // about the world, not the odds printed as a percentage.
-      const S = CBZ.prisonSchedule;
-      if (S && S.enabled()) {
-        if ((a.kind === "guard" || a.kind === "warden") && (S.is("count") || S.is("secure") || S.is("wake"))) return "counting";
-        if (S.is("night")) return "dark";
+      case "bribe": {
+        const c = CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : (a.corrupt ? 5 : 10);
+        return c > 0 ? c + "" : "";
       }
-      if (a.blockRead && a.blockRead.kind === "wealth" && (a.blockRead.t || 0) > 0) return "hot";
-      return "";
+      case "payoff": return (CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : 6) + "";
+      case "pay": return ap.cost ? ap.cost + "" : "";
+      case "squash": return CBZ.squashGrudgeCost ? CBZ.squashGrudgeCost(a) + "" : "";
+      case "paySilence": return CBZ.knownSnitchCost ? CBZ.knownSnitchCost(a) + "" : "";
+      case "collect": {
+        const t = CBZ.prisonContract && CBZ.prisonContract.ripeTab(a);
+        return t ? Math.round(t.amt) + "" : "";
+      }
+      case "settle": {
+        const c = CBZ.prisonContract && CBZ.prisonContract.live();
+        if (!c || c.dead) return "";
+        if (c.kind === "repo") return c.item ? shortText(c.item, 12) : "";
+        if (c.kind === "roughUp") return "";
+        return (c.got || 0) + "/" + c.amt;
+      }
+      case "work": {
+        const c = CBZ.prisonContract && CBZ.prisonContract.ripeTab(a);
+        return c ? Math.round(c.amt) + "" : "";
+      }
+      case "steal": {
+        const want = CBZ.prisonContract && CBZ.prisonContract.wantedItem(a);
+        return want ? shortText(want, 12) : "";
+      }
+      case "restrain":
+        return CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Bedsheet Rope") ? "" : "needs rope";
+      case "join": return gangShort(a);
+      case "accept":
+        if (ap.kind === "favor") return "+" + (ap.gift || 3);
+        if (ap.kind === "buyItem" || ap.kind === "copBribe") return "+" + (ap.price || 0);
+        if (ap.kind === "gangJob") return "+" + ((ap.job && ap.job.reward) || 5);
+        if (ap.kind === "gangInvite") return gangShort(a);
+        return "";
+      default: return "";
     }
-    if (v === "accept" && a.approach && a.approach.kind === "favor") return "+" + (a.approach.gift || 3) + "";
-    if (v === "accept" && a.approach && a.approach.kind === "buyItem") return "+" + (a.approach.price || 0) + "";
-    if (v === "accept" && a.approach && a.approach.kind === "copBribe") return "+" + (a.approach.price || 0) + "";
-    if (v === "accept" && a.approach && a.approach.kind === "copTip") return "intel";
-    if (v === "accept" && a.approach && a.approach.kind === "copPlea") return "case";
-    // "RESPECT +respect" would say it twice — respect carries no chip.
-    if (v === "accept" && a.approach && a.approach.kind === "gangJob") return "+" + ((a.approach.job && a.approach.job.reward) || 5) + "";
-    if (v === "accept" && a.approach && a.approach.kind === "gangParley") return a.approach.parleyMode || "terms";
-    if (v === "accept" && a.approach && a.approach.kind === "crewBackup") return "backup";
-    if (v === "accept" && a.approach && a.approach.kind === "coverStory") return "cover";
-    if (v === "accept" && a.approach && a.approach.kind === "heatWarning") return "duck";
-    if (v === "accept" && a.approach && a.approach.kind === "alibiDeal") return "alibi";
-    if (v === "accept" && a.approach && a.approach.kind === "gangInvite") return gangShort(a);
-    if (v === "join") return gangShort(a);
-    return "";
   }
 
-  // The SPOKEN form of each option, written as a LINE ("Buy a Shiv — 8🚬").
+  // The SPOKEN form of each option, written as a LINE ("Buy a Shiv. 8").
   // Since 2026-08-19 no button prints this sentence — the button is ONE WORD
   // and this line survives as its aria-label, so a screen reader still hears
   // the whole action. Contextual + deterministic (no flicker).
@@ -835,7 +518,7 @@
     switch (v) {
       case "insult":   return `Talk trash to ${nm}`;
       case "talk":     return (a.playerGrudge || 0) >= 6 ? `Square things with ${nm}` : ((a.rep || 0) >= 45 ? `Catch up with ${nm}` : `Chat up ${nm}`);
-      case "befriend": return `Take ${nm} up on it — he runs with you`;
+      case "befriend": return `Run with ${nm}`;
       case "collect":  { const t = CBZ.prisonContract && CBZ.prisonContract.ripeTab(a); return t ? `Hear what ${nm} wants collected` : `Ask ${nm} about the money`; }
       case "settle":   { const c = CBZ.prisonContract && CBZ.prisonContract.live(); return c && c.kind === "repo" ? `Hand ${nm} the ${c.item}` : `Settle up with ${nm}`; }
       case "work":     return `Work the tab off instead`;
@@ -865,84 +548,52 @@
   }
 
   // ===========================================================================
-  //  THE SPOKEN LINE — the gang-city dialogue look (PRISON_INTERACT_SUBTITLE)
+  //  SPEECH IS OVER THE SPEAKER'S HEAD — CBZ.prisonSay(actor, line, opts)
   //
-  //  hud.css's .world-subtitle is this game's ONE observed-world dialogue
-  //  grammar: bottom-centre, Fredoka 700 white, 1.6px black stroke + layered
-  //  shadow, NO box, safe-area-aware floor. citySay and campaign_ui already
-  //  speak in it; the prison card answered every verb with a HUD hint panel
-  //  instead. css/interact_touch.css reproduces that treatment under
-  //  .pi-subtitle, so this file owns its own element and never reaches into a
-  //  city module for one.
+  //  THE PRISON'S ONE MOUTH. Every inmate, guard, the warden and the answer
+  //  to a verb you pressed come through here (ai.js say()/nar(), guards.js,
+  //  detection.js, capture.js, prisonfriends.js, adminwing.js, and in escape
+  //  mode city/social.js's citySay, which forwards here).
+  //
+  //  It used to print into a bottom-centre subtitle band (#pinteractSay) with
+  //  the speaker's name hidden, one line for the whole prison, while the card
+  //  printed the same pitch a second time in its note line. Now:
+  //    - a line floats over the head of the man saying it (#prisonSpeech),
+  //      one line per speaker (a new line replaces his old one);
+  //    - only within earshot (EAR m; a man walking up to you, EAR_ENGAGED);
+  //    - a few words: the first sentence, cut to a clause, else nothing;
+  //    - at most SPEAK_MAX on screen; the nearest speakers win;
+  //    - short-lived, fades, hidden when the head is off screen;
+  //    - third-person narration ("Marcus backs off.") is not speech and is
+  //      dropped: his body already did it.
+  //  The dead, the knocked-out and the escaped do not talk.
   // ===========================================================================
-  let sayEl = null, sayLine = null, saySpeaker = null, sayT = 0, sayRank = 0;
-  function ensureSay() {
-    if (sayEl) return sayEl;
-    sayEl = document.createElement("div");
-    sayEl.id = "pinteractSay";
-    sayEl.className = "pi-subtitle";
-    sayEl.setAttribute("role", "status");
-    sayEl.setAttribute("aria-live", "polite");
-    // speaker stays in the accessible text and out of the picture, exactly the
-    // split .world-subtitle-speaker makes — the observed world shows the LINE.
-    sayEl.innerHTML = '<div class="pi-subtitle-speaker"></div><div class="pi-subtitle-line"></div>';
-    document.body.appendChild(sayEl);
-    saySpeaker = sayEl.querySelector(".pi-subtitle-speaker");
-    sayLine = sayEl.querySelector(".pi-subtitle-line");
-    return sayEl;
+  const EAR = 12, EAR_ENGAGED = 18, SPEAK_MAX = 2, SPEAK_CHARS = 48;
+  const HEAD_Y = 2.15;
+  let saidLines = 0, sayRefused = 0, narrationDropped = 0;
+  const speaking = [];            // {actor, el, t, life, d}
+  let speechRoot = null;
+  const _hv = new THREE.Vector3();
+
+  function actorSpot(a) {
+    if (!a) return null;
+    if (a.group && a.group.position) return a.group.position;
+    return a.pos || null;
   }
-  /* =========================================================================
-     ONE CONVENTION FOR EVERY SPOKEN LINE IN THE PRISON
-
-     THE BUG THIS REPLACES, exactly. The line below used to be:
-
-         sayLine.textContent = String(msg).replace(/^[“"]|[”"]$/g, "");
-
-     and systems/quests.js built every negotiation line as
-     `${actor.data.name}: "${text}"`. The `^[“"]` alternative can NEVER match a
-     string that begins with a name, so the alternation only ever fired on the
-     `[”"]$` side and stripped the CLOSING quote off all four of them:
-
-         Marcus: "Rough up Officer #3 for me.
-
-     Name, colon, an opening quote and no close — on a surface whose speaker
-     element is already carrying that same name (aria-only, because you can SEE
-     who is in front of you). Two other truncators could eat a closing quote
-     the same way (shortText, panelNote), and entities/guards.js had a second
-     instance of the whole shape inside a HUD hint.
-
-     THE CONVENTION, and it is enforced HERE so no caller can get it wrong:
-       1. the LINE is words a person said, and nothing else;
-       2. the SPEAKER's name lives in the speaker slot, never in the sentence —
-          a `Name:` prefix is stripped when it names this speaker;
-       3. QUOTES ARE DROPPED, both of them, always. The surface is the quote.
-          Stripping is symmetric, so an unbalanced quote (the old bug's own
-          output, or anything a truncator chewed) can never survive either.
-     Interior quotation — a man quoting somebody else — is untouched, because
-     only the first and last characters are ever considered.
-     ========================================================================= */
   const QUOTE_OPEN = "“‘\"'";
   const QUOTE_CLOSE = "”’\"'";
+  // the words a person said: no `Name:` prefix, no wrapping quotes
   function speechText(who, msg) {
     let s = String(msg == null ? "" : msg).trim();
     if (!s) return "";
-    // 2. drop a `Speaker:` / `the Speaker:` prefix naming the person talking
     const colon = s.indexOf(":");
     if (colon > 0 && colon <= 34) {
       const head = s.slice(0, colon).trim().toLowerCase().replace(/^(the|a|an)\s+/, "");
       const me = String(who || "").trim().toLowerCase().replace(/^(the|a|an)\s+/, "");
       if (me && head === me) s = s.slice(colon + 1).trim();
     }
-    /* 3. QUOTE STRIP, AND THE ASYMMETRY IS THE WHOLE LESSON OF THE BUG.
-       A leading quote is always the wrapper opening (the surface is the
-       quote), so it goes — with its partner if it has one, which also cleans
-       up the shipped bug's own unterminated output. A TRAILING quote with no
-       opener is not a wrapper at all: it is somebody closing a quotation
-       inside the sentence, and eating it is exactly the mistake the old
-       `/^[“"]|[”"]$/g` made on `Officer #3 mutters, "Fine. 8 cigs."`. So a
-       lone closer is left alone. Verified both ways by the phase probe. */
     for (let pass = 0; pass < 2 && s.length > 1; pass++) {
-      if (QUOTE_OPEN.indexOf(s.charAt(0)) < 0) break;      // no opener -> nothing to unwrap
+      if (QUOTE_OPEN.indexOf(s.charAt(0)) < 0) break;
       const last = s.charAt(s.length - 1);
       s = s.slice(1);
       if (QUOTE_CLOSE.indexOf(last) >= 0) s = s.slice(0, -1);
@@ -950,116 +601,135 @@
     }
     return s;
   }
-  CBZ.prisonSpeechText = speechText;   // published so nothing re-derives it
+  CBZ.prisonSpeechText = speechText;
 
-  // EVERY verb result goes through here. Flag off → the legacy CBZ.flashHint
-  // panel, byte-identical to what shipped.
-  function sayResult(who, msg, secs, rank) {
-    if (!msg) return;
-    const line = speechText(who, msg);
-    if (!line) return;                 // a result with nothing to SAY says nothing
-    if (!subtitleOn()) { if (CBZ.flashHint) CBZ.flashHint(line, secs || 2.8); return; }
-    // ONE LINE, ONE SURFACE (systems/subtitlebus.js). This band and #citySpeech
-    // resolve to the same 120px touch floor, and #hint wears the same skin on
-    // touch — so the answer to the player's own verb outranks both and takes
-    // the sentence off them rather than printing a second copy a slot away.
-    if (CBZ.subtitles && !CBZ.subtitles.claim("pinteractSay", "interact", line, secs || 2.8, who, saySilence)) return;
-    ensureSay();
-    sayRank = rank != null ? rank : SAY_ANSWER;
-    saySpeaker.textContent = who || "";
-    sayLine.textContent = line;
-    sayEl.classList.add("show");
-    sayT = secs || 2.8;
-    // Enrol in hud.css's ONE subtitle ladder for the life of the line, exactly
-    // the way campaign_ui.js stamps campaign-dialogue-active. Without it this
-    // band and #citySpeech's resolve to the same 120px touch floor and a ped
-    // bark lands character-on-character over the answer to the player's verb.
-    document.body.classList.add("interact-subtitle-active");
+  // a few words, or nothing
+  function fewWords(s) {
+    s = String(s || "").replace(/\s*[—–·•]\s*/g, ". ").replace(/\s+-\s+/g, ". ").replace(/\s+/g, " ").trim();
+    if (!s) return "";
+    if (s.length <= SPEAK_CHARS) return s;
+    // whole sentences, as many as fit
+    const sents = s.match(/[^.!?]+[.!?]+(?=\s|$)|[^.!?]+$/g) || [];
+    let out = "";
+    for (let i = 0; i < sents.length; i++) {
+      const next = (out ? out + " " : "") + sents[i].trim();
+      if (next.length > SPEAK_CHARS) break;
+      out = next;
+    }
+    if (out) return out;
+    const clause = s.split(/[,;:]\s/)[0].trim();
+    if (clause.length <= SPEAK_CHARS && clause.length >= 2) return clause;
+    return "";
   }
-  function saySilence() {
-    sayT = 0; sayRank = 0;
-    if (sayEl) sayEl.classList.remove("show");
-    document.body.classList.remove("interact-subtitle-active");
-    if (CBZ.subtitles) CBZ.subtitles.release("pinteractSay");
-  }
-  function tickSay(dt) {
-    if (sayT <= 0) return;
-    sayT -= dt;
-    if (sayT <= 0) saySilence();
+  // "Marcus backs off." / "the Old Timer counts it." is a caption, not a line
+  function isNarration(actor, s) {
+    const full = actor && actor.data && actor.data.name ? String(actor.data.name).toLowerCase() : "";
+    const bare = cleanName(actor).toLowerCase();
+    const low = s.toLowerCase();
+    return !!((full && low.indexOf(full + " ") === 0) || (bare && bare !== "someone" && low.indexOf(bare + " ") === 0) ||
+      (bare && low.indexOf(bare + "'s ") === 0));
   }
 
-  /* ===========================================================================
-     CBZ.prisonSay(actor, line, opts) — THE ONE MOUTH IN THE PRISON.
-
-     OWNER (2026-08-04): "Don't clear up the logic behind the HUD space wasters.
-     Improve that logic, connect it all, and make it real logic, but remove it
-     from the HUD."
-
-     THE STATE THIS ANSWERS, and it is worse than a cluttered HUD. The
-     JAIL_SHOW_DONT_TELL wave deleted 47 narration popups out of entities/ai.js
-     — correctly; they were captions over a world that was already acting — and
-     documented `CBZ.citySay` as "the sanctioned replacement: a thing a person
-     SAYS goes over that person's head". Counted afterwards: 47 narrations
-     dropped, ONE say() call, and that one call could not work either.
-     city/social.js's say() reads `ped.pos.x` for its range gate and prison
-     actors keep their position on `.group.position` and their name on
-     `.data.name` — so every prison citySay threw a TypeError into the caller's
-     own try/catch and returned silently. The prison has been MUTE since that
-     wave: the whole gang/debt/cover/snitch simulation ran with no output at all
-     except the corner HUD chips the owner is now asking to remove. Take the
-     chips away first and the systems become invisible rather than diegetic.
-
-     So the replacement is real this time, and it is not a new UI: this file
-     ALREADY owns a working speech surface (`sayResult` -> .pi-subtitle, the
-     shared world-subtitle grammar, enrolled in hud.css's subtitle ladder) which
-     is what answers every interaction verb today. It is published here with the
-     three rules ambient speech needs and verb answers never did:
-
-       RANGE   — a line is a thing you overhear, not a broadcast. 16 u normally,
-                 24 u for somebody mid-approach (they are walking at you and
-                 started talking on the way, exactly like citySay's own
-                 engaged-speaker slack).
-       RANK    — a louder line cannot be stomped by a quieter one while it is
-                 still on screen. The answer to a verb the player just pressed
-                 (SAY_ANSWER) outranks a person acting on you (SAY_ACT), which
-                 outranks block chatter (SAY_AMBIENT).
-       SILENCE — the dead, the knocked-out and the cuffed do not talk.
-
-     One-line adoption, degrade-safe: a caller that has no actor, or whose actor
-     is out of range, gets `false` and behaves exactly as it does today. Named
-     in scrolls/claude/, counted by CBZ.aiNarrationAudit().
-     =========================================================================== */
-  const SAY_AMBIENT = 0, SAY_ACT = 1, SAY_ANSWER = 2;
-  const SAY_NEAR = 16, SAY_ENGAGED = 24;
-  let saidLines = 0, sayRefused = 0;
-  function actorSpot(a) {
-    if (!a) return null;
-    if (a.group && a.group.position) return a.group.position;
-    return a.pos || null;
+  function ensureSpeechRoot() {
+    if (speechRoot && speechRoot.parentNode) return speechRoot;
+    speechRoot = document.createElement("div");
+    speechRoot.id = "prisonSpeech";
+    speechRoot.setAttribute("aria-live", "polite");
+    document.body.appendChild(speechRoot);
+    return speechRoot;
   }
-  function prisonSay(actor, line, opts) {
-    opts = opts || {};
-    const rank = opts.rank != null ? +opts.rank : SAY_ACT;
-    if (!line || !actor || CBZ.game.state !== "playing") { sayRefused++; return false; }
+  function dropSpeech(i) {
+    const s = speaking[i];
+    if (s && s.el.parentNode) s.el.parentNode.removeChild(s.el);
+    speaking.splice(i, 1);
+  }
+  function clearSpeech() { while (speaking.length) dropSpeech(speaking.length - 1); }
+
+  // force = the answer to a verb the player just pressed: it always shows
+  function speak(actor, msg, secs, force) {
+    if (!actor || !msg || !CBZ.game || CBZ.game.mode !== "escape" || CBZ.game.state !== "playing") { sayRefused++; return false; }
     if (actor.dead || actor.escaped || (actor.ko || 0) > 0) { sayRefused++; return false; }
-    const p = actorSpot(actor);
-    const P = CBZ.player;
+    const p = actorSpot(actor), P = CBZ.player;
     if (!p || !P || !P.pos) { sayRefused++; return false; }
-    const lim = (actor.approach && (actor.approach.t || 0) > 0) ? SAY_ENGAGED : SAY_NEAR;
-    if (Math.hypot(P.pos.x - p.x, P.pos.z - p.z) > lim) { sayRefused++; return false; }
-    // a live line only yields to an equal or louder one
-    if (sayT > 0 && rank < sayRank) { sayRefused++; return false; }
-    sayResult(cleanName(actor), line, opts.secs || 2.2, rank);
+    const d = Math.hypot(P.pos.x - p.x, P.pos.z - p.z);
+    const ear = (actor.approach && (actor.approach.t || 0) > 0) || force ? EAR_ENGAGED : EAR;
+    if (d > ear) { sayRefused++; return false; }
+    const raw = speechText(cleanName(actor), msg);
+    if (!raw || isNarration(actor, raw)) { narrationDropped++; return false; }
+    const line = fewWords(raw);
+    if (!line) { sayRefused++; return false; }
+    const life = Math.min(3.2, Math.max(1.6, (+secs || 2.2)));
+    let s = null;
+    for (let i = 0; i < speaking.length; i++) if (speaking[i].actor === actor) { s = speaking[i]; break; }
+    if (!s) {
+      if (speaking.length >= SPEAK_MAX) {
+        let far = 0;
+        for (let i = 1; i < speaking.length; i++) if (speaking[i].d > speaking[far].d) far = i;
+        if (!force && d >= speaking[far].d) { sayRefused++; return false; }
+        dropSpeech(far);
+      }
+      const el = document.createElement("div");
+      el.className = "psay";
+      ensureSpeechRoot().appendChild(el);
+      s = { actor: actor, el: el, t: 0, life: life, d: d };
+      speaking.push(s);
+    }
+    s.el.textContent = line;
+    s.el.classList.remove("out");
+    s.t = 0; s.life = life; s.d = d;
+    placeSpeech(s);
     saidLines++;
     return true;
   }
+
+  function placeSpeech(s) {
+    const cam = CBZ.camera, p = actorSpot(s.actor);
+    if (!cam || !p) { s.el.style.visibility = "hidden"; return; }
+    _hv.set(p.x, (p.y || 0) + HEAD_Y, p.z).project(cam);
+    if (_hv.z > 1 || Math.abs(_hv.x) > 1.05 || Math.abs(_hv.y) > 1.05) { s.el.style.visibility = "hidden"; return; }
+    const w = window.innerWidth || 800, h = window.innerHeight || 600;
+    s.el.style.left = Math.round((_hv.x * 0.5 + 0.5) * w) + "px";
+    s.el.style.top = Math.round((-_hv.y * 0.5 + 0.5) * h) + "px";
+    s.el.style.visibility = "";
+  }
+
+  // order 97: after camera.js (50) moved the camera and after the prompt
+  // layer (96) — the same projection contract interactions.js documents
+  function tickSpeech(dt) {
+    if (!speaking.length) return;
+    const g = CBZ.game, P = CBZ.player;
+    if (!g || g.mode !== "escape" || g.state !== "playing") { clearSpeech(); return; }
+    if (CBZ.camera) CBZ.camera.updateMatrixWorld();
+    for (let i = speaking.length - 1; i >= 0; i--) {
+      const s = speaking[i], a = s.actor;
+      s.t += dt;
+      if (s.t >= s.life || !a || a.dead || a.escaped || (a.ko || 0) > 0) { dropSpeech(i); continue; }
+      if (s.t > s.life - 0.3 && !s.el.classList.contains("out")) s.el.classList.add("out");
+      const p = actorSpot(a);
+      if (p && P && P.pos) s.d = Math.hypot(P.pos.x - p.x, P.pos.z - p.z);
+      placeSpeech(s);
+    }
+  }
+
+  // the answer to a verb you pressed: spoken by the man you pressed it on
+  function sayResult(actor, msg, secs) {
+    if (!msg || !actor) return;
+    speak(actor, msg, secs || 2.8, true);
+  }
+
+  function prisonSay(actor, line, opts) {
+    opts = opts || {};
+    return speak(actor, line, opts.secs || 2.2, false);
+  }
   CBZ.prisonSay = prisonSay;
-  CBZ.PRISON_SAY = { ambient: SAY_AMBIENT, act: SAY_ACT, answer: SAY_ANSWER };
-  // said = lines that reached the screen; refused = calls the rules turned down
-  // (out of range, downed, out-ranked). Both are diagnostics, not ratchets — the
-  // ratchet that matters is CBZ.aiNarrationAudit().mute.
+  // kept for callers that pass a rank; ranks no longer order anything
+  CBZ.PRISON_SAY = { ambient: 0, act: 1, answer: 2 };
+  // said = lines that reached the screen; refused = out of earshot / out of
+  // the nearest-two / downed; narration = third-person captions dropped
   CBZ.prisonSayAudit = function () {
-    return { said: saidLines, refused: sayRefused, near: SAY_NEAR, engaged: SAY_ENGAGED };
+    return { said: saidLines, refused: sayRefused, narration: narrationDropped, live: speaking.length,
+      ear: EAR, engaged: EAR_ENGAGED, max: SPEAK_MAX,
+      lines: speaking.map(function (s) { return { who: cleanName(s.actor), text: s.el.textContent, d: +s.d.toFixed(1) }; }) };
   };
 
   // ===========================================================================
@@ -1067,29 +737,21 @@
   //
   //  Anchoring is DERIVED from mobile.css's cluster, never guessed — see the
   //  arithmetic block at the top of css/interact_touch.css. All this file does
-  //  is build and fill the DOM; where it lands is one CSS decision.
+  //  is build and fill the DOM; where it lands is one CSS decision. The row is
+  //  the verbs; the only line above it is a stall's item and price.
   // ===========================================================================
-  let piRoot = null, piWho = null, piName = null, piNote = null, piTip = null;
+  let piRoot = null, piNote = null;
   let piVerbs = null, piOpts = null, piSig = "", piShown = false, piQuiet = null;
 
   function buildTouchUI() {
     if (piRoot) return piRoot;
     piRoot = document.createElement("div");
     piRoot.id = "pinteract";
-    // The containers stay separate for the compact phone fallback; tablet CSS
-    // stacks both into one uninterrupted vertical rail.
     piRoot.innerHTML =
-      '<div id="pinteractWho">' +
-        '<span class="piw-name"></span>' +
-        '<span class="piw-note"></span>' +
-        '<span class="piw-tip"></span>' +
-      "</div>" +
+      '<div id="pinteractWho"><span class="piw-note"></span></div>' +
       '<div class="pi-row"><div id="pverbs"></div><div id="poptions"></div></div>';
     document.body.appendChild(piRoot);
-    piWho = piRoot.querySelector("#pinteractWho");
-    piName = piRoot.querySelector(".piw-name");
     piNote = piRoot.querySelector(".piw-note");
-    piTip = piRoot.querySelector(".piw-tip");
     piVerbs = piRoot.querySelector("#pverbs");
     piOpts = piRoot.querySelector("#poptions");
     // Delegated so it survives every re-render. CLICK (not touchstart): a verb
@@ -1099,19 +761,15 @@
       const b = e.target && e.target.closest ? e.target.closest("[data-pi]") : null;
       if (!b) return;
       e.preventDefault(); e.stopPropagation();
-      const act = b.getAttribute("data-pi");
-      if (act === "tips") { tipsToggle(); return; }
-      const i = parseInt(act, 10);
+      const i = parseInt(b.getAttribute("data-pi"), 10);
       if (i >= 0) doAction(i);
     });
     return piRoot;
   }
 
-  // The capsule carries a WORD — touch.js's doctrine is that interaction
-  // surfaces spell the verb out and never render a key. VERB[]
-  // already owns that word; an AUTHORED campaign verb has none, so its full
-  // sentence is cut at the first dash ("Take the deal — work as the warden's
-  // spy" → "Take the deal") and the sentence itself lives on as the aria-label.
+  // The capsule carries a WORD. VERB[] owns it; an AUTHORED campaign verb has
+  // none, so its sentence is cut at the first dash and the sentence itself
+  // lives on as the aria-label.
   function shortLabel(a, v) {
     if (v === "campaign-spy") return "Accept";
     if (v === "campaign-escape") return "Refuse";
@@ -1119,25 +777,14 @@
     const raw = String(labelFor(a, v) || v);
     return shortText(raw.split(/\s+[—–-]\s+/)[0], 18);
   }
-  // The status chip (price / meter / "armed") rides along; the FULL authored
-  // line ("Pay 8 to keep Marcus quiet") stays on the button as its aria-label,
-  // so nothing is lost — it is read out rather than printed as a wall.
   function optButton(cls, idx, a, v, subMax) {
     const sub = subFor(a, v);
     return '<button type="button" class="' + cls + '" data-pi="' + idx + '" aria-label="' +
       esc(labelFor(a, v)) + '"><span class="pi-lab">' + esc(shortLabel(a, v)) + "</span>" +
       (sub ? '<span class="pi-sub">' + esc(shortText(sub, subMax || 12)) + "</span>" : "") + "</button>";
   }
-  /* Tablet row: ONE WORD ON THE BUTTON (owner, 2026-08-19: "buttons should
-     be one word... don't have a steal keycard button, have a steal button").
-
-     The last pass moved the whole authored sentence onto the button when it
-     fit — "SLIP 25 TO LOOK AWAY", "LIFT WARDEN'S KEYS" — which reads as four
-     lines of prose stacked on the thumb. The survival dock (systems/
-     survival_interact.js: Throw / Grab / Punch / Shove) is the reference:
-     the button is the VERB, full stop. The price or status rides inside it
-     as the small chip ("BRIBE 25"), and the full sentence lives on as the
-     aria-label so nothing is lost, only unprinted. */
+  // Tablet rail: ONE WORD ON THE BUTTON (owner, 2026-08-19), the price or
+  // status as the small chip inside it.
   function optChoice(idx, a, v) {
     const sub = subFor(a, v);
     return '<div class="pi-choice">' +
@@ -1147,72 +794,22 @@
       "</button></div>";
   }
 
-  function renderTouch(a, core, rest, rawNote) {
+  function renderTouch(a, verbs, rawNote) {
     buildTouchUI();
-    const name = cleanName(a).toUpperCase();
-    const note = shortText(rawNote, 74);
+    const note = shortText(rawNote, 40);
     const docked = !!(CBZ.touchInteractionDocked && CBZ.touchInteractionDocked());
-    // ONE teaching line, never a wall: the first verb on offer this player has
-    // never used. Tips off — or everything learned — leaves the row silent.
-    let tip = "";
-    if (helpOn && !docked) {
-      const order = core.concat(rest);
-      for (let i = 0; i < order.length; i++) {
-        const v = order[i];
-        if (learned[v]) continue;
-        const d = (CBZ.cityCampaignPrisonDesc && CBZ.cityCampaignPrisonDesc(a, v)) || DESC[v] || "";
-        if (d) { tip = shortLabel(a, v) + " — " + d; break; }
-      }
-    }
-    let btns = "", pills = "";
-    if (docked) {
-      const order = core.concat(rest);
-      for (let i = 0; i < order.length; i++) btns += optChoice(i, a, order[i]);
-      // PRISON_TIPS off (the default): no toggle row at all. The rail is verbs.
-      if (tipsAllowed()) {
-        pills = '<div class="pi-choice pi-tips-choice">' +
-          '<span class="pi-copy"><span class="pi-choice-label">Teaching tips</span></span>' +
-          '<button type="button" class="pi-action pi-tips-action' + (helpOn ? " on" : "") +
-          '" data-pi="tips" aria-label="Teaching tips ' + (helpOn ? "on" : "off") + '">' +
-          (helpOn ? "TIPS ON" : "TIPS OFF") + "</button></div>";
-      }
-    } else {
-      // ONE capsule for every verb — .svbtn, the survival dock's own class
-      // (owner: "the nat disaster buttons are PERFECT — switch the style").
-      // core and rest still render into their own containers because the
-      // KEYBOARD cares which four are bound to I J K L; css/interact_touch.css
-      // makes those containers display:contents so the thumb sees one stack.
-      for (let i = 0; i < core.length; i++) btns += optButton("svbtn", i, a, core[i], 12);
-      for (let i = 0; i < rest.length; i++) pills += optButton("svbtn", core.length + i, a, rest[i], 12);
-      // the "[H] Tips: ON/OFF" footer, as a thing a thumb can actually reach
-      if (tipsAllowed()) {
-        pills += '<button type="button" class="svbtn po-tips' + (helpOn ? " on" : "") +
-          '" data-pi="tips" aria-label="Teaching tips ' + (helpOn ? "on" : "off") +
-          '"><span class="pi-lab">Tips</span><span class="pi-sub">' + (helpOn ? "ON" : "OFF") + "</span></button>";
-      }
-    }
-
+    let btns = "";
+    for (let i = 0; i < verbs.length; i++) btns += docked ? optChoice(i, a, verbs[i]) : optButton("svbtn", i, a, verbs[i], 12);
     // renderPanel runs EVERY frame while somebody is in range; only touch the
     // DOM when what it would say actually changed.
-    const sig = [name, note, tip, btns, pills].join("\u0001");
+    const sig = note + "\u0001" + btns;
     if (sig === piSig) return;
     piSig = sig;
-    piName.textContent = name;
     piNote.textContent = note;
     piNote.style.display = note ? "" : "none";
-    piTip.textContent = tip;
-    piTip.style.display = tip ? "" : "none";
     piVerbs.innerHTML = btns;
-    piOpts.innerHTML = pills;
-    // THE SPOKEN LINE HAS TO CLEAR THE DOCK. On a phone the verb stack now
-    // sits at the thumb (bottom 34, like survival's) and this mode's dialogue
-    // band is centred at 120 — on a 393pt screen those two share pixels. How
-    // tall the stack is depends on how many verbs this actor offers, which is
-    // only knowable after layout, so publish it and let css/interact_touch.css
-    // lift the band by it. The iPad rail is a right-edge column that never
-    // crosses the centre band, so it publishes nothing to clear.
-    // the WHOLE block, name plate included — lifting the band over the buttons
-    // alone drops it straight onto "BLOODY MARCUS · wary".
+    piOpts.innerHTML = "";
+    // the phone stack's height, for css/interact_touch.css's layout math
     setDockHeight(docked ? 0 : piRoot.getBoundingClientRect().height);
   }
 
@@ -1225,21 +822,12 @@
     if (on === piShown) return;
     piShown = on;
     if (piRoot) piRoot.classList.toggle("show", on);
-    if (!on) setDockHeight(0);        // nothing docked, nothing to lift over
+    if (!on) setDockHeight(0);
   }
-  // On touch the legacy card is replaced, not decorated: it stops rendering
-  // rows entirely (so no [J]/[K]/[L]/[;] chip and no "[H]" footer can survive
-  // the switch) and css/interact_touch.css collapses it. `.show` is still
-  // added/removed exactly as before, because CBZ.interactionMenuOpen() — which
-  // touch/controller consumers read to know whether context is live — is keyed
-  // off that class and must keep meaning the same thing.
-  //
-  // SCOPED TO ESCAPE MODE ON PURPOSE. #interact is a SHARED element: city/
-  // interactions.js raises the very same card in the open city, and there is no
-  // `body.mode-escape` class to key CSS off (state.js stamps only mode-city /
-  // mode-survival). A latch left on after leaving the prison would blank the
-  // city's card on every iPad, so the class is driven from mode every frame
-  // rather than from touchMode once.
+  // On touch the legacy #interact card is replaced, not decorated. #interact
+  // is SHARED with city/interactions.js, so the latch is driven from mode
+  // every frame rather than from touchMode once. `.show` still tracks context
+  // (CBZ.interactionMenuOpen reads it).
   function syncQuiet() {
     const q = touchUI() && !!CBZ.game && CBZ.game.mode === "escape";
     if (q === piQuiet) return;
@@ -1247,10 +835,6 @@
     el.interact.classList.toggle("pi-quiet", q);
     if (q) el.interactOpts.innerHTML = "";
   }
-  // PRISON_TIPS off → [H] and every tips control are inert (there is nothing to
-  // toggle and nothing drawing the state). Still exported, so a build that turns
-  // the flag on gets the key back with no other edit.
-  function tipsToggle() { if (!tipsAllowed()) return; helpOn = !helpOn; persist(); piSig = ""; }
 
   let current = null, cooldown = 0;
 
@@ -1269,18 +853,9 @@
       const d2 = dx * dx + dz * dz;
       if (d2 < bd) { bd = d2; best = a; }
     }
-    /* WHO THE PANEL IS ABOUT, WHEN A GUN IS OUT.
-       This picks the CLOSEST body; systems/intimidate.js picks whoever is
-       under the crosshair. Those are different selectors and they disagree
-       often enough to matter: hold a man at gunpoint three metres away while
-       another stands at your elbow, and the panel locks onto the elbow — so
-       the verbs for the man with his hands up are unreachable, and the ones
-       on screen belong to somebody who is not part of what is happening.
-       The man you are pointing a gun at wins, but ONLY if he is already
-       inside RANGE. That is deliberate: the panel's short reach is the
-       design, not a limitation to route around. His hands go up from across
-       the yard and you can read that at any distance; the things you can DO
-       to a person still wait until you have walked over to him. */
+    // The man you are holding at gunpoint wins the card over whoever is at
+    // your elbow, but only inside RANGE (systems/intimidate.js picks by
+    // crosshair; this picks by distance; they disagree often enough).
     if (CBZ.intimidate && CBZ.intimidate.target) {
       const held = CBZ.intimidate.target();
       if (held && held !== best && held.group && !held.dead && !held.escaped && !(held.ko > 0) &&
@@ -1294,99 +869,41 @@
 
   function renderPanel(a) {
     const note = panelNote(a);
-    el.interactName.textContent = cleanName(a).toUpperCase();
-    el.interactNote.textContent = note;
-
-    if (touchUI()) {
-      // TOUCH: on iPad the verbs become a vertical explained rail beside
-      // Reload; phones stack them in one .svbtn column at the thumb, in the
-      // survival dock's grammar (css/interact_touch.css).
-      //
-      // THE OVERFLOW RAIL IS GONE. This used to render cap4's four AND a
-      // second `rest` row of everything cap4 dropped — so touch, the surface
-      // this game is actually played on, was the one place with no cap. Both
-      // rows now render the SAME capped three; `rest` stays in the signature
-      // because renderTouch's phone/iPad split still reads two containers, and
-      // it is now always empty.
-      const verbs = capVerbs(verbsFor(a));
-      a._verbs = verbs;
-      renderTouch(a, verbs, [], note);
-      return;
-    }
-
     const verbs = capVerbs(verbsFor(a));
     a._verbs = verbs;
-    const showTips = helpOn;
+    if (touchUI()) { renderTouch(a, verbs, note); return; }
+    // DESKTOP: key rows, the verb and its chip. No name plate, no read line.
+    if (el.interactName.textContent) el.interactName.textContent = "";
+    if (el.interactNote.textContent !== note) el.interactNote.textContent = note;
     const dockedTouch = !!(CBZ.touchInteractionDocked && CBZ.touchInteractionDocked());
-    let html = verbs.map((v, i) => {
+    const html = verbs.map((v, i) => {
       const label = labelFor(a, v);
       const sub = subFor(a, v);
-      const desc = (CBZ.cityCampaignPrisonDesc && CBZ.cityCampaignPrisonDesc(a, v)) || DESC[v] || "";
       if (dockedTouch) {
-        // ONE WORD ON THE BUTTON — the same law as the live rail above (this
-        // is the PRISON_INTERACT_TOUCH=false fallback). The status/price chip
-        // rides inside it; the authored sentence is the aria-label.
         return `<div class="iopt tverb tyes" data-i="${i}">` +
           `<button type="button" class="itouch-act" aria-label="${esc(label)}">${esc(shortLabel(a, v).toUpperCase())}` +
           (sub ? `<span class="pi-act-sub">${esc(shortText(sub, 12))}</span>` : "") + `</button></div>`;
       }
-      // Desktop rows obey the same grammar: the word is the option, the chip
-      // is the price/status. The sentence ("Slip 25 to look away") is gone
-      // from every printed surface, not just the touch ones.
-      const row = `<div class="iopt" data-i="${i}"><span class="ikey">${(OPT_KEYS[i] || "").toUpperCase()}</span>` +
+      return `<div class="iopt" data-i="${i}" aria-label="${esc(label)}"><span class="ikey">${(OPT_KEYS[i] || "").toUpperCase()}</span>` +
         `<span class="ilab">${esc(shortLabel(a, v))}</span>` +
         `<span class="isub">${esc(sub)}</span></div>`;
-      // teach this button until it's been used at least once
-      const tip = (showTips && !learned[v] && desc) ? `<div class="idesc">${desc}</div>` : "";
-      return row + tip;
     }).join("");
-    if (!dockedTouch && tipsAllowed()) html += `<div class="ihelp">[H] Tips: ${helpOn ? "ON" : "OFF"}</div>`;
-    el.interactOpts.innerHTML = html;
+    if (el.interactOpts.innerHTML !== html) el.interactOpts.innerHTML = html;
   }
 
-  // Interaction options live on a home-row cluster (numbers are reserved for
-  // the hotbar, and I is the invariant Prison stash key). Exactly THREE slots:
-  // J K L. The fourth used to be `;` — it went with the fourth verb, because a
-  // key with nothing behind it is just a key that does nothing. Touch buttons
-  // retain their direct doAction indices.
+  // Exactly THREE option keys, J K L (numbers belong to the hotbar, I to the
+  // stash). Touch buttons call doAction by index.
   const OPT_KEYS = ["j", "k", "l"];
-  /* THREE. NOT FOUR, AND NOT "FOUR PLUS THE OVERFLOW" (owner, 2026-08-21).
-
-     This used to be cap4, and cap4 only ever ran on DESKTOP: the touch path
-     rendered the four it returned AND every verb it dropped, on the reasoning
-     that a thumb has no fifth key so hiding one would strand it. True as far
-     as it went, and it meant the surface the owner actually plays on was the
-     one place with no cap at all — a bent guard's stall put five buttons under
-     his thumb. The answer is not a longer rail, it is a shorter menu:
-     verbsFor above now curates every context down to three by hand, and this
-     is the backstop that catches the combinations (merchant + gang recruiter +
-     a standing offer of friendship) that arithmetic can still push past it.
-
-     It is a BACKSTOP and nothing else — verbsFor curates every context to
-     three by hand, and tools/interact-verbs-check.mjs fails the build if any
-     of them arrives here needing a cut. That test is why: the first draft let
-     the ladder design the street menu, and on a man who sells AND recruits AND
-     has offered you his hand it kept the three RAREST verbs and silently took
-     TALK — the whole favour loop — off him. A cap that fires is a verb the
-     player lost without being told.
-
-     Order is therefore "what would hurt most to lose if arithmetic ever does
-     beat the curation": ending a conversation, then the two things you can do
-     to anybody (ask, take), then the rare offers, then the priced verbs, and
-     INSULT — a rep-losing joke with a punch already bound to left-click — last
-     out. Menu order is preserved after the cut, so the buttons never reshuffle
-     under a thumb that is already moving. */
+  /* THREE, and a backstop only: verbsFor curates every context to three by
+     hand (tools/interact-verbs-check.mjs fails the build if a context arrives
+     here needing a cut). Order = what would hurt most to lose. */
   const MAX_VERBS = 3;
   const VERB_PRIORITY = {
     refuse: 100, talk: 90, steal: 87, befriend: 86, join: 85, accept: 92, trade: 88,
-    // both are curated into the head slot by construction, so the cap should
-    // never see them — but if arithmetic ever does beat the curation, the one
-    // that is about to disappear (settle) survives ahead of the one that keeps
     settle: 93, collect: 86, work: 74,
     confrontReport: 84, paySilence: 80, snitch: 80, bribe: 78, threatenSnitch: 78,
     payoff: 76, pay: 74, detain: 72, search: 70, warn: 66, threaten: 64,
     respect: 60, question: 60, haggle: 50, insult: 40,
-    // gunpoint trio — only ever offered together, so the cap never sees them
     rob: 96, restrain: 95, release: 94,
   };
   function capVerbs(v) {
@@ -1398,26 +915,16 @@
   // Exposed so touch/controller surfaces can tell when context is live.
   CBZ.interactionMenuOpen = function () { return !!(el.interact.classList.contains("show") && CBZ.game.state === "playing"); };
 
-  /* THE MAN TALKS TO YOU. This is what used to be the LISTEN button.
-     Somebody who has crossed a yard to make you an offer does not need to be
-     asked to speak, and asking cost a whole slot out of three. So the first
-     time the card opens on a live approach, his pitch — the LONG one, the one
-     that names the price, the gang and what he'll do for it, straight out of
-     ai.js's resolveNpcApproach("listen") — is SPOKEN, through the same
-     subtitle mouth every verb result uses.
-
-     Once per approach, not once per frame: `a.approach.greeted` is the flag
-     resolveNpcApproach itself sets, and it deliberately does NOT count as a
-     player response (ai.js skips rememberPlayerResponse for a listen that has
-     already been greeted), so hearing a man out still costs you nothing with
-     him. Walking away and coming back re-reads the same flag, so he doesn't
-     repeat himself either. */
+  /* THE MAN TALKS TO YOU (what used to be the LISTEN button). The first time
+     the card opens on a live approach, his pitch is SPOKEN over his head.
+     Once per approach: `a.approach.greeted` is resolveNpcApproach's own flag,
+     and a listen after greeting is not counted as a player response. */
   function autoListen(a) {
     if (!a || !a.approach || !(a.approach.t > 0) || a.approach.greeted) return;
     if (!CBZ.resolveNpcApproach) return;
     let res = null;
     try { res = approachAction(a, "listen"); } catch (e) { return; }
-    if (res && res.ok && res.msg) sayResult(cleanName(a), res.msg, 3.4, SAY_ANSWER);
+    if (res && res.ok && res.msg) sayResult(a, res.msg, 3.2);
   }
 
   function update(dt) {
@@ -1434,9 +941,6 @@
       if (a) { autoListen(a); renderPanel(a); el.interact.classList.add("show"); }
       else el.interact.classList.remove("show");
     } else if (a) renderPanel(a);
-    // ONE visibility decision per frame (showTouchUI is a no-op when it does
-    // not change). CBZ.invOpen is systems/inventory.js's own open latch, read
-    // only — the stash grid owns the whole screen while it is up.
     showTouchUI(!!(a && touchUI() && !CBZ.invOpen && CBZ.game.state === "playing"));
     if (piRoot) piRoot.classList.toggle("cool", cooldown > 0);
   }
@@ -1447,25 +951,22 @@
     if (!(idx >= 0) || idx >= verbs.length) return;
     cooldown = 0.35;
     const v = verbs[idx];
-    const who = cleanName(current);
-    if (!learned[v]) { learned[v] = true; persist(); piSig = ""; } // seen it → stop teaching it
-    const res = CBZ.cityCampaignPrisonAct && CBZ.cityCampaignPrisonAct(v, current);
+    const who = current;
+    const res = CBZ.cityCampaignPrisonAct && CBZ.cityCampaignPrisonAct(v, who);
     if (res && res.handled) {
       if (res.msg) sayResult(who, res.msg, 2.8);
       return;
     }
     if (!VERB[v]) return;
-    const fallback = VERB[v].fn(current);
-    if (fallback && fallback.msg) sayResult(who, fallback.msg, 2.8);
+    const out = VERB[v].fn(who);
+    if (out && out.msg) sayResult(who, out.msg, 2.8);
   }
 
   addEventListener("keydown", (e) => {
     if (e.repeat) return;
-    const k = e.key.toLowerCase();
-    if (k === "h") { tipsToggle(); return; }
     // only consume the option keys while a panel is actually up
     if (!CBZ.interactionMenuOpen()) return;
-    const i = OPT_KEYS.indexOf(k);
+    const i = OPT_KEYS.indexOf(e.key.toLowerCase());
     if (i >= 0) { e.preventDefault(); doAction(i); }
   });
 
@@ -1475,21 +976,17 @@
     if (row && row.dataset.i != null) doAction(+row.dataset.i);
   });
   CBZ.doInteract = doAction;       // touch buttons call this
-  CBZ.toggleHelp = tipsToggle;
 
   CBZ.onUpdate(45, update);
-  CBZ.onAlways(96, function (dt) {
-    tickSay(dt);
-    // onUpdate stops dead at the pause/title screen, so the quiet latch is
-    // re-evaluated here too — a mode change that happens while paused (title →
-    // city) must still hand #interact back to whoever owns it next.
+  CBZ.onAlways(97, function (dt) {
+    tickSpeech(dt);
+    // onUpdate stops at the pause/title screen, so the quiet latch is
+    // re-evaluated here too — a mode change while paused must still hand
+    // #interact back to whoever owns it next.
     syncQuiet();
     if (CBZ.game.state !== "playing") {
       if (current) { current = null; el.interact.classList.remove("show"); }
       showTouchUI(false);
-      // a line still playing when the world stops is left over from a run that
-      // is no longer on screen — the subtitle goes with it.
-      saySilence();
     } else if (CBZ.game.mode !== "escape") showTouchUI(false);
   });
 })();
