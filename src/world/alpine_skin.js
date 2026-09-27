@@ -222,8 +222,8 @@
         "    alpRn = vec3( - gZ * wxz.y, 0.0, - gX * wxz.x ) * 0.30 * steep;\n" +
         // snow on a steep face survives only in the grooves: couloirs and
         // streaks down the rock, not a sheet (a deep field still buries it)
-        "    float hold = smoothstep( 0.30, 0.62, 1.0 - runnel );\n" +
-        "    snowM *= mix( 1.0, hold, steep * ( 1.0 - cov * cov * cov ) );\n" +
+        "    float hold = smoothstep( 0.18, 0.50, 1.0 - runnel );\n" +
+        "    snowM *= mix( 1.0, hold, 0.75 * steep * ( 1.0 - cov * cov ) );\n" +
         "  }\n" +
         "  alpSnowMask = snowM;\n" +
         // rock: bedding contacts on world height, grain, cracks

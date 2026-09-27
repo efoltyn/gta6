@@ -1547,8 +1547,11 @@
           // running down the concavities past bare rock, which is the look.
           const gHold = CBZ.mtnSlopeAt ? CBZ.mtnSlopeAt(greaterMercyHeightAt, wx, wz, 30) : null;
           const cover = CBZ.mtnSnowCover(wx - DX, wz - DZ, y, slope, faceLight, {
-            line: 96, band: 140, aspect: 70, wob: 40, shed0: 0.14, shed1: 0.54, salt: S_GSNOW,
-            concave: gconc, gully: 74, spine: 0.58, patch: 0.85, patchCell: 190,
+            // gully 38 (was 74), shed1 0.74 (was 0.54), line 88: the ridged range (see
+            // RIDGES, NOT DOMES) has deeper gullies and steeper crests; the old
+            // numbers filled every low valley white and stripped the summits
+            line: 88, band: 140, aspect: 70, wob: 40, shed0: 0.18, shed1: 0.74, salt: S_GSNOW,
+            concave: gconc, gully: 38, spine: 0.58, patch: 0.85, patchCell: 190,
             slopeHold: gHold,
             // one scale up: 34 u beds, so the ledge lines are the ones a
             // kilometre-distant eye actually resolves on this range.
