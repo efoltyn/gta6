@@ -927,6 +927,7 @@
       // advice names, so that is the only piece drawn. One or two per floor
       // plate, inset from the walls, away from the stairwell strip.
       if (CBZ.furnish && CBZ.furnish.table && b.w > 5 && b.d > 5) {
+        const buckets = new Map();
         const n = 1 + (h01(b.x, b.z, 0x9a11) > 0.55 ? 1 : 0);
         /* TWO TABLES MUST NOT BE THE SAME TABLE. Both positions were drawn
            independently from the hash inside a room whose usable span is only
@@ -956,21 +957,24 @@
           const wx = b.x + lx, wz = b.z + lz;
           const yaw = h01(wx, wz, 0x9a14) > 0.5 ? 0 : Math.PI / 2;
           // host draw: the table belongs to the BUILDING's group, so it goes
-          // down with it when the building pancakes.
-          const grp = b.group;
+          // down with it when the building pancakes. Boxes are BUFFERED per
+          // colour and merged once per building below: one mesh per table
+          // leg was 1,760 draw calls across the island for furniture that
+          // sits behind walls.
           const host = function (dx, dy, dz, dw, dh, dd, color, oo) {
-            const m = new THREE.Mesh(new THREE.BoxGeometry(dw, dh, dd),
-              CBZ.cmat ? CBZ.cmat(color) : new THREE.MeshLambertMaterial({ color: color }));
-            m.position.set(dx - b.x, dy - gy, dz - b.z);
-            m.castShadow = !!(oo && oo.cast);
-            m.receiveShadow = true;
-            grp.add(m);
+            const g = new THREE.BoxGeometry(dw, dh, dd);
+            g.translate(dx - b.x, dy - gy, dz - b.z);
+            const key = color + (oo && oo.cast ? "c" : "");
+            let bk = buckets.get(key);
+            if (!bk) { bk = { color: color, cast: !!(oo && oo.cast), geos: [], cols: [] }; buckets.set(key, bk); }
+            bk.geos.push(g);
             if (oo && oo.solid) {
-              const c = { minX: dx - dw / 2, maxX: dx + dw / 2, minZ: dz - dd / 2, maxZ: dz + dd / 2, ref: m, y0: oo.y0, y1: oo.y1 };
+              const c = { minX: dx - dw / 2, maxX: dx + dw / 2, minZ: dz - dd / 2, maxZ: dz + dd / 2, ref: null, y0: oo.y0, y1: oo.y1 };
               if (CBZ.colliders) CBZ.colliders.push(c);
               if (b.colliders) b.colliders.push(c);
+              bk.cols.push(c);
             }
-            return m;
+            return true;
           };
           try {
             // a HEAVY table — the advice is specific about that, and a 1.6 m
@@ -980,6 +984,18 @@
             A.kitTables++;
           } catch (e) { /* the kit refused; the island simply has no table here */ }
         }
+        // one mesh per colour for this building's furniture
+        const BGU = THREE.BufferGeometryUtils;
+        buckets.forEach(function (bk) {
+          const geos = BGU && BGU.mergeBufferGeometries ? [BGU.mergeBufferGeometries(bk.geos, false)] : bk.geos;
+          for (let gi = 0; gi < geos.length; gi++) {
+            const m = new THREE.Mesh(geos[gi], CBZ.cmat ? CBZ.cmat(bk.color) : new THREE.MeshLambertMaterial({ color: bk.color }));
+            m.castShadow = bk.cast; m.receiveShadow = true;
+            b.group.add(m);
+            for (let ci = 0; ci < bk.cols.length; ci++) if (!bk.cols[ci].ref) bk.cols[ci].ref = m;
+          }
+          if (geos[0] !== bk.geos[0]) for (let gi = 0; gi < bk.geos.length; gi++) bk.geos[gi].dispose();
+        });
         if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
       }
       // ---- A UTILITY POLE beside roughly a third of buildings -----------

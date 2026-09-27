@@ -638,6 +638,40 @@
       });
     }
   } catch (e) {}
+
+  // ---- WHAT KIND OF MACHINE IS THIS? (read once, before any renderer exists) ---
+  // Owner, 2026-09-27: "gang life is literally not running ... it's very hard
+  // to run on my iPad." The game used to boot every device into the same pinned
+  // Medium tier, sized for an M-series Mac, with 16 point + 8 spot lights
+  // compiled into EVERY lit fragment shader. A tablet GPU pays for each of those
+  // lights on every pixel whether it is lit or not, so the device class has to
+  // be known before core/lightpin.js pins the counts and before core/quality.js
+  // picks a starting tier.
+  //   phone   iPhone / Android phone / a small touch screen
+  //   tablet  iPad (iPadOS reports "Macintosh" + maxTouchPoints > 1) / Android tablet
+  //   desktop everything else
+  // ?device=phone|tablet|desktop forces it (tools, and the owner's own A/B).
+  CBZ.deviceClass = (function () {
+    try {
+      const force = new URLSearchParams(location.search).get("device");
+      if (force === "phone" || force === "tablet" || force === "desktop") return force;
+      const ua = navigator.userAgent || "";
+      const pts = navigator.maxTouchPoints || 0;
+      if (/iPhone|iPod/.test(ua) || (/Android/.test(ua) && /Mobile/.test(ua))) return "phone";
+      if (/iPad/.test(ua) || (/Macintosh/.test(ua) && pts > 1) || /Android/.test(ua)) return "tablet";
+      const short = Math.min(screen.width || 9999, screen.height || 9999);
+      if (pts > 0 && /Mobile|Silk|Kindle/.test(ua)) return short < 600 ? "phone" : "tablet";
+    } catch (e) {}
+    return "desktop";
+  })();
+  CBZ.isMobileDevice = CBZ.deviceClass !== "desktop";
+  if (CBZ.isMobileDevice) {
+    // Shader light pin (core/lightpin.js): the nearest 4 point lights (street
+    // lamps, muzzle flashes) and 2 spots (headlights) stay real; everything
+    // further keeps its emissive glow. Pinned per boot, so no recompiles.
+    if (CBZ.CONFIG.LIGHT_BUDGET_POINT == null) CBZ.CONFIG.LIGHT_BUDGET_POINT = CBZ.deviceClass === "phone" ? 3 : 4;
+    if (CBZ.CONFIG.LIGHT_BUDGET_SPOT == null) CBZ.CONFIG.LIGHT_BUDGET_SPOT = CBZ.deviceClass === "phone" ? 1 : 2;
+  }
   // ---- PERF LEVERS (owner-facing, feel-testable via URL) ----------------------
   // Round-3 teardown (tools/perf-ab/LOG.md) named the three biggest costs and
   // gave each its own reversible switch so the owner can flip it and PLAY the

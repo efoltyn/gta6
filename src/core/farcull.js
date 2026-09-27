@@ -476,4 +476,111 @@
       hidByUs.clear();
     }
   });
+
+  /* ---- FOG REACH (phones and tablets only) --------------------------------
+     MEASURED 2026-09-27 (tools/ipad-perf.mjs, Gang City spawn, iPad viewport):
+     8.7 M triangles a frame at the Fast tier, and ~6 M of them were scenery
+     pools that are NEVER frustum-culled (backcountry forest chunks, Redhollow
+     crowns and wood, scatter rocks): r128 tests an InstancedMesh by its
+     prototype's sphere, so every such pool is `frustumCulled = false` and
+     draws in full from anywhere in the country. The farcull sweep above
+     exempts them (terrain-flagged, r > 400), and continent.js's forest disc
+     keeps chunks out to 3.5 km whatever the fog says.
+     On a desktop that is a fair price for a horizon. On a tablet at the Fast
+     tier the fog ends at 560 m, and a low tree 1.5 km away is ~86% fog even
+     under the height fog's floor: a faint smudge that still costs its whole
+     vertex pass, every frame, in the main pass and the shadow pass. So here a
+     scenery pool whose NEAREST point is further than 1.8x fog.far is removed
+     from rendering via layers (never .visible, which continent.js and the
+     tier gates own), and put back the moment it comes within reach. Mountains
+     are plain meshes and are left to their own tier gates; airborne (camera
+     above 250 m) the fog opens up and nothing is held back. */
+  if (CBZ.isMobileDevice) {
+    const reachHidden = new Set();
+    let reachT = 0;
+    const reachStat = { cands: 0, reach: 0, camY: 0 };
+    // Own measurement, not viewscope's subtreeSphere: that one marks anything
+    // wider than 400 m unscopeable, which is every forest chunk (1.6 km).
+    // Instanced pools are measured over their instances (r128 only knows the
+    // prototype), cached until the pool rewrites its matrices.
+    const reachBounds = new WeakMap();
+    const _rv = new THREE.Vector3();
+    function reachSphere(o) {
+      let b = reachBounds.get(o);
+      if (b && (b.moving || b.iv == null || !o.instanceMatrix || o.instanceMatrix.version === b.iv)) return b;
+      // A pool that keeps rewriting its matrices is actors (crowd, instanced
+      // peds, traffic), not scenery: after three rewrites it is left alone.
+      const rewrites = b ? (b.rewrites || 0) + 1 : 0;
+      if (rewrites > 3) { b.moving = true; return b; }
+      b = { x: 0, y: 0, z: 0, r: 0, iv: null, ok: false, rewrites: rewrites, moving: false };
+      try {
+        const g = o.geometry;
+        if (o.isInstancedMesh) {
+          const a = o.instanceMatrix && o.instanceMatrix.array, n = o.count | 0;
+          if (a && n) {
+            let mnx = 1e9, mxx = -1e9, mny = 1e9, mxy = -1e9, mnz = 1e9, mxz = -1e9, maxS = 0;
+            for (let i = 0; i < n; i++) {
+              const q = i * 16, x = a[q + 12], y = a[q + 13], z = a[q + 14];
+              if (x < mnx) mnx = x; if (x > mxx) mxx = x;
+              if (y < mny) mny = y; if (y > mxy) mxy = y;
+              if (z < mnz) mnz = z; if (z > mxz) mxz = z;
+              const s = Math.max(Math.hypot(a[q], a[q + 1], a[q + 2]), Math.hypot(a[q + 4], a[q + 5], a[q + 6]), Math.hypot(a[q + 8], a[q + 9], a[q + 10]));
+              if (s > maxS) maxS = s;
+            }
+            if (!g.boundingSphere) g.computeBoundingSphere();
+            const proto = (g.boundingSphere ? g.boundingSphere.radius : 2) * (maxS || 1);
+            b.x = (mnx + mxx) / 2 + o.position.x; b.y = (mny + mxy) / 2 + o.position.y; b.z = (mnz + mxz) / 2 + o.position.z;
+            b.r = Math.hypot(mxx - mnx, mxy - mny, mxz - mnz) * 0.5 + proto;
+            b.iv = o.instanceMatrix.version; b.ok = true;
+          }
+        } else if (g) {
+          if (!g.boundingSphere) g.computeBoundingSphere();
+          const s = g.boundingSphere;
+          if (s) {
+            _rv.copy(s.center).applyMatrix4(o.matrixWorld);
+            b.x = _rv.x; b.y = _rv.y; b.z = _rv.z;
+            b.r = s.radius * Math.max(Math.abs(o.scale.x), Math.abs(o.scale.y), Math.abs(o.scale.z), 1); b.ok = true;
+          }
+        }
+      } catch (e) { b.ok = false; }
+      reachBounds.set(o, b);
+      return b;
+    }
+    function restoreReach() { reachHidden.forEach(function (o) { o.layers.mask = 1; }); reachHidden.clear(); }
+    CBZ.onAlways(3.61, function () {
+      const now = performance.now();
+      if (now - reachT < 300) return;
+      reachT = now;
+      const g = CBZ.game, root = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
+      const cam = CBZ.camera, fog = CBZ.scene && CBZ.scene.fog;
+      if (!g || g.mode !== "city" || !root || !cam || !fog || !(fog.far > 0) ||
+          cam.position.y > 250 || (CBZ.CONFIG && CBZ.CONFIG.MOBILE_FOG_REACH === false)) {
+        if (reachHidden.size) restoreReach();
+        return;
+      }
+      // A raised eye (a rooftop, a hill road) thins the height fog along the
+      // line of sight (renderer.js cbzAir), so the reach grows with altitude.
+      const reach = fog.far * 1.8 + Math.max(0, cam.position.y) * 2;
+      const kids = root.children;
+      let cands = 0;
+      for (let i = 0; i < kids.length; i++) {
+        const o = kids[i];
+        const ud = o.userData || {};
+        if (!(o.isInstancedMesh || ud.vegetationLayer || ud.sceneryScale)) continue;
+        if (o.frustumCulled !== false && !o.isInstancedMesh) continue;   // r128 already culls it
+        if (ud.dynamic) continue;
+        const b = reachSphere(o);
+        if (!b.ok || b.moving) continue;
+        cands++;
+        const d = Math.hypot(b.x - cam.position.x, b.y - cam.position.y, b.z - cam.position.z) - b.r;
+        if (d > reach) {
+          if (o.layers.mask !== 0) { o.layers.mask = 0; reachHidden.add(o); }
+        } else if (reachHidden.has(o)) {
+          o.layers.mask = 1; reachHidden.delete(o);
+        }
+      }
+      reachStat.cands = cands; reachStat.reach = reach; reachStat.camY = cam.position.y;
+    });
+    CBZ.fogReachAudit = function () { return { hidden: reachHidden.size, candidates: reachStat.cands, reach: Math.round(reachStat.reach), camY: Math.round(reachStat.camY) }; };
+  }
 })();

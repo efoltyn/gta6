@@ -2270,6 +2270,14 @@
        the foam colour the soup is allowed to make: whitewater churned out of
        a suspension is tan, never paper-white, and painting it white is most of
        what made the flooded town read as snow. */
+    /* ---- THE DRY DISC: (cx, cz, r, sink). An island's sea sheet runs
+       under the whole island, and its swell crests rose through the flat
+       plain and the upper beach as z-fighting stripes (measured: 21k of 26k
+       flickering pixels in a high view of the disaster island). Inside r the
+       sheet is pulled `sink` metres down, fading to nothing over 8 m at r so
+       the waterline contact is untouched. w = 0 (the default) is a no-op for
+       every other consumer; the owner zeroes it while a flood is up. */
+    U.uDwDryDisc = { value: new THREE.Vector4(0, 0, 0, 0) };
     U.uDwSilt = { value: new THREE.Color(opts.siltColor == null ? 0x1f1810 : opts.siltColor) };
     U.uDwFoam = { value: new THREE.Color(opts.dirtyFoamColor == null ? 0x8e8271 : opts.dirtyFoamColor) };
 
@@ -2278,6 +2286,7 @@
       "uniform float uDisasterAmp;",
       "uniform float uDisasterChop;",
       "uniform float uDisasterNormalGain;",
+      "uniform vec4 uDwDryDisc;",
       "varying vec3 vDwWorld;",
       "varying vec3 vDwNormal;",
       "varying float vDwHeight;",
@@ -2287,6 +2296,7 @@
       "  vec4 dwBase = modelMatrix * vec4(position, 1.0);",
       CBZ.waterWaveGLSL("dwBase.xz", "uSeaTime", "uDisasterAmp", "dwH", "dwDx", "dwDz", "uDisasterChop"),
       "  vec3 dwWorld = vec3(dwBase.x, dwBase.y + dwH, dwBase.z);",
+      "  dwWorld.y -= uDwDryDisc.w * (1.0 - smoothstep(uDwDryDisc.z - 8.0, uDwDryDisc.z, distance(dwBase.xz, uDwDryDisc.xy)));",
       "  vec3 dwNormal = normalize(vec3(-dwDx * uDisasterNormalGain, 1.0, -dwDz * uDisasterNormalGain));",
       "  vDwWorld = dwWorld;",
       "  vDwNormal = dwNormal;",
