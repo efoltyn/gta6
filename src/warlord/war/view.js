@@ -22,14 +22,19 @@
               and a pale line where a realm meets the sea. A town that
               changes hands repaints outward from its gate over 0.8 s,
               in the order G.catchTiles already sorts by distance.
-     TOWNS    the repo's own village huts (city/villagekit.js through
-              W.props.house), merged once per kind and INSTANCED: every
-              house on the map is three draw calls. Capitals are walled.
-              Every town flies its owner's flag.
-     ARMIES   a block of little spearmen (instanced, tinted by owner) under
-              a banner, with a strength plate. Movement is interpolated
-              between sim days. Battles are crossed swords and smoke with
-              both sides' numbers.
+     TOWNS    the warlord's own houses (W.props.house, lite shells),
+              merged once per kind and INSTANCED: every house on the map is
+              three draw calls. They face a well on a square of trodden
+              earth that the terrain shader paints and grows with the town;
+              tracks between neighbouring towns are baked into the ground.
+              Capitals are walled: crenellated curtain, square towers, a
+              gatehouse. Every town flies its owner's vexillum.
+     ARMIES   a regiment of painted miniature spearmen on a wooden stand
+              that lies on the slope, ranks facing the march, the owner's
+              standard at the back corner, a strength plate over it.
+              Movement is interpolated between sim days. Battles are crossed
+              swords and dust with both sides' numbers; routes end in an
+              arrowhead.
      CAMERA   an RTS map camera: drag pans, wheel/pinch zooms toward the
               cursor, right-drag / two-finger twist rotates and tilts.
 
@@ -389,8 +394,8 @@
     "varying vec2 vUv;varying float vDepth;varying vec3 vWorld;" +
     "void main(){vUv=uv;vec4 wp=modelMatrix*vec4(position,1.0);vWorld=wp.xyz;vec4 mv=viewMatrix*wp;vDepth=-mv.z;gl_Position=projectionMatrix*mv;}";
   const TERRAIN_FRAG =
-    "uniform sampler2D uBase;uniform sampler2D uOwner;uniform sampler2D uPal;uniform sampler2D uLand;" +
-    "uniform vec2 uSize;uniform vec3 uFog;uniform vec2 uFogR;uniform float uPlayer;uniform float uHi;uniform float uTime;uniform float uAlpha;" +
+    "uniform sampler2D uBase;uniform sampler2D uOwner;uniform sampler2D uPal;uniform sampler2D uLand;uniform sampler2D uTown;" +
+    "uniform vec2 uSize;uniform vec3 uFog;uniform vec2 uFogR;uniform float uPlayer;uniform float uHi;uniform float uTime;uniform float uAlpha;uniform float uTownZ;" +
     "varying vec2 vUv;varying float vDepth;varying vec3 vWorld;" + NOISE_GLSL +
     "float own(vec2 c){return floor(texture2D(uOwner,(c+0.5)/uSize).r*255.0+0.5);}" +
     "vec3 pal(float o){return texture2D(uPal,vec2((o+0.5)/256.0,0.5)).rgb;}" +
@@ -401,6 +406,25 @@
     " float land=texture2D(uLand,vUv).r;" +
     " float fwL=max(fwidth(land),0.0005);" +
     " float lm=smoothstep(0.5-fwL,0.5+fwL,land);" +
+    // TOWN GROUND: trodden earth under the huts, out to the town's ground radius
+    // (grown with the live town zoom), its edge broken by noise so it is a
+    // worn patch and not a disc, and a paler packed square round the well.
+    // uTown holds, per tile, the EXACT offset to the nearest town centre
+    // (12-bit x/y) and that town's radius, so the distance is exact at any zoom
+    " vec2 tc=floor(tp)+0.5;vec4 tw=texture2D(uTown,tc/uSize);" +
+    " float tr=tw.b*uTownZ;" +
+    " if(tr>0.0){" +
+    "  float lo=floor(tw.a*255.0+0.5);float lx=floor(lo/16.0);float ly=lo-lx*16.0;" +
+    "  vec2 off=(vec2(floor(tw.r*255.0+0.5)*16.0+lx,floor(tw.g*255.0+0.5)*16.0+ly)/4095.0)*24.0-12.0;" +
+    "  float td0=length(tp-(tc+off));" +
+    "  float td=td0+(vno(tp*2.7)-0.5)*0.35*tr;" +
+    "  float lu0=dot(col,vec3(0.299,0.587,0.114));" +
+    "  float dirt=(1.0-smoothstep(tr*0.7,tr*1.15,td))*lm;" +
+    "  vec3 dc=vec3(0.46,0.38,0.28)*(0.88+0.24*vno(tp*31.0));" +
+    "  col=mix(col,dc*(0.55+0.9*lu0),dirt*0.62);" +
+    "  float sq=(1.0-smoothstep(0.1*uTownZ,0.15*uTownZ,td0))*lm;" +
+    "  col=mix(col,vec3(0.6,0.55,0.46)*(0.55+0.9*lu0),sq*0.55);" +
+    " }" +
     " vec2 p=tp-0.5;vec2 i0=floor(p);vec2 f=p-i0;" +
     " float o0=own(i0),o1=own(i0+vec2(1.0,0.0)),o2=own(i0+vec2(0.0,1.0)),o3=own(i0+vec2(1.0,1.0));" +
     " float w0=(1.0-f.x)*(1.0-f.y),w1=f.x*(1.0-f.y),w2=(1.0-f.x)*f.y,w3=f.x*f.y;" +
@@ -463,15 +487,18 @@
     " col=mix(col,uFog,fg);" +
     " gl_FragColor=vec4(col,1.0);" +
     "}";
+  // a march route: a dashed, crawling line with dark edges, ending in a solid
+  // arrowhead (aHead = 1) the way a campaign map draws an army's advance
   const RIBBON_VERT =
-    "attribute float aLen;attribute float aSide;varying float vLen;varying float vSide;" +
-    "void main(){vLen=aLen;vSide=aSide;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}";
+    "attribute float aLen;attribute float aSide;attribute float aHead;varying float vLen;varying float vSide;varying float vHead;" +
+    "void main(){vLen=aLen;vSide=aSide;vHead=aHead;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}";
   const RIBBON_FRAG =
-    "uniform vec3 uColor;uniform float uTime;uniform float uDash;uniform float uOp;varying float vLen;varying float vSide;" +
+    "uniform vec3 uColor;uniform float uTime;uniform float uDash;uniform float uOp;varying float vLen;varying float vSide;varying float vHead;" +
     "void main(){float ph=fract(vLen/uDash-uTime*0.9);float dsh=smoothstep(0.0,0.08,ph)*(1.0-smoothstep(0.55,0.63,ph));" +
     "float e=smoothstep(0.0,0.22,vSide)*(1.0-smoothstep(0.78,1.0,vSide));" +
     "float core=1.0-smoothstep(0.3,0.5,abs(vSide-0.5));" +
     "vec3 c=mix(vec3(0.08,0.06,0.04),uColor,core);" +
+    "if(vHead>0.5){c=mix(vec3(0.08,0.06,0.04),uColor,smoothstep(0.55,0.8,vHead));dsh=1.0;e=1.0;}" +
     "gl_FragColor=vec4(c,dsh*e*uOp);}";
 
   /* ================================================================ BUILD */
@@ -547,7 +574,7 @@
       uniforms: {
         uBase: { value: baseTex }, uOwner: { value: ownerTex }, uPal: { value: palTex }, uLand: { value: landTex },
         uSize: { value: new THREE.Vector2(w, h) }, uFog: { value: fogC }, uFogR: { value: new THREE.Vector2(1e5, 2e5) },
-        uPlayer: { value: G.player || -1 }, uHi: { value: -1 }, uTime: { value: 0 }, uAlpha: { value: 0.36 },
+        uPlayer: { value: G.player || -1 }, uHi: { value: -1 }, uTime: { value: 0 }, uAlpha: { value: 0.36 }, uTownZ: { value: 1 }, uTown: { value: null },
       },
       vertexShader: VERT, fragmentShader: TERRAIN_FRAG,
       extensions: { derivatives: true },
@@ -614,6 +641,38 @@
     g.translate(x, y, z);
     parts.push({ geo: g, color: col });
   }
+  // any geometry, optionally turned about x then y, then moved into place
+  function part(parts, g, x, y, z, col, rx, ry) {
+    if (rx) g.rotateX(rx);
+    if (ry) g.rotateY(ry);
+    g.translate(x, y, z);
+    parts.push({ geo: g, color: col });
+  }
+  /* A SQUARE STONE TOWER, unit footprint, body 0..1 high: a battered plinth,
+     the shaft, a corbelled parapet course, eight merlons (corners and
+     mid-sides), a dark pyramid roof sunk inside the fighting top, and an
+     arrow slit on every face. Shared by the capital's wall towers and the
+     two drums of the gatehouse. */
+  function towerParts(parts, cx, cz, wdt, hgt, stone, roof) {
+    const dark = [0.07, 0.06, 0.05], course = [stone[0] * 0.82, stone[1] * 0.82, stone[2] * 0.8];
+    box(parts, wdt * 1.12, 0.14 * hgt, wdt * 1.12, cx, 0.07 * hgt, cz, course);
+    box(parts, wdt, hgt, wdt, cx, hgt / 2, cz, stone);
+    box(parts, wdt * 1.14, 0.08 * hgt, wdt * 1.14, cx, hgt + 0.04 * hgt, cz, course);
+    const m = wdt * 0.26, e = wdt * 0.57 - m / 2;
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+      if (!i && !j) continue;
+      box(parts, m, 0.2 * hgt, m, cx + i * e, hgt * 1.18, cz + j * e, stone);
+    }
+    const py = new THREE.ConeGeometry(wdt * 0.5, 0.34 * hgt, 4);
+    part(parts, py, cx, hgt * 1.08 + 0.17 * hgt, cz, roof, 0, Math.PI / 4);
+    for (let k = 0; k < 4; k++) {
+      const a = k * Math.PI / 2, s = Math.sin(a), c = Math.cos(a);
+      const sl = new THREE.BoxGeometry(wdt * 0.09, 0.2 * hgt, 0.06 * wdt);
+      sl.rotateY(a);
+      sl.translate(cx + s * wdt * 0.5, hgt * 0.62, cz + c * wdt * 0.5);
+      parts.push({ geo: sl, color: dark });
+    }
+  }
   function mergeParts(parts) {
     let n = 0;
     const geos = parts.map(function (p) {
@@ -643,7 +702,8 @@
     const P = W.props;
     const parts = [];
     let g = null;
-    try { if (P && P.house) g = P.house({ kind: kind, seed: seed, rot: 0 }); } catch (e) { g = null; }
+    // lite: the exterior shell only, no interior and no nested instancing
+    try { if (P && P.house) g = P.house({ kind: kind, seed: seed, rot: 0, lite: true }); } catch (e) { g = null; }
     if (g && !g.userData.missing) {
       g.updateMatrixWorld(true);
       g.traverse(function (o) {
@@ -656,26 +716,64 @@
       });
     }
     if (!parts.length) {
-      box(parts, 3.3, 2.1, 3.3, 0, 1.05, 0, [0.42, 0.33, 0.24]);
-      box(parts, 3.8, 0.25, 3.8, 0, 2.2, 0, [0.3, 0.16, 0.1]);
+      // no props.js: an adobe hut with a door and a pitched roof, never a lidded box
+      box(parts, 3.3, 2.1, 3.0, 0, 1.05, 0, [0.62, 0.5, 0.36]);
+      box(parts, 0.8, 1.5, 0.1, 0, 0.75, 1.52, [0.18, 0.12, 0.08]);
+      // roof slabs fall away from the ridge (rotateX(+a) drops the +z end)
+      const r1 = new THREE.BoxGeometry(3.7, 0.16, 1.95); r1.rotateX(0.62); r1.translate(0, 2.62, 0.78);
+      const r2 = new THREE.BoxGeometry(3.7, 0.16, 1.95); r2.rotateX(-0.62); r2.translate(0, 2.62, -0.78);
+      parts.push({ geo: r1, color: [0.42, 0.24, 0.14] }, { geo: r2, color: [0.36, 0.2, 0.12] });
+      // the gable: a triangular prism along x closing both ends under the roof
+      const gb = new THREE.CylinderGeometry(1.73, 1.73, 3.3, 3, 1);
+      gb.rotateZ(Math.PI / 2); gb.rotateX(-Math.PI / 2); gb.scale(1, 0.41, 1); gb.translate(0, 2.455, 0);
+      parts.push({ geo: gb, color: [0.6, 0.48, 0.34] });
     }
     return mergeParts(parts);
   }
+  /* A PAINTED MINIATURE SPEARMAN, 1.8 tall, facing +z. The owner's colour is
+     what a wargamer paints: tunic, shield face and helmet crest (the tinted
+     half). Skin, bronze, leather and the spear stay their own colours (the
+     untinted half). Low-poly on purpose: at map zoom he is ~15 px tall and
+     every vertex is paid 4000 times. */
   function manGeos() {
     const cloth = [], kit = [];
-    // the tinted half: tunic, sleeves, the shield
-    box(cloth, 0.46, 0.62, 0.27, 0, 1.12, 0, [0.78, 0.78, 0.78]);
-    box(cloth, 0.13, 0.56, 0.14, -0.3, 1.1, 0.02, [0.7, 0.7, 0.7]);
-    box(cloth, 0.13, 0.56, 0.14, 0.3, 1.1, 0.02, [0.7, 0.7, 0.7]);
-    box(cloth, 0.5, 0.72, 0.07, -0.2, 1.02, 0.24, [1, 1, 1]);
-    // the untinted half: legs, face, bronze helmet, spear
-    box(kit, 0.17, 0.82, 0.18, -0.12, 0.41, 0, [0.12, 0.09, 0.07]);
-    box(kit, 0.17, 0.82, 0.18, 0.12, 0.41, 0, [0.12, 0.09, 0.07]);
-    box(kit, 0.24, 0.27, 0.24, 0, 1.58, 0, [0.62, 0.42, 0.29]);
-    box(kit, 0.3, 0.13, 0.3, 0, 1.74, 0, [0.46, 0.33, 0.12]);
-    box(kit, 0.05, 2.5, 0.05, 0.32, 1.3, 0.06, [0.3, 0.2, 0.1]);
-    box(kit, 0.09, 0.22, 0.09, 0.32, 2.62, 0.06, [0.75, 0.75, 0.72]);
+    const skin = [0.62, 0.43, 0.3], bronze = [0.55, 0.4, 0.16], leather = [0.2, 0.13, 0.08], wood = [0.36, 0.25, 0.13];
+    // tinted: tunic (a tapered skirt of cloth, not a box), sleeves, shield face, crest
+    part(cloth, new THREE.CylinderGeometry(0.2, 0.28, 0.66, 6), 0, 1.1, 0, [0.82, 0.82, 0.82]);
+    box(cloth, 0.12, 0.3, 0.13, -0.28, 1.28, 0.02, [0.72, 0.72, 0.72]);
+    box(cloth, 0.12, 0.3, 0.13, 0.28, 1.28, 0.02, [0.72, 0.72, 0.72]);
+    part(cloth, new THREE.CylinderGeometry(0.33, 0.33, 0.05, 10), -0.16, 1.08, 0.3, [1, 1, 1], Math.PI / 2);
+    box(cloth, 0.05, 0.14, 0.34, 0, 1.86, -0.02, [0.9, 0.9, 0.9]);
+    // untinted: bare legs and sandals, belt, forearms, head, bronze helmet and shield boss, the spear
+    box(kit, 0.14, 0.72, 0.15, -0.1, 0.42, 0, skin);
+    box(kit, 0.14, 0.72, 0.15, 0.1, 0.42, 0, skin);
+    box(kit, 0.17, 0.08, 0.24, -0.1, 0.04, 0.03, leather);
+    box(kit, 0.17, 0.08, 0.24, 0.1, 0.04, 0.03, leather);
+    part(kit, new THREE.CylinderGeometry(0.215, 0.23, 0.07, 6), 0, 0.98, 0, leather);
+    box(kit, 0.1, 0.3, 0.1, 0.3, 0.98, 0.08, skin);
+    part(kit, new THREE.SphereGeometry(0.13, 6, 4), 0, 1.57, 0, skin);
+    part(kit, new THREE.SphereGeometry(0.155, 6, 3, 0, Math.PI * 2, 0, Math.PI / 2), 0, 1.6, 0, bronze);
+    part(kit, new THREE.SphereGeometry(0.08, 5, 3, 0, Math.PI * 2, 0, Math.PI / 2), -0.16, 1.08, 0.325, bronze, Math.PI / 2);
+    part(kit, new THREE.CylinderGeometry(0.024, 0.024, 2.4, 4), 0.32, 1.25, 0.1, wood);
+    part(kit, new THREE.ConeGeometry(0.05, 0.24, 4), 0.32, 2.57, 0.1, [0.7, 0.7, 0.68]);
     return { cloth: mergeParts(cloth), kit: mergeParts(kit) };
+  }
+  /* THE STAND a regiment is glued to, like a wargame base: a dark wood rim
+     with a bevel step and a flocked top painted like trodden ground. Unit
+     footprint, 0.14 high; scaled per army to its formation. */
+  const BASE_H = 0.14;
+  function standGeo() {
+    const p = [];
+    box(p, 1.06, 0.08, 1.06, 0, 0.04, 0, [0.19, 0.12, 0.07]);
+    box(p, 1, 0.08, 1, 0, 0.1, 0, [0.4, 0.36, 0.23]);
+    // tufts of static grass and a stone or two, so the flock is not one flat colour
+    const r = mulberry(77);
+    for (let i = 0; i < 14; i++) {
+      const g = r() < 0.7;
+      box(p, g ? 0.07 : 0.06, g ? 0.05 : 0.035, g ? 0.07 : 0.05, (r() - 0.5) * 0.9, 0.14 + (g ? 0.025 : 0.017), (r() - 0.5) * 0.9,
+          g ? [0.3, 0.36, 0.16] : [0.5, 0.47, 0.42]);
+    }
+    return mergeParts(p);
   }
   function vcMat() { return track(new THREE.MeshLambertMaterial({ vertexColors: true })); }
   function instanced(geo, mat, cap, tint) {
@@ -688,34 +786,44 @@
     return m;
   }
 
-  /* ================================================================ TOWNS */
+  /* ================================================================ TOWNS
+     A town is a village you could have painted: huts round a well on a
+     trodden-earth square (the ground is the terrain shader's, off a
+     town-distance field, so it grows with the town instead of floating on
+     it), a hall for the big places, and a capital's stone ring of crenellated
+     wall with square towers and a gatehouse facing south. Every kind is ONE
+     instanced mesh: three house kinds, wall, tower, gate, well. */
   const HUT = 0.036;             // display units per metre of hut
   const HOUSE_KINDS = ["hut_square", "hut_round", "shack_lean"];
-  let houseMeshes = [], wallMesh = null, towerMesh = null, townItems = null, lastTownZ = -1;
+  const STONE = [0.5, 0.45, 0.37], ROOF = [0.24, 0.15, 0.1];
+  let houseMeshes = [], wallMesh = null, towerMesh = null, gateMesh = null, wellMesh = null, townItems = null, lastTownZ = -1;
+  function angDist(a, b) { let d = Math.abs(a - b) % (Math.PI * 2); return d > Math.PI ? Math.PI * 2 - d : d; }
   function buildTowns() {
     const mat = vcMat();
     const geos = HOUSE_KINDS.map(function (k, i) { return houseGeo(k, 11 + i * 7); });
     const perKind = [[], [], []];
-    const walls = [], towers = [];
-    townItems = { kinds: perKind, walls: walls, towers: towers };
+    const walls = [], towers = [], gates = [], wells = [];
+    townItems = { kinds: perKind, walls: walls, towers: towers, gates: gates, wells: wells };
     for (let t = 0; t < M.towns.length; t++) {
       const T = M.towns[t];
       const r = mulberry(strHash(T.id || T.name || t) ^ 0x9e3779b9);
       const pop = Math.max(500, T.pop || 1000);
       let n = clamp(Math.round(Math.sqrt(pop) / 13), 3, 40);
       if (T.capital) n += 6;
-      const R = 0.18 + 0.068 * Math.sqrt(n);
+      const R = 0.2 + 0.068 * Math.sqrt(n);
       const placed = [];
+      wells.push({ t: t, ox: 0, oz: 0, rot: r() * Math.PI * 2 });
       if (T.capital || pop > 60000) {
-        // a hall at the middle: the big square house, doubled
-        placed.push([0, 0, 0.3]);
-        perKind[0].push({ t: t, ox: 0, oz: 0, rot: (r() * 4 | 0) * Math.PI / 2, s: 2.1 });
+        // the hall stands on the north side of the square, its front to the well
+        placed.push([0, -0.2, 0.3]);
+        perKind[0].push({ t: t, ox: 0, oz: -0.2, rot: 0, s: 2.1 });
       }
       let tries = 0;
       while (placed.length < n && tries < n * 30) {
         tries++;
         const a = r() * Math.PI * 2, d = R * Math.sqrt(r());
         const ox = Math.cos(a) * d, oz = Math.sin(a) * d;
+        if (ox * ox + oz * oz < 0.12 * 0.12) continue;           // the square stays open
         let ok = true;
         for (const q of placed) { const dx = q[0] - ox, dz = q[1] - oz; if (dx * dx + dz * dz < (0.13 + q[2] * 0.3) * (0.13 + q[2] * 0.3)) { ok = false; break; } }
         if (!ok) continue;
@@ -723,31 +831,169 @@
         const kind = r() < big ? 0 : r() < 0.6 ? 1 : 2;
         const s = 0.85 + r() * 0.35;
         placed.push([ox, oz, 0]);
-        perKind[kind].push({ t: t, ox: ox, oz: oz, rot: (r() * 4 | 0) * Math.PI / 2 + (r() - 0.5) * 0.3, s: s });
+        // houses turn their fronts to the square, give or take
+        perKind[kind].push({ t: t, ox: ox, oz: oz, rot: Math.atan2(-ox, -oz) + (r() - 0.5) * 0.5, s: s });
       }
       if (T.capital) {
         const RW = R + 0.1;
         const segs = Math.max(10, Math.ceil(Math.PI * 2 * RW / 0.1));
+        // the gate faces +z (the side the default camera looks at), snapped to
+        // a segment's middle so exactly one run of wall gives way to it
+        const GATE_A = (Math.round(segs / 4 - 0.5) + 0.5) / segs * Math.PI * 2;
+        const gateHalf = Math.PI / segs * 0.9;
         for (let k = 0; k < segs; k++) {
           const a0 = k / segs * Math.PI * 2, a1 = (k + 1) / segs * Math.PI * 2, am = (a0 + a1) / 2;
           const len = 2 * RW * Math.sin(Math.PI / segs) * 1.06;
+          if (angDist(am, GATE_A) < gateHalf) continue;
           walls.push({ t: t, ox: Math.cos(am) * RW, oz: Math.sin(am) * RW, rot: -am + Math.PI / 2, len: len });
-          if (k % 3 === 0) towers.push({ t: t, ox: Math.cos(a0) * RW, oz: Math.sin(a0) * RW });
+          if (k % 3 === 0 && angDist(a0, GATE_A) > gateHalf + 0.08 / RW) towers.push({ t: t, ox: Math.cos(a0) * RW, oz: Math.sin(a0) * RW });
         }
+        gates.push({ t: t, ox: Math.cos(GATE_A) * RW, oz: Math.sin(GATE_A) * RW, rot: -GATE_A + Math.PI / 2 });
       }
       T._viewR = R;
+      T._groundR = T.capital ? R + 0.16 : R + 0.08;
     }
     houseMeshes = geos.map(function (g, k) { return instanced(g, mat, Math.max(1, perKind[k].length), false); });
-    const stone = [0.36, 0.32, 0.26];
+
+    // wall run: unit length (x), height 1, thickness 1 (z, +z outward); a
+    // stepped footing, the curtain, a rampart lip inside, two merlons outside
     const wg = [];
-    box(wg, 1, 1, 1, 0, 0.5, 0, stone);
+    box(wg, 1, 0.14, 1.25, 0, 0.07, 0, [STONE[0] * 0.8, STONE[1] * 0.8, STONE[2] * 0.78]);
+    box(wg, 1, 1, 1, 0, 0.5, 0, STONE);
+    box(wg, 1, 0.14, 0.18, 0, 1.07, -0.41, STONE);
+    box(wg, 0.26, 0.34, 0.36, -0.25, 1.17, 0.32, STONE);
+    box(wg, 0.26, 0.34, 0.36, 0.25, 1.17, 0.32, STONE);
     wallMesh = instanced(mergeParts(wg), mat, Math.max(1, walls.length), false);
+
     const tg = [];
-    const cyl = new THREE.CylinderGeometry(0.5, 0.55, 1, 8); cyl.translate(0, 0.5, 0);
-    tg.push({ geo: cyl, color: stone });
-    const cap = new THREE.ConeGeometry(0.62, 0.5, 8); cap.translate(0, 1.2, 0);
-    tg.push({ geo: cap, color: [0.33, 0.17, 0.1] });
+    towerParts(tg, 0, 0, 1, 1, STONE, ROOF);
     towerMesh = instanced(mergeParts(tg), mat, Math.max(1, towers.length), false);
+
+    // gatehouse, in wall units (wall = 1 high): two drum towers, the arch
+    // block over an OPEN passage, its merlons, and the gate leaves swung in
+    const gp = [];
+    towerParts(gp, -0.62, 0, 0.5, 1.45, STONE, ROOF);
+    towerParts(gp, 0.62, 0, 0.5, 1.45, STONE, ROOF);
+    box(gp, 0.78, 0.4, 0.5, 0, 0.93, 0, STONE);
+    for (let k = -1; k <= 1; k++) box(gp, 0.16, 0.2, 0.14, k * 0.26, 1.23, 0.18, STONE);
+    box(gp, 0.04, 0.66, 0.3, -0.34, 0.33, -0.28, [0.26, 0.16, 0.09]);
+    box(gp, 0.04, 0.66, 0.3, 0.34, 0.33, -0.28, [0.26, 0.16, 0.09]);
+    gateMesh = instanced(mergeParts(gp), mat, Math.max(1, gates.length), false);
+
+    // the well, in metres: a kerb of eight dressed stones, dark water inside,
+    // two posts, a windlass and a little gabled roof
+    const eg = [];
+    for (let k = 0; k < 8; k++) {
+      const a = k / 8 * Math.PI * 2;
+      const st = new THREE.BoxGeometry(0.56, 0.72, 0.3);
+      part(eg, st, Math.sin(a) * 0.72, 0.36, Math.cos(a) * 0.72, k & 1 ? STONE : [STONE[0] * 0.9, STONE[1] * 0.9, STONE[2] * 0.88], 0, a);
+    }
+    part(eg, new THREE.CircleGeometry(0.62, 10), 0, 0.5, 0, [0.07, 0.11, 0.13], -Math.PI / 2);
+    box(eg, 0.13, 2.0, 0.13, -0.78, 1.0, 0, [0.3, 0.2, 0.11]);
+    box(eg, 0.13, 2.0, 0.13, 0.78, 1.0, 0, [0.3, 0.2, 0.11]);
+    const wl = new THREE.CylinderGeometry(0.07, 0.07, 1.5, 6); wl.rotateZ(Math.PI / 2); wl.translate(0, 1.55, 0);
+    eg.push({ geo: wl, color: [0.36, 0.25, 0.13] });
+    const rf = new THREE.BoxGeometry(1.95, 0.07, 0.8); rf.rotateX(0.55); rf.translate(0, 2.12, 0.3);
+    eg.push({ geo: rf, color: [0.4, 0.27, 0.15] });
+    const rb = new THREE.BoxGeometry(1.95, 0.07, 0.8); rb.rotateX(-0.55); rb.translate(0, 2.12, -0.3);
+    eg.push({ geo: rb, color: [0.36, 0.24, 0.13] });
+    wellMesh = instanced(mergeParts(eg), mat, Math.max(1, wells.length), false);
+
+    buildTownField();
+    paintRoads();
+  }
+  /* THE GROUND A TOWN STANDS ON, as data the terrain shader reads: per tile,
+     the offset from the tile centre to the nearest town centre (x and y at
+     12 bits over +-12 tiles: R/G the high 8 bits, A the two low nibbles) and
+     that town's ground radius (B, tiles). Sampled NEAREST and turned back
+     into an exact vector in the shader, so a square 0.1 tile across is round
+     at any zoom; linear filtering would average offsets of two towns into a
+     phantom patch on the line between them. */
+  let townTex = null;
+  function buildTownField() {
+    const w = M.w, h = M.h, N = w * h;
+    const d = new Uint8Array(N * 4);
+    const best = new Float32Array(N).fill(1e9), who = new Int32Array(N).fill(-1);
+    for (let t = 0; t < M.towns.length; t++) {
+      const T = M.towns[t];
+      const x0 = Math.max(0, Math.floor(T.x - 11)), x1 = Math.min(w - 1, Math.ceil(T.x + 11));
+      const y0 = Math.max(0, Math.floor(T.y - 11)), y1 = Math.min(h - 1, Math.ceil(T.y + 11));
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        const i = x + y * w;
+        // nearest by distance relative to size, so a big town is not cut by a small neighbour
+        const dd = Math.hypot(x + 0.5 - T.x, y + 0.5 - T.y) - T._groundR;
+        if (dd < best[i]) { best[i] = dd; who[i] = t; }
+      }
+    }
+    for (let i = 0; i < N; i++) {
+      const t = who[i];
+      if (t < 0) continue;
+      const T = M.towns[t], x = i % w, y = (i / w) | 0;
+      const qx = Math.round(clamp((T.x - (x + 0.5) + 12) / 24, 0, 1) * 4095);
+      const qy = Math.round(clamp((T.y - (y + 0.5) + 12) / 24, 0, 1) * 4095);
+      d[i * 4] = qx >> 4; d[i * 4 + 1] = qy >> 4;
+      d[i * 4 + 2] = Math.round(clamp(T._groundR, 0, 1) * 255);
+      d[i * 4 + 3] = ((qx & 15) << 4) | (qy & 15);
+    }
+    townTex = track(new THREE.DataTexture(d, w, h, THREE.RGBAFormat));
+    townTex.magFilter = townTex.minFilter = THREE.NearestFilter;
+    townTex.generateMipmaps = false; townTex.flipY = false; townTex.needsUpdate = true;
+    if (terrainMat) terrainMat.uniforms.uTown.value = townTex;
+  }
+  /* TRACKS BETWEEN TOWNS, baked into the painted ground: every town to its
+     two nearest neighbours over land, a worn double line (dark rut under a
+     pale surface) that wanders a little, never across water. */
+  function paintRoads() {
+    const cv = V._bakeCanvas;
+    if (!cv || M.towns.length < 2) return;
+    const cx = cv.getContext("2d"), s = bakeScale, w = M.w, h = M.h;
+    const maxD = Math.max(6, 0.09 * Math.max(w, h));
+    const done = new Set(), roads = [];
+    function landOk(x, y) {
+      const i = clamp(x | 0, 0, w - 1) + clamp(y | 0, 0, h - 1) * w;
+      return landF[i] > 0.5;
+    }
+    for (let a = 0; a < M.towns.length; a++) {
+      const A = M.towns[a];
+      const near = [];
+      for (let b = 0; b < M.towns.length; b++) {
+        if (b === a) continue;
+        const B = M.towns[b], dd = Math.hypot(B.x - A.x, B.y - A.y);
+        if (dd < maxD) near.push([dd, b]);
+      }
+      near.sort(function (p, q) { return p[0] - q[0]; });
+      for (let k = 0; k < Math.min(2, near.length); k++) {
+        const b = near[k][1], key = a < b ? a + ":" + b : b + ":" + a;
+        if (done.has(key)) continue;
+        done.add(key);
+        const B = M.towns[b], L = near[k][0];
+        const bend = (hash2(a, b, 5) - 0.5) * 0.3 * L;
+        const nx = -(B.y - A.y) / L, ny = (B.x - A.x) / L;
+        const mx = (A.x + B.x) / 2 + nx * bend, my = (A.y + B.y) / 2 + ny * bend;
+        let ok = true;
+        for (let q = 0; q <= 1.0001 && ok; q += 0.35 / L) {
+          const u = 1 - q;
+          const px = u * u * A.x + 2 * u * q * mx + q * q * B.x, py = u * u * A.y + 2 * u * q * my + q * q * B.y;
+          if (!landOk(px, py)) ok = false;
+        }
+        if (ok) roads.push([A.x, A.y, mx, my, B.x, B.y]);
+      }
+    }
+    cx.save();
+    cx.lineCap = "round"; cx.lineJoin = "round";
+    for (let pass = 0; pass < 2; pass++) {
+      cx.strokeStyle = pass ? "rgba(178,154,112,0.5)" : "rgba(70,56,38,0.22)";
+      cx.lineWidth = Math.max(pass ? 0.7 : 1.3, s * (pass ? 0.12 : 0.26));
+      for (const r of roads) {
+        cx.beginPath();
+        cx.moveTo(r[0] * s, r[1] * s);
+        cx.quadraticCurveTo(r[2] * s, r[3] * s, r[4] * s, r[5] * s);
+        cx.stroke();
+      }
+    }
+    cx.restore();
+    V.roadCount = roads.length;
+    if (baseTex) baseTex.needsUpdate = true;
   }
   let tmpObj = null;
   function layoutTowns(Z) {
@@ -766,65 +1012,99 @@
       mesh.count = L.length;
       mesh.instanceMatrix.needsUpdate = true;
     }
-    const WL = townItems.walls;
-    for (let i = 0; i < WL.length; i++) {
-      const it = WL[i], T = M.towns[it.t];
-      const tx = T.x + it.ox * Z, ty = T.y + it.oz * Z;
-      o.position.set(wx(tx), groundY(tx, ty) - 0.005 * Z, wz(ty));
-      o.rotation.set(0, it.rot, 0);
-      o.scale.set(it.len * Z, 0.07 * Z, 0.022 * Z);
-      o.updateMatrix();
-      wallMesh.setMatrixAt(i, o.matrix);
+    function lay(L, mesh, sx, sy, sz, sink) {
+      for (let i = 0; i < L.length; i++) {
+        const it = L[i], T = M.towns[it.t];
+        const tx = T.x + it.ox * Z, ty = T.y + it.oz * Z;
+        o.position.set(wx(tx), groundY(tx, ty) - sink * Z, wz(ty));
+        o.rotation.set(0, it.rot || 0, 0);
+        o.scale.set((it.len || 1) * sx * Z, sy * Z, sz * Z);
+        o.updateMatrix();
+        mesh.setMatrixAt(i, o.matrix);
+      }
+      mesh.count = L.length; mesh.instanceMatrix.needsUpdate = true;
     }
-    wallMesh.count = WL.length; wallMesh.instanceMatrix.needsUpdate = true;
-    const TL = townItems.towers;
-    for (let i = 0; i < TL.length; i++) {
-      const it = TL[i], T = M.towns[it.t];
-      const tx = T.x + it.ox * Z, ty = T.y + it.oz * Z;
-      o.position.set(wx(tx), groundY(tx, ty) - 0.005 * Z, wz(ty));
-      o.rotation.set(0, 0, 0);
-      o.scale.set(0.05 * Z, 0.1 * Z, 0.05 * Z);
-      o.updateMatrix();
-      towerMesh.setMatrixAt(i, o.matrix);
-    }
-    towerMesh.count = TL.length; towerMesh.instanceMatrix.needsUpdate = true;
+    lay(townItems.walls, wallMesh, 1, 0.07, 0.022, 0.005);
+    lay(townItems.towers, towerMesh, 0.052, 0.1, 0.052, 0.005);
+    lay(townItems.gates, gateMesh, 0.07, 0.07, 0.07, 0.005);
+    lay(townItems.wells, wellMesh, HUT, HUT, HUT, 0.002);
+    if (terrainMat) terrainMat.uniforms.uTownZ.value = Z;
   }
 
   /* ================================================================ BANNERS
-     Towns and armies share one set: a pole and a cloth, two draw calls. */
+     Towns and armies share one set, two draw calls: the staff (pole, a
+     crossbar, a spear-point finial) and the cloth, a vexillum hanging from
+     the crossbar with a darker painted border and a scalloped fringe. The
+     cloth is a real subdivided sheet and it ripples in the vertex shader,
+     phase taken off each instance's own position, so no two flags beat
+     together. Both face the camera, the way a painter sets a standard. */
   let poleMesh = null, clothMesh = null, bannerN = 0;
+  const clothTime = { value: 0 };
+  const CLOTH_W = 0.46, CLOTH_H = 0.34, BAR_Y = 0.93;
   function buildBanners(cap) {
     const pg = [];
-    const c = new THREE.CylinderGeometry(0.018, 0.026, 1, 5); c.translate(0, 0.5, 0);
-    pg.push({ geo: c, color: [0.28, 0.2, 0.12] });
-    const tip = new THREE.BoxGeometry(0.05, 0.05, 0.05); tip.translate(0, 1.02, 0);
-    pg.push({ geo: tip, color: [0.7, 0.6, 0.3] });
+    const wood = [0.3, 0.2, 0.11], brass = [0.62, 0.48, 0.2];
+    part(pg, new THREE.CylinderGeometry(0.016, 0.022, BAR_Y + 0.02, 6), 0, (BAR_Y + 0.02) / 2, 0, wood);
+    const bar = new THREE.CylinderGeometry(0.011, 0.011, CLOTH_W + 0.06, 5); bar.rotateZ(Math.PI / 2); bar.translate(0, BAR_Y, 0.004);
+    pg.push({ geo: bar, color: wood });
+    part(pg, new THREE.SphereGeometry(0.02, 5, 3), -(CLOTH_W / 2 + 0.03), BAR_Y, 0.004, brass);
+    part(pg, new THREE.SphereGeometry(0.02, 5, 3), CLOTH_W / 2 + 0.03, BAR_Y, 0.004, brass);
+    part(pg, new THREE.ConeGeometry(0.026, 0.1, 4), 0, BAR_Y + 0.07, 0, brass);
     poleMesh = instanced(mergeParts(pg), vcMat(), cap, false);
-    const cg = [];
-    box(cg, 0.52, 0.34, 0.02, 0.27, 0.8, 0, [1, 1, 1]);
+
+    // the cloth: top edge on y = 0 (the crossbar), hanging to -CLOTH_H
+    const cg = new THREE.PlaneGeometry(CLOTH_W, CLOTH_H, 10, 5);
+    cg.translate(0, -CLOTH_H / 2, 0.012);
+    const P = cg.attributes.position, col = new Float32Array(P.count * 3);
+    for (let i = 0; i < P.count; i++) {
+      const x = P.getX(i), y = P.getY(i);
+      const u = x / CLOTH_W + 0.5, v = -y / CLOTH_H;
+      // the bottom edge is a fringe of shallow points
+      if (v > 0.99) P.setY(i, y - 0.028 * Math.abs(Math.sin(u * Math.PI * 5)));
+      // it sags between the bar's ends and bellies a little at rest
+      P.setZ(i, P.getZ(i) + Math.sin(u * Math.PI) * 0.012 * v);
+      const border = u < 0.09 || u > 0.91 || v > 0.84 || v < 0.06;
+      const k = border ? 0.6 : 1;
+      col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = k;
+    }
+    cg.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    cg.computeVertexNormals();
+    track(cg);
     const cm = track(new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
-    clothMesh = instanced(mergeParts(cg), cm, cap, true);
+    cm.onBeforeCompile = function (sh) {
+      sh.uniforms.uClothT = clothTime;
+      sh.vertexShader = "uniform float uClothT;\n" + sh.vertexShader.replace("#include <begin_vertex>",
+        "#include <begin_vertex>\n" +
+        "float hang=clamp(-position.y/" + CLOTH_H.toFixed(3) + ",0.0,1.2);\n" +
+        "float ph=0.0;\n#ifdef USE_INSTANCING\nph=instanceMatrix[3].x*3.1+instanceMatrix[3].z*1.7;\n#endif\n" +
+        "transformed.z+=(sin(position.x*15.0-uClothT*3.3+ph)*0.022+sin(uClothT*1.2+ph)*0.03)*hang;\n" +
+        "transformed.x+=sin(uClothT*0.9+ph*1.3)*0.012*hang;");
+    };
+    clothMesh = instanced(cg, cm, cap, true);
   }
   function putBanner(x, y, z, hgt, css, phase, t) {
     if (bannerN >= poleMesh.instanceMatrix.count) return;
-    const o = tmpObj;
-    o.position.set(x, y, z); o.rotation.set(0, 0, 0); o.scale.set(hgt, hgt, hgt); o.updateMatrix();
+    const o = tmpObj, face = cam.yaw;
+    o.position.set(x, y, z); o.rotation.set(0, face, 0, "YXZ"); o.scale.set(hgt, hgt, hgt); o.updateMatrix();
     poleMesh.setMatrixAt(bannerN, o.matrix);
-    o.rotation.set(0, Math.sin(t * 1.7 + phase) * 0.35 + phase, Math.sin(t * 2.3 + phase * 2) * 0.05);
+    o.position.set(x, y + BAR_Y * hgt, z);
+    o.rotation.set(Math.sin(t * 1.3 + phase) * 0.08, face + Math.sin(t * 0.7 + phase) * 0.08, 0, "YXZ");
     o.updateMatrix();
     clothMesh.setMatrixAt(bannerN, o.matrix);
-    clothMesh.setColorAt(bannerN, linColour(css, 0.85));
+    clothMesh.setColorAt(bannerN, linColour(css, 0.9));
     bannerN++;
   }
 
-  /* ================================================================ ARMIES */
-  const MAXFIG = 4200;
-  let clothFig = null, kitFig = null, figN = 0;
-  const vis = new Map();         // army id -> {x,y,fx,fy,tx,ty,yaw,moving}
+  /* ================================================================ ARMIES
+     A regiment is a painted stand with its men glued on in ranks, front
+     rank toward the march, and its standard planted at the back corner. */
+  const MAXFIG = 4200, MAXSTAND = 1400;
+  let clothFig = null, kitFig = null, standMesh = null, figN = 0, standN = 0;
+  const vis = new Map();         // army id -> {x,y,fx,fy,tx,ty,yaw,moving,br,top}
   function figuresFor(men) {
-    return men < 800 ? 2 : men < 2500 ? 3 : men < 6000 ? 4 : men < 12000 ? 5 : men < 25000 ? 6 : men < 50000 ? 8 : 9;
+    return men < 800 ? 2 : men < 2500 ? 3 : men < 6000 ? 4 : men < 12000 ? 6 : men < 25000 ? 8 : men < 50000 ? 9 : 12;
   }
-  const FORM = [[0, 0], [-1, 0], [1, 0], [0, -1], [-1, -1], [1, -1], [0, 1], [-1, 1], [1, 1]];
+  const FILE_S = 0.36, RANK_S = 0.42;
   function putFigure(x, y, z, yaw, f, css) {
     if (figN >= MAXFIG) return;
     const o = tmpObj;
@@ -834,15 +1114,27 @@
     clothFig.setColorAt(figN, linColour(css, 1));
     figN++;
   }
+  function putStand(x, y, z, yaw, bw, bd, hgt, pitch, roll) {
+    if (standN >= MAXSTAND) return;
+    const o = tmpObj;
+    o.position.set(x, y, z); o.rotation.set(pitch, yaw, roll, "YXZ"); o.scale.set(bw, hgt, bd); o.updateMatrix();
+    standMesh.setMatrixAt(standN++, o.matrix);
+  }
 
   /* ================================================================ MARKERS */
   let ringPool = [], swordsTex = null, smokeTex = null, swordPool = [], smokePool = [];
+  /* The selection mark is a thin raised hoop round the stand, depth-tested
+     like anything else on the table: it hides behind a hill instead of
+     painting through it, and it never lies flat on the ground to z-fight. */
+  let ringGeo = null, ringMat = null;
   function makeRing() {
-    const g = track(new THREE.RingGeometry(0.78, 1, 40));
-    g.rotateX(-Math.PI / 2);
-    const m = track(new THREE.MeshBasicMaterial({ color: 0xffa060, transparent: true, opacity: 0.9, depthTest: false, depthWrite: false }));
-    m.toneMapped = false;
-    const r = new THREE.Mesh(g, m);
+    if (!ringGeo) {
+      ringGeo = track(new THREE.TorusGeometry(1, 0.035, 4, 48));
+      ringGeo.rotateX(-Math.PI / 2);
+      ringMat = track(new THREE.MeshBasicMaterial({ color: 0xffa060, transparent: true, opacity: 0.95, depthWrite: false }));
+      ringMat.toneMapped = false;
+    }
+    const r = new THREE.Mesh(ringGeo, ringMat);
     r.renderOrder = 20; r.visible = false; r.frustumCulled = false;
     root.add(r);
     return r;
@@ -854,23 +1146,44 @@
     return t;
   }
   function buildMarkers() {
+    // CROSSED SWORDS, the cartographer's battle mark: two short blades with a
+    // fuller, a brass guard, a bound grip and a pommel, inked round in black
+    // so they read on sand and on sea without a token disc behind them
     swordsTex = canvasTex(128, function (x, s) {
       x.translate(s / 2, s / 2);
-      x.beginPath(); x.arc(0, 0, s * 0.44, 0, Math.PI * 2); x.fillStyle = "rgba(20,14,9,0.72)"; x.fill();
-      x.lineWidth = 3; x.strokeStyle = "rgba(255,138,61,0.95)"; x.stroke();
+      x.shadowColor = "rgba(0,0,0,0.85)"; x.shadowBlur = 6;
       for (let k = 0; k < 2; k++) {
         x.save(); x.rotate(k ? Math.PI / 4 : -Math.PI / 4);
-        x.fillStyle = "#efe6d0"; x.strokeStyle = "#1a120b"; x.lineWidth = 2;
-        x.beginPath(); x.moveTo(-4, -40); x.lineTo(0, -48); x.lineTo(4, -40); x.lineTo(4, 22); x.lineTo(-4, 22); x.closePath(); x.fill(); x.stroke();
-        x.fillStyle = "#c9a24a"; x.fillRect(-14, 22, 28, 6); x.strokeRect(-14, 22, 28, 6);
-        x.fillStyle = "#5a3a1e"; x.fillRect(-3, 28, 6, 14);
+        x.lineJoin = "round";
+        x.strokeStyle = "#140d08"; x.lineWidth = 3;
+        x.beginPath(); x.moveTo(-5.5, 18); x.lineTo(-5.5, -36); x.quadraticCurveTo(-5, -44, 0, -52); x.quadraticCurveTo(5, -44, 5.5, -36); x.lineTo(5.5, 18); x.closePath();
+        x.fillStyle = "#e9e4d8"; x.fill(); x.stroke();
+        x.shadowBlur = 0;
+        x.strokeStyle = "rgba(120,112,100,0.9)"; x.lineWidth = 1.5;
+        x.beginPath(); x.moveTo(0, 14); x.lineTo(0, -40); x.stroke();
+        x.strokeStyle = "#140d08"; x.lineWidth = 2;
+        x.fillStyle = "#c29a3e";
+        x.beginPath(); x.moveTo(-16, 18); x.lineTo(16, 18); x.lineTo(13, 25); x.lineTo(-13, 25); x.closePath(); x.fill(); x.stroke();
+        x.fillStyle = "#4a2e17"; x.fillRect(-3.5, 25, 7, 16); x.strokeRect(-3.5, 25, 7, 16);
+        x.fillStyle = "#6b4a24";
+        for (let b = 0; b < 3; b++) x.fillRect(-3.5, 28 + b * 4.5, 7, 1.6);
+        x.fillStyle = "#c29a3e"; x.beginPath(); x.arc(0, 45, 5, 0, Math.PI * 2); x.fill(); x.stroke();
         x.restore();
       }
     });
+    // DUST AND SMOKE: a lumpy cloud of overlapping soft puffs in dusty grey,
+    // not a perfect radial ball (which reads as a glowing light)
     smokeTex = canvasTex(64, function (x, s) {
-      const g = x.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
-      g.addColorStop(0, "rgba(210,200,185,0.9)"); g.addColorStop(0.5, "rgba(170,160,150,0.45)"); g.addColorStop(1, "rgba(150,140,130,0)");
-      x.fillStyle = g; x.fillRect(0, 0, s, s);
+      const rr = mulberry(9);
+      for (let k = 0; k < 9; k++) {
+        const a = rr() * Math.PI * 2, d = rr() * s * 0.16;
+        const cx = s / 2 + Math.cos(a) * d, cy = s / 2 + Math.sin(a) * d, r = s * (0.16 + rr() * 0.14);
+        const g = x.createRadialGradient(cx, cy, 0, cx, cy, r);
+        const l = 150 + (rr() * 40 | 0);
+        g.addColorStop(0, "rgba(" + l + "," + (l - 8) + "," + (l - 20) + ",0.5)");
+        g.addColorStop(1, "rgba(" + l + "," + (l - 8) + "," + (l - 20) + ",0)");
+        x.fillStyle = g; x.fillRect(0, 0, s, s);
+      }
     });
   }
   function getSword(i) {
@@ -878,7 +1191,7 @@
       const m = track(new THREE.SpriteMaterial({ map: swordsTex, depthTest: false, depthWrite: false, sizeAttenuation: false, transparent: true }));
       m.toneMapped = false;
       const s = new THREE.Sprite(m);
-      s.renderOrder = 30; s.frustumCulled = false; s.scale.set(0.042, 0.042, 1);
+      s.renderOrder = 30; s.frustumCulled = false; s.scale.set(0.046, 0.046, 1);
       root.add(s); swordPool.push(s);
     }
     return swordPool[i];
@@ -927,10 +1240,28 @@
     }
     const idx = [];
     for (let i = 0; i < n - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+    // the arrowhead: a centre vertex at the route's end, two barbs, a tip; the
+    // centre carries aHead 1 and the rim 0.6, so it is inked round its edge
+    const e = pts[n - 1], q = pts[Math.max(0, n - 3)];
+    let hx = e[0] - q[0], hy = e[1] - q[1];
+    const hl = Math.hypot(hx, hy) || 1; hx /= hl; hy /= hl;
+    const HW = width * 1.25, HL = width * 2.2;
+    const hp = [[e[0] - hx * HL * 0.35, e[1] - hy * HL * 0.35], [e[0] - hx * HL * 0.55 - hy * HW, e[1] - hy * HL * 0.55 + hx * HW],
+                [e[0] + hx * HL * 0.45, e[1] + hy * HL * 0.45], [e[0] - hx * HL * 0.55 + hy * HW, e[1] - hy * HL * 0.55 - hx * HW]];
+    const P2 = new Float32Array(pos.length + 12), L2 = new Float32Array(len.length + 4), S2 = new Float32Array(side.length + 4), H2 = new Float32Array(len.length + 4);
+    P2.set(pos); L2.set(len); S2.set(side);
+    const b0 = n * 2;
+    for (let k = 0; k < 4; k++) {
+      const p = hp[k];
+      P2[(b0 + k) * 3] = wx(p[0]); P2[(b0 + k) * 3 + 1] = groundY(p[0], p[1]) + lift * 1.05; P2[(b0 + k) * 3 + 2] = wz(p[1]);
+      L2[b0 + k] = acc; S2[b0 + k] = 0.5; H2[b0 + k] = k === 0 ? 1 : 0.6;
+    }
+    idx.push(b0, b0 + 1, b0 + 2, b0, b0 + 2, b0 + 3);
     const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    g.setAttribute("aLen", new THREE.BufferAttribute(len, 1));
-    g.setAttribute("aSide", new THREE.BufferAttribute(side, 1));
+    g.setAttribute("position", new THREE.BufferAttribute(P2, 3));
+    g.setAttribute("aLen", new THREE.BufferAttribute(L2, 1));
+    g.setAttribute("aSide", new THREE.BufferAttribute(S2, 1));
+    g.setAttribute("aHead", new THREE.BufferAttribute(H2, 1));
     g.setIndex(idx);
     return g;
   }
@@ -938,7 +1269,7 @@
     const m = track(new THREE.ShaderMaterial({
       uniforms: { uColor: { value: new THREE.Color(hex) }, uTime: { value: 0 }, uDash: { value: 1 }, uOp: { value: op } },
       vertexShader: RIBBON_VERT, fragmentShader: RIBBON_FRAG,
-      transparent: true, depthTest: false, depthWrite: false,
+      transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide,
     }));
     m.toneMapped = false;
     return m;
@@ -1259,6 +1590,7 @@
     // its OWN material: r128 caches one program per material, and a program
     // built for the tinted cloth reads instanceColor, which the kit has not got
     kitFig = instanced(mg.kit, vcMat(), MAXFIG, false);
+    standMesh = instanced(standGeo(), vcMat(), MAXSTAND, false);
     buildMarkers();
     ribbonMat = ribbonMaterial(0xf4e6c8, 0.85);
     previewMat = ribbonMaterial(0xff8a3d, 0.95);
@@ -1356,6 +1688,7 @@
     if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
     if (boxEl && boxEl.parentNode) boxEl.parentNode.removeChild(boxEl);
     overlay = null; boxEl = null; root = null; terrainMesh = seaMesh = null; houseMeshes = []; ringPool = []; swordPool = []; smokePool = [];
+    ringGeo = ringMat = null; townTex = null; standMesh = wallMesh = towerMesh = gateMesh = wellMesh = null;
     previewMesh = null; pathMeshes = []; armyEls = new Map(); battleEls = new Map(); townEls = [];
     vis.clear(); anims.length = 0; ptrs.clear(); drag = null; saved = null;
     M = null; G = null;
@@ -1438,7 +1771,8 @@
     if (lastTownZ < 0 || Math.abs(townZ / lastTownZ - 1) > 0.04) { layoutTowns(townZ); lastTownZ = townZ; }
 
     // ---- armies
-    figN = 0; bannerN = 0;
+    figN = 0; bannerN = 0; standN = 0;
+    clothTime.value = time;
     const e = dayFrac * dayFrac * (3 - 2 * dayFrac);
     for (const a of G.armies) {
       let v = vis.get(a.id);
@@ -1450,21 +1784,36 @@
         if (b) v.yaw = Math.atan2(b.x - v.x, b.y - v.y) || v.yaw;
       }
       const css = cssOfOwner(a.owner, a);
-      const X = wx(v.x), Z = wz(v.y), y0 = groundY(v.x, v.y);
+      const X = wx(v.x), Z = wz(v.y);
       const k = figuresFor(a.men);
       const f = figScale;
       const cy = Math.cos(v.yaw), sy = Math.sin(v.yaw);
       const walking = v.moving && dayFrac < 0.999;
+      // the stand: files x ranks plus a margin, room at the back for the standard
+      const files = k <= 3 ? k : k <= 9 ? 3 : 4, ranks = Math.ceil(k / files);
+      const bw = (files * FILE_S + 0.16) * f, bd = (ranks * RANK_S + 0.34) * f;
+      // the stand lies ON the slope: a plane through its four edge midpoints,
+      // tilted in pitch and roll, so it neither floats downhill nor sinks uphill
+      const gAt = function (lx, lz) { return groundY(X + lx * cy + lz * sy + M.w / 2, Z - lx * sy + lz * cy + M.h / 2); };
+      const hF = gAt(0, bd / 2), hB = gAt(0, -bd / 2), hL = gAt(-bw / 2, 0), hR = gAt(bw / 2, 0);
+      const slZ = clamp((hF - hB) / bd, -0.5, 0.5), slX = clamp((hR - hL) / bw, -0.5, 0.5);
+      const y0 = Math.max(groundY(v.x, v.y), (hF + hB + hL + hR) / 4) - f * 0.01;
+      const hb = BASE_H * f * 0.55, top = y0 + hb;
+      putStand(X, y0, Z, v.yaw, bw, bd, f * 0.55, -Math.atan(slZ), Math.atan(slX));
+      v.br = Math.hypot(bw, bd) * 0.56; v.top = top;
       for (let i = 0; i < k; i++) {
-        const q = FORM[i];
-        const lx = q[0] * f * 0.36, lz = q[1] * f * 0.4 + ((i * 7) % 3 - 1) * f * 0.02;
+        const col = i % files, row = (i / files) | 0;
+        const lx = (col - (files - 1) / 2) * FILE_S * f + ((i * 7) % 3 - 1) * f * 0.015;
+        const lz = ((ranks - 1) / 2 - row) * RANK_S * f + 0.1 * f;
         const px = X + lx * cy + lz * sy, pz = Z - lx * sy + lz * cy;
-        const bob = walking ? Math.abs(Math.sin(time * 9 + i * 1.7)) * f * 0.05 : 0;
-        putFigure(px, Math.max(0, groundY(px + M.w / 2, pz + M.h / 2)) + bob, pz, v.yaw, f, css);
+        const bob = walking ? Math.abs(Math.sin(time * 9 + i * 1.7)) * f * 0.04 : 0;
+        putFigure(px, top + lx * slX + lz * slZ + bob, pz, v.yaw, f, css);
       }
-      const bx = X - sy * f * 0.62 - cy * f * 0.3, bz = Z - cy * f * 0.62 + sy * f * 0.3;
-      putBanner(bx, y0, bz, f * 1.75, css, (a.id % 17) * 0.37, time);
+      const slx = -(bw / 2 - 0.1 * f), slz = -(bd / 2 - 0.1 * f);
+      const bx = X + slx * cy + slz * sy, bz = Z - slx * sy + slz * cy;
+      putBanner(bx, top + slx * slX + slz * slZ, bz, f * 2.3, css, (a.id % 17) * 0.37, time);
     }
+    standMesh.count = standN; standMesh.instanceMatrix.needsUpdate = true;
     clothFig.count = kitFig.count = figN;
     clothFig.instanceMatrix.needsUpdate = kitFig.instanceMatrix.needsUpdate = true;
     if (clothFig.instanceColor) clothFig.instanceColor.needsUpdate = true;
@@ -1473,7 +1822,8 @@
     for (let t = 0; t < M.towns.length; t++) {
       const T = M.towns[t], o = G.townOwner[t];
       const css = o ? G.factions[o].css : "#d8cfb4";
-      const hx = T.x + 0.02 * townZ, hy = T.y - (T._viewR || 0.3) * 0.2 * townZ;
+      // planted on the edge of the square, beside the well
+      const hx = T.x + 0.085 * townZ, hy = T.y + 0.03 * townZ;
       putBanner(wx(hx), groundY(hx, hy), wz(hy), (T.capital ? 0.42 : 0.3) * townZ, css, t * 0.61, time);
     }
     poleMesh.count = clothMesh.count = bannerN;
@@ -1487,9 +1837,9 @@
       if (!a || !v || ri >= ringPool.length) continue;
       const r = ringPool[ri++];
       r.visible = true;
-      r.position.set(wx(v.x), groundY(v.x, v.y) + figScale * 0.05, wz(v.y));
-      const pulse = 1 + Math.sin(time * 4) * 0.06;
-      r.scale.setScalar(figScale * 0.95 * pulse);
+      r.position.set(wx(v.x), (v.top != null ? v.top : groundY(v.x, v.y)) + figScale * 0.02, wz(v.y));
+      const pulse = 1 + Math.sin(time * 4) * 0.04;
+      r.scale.setScalar((v.br || figScale) * pulse);
     }
     for (; ri < ringPool.length; ri++) ringPool[ri].visible = false;
 

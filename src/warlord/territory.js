@@ -2149,6 +2149,142 @@
     paths = { hair: hair, casing: casing, byColour: byColour, hot: hotPaths, sel: sel, bw: BW, own: own };
   }
 
+  /* ============================================================ MAP PIECES
+     Drawn like a painted campaign map, not a chart of dots: a warband is a
+     regiment block (a stand with its ranks ruled across it) with its
+     standard flying from the back corner; a garrison is a little crenellated
+     keep with its gate; an outpost is a cluster of flat-roofed houses (a
+     camp is tents); an oasis is a pool with palms. Everything is inked round
+     in dark brown so it survives both the salt pan and dark rock. */
+  const INK = "rgba(24,16,9,.88)";
+  function drawRegiment(g, px, py, r, colour, alpha, casing) {
+    const bw = r * 2.3, bd = Math.max(3.2, r * 1.15);
+    const x0 = px - bw / 2, y0 = py - bd / 2;
+    // the standard first, so the block overlaps its foot
+    const fx = x0 + 1.2, fy = y0 - r * 1.55 - 2;
+    g.strokeStyle = INK; g.lineWidth = 1.1;
+    g.beginPath(); g.moveTo(x0 + 1.2, y0 + 0.5); g.lineTo(fx, fy); g.stroke();
+    const fw = Math.max(4, r * 1.05), fh = Math.max(3, r * 0.7);
+    g.fillStyle = rgba(colour, 1);
+    g.beginPath();
+    g.moveTo(fx, fy); g.lineTo(fx + fw, fy + fh * 0.12); g.lineTo(fx + fw * 0.8, fy + fh * 0.55);
+    g.lineTo(fx + fw, fy + fh); g.lineTo(fx, fy + fh * 0.92); g.closePath();
+    g.fill(); g.lineWidth = 0.9; g.stroke();
+    // the stand and its ranks
+    if (casing) { g.strokeStyle = casing; g.lineWidth = 3.2; g.strokeRect(x0, y0, bw, bd); }
+    g.fillStyle = rgba(colour, alpha);
+    g.fillRect(x0, y0, bw, bd);
+    g.strokeStyle = "rgba(16,10,5,.55)"; g.lineWidth = 0.8;
+    const ranks = Math.max(1, Math.min(4, Math.round(bd / 2.4)));
+    for (let k = 1; k < ranks; k++) {
+      const y = y0 + bd * k / ranks;
+      g.beginPath(); g.moveTo(x0 + 0.8, y); g.lineTo(x0 + bw - 0.8, y); g.stroke();
+    }
+    // files: a tick per man-width along the front rank
+    g.strokeStyle = "rgba(255,246,226,.35)";
+    for (let x = x0 + 2; x < x0 + bw - 1; x += 2.2) { g.beginPath(); g.moveTo(x, y0 + bd - 1.4); g.lineTo(x, y0 + bd - 0.3); g.stroke(); }
+    g.strokeStyle = INK; g.lineWidth = 1.2; g.strokeRect(x0, y0, bw, bd);
+  }
+  function drawKeep(g, px, py, colour) {
+    const w = 10, h = 8, x0 = px - w / 2, y0 = py - h / 2;
+    g.fillStyle = rgba(colour, 0.96); g.strokeStyle = INK; g.lineWidth = 1.1;
+    g.beginPath();
+    g.moveTo(x0, y0 + h); g.lineTo(x0, y0);
+    for (let k = 0; k < 3; k++) {
+      const mx = x0 + k * (w / 2.5);
+      g.lineTo(mx, y0 - 2.4); g.lineTo(mx + w / 5, y0 - 2.4); g.lineTo(mx + w / 5, y0);
+      if (k < 2) g.lineTo(mx + w / 2.5, y0);
+    }
+    g.lineTo(x0 + w, y0 + h); g.closePath();
+    g.fill(); g.stroke();
+    // the gate
+    g.fillStyle = INK;
+    g.beginPath(); g.moveTo(px - 1.7, y0 + h); g.lineTo(px - 1.7, y0 + h - 2.6);
+    g.arc(px, y0 + h - 2.6, 1.7, Math.PI, 0); g.lineTo(px + 1.7, y0 + h); g.closePath(); g.fill();
+  }
+  function drawHouse(g, x, y, w, h, wall, roof) {
+    g.fillStyle = wall; g.fillRect(x, y, w, h);
+    g.fillStyle = roof; g.fillRect(x, y, w, h * 0.42);
+    g.strokeStyle = INK; g.lineWidth = 0.8; g.strokeRect(x, y, w, h);
+  }
+  function drawHamlet(g, px, py, seed, kind) {
+    const rnd = function (k) { const v = Math.sin(seed * 12.9898 + k * 78.233) * 43758.5453; return v - Math.floor(v); };
+    if (kind === "camp") {
+      for (let k = 0; k < 3; k++) {
+        const x = px + (k - 1) * 4.4 + (rnd(k) - 0.5) * 1.5, y = py + (k === 1 ? -2 : 1.2);
+        g.fillStyle = "#d8c7a0"; g.strokeStyle = INK; g.lineWidth = 0.8;
+        g.beginPath(); g.moveTo(x - 2.6, y + 2); g.lineTo(x, y - 2.4); g.lineTo(x + 2.6, y + 2); g.closePath(); g.fill(); g.stroke();
+        g.fillStyle = "rgba(24,16,9,.7)";
+        g.beginPath(); g.moveTo(x - 0.7, y + 2); g.lineTo(x, y - 0.2); g.lineTo(x + 0.7, y + 2); g.closePath(); g.fill();
+      }
+      return;
+    }
+    // a well-town or depot: four adobe houses round a yard
+    const spots = [[-4.2, -3.2, 4.4, 3.4], [0.8, -3.8, 3.8, 3.2], [-3.6, 1.2, 3.6, 3.0], [1.4, 0.8, 3.8, 3.6]];
+    for (let k = 0; k < spots.length; k++) {
+      const q = spots[k];
+      drawHouse(g, px + q[0] + (rnd(k) - 0.5) * 0.8, py + q[1] + (rnd(k + 9) - 0.5) * 0.8, q[2], q[3],
+                k & 1 ? "#dcc49a" : "#cfb389", k & 1 ? "#8d5b3a" : "#7a4e33");
+    }
+    if (kind === "well") {
+      g.fillStyle = "#2f7f93"; g.strokeStyle = INK; g.lineWidth = 0.7;
+      g.beginPath(); g.arc(px - 0.3, py - 0.6, 1.1, 0, TAU); g.fill(); g.stroke();
+    }
+  }
+  function drawOasis(g, px, py) {
+    g.fillStyle = "#2c7f8f"; g.strokeStyle = "rgba(24,16,9,.6)"; g.lineWidth = 0.9;
+    g.beginPath(); g.ellipse(px, py + 0.8, 4.2, 2.6, -0.2, 0, TAU); g.fill(); g.stroke();
+    g.fillStyle = "rgba(210,240,236,.45)";
+    g.beginPath(); g.ellipse(px - 1.2, py + 0.2, 1.6, 0.7, -0.2, 0, TAU); g.fill();
+    // two palms: a leaning trunk and a crown of fronds
+    for (let k = 0; k < 2; k++) {
+      const bx = px + (k ? 3.6 : -3.4), by = py + (k ? -0.4 : 1.2), tx = bx + (k ? 1.2 : -0.9), ty = by - 5.2;
+      g.strokeStyle = "#5a3f24"; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(bx, by); g.quadraticCurveTo(bx + (k ? 0.2 : -0.2), by - 3, tx, ty); g.stroke();
+      g.strokeStyle = "#3e6a2a"; g.lineWidth = 1.1;
+      for (let f = 0; f < 5; f++) {
+        const a = -Math.PI / 2 + (f - 2) * 0.72;
+        g.beginPath(); g.moveTo(tx, ty);
+        g.quadraticCurveTo(tx + Math.cos(a) * 2, ty + Math.sin(a) * 2 - 0.6, tx + Math.cos(a) * 3.2, ty + Math.sin(a) * 3.2 + 1.2);
+        g.stroke();
+      }
+    }
+  }
+  /* PAPER. A warm grain of fibres and blotches multiplied over the whole map
+     from a cached tile, plus an edge vignette, so the map reads as a painted
+     sheet and not a screenshot of a heightfield. */
+  let paperCv = null, paperPat = null, paperCtx = null;
+  function paper(g, w, h) {
+    if (!paperCv) {
+      paperCv = document.createElement("canvas");
+      paperCv.width = paperCv.height = 256;
+      const p = paperCv.getContext("2d");
+      const img = p.createImageData(256, 256), D = img.data;
+      let seed = 7;
+      const rnd = function () { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+      for (let i = 0; i < 256 * 256; i++) {
+        const x = i & 255, y = i >> 8;
+        const blot = Math.sin(x * 0.049 + Math.sin(y * 0.031) * 2) * Math.sin(y * 0.043 + Math.sin(x * 0.027) * 2);
+        const v = 243 + blot * 6 + (rnd() - 0.5) * 16;
+        D[i * 4] = v; D[i * 4 + 1] = v * 0.975; D[i * 4 + 2] = v * 0.92; D[i * 4 + 3] = 255;
+      }
+      p.putImageData(img, 0, 0);
+      p.strokeStyle = "rgba(150,120,80,.10)"; p.lineWidth = 0.6;
+      for (let k = 0; k < 90; k++) {
+        const x = rnd() * 256, y = rnd() * 256, a = rnd() * Math.PI, l = 4 + rnd() * 10;
+        p.beginPath(); p.moveTo(x, y); p.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); p.stroke();
+      }
+    }
+    if (paperCtx !== g) { paperPat = g.createPattern(paperCv, "repeat"); paperCtx = g; }
+    g.save();
+    g.globalCompositeOperation = "multiply";
+    g.fillStyle = paperPat; g.fillRect(0, 0, w, h);
+    const vg = g.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.75);
+    vg.addColorStop(0, "rgba(255,255,255,0)"); vg.addColorStop(1, "rgba(120,96,64,.45)");
+    g.fillStyle = vg; g.fillRect(0, 0, w, h);
+    g.restore();
+  }
+
   function draw() {
     raf = 0;
     if (!open || !cv || !g2) return;
@@ -2196,6 +2332,8 @@
       g.drawImage(tintCv, dx, dy, dw, dw);
       g.restore();
     }
+
+    paper(g, w, h);
 
     /* 3. THE FRONTIERS */
     const key = viewVer + ":" + ownVer + ":" + contestedVer + ":" + (selected ? selected.idx : -1);
@@ -2248,21 +2386,22 @@
     const st = S();
     const own = paths ? paths.own : [];
     const O = D.oases || [];
-    for (let i = 0; i < O.length; i++) {
-      const px = sx(O[i].x, w), py = sy(O[i].z, h);
-      g.fillStyle = "#39d0a8";
-      g.beginPath(); g.arc(px, py, 3.6, 0, TAU); g.fill();
-      g.strokeStyle = "rgba(0,0,0,.55)"; g.lineWidth = 1; g.stroke();
-    }
+    for (let i = 0; i < O.length; i++) drawOasis(g, sx(O[i].x, w), sy(O[i].z, h));
     const OP = st.outposts || [];
-    g.strokeStyle = "rgba(0,0,0,.6)"; g.lineWidth = 1;
     for (let i = 0; i < OP.length; i++) {
       const px = sx(OP[i].x, w), py = sy(OP[i].z, h);
-      g.fillStyle = "#ffb15a";
-      g.beginPath(); g.rect(px - 3.6, py - 3.6, 7.2, 7.2); g.fill(); g.stroke();
+      if (px < -20 || py < -20 || px > w + 20 || py > h + 20) continue;
+      drawHamlet(g, px, py, i + 1, OP[i].kind);
+    }
+    /* A GARRISON is the keep of its holding, in the holder's colour, under
+       the holding's name. */
+    for (let i = 0; i < REG.length; i++) {
+      const n = T.garrisonSize(REG[i].id);
+      if (!n) continue;
+      drawKeep(g, sx(REG[i].lx, w), sy(REG[i].lz, h) + 15, ownerColour(own[i]));
     }
     /* WARBANDS, SIZED BY REAL STRENGTH. A six-man crew and a three-hundred
-       man army must not be the same dot — the single most useful thing a
+       man army must not be the same block: the single most useful thing a
        strategic map can tell you. Cube root rather than square root because
        core's band sizes span 2..320 and a square root still let the armies
        eat the island. */
@@ -2272,33 +2411,16 @@
       const px = sx(b.x, w), py = sy(b.z, h);
       if (px < -30 || py < -30 || px > w + 30 || py > h + 30) continue;
       const r = 2.4 + Math.pow(Math.max(1, W.bandPower(b)), 0.34) * 1.35;
-      g.fillStyle = rgba(b.colour || ownerColour(bandOwner(b)), b.mood === "hunt" ? 0.98 : 0.82);
-      g.beginPath(); g.arc(px, py, r, 0, TAU); g.fill();
-      g.strokeStyle = "rgba(10,7,4,.75)"; g.lineWidth = 1.2; g.stroke();
-    }
-    for (let i = 0; i < REG.length; i++) {
-      const n = T.garrisonSize(REG[i].id);
-      if (!n) continue;
-      const px = sx(REG[i].lx, w), py = sy(REG[i].lz, h) + 15;
-      g.fillStyle = rgba(ownerColour(own[i]), 0.95);
-      g.strokeStyle = "rgba(10,7,4,.8)"; g.lineWidth = 1.1;
-      g.beginPath();
-      g.moveTo(px, py - 6); g.lineTo(px + 5, py - 3); g.lineTo(px + 5, py + 2);
-      g.lineTo(px, py + 6); g.lineTo(px - 5, py + 2); g.lineTo(px - 5, py - 3);
-      g.closePath(); g.fill(); g.stroke();
+      drawRegiment(g, px, py, r, b.colour || ownerColour(bandOwner(b)), b.mood === "hunt" ? 0.98 : 0.84, null);
     }
     const peers = st.peers || {};
     Object.keys(peers).forEach(function (k) {
       const p = peers[k];
       if (!p || p.x == null) return;
-      g.strokeStyle = "#7fa8c8"; g.lineWidth = 2;
-      g.beginPath(); g.arc(sx(p.x, w), sy(p.z, h), 6, 0, TAU); g.stroke();
+      drawRegiment(g, sx(p.x, w), sy(p.z, h), 4.2, 0x7fa8c8, 0.95, "rgba(255,255,255,.8)");
     });
-    const mex = sx(st.you.x, w), mey = sy(st.you.z, h);
-    g.strokeStyle = "#fff"; g.lineWidth = 2.4;
-    g.beginPath(); g.arc(mex, mey, 8, 0, TAU); g.stroke();
-    g.fillStyle = hex(YOU_COLOUR);
-    g.beginPath(); g.arc(mex, mey, 3.4, 0, TAU); g.fill();
+    // you: your own regiment, cased in white so it is the first thing found
+    drawRegiment(g, sx(st.you.x, w), sy(st.you.z, h), 5, YOU_COLOUR, 1, "#fff");
 
     /* THE LABELS turn a coloured blob into a place. Only drawn when a region
        is actually big enough on screen to carry one — the first draft printed
@@ -2332,7 +2454,7 @@
       if (px < -70 || py < TOP_INSET - 26 || px > w + 70 || py > h + 40) continue;
       const o = own[order[k].i];
       const size = clamp(onPx / 7.5, 9.5, 16);
-      const sub = onPx > 116 ? ("$" + T.regionIncome(r) + (o ? " · " + ownerLabel(o) : " · UNCLAIMED")) : null;
+      const sub = onPx > 116 ? ((o ? ownerLabel(o) : "UNCLAIMED") + "   $" + T.regionIncome(r)) : null;
       g.font = "800 " + size.toFixed(1) + "px ui-sans-serif,system-ui,-apple-system,sans-serif";
       const tw = g.measureText(r.name).width;
       const box = { x0: px - tw / 2 - 4, x1: px + tw / 2 + 4,
