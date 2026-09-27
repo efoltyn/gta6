@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "2bc339147b43d837cf35eeff2939682354777767",
-  "createdAt": "2026-09-27T07:44:20.150Z",
+  "sourceCommit": "c118015136e50f80729d722498a009af4577ef96",
+  "createdAt": "2026-09-27T07:47:56.543Z",
   "fileCount": 1119,
-  "totalBytes": 45291246,
+  "totalBytes": 45324799,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -223,8 +223,8 @@
     },
     {
       "file": "src/city/carbody.js",
-      "bytes": 17150,
-      "sha256": "18db6497aa0262780d9b7893edf6f000b62ba3be1ca016c6ad076ffde3a7453c"
+      "bytes": 25905,
+      "sha256": "5e43a727ae33b1f164f900ac6f699993aaaa5ff93a4a4cb8f20650549e7ab2cb"
     },
     {
       "file": "src/city/carcluster.js",
@@ -253,8 +253,8 @@
     },
     {
       "file": "src/city/carparts.js",
-      "bytes": 27279,
-      "sha256": "1fb354f3e8637c408731c168194177c388af3b639c35b20779c80bc73cf5bbe6"
+      "bytes": 43497,
+      "sha256": "5496b6a7eebf0e6a4a067ba1e871935ac23db440d05ec07daa655400436b4ab9"
     },
     {
       "file": "src/city/carseats.js",
@@ -263,8 +263,8 @@
     },
     {
       "file": "src/city/carwheels.js",
-      "bytes": 10979,
-      "sha256": "7ee162f30e88755bba6eb02b1ac0f7feabcca5d9180eebe801a8043cf06b70f8"
+      "bytes": 15424,
+      "sha256": "4c2577b8a42d09531dc08967b7ec13993784e151a505832c2c863482647e29e9"
     },
     {
       "file": "src/city/cashstore.js",
@@ -1093,8 +1093,8 @@
     },
     {
       "file": "src/city/playercars.js",
-      "bytes": 81690,
-      "sha256": "6080d0bf6280f0e2edc731484ef9ca77b7e559e67fef72c8adee20de8f8a48a5"
+      "bytes": 83175,
+      "sha256": "980124e8afd97e30c855705583ee571eab960781629fbc1cafeb41d14f042472"
     },
     {
       "file": "src/city/playergang.js",
@@ -3048,8 +3048,8 @@
     },
     {
       "file": "src/world/carfx.js",
-      "bytes": 16523,
-      "sha256": "411609743702d5b72ab693ecc67a5c61152fbe8c49ad55a9a4c2578ab8688234"
+      "bytes": 19173,
+      "sha256": "9dd9ea0190ba1d2fd4d9ad5d48ac71ce1f02f15f9f7e5deca96883e0e03a2261"
     },
     {
       "file": "src/world/cellblock.js",
@@ -5469,27 +5469,27 @@
     {
       "file": "shark-sim.html",
       "bytes": 55067,
-      "sha256": "20069b980803e2a92f6d22e6eeeff45a522ee73adaed066223ac9b05745fdef4"
+      "sha256": "56d39ae81e291f2ad7c0a267dc0592dbd50ce3123bec18c2e7a17631da18dc5c"
     },
     {
       "file": "disaster-survival.html",
       "bytes": 55110,
-      "sha256": "82e7886a846d4e75d8242f068a19c951ea63da1ebcbb143579a601b37faee9a5"
+      "sha256": "2d415a5771c7ebc175bf48498fc6f921b80b69fa61ad6450245044f421c3ebfd"
     },
     {
       "file": "prison-escape.html",
       "bytes": 55079,
-      "sha256": "c26bcf29c247e7a1637325d9167bed3b93344f04ce55a1cbb1ff4c5fb0582f83"
+      "sha256": "0554ec084ee495963dde2a554401098f22a6a1a5ec1409145796bc44ef339232"
     },
     {
       "file": "gang-city.html",
       "bytes": 55034,
-      "sha256": "c434c748fc19562873287d228be2b7a5416d22c1c27721e9067cca2aae5455ce"
+      "sha256": "c9665e8d39dad955b5444b493a29aa5a56f100303b20a5834fb2e0614115c7c5"
     },
     {
       "file": "gun-game.html",
       "bytes": 55056,
-      "sha256": "8bcf4afc390cc3913b81b5f0a933691a2ce10e29d2125f983906e59427d765b7"
+      "sha256": "e3f2d3f5c06927f94b14f8a6648c08acaaeec9619c1355232b66070d7374bd4f"
     },
     {
       "file": "games/airport.html",
