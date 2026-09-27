@@ -64,25 +64,24 @@
      floorplates the airframe passed through, and blows the EXIT PLUME out the
      far side. We use the same closed form here for one thing only: where to
      seat the ejecta cone.
-   * BALLISTIC DEBRIS. Closed form, solved once at spawn:
-     y(t) = y0 + vy t - 1/2 g t^2, landing time from the quadratic. No physics
-     engine, no per-frame integration, no drift.
+   * DEBRIS is CBZ.debris's: real rigid bodies cut from (or adopted as) the
+     thing that broke — the struck floor's own wall, the airframe's own wing.
    * EVERYTHING ELSE IS A DRAW. Fire, sag, tilt and collapse are
      city/structural.js's; we never re-implement them.
 
    PERFORMANCE ENVELOPE (levelling a district must not kill a low-end machine):
    * Every count rides CBZ.qScale(lo, hi). Nothing is a hardcoded particle
      count.
-   * NO NEW PARTICLE POOL. Ejecta -> CBZ.cityChunk (buildings.js, capped 60).
-     Paper/contents -> CBZ.cityDebrisAdopt (crashfx's shared chunk pool,
-     CHUNK_CAP 220, camera-aware recycle). Dust -> cityDustKick. Smoke ->
+   * NO NEW PARTICLE POOL. Ejecta -> CBZ.cityChunk (chips of the struck
+     wall's own material). Paper/contents -> CBZ.cityDebrisAdopt. Falling
+     floor edge and airframe sections -> CBZ.debris (the one rigid-body sim),
+     cut from / adopted as the real thing. Dust -> cityDustKick. Smoke ->
      cityCrashSmoke. Wound -> cityWallRuin / cityHeavyWallRuin. Glass ->
      cityShatter.
-   * The ONE list this file owns is the WRECK FIELD: whole airframe SECTIONS
-     (a sheared wing, a tail) that crashfx's debris pool refuses because they
-     are over its 3 m donation limit. It is hard-capped at qScale(3, 12)
-     concurrent pieces, closed-form (no integration), and degrades over the cap
-     by retiring the farthest piece — never by queueing.
+   * The ONE list this file owns is the WRECK TRACKER: burning / hazardous
+     pieces in the debris sim, followed until they land (smoke trail, kill
+     check). Hard-capped at qScale(4, 16); over the cap the farthest record
+     stops being tracked (the piece itself stays).
    * The per-frame cost with nothing crashing is: one Map walk over <= ~8 live
      airframes plus two length checks.
 
@@ -504,6 +503,9 @@
   const LAMBDA = 2.4;
   function ejectaCone(x, y, z, nx, nz, pen, scale, hot) {
     if (!CBZ.cityChunk) return;
+    // chips of the wall that was struck, in its own colour
+    const wc = wallNear(x, y, z);
+    const wm = wc && wc.ref ? wc.ref.material : null;
     const depth = LAMBDA * Math.log(1 + Math.max(0.2, pen));
     const seats = qi(1, 3);
     for (let i = 0; i < seats; i++) {
@@ -521,7 +523,7 @@
           count: Math.round(n),
           force: (6 + 9 * carried) * Math.min(1.8, scale),
           dirx: nx * ca - nz * sa, dirz: nx * sa + nz * ca,
-          color: hot && i === 0 ? 0x6b3a22 : 0x747b82,
+          material: wm, color: wm ? undefined : 0x747b82,
         });
       } catch (e) {}
     }
@@ -535,13 +537,12 @@
      a slow, wide, long-lived snow of office contents. It is also the cheapest
      thing in this file.
 
-     NO NEW POOL: these are thin quads on ONE shared geometry and ONE shared
-     material, handed straight to CBZ.cityDebrisAdopt — crashfx's existing
-     debris pool (CHUNK_CAP 220, camera-aware recycle, gravity, settle, then up
-     to ~18 s at rest on the street). So the paper genuinely lands and lies
-     around the block afterwards, and it costs the pool it already had.
-     Wide + slow is achieved with a big lateral kick and almost no vertical
-     one, so the sheets sail rather than drop.
+     NO NEW POOL: these are thin sheets on ONE shared geometry and ONE shared
+     material (they are the building's contents, not invented rubble), handed
+     to CBZ.cityDebrisAdopt, i.e. the shared CBZ.debris rigid-body sim. The
+     material is tagged as a light, high-drag kind so a sheet drifts instead
+     of dropping like a brick, lands, and lies around the block afterwards.
+     Wide + slow is a big lateral kick and almost no vertical one.
   ------------------------------------------------------------------------ */
   let paperGeo = null, paperMat = null;
   function ensurePaper() {
@@ -552,13 +553,16 @@
       paperGeo._shared = true;
       paperMat = new THREE.MeshLambertMaterial({ color: 0xe6e2d6, side: THREE.DoubleSide });
       paperMat._shared = true;
+      // paper has leaf physics (light, all drag), not concrete's
+      paperMat.userData.debrisKind = "foliage";
     } catch (e) { paperGeo = null; return false; }
     return true;
   }
   function contentsFlutter(x, y, z, nx, nz, scale) {
     if (!CBZ.cityDebrisAdopt || y < 4) return;         // only reads from a height
     if (!ensurePaper()) return;
-    const n = qi(3, 20) * Math.min(1.6, scale);
+    // the live-body budget is shared with the building's own pieces
+    const n = qi(2, 10) * Math.min(1.6, scale);
     for (let i = 0; i < n; i++) {
       let m;
       try { m = new THREE.Mesh(paperGeo, paperMat); } catch (e) { return; }
@@ -629,36 +633,24 @@
   }
 
   /* ============================================================
-     THE WRECK FIELD — whole airframe SECTIONS on closed-form arcs.
+     THE WRECK FIELD — whole airframe SECTIONS, as rigid bodies.
 
-     crashfx's debris pool refuses donations over 3 m (it is for car panels and
-     fragments), so a sheared 15 m wing has nowhere to go. This is the one list
-     this file owns. It is not a particle system:
-       * hard-capped at qScale(3, 12) concurrent pieces;
-       * motion is the CLOSED FORM p(t) = p0 + v t + 1/2 g t^2 evaluated per
-         frame (no integration, no drift, no collision solve);
-       * the landing point and landing TIME are solved analytically at spawn,
-         so a piece knows where it is going before it leaves;
-       * over the cap the FARTHEST piece retires immediately — never a queue.
+     A sheared wing, a tail, a torn panel: the aircraft's OWN meshes, handed
+     whole to CBZ.debris (the one rigid-body sim), so they tumble, land on
+     the real ground and on the rubble, and freeze into the wreck field that
+     stays on the street. This file used to fly them on its own closed-form
+     arcs and pad the field with invented grey boxes; both are gone.
 
-     Pieces are adopted meshes (a wing torn off by crashdeform.js) or plain
-     boxes. We never dispose a `_shared` geometry/material, matching the
-     disposeGroup contract the aircraft files use.
+     What stays here is what only this file knows about a falling piece of
+     an airliner: it can be BURNING (a fuel smoke trail follows it down) and
+     it can be a HAZARD (it kills whoever is under it when it lands). Each
+     adopted body is tracked for exactly that, until it comes to rest.
+     Tracking is hard-capped at qScale(4, 16); over the cap the FARTHEST
+     record simply stops being tracked (the piece itself stays real).
      ============================================================ */
-  const G = 9.81 * 0.9;                 // the same mildly-damped gravity crashfx's debris uses
   const hulks = [];
-  const REST = 14;                      // seconds a landed section lingers
-  // Concurrency is the whole performance story here: a wing, a tail, a handful
-  // of recognisable fragments and the high-floor debris all land in this list,
-  // and a district being levelled must not be able to grow it. 4 at tier 0,
-  // 16 at tier 4 — over the cap the FARTHEST piece retires immediately.
+  const TRACK_MAX = 12;                 // seconds a piece can stay "falling" for our purposes
   function hulkCap() { return Math.max(3, qi(4, 16)); }
-
-  function solveLandT(y0, vy, gy) {
-    const disc = vy * vy + 2 * G * (y0 - gy);
-    if (disc <= 0) return 0.15;
-    return Math.max(0.08, (vy + Math.sqrt(disc)) / G);
-  }
 
   function evictHulk() {
     let idx = 0, bd = -1;
@@ -666,52 +658,47 @@
       const d = camDist(hulks[i].x, hulks[i].z);
       if (d > bd) { bd = d; idx = i; }
     }
-    retireHulk(hulks[idx]);
     hulks.splice(idx, 1);
   }
-  function retireHulk(h) {
-    if (!h || !h.mesh) return;
-    try {
-      if (h.mesh.parent) h.mesh.parent.remove(h.mesh);
-      if (h.own) {
-        h.mesh.traverse(function (o) {
-          if (o.geometry && !o.geometry._shared && o.geometry.dispose) { try { o.geometry.dispose(); } catch (e) {} }
-        });
-      }
-    } catch (e) {}
-    h.mesh = null;
-  }
-
-  /* PUBLIC: adopt an oversized airframe section into the wreck field.
-     city/crashdeform.js calls this when it shears a wing or a tail off; any
-     caller may. Degrade-safe: if this file is absent the caller falls back to
-     CBZ.cityDebrisAdopt, which is exactly what it did before.
-       mesh  already reparented into the arena root, posed in WORLD space
-       opts  { spin, burning, hazard, dmg, by, byPlayer, own } */
-  CBZ.cityWreckDebris = A.debris = function (mesh, vx, vy, vz, opts) {
-    if (!mesh || !inCity()) return false;
-    opts = opts || {};
+  // Track one debris body (a mesh CBZ.debris returned) for smoke + hazard.
+  function track(body, opts) {
+    if (!body) return;
     while (hulks.length >= hulkCap()) evictHulk();
-    const p = mesh.position;
-    // analytic landing point: solve once with the ground under the spawn, then
-    // re-solve with the ground under the projected landing spot (two passes is
-    // plenty — terrain does not change fast enough for a third to matter).
-    let gy = floorAt(p.x, p.z);
-    let t = solveLandT(p.y, vy, gy);
-    gy = floorAt(p.x + vx * t, p.z + vz * t);
-    t = solveLandT(p.y, vy, gy);
-    const h = {
-      mesh: mesh, x: p.x, y: p.y, z: p.z, x0: p.x, y0: p.y, z0: p.z,
-      vx: vx || 0, vy: vy || 0, vz: vz || 0,
-      t: 0, tLand: t, gy: gy, landed: false, rest: 0,
-      spin: opts.spin || (Math.random() - 0.5) * 5,
-      spin2: (Math.random() - 0.5) * 3.5,
+    const p = body.position;
+    hulks.push({
+      body: body, x: p.x, y: p.y, z: p.z, gy: floorAt(p.x, p.z), t: 0, still: 0,
       burning: !!opts.burning, smokeT: 0,
       hazard: !!opts.hazard && !!CBZ.CONFIG.AIR_IMPACT_DEBRIS_HAZARD,
-      dmg: opts.dmg || 0, by: opts.by || null, byPlayer: !!opts.byPlayer,
-      hurtT: 0, own: !!opts.own,
-    };
-    hulks.push(h);
+      dmg: opts.dmg || 0, by: opts.by || null, byPlayer: !!opts.byPlayer, hurtT: 0,
+    });
+  }
+
+  /* PUBLIC: adopt an airframe section into the wreck field.
+     city/crashdeform.js calls this when it shears a wing or a tail off; any
+     caller may. The mesh is handed WHOLE to CBZ.debris (its own geometry and
+     paint become the rigid body; the original is removed).
+       mesh  posed in WORLD space (parent it to the arena root first)
+       opts  { spin, burning, hazard, dmg, by, byPlayer, own } */
+  CBZ.cityWreckDebris = A.debris = function (mesh, vx, vy, vz, opts) {
+    if (!mesh || !inCity() || !CBZ.debris) return false;
+    opts = opts || {};
+    const spin = opts.spin || (Math.random() - 0.5) * 5;
+    let r = null;
+    try {
+      mesh.updateWorldMatrix(true, true);
+      r = CBZ.debris.adopt(mesh, {
+        velocity: new THREE.Vector3(vx || 0, vy || 0, vz || 0),
+        angular: new THREE.Vector3(spin, (Math.random() - 0.5) * 1.5, (Math.random() - 0.5) * 3.5),
+        owner: "wreck",
+      });
+    } catch (e) {}
+    // the body is a copy of the mesh's own geometry; the original goes
+    try {
+      if (mesh.parent) mesh.parent.remove(mesh);
+      if (opts.own) mesh.traverse(function (o) { if (o.geometry && !o.geometry._shared && o.geometry.dispose) o.geometry.dispose(); });
+    } catch (e) {}
+    if (!r || !r.bodies || !r.bodies.length) return false;
+    for (const b of r.bodies) track(b, opts);
     return true;
   };
   A.wreckCount = function () { return hulks.length; };
@@ -755,26 +742,23 @@
     } catch (e) {}
   }
 
+  // Follow each tracked body until it rests (or the sim froze it into the
+  // rubble, which removes the live mesh): smoke while it falls, hazard in the
+  // last few metres and once more on landing.
   function stepHulks(dt) {
     for (let i = hulks.length - 1; i >= 0; i--) {
       const h = hulks[i];
-      if (!h.mesh) { hulks.splice(i, 1); continue; }
-      if (h.landed) {
-        h.rest += dt;
-        if (h.rest > REST) { retireHulk(h); hulks.splice(i, 1); }
-        continue;
-      }
+      const m = h.body;
       h.t += dt;
-      const t = h.t;
-      // CLOSED FORM — position is a function of t, never an accumulation.
-      h.x = h.x0 + h.vx * t;
-      h.z = h.z0 + h.vz * t;
-      h.y = h.y0 + h.vy * t - 0.5 * G * t * t;
-      const m = h.mesh;
-      m.position.set(h.x, h.y, h.z);
-      m.rotation.x += h.spin * dt;
-      m.rotation.z += h.spin2 * dt;
-      if (h.burning && CBZ.cityCrashSmoke) {
+      const alive = m && m.parent && m.visible !== false;
+      if (alive) {
+        const p = m.position;
+        const moved = Math.abs(p.x - h.x) + Math.abs(p.y - h.y) + Math.abs(p.z - h.z);
+        h.x = p.x; h.y = p.y; h.z = p.z;
+        h.gy = floorAt(h.x, h.z);
+        h.still = moved < 0.02 ? h.still + dt : 0;
+      }
+      if (h.burning && alive && CBZ.cityCrashSmoke) {
         h.smokeT -= dt;
         if (h.smokeT <= 0) {
           h.smokeT = 0.1;
@@ -784,16 +768,9 @@
         }
       }
       hazardSweep(h, dt);
-      if (t >= h.tLand || h.y <= h.gy + 0.3) {
-        h.landed = true; h.rest = 0;
-        h.y = h.gy + 0.3;
-        m.position.y = h.y;
-        m.rotation.x = (Math.random() - 0.5) * 0.6;      // lie down, do not freeze mid-tumble
-        m.rotation.z = (Math.random() - 0.5) * 0.6;
-        try {
-          if (CBZ.cityDustKick) CBZ.cityDustKick(h.x, h.gy + 0.4, h.z, 1.4);
-        } catch (e) {}
-        hazardSweep(h, 1);                                // the landing itself
+      if (!alive || h.still > 0.4 || h.t > TRACK_MAX) {
+        h.hurtT = 0; hazardSweep(h, 1);                  // the landing itself
+        hulks.splice(i, 1);
       }
     }
   }
@@ -928,31 +905,58 @@
     return { x: x, y: y, z: z, cls: s.cls, scale: scale, speed: v, building: building, strike: strike };
   }
 
-  // Heavy structural pieces shed from the impacted floors. Closed-form arcs
-  // (the wreck field above) with an outward+downrange kick, and they HURT.
+  /* THE STRUCK FLOOR'S OWN EDGE. What falls off a wounded high floor is that
+     floor: the slab edge and the facade band the airframe tore through, in
+     the struck wall's own material (read off the wall collider's mesh), cut
+     into pieces by CBZ.debris and thrown out of the hole and down. They are
+     real rigid bodies, and while they fall they are tracked as a hazard: a
+     slab off the 30th floor kills whoever it lands on. (This used to mint
+     1-10 `new THREE.BoxGeometry` lumps in one brown-grey.) */
   function shedHighDebris(s, x, y, z, dx, dz, scale) {
-    if (!window.THREE || !CBZ.city) return;
-    const arena = CBZ.city.arena || CBZ.city;
-    const root = arena && arena.root;
-    if (!root) return;
-    const n = Math.min(6, qi(1, 5) * (scale > 1.4 ? 2 : 1));
-    for (let i = 0; i < n; i++) {
-      let m;
-      try {
-        const g = new THREE.BoxGeometry(0.7 + Math.random() * 1.3, 0.4 + Math.random() * 0.9, 0.6 + Math.random() * 1.2);
-        const mat = CBZ.cmat ? CBZ.cmat(0x6c6358) : new THREE.MeshLambertMaterial({ color: 0x6c6358 });
-        m = new THREE.Mesh(g, mat);
-      } catch (e) { return; }
-      const a = Math.random() * 6.2832;
-      m.position.set(x + Math.cos(a) * 2.5, y + (Math.random() - 0.5) * 5, z + Math.sin(a) * 2.5);
-      m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
-      root.add(m);
-      CBZ.cityWreckDebris(m,
-        dx * (3 + Math.random() * 6) + Math.cos(a) * (2 + Math.random() * 4),
-        1 + Math.random() * 3,
-        dz * (3 + Math.random() * 6) + Math.sin(a) * (2 + Math.random() * 4),
-        { hazard: true, dmg: 55, by: s.byPlayer ? CBZ.player : null, byPlayer: s.byPlayer, own: true });
+    if (!CBZ.debris) return;
+    const c = wallNear(x, y, z);
+    const mat = c && c.ref && c.ref.material;
+    if (!mat) return;
+    // a band of that floor, standing just proud of the face it came out of
+    const along = 1.6 + Math.min(2.6, scale * 1.4);
+    const tx = Math.abs(dz), tz = Math.abs(dx);          // horizontal, across the travel
+    const box = {
+      minX: x - tx * along - 0.35, maxX: x + tx * along + 0.35,
+      minY: y - 0.9, maxY: y + 0.35,
+      minZ: z - tz * along - 0.35, maxZ: z + tz * along + 0.35,
+    };
+    const n = Math.min(14, qi(4, 10) * (scale > 1.4 ? 2 : 1));
+    let r = null;
+    try {
+      r = CBZ.debris.shatterBox(box, mat, {
+        at: { x: x, y: y, z: z }, dir: { x: dx, y: -0.25, z: dz },
+        power: Math.min(2.2, 1 + scale * 0.5), maxPieces: n, owner: "wreck", solid: true,
+        velocity: new THREE.Vector3(dx * 3, 0.5, dz * 3),
+      });
+    } catch (e) {}
+    if (!r || !r.bodies) return;
+    for (const body of r.bodies) {
+      track(body, { hazard: true, dmg: 55, by: s.byPlayer ? CBZ.player : null, byPlayer: s.byPlayer });
     }
+  }
+  // The building wall at an impact seat: the facade collider containing the
+  // point, else the nearest tall collider face within 3 m that has a mesh.
+  function wallNear(x, y, z) {
+    const c0 = facadeAt(x, y, z);
+    if (c0 && c0.ref && c0.ref.material && !c0.ref.material.transparent) return c0;
+    const cols = CBZ.colliders || [];
+    let best = null, bd = 9;
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (!c.ref || !c.ref.material || c.ref.material.transparent) continue;
+      const y0 = c.y0 != null ? c.y0 : 0, y1 = c.y1 != null ? c.y1 : 18;
+      if (y1 - y0 <= 1.6 || y < y0 - 1.2 || y > y1 + 1.2) continue;
+      if (isAircraftCollider(c)) continue;
+      const sx = Math.max(c.minX, Math.min(c.maxX, x)), sz = Math.max(c.minZ, Math.min(c.maxZ, z));
+      const d = (x - sx) * (x - sx) + (z - sz) * (z - sz);
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best;
   }
 
   /* PUBLIC: run the catastrophe at a point without a tracked airframe (a
@@ -1060,8 +1064,8 @@
   // run-reset chokepoint demolition.js / structural.js already hang off; wrap
   // it the same lazy, marker-copying way so every reset fires.
   A.reset = function () {
-    for (let i = hulks.length - 1; i >= 0; i--) retireHulk(hulks[i]);
     hulks.length = 0; tumbles.length = 0; samples.clear();
+    if (CBZ.debris) { try { CBZ.debris.clear("wreck"); } catch (e) {} }
   };
   if (CBZ.onUpdate) CBZ.onUpdate(0.021, function () {
     const orig = CBZ.cityGlassReset;

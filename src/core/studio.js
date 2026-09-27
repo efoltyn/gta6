@@ -688,8 +688,8 @@
              "violent draws out of. Cheap because it is pooled, so a salvo " +
              "cannot flood the frame",
       needs: ["look"],
-      files: ["systems/fx.js"],
-      publishes: ["fx"],
+      files: ["systems/fx.js", "systems/debris.js"],
+      publishes: ["fx", "debris"],
     },
     blood: {
       gives: "what a body does when something opens it: the directional spray, " +

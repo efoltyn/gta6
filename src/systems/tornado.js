@@ -351,10 +351,44 @@
     return cloudDeckTex;
   }
 
-  let debrisGeo = null;
-  function debrisGeometry() {
-    if (!debrisGeo) debrisGeo = new THREE.BoxGeometry(1.15, 0.5, 0.8);
-    return debrisGeo;                            // module-shared: never disposed
+  /* THE JUNK IN THE COLUMN is what a tornado actually carries: boards,
+     torn corrugated roof sheet and snapped branches, each its own real shape
+     and material. (It was one grey 1.15 x 0.5 x 0.8 box, cloned.) Module-
+     shared geometry + materials, never disposed. */
+  let junkKit = null;
+  function junk() {
+    if (junkKit) return junkKit;
+    // a board: 2.4 m x 20 cm x 45 mm, weathered pine
+    const plank = new THREE.BoxGeometry(2.4, 0.045, 0.2);
+    // corrugated roof sheet: a thin plane rippled across its width
+    const sheet = new THREE.PlaneGeometry(1.8, 0.9, 1, 14);
+    const sp = sheet.attributes.position;
+    for (let i = 0; i < sp.count; i++) sp.setZ(i, Math.sin(sp.getY(i) / 0.9 * 14 * Math.PI) * 0.025);
+    sheet.computeVertexNormals();
+    // a snapped branch: tapered, lying along x, with one side twig
+    const br = new THREE.CylinderGeometry(0.035, 0.085, 2.1, 6, 1);
+    br.rotateZ(Math.PI / 2);
+    const tw = new THREE.CylinderGeometry(0.015, 0.03, 0.8, 5, 1);
+    tw.rotateZ(Math.PI / 2 - 0.7); tw.translate(0.25, 0.25, 0);
+    const branch = mergeTwo(br, tw);
+    const M = function (c, o) { const m = new THREE.MeshLambertMaterial(Object.assign({ color: c }, o || {})); m._shared = true; return m; };
+    junkKit = [
+      { geo: plank, mat: M(0x8f6e4a) },
+      { geo: sheet, mat: M(0x98a1a6, { side: THREE.DoubleSide }) },
+      { geo: branch, mat: M(0x4d3a28) },
+    ];
+    return junkKit;
+  }
+  function mergeTwo(a, b) {
+    a = a.index ? a.toNonIndexed() : a; b = b.index ? b.toNonIndexed() : b;
+    const g = new THREE.BufferGeometry();
+    for (const k of ["position", "normal", "uv"]) {
+      const A = a.attributes[k], B = b.attributes[k];
+      const arr = new Float32Array(A.array.length + B.array.length);
+      arr.set(A.array, 0); arr.set(B.array, A.array.length);
+      g.setAttribute(k, new THREE.BufferAttribute(arr, A.itemSize));
+    }
+    return g;
   }
 
   function buildFunnel(t) {
@@ -539,11 +573,11 @@
     // orbiting debris — the "flung junk in the column" read, as real meshes
     // rather than a particle system, so it costs a fixed handful of draws.
     const nDeb = Math.max(2, Math.round(CBZ.qScale ? CBZ.qScale(3, 10) : 7));
-    const dgeo = debrisGeometry();
-    const dmat = CBZ.cmat ? CBZ.cmat(0x5b5347) : new THREE.MeshLambertMaterial({ color: 0x5b5347 });
+    const kit = junk();
     const debris = [];
     for (let i = 0; i < nDeb; i++) {
-      const m = new THREE.Mesh(dgeo, dmat);
+      const J = kit[i % kit.length];
+      const m = new THREE.Mesh(J.geo, J.mat);
       m.castShadow = false; m.receiveShadow = false;
       grp.add(m);
       debris.push({
@@ -552,7 +586,7 @@
         y: 4 + (i * H) / (nDeb + 1),
         ang: (i * 2.399),                         // golden-angle spread
         rate: 1.5 + (i % 3) * 0.5,
-        sc: 0.7 + (i % 5) * 0.35,
+        sc: 0.75 + (i % 5) * 0.15,
       });
     }
 
@@ -568,8 +602,8 @@
     if (!M) return;
     try {
       if (M.grp.parent) M.grp.parent.remove(M.grp);
-      // ONLY the geometries this funnel created; the debris boxes share the
-      // module geometry and CBZ.cmat's _shared material — never dispose those.
+      // ONLY the geometries this funnel created; the junk in the column shares
+      // the module kit's geometry and _shared materials — never dispose those.
       for (const r of M.rings) if (r.mesh.geometry) r.mesh.geometry.dispose();
       if (M.skirt.geometry) M.skirt.geometry.dispose();
       if (M.skirt2 && M.skirt2.geometry) M.skirt2.geometry.dispose();
@@ -746,20 +780,26 @@
     let scarR = t.R * 0.55;
     if (t.bounds) scarR = Math.min(scarR, Math.max(3, t.bounds.r + 2 - Math.hypot(t.x - t.bounds.x, t.z - t.bounds.z)));
     layScar(t.x, t.z, scarR);
-    // deposit wreckage behind + beside the track (survival only: the city
-    // already litters through its own pooled chunk systems above)
+    // deposit what it was carrying behind + beside the track (survival only:
+    // the city litters through its own structural/debris systems). The
+    // deposit is the SAME junk the column carries (boards, roof sheet,
+    // branches), each a whole real piece that lands, tumbles and lies there
+    // under CBZ.debris, not a scatter of coloured cubes.
     if (!inCity() && CBZ.fx && CBZ.fx.dropDebris) {
       const ux = f > 0.1 ? t.fvx / f : 1, uz = f > 0.1 ? t.fvz / f : 0;
+      const kit = junk();
       const n = 2;
       for (let i = 0; i < n; i++) {
         const back = 2 + Math.random() * t.R * 1.2;
         const side = (Math.random() - 0.5) * t.R * 2.0;
+        const k = (Math.random() * 3) | 0;
         CBZ.fx.dropDebris({
           x: t.x - ux * back - uz * side,
           z: t.z - uz * back + ux * side,
           fromY: 5 + Math.random() * 12, vy: -2 - Math.random() * 3,
-          size: 0.35 + Math.random() * 0.85,
-          color: [0x8b9097, 0x6a5642, 0x77552f, 0x5c6168][(Math.random() * 4) | 0],
+          size: k === 0 ? 2.4 : k === 1 ? 1.8 : 2.1,
+          dims: k === 0 ? { w: 2.4, h: 0.045, d: 0.2 } : k === 1 ? { w: 1.8, h: 0.02, d: 0.9 } : { w: 2.1, h: 0.12, d: 0.12 },
+          material: kit[k].mat, kind: k === 1 ? "metal" : "wood", whole: true,
           keep: true,
         });
         stats.debrisKept++;
@@ -792,6 +832,26 @@
      escalation read instead, and the roof VISIBLY sheds — debris thrown UP
      off the top of a ground building, because a tornado lifts.
      ============================================================ */
+  // a building's roof material: the highest wide flat mesh of its group,
+  // else its shell colour (cached on the record)
+  function roofMatOf(b) {
+    if (b._roofMat !== undefined) return b._roofMat;
+    let best = null, top = -Infinity;
+    const bb = new THREE.Box3();
+    if (b.group) {
+      b.group.updateWorldMatrix(true, true);
+      b.group.traverse(function (o) {
+        if (!o.isMesh || !o.geometry || !o.material || Array.isArray(o.material) || o.material.transparent || !o.material.color) return;
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+        bb.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
+        const w = bb.max.x - bb.min.x, d = bb.max.z - bb.min.z, h = bb.max.y - bb.min.y;
+        if (w < b.w * 0.4 || d < b.d * 0.4 || h > 2) return;
+        if (bb.max.y > top) { top = bb.max.y; best = o.material; }
+      });
+    }
+    b._roofMat = best || (CBZ.cmat ? CBZ.cmat(b.color != null ? b.color : 0x8b9097) : null);
+    return b._roofMat;
+  }
   const ARENA_TICK = 0.25;
   // maps the city-calibrated dps (v^3 power flux) onto the arena ledger's
   // 0..1 scale. Tuned against the real dwell a moving funnel gives a
@@ -826,12 +886,15 @@
         if (b.fallen && !b._twFell) { b._twFell = true; stats.buildingCollapses++; }
         // the roof coming off, visibly: pieces leave the top of the building
         // going UP, because the updraft is what a tornado is
+        // the pieces are slabs of THIS building's roof, in its own material
         if (q > 0.4 && CBZ.fx && CBZ.fx.dropDebris && Math.random() < 0.75) {
+          const sz = 0.5 + Math.random() * 0.9;
           CBZ.fx.dropDebris({
             x: b.x + (Math.random() - 0.5) * b.w * 0.9,
             z: b.z + (Math.random() - 0.5) * b.d * 0.9,
-            fromY: b.h + 1.2, vy: 2.5 + _scratch.lift * 0.25,
-            size: 0.4 + Math.random() * 0.8, color: 0x8b9097,
+            fromY: (b.gy || 0) + b.h + 1.2, vy: 2.5 + _scratch.lift * 0.25,
+            size: sz, dims: { w: sz * 1.4, h: 0.16, d: sz },
+            material: roofMatOf(b),
             keep: Math.random() < 0.4,
           });
         }
