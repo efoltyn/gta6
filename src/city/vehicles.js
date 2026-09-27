@@ -815,6 +815,7 @@
      it open, exactly as boarding.js's leaf contract says. Returns false when
      the car has no such door, so callers can fall back. */
   CBZ.carDoorPose = function (car, id, t) {
+    if (car && car._proxy) wakeCar(car);           // a door moving is the real car's job
     const rig = doorRigOf(car);
     if (!rig) return false;
     const vis = rig.shut.length ? rig.shut[0].parent : null;
@@ -2362,6 +2363,7 @@
 
   function clearCars() {
     while (sleepers.length) wakeCar(sleepers[sleepers.length - 1]);   // the sleep list never outlives its cars
+    if (CBZ.carInstances) CBZ.carInstances.releaseAll();                // nor does the proxy list
     const keep = [];
     for (const c of CBZ.cityCars) {
       // _persist records (farm tractor/combine — world fixtures registered via
@@ -4005,7 +4007,7 @@
     const cars = CBZ.cityCars;
     for (let i = 0; i < cars.length; i++) {
       const c = cars[i];
-      if (c._sleep) continue;                // parked, far, inert (see sleepers)
+      if (c._sleep || c._proxy) continue;    // parked + inert: asleep far, or drawn by carinstances.js
       syncOccupants(c);                      // driver body appears/vanishes with control state
       // a passenger who froze in his seat: still there, still yours, and the
       // moment you actually drive off with him it stops being a jack.
@@ -5795,24 +5797,36 @@
   const SLEEP_D2 = 150 * 150, WAKE_D2 = 140 * 140, WAKE_SLICE = 24;
   const sleepers = [];
   let _wakeCursor = 0;
+  /* THREE STATES, ONE DOOR. A parked car is AWAKE (draws itself), PROXIED
+     (city/carinstances.js draws it inside a shared instanced pool, 35-150 m)
+     or ASLEEP (hidden, past 150 m). Proxied and asleep both skip the two
+     per-car passes; wakeCar() is the one exit from either, so every wake
+     hook below (damage, fire, tyres, entry, carjack, hold, scrap, doors)
+     brings a proxied car back as its real self too. */
   function sleepCar(c) {
     if (c._sleep) return;
+    if (c._proxy && CBZ.carInstances) CBZ.carInstances.release(c);
     c._sleep = true;
     if (c.group) c.group.visible = false;
     sleepers.push(c);
   }
   function wakeCar(c) {
-    if (!c || !c._sleep) return;
+    if (!c) return;
+    if (c._proxy && CBZ.carInstances) CBZ.carInstances.release(c);
+    if (!c._sleep) return;
     c._sleep = false;
     if (c.group) c.group.visible = true;
     const i = sleepers.indexOf(c);
     if (i >= 0) { sleepers[i] = sleepers[sleepers.length - 1]; sleepers.pop(); }
   }
   CBZ.cityWakeCar = wakeCar;
+  CBZ.citySleepCar = sleepCar;
   function sleepable(c) {
     return !c.player && !c.dead && !c.ai && !c._heldBy && !c._runaway && !(c.wreckT > 0) &&
       !c._onFire && !c._smoking && !c._husk && !(c.occ && c.occ.jacked) && !c.npcDriver;
   }
+  CBZ.cityCarSleepable = sleepable;     // carinstances.js re-checks it on every proxy, every frame
+  const PROXY_IN2 = 35 * 35;            // == carinstances.js PROXY_IN (it re-checks the band itself)
   function wakeSlice(camx, camz) {
     const n = Math.min(WAKE_SLICE, sleepers.length);
     for (let k = 0; k < n; k++) {
@@ -5923,7 +5937,7 @@
     rebuildCarGrid();   // ONE rebuild per frame; carAhead queries it per car
     wakeSlice(camx, camz);
     for (const c of CBZ.cityCars) {
-      if (c._sleep) continue;
+      if (c._sleep || c._proxy) continue;
       dt = baseDt;     // reset each car (a strided far car overrides this below)
       /* A CHAINED-DOWN LOAD HAS NO GROUND UNDER IT. This pass runs at 37 and
          vehicle_hold.js writes strapped freight at 12.7, so anything this loop
@@ -5969,6 +5983,7 @@
           if (settled && c.group) {
             const pdx = c.pos.x - camx, pdz = c.pos.z - camz, pd2 = pdx * pdx + pdz * pdz;
             if (pd2 > SLEEP_D2 && sleepable(c)) { sleepCar(c); continue; }
+            if (pd2 > PROXY_IN2 && sleepable(c) && CBZ.carInstances && CBZ.carInstances.acquire(c)) continue;
             if (pd2 > 3600 && CBZ.CONFIG.CAR_MATRIX_HOLD !== false) c.group._cbzMatrixOwnedFrame = CBZ._matrixOwnStamp;
           }
         }

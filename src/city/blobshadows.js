@@ -116,7 +116,9 @@
     return !!(p && p.pos && p.group && p.group.parent && p.group.visible && !p.inCar && !p._parked && !p.culled);
   }
   function carAlive(c) {
-    return !!(c && c.pos && c.group && c.group.parent && c.group.visible !== false);
+    // a PROXIED car (city/carinstances.js) is drawn by the instanced pool
+    // with its own group hidden: it is on screen, so it keeps its blob
+    return !!(c && c.pos && c.group && c.group.parent && (c.group.visible !== false || c._proxy));
   }
 
   // time-sliced acquisition: walk a small rolling window of one roster per
