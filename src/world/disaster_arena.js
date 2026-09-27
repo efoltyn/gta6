@@ -487,9 +487,18 @@
     // does the facade cover local point (t, y) on face f? (only boxes that
     // stand proud of the wall face count: a box flush with the wall is paint,
     // and the window cut goes through it)
+    // A GRAMMAR'S OWN GLASS NEVER HIDES AN OPENING. Nearly every grammar
+    // draws its windows as a dark "glass" box standing proud of the wall with
+    // a frame round it; counted as cladding, that box hid the very opening it
+    // marks, so a Victorian, a Greek Revival, a pagoda house and five of the
+    // ten towers came out with NO window at all: an opaque mirror-metal
+    // panel on a solid wall, a windowless room behind it. The frame round
+    // the glass still bounds the opening; the glass box itself is taken out
+    // of the opening in the cut below and the real window goes in.
     function coveredFn(f) {
       const list = [];
       for (const b of o.recs) {
+        if (isGlassHex(b[6])) continue;
         const nC = f.horiz ? b[2] : b[0], nH = (f.horiz ? b[5] : b[3]) / 2;
         const outer = f.out > 0 ? (nC + nH) - f.halfN : -f.halfN - (nC - nH);
         const inner = f.out > 0 ? (nC - nH) - f.halfN : -f.halfN - (nC + nH);
@@ -513,26 +522,40 @@
       for (let k = 0; k < o.storeys; k++) {
         const shop = !o.tower && f.s === 0 && k === 0;
         const b0 = k * o.fh + (shop ? 0.4 : 0.55), b1 = (k + 1) * o.fh - 0.45;
-        const yMid = b0 + (b1 - b0) * 0.55;
-        const runs = [];
-        let start = null;
-        for (let t = -half; t <= half + 1e-6; t += STEP) {
-          const doorBlock = f.s === 0 && k === 0 && Math.abs(t) < o.doorHalf;
-          const open = !doorBlock && !cov(t, yMid);
-          if (open && start == null) start = t;
-          if ((!open || t + STEP > half + 1e-6) && start != null) {
-            const end = open ? t : t - STEP;
-            if (end - start >= 0.3) runs.push([start, end]);
-            start = null;
+        /* THREE SCAN LINES, NOT ONE. The openings used to be looked for along
+           a single line at 55% of the band, which is exactly where a sash
+           window's meeting rail runs: every double-hung window on a Victorian
+           or a Greek Revival house read as "covered" and the house got no
+           windows at all. Scanned at 55%, then 30% and 80%, an opening is
+           found by whichever line crosses it clear, and a later line never
+           re-finds an opening an earlier one already glazed. */
+        const made = [];
+        const runsAt = function (yS) {
+          const out = [];
+          let start = null;
+          for (let t = -half; t <= half + 1e-6; t += STEP) {
+            const doorBlock = f.s === 0 && k === 0 && Math.abs(t) < o.doorHalf;
+            const open = !doorBlock && !cov(t, yS);
+            if (open && start == null) start = t;
+            if ((!open || t + STEP > half + 1e-6) && start != null) {
+              const end = open ? t : t - STEP;
+              if (end - start >= 0.3) out.push([start, end, yS]);
+              start = null;
+            }
           }
-        }
+          return out;
+        };
+        const runs = [];
+        for (const frac of [0.55, 0.3, 0.8]) for (const r of runsAt(b0 + (b1 - b0) * frac)) runs.push(r);
         for (const run of runs) {
-          const tm = (run[0] + run[1]) / 2;
-          let v0 = yMid, v1 = yMid;
+          const tm = (run[0] + run[1]) / 2, yS = run[2];
+          let v0 = yS, v1 = yS;
           while (v0 - VSTEP >= b0 && !cov(tm, v0 - VSTEP)) v0 -= VSTEP;
           while (v1 + VSTEP <= b1 && !cov(tm, v1 + VSTEP)) v1 += VSTEP;
           if (v1 - v0 < 0.35) continue;
           const u0 = run[0] - STEP / 2, u1 = run[1] + STEP / 2;
+          if (made.some(function (m) { return u1 > m[0] + 0.02 && u0 < m[1] - 0.02 && v1 > m[2] + 0.02 && v0 < m[3] - 0.02; })) continue;
+          made.push([u0, u1, v0, v1]);
           const bare = !cov(tm, v0 - 0.12);
           const nMod = Math.max(1, Math.round((u1 - u0) / 1.45));
           const mw = (u1 - u0) / nMod;
@@ -581,21 +604,27 @@
     if (holes.length && SUB) {
       // (1) deco boxes lying in the wall's plane zone (flush paint, a panel
       //     laid on the wall) lose the part inside the opening
-      const vol = holes.map(function (h) {
-        const f = faces[h.s], n0 = f.halfN - WT_ - 0.05, n1 = f.halfN + 0.03;
+      // a grammar's glass box is cleared from the opening through its whole
+      // depth (it stands proud of the wall), everything else only where it
+      // lies in the wall's plane
+      const volOf = function (h, reach) {
+        const f = faces[h.s], n0 = f.halfN - WT_ - 0.05, n1 = f.halfN + 0.03 + reach;
         const lo = f.out > 0 ? n0 : -n1, hi = f.out > 0 ? n1 : -n0;
         return f.horiz
           ? { x0: h.a0, x1: h.a1, z0: lo, z1: hi, y0: h.y0, y1: h.y1 }
           : { x0: lo, x1: hi, z0: h.a0, z1: h.a1, y0: h.y0, y1: h.y1 };
-      });
+      };
+      const vol = holes.map(function (h) { return volOf(h, 0); });
+      const volGlass = holes.map(function (h) { return volOf(h, 1.2); });
       const kept = [];
       const queue = o.recs.slice();
       for (let qi = 0; qi < queue.length; qi++) {
         const b = queue[qi];
         const bx0 = b[0] - b[3] / 2, bx1 = b[0] + b[3] / 2, by0 = b[1] - b[4] / 2, by1 = b[1] + b[4] / 2, bz0 = b[2] - b[5] / 2, bz1 = b[2] + b[5] / 2;
+        const vols = isGlassHex(b[6]) ? volGlass : vol;
         let hit = null;
-        for (let j = 0; j < vol.length; j++) {
-          const c = vol[j];
+        for (let j = 0; j < vols.length; j++) {
+          const c = vols[j];
           if (bx1 > c.x0 + 1e-4 && bx0 < c.x1 - 1e-4 && bz1 > c.z0 + 1e-4 && bz0 < c.z1 - 1e-4 && by1 > c.y0 + 1e-4 && by0 < c.y1 - 1e-4) { hit = c; break; }
         }
         if (!hit) { kept.push(b); continue; }
@@ -647,23 +676,19 @@
         }
       };
     }
+    // the openings themselves, for the interior finish (the plaster skin on
+    // the room side is cut by exactly the holes the wall was cut by)
+    panes.holes = holes;
     return panes;
   }
 
-  /* CUT A WALL. wl: { mesh, face (0:-z 1:+z 2:-x 3:+x), lx, ly, lz, bw, bh,
-     bd } — a shell wall box in its building's local frame. Its geometry is
-     rebuilt as the wall MINUS the openings (a grid over the hole edges, solid
-     cells merged into runs, then runs merged down the rows), so the reveals
-     are real faces and the sun comes in through them. The collider is left
-     whole on purpose: glass is not a doorway. geometry.parameters is kept as
-     the original box's, because the tsunami picks walls to tear off by it. */
-  function cutWall(wl, hs) {
-    if (!hs.length || !wl.mesh) return;
-    const horiz = wl.face < 2;
-    const a0 = horiz ? wl.lx - wl.bw / 2 : wl.lz - wl.bd / 2, a1 = horiz ? wl.lx + wl.bw / 2 : wl.lz + wl.bd / 2;
-    const y0 = wl.ly - wl.bh / 2, y1 = wl.ly + wl.bh / 2;
+  /* THE SOLID PART OF A RECTANGLE WITH HOLES IN IT. [a0,a1] x [y0,y1] minus
+     every hole {a0, a1, y0, y1}: a grid over the hole edges, solid cells
+     merged into runs, runs merged down the rows. Returns [[a0, a1, y0, y1]].
+     Shared by the wall cut (below) and the interior skin that lines it. */
+  function solidRects(a0, a1, y0, y1, hs) {
     const mine = hs.filter(function (h) { return h.a1 > a0 + 0.01 && h.a0 < a1 - 0.01 && h.y1 > y0 + 0.01 && h.y0 < y1 - 0.01; });
-    if (!mine.length) return;
+    if (!mine.length) return [[a0, a1, y0, y1]];
     const clampA = function (v) { return Math.max(a0, Math.min(a1, v)); };
     const clampY = function (v) { return Math.max(y0, Math.min(y1, v)); };
     const xs = [a0, a1], ys = [y0, y1];
@@ -680,8 +705,7 @@
       for (const h of mine) if (cx > h.a0 && cx < h.a1 && cy > h.y0 && cy < h.y1) return false;
       return true;
     };
-    // runs per row, then stack identical runs in consecutive rows
-    let open = new Map();          // "i0|i1" -> {i0, i1, j0}
+    let open = new Map();
     const rects = [];
     for (let j = 0; j < Y.length - 1; j++) {
       const rowRuns = [];
@@ -701,10 +725,27 @@
       open = next;
     }
     open.forEach(function (r) { rects.push([r.i0, r.i1, r.j0, Y.length - 2]); });
+    return rects.map(function (r) { return [X[r[0]], X[r[1] + 1], Y[r[2]], Y[r[3] + 1]]; });
+  }
+
+  /* CUT A WALL. wl: { mesh, face (0:-z 1:+z 2:-x 3:+x), lx, ly, lz, bw, bh,
+     bd } — a shell wall box in its building's local frame. Its geometry is
+     rebuilt as the wall MINUS the openings (a grid over the hole edges, solid
+     cells merged into runs, then runs merged down the rows), so the reveals
+     are real faces and the sun comes in through them. The collider is left
+     whole on purpose: glass is not a doorway. geometry.parameters is kept as
+     the original box's, because the tsunami picks walls to tear off by it. */
+  function cutWall(wl, hs) {
+    if (!hs.length || !wl.mesh) return;
+    const horiz = wl.face < 2;
+    const a0 = horiz ? wl.lx - wl.bw / 2 : wl.lz - wl.bd / 2, a1 = horiz ? wl.lx + wl.bw / 2 : wl.lz + wl.bd / 2;
+    const y0 = wl.ly - wl.bh / 2, y1 = wl.ly + wl.bh / 2;
+    if (!hs.some(function (h) { return h.a1 > a0 + 0.01 && h.a0 < a1 - 0.01 && h.y1 > y0 + 0.01 && h.y0 < y1 - 0.01; })) return;
+    const rects = solidRects(a0, a1, y0, y1, hs);
     const geos = [];
     const th = horiz ? wl.bd : wl.bw;
     for (const r of rects) {
-      const ra0 = X[r[0]], ra1 = X[r[1] + 1], ry0 = Y[r[2]], ry1 = Y[r[3] + 1];
+      const ra0 = r[0], ra1 = r[1], ry0 = r[2], ry1 = r[3];
       const g2 = horiz ? new THREE.BoxGeometry(ra1 - ra0, ry1 - ry0, th) : new THREE.BoxGeometry(th, ry1 - ry0, ra1 - ra0);
       const ca = (ra0 + ra1) / 2 - (horiz ? wl.lx : wl.lz), cy = (ry0 + ry1) / 2 - wl.ly;
       if (horiz) g2.translate(ca, cy, 0); else g2.translate(0, cy, ca);
@@ -816,7 +857,7 @@
     const fh = (CBZ.hash01 ? CBZ.hash01(ox, oz, 0xf4a3) : 0.3);
     const frameCol = o.frameCol != null ? o.frameCol
       : [0xe6e1d6, 0x34312d, 0x6b6f73, 0xe6e1d6, 0x2c3a33][(fh * 5) | 0];
-    glazeBuilding({
+    const panes = glazeBuilding({
       group: group, ox: ox, oz: oz, gy: gy, w: o.w, d: o.d, storeys: o.storeys,
       fh: o.fh, wt: o.wt, doorHalf: o.doorHalf || 1.3, list: o.glassList, recs: recs, walls: o.walls,
       tower: !!o.tower, dbox: dbox, frameCol: frameCol,
@@ -870,7 +911,37 @@
         if (m && b.los) CBZ.losBlockers.push(m);
       });
     }
-    return { def: def, lift: lift };
+    // holes: every window opening cut through the shell (building-local,
+    // {s, a0, a1, y0, y1}); crown: every box the grammar stood on the roof
+    // ([x0,x1,y0,y1,z0,z1]), so the host keeps its roof plant out of it
+    return { def: def, lift: lift, holes: (panes && panes.holes) || [],
+      crown: (ctx.crown && ctx.crown.boxes) || [], crownsRoof: !!(def && def.crownsRoof) };
+  }
+
+  /* SHELL PIECES QUEUED AFTER THE FACADE FLUSH (a tower's crown deck, a
+     house's roof bulkhead): one more merged mesh per colour, same finish. */
+  function flushLateShell(group, shellMerge, gy) {
+    const late = new Map();
+    for (const it of shellMerge) {
+      if (it.length !== 8) continue;              // already flushed with the facade
+      const k = it[6] + (it[7] ? "|los" : "");
+      let bk = late.get(k);
+      if (!bk) { bk = { col: it[6], los: it[7], geos: [] }; late.set(k, bk); }
+      const g2 = new THREE.BoxGeometry(it[3], it[4], it[5]);
+      g2.deleteAttribute("uv");
+      g2.translate(it[0], it[1], it[2]);
+      bk.geos.push(g2);
+      it.push(null);                               // flushed: never twice
+    }
+    const BGU = THREE.BufferGeometryUtils;
+    late.forEach(function (bk) {
+      const geo = bk.geos.length > 1 && BGU ? BGU.mergeBufferGeometries(bk.geos) : bk.geos[0];
+      if (geo !== bk.geos[0]) for (const g2 of bk.geos) g2.dispose();
+      const m = new THREE.Mesh(geo, finishMat(bk.col, 0, gy));
+      m.castShadow = true; m.receiveShadow = true;
+      group.add(m);
+      if (bk.los) CBZ.losBlockers.push(m);
+    });
   }
 
   /* THE BUILD IS ONE SYNCHRONOUS BLOCK, SO IT REPORTS ON ITSELF.
@@ -2256,8 +2327,21 @@
     // {mesh,x,y,z,span,shattered}; a building also keeps its own list so its
     // collapse blows out exactly its windows.
     const allGlass = [];
-    const glassMat = new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x3f8aa6, emissiveIntensity: 0.55, transparent: true, opacity: 0.5 });
+    /* The loose panes (the showroom's display glass) are the same glass as
+       the facades': clear, a faint tint, a Fresnel mirror at a glancing angle.
+       They were a half-opaque cyan Lambert with a 0.55 cyan EMISSIVE, so a
+       car dealership's windows glowed like a fish tank at midnight. */
+    const glassMat = new THREE.MeshStandardMaterial({
+      color: 0xdbe8ec, metalness: 0.15, roughness: 0.05,
+      envMap: CBZ.ENV || null, envMapIntensity: 1.25,
+      transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide,
+    });
+    glassMat.onBeforeCompile = function (sh) {
+      sh.fragmentShader = sh.fragmentShader.replace(GLASS_FRAG_OUT, GLASS_FRAG_NEW);
+    };
+    glassMat.customProgramCacheKey = function () { return "cbz-island-pane-fresnel"; };
     glassMat._shared = true;
+    envWanting.push(glassMat); hookEnv();
     // add a glass pane into `group` at LOCAL (lx,ly,lz); (ox,oz,gy) maps it to
     // world space for proximity tests. For root-level structures pass 0,0,0 and
     // give world coords as the local position.
@@ -2308,6 +2392,407 @@
       return n;
     };
 
+    /* ============================================================
+       THE INSIDE OF A BUILDING
+       ============================================================
+       Every room on the island was the outside of a box seen from within:
+       a flat grey foundation for a floor (0x6c7178), the same grey slab
+       overhead with no ceiling, the inside of each wall wearing the street
+       paint, stair treads floating 12 cm apart over an invisible ramp, and
+       whatever the quake kit dropped in the middle. None of it read as a
+       room anybody lived or worked in.
+
+       Now each building gets a real interior, built once with the shell and
+       merged by material into a handful of meshes (one per surface kind,
+       never one per piece): oak, ceramic tile, terrazzo or carpet-tile
+       floors at their real world scale, painted plaster walls cut round the
+       same window holes as the shell, skirting, door linings and window
+       stools, painted ceilings with their fixtures (flush domes and pendants
+       in houses, 600x1200 troffers in the towers, all emissive, never a
+       THREE light), closed stairs with stringers, a soffit and a rail, and
+       furniture arranged the way people arrange it (against walls, round a
+       focal point, with room to walk). The textures are city/fitout.js's
+       canvases (CBZ.fitoutTex), not a second library; the light pools under
+       each fixture are baked into the floor's vertex colours.
+
+       Coplanar faces are designed out, not polygon-offset away: the
+       structural slab's visual stops 15 mm under the finished floor and
+       12 mm over the ceiling board, and the plaster skin stands 6 mm off the
+       wall it lines. The walkable records (platforms, ramps, colliders) are
+       exactly the numbers they always were. */
+    const IN_TEX_SCALE = { wood: 1.6, tile: 1.2, terrazzo: 2.0, carpet: 2.0, plaster: 2.5, ceiling: 2.4, concrete: 3.0 };
+    // the same canvas at another size: the showroom's 600 mm polished tiles
+    const IN_ALIAS = { tile60: { tex: "tile", scale: 2.4 } };
+    const inMats = Object.create(null);
+    function inMat(key) {
+      let m = inMats[key];
+      if (m) return m;
+      if (key === "glow") {
+        m = new THREE.MeshBasicMaterial({ vertexColors: true });
+      } else {
+        const tk = IN_ALIAS[key] ? IN_ALIAS[key].tex : key;
+        const tex = (key === "flat" || !CBZ.fitoutTex) ? null : CBZ.fitoutTex(tk);
+        m = new THREE.MeshLambertMaterial({ vertexColors: true, map: tex || null });
+        // the skin wins any tie with the wall it lines, at every distance
+        if (key === "plaster") { m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -2; }
+      }
+      m.name = "island-interior:" + key;
+      m._shared = true;
+      inMats[key] = m;
+      return m;
+    }
+    function inScale(key) {
+      if (IN_ALIAS[key]) return IN_ALIAS[key].scale;
+      const S = CBZ.FITOUT_TEX_SCALE;
+      return (S && S[key]) || IN_TEX_SCALE[key] || 2;
+    }
+    function hexRGB(hex) { return [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255]; }
+
+    /* The per-building kit: buckets of quads by material key, in the
+       building's LOCAL frame; (wx, wz) is its world origin, for world-scaled
+       UVs. Faces are wound from their normal, so a caller never has to. */
+    function inKit(wx, wz) {
+      const bk = Object.create(null);
+      const lights = [];
+      function B(key) {
+        return bk[key] || (bk[key] = { p: [], n: [], c: [], u: [], i: [], tex: key !== "flat" && key !== "glow" });
+      }
+      function quad(key, a, b, c, d, n, col, lit) {
+        const k = B(key), base = k.p.length / 3, s = k.tex ? inScale(key) : 1;
+        const C = typeof col === "number" ? hexRGB(col) : col;
+        // wind counter-clockwise seen from the normal side
+        const e1x = b[0] - a[0], e1y = b[1] - a[1], e1z = b[2] - a[2];
+        const e2x = c[0] - a[0], e2y = c[1] - a[1], e2z = c[2] - a[2];
+        const cx = e1y * e2z - e1z * e2y, cy = e1z * e2x - e1x * e2z, cz = e1x * e2y - e1y * e2x;
+        const P = (cx * n[0] + cy * n[1] + cz * n[2]) < 0 ? [a, d, c, b] : [a, b, c, d];
+        const ax = Math.abs(n[0]), ay = Math.abs(n[1]), az = Math.abs(n[2]);
+        for (let q = 0; q < 4; q++) {
+          const v = P[q];
+          k.p.push(v[0], v[1], v[2]); k.n.push(n[0], n[1], n[2]);
+          const f = lit ? lit(v[0], v[1], v[2]) : 1;
+          k.c.push(C[0] * f, C[1] * f, C[2] * f);
+          if (k.tex) {
+            const X = v[0] + wx, Z = v[2] + wz;
+            if (ay >= ax && ay >= az) k.u.push(X / s, -Z / s);
+            else if (ax >= az) k.u.push(Z / s, v[1] / s);
+            else k.u.push(X / s, v[1] / s);
+          }
+        }
+        k.i.push(base, base + 1, base + 2, base, base + 2, base + 3);
+      }
+      // an axis-aligned box; mask bits +x 1, -x 2, +y 4, -y 8, +z 16, -z 32
+      function box(key, cx, cy, cz, w, h, d, col, mask, lit) {
+        if (!(w > 0.001 && h > 0.001 && d > 0.001)) return;
+        const x0 = cx - w / 2, x1 = cx + w / 2, y0 = cy - h / 2, y1 = cy + h / 2, z0 = cz - d / 2, z1 = cz + d / 2;
+        const m = mask == null ? 63 : mask;
+        if (m & 1) quad(key, [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1], [1, 0, 0], col, lit);
+        if (m & 2) quad(key, [x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [-1, 0, 0], col, lit);
+        if (m & 4) quad(key, [x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [0, 1, 0], col, lit);
+        if (m & 8) quad(key, [x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [0, -1, 0], col, lit);
+        if (m & 16) quad(key, [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [0, 0, 1], col, lit);
+        if (m & 32) quad(key, [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1, y0, z0], [0, 0, -1], col, lit);
+      }
+      // a convex eight-corner solid: v[0..3] one ring, v[4..7] the ring
+      // opposite (v[4] over v[0]); flat normals pointing away from its middle
+      function hexa(key, v, col) {
+        let mx = 0, my = 0, mz = 0;
+        for (let i = 0; i < 8; i++) { mx += v[i][0] / 8; my += v[i][1] / 8; mz += v[i][2] / 8; }
+        const F = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]];
+        for (let f = 0; f < 6; f++) {
+          const q = F[f], a = v[q[0]], b = v[q[1]], c = v[q[2]], d = v[q[3]];
+          const e1 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]], e2 = [d[0] - b[0], d[1] - b[1], d[2] - b[2]];
+          let n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+          const L = Math.hypot(n[0], n[1], n[2]);
+          if (L < 1e-9) continue;
+          n = [n[0] / L, n[1] / L, n[2] / L];
+          const fx = (a[0] + b[0] + c[0] + d[0]) / 4 - mx, fy = (a[1] + b[1] + c[1] + d[1]) / 4 - my, fz = (a[2] + b[2] + c[2] + d[2]) / 4 - mz;
+          if (n[0] * fx + n[1] * fy + n[2] * fz < 0) n = [-n[0], -n[1], -n[2]];
+          quad(key, a, b, c, d, n, col);
+        }
+      }
+      // a flat regular polygon (a dome light's diffuser, a fan grille)
+      function disc(key, cx, cy, cz, r, seg, down, col) {
+        const k = B(key), base = k.p.length / 3, C = hexRGB(col), s = k.tex ? inScale(key) : 1;
+        const ny = down ? -1 : 1;
+        k.p.push(cx, cy, cz); k.n.push(0, ny, 0); k.c.push(C[0], C[1], C[2]);
+        if (k.tex) k.u.push((cx + wx) / s, -(cz + wz) / s);
+        for (let i = 0; i < seg; i++) {
+          const a = (i / seg) * Math.PI * 2, px = cx + Math.cos(a) * r, pz = cz + Math.sin(a) * r;
+          k.p.push(px, cy, pz); k.n.push(0, ny, 0); k.c.push(C[0], C[1], C[2]);
+          if (k.tex) k.u.push((px + wx) / s, -(pz + wz) / s);
+        }
+        for (let i = 0; i < seg; i++) {
+          const a = base + 1 + i, b = base + 1 + ((i + 1) % seg);
+          if (down) k.i.push(base, a, b); else k.i.push(base, b, a);
+        }
+      }
+      // a horizontal plane subdivided so the baked light can pool on it;
+      // cells inside any `holes` rect are left out
+      function plane(key, x0, z0, x1, z1, y, col, down, lit, holes, cell) {
+        const cs = cell || 1.1;
+        const nx = Math.max(1, Math.ceil((x1 - x0) / cs)), nz = Math.max(1, Math.ceil((z1 - z0) / cs));
+        const dx = (x1 - x0) / nx, dz = (z1 - z0) / nz;
+        const n = down ? [0, -1, 0] : [0, 1, 0];
+        for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
+          const ax = x0 + i * dx, az = z0 + j * dz, bx = ax + dx, bz = az + dz;
+          if (holes && holes.some(function (h) { return bx > h.x0 + 1e-4 && ax < h.x1 - 1e-4 && bz > h.z0 + 1e-4 && az < h.z1 - 1e-4; })) continue;
+          quad(key, [ax, y, az], [ax, y, bz], [bx, y, bz], [bx, y, az], n, col, lit);
+        }
+      }
+      // a fixture's pool of light on the floor below it (and a faint halo on
+      // the ceiling round it), baked per vertex: no THREE light, no shader
+      function light(x, y, z, r, i) { lights.push({ x: x, y: y, z: z, r: r, i: i }); }
+      function floorLit(yFloor) {
+        const ls = lights.filter(function (l) { return l.y > yFloor && l.y - yFloor < 3.8; });
+        if (!ls.length) return null;
+        return function (x, y, z) {
+          let f = 1;
+          for (let q = 0; q < ls.length; q++) {
+            const l = ls[q], d = Math.hypot(x - l.x, z - l.z);
+            if (d < l.r) { const t = 1 - d / l.r; f += l.i * t * t; }
+          }
+          return Math.min(1.4, f);
+        };
+      }
+      function ceilLit(yCeil) {
+        const ls = lights.filter(function (l) { return Math.abs(l.y - yCeil) < 0.9; });
+        if (!ls.length) return null;
+        return function (x, y, z) {
+          let f = 0.93;                               // a ceiling is the dimmest surface in a room
+          for (let q = 0; q < ls.length; q++) {
+            const l = ls[q], d = Math.hypot(x - l.x, z - l.z);
+            if (d < 1.6) { const t = 1 - d / 1.6; f += 0.22 * l.i * t * t; }
+          }
+          return Math.min(1.15, f);
+        };
+      }
+      function flush(group, cast) {
+        const out = [];
+        for (const key in bk) {
+          const k = bk[key];
+          if (!k.i.length) continue;
+          const g2 = new THREE.BufferGeometry();
+          g2.setAttribute("position", new THREE.Float32BufferAttribute(k.p, 3));
+          g2.setAttribute("normal", new THREE.Float32BufferAttribute(k.n, 3));
+          g2.setAttribute("color", new THREE.Float32BufferAttribute(k.c, 3));
+          if (k.tex) g2.setAttribute("uv", new THREE.Float32BufferAttribute(k.u, 2));
+          g2.setIndex(k.i);
+          g2.computeBoundingSphere();
+          const m = new THREE.Mesh(g2, inMat(key));
+          m.castShadow = !!cast && key === "flat";
+          m.receiveShadow = key !== "glow";
+          m.name = "island-interior-" + key;
+          // a merged interior spans the whole building, so a bounding-box
+          // "is it inside?" test cannot tell it from the shell: say so
+          m.userData.cbzInterior = true;
+          group.add(m);
+          out.push(m);
+          delete bk[key];
+        }
+        return out;
+      }
+      return { quad: quad, box: box, hexa: hexa, disc: disc, plane: plane, light: light,
+        floorLit: floorLit, ceilLit: ceilLit, flush: flush, lights: lights };
+    }
+
+    /* THE ROOM-SIDE SKIN OF ONE WALL FACE, one storey tall: painted plaster
+       cut round the same openings as the wall (holes in building-local
+       {s, a0, a1, y0, y1}), a skirting board broken where an opening reaches
+       the floor, and each window's reveal lined and sat on a stool. f: { s,
+       n (the wall's room-side plane, local), inward (+1/-1 along the normal
+       axis), a0, a1 (span along the wall), y0, y1 (floor top .. ceiling),
+       skirt: [[a0, a1], ...] runs that get skirting (default the whole span),
+       glassN (the glass plane, for the reveal linings; null = no linings) } */
+    function skinFace(K, f, holes, paint, trim) {
+      const horiz = f.s < 2;                    // faces 0/1 run along x
+      const pn = f.n + f.inward * 0.006;        // 6 mm off the wall
+      const N = horiz ? [0, 0, f.inward] : [f.inward, 0, 0];
+      const P = function (a, y, nn) { return horiz ? [a, y, nn] : [nn, y, a]; };
+      const mine = holes.filter(function (h) { return h.s === f.s && h.y1 > f.y0 + 0.01 && h.y0 < f.y1 - 0.01 && h.a1 > f.a0 && h.a0 < f.a1; });
+      for (const r of solidRects(f.a0, f.a1, f.y0, f.y1, mine)) {
+        K.quad("plaster", P(r[0], r[2], pn), P(r[1], r[2], pn), P(r[1], r[3], pn), P(r[0], r[3], pn), N, paint);
+      }
+      // skirting: 10 cm tall, 15 mm proud of the skin, stopped at an opening
+      // (on the finished floor, which is not always the skin's foot: an upper
+      // storey's skin starts down in the slab so the stairwell has no seam)
+      const fl = f.floor != null ? f.floor : f.y0;
+      const runs = f.skirt || [[f.a0, f.a1]];
+      const doors = mine.filter(function (h) { return h.y0 < fl + 0.12; });
+      const skN = pn + f.inward * 0.008;
+      for (const run of runs) {
+        let segs = [[Math.max(f.a0, run[0]), Math.min(f.a1, run[1])]];
+        for (const h of doors) {
+          const next = [];
+          for (const sg of segs) {
+            if (h.a1 <= sg[0] || h.a0 >= sg[1]) { next.push(sg); continue; }
+            if (h.a0 > sg[0]) next.push([sg[0], h.a0 - 0.07]);
+            if (h.a1 < sg[1]) next.push([h.a1 + 0.07, sg[1]]);
+          }
+          segs = next;
+        }
+        for (const sg of segs) {
+          if (sg[1] - sg[0] < 0.05) continue;
+          const cA = (sg[0] + sg[1]) / 2, len = sg[1] - sg[0];
+          if (horiz) K.box("flat", cA, fl + 0.05, skN, len, 0.1, 0.016, trim, f.inward > 0 ? 16 | 4 | 1 | 2 : 32 | 4 | 1 | 2);
+          else K.box("flat", skN, fl + 0.05, cA, 0.016, 0.1, len, trim, f.inward > 0 ? 1 | 4 | 16 | 32 : 2 | 4 | 16 | 32);
+        }
+      }
+      if (f.glassN == null) return;
+      // windows: plaster linings on the reveal's head and jambs (from the room
+      // face to just inside the glass) and a painted stool along the bottom
+      const gn = f.glassN + f.inward * 0.012;   // just room-side of the glass
+      for (const h of mine) {
+        if (h.y0 < fl + 0.12) continue;         // a doorway is lined by its own casing
+        const ya = Math.max(h.y0, f.y0), yb = Math.min(h.y1, f.y1);
+        const nA = Math.min(pn, gn), nB = Math.max(pn, gn), nC = (nA + nB) / 2, nD = nB - nA;
+        if (nD < 0.02) continue;
+        // jambs face into the opening; head faces down
+        if (horiz) {
+          K.box("plaster", h.a0 + 0.004, (ya + yb) / 2, nC, 0.008, yb - ya, nD, paint, 1);
+          K.box("plaster", h.a1 - 0.004, (ya + yb) / 2, nC, 0.008, yb - ya, nD, paint, 2);
+          K.box("plaster", (h.a0 + h.a1) / 2, yb - 0.004, nC, h.a1 - h.a0, 0.008, nD, paint, 8);
+          K.box("flat", (h.a0 + h.a1) / 2, ya + 0.012, nC + f.inward * 0.014, h.a1 - h.a0 + 0.1, 0.028, nD + 0.028, trim);
+        } else {
+          K.box("plaster", nC, (ya + yb) / 2, h.a0 + 0.004, nD, yb - ya, 0.008, paint, 16);
+          K.box("plaster", nC, (ya + yb) / 2, h.a1 - 0.004, nD, yb - ya, 0.008, paint, 32);
+          K.box("plaster", nC, yb - 0.004, (h.a0 + h.a1) / 2, nD, 0.008, h.a1 - h.a0, paint, 8);
+          K.box("flat", nC + f.inward * 0.014, ya + 0.012, (h.a0 + h.a1) / 2, nD + 0.028, 0.028, h.a1 - h.a0 + 0.1, trim);
+        }
+      }
+    }
+
+    /* A DOORWAY'S TRIM: a lining over the reveal (both jambs and the head,
+       5 mm clear of the cut faces) and an architrave round it on the room
+       side, plus a stone threshold across the wall's thickness. Face 0 (-z)
+       only: every island door is on -z. zOut/zIn: the wall's outer and room
+       faces; top: the head's height; y0: the finished floor. */
+    function doorTrim(K, halfW, zOut, zIn, y0, top, casing, sill) {
+      const zc = (zOut + zIn) / 2, zd = zIn - zOut;
+      K.box("flat", -halfW + 0.012, (y0 + top) / 2, zc, 0.024, top - y0, zd, casing, 1);
+      K.box("flat", halfW - 0.012, (y0 + top) / 2, zc, 0.024, top - y0, zd, casing, 2);
+      K.box("flat", 0, top - 0.012, zc, 2 * halfW, 0.024, zd, casing, 8);
+      // architrave, room side: 7 cm wide, 2 cm proud
+      const za = zIn + 0.016;
+      K.box("flat", -halfW - 0.035, (y0 + top + 0.07) / 2, za, 0.07, top + 0.07 - y0, 0.02, casing);
+      K.box("flat", halfW + 0.035, (y0 + top + 0.07) / 2, za, 0.07, top + 0.07 - y0, 0.02, casing);
+      K.box("flat", 0, top + 0.035, za, 2 * halfW + 0.14, 0.07, 0.02, casing);
+      K.box("flat", 0, y0 - 0.006, zc, 2 * halfW, 0.028, zd + 0.04, sill, 4 | 16 | 32);
+    }
+
+    /* FURNITURE INTO THE KIT. city/furniture.js draws every piece through a
+       host box callback; this one lands the boxes in the building's merged
+       "flat" bucket (an emissive box, a lamp shade or a screen, in "glow"),
+       with an optional colour remap so a storage rack can be a walnut
+       bookcase, and its colliders in the building's own list so the quake
+       and the reset handle them like the walls. */
+    function furnHost(K, ox, oz, gy, cols, floorY, remap) {
+      return function (x, y, z, w, h, d, color, o) {
+        const col = remap && remap[color] != null ? remap[color] : color;
+        const onFloor = y - h / 2 <= floorY + 0.01;
+        if (o && o.emissive != null) K.box("glow", x, y, z, w, h, d, col, onFloor ? 63 & ~8 : 63);
+        else K.box("flat", x, y, z, w, h, d, col, onFloor ? 63 & ~8 : 63);
+        if (o && o.solid) {
+          const c = { minX: ox + x - w / 2, maxX: ox + x + w / 2, minZ: oz + z - d / 2, maxZ: oz + z + d / 2,
+            ref: null, y0: gy + (o.y0 != null ? o.y0 : y - h / 2), y1: gy + (o.y1 != null ? o.y1 : y + h / 2) };
+          CBZ.colliders.push(c); cols.push(c);
+        }
+        return true;
+      };
+    }
+    // one CBZ.furnish call with the city's seat registry closed: an island's
+    // chairs are not the city's anchors (see systems/quake.js's old note)
+    function furnish(name, host, x, y, z, yaw, o) {
+      const F = CBZ.furnish;
+      if (!F || typeof F[name] !== "function") return null;
+      const sSeat = CBZ.propRegisterSeat, sBed = CBZ.propRegisterBed;
+      CBZ.propRegisterSeat = null; CBZ.propRegisterBed = null;
+      const opts = { box: host, ox: 0, oz: 0, solid: true };
+      if (o) for (const k in o) opts[k] = o[k];
+      try { return name === "lamp" ? F.lamp(x, y, z, opts) : F[name](x, y, z, yaw || 0, opts); }
+      catch (e) { return null; }
+      finally { CBZ.propRegisterSeat = sSeat; CBZ.propRegisterBed = sBed; }
+    }
+
+    /* A ROOM PLANNER, the size of the problem: a rectangle, the rectangles
+       that must stay clear (stairs, door, walks, what is already placed),
+       and the edges of the room that are real walls. A piece against a wall
+       is slid along it from the preferred end until its footprint AND the
+       floor in front of it (where you stand to use it) are clear. */
+    function rectHit(r, list) {
+      for (let i = 0; i < list.length; i++) {
+        const k = list[i];
+        if (r.x1 > k.x0 + 1e-4 && r.x0 < k.x1 - 1e-4 && r.z1 > k.z0 + 1e-4 && r.z0 < k.z1 - 1e-4) return true;
+      }
+      return false;
+    }
+    // edge: "x0" | "x1" | "z0" | "z1" (the wall the piece's back is on).
+    // W along the wall, D deep, front clearance, t (0..1) where along the
+    // wall to start looking. Returns {x, z, yaw (facing into the room),
+    // rect (the piece), use (piece + front)} or null.
+    function againstWall(R, blocks, edge, W, D, front, t, gap) {
+      gap = gap == null ? 0.03 : gap;
+      const alongX = edge === "z0" || edge === "z1";
+      const lo = alongX ? R.x0 + W / 2 : R.z0 + W / 2, hi = alongX ? R.x1 - W / 2 : R.z1 - W / 2;
+      if (hi < lo - 1e-6) return null;
+      const start = lo + (hi - lo) * (t == null ? 0.5 : t);
+      const cands = [start];
+      for (let s = 0.15; s <= hi - lo + 0.15; s += 0.15) { cands.push(start + s, start - s); }
+      for (const c of cands) {
+        if (c < lo - 1e-6 || c > hi + 1e-6) continue;
+        let rect, use, x, z, yaw;
+        if (edge === "x1") { x = R.x1 - gap - D / 2; z = c; yaw = -Math.PI / 2;
+          rect = { x0: R.x1 - gap - D, x1: R.x1, z0: c - W / 2, z1: c + W / 2 };
+          use = { x0: rect.x0 - front, x1: R.x1, z0: rect.z0, z1: rect.z1 }; }
+        else if (edge === "x0") { x = R.x0 + gap + D / 2; z = c; yaw = Math.PI / 2;
+          rect = { x0: R.x0, x1: R.x0 + gap + D, z0: c - W / 2, z1: c + W / 2 };
+          use = { x0: R.x0, x1: rect.x1 + front, z0: rect.z0, z1: rect.z1 }; }
+        else if (edge === "z1") { z = R.z1 - gap - D / 2; x = c; yaw = Math.PI;
+          rect = { x0: c - W / 2, x1: c + W / 2, z0: R.z1 - gap - D, z1: R.z1 };
+          use = { x0: rect.x0, x1: rect.x1, z0: rect.z0 - front, z1: R.z1 }; }
+        else { z = R.z0 + gap + D / 2; x = c; yaw = 0;
+          rect = { x0: c - W / 2, x1: c + W / 2, z0: R.z0, z1: R.z0 + gap + D };
+          use = { x0: rect.x0, x1: rect.x1, z0: R.z0, z1: rect.z1 + front }; }
+        if (use.x0 < R.x0 - 1e-6 || use.x1 > R.x1 + 1e-6 || use.z0 < R.z0 - 1e-6 || use.z1 > R.z1 + 1e-6) continue;
+        if (rectHit(use, blocks)) continue;
+        return { x: x, z: z, yaw: yaw, rect: rect, use: use, edge: edge };
+      }
+      return null;
+    }
+    // Is the plan-view point (a along the wall of face s) inside a window?
+    function windowOn(holes, s, a0, a1, yLo, yHi) {
+      return holes.some(function (h) { return h.s === s && h.a1 > a0 && h.a0 < a1 && h.y1 > yLo && h.y0 < yHi; });
+    }
+    const EDGE_FACE = { x0: 2, x1: 3, z0: 0, z1: 1 };
+    // Put a piece against the first wall (in `edges` order) where it fits;
+    // a TALL piece never stands in front of a window.
+    function placeOnWalls(R, blocks, edges, W, D, front, holes, tallY, t) {
+      for (const e of edges) {
+        const tries = [t == null ? 0.5 : t, 0.1, 0.9, 0.5];
+        for (const tt of tries) {
+          const p = againstWall(R, blocks, e, W, D, front, tt);
+          if (!p) continue;
+          if (tallY) {
+            const s = EDGE_FACE[e], alongX = e === "z0" || e === "z1";
+            const a0 = alongX ? p.rect.x0 : p.rect.z0, a1 = alongX ? p.rect.x1 : p.rect.z1;
+            if (windowOn(holes, s, a0 - 0.05, a1 + 0.05, tallY[0], tallY[1])) {
+              // slide on along this wall for a stretch with no window
+              let ok = null;
+              for (let s2 = 0; s2 <= 1.0001 && !ok; s2 += 0.1) {
+                const q = againstWall(R, blocks, e, W, D, front, s2);
+                if (!q) continue;
+                const b0 = alongX ? q.rect.x0 : q.rect.z0, b1 = alongX ? q.rect.x1 : q.rect.z1;
+                if (!windowOn(holes, s, b0 - 0.05, b1 + 0.05, tallY[0], tallY[1])) ok = q;
+              }
+              if (ok) return ok;
+              continue;
+            }
+          }
+          return p;
+        }
+      }
+      return null;
+    }
+
     // sample the terrain across a footprint so we only drop buildings on flat
     // ground (and learn the high point to sit the foundation on)
     function footprintTerrain(ox, oz, w, d) {
@@ -2318,6 +2803,490 @@
       }
       return { max: mx, min: mn };
     }
+
+    // colours, all authored as the linear hexes this pipeline treats them as
+    const IN_PAINTS = [0xe4ded2, 0xdad6cc, 0xd2d8cc, 0xe2d6c0, 0xd2d9de, 0xe6dbcf];
+    const IN_CEIL = 0xefede6, IN_TRIM = 0xf1eee6, IN_STRUCT = 0x8e8a82;
+    const IN_RUGS = [0x7a4a3a, 0x3f5566, 0x8a7d62, 0x5b6b4a, 0x6b3f4f, 0x9a8b74];
+    const IN_BOOKS = [0x7b2f2a, 0x2f4a6b, 0x3d5a3a, 0xc9b98f, 0x5b3a5e, 0x2a2a2e, 0xa8672f, 0xd9d2c0];
+    const WALNUT = 0x5a3e2a;
+
+    /* A DOME LIGHT: a painted base plate and the diffuser under it, flush on
+       the ceiling at (x, yc, z); registers its pool on the floor below. */
+    function domeLight(K, x, yc, z, r, i) {
+      K.box("flat", x, yc - 0.012, z, 0.3, 0.024, 0.3, IN_TRIM, 63 & ~4);
+      K.disc("glow", x, yc - 0.032, z, 0.13, 10, true, 0xf6f0e0);
+      K.light(x, yc, z, r || 3.0, i == null ? 0.26 : i);
+    }
+    // a pendant: cord, a dark shade, the glowing mouth of the shade
+    function pendant(K, x, yc, z, drop) {
+      const dy = drop || 0.75, sy = yc - dy;
+      K.box("flat", x, yc - dy / 2, z, 0.012, dy, 0.012, 0x1c1c1c, 1 | 2 | 16 | 32);
+      K.box("flat", x, yc - 0.02, z, 0.12, 0.04, 0.12, 0x2a2a2a, 63 & ~4);
+      K.hexa("flat", [[x - 0.24, sy - 0.2, z - 0.24], [x + 0.24, sy - 0.2, z - 0.24], [x + 0.24, sy - 0.2, z + 0.24], [x - 0.24, sy - 0.2, z + 0.24],
+        [x - 0.08, sy, z - 0.08], [x + 0.08, sy, z - 0.08], [x + 0.08, sy, z + 0.08], [x - 0.08, sy, z + 0.08]], 0x2d3a34);
+      K.disc("glow", x, sy - 0.205, z, 0.2, 10, true, 0xfbe7bf);
+      K.light(x, sy, z, 2.6, 0.36);
+    }
+    // a bookcase's stock: a row of books standing on each board (local to
+    // the piece: lat across, up from the floor, fwd out of the front)
+    function books(K, x, y, z, yaw, L, D, levels, salt) {
+      const s = Math.sin(yaw), c = Math.cos(yaw), swap = (Math.round(yaw / (Math.PI / 2)) & 1) === 1;
+      for (let li = 0; li < levels.length; li++) {
+        let lat = -L / 2 + 0.09;
+        let n = 0;
+        while (lat < L / 2 - 0.12 && n < 14) {
+          const hh = h01g(x + lat * 7.1, z + li * 3.3, salt + n);
+          const bw = 0.028 + hh * 0.04, bh = 0.17 + h01g(x + n, z + lat, salt + 7) * 0.1, bd = Math.min(D - 0.08, 0.2 + hh * 0.06);
+          if (h01g(lat * 13.7 + x, li + z, salt + 31) < 0.12) { lat += 0.09; n++; continue; }   // a gap on the shelf
+          const col = IN_BOOKS[(h01g(x + lat * 3.1, z - li, salt + 17) * IN_BOOKS.length) | 0];
+          const la = lat + bw / 2, fw = -D / 2 + 0.04 + bd / 2;
+          const wx = x + la * c + fw * s, wz = z - la * s + fw * c;
+          const w = swap ? bd : bw, dd = swap ? bw : bd;
+          K.box("flat", wx, y + levels[li] + bh / 2, wz, w, bh, dd, col, 63 & ~8);
+          lat += bw + 0.004;
+          n++;
+        }
+      }
+    }
+
+    /* THE HOUSE INTERIOR. H: the shell's numbers (see makeBuilding). Draws
+       into its own kit, flushes into the building group, and returns the
+       sturdy pieces the quake's drop-cover-hold-on can use:
+       [{x, y, z, r}] in world space. */
+    function houseInterior(H) {
+      const ox = H.ox, oz = H.oz, gy = H.gy, w = H.w, d = H.d, storeys = H.storeys;
+      const ixMin = H.ixMin, ixMax = H.ixMax, izMin = H.izMin, izMax = H.izMax;
+      const sEdge = ixMin + SW, laneW = SW / 2, rTop = storeys * FH;
+      const hh = function (s) { return h01g(ox, oz, s); };
+      const K = inKit(ox, oz);
+      const cols = H.cols, covers = [];
+      const holes = H.holes.slice();
+      // the front door is a hole in the skin like any window
+      holes.push({ s: 0, a0: -DOORW / 2, a1: DOORW / 2, y0: 0, y1: FH - 0.7 });
+
+      const paint0 = IN_PAINTS[(hh(0x1a01) * IN_PAINTS.length) | 0];
+      const paintUp = IN_PAINTS[(hh(0x1a02) * IN_PAINTS.length) | 0];
+      const groundKey = hh(0x1a03) < 0.55 ? "wood" : "tile";
+      const groundTint = groundKey === "wood"
+        ? [0xffffff, 0xdcc6ad, 0xf1e5d6][(hh(0x1a04) * 3) | 0]
+        : [0xffffff, 0xe3b596, 0xdcd6c8][(hh(0x1a05) * 3) | 0];
+      const upTint = [0xffffff, 0xcdb096, 0xefe1cf][(hh(0x1a06) * 3) | 0];
+      // one household's taste: upholstery, bed linen, the wood of the table
+      const tone = {
+        cloth: [0x6b7d8a, 0x8a5a2b, 0x5d6b4f, 0x9a8f80, 0x7a3b36, 0x4d5563][(hh(0x1a07) * 6) | 0],
+        linen: [0xd9d4c8, 0x9fb0c0, 0xc9b79a, 0xb7c2b0][(hh(0x1a08) * 4) | 0],
+        wood: [0x6b4a2a, 0x3a2b1e, 0x8a6a48][(hh(0x1a09) * 3) | 0],
+        frame: [0x4a4036, 0x2e2620, 0x6f5139][(hh(0x1a0a) * 3) | 0],
+      };
+      const fyOf = function (L) { return L === 0 ? 0.08 : L * FH; };
+      const ceilOf = function (L) { return (L + 1) * FH - 0.2; };
+      const landingAt = function (L) { for (const l of H.landings) if (l.L === L) return l; return null; };
+
+      /* ---- FURNITURE FIRST (the fixtures hang over it, the floors pool the
+         fixtures' light), room by room ---------------------------------- */
+      const fixtures = [];      // {kind, x, z, L}
+      // GROUND FLOOR: a living-dining room. The strip down the -x side is the
+      // stair, the band along the front wall is the walk from the door to the
+      // foot of the stair: both stay clear.
+      {
+        const fy = fyOf(0);
+        const R = { x0: sEdge + 0.35, x1: ixMax, z0: izMin + 1.3, z1: izMax };
+        const blocks = [{ x0: -DOORW / 2 - 0.7, x1: DOORW / 2 + 0.7, z0: izMin, z1: izMin + 2.4 }];
+        const host = furnHost(K, ox, oz, gy, cols, fy, null);
+        // the windows of this storey, in plan (for "a table goes by a window")
+        const wins = holes.filter(function (h) { return h.y0 > 0.3 && h.y0 < FH && h.s !== 0; }).map(function (h) {
+          const a = (h.a0 + h.a1) / 2;
+          return h.s === 1 ? [a, izMax] : h.s === 3 ? [ixMax, a] : [ixMin, a];
+        });
+        // 1. THE TABLE: the biggest one that fits with its chairs pulled out
+        //    and a walkway round it, by a window. It is also the island's
+        //    lesson in drop-cover-hold-on, so every house gets one it can.
+        const TIERS = [{ len: 1.6, deep: 0.9, seats: 4 }, { len: 1.2, deep: 0.8, seats: 2 }, { len: 0.9, deep: 0.7, seats: 0 }];
+        let table = null;
+        for (const T of TIERS) {
+          let best = null;
+          for (let yi = 0; yi < 2 && !best; yi++) {
+            const hx0 = T.len / 2 + 0.05, hz0 = T.deep / 2 + (T.seats ? 0.42 + 0.28 : 0.05);
+            const hx = (yi ? hz0 : hx0) + 0.3, hz = (yi ? hx0 : hz0) + 0.3;
+            for (let x = R.x0 + hx; x <= R.x1 - hx + 1e-6; x += 0.1) {
+              for (let z = R.z0 + hz; z <= R.z1 - hz + 1e-6; z += 0.1) {
+                const r = { x0: x - hx, x1: x + hx, z0: z - hz, z1: z + hz };
+                if (rectHit(r, blocks)) continue;
+                let dw = 6;
+                for (const wv of wins) dw = Math.min(dw, Math.hypot(wv[0] - x, wv[1] - z));
+                const score = dw + 0.25 * Math.hypot(x - (R.x0 + R.x1) / 2, z - (R.z0 + R.z1) / 2) + (yi ? 0.05 : 0);
+                if (!best || score < best.score) best = { x: x, z: z, yaw: yi ? Math.PI / 2 : 0, rect: r, score: score };
+              }
+            }
+          }
+          if (best) { table = { T: T, p: best }; break; }
+        }
+        if (table) {
+          const P = table.p, T = table.T;
+          furnish("table", host, P.x, fy, P.z, P.yaw, { seats: T.seats, len: T.len, deep: T.deep, tone: tone });
+          blocks.push(P.rect);
+          covers.push({ x: ox + P.x, y: gy + fy, z: oz + P.z, r: T.seats ? 1.0 : 0.75 });
+          fixtures.push({ kind: "pendant", x: P.x, z: P.z, L: 0 });
+        }
+        // 2. THE SOFA, back to a wall, facing into the room, with a coffee
+        //    table and a rug in front of it and a lamp at its end
+        const roomW = R.x1 - R.x0;
+        const sofaLen = roomW > 3.4 ? 2.1 : roomW > 2.4 ? 1.7 : 0;
+        let sofa = null;
+        if (sofaLen) sofa = placeOnWalls(R, blocks, ["z1", "x1"], sofaLen, 0.87, 1.3, holes, null, 0.5);
+        if (sofa) {
+          furnish("sofa", host, sofa.x, fy, sofa.z, sofa.yaw, { len: sofaLen, tone: tone });
+          blocks.push(sofa.use);
+          const fx = Math.sin(sofa.yaw), fz = Math.cos(sofa.yaw);
+          const cx = sofa.x + fx * 1.05, cz = sofa.z + fz * 1.05;
+          const cl = Math.min(1.1, sofaLen * 0.55);
+          const rugC = IN_RUGS[(hh(0x1a11) * IN_RUGS.length) | 0];
+          const rugA = sofaLen + 0.3, rugB = 1.7;
+          const along = Math.abs(fx) < 0.5;       // sofa along x (back on a z wall)
+          K.box("flat", sofa.x + fx * 0.95, fy + 0.006, sofa.z + fz * 0.95, along ? rugA : rugB, 0.012, along ? rugB : rugA, rugC, 63 & ~8);
+          furnish("coffee", host, cx, fy + 0.012, cz, sofa.yaw, { len: cl, deep: 0.55, tone: tone });
+          // floor lamp at the sofa's left end, if there is floor there
+          const lx = sofa.x + (along ? -(sofaLen / 2 + 0.3) : 0), lz = sofa.z + (along ? 0 : -(sofaLen / 2 + 0.3));
+          const lr = { x0: lx - 0.2, x1: lx + 0.2, z0: lz - 0.2, z1: lz + 0.2 };
+          if (lr.x0 >= R.x0 && lr.x1 <= R.x1 && lr.z0 >= R.z0 && lr.z1 <= R.z1 && !rectHit(lr, blocks)) {
+            furnish("lamp", host, lx, fy, lz, 0, { h: 1.5, ei: 0.6 });
+            K.light(lx, fy + 1.5, lz, 2.0, 0.18);
+            blocks.push(lr);
+          }
+          fixtures.push({ kind: "dome", x: sofa.x + fx * 1.2, z: sofa.z + fz * 1.2, L: 0 });
+        }
+        // 3. A BOOKCASE on a wall with no window behind it
+        const bc = placeOnWalls(R, blocks, ["x1", "z1"], 0.9, 0.36, 0.6, holes, [0.1, 1.95], 0.85);
+        if (bc) {
+          const yawB = bc.yaw;
+          furnish("shelf", furnHost(K, ox, oz, gy, cols, fy, { 0x49505b: WALNUT, 0x8a939c: 0x6f5139 }), bc.x, fy, bc.z, yawB, { len: 0.9, deep: 0.34, h: 1.9 });
+          const gap = (1.9 - 0.35) / 4;
+          books(K, bc.x, fy, bc.z, yawB, 0.9, 0.34, [0.30, 0.30 + gap + 0.05, 0.30 + 2 * gap + 0.05, 0.30 + 3 * gap + 0.05], 0x5b00 + (hh(0x1a12) * 999 | 0));
+          blocks.push(bc.use);
+        }
+        // the entry: a light inside the door
+        fixtures.push({ kind: "dome", x: 0, z: izMin + 1.0, L: 0 });
+        if (!sofa && !table) fixtures.push({ kind: "dome", x: (R.x0 + R.x1) / 2, z: (R.z0 + R.z1) / 2, L: 0 });
+      }
+      // UPPER FLOORS: a bedroom, then a study. The landing and the way off
+      // it stay clear.
+      for (let L = 1; L < storeys; L++) {
+        const fy = fyOf(L);
+        const R = { x0: sEdge + 0.12, x1: ixMax, z0: izMin, z1: izMax };
+        const lg = landingAt(L);
+        const blocks = lg ? [{ x0: sEdge, x1: sEdge + 1.25, z0: lg.z0 - 0.25, z1: lg.z1 + 0.25 }] : [];
+        const host = furnHost(K, ox, oz, gy, cols, fy, null);
+        const roomW = R.x1 - R.x0, roomD = R.z1 - R.z0;
+        let desk = null, bed = null;
+        if (L === 1) {
+          const wide = roomW >= 3.1 && roomD >= 3.1 ? 1.4 : 0.9;
+          const BL = 2.0;
+          bed = placeOnWalls(R, blocks, ["z1", "x1", "z0"], wide + 0.14 + (roomW > wide + 1.3 ? 1.0 : 0), BL + 0.13, 0.7, holes, null, 0.5);
+          if (bed) {
+            const yawBed = bed.yaw + Math.PI;           // yaw points at the pillow = at the wall
+            const fx = Math.sin(bed.yaw), fz = Math.cos(bed.yaw);
+            const bx = bed.x + fx * 0.06, bz = bed.z + fz * 0.06;
+            furnish("bed", host, bx, fy, bz, yawBed, { len: BL, wide: wide, tone: tone });
+            blocks.push(bed.use);
+            // nightstands either side of the head, each with a small lamp
+            const along = Math.abs(fx) < 0.5;
+            // nightstand centres 25 cm off the wall the headboard is on
+            const toHead = (BL + 0.13) / 2 + 0.03 - 0.25;
+            const headX = bed.x - fx * toHead, headZ = bed.z - fz * toHead;
+            for (let sd = -1; sd <= 1; sd += 2) {
+              const off = wide / 2 + 0.34;
+              const nx = headX + (along ? sd * off : 0), nz = headZ + (along ? 0 : sd * off);
+              const nr = { x0: nx - 0.23, x1: nx + 0.23, z0: nz - 0.23, z1: nz + 0.23 };
+              if (nr.x0 < R.x0 || nr.x1 > R.x1 || nr.z0 < R.z0 || nr.z1 > R.z1) continue;
+              K.box("flat", nx, fy + 0.27, nz, 0.44, 0.54, 0.4, WALNUT, 63 & ~8);
+              K.box("flat", nx, fy + 0.56, nz, 0.46, 0.03, 0.42, 0x6f5139);
+              K.box("flat", nx, fy + 0.6, nz, 0.1, 0.05, 0.1, 0x3a3a3a);
+              K.box("flat", nx, fy + 0.72, nz, 0.02, 0.2, 0.02, 0x3a3a3a);
+              K.box("glow", nx, fy + 0.86, nz, 0.2, 0.17, 0.2, 0xf3dcae);
+              K.light(nx, fy + 0.9, nz, 1.4, 0.14);
+            }
+            // a runner at the foot of the bed
+            const footX = bed.x + fx * (BL / 2 + 0.55), footZ = bed.z + fz * (BL / 2 + 0.55);
+            const rugC = IN_RUGS[(hh(0x1a21 + L) * IN_RUGS.length) | 0];
+            K.box("flat", footX, fy + 0.006, footZ, along ? wide + 0.5 : 0.8, 0.012, along ? 0.8 : wide + 0.5, rugC, 63 & ~8);
+            fixtures.push({ kind: "dome", x: bed.x + fx * 0.6, z: bed.z + fz * 0.6, L: L });
+          }
+          // a wardrobe on a wall with no window behind it
+          const wd = placeOnWalls(R, blocks, ["x1", "z0", "z1"], 1.2, 0.6, 0.8, holes, [fy + 0.1, fy + 2.1], 0.5);
+          if (wd) {
+            const fx = Math.sin(wd.yaw), fz = Math.cos(wd.yaw), along = Math.abs(fx) < 0.5;
+            const carc = [0xe6e0d4, WALNUT, 0xcfc5b4][(hh(0x1a31 + L) * 3) | 0];
+            K.box("flat", wd.x, fy + 1.0, wd.z, along ? 1.2 : 0.6, 2.0, along ? 0.6 : 1.2, carc, 63 & ~8);
+            // the doors' meeting line and two handles, on the front face
+            const fxp = wd.x + fx * 0.302, fzp = wd.z + fz * 0.302;
+            K.box("flat", fxp, fy + 1.02, fzp, along ? 0.01 : 0.006, 1.9, along ? 0.006 : 0.01, 0x2b2622);
+            for (let sd = -1; sd <= 1; sd += 2) {
+              const hx = fxp + fx * 0.012 + (along ? sd * 0.07 : 0), hz = fzp + fz * 0.012 + (along ? 0 : sd * 0.07);
+              K.box("flat", hx, fy + 1.05, hz, 0.02, 0.22, 0.02, 0x8d8f91);
+            }
+            const c = { minX: ox + wd.rect.x0, maxX: ox + wd.rect.x1, minZ: oz + wd.rect.z0, maxZ: oz + wd.rect.z1, ref: null, y0: gy + fy, y1: gy + fy + 2.0 };
+            CBZ.colliders.push(c); cols.push(c);
+            blocks.push(wd.use);
+          }
+        }
+        // a desk to work at (and to get under), under or beside a window
+        desk = placeOnWalls(R, blocks, ["x1", "z1", "z0"], 1.3, 0.62, 0.95, holes, null, 0.5);
+        if (desk) {
+          furnish("desk", host, desk.x, fy, desk.z, desk.yaw + Math.PI, { len: 1.3, deep: 0.62 });
+          blocks.push(desk.use);
+          covers.push({ x: ox + desk.x, y: gy + fy, z: oz + desk.z, r: 0.75 });
+        }
+        if (!bed) {
+          // a study: a bookcase and an armchair to read in
+          const bc = placeOnWalls(R, blocks, ["z1", "x1", "z0"], 0.9, 0.36, 0.6, holes, [fy + 0.1, fy + 1.95], 0.2);
+          if (bc) {
+            furnish("shelf", furnHost(K, ox, oz, gy, cols, fy, { 0x49505b: WALNUT, 0x8a939c: 0x6f5139 }), bc.x, fy, bc.z, bc.yaw, { len: 0.9, deep: 0.34, h: 1.9 });
+            const gap = (1.9 - 0.35) / 4;
+            books(K, bc.x, fy, bc.z, bc.yaw, 0.9, 0.34, [0.30, 0.30 + gap + 0.05, 0.30 + 2 * gap + 0.05, 0.30 + 3 * gap + 0.05], 0x5c00 + L);
+            blocks.push(bc.use);
+          }
+          const ac = placeOnWalls(R, blocks, ["z1", "x1"], 0.95, 0.92, 0.6, holes, null, 0.8);
+          if (ac) { furnish("armchair", host, ac.x, fy, ac.z, ac.yaw, { tone: tone }); blocks.push(ac.use); }
+        }
+        fixtures.push({ kind: "dome", x: (R.x0 + R.x1) / 2, z: (R.z0 + R.z1) / 2, L: L });
+      }
+      // lay the ceiling fixtures (and their light) before the floors are laid
+      const domes = [];
+      for (const fx of fixtures) {
+        // two domes closer than 1.4 m are one
+        if (fx.kind === "dome" && domes.some(function (o) { return o.L === fx.L && Math.hypot(o.x - fx.x, o.z - fx.z) < 1.4; })) continue;
+        if (fx.kind === "dome") domes.push(fx);
+        const yc = ceilOf(fx.L);
+        const x = Math.max(sEdge + 0.3, Math.min(ixMax - 0.3, fx.x)), z = Math.max(izMin + 0.3, Math.min(izMax - 0.3, fx.z));
+        if (fx.kind === "pendant") pendant(K, x, yc, z, 1.15);   // shade ~1 m over the table top
+        else domeLight(K, x, yc, z);
+      }
+      // a light under every landing, for the flight below it
+      for (const lg of H.landings) domeLight(K, (lg.x0 + lg.x1) / 2, lg.L * FH - 0.2, (lg.z0 + lg.z1) / 2, 2.6, 0.2);
+
+      /* ---- FLOORS AND CEILINGS ----------------------------------------- */
+      K.plane(groundKey, ixMin, izMin, ixMax, izMax, 0.08, groundTint, false, K.floorLit(0.08));
+      for (let L = 1; L <= storeys; L++) {
+        const roof = L === storeys, y = L * FH;
+        const lg = landingAt(L);
+        const key = roof ? "concrete" : "wood", tint = roof ? 0x9a978f : upTint;
+        const lit = roof ? null : K.floorLit(y);
+        K.plane(key, sEdge, izMin, ixMax, izMax, y, tint, false, lit);
+        if (lg) K.plane(key, lg.x0, lg.z0, lg.x1, lg.z1, y, tint, false, lit);
+        // the ceiling of the storey below, under the slab and the landing
+        const yc = y - 0.2, cl = K.ceilLit(yc);
+        K.plane("plaster", sEdge, izMin, ixMax, izMax, yc, IN_CEIL, true, cl);
+        if (lg) K.plane("plaster", lg.x0, lg.z0, lg.x1, lg.z1, yc, IN_CEIL, true, cl);
+        // the slab's edge where it meets the stairwell, painted (the 20 cm
+        // of concrete you see from the stair), and the landing's inner edge
+        const segs = lg ? (lg.z0 <= izMin + 0.01 ? [[lg.z1, izMax]] : [[izMin, lg.z0]]) : [[izMin, izMax]];
+        for (const sg of segs) if (sg[1] - sg[0] > 0.02)
+          K.quad("plaster", [sEdge - 0.004, yc, sg[0]], [sEdge - 0.004, yc, sg[1]], [sEdge - 0.004, y, sg[1]], [sEdge - 0.004, y, sg[0]], [-1, 0, 0], paintUp);
+        if (lg) {
+          const zi = lg.z0 <= izMin + 0.01 ? lg.z1 : lg.z0, sgn = lg.z0 <= izMin + 0.01 ? 1 : -1;
+          K.quad("plaster", [lg.x0, yc, zi + sgn * 0.004], [lg.x1, yc, zi + sgn * 0.004], [lg.x1, y, zi + sgn * 0.004], [lg.x0, y, zi + sgn * 0.004], [0, 0, sgn], paintUp);
+        }
+        if (roof) {
+          // the membrane turns up the inside of the parapets
+          K.box("concrete", (sEdge + ixMax) / 2, y + 0.075, izMax - 0.01, ixMax - sEdge, 0.15, 0.02, 0x8a877f, 4 | 32);
+          K.box("concrete", (sEdge + ixMax) / 2, y + 0.075, izMin + 0.01, ixMax - sEdge, 0.15, 0.02, 0x8a877f, 4 | 16);
+          K.box("concrete", ixMax - 0.01, y + 0.075, (izMin + izMax) / 2, 0.02, 0.15, izMax - izMin - 0.04, 0x8a877f, 4 | 2);
+        }
+      }
+
+      /* ---- WALLS: plaster skin, skirting, window reveals, the door ------ */
+      const faces = [
+        { s: 0, n: -d / 2 + WT, inward: 1, a0: ixMin, a1: ixMax, glassN: -(d / 2 - 0.07) },
+        { s: 1, n: d / 2 - WT, inward: -1, a0: ixMin, a1: ixMax, glassN: d / 2 - 0.07 },
+        { s: 2, n: -w / 2 + WT, inward: 1, a0: izMin, a1: izMax, glassN: -(w / 2 - 0.07) },
+        { s: 3, n: w / 2 - WT, inward: -1, a0: izMin, a1: izMax, glassN: w / 2 - 0.07 },
+      ];
+      for (let L = 0; L < storeys; L++) {
+        const lg = L > 0 ? landingAt(L) : null;
+        const y0 = L === 0 ? 0.08 : L * FH - 0.2;
+        const y1 = L === storeys - 1 ? rTop : ceilOf(L);
+        const paint = L === 0 ? paint0 : paintUp;
+        for (const f of faces) {
+          let skirt = null;
+          if (L > 0) {
+            if (f.s === 2) skirt = lg ? [[lg.z0, lg.z1]] : [];
+            else if (f.s === 3) skirt = null;
+            else {
+              skirt = [[sEdge, ixMax]];
+              if (lg && ((f.s === 0 && lg.z0 <= izMin + 0.01) || (f.s === 1 && lg.z1 >= izMax - 0.01))) skirt.push([ixMin, sEdge]);
+            }
+          }
+          skinFace(K, { s: f.s, n: f.n, inward: f.inward, a0: f.a0, a1: f.a1, y0: y0, y1: y1, skirt: skirt,
+            glassN: f.glassN, floor: L === 0 ? 0.08 : L * FH }, holes, paint, IN_TRIM);
+        }
+      }
+      doorTrim(K, DOORW / 2, -d / 2, -d / 2 + WT, 0.08, FH - 0.7, IN_TRIM, 0x8f8a80);
+
+      /* ---- THE STAIR ------------------------------------------------------
+         Each flight is a closed stair: oak treads with a nosing over painted
+         risers on a solid body whose underside is the sloped soffit, between
+         two stringers, with a rail on the open side. Drawn over the SAME
+         physics ramp it always had (the treads straddle the ramp's line). */
+      const RISE = FH / 9;
+      for (const F of H.flights) {
+        const k = F.k, dir = F.dir, run = F.rampEndZ - F.startZ, rd = run / 9;
+        const xa = F.lx0 + 0.04, xb = F.lx0 + laneW - 0.04;
+        const yP = function (z) { return k * FH + (z - F.startZ) / run * FH; };
+        const floorClamp = k === 0 ? 0.08 : k * FH - 0.2;
+        const ySoff = function (z) { return Math.max(floorClamp, yP(z) - 0.32); };
+        for (let i = 1; i <= 9; i++) {
+          const z0 = F.startZ + (i - 1) * rd, z1 = F.startZ + i * rd;
+          const top = k * FH + (i - 0.5) * RISE;
+          // the body under this tread: flat top, sloped bottom (the soffit)
+          const ya = ySoff(z0), yb = ySoff(z1), yt = top - 0.035;
+          K.hexa("plaster", [[xa, ya, z0], [xb, ya, z0], [xb, yb, z1], [xa, yb, z1],
+            [xa, yt, z0], [xb, yt, z0], [xb, yt, z1], [xa, yt, z1]], IN_TRIM);
+          // the tread, 35 mm oak, its nosing 25 mm over the riser below
+          const zn = z0 - dir * 0.025;
+          K.box("wood", (xa + xb) / 2, top - 0.0175, (zn + z1) / 2, xb - xa, 0.035, Math.abs(z1 - zn), upTint);
+        }
+        // stringers both sides: a sloped board from the soffit to over the nosings
+        const zS = F.startZ, zE = F.rampEndZ;
+        for (let sd = 0; sd < 2; sd++) {
+          const x0 = sd ? xb : F.lx0 + 0.005, x1 = sd ? F.lx0 + laneW - 0.005 : xa;
+          const b0 = ySoff(zS) - 0.02, b1 = ySoff(zE) - 0.02, t0 = yP(zS) + RISE / 2 + 0.07, t1 = yP(zE) + RISE / 2 + 0.07;
+          K.hexa("flat", [[x0, b0, zS], [x1, b0, zS], [x1, b1, zE], [x0, b1, zE],
+            [x0, t0, zS], [x1, t0, zS], [x1, t1, zE], [x0, t1, zE]], IN_TRIM);
+        }
+        // the rail, on the side open to the other lane: newels, balusters, a
+        // sloped oak handrail 0.9 m over the pitch line
+        const xr = (k % 2 === 0) ? F.lx0 + laneW - 0.03 : F.lx0 + 0.03;
+        const zr0 = zS + dir * 0.15, zr1 = zE - dir * 0.1;
+        const RH = 0.9;
+        const hr0 = yP(zr0) + RISE / 2 + RH, hr1 = yP(zr1) + RISE / 2 + RH;
+        K.hexa("flat", [[xr - 0.03, hr0 - 0.05, zr0], [xr + 0.03, hr0 - 0.05, zr0], [xr + 0.03, hr1 - 0.05, zr1], [xr - 0.03, hr1 - 0.05, zr1],
+          [xr - 0.03, hr0, zr0], [xr + 0.03, hr0, zr0], [xr + 0.03, hr1, zr1], [xr - 0.03, hr1, zr1]], 0x5c3d26);
+        for (const zn of [zr0, zr1]) {
+          const yb = yP(zn) + RISE / 2 + 0.05, yt = yP(zn) + RISE / 2 + RH + 0.08;
+          K.box("flat", xr, (yb + yt) / 2, zn, 0.08, yt - yb, 0.08, 0x5c3d26);
+        }
+        const nb = Math.max(2, Math.floor(Math.abs(zr1 - zr0) / 0.36));
+        for (let j = 1; j < nb; j++) {
+          const zn = zr0 + (zr1 - zr0) * j / nb;
+          const yb = yP(zn) + RISE / 2 + 0.07, yt = yP(zn) + RISE / 2 + RH - 0.05;
+          K.box("flat", xr, (yb + yt) / 2, zn, 0.025, yt - yb, 0.025, IN_TRIM, 1 | 2 | 16 | 32);
+        }
+      }
+      // THE STAIRWELL EDGE on every upper floor (and the roof when no bulkhead
+      // encloses it): a painted knee wall under an oak cap along the slab's
+      // edge, open only where the landing meets the floor. Solid: walking off
+      // the floor into a three-storey drop used to be one step to the left.
+      const kneeWall = function (L, z0, z1) {
+        if (z1 - z0 < 0.1) return;
+        const y = L * FH, zc = (z0 + z1) / 2;
+        K.box("plaster", sEdge + 0.05, y + 0.475, zc, 0.1, 0.95, z1 - z0, L === storeys ? 0xd8d4ca : paintUp, 63 & ~8);
+        K.box("flat", sEdge + 0.05, y + 0.97, zc, 0.14, 0.04, z1 - z0 + 0.02, 0x5c3d26);
+        const c = { minX: ox + sEdge, maxX: ox + sEdge + 0.1, minZ: oz + z0, maxZ: oz + z1, ref: null, y0: gy + y, y1: gy + y + 0.99 };
+        CBZ.colliders.push(c); cols.push(c);
+      };
+      const kneeFor = function (L) {
+        const lg = landingAt(L);
+        if (!lg) { kneeWall(L, izMin, izMax); return; }
+        if (lg.z0 <= izMin + 0.01) kneeWall(L, lg.z1 + 0.05, izMax); else kneeWall(L, izMin, lg.z0 - 0.05);
+      };
+      for (let L = 1; L < storeys; L++) kneeFor(L);
+
+      /* ---- THE ROOF ------------------------------------------------------
+         The stair came up through a 3.6 m hole in the roof, open to the sky
+         (and the rain). Now it arrives in a BULKHEAD: the building's own
+         walls carried up a storey round the stair, roofed, with a doorway
+         onto the roof where the top landing is. Only where the facade has
+         not stood its own crown there; else the stairwell keeps a knee wall
+         and the roof edge a parapet. */
+      const BH = 2.6, bx1 = sEdge + 0.12;
+      const crownIn = function (x0, x1, z0, z1, y0, y1) {
+        for (const c of H.crown) if (c[1] > x0 && c[0] < x1 && c[5] > z0 && c[4] < z1 && c[3] > y0 && c[2] < y1) return true;
+        return false;
+      };
+      const topLg = landingAt(storeys);
+      const bulk = !crownIn(-w / 2, bx1, -d / 2, d / 2, rTop + PPH_ROOF, rTop + BH + 0.3);
+      const late = H.late;             // shell boxes laid after the facade flush
+      const wallBox = function (x0, x1, z0, z1, y0, y1, solid) {
+        late.push([(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, x1 - x0, y1 - y0, z1 - z0, H.color, true]);
+        if (solid) {
+          const c = { minX: ox + x0, maxX: ox + x1, minZ: oz + z0, maxZ: oz + z1, ref: null, y0: gy + y0, y1: gy + y1 };
+          CBZ.colliders.push(c); cols.push(c);
+        }
+      };
+      if (bulk) {
+        const yA = rTop, yB = rTop + BH;
+        wallBox(-w / 2, -w / 2 + WT, -d / 2, d / 2, yA, yB, true);                 // -x
+        wallBox(-w / 2 + WT, bx1, -d / 2, -d / 2 + WT, yA, yB, true);              // -z
+        wallBox(-w / 2 + WT, bx1, d / 2 - WT, d / 2, yA, yB, true);                // +z
+        // the front, onto the roof: a doorway where the top landing is
+        const dz0 = topLg ? Math.max(izMin, topLg.z0 + 0.05) : izMin, dz1 = topLg ? Math.min(izMax, topLg.z1 - 0.05) : izMin + 1.1;
+        const DH = 2.2;
+        wallBox(sEdge, bx1, izMin, dz0, yA, yB, true);
+        wallBox(sEdge, bx1, dz1, izMax, yA, yB, true);
+        wallBox(sEdge, bx1, dz0, dz1, yA + DH, yB, false);
+        // its roof: a slab, and over it the roofing, lapped 4 cm over every
+        // edge as a drip; a ceiling under it
+        late.push([(-w / 2 + bx1) / 2, yB + 0.0825, 0, bx1 + w / 2, 0.165, d, IN_STRUCT, true]);
+        K.box("flat", (-w / 2 + bx1) / 2, yB + 0.195, 0, bx1 + w / 2 + 0.08, 0.06, d + 0.08, 0x8d8a83, 63 & ~8);
+        // inside: plaster on the three walls and the door wall's back, a light
+        const P2 = 0xd8d4ca;
+        K.quad("plaster", [-w / 2 + WT + 0.006, rTop - 0.2, izMin], [-w / 2 + WT + 0.006, rTop - 0.2, izMax], [-w / 2 + WT + 0.006, yB, izMax], [-w / 2 + WT + 0.006, yB, izMin], [1, 0, 0], P2);
+        K.quad("plaster", [ixMin, rTop - 0.2, izMin + 0.006], [sEdge, rTop - 0.2, izMin + 0.006], [sEdge, yB, izMin + 0.006], [ixMin, yB, izMin + 0.006], [0, 0, 1], P2);
+        K.quad("plaster", [ixMin, rTop - 0.2, izMax - 0.006], [sEdge, rTop - 0.2, izMax - 0.006], [sEdge, yB, izMax - 0.006], [ixMin, yB, izMax - 0.006], [0, 0, -1], P2);
+        for (const r of solidRects(izMin, izMax, yA, yB, [{ a0: dz0, a1: dz1, y0: yA - 1, y1: yA + DH }]))
+          K.quad("plaster", [sEdge - 0.006, r[2], r[0]], [sEdge - 0.006, r[2], r[1]], [sEdge - 0.006, r[3], r[1]], [sEdge - 0.006, r[3], r[0]], [-1, 0, 0], P2);
+        K.plane("plaster", ixMin, izMin, sEdge, izMax, yB - 0.002, IN_CEIL, true, null);
+        // the doorway's lining (the 12 cm reveal) and a threshold
+        K.box("flat", sEdge + 0.06, yA + DH - 0.01, (dz0 + dz1) / 2, 0.12, 0.02, dz1 - dz0, IN_TRIM, 8);
+        K.box("flat", sEdge + 0.06, yA + DH / 2, dz0 + 0.008, 0.12, DH, 0.016, IN_TRIM, 16);
+        K.box("flat", sEdge + 0.06, yA + DH / 2, dz1 - 0.008, 0.12, DH, 0.016, IN_TRIM, 32);
+        domeLight(K, ixMin + SW / 2, yB - 0.002, (izMin + izMax) / 2, 2.4, 0.2);
+        // (the bulkhead's own front wall is the stairwell's guard at roof
+        // level, so the roof keeps its parapet only over the slab)
+      } else {
+        // no bulkhead: a parapet on the stair strip's roof edges, and the
+        // stairwell's knee wall at roof level too
+        H.parapet(-w / 2, -w / 2 + WT, -d / 2, d / 2);
+        H.parapet(-w / 2 + WT, sEdge, -d / 2, -d / 2 + WT);
+        H.parapet(-w / 2 + WT, sEdge, d / 2 - WT, d / 2);
+        kneeFor(storeys);
+      }
+      // ROOF PLANT: a condenser on a curb at the back of the roof (the thing
+      // a flat roof actually carries), and two vent stacks, clear of the
+      // stair, the parapet and any crown the facade stood there
+      const hvacAt = function (x, z) {
+        const hx = 0.5, hz = 0.5;
+        if (x - hx < sEdge + 0.9 || x + hx > ixMax - 0.25 || z - hz < izMin + 0.25 || z + hz > izMax - 0.25) return false;
+        if (crownIn(x - hx, x + hx, z - hz, z + hz, rTop, rTop + 1.1)) return false;
+        const y = rTop;
+        K.box("flat", x, y + 0.05, z, 1.0, 0.1, 1.0, 0x55585c, 63 & ~8);
+        K.box("flat", x, y + 0.46, z, 0.9, 0.72, 0.9, 0xb4b6b3, 63 & ~8);
+        for (let j = 0; j < 5; j++) {
+          const yy = y + 0.2 + j * 0.11;
+          K.box("flat", x, yy, z - 0.452, 0.8, 0.018, 0.006, 0x3a3d40, 32);
+          K.box("flat", x, yy, z + 0.452, 0.8, 0.018, 0.006, 0x3a3d40, 16);
+          K.box("flat", x - 0.452, yy, z, 0.006, 0.018, 0.8, 0x3a3d40, 2);
+          K.box("flat", x + 0.452, yy, z, 0.006, 0.018, 0.8, 0x3a3d40, 1);
+        }
+        K.disc("flat", x, y + 0.823, z, 0.34, 16, false, 0x2a2c2f);
+        K.disc("flat", x, y + 0.826, z, 0.08, 8, false, 0x6d7073);
+        const c = { minX: ox + x - hx, maxX: ox + x + hx, minZ: oz + z - hz, maxZ: oz + z + hz, ref: null, y0: gy + y, y1: gy + y + 0.84 };
+        CBZ.colliders.push(c); cols.push(c);
+        return true;
+      };
+      if (!H.crownsRoof && !hvacAt(ixMax - 0.95, izMax - 0.95)) hvacAt(ixMax - 0.95, izMin + 0.95);
+      if (!H.crownsRoof) for (let j = 0; j < 2; j++) {
+        const vx = sEdge + 1.2 + j * 0.9, vz = izMax - 0.35;
+        if (vx > ixMax - 1.6 || crownIn(vx - 0.1, vx + 0.1, vz - 0.1, vz + 0.1, rTop, rTop + 0.6)) continue;
+        K.box("flat", vx, rTop + 0.28, vz, 0.11, 0.56, 0.11, 0x5f6164, 63 & ~8);
+        K.box("flat", vx, rTop + 0.58, vz, 0.16, 0.04, 0.16, 0x4a4c4f);
+      }
+
+      K.flush(H.group, false);
+      return covers;
+    }
+    const PPH_ROOF = 0.7;
 
     function makeBuilding(ox, oz, w, d, storeys, color, gy, style) {
       const bgroup = new THREE.Group();
@@ -2335,10 +3304,14 @@
       // opts.merge → no mesh of its own: it joins the building's merged shell
       // (slabs, treads, parapets: nothing that is a collider's ref or a wall
       // the tsunami tears off)
+      // opts.noVis → the record only (collider / platform); the interior
+      // pass draws that surface itself, as structure + finish + ceiling
       function lbox(lx, ly, lz, bw, bh, bd, col, opts) {
         opts = opts || {};
         let m = null;
-        if (opts.merge && !opts.solid) {
+        if (opts.noVis && !opts.solid) {
+          // nothing drawn here
+        } else if (opts.merge && !opts.solid) {
           shellMerge.push([lx, ly, lz, bw, bh, bd, col, !!opts.los]);
         } else {
           m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), opts.emissive ? mat(col, { emissive: opts.emissive, ei: 0.5 }) : finishMat(col, 0, gy));
@@ -2368,8 +3341,11 @@
          coplanar across the whole room and z-fought, and you stood in a room
          with a grass floor. It is lifted 8 cm clear (a step far under physics
          STEP_UP, so you still walk straight in) and squared out to the full
-         footprint, so no sliver of terrain shows along the wall line either. */
-      lbox(0, -0.27, 0, w, 0.7, d, 0x6c7178, { plat: true, merge: true });
+         footprint, so no sliver of terrain shows along the wall line either.
+         The record is unchanged; what you SEE is a concrete footing 15 mm
+         under the finished floor the interior pass lays on it. */
+      lbox(0, -0.27, 0, w, 0.7, d, 0x6c7178, { plat: true, noVis: true });
+      shellMerge.push([0, (-0.62 + 0.065) / 2, 0, w, 0.685, d, 0x77736b, false]);
 
       const wallOpt = { solid: true, los: true };
       // every shell wall is remembered with the face it stands on, so the
@@ -2399,17 +3375,33 @@
       // floor slabs (levels 1..storeys; the top one is the ROOF). Each slab
       // covers the interior MINUS the open stairwell strip on the -x side.
       const slabW = ixMax - (ixMin + SW), slabCx = (ixMin + SW + ixMax) / 2, slabD = izMax - izMin, slabCz = (izMin + izMax) / 2;
+      // The walk surface (the platform record) is exactly the old slab's; the
+      // VISIBLE slab is the structure between the finished floor (15 mm oak
+      // or tile, laid by the interior pass) and the ceiling board (12 mm).
       for (let L = 1; L <= storeys; L++) {
-        const isRoof = L === storeys;
-        lbox(slabCx, L * FH - 0.1, slabCz, slabW, 0.2, slabD, isRoof ? 0x9fa6ad : 0xb9bec6, { plat: true, los: true, cast: isRoof, merge: true });
+        lbox(slabCx, L * FH - 0.1, slabCz, slabW, 0.2, slabD, 0xb9bec6, { plat: true, noVis: true });
+        shellMerge.push([slabCx, L * FH - 0.1015, slabCz, slabW, 0.173, slabD, 0x8e8a82, true]);
       }
       // a slab over the stairwell strip on the GROUND floor's far side would
-      // block the climb, so we leave the strip open all the way up; the roof
-      // gets a low parapet on three sides so you don't walk straight off.
+      // block the climb, so we leave the strip open all the way up. The roof
+      // edge is a PARAPET all the way round, in the wall's own finish under a
+      // stone coping, and it is solid: it used to be a paint-only box you
+      // walked straight through (and there was none at all on -x). The run
+      // over the stair strip is laid after the facade, because that is where
+      // a stair bulkhead may stand instead (see THE ROOF).
       const rTop = storeys * FH;
-      lbox(slabCx, rTop + 0.35, d / 2 - WT / 2, slabW, 0.7, WT, 0x8b9097, { los: true, merge: true });   // +z parapet
-      lbox(w / 2 - WT / 2, rTop + 0.35, slabCz, WT, 0.7, slabD, 0x8b9097, { los: true, merge: true });    // +x parapet
-      lbox(slabCx, rTop + 0.35, -d / 2 + WT / 2, slabW, 0.7, WT, 0x8b9097, { los: true, merge: true });   // -z parapet
+      const PPH = 0.7, sEdge = ixMin + SW;              // parapet height; the stair strip's +x edge
+      const parapet = function (x0, x1, z0, z1, merge) {
+        const cxp = (x0 + x1) / 2, czp = (z0 + z1) / 2, pw = x1 - x0, pd = z1 - z0;
+        if (pw < 0.05 || pd < 0.05) return;
+        shellMerge.push([cxp, rTop + PPH / 2, czp, pw, PPH, pd, color, true]);
+        shellMerge.push([cxp, rTop + PPH + 0.03, czp, pw + (pw > pd ? 0 : 0.08), 0.06, pd + (pw > pd ? 0.08 : 0), 0xc9c2b4, false]);
+        const c = { minX: ox + x0, maxX: ox + x1, minZ: oz + z0, maxZ: oz + z1, ref: null, y0: gy + rTop, y1: gy + rTop + PPH + 0.06 };
+        CBZ.colliders.push(c); cols.push(c);
+      };
+      parapet(sEdge, w / 2, d / 2 - WT, d / 2);            // +z (over the slab)
+      parapet(w / 2 - WT, w / 2, -d / 2 + WT, d / 2 - WT);  // +x
+      parapet(sEdge, w / 2, -d / 2, -d / 2 + WT);          // -z (over the slab)
 
       // TWO-LANE switchback stairs. The up-flight and the down-flight must
       // never share an (x,z), or groundAt() (highest surface within step
@@ -2424,12 +3416,12 @@
       const LD = 1.1;   // flat landing depth at the top of each flight
       const zA = izMin + 0.3, zB = izMax - 0.3;
       const laneW = SW / 2;
+      const flights = [], landings = [];
       for (let k = 0; k < storeys; k++) {
         const dir = (k % 2 === 0) ? 1 : -1;
         const startZ = dir > 0 ? zA : zB, endZ = dir > 0 ? zB : zA;
         const rampEndZ = endZ - dir * LD;       // ramp stops where the landing starts…
         const lx0 = (k % 2 === 0) ? ixMin : ixMin + laneW;   // this flight's lane
-        const lxc = lx0 + laneW / 2;
         // smooth physics ramp confined to the lane, k·FH (at startZ) → (k+1)·FH
         // (at rampEndZ). It ENDS at the landing's inner edge and meets it at the
         // SAME height, so there's no shelf-edge drop when you step off — that was
@@ -2441,28 +3433,40 @@
           ramp: { z0: oz + startZ, z1: oz + rampEndZ, y0: gy + k * FH, y1: gy + (k + 1) * FH },
         };
         CBZ.platforms.push(ramp); plats.push(ramp);
-        // visible treads riding on the ramp (start → rampEnd)
-        const runLen = Math.abs(rampEndZ - startZ), runDepth = runLen / nSteps, rise = FH / nSteps;
-        for (let i = 1; i <= nSteps; i++) {
-          const vtop = k * FH + (i - 0.5) * rise;
-          const cz2 = startZ + dir * (i - 0.5) * runDepth;
-          lbox(lxc, vtop - 0.13, cz2, laneW - 0.16, 0.26, runDepth + 0.04, 0xa7adb5, { cast: false, merge: true });
-        }
-        // flat landing across BOTH lanes, from the ramp's top edge out to endZ,
-        // at exactly (k+1)·FH — bridges the two lanes and meets the next flight
-        const lzc = (rampEndZ + endZ) / 2;
-        lbox(ixMin + SW / 2, (k + 1) * FH - 0.1, lzc, SW, 0.2, LD + 0.2, 0xb4b9c1, { plat: true, los: true, cast: false, merge: true });
+        // the flight you SEE is drawn by the interior pass (closed steps on a
+        // soffit between stringers, a rail) from this record
+        flights.push({ k: k, dir: dir, lx0: lx0, startZ: startZ, rampEndZ: rampEndZ, endZ: endZ });
+        // flat landing across BOTH lanes, from 10 cm under the ramp's top
+        // edge out to the END WALL, at exactly (k+1)·FH — bridges the two
+        // lanes and meets the next flight. (It used to stop 20 cm short of
+        // the wall, a slot down the full width of the stair you could see,
+        // and stand over, straight to the floor below.)
+        const lz0 = dir > 0 ? rampEndZ - 0.1 : izMin, lz1 = dir > 0 ? izMax : rampEndZ + 0.1;
+        const lzc = (lz0 + lz1) / 2;
+        lbox(ixMin + SW / 2, (k + 1) * FH - 0.1, lzc, SW, 0.2, lz1 - lz0, 0xb4b9c1, { plat: true, noVis: true });
+        shellMerge.push([ixMin + SW / 2, (k + 1) * FH - 0.1015, lzc, SW, 0.173, lz1 - lz0, 0x8e8a82, true]);
+        landings.push({ L: k + 1, x0: ixMin, x1: ixMin + SW, z0: lz0, z1: lz1 });
       }
 
       // THE FACADE. Emitted last so it dresses the finished shell, and into
       // this building's own group so the quake still topples it as one piece.
-      dressIslandFacade({
+      const dressed = dressIslandFacade({
         group: bgroup, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys,
         fh: FH, wt: WT, rTop: rTop, pp: 0.7, doorSide: 0,   // the door is on -z
         color: color, style: style, plats: plats,
         shellMerge: shellMerge, glassList: glassList, doorHalf: DOORW / 2 + 0.35, walls: walls,
       });
       for (const gp of glassList) allGlass.push(gp);
+
+      // THE INSIDE (see THE INSIDE OF A BUILDING), then the shell pieces it
+      // laid on the roof after the facade flushed
+      const covers = houseInterior({
+        group: bgroup, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys, color: color,
+        ixMin: ixMin, ixMax: ixMax, izMin: izMin, izMax: izMax,
+        flights: flights, landings: landings, cols: cols, late: shellMerge, parapet: parapet,
+        holes: dressed.holes, crown: dressed.crown, crownsRoof: dressed.crownsRoof,
+      });
+      flushLateShell(bgroup, shellMerge, gy);
 
       const b = {
         group: bgroup, ox, oz, gy, x: ox, z: oz, w, d, h: storeys * FH, storeys,
@@ -2474,12 +3478,14 @@
         floorTop: gy + 0.08,               // the walkable ground-floor surface, published
                                            // so a probe can assert nothing grows through it
         colliders: cols, platforms: plats, glass: glassList, fallen: false,
-        // THE GROUND-FLOOR PLAN, building-local, for anyone who furnishes it
-        // (systems/quake.js's shelter tables): the room inside the walls and
+        // THE GROUND-FLOOR PLAN, building-local: the room inside the walls and
         // the strips that must stay walkable. The stair strip runs the whole
         // depth of the -x side; the door is on -z, and the walk from the door
         // to the foot of the stairs (zA, the -z end of lane one) runs along
-        // the front wall, so that whole front band stays clear too.
+        // the front wall, so that whole front band stays clear too. The
+        // interior pass furnished it round these; `covers` are the sturdy
+        // tables and desks it put in (WORLD {x, y, z, r}), which
+        // systems/quake.js registers for drop-cover-hold-on.
         interior: {
           kind: "house",
           x0: ixMin, x1: ixMax, z0: izMin, z1: izMax,
@@ -2488,6 +3494,7 @@
             { x0: -DOORW / 2 - 0.7, x1: DOORW / 2 + 0.7, z0: izMin, z1: izMin + 2.4, why: "door" },
             { x0: ixMin, x1: ixMax, z0: izMin, z1: izMin + 1.3, why: "front walk" },
           ],
+          covers: covers,
         },
       };
       fragile.push(b);
@@ -2501,6 +3508,225 @@
     // (high ground for the tsunami). Still one group so the quake topples the
     // whole thing; its walls/floors register as height-gated colliders +
     // walkable platforms (collapse yanks them all). ----
+    /* THE TOWER INTERIOR. T: the tower's numbers (see makeTower). An office
+       tower: a terrazzo lobby, carpet-tile floors, a 600-grid acoustic
+       ceiling with 600x1200 troffers on every storey (from the street at
+       night the tower is lit floor by floor, as towers are), plaster on the
+       shell and on a real lift SHAFT: the car used to ride an open hole in
+       every floor, with nothing between the landing and the drop but air.
+       Now the shaft is walled, with a steel-framed opening facing the front
+       door on every floor. Furnished at the lobby and the first two floors;
+       the floors above are fitted out and empty, to let. */
+    function towerInterior(T) {
+      const ox = T.ox, oz = T.oz, gy = T.gy, w = T.w, d = T.d, storeys = T.storeys;
+      const iw = T.iw, id = T.id, s = T.s, TW = T.TW, realH = storeys * FH, lobbyTop = T.lobbyTop;
+      const hh = function (sl) { return h01g(ox, oz, sl); };
+      const K = inKit(ox, oz);
+      const cols = T.cols, covers = [];
+      const holes = T.holes.slice();
+      holes.push({ s: 0, a0: -T.DW / 2, a1: T.DW / 2, y0: 0, y1: T.DOORH });
+      const paint = [0xe2e0da, 0xd8d9d9, 0xdfdbd1][(hh(0x2a01) * 3) | 0];
+      const carpet = [0xffffff, 0xaeb6bf, 0xc4b9a8, 0x9ba49f][(hh(0x2a02) * 4) | 0];
+      const fyOf = function (k) { return k === 0 ? lobbyTop : k * FH + 0.1; };
+      const ceilOf = function (k) { return (k + 1) * FH - 0.1; };
+      const SWT = 0.15;                                // the shaft wall
+      const so = s + SWT;                              // the shaft's outer half-size
+      const ring = [
+        { x0: -iw, x1: iw, z0: -id, z1: -s }, { x0: -iw, x1: iw, z0: s, z1: id },
+        { x0: -iw, x1: -s, z0: -s, z1: s }, { x0: s, x1: iw, z0: -s, z1: s },
+      ];
+      const dw = Math.min(2 * s - 0.5, 1.6), DH = 2.2;  // the lift's door opening
+      const R = { x0: -iw, x1: iw, z0: -id, z1: id };
+      // what stays clear: a walk round the shaft, the apron in front of its
+      // one door (the shaft only opens to -z now), and in the lobby the walk
+      // from the street door to it
+      const liftZone = { x0: -so - 0.9, x1: so + 0.9, z0: -so - 0.9, z1: so + 0.9 };
+      const apron = { x0: -dw / 2 - 0.7, x1: dw / 2 + 0.7, z0: -so - 1.6, z1: -so };
+      const doorWalk = { x0: -T.DW / 2 - 0.6, x1: T.DW / 2 + 0.6, z0: -id, z1: 0 };
+
+      /* ---- FURNITURE: the lobby's waiting area, desks on floors 1-2 ---- */
+      const tone = { cloth: [0x4d5563, 0x6b7d8a, 0x3f4a44][(hh(0x2a03) * 3) | 0], wood: 0x3a2b1e, frame: 0x2e2620 };
+      {
+        const fy = fyOf(0);
+        const host = furnHost(K, ox, oz, gy, cols, fy, null);
+        const blocks = [liftZone, apron, doorWalk];
+        // a table to wait at (and to get under)
+        const TIERS = [{ len: 1.2, deep: 0.8, seats: 2 }, { len: 0.9, deep: 0.7, seats: 0 }];
+        let done = false;
+        for (const T2 of TIERS) {
+          if (done) break;
+          for (let yi = 0; yi < 2 && !done; yi++) {
+            const hx0 = T2.len / 2 + 0.05, hz0 = T2.deep / 2 + (T2.seats ? 0.7 : 0.05);
+            const hx = (yi ? hz0 : hx0) + 0.3, hz = (yi ? hx0 : hz0) + 0.3;
+            let best = null;
+            for (let x = R.x0 + hx + 0.1; x <= R.x1 - hx - 0.1 + 1e-6; x += 0.2) {
+              for (let z = R.z0 + hz + 0.1; z <= R.z1 - hz - 0.1 + 1e-6; z += 0.2) {
+                const r = { x0: x - hx, x1: x + hx, z0: z - hz, z1: z + hz };
+                if (rectHit(r, blocks)) continue;
+                const sc = Math.abs(x) * 0.2 - z * 0.1;      // off to a side, towards the back
+                if (!best || sc < best.sc) best = { x: x, z: z, r: r, sc: sc, yaw: yi ? Math.PI / 2 : 0 };
+              }
+            }
+            if (best) {
+              furnish("table", host, best.x, fy, best.z, best.yaw, { seats: T2.seats, len: T2.len, deep: T2.deep, tone: tone });
+              blocks.push(best.r);
+              covers.push({ x: ox + best.x, y: gy + fy, z: oz + best.z, r: T2.seats ? 1.0 : 0.75 });
+              done = true;
+            }
+          }
+        }
+        const sofa = placeOnWalls(R, blocks, ["x0", "x1", "z1"], 1.8, 0.87, 0.8, holes, null, 0.5);
+        if (sofa) { furnish("sofa", host, sofa.x, fy, sofa.z, sofa.yaw, { len: 1.8, tone: tone }); blocks.push(sofa.use); }
+      }
+      for (let k = 1; k <= Math.min(2, storeys - 1); k++) {
+        const fy = fyOf(k);
+        const host = furnHost(K, ox, oz, gy, cols, fy, null);
+        const blocks = [liftZone, apron];
+        for (let n = 0; n < 3; n++) {
+          const dk = placeOnWalls(R, blocks, ["x1", "x0", "z1", "z0"], 1.4, 0.7, 1.0, holes, null, n * 0.35 + 0.15);
+          if (!dk) break;
+          furnish("desk", host, dk.x, fy, dk.z, dk.yaw + Math.PI, { len: 1.4, deep: 0.7 });
+          blocks.push(dk.use);
+          covers.push({ x: ox + dk.x, y: gy + fy, z: oz + dk.z, r: 0.75 });
+        }
+      }
+
+      /* ---- CEILING FIXTURES: troffers on a 2.4 m grid, clear of the shaft */
+      const trof = [];
+      const nX = Math.max(1, Math.floor((2 * iw - 1.2) / 2.4)), nZ = Math.max(1, Math.floor((2 * id - 1.2) / 2.4));
+      for (let i = 0; i <= nX; i++) for (let j = 0; j <= nZ; j++) {
+        const x = -nX * 1.2 + i * 2.4, z = -nZ * 1.2 + j * 2.4;
+        if (Math.abs(x) > iw - 0.7 || Math.abs(z) > id - 0.5) continue;
+        if (Math.abs(x) < so + 0.75 && Math.abs(z) < so + 0.45) continue;
+        trof.push([x, z]);
+      }
+      for (let k = 0; k < storeys; k++) {
+        const yc = ceilOf(k);
+        for (const t of trof) {
+          K.box("flat", t[0], yc - 0.015, t[1], 1.26, 0.03, 0.66, 0xd6d8d6, 63 & ~4);
+          K.quad("glow", [t[0] - 0.6, yc - 0.037, t[1] - 0.3], [t[0] + 0.6, yc - 0.037, t[1] - 0.3], [t[0] + 0.6, yc - 0.037, t[1] + 0.3], [t[0] - 0.6, yc - 0.037, t[1] + 0.3], [0, -1, 0], 0xf1f3f0);
+          K.light(t[0], yc, t[1], 3.0, 0.16);
+        }
+      }
+
+      /* ---- FLOORS AND CEILINGS ------------------------------------------ */
+      for (let k = 0; k <= storeys; k++) {
+        const roof = k === storeys, y = roof ? realH + 0.1 : fyOf(k);
+        const key = k === 0 ? "terrazzo" : roof ? "concrete" : "carpet";
+        const tint = k === 0 ? 0xffffff : roof ? 0x9a978f : carpet;
+        const lit = roof ? null : K.floorLit(y);
+        for (const r of ring) K.plane(key, r.x0, r.z0, r.x1, r.z1, y, tint, false, lit, null, 2.4);
+        if (k > 0) {
+          const yc = k * FH - 0.1, cl = K.ceilLit(yc);
+          for (const r of ring) K.plane("ceiling", r.x0, r.z0, r.x1, r.z1, yc, 0xffffff, true, cl, null, 2.4);
+        }
+      }
+      // the lobby's threshold across the doorway (its walk record is makeTower's)
+      K.box("flat", 0, lobbyTop - 0.02, -d / 2 + TW / 2, T.DW, 0.04, TW + 0.02, 0x8f8a80, 4 | 16 | 32);
+
+      /* ---- WALLS -------------------------------------------------------- */
+      const faces = [
+        { s: 0, n: -d / 2 + TW, inward: 1, a0: -iw, a1: iw },
+        { s: 1, n: d / 2 - TW, inward: -1, a0: -iw, a1: iw },
+        { s: 2, n: -w / 2 + TW, inward: 1, a0: -id, a1: id },
+        { s: 3, n: w / 2 - TW, inward: -1, a0: -id, a1: id },
+      ];
+      for (let k = 0; k < storeys; k++) {
+        const y0 = k === 0 ? lobbyTop : k * FH - 0.1, y1 = ceilOf(k);
+        for (const f of faces)
+          skinFace(K, { s: f.s, n: f.n, inward: f.inward, a0: f.a0, a1: f.a1, y0: y0, y1: y1, floor: fyOf(k), glassN: null }, holes, paint, 0x6e6a64);
+      }
+      doorTrim(K, T.DW / 2, -d / 2, -d / 2 + TW, lobbyTop, T.DOORH, 0x6e6a64, 0x8f8a80);
+
+      /* ---- THE LIFT SHAFT ----------------------------------------------- */
+      const sy0 = lobbyTop, sy1 = realH - 0.1, syc = (sy0 + sy1) / 2, syh = sy1 - sy0;
+      const shaftCol = function (x0, x1, z0, z1) {
+        const c = { minX: ox + x0, maxX: ox + x1, minZ: oz + z0, maxZ: oz + z1, ref: null, y0: gy + sy0, y1: gy + sy1 };
+        CBZ.colliders.push(c); cols.push(c);
+      };
+      K.box("plaster", s + SWT / 2, syc, 0, SWT, syh, 2 * so, paint, 1 | 2 | 16 | 32);
+      K.box("plaster", -s - SWT / 2, syc, 0, SWT, syh, 2 * so, paint, 1 | 2 | 16 | 32);
+      K.box("plaster", 0, syc, s + SWT / 2, 2 * s, syh, SWT, paint, 16 | 32);
+      shaftCol(s, so, -so, so); shaftCol(-so, -s, -so, so); shaftCol(-s, s, s, so);
+      // the front: full-height piers either side of the openings, a head over each
+      const px = (s + dw / 2) / 2, pw = s - dw / 2;
+      K.box("plaster", -px, syc, -s - SWT / 2, pw, syh, SWT, paint, 1 | 2 | 16 | 32);
+      K.box("plaster", px, syc, -s - SWT / 2, pw, syh, SWT, paint, 1 | 2 | 16 | 32);
+      shaftCol(-s, -dw / 2, -so, -s); shaftCol(dw / 2, s, -so, -s);
+      for (let k = 0; k < storeys; k++) {
+        const fy = fyOf(k), top = Math.min(fy + DH, k + 1 < storeys ? fyOf(k + 1) - 0.2 : sy1);
+        const hy1 = k + 1 < storeys ? fyOf(k + 1) : sy1;
+        K.box("plaster", 0, (top + hy1) / 2, -s - SWT / 2, dw, hy1 - top, SWT, paint, 8 | 16 | 32);
+        // a brushed-steel frame and sill round the opening, and the call button
+        const zf = -so - 0.012;
+        K.box("flat", -dw / 2 - 0.04, (fy + top + 0.06) / 2, zf, 0.08, top + 0.06 - fy, 0.024, 0x9ea3a8, 63 & ~16);
+        K.box("flat", dw / 2 + 0.04, (fy + top + 0.06) / 2, zf, 0.08, top + 0.06 - fy, 0.024, 0x9ea3a8, 63 & ~16);
+        K.box("flat", 0, top + 0.03, zf, dw + 0.16, 0.06, 0.024, 0x9ea3a8, 63 & ~16);
+        K.box("flat", 0, fy + 0.003, -s - SWT / 2, dw, 0.006, SWT + 0.02, 0x8b9095, 4 | 16 | 32);
+        K.box("flat", -dw / 2 - 0.26, fy + 1.1, -so - 0.008, 0.08, 0.16, 0.016, 0x7c8186, 63 & ~16);
+        K.box("glow", -dw / 2 - 0.26, fy + 1.12, -so - 0.019, 0.03, 0.03, 0.006, 0xf4f1e6, 63 & ~16);
+      }
+
+      /* ---- THE ROOF: plant clear of the shaft and of any crown ---------- */
+      if (T.plant) {
+        const P = T.plant, y = realH + 0.1;
+        K.box("flat", P.x, y + 0.05, P.z, P.w + 0.1, 0.1, P.d + 0.1, 0x55585c, 63 & ~8);
+        K.box("flat", P.x, y + 0.66, P.z, P.w, 1.12, P.d, 0xb4b6b3, 63 & ~8);
+        for (let j = 0; j < 7; j++) {
+          const yy = y + 0.25 + j * 0.12;
+          K.box("flat", P.x, yy, P.z - P.d / 2 - 0.003, P.w - 0.1, 0.02, 0.006, 0x3a3d40, 32);
+          K.box("flat", P.x, yy, P.z + P.d / 2 + 0.003, P.w - 0.1, 0.02, 0.006, 0x3a3d40, 16);
+        }
+        const nf = Math.max(1, Math.floor(P.w / 1.1));
+        for (let i = 0; i < nf; i++) {
+          const fx = P.x - P.w / 2 + (i + 0.5) * P.w / nf;
+          K.disc("flat", fx, y + 1.223, P.z, Math.min(0.42, P.d * 0.38), 16, false, 0x2a2c2f);
+          K.disc("flat", fx, y + 1.226, P.z, 0.09, 8, false, 0x6d7073);
+        }
+        const c = { minX: ox + P.x - P.w / 2, maxX: ox + P.x + P.w / 2, minZ: oz + P.z - P.d / 2, maxZ: oz + P.z + P.d / 2, ref: null, y0: gy + y, y1: gy + y + 1.22 };
+        CBZ.colliders.push(c); cols.push(c);
+      }
+      K.flush(T.group, false);
+      return covers;
+    }
+
+    /* THE LIFT CAR. It was a dark slab with four posts: a thing you stood on
+       to be carried up an open hole. Now it is a car: a floor with a steel
+       sill, brushed-steel walls on three sides in panels, a handrail, a dark
+       ceiling with a lit panel in it, open on the side that faces the shaft's
+       door openings. Its origin is the old slab's (the deck at +0.1). Kept
+       under the headhouse roof: the car stands 2.24 m over its origin, and
+       the crown's hollow is 2.6 m over the top stop. */
+    function liftCar(s) {
+      const g2 = new THREE.Group();
+      const K = inKit(0, 0);
+      const cs = s - 0.05, CH = 2.2;
+      K.box("flat", 0, 0, 0, 2 * cs, 0.2, 2 * cs, 0x3b3f44);
+      K.box("flat", 0, 0.103, -cs + 0.06, 2 * cs - 0.1, 0.006, 0.1, 0xa8adb2, 4 | 32);
+      for (let sd = -1; sd <= 1; sd += 2) {
+        // side walls in three panels, alternating a touch in tone
+        for (let p = 0; p < 3; p++) {
+          const z0 = -cs + p * (2 * cs / 3), z1 = z0 + 2 * cs / 3;
+          K.box("flat", sd * (cs - 0.015), 0.1 + CH / 2, (z0 + z1) / 2, 0.03, CH, 2 * cs / 3 - 0.006, p === 1 ? 0xa5a9ad : 0xaeb2b6);
+        }
+        K.box("flat", sd * (cs - 0.075), 1.0, 0, 0.04, 0.045, 2 * cs - 0.4, 0xc9ccce);
+        for (const bz of [-cs + 0.35, cs - 0.35]) K.box("flat", sd * (cs - 0.05), 1.0, bz, 0.05, 0.03, 0.03, 0xc9ccce);
+      }
+      for (let p = 0; p < 3; p++) {
+        const x0 = -cs + p * (2 * cs / 3), x1 = x0 + 2 * cs / 3;
+        K.box("flat", (x0 + x1) / 2, 0.1 + CH / 2, cs - 0.015, 2 * cs / 3 - 0.006, CH, 0.03, p === 1 ? 0xa5a9ad : 0xaeb2b6);
+      }
+      K.box("flat", 0, 1.0, cs - 0.075, 2 * cs - 0.4, 0.045, 0.04, 0xc9ccce);
+      K.box("flat", 0, 0.1 + CH + 0.02, 0, 2 * cs, 0.04, 2 * cs, 0x2e3136);
+      K.quad("glow", [-cs + 0.35, 0.1 + CH - 0.002, -cs + 0.35], [cs - 0.35, 0.1 + CH - 0.002, -cs + 0.35],
+        [cs - 0.35, 0.1 + CH - 0.002, cs - 0.35], [-cs + 0.35, 0.1 + CH - 0.002, cs - 0.35], [0, -1, 0], 0xeef1f3);
+      // the front fascia over the opening
+      K.box("flat", 0, 0.1 + CH - 0.06, -cs + 0.015, 2 * cs, 0.12, 0.03, 0x9ea3a8);
+      K.flush(g2, false);
+      g2.name = "island-lift-car";
+      return g2;
+    }
+
     function makeTower(ox, oz, w, d, h, color, style) {
       const gy = groundHeightAt(ox, oz);
       const g = new THREE.Group();
@@ -2517,10 +3743,13 @@
 
       // local box → mesh on the group; world-space collider/platform records.
       // opts.merge → joins the tower's merged shell instead of being a mesh
+      // opts.noVis → the record only; the interior pass draws that surface
       function tbox(lx, ly, lz, bw, bh, bd, col, opts) {
         opts = opts || {};
         let m = null;
-        if (opts.merge && !opts.solid) {
+        if (opts.noVis && !opts.solid) {
+          // nothing drawn here
+        } else if (opts.merge && !opts.solid) {
           shellMerge.push([lx, ly, lz, bw, bh, bd, col, !!opts.los]);
         } else {
           m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), opts.emissive ? mat(col, { emissive: opts.emissive, ei: opts.ei || 0.4 }) : finishMat(col, 0, gy));
@@ -2558,15 +3787,33 @@
       wallT(0, 0, (DOORH + realH) / 2, fz, DW, realH - DOORH, TW);   // lintel above the doorway
 
       // ---- per-floor landings + roof: a slab frame around the central shaft ----
+      // (the walk records exactly as before; the visible slab is structure
+      // between the carpet over it and the ceiling under it, see
+      // towerInterior)
+      const ringRects = [
+        [0, -(id + s) / 2, 2 * iw, id - s], [0, (id + s) / 2, 2 * iw, id - s],
+        [-(iw + s) / 2, 0, iw - s, 2 * s], [(iw + s) / 2, 0, iw - s, 2 * s],
+      ];
       function landing(ly) {
-        const zN = -(id + s) / 2, zS = (id + s) / 2, wN = id - s;
-        tbox(0, ly, zN, 2 * iw, 0.2, wN, 0xb4b9c1, { plat: true, los: true, cast: false, merge: true });
-        tbox(0, ly, zS, 2 * iw, 0.2, wN, 0xb4b9c1, { plat: true, los: true, cast: false, merge: true });
-        tbox(-(iw + s) / 2, ly, 0, iw - s, 0.2, 2 * s, 0xb4b9c1, { plat: true, cast: false, merge: true });
-        tbox((iw + s) / 2, ly, 0, iw - s, 0.2, 2 * s, 0xb4b9c1, { plat: true, cast: false, merge: true });
+        for (const r of ringRects) {
+          tbox(r[0], ly, r[1], r[2], 0.2, r[3], 0xb4b9c1, { plat: true, noVis: true });
+          shellMerge.push([r[0], ly - 0.0015, r[1], r[2], 0.173, r[3], IN_STRUCT, true]);
+        }
       }
       for (let k = 1; k < storeys; k++) landing(k * FH);
       landing(realH);                                   // roof (with the same shaft opening)
+      /* THE LOBBY FLOOR. The ground floor of every tower was the island's
+         grass: no slab at all, the lobby carpeted in turf, and on a lot that
+         rises across the footprint the grass came up through the room. Now a
+         slab like a house's foundation, round the shaft, its top clear of the
+         highest ground under the footprint, and a sill across the doorway. */
+      const terT = footprintTerrain(ox, oz, w, d);
+      const lobbyTop = Math.max(0.08, +(terT.max - gy + 0.05).toFixed(3));
+      for (const r of ringRects) {
+        tbox(r[0], (lobbyTop - 0.6) / 2, r[1], r[2], lobbyTop + 0.6, r[3], 0x77736b, { plat: true, noVis: true });
+        shellMerge.push([r[0], (lobbyTop - 0.015 - 0.6) / 2, r[1], r[2], lobbyTop - 0.015 + 0.6, r[3], 0x77736b, false]);
+      }
+      tbox(0, (lobbyTop - 0.3) / 2, -d / 2 + TW / 2, DW, lobbyTop + 0.3, TW, 0x8f8a80, { plat: true, noVis: true });
 
       // THE FACADE: the tower grammars (bundled tube, braced tube, setback
       // ziggurat, radiator crown ...) declare minStoreys in the range these
@@ -2640,47 +3887,38 @@
         for (let cz2 = -1; cz2 <= 1; cz2 += 2) for (let cx2 = -1; cx2 <= 1; cx2 += 2)
           tbox(cx2 * (s + 0.08), topY + 0.1 + (lift.head - 0.38) / 2, cz2 * (s + 0.08), 0.16, lift.head - 0.38, 0.16, 0x5a626d, { merge: true });
       }
-      // rooftop plant box, only on a roof nobody built a crown on, and clear of
-      // the shaft AND of the apron you step out onto
+      // rooftop plant, only on a roof nobody built a crown on, and clear of
+      // the shaft AND of the apron you step out onto. It was a bare grey box;
+      // it is a condenser bank now (towerInterior draws it) and it is solid.
+      let plant = null;
       if (!(lift && (lift.raised || lift.headhouse))) {
         const pz0 = s + 1.4, pz1 = id - 0.2;
         if (pz1 - pz0 > 0.8) {
-          const capm = new THREE.Mesh(new THREE.BoxGeometry(iw * 0.7, 1.2, pz1 - pz0), finishMat(0x8b9097, 0, gy));
-          capm.position.set(0, realH + 0.7, (pz0 + pz1) / 2); capm.castShadow = true; g.add(capm);
+          const P = { x: 0, z: (pz0 + pz1) / 2, w: iw * 0.7, d: Math.min(1.6, pz1 - pz0) };
+          const hit = (dressedT.crown || []).some(function (c) {
+            return c[1] > P.x - P.w / 2 && c[0] < P.x + P.w / 2 && c[5] > P.z - P.d / 2 && c[4] < P.z + P.d / 2 && c[3] > realH + 0.8 && c[2] < realH + 1.4;
+          });
+          if (!hit) plant = P;
         }
       }
+      // THE INSIDE (see THE TOWER INTERIOR)
+      const towerCovers = towerInterior({
+        group: g, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys, iw: iw, id: id, s: s, TW: TW,
+        DW: DW, DOORH: DOORH, lobbyTop: lobbyTop, cols: cols, holes: dressedT.holes, plant: plant,
+      });
       // the deck, rail and headhouse are shell pieces queued AFTER the facade
       // pass flushed the rest: one more merged mesh per colour for them
-      {
-        const late = new Map();
-        for (const it of shellMerge) {
-          if (it.length !== 8) continue;              // already flushed with the facade
-          const k = it[6] + (it[7] ? "|los" : "");
-          let bk = late.get(k);
-          if (!bk) { bk = { col: it[6], los: it[7], geos: [] }; late.set(k, bk); }
-          const g2 = new THREE.BoxGeometry(it[3], it[4], it[5]);
-          g2.deleteAttribute("uv");
-          g2.translate(it[0], it[1], it[2]);
-          bk.geos.push(g2);
-        }
-        const BGU = THREE.BufferGeometryUtils;
-        late.forEach(function (bk) {
-          const geo = bk.geos.length > 1 && BGU ? BGU.mergeBufferGeometries(bk.geos) : bk.geos[0];
-          if (geo !== bk.geos[0]) for (const g2 of bk.geos) g2.dispose();
-          const m = new THREE.Mesh(geo, finishMat(bk.col, 0, gy));
-          m.castShadow = true; m.receiveShadow = true;
-          g.add(m);
-          if (bk.los) CBZ.losBlockers.push(m);
-        });
-      }
+      flushLateShell(g, shellMerge, gy);
 
       // h stays the SHELL's height (the collapse proxy and the ash roofs are
       // built off h / storeys); the lift's top stop is published beside it
       const b = { group: g, ox, oz, gy, x: ox, z: oz, w, d, h: realH, liftTop: topY, storeys,
         facadeStyle: style || null, color: color,   // see makeBuilding: the collapse proxy is built from it
+        floorTop: gy + lobbyTop,                    // the lobby's walk surface (see THE LOBBY FLOOR)
         colliders: cols, platforms: plats, glass: glassT, fallen: false,
         // THE GROUND-FLOOR PLAN (see makeBuilding): the lift shaft and the
-        // apron you board it from, and the walk from the door to it
+        // apron you board it from, and the walk from the door to it; covers:
+        // the tables and desks the interior pass put in (world {x, y, z, r})
         interior: {
           kind: "tower",
           x0: -iw, x1: iw, z0: -id, z1: id,
@@ -2688,17 +3926,16 @@
             { x0: -s - 1.4, x1: s + 1.4, z0: -s - 1.4, z1: s + 1.4, why: "lift" },
             { x0: -DW / 2 - 0.6, x1: DW / 2 + 0.6, z0: -id, z1: 0, why: "door to lift" },
           ],
+          covers: towerCovers,
         },
       };
       fragile.push(b);
 
-      // ---- the elevator car: a slab that rides the central shaft ----
-      const carMesh = new THREE.Mesh(new THREE.BoxGeometry(2 * s - 0.1, 0.2, 2 * s - 0.1), mat(0x3a4150, { emissive: 0x10141c, ei: 0.5 }));
-      carMesh.position.set(0, 0.12, 0); carMesh.castShadow = true; g.add(carMesh);
-      for (let cz2 = -1; cz2 <= 1; cz2 += 2) for (let cx2 = -1; cx2 <= 1; cx2 += 2) {  // corner posts
-        const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.6, 0.12), mat(0x5a626d));
-        post.position.set(cx2 * (s - 0.12), 0.9, cz2 * (s - 0.12)); carMesh.add(post);
-      }
+      // ---- the elevator car (see THE LIFT CAR), riding the walled shaft ----
+      // Its ground stop sets the deck flush with the lobby floor.
+      const stop0 = lobbyTop - 0.1;
+      const carMesh = liftCar(s);
+      carMesh.position.set(0, stop0, 0); g.add(carMesh);
       // The car's deck is a MOVING PLATFORM (systems/platforms_moving.js): the
       // rig ticks at 9.5, before the player (10), and carries riders properly.
       // `yaw:false`: this is a pure vertical lift. The parent is the FUNCTION
@@ -2710,19 +3947,19 @@
           o.x = ox; o.y = gy + carMesh.position.y; o.z = oz; o.yaw = 0; return o;
         }, carSpec);
       } else {
-        carPlat = { minX: ox - s + 0.05, maxX: ox + s - 0.05, minZ: oz - s + 0.05, maxZ: oz + s - 0.05, top: gy + 0.22 };
+        carPlat = { minX: ox - s + 0.05, maxX: ox + s - 0.05, minZ: oz - s + 0.05, maxZ: oz + s - 0.05, top: gy + stop0 + 0.1 };
         CBZ.platforms.push(carPlat); plats.push(carPlat);
       }
       /* THE STOPS: the ground, EVERY floor, the shell roof (unless the crown
          fills it), and the top of the crown. Car mesh y per stop; its deck
          (slabTop 0.1 above) arrives level with each landing's walk surface. */
-      const stops = [0.12];
+      const stops = [stop0];
       for (let k = 1; k < storeys; k++) stops.push(k * FH);
       if (!(lift && lift.roofBuried)) stops.push(realH);
       if (topY > realH + 0.3) stops.push(topY);
       rng();                     // was the car's start phase: keeps the island's rng stream (and so its town plan) where it was
       elevators.push({ b, mesh: carMesh, plat: carPlat, rig: carRig, gy, ox, oz, s, stops,
-        y: 0.12, v: 0, dir: 1, at: 0, target: -1, dwell: 1.5, idle: 0, slabTop: 0.1 });
+        y: stop0, v: 0, dir: 1, at: 0, target: -1, dwell: 1.5, idle: 0, slabTop: 0.1 });
 
       return b;
     }
@@ -2836,35 +4073,64 @@
       CBZ.survRoadStats = roadNet.stats;
     }
 
-    /* ---- CARS: a real car silhouette in ONE draw ---------------------------
-       They were a grey box on a grey box on four cylinders — six meshes, six
-       draw calls, and it read as exactly that. Now each car is ONE merged
-       geometry: a bevelled side-profile body (bumpers, sloped bonnet, boot),
-       a glass greenhouse under a painted roof, four tyres with pale hubs,
-       head- and tail-lamps — colour baked per vertex, one shared glossy
-       material for the whole fleet. Geometry is cached per (shape, paint),
-       so the fleet is a handful of buffers. The record the tsunami flings
-       (group/x/z/oy/rotY/collider) is unchanged; the collider's ref is the
-       body mesh as before. */
-    const CAR_COLORS = [0xe24b4b, 0x3c6fd6, 0xf2c43d, 0x4caf6e, 0xe8e8ee, 0x2a2d33, 0xe88a3c];
-    const carMat = new THREE.MeshPhongMaterial({ color: 0xffffff, vertexColors: true, shininess: 48, specular: 0x2a2a2a });
+    /* ---- CARS: a real car in ONE draw ---------------------------------------
+       Each car is ONE merged geometry with colour per vertex and one shared
+       glossy material for the fleet, cached per (shape, paint). What it used
+       to get wrong, and now does not:
+         - the body was a slab down to 0.34 m with the tyres buried in it: no
+           wheel arches, so it read as a box on rollers. The side profile now
+           has real arches cut round each wheel, with a dark wheel tub behind
+           so you cannot see through the car under them;
+         - the tyres were closed black cylinders with a pale cylinder poking
+           OUT of them. Now: an open tread, black sidewalls, and a silver rim
+           set IN the tyre, the way a wheel looks;
+         - paint was the hex read as LINEAR and darkened, which on this sRGB
+           pipeline made every car pastel (a red car photographed pink). The
+           paint is now the hex decoded to linear, so a red car is red, and
+           the fleet is the colours cars actually are (mostly white, silver,
+           grey and black, a few blues and reds);
+         - no grille, plates, mirrors or pillars: added (one box each);
+         - wheels sat 4 cm INSIDE the asphalt (roads are laid 4 cm proud of the
+           plain): the car now stands on the road surface.
+       The record the tsunami flings (group/x/z/oy/rotY/collider) is unchanged;
+       the collider's ref is the body mesh as before. */
+    const CAR_COLORS = [0xe7e7e3, 0xb9bdc2, 0x17191c, 0x5d6268, 0xe7e7e3, 0x9aa0a6, 0x1d3150, 0x7e1616, 0xb5a585, 0x2a3f34];
+    const carMat = new THREE.MeshPhongMaterial({ color: 0xffffff, vertexColors: true, shininess: 60, specular: 0x3a3a3a });
     carMat.name = "survival-car";
     const carGeos = new Map();
     const CAR_SHAPES = [
-      // side profile (length axis, height) + greenhouse profile
+      // side profile (length axis, height) + greenhouse profile. Profile +x is
+      // the FRONT (it ends up at -z after profileGeo's rotation).
       { body: [[-2.1, 0.34], [2.1, 0.34], [2.13, 0.72], [1.95, 0.93], [0.78, 1.03], [-1.55, 1.05], [-2.06, 0.98], [-2.13, 0.62]],
-        cab: [[0.80, 1.0], [0.02, 1.62], [-1.02, 1.62], [-1.58, 1.0]] },                         // saloon
+        cab: [[0.80, 1.0], [0.02, 1.62], [-1.02, 1.62], [-1.58, 1.0]], wb: 1.35 },                  // saloon
       { body: [[-2.0, 0.36], [2.05, 0.36], [2.08, 0.74], [1.9, 0.95], [0.9, 1.05], [-1.95, 1.07], [-2.05, 0.98], [-2.08, 0.62]],
-        cab: [[0.92, 1.02], [0.12, 1.66], [-1.72, 1.68], [-1.96, 1.02]] },                        // hatchback
+        cab: [[0.92, 1.02], [0.12, 1.66], [-1.72, 1.68], [-1.96, 1.02]], wb: 1.3 },                  // hatchback
       { body: [[-2.15, 0.40], [2.15, 0.40], [2.17, 0.82], [2.0, 1.04], [0.95, 1.12], [-2.12, 1.12], [-2.17, 1.04], [-2.19, 0.66]],
-        cab: [[0.97, 1.08], [0.35, 1.78], [-0.75, 1.78], [-0.95, 1.08]] },                       // pickup
+        cab: [[0.97, 1.08], [0.35, 1.78], [-0.75, 1.78], [-0.95, 1.08]], wb: 1.45 },                 // pickup
     ];
+    const WHEEL_R = 0.37, ARCH_R = 0.45;
     function tintGeo(g, r, gg, b) {
       const n = g.attributes.position.count, c = new Float32Array(n * 3);
       for (let i = 0; i < n; i++) { c[i * 3] = r; c[i * 3 + 1] = gg; c[i * 3 + 2] = b; }
       g.setAttribute("color", new THREE.BufferAttribute(c, 3));
       if (!g.attributes.uv) g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(n * 2), 2));
       return g;
+    }
+    // the body's side profile with a wheel arch cut round each axle
+    function archedBody(pts, wb) {
+      const out = [pts[0]];
+      const y0 = pts[0][1], dy = Math.max(0, WHEEL_R - y0);
+      const half = Math.sqrt(Math.max(0, ARCH_R * ARCH_R - dy * dy));
+      for (const c of [-wb, wb]) {                 // rear axle first: the edge runs rear -> front
+        out.push([c - half, y0]);
+        for (let k = 0; k <= 8; k++) {
+          const a = Math.PI - (k / 8) * Math.PI;
+          out.push([c + Math.cos(a) * ARCH_R, WHEEL_R + Math.sin(a) * ARCH_R]);
+        }
+        out.push([c + half, y0]);
+      }
+      for (let i = 1; i < pts.length; i++) out.push(pts[i]);
+      return out;
     }
     function profileGeo(pts, width, bevel) {
       const sh = new THREE.Shape();
@@ -2876,53 +4142,79 @@
       g.rotateY(Math.PI / 2);                    // profile x -> car length (z)
       return g.index ? g.toNonIndexed() : g;
     }
+    function boxAt(w, h, d, x, y, z, rgb) {
+      const b = new THREE.BoxGeometry(w, h, d).toNonIndexed();
+      b.translate(x, y, z);
+      return tintGeo(b, rgb[0], rgb[1], rgb[2]);
+    }
     function carGeo(shapeIdx, paintHex) {
       const key = shapeIdx + "|" + paintHex;
       if (carGeos.has(key)) return carGeos.get(key);
       const S = CAR_SHAPES[shapeIdx];
-      const pc = new THREE.Color(paintHex).multiplyScalar(0.62);
+      // the hex is an sRGB swatch: decode it, then a touch under for the clear coat
+      const pc = new THREE.Color(paintHex).convertSRGBToLinear().multiplyScalar(0.9);
+      const P = [pc.r, pc.g, pc.b];
+      const GLASS = [0.028, 0.036, 0.046], BLACK = [0.02, 0.02, 0.022], TYRE = [0.022, 0.022, 0.024];
+      const RIM = [0.42, 0.43, 0.45], TRIM = [0.03, 0.03, 0.032];
       const parts = [];
-      parts.push(tintGeo(profileGeo(S.body, 1.92, 0.1), pc.r, pc.g, pc.b));
-      parts.push(tintGeo(profileGeo(S.cab, 1.62, 0.07), 0.035, 0.045, 0.055));
-      // painted roof over the greenhouse
+      parts.push(tintGeo(profileGeo(archedBody(S.body, S.wb), 1.92, 0.1), P[0], P[1], P[2]));
+      parts.push(tintGeo(profileGeo(S.cab, 1.62, 0.07), GLASS[0], GLASS[1], GLASS[2]));
+      // wheel tub / floor pan: what you see behind the tyre through the arch
+      const bodyLen = Math.abs(S.body[1][0] - S.body[0][0]);
+      parts.push(boxAt(1.4, 0.5, bodyLen - 0.3, 0, S.body[0][1] + 0.3, 0, BLACK));
+      // painted roof over the greenhouse, and B-pillars down its sides
       const roofY = S.cab[1][1], rz0 = S.cab[1][0], rz1 = S.cab[2][0];
-      const roof = new THREE.BoxGeometry(1.58, 0.07, Math.abs(rz0 - rz1) + 0.1).toNonIndexed();
-      roof.translate(0, roofY + 0.02, -(rz0 + rz1) / 2);
-      parts.push(tintGeo(roof, pc.r, pc.g, pc.b));
-      // tyres + hubs
-      const wz = shapeIdx === 2 ? 1.45 : 1.35;
+      parts.push(boxAt(1.58, 0.07, Math.abs(rz0 - rz1) + 0.1, 0, roofY + 0.02, -(rz0 + rz1) / 2, P));
+      const bz = -(S.cab[0][0] + S.cab[3][0]) / 2 + (shapeIdx === 2 ? 0.2 : 0.05);
+      for (const s of [-1, 1]) parts.push(boxAt(0.02, roofY - S.cab[0][1], 0.11, s * 0.815, (roofY + S.cab[0][1]) / 2, bz, P));
+      // tyres: open tread, black sidewalls, a silver rim set into the tyre
+      const wz = S.wb;
       [[0.86, wz], [-0.86, wz], [0.86, -wz], [-0.86, -wz]].forEach(function (w) {
-        const t = new THREE.CylinderGeometry(0.37, 0.37, 0.28, 14).toNonIndexed();
-        t.rotateZ(Math.PI / 2); t.translate(w[0], 0.37, w[1]);
-        parts.push(tintGeo(t, 0.018, 0.018, 0.02));
-        const h = new THREE.CylinderGeometry(0.2, 0.2, 0.3, 10).toNonIndexed();
-        h.rotateZ(Math.PI / 2); h.translate(w[0] * 1.005, 0.37, w[1]);
-        parts.push(tintGeo(h, 0.35, 0.36, 0.38));
+        const t = new THREE.CylinderGeometry(WHEEL_R, WHEEL_R, 0.26, 18, 1, true).toNonIndexed();
+        t.rotateZ(Math.PI / 2); t.translate(w[0], WHEEL_R, w[1]);
+        parts.push(tintGeo(t, TYRE[0], TYRE[1], TYRE[2]));
+        for (const s of [-1, 1]) {
+          const ring = new THREE.RingGeometry(0.23, WHEEL_R, 18, 1).toNonIndexed();
+          ring.rotateY(s * Math.PI / 2); ring.translate(w[0] + s * 0.13, WHEEL_R, w[1]);
+          parts.push(tintGeo(ring, TYRE[0] * 1.3, TYRE[1] * 1.3, TYRE[2] * 1.3));
+        }
+        const h = new THREE.CylinderGeometry(0.23, 0.23, 0.22, 14).toNonIndexed();
+        h.rotateZ(Math.PI / 2); h.translate(w[0], WHEEL_R, w[1]);
+        parts.push(tintGeo(h, RIM[0], RIM[1], RIM[2]));
+        const hub = new THREE.CylinderGeometry(0.07, 0.07, 0.235, 8).toNonIndexed();
+        hub.rotateZ(Math.PI / 2); hub.translate(w[0], WHEEL_R, w[1]);
+        parts.push(tintGeo(hub, TRIM[0], TRIM[1], TRIM[2]));
       });
-      // lamps: front is -z after the profile rotation
-      const fz = -S.body[1][0] - 0.02, rzb = -S.body[0][0] + 0.02, ly = 0.78;
+      // lamps, grille, plates: front is -z after the profile rotation
+      const fz = -S.body[2][0] - 0.01, rzb = -S.body[7][0] + 0.01, ly = 0.78;
       [[0.62, fz, 0.9, 0.88, 0.75], [-0.62, fz, 0.9, 0.88, 0.75], [0.66, rzb, 0.45, 0.02, 0.02], [-0.66, rzb, 0.45, 0.02, 0.02]].forEach(function (l) {
-        const b = new THREE.BoxGeometry(0.42, 0.13, 0.06).toNonIndexed();
-        b.translate(l[0], ly, l[1]);
-        parts.push(tintGeo(b, l[2], l[3], l[4]));
+        parts.push(boxAt(0.42, 0.13, 0.06, l[0], ly, l[1], [l[2], l[3], l[4]]));
       });
+      parts.push(boxAt(0.72, 0.16, 0.05, 0, ly - 0.02, fz, TRIM));                       // grille
+      parts.push(boxAt(0.5, 0.11, 0.03, 0, S.body[0][1] + 0.18, fz - 0.02, [0.62, 0.62, 0.58]));   // plates
+      parts.push(boxAt(0.5, 0.11, 0.03, 0, S.body[0][1] + 0.26, rzb + 0.02, [0.62, 0.6, 0.35]));
+      // mirrors at the foot of the A-pillars
+      const mz = -S.cab[0][0] + 0.12;
+      for (const s of [-1, 1]) parts.push(boxAt(0.14, 0.1, 0.16, s * 1.02, S.cab[0][1] + 0.06, mz, P));
       // dark bumper/sill band
-      const sill = new THREE.BoxGeometry(1.96, 0.16, Math.abs(S.body[1][0] - S.body[0][0]) + 0.1).toNonIndexed();
-      sill.translate(0, S.body[0][1] + 0.06, 0);
-      parts.push(tintGeo(sill, 0.03, 0.03, 0.032));
+      parts.push(boxAt(1.96, 0.16, bodyLen + 0.1, 0, S.body[0][1] + 0.06, 0, TRIM));
       const g = THREE.BufferGeometryUtils.mergeBufferGeometries(parts, false);
       g.computeBoundingSphere();
       parts.forEach(function (p) { p.dispose(); });
       carGeos.set(key, g);
       return g;
     }
-    function makeCar(x, z, vertical, color) {
-      const gy = groundHeightAt(x, z);
+    // facing: optional. -1 / 1 picks which way the car points along its axis
+    // (a parked car faces the way its lane runs); omitted, a position hash.
+    const CAR_LIFT = 0.045;       // the asphalt sits 4 cm proud of the plain
+    function makeCar(x, z, vertical, color, facing) {
+      const gy = groundHeightAt(x, z) + CAR_LIFT;
       const g = new THREE.Group();
       g.position.set(x, gy, z); g.rotation.y = vertical ? 0 : Math.PI / 2; root.add(g);
       const shape = (h01g(x, z, 0xca7) * CAR_SHAPES.length) | 0;
       const body = new THREE.Mesh(carGeo(shape, color), carMat);
-      if (h01g(x, z, 0xca8) < 0.5) body.rotation.y = Math.PI;   // parked either way round
+      const flip = facing != null ? facing > 0 : h01g(x, z, 0xca8) < 0.5;
+      if (flip) body.rotation.y = Math.PI;
       body.castShadow = true; body.receiveShadow = true; g.add(body);
       const hw = vertical ? 1.1 : 2.2, hd = vertical ? 2.2 : 1.1;
       const c = { minX: x - hw, maxX: x + hw, minZ: z - hd, maxZ: z + hd, ref: body, noCam: true };
@@ -2996,39 +4288,120 @@
     // drive a car straight into, flanked by full-height display glass, capped
     // by a massive clerestory window and an AUTO SALES sign. Cars on display
     // inside. The glass is shatterable. ----
+    /* THE SHOWROOM, REBUILT FROM THE INSIDE. It was: a grass floor with a
+       grey plane laid over it by polygon offset (and no walk record: you
+       walked the lawn under it), walls and roof in the old party palette
+       (sky blue, one fresh Lambert material per box), the side "display
+       glass" buried INSIDE the solid side walls where nobody could ever see
+       it, no ceiling, no light, and a blank green board on the roof where a
+       sign would be. Now: one merged shell in a real cladding with the grime
+       finish, a polished-tile slab you walk on, real side windows cut
+       through the walls, a plaster lining, an acoustic ceiling with troffers,
+       a dark fascia band, the display cars standing on the tiles, a sales
+       desk and a sofa. Same footprint, same bay, same glass registration. */
     function makeShowroom(ox, oz) {
       const gy = groundHeightAt(ox, oz);
       const w = 18, d = 13, SH = 6.0, T = 0.35;
-      const floor = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.4, d - 0.4), new THREE.MeshLambertMaterial({ color: 0xd6dade, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
-      floor.rotation.x = -Math.PI / 2; floor.position.set(ox, gy + 0.06, oz); floor.receiveShadow = true; root.add(floor);
-      // shell: back + sides + roof (solid, height-gated)
-      box(ox, gy + SH / 2, oz + d / 2 - T / 2, w, SH, T, 0x586a86, { solid: true, y0: gy, y1: gy + SH, los: true });
-      box(ox - w / 2 + T / 2, gy + SH / 2, oz, T, SH, d, 0x586a86, { solid: true, y0: gy, y1: gy + SH, los: true });
-      box(ox + w / 2 - T / 2, gy + SH / 2, oz, T, SH, d, 0x586a86, { solid: true, y0: gy, y1: gy + SH, los: true });
-      box(ox, gy + SH + 0.2, oz, w, 0.4, d, 0x46566b, { solid: true, y0: gy + SH, y1: gy + SH + 0.4, los: true });
-      addGlass(root, ox - w / 2 + 0.18, gy + SH * 0.52, oz + 1.2, 0.05, SH * 0.7, d * 0.5, 0, 0, 0, null);  // side display glass
-      addGlass(root, ox + w / 2 - 0.18, gy + SH * 0.52, oz + 1.2, 0.05, SH * 0.7, d * 0.5, 0, 0, 0, null);
+      const ter = footprintTerrain(ox, oz, w, d);
+      const fy = Math.max(0.06, +(ter.max - gy + 0.04).toFixed(3));   // finished floor, local
+      const grp = new THREE.Group();
+      grp.position.set(ox, gy, oz);
+      root.add(grp);
+      const K = inKit(ox, oz);
+      const shell = [];                          // [x,y,z,w,h,d,col] local
+      const sbox = function (x, y, z, bw, bh, bd, col) { shell.push([x, y, z, bw, bh, bd, col]); };
+      const scol = function (x0, x1, z0, z1, y0, y1) {
+        CBZ.colliders.push({ minX: ox + x0, maxX: ox + x1, minZ: oz + z0, maxZ: oz + z1, ref: null, y0: gy + y0, y1: gy + y1 });
+      };
+      const CLAD = 0xb9bdbf, DARK = 0x30353b;
+      // the slab: a walk record and a tiled floor
+      CBZ.platforms.push({ minX: ox - w / 2 + T, maxX: ox + w / 2 - T, minZ: oz - d / 2, maxZ: oz + d / 2 - T, top: gy + fy });
+      sbox(0, (fy - 0.015 - 0.5) / 2, 0, w, fy - 0.015 + 0.5, d, 0x77736b);
+      K.plane("tile60", -w / 2 + T, -d / 2, w / 2 - T, d / 2 - T, fy, 0xe8e7e3, false, null, null, 2.4);
+      // back wall, and the side walls with a long window cut through each
+      sbox(0, SH / 2, d / 2 - T / 2, w, SH, T, CLAD); scol(-w / 2, w / 2, d / 2 - T, d / 2, 0, SH);
+      const win = { a0: 1.2 - d * 0.25, a1: 1.2 + d * 0.25, y0: SH * 0.17, y1: SH * 0.87 };
+      const holes = [];
+      for (let sd = -1; sd <= 1; sd += 2) {
+        const xw = sd * (w / 2 - T / 2);
+        // (from behind the front corner post to the back wall: no two shell
+        // boxes share a face)
+        for (const r of solidRects(-d / 2 + T, d / 2 - T, 0, SH, [win]))
+          sbox(xw, (r[2] + r[3]) / 2, (r[0] + r[1]) / 2, T, r[3] - r[2], r[1] - r[0], CLAD);
+        scol(xw - T / 2, xw + T / 2, -d / 2, d / 2, 0, SH);
+        addGlass(root, ox + xw, gy + (win.y0 + win.y1) / 2, oz + (win.a0 + win.a1) / 2, 0.04, win.y1 - win.y0, win.a1 - win.a0, 0, 0, 0, null);
+        holes.push({ s: sd < 0 ? 2 : 3, a0: win.a0, a1: win.a1, y0: win.y0, y1: win.y1 });
+        // the frame round it, on the outside
+        const xo = sd * (w / 2 + 0.02);
+        K.box("flat", xo, win.y1 + 0.03, (win.a0 + win.a1) / 2, 0.05, 0.06, win.a1 - win.a0 + 0.12, DARK);
+        K.box("flat", xo, win.y0 - 0.03, (win.a0 + win.a1) / 2, 0.05, 0.06, win.a1 - win.a0 + 0.12, DARK);
+        K.box("flat", xo, (win.y0 + win.y1) / 2, win.a0 - 0.03, 0.05, win.y1 - win.y0, 0.06, DARK);
+        K.box("flat", xo, (win.y0 + win.y1) / 2, win.a1 + 0.03, 0.05, win.y1 - win.y0, 0.06, DARK);
+        K.box("flat", xo, (win.y0 + win.y1) / 2, (win.a0 + win.a1) / 2, 0.04, win.y1 - win.y0, 0.05, DARK);
+      }
+      // the roof, and the fascia band across the front where the board was
+      sbox(0, SH + 0.2, 0, w, 0.4, d, 0x8d8a83); scol(-w / 2, w / 2, -d / 2, d / 2, SH, SH + 0.4);
+      sbox(0, SH + 0.25, -d / 2 - 0.03, w + 0.06, 0.62, 0.06, DARK);
       // FRONT (-z): posts/mullions, header + rolled-up garage door over the bay
-      const fz = oz - d / 2 + T / 2, BAYW = 5.2, HEADER = 4.2;
-      box(ox - w / 2 + 0.35, gy + SH / 2, fz, 0.7, SH, T, 0x44506b, { solid: true, y0: gy, y1: gy + SH });
-      box(ox + w / 2 - 0.35, gy + SH / 2, fz, 0.7, SH, T, 0x44506b, { solid: true, y0: gy, y1: gy + SH });
-      box(ox - BAYW / 2, gy + SH / 2, fz, 0.4, SH, T, 0x44506b, { solid: true, y0: gy, y1: gy + SH });
-      box(ox + BAYW / 2, gy + SH / 2, fz, 0.4, SH, T, 0x44506b, { solid: true, y0: gy, y1: gy + SH });
-      box(ox, gy + HEADER + 0.3, fz, BAYW + 0.4, 0.6, T + 0.06, 0x39414f, { solid: true, y0: gy + HEADER, y1: gy + HEADER + 0.6 });
-      box(ox, gy + HEADER - 0.45, fz + 0.05, BAYW - 0.5, 0.9, 0.16, 0x8a93a0);   // rolled-up door
-      for (let s = 0; s < 4; s++) box(ox, gy + HEADER - 0.2 - s * 0.2, fz + 0.06, BAYW - 0.55, 0.05, 0.18, 0x6b7480);
-      // full-height display glass flanking the bay
+      const fzl = -d / 2 + T / 2, BAYW = 5.2, HEADER = 4.2;
+      const post = function (x, pw) { sbox(x, SH / 2, fzl, pw, SH, T, DARK); scol(x - pw / 2, x + pw / 2, -d / 2, -d / 2 + T, 0, SH); };
+      post(-w / 2 + 0.35, 0.7); post(w / 2 - 0.35, 0.7); post(-BAYW / 2, 0.4); post(BAYW / 2, 0.4);
+      sbox(0, HEADER + 0.3, fzl, BAYW + 0.4, 0.6, T + 0.06, DARK); scol(-BAYW / 2 - 0.2, BAYW / 2 + 0.2, -d / 2 - 0.03, -d / 2 + T + 0.03, HEADER, HEADER + 0.6);
+      K.box("flat", 0, HEADER - 0.45, fzl + 0.05, BAYW - 0.5, 0.9, 0.16, 0x8a8f95);         // the door, rolled up
+      for (let s2 = 0; s2 < 4; s2++) K.box("flat", 0, HEADER - 0.2 - s2 * 0.2, fzl + 0.14, BAYW - 0.55, 0.05, 0.02, 0x6b7076, 4 | 8 | 16);
+      K.box("flat", 0, fy - 0.008, -d / 2 + T / 2, BAYW - 0.4, 0.028, T + 0.04, 0x8f8a80, 4 | 16 | 32);   // the bay's sill
+      // full-height display glass flanking the bay, and the clerestory over it
       const a = -w / 2 + 0.7, bb = -BAYW / 2 - 0.2, cxL = (a + bb) / 2, wL = bb - a;
-      addGlass(root, ox + cxL, gy + SH * 0.52, fz, wL * 0.95, SH * 0.82, 0.06, 0, 0, 0, null);
-      addGlass(root, ox - cxL, gy + SH * 0.52, fz, wL * 0.95, SH * 0.82, 0.06, 0, 0, 0, null);
-      // MASSIVE clerestory glass above the bay header
-      addGlass(root, ox, gy + (HEADER + SH) / 2 + 0.3, fz, BAYW + 0.2, SH - HEADER - 0.7, 0.06, 0, 0, 0, null);
-      // display cars (for sale) + the sign
-      makeCar(ox - 4.6, oz + 1.6, true, 0xe24b4b);
-      makeCar(ox + 4.6, oz + 1.6, true, 0x3c6fd6);
-      makeCar(ox, oz + 4.2, false, 0xf2c43d);
-      box(ox, gy + SH + 1.1, fz + 0.2, 9.5, 1.5, 0.3, 0x12c258);   // AUTO SALES sign
-      box(ox, gy + SH + 1.1, fz + 0.36, 8.6, 1.05, 0.1, 0xeafff2);
+      addGlass(root, ox + cxL, gy + SH * 0.52, oz + fzl, wL * 0.95, SH * 0.82, 0.06, 0, 0, 0, null);
+      addGlass(root, ox - cxL, gy + SH * 0.52, oz + fzl, wL * 0.95, SH * 0.82, 0.06, 0, 0, 0, null);
+      addGlass(root, ox, gy + (HEADER + SH) / 2 + 0.3, oz + fzl, BAYW + 0.2, SH - HEADER - 0.7, 0.06, 0, 0, 0, null);
+      // inside: plaster on the back and side walls (cut round the windows),
+      // an acoustic ceiling with troffers on a 2.4 m grid
+      const paint = 0xeeeeea, trim = 0x3a3a3a;
+      skinFace(K, { s: 1, n: d / 2 - T, inward: -1, a0: -w / 2 + T, a1: w / 2 - T, y0: fy, y1: SH, floor: fy, glassN: null }, holes, paint, trim);
+      skinFace(K, { s: 2, n: -w / 2 + T, inward: 1, a0: -d / 2 + T, a1: d / 2 - T, y0: fy, y1: SH, floor: fy, glassN: -(w / 2 - T / 2) }, holes, paint, trim);
+      skinFace(K, { s: 3, n: w / 2 - T, inward: -1, a0: -d / 2 + T, a1: d / 2 - T, y0: fy, y1: SH, floor: fy, glassN: w / 2 - T / 2 }, holes, paint, trim);
+      for (let x = -w / 2 + 2.2; x <= w / 2 - 2.1; x += 2.4) for (let z = -d / 2 + 2.1; z <= d / 2 - 1.6; z += 2.4) {
+        K.box("flat", x, SH - 0.02, z, 1.26, 0.03, 0.66, 0xd6d8d6, 63 & ~4);
+        K.quad("glow", [x - 0.6, SH - 0.042, z - 0.3], [x + 0.6, SH - 0.042, z - 0.3], [x + 0.6, SH - 0.042, z + 0.3], [x - 0.6, SH - 0.042, z + 0.3], [0, -1, 0], 0xf1f3f0);
+      }
+      K.plane("ceiling", -w / 2 + T, -d / 2 + T, w / 2 - T, d / 2 - T, SH - 0.004, 0xffffff, true, null, null, 2.4);
+      // display cars (for sale), standing on the tiles, and the sales desk
+      const onFloor = function () {
+        const car = cars[cars.length - 1];
+        if (!car) return;
+        car.group.position.y = gy + fy; car.oy = gy + fy;
+      };
+      makeCar(ox - 4.6, oz + 1.6, true, 0xe24b4b); onFloor();
+      makeCar(ox + 4.6, oz + 1.6, true, 0x3c6fd6); onFloor();
+      makeCar(ox, oz + 4.2, false, 0xf2c43d); onFloor();
+      const cols = [];
+      const host = furnHost(K, ox, oz, gy, cols, fy, null);
+      const R = { x0: -w / 2 + T, x1: w / 2 - T, z0: -d / 2 + T, z1: d / 2 - T };
+      const blocks = [{ x0: -5.9, x1: -3.3, z0: -0.9, z1: 4.1 }, { x0: 3.3, x1: 5.9, z0: -0.9, z1: 4.1 },
+        { x0: -2.5, x1: 2.5, z0: -d / 2, z1: 5.6 }];
+      const dk = placeOnWalls(R, blocks, ["z1", "x1"], 1.6, 0.75, 1.3, holes, null, 0.88);
+      if (dk) { furnish("desk", host, dk.x, fy, dk.z, dk.yaw + Math.PI, { len: 1.6, deep: 0.75 }); blocks.push(dk.use); }
+      const sf = placeOnWalls(R, blocks, ["z1", "x0"], 2.0, 0.87, 0.9, holes, null, 0.1);
+      if (sf) furnish("sofa", host, sf.x, fy, sf.z, sf.yaw, { len: 2.0, tone: { cloth: 0x2b2f35 } });
+      // flush: the shell per colour in the island finish, the rest in the kit
+      const byCol = new Map();
+      for (const r of shell) {
+        const g2 = new THREE.BoxGeometry(r[3], r[4], r[5]);
+        g2.deleteAttribute("uv");
+        g2.translate(r[0], r[1], r[2]);
+        let l = byCol.get(r[6]); if (!l) { l = []; byCol.set(r[6], l); } l.push(g2);
+      }
+      const BGU = THREE.BufferGeometryUtils;
+      byCol.forEach(function (geos, col) {
+        const geo = geos.length > 1 && BGU ? BGU.mergeBufferGeometries(geos) : geos[0];
+        if (geo !== geos[0]) for (const g2 of geos) g2.dispose();
+        const m = new THREE.Mesh(geo, finishMat(col, 0, gy));
+        m.castShadow = true; m.receiveShadow = true;
+        grp.add(m);
+        if (col === CLAD || col === DARK) CBZ.losBlockers.push(m);
+      });
+      K.flush(grp, false);
     }
 
     /* ---- WHICH FACADE GOES ON WHICH BUILDING -------------------------------
@@ -3157,18 +4530,39 @@
     const dl1 = placeFlat(10, 8); if (dl1) makeShowroom(dl1.x, dl1.z);
     finishRoads();
 
-    // park cars along the streets (offset to one lane), skipping building spots
+    /* Park cars along the streets. They used to stand in the MIDDLE of a
+       lane (1.7 m off the centre line), pointing either way at random, and
+       anywhere along the piece, so a car sat on the crosswalk or across a
+       filling station's driveway. Now: against the kerb (2.2 m off, the
+       gutter side), facing the way that lane runs (drive on the right), clear
+       of the junction's crosswalk and stop bar, off the station's frontage
+       and never on top of another parked car. The rng stream is consumed
+       EXACTLY as before (a skipped car still spends its colour draw where the
+       old code would have placed one), so the trees and everything after
+       are where they were. */
+    const parked = [];
+    const CAR_OFF = 2.2, END_CLEAR = 8.5;
     roadSegs.forEach((seg) => {
       const n = 1 + ((rng() * 2) | 0);
       for (let i = 0; i < n; i++) {
-        const off = (rng() < 0.5 ? -1 : 1) * (ROADW * 0.24);
-        const along = (rng() - 0.5) * seg.len * 0.8;
+        const side = rng() < 0.5 ? -1 : 1;
+        const u = rng() - 0.5;
+        const off = side * CAR_OFF;
+        const along = u * Math.max(0, seg.len - 2 * END_CLEAR);
         const x = seg.x + (seg.vertical ? off : along);
         const z = seg.z + (seg.vertical ? along : off);
         let onBldg = false;
         for (const p of placed) { if (Math.abs(p.x - x) < p.w / 2 + 2 && Math.abs(p.z - z) < p.d / 2 + 2) { onBldg = true; break; } }
         if (onBldg) continue;
-        makeCar(x, z, seg.vertical, CAR_COLORS[(rng() * CAR_COLORS.length) | 0]);
+        const color = CAR_COLORS[(rng() * CAR_COLORS.length) | 0];
+        if (seg.len < 2 * END_CLEAR + 4.5) continue;                     // too short to park on
+        if (stationSites.some(function (st) { return Math.abs(st.x - x) < 16 && Math.abs(st.z - z) < 16; })) continue;
+        if (parked.some(function (q) { return Math.hypot(q.x - x, q.z - z) < 5.4; })) continue;
+        parked.push({ x: x, z: z });
+        // right-hand traffic: +x lane of an avenue runs toward -z (body as
+        // built), the -z lane of a cross-street runs toward -x (as built)
+        const asBuilt = seg.vertical ? side > 0 : side < 0;
+        makeCar(x, z, seg.vertical, color, asBuilt ? -1 : 1);
       }
     });
 
@@ -3355,29 +4749,21 @@
     })();
 
     if (CBZ.bootStep) CBZ.bootStep("island:rocks");
-    // a faceted boulder of the box's size: a dodecahedron whose corners are
-    // pushed about by a hash of the corner (so shared corners move together
-    // and the solid stays closed), flat-shaded by construction
-    const rockGeos = {};
-    function rockGeo(v, s) {
-      const key = v + "|" + s.toFixed(2);
-      if (rockGeos[key]) return rockGeos[key];
-      const g = new THREE.DodecahedronGeometry(0.62, 0);
-      const p = g.attributes.position;
-      for (let i = 0; i < p.count; i++) {
-        const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
-        const k = 0.78 + 0.44 * h01g(x * 7 + v * 3, z * 7 + y * 5, 0xb0d);
-        p.setXYZ(i, x * k * s, y * k * s, z * k * s);
-      }
-      g.computeVertexNormals();
-      g.computeBoundingSphere();
-      rockGeos[key] = g;
-      return g;
-    }
     // ---- rocks / cover ----
-    // Boulders, not silver dice: earthy grey-brown, randomly rotated and
-    // squashed so they read as rough rock — and kept OFF the hill/mountain
-    // slopes (a perfect cube stuck on a cone looked broken). Flat ground only.
+    /* The boulders were 26 separate meshes (26 draws), each a 12-face
+       dodecahedron coloured by writing 0.105 linear into the SHARED cmat
+       material of 0x6e675e (so anything else in that colour went black too),
+       flat-shaded, sitting on the grass like black lumps, and free to land
+       against a front door. This loop now only chooses SITES, spending the
+       rng stream exactly as before (a, dist, s, three rotation draws, three
+       scale draws) so every draw after it is unchanged; world/
+       island_dressing.js turns the sites into real rock in ONE draw:
+       noise-displaced and facet-cut (the flat broken faces that make a rock
+       read as rock), part-buried, sun-bleached on top, lichen on the up
+       faces, soil-stained at the foot, in the rock surface map, with a
+       fallen piece or two beside the big one. A site within 5 m of a
+       building is dropped: a boulder in a front yard has no reason. */
+    const rockSites = [];
     for (let i = 0; i < 26; i++) {
       const a = rng() * Math.PI * 2, dist = 12 + rng() * (R - 14);
       const x = cx + Math.cos(a) * dist, z = cz + Math.sin(a) * dist;
@@ -3385,14 +4771,16 @@
       if (gy > 0.8) continue;                 // skip hillsides — no floating cubes on the mountain
       if (onRoad(x, z, 3, 3) || surfaceHeightAt(x, z) > gy + 0.02) continue;   // not in a street corridor or on a forecourt
       const s = 1 + rng() * 2.2;
-      const m = box(x, gy + s * 0.4, z, s, s, s, 0x6e675e, { solid: true });
-      m.geometry.dispose();
-      m.geometry = rockGeo((h01g(x, z, 0xb0c) * 4) | 0, s);
-      m.material.color.setRGB(0.105, 0.098, 0.088);
-      m.rotation.set((rng() - 0.5) * 0.5, rng() * Math.PI, (rng() - 0.5) * 0.5);
-      m.scale.set(0.8 + rng() * 0.4, 0.55 + rng() * 0.35, 0.8 + rng() * 0.4);
-      m.position.y = gy + s * m.scale.y * 0.5 - 0.06;   // rest on the ground, slightly embedded
+      const tilt = (rng() - 0.5) * 0.5, yaw = rng() * Math.PI; rng();
+      const kx = 0.8 + rng() * 0.4, ky = 0.55 + rng() * 0.35, kz = 0.8 + rng() * 0.4;
+      let byBuilding = false;
+      for (const p of placed) { if (Math.abs(p.x - x) < p.w / 2 + 5 && Math.abs(p.z - z) < p.d / 2 + 5) { byBuilding = true; break; } }
+      if (byBuilding) continue;
+      rockSites.push({ x: x, z: z, s: s, kx: kx, ky: ky, kz: kz, yaw: yaw, tilt: tilt });
     }
+
+    // the town between the buildings: yards, square, car lot, dock, farm, rocks (world/island_dressing.js; result also at CBZ.islandDressing.current)
+    const islandDress = CBZ.islandDressing ? CBZ.islandDressing.build({ root: root, cx: cx, cz: cz, R: R, GRID: GRID, ROADW: ROADW, groundHeightAt: groundHeightAt, surfaceHeightAt: surfaceHeightAt, onRoad: onRoad, placed: placed, fragile: fragile, roadSegs: roadSegs, h01: h01g, trees: flammable, rocks: rockSites, cars: cars, makeCar: makeCar, showroom: dl1 ? { x: dl1.x, z: dl1.z, w: 18, d: 13 } : null, stations: stationSites, oceanY: OCEAN_Y }) : null;
 
     arena = {
       root, center: { x: cx, z: cz }, radius: R,
@@ -3407,6 +4795,10 @@
       // field, never this list
       islets,
       hills, fragile, flammable, cars, elevators, glass: allGlass, groundHeightAt: surfaceHeightAt,
+      // the street grid's own test and the town between the buildings
+      // (world/island_dressing.js: fences, benches, bales, the pier...), so a
+      // later dresser (quake.js's utility poles) never stands in a road or a fence
+      onRoad: onRoad, dressing: islandDress,
       randomPoint(minD, maxD) {
         const a = rng() * Math.PI * 2;
         const d = (minD || 0) + rng() * ((maxD || R * 0.82) - (minD || 0));
@@ -3438,6 +4830,9 @@
            it, so their building is left standing and solid — which is exactly
            what the loop below is about to guarantee anyway. */
         if (CBZ.collapse && CBZ.collapse.reset) CBZ.collapse.reset();
+        // a meteor's bowl (systems/craters.js) is permanent WITHIN a match;
+        // the next match starts on the island's own ground, not last round's holes
+        if (CBZ.craterClear) CBZ.craterClear();
         for (const b of fragile) {
           // clear the shared structural ledger (systems/disasters.js) so a new
           // match starts on undamaged towers, not on last match's spalling

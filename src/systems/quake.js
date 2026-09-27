@@ -45,7 +45,8 @@
                                 (the killfeed is the only popup; nothing here
                                  toasts anything)
      · knockdown/ragdoll      → CBZ.body
-     · furniture              → CBZ.furnish
+     · furniture              → the arena's own rooms (b.interior.covers) /
+                                CBZ.propSeats in the city
      · the shake              → CBZ.shake
    What it DOES own is one thing nothing else in the game had: a piece of a
    building in the air with mass, on its way to a person.
@@ -432,15 +433,71 @@
       const u = q / 6;
       g = kind === "glass"
         ? new THREE.BoxGeometry(u * 1.6, u * 2.1, 0.05)
-        : new THREE.BoxGeometry(u, u * (0.55 + (q % 3) * 0.22), u * 0.85);
+        : brokenChunk(u, u * (0.55 + (q % 3) * 0.22), u * 0.85, q);
       g._shared = true;
       GEO_CACHE.set(k, g);
     }
     return g;
   }
+  /* A LUMP OF BROKEN WALL, not a box. Masonry used to shed as clean cuboids
+     in five greys: dice falling off a painted building. A torn-off piece of
+     facade is a slab with one or two faces still flat (the wall face, the
+     back of the render) and the rest ragged, so the chunk is a box cut into
+     a 2x2x2 lattice whose inner and edge vertices are pushed about by a hash
+     of the lattice point, then split to flat-shaded triangles so every
+     fracture facet catches the light on its own. Quantised and cached, so a
+     whole quake still shares a handful of buffers. */
+  function brokenChunk(w, h, d, salt) {
+    const b = new THREE.BoxGeometry(w, h, d, 2, 2, 2);
+    const pa = b.attributes.position;
+    const hs = function (x, y, z) {
+      const v = Math.sin(x * 127.1 + y * 311.7 + z * 74.7 + salt * 17.3) * 43758.5453;
+      return v - Math.floor(v) - 0.5;
+    };
+    for (let i = 0; i < pa.count; i++) {
+      const x = pa.getX(i), y = pa.getY(i), z = pa.getZ(i);
+      // the +z face stays the flat wall face; everything else is fracture
+      const face = z > d * 0.49 ? 0.25 : 1;
+      const k = 0.34 * face;
+      pa.setXYZ(i,
+        x + hs(x, y, z) * w * k,
+        y + hs(y, z, x) * h * k,
+        z + hs(z, x, y) * d * k * 0.6);
+    }
+    const g = b.toNonIndexed();
+    b.dispose();
+    g.computeVertexNormals();
+    return g;
+  }
   const MASONRY = [0x8b9097, 0x70757e, 0x9aa0a8, 0xb0aa9c, 0x5c6168];
-  function pieceMat(kind, i) {
+  /* WHAT THE BUILDING IS MADE OF. A piece off a red-brick house is red
+     brick: two in three lumps wear the building's own wall material (the
+     biggest opaque coloured mesh in its group, cached on the group), the
+     third is the grey concrete core behind the facade. */
+  function wallMatOfGroup(grp) {
+    if (!grp) return null;
+    const ud = grp.userData || (grp.userData = {});
+    if (ud._quakeWallMat !== undefined) return ud._quakeWallMat;
+    let best = null, bestN = -1;
+    grp.traverse(function (o) {
+      if (!o.isMesh || !o.material || Array.isArray(o.material) || o.material.transparent || !o.material.color) return;
+      // a vertex-coloured merge paints its colour per vertex; a chunk has none
+      // and would draw black in it
+      if (o.material.vertexColors) return;
+      if (o.material.emissive && o.material.emissive.getHex() !== 0 && o.material.emissiveIntensity > 0.2) return;
+      const pa = o.geometry && o.geometry.attributes && o.geometry.attributes.position;
+      const n = pa ? pa.count : 0;
+      if (n > bestN) { bestN = n; best = o.material; }
+    });
+    ud._quakeWallMat = best;
+    return best;
+  }
+  function pieceMat(kind, i, B) {
     if (kind === "glass") return CBZ.glass ? CBZ.glass({ opacity: 0.55 }) : new THREE.MeshLambertMaterial({ color: 0xcdeefb, transparent: true, opacity: 0.55 });
+    if (B && B.group && (i % 3) !== 0) {
+      const wm = wallMatOfGroup(B.group);
+      if (wm) return wm;
+    }
     const c = MASONRY[i % MASONRY.length];
     return CBZ.cmat ? CBZ.cmat(c) : new THREE.MeshLambertMaterial({ color: c });
   }
@@ -486,7 +543,7 @@
     // that was invisible from across the street and read as grit.
     const size = glassy ? (0.7 + rnd() * 0.9) : (0.95 + rnd() * (1.1 + sev * 1.7));
     const geo = pieceGeo(kind, size);
-    const m = new THREE.Mesh(geo, pieceMat(kind, (px * 7 + pz * 13) | 0));
+    const m = new THREE.Mesh(geo, pieceMat(kind, Math.abs((px * 7 + pz * 13) | 0), B));
     m.position.set(px + nx * 0.3, fy, pz + nz * 0.3);
     m.rotation.set(rnd() * 3, rnd() * 3, rnd() * 3);
     m.castShadow = !glassy;
@@ -656,13 +713,34 @@
     const fx = B.x + (side === 2 ? -B.w / 2 : side === 3 ? B.w / 2 : 0);
     const fz = B.z + (side === 0 ? -B.d / 2 : side === 1 ? B.d / 2 : 0);
     const fy = gy + Math.min(B.h - 1.2, 1.4 + rnd() * Math.max(1, B.h * 0.4));
+    /* THE FLAME IS THE WILDFIRE'S FLAME. This used to be three additive
+       cones stacked on the facade (red, orange, yellow, six sides each): a
+       traffic cone glowing on the wall for ninety seconds. A gas fire out of
+       a broken wall is a ragged sheet of tongues along the break, so it is
+       drawn as a handful of the wildfire's own feathered point-sprite flames
+       spread along the face, each licking on its own seed. */
     const grp = new THREE.Group();
-    const flame = function (c, s, y) {
-      const m = new THREE.Mesh(new THREE.ConeGeometry(s, s * 2.6, 6),
-        new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.AdditiveBlending }));
-      m.position.y = y; m.renderOrder = 8; grp.add(m); return m;
-    };
-    const F = [flame(0xff3a0e, 1.5, 0.4), flame(0xff8a24, 1.0, 1.4), flame(0xffd870, 0.55, 2.3)];
+    const F = [];
+    const fmat = CBZ.wildfire && CBZ.wildfire.flameMaterial ? CBZ.wildfire.flameMaterial() : null;
+    if (fmat) {
+      const N = 7, P = new Float32Array(N * 3), S = new Float32Array(N), A = new Float32Array(N), Sd = new Float32Array(N);
+      const along = side < 2 ? 1 : 0;              // the wall runs along x on the -z/+z faces
+      for (let i = 0; i < N; i++) {
+        const u = (i / (N - 1) - 0.5) * 3.2 + (rnd() - 0.5) * 0.5;
+        P[i * 3] = along ? u : (side === 2 ? -0.35 : 0.35);
+        P[i * 3 + 1] = 0.2 + rnd() * 0.9;
+        P[i * 3 + 2] = along ? (side === 0 ? -0.35 : 0.35) : u;
+        S[i] = 1.6 + rnd() * 1.6; A[i] = 0.85; Sd[i] = rnd();
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(P, 3));
+      g.setAttribute("aSize", new THREE.BufferAttribute(S, 1));
+      g.setAttribute("aAlpha", new THREE.BufferAttribute(A, 1).setUsage(THREE.DynamicDrawUsage));
+      g.setAttribute("aSeed", new THREE.BufferAttribute(Sd, 1));
+      const pts = new THREE.Points(g, fmat);
+      pts.frustumCulled = false; pts.renderOrder = 8;
+      grp.add(pts); F.push(pts);
+    }
     grp.position.set(fx, fy, fz);
     if (scene()) scene().add(grp);
     const smoke = CBZ.fx && CBZ.fx.particleCloud
@@ -686,9 +764,14 @@
       const f = localFires[i];
       f.age += dt;
       const k = 0.6 + 0.4 * Math.sin(now() * 0.021 + i * 1.7);
+      const ps = Math.max(1, ((CBZ.renderer && CBZ.renderer.domElement && CBZ.renderer.domElement.height) || 640) * 0.5);
+      // it dies down over its last fifteen seconds instead of blinking out
+      const fade = Math.max(0, Math.min(1, (f.life - f.age) / 15));
       for (let j = 0; j < f.F.length; j++) {
-        f.F[j].scale.set(0.8 + k * 0.4, 0.7 + k * 0.55, 0.8 + k * 0.4);
-        f.F[j].material.opacity = 0.6 + 0.3 * k;
+        const u = f.F[j].material.uniforms;
+        if (u) { u.uTime.value = f.age; u.uScale.value = ps * (0.85 + 0.15 * k); }
+        const al = f.F[j].geometry.attributes.aAlpha;
+        if (al) { for (let q = 0; q < al.count; q++) al.array[q] = 0.85 * fade; al.needsUpdate = true; }
       }
       if (f.smoke) f.smoke.update(dt, f.x, f.y + 2, f.z);
       // fire is what turns a survivable hit into a fatal one — it eats the
@@ -720,25 +803,131 @@
   const lines = [];
   const POLE_H = 9.4, POLE_RT = 0.135, POLE_RB = 0.205, ARM_Y = 8.45, ARM_SPAN = 2.3;
 
-  // A pole, drawn to world/utility_lines.js's authored dimensions (that file
-  // is an InstancedMesh detail-kit pass bound to the city build, so it cannot
-  // hand us a single toppleable instance — but its numbers are the right
-  // numbers and a pole that disagreed with the ones down the street would be
-  // the same "two constants describing one object" fault that file exists to
-  // cure). Kept to five boxes: this is a prop that gets used twice a match.
+  /* A pole, drawn to world/utility_lines.js's authored dimensions (that file
+     is an InstancedMesh detail-kit pass bound to the city build, so it cannot
+     hand us a single toppleable instance — but its numbers are the right
+     numbers and a pole that disagreed with the ones down the street would be
+     the same "two constants describing one object" fault that file exists to
+     cure).
+
+     It was five separate meshes: a grey-brown cylinder, a box crossarm and
+     three little glass BOXES on top, i.e. a stick with three sugar cubes, and
+     nothing connecting it to anything. Now it is ONE mesh with colour per
+     vertex (one shared material, geometry built once and shared by every
+     pole): a creosoted tapered shaft, ground-stained at the butt, a weathered
+     crossarm on steel braces, three glass pin insulators on steel pins, a
+     transformer can with its bushings on the house side, climbing steps, and
+     a SERVICE DROP, the sagging pair of wires that runs from the can to a
+     weatherhead on the wall of the building the pole stands beside, which is
+     the reason the pole is there. The drop lives in its own geometry variant:
+     when the pole goes down the mesh swaps to the bare variant (the drop has
+     snapped) and dropLine lays the live conductor on the ground. */
+  const DROP_LEN = 5.2;               // the arena kit stands its poles 5.2 m off the wall
+  let poleMat = null;
+  const poleGeos = {};
+  function poleMaterial() {
+    if (poleMat) return poleMat;
+    poleMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+    poleMat.name = "quake-utility-pole";
+    const maps = CBZ.surfaceMaps ? CBZ.surfaceMaps("wood", { repeat: 1 }) : null;
+    if (maps && maps.map) {
+      poleMat.map = maps.map;
+      const mn = CBZ.surfaceMapMean ? CBZ.surfaceMapMean(maps.map) : [1, 1, 1];
+      poleMat.color.setRGB(1 / Math.max(0.02, mn[0]), 1 / Math.max(0.02, mn[1]), 1 / Math.max(0.02, mn[2]));
+    }
+    return poleMat;
+  }
+  function poleGeometry(withDrop) {
+    const key = withDrop ? "drop" : "bare";
+    if (poleGeos[key]) return poleGeos[key];
+    const parts = [];
+    // colour per vertex (+ a darkening below `ao` m) and box-projected UVs in
+    // metres, so the wood map reads at real scale on the shaft and the arm
+    function put(g, rgb, ao) {
+      const src = g.index ? g.toNonIndexed() : g;
+      const P = src.attributes.position, n = P.count;
+      const col = new Float32Array(n * 3), uv = new Float32Array(n * 2);
+      const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), fn = new THREE.Vector3();
+      for (let i = 0; i < n; i += 3) {
+        a.fromBufferAttribute(P, i); b.fromBufferAttribute(P, i + 1); c.fromBufferAttribute(P, i + 2);
+        fn.crossVectors(b.clone().sub(a), c.clone().sub(a));
+        const ax = Math.abs(fn.x), ay = Math.abs(fn.y), az = Math.abs(fn.z);
+        for (let k = 0; k < 3; k++) {
+          const v = k === 0 ? a : k === 1 ? b : c, j = i + k;
+          let u, w;
+          if (ay >= ax && ay >= az) { u = v.x; w = v.z; } else if (ax >= az) { u = v.z; w = v.y; } else { u = v.x; w = v.y; }
+          uv[j * 2] = u / 0.9; uv[j * 2 + 1] = w / 2.4;
+          const f = ao != null ? 1 - 0.45 * (1 - Math.max(0, Math.min(1, v.y / ao))) : 1;
+          col[j * 3] = rgb[0] * f; col[j * 3 + 1] = rgb[1] * f; col[j * 3 + 2] = rgb[2] * f;
+        }
+      }
+      src.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      src.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+      parts.push(src);
+    }
+    const CREOSOTE = [0.075, 0.052, 0.034], ARMWOOD = [0.15, 0.13, 0.105], STEEL = [0.2, 0.21, 0.22];
+    const GLASSC = [0.2, 0.33, 0.3], CAN = [0.3, 0.31, 0.32], WIRE = [0.012, 0.012, 0.014];
+    // shaft
+    put(new THREE.CylinderGeometry(POLE_RT, POLE_RB, POLE_H, 10).translate(0, POLE_H / 2, 0), CREOSOTE, 0.8);
+    // crossarm on two steel flat braces
+    put(new THREE.BoxGeometry(ARM_SPAN, 0.1, 0.12).translate(0, ARM_Y, 0.19), ARMWOOD);
+    for (const s of [-1, 1]) {
+      const br = new THREE.BoxGeometry(0.035, 0.95, 0.02);
+      br.rotateZ(s * -0.72); br.translate(s * 0.3, ARM_Y - 0.36, 0.14);
+      put(br, STEEL);
+    }
+    // three pin insulators: steel pin, a glass skirt and a glass crown
+    for (let i = -1; i <= 1; i++) {
+      const ix = i * (ARM_SPAN / 2 - 0.2);
+      put(new THREE.CylinderGeometry(0.014, 0.014, 0.16, 5).translate(ix, ARM_Y + 0.12, 0.19), STEEL);
+      put(new THREE.CylinderGeometry(0.05, 0.075, 0.08, 10).translate(ix, ARM_Y + 0.2, 0.19), GLASSC);
+      put(new THREE.CylinderGeometry(0.035, 0.05, 0.09, 10).translate(ix, ARM_Y + 0.285, 0.19), GLASSC);
+    }
+    // transformer can on the house side (-z), with a lid and two bushings
+    const CY = 6.7;
+    put(new THREE.CylinderGeometry(0.25, 0.25, 0.85, 12).translate(0, CY, -0.47), CAN);
+    put(new THREE.CylinderGeometry(0.27, 0.27, 0.05, 12).translate(0, CY + 0.45, -0.47), CAN);
+    put(new THREE.BoxGeometry(0.1, 0.5, 0.2).translate(0, CY, -0.24), STEEL);          // hanger bracket
+    for (const s of [-1, 1]) put(new THREE.CylinderGeometry(0.025, 0.035, 0.14, 6).translate(s * 0.1, CY + 0.54, -0.5), GLASSC);
+    // climbing steps, staggered either side
+    for (let k = 0; k < 9; k++) {
+      const y = 2.6 + k * 0.5, s = k % 2 ? 1 : -1;
+      put(new THREE.CylinderGeometry(0.012, 0.012, 0.24, 4).rotateZ(Math.PI / 2).translate(s * (POLE_RB * 0.9), y, 0), STEEL);
+    }
+    if (withDrop) {
+      // the service drop: two conductors sagging from the can's bushings to a
+      // weatherhead on the wall DROP_LEN behind the pole
+      const WALL_Y = 3.1;
+      for (const s of [-1, 1]) {
+        const pts = [];
+        const x0 = s * 0.1, y0 = CY + 0.58, z0 = -0.5, x1 = s * 0.06, y1 = WALL_Y + 0.35, z1 = -DROP_LEN + 0.08;
+        for (let k = 0; k <= 10; k++) {
+          const t = k / 10;
+          const sag = 0.55 * 4 * t * (1 - t);
+          pts.push(new THREE.Vector3(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t - sag, z0 + (z1 - z0) * t));
+        }
+        put(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 10, 0.012, 4, false), WIRE);
+      }
+      // weatherhead: a short service mast on the wall with its hood
+      put(new THREE.CylinderGeometry(0.03, 0.03, 0.9, 6).translate(0, WALL_Y, -DROP_LEN + 0.06), STEEL);
+      put(new THREE.CylinderGeometry(0.06, 0.04, 0.1, 6).translate(0, WALL_Y + 0.48, -DROP_LEN + 0.06), STEEL);
+    }
+    const BGU = THREE.BufferGeometryUtils;
+    const g = BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(parts.map(function (p) {
+      // TubeGeometry / Cylinder carry normals; strip anything else so the merge lines up
+      for (const k of Object.keys(p.attributes)) if (k !== "position" && k !== "normal" && k !== "color" && k !== "uv") p.deleteAttribute(k);
+      return p;
+    }), false) : parts[0];
+    g.computeBoundingSphere();
+    poleGeos[key] = g;
+    return g;
+  }
   function poleGroup(x, y, z, yaw) {
     const g = new THREE.Group();
-    const wood = CBZ.cmat ? CBZ.cmat(0x6c5a44) : new THREE.MeshLambertMaterial({ color: 0x6c5a44 });
-    const woodD = CBZ.cmat ? CBZ.cmat(0x54452f) : wood;
-    const glassM = CBZ.cmat ? CBZ.cmat(0x86a8ab) : wood;
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(POLE_RT, POLE_RB, POLE_H, 8), wood);
-    shaft.position.y = POLE_H / 2; shaft.castShadow = true; g.add(shaft);
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(ARM_SPAN, 0.13, 0.13), woodD);
-    arm.position.y = ARM_Y; g.add(arm);
-    for (let i = -1; i <= 1; i++) {
-      const ins = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.2, 0.11), glassM);
-      ins.position.set(i * (ARM_SPAN / 2 - 0.2), ARM_Y + 0.18, 0); g.add(ins);
-    }
+    const m = new THREE.Mesh(poleGeometry(true), poleMaterial());
+    m.castShadow = true; m.receiveShadow = true;
+    g.add(m);
+    g.userData.poleMesh = m;
     g.position.set(x, y, z); g.rotation.y = yaw || 0;
     return g;
   }
@@ -756,6 +945,70 @@
     const rec = { g: g, x: x, y: y, z: z, fx: fx, fz: fz, collider: c, down: false };
     poles.push(rec); A.kitPoles = poles.length;
     return rec;
+  }
+
+  /* The live conductor on the ground: not a straight bar but a wire that
+     landed, snaking a little either side of the fall line (deterministic per
+     pole), one thin tube, one draw. */
+  function groundWireGeo(x, z, tipX, tipZ, gy, len) {
+    const pts = [];
+    const ux = (tipX - x) / (len || 1), uz = (tipZ - z) / (len || 1);
+    const h = CBZ.hash01 ? CBZ.hash01(x, z, 0x51d) : 0.5;
+    for (let k = 0; k <= 12; k++) {
+      const t = k / 12;
+      const w = Math.sin(t * Math.PI * (2 + h * 2) + h * 6) * 0.35 * Math.sin(t * Math.PI);
+      const px = x + (tipX - x) * t - uz * w, pz = z + (tipZ - z) * t + ux * w;
+      const lift = k === 0 ? 0.5 : 0.04;               // it leaves the butt of the pole
+      pts.push(new THREE.Vector3(px, (floorAt(px, pz) || gy) + lift, pz));
+    }
+    return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 36, 0.03, 5, false);
+  }
+  /* The arc: a crackling blue-white star, drawn on a small canvas once and
+     shown on three crossed planes so it reads from every side. It was an
+     additive SPHERE, which reads as a lamp. */
+  let arcTex = null;
+  function arcTexture() {
+    if (arcTex !== null) return arcTex;
+    arcTex = undefined;
+    try {
+      const S = 128, cv = document.createElement("canvas");
+      cv.width = cv.height = S;
+      const c2 = cv.getContext("2d");
+      const gr = c2.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+      gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(0.12, "rgba(210,235,255,0.95)");
+      gr.addColorStop(0.35, "rgba(120,170,255,0.35)"); gr.addColorStop(1, "rgba(60,90,255,0)");
+      c2.fillStyle = gr; c2.fillRect(0, 0, S, S);
+      c2.strokeStyle = "rgba(235,245,255,0.9)"; c2.lineWidth = 1.6;
+      let seed = 7;
+      const r = function () { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+      for (let k = 0; k < 7; k++) {
+        const a0 = r() * Math.PI * 2;
+        let px = S / 2, py = S / 2;
+        c2.beginPath(); c2.moveTo(px, py);
+        for (let s = 0; s < 6; s++) {
+          const a = a0 + (r() - 0.5) * 1.2, d = 5 + r() * 6;
+          px += Math.cos(a) * d; py += Math.sin(a) * d; c2.lineTo(px, py);
+        }
+        c2.stroke();
+      }
+      arcTex = new THREE.CanvasTexture(cv);
+    } catch (e) { arcTex = undefined; }
+    return arcTex;
+  }
+  function arcMesh() {
+    const planes = [];
+    for (let k = 0; k < 3; k++) {
+      const p = new THREE.PlaneGeometry(1.4, 1.4);
+      if (k === 1) p.rotateY(Math.PI / 2);
+      if (k === 2) p.rotateX(Math.PI / 2);
+      planes.push(p);
+    }
+    const BGU = THREE.BufferGeometryUtils;
+    const geo = BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(planes, false) : planes[0];
+    const tex = arcTexture();
+    const mat = new THREE.MeshBasicMaterial({ color: 0xcfe6ff, transparent: true, opacity: 0.9, depthWrite: false,
+      blending: THREE.AdditiveBlending, side: THREE.DoubleSide, map: tex || null, fog: false });
+    return new THREE.Mesh(geo, mat);
   }
 
   /* Bring one down. `pole` may be a record from poleAdd, or null — in which
@@ -780,19 +1033,18 @@
     const fl = Math.hypot(fx, fz) || 1; fx /= fl; fz /= fl;
     const reach = POLE_H * 0.82;
     const tipX = x + fx * reach, tipZ = z + fz * reach;
-    // the conductor on the deck: a dark ribbon from the pole base out to the
-    // arcing break, drawn as one thin box so it costs a single draw
+    // the conductor on the deck: a wire from the pole base out to the arcing
+    // break, lying the way a dropped wire lies, one draw
     const wireLen = Math.hypot(tipX - x, tipZ - z);
-    const wire = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, wireLen),
+    const wire = new THREE.Mesh(groundWireGeo(x, z, tipX, tipZ, gy, wireLen),
       CBZ.cmat ? CBZ.cmat(0x14161a) : new THREE.MeshLambertMaterial({ color: 0x14161a }));
-    wire.position.set((x + tipX) / 2, gy + 0.09, (z + tipZ) / 2);
-    wire.rotation.y = Math.atan2(tipX - x, tipZ - z);
     if (scene()) scene().add(wire);
+    // the service drop snapped with it
+    if (P && P.g && P.g.userData.poleMesh) P.g.userData.poleMesh.geometry = poleGeometry(false);
     // the arc at the break — additive, and it FLICKERS, because a steady glow
     // reads as a lamp and a stuttering one reads as a fault
-    const spark = new THREE.Mesh(new THREE.SphereGeometry(0.42, 8, 6),
-      new THREE.MeshBasicMaterial({ color: 0xbfe8ff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
-    spark.position.set(tipX, gy + 0.22, tipZ);
+    const spark = arcMesh();
+    spark.position.set(tipX, gy + 0.3, tipZ);
     spark.renderOrder = 8;
     if (scene()) scene().add(spark);
     const rec = {
@@ -888,12 +1140,20 @@
   /* ============================================================
      THE ARENA KIT — the two props the survival lesson needs to exist.
 
-     The disaster island was built with hollow towers, cars and trees and no
-     furniture and no utilities at all, so "get under a table" and "mind the
-     power line" had nothing to refer to. This lays BOTH, deterministically
+     "Get under a table" and "mind the power line" need a table and a line.
+     The TABLES are the island's own now: world/disaster_arena.js furnishes
+     every house and tower as it builds it (a dining table by a window, a desk
+     upstairs, a table in a tower lobby: arranged rooms, not a table dropped
+     wherever it fit) and publishes the sturdy pieces as b.interior.covers.
+     This registers those, and lays the utility POLES, deterministically
      (CBZ.hash01 of each building's own position — a build path never touches
-     Math.random), once per arena, and hands the tables straight to the cover
-     registry. Tables are drawn through CBZ.furnish, not authored here.
+     Math.random), once per arena.
+
+     It used to DRAW the tables here, into each building's group, at the first
+     survival frame. dressArena() re-runs after every mode change (reset()
+     clears `dressedArena`), and the arena is built once and kept, so every
+     trip to the menu and back stacked another set of tables and another set
+     of colliders into every house on the island.
      ============================================================ */
   let dressedArena = null;
   function h01(x, z, s) { return CBZ.hash01 ? CBZ.hash01(x, z, s) : 0.5; }
@@ -903,135 +1163,18 @@
     if (dressedArena === A2) return;
     dressedArena = A2;
     coverReset(); clearPoles(); clearPieces();
-    /* THE ISLAND IS NOT THE CITY'S ANCHOR REGISTRY. city/furniture.js
-       registers a propuse SEAT for every chair it draws, and that registry is
-       the city's — an arena's worth of anchors sitting in it would show up in
-       CBZ.propUseAudit() as unreachable seats belonging to a world the city
-       has never heard of. The kit wants the MESH, not the anchor, so the
-       registration seam is closed for the duration of the pass and handed
-       straight back. (propuse.js's own reset runs on a city build, so this is
-       belt and braces — but a ratchet measured mid-survival would have read a
-       number nobody could explain.) */
-    const savedSeatReg = CBZ.propRegisterSeat;
-    CBZ.propRegisterSeat = null;
-    try { dressArenaInner(A2); } finally { CBZ.propRegisterSeat = savedSeatReg; }
+    dressArenaInner(A2);
   }
   function dressArenaInner(A2) {
     const frag = A2.fragile || [];
     for (let i = 0; i < frag.length; i++) {
       const b = frag[i];
       if (!b || b.fallen || !b.group) continue;
-      const gy = b.gy != null ? b.gy : (A2.groundHeightAt ? A2.groundHeightAt(b.x, b.z) : 0);
-      /* WHERE A TABLE ACTUALLY FITS.
-         OWNER: "the table and chair were stupidly placed inside buildings that
-         aren't big enough for them." They were: a 2.1 x 1.25 table with four
-         chairs was dropped at a hashed spot anywhere in the middle (w - 4.4)
-         of the footprint, and nothing knew the room had a 3.6 m switchback
-         stair down its -x side, a door on -z, or, in a tower, a lift shaft in
-         the middle. So tables stood on the stairs, across the doorway and on
-         the lift car, and chairs went through walls.
-
-         Now the arena publishes each building's ground-floor plan (b.interior:
-         the room inside the walls and the strips that must stay walkable) and
-         a table goes only where its WHOLE footprint, chairs pulled out and a
-         walkway round it, lies in the room and clear of every one of those
-         strips. The biggest piece that fits wins: a four-seat dining table,
-         else a two-seat one, else a small sturdy table (still something to
-         get under), else nothing. Among the spots that fit it takes the one
-         nearest the middle of the free floor, which is where people put a
-         table. A second table only goes in if it fits clear of the first. */
-      const plan = b.interior;
-      if (CBZ.furnish && CBZ.furnish.table && plan) {
-        const buckets = new Map();
-        const TIERS = [
-          { len: 2.1, deep: 1.25, seats: 4 },
-          { len: 1.6, deep: 0.95, seats: 2 },
-          { len: 1.1, deep: 0.75, seats: 0 },
-        ];
-        const CLEAR = 0.4, WALL = 0.2, STEP = 0.2;
-        const placedRects = [];
-        const fits = function (r) {
-          if (r.x0 < plan.x0 + WALL || r.x1 > plan.x1 - WALL || r.z0 < plan.z0 + WALL || r.z1 > plan.z1 - WALL) return false;
-          const all = plan.keepOut.concat(placedRects);
-          for (let i = 0; i < all.length; i++) {
-            const k = all[i];
-            if (r.x1 > k.x0 && r.x0 < k.x1 && r.z1 > k.z0 && r.z0 < k.z1) return false;
-          }
-          return true;
-        };
-        // every centre + yaw where this tier fits, nearest the middle of the
-        // free floor first
-        const spotsFor = function (T) {
-          const out = [];
-          for (let yi = 0; yi < 2; yi++) {
-            const hx0 = T.len / 2 + 0.05, hz0 = T.deep / 2 + (T.seats ? 0.42 + 0.3 : 0.05);
-            const hx = (yi ? hz0 : hx0) + CLEAR, hz = (yi ? hx0 : hz0) + CLEAR;
-            for (let x = plan.x0 + hx; x <= plan.x1 - hx + 1e-6; x += STEP) {
-              for (let z = plan.z0 + hz; z <= plan.z1 - hz + 1e-6; z += STEP) {
-                const r = { x0: x - hx, x1: x + hx, z0: z - hz, z1: z + hz };
-                if (fits(r)) out.push({ lx: x, lz: z, yaw: yi ? Math.PI / 2 : 0, rect: r });
-              }
-            }
-          }
-          if (!out.length) return out;
-          let mx = 0, mz = 0;
-          for (const o of out) { mx += o.lx; mz += o.lz; }
-          mx /= out.length; mz /= out.length;
-          for (const o of out) o.score = Math.hypot(o.lx - mx, o.lz - mz) + (o.yaw ? 0.01 : 0);
-          out.sort(function (a, c) { return a.score - c.score; });
-          return out;
-        };
-        const want = 1 + (h01(b.x, b.z, 0x9a11) > 0.55 ? 1 : 0);
-        for (let k = 0; k < want; k++) {
-          let pick = null, tier = null;
-          for (const T of TIERS) {
-            const spots = spotsFor(T);
-            if (spots.length) { pick = spots[0]; tier = T; break; }
-          }
-          if (!pick) break;                       // this room has no floor left for a table
-          if (k > 0 && tier !== TIERS[0] && tier !== TIERS[1]) break;   // a second table must be a real one
-          placedRects.push(pick.rect);
-          const wx = b.x + pick.lx, wz = b.z + pick.lz;
-          const fy = b.floorTop != null ? b.floorTop : gy;      // the floor you stand on, not the lot
-          // host draw: the table belongs to the BUILDING's group, so it goes
-          // down with it when the building pancakes. Boxes are BUFFERED per
-          // colour and merged once per building below: one mesh per table
-          // leg was 1,760 draw calls across the island for furniture that
-          // sits behind walls.
-          const host = function (dx, dy, dz, dw, dh, dd, color, oo) {
-            const g = new THREE.BoxGeometry(dw, dh, dd);
-            g.translate(dx - b.x, dy - gy, dz - b.z);
-            const key = color + (oo && oo.cast ? "c" : "");
-            let bk = buckets.get(key);
-            if (!bk) { bk = { color: color, cast: !!(oo && oo.cast), geos: [], cols: [] }; buckets.set(key, bk); }
-            bk.geos.push(g);
-            if (oo && oo.solid) {
-              const c = { minX: dx - dw / 2, maxX: dx + dw / 2, minZ: dz - dd / 2, maxZ: dz + dd / 2, ref: null, y0: oo.y0, y1: oo.y1 };
-              if (CBZ.colliders) CBZ.colliders.push(c);
-              if (b.colliders) b.colliders.push(c);
-              bk.cols.push(c);
-            }
-            return true;
-          };
-          try {
-            CBZ.furnish.table(wx, fy, wz, pick.yaw, { box: host, ox: 0, oz: 0, solid: true, seats: tier.seats, len: tier.len, deep: tier.deep, tone: "warm" });
-            coverAdd(wx, fy, wz, tier.seats ? 1.0 : 0.75, "table", b);
-            A.kitTables++;
-          } catch (e) { /* the kit refused; the island simply has no table here */ }
-        }
-        // one mesh per colour for this building's furniture
-        const BGU = THREE.BufferGeometryUtils;
-        buckets.forEach(function (bk) {
-          const geos = BGU && BGU.mergeBufferGeometries ? [BGU.mergeBufferGeometries(bk.geos, false)] : bk.geos;
-          for (let gi = 0; gi < geos.length; gi++) {
-            const m = new THREE.Mesh(geos[gi], CBZ.cmat ? CBZ.cmat(bk.color) : new THREE.MeshLambertMaterial({ color: bk.color }));
-            m.castShadow = bk.cast; m.receiveShadow = true;
-            b.group.add(m);
-            for (let ci = 0; ci < bk.cols.length; ci++) if (!bk.cols[ci].ref) bk.cols[ci].ref = m;
-          }
-          if (geos[0] !== bk.geos[0]) for (let gi = 0; gi < bk.geos.length; gi++) bk.geos[gi].dispose();
-        });
-        if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      // the building's own tables and desks, already standing in its rooms
+      const cv = b.interior && b.interior.covers;
+      if (cv) for (let k = 0; k < cv.length; k++) {
+        coverAdd(cv[k].x, cv[k].y, cv[k].z, cv[k].r, "table", b);
+        A.kitTables++;
       }
       // ---- A UTILITY POLE beside roughly a third of buildings -----------
       // It stands in the street on the building's OWN outward bearing, so
@@ -1042,6 +1185,18 @@
         const nx = which === 2 ? -1 : which === 3 ? 1 : 0;
         const nz = which === 0 ? -1 : which === 1 ? 1 : 0;
         const px = b.x + nx * (b.w / 2 + 5.2), pz = b.z + nz * (b.d / 2 + 5.2);
+        /* NOT IN THE CARRIAGEWAY, NOT THROUGH A FENCE. The service drop is
+           DROP_LEN long, so the pole's spot is fixed 5.2 m off the wall; on
+           a street-facing side that was the middle of the road, and on a yard
+           side it could stand in the fence line. Such a side gets no pole. */
+        if (A2.onRoad && A2.onRoad(px, pz, 0.8, 0.8)) continue;
+        const fl = A2.dressing && A2.dressing.fences;
+        let inFence = false;
+        if (fl) for (let q = 0; q < fl.length && !inFence; q++) {
+          const f = fl[q];
+          if (px > Math.min(f.x0, f.x1) - 0.6 && px < Math.max(f.x0, f.x1) + 0.6 && pz > Math.min(f.z0, f.z1) - 0.6 && pz < Math.max(f.z0, f.z1) + 0.6) inFence = true;
+        }
+        if (inFence) continue;
         const py = A2.groundHeightAt ? A2.groundHeightAt(px, pz) : 0;
         poleAdd(px, py, pz, Math.atan2(nx, nz), nx, nz);
       }

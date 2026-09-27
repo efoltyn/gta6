@@ -284,6 +284,17 @@
     MATS[key] = m;
     return m;
   }
+  // THE SAME SURFACES ELSEWHERE. The disaster island's walk-in houses and
+  // towers (world/disaster_arena.js) finish their floors, walls and ceilings
+  // with these exact canvases instead of a second texture library. Texture
+  // only: the caller owns its material (the island has no night uniform).
+  // UVs are world metres / FITOUT_TEX_SCALE[key].
+  CBZ.fitoutTex = function (key) {
+    if (!PAINT[key]) return null;
+    const m = texMat(key);
+    return (m && m.map) || null;
+  };
+  CBZ.FITOUT_TEX_SCALE = TEX_SCALE;
 
   /* ========================================================================
      3. THE BUILDER — boxes into merge buckets, baked light, colliders.
