@@ -203,7 +203,8 @@
   function makeBot(x, z, r) {
     const outfit = pick(OUTFIT, r());
     const skin = pick(SKIN, r());
-    const ch = makeCharacter({
+    const swim = CBZ.beachSwimwear ? CBZ.beachSwimwear(r, skin, HAIR) : null;   // Shark Sim: swimwear (city/beach.js)
+    const ch = makeCharacter(swim || {
       legs: pick(OUTFIT, r()), torso: outfit, collar: outfit, arms: outfit,
       skin: skin, hair: pick(HAIR, r()), shoes: 0x2b2b2b,
     });
@@ -213,7 +214,7 @@
     const name = pickName(r);
     const b = {
       char: ch, group: ch.group, pos: ch.group.position,
-      name: name, tag: null, outfit: outfit, skin: skin,
+      name: name, tag: null, outfit: swim ? swim.cloth : outfit, skin: skin,
       hp: 100, dead: false, deadT: 0, culled: false,
       baseSpeed: 2.0 + r() * 1.0, speed: 0,
       target: new THREE.Vector3(x, 0, z),

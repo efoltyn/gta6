@@ -1319,12 +1319,29 @@
        this game under the waterline forever), and the seabed clamp has nothing
        underneath a body that is over the water. Both come back on landing. */
     if (s.air) return;
+    /* A SPECIES LAYER THAT OWNS y THIS FRAME (wildlife_orca.js's breath and
+       acts, when marine_predation is steering an orca through this mover)
+       claims it for two frames; two easings toward two targets is a blend,
+       not a depth. The claim lapses on its own. */
+    if (a._depthClaim > 0) { a._depthClaim--; return; }
     const grp = a.group;
     const surf = surfaceAt(grp.position.x, grp.position.z, t);
     s.dive += (s.diveWant - s.dive) * Math.min(1, dt * (s.meg ? 0.85 : 1.3));
     let y = surf - s.dive;
     const draft = a.swimDepth || 2;
-    const sub = draft * 0.92;
+    /* THE CEILING IS THE BODY'S, when the species can say where its back is.
+       draft x 0.92 was written for a shark's hull; an orca rides on a deeper
+       hull and its draft only grows as size^0.9, so under this mover an
+       average cow broke the surface ~0.25 m higher than its own depth track
+       allows (and a big one ~0.9 m). A species row may publish surfCeil(a,
+       draft) -> the shallowest origin depth that leaves only what should
+       show out of the water; everything else keeps the shark number. */
+    const sp = a.species;
+    let sub = draft * 0.92;
+    if (sp && typeof sp.surfCeil === "function") {
+      const c = +sp.surfCeil(a, draft);
+      if (c > 0 && isFinite(c)) sub = c;
+    }
     if (y > surf - sub) y = surf - sub;               // 1. keep the torso under
     if (CBZ.cityAquaticBedRestY) {                    // 2. ...but never in the bed
       const lift = CBZ.cityAquaticBedLift

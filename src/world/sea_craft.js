@@ -1509,6 +1509,479 @@
   CBZ.seaCraftCapsize = onCapsize;      // the storyboard and the tests stage it
 
   // ============================================================
+  //  §5b. THE HULL IS A SOLID — shark vs boat, and boat vs boat
+  // ============================================================
+  /* OWNER: "I can kind of phase through boats a little bit in the shark one
+     ... there should be a mesh collider for boats and sharks."
+
+     There was no collider. Every contact between an animal and a hull was a
+     VERB — the bite scan's reach test, the ram's 0.35 s cooldown, the wild
+     tip's centre-to-centre distance — and none of them ever stopped a body.
+     So a shark that did not bite simply swam through the boat, and one that
+     did bite kept swimming into it for the rest of the swing.
+
+     THE BOAT'S SOLID IS MEASURED OFF ITS OWN SKIN. The first time any body
+     comes near a model, every `hullSurface` mesh in its group (the lofted
+     shell water_hulls.js hands to hull_loft.js) is walked once in the boat's
+     own frame and binned into COL_N stations stern to bow: the half-beam, the
+     keel, the sheer and the half-width down at the keel (deadrise / round
+     bilge). That table, cached per model, IS the collider: at any station
+     the section is full beam above half depth and narrows linearly to the
+     keel width, the plan tapers exactly as the drawn hull tapers into its
+     stem, and it is closed by the keel below, the sheer on top and the
+     transom and stem planes at the ends. A model with no lofted skin gets
+     the same table synthesised from loa / beam / draft / freeboard.
+
+     THE ANIMAL IS ITS OWN BODY. A chain of seven spheres down the named
+     *Hull mesh's long axis, radius following a fusiform profile off the
+     trunk's measured girth (thin at the tail and snout, full at the
+     shoulder), posed by the live heading AND pitch. It is a 3D test in the
+     boat's live frame (its pitch, its heel, capsized included), so a shark
+     well under the keel swims under and one at the surface hits the side.
+
+     ON CONTACT the body is put back on the surface along the contact normal
+     (penetration drawn: zero), the part of its velocity going INTO the hull
+     is taken off in proportion to the hull's share of the combined mass (a
+     yacht stops a great white dead; a megalodon carries on into a kayak and
+     SHOVES it), and the hull gets the other side of that: its share of the
+     separation next tick, a shove, and a heel impulse off the real contact
+     lever. A fast hit (closing >= RAM_MIN) by the player is the existing
+     ram, untouched. THE BITE IS SPARED: while the jaws are committed to THIS
+     hull the head spheres stand down, so the mouth still reaches the rail —
+     the bite's own surface stop (capBiteStep / jawInHull) owns the head. */
+  const COL_N = 16;
+  const COL_T = [0.05, 0.19, 0.35, 0.51, 0.67, 0.81, 0.95];   // tail -> snout
+  const COL_P = [0.28, 0.62, 0.92, 1.00, 0.90, 0.66, 0.52];   // radius / girth
+  const COL_HEAD = 5;                                          // 5, 6 = the head
+  const RAM_MIN = 3.0;                                         // m/s closing
+  const _shapeBySpec = new WeakMap();
+  const _colM = new THREE.Matrix4(), _colInv = new THREE.Matrix4();
+  const _colV = new THREE.Vector3(), _colL = new THREE.Vector3(), _colN = new THREE.Vector3();
+  const _colQ = new THREE.Quaternion(), _colBox = new THREE.Box3();
+  const _sd = { nx: 0, ny: 0, nz: 0 };
+  const _capOut = { x0: 0, x1: 0, R: 0 };
+  const COLA = { contacts: 0, rams: 0, nudges: 0, boatPairs: 0, maxPen: 0 };
+
+  function newShape(z0, z1) {
+    const n = COL_N;
+    return {
+      n: n, z0: z0, z1: z1, dz: Math.max(0.05, (z1 - z0) / (n - 1)),
+      hb: new Float32Array(n), wk: new Float32Array(n),
+      keel: new Float32Array(n), sheer: new Float32Array(n),
+      R: 0, ext: 0, hbMax: 0, src: "",
+    };
+  }
+  function finishShape(S) {
+    let hbM = 0, ext = 0;
+    for (let j = 0; j < S.n; j++) {
+      if (S.hb[j] > hbM) hbM = S.hb[j];
+      ext = Math.max(ext, Math.abs(S.keel[j]), Math.abs(S.sheer[j]));
+    }
+    S.hbMax = hbM; S.ext = ext;
+    S.R = Math.hypot(Math.max(Math.abs(S.z0), Math.abs(S.z1)), hbM);
+    return S;
+  }
+  // The fallback: a planing-hull plan off the registry row, stern to stem.
+  function shapeFromSpec(spec) {
+    const loa = num(spec && spec.loa, 6), beam = num(spec && spec.beam, 2);
+    const draft = num(spec && spec.draft, 0.4);
+    const fb = num(spec && spec.freeboard, num(spec && spec.stab && spec.stab.freeboard, loa * 0.09));
+    const so = clamp(num(spec && spec.sternOffset, loa * 0.5), loa * 0.3, loa * 0.7);
+    const S = newShape(-so, loa - so);
+    for (let j = 0; j < S.n; j++) {
+      const t = j / (S.n - 1);
+      const hb = beam * 0.5 * (t < 0.55 ? 0.84 + 0.16 * t / 0.55 : Math.sqrt(Math.max(0, (1 - t) / 0.45)));
+      S.hb[j] = hb; S.wk[j] = hb * 0.3;
+      S.keel[j] = -draft * (t < 0.7 ? 1 : 0.25 + 0.75 * (1 - t) / 0.3);
+      S.sheer[j] = fb * (1 + 0.25 * t);
+    }
+    S.src = "spec";
+    return finishShape(S);
+  }
+  /* The measured table. P is xyz in the BOAT's frame (+z bow, +x one side,
+     y up from the group origin). */
+  function shapeFromPoints(P, count, spec) {
+    let z0 = Infinity, z1 = -Infinity;
+    for (let i = 0; i < count; i++) { const z = P[i * 3 + 2]; if (z < z0) z0 = z; if (z > z1) z1 = z; }
+    if (!(z1 - z0 > 0.3)) return null;
+    const S = newShape(z0, z1), n = S.n;
+    const cnt = new Int32Array(n);
+    for (let j = 0; j < n; j++) { S.keel[j] = Infinity; S.sheer[j] = -Infinity; }
+    for (let i = 0; i < count; i++) {
+      const x = Math.abs(P[i * 3]), y = P[i * 3 + 1];
+      const j = clamp(Math.round((P[i * 3 + 2] - z0) / S.dz), 0, n - 1);
+      if (x > S.hb[j]) S.hb[j] = x;
+      if (y < S.keel[j]) S.keel[j] = y;
+      if (y > S.sheer[j]) S.sheer[j] = y;
+      cnt[j]++;
+    }
+    // stations the skin did not put a vertex in borrow from their neighbours
+    for (let j = 0; j < n; j++) {
+      if (cnt[j]) continue;
+      let a = j - 1, b = j + 1;
+      while (a >= 0 && !cnt[a]) a--;
+      while (b < n && !cnt[b]) b++;
+      const A = a >= 0 ? a : b, B = b < n ? b : a;
+      if (A < 0 || A >= n) return null;
+      const u = B === A ? 0 : (j - A) / (B - A);
+      S.hb[j] = S.hb[A] + (S.hb[B] - S.hb[A]) * u;
+      S.keel[j] = S.keel[A] + (S.keel[B] - S.keel[A]) * u;
+      S.sheer[j] = S.sheer[A] + (S.sheer[B] - S.sheer[A]) * u;
+    }
+    // the half-width down at the keel: the bottom 15% of each section
+    for (let i = 0; i < count; i++) {
+      const j = clamp(Math.round((P[i * 3 + 2] - z0) / S.dz), 0, n - 1);
+      const y = P[i * 3 + 1];
+      if (y < S.keel[j] + 0.15 * (S.sheer[j] - S.keel[j])) {
+        const x = Math.abs(P[i * 3]);
+        if (x > S.wk[j]) S.wk[j] = x;
+      }
+    }
+    for (let j = 0; j < n; j++) if (!cnt[j] || S.wk[j] > S.hb[j]) S.wk[j] = Math.min(S.hb[j], Math.max(S.wk[j], S.hb[j] * 0.3));
+    // a RIB's beam is its tubes, which are not the lofted skin: the registry's
+    // beam is a floor on what the solid is allowed to be
+    let hbM = 0;
+    for (let j = 0; j < n; j++) hbM = Math.max(hbM, S.hb[j]);
+    const want = num(spec && spec.beam, 0) * 0.5;
+    if (want > 0 && hbM > 0.05 && hbM < want * 0.9) {
+      const k = want / hbM;
+      for (let j = 0; j < n; j++) { S.hb[j] *= k; S.wk[j] *= k; }
+    }
+    S.src = "mesh";
+    return finishShape(S);
+  }
+  function shapeOf(rec) {
+    const spec = rec && rec._hullSpec;
+    if (!spec) return null;
+    let S = _shapeBySpec.get(spec);
+    if (S) return S;
+    S = null;
+    const g = rec.group;
+    if (g) {
+      try {
+        g.updateMatrixWorld(true);
+        _colInv.copy(g.matrixWorld).invert();
+        const meshes = [];
+        let total = 0;
+        g.traverse(function (o) {
+          if (o.isMesh && o.userData && o.userData.hullSurface && o.geometry && o.geometry.attributes &&
+              o.geometry.attributes.position) { meshes.push(o); total += o.geometry.attributes.position.count; }
+        });
+        if (total) {
+          const P = new Float32Array(total * 3);
+          let k = 0;
+          for (let m = 0; m < meshes.length; m++) {
+            _colM.multiplyMatrices(_colInv, meshes[m].matrixWorld);
+            const pos = meshes[m].geometry.attributes.position;
+            for (let i = 0; i < pos.count; i++) {
+              _colV.fromBufferAttribute(pos, i).applyMatrix4(_colM);
+              P[k++] = _colV.x; P[k++] = _colV.y; P[k++] = _colV.z;
+            }
+          }
+          S = shapeFromPoints(P, total, spec);
+        }
+      } catch (e) { S = null; }
+    }
+    if (!S) S = shapeFromSpec(spec);
+    _shapeBySpec.set(spec, S);
+    return S;
+  }
+
+  /* Signed distance from a point in the boat's frame to the solid, and the
+     outward normal. Inside, the nearest face wins; outside, the positive face
+     terms combine the way a box's do, so a corner is a corner. */
+  function hullSdf(S, x, y, z, out) {
+    const zc = z < S.z0 ? S.z0 : (z > S.z1 ? S.z1 : z);
+    const f = (zc - S.z0) / S.dz;
+    let i = Math.floor(f);
+    if (i > S.n - 2) i = S.n - 2;
+    if (i < 0) i = 0;
+    const u = f - i, dz = S.dz;
+    const hb = S.hb[i] + (S.hb[i + 1] - S.hb[i]) * u, hbz = (S.hb[i + 1] - S.hb[i]) / dz;
+    const wk = S.wk[i] + (S.wk[i + 1] - S.wk[i]) * u, wkz = (S.wk[i + 1] - S.wk[i]) / dz;
+    const k = S.keel[i] + (S.keel[i + 1] - S.keel[i]) * u, kz = (S.keel[i + 1] - S.keel[i]) / dz;
+    const s = S.sheer[i] + (S.sheer[i + 1] - S.sheer[i]) * u, sz = (S.sheer[i + 1] - S.sheer[i]) / dz;
+    const yF = k + Math.max(0.05, s - k) * 0.5;
+    let w, wy, wz;
+    if (y >= yF) { w = hb; wy = 0; wz = hbz; }
+    else if (y <= k) { w = wk; wy = 0; wz = wkz; }
+    else { const t = (y - k) / (yF - k); w = wk + (hb - wk) * t; wy = (hb - wk) / (yF - k); wz = wkz + (hbz - wkz) * t; }
+    const sx = x >= 0 ? 1 : -1;
+    /* five faces: side, keel, sheer, transom, stem. THE SIDE PUSHES LEVEL.
+       Its true normal leans down along the deadrise, and resolving along it
+       walked a shark shouldering the topsides down the V and out under the
+       keel — the jaws dragged off the rail and the "hit" became a dive. The
+       width still follows the section (w(y)); only the push is horizontal,
+       and a body genuinely under the bottom is the keel face's to answer. */
+    wy = 0;
+    const gS = Math.sqrt(1 + wz * wz), gB = Math.sqrt(1 + kz * kz), gT = Math.sqrt(1 + sz * sz);
+    const d0 = (Math.abs(x) - w) / gS, d1 = (k - y) / gB, d2 = (y - s) / gT, d3 = S.z0 - z, d4 = z - S.z1;
+    let dm = d0, nx = sx / gS, ny = 0, nz = -wz / gS;
+    if (d1 > dm) { dm = d1; nx = 0; ny = -1 / gB; nz = kz / gB; }
+    if (d2 > dm) { dm = d2; nx = 0; ny = 1 / gT; nz = -sz / gT; }
+    if (d3 > dm) { dm = d3; nx = 0; ny = 0; nz = -1; }
+    if (d4 > dm) { dm = d4; nx = 0; ny = 0; nz = 1; }
+    if (dm > 0) {
+      let ax = 0, ay = 0, az = 0, q = 0;
+      if (d0 > 0) { q += d0 * d0; ax += d0 * sx / gS; ay -= d0 * wy / gS; az -= d0 * wz / gS; }
+      if (d1 > 0) { q += d1 * d1; ay -= d1 / gB; az += d1 * kz / gB; }
+      if (d2 > 0) { q += d2 * d2; ay += d2 / gT; az -= d2 * sz / gT; }
+      if (d3 > 0) { q += d3 * d3; az -= d3; }
+      if (d4 > 0) { q += d4 * d4; az += d4; }
+      const L = Math.hypot(ax, ay, az) || 1;
+      out.nx = ax / L; out.ny = ay / L; out.nz = az / L;
+      return Math.sqrt(q);
+    }
+    out.nx = nx; out.ny = ny; out.nz = nz;
+    return dm;
+  }
+
+  /* THE ANIMAL'S TRUNK, in metres at its live size: where the named *Hull
+     mesh starts and ends along the body's +X, and its girth. Measured once in
+     the group's own frame, scaled live (length off scale.x, girth off the
+     fed/lean scale.y/z). */
+  function capsuleOf(a, out) {
+    let c = a._hullCap;
+    if (c === undefined) {
+      c = null;
+      const g = a.group;
+      if (g) {
+        try {
+          let hull = null;
+          g.traverse(function (o) { if (!hull && o.isMesh && o.geometry && /hull$/i.test(o.name || "")) hull = o; });
+          if (hull) {
+            if (!hull.geometry.boundingBox) hull.geometry.computeBoundingBox();
+            g.updateMatrixWorld(true);
+            _colM.multiplyMatrices(_colInv.copy(g.matrixWorld).invert(), hull.matrixWorld);
+            _colBox.copy(hull.geometry.boundingBox).applyMatrix4(_colM);
+            const bx = _colBox.max.x - _colBox.min.x;
+            if (bx > 0.2 && isFinite(bx)) {
+              c = { x0: _colBox.min.x, x1: _colBox.max.x, abs: false,
+                    R: ((_colBox.max.y - _colBox.min.y) + (_colBox.max.z - _colBox.min.z)) * 0.25 };
+            }
+          }
+        } catch (e) { c = null; }
+      }
+      if (!c) { const L = lenOf(a) || 3; c = { x0: -0.5 * L, x1: 0.5 * L, R: 0.09 * L, abs: true }; }
+      a._hullCap = c;
+    }
+    const sc = c.abs ? null : (a.group && a.group.scale);
+    const sx = sc ? Math.abs(sc.x) : 1, sg = sc ? (Math.abs(sc.y) + Math.abs(sc.z)) * 0.5 : 1;
+    out.x0 = c.x0 * sx; out.x1 = c.x1 * sx; out.R = Math.max(0.08, c.R * sg);
+    return out;
+  }
+
+  /* CBZ.marineHullContact(a, B) -> number of hulls touched.
+     B is the body, and is WRITTEN BACK: { x, y, z } origin, { ax, ay, az }
+     its unit +X (the way the snout points), { vx, vy, vz } its velocity,
+     skipHeadOf: the hull its jaws are committed to (head spheres stand down
+     for that one), ramOK: a hard hit may be the ram (the player's). */
+  function marineHullContact(a, B) {
+    if (!craft.length || !a || !B) return 0;
+    const cap = capsuleOf(a, _capOut);
+    const reach = Math.max(Math.abs(cap.x0), Math.abs(cap.x1)) + cap.R;
+    const mA = Math.max(0.01, tonnesOf(a));
+    let hits = 0;
+    for (let c = 0; c < craft.length; c++) {
+      const rec = craft[c];
+      if (!rec || rec.dead || rec._sinking || rec._engulf || rec._hidden || !rec.group) continue;
+      const S = shapeOf(rec);
+      if (!S) continue;
+      const gp = rec.group.position;
+      const dx = B.x - gp.x, dz = B.z - gp.z, rr = S.R + reach + 0.3;
+      if (dx * dx + dz * dz > rr * rr) continue;
+      if (Math.abs(B.y - gp.y) > S.ext + reach + 0.3) continue;
+      _colQ.copy(rec.group.quaternion).invert();
+      const mB = Math.max(0.01, num(rec._hullSpec.massT, 1));
+      const shareA = mB / (mA + mB);
+      const skipHead = B.skipHeadOf === rec;
+      const vbx = num(rec._cvx, 0), vbz = num(rec._cvz, 0);
+      let touched = false, closing = 0, push = 0, cx = 0, cy = 0, cz = 0, nx = 0, ny = 0, nz = 0;
+      for (let it = 0; it < 4; it++) {
+        let best = 0.001, bi = -1, bs = 0, br = 0;
+        for (let i = 0; i < COL_T.length; i++) {
+          if (skipHead && i >= COL_HEAD) continue;
+          const s = cap.x0 + (cap.x1 - cap.x0) * COL_T[i];
+          const r = cap.R * COL_P[i];
+          _colL.set(B.x + B.ax * s - gp.x, B.y + B.ay * s - gp.y, B.z + B.az * s - gp.z).applyQuaternion(_colQ);
+          const d = hullSdf(S, _colL.x, _colL.y, _colL.z, _sd);
+          if (r - d > best) { best = r - d; bi = i; bs = s; br = r; _colN.set(_sd.nx, _sd.ny, _sd.nz); }
+        }
+        if (bi < 0) break;
+        touched = true;
+        if (best > COLA.maxPen) COLA.maxPen = best;
+        _colN.applyQuaternion(rec.group.quaternion);
+        nx = _colN.x; ny = _colN.y; nz = _colN.z;
+        // THE BODY IS PUT BACK ON THE SURFACE NOW, all of it — nothing is
+        // drawn inside a boat. The hull's share of the separation is paid as
+        // a shove next tick (the water owns her height, so never vertical).
+        B.x += nx * best; B.y += ny * best; B.z += nz * best;
+        push += best;
+        rec._colDX = num(rec._colDX, 0) - nx * best * (1 - shareA);
+        rec._colDZ = num(rec._colDZ, 0) - nz * best * (1 - shareA);
+        cx = B.x + B.ax * bs - nx * br; cy = B.y + B.ay * bs - ny * br; cz = B.z + B.az * bs - nz * br;
+        // the velocity INTO the hull, taken off in the hull's share of the
+        // mass; the vertical all to the animal (the sea holds the boat up)
+        const vn = (B.vx - vbx) * nx + B.vy * ny + (B.vz - vbz) * nz;
+        if (vn < 0) {
+          if (-vn > closing) closing = -vn;
+          B.vx -= nx * vn * shareA; B.vz -= nz * vn * shareA; B.vy -= ny * vn;
+        }
+      }
+      if (!touched) continue;
+      hits++;
+      COLA.contacts++;
+      hullContactReact(a, rec, B, closing, mA, mB, cx, cy, cz, nx, ny, nz);
+    }
+    return hits;
+  }
+  CBZ.marineHullContact = marineHullContact;
+
+  function hullContactReact(a, rec, B, closing, mA, mB, px, py, pz, nx, ny, nz) {
+    if (B.ramOK && closing >= RAM_MIN) {
+      if (!(rec._ramCd > 0)) {
+        COLA.rams++;
+        CBZ.sharkRamHull(a, rec, { from: ny < -0.6 ? "under" : "ram", x: px, z: pz, speed: closing });
+      }
+      return;
+    }
+    if (closing < 0.15 || rec._nudgeCd > 0) return;
+    rec._nudgeCd = 0.1;
+    /* THE NUDGE. The same collision, below ram speed or by an animal that
+       is only swimming: the momentum the hull just absorbed, (reduced mass x
+       closing speed), turned about her roll axis by the real lever — a push
+       on the topsides acts at its height, a push up under the bottom at its
+       distance off the centreline — and a shove along the contact normal. */
+    const dp = (mA * mB / (mA + mB)) * closing;
+    const gp = rec.group.position;
+    const h = rec.heading || 0;
+    const lat = Math.abs((px - gp.x) * Math.cos(h) - (pz - gp.z) * Math.sin(h));
+    const nh = Math.sqrt(Math.max(0, 1 - ny * ny));
+    const lever = Math.max(0.1, nh * Math.abs(py - gp.y) + Math.abs(ny) * lat);
+    if (typeof CBZ.hullHeelImpulse === "function") {
+      try { CBZ.hullHeelImpulse(rec, dp * lever / 0.1, { from: ny < -0.6 ? "under" : "nudge", x: px, z: pz, dur: 0.1 }); } catch (e) {}
+    } else {
+      heelFallback(rec, dp * lever * 0.5 * ((px - gp.x) * Math.cos(h) - (pz - gp.z) * Math.sin(h) >= 0 ? -1 : 1));
+    }
+    const sh = clamp(dp / mB, 0, 4);
+    rec.vx = num(rec.vx, 0) - nx * sh;
+    rec.vz = num(rec.vz, 0) - nz * sh;
+    COLA.nudges++;
+  }
+
+  /* BOAT VS BOAT. Cheap and honest enough: each hull is a 2D capsule down
+     its measured keel line (its own stern-to-stem span, its own widest
+     half-beam), and two that overlap are parted by mass along the line
+     between their closest points, the heavier one moving less. */
+  const _ss = { d2: 0, px: 0, pz: 0, qx: 0, qz: 0 };
+  function segSeg2(ax, az, bx, bz, cx, cz, dx, dz, o) {
+    const ux = bx - ax, uz = bz - az, vx = dx - cx, vz = dz - cz, wx = ax - cx, wz = az - cz;
+    const A = ux * ux + uz * uz, Bv = ux * vx + uz * vz, C = vx * vx + vz * vz;
+    const D = ux * wx + uz * wz, E = vx * wx + vz * wz, den = A * C - Bv * Bv;
+    let s = den > 1e-9 ? clamp((Bv * E - C * D) / den, 0, 1) : 0;
+    let t = C > 1e-9 ? (Bv * s + E) / C : 0;
+    if (t < 0) { t = 0; s = A > 1e-9 ? clamp(-D / A, 0, 1) : 0; }
+    else if (t > 1) { t = 1; s = A > 1e-9 ? clamp((Bv - D) / A, 0, 1) : 0; }
+    o.px = ax + ux * s; o.pz = az + uz * s; o.qx = cx + vx * t; o.qz = cz + vz * t;
+    const ex = o.px - o.qx, ez = o.pz - o.qz;
+    o.d2 = ex * ex + ez * ez;
+    return o;
+  }
+  function boatSeg(rec, S, o) {
+    const h = rec.heading || 0, fx = Math.sin(h), fz = Math.cos(h);
+    const r = Math.max(0.2, S.hbMax);
+    const a = S.z0 + r, b = Math.max(a, S.z1 - r);
+    o.ax = rec.pos.x + fx * a; o.az = rec.pos.z + fz * a;
+    o.bx = rec.pos.x + fx * b; o.bz = rec.pos.z + fz * b;
+    o.r = r; o.m = Math.max(0.01, num(rec._hullSpec.massT, 1));
+    return o;
+  }
+  const _sa = {}, _sb = {};
+  function boatPairs() {
+    for (let i = 0; i < craft.length; i++) {
+      const A = craft[i];
+      if (!A || A.dead || A._sinking || A._engulf || A._hidden || !A.pos) continue;
+      const SA = shapeOf(A);
+      if (!SA) continue;
+      for (let j = i + 1; j < craft.length; j++) {
+        const Bc = craft[j];
+        if (!Bc || Bc.dead || Bc._sinking || Bc._engulf || Bc._hidden || !Bc.pos) continue;
+        const SB = shapeOf(Bc);
+        if (!SB) continue;
+        const dx = A.pos.x - Bc.pos.x, dz = A.pos.z - Bc.pos.z, rr = SA.R + SB.R;
+        if (dx * dx + dz * dz > rr * rr) continue;
+        boatSeg(A, SA, _sa); boatSeg(Bc, SB, _sb);
+        segSeg2(_sa.ax, _sa.az, _sa.bx, _sa.bz, _sb.ax, _sb.az, _sb.bx, _sb.bz, _ss);
+        const want = _sa.r + _sb.r;
+        if (_ss.d2 >= want * want) continue;
+        const d = Math.sqrt(_ss.d2);
+        let nx = 1, nz = 0;
+        if (d > 1e-4) { nx = (_ss.px - _ss.qx) / d; nz = (_ss.pz - _ss.qz) / d; }
+        else { const l = Math.hypot(dx, dz) || 1; nx = dx / l; nz = dz / l; }
+        const pen = want - d, kA = _sb.m / (_sa.m + _sb.m);
+        A.pos.x += nx * pen * kA; A.pos.z += nz * pen * kA;
+        Bc.pos.x -= nx * pen * (1 - kA); Bc.pos.z -= nz * pen * (1 - kA);
+        // the way on is spent against the other hull
+        A.v = num(A.v, 0) * 0.96; Bc.v = num(Bc.v, 0) * 0.96;
+        COLA.boatPairs++;
+      }
+    }
+  }
+  function applyContactShoves(dt) {
+    for (let i = 0; i < craft.length; i++) {
+      const rec = craft[i];
+      if (!rec || !rec.pos) continue;
+      if (rec._nudgeCd > 0) rec._nudgeCd -= dt;
+      if (rec._colDX || rec._colDZ) {
+        if (!rec._sinking && !rec._engulf) {
+          rec.pos.x += clamp(num(rec._colDX, 0), -1.5, 1.5);
+          rec.pos.z += clamp(num(rec._colDZ, 0), -1.5, 1.5);
+        }
+        rec._colDX = 0; rec._colDZ = 0;
+      }
+    }
+  }
+  // every hull's real ground velocity, whatever mover drove it this frame
+  function trackCraftVel(rec, dt) {
+    if (rec._lpx !== undefined) {
+      rec._cvx = (rec.pos.x - rec._lpx) / dt;
+      rec._cvz = (rec.pos.z - rec._lpz) / dt;
+    }
+    rec._lpx = rec.pos.x; rec._lpz = rec.pos.z;
+  }
+
+  /* THE WILD ONES. Every aquatic animal in the sea, after all of their
+     movers have run (wildlife 47.1, predation 47.15, orca 47.2, shark 47.22)
+     and before anything is drawn. The ridden animal is resolved inside its
+     own ride step (wildlife_tame.js), so it is skipped here. A wild body
+     never rams through this — marine_predation's tip and bite own the
+     deliberate hits — so a shark that only swims into a hull nudges it. */
+  const _wb = { x: 0, y: 0, z: 0, ax: 1, ay: 0, az: 0, vx: 0, vy: 0, vz: 0, skipHeadOf: null, ramOK: false };
+  CBZ.onUpdate(47.3, function (dt) {
+    if (!craft.length) return;
+    const list = CBZ.cityWildlife;
+    if (!list || !list.length) return;
+    dt = clamp(num(dt, 0.016), 0.001, 0.05);
+    const mount = CBZ.player && CBZ.player._aquaticMount;
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      if (!a || a.dead || a === mount || !a.species || !a.species.aquatic || !a.group || !a.group.parent) continue;
+      const gp = a.group.position;
+      if (a._hcX === undefined) { a._hcX = gp.x; a._hcY = gp.y; a._hcZ = gp.z; }
+      _colV.set(1, 0, 0).applyQuaternion(a.group.quaternion);
+      _wb.x = gp.x; _wb.y = gp.y; _wb.z = gp.z;
+      _wb.ax = _colV.x; _wb.ay = _colV.y; _wb.az = _colV.z;
+      _wb.vx = (gp.x - a._hcX) / dt; _wb.vy = (gp.y - a._hcY) / dt; _wb.vz = (gp.z - a._hcZ) / dt;
+      _wb.skipHeadOf = (a._mp && a._mp.shipTarget) || null;
+      if (marineHullContact(a, _wb)) {
+        gp.x = _wb.x; gp.y = _wb.y; gp.z = _wb.z;
+        if (a._waterMove) { a._waterMove.x = gp.x; a._waterMove.z = gp.z; }
+      }
+      a._hcX = gp.x; a._hcY = gp.y; a._hcZ = gp.z;
+    }
+  });
+
+  // ============================================================
   //  §6. DAMAGE — a chunk out of the hull, and going down
   // ============================================================
   const _box3 = new THREE.Box3();
@@ -2095,10 +2568,14 @@
     const spot = threatT <= 0;
     if (spot) { threatT = 0.3; spotTick(); }
     tierTick(dt);
+    // §5b: the hulls' share of last frame's contacts, then hull vs hull
+    applyContactShoves(dt);
+    boatPairs();
     for (let i = craft.length - 1; i >= 0; i--) {
       const rec = craft[i];
       if (!rec || !rec.group || !rec.group.parent) { craft.splice(i, 1); continue; }
       if (rec._ramCd > 0) rec._ramCd -= dt;
+      trackCraftVel(rec, dt);
 
       if (rec._engulf) { engulfTick(rec, dt); continue; }
       if (rec._sinking) {
@@ -2180,6 +2657,8 @@
         sunk: AUDIT.sunk, holed: AUDIT.holed, overboard: AUDIT.overboard,
         rams: AUDIT.rams, bites: AUDIT.bites,
         biggestEatenM: AUDIT.biggestEatenM,
+        contacts: COLA.contacts, contactRams: COLA.rams, nudges: COLA.nudges,
+        boatPairs: COLA.boatPairs, maxPen: +COLA.maxPen.toFixed(3),
       };
     },
     reset: function () {
@@ -2188,6 +2667,11 @@
       AUDIT.spawned = AUDIT.eaten = AUDIT.tipped = AUDIT.sunk = 0;
       AUDIT.holed = AUDIT.overboard = AUDIT.rams = AUDIT.bites = 0;
       AUDIT.biggestEatenM = 0;
+      COLA.contacts = COLA.rams = COLA.nudges = COLA.boatPairs = COLA.maxPen = 0;
     },
+    // §5b, for the tests: the measured solid of a hull and the distance to it
+    collider: shapeOf,
+    colliderFromSpec: shapeFromSpec,
+    hullSdf: hullSdf,
   };
 })();

@@ -1338,4 +1338,78 @@
     rifling = null;
     for (const L of loot) { L.looted = false; L.t = 0; setLook(L, true); }
   };
+
+  /* ================================================================
+     WHAT A BEACH WEARS (Shark Sim's crowd, 2026-09-27).
+
+     Owner, on the Shark Sim swimmers: "for clothes, they should be [in
+     swimwear]". The crowd was survival's lobby: a bright shirt, a second
+     bright colour from the waist to the ankle and dark shoes, on everyone,
+     into the sea. This is the dresser that turns one of those bodies into a
+     person at a family beach, as a makeCharacter spec:
+
+       men    bare-chested in board shorts or trunks (most), a rash guard, or
+              a T-shirt over the shorts
+       women  a one-piece, a two-piece (top + bottoms, bare midriff), a rash
+              guard over bottoms, or a T-shirt over the swimsuit
+       all    bare arms and legs below the suit, BARE FEET (the shoe box is
+              skin), and a straw sun hat or a cap on about a quarter of them,
+              which comes off in the water (character.js c.hat).
+
+     Every piece is a colour on a box the rig already has (character.js
+     c.waist / c.pelvis / c.shins split the ones that used to share one), so a
+     dressed body costs exactly the draw calls and the cached cmat materials
+     an undressed one did; the only extra meshes are two hat boxes on the
+     heads that wear one. Deterministic: every choice is a draw from the
+     caller's own stream `r`, the same stream that already picks the face.
+
+     Returns null outside Shark Sim, so Natural Disaster (which shares this
+     crowd) keeps its street clothes. */
+  // No sand, khaki, cream or white in the suits: on a box body at thirty
+  // metres a skin-toned swimsuit reads as no swimsuit, which is the one thing
+  // a family beach must never look like.
+  const SWIM = [0x1f3a68, 0x13161c, 0xc8322f, 0xf0674f, 0x1fa7a8, 0x2b63c6,
+                0x0f7c6e, 0xf28c28, 0xf2c230, 0xd94f86, 0x6c7a3a, 0x8a4fb8,
+                0x35b0e8, 0x7b1f2e];
+  const GUARD = [0x13161c, 0x1f3a68, 0xeae6dc, 0x1fa7a8, 0x2b63c6, 0x9fd13c, 0xd94f86];
+  const TEE = [0xf2f0ea, 0xb9bec6, 0x9cc4e4, 0xf3e3a0, 0xf2b8c6, 0x9fd4b0, 0x3c4450];
+  const HATS = [0xe6d3a3, 0xd9c18c, 0xf2f0ea, 0x1f3a68];      // straw, straw, white, navy
+  const CAPS = [0xc8322f, 0x1f3a68, 0xf2f0ea, 0x13161c, 0x1fa7a8, 0xf28c28];
+  const pk = (a, u) => a[(u * a.length) | 0];
+
+  CBZ.beachSwimwear = function (r, skin, hairs) {
+    if (!(CBZ.game && CBZ.game.mode === "sharksim")) return null;
+    const fem = r() < 0.5;
+    const look = r();
+    const suit = pk(SWIM, r());
+    const alt = r() < 0.35 ? pk(SWIM, r()) : suit;   // most two-pieces match; some don't
+    const hatU = r(), hatC = r();
+    const c = {
+      build: fem ? "f" : "m", skin: skin, hair: pk(hairs, r()),
+      longHair: fem && hatC < 0.6,
+      arms: skin, collar: skin, torso: skin, waist: skin,
+      legs: skin, pelvis: skin, shins: skin, shoes: skin,       // bare feet
+    };
+    let wear;
+    if (!fem) {
+      c.pelvis = c.legs = suit;                                 // shorts to the knee
+      if (look < 0.58) wear = look < 0.36 ? "board shorts" : "swim trunks";
+      else if (look < 0.78) { c.torso = c.waist = c.collar = c.arms = pk(GUARD, hatC); wear = "rash guard + board shorts"; }
+      else { c.torso = c.waist = c.collar = c.arms = pk(TEE, hatC); c.shortSleeve = true; wear = "T-shirt over trunks"; }
+    } else if (look < 0.36) {
+      c.torso = c.waist = c.pelvis = suit; wear = "one-piece";
+    } else if (look < 0.70) {
+      c.torso = suit; c.pelvis = alt; wear = "two-piece";       // top + bottoms, bare midriff
+    } else if (look < 0.85) {
+      c.torso = c.waist = c.collar = c.arms = pk(GUARD, hatC); c.pelvis = c.legs = suit; wear = "rash guard + board shorts";
+    } else {
+      c.torso = c.waist = c.collar = c.arms = pk(TEE, hatC); c.shortSleeve = true; c.pelvis = suit; wear = "T-shirt over swimsuit";
+    }
+    if (hatU < 0.14) { c.hat = "sun"; c.hatColor = pk(HATS, hatC); wear += " + sun hat"; }
+    else if (hatU < 0.26) { c.hat = "cap"; c.hatColor = pk(CAPS, hatC); wear += " + cap"; }
+    // the fabric colour a wound or a shred of this person should show
+    c.cloth = c.torso !== skin ? c.torso : suit;
+    c.wear = wear;
+    return c;
+  };
 })();

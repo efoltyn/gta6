@@ -462,7 +462,7 @@ async function stageMarinePredation(input) {
     // report zero for the frame that worked.
     if (CBZ.marineFrenzyAudit) {
       const f = CBZ.marineFrenzyAudit();
-      if (f.fishDrawn > ballPeak) ballPeak = f.fishDrawn;
+      if (f.baitBalls > ballPeak) ballPeak = f.baitBalls;
     }
   }
 
@@ -537,7 +537,7 @@ async function stageMarinePredation(input) {
   label("state", subject.state, `position:absolute;right:26px;top:25px;color:${before ? "#ffb0b0" : "#7ff0bb"};font-size:11px;font-weight:900;letter-spacing:.1em`);
   label("read",
     `chum ${audit.chumSources || 0} · sharks near ${sharksNear} · bites ${audit.shipBites || 0}` +
-    `\nbait eaten ${frenzy.baitEaten || 0} · fish drawn ${ballPeak}` +
+    `\nballed schools ${ballPeak}` +
     `\nscavenging ${frenzy.scavengerFrames || 0} · hull ${hullMin} · feed lines ${feedLines}`,
     "position:absolute;right:26px;top:52px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:#9fe8c3;white-space:pre;text-align:right");
   label("source", new URL(input.sourceUrl).host + new URL(input.sourceUrl).pathname,
@@ -560,7 +560,7 @@ async function stageMarinePredation(input) {
       hullEngine: hullMin,
       shipBites: audit.shipBites || 0,
       baitEaten: frenzy.baitEaten || 0,
-      fishDrawn: ballPeak,
+      balledSchools: ballPeak,
       scavengers: frenzy.scavengerFrames || 0,
       feedLines: feedLines,
     },

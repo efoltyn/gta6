@@ -587,7 +587,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/proptypes.js?v=arch2"></script>
 
 <!-- 3. entities -->
-  <script src="src/entities/character.js?v=sharkscene1"></script>
+  <script src="src/entities/character.js?v=sharkfix2"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
@@ -917,7 +917,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_roads.js?v=roads1"></script>
 <script src="src/world/disaster_arena.js?v=merge0927a"></script>
 <script src="src/systems/grapple.js?v=nohint1"></script>
-<script src="src/entities/survivorbot.js?v=sharkscene1"></script>
+<script src="src/entities/survivorbot.js?v=sharkfix2"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
 <script src="src/modes/shark_sim.js?v=uicut1"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
@@ -1075,7 +1075,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/exec_office.js?v=nodash1"></script>
 <script src="src/city/escalators.js?v=esc2"></script>
 <script src="src/city/roofloot.js?v=onecall1"></script>
-<script src="src/city/beach.js?v=onecall1"></script>
+<script src="src/city/beach.js?v=sharkfix2"></script>
 <script src="src/city/expansion.js?v=fuel1"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
@@ -1191,7 +1191,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4d-4. WILDLIFE + HUNTING + DOGS. The bestiary (defineSpecies) loads FIRST,
      then every biome batch of species, then the hunting engine and the dog
      companion system (both self-register as high-order landmasses). -->
-<script src="src/city/wildlife_rig.js?v=sharkscene1"></script>
+<script src="src/city/wildlife_rig.js?v=sharkfix3"></script>
 <script src="src/city/wildlife_species.js?v=attach1"></script>
 <script src="src/city/wildlife/forest_deer.js?v=attach1"></script>
 <script src="src/city/wildlife/bears.js?v=attach1"></script>
@@ -1203,14 +1203,14 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/wildlife/snow_ungulates.js?v=attach1"></script>
 <script src="src/city/wildlife/small_game.js?v=attach1"></script>
 <script src="src/city/wildlife/snakes.js?v=wild1"></script>
-<script src="src/city/wildlife/aquatic.js?v=gillcrease1"></script>
+<script src="src/city/wildlife/aquatic.js?v=sharkfix3"></script>
 <!-- EVERY ANIMAL IS AN INDIVIDUAL: the per-individual size draw and the
      hunger scalar wildlife.js spends. Must load BEFORE the engine (it
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
      straight back to the species constant. -->
 <script src="src/city/wildlife_traits.js?v=indiv1"></script>
-<script src="src/city/wildlife.js?v=sharkscene1"></script>
-<script src="src/city/wildlife_tame.js?v=sharkscene1"></script>
+<script src="src/city/wildlife.js?v=sharkfix3"></script>
+<script src="src/city/wildlife_tame.js?v=sharkfix2"></script>
 <script src="src/city/dogs.js?v=nodash1"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
@@ -1728,7 +1728,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
-<script src="src/systems/gore.js?v=sharkmode1"></script>
+<script src="src/systems/gore.js?v=sharkfix3"></script>
 <script src="src/systems/wounds.js?v=soak4w9"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
@@ -1767,7 +1767,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/quadruped_ragdoll.js?v=quadrag1"></script>
 <!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
      predator.js AND wildlife.js so both seams exist. -->
-<script src="src/city/wildlife_shark.js?v=sharkscene1"></script>
+<script src="src/city/wildlife_shark.js?v=sharkfix3"></script>
 <!-- THE ORCA. Re-registers id:"orca" over city/wildlife/aquatic.js's build
      (defineSpecies is last-write-wins) so the markings that actually identify
      the animal exist: the white post-ocular eye patch, the grey saddle, the
@@ -1782,7 +1782,7 @@ document.body.appendChild(b);}}catch(e){}})();
      takedown is CONSUMED from marine_predation, not re-implemented.
      Reverts whole with CBZ.CONFIG.ORCA_V1 / ORCA_POD / ORCA_SURFACE /
      ORCA_ACTS / ORCA_DRAG / ORCA_HUNT. -->
-<script src="src/city/wildlife_orca.js?v=orca1"></script>
+<script src="src/city/wildlife_orca.js?v=sharkfix3"></script>
 <!-- THE SEA EATS ITSELF: the marine predation graph (who preys on whom, who
      MOBS whom), the orca pod's bearings/ram/roll-over finisher, a big shark
      taking a small boat, and the chum producers that had never existed — a
@@ -1792,7 +1792,7 @@ document.body.appendChild(b);}}catch(e){}})();
      it declines falls through to the shark's own player hunt), and after
      predator.js + creature_combat.js whose drivers it ticks rather than
      duplicating. Reverts whole with CBZ.CONFIG.MARINE_PREDATION = false. -->
-<script src="src/city/marine_predation.js?v=marinepred1"></script>
+<script src="src/city/marine_predation.js?v=sharkfix3"></script>
 <!-- WHAT A KILL LOOKS LIKE FROM A MILE AWAY: the bait ball that tightens, is
      driven up against the surface and collapses as it is eaten; the gulls
      working it (the only part of a marine kill visible ABOVE the water, and
@@ -1801,7 +1801,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.predatorHunt as every other hunter, never a private loop. AFTER
      marine_predation.js, whose chum producer and damage bus it spends.
      Reverts whole with CBZ.CONFIG.MARINE_FRENZY = false. -->
-<script src="src/city/marine_frenzy.js?v=sharkscene1"></script>
+<script src="src/city/marine_frenzy.js?v=sharkfix3"></script>
 <!-- CHILDREN ARE NOT TARGETS. Wraps the shared damage/kill/KO/crowd-kill/gore/
      lock-on/predator buses and seals child hp against the ~32 raw `.hp -=`
      sites that bypass every bus. Hooks are lazily retried for 10s, so exact
@@ -2256,7 +2256,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and any other mode that has water but no road fleet, plus the shark-vs-boat
      rules (engulf / bite / tip). After water_hulls + water_float, both of which
      it spends. -->
-<script src="src/world/sea_craft.js?v=sharkscene1"></script>
+<script src="src/world/sea_craft.js?v=sharkfix2"></script>
 <script src="src/world/sea_scene.js?v=sharkscene1"></script>
 <script src="src/world/water_impact.js?v=waterv2"></script>
 <!-- ONE WATER ORACLE, BOTH WORLDS. Wraps CBZ.cityWaterAt / citySeaHeightAt /

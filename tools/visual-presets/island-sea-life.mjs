@@ -259,7 +259,7 @@ async function stageSeaLife(input) {
         D.sec(6);                                        // the poll opens it
       }
       const sites = CBZ.marineFrenzySites ? CBZ.marineFrenzySites([]) : [];
-      const ball = sites.find((s) => s.kind === "bait") || null;
+      const ball = sites.find((s) => s.kind === "school") || null;
       if (ball) {
         D.moveTo(ball.x - 22, ball.z - 8);
         D.lookAt(ball.x, ball.z, 0.02);

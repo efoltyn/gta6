@@ -755,8 +755,10 @@
     // shrunken adult: short legs had nowhere to put the hips. Everything above
     // is stacked off this, so a toddler's hips sit at a toddler's height.
     const hipY = P.legUp + P.legLo;
-    const ll = limb(P.legW, P.legUp, P.legLo, P.legW, c.legs, c.shoes, P.shoeH);
-    const rl = limb(P.legW, P.legUp, P.legLo, P.legW, c.legs, c.shoes, P.shoeH);
+    // c.shins: a different colour below the knee (bare legs under shorts or a
+    // swimsuit). Absent = the whole leg is c.legs, exactly as before.
+    const ll = limb(P.legW, P.legUp, P.legLo, P.legW, c.legs, c.shoes, P.shoeH, c.shins);
+    const rl = limb(P.legW, P.legUp, P.legLo, P.legW, c.legs, c.shoes, P.shoeH, c.shins);
     ll.position.set(-P.hipX, hipY, 0); rl.position.set(P.hipX, hipY, 0);
     // STEP WIDTH, from frame zero. animChar damps this channel toward the same
     // value every frame, but a rig that never animates (the charpanel portrait,
@@ -776,7 +778,8 @@
     // face and appears as a flickering pants-coloured shelf through the back.
     // Sharing the hip-locked transform makes that overlap rigid while the
     // existing lower tuck continues to cover the independently swinging legs.
-    const pelvis = new THREE.Mesh(boxGeom(P.pelvisW, P.pelvisH, P.pelvisD), cmat(c.legs));
+    // c.pelvis: the hips in their own colour (swim briefs over bare thighs).
+    const pelvis = new THREE.Mesh(boxGeom(P.pelvisW, P.pelvisH, P.pelvisD), cmat(c.pelvis != null ? c.pelvis : c.legs));
     pelvis.position.set(0, hipY + 0.03, 0); pelvis.castShadow = pelvis.receiveShadow = true;
     body.add(pelvis);
 
@@ -809,7 +812,8 @@
     // work, which is the whole point of the table.
     let waist = null;
     if (waistH > 0) {
-      waist = new THREE.Mesh(boxGeom(P.waistW, waistH + WAIST_TUCK, P.waistD), cmat(c.torso));
+      // c.waist: the midriff in its own colour (a bikini top's bare middle).
+      waist = new THREE.Mesh(boxGeom(P.waistW, waistH + WAIST_TUCK, P.waistD), cmat(c.waist != null ? c.waist : c.torso));
       // The top tucks UP into the chest box (the same overlap trick the limb
       // joints use), so leaning or a hit reaction can never open a seam.
       waist.position.y = base + (waistH + WAIST_TUCK) / 2;
@@ -1017,6 +1021,28 @@
       hairMesh.userData.hairStyle = styleId;
       neck.add(hairMesh); hairParts.push(hairMesh);
     }
+    /* ---- A HAT WORN OVER THE HAIR (c.hat: "sun" | "cap", c.hatColor) -------
+       c.cap above REPLACES the hair (a uniform cap, a shaved line under it),
+       so taking it off leaves a bald man. A beach hat comes off at the water's
+       edge and the hair has to still be there — survivorbot.js hides
+       skinSlots.cap while its wearer swims. So these are built OVER the hair
+       shell: the crown is 0.70k wide against the hair's 0.64k (hairGeometry's
+       S + 0.04) and tops out 0.10k above its 0.06k crown, so the shell is
+       enclosed with a clear margin on every face and nothing is coplanar.
+       Same cached boxes and colour materials as everything else here. */
+    if (c.hat === "sun" || c.hat === "cap") {
+      const hk = headSize / 0.60;
+      const hm = cmat(c.hatColor != null ? c.hatColor : 0xe6d3a3);
+      const crown = new THREE.Mesh(boxGeom(0.70 * hk, 0.20 * hk, 0.70 * hk), hm);
+      crown.position.y = headSize + 0.06 * hk; neck.add(crown); capParts.push(crown);
+      const brim = c.hat === "sun"
+        ? new THREE.Mesh(boxGeom(1.12 * hk, 0.04 * hk, 1.12 * hk), hm)     // wide straw brim, all round
+        : new THREE.Mesh(boxGeom(0.60 * hk, 0.06 * hk, 0.30 * hk), hm);    // a peak, forward
+      if (c.hat === "sun") brim.position.y = headSize - 0.03 * hk;
+      else brim.position.set(0, headSize - 0.01 * hk, 0.47 * hk);
+      brim.castShadow = true;
+      neck.add(brim); capParts.push(brim);
+    }
 
     // painted-clothing atlas metadata: which vertical band of the garment row
     // each segment shows (0=hem/wrist, 1=shoulder/waist). city/clothes.js
@@ -1088,6 +1114,22 @@
       // face instead of a hard-coded shared-atlas tan.
       skinTone: c.skin != null ? c.skin : 0xcf9a72,
     };
+    // A c.hat comes off in the water: every swimmer's pose (poseSwimmer) sets
+    // rig.swimming true and the caller clears it on landing, so the hat rides
+    // that one flag — no caller has to remember it, and it costs a compare.
+    if (c.hat && capParts.length) {
+      let swimFlag = false;
+      Object.defineProperty(rig, "swimming", {
+        configurable: true, enumerable: true,
+        get() { return swimFlag; },
+        set(v) {
+          v = !!v;
+          if (v === swimFlag) return;
+          swimFlag = v;
+          for (let i = 0; i < capParts.length; i++) capParts[i].visible = !v;
+        },
+      });
+    }
     if (c.clothes && CBZ.applyClothes) CBZ.applyClothes(rig, c.clothes);
     return rig;
   }

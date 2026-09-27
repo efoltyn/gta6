@@ -1617,8 +1617,11 @@
     const x = _biteAt.x, y = _biteAt.y, z = _biteAt.z;
     const wet = biteMedium(x, y, z) === "water";
     if (killed) {
-      if (wet && waterDepth(x, z) >= SWIMMABLE && typeof CBZ.goreKillCloud === "function") {
-        try { CBZ.goreKillCloud(x, y, z, { size: Math.min(2.2, 0.8 + sev), trail: false }); } catch (e) {}
+      if (wet && waterDepth(x, z) >= SWIMMABLE && typeof CBZ.goreKillCloud === "function" && !target._cbzKillCloud) {
+        // the once-flag every other kill-cloud producer honours (wounds.js's
+        // death scan fired a second cloud on this same body a frame later)
+        target._cbzKillCloud = 1;
+        try { CBZ.goreKillCloud(x, y, z, { size: Math.min(1.6, 0.6 + sev * 0.8), trail: false }); } catch (e) {}
       }
       return;                       // the death bus drew the rest of it
     }
@@ -3140,6 +3143,7 @@
   }
   CBZ.marineBreachShed = breachShed;
 
+  const _hullBody = { x: 0, y: 0, z: 0, ax: 1, ay: 0, az: 0, vx: 0, vy: 0, vz: 0, skipHeadOf: null, ramOK: true };
   CBZ.cityAquaticMountStep = function (dt) {
     const a = ride.mount, P = CBZ.player;
     if (!a || !P || !aquaticMounted(a) || P.dead || P.driving || a.dead) return false;
@@ -3596,6 +3600,34 @@
       const turnRate = shortestAngle(ride.head - W.lastHead) / fdt;
       W.roll += (turnRate * 0.17 - W.roll) * (1 - Math.exp(-fdt * 4));
       W.roll = Math.max(-0.45, Math.min(0.45, W.roll)); W.lastHead = ride.head;
+    }
+    /* A BOAT IS SOLID. The ridden body used to swim straight through every
+       hull it did not bite (owner: "I can kind of phase through boats").
+       world/sea_craft.js §5b owns the collider — the hull's own measured
+       skin against this body's trunk, in 3D, so under the keel is under and
+       at the surface is a hit. It hands back where the body may be and what
+       is left of its velocity; a hard hit is the existing ram, a soft one
+       rocks her. While the jaws are committed to that hull the head stands
+       down so the bite still reaches the rail. */
+    if (typeof CBZ.marineHullContact === "function") {
+      const ch = Math.cos(ride.head), sh = Math.sin(ride.head), cp = Math.cos(W.pitch || 0);
+      const vh = W.v || 0;
+      _hullBody.x = P.pos.x; _hullBody.y = W.y; _hullBody.z = P.pos.z;
+      _hullBody.ax = ch * cp; _hullBody.ay = Math.sin(W.pitch || 0); _hullBody.az = sh * cp;
+      _hullBody.vx = Math.cos(travelHead) * vh; _hullBody.vy = W.vy || 0; _hullBody.vz = Math.sin(travelHead) * vh;
+      _hullBody.skipHeadOf = (ride.attackT > 0 && ride.target && ride.target._seaCraft) ? ride.target : null;
+      _hullBody.ramOK = true;
+      let hit = 0;
+      try { hit = CBZ.marineHullContact(a, _hullBody); } catch (e) { hit = 0; }
+      if (hit) {
+        P.pos.x = _hullBody.x; P.pos.z = _hullBody.z;
+        W.y = _hullBody.y; W.vy = _hullBody.vy;
+        // what survives is the speed still going the way the body travels:
+        // head-on it is nothing, a glance slides along the hull
+        W.v = Math.max(0, _hullBody.vx * Math.cos(travelHead) + _hullBody.vz * Math.sin(travelHead));
+        P.speed = W.v;
+        AQUATIC_AUDIT.hullContacts = (AQUATIC_AUDIT.hullContacts || 0) + 1;
+      }
     }
     /* THE SEA ANSWERS THE BODY, EVERY FRAME. Last thing in the update, so the
        position and the pose it reads are the ones that will be DRAWN this
