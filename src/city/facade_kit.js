@@ -462,9 +462,234 @@
     return !!(r && r.def.crownsRoof);
   };
 
+  /* ============================================================
+     KEEP-CLEAR COLUMNS AND THE CROWN DECK
+     ============================================================
+     OWNER (Natural Disaster Survival, on a tablet): "the elevator isn't
+     getting me to the top of the building ... because of the facade."
+
+     Measured, not guessed (a plain-node run of every grammar at the island's
+     tower numbers): the ten skyline grammars build 5 to 45 m of REAL-LOOKING
+     volume above ctx.rTop (bundled tubes, a pencil's slim shaft, a ziggurat's
+     stages, a neogothic crown, a pyramid cap), and 9 of the 10 stand some of
+     it squarely over the middle of the roof. The host's lift ran to rTop and
+     stopped there, so you arrived INSIDE the crown: boxes all round your head,
+     the building's visible top 20-45 m further up, nothing to stand on.
+
+     Two things fix it at the source, for any host:
+
+       ctx.keepClear  [{x0,x1,z0,z1,y0,y1?}] in building-local metres. Any box
+                      a grammar lays through one of these volumes is re-emitted
+                      as the pieces AROUND it (the same move as the door carve
+                      below), so a lift shaft runs cleanly up through a crown
+                      and its walls read as the shaft's walls. A round
+                      primitive (dome, cone, column, ball) cannot be split, so
+                      one that fouls a column is left out.
+       ctx.crown      filled in by dressFacade: every box that stands above
+                      rTop - 0.3 after the carve.
+     CBZ.facadeLiftTop (below) decides both BEFORE the build: where the lift
+     comes out and which volumes the grammar has to leave open for it.     */
+  function hitsClear(cols, x0, x1, y0, y1, z0, z1) {
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i], cy1 = c.y1 != null ? c.y1 : Infinity;
+      if (x1 > c.x0 + 1e-4 && x0 < c.x1 - 1e-4 && z1 > c.z0 + 1e-4 && z0 < c.z1 - 1e-4 &&
+          y1 > c.y0 + 1e-4 && y0 < cy1 - 1e-4) return c;
+    }
+    return null;
+  }
+  // AABB minus AABB: up to six pieces (left/right in x, then front/back in z
+  // over the middle x span, then below/above in y over the middle xz cell)
+  function subtractBox(b, c) {
+    const out = [];
+    let [x0, x1, y0, y1, z0, z1] = b;
+    const cy1 = c.y1 != null ? c.y1 : Infinity;
+    if (x0 < c.x0) { out.push([x0, c.x0, y0, y1, z0, z1]); x0 = c.x0; }
+    if (x1 > c.x1) { out.push([c.x1, x1, y0, y1, z0, z1]); x1 = c.x1; }
+    if (z0 < c.z0) { out.push([x0, x1, y0, y1, z0, c.z0]); z0 = c.z0; }
+    if (z1 > c.z1) { out.push([x0, x1, y0, y1, c.z1, z1]); z1 = c.z1; }
+    if (y0 < c.y0) out.push([x0, x1, y0, c.y0, z0, z1]);
+    if (y1 > cy1) out.push([x0, x1, cy1, y1, z0, z1]);
+    return out.filter(function (p) { return p[1] - p[0] > 0.02 && p[3] - p[2] > 0.02 && p[5] - p[4] > 0.02; });
+  }
+  // shared with hosts that cut openings through their own boxes (the island's
+  // glazing pass cuts window holes through the shell and the cladding with it)
+  F.subtractBox = subtractBox;
+
+  /* WHERE DOES A LIFT UP THROUGH THIS FACADE COME OUT?
+     Asked BEFORE the facade is built, because the answer decides what the
+     grammar may lay there. CBZ.facadeCrownProbe dry-runs the grammar against
+     recording emitters (a grammar is pure: ctx in, emitter calls out, no rng,
+     no scene graph, so running it twice is safe) and returns every piece that
+     stands above rTop - 0.3 as [x0,x1,y0,y1,z0,z1] in building-local metres.
+
+     CBZ.facadeLiftTop(ctx, shaft, o) then reads that crown over a lift shaft
+     rect {x0,x1,z0,z1}:
+       y        the TOP OF THE CROWN'S MASS over the shaft: the highest level
+                where at least half of the shaft's own square is inside solid
+                crown. A ziggurat keeps every stage and the lift comes out on
+                the top one, a pencil at the top of its slim shaft, a pyramid
+                where its section is still as wide as the car. No crown over
+                the shaft: y is rTop (the host's own roof).
+       deck     {x0,x1,z0,z1}: the shaft plus as much of an o.ring-metre
+                apron round it as has headroom. The host lays a real deck slab
+                here (it may oversail a narrow top stage, the way a sky deck
+                does), with a rail.
+       keepClear  what to hand dressFacade so the lift can reach y: the shaft
+                column hollowed from the roof to the headroom over the top.
+       headhouse  something stands over the shaft above that: the host roofs
+                the top stop so it has something to stand on.
+       roofBuried  true when the crown fills the host roof round the shaft, so
+                a lift stop AT rTop would open onto the inside of the crown. */
+  CBZ.facadeCrownProbe = function (ctx) {
+    const r = resolve(ctx.dress, ctx.hash, ctx.storeys);
+    if (!r) return [];
+    const pieces = [], yRec = (ctx.rTop || 0) - 0.3;
+    const rec = function (x0, x1, y0, y1, z0, z1) { if (y1 > yRec) pieces.push([x0, x1, y0, y1, z0, z1]); };
+    const nop = function () {};
+    const bx = function (x, y, z, w, h, d) { rec(x - w / 2, x + w / 2, y - h / 2, y + h / 2, z - d / 2, z + d / 2); };
+    const dry = Object.assign({}, ctx, {
+      keepClear: null, doorTint: null, crown: null,
+      dbox: bx, lbox: bx, plat: nop, lamp: nop, disc: nop, plaque: nop, seal: nop,
+      ball: function (x, y, z, rr) { rec(x - rr, x + rr, y - rr, y + rr, z - rr, z + rr); },
+      column: function (x, y, z, rr, h) { rec(x - rr, x + rr, y, y + h, z - rr, z + rr); },
+      cone: function (x, y, z, rr, h) { rec(x - rr, x + rr, y, y + h, z - rr, z + rr); },
+      dome: function (x, y, z, rr) { rec(x - rr, x + rr, y, y + rr, z - rr, z + rr); },
+    });
+    try { r.def.build(dry, F, r.spec); } catch (e) { /* the real pass reports it */ }
+    return pieces;
+  };
+  CBZ.facadeLiftTop = function (ctx, shaft, o) {
+    o = o || {};
+    const rTop = ctx.rTop, ring = o.ring != null ? o.ring : 1.1, thin = o.thin != null ? o.thin : 0.6;
+    const wt = ctx.WT || 0.3;
+    const lim = {
+      x0: Math.max(-ctx.w / 2 + wt, shaft.x0 - ring), x1: Math.min(ctx.w / 2 - wt, shaft.x1 + ring),
+      z0: Math.max(-ctx.d / 2 + wt, shaft.z0 - ring), z1: Math.min(ctx.d / 2 - wt, shaft.z1 + ring),
+    };
+    const all = CBZ.facadeCrownProbe(ctx);
+    // massive pieces only: a mast or a finial is not something to stand on
+    const mass = all.filter(function (p) { return Math.min(p[1] - p[0], p[5] - p[4]) > thin; });
+    const STEP = 0.3;
+    function cover(y, R) {
+      let n = 0, hit = 0;
+      for (let x = R.x0 + STEP / 2; x < R.x1; x += STEP) for (let z = R.z0 + STEP / 2; z < R.z1; z += STEP) {
+        n++;
+        for (let i = 0; i < mass.length; i++) {
+          const p = mass[i];
+          if (x > p[0] && x < p[1] && z > p[4] && z < p[5] && p[2] < y && p[3] >= y) { hit++; break; }
+        }
+      }
+      return n ? hit / n : 0;
+    }
+    // candidate levels: the top of every massive piece over the deck square
+    const cands = [];
+    for (let i = 0; i < mass.length; i++) {
+      const p = mass[i];
+      if (p[3] > rTop + 0.3 && p[1] > shaft.x0 && p[0] < shaft.x1 && p[5] > shaft.z0 && p[4] < shaft.z1) cands.push(p[3]);
+    }
+    cands.sort(function (a, b) { return b - a; });
+    let y = rTop;
+    for (let i = 0; i < cands.length; i++) {
+      if (cover(cands[i] - 0.05, shaft) >= 0.5) { y = cands[i]; break; }
+    }
+    const raised = y > rTop + 0.3;
+    /* The shaft is hollow from the roof to HEAD above the top stop. Whatever
+       the grammar stands over the shaft ABOVE that (a needle, a finial, the
+       last tiers of a ziggurat) is kept, and ends up standing on a lift
+       HEADHOUSE the host builds there: a small room round the car with open
+       sides, which is what a real tower's lift overrun is. So the silhouette
+       keeps its spire and the car never rises into it.
+       The DECK is then grown out from the shaft, a strip at a time up to
+       `ring` metres, only while the strip has HEAD of clear air over it: a
+       taller tube or quadrant standing beside the shaft stays whole and the
+       deck simply stops at its wall. */
+    const HEAD = o.head != null ? o.head : 2.6;
+    const keepClear = [
+      { x0: shaft.x0, x1: shaft.x1, z0: shaft.z0, z1: shaft.z1, y0: rTop - 0.2, y1: y + HEAD },
+    ];
+    function clear(x0, x1, z0, z1) {
+      let n = 0, ok = 0;
+      for (let x = x0 + 0.125; x < x1; x += 0.25) for (let z = z0 + 0.125; z < z1; z += 0.25) {
+        n++;
+        let hit = false;
+        for (let i = 0; i < mass.length && !hit; i++) {
+          const p = mass[i];
+          hit = x > p[0] && x < p[1] && z > p[4] && z < p[5] && p[2] < y + HEAD && p[3] > y + 0.05;
+        }
+        if (!hit) ok++;
+      }
+      return n ? ok / n >= 0.9 : true;
+    }
+    const deck = { x0: shaft.x0, x1: shaft.x1, z0: shaft.z0, z1: shaft.z1 };
+    for (let grew = true, guard = 0; grew && guard < 40; guard++) {
+      grew = false;
+      if (deck.x0 - 0.25 >= lim.x0 - 1e-6 && clear(deck.x0 - 0.25, deck.x0, deck.z0, deck.z1)) { deck.x0 -= 0.25; grew = true; }
+      if (deck.x1 + 0.25 <= lim.x1 + 1e-6 && clear(deck.x1, deck.x1 + 0.25, deck.z0, deck.z1)) { deck.x1 += 0.25; grew = true; }
+      if (deck.z0 - 0.25 >= lim.z0 - 1e-6 && clear(deck.x0, deck.x1, deck.z0 - 0.25, deck.z0)) { deck.z0 -= 0.25; grew = true; }
+      if (deck.z1 + 0.25 <= lim.z1 + 1e-6 && clear(deck.x0, deck.x1, deck.z1, deck.z1 + 0.25)) { deck.z1 += 0.25; grew = true; }
+    }
+    let spire = false;
+    for (let i = 0; i < all.length && !spire; i++) {
+      const p = all[i];
+      if (p[3] > y + HEAD + 0.05 && p[1] > shaft.x0 && p[0] < shaft.x1 && p[5] > shaft.z0 && p[4] < shaft.z1) spire = true;
+    }
+    return { y: y, raised: raised, deck: deck, keepClear: keepClear, head: HEAD,
+      // something stands over the shaft above the headroom: the host roofs the
+      // car's top stop with a headhouse for it to stand on
+      headhouse: spire,
+      roofBuried: raised && cover(rTop + 1.2, lim) > 0.3 };
+  };
+
   CBZ.dressFacade = function (ctx) {
     const r = resolve(ctx.dress, ctx.hash, ctx.storeys);
     if (!r) return null;
+
+    // ---- keep-clear carve + crown record (see KEEP-CLEAR COLUMNS above) ----
+    const keep = Array.isArray(ctx.keepClear) && ctx.keepClear.length ? ctx.keepClear : null;
+    const crown = { boxes: [] };
+    ctx.crown = crown;
+    const yRec = (ctx.rTop || 0) - 0.3;
+    const origDbox = ctx.dbox, origLbox = ctx.lbox;
+    function carving(fn) {
+      if (typeof fn !== "function") return fn;
+      const emit = function (x, y, z, w, h, d) {
+        const x0 = x - w / 2, x1 = x + w / 2, y0 = y - h / 2, y1 = y + h / 2, z0 = z - d / 2, z1 = z + d / 2;
+        const c = keep ? hitsClear(keep, x0, x1, y0, y1, z0, z1) : null;
+        if (c) {
+          const rest = Array.prototype.slice.call(arguments, 6);
+          const parts = subtractBox([x0, x1, y0, y1, z0, z1], c);
+          for (let i = 0; i < parts.length; i++) {
+            const p = parts[i];
+            emit.apply(this, [(p[0] + p[1]) / 2, (p[2] + p[3]) / 2, (p[4] + p[5]) / 2,
+              p[1] - p[0], p[3] - p[2], p[5] - p[4]].concat(rest));
+          }
+          return;
+        }
+        if (y1 > yRec) crown.boxes.push([x0, x1, y0, y1, z0, z1]);
+        return fn.apply(this, arguments);
+      };
+      return emit;
+    }
+    // a round primitive cannot be split: recorded for the crown, dropped if
+    // it stands in a keep-clear column
+    const roundWraps = {};
+    function roundGuard(name, ext) {
+      const fn = ctx[name];
+      if (typeof fn !== "function") return;
+      roundWraps[name] = fn;
+      ctx[name] = function () {
+        const e = ext.apply(null, arguments);
+        if (keep && hitsClear(keep, e[0], e[1], e[2], e[3], e[4], e[5])) return;
+        if (e[3] > yRec) crown.boxes.push(e);
+        return fn.apply(this, arguments);
+      };
+    }
+    roundGuard("ball", function (x, y, z, r) { return [x - r, x + r, y - r, y + r, z - r, z + r]; });
+    roundGuard("column", function (x, y, z, r, h) { return [x - r, x + r, y, y + h, z - r, z + r]; });
+    roundGuard("cone", function (x, y, z, r, h) { return [x - r, x + r, y, y + h, z - r, z + r]; });
+    roundGuard("dome", function (x, y, z, r) { return [x - r, x + r, y, y + r, z - r, z + r]; });
+    ctx.dbox = carving(origDbox);
+    if (origLbox) ctx.lbox = carving(origLbox);
 
     /* CUT THE HOLE. Every box a facade lays on the entrance face is checked
        against the doorway, and any box that would cover it is re-emitted as
@@ -539,7 +764,10 @@
 
     try { r.def.build(ctx, F, r.spec); }
     catch (e) { if (window.console) console.warn("facade " + r.spec.style + ": " + e.message); }
-    ctx.dbox = realDbox;                       // the carve is build-time only
+    // the carves are build-time only
+    ctx.dbox = origDbox;
+    if (origLbox) ctx.lbox = origLbox;
+    for (const k in roundWraps) ctx[k] = roundWraps[k];
 
     const doorProj = Math.max(0.30, Math.min(6.5, deepest + 0.16));
 
