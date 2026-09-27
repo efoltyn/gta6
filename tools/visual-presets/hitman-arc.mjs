@@ -109,7 +109,8 @@ async function stageHitmanArc(input) {
   // ------------------------------------------------------------------ beats
   if (sub.id === "contract-file" || sub.id === "confirm") {
     if (hasArc) {
-      if (!S.ledger) {
+      // a later beat may have moved the arc on; re-open the file it needs
+      if (!S.ledger || !CBZ.agency._rt.op || CBZ.agency._rt.op.id !== "ledger" || CBZ.agency._rt.op.dead) {
         CBZ.agency.jump("ledger");
         tickUntil(() => CBZ.agency._rt.op && CBZ.agency._rt.op.staged && CBZ.agency._rt.op.ped, 900);
         S.ledger = true;
