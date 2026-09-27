@@ -209,7 +209,7 @@ async function stageCompound(input) {
       }
     }
     // the hires walk in from the street; give them the time to reach their posts
-    for (let i = 0; i < 30; i++) tick(30, 1 / 30);
+    for (let i = 0; i < 60; i++) tick(30, 1 / 30);
     S.built = true;
     result.crew = S.crew.length;
   };

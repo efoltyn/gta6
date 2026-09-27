@@ -411,11 +411,31 @@
     const p0 = route[0];
     standAt(ped, plot, { x: p0.x, z: p0.z, face: Math.atan2(p0.x - ped.pos.x, p0.z - ped.pos.z) }, "detail");
   }
+  /* AROUND THE WALL, NOT THROUGH IT. The post brain walks a straight line
+     (garrison walkTo nulls ped.path), so a man coming from the side or the
+     back of the lot used to aim at the gate THROUGH the perimeter wall and
+     grind against it on the street for good. Walk the outside of the lot
+     instead: back corner, front corner, then the gate. Frame: u along the
+     frontage normal, v along the frontage. */
+  function aroundTheWall(plot, x, z) {
+    const r = plot.rect, c = center(plot), f = front(plot);
+    const tx = -f.nz, tz = f.nx, O = 3.5;
+    const hn = Math.abs(f.nx) > 0.5 ? (r.maxX - r.minX) / 2 : (r.maxZ - r.minZ) / 2;
+    const ht = Math.abs(f.nx) > 0.5 ? (r.maxZ - r.minZ) / 2 : (r.maxX - r.minX) / 2;
+    const u = (x - c.x) * f.nx + (z - c.z) * f.nz, v = (x - c.x) * tx + (z - c.z) * tz;
+    const pt = (uu, vv) => ({ x: c.x + f.nx * uu + tx * vv, z: c.z + f.nz * uu + tz * vv });
+    if (u >= hn + 1) return [];                       // already out front
+    const side = v >= 0 ? 1 : -1;
+    const out = [];
+    if (Math.abs(v) < ht + 1) out.push(pt(-(hn + O), side * (ht + O)));   // behind: round the back corner first
+    out.push(pt(hn + O, side * (ht + O)));                                // then the front corner
+    return out;
+  }
   function routeHome(plot, rt, ped, slot) {
     const gp = gatePoints(plot, rt);
     const outside = !inRect(plot, ped.pos.x, ped.pos.z, -0.5);
     const route = [];
-    if (outside && kit()) { route.push(gp.out); route.push(gp.inn); }
+    if (outside && kit()) { for (const w of aroundTheWall(plot, ped.pos.x, ped.pos.z)) route.push(w); route.push(gp.out); route.push(gp.inn); }
     route.push({ x: slot.x, z: slot.z });
     walkRoute(ped, plot, route, slot);
   }
@@ -426,21 +446,27 @@
   }
 
   // ---- HIRE / STATION / PULL BACK -----------------------------------------------
+  /* WHERE A HIRE COMES FROM: down the street the gate faces, on the curb
+     lane, 30 to 60 m along it, out of your sight. It used to be a random
+     point 40-70 m from the lot centre in the frontage's general direction,
+     which on a 52 m block grid is the MIDDLE OF THE BLOCK ACROSS THE STREET:
+     the man spawned inside somebody else's building and walked a straight
+     line at the gate that never left it (the guards seen standing in the road
+     outside the wire were the ones who got half way). */
   function streetSpawnPoint(plot) {
-    const c = center(plot), f = front(plot);
-    const base = Math.atan2(f.nx, f.nz);
+    const f = front(plot), tx = -f.nz, tz = f.nx;
+    const A = arena();
     let fallback = null, fd = -1;
-    for (let k = 0; k < 14; k++) {
-      const a = base + (Math.random() - 0.5) * 2.2, r = 40 + Math.random() * 30;
-      const p = { x: c.x + Math.sin(a) * r, z: c.z + Math.cos(a) * r };
-      const A = arena(); if (A && A.clampToCity) { try { A.clampToCity(p, 2); } catch (e) {} }
-      if (inRect(plot, p.x, p.z, 4)) continue;
-      const safe = !CBZ.npcTransitionSafe || CBZ.npcTransitionSafe(p.x, p.z, { minDistance: 30, maxDistance: 150 });
+    for (let k = 0; k < 12; k++) {
+      const side = (k & 1) ? 1 : -1, along = 30 + (k >> 1) * 6;
+      const p = { x: f.x + f.nx * 4 + tx * side * along, z: f.z + f.nz * 4 + tz * side * along };
+      if (A && A.clampToCity) { try { A.clampToCity(p, 2); } catch (e) {} }
+      const safe = !CBZ.npcTransitionSafe || CBZ.npcTransitionSafe(p.x, p.z, { minDistance: 25, maxDistance: 150 });
       if (safe) return p;
       const pl = P(); const dd = pl ? d2(p.x, p.z, pl.pos.x, pl.pos.z) : 0;
       if (dd > fd) { fd = dd; fallback = p; }
     }
-    return fallback || { x: c.x + f.nx * 55, z: c.z + f.nz * 55 };
+    return fallback || { x: f.x + f.nx * 4 + tx * 40, z: f.z + f.nz * 4 + tz * 40 };
   }
 
   function hire(plot, role) {
