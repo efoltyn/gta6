@@ -75,10 +75,10 @@
      And in the wave after that the pill itself went (2026-08-25): the species
      name, the "→ NEXT" label and the box around them are deleted, because a
      ladder whose whole point is a body that visibly grows does not need to
-     print what that body already is. What survives mid-play is one 3 px
-     WORDLESS sliver seated with the health/stamina bars — how close the next
-     form is, and nothing else — plus the title/end cards that own the screen
-     when play is not happening, and the killfeed. See the HUD section.
+     print what that body already is. And on 2026-09-27 the rest went too:
+     score pill, clock, health/stamina bars, evolve sliver, killfeed. Nothing
+     is printed mid-play; hunger is the red screen edge, growth is the body,
+     score and best live on the death card. See the HUD section.
 
      ?cfg_SHARK_SHOW_DONT_TELL=0 restores every line of the old text and
      silences the physical beats — that is the before/after preset's BEFORE. */
@@ -1280,7 +1280,6 @@
     sim.comboT = COMBO_WINDOW;
     const pts = Math.round(gain * 10 * sim.combo * (1 + sim.tier * 0.25));
     sim.score += pts;
-    scorePop(pts);
     const big = kind !== "animal" || gain >= 3;
     if (big && CBZ.shake) CBZ.shake(Math.min(0.22, 0.08 + gain * 0.02));
     if (CBZ.sfx && sim.combo >= 2) {
@@ -1288,196 +1287,56 @@
     }
   }
   function comboTick(dt) {
-    if (sim.comboT > 0) { sim.comboT -= dt; if (sim.comboT <= 0) { sim.combo = 0; scoreDraw(); } }
+    if (sim.comboT > 0) { sim.comboT -= dt; if (sim.comboT <= 0) sim.combo = 0; }
   }
 
-  // ---- the score rail + the starving edge ---------------------------------
-  let scoreEl = null, scoreNum = null, comboEl = null, starveEl = null, shownScore = -1, shownCombo = -1;
-  function buildScore() {
-    if (!scoreEl) {
-      const rail = document.getElementById("topright");
-      scoreEl = document.createElement("div");
-      scoreEl.id = "sharkScore";
-      scoreEl.className = "pill panel";
-      scoreNum = document.createElement("b");
-      scoreNum.id = "sharkScoreNum";
-      comboEl = document.createElement("span");
-      comboEl.id = "sharkCombo";
-      scoreEl.appendChild(scoreNum); scoreEl.appendChild(comboEl);
-      if (rail) rail.insertBefore(scoreEl, rail.firstChild); else document.body.appendChild(scoreEl);
-    }
+  /* ---- NOTHING OVER THE WATER BUT THE WATER ------------------------------
+     Owner, 2026-09-27: "every HUD, the overlapping tabs, everything should be
+     considered for removal, including the minimap, the timer, the PB run,
+     pills that mean nothing. SHOW DON'T TELL."
+
+     So while you swim there is no score pill, no frenzy counter, no clock, no
+     health or stamina bar and no evolve meter. Every one of them had a world
+     reading already, and the world reading is the one that stays:
+       - HUNGER is the red edge of the screen, beating harder as the tank
+         empties (starveTick below), and the shark slowing into it.
+       - GROWTH is the body. Each meal swells it; each rung is the evolve
+         beat, a bigger animal where the smaller one was.
+       - A FRENZY is the rising chime and the jolt of a chained meal
+         (mealBeat above); the number behind it still counts.
+       - SCORE and BEST are kept and shown exactly once, on the death card
+         (CBZ.sharkSimFillResult).
+     css/shark_title.css hides the island HUD family (the clock, the bars, the
+     casualty feed, the hint/toast strip) in this mode. What is left in this
+     section is the starving edge and the banner surface the evolve beat and
+     the tool seam sim.banner still use. */
+  function fmtScore(n) { return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+  let starveEl = null;
+  function buildStarve() {
     if (!starveEl) {
       starveEl = document.createElement("div");
       starveEl.id = "sharkStarve";
       document.body.appendChild(starveEl);
     }
-    scoreEl.style.display = "";
-    shownScore = -1; shownCombo = -1;
-    scoreDraw();
-  }
-  function fmtScore(n) { return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
-  function scoreDraw() {
-    if (!scoreNum) return;
-    if (shownScore !== sim.score) { scoreNum.textContent = fmtScore(sim.score); shownScore = sim.score; }
-    const c = sim.comboT > 0 && sim.combo >= 2 ? sim.combo : 0;
-    if (c !== shownCombo) {
-      comboEl.textContent = c ? "x" + c : "";
-      comboEl.style.display = c ? "" : "none";
-      shownCombo = c;
-    }
-  }
-  function scorePop(pts) {
-    scoreDraw();
-    if (!scoreEl) return;
-    scoreEl.classList.remove("pop");
-    void scoreEl.offsetWidth;            // restart the keyframe
-    scoreEl.classList.add("pop");
+    starveEl.style.opacity = "0";
   }
   function starveTick() {
     if (!starveEl) return;
     const S = sim.shark;
     const f = S && S.maxHp ? S.hp / S.maxHp : 1;
     const burning = sim.clock >= HUNGER_GRACE && !sim.ended;
-    // under a third of the tank the edge of the screen starts to beat, faster
-    // and redder as it empties: the body telling you to go and eat
-    const k = burning ? Math.max(0, Math.min(1, (0.34 - f) / 0.34)) : 0;
+    // the ONLY hunger readout now, so it speaks from half a tank: a faint slow
+    // pulse at 50%, a hard fast red beat as it runs out. Pod damage lands on
+    // the same number, so a mauling reads here too.
+    const k = burning || f < 0.99 ? Math.max(0, Math.min(1, (0.5 - f) / 0.5)) : 0;
     if (k <= 0) { if (starveEl.style.opacity !== "0") starveEl.style.opacity = "0"; return; }
-    const beat = 0.5 + 0.5 * Math.sin(sim.clock * (4 + k * 6));
-    starveEl.style.opacity = (0.12 + 0.43 * k * (0.55 + 0.45 * beat)).toFixed(3);
-  }
-  function hideScore() {
-    if (scoreEl) scoreEl.style.display = "none";
-    if (starveEl) starveEl.style.opacity = "0";
+    const beat = 0.5 + 0.5 * Math.sin(sim.clock * (3 + k * 7));
+    starveEl.style.opacity = (0.08 + 0.5 * k * (0.5 + 0.5 * beat)).toFixed(3);
   }
 
-  // ---- HUD ---------------------------------------------------------------
-  /* THE BODY IS THE READOUT. The owner, on the last thing this mode still put
-     over the water mid-play:
-
-       "the popup on the screen saying shark name arrow next shark should be
-        GONE ... instead each time the shark eats something it gets bigger,
-        and a level-up meter moves up until the shark cinematically evolves."
-
-     He does not hate meters, he hates WORDS. So the pill is deleted outright —
-     the species name (you can SEE what you are; that is the entire point of a
-     ladder that grows the body), the "→ GREAT WHITE" label, and the boxed
-     chrome that made a HUD read as a popup. Every meal now grows the shark
-     physically, which is the honest readout of "how big am I", and the only
-     thing a bar can add is the one fact the body cannot show: HOW CLOSE the
-     next form is.
-
-     What is left is that one fact and nothing else — a 3 px wordless sliver
-     seated with the health/stamina bars at the bottom, at the width they are
-     already at, so it belongs to the same instrument cluster instead of
-     floating alone at the top of the screen. It fills as you eat, flares white
-     for the beat the ladder climbs (evolveBeat's swell owns the screen at that
-     moment), empties into the new rung, and after the MEGALODON — which has
-     nothing left to become — it fades out for good. Nothing to eat "next" is a
-     thing the HUD should stop having an opinion about.
-
-     It hangs off #survBars deliberately, and OUT OF ITS FLOW. That element
-     already carries the island's bottom-centre width, its centring, and the
-     `.sbar`/`.slab`/`.sbarbg` row grammar the health and stamina bars are
-     built from — so the sliver borrows all of it (including an EMPTY label
-     cell, which holds the column so the bar lines up under the other two
-     without a single hard-coded offset) and prints nothing.
-
-     Out of the flow because css/interact_touch.css measured this cluster:
-     #survBars is 66 px tall (bottom:24 + 42) and the portrait touch dock was
-     given 78 px of clearance against exactly that number. #survBars is pinned
-     by its BOTTOM, so an extra row in the flow grows the box UPWARD and eats
-     that clearance. `position:absolute;bottom:-9px` instead: the sliver hangs
-     into the 24 px gap under the stamina bar, the measured height of the
-     cluster does not change, and no touch rail moves on any device.
-
-     ?cfg_SHARK_HUD_WORDLESS=0 restores the old pill verbatim — species name,
-     bar, "→ NEXT" — which is the before/after preset's BEFORE.
-
-     The id stays "sharkhud": it is still THE shark HUD, and shark-sim-check's
-     "the HUD stood up" assertion means the same thing about the sliver as it
-     did about the pill. */
-  function WORDLESS() { return CFG.SHARK_HUD_WORDLESS !== false; }
-
-  let hud = null, hudLine1 = null, hudBar = null, hudLine2 = null, flashEl = null, flashSub = null;
-  let hudTier = -1, hudFlare = 0, hudSpent = false;
-
-  function buildHud() {
-    // a fresh match starts the ladder over, so the meter does too
-    hudTier = -1; hudFlare = 0; hudSpent = false;
-    if (hud) {
-      // "" and not "block": the meter row is a flex row, and block would
-      // collapse the label column that keeps it aligned with the other bars
-      hud.style.display = "";
-      hud.style.opacity = "1";
-      if (hudBar) hudBar.style.width = "0%";
-      return;
-    }
-    if (WORDLESS()) buildMeter(); else buildPill();
-    buildFlash();
-  }
-
-  /* THE METER. No label, no number, no name, no box — a line that is either
-     further along than it was or it is not. */
-  function buildMeter() {
-    hudBar = document.createElement("div");
-    hudBar.id = "sharkhudfill";
-    hudBar.style.cssText = "height:100%;width:0%;border-radius:2px;" +
-      "background:linear-gradient(90deg,#39c06a,#9fe870);" +
-      "box-shadow:0 0 6px rgba(159,232,112,.45);transition:width .25s ease,background .2s";
-    hud = document.createElement("div");
-    hud.id = "sharkhud";
-    const host = document.getElementById("survBars");
-    if (host) {
-      // the island cluster's own row, out of its flow (see the note above)
-      hud.className = "sbar";
-      hud.style.cssText = "position:absolute;left:0;right:0;bottom:-9px;margin:0;" +
-        "pointer-events:none;opacity:1;transition:opacity .7s ease";
-      const slab = document.createElement("span");
-      slab.className = "slab";                 // holds the column, prints nothing
-      slab.style.cssText = "font-size:0;line-height:0";
-      const track = document.createElement("div");
-      track.className = "sbarbg";
-      track.style.cssText = "height:3px;border-radius:2px;background:rgba(0,0,0,.42);" +
-        "box-shadow:inset 0 1px 2px rgba(0,0,0,.5)";
-      track.appendChild(hudBar);
-      hud.appendChild(slab); hud.appendChild(track);
-      host.appendChild(hud);
-    } else {
-      // no island cluster (a bare mount test page): stand where it would have
-      hud.style.cssText = "position:fixed;left:50%;bottom:12px;transform:translateX(-50%);" +
-        "width:min(360px,72vw);height:3px;border-radius:2px;z-index:45;pointer-events:none;" +
-        "background:rgba(0,0,0,.42);overflow:hidden;opacity:1;transition:opacity .7s ease";
-      hud.appendChild(hudBar);
-      document.body.appendChild(hud);
-    }
-  }
-
-  /* THE OLD PILL, kept whole behind ?cfg_SHARK_HUD_WORDLESS=0 so the A/B has
-     a real BEFORE to photograph. Nothing new should be added to it. */
-  function buildPill() {
-    hud = document.createElement("div");
-    hud.id = "sharkhud";
-    hud.style.cssText = "position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:45;" +
-      "pointer-events:none;font-family:Fredoka,system-ui,sans-serif;text-align:center;" +
-      "background:rgba(8,12,20,.62);border-radius:14px;padding:7px 16px 9px;min-width:230px;" +
-      "box-shadow:0 4px 14px rgba(0,0,0,.35)";
-    hudLine1 = document.createElement("div");
-    hudLine1.style.cssText = "color:#eaf4ff;font-size:17px;font-weight:700;letter-spacing:1px";
-    const barWrap = document.createElement("div");
-    barWrap.style.cssText = "height:6px;border-radius:3px;background:rgba(255,255,255,.14);margin:5px 0 4px;overflow:hidden";
-    hudBar = document.createElement("div");
-    hudBar.id = "sharkhudfill";
-    hudBar.style.cssText = "height:100%;width:0%;border-radius:3px;background:linear-gradient(90deg,#39c06a,#9fe870);transition:width .25s ease";
-    barWrap.appendChild(hudBar);
-    hudLine2 = document.createElement("div");
-    hudLine2.style.cssText = "color:#bcd0e2;font-size:12.5px";
-    hud.appendChild(hudLine1); hud.appendChild(barWrap); hud.appendChild(hudLine2);
-    document.body.appendChild(hud);
-  }
-
-  /* The title card / end card / sim.banner surface. It is NOT the pill and it
-     never was: it owns the screen when play is not happening, and the storyboard
-     preset re-shows a beat through it at capture time. Built in both modes. */
+  let flashEl = null, flashSub = null;
+  /* The banner surface: the flag-off evolve line and the tool seam
+     sim.banner. Never raised by the default game while swimming. */
   function buildFlash() {
     if (flashEl) return;
     flashEl = document.createElement("div");
@@ -1492,155 +1351,90 @@
   }
   let flashTimer = 0;
   function flash(big, small) {
-    if (!flashEl) return;
+    buildFlash();
     if (flashEl.firstChild && flashEl.firstChild !== flashSub) flashEl.removeChild(flashEl.firstChild);
     flashEl.insertBefore(document.createTextNode(big), flashSub);
     flashSub.textContent = small || "";
     flashEl.style.opacity = "1";
     flashTimer = 2.8;
   }
-  function hudNow() { sim.hudT = 0; }
-
+  function hudNow() {}
   function hudTick(dt) {
-    if (!hud) return;
-    if (flashTimer > 0) { flashTimer -= dt; if (flashTimer <= 0) flashEl.style.opacity = "0"; }
-    // the flare runs on real time, not on the quarter-second refresh clock
-    if (hudFlare > 0) { hudFlare -= dt; if (hudFlare <= 0) sim.hudT = 0; }
-    sim.hudT -= dt;
-    if (sim.hudT > 0) return;
-    sim.hudT = 0.25;
-    const S = sim.shark; if (!S) return;
-    if (WORDLESS()) { meterTick(); return; }
-    pillTick();
-  }
-
-  /* PROGRESS BETWEEN TWO RUNGS AND NOTHING ELSE. The LADDER's `need` values
-     are the thresholds — this only reads them. sim.mass is the same number the
-     growth wiring turns into body scale, so the bar and the body are two
-     renderings of one fact and cannot disagree. */
-  function meterTick() {
-    if (hudSpent) return;
-    if (sim.tier !== hudTier) {
-      // a rung climbed while the HUD was watching: hold the bar full and go
-      // white for the length of the evolve beat, then let it fall to the new
-      // rung's zero. On the first tick of a match there is nothing to flare.
-      if (hudTier >= 0) hudFlare = 0.75;
-      hudTier = sim.tier;
-    }
-    /* THE FLARE IS TIED TO THE BODY, NOT TO A STOPWATCH. sim.grow is live for
-       exactly as long as growTick is swelling the new body out of the old one
-       — the cinematic beat this meter is the level-up bar for — so the bar
-       holds full and white for exactly that, and the 0.75 s timer is only the
-       fallback for the flag-off path where there is no swell to ride. Tying it
-       to the timer alone was fragile in the A/B: how much HUD time one
-       stepSim burns is not something this file gets to assume. */
-    if (hudFlare > 0 || sim.grow) {
-      hudBar.style.width = "100%";
-      hudBar.style.background = "linear-gradient(90deg,#9fe870,#fff)";
-      return;
-    }
-    hudBar.style.background = "linear-gradient(90deg,#39c06a,#9fe870)";
-    const next = LADDER[sim.tier + 1];
-    if (!next) {
-      // MEGALODON. There is no next form and no win, so there is no meter — it
-      // fades out and stays out. What is left is the sea and the pod in it,
-      // which is a thing to hunt, not a thing to fill.
-      hud.style.opacity = "0";
-      hudSpent = true;
-      return;
-    }
-    const prev = LADDER[sim.tier].need;
-    const p = (sim.mass - prev) / Math.max(1e-6, next.need - prev);
-    hudBar.style.width = (Math.max(0, Math.min(1, p)) * 100).toFixed(1) + "%";
-  }
-
-  /* ?cfg_SHARK_HUD_WORDLESS=0 ONLY. Everything below is the deleted design,
-     kept runnable so the A/B can photograph it. ?cfg_SHARK_SHOW_DONT_TELL=0
-     additionally restores the scent line and the opening hint inside it. */
-  function pillTick() {
-    const show = SDT();
-    hudLine1.textContent = LADDER[sim.tier].name;
-    const next = LADDER[sim.tier + 1];
-    if (next) {
-      const prev = LADDER[sim.tier].need;
-      hudBar.style.width = Math.min(100, Math.round(100 * (sim.mass - prev) / (next.need - prev))) + "%";
-      hudLine2.textContent = show
-        ? "→ " + next.name
-        : "eat " + Math.max(0, next.need - sim.mass) + " more → " + next.name;
-    } else {
-      hudBar.style.width = "100%";
-      hudLine2.textContent = show ? "→ POD"
-        : sim.orcas ? sim.orcas + (sim.orcas > 1 ? " orcas" : " orca") + " eaten"
-        : "nothing outranks you — hunt the pod";
-    }
-    hudLine2.style.color = "#bcd0e2";
-    if (show) return;
-    if (sim.tier < 3) {
-      const P = CBZ.player;
-      let near = 1e9;
-      orcas(function (a) { const d = Math.hypot(a.pos.x - P.pos.x, a.pos.z - P.pos.z); if (d < near) near = d; });
-      // enter at 55 m, let go at 75 — a warning that flickers is a warning ignored
-      sim._podClose = near < (sim._podClose ? 75 : 55);
-      if (sim._podClose) {
-        hudLine2.textContent = "the pod has your scent";
-        hudLine2.style.color = "#ffd06b";
-        sim.hintT = 0;
-      }
-    } else sim._podClose = false;
-    if (sim.hintT > 0) hudLine2.textContent = "point your mouth at food — the bite is automatic";
+    if (flashTimer > 0) { flashTimer -= dt; if (flashTimer <= 0 && flashEl) flashEl.style.opacity = "0"; }
   }
   function hideHud() {
-    hideScore();
-    if (hud) hud.style.display = "none";
+    if (starveEl) starveEl.style.opacity = "0";
     if (flashEl) flashEl.style.opacity = "0";
-    viewCardClose();      // every hideHud caller means "another card owns the screen now"
   }
 
-  /* ---- THE VIEW IS A CHOICE, NOT A BUTTON --------------------------------
-     Owner, 2026-08-29: "remove attack jump and eye button … it should be in
-     settings to change view and when you first load game you choose and then
-     in pause settings you should be able to change it."
+  /* ---- ONE CAMERA ----------------------------------------------------------
+     Owner, 2026-09-27, on his iPad: "the third-person switch doesn't even need
+     an option. You're just adding too many buttons." Shark Sim has exactly one
+     view, the chase camera. There is no first-person shark, no chooser card,
+     no Settings row, no [V], no eye button. This pins it: anything that turns
+     fpsmode on while this mode is live (a stale key handler, an armed intro
+     handoff) is turned straight back off. The chase camera itself is not
+     touched here. */
+  function pinChase() {
+    if (!(CBZ.fps && CBZ.fps.active)) return;
+    if (CBZ.setFPS) { try { CBZ.setFPS(false); } catch (e) {} }
+    else if (CBZ.toggleFPS) { try { CBZ.toggleFPS(); } catch (e) {} }
+  }
 
-     A shark has exactly two views: the chase boom ("chase") and fpsmode's
-     first person riding the shark's own eye ("eye" — systems/fpsmode.js's
-     aquatic-mount seat). The choice is made ONCE, on the first shark match
-     this device ever runs, on a card that owns the screen the way the title
-     card does (a decision is not mid-play, so it is not a words-over-water
-     violation); after that it lives in the pause Settings panel
-     (systems/settings.js reads the two seams below) and the eye button is
-     gone from the touch glass (systems/touch.js hides it in this mode).
-     [V] on a keyboard still toggles live — the pref is where a match STARTS,
-     not a cage. */
-  const VIEW_KEY = "CBZ_SHARK_VIEW_V1";
-  let viewCard = null;
-  function viewPref() {
-    try {
-      const v = localStorage.getItem(VIEW_KEY);
-      return v === "eye" || v === "chase" ? v : null;
-    } catch (e) { return null; }
+  /* ---- THE CHROME WHILE SWIMMING -------------------------------------------
+     Touch: the move stick, RISE / DIVE (touch_vehicle's mount rail) and ONE
+     pause button, top left. The bite is automatic. Keyboard players pause
+     with Esc (pointer lock) or P. The pause card itself is cut to Resume,
+     Restart, Main Menu; the Settings panel (crowd density, total population,
+     quality tiers) is hidden in this mode by css/shark_title.css. */
+  let pauseBtn = null, restartBtn = null;
+  function restartMatch() {
+    if (g.mode !== "sharksim" || !CBZ.startRun) return;
+    // setup() only runs when sim.on is false: stand the old match down first
+    if (sim.needsTeardown) teardown();
+    try { CBZ.startRun(); } catch (e) { console.error("[shark restart]", e); }
   }
-  function viewApply(v) {
-    if (CBZ.setFPS) { try { CBZ.setFPS(v === "eye"); } catch (e) {} return; }
-    const fpOn = !!(CBZ.fps && CBZ.fps.active);
-    if ((v === "eye") !== fpOn && CBZ.toggleFPS) { try { CBZ.toggleFPS(); } catch (e) {} }
+  function buildChrome() {
+    if (!pauseBtn) {
+      pauseBtn = document.createElement("button");
+      pauseBtn.type = "button";
+      pauseBtn.id = "sharkPauseBtn";
+      pauseBtn.setAttribute("aria-label", "Pause");
+      pauseBtn.innerHTML = "<i></i><i></i>";
+      const go = function (e) {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        if (g.mode === "sharksim" && g.state === "playing" && CBZ.setState) CBZ.setState("paused");
+      };
+      pauseBtn.addEventListener("touchstart", go, { passive: false });
+      pauseBtn.addEventListener("click", go);
+      document.body.appendChild(pauseBtn);
+    }
+    if (!restartBtn) {
+      const resume = document.getElementById("resumeBtn");
+      if (resume && resume.parentNode) {
+        restartBtn = document.createElement("button");
+        restartBtn.type = "button";
+        restartBtn.id = "sharkRestartBtn";
+        restartBtn.className = "btn";
+        restartBtn.textContent = "Restart";
+        restartBtn.addEventListener("click", function (e) { if (e) e.preventDefault(); restartMatch(); });
+        // straight above Main Menu, whatever settings.js slotted in after Resume
+        const menu = document.getElementById("pauseMenuBtn");
+        resume.parentNode.insertBefore(restartBtn, menu && menu.parentNode === resume.parentNode ? menu : resume.nextSibling);
+      }
+    }
   }
-  CBZ.sharkSimViewGet = function () {
-    return viewPref() || ((CBZ.fps && CBZ.fps.active) ? "eye" : "chase");
-  };
-  CBZ.sharkSimViewSet = function (v) {
-    v = v === "eye" ? "eye" : "chase";
-    try { localStorage.setItem(VIEW_KEY, v); } catch (e) {}
-    if (g.mode === "sharksim" && sim.on) viewApply(v);
-    return v;
-  };
-  function viewCardClose() {
-    if (!viewCard) return;
-    if (viewCard.parentNode) viewCard.parentNode.removeChild(viewCard);
-    viewCard = null;
-  }
-  function openingFlash() {
-    flash("YOU ARE THE SHARK", "eat to live, chain meals for a frenzy, become the MEGALODON");
-  }
+  CBZ.sharkSimRestart = restartMatch;
+  window.addEventListener("keydown", function (e) {
+    if (g.mode !== "sharksim" || e.repeat) return;
+    const k = (e.key || "").toLowerCase();
+    if (k !== "p" || g.state !== "playing") return;
+    // a held mouse would leave the card unclickable: letting it go IS the
+    // pause (camera.js's pointerlockchange), exactly like Esc
+    if (document.pointerLockElement && document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
+    if (g.state === "playing" && CBZ.setState) CBZ.setState("paused");
+  });
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", buildChrome); else buildChrome();
 
   // ---- match lifecycle ---------------------------------------------------
   function setup() {
@@ -1655,7 +1449,7 @@
     sim.death = null; sim.killer = null;
     // stockT 0.4, not 3: the sea top-up rides this same clock now and a match
     // that opens on empty water is the bug this file was opened to fix.
-    sim.biteT = 0; sim.podT = 2; sim.stockT = 0.4; sim.strandT = 0; sim.hudT = 0; sim.hintT = 5;
+    sim.biteT = 0; sim.podT = 2; sim.stockT = 0.4; sim.strandT = 0; sim.hudT = 0;
     sim.seaIx = 0; sim.rivalT = 0; sim.seaAdds = 0;
     sim._podClose = false;
     podRestore(); growClear();
@@ -1687,31 +1481,10 @@
     hideRider();          // the frame you BECOME the shark, not the one after:
                           // step() used to own this and the oracle caught the
                           // one-frame window where a man sits on the shark
-    buildHud();
-    buildScore();
-    hudNow();
+    buildStarve();
     sim.on = true;
     sim.needsTeardown = true;
-    // The view: a saved choice is applied silently; a device that has never
-    // chosen gets the chooser card, which holds the opening banner until the
-    // pick lands (openingFlash fires from the card's own buttons). A TOOL RUN
-    // (shark-sim-check, every visual preset, any CDP probe) has nobody to tap
-    // the card and must not capture it over every shot: it gets the chase
-    // default, unsaved, and ?cfg_SHARK_VIEW=eye can stage the other camera.
-    // navigator.webdriver alone was NOT the tool test it claims to be — the
-    // harness's Chromes speak raw CDP without --enable-automation, so it
-    // stayed false and the first capture run photographed the card over every
-    // frame. The belt is the repo's own tooling grammar: every tool pins
-    // ?seed= or stages ?cfg_ flags, and no player types either.
-    // THE VIEW IS NOT A GATE. A first-run "PICK YOUR VIEW" card used to stand
-    // between launch and the water (CrazyGames: "land directly in gameplay").
-    // Chase is the default; a saved or staged choice still applies, and the
-    // pause Settings panel (CBZ.sharkSimViewSet) and [V] still change it.
-    const pv = viewPref() || (CFG.SHARK_VIEW === "eye" || CFG.SHARK_VIEW === "chase" ? CFG.SHARK_VIEW : null);
-    viewApply(pv || "chase");
-    // the launch intro (modes/shark_title.js) already owns the screen with the
-    // wordmark and the controls; a banner on top of it would be a second one
-    if (!(CBZ.sharkIntroActive && CBZ.sharkIntroActive() && sim.match <= 1)) openingFlash();
+    pinChase();                          // one camera: the chase view
   }
 
   function teardown() {
@@ -1727,7 +1500,6 @@
       sim.death = null;
       if (CBZ.clearSpectate) { try { CBZ.clearSpectate(); } catch (e) {} }
     }
-    viewCardClose();                     // an unanswered chooser must not outlive the mode
     g.invuln = 0;                        // never leak the rider shield into another mode
     CBZ.sharkSimShoreRing = null;
     // the fleet does not outlive the match — and neither do the people on it
@@ -1750,7 +1522,6 @@
       return;
     }
     if (S.dead) { onSharkDead(); return; }
-    if (sim.hintT > 0) sim.hintT -= dt;
     // the island's own spawn writes the castaway's yaw back for a few frames
     // after setup; hold the opening lens on the beach until it settles
     if (sim.clock < 0.5 && sim.spawnYaw != null && CBZ.cam && !(CBZ.keys && (CBZ.keys.w || CBZ.keys.a || CBZ.keys.s || CBZ.keys.d))) CBZ.cam.yaw = sim.spawnYaw;
@@ -1770,6 +1541,7 @@
     // first). Anything that would kill the HUMAN off the shark's back — a
     // stray blast, an animal that targets the rider — lands on the mirror.
     if ((g.invuln || 0) < 2) g.invuln = 2;
+    pinChase();
     if (!P.dead) {
       mountShark();                          // E/dismount is not a control in this game
       hideRider();

@@ -4164,7 +4164,8 @@
   addEventListener("keydown", (e) => {
     if (e.repeat) return;
     const k = e.key.toLowerCase();
-    if (k === "v" && CBZ.game.mode !== "city") CBZ.toggleFPS();   // city owns [V] via city/view.js
+    // city owns [V] via city/view.js; Shark Sim has one camera and no [V]
+    if (k === "v" && CBZ.game.mode !== "city" && CBZ.game.mode !== "sharksim") CBZ.toggleFPS();
     else if (k === "r" && (fps.active || shoulderActive())) reload();
     else if (k === "x" && (fps.active || shoulderActive()) && weapon().explosive &&
       !CBZ.cityMenuOpen && !(CBZ.fullMap && CBZ.fullMap.active) &&
