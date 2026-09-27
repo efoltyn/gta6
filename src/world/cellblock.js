@@ -32,7 +32,7 @@
        of the north wall is the wing's OFFICER POST, open to the floor, and
        the patrol walks into it and turns around.
      · escape_routes.js:96 floor-hatches the "Cell Utility Crawl" at
-       (-12.2,-38.2). That is inside the player's cell — deliberately kept
+       (-12.2,-39.6). That is inside the player's cell — deliberately kept
        there: a physical route out of your own floor is worth more than any
        marker (CLAUDE.md LAW 1).
      · escape_routes.js:119 hatches the "Ceiling Service Hatch" at
@@ -100,7 +100,7 @@
    run rather than from this comment: CBZ.SPAWN (-11,-39) still on A-1's
    centre-line 1.0 m north of its own door with spawnBlocked 0, the
    ventilation crawl (-14.2,-31) and the officer-post waypoint (0,-39) still
-   outside every cell, the utility crawl (-12.2,-38.2) still inside A-1, the
+   outside every cell, the utility crawl (-12.2,-39.6) still inside A-1, the
    ceiling hatch (11.6,-36.4) still in the cross-aisle, doorGapBlocked and
    spineBlocked still 0.
 
@@ -125,10 +125,6 @@
    cells stand empty, which inmate does what, blanket colours, personal
    effects) comes off CBZ.hash01 of the cell's own coordinates. No
    Math.random, no shared rng stream.
-
-   REVERT: CBZ.CONFIG.PRISON_CELLS_V2 = false (or ?cfg_PRISON_CELLS_V2=0)
-   restores the original 59-line dressing byte for byte, and CBZ.cellblock
-   degrades to a null-safe stub whose playerSpawn() falls back to CBZ.SPAWN.
 
    ------------------------------------------------------------------
    THE TIER (2026-09-04). OWNER, with a photograph of a real cell house —
@@ -202,14 +198,11 @@
     }
     return addBox0(x, y + LIFT, z, w, hgt, d, color, opts);
   }
-  const { WALL, TRIM } = COL;
+  const { WALL } = COL;
   const WH = DIM.WH;
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
   const root = CBZ.prisonRoot || CBZ.scene;
 
-  // ONE-LINE REVERT. config.js's generic ?cfg_ sweep runs before this file,
-  // so a URL override already sits in CONFIG and this guard leaves it alone.
-  if (CFG.PRISON_CELLS_V2 == null) CFG.PRISON_CELLS_V2 = true;
   // The two halves of "a man sits ON his bunk": where his hips go (the pose,
   // see bunkSpot) and whether there is room for his head when they get there
   // (the geometry, see bunkRig). Declared together and up here because the
@@ -262,63 +255,6 @@
   addBox(16, WH / 2, -26, 1, WH, 36, WALL, { solid: true, blockLOS: true });   // east
   addBox(-9.5, WH / 2, -8, 13, WH, 1, WALL, { solid: true, blockLOS: true });  // south-left  (door gap x[-3,3])
   addBox(9.5, WH / 2, -8, 13, WH, 1, WALL, { solid: true, blockLOS: true });   // south-right
-
-  // red trim line along the north wall top
-  addBox(0, WH - 0.6, -43.55, 32, 0.5, 0.4, TRIM, { cast: false });
-
-  /* ==========================================================
-     LEGACY PATH — the original set dressing, kept callable so the flag
-     is a true one-line revert (and so the before-state stays visible).
-     ========================================================== */
-  function buildLegacy() {
-    // barred windows punched into the north wall — OWNER RULE (bda61ab): no
-    // gray panes; glass behind the bars is the same clear tint as the city.
-    for (let wx = -11; wx <= 11; wx += 11) {
-      const pane = addBox(wx, 6, -43.4, 2.6, 2.6, 0.2, 0xbfe9f7, { cast: false, emissive: 0x3f8aa6, ei: 0.5 });
-      pane.material.transparent = true; pane.material.opacity = 0.6;
-      for (let i = 0; i < 4; i++)
-        addBox(wx - 1 + i * 0.66, 6, -43.2, 0.1, 2.4, 0.1, 0x2a2f38, { cast: false }); // bars
-    }
-    function bunk(x, z) {
-      addBox(x, 0.5, z, 2.6, 0.3, 1.3, 0x4f5663, {});
-      addBox(x, 0.7, z, 2.4, 0.18, 1.1, 0xd9d2c4, {});
-      addBox(x, 1.7, z, 2.6, 0.3, 1.3, 0x4f5663, {});
-      addBox(x, 1.9, z, 2.4, 0.18, 1.1, 0xd9d2c4, {});
-      addBox(x, 1.0, z, 0.2, 0.3, 1.1, 0x9aa0a8, {});
-      addBox(x - 1.2, 1.0, z, 0.16, 2.0, 1.3, 0x3c424d, {});
-      addBox(x + 1.2, 1.0, z, 0.16, 2.0, 1.3, 0x3c424d, {});
-    }
-    bunk(-12.5, -41);
-    bunk(12.5, -41);
-    addBox(-14.4, 0.5, -34, 1.0, 1.0, 0.9, 0xc7ccd2, {});
-    addBox(-14.4, 1.05, -34, 0.9, 0.1, 0.8, 0xe6e9ed, {});
-    for (let i = 0; i < 6; i++)
-      addBox(-7 + i * 0.6, 2.4, -37.5, 0.12, 4.6, 0.12, 0x2a2f38, { cast: false });
-    addBox(-4.0, 4.85, -37.5, 4.0, 0.25, 0.25, 0x2a2f38, { cast: false });
-    addBox(-4.0, 0.15, -37.5, 4.0, 0.25, 0.25, 0x2a2f38, { cast: false });
-    addBox(0, 8.6, -30, 0.5, 0.3, 0.5, 0x3c424d, { cast: false });
-    CBZ.ceilingLamp = addBox(0, 8.2, -30, 0.7, 0.2, 0.7, 0xffe9a8, { emissive: 0xffcf66, ei: 0.9, cast: false });
-
-    // null-safe stub so every consumer (capture.js / lockdown.js) can call the
-    // same API with the flag off and get honest "there are no cells" answers.
-    CBZ.cellblock = {
-      v2: false, cells: [], playerCell: null,
-      setDoor: function () { return false; },
-      assign: function () { return false; },
-      cellAt: function () { return null; },
-      freeCell: function () { return null; },
-      lockAll: function () { return 0; },
-      resetDoors: function () { return 0; },
-      playerSpawn: function () { return { x: CBZ.SPAWN.x, z: CBZ.SPAWN.z }; },
-    };
-    CBZ.cellblockAudit = function () {
-      return { v2: false, rows3: false, cells: 0, rows: {}, occupied: 0, empty: 0, locked: 0,
-        vacantWanted: 0, spawnInPlayerCell: false, spawnMargin: 0, spawnBlocked: 0,
-        doorGapBlocked: 0, spineBlocked: 0, colliders: 0 };
-    };
-  }
-
-  if (!CFG.PRISON_CELLS_V2) { buildLegacy(); return; }
 
   /* ==========================================================
      PRISON_PROP_HONESTY_V1 — THE ONE-LINE REVERT FOR THE 2026-08-15 PROP PASS.
@@ -710,6 +646,109 @@
     return m;
   }
 
+  /* THE DRESSING MERGE. Everything small and static that gives the wing its
+     detail (posters, photos, books, the mug, lamp housings, window reveals,
+     cage lamp reflectors, desk kit) is real geometry — cylinders, lathes,
+     rounded solids — painted per vertex and folded into ONE mesh at the end
+     of the build. One draw call for the whole wing's small stuff, whatever
+     shape it is. `dress` takes geometry already built around its own origin,
+     turns it `ry` about y and drops it at (x, y, z) on the CURRENT floor. */
+  const DRESS = [];
+  const DRESS_MAT = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const _dc = new THREE.Color();
+  function paintGeo(g, color) {
+    g = g.index ? g.toNonIndexed() : g;
+    if (g.attributes.uv) g.deleteAttribute("uv");
+    if (g.attributes.uv2) g.deleteAttribute("uv2");
+    const n = g.attributes.position.count, a = new Float32Array(n * 3);
+    _dc.setHex(color);
+    for (let k = 0; k < n; k++) { a[k * 3] = _dc.r; a[k * 3 + 1] = _dc.g; a[k * 3 + 2] = _dc.b; }
+    g.setAttribute("color", new THREE.BufferAttribute(a, 3));
+    return g;
+  }
+  function dress(g, color, x, y, z, ry) {
+    g = paintGeo(g, color);
+    if (ry) g.rotateY(ry);
+    g.translate(x, y + LIFT, z);
+    DRESS.push(g);
+    return g;
+  }
+  // a box in the dressing merge (the cheap case)
+  function dbox(x, y, z, w, h, d, color, ry) { return dress(new THREE.BoxGeometry(w, h, d), color, x, y, z, ry); }
+  function flushDress() {
+    if (!DRESS.length) return null;
+    const geo = THREE.BufferGeometryUtils.mergeBufferGeometries(DRESS, false);
+    for (const g of DRESS) g.dispose();
+    DRESS.length = 0;
+    const m = new THREE.Mesh(geo, DRESS_MAT);
+    m.castShadow = false; m.receiveShadow = true;
+    root.add(m);
+    return m;
+  }
+
+  /* A PRINTED SHEET ON A WALL — a poster, a photograph, a calendar. Built in a
+     local frame (sheet in XY, facing +z, its back ON z = 0) and turned so +z
+     is the wall's normal (nx, nz), so the paper lies ON the wall face at
+     (x, y, z) instead of standing a box-thickness proud of it. No text
+     anywhere (signage law): the image is blocks of colour, the way a poster
+     reads from two metres. */
+  function wallSheet(x, y, z, nx, nz, w, h, kind, seed) {
+    const parts = [];
+    const T = 0.004;
+    const sheet = (px, py, pw, ph, col, dz) => {
+      const g = new THREE.BoxGeometry(pw, ph, T);
+      g.translate(px, py, T / 2 + (dz || 0));
+      parts.push(paintGeo(g, col));
+    };
+    const tri = (px, py, pw, ph, col, dz) => {           // a mountain / a sail
+      const s = new THREE.Shape();
+      s.moveTo(-pw / 2, 0); s.lineTo(pw / 2, 0); s.lineTo(pw * (0.1 * (seed % 3)), ph); s.closePath();
+      const g = new THREE.ShapeGeometry(s);
+      g.translate(px, py, T + 0.0015 + (dz || 0));
+      parts.push(paintGeo(g, col));
+    };
+    const disc = (px, py, r, col, dz) => {
+      const g = new THREE.CircleGeometry(r, 18);
+      g.translate(px, py, T + 0.0015 + (dz || 0));
+      parts.push(paintGeo(g, col));
+    };
+    if (kind === "photo") {
+      sheet(0, 0, w, h, 0xece6d6);                                            // print border
+      sheet(0, h * 0.06, w * 0.86, h * 0.72, [0x6f8aa0, 0x8a7a5c, 0x7a6e84][seed % 3], 0.0015);
+      sheet(0, h * 0.06 - h * 0.14, w * 0.86, h * 0.44, [0x5b6a4a, 0x9b8a6c, 0x6b5a50][seed % 3], 0.0025);
+      disc(w * 0.08 * ((seed % 3) - 1), h * 0.02, w * 0.14, [0xc79a7a, 0xb88a6a, 0x8a5e46][seed % 3], 0.002);
+    } else if (kind === "calendar") {
+      sheet(0, 0, w, h, 0xe9e6dd);
+      sheet(0, h * 0.30, w * 0.92, h * 0.34, [0x6d8fb0, 0x8aa36a, 0xb07a5a][seed % 3], 0.0015); // the month's picture
+      for (let r = 0; r < 5; r++) for (let c2 = 0; c2 < 7; c2++)
+        sheet(-w * 0.39 + c2 * w * 0.13, -h * 0.05 - r * h * 0.085, w * 0.10, h * 0.06, (r * 7 + c2 + seed) % 11 === 0 ? 0xb24a3a : 0xc9c5ba, 0.0015);
+    } else if (kind === "land") {
+      sheet(0, 0, w, h, 0xf1eee6);
+      sheet(0, h * 0.18, w * 0.9, h * 0.52, 0x8fb4cf, 0.0012);               // sky
+      sheet(0, h * 0.42, w * 0.9, h * 0.06, 0xb6cfe0, 0.0014);
+      tri(-w * 0.12, -h * 0.08, w * 0.62, h * 0.40, 0x5d6b73);                // range
+      tri(w * 0.22, -h * 0.08, w * 0.44, h * 0.28, 0x75818a, 0.0005);
+      sheet(0, -h * 0.20, w * 0.9, h * 0.24, 0x3f6f86, 0.0022);               // water
+      sheet(0, -h * 0.40, w * 0.9, h * 0.12, 0xd8c79e, 0.0024);               // beach
+    } else {                                                                  // a team / band poster
+      const a = [0x1f2f4a, 0x4a1f24, 0x1f3a2b][seed % 3], b = [0xc9a24a, 0xd9d4c8, 0xb2544a][seed % 3];
+      sheet(0, 0, w, h, a);
+      sheet(0, -h * 0.30, w * 0.9, h * 0.08, b, 0.0012);
+      disc(0, h * 0.12, w * 0.28, b, 0.0005);
+      disc(0, h * 0.12, w * 0.20, a, 0.0012);
+      sheet(0, h * 0.12, w * 0.07, w * 0.30, b, 0.0022);
+    }
+    // four strips of tape holding it up, catching the light
+    if (kind !== "photo") for (const sx of [-1, 1]) for (const sy of [-1, 1])
+      sheet(sx * (w / 2 - 0.02), sy * (h / 2 - 0.015), 0.06, 0.03, 0xd8d2b8, 0.0035);
+    else sheet(0, h / 2 - 0.01, 0.05, 0.03, 0xd8d2b8, 0.0035);
+    const g = THREE.BufferGeometryUtils.mergeBufferGeometries(parts, false);
+    for (const p of parts) p.dispose();
+    g.rotateY(Math.atan2(nx, nz));
+    g.translate(x, y + LIFT, z);
+    DRESS.push(g);
+  }
+
   /* ==========================================================
      4. ONE CELL. Structure, then the barred face, then the fittings.
      ========================================================== */
@@ -898,7 +937,7 @@
   const LOW_TOP = DECK_Y - BERTH;       // 0.62
   const RAIL_TOP = UP_TOP + 0.34;       // 2.62
 
-  function bunkRig(c, x, z, along, dbl, blanket) {
+  function bunkRig(c, x, z, along, dbl, blanket, open) {
     // ONE local frame instead of eleven `along === "z" ? … : …` ternaries.
     // `lat` = across the bunk, `lon` = along the lie axis with the PILLOW at
     // -lon. Writing it once is not tidiness: the old ternaries disagreed with
@@ -932,19 +971,33 @@
        0.14 under the mattress top and the frame is 0.20 deep, so the underside
        is exactly M - DECK_T and the solve cannot silently stop being true.
        `solidY0` makes the frame a real obstacle (see the collider note below). */
+    /* THE FRAME IS STEEL, NOT A SLAB. It was one 0.20 m solid block the size
+       of the bed, which is what made the whole bunk read as a shelf unit. A
+       prison bunk is angle-iron rails round a pressed-steel deck pan, with
+       straps under the pan and square-tube posts at the corners: from the
+       floor you see THROUGH it to the wall. The collider keeps the exact box
+       the slab had (solid() below), so nothing that measures the bunk moves;
+       only the drawing is honest now. */
+    const RL = 0.05, RH = 0.12;                                           // rail section
     function rack(M, solidY0) {
-      bb(0, M - 0.24, 0, LAT, 0.20, LON, C_BUNK,                         // frame → M-0.34..M-0.14
-        { cast: true, solid: true, y0: solidY0, y1: M - 0.14 });
-      soft(bb(0, M - 0.09, 0, MLAT, 0.18, MLON, C_MATT), 0.06);          // mattress → M
-      if (DET) {
-        // a TUCKED SHEET: a thin lip of linen overhanging the frame all round.
-        // It is the line that separates "mattress" from "slab on a shelf".
-        bb(0, M - 0.175, 0, MLAT + 0.10, 0.09, MLON + 0.08, C_MATT);
-        bb(0, M - 0.20, LON / 2 - 0.05, LAT, 0.14, 0.10, C_DARK);        // foot rail
+      const hx = AZ ? LAT / 2 : LON / 2, hz = AZ ? LON / 2 : LAT / 2;
+      solid(x - hx, z - hz, x + hx, z + hz, solidY0, M - 0.14);           // the slab's collider, unchanged
+      for (const s of [-1, 1]) {
+        bb(s * (LAT / 2 - RL / 2), M - 0.14 - RH / 2, 0, RL, RH, LON, C_BUNK);   // side rails
+        bb(0, M - 0.14 - RH / 2, s * (LON / 2 - RL / 2), LAT - 2 * RL, RH, RL, C_BUNK); // end rails
       }
-      soft(bb(0, M + 0.01, 0.55, MLAT * 0.98, 0.07, 1.30, blanket), 0.03, 0.012);   // blanket over the legs
-      if (DET) soft(bb(0, M + 0.02, -0.09, MLAT * 0.97, 0.07, 0.18, C_MATT), 0.03);  // TURNED-DOWN fold
-      soft(bb(0, M + 0.06, -1.00, 0.84, 0.17, 0.42, 0xe6e9ed), 0.08);                // pillow
+      bb(0, M - 0.165, 0, LAT - 2 * RL, 0.02, LON - 2 * RL, C_DARK);      // deck pan
+      if (DET) for (const t of [-0.75, 0, 0.75])
+        bb(0, M - 0.20, t, LAT - 2 * RL, 0.04, 0.06, C_BUNK);             // straps under the pan
+      soft(bb(0, M - 0.09, 0, MLAT, 0.18, MLON, C_MATT), 0.06, 0.006);   // mattress → M
+      if (DET) {
+        // a TUCKED SHEET: a thin lip of linen round the mattress's foot.
+        // It is the line that separates "mattress" from "slab on a shelf".
+        soft(bb(0, M - 0.155, 0, MLAT + 0.04, 0.05, MLON + 0.04, C_MATT), 0.02);
+      }
+      soft(bb(0, M + 0.01, 0.55, MLAT * 0.98 + 0.06, 0.07, 1.30, blanket), 0.03, 0.012);   // blanket over the legs, over the edges
+      if (DET) soft(bb(0, M + 0.02, -0.09, MLAT * 0.97, 0.07, 0.18, C_MATT), 0.03, 0.006); // TURNED-DOWN fold
+      soft(bb(0, M + 0.06, -1.00, 0.72, 0.15, 0.40, 0xe6e9ed), 0.07, 0.01);             // pillow
     }
 
     /* THE COLLIDERS, and why they arrive now. This file's fittings were all
@@ -964,18 +1017,32 @@
        The leash in §10 is widened off `latOut` below so a cell resident is never
        clamped INTO the frame it now has. */
     rack(LOW_TOP, 0);
-    // FOUR corner legs, not the two diagonal ones this used to draw (a bunk
-    // resting on opposite corners is a thing the eye reads as broken).
+    // square-tube posts at the four corners, inside the rail corners. A single
+    // rack stands on them to its own frame; a stack runs them floor to rail
+    // head. Each rack gets a head and a foot bar between its posts: the end
+    // frame is what makes a bunk read as a bunk from the door.
+    const PT = 0.06, PLAT = LAT / 2 - PT / 2, PLON = LON / 2 - PT / 2;
+    const postTop = dbl ? RAIL_TOP : LOW_TOP + 0.28;
     for (const a of [-1, 1]) for (const b2 of [-1, 1]) {
       if (!DET && a !== b2) continue;
-      bb(a * 0.55, 0.14, b2 * 1.25, 0.12, 0.28, 0.12, C_DARK);
+      bb(a * PLAT, postTop / 2, b2 * PLON, PT, postTop, PT, C_DARK);
+      bb(a * PLAT, 0.01, b2 * PLON, PT + 0.03, 0.02, PT + 0.03, C_DARK);   // floor shoe
+    }
+    if (DET) for (const b2 of [-1, 1]) {
+      bb(0, LOW_TOP + 0.22, b2 * PLON, LAT - PT, 0.04, 0.04, C_DARK);
+      if (dbl) bb(0, RAIL_TOP - 0.02, b2 * PLON, LAT - PT, 0.04, 0.04, C_DARK);
     }
     if (dbl) {
       rack(UP_TOP, DECK_Y);
       if (DET) {
         // GUARD RAIL down the open side + the ladder at the foot: the two
         // fittings that say "somebody sleeps up there" rather than "shelf".
-        bb(LAT / 2 - 0.06, RAIL_TOP - 0.15, 0.30, 0.08, 0.30, 1.60, C_DARK);
+        // Two tubes from the head post and a drop at the open end — it was a
+        // 0.30 m solid plate, which is a shelf's lip, not a rail.
+        const g0 = -PLON, g1 = 0.55, GS = open || 1;   // GS: the side of the bed the room is on
+        bb(GS * PLAT, RAIL_TOP - 0.02, (g0 + g1) / 2, 0.04, 0.04, g1 - g0, C_DARK);
+        bb(GS * PLAT, UP_TOP + 0.13, (g0 + g1) / 2, 0.035, 0.035, g1 - g0, C_DARK);
+        bb(GS * PLAT, (UP_TOP - 0.14 + RAIL_TOP) / 2, g1, 0.04, RAIL_TOP - UP_TOP + 0.14, 0.04, C_DARK);
         // A REAL FLIGHT, not two rungs starting at chest height. The rise is
         // pinned to systems/physics.js's STEP_UP — the tallest riser a body in
         // this engine takes in one step — so the count follows the height
@@ -986,18 +1053,15 @@
         const RUNGS = Math.max(2, Math.ceil(UP_TOP / STEP_UP));
         const LADZ = LON / 2 + 0.05;
         for (let r = 1; r < RUNGS; r++)
-          bb(0, (UP_TOP / RUNGS) * r, LADZ, 0.60, 0.07, 0.07, C_DARK);
-        for (const a of [-1, 1]) bb(a * 0.28, UP_TOP / 2, LADZ, 0.07, UP_TOP, 0.07, C_DARK);
-      }
-      // FOUR corner posts, carried from the lower frame's underside all the way
-      // to the rail head. The old pair stopped at 1.75 and stood on opposite
-      // DIAGONAL corners — the same "the eye reads it as broken" fault the legs
-      // above were fixed for, and at this height a rail resting on nothing is
-      // the first thing you would notice.
-      const PY0 = LOW_TOP - 0.34, PH = RAIL_TOP - PY0;
-      for (const a of [-1, 1]) for (const b2 of [-1, 1]) {
-        if (!DET && a !== b2) continue;
-        bb(a * 0.60, PY0 + PH / 2, b2 * 1.28, 0.10, PH, 0.10, C_DARK);
+          bb(0, (UP_TOP / RUNGS) * r, LADZ, 0.50, 0.035, 0.035, C_DARK);
+        const LH = UP_TOP + 0.30;                    // stiles run past the deck: a handhold
+        for (const a of [-1, 1]) {
+          bb(a * 0.26, LH / 2, LADZ, 0.045, LH, 0.045, C_DARK);
+          // the hooks that hang it on the end rail — a ladder standing free of
+          // the bed it serves is a ladder waiting to fall over
+          bb(a * 0.26, UP_TOP - 0.20, (LADZ + PLON) / 2, 0.04, 0.03, LADZ - PLON + 0.04, C_DARK);
+          bb(a * 0.26, LOW_TOP - 0.20, (LADZ + PLON) / 2, 0.04, 0.03, LADZ - PLON + 0.04, C_DARK);
+        }
       }
     }
     /* WHAT THE RIG PUBLISHES, and why it is more than two mattress tops now.
@@ -1154,27 +1218,94 @@
     }
   }
 
-  // a shelf + its two brackets, sized along the wall it hangs on
-  function shelf(x, y, z, w, d) {
-    addBox(x, y, z, w, 0.06, d, 0xb9a184, { cast: false });
-    if (w > d) {
-      addBox(x - w * 0.4, y - 0.09, z, 0.05, 0.12, d * 0.7, C_STEEL_D, { cast: false });
-      addBox(x + w * 0.4, y - 0.09, z, 0.05, 0.12, d * 0.7, C_STEEL_D, { cast: false });
-    } else {
-      addBox(x, y - 0.09, z - d * 0.4, w * 0.7, 0.12, 0.05, C_STEEL_D, { cast: false });
-      addBox(x, y - 0.09, z + d * 0.4, w * 0.7, 0.12, 0.05, C_STEEL_D, { cast: false });
+  // a shelf + its two brackets, sized along the wall it hangs on. (inx,inz)
+  // points AT that wall, so the brackets are gussets bolted to it — they used
+  // to be two little blocks floating under the middle of the plank.
+  function shelf(x, y, z, w, d, inx, inz) {
+    addBox(x, y, z, w, 0.03, d, 0xa9b0b4, { cast: false });                          // pressed-steel shelf
+    const along = w > d, L = along ? w : d, D = along ? d : w;
+    // a turned-down front lip, the edge a steel shelf actually has
+    dbox(x - inx * (D / 2 - 0.01), y - 0.025, z - inz * (D / 2 - 0.01), along ? L : 0.02, 0.05, along ? 0.02 : L, 0x9aa1a5);
+    for (const s of [-0.38, 0.38]) {
+      const bx = along ? x + s * L : x, bz = along ? z : z + s * L;
+      const g = new THREE.Shape();                                                   // the gusset, in (depth, height)
+      g.moveTo(0, 0); g.lineTo(D * 0.8, 0); g.lineTo(0, -0.16); g.closePath();
+      const geo = new THREE.ExtrudeGeometry(g, { depth: 0.012, bevelEnabled: false });
+      geo.translate(0, 0, -0.006);
+      // local x = away from the wall; turn it so +x points -in
+      dress(geo, C_STEEL_D, bx + inx * (D / 2), y - 0.015, bz + inz * (D / 2), Math.atan2(inz, -inx));
     }
   }
 
   // a barred window punched through the north wall, inside one cell
   function cellWindow(x) {
-    const pane = addBox(x, 2.30, -43.40, 1.60, 1.50, 0.20, 0xbfe9f7, { cast: false, emissive: 0x3f8aa6, ei: 0.5 });
-    pane.material.transparent = true; pane.material.opacity = 0.6;   // OWNER RULE (bda61ab): clear glass, never grey
-    addBox(x, 3.10, -43.34, 1.80, 0.16, 0.28, C_PART_D, { cast: false });   // lintel
-    addBox(x, 1.52, -43.34, 1.80, 0.14, 0.34, C_PART_D, { cast: false });   // sill
-    for (let i = 0; i < 4; i++) addBox(x - 0.60 + i * 0.40, 2.30, -43.22, 0.09, 1.40, 0.09, C_BAR, { cast: false });
-    addBox(x, 1.62, -43.22, 1.50, 0.10, 0.10, C_BAR, { cast: false });
-    addBox(x, 2.98, -43.22, 1.50, 0.10, 0.10, C_BAR, { cast: false });
+    /* A WINDOW IS AN OPENING, NOT A GLOWING SLAB. It was a 20 cm thick,
+       60 % transparent cyan box glued to the wall face with a tint of
+       emissive — the wall showed through it, so it read as a mint-green
+       panel, not glass (owner rule bda61ab: clear, never grey, and never
+       that). Now: a cast concrete surround standing off the wall, a sloped
+       sill, a dark steel frame with a transom, wired safety glass lit by the
+       sky outside (world/prisonlook.js follows the day with it), and five
+       round bars set into the head and the sill. */
+    const Z = IZN, W = 1.50, H = 1.40, Y = 2.30, D = 0.16;
+    dbox(x, Y + H / 2 + 0.07, Z + D / 2, W + 0.28, 0.14, D, 0x9aa0a4);                 // head
+    for (const s of [-1, 1]) dbox(x + s * (W / 2 + 0.07), Y, Z + D / 2, 0.14, H, D, 0x9aa0a4);   // jambs
+    // the sill: deeper than the reveal, its top falling away from the glass
+    const sill = new THREE.BoxGeometry(W + 0.36, 0.08, D + 0.10);
+    const sp = sill.attributes.position;
+    for (let i = 0; i < sp.count; i++) if (sp.getY(i) > 0 && sp.getZ(i) > 0) sp.setY(i, sp.getY(i) - 0.03);
+    sill.computeVertexNormals();
+    dress(sill, 0xa3a8ab, x, Y - H / 2 - 0.04, Z + (D + 0.10) / 2);
+    // steel frame, transom, and the glazing bead the glass sits in
+    dbox(x, Y + H / 2 - 0.03, Z + 0.03, W, 0.06, 0.06, 0x2e343b);
+    dbox(x, Y - H / 2 + 0.03, Z + 0.03, W, 0.06, 0.06, 0x2e343b);
+    for (const s of [-1, 1]) dbox(x + s * (W / 2 - 0.03), Y, Z + 0.03, 0.06, H, 0.06, 0x2e343b);
+    dbox(x, Y + 0.22, Z + 0.03, W, 0.05, 0.05, 0x2e343b);                             // transom
+    dbox(x, Y, Z + 0.03, 0.05, H, 0.05, 0x2e343b);                                       // mullion
+    // the bars, round, in the reveal, into the head and the sill
+    for (let i = 0; i < 5; i++) {
+      const b = new THREE.CylinderGeometry(0.022, 0.022, H + 0.10, 10);
+      dress(b, C_BAR, x - 0.60 + i * 0.30, Y, Z + D - 0.05);
+    }
+    // the glass itself: a plane on the wall face, inside the frame
+    const g = new THREE.PlaneGeometry(W - 0.06, H - 0.06);
+    g.translate(x, Y + LIFT, Z + 0.006);
+    GLASS.push(g);
+  }
+  // wired, lightly frosted safety glass. ONE material for every cell window
+  // in the wing; its colour is the sky (prisonlook.js drives it).
+  const GLASS = [];
+  const GLASS_MAT = (function () {
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = 128;
+    const q = cv.getContext("2d");
+    q.fillStyle = "#ffffff"; q.fillRect(0, 0, 128, 128);
+    for (let i = 0; i < 128; i += 4) {                         // the frosting: faint vertical streaks
+      q.fillStyle = "rgba(120,140,150," + (0.03 + ((i * 37) % 11) / 220).toFixed(3) + ")";
+      q.fillRect(i, 0, 2, 128);
+    }
+    q.strokeStyle = "rgba(70,78,84,0.45)"; q.lineWidth = 1;    // the wire, a 16 px square mesh
+    for (let i = 0; i <= 128; i += 16) {
+      q.beginPath(); q.moveTo(i + 0.5, 0); q.lineTo(i + 0.5, 128); q.stroke();
+      q.beginPath(); q.moveTo(0, i + 0.5); q.lineTo(128, i + 0.5); q.stroke();
+    }
+    const t = new THREE.CanvasTexture(cv);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(6, 5.6);                                     // ~2.4 cm wire squares on a 1.44 x 1.34 pane
+    const m = new THREE.MeshBasicMaterial({ color: 0xd4e6f0, map: t });
+    m._prSkip = true;
+    return m;
+  })();
+  CBZ.cellWindowGlass = GLASS_MAT;
+  function flushGlass() {
+    if (!GLASS.length) return null;
+    const geo = THREE.BufferGeometryUtils.mergeBufferGeometries(GLASS, false);
+    for (const g of GLASS) g.dispose();
+    GLASS.length = 0;
+    const m = new THREE.Mesh(geo, GLASS_MAT);
+    m.castShadow = false; m.receiveShadow = false;
+    root.add(m);
+    return m;
   }
 
   function fitOutCell(c) {
@@ -1205,7 +1336,7 @@
        mattress, bedding, guard rail, ladder — so this costs one argument. */
     const bx = north ? c.x - (c.hx - 0.70) : c.x - c.dx * (c.hx - 0.70);
     const bz = north ? c.z - c.dz * (c.hz - 1.55) : c.z - (c.hz - 1.40);
-    c.bunk = bunkRig(c, bx, bz, "z", true, blanket);
+    c.bunk = bunkRig(c, bx, bz, "z", true, blanket, north ? 1 : c.dx);   // the rail goes on the ROOM side (east-row bunks had it against the wall)
     // THE BUNK IS A BED — BOTH RACKS. Each returns its own mattress top (0.79
     // and UP_TOP) as the declared cushion, so an anchor can never drift off the
     // mesh it belongs to. `c` + "bed"/"bunkTop" is where the records land once
@@ -1223,12 +1354,20 @@
     const tx = north ? c.x + (c.hx - 0.55) : backX;
     const tz = north ? backZ : c.z + (c.hz - 0.55);
     toiletSink(tx, tz, inx, inz);
-    // the shelf/mirror over the sink — one shelf, and everything small sits ON it
-    shelf(tx, 1.62, tz, north ? 0.78 : 0.44, north ? 0.44 : 0.78);
+    // the shelf/mirror over the sink — one shelf, and everything small sits ON it.
+    // Both are hung on the WALL: `tx,tz` is the unit's centre, BACK_IN off the
+    // masonry, and the mirror used to be placed from it — a steel plate
+    // floating 30 cm out from the wall with nothing holding it, and a shelf
+    // with a 10 cm gap behind it. (wx, wz) is the wall face itself.
+    const wx = north ? tx : tx + inx * BACK_IN, wz = north ? tz + inz * BACK_IN : tz;
+    const shx = wx - inx * 0.20, shz = wz - inz * 0.20;               // shelf centre, back edge on the wall
+    shelf(shx, 1.62, shz, north ? 0.78 : 0.40, north ? 0.40 : 0.78, inx, inz);
     // the mirror: a polished steel plate (prisons never hang glass) bolted flat
-    // to the wall in a dark frame. It was a 6 cm pale block standing proud.
-    addBox(tx + inx * 0.012, 2.02, tz + inz * 0.012, north ? 0.46 : 0.02, 0.54, north ? 0.02 : 0.46, 0x4a5058, { cast: false }); // frame
-    addBox(tx + inx * 0.024, 2.02, tz + inz * 0.024, north ? 0.40 : 0.01, 0.48, north ? 0.01 : 0.40, 0x9ba6ae, { cast: false }); // plate
+    // to the wall in a dark frame
+    addBox(wx - inx * 0.008, 2.08, wz - inz * 0.008, north ? 0.46 : 0.016, 0.54, north ? 0.016 : 0.46, 0x4a5058, { cast: false }); // frame
+    addBox(wx - inx * 0.018, 2.08, wz - inz * 0.018, north ? 0.40 : 0.006, 0.48, north ? 0.006 : 0.40, 0x9ba6ae, { cast: false }); // plate
+    for (const a of [-1, 1]) for (const b of [-1, 1])                  // its four security screws
+      dbox(wx - inx * 0.02 + (north ? a * 0.21 : 0), 2.08 + b * 0.25, wz - inz * 0.02 + (north ? 0 : a * 0.21), 0.018, 0.018, 0.018, 0x2f3338);
     // a stool, only where the 5.5 m north cells have the depth for one — and
     // deliberately 1.4 m clear of CBZ.SPAWN so the player never boots inside it.
     // IT IS THE FIRST THING IN THIS PRISON YOU CAN SHOVE. 7 kg of moulded
@@ -1264,58 +1403,90 @@
       });
     }
 
-    // CEILING STRIP — every cell is lit. Mirrored by the wing lamp driver so
-    // systems/interactions.js's breaker sabotage takes the whole block dark.
-    lamps.push(addBox(c.x, CH - 0.14, c.z + (north ? c.dz * 0.6 : 0), north ? 0.7 : 0.26, 0.08, north ? 0.26 : 0.7,
-      0xfff3cf, { emissive: 0xffd98a, ei: 0.95, cast: false }));
+    // THE CELL FITTING — a vandal-resistant bulkhead screwed flat to the
+    // slab: a steel tray and a frosted lens. It was a glowing bar hung 10 cm
+    // under the ceiling on nothing. The LENS is the lamp (the wing lamp driver
+    // mirrors the breaker onto it); the tray is dressing.
+    {
+      const lz = c.z + (north ? c.dz * 0.6 : 0);
+      dbox(c.x, CH - 0.03, lz, north ? 0.84 : 0.34, 0.06, north ? 0.34 : 0.84, 0x6a7078);
+      const lens = soft(addBox(c.x, CH - 0.07, lz, north ? 0.72 : 0.24, 0.04, north ? 0.24 : 0.72,
+        0xfff3cf, { emissive: 0xffd98a, ei: 0.95, cast: false }), 0.018);
+      stripLamps.add(lens);
+      lamps.push(lens);
+      // a slotted air grille in the slab over the back of the cell
+      const gx = c.x + (north ? -0.6 : inx * 0.9), gz = north ? c.z - 1.7 : c.z + 0.6;
+      dbox(gx, CH - 0.006, gz, 0.34, 0.012, 0.34, 0x8d949b);
+      for (let i = -2; i <= 2; i++) dbox(gx + i * 0.06, CH - 0.014, gz, 0.025, 0.012, 0.28, 0x2c3136);
+    }
 
     // ---- PERSONAL EFFECTS. Deterministic per cell (position hash), because a
     //      cell that looks like every other cell is a corridor with doors. They
     //      hang on the PARTITIONS, never the back wall — that is where the
     //      barred window is, and a poster over a window is a poster in a hole.
-    const sideX = north ? c.x + c.hx - 0.05 : c.x + inx * 0.55;     // the "right-hand" partition
-    const sideZ = north ? c.z + 0.55 : c.z + c.hz - 0.05;
-    const oppX = north ? c.x - c.hx + 0.05 : c.x + inx * 0.55;      // the bunk-head partition
-    const oppZ = north ? c.z - 1.30 : c.z - c.hz + 0.05;
+    //      Each is a point ON a partition face plus the face's normal, so the
+    //      paper lies on the wall (they used to stand 3-8 cm proud of it).
+    const side = north ? { x: c.x + c.hx, z: c.z + 0.55, nx: -1, nz: 0 }             // the "right-hand" partition
+      : { x: c.x + inx * 0.55, z: c.z + c.hz, nx: 0, nz: -1 };
+    const opp = north ? { x: c.x - c.hx, z: c.z - 1.30, nx: 1, nz: 0 }                // the bunk-head partition
+      : { x: c.x + inx * 0.55, z: c.z - c.hz, nx: 0, nz: 1 };
+    const seed = (h01(c.x, c.z, 5503) * 97) | 0;
     if (h01(c.x, c.z, 5501) < 0.62) {   // a poster taped up on the partition
-      addBox(sideX, 1.95, sideZ, north ? 0.05 : 0.58, 0.78, north ? 0.58 : 0.05,
-        pick([0xc9a24a, 0x4a7fc9, 0xb2544a, 0x4fa06b], c.x, c.z, 5503), { cast: false });
+      const kind = ["land", "team", "calendar", "land", "team"][seed % 5];
+      wallSheet(side.x, 1.95, side.z, side.nx, side.nz, kind === "calendar" ? 0.40 : 0.56, kind === "calendar" ? 0.60 : 0.78, kind, seed);
     }
-    if (h01(c.x, c.z, 5502) < 0.55) {   // a towel over the bunk rail
-      // hung off the frame the rig actually drew — it used to be two literals
-      // that happened to match a 0.79 mattress and stopped matching a 0.62 one.
-      // DRAPED over the frame edge: a folded strip lying on the mattress edge
-      // and a flap hanging flush down the frame's side. It used to be a 10 cm
-      // thick, 56 cm tall slab standing in the air beside the mattress (owner:
-      // "the bed has a floating white block next to it").
+    if (h01(c.x, c.z, 5502) < 0.55) {   // a towel, folded at the foot of the bed
+      // It was draped over the frame edge, and before that a 10 cm slab
+      // standing beside the mattress (owner: "the bed has a floating white
+      // block next to it"); the draped flap still read as a plank sticking
+      // out of the bunk. A folded towel on the blanket reads as a towel.
+      // NB: c.bunk.top is a WORLD height (it carries LIFT) and addBox adds
+      // LIFT again, so every upper-tier towel was drawn 3.9 m over its own
+      // bed, in the hall's air. LOW_TOP is the same number on the local floor.
       const tcol = pick([0xcfd0cc, 0xc8bb9c, 0xaec2cd], c.x, c.z, 5504);
-      const ex = c.bunk.x + c.bunk.latOut;
-      addBox(ex - 0.08, c.bunk.top + 0.012, c.bunk.z + 0.70, 0.18, 0.024, 0.34, tcol, { cast: false });
-      addBox(ex + 0.012, c.bunk.top - 0.19, c.bunk.z + 0.70, 0.024, 0.40, 0.34, tcol, { cast: false });
+      soft(addBox(c.bunk.x + 0.12, LOW_TOP + 0.082, c.bunk.z + 0.85, 0.34, 0.07, 0.26, tcol, { cast: false }), 0.025, 0.004);
     }
-    if (h01(c.x, c.z, 5505) < 0.50) {   // a cup on the sink shelf
-      addBox(tx + (north ? -0.24 : 0), 1.74, tz + (north ? 0 : -0.24), 0.13, 0.17, 0.13, 0xdfe6ec, { cast: false });
+    if (h01(c.x, c.z, 5505) < 0.50) {   // a plastic mug on the sink shelf
+      const mx = shx + (north ? -0.24 : 0), mz = shz + (north ? 0 : -0.24);
+      dress(new THREE.CylinderGeometry(0.042, 0.036, 0.10, 14, 1, true), 0xdfe6ec, mx, 1.685, mz);
+      dress(new THREE.CircleGeometry(0.036, 14).rotateX(-Math.PI / 2), 0x3c3a36, mx, 1.715, mz);   // what is in it
+      dress(new THREE.TorusGeometry(0.026, 0.007, 5, 10, Math.PI).rotateZ(-Math.PI / 2), 0xdfe6ec, mx + (north ? 0.045 : 0), 1.685, mz + (north ? 0 : 0.045), north ? 0 : -Math.PI / 2);
     }
-    if (h01(c.x, c.z, 5506) < 0.42) {   // a stack of books on it
-      addBox(tx + (north ? 0.24 : 0), 1.73, tz + (north ? 0 : 0.24), north ? 0.24 : 0.18, 0.16, north ? 0.18 : 0.24, 0x8a5e2b, { cast: false });
+    if (h01(c.x, c.z, 5506) < 0.42) {   // books: a few upright, one lying on its side
+      const bx0 = shx + (north ? -0.08 : 0), bz0 = shz + (north ? 0 : -0.08);
+      const cols = [0x7a3b2e, 0x2f4a6b, 0x6b6a3a, 0x8a5e2b, 0x3e5a45];
+      const ry = north ? 0 : Math.PI / 2;
+      let t = 0;
+      for (let i = 0; i < 4; i++) {
+        const th = 0.025 + h01(c.x + i, c.z, 5507) * 0.03, ht = 0.17 + h01(c.x, c.z + i, 5508) * 0.07;
+        const at = t + th / 2, dep = 0.15 + h01(c.x, c.z, 5509 + i) * 0.04;
+        dbox(bx0 + (north ? at : 0), 1.635 + ht / 2, bz0 + (north ? 0 : at), th, ht, dep, cols[(seed + i) % 5], ry);
+        // a pale label band across the spine (the side facing the room)
+        const so = dep / 2 + 0.001;
+        dbox(bx0 + (north ? at : -inx * so), 1.635 + ht * 0.72, bz0 + (north ? -inz * so : at),
+          th - 0.004, 0.025, 0.003, 0xd9d0b4, ry);
+        t += th + 0.002;
+      }
+      dbox(bx0 + (north ? t + 0.12 : 0), 1.655, bz0 + (north ? 0 : t + 0.12), 0.21, 0.04, 0.15, cols[(seed + 4) % 5], ry);
     }
 
     // THE PLAYER'S CELL IS MARKED AS OURS — a red blanket (above), three taped
     // photographs over the bunk head and a scratched tally by the door. No
     // prompt and no icon: you recognise your own cell, which is the whole point.
-    // The photographs ride with the rack they are taped beside. At 2.35 they
-    // used to sit just over a 1.97 mattress; against the raised stack that is
-    // level with the upper mattress itself, i.e. behind it. UP_TOP + 0.56 keeps
-    // them where they always were relative to the man who looks at them —
-    // above his own pillow, clear of the 2.74 rail, under the 3.46 light strip.
+    // UP_TOP + 0.56 keeps them above his own pillow, clear of the rail and
+    // under the light.
     if (c.player) {
-      const PHOTO_Y = (c.bunk.topBunk || 1.97) + 0.56;
-      for (let i = 0; i < 3; i++)
-        addBox(oppX + (north ? 0.03 : 0), PHOTO_Y, oppZ + (north ? -0.34 + i * 0.34 : 0.03), north ? 0.03 : 0.24, 0.30, north ? 0.24 : 0.03,
-          [0xe8e2cf, 0xd9cdb4, 0xefe8d6][i], { cast: false });
-      for (let i = 0; i < 6; i++)
-        addBox(sideX - (north ? 0.03 : 0), 1.62 - ((i / 4) | 0) * 0.24, sideZ + (north ? -0.9 + (i % 4) * 0.11 : -0.03),
-          north ? 0.006 : 0.012, 0.18, north ? 0.012 : 0.006, 0x8e969c, { cast: false });   // scratched in, not white bars
+      const PHOTO_Y = UP_TOP + 0.56;
+      for (let i = 0; i < 3; i++) {
+        const o = -0.34 + i * 0.34, jy = (i === 1 ? 0.05 : 0) - i * 0.01;
+        wallSheet(opp.x + (north ? 0 : o), PHOTO_Y + jy, opp.z + (north ? o : 0), opp.nx, opp.nz,
+          i === 1 ? 0.20 : 0.15, i === 1 ? 0.15 : 0.20, "photo", seed + i);
+      }
+      for (let i = 0; i < 6; i++) {
+        const o = -0.9 + (i % 4) * 0.11;
+        dbox(side.x + side.nx * 0.002 + (north ? 0 : o), 1.62 - ((i / 4) | 0) * 0.24, side.z + side.nz * 0.002 + (north ? o : 0),
+          north ? 0.004 : 0.012, 0.18, north ? 0.012 : 0.004, 0x8e969c);   // scratched in, not white bars
+      }
     }
 
     // a barred window through the north wall, one per north-row cell
@@ -1326,6 +1497,7 @@
      5. BUILD THE THREE ROWS
      ========================================================== */
   const lamps = [];
+  const stripLamps = new Set();   // the cells' own fittings: the lamp mirror gives them the warmer strip colour
 
   function addCell(seg, opts) {
     const c = {
@@ -1598,55 +1770,73 @@
      The pan and the drain stay and are meant to: at 5 cm they are the floor's
      own surface, the same class as a painted circulation line. */
   function showerAlcove(cx, cz, w, d) {
-    if (!HONEST) {                                     // the shipped alcove, byte for byte
-      addBox(cx, 0.03, cz + 0.6, w - 0.1, 0.06, d - 1.6, 0x7c8894, { cast: false });
-      addBox(cx, 0.05, cz + 0.6, 0.34, 0.10, 0.34, 0x5b6470, { cast: false });
-      for (let i = 0; i < 2; i++) {
-        const zz = cz - 1.5 + i * 2.6;
-        addBox(cx - w / 2 + 0.14, 2.35, zz, 0.14, 0.14, 0.14, C_STEEL_D, { cast: false });
-        addBox(cx - w / 2 + 0.45, 2.28, zz, 0.5, 0.10, 0.22, C_STEEL, { cast: false });
-        addBox(cx - w / 2 + 0.12, 1.30, zz, 0.10, 2.00, 0.10, C_STEEL_D, { cast: false });
-      }
-      addBox(cx, 2.9, cz + d / 2 - 0.2, w - 0.2, 0.16, 0.16, C_STEEL_D, { cast: false });
-      addBox(cx, 1.0, cz - d / 2 + 0.35, w - 0.6, 0.05, 0.3, 0xb9a184, { cast: false });
-      return;
-    }
-    addBox(cx, 0.025, cz + 0.6, w - 0.1, 0.05, d - 1.6, 0x7c8894, { cast: false });    // tiled pan
-    addBox(cx, 0.05, cz + 0.6, 0.34, 0.05, 0.34, 0x5b6470, { cast: false });           // drain grating
+    addBox(cx, 0.012, cz + 0.6, w - 0.1, 0.024, d - 1.6, 0x7c8894, { cast: false });   // tiled pan, flush
+    dbox(cx, 0.026, cz + 0.6, 0.30, 0.004, 0.30, 0x2f353b);                            // drain grating
+    for (let i = -3; i <= 3; i++) dbox(cx + i * 0.04, 0.029, cz + 0.6, 0.012, 0.004, 0.26, 0x8c959c);
+    /* THE ROSES ARE ON THE WALL. They were a 12 cm square column standing
+       free 45 cm out on the floor with a box "mixer" and a box "rose" on top
+       of it — plumbing no building has, and a solid pillar in a shower. A
+       prison shower is a riser pipe on the wall, a mixer valve at hand
+       height, and an arm that carries the rose out over the stall. */
+    const wx = cx - w / 2;                                                               // the west wall face
     for (let i = 0; i < 2; i++) {
-      const zz = cz - 1.5 + i * 2.6, rx = cx - w / 2 + 0.45;
-      addBox(rx, 1.14, zz, 0.12, 2.28, 0.12, C_STEEL_D, solidTo(1.14, 2.28));           // riser, floor to rose
-      addBox(rx, 1.35, zz, 0.17, 0.17, 0.17, C_STEEL_D, { cast: false });              // mixer, on the riser
-      addBox(rx, 2.36, zz, 0.40, 0.10, 0.30, C_STEEL, { cast: false });                // rose, over the riser
+      const zz = cz - 1.5 + i * 2.6;
+      dress(new THREE.CylinderGeometry(0.02, 0.02, 1.25, 10), C_STEEL_D, wx + 0.05, 1.53, zz);   // riser
+      const esc = new THREE.CylinderGeometry(0.075, 0.075, 0.02, 18); esc.rotateZ(Math.PI / 2);
+      dress(esc, C_STEEL, wx + 0.01, 1.15, zz);                                          // mixer plate
+      dbox(wx + 0.07, 1.15, zz, 0.10, 0.025, 0.03, C_STEEL);                             // push button
+      const arm = new THREE.CylinderGeometry(0.018, 0.018, 0.34, 10); arm.rotateZ(Math.PI / 2 - 0.25);
+      dress(arm, C_STEEL_D, wx + 0.21, 2.20, zz);                                        // arm
+      const rose = new THREE.CylinderGeometry(0.07, 0.035, 0.05, 18); rose.rotateZ(-0.25);
+      dress(rose, C_STEEL, wx + 0.39, 2.12, zz);                                         // rose
     }
     // the bench: a solid plinth with a seat anchor, not a plank in mid-air.
     const bz = cz - d / 2 + 0.45;
     sbox(cx, 0.21, bz, w - 0.6, 0.42, 0.42, 0xb9a184, solidTo(0.21, 0.42));
     useSeat(cx, bz, 0, 0.42);
   }
-  /* THE LINEN STORE WAS 5 PROPS, 0 SOLID, 0 USED, 3.61 m3 — three cream planes
-     sized to the alcove and a 2.145 m3 laundry cart a body walked through,
-     which was the single biggest dead box in the whole cell house. The planes
-     become a real rack on the existing back frame; the cart becomes the thing
-     a wheeled cart obviously is — a SHOVABLE, through the same
-     systems/pushprops.js call the cell stool already uses, so it is `used` by
-     the only definition that matters: the player can move it. */
+  /* THE LINEN STORE: a real rack on the back frame, and the laundry cart —
+     a SHOVABLE (systems/pushables.js), same call the cell stool uses. The
+     cart was a 1.3 x 1.1 x 1.5 white block with a lid-shaped slab on it; it
+     is drawn now as what it is: a steel frame on four casters with a vinyl
+     bag slung in it, full of sheets. Same two parts, same footprint, same
+     collider, only the drawing changes. */
   function storeAlcove(cx, cz, w, d) {
-    if (!HONEST) {                                     // the shipped alcove, byte for byte
-      for (let i = 0; i < 3; i++)
-        addBox(cx, 0.7 + i * 0.72, cz - 0.7, w - 0.3, 0.07, d - 2.6, 0xb9a184, { cast: false });
-      sbox(cx, 1.35, cz - d / 2 + 0.25, w - 0.3, 2.7, 0.10, C_PART_D, solidTo(1.35, 2.7));
-      addBox(cx, 0.55, cz + d / 2 - 1.1, 1.3, 1.1, 1.5, 0xe2e2e2, { cast: false });
-      addBox(cx, 1.12, cz + d / 2 - 1.1, 1.4, 0.12, 1.6, 0xd0d0d0, { cast: false });
-      return;
-    }
     sbox(cx, 1.35, cz - d / 2 + 0.25, w - 0.3, 2.7, 0.10, C_PART_D, solidTo(1.35, 2.7));  // back rack frame
     for (let i = 0; i < 3; i++)
       sbox(cx, 0.42 + i * 0.62, cz - d / 2 + 0.62, w - 0.3, 0.05, 0.62, 0xb9a184, solidTo(0.42 + i * 0.62, 0.05));
     const cartZ = cz + d / 2 - 1.1;
     const tub = addBox(cx, 0.55, cartZ, 1.3, 1.1, 1.5, 0xe2e2e2, { cast: false });
     const lip = addBox(cx, 1.12, cartZ, 1.4, 0.12, 1.6, 0xd0d0d0, { cast: false });
-    if (HONEST && CBZ.pushProp) CBZ.pushProp({
+    {
+      const P = [];
+      const add = (g, col, x, y, z) => { g = paintGeo(g, col); g.translate(x, y, z); P.push(g); };
+      const HX = 0.62, HZ = 0.72, Y0 = -0.55;                    // tub origin is 0.55 up
+      for (const a of [-1, 1]) for (const b of [-1, 1]) {
+        add(new THREE.CylinderGeometry(0.05, 0.05, 0.035, 12).rotateX(Math.PI / 2), 0x1d1f22, a * (HX - 0.06), Y0 + 0.05, b * (HZ - 0.06));  // caster wheel
+        add(new THREE.BoxGeometry(0.06, 0.06, 0.06), 0x6a7078, a * (HX - 0.06), Y0 + 0.11, b * (HZ - 0.06));                               // swivel
+        add(new THREE.BoxGeometry(0.035, 0.96, 0.035), 0x8d949b, a * HX, Y0 + 0.60, b * HZ);                                                 // corner post
+      }
+      for (const b of [-1, 1]) add(new THREE.BoxGeometry(2 * HX, 0.035, 0.035), 0x8d949b, 0, Y0 + 0.14, b * HZ);   // base frame
+      for (const a of [-1, 1]) add(new THREE.BoxGeometry(0.035, 0.035, 2 * HZ), 0x8d949b, a * HX, Y0 + 0.14, 0);
+      const BAG = 0x4d6280;
+      for (const b of [-1, 1]) add(new THREE.BoxGeometry(2 * HX - 0.06, 0.80, 0.02), BAG, 0, Y0 + 0.62, b * (HZ - 0.03));
+      for (const a of [-1, 1]) add(new THREE.BoxGeometry(0.02, 0.80, 2 * HZ - 0.06), BAG, a * (HX - 0.03), Y0 + 0.62, 0);
+      add(new THREE.BoxGeometry(2 * HX - 0.06, 0.02, 2 * HZ - 0.06), BAG, 0, Y0 + 0.23, 0);
+      add(roundedBoxGeo(1.10, 0.26, 1.28, 0.10, 0.03), 0xd8d6cc, 0, Y0 + 0.88, 0);                   // the sheets
+      add(roundedBoxGeo(0.46, 0.08, 0.34, 0.03, 0.01), 0xaec2cd, 0.22, Y0 + 1.02, -0.2);             // a towel on top
+      tub.geometry.dispose();
+      tub.geometry = THREE.BufferGeometryUtils.mergeBufferGeometries(P, false);
+      tub.material = DRESS_MAT;
+      const R = [];
+      const rim = (g, x, z) => { g = paintGeo(g, 0x8d949b); g.translate(x, -0.04, z); R.push(g); };
+      for (const b of [-1, 1]) rim(new THREE.BoxGeometry(2 * HX + 0.04, 0.035, 0.035), 0, b * HZ);
+      for (const a of [-1, 1]) rim(new THREE.BoxGeometry(0.035, 0.035, 2 * HZ + 0.04), a * HX, 0);
+      lip.geometry.dispose();
+      lip.geometry = THREE.BufferGeometryUtils.mergeBufferGeometries(R, false);
+      lip.material = DRESS_MAT;
+    }
+    if (CBZ.pushProp) CBZ.pushProp({
       parts: [tub, lip], x: cx, z: cartZ, hx: 0.7, hz: 0.8, y1: 1.18,
       mass: 34, kind: "cart", solid: true, leash: 3.0, mode: "escape",
       room: { x0: cx - w / 2 + 0.8, x1: cx + w / 2 - 0.8, z0: cz - d / 2 + 1.6, z1: cz + d / 2 - 0.9 },
@@ -1671,27 +1861,94 @@
     } else {
       addBox(cx, 1.5, pz, w - 0.6, 3.0, 0.12, C_PART_D, { cast: false });               // back panel
     }
-    sbox(cx, 0.55, cz - d / 2 + 1.1, 3.4, 1.1, 0.9, 0x33200f, solidTo(0.55, 1.1));      // desk
-    addBox(cx, 1.16, cz - d / 2 + 1.1, 3.6, 0.12, 1.0, 0x4a3a22, { cast: false });
-    addBox(cx - 0.9, 1.34, cz - d / 2 + 1.0, 0.7, 0.42, 0.06, 0x9fd6ff, { emissive: 0x2a6ea5, ei: 0.7, cast: false }); // monitor
-    addBox(cx + 1.5, 1.75, cz - d / 2 + 0.42, 0.9, 1.1, 0.10, 0x2a2f38, { cast: false });   // key board
-    for (let i = 0; i < 8; i++)
-      addBox(cx + 1.15 + (i % 4) * 0.24, 1.95 - ((i / 4) | 0) * 0.36, cz - d / 2 + 0.36, 0.07, 0.20, 0.04, 0xd9b64c, { cast: false });
-    // the duty chair. It was two dead boxes in front of a solid desk; it is a
-    // propuse seat now, so the post is somewhere a body sits and not a prop
-    // shaped like one. `face` looks north at the desk.
+    /* THE DUTY DESK. It was a 1.1 m dark-brown block with a 1.22 m slab on
+       it, a glowing blue rectangle standing on the top with no stand, and a
+       chair made of two cubes — a desk nobody could sit at (seat 0.45 under a
+       1.22 top). Now a steel office desk at desk height: laminate top, a
+       drawer pedestal each end, a modesty panel, two monitors on stands, a
+       keyboard and the shift log, and a real task chair in front of it. The
+       collider is the same footprint, banded to the new top. */
+    const dz = cz - d / 2 + 1.1, TOP = 0.78;
+    solid(cx - 1.7, dz - 0.45, cx + 1.7, dz + 0.45, 0, TOP);
+    dbox(cx, TOP - 0.02, dz, 3.4, 0.04, 0.9, 0x8a8c84);                               // laminate top
+    dbox(cx, TOP - 0.02, dz + 0.451, 3.4, 0.04, 0.004, 0x3a3e44);                     // edge band
+    for (const s of [-1, 1]) {
+      const px = cx + s * (1.7 - 0.24);
+      dbox(px, (TOP - 0.04) / 2 + 0.02, dz, 0.46, TOP - 0.06, 0.84, 0x5d646c);        // pedestal
+      dbox(px, 0.01, dz, 0.44, 0.02, 0.8, 0x2c3035);                                  // plinth
+      for (let i = 0; i < 3; i++) {                                                    // drawer fronts + pulls
+        const y = 0.16 + i * 0.22;
+        dbox(px, y, dz + 0.42, 0.42, 0.19, 0.012, 0x6b737c);
+        dbox(px, y + 0.05, dz + 0.43, 0.14, 0.018, 0.02, 0x2c3035);
+      }
+    }
+    dbox(cx, 0.46, dz - 0.40, 2.46, 0.52, 0.02, 0x5d646c);                            // modesty panel
+    // two monitors on stands, facing the chair
+    for (const s of [-1, 1]) {
+      const mx = cx + s * 0.34, mz = dz - 0.18;
+      dress(new THREE.CylinderGeometry(0.10, 0.11, 0.015, 16), 0x24282d, mx, TOP + 0.008, mz);
+      dbox(mx, TOP + 0.16, mz - 0.03, 0.04, 0.30, 0.03, 0x24282d);
+      dbox(mx, TOP + 0.32, mz, 0.56, 0.34, 0.035, 0x1d2025, -s * 0.18);               // bezel, angled in
+    }
+    // the screens: dim, the way a desk screen reads across a room
+    const scr = addBox(cx, TOP + 0.32, dz - 0.18 + 0.02, 0.5, 0.29, 0.004, 0x1c2a36, { emissive: 0x2a4f6c, ei: 0.55, cast: false });
+    const sg = [];
+    for (const s of [-1, 1]) {
+      const g = new THREE.BoxGeometry(0.5, 0.29, 0.004);
+      g.rotateY(-s * 0.18); g.translate(s * 0.34, 0, 0);
+      sg.push(g);
+    }
+    scr.geometry.dispose();
+    scr.geometry = THREE.BufferGeometryUtils.mergeBufferGeometries(sg, false);
+    dbox(cx, TOP + 0.012, dz + 0.10, 0.44, 0.02, 0.14, 0x2a2e33);                     // keyboard
+    dbox(cx + 0.32, TOP + 0.012, dz + 0.12, 0.06, 0.02, 0.1, 0x2a2e33);               // mouse
+    dbox(cx - 1.05, TOP + 0.01, dz + 0.05, 0.42, 0.02, 0.30, 0x2f3d52, 0.12);         // the shift log, open
+    dbox(cx - 1.05, TOP + 0.022, dz + 0.05, 0.40, 0.004, 0.28, 0xe7e3d6, 0.12);
+    // the key cabinet on the duty board: a steel box, a hook rail, keys on rings
+    const kz = pz + 0.11;
+    dbox(cx + 1.5, 1.75, kz, 0.9, 1.1, 0.10, 0x3a4048);
+    dbox(cx + 1.5, 1.75, kz + 0.051, 0.82, 1.02, 0.004, 0x5a616a);
+    for (let i = 0; i < 8; i++) {
+      const hx = cx + 1.19 + (i % 4) * 0.2, hy = 2.05 - ((i / 4) | 0) * 0.42;
+      dbox(hx, hy, kz + 0.08, 0.012, 0.012, 0.06, 0x9aa3ad);                          // hook
+      if (i === 5) continue;                                                           // one hook is empty
+      dress(new THREE.TorusGeometry(0.018, 0.003, 4, 10), 0x9aa3ad, hx, hy - 0.025, kz + 0.1);
+      dbox(hx, hy - 0.08, kz + 0.1, 0.022, 0.07, 0.004, 0xc9a44a);                     // key
+      dbox(hx + 0.02, hy - 0.06, kz + 0.098, 0.03, 0.045, 0.004, [0xc94d3a, 0x3a6ec9, 0xd9d4c8][i % 3]); // tag
+    }
+    // a cork pinboard beside it with the shift's paperwork on it (no words:
+    // at this distance a notice is a white sheet)
+    const bx = cx - 0.2;
+    dbox(bx, 1.80, pz + 0.075, 1.3, 0.9, 0.03, 0x4a4f55);
+    dbox(bx, 1.80, pz + 0.092, 1.22, 0.82, 0.004, 0xa67d52);
+    for (let i = 0; i < 5; i++) {
+      const ox = -0.42 + i * 0.21 + (i % 2) * 0.03, oy = (i % 2 ? -0.14 : 0.12);
+      dbox(bx + ox, 1.80 + oy, pz + 0.096, 0.18, 0.25, 0.002, i === 3 ? 0xe6d27a : 0xece9e0, (i - 2) * 0.004);
+      dbox(bx + ox, 1.80 + oy + 0.11, pz + 0.099, 0.012, 0.012, 0.004, [0xc94d3a, 0x3a6ec9][i % 2]);
+    }
+    // the duty chair — a task chair on a five-star base, and still a propuse
+    // seat (face looks north at the desk). Its collider is the old 0.6 box.
     const chZ = cz - d / 2 + 2.0;
-    sbox(cx, 0.45, chZ, 0.6, 0.9, 0.6, C_DARK, solidTo(0.45, 0.9, HONEST));            // chair
-    addBox(cx, 1.05, cz - d / 2 + 2.25, 0.6, 0.7, 0.1, C_DARK, { cast: false });       // back
+    if (HONEST) solid(cx - 0.3, chZ - 0.3, cx + 0.3, chZ + 0.3, 0, 0.9);
+    {
+      const seat = addBox(cx, 0.46, chZ, 0.48, 0.08, 0.46, 0x2a2e34, { cast: false });
+      soft(seat, 0.03, 0.004);
+      const back = addBox(cx, 0.84, chZ + 0.24, 0.44, 0.50, 0.06, 0x2a2e34, { cast: false });
+      soft(back, 0.03);
+      dbox(cx, 0.55, chZ + 0.25, 0.05, 0.16, 0.03, 0x3a3e44);                         // back upright
+      dress(new THREE.CylinderGeometry(0.03, 0.03, 0.30, 10), 0x3a3e44, cx, 0.27, chZ);   // gas column
+      for (let i = 0; i < 5; i++) {
+        const a = i * Math.PI * 2 / 5;
+        const leg = new THREE.BoxGeometry(0.30, 0.035, 0.05);
+        leg.translate(0.15, 0, 0); leg.rotateY(a);
+        dress(leg, 0x24282d, cx, 0.09, chZ);
+        dress(new THREE.SphereGeometry(0.03, 8, 6), 0x1a1c1f, cx + Math.cos(a) * 0.29, 0.03, chZ - Math.sin(a) * 0.29);
+      }
+    }
     if (HONEST) useSeat(cx, chZ, Math.PI, 0.45);
-    // WING SIGN — the block announces itself over the post.
-    // …under the tier's floor slab (3.6-3.9), not through it
-    // The lit plate goes on the SOUTH face, the side the hall sees. It used
-    // to sit 0.1 north of the board — behind it — and read fine only because
-    // the board itself was one of the boxes the batcher had baked at the
-    // origin; the day the board came back the sign went dark.
-    addBox(cx, 3.15, cz + d / 2 - 0.1, 5.0, 0.7, 0.14, 0x11151b, { cast: false });
-    addBox(cx, 3.15, cz + d / 2 + 0.005, 4.4, 0.34, 0.06, 0xe8b64c, { emissive: 0x6a4f10, ei: 0.6, cast: false });
+    // NO WING SIGN. The dark board and the blank amber lit strip that hung
+    // over the post were a sign with nothing on it; the wing is identified
+    // at its door (escape_routes.js), where a sign belongs.
   }
   // The break the ventilation grate lives in (ventilation.js:41, z = -31) — a
   // recess, never a cell, so that escape route can never be locked away.
@@ -1810,11 +2067,28 @@
     const zc = TRUSS_Z.reduce((a, b) => (Math.abs(b - z) < Math.abs(a - z) ? b : a), TRUSS_Z[0]);
     const onChord = Math.abs(zc - z) < 0.2;
     const stemTop = onChord ? CHORD_LO - 0.10 : WH - 0.05;
-    const capTop = LAMP_Y + 0.10 + 0.30;
-    addBox(x, (capTop + stemTop) / 2, z, 0.06, stemTop - capTop, 0.06, C_DARK, { cast: false });   // stem
-    addBox(x, LAMP_Y + 0.25, z, 0.5, 0.3, 0.5, C_DARK, { cast: false });                           // cap
-    const l = addBox(x, LAMP_Y, z, 0.7, 0.2, 0.7, 0xffe9a8, { emissive: 0xffcf66, ei: 0.9, cast: false });
-    for (let i = -1; i <= 1; i += 2) addBox(x + i * 0.36, LAMP_Y, z, 0.06, 0.26, 0.62, C_DARK, { cast: false });
+    const capTop = LAMP_Y + 0.40;
+    /* AN INDUSTRIAL PENDANT, not four boxes. Conduit stem off the chord, a
+       round driver housing, a spun-steel reflector bell, the lamp globe in
+       it, and a wire guard round the globe — the "cage" in cage lamp. The
+       globe is the published lamp mesh (the breaker writes its material);
+       the rest is dressing. */
+    dress(new THREE.CylinderGeometry(0.025, 0.025, stemTop - capTop, 8), C_DARK, x, (capTop + stemTop) / 2, z);   // stem
+    dress(new THREE.CylinderGeometry(0.09, 0.10, 0.14, 14), C_DARK, x, LAMP_Y + 0.33, z);                          // driver
+    dress(new THREE.CylinderGeometry(0.11, 0.36, 0.24, 22, 1, true), 0x59616b, x, LAMP_Y + 0.14, z);               // reflector
+    dress(new THREE.TorusGeometry(0.36, 0.012, 5, 22).rotateX(Math.PI / 2), 0x3a4048, x, LAMP_Y + 0.02, z);        // its rolled rim
+    // the guard: a ring at the rim, a smaller ring under the globe, four wires
+    dress(new THREE.TorusGeometry(0.16, 0.007, 4, 16).rotateX(Math.PI / 2), C_DARK, x, LAMP_Y - 0.20, z);
+    for (let i = 0; i < 4; i++) {
+      const a = i * Math.PI / 2 + Math.PI / 4;
+      const w = new THREE.CylinderGeometry(0.007, 0.007, 0.30, 4);
+      w.rotateZ(-0.74); w.rotateY(-a);
+      dress(w, C_DARK, x + Math.cos(a) * 0.26, LAMP_Y - 0.09, z + Math.sin(a) * 0.26);
+    }
+    const l = addBox(x, LAMP_Y - 0.02, z, 0.3, 0.3, 0.3, 0xffe9a8, { emissive: 0xffcf66, ei: 0.9, cast: false });
+    l.geometry.dispose();
+    l.geometry = new THREE.SphereGeometry(0.13, 16, 10);
+    l.scale.set(1, 1.15, 1);
     cages.push({ x: x, z: z, hung: onChord });
     return l;
   }
@@ -1827,6 +2101,11 @@
   // breaker owns all of them through the mirror below.
   lamps.push(cageLamp(0, -37.5), cageLamp(0, -22.5), cageLamp(0, -15));
   lamps.push(cageLamp(-9.6, -22.5), cageLamp(9.6, -22.5), cageLamp(-9.6, -30), cageLamp(9.6, -30));
+
+  // everything the wing dressed is built: one mesh for the small stuff, one
+  // for the window glass
+  flushDress();
+  flushGlass();
 
   /* ==========================================================
      8. THE DOOR — jail.js's setDoor, ported. The collider and the visual
@@ -2523,7 +2802,7 @@
         const dark = hex === 0;
         for (let i = 0; i < lamps.length; i++) {
           const m = lamps[i].material;
-          const isStrip = lamps[i].geometry && lamps[i].geometry.parameters && lamps[i].geometry.parameters.height < 0.12;
+          const isStrip = stripLamps.has(lamps[i]);
           m.color.setHex(dark ? 0x2b2b2b : (isStrip ? 0xfff3cf : col));
           m.emissive.setHex(dark ? 0x000000 : (isStrip ? 0xffd98a : 0xffcf66));
         }

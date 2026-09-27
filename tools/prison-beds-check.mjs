@@ -284,7 +284,7 @@ check("wing: the build's own sleepGap agrees with an independent count",
     return {
       vent: inCell(-14.2, -31),          // ventilation.js:41 crawl point
       post: inCell(0, -39),              // guards.js:79 patrol waypoint
-      floorHatch: inCell(-12.2, -38.2),  // escape_routes.js:96 — INSIDE A-1 on purpose
+      floorHatch: inCell(-12.2, -39.6),  // escape_routes.js:96 — INSIDE A-1 on purpose
       ceilHatch: inCell(11.6, -36.4),    // escape_routes.js:119 — must stay in the cross-aisle
       throat: inCell(0, -8),
     };
@@ -293,7 +293,7 @@ check("wing: the build's own sleepGap agrees with an independent count",
   else {
     check("held: the ventilation crawl is not inside a cell", r.vent === null, `cellAt(-14.2,-31)=${r.vent}`);
     check("held: the officer-post waypoint is not inside a cell", r.post === null, `cellAt(0,-39)=${r.post}`);
-    check("held: the utility crawl is still inside A-1", r.floorHatch === "A-1", `cellAt(-12.2,-38.2)=${r.floorHatch}`);
+    check("held: the utility crawl is still inside A-1", r.floorHatch === "A-1", `cellAt(-12.2,-39.6)=${r.floorHatch}`);
     check("held: the ceiling hatch is still in the cross-aisle", r.ceilHatch === null, `cellAt(11.6,-36.4)=${r.ceilHatch}`);
     check("held: the south throat is open floor", r.throat === null, `cellAt(0,-8)=${r.throat}`);
   }

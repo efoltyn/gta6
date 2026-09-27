@@ -142,12 +142,19 @@
   // Cell block interior is x -16..16, z -44..-8 (inner faces 15.5 / -8.5), so
   // this corner is clear of the bunks, the toilet block and the cell bars.
   addBox(13.9, 0.90, -11.50, 1.90, 0.08, 0.95, 0x39424e, { solid: true, y0: 0, y1: 0.95 });   // desk top
-  addBox(13.9, 0.62, -11.50, 1.74, 0.44, 0.80, 0x2f3742, { cast: false });                    // drawer bank
-  addBox(13.05, 0.43, -11.50, 0.10, 0.86, 0.80, 0x39424e, { cast: false });                   // legs
+  // A steel desk is two end panels, a modesty panel at the back and ONE
+  // drawer pedestal — you sit at it, so the middle is open for your knees.
+  // It used to be a 1.74 m solid "drawer bank" filling the whole underside,
+  // with two 0.78 m bars on the end panels for handles.
+  addBox(13.05, 0.43, -11.50, 0.10, 0.86, 0.80, 0x39424e, { cast: false });                   // end panels
   addBox(14.75, 0.43, -11.50, 0.10, 0.86, 0.80, 0x39424e, { cast: false });
-  addBox(13.05, 0.70, -11.50, 0.06, 0.06, 0.78, 0x8b95a1, { cast: false });                   // drawer pulls
-  addBox(14.75, 0.70, -11.50, 0.06, 0.06, 0.78, 0x8b95a1, { cast: false });
-
+  addBox(13.9, 0.55, -11.86, 1.60, 0.56, 0.03, 0x2f3742, { cast: false });                    // modesty panel
+  addBox(14.49, 0.44, -11.50, 0.42, 0.84, 0.78, 0x2f3742, { cast: false });                   // pedestal
+  for (let i = 0; i < 3; i++) {
+    const y = 0.17 + i * 0.25;
+    addBox(14.49, y, -11.106, 0.39, 0.22, 0.012, 0x3d4652, { cast: false });                  // drawer front
+    addBox(14.49, y + 0.06, -11.094, 0.16, 0.02, 0.02, 0x8b95a1, { cast: false });           // its pull
+  }
   // desk clutter: a shift log on a clipboard and a mug. Everything sits ON the
   // 0.94 desk top (the old paper, lamp base and lanyard hung 1-2.7 cm over it).
   addBox(14.28, DESK_TOP + 0.003, -11.72, 0.23, 0.006, 0.32, 0x6b4f33, { cast: false });      // clipboard board
@@ -158,13 +165,22 @@
   const handle = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.008, 5, 10, Math.PI), mat(0xd9dee5));
   handle.rotation.z = -Math.PI / 2; handle.position.set(14.563, DESK_TOP + 0.05, -11.24); scene.add(handle);
 
-  // the desk lamp that is actually throwing the pool of light on the card
-  addBox(14.66, DESK_TOP + 0.015, -11.86, 0.18, 0.03, 0.18, 0x21262e, { cast: false });      // base
-  addBox(14.66, 1.18, -11.86, 0.03, 0.44, 0.03, 0x21262e, { cast: false });                  // stem
-  addBox(14.45, 1.40, -11.80, 0.42, 0.03, 0.03, 0x21262e, { cast: false });                  // arm
-  addBox(14.24, 1.35, -11.76, 0.18, 0.12, 0.18, 0x2b313a, { cast: false });                  // shade
-  addBox(14.24, 1.285, -11.76, 0.13, 0.01, 0.13, 0xffe6b0, { emissive: 0xffb347, ei: 0.9, cast: false });  // bulb face
-
+  // the desk lamp that is actually throwing the pool of light on the card: a
+  // weighted round base, a tube stem and arm, a spun shade, the bulb in it.
+  // (It was five boxes: a square shade on a square arm.)
+  const lampMat = mat(0x21262e);
+  const lampPart = (g, x, y, z, m) => {
+    const o = new THREE.Mesh(g, m || lampMat); o.position.set(x, y, z); o.castShadow = false; scene.add(o); return o;
+  };
+  lampPart(new THREE.CylinderGeometry(0.085, 0.095, 0.03, 18), 14.66, DESK_TOP + 0.015, -11.86);          // base
+  lampPart(new THREE.CylinderGeometry(0.012, 0.012, 0.44, 8), 14.66, 1.18, -11.86);                       // stem
+  lampPart(new THREE.CylinderGeometry(0.011, 0.011, 0.44, 8), 14.45, 1.40, -11.81)                        // arm, stem top to shade
+    .rotation.set(0, Math.atan2(0.10, 0.42), Math.PI / 2);
+  const shadeMat = mat(0x2b313a); shadeMat.side = THREE.DoubleSide;
+  lampPart(new THREE.CylinderGeometry(0.035, 0.11, 0.13, 18, 1, true), 14.24, 1.35, -11.76, shadeMat);    // shade
+  lampPart(new THREE.CylinderGeometry(0.035, 0.035, 0.03, 12), 14.24, 1.43, -11.76);                      // shade cap
+  lampPart(new THREE.SphereGeometry(0.035, 12, 8), 14.24, 1.31, -11.76,
+    mat(0xffe6b0, { emissive: 0xffb347, ei: 0.9 }));                                                      // bulb
   /* THE KEY CABINET, AND WHY IT IS HERE. A card lying on a desk answers
      "what is this"; the steel cabinet on the wall behind it, door hanging
      open with one hook stripped bare, answers "where did it come from and
