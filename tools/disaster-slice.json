@@ -3268,7 +3268,6 @@
   "marineAudit": "city/marine_predation.js",
   "marineAuditReset": "city/marine_predation.js",
   "marineScavengeStep": "city/marine_frenzy.js",
-  "marineFrenzyAbsorb": "city/marine_frenzy.js",
   "marineFrenzyAt": "city/marine_frenzy.js",
   "marineFrenzySites": "city/marine_frenzy.js",
   "marineFrenzyAudit": "city/marine_frenzy.js",

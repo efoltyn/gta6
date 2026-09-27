@@ -740,7 +740,12 @@
      just above and behind the eye and it broadens as it runs BACK AND UP.
      The old oval was tilted the other way (forward end high) and equally
      wide at both ends. */
-  const PATCH_X = 2.12, PATCH_AF = 0.36;
+  /* ..AND IT IS LONG. Seen in the 2026-09-27 capture it was a near-round
+     disc (rx 0.38 against an arc of 0.15), which head-on read as a cartoon
+     eye. The real patch is about three times as long as it is tall, so it is
+     longer and slimmer now, and its centre moves back so the narrow front end
+     still stops just behind the eye. */
+  const PATCH_X = 2.00, PATCH_AF = 0.36;
   const SADDLE_X = 0.05, SADDLE_AF = 1.17;    // behind and below the dorsal
   const DORSAL_X = 0.35, DORSAL_Y = 1.90;
   const BLOW_X = 2.05, BLOW_Y = 1.86;
@@ -764,8 +769,13 @@
     return orcaRoofY(x);
   }
 
+  /* THE BULL'S BLADE IS 1.45 MODEL UNITS, i.e. ~1.6-1.8 m on a grown bull.
+     It was 1.62 on a 1.55-scale animal, and with a big bull's individual size
+     on top a live bull carried a 3.4 m dorsal — twice the real thing (the
+     tallest measured bull dorsals are ~1.8 m). The ratio to body length is
+     now the real one too: ~21% of a bull's length, ~14% of a cow's. */
   const BULL_DORSAL = {
-    span: 1.62, chordRoot: 1.06, chordTip: 0.09, sweep: 0.09, concavity: 0.035,
+    span: 1.45, chordRoot: 1.02, chordTip: 0.09, sweep: 0.09, concavity: 0.035,
     leadBow: 0.020, rearTipH: 0.07, rearTipBack: 0.24, apexRound: 0.09,
     thick: 0.19, spanSteps: 7, chordSteps: 4, spanDir: [0, 1, 0], chordDir: [1, 0, 0],
   };
@@ -872,9 +882,9 @@
        the eye, its long axis angled BACK along the body. Its absence is the
        entire reason the old model read as a generic dolphin, and a photograph
        of an orca is unmistakable at 200 m because of this one mark. */
-    const patch = new T.Mesh(cached("orcaEyePatch|teardrop-v2", function () {
+    const patch = new T.Mesh(cached("orcaEyePatch|teardrop-v3", function () {
       return patchGeom({
-        rings: rings, x: PATCH_X, ang: PATCH_AF, rx: 0.38, rArc: 0.15,
+        rings: rings, x: PATCH_X, ang: PATCH_AF, rx: 0.48, rArc: 0.125,
         tilt: -0.30, arcR: 0.74, lift: 0.030, seg: 24, rad: 4,
         // narrow at the eye end (+x), full at the back
         radius: function (th) { return 1 - 0.34 * Math.max(0, Math.cos(th)); },
@@ -941,8 +951,11 @@
         span: 1.52, chordRoot: 1.06, chordTip: 0.66, sweep: 0.26, concavity: 0.02,
         leadBow: 0.12, rearTipH: 0.22, rearTipBack: 0.10, apexRound: 0.58,
         thick: 0.17, spanSteps: 5, chordSteps: 5,
-        spanDir: [-0.24, -0.20, s2 * 0.95], chordDir: [1, 0, s2 * 0.08],
-      }, "orcaPec|" + s2);
+        // HUNG, NOT HELD OUT: an orca's paddles angle ~25 degrees down and a
+        // little back. At -0.20 they stood out nearly flat and, from the front
+        // quarter, read as two black spears sticking out of the flanks.
+        spanDir: [-0.28, -0.42, s2 * 0.86], chordDir: [1, 0, s2 * 0.08],
+      }, "orcaPec2|" + s2);
       f.name = "orcaPectoral";
       g.add(f);
     });
@@ -1252,23 +1265,36 @@
 
   /* THE RE-REGISTRATION. CBZ.defineSpecies is SPECIES[sp.id] = sp — last write
      wins — and this file loads after city/wildlife/aquatic.js, so re-declaring
-     id:"orca" takes ownership of the animal, model and all, with zero edits to
-     a file five other agents are inside.
+     id:"orca" takes ownership of the animal, model and all.
 
-     THE NUMBERS ARE DELIBERATELY UNCHANGED. hp 620 / bite 42 / scale 1.55 are
-     what city/marine_predation.js's podNeeded() solves the megalodon threshold
-     against; the owner asked for "one loses, two or three stalemate, enough of
-     them kills it" and those numbers already produce exactly that (§7 measures
-     it rather than asserting it). A model pass is not the place to move a
-     balance number by accident. What DID change: packs 2 -> 3, because a pod
-     you never meet cannot be frightening. */
+     REAL SIZE (2026-09-27). The model is 6.95 units nose to fluke tip, and at
+     scale 1.55 the AVERAGE orca was 10.8 m with pod members measured at 8.7
+     and 14.7 m. Real adults are 6-8 m (cows 5.5-7, bulls 7-8, a record bull
+     9.8). 0.95 puts an average cow at 6.6 m, a bull (the top fifth of the
+     size draw, see identify) at ~7.9 m, a fully fed big bull near 10 m — and
+     keeps the orca the biggest thing in the sea short of the humpback and the
+     megalodon, and a clear head over the 4.7 m great white.
+
+     THE FIGHT IS UNCHANGED BY IT, ON PURPOSE. predator.js derives an aquatic
+     hunter's bite interval as k*sqrt(scale), so a smaller body bites more
+     often: bite 33 at scale 0.95 is 33/sqrt(0.95) = 33.9 damage-per-interval
+     unit against the old 42/sqrt(1.55) = 33.7. Same dps on the player's
+     shark, and marine_predation's closed-form pod threshold (which carries
+     the same sqrt(scale)) still says FOUR orcas for a megalodon:
+     1200*60*sqrt(.95) / (620*33*sqrt(2.6)) = 2.12 -> 3 + 1. Size alone
+     moves no balance number. (What DID make the pod more dangerous is that
+     its flank passes land now — see marine_predation.js's podMobTick.) */
   const LEGACY_SPECIES = (CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES.orca) || null;
   const ORCA_SPECIES = {
     id: "orca", name: "Orca", biome: "water", rarity: "rare",
     hp: 620, fur: "Orca Hide", furValue: 520, meat: "Whale Meat", meatValue: 44,
-    herd: [3, 8], packs: 3, spd: 3.4, danger: 0.5, bite: 42, aquatic: true,
-    scale: 1.55, color: 0x0a0c10, clearance: 110, swimDepth: 2.6,
+    herd: [3, 8], packs: 3, spd: 3.4, danger: 0.5, bite: 33, aquatic: true,
+    scale: 0.95, color: 0x0a0c10, clearance: 110, swimDepth: 2.6,
     build: build,
+    /* the swimming ceiling, measured off THIS body (see surfCeil). Read by
+       wildlife_shark.js's depth(), which is the depth track whenever
+       marine_predation steers an orca through the shark's water mover. */
+    surfCeil: function (a, draft) { return surfCeil(a, draft); },
   };
   if (MODEL() && typeof CBZ.defineSpecies === "function") CBZ.defineSpecies(ORCA_SPECIES);
 
@@ -1327,6 +1353,9 @@
     return ((a && a.species && a.species.scale) || 1) * sizeOf(a);
   }
 
+  // THE SIZE DRAW DECIDES THE SEX (see identify). Shared with podScan's
+  // look-ahead so a packmate that has not ticked yet answers the same way.
+  const CALF_K = 0.80, BULL_K = 1.12;
   function identify(a, s) {
     const h = homeOf(a);
     const r = h01(h.x, h.z, 0x0C4A);
@@ -1336,9 +1365,17 @@
     // a question the world has ALREADY answered — reading its answer instead of
     // drawing a second one is what keeps the calf small in every other system
     // (hp, speed, clearance, ragdoll mass) as well as in this one.
-    s.calf = k < 0.80;
-    s.bull = !s.calf && r > 0.74;                 // ~26% of adults are bulls
+    s.calf = k < CALF_K;
+    /* A BULL IS A BIG ONE. The sex used to be a coin weighted 26/74 and blind
+       to size, so the pod's bull was as often its smallest adult as its
+       biggest (measured: a 1.11-scale bull beside a 2.02-scale cow). Orcas
+       are strongly dimorphic — bulls run 7-8 m against a cow's 5.5-7 — so
+       the sex is READ OFF the size draw the world already made: the top of
+       the triangular draw (about a fifth of adults) are bulls. `r` is kept
+       only so every other per-animal hash below stays where it was. */
+    s.bull = !s.calf && k >= BULL_K;
     s.cow = !s.calf && !s.bull;
+    void r;
     s.sex = s.bull ? "bull" : (s.calf ? "calf" : "cow");
     s.dorsalSpan = (s.bull ? BULL_DORSAL.span : COW_DORSAL.span) * (s.calf ? 0.72 : 1);
     // marking variation: a real pod is told apart by saddle shape. One
@@ -1879,6 +1916,17 @@
     return isOrca(a) && !a.dead && !a.tamed && !a.ridden;
   }
 
+  /* WHO LEADS. An orca pod is a matriline and its leader is the oldest COW —
+     never the bull, who is the biggest animal in it and whom the old "bigger
+     wins" election therefore always crowned. Cows outrank bulls outrank
+     calves, and inside a class the bigger (older) one wins; the spawn hash
+     breaks ties below that. A key rather than a comparison so every member
+     computes the same order without talking to the others. */
+  function leadKey(o) {
+    const k = sizeOf(o), os = o._orca;
+    const cls = os ? (os.cow ? 2 : (os.bull ? 1 : 0)) : (k >= BULL_K ? 1 : (k >= CALF_K ? 2 : 0));
+    return cls * 10 + k;
+  }
   function podScan(a, s, dt) {
     s.podT -= dt;
     if (s.podT > 0) return;
@@ -1888,7 +1936,7 @@
     if (!list) return;
     const p = a.group.position;
     let n = 0, best = null, bestK = -1, bestR = -1, slot = 0, momD2 = 1e18;
-    const myK = scaleOf(a), myRank = h01(homeOf(a).x, homeOf(a).z, 0x0C71);
+    const myK = leadKey(a), myRank = h01(homeOf(a).x, homeOf(a).z, 0x0C71);
     for (let i = 0; i < list.length; i++) {
       const o = list[i];
       if (!liveOrca(o)) continue;
@@ -1898,7 +1946,7 @@
       if (d2 > POD_R * POD_R) continue;
       n++;                                       // counts me too — I am in the pod
       if (o === a) continue;
-      const k = scaleOf(o);
+      const k = leadKey(o);
       const rank = h01(homeOf(o).x, homeOf(o).z, 0x0C71);
       // STABLE ELECTION, and it has to be stable: every member runs this sweep
       // independently and they must all elect the SAME matriarch without ever
@@ -1915,7 +1963,8 @@
         const os = o._orca;
         // if she has not ticked yet, size answers the same question: an adult
         // that is not a bull. No ensure() call, so this sweep cannot recurse.
-        const isCow = os ? os.cow : (k >= 0.80 && h01(homeOf(o).x, homeOf(o).z, 0x0C4A) <= 0.74);
+        const ko = sizeOf(o);
+        const isCow = os ? os.cow : (ko >= CALF_K && ko < BULL_K);
         if (isCow && d2 < momD2) { momD2 = d2; s.mother = o; }
       }
     }
@@ -2166,6 +2215,20 @@
     const x = end === "tail" ? TAIL_X * sc : end === "nose" ? NOSE_X * sc : 0;
     return x * Math.sin(pitch || 0) - (out || 0);
   }
+  /* THE CEILING FOR A SWIMMING ORCA, measured off the body instead of off
+     the draft. The hull rides at y = HY with its deepest ring 0.92 up and
+     down, so the top of the back is (HY + 0.92) model units over the origin.
+     The old ceiling was `0.92 x draft`, and draft only grows as size^0.9
+     while the body grows as size — so it put 0.66 m of back in the air on an
+     average cow and 0.9 m on a big bull. This is the
+     depth that leaves exactly BACK_OUT metres of back (and the whole dorsal)
+     over the swell at any size. Returns a DEPTH (positive = below). */
+  const BACK_Y = HY + 0.92, BACK_OUT = 0.4;
+  const PORP_ROLL = 2.4;                 // s — one breath-roll at speed
+  function surfCeil(a, draft) {
+    const d = BACK_Y * scaleOf(a) - BACK_OUT;
+    return d > 0.3 ? d : (draft || 2.6) * 0.92;
+  }
   function actTick(a, s, dt, dist) {
     if (!ACTS()) { if (s.act) endAct(s); s.airborne = false; return false; }
     s.cool -= dt;
@@ -2176,21 +2239,49 @@
     const dep = surf - g.position.y;
     const draft = a.swimDepth || 2.6;
 
-    // ---- PORPOISING. Not a decision — a consequence of travelling fast, so it
-    // is a modifier on top of everything else rather than an act that has to
-    // start and end. It only runs when no act owns the animal.
+    // ---- TRAVELLING FAST. Not a decision — a consequence of speed, so it is a
+    // modifier on top of everything else rather than an act that has to start
+    // and end. It only runs when no act owns the animal.
+    /* OWNER, 2026-09-27: "the orcas sometimes, when they're going fast, they
+       are entirely above the water while swimming, which is really dumb."
+       This branch WAS that. Above 5.2 m/s it ran a continuous sine, and on the
+       positive half of every 4.6 s cycle it asked for `lift = 0.75 x draft`
+       ABOVE the surface and set `s.airborne`, which switches depth()'s
+       submersion clamp off. 0.75 x 2.6 put the ORIGIN 1.95 m over the sea, and
+       the origin is the orca's BELLY line (the hull rides at y = HY, bottom at
+       0.13 model units) — so the whole animal, belly included, was in the air
+       for ~2 s of every 4.6 s on any fast transit. The negative half pinned it
+       at the ceiling, so a fast orca was never once down at swimming depth.
+
+       A real orca at speed runs a metre or three down and surfaces only to
+       breathe: a short roll where the blowhole, the back and the dorsal break
+       the surface and it goes straight back down. So that is what this is — a
+       DEPTH curve, never a height: from its travelling depth up to the one
+       depth depth() allows a swimming orca (surfCeil: back and fin out, belly
+       under), blow at the top, back down, then run submerged until the next
+       breath. `s.airborne` stays false the whole way, so the clamp is never
+       lifted; only a deliberate breach (§5, rare) clears the water. The pitch
+       still comes off the depth curve (ballistic), capped to a gentle roll. */
     if (!s.act && s.spd > 5.2 && dep < draft * 2.6) {
-      s.porpPh = (s.porpPh || 0) + dt * 1.35;
-      if (s.porpPh > 6.283185307) { s.porpPh -= 6.283185307; AUDIT.porpoises++; }
-      // MARINE_SIT_DEEPER: 1.5 drafts of air put the ORIGIN 4.3 m over the
-      // surface, i.e. the whole nine metres of animal clear of the water on an
-      // ordinary fast transit. A porpoise is a low arc that skims — the back
-      // and the flank break out, the body does not fly.
-      s.lift = Math.max(0, Math.sin(s.porpPh)) * draft * (SITLOW() ? 0.75 : 1.5);
-      s.airborne = s.lift > draft * 0.5;
+      const period = 7.5 - clamp((s.spd - 5.2) / 6, 0, 1) * 2.5;   // 7.5 s fast, 5 s flat out
+      s.porpPh = (s.porpPh || 0) + dt;
+      if (s.porpPh >= period) { s.porpPh -= period; s.blown = false; AUDIT.porpoises++; }
+      const deep = draft * 1.35 * 1.15;                              // the pod's travelling depth
+      const top = surfCeil(a, draft);
+      let rise = 0;
+      if (s.porpPh < PORP_ROLL) {
+        const k = s.porpPh / PORP_ROLL;
+        rise = Math.sin(k * Math.PI);
+        if (!s.blown && k > 0.45) {
+          s.blown = true; fireSpout(a, s);
+          s.breathT = Math.max(s.breathT, 20);                       // that WAS the breath
+        }
+      }
+      s.diveWant = deep + (top - deep) * rise;
+      s.lift = -s.diveWant;
+      s.airborne = false;
       s.porp = true;
-      s.diveWant = -s.lift;
-      ballistic(s, dt, 0.38);            // nose follows the arc, not an author
+      ballistic(s, dt, 0.16);            // nose up into the roll, down out of it
       return true;
     }
     s.porp = false;
@@ -2214,8 +2305,12 @@
         startAct(a, s, "spyhop", 4.6); s.cool = ACT_COOL;
       } else if (s.cool <= 0 && s.idleT <= 0) {
         const r = h01(g.position.x * 0.37, g.position.z * 0.41, 0x0C82);
-        if (r > 0.72) startAct(a, s, "breach", 2.9);
-        else if (r > 0.45) startAct(a, s, "taillob", 3.1);
+        // A BREACH IS AN EVENT. It was 28% of idle acts — with a pod of
+        // five in view, one about every twenty seconds, which made the most
+        // spectacular thing an orca does into scenery. One idle act in ten
+        // now; the lobtail is the common display, the blow the default.
+        if (r > 0.90) startAct(a, s, "breach", 2.9);
+        else if (r > 0.62) startAct(a, s, "taillob", 3.1);
         else startAct(a, s, "blow", 3.4);
         s.cool = ACT_COOL * (0.7 + r * 0.9);
         s.idleT = 12 + r * 30;
@@ -2245,7 +2340,7 @@
          the game.
          The honest shape is a rise to the SURFACE, not through it: aim the same
          eased curve at a shallow DEPTH instead of a height, and let depth()'s
-         own submersion clamp (0.92 × draft, which puts the back and the whole
+         own submersion clamp (surfCeil: the back and the whole
          dorsal in the air and nothing else) be what stops it. `s.airborne`
          stays false for a blow now, which is what re-arms that clamp — the act
          no longer asks for the exemption a breach legitimately needs. */
@@ -2258,8 +2353,7 @@
          4.07 m of dorsal in the air and aimed it at a shallow DEPTH instead;
          that number is settled and the owner signed it off. Only the sign of
          the ten-centimetre pitch was wrong, so only the sign is touched. */
-      if (SITLOW()) s.lift = -draft * (1.25 - 1.05 * rise);   // ⇒ diveWant = a depth
-      else s.lift = rise * (draft * 0.85);
+      s.lift = -draft * (1.25 - 1.05 * rise);   // ⇒ diveWant = a depth; depth()'s ceiling stops it
       if (!s.blown && k > 0.42) { s.blown = true; fireSpout(a, s); }
       if (s.actT <= 0) endAct(s);
     } else if (s.act === "spyhop") {
@@ -2472,7 +2566,7 @@
       senseR: 150, chumR: 300, circleR: 34, orbitR: 22, circleT: 9,
       cruiseSpeed: (sp.spd || 3.4) * 2.2, rushSpeed: (sp.spd || 3.4) * 8.0,
       bumpDmg: (sp.bite || 42) * 0.18, style: "lunge", medium: "water",
-      reach: 2.6 + (sp.scale || 1.55) * 1.7, rate: 1.2, dmg: sp.bite || 42,
+      reach: 2.6 + (sp.scale || 0.95) * 1.7, rate: 1.2, dmg: sp.bite || 33,
       canReach: SEAMS.canReach, move: SEAMS.move, onState: SEAMS.onState, onHit: SEAMS.onHit,
       seize: {
         jaw: CBZ.creatureJawPoint ? CBZ.creatureJawPoint(a) : { x: 2.8, y: 0.75, z: 0 },
@@ -2567,7 +2661,11 @@
        body lagged its own pose and the flukes only ever grazed the surface
        instead of clearing it. A ballistic arc keeps the softer number; it is
        already a smooth curve and does not need chasing. */
-    const seatK = s.act && !s.airborne ? 9 : (s.airborne || s.act ? 4.5 : 1.1);
+    /* The breath-roll at speed (s.porp) is tracked like an attitude act: at
+       the resting 1.1 a 2.4 s roll lagged so far behind its own curve that the
+       back never broke the surface at all. */
+    const tracked = (s.act || s.porp) && !s.airborne;
+    const seatK = tracked ? 9 : (s.airborne || s.act ? 4.5 : 1.1);
     s.dive += (s.diveWant - s.dive) * Math.min(1, dt * seatK);
     let y = surf - s.dive;
     const draft = a.swimDepth || 2.6;
@@ -2575,13 +2673,23 @@
     // leave the water is not a breach, and a spy-hop under the surface is a
     // hovering whale. The seabed clamp below is NOT lifted — the bed always
     // wins, which is wildlife_shark.js's order and its reasoning.
-    if (!s.airborne && y > surf - draft * 0.92) y = surf - draft * 0.92;
+    const ceil = surfCeil(a, draft);
+    if (!s.airborne && y > surf - ceil) y = surf - ceil;
     if (CBZ.cityAquaticBedRestY) {
       const lift = CBZ.cityAquaticBedLift ? CBZ.cityAquaticBedLift(a.species) : scaleOf(a) * 0.9;
       const lo = CBZ.cityAquaticBedRestY(g.position.x, g.position.z, draft, lift, t, surf);
       if (y < lo) y = lo;
     }
-    g.position.y += (y - g.position.y) * Math.min(1, dt * (s.act && !s.airborne ? 13 : (s.airborne || s.act ? 7 : 3.2)));
+    g.position.y += (y - g.position.y) * Math.min(1, dt * (tracked ? 13 : (s.airborne || s.act ? 7 : 3.2)));
+    /* ONE WRITER OF y. When marine_predation steers an orca it moves it with
+       the shark's water mover, whose depth() also eases y — toward the SHARK's
+       dive target. On every frame this function ran too (a breath, a breath
+       roll at speed, an act, pod travel) the two blended, and the orca's
+       breath curve came out as a smear between two depths (measured: backs
+       wandering from 2.5 m under to a metre out at a steady 10 m/s). This
+       claims y for the next two frames; wildlife_shark.js's depth() stands
+       down while the claim holds and resumes the frame it lapses. */
+    a._depthClaim = 2;
   }
 
   // ============================================================
@@ -2641,7 +2749,7 @@
     ROLL_HP: 0.35,      // quarry hp fraction that unlocks the finisher
     ROLL_S: 4.6,        // s the roll-over takes, end to end
     BREAK_HP: 0.50,     // below this and short-handed, a member leaves
-    MOB_MAX: 2.6,       // a pod's quarry may be at most this x its own scale
+    MOB_MAX: 3.0,       // a pod's quarry may be at most this x its own scale (a 16 m megalodon over a 6.6 m cow is 2.74)
   };
 
   function hpOf(a) { return Math.max(1, a.maxHp || (a.species && a.species.hp) || 100); }
@@ -2794,7 +2902,7 @@
     const sp = o.species;
     if (!sp || !sp.aquatic || sp.id === "orca") return false;
     if (!(sp.danger > 0) || !(sp.bite > 0)) return false;      // no teeth, no fight
-    const mine = (a.species && a.species.scale) || 1.55;
+    const mine = (a.species && a.species.scale) || 0.95;
     return (sp.scale || 1) <= mine * MOB.MOB_MAX;
   }
   function pickQuarry(a, s, dt) {
@@ -2860,8 +2968,11 @@
         AUDIT.rams = (AUDIT.rams || 0) + 1;
       },
     };
+    // creatureFight moves by (actor, dx, dz, step, dt); the shark's water
+    // mover takes (actor, heading, speed, dt). Convert (see marine_predation's
+    // ramOpts for what handing it straight across did).
     const mv = moveOf(a);
-    if (mv) o.move = mv;
+    if (mv) o.move = function (h, dx, dz, step, dt) { return mv(h, Math.atan2(dz, dx), dt > 0 ? step / dt : 0, dt); };
     return o;
   }
   // HOW LONG IS THIS ANIMAL, in world metres, cached on the actor (the quarry
@@ -3198,16 +3309,22 @@
         const wz = lead.group.position.z + ox * cz + oz * cx;
         const ddx = wx - g.position.x, ddz = wz - g.position.z;
         const d = Math.hypot(ddx, ddz);
-        const cruise = (a._spd0 || a.spd || 3.4) * 2.0;
+        /* HER PACE, NOT A CONSTANT. Station-keeping used to run at a fixed
+           2 x spd (6.8 m/s) whatever she was doing, so a pod whose matriarch
+           had slowed to rest kept surging past her and circling back. The
+           pace is her MEASURED speed (proxy() eases it off her real
+           displacement); a member off its station adds a closing term that
+           grows with the gap and is capped, so a laggard sprints (and, over
+           5.2 m/s, porpoises — which is exactly what a travelling orca that
+           is catching up does) and one on station simply swims beside her. */
+        const pace = Math.max(1.2, ls.spd > 0 ? ls.spd : (a._spd0 || 3.4) * 1.3);
         if (d > leadLen * 0.22) {
           const want = Math.atan2(ddz, ddx);
-          // close fast when far behind, match her pace when on station — that
-          // difference is what makes a formation look held rather than chased
-          const spd = clamp(cruise * (0.55 + d / (leadLen * 3)), cruise * 0.5, cruise * 2.4);
+          const spd = clamp(pace * (0.8 + d / (leadLen * 3)), pace * 0.6, pace + 6);
           swim(a, want, spd, dt);
           owned = true;
         } else {
-          swim(a, lh, cruise * 0.9, dt);
+          swim(a, lh, pace, dt);
           owned = true;
         }
         // MARINE_SIT_DEEPER: the pod's station-keeping depth, one notch lower.
@@ -3360,6 +3477,11 @@
               st.lift = 0; st.pitch = 0; st.roll = 0; st.airborne = false; st.porp = false;
             } else {
               st.quiet = engaged;              // read by actTick: no new display acts
+              // ..and one already running stops: marine_predation is about to
+              // drive this body at a sprint, and a spy-hop carried along at
+              // 14 m/s is a whale sliding upright across the sea (measured).
+              // The breath is the one act a hunting orca keeps.
+              if (engaged && st.act && st.act !== "blow") endAct(st);
               let ran = false;
               try { ran = actTick(a, st, dt, d); } catch (_e3) { ran = false; }
               st.quiet = false;

@@ -148,7 +148,14 @@ await sleep(9000);
    the honest pre-PLAY test is therefore "is the entry point there and did
    nothing throw", not a count of <script> tags. */
 const entrySel = JSON.stringify(ENTRY);
-const entry = await ev(`!!document.querySelector(${entrySel})`);
+/* Poll for the entry instead of trusting the fixed 9 s nap above: on a box at
+   load 30 a 30 MB page is still parsing at 9 s, and a missing button there
+   read as "script chain broken" when nothing was. Up to 90 s. */
+let entry = false;
+for (let t = 0; t < 90 && !entry; t += 3) {
+  try { entry = await ev(`!!document.querySelector(${entrySel})`); } catch (e) { entry = false; }
+  if (!entry) await sleep(3000);
+}
 const entryWhich = entry ? await ev(`(function(){var e=document.querySelector(${entrySel});return e.id||e.tagName.toLowerCase();})()`) : null;
 log(`  entry point: ${entry ? "present (" + entryWhich + ")" : "MISSING — try --entry '<css selector>'"}`);
 dump("script-chain errors");
