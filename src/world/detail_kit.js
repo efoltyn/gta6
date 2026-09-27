@@ -364,6 +364,7 @@
     im.instanceMatrix.needsUpdate = true;
     root.add(im);
     this.mesh = im;
+    built.push(this);
     const full = n, cls = this.cls;
     scalables.push({
       cls: cls,
@@ -384,6 +385,69 @@
     return im;
   };
   DK.batch = function (name, geo, opts) { return new Batch(name, geo, opts); };
+
+  // =====================================================================
+  //  BREAKING ONE INSTANCE (REAL DEBRIS)
+  // =====================================================================
+  // An instance cannot be shattered in place: there is no Object3D to hand
+  // CBZ.debris. These three calls let city/props.js's blast pass break a
+  // pallet, a crate or a barrier out of its batch for real — the debris is
+  // cut from the batch's OWN prototype geometry (with its baked vertex
+  // colours) at the instance's own matrix, and the instance is zero-scaled.
+  // The policy (what breaks, at what force) lives with the blast, not here.
+  const built = [];                 // every Batch built this world, for instancesNear
+  const _bm = new THREE.Matrix4();
+  // [{batch, i, item, d}] of live, drawn instances of the named batches within R
+  DK.instancesNear = function (x, z, R, names) {
+    const out = [];
+    for (let b = 0; b < built.length; b++) {
+      const B = built[b], im = B.mesh;
+      if (!im || !im.visible || (names && !names[B.name])) continue;
+      const n = Math.min(B.items.length, im.count);
+      for (let i = 0; i < n; i++) {
+        const it = B.items[i];
+        if (it.gone) continue;
+        const dx = it.x - x, dz = it.z - z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 <= R * R) out.push({ batch: B, i: i, item: it, d: Math.sqrt(d2), name: B.name });
+      }
+    }
+    return out;
+  };
+  // a stand-alone Mesh of one instance (world matrix baked, not in the scene)
+  DK.instanceMesh = function (B, i) {
+    if (!B || !B.mesh || !B.geo) return null;
+    const m = new THREE.Mesh(B.geo, B.mesh.material);
+    B.mesh.getMatrixAt(i, _bm);
+    m.matrixAutoUpdate = false;
+    m.matrix.copy(_bm);
+    m.matrixWorld.copy(_bm);
+    return m;
+  };
+  // zero-scale one instance and drop the collider DK.solid gave it (matched by
+  // its centre: DK.solid is called with the same x,z as the batch add)
+  DK.hideInstance = function (B, i) {
+    if (!B || !B.mesh) return false;
+    const it = B.items[i];
+    if (!it || it.gone) return false;
+    it.gone = true;
+    _bm.makeScale(0, 0, 0);
+    B.mesh.setMatrixAt(i, _bm);
+    B.mesh.instanceMatrix.needsUpdate = true;
+    const cs = CBZ.colliders;
+    if (cs) {
+      let hit = false;
+      for (let k = cs.length - 1; k >= 0; k--) {
+        const c = cs[k];
+        if (!c || !c.noBreach || c.ref) continue;
+        if (c.maxX - c.minX > 2 || c.maxZ - c.minZ > 2) continue;
+        const cx = (c.minX + c.maxX) / 2, cz = (c.minZ + c.maxZ) / 2;
+        if (Math.abs(cx - it.x) < 0.08 && Math.abs(cz - it.z) < 0.08) { cs.splice(k, 1); hit = true; }
+      }
+      if (hit && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    }
+    return true;
+  };
 
   // =====================================================================
   //  SHEET — one merged triangle soup per surface class
@@ -578,6 +642,7 @@
   }
 
   DK.begin = function (city) {
+    built.length = 0;               // a fresh world: the old batches are gone with it
     OR.city = city;
     OR.roads = [];
     OR.rgrid = new Map();
