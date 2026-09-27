@@ -1,25 +1,15 @@
 /* ============================================================
-   world/props.js — yard flavour: basketball hoop, picnic table,
-   oil barrels. Makes the exercise yard feel lived-in.
+   world/props.js — north-yard kit: the basketball hoop, a picnic table,
+   the bench/bar/dumbbell/pull-up corner, the grounds crew's drums, and the
+   cell block's breaker box.
 
-   F7 MIGRATION: three props below now route through CBZ.spawnPiece
-   (systems/pieces.js, F4) as the migration proof set — table(), the
-   weight-bench inside gym(), and barrel(). Each demonstrates a distinct
-   spawnPiece path:
-     - table:  solid:false, walkTop:true  (a NEW capability — the old
-               table had no collider AND no platform at all; findSupport
-               can now snap onto its top. This is the one deliberate,
-               additive behaviour change in this migration, called out
-               here and in BUILD-PLAN F7 rather than silently added.)
-     - weightBench (in gym()): solid:true, no blockLOS.
-     - barrel: solid:true, blockLOS:true (the manual CBZ.colliders.push /
-               CBZ.losBlockers.push this file used to do by hand — now
-               spawnPiece owns both, so this is also the reap/despawn
-               proof: a piece built from something OTHER than boxes, i.e.
-               a CylinderGeometry mesh returned directly from build()).
-   hoop() and the rest of gym() (dumbbell rack, pull-up station) stay on
-   addBox — purely decorative/already-solid-via-addBox, no proof value
-   added by moving them too.
+   2026-09-27 DE-SLOP: every object here is the real thing drawn from
+   world/prisonkit.js's yard kit (round plates and rims, a galvanised
+   walk-through table, a net), not a box standing in for it. The three
+   CBZ.spawnPiece pieces keep their contracts: the table is solid:false +
+   walkTop (its piece is the invisible top the platform lands on), the
+   bench solid, the drum pallets solid + blockLOS with an unseen hull mesh
+   as the piece root (LOS rays test the blocker list non-recursively).
    breakerBox() is SKIPPED on purpose: it exports CBZ.breaker, a live
    registry read by entities/security.js, systems/interactions.js and
    systems/state.js. Piece meshRefs are expected to get reaped/replaced
@@ -46,117 +36,89 @@
      piece this file spawns is parented here explicitly. */
   const ROOT = CBZ.prisonRoot || CBZ.scene;
 
-  // ---- basketball hoop against the west wall ----
-  (function hoop(x, z) {
-    addBox(x, 2.5, z, 0.25, 5, 0.25, 0x3c424d, { cast: false });        // pole
-    // backboard face must be perpendicular to the rim's overhang (+X): thin in
-    // X, wide in Z. It shipped swapped (wide in X), i.e. rotated 90° from its
-    // own rim — found when the court paint was laid along the true rim axis.
-    addBox(x + 0.9, 4.6, z, 0.12, 1.0, 1.5, 0xffffff, { cast: false }); // backboard
-    addBox(x + 1.5, 4.2, z, 0.5, 0.1, 0.5, 0xff7a1a, { cast: false });  // rim
-  })(-28, 14);
+  const K = CBZ.prisonKit || null;
 
-  // ---- picnic / mess table (F7: migrated to spawnPiece — solid:false
-  // matches the old table exactly (it never had a collider), walkTop:true
-  // is new: the tabletop is now a real platform findSupport can return) ----
+  // ---- basketball hoop behind the half-court's baseline (world/ground.js
+  // paints the court: baseline x=-28.4, key to -22.6). The kit's hoop: round
+  // pole, gooseneck, a board with its square painted on, rim, net. It was a
+  // square post, a white slab and a 50 cm ORANGE SQUARE for a rim, standing
+  // inside the baseline. Board 1.2 m inside the baseline, rim over the key.
+  if (K) K.hoop(-29.2, 14, 1, 0, { reach: 2.0 });
+  CBZ.colliders.push({ minX: -29.45, maxX: -28.95, minZ: 13.75, maxZ: 14.25, noBreach: true });
+
+  // ---- picnic table (F7 spawnPiece: solid:false, walkTop:true — the top is a
+  // platform findSupport can return). What you see is the kit's galvanised
+  // walk-through table (the one every yard in the compound uses); the piece
+  // is its top, invisible, so the platform lands exactly on the planks. ----
   (function table(x, z) {
+    if (K) K.picnicTable(x, z, 0);
     const def = {
-      footprint: { hx: 1.3, hz: 0.5 },  // the tabletop's own half-extents (2.6 x 1.0)
-      y0: -0.08, y1: 0.08,              // tabletop's own half-height (0.16/2), world top = pos.y+0.08
+      footprint: { hx: 0.9, hz: 0.38 },
+      y0: -0.02, y1: 0.02,
       build: function () {
-        const top = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.16, 1.0), CBZ.mat(0xb07a3c, {}));
-        top.castShadow = true; top.receiveShadow = true;
-
-        const benchA = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.16, 0.4), CBZ.mat(0x8a5e2b, {}));
-        benchA.position.set(0, -0.43, -0.7);
-        benchA.castShadow = true; benchA.receiveShadow = true;
-        top.add(benchA);
-
-        const benchB = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.16, 0.4), CBZ.mat(0x8a5e2b, {}));
-        benchB.position.set(0, -0.43, 0.7);
-        benchB.castShadow = true; benchB.receiveShadow = true;
-        top.add(benchB);
-
-        const legA = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.84, 1.0), CBZ.mat(0x6e4a22, {}));
-        legA.position.set(-1.1, -0.43, 0);
-        legA.castShadow = false; legA.receiveShadow = true;
-        top.add(legA);
-
-        const legB = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.84, 1.0), CBZ.mat(0x6e4a22, {}));
-        legB.position.set(1.1, -0.43, 0);
-        legB.castShadow = false; legB.receiveShadow = true;
-        top.add(legB);
-
+        const top = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.04, 0.76), CBZ.mat(0x55705f, {}));
+        top.visible = !K;
         return top;
       },
     };
-    CBZ.spawnPiece(def, { pos: { x: x, y: 0.85, z: z }, solid: false, walkTop: true, parent: ROOT });
+    CBZ.spawnPiece(def, { pos: { x: x, y: 0.74, z: z }, solid: false, walkTop: true, parent: ROOT });
   })(18, 30);
 
-  // ---- outdoor workout gym area (Reds' turf recreation zone) ----
+  // ---- outdoor workout area: a flat bench, a loaded bar on its stands, a
+  // dumbbell rack, a pull-up station. Round things are round now (the plates
+  // and dumbbells were black squares), and the bench stands on steel legs,
+  // not two grey cubes. ----
   (function gym(x, z) {
-    // 1. weight bench (F7 migration proof #3: a simple solid-only piece,
-    // no blockLOS. The padded top used to be a manual addBox({solid:true})
-    // — the old comment "solid so players can stand/hide behind it" still
-    // holds, just via spawnPiece's opts.solid path now. Support legs are
-    // decorative children of the returned top mesh, exactly as before
-    // (they were never solid).
+    const frame = K ? K.skin("steel", 0x3a4048) : null, iron = K ? K.skin("steel", 0x1c1e22, 0.7) : null;
+    const bar = K ? K.skin("galv", 0xb4bcc4) : null;
+    // 1. the bench (F7 piece: solid, no blockLOS)
     (function weightBench() {
+      const legGeo = new THREE.BoxGeometry(0.05, 0.46, 0.05), footGeo = new THREE.BoxGeometry(0.42, 0.04, 0.06);
       const def = {
-        footprint: { hx: 0.25, hz: 0.9 }, // top's own half-extents (0.5 x 1.8)
-        y0: -0.07, y1: 0.07,              // top's own half-height (0.14/2)
+        footprint: { hx: 0.25, hz: 0.9 },
+        y0: -0.07, y1: 0.07,
         build: function () {
-          const top = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.14, 1.8), CBZ.mat(0x222831, {}));
+          const top = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.1, 1.7), CBZ.mat(0x222831, {}));
           top.castShadow = true; top.receiveShadow = true;
-
-          const legA = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.5, 0.4), CBZ.mat(0x7d8794, {}));
-          legA.position.set(0, -0.3, -0.7);
-          legA.castShadow = true; legA.receiveShadow = true;
-          top.add(legA);
-
-          const legB = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.5, 0.4), CBZ.mat(0x7d8794, {}));
-          legB.position.set(0, -0.3, 0.7);
-          legB.castShadow = true; legB.receiveShadow = true;
-          top.add(legB);
-
+          for (const e of [-0.7, 0.7]) {
+            const leg = new THREE.Mesh(legGeo, CBZ.mat(0x4f5663, {})); leg.position.set(0, -0.28, e); top.add(leg);
+            const foot = new THREE.Mesh(footGeo, CBZ.mat(0x4f5663, {})); foot.position.set(0, -0.53, e); top.add(foot);
+          }
           return top;
         },
       };
       CBZ.spawnPiece(def, { pos: { x: x, y: 0.55, z: z }, solid: true, parent: ROOT });
     })();
-
-    // barbell rack stands
-    addBox(x - 0.22, 0.7, z, 0.08, 0.9, 0.08, 0x4f5663, { cast: false });
-    addBox(x + 0.22, 0.7, z, 0.08, 0.9, 0.08, 0x4f5663, { cast: false });
-    // barbell bar (runs along x)
-    addBox(x, 1.15, z, 2.0, 0.06, 0.06, 0x9aa0a8, { cast: false });
-    // weight plates (runs along y/z)
-    addBox(x - 0.9, 1.15, z, 0.12, 0.5, 0.5, 0x111111, {});
-    addBox(x - 0.75, 1.15, z, 0.12, 0.42, 0.42, 0x111111, {});
-    addBox(x + 0.9, 1.15, z, 0.12, 0.5, 0.5, 0x111111, {});
-    addBox(x + 0.75, 1.15, z, 0.12, 0.42, 0.42, 0x111111, {});
-
-    // 2. dumbbell rack
-    const rx = x + 3.5, rz = z;
-    // rack frame
-    addBox(rx, 0.4, rz, 1.8, 0.8, 0.6, 0x3c424d, { solid: true });
-    // dumbbells on the rack
-    for (let i = -2; i <= 2; i++) {
-      const dx = rx + i * 0.34;
-      // left plate, handle, right plate
-      addBox(dx - 0.08, 0.85, rz, 0.06, 0.2, 0.2, 0x111111, { cast: false });
-      addBox(dx, 0.85, rz, 0.18, 0.04, 0.04, 0x9aa0a8, { cast: false });
-      addBox(dx + 0.08, 0.85, rz, 0.06, 0.2, 0.2, 0x111111, { cast: false });
+    if (!K) return;
+    // the bar on its stands at the head of the bench
+    for (const s of [-1, 1]) { K.tube(x + s * 0.5, 0, z - 0.95, x + s * 0.5, 1.2, z - 0.95, 0.03, frame, { cast: false }); K.stat(new THREE.BoxGeometry(0.1, 0.03, 0.4), frame, x + s * 0.5, 0.015, z - 0.95, { cast: false }); }
+    K.stat(new THREE.CylinderGeometry(0.014, 0.014, 2.0, 8), bar, x, 1.2, z - 0.9, { rz: Math.PI / 2, cast: false });
+    for (const s of [-1, 1]) {
+      K.stat(new THREE.CylinderGeometry(0.225, 0.225, 0.05, 20), iron, x + s * 0.78, 1.2, z - 0.9, { rz: Math.PI / 2, cast: false });
+      K.stat(new THREE.CylinderGeometry(0.19, 0.19, 0.04, 20), iron, x + s * 0.72, 1.2, z - 0.9, { rz: Math.PI / 2, cast: false });
     }
-
-    // 3. pull-up station
+    // 2. the dumbbell rack: an A-frame of tube, two sloped rails, pairs of
+    // round dumbbells heaviest at the bottom. Still solid (an unseen box).
+    const rx = x + 3.5, rz = z;
+    const rack = addBox(rx, 0.4, rz, 1.8, 0.8, 0.6, 0x3c424d, { solid: true });
+    rack.visible = false;
+    for (const e of [-0.85, 0.85]) {
+      K.tube(rx + e, 0, rz - 0.3, rx + e, 0.8, rz - 0.05, 0.025, frame, { cast: false });
+      K.tube(rx + e, 0, rz + 0.3, rx + e, 0.8, rz - 0.05, 0.025, frame, { cast: false });
+    }
+    for (const t of [0, 1]) K.stat(new THREE.BoxGeometry(1.8, 0.04, 0.2), frame, rx, 0.45 + t * 0.3, rz + 0.12 - t * 0.14, { rx: 0.35, cast: false });
+    for (let i = -2; i <= 2; i++) for (const t of [0, 1]) {
+      const dx = rx + i * 0.34, dy = 0.52 + t * 0.3, dz = rz + 0.12 - t * 0.14, r = t ? 0.06 : 0.08;
+      K.stat(new THREE.CylinderGeometry(0.016, 0.016, 0.3, 6), bar, dx, dy, dz, { rz: Math.PI / 2, cast: false });
+      for (const s of [-1, 1]) K.stat(new THREE.CylinderGeometry(r, r, 0.07, 14), iron, dx + s * 0.11, dy, dz, { rz: Math.PI / 2, cast: false });
+    }
+    // 3. pull-up station: two timber posts set in the ground, a steel bar through them
     const px = x - 3.5, pz = z;
-    // vertical timber posts
-    addBox(px, 1.8, pz - 0.9, 0.24, 3.6, 0.24, 0x6e4a22, { solid: true });
-    addBox(px, 1.8, pz + 0.9, 0.24, 3.6, 0.24, 0x6e4a22, { solid: true });
-    // pull-up bar (high steel bar)
-    addBox(px, 3.4, pz, 0.06, 0.06, 1.8, 0x8b95a1, { cast: false });
+    skinTimber(addBox(px, 1.8, pz - 0.9, 0.2, 3.6, 0.2, 0x6e4a22, { solid: true }));
+    skinTimber(addBox(px, 1.8, pz + 0.9, 0.2, 3.6, 0.2, 0x6e4a22, { solid: true }));
+    K.stat(new THREE.CylinderGeometry(0.018, 0.018, 2.0, 8), bar, px, 3.3, pz, { rx: Math.PI / 2, cast: false });
   })(-22, 32);
+  function skinTimber(m) { if (K && m) K.skinBox(m, "concrete", 0x7a5530, 1); return m; }
 
   // ---- electrical breaker box inside the cell block ----
   // SKIPPED for F7 (see file header): exports CBZ.breaker, a live registry
@@ -185,37 +147,44 @@
     };
   })();
 
-  // ---- a cluster of oil barrels (extra cover, solid) ----
-  // F7: migrated to spawnPiece. Old code manually did
-  // CBZ.colliders.push({...}) + CBZ.losBlockers.push(m) by hand right here
-  // — spawnPiece now owns both (opts.solid + opts.blockLOS), and reap/
-  // despawn cleanup (previously nonexistent for this prop) comes for free.
-  function barrel(x, z) {
+  // ---- the grounds crew's drums: two pallets of four 55-gallon drums by the
+  // wall (solid, LOS-blocking cover, F7 spawnPiece). They were three 1.1 m
+  // wide, 1.6 m tall green cylinders with a faint GLOW (emissive) and SQUARE
+  // bands round them, three overlapping in a heap: twice a drum's size and
+  // not a drum. A drum is 0.58 m across and 0.88 m tall with rolling hoops.
+  const DRUM = {
+    body: new THREE.CylinderGeometry(0.29, 0.29, 0.88, 18),
+    hoop: new THREE.TorusGeometry(0.292, 0.012, 4, 18),
+    lid: new THREE.CylinderGeometry(0.03, 0.03, 0.02, 8),
+    board: new THREE.BoxGeometry(0.1, 0.022, 1.2),
+    runner: new THREE.BoxGeometry(1.2, 0.1, 0.1),
+  };
+  const HULL = new THREE.MeshBasicMaterial({ visible: false });
+  function drumPallet(x, z, tones) {
     const def = {
-      footprint: { hx: 0.6, hz: 0.6 }, // matches the old manual collider's half-extents exactly
-      y0: -0.8, y1: 0.8,               // the cylinder's own physical extent (height 1.6, centred on pos.y)
+      footprint: { hx: 0.6, hz: 0.6 },
+      y0: -0.51, y1: 0.51,
       build: function () {
-        const m = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.55, 0.55, 1.6, 14),
-          CBZ.mat(0x3f7d4a, { emissive: 0x10260f, ei: 0.2 })
-        );
-        m.castShadow = true; m.receiveShadow = true;
-
-        // banding rings (old world y 1.1 / 0.5 -> local offset from pos.y=0.8)
-        const ringTop = new THREE.Mesh(new THREE.BoxGeometry(1.14, 0.1, 1.14), CBZ.mat(0x2f5e38, {}));
-        ringTop.position.set(0, 0.3, 0);
-        ringTop.castShadow = false; ringTop.receiveShadow = true;
-        m.add(ringTop);
-
-        const ringBot = new THREE.Mesh(new THREE.BoxGeometry(1.14, 0.1, 1.14), CBZ.mat(0x2f5e38, {}));
-        ringBot.position.set(0, -0.3, 0);
-        ringBot.castShadow = false; ringBot.receiveShadow = true;
-        m.add(ringBot);
-
-        return m;
+        // the root is the stack's hull, unseen: guards' LOS rays test the
+        // blocker list NON-recursively, so the cover must be a real mesh
+        const g = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.02, 1.2), HULL);
+        const wood = CBZ.mat(0x8a6c45, {}), rim = CBZ.mat(0x3a4048, {});
+        for (let i = 0; i < 5; i++) { const b = new THREE.Mesh(DRUM.board, wood); b.position.set(-0.48 + i * 0.24, -0.395, 0); g.add(b); }
+        for (const lz of [-0.5, 0, 0.5]) { const r = new THREE.Mesh(DRUM.runner, wood); r.position.set(0, -0.46, lz); g.add(r); }
+        for (let k = 0; k < 4; k++) {
+          const dx = (k % 2 ? 0.3 : -0.3), dz = (k < 2 ? -0.3 : 0.3);
+          const body = new THREE.Mesh(DRUM.body, CBZ.mat(tones[k % tones.length], {}));
+          body.position.set(dx, 0.06, dz); body.castShadow = true; body.receiveShadow = true; g.add(body);
+          for (const y of [-0.37, -0.09, 0.21, 0.49]) {
+            const h = new THREE.Mesh(DRUM.hoop, rim); h.rotation.x = Math.PI / 2; h.position.set(dx, y, dz); g.add(h);
+          }
+          const bung = new THREE.Mesh(DRUM.lid, rim); bung.position.set(dx + 0.15, 0.51, dz + 0.05); g.add(bung);
+        }
+        return g;
       },
     };
-    CBZ.spawnPiece(def, { pos: { x: x, y: 0.8, z: z }, solid: true, blockLOS: true, parent: ROOT });
+    CBZ.spawnPiece(def, { pos: { x: x, y: 0.51, z: z }, solid: true, blockLOS: true, parent: ROOT });
   }
-  barrel(-19, 44); barrel(-20.2, 45); barrel(-19.6, 43);
+  drumPallet(-19.3, 43.6, [0x2f5e8a, 0x2f5e8a, 0x3f6f4a, 0x2f5e8a]);
+  drumPallet(-19.3, 45.0, [0x3f6f4a, 0x2f5e8a, 0x3f6f4a, 0x3f6f4a]);
 })();

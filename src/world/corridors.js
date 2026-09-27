@@ -134,7 +134,11 @@
     K.skinBox(m, "panel", WALL);
     // the parapet on top, and the block lining on the inside face (the caller
     // says which face is inside through the `inner` it passes)
-    addBox(x, TOP + 0.18, z, w, 0.36, d, 0x8f959c, { cast: false });
+    // (it was a flat-grey 0.36 m box buried in the roof slab, 6 cm of it
+    //  showing: a lip, not a parapet. Now it stands 0.45 m clear of the
+    //  roof in the same poured concrete as the coping on the yard walls.)
+    const para = addBox(x, TOP + 0.375, z, w, 0.75, d, 0x8f959c, { cast: false });
+    K.skinBox(para, "concrete", 0x9ea3a8);
     wallRuns++;
     return m;
   }
