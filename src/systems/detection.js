@@ -63,15 +63,16 @@
   // Spoken in the world (prisonSay: 16 m, ranked, silent when he is down) —
   // the window is audible, never printed on the HUD.
   const SPOT_LINES = {
-    "the armory": ["You! Out of the gun room! Now!", "Inmate in the armory! Stand where you are!"],
-    "the staff lounge": ["This floor is staff. Turn around!", "You do not walk here, inmate. Move!"],
-    "the exit corridor": ["Stop! You are a long way past your block!", "He's in the corridor! Stop him!"],
+    "the armory": ["Out of there! Now!", "Gun room! Stand still!"],
+    "the staff lounge": ["Hey! Out!", "Staff only! Move!"],
+    "the exit corridor": ["Stop! Right there!", "He's at the gate!"],
+    "the sterile zone": ["On the fence! Stop!", "Get off the road!"],
+    "the admin wing": ["Stand still!", "Hands where I can see them!"],
   };
   const CALL_LINES = [
-    "Control, inmate where he should not be. All units.",
-    "Control, post calling it in. Get bodies over here.",
+    "Control, inmate out of bounds.",
+    "Control, need bodies here.",
   ];
-  SPOT_LINES["the admin wing"] = ["This wing is off limits! Stand still!", "Inmate in the admin wing! Hands where I can see them!"];
 
   /* ---- THE WARNING (staff areas, seen from a distance) ---------------------
      A screw who sees an inmate somewhere he should not be, from across the
@@ -83,9 +84,10 @@
      WARN_DIST * 0.6). */
   const WARN_T = 3.5, WARN_DIST = 7, WARN_MEMORY = 30;
   const WARN_LINES = {
-    "the staff lounge": ["Staff only. Turn around, inmate.", "Hey! You don't belong in here. Out."],
-    "the exit corridor": ["Back to your block! Now!", "Hey! You're a long way from your cell. Turn around."],
-    "the admin wing": ["This wing is off limits. Back the way you came.", "Inmate! Turn around and walk out. Now."],
+    "the staff lounge": ["Staff only. Out.", "You lost? Out."],
+    "the exit corridor": ["Turn around.", "Back to your block."],
+    "the sterile zone": ["Off the road. Now.", "Get back inside."],
+    "the admin wing": ["Wrong wing. Out.", "Turn around. Now."],
   };
 
   /* ---- BACKUP (a hunting guard's radio) ------------------------------------
@@ -96,9 +98,9 @@
      position. BACKUP_CD keeps one man from calling it in every few seconds. */
   const BACKUP_CALL_T = 2.0, BACKUP_CD = 9, BACKUP_HEAT = 4;
   const BACKUP_LINES = [
-    "Control, eyes on the runner. Need backup on me.",
-    "Runner on my post! Anybody close, move!",
-    "Control, I've got him. Send whoever's near.",
+    "Control, need backup.",
+    "Runner! Anybody close?",
+    "I've got him. Send someone.",
   ];
 
   /* ---- NOISE ---------------------------------------------------------------
@@ -132,8 +134,16 @@
     // "I legit followed the warden into his quarters... he acted like an
     // inmate [was allowed there]"). Catch him on his ROUNDS in the wing —
     // that part of his day was always the legitimate audience.
-    if (p.x > -19.5 && p.x < 19.5 && p.z > -63.5 && p.z < -44.1) return "the admin wing";
-    if (p.z > 47) return "the exit corridor";
+    if (p.x > -19.5 && p.x < 19.5 && p.z > -63.5 && p.z < -44.1 &&
+        !(CBZ.warden && CBZ.warden.pass && CBZ.warden.pass())) return "the admin wing";   // unless he sent for you
+    /* THE EXIT RUN, NOT THE SOUTH BLOCK. This read `z > 47` from when the
+       compound ended there; world/southblock.js then built the lower yard,
+       the chapel, the laundry and the INFIRMARY on z 52..110, so walking to
+       the doctor was trespass. The run is the sally port approach below them
+       (pillars z 118, guard hut z 116..124, gate z 128) and the sterile zone
+       between the inner fence and the wall (systems/prisonlaw.js). */
+    if (CBZ.prisonSterileAt && CBZ.prisonSterileAt(p.x, p.z)) return "the sterile zone";
+    if (p.z > 108 && Math.abs(p.x) < 44) return "the exit corridor";
     return null;
   }
   // entities/guards.js prices its suspicion meter off the same map
@@ -754,11 +764,17 @@
       return;
     }
     const gd = CBZ.witnessGuard();
+    // SELF-DEFENCE (systems/combat.js marks it): a man swinging back at the
+    // one who came for him. The screw who sees it breaks it up
+    // (systems/prisonlaw.js); it is not a case and it is not heat.
+    if (meta.selfDefense) { if (!gd) CBZ.addHeat(amount * 0.05); return; }
     if (gd) {
       storeLastKnown(amount, meta, gd);
       CBZ.addCasePressure(amount, meta, gd, { guardSeen: true, credibility: 0.94 });
       CBZ.addHeat(amount);
       gd.hunt = Math.max(gd.hunt || 0, 3.5); gd.alert = 1.0;
+      // gunfire in front of a screw is an assault on file
+      if (meta.type === "gunfire" && CBZ.prisonOffense) CBZ.prisonOffense("assault", { seenBy: gd, severity: 4 });
       return;
     }
     // unseen by guards: maybe a snitch inmate is watching
@@ -847,7 +863,8 @@
                 gd.warnT = WARN_T;
                 gd._warnedZone = zone; gd._warnedAt = g.elapsed || 0;
                 gd.alert = Math.max(gd.alert || 0, 0.5);
-                const wl = WARN_LINES[zone] || ["Back to your cell!"];
+                if (CBZ.prisonLawCount) CBZ.prisonLawCount("warnings");
+                const wl = WARN_LINES[zone] || ["Back to your block."];
                 if (CBZ.prisonSay) { try { CBZ.prisonSay(gd, wl[(gd.id || 0) % wl.length]); } catch (e) {} }
               }
             } else if (gd.radioT == null) {
@@ -862,6 +879,13 @@
               gd.investigate = null;
               const lines = SPOT_LINES[zone];
               if (lines && CBZ.prisonSay) { try { CBZ.prisonSay(gd, lines[(gd.id || 0) % lines.length]); } catch (e) {} }
+              // ON FILE: past a warning (or straight into the gun room). The
+              // wire and the gate run are an escape; anywhere else trespass.
+              if (CBZ.prisonOffense) {
+                const run = zone === "the exit corridor" || zone === "the sterile zone";
+                CBZ.prisonOffense(run ? "escape" : "restricted",
+                  { seenBy: gd, severity: run ? 4 : zone === "the armory" ? 3 : 2 });
+              }
             } else {
               gd.hunt = Math.max(gd.hunt || 0, 2.2);   // still coming while he has eyes on you
             }
@@ -869,7 +893,7 @@
         }
         if ((g.witnessReportT || 0) > 0 && !gd.corrupt) CBZ.addHeat(8 * dt);
         // already wanted + spotted → this guard joins the hunt
-        if ((g.detection > 18 || (g.witnessReportT || 0) > 0) && !gd.corrupt) {
+        if ((g.detection > 18 || (g.witnessReportT || 0) > 0) && !gd.corrupt && !(CBZ.prisonLawGrace && CBZ.prisonLawGrace())) {
           storeLastKnown(10, { type: "visual" }, gd);
           gd.hunt = Math.max(gd.hunt || 0, 3.0); gd.alert = 1.0; gd.investigate = null; gd.warnT = null;
           // ...and reaches for his radio (BACKUP above)
@@ -926,11 +950,14 @@
     if (CBZ.CONFIG && CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT && g.mode === "escape" &&
         g.invuln <= 0 && !player.dead &&
         (!player.captureState || player.captureState === "normal") &&
+        // a beam only means something when you should be INSIDE: in open-yard
+        // hours the yard is where a man is supposed to be standing
+        !(CBZ.prisonSchedule && CBZ.prisonSchedule.enabled && CBZ.prisonSchedule.enabled() && !CBZ.prisonSchedule.indoors() && !(CBZ.prisonSterileAt && CBZ.prisonSterileAt(player.pos.x, player.pos.z))) &&
+        !(CBZ.prisonLawGrace && CBZ.prisonLawGrace()) &&
         CBZ.litBySearchlight && CBZ.litBySearchlight(player.pos, player.crouch)) {
       CBZ.addHeat((player.crouch ? 16 : 30) * dt);
       // the beam is ON you and your shadow is thirty feet long. Saying so is
       // the definition of telling.
-      if (!litNow) tellHint("SEARCHLIGHT, you're lit up!", 1.5);
       litNow = true;
       if (litPingT <= 0) {
         litPingT = 3.0;
@@ -940,7 +967,7 @@
     if (litPingT > 0) litPingT -= dt;
 
     const csum = CBZ.caseSummary && CBZ.caseSummary();
-    if (csum && csum.heat > 18 && csum.lastKnown && (!g.lastKnown || g.lastKnown.t <= 0) && (g.caseSearchCD || 0) <= 0) {
+    if (csum && csum.heat > 18 && csum.lastKnown && (!g.lastKnown || g.lastKnown.t <= 0) && (g.caseSearchCD || 0) <= 0 && !(CBZ.prisonLawGrace && CBZ.prisonLawGrace())) {
       g.caseSearchCD = csum.weak ? 9.0 : 6.0;
       dispatchSearch(
         Math.max(8, Math.min(18, csum.heat * (csum.weak ? 0.26 : 0.36))),
