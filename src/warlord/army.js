@@ -688,7 +688,7 @@
       band.mood = "hunt";
       band.cooldown = 0;
       W.log(band.name + " told you to come and take them.", "bad");
-      W.toast("THEY REFUSE", "bad");
+      // no "THEY REFUSE" toast: the fight starting this frame IS the answer
       startBattle({ surprised: true, defending: true });
     }
   }
@@ -723,7 +723,6 @@
       }
       W.state.fame += Math.round(2 + W.state.prisoners.length * 0.5);
       W.log(line, "good");
-      W.toast("THEY SURRENDER", "good");
       W.state.stats.battles++;
       W.state.stats.won++;
       aftermath({
@@ -733,6 +732,9 @@
         loot: {}, armourLoot: {}, gold: 0, youKills: 0, alreadyBanked: true,
       });
     };
+    /* their leader says it over his own head while the rifles go down; the
+       "THEY SURRENDER" toast that narrated the picture is gone */
+    if (W.talk) W.talk(band, ["Enough. The guns are yours."]);
     if (stageable()) showSurrender(band, apply);
     else { takeTheirArms(band); apply(); }
   }
@@ -757,9 +759,10 @@
       }
       W.state.stats.recruited += n;
       W.log("paid $" + price + ". " + n + " men ride with you now.", "good");
-      W.toast(n + " MEN JOIN YOU", "good");
       finish();
     };
+    // the men walking in are the picture; their leader says the deal
+    if (W.talk) W.talk(band, ["Your coin, your war. We ride with you."]);
     if (stageable()) showJoin(band, apply);
     else apply();
   }

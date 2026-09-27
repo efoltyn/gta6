@@ -739,8 +739,6 @@
       ".wl-ev{max-width:640px;margin:0 auto}",
       ".wl-ev .tag{font-size:10px;letter-spacing:.28em;opacity:.45;margin-bottom:6px}",
       ".wl-ev .body{opacity:.9;line-height:1.5;font-weight:500;margin:6px 0 2px}",
-      /* the same card body, docked in the verb rail with the party behind it */
-      ".wl-evrail{opacity:.92;line-height:1.45;font-weight:500;font-size:13px;max-width:560px}",
       ".wl-pick{display:block;width:100%;text-align:left;margin:9px 0 0;padding:13px 15px}",
       ".wl-pick i{display:block;font-style:normal;font-size:11px;letter-spacing:.1em;opacity:.55;margin-top:5px;font-weight:500}",
       ".wl-meter{height:7px;border-radius:5px;background:rgba(255,255,255,.09);overflow:hidden;margin:7px 0 2px}",
@@ -855,12 +853,13 @@
     for (let i = 0; i < choices.length; i++) {
       (function (c) {
         opts.push({
-          label: esc(c.label), note: c.hint ? esc(c.hint) : "",
+          label: esc(c.label), note: c.hint ? esc(sign(c.hint)) : "",
           kind: c.cls === "hot" ? "hot" : c.cls === "bad" ? "bad" : "",
           disabled: c.enabled === false,
           on: function () {
             W.emit("events:choice", { id: card.id, choice: c.key || c.label });
             CARD = null;
+            hush();
             safe(function () { if (c.run) c.run(); });
             safe(function () { settleCast(card); });
             safe(paintChips);
@@ -875,12 +874,64 @@
     ctx.verbs({
       title: esc(headline),
       sub: headline.length > 20 ? "" : esc(card.tag || card.sub || ""),
-      body: '<div class="wl-evrail">' + card.body + '</div>',
       options: opts,
     });
+    talk(card.band, card.say);
     W.emit("events:card", { id: card.id });
     return CARD;
   }
+
+  /* THE MAN IN FRONT OF YOU SAYS IT. 2026-09-27 (owner: dialogue goes over
+     the talker's head, like the jail game). A people-card used to carry a
+     paragraph of reported speech in the rail ("He says his warlord has been
+     counting your column"); now the rail is the title and the buttons, and
+     the band's leader says card.say over his own head through the one mouth,
+     CBZ.speech. The mouth is a live point on the band (it walks, it rides
+     off, it goes quiet the moment the band is gone from the island). ear is
+     wide open on purpose: the campaign camera is a lens over the column, and
+     CBZ.player.pos is the LAST battle's position, not where you stand now. */
+  let talkT = 0;
+  function mouthOf(b) {
+    if (b._mouth) return b._mouth;
+    b._mouth = {
+      get x() { return b.x; },
+      get z() { return b.z; },
+      get y() { return groundAt(b.x, b.z); },
+      get dead() { return S.bands.indexOf(b) < 0; },
+    };
+    return b._mouth;
+  }
+  function hush() { if (talkT) { clearTimeout(talkT); talkT = 0; } }
+  function talk(b, list) {
+    hush();
+    const SP = CBZ.speech;
+    if (!b || !list || !list.length || !SP || !SP.say) return;
+    const m = mouthOf(b), q = [];
+    for (let i = 0; i < list.length; i++) {
+      const bits = SP.pieces ? SP.pieces(list[i]) : [list[i]];
+      for (let k = 0; k < bits.length; k++) q.push(bits[k]);
+    }
+    let i = 0;
+    const next = function () {
+      talkT = 0;
+      if (i >= q.length) return;
+      const t = q[i++];
+      const secs = clamp(1.3 + t.length * 0.05, 1.8, 3.6);
+      safe(function () { SP.say(m, t, { secs: secs + 0.2, force: true, important: true, headY: 2.2, ear: 1e5 }); });
+      talkT = setTimeout(next, secs * 1000);
+    };
+    next();
+  }
+  /* PUBLISHED: army.js's encounter rail (a band answering DEMAND or HIRE)
+     speaks through the same mouth rather than typing a toast about it. */
+  W.talk = talk;
+  /* the mouths are campaign coordinates: a battle, the armoury or the end
+     screen must not inherit a line hanging over where a band used to be */
+  W.on("phase", function (t) {
+    if (t && t.to === "campaign") return;
+    hush();
+    if (CBZ.speech && CBZ.speech.clear) safe(CBZ.speech.clear);
+  });
 
   function showCard(card) {
     if (card.band && ctx && ctx.verbs) return showRail(card);
@@ -892,13 +943,13 @@
       '<div class="wl-ev">' +
       (card.tag ? '<div class="tag">' + esc(card.tag) + '</div>' : '') +
       '<h1 class="wl-h">' + card.title + '</h1>' +
-      (card.sub ? '<p class="wl-sub">' + esc(card.sub) + '</p>' : '') +
-      '<div class="wl-card"><div class="body">' + card.body + '</div></div>';
+      (card.sub ? '<p class="wl-sub">' + esc(sign(card.sub)) + '</p>' : '') +
+      (card.body ? '<div class="wl-card"><div class="body">' + card.body + '</div></div>' : '');
     for (let i = 0; i < choices.length; i++) {
       const c = choices[i];
       html += '<button class="wl-btn wl-pick ' + (c.cls || "") + '" id="evP' + i + '"' +
         (c.enabled === false ? " disabled" : "") + '>' + esc(c.label) +
-        (c.hint ? '<i>' + esc(c.hint) + '</i>' : '') + '</button>';
+        (c.hint ? '<i>' + esc(sign(c.hint)) + '</i>' : '') + '</button>';
     }
     html += '</div>';
     takeScreen(html);
@@ -920,6 +971,7 @@
   function closeCard() {
     const was = CARD;
     CARD = null;
+    hush();
     if (was && was.rail) {
       if (ctx && ctx.closeVerbs) ctx.closeVerbs();
       safe(function () { settleCast(was); });
@@ -1768,6 +1820,9 @@
   function strongest(men, n) {
     return men.slice().sort(function (a, b) { return powerOf(b) - powerOf(a); }).slice(0, n);
   }
+  /* SIGNAGE LAW (owner): no em dashes or middle dots on screen. The library
+     writes its chips as "+3 MEN · +$40/DAY"; they read as a comma list. */
+  function sign(t) { return String(t).replace(/\s*(?:\u00b7|\u2014|\u2013)\s*/g, ", "); }
   function plainText(html) { return String(html || "").replace(/<[^>]*>/g, ""); }
 
   function bandById(id) {
@@ -1957,8 +2012,7 @@
       return {
         title: 'MEN WITH NO <em>FLAG</em>',
         sub: place().toUpperCase(),
-        body: n + ' men in the shade of a wrecked truck with their boots off. They deserted ' +
-              'from something and will not say what. They will march for food and a share.',
+        say: ["We left our last flag. Do not ask which one.", "Feed us and give us a share. We march."],
         band: b, bands: arg && arg.bands,
         choices: [
           { key: "take", label: "TAKE THEM ALL", cls: "hot",
@@ -2006,8 +2060,7 @@
       return {
         title: 'A <em>CARAVAN</em> AT THE EDGE OF THE PAN',
         sub: "SALT CROSSING",
-        body: 'Nine trucks and a man in a good coat. He wants your guns beside him across the ' +
-              'pan — ' + days + ' days out of your way, paid on arrival.',
+        say: ["I need your guns beside me across the pan.", days + " days out of your way. I pay when we arrive."],
         band: b, bands: arg && arg.bands,
         choices: [
           { key: "escort", label: "TAKE THE CONTRACT", cls: "hot",
@@ -2046,9 +2099,8 @@
       return {
         title: 'THE <em>WELL</em> AT ADH-DHIB',
         sub: "A VILLAGE WITH A PROBLEM",
-        body: 'Mud walls, forty families, one well. A bandit crew has taken a third of everything ' +
-              'since the spring. The headman offers ' + pay + ' of his young men if it stops. ' +
-              'About ' + raiders + ' of them.',
+        body: 'Mud walls, forty families, one well. A bandit crew of about ' + raiders +
+              ' has taken a third of everything since the spring.',
         choices: [
           { key: "take", label: "TAKE THE JOB", cls: "hot",
             hint: raiders + " BANDITS · +" + men(pay) + " AFTER",
@@ -2091,7 +2143,7 @@
         sub: place().toUpperCase(),
         body: 'A tarp under two inches of sand, weighted with rocks carried here. ' + n +
               ' guns: ' + esc(list) + '. The tyre tracks beside it are three days old and pointed ' +
-              'at us — about ' + owners + ' of them.',
+              'at us, about ' + owners + ' of them.',
         choices: [
           { key: "take", label: "TAKE IT AND GO", cls: "hot",
             hint: "+" + n + " GUNS · ~$" + worth,
@@ -2143,8 +2195,7 @@
       return {
         title: 'A <em>WARLORD</em> WITH A HOLE IN HIM',
         sub: "WHAT IS LEFT OF HIS COLUMN",
-        body: 'He is against a wheel with his hand pressed into his side and ' + n + ' men around ' +
-              'him who have not decided anything yet. Let him ride out alive and they are yours.',
+        say: ["I am finished. Let me ride out alive.", "Do that and my men are yours."],
         band: b, bands: arg && arg.bands,
         choices: [
           { key: "let", label: "LET HIM GO. TAKE HIS MEN.", cls: "hot",
@@ -2170,7 +2221,6 @@
               /* "THEY FIGHT HARDER" used to be a hint with nothing behind it.
                  They are standing right there; they fight NOW. */
               if (b) { b.men.splice(0, 1); puff(b.x, b.z, 1); churn(b.x, b.z, b.men.length, b.yaw || 0); attack(b, { chased: true }); }
-              else W.toast("THE ISLAND HEARD THAT", "bad");
             } },
           { key: "ride", label: "RIDE ON AND LEAVE HIM TO IT", cls: "ghost",
             hint: "HE LIVES ANYWAY",
@@ -2198,8 +2248,7 @@
       return {
         title: 'HE WANTS A <em>THIRD</em> OF THE ARMY',
         sub: (lead ? W.tier(lead.tier).label + " " + name : "A VETERAN").toUpperCase(),
-        body: esc(name) + ' has sat with the same twenty men every night for a week. This ' +
-              'morning: give him ' + n + ' men and he goes south. They are already packed.',
+        body: esc(name) + ' and ' + n + ' men are packed and facing south.',
         choices: [
           { key: "let", label: "LET THEM WALK", cls: "",
             hint: "-" + men(n),
@@ -2357,9 +2406,7 @@
       return {
         title: 'A COLUMN ON A <em>CHAIN</em>',
         sub: "SLAVERS, HEADING EAST",
-        body: n + ' men walking in a line with their wrists wired together and ' + guards +
-              ' men with rifles beside them. The chief wants to sell, and he is being very ' +
-              'polite about it.',
+        say: ["Good morning, friend. These " + n + " are for sale.", "$" + price + " and they walk wherever you like."],
         band: slavers, bands: arg && arg.bands,
         choices: [
           { key: "free", label: "CUT THEM LOOSE", cls: "hot",
@@ -2421,8 +2468,7 @@
       return {
         title: 'A MAN WITH A <em>CRATE</em>',
         sub: "GUN RUNNER",
-        body: 'One truck, one crate, one nervous man. ' + n + '× ' + esc(W.gunLabel(id)) +
-              ', still in grease, and he would like to be somewhere else by dark.',
+        say: [n + " guns, still in the grease. $" + ask + ".", "Quick, please. I want to be gone by dark."],
         band: b, bands: arg && arg.bands,
         choices: [
           { key: "buy", label: "BUY THE CRATE", cls: "hot", enabled: S.gold >= ask,
@@ -2470,8 +2516,7 @@
         sub: "ALONE, WITH A GOOD RIFLE",
         /* "and he says the second one is the better deal for you and he is
            right" was the card telling the player which button to press. */
-        body: 'He has a fire, a ' + esc(W.gunLabel(wid)) + ' cleaned to a shine, and thirty years ' +
-              'of somebody else\'s wars behind him. He will come — for money up front, or for a share.',
+        say: ["Thirty years of other men's wars.", "Money up front or a share. Either way, I come."],
         band: b, bands: arg && arg.bands,
         choices: [
           { key: "pay", label: "PAY HIM", cls: "hot", enabled: S.gold >= price,
@@ -2518,8 +2563,7 @@
       return {
         title: 'HE WANTS YOUR <em>PRISONERS</em>',
         sub: n + " MEN IN THE WIRE",
-        body: 'A quiet man with four trucks and a ledger. He will take all ' + n +
-              ' off your hands at $' + worth + ' and does not want to discuss what for.',
+        say: ["I will take all " + n + " of them. $" + worth + ".", "Do not ask me what for."],
         band: b, bands: arg && arg.bands,
         choices: [
           { key: "sell", label: "SELL THEM ALL", cls: "bad",
@@ -2579,9 +2623,7 @@
       return {
         title: 'A <em>TOLL</em> AT THE NARROWS',
         sub: place().toUpperCase(),
-        body: 'The only way through the rock for six kilometres, and ' + n + ' men are sitting on ' +
-              'both sides of it with a truck across the gap. The price is $' + toll +
-              ' and the man saying it is not the one holding the machine gun.',
+        say: ["Only road through the rock. $" + toll + " to pass.", "Pay the toll or turn around."],
         band: b, bands: arg && arg.bands,
         choices: [
           { key: "pay", label: "PAY THE TOLL", cls: "", enabled: S.gold >= toll,
@@ -2627,15 +2669,11 @@
       const n = W.irange(2, 7);
       const guns = [];
       for (let i = 0; i < n; i++) guns.push(gunFor(0.3));
-      const fallen = ev().fallen;
-      const ghost = fallen.length ? fallen[Math.floor(W.rnd() * fallen.length)] : null;
       return {
         title: 'SOMEBODY ELSE\'S <em>WAR</em>',
         sub: "A FIELD OF OLD BONES",
         body: 'Two hundred men died here and nobody carried them off. The sand has taken most of ' +
-              'it. There are ' + n + ' rifles still in it that will fire.' +
-              (ghost ? ' One of your men stops and says he knew a ' + esc(ghost.name.split(" ")[1] || ghost.name) +
-                       ' once. He did not, but you let him say it.' : ''),
+              'it. There are ' + n + ' rifles still in it that will fire.',
         choices: [
           { key: "dig", label: "DIG", cls: "hot",
             hint: "+" + n + " GUNS · AN HOUR OR TWO",
@@ -2700,12 +2738,7 @@
       return {
         title: 'HE WANTS <em>YOU</em>, NOT YOUR ARMY',
         sub: n + " MEN WATCHING",
-        body: 'Their biggest man walks out ahead of the line, puts his rifle in the sand and ' +
-              'shouts across the gap that if you beat him his ' + n +
-              ' men are yours, and if he beats you they take what you are carrying. ' +
-              /* "You would win this about 61 times in a hundred" was the odds
-                 printed in English immediately above a button chipped "61%". */
-              'Your men are already forming a circle.',
+        say: ["You and me. Beat me and my " + n + " men are yours.", "Lose and we take what you carry."],
         band: champ || line, bands: arg && arg.bands,
         choices: [
           { key: "fight", label: "WALK OUT", cls: "hot",
@@ -2815,8 +2848,7 @@
       return {
         title: 'HE HAS BEEN <em>WATCHING</em> YOU',
         sub: "A SERGEANT FROM SOMEBODY ELSE'S COLUMN",
-        body: 'He rode in alone with his hands up. His warlord has not paid anyone in nine days ' +
-              'and he can bring ' + n + ' men across tonight if there is money in it.',
+        say: ["My warlord has not paid us in nine days.", "Pay me and I bring " + n + " men over tonight."],
         band: b, bands: arg && arg.bands,
         choices: [
           { key: "pay", label: "PAY HIM", cls: "hot", enabled: S.gold >= price,
@@ -2891,9 +2923,7 @@
       return {
         title: esc(name) + ' SENDS A <em>RIDER</em>',
         sub: f.men + " MEN UNDER HIS BANNER",
-        body: 'The rider does not dismount. He says his warlord has been counting your column and ' +
-              'has decided you are worth talking to once. Pay $' + tribute + ' a season and ride ' +
-              'where you like. Refuse and he comes with everything he has.',
+        say: [name + " has been counting your column.", "Pay $" + tribute + " a season and ride where you like.", "Refuse and he comes with everything he has."],
         band: rider, bands: arg && arg.bands,
         choices: [
           { key: "pay", label: "PAY THE TRIBUTE", cls: "", enabled: S.gold >= tribute,
@@ -2920,8 +2950,9 @@
               S.fame += 12;
               W.log("sent " + name + "'s rider back on foot.", "good");
               loyMove(+11, "they have been waiting for you to say that");
-              W.toast(name.toUpperCase() + " IS COMING", "bad");
-              if (rider) rideOff(rider);                 // on foot, as promised
+              // the rider says the threat over his own head as he goes; the
+              // dust lines above are the columns turning. No toast.
+              if (rider) { talk(rider, ["Then he comes for you."]); rideOff(rider); }   // on foot, as promised
             } },
         ],
       };
@@ -3182,16 +3213,10 @@
       id: "mutiny", tag: "IT IS TONIGHT",
       title: '<em>MUTINY</em>',
       sub: cut.length + " AGAINST " + (S.army.length + 1),
-      /* THE BODY IS ONE LINE NOW. It used to describe the fire, the rifles and
-         which side of the fire each half of the army was standing on — all
-         three of which are now on the screen behind the card, drawn, in the
-         seconds before it goes up. What is left is the only thing the picture
-         cannot say. */
-      body: FLAG_NOSHOW
-        ? ('They came for the trucks first and then for you. ' + cut.length + ' men are on the ' +
-           'other side of the fire with the rifles you gave them, and ' + S.army.length +
-           ' are on this one.')
-        : 'Lose this one and there is nobody left to carry you off.',
+      /* NO BODY. The fire, the rifles and the two halves of the camp are drawn
+         behind the rail; the ringleader across the fire says the rest. */
+      band: b,
+      say: ["We are done taking your orders.", "Come and take the rifles back."],
       choices: [
         { key: "fight", label: "PUT IT DOWN", cls: "bad",
           hint: cut.length + " MEN · YOUR OWN",

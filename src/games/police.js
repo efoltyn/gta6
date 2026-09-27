@@ -182,7 +182,6 @@
   function bag() { return Sbag || (Sbag = C.state(() => ({ attempts: 0, wins: 0, partials: 0, busted: 0, bestTimeLeft: 0 }))); }
   function saveStats() { C && C.saveState(); }
   function fmtT(s) { s = Math.max(0, s); const m = Math.floor(s / 60), ss = Math.floor(s % 60); return String(m).padStart(2, "0") + ":" + String(ss).padStart(2, "0"); }
-  function feed(m, col) { C && C.hud.feed(m, col); }
   function toast(m) { C && C.hud.toast(m); }
 
   function freshRun() {
@@ -468,16 +467,16 @@
     cc.fillText("DUTY ROSTER", 24, 46);
     cc.font = "bold 19px Arial"; cc.fillStyle = "#9fb2c4"; cc.textAlign = "right";
     cc.fillText("SHIFT CHANGE " + fmtT(SHIFT_LEN - t), w - 24, 46);
-    const rows = [["CAGE", r.cage || " · AT COFFEE"], ["FRONT DESK", r.frontDesk], ["BAIL", r.bail || " · WINDOW SHUT"],
-      ["BULLPEN", r.bullpenDesk || " · OUT"], ["INTERROGATION", r.interrogation || " · EMPTY"], ["LOBBY", r.lobby], ["K-9", r.k9]];
+    const rows = [["CAGE", r.cage, "AT COFFEE"], ["FRONT DESK", r.frontDesk], ["BAIL", r.bail, "WINDOW SHUT"],
+      ["BULLPEN", r.bullpenDesk, "OUT"], ["INTERROGATION", r.interrogation, "EMPTY"], ["LOBBY", r.lobby], ["K-9", r.k9]];
     const top = 92, rh = 31;
     rows.forEach((row, i) => {
       const y = top + i * rh;
       if (i % 2 === 0) { cc.fillStyle = "rgba(255,255,255,.035)"; cc.fillRect(14, y - 20, w - 28, rh - 4); }
       cc.textAlign = "left"; cc.fillStyle = "#8fa0b2"; cc.font = "bold 17px Arial";
       cc.fillText(row[0], 26, y);
-      cc.textAlign = "right"; cc.fillStyle = row[1][0] === "—" ? "#e88a7a" : "#7fe8a8"; cc.font = "20px Arial";
-      cc.fillText(row[1], w - 26, y, w * 0.55);
+      cc.textAlign = "right"; cc.fillStyle = row[1] ? "#7fe8a8" : "#e88a7a"; cc.font = "20px Arial";
+      cc.fillText(row[1] || row[2] || "", w - 26, y, w * 0.55);
     });
     if (V.roster) V.roster.paint(); else if (V.rosterTex) V.rosterTex.needsUpdate = true;
   }
@@ -492,10 +491,10 @@
     cc.fillStyle = "rgba(232,178,58,.55)"; cc.fillRect(18, h - 30, w - 36, 3);   // engraved rule
     cc.textAlign = "center"; cc.textBaseline = "middle";
     if (clerk === "MERCER") { cc.fillStyle = "#e8b23a"; cc.font = "bold 58px Arial"; cc.fillText("SGT. MERCER", w / 2, h / 2 - 16, w - 44);
-      cc.fillStyle = "#9fb2c4"; cc.font = "24px Arial"; cc.fillText("EVIDENCE · 22 YRS", w / 2, h / 2 + 38); }
+      cc.fillStyle = "#9fb2c4"; cc.font = "24px Arial"; cc.fillText("EVIDENCE, 22 YEARS", w / 2, h / 2 + 38); }
     else if (clerk === "PYE") { cc.fillStyle = "#cdd8e2"; cc.font = "bold 58px Arial"; cc.fillText("OFC. PYE", w / 2, h / 2 - 16, w - 44);
-      cc.fillStyle = "#9fb2c4"; cc.font = "24px Arial"; cc.fillText("EVIDENCE · PROBATIONARY", w / 2, h / 2 + 38); }
-    else { cc.fillStyle = "#6d7f91"; cc.font = "bold 44px Arial"; cc.fillText(" · POST EMPTY · ", w / 2, h / 2); }
+      cc.fillStyle = "#9fb2c4"; cc.font = "24px Arial"; cc.fillText("EVIDENCE, PROBATIONARY", w / 2, h / 2 + 38); }
+    else { cc.fillStyle = "#6d7f91"; cc.font = "bold 44px Arial"; cc.fillText("POST EMPTY", w / 2, h / 2); }
     if (V.plate) V.plate.paint(); else if (V.plateTex) V.plateTex.needsUpdate = true;
   }
 
@@ -617,7 +616,6 @@
       return;
     }
     sergeantSay(pick(["Visiting hours. Bench is there.", "You lost? Bail window's the glass."]));
-    if (!S.password) feed("The sergeant's on the take, but you'd need the WORD. Ask Lou next door.", "#e8b23a");
   }
   function sergeantSay(l) { staffSay("KOWALCZYK", l); }
   // a staffer's words go over HIS head. No body in the room, no line.
@@ -626,9 +624,9 @@
   function openBondsman() {
     armStart();
     if (!S.password) staffSay("LOU", "The sarge is on the take. I sell the word.");
-    const owe = S.loanOwed ? "  ·  you owe Lou $" + S.loanOwed : "";
+    const owe = S.loanOwed ? "you owe Lou $" + S.loanOwed : "";
     C.hud.panel(
-      hHead("LOU'S BONDS", "both money paths start here" + owe) +
+      hHead("LOU'S BONDS", owe) +
       "<div style='font-size:13px;margin:6px 0;line-height:1.5'>Cash <b>" + fmtCash(C.wallet.cash()) + "</b></div>" +
       hBtn("word", S.password ? "WORD BOUGHT" : "Buy the word on the sarge. $" + BOND.PASSWORD, S.password ? "#26343c" : "#8a1f1f", S.password) +
       hBtn("loan", S.loanGot ? "LOAN TAKEN" : "Loan. $" + BOND.LOAN_NOW + " now, $" + BOND.LOAN_OWED + " owed", S.loanGot ? "#26343c" : "#1f4e8a", !!S.loanGot) +
@@ -643,16 +641,17 @@
 
   function openBail() {
     armStart();
-    if (S.chargesKicked || S.released || S.releaseAt != null) { feed("Bail's settled. Decker's release is in motion."); return; }
-    if (!rosterAt(S.t, S.lawyered).bail) { feed("Window shade is down: BACK IN 5.", "#e88a7a"); return; }
+    if (S.chargesKicked || S.released || S.releaseAt != null) { staffSay("DASILVA", "You're square. He's being processed."); return; }
+    if (!rosterAt(S.t, S.lawyered).bail) return;   // the shade is down; the window shows it
     const q = bailQuote(S.charges);
     if (q == null) { staffSay("DASILVA", "It's above my pay grade now. The DA has the file."); return; }
+    staffSay("DASILVA", S.talking ? "$" + q + ". And it goes up every word he says in that box." : "Bail's $" + q + ".");
     C.hud.panel(
       hHead("BAIL WINDOW", "charges: " + chargeTier(S.charges)) +
-      "<div style='font-size:13px;margin:6px 0;line-height:1.5'>Bail is <b>400 + 8 × charges</b> = <b>$" + q + "</b>, and it CLIMBS while he talks in the box (freeze it with the lawyer card). Cash <b>" + fmtCash(C.wallet.cash()) + "</b>.<br><span style='opacity:.8'>Cheaper but dirty: the sergeant kicks the whole sheet for the word + $" + BOND.BRIBE + ".</span></div>" +
+      "<div style='font-size:13px;margin:6px 0;line-height:1.5'>Bail <b>$" + q + "</b>. Cash <b>" + fmtCash(C.wallet.cash()) + "</b></div>" +
       hBtn("pay", "Post bail. $" + q, "#1c6b40") + hBtn("close", "Leave", "#26343c"),
       {
-        pay: () => { const qq = bailQuote(S.charges); if (qq == null) { feed("Too late. RICO referral. The window's shut."); return; }
+        pay: () => { const qq = bailQuote(S.charges); if (qq == null) { staffSay("DASILVA", "Too late. RICO referral. Window's shut."); C.hud.closePanel(); return; }
           if (!C.wallet.spend(qq, "Bail posted")) { staffSay("DASILVA", "Bail is $" + qq + ". You're short."); return; }
           S.paid += qq; S.bailPaid = true; startRelease(); toast("BAIL POSTED");
           staffSay("DASILVA", "Receipt. Processing takes a minute."); C.hud.closePanel(); },
@@ -664,28 +663,26 @@
     armStart(); if (S.inv.badge) return;
     const w = observed();
     if (w) { S.heat += 25; toast("HEY!"); w.say("Hands off the podium."); return; }
-    S.inv.badge = true; toast("BADGE LIFTED"); feed("A visitor-escort badge. Fools a rookie. Not a veteran.", "#e8b23a");
+    S.inv.badge = true; toast("BADGE LIFTED");
   }
   function stealCase() {
     armStart(); if (S.inv.caseNo) return;
     if (rosterAt(S.t, S.lawyered).bullpenDesk === "REYES") { staffSay("REYES", "That desk bites. Walk on."); S.heat += 8; return; }
     const w = observed();
     if (w) { S.heat += 25; toast("HEY!"); w.say("Step away from the detective's desk."); return; }
-    S.inv.caseNo = CASE_NO; toast("CASE " + CASE_NO); feed("Case number " + CASE_NO + " · the duffel's sign-out key.", "#e8b23a");
+    S.inv.caseNo = CASE_NO; toast("CASE " + CASE_NO);
   }
 
   function openEvidence() {
     armStart();
-    if (S.inv.duffel) { feed("The stash is already out. Get it to the beater."); return; }
+    if (S.inv.duffel) return;
     const clerk = rosterAt(S.t, S.lawyered).cage;
-    const blind = !clerk || flickerPhaseAt(S.t) === "dark";
+    if (clerk && flickerPhaseAt(S.t) !== "dark" && !S.cageOpen) clerkSay(clerk, S.inv.caseNo ? "Case number and a badge. Let's see 'em." : "Sign-out needs a case number and a badge, pal.");
     C.hud.panel(
-      hHead("EVIDENCE CAGE", clerk ? ("clerk: " + clerk + (flickerPhaseAt(S.t) === "dark" ? " · tube DARK" : "")) : "post empty, tube: " + flickerPhaseAt(S.t)) +
-      "<div style='font-size:13px;margin:6px 0;line-height:1.5'>Two ways past the gate:<br>• <b>SIGN IT OUT</b>, needs case# <b>" + (S.inv.caseNo || "—") + "</b> + a badge that satisfies the clerk (rookie takes the escort badge; the veteran does not. READ THE PLATE).<br>• <b>PICK THE LOCK</b>, only while the clerk can't see you (post empty OR the tube is dark). No signature, no chain.</div>" +
+      hHead("EVIDENCE CAGE", S.inv.caseNo ? "case " + S.inv.caseNo : "") +
       hBtn("sign", "Sign the duffel out", "#1f4e8a", !clerk || S.stashLoc !== "cage") +
       hBtn("pick", S.cageOpen ? "GATE OPEN" : "Pick the cage lock", "#8a1f1f", S.cageOpen || !S.inv.picks) +
-      "<div style='margin-top:8px'>" + hBtn("close", "Back off", "#26343c") + "</div>" +
-      (blind ? "<div style='font-size:11px;color:#7fe8a8;margin-top:4px'>The clerk can't see the gate right now.</div>" : ""),
+      "<div style='margin-top:8px'>" + hBtn("close", "Back off", "#26343c") + "</div>",
       {
         sign: () => signOut(),
         pick: () => { for (let i = 0; i < 3; i++) pickTick(1.0); openEvidence(); },
@@ -694,7 +691,7 @@
   }
   function signOut() {
     const clerk = rosterAt(S.t, S.lawyered).cage;
-    if (!clerk) { feed("Nobody at the log desk to sign anything."); return; }
+    if (!clerk) return;   // nobody at the log desk
     if (!S.inv.caseNo) { clerkSay(clerk, "Sign-out needs a case number and a badge, pal."); return; }
     const r = custodyCheck(S.inv.caseNo, S.inv.badge ? 1 : 0, S.t, S.lawyered);
     if (!r.accept) {
@@ -725,30 +722,29 @@
   function grabDuffel() {
     armStart(); if (!S.cageOpen || S.stashLoc !== "cage") return;
     S.inv.duffel = true; S.stashLoc = "hand"; if (V.duffel) V.duffel.visible = false;
-    toast("THE STASH"); feed("No signature. No chain. Like it was never here.", "#7fe8a8");
+    toast("THE STASH");
   }
 
   function slideLawyer() {
     armStart(); if (!S.inv.card || S.lawyered || S.deckerLoc !== "interrogation") return;
     S.inv.card = false; S.lawyered = true; S.talking = false;
     toast("HE SHUT UP"); if (V.decker && V.decker.say) V.decker.say("...I want my lawyer. Miss Ferro. Now.");
-    feed("Charge meter FROZEN, he's done talking.", "#7fe8a8");
   }
 
   function takeSteak() {
     armStart(); if (S.inv.steak || S.steakDeployed) return;
-    S.inv.steak = true; toast("STEAK"); feed("Somebody's Friday dinner. The dog needs it more.", "#e8b23a");
+    S.inv.steak = true; toast("STEAK");
   }
   function tossSteak() {
     armStart(); if (!S.inv.steak) return;
     S.inv.steak = false; S.steakDeployed = true; S.dogEatUntil = S.t + 90;
-    toast("GOOD BOY"); feed("REX buries his snout in the steak. The rear's open for ~90s.", "#7fe8a8");
+    toast("GOOD BOY");
   }
 
   function talkBoy() {
     armStart();
-    if (S.released && !S.following) { S.following = true; if (V.decker && V.decker.say) V.decker.say("Right behind you. Walk normal."); feed("Decker's on your shoulder, get to the beater.", "#7fe8a8"); return; }
-    if (V.decker && V.decker.say) V.decker.say(pick(["The sheet's on Reyes' desk. 4471-B.", "Read the plate at the cage before you sign.", "Don't bring metal past that gate."]));
+    if (S.released && !S.following) { S.following = true; if (V.decker && V.decker.say) V.decker.say("Right behind you. Walk normal."); return; }
+    if (V.decker && V.decker.say) V.decker.say(pick(["The sheet's on Reyes' desk. 4471-B.", "Read the plate at the cage before you sign.", "Don't bring metal past that gate.", "Lou next door sells the word on the sarge."]));
   }
 
   /* ---- release + endings ---- */
@@ -758,7 +754,7 @@
       S.released = true; S.releaseAt = null; S.talking = false;
       S.deckerLoc = "lobby";
       if (V.decker) { V.decker.pose && V.decker.pose("stand"); V.decker.at && V.decker.at(2.5, 3.0, Math.PI); }
-      toast("RELEASED"); feed("Decker walks out to the lobby. Say the word and he follows.", "#7fe8a8");
+      toast("RELEASED"); if (V.decker && V.decker.say) V.decker.say("I'm out. Get me outta here.");
     }
   }
   function finishRun() {
@@ -788,7 +784,7 @@
     S.detained = true; S.heat = 100;
     toast("BOOKED");
     setTimeout(() => { if (S && S.detained && !S.ended) {
-      S.ended = true; S.ending = "LOSE"; S.endWhy = "Cuffs, prints, cell B, you know how this ends. You've read the wall.";
+      S.ended = true; S.ending = "LOSE"; S.endWhy = "Cuffs, prints, cell B.";
       const s = bag(); s.busted++; saveStats(); openResult();
     } }, 1200);
   }
@@ -909,8 +905,8 @@
     const crossedIn = S.prevZ > 8 && pz <= 8 && px > -1.6 && px < 1.6;
     if (crossedIn && armedEntry(w) && (S.t - S.detectorTrippedT) > 3) {
       S.detectorTrippedT = S.t; S.heat = Math.min(100, S.heat + 45);
-      toast("DETECTOR · BEEP");
-      feed("Metal at the gate. Every eye in the lobby just found you. Stow it or lose the picks.", "#e88a7a");
+      toast("BEEP");
+      const eye = observed(); if (eye) eye.say("Whoa. What's on your hip?");
       if (V.detLamp) V.detLamp.material.color.setHex(0xc8402f);
       if (S.heat >= 100) detain();
     } else if (V.detLamp && (S.t - S.detectorTrippedT) > 1.5) V.detLamp.material.color.setHex(0x2fd06a);
@@ -932,8 +928,8 @@
     if (pz < -20.5 && dogD < 6.0) {
       const eating = S.t < S.dogEatUntil;
       if (k9Alarm({ duffel: S.inv.duffel, steakDeployed: S.steakDeployed, dogEating: eating })) {
-        toast("K-9 ALARM"); feed("REX lunges at the duffel, the whole precinct heard that.", "#e88a7a"); S.heat = 100; detain();
-      } else if (!S.inv.duffel && S.dogBarkCd <= 0) { S.dogBarkCd = 12; S.heat = Math.min(100, S.heat + 4); feed("REX barks you back from the kennel.", "#e88a7a"); }
+        toast("K-9 ALARM"); S.heat = 100; detain();
+      } else if (!S.inv.duffel && S.dogBarkCd <= 0) { S.dogBarkCd = 12; S.heat = Math.min(100, S.heat + 4); }
     }
   }
 
@@ -955,7 +951,7 @@
   function hBtn(act, label, bg, dis) { return "<span data-act='" + act + "' style='" + BTN + "background:" + (bg || "#1c6b40") + ";" + (dis ? "opacity:.4;pointer-events:none;" : "") + "'>" + label + "</span>"; }
   function hHead(title, sub) {
     return "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
-      "<b style='letter-spacing:2px;color:#e8b23a'>" + title + "</b><span style='opacity:.7;font-size:12px'>" + (sub || "") + " · Esc closes</span></div>";
+      "<b style='letter-spacing:2px;color:#e8b23a'>" + title + "</b><span style='opacity:.7;font-size:12px'>" + (sub || "") + "</span></div>";
   }
   function fmtCash(n) { return "$" + Math.round(n).toLocaleString("en-US"); }
 
@@ -966,29 +962,14 @@
     const title = kind === "WIN" ? "CLEAN GETAWAY" : kind === "LOSE" ? (S.detained ? "BOOKED" : "SHIFT CHANGE") : kind === "PARTIAL" ? "HALF A JOB" : "YOU WALKED";
     C.hud.panel(
       "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>" +
-        "<b style='letter-spacing:2px;color:" + col + ";font-size:18px'>PRECINCT 13 · " + title + "</b>" +
-        "<span style='opacity:.7;font-size:12px'>Esc closes</span></div>" +
+        "<b style='letter-spacing:2px;color:" + col + ";font-size:18px'>PRECINCT 13: " + title + "</b></div>" +
       "<div style='font-size:13px;margin:6px 0;line-height:1.5'>" + S.endWhy + "</div>" +
-      "<div style='font-size:13px;margin:8px 0'>Time left <b>" + fmtT(SHIFT_LEN - S.t) + "</b> · charges <b>" + Math.round(S.charges) + " (" + chargeTier(S.charges) + ")</b> · cash spent <b>" + fmtCash(statSpent()) + "</b> · heat peak <b>" + Math.round(S.heatPeak) + "</b><br>" +
-        "Record: " + s.wins + " clean · " + s.partials + " partial · " + s.busted + " booked" + "</div>" +
+      "<div style='font-size:13px;margin:8px 0'>Time left <b>" + fmtT(SHIFT_LEN - S.t) + "</b>, charges <b>" + Math.round(S.charges) + " (" + chargeTier(S.charges) + ")</b>, cash spent <b>" + fmtCash(statSpent()) + "</b>, heat peak <b>" + Math.round(S.heatPeak) + "</b><br>" +
+        "Record: " + s.wins + " clean, " + s.partials + " partial, " + s.busted + " booked" + "</div>" +
       hBtn("again", "Run it back", "#8a1f1f") + hBtn("close", "Leave", "#26343c"),
-      { again: () => { S = null; panelMode = null; C.hud.closePanel(); armStart(); openObjectives(); },
+      { again: () => { S = null; panelMode = null; C.hud.closePanel(); armStart(); },
         close: () => { S = null; panelMode = null; C.hud.closePanel(); } });
   }
-  function openObjectives() {
-    const r = S || freshRun();
-    C.hud.panel(
-      hHead("PRECINCT 13", "GET YOUR BOY OUT · shift change " + fmtT(SHIFT_LEN - r.t)) +
-      "<div style='font-size:13px;margin:6px 0;line-height:1.6'>" +
-        "① <b>FREE DECKER</b>, post steep cash bail at the window, OR buy the WORD from Lou and let the sergeant kick the sheet ($" + BOND.BRIBE + ").<br>" +
-        "② <b>RECOVER THE STASH</b>, sign the duffel out of the cage (case # from Reyes' file + a badge that satisfies the clerk. READ THE PLATE), or pick the gate while the clerk's blind.<br>" +
-        "• Freeze his rising charges with the lawyer card (viewing-window tray).<br>" +
-        "• Steak the K-9 before you carry the bag out the back.<br>" +
-        "• Nothing metal drawn through the front detector." +
-      "</div>" + hBtn("close", "Get to work", "#1c6b40"),
-      { close: () => C.hud.closePanel() });
-  }
-
   /* ==========================================================
      10. REGISTER — SITE venue (no police lotKind exists in towngen;
          city/police.js fronts intake at City Hall). Resolve to open

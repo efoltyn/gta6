@@ -653,32 +653,21 @@
   function stopOpts() {
     return [{ key: "e", label: "Holster", proposal: "Holster the weapon", fn: stopComply }];
   }
-  // The note is the OFFICER, not a restated button: how close he is to calling
-  // it in, and (once he is impatient) what walking off will now cost.
-  // THE CLOCK IS ON THE CARD. Ignoring a gun-stop used to end, silently, 16 s
-  // in, as a 2-star "Discharging a Firearm" charge nobody had fired. Now the
-  // officer's patience is a visible count, he says it three times out loud
-  // (STOP_WARN), and running out of it is the honest charge: brandishing, 1 star.
+  // NO NOTE ON THE CARD (2026-09-27). The card used to narrate the officer
+  // ("Open carry, he wants it away", "Officer is losing patience", a countdown).
+  // He says it himself now, over his own head (copSay + STOP_WARN), and his
+  // gun coming up is the clock. The card is the one HOLSTER button.
+  // THE CLOCK: ignoring a gun-stop runs out STOP_LIMIT seconds in, and the
+  // honest charge is brandishing, 1 star.
   const STOP_LIMIT = 14;
   const STOP_WARN = [
     { t: 5, line: "Put it away. Now." },
     { t: 9.5, line: "Last warning! Holster that weapon!" },
   ];
-  function stopLeft() { return Math.max(0, Math.ceil(STOP_LIMIT - STOP.t)); }
-  function stopNote() {
-    const s = STOP.susp, left = stopLeft();
-    if (s >= 2.2) return "FINAL WARNING: walk off now and he calls it in (" + left + ")";
-    if (STOP.t >= STOP_WARN[0].t) return "Holster it or he calls it in (" + left + ")";
-    if (s >= 1.2) return "Officer is losing patience";
-    return "Open carry, he wants it away";
-  }
-  // The ordinary city card now HIDES #interactNote (it has no question line to
-  // print any more), and it shares this element with us. Writing textContent
-  // alone would leave the officer's temper invisible behind that display:none
-  // for as long as the stand-off lasts, so re-assert the slot with the text.
-  function stopSetNote(text) {
-    STOP.note.textContent = text;
-    STOP.note.style.display = "";
+  function stopHideNote() {
+    if (!STOP.note) return;
+    STOP.note.textContent = "";
+    STOP.note.style.display = "none";
   }
   function stopRowsHTML() {
     if (CBZ.cityInteractRowsHTML) return CBZ.cityInteractRowsHTML(STOP.optList);
@@ -705,9 +694,8 @@
   function stopRefreshPanel() {
     const c = STOP.cop; if (!c) return;
     STOP.optList = stopOpts();
-    const note = stopNote();
     if (STOP.name) STOP.name.textContent = "" + (c.name || "Officer");
-    if (STOP.note) stopSetNote(note);
+    stopHideNote();
     STOP.key = "gunstop:" + (STOP.susp >= 2.2 ? 2 : STOP.susp >= 1.2 ? 1 : 0);
     stopStampRows(true);
   }
@@ -720,17 +708,18 @@
     // every walk-off you owe this officer seeds the next stop's suspicion, so
     // the second contact opens already impatient and the third gets called in
     // (see stopWalkOff for the arithmetic — it is the old row's, unchanged).
-    // The ladder the player can READ off stopNote(): first contact is a plain
-    // "he wants it away", the second opens at "losing patience", the third
-    // opens at "FINAL WARNING · walk off now and he calls it in" — and walking
-    // off then does exactly that. Capped below 3 so re-contact alone can never
+    // The ladder the player HEARS from him (the opening line below): first
+    // contact asks, the second is "you again", the third tells you walking
+    // off gets it called in, and walking off then does exactly that. Capped below 3 so re-contact alone can never
     // open a stop that is already over; only the refusal itself crosses.
     STOP.susp = Math.min(2.4, (cop._stopRefused || 0) * 1.25);
     cop.state = "gunstop"; cop.gunstop = true; cop.npcTarget = null; cop.curTarget = null;
     cop.searchT = 0; cop.giveUp = false; cop.arrestT = 0;
     cop._duty = null;            // the open carry outranks a move-along
     drawGun(cop);                // challenge stance: gun OUT but lowered (_gunLowered)
-    copSay(cop, "Hey! Hold up, is that a firearm? Put it away.", 2.4);
+    copSay(cop, STOP.susp >= 2.2 ? "You again. Walk off and I call it in."
+      : STOP.susp >= 1.2 ? "You again? Put that away."
+      : "Hey! Hold up, is that a firearm? Put it away.", 2.4);
     if (CBZ.sfx) CBZ.sfx("whoosh");
     stopRefreshPanel();
     stopShow();
@@ -888,8 +877,7 @@
       STOP.susp = Math.min(2.6, STOP.susp + dt * 0.10);
       const wantKey = "gunstop:" + (STOP.susp >= 2.2 ? 2 : STOP.susp >= 1.2 ? 1 : 0);
       if (wantKey !== STOP.key) stopRefreshPanel();
-      // he SAYS it, louder each time, on the screen over his head (the card's
-      // count is the second carrier; the @40 re-assert keeps it ticking).
+      // he SAYS it, louder each time, over his head: that is the only clock.
       const w = STOP_WARN[STOP.warnI | 0];
       if (w && STOP.t >= w.t) { STOP.warnI = (STOP.warnI | 0) + 1; copSay(c, w.line, 2.4); }
       // ignore him to the end of the count and he calls it in: brandishing,
@@ -948,7 +936,7 @@
     _stopReassertT = 0.1;
     // re-stamp the rows + force-show (interact.js @39 may have overwritten them)
     if (STOP.name) STOP.name.textContent = "" + (STOP.cop.name || "Officer");
-    if (STOP.note) stopSetNote(stopNote());
+    stopHideNote();
     if (STOP.optList) stopStampRows(false);
     stopShow();
   });

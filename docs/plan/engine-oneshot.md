@@ -252,7 +252,8 @@ card, payout), determinism (`hash01`/`seedStream`), touch controls, save.
 textures — 19 MB of audio alone.
 
 **Six finished short books already written.** `games/casino.html` ·
-`ocean.html` · `police.html` · `airport.html` · `racing.html` · `boxing.html`,
+`ocean.html` · `police.html` · `airport.html` · `racing.html` · `boxing.html`
+(casino/police/airport drafts deleted 2026-09-27; their logic lives in src/games/),
 790–2,171 lines each, complete arcs, self-contained. `GAMES-FIRST.md:88-90`
 demoted them to "design references" and `index.html` links to none of them.
 They are the regression corpus for §5 and, several of them, the fastest path to
@@ -270,7 +271,7 @@ CODE" comments demonstrably did nothing*).
    `src/games/_template.js` is a stub and nine authors still needed 800–1,800
    lines to find the shape. Copy-and-delete beats fill-in-the-blanks.
 2. **`tools/oneshot-check.mjs` — one gate every one-shot passes**, asserting
-   through the game's own `api` the way `tools/casino-check.mjs` already does:
+   through the game's own `api` the way the deleted `tools/casino-check.mjs` once did:
    boots · reaches playable · reaches a verdict from a rigged state ·
    deterministic per seed · console clean against baseline.
 3. **The gate carries a BUDGET, and the budget is the ratchet.** Requests to

@@ -401,7 +401,7 @@
     // the dock vendor — a REAL city ped (brain + wardrobe + death funnel),
     // pinned behind the counter. [E] Talk gives wreck/price flavour; the
     // Charter zone below is the actual economy panel.
-    if (ctx.npc) ctx.npc({
+    if (ctx.npc) V.mona = ctx.npc({
       role: "vendor", name: "Mona", outfit: "vendor",
       at: [kx + ux * 1.1, kz + uz * 1.1], face: Math.atan2(-ux, -uz),
       post: "pinned", pose: "stand", sayColor: "#9adcb8",
@@ -794,7 +794,6 @@
       const pl = preyPos();
       if (pl && d3(s.pos, pl) < 6) {
         chain.events.sharkBumps++;
-        if (!RT.simDrive) warn("Something just brushed you", true);
       }
     }
   }
@@ -854,7 +853,6 @@
     addBlood(s.pos.x, s.pos.z, 5, 50);
     if (by === "orca") {
       chain.events.orcaKills++;
-      if (!RT.simDrive) feedNear(s.pos, "AN ORCA JUST KILLED A GREAT WHITE", 200);
     }
   }
   function updateShark(s, dt) {
@@ -941,7 +939,7 @@
     const ref = refPos();
     const nearP = d2(pod.members[0].pos.x, pod.members[0].pos.z, ref.x, ref.z) < 85 && pod.leaveT <= 0;
     if (pod.leaveT > 0) pod.leaveT -= dt;
-    if (nearP && !pod.escorting) { pod.escorting = true; if (RT.diving && !RT.simDrive) C.hud.toast("A dolphin pod is escorting you"); }
+    if (nearP && !pod.escorting) { pod.escorting = true; }
     if (!nearP) pod.escorting = false;
     let cx, cz;
     if (pod.escorting) { cx = ref.x; cz = ref.z; }
@@ -972,7 +970,6 @@
             // had the diver in its jaws, make it let go (see sharkFlee).
             s.aggr = 0; s.calmT = 7; sharkFlee(s, m.pos, 6);
             chain.events.dolphinRepels++;
-            if (!RT.simDrive) feedNear(s.pos, "A dolphin drove the shark off!", 160);
             m.charging = null; m.chargeCd = 3;
           }
           clampSwim(m); m.tailT += dt * 9;
@@ -1011,7 +1008,6 @@
       chain.orcas.push(o); arr.push(o);
     }
     chain.orcaHere = true;
-    if (!RT.simDrive) C.hud.toast("ORCA POD INBOUND");
     return arr;
   }
   function updateOrca(o, dt) {
@@ -1065,7 +1061,6 @@
       pos: { x: T.x + 85, y: floorY(T.x + 85, T.z) + 9, z: T.z },
       yaw: 0, pitch: 0, heading: 0, tailT: 0, hunt: "rush",
       phase: "lurk", lurkT: 0, runCd: 4, enraged: false, running: false, passHit: false, alive: true };
-    if (!RT.simDrive) C.hud.toast("SOMETHING ENORMOUS IS MOVING BELOW");
     return chain.meg;
   }
   // the seize the meg offers on a pass. Built once; the jaw is this creature's
@@ -1092,10 +1087,10 @@
       m.lurkT += dt;
       const a = simT * 0.11, r = 85;
       steer(m, T.x + Math.sin(a) * r, floorY(T.x, T.z) + 11, T.z + Math.cos(a) * r, 6, 0.8, dt);
-      if (inTrench && (RT.goldGrabbed || m.lurkT > 16)) { m.phase = "run"; m.runCd = 2.5; if (!RT.simDrive) C.hud.toast("IT HAS FOUND YOU"); }
+      if (inTrench && (RT.goldGrabbed || m.lurkT > 16)) { m.phase = "run"; m.runCd = 2.5; }
     } else if (m.phase === "run") {
       m.runCd -= dt;
-      if (!inTrench && d2(ref.x, ref.z, T.x, T.z) > 300) { m.phase = "lurk"; m.lurkT = 0; if (!RT.simDrive) C.hud.toast("It broke off. It does not leave the trench."); }
+      if (!inTrench && d2(ref.x, ref.z, T.x, T.z) > 300) { m.phase = "lurk"; m.lurkT = 0; }
       else if (m.runCd <= 0 && !m.running) {
         const a = Math.random() * Math.PI * 2;
         m.pos.x = ref.x + Math.sin(a) * 70; m.pos.z = ref.z + Math.cos(a) * 70; m.pos.y = ref.y || SEA_Y() - 4;
@@ -1210,14 +1205,10 @@
     const swimming = CBZ.citySwimming ? CBZ.citySwimming() : (P._swim === true);
     return swimming && insideBounds(P.pos.x, P.pos.z);
   }
-  function feedNear(p, msg, r) { const P = CBZ.player; if (P && d2(P.pos.x, P.pos.z, p.x, p.z) < (r || 180)) C.hud.toast(msg); }
-  function warn(msg, scary) { C.hud.feed(msg, scary ? "#ff5a4a" : "#9adcb8"); }
   function hurtDiver(dmg, from, reason) {
     if (RT.hurtCd > 0) return; RT.hurtCd = 0.4;
     if (CBZ.cityHurtPlayer && CBZ.player) CBZ.cityHurtPlayer(dmg, from ? from.x : null, from ? from.z : null, reason, false, null, false);
-    else warn(reason, true);
-    C.hud.feed(reason, "#ff5a4a");
-    if (CBZ.player && CBZ.player.hp != null && CBZ.player.hp < 22 && !CBZ.player.dead) dragAshore("Dragged ashore, the water nearly took you.");
+    if (CBZ.player && CBZ.player.hp != null && CBZ.player.hp < 22 && !CBZ.player.dead) dragAshore("");
   }
   function dragAshore(reason) {
     const P = CBZ.player; if (!P) return;
@@ -1227,7 +1218,7 @@
     if (CBZ.playerChar) CBZ.playerChar.swimming = false;
     if (P.stamina != null) P.stamina = (P.maxStamina != null ? P.maxStamina : 100);
     RT.o2 = o2cap(); RT.diving = false;
-    C.hud.toast(reason);
+    if (reason) C.hud.toast(reason);
   }
 
   function salvageTick(dt) {
@@ -1242,7 +1233,7 @@
       if (RT.o2 <= 0 && RT.drownT === 0) {} // (hurtDiver may already drag ashore)
     } else {
       RT.drownT = 0;
-      if (RT.o2 < 20 && RT.warnCd <= 0) { RT.warnCd = 4; C.hud.feed("Air low · " + Math.ceil(RT.o2) + "s. Head for the dock.", "#f0a028"); }
+      if (RT.o2 < 20 && RT.warnCd <= 0) { RT.warnCd = 4; C.hud.toast("AIR " + Math.ceil(RT.o2) + "s"); }
     }
     // salvage: work a buoy you're near that still has crates
     for (const w of V.wrecks) {
@@ -1255,8 +1246,8 @@
           const gold = w.gold && w.crates === 0;
           const v = (gold ? GOLD_VALUE : w.val) * (night ? 2 : 1);
           bag().cargo.push({ v, gold, night }); save();
-          if (gold) { RT.goldGrabbed = true; forceMeg(); C.hud.toast("THE AURORA GOLD IS YOURS · NOW SURVIVE"); }
-          else C.hud.feed("+$" + v + " salvage in the hold" + (night ? " (night x2)" : ""), "#ffd166");
+          if (gold) { RT.goldGrabbed = true; forceMeg(); C.hud.toast("THE AURORA GOLD"); }
+          else C.hud.toast("+$" + v + (night ? " (night x2)" : ""));
         }
       } else w.workT = 0;
     }
@@ -1268,22 +1259,20 @@
     if (CBZ.keys && !CBZ.keys["c"]) RT._cLatch = false;
   }
   function fireHarpoon() {
-    if (bag().bolts <= 0) { C.hud.feed("Out of harpoon bolts, buy more at the kiosk", "#f0a028"); return; }
+    if (bag().bolts <= 0) { C.hud.toast("NO BOLTS"); return; }
     const P = CBZ.player; let best = null, bd = 26;
     for (const s of chain.sharks) { if (!s.alive) continue; const dd = d3(s.pos, P.pos); if (dd < bd) { bd = dd; best = s; } }
-    if (!best) { C.hud.feed("Harpoon fired, nothing in range", "#9adcb8"); return; }
+    if (!best) return;
     bag().bolts--; save();
     best.hp--; sharkFlee(best, P.pos, 5);
     addBlood(best.pos.x, best.pos.z, 2, 35);
-    if (best.hp <= 0) { killShark(best, "bolt"); chain.sharkTimer = Math.min(chain.sharkTimer, 8); C.hud.feed("Shark killed, the blood is calling MORE", "#ff5a4a"); }
-    else C.hud.feed("Harpoon hit, it's bleeding and fleeing", "#9adcb8");
+    if (best.hp <= 0) { killShark(best, "bolt"); chain.sharkTimer = Math.min(chain.sharkTimer, 8); C.hud.toast("SHARK KILLED"); }
   }
   function throwChum() {
-    if (bag().chum <= 0) { C.hud.feed("No chum left, buy at the kiosk", "#f0a028"); return; }
+    if (bag().chum <= 0) { C.hud.toast("NO CHUM"); return; }
     bag().chum--; save();
     const P = CBZ.player, hx = Math.sin(RT.sharkYaw || 0), hz = Math.cos(RT.sharkYaw || 0);
     addBlood(P.pos.x + hx * 16, P.pos.z + hz * 16, 4, 70);
-    C.hud.toast("Chum in the water, sharks will come THERE, not here");
   }
 
   function sharkRoleTick(dt) {
@@ -1302,7 +1291,7 @@
     // EAT: bait balls and seals within range → score
     RT.fedCd -= dt;
     for (const s of chain.schools) {
-      if (d2(P.pos.x, P.pos.z, s.x, s.z) < 8 && RT.fedCd <= 0) { s.scatter = 1; RT.fedCd = 0.8; RT.score += 60; chain.events.playerFed++; C.hud.feed("Fed on the bait ball  +60", "#9adcb8"); }
+      if (d2(P.pos.x, P.pos.z, s.x, s.z) < 8 && RT.fedCd <= 0) { s.scatter = 1; RT.fedCd = 0.8; RT.score += 60; chain.events.playerFed++; C.hud.toast("+60"); }
     }
     for (let i = chain.seals.length - 1; i >= 0; i--) {
       const sl = chain.seals[i];
@@ -1315,21 +1304,21 @@
     if (d2(P.pos.x, P.pos.z, V.origin.x, V.origin.z) < 60 && RT.harpoonCd <= 0) {
       RT.harpoonCd = 6;
       if (CBZ.cityHurtPlayer && CBZ.player) CBZ.cityHurtPlayer(18, V.origin.x, V.origin.z, "the harpooner tagged you", false, null, false);
-      C.hud.feed("HARPOON from the dock, get to deep water!", "#ff5a4a");
+      if (CBZ.speech && CBZ.speech.say) CBZ.speech.say({ x: V.origin.x, y: (CBZ.floorAt ? (CBZ.floorAt(V.origin.x, V.origin.z) || 0) : 0) + 2, z: V.origin.z }, "Shark at the dock! Harpoon it!", { important: true });
     }
   }
   function endSharkRun(reason) {
     if (RT.score > bag().hiShark) { bag().hiShark = RT.score; save(); }
-    C.hud.toast(reason + " · score " + RT.score + (RT.score >= bag().hiShark ? " (BEST)" : ""));
+    C.hud.toast(reason + ", score " + RT.score + (RT.score >= bag().hiShark ? " (BEST)" : ""));
     RT.score = 0;
-    dragAshore("Washed up on the dock.");
+    dragAshore("");
   }
   function detachShark() { if (RT.playerShark) { release("shark", RT.playerShark); RT.playerShark = null; } if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = true; }
 
   /* ============================== economy =============================== */
   function sellSalvage(ctx) {
     const cargo = bag().cargo;
-    if (!cargo.length) { ctx.hud.feed("Nothing in the hold to sell", "#f0a028"); return; }
+    if (!cargo.length) return;
     const v = cargoValue(); const hadGold = cargo.some((c) => c.gold);
     ctx.wallet.give(v, "Salvage sold"); bag().cargo = []; if (v > bag().hiSalvage) bag().hiSalvage = v; save();
     if (hadGold) ctx.hud.toast("THE AURORA GOLD IS CASHED OUT. $" + v.toLocaleString());
@@ -1349,21 +1338,18 @@
       "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
         "<b style='letter-spacing:2px;color:#f0a028;font-size:17px'>DEAD WATER. CHARTER</b>" +
         "<span style='font-size:13px'>cash <b style='color:#ffd451'>$" + C.wallet.cash().toLocaleString() + "</b></span></div>" +
-      "<div style='font-size:12px;opacity:.85;margin-bottom:6px'>Pick your role in the water:</div>" +
       "<div>" +
         "<span data-act='roleSalvage' style='" + BTN + (RT.role === "salvage" ? on : off) + "'>SALVAGE DIVER</span>" +
         "<span data-act='roleShark' style='" + BTN + (RT.role === "shark" ? on : off) + "'>THE SHARK</span>" +
       "</div>" +
       (RT.role === "salvage"
-        ? "<div style='font-size:12px;opacity:.85;margin:8px 0 4px'>Swim the buoys for cash. Air drains with depth, surface at the dock. " +
-          "F harpoon · C chum. Hold: <b>$" + cargoValue().toLocaleString() + "</b> · best haul <b>$" + s.hiSalvage.toLocaleString() + "</b></div>" +
+        ? "<div style='font-size:12px;opacity:.85;margin:8px 0 4px'>F harpoon, C chum. Hold <b>$" + cargoValue().toLocaleString() + "</b>, best haul <b>$" + s.hiSalvage.toLocaleString() + "</b></div>" +
           "<div>" +
           "<span data-act='buyO2' style='" + BTN + (canO2 ? on : off) + "'>O2 tank → " + (nextO2 ? nextO2 + "s ($" + costO2 + ")" : "MAX") + "</span>" +
           "<span data-act='buyBolt' style='" + BTN + (canBolt ? on : off) + "'>Harpoon x4 ($" + BOLT_COST + "), have " + s.bolts + "</span>" +
           "<span data-act='buyChum' style='" + BTN + (canChum ? on : off) + "'>Chum x1 ($" + CHUM_COST + "), have " + s.chum + "</span>" +
           "</div>"
-        : "<div style='font-size:12px;opacity:.85;margin:8px 0 4px'>You ARE the great white. Eat bait balls and seals for score. " +
-          "Dodge the orca pod. Flee the harpoon near the dock. Best score: <b>" + s.hiShark + "</b></div>") +
+        : "<div style='font-size:12px;opacity:.85;margin:8px 0 4px'>Best score <b>" + s.hiShark + "</b></div>") +
       "<div style='margin-top:8px'><span data-act='sell' style='" + BTN + off + "'>Sell salvage</span>" +
         "<span data-act='close' style='" + BTN + off + "'>Close (Esc)</span></div>";
     C.hud.panel(html, {

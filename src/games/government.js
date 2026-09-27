@@ -159,6 +159,8 @@
   function arenaLive() { return !!(CBZ.city && CBZ.city.arena && CBZ.city.arena.root); }
   function worldOf(lx, lz) { const o = (V && V._venue && V._venue.origin) || { x: 0, z: 0 }; return { x: o.x + lx, z: o.z + lz }; }
   function fmt(n) { return "$" + Math.round(n).toLocaleString("en-US"); }
+  // a line goes over the SPEAKER's head (packages.js handle.say). No body, no line.
+  function sayBy(h, line) { if (h && h.say && line) { try { h.say(line); } catch (e) {} } }
   function shortName(n) { if (!n) return "?"; const p = String(n).trim().split(/\s+/); return p.length > 1 ? p[p.length - 1] : p[0]; }
   function clampNum(lo, hi, v) { return Math.max(lo, Math.min(hi, v)); }
   function clockStr() { const s = Math.max(0, Math.round(G.clockLeft)); return (s / 60 | 0) + ":" + ("0" + (s % 60)).slice(-2) + " to the gavel"; }
@@ -375,14 +377,14 @@
     cc.fillStyle = "#dce8f6"; cc.font = "700 42px " + FONT;
     cc.fillText("DOCKLANDS REZONING", 34, 52);
     cc.fillStyle = BC.dim; cc.font = "600 19px " + FONT;
-    cc.fillText("COUNCIL ROLL · LIVE WHIP COUNT", 36, 79);
+    cc.fillText("COUNCIL ROLL, LIVE WHIP COUNT", 36, 79);
     cc.textAlign = "right";
     cc.fillStyle = G.result === "win" ? BC.for : (G.result ? BC.against : BC.dim);
     cc.font = "700 22px " + FONT;
     cc.fillText(G.result ? resultLine().toUpperCase() : (G.active ? "SESSION IN PROGRESS" : "CHAMBER STANDING BY"), W - 34, 50);
     cc.fillStyle = G.scandal >= SCANDAL_CAP * 0.6 ? BC.against : BC.dim;
     cc.font = "600 18px " + FONT;
-    cc.fillText("SCANDAL " + Math.min(100, Math.round(G.scandal)) + "%  ·  LEDGER " + G.ledger.length, W - 34, 79);
+    cc.fillText("SCANDAL " + Math.min(100, Math.round(G.scandal)) + "%   LEDGER " + G.ledger.length, W - 34, 79);
 
     if (!COUNCIL.length) {
       cc.textAlign = "center"; cc.fillStyle = BC.none; cc.font = "600 30px " + FONT;
@@ -404,7 +406,7 @@
       // The stand-in note is SPELLED OUT: the old asterisk needed a legend the
       // board never had room to print, and this line was already free.
       cc.fillStyle = BC.sub; cc.font = "500 17px " + FONT;
-      cc.fillText(m.title + (m.real ? "" : " · stand-in") + (m.flippedBy ? "  —  " + m.flippedBy : ""), 90, y + 50, CHIPX - 110);
+      cc.fillText(m.title + (m.real ? "" : ", stand-in") + (m.flippedBy ? ", " + m.flippedBy : ""), 90, y + 50, CHIPX - 110);
       cc.globalAlpha = 0.16; cc.fillStyle = col; rrect(cc, CHIPX, y + 12, CHIPW, 34, 8); cc.fill(); cc.globalAlpha = 1;
       cc.strokeStyle = col; cc.lineWidth = 2; rrect(cc, CHIPX, y + 12, CHIPW, 34, 8); cc.stroke();
       cc.textAlign = "center"; cc.fillStyle = col; cc.font = "700 21px " + FONT;
@@ -439,7 +441,7 @@
   /* ---------------- panel UI (engine panel, data-act delegation) ---------- */
   const BTN = "display:inline-block;margin:3px 6px 3px 0;padding:9px 15px;border-radius:10px;cursor:pointer;font-weight:800;font-size:13px;user-select:none;box-shadow:0 3px 0 rgba(0,0,0,.4);";
   function btn(act, label, bg, dis) { return "<span data-act='" + act + "' style='" + BTN + "background:" + (bg || "#1c4b6b") + ";" + (dis ? "opacity:.4;pointer-events:none;" : "") + "'>" + label + "</span>"; }
-  function head(title, sub) { return "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'><b style='letter-spacing:2px;color:#8fc1ff'>" + title + "</b><span style='opacity:.7;font-size:12px'>" + (sub || "") + " · Esc closes</span></div>"; }
+  function head(title, sub) { return "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'><b style='letter-spacing:2px;color:#8fc1ff'>" + title + "</b><span style='opacity:.7;font-size:12px'>" + (sub || "") + "</span></div>"; }
   function stanceTag(s) { const col = s === "for" ? "#5fd08a" : s === "against" ? "#ff6a5e" : "#c9a24a"; return "<b style='color:" + col + "'>" + s.toUpperCase() + "</b>"; }
   function resultLine() {
     switch (G.result) {
@@ -477,7 +479,7 @@
     if (!G.active || G.result) return false;
     if (!playerChairsHere()) return false;
     const t = tallyOf(COUNCIL);
-    if (t.pass) { C.hud.feed("The room's already with you, just call the vote."); return false; }
+    if (t.pass) return false;
     const seat = playerSeat();
     // the whole cost, paid to the REAL simulation, before anything is gained.
     if (seat && seat.id && CBZ.approvalShock) {
@@ -491,7 +493,6 @@
     if (CBZ.city && CBZ.city.big) CBZ.city.big("REZONING GAVELLED THROUGH " + t.for + "–" + t.against + " AGAINST");
     if (CBZ.cityFeed) CBZ.cityFeed("The chair overrode the council on the Docklands rezoning. Two members walked out.", "#ff9a6a");
     creditCampaign("gavelled the Docklands rezoning through");
-    C.hud.feed("You gavel it through over the council's objection. It is legal. Nobody in this room will forget it.", "#e8c84a");
     return true;
   }
 
@@ -509,28 +510,25 @@
     if (!C) return;
     const t = tallyOf(COUNCIL);
     const chair = playerChairsHere();
-    let body = head("CITY HALL · DOCKLANDS REZONING", G.active ? clockStr() : (chair ? "you have the gavel" : "after dark"));
+    let body = head("CITY HALL, DOCKLANDS REZONING", G.active ? clockStr() : (chair ? "you have the gavel" : "after dark"));
     body += "<div style='margin:2px 0 8px;line-height:1.55'>";
-    body += "Tally: <b style='color:#5fd08a'>FOR " + t.for + "</b> · <b style='color:#ff6a5e'>AGAINST " + t.against + "</b> · <b style='color:#c9a24a'>UNDECIDED " + t.abstain + "</b>, need FOR &gt; AGAINST.<br>";
-    body += "Scandal <b style='color:" + (G.scandal >= SCANDAL_CAP * 0.6 ? "#ff6a5e" : "#9aa6bd") + "'>" + Math.min(100, Math.round(G.scandal)) + "%</b>/" + SCANDAL_CAP + " · Ledger <b>" + G.ledger.length + "</b> page(s) · Cash <b>" + fmt(C.wallet.cash()) + "</b>";
+    body += "Tally: <b style='color:#5fd08a'>FOR " + t.for + "</b>&nbsp;&nbsp;<b style='color:#ff6a5e'>AGAINST " + t.against + "</b>&nbsp;&nbsp;<b style='color:#c9a24a'>UNDECIDED " + t.abstain + "</b><br>";
+    body += "Scandal <b style='color:" + (G.scandal >= SCANDAL_CAP * 0.6 ? "#ff6a5e" : "#9aa6bd") + "'>" + Math.min(100, Math.round(G.scandal)) + "%</b>/" + SCANDAL_CAP + "&nbsp;&nbsp;Ledger <b>" + G.ledger.length + "</b>&nbsp;&nbsp;Cash <b>" + fmt(C.wallet.cash()) + "</b>";
     body += "</div>";
     if (G.result) {
       body += "<div style='margin:6px 0;font-weight:800;color:" + (G.result === "win" ? "#5fd08a" : "#ff6a5e") + "'>" + resultLine().toUpperCase() + "</div>";
       body += btn("close", "Leave", "#26343c");
     } else if (!G.active) {
-      if (startable()) body += "<div style='opacity:.85;margin-bottom:6px'>Convene the session and flip the room before the gavel. Bribe, trade favors, dig the records, or lean on the press, just don't let the auditor read your ledger.</div>" + btn("start", "CONVENE THE SESSION", "#1c6b40");
-      else body += "<div style='opacity:.7'>The chamber is dark tonight, the clerk's locked up. Come back tomorrow.</div>";
+      if (startable()) body += btn("start", "CONVENE THE SESSION", "#1c6b40");
+      else body += "<div style='opacity:.7'>Closed until tomorrow</div>";
       body += " " + btn("close", "Leave", "#26343c");
     } else {
-      body += "<div style='opacity:.8;font-size:12px;margin-bottom:6px'>Flip " + Math.max(0, shortfall()) + " more to carry it. Lobby councillors at their seats; the records room, the cabinets, the press and the shredder are down the halls.</div>";
       body += btn("callvote", "CALL THE VOTE NOW", "#c98f22");
       // THE CHAIR'S PREROGATIVE — only when the player genuinely holds this
       // jurisdiction's seat, and only when the room is actually against them
       // (otherwise it is not an override, it is just the vote).
       if (chair && !t.pass) {
-        body += btn("override", "GAVEL IT THROUGH ANYWAY", "#7c1626");
-        body += "<div style='opacity:.75;font-size:12px;margin:4px 0'>The chair can carry a bill the council rejected. It costs " +
-          CHAIR_OVERRIDE_APPROVAL + " points of your approval and it is remembered, the garrison reads that number before it obeys you.</div>";
+        body += btn("override", "GAVEL IT THROUGH ANYWAY (-" + CHAIR_OVERRIDE_APPROVAL + " approval)", "#7c1626");
       }
       body += btn("close", "Keep working", "#26343c");
     }
@@ -553,9 +551,9 @@
   function openClerkWindow() {
     if (!C) return;
     const R = (CBZ.cityRun && CBZ.cityRun.offices) ? CBZ.cityRun : null;
-    let body = head("THE CLERK'S WINDOW", "filings · candidacies · the ballot");
+    let body = head("THE CLERK'S WINDOW", "");
     if (!R) {
-      body += "<div style='opacity:.75;line-height:1.5'>The filing window is shuttered. A typed card behind the glass gives an office number and no hours.</div>";
+      body += "<div style='opacity:.75;line-height:1.5'>Shuttered</div>";
       C.hud.panel(body + btn("close", "Leave", "#26343c"), { close: function () { C.hud.closePanel(); } });
       return;
     }
@@ -575,8 +573,8 @@
       const need = (!canD && CBZ.cityPowerNeed) ? CBZ.cityPowerNeed("doctrine") : null;
       const govs = (CBZ.regimeDoctrines && CBZ.regimeDoctrines()) || [];
       let dbody = "<div style='margin:2px 0 8px;padding:6px 0;border-top:1px solid #2c3140;line-height:1.5'>" +
-        "You hold <b style='color:#8fe08a'>" + (seat.name || seat.id) + "</b>. A state can be REMADE by the person who holds it." +
-        (canD ? "" : "<br><span style='opacity:.75;font-size:12px'>Not yet · " + ((need && need.line) || "you need more behind you") + ".</span>") +
+        "You hold <b style='color:#8fe08a'>" + (seat.name || seat.id) + "</b>" +
+        (canD ? "" : "<br><span style='opacity:.75;font-size:12px'>Not yet: " + ((need && need.line) || "you need more behind you") + "</span>") +
         "</div>";
       for (let i = 0; i < govs.length; i++) {
         (function (gov, i) {
@@ -599,9 +597,8 @@
       const held = playerSeat();
       body += "<div style='margin:2px 0 8px;line-height:1.55'>You are <b style='color:#8fe08a'>on the ballot</b>" +
         (st.officeId ? " for <b>" + String(st.officeId) + "</b>" : "") + ".<br>" +
-        "Signatures <b>" + (st.sigCount | 0) + "</b> · war chest <b>" + fmt(st.warChest || 0) + "</b> · momentum <b>" + Math.round(st.momentum || 0) + "</b>" +
-        (st.scandal ? " · scandal <b style='color:#ff6a5e'>" + Math.round(st.scandal) + "</b>" : "") + "</div>";
-      if (held) body += "<div style='opacity:.8;margin-bottom:6px'>You already hold a seat. Defending it is the same ballot.</div>";
+        "Signatures <b>" + (st.sigCount | 0) + "</b>, war chest <b>" + fmt(st.warChest || 0) + "</b>, momentum <b>" + Math.round(st.momentum || 0) + "</b>" +
+        (st.scandal ? ", scandal <b style='color:#ff6a5e'>" + Math.round(st.scandal) + "</b>" : "") + "</div>";
       body += btn("withdraw", "Withdraw the papers", "#7c1626") + btn("close", "Leave", "#26343c");
       C.hud.panel(body, Object.assign({
         withdraw: function () { try { R.withdraw(); } catch (e) {} C.hud.closePanel(); },
@@ -620,9 +617,9 @@
         const ok = o.canFile !== false;
         body += "<div style='margin:6px 0;padding-top:5px;border-top:1px solid #2c3140'>" +
           "<b>" + (o.title || "Office") + " of " + (o.name || o.id) + "</b>" +
-          "<span style='opacity:.7;font-size:12px'> · fee " + fmt(o.fee || 0) +
-          " · " + (o.sigsNeeded | 0) + " signatures" +
-          (o.daysLeft != null ? " · " + o.daysLeft + "d to the ballot" : "") + "</span><br>" +
+          "<span style='opacity:.7;font-size:12px'>&nbsp;&nbsp;fee " + fmt(o.fee || 0) +
+          ", " + (o.sigsNeeded | 0) + " signatures" +
+          (o.daysLeft != null ? ", " + o.daysLeft + "d to the ballot" : "") + "</span><br>" +
           btn("file" + i, ok ? "FILE THE PAPERS" : "Can't file", ok ? "#1c6b40" : "#3a3f46", !ok) +
           (!ok && o.why ? "<span style='opacity:.7;font-size:12px'> " + o.why + "</span>" : "") +
           "</div>";
@@ -651,8 +648,9 @@
       C.hud.panel(body, { close: function () { C.hud.closePanel(); } });
       return;
     }
+    if (m.stance !== "for") sayBy(m.handle, G.dirt[m.key] ? "What do you want?" : ("Bring me " + m.want.name + " and we can talk."));
     if (m.stance === "for") {
-      body += "<div style='color:#5fd08a;margin-bottom:6px'>Already voting AYE on the rezoning.</div>";
+      body += "<div style='color:#5fd08a;margin-bottom:6px'>Voting AYE</div>";
     } else {
       body += btn("bribe", "Bribe " + fmt(BRIBE_COST) + " (leaves a ledger page)", "#7c1626", C.wallet.cash() < BRIBE_COST);
       if (G.satchel[m.want.id]) body += btn("trade", "Trade: give " + m.want.name, "#1c6b40");
@@ -670,9 +668,9 @@
 
   /* ================= THE LOBBY PRESS ===================================== */
   function openReporter() {
-    let body = head("THE LOBBY PRESS", "a leak flips a vote, and stains the room");
-    if (!G.active) { C.hud.panel(head("THE LOBBY PRESS", "quiet") + "<div style='opacity:.7'>No session tonight.</div>" + btn("close", "Back", "#26343c"), { close: function () { C.hud.closePanel(); } }); return; }
-    body += "<div style='margin:2px 0 8px'>Scandal <b style='color:" + (G.scandal >= SCANDAL_CAP * 0.6 ? "#ff6a5e" : "#9aa6bd") + "'>" + Math.min(100, Math.round(G.scandal)) + "%</b> / " + SCANDAL_CAP + "%, at the cap the chair postpones the vote (you lose).</div>";
+    let body = head("THE LOBBY PRESS", "");
+    if (!G.active) { sayBy(V && V.reporter, "Slow night. Nothing to print."); C.hud.panel(head("THE LOBBY PRESS", "") + btn("close", "Back", "#26343c"), { close: function () { C.hud.closePanel(); } }); return; }
+    body += "<div style='margin:2px 0 8px'>Scandal <b style='color:" + (G.scandal >= SCANDAL_CAP * 0.6 ? "#ff6a5e" : "#9aa6bd") + "'>" + Math.min(100, Math.round(G.scandal)) + "%</b> / " + SCANDAL_CAP + "%</div>";
     const h = { close: function () { C.hud.closePanel(); } };
     let any = false;
     for (let i = 0; i < COUNCIL.length; i++) {
@@ -680,7 +678,7 @@
       body += btn("leak" + i, "Leak " + shortName(m.name) + "'s secret (+" + SCANDAL_PER_LEAK + "% scandal)", "#7c1626");
       (function (i) { h["leak" + i] = function () { if (pressLeak(i)) openReporter(); }; })(i);
     }
-    if (!any) body += "<div style='color:#5fd08a'>Every holdout already folded.</div>";
+    if (!any) body += "<div style='color:#5fd08a'>No holdouts left</div>";
     body += "<br>" + btn("close", "Back", "#26343c");
     C.hud.panel(body, h);
   }
@@ -694,24 +692,24 @@
     if (!C.wallet.spend(BRIBE_COST, "Envelope to " + shortName(m.name))) return false;
     G.ledger.push({ member: i, name: m.name, amount: BRIBE_COST, day: worldDayNow() });
     flip(i, "bribed");
-    C.hud.feed("" + shortName(m.name) + " pockets the envelope. It's on the ledger now, shred it before the auditor reads it.", "#ffd166");
+    sayBy(m.handle, "I never saw you.");
     return true;
   }
   function tradeWant(i) {
     if (!G.active) return false;
     const m = COUNCIL[i]; if (!m || m.stance === "for") return false;
-    if (!G.satchel[m.want.id]) { C.hud.feed("You're not carrying " + m.want.name + ".", "#ff9aa2"); return false; }
+    if (!G.satchel[m.want.id]) return false;
     G.satchel[m.want.id] = false;
     flip(i, "traded");
-    C.hud.feed("You hand over " + m.want.name + ". " + shortName(m.name) + " is an AYE.", "#8fe08a");
+    sayBy(m.handle, "You'll have my vote.");
     return true;
   }
   function blackmailMember(i) {
     if (!G.active) return false;
     const m = COUNCIL[i]; if (!m || m.stance === "for") return false;
-    if (!G.dirt[m.key]) { C.hud.feed("You've got nothing on " + shortName(m.name) + " yet, try the records room.", "#ff9aa2"); return false; }
+    if (!G.dirt[m.key]) return false;
     flip(i, "blackmailed");
-    C.hud.feed("You slide the file across. " + shortName(m.name) + " won't cross you tonight.", "#8fe08a");
+    sayBy(m.handle, "Put that away. Aye. Fine.");
     return true;
   }
   function pressLeak(i) {
@@ -719,45 +717,45 @@
     const m = COUNCIL[i]; if (!m || m.stance === "for") return false;
     flip(i, "pressured");
     G.scandal += SCANDAL_PER_LEAK;
-    C.hud.feed("The reporter runs with " + shortName(m.name) + "'s " + m.fear + ". They flip to AYE, but the room reeks.", "#e8c84a");
+    sayBy(V && V.reporter, "That runs tonight.");
     redrawBoard();
     if (G.scandal >= SCANDAL_CAP) postpone();
     return true;
   }
   function pickUp(itemId) {
-    if (!G.active) { C.hud.feed("Nothing worth taking until the session convenes."); return false; }
-    if (G.satchel[itemId]) { C.hud.feed("Already in your bag."); return false; }
+    if (!G.active) return false;
+    if (G.satchel[itemId]) return false;
     G.satchel[itemId] = true;
     const it = WANT_ITEMS.filter(function (w) { return w.id === itemId; })[0];
-    C.hud.feed("You take " + (it ? it.name : "the item") + ".", "#cfe8ff");
+    C.hud.toast((it ? it.name : "the item").toUpperCase());
     return true;
   }
   function searchShelf(i) {
     if (!V || !V.shelves) return false;
     const sh = V.shelves[i]; if (!sh) return false;
-    if (!G.active) { C.hud.feed("The records room is locked until the session convenes."); return false; }
-    if (sh.searched) { C.hud.feed("You've already turned this shelf over."); return false; }
+    if (!G.active) return false;
+    if (sh.searched) return false;
     sh.searched = true;
     if (sh.member >= 0 && COUNCIL[sh.member]) {
       const m = COUNCIL[sh.member]; G.dirt[m.key] = true; m.dirtLine = sh.line;
-      C.hud.feed("Buried in the files: " + sh.line + " · on " + m.name + ".", "#ffd166");
+      C.hud.toast("FILE ON " + shortName(m.name).toUpperCase());
       return true;
     }
-    C.hud.feed("Dust, old zoning maps, nothing you can use.");
     return false;
   }
   function shredPage() {
     if (!G) return { cleared: true, jammed: false };
-    if (G.ledger.length === 0) { C.hud.feed("The ledger's already clean."); return { cleared: true, jammed: false }; }
+    if (G.ledger.length === 0) return { cleared: true, jammed: false };
     const n = G.ledger.length; G.ledger.length = 0;      // the page goes through — shred ALWAYS clears
     const jam = Math.random() < JAM_CHANCE;              // runtime FX RNG is allowed
     if (jam) {
       G.scandal += JAM_SCANDAL; pullGuardToShredder();
-      C.hud.feed("The shredder JAMS, a horrible grinding shriek. The desk guard is coming over.", "#ff9aa2");
+      C.hud.toast("JAMMED");
+      sayBy(V && V.guard, "Hey! What's grinding over there?");
       redrawBoard();
       if (G.active && G.scandal >= SCANDAL_CAP) postpone();
     } else {
-      C.hud.feed("" + n + " ledger page(s) shredded, clean and quiet.", "#8fe08a");
+      C.hud.toast("SHREDDED");
     }
     return { cleared: true, jammed: jam };
   }
@@ -776,21 +774,19 @@
     if (!G || G.result) return;
     G.active = false; G.voted = true; G.result = "lose:indicted";
     setCooldown(); redrawBoard();
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("INDICTED · THE AUDITOR FOUND THE LEDGER");
-    C.hud.feed("The auditor photographs your ledger page. The rezoning is dead and so is your night.", "#ff6a5e");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("INDICTED");
+    sayBy(V && V.auditor, "I'll be taking a copy of this page.");
   }
   function postpone() {
     if (!G || G.result) return;
     G.active = false; G.voted = true; G.result = "lose:scandal";
     setCooldown(); redrawBoard();
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("VOTE POSTPONED · SCANDAL ENGULFS THE CHAMBER");
-    C.hud.feed("Too much stink. The chair gavels the session closed, the rezoning is tabled indefinitely.", "#ff6a5e");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("VOTE POSTPONED");
   }
   function win(t) {
     G.result = "win";
     C.wallet.give(WIN_PAYOUT, "Docklands rezoning, developer kickback");
     if (CBZ.city && CBZ.city.big) CBZ.city.big("DOCKLANDS REZONING PASSES " + t.for + "–" + t.against);
-    C.hud.feed("The gavel falls. Rezoning carries " + t.for + "–" + t.against + " · the Docklands waterfront is your crew's turf now.", "#8fe08a");
     // A bill you carried on a clean majority while you hold the seat is the
     // one thing in this room that BUYS approval instead of spending it — and
     // only when the room genuinely voted for it. Real number, real system.
@@ -801,7 +797,6 @@
   function lose(t) {
     G.result = t.for === t.against ? "lose:tie" : "lose:vote";
     if (CBZ.city && CBZ.city.big) CBZ.city.big("REZONING FAILS " + t.for + "–" + t.against);
-    C.hud.feed("" + (t.for === t.against ? "Deadlocked " + t.for + "–" + t.against + " · a tie fails." : "Rezoning fails " + t.for + "–" + t.against + ".") + " The Docklands stay as they are.", "#ff6a5e");
   }
   // the gavel: a dirty ledger indicts first; otherwise roll call → result.
   function gavel(trigger) {
@@ -819,10 +814,10 @@
     const lines = COUNCIL.map(function (m) { return { name: shortName(m.name), vote: m.stance === "for" ? "AYE" : m.stance === "against" ? "NAY" : "ABSTAIN" }; });
     let shown = 0;
     function render() {
-      let body = head("ROLL CALL · DOCKLANDS REZONING", "the gavel");
+      let body = head("ROLL CALL, DOCKLANDS REZONING", "");
       for (let i = 0; i < shown; i++) {
         const L = lines[i], col = L.vote === "AYE" ? "#5fd08a" : L.vote === "NAY" ? "#ff6a5e" : "#c9a24a";
-        body += "<div style='margin:2px 0'>" + (i + 1) + ". " + L.name + " · <b style='color:" + col + "'>" + L.vote + "</b></div>";
+        body += "<div style='margin:2px 0'>" + (i + 1) + ". " + L.name + "&nbsp;&nbsp;<b style='color:" + col + "'>" + L.vote + "</b></div>";
       }
       if (shown >= lines.length) {
         body += "<div style='margin:8px 0;font-weight:800;color:" + (t.pass ? "#8fe08a" : "#ff6a5e") + "'>" + (t.pass ? "CARRIED " + t.for + "–" + t.against : "FAILED " + t.for + "–" + t.against) + "</div>" + btn("close", "Done", "#26343c");
@@ -842,9 +837,9 @@
 
   function startNight(opts) {
     if (!C) return false;
-    if (!ensureCouncil()) { C.hud.feed("The council hasn't taken their seats yet."); return false; }
+    if (!ensureCouncil()) return false;
     const force = opts && opts.force;
-    if (!force && !startable()) { C.hud.feed("Not tonight, the chamber's on cooldown."); return false; }
+    if (!force && !startable()) return false;
     for (let i = 0; i < COUNCIL.length; i++) { const m = COUNCIL[i]; m.stance = m.baseStance; m.flippedBy = null; m.dirtLine = null; }
     if (V.shelves) for (let i = 0; i < V.shelves.length; i++) V.shelves[i].searched = false;
     G = idleGame(); G.active = true; G.clockLeft = NIGHT_SECONDS;
@@ -860,9 +855,7 @@
     }
     V.wpIdx = 0; V.guardAlertT = 0;
     redrawBoard();
-    if (banked) C.hud.feed("You came in with " + banked + " file(s) out of the archives. Someone at that bench knows it.", "#ffd166");
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("CITY HALL AFTER DARK · PASS THE DOCKLANDS REZONING BY THE GAVEL");
-    C.hud.feed("Session convened. FOR must beat AGAINST when the gavel falls, flip " + Math.max(0, shortfall()) + " more. The auditor is on her rounds.", "#8fc1ff");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("PASS THE DOCKLANDS REZONING");
     return true;
   }
 
@@ -888,7 +881,7 @@
       if (wp.desk && G.active && !G.result) auditorCheck();      // she reads the ledger at the records desk
       V.wpIdx = (V.wpIdx + 1) % V.waypoints.length;
       const nxt = V.waypoints[V.wpIdx];
-      if (nxt && nxt.desk && G.active && !G.result) C.hud.feed("The auditor turns toward the records desk. If a bribe's on the ledger, shred it now.", "#e8c84a");
+      if (nxt && nxt.desk && G.active && !G.result) sayBy(h, "Records desk. Let's see that ledger.");
     }
   }
   function pullGuardToShredder() { if (V) V.guardAlertT = 6; }
@@ -1038,7 +1031,7 @@
           // GRAMMAR LAW (owner): no names inside an option label — the member's
           // name belongs to the panel that opens; title + stance identify the seat.
           label: function () { const m = COUNCIL[i]; return m ? "[E] Lobby the " + m.title + " (" + m.stance.toUpperCase() + ")" : "[E] The council bench"; },
-          onUse: function () { if (!ensureCouncil()) { C.hud.feed("The council hasn't taken their seats yet."); return; } openMember(i); } });
+          onUse: function () { if (!ensureCouncil()) return; openMember(i); } });
       })(i);
     }
 

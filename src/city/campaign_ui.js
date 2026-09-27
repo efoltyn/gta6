@@ -1055,12 +1055,15 @@
     }
     return best;
   }
-  function speakLine(meta, speaker, text) {
+  function speakLine(meta, speaker, text, asking) {
     if (!CBZ.speech || !text) return false;
     const secs = Math.min(4, 1.4 + String(text).length * 0.05);
     if (meta && meta.phone) return CBZ.speech.phone(text, { secs: secs });
     const actor = (meta && meta.actor) || (speaker && typeof speaker === "object" && (speaker.group || speaker.pos) ? speaker : null) || findSpeaker(speakerName(speaker));
-    if (!actor) return false;
+    // A question with reply buttons under it must be heard, or the buttons
+    // answer nothing. With nobody in the world to ask it, it comes down the
+    // line (the phone voice by the hand); a bare remark with no body is dropped.
+    if (!actor) return asking ? CBZ.speech.phone(text, { secs: secs }) : false;
     return CBZ.speech.say(actor, text, { secs: secs, force: true, important: true });
   }
 
@@ -1076,7 +1079,7 @@
       choices: normalized,
       actor: metadata && metadata.actor ? metadata.actor : null,
     };
-    const spoke = speakLine(metadata, speaker, state.dialogue.text);
+    const spoke = speakLine(metadata, speaker, state.dialogue.text, normalized.length > 0);
     if (dialogueChoices) {
       dialogueChoices.textContent = "";
       normalized.forEach(function (choice, i) {

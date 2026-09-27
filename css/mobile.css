@@ -746,48 +746,13 @@ body.tveh-on #cityFlightHud { display: none !important; }
   body.touch #interact .ihelp { display: none; }
 }
 
-/* ---- THE SPOKEN-WORD BAND ON TOUCH ---------------------------------------
-   hud.css declares the band (--subtitle-floor / --subtitle-line) against the
-   bottom-CENTRE cluster, which is the only thing in a keyboard player's way.
-   A touch player has two more walls and they are in the CORNERS, so the answer
-   here is a narrower column rather than a higher one — lifting the band over
-   #tstick (top edge 232px) would put dialogue a third of the way up an iPad.
-
-   The free centre channel is measured off the two touch clusters as they are
-   actually laid out above:
-     left   #tstick.tfixed  left:88px  width:168px          -> ends at 256px
-     right  #tbtns          right:16px width:64px, and
-            #tfireup at right:calc(100% + 12px)             -> starts at W-156
-   A CENTRED box can therefore only be 2*(50vw - 256px) = (100vw - 512px) wide
-   before it reaches the joystick. Below ~810px of width that leaves too little
-   to read, so the 46vw floor deliberately lets a long line pass behind the
-   joystick's 35%-opacity ring — the type carries a 1.6px black stroke and wins
-   that fight, which is a better trade than a two-word column.
-
-   Vertically 120px clears #cWpn (whose top is ~115px: see hud.css), and the
-   walk-up prompt band above was moved 158 -> 168 to make room for the band's
-   second line. */
+/* the touch floor for the hint band (#hint rides --subtitle-floor + --hint-rank).
+   The spoken-word band itself is gone: speech is over the speaker's head. */
 body.touch{
   --subtitle-line: clamp(16px, 2.35vh, 24px);
   --subtitle-slot: calc(clamp(16px, 2.35vh, 24px) * 2.35);
   --subtitle-floor: calc(120px + env(safe-area-inset-bottom, 0px));
 }
-body.touch .world-subtitle{
-  width: max(46vw, min(640px, calc(100vw - 512px)));
-}
-/* …EXCEPT ON A PHONE, WHERE THAT CHANNEL IS 181px. The formula above measures
-   the gap between the two touch clusters, which is the right question on an
-   iPad and an impossible one on a 393px handset: max(46vw, 100vw-512px)
-   collapses to 46vw = 181px, and an ordinary line ("Officer #2: I heard so and
-   so...") runs out of both ends of it. The rule's own comment already accepts
-   type passing BEHIND the joystick ring rather than shrinking to a two-word
-   column — this simply follows that trade the whole way on the screen where it
-   actually bites. The 1.6px black stroke is what makes it legible over the
-   35%-opacity ring. */
-@media (max-width: 560px), (max-height: 480px) {
-  body.touch .world-subtitle{ width: calc(100vw - 24px); }
-}
-
 /* ---- responsive scaling for small / portrait screens ---- */
 @media (max-width: 820px) {
   #objective { font-size: 14px; max-width: 56vw; padding: 9px 12px; }

@@ -174,6 +174,17 @@
     else if (C) C.hud.feed(msg, col || "#cfe3ff");
   }
   const player = () => CBZ.player;
+  // a sentry's words go over HIS head: the nearest live guard to the player
+  function guardSay(line) {
+    const P = CBZ.player; if (!P || !V) return;
+    let best = null, bd = 1e9;
+    for (const gd of V.guards) {
+      const h = gd.handle; if (!h || !h.say || (gd.ped && gd.ped.dead)) continue;
+      const d = d2(P.pos.x, P.pos.z, V.origin.x + gd.lx, V.origin.z + gd.lz);
+      if (d < bd) { bd = d; best = h; }
+    }
+    if (best && bd < 60) best.say(line);
+  }
   function floorY(x, z) { return CBZ.floorAt ? (CBZ.floorAt(x, z) || 0) : 0; }
 
   /* ============================================================
@@ -333,7 +344,7 @@
     C.solid(lx - 4.4, lz - 4.9, lx + 4.4, lz + 4.9, 0, 1.4);
     ctx.light(lx, gy + 3.4, lz + 3, M.protoGlass, 0.5, 12);
     // a warning placard
-    signPlate(ctx, lx, gy + 2.2, lz + 6.05, "PROTOTYPE · NO PHOTOGRAPHY", 0);
+    signPlate(ctx, lx, gy + 2.2, lz + 6.05, "NO PHOTOGRAPHY", 0);
     V.proto = { lx, lz, wx: V.origin.x + lx, wz: V.origin.z + lz, y: gy + 1.2 };
     // a known LOS wall for the vision probe (the revetment back wall centre)
     V.probeWall = { wx: V.origin.x + lx, wz: V.origin.z + lz - 6 };
@@ -371,7 +382,7 @@
     ctx.box(g, lx + 2.2, gy + 1.4, lz + 2.05, 1.4, 1.6, 0.2, ctx.emat(M.warn, 0.5)); // breaker panel
     ctx.cyl(g, lx - 2.6, gy + 1.2, lz - 1.4, 0.5, 0.5, 2.4, ctx.mat(M.dark), 10);     // exhaust stack
     C.solid(lx - 3, lz - 2, lx + 3, lz + 2, 0, 3.2);
-    signPlate(ctx, lx + 2.2, gy + 2.6, lz + 2.2, "MAIN POWER · DANGER", 0);
+    signPlate(ctx, lx + 2.2, gy + 2.6, lz + 2.2, "DANGER HIGH VOLTAGE", 0);
     V.gen = { lx, lz };
   }
   function sabotageGenerator() {
@@ -383,7 +394,7 @@
     for (const s of V.beams) s.disabled = 999;
     // it's LOUD: auto-escalate to at least YELLOW
     setAlarm(Math.max(RT.alarm, TIER_AT[1] + 2));
-    if (C) { C.hud.toast("GENERATOR DOWN. 60s of dark"); C.hud.feed("Perimeter lights cut. They'll be scrambling.", "#ffd166"); }
+    if (C) { C.hud.toast("GENERATOR DOWN"); guardSay("Lights are out! Check the generator!"); }
     if (CBZ.shake) CBZ.shake(0.35);
     return { until: RT.genUntil, tier: TIERS[RT.tierIdx] };
   }
@@ -624,13 +635,9 @@
     else if (wantExtras < haveExtras) { despawnExtras(); if (wantExtras) spawnExtras(wantExtras); }
     if (!C) return;
     if (nt > oldIdx) {
-      const msg = nt === 1 ? "ALERT: YELLOW, they're suspicious"
-        : nt === 2 ? "ALERT: ORANGE, patrols doubling, lights sweeping"
-          : "ALERT: RED, gate sealed, they're hunting";
-      C.hud.toast(msg);
+      C.hud.toast("ALERT " + (nt === 1 ? "YELLOW" : nt === 2 ? "ORANGE" : "RED"));
+      guardSay(nt === 1 ? "Hey. Who's there?" : nt === 2 ? "Movement on the wire! Double up!" : "Seal the gate! Find him!");
       if (nt >= 2 && CBZ.shake) CBZ.shake(nt === 3 ? 0.5 : 0.3);
-    } else if (nt < oldIdx && nt === 0) {
-      C.hud.feed("Alert cooling, you're a ghost again.", "#8fe39a");
     }
   }
 
@@ -649,11 +656,11 @@
       if (RT.messOn && sent < 2) {
         gd.messRoute = [[mx - 6, mz + 7], [mx + 6, mz + 7], [gd.route[0][0], gd.route[0][1]]];
         gd.mode = "mess"; gd.seg = 0; sent++;
+        if (sent === 1 && gd.handle && gd.handle.say) gd.handle.say("Chow time.");
       } else if (!RT.messOn && gd.mode === "mess") {
         gd.mode = "patrol"; gd.seg = 0;
       }
     }
-    if (C && RT.messOn) C.hud.feed("Mess call, some sentries break for chow.", "#cfe3ff");
   }
 
   /* --------------------------------------------------- ELECTRIC FENCE ---- */
@@ -668,7 +675,7 @@
         setAlarm(RT.alarm + 18);
         if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(8, null, null, "electrified fence", false, null, true);
         if (CBZ.shake) CBZ.shake(0.4);
-        hint("ELECTRIFIED FENCE, bad idea", "#ff5a4a");
+        hint("ELECTRIFIED FENCE", "#ff5a4a");
         return;
       }
     }
@@ -682,9 +689,9 @@
     if (C) {
       C.wallet.give(PAY[name] || 0, name === "photo" ? "Prototype photographed"
         : name === "tap" ? "Comms mast tapped" : "Military vehicle stolen");
-      C.hud.toast((name === "photo" ? "PHOTO SECURED" : name === "tap" ? "COMMS TAPPED" : "HARDWARE STOLEN") + " · job done");
+      C.hud.toast((name === "photo" ? "PHOTO SECURED" : name === "tap" ? "COMMS TAPPED" : "HARDWARE STOLEN"));
     }
-    if (nb.photo && nb.tap && nb.steal && C) C.hud.feed("All three jobs done. CRASH THE GATE in a stolen vehicle.", "#ffd166");
+    if (nb.photo && nb.tap && nb.steal && CBZ.speech && CBZ.speech.phone) CBZ.speech.phone("That's all three. Bring something loud through the gate.");
     return true;
   }
   function isPilotingMilitary() {
@@ -706,13 +713,13 @@
         // readout hangs on the prototype, never a HUD percentage
         if (CBZ.workLine) CBZ.workLine("mil-photo", { x: V.proto.wx, y: (V.proto.y || 0) + 2.2, z: V.proto.wz }, RT.photoT / PHOTO_HOLD);
         if (RT.photoT >= PHOTO_HOLD) { RT.photoT = 0; completeJob("photo"); }
-      } else { if (near && !clear) hint("No clean shot, get past the revetment wall"); RT.photoT = Math.max(0, RT.photoT - dt * 1.5); }
+      } else { if (near && !clear) hint("No clean shot"); RT.photoT = Math.max(0, RT.photoT - dt * 1.5); }
     }
     // COMMS TAP: at the junction box, hold-to-install, but only while UNSEEN
     if (!nb.tap && V.comms) {
       const near = d2(P.pos.x, P.pos.z, V.comms.wx, V.comms.wz) < TAP_R;
       if (near) {
-        if (RT.seen) { hint("Spotted, can't work the mast now"); RT.tapT = Math.max(0, RT.tapT - dt * 0.8); }
+        if (RT.seen) { hint("Spotted"); RT.tapT = Math.max(0, RT.tapT - dt * 0.8); }
         else {
           RT.tapT += dt;
           if (CBZ.workLine) CBZ.workLine("mil-tap", { x: V.comms.wx, y: (V.comms.y || 0) + 1.6, z: V.comms.wz }, RT.tapT / TAP_HOLD);
@@ -740,7 +747,7 @@
     nb.active = false; RT.outcome = "win";
     if (state) { state.wins = (state.wins || 0) + 1; state.best = Math.max(state.best || 0, payout); }
     save();
-    if (C) { C.hud.toast("EXTRACTED · CONTRACT PAID"); openWinPanel(payout); if (CBZ.shake) CBZ.shake(0.8); }
+    if (C) { C.hud.toast("CONTRACT PAID"); openWinPanel(payout); if (CBZ.shake) CBZ.shake(0.8); }
     return { won: true, payout, cashBefore, cashAfter, jobs: { photo: nb.photo, tap: nb.tap, steal: nb.steal } };
   }
 
@@ -763,7 +770,7 @@
     // slam the cell door (a real collider) until the lock is picked
     if (!V.brigDoor) V.brigDoor = C.solid(cell.lx - 2.4, cell.lz + 2.2, cell.lx + 2.4, cell.lz + 2.8, 0, 3.6);
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-    if (C) { C.hud.toast("CAUGHT · THE BRIG"); if (reason) C.hud.feed(reason, "#ff5a4a"); }
+    if (C) C.hud.toast("THE BRIG");
     if (CBZ.shake) CBZ.shake(0.7);
     startLockpick();
   }
@@ -775,7 +782,7 @@
     if (P && cell) { P.pos.set(cell.wx, floorY(cell.wx, cell.wz) + 0.1, cell.wz + 4); P.vy = 0; }
     setAlarm(TIER_AT[1] + 2);                          // back out at YELLOW, they're looking
     if (RT.brig.keyH) { window.removeEventListener("keydown", RT.brig.keyH); RT.brig.keyH = null; }
-    if (C) { C.hud.closePanel(); C.hud.toast("LOCK PICKED, you slip out"); }
+    if (C) { C.hud.closePanel(); C.hud.toast("LOCK PICKED"); }
   }
   function courtMartial() {
     RT.brig.active = false; RT.outcome = "lose";
@@ -794,6 +801,7 @@
     if (P && V) { const wx = V.origin.x + V.fixerAt[0], wz = V.origin.z + V.fixerAt[1] + 4; P.pos.set(wx, floorY(wx, wz) + 0.1, wz); P.vy = 0; }
     save();
     if (C) C.hud.closePanel();
+    if (V && V.fixer && V.fixer.say) V.fixer.say("Twice in one night. We start over.");
   }
 
   /* ---- LOCKPICK minigame (cell-block-z homage) — a 3-pin timing lock ----
@@ -837,9 +845,8 @@
     const pins = bk.pins.map((x, i) => "<span style='display:inline-block;width:22px;height:22px;border-radius:5px;margin-right:5px;background:" + (x.set ? "#35d07a" : i === bk.pin ? "#e8b64c" : "#26343c") + "'></span>").join("");
     const html =
       "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
-      "<b style='letter-spacing:2px;color:#e8b64c;font-size:17px'>THE BRIG · PICK THE LOCK</b>" +
+      "<b style='letter-spacing:2px;color:#e8b64c;font-size:17px'>PICK THE LOCK</b>" +
       "<span style='font-size:12px'>pin " + (bk.pin + 1) + " / " + bk.pins.length + "</span></div>" +
-      "<div style='font-size:12px;opacity:.85;margin-bottom:8px'>Seat each pin: hit <b>SET</b> (or Space) when the pick is in the green.</div>" +
       "<div>" + pins + "</div>" +
       "<div style='position:relative;height:26px;margin:10px 0;background:#12181c;border-radius:8px;overflow:hidden'>" +
       "<div style='position:absolute;top:0;bottom:0;left:" + p.lo + "%;width:" + (p.hi - p.lo) + "%;background:rgba(53,208,122,.55)'></div>" +
@@ -856,19 +863,19 @@
     const jrow = (done, label) => "<div style='margin:2px 0'>" + (done ? "" : "▫") + " " + label + "</div>";
     const html =
       "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
-      "<b style='letter-spacing:2px;color:#d8e6b0;font-size:17px'>FORT HALSTEAD · RESTRICTED AREA</b>" +
+      "<b style='letter-spacing:2px;color:#d8e6b0;font-size:17px'>FORT HALSTEAD</b>" +
       "<span style='font-size:13px'>cash <b style='color:#ffd451'>$" + C.wallet.cash().toLocaleString() + "</b></span></div>" +
-      "<div style='font-size:12px;opacity:.9;margin-bottom:6px'>One night. Three jobs, any order, then crash the gate in something with tracks.</div>" +
-      jrow(nb.photo, "Photograph the prototype (far hangar). $" + PAY.photo.toLocaleString()) +
-      jrow(nb.tap, "Tap the comms mast (hold, stay unseen). $" + PAY.tap.toLocaleString()) +
+      jrow(nb.photo, "Photograph the prototype. $" + PAY.photo.toLocaleString()) +
+      jrow(nb.tap, "Tap the comms mast. $" + PAY.tap.toLocaleString()) +
       jrow(nb.steal, "Steal a military vehicle. $" + PAY.steal.toLocaleString()) +
-      "<div style='margin:4px 0;font-size:12px;opacity:.85'>Extraction: crash the gate in a stolen vehicle. $" + PAY.extract.toLocaleString() + "</div>" +
+      jrow(false, "Crash the gate. $" + PAY.extract.toLocaleString()) +
       "<div style='margin-top:8px'>" +
       (nb.active
-        ? "<span style='" + BTN + "background:#26343c;color:#8fe39a'>CONTRACT ACTIVE · alert " + TIERS[RT.tierIdx] + "</span>"
+        ? "<span style='" + BTN + "background:#26343c;color:#8fe39a'>CONTRACT ACTIVE</span>"
         : "<span data-act='accept' style='" + BTN + "background:#1c6b40;color:#eafff0'>Take the contract</span>") +
       "<span data-act='close' style='" + BTN + "background:#26343c;color:#dfe7ff'>Leave</span></div>" +
-      "<div style='font-size:11px;opacity:.6;margin-top:6px'>Nights won: " + ((state && state.wins) || 0) + " · lost: " + ((state && state.losses) || 0) + "</div>";
+      "<div style='font-size:11px;opacity:.6;margin-top:6px'>Won " + ((state && state.wins) || 0) + ", lost " + ((state && state.losses) || 0) + "</div>";
+    if (!nb.active && V.fixer && V.fixer.say) V.fixer.say("Three jobs, one night. Then out the gate in something loud.");
     C.hud.panel(html, {
       accept: () => { startNight(); openBriefing(); },
       close: () => C.hud.closePanel(),
@@ -879,12 +886,11 @@
     nb.active = true; nb.photo = nb.tap = nb.steal = false; nb.caught = 0;
     RT.alarm = 0; RT.tierIdx = 0; RT.outcome = "none"; RT.photoT = RT.tapT = 0;
     save();
-    C.hud.toast("CONTRACT ACTIVE, go dark");
+    C.hud.toast("CONTRACT ACTIVE");
   }
   function openWinPanel(payout) {
     C.hud.panel(
       "<b style='letter-spacing:2px;color:#35d07a;font-size:18px'>EXTRACTED</b>" +
-      "<div style='margin:8px 0'>Prototype shot, comms tapped, hardware gone, gate in pieces.</div>" +
       "<div style='font-size:15px'>Contract paid: <b style='color:#ffd451'>$" + payout.toLocaleString() + "</b></div>" +
       "<div style='margin-top:10px'><span data-act='close' style='" + BTN + "background:#1c6b40;color:#eafff0'>Nice</span></div>",
       { close: () => C.hud.closePanel() }
@@ -893,8 +899,6 @@
   function openCourtPanel() {
     C.hud.panel(
       "<b style='letter-spacing:2px;color:#ff5a4a;font-size:18px'>COURT MARTIAL</b>" +
-      "<div style='margin:8px 0'>Caught twice in one night. The contract's blown and the base is locked down tight.</div>" +
-      "<div style='font-size:12px;opacity:.8'>The fixer will take you back at the gate. Try again.</div>" +
       "<div style='margin-top:10px'><span data-act='reset' style='" + BTN + "background:#7a2b2b;color:#ffe0e0'>Reset the night</span></div>",
       { reset: () => resetArc() }
     );

@@ -168,7 +168,6 @@ story += [
         ["city/cockpit_view.js — cockpit", "Euler X = cam.pitch", "= -cam.pitch", "head pitched against the mouse"],
         ["city/combat.js — aimVec()", "y: sin(cam.pitch)", "y: sin(-cam.pitch)", "thrown ordnance went up when you aimed down"],
         ["entities/character.js — aim pose", "arms off +cam.pitch", "off -cam.pitch", "gun arm raised as the view dropped"],
-        ["games/police.html", "camPitch -= movementY", "+=", "same inversion, its own rig"],
     ], [78 * mm, 62 * mm, 42 * mm, CONTENT_W - 182 * mm]),
     Spacer(1, 4 * mm),
     Paragraph(

@@ -1506,7 +1506,7 @@
     if (CBZ.resetZoom) CBZ.resetZoom();
     gg.spawnProtectT = 2.0;
     grantPlayerRung();
-    if (CBZ.setObjective) CBZ.setObjective("Gun Game on " + map.label + ". Every kill climbs the ladder. Win on bare fists.");
+    if (CBZ.setObjective) CBZ.setObjective("Gun Game on " + map.label + ". Win on bare fists.");
     swapButtonIsMelee(true);
     playerQuietT = 0;
     emit("matchstart", { map: map.id, label: map.label });
