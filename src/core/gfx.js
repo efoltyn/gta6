@@ -356,6 +356,40 @@
 
   const pbrClients = [];
 
+  /* THE ENVIRONMENT FOLLOWS THE SKY. CBZ.ENV is ONE PMREM of a fixed
+     daylight gradient (world/carfx.js), and every Standard material in the
+     world reads it at a constant envMapIntensity. So at midnight the whole
+     city was still lit by a noon-blue sky from every direction: the night
+     plate was a blue daytime diorama, and dusk had no warmth in its shade.
+     Rebaking the PMREM per frame is not an option, but every lit program
+     already receives the hemisphere light's sky colour (colour x intensity,
+     written by the day clock each frame), and that IS the sky's brightness
+     and hue. The IBL terms are scaled by it in the shader: 1.0 at any normal
+     daylight level (so daytime is untouched in every mode), warm at dusk,
+     down to a few percent at night. Zero CPU, no new uniforms. */
+  (function envFollowsSky() {
+    const SC = THREE.ShaderChunk;
+    if (!SC || typeof SC.lights_fragment_maps !== "string" || SC.lights_fragment_maps.indexOf("cbzEnvSky") >= 0) return;
+    let src = SC.lights_fragment_maps;
+    const irr = "iblIrradiance += getLightProbeIndirectIrradiance(";
+    const rad = "radiance += getLightProbeIndirectRadiance(";
+    if (src.indexOf(irr) < 0 || src.indexOf(rad) < 0) return;   // unknown three build: leave it alone
+    src = src.split(irr).join("iblIrradiance += cbzEnvSky * getLightProbeIndirectIrradiance(");
+    src = src.split(rad).join("radiance += cbzEnvSky * getLightProbeIndirectRadiance(");
+    SC.lights_fragment_maps = [
+      "vec3 cbzEnvSky = vec3( 1.0 );",
+      "#if NUM_HEMI_LIGHTS > 0",
+      "  {",
+      "    vec3 cbzSky = hemisphereLights[ 0 ].skyColor;",
+      "    float cbzSkyL = dot( cbzSky, vec3( 0.2126, 0.7152, 0.0722 ) );",
+      "    float cbzK = clamp( cbzSkyL / 0.45, 0.04, 1.0 );",
+      "    cbzEnvSky = mix( vec3( 1.0 ), cbzSky / max( cbzSkyL, 1e-4 ), 0.35 ) * cbzK;",
+      "  }",
+      "#endif",
+      src,
+    ].join("\n");
+  })();
+
   // WHICH environment. There are two producers and they must not fight:
   //   * world/carfx.js bakes CBZ.ENV (a PMREM of a 4-stop canvas gradient) as
   //     soon as a renderer exists — always available, deterministic, no assets.

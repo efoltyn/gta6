@@ -226,6 +226,21 @@
     const k = CBZ.dayness != null ? CBZ.dayness : 1;
     const d = CBZ.duskness || 0;
     daylight(k, d, CBZ.sunTint || (CBZ.sunTint = new THREE.Color()));
+    // GOLDEN HOUR (city only). The shared keys only warm the light inside
+    // |sunHeight| < 0.33, and only by a third there, so the last hour of the
+    // city's day photographed as a flat grey noon. A low sun is gold: ramp a
+    // warm key and a peach sky fill in as the sun drops under ~27 degrees,
+    // full strength from ~13 degrees down to the horizon.
+    const upG = Number(CBZ.sunHeight);
+    if (Number.isFinite(upG)) {
+      const w = Math.max(0, Math.min(1, (0.45 - upG) / 0.25)) * Math.max(0, Math.min(1, (upG + 0.06) / 0.1));
+      if (w > 0) {
+        sun.color.lerp(_c1.setHex(0xffa04a), w * 0.6);
+        sun.intensity *= 1 + 0.12 * w;
+        hemi.color.lerp(_c1.setHex(0xffc9a0), w * 0.3);
+        hemi.groundColor.lerp(_c1.setHex(0x8a6448), w * 0.25);
+      }
+    }
     if (CBZ.CONFIG.CITY_STREET_REALISM_V1 !== false) {
       // Preserve the noon keyframe exactly. As the sun falls, remove the flat
       // global fill that made midnight asphalt as legible as daytime; street
@@ -238,7 +253,19 @@
       hemi.intensity *= 1 - 0.72 * deep;
       bounce.intensity *= 1 - 0.76 * deep;
     }
-    aimSun(focus.x, 4, focus.z, 70, 146, -50);
+    // THE SUN MOVES. This used to be a constant offset (70, 146, -50): the
+    // city's key light hung at the same ~60 degree noon angle all day and all
+    // night, so golden hour had short noon shadows and midnight was lit from
+    // high overhead. Ride the real clock instead (CBZ.sunAngle, daynight.js):
+    // east to west with a southern bias, low and raking at the ends of the
+    // day, and after sunset the moon (the opposite point) takes the key.
+    // Elevation is floored at ~15 degrees so a building's shadow stays inside
+    // the tier's shadow box instead of streaking off to the horizon.
+    const ang = Number.isFinite(CBZ.sunAngle) ? CBZ.sunAngle : 1.1;
+    const a2 = Math.sin(ang) >= 0 ? ang : ang + Math.PI;
+    const sx = Math.cos(a2), sy = Math.max(0.27, Math.sin(a2)), sz = -0.42;
+    const sl = 170 / Math.hypot(sx, sy, sz);
+    aimSun(focus.x, 4, focus.z, sx * sl, sy * sl, sz * sl);
     setShadowFrustum(tier().shadowHalf || 190, (tier().shadowHalf || 190) * 2.6 + 40);
     aimBounce(focus.x, 6, focus.z);
   }
