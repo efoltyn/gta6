@@ -3258,7 +3258,7 @@
     // `out.fit` carries whatever the lazy pass needs (the flats' unit list).
     if (out && CBZ.fitoutDeclare) {
       try {
-        CBZ.fitoutDeclare(h.b, r.y, name, { x0: r.x0, x1: r.x1, z0: r.z0, z1: r.z1 },
+        CBZ.fitoutDeclare(h.b, r.y, name, { x0: r.x0, x1: r.x1, z0: r.z0, z1: r.z1, y: r.y },
           Object.assign({ opts: (ctx && ctx.opts) || null }, out.fit || {}));
       } catch (e) {}
     }
