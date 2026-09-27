@@ -1013,7 +1013,7 @@
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
 <script src="src/city/buildings_civic.js?v=civic1"></script>
-<script src="src/city/buildings.js?v=nodash1"></script>
+<script src="src/city/buildings.js?v=cpd1"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1066,7 +1066,7 @@
 <script src="src/city/interiorlight.js?v=room1"></script>
 <script src="src/city/citynav.js?v=brains1"></script>
 <script src="src/city/fracture.js?v=ruin1"></script>
-<script src="src/city/demolition.js?v=nukefix1"></script>
+<script src="src/city/demolition.js?v=cpd1"></script>
 <script src="src/city/elevators.js?v=onecall1"></script>
 <script src="src/city/exec_office.js?v=nodash1"></script>
 <script src="src/city/escalators.js?v=esc2"></script>
@@ -1106,14 +1106,14 @@
      B2 lands the ghost preview/hotbar). Loads right after pieces.js
      (needs spawnPiece/despawnPiece/findSupport) and after placement.js
      above (needs CBZ.placement.isFree/reserve for the world-collision gate). -->
-<script src="src/systems/building.js?v=nodash1"></script>
+<script src="src/systems/building.js?v=cpd1"></script>
 <!-- B5 — the raid-tool damage matrix: CBZ.structDamage.hit/repair on top
      of B1's CATALOG hp + B4's cascade/stability (CBZ.building.remove).
      Loads right after building.js (needs CBZ.building.remove + CBZ.pieces,
      both already defined by this point); explosives.js/fpsmode.js's bullet
      hook call CBZ.structDamage.hit at runtime, so load order relative to
      THEM doesn't matter — only relative to building.js/pieces.js does. -->
-<script src="src/systems/structdamage.js?v=bld1"></script>
+<script src="src/systems/structdamage.js?v=cpd1"></script>
 <!-- B6 — OWNERSHIP: the tool cupboard + BaseRecord + placement-rejection
      radius + door locks/lockable containers, on top of B1's CATALOG and
      B5's damage matrix (structdamage.js's destroy path stamps the
@@ -1129,7 +1129,12 @@
      Loads right after building.js (needs CBZ.building.CATALOG/validate/
      place/remove) and after CBZ.camera/CBZ.pieces already exist (systems/
      camera.js, systems/pieces.js — both load earlier in this file). -->
-<script src="src/systems/buildmode.js?v=nohint1"></script>
+<script src="src/systems/buildmode.js?v=cpd1"></script>
+<!-- THE CITY BUILD KIT (city/compoundkit.js): concrete/brick walls, steel gates,
+     guard towers, floodlights, cameras, garage, helipad, stash, bunks, registered
+     into systems/building.js's CATALOG. City-only; everything city-side is looked
+     up lazily. -->
+<script src="src/city/compoundkit.js?v=cpd1"></script>
 <!-- F7 — world/crates.js + world/props.js migrated onto CBZ.spawnPiece
      (moved from the "2. world geometry" wave above, right after
      towers.js): they now need spawnPiece to exist at parse time. -->
@@ -1382,8 +1387,8 @@
      are still standing. Reverts: ?cfg_COLLAPSE_V2=0 (both callers fall back
      to the collapse they had) · ?cfg_COLLAPSE_FRAGMENTS=0 (motion without
      debris) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
-<script src="src/city/collapse.js?v=collapse1"></script>
-<script src="src/city/structural.js?v=collapse1"></script>
+<script src="src/city/collapse.js?v=cpd1"></script>
+<script src="src/city/structural.js?v=cpd1"></script>
 <script src="src/city/nukefx.js?v=nukefield4"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
@@ -1501,7 +1506,7 @@
 <script src="src/city/camera.js?v=shouldergun2"></script>
 <script src="src/city/ragdoll.js?v=fall1"></script>
 <script src="src/city/leaderboard.js?v=nodash1"></script>
-<script src="src/city/zillow.js?v=nodash1"></script>
+<script src="src/city/zillow.js?v=cpd1"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
 <script src="src/city/bank.js?v=nodash1"></script>
 <script src="src/city/pawnshop.js?v=nodash1"></script>
@@ -1527,7 +1532,7 @@
 <script src="src/city/construction.js?v=nodash1"></script>
 <script src="src/city/companies.js?v=nodash1"></script>
 <script src="src/city/citystaff.js?v=staff1s"></script>
-<script src="src/city/playergang.js?v=nodash1"></script>
+<script src="src/city/playergang.js?v=cpd1"></script>
 <script src="src/city/promotion.js?v=rank1"></script>
 <script src="src/city/schedule.js?v=nodash1"></script>
 <script src="src/city/aigoals.js?v=nodash1"></script>
@@ -1536,7 +1541,7 @@
 <script src="src/city/story.js?v=night1"></script>
 <script src="src/city/wealth.js?v=nodash1"></script>
 <script src="src/city/turf.js?v=nodash1"></script>
-<script src="src/city/gangops.js?v=nodash1"></script>
+<script src="src/city/gangops.js?v=cpd1"></script>
 <!-- sims-overhaul wave 1: drivable military hardware + smart team combat (self-contained, self-registering via CBZ.interactions) -->
 <script src="src/city/militaryvehicles.js?v=nodash1"></script>
 <!-- STRATEGIC LAYER part 2 — the B-2 (registers into the militaryvehicles
@@ -1547,7 +1552,7 @@
 <script src="src/city/loyalty.js?v=nodash1"></script>
 <!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->
 <script src="src/city/wallet.js?v=sim2"></script>
-<script src="src/city/housing.js?v=sim2"></script>
+<script src="src/city/housing.js?v=cpd1"></script>
 <script src="src/city/citytemplates.js?v=sim2"></script>
 <script src="src/city/minicities.js?v=sim4w9x"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
@@ -1580,7 +1585,7 @@
 <script src="src/city/regionlife.js?v=arch2"></script>
 <script src="src/city/modshop.js?v=nodash1"></script>
 <script src="src/city/stuntjumps.js?v=ballistic2z"></script>
-<script src="src/city/storage.js?v=nodash1"></script>
+<script src="src/city/storage.js?v=cpd1"></script>
 <!-- MARINA + BOATYARD: finger berths, Med-moor quay, fuel dock, travel-lift
      well, IALA Region B buoyage, and a dealer with three demo hulls floating
      at its own dock. Buying reuses zillow.js's cash AND financed paths (no 7th
@@ -1637,7 +1642,7 @@
 <script src="src/city/gigs.js?v=nodash1"></script>
 <script src="src/city/gigfleet.js?v=nodash1"></script>
 <script src="src/city/giglife.js?v=gig2"></script>
-<script src="src/city/hud.js?v=speedunit1"></script>
+<script src="src/city/hud.js?v=cpd1"></script>
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=nodash1"></script>
@@ -1695,7 +1700,7 @@
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
 <script src="src/city/pednav.js?v=nav2"></script>
-<script src="src/systems/fullmap.js?v=sharkmode1"></script>
+<script src="src/systems/fullmap.js?v=cpd1"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
@@ -2132,6 +2137,12 @@
      Loads after storage.js (ownership), bank.js (the room) and cashstore.js
      (the bag verbs it hooks). -->
 <script src="src/city/propertyvault.js?v=pvault1"></script>
+<!-- LAND YOU OWN, AS A PLACE (city/plots.js): sale signs at the curb, the
+     property panel at your address post, the contractor's demolition, locked
+     doors, the deed map. Then the crew that lives there and the rival raids
+     on it (city/compoundcrew.js). -->
+<script src="src/city/plots.js?v=plots1"></script>
+<script src="src/city/compoundcrew.js?v=cpd1"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
      feature-detected/lazy — this tag itself is tiny (no wasm, no Worker
