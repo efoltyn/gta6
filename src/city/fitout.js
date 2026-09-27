@@ -96,11 +96,19 @@
   }
   // DECLARE a floor. `prog` names the planner; `rect` is the host-local usable
   // band; `info` rides along to the planner (units, door, kind, gang…).
+  const STICKY = { hideout: 1 };
   CBZ.fitoutDeclare = function (b, y, prog, rect, info) {
     const s = siteOf(b);
     if (!s || !prog) return null;
     const k = floorIndexOf(b, y || 0);
     const prev = s.floors[k];
+    // a gang's building stays the gang's: a later generic program declared on
+    // the same storey (the office-lobby pass runs over every ground floor)
+    // rides along as `extra` instead of turning the hideout into a lobby.
+    if (prev && STICKY[prev.prog] && !STICKY[prog]) {
+      prev.extra = (prev.extra || []).concat([{ prog: prog, info: info || null, rect: rect || null }]);
+      return prev;
+    }
     // the trade dresser declares the ground floor first; a program that later
     // dresses the same storey refines it rather than wiping the trade.
     const rec = { k: k, y: floorTopOf(b, k), prog: prog, rect: rect || null, info: info || null,
@@ -144,7 +152,7 @@
         while (y0 < n) {
           const len = n * (0.35 + r() * 0.5);
           const t = 0.8 + r() * 0.35;
-          x.fillStyle = "rgb(" + ((150 * t) | 0) + "," + ((104 * t) | 0) + "," + ((66 * t) | 0) + ")";
+          x.fillStyle = "rgb(" + ((122 * t) | 0) + "," + ((92 * t) | 0) + "," + ((66 * t) | 0) + ")";
           x.fillRect(i * pw, y0, pw, len);
           for (let g = 0; g < 7; g++) {             // grain
             x.strokeStyle = "rgba(60,36,18," + (0.05 + r() * 0.1).toFixed(3) + ")";
@@ -237,7 +245,7 @@
     ceiling: function (x, n) {                       // 600 grid acoustic tile
       x.fillStyle = "#e9e9e6"; x.fillRect(0, 0, n, n);
       noise(x, n, 0, 0.1, 5000, 1.2, 101);
-      const q = n / 4; x.fillStyle = "rgba(120,120,118,0.9)";
+      const q = n / 4; x.fillStyle = "rgba(170,170,166,0.8)";
       for (let i = 0; i <= 4; i++) { x.fillRect(i * q - 1.5, 0, 3, n); x.fillRect(0, i * q - 1.5, n, 3); }
     },
   };
