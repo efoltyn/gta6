@@ -62,20 +62,48 @@ check("a phone voice shows", S.phone("Where are you?"), true);
 for (let i = 0; i < 300; i++) always.forEach((f) => f(1 / 60));
 check("lines age out", S.audit().live, 0);
 
-// ---- no source writes to a removed surface ------------------------------------
-const dead = /CBZ\.subtitles\b|getElementById\(["'](citySpeech|prisonSpeech|pinteractSay)["']\)|\.world-subtitle-line|\.pi-subtitle-line/;
+// ---- no source builds, styles or writes a removed speech surface -------------
+// Every surface that ever showed a person's words anywhere but over his head.
+// Each was deleted; a hit here means one is being rebuilt. Scanned: src/,
+// css/, games/, index.html, disaster.html. Comment lines are skipped.
+const DEAD_SURFACES = [
+  // the subtitle desk and the three old speech bands
+  /CBZ\.subtitles\b/, /\bsubtitlebus\b/,
+  /\bcitySpeech\b/, /\bprisonSpeech\b/, /\bpinteractSay\b/,
+  /world-subtitle(-line)?\b/, /pi-subtitle-line\b/, /\.hm-sub\b|["' ]hm-sub["' ]/,
+  // the campaign's line box (only the reply buttons survive)
+  /campaign-dialogue-(line|speaker|text)\b/,
+  // the police gun-stop narration on the interaction card
+  /\bstopSetNote\b|\bstopNote\(/,
+  // Desert Warlord's road-card prose (the band's leader says it now)
+  /\bwl-evrail\b/,
+  // the venue games' narrator helpers (a staffer says it, or nobody does)
+  /\bfunction feedNear\b/, /\bopenObjectives\b/,
+];
 const hits = [];
-(function walk(dir) {
-  for (const f of readdirSync(dir)) {
-    const p = join(dir, f);
-    if (f === "vendor" || f === "node_modules") continue;
-    if (statSync(p).isDirectory()) walk(p);
-    else if (/\.(js|mjs|html)$/.test(f)) {
-      readFileSync(p, "utf8").split("\n").forEach((l, i) => { if (dead.test(l) && !/^\s*(\/\/|\*|\/\*)/.test(l)) hits.push(`${p.slice(ROOT.length + 1)}:${i + 1}`); });
-    }
-  }
-})(join(ROOT, "src"));
-check("no code writes to a removed speech surface", hits, []);
+function scanFile(p) {
+  // blank out block comments (keeping line numbers): a note that NAMES a dead
+  // surface ("Replaces: #citySpeech") is history, not a rebuild
+  const src = readFileSync(p, "utf8").replace(/\/\*[\s\S]*?\*\/|<!--[\s\S]*?-->/g, (c) => c.replace(/[^\n]/g, " "));
+  src.split("\n").forEach((l, i) => {
+    if (/^\s*(\/\/|\*|\/\*|<!--)/.test(l)) return;
+    const code = l.replace(/\s\/\/\s.*$/, "");   // a trailing note about a dead surface is not a hit
+    for (const re of DEAD_SURFACES) if (re.test(code)) { hits.push(`${p.slice(ROOT.length + 1)}:${i + 1} ${re}`); break; }
+  });
+}
+function walk(p) {
+  let st; try { st = statSync(p); } catch (_) { return; }
+  if (st.isDirectory()) {
+    for (const f of readdirSync(p)) { if (f === "vendor" || f === "node_modules") continue; walk(join(p, f)); }
+  } else if (/\.(js|mjs|html|css)$/.test(p)) scanFile(p);
+}
+["src", "css", "games", "index.html", "disaster.html"].forEach((f) => walk(join(ROOT, f)));
+check("no code builds, styles or writes a removed speech surface", hits, []);
+
+// the standalone draft pages whose rules now live in src/games/*.js
+const drafts = ["games/police.html", "games/casino.html", "games/airport.html", "games/boxing.html"]
+  .filter((f) => { try { statSync(join(ROOT, f)); return true; } catch (_) { return false; } });
+check("the dead standalone drafts stay deleted", drafts, []);
 
 console.log(failed ? `\nSPEECH: ${failed} FAILED` : "\nSPEECH: ok");
 process.exit(failed ? 1 : 0);
